@@ -18,6 +18,8 @@ UI 新增保存下一版、歷史分頁／讀回及「選用草稿原版開場�
 
 完整契約與備份／不可直接降版見 MISSION_VERSIONS，已更新相關需求、路線、API 與儲存文件。接續仍先取得有效 Unity 授權及實際 Prepare／Tests／Desktop／Quest、雙 Quest 頭手／重連／撤銷／排空，再做正式軍事素材、硬體、MR、VIVE 及 25 台效能。CI 依推送結果另記，不改帳務或重跑已知受限工作；長期目標保持開發中。
 
+3430a67 已推送；功能 CI run 40786700224／check 123161576652 已終止且 steps 空，失敗 annotation 為付款／支出限制，工作未啟動。另有 ubuntu-latest 遷移 notice，不是本輪測試失敗。本機 979 項結果有效，未宣稱雲端通過，未更改帳務或重跑受限工作。
+
 ## 2026-10-29：v0.14.1 觀戰鏡頭位置持久保存與重試
 
 上一輪已安裝、驗證並啟動 Hub，屬於實際工具鏈進展。本輪從乾淨的 28cdac3 接續；CLI 仍無登入／授權，但不單獨據此否定 Hub。Hub 及 Licensing Client 已在執行，實際 Prepare 再驗仍因「No valid Unity Editor license」退出 198，已結束。沒有新登入／安全性操作、重裝 SDK 或重問已同意條款；Unity／15 項 EditMode／桌面程式／APK／頭盔仍未通過，Quest 3 主線保持優先。
