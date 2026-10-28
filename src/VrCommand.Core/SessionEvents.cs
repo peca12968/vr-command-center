@@ -4,16 +4,21 @@ namespace VrCommand.Core;
 
 public enum SessionEventKind { Created, PlayerJoined, PlayerLeft, ControlApplied, CombatRecorded, CombatStreamOpened, StreamCombatRecorded, CombatStreamSealed }
 public record SessionCreated(SessionMode Mode, int[] RoomIds, Mission Mission);
-public record PlayerLeft(Guid PlayerId, int? RoomId = null);
+public record PlayerLeft(Guid PlayerId, int? RoomId = null, Guid AdmissionId = default, Guid? ExpectedAdmissionId = null);
 public record SessionEvent(int SchemaVersion, Guid EventId, Guid SessionId, long Sequence,
     DateTimeOffset RecordedAtUtc, SessionEventKind Kind, JsonElement Payload, OperatorIdentity? Actor = null,
     Guid? RequestId = null)
 {
     public T Read<T>() => Payload.Deserialize<T>(JsonFormat.Options)
         ?? throw new InvalidDataException("Missing event payload.");
-    internal static SessionEvent Create<T>(Guid id, long sequence, SessionEventKind kind, T payload, OperatorIdentity actor, Guid? requestId = null) =>
-        new(5, Guid.NewGuid(), id, sequence, DateTimeOffset.UtcNow, kind,
-            JsonSerializer.SerializeToElement(payload, JsonFormat.Options), actor, requestId);
+    internal static SessionEvent Create<T>(Guid id, long sequence, SessionEventKind kind, T payload, OperatorIdentity actor, Guid? requestId = null)
+    {
+        var eventId = Guid.NewGuid();
+        var data = kind == SessionEventKind.PlayerJoined && payload is Player player
+            ? JsonSerializer.SerializeToElement(player with { AdmissionId = eventId }, JsonFormat.Options)
+            : JsonSerializer.SerializeToElement(payload, JsonFormat.Options);
+        return new(6, eventId, id, sequence, DateTimeOffset.UtcNow, kind, data, actor, requestId);
+    }
 }
 
 // Use the same transition rules for commands and reconstruction after a restart.
@@ -50,7 +55,7 @@ internal static class SessionProjection
 
     internal static SessionView Apply(SessionView? current, SessionEvent entry)
     {
-        if (entry.SchemaVersion is not (1 or 2 or 3 or 4 or 5) || entry.EventId == Guid.Empty || entry.SessionId == Guid.Empty
+        if (entry.SchemaVersion is not (1 or 2 or 3 or 4 or 5 or 6) || entry.EventId == Guid.Empty || entry.SessionId == Guid.Empty
             || entry.Sequence != (current?.Sequence ?? 0) + 1 || !Enum.IsDefined(entry.Kind)
             || entry.RecordedAtUtc == default || entry.RecordedAtUtc.Offset != TimeSpan.Zero
             || (current is not null && current.Id != entry.SessionId))
@@ -92,6 +97,11 @@ internal static class SessionProjection
                     ?? throw new KeyNotFoundException("Player does not exist.");
                 if (entry.SchemaVersion >= 4 && leaving.RoomId != player.RoomId)
                     throw new InvalidDataException("Leave event must retain the admitted player's room.");
+                if (entry.SchemaVersion >= 6 && (leaving.AdmissionId != player.AdmissionId
+                    || leaving.ExpectedAdmissionId == Guid.Empty || (leaving.ExpectedAdmissionId.HasValue && leaving.ExpectedAdmissionId != player.AdmissionId)))
+                    throw new InvalidDataException("Leave event must target its exact admitted player instance.");
+                if (entry.SchemaVersion < 6 && ((leaving.AdmissionId != Guid.Empty && leaving.AdmissionId != player.AdmissionId) || leaving.ExpectedAdmissionId.HasValue))
+                    throw new InvalidDataException("Admission fences require event schema 6.");
                 AccessPolicy.Player(actor, current, player.RoomId);
                 break;
             case SessionEventKind.ControlApplied:
@@ -105,7 +115,7 @@ internal static class SessionProjection
         }
         var updated = entry.Kind switch
         {
-            SessionEventKind.PlayerJoined => Join(current, entry.Read<Player>()),
+            SessionEventKind.PlayerJoined => Join(current, entry.Read<Player>(), entry.EventId, entry.SchemaVersion),
             SessionEventKind.PlayerLeft => Leave(current, entry.Read<PlayerLeft>().PlayerId),
             SessionEventKind.ControlApplied => Control(current, entry.Read<ControlCommand>(), entry.RecordedAtUtc),
             SessionEventKind.CombatRecorded => current,
@@ -114,8 +124,10 @@ internal static class SessionProjection
         return updated with { Sequence = entry.Sequence };
     }
 
-    private static SessionView Join(SessionView session, Player player)
+    private static SessionView Join(SessionView session, Player player, Guid admission, int schema)
     {
+        if ((schema >= 6 && player.AdmissionId != admission) || (player.AdmissionId != Guid.Empty && player.AdmissionId != admission))
+            throw new InvalidDataException("Player admission must be the immutable joining event ID.");
         if (player.Id == Guid.Empty || string.IsNullOrWhiteSpace(player.Name) || player.Name.Length > 80
             || !Enum.IsDefined(player.Headset)) throw new ArgumentException("Invalid player details.");
         if (session.State != SessionState.Preparing) throw new InvalidOperationException("Players may join only while preparing.");
@@ -127,7 +139,7 @@ internal static class SessionProjection
             .First(candidate => !session.Players.Any(p => p.RoomId == player.RoomId && p.Seat == candidate)) : player.Seat;
         if (seat is < 0 or >= SessionManager.PlayersPerRoom || session.Players.Any(p => p.RoomId == player.RoomId && p.Seat == seat))
             throw new ArgumentException("Player seat is invalid or already occupied.");
-        return session with { Players = [.. session.Players, player with { Seat = seat }] };
+        return session with { Players = [.. session.Players, player with { Seat = seat, AdmissionId = admission }] };
     }
 
     private static SessionView Leave(SessionView session, Guid playerId)

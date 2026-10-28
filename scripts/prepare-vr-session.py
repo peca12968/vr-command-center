@@ -23,10 +23,10 @@ if not keys.get("GameServer"):
     raise SystemExit("The local credential file needs a GameServer credential.")
 
 
-def api(method, path, body=None):
+def api(method, path, body=None, admission_id=None):
     request = urllib.request.Request(args.base_url.rstrip("/") + path,
         data=None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8"), method=method,
-        headers={"Authorization": "Bearer " + keys["Master"], "Content-Type": "application/json; charset=utf-8"})
+        headers={"Authorization": "Bearer " + keys["Master"], "Content-Type": "application/json; charset=utf-8", **({"If-Match-Admission": admission_id} if admission_id else {})})
     with urllib.request.urlopen(request, timeout=10) as response:
         payload = response.read()
         return json.loads(payload) if payload else None
@@ -49,8 +49,9 @@ try:
     players = []
     for index in range(1, args.players + 1):
         player_id = str(uuid.uuid4())
-        api("POST", path + "/players", {"playerId": player_id, "name": f"Quest3-{index}", "roomId": args.room, "headset": "Quest3"})
-        invitation = api("POST", path + f"/players/{player_id}/join-ticket")
+        joined = api("POST", path + "/players", {"playerId": player_id, "name": f"Quest3-{index}", "roomId": args.room, "headset": "Quest3"})
+        admission_id = next(player["admissionId"] for player in joined["players"] if player["id"] == player_id)
+        invitation = api("POST", path + f"/players/{player_id}/join-ticket", admission_id=admission_id)
         filename = f"player-{index}.json"
         client = {"role": "Client", "address": args.server_address, "port": args.port, "joinTicket": invitation["ticket"]}
         (output / filename).write_text(json.dumps(client, indent=2), encoding="utf-8")

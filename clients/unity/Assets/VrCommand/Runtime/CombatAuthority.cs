@@ -152,7 +152,7 @@ namespace VrCommand.Unity
             if (IsSpawned && IsServer) Ready.Value = false;
         }
         public bool Bind(ulong client, TicketApproval admission) => serverReady && Guid.TryParse(admission.playerId, out var id)
-            && session.Connect(client, id, admission.roomId, admission.seat);
+            && Guid.TryParse(admission.admissionId, out var epoch) && session.Connect(client, id, admission.roomId, admission.seat, epoch);
         public void Unbind(ulong client)
         {
             session.Disconnect(client);

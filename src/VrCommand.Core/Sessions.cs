@@ -4,7 +4,7 @@ public enum SessionMode { Independent, Linked }
 public enum HeadsetKind { ViveXr, Quest3 }
 public enum SessionState { Preparing, Running, Paused, Ended }
 public enum ControlAction { Unspecified, Begin, Pause, Resume, End, SetEnvironment, SetEnemies }
-public record Player(Guid Id, string Name, int RoomId, HeadsetKind Headset, int Seat = -1);
+public record Player(Guid Id, string Name, int RoomId, HeadsetKind Headset, int Seat = -1, Guid AdmissionId = default);
 public record SessionView(Guid Id, SessionMode Mode, int[] RoomIds, Mission Mission,
     DateTimeOffset CreatedAtUtc, DateTimeOffset? StartedAtUtc, DateTimeOffset? EndedAtUtc,
     SessionState State, Player[] Players, EnvironmentSettings Environment, EnemySettings Enemies, long Sequence,
@@ -142,9 +142,10 @@ public sealed partial class SessionManager
         }
     }
 
-    public void Leave(Guid sessionId, Guid playerId, OperatorIdentity? actor = null, Guid? requestId = null)
+    public void Leave(Guid sessionId, Guid playerId, OperatorIdentity? actor = null, Guid? requestId = null, Guid? expectedAdmissionId = null, bool requireAdmissionMatch = false)
     {
         ValidateRequestId(requestId);
+        if (expectedAdmissionId == Guid.Empty) throw new ArgumentException("Expected admission must be a non-empty UUID.");
         lock (gate)
         {
             var history = Find(sessionId);
@@ -154,7 +155,7 @@ public sealed partial class SessionManager
             if (previous is not null)
             {
                 var left = previous.Read<PlayerLeft>();
-                if (previous.SessionId != sessionId || left.PlayerId != playerId)
+                if (previous.SessionId != sessionId || left.PlayerId != playerId || left.ExpectedAdmissionId != expectedAdmissionId)
                     throw new InvalidOperationException("Request ID already used with different content.");
                 AccessPolicy.Player(actor, history.View, left.RoomId!.Value);
                 return;
@@ -162,8 +163,12 @@ public sealed partial class SessionManager
             var player = history.View.Players.SingleOrDefault(p => p.Id == playerId)
                 ?? throw new KeyNotFoundException("Player does not exist.");
             AccessPolicy.Player(actor, history.View, player.RoomId);
+            if (requireAdmissionMatch && !expectedAdmissionId.HasValue)
+                throw new ArgumentException("If-Match-Admission is required; reload the current roster before removing a player.");
+            if (expectedAdmissionId.HasValue && expectedAdmissionId != player.AdmissionId)
+                throw new InvalidOperationException("Player admission changed; reload the current roster.");
             Commit(history, SessionEvent.Create(sessionId, history.View.Sequence + 1,
-                SessionEventKind.PlayerLeft, new PlayerLeft(playerId, player.RoomId), actor, requestId));
+                SessionEventKind.PlayerLeft, new PlayerLeft(playerId, player.RoomId, player.AdmissionId, expectedAdmissionId), actor, requestId));
         }
     }
 

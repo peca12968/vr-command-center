@@ -1,5 +1,7 @@
 # 事件儲存與升級 v0.11
 
+v0.14 session envelope 升 6，PlayerJoined 保存 admissionId=EventId，PlayerLeft 保存 admission 與原始 fence，讀取 1–5 會從舊加入 EventId 推導穩定識別。DB schema 不變，但寫入後不可降回舊 event reader；舊 v1 票券失效須重發。備份後協同升級 API／控制台／GameServer，見 ADMISSION.md。
+
 v0.13 header 新增選用 UTC 擷取基準與 capturedAtUtc metadata，舊無時間 header 可讀／原樣去重；DB schema 不變，但 v0.12 的嚴格 reader 不接受新欄位，寫入後不可直接降版。完整備份後再一同升級來源、API 與主控台。來源 binary journal 及 ack 規範見 WORLD_SOURCE.md。
 
 v0.12 另在相同 SessionDataDirectory 新增 worlds.db（schema 1），以交易保存逐幀世界／統計並以時間索引播放。管理 events.db 的 schema 與 envelope 5 不變；完整備份需包含兩個資料庫及來源檔，詳見 [WORLD_RECORDING.md](WORLD_RECORDING.md)。

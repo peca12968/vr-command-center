@@ -36,8 +36,8 @@ async function main() {
       if (processApi.exitCode !== null || attempt > 100) throw new Error('Isolated API did not start: ' + Object.values(tokens).reduce((text, key) => text.replaceAll(key, '[redacted]'), apiLog));
       await delay(100);
     }
-    async function api(route, method = 'GET', body, role = 'Master', expected = 200) {
-      const response = await fetch(base + '/api' + route, { method, headers: { Authorization: 'Bearer ' + tokens[role], 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    async function api(route, method = 'GET', body, role = 'Master', expected = 200, admissionId) {
+      const response = await fetch(base + '/api' + route, { method, headers: { Authorization: 'Bearer ' + tokens[role], 'Content-Type': 'application/json', ...(admissionId ? { 'If-Match-Admission': admissionId } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
       assert.equal(response.status, expected, method + ' ' + route);
       return response.status === 204 ? null : response.json();
     }
@@ -87,7 +87,7 @@ async function main() {
       const request = route.request(), pathname = new URL(request.url()).pathname;
       const kind = request.method() === 'DELETE' && /\/players\/[^/]+$/.test(pathname) ? 'leave' : request.method() === 'POST' && /\/players$/.test(pathname) ? 'join' : request.method() === 'POST' && pathname === '/api/sessions' ? 'create' : null;
       if (kind !== lifecycleKind) return route.continue();
-      lifecycleAttempts.push({ kind, method: request.method(), path: pathname, body: request.postData(), key: request.headers()['idempotency-key'] });
+      lifecycleAttempts.push({ kind, method: request.method(), path: pathname, body: request.postData(), key: request.headers()['idempotency-key'], admission: request.headers()['if-match-admission'] || null });
       if (loseLifecycle) { loseLifecycle = false; await route.fetch(); await route.abort('failed'); }
       else await route.continue();
     }
@@ -116,23 +116,32 @@ async function main() {
       'Join retry retains the original player UUID and request key with one admitted seat');
     lifecycleKind = null;
     // A lower fixed UUID puts this departed player before Alpha in statistics, exposing row-order assumptions.
-    await api('/sessions/' + session.id + '/players', 'POST', { playerId: '00000000-0000-0000-0000-000000000001', name: 'Temporary', roomId: session.roomIds[0], headset: 'Quest3' });
+    const temporaryPlayer = { playerId: '00000000-0000-0000-0000-000000000001', name: 'Temporary', roomId: session.roomIds[0], headset: 'Quest3' };
+    const beforeLeave = await api('/sessions/' + session.id + '/players', 'POST', temporaryPlayer);
+    const temporaryAdmission = beforeLeave.players.find(player => player.id === temporaryPlayer.playerId).admissionId;
     await page.locator('#refresh').click();
     await page.waitForFunction(() => document.querySelector('#roster').textContent.includes('Temporary'));
     lifecycleKind = 'leave'; loseLifecycle = true; lifecycleAttempts.length = 0;
     page.once('dialog', dialog => dialog.accept()); await page.locator('#roster tr').filter({ hasText: 'Temporary' }).getByRole('button', { name: '移除', exact: true }).click();
     await page.locator('#pending-command').waitFor({ state: 'visible' });
     check((await api('/sessions/' + session.id)).players.length === 1 && await page.locator('#game-address').isDisabled(), 'Lost leave response retains confirmation controls while the server has already removed the player');
+    const replacementSession = await api('/sessions/' + session.id + '/players', 'POST', temporaryPlayer);
+    const replacement = replacementSession.players.find(player => player.id === temporaryPlayer.playerId);
+    check(replacement.admissionId !== temporaryAdmission && lifecycleAttempts[0].admission === temporaryAdmission, 'Removal captures the selected admission even when another operator readmits the same player');
     await page.locator('#retry-command').click(); await page.locator('#pending-command').waitFor({ state: 'hidden' });
     check(lifecycleAttempts.length === 2 && lifecycleAttempts[0].key && JSON.stringify(lifecycleAttempts[0]) === JSON.stringify(lifecycleAttempts[1]) && (await api('/sessions/' + session.id + '/events')).filter(event => event.kind === 'PlayerLeft').length === 1,
       'Leave retry returns confirmation after removal without a second event');
+    check((await api('/sessions/' + session.id)).players.find(player => player.id === temporaryPlayer.playerId).admissionId === replacement.admissionId, 'Lost-response retry preserves the replacement player admission');
     lifecycleKind = null;
+    await api('/sessions/' + session.id + '/players/' + temporaryPlayer.playerId, 'DELETE', undefined, 'Master', 204, replacement.admissionId);
+    await page.locator('#refresh').click(); await page.waitForFunction(() => document.querySelectorAll('#roster tr').length === 1);
     await page.locator('#game-address').fill('127.0.0.1');
     const [download] = await Promise.all([page.waitForEvent('download'), page.locator('#roster button').filter({ hasText: '下載連線檔' }).click()]);
     const configPath = path.join(directory, 'player.json'); await download.saveAs(configPath);
     const config = JSON.parse(await fs.readFile(configPath, 'utf8'));
     check(JSON.stringify(Object.keys(config).sort()) === JSON.stringify(['address', 'joinTicket', 'port', 'role']) && !Object.values(tokens).some(key => JSON.stringify(config).includes(key)), 'Downloaded headset configuration contains only player connection fields');
-    check((await api('/player-tickets/validate', 'POST', { sessionId: session.id, ticket: config.joinTicket }, 'GameServer')).playerId === session.players[0].id, 'Downloaded player ticket validates for the selected roster entry');
+    const validatedTicket = await api('/player-tickets/validate', 'POST', { sessionId: session.id, ticket: config.joinTicket, protocolVersion: 2 }, 'GameServer');
+    check(config.joinTicket.startsWith('v2.') && validatedTicket.playerId === session.players[0].id && validatedTicket.admissionId === session.players[0].admissionId, 'Downloaded V2 ticket validates the exact selected player admission');
     await page.locator('[data-command=Begin]').click();
     await page.waitForFunction(() => document.querySelector('#session-phase').textContent === '執行中');
     check((await api('/sessions/' + session.id)).state === 'Running', 'Operator starts the mission from the console');

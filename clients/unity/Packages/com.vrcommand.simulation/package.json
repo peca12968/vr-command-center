@@ -1,6 +1,6 @@
 {
   "name": "com.vrcommand.simulation",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "displayName": "VR Command Simulation",
   "description": "Engine-independent server combat and grid navigation rules.",
   "unity": "6000.3"

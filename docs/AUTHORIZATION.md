@@ -1,4 +1,4 @@
-# 控制台身分、權限與玩家票券 v0.5
+# 控制台身分、權限與玩家票券 v0.14
 
 目前使用分別配發給控制台的 Bearer 憑證。認證結果由伺服器設定決定，不接受請求 body 裡自行宣告的身分或角色。這是原型的控制台認證，還不是員工個人帳號、頭盔註冊或企業登入。
 
@@ -34,15 +34,15 @@ OperatorKeys__GameServer
 
 ## 頭盔入場
 
-頭盔只持有綁定場次／玩家／房間、五分鐘到期的 HMAC-SHA256 票券，不能呼叫 REST 管理 API。桌面遊戲伺服器帶 GameServer 憑證驗證簽章、到期、現行名冊與場次狀態，再採用 API 回傳的房間及固定席位；不信任頭盔自行宣告玩家 ID。
+頭盔只持有綁定場次／玩家／本次 admissionId／房間／席位、五分鐘到期的 HMAC-SHA256 v2 票券，不能呼叫 REST 管理 API。桌面遊戲伺服器帶 GameServer 憑證驗證簽章、到期、現行名冊與場次狀態，再採用 API 回傳的房間及固定席位；不信任頭盔自行宣告玩家 ID。
 
 簽章鑰預設以隨機 32 bytes 建立，Base64 保存於 `DataDirectory` 父目錄的 `player-ticket-signing.key`，例如 API 專案預設 `data/player-ticket-signing.key`。實際位置以任務資料路徑為準，與 `OperatorKeyFile` 的位置無關。可透過 `PlayerTicketSigningKey` 配置至少 32 bytes 的 Base64 鑰匙。鑰匙依賴主機檔案權限，不能放入 Unity 或 Git；備份與部署需保留，換鑰重啟會使舊票券失效。票券本身不保存於場次事件。
 
-票券不做一次性消耗或加入版本撤銷。驗票成功並不等於傳輸加密、設備證明或已通過實機驗收；現有 GameServer 身分仍可跨場讀取，後續須按部署需求收緊。現有連線不因移除名冊或票券到期自動斷開；到期限制目前只作用於入場驗證。
+v0.14 每次入場有獨立 admissionId，v1 券全部拒絕並須重發。驗票需 protocolVersion:2；配票及新的 HTTP 移除需 If-Match-Admission。v2 不做一次性消耗，期限限制入場驗證。Unity 已接管理輪詢後的 epoch 撤銷來源碼，正常目標 0.5 秒、管理過期 1.5 秒暫停，但尚未編譯／實測；驗票成功不是傳輸加密、設備證明或頭盔驗收。GameServer 身分仍可跨場讀取，部署收斂待做。完整規範見 ADMISSION.md。
 
 ## 事件與復原
 
-新事件使用 envelope schema 5，保留 schema 2 引入的 `actor: { id, role, roomId }`。角色與房間權限在操作前及從歷史復原時都會檢查；同一控制命令、戰鬥報告或建立／加入／離開的 requestId 重送必須由同一來源身分發出。離開重試用事件保存的原房間重新授權。換鑰仍屬同一身分，可以原樣重送。主控及房間控制台不能提交戰鬥事件；模擬器使用 GameServer 憑證且將資料明確標記為 Simulation。
+新事件使用 envelope schema 6，保留 schema 2 引入的 `actor: { id, role, roomId }`。角色與房間權限在操作前及從歷史復原時都會檢查；同一控制命令、戰鬥報告或建立／加入／離開的 requestId 重送必須由同一來源身分發出。離開重試用事件保存的原房間重新授權。換鑰仍屬同一身分，可以原樣重送。主控及房間控制台不能提交戰鬥事件；模擬器使用 GameServer 憑證且將資料明確標記為 Simulation。
 
 schema 1 歷史保持 `actor: null`，不補造控制台身分；由受信任的舊版內部操作復原。舊版已接受的命令無法改由新認證身分接管去重 ID，回傳 409。核心函式庫另有 `Internal` 身分供受信任的程序內部呼叫與舊歷史使用；HTTP 認證永遠不配發此角色。
 

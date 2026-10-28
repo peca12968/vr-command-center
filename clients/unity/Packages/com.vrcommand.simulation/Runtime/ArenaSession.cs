@@ -23,7 +23,7 @@ namespace VrCommand.Simulation
     [Serializable] public sealed class ManagedPosition { public float x, y, z; public Vec3 Vector => new Vec3(x, y, z); }
     [Serializable] public sealed class ManagedEnvironment { public string mode = null!, weather = null!, timeOfDay = null!; public bool lightning; }
     [Serializable] public sealed class ManagedEnemies { public int count; public string behavior = null!; public bool autoAttack; }
-    [Serializable] public sealed class ManagedPlayer { public string id = null!; public int roomId, seat; }
+    [Serializable] public sealed class ManagedPlayer { public string id = null!, admissionId = null!; public int roomId, seat; }
 
     // Single-threaded server adapter. Transport authenticates a ticket before binding its connection here.
     public sealed class ArenaSession
@@ -31,6 +31,7 @@ namespace VrCommand.Simulation
         private sealed class Binding
         {
             internal Guid Player;
+            internal Guid Admission;
             internal double LastPose = double.NegativeInfinity;
             internal ulong LastInput;
         }
@@ -79,10 +80,12 @@ namespace VrCommand.Simulation
             foreach (var player in snapshot.players)
             {
                 if (player == null || !Guid.TryParse(player.id, out var playerId) || playerId == Guid.Empty
+                    || !Guid.TryParse(player.admissionId, out var admission) || admission == Guid.Empty
+                    || nextRoster.Values.Any(other => other.admissionId == admission.ToString("D"))
                     || nextRoster.ContainsKey(playerId) || !snapshot.roomIds.Contains(player.roomId) || player.seat < 0 || player.seat > 4
                     || nextRoster.Values.Any(other => other.roomId == player.roomId && other.seat == player.seat))
                     throw new ArgumentException("Invalid mission roster or duplicate seat.");
-                nextRoster.Add(playerId, new ManagedPlayer { id = playerId.ToString("D"), roomId = player.roomId, seat = player.seat });
+                nextRoster.Add(playerId, new ManagedPlayer { id = playerId.ToString("D"), admissionId = admission.ToString("D"), roomId = player.roomId, seat = player.seat });
             }
             var nextProps = new List<WorldProp>();
             foreach (var room in snapshot.roomIds.OrderBy(value => value))
@@ -97,11 +100,11 @@ namespace VrCommand.Simulation
                         ArenaWorld.RoomOrigin(room) + prop.position.Vector, prop.yawDegrees));
                 }
             var changedRoster = roster.Count != nextRoster.Count || roster.Any(pair => !nextRoster.TryGetValue(pair.Key, out var value)
-                || pair.Value.roomId != value.roomId || pair.Value.seat != value.seat);
+                || pair.Value.roomId != value.roomId || pair.Value.seat != value.seat || pair.Value.admissionId != value.admissionId);
             if (World != null && (!SameProps(props, nextProps.ToArray()) || (phase == WorldPhase.Preparing && World.Phase != WorldPhase.Preparing)))
                 throw new InvalidOperationException("Mission geometry cannot change after server initialization.");
             if (World != null && World.Phase != WorldPhase.Preparing && nextRoster.Any(pair => !roster.ContainsKey(pair.Key)
-                || roster[pair.Key].roomId != pair.Value.roomId || roster[pair.Key].seat != pair.Value.seat))
+                || roster[pair.Key].roomId != pair.Value.roomId || roster[pair.Key].seat != pair.Value.seat || roster[pair.Key].admissionId != pair.Value.admissionId))
                 throw new InvalidOperationException("New roster bodies require Preparing.");
 
             var rebuilt = World == null || (World.Phase == WorldPhase.Preparing && changedRoster);
@@ -128,7 +131,8 @@ namespace VrCommand.Simulation
                 foreach (var enemy in extra) { World.AddEnemy(enemy.Id, enemy.Room, enemy.Feet, enemy.Patrol); enemySlots.Add(enemy.Id); }
                 enemyGeneration += extra.Length;
             }
-            foreach (var connection in connections.Where(pair => !nextRoster.ContainsKey(pair.Value.Player)).Select(pair => pair.Key).ToArray())
+            foreach (var connection in connections.Where(pair => !nextRoster.TryGetValue(pair.Value.Player, out var entry)
+                || entry.admissionId != pair.Value.Admission.ToString("D")).Select(pair => pair.Key).ToArray())
             {
                 if (rebuilt) connections.Remove(connection); // The replacement world already omits this body.
                 else Disconnect(connection);
@@ -168,12 +172,12 @@ namespace VrCommand.Simulation
         private static bool SameProps(WorldProp[] left, WorldProp[] right) => left.Length == right.Length && left.Zip(right, (a, b) =>
             a.Id == b.Id && a.RoomId == b.RoomId && a.Kind == b.Kind && a.Feet.Equals(b.Feet) && a.Yaw.Equals(b.Yaw)).All(value => value);
 
-        public bool Connect(ulong connection, Guid player, int room, int seat)
+        public bool Connect(ulong connection, Guid player, int room, int seat, Guid admission)
         {
             if (World == null || World.Phase == WorldPhase.Ended || connections.ContainsKey(connection)
                 || connections.Values.Any(binding => binding.Player == player) || !roster.TryGetValue(player, out var entry)
-                || entry.roomId != room || entry.seat != seat) return false;
-            connections.Add(connection, new Binding { Player = player }); return true;
+                || admission == Guid.Empty || entry.admissionId != admission.ToString("D") || entry.roomId != room || entry.seat != seat) return false;
+            connections.Add(connection, new Binding { Player = player, Admission = admission }); return true;
         }
         public void Disconnect(ulong connection)
         {

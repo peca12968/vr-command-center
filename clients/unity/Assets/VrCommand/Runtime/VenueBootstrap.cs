@@ -52,7 +52,7 @@ namespace VrCommand.Unity
             networkManager.OnClientDisconnectCallback += Disconnected;
             networkManager.OnClientConnectedCallback += Connected;
             networkManager.NetworkConfig.ConnectionApproval = true;
-            networkManager.NetworkConfig.ClientConnectionBufferTimeout = 15;
+            networkManager.NetworkConfig.ClientConnectionBufferTimeout = 20;
             if (configuration.IsServer)
             {
                 networkManager.ConnectionApprovalCallback = ApproveConnection;
@@ -161,7 +161,15 @@ namespace VrCommand.Unity
                 yield return new WaitForSecondsRealtime(.2f);
             }
         }
+        private bool refreshingManagement;
         private IEnumerator RefreshManagement()
+        {
+            if (refreshingManagement) { while (refreshingManagement) yield return null; yield break; }
+            refreshingManagement = true;
+            try { yield return RefreshManagementCore(); }
+            finally { refreshingManagement = false; }
+        }
+        private IEnumerator RefreshManagementCore()
         {
             using (var request = UnityWebRequest.Get(configuration.managementApiUrl.TrimEnd('/') + "/api/sessions/" + configuration.sessionId))
             {
@@ -181,17 +189,18 @@ namespace VrCommand.Unity
                 if (!valid) yield break;
                 latestSnapshot = snapshot;
                 managementReady = true;
+                if (sceneAuthority.IsSpawned) sceneAuthority.ApplyServerSnapshot(snapshot);
                 // Revoke current connections whose admitted roster entry was removed or reassigned.
                 foreach (var clientId in new List<ulong>(admitted.Keys))
                 {
                     var admission = admitted[clientId];
                     var present = snapshot.state != "Ended" && Array.Exists(snapshot.players, player => player.id == admission.playerId
-                        && player.roomId == admission.roomId && player.seat == admission.seat);
+                        && player.roomId == admission.roomId && player.seat == admission.seat && player.admissionId == admission.admissionId);
                     if (!present)
                     {
                         if (clientId == NetworkManager.ServerClientId && networkManager.IsHost)
                         { status = "HOST ADMISSION REVOKED"; networkManager.Shutdown(); yield break; }
-                        networkManager.DisconnectClient(clientId);
+                        admitted.Remove(clientId); combatAuthority.Unbind(clientId); networkManager.DisconnectClient(clientId);
                     }
                 }
             }
@@ -236,7 +245,18 @@ namespace VrCommand.Unity
                 try { approval = JsonUtility.FromJson<TicketApproval>(request.downloadHandler.text); }
                 catch (Exception) { }
                 if (approval == null || approval.sessionId != configuration.sessionId || !Guid.TryParse(approval.playerId, out _)
-                    || approval.roomId < 1 || approval.roomId > 5 || approval.seat < 0 || approval.seat > 4 || admitted.Count >= 25)
+                    || !Guid.TryParse(approval.admissionId, out var epoch) || epoch == Guid.Empty || approval.throughSequence < 1
+                    || approval.roomId < 1 || approval.roomId > 5 || approval.seat < 0 || approval.seat > 4)
+                { Reject(response); yield break; }
+                // Observe at least the roster revision validated by the API before binding the transport.
+                yield return RefreshManagement();
+                if (managementReady && latestSnapshot.sequence < approval.throughSequence) yield return RefreshManagement();
+                if (!managementReady || latestSnapshot.sequence < approval.throughSequence || latestSnapshot.state == "Ended"
+                    || !DateTimeOffset.TryParse(approval.expiresAtUtc, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out var expires)
+                    || expires <= DateTimeOffset.UtcNow
+                    || (!preflight && (!networkManager.IsListening || !networkManager.PendingClients.ContainsKey(clientId)))
+                    || !Array.Exists(latestSnapshot.players, player => player.id == approval.playerId && player.admissionId == approval.admissionId
+                        && player.roomId == approval.roomId && player.seat == approval.seat) || admitted.Count >= 25)
                 { Reject(response); yield break; }
                 foreach (var existing in admitted.Values)
                     if (existing.playerId == approval.playerId) { Reject(response); yield break; }

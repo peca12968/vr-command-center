@@ -77,7 +77,7 @@ key 與事件在同一 SQLite append 交易中提交；重啟從事件重建索�
 
 `GET /api/sessions/{id}/events?after=0&limit=100` 回傳事件陣列。每場次從序號 1 開始，僅接受的變更會遞增；讀取端以最後收到的序號作為下一次 `after`，空陣列表示已讀到目前尾端。預設 100、最多 500 筆；沒有訂閱推播與長輪詢。
 
-共同欄位為 `schemaVersion`（新事件為 5）、`eventId`、`sessionId`、`sequence`、`recordedAtUtc`、`kind`、`payload`、`actor` 及可為 null 的 `requestId`。schema 1–4 歷史仍可讀取，schema 1 的 `actor` 保持 null，細節見權限文件。只有 schema 4+ 的 Created／PlayerJoined／PlayerLeft 可以有非空 requestId；跨事件重複 requestId 會使恢復失敗。
+共同欄位為 `schemaVersion`（新事件為 6）、`eventId`、`sessionId`、`sequence`、`recordedAtUtc`、`kind`、`payload`、`actor` 及可為 null 的 `requestId`。schema 1–5 歷史仍可讀取，schema 1 的 `actor` 保持 null，細節見權限文件。只有 schema 4+ 的 Created／PlayerJoined／PlayerLeft 可以有非空 requestId；跨事件重複 requestId 會使恢復失敗。
 
 | kind | payload | 用途 |
 |---|---|---|
@@ -95,3 +95,8 @@ key 與事件在同一 SQLite append 交易中提交；重啟從事件重建索�
 服務啟動時從事件重建活動與歷史場次，驗證 schema、身分、連續序號、事件／命令 ID、狀態轉移與活動房間／玩家衝突。資料損壞或未知版本時啟動失敗，不靜默丟棄歷史。執行中的場次會恢復管理狀態；此行為尚不涵蓋遊戲世界、裝置重連或硬體恢復。
 
 事件逐筆追加並增量更新統計，但啟動時仍載入所有場次；尚無保留／刪除介面、世界快照或姿態串流。戰鬥事件已有傷害及射擊關聯，仍不包含 3D 位置與動畫，不能視為需求第 9 項的 3D 任務回放。實際遊戲的傳輸與批次寫入將在 Quest 3 垂直切片中整合。
+
+
+## v0.14 每次入場
+
+PlayerJoined admissionId 等於 EventId，schema 6 持久保存；舊 1–5 從原 EventId 推導，不改寫原事件。PlayerLeft schema 6 另外保存實際 admissionId 及原始 expectedAdmissionId。新 HTTP 移除需要 If-Match-Admission；已接受的同 requestId／原 fence 只確認歷史，改 fence 回 409，不移除後來入場者。票券與共用 binding 同樣檢查本次入場，詳見 [ADMISSION.md](ADMISSION.md)。

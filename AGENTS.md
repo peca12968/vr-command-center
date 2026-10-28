@@ -42,3 +42,5 @@ v0.11 新事件 schema 5，讀取 schema 1–4；戰鬥串流綁定唯一來源�
 v0.12 世界發布為 WebSocket、觀察為帶 Bearer 的 fetch SSE，來源規範在 WORLD_RECORDING.md。新增 worlds.db 與每幀統計／combat witness 核對；管理 events.db schema 不變。必要另跑 python scripts/smoke_world.py，隔離指定 VR_COMMAND_WORLD_RELAY_DLL；瀏覽器檢查包含 world-browser.cjs。共享 WorldRecording DTO 仍須 C# 9／netstandard2.1；Unity 尚未發布世界或採樣頭手，不能把合成 Simulated rig 宣稱為 Tracked。
 
 v0.13 共用 WorldOutbox／WorldPublisher 與 Unity 頭手來源／追蹤／管理邊界已接源碼，尚未編譯運行。binary journal 有 checksum、exclusive lease、durable ack 與 completion/seal；Native --world-journal 使用同一發布器，--recording 留舊 NDJSON，恢復 Unity 可另指定 --combat-journal。header UTC 擷取時間需 v0.13 API，舊資料預設空值；DB schema 不變不表示可直接降回舊 reader。新鮮度不可用收到時間代替擷取時間。NGO source byte 改 wire format，生成器 protocol 13；EditMode 至少 12 項，來源／證據／限制見 WORLD_SOURCE.md。
+
+v0.14 入場規範見 ADMISSION.md：envelope 6 讀 1–5，以原加入 EventId 派生／保存 admissionId；v2 票券簽 admission／seat，v1 全拒。新 HTTP 移除及配票必須 If-Match-Admission，已接受的歷史 leave 重試仍保留原 fence 只確認；不要以當前入場覆蓋舊 pending 操作。GameServer 驗票 protocolVersion 2，ArenaSession.Connect 必帶 admissionId；Unity 以 throughSequence 快照及 expiry 驗後綁定，管理 fetch 合併串行。15 項 EditMode 仍待執行；協同更新 API／UI／所有 GameServer／頭盔來源並重發票券，不以舊來源忽略 epoch 作相容解法。

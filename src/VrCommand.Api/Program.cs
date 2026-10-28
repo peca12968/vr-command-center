@@ -81,7 +81,7 @@ app.Use(async (context, next) =>
     }
 });
 
-app.MapGet("/", () => new { service = "VR Command Center", stage = "durable world source and Quest recording integration prototype", version = "0.13.0" });
+app.MapGet("/", () => new { service = "VR Command Center", stage = "admission-fenced tickets and Quest connection integration prototype", version = "0.14.0" });
 app.MapWorldRoutes();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/api/me", (HttpContext context) => Actor(context));
@@ -125,22 +125,21 @@ app.MapPost("/api/sessions/{id:guid}/players/{playerId:guid}/join-ticket", (Guid
     var player = session.Players.SingleOrDefault(p => p.Id == playerId) ?? throw new KeyNotFoundException("Player does not exist.");
     AccessPolicy.Player(Actor(context), session, player.RoomId);
     if (session.State == SessionState.Ended) throw new InvalidOperationException("Session has ended.");
+    var expected = AdmissionMatch(context) ?? throw new ArgumentException("If-Match-Admission is required; reload the current player roster.");
+    if (expected != player.AdmissionId) throw new InvalidOperationException("Player admission changed; reload the current roster.");
     return ticketSigner.Issue(id, player);
 });
 app.MapPost("/api/player-tickets/validate", (ValidatePlayerTicket request, SessionManager manager, HttpContext context) =>
 {
     if (Actor(context).Role != OperatorRole.GameServer)
         throw new AccessDeniedException("Player ticket validation requires a game-server identity.");
+    if (request.ProtocolVersion != 2) throw new ArgumentException("Game server admission protocol 2 is required; upgrade the game server.");
     var claims = ticketSigner.Validate(request.Ticket, request.SessionId);
-    var session = manager.Get(claims.SessionId, Actor(context));
-    var player = session.Players.SingleOrDefault(p => p.Id == claims.PlayerId);
-    if (session.State == SessionState.Ended || player is null || player.RoomId != claims.RoomId)
-        throw new AccessDeniedException("Player is no longer admitted to this session.");
-    return new { sessionId = session.Id, playerId = player.Id, roomId = player.RoomId, seat = player.Seat };
+    return manager.ResolveAdmission(claims, Actor(context));
 });
 app.MapDelete("/api/sessions/{id:guid}/players/{playerId:guid}", (Guid id, Guid playerId, SessionManager manager, HttpContext context) =>
 {
-    manager.Leave(id, playerId, Actor(context), RequestId(context));
+    manager.Leave(id, playerId, Actor(context), RequestId(context), AdmissionMatch(context), requireAdmissionMatch: true);
     return Results.NoContent();
 });
 app.MapDelete("/api/sessions/{id:guid}", (Guid id, SessionManager manager, HttpContext context) =>
@@ -161,6 +160,14 @@ static Guid? RequestId(HttpContext context)
     return id;
 }
 
+static Guid? AdmissionMatch(HttpContext context)
+{
+    if (!context.Request.Headers.TryGetValue("If-Match-Admission", out var values)) return null;
+    if (values.Count != 1 || !Guid.TryParseExact(values[0], "D", out var admission) || admission == Guid.Empty)
+        throw new ArgumentException("If-Match-Admission must contain one non-empty UUID.");
+    return admission;
+}
+
 record CreateSession(Guid MissionId, SessionMode Mode, int[] RoomIds);
 record JoinPlayer(Guid PlayerId, string Name, int RoomId, HeadsetKind Headset);
-record ValidatePlayerTicket(Guid SessionId, string Ticket);
+record ValidatePlayerTicket(Guid SessionId, string Ticket, int ProtocolVersion = 0);

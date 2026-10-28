@@ -29,10 +29,12 @@ checks = 0
 tokens = {name: secrets.token_urlsafe(32) for name in ["Master", "GameServer", *[f"Room{i}" for i in range(1, 6)]]}
 
 
-def request(method, path, body=None, expected=200, identity="Master", request_id=None):
+def request(method, path, body=None, expected=200, identity="Master", request_id=None, admission_id=None):
     global checks
     data = None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
     headers = {"Content-Type": "application/json; charset=utf-8"}
+    if admission_id is not None:
+        headers["If-Match-Admission"] = admission_id
     if request_id is not None:
         headers["Idempotency-Key"] = request_id
     if identity is not None:
@@ -194,9 +196,10 @@ try:
             request("POST", own_path + "/players", room_player, 409, request_id=join_key)
             request("POST", own_path + "/players", room_player, 403, identity="Room2", request_id=join_key)
             request("POST", own_path + "/players", room_player, 409, identity="Room1", request_id=create_key)
-            invitation = request("POST", own_path + "/players/" + room_player["playerId"] + "/join-ticket", identity="Room1")
+            room_admission = next(player["admissionId"] for player in joins[0]["players"] if player["id"] == room_player["playerId"])
+            invitation = request("POST", own_path + "/players/" + room_player["playerId"] + "/join-ticket", identity="Room1", admission_id=room_admission)
             require(len(invitation["ticket"]) < 256, "Headset receives a compact player-only connection ticket")
-            validate = {"sessionId": independent[0]["id"], "ticket": invitation["ticket"]}
+            validate = {"sessionId": independent[0]["id"], "ticket": invitation["ticket"], "protocolVersion": 2}
             approved = request("POST", "/api/player-tickets/validate", validate, identity="GameServer")
             require(approved["playerId"] == room_player["playerId"] and approved["roomId"] == 1 and approved["seat"] == 1,
                     "Game server validates the assigned player, room and stable spawn seat")
@@ -208,17 +211,40 @@ try:
             request("DELETE", own_path + "/players/" + room_player["playerId"], expected=403, identity="Room2")
             leave_key = str(uuid.uuid4())
             with ThreadPoolExecutor(max_workers=8) as pool:
-                list(pool.map(lambda _: request("DELETE", own_path + "/players/" + room_player["playerId"], expected=204, identity="Room1", request_id=leave_key), range(8)))
+                list(pool.map(lambda _: request("DELETE", own_path + "/players/" + room_player["playerId"], expected=204, identity="Room1", request_id=leave_key, admission_id=room_admission), range(8)))
             require(len(request("GET", own_path)["players"]) == 1, "Concurrent HTTP leave retries remove the player once")
-            request("DELETE", own_path + "/players/" + player["playerId"], expected=409, identity="Room1", request_id=leave_key)
+            request("DELETE", own_path + "/players/" + player["playerId"], expected=409, identity="Room1", request_id=leave_key, admission_id=room_admission)
             require(len(request("POST", own_path + "/players", room_player, identity="Room1", request_id=join_key)["players"]) == 1,
                     "Delayed HTTP join acknowledgment does not resurrect a departed player")
             request("POST", "/api/player-tickets/validate", validate, 403, identity="GameServer")
+            # A cryptographically valid old ticket must not revive when the same identity/seat is reused.
+            rejoined = request("POST", own_path + "/players", room_player, identity="Room1")
+            replacement = next(entry for entry in rejoined["players"] if entry["id"] == room_player["playerId"])
+            require(replacement["admissionId"] != room_admission and replacement["seat"] == approved["seat"],
+                    "Same-ID same-seat reentry has a new durable admission")
+            request("POST", "/api/player-tickets/validate", validate, 403, identity="GameServer")
+            request("POST", "/api/player-tickets/validate", {key: value for key, value in validate.items() if key != "protocolVersion"}, 400, identity="GameServer")
+            request("POST", own_path + "/players/" + room_player["playerId"] + "/join-ticket", expected=400, identity="Room1")
+            request("POST", own_path + "/players/" + room_player["playerId"] + "/join-ticket", expected=400, identity="Room1", admission_id="not-a-uuid")
+            request("POST", own_path + "/players/" + room_player["playerId"] + "/join-ticket", expected=409, identity="Room1", admission_id=room_admission)
+            fresh = request("POST", own_path + "/players/" + room_player["playerId"] + "/join-ticket", identity="Room1", admission_id=replacement["admissionId"])
+            current_claims = request("POST", "/api/player-tickets/validate", {**validate, "ticket": fresh["ticket"]}, identity="GameServer")
+            require(fresh["ticket"].startswith("v2.") and current_claims["admissionId"] == replacement["admissionId"]
+                    and current_claims["throughSequence"] == rejoined["sequence"] and current_claims["expiresAtUtc"] == fresh["expiresAtUtc"],
+                    "V2 validation returns exact admission, roster observation and expiry")
+            before_fence = request("GET", own_path)
+            request("DELETE", own_path + "/players/" + room_player["playerId"], expected=400, identity="Room1")
+            request("DELETE", own_path + "/players/" + room_player["playerId"], expected=400, identity="Room1", admission_id=str(uuid.UUID(int=0)))
+            request("DELETE", own_path + "/players/" + room_player["playerId"], expected=409, identity="Room1", admission_id=room_admission)
+            request("DELETE", own_path + "/players/" + room_player["playerId"], expected=204, identity="Room1", request_id=leave_key, admission_id=room_admission)
+            request("DELETE", own_path + "/players/" + room_player["playerId"], expected=409, identity="Room1", request_id=leave_key, admission_id=replacement["admissionId"])
+            require(request("GET", own_path) == before_fence, "Rejected stale removals and accepted old retries do not mutate a replacement admission")
+            request("DELETE", own_path + "/players/" + room_player["playerId"], expected=204, identity="Room1", admission_id=replacement["admissionId"])
             command = {"commandId": str(uuid.uuid4()), "action": "SetEnvironment", "environment": draft["environment"]}
             request("POST", own_path + "/commands", command, identity="Room1")
             request("POST", own_path + "/commands", command, 409)  # another identity cannot claim this retry
             own_events = request("GET", own_path + "/events", identity="Room1")
-            require(own_events[-1]["actor"]["id"] == "room-1" and own_events[-1]["schemaVersion"] == 5,
+            require(own_events[-1]["actor"]["id"] == "room-1" and own_events[-1]["schemaVersion"] == 6,
                     "Management events retain authenticated console identity")
             request("POST", f"/api/sessions/{independent[1]['id']}/players", {**player, "roomId": 2}, 409)
             request("POST", f"/api/sessions/{independent[0]['id']}/players", {**player, "playerId": str(uuid.uuid4()), "roomId": 2}, 400)
@@ -253,11 +279,12 @@ try:
             request("POST", session_path + "/players", {**player, "playerId": str(uuid.uuid4())}, 409)
             require(all(r["playerCount"] == 5 for r in request("GET", "/api/rooms")), "Every room remains at capacity after overflow rejection")
             request("DELETE", session_path + "/players/" + current["players"][0]["id"], expected=403, identity="Room2")
-            request("DELETE", session_path + "/players/" + current["players"][0]["id"], expected=204, identity="Room1")
+            request("DELETE", session_path + "/players/" + current["players"][0]["id"], expected=204, identity="Room1", admission_id=current["players"][0]["admissionId"])
             request("POST", session_path + "/players", {**player, "roomId": 2}, 403, identity="Room1")
             request("POST", session_path + "/players", player, identity="Room1")
-            live_ticket = request("POST", session_path + "/players/" + player["playerId"] + "/join-ticket", identity="Room1")
-            live_validation = {"sessionId": session["id"], "ticket": live_ticket["ticket"]}
+            live_admission = next(entry["admissionId"] for entry in request("GET", session_path)["players"] if entry["id"] == player["playerId"])
+            live_ticket = request("POST", session_path + "/players/" + player["playerId"] + "/join-ticket", identity="Room1", admission_id=live_admission)
+            live_validation = {"sessionId": session["id"], "ticket": live_ticket["ticket"], "protocolVersion": 2}
             require(request("POST", "/api/player-tickets/validate", live_validation, identity="GameServer")["seat"] == 0,
                     "Replacement player receives the released stable spawn seat")
 
@@ -339,7 +366,7 @@ try:
                     "Runtime overrides preserve the saved template")
             events = request("GET", session_path + "/events?after=0&limit=500")
             combat_events = [event for event in events if event["kind"] == "CombatRecorded"]
-            require(len(combat_events) == 7 and all(event["actor"]["id"] == "game-server" and event["schemaVersion"] == 5 for event in combat_events),
+            require(len(combat_events) == 7 and all(event["actor"]["id"] == "game-server" and event["schemaVersion"] == 6 for event in combat_events),
                     "Combat and management share a versioned, authenticated event stream")
             with closing(sqlite3.connect(test_directory / "sessions/events.db")) as database:
                 stored = database.execute("SELECT COUNT(*) FROM session_events WHERE session_id=?", (session["id"],)).fetchone()[0]
@@ -364,7 +391,7 @@ try:
                     "HTTP creation retry after restart returns its archived session despite a new linked reservation")
             require(request("POST", own_path + "/players", room_player, identity="Room1", request_id=join_key) == old_archive,
                     "HTTP join key is recovered from SQLite and remains valid after archival")
-            request("DELETE", own_path + "/players/" + room_player["playerId"], expected=204, identity="Room1", request_id=leave_key)
+            request("DELETE", own_path + "/players/" + room_player["playerId"], expected=204, identity="Room1", request_id=leave_key, admission_id=room_admission)
             require(request("GET", own_path) == old_archive, "Recovered HTTP leave acknowledgment adds no event")
             require(request("POST", "/api/player-tickets/validate", live_validation, identity="GameServer")["playerId"] == player["playerId"],
                     "Player ticket signing key survives API process restart")
@@ -423,7 +450,7 @@ try:
             require(server_config["gameServerKey"] == tokens["GameServer"] and "gameServerKey" not in client_config
                     and not any(key in json.dumps(client_config) for key in tokens.values()),
                     "Provisioning keeps control/server credentials out of headset connection files")
-            require(request("POST", "/api/player-tickets/validate", {"sessionId": plan["sessionId"], "ticket": client_config["joinTicket"]},
+            require(request("POST", "/api/player-tickets/validate", {"sessionId": plan["sessionId"], "ticket": client_config["joinTicket"], "protocolVersion": 2},
                             identity="GameServer")["roomId"] == 1, "Provisioned Quest client ticket is accepted by the management API")
             request("DELETE", "/api/sessions/" + plan["sessionId"], expected=204)
             simulation_dll = Path(os.environ.get("VR_COMMAND_SIMULATION_DEMO_DLL", ROOT / "tools/VrCommand.SimulationDemo/bin/Release/net10.0/VrCommand.SimulationDemo.dll"))

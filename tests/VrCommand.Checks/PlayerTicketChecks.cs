@@ -8,7 +8,7 @@ internal static class PlayerTicketChecks
         var key = Enumerable.Repeat((byte)42, 32).ToArray();
         var signer = new PlayerJoinTicketSigner(key, clock);
         var session = Guid.NewGuid();
-        var player = new Player(Guid.NewGuid(), "Quest3", 1, HeadsetKind.Quest3);
+        var player = new Player(Guid.NewGuid(), "Quest3", 1, HeadsetKind.Quest3, 0, Guid.NewGuid());
         var issued = signer.Issue(session, player);
         check(issued.Ticket.Length < 256 && signer.Validate(issued.Ticket, session).PlayerId == player.Id,
             "Headset ticket is compact and bound to its player/session");
@@ -40,7 +40,7 @@ internal static class PlayerTicketChecks
             "A released spawn seat is reused without shifting existing players");
         var legacy = manager.Events(id).Select(entry => entry.Kind != SessionEventKind.PlayerJoined ? entry : entry with
         {
-            Payload = System.Text.Json.JsonSerializer.SerializeToElement(new { id = entry.Read<Player>().Id, name = entry.Read<Player>().Name,
+            SchemaVersion = 5, Payload = System.Text.Json.JsonSerializer.SerializeToElement(new { id = entry.Read<Player>().Id, name = entry.Read<Player>().Name,
                 roomId = entry.Read<Player>().RoomId, headset = entry.Read<Player>().Headset.ToString() }, JsonFormat.Options)
         }).ToArray();
         var legacyStore = new MemorySessionEventStore();

@@ -157,7 +157,7 @@ try
         await SaveSend(new { type = "frame", payload = packet }); worldCursor = bridge.World.EventSequence;
     }
     await Capture();
-    if (!bridge.Connect(1, player, room, 0)) throw new InvalidOperationException("Simulation binding failed.");
+    if (!bridge.Connect(1, player, room, 0, (await http.GetFromJsonAsync<SessionView>(route, JsonFormat.Options))!.Players.Single().AdmissionId)) throw new InvalidOperationException("Simulation binding failed.");
     var head = ArenaSession.Spawn(room, 0); var target = bridge.World.Snapshot().Enemies[0].Feet + new Vec3(0, .9f, 0);
     await Post<CommandReceipt>(master, route + "/commands", new ControlCommand(Guid.NewGuid(), ControlAction.Begin)); await Refresh();
     for (var tick = 0; tick < seconds * 20; tick++)

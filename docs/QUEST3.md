@@ -1,6 +1,8 @@
-# Quest 3 接入原型與工具鏈 v0.13
+# Quest 3 接入原型與工具鏈 v0.14
 
-v0.13 新增共用世界來源／發布器、接受後頭手錄製、追蹤中斷與 NGO protocol 13；接入／補送見 [WORLD_SOURCE.md](WORLD_SOURCE.md)。本輪仍無 Unity 編譯／APK／頭盔證據，Prepare 實際退出 198。12 項 EditMode 只新增來源，尚未執行；C# 9 語法檢查為 22 份。
+v0.14 新增每次入場識別、票券 v2／protocol 2、If-Match-Admission 與跨輪詢重入撤銷，Unity／API 需同版升級並重發舊券，見 [ADMISSION.md](ADMISSION.md)。生成器 NGO protocol 14／bundle 0.14；15 項 EditMode 仍待執行，沒有 Unity／APK／頭盔結果。
+
+v0.13 新增共用世界來源／發布器、接受後頭手錄製、追蹤中斷與 NGO protocol 13；接入／補送見 [WORLD_SOURCE.md](WORLD_SOURCE.md)。本輪仍無 Unity 編譯／APK／頭盔證據，Prepare 實際退出 198。12 項 EditMode 只新增來源，尚未執行；C# 9 語法檢查為 23 份。
 
 使用者指定先用 Meta Quest 3；暫按 Android 獨立執行規劃。工程在 `clients/unity/`，後端仍獨立使用 .NET 10，不把後端 DLL 放進 Unity。
 
@@ -8,7 +10,7 @@ v0.13 新增共用世界來源／發布器、接受後頭手錄製、追蹤中�
 
 已有場地生成器、玩家頭部／雙手及武器物件、OpenXR 瞄準／射擊／換彈、NGO 連線審核、固定出生席位，以及管理狀態／環境、任務擺設、敵軍與健康／彈藥的接入來源碼。姿態透過 NGO 傳送，不走 REST。姿態目標 20 Hz、戰鬥狀態 10 Hz 是設定值，沒有實機量測；支援範圍與未接通的報告見 `GAMEPLAY.md`。
 
-**目前僅完成來源碼原型，沒有成功的 Unity 編譯、生成場景、EditMode 結果、桌面執行檔或 APK。** 2026-10-29 本機 Editor 已完整安裝，本輪 Prepare 仍因授權退出 198。22 份 C# 通過 C# 9 語法檢查，沒有綁定 Unity SDK；其中 embedded Runtime 另通過 .NET Standard 2.1 型別建置。363 項核心、302 項原 HTTP 及 32 項世界串流 檢查包含管理、票券、幾何核心與新任務接入層。
+**目前僅完成來源碼原型，沒有成功的 Unity 編譯、生成場景、EditMode 結果、桌面執行檔或 APK。** 2026-10-29 本機 Editor 已完整安裝，本輪 Prepare 仍因授權退出 198。23 份 C# 通過 C# 9 語法檢查，沒有綁定 Unity SDK；其中 embedded Runtime 另通過 .NET Standard 2.1 型別建置。399 項核心、322 項原 HTTP 及 32 項世界串流 檢查包含管理、票券、幾何核心與新任務接入層。
 
 沒有實機互見、Unity 射擊／AI 運行證據、雨粒子／雷聲、MR 透視／錨點、遊戲內物件編輯、自由觀戰或頭盔任務錄製。桌面觀察鏡頭固定，不能作為需求 10 的完成證據。Unity 已接入持久事件／補送來源碼，仍無實際統計整合運行證據；頻率與效能仍須量測，詳見 TELEMETRY。
 

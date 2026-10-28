@@ -14,7 +14,7 @@ namespace VrCommand.Unity.Tests
             var json = "{\"id\":\"8aaf649c-f482-40b2-9a99-ef8758c58802\",\"sequence\":2,\"state\":\"Preparing\",\"roomIds\":[3],"
                 + "\"mission\":{\"id\":\"3d872c98-e108-4c46-94d0-e3f0ed3ed712\",\"definition\":{\"name\":\"Test\",\"props\":[{\"assetId\":\"barrel\",\"position\":{\"x\":0,\"y\":0,\"z\":0},\"yawDegrees\":45}]}},"
                 + "\"environment\":{\"mode\":\"VR\",\"weather\":\"Clear\",\"timeOfDay\":\"Day\"},\"enemies\":{\"count\":1,\"behavior\":\"Hold\",\"autoAttack\":false},"
-                + "\"players\":[{\"id\":\"6bcd2409-6172-43af-8307-88255c0959f8\",\"roomId\":3,\"seat\":0}]}";
+                + "\"players\":[{\"id\":\"6bcd2409-6172-43af-8307-88255c0959f8\",\"admissionId\":\"a6f93528-dd40-4677-be50-8cb318bfedc5\",\"roomId\":3,\"seat\":0}]}";
             var adapter = new ArenaSession(); adapter.Apply(JsonUtility.FromJson<ManagementSnapshot>(json));
             Assert.AreEqual(1, adapter.World.Snapshot().Players.Length);
             Assert.IsFalse(adapter.World.Snapshot().Players[0].Connected);

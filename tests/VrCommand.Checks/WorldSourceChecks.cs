@@ -45,7 +45,7 @@ internal static class WorldSourceChecks
         connection = new Loopback(store, id, actor, codec);
         using (var publisher = new WorldPublisher(source, codec, connection))
             check(publisher.Deliver(0, false, default).GetAwaiter().GetResult() && source.AcknowledgedSequence == 1, "Recovered source retries the exact accepted frame without duplication");
-        manager.Execute(id, new(Guid.NewGuid(), ControlAction.Begin)); Refresh(); bridge.Connect(1, player, 3, 0);
+        manager.Execute(id, new(Guid.NewGuid(), ControlAction.Begin)); Refresh(); bridge.Connect(1, player, 3, 0, manager.Get(id).Players.Single().AdmissionId);
         var head = ArenaSession.Spawn(3, 0); var target = bridge.World.Snapshot().Enemies[0].Feet + new Vec3(0, .9f, 0);
         bridge.Pose(1, head, head, (target - head).Normalized(), 0); bridge.Weapon(1, 1, false, 0);
         combat.Capture(bridge.World, manager.Get(id).Sequence);

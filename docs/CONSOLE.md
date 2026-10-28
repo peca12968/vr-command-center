@@ -1,4 +1,6 @@
-# 場館主控台 v0.13
+# 場館主控台 v0.14
+
+v0.14 新增每次入場識別、票券 v2／protocol 2、If-Match-Admission 與跨輪詢重入撤銷，Unity／API 需同版升級並重發舊券，見 [ADMISSION.md](ADMISSION.md)。生成器 NGO protocol 14／bundle 0.14；15 項 EditMode 仍待執行，沒有 Unity／APK／頭盔結果。
 
 v0.13 的即時性以顯示幀的來源 UTC＋elapsed 判斷，補送舊快照持續抵達仍標過期，缺少時間標未知，來源時鐘超前標未同步。來源／API／操作員電腦須同步時鐘；不是硬體姿態防偽證明。見 WORLD_SOURCE.md。
 

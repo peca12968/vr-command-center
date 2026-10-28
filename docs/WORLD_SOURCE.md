@@ -1,4 +1,6 @@
-# 世界來源、頭手與補送 v0.13
+# 世界來源、頭手與補送 v0.14
+
+v0.14 新增每次入場識別、票券 v2／protocol 2、If-Match-Admission 與跨輪詢重入撤銷，Unity／API 需同版升級並重發舊券，見 [ADMISSION.md](ADMISSION.md)。生成器 NGO protocol 14／bundle 0.14；15 項 EditMode 仍待執行，沒有 Unity／APK／頭盔結果。
 
 WorldOutbox／WorldPublisher 是 Unity 與 .NET 工具共用的唯一來源，位於 embedded Simulation Runtime，實際編譯為 C# 9／.NET Standard 2.1，不引用後端或 UnityEngine。JSON 由 IWorldCodec 提供：工具使用 System.Text.Json，Unity 使用 JsonUtility。真實 WebSocket、API、SQLite、SSE 及 Chromium 已以此 .NET 發送器驗證；**Unity 接入仍是未編譯／運行的來源碼**，沒有 APK、Quest／VIVE、實際 Tracked 姿態或 25 台效能證據。
 
@@ -53,8 +55,8 @@ dotnet tools/VrCommand.WorldRelay/bin/Release/net10.0/VrCommand.WorldRelay.dll -
 - WorldRecordingDelivery 把共用非同步 publisher 接到 coroutine，等待 combat ack、重試連線中斷，永久訊息／磁碟錯誤暫停戰鬥。結束後先排空並確認 combat seal，再送 world seal。銷毀時取消 socket，等待尚在進行的工作結束才釋放來源檔。
 - 管理連線過期時保存 suspended Paused 快照；新鮮管理快照恢復後再記錄 Running。記錄結束幀與完成意圖後不再追加新世界幀。
 
-AvatarPose 的 NGO wire format 改變，生成器設 ProtocolVersion=13、bundleVersion=0.13.0／Android code 13；兩端需重新建置同版。Unity EditMode 來源新增姿態來源／距離／序列化及 world codec 測試，腳本要求至少 **12 項通過**；目前沒有任何本輪 EditMode 結果。Input System 1.17.0 trackingState／isTracked／TrackedPoseDriver 與 NGO 2.7.0 ProtocolVersion 已依本機快取的官方固定版本來源檢視，仍不能代替 Unity 編譯。
+AvatarPose 的 NGO wire format 改變，生成器設 ProtocolVersion=13、bundleVersion=0.13.0／Android code 13；兩端需重新建置同版。Unity EditMode 來源新增姿態來源／距離／序列化及 world codec 測試，腳本要求至少 **15 項通過**；目前沒有任何本輪 EditMode 結果。Input System 1.17.0 trackingState／isTracked／TrackedPoseDriver 與 NGO 2.7.0 ProtocolVersion 已依本機快取的官方固定版本來源檢視，仍不能代替 Unity 編譯。
 
 ## 接續驗收
 
-先完成工具可讀的 Unity 授權，實際 Prepare／12 項 Tests／Desktop／Quest。以兩位 Quest 玩家驗證頭手與控制器遮擋／追蹤中斷、射擊與資料依賴、Pause／End、HTTP／WS 各自斷線與排空、封存／重送，再對照主控台及 APK 日誌。尚無長任務壓測、檔案保留／壓縮、自動世界恢復、書籤、實機校正、25 台吞吐量或硬體驗收。
+先完成工具可讀的 Unity 授權，實際 Prepare／15 項 Tests／Desktop／Quest。以兩位 Quest 玩家驗證頭手與控制器遮擋／追蹤中斷、射擊與資料依賴、Pause／End、HTTP／WS 各自斷線與排空、封存／重送，再對照主控台及 APK 日誌。尚無長任務壓測、檔案保留／壓縮、自動世界恢復、書籤、實機校正、25 台吞吐量或硬體驗收。

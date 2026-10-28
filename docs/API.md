@@ -20,8 +20,8 @@ v0.6 新增瀏覽器介面 `/console/`，操作見 [CONSOLE.md](CONSOLE.md)。�
 | POST | `/api/sessions/{id}/combat` | GameServer 身分提交已分類戰鬥報告，回傳去重收據與統計 |
 | GET | `/api/sessions/{id}/statistics` | 包含曾離開玩家的統計、資料來源及統計涵蓋序號 |
 | POST | `/api/sessions/{id}/players` | 加入玩家，回傳場次快照 |
-| POST | `/api/sessions/{id}/players/{playerId}/join-ticket` | 主控／自房控制台配發五分鐘玩家票券，回傳 200 |
-| POST | `/api/player-tickets/validate` | 僅 GameServer 驗證票券及現行名冊，回傳玩家與固定席位 |
+| POST | `/api/sessions/{id}/players/{playerId}/join-ticket` | 主控／自房控制台以 If-Match-Admission 配發五分鐘 v2 券，回傳 200 |
+| POST | `/api/player-tickets/validate` | 僅 GameServer 以 protocolVersion:2 驗票及現行入場，回傳 admission／席位／throughSequence／expiry |
 | DELETE | `/api/sessions/{id}/players/{playerId}` | 離開並釋放名額，回傳 204 |
 | DELETE | `/api/sessions/{id}` | 結束、保存歷史並釋放房間，回傳 204；重複結束回傳 409 |
 
@@ -90,3 +90,8 @@ GET /api/world-recordings、GET /api/sessions/{id}/world 為房間範圍內 meta
 ## v0.13 世界擷取時間
 
 header 的 captureStartedAtUtc 為選用 round-trip UTC 基準，世界 metadata 另有 capturedAtUtc（基準加已接受 elapsed）；updatedAtUtc 仍為接收時間。舊無時間 header 讀取／確認時補空值，不能重設既有 header 來偽裝新擷取時間。新來源需使用 v0.13 API。共享發布器、binary journal 及頭手來源在 WORLD_SOURCE.md。
+
+
+## v0.14 入場 fence
+
+Player 快照新增 admissionId，每次加入不同。配票及新的玩家 DELETE 必須 If-Match-Admission（單一非零 UUID）；已換入場回 409，缺／壞 header 回 400。DELETE 的 Idempotency-Key 重試保留原 fence，已接受的舊請求只確認、不移除新入場；換 fence 視為改內容。v1 票券全部拒絕，GameServer 驗票 body 需 protocolVersion:2。事件新版本 6、讀舊 1–5，詳見 [ADMISSION.md](ADMISSION.md)。

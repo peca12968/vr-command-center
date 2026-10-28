@@ -34,7 +34,7 @@ if (options.TryGetValue("--demo-room", out var value))
         var jsonOptions = new JsonSerializerOptions(JsonFormat.Options) { IncludeFields = true };
         var bridge = new ArenaSession();
         async Task Refresh() => bridge.Apply((await http.GetFromJsonAsync<ManagementSnapshot>(path, jsonOptions))!);
-        await Refresh(); if (!bridge.Connect(1, player, room, 0)) throw new InvalidOperationException("Simulation binding failed.");
+        await Refresh(); if (!bridge.Connect(1, player, room, 0, (await http.GetFromJsonAsync<SessionView>(path, JsonFormat.Options))!.Players.Single().AdmissionId)) throw new InvalidOperationException("Simulation binding failed.");
         var head = ArenaSession.Spawn(room, 0); var target = bridge.World.Snapshot().Enemies[0].Feet + new Vec3(0, .9f, 0);
         bridge.Pose(1, head, head, (target - head).Normalized(), 0);
         await Post<CommandReceipt>(master, path + "/commands", new ControlCommand(Guid.NewGuid(), ControlAction.Begin)); await Refresh();

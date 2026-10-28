@@ -46,11 +46,14 @@ namespace VrCommand.Unity
         }
     }
 
-    [Serializable] public sealed class TicketValidationRequest { public string sessionId; public string ticket; }
+    [Serializable] public sealed class TicketValidationRequest { public string sessionId; public string ticket; public int protocolVersion = 2; }
     [Serializable] public sealed class TicketApproval
     {
         public string sessionId;
         public string playerId;
+        public string admissionId;
+        public long throughSequence;
+        public string expiresAtUtc;
         public int roomId;
         public int seat;
     }

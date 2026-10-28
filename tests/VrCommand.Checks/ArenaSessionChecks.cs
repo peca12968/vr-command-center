@@ -20,6 +20,7 @@ internal static class ArenaSessionChecks
         var player = Guid.NewGuid(); manager.Join(managed.Id, player, "Alpha", 3, HeadsetKind.Quest3);
         ManagementSnapshot Snapshot() => JsonSerializer.Deserialize<ManagementSnapshot>(JsonSerializer.Serialize(manager.Get(managed.Id), JsonFormat.Options),
             new JsonSerializerOptions(JsonFormat.Options) { IncludeFields = true })!;
+        var admission = manager.Get(managed.Id).Players.Single().AdmissionId;
         var adapter = new ArenaSession(); adapter.Apply(Snapshot());
         check(adapter.World.Snapshot().Players.Single().Id == player && !adapter.World.Snapshot().Players.Single().Connected,
             "Real management JSON creates the admitted roster as inactive bodies until an authenticated connection sends pose");
@@ -31,8 +32,8 @@ internal static class ArenaSessionChecks
         Reject<ArgumentException>(() => adapter.Apply(invalid), "Unsupported MR mode is rejected instead of pretending to calibrate a venue");
         invalid = Snapshot(); invalid.mission.definition.props[0].assetId = "unknown";
         Reject<ArgumentException>(() => adapter.Apply(invalid), "Unknown assets cannot silently acquire arbitrary collision shapes");
-        check(adapter.Connect(17, player, 3, 0), "Validated ticket identity binds its exact room and seat to a transport connection");
-        check(!adapter.Connect(18, player, 3, 0) && !adapter.Connect(18, Guid.NewGuid(), 3, 0) && !adapter.Connect(18, player, 2, 0),
+        check(adapter.Connect(17, player, 3, 0, admission), "Validated ticket identity binds its exact room and seat to a transport connection");
+        check(!adapter.Connect(18, player, 3, 0, admission) && !adapter.Connect(18, Guid.NewGuid(), 3, 0, admission) && !adapter.Connect(18, player, 2, 0, admission),
             "Duplicate, unknown and cross-room admission bindings are rejected");
         var head = ArenaSession.Spawn(3, 0);
         var target = adapter.World.Snapshot().Enemies[0].Feet + new Vec3(0, .9f, 0);
@@ -61,7 +62,7 @@ internal static class ArenaSessionChecks
         adapter.Disconnect(17); var ammunition = adapter.World.Snapshot().Players.Single().Magazine;
         check(!adapter.World.Snapshot().Players.Single().Connected && !adapter.Weapon(17, 4, false, now),
             "Disconnected owner loses firing and collision participation without deleting its weapon state");
-        check(adapter.Connect(19, player, 3, 0) && adapter.Pose(19, head, head, forward, now), "Reconnect rebinds the retained roster body without a respawn");
+        check(adapter.Connect(19, player, 3, 0, admission) && adapter.Pose(19, head, head, forward, now), "Reconnect rebinds the retained roster body without a respawn");
         for (var i = 0; i < 4; i++) { now += .05; adapter.Tick(now); }
         check(adapter.Weapon(19, 1, false, now) && adapter.World.Snapshot().Players.Single().Magazine == ammunition - 1,
             "New connection input sequence cannot collide with the previous connection's shot IDs");
@@ -73,10 +74,10 @@ internal static class ArenaSessionChecks
         now += 1;
         check(adapter.Pose(19, head, head, forward, now), "Tracking can recover without resetting ammunition or health");
         manager.Leave(managed.Id, player); adapter.Apply(Snapshot());
-        check(!adapter.Weapon(19, 3, false, now) && !adapter.Connect(20, player, 3, 0),
+        check(!adapter.Weapon(19, 3, false, now) && !adapter.Connect(20, player, 3, 0, admission),
             "Roster revocation removes the bound owner and prevents readmission to combat");
         manager.End(managed.Id); adapter.Apply(Snapshot());
-        check(adapter.World.Phase == WorldPhase.Ended && !adapter.Connect(20, player, 3, 0), "Ended management state ends the combat world permanently");
+        check(adapter.World.Phase == WorldPhase.Ended && !adapter.Connect(20, player, 3, 0, admission), "Ended management state ends the combat world permanently");
         var late = new ArenaSession();
         Reject<InvalidOperationException>(() => late.Apply(Snapshot()), "Server cannot invent a fresh combat world for an already ended mission");
 
@@ -107,8 +108,8 @@ internal static class ArenaSessionChecks
         check(full.World.Snapshot().Enemies.Length == 100, "Open arena supports the configured 100-enemy input ceiling without overlapping spawn centers");
         maximum.mission.definition.props = [new() { assetId = "barrel", position = new() { x = 0, z = 0 } }];
         var geometry = new ArenaSession(); geometry.Apply(maximum);
-        var moving = maximum.players = [new() { id = Guid.NewGuid().ToString(), roomId = 1, seat = 2 }]; maximum.sequence++;
-        geometry.Apply(maximum); var mover = Guid.Parse(moving[0].id); geometry.Connect(1, mover, 1, 2);
+        var moving = maximum.players = [new() { id = Guid.NewGuid().ToString(), admissionId = Guid.NewGuid().ToString(), roomId = 1, seat = 2 }]; maximum.sequence++;
+        geometry.Apply(maximum); var mover = Guid.Parse(moving[0].id); geometry.Connect(1, mover, 1, 2, Guid.Parse(moving[0].admissionId));
         var start = ArenaSession.Spawn(1, 2);
         check(!geometry.Pose(1, start + new Vec3(0, 0, 3), start, new(0, 0, 1), 0),
             "Transport pose cannot cross mission cover or teleport to it");
@@ -130,7 +131,7 @@ internal static class ArenaSessionChecks
             "Restoring participation retains damage and ammunition rather than respawning the player");
         var pending = new ArenaSession(); var pendingSnapshot = AllSnapshot(); pending.Apply(pendingSnapshot);
         var pendingId = Guid.Parse(pendingSnapshot.players[0].id);
-        pending.Connect(55, pendingId, pendingSnapshot.players[0].roomId, pendingSnapshot.players[0].seat);
+        pending.Connect(55, pendingId, pendingSnapshot.players[0].roomId, pendingSnapshot.players[0].seat, Guid.Parse(pendingSnapshot.players[0].admissionId));
         pendingSnapshot.players = pendingSnapshot.players.Skip(1).ToArray(); pendingSnapshot.sequence++;
         pending.Apply(pendingSnapshot);
         check(pending.World.Snapshot().Players.Length == 24 && !pending.Weapon(55, 1, false, 0),

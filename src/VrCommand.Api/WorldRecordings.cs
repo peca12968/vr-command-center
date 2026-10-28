@@ -180,7 +180,9 @@ public sealed class WorldRecordings : IDisposable
             if (packet.frame.enemies.Length != observed.Enemies.Count) throw new InvalidOperationException("Recorded enemy roster disagrees with management.");
             var stats = (previous?.Statistics ?? []).ToDictionary(player => player.PlayerId);
             foreach (var player in observed.Players)
-                stats.TryAdd(player.Id, new(player.Id, player.Name, player.RoomId));
+                stats[player.Id] = stats.TryGetValue(player.Id, out var existingPlayer)
+                    ? existingPlayer with { Name = player.Name, RoomId = player.RoomId }
+                    : new(player.Id, player.Name, player.RoomId);
             var through = previous?.Packet.throughCombatSequence ?? 0;
             foreach (var entry in packet.events)
             {

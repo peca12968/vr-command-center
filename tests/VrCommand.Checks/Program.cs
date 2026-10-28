@@ -71,6 +71,7 @@ try
     PersistenceChecks.Run(Check, directory, mission);
     CombatChecks.Run(Check, mission);
     PlayerTicketChecks.Run(Check, mission);
+    AdmissionChecks.Run(Check, directory, mission);
     RequestRetryChecks.Run(Check, directory, mission);
     SimulationChecks.Run(Check);
     ArenaSessionChecks.Run(Check, directory);

@@ -37,11 +37,11 @@ function manages(session = state.session) { return !!session && (master() || (st
 function ownsRoom(room) { return master() || (state.actor?.role === 'RoomController' && state.actor.roomId === room); }
 function time(value) { return new Date(value).toLocaleTimeString('zh-TW', { hour12: false }); }
 
-async function api(path, method = 'GET', body, requestId) {
+async function api(path, method = 'GET', body, requestId, admissionId) {
   const controller = new AbortController(), epoch = state.epoch;
   const timeout = setTimeout(() => controller.abort(), 8000);
   try {
-    const response = await fetch('/api' + path, { method, headers: { Authorization: 'Bearer ' + state.key, 'Content-Type': 'application/json', ...(requestId ? { 'Idempotency-Key': requestId } : {}) }, body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal, cache: 'no-store' });
+    const response = await fetch('/api' + path, { method, headers: { Authorization: 'Bearer ' + state.key, 'Content-Type': 'application/json', ...(requestId ? { 'Idempotency-Key': requestId } : {}), ...(admissionId ? { 'If-Match-Admission': admissionId } : {}) }, body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal, cache: 'no-store' });
     if (epoch !== state.epoch) throw new Error('登入狀態已變更，已忽略舊回應。');
     const content = await response.text();
     if (epoch !== state.epoch) throw new Error('登入狀態已變更，已忽略舊回應。');
@@ -221,7 +221,7 @@ async function sendPending() {
   const pending = state.pending;
   if (!pending) return;
   try {
-    const response = await api(pending.path, pending.method, pending.body, pending.requestId);
+    const response = await api(pending.path, pending.method, pending.body, pending.requestId, pending.admissionId);
     if (state.pending !== pending) return;
     state.pending = null;
     if (pending.kind === 'create') { $('include-ended').checked = response.state === 'Ended'; state.selected = response.id; state.session = null; }
@@ -241,8 +241,9 @@ async function joinPlayer() {
 }
 async function removePlayer(player) {
   if (state.pending) return;
-  if (!confirm(`將「${player.name}」移出名冊？現有頭盔連線尚不會自動斷開。`)) return;
-  state.pending = { kind: 'leave', path: `/sessions/${state.selected}/players/${player.id}`, method: 'DELETE', requestId: uuid() };
+  if (!player.admissionId) throw new Error('控制台與 API 版本不一致，請更新服務並重新整理。');
+  if (!confirm(`將「${player.name}」移出本次入場？此入場票券將立即失效。`)) return;
+  state.pending = { kind: 'leave', path: `/sessions/${state.selected}/players/${player.id}`, method: 'DELETE', requestId: uuid(), admissionId: player.admissionId };
   await sendPending();
 }
 function download(filename, value) {
@@ -250,9 +251,10 @@ function download(filename, value) {
   const anchor = element('a'); anchor.href = url; anchor.download = filename; document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 async function downloadTicket(player) {
+  if (!player.admissionId) throw new Error('控制台與 API 版本不一致，請更新服務並重新整理。');
   const address = $('game-address').value.trim(), port = Number($('game-port').value);
   if (!address || /[\s/\\?#@]/.test(address) || !Number.isInteger(port) || port < 1024 || port > 65535) { notify('請先輸入遊戲伺服器地址及 1024–65535 的連線埠。', true); return; }
-  const ticket = await api(`/sessions/${state.selected}/players/${player.id}/join-ticket`, 'POST');
+  const ticket = await api(`/sessions/${state.selected}/players/${player.id}/join-ticket`, 'POST', undefined, undefined, player.admissionId);
   download(`quest-player-${player.id}.json`, { role: 'Client', address, port, joinTicket: ticket.ticket });
   notify(`玩家連線檔已產生，有效至 ${time(ticket.expiresAtUtc)}。請將各自檔案配置到對應頭盔。`);
 }

@@ -49,7 +49,7 @@ internal static class WorldChecks
         var initialBad = Copy(initial); initialBad.elapsedMilliseconds = 1;
         Reject<InvalidOperationException>(() => store.Append(id, initialBad, owner), "Accepted frame cannot be changed by a retry");
         manager.Execute(id, new(Guid.NewGuid(), ControlAction.Begin), master); Refresh();
-        bridge.Connect(1, player, 1, 0); var head = ArenaSession.Spawn(1, 0); var target = bridge.World.Snapshot().Enemies[0].Feet + new Vec3(0, .9f, 0);
+        bridge.Connect(1, player, 1, 0, manager.Get(id).Players.Single().AdmissionId); var head = ArenaSession.Spawn(1, 0); var target = bridge.World.Snapshot().Enemies[0].Feet + new Vec3(0, .9f, 0);
         bridge.Pose(1, head, head, (target - head).Normalized(), 0); bridge.Weapon(1, 1, false, 0); bridge.Tick(.05);
         var observed = manager.Get(id).Sequence; queue.Capture(bridge.World, observed);
         var running = WorldRecordingPacket.Capture(bridge.World, 2, 50, observed, queue.LastSequence, 0, Rig);
