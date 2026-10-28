@@ -48,10 +48,14 @@ namespace VrCommand.Simulation
         public long Tick { get; }
         public WorldPhase Phase { get; }
         public long ThroughSequence { get; }
+        public AiBehavior Behavior { get; }
+        public bool AutoAttack { get; }
+        public Visibility Visibility { get; }
+        public bool Night { get; }
         public PlayerFrame[] Players { get; }
         public EnemyFrame[] Enemies { get; }
-        internal WorldFrame(long tick, WorldPhase phase, long throughSequence, PlayerFrame[] players, EnemyFrame[] enemies)
-        { Tick = tick; Phase = phase; ThroughSequence = throughSequence; Players = players; Enemies = enemies; }
+        internal WorldFrame(long tick, WorldPhase phase, long throughSequence, AiBehavior behavior, bool autoAttack, Visibility visibility, bool night, PlayerFrame[] players, EnemyFrame[] enemies)
+        { Tick = tick; Phase = phase; ThroughSequence = throughSequence; Behavior = behavior; AutoAttack = autoAttack; Visibility = visibility; Night = night; Players = players; Enemies = enemies; }
     }
     public sealed class WorldEvent
     {
@@ -63,8 +67,15 @@ namespace VrCommand.Simulation
         public Guid? ShotId { get; }
         public Guid? EnemyId { get; }
         public int Damage { get; }
-        internal WorldEvent(long sequence, long tick, WorldEventKind kind, Guid playerId, Guid? shotId, Guid? enemyId, int damage)
-        { Sequence = sequence; EventId = Guid.NewGuid(); Tick = tick; Kind = kind; PlayerId = playerId; ShotId = shotId; EnemyId = enemyId; Damage = damage; }
+        public Vec3? Origin { get; }
+        public Vec3? Direction { get; }
+        public float? Distance { get; }
+        public HitKind? Hit { get; }
+        public Guid? TargetId { get; }
+        internal WorldEvent(long sequence, long tick, WorldEventKind kind, Guid playerId, Guid? shotId, Guid? enemyId, int damage,
+            Vec3? origin, Vec3? direction, float? distance, HitKind? hit, Guid? targetId)
+        { Sequence = sequence; EventId = Guid.NewGuid(); Tick = tick; Kind = kind; PlayerId = playerId; ShotId = shotId; EnemyId = enemyId; Damage = damage;
+            Origin = origin; Direction = direction; Distance = distance; Hit = hit; TargetId = targetId; }
     }
     public sealed class ShotResult
     {

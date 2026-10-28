@@ -129,7 +129,7 @@ namespace VrCommand.Simulation
                 throw new InvalidOperationException("Weapon cannot fire now.");
             var hit = Cast(player.Muzzle, player.Forward, 40, player.Id, null);
             player.Magazine--; player.NextShot = TickNumber + 4;
-            Emit(WorldEventKind.ShotFired, playerId, shotId);
+            Emit(WorldEventKind.ShotFired, playerId, shotId, origin: player.Muzzle, direction: player.Forward.Normalized(), distance: hit.Distance, hit: hit.Kind, target: hit.Id);
             var eliminated = false;
             if (hit.Kind == HitKind.Enemy)
             {
@@ -184,7 +184,7 @@ namespace VrCommand.Simulation
                 var hit = Cast(muzzle, direction.Normalized(), range, null, enemy.Id);
                 if (hit.Kind != HitKind.Friendly || hit.Id != target.Id) continue;
                 enemy.NextShot = TickNumber + 20;
-                Emit(WorldEventKind.EnemyShot, target.Id, null, enemy.Id);
+                Emit(WorldEventKind.EnemyShot, target.Id, null, enemy.Id, origin: muzzle, direction: direction.Normalized(), distance: hit.Distance, hit: hit.Kind, target: hit.Id);
                 var damage = Math.Min(20, target.Health); target.Health -= damage;
                 Emit(WorldEventKind.PlayerDamaged, target.Id, null, enemy.Id, damage);
             }
@@ -221,14 +221,15 @@ namespace VrCommand.Simulation
                 { hit.Kind = kind; hit.Id = id; hit.Distance = distance.Value; }
             }
         }
-        private void Emit(WorldEventKind kind, Guid player, Guid? shot = null, Guid? enemy = null, int damage = 0)
-            => events.Add(new WorldEvent(events.Count + 1L, TickNumber, kind, player, shot, enemy, damage));
+        private void Emit(WorldEventKind kind, Guid player, Guid? shot = null, Guid? enemy = null, int damage = 0,
+            Vec3? origin = null, Vec3? direction = null, float? distance = null, HitKind? hit = null, Guid? target = null)
+            => events.Add(new WorldEvent(events.Count + 1L, TickNumber, kind, player, shot, enemy, damage, origin, direction, distance, hit, target));
         public WorldEvent[] Events(long after = 0, int limit = 500)
         {
             if (after < 0 || limit < 1 || limit > 500) throw new ArgumentException("Invalid world event page.");
             var start = (int)Math.Min(after, events.Count); return events.GetRange(start, Math.Min(limit, events.Count - start)).ToArray();
         }
-        public WorldFrame Snapshot() => new WorldFrame(TickNumber, Phase, events.Count,
+        public WorldFrame Snapshot() => new WorldFrame(TickNumber, Phase, events.Count, Behavior, AutoAttack, Visibility, Night,
             players.Select(p => new PlayerFrame(p.Id, p.Room, p.Head, p.Muzzle, p.Forward, p.Health, p.Magazine, p.Reserve, p.ReloadUntil != 0)).ToArray(),
             enemies.Select(e => new EnemyFrame(e.Id, e.Room, e.Feet, e.Health)).ToArray());
     }

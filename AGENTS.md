@@ -29,6 +29,8 @@ python scripts/smoke_api.py
 
 Windows 執行中的本機 API 可能鎖住一般輸出 DLL；採 SIMULATION 文件的 `--artifacts-path` 隔離建置，不為測試任意停止現有服務。HTTP／瀏覽器檢查可用 `VR_COMMAND_API_DLL` 指定隔離 API，HTTP 另以 `VR_COMMAND_SIMULATION_DEMO_DLL` 指定同次建置的示範工具。
 
-Quest 接入與建置見 `docs/QUEST3.md`。`scripts/check-unity-source.ps1` 只檢查 C# 9 語法，不能代替 Unity 編譯與 EditMode 測試。2026-10-29 Editor 已安裝至 F 槽，但實際 Prepare 因授權失敗退出 198；Android 模組尚待使用者接受 SDK／NDK 條款。不要重啟已完成的 Editor 安裝或自行宣稱授權已啟用。
+Quest 接入與建置見 `docs/QUEST3.md`。`scripts/check-unity-source.ps1` 只檢查 C# 9 語法，不能代替 Unity 編譯與 EditMode 測試。Editor 已安裝至 F 槽。使用者已明確同意 SDK／NDK 條款，不再要求相同確認；CLI 子模組失敗後已整理官方目錄，`check-android-toolchain.ps1` 的 API 32 ARM64 編譯通過。CLI 失敗登錄仍在，不盲目重裝。使用者雖回覆已登入，實際 CLI 仍無 session／license、Prepare 退出 198，一次瀏覽器回呼等待亦已逾時；後續以新的 auth/license 與 Editor 實測為準。
+
+3D 模擬回放在 `replay-*.js`，資料與操作見 `docs/REPLAY.md`。維護 schema 2／rules 0.8.0、明確 Simulation 來源、射線與快照／統計的一致性。`tests/browser` 的 test 會執行資料驗證與軟體 WebGL 檢查，不能視為真實 GPU、Unity 或頭盔測試。Three.js 上游原始檔、MIT 及 provenance 一併保留，不混入 CDN 執行相依。
 
 頭盔只配置短效玩家票券；GameServer 憑證僅存桌面伺服器設定。所有 `data/`、`artifacts/`、Unity 快取與本機憑證均不得提交。生成場景、APK 或桌面程式須有實際成功結果，不能以來源碼存在宣稱完成。

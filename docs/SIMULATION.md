@@ -1,8 +1,8 @@
-# 共用戰鬥模擬核心 v0.7
+# 共用戰鬥模擬核心 v0.8
 
 `clients/unity/Packages/com.vrcommand.simulation/Runtime/` 是唯一來源；`src/VrCommand.Simulation` 直接編譯這些檔案，目標 .NET Standard 2.1／C# 9，無 Unity、管理 API 或資料庫相依。Unity 工程將它作為 embedded package，尚未實際匯入／編譯，也尚未從現有場景建立世界。管理 API 與瀏覽器介面維持 v0.6 契約。
 
-目前已證明的是 .NET 下的遊戲規則與幾何模擬，不能當作 Quest／VIVE、Unity Physics、IL2CPP、網路延遲或 25 台裝置驗收。Unity 帳戶授權與 Android 模組條款仍待處理。
+目前已證明 .NET 遊戲規則與幾何模擬，以及讀取紀錄的瀏覽器 3D 回放，不能當作 Quest／VIVE、Unity Physics、IL2CPP、網路延遲或 25 台裝置驗收。Android 工具已安裝整理並通過 ARM64 原生編譯；Unity 編輯器仍未取得有效授權，見 `QUEST3.md`。
 
 ## 規則與資料
 
@@ -31,19 +31,19 @@ Tick 是邏輯步進；示範程序加速執行，尚未提供實際 20 Hz 遊�
 
 世界事件包含 ShotFired、ShotHit、EnemyEliminated、EnemyShot、PlayerDamaged、ReloadStarted／Completed。模擬工具把其中四種統計事件轉為既有 `CombatReport`，以世界 eventId 作 reportId，**一律標記 Simulation**。AI 射擊與換彈不冒充玩家彈藥或擊殺；每次成功玩家射擊只有一份 ShotFired。
 
-世界事件目前留在程序記憶體；API 的 SQLite 只接收轉換後的管理／戰鬥事件。工具另存 `schemaVersion: 1`／`rulesVersion: 0.7.0` 的除錯 JSON，含任務、房間、按順序的快照、世界事件及統計。相同 tick 可有多次狀態變化，需同時使用 throughSequence 與陣列順序；這不是完整回放儲存格式，沒有播放器、資產雜湊、定期持久快照、斷點恢復或 3D 回放證據。
+世界事件目前留在程序記憶體；API 的 SQLite 只接收轉換後的管理／戰鬥事件。v0.8 工具另存 `schemaVersion: 2`／`rulesVersion: 0.8.0`，新增 world props、快照中的 AI／能見度／夜間設定及射擊事件的槍口、方向、距離、碰撞類別／目標。相同 tick 仍可能有多次變化，需使用 throughSequence 與陣列順序；瀏覽器回放原型見 `REPLAY.md`。舊 schema 1 除錯檔保留但不猜測缺少的射線。正式持久儲存、資產版本、斷點恢復與實機回放仍待完成。
 
 ## 幾何模擬示範
 
 管理 API 已啟動時，在儲存庫根目錄執行（先完成下面建置）：
 
 ```powershell
-dotnet artifacts/build-v07/bin/VrCommand.SimulationDemo/release/VrCommand.SimulationDemo.dll --room 5
+dotnet artifacts/build-v08/bin/VrCommand.SimulationDemo/release/VrCommand.SimulationDemo.dll --room 5
 ```
 
 工具從本機 `data/operator-keys.local.json` 讀取 Master／GameServer 憑證，不輸出憑證；可指定 `--key-file`、`--base-url`、`--room`、`--output`。只在空閒房新建自己的場次，不改既有名冊，成功或失敗後嘗試結束自己的場次。
 
-情境為：玩家低槍口射擊被油桶擋住，AI 從油桶上方命中玩家一次，操作設定關閉自動攻擊，玩家移到側邊再命中敵軍兩次。傷害與命中由共用核心實際計算，再按順序送入 API。預期 **彈藥 3、命中 2、命中率 66.67%、擊殺 1、中彈 1、耗損 20、剩餘血量 80**。這個工具明確是腳本驅動的無頭盔模擬，未從控制台持續輪詢指令。
+情境為：低槍口被油桶擋住，AI 命中玩家一次，操作設定關閉自動攻擊，玩家側移並命中兩次擊殺，再加入另一個敵軍巡邏繞障 10 秒。傷害與命中由共用核心計算並依序送入 API。預期 **彈藥 3、命中 2、命中率 66.67%、擊殺 1、中彈 1、耗損 20、血量 80**，216 份快照及 8 筆世界事件。工具是腳本驅動的無頭盔模擬，未從控制台持續輪詢指令。
 
 統計及結束紀錄可在主控台勾選「包含已結束紀錄」後查閱；世界除錯 JSON 預設寫入 `artifacts/simulation-demo/<場次ID>.json`。不會傳送訊息或呼叫實際硬體。
 
@@ -52,17 +52,17 @@ dotnet artifacts/build-v07/bin/VrCommand.SimulationDemo/release/VrCommand.Simula
 Windows 執行中的 API 會鎖住 DLL。以下使用另一個輸出目錄，不需要停止現有主控台；CI 在乾淨工作目錄仍可沿用 README 的一般建置。
 
 ```powershell
-dotnet restore VrCommand.slnx --locked-mode --artifacts-path artifacts/build-v07
-dotnet build VrCommand.slnx --configuration Release --no-restore --artifacts-path artifacts/build-v07
-dotnet artifacts/build-v07/bin/VrCommand.Checks/release/VrCommand.Checks.dll
-$env:VR_COMMAND_API_DLL = "$PWD/artifacts/build-v07/bin/VrCommand.Api/release/VrCommand.Api.dll"
-$env:VR_COMMAND_SIMULATION_DEMO_DLL = "$PWD/artifacts/build-v07/bin/VrCommand.SimulationDemo/release/VrCommand.SimulationDemo.dll"
+dotnet restore VrCommand.slnx --locked-mode --artifacts-path artifacts/build-v08
+dotnet build VrCommand.slnx --configuration Release --no-restore --artifacts-path artifacts/build-v08
+dotnet artifacts/build-v08/bin/VrCommand.Checks/release/VrCommand.Checks.dll
+$env:VR_COMMAND_API_DLL = "$PWD/artifacts/build-v08/bin/VrCommand.Api/release/VrCommand.Api.dll"
+$env:VR_COMMAND_SIMULATION_DEMO_DLL = "$PWD/artifacts/build-v08/bin/VrCommand.SimulationDemo/release/VrCommand.SimulationDemo.dll"
 python scripts/smoke_api.py
 ```
 
 瀏覽器檢查也接受 `VR_COMMAND_API_DLL`，命令仍見 `CONSOLE.md`。`check-unity-source.ps1` 現在同時檢查遊戲端及 embedded package，僅提供 C# 9 語法結果；共用核心另由上述 .NET Standard 建置進行真正的 API 型別綁定。
 
-本機證據：Release 建置 0 警告／0 錯誤，**179 項核心、234 項 HTTP 斷言及 36 項 Chromium 檢查通過**；12 份 Unity／套件 C# 語法通過。包含射線／旋轉掩體、友軍阻擋、射擊／換彈去重、有限彈藥、AI 視線／冷卻／死亡、霧／夜間、巡邏繞障／不可達、Hold 覆寫、Advance、五房 25 個角色資料及世界事件邊界。沒有測量頭盔 FPS 或 25 台連線效能。
+本機證據：Release 建置 0 警告／0 錯誤，**181 項核心、234 項 HTTP、12 項回放資料及 50 項 Chromium 檢查通過**；12 份 Unity／套件 C# 語法通過。核心另新增射線紀錄及快照設定驗證，回放驗證範圍見 `REPLAY.md`。沒有測量頭盔 FPS 或 25 台連線效能。
 
 ## 待接入
 

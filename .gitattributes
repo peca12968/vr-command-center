@@ -5,3 +5,5 @@
 *.glb binary
 *.wav binary
 *.ogg binary
+# Preserve upstream Three.js bytes and its original formatting.
+src/VrCommand.Api/wwwroot/console/vendor/three/three.*.js -text -whitespace

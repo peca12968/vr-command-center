@@ -31,23 +31,32 @@ try
     await Post<SessionView>(master, $"/api/sessions/{session.Id}/players", new { playerId, name = "Quest3-Simulation", roomId = room, headset = "Quest3" });
     var origin = ArenaWorld.RoomOrigin(room);
     var enemyId = Guid.NewGuid();
-    var world = new ArenaWorld([room], [new WorldProp(Guid.NewGuid(), room, PropKind.Barrel, origin, 0)]);
+    var props = new[] { new WorldProp(Guid.NewGuid(), room, PropKind.Barrel, origin, 0) };
+    var world = new ArenaWorld([room], props);
     world.AddPlayer(playerId, room, origin + new Vec3(0, 1.4f, -3));
     world.AddEnemy(enemyId, room, origin + new Vec3(0, 0, 3), origin + new Vec3(2, 0, 3));
     var frames = new List<WorldFrame> { world.Snapshot() };
     await Control("Begin"); world.SetPhase(WorldPhase.Running);
     var muzzle = origin + new Vec3(0, .6f, -3);
     world.SetPlayerPose(playerId, origin + new Vec3(0, 1.4f, -3), muzzle, (origin + new Vec3(0, .9f, 3) - muzzle).Normalized());
+    frames.Add(world.Snapshot());
     var blocked = world.Fire(playerId, Guid.NewGuid());
+    frames.Add(world.Snapshot());
     world.Tick(); frames.Add(world.Snapshot()); // Enemy has line of sight above the barrel; player muzzle does not.
     await Control("SetEnemies", new(1, EnemyBehavior.Hold, false));
     world.SetPolicy(AiBehavior.Hold, false, Visibility.Clear, false);
     for (var i = 0; i < 3; i++) { world.Tick(); frames.Add(world.Snapshot()); }
     muzzle = origin + new Vec3(2, 1.4f, -3);
     world.SetPlayerPose(playerId, muzzle, muzzle, (origin + new Vec3(0, .9f, 3) - muzzle).Normalized());
+    frames.Add(world.Snapshot());
     var firstHit = world.Fire(playerId, Guid.NewGuid());
+    frames.Add(world.Snapshot());
     for (var i = 0; i < 4; i++) { world.Tick(); frames.Add(world.Snapshot()); }
     var kill = world.Fire(playerId, Guid.NewGuid()); frames.Add(world.Snapshot());
+    await Control("SetEnemies", new(2, EnemyBehavior.Patrol, false));
+    world.AddEnemy(Guid.NewGuid(), room, origin + new Vec3(-3, 0, 0), origin + new Vec3(3, 0, 0));
+    world.SetPolicy(AiBehavior.Patrol, false, Visibility.Clear, false); frames.Add(world.Snapshot());
+    for (var i = 0; i < 200; i++) { world.Tick(); frames.Add(world.Snapshot()); }
     var reports = world.Events().Select(ToReport).Where(r => r is not null).ToArray();
     foreach (var report in reports)
     {
@@ -66,8 +75,8 @@ try
         throw new InvalidOperationException("Geometry simulation and persisted statistics did not match.");
     var output = Path.GetFullPath(options.GetValueOrDefault("--output", Path.Combine(root, "artifacts/simulation-demo", session.Id + ".json")));
     Directory.CreateDirectory(Path.GetDirectoryName(output)!);
-    await File.WriteAllTextAsync(output, JsonSerializer.Serialize(new { schemaVersion = 1, rulesVersion = "0.7.0", origin = "Simulation", sessionId = session.Id,
-        roomIds = new[] { room }, mission, tickSeconds = ArenaWorld.TickSeconds, frames, events = world.Events(), statistics }, JsonFormat.Options));
+    await File.WriteAllTextAsync(output, JsonSerializer.Serialize(new { schemaVersion = 2, rulesVersion = "0.8.0", origin = "Simulation", sessionId = session.Id,
+        roomIds = new[] { room }, mission, props, tickSeconds = ArenaWorld.TickSeconds, frames, events = world.Events(), statistics }, JsonFormat.Options));
     Console.WriteLine(JsonSerializer.Serialize(new { sessionId = session.Id, origin = "Simulation", blockedByCover = true, player, output }, JsonFormat.Options));
 }
 finally

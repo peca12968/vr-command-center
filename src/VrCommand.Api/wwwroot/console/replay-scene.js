@@ -1,0 +1,137 @@
+import * as THREE from './vendor/three/three.module.js';
+
+const point = value => new THREE.Vector3(value.x, value.y, value.z);
+const roomX = id => (id - 3) * 14;
+export class ReplayScene {
+  constructor(canvas, onPick, onFreeMove) {
+    this.canvas = canvas; this.onPick = onPick; this.onFreeMove = onFreeMove;
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
+    this.renderer.setClearColor(0x101a17); this.scene = new THREE.Scene();
+    this.camera = new THREE.PerspectiveCamera(48, 1, .05, 300);
+    this.target = new THREE.Vector3(0, .8, 0); this.theta = .6; this.phi = .9; this.radius = 15;
+    this.actors = new Map(); this.follow = false; this.selected = ''; this.frame = null;
+    this.stage = new THREE.Group(); this.traces = new THREE.Group(); this.scene.add(this.stage, this.traces);
+    this.ambient = new THREE.HemisphereLight(0xd5e3dc, 0x394637, 2.2); this.scene.add(this.ambient);
+    this.sun = new THREE.DirectionalLight(0xffe4ba, 2.5); this.sun.position.set(10, 18, -8); this.scene.add(this.sun);
+    this.marker = new THREE.Mesh(new THREE.RingGeometry(.5, .57, 32), new THREE.MeshBasicMaterial({ color: 0xe3f594, side: THREE.DoubleSide }));
+    this.marker.rotation.x = -Math.PI / 2; this.marker.visible = false; this.scene.add(this.marker);
+    this.observer = new ResizeObserver(() => this.resize()); this.observer.observe(canvas.parentElement);
+    this.input(); this.resize();
+  }
+  mesh(geometry, color) { return new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color, roughness: .8 })); }
+  clear(group) {
+    group.traverse(object => { object.geometry?.dispose(); if (Array.isArray(object.material)) object.material.forEach(m => m.dispose()); else object.material?.dispose(); });
+    group.clear();
+  }
+  load(recording) {
+    this.clear(this.stage); this.clear(this.traces); this.actors.clear(); this.selected = ''; this.follow = false;
+    for (const room of recording.roomIds) {
+      const floor = this.mesh(new THREE.BoxGeometry(12, .2, 12), 0x344638); floor.position.set(roomX(room), -.12, 0); this.stage.add(floor);
+      const grid = new THREE.GridHelper(12, 24, 0x8b9b6c, 0x4c6354); grid.position.set(roomX(room), -.005, 0); this.stage.add(grid);
+      const boundary = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([[-6,-6],[6,-6],[6,6],[-6,6]].map(([x,z]) => new THREE.Vector3(roomX(room) + x, .01, z))), new THREE.LineBasicMaterial({ color: 0xc1d281 })); this.stage.add(boundary);
+    }
+    for (const prop of recording.props) {
+      const half = prop.kind === 'Barrel' ? [.35, .6, .35] : [1, .45, .35];
+      // These are the exact box colliders used by the simulation, not decorative geometry.
+      const mesh = this.mesh(new THREE.BoxGeometry(half[0] * 2, half[1] * 2, half[2] * 2), prop.kind === 'Barrel' ? 0x6b8e91 : 0xa59a69);
+      mesh.position.copy(point(prop.feet)).add(new THREE.Vector3(0, half[1], 0)); mesh.rotation.y = prop.yaw * Math.PI / 180; this.stage.add(mesh);
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry), new THREE.LineBasicMaterial({ color: 0xc9d4ba })); mesh.add(edges);
+    }
+    this.defaultTarget = new THREE.Vector3(recording.roomIds.reduce((sum, id) => sum + roomX(id), 0) / recording.roomIds.length, .8, 0);
+    this.defaultRadius = recording.roomIds.length === 5 ? 49 : 15; this.preset('overview');
+  }
+  actor(key, enemy) {
+    if (this.actors.has(key)) return this.actors.get(key);
+    const group = new THREE.Group(); group.userData.key = key;
+    const body = this.mesh(new THREE.BoxGeometry(1, 1, 1), enemy ? 0xc26754 : 0x82bc94); group.add(body);
+    const head = this.mesh(new THREE.SphereGeometry(.17, 12, 8), enemy ? 0xefad84 : 0xb7e7c6); group.add(head);
+    const gun = this.mesh(new THREE.BoxGeometry(.08, .08, .45), enemy ? 0x5e312a : 0x222e28); group.add(gun);
+    const entry = { group, body, head, gun, enemy }; this.actors.set(key, entry); this.stage.add(group); return entry;
+  }
+  show(frame, previous, events) {
+    this.frame = frame;
+    for (const actor of this.actors.values()) actor.group.visible = false;
+    for (const player of frame.players) {
+      const actor = this.actor('p:' + player.id, false), height = player.head.y;
+      actor.group.visible = true; actor.group.position.set(player.head.x, 0, player.head.z);
+      actor.body.scale.set(.44, Math.max(.25, height - .3), .35); actor.body.position.set(0, Math.max(.25, height - .3) / 2, 0);
+      actor.body.rotation.y = Math.atan2(player.forward.x, player.forward.z); actor.head.position.set(0, height, 0);
+      actor.gun.position.copy(point(player.muzzle)).sub(actor.group.position); actor.gun.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), point(player.forward).normalize());
+      for (const mesh of [actor.body, actor.head, actor.gun]) { mesh.material.transparent = player.health === 0; mesh.material.opacity = player.health === 0 ? .25 : 1; }
+    }
+    for (const enemy of frame.enemies) {
+      const actor = this.actor('e:' + enemy.id, true); actor.group.visible = true; actor.group.position.copy(point(enemy.feet));
+      actor.body.scale.set(.5, 1.25, .4); actor.body.position.set(0, .68, 0); actor.head.position.set(0, 1.52, 0); actor.gun.position.set(.25, 1.1, -.3);
+      const before = previous?.enemies.find(value => value.id === enemy.id);
+      if (before && Math.hypot(enemy.feet.x - before.feet.x, enemy.feet.z - before.feet.z) > .001) actor.group.rotation.y = Math.atan2(enemy.feet.x - before.feet.x, enemy.feet.z - before.feet.z);
+      for (const mesh of [actor.body, actor.head, actor.gun]) { mesh.material.transparent = enemy.health === 0; mesh.material.opacity = enemy.health === 0 ? .18 : 1; }
+    }
+    this.clear(this.traces);
+    for (const event of events) {
+      const start = point(event.origin), end = start.clone().addScaledVector(point(event.direction), event.distance);
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([start, end]), new THREE.LineBasicMaterial({ color: event.kind === 'EnemyShot' ? 0xff775f : 0xf4e795 })); this.traces.add(line);
+      const hit = new THREE.Mesh(new THREE.SphereGeometry(.065, 8, 6), new THREE.MeshBasicMaterial({ color: event.hit === 'Cover' ? 0xffb454 : 0xf4ecba })); hit.position.copy(end); this.traces.add(hit);
+    }
+    this.canvas.dataset.traceCount = String(events.length);
+    this.ambient.intensity = frame.night ? .8 : 2.2; this.sun.intensity = frame.night ? .35 : 2.5;
+    this.scene.fog = frame.visibility === 'Clear' ? null : new THREE.FogExp2(frame.night ? 0x111e25 : 0x637266, frame.visibility === 'Fog' ? .035 : .015);
+    this.draw();
+  }
+  select(key) { this.selected = key; this.draw(); }
+  fitRadius(radius) { const aspect = this.canvas.parentElement.clientWidth / Math.max(1, this.canvas.parentElement.clientHeight); return radius * Math.max(1, 1.5 / Math.max(.4, aspect)); }
+  focus(room) { this.follow = false; this.target.set(roomX(Number(room)), .8, 0); this.radius = this.fitRadius(15); this.draw(); }
+  preset(mode) {
+    this.follow = false; this.target.copy(this.defaultTarget || new THREE.Vector3(0, .8, 0)); this.radius = this.fitRadius(this.defaultRadius || 15);
+    this.theta = mode === 'top' ? 0 : .6; this.phi = mode === 'top' ? .08 : .9; this.draw();
+  }
+  resize() {
+    const width = this.canvas.parentElement.clientWidth, height = this.canvas.parentElement.clientHeight;
+    if (!width || !height) return;
+    this.renderer.setSize(width, height, false); this.camera.aspect = width / height; this.camera.updateProjectionMatrix(); this.draw();
+  }
+  draw() {
+    const actor = this.actors.get(this.selected);
+    if (this.follow && actor?.group.visible) this.target.copy(actor.group.position).add(new THREE.Vector3(0, 1, 0));
+    this.marker.visible = !!actor?.group.visible;
+    if (this.marker.visible) this.marker.position.copy(actor.group.position).setY(.02);
+    this.camera.position.copy(this.target).add(new THREE.Vector3(this.radius * Math.sin(this.phi) * Math.sin(this.theta), this.radius * Math.cos(this.phi), -this.radius * Math.sin(this.phi) * Math.cos(this.theta)));
+    this.camera.lookAt(this.target); this.renderer.render(this.scene, this.camera);
+    this.canvas.dataset.triangles = String(this.renderer.info.render.triangles);
+    this.canvas.dataset.camera = this.camera.position.toArray().map(x => x.toFixed(2)).join(',');
+  }
+  input() {
+    let drag = null;
+    this.canvas.addEventListener('contextmenu', event => event.preventDefault());
+    this.canvas.addEventListener('pointerdown', event => { this.canvas.focus(); drag = { id: event.pointerId, x: event.clientX, y: event.clientY, firstX: event.clientX, firstY: event.clientY, pan: event.button === 2 || event.shiftKey }; this.canvas.setPointerCapture(event.pointerId); });
+    this.canvas.addEventListener('pointermove', event => {
+      if (!drag || drag.id !== event.pointerId) return;
+      const dx = event.clientX - drag.x, dy = event.clientY - drag.y; drag.x = event.clientX; drag.y = event.clientY;
+      if (drag.pan) { this.follow = false; this.onFreeMove(); this.pan(dx, dy); }
+      else { this.theta -= dx * .007; this.phi = Math.max(.06, Math.min(1.5, this.phi + dy * .007)); }
+      this.draw();
+    });
+    this.canvas.addEventListener('pointerup', event => {
+      if (drag && !drag.pan && Math.hypot(event.clientX - drag.firstX, event.clientY - drag.firstY) < 5) this.pick(event);
+      drag = null;
+    });
+    for (const name of ['pointercancel', 'lostpointercapture']) this.canvas.addEventListener(name, () => { drag = null; });
+    this.canvas.addEventListener('wheel', event => { event.preventDefault(); this.radius = Math.max(2, Math.min(95, this.radius * Math.exp(event.deltaY * .001))); this.draw(); }, { passive: false });
+    this.canvas.addEventListener('keydown', event => {
+      const keys = { ArrowLeft: [-15, 0], ArrowRight: [15, 0], ArrowUp: [0, -15], ArrowDown: [0, 15] };
+      if (keys[event.key]) { event.preventDefault(); this.follow = false; this.onFreeMove(); this.pan(...keys[event.key]); this.draw(); }
+      if (event.key === '+' || event.key === '-') { event.preventDefault(); this.radius = Math.max(2, Math.min(95, this.radius * (event.key === '+' ? .9 : 1.1))); this.draw(); }
+    });
+  }
+  pan(dx, dy) {
+    const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0), forward = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 1);
+    this.target.addScaledVector(right, -dx * this.radius / 600).addScaledVector(forward, dy * this.radius / 600);
+  }
+  pick(event) {
+    const bounds = this.canvas.getBoundingClientRect(), cursor = new THREE.Vector2((event.clientX - bounds.left) / bounds.width * 2 - 1, 1 - (event.clientY - bounds.top) / bounds.height * 2);
+    const ray = new THREE.Raycaster(); ray.setFromCamera(cursor, this.camera);
+    const hit = ray.intersectObjects([...this.actors.values()].filter(actor => actor.group.visible).map(actor => actor.group), true)[0];
+    if (hit) { let object = hit.object; while (object && !object.userData.key) object = object.parent; if (object) this.onPick(object.userData.key); }
+  }
+  reset() { this.frame = null; this.follow = false; this.selected = ''; this.clear(this.stage); this.clear(this.traces); this.actors.clear(); this.marker.visible = false; this.draw(); }
+}

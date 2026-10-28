@@ -1,3 +1,5 @@
+import { mountReplay } from './replay-ui.js';
+const replay = mountReplay();
 const $ = id => document.getElementById(id);
 const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫停', Ended: '已結束' };
 const weatherNames = { Clear: '晴朗', Rain: '下雨', Fog: '濃霧', Storm: '暴風雨' };
@@ -59,6 +61,7 @@ async function run(action) {
   finally { state.busy = false; applyPermissions(); }
 }
 function logout() {
+  replay.active(false); replay.reset();
   state.epoch++; state.key = ''; state.actor = null; state.selected = ''; state.session = null; state.pending = null;
   state.rooms = []; state.missions = []; state.sessions = []; state.refreshPromise = null;
   state.props = []; state.prop = -1;
@@ -77,6 +80,7 @@ async function login(event) {
     const actor = await api('/me');
     if (!['Master', 'RoomController'].includes(actor.role)) { logout(); notify('請使用主控台或房間控制台的操作憑證。', true); return; }
     state.actor = actor;
+    tab('operations');
     $('identity').textContent = master() ? '全館主控' : `房間 ${actor.roomId} 控制台`;
     $('login-key').value = ''; $('login-panel').hidden = true; $('workspace').hidden = false; $('logout').hidden = false;
     $('launch-mode').querySelector('[value=Linked]').disabled = !master();
@@ -304,7 +308,8 @@ for (const id of ['prop-asset', 'prop-x', 'prop-y', 'prop-z', 'prop-yaw']) $(id)
 });
 
 function tab(name) {
-  for (const candidate of ['operations', 'missions']) { const active = candidate === name; $(candidate + '-view').hidden = !active; $('tab-' + candidate).classList.toggle('active', active); $('tab-' + candidate).setAttribute('aria-pressed', String(active)); }
+  for (const candidate of ['operations', 'missions', 'replay']) { const active = candidate === name; $(candidate + '-view').hidden = !active; $('tab-' + candidate).classList.toggle('active', active); $('tab-' + candidate).setAttribute('aria-pressed', String(active)); }
+  replay.active(name === 'replay');
 }
 function submit(id, action) { $(id).addEventListener('submit', event => { event.preventDefault(); run(action); }); }
 $('login-form').addEventListener('submit', login);
@@ -331,5 +336,5 @@ $('rotate-prop').addEventListener('click', () => { if (editable() && state.props
 $('remove-prop').addEventListener('click', () => { if (editable() && state.prop >= 0) { state.props.splice(state.prop, 1); state.prop = Math.min(state.prop, state.props.length - 1); renderProps(); dirtyDraft(); } });
 $('mission-form').addEventListener('input', dirtyDraft);
 $('mission-form').addEventListener('change', dirtyDraft);
-for (const name of ['operations', 'missions']) $('tab-' + name).addEventListener('click', () => tab(name));
+for (const name of ['operations', 'missions', 'replay']) $('tab-' + name).addEventListener('click', () => tab(name));
 window.addEventListener('beforeunload', event => { if (state.pending) { event.preventDefault(); event.returnValue = ''; } });

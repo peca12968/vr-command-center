@@ -34,6 +34,9 @@ internal static class SimulationChecks
         var muzzle = new Vec3(0, .6f, -3);
         blocked.World.SetPlayerPose(blocked.Player, new(0, 1.4f, -3), muzzle, (new Vec3(0, .9f, 3) - muzzle).Normalized());
         var first = blocked.World.Fire(blocked.Player, Guid.NewGuid());
+        var ray = blocked.World.Events()[0];
+        check(ray.Hit == HitKind.Cover && ray.TargetId == cover.Id && ray.Origin?.Y == .6f && ray.Distance > 2 && ray.Distance < 4 && Math.Abs(ray.Direction!.Value.Length - 1) < .0001f,
+            "Recorded shot preserves its authoritative muzzle, direction, collision distance and cover identity");
         check(first.Hit == HitKind.Cover && blocked.World.Snapshot().Enemies[0].Health == 100 && blocked.World.Events().Length == 1,
             "Barrel blocks a low shot before the enemy and emits only ammunition consumption");
         Reject<ArgumentException>(() => blocked.World.SetPlayerPose(blocked.Player, new(0, 1.4f, 3), new(0, 1.4f, 3), forward), "Player pose cannot teleport across solid cover");
@@ -93,6 +96,8 @@ internal static class SimulationChecks
         var hidden = World([cover], playerHead: new(0, .6f, -3)); hidden.World.SetPolicy(AiBehavior.Hold, true, Visibility.Clear, false); Step(hidden.World, 50);
         check(hidden.World.Snapshot().Players[0].Health == 100, "Cover prevents AI firing at a crouched player");
         var fog = World(enemyFeet: new(0, 0, 5), playerHead: new(0, 1.4f, -5)); fog.World.SetPolicy(AiBehavior.Hold, true, Visibility.Fog, false); Step(fog.World, 25);
+        check(fog.World.Snapshot().Visibility == Visibility.Fog && fog.World.Snapshot().AutoAttack && fog.World.Snapshot().Behavior == AiBehavior.Hold && !fog.World.Snapshot().Night,
+            "World snapshots preserve the active visibility and AI policy for playback");
         check(fog.World.Snapshot().Players[0].Health == 100, "Fog reduces AI engagement range");
         fog.World.SetPolicy(AiBehavior.Hold, true, Visibility.Clear, true); fog.World.Tick();
         check(fog.World.Snapshot().Players[0].Health == 100, "Night reduces AI engagement range");

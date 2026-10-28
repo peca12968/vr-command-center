@@ -406,8 +406,8 @@ try:
                     and geometric_result["player"]["ammoUsed"] == 3 and geometric_result["player"]["shotsHit"] == 2
                     and geometric_result["player"]["kills"] == 1 and geometric_result["player"]["health"] == 80,
                     "Shared simulation raycasts cover and enemies before emitting persisted combat statistics")
-            require(geometric_archive["schemaVersion"] == 1 and geometric_archive["origin"] == "Simulation"
-                    and geometric_archive["frames"][1]["players"][0]["health"] == 80
+            require(geometric_archive["schemaVersion"] == 2 and geometric_archive["origin"] == "Simulation"
+                    and any(frame["players"][0]["health"] == 80 for frame in geometric_archive["frames"])
                     and geometric_archive["frames"][-1]["phase"] == "Ended"
                     and geometric_archive["frames"][-1]["throughSequence"] == geometric_archive["events"][-1]["sequence"]
                     and sum(event["kind"] == "EnemyEliminated" for event in geometric_archive["events"]) == 1,

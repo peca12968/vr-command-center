@@ -1,4 +1,4 @@
-# Quest 3 接入原型 v0.5
+# Quest 3 接入原型與工具鏈 v0.8
 
 使用者指定先用 Meta Quest 3；暫按 Android 獨立執行規劃。工程在 `clients/unity/`，後端仍獨立使用 .NET 10，不把後端 DLL 放進 Unity。
 
@@ -27,7 +27,26 @@
 
 版本由官方 Unity release feed、套件 metadata 與 URP Blank 17.1.0 模板選定；不是最新版套件一律升級。模板 ProjectSettings／URP 設定附原始授權於 `clients/unity/ThirdPartyNotices/`。Unity 套件鎖定檔尚待第一次成功套件解析產生並提交。
 
-目前待使用者在本機執行 `unity auth login`，以自己的 Unity 帳戶啟用適用授權；不要把密碼或 token 貼入對話。Android Build Support 與其 SDK／NDK／OpenJDK 尚未安裝；安裝器要求明確接受相關授權（`--accept-eula`），已提出確認。沒有自行選擇付費授權或判定 Personal 資格。
+使用者已明確同意 SDK／NDK 條款；Android Build Support 與 OpenJDK 已由 CLI 安裝，SDK／NDK 目錄修復及實際原生編譯結果見下節，不再等待條款確認。
+
+使用者另回覆已登入／啟用，但工具端驗證仍為 CLI `loggedIn: false`、`unity license list` 空陣列，實際 Prepare 再次退出 198。已啟動一次瀏覽器登入流程，觀察到 Chrome 停在 Unity 登入頁；CLI 未收到成功回呼並回報登入逾時。後續請在本機重新執行 `unity auth login`，等待命令成功，再以 `unity auth status --format json` 及 `unity license list --format json` 核對適用帳戶／授權。不要把密碼、token 或序號貼入對話；沒有自行購買或選擇 Personal 資格。
+
+## Android 工具實測
+
+安裝命令使用已同意的 `--accept-eula`。CLI 結束時回報 Android、OpenJDK、SDK parent、platform 34 成功，其餘八個子模組失敗；原始登錄並非全部成功。實際解壓檔案已存在，NDK、CMake、Build Tools、command-line tools 留在未整理的 archive 根目錄。
+
+依官方 release metadata 的 extractedPathRename，`scripts/repair-android-layout.ps1` 已先用 `-WhatIf` 核對，再以限定在此 Editor 的絕對路徑移動新解壓元件；不合併／覆寫既有目標或刪除資料。整理後再次 WhatIf 沒有待移動項目。
+
+| 元件 | 已實際驗證 |
+|---|---|
+| NDK | r27c／27.2.12479018，clang 18.0.3 可執行 |
+| OpenJDK | Temurin 17.0.18+8 可執行 |
+| CMake | 3.22.1 可執行，搭配內建 Ninja 完成組態及建置 |
+| SDK | SDK Manager 辨識 Build Tools 36.0.0、Platform Tools 37.0.1、platform 34／35／36 |
+| 工具與條款 | command-line tools 16.0 可執行；使用者已同意的 android-sdk-license 已由官方 SDK Manager 登錄 |
+| 原生編譯 | C++17、Android log／STL、API 32、arm64-v8a 的共享庫編譯／連結通過，ELF header 驗證為 64-bit AArch64 |
+
+可重驗 `.\scripts\check-android-toolchain.ps1`，輸出在忽略的 `artifacts/android-toolchain-check/`。這證明主要原生工具可協同工作；CLI 八個子模組的失敗登錄仍保留，Unity Editor 偵測及 APK 建置還須實際驗證。沒有把原生 `.so` 當成 APK 或 Quest 執行結果。
 
 來源：[Unity CLI 使用方式](https://docs.unity.com/en-us/unity-cli/use-unity-cli)、[Meta Unity requirements](https://developers.meta.com/vr/documentation/unity/unity-development-requirements/)、[Unity 套件庫](https://packages.unity.com/)、[Android SDK 條款](https://developer.android.com/studio/terms)。
 

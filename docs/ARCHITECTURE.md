@@ -24,7 +24,7 @@ flowchart TB
     Sim --> Spectator
 ```
 
-圖為目標架構。管理 API、權限、SQLite 事件／統計、玩家票券及 `/console/` 操作已有驗證。v0.7 新增同源 .NET Standard 射擊／掩體／AI 核心及幾何模擬接入，詳見 `SIMULATION.md`；現有 Unity 場景尚未呼叫，仍待整個工程編譯與運行。除錯世界快照已有工具輸出，正式世界儲存、3D 回放與完整權威遊戲伺服器待整合。契約見 `SESSION_PROTOCOL.md`、`COMBAT_PROTOCOL.md`，儲存見 `STORAGE.md`，Quest 原型見 `QUEST3.md`，瀏覽器操作見 `CONSOLE.md`。
+圖為目標架構。管理、SQLite／統計、票券及 `/console/` 操作已有驗證。共用 .NET Standard 核心可執行射擊／掩體／AI，v0.8 瀏覽器可從實際模擬快照與射線進行 3D 回放，見 `SIMULATION.md`／`REPLAY.md`。Unity 場景尚未呼叫核心，正式世界儲存、頭盔錄影、即時觀戰與完整遊戲伺服器待整合。契約見 `SESSION_PROTOCOL.md`、`COMBAT_PROTOCOL.md`，儲存見 `STORAGE.md`，工具鏈見 `QUEST3.md`，操作見 `CONSOLE.md`。
 
 管理 API 處理低頻設定與場次生命週期；頭部／手部姿態、射擊與 AI 不經此 REST API 做每幀同步。原型選用 NGO 2.7.0／Unity Transport，桌面伺服器向管理 API 驗票及讀取設定，頭盔只帶短效玩家票券。後續遊戲伺服器負責權威命中判定、AI、環境狀態與事件排序。網路框架仍須雙裝置實測評估，尚未承諾第三方付費服務。
 
@@ -34,7 +34,7 @@ flowchart TB
 
 依 2026-10-29 使用者指示，先以 Meta Quest 3 完成遊戲垂直切片，再接 VIVE；目前 Android 獨立執行為尚待實機確認的部署假設。
 
-選擇 Unity 與 C#，以 OpenXR 為共同頭盔與控制器介面。Quest 原型固定 Editor 6000.3.27f1、OpenXR 1.19.0 等版本，詳見 `QUEST3.md`。Editor 已安裝至 F 槽，但缺有效授權使實際 Prepare 退出 198；Android 模組條款待使用者確認。工程來源碼已建立，仍無成功編譯或 APK，更無跨平台實測證據。
+選擇 Unity 與 C#，以 OpenXR 為共同頭盔與控制器介面。Quest 原型固定 Editor 6000.3.27f1、OpenXR 1.19.0 等版本，見 `QUEST3.md`。Editor 及 Android 工具在 F 槽，已依使用者同意安裝／整理並通過原生 ARM64 編譯。Editor 仍未取得有效授權，Prepare 退出 198；工程沒有 Unity 編譯或 APK 證據，更沒有跨平台實測。
 
 Meta 的官方文件提供 OpenXR 開發流程；VIVE 的 OpenXR SDK 包含 Android AIO 頭盔開發路徑。這是技術選型依據，並非本專案已通過跨平台測試：
 
