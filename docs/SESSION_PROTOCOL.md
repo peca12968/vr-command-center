@@ -1,4 +1,4 @@
-# 場次與事件契約 v0.2
+# 場次與事件契約 v0.3
 
 本契約目前僅實作管理資料狀態。狀態為 `Running` 不代表已連接遊戲伺服器，`Pause` 尚不會停止頭盔畫面或硬體。
 
@@ -17,7 +17,7 @@ stateDiagram-v2
 
 建立時複製任務模板，`CreatedAtUtc` 記錄建立時間；`StartedAtUtc` 在首次 `Begin` 設定，恢復時不覆寫。`EndedAtUtc` 在結束時設定。所有事件時間由後端產生，以序號決定順序，不依賴裝置時鐘。
 
-玩家只可在 `Preparing` 加入，在任一未結束狀態離開。沒有自動開局、倒數結束、斷線偵測、設備準備確認、重連席位或操作者授權。結束時保留當時名冊供歷史查閱，活動名額全部釋放；曾離開的玩家可從事件查閱。
+玩家只可在 `Preparing` 加入，在任一未結束狀態離開。沒有自動開局、倒數結束、斷線偵測、設備準備確認或重連席位。控制台權限見 `AUTHORIZATION.md`。結束時保留當時名冊供歷史查閱，活動名額全部釋放；曾離開的玩家可從事件查閱。
 
 `SetEnvironment` 與 `SetEnemies` 可用於任一未結束狀態。它們更新場次的執行設定，不修改任務模板，也不影響其他獨立場次。已結束的場次拒絕新操作；成功命令的原樣重送仍可查詢接受結果。
 
@@ -35,7 +35,7 @@ stateDiagram-v2
 
 `expectedSequence` 可省略；有指定時必須符合伺服器目前序號，否則回傳 409，讓控制者重新載入再決定。命令重送的去重檢查優先於版本檢查，因此已接受的同一命令即使版本已前進仍能取得結果。
 
-去重範圍是每場次。相同 ID 必須有完全相同的解析後內容，包含 `expectedSequence`；改變內容回傳 409。回應 `duplicate`、`appliedAtSequence` 表示是否重送及原始接受位置，`session` 一律為最新快照，而非原命令當時的舊狀態。新接受事件與去重資訊一起寫入磁碟，重啟後仍有效。
+去重範圍是每場次。相同 ID 必須由同一認證身分發出且有完全相同的解析後內容，包含 `expectedSequence`；改變內容或身分回傳 409。回應 `duplicate`、`appliedAtSequence` 表示是否重送及原始接受位置，`session` 一律為最新快照，而非原命令當時的舊狀態。新接受事件與去重資訊一起寫入磁碟，重啟後仍有效。
 
 環境設定範例：
 
@@ -57,13 +57,13 @@ stateDiagram-v2
 }
 ```
 
-與動作無關的設定欄位會回傳 400。`commandId` 不可為空 GUID，`action` 不可省略。尚無命令操作者身分；不能把此紀錄視為已認證的操作稽核。
+與動作無關的設定欄位會回傳 400。`commandId` 不可為空 GUID，`action` 不可省略。控制台身分由認證中介層指定，請求 body 的 `actor` 不會改變權限或紀錄來源。
 
 ## 事件讀取與持久化
 
 `GET /api/sessions/{id}/events?after=0&limit=100` 回傳事件陣列。每場次從序號 1 開始，僅接受的變更會遞增；讀取端以最後收到的序號作為下一次 `after`，空陣列表示已讀到目前尾端。預設 100、最多 500 筆；沒有訂閱推播與長輪詢。
 
-共同欄位為 `schemaVersion`（目前 1）、`eventId`、`sessionId`、`sequence`、`recordedAtUtc`、`kind` 及 `payload`。
+共同欄位為 `schemaVersion`（新事件為 2）、`eventId`、`sessionId`、`sequence`、`recordedAtUtc`、`kind`、`payload` 及 `actor`。schema 1 歷史仍可讀取，`actor` 保持 null，細節見權限文件。
 
 | kind | payload | 用途 |
 |---|---|---|

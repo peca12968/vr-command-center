@@ -1,10 +1,11 @@
-# 管理 API v0.2
+# 管理 API v0.3
 
-REST、UTF-8 JSON；預設範例地址 `http://127.0.0.1:5080`。列舉使用字串，不接受數字列舉。這是低頻管理介面，沒有姿態串流、遊戲伺服器或角色驗證。
+REST、UTF-8 JSON；預設範例地址 `http://127.0.0.1:5080`。列舉使用字串，不接受數字列舉。這是低頻管理介面，沒有姿態串流或遊戲伺服器。所有 `/api` 呼叫須帶 `Authorization: Bearer <credential>`；配置與角色表見 [AUTHORIZATION.md](AUTHORIZATION.md)。
 
 | 方法 | 路徑 | 行為 |
 |---|---|---|
 | GET | `/health` | 服務存活狀態 |
+| GET | `/api/me` | 經認證的控制台身分與房間範圍 |
 | GET | `/api/rooms` | 五房名額、場次與目前人數 |
 | GET | `/api/missions` | 列出磁碟保存任務 |
 | GET | `/api/missions/{id}` | 取得任務 |
@@ -38,10 +39,12 @@ REST、UTF-8 JSON；預設範例地址 `http://127.0.0.1:5080`。列舉使用字
 
 控制命令、狀態圖、去重／版本語意與事件格式見 [SESSION_PROTOCOL.md](SESSION_PROTOCOL.md)。新命令使用 `Begin`、`Pause`、`Resume`、`End`、`SetEnvironment` 或 `SetEnemies`；這些管理設定尚未連接渲染、AI 或硬體。
 
-已處理的輸入錯誤回傳 400、找不到任務／場次／玩家回傳 404、房間占用／玩家重複／人數超限回傳 409。領域錯誤 JSON 為 `{ "error": "原因" }`；JSON 語法與模型繫結錯誤由 ASP.NET Core 處理，回應內容格式可能不同。無法解析的 GUID 路徑因路由限制回傳 404。
+已處理的輸入錯誤回傳 400、認證失敗 401、權限不足 403、找不到任務／場次／玩家 404、房間占用／玩家重複／人數超限 409。領域錯誤 JSON 為 `{ "error": "原因" }`；JSON 語法與模型繫結錯誤由 ASP.NET Core 處理，回應內容格式可能不同。無法解析的 GUID 路徑因路由限制回傳 404。
 
 任務時間範圍 60–14400 秒；敵軍數量 0–100；物件最多 500。這些是原型輸入範圍，尚非實機效能承諾。環境可設定 `VR`／`MR`、`Clear`／`Rain`／`Fog`／`Storm`、`Day`／`Night` 及 `lightning` 布林值；可藉命令更新場次設定並留下事件，遊戲端套用待實作。
 
-## 與 v0.1 的差異
+## 相容性
+
+v0.3 新增強制控制台認證與房間範圍授權；匿名 `/api` 呼叫不再成功。新事件使用 schema 2 及伺服器認證的 `actor`；仍可讀取 schema 1 歷史。
 
 `GET /api/sessions/{id}` 現在可讀取已結束場次；不再因結束而回傳 404。快照新增 `state`、`createdAtUtc`、`endedAtUtc`、`environment`、`enemies` 與 `sequence`；`startedAtUtc` 改為可為 null，僅在 `Begin` 後有值。程式層的 `SessionManager.Start` 改名為 `Create`，避免與真正開始遊戲混淆。

@@ -49,88 +49,111 @@ public sealed class SessionManager
             throw new InvalidDataException("Restored active sessions contain conflicting reservations.");
     }
 
-    public SessionView Create(SessionMode mode, int[] roomIds, Mission mission)
+    public SessionView Create(SessionMode mode, int[] roomIds, Mission mission, OperatorIdentity? actor = null)
     {
+        actor ??= OperatorIdentity.Internal;
         SessionProjection.ValidateCreation(new(mode, roomIds, mission));
+        AccessPolicy.Manage(actor, mode, roomIds);
         lock (gate)
         {
             if (Active().Any(s => s.RoomIds.Intersect(roomIds).Any()))
                 throw new InvalidOperationException("A requested room is already in use.");
             var id = Guid.NewGuid();
             var entry = SessionEvent.Create(id, 1, SessionEventKind.Created,
-                new SessionCreated(mode, roomIds.Order().ToArray(), mission));
+                new SessionCreated(mode, roomIds.Order().ToArray(), mission), actor);
             return Commit(null, entry);
         }
     }
 
-    public SessionView Get(Guid id)
+    public SessionView Get(Guid id, OperatorIdentity? actor = null)
     {
-        lock (gate) return Snapshot(Find(id).View);
+        lock (gate)
+        {
+            var view = Find(id).View;
+            AccessPolicy.Read(actor ?? OperatorIdentity.Internal, view.RoomIds);
+            return Snapshot(view);
+        }
     }
 
-    public SessionView[] List(bool includeEnded = false)
+    public SessionView[] List(bool includeEnded = false, OperatorIdentity? actor = null)
     {
         lock (gate) return sessions.Values.Select(h => h.View)
             .Where(s => includeEnded || s.State != SessionState.Ended)
+            .Where(s => AccessPolicy.CanRead(actor ?? OperatorIdentity.Internal, s.RoomIds))
             .OrderByDescending(s => s.CreatedAtUtc).Select(Snapshot).ToArray();
     }
 
-    public SessionEvent[] Events(Guid id, long after = 0, int limit = 100)
+    public SessionEvent[] Events(Guid id, long after = 0, int limit = 100, OperatorIdentity? actor = null)
     {
         if (after < 0 || limit is < 1 or > 500) throw new ArgumentException("Use after >= 0 and limit 1–500.");
-        lock (gate) return Find(id).Events.Where(e => e.Sequence > after).Take(limit).ToArray();
+        lock (gate)
+        {
+            var history = Find(id);
+            AccessPolicy.Read(actor ?? OperatorIdentity.Internal, history.View.RoomIds);
+            return history.Events.Where(e => e.Sequence > after).Take(limit).ToArray();
+        }
     }
 
-    public SessionView Join(Guid sessionId, Guid playerId, string name, int roomId, HeadsetKind headset)
+    public SessionView Join(Guid sessionId, Guid playerId, string name, int roomId, HeadsetKind headset, OperatorIdentity? actor = null)
     {
         lock (gate)
         {
             var history = Find(sessionId);
+            actor ??= OperatorIdentity.Internal;
+            AccessPolicy.Player(actor, history.View, roomId);
             if (Active().Any(s => s.Players.Any(p => p.Id == playerId)))
                 throw new InvalidOperationException("Player already belongs to a session.");
             return Commit(history, SessionEvent.Create(sessionId, history.View.Sequence + 1,
-                SessionEventKind.PlayerJoined, new Player(playerId, name, roomId, headset)));
+                SessionEventKind.PlayerJoined, new Player(playerId, name, roomId, headset), actor));
         }
     }
 
-    public void Leave(Guid sessionId, Guid playerId)
+    public void Leave(Guid sessionId, Guid playerId, OperatorIdentity? actor = null)
     {
         lock (gate)
         {
             var history = Find(sessionId);
+            actor ??= OperatorIdentity.Internal;
+            AccessPolicy.Read(actor, history.View.RoomIds);
+            var player = history.View.Players.SingleOrDefault(p => p.Id == playerId)
+                ?? throw new KeyNotFoundException("Player does not exist.");
+            AccessPolicy.Player(actor, history.View, player.RoomId);
             Commit(history, SessionEvent.Create(sessionId, history.View.Sequence + 1,
-                SessionEventKind.PlayerLeft, new PlayerLeft(playerId)));
+                SessionEventKind.PlayerLeft, new PlayerLeft(playerId), actor));
         }
     }
 
-    public CommandReceipt Execute(Guid id, ControlCommand command)
+    public CommandReceipt Execute(Guid id, ControlCommand command, OperatorIdentity? actor = null)
     {
         ArgumentNullException.ThrowIfNull(command);
         SessionProjection.ValidateCommand(command);
         lock (gate)
         {
             var history = Find(id);
+            actor ??= OperatorIdentity.Internal;
+            AccessPolicy.Manage(actor, history.View.Mode, history.View.RoomIds);
             var previous = history.Events.FirstOrDefault(e => e.Kind == SessionEventKind.ControlApplied
                 && e.Read<ControlCommand>().CommandId == command.CommandId);
             if (previous is not null)
             {
-                if (previous.Read<ControlCommand>() != command)
+                if (previous.Read<ControlCommand>() != command || (previous.Actor ?? OperatorIdentity.Internal) != actor)
                     throw new InvalidOperationException("Command ID already used with different content.");
                 return new(command.CommandId, previous.Sequence, true, Snapshot(history.View));
             }
             if (command.ExpectedSequence.HasValue && command.ExpectedSequence != history.View.Sequence)
                 throw new InvalidOperationException("Session changed; refresh before issuing this command.");
-            var entry = SessionEvent.Create(id, history.View.Sequence + 1, SessionEventKind.ControlApplied, command);
+            var entry = SessionEvent.Create(id, history.View.Sequence + 1, SessionEventKind.ControlApplied, command, actor);
             var updated = Commit(history, entry);
             return new(command.CommandId, entry.Sequence, false, updated);
         }
     }
 
-    public void End(Guid id) => Execute(id, new(Guid.NewGuid(), ControlAction.End));
+    public void End(Guid id, OperatorIdentity? actor = null) => Execute(id, new(Guid.NewGuid(), ControlAction.End), actor);
 
-    public RoomView[] Rooms()
+    public RoomView[] Rooms(OperatorIdentity? actor = null)
     {
-        lock (gate) return Enumerable.Range(1, RoomCount).Select(id =>
+        lock (gate) return Enumerable.Range(1, RoomCount)
+            .Where(id => AccessPolicy.CanRead(actor ?? OperatorIdentity.Internal, [id])).Select(id =>
         {
             var session = Active().SingleOrDefault(s => s.RoomIds.Contains(id));
             return new RoomView(id, PlayersPerRoom, session?.Id, session?.Players.Count(p => p.RoomId == id) ?? 0);

@@ -6,13 +6,13 @@ public enum SessionEventKind { Created, PlayerJoined, PlayerLeft, ControlApplied
 public record SessionCreated(SessionMode Mode, int[] RoomIds, Mission Mission);
 public record PlayerLeft(Guid PlayerId);
 public record SessionEvent(int SchemaVersion, Guid EventId, Guid SessionId, long Sequence,
-    DateTimeOffset RecordedAtUtc, SessionEventKind Kind, JsonElement Payload)
+    DateTimeOffset RecordedAtUtc, SessionEventKind Kind, JsonElement Payload, OperatorIdentity? Actor = null)
 {
     public T Read<T>() => Payload.Deserialize<T>(JsonFormat.Options)
         ?? throw new InvalidDataException("Missing event payload.");
-    internal static SessionEvent Create<T>(Guid id, long sequence, SessionEventKind kind, T payload) =>
-        new(1, Guid.NewGuid(), id, sequence, DateTimeOffset.UtcNow, kind,
-            JsonSerializer.SerializeToElement(payload, JsonFormat.Options));
+    internal static SessionEvent Create<T>(Guid id, long sequence, SessionEventKind kind, T payload, OperatorIdentity actor) =>
+        new(2, Guid.NewGuid(), id, sequence, DateTimeOffset.UtcNow, kind,
+            JsonSerializer.SerializeToElement(payload, JsonFormat.Options), actor);
 }
 
 // Use the same transition rules for commands and reconstruction after a restart.
@@ -49,21 +49,42 @@ internal static class SessionProjection
 
     internal static SessionView Apply(SessionView? current, SessionEvent entry)
     {
-        if (entry.SchemaVersion != 1 || entry.EventId == Guid.Empty || entry.SessionId == Guid.Empty
+        if (entry.SchemaVersion is not (1 or 2) || entry.EventId == Guid.Empty || entry.SessionId == Guid.Empty
             || entry.Sequence != (current?.Sequence ?? 0) + 1 || !Enum.IsDefined(entry.Kind)
             || entry.RecordedAtUtc == default || entry.RecordedAtUtc.Offset != TimeSpan.Zero
             || (current is not null && current.Id != entry.SessionId))
             throw new InvalidDataException("Unsupported or inconsistent event envelope.");
+        if (entry.SchemaVersion == 2 && entry.Actor is null)
+            throw new InvalidDataException("Version 2 events require an authenticated or internal actor.");
+        if (entry.SchemaVersion == 1 && entry.Actor is not null)
+            throw new InvalidDataException("Legacy events cannot assert an authenticated actor.");
+        var actor = entry.Actor ?? OperatorIdentity.Internal;
+        AccessPolicy.Validate(actor);
         if (current is null)
         {
             if (entry.Kind != SessionEventKind.Created) throw new InvalidDataException("History must begin with Created.");
             var created = entry.Read<SessionCreated>();
             ValidateCreation(created);
+            AccessPolicy.Manage(actor, created.Mode, created.RoomIds);
             return new(entry.SessionId, created.Mode, created.RoomIds, created.Mission,
                 entry.RecordedAtUtc, null, null, SessionState.Preparing, [],
                 created.Mission.Definition.Environment, created.Mission.Definition.Enemies, entry.Sequence);
         }
         if (current.State == SessionState.Ended) throw new InvalidOperationException("Session has ended.");
+        switch (entry.Kind)
+        {
+            case SessionEventKind.PlayerJoined:
+                AccessPolicy.Player(actor, current, entry.Read<Player>().RoomId);
+                break;
+            case SessionEventKind.PlayerLeft:
+                var player = current.Players.SingleOrDefault(p => p.Id == entry.Read<PlayerLeft>().PlayerId)
+                    ?? throw new KeyNotFoundException("Player does not exist.");
+                AccessPolicy.Player(actor, current, player.RoomId);
+                break;
+            case SessionEventKind.ControlApplied:
+                AccessPolicy.Manage(actor, current.Mode, current.RoomIds);
+                break;
+        }
         var updated = entry.Kind switch
         {
             SessionEventKind.PlayerJoined => Join(current, entry.Read<Player>()),

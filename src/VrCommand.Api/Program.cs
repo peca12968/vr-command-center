@@ -2,6 +2,11 @@ using System.Text.Json.Serialization;
 using VrCommand.Core;
 
 var builder = WebApplication.CreateBuilder(args);
+var operatorKeyFile = builder.Configuration["OperatorKeyFile"];
+if (!string.IsNullOrWhiteSpace(operatorKeyFile))
+    builder.Configuration.AddJsonFile(Path.GetFullPath(operatorKeyFile), optional: false, reloadOnChange: false)
+        .AddEnvironmentVariables().AddCommandLine(args);
+var authentication = new OperatorAuthentication(builder.Configuration);
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: false)));
 var dataDirectory = Path.GetFullPath(builder.Configuration["DataDirectory"]
@@ -20,12 +25,30 @@ app.Services.GetRequiredService<SessionManager>();
 
 app.Use(async (context, next) =>
 {
+    if (context.Request.Path.StartsWithSegments("/api"))
+    {
+        var identity = authentication.Authenticate(context.Request.Headers.Authorization.ToString());
+        if (identity is null)
+        {
+            context.Response.StatusCode = 401;
+            context.Response.Headers.WWWAuthenticate = "Bearer";
+            await context.Response.WriteAsJsonAsync(new { error = "Operator authentication required." });
+            return;
+        }
+        context.Items[typeof(OperatorIdentity)] = identity;
+    }
+    await next(context);
+});
+
+app.Use(async (context, next) =>
+{
     try { await next(context); }
-    catch (Exception ex) when (ex is ArgumentException or KeyNotFoundException or InvalidOperationException)
+    catch (Exception ex) when (ex is ArgumentException or KeyNotFoundException or InvalidOperationException or AccessDeniedException)
     {
         context.Response.StatusCode = ex switch
         {
             ArgumentException => 400,
+            AccessDeniedException => 403,
             KeyNotFoundException => 404,
             _ => 409
         };
@@ -33,40 +56,44 @@ app.Use(async (context, next) =>
     }
 });
 
-app.MapGet("/", () => new { service = "VR Command Center", stage = "control-plane prototype", version = "0.2.0" });
+app.MapGet("/", () => new { service = "VR Command Center", stage = "control-plane prototype", version = "0.3.0" });
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
-app.MapGet("/api/rooms", (SessionManager manager) => manager.Rooms());
+app.MapGet("/api/me", (HttpContext context) => Actor(context));
+app.MapGet("/api/rooms", (SessionManager manager, HttpContext context) => manager.Rooms(Actor(context)));
 app.MapGet("/api/missions", (MissionStore store) => store.List());
 app.MapGet("/api/missions/{id:guid}", (Guid id, MissionStore store) => store.Get(id));
-app.MapPost("/api/missions", (MissionDraft draft, MissionStore store) =>
+app.MapPost("/api/missions", (MissionDraft draft, MissionStore store, HttpContext context) =>
 {
+    AccessPolicy.AuthorMission(Actor(context));
     var mission = store.Create(draft);
     return Results.Created($"/api/missions/{mission.Id}", mission);
 });
-app.MapPost("/api/sessions", (CreateSession request, MissionStore store, SessionManager manager) =>
+app.MapPost("/api/sessions", (CreateSession request, MissionStore store, SessionManager manager, HttpContext context) =>
 {
-    var session = manager.Create(request.Mode, request.RoomIds, store.Get(request.MissionId));
+    var session = manager.Create(request.Mode, request.RoomIds, store.Get(request.MissionId), Actor(context));
     return Results.Created($"/api/sessions/{session.Id}", session);
 });
-app.MapGet("/api/sessions/{id:guid}", (Guid id, SessionManager manager) => manager.Get(id));
-app.MapGet("/api/sessions", (bool? includeEnded, SessionManager manager) => manager.List(includeEnded ?? false));
-app.MapGet("/api/sessions/{id:guid}/events", (Guid id, long? after, int? limit, SessionManager manager) =>
-    manager.Events(id, after ?? 0, limit ?? 100));
-app.MapPost("/api/sessions/{id:guid}/commands", (Guid id, ControlCommand command, SessionManager manager) =>
-    manager.Execute(id, command));
-app.MapPost("/api/sessions/{id:guid}/players", (Guid id, JoinPlayer request, SessionManager manager) =>
-    manager.Join(id, request.PlayerId, request.Name, request.RoomId, request.Headset));
-app.MapDelete("/api/sessions/{id:guid}/players/{playerId:guid}", (Guid id, Guid playerId, SessionManager manager) =>
+app.MapGet("/api/sessions/{id:guid}", (Guid id, SessionManager manager, HttpContext context) => manager.Get(id, Actor(context)));
+app.MapGet("/api/sessions", (bool? includeEnded, SessionManager manager, HttpContext context) => manager.List(includeEnded ?? false, Actor(context)));
+app.MapGet("/api/sessions/{id:guid}/events", (Guid id, long? after, int? limit, SessionManager manager, HttpContext context) =>
+    manager.Events(id, after ?? 0, limit ?? 100, Actor(context)));
+app.MapPost("/api/sessions/{id:guid}/commands", (Guid id, ControlCommand command, SessionManager manager, HttpContext context) =>
+    manager.Execute(id, command, Actor(context)));
+app.MapPost("/api/sessions/{id:guid}/players", (Guid id, JoinPlayer request, SessionManager manager, HttpContext context) =>
+    manager.Join(id, request.PlayerId, request.Name, request.RoomId, request.Headset, Actor(context)));
+app.MapDelete("/api/sessions/{id:guid}/players/{playerId:guid}", (Guid id, Guid playerId, SessionManager manager, HttpContext context) =>
 {
-    manager.Leave(id, playerId);
+    manager.Leave(id, playerId, Actor(context));
     return Results.NoContent();
 });
-app.MapDelete("/api/sessions/{id:guid}", (Guid id, SessionManager manager) =>
+app.MapDelete("/api/sessions/{id:guid}", (Guid id, SessionManager manager, HttpContext context) =>
 {
-    manager.End(id);
+    manager.End(id, Actor(context));
     return Results.NoContent();
 });
 app.Run();
+
+static OperatorIdentity Actor(HttpContext context) => (OperatorIdentity)context.Items[typeof(OperatorIdentity)]!;
 
 record CreateSession(Guid MissionId, SessionMode Mode, int[] RoomIds);
 record JoinPlayer(Guid PlayerId, string Name, int RoomId, HeadsetKind Headset);

@@ -67,6 +67,7 @@ try
     });
     Check(accepted == 5 && manager.Get(concurrent.Id).Players.Length == 5, "Concurrent joins cannot exceed room capacity");
     LifecycleChecks.Run(Check, directory, mission);
+    OperatorChecks.Run(Check, mission);
     Console.WriteLine($"All {checks} checks passed. These are control-plane checks, not headset or network load tests.");
 }
 finally
