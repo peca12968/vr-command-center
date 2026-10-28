@@ -115,7 +115,9 @@ async function main() {
     check(lifecycleAttempts.length === 2 && lifecycleAttempts[0].key && JSON.stringify(lifecycleAttempts[0]) === JSON.stringify(lifecycleAttempts[1]) && session.players.length === 1 && session.sequence === 2,
       'Join retry retains the original player UUID and request key with one admitted seat');
     lifecycleKind = null;
-    await page.locator('#player-name').fill('Temporary'); await page.locator('#join-form button').click();
+    // A lower fixed UUID puts this departed player before Alpha in statistics, exposing row-order assumptions.
+    await api('/sessions/' + session.id + '/players', 'POST', { playerId: '00000000-0000-0000-0000-000000000001', name: 'Temporary', roomId: session.roomIds[0], headset: 'Quest3' });
+    await page.locator('#refresh').click();
     await page.waitForFunction(() => document.querySelector('#roster').textContent.includes('Temporary'));
     lifecycleKind = 'leave'; loseLifecycle = true; lifecycleAttempts.length = 0;
     page.once('dialog', dialog => dialog.accept()); await page.locator('#roster tr').filter({ hasText: 'Temporary' }).getByRole('button', { name: '移除', exact: true }).click();
@@ -174,7 +176,7 @@ async function main() {
     for (const report of [{ kind: 'ShotFired', shotId }, { kind: 'ShotHit', shotId, enemyId }, { kind: 'EnemyEliminated', shotId, enemyId }, { kind: 'PlayerDamaged', damage: 20 }]) await api('/sessions/' + session.id + '/combat', 'POST', { reportId: randomUUID(), origin: 'Simulation', playerId, ...report }, 'GameServer');
     await page.locator('#refresh').click();
     await page.waitForFunction(() => document.querySelector('#statistics-origin').textContent === '模擬資料');
-    check((await page.locator('#statistics tr').first().locator('td').allTextContents()).join('|') === 'Alpha 01|1|1|20|1|100%|80', 'Console shows ammo, kills, damage, hits, accuracy and health from durable simulated events');
+    check((await page.locator('#statistics tr').filter({ hasText: 'Alpha 01' }).locator('td').allTextContents()).join('|') === 'Alpha 01|1|1|20|1|100%|80', 'Console shows ammo, kills, damage, hits, accuracy and health from durable simulated events');
     check(!(await page.locator('#event-list').innerText()).includes('Invalid Date'), 'History renders the server-recorded event time');
     await page.screenshot({ path: path.join(screenshots, 'operations.png'), fullPage: true });
     const xssName = '<img src=x onerror="window.injected=true">';
