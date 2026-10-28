@@ -78,6 +78,7 @@ try
     TelemetryChecks.Run(Check, directory, mission);
     WorldChecks.Run(Check, directory);
     CameraBookmarkChecks.Run(Check, directory);
+    MissionLibraryChecks.Run(Check, directory);
     WorldSourceChecks.Run(Check, directory);
     Console.WriteLine($"All {checks} checks passed. These are domain checks, not headset or gameplay load tests.");
 }

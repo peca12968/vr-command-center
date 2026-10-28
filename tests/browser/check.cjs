@@ -36,8 +36,8 @@ async function main() {
       if (processApi.exitCode !== null || attempt > 100) throw new Error('Isolated API did not start: ' + Object.values(tokens).reduce((text, key) => text.replaceAll(key, '[redacted]'), apiLog));
       await delay(100);
     }
-    async function api(route, method = 'GET', body, role = 'Master', expected = 200, admissionId) {
-      const response = await fetch(base + '/api' + route, { method, headers: { Authorization: 'Bearer ' + tokens[role], 'Content-Type': 'application/json', ...(admissionId ? { 'If-Match-Admission': admissionId } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
+    async function api(route, method = 'GET', body, role = 'Master', expected = 200, admissionId, requestId) {
+      const response = await fetch(base + '/api' + route, { method, headers: { Authorization: 'Bearer ' + tokens[role], 'Content-Type': 'application/json', ...(admissionId ? { 'If-Match-Admission': admissionId } : {}), ...(requestId ? { 'Idempotency-Key': requestId } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
       assert.equal(response.status, expected, method + ' ' + route);
       return response.status === 204 ? null : response.json();
     }
@@ -79,6 +79,7 @@ async function main() {
     check(mission.definition.props.length === 2 && mission.definition.props[0].position.x === 3.5 && mission.definition.props[0].yawDegrees === 45 && mission.definition.environment.lightning, 'Mission save persists the edited layout and environment through the real API');
     page.once('dialog', dialog => dialog.accept()); await page.locator('#new-mission').click();
     await page.locator('#load-mission').click();
+    await page.waitForFunction(name => document.querySelector('#draft-name').value === name && !document.querySelector('#mission-fields').disabled, mission.definition.name);
     check(await page.locator('#draft-name').inputValue() === mission.definition.name && await page.locator('#prop-layer [data-index]').count() === 2 && await page.locator('#prop-x').inputValue() === '3.5', 'Saved mission can be loaded back into the editor without losing layout coordinates');
     await page.screenshot({ path: path.join(screenshots, 'mission-planner.png'), fullPage: true });
     const lifecycleAttempts = [];
@@ -145,6 +146,7 @@ async function main() {
     await page.locator('[data-command=Begin]').click();
     await page.waitForFunction(() => document.querySelector('#session-phase').textContent === '執行中');
     check((await api('/sessions/' + session.id)).state === 'Running', 'Operator starts the mission from the console');
+    await require('./mission-browser.cjs')({ page, context, api, tokens, base, mission, session, screenshots, check });
     await page.locator('#live-weather').selectOption('Fog'); await page.locator('#live-lightning').uncheck();
     await page.locator('#environment-form button[type=submit]').click();
     await page.waitForFunction(() => document.querySelector('#live-environment').textContent.includes('濃霧'));
@@ -212,7 +214,7 @@ async function main() {
     await roomPage.waitForFunction(() => document.querySelectorAll('#roster tr').length === 2);
     check((await api('/sessions/' + linked.id)).players.some(player => player.name === 'Room 1 Alpha' && player.roomId === 1), 'Room controller can add its own player to the linked roster');
     await roomPage.locator('#tab-missions').click();
-    check(await roomPage.locator('#draft-name').isDisabled() && await roomPage.locator('#mission-form button[type=submit]').isDisabled(), 'Room controller mission editing remains read-only');
+    check(await roomPage.locator('#draft-name').isDisabled() && await roomPage.locator('#mission-form button[type=submit]').isDisabled() && await roomPage.locator('#save-revision').isDisabled(), 'Room controller mission editing and revision saving remain read-only');
     check(await roomPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'Console layout fits a 390-pixel viewport without page overflow');
     await roomPage.locator('#tab-operations').click(); await roomPage.screenshot({ path: path.join(screenshots, 'room-controller.png'), fullPage: true });
     await page.locator('#include-ended').check(); await page.locator('#refresh').click();

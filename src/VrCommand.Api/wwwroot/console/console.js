@@ -5,7 +5,7 @@ const $ = id => document.getElementById(id);
 const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫停', Ended: '已結束' };
 const weatherNames = { Clear: '晴朗', Rain: '下雨', Fog: '濃霧', Storm: '暴風雨' };
 const behaviorNames = { Hold: '守備', Patrol: '巡邏', Advance: '推進' };
-const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: null, rooms: [], missions: [], sessions: [], session: null, selected: '', pending: null, props: [], prop: -1, environmentSequence: null, enemiesSequence: null };
+const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: null, rooms: [], missions: [], catalog: [], launchPinned: null, history: null, draftBase: null, draftChanged: false, draftSavedAt: '', sessions: [], session: null, selected: '', pending: null, props: [], prop: -1, environmentSequence: null, enemiesSequence: null };
 const world = mountWorld(() => state.key, logout);
 let timer;
 
@@ -50,7 +50,7 @@ async function api(path, method = 'GET', body, requestId, admissionId) {
       try { message = JSON.parse(content).error || message; } catch { /* Non-domain errors have no stable JSON contract. */ }
       if (response.status === 401) { logout(); message = '憑證無效或已更換，請重新登入。'; }
       if (response.status === 403) message = '目前身分沒有此操作權限。';
-      if (response.status === 409) message = '場次狀態或名額已變更，請重新整理並確認後再操作。';
+      if (response.status === 409) message = path.startsWith('/missions') ? '任務版本已變更或原請求內容不一致；草稿仍保留，可載入最新版或另存新任務。' : '場次狀態或名額已變更，請重新整理並確認後再操作。';
       const error = new Error(message); error.status = response.status; throw error;
     }
     return content ? JSON.parse(content) : null;
@@ -66,13 +66,13 @@ async function run(action) {
 function logout() {
   replay.active(false); replay.reset(); world.active(false); world.reset();
   state.epoch++; state.key = ''; state.actor = null; state.selected = ''; state.session = null; state.pending = null;
-  state.rooms = []; state.missions = []; state.sessions = []; state.refreshPromise = null;
+  state.rooms = []; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
   state.props = []; state.prop = -1;
   clearInterval(timer);
   $('workspace').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true;
   $('identity').textContent = '尚未登入'; $('login-key').value = '';
   $('rooms').replaceChildren(); $('roster').replaceChildren(); $('statistics').replaceChildren(); $('event-list').replaceChildren();
-  $('mission-form').reset(); $('session-panel').hidden = true; notify('');
+  $('mission-form').reset(); $('launch-mission').replaceChildren(); $('edit-mission').replaceChildren(); renderHistory(); renderProps(); $('draft-status').textContent = '尚未儲存的草稿'; $('session-panel').hidden = true; notify('');
 }
 async function login(event) {
   event.preventDefault();
@@ -104,12 +104,19 @@ function refresh() {
   return pending;
 }
 async function refreshData(epoch) {
-  const [rooms, missions, sessions] = await Promise.all([api('/rooms'), api('/missions'), api('/sessions?includeEnded=' + $('include-ended').checked)]);
+  const [rooms, catalog, sessions] = await Promise.all([api('/rooms'), api('/mission-library'), api('/sessions?includeEnded=' + $('include-ended').checked)]);
   if (epoch !== state.epoch) return;
-  state.rooms = rooms; state.missions = missions; state.sessions = sessions;
+  const merged = new Map(state.catalog.map(row => [row.seriesId, row]));
+  for (const row of catalog) if (!merged.has(row.seriesId) || merged.get(row.seriesId).number < row.number) merged.set(row.seriesId, row);
+  const heads = [...merged.values()].sort((a, b) => Date.parse(b.mission.createdAtUtc) - Date.parse(a.mission.createdAtUtc) || a.mission.id.localeCompare(b.mission.id));
+  const launch = $('launch-mission').value, edit = $('edit-mission').value;
+  const prior = [...state.catalog, state.launchPinned].find(row => row?.mission.id === launch);
+  const editedSeries = state.catalog.find(row => row.mission.id === edit)?.seriesId;
+  state.launchPinned = prior && !heads.some(row => row.mission.id === launch) ? prior : null;
+  state.rooms = rooms; state.catalog = heads; state.missions = heads.map(row => row.mission); state.sessions = sessions;
   if (!sessions.some(s => s.id === state.selected)) state.selected = sessions[0]?.id || '';
-  fillOptions('launch-mission', missions.length ? missions.map(m => [m.id, m.definition.name]) : [['', '請先儲存任務']]);
-  fillOptions('edit-mission', missions.length ? missions.map(m => [m.id, m.definition.name]) : [['', '尚無儲存任務']]);
+  missionOptions(launch, heads.find(row => row.seriesId === editedSeries)?.mission.id || edit);
+  draftStatus();
   fillOptions('session-select', sessions.length ? sessions.map(s => [s.id, `${phases[s.state]} · ${s.mission.definition.name} · 房 ${s.roomIds.join('、')}`]) : [['', '目前沒有場次']], state.selected);
   const ownRooms = rooms.filter(r => ownsRoom(r.id));
   fillOptions('launch-room', ownRooms.map(r => [String(r.id), `房間 ${r.id}${r.sessionId ? '（使用中）' : '（空閒）'}`]));
@@ -150,6 +157,12 @@ function applyPermissions() {
   $('create-session-form').querySelector('button').disabled = locked || !state.missions.length || ($('launch-mode').value === 'Linked' ? !master() || state.rooms.some(r => r.sessionId) : !!state.rooms.find(r => r.id === Number($('launch-room').value))?.sessionId);
   $('mission-fields').disabled = locked || !master();
   $('load-mission').disabled = locked || !state.missions.length; $('new-mission').disabled = locked || !master();
+  $('edit-mission').disabled = locked;
+  $('mission-version').disabled = locked || !state.history;
+  $('load-version').disabled = locked || !state.history;
+  $('more-versions').disabled = locked || !state.history?.nextBefore;
+  $('launch-version').disabled = locked || !state.draftBase;
+  $('save-revision').disabled = locked || !master() || !state.draftBase || state.draftBase.number !== knownHeadNumber(state.draftBase.seriesId);
   for (const id of ['environment-fields', 'enemies-fields']) $(id).disabled = locked || !manages() || ended || !session;
   $('join-fields').disabled = locked || session?.state !== 'Preparing';
   $('ticket-fields').disabled = locked || ended || !session;
@@ -218,11 +231,25 @@ async function command(action, extra = {}, expectedSequence = state.session.sequ
   await sendPending();
 }
 async function sendPending() {
-  const pending = state.pending;
+  const pending = state.pending, epoch = state.epoch;
   if (!pending) return;
   try {
     const response = await api(pending.path, pending.method, pending.body, pending.requestId, pending.admissionId);
     if (state.pending !== pending) return;
+    if (pending.kind === 'mission-create' || pending.kind === 'mission-revise') {
+      pending.accepted = response.id;
+      await refreshData(epoch);
+      if (epoch !== state.epoch) return;
+      const revision = await api(`/missions/${response.id}/version`);
+      if (epoch !== state.epoch) return;
+      const history = await api(`/missions/${response.id}/history`);
+      if (epoch !== state.epoch) return;
+      if (!await rememberHead(history, epoch)) return;
+      state.draftBase = revision; state.draftChanged = false; state.draftSavedAt = response.createdAtUtc; state.history = history;
+      state.launchPinned = revision; renderHistory(response.id); missionOptions(response.id, history.headId); draftStatus();
+      state.pending = null;
+      notify('任務保存已確認，原版本與既有場次保持不變。可選擇此版本開場。'); return;
+    }
     state.pending = null;
     if (pending.kind === 'create') { $('include-ended').checked = response.state === 'Ended'; state.selected = response.id; state.session = null; }
     if (pending.kind === 'command' && pending.body.action === 'End' && response.session.combatStream && !response.session.combatStream.sealed) $('include-ended').checked = true;
@@ -230,7 +257,7 @@ async function sendPending() {
     await refresh(); loadEnvironment(); loadEnemies();
     notify({ create: '場次建立結果已確認。請核對目前狀態，再加入玩家及開始任務。', join: '玩家加入操作已確認，請核對目前名冊；尚不代表頭盔在線。', leave: '玩家移出操作已確認，請核對目前名冊。', command: '控制命令已確認。' }[pending.kind]);
   } catch (error) {
-    if (state.pending === pending && error.status >= 400 && error.status < 500) state.pending = null;
+    if (state.pending === pending && !pending.accepted && error.status >= 400 && error.status < 500) state.pending = null;
     throw error;
   }
 }
@@ -260,21 +287,67 @@ async function downloadTicket(player) {
 }
 
 function resetDraft() {
-  $('mission-form').reset(); state.props = []; state.prop = -1; renderProps(); $('draft-status').textContent = '尚未儲存的草稿';
+  $('mission-form').reset(); state.props = []; state.prop = -1; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.history = null;
+  renderProps(); renderHistory(); draftStatus(); applyPermissions();
 }
-function loadDraft() {
-  const mission = state.missions.find(m => m.id === $('edit-mission').value);
-  if (!mission) return;
+function missionOptions(launch, edit) {
+  const entries = state.catalog.map(row => [row.mission.id, `${row.mission.definition.name} · 第 ${row.number} 版`]);
+  const pinned = state.launchPinned;
+  const launchEntries = pinned && !entries.some(([id]) => id === pinned.mission.id) ? [...entries, [pinned.mission.id, `${pinned.mission.definition.name} · 第 ${pinned.number} 版（歷史）`]] : entries;
+  fillOptions('launch-mission', launchEntries.length ? launchEntries : [['', '請先儲存任務']], launch);
+  fillOptions('edit-mission', entries.length ? entries : [['', '尚無儲存任務']], edit);
+}
+function knownHeadNumber(seriesId) {
+  return Math.max(state.catalog.find(row => row.seriesId === seriesId)?.number || 0, state.history?.seriesId === seriesId ? state.history.headNumber : 0);
+}
+async function rememberHead(history, epoch) {
+  const index = state.catalog.findIndex(row => row.seriesId === history.seriesId), known = state.catalog[index];
+  if (known && known.number >= history.headNumber) return epoch === state.epoch;
+  const revision = await api(`/missions/${history.headId}/version`);
+  if (epoch !== state.epoch) return false;
+  const currentIndex = state.catalog.findIndex(row => row.seriesId === history.seriesId), current = state.catalog[currentIndex];
+  if (current && current.number >= revision.number) return true;
+  if (current?.mission.id === $('launch-mission').value) state.launchPinned = current;
+  if (currentIndex < 0) state.catalog.push(revision); else state.catalog[currentIndex] = revision;
+  state.missions = state.catalog.map(row => row.mission); return true;
+}
+function draftStatus() {
+  const base = state.draftBase;
+  let text = state.draftChanged ? '尚未儲存的修改' : state.draftSavedAt ? '已儲存於 ' + time(state.draftSavedAt) : base ? '已載入草稿' : '尚未儲存的草稿';
+  if (base) {
+    text += ` · 基於「${base.mission.definition.name}」第 ${base.number} 版`;
+    const latest = knownHeadNumber(base.seriesId);
+    if (latest > base.number) text += ` · 已有第 ${latest} 版，修訂前請載入最新版，或另存新任務`;
+  }
+  $('draft-status').textContent = text;
+}
+function renderHistory(selected) {
+  const history = state.history;
+  $('mission-history').hidden = !history;
+  fillOptions('mission-version', history ? [...history.versions].sort((a, b) => b.number - a.number).map(row => [row.id, `第 ${row.number} 版 · ${row.name} · ${new Date(row.createdAtUtc).toLocaleString('zh-TW')}`]) : [], selected);
+  $('history-status').textContent = history ? `已讀取 ${history.versions.length} 版 · 本次查詢最新第 ${history.headNumber} 版` : '';
+}
+async function loadDraft(id = $('edit-mission').value, older = false) {
+  if (!id) return;
+  const epoch = state.epoch;
+  const history = await api(`/missions/${id}/history`);
+  if (epoch !== state.epoch) return;
+  const revision = await api(`/missions/${older ? id : history.headId}/version`), mission = revision.mission;
+  if (epoch !== state.epoch) return;
+  if (!await rememberHead(history, epoch)) return;
   const draft = mission.definition;
   $('draft-name').value = draft.name; $('draft-briefing').value = draft.briefing; $('draft-duration').value = draft.durationSeconds;
   setEnvironment('draft', draft.environment); setEnemies('draft', draft.enemies);
   state.props = structuredClone(draft.props); state.prop = state.props.length ? 0 : -1;
-  renderProps(); $('draft-status').textContent = '已載入草稿，修改後另存新任務';
+  state.draftBase = revision; state.draftChanged = false; state.draftSavedAt = ''; state.history = history;
+  if (!history.versions.some(row => row.id === mission.id)) history.versions.push({ id: mission.id, number: revision.number, name: draft.name, createdAtUtc: mission.createdAtUtc });
+  renderProps(); renderHistory(mission.id); missionOptions(undefined, history.headId); draftStatus();
 }
-async function saveMission() {
-  const mission = await api('/missions', 'POST', { name: $('draft-name').value.trim(), briefing: $('draft-briefing').value, durationSeconds: Number($('draft-duration').value), environment: environment('draft'), enemies: enemies('draft'), props: structuredClone(state.props) });
-  await refresh(); $('launch-mission').value = mission.id; $('edit-mission').value = mission.id;
-  $('draft-status').textContent = '已儲存於 ' + time(mission.createdAtUtc); notify('任務已儲存，可到「房間與場次」選取開局。');
+async function saveMission(revise = false) {
+  if (state.pending || (revise && !state.draftBase)) return;
+  state.pending = { kind: revise ? 'mission-revise' : 'mission-create', path: revise ? `/missions/${state.draftBase.mission.id}/revisions` : '/missions', method: 'POST', requestId: uuid(),
+    body: { name: $('draft-name').value.trim(), briefing: $('draft-briefing').value, durationSeconds: Number($('draft-duration').value), environment: environment('draft'), enemies: enemies('draft'), props: structuredClone(state.props) } };
+  await sendPending();
 }
 function svgNode(tag, attributes) { const node = document.createElementNS('http://www.w3.org/2000/svg', tag); for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value); return node; }
 function renderProps(updateInspector = true) {
@@ -291,7 +364,7 @@ function renderProps(updateInspector = true) {
   if (prop) { $('prop-asset').value = prop.assetId; for (const axis of ['x', 'y', 'z']) $('prop-' + axis).value = prop.position[axis]; $('prop-yaw').value = prop.yawDegrees; }
 }
 function editable() { return master() && !state.busy && !state.pending; }
-function dirtyDraft() { $('draft-status').textContent = '尚未儲存的草稿'; }
+function dirtyDraft() { state.draftChanged = true; draftStatus(); }
 function addProp(assetId) {
   if (!editable()) return;
   if (state.props.length >= 500) { notify('最多可放置 500 個物件。', true); return; }
@@ -346,7 +419,22 @@ submit('join-form', joinPlayer);
 submit('environment-form', () => command('SetEnvironment', { environment: environment('live') }, state.environmentSequence));
 submit('enemies-form', () => command('SetEnemies', { enemies: enemies('live') }, state.enemiesSequence));
 submit('mission-form', saveMission);
-$('load-mission').addEventListener('click', () => { loadDraft(); });
+$('load-mission').addEventListener('click', () => run(() => loadDraft()));
+$('load-version').addEventListener('click', () => run(() => loadDraft($('mission-version').value, true)));
+$('more-versions').addEventListener('click', () => run(async () => {
+  if (!state.history?.nextBefore) return;
+  const previous = state.history, epoch = state.epoch;
+  const history = await api(`/missions/${previous.seriesId}/history?before=${previous.nextBefore}`);
+  if (epoch !== state.epoch || state.history !== previous) return;
+  history.versions = [...previous.versions, ...history.versions.filter(row => !previous.versions.some(old => old.id === row.id))];
+  state.history = history; renderHistory(); draftStatus();
+}));
+$('save-revision').addEventListener('click', () => { if ($('mission-form').reportValidity()) run(() => saveMission(true)); });
+$('launch-version').addEventListener('click', () => {
+  if (!state.draftBase || state.pending || state.busy) return;
+  state.launchPinned = state.draftBase; missionOptions(state.draftBase.mission.id); tab('operations');
+  notify(`已選取保存的第 ${state.draftBase.number} 版開場；未儲存的草稿修改不會套用。`);
+});
 $('new-mission').addEventListener('click', () => { if (confirm('清除目前未儲存的草稿並建立新任務？')) resetDraft(); });
 $('add-sandbag').addEventListener('click', () => addProp('sandbag'));
 $('add-barrel').addEventListener('click', () => addProp('barrel'));

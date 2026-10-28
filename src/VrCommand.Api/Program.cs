@@ -17,7 +17,7 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: false)));
 var dataDirectory = Path.GetFullPath(builder.Configuration["DataDirectory"]
     ?? Path.Combine(builder.Environment.ContentRootPath, "data", "missions"));
-builder.Services.AddSingleton(new MissionStore(dataDirectory));
+builder.Services.AddSingleton(_ => new SqliteMissionLibrary(dataDirectory));
 var ticketSigner = new PlayerJoinTicketSigner(PlayerTicketKey.Load(Path.GetDirectoryName(dataDirectory)!,
     builder.Configuration["PlayerTicketSigningKey"]));
 var sessionDirectory = Path.GetFullPath(builder.Configuration["SessionDataDirectory"]
@@ -31,6 +31,7 @@ builder.Services.AddSingleton(services => new WorldRecordings(sessionDirectory, 
 var app = builder.Build();
 // Fail startup on inconsistent persisted histories, before reporting a healthy service.
 app.Services.GetRequiredService<SessionManager>();
+app.Services.GetRequiredService<SqliteMissionLibrary>();
 app.Services.GetRequiredService<WorldRecordings>();
 app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
 
@@ -81,22 +82,31 @@ app.Use(async (context, next) =>
     }
 });
 
-app.MapGet("/", () => new { service = "VR Command Center", stage = "persisted operator cameras and Quest connection integration prototype", version = "0.14.1" });
+app.MapGet("/", () => new { service = "VR Command Center", stage = "immutable mission revisions and Quest connection integration prototype", version = "0.15.0" });
 app.MapWorldRoutes();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/api/me", (HttpContext context) => Actor(context));
 app.MapGet("/api/rooms", (SessionManager manager, HttpContext context) => manager.Rooms(Actor(context)));
-app.MapGet("/api/missions", (MissionStore store) => store.List());
-app.MapGet("/api/missions/{id:guid}", (Guid id, MissionStore store) => store.Get(id));
-app.MapPost("/api/missions", (MissionDraft draft, MissionStore store, HttpContext context) =>
+app.MapGet("/api/missions", (SqliteMissionLibrary store, HttpContext context) => store.List(Actor(context)));
+app.MapGet("/api/mission-library", (SqliteMissionLibrary store, HttpContext context) => store.Heads(Actor(context)));
+app.MapGet("/api/missions/{id:guid}", (Guid id, SqliteMissionLibrary store, HttpContext context) => store.Get(id, Actor(context)));
+app.MapGet("/api/missions/{id:guid}/version", (Guid id, SqliteMissionLibrary store, HttpContext context) => store.Version(id, Actor(context)));
+app.MapGet("/api/missions/{id:guid}/history", (Guid id, int? before, int? limit, SqliteMissionLibrary store, HttpContext context) => store.History(id, before, limit ?? 20, Actor(context)));
+app.MapPost("/api/missions", (MissionDraft draft, SqliteMissionLibrary store, HttpContext context) =>
 {
     AccessPolicy.AuthorMission(Actor(context));
-    var mission = store.Create(draft);
+    var mission = store.Create(draft, Actor(context), RequestId(context));
     return Results.Created($"/api/missions/{mission.Id}", mission);
 });
-app.MapPost("/api/sessions", (CreateSession request, MissionStore store, SessionManager manager, HttpContext context) =>
+app.MapPost("/api/missions/{id:guid}/revisions", (Guid id, MissionDraft draft, SqliteMissionLibrary store, HttpContext context) =>
 {
-    var session = manager.Create(request.Mode, request.RoomIds, store.Get(request.MissionId), Actor(context), RequestId(context));
+    AccessPolicy.AuthorMission(Actor(context));
+    var mission = store.Revise(id, draft, Actor(context), RequestId(context) ?? throw new ArgumentException("Idempotency-Key is required for mission revisions."));
+    return Results.Created($"/api/missions/{mission.Id}", mission);
+});
+app.MapPost("/api/sessions", (CreateSession request, SqliteMissionLibrary store, SessionManager manager, HttpContext context) =>
+{
+    var session = manager.Create(request.Mode, request.RoomIds, store.Get(request.MissionId, Actor(context)), Actor(context), RequestId(context));
     return Results.Created($"/api/sessions/{session.Id}", session);
 });
 app.MapGet("/api/sessions/{id:guid}", (Guid id, SessionManager manager, HttpContext context) => manager.Get(id, Actor(context)));

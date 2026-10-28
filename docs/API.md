@@ -1,17 +1,21 @@
-# 管理、統計與玩家接入 API v0.11
+# 管理、統計與玩家接入 API v0.15
 
 REST、UTF-8 JSON；預設範例地址 `http://127.0.0.1:5080`。列舉使用字串，不接受數字列舉。提供管理、統計與短效入場票券；姿態不經此 API。Unity 遊戲來源碼尚待編譯／運行。所有 `/api` 呼叫須帶 `Authorization: Bearer <credential>`；配置與角色表見 [AUTHORIZATION.md](AUTHORIZATION.md)。
 
-v0.6 新增瀏覽器介面 `/console/`，操作見 [CONSOLE.md](CONSOLE.md)。靜態介面可匿名載入，資料與操作仍經下列已認證 API；任務每次儲存使用 POST 建立新 ID，未新增覆寫或版本修改端點。
+瀏覽器介面 `/console/` 的操作見 [CONSOLE.md](CONSOLE.md)。靜態介面可匿名載入，資料與操作仍經下列已認證 API。v0.15 新增不可變任務修訂、metadata 歷史與 latest library；舊版本及既有場次不被改動，規範與資料遷移見 [MISSION_VERSIONS.md](MISSION_VERSIONS.md)。
 
 | 方法 | 路徑 | 行為 |
 |---|---|---|
 | GET | `/health` | 服務存活狀態 |
 | GET | `/api/me` | 經認證的控制台身分與房間範圍 |
 | GET | `/api/rooms` | 五房名額、場次與目前人數 |
-| GET | `/api/missions` | 列出磁碟保存任務 |
+| GET | `/api/missions` | 相容列出全部不可變 Mission 快照，包含歷史版本 |
+| GET | `/api/mission-library` | 每條任務系列的最新版及 lineage metadata，主控台輪詢使用 |
+| GET | `/api/missions/{id}/version` | 精確版本及 series／number／previous／author |
+| GET | `/api/missions/{id}/history` | 版號 metadata 分頁，before 不含、limit 預設 20／最多 100 |
 | GET | `/api/missions/{id}` | 取得任務 |
 | POST | `/api/missions` | 以 `examples/mission.json` 格式建立任務，回傳 201 |
+| POST | `/api/missions/{id}/revisions` | 從精確 head 保存下一版，必須 Idempotency-Key；過時 base 為 409 |
 | POST | `/api/sessions` | 依任務建立場次，回傳 201 |
 | GET | `/api/sessions` | 活動場次；加 `?includeEnded=true` 包含歷史 |
 | GET | `/api/sessions/{id}` | 場次快照及玩家名冊，包含已結束場次 |

@@ -49,7 +49,7 @@ def request(method, path, body=None, expected=200, identity="Master", request_id
         response = error
     with response:
         payload = response.read()
-        if response.status != expected:
+        if response.status not in (expected if isinstance(expected, tuple) else (expected,)):
             raise AssertionError(f"{method} {path}: expected {expected}, got {response.status}: {payload!r}")
     checks += 1
     return json.loads(payload) if payload else None
@@ -145,13 +145,52 @@ try:
             rooms = request("GET", "/api/rooms")
             require(len(rooms) == 5 and all(r["capacity"] == 5 for r in rooms), "Five rooms expose five slots each")
             draft = json.loads((ROOT / "examples/mission.json").read_text(encoding="utf-8"))
-            mission = request("POST", "/api/missions", draft, 201)
+            mission_key = str(uuid.uuid4())
+            mission = request("POST", "/api/missions", draft, 201, request_id=mission_key)
             loaded = request("GET", f"/api/missions/{mission['id']}")
             require(loaded["definition"] == draft, "Mission round-trips through JSON persistence")
             require(len(request("GET", "/api/missions")) == 1, "Saved mission appears in list")
             request("POST", "/api/missions", draft, 403, identity="Room1")
             request("POST", "/api/missions", draft, 403, identity="GameServer")
             request("POST", "/api/missions", {**draft, "durationSeconds": 0}, 400)
+            require(request("POST", "/api/missions", draft, 201, request_id=mission_key) == mission, "Mission creation response can be retried with its original durable key")
+            request("POST", "/api/missions", {**draft, "name": "Changed request"}, 409, request_id=mission_key)
+            revisions_path = f"/api/missions/{mission['id']}/revisions"
+            revision_draft = {**draft, "name": "Second version", "durationSeconds": 1200,
+                "environment": {**draft["environment"], "weather": "Storm", "timeOfDay": "Night", "lightning": True}}
+            revision_key = str(uuid.uuid4())
+            request("POST", revisions_path, revision_draft, 403, identity="Room1", request_id=revision_key)
+            request("POST", revisions_path, revision_draft, 403, identity="GameServer", request_id=revision_key)
+            request("POST", revisions_path, revision_draft, 401, identity=None, request_id=revision_key)
+            request("POST", revisions_path, revision_draft, 400)
+            request("POST", revisions_path, revision_draft, 400, request_id="bad-key")
+            revision = request("POST", revisions_path, revision_draft, 201, request_id=revision_key)
+            require(request("GET", f"/api/missions/{mission['id']}") == mission and revision["definition"] == revision_draft,
+                    "Revision HTTP saves new conditions without changing the original mission")
+            history = request("GET", f"/api/missions/{mission['id']}/history")
+            require(history["headId"] == revision["id"] and [row["number"] for row in history["versions"]] == [2, 1], "Mission history exposes a single ordered immutable lineage")
+            revision_info = request("GET", f"/api/missions/{revision['id']}/version")
+            require(revision_info["seriesId"] == mission["id"] and revision_info["previousId"] == mission["id"] and revision_info["author"]["role"] == "Master",
+                    "Revision metadata binds its exact parent and authenticated author")
+            request("POST", revisions_path, revision_draft, 409, request_id=str(uuid.uuid4()))
+            concurrent_path = f"/api/missions/{revision['id']}/revisions"
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                results = list(pool.map(lambda index: request("POST", concurrent_path, {**draft, "name": f"Concurrent revision {index}"}, (201, 409), request_id=str(uuid.uuid4())), range(8)))
+            head = next(row for row in results if "id" in row)
+            require(sum("id" in row for row in results) == 1, "Concurrent revision HTTP requests from the same base accept one next version")
+            require(request("POST", revisions_path, revision_draft, 201, request_id=revision_key) == revision,
+                    "Accepted revision retry confirms its old result after the head has advanced")
+            require(len(request("GET", "/api/mission-library")) == 1 and request("GET", "/api/mission-library")[0]["mission"]["id"] == head["id"],
+                    "Mission planner catalog returns current heads without downloading all version definitions")
+            first_page = request("GET", f"/api/missions/{mission['id']}/history?limit=1")
+            second_page = request("GET", f"/api/missions/{mission['id']}/history?limit=1&before={first_page['nextBefore']}")
+            require(first_page["versions"][0]["number"] == 3 and second_page["versions"][0]["number"] == 2,
+                    "HTTP history pagination has no duplicate revision at its boundary")
+            request("GET", f"/api/missions/{mission['id']}/history?limit=101", expected=400)
+            request("GET", f"/api/missions/{mission['id']}/history?before=0", expected=400)
+            request("GET", "/api/mission-library", expected=401, identity=None)
+            require(request("GET", "/api/missions") and request("GET", f"/api/missions/{mission['id']}/history", identity="Room1")["headId"] == head["id"],
+                    "Global mission library remains readable by room operators while authoring stays restricted")
             request("POST", "/api/missions", {**draft, "props": None}, 400)
             request("GET", f"/api/missions/{uuid.uuid4()}", expected=404)
 
@@ -386,6 +425,13 @@ try:
             wait_ready(process)
             recovered = request("GET", session_path)
             require(recovered == current, "Process restart reconstructs active state, players and control settings")
+            require(request("GET", f"/api/missions/{mission['id']}") == mission and request("GET", "/api/mission-library")[0]["mission"]["id"] == head["id"],
+                    "API restart retains old mission snapshots and the current library head")
+            require(request("POST", revisions_path, revision_draft, 201, request_id=revision_key) == revision
+                    and request("POST", "/api/missions", draft, 201, request_id=mission_key) == mission,
+                    "Mission creation and revision request receipts survive API process restart")
+            require(recovered["mission"]["id"] == mission["id"] and recovered["mission"]["definition"] == draft,
+                    "Existing session recovery keeps its original version despite later library revisions")
             old_archive = request("GET", own_path)
             require(request("POST", "/api/sessions", creation_body, 201, request_id=create_key) == old_archive,
                     "HTTP creation retry after restart returns its archived session despite a new linked reservation")
@@ -416,7 +462,7 @@ try:
             require(request("GET", "/api/sessions") == [], "Active list excludes archived sessions")
             require(len(request("GET", "/api/sessions?includeEnded=true")) == 6, "History list includes independent and linked sessions")
             require(all(r["sessionId"] is None and r["playerCount"] == 0 for r in request("GET", "/api/rooms")), "Ending releases all room reservations and player slots")
-            require(len(request("GET", "/api/missions")) == 1, "Mission survives session cleanup")
+            require(len(request("GET", "/api/missions")) == 3 and len(request("GET", "/api/mission-library")) == 1, "All immutable mission revisions survive session cleanup with one current catalog head")
             stop(process)
             old_master = tokens["Master"]
             tokens["Master"] = secrets.token_urlsafe(32)

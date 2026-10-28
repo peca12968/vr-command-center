@@ -26,8 +26,14 @@ public static class JsonFormat
 
 public sealed class MissionStore(string directory)
 {
+    private void LegacyOnly()
+    {
+        if (File.Exists(Path.Combine(directory, "missions.db")))
+            throw new InvalidOperationException("This mission directory uses the versioned library. Use the current API; legacy JSON readers and writers cannot access it.");
+    }
     public Mission Create(MissionDraft draft)
     {
+        LegacyOnly();
         Validate(draft);
         var mission = new Mission(Guid.NewGuid(), 1, DateTimeOffset.UtcNow, draft);
         Directory.CreateDirectory(directory);
@@ -47,6 +53,7 @@ public sealed class MissionStore(string directory)
 
     public Mission Get(Guid id)
     {
+        LegacyOnly();
         var path = Path.Combine(directory, $"{id:D}.json");
         if (!File.Exists(path)) throw new KeyNotFoundException("Mission does not exist.");
         var mission = JsonSerializer.Deserialize<Mission>(File.ReadAllText(path), JsonFormat.Options)
@@ -57,12 +64,16 @@ public sealed class MissionStore(string directory)
         return mission;
     }
 
-    public Mission[] List() => !Directory.Exists(directory) ? [] :
+    public Mission[] List()
+    {
+        LegacyOnly();
+        return !Directory.Exists(directory) ? [] :
         Directory.EnumerateFiles(directory, "*.json")
             .Select(Path.GetFileNameWithoutExtension)
             .Where(name => Guid.TryParse(name, out _))
             .Select(name => Get(Guid.Parse(name!)))
             .OrderByDescending(mission => mission.CreatedAtUtc).ToArray();
+    }
 
     public static void Validate(MissionDraft draft)
     {

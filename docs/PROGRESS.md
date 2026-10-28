@@ -1,5 +1,23 @@
 # 開發進度
 
+## 2026-10-29：v0.15 不可變任務修訂、歷史與新舊版開場
+
+上一輪 v0.14.1 已推送及部署鏡頭位置，屬於具體進展。本輪從乾淨的 9639a32 接續，CLI 仍 loggedIn=false、active=false／licenses 空，未找到新的常見授權檔；沒有重跑同一個 Prepare 或重啟舊回呼。最近 Editor 結果仍為 198，Hub 登入／有效授權待本機確認。沒有新的 Unity／15 項 EditMode／桌面程式／APK／頭盔結果，也沒有操作登入、安全提示或重裝 SDK。Quest 3 主線優先及原始完整 11 項範圍保持。
+
+需求 8 新增 Persistence.SqliteMissionLibrary：DataDirectory/missions.db，WAL／FULL／獨占 writer lease，完整 schema 1 Mission、series／number／previous、服務端作者及 request 同交易。根版本為 series 自身，修訂只從當前 head 新增不可變 ID，並行舊 base 只有一個可成功。新任務的 key 選用以相容舊工具，修訂 key 必須提供；UI 兩者固定提供。相同請求綁作者／kind／parent／全部定義，之後 head 前進仍回原接受版本。任務本體、場次 envelope 6、世界 schema 1 及 NGO protocol 14 不變，既有場次不跟著任務庫更新。
+
+首次啟動把原 GUID.json 在同一交易匯入各自第 1 版，保留原檔 bytes；壞資料／不一致鏈失敗即回滾，後續只讀 catalog。目前 Core 的舊 JSON helper 讀寫已版本化目錄會拒絕，不混跑不同版 API。ReadMission 明確驗證已認證身分，共用範本對配置角色可讀，AuthorMission 限 Master／受信任 in-process Internal；所有 HTTP 路由傳入 Actor，不用隱含 Internal。history 只取有界 metadata（預設 20／最多 100），選取才讀完整定義，主控台輪詢 /mission-library 的各系列 head，舊 /missions 保留全部快照契約。
+
+UI 新增保存下一版、歷史分頁／讀回及「選用草稿原版開場」。背景更新保留草稿、已知 head 不倒退、開場版本不偷偷跳到最新版；已知舊草稿不得修訂，409 保留內容供載入新版本或另存新任務。網路、逾時及 5xx 保留完整原請求；保存已接受但後續資料讀回失敗仍保留重試，不再重複建立新任務。登出清理草稿／版本／配置並阻擋晚回應。手機保存列移除多餘的固定高度空白，已檢視 mission-versions-desktop.png 與 mission-versions-mobile.png。
+
+鎖定還原、Release 0 警告／0 錯誤；**451 核心、369 HTTP、39 世界串流、12 回放資料、108 Chromium，共 979 項通過**。驗證含匯入原檔不變、失敗回滾與修復重試、writer lease、非法身分、線性並行、保存 key 衝突／跨作者拒絕、游標分頁、重啟後請求／head／舊場次保持、新舊版實際 API 開場、主控回應遺失後 head 前進、保存後讀回 503、舊 catalog 晚到不倒退與登出競態。本輪未改 Unity／共享 Runtime，這些是管理／Simulation／軟體 WebGL 證據，不代表 Unity 場景還原或頭盔測試。
+
+升級前空陣列檢查因直接 @(Invoke-RestMethod) 的包裝誤判，檢查退出後仍錯誤啟動新版，被既有 events writer lease 拒絕；原服務與資料未動，也未建立 missions.db。已改為先賦值再檢查並分步驗證成功後才啟動相依操作。真正確認活動 0／自有程序後停止，root data 及 src/VrCommand.Api/data 完整備份至 artifacts/backups/pre-v015-20261028-231232，17 檔雜湊一致，pointer 為 artifacts/pre-v015-backup-path.txt。新 exec 49439 為 0.15.0，原 8 任務／8 場歷史／3 份 world metadata／主控鏡頭位置逐欄一致，任務皆匯入第 1 版。前置快照的鏡頭陣列亦有額外包裝，僅比對時解包，原 artifact 留存，證據為 artifacts/v015-migration-check.json。
+
+於自己既有 clocked Simulation 任務 f71fb223-dcc0-4a4a-8166-35b06ec47379 建立第 2 版 913a28f2-9826-4c8e-a8e0-34fc76c1bdd2「Quest 3・夜霧巡邏（開發示範）」，保存 1800 秒、Fog／Night、2 名 Patrol 敵軍；同 key 再送回同一版本。原 v1 及歷史場次 e382ddcc-733b-440a-ab6a-395f5aa37a35 完全不變，活動仍 0。主控可直接在任務編輯器查閱新舊版；沒有把此任務保存宣稱為遊戲運行。摘要在忽略的 artifacts/v015-live-mission.json。
+
+完整契約與備份／不可直接降版見 MISSION_VERSIONS，已更新相關需求、路線、API 與儲存文件。接續仍先取得有效 Unity 授權及實際 Prepare／Tests／Desktop／Quest、雙 Quest 頭手／重連／撤銷／排空，再做正式軍事素材、硬體、MR、VIVE 及 25 台效能。CI 依推送結果另記，不改帳務或重跑已知受限工作；長期目標保持開發中。
+
 ## 2026-10-29：v0.14.1 觀戰鏡頭位置持久保存與重試
 
 上一輪已安裝、驗證並啟動 Hub，屬於實際工具鏈進展。本輪從乾淨的 28cdac3 接續；CLI 仍無登入／授權，但不單獨據此否定 Hub。Hub 及 Licensing Client 已在執行，實際 Prepare 再驗仍因「No valid Unity Editor license」退出 198，已結束。沒有新登入／安全性操作、重裝 SDK 或重問已同意條款；Unity／15 項 EditMode／桌面程式／APK／頭盔仍未通過，Quest 3 主線保持優先。

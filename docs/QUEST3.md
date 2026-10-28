@@ -1,5 +1,7 @@
 # Quest 3 接入原型與工具鏈 v0.14
 
+管理 API／控制台現為 v0.15，新增任務庫不可變修訂與明確新／舊版開場，見 MISSION_VERSIONS。遊戲收到的 Mission 本體仍 schema 1、NGO wire protocol 仍 14，本輪未改 Unity 來源，不能以管理版本號或任務庫檢查當作 Unity 編譯／APK 結果。
+
 v0.14 新增每次入場識別、票券 v2／protocol 2、If-Match-Admission 與跨輪詢重入撤銷，Unity／API 需同版升級並重發舊券，見 [ADMISSION.md](ADMISSION.md)。生成器 NGO protocol 14／bundle 0.14；15 項 EditMode 仍待執行，沒有 Unity／APK／頭盔結果。
 
 v0.13 新增共用世界來源／發布器、接受後頭手錄製、追蹤中斷與 NGO protocol 13；接入／補送見 [WORLD_SOURCE.md](WORLD_SOURCE.md)。本輪仍無 Unity 編譯／APK／頭盔證據，Prepare 實際退出 198。12 項 EditMode 只新增來源，尚未執行；C# 9 語法檢查為 23 份。

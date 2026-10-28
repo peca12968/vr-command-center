@@ -54,6 +54,12 @@ public static class AccessPolicy
             throw new AccessDeniedException("Only the master may author shared mission templates.");
     }
 
+    public static void ReadMission(OperatorIdentity actor)
+    {
+        // Shared mission templates are readable by every configured role; writes remain master-only.
+        Validate(actor);
+    }
+
     public static void ReportCombat(OperatorIdentity actor)
     {
         Validate(actor);

@@ -4,7 +4,7 @@
 
 依 2026-10-29 的使用者指示，**優先開發 Meta Quest 3**，暫以 Android 獨立執行為工作假設；VIVE 延後接入，共用架構與原始雙平台目標保留。
 
-目前為 **v0.14.1 鏡頭位置保存與 Quest 連線接入原型**。觀戰可命名保存任意鏡頭位置，重新登入後於同場觀戰／回放快速切換；設定依控制台身分隔離，網路結果不明可原樣重試，已移除位置不被舊請求重建。v0.14 的入場識別、票券 v2 及撤銷接入保留，Unity wire protocol 仍為 14。**已補裝 Hub，但實際 Prepare 仍因授權退出 198，沒有 Unity 編譯、APK 或頭盔證據**；所有遊戲示範仍為 Simulation。完整 11 項與雙平台需求保持開發中。
+目前為 **v0.15 任務版本與 Quest 連線接入原型**。任務可保存下一版、查詢歷史、讀回舊配置並明確選用新／舊版開場；較舊的草稿不能覆蓋其他主控剛保存的版本，既有場次保持原始任務。新任務與修訂都有持久請求去重，保存後讀回失敗也能原樣確認。鏡頭位置、入場票券及撤銷功能保留，Unity wire protocol 仍為 14。**Unity 授權尚未實測通過，沒有 Unity 編譯、APK 或頭盔證據**；所有遊戲示範仍為 Simulation。完整 11 項與雙平台需求保持開發中。
 
 ## 開發位置
 
@@ -22,6 +22,7 @@
 - SQLite 儲存與升級：[STORAGE.md](docs/STORAGE.md)
 - Quest 3 工程、建置與待驗操作：[QUEST3.md](docs/QUEST3.md)
 - 瀏覽器主控台與任務配置：[CONSOLE.md](docs/CONSOLE.md)
+- 任務修訂、歷史及升級：[MISSION_VERSIONS.md](docs/MISSION_VERSIONS.md)
 - 共用射擊／AI 核心與幾何模擬：[SIMULATION.md](docs/SIMULATION.md)
 - Quest 戰鬥接入、輸入及驗證邊界：[GAMEPLAY.md](docs/GAMEPLAY.md)
 - 持久事件、結束封存與補送工具：[TELEMETRY.md](docs/TELEMETRY.md)

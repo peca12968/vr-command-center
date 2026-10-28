@@ -1,4 +1,6 @@
-# 事件儲存與升級 v0.11
+# 任務、事件儲存與升級 v0.15
+
+v0.15 任務庫新增 DataDirectory/missions.db（獨立 schema 1）及 writer lease，原 GUID.json 在單一交易內匯入為各自第 1 版，之後以 SQLite 為權威來源。保存 request／作者／不可變版本與線性前置版本同交易，舊 JSON 保留備份，不再由 API 寫入；不可混用舊 API 或直接降版。完整保存 root data 及實際 API data／WAL，見 [MISSION_VERSIONS.md](MISSION_VERSIONS.md)。場次 envelope 6、events.db／worlds.db schema 1 及 NGO protocol 14 不變。
 
 v0.14 session envelope 升 6，PlayerJoined 保存 admissionId=EventId，PlayerLeft 保存 admission 與原始 fence，讀取 1–5 會從舊加入 EventId 推導穩定識別。DB schema 不變，但寫入後不可降回舊 event reader；舊 v1 票券失效須重發。備份後協同升級 API／控制台／GameServer，見 ADMISSION.md。
 
@@ -10,7 +12,7 @@ v0.11 新事件 schema 5，戰鬥來源／觀察位置／有序報告及封存�
 
 遊戲伺服器另有獨占開啟、checksummed frame 及 Flush 的本地 journal，與 API SQLite 分開保存，格式及補送見 TELEMETRY。兩者先後提交依靠穩定 reportId／順序與 acknowledgment 恢復，不宣稱跨檔案／跨程序原子交易。
 
-API 預設使用 `SessionDataDirectory/events.db`，由獨立的 `VrCommand.Persistence` 專案負責。依賴 Microsoft.Data.Sqlite 10.0.14，版本及相依套件已鎖定於各專案的 `packages.lock.json`；首次還原需要 NuGet 網路連線。任務模板仍使用原本的獨立 JSON 檔案。
+API 預設使用 `SessionDataDirectory/events.db`，由獨立的 `VrCommand.Persistence` 專案負責。依賴 Microsoft.Data.Sqlite 10.0.14，版本及相依套件已鎖定於各專案的 `packages.lock.json`；首次還原需要 NuGet 網路連線。任務由同專案的 SqliteMissionLibrary 管理 DataDirectory/missions.db，既有 JSON 僅作一次匯入來源及保留備份。
 
 ## 追加與復原
 
