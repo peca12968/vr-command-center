@@ -70,6 +70,7 @@ try
     OperatorChecks.Run(Check, mission);
     PersistenceChecks.Run(Check, directory, mission);
     CombatChecks.Run(Check, mission);
+    PlayerTicketChecks.Run(Check, mission);
     Console.WriteLine($"All {checks} checks passed. These are domain checks, not headset or gameplay load tests.");
 }
 finally

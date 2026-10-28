@@ -68,7 +68,7 @@ if test_directory.parent != temp_root or not test_directory.name.startswith("vr-
 
 try:
     environment = {key: value for key, value in os.environ.items()
-                   if not key.lower().startswith("operatorkeys__") and key.lower() != "operatorkeyfile"}
+                   if not key.lower().startswith("operatorkeys__") and key.lower() not in ("operatorkeyfile", "playerticketsigningkey")}
     environment["DataDirectory"] = str(test_directory / "missions")
     environment["SessionDataDirectory"] = str(test_directory / "sessions")
     environment["ASPNETCORE_ENVIRONMENT"] = "Production"
@@ -174,8 +174,20 @@ try:
             room_player = {**player, "playerId": str(uuid.uuid4())}
             own_path = f"/api/sessions/{independent[0]['id']}"
             request("POST", own_path + "/players", room_player, identity="Room1")
+            invitation = request("POST", own_path + "/players/" + room_player["playerId"] + "/join-ticket", identity="Room1")
+            require(len(invitation["ticket"]) < 256, "Headset receives a compact player-only connection ticket")
+            validate = {"sessionId": independent[0]["id"], "ticket": invitation["ticket"]}
+            approved = request("POST", "/api/player-tickets/validate", validate, identity="GameServer")
+            require(approved["playerId"] == room_player["playerId"] and approved["roomId"] == 1 and approved["seat"] == 1,
+                    "Game server validates the assigned player, room and stable spawn seat")
+            request("POST", "/api/player-tickets/validate", validate, 403, identity="Master")
+            request("POST", "/api/player-tickets/validate", {**validate, "sessionId": independent[1]["id"]}, 403, identity="GameServer")
+            request("POST", "/api/player-tickets/validate", {**validate, "ticket": invitation["ticket"][:-5] + "AAAAA"}, 403, identity="GameServer")
+            request("POST", own_path + "/players/" + room_player["playerId"] + "/join-ticket", expected=403, identity="Room2")
+            request("POST", own_path + "/players/" + room_player["playerId"] + "/join-ticket", expected=403, identity="GameServer")
             request("DELETE", own_path + "/players/" + room_player["playerId"], expected=403, identity="Room2")
             request("DELETE", own_path + "/players/" + room_player["playerId"], expected=204, identity="Room1")
+            request("POST", "/api/player-tickets/validate", validate, 403, identity="GameServer")
             command = {"commandId": str(uuid.uuid4()), "action": "SetEnvironment", "environment": draft["environment"]}
             request("POST", own_path + "/commands", command, identity="Room1")
             request("POST", own_path + "/commands", command, 409)  # another identity cannot claim this retry
@@ -199,6 +211,7 @@ try:
             require(len(current["players"]) == 25, "Linked session contains 25 mixed-device player records")
             require(current["state"] == "Preparing" and current["startedAtUtc"] is None,
                     "Creating a session does not start the mission")
+            request("POST", session_path + "/players/" + player["playerId"] + "/join-ticket", expected=404)
             require(request("GET", session_path, identity="Room1")["id"] == session["id"],
                     "Room controllers may read the shared linked scene")
             request("POST", session_path + "/commands", {"commandId": str(uuid.uuid4()), "action": "Begin", "actor": {"id": "master", "role": "Master"}}, 403, identity="Room1")
@@ -217,6 +230,10 @@ try:
             request("DELETE", session_path + "/players/" + current["players"][0]["id"], expected=204, identity="Room1")
             request("POST", session_path + "/players", {**player, "roomId": 2}, 403, identity="Room1")
             request("POST", session_path + "/players", player, identity="Room1")
+            live_ticket = request("POST", session_path + "/players/" + player["playerId"] + "/join-ticket", identity="Room1")
+            live_validation = {"sessionId": session["id"], "ticket": live_ticket["ticket"]}
+            require(request("POST", "/api/player-tickets/validate", live_validation, identity="GameServer")["seat"] == 0,
+                    "Replacement player receives the released stable spawn seat")
 
             def control(action, expected=200, **extra):
                 body = {"commandId": str(uuid.uuid4()), "action": action, **extra}
@@ -303,6 +320,7 @@ try:
             require(stored == current["sequence"], "SQLite stores exactly one row per accepted management or combat event")
             require(not any(token in json.dumps(events) for token in tokens.values()),
                     "Event history contains console identity without credential values")
+            require(live_ticket["ticket"] not in json.dumps(events), "Player admission ticket is never written into event history")
             require(len(events) == current["sequence"] and [e["sequence"] for e in events] == list(range(1, len(events) + 1)),
                     "Ordered event stream covers accepted mutations without gaps")
             page = request("GET", session_path + "/events?after=1&limit=2")
@@ -315,6 +333,8 @@ try:
             wait_ready(process)
             recovered = request("GET", session_path)
             require(recovered == current, "Process restart reconstructs active state, players and control settings")
+            require(request("POST", "/api/player-tickets/validate", live_validation, identity="GameServer")["playerId"] == player["playerId"],
+                    "Player ticket signing key survives API process restart")
             require(request("GET", session_path + "/statistics") == statistics, "Restart rebuilds identical combat statistics from SQLite")
             require(report(fired)["duplicate"] and report(fired)["appliedAtSequence"] == accepted_shot["appliedAtSequence"],
                     "Combat report deduplication survives API process restart")
@@ -329,6 +349,7 @@ try:
                     "End archives the session and timestamps completion")
             request("DELETE", session_path, expected=409)
             require(request("GET", session_path)["state"] == "Ended", "Ended history remains readable")
+            request("POST", "/api/player-tickets/validate", live_validation, 403, identity="GameServer")
             require(request("GET", session_path + "/statistics")["players"] == statistics["players"], "Ended session preserves combat statistics")
             require(report(fired)["duplicate"], "Combat report retry is available after session end")
             report({**fired, "reportId": str(uuid.uuid4()), "shotId": str(uuid.uuid4())}, 409)
@@ -357,6 +378,21 @@ try:
                     and summary["players"][0]["accuracyPercent"] == 66.67 and summary["players"][0]["kills"] == 1
                     and summary["players"][0]["health"] == 80, "Standalone Quest3-record demo creates a simulated combat archive")
             require(all(room["sessionId"] is None for room in request("GET", "/api/rooms")), "Combat demo releases only its own session on completion")
+            provision = subprocess.run([sys.executable, str(ROOT / "scripts/prepare-vr-session.py"), "--base-url", base_url,
+                                       "--key-file", str(key_file), "--server-address", "127.0.0.1", "--output", str(test_directory / "connections")],
+                                      capture_output=True, text=True, encoding="utf-8", timeout=30)
+            if provision.returncode != 0:
+                raise AssertionError("VR session provisioning failed: " + provision.stderr)
+            plan = json.loads(provision.stdout)
+            config_directory = Path(plan["directory"])
+            server_config = json.loads((config_directory / "server.json").read_text())
+            client_config = json.loads((config_directory / "player-1.json").read_text())
+            require(server_config["gameServerKey"] == tokens["GameServer"] and "gameServerKey" not in client_config
+                    and not any(key in json.dumps(client_config) for key in tokens.values()),
+                    "Provisioning keeps control/server credentials out of headset connection files")
+            require(request("POST", "/api/player-tickets/validate", {"sessionId": plan["sessionId"], "ticket": client_config["joinTicket"]},
+                            identity="GameServer")["roomId"] == 1, "Provisioned Quest client ticket is accepted by the management API")
+            request("DELETE", "/api/sessions/" + plan["sessionId"], expected=204)
         except BaseException:
             log.flush()
             print((test_directory / "server.log").read_text(encoding="utf-8"))

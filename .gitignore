@@ -20,3 +20,7 @@ artifacts/
 *.mp4
 __pycache__/
 *.py[cod]
+clients/unity/*.csproj
+clients/unity/*.sln
+clients/unity/*.slnx
+clients/unity/*.suo

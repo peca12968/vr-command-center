@@ -111,7 +111,11 @@ internal static class SessionProjection
         if (session.Players.Any(p => p.Id == player.Id)) throw new InvalidOperationException("Player already joined.");
         if (session.Players.Count(p => p.RoomId == player.RoomId) >= SessionManager.PlayersPerRoom)
             throw new InvalidOperationException("Player capacity reached.");
-        return session with { Players = [.. session.Players, player] };
+        var seat = player.Seat == -1 ? Enumerable.Range(0, SessionManager.PlayersPerRoom)
+            .First(candidate => !session.Players.Any(p => p.RoomId == player.RoomId && p.Seat == candidate)) : player.Seat;
+        if (seat is < 0 or >= SessionManager.PlayersPerRoom || session.Players.Any(p => p.RoomId == player.RoomId && p.Seat == seat))
+            throw new ArgumentException("Player seat is invalid or already occupied.");
+        return session with { Players = [.. session.Players, player with { Seat = seat }] };
     }
 
     private static SessionView Leave(SessionView session, Guid playerId)

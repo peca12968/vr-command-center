@@ -13,6 +13,8 @@ builder.Services.ConfigureHttpJsonOptions(options =>
 var dataDirectory = Path.GetFullPath(builder.Configuration["DataDirectory"]
     ?? Path.Combine(builder.Environment.ContentRootPath, "data", "missions"));
 builder.Services.AddSingleton(new MissionStore(dataDirectory));
+var ticketSigner = new PlayerJoinTicketSigner(PlayerTicketKey.Load(Path.GetDirectoryName(dataDirectory)!,
+    builder.Configuration["PlayerTicketSigningKey"]));
 var sessionDirectory = Path.GetFullPath(builder.Configuration["SessionDataDirectory"]
     ?? Path.Combine(Path.GetDirectoryName(dataDirectory)!, "sessions"));
 if (string.Equals(Path.TrimEndingDirectorySeparator(dataDirectory), Path.TrimEndingDirectorySeparator(sessionDirectory),
@@ -57,7 +59,7 @@ app.Use(async (context, next) =>
     }
 });
 
-app.MapGet("/", () => new { service = "VR Command Center", stage = "control and telemetry prototype", version = "0.4.0" });
+app.MapGet("/", () => new { service = "VR Command Center", stage = "control, telemetry and Quest integration prototype", version = "0.5.0" });
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/api/me", (HttpContext context) => Actor(context));
 app.MapGet("/api/rooms", (SessionManager manager, HttpContext context) => manager.Rooms(Actor(context)));
@@ -86,6 +88,25 @@ app.MapPost("/api/sessions/{id:guid}/combat", (Guid id, CombatReport report, Ses
     manager.ReportCombat(id, report, Actor(context)));
 app.MapPost("/api/sessions/{id:guid}/players", (Guid id, JoinPlayer request, SessionManager manager, HttpContext context) =>
     manager.Join(id, request.PlayerId, request.Name, request.RoomId, request.Headset, Actor(context)));
+app.MapPost("/api/sessions/{id:guid}/players/{playerId:guid}/join-ticket", (Guid id, Guid playerId, SessionManager manager, HttpContext context) =>
+{
+    var session = manager.Get(id, Actor(context));
+    var player = session.Players.SingleOrDefault(p => p.Id == playerId) ?? throw new KeyNotFoundException("Player does not exist.");
+    AccessPolicy.Player(Actor(context), session, player.RoomId);
+    if (session.State == SessionState.Ended) throw new InvalidOperationException("Session has ended.");
+    return ticketSigner.Issue(id, player);
+});
+app.MapPost("/api/player-tickets/validate", (ValidatePlayerTicket request, SessionManager manager, HttpContext context) =>
+{
+    if (Actor(context).Role != OperatorRole.GameServer)
+        throw new AccessDeniedException("Player ticket validation requires a game-server identity.");
+    var claims = ticketSigner.Validate(request.Ticket, request.SessionId);
+    var session = manager.Get(claims.SessionId, Actor(context));
+    var player = session.Players.SingleOrDefault(p => p.Id == claims.PlayerId);
+    if (session.State == SessionState.Ended || player is null || player.RoomId != claims.RoomId)
+        throw new AccessDeniedException("Player is no longer admitted to this session.");
+    return new { sessionId = session.Id, playerId = player.Id, roomId = player.RoomId, seat = player.Seat };
+});
 app.MapDelete("/api/sessions/{id:guid}/players/{playerId:guid}", (Guid id, Guid playerId, SessionManager manager, HttpContext context) =>
 {
     manager.Leave(id, playerId, Actor(context));
@@ -102,3 +123,4 @@ static OperatorIdentity Actor(HttpContext context) => (OperatorIdentity)context.
 
 record CreateSession(Guid MissionId, SessionMode Mode, int[] RoomIds);
 record JoinPlayer(Guid PlayerId, string Name, int RoomId, HeadsetKind Headset);
+record ValidatePlayerTicket(Guid SessionId, string Ticket);

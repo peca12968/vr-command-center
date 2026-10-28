@@ -1,0 +1,7 @@
+{
+  "name": "VrCommand.Tests",
+  "references": ["VrCommand.Runtime", "UnityEngine.TestRunner", "UnityEditor.TestRunner"],
+  "includePlatforms": ["Editor"],
+  "optionalUnityReferences": ["TestAssemblies"],
+  "autoReferenced": false
+}

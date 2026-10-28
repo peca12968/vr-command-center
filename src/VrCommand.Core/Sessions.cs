@@ -4,7 +4,7 @@ public enum SessionMode { Independent, Linked }
 public enum HeadsetKind { ViveXr, Quest3 }
 public enum SessionState { Preparing, Running, Paused, Ended }
 public enum ControlAction { Unspecified, Begin, Pause, Resume, End, SetEnvironment, SetEnemies }
-public record Player(Guid Id, string Name, int RoomId, HeadsetKind Headset);
+public record Player(Guid Id, string Name, int RoomId, HeadsetKind Headset, int Seat = -1);
 public record SessionView(Guid Id, SessionMode Mode, int[] RoomIds, Mission Mission,
     DateTimeOffset CreatedAtUtc, DateTimeOffset? StartedAtUtc, DateTimeOffset? EndedAtUtc,
     SessionState State, Player[] Players, EnvironmentSettings Environment, EnemySettings Enemies, long Sequence);
@@ -107,8 +107,10 @@ public sealed class SessionManager
             AccessPolicy.Player(actor, history.View, roomId);
             if (Active().Any(s => s.Players.Any(p => p.Id == playerId)))
                 throw new InvalidOperationException("Player already belongs to a session.");
+            var seat = Enumerable.Range(0, PlayersPerRoom)
+                .FirstOrDefault(candidate => !history.View.Players.Any(p => p.RoomId == roomId && p.Seat == candidate), -1);
             return Commit(history, SessionEvent.Create(sessionId, history.View.Sequence + 1,
-                SessionEventKind.PlayerJoined, new Player(playerId, name, roomId, headset), actor));
+                SessionEventKind.PlayerJoined, new Player(playerId, name, roomId, headset, seat), actor));
         }
     }
 

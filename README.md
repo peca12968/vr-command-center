@@ -4,7 +4,7 @@
 
 依 2026-10-29 的使用者指示，**優先開發 Meta Quest 3**，暫以 Android 獨立執行為工作假設；VIVE 延後接入，共用架構與原始雙平台目標保留。
 
-目前為 **v0.4 管理與統計後端原型**。已提供控制台權限、五房名額、任務與場次控制、環境／敵軍設定命令、SQLite 事件紀錄，以及彈藥、命中率、擊殺、中彈與血量統計。已有明確標記 Simulation 的命令列模擬器。尚無頭盔遊戲端、實際射擊／AI 模擬、管理畫面、硬體控制或 3D 觀戰回放。`ViveXr`、`Quest3` 目前只是玩家裝置分類，不能作為實機相容證據。
+目前為 **v0.5 後端與 Quest 3 接入來源碼原型**。後端已有五房權限、場次、SQLite 事件、戰鬥統計與短效玩家票券；Unity 工程已有共同場景生成、頭手姿態與管理狀態同步程式。Unity 編輯器已安裝，但實際 Prepare 因尚無有效授權而退出，尚無成功編譯或 APK；沒有實機相容證據。實際射擊／AI、管理畫面、硬體控制與 3D 觀戰回放仍待開發。
 
 ## 開發位置
 
@@ -20,6 +20,7 @@
 - 控制台身分與權限：[AUTHORIZATION.md](docs/AUTHORIZATION.md)
 - 戰鬥事件與統計：[COMBAT_PROTOCOL.md](docs/COMBAT_PROTOCOL.md)
 - SQLite 儲存與升級：[STORAGE.md](docs/STORAGE.md)
+- Quest 3 工程、建置與待驗操作：[QUEST3.md](docs/QUEST3.md)
 
 ## 啟動
 
@@ -32,7 +33,7 @@ dotnet run --project tests/VrCommand.Checks --configuration Release --no-build
 .\scripts\start-local.ps1
 ```
 
-啟動助手首次在 `data/operator-keys.local.json` 產生七份不同的隨機憑證，分別供主控、五房控制台與遊戲事件來源使用；檔案已排除於 Git，畫面不輸出憑證。重新啟動沿用原檔。`GET http://127.0.0.1:5080/health` 無需登入；所有 `/api` 端點需帶 Bearer 憑證。這是本機控制台憑證機制，尚無人員帳號登入或實際頭盔驗證。其他部署方式見權限文件。
+啟動助手首次在 `data/operator-keys.local.json` 產生七份不同的隨機憑證，分別供主控、五房控制台與遊戲事件來源使用；檔案已排除於 Git，畫面不輸出憑證。重新啟動沿用原檔。`GET http://127.0.0.1:5080/health` 無需登入；所有 `/api` 端點需帶 Bearer 憑證。頭盔設定使用另行配發的短效玩家票券，不含上述憑證；尚無人員帳號登入或實際頭盔驗證。其他部署方式見權限文件。
 
 任務預設存於 API 專案的 `data/missions/`，可用 `DataDirectory` 指定絕對路徑。場次事件預設位於旁邊的 `sessions/events.db`，亦可用 `SessionDataDirectory` 指定另一目錄；兩者不可相同，均已排除於 Git。舊 JSON 場次會驗證後一次匯入，原檔保留。場次、名冊、執行設定、去重及統計會在重啟後恢復；結束後保留歷史並釋放房間。事件目錄限單一 API 程序寫入。任務時間目前不會自動結束場次。
 
@@ -73,7 +74,7 @@ $receipt.session
 python scripts/smoke_api.py
 ```
 
-腳本使用隨機測試憑證及暫存資料，驗證權限、名額、場次狀態、去重、SQLite 交易儲存、戰鬥因果與統計，並兩次實際重啟 API 驗證復原。核心檢查另包含 JSON 升級、回滾、資料損壞及五房 25 個玩家的模擬統計。這不等同 25 台頭盔的連線效能驗收。
+腳本使用隨機測試憑證及暫存資料，驗證權限、名額、場次狀態、去重、SQLite 交易儲存、戰鬥因果、玩家票券及設定產生，並兩次實際重啟 API 驗證復原。核心檢查另包含 JSON 升級、回滾、資料損壞及五房 25 個玩家的模擬統計。目前 128 項核心檢查、229 項 HTTP 斷言通過；這不等同 Unity 編譯或 25 台頭盔連線效能驗收。
 
 本機 API 啟動後，也可在空閒房間執行一場明確標記的模擬紀錄：
 
@@ -89,10 +90,11 @@ python scripts/demo_combat.py --room 1
 src/VrCommand.Core/      任務與場次管理規則
 src/VrCommand.Persistence/ SQLite 交易式事件儲存
 src/VrCommand.Api/       ASP.NET Core 管理 API
+clients/unity/          Quest 3 Unity 來源碼工程
 tests/VrCommand.Checks/  無外部測試套件的核心規則驗證
 scripts/                HTTP 整合驗證
 examples/               可直接送入 API 的任務範例
 docs/                   規格、開發路線、驗收與外部依賴
 ```
 
-Unity 遊戲端將另建於 `clients/unity/`；目前尚未建立 Unity 專案，不能將 .NET 10 的後端組件直接當成 Unity 相容組件。
+Unity 工程固定 Editor 6000.3.27f1，使用獨立 JSON 契約，不引用 .NET 10 後端組件。建置工具、授權依賴與未驗證步驟見 [QUEST3.md](docs/QUEST3.md)。

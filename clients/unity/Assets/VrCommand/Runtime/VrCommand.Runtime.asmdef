@@ -1,0 +1,6 @@
+{
+  "name": "VrCommand.Runtime",
+  "rootNamespace": "VrCommand.Unity",
+  "references": ["Unity.Netcode.Runtime", "Unity.Networking.Transport", "Unity.InputSystem", "Unity.Collections", "UnityEngine.UI"],
+  "autoReferenced": true
+}

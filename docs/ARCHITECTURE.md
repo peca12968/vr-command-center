@@ -24,9 +24,9 @@ flowchart TB
     Sim --> Spectator
 ```
 
-圖為目標架構。v0.4 已實作控制台授權、管理 API、任務 JSON、SQLite 管理／戰鬥事件與統計投影，並有明確標記的模擬事件來源；權威遊戲伺服器、頭盔與世界快照等節點待開發。事件契約見 `SESSION_PROTOCOL.md`、`COMBAT_PROTOCOL.md`，儲存見 `STORAGE.md`。
+圖為目標架構。v0.5 已驗證控制台授權、管理 API、任務 JSON、SQLite 事件／統計及短效玩家票券；Unity 的桌面伺服器／頭盔接入來源碼在 `clients/unity/`，仍待編譯與運行，沒有權威戰鬥或世界快照。事件契約見 `SESSION_PROTOCOL.md`、`COMBAT_PROTOCOL.md`，儲存見 `STORAGE.md`，Quest 原型見 `QUEST3.md`。
 
-管理 API 處理低頻設定與場次生命週期；頭部／手部姿態、射擊與 AI 不經此 REST API 做每幀同步。後續遊戲伺服器負責權威命中判定、AI、環境狀態與事件排序。網路框架須在 Unity 雙裝置原型實測後決定，尚未承諾第三方付費服務或授權。
+管理 API 處理低頻設定與場次生命週期；頭部／手部姿態、射擊與 AI 不經此 REST API 做每幀同步。原型選用 NGO 2.7.0／Unity Transport，桌面伺服器向管理 API 驗票及讀取設定，頭盔只帶短效玩家票券。後續遊戲伺服器負責權威命中判定、AI、環境狀態與事件排序。網路框架仍須雙裝置實測評估，尚未承諾第三方付費服務。
 
 獨立模式每房對應一個隔離的遊戲世界；全連線模式五房映射到一個共同世界。切換模式須先結束受影響場次，再重新指派；不在進行中熱合併既有世界。觀戰者以唯讀身分接入，不占用 25 個玩家名額。
 
@@ -34,7 +34,7 @@ flowchart TB
 
 依 2026-10-29 使用者指示，先以 Meta Quest 3 完成遊戲垂直切片，再接 VIVE；目前 Android 獨立執行為尚待實機確認的部署假設。
 
-初步選擇 Unity 與 C#；以 OpenXR 為共同頭盔與控制器介面。依雙平台實測選定並固定 Unity Editor、OpenXR、互動工具與廠牌套件版本，建立可重現的兩個 Android build profile。目前環境未找到 Unity Editor，因此本庫尚無 Unity 工程或 Android 安裝包。
+選擇 Unity 與 C#，以 OpenXR 為共同頭盔與控制器介面。Quest 原型固定 Editor 6000.3.27f1、OpenXR 1.19.0 等版本，詳見 `QUEST3.md`。Editor 已安裝至 F 槽，但缺有效授權使實際 Prepare 退出 198；Android 模組條款待使用者確認。工程來源碼已建立，仍無成功編譯或 APK，更無跨平台實測證據。
 
 Meta 的官方文件提供 OpenXR 開發流程；VIVE 的 OpenXR SDK 包含 Android AIO 頭盔開發路徑。這是技術選型依據，並非本專案已通過跨平台測試：
 
