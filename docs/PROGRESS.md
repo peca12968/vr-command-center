@@ -1,5 +1,19 @@
 # 開發進度
 
+## 2026-10-29：v0.14.1 觀戰鏡頭位置持久保存與重試
+
+上一輪已安裝、驗證並啟動 Hub，屬於實際工具鏈進展。本輪從乾淨的 28cdac3 接續；CLI 仍無登入／授權，但不單獨據此否定 Hub。Hub 及 Licensing Client 已在執行，實際 Prepare 再驗仍因「No valid Unity Editor license」退出 198，已結束。沒有新登入／安全性操作、重裝 SDK 或重問已同意條款；Unity／15 項 EditMode／桌面程式／APK／頭盔仍未通過，Quest 3 主線保持優先。
+
+需求 10 的觀戰新增命名保存、切換、移除與重新讀取鏡頭位置，保存世界目標、theta／phi／radius；跟隨時只保存當下固定位置。位置存在同一 worlds.db 的新增 camera_bookmarks 表，按完整 OperatorIdentity 及場次隔離，只有 Master／RoomController 可用，每次重查可讀房間及錄製。每身分／場次最多 24 個有效位置，名稱／座標／角度／距離有界，不寫瀏覽器儲存或影響玩家名額、世界幀、統計、錄製 updatedAtUtc。
+
+PUT 以客戶端新 GUID 保存不可變內容，相同內容重試回原建立時間，不同內容 409；DELETE 留 tombstone，可原樣確認。已接受後被其他視窗移除的舊 PUT 回 Deleted，不重新建立位置。UI 保存／移除遇網路中斷、10 秒逾時或 5xx 保留原 ID／名稱／視角，凍結新寫入及換場，提供重試；登出清理，epoch 阻擋晚回應進入另一身分。修正全部房間取景把 'all' 轉為 NaN；窄視窗全館所需較大距離可保存，縮放／保存範圍一致為 2–240 m。共享 Runtime、envelope 6、world schema 1 及 NGO protocol 14 不變，API／UI 版本為 0.14.1。
+
+鎖定還原與 Release 建置 0 警告／0 錯誤；**420 核心、322 原 HTTP、39 世界串流、12 回放資料、90 Chromium，共 883 項通過**。覆蓋 SQLite 重啟、完整身分隔離／房間及角色拒絕、配額、非法視角、保存／移除遺失回應、舊保存晚到不復活、任意平移旋轉還原、新登入讀回、登出後舊保存回應不污染另一控制台。已檢視 world-camera-positions.png 及 world-replay-mobile.png，桌面／手機鏡頭介面可操作。本輪未改 Unity 來源；這些結果是 Simulation／軟體 WebGL，不能代替 Unity、真實 GPU 或頭盔驗收。
+
+確認預覽活動場次 0 及自有程序後停止，完整備份 root data 與實際 src/VrCommand.Api/data（含 WAL／keys）；16 份 API data 檔逐檔雜湊相符。路徑為 artifacts/backups/pre-v0141-20261028-223839，pointer 為 artifacts/pre-v0141-backup-path.txt。隔離 DLL 以明確 DataDirectory／SessionDataDirectory 啟動，新 exec 16894 服務 0.14.1；原 8 份歷史場次與 3 份 world metadata 逐欄完全一致，活動仍 0。於自己既有 clocked Simulation e382ddcc-733b-440a-ab6a-395f5aa37a35 保存「房間5・開發示範全景」鏡頭，ID 45f90259-b86c-4053-a146-3cbf3b9fcbd6，主控可直接選取回放及切換。來源／升級摘要在忽略的 artifacts/v0141-*。
+
+接續仍先完成本機 Hub 有效授權及真正 Prepare／Tests／Desktop／Quest、雙 Quest 頭手／重連／撤銷／排空；再推進正式軍事素材、任務版本、硬體協議、MR、VIVE 及 25 台效能。完整 11 項驗收範圍維持，長期目標開發中。本輪 CI 以推送實際結果另記，不改帳務或重跑受限工作。
+
 ## 2026-10-29：Unity Hub 安裝與授權診斷
 
 從乾淨的 19aacf9 接續，先核對 M2 建置阻礙，未擴增遊戲來源或宣稱新功能版本。CLI 仍未登入，license list 空，license status 為 active=false／signedIn=false；先前 Prepare 的 198 結果不變，本輪沒有重跑相同失敗建置。Appx、解除安裝登錄及常見安裝目錄原先未找到 Hub，只有 CLI；也未找到常見位置的本機授權檔。這些診斷不能取代實際 Editor 授權／建置結果。

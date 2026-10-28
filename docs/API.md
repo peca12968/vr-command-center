@@ -87,6 +87,10 @@ v0.3 新增強制控制台認證與房間範圍授權；匿名 `/api` 呼叫不�
 GET /api/world-recordings、GET /api/sessions/{id}/world 為房間範圍內 metadata；WebSocket .../world/publish 僅 combat-stream owner 可發布；fetch SSE .../world/watch 為只讀 live／replay，不占玩家席位。所有端點仍帶 Bearer，逐幀輸入不走 REST。封包、限制、精確封存及真實驗證範圍見 [WORLD_RECORDING.md](WORLD_RECORDING.md)。
 
 
+## v0.14.1 觀戰鏡頭位置
+
+v0.14.1 新增 GET `/api/sessions/{id}/world/cameras` 及 PUT／DELETE `.../cameras/{cameraId}`，由 Master／RoomController 管理自己的場次鏡頭位置；每次檢查房間範圍，設定依完整身分隔離。PUT 原樣重試確認不可變位置，DELETE 留移除記錄，晚到的保存不重建位置。最多 24 個有效位置，不變更遊戲／世界／統計；格式與驗證見 [WORLD_RECORDING.md](WORLD_RECORDING.md)。
+
 ## v0.13 世界擷取時間
 
 header 的 captureStartedAtUtc 為選用 round-trip UTC 基準，世界 metadata 另有 capturedAtUtc（基準加已接受 elapsed）；updatedAtUtc 仍為接收時間。舊無時間 header 讀取／確認時補空值，不能重設既有 header 來偽裝新擷取時間。新來源需使用 v0.13 API。共享發布器、binary journal 及頭手來源在 WORLD_SOURCE.md。

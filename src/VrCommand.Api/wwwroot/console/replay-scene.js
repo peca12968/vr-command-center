@@ -25,6 +25,7 @@ export class ReplayScene {
     group.clear();
   }
   load(recording) {
+    this.roomIds = [...recording.roomIds];
     this.clear(this.stage); this.clear(this.traces); this.actors.clear(); this.selected = ''; this.follow = false;
     for (const room of recording.roomIds) {
       const floor = this.mesh(new THREE.BoxGeometry(12, .2, 12), 0x344638); floor.position.set(roomX(room), -.12, 0); this.stage.add(floor);
@@ -93,9 +94,20 @@ export class ReplayScene {
   }
   select(key) { this.selected = key; this.draw(); }
   fitRadius(radius) { const aspect = this.canvas.parentElement.clientWidth / Math.max(1, this.canvas.parentElement.clientHeight); return radius * Math.max(1, 1.5 / Math.max(.4, aspect)); }
-  focus(room) { this.follow = false; this.target.set(roomX(Number(room)), .8, 0); this.radius = this.fitRadius(15); this.draw(); }
+  focus(room) {
+    if (room === 'all') { this.preset('overview'); return; }
+    const id = Number(room); if (!this.roomIds?.includes(id)) return;
+    this.follow = false; this.target.set(roomX(id), .8, 0); this.radius = Math.min(240, this.fitRadius(15)); this.draw();
+  }
+  view() {
+    this.draw(); // Resolve a moving follow target before saving a fixed world position.
+    return { target: this.target.toArray(), theta: Math.atan2(Math.sin(this.theta), Math.cos(this.theta)), phi: this.phi, radius: this.radius };
+  }
+  restoreView(view) {
+    this.follow = false; this.target.fromArray(view.target); this.theta = view.theta; this.phi = view.phi; this.radius = view.radius; this.draw();
+  }
   preset(mode) {
-    this.follow = false; this.target.copy(this.defaultTarget || new THREE.Vector3(0, .8, 0)); this.radius = this.fitRadius(this.defaultRadius || 15);
+    this.follow = false; this.target.copy(this.defaultTarget || new THREE.Vector3(0, .8, 0)); this.radius = Math.min(240, this.fitRadius(this.defaultRadius || 15));
     this.theta = mode === 'top' ? 0 : .6; this.phi = mode === 'top' ? .08 : .9; this.draw();
   }
   resize() {
@@ -129,11 +141,11 @@ export class ReplayScene {
       drag = null;
     });
     for (const name of ['pointercancel', 'lostpointercapture']) this.canvas.addEventListener(name, () => { drag = null; });
-    this.canvas.addEventListener('wheel', event => { event.preventDefault(); this.radius = Math.max(2, Math.min(95, this.radius * Math.exp(event.deltaY * .001))); this.draw(); }, { passive: false });
+    this.canvas.addEventListener('wheel', event => { event.preventDefault(); this.radius = Math.max(2, Math.min(240, this.radius * Math.exp(event.deltaY * .001))); this.draw(); }, { passive: false });
     this.canvas.addEventListener('keydown', event => {
       const keys = { ArrowLeft: [-15, 0], ArrowRight: [15, 0], ArrowUp: [0, -15], ArrowDown: [0, 15] };
       if (keys[event.key]) { event.preventDefault(); this.follow = false; this.onFreeMove(); this.pan(...keys[event.key]); this.draw(); }
-      if (event.key === '+' || event.key === '-') { event.preventDefault(); this.radius = Math.max(2, Math.min(95, this.radius * (event.key === '+' ? .9 : 1.1))); this.draw(); }
+      if (event.key === '+' || event.key === '-') { event.preventDefault(); this.radius = Math.max(2, Math.min(240, this.radius * (event.key === '+' ? .9 : 1.1))); this.draw(); }
     });
   }
   pan(dx, dy) {

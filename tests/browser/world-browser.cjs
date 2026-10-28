@@ -17,7 +17,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await page.setViewportSize({ width: 1440, height: 1080 });
     await page.locator('#tab-world').click(); await page.waitForFunction(() => document.querySelector('#world-message').textContent.includes('目前沒有'));
     check((await page.locator('#world-message').innerText()).includes('目前沒有'), 'World viewer reports an empty archive without inventing a recording');
-    const source = demo('interrupted-world', 30);
+    const source = demo('interrupted-world', 60);
     // Test credentials stay in this fixture's Node process, never window properties or storage.
     let entries;
     for (let attempt = 0; attempt < 100; attempt++) {
@@ -38,6 +38,79 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     check((await page.locator('#world-statistics tr td').allTextContents()).join('|') === 'World Simulation|2|1|20|1|100%|80', 'Streamed per-frame combat statistics match the authoritative report prefix');
     const camera = await canvas.getAttribute('data-camera'); await page.locator('#world-camera').selectOption('top');
     check(await canvas.getAttribute('data-camera') !== camera, 'Streamed world supports the god-view camera preset');
+    await page.locator('#world-room').selectOption('2'); await page.locator('#world-room').selectOption('all');
+    check((await canvas.getAttribute('data-camera')).split(',').every(value => Number.isFinite(Number(value))), 'All-room focus restores a finite camera instead of using an invalid room coordinate');
+    async function customCamera() {
+      await page.locator('#world-camera').selectOption('top');
+      await canvas.scrollIntoViewIfNeeded();
+      const bounds = await canvas.boundingBox(), x = bounds.x + bounds.width / 2, y = bounds.y + bounds.height / 2;
+      await page.mouse.move(x, y); await page.mouse.down({ button: 'right' }); await page.mouse.move(x + 45, y + 10, { steps: 4 }); await page.mouse.up({ button: 'right' });
+      await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x + 30, y + 30, { steps: 4 }); await page.mouse.up();
+      return canvas.getAttribute('data-camera');
+    }
+    let savedPosition = await customCamera();
+    const cameraRoute = '/sessions/' + live.header.sessionId + '/world/cameras';
+    let loseSave = true, loseDelete = false; const saveBodies = [];
+    await page.route('**/world/cameras/*', async route => {
+      const method = route.request().method();
+      if (method === 'PUT') saveBodies.push(route.request().postData());
+      if ((method === 'PUT' && loseSave) || (method === 'DELETE' && loseDelete)) {
+        if (method === 'PUT') loseSave = false; else loseDelete = false;
+        await route.fetch(); await route.abort('failed');
+      } else await route.continue();
+    });
+    await page.locator('#camera-name').fill('移除前的舊請求'); await page.locator('#camera-save').click();
+    await page.locator('#camera-retry').waitFor({ state: 'visible' });
+    check(await page.locator('#camera-name').isDisabled() && await page.locator('#world-recording').isDisabled(), 'Uncertain camera save preserves its original request and locks replacement settings');
+    const acceptedCamera = (await api(cameraRoute))[0]; await api(cameraRoute + '/' + acceptedCamera.id, 'DELETE', undefined, 'Master', 204);
+    await page.locator('#world-camera').selectOption('overview'); await page.locator('#camera-retry').click();
+    await page.waitForFunction(() => document.querySelector('#camera-message').textContent.includes('已被其他視窗移除'));
+    check(saveBodies[0] === saveBodies[1] && (await api(cameraRoute)).length === 0 && await page.locator('#camera-positions option').count() === 0,
+      'Late browser save retry uses the original camera body and does not resurrect a position removed by another window');
+    savedPosition = await customCamera();
+    await page.locator('#camera-name').fill('<東側>沙包上方'); await page.locator('#camera-save').click();
+    await page.locator('#camera-positions option').waitFor({ state: 'attached' });
+    check(await page.locator('#camera-positions option').innerText() === '<東側>沙包上方' && await page.locator('#camera-positions img').count() === 0, 'Saved camera names render as literal text');
+    await page.locator('#world-camera').selectOption('overview'); await page.locator('#camera-recall').click();
+    check(await canvas.getAttribute('data-camera') === savedPosition && await page.locator('#world-camera').inputValue() === 'free', 'Recalling a position restores its fixed world target, angles and distance');
+    const remembered = await context.newPage(); await remembered.setViewportSize({ width: 1440, height: 1080 });
+    await remembered.goto(base + '/console/'); await remembered.locator('#login-key').fill(tokens.Master); await remembered.locator('#login-form button').click();
+    await remembered.locator('#tab-world').click(); await remembered.locator('#world-recording option').waitFor({ state: 'attached' });
+    await remembered.locator('#world-recording').selectOption(live.header.sessionId); await remembered.locator('#world-live').click();
+    await remembered.locator('#camera-positions option').waitFor({ state: 'attached' }); await remembered.locator('#camera-recall').click();
+    check(await remembered.locator('#world-canvas').getAttribute('data-camera') === savedPosition, 'A freshly authenticated page reloads and recalls the persisted camera position');
+    await remembered.screenshot({ path: path.join(screenshots, 'world-camera-positions.png'), fullPage: true });
+    let releaseRead, readAccepted;
+    const readGate = new Promise(resolve => { releaseRead = resolve; }), requestedRead = new Promise(resolve => { readAccepted = resolve; });
+    await remembered.route('**/world/cameras', async route => {
+      const response = await route.fetch(); readAccepted(); await readGate; await route.fulfill({ response }).catch(() => {});
+    });
+    await remembered.locator('#camera-refresh').click(); await requestedRead;
+    await remembered.waitForFunction(() => !document.querySelector('#camera-refresh').disabled, null, { timeout: 15000 });
+    check(await remembered.locator('#camera-message').evaluate(node => node.classList.contains('replay-error')) && await remembered.locator('#camera-positions option').count() === 1,
+      'A stalled camera read times out, retains the last known collection and allows a new read');
+    releaseRead(); await remembered.unroute('**/world/cameras');
+    let releaseSave, saveAccepted;
+    const saveGate = new Promise(resolve => { releaseSave = resolve; }), accepted = new Promise(resolve => { saveAccepted = resolve; });
+    await remembered.route('**/world/cameras/*', async route => {
+      if (route.request().method() !== 'PUT') { await route.continue(); return; }
+      const response = await route.fetch(); saveAccepted(); await saveGate; await route.fulfill({ response });
+    });
+    await remembered.locator('#camera-name').fill('離開前的待確認位置'); await remembered.locator('#camera-save').click(); await accepted;
+    const lateCamera = (await api(cameraRoute)).find(row => row.name === '離開前的待確認位置');
+    await remembered.locator('#logout').click();
+    check(await remembered.locator('#camera-positions option').count() === 0 && await remembered.locator('#camera-name').inputValue() === '', 'Logout clears camera names, saved positions and pending state from the page');
+    await remembered.locator('#login-key').fill(tokens.Room2); await remembered.locator('#login-form button').click();
+    await remembered.locator('#tab-world').click(); await remembered.locator('#world-recording option').waitFor({ state: 'attached' }); await remembered.locator('#world-live').click();
+    await remembered.waitForFunction(() => !document.querySelector('#camera-save').disabled); releaseSave();
+    await remembered.waitForTimeout(100);
+    check(await remembered.locator('#camera-positions option').count() === 0 && !(await remembered.locator('#camera-message').innerText()).includes('離開前'), 'A delayed camera save response cannot repopulate a different operator after logout');
+    await api(cameraRoute + '/' + lateCamera.id, 'DELETE', undefined, 'Master', 204); await remembered.close();
+    check((await api(cameraRoute, 'GET', undefined, 'Room2')).length === 0, 'An authorized room observer has a separate camera collection');
+    loseDelete = true; await page.locator('#camera-remove').click(); await page.locator('#camera-retry').waitFor({ state: 'visible' });
+    await page.locator('#camera-retry').click(); await page.waitForFunction(() => document.querySelector('#camera-positions').options.length === 0 && document.querySelector('#camera-retry').hidden);
+    check((await api(cameraRoute)).length === 0, 'A lost remove response is safely retried without duplicating or restoring a camera');
+    await page.unroute('**/world/cameras/*');
     await page.locator('#world-camera').selectOption('follow');
     await page.screenshot({ path: path.join(screenshots, 'world-live.png'), fullPage: true });
     check((await api('/sessions/' + live.header.sessionId)).players.length === 1, 'Observation creates no extra player seat');
@@ -87,6 +160,8 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await page.locator('#world-refresh').click(); await page.locator(`#world-recording option[value="${completed.sessionId}"]`).waitFor({ state: 'attached' });
     await page.locator('#world-recording').selectOption(completed.sessionId); await page.locator('#world-replay').click();
     await page.locator('#world-player').waitFor(); await page.locator('#world-speed').selectOption('4');
+    await page.waitForFunction(() => !document.querySelector('#camera-save').disabled);
+    check(await page.locator('#camera-positions option').count() === 0 && await page.locator('#camera-name').inputValue() === '', 'Switching recordings clears camera selection and draft names');
     await page.waitForFunction(() => document.querySelector('#world-status').textContent.includes('已結束') && document.querySelector('#world-status').textContent.includes('核對封存'));
     check((await page.locator('#world-statistics tr td').allTextContents()).join('|') === 'World Simulation|2|1|20|1|100%|80' && (await page.locator('#world-environment').innerText()).includes('Storm'), 'Persisted replay reaches the exact final statistics and recorded environment');
     await page.locator('#world-speed').selectOption('0.25');

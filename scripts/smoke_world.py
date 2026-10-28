@@ -10,6 +10,7 @@ import struct
 import subprocess
 import tempfile
 import time
+from uuid import uuid4
 import urllib.error
 import urllib.request
 
@@ -85,8 +86,10 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
     process = None
     demo = None
 
-    def request(route, role="Master", expected=200):
-        req = urllib.request.Request(base + route, headers={"Authorization": "Bearer " + tokens.get(role, role)})
+    def request(route, role="Master", expected=200, method="GET", body=None):
+        req = urllib.request.Request(base + route, method=method,
+            data=None if body is None else json.dumps(body).encode(),
+            headers={"Authorization": "Bearer " + tokens.get(role, role), "Content-Type": "application/json"})
         try:
             response = urllib.request.urlopen(req, timeout=10)
         except urllib.error.HTTPError as error:
@@ -193,10 +196,37 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         request(route + "/watch?rate=999", expected=400)
         request(route + "/watch?fromMs=-1", expected=400)
         check(True, "Unbounded replay speed and invalid seeks are rejected")
+        cameras = route + "/cameras"
+        camera_id = str(uuid4())
+        camera_route = cameras + "/" + camera_id
+        camera = {"name": "East <sandbags>", "view": {"target": [28, .8, 0], "theta": .6, "phi": .9, "radius": 15}}
+        request(cameras, "invalid", 401)
+        request(cameras, "Room1", 403)
+        request(camera_route, "Room1", 403, "PUT", camera)
+        request(camera_route, "Room1", 403, "DELETE")
+        request(cameras, "GameServer", 403)
+        request(camera_route, "GameServer", 403, "PUT", camera)
+        check(True, "Camera HTTP reads and mutations enforce authentication, room scope and operator role")
+        saved_camera = request(camera_route, method="PUT", body=camera)
+        check(request(camera_route, method="PUT", body=camera) == saved_camera and request(cameras) == [saved_camera], "Camera HTTP retry preserves the exact saved view and creation time")
+        request(camera_route, expected=409, method="PUT", body={**camera, "name": "changed"})
+        request(camera_route + "bad", expected=404, method="PUT", body=camera)
+        invalid_view = {**camera, "view": {**camera["view"], "target": [999, 0, 0]}}
+        request(cameras + "/" + str(uuid4()), expected=400, method="PUT", body=invalid_view)
+        check(True, "Camera HTTP rejects conflicting identity, invalid IDs and unbounded targets")
+        check(request(cameras, "Room5") == [], "Camera positions are private to the current authenticated operator identity")
+        request(camera_route, "Room5", 404, "DELETE")
+        room_camera = request(camera_route, "Room5", method="PUT", body={**camera, "name": "Room view"})
+        check(request(cameras) == [saved_camera] and request(cameras, "Room5") == [room_camera], "Same camera ID cannot overwrite another operator's position")
+        request(camera_route, expected=204, method="DELETE")
+        request(camera_route, expected=204, method="DELETE")
+        check(request(camera_route, method="PUT", body=camera)["deleted"] and request(cameras) == [], "Late camera save and remove retries do not resurrect a removed position")
         process.terminate()
         process.wait(timeout=10)
         process = start()
         check(request(route) == info, "SQLite restart restores recording identity, cursor, time and completion")
+        check(request(cameras) == [] and request(cameras, "Room5") == [room_camera]
+              and request(camera_route, method="PUT", body=camera)["deleted"], "SQLite restart preserves saved camera positions and removal history without changing world metadata")
         recovery = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30)
         check(recovery.returncode == 0 and json.loads(recovery.stdout)["complete"], "A second native process replays the full saved source idempotently")
         check(request(route) == info, "Whole-source retry changes no frame or archive metadata")

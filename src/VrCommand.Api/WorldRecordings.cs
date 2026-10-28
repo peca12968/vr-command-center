@@ -22,7 +22,7 @@ public record WorldFrameView(WorldRecordingPacket Packet, PlayerStatistics[] Sta
 
 // Indexed, append-only frames are read on demand; startup never loads an entire world recording.
 // This instance shares the session store's process lease and uses its own synchronous SQLite transactions.
-public sealed class WorldRecordings : IDisposable
+public sealed partial class WorldRecordings : IDisposable
 {
     private readonly object gate = new();
     private readonly SqliteConnection db;
@@ -49,6 +49,10 @@ public sealed class WorldRecordings : IDisposable
                 CREATE INDEX IF NOT EXISTS world_time ON world_frames(session, elapsed, sequence);
                 CREATE TABLE IF NOT EXISTS world_event_ids (
                   session TEXT NOT NULL REFERENCES recordings(session), event TEXT NOT NULL, PRIMARY KEY(session, event));
+                CREATE TABLE IF NOT EXISTS camera_bookmarks (
+                  session TEXT NOT NULL REFERENCES recordings(session), owner TEXT NOT NULL, id TEXT NOT NULL,
+                  body TEXT NOT NULL, created TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0,
+                  PRIMARY KEY(session, owner, id));
                 PRAGMA user_version=1;
                 """);
             setup.ExecuteNonQuery();

@@ -1,4 +1,5 @@
 import { ReplayScene } from './replay-scene.js';
+import { mountCameras } from './camera-ui.js';
 
 const $ = id => document.getElementById(id);
 const time = milliseconds => (milliseconds / 1000).toFixed(2) + ' 秒';
@@ -6,10 +7,11 @@ const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫�
 
 export function mountWorld(getKey, unauthorized) {
   let active = false, scene, controller, epoch = 0, listEpoch = 0, info, frame, previous, geometry = '', mode = '', connected = false, received = 0;
+  const cameras = mountCameras(getKey, unauthorized, () => scene, () => { $('world-camera').value = 'free'; $('world-room').value = 'all'; });
   function message(text, error = false) { $('world-message').textContent = text; $('world-message').classList.toggle('replay-error', error); }
   function stop() { epoch++; controller?.abort(); controller = null; connected = false; $('world-pause').textContent = '繼續回放'; }
   function reset() {
-    stop(); listEpoch++; info = frame = previous = null; geometry = ''; mode = '';
+    stop(); listEpoch++; info = frame = previous = null; geometry = ''; mode = ''; cameras.reset();
     $('world-recording').replaceChildren(); $('world-player').hidden = true; message('選取已錄製的場次，開始觀戰或回放。');
     if (scene) { scene.clear(scene.stage); scene.clear(scene.traces); scene.actors.clear(); scene.frame = null; }
   }
@@ -108,6 +110,7 @@ export function mountWorld(getKey, unauthorized) {
                 $('world-camera').value = 'overview';
               }
               $('world-player').hidden = false; scene.resize(); $('world-name').textContent = info.missionName;
+              cameras.bind(info.header.sessionId);
               message(`${info.header.origin} · ${info.header.rulesVersion} · 基本幾何素材 · VR 未校正。${info.header.origin === 'Simulation' ? '此場次使用合成頭手資料，無頭盔連接。' : '頭手來源請見角色資訊。'}`);
               status();
             } else if (type === 'frame') show(data);
@@ -119,7 +122,7 @@ export function mountWorld(getKey, unauthorized) {
     } catch (error) { if (request === epoch && !signal.aborted) { connected = false; message('觀戰已中斷：' + error.message + '；可重新連接。', true); status(); } }
   }
   $('world-refresh').addEventListener('click', refresh);
-  $('world-recording').addEventListener('change', () => { stop(); info = frame = previous = null; $('world-player').hidden = true; message('已切換場次，請開始觀戰或回放。'); });
+  $('world-recording').addEventListener('change', () => { stop(); cameras.bind(null); info = frame = previous = null; $('world-player').hidden = true; message('已切換場次，請開始觀戰或回放。'); });
   $('world-live').addEventListener('click', () => connect('live'));
   $('world-replay').addEventListener('click', () => connect('replay'));
   $('world-pause').addEventListener('click', () => { if (mode === 'replay' && connected) { stop(); status(); } else connect('replay', frame?.packet.elapsedMilliseconds ?? 0); });

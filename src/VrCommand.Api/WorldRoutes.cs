@@ -16,6 +16,10 @@ public static class WorldRoutes
         app.MapGet("/api/sessions/{id:guid}/world", (Guid id, WorldRecordings store, HttpContext context) => Results.Json(store.Info(id, Actor(context)), WorldJson.Options));
         app.MapGet("/api/sessions/{id:guid}/world/publish", Publish);
         app.MapGet("/api/sessions/{id:guid}/world/watch", Watch);
+        app.MapGet("/api/sessions/{id:guid}/world/cameras", (Guid id, WorldRecordings store, HttpContext context) => store.Bookmarks(id, Actor(context)));
+        app.MapPut("/api/sessions/{id:guid}/world/cameras/{camera:guid}", (Guid id, Guid camera, CameraBookmarkDraft draft, WorldRecordings store, HttpContext context) => store.SaveBookmark(id, camera, draft, Actor(context)));
+        app.MapDelete("/api/sessions/{id:guid}/world/cameras/{camera:guid}", (Guid id, Guid camera, WorldRecordings store, HttpContext context) =>
+        { store.DeleteBookmark(id, camera, Actor(context)); return Results.NoContent(); });
     }
 
     private static async Task Publish(Guid id, WorldRecordings store, SessionManager manager, HttpContext context)

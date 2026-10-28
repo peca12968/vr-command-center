@@ -8,3 +8,4 @@
 #world-viewport{position:relative;width:100%;height:560px;background:#101a17;border:1px solid var(--line);border-radius:5px;overflow:hidden}#world-canvas{display:block;width:100%;height:100%;touch-action:none}#world-timeline{padding:0;accent-color:var(--accent)}#world-status{white-space:normal}@media(max-width:600px){#world-viewport{height:390px}}
 
 @media(max-width:600px){#world-player>.section-heading{flex-direction:column;gap:8px}}
+.camera-positions{min-width:0;margin:16px 0;padding:14px;border:1px solid var(--line);border-radius:5px}.camera-positions legend{padding:0 8px;color:var(--accent)}.camera-positions .form-row{align-items:end}.camera-positions .form-row>button{align-self:end;margin-bottom:14px}.camera-positions .hint:last-child{margin-bottom:0}

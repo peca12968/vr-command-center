@@ -73,7 +73,7 @@
         </fieldset></form>
       </section>
       <section id="world-view" hidden>
-        <div class="section-heading"><div><p class="eyebrow">WORLD RECORDINGS</p><h2>觀戰與任務回放</h2></div><span class="badge">只讀觀察 · 不占玩家席位</span></div>
+        <div class="section-heading"><div><p class="eyebrow">WORLD RECORDINGS</p><h2>觀戰與任務回放</h2></div><span class="badge">觀察不占玩家席位</span></div>
         <section class="panel"><label>可讀取的錄製場次<select id="world-recording"></select></label><div class="button-row"><button id="world-refresh" class="quiet">更新錄製列表</button><button id="world-live" disabled>即時觀戰</button><button id="world-replay" class="secondary" disabled>從頭回放</button></div><p id="world-message" class="hint" role="status" aria-live="polite">選取已錄製的場次，開始觀戰或回放。</p></section>
         <section id="world-player" class="panel" hidden>
           <div class="section-heading"><h3 id="world-name"></h3><span id="world-status" class="badge"></span></div>
@@ -82,6 +82,11 @@
           <div class="replay-transport"><button id="world-pause" class="quiet">暫停回放</button><label>速度<select id="world-speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select></label><output id="world-time"></output></div>
           <label>跳轉已保存時間<input id="world-timeline" type="range" min="0" max="1" step="1" value="0" aria-label="世界錄製回放時間軸"></label>
           <div class="form-row"><label>鏡頭<select id="world-camera"><option value="overview">斜角全景</option><option value="top">上帝俯視</option><option value="follow">跟隨選取角色</option><option value="free">自由調整</option></select></label><label>房間<select id="world-room"></select></label><label>選取角色<select id="world-actor"></select></label></div>
+          <fieldset class="camera-positions"><legend>保存與切換鏡頭位置</legend>
+            <div class="form-row"><label>新位置名稱<input id="camera-name" maxlength="60" placeholder="例如：東側沙包上方"></label><button id="camera-save" class="secondary">保存目前位置</button><label>已保存位置<select id="camera-positions"></select></label></div>
+            <div class="button-row"><button id="camera-recall" class="quiet">切換位置</button><button id="camera-remove" class="quiet">移除位置</button><button id="camera-refresh" class="quiet">重新讀取位置</button><button id="camera-retry" hidden>重試確認結果</button></div>
+            <p class="hint">位置依目前控制台身分與場次保存，可於觀戰或回放使用。跟隨時保存的是當下固定位置；每場最多保存 24 個。</p><p id="camera-message" class="hint" role="status" aria-live="polite"></p>
+          </fieldset>
           <p id="world-actor-info" class="replay-actor-info"></p><h3>此快照已核對的統計</h3><div class="table-scroll"><table><caption class="sr-only">世界快照統計</caption><thead><tr><th>玩家</th><th>彈藥</th><th>擊殺</th><th>耗損</th><th>中彈</th><th>命中率</th><th>血量</th></tr></thead><tbody id="world-statistics"></tbody></table></div>
         </section>
       </section>
@@ -100,7 +105,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>開發原型 v0.14 · 已有模擬回放；頭盔實機、25 台連線、Unity 遊戲整合與硬體仍待驗證。</footer>
+      <footer>開發原型 v0.14.1 · 已有模擬回放與鏡頭位置保存；頭盔實機、25 台連線、Unity 遊戲整合與硬體仍待驗證。</footer>
     </div>
   </main>
 </body>
