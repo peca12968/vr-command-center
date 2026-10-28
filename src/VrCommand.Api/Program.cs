@@ -77,7 +77,7 @@ app.Use(async (context, next) =>
     }
 });
 
-app.MapGet("/", () => new { service = "VR Command Center", stage = "operator console and Quest integration prototype", version = "0.9.0" });
+app.MapGet("/", () => new { service = "VR Command Center", stage = "durable combat telemetry and Quest integration prototype", version = "0.11.0" });
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/api/me", (HttpContext context) => Actor(context));
 app.MapGet("/api/rooms", (SessionManager manager, HttpContext context) => manager.Rooms(Actor(context)));
@@ -104,6 +104,14 @@ app.MapGet("/api/sessions/{id:guid}/statistics", (Guid id, SessionManager manage
     manager.Statistics(id, Actor(context)));
 app.MapPost("/api/sessions/{id:guid}/combat", (Guid id, CombatReport report, SessionManager manager, HttpContext context) =>
     manager.ReportCombat(id, report, Actor(context)));
+app.MapPost("/api/sessions/{id:guid}/combat-stream", (Guid id, OpenCombatStream request, SessionManager manager, HttpContext context) =>
+    manager.OpenStream(id, request, Actor(context)));
+app.MapPost("/api/sessions/{id:guid}/combat-stream/reports", (Guid id, StreamCombatRecord request, SessionManager manager, HttpContext context) =>
+    manager.ReportStream(id, request, Actor(context)));
+app.MapPost("/api/sessions/{id:guid}/combat-stream/batch", (Guid id, StreamCombatRecord[] request, SessionManager manager, HttpContext context) =>
+    manager.ReportStreamBatch(id, request, Actor(context)));
+app.MapPost("/api/sessions/{id:guid}/combat-stream/seal", (Guid id, SealCombatStream request, SessionManager manager, HttpContext context) =>
+    manager.SealStream(id, request, Actor(context)));
 app.MapPost("/api/sessions/{id:guid}/players", (Guid id, JoinPlayer request, SessionManager manager, HttpContext context) =>
     manager.Join(id, request.PlayerId, request.Name, request.RoomId, request.Headset, Actor(context), RequestId(context)));
 app.MapPost("/api/sessions/{id:guid}/players/{playerId:guid}/join-ticket", (Guid id, Guid playerId, SessionManager manager, HttpContext context) =>

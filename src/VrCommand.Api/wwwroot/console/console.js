@@ -187,9 +187,12 @@ function renderSession(statistics, events) {
   }));
   if (!session.players.length) emptyTable('roster', 4, '尚未加入玩家');
   $('statistics-origin').textContent = statistics.origin === 'Simulation' ? '模擬資料' : statistics.origin === 'GameServer' ? '遊戲伺服器回報' : '尚無戰鬥資料';
+  $('telemetry-status').hidden = !session.combatStream;
+  $('telemetry-status').textContent = statistics.pendingTelemetry ? '已要求結束；等待遊戲伺服器補送事件並封存，統計尚未確認完整。'
+    : session.combatStream?.sealed ? '戰鬥事件已全部確認並封存。' : '戰鬥資料接收中；目前統計將隨資料更新。';
   $('statistics').replaceChildren(...statistics.players.map(player => row([player.name, player.ammoUsed, player.kills, player.damageTaken, player.hitsReceived, player.accuracyPercent + '%', player.health])));
   if (!statistics.players.length) emptyTable('statistics', 7, '加入玩家後顯示統計');
-  const eventNames = { Created: '建立場次', PlayerJoined: '玩家加入', PlayerLeft: '玩家離開', ControlApplied: '套用控制命令', CombatRecorded: '戰鬥事件' };
+  const eventNames = { Created: '建立場次', PlayerJoined: '玩家加入', PlayerLeft: '玩家離開', ControlApplied: '套用控制命令', CombatRecorded: '戰鬥事件', CombatStreamOpened: '綁定戰鬥來源', StreamCombatRecorded: '接收戰鬥事件', CombatStreamSealed: '戰鬥事件封存' };
   $('event-list').replaceChildren(...events.slice().reverse().map(event => {
     const item = element('li'); item.append(element('span', time(event.recordedAtUtc), 'event-time'), element('span', `#${event.sequence} ${eventNames[event.kind] || event.kind}`), element('span', event.actor?.id || '舊版紀錄', 'event-actor')); return item;
   }));
@@ -220,6 +223,7 @@ async function sendPending() {
     if (state.pending !== pending) return;
     state.pending = null;
     if (pending.kind === 'create') { $('include-ended').checked = response.state === 'Ended'; state.selected = response.id; state.session = null; }
+    if (pending.kind === 'command' && pending.body.action === 'End' && response.session.combatStream && !response.session.combatStream.sealed) $('include-ended').checked = true;
     if (pending.kind === 'join') $('player-name').value = '';
     await refresh(); loadEnvironment(); loadEnemies();
     notify({ create: '場次建立結果已確認。請核對目前狀態，再加入玩家及開始任務。', join: '玩家加入操作已確認，請核對目前名冊；尚不代表頭盔在線。', leave: '玩家移出操作已確認，請核對目前名冊。', command: '控制命令已確認。' }[pending.kind]);

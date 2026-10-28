@@ -1,6 +1,6 @@
-# 共用戰鬥模擬核心 v0.10
+# 共用戰鬥模擬核心 v0.11
 
-`clients/unity/Packages/com.vrcommand.simulation/Runtime/` 是唯一來源；`src/VrCommand.Simulation` 直接編譯為 .NET Standard 2.1／C# 9，無 Unity、後端組件或資料庫相依。新增 ArenaSession field DTO 與任務／連線／姿態接入層；Unity 轉接來源碼已引用 embedded package 並建立世界，但尚未實際匯入／編譯或執行。管理 API／瀏覽器介面維持 v0.9；詳見 `GAMEPLAY.md`。
+`clients/unity/Packages/com.vrcommand.simulation/Runtime/` 是唯一來源；`src/VrCommand.Simulation` 直接編譯為 .NET Standard 2.1／C# 9，無 Unity、後端組件或資料庫相依。新增 ArenaSession field DTO 與任務／連線／姿態接入層；Unity 轉接來源碼已引用 embedded package 並建立世界，但尚未實際匯入／編譯或執行。管理 API／瀏覽器介面為 v0.11；詳見 `GAMEPLAY.md`。
 
 目前已證明 .NET 遊戲規則與幾何模擬，以及讀取紀錄的瀏覽器 3D 回放，不能當作 Quest／VIVE、Unity Physics、IL2CPP、網路延遲或 25 台裝置驗收。Android 工具已安裝整理並通過 ARM64 原生編譯；Unity 編輯器仍未取得有效授權，見 `QUEST3.md`。
 
@@ -66,6 +66,6 @@ python scripts/smoke_api.py
 
 ## 待接入
 
-Unity 端已有組件參考、任務／名冊、已驗票輸入、固定步進、敵軍／擺設渲染及 NGO 狀態接入來源碼，仍未通過 Unity 編譯／運行，見 GAMEPLAY。已確認的戰鬥事件尚未可靠送入 API；控制台按鈕也不會自動驅動這個獨立示範程序。接續補齊持久 outbox、Pause／End 排空、硬體、姿態／場地實測、完整世界回放及觀戰。
+Unity 端已有組件參考、任務／名冊、已驗票輸入、固定步進、敵軍／擺設渲染及 NGO 狀態接入來源碼，仍未通過 Unity 編譯／運行，見 GAMEPLAY。持久補送及 Pause／End 尾端封存已通過 .NET／HTTP，Unity 發送器仍待編譯運行，詳見 TELEMETRY。控制台按鈕不會自動驅動此獨立示範程序；接續補齊硬體、姿態／場地實測、正式世界錄製及即時觀戰。
 
 技術來源：[Unity 6000.3 C# compiler](https://docs.unity.com/en-us/engine/6000.3/manual/programming-environment/overview-of-dot-net-in-unity/csharp-compiler)、[.NET API profiles](https://docs.unity.com/en-us/engine/6000.3/manual/programming-environment/overview-of-dot-net-in-unity/dotnet-profile-support)、[embedded packages](https://docs.unity.com/en-us/engine/6000.3/manual/packages-list/dependencies-lp/upm-embed)。這些是選型依據，實際 Unity 編譯與實機相容仍需另外驗證。

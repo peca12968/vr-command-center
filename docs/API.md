@@ -1,4 +1,4 @@
-# 管理、統計與玩家接入 API v0.9
+# 管理、統計與玩家接入 API v0.11
 
 REST、UTF-8 JSON；預設範例地址 `http://127.0.0.1:5080`。列舉使用字串，不接受數字列舉。提供管理、統計與短效入場票券；姿態不經此 API。Unity 遊戲來源碼尚待編譯／運行。所有 `/api` 呼叫須帶 `Authorization: Bearer <credential>`；配置與角色表見 [AUTHORIZATION.md](AUTHORIZATION.md)。
 
@@ -68,6 +68,8 @@ v0.6 新增瀏覽器介面 `/console/`，操作見 [CONSOLE.md](CONSOLE.md)。�
 票券不是一次性：目前仍在名冊且未到期可再次驗證。同一玩家離開後又以相同 ID／房間加入，舊未到期票券可能再次有效；尚無每次加入的撤銷版本。Unity 伺服器有同一玩家同時重複連線拒絕程式，仍待運行驗證。移除玩家不會自動斷開現有 Unity 連線。詳見 [QUEST3.md](QUEST3.md)。
 
 ## 相容性
+
+v0.11 新增 GameServer 專用 combat-stream、reports、batch 及 seal 端點，格式見 `TELEMETRY.md`。SessionView 新增可為 null 的 combatStream，statistics 新增 pendingTelemetry；Ended 的已綁來源場次可依原 Running 觀察補送，精確封存後才表示完整尾端已確認。新事件 schema 5，讀取舊 1–4，SQLite user_version 仍 1；寫入後不可直接降版。
 
 v0.9 新增上述三個端點的選用去重標頭。新事件使用 schema 4，保留 schema 1–3 讀取；新 PlayerLeft 保存房間，requestId 隨接受事件一起持久化。事件資料庫結構仍為 user_version 1。寫入 schema 4 後不能用舊版程式服務同一資料目錄。
 

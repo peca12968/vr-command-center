@@ -9,7 +9,7 @@ public record PlayerStatistics(Guid PlayerId, string Name, int RoomId, long Ammo
 {
     public decimal AccuracyPercent => AmmoUsed == 0 ? 0 : decimal.Round(100m * ShotsHit / AmmoUsed, 2);
 }
-public record SessionStatistics(Guid SessionId, long ThroughSequence, CombatOrigin? Origin, PlayerStatistics[] Players);
+public record SessionStatistics(Guid SessionId, long ThroughSequence, CombatOrigin? Origin, PlayerStatistics[] Players, bool PendingTelemetry = false);
 public record CombatReceipt(Guid ReportId, long AppliedAtSequence, bool Duplicate, SessionStatistics Statistics);
 
 // Incremental projection. A prepared change is applied only after its event has committed to storage.
@@ -55,10 +55,10 @@ internal sealed class CombatLedger
             var joined = entry.Read<Player>();
             return () => players[joined.Id] = new(joined.Id, joined.Name, joined.RoomId);
         }
-        if (entry.Kind != SessionEventKind.CombatRecorded) return static () => { };
+        if (entry.Kind is not (SessionEventKind.CombatRecorded or SessionEventKind.StreamCombatRecorded)) return static () => { };
         if (before is null || before.State != SessionState.Running)
             throw new InvalidOperationException("New combat reports require a running session.");
-        var report = entry.Read<CombatReport>();
+        var report = entry.Kind == SessionEventKind.StreamCombatRecorded ? entry.Read<StreamCombatRecord>().Report : entry.Read<CombatReport>();
         Validate(report);
         if (reports.ContainsKey(report.ReportId)) throw new InvalidDataException("Repeated combat report ID in history.");
         if (origin.HasValue && origin != report.Origin)

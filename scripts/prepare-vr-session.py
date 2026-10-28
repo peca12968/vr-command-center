@@ -43,7 +43,8 @@ output = args.output.resolve() / session["id"]
 try:
     output.mkdir(parents=True, exist_ok=False)
     server = {"role": "Server", "address": "0.0.0.0", "port": args.port, "sessionId": session["id"],
-              "managementApiUrl": args.base_url.rstrip("/"), "gameServerKey": keys["GameServer"]}
+              "managementApiUrl": args.base_url.rstrip("/"), "gameServerKey": keys["GameServer"],
+              "telemetryOrigin": "Simulation", "telemetryDirectory": str(ROOT / "data/telemetry")}
     (output / "server.json").write_text(json.dumps(server, indent=2), encoding="utf-8")
     players = []
     for index in range(1, args.players + 1):

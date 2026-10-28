@@ -52,6 +52,27 @@ namespace VrCommand.Unity
         private float accumulator, nextPublish;
         private double lastManagement = double.NegativeInfinity;
         private bool geometryDirty = true, geometryPublished, serverReady;
+        private long observedSequence;
+        private bool journalFault;
+        public TelemetryOutbox Outbox { get; private set; }
+
+        public void InitializeTelemetry(string path, Guid sessionId, string origin)
+        {
+            Outbox = TelemetryOutbox.OpenFile(path, sessionId, origin);
+            if (Outbox.LastSequence != 0 || Outbox.Complete)
+            { Outbox.Dispose(); Outbox = null; throw new InvalidOperationException("Recover the previous telemetry journal before restarting this world."); }
+            serverReady = false;
+        }
+        public void TelemetryFault()
+        { journalFault = true; Suspend(); Debug.LogError("Telemetry persistence or delivery failed. Combat paused; recover the journal."); }
+        private bool Capture()
+        {
+            if (journalFault) return false;
+            if (Outbox == null || session.World == null) return true;
+            try { Outbox.Capture(session.World, observedSequence); return true; }
+            catch (Exception exception) when (exception is System.IO.IOException || exception is System.IO.InvalidDataException || exception is UnauthorizedAccessException || exception is InvalidOperationException || exception is ArgumentException)
+            { TelemetryFault(); return false; }
+        }
 
         private void Awake() { Actors = new NetworkList<CombatActorState>(); Props = new NetworkList<CombatPropState>(); }
         public override void OnNetworkSpawn()
@@ -69,7 +90,15 @@ namespace VrCommand.Unity
         }
         public void ApplyManagement(ManagementSnapshot snapshot)
         {
-            session.Apply(snapshot); lastManagement = Time.realtimeSinceStartupAsDouble; serverReady = true;
+            if (!Capture()) throw new InvalidOperationException("Telemetry is faulted.");
+            session.Apply(snapshot); observedSequence = snapshot.sequence;
+            if (session.World.Phase == WorldPhase.Ended && Outbox != null)
+            {
+                try { Outbox.Finish(session.World); }
+                catch (Exception exception) when (exception is System.IO.IOException || exception is System.IO.InvalidDataException || exception is UnauthorizedAccessException)
+                { TelemetryFault(); throw new InvalidOperationException("Telemetry completion could not be persisted.", exception); }
+            }
+            lastManagement = Time.realtimeSinceStartupAsDouble; serverReady = true;
             if (IsSpawned && IsServer) { Ready.Value = true; Publish(); }
         }
         public void Suspend()
@@ -88,8 +117,12 @@ namespace VrCommand.Unity
             var forward = pose.rightRotation * Vector3.forward;
             return session.Pose(client, Vector(root + pose.head), Vector(root + pose.right + forward * .15f), Vector(forward.normalized), Time.realtimeSinceStartupAsDouble);
         }
-        public bool Weapon(ulong client, ulong input, bool reload, AvatarPose pose, Vector3 root) => AcceptPose(client, pose, root)
-            && session.Weapon(client, input, reload, Time.realtimeSinceStartupAsDouble);
+        public bool Weapon(ulong client, ulong input, bool reload, AvatarPose pose, Vector3 root)
+        {
+            if (Outbox == null || journalFault || !AcceptPose(client, pose, root)) return false;
+            var accepted = session.Weapon(client, input, reload, Time.realtimeSinceStartupAsDouble);
+            return Capture() && accepted;
+        }
         public bool Player(string id, out CombatActorState state)
         {
             if (Actors != null) for (var index = 0; index < Actors.Count; index++)
@@ -106,8 +139,8 @@ namespace VrCommand.Unity
                     Suspend(); VenueBootstrap.Instance?.sceneAuthority.SuspendForManagementLoss();
                 }
                 accumulator += Mathf.Min(Time.unscaledDeltaTime, .2f);
-                while (accumulator >= ArenaWorld.TickSeconds) { accumulator -= ArenaWorld.TickSeconds; session.Tick(Time.realtimeSinceStartupAsDouble); }
-                if (Time.unscaledTime >= nextPublish) { nextPublish = Time.unscaledTime + .1f; Publish(); }
+                while (accumulator >= ArenaWorld.TickSeconds) { accumulator -= ArenaWorld.TickSeconds; session.Tick(Time.realtimeSinceStartupAsDouble); if (!Capture()) break; }
+                if (!journalFault && Time.unscaledTime >= nextPublish) { nextPublish = Time.unscaledTime + .1f; Publish(); }
             }
             Draw();
         }

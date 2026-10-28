@@ -1,4 +1,4 @@
-# Quest 3 接入原型與工具鏈 v0.10
+# Quest 3 接入原型與工具鏈 v0.11
 
 使用者指定先用 Meta Quest 3；暫按 Android 獨立執行規劃。工程在 `clients/unity/`，後端仍獨立使用 .NET 10，不把後端 DLL 放進 Unity。
 
@@ -6,11 +6,11 @@
 
 已有場地生成器、玩家頭部／雙手及武器物件、OpenXR 瞄準／射擊／換彈、NGO 連線審核、固定出生席位，以及管理狀態／環境、任務擺設、敵軍與健康／彈藥的接入來源碼。姿態透過 NGO 傳送，不走 REST。姿態目標 20 Hz、戰鬥狀態 10 Hz 是設定值，沒有實機量測；支援範圍與未接通的報告見 `GAMEPLAY.md`。
 
-**目前僅完成來源碼原型，沒有成功的 Unity 編譯、生成場景、EditMode 結果、桌面執行檔或 APK。** 2026-10-29 本機 Editor 已完整安裝，本輪 Prepare 仍因授權退出 198。15 份 C# 通過 C# 9 語法檢查，沒有綁定 Unity SDK；其中 embedded Runtime 另通過 .NET Standard 2.1 型別建置。254 項核心及 282 項 HTTP 檢查包含管理、票券、幾何核心與新任務接入層。
+**目前僅完成來源碼原型，沒有成功的 Unity 編譯、生成場景、EditMode 結果、桌面執行檔或 APK。** 2026-10-29 本機 Editor 已完整安裝，本輪 Prepare 仍因授權退出 198。16 份 C# 通過 C# 9 語法檢查，沒有綁定 Unity SDK；其中 embedded Runtime 另通過 .NET Standard 2.1 型別建置。295 項核心及 302 項 HTTP 檢查包含管理、票券、幾何核心與新任務接入層。
 
-沒有實機互見、Unity 射擊／AI 運行證據、雨粒子／雷聲、MR 透視／錨點、遊戲內物件編輯、自由觀戰或頭盔任務錄製。桌面觀察鏡頭固定，不能作為需求 10 的完成證據。Unity 戰鬥事件尚未送入 API 統計或正式回放；所有頻率與效能值仍須量測。
+沒有實機互見、Unity 射擊／AI 運行證據、雨粒子／雷聲、MR 透視／錨點、遊戲內物件編輯、自由觀戰或頭盔任務錄製。桌面觀察鏡頭固定，不能作為需求 10 的完成證據。Unity 已接入持久事件／補送來源碼，仍無實際統計整合運行證據；頻率與效能仍須量測，詳見 TELEMETRY。
 
-embedded package `com.vrcommand.simulation` 現為 0.10.0。Runtime asmdef 已引用它，ProjectBuilder／CombatAuthority 來源碼會建立世界及同步渲染，但尚未成功執行生成器；不能將 .NET 核心通過結果當作 Unity 工程成功編譯。規則與接入分別見 `SIMULATION.md`／`GAMEPLAY.md`。
+embedded package `com.vrcommand.simulation` 現為 0.11.0。Runtime asmdef 已引用它，ProjectBuilder／CombatAuthority 來源碼會建立世界及同步渲染，但尚未成功執行生成器；不能將 .NET 核心通過結果當作 Unity 工程成功編譯。規則與接入分別見 `SIMULATION.md`／`GAMEPLAY.md`。
 
 ## 固定工具鏈
 
@@ -91,7 +91,7 @@ embedded package `com.vrcommand.simulation` 現為 0.10.0。Runtime asmdef 已�
    ```
 
    多台裝置須用 `-Serial` 指定；腳本核對裝置型號、只接受玩家欄位、安裝本專案 APK 並複製設定後啟動。此腳本尚未實機執行。
-5. 先在 Preparing 啟動伺服器與玩家，再發 Begin；核對頭手互見、射擊／換彈、掩體與 AI／健康同步，再試 Pause、Resume、SetEnvironment 及 SetEnemies。管理資料超過 1.5 秒未更新時應停止戰鬥；所有路徑尚待實際執行。Unity 尚未送出 CombatReport，主控台戰鬥統計不會因此自動更新。
+5. 先在 Preparing 啟動伺服器與玩家，再發 Begin；核對頭手互見、射擊／換彈、掩體與 AI／健康同步，再試 Pause、Resume、SetEnvironment 及 SetEnemies。管理資料超過 1.5 秒未更新時應停止戰鬥；所有路徑尚待實際執行。另核對 journal、批次補送與 End 封存；同一管道已有 .NET／HTTP 證據，Unity 路徑仍須實際執行。
 6. 測試後以 End 結束自己建立的場次，保留歷史並釋放房間。票券過期時由有權控制台對同一玩家重新配發；不用刪除其他場次。已結束場次不能再配發或驗證。
 
 ## 連線與仍待實作事項

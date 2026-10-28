@@ -35,6 +35,7 @@ namespace VrCommand.Simulation
         private readonly Dictionary<Guid, Guid> reloads = new Dictionary<Guid, Guid>();
         private readonly List<WorldEvent> events = new List<WorldEvent>();
         public long TickNumber { get; private set; }
+        public long EventSequence => events.Count;
         public WorldPhase Phase { get; private set; } = WorldPhase.Preparing;
         public AiBehavior Behavior { get; private set; } = AiBehavior.Hold;
         public bool AutoAttack { get; private set; } = true;

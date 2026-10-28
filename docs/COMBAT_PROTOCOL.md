@@ -1,5 +1,7 @@
 # 戰鬥統計契約
 
+v0.11 新增有序戰鬥來源、持久 outbox、Pause／End 補送及精確 seal，詳見 `TELEMETRY.md`；下列 `/combat` 格式保留給未綁定來源的舊客戶端。Unity 有同一管道的發送來源碼但尚未編譯運行；不能以 .NET 示範宣稱頭盔報表驗收。
+
 本契約沿用 v0.4 引入的 schema 3 事件接收、因果檢查、去重、統計與復原。v0.7 共用核心已可獨立判定幾何射擊、敵軍血量及 AI 傷害，並透過 Simulation 示範接入，見 `SIMULATION.md`；尚未由 Unity 場景或頭盔輸入驅動。API 仍信任持有 GameServer 憑證的來源報告，不會從畫面推算命中。`origin: GameServer` 是來源宣告，不是實機驗收證明。
 
 ## 接收與讀取

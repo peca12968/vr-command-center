@@ -53,6 +53,7 @@
           <div class="table-scroll"><table><caption class="sr-only">目前場次玩家名冊</caption><thead><tr><th>玩家</th><th>房間／席位</th><th>頭盔分類</th><th>操作</th></tr></thead><tbody id="roster"></tbody></table></div>
           <fieldset id="ticket-fields" class="form-row ticket-fields"><label>遊戲伺服器地址<input id="game-address" placeholder="例如 192.168.1.100" maxlength="253"></label><label>連線埠<input id="game-port" type="number" value="7777" min="1024" max="65535"></label><p class="hint">點選玩家的「下載連線檔」配發五分鐘入場票券。檔案不含控制台憑證；地址須為頭盔可連到的遊戲伺服器。</p></fieldset>
           <div class="subheading"><h3>任務統計</h3><span id="statistics-origin" class="badge"></span></div>
+          <p id="telemetry-status" class="warning" role="status" hidden></p>
           <div class="table-scroll"><table><caption class="sr-only">玩家戰鬥統計，含已離開玩家</caption><thead><tr><th>玩家</th><th>彈藥</th><th>擊殺</th><th>耗損</th><th>中彈</th><th>命中率</th><th>剩餘血量</th></tr></thead><tbody id="statistics"></tbody></table></div>
           <p class="hint">含曾離開的玩家。未收到戰鬥事件時數值為零；名冊與統計不代表裝置在線。</p>
           <div class="subheading"><h3>最近操作紀錄</h3><span class="hint">最多 20 筆，非 3D 回放</span></div>
@@ -86,7 +87,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>開發原型 v0.9 · 已有模擬回放；頭盔實機、25 台連線、Unity 遊戲整合與硬體仍待驗證。</footer>
+      <footer>開發原型 v0.11 · 已有模擬回放；頭盔實機、25 台連線、Unity 遊戲整合與硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

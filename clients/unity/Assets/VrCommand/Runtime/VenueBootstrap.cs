@@ -7,6 +7,7 @@ using Unity.Netcode.Transports.UTP;
 using UnityEngine;
 using UnityEngine.Networking;
 using SessionSnapshot = VrCommand.Simulation.ManagementSnapshot;
+using VrCommand.Simulation;
 
 namespace VrCommand.Unity
 {
@@ -19,9 +20,10 @@ namespace VrCommand.Unity
         private LaunchConfiguration configuration;
         private string status = "WAITING FOR CONTROL DESK";
         private bool managementReady;
+        private TelemetryOutbox outbox;
         public static VenueBootstrap Instance { get; private set; }
         public string State => sceneAuthority != null && sceneAuthority.IsSpawned ? sceneAuthority.Phase.Value.ToString() : "Preparing";
-        public string Status => status;
+        public string Status => status + (outbox == null ? "" : " / REPORTS PENDING " + (outbox.LastSequence - outbox.AcknowledgedSequence));
 
         private IEnumerator Start()
         {
@@ -55,6 +57,20 @@ namespace VrCommand.Unity
                 networkManager.ConnectionApprovalCallback = ApproveConnection;
                 yield return RefreshManagement();
                 if (!managementReady) { status = "CONTROL DESK CONNECTION FAILED"; yield break; }
+                var telemetryReady = true;
+                try
+                {
+                    var directory = string.IsNullOrWhiteSpace(configuration.telemetryDirectory) ? System.IO.Path.Combine(Application.persistentDataPath, "telemetry") : configuration.telemetryDirectory;
+                    combatAuthority.InitializeTelemetry(System.IO.Path.Combine(directory, configuration.sessionId + ".journal"), Guid.Parse(configuration.sessionId), configuration.telemetryOrigin);
+                    outbox = combatAuthority.Outbox;
+                }
+                catch (Exception) { status = "TELEMETRY JOURNAL NEEDS RECOVERY"; telemetryReady = false; }
+                if (!telemetryReady) yield break;
+                yield return OpenTelemetry();
+                if (!streamReady) { status = "TELEMETRY ATTACHMENT FAILED"; yield break; }
+                yield return RefreshManagement();
+                if (!managementReady) yield break;
+                StartCoroutine(DeliverTelemetry());
                 if (configuration.role == "Host")
                 {
                     // NGO 2.7 ignores asynchronous host approval; validate before StartHost and answer it synchronously.
@@ -83,6 +99,64 @@ namespace VrCommand.Unity
         }
 
         private SessionSnapshot latestSnapshot;
+        private bool streamReady;
+        [Serializable] private sealed class StreamStatus { public string streamId; public string origin; public long acceptedSequence; public bool @sealed; }
+        [Serializable] private sealed class StreamReceipt { public string streamId; public long acceptedSequence; }
+        private UnityWebRequest TelemetryRequest(string suffix, string body)
+        {
+            var request = new UnityWebRequest(configuration.managementApiUrl.TrimEnd('/') + "/api/sessions/" + configuration.sessionId + "/combat-stream" + suffix, "POST");
+            request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(body)); request.downloadHandler = new DownloadHandlerBuffer();
+            request.SetRequestHeader("Content-Type", "application/json"); request.SetRequestHeader("Authorization", "Bearer " + configuration.gameServerKey); request.timeout = 5;
+            return request;
+        }
+        private IEnumerator OpenTelemetry()
+        {
+            using (var request = TelemetryRequest("", "{\"streamId\":\"" + outbox.StreamId.ToString("D") + "\",\"origin\":\"" + outbox.Origin + "\"}"))
+            {
+                yield return request.SendWebRequest();
+                if (request.result != UnityWebRequest.Result.Success) yield break;
+                StreamStatus response = null; try { response = JsonUtility.FromJson<StreamStatus>(request.downloadHandler.text); } catch (Exception) { }
+                streamReady = response != null && Guid.TryParse(response.streamId, out var id) && id == outbox.StreamId && response.origin == outbox.Origin
+                    && response.acceptedSequence == 0 && !response.@sealed;
+            }
+        }
+        private IEnumerator DeliverTelemetry()
+        {
+            while (outbox != null && !outbox.Sealed)
+            {
+                var batch = outbox.PendingBatch();
+                if (batch.Length == 0 && !outbox.Complete) { yield return new WaitForSecondsRealtime(.2f); continue; }
+                var body = batch.Length != 0 ? TelemetryOutbox.BatchJson(batch) : "{\"streamId\":\"" + outbox.StreamId.ToString("D") + "\",\"finalSequence\":" + outbox.LastSequence.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}";
+                using (var request = TelemetryRequest(batch.Length != 0 ? "/batch" : "/seal", body))
+                {
+                    yield return request.SendWebRequest();
+                    if (request.responseCode >= 400 && request.responseCode < 500)
+                    { status = "TELEMETRY REJECTED - RECOVER JOURNAL"; combatAuthority.TelemetryFault(); yield break; }
+                    if (request.result == UnityWebRequest.Result.Success)
+                    {
+                        var valid = true;
+                        try
+                        {
+                            if (batch.Length != 0)
+                            {
+                                var receipt = JsonUtility.FromJson<StreamReceipt>(request.downloadHandler.text);
+                                if (!Guid.TryParse(receipt.streamId, out var id) || id != outbox.StreamId || receipt.acceptedSequence < batch[batch.Length - 1].StreamSequence) throw new InvalidOperationException("Invalid receipt.");
+                                outbox.AcknowledgeThrough(batch[batch.Length - 1].StreamSequence, batch[batch.Length - 1].ReportId);
+                            }
+                            else
+                            {
+                                var receipt = JsonUtility.FromJson<StreamStatus>(request.downloadHandler.text);
+                                if (!Guid.TryParse(receipt.streamId, out var id) || id != outbox.StreamId || !receipt.@sealed || receipt.acceptedSequence != outbox.LastSequence) throw new InvalidOperationException("Invalid seal.");
+                                outbox.MarkSealed();
+                            }
+                        }
+                        catch (Exception) { status = "TELEMETRY RECEIPT OR DISK ERROR"; combatAuthority.TelemetryFault(); valid = false; }
+                        if (!valid) yield break;
+                    }
+                }
+                yield return new WaitForSecondsRealtime(.2f);
+            }
+        }
         private IEnumerator RefreshManagement()
         {
             using (var request = UnityWebRequest.Get(configuration.managementApiUrl.TrimEnd('/') + "/api/sessions/" + configuration.sessionId))
@@ -98,7 +172,7 @@ namespace VrCommand.Unity
                 if (snapshot == null || snapshot.id != configuration.sessionId || snapshot.environment == null) yield break;
                 var valid = true;
                 try { combatAuthority.ApplyManagement(snapshot); }
-                catch (Exception exception) when (exception is ArgumentException || exception is InvalidOperationException)
+                catch (Exception exception) when (exception is ArgumentException || exception is InvalidOperationException || exception is System.IO.IOException)
                 { status = "MISSION NOT READY - CHECK SERVER CONSOLE"; Debug.LogError("Mission validation: " + exception.Message); valid = false; }
                 if (!valid) yield break;
                 latestSnapshot = snapshot;
@@ -196,6 +270,7 @@ namespace VrCommand.Unity
         }
         private void OnDestroy()
         {
+            outbox?.Dispose();
             if (networkManager != null)
             {
                 networkManager.OnClientDisconnectCallback -= Disconnected;
@@ -207,7 +282,7 @@ namespace VrCommand.Unity
         {
             if (Application.platform == RuntimePlatform.Android) return;
             GUI.Box(new Rect(12, 12, 430, 58), "VR COMMAND - QUEST 3 VERTICAL SLICE");
-            GUI.Label(new Rect(24, 40, 410, 24), status + " / " + State);
+            GUI.Label(new Rect(24, 40, 410, 24), Status + " / " + State);
         }
     }
 

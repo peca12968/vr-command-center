@@ -7,14 +7,15 @@ public enum ControlAction { Unspecified, Begin, Pause, Resume, End, SetEnvironme
 public record Player(Guid Id, string Name, int RoomId, HeadsetKind Headset, int Seat = -1);
 public record SessionView(Guid Id, SessionMode Mode, int[] RoomIds, Mission Mission,
     DateTimeOffset CreatedAtUtc, DateTimeOffset? StartedAtUtc, DateTimeOffset? EndedAtUtc,
-    SessionState State, Player[] Players, EnvironmentSettings Environment, EnemySettings Enemies, long Sequence);
+    SessionState State, Player[] Players, EnvironmentSettings Environment, EnemySettings Enemies, long Sequence,
+    CombatStreamView? CombatStream = null);
 public record RoomView(int Id, int Capacity, Guid? SessionId, int PlayerCount);
 public record ControlCommand(Guid CommandId, ControlAction Action, EnvironmentSettings? Environment = null,
     EnemySettings? Enemies = null, long? ExpectedSequence = null);
 public record CommandReceipt(Guid CommandId, long AppliedAtSequence, bool Duplicate, SessionView Session);
 
 // Management and combat telemetry; this does not simulate a 3D world or determine physical collisions.
-public sealed class SessionManager
+public sealed partial class SessionManager
 {
     public const int RoomCount = 5;
     public const int PlayersPerRoom = 5;
@@ -24,7 +25,8 @@ public sealed class SessionManager
     private readonly Dictionary<Guid, History> sessions = [];
     // A lifecycle request key is global across creation and roster mutations, including archived sessions.
     private readonly Dictionary<Guid, SessionEvent> requests = [];
-    private sealed record History(SessionView View, List<SessionEvent> Events, Dictionary<Guid, SessionEvent> Commands, CombatLedger Combat);
+    private sealed record History(SessionView View, List<SessionEvent> Events, Dictionary<Guid, SessionEvent> Commands, CombatLedger Combat,
+        List<SessionView> Authority);
 
     public SessionManager(ISessionEventStore? eventStore = null)
     {
@@ -35,18 +37,20 @@ public sealed class SessionManager
             var ids = new HashSet<Guid>();
             var commands = new Dictionary<Guid, SessionEvent>();
             var combat = new CombatLedger();
+            var authority = new List<SessionView>();
             foreach (var entry in events)
             {
                 if (!ids.Add(entry.EventId)) throw new InvalidDataException("Duplicate event ID in session history.");
                 if (entry.Kind == SessionEventKind.ControlApplied && !commands.TryAdd(entry.Read<ControlCommand>().CommandId, entry))
                     throw new InvalidDataException("Duplicate command ID in session history.");
                 var next = SessionProjection.Apply(view, entry);
-                combat.Prepare(view, entry)();
+                combat.Prepare(CombatBefore(view, entry, authority), entry)();
                 view = next;
+                if (IsAuthority(entry)) authority.Add(view);
                 if (entry.RequestId.HasValue && !requests.TryAdd(entry.RequestId.Value, entry))
                     throw new InvalidDataException("Duplicate lifecycle request ID in persisted histories.");
             }
-            if (view is null || !sessions.TryAdd(view.Id, new(view, [.. events], commands, combat)))
+            if (view is null || !sessions.TryAdd(view.Id, new(view, [.. events], commands, combat, authority)))
                 throw new InvalidDataException("Empty or duplicate session history.");
         }
         var active = Active().ToArray();
@@ -194,7 +198,7 @@ public sealed class SessionManager
         {
             var history = Find(id);
             AccessPolicy.Read(actor ?? OperatorIdentity.Internal, history.View.RoomIds);
-            return history.Combat.Snapshot(id, history.View.Sequence);
+            return Statistics(history);
         }
     }
 
@@ -206,6 +210,7 @@ public sealed class SessionManager
         lock (gate)
         {
             var history = Find(id);
+            if (history.View.CombatStream is not null) throw new InvalidOperationException("Use the bound ordered combat stream for this session.");
             var previous = history.Combat.Find(report.ReportId);
             if (previous is not null)
             {
@@ -233,14 +238,16 @@ public sealed class SessionManager
     {
         var view = SessionProjection.Apply(previous?.View, entry);
         var combat = previous?.Combat ?? new CombatLedger();
-        var applyCombat = combat.Prepare(previous?.View, entry);
+        var authority = previous?.Authority ?? [];
+        var applyCombat = combat.Prepare(CombatBefore(previous?.View, entry, authority), entry);
         eventStore.Append(entry); // Memory advances only after the durable append succeeds.
         applyCombat();
         var events = previous?.Events ?? [];
         var commands = previous?.Commands ?? [];
         events.Add(entry);
         if (entry.Kind == SessionEventKind.ControlApplied) commands.Add(entry.Read<ControlCommand>().CommandId, entry);
-        sessions[entry.SessionId] = new(view, events, commands, combat);
+        if (IsAuthority(entry)) authority.Add(view);
+        sessions[entry.SessionId] = new(view, events, commands, combat, authority);
         if (entry.RequestId.HasValue) requests.Add(entry.RequestId.Value, entry);
         return Snapshot(view);
     }

@@ -210,6 +210,27 @@ async function main() {
     await page.locator('#session-select').selectOption(session.id);
     await page.waitForFunction(() => document.querySelector('#session-phase').textContent === '已結束');
     check(await page.locator('[data-command=Begin]').isDisabled() && (await page.locator('#statistics').innerText()).includes('80'), 'Archived session remains viewable with statistics and no lifecycle writes');
+    const streamId = randomUUID();
+    await api('/sessions/' + linked.id + '/combat-stream', 'POST', { streamId, origin: 'Simulation' }, 'GameServer');
+    await page.locator('#session-select').selectOption(linked.id);
+    await page.waitForFunction(() => document.querySelector('#session-phase').textContent === '準備中');
+    await page.locator('#include-ended').uncheck(); await page.locator('[data-command=Begin]').click();
+    await page.waitForFunction(() => document.querySelector('#session-phase').textContent === '執行中');
+    const observed = await api('/sessions/' + linked.id);
+    const streamedPlayer = observed.players.find(player => player.roomId === 1);
+    page.once('dialog', dialog => dialog.accept()); await page.locator('[data-command=End]').click();
+    await page.waitForFunction(() => document.querySelector('#session-phase').textContent === '已結束' && document.querySelector('#telemetry-status').textContent.includes('尚未確認完整'));
+    check(await page.locator('#session-panel').isVisible() && await page.locator('#include-ended').isChecked(), 'Ending a bound stream retains its archived session and visibly pending final statistics');
+    await page.screenshot({ path: path.join(screenshots, 'telemetry-pending.png'), fullPage: true });
+    await api('/sessions/' + linked.id + '/combat-stream/batch', 'POST', [{ streamId, streamSequence: 1, observedSequence: observed.sequence,
+      report: { reportId: randomUUID(), kind: 'ShotFired', origin: 'Simulation', playerId: streamedPlayer.id, shotId: randomUUID() } }], 'GameServer');
+    await page.locator('#refresh').click();
+    await page.waitForFunction(() => document.querySelector('#statistics-origin').textContent === '模擬資料');
+    check((await page.locator('#statistics tr').filter({ hasText: streamedPlayer.name }).locator('td').allTextContents())[1] === '1' && (await page.locator('#telemetry-status').innerText()).includes('尚未確認完整'), 'Late confirmed stream report updates archived metrics without claiming the tail is complete');
+    await api('/sessions/' + linked.id + '/combat-stream/seal', 'POST', { streamId, finalSequence: 1 }, 'GameServer');
+    await page.locator('#refresh').click();
+    await page.waitForFunction(() => document.querySelector('#telemetry-status').textContent.includes('全部確認並封存'));
+    check((await api('/sessions/' + linked.id + '/statistics')).pendingTelemetry === false, 'Final-report UI changes only after the server accepts the exact seal boundary');
     await page.locator('#tab-replay').click(); await page.locator('#replay-example').click();
     await page.waitForFunction(() => !document.querySelector('#replay-player').hidden && Number(document.querySelector('#replay-canvas').dataset.triangles) > 0);
     check((await page.locator('#replay-message').innerText()).includes('統計核對一致') && (await page.locator('#replay-time').innerText()).includes('10.40'), 'Real WebGL viewer loads the recorded geometric simulation and validates its final statistics');
@@ -266,7 +287,6 @@ async function main() {
     await page.reload();
     check(await page.locator('#login-panel').isVisible(), 'Reload requires authentication again');
     check(browserErrors.length === 0, 'Browser has no uncaught script errors or CSP violations');
-    await api('/sessions/' + linked.id + '/commands', 'POST', { commandId: randomUUID(), action: 'End' });
     await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), playwright: require('playwright/package.json').version, result: 'passed', scope: 'isolated real API and browser console; no Unity or headset test' }, null, 2));
     console.log(`PASS: ${checks} real-browser checks. Screenshots: ${screenshots}`);
   } catch (error) {

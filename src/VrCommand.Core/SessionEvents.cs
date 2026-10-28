@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace VrCommand.Core;
 
-public enum SessionEventKind { Created, PlayerJoined, PlayerLeft, ControlApplied, CombatRecorded }
+public enum SessionEventKind { Created, PlayerJoined, PlayerLeft, ControlApplied, CombatRecorded, CombatStreamOpened, StreamCombatRecorded, CombatStreamSealed }
 public record SessionCreated(SessionMode Mode, int[] RoomIds, Mission Mission);
 public record PlayerLeft(Guid PlayerId, int? RoomId = null);
 public record SessionEvent(int SchemaVersion, Guid EventId, Guid SessionId, long Sequence,
@@ -12,7 +12,7 @@ public record SessionEvent(int SchemaVersion, Guid EventId, Guid SessionId, long
     public T Read<T>() => Payload.Deserialize<T>(JsonFormat.Options)
         ?? throw new InvalidDataException("Missing event payload.");
     internal static SessionEvent Create<T>(Guid id, long sequence, SessionEventKind kind, T payload, OperatorIdentity actor, Guid? requestId = null) =>
-        new(4, Guid.NewGuid(), id, sequence, DateTimeOffset.UtcNow, kind,
+        new(5, Guid.NewGuid(), id, sequence, DateTimeOffset.UtcNow, kind,
             JsonSerializer.SerializeToElement(payload, JsonFormat.Options), actor, requestId);
 }
 
@@ -50,7 +50,7 @@ internal static class SessionProjection
 
     internal static SessionView Apply(SessionView? current, SessionEvent entry)
     {
-        if (entry.SchemaVersion is not (1 or 2 or 3 or 4) || entry.EventId == Guid.Empty || entry.SessionId == Guid.Empty
+        if (entry.SchemaVersion is not (1 or 2 or 3 or 4 or 5) || entry.EventId == Guid.Empty || entry.SessionId == Guid.Empty
             || entry.Sequence != (current?.Sequence ?? 0) + 1 || !Enum.IsDefined(entry.Kind)
             || entry.RecordedAtUtc == default || entry.RecordedAtUtc.Offset != TimeSpan.Zero
             || (current is not null && current.Id != entry.SessionId))
@@ -59,6 +59,8 @@ internal static class SessionProjection
             throw new InvalidDataException("Version 2+ events require an authenticated or internal actor.");
         if (entry.Kind == SessionEventKind.CombatRecorded && entry.SchemaVersion < 3)
             throw new InvalidDataException("Combat events require schema version 3+.");
+        if (entry.Kind is SessionEventKind.CombatStreamOpened or SessionEventKind.StreamCombatRecorded or SessionEventKind.CombatStreamSealed
+            && entry.SchemaVersion < 5) throw new InvalidDataException("Combat streams require schema version 5.");
         if (entry.RequestId.HasValue && (entry.SchemaVersion < 4 || entry.RequestId == Guid.Empty
             || entry.Kind is not (SessionEventKind.Created or SessionEventKind.PlayerJoined or SessionEventKind.PlayerLeft)))
             throw new InvalidDataException("Request IDs require a version 4 lifecycle event and a non-empty ID.");
@@ -76,6 +78,8 @@ internal static class SessionProjection
                 entry.RecordedAtUtc, null, null, SessionState.Preparing, [],
                 created.Mission.Definition.Environment, created.Mission.Definition.Enemies, entry.Sequence);
         }
+        if (entry.Kind is SessionEventKind.CombatStreamOpened or SessionEventKind.StreamCombatRecorded or SessionEventKind.CombatStreamSealed)
+            return CombatStreamProjection.Apply(current, entry) with { Sequence = entry.Sequence };
         if (current.State == SessionState.Ended) throw new InvalidOperationException("Session has ended.");
         switch (entry.Kind)
         {
@@ -95,6 +99,7 @@ internal static class SessionProjection
                 break;
             case SessionEventKind.CombatRecorded:
                 AccessPolicy.ReportCombat(actor);
+                if (current.CombatStream is not null) throw new InvalidOperationException("Legacy reports cannot bypass a bound stream.");
                 if (current.State != SessionState.Running) throw new InvalidOperationException("Combat requires Running.");
                 break;
         }

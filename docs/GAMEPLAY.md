@@ -1,10 +1,10 @@
-# Quest 戰鬥接入來源碼 v0.10
+# Quest 戰鬥接入來源碼 v0.11
 
 本版把共用戰鬥核心接到 Unity 的任務、入場、姿態、武器及 NGO 狀態同步來源碼。**尚未通過 Unity 編譯或運行，也沒有 APK、頭盔射擊、雙玩家互見或 25 台效能證據。** .NET 檢查證明相同任務接入層及遊戲規則可執行，不能代替 Unity SDK／IL2CPP／實機驗證。
 
 ## 同一套任務與戰鬥規則
 
-`Packages/com.vrcommand.simulation/Runtime/ArenaSession.cs` 是無 Unity／後端相依的伺服器接入層，使用 field DTO 讀取真實 SessionView JSON。它建立 ArenaWorld、固定出生席位、管理名冊及連線綁定，套用執行階段、AI 行為、自動攻擊、能見度與日夜。正式後端仍為 v0.9，沒有新增管理 API。
+`Packages/com.vrcommand.simulation/Runtime/ArenaSession.cs` 是無 Unity／後端相依的伺服器接入層，使用 field DTO 讀取真實 SessionView JSON。它建立 ArenaWorld、固定出生席位、管理名冊及連線綁定，套用執行階段、AI 行為、自動攻擊、能見度與日夜。v0.11 另新增戰鬥來源 API 與持久補送，見 TELEMETRY。
 
 只接受 Preparing 時啟動遊戲伺服器；Running／Paused／Ended 不能以全新世界代替恢復，避免重設血量、彈藥及敵軍。管理快照不能換場次／任務、倒退序號或修改幾何。Preparing 的名冊變更可重新建立尚無戰鬥的世界；開始後只能撤銷既有玩家，不新增身體。伺服器崩潰的持久世界恢復尚待開發。
 
@@ -32,15 +32,15 @@ ProjectBuilder 生成地板及戰鬥元件，不再放入未經核心判定的�
 
 這些同步頻率是來源碼目標，沒有實際頻寬、幀率、延遲、封包遺失或 25 台結果。每個遊戲伺服器對應一個 Independent 或 Linked 場次，五個獨立遊戲伺服器需不同 UDP 埠；尚無自動程序調度。
 
-## 尚未接通的統計與回放
+## 戰鬥統計管道與仍待接入的回放
 
-Unity 世界現在只產生記憶體中的 WorldEvent，**尚未轉送至管理 API 的 CombatReport**；頭盔 HUD 的彈藥／血量來源與主控台報表目前不會自動合併。既有 .NET SimulationDemo 仍會將明確 Simulation 報告送入 API，不能拿該工具證明 Unity 遊戲統計已接通。
+v0.11 的 Unity 來源碼會把四種統計 WorldEvent 保存到共用 TelemetryOutbox，綁定有序來源後批次送入 API，並於 End 補送／封存。相同 journal 及後端已通過跨程序 .NET／HTTP 驗證，但 Unity 發送器尚未編譯運行；不能宣稱實際頭盔 HUD 與主控台數值已實測一致。預設標記 Simulation，詳見 TELEMETRY。
 
-接續須完成持久 outbox、可靠報告及 Pause／End 的事件排空／封存順序，避免管理場次已結束後剩餘射擊被拒絕。也須將正式世界快照、頭手六軸與操作者事件保存，才能支援真正頭盔任務回放及即時觀戰。現有瀏覽器只播放既有 schema 2／rules 0.8.0 合成紀錄；核心新 Connected 欄位保留舊模擬的預設參戰行為，不將此接入版冒充舊錄製驗收。
+持久 outbox、Pause／End 補送及封存邊界已實作，接續仍須 Unity／實機驗收、量測與損壞檔恢復流程。正式世界快照、頭手六軸與操作者事件仍待保存，才能支援真正頭盔任務回放及即時觀戰。瀏覽器維持既有 schema 2／rules 0.8.0 合成紀錄，不把此管道當作頭盔錄製驗收。
 
 ## 已執行與待執行的驗證
 
-本機 Release 建置通過，254 項核心檢查含 41 項 ArenaSession／參戰狀態檢查，使用真實管理模型 JSON。另通過 282 項 HTTP、12 項回放資料及 56 項瀏覽器檢查。15 份 C# 通過 C# 9 語法；相同 embedded Runtime 真正建置為 .NET Standard 2.1。沒有使用假 Unity SDK stub 宣稱型別編譯成功。
+本機 Release 建置通過，295 項核心檢查含 41 項 ArenaSession／參戰狀態檢查，使用真實管理模型 JSON。另通過 302 項 HTTP、12 項回放資料及 59 項瀏覽器檢查。16 份 C# 通過 C# 9 語法；相同 embedded Runtime 真正建置為 .NET Standard 2.1。沒有使用假 Unity SDK stub 宣稱型別編譯成功。
 
 新增三個待執行 EditMode 測試：Unity JsonUtility 綁定完整管理欄位、拒絕缺欄位 JSON、NGO buffer 往返保留健康／武器／連線狀態。加上原四個 AvatarPose 測試共七個；建置腳本要求至少七個通過。實際 Prepare 本輪仍退出 198（授權），尚未進入可確認的 Unity 編譯或測試。
 

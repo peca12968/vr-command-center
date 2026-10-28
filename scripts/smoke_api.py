@@ -218,7 +218,7 @@ try:
             request("POST", own_path + "/commands", command, identity="Room1")
             request("POST", own_path + "/commands", command, 409)  # another identity cannot claim this retry
             own_events = request("GET", own_path + "/events", identity="Room1")
-            require(own_events[-1]["actor"]["id"] == "room-1" and own_events[-1]["schemaVersion"] == 4,
+            require(own_events[-1]["actor"]["id"] == "room-1" and own_events[-1]["schemaVersion"] == 5,
                     "Management events retain authenticated console identity")
             request("POST", f"/api/sessions/{independent[1]['id']}/players", {**player, "roomId": 2}, 409)
             request("POST", f"/api/sessions/{independent[0]['id']}/players", {**player, "playerId": str(uuid.uuid4()), "roomId": 2}, 400)
@@ -339,7 +339,7 @@ try:
                     "Runtime overrides preserve the saved template")
             events = request("GET", session_path + "/events?after=0&limit=500")
             combat_events = [event for event in events if event["kind"] == "CombatRecorded"]
-            require(len(combat_events) == 7 and all(event["actor"]["id"] == "game-server" and event["schemaVersion"] == 4 for event in combat_events),
+            require(len(combat_events) == 7 and all(event["actor"]["id"] == "game-server" and event["schemaVersion"] == 5 for event in combat_events),
                     "Combat and management share a versioned, authenticated event stream")
             with closing(sqlite3.connect(test_directory / "sessions/events.db")) as database:
                 stored = database.execute("SELECT COUNT(*) FROM session_events WHERE session_id=?", (session["id"],)).fetchone()[0]
@@ -448,6 +448,46 @@ try:
             require(request("GET", "/api/sessions/" + geometric_result["sessionId"])["state"] == "Ended"
                     and all(room["sessionId"] is None for room in request("GET", "/api/rooms")),
                     "Geometric demo archives its own session and releases all its reservations")
+            relay_dll = Path(os.environ.get("VR_COMMAND_TELEMETRY_RELAY_DLL", ROOT / "tools/VrCommand.TelemetryRelay/bin/Release/net10.0/VrCommand.TelemetryRelay.dll"))
+            journal = test_directory / "outbox.journal"
+            relay_args = ["dotnet", str(relay_dll), "--journal", str(journal), "--base-url", base_url, "--key-file", str(key_file)]
+            demo = subprocess.run([*relay_args, "--demo-room", "1"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30)
+            if demo.returncode != 0:
+                raise AssertionError("Outbox demo failed: " + demo.stderr)
+            queued = json.loads(demo.stdout)
+            stream_path = "/api/sessions/" + queued["sessionId"]
+            require(queued["origin"] == "Simulation" and queued["queuedReports"] == 6 and queued["pendingTelemetry"],
+                    "Real simulation persists six causal reports, ends the session and exits before delivering them")
+            first = queued["firstReport"]
+            request("POST", stream_path + "/combat-stream/reports", first, 403)
+            request("POST", stream_path + "/combat-stream/reports", first, 403, identity="Room1")
+            request("POST", stream_path + "/combat-stream/batch", [], 400, identity="GameServer")
+            request("POST", stream_path + "/combat-stream/batch", [first] * 129, 400, identity="GameServer")
+            request("POST", stream_path + "/combat-stream/reports", {**first, "streamSequence": 2}, 409, identity="GameServer")
+            ended_sequence = request("GET", stream_path)["sequence"]
+            request("POST", stream_path + "/combat-stream/reports", {**first, "observedSequence": ended_sequence}, 409, identity="GameServer")
+            request("POST", stream_path + "/combat-stream/reports", {**first, "report": {**first["report"], "origin": "GameServer"}}, 409, identity="GameServer")
+            accepted = request("POST", stream_path + "/combat-stream/reports", first, identity="GameServer")
+            require(accepted["acceptedSequence"] == 1 and accepted["statistics"]["pendingTelemetry"], "Ended stream accepts only its known Running-context tail and stays visibly unsealed")
+            require(request("POST", stream_path + "/combat-stream/reports", first, identity="GameServer")["duplicate"], "Lost response leaves a retryable accepted prefix without another shot")
+            request("POST", stream_path + "/combat-stream/seal", {"streamId": first["streamId"], "finalSequence": 6}, 409, identity="GameServer")
+            stop(process)
+            process = launch(use_key_file=True)
+            wait_ready(process)
+            recovered = subprocess.run(relay_args, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30)
+            if recovered.returncode != 0:
+                raise AssertionError("Outbox recovery failed: " + recovered.stderr)
+            delivered = json.loads(recovered.stdout)
+            player_stats = delivered["statistics"]["players"][0]
+            require(delivered["complete"] and delivered["sealedStream"] and delivered["acknowledged"] == 6 and not delivered["statistics"]["pendingTelemetry"],
+                    "Separate recovery process drains the durable journal after API restart and seals its exact boundary")
+            require((player_stats["ammoUsed"], player_stats["shotsHit"], player_stats["kills"], player_stats["hitsReceived"], player_stats["damageTaken"], player_stats["health"], player_stats["accuracyPercent"]) == (2, 2, 1, 1, 20, 80, 100),
+                    "Recovered geometric combat preserves every requested statistic without double counting the lost-response prefix")
+            history = request("GET", stream_path + "/events?limit=500")
+            require(sum(event["kind"] == "StreamCombatRecorded" for event in history) == 6 and sum(event["kind"] == "CombatStreamSealed" for event in history) == 1,
+                    "Six ordered reports and one seal remain in durable event history")
+            retry = subprocess.run(relay_args, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30)
+            require(retry.returncode == 0 and json.loads(retry.stdout)["statistics"] == delivered["statistics"], "Running recovery again returns unchanged sealed statistics")
         except BaseException:
             log.flush()
             diagnostic = (test_directory / "server.log").read_text(encoding="utf-8", errors="replace")

@@ -1,4 +1,8 @@
-# 事件儲存與升級 v0.9
+# 事件儲存與升級 v0.11
+
+v0.11 新事件 schema 5，戰鬥來源／觀察位置／有序報告及封存各以事件保存，仍讀取 1–4，資料庫結構 user_version 不變。每筆有序報告單獨交易；批次失敗可能已有前綴，原樣重試去重續送。主控台以 pendingTelemetry 區分已 End 但尚未 seal 的統計。
+
+遊戲伺服器另有獨占開啟、checksummed frame 及 Flush 的本地 journal，與 API SQLite 分開保存，格式及補送見 TELEMETRY。兩者先後提交依靠穩定 reportId／順序與 acknowledgment 恢復，不宣稱跨檔案／跨程序原子交易。
 
 API 預設使用 `SessionDataDirectory/events.db`，由獨立的 `VrCommand.Persistence` 專案負責。依賴 Microsoft.Data.Sqlite 10.0.14，版本及相依套件已鎖定於各專案的 `packages.lock.json`；首次還原需要 NuGet 網路連線。任務模板仍使用原本的獨立 JSON 檔案。
 
@@ -10,9 +14,9 @@ API 預設使用 `SessionDataDirectory/events.db`，由獨立的 `VrCommand.Pers
 
 後端在儲存提交後才套用統計投影與場次狀態。事件清單採追加、控制命令與報告使用索引去重，統計增量更新；不會每次射擊重寫全部歷史或重算全部統計。服務啟動時讀取完整歷史並重建場次及統計，現階段仍將歷史載入記憶體；長期保留、快照、壓縮與批次寫入待正式場館效能測試後補齊。
 
-資料庫 schema 目前為 user_version 1；新事件 envelope 為 schema 4，仍讀取既有 schema 1–3。Created／PlayerJoined／PlayerLeft 的 requestId 隨同一筆事件原子提交，不另寫容易不同步的去重檔；啟動重建跨場次索引。未知版本、重複 requestId、資料列與 envelope 身分不符、序號缺口、非法狀態轉移或未授權來源都會使啟動失敗，不清空資料重新開館。
+資料庫 schema 目前為 user_version 1；新事件 envelope 為 schema 5，仍讀取既有 schema 1–4。Created／PlayerJoined／PlayerLeft 的 requestId 隨同一筆事件原子提交，不另寫容易不同步的去重檔；啟動重建跨場次索引。未知版本、重複 requestId、資料列與 envelope 身分不符、序號缺口、非法狀態轉移或未授權來源都會使啟動失敗，不清空資料重新開館。
 
-新 PlayerLeft 保留當時玩家房間，schema 4 恢復時須符合前一名冊。舊事件沒有 requestId 或 roomId 仍按其原版本解讀，不補造去重證據。寫入 schema 4 後舊版不認識此版本，不能直接降版；升級前應先備份完整資料目錄。
+新 PlayerLeft 保留當時玩家房間，schema 4 恢復時須符合前一名冊。舊事件沒有 requestId 或 roomId 仍按其原版本解讀，不補造去重證據。寫入 schema 5 後舊版不認識此版本，不能直接降版；升級前應先備份完整資料目錄。
 
 ## JSON 升級
 

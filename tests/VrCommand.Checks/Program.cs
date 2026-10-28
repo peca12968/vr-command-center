@@ -74,6 +74,7 @@ try
     RequestRetryChecks.Run(Check, directory, mission);
     SimulationChecks.Run(Check);
     ArenaSessionChecks.Run(Check, directory);
+    TelemetryChecks.Run(Check, directory, mission);
     Console.WriteLine($"All {checks} checks passed. These are domain checks, not headset or gameplay load tests.");
 }
 finally

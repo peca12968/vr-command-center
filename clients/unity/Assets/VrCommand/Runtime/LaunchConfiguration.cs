@@ -14,6 +14,8 @@ namespace VrCommand.Unity
         public string sessionId = "";
         public string managementApiUrl = "http://127.0.0.1:5080";
         public string gameServerKey = "";
+        public string telemetryOrigin = "Simulation";
+        public string telemetryDirectory = "";
 
         public bool IsServer => role == "Server" || role == "Host";
 
@@ -31,6 +33,13 @@ namespace VrCommand.Unity
                 throw new InvalidOperationException("Headsets must use client mode.");
             if (config.IsServer && (!Guid.TryParse(config.sessionId, out _) || string.IsNullOrWhiteSpace(config.gameServerKey)))
                 throw new InvalidOperationException("Server management configuration is missing.");
+            if (config.IsServer)
+            {
+                config.sessionId = Guid.Parse(config.sessionId).ToString("D");
+                if (string.IsNullOrEmpty(config.telemetryOrigin)) config.telemetryOrigin = "Simulation";
+            }
+            if (config.IsServer && config.telemetryOrigin != "Simulation" && config.telemetryOrigin != "GameServer")
+                throw new InvalidOperationException("Telemetry origin must be explicit.");
             if (config.role != "Server" && string.IsNullOrWhiteSpace(config.joinTicket))
                 throw new InvalidOperationException("Player admission ticket is missing.");
             return config;
