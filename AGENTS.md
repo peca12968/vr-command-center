@@ -34,3 +34,5 @@ Quest 接入與建置見 `docs/QUEST3.md`。`scripts/check-unity-source.ps1` 只
 3D 模擬回放在 `replay-*.js`，資料與操作見 `docs/REPLAY.md`。維護 schema 2／rules 0.8.0、明確 Simulation 來源、射線與快照／統計的一致性。`tests/browser` 的 test 會執行資料驗證與軟體 WebGL 檢查，不能視為真實 GPU、Unity 或頭盔測試。Three.js 上游原始檔、MIT 及 provenance 一併保留，不混入 CDN 執行相依。
 
 頭盔只配置短效玩家票券；GameServer 憑證僅存桌面伺服器設定。所有 `data/`、`artifacts/`、Unity 快取與本機憑證均不得提交。生成場景、APK 或桌面程式須有實際成功結果，不能以來源碼存在宣稱完成。
+
+v0.9 的建立／加入／離開以選用 Idempotency-Key 去重，事件 schema 4 的 requestId 與業務事件一起持久化；重試只確認歷史接受，不重施新狀態。保留 schema 1–3 讀取與不帶 key 的相容性。前端與後端需一起升級，不能把 v0.9 的可重試前端放到忽略 key 的舊後端；寫入新 schema 後不可直接降版。契約見 SESSION_PROTOCOL。

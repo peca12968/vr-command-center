@@ -22,6 +22,8 @@ public sealed class SessionManager
     private readonly object gate = new();
     private readonly ISessionEventStore eventStore;
     private readonly Dictionary<Guid, History> sessions = [];
+    // A lifecycle request key is global across creation and roster mutations, including archived sessions.
+    private readonly Dictionary<Guid, SessionEvent> requests = [];
     private sealed record History(SessionView View, List<SessionEvent> Events, Dictionary<Guid, SessionEvent> Commands, CombatLedger Combat);
 
     public SessionManager(ISessionEventStore? eventStore = null)
@@ -41,6 +43,8 @@ public sealed class SessionManager
                 var next = SessionProjection.Apply(view, entry);
                 combat.Prepare(view, entry)();
                 view = next;
+                if (entry.RequestId.HasValue && !requests.TryAdd(entry.RequestId.Value, entry))
+                    throw new InvalidDataException("Duplicate lifecycle request ID in persisted histories.");
             }
             if (view is null || !sessions.TryAdd(view.Id, new(view, [.. events], commands, combat)))
                 throw new InvalidDataException("Empty or duplicate session history.");
@@ -52,18 +56,28 @@ public sealed class SessionManager
             throw new InvalidDataException("Restored active sessions contain conflicting reservations.");
     }
 
-    public SessionView Create(SessionMode mode, int[] roomIds, Mission mission, OperatorIdentity? actor = null)
+    public SessionView Create(SessionMode mode, int[] roomIds, Mission mission, OperatorIdentity? actor = null, Guid? requestId = null)
     {
         actor ??= OperatorIdentity.Internal;
         SessionProjection.ValidateCreation(new(mode, roomIds, mission));
         AccessPolicy.Manage(actor, mode, roomIds);
+        ValidateRequestId(requestId);
         lock (gate)
         {
+            var creation = new SessionCreated(mode, roomIds.Order().ToArray(), mission);
+            var previous = Request(requestId, SessionEventKind.Created, actor);
+            if (previous is not null)
+            {
+                if (System.Text.Json.JsonSerializer.Serialize(previous.Read<SessionCreated>(), JsonFormat.Options)
+                    != System.Text.Json.JsonSerializer.Serialize(creation, JsonFormat.Options))
+                    throw new InvalidOperationException("Request ID already used with different content.");
+                return Snapshot(Find(previous.SessionId).View);
+            }
             if (Active().Any(s => s.RoomIds.Intersect(roomIds).Any()))
                 throw new InvalidOperationException("A requested room is already in use.");
             var id = Guid.NewGuid();
             var entry = SessionEvent.Create(id, 1, SessionEventKind.Created,
-                new SessionCreated(mode, roomIds.Order().ToArray(), mission), actor);
+                creation, actor, requestId);
             return Commit(null, entry);
         }
     }
@@ -98,34 +112,54 @@ public sealed class SessionManager
         }
     }
 
-    public SessionView Join(Guid sessionId, Guid playerId, string name, int roomId, HeadsetKind headset, OperatorIdentity? actor = null)
+    public SessionView Join(Guid sessionId, Guid playerId, string name, int roomId, HeadsetKind headset, OperatorIdentity? actor = null, Guid? requestId = null)
     {
+        ValidateRequestId(requestId);
         lock (gate)
         {
             var history = Find(sessionId);
             actor ??= OperatorIdentity.Internal;
             AccessPolicy.Player(actor, history.View, roomId);
+            var previous = Request(requestId, SessionEventKind.PlayerJoined, actor);
+            if (previous is not null)
+            {
+                var joined = previous.Read<Player>();
+                if (previous.SessionId != sessionId || joined.Id != playerId || joined.Name != name
+                    || joined.RoomId != roomId || joined.Headset != headset)
+                    throw new InvalidOperationException("Request ID already used with different content.");
+                return Snapshot(history.View);
+            }
             if (Active().Any(s => s.Players.Any(p => p.Id == playerId)))
                 throw new InvalidOperationException("Player already belongs to a session.");
             var seat = Enumerable.Range(0, PlayersPerRoom)
                 .FirstOrDefault(candidate => !history.View.Players.Any(p => p.RoomId == roomId && p.Seat == candidate), -1);
             return Commit(history, SessionEvent.Create(sessionId, history.View.Sequence + 1,
-                SessionEventKind.PlayerJoined, new Player(playerId, name, roomId, headset, seat), actor));
+                SessionEventKind.PlayerJoined, new Player(playerId, name, roomId, headset, seat), actor, requestId));
         }
     }
 
-    public void Leave(Guid sessionId, Guid playerId, OperatorIdentity? actor = null)
+    public void Leave(Guid sessionId, Guid playerId, OperatorIdentity? actor = null, Guid? requestId = null)
     {
+        ValidateRequestId(requestId);
         lock (gate)
         {
             var history = Find(sessionId);
             actor ??= OperatorIdentity.Internal;
             AccessPolicy.Read(actor, history.View.RoomIds);
+            var previous = Request(requestId, SessionEventKind.PlayerLeft, actor);
+            if (previous is not null)
+            {
+                var left = previous.Read<PlayerLeft>();
+                if (previous.SessionId != sessionId || left.PlayerId != playerId)
+                    throw new InvalidOperationException("Request ID already used with different content.");
+                AccessPolicy.Player(actor, history.View, left.RoomId!.Value);
+                return;
+            }
             var player = history.View.Players.SingleOrDefault(p => p.Id == playerId)
                 ?? throw new KeyNotFoundException("Player does not exist.");
             AccessPolicy.Player(actor, history.View, player.RoomId);
             Commit(history, SessionEvent.Create(sessionId, history.View.Sequence + 1,
-                SessionEventKind.PlayerLeft, new PlayerLeft(playerId), actor));
+                SessionEventKind.PlayerLeft, new PlayerLeft(playerId, player.RoomId), actor, requestId));
         }
     }
 
@@ -207,7 +241,21 @@ public sealed class SessionManager
         events.Add(entry);
         if (entry.Kind == SessionEventKind.ControlApplied) commands.Add(entry.Read<ControlCommand>().CommandId, entry);
         sessions[entry.SessionId] = new(view, events, commands, combat);
+        if (entry.RequestId.HasValue) requests.Add(entry.RequestId.Value, entry);
         return Snapshot(view);
+    }
+
+    private static void ValidateRequestId(Guid? requestId)
+    {
+        if (requestId == Guid.Empty) throw new ArgumentException("Request ID must be a non-empty UUID.");
+    }
+
+    private SessionEvent? Request(Guid? requestId, SessionEventKind kind, OperatorIdentity actor)
+    {
+        if (!requestId.HasValue || !requests.TryGetValue(requestId.Value, out var previous)) return null;
+        if (previous.Kind != kind || previous.Actor != actor)
+            throw new InvalidOperationException("Request ID already used for another operation or identity.");
+        return previous;
     }
 
     private IEnumerable<SessionView> Active() => sessions.Values.Select(h => h.View).Where(s => s.State != SessionState.Ended);

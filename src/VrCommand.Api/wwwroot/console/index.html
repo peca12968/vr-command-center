@@ -26,6 +26,7 @@
     </section>
     <div id="notice" role="status" aria-live="polite" hidden></div>
     <div id="workspace" hidden>
+      <div id="pending-command" class="warning" hidden><span>操作結果尚未確認。重試會沿用原操作，不會重複執行。請先確認結果，再進行其他操作。</span><button id="retry-command">重試確認結果</button></div>
       <div class="toolbar"><nav aria-label="工作區"><button id="tab-operations" class="tab active" aria-pressed="true">房間與場次</button><button id="tab-missions" class="tab" aria-pressed="false">任務庫與編輯</button><button id="tab-replay" class="tab" aria-pressed="false">3D 模擬回放</button></nav><span id="last-update" class="hint">等待更新</span><button id="refresh" class="quiet">重新整理</button></div>
       <section id="operations-view">
         <div class="section-heading"><div><p class="eyebrow">VENUE STATUS</p><h2>五房間總覽</h2></div><span class="badge">Quest 3 優先</span></div>
@@ -43,7 +44,6 @@
           <div class="section-heading"><div><p id="session-meta" class="eyebrow"></p><h2 id="session-name"></h2></div><span id="session-phase" class="badge"></span></div>
           <p id="session-briefing" class="briefing"></p>
           <div id="session-controls" class="button-row"><button data-command="Begin">開始任務</button><button data-command="Pause" class="secondary">暫停</button><button data-command="Resume" class="secondary">繼續</button><button data-command="End" class="danger">結束場次</button></div>
-          <div id="pending-command" class="warning" hidden><span>命令結果尚未確認。重試會沿用同一筆命令，不會重複套用。</span><button id="retry-command">重試確認結果</button></div>
           <div class="two-columns controls-grid">
             <section><h3>即時環境</h3><p id="live-environment" class="hint"></p><form id="environment-form"><fieldset id="environment-fields"><div class="form-row"><label>模式<select id="live-mode"><option value="VR">VR</option><option value="MR">MR</option></select></label><label>天氣<select id="live-weather"><option value="Clear">晴朗</option><option value="Rain">下雨</option><option value="Fog">濃霧</option><option value="Storm">暴風雨</option></select></label><label>時段<select id="live-time"><option value="Day">白天</option><option value="Night">夜晚</option></select></label></div><label class="check"><input id="live-lightning" type="checkbox">閃電</label><div class="button-row"><button type="submit" class="secondary">套用環境</button><button type="button" id="reload-environment" class="quiet">載入目前設定</button></div></fieldset></form></section>
             <section><h3>敵軍設定</h3><p id="live-enemies" class="hint"></p><form id="enemies-form"><fieldset id="enemies-fields"><div class="form-row"><label>敵軍數量<input id="live-count" type="number" min="0" max="100" required></label><label>攻擊方式<select id="live-behavior"><option value="Hold">守備</option><option value="Patrol">巡邏</option><option value="Advance">推進</option></select></label></div><label class="check"><input id="live-auto-attack" type="checkbox">自動攻擊</label><div class="button-row"><button type="submit" class="secondary">套用敵軍設定</button><button type="button" id="reload-enemies" class="quiet">載入目前設定</button></div></fieldset></form></section>
@@ -86,7 +86,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>開發原型 v0.8 · 已有模擬回放；頭盔實機、25 台連線、Unity 遊戲整合與硬體仍待驗證。</footer>
+      <footer>開發原型 v0.9 · 已有模擬回放；頭盔實機、25 台連線、Unity 遊戲整合與硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

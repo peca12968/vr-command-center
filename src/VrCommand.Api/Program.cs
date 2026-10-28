@@ -77,7 +77,7 @@ app.Use(async (context, next) =>
     }
 });
 
-app.MapGet("/", () => new { service = "VR Command Center", stage = "operator console and Quest integration prototype", version = "0.6.0" });
+app.MapGet("/", () => new { service = "VR Command Center", stage = "operator console and Quest integration prototype", version = "0.9.0" });
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/api/me", (HttpContext context) => Actor(context));
 app.MapGet("/api/rooms", (SessionManager manager, HttpContext context) => manager.Rooms(Actor(context)));
@@ -91,7 +91,7 @@ app.MapPost("/api/missions", (MissionDraft draft, MissionStore store, HttpContex
 });
 app.MapPost("/api/sessions", (CreateSession request, MissionStore store, SessionManager manager, HttpContext context) =>
 {
-    var session = manager.Create(request.Mode, request.RoomIds, store.Get(request.MissionId), Actor(context));
+    var session = manager.Create(request.Mode, request.RoomIds, store.Get(request.MissionId), Actor(context), RequestId(context));
     return Results.Created($"/api/sessions/{session.Id}", session);
 });
 app.MapGet("/api/sessions/{id:guid}", (Guid id, SessionManager manager, HttpContext context) => manager.Get(id, Actor(context)));
@@ -105,7 +105,7 @@ app.MapGet("/api/sessions/{id:guid}/statistics", (Guid id, SessionManager manage
 app.MapPost("/api/sessions/{id:guid}/combat", (Guid id, CombatReport report, SessionManager manager, HttpContext context) =>
     manager.ReportCombat(id, report, Actor(context)));
 app.MapPost("/api/sessions/{id:guid}/players", (Guid id, JoinPlayer request, SessionManager manager, HttpContext context) =>
-    manager.Join(id, request.PlayerId, request.Name, request.RoomId, request.Headset, Actor(context)));
+    manager.Join(id, request.PlayerId, request.Name, request.RoomId, request.Headset, Actor(context), RequestId(context)));
 app.MapPost("/api/sessions/{id:guid}/players/{playerId:guid}/join-ticket", (Guid id, Guid playerId, SessionManager manager, HttpContext context) =>
 {
     var session = manager.Get(id, Actor(context));
@@ -127,7 +127,7 @@ app.MapPost("/api/player-tickets/validate", (ValidatePlayerTicket request, Sessi
 });
 app.MapDelete("/api/sessions/{id:guid}/players/{playerId:guid}", (Guid id, Guid playerId, SessionManager manager, HttpContext context) =>
 {
-    manager.Leave(id, playerId, Actor(context));
+    manager.Leave(id, playerId, Actor(context), RequestId(context));
     return Results.NoContent();
 });
 app.MapDelete("/api/sessions/{id:guid}", (Guid id, SessionManager manager, HttpContext context) =>
@@ -138,6 +138,15 @@ app.MapDelete("/api/sessions/{id:guid}", (Guid id, SessionManager manager, HttpC
 app.Run();
 
 static OperatorIdentity Actor(HttpContext context) => (OperatorIdentity)context.Items[typeof(OperatorIdentity)]!;
+
+static Guid? RequestId(HttpContext context)
+{
+    if (!context.Request.Headers.TryGetValue("Idempotency-Key", out var values)) return null;
+    if (values.Count != 1 || !Guid.TryParseExact(values[0], "D", out var id) || id == Guid.Empty)
+        throw new ArgumentException("Idempotency-Key must be one non-empty UUID in D format.");
+    context.Response.Headers["Idempotency-Key"] = id.ToString("D");
+    return id;
+}
 
 record CreateSession(Guid MissionId, SessionMode Mode, int[] RoomIds);
 record JoinPlayer(Guid PlayerId, string Name, int RoomId, HeadsetKind Headset);

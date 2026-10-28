@@ -4,15 +4,16 @@ namespace VrCommand.Core;
 
 public enum SessionEventKind { Created, PlayerJoined, PlayerLeft, ControlApplied, CombatRecorded }
 public record SessionCreated(SessionMode Mode, int[] RoomIds, Mission Mission);
-public record PlayerLeft(Guid PlayerId);
+public record PlayerLeft(Guid PlayerId, int? RoomId = null);
 public record SessionEvent(int SchemaVersion, Guid EventId, Guid SessionId, long Sequence,
-    DateTimeOffset RecordedAtUtc, SessionEventKind Kind, JsonElement Payload, OperatorIdentity? Actor = null)
+    DateTimeOffset RecordedAtUtc, SessionEventKind Kind, JsonElement Payload, OperatorIdentity? Actor = null,
+    Guid? RequestId = null)
 {
     public T Read<T>() => Payload.Deserialize<T>(JsonFormat.Options)
         ?? throw new InvalidDataException("Missing event payload.");
-    internal static SessionEvent Create<T>(Guid id, long sequence, SessionEventKind kind, T payload, OperatorIdentity actor) =>
-        new(3, Guid.NewGuid(), id, sequence, DateTimeOffset.UtcNow, kind,
-            JsonSerializer.SerializeToElement(payload, JsonFormat.Options), actor);
+    internal static SessionEvent Create<T>(Guid id, long sequence, SessionEventKind kind, T payload, OperatorIdentity actor, Guid? requestId = null) =>
+        new(4, Guid.NewGuid(), id, sequence, DateTimeOffset.UtcNow, kind,
+            JsonSerializer.SerializeToElement(payload, JsonFormat.Options), actor, requestId);
 }
 
 // Use the same transition rules for commands and reconstruction after a restart.
@@ -49,15 +50,18 @@ internal static class SessionProjection
 
     internal static SessionView Apply(SessionView? current, SessionEvent entry)
     {
-        if (entry.SchemaVersion is not (1 or 2 or 3) || entry.EventId == Guid.Empty || entry.SessionId == Guid.Empty
+        if (entry.SchemaVersion is not (1 or 2 or 3 or 4) || entry.EventId == Guid.Empty || entry.SessionId == Guid.Empty
             || entry.Sequence != (current?.Sequence ?? 0) + 1 || !Enum.IsDefined(entry.Kind)
             || entry.RecordedAtUtc == default || entry.RecordedAtUtc.Offset != TimeSpan.Zero
             || (current is not null && current.Id != entry.SessionId))
             throw new InvalidDataException("Unsupported or inconsistent event envelope.");
         if (entry.SchemaVersion >= 2 && entry.Actor is null)
             throw new InvalidDataException("Version 2+ events require an authenticated or internal actor.");
-        if (entry.Kind == SessionEventKind.CombatRecorded && entry.SchemaVersion != 3)
-            throw new InvalidDataException("Combat events require schema version 3.");
+        if (entry.Kind == SessionEventKind.CombatRecorded && entry.SchemaVersion < 3)
+            throw new InvalidDataException("Combat events require schema version 3+.");
+        if (entry.RequestId.HasValue && (entry.SchemaVersion < 4 || entry.RequestId == Guid.Empty
+            || entry.Kind is not (SessionEventKind.Created or SessionEventKind.PlayerJoined or SessionEventKind.PlayerLeft)))
+            throw new InvalidDataException("Request IDs require a version 4 lifecycle event and a non-empty ID.");
         if (entry.SchemaVersion == 1 && entry.Actor is not null)
             throw new InvalidDataException("Legacy events cannot assert an authenticated actor.");
         var actor = entry.Actor ?? OperatorIdentity.Internal;
@@ -79,8 +83,11 @@ internal static class SessionProjection
                 AccessPolicy.Player(actor, current, entry.Read<Player>().RoomId);
                 break;
             case SessionEventKind.PlayerLeft:
-                var player = current.Players.SingleOrDefault(p => p.Id == entry.Read<PlayerLeft>().PlayerId)
+                var leaving = entry.Read<PlayerLeft>();
+                var player = current.Players.SingleOrDefault(p => p.Id == leaving.PlayerId)
                     ?? throw new KeyNotFoundException("Player does not exist.");
+                if (entry.SchemaVersion >= 4 && leaving.RoomId != player.RoomId)
+                    throw new InvalidDataException("Leave event must retain the admitted player's room.");
                 AccessPolicy.Player(actor, current, player.RoomId);
                 break;
             case SessionEventKind.ControlApplied:

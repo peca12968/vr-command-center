@@ -29,10 +29,12 @@ checks = 0
 tokens = {name: secrets.token_urlsafe(32) for name in ["Master", "GameServer", *[f"Room{i}" for i in range(1, 6)]]}
 
 
-def request(method, path, body=None, expected=200, identity="Master"):
+def request(method, path, body=None, expected=200, identity="Master", request_id=None):
     global checks
     data = None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
     headers = {"Content-Type": "application/json; charset=utf-8"}
+    if request_id is not None:
+        headers["Idempotency-Key"] = request_id
     if identity is not None:
         headers["Authorization"] = "Bearer " + tokens.get(identity, identity)
     req = urllib.request.Request(
@@ -151,17 +153,28 @@ try:
             request("POST", "/api/missions", {**draft, "props": None}, 400)
             request("GET", f"/api/missions/{uuid.uuid4()}", expected=404)
 
-            def start(mode, room_ids, expected=201):
+            def start(mode, room_ids, expected=201, request_id=None):
                 return request("POST", "/api/sessions", {
                     "missionId": mission["id"], "mode": mode, "roomIds": room_ids,
-                }, expected)
+                }, expected, request_id=request_id)
 
             start("Linked", [1, 2, 3, 4, 4], 400)
             start("Linked", None, 400)
             request("POST", "/api/sessions", {"missionId": mission["id"], "mode": "Linked", "roomIds": [1,2,3,4,5]}, 403, identity="Room1")
             request("POST", "/api/sessions", {"missionId": mission["id"], "mode": "Independent", "roomIds": [2]}, 403, identity="Room1")
             request("POST", "/api/sessions", {"missionId": mission["id"], "mode": "Independent", "roomIds": [1]}, 403, identity="GameServer")
-            independent = [start("Independent", [room]) for room in range(1, 6)]
+            create_key = str(uuid.uuid4())
+            creation_body = {"missionId": mission["id"], "mode": "Independent", "roomIds": [1]}
+            for malformed in ["", "not-a-uuid", str(uuid.UUID(int=0)), str(uuid.uuid4()) + "," + str(uuid.uuid4())]:
+                request("POST", "/api/sessions", creation_body, 400, request_id=malformed)
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                creations = list(pool.map(lambda _: start("Independent", [1], request_id=create_key), range(8)))
+            require(len({value["id"] for value in creations}) == 1, "Concurrent keyed HTTP creations produce one session")
+            independent = [creations[0], *[start("Independent", [room]) for room in range(2, 6)]]
+            start("Independent", [2], 409, request_id=create_key)
+            request("POST", "/api/sessions", creation_body, 409, identity="Room1", request_id=create_key)
+            request("POST", "/api/sessions", creation_body, 403, identity="Room2", request_id=create_key)
+            request("POST", "/api/sessions", creation_body, 403, identity="GameServer", request_id=create_key)
             require(len(request("GET", "/api/sessions", identity="Room1")) == 1, "Room controller session list excludes other independent rooms")
             request("GET", f"/api/sessions/{independent[1]['id']}", expected=403, identity="Room1")
             request("GET", f"/api/sessions/{independent[1]['id']}/events", expected=403, identity="Room1")
@@ -173,7 +186,14 @@ try:
             request("POST", f"/api/sessions/{independent[0]['id']}/players", player)
             room_player = {**player, "playerId": str(uuid.uuid4())}
             own_path = f"/api/sessions/{independent[0]['id']}"
-            request("POST", own_path + "/players", room_player, identity="Room1")
+            join_key = str(uuid.uuid4())
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                joins = list(pool.map(lambda _: request("POST", own_path + "/players", room_player, identity="Room1", request_id=join_key), range(8)))
+            require(all(len(value["players"]) == 2 and value["sequence"] == 3 for value in joins), "Concurrent HTTP join retries retain one roster entry and seat")
+            request("POST", own_path + "/players", {**room_player, "name": "Changed"}, 409, identity="Room1", request_id=join_key)
+            request("POST", own_path + "/players", room_player, 409, request_id=join_key)
+            request("POST", own_path + "/players", room_player, 403, identity="Room2", request_id=join_key)
+            request("POST", own_path + "/players", room_player, 409, identity="Room1", request_id=create_key)
             invitation = request("POST", own_path + "/players/" + room_player["playerId"] + "/join-ticket", identity="Room1")
             require(len(invitation["ticket"]) < 256, "Headset receives a compact player-only connection ticket")
             validate = {"sessionId": independent[0]["id"], "ticket": invitation["ticket"]}
@@ -186,13 +206,19 @@ try:
             request("POST", own_path + "/players/" + room_player["playerId"] + "/join-ticket", expected=403, identity="Room2")
             request("POST", own_path + "/players/" + room_player["playerId"] + "/join-ticket", expected=403, identity="GameServer")
             request("DELETE", own_path + "/players/" + room_player["playerId"], expected=403, identity="Room2")
-            request("DELETE", own_path + "/players/" + room_player["playerId"], expected=204, identity="Room1")
+            leave_key = str(uuid.uuid4())
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                list(pool.map(lambda _: request("DELETE", own_path + "/players/" + room_player["playerId"], expected=204, identity="Room1", request_id=leave_key), range(8)))
+            require(len(request("GET", own_path)["players"]) == 1, "Concurrent HTTP leave retries remove the player once")
+            request("DELETE", own_path + "/players/" + player["playerId"], expected=409, identity="Room1", request_id=leave_key)
+            require(len(request("POST", own_path + "/players", room_player, identity="Room1", request_id=join_key)["players"]) == 1,
+                    "Delayed HTTP join acknowledgment does not resurrect a departed player")
             request("POST", "/api/player-tickets/validate", validate, 403, identity="GameServer")
             command = {"commandId": str(uuid.uuid4()), "action": "SetEnvironment", "environment": draft["environment"]}
             request("POST", own_path + "/commands", command, identity="Room1")
             request("POST", own_path + "/commands", command, 409)  # another identity cannot claim this retry
             own_events = request("GET", own_path + "/events", identity="Room1")
-            require(own_events[-1]["actor"]["id"] == "room-1" and own_events[-1]["schemaVersion"] == 3,
+            require(own_events[-1]["actor"]["id"] == "room-1" and own_events[-1]["schemaVersion"] == 4,
                     "Management events retain authenticated console identity")
             request("POST", f"/api/sessions/{independent[1]['id']}/players", {**player, "roomId": 2}, 409)
             request("POST", f"/api/sessions/{independent[0]['id']}/players", {**player, "playerId": str(uuid.uuid4()), "roomId": 2}, 400)
@@ -313,7 +339,7 @@ try:
                     "Runtime overrides preserve the saved template")
             events = request("GET", session_path + "/events?after=0&limit=500")
             combat_events = [event for event in events if event["kind"] == "CombatRecorded"]
-            require(len(combat_events) == 7 and all(event["actor"]["id"] == "game-server" and event["schemaVersion"] == 3 for event in combat_events),
+            require(len(combat_events) == 7 and all(event["actor"]["id"] == "game-server" and event["schemaVersion"] == 4 for event in combat_events),
                     "Combat and management share a versioned, authenticated event stream")
             with closing(sqlite3.connect(test_directory / "sessions/events.db")) as database:
                 stored = database.execute("SELECT COUNT(*) FROM session_events WHERE session_id=?", (session["id"],)).fetchone()[0]
@@ -333,6 +359,13 @@ try:
             wait_ready(process)
             recovered = request("GET", session_path)
             require(recovered == current, "Process restart reconstructs active state, players and control settings")
+            old_archive = request("GET", own_path)
+            require(request("POST", "/api/sessions", creation_body, 201, request_id=create_key) == old_archive,
+                    "HTTP creation retry after restart returns its archived session despite a new linked reservation")
+            require(request("POST", own_path + "/players", room_player, identity="Room1", request_id=join_key) == old_archive,
+                    "HTTP join key is recovered from SQLite and remains valid after archival")
+            request("DELETE", own_path + "/players/" + room_player["playerId"], expected=204, identity="Room1", request_id=leave_key)
+            require(request("GET", own_path) == old_archive, "Recovered HTTP leave acknowledgment adds no event")
             require(request("POST", "/api/player-tickets/validate", live_validation, identity="GameServer")["playerId"] == player["playerId"],
                     "Player ticket signing key survives API process restart")
             require(request("GET", session_path + "/statistics") == statistics, "Restart rebuilds identical combat statistics from SQLite")
@@ -417,7 +450,10 @@ try:
                     "Geometric demo archives its own session and releases all its reservations")
         except BaseException:
             log.flush()
-            print((test_directory / "server.log").read_text(encoding="utf-8"))
+            diagnostic = (test_directory / "server.log").read_text(encoding="utf-8", errors="replace")
+            for token in tokens.values():
+                diagnostic = diagnostic.replace(token, "[redacted]")
+            print(diagnostic)
             raise
         finally:
             if process.poll() is None:

@@ -31,7 +31,7 @@ internal static class OperatorChecks
         var command = new ControlCommand(Guid.NewGuid(), ControlAction.Begin);
         manager.Execute(own.Id, command, room1);
         Reject<InvalidOperationException>(() => manager.Execute(own.Id, command, master), "A different actor cannot take ownership of an accepted command ID");
-        check(manager.Events(own.Id).All(e => e.Actor == room1 && e.SchemaVersion == 3), "New event envelopes retain the verified identity");
+        check(manager.Events(own.Id).All(e => e.Actor == room1 && e.SchemaVersion == 4), "New event envelopes retain the verified identity");
         var restored = new SessionManager(store);
         check(restored.Execute(own.Id, command, room1).Duplicate, "Authenticated command retries survive recovery");
         manager.End(own.Id, room1);

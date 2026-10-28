@@ -42,7 +42,7 @@ OperatorKeys__GameServer
 
 ## 事件與復原
 
-新事件使用 envelope schema 3，保留 schema 2 引入的 `actor: { id, role, roomId }`。角色與房間權限在操作前及從歷史復原時都會檢查；同一控制命令或戰鬥報告 ID 的重送必須由同一來源身分發出。換鑰仍屬同一身分，可以原樣重送。主控及房間控制台不能提交戰鬥事件；模擬器使用 GameServer 憑證且將資料明確標記為 Simulation。
+新事件使用 envelope schema 4，保留 schema 2 引入的 `actor: { id, role, roomId }`。角色與房間權限在操作前及從歷史復原時都會檢查；同一控制命令、戰鬥報告或建立／加入／離開的 requestId 重送必須由同一來源身分發出。離開重試用事件保存的原房間重新授權。換鑰仍屬同一身分，可以原樣重送。主控及房間控制台不能提交戰鬥事件；模擬器使用 GameServer 憑證且將資料明確標記為 Simulation。
 
 schema 1 歷史保持 `actor: null`，不補造控制台身分；由受信任的舊版內部操作復原。舊版已接受的命令無法改由新認證身分接管去重 ID，回傳 409。核心函式庫另有 `Internal` 身分供受信任的程序內部呼叫與舊歷史使用；HTTP 認證永遠不配發此角色。
 

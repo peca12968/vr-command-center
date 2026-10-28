@@ -35,13 +35,14 @@ function manages(session = state.session) { return !!session && (master() || (st
 function ownsRoom(room) { return master() || (state.actor?.role === 'RoomController' && state.actor.roomId === room); }
 function time(value) { return new Date(value).toLocaleTimeString('zh-TW', { hour12: false }); }
 
-async function api(path, method = 'GET', body) {
+async function api(path, method = 'GET', body, requestId) {
   const controller = new AbortController(), epoch = state.epoch;
   const timeout = setTimeout(() => controller.abort(), 8000);
   try {
-    const response = await fetch('/api' + path, { method, headers: { Authorization: 'Bearer ' + state.key, 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal, cache: 'no-store' });
+    const response = await fetch('/api' + path, { method, headers: { Authorization: 'Bearer ' + state.key, 'Content-Type': 'application/json', ...(requestId ? { 'Idempotency-Key': requestId } : {}) }, body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal, cache: 'no-store' });
     if (epoch !== state.epoch) throw new Error('登入狀態已變更，已忽略舊回應。');
     const content = await response.text();
+    if (epoch !== state.epoch) throw new Error('登入狀態已變更，已忽略舊回應。');
     if (!response.ok) {
       let message = '操作未完成，請重新整理後確認。';
       try { message = JSON.parse(content).error || message; } catch { /* Non-domain errors have no stable JSON contract. */ }
@@ -200,34 +201,43 @@ function setEnemies(prefix, value) { $(prefix + '-count').value = value.count; $
 function loadEnvironment() { if (state.session) { setEnvironment('live', state.session.environment); state.environmentSequence = state.session.sequence; } }
 function loadEnemies() { if (state.session) { setEnemies('live', state.session.enemies); state.enemiesSequence = state.session.sequence; } }
 async function createSession() {
+  if (state.pending) return;
   const mode = $('launch-mode').value;
-  const session = await api('/sessions', 'POST', { missionId: $('launch-mission').value, mode, roomIds: mode === 'Linked' ? [1, 2, 3, 4, 5] : [Number($('launch-room').value)] });
-  $('include-ended').checked = false; state.selected = session.id; state.session = null; await refresh(); notify('場次已準備。請加入玩家，再開始任務。');
+  state.pending = { kind: 'create', path: '/sessions', method: 'POST', requestId: uuid(), body: { missionId: $('launch-mission').value, mode, roomIds: mode === 'Linked' ? [1, 2, 3, 4, 5] : [Number($('launch-room').value)] } };
+  await sendPending();
 }
 async function command(action, extra = {}, expectedSequence = state.session.sequence) {
   if (state.pending) return;
   if (action === 'End' && !confirm('結束此場次並釋放房間？歷史與統計會保留。')) return;
-  state.pending = { id: state.session.id, body: { commandId: uuid(), action, expectedSequence, ...extra } };
+  state.pending = { kind: 'command', path: '/sessions/' + state.session.id + '/commands', method: 'POST', body: { commandId: uuid(), action, expectedSequence, ...extra } };
   await sendPending();
 }
 async function sendPending() {
   const pending = state.pending;
   if (!pending) return;
   try {
-    await api('/sessions/' + pending.id + '/commands', 'POST', pending.body);
-    state.pending = null; await refresh(); loadEnvironment(); loadEnemies(); notify('控制命令已確認。');
+    const response = await api(pending.path, pending.method, pending.body, pending.requestId);
+    if (state.pending !== pending) return;
+    state.pending = null;
+    if (pending.kind === 'create') { $('include-ended').checked = response.state === 'Ended'; state.selected = response.id; state.session = null; }
+    if (pending.kind === 'join') $('player-name').value = '';
+    await refresh(); loadEnvironment(); loadEnemies();
+    notify({ create: '場次建立結果已確認。請核對目前狀態，再加入玩家及開始任務。', join: '玩家加入操作已確認，請核對目前名冊；尚不代表頭盔在線。', leave: '玩家移出操作已確認，請核對目前名冊。', command: '控制命令已確認。' }[pending.kind]);
   } catch (error) {
-    if (error.status >= 400 && error.status < 500) state.pending = null;
+    if (state.pending === pending && error.status >= 400 && error.status < 500) state.pending = null;
     throw error;
   }
 }
 async function joinPlayer() {
-  await api('/sessions/' + state.selected + '/players', 'POST', { playerId: uuid(), name: $('player-name').value.trim(), roomId: Number($('player-room').value), headset: $('player-headset').value });
-  $('player-name').value = ''; await refresh(); loadEnvironment(); loadEnemies(); notify('玩家已加入名冊；尚不代表頭盔在線。');
+  if (state.pending) return;
+  state.pending = { kind: 'join', path: '/sessions/' + state.selected + '/players', method: 'POST', requestId: uuid(), body: { playerId: uuid(), name: $('player-name').value.trim(), roomId: Number($('player-room').value), headset: $('player-headset').value } };
+  await sendPending();
 }
 async function removePlayer(player) {
+  if (state.pending) return;
   if (!confirm(`將「${player.name}」移出名冊？現有頭盔連線尚不會自動斷開。`)) return;
-  await api(`/sessions/${state.selected}/players/${player.id}`, 'DELETE'); await refresh(); loadEnvironment(); loadEnemies(); notify('玩家已移出名冊。');
+  state.pending = { kind: 'leave', path: `/sessions/${state.selected}/players/${player.id}`, method: 'DELETE', requestId: uuid() };
+  await sendPending();
 }
 function download(filename, value) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }));

@@ -81,13 +81,50 @@ async function main() {
     await page.locator('#load-mission').click();
     check(await page.locator('#draft-name').inputValue() === mission.definition.name && await page.locator('#prop-layer [data-index]').count() === 2 && await page.locator('#prop-x').inputValue() === '3.5', 'Saved mission can be loaded back into the editor without losing layout coordinates');
     await page.screenshot({ path: path.join(screenshots, 'mission-planner.png'), fullPage: true });
+    const lifecycleAttempts = [];
+    let loseLifecycle = true, lifecycleKind = 'create';
+    async function lifecycleRoute(route) {
+      const request = route.request(), pathname = new URL(request.url()).pathname;
+      const kind = request.method() === 'DELETE' && /\/players\/[^/]+$/.test(pathname) ? 'leave' : request.method() === 'POST' && /\/players$/.test(pathname) ? 'join' : request.method() === 'POST' && pathname === '/api/sessions' ? 'create' : null;
+      if (kind !== lifecycleKind) return route.continue();
+      lifecycleAttempts.push({ kind, method: request.method(), path: pathname, body: request.postData(), key: request.headers()['idempotency-key'] });
+      if (loseLifecycle) { loseLifecycle = false; await route.fetch(); await route.abort('failed'); }
+      else await route.continue();
+    }
+    await page.route('**/api/sessions', lifecycleRoute);
+    await page.route('**/api/sessions/*/players', lifecycleRoute);
+    await page.route('**/api/sessions/*/players/*', lifecycleRoute);
     await page.locator('#tab-operations').click(); await page.locator('#create-session-form button').click();
+    await page.locator('#pending-command').waitFor({ state: 'visible' });
+    await delay(2100);
+    check(await page.locator('#session-panel').isHidden() && await page.locator('#refresh').isDisabled() && (await api('/sessions')).length === 1,
+      'Lost creation response exposes retry without a selected session and stops further writes or polling');
+    await page.locator('#retry-command').click(); await page.locator('#pending-command').waitFor({ state: 'hidden' });
     await page.waitForFunction(() => !document.querySelector('#session-panel').hidden);
     let session = (await api('/sessions'))[0];
+    check(lifecycleAttempts.length === 2 && lifecycleAttempts[0].key && JSON.stringify(lifecycleAttempts[0]) === JSON.stringify(lifecycleAttempts[1]) && (await api('/sessions/' + session.id + '/events')).length === 1,
+      'Creation retry retains its UUID and exact body and confirms one durable session');
     check(session.mission.id === mission.id && session.state === 'Preparing', 'Selecting a saved mission creates a preparing session with that definition');
+    lifecycleKind = 'join'; loseLifecycle = true; lifecycleAttempts.length = 0;
     await page.locator('#player-name').fill('Alpha 01'); await page.locator('#join-form button').click();
+    await page.locator('#pending-command').waitFor({ state: 'visible' });
+    check(await page.locator('#player-name').inputValue() === 'Alpha 01' && await page.locator('#join-form button').isDisabled(), 'Lost join response retains the entered player while locking duplicate admission');
+    await page.locator('#retry-command').click(); await page.locator('#pending-command').waitFor({ state: 'hidden' });
     await page.waitForFunction(() => document.querySelector('#roster').textContent.includes('Alpha 01'));
     session = await api('/sessions/' + session.id);
+    check(lifecycleAttempts.length === 2 && lifecycleAttempts[0].key && JSON.stringify(lifecycleAttempts[0]) === JSON.stringify(lifecycleAttempts[1]) && session.players.length === 1 && session.sequence === 2,
+      'Join retry retains the original player UUID and request key with one admitted seat');
+    lifecycleKind = null;
+    await page.locator('#player-name').fill('Temporary'); await page.locator('#join-form button').click();
+    await page.waitForFunction(() => document.querySelector('#roster').textContent.includes('Temporary'));
+    lifecycleKind = 'leave'; loseLifecycle = true; lifecycleAttempts.length = 0;
+    page.once('dialog', dialog => dialog.accept()); await page.locator('#roster tr').filter({ hasText: 'Temporary' }).getByRole('button', { name: '移除', exact: true }).click();
+    await page.locator('#pending-command').waitFor({ state: 'visible' });
+    check((await api('/sessions/' + session.id)).players.length === 1 && await page.locator('#game-address').isDisabled(), 'Lost leave response retains confirmation controls while the server has already removed the player');
+    await page.locator('#retry-command').click(); await page.locator('#pending-command').waitFor({ state: 'hidden' });
+    check(lifecycleAttempts.length === 2 && lifecycleAttempts[0].key && JSON.stringify(lifecycleAttempts[0]) === JSON.stringify(lifecycleAttempts[1]) && (await api('/sessions/' + session.id + '/events')).filter(event => event.kind === 'PlayerLeft').length === 1,
+      'Leave retry returns confirmation after removal without a second event');
+    lifecycleKind = null;
     await page.locator('#game-address').fill('127.0.0.1');
     const [download] = await Promise.all([page.waitForEvent('download'), page.locator('#roster button').filter({ hasText: '下載連線檔' }).click()]);
     const configPath = path.join(directory, 'player.json'); await download.saveAs(configPath);

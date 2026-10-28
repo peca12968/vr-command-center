@@ -71,6 +71,7 @@ try
     PersistenceChecks.Run(Check, directory, mission);
     CombatChecks.Run(Check, mission);
     PlayerTicketChecks.Run(Check, mission);
+    RequestRetryChecks.Run(Check, directory, mission);
     SimulationChecks.Run(Check);
     Console.WriteLine($"All {checks} checks passed. These are domain checks, not headset or gameplay load tests.");
 }

@@ -38,6 +38,6 @@ dotnet artifacts/build-v08/bin/VrCommand.SimulationDemo/release/VrCommand.Simula
 
 瀏覽器使用本機提供的 Three.js 0.186.1，MIT 授權與下載來源／SHA-512 位於 `wwwroot/console/vendor/three/`，沒有 CDN 執行相依；原始檔未修改。API CSP 沿用同源資產政策。來源：[Three.js 官方文件](https://threejs.org/docs/)、[原始套件](https://registry.npmjs.org/three/0.186.1)。
 
-`pnpm --dir tests/browser test` 會先執行 12 項回放資料測試，再執行 50 項真實瀏覽器檢查。瀏覽器檢查以 Chromium SwiftShader 軟體 WebGL 渲染，包含幾何場景、射線、逐格／時間軸／倍速／暫停、自由／跟隨／俯視鏡頭、手機寬度、錯誤檔、未信任文字及登出競態；這不代表實際 GPU 或頭盔效能。已檢視桌面與手機截圖，位於 `artifacts/console/replay-combat.png` 及 `replay-mobile.png`。
+`pnpm --dir tests/browser test` 會先執行 12 項回放資料測試，再執行 56 項真實瀏覽器檢查（含 v0.9 管理重試）。瀏覽器檢查以 Chromium SwiftShader 軟體 WebGL 渲染，包含幾何場景、射線、逐格／時間軸／倍速／暫停、自由／跟隨／俯視鏡頭、手機寬度、錯誤檔、未信任文字及登出競態；這不代表實際 GPU 或頭盔效能。已檢視桌面與手機截圖，位於 `artifacts/console/replay-combat.png` 及 `replay-mobile.png`。
 
-搭配本機 181 項核心、234 項 HTTP 斷言與 .NET Standard 建置，驗證的是這套合成記錄的產生、讀取、渲染與統計。完整長期需求中的 Unity、實機任務、25 台連線、持久回放與即時上帝視角仍待整合與驗收。
+搭配本機 213 項核心、282 項 HTTP 斷言與 .NET Standard 建置，驗證的是這套合成記錄的產生、讀取、渲染與統計。完整長期需求中的 Unity、實機任務、25 台連線、持久回放與即時上帝視角仍待整合與驗收。
