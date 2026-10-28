@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <ItemGroup>
     <ProjectReference Include="../VrCommand.Core/VrCommand.Core.csproj" />
+    <ProjectReference Include="..\VrCommand.Persistence\VrCommand.Persistence.csproj" />
   </ItemGroup>
 </Project>

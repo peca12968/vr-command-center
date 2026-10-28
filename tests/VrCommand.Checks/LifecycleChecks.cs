@@ -128,13 +128,13 @@ internal static class LifecycleChecks
         var disposedStore = new FileSessionEventStore(Path.Combine(directory, "disposed"));
         disposedStore.Dispose();
         Reject<ObjectDisposedException>(() => disposedStore.Load(), "Disposed store cannot read after releasing its writer lease");
-        Reject<ObjectDisposedException>(() => disposedStore.Save(sessionId, finalEvents), "Disposed store cannot write after releasing its writer lease");
+        Reject<ObjectDisposedException>(() => disposedStore.Append(finalEvents[0]), "Disposed store cannot write after releasing its writer lease");
     }
 
     private sealed class SeedStore(SessionEvent[] entries) : ISessionEventStore
     {
         public SessionEvent[][] Load() => [entries];
-        public void Save(Guid sessionId, SessionEvent[] events) => throw new NotSupportedException();
+        public void Append(SessionEvent entry) => throw new NotSupportedException();
     }
 
     private sealed class FailingStore : ISessionEventStore
@@ -142,10 +142,10 @@ internal static class LifecycleChecks
         public bool Fail { get; set; }
         private readonly MemorySessionEventStore inner = new();
         public SessionEvent[][] Load() => inner.Load();
-        public void Save(Guid sessionId, SessionEvent[] events)
+        public void Append(SessionEvent entry)
         {
             if (Fail) throw new IOException("Simulated disk failure.");
-            inner.Save(sessionId, events);
+            inner.Append(entry);
         }
     }
 }

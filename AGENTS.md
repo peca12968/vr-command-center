@@ -6,12 +6,15 @@
 
 後端為 .NET 10；Unity 工程尚未建立。不要把後端組件宣稱為 Unity 相容。未知硬體協議使用模擬器，實機整合待廠商文件及設備。
 
+使用者已指定先用 Meta Quest 3；優先推進 Quest 3 的 Android 垂直切片，VIVE 相容性留待後續。模擬戰鬥必須使用 Simulation 標記，不能與 GameServer 資料在同場混用或宣稱頭盔實測完成。
+
 `/api` 端點使用伺服器配發的主控／房間控制台身分。實作新路由時必須傳遞認證身分並檢查操作範圍，不能依賴核心的預設 Internal 身分處理 HTTP 請求。測試用獨立的暫存憑證；不要讀出或提交 `data/operator-keys.local.json`。
 
 後端變更應執行：
 
 ```text
-dotnet build VrCommand.slnx --configuration Release
+dotnet restore VrCommand.slnx --locked-mode
+dotnet build VrCommand.slnx --configuration Release --no-restore
 dotnet run --project tests/VrCommand.Checks --configuration Release --no-build
 python scripts/smoke_api.py
 ```

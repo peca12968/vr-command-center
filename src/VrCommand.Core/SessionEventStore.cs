@@ -5,17 +5,25 @@ namespace VrCommand.Core;
 public interface ISessionEventStore
 {
     SessionEvent[][] Load();
-    void Save(Guid sessionId, SessionEvent[] events);
+    void Append(SessionEvent entry);
 }
 
 public sealed class MemorySessionEventStore : ISessionEventStore
 {
-    private readonly Dictionary<Guid, SessionEvent[]> streams = [];
+    private readonly Dictionary<Guid, List<SessionEvent>> streams = [];
     public SessionEvent[][] Load() => streams.Values.Select(events => events.ToArray()).ToArray();
-    public void Save(Guid sessionId, SessionEvent[] events) => streams[sessionId] = [.. events];
+    public void Append(SessionEvent entry)
+    {
+        var existing = streams.TryGetValue(entry.SessionId, out var events);
+        events ??= [];
+        if (entry.Sequence != events.Count + 1) throw new InvalidOperationException("Unexpected storage sequence.");
+        if (!existing) streams.Add(entry.SessionId, events);
+        events.Add(entry);
+    }
+    public void Seed(Guid sessionId, SessionEvent[] events) => streams[sessionId] = [.. events];
 }
 
-// A single process per directory; file replacement is for low-frequency management events.
+// Legacy JSON compatibility adapter. The HTTP service uses the transactional SQLite store.
 public sealed class FileSessionEventStore : ISessionEventStore, IDisposable
 {
     private readonly string directory;
@@ -33,7 +41,11 @@ public sealed class FileSessionEventStore : ISessionEventStore, IDisposable
     public SessionEvent[][] Load()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-        return Directory.EnumerateFiles(directory, "*.json")
+        return ReadLegacy(directory);
+    }
+
+    public static SessionEvent[][] ReadLegacy(string directory) => !Directory.Exists(directory) ? [] :
+        Directory.EnumerateFiles(directory, "*.json")
         .Select(path =>
         {
             if (!Guid.TryParse(Path.GetFileNameWithoutExtension(path), out var id))
@@ -44,12 +56,14 @@ public sealed class FileSessionEventStore : ISessionEventStore, IDisposable
                 throw new InvalidDataException("Session history identity does not match its filename.");
             return entries;
         }).ToArray();
-    }
 
-    public void Save(Guid sessionId, SessionEvent[] events)
+    public void Append(SessionEvent entry)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-        var destination = Path.Combine(directory, $"{sessionId:D}.json");
+        var previous = Load().SingleOrDefault(events => events[0].SessionId == entry.SessionId) ?? [];
+        if (entry.Sequence != previous.Length + 1) throw new InvalidOperationException("Unexpected storage sequence.");
+        SessionEvent[] events = [.. previous, entry];
+        var destination = Path.Combine(directory, $"{entry.SessionId:D}.json");
         var temporary = destination + ".tmp";
         try
         {

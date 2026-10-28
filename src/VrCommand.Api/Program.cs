@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using VrCommand.Core;
+using VrCommand.Persistence;
 
 var builder = WebApplication.CreateBuilder(args);
 var operatorKeyFile = builder.Configuration["OperatorKeyFile"];
@@ -17,8 +18,8 @@ var sessionDirectory = Path.GetFullPath(builder.Configuration["SessionDataDirect
 if (string.Equals(Path.TrimEndingDirectorySeparator(dataDirectory), Path.TrimEndingDirectorySeparator(sessionDirectory),
     OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
     throw new InvalidOperationException("Mission and session data directories must be separate.");
-builder.Services.AddSingleton(_ => new FileSessionEventStore(sessionDirectory));
-builder.Services.AddSingleton(services => new SessionManager(services.GetRequiredService<FileSessionEventStore>()));
+builder.Services.AddSingleton(_ => new SqliteSessionEventStore(sessionDirectory));
+builder.Services.AddSingleton(services => new SessionManager(services.GetRequiredService<SqliteSessionEventStore>()));
 var app = builder.Build();
 // Fail startup on inconsistent persisted histories, before reporting a healthy service.
 app.Services.GetRequiredService<SessionManager>();
@@ -56,7 +57,7 @@ app.Use(async (context, next) =>
     }
 });
 
-app.MapGet("/", () => new { service = "VR Command Center", stage = "control-plane prototype", version = "0.3.0" });
+app.MapGet("/", () => new { service = "VR Command Center", stage = "control and telemetry prototype", version = "0.4.0" });
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/api/me", (HttpContext context) => Actor(context));
 app.MapGet("/api/rooms", (SessionManager manager, HttpContext context) => manager.Rooms(Actor(context)));
@@ -79,6 +80,10 @@ app.MapGet("/api/sessions/{id:guid}/events", (Guid id, long? after, int? limit, 
     manager.Events(id, after ?? 0, limit ?? 100, Actor(context)));
 app.MapPost("/api/sessions/{id:guid}/commands", (Guid id, ControlCommand command, SessionManager manager, HttpContext context) =>
     manager.Execute(id, command, Actor(context)));
+app.MapGet("/api/sessions/{id:guid}/statistics", (Guid id, SessionManager manager, HttpContext context) =>
+    manager.Statistics(id, Actor(context)));
+app.MapPost("/api/sessions/{id:guid}/combat", (Guid id, CombatReport report, SessionManager manager, HttpContext context) =>
+    manager.ReportCombat(id, report, Actor(context)));
 app.MapPost("/api/sessions/{id:guid}/players", (Guid id, JoinPlayer request, SessionManager manager, HttpContext context) =>
     manager.Join(id, request.PlayerId, request.Name, request.RoomId, request.Headset, Actor(context)));
 app.MapDelete("/api/sessions/{id:guid}/players/{playerId:guid}", (Guid id, Guid playerId, SessionManager manager, HttpContext context) =>

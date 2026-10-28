@@ -11,6 +11,9 @@ import urllib.error
 import urllib.request
 import uuid
 import secrets
+import sys
+import sqlite3
+from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -162,6 +165,7 @@ try:
             require(len(request("GET", "/api/sessions", identity="Room1")) == 1, "Room controller session list excludes other independent rooms")
             request("GET", f"/api/sessions/{independent[1]['id']}", expected=403, identity="Room1")
             request("GET", f"/api/sessions/{independent[1]['id']}/events", expected=403, identity="Room1")
+            request("GET", f"/api/sessions/{independent[1]['id']}/statistics", expected=403, identity="Room1")
             request("DELETE", f"/api/sessions/{independent[1]['id']}", expected=403, identity="Room1")
             start("Linked", [1, 2, 3, 4, 5], 409)
             first_player_id = str(uuid.uuid4())
@@ -176,7 +180,7 @@ try:
             request("POST", own_path + "/commands", command, identity="Room1")
             request("POST", own_path + "/commands", command, 409)  # another identity cannot claim this retry
             own_events = request("GET", own_path + "/events", identity="Room1")
-            require(own_events[-1]["actor"]["id"] == "room-1" and own_events[-1]["schemaVersion"] == 2,
+            require(own_events[-1]["actor"]["id"] == "room-1" and own_events[-1]["schemaVersion"] == 3,
                     "Management events retain authenticated console identity")
             request("POST", f"/api/sessions/{independent[1]['id']}/players", {**player, "roomId": 2}, 409)
             request("POST", f"/api/sessions/{independent[0]['id']}/players", {**player, "playerId": str(uuid.uuid4()), "roomId": 2}, 400)
@@ -225,13 +229,47 @@ try:
             request("POST", session_path + "/commands", {"commandId": str(uuid.uuid4()), "action": "Begin", "environment": draft["environment"]}, 400)
             current = request("GET", session_path)
             begin = {"commandId": str(uuid.uuid4()), "action": "Begin", "expectedSequence": current["sequence"]}
+            fired = {"reportId": str(uuid.uuid4()), "kind": "ShotFired", "origin": "Simulation",
+                     "playerId": player["playerId"], "shotId": str(uuid.uuid4())}
+            request("POST", session_path + "/combat", fired, 409, identity="GameServer")
             receipt = request("POST", session_path + "/commands", begin)
             require(receipt["session"]["state"] == "Running" and receipt["session"]["startedAtUtc"] is not None,
                     "Begin moves a populated mission to Running")
             request("POST", session_path + "/players", {**player, "playerId": str(uuid.uuid4())}, 409)
+
+            def report(body, expected=200, identity="GameServer"):
+                return request("POST", session_path + "/combat", body, expected, identity)
+
+            baseline = request("GET", session_path + "/statistics")
+            require(baseline["origin"] is None and all(p["ammoUsed"] == 0 and p["health"] == 100 for p in baseline["players"]),
+                    "Statistics start empty and include previously departed players")
+            report(fired, 403, identity="Master")
+            report({**fired, "actor": {"role": "GameServer"}}, 403, identity="Room1")
+            accepted_shot = report(fired)
+            require(report(fired)["duplicate"], "Repeated combat report returns an idempotent receipt")
+            second_shot = {**fired, "reportId": str(uuid.uuid4()), "shotId": str(uuid.uuid4())}
+            third_shot = {**fired, "reportId": str(uuid.uuid4()), "shotId": str(uuid.uuid4())}
+            report(second_shot)
+            report(third_shot)
+            enemy = str(uuid.uuid4())
+            hit = {**fired, "reportId": str(uuid.uuid4()), "kind": "ShotHit", "enemyId": enemy}
+            report(hit)
+            report({**hit, "reportId": str(uuid.uuid4()), "kind": "EnemyEliminated"})
+            report({**second_shot, "reportId": str(uuid.uuid4()), "kind": "ShotHit", "enemyId": str(uuid.uuid4())})
+            report({"reportId": str(uuid.uuid4()), "kind": "PlayerDamaged", "origin": "Simulation", "playerId": player["playerId"], "damage": 20})
+            report({**fired, "reportId": str(uuid.uuid4())}, 409)
+            report({**hit, "reportId": str(uuid.uuid4()), "shotId": str(uuid.uuid4())}, 409)
+            report({**fired, "reportId": str(uuid.uuid4()), "shotId": str(uuid.uuid4()), "origin": "GameServer"}, 409)
+            report({**fired, "origin": "Unspecified"}, 400)
+            report({"reportId": str(uuid.uuid4()), "kind": "PlayerDamaged", "origin": "Simulation", "playerId": player["playerId"], "damage": 0}, 400)
+            alpha = next(p for p in request("GET", session_path + "/statistics")["players"] if p["playerId"] == player["playerId"])
+            require(alpha["ammoUsed"] == 3 and alpha["shotsHit"] == 2 and alpha["accuracyPercent"] == 66.67
+                    and alpha["kills"] == 1 and alpha["hitsReceived"] == 1 and alpha["damageTaken"] == 20 and alpha["health"] == 80,
+                    "HTTP combat events produce the six requested player metrics")
             control("Resume", 409)
             control("Pause", expectedSequence=1, expected=409)
             pause = {"commandId": str(uuid.uuid4()), "action": "Pause"}
+            before_pause_sequence = request("GET", session_path)["sequence"]
             with ThreadPoolExecutor(max_workers=8) as pool:
                 # request() counts are kept on the main thread below for deterministic reporting.
                 def retry_pause(_):
@@ -243,17 +281,26 @@ try:
             require(sum(not result["duplicate"] for result in retries) == 1,
                     "Concurrent HTTP retries apply one pause command")
             current = request("GET", session_path)
-            require(current["state"] == "Paused" and current["sequence"] == receipt["appliedAtSequence"] + 1,
+            require(current["state"] == "Paused" and current["sequence"] == before_pause_sequence + 1,
                     "Retrying does not append extra events")
+            report({**fired, "reportId": str(uuid.uuid4()), "shotId": str(uuid.uuid4())}, 409)
+            require(report(fired)["duplicate"], "Combat retry remains valid while paused without new events")
             request("POST", session_path + "/commands", {**pause, "action": "Resume"}, 409)
             environment_override = {"mode": "VR", "weather": "Clear", "timeOfDay": "Day", "lightning": False}
             control("SetEnvironment", environment=environment_override)
             control("SetEnemies", enemies={"count": 2, "behavior": "Advance", "autoAttack": False})
             control("Resume")
             current = request("GET", session_path)
+            statistics = request("GET", session_path + "/statistics")
             require(current["environment"] == environment_override and current["mission"]["definition"] == draft,
                     "Runtime overrides preserve the saved template")
             events = request("GET", session_path + "/events?after=0&limit=500")
+            combat_events = [event for event in events if event["kind"] == "CombatRecorded"]
+            require(len(combat_events) == 7 and all(event["actor"]["id"] == "game-server" and event["schemaVersion"] == 3 for event in combat_events),
+                    "Combat and management share a versioned, authenticated event stream")
+            with closing(sqlite3.connect(test_directory / "sessions/events.db")) as database:
+                stored = database.execute("SELECT COUNT(*) FROM session_events WHERE session_id=?", (session["id"],)).fetchone()[0]
+            require(stored == current["sequence"], "SQLite stores exactly one row per accepted management or combat event")
             require(not any(token in json.dumps(events) for token in tokens.values()),
                     "Event history contains console identity without credential values")
             require(len(events) == current["sequence"] and [e["sequence"] for e in events] == list(range(1, len(events) + 1)),
@@ -268,6 +315,9 @@ try:
             wait_ready(process)
             recovered = request("GET", session_path)
             require(recovered == current, "Process restart reconstructs active state, players and control settings")
+            require(request("GET", session_path + "/statistics") == statistics, "Restart rebuilds identical combat statistics from SQLite")
+            require(report(fired)["duplicate"] and report(fired)["appliedAtSequence"] == accepted_shot["appliedAtSequence"],
+                    "Combat report deduplication survives API process restart")
             require(all(r["playerCount"] == 5 for r in request("GET", "/api/rooms")),
                     "Restart retains room capacity reservations")
             start("Independent", [1], 409)
@@ -279,6 +329,9 @@ try:
                     "End archives the session and timestamps completion")
             request("DELETE", session_path, expected=409)
             require(request("GET", session_path)["state"] == "Ended", "Ended history remains readable")
+            require(request("GET", session_path + "/statistics")["players"] == statistics["players"], "Ended session preserves combat statistics")
+            require(report(fired)["duplicate"], "Combat report retry is available after session end")
+            report({**fired, "reportId": str(uuid.uuid4()), "shotId": str(uuid.uuid4())}, 409)
             require(request("GET", "/api/sessions") == [], "Active list excludes archived sessions")
             require(len(request("GET", "/api/sessions?includeEnded=true")) == 6, "History list includes independent and linked sessions")
             require(all(r["sessionId"] is None and r["playerCount"] == 0 for r in request("GET", "/api/rooms")), "Ending releases all room reservations and player slots")
@@ -294,6 +347,16 @@ try:
                     and all(r["sessionId"] is None for r in request("GET", "/api/rooms")),
                     "Second restart preserves archived state and released rooms")
             request("POST", session_path + "/commands", {"commandId": str(uuid.uuid4()), "action": "Pause"}, 409)
+            require(request("GET", session_path + "/statistics")["players"] == statistics["players"], "Archived statistics also survive a second restart")
+            demo = subprocess.run([sys.executable, str(ROOT / "scripts/demo_combat.py"), "--base-url", base_url,
+                                   "--key-file", str(key_file), "--room", "1"], capture_output=True, text=True, encoding="utf-8", timeout=30)
+            if demo.returncode != 0:
+                raise AssertionError("Combat demo failed: " + demo.stderr)
+            summary = json.loads(demo.stdout)
+            require(summary["origin"] == "Simulation" and summary["players"][0]["ammoUsed"] == 3
+                    and summary["players"][0]["accuracyPercent"] == 66.67 and summary["players"][0]["kills"] == 1
+                    and summary["players"][0]["health"] == 80, "Standalone Quest3-record demo creates a simulated combat archive")
+            require(all(room["sessionId"] is None for room in request("GET", "/api/rooms")), "Combat demo releases only its own session on completion")
         except BaseException:
             log.flush()
             print((test_directory / "server.log").read_text(encoding="utf-8"))

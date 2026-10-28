@@ -18,3 +18,5 @@ artifacts/
 *.apk
 *.aab
 *.mp4
+__pycache__/
+*.py[cod]

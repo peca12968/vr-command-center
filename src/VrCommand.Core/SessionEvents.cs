@@ -2,7 +2,7 @@ using System.Text.Json;
 
 namespace VrCommand.Core;
 
-public enum SessionEventKind { Created, PlayerJoined, PlayerLeft, ControlApplied }
+public enum SessionEventKind { Created, PlayerJoined, PlayerLeft, ControlApplied, CombatRecorded }
 public record SessionCreated(SessionMode Mode, int[] RoomIds, Mission Mission);
 public record PlayerLeft(Guid PlayerId);
 public record SessionEvent(int SchemaVersion, Guid EventId, Guid SessionId, long Sequence,
@@ -11,7 +11,7 @@ public record SessionEvent(int SchemaVersion, Guid EventId, Guid SessionId, long
     public T Read<T>() => Payload.Deserialize<T>(JsonFormat.Options)
         ?? throw new InvalidDataException("Missing event payload.");
     internal static SessionEvent Create<T>(Guid id, long sequence, SessionEventKind kind, T payload, OperatorIdentity actor) =>
-        new(2, Guid.NewGuid(), id, sequence, DateTimeOffset.UtcNow, kind,
+        new(3, Guid.NewGuid(), id, sequence, DateTimeOffset.UtcNow, kind,
             JsonSerializer.SerializeToElement(payload, JsonFormat.Options), actor);
 }
 
@@ -49,13 +49,15 @@ internal static class SessionProjection
 
     internal static SessionView Apply(SessionView? current, SessionEvent entry)
     {
-        if (entry.SchemaVersion is not (1 or 2) || entry.EventId == Guid.Empty || entry.SessionId == Guid.Empty
+        if (entry.SchemaVersion is not (1 or 2 or 3) || entry.EventId == Guid.Empty || entry.SessionId == Guid.Empty
             || entry.Sequence != (current?.Sequence ?? 0) + 1 || !Enum.IsDefined(entry.Kind)
             || entry.RecordedAtUtc == default || entry.RecordedAtUtc.Offset != TimeSpan.Zero
             || (current is not null && current.Id != entry.SessionId))
             throw new InvalidDataException("Unsupported or inconsistent event envelope.");
-        if (entry.SchemaVersion == 2 && entry.Actor is null)
-            throw new InvalidDataException("Version 2 events require an authenticated or internal actor.");
+        if (entry.SchemaVersion >= 2 && entry.Actor is null)
+            throw new InvalidDataException("Version 2+ events require an authenticated or internal actor.");
+        if (entry.Kind == SessionEventKind.CombatRecorded && entry.SchemaVersion != 3)
+            throw new InvalidDataException("Combat events require schema version 3.");
         if (entry.SchemaVersion == 1 && entry.Actor is not null)
             throw new InvalidDataException("Legacy events cannot assert an authenticated actor.");
         var actor = entry.Actor ?? OperatorIdentity.Internal;
@@ -84,12 +86,17 @@ internal static class SessionProjection
             case SessionEventKind.ControlApplied:
                 AccessPolicy.Manage(actor, current.Mode, current.RoomIds);
                 break;
+            case SessionEventKind.CombatRecorded:
+                AccessPolicy.ReportCombat(actor);
+                if (current.State != SessionState.Running) throw new InvalidOperationException("Combat requires Running.");
+                break;
         }
         var updated = entry.Kind switch
         {
             SessionEventKind.PlayerJoined => Join(current, entry.Read<Player>()),
             SessionEventKind.PlayerLeft => Leave(current, entry.Read<PlayerLeft>().PlayerId),
             SessionEventKind.ControlApplied => Control(current, entry.Read<ControlCommand>(), entry.RecordedAtUtc),
+            SessionEventKind.CombatRecorded => current,
             _ => throw new InvalidDataException("Unexpected event kind.")
         };
         return updated with { Sequence = entry.Sequence };

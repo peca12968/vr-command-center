@@ -13,7 +13,7 @@ public record ControlCommand(Guid CommandId, ControlAction Action, EnvironmentSe
     EnemySettings? Enemies = null, long? ExpectedSequence = null);
 public record CommandReceipt(Guid CommandId, long AppliedAtSequence, bool Duplicate, SessionView Session);
 
-// Control-plane only. Management events do not contain a 3D world or combat simulation.
+// Management and combat telemetry; this does not simulate a 3D world or determine physical collisions.
 public sealed class SessionManager
 {
     public const int RoomCount = 5;
@@ -22,7 +22,7 @@ public sealed class SessionManager
     private readonly object gate = new();
     private readonly ISessionEventStore eventStore;
     private readonly Dictionary<Guid, History> sessions = [];
-    private sealed record History(SessionView View, SessionEvent[] Events);
+    private sealed record History(SessionView View, List<SessionEvent> Events, Dictionary<Guid, SessionEvent> Commands, CombatLedger Combat);
 
     public SessionManager(ISessionEventStore? eventStore = null)
     {
@@ -31,15 +31,18 @@ public sealed class SessionManager
         {
             SessionView? view = null;
             var ids = new HashSet<Guid>();
-            var commands = new HashSet<Guid>();
+            var commands = new Dictionary<Guid, SessionEvent>();
+            var combat = new CombatLedger();
             foreach (var entry in events)
             {
                 if (!ids.Add(entry.EventId)) throw new InvalidDataException("Duplicate event ID in session history.");
-                if (entry.Kind == SessionEventKind.ControlApplied && !commands.Add(entry.Read<ControlCommand>().CommandId))
+                if (entry.Kind == SessionEventKind.ControlApplied && !commands.TryAdd(entry.Read<ControlCommand>().CommandId, entry))
                     throw new InvalidDataException("Duplicate command ID in session history.");
-                view = SessionProjection.Apply(view, entry);
+                var next = SessionProjection.Apply(view, entry);
+                combat.Prepare(view, entry)();
+                view = next;
             }
-            if (view is null || !sessions.TryAdd(view.Id, new(view, events)))
+            if (view is null || !sessions.TryAdd(view.Id, new(view, [.. events], commands, combat)))
                 throw new InvalidDataException("Empty or duplicate session history.");
         }
         var active = Active().ToArray();
@@ -90,7 +93,8 @@ public sealed class SessionManager
         {
             var history = Find(id);
             AccessPolicy.Read(actor ?? OperatorIdentity.Internal, history.View.RoomIds);
-            return history.Events.Where(e => e.Sequence > after).Take(limit).ToArray();
+            var start = (int)Math.Min(after, history.Events.Count);
+            return history.Events.GetRange(start, Math.Min(limit, history.Events.Count - start)).ToArray();
         }
     }
 
@@ -132,9 +136,7 @@ public sealed class SessionManager
             var history = Find(id);
             actor ??= OperatorIdentity.Internal;
             AccessPolicy.Manage(actor, history.View.Mode, history.View.RoomIds);
-            var previous = history.Events.FirstOrDefault(e => e.Kind == SessionEventKind.ControlApplied
-                && e.Read<ControlCommand>().CommandId == command.CommandId);
-            if (previous is not null)
+            if (history.Commands.TryGetValue(command.CommandId, out var previous))
             {
                 if (previous.Read<ControlCommand>() != command || (previous.Actor ?? OperatorIdentity.Internal) != actor)
                     throw new InvalidOperationException("Command ID already used with different content.");
@@ -150,6 +152,37 @@ public sealed class SessionManager
 
     public void End(Guid id, OperatorIdentity? actor = null) => Execute(id, new(Guid.NewGuid(), ControlAction.End), actor);
 
+    public SessionStatistics Statistics(Guid id, OperatorIdentity? actor = null)
+    {
+        lock (gate)
+        {
+            var history = Find(id);
+            AccessPolicy.Read(actor ?? OperatorIdentity.Internal, history.View.RoomIds);
+            return history.Combat.Snapshot(id, history.View.Sequence);
+        }
+    }
+
+    public CombatReceipt ReportCombat(Guid id, CombatReport report, OperatorIdentity? actor = null)
+    {
+        actor ??= OperatorIdentity.Internal;
+        AccessPolicy.ReportCombat(actor);
+        CombatLedger.Validate(report);
+        lock (gate)
+        {
+            var history = Find(id);
+            var previous = history.Combat.Find(report.ReportId);
+            if (previous is not null)
+            {
+                if (previous.Read<CombatReport>() != report || previous.Actor != actor)
+                    throw new InvalidOperationException("Report ID already used with different content or source identity.");
+                return new(report.ReportId, previous.Sequence, true, history.Combat.Snapshot(id, history.View.Sequence));
+            }
+            var entry = SessionEvent.Create(id, history.View.Sequence + 1, SessionEventKind.CombatRecorded, report, actor);
+            Commit(history, entry);
+            return new(report.ReportId, entry.Sequence, false, history.Combat.Snapshot(id, entry.Sequence));
+        }
+    }
+
     public RoomView[] Rooms(OperatorIdentity? actor = null)
     {
         lock (gate) return Enumerable.Range(1, RoomCount)
@@ -163,9 +196,15 @@ public sealed class SessionManager
     private SessionView Commit(History? previous, SessionEvent entry)
     {
         var view = SessionProjection.Apply(previous?.View, entry);
-        SessionEvent[] events = [.. previous?.Events ?? [], entry];
-        eventStore.Save(entry.SessionId, events); // Memory advances only after the durable write succeeds.
-        sessions[entry.SessionId] = new(view, events);
+        var combat = previous?.Combat ?? new CombatLedger();
+        var applyCombat = combat.Prepare(previous?.View, entry);
+        eventStore.Append(entry); // Memory advances only after the durable append succeeds.
+        applyCombat();
+        var events = previous?.Events ?? [];
+        var commands = previous?.Commands ?? [];
+        events.Add(entry);
+        if (entry.Kind == SessionEventKind.ControlApplied) commands.Add(entry.Read<ControlCommand>().CommandId, entry);
+        sessions[entry.SessionId] = new(view, events, commands, combat);
         return Snapshot(view);
     }
 

@@ -2,7 +2,9 @@
 
 五房間、總計 25 人的 VR/MR 軍事戰鬥遊戲系統，目標支援 VIVE XR 與 Meta Quest 3。
 
-目前為 **v0.3 管理後端原型**。已提供主控／房間控制台權限、玩家名額、任務儲存、場次生命週期、環境／敵軍設定命令，以及包含控制台身分且可在重啟後重建狀態的事件紀錄。尚未交付頭盔遊戲端、戰鬥模擬、管理畫面、硬體控制、3D 觀戰或回放。`ViveXr`、`Quest3` 目前只是玩家裝置分類，不能作為實機相容證據。
+依 2026-10-29 的使用者指示，**優先開發 Meta Quest 3**，暫以 Android 獨立執行為工作假設；VIVE 延後接入，共用架構與原始雙平台目標保留。
+
+目前為 **v0.4 管理與統計後端原型**。已提供控制台權限、五房名額、任務與場次控制、環境／敵軍設定命令、SQLite 事件紀錄，以及彈藥、命中率、擊殺、中彈與血量統計。已有明確標記 Simulation 的命令列模擬器。尚無頭盔遊戲端、實際射擊／AI 模擬、管理畫面、硬體控制或 3D 觀戰回放。`ViveXr`、`Quest3` 目前只是玩家裝置分類，不能作為實機相容證據。
 
 ## 開發位置
 
@@ -16,20 +18,23 @@
 - API：[API.md](docs/API.md)
 - 場次與事件契約：[SESSION_PROTOCOL.md](docs/SESSION_PROTOCOL.md)
 - 控制台身分與權限：[AUTHORIZATION.md](docs/AUTHORIZATION.md)
+- 戰鬥事件與統計：[COMBAT_PROTOCOL.md](docs/COMBAT_PROTOCOL.md)
+- SQLite 儲存與升級：[STORAGE.md](docs/STORAGE.md)
 
 ## 啟動
 
-需要 .NET SDK `10.0.400`（版本由 `global.json` 固定）。Windows 本機啟動助手需要 PowerShell 7。下列命令在專案根目錄執行：
+需要 .NET SDK `10.0.400`（版本由 `global.json` 固定）及首次 NuGet 還原的網路連線。Windows 本機啟動助手需要 PowerShell 7。下列命令在專案根目錄執行：
 
 ```powershell
-dotnet build VrCommand.slnx --configuration Release
+dotnet restore VrCommand.slnx --locked-mode
+dotnet build VrCommand.slnx --configuration Release --no-restore
 dotnet run --project tests/VrCommand.Checks --configuration Release --no-build
 .\scripts\start-local.ps1
 ```
 
-啟動助手首次在 `data/operator-keys.local.json` 產生七份不同的隨機憑證，分別供主控、五房控制台與預留的遊戲伺服器使用；檔案已排除於 Git，畫面不輸出憑證。重新啟動沿用原檔。`GET http://127.0.0.1:5080/health` 無需登入；所有 `/api` 端點需帶 Bearer 憑證。這是本機控制台憑證機制，尚無人員帳號登入或實際頭盔驗證。其他部署方式見權限文件。
+啟動助手首次在 `data/operator-keys.local.json` 產生七份不同的隨機憑證，分別供主控、五房控制台與遊戲事件來源使用；檔案已排除於 Git，畫面不輸出憑證。重新啟動沿用原檔。`GET http://127.0.0.1:5080/health` 無需登入；所有 `/api` 端點需帶 Bearer 憑證。這是本機控制台憑證機制，尚無人員帳號登入或實際頭盔驗證。其他部署方式見權限文件。
 
-任務預設存於 API 專案的 `data/missions/`，可透過 `DataDirectory` 環境變數指定絕對路徑。場次事件預設位於任務目錄旁的 `sessions/`，亦可用 `SessionDataDirectory` 指定另一目錄；兩者不可相同，均已排除於 Git。場次、名冊、執行設定與命令去重紀錄會在重啟後恢復；結束後保留歷史並釋放房間。事件目錄限單一 API 程序寫入。任務時間目前不會自動結束場次。
+任務預設存於 API 專案的 `data/missions/`，可用 `DataDirectory` 指定絕對路徑。場次事件預設位於旁邊的 `sessions/events.db`，亦可用 `SessionDataDirectory` 指定另一目錄；兩者不可相同，均已排除於 Git。舊 JSON 場次會驗證後一次匯入，原檔保留。場次、名冊、執行設定、去重及統計會在重啟後恢復；結束後保留歷史並釋放房間。事件目錄限單一 API 程序寫入。任務時間目前不會自動結束場次。
 
 ## 操作範例
 
@@ -68,12 +73,21 @@ $receipt.session
 python scripts/smoke_api.py
 ```
 
-腳本使用獨立的隨機測試憑證與暫存資料，驗證各角色與五房範圍、錯誤憑證設定拒絕啟動、換鑰、任務儲存、名額、狀態轉移、併發命令去重、版本衝突、單一寫入程序，以及兩次實際重啟後的活動／歷史場次恢復。最後關閉服務並清理測試資料。這不等同 25 台頭盔的連線效能驗收。
+腳本使用隨機測試憑證及暫存資料，驗證權限、名額、場次狀態、去重、SQLite 交易儲存、戰鬥因果與統計，並兩次實際重啟 API 驗證復原。核心檢查另包含 JSON 升級、回滾、資料損壞及五房 25 個玩家的模擬統計。這不等同 25 台頭盔的連線效能驗收。
+
+本機 API 啟動後，也可在空閒房間執行一場明確標記的模擬紀錄：
+
+```powershell
+python scripts/demo_combat.py --room 1
+```
+
+預期輸出：使用彈藥 3、命中率 66.67%、擊殺 1、中彈 1、耗損 20、血量 80。腳本只結束自己建立的場次，並保留歷史供查閱；它不連接頭盔或硬體。
 
 ## 目錄
 
 ```text
 src/VrCommand.Core/      任務與場次管理規則
+src/VrCommand.Persistence/ SQLite 交易式事件儲存
 src/VrCommand.Api/       ASP.NET Core 管理 API
 tests/VrCommand.Checks/  無外部測試套件的核心規則驗證
 scripts/                HTTP 整合驗證

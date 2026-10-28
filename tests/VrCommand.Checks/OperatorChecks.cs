@@ -31,7 +31,7 @@ internal static class OperatorChecks
         var command = new ControlCommand(Guid.NewGuid(), ControlAction.Begin);
         manager.Execute(own.Id, command, room1);
         Reject<InvalidOperationException>(() => manager.Execute(own.Id, command, master), "A different actor cannot take ownership of an accepted command ID");
-        check(manager.Events(own.Id).All(e => e.Actor == room1 && e.SchemaVersion == 2), "New event envelopes retain the verified identity");
+        check(manager.Events(own.Id).All(e => e.Actor == room1 && e.SchemaVersion == 3), "New event envelopes retain the verified identity");
         var restored = new SessionManager(store);
         check(restored.Execute(own.Id, command, room1).Duplicate, "Authenticated command retries survive recovery");
         manager.End(own.Id, room1);
@@ -47,20 +47,20 @@ internal static class OperatorChecks
         check(manager.Get(linked.Id).Players.Length == 0, "Room controller may release its own linked player slot");
         var oldEvents = manager.Events(own.Id).Select(e => e with { SchemaVersion = 1, Actor = null }).ToArray();
         var legacyStore = new MemorySessionEventStore();
-        legacyStore.Save(own.Id, oldEvents);
+        legacyStore.Seed(own.Id, oldEvents);
         var legacy = new SessionManager(legacyStore);
         check(legacy.Get(own.Id).State == SessionState.Ended && legacy.Events(own.Id).All(e => e.Actor is null),
             "Version 1 histories remain readable without inventing an operator identity");
         var invalid = oldEvents.ToArray();
         invalid[0] = invalid[0] with { SchemaVersion = 2 };
-        legacyStore.Save(own.Id, invalid);
+        legacyStore.Seed(own.Id, invalid);
         Reject<InvalidDataException>(() => new SessionManager(legacyStore), "Version 2 history cannot omit its actor");
         Reject<ArgumentException>(() => manager.Rooms(new("invalid", OperatorRole.RoomController, 6)),
             "Invalid room-scoped identity rejected");
         var unauthorized = manager.Events(linked.Id).ToArray();
         unauthorized[0] = unauthorized[0] with { Actor = room1 };
         var unauthorizedStore = new MemorySessionEventStore();
-        unauthorizedStore.Save(linked.Id, unauthorized);
+        unauthorizedStore.Seed(linked.Id, unauthorized);
         Reject<AccessDeniedException>(() => new SessionManager(unauthorizedStore),
             "Recovery revalidates the recorded actor's authority over linked creation");
     }

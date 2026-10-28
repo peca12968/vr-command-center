@@ -1,6 +1,6 @@
-# 管理 API v0.3
+# 管理與統計 API v0.4
 
-REST、UTF-8 JSON；預設範例地址 `http://127.0.0.1:5080`。列舉使用字串，不接受數字列舉。這是低頻管理介面，沒有姿態串流或遊戲伺服器。所有 `/api` 呼叫須帶 `Authorization: Bearer <credential>`；配置與角色表見 [AUTHORIZATION.md](AUTHORIZATION.md)。
+REST、UTF-8 JSON；預設範例地址 `http://127.0.0.1:5080`。列舉使用字串，不接受數字列舉。提供管理與模擬統計接入，尚無姿態串流或實際權威遊戲伺服器。所有 `/api` 呼叫須帶 `Authorization: Bearer <credential>`；配置與角色表見 [AUTHORIZATION.md](AUTHORIZATION.md)。
 
 | 方法 | 路徑 | 行為 |
 |---|---|---|
@@ -14,7 +14,9 @@ REST、UTF-8 JSON；預設範例地址 `http://127.0.0.1:5080`。列舉使用字
 | GET | `/api/sessions` | 活動場次；加 `?includeEnded=true` 包含歷史 |
 | GET | `/api/sessions/{id}` | 場次快照及玩家名冊，包含已結束場次 |
 | POST | `/api/sessions/{id}/commands` | 套用帶有去重 ID 的控制命令，回傳接受序號與最新狀態 |
-| GET | `/api/sessions/{id}/events` | 有序管理事件，參數 `after` 預設 0、`limit` 預設 100，上限 500 |
+| GET | `/api/sessions/{id}/events` | 有序管理／戰鬥事件，參數 `after` 預設 0、`limit` 預設 100，上限 500 |
+| POST | `/api/sessions/{id}/combat` | GameServer 身分提交已分類戰鬥報告，回傳去重收據與統計 |
+| GET | `/api/sessions/{id}/statistics` | 包含曾離開玩家的統計、資料來源及統計涵蓋序號 |
 | POST | `/api/sessions/{id}/players` | 加入玩家，回傳場次快照 |
 | DELETE | `/api/sessions/{id}/players/{playerId}` | 離開並釋放名額，回傳 204 |
 | DELETE | `/api/sessions/{id}` | 結束、保存歷史並釋放房間，回傳 204；重複結束回傳 409 |
@@ -44,6 +46,8 @@ REST、UTF-8 JSON；預設範例地址 `http://127.0.0.1:5080`。列舉使用字
 任務時間範圍 60–14400 秒；敵軍數量 0–100；物件最多 500。這些是原型輸入範圍，尚非實機效能承諾。環境可設定 `VR`／`MR`、`Clear`／`Rain`／`Fog`／`Storm`、`Day`／`Night` 及 `lightning` 布林值；可藉命令更新場次設定並留下事件，遊戲端套用待實作。
 
 ## 相容性
+
+v0.4 新事件使用 schema 3，支援讀取 schema 1／2；JSON 歷史一次匯入 SQLite，見 `STORAGE.md`。報告需明確標記 Simulation 或 GameServer，詳見 `COMBAT_PROTOCOL.md`。
 
 v0.3 新增強制控制台認證與房間範圍授權；匿名 `/api` 呼叫不再成功。新事件使用 schema 2 及伺服器認證的 `actor`；仍可讀取 schema 1 歷史。
 

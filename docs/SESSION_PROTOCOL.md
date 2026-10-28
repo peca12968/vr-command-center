@@ -1,4 +1,4 @@
-# 場次與事件契約 v0.3
+# 場次與事件契約 v0.4
 
 本契約目前僅實作管理資料狀態。狀態為 `Running` 不代表已連接遊戲伺服器，`Pause` 尚不會停止頭盔畫面或硬體。
 
@@ -63,7 +63,7 @@ stateDiagram-v2
 
 `GET /api/sessions/{id}/events?after=0&limit=100` 回傳事件陣列。每場次從序號 1 開始，僅接受的變更會遞增；讀取端以最後收到的序號作為下一次 `after`，空陣列表示已讀到目前尾端。預設 100、最多 500 筆；沒有訂閱推播與長輪詢。
 
-共同欄位為 `schemaVersion`（新事件為 2）、`eventId`、`sessionId`、`sequence`、`recordedAtUtc`、`kind`、`payload` 及 `actor`。schema 1 歷史仍可讀取，`actor` 保持 null，細節見權限文件。
+共同欄位為 `schemaVersion`（新事件為 3）、`eventId`、`sessionId`、`sequence`、`recordedAtUtc`、`kind`、`payload` 及 `actor`。schema 1／2 歷史仍可讀取，schema 1 的 `actor` 保持 null，細節見權限文件。
 
 | kind | payload | 用途 |
 |---|---|---|
@@ -71,9 +71,10 @@ stateDiagram-v2
 | `PlayerJoined` | id、name、roomId、headset | 玩家加入名冊 |
 | `PlayerLeft` | playerId | 玩家離開 |
 | `ControlApplied` | 完整 ControlCommand | 生命週期或執行設定變更 |
+| `CombatRecorded` | 完整 CombatReport | 可去重且帶來源標記的戰鬥統計事件，僅 schema 3 |
 
-檔案存放於 `SessionDataDirectory/{sessionId}.json`。每次管理變更先計算新狀態，再寫入暫存檔、flush 及替換原檔，成功後才更新記憶體。寫入失敗不推進狀態或釋放房間。單一目錄以 `.writer.lock` 防止另一個 API 程序同時寫入；不要手動更動正在使用的歷史檔。
+預設儲存於 `SessionDataDirectory/events.db`，每次事件以交易追加後才更新記憶體及統計。單一目錄仍以 `.writer.lock` 限制寫入程序；舊 JSON 歷史會驗證後一次匯入並保留原檔，詳見 `STORAGE.md`。
 
 服務啟動時從事件重建活動與歷史場次，驗證 schema、身分、連續序號、事件／命令 ID、狀態轉移與活動房間／玩家衝突。資料損壞或未知版本時啟動失敗，不靜默丟棄歷史。執行中的場次會恢復管理狀態；此行為尚不涵蓋遊戲世界、裝置重連或硬體恢復。
 
-目前逐次重寫整份管理歷史，並在啟動時載入所有場次；適用於原型的低頻管理事件，尚無歷史保留／刪除介面或資料庫索引。正式遊戲的高頻姿態與戰鬥紀錄須使用另外的分段儲存／快照策略。事件尚不含世界位置、傷害與動畫，因此本功能不是需求第 9 項的 3D 任務回放。
+事件逐筆追加並增量更新統計，但啟動時仍載入所有場次；尚無保留／刪除介面、世界快照或姿態串流。戰鬥事件已有傷害及射擊關聯，仍不包含 3D 位置與動畫，不能視為需求第 9 項的 3D 任務回放。實際遊戲的傳輸與批次寫入將在 Quest 3 垂直切片中整合。

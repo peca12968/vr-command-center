@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/VrCommand.Api/VrCommand.Api.csproj" />
     <Project Path="src/VrCommand.Core/VrCommand.Core.csproj" />
+    <Project Path="src/VrCommand.Persistence/VrCommand.Persistence.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/VrCommand.Checks/VrCommand.Checks.csproj" />

@@ -10,7 +10,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
-      - run: dotnet build VrCommand.slnx --configuration Release
+      - run: dotnet restore VrCommand.slnx --locked-mode
+      - run: dotnet build VrCommand.slnx --configuration Release --no-restore
       - run: dotnet run --project tests/VrCommand.Checks --configuration Release --no-build
       - uses: actions/setup-python@v5
         with:
