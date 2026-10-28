@@ -39,8 +39,8 @@ namespace VrCommand.Unity.Editor
         {
             PlayerSettings.companyName = "VR Command";
             PlayerSettings.productName = "VR Command Quest";
-            PlayerSettings.bundleVersion = "0.5.0";
-            PlayerSettings.Android.bundleVersionCode = 5;
+            PlayerSettings.bundleVersion = "0.10.0";
+            PlayerSettings.Android.bundleVersionCode = 10;
             PlayerSettings.insecureHttpOption = InsecureHttpOption.DevelopmentOnly;
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, "com.vrcommand.quest");
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
@@ -86,8 +86,6 @@ namespace VrCommand.Unity.Editor
         private static void CreateScene()
         {
             EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
-            var olive = Material("Olive", new Color(0.22f, 0.27f, 0.16f));
-            var sand = Material("Sand", new Color(0.47f, 0.41f, 0.28f));
             var concrete = Material("Concrete", new Color(0.25f, 0.27f, 0.26f));
             var steel = Material("Steel", new Color(0.19f, 0.23f, 0.24f));
             var avatarMaterial = Material("Players", new Color(0.24f, 0.67f, 0.38f));
@@ -95,12 +93,6 @@ namespace VrCommand.Unity.Editor
             {
                 var origin = VenueBootstrap.RoomOrigin(room);
                 Primitive("Room " + room + " Floor", PrimitiveType.Cube, origin + new Vector3(0, -0.15f, 0), new Vector3(12, 0.3f, 12), concrete);
-                Primitive("Rear Barrier", PrimitiveType.Cube, origin + new Vector3(0, 1.2f, 5.8f), new Vector3(12, 2.4f, 0.3f), olive);
-                for (var index = 0; index < 3; index++)
-                {
-                    Primitive("Sandbag Cover", PrimitiveType.Cube, origin + new Vector3((index - 1) * 3, 0.45f, 1), new Vector3(2, 0.9f, 0.7f), sand);
-                    Primitive("Training Barrel", PrimitiveType.Cylinder, origin + new Vector3((index - 1) * 3, 0.6f, 3.5f), new Vector3(0.6f, 0.6f, 0.6f), steel);
-                }
             }
             var lightObject = new GameObject("Sun", typeof(Light));
             var sun = lightObject.GetComponent<Light>();
@@ -112,14 +104,14 @@ namespace VrCommand.Unity.Editor
             spectator.transform.position = new Vector3(0, 18, -18);
             spectator.transform.LookAt(new Vector3(0, 0, 1));
 
-            var state = new GameObject("Scene Authority", typeof(NetworkObject), typeof(SceneAuthority));
+            var state = new GameObject("Scene Authority", typeof(NetworkObject), typeof(SceneAuthority), typeof(CombatAuthority));
             state.GetComponent<SceneAuthority>().sun = sun;
             var network = new GameObject("Network Manager", typeof(NetworkManager), typeof(UnityTransport), typeof(VenueBootstrap));
             var manager = network.GetComponent<NetworkManager>();
             var bootstrap = network.GetComponent<VenueBootstrap>();
             manager.NetworkConfig = new NetworkConfig { NetworkTransport = network.GetComponent<UnityTransport>(), TickRate = 30,
                 ConnectionApproval = true, EnableSceneManagement = true, ForceSamePrefabs = true };
-            manager.NetworkConfig.PlayerPrefab = CreateAvatar(avatarMaterial);
+            manager.NetworkConfig.PlayerPrefab = CreateAvatar(avatarMaterial, steel);
             var list = AssetDatabase.LoadAssetAtPath<NetworkPrefabsList>(Generated + "/NetworkPrefabs.asset");
             if (list == null)
             {
@@ -132,17 +124,19 @@ namespace VrCommand.Unity.Editor
             EditorUtility.SetDirty(list);
             bootstrap.networkManager = manager;
             bootstrap.sceneAuthority = state.GetComponent<SceneAuthority>();
+            bootstrap.combatAuthority = state.GetComponent<CombatAuthority>();
             if (!EditorSceneManager.SaveScene(UnityEngine.SceneManagement.SceneManager.GetActiveScene(), ScenePath))
                 throw new BuildFailedException("Generated arena scene could not be saved.");
         }
 
-        private static GameObject CreateAvatar(Material material)
+        private static GameObject CreateAvatar(Material material, Material weapon)
         {
             var root = new GameObject("Player Avatar", typeof(NetworkObject), typeof(NetworkAvatar));
             var avatar = root.GetComponent<NetworkAvatar>();
             avatar.head = Joint(root.transform, "Head", new Vector3(0, 1.65f, 0), PrimitiveType.Sphere, Vector3.one * 0.24f, material);
             avatar.leftHand = Joint(root.transform, "Left Hand", new Vector3(-0.3f, 1.3f, 0.3f), PrimitiveType.Cube, new Vector3(0.12f, 0.12f, 0.2f), material);
             avatar.rightHand = Joint(root.transform, "Right Hand", new Vector3(0.3f, 1.3f, 0.3f), PrimitiveType.Cube, new Vector3(0.12f, 0.12f, 0.2f), material);
+            Joint(avatar.rightHand, "Weapon", new Vector3(0, -.035f, .12f), PrimitiveType.Cube, new Vector3(.08f, .08f, .38f), weapon);
             var prefab = PrefabUtility.SaveAsPrefabAsset(root, Generated + "/PlayerAvatar.prefab");
             UnityEngine.Object.DestroyImmediate(root);
             return prefab;

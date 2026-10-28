@@ -6,6 +6,7 @@ using Unity.Netcode;
 using Unity.Netcode.Transports.UTP;
 using UnityEngine;
 using UnityEngine.Networking;
+using SessionSnapshot = VrCommand.Simulation.ManagementSnapshot;
 
 namespace VrCommand.Unity
 {
@@ -13,6 +14,7 @@ namespace VrCommand.Unity
     {
         public NetworkManager networkManager;
         public SceneAuthority sceneAuthority;
+        public CombatAuthority combatAuthority;
         private readonly Dictionary<ulong, TicketApproval> admitted = new Dictionary<ulong, TicketApproval>();
         private LaunchConfiguration configuration;
         private string status = "WAITING FOR CONTROL DESK";
@@ -27,7 +29,8 @@ namespace VrCommand.Unity
             var spectator = GameObject.Find("Desktop Spectator");
             if (Application.platform == RuntimePlatform.Android && spectator != null)
             {
-                spectator.transform.position = new Vector3(0, 1.65f, 0);
+                NetworkAvatar.CreateTrackingSpace(null, spectator.transform);
+                spectator.transform.localPosition = Vector3.zero;
                 spectator.transform.rotation = Quaternion.identity;
                 var driver = spectator.AddComponent<UnityEngine.InputSystem.XR.TrackedPoseDriver>();
                 driver.positionInput = new UnityEngine.InputSystem.InputActionProperty(new UnityEngine.InputSystem.InputAction(
@@ -52,6 +55,13 @@ namespace VrCommand.Unity
                 networkManager.ConnectionApprovalCallback = ApproveConnection;
                 yield return RefreshManagement();
                 if (!managementReady) { status = "CONTROL DESK CONNECTION FAILED"; yield break; }
+                if (configuration.role == "Host")
+                {
+                    // NGO 2.7 ignores asynchronous host approval; validate before StartHost and answer it synchronously.
+                    var hostApproval = new NetworkManager.ConnectionApprovalResponse();
+                    yield return ValidateAdmission(NetworkManager.ServerClientId, Encoding.UTF8.GetBytes(configuration.joinTicket), hostApproval, true);
+                    if (!hostApproval.Approved) { status = "HOST ADMISSION FAILED"; yield break; }
+                }
             }
             if (configuration.role != "Server")
                 networkManager.NetworkConfig.ConnectionData = Encoding.UTF8.GetBytes(configuration.joinTicket);
@@ -64,10 +74,10 @@ namespace VrCommand.Unity
                 while (networkManager.IsListening)
                 {
                     if (managementReady) sceneAuthority.ApplyServerSnapshot(latestSnapshot);
-                    else sceneAuthority.SuspendForManagementLoss();
+                    else { sceneAuthority.SuspendForManagementLoss(); combatAuthority.Suspend(); }
                     yield return new WaitForSecondsRealtime(0.5f);
                     yield return RefreshManagement();
-                    if (!managementReady) sceneAuthority.SuspendForManagementLoss();
+                    if (!managementReady) { sceneAuthority.SuspendForManagementLoss(); combatAuthority.Suspend(); }
                 }
             }
         }
@@ -86,18 +96,47 @@ namespace VrCommand.Unity
                 try { snapshot = JsonUtility.FromJson<SessionSnapshot>(request.downloadHandler.text); }
                 catch (Exception) { }
                 if (snapshot == null || snapshot.id != configuration.sessionId || snapshot.environment == null) yield break;
+                var valid = true;
+                try { combatAuthority.ApplyManagement(snapshot); }
+                catch (Exception exception) when (exception is ArgumentException || exception is InvalidOperationException)
+                { status = "MISSION NOT READY - CHECK SERVER CONSOLE"; Debug.LogError("Mission validation: " + exception.Message); valid = false; }
+                if (!valid) yield break;
                 latestSnapshot = snapshot;
                 managementReady = true;
+                // Revoke current connections whose admitted roster entry was removed or reassigned.
+                foreach (var clientId in new List<ulong>(admitted.Keys))
+                {
+                    var admission = admitted[clientId];
+                    var present = snapshot.state != "Ended" && Array.Exists(snapshot.players, player => player.id == admission.playerId
+                        && player.roomId == admission.roomId && player.seat == admission.seat);
+                    if (!present)
+                    {
+                        if (clientId == NetworkManager.ServerClientId && networkManager.IsHost)
+                        { status = "HOST ADMISSION REVOKED"; networkManager.Shutdown(); yield break; }
+                        networkManager.DisconnectClient(clientId);
+                    }
+                }
             }
         }
 
         private void ApproveConnection(NetworkManager.ConnectionApprovalRequest request, NetworkManager.ConnectionApprovalResponse response)
         {
+            if (request.ClientNetworkId == NetworkManager.ServerClientId && configuration.role == "Host")
+            {
+                if (admitted.TryGetValue(request.ClientNetworkId, out var host))
+                {
+                    response.Approved = true; response.CreatePlayerObject = true;
+                    response.Position = RoomOrigin(host.roomId) + new Vector3((host.seat - 2) * 1.5f, 0, -3);
+                    response.Rotation = Quaternion.identity;
+                }
+                else Reject(response);
+                return;
+            }
             response.Pending = true;
             StartCoroutine(ValidateAdmission(request.ClientNetworkId, request.Payload, response));
         }
 
-        private IEnumerator ValidateAdmission(ulong clientId, byte[] payload, NetworkManager.ConnectionApprovalResponse response)
+        private IEnumerator ValidateAdmission(ulong clientId, byte[] payload, NetworkManager.ConnectionApprovalResponse response, bool preflight = false)
         {
             if (!managementReady || payload == null || payload.Length == 0 || payload.Length > 256)
             {
@@ -113,7 +152,7 @@ namespace VrCommand.Unity
                 request.SetRequestHeader("Authorization", "Bearer " + configuration.gameServerKey);
                 request.timeout = 5;
                 yield return request.SendWebRequest();
-                if (request.result != UnityWebRequest.Result.Success || !networkManager.IsListening)
+                if (request.result != UnityWebRequest.Result.Success || (!preflight && (!networkManager.IsListening || !networkManager.PendingClients.ContainsKey(clientId))))
                 { Reject(response); yield break; }
                 TicketApproval approval = null;
                 try { approval = JsonUtility.FromJson<TicketApproval>(request.downloadHandler.text); }
@@ -123,6 +162,7 @@ namespace VrCommand.Unity
                 { Reject(response); yield break; }
                 foreach (var existing in admitted.Values)
                     if (existing.playerId == approval.playerId) { Reject(response); yield break; }
+                if (!combatAuthority.Bind(clientId, approval)) { Reject(response); yield break; }
                 admitted[clientId] = approval;
                 response.Approved = true;
                 response.CreatePlayerObject = true;
@@ -144,6 +184,7 @@ namespace VrCommand.Unity
         private void Connected(ulong clientId) { if (clientId == networkManager.LocalClientId) status = "CONNECTED"; }
         private void Disconnected(ulong clientId)
         {
+            combatAuthority?.Unbind(clientId);
             admitted.Remove(clientId);
             if (clientId == networkManager.LocalClientId)
             {

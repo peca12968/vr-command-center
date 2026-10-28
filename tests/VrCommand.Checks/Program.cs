@@ -73,6 +73,7 @@ try
     PlayerTicketChecks.Run(Check, mission);
     RequestRetryChecks.Run(Check, directory, mission);
     SimulationChecks.Run(Check);
+    ArenaSessionChecks.Run(Check, directory);
     Console.WriteLine($"All {checks} checks passed. These are domain checks, not headset or gameplay load tests.");
 }
 finally

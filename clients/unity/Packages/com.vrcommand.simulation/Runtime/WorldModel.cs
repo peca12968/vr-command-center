@@ -32,8 +32,9 @@ namespace VrCommand.Simulation
         public int Magazine { get; }
         public int Reserve { get; }
         public bool Reloading { get; }
-        internal PlayerFrame(Guid id, int room, Vec3 head, Vec3 muzzle, Vec3 forward, int health, int magazine, int reserve, bool reloading)
-        { Id = id; RoomId = room; Head = head; Muzzle = muzzle; Forward = forward; Health = health; Magazine = magazine; Reserve = reserve; Reloading = reloading; }
+        public bool Connected { get; }
+        internal PlayerFrame(Guid id, int room, Vec3 head, Vec3 muzzle, Vec3 forward, int health, int magazine, int reserve, bool reloading, bool connected)
+        { Id = id; RoomId = room; Head = head; Muzzle = muzzle; Forward = forward; Health = health; Magazine = magazine; Reserve = reserve; Reloading = reloading; Connected = connected; }
     }
     public sealed class EnemyFrame
     {

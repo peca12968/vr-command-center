@@ -1,6 +1,7 @@
 using Unity.Collections;
 using Unity.Netcode;
 using UnityEngine;
+using SessionSnapshot = VrCommand.Simulation.ManagementSnapshot;
 
 namespace VrCommand.Unity
 {

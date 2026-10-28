@@ -14,6 +14,7 @@ namespace VrCommand.Simulation
             internal Guid Id; internal int Room; internal Vec3 Head, Muzzle, Forward;
             internal int Health = 100, Magazine = MagazineSize, Reserve = 90;
             internal long NextShot, ReloadUntil;
+            internal bool Connected = true;
         }
         private sealed class Enemy
         {
@@ -74,6 +75,7 @@ namespace VrCommand.Simulation
             entities.Add(id); players.Add(new Player { Id = id, Room = room, Head = head, Muzzle = head, Forward = new Vec3(0, 0, 1) });
         }
         public void RemovePlayer(Guid id) { Active(); players.Remove(FindPlayer(id)); }
+        public void SetPlayerConnected(Guid id, bool connected) { Active(); FindPlayer(id).Connected = connected; }
         public void AddEnemy(Guid id, int room, Vec3 feet, Vec3 patrol)
         {
             Active(); Reserve(id, room);
@@ -86,13 +88,16 @@ namespace VrCommand.Simulation
             Active(); var enemy = enemies.SingleOrDefault(e => e.Id == id) ?? throw new KeyNotFoundException("Enemy not found.");
             enemies.Remove(enemy);
         }
-        public void SetPhase(WorldPhase next)
+        public void SetPhase(WorldPhase next) => SetPhase(next, false);
+        // Management may already have accepted Begin and the last player left before its next poll.
+        internal void SetManagedPhase(WorldPhase next) => SetPhase(next, true);
+        private void SetPhase(WorldPhase next, bool allowEmpty)
         {
             if (!Enum.IsDefined(typeof(WorldPhase), next) || Phase == WorldPhase.Ended || next == Phase
                 || (next == WorldPhase.Running ? Phase != WorldPhase.Preparing && Phase != WorldPhase.Paused
                     : next == WorldPhase.Paused ? Phase != WorldPhase.Running : next != WorldPhase.Ended))
                 throw new InvalidOperationException("Invalid world phase transition.");
-            if (next == WorldPhase.Running && players.Count == 0) throw new InvalidOperationException("At least one player is required.");
+            if (next == WorldPhase.Running && players.Count == 0 && !allowEmpty) throw new InvalidOperationException("At least one player is required.");
             Phase = next;
         }
         public void SetPolicy(AiBehavior behavior, bool autoAttack, Visibility visibility, bool night)
@@ -125,7 +130,7 @@ namespace VrCommand.Simulation
                 return prior;
             }
             Running(); var player = FindPlayer(playerId);
-            if (player.Health <= 0 || player.Magazine <= 0 || player.ReloadUntil != 0 || TickNumber < player.NextShot)
+            if (!player.Connected || player.Health <= 0 || player.Magazine <= 0 || player.ReloadUntil != 0 || TickNumber < player.NextShot)
                 throw new InvalidOperationException("Weapon cannot fire now.");
             var hit = Cast(player.Muzzle, player.Forward, 40, player.Id, null);
             player.Magazine--; player.NextShot = TickNumber + 4;
@@ -148,7 +153,7 @@ namespace VrCommand.Simulation
             if (reloads.TryGetValue(commandId, out var owner))
             { if (owner != playerId) throw new InvalidOperationException("Reload belongs to another player."); return; }
             Running(); var player = FindPlayer(playerId);
-            if (player.Health <= 0 || player.Magazine == MagazineSize || player.Reserve == 0 || player.ReloadUntil != 0)
+            if (!player.Connected || player.Health <= 0 || player.Magazine == MagazineSize || player.Reserve == 0 || player.ReloadUntil != 0)
                 throw new InvalidOperationException("Weapon cannot reload now.");
             player.ReloadUntil = TickNumber + 30; reloads.Add(commandId, playerId);
             Emit(WorldEventKind.ReloadStarted, playerId);
@@ -168,7 +173,7 @@ namespace VrCommand.Simulation
             foreach (var enemy in enemies)
             {
                 if (enemy.Health <= 0) continue;
-                var target = players.Where(p => p.Health > 0 && p.Room == enemy.Room && Vec3.Distance(p.Head, enemy.Feet + new Vec3(0, 1.4f, 0)) <= range)
+                var target = players.Where(p => p.Connected && p.Health > 0 && p.Room == enemy.Room && Vec3.Distance(p.Head, enemy.Feet + new Vec3(0, 1.4f, 0)) <= range)
                     .OrderBy(p => Vec3.Distance(p.Head, enemy.Feet)).ThenBy(p => p.Id).FirstOrDefault();
                 if (Behavior == AiBehavior.Patrol)
                 {
@@ -206,7 +211,7 @@ namespace VrCommand.Simulation
         {
             var hit = new Hit { Kind = HitKind.Miss, Distance = range };
             foreach (var prop in props) Consider(HitKind.Cover, prop.Id, prop.Center, prop.HalfSize, prop.Yaw);
-            foreach (var player in players.Where(p => p.Health > 0 && p.Id != ignorePlayer))
+            foreach (var player in players.Where(p => p.Connected && p.Health > 0 && p.Id != ignorePlayer))
             {
                 var height = player.Head.Y + .15f;
                 Consider(HitKind.Friendly, player.Id, new Vec3(player.Head.X, height / 2, player.Head.Z), new Vec3(.25f, height / 2, .25f), 0);
@@ -229,8 +234,10 @@ namespace VrCommand.Simulation
             if (after < 0 || limit < 1 || limit > 500) throw new ArgumentException("Invalid world event page.");
             var start = (int)Math.Min(after, events.Count); return events.GetRange(start, Math.Min(limit, events.Count - start)).ToArray();
         }
+        private static PlayerFrame Frame(Player p) => new PlayerFrame(p.Id, p.Room, p.Head, p.Muzzle, p.Forward, p.Health, p.Magazine, p.Reserve, p.ReloadUntil != 0, p.Connected);
+        public PlayerFrame PlayerSnapshot(Guid id) => Frame(FindPlayer(id));
         public WorldFrame Snapshot() => new WorldFrame(TickNumber, Phase, events.Count, Behavior, AutoAttack, Visibility, Night,
-            players.Select(p => new PlayerFrame(p.Id, p.Room, p.Head, p.Muzzle, p.Forward, p.Health, p.Magazine, p.Reserve, p.ReloadUntil != 0)).ToArray(),
+            players.Select(Frame).ToArray(),
             enemies.Select(e => new EnemyFrame(e.Id, e.Room, e.Feet, e.Health)).ToArray());
     }
 }

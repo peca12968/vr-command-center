@@ -1,0 +1,212 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+
+namespace VrCommand.Simulation
+{
+    // Field DTOs are shared by Unity JsonUtility and the real API contract fixture. No Unity or backend dependency.
+    [Serializable] public sealed class ManagementSnapshot
+    {
+        public string id = null!, state = null!;
+        public long sequence;
+        public int[] roomIds = null!;
+        public ManagedMission mission = null!;
+        public ManagedEnvironment environment = null!;
+        public ManagedEnemies enemies = null!;
+        public ManagedPlayer[] players = null!;
+    }
+    [Serializable] public sealed class ManagedMission { public string id = null!; public ManagedDefinition definition = null!; }
+    [Serializable] public sealed class ManagedDefinition { public string name = null!; public ManagedProp[] props = null!; }
+    [Serializable] public sealed class ManagedProp { public string assetId = null!; public ManagedPosition position = null!; public float yawDegrees; }
+    [Serializable] public sealed class ManagedPosition { public float x, y, z; public Vec3 Vector => new Vec3(x, y, z); }
+    [Serializable] public sealed class ManagedEnvironment { public string mode = null!, weather = null!, timeOfDay = null!; public bool lightning; }
+    [Serializable] public sealed class ManagedEnemies { public int count; public string behavior = null!; public bool autoAttack; }
+    [Serializable] public sealed class ManagedPlayer { public string id = null!; public int roomId, seat; }
+
+    // Single-threaded server adapter. Transport authenticates a ticket before binding its connection here.
+    public sealed class ArenaSession
+    {
+        private sealed class Binding
+        {
+            internal Guid Player;
+            internal double LastPose = double.NegativeInfinity;
+            internal ulong LastInput;
+        }
+        private readonly Dictionary<ulong, Binding> connections = new Dictionary<ulong, Binding>();
+        private Dictionary<Guid, ManagedPlayer> roster = new Dictionary<Guid, ManagedPlayer>();
+        private readonly List<Guid> enemySlots = new List<Guid>();
+        private Guid sessionId, missionId;
+        private int enemyGeneration;
+        private long sequence;
+        private int[] roomIds = null!;
+        private WorldProp[] props = null!;
+        public ArenaWorld World { get; private set; } = null!;
+        public WorldProp[] Props => props == null ? new WorldProp[0] : (WorldProp[])props.Clone();
+
+        public static Guid StableId(Guid session, string purpose)
+        {
+            using (var hash = SHA256.Create())
+            {
+                var bytes = hash.ComputeHash(Encoding.UTF8.GetBytes(session.ToString("D") + ":" + purpose));
+                var id = new byte[16]; Array.Copy(bytes, id, id.Length); return new Guid(id);
+            }
+        }
+        public static Vec3 Spawn(int room, int seat) => ArenaWorld.RoomOrigin(room) + new Vec3((seat - 2) * 1.5f, 1.65f, -3);
+
+        public void Apply(ManagementSnapshot snapshot)
+        {
+            if (snapshot == null || !Guid.TryParse(snapshot.id, out var id) || id == Guid.Empty || snapshot.sequence < 1
+                || snapshot.mission == null || !Guid.TryParse(snapshot.mission.id, out var mission) || mission == Guid.Empty
+                || snapshot.mission.definition == null || snapshot.mission.definition.props == null
+                || snapshot.mission.definition.props.Length > 500 || snapshot.environment == null || snapshot.environment.mode != "VR"
+                || snapshot.enemies == null || snapshot.enemies.count < 0 || snapshot.enemies.count > 100
+                || !Enum.TryParse<AiBehavior>(snapshot.enemies.behavior, out var behavior) || !Enum.IsDefined(typeof(AiBehavior), behavior)
+                || !Enum.TryParse<WorldPhase>(snapshot.state, out var phase) || !Enum.IsDefined(typeof(WorldPhase), phase)
+                || snapshot.players == null || snapshot.players.Length > 25 || snapshot.roomIds == null
+                || (snapshot.roomIds.Length != 1 && snapshot.roomIds.Length != 5) || snapshot.roomIds.Distinct().Count() != snapshot.roomIds.Length
+                || snapshot.roomIds.Any(room => room < 1 || room > 5)
+                || !new[] { "Clear", "Rain", "Fog", "Storm" }.Contains(snapshot.environment.weather)
+                || !new[] { "Day", "Night" }.Contains(snapshot.environment.timeOfDay))
+                throw new ArgumentException("Unsupported or incomplete VR mission snapshot.");
+            if (World != null && (id != sessionId || mission != missionId || snapshot.sequence < sequence
+                || !snapshot.roomIds.OrderBy(room => room).SequenceEqual(roomIds)))
+                throw new InvalidOperationException("The running server cannot switch session, mission or rewind management state.");
+            if ((World == null && phase != WorldPhase.Preparing) || (World != null && World.Phase == WorldPhase.Ended && phase != WorldPhase.Ended))
+                throw new InvalidOperationException("Start the game server during Preparing; ended worlds cannot restart.");
+            var nextRoster = new Dictionary<Guid, ManagedPlayer>();
+            foreach (var player in snapshot.players)
+            {
+                if (player == null || !Guid.TryParse(player.id, out var playerId) || playerId == Guid.Empty
+                    || nextRoster.ContainsKey(playerId) || !snapshot.roomIds.Contains(player.roomId) || player.seat < 0 || player.seat > 4
+                    || nextRoster.Values.Any(other => other.roomId == player.roomId && other.seat == player.seat))
+                    throw new ArgumentException("Invalid mission roster or duplicate seat.");
+                nextRoster.Add(playerId, new ManagedPlayer { id = playerId.ToString("D"), roomId = player.roomId, seat = player.seat });
+            }
+            var nextProps = new List<WorldProp>();
+            foreach (var room in snapshot.roomIds.OrderBy(value => value))
+                for (var index = 0; index < snapshot.mission.definition.props.Length; index++)
+                {
+                    var prop = snapshot.mission.definition.props[index];
+                    if (prop == null || prop.position == null || (prop.assetId != "barrel" && prop.assetId != "sandbag")
+                        || Math.Abs(prop.position.y) > .001f)
+                        throw new ArgumentException("Only floor-level sandbag and barrel props are supported by this VR arena.");
+                    nextProps.Add(new WorldProp(StableId(id, "prop:" + room + ":" + index), room,
+                        prop.assetId == "barrel" ? PropKind.Barrel : PropKind.Sandbag,
+                        ArenaWorld.RoomOrigin(room) + prop.position.Vector, prop.yawDegrees));
+                }
+            var changedRoster = roster.Count != nextRoster.Count || roster.Any(pair => !nextRoster.TryGetValue(pair.Key, out var value)
+                || pair.Value.roomId != value.roomId || pair.Value.seat != value.seat);
+            if (World != null && (!SameProps(props, nextProps.ToArray()) || (phase == WorldPhase.Preparing && World.Phase != WorldPhase.Preparing)))
+                throw new InvalidOperationException("Mission geometry cannot change after server initialization.");
+            if (World != null && World.Phase != WorldPhase.Preparing && nextRoster.Any(pair => !roster.ContainsKey(pair.Key)
+                || roster[pair.Key].roomId != pair.Value.roomId || roster[pair.Key].seat != pair.Value.seat))
+                throw new InvalidOperationException("New roster bodies require Preparing.");
+
+            var rebuilt = World == null || (World.Phase == WorldPhase.Preparing && changedRoster);
+            if (rebuilt)
+            {
+                // Build and validate a replacement before publishing any state; Preparing has no combat to preserve.
+                var candidate = new ArenaWorld(snapshot.roomIds, nextProps.ToArray());
+                foreach (var pair in nextRoster)
+                {
+                    candidate.AddPlayer(pair.Key, pair.Value.roomId, Spawn(pair.Value.roomId, pair.Value.seat));
+                    candidate.SetPlayerConnected(pair.Key, false);
+                }
+                var initialEnemies = PlanEnemies(candidate, snapshot.roomIds, nextProps.ToArray(), snapshot.enemies.count, id, enemyGeneration);
+                foreach (var enemy in initialEnemies) candidate.AddEnemy(enemy.Id, enemy.Room, enemy.Feet, enemy.Patrol);
+                World = candidate; props = nextProps.ToArray(); roomIds = snapshot.roomIds.OrderBy(room => room).ToArray();
+                enemySlots.Clear(); enemySlots.AddRange(initialEnemies.Select(enemy => enemy.Id)); enemyGeneration += initialEnemies.Length;
+                foreach (var binding in connections.Values) binding.LastPose = double.NegativeInfinity;
+            }
+            else if (World!.Phase != WorldPhase.Ended)
+            {
+                var extra = PlanEnemies(World, roomIds, props, Math.Max(0, snapshot.enemies.count - enemySlots.Count), id, enemyGeneration);
+                while (enemySlots.Count > snapshot.enemies.count)
+                { World.RemoveEnemy(enemySlots[enemySlots.Count - 1]); enemySlots.RemoveAt(enemySlots.Count - 1); }
+                foreach (var enemy in extra) { World.AddEnemy(enemy.Id, enemy.Room, enemy.Feet, enemy.Patrol); enemySlots.Add(enemy.Id); }
+                enemyGeneration += extra.Length;
+            }
+            foreach (var connection in connections.Where(pair => !nextRoster.ContainsKey(pair.Value.Player)).Select(pair => pair.Key).ToArray())
+            {
+                if (rebuilt) connections.Remove(connection); // The replacement world already omits this body.
+                else Disconnect(connection);
+            }
+            roster = nextRoster; sessionId = id; missionId = mission; sequence = snapshot.sequence;
+            if (World.Phase == WorldPhase.Ended)
+            { if (phase != WorldPhase.Ended) throw new InvalidOperationException("World is already ended."); return; }
+            World.SetPolicy(behavior, snapshot.enemies.autoAttack,
+                snapshot.environment.weather == "Fog" ? Visibility.Fog : snapshot.environment.weather == "Storm" ? Visibility.Storm : Visibility.Clear,
+                snapshot.environment.timeOfDay == "Night");
+            if (phase == WorldPhase.Paused && World.Phase == WorldPhase.Preparing) World.SetManagedPhase(WorldPhase.Running);
+            if (World.Phase != phase) World.SetManagedPhase(phase);
+        }
+
+        private sealed class EnemySpawn { internal Guid Id; internal int Room; internal Vec3 Feet, Patrol; }
+        private static EnemySpawn[] PlanEnemies(ArenaWorld world, int[] rooms, WorldProp[] geometry, int count, Guid session, int generation)
+        {
+            var plan = new List<EnemySpawn>();
+            var existing = world.Snapshot().Enemies;
+            for (var index = 0; index < count; index++)
+            {
+                var room = rooms[(existing.Length + index) % rooms.Length];
+                var navigation = new GridNavigation(ArenaWorld.RoomOrigin(room), geometry.Where(prop => prop.RoomId == room).ToArray());
+                var candidates = new List<Vec3>();
+                for (var z = -1f; z <= 5; z += .75f) for (var x = -4.5f; x <= 4.5f; x += .75f)
+                {
+                    var position = ArenaWorld.RoomOrigin(room) + new Vec3(x, 0, z);
+                    if (navigation.Walkable(position) && existing.All(enemy => Vec3.Distance(enemy.Feet, position) > .7f)
+                        && plan.All(enemy => Vec3.Distance(enemy.Feet, position) > .7f)) candidates.Add(position);
+                }
+                if (candidates.Count == 0) throw new ArgumentException("Mission has no free enemy spawn area.");
+                var feet = candidates[0]; var patrol = candidates[candidates.Count - 1];
+                plan.Add(new EnemySpawn { Id = StableId(session, "enemy:" + (generation + index)), Room = room, Feet = feet, Patrol = patrol });
+            }
+            return plan.ToArray();
+        }
+        private static bool SameProps(WorldProp[] left, WorldProp[] right) => left.Length == right.Length && left.Zip(right, (a, b) =>
+            a.Id == b.Id && a.RoomId == b.RoomId && a.Kind == b.Kind && a.Feet.Equals(b.Feet) && a.Yaw.Equals(b.Yaw)).All(value => value);
+
+        public bool Connect(ulong connection, Guid player, int room, int seat)
+        {
+            if (World == null || World.Phase == WorldPhase.Ended || connections.ContainsKey(connection)
+                || connections.Values.Any(binding => binding.Player == player) || !roster.TryGetValue(player, out var entry)
+                || entry.roomId != room || entry.seat != seat) return false;
+            connections.Add(connection, new Binding { Player = player }); return true;
+        }
+        public void Disconnect(ulong connection)
+        {
+            if (!connections.TryGetValue(connection, out var binding)) return;
+            if (World.Phase != WorldPhase.Ended) World.SetPlayerConnected(binding.Player, false);
+            connections.Remove(connection);
+        }
+        public bool Pose(ulong connection, Vec3 head, Vec3 muzzle, Vec3 forward, double now)
+        {
+            if (!connections.TryGetValue(connection, out var binding) || !ValidTime(now) || now < binding.LastPose || World.Phase == WorldPhase.Ended) return false;
+            var previous = World.PlayerSnapshot(binding.Player);
+            if (Vec3.Distance(Vec3.Flat(previous.Head), Vec3.Flat(head)) > .5 + 4 * Math.Min(.5, double.IsNegativeInfinity(binding.LastPose) ? 0 : now - binding.LastPose)) return false;
+            try { World.SetPlayerPose(binding.Player, head, muzzle, forward); }
+            catch (ArgumentException) { return false; }
+            binding.LastPose = now; World.SetPlayerConnected(binding.Player, true); return true;
+        }
+        public bool Weapon(ulong connection, ulong input, bool reload, double now)
+        {
+            if (!connections.TryGetValue(connection, out var binding) || input == 0 || input <= binding.LastInput || !ValidTime(now)
+                || now < binding.LastPose || now - binding.LastPose > .5 || World.Phase != WorldPhase.Running) return false;
+            binding.LastInput = input;
+            var id = StableId(sessionId, "input:" + connection + ":" + input);
+            try { if (reload) World.Reload(binding.Player, id); else World.Fire(binding.Player, id); return true; }
+            catch (InvalidOperationException) { return false; }
+        }
+        public void Tick(double now)
+        {
+            if (!ValidTime(now) || World == null) return;
+            if (World.Phase != WorldPhase.Ended)
+                foreach (var binding in connections.Values) World.SetPlayerConnected(binding.Player, now >= binding.LastPose && now - binding.LastPose <= .5);
+            World.Tick();
+        }
+        public void Suspend() { if (World != null && World.Phase == WorldPhase.Running) World.SetPhase(WorldPhase.Paused); }
+        private static bool ValidTime(double now) => !double.IsNaN(now) && !double.IsInfinity(now) && now >= 0;
+    }
+}

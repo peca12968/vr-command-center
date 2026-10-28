@@ -1,6 +1,6 @@
 {
   "name": "VrCommand.Tests",
-  "references": ["VrCommand.Runtime", "UnityEngine.TestRunner", "UnityEditor.TestRunner"],
+  "references": ["VrCommand.Runtime", "VrCommand.Simulation", "Unity.Netcode.Runtime", "Unity.Collections", "UnityEngine.TestRunner", "UnityEditor.TestRunner"],
   "includePlatforms": ["Editor"],
   "optionalUnityReferences": ["TestAssemblies"],
   "autoReferenced": false

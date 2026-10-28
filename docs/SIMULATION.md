@@ -1,6 +1,6 @@
-# 共用戰鬥模擬核心 v0.8
+# 共用戰鬥模擬核心 v0.10
 
-`clients/unity/Packages/com.vrcommand.simulation/Runtime/` 是唯一來源；`src/VrCommand.Simulation` 直接編譯這些檔案，目標 .NET Standard 2.1／C# 9，無 Unity、管理 API 或資料庫相依。Unity 工程將它作為 embedded package，尚未實際匯入／編譯，也尚未從現有場景建立世界。管理 API 與瀏覽器介面維持 v0.6 契約。
+`clients/unity/Packages/com.vrcommand.simulation/Runtime/` 是唯一來源；`src/VrCommand.Simulation` 直接編譯為 .NET Standard 2.1／C# 9，無 Unity、後端組件或資料庫相依。新增 ArenaSession field DTO 與任務／連線／姿態接入層；Unity 轉接來源碼已引用 embedded package 並建立世界，但尚未實際匯入／編譯或執行。管理 API／瀏覽器介面維持 v0.9；詳見 `GAMEPLAY.md`。
 
 目前已證明 .NET 遊戲規則與幾何模擬，以及讀取紀錄的瀏覽器 3D 回放，不能當作 Quest／VIVE、Unity Physics、IL2CPP、網路延遲或 25 台裝置驗收。Android 工具已安裝整理並通過 ARM64 原生編譯；Unity 編輯器仍未取得有效授權，見 `QUEST3.md`。
 
@@ -19,7 +19,7 @@
 | AI 視線 | 同房玩家進入範圍才選取；晴天 15m、暴風雨 10m、霧 6m，夜間上限 8m。攻擊須有未受掩體或其他身體阻擋的射線。Advance 尋路知道所選玩家位置，尚無隱匿／記憶與戰術協作 |
 | 重試 | 射擊 ID 保存原始結果，重送不再次扣彈／傷害；同 ID 不能由另一玩家接管。換彈命令也去重，原先接受的重試可在暫停／結束後確認 |
 
-Tick 是邏輯步進；示範程序加速執行，尚未提供實際 20 Hz 遊戲伺服器排程器。世界由單一呼叫執行緒持有，網路端之後須排序與驗證輸入，不能直接並行修改世界。
+Tick 是邏輯步進；示範程序加速執行。Unity CombatAuthority 來源碼提供目標 20 Hz 單執行緒排程及經票券綁定的輸入檢查，仍無實際 Unity 排程／網路量測。ArenaSession 支援不刪除血量／彈藥的參戰狀態切換；未連線、追蹤逾時或名冊撤銷者不射擊、不擋彈、不被 AI 選取，驗證見 GAMEPLAY。
 
 場景目前平坦、沒有樓梯／跳躍／角色間擠壓、動態掩體或複雜網格碰撞。呼叫者需選擇不與角色重疊的出生點；新增角色目前檢查掩體與邊界，未驗角色相互重疊。角色移動只限所屬房間，全連線的空間轉換、跨房移動與實體定位仍待場館設計。
 
@@ -66,6 +66,6 @@ python scripts/smoke_api.py
 
 ## 待接入
 
-Unity 端須加入此組件參考、從任務與名冊建立世界、對接已認證的玩家輸入、固定步進排程、敵軍／擺設渲染及 NGO 快照，再將已確認的戰鬥事件可靠送入 API。現有 Unity 場景尚未呼叫此核心；控制台按鈕目前也不會自動驅動這個示範程序。之後補齊硬體轉接、權威姿態驗證、持久 outbox、完整世界回放及觀戰。
+Unity 端已有組件參考、任務／名冊、已驗票輸入、固定步進、敵軍／擺設渲染及 NGO 狀態接入來源碼，仍未通過 Unity 編譯／運行，見 GAMEPLAY。已確認的戰鬥事件尚未可靠送入 API；控制台按鈕也不會自動驅動這個獨立示範程序。接續補齊持久 outbox、Pause／End 排空、硬體、姿態／場地實測、完整世界回放及觀戰。
 
 技術來源：[Unity 6000.3 C# compiler](https://docs.unity.com/en-us/engine/6000.3/manual/programming-environment/overview-of-dot-net-in-unity/csharp-compiler)、[.NET API profiles](https://docs.unity.com/en-us/engine/6000.3/manual/programming-environment/overview-of-dot-net-in-unity/dotnet-profile-support)、[embedded packages](https://docs.unity.com/en-us/engine/6000.3/manual/packages-list/dependencies-lp/upm-embed)。這些是選型依據，實際 Unity 編譯與實機相容仍需另外驗證。

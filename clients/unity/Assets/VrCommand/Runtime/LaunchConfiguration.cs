@@ -37,22 +37,6 @@ namespace VrCommand.Unity
         }
     }
 
-    [Serializable] public sealed class SessionSnapshot
-    {
-        public string id;
-        public string state;
-        public MissionSnapshot mission;
-        public EnvironmentSnapshot environment;
-    }
-    [Serializable] public sealed class MissionSnapshot { public MissionDefinition definition; }
-    [Serializable] public sealed class MissionDefinition { public string name; }
-    [Serializable] public sealed class EnvironmentSnapshot
-    {
-        public string mode;
-        public string weather;
-        public string timeOfDay;
-        public bool lightning;
-    }
     [Serializable] public sealed class TicketValidationRequest { public string sessionId; public string ticket; }
     [Serializable] public sealed class TicketApproval
     {

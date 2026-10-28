@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.XR;
 using UnityEngine.XR;
+using Unity.Collections;
 
 namespace VrCommand.Unity
 {
@@ -35,14 +37,26 @@ namespace VrCommand.Unity
     {
         public Transform head, leftHand, rightHand;
         public NetworkVariable<AvatarPose> Pose = new NetworkVariable<AvatarPose>();
-        private InputAction leftPosition, rightPosition, leftRotation, rightRotation;
+        public NetworkVariable<FixedString64Bytes> PlayerId = new NetworkVariable<FixedString64Bytes>();
+        public NetworkVariable<bool> PoseAccepted = new NetworkVariable<bool>(false);
+        private InputAction leftPosition, rightPosition, leftRotation, rightRotation, trigger, reload;
         private Camera localCamera;
         private float nextSend;
         private double nextServerAccept;
         private bool tracked;
+        private float nextFire;
+        private double nextWeaponAccept;
+        private ulong inputSequence;
+        private Renderer[] visuals;
 
         public override void OnNetworkSpawn()
         {
+            visuals = GetComponentsInChildren<Renderer>();
+            if (IsServer)
+            {
+                var admission = VenueBootstrap.Instance?.Admission(OwnerClientId);
+                if (admission != null) PlayerId.Value = admission.playerId;
+            }
             if (!IsOwner) return;
             var spectator = GameObject.Find("Desktop Spectator");
             if (spectator != null) spectator.SetActive(false);
@@ -55,14 +69,17 @@ namespace VrCommand.Unity
             tracked = XRSettings.isDeviceActive || Application.platform == RuntimePlatform.Android;
             if (tracked)
             {
+                CreateTrackingSpace(transform, head, leftHand, rightHand);
                 var driver = head.gameObject.AddComponent<TrackedPoseDriver>();
                 driver.positionInput = new InputActionProperty(new InputAction("Head Position", InputActionType.Value, "<XRHMD>/centerEyePosition"));
                 driver.rotationInput = new InputActionProperty(new InputAction("Head Rotation", InputActionType.Value, "<XRHMD>/centerEyeRotation"));
                 driver.ignoreTrackingState = true;
                 leftPosition = Action("Left Position", "<XRController>{LeftHand}/devicePosition");
-                rightPosition = Action("Right Position", "<XRController>{RightHand}/devicePosition");
+                rightPosition = Action("Right Aim Position", "<XRController>{RightHand}/pointerPosition");
                 leftRotation = Action("Left Rotation", "<XRController>{LeftHand}/deviceRotation");
-                rightRotation = Action("Right Rotation", "<XRController>{RightHand}/deviceRotation");
+                rightRotation = Action("Right Aim Rotation", "<XRController>{RightHand}/pointerRotation");
+                trigger = Action("Fire", "<XRController>{RightHand}/triggerPressed");
+                reload = Action("Reload", "<XRController>{RightHand}/primaryButton");
             }
             else head.localPosition = new Vector3(0, 1.65f, 0);
             CreateStatusPanel();
@@ -78,6 +95,8 @@ namespace VrCommand.Unity
         private void Update()
         {
             if (!IsSpawned) return;
+            if (CombatAuthority.Instance != null && CombatAuthority.Instance.Player(PlayerId.Value.ToString(), out var body))
+                foreach (var visual in visuals) visual.enabled = body.connected && body.health > 0 && !(IsOwner && visual.transform.IsChildOf(head));
             if (IsOwner)
             {
                 if (tracked)
@@ -91,9 +110,17 @@ namespace VrCommand.Unity
                 if (Time.unscaledTime >= nextSend)
                 {
                     nextSend = Time.unscaledTime + 0.05f;
-                    var pose = new AvatarPose { head = head.localPosition, left = leftHand.localPosition, right = rightHand.localPosition,
-                        headRotation = head.localRotation, leftRotation = leftHand.localRotation, rightRotation = rightHand.localRotation };
+                    var pose = CurrentPose();
                     if (pose.Valid()) SubmitPoseRpc(pose);
+                }
+                var authority = CombatAuthority.Instance;
+                if (authority != null && authority.Ready.Value && VenueBootstrap.Instance.State == "Running")
+                {
+                    var wantsReload = tracked ? reload.WasPressedThisFrame() : Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame;
+                    var wantsFire = tracked ? trigger.ReadValue<float>() > .5f : Mouse.current != null && Mouse.current.leftButton.isPressed;
+                    if (wantsReload) SubmitWeaponRpc(++inputSequence, true, CurrentPose());
+                    else if (wantsFire && Time.unscaledTime >= nextFire)
+                    { nextFire = Time.unscaledTime + .2f; SubmitWeaponRpc(++inputSequence, false, CurrentPose()); }
                 }
             }
             else
@@ -115,7 +142,30 @@ namespace VrCommand.Unity
         {
             if (!pose.Valid() || Time.realtimeSinceStartupAsDouble < nextServerAccept) return;
             nextServerAccept = Time.realtimeSinceStartupAsDouble + 0.025;
-            Pose.Value = pose;
+            PoseAccepted.Value = CombatAuthority.Instance != null && CombatAuthority.Instance.AcceptPose(OwnerClientId, pose, transform.position);
+            if (PoseAccepted.Value) Pose.Value = pose;
+        }
+
+        private AvatarPose CurrentPose() => new AvatarPose { head = transform.InverseTransformPoint(head.position), left = transform.InverseTransformPoint(leftHand.position), right = transform.InverseTransformPoint(rightHand.position),
+            headRotation = Quaternion.Inverse(transform.rotation) * head.rotation, leftRotation = Quaternion.Inverse(transform.rotation) * leftHand.rotation, rightRotation = Quaternion.Inverse(transform.rotation) * rightHand.rotation };
+
+        public static void CreateTrackingSpace(Transform root, params Transform[] joints)
+        {
+            var space = new GameObject("XR Tracking Origin").transform; space.SetParent(root, false);
+            var inputs = new List<XRInputSubsystem>(); SubsystemManager.GetSubsystems(inputs);
+            var floor = false;
+            foreach (var input in inputs)
+                if (input.running && input.TrySetTrackingOriginMode(TrackingOriginModeFlags.Floor)) floor = true;
+            space.localPosition = floor ? Vector3.zero : new Vector3(0, 1.65f, 0);
+            foreach (var joint in joints) joint.SetParent(space, false);
+        }
+
+        [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
+        private void SubmitWeaponRpc(ulong input, bool reloadWeapon, AvatarPose pose)
+        {
+            if (!pose.Valid() || Time.realtimeSinceStartupAsDouble < nextWeaponAccept) return;
+            nextWeaponAccept = Time.realtimeSinceStartupAsDouble + .025;
+            CombatAuthority.Instance?.Weapon(OwnerClientId, input, reloadWeapon, pose, transform.position);
         }
 
         private void DesktopPreview()
@@ -144,21 +194,21 @@ namespace VrCommand.Unity
             panel.transform.localScale = Vector3.one * 0.0015f;
             var canvas = panel.GetComponent<Canvas>();
             canvas.renderMode = RenderMode.WorldSpace;
-            panel.GetComponent<RectTransform>().sizeDelta = new Vector2(600, 90);
+            panel.GetComponent<RectTransform>().sizeDelta = new Vector2(600, 150);
             var label = new GameObject("Phase", typeof(UnityEngine.UI.Text));
             label.transform.SetParent(panel.transform, false);
             var text = label.GetComponent<UnityEngine.UI.Text>();
             text.font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-            text.fontSize = 32;
+            text.fontSize = 24;
             text.alignment = TextAnchor.MiddleCenter;
             text.color = new Color(0.6f, 1, 0.6f);
-            label.GetComponent<RectTransform>().sizeDelta = new Vector2(600, 90);
-            label.AddComponent<PhaseLabel>();
+            label.GetComponent<RectTransform>().sizeDelta = new Vector2(600, 150);
+            label.AddComponent<PhaseLabel>().avatar = this;
         }
 
         public override void OnNetworkDespawn()
         {
-            leftPosition?.Dispose(); rightPosition?.Dispose(); leftRotation?.Dispose(); rightRotation?.Dispose();
+            leftPosition?.Dispose(); rightPosition?.Dispose(); leftRotation?.Dispose(); rightRotation?.Dispose(); trigger?.Dispose(); reload?.Dispose();
         }
     }
 

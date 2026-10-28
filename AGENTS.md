@@ -23,9 +23,9 @@ python scripts/smoke_api.py
 
 遊戲事件、即時狀態、統計與回放應共享版本化契約；頭盔姿態與逐幀模擬不使用管理 REST API。實機相容、MR 校正、25 台頭盔效能與硬體控制須分別保留驗收證據。
 
-瀏覽器主控台在 `src/VrCommand.Api/wwwroot/console/`，操作與真實瀏覽器檢查見 `docs/CONSOLE.md`。UI 變更執行 `tests/browser/check.cjs`，使用隔離 API 與測試憑證；檢視 `artifacts/console/` 截圖。瀏覽器沒有持久化控制台憑證，保持每次 API 授權與房間範圍；不能用 UI 隱藏按鈕替代後端檢查。平面配置尚未由 Unity 載入，不能宣稱已整合遊戲擺設。
+瀏覽器主控台在 `src/VrCommand.Api/wwwroot/console/`，操作與真實瀏覽器檢查見 `docs/CONSOLE.md`。UI 變更執行 `tests/browser/check.cjs`，使用隔離 API 與測試憑證；檢視 `artifacts/console/` 截圖。瀏覽器沒有持久化控制台憑證，保持每次 API 授權與房間範圍；不能用 UI 隱藏按鈕替代後端檢查。平面配置已有任務／Unity 接入來源碼，但尚無 Unity 運行證據。
 
-共用射擊／AI 核心唯一來源在 `clients/unity/Packages/com.vrcommand.simulation/Runtime/`；.NET Standard 2.1 建置入口是 `src/VrCommand.Simulation`。保持 C# 9 與無 Unity／.NET 10 相依，新增規則同時驗證 .NET 建置及模擬檢查。`tools/VrCommand.SimulationDemo` 一律使用 Simulation 來源。Unity 場景尚未接入此核心，詳細規則與未完成項目見 `docs/SIMULATION.md`。
+共用射擊／AI 及 ArenaSession 接入層唯一來源在 `clients/unity/Packages/com.vrcommand.simulation/Runtime/`；.NET Standard 2.1 建置入口是 `src/VrCommand.Simulation`。保持 C# 9 與無 Unity／.NET 10 相依，新增規則同時驗證 .NET 建置及模擬檢查。`tools/VrCommand.SimulationDemo` 一律使用 Simulation 來源。Unity 的 CombatAuthority、武器／HUD／渲染及 NGO 接入已有來源碼，仍未編譯運行；詳見 SIMULATION／GAMEPLAY。Unity 世界事件目前未送入 API，不得宣稱報表已接通。
 
 Windows 執行中的本機 API 可能鎖住一般輸出 DLL；採 SIMULATION 文件的 `--artifacts-path` 隔離建置，不為測試任意停止現有服務。HTTP／瀏覽器檢查可用 `VR_COMMAND_API_DLL` 指定隔離 API，HTTP 另以 `VR_COMMAND_SIMULATION_DEMO_DLL` 指定同次建置的示範工具。
 

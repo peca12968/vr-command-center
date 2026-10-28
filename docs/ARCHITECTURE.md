@@ -24,7 +24,7 @@ flowchart TB
     Sim --> Spectator
 ```
 
-圖為目標架構。管理、SQLite／統計、票券及 `/console/` 操作已有驗證。共用 .NET Standard 核心可執行射擊／掩體／AI，v0.8 瀏覽器可從實際模擬快照與射線進行 3D 回放，見 `SIMULATION.md`／`REPLAY.md`。Unity 場景尚未呼叫核心，正式世界儲存、頭盔錄影、即時觀戰與完整遊戲伺服器待整合。契約見 `SESSION_PROTOCOL.md`、`COMBAT_PROTOCOL.md`，儲存見 `STORAGE.md`，工具鏈見 `QUEST3.md`，操作見 `CONSOLE.md`。
+圖為目標架構。管理、SQLite／統計、票券及 `/console/` 操作已有驗證；瀏覽器可從實際模擬紀錄進行 3D 回放。v0.10 的 ArenaSession 與射擊／掩體／AI 使用相同 .NET Standard 核心，Unity 的 CombatAuthority／輸入／渲染／HUD 已有呼叫它的來源碼，仍無 Unity 編譯或運行證據。Unity 戰鬥事件未送入 API，正式 outbox、世界儲存、頭盔錄影、即時觀戰待整合。接入與限制見 `GAMEPLAY.md`，規則／回放見 `SIMULATION.md`／`REPLAY.md`。
 
 管理 API 處理低頻設定與場次生命週期；頭部／手部姿態、射擊與 AI 不經此 REST API 做每幀同步。原型選用 NGO 2.7.0／Unity Transport，桌面伺服器向管理 API 驗票及讀取設定，頭盔只帶短效玩家票券。後續遊戲伺服器負責權威命中判定、AI、環境狀態與事件排序。網路框架仍須雙裝置實測評估，尚未承諾第三方付費服務。
 
