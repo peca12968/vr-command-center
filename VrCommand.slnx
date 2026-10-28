@@ -3,8 +3,12 @@
     <Project Path="src/VrCommand.Api/VrCommand.Api.csproj" />
     <Project Path="src/VrCommand.Core/VrCommand.Core.csproj" />
     <Project Path="src/VrCommand.Persistence/VrCommand.Persistence.csproj" />
+    <Project Path="src/VrCommand.Simulation/VrCommand.Simulation.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/VrCommand.Checks/VrCommand.Checks.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/VrCommand.SimulationDemo/VrCommand.SimulationDemo.csproj" />
   </Folder>
 </Solution>

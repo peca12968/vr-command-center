@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/VrCommand.Core/VrCommand.Core.csproj" />
+    <ProjectReference Include="../../src/VrCommand.Simulation/VrCommand.Simulation.csproj" />
+  </ItemGroup>
+</Project>

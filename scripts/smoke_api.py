@@ -17,7 +17,7 @@ from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
 
 ROOT = Path(__file__).resolve().parents[1]
-DLL = ROOT / "src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll"
+DLL = Path(os.environ.get("VR_COMMAND_API_DLL", ROOT / "src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll"))
 if not DLL.exists():
     raise SystemExit("Build first: dotnet build VrCommand.slnx --configuration Release")
 
@@ -393,6 +393,28 @@ try:
             require(request("POST", "/api/player-tickets/validate", {"sessionId": plan["sessionId"], "ticket": client_config["joinTicket"]},
                             identity="GameServer")["roomId"] == 1, "Provisioned Quest client ticket is accepted by the management API")
             request("DELETE", "/api/sessions/" + plan["sessionId"], expected=204)
+            simulation_dll = Path(os.environ.get("VR_COMMAND_SIMULATION_DEMO_DLL", ROOT / "tools/VrCommand.SimulationDemo/bin/Release/net10.0/VrCommand.SimulationDemo.dll"))
+            simulation_output = test_directory / "simulation-world.json"
+            geometric_demo = subprocess.run(["dotnet", str(simulation_dll), "--base-url", base_url, "--key-file", str(key_file),
+                                             "--room", "1", "--output", str(simulation_output)],
+                                            capture_output=True, text=True, encoding="utf-8", timeout=30)
+            if geometric_demo.returncode != 0:
+                raise AssertionError("Geometric simulation demo failed: " + geometric_demo.stderr)
+            geometric_result = json.loads(geometric_demo.stdout)
+            geometric_archive = json.loads(simulation_output.read_text(encoding="utf-8"))
+            require(geometric_result["origin"] == "Simulation" and geometric_result["blockedByCover"]
+                    and geometric_result["player"]["ammoUsed"] == 3 and geometric_result["player"]["shotsHit"] == 2
+                    and geometric_result["player"]["kills"] == 1 and geometric_result["player"]["health"] == 80,
+                    "Shared simulation raycasts cover and enemies before emitting persisted combat statistics")
+            require(geometric_archive["schemaVersion"] == 1 and geometric_archive["origin"] == "Simulation"
+                    and geometric_archive["frames"][1]["players"][0]["health"] == 80
+                    and geometric_archive["frames"][-1]["phase"] == "Ended"
+                    and geometric_archive["frames"][-1]["throughSequence"] == geometric_archive["events"][-1]["sequence"]
+                    and sum(event["kind"] == "EnemyEliminated" for event in geometric_archive["events"]) == 1,
+                    "Headless geometry demo saves world frames and actual AI damage without claiming a 3D replay")
+            require(request("GET", "/api/sessions/" + geometric_result["sessionId"])["state"] == "Ended"
+                    and all(room["sessionId"] is None for room in request("GET", "/api/rooms")),
+                    "Geometric demo archives its own session and releases all its reservations")
         except BaseException:
             log.flush()
             print((test_directory / "server.log").read_text(encoding="utf-8"))

@@ -25,6 +25,10 @@ python scripts/smoke_api.py
 
 瀏覽器主控台在 `src/VrCommand.Api/wwwroot/console/`，操作與真實瀏覽器檢查見 `docs/CONSOLE.md`。UI 變更執行 `tests/browser/check.cjs`，使用隔離 API 與測試憑證；檢視 `artifacts/console/` 截圖。瀏覽器沒有持久化控制台憑證，保持每次 API 授權與房間範圍；不能用 UI 隱藏按鈕替代後端檢查。平面配置尚未由 Unity 載入，不能宣稱已整合遊戲擺設。
 
+共用射擊／AI 核心唯一來源在 `clients/unity/Packages/com.vrcommand.simulation/Runtime/`；.NET Standard 2.1 建置入口是 `src/VrCommand.Simulation`。保持 C# 9 與無 Unity／.NET 10 相依，新增規則同時驗證 .NET 建置及模擬檢查。`tools/VrCommand.SimulationDemo` 一律使用 Simulation 來源。Unity 場景尚未接入此核心，詳細規則與未完成項目見 `docs/SIMULATION.md`。
+
+Windows 執行中的本機 API 可能鎖住一般輸出 DLL；採 SIMULATION 文件的 `--artifacts-path` 隔離建置，不為測試任意停止現有服務。HTTP／瀏覽器檢查可用 `VR_COMMAND_API_DLL` 指定隔離 API，HTTP 另以 `VR_COMMAND_SIMULATION_DEMO_DLL` 指定同次建置的示範工具。
+
 Quest 接入與建置見 `docs/QUEST3.md`。`scripts/check-unity-source.ps1` 只檢查 C# 9 語法，不能代替 Unity 編譯與 EditMode 測試。2026-10-29 Editor 已安裝至 F 槽，但實際 Prepare 因授權失敗退出 198；Android 模組尚待使用者接受 SDK／NDK 條款。不要重啟已完成的 Editor 安裝或自行宣稱授權已啟用。
 
 頭盔只配置短效玩家票券；GameServer 憑證僅存桌面伺服器設定。所有 `data/`、`artifacts/`、Unity 快取與本機憑證均不得提交。生成場景、APK 或桌面程式須有實際成功結果，不能以來源碼存在宣稱完成。

@@ -26,7 +26,7 @@ async function main() {
   Object.assign(environment, { DataDirectory: path.join(directory, 'missions'), SessionDataDirectory: path.join(directory, 'sessions'), ASPNETCORE_ENVIRONMENT: 'Production', Logging__LogLevel__Default: 'Warning' });
   for (const [role, value] of Object.entries(tokens)) environment['OperatorKeys__' + role] = value;
   const base = 'http://127.0.0.1:' + await availablePort();
-  const processApi = spawn('dotnet', [path.join(root, 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll'), '--urls', base], { cwd: root, env: environment, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const processApi = spawn('dotnet', [process.env.VR_COMMAND_API_DLL || path.join(root, 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll'), '--urls', base], { cwd: root, env: environment, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let apiLog = '';
   for (const stream of [processApi.stdout, processApi.stderr]) stream.on('data', data => { apiLog = (apiLog + data.toString()).slice(-6000); });
   let browser, diagnosticPage;

@@ -24,7 +24,7 @@ flowchart TB
     Sim --> Spectator
 ```
 
-圖為目標架構。v0.6 已驗證控制台授權、管理 API、任務 JSON、SQLite 事件／統計、短效玩家票券，以及同源 `/console/` 的管理／任務與平面配置介面。Unity 的桌面伺服器／頭盔接入來源碼在 `clients/unity/`，仍待編譯與運行，沒有權威戰鬥或世界快照。事件契約見 `SESSION_PROTOCOL.md`、`COMBAT_PROTOCOL.md`，儲存見 `STORAGE.md`，Quest 原型見 `QUEST3.md`，瀏覽器操作見 `CONSOLE.md`。
+圖為目標架構。管理 API、權限、SQLite 事件／統計、玩家票券及 `/console/` 操作已有驗證。v0.7 新增同源 .NET Standard 射擊／掩體／AI 核心及幾何模擬接入，詳見 `SIMULATION.md`；現有 Unity 場景尚未呼叫，仍待整個工程編譯與運行。除錯世界快照已有工具輸出，正式世界儲存、3D 回放與完整權威遊戲伺服器待整合。契約見 `SESSION_PROTOCOL.md`、`COMBAT_PROTOCOL.md`，儲存見 `STORAGE.md`，Quest 原型見 `QUEST3.md`，瀏覽器操作見 `CONSOLE.md`。
 
 管理 API 處理低頻設定與場次生命週期；頭部／手部姿態、射擊與 AI 不經此 REST API 做每幀同步。原型選用 NGO 2.7.0／Unity Transport，桌面伺服器向管理 API 驗票及讀取設定，頭盔只帶短效玩家票券。後續遊戲伺服器負責權威命中判定、AI、環境狀態與事件排序。網路框架仍須雙裝置實測評估，尚未承諾第三方付費服務。
 
@@ -44,7 +44,7 @@ Meta 的官方文件提供 OpenXR 開發流程；VIVE 的 OpenXR SDK 包含 Andr
 
 MR 功能需以 `IXrPlatform` 類型的介面分隔透視、錨點、場地網格、邊界與定位校正能力。每房維護 room-to-world 轉換與校正版本；全連線時傳送遊戲世界座標。不同廠牌的原生錨點不可直接視為共用格式。MR 的「夜間／天氣」視覺作用於虛擬內容，實體世界透視效果須依平台能力另外設計。
 
-後端採 .NET 10，與 Unity 執行環境分開。共用資料使用版本化 JSON 契約；若新增共用 C# 套件，需另選 Unity 支援的目標框架與語法，避免直接參考 `VrCommand.Core` 的 .NET 10 組件。
+後端採 .NET 10，與 Unity 執行環境分開。共用資料使用版本化 JSON 契約；新共用戰鬥套件使用 .NET Standard 2.1／C# 9，同一份 Runtime 來源同時供 embedded package 與 .NET 建置入口使用，避免直接參考 `VrCommand.Core` 的 .NET 10 組件。只有 .NET 核心完成型別綁定與執行驗證，Unity 匯入及 IL2CPP 仍須實測。
 
 ## 任務、即時控制與歷史
 

@@ -1,0 +1,7 @@
+{
+  "name": "VrCommand.Simulation",
+  "rootNamespace": "VrCommand.Simulation",
+  "references": [],
+  "autoReferenced": true,
+  "noEngineReferences": true
+}

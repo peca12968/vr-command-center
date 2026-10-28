@@ -14,7 +14,7 @@ New-Item -ItemType Directory -Path $checkRoot -Force | Out-Null
 @'
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
-var files = Directory.GetFiles(args[0], "*.cs", SearchOption.AllDirectories);
+var files = args.SelectMany(directory => Directory.GetFiles(directory, "*.cs", SearchOption.AllDirectories)).ToArray();
 var errors = files.SelectMany(file => CSharpSyntaxTree.ParseText(File.ReadAllText(file),
     new CSharpParseOptions(LanguageVersion.CSharp9), file).GetDiagnostics())
     .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error).ToArray();
@@ -23,5 +23,5 @@ Console.WriteLine($"Checked {files.Length} Unity source files with the C# 9 pars
 Console.WriteLine("This does not bind Unity SDK types, compile the Unity project, run EditMode tests or validate a headset.");
 return errors.Length == 0 ? 0 : 1;
 '@ | Set-Content -LiteralPath (Join-Path $checkRoot 'Program.cs') -Encoding utf8NoBOM
-dotnet run --project (Join-Path $checkRoot 'UnitySyntax.csproj') --configuration Release -- (Join-Path $projectRoot 'clients/unity/Assets/VrCommand')
+dotnet run --project (Join-Path $checkRoot 'UnitySyntax.csproj') --configuration Release -- (Join-Path $projectRoot 'clients/unity/Assets/VrCommand') (Join-Path $projectRoot 'clients/unity/Packages/com.vrcommand.simulation/Runtime')
 if ($LASTEXITCODE -ne 0) { throw 'Unity source syntax validation failed.' }
