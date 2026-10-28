@@ -80,3 +80,8 @@ v0.4 新事件使用 schema 3，支援讀取 schema 1／2；JSON 歷史一次匯
 v0.3 新增強制控制台認證與房間範圍授權；匿名 `/api` 呼叫不再成功。新事件使用 schema 2 及伺服器認證的 `actor`；仍可讀取 schema 1 歷史。
 
 `GET /api/sessions/{id}` 現在可讀取已結束場次；不再因結束而回傳 404。快照新增 `state`、`createdAtUtc`、`endedAtUtc`、`environment`、`enemies` 與 `sequence`；`startedAtUtc` 改為可為 null，僅在 `Begin` 後有值。程式層的 `SessionManager.Start` 改名為 `Create`，避免與真正開始遊戲混淆。
+
+
+## v0.12 世界串流
+
+GET /api/world-recordings、GET /api/sessions/{id}/world 為房間範圍內 metadata；WebSocket .../world/publish 僅 combat-stream owner 可發布；fetch SSE .../world/watch 為只讀 live／replay，不占玩家席位。所有端點仍帶 Bearer，逐幀輸入不走 REST。封包、限制、精確封存及真實驗證範圍見 [WORLD_RECORDING.md](WORLD_RECORDING.md)。

@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using VrCommand.Core;
 using VrCommand.Persistence;
+using VrCommand.Api;
 
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
@@ -26,9 +27,12 @@ if (string.Equals(Path.TrimEndingDirectorySeparator(dataDirectory), Path.TrimEnd
     throw new InvalidOperationException("Mission and session data directories must be separate.");
 builder.Services.AddSingleton(_ => new SqliteSessionEventStore(sessionDirectory));
 builder.Services.AddSingleton(services => new SessionManager(services.GetRequiredService<SqliteSessionEventStore>()));
+builder.Services.AddSingleton(services => new WorldRecordings(sessionDirectory, services.GetRequiredService<SessionManager>()));
 var app = builder.Build();
 // Fail startup on inconsistent persisted histories, before reporting a healthy service.
 app.Services.GetRequiredService<SessionManager>();
+app.Services.GetRequiredService<WorldRecordings>();
+app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
 
 app.Use(async (context, next) =>
 {
@@ -77,7 +81,8 @@ app.Use(async (context, next) =>
     }
 });
 
-app.MapGet("/", () => new { service = "VR Command Center", stage = "durable combat telemetry and Quest integration prototype", version = "0.11.0" });
+app.MapGet("/", () => new { service = "VR Command Center", stage = "persistent world recording and observation prototype", version = "0.12.0" });
+app.MapWorldRoutes();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/api/me", (HttpContext context) => Actor(context));
 app.MapGet("/api/rooms", (SessionManager manager, HttpContext context) => manager.Rooms(Actor(context)));

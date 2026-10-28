@@ -38,3 +38,5 @@ Quest 接入與建置見 `docs/QUEST3.md`。`scripts/check-unity-source.ps1` 只
 v0.9 的建立／加入／離開以選用 Idempotency-Key 去重，事件 schema 4 的 requestId 與業務事件一起持久化；重試只確認歷史接受，不重施新狀態。保留 schema 1–3 讀取與不帶 key 的相容性。前端與後端需一起升級，不能把 v0.9 的可重試前端放到忽略 key 的舊後端；寫入新 schema 後不可直接降版。契約見 SESSION_PROTOCOL。
 
 v0.11 新事件 schema 5，讀取 schema 1–4；戰鬥串流綁定唯一來源／origin，接受有 Running 觀察位置的已保存尾端，封存後只允許既有報告去重確認。End 釋放房間但 pendingTelemetry 保持 true 到精確 seal；不能把未封存報表當作最終結果。批次可能已提交前綴，須原樣重試。journal 壞尾端不自動截斷；補送不是世界恢復。HTTP 隔離檢查另設 VR_COMMAND_TELEMETRY_RELAY_DLL。備份資料後再升級，不能降版讀取 schema 5。
+
+v0.12 世界發布為 WebSocket、觀察為帶 Bearer 的 fetch SSE，來源規範在 WORLD_RECORDING.md。新增 worlds.db 與每幀統計／combat witness 核對；管理 events.db schema 不變。必要另跑 python scripts/smoke_world.py，隔離指定 VR_COMMAND_WORLD_RELAY_DLL；瀏覽器檢查包含 world-browser.cjs。共享 WorldRecording DTO 仍須 C# 9／netstandard2.1；Unity 尚未發布世界或採樣頭手，不能把合成 Simulated rig 宣稱為 Tracked。

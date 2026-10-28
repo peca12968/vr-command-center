@@ -47,18 +47,31 @@ export class ReplayScene {
     const body = this.mesh(new THREE.BoxGeometry(1, 1, 1), enemy ? 0xc26754 : 0x82bc94); group.add(body);
     const head = this.mesh(new THREE.SphereGeometry(.17, 12, 8), enemy ? 0xefad84 : 0xb7e7c6); group.add(head);
     const gun = this.mesh(new THREE.BoxGeometry(.08, .08, .45), enemy ? 0x5e312a : 0x222e28); group.add(gun);
-    const entry = { group, body, head, gun, enemy }; this.actors.set(key, entry); this.stage.add(group); return entry;
+    const left = this.mesh(new THREE.BoxGeometry(.09, .06, .18), 0xa6d9ce), right = this.mesh(new THREE.BoxGeometry(.09, .06, .18), 0xa6d9ce);
+    left.visible = right.visible = false; group.add(left, right);
+    const facing = this.mesh(new THREE.BoxGeometry(.06, .04, .12), 0x344f40); facing.position.z = .18; head.add(facing);
+    const entry = { group, body, head, gun, left, right, enemy }; this.actors.set(key, entry); this.stage.add(group); return entry;
   }
   show(frame, previous, events) {
     this.frame = frame;
+    const present = new Set([...frame.players.map(player => 'p:' + player.id), ...frame.enemies.map(enemy => 'e:' + enemy.id)]);
+    for (const [key, actor] of this.actors) if (!present.has(key)) { this.clear(actor.group); this.stage.remove(actor.group); this.actors.delete(key); }
     for (const actor of this.actors.values()) actor.group.visible = false;
     for (const player of frame.players) {
       const actor = this.actor('p:' + player.id, false), height = player.head.y;
       actor.group.visible = true; actor.group.position.set(player.head.x, 0, player.head.z);
       actor.body.scale.set(.44, Math.max(.25, height - .3), .35); actor.body.position.set(0, Math.max(.25, height - .3) / 2, 0);
       actor.body.rotation.y = Math.atan2(player.forward.x, player.forward.z); actor.head.position.set(0, height, 0);
+      actor.head.quaternion.set(0, 0, 0, 1);
+      if (player.rig && player.rig.kind !== 'None') {
+        const rotation = player.rig.headRotation; actor.head.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w);
+        for (const side of ['left', 'right']) {
+          actor[side].visible = true; actor[side].position.copy(point(player.rig[side])).sub(actor.group.position);
+          const value = player.rig[side + 'Rotation']; actor[side].quaternion.set(value.x, value.y, value.z, value.w);
+        }
+      } else actor.left.visible = actor.right.visible = false;
       actor.gun.position.copy(point(player.muzzle)).sub(actor.group.position); actor.gun.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), point(player.forward).normalize());
-      for (const mesh of [actor.body, actor.head, actor.gun]) { mesh.material.transparent = player.health === 0; mesh.material.opacity = player.health === 0 ? .25 : 1; }
+      for (const mesh of [actor.body, actor.head, actor.gun, actor.left, actor.right]) { const faded = player.health === 0 || player.connected === false; mesh.material.transparent = faded; mesh.material.opacity = faded ? .25 : 1; }
     }
     for (const enemy of frame.enemies) {
       const actor = this.actor('e:' + enemy.id, true); actor.group.visible = true; actor.group.position.copy(point(enemy.feet));

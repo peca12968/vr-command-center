@@ -17,6 +17,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: python scripts/smoke_api.py
+      - run: python scripts/smoke_world.py
       - uses: actions/setup-node@v4
         with:
           node-version: '24'

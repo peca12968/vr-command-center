@@ -42,6 +42,35 @@ internal static class CombatStreamProjection
 
 public sealed partial class SessionManager
 {
+    // Read a sparse administrative view without replaying high-volume combat reports.
+    public SessionView Observed(Guid id, long sequence, OperatorIdentity actor)
+    {
+        lock (gate)
+        {
+            var history = Find(id); AccessPolicy.Read(actor, history.View.RoomIds);
+            if (sequence < 1 || sequence > history.View.Sequence) throw new ArgumentException("Observation is outside accepted history.");
+            var low = 0; var high = history.Authority.Count - 1; SessionView? observed = null;
+            while (low <= high)
+            {
+                var middle = low + (high - low) / 2;
+                if (history.Authority[middle].Sequence <= sequence) { observed = history.Authority[middle]; low = middle + 1; }
+                else high = middle - 1;
+            }
+            return Snapshot(observed ?? throw new InvalidOperationException("No administrative observation."));
+        }
+    }
+
+    public StreamCombatRecord CombatWitness(Guid id, Guid reportId, OperatorIdentity actor)
+    {
+        lock (gate)
+        {
+            var history = Find(id); AccessPolicy.Read(actor, history.View.RoomIds);
+            var entry = history.Combat.Find(reportId);
+            if (entry?.Kind != SessionEventKind.StreamCombatRecorded) throw new InvalidOperationException("Deliver the matching combat report before its world frame.");
+            return entry.Read<StreamCombatRecord>();
+        }
+    }
+
     // Each row remains its own durable event. Retrying a partially committed batch deduplicates its accepted prefix.
     public StreamReceipt ReportStreamBatch(Guid id, StreamCombatRecord[] records, OperatorIdentity? actor = null)
     {

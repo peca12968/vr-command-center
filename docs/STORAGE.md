@@ -1,5 +1,7 @@
 # 事件儲存與升級 v0.11
 
+v0.12 另在相同 SessionDataDirectory 新增 worlds.db（schema 1），以交易保存逐幀世界／統計並以時間索引播放。管理 events.db 的 schema 與 envelope 5 不變；完整備份需包含兩個資料庫及來源檔，詳見 [WORLD_RECORDING.md](WORLD_RECORDING.md)。
+
 v0.11 新事件 schema 5，戰鬥來源／觀察位置／有序報告及封存各以事件保存，仍讀取 1–4，資料庫結構 user_version 不變。每筆有序報告單獨交易；批次失敗可能已有前綴，原樣重試去重續送。主控台以 pendingTelemetry 區分已 End 但尚未 seal 的統計。
 
 遊戲伺服器另有獨占開啟、checksummed frame 及 Flush 的本地 journal，與 API SQLite 分開保存，格式及補送見 TELEMETRY。兩者先後提交依靠穩定 reportId／順序與 acknowledgment 恢復，不宣稱跨檔案／跨程序原子交易。

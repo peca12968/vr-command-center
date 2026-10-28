@@ -27,7 +27,7 @@
     <div id="notice" role="status" aria-live="polite" hidden></div>
     <div id="workspace" hidden>
       <div id="pending-command" class="warning" hidden><span>操作結果尚未確認。重試會沿用原操作，不會重複執行。請先確認結果，再進行其他操作。</span><button id="retry-command">重試確認結果</button></div>
-      <div class="toolbar"><nav aria-label="工作區"><button id="tab-operations" class="tab active" aria-pressed="true">房間與場次</button><button id="tab-missions" class="tab" aria-pressed="false">任務庫與編輯</button><button id="tab-replay" class="tab" aria-pressed="false">3D 模擬回放</button></nav><span id="last-update" class="hint">等待更新</span><button id="refresh" class="quiet">重新整理</button></div>
+      <div class="toolbar"><nav aria-label="工作區"><button id="tab-operations" class="tab active" aria-pressed="true">房間與場次</button><button id="tab-missions" class="tab" aria-pressed="false">任務庫與編輯</button><button id="tab-replay" class="tab" aria-pressed="false">3D 模擬回放</button><button id="tab-world" class="tab" aria-pressed="false">觀戰與任務回放</button></nav><span id="last-update" class="hint">等待更新</span><button id="refresh" class="quiet">重新整理</button></div>
       <section id="operations-view">
         <div class="section-heading"><div><p class="eyebrow">VENUE STATUS</p><h2>五房間總覽</h2></div><span class="badge">Quest 3 優先</span></div>
         <div id="rooms" class="rooms"></div>
@@ -72,6 +72,19 @@
           <div class="save-row"><button type="submit">儲存為新任務</button><span id="draft-status" class="hint">尚未儲存的草稿</span></div>
         </fieldset></form>
       </section>
+      <section id="world-view" hidden>
+        <div class="section-heading"><div><p class="eyebrow">WORLD RECORDINGS</p><h2>觀戰與任務回放</h2></div><span class="badge">只讀觀察 · 不占玩家席位</span></div>
+        <section class="panel"><label>可讀取的錄製場次<select id="world-recording"></select></label><div class="button-row"><button id="world-refresh" class="quiet">更新錄製列表</button><button id="world-live" disabled>即時觀戰</button><button id="world-replay" class="secondary" disabled>從頭回放</button></div><p id="world-message" class="hint" role="status" aria-live="polite">選取已錄製的場次，開始觀戰或回放。</p></section>
+        <section id="world-player" class="panel" hidden>
+          <div class="section-heading"><h3 id="world-name"></h3><span id="world-status" class="badge"></span></div>
+          <div id="world-viewport"><canvas id="world-canvas" tabindex="0" aria-label="世界錄製 3D 觀察場景，可拖曳及點選角色"></canvas><div class="replay-overlay"><span id="world-environment"></span><span id="world-freshness"></span></div></div>
+          <p class="hint">拖曳旋轉 · Shift／右鍵拖曳平移 · 滾輪縮放 · 點選角色。綠色為玩家，紅色為敵軍；雙手依錄製來源顯示。</p>
+          <div class="replay-transport"><button id="world-pause" class="quiet">暫停回放</button><label>速度<select id="world-speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select></label><output id="world-time"></output></div>
+          <label>跳轉已保存時間<input id="world-timeline" type="range" min="0" max="1" step="1" value="0" aria-label="世界錄製回放時間軸"></label>
+          <div class="form-row"><label>鏡頭<select id="world-camera"><option value="overview">斜角全景</option><option value="top">上帝俯視</option><option value="follow">跟隨選取角色</option><option value="free">自由調整</option></select></label><label>房間<select id="world-room"></select></label><label>選取角色<select id="world-actor"></select></label></div>
+          <p id="world-actor-info" class="replay-actor-info"></p><h3>此快照已核對的統計</h3><div class="table-scroll"><table><caption class="sr-only">世界快照統計</caption><thead><tr><th>玩家</th><th>彈藥</th><th>擊殺</th><th>耗損</th><th>中彈</th><th>命中率</th><th>血量</th></tr></thead><tbody id="world-statistics"></tbody></table></div>
+        </section>
+      </section>
       <section id="replay-view" hidden>
         <div class="section-heading"><div><p class="eyebrow">AFTER ACTION REVIEW</p><h2>3D 模擬回放</h2></div><span class="badge">Simulation</span></div>
         <section class="panel"><div class="form-row"><button id="replay-example" class="secondary">載入幾何模擬範例</button><label>匯入已結束的模擬紀錄<input id="replay-file" type="file" accept=".json,application/json"></label></div><p class="hint">檔案只在本頁讀取，不上傳。支援 25 MB 內的新版模擬紀錄；這不是頭盔錄影或即時觀戰。</p><p id="replay-message" role="status" aria-live="polite" class="hint">請載入範例或選擇模擬紀錄。</p></section>
@@ -87,7 +100,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>開發原型 v0.11 · 已有模擬回放；頭盔實機、25 台連線、Unity 遊戲整合與硬體仍待驗證。</footer>
+      <footer>開發原型 v0.12 · 已有模擬回放；頭盔實機、25 台連線、Unity 遊戲整合與硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

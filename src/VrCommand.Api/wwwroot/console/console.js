@@ -1,3 +1,4 @@
+import { mountWorld } from './world-ui.js';
 import { mountReplay } from './replay-ui.js';
 const replay = mountReplay();
 const $ = id => document.getElementById(id);
@@ -5,6 +6,7 @@ const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫�
 const weatherNames = { Clear: '晴朗', Rain: '下雨', Fog: '濃霧', Storm: '暴風雨' };
 const behaviorNames = { Hold: '守備', Patrol: '巡邏', Advance: '推進' };
 const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: null, rooms: [], missions: [], sessions: [], session: null, selected: '', pending: null, props: [], prop: -1, environmentSequence: null, enemiesSequence: null };
+const world = mountWorld(() => state.key, logout);
 let timer;
 
 function notify(message, error = false) {
@@ -62,7 +64,7 @@ async function run(action) {
   finally { state.busy = false; applyPermissions(); }
 }
 function logout() {
-  replay.active(false); replay.reset();
+  replay.active(false); replay.reset(); world.active(false); world.reset();
   state.epoch++; state.key = ''; state.actor = null; state.selected = ''; state.session = null; state.pending = null;
   state.rooms = []; state.missions = []; state.sessions = []; state.refreshPromise = null;
   state.props = []; state.prop = -1;
@@ -322,8 +324,8 @@ for (const id of ['prop-asset', 'prop-x', 'prop-y', 'prop-z', 'prop-yaw']) $(id)
 });
 
 function tab(name) {
-  for (const candidate of ['operations', 'missions', 'replay']) { const active = candidate === name; $(candidate + '-view').hidden = !active; $('tab-' + candidate).classList.toggle('active', active); $('tab-' + candidate).setAttribute('aria-pressed', String(active)); }
-  replay.active(name === 'replay');
+  for (const candidate of ['operations', 'missions', 'replay', 'world']) { const active = candidate === name; $(candidate + '-view').hidden = !active; $('tab-' + candidate).classList.toggle('active', active); $('tab-' + candidate).setAttribute('aria-pressed', String(active)); }
+  replay.active(name === 'replay'); world.active(name === 'world');
 }
 function submit(id, action) { $(id).addEventListener('submit', event => { event.preventDefault(); run(action); }); }
 $('login-form').addEventListener('submit', login);
@@ -350,5 +352,5 @@ $('rotate-prop').addEventListener('click', () => { if (editable() && state.props
 $('remove-prop').addEventListener('click', () => { if (editable() && state.prop >= 0) { state.props.splice(state.prop, 1); state.prop = Math.min(state.prop, state.props.length - 1); renderProps(); dirtyDraft(); } });
 $('mission-form').addEventListener('input', dirtyDraft);
 $('mission-form').addEventListener('change', dirtyDraft);
-for (const name of ['operations', 'missions', 'replay']) $('tab-' + name).addEventListener('click', () => tab(name));
+for (const name of ['operations', 'missions', 'replay', 'world']) $('tab-' + name).addEventListener('click', () => tab(name));
 window.addEventListener('beforeunload', event => { if (state.pending) { event.preventDefault(); event.returnValue = ''; } });

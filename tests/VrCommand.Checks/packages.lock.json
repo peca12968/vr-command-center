@@ -47,6 +47,14 @@
           "SQLitePCLRaw.core": "2.1.13"
         }
       },
+      "vrcommand.api": {
+        "type": "Project",
+        "dependencies": {
+          "VrCommand.Core": "[1.0.0, )",
+          "VrCommand.Persistence": "[1.0.0, )",
+          "VrCommand.Simulation": "[1.0.0, )"
+        }
+      },
       "vrcommand.core": {
         "type": "Project"
       },
