@@ -33,7 +33,15 @@ embedded package `com.vrcommand.simulation` 現為 0.11.0。Runtime asmdef 已�
 
 使用者已明確同意 SDK／NDK 條款；Android Build Support 與 OpenJDK 已由 CLI 安裝，SDK／NDK 目錄修復及實際原生編譯結果見下節，不再等待條款確認。
 
-使用者另回覆已登入／啟用，但工具端驗證仍為 CLI `loggedIn: false`、`unity license list` 空陣列，實際 Prepare 再次退出 198。已啟動一次瀏覽器登入流程，觀察到 Chrome 停在 Unity 登入頁；CLI 未收到成功回呼並回報登入逾時。後續請在本機重新執行 `unity auth login`，等待命令成功，再以 `unity auth status --format json` 及 `unity license list --format json` 核對適用帳戶／授權。不要把密碼、token 或序號貼入對話；沒有自行購買或選擇 Personal 資格。
+使用者另回覆已登入／啟用，但後續工具端驗證仍為 CLI `loggedIn: false`、`unity license list` 空陣列、`unity license status` 為 active=false／signedIn=false，先前實際 Prepare 退出 198。一次瀏覽器登入流程已逾時，不能繼續等待舊回呼。CLI 狀態只是診斷資訊；是否能建置仍以實際 Editor 結果為準，不因 CLI 未登入而否定有效的 Hub／浮動授權。
+
+2026-10-29 已查核本機 Appx、解除安裝登錄與常見目錄，原先只有 Unity CLI，未找到 Hub。已補裝並啟動 **Unity Hub 3.22.5**，Appx 版本 3.22.5.65535，註冊狀態正常。Windows 管理 Hub 套件位於 C 槽；工程、Editor、Android 工具及安裝包仍在 F 槽。套件來自 Windows 套件來源列出的 Unity 官方 CDN，SHA-256 `26b4103d7784d09a1ec312058360710f01c53a5881caa1c722e692055dcb9032` 與來源相符，Authenticode 為 Valid／Unity Technologies SF。安裝包存於忽略的 `artifacts/setup/UnityHubSetup-3.22.5-x64.msix`，無須重裝 Editor／SDK。
+
+Hub 視窗已實際出現，但 Windows 安全性對 `adb.exe` 的網路存取提示遮住畫面。由使用者自行處理提示後，在 Hub 完成 Sign in，再到 Settings → Licenses 確認有效授權。若需新增，使用者應選擇適用方案及確認條款；不預設具備 Personal 資格、不購買授權、不要求提供密碼／token／序號。此步尚待完成，沒有操作安全設定或自動登入。
+
+Hub 授權正常後，依序執行下節 Prepare／Tests／Desktop／Quest；僅出現 Hub 視窗或網頁登入成功不算建置完成。若選擇 CLI 流程，須等待新的 `unity auth login` 成功，`unity license activate` 的方案依實際適用授權決定。官方 CLI beta.14 支援 Personal 啟用及其條款旗標，但本專案未代替使用者選擇／接受 Personal 方案。
+
+官方說明：[Hub 授權管理](https://docs.unity.com/en-us/hub/manage-license)、[CLI 驗證與授權命令](https://github.com/Unity-Technologies/skills/blob/main/skills/unity-cli/references/auth-license-cloud.md)。
 
 ## Android 工具實測
 

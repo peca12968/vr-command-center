@@ -1,5 +1,15 @@
 # 開發進度
 
+## 2026-10-29：Unity Hub 安裝與授權診斷
+
+從乾淨的 19aacf9 接續，先核對 M2 建置阻礙，未擴增遊戲來源或宣稱新功能版本。CLI 仍未登入，license list 空，license status 為 active=false／signedIn=false；先前 Prepare 的 198 結果不變，本輪沒有重跑相同失敗建置。Appx、解除安裝登錄及常見安裝目錄原先未找到 Hub，只有 CLI；也未找到常見位置的本機授權檔。這些診斷不能取代實際 Editor 授權／建置結果。
+
+已從 Windows 套件來源取得 Unity 官方 CDN 的 Hub 3.22.5 x64 MSIX（260081856 bytes），SHA-256 與來源提供值相符，Authenticode Valid／Unity Technologies SF。以 Add-AppxPackage 安裝，註冊版本 3.22.5.65535／Status 0，主程序 49404 及 Unity Hub 3.22.5 視窗均已實際確認。Windows 管理的套件位於 C 槽；工程、6000.3.27f1 Editor、Android 工具與安裝包仍在 F 槽。未重裝 Editor／SDK，原生工具的既有成功結果維持。
+
+Computer Use 觀察到 Windows 安全性對 adb.exe 網路存取提示遮住 Hub；未操作提示、變更防火牆或代填帳戶。已請使用者自行處理提示、在 Hub 登入並到 Settings → Licenses 確認有效授權；若需新增，由使用者選擇適用方案及確認條款。不要求提供密碼／token／序號，也沒有選擇 Personal 資格或購買授權。
+
+QUEST3、ROADMAP 與 AGENTS 已記錄新狀態，避免後續誤稱 Hub 尚未安裝或重啟過期登入回呼。官方 CLI beta.14 支援帳戶啟用；Hub 授權也可能獨立於 CLI 工作階段，後續以實際 Prepare／Tests／Desktop／Quest 為準。授權確認仍待使用者操作；沒有新的 Unity 編譯、EditMode、桌面程式、APK 或頭盔證據。既有 v0.14 的 843 項本機檢查未在本輪重跑；本輪只改文件，未變更後端／遊戲／預覽資料。長期目標保持開發中，完整 11 項驗收範圍不變。
+
 ## 2026-10-29：v0.14 每次入場識別、票券 v2 與撤銷接入
 
 上一輪 v0.13 已推送、部署並完成具體驗證。本輪以乾淨的 27242b2 接續原目標，CLI 仍 loggedIn false／license list 空；新的 Prepare 實際退出 198，命令已結束，沒有等待中的 Unity 工作。SDK 條款無須重問，沒有重裝或代填登入。長期目標保持開發中。
