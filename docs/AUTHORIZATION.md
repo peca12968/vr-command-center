@@ -36,7 +36,7 @@ OperatorKeys__GameServer
 
 頭盔只持有綁定場次／玩家／房間、五分鐘到期的 HMAC-SHA256 票券，不能呼叫 REST 管理 API。桌面遊戲伺服器帶 GameServer 憑證驗證簽章、到期、現行名冊與場次狀態，再採用 API 回傳的房間及固定席位；不信任頭盔自行宣告玩家 ID。
 
-簽章鑰預設以隨機 32 bytes 建立，Base64 保存於 `DataDirectory` 父目錄的 `player-ticket-signing.key`，例如 API 預設 `data/player-ticket-signing.key`；本機助手指定的資料路徑則位於根目錄 `data/`。可透過 `PlayerTicketSigningKey` 配置至少 32 bytes 的 Base64 鑰匙。鑰匙依賴主機檔案權限，不能放入 Unity 或 Git；備份與部署需保留，換鑰重啟會使舊票券失效。票券本身不保存於場次事件。
+簽章鑰預設以隨機 32 bytes 建立，Base64 保存於 `DataDirectory` 父目錄的 `player-ticket-signing.key`，例如 API 專案預設 `data/player-ticket-signing.key`。實際位置以任務資料路徑為準，與 `OperatorKeyFile` 的位置無關。可透過 `PlayerTicketSigningKey` 配置至少 32 bytes 的 Base64 鑰匙。鑰匙依賴主機檔案權限，不能放入 Unity 或 Git；備份與部署需保留，換鑰重啟會使舊票券失效。票券本身不保存於場次事件。
 
 票券不做一次性消耗或加入版本撤銷。驗票成功並不等於傳輸加密、設備證明或已通過實機驗收；現有 GameServer 身分仍可跨場讀取，後續須按部署需求收緊。現有連線不因移除名冊或票券到期自動斷開；到期限制目前只作用於入場驗證。
 

@@ -1,0 +1,194 @@
+// Runs the shipped console against an isolated, real API and SQLite store.
+const { chromium } = require('playwright');
+const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const os = require('node:os');
+const net = require('node:net');
+const { spawn } = require('node:child_process');
+const { randomBytes, randomUUID } = require('node:crypto');
+const root = path.resolve(__dirname, '../..');
+let checks = 0;
+function check(condition, description) { assert.ok(condition, description); checks++; console.log('PASS:', description); }
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+async function availablePort() {
+  const server = net.createServer();
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port; await new Promise(resolve => server.close(resolve)); return port;
+}
+async function main() {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'vr-console-'));
+  if (path.dirname(path.resolve(directory)) !== path.resolve(os.tmpdir()) || !path.basename(directory).startsWith('vr-console-')) throw new Error('Unsafe cleanup target');
+  const screenshots = path.join(root, 'artifacts/console');
+  await fs.mkdir(screenshots, { recursive: true });
+  const tokens = Object.fromEntries(['Master', 'Room1', 'Room2', 'GameServer'].map(role => [role, randomBytes(32).toString('hex')]));
+  const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toLowerCase().startsWith('operatorkeys__') && !['operatorkeyfile', 'playerticketsigningkey'].includes(key.toLowerCase())));
+  Object.assign(environment, { DataDirectory: path.join(directory, 'missions'), SessionDataDirectory: path.join(directory, 'sessions'), ASPNETCORE_ENVIRONMENT: 'Production', Logging__LogLevel__Default: 'Warning' });
+  for (const [role, value] of Object.entries(tokens)) environment['OperatorKeys__' + role] = value;
+  const base = 'http://127.0.0.1:' + await availablePort();
+  const processApi = spawn('dotnet', [path.join(root, 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll'), '--urls', base], { cwd: root, env: environment, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  let apiLog = '';
+  for (const stream of [processApi.stdout, processApi.stderr]) stream.on('data', data => { apiLog = (apiLog + data.toString()).slice(-6000); });
+  let browser, diagnosticPage;
+  try {
+    for (let attempt = 0; ; attempt++) {
+      try { if ((await fetch(base + '/health')).ok) break; } catch { /* Wait only for this fixture's live child process. */ }
+      if (processApi.exitCode !== null || attempt > 100) throw new Error('Isolated API did not start: ' + Object.values(tokens).reduce((text, key) => text.replaceAll(key, '[redacted]'), apiLog));
+      await delay(100);
+    }
+    async function api(route, method = 'GET', body, role = 'Master', expected = 200) {
+      const response = await fetch(base + '/api' + route, { method, headers: { Authorization: 'Bearer ' + tokens[role], 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+      assert.equal(response.status, expected, method + ' ' + route);
+      return response.status === 204 ? null : response.json();
+    }
+    const shell = await fetch(base + '/console/');
+    check(shell.ok && shell.headers.get('content-security-policy').includes("script-src 'self'") && shell.headers.get('cache-control').includes('no-store'), 'Console shell is served with its content and cache policies');
+    check((await fetch(base + '/api/rooms')).status === 401, 'Serving the console does not bypass API authentication');
+    browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext({ viewport: { width: 1440, height: 1080 }, acceptDownloads: true });
+    const page = await context.newPage(), browserErrors = [];
+    diagnosticPage = page;
+    function captureErrors(target) { target.on('pageerror', error => browserErrors.push(error.message)); target.on('console', message => { if (/Content Security Policy|violates.*directive/i.test(message.text())) browserErrors.push(message.text()); }); }
+    captureErrors(page);
+    await page.goto(base + '/console/');
+    await page.locator('#login-key').fill('wrong-key'); await page.locator('#login-form button').click();
+    await page.locator('#notice.error').waitFor();
+    check(await page.locator('#login-panel').isVisible(), 'Invalid credentials keep the operator on the login screen');
+    await page.locator('#login-key').fill(tokens.Master); await page.locator('#login-form button').click();
+    await page.waitForFunction(() => document.querySelectorAll('.room-card').length === 5);
+    check(await page.locator('#identity').innerText() === '全館主控', 'Master sees all five rooms');
+    check(await page.locator('#login-key').inputValue() === '', 'Credential input is cleared after authentication');
+    await page.locator('#tab-missions').click();
+    await page.locator('#draft-name').fill('夜間防衛・瀏覽器驗證');
+    await page.locator('#draft-briefing').fill('守住據點，確認場次控制與配置儲存。');
+    await page.locator('#draft-duration').fill('1200');
+    await page.locator('#draft-weather').selectOption('Storm'); await page.locator('#draft-time').selectOption('Night'); await page.locator('#draft-lightning').check();
+    await page.locator('#add-sandbag').click();
+    for (const [id, value] of [['prop-x', '1'], ['prop-z', '3'], ['prop-yaw', '45']]) { await page.locator('#' + id).fill(value); await page.locator('#' + id).blur(); }
+    await page.locator('#add-barrel').click();
+    for (const [id, value] of [['prop-x', '2'], ['prop-z', '4']]) { await page.locator('#' + id).fill(value); await page.locator('#' + id).blur(); }
+    await page.locator('#layout-map').scrollIntoViewIfNeeded();
+    const coords = await page.locator('#layout-map').evaluate(svg => [[1, -3], [3, -2]].map(([x, y]) => { const p = svg.createSVGPoint(); p.x = x; p.y = y; const result = p.matrixTransform(svg.getScreenCTM()); return { x: result.x, y: result.y }; }));
+    await page.mouse.move(coords[0].x, coords[0].y); await page.mouse.down(); await page.mouse.move(coords[1].x, coords[1].y, { steps: 8 }); await page.mouse.up();
+    check(await page.locator('#prop-x').inputValue() === '3' && await page.locator('#prop-z').inputValue() === '2', 'Pointer drag moves a sandbag on the half-metre layout grid');
+    await page.locator('#layout-map').press('ArrowRight');
+    check(await page.locator('#prop-x').inputValue() === '3.5', 'Keyboard arrows can adjust a selected layout object');
+    await page.locator('#mission-form button[type=submit]').click();
+    await page.waitForFunction(() => document.querySelector('#draft-status').textContent.startsWith('已儲存'));
+    const mission = (await api('/missions'))[0];
+    check(mission.definition.props.length === 2 && mission.definition.props[0].position.x === 3.5 && mission.definition.props[0].yawDegrees === 45 && mission.definition.environment.lightning, 'Mission save persists the edited layout and environment through the real API');
+    page.once('dialog', dialog => dialog.accept()); await page.locator('#new-mission').click();
+    await page.locator('#load-mission').click();
+    check(await page.locator('#draft-name').inputValue() === mission.definition.name && await page.locator('#prop-layer [data-index]').count() === 2 && await page.locator('#prop-x').inputValue() === '3.5', 'Saved mission can be loaded back into the editor without losing layout coordinates');
+    await page.screenshot({ path: path.join(screenshots, 'mission-planner.png'), fullPage: true });
+    await page.locator('#tab-operations').click(); await page.locator('#create-session-form button').click();
+    await page.waitForFunction(() => !document.querySelector('#session-panel').hidden);
+    let session = (await api('/sessions'))[0];
+    check(session.mission.id === mission.id && session.state === 'Preparing', 'Selecting a saved mission creates a preparing session with that definition');
+    await page.locator('#player-name').fill('Alpha 01'); await page.locator('#join-form button').click();
+    await page.waitForFunction(() => document.querySelector('#roster').textContent.includes('Alpha 01'));
+    session = await api('/sessions/' + session.id);
+    await page.locator('#game-address').fill('127.0.0.1');
+    const [download] = await Promise.all([page.waitForEvent('download'), page.locator('#roster button').filter({ hasText: '下載連線檔' }).click()]);
+    const configPath = path.join(directory, 'player.json'); await download.saveAs(configPath);
+    const config = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    check(JSON.stringify(Object.keys(config).sort()) === JSON.stringify(['address', 'joinTicket', 'port', 'role']) && !Object.values(tokens).some(key => JSON.stringify(config).includes(key)), 'Downloaded headset configuration contains only player connection fields');
+    check((await api('/player-tickets/validate', 'POST', { sessionId: session.id, ticket: config.joinTicket }, 'GameServer')).playerId === session.players[0].id, 'Downloaded player ticket validates for the selected roster entry');
+    await page.locator('[data-command=Begin]').click();
+    await page.waitForFunction(() => document.querySelector('#session-phase').textContent === '執行中');
+    check((await api('/sessions/' + session.id)).state === 'Running', 'Operator starts the mission from the console');
+    await page.locator('#live-weather').selectOption('Fog'); await page.locator('#live-lightning').uncheck();
+    await page.locator('#environment-form button[type=submit]').click();
+    await page.waitForFunction(() => document.querySelector('#live-environment').textContent.includes('濃霧'));
+    check((await api('/sessions/' + session.id)).environment.weather === 'Fog', 'Environment control reaches the active session');
+    await api('/sessions/' + session.id + '/commands', 'POST', { commandId: randomUUID(), action: 'SetEnemies', enemies: { count: 9, behavior: 'Patrol', autoAttack: true } });
+    await page.locator('#live-count').fill('5');
+    await page.locator('#enemies-form button[type=submit]').click();
+    await page.waitForFunction(() => document.querySelector('#notice').textContent.includes('場次狀態或名額已變更'));
+    check((await api('/sessions/' + session.id)).enemies.count === 9, 'Stale editor sequence cannot overwrite another operator command');
+    await page.locator('#refresh').click();
+    await page.waitForFunction(() => document.querySelector('#live-enemies').textContent.startsWith('9 名'));
+    check(await page.locator('#live-count').inputValue() === '5', 'Background refresh does not silently replace an operator draft');
+    await page.locator('#reload-enemies').click();
+    await page.locator('#live-count').fill('5'); await page.locator('#live-behavior').selectOption('Advance'); await page.locator('#live-auto-attack').uncheck();
+    await page.locator('#enemies-form button[type=submit]').click();
+    await page.waitForFunction(() => document.querySelector('#live-enemies').textContent.startsWith('5 名'));
+    const enemySettings = (await api('/sessions/' + session.id)).enemies;
+    check(enemySettings.count === 5 && enemySettings.behavior === 'Advance' && !enemySettings.autoAttack, 'Enemy count, behavior and automatic attack controls update the session settings');
+    const commands = []; let loseResponse = true, lossAction = 'Pause';
+    await page.route('**/api/sessions/*/commands', async route => {
+      const body = route.request().postDataJSON();
+      if (body.action !== lossAction) return route.continue();
+      commands.push(body);
+      if (loseResponse) { loseResponse = false; await route.fetch(); await route.abort('failed'); }
+      else await route.continue();
+    });
+    await page.locator('[data-command=Pause]').click();
+    await page.locator('#pending-command').waitFor({ state: 'visible' });
+    check(await page.locator('[data-command=End]').isDisabled(), 'Unknown command result locks further writes until it is resolved');
+    await page.locator('#retry-command').click();
+    await page.locator('#pending-command').waitFor({ state: 'hidden' });
+    check(commands.length === 2 && JSON.stringify(commands[0]) === JSON.stringify(commands[1]), 'Retry preserves the exact command ID, body and expected sequence after a lost response');
+    const history = await api('/sessions/' + session.id + '/events?limit=500');
+    check(history.filter(event => event.kind === 'ControlApplied' && event.payload.action === 'Pause').length === 1, 'Lost-response retry applies Pause exactly once in durable history');
+    await page.locator('[data-command=Resume]').click();
+    await page.waitForFunction(() => document.querySelector('#session-phase').textContent === '執行中');
+    const playerId = session.players[0].id, shotId = randomUUID(), enemyId = randomUUID();
+    for (const report of [{ kind: 'ShotFired', shotId }, { kind: 'ShotHit', shotId, enemyId }, { kind: 'EnemyEliminated', shotId, enemyId }, { kind: 'PlayerDamaged', damage: 20 }]) await api('/sessions/' + session.id + '/combat', 'POST', { reportId: randomUUID(), origin: 'Simulation', playerId, ...report }, 'GameServer');
+    await page.locator('#refresh').click();
+    await page.waitForFunction(() => document.querySelector('#statistics-origin').textContent === '模擬資料');
+    check((await page.locator('#statistics tr').first().locator('td').allTextContents()).join('|') === 'Alpha 01|1|1|20|1|100%|80', 'Console shows ammo, kills, damage, hits, accuracy and health from durable simulated events');
+    check(!(await page.locator('#event-list').innerText()).includes('Invalid Date'), 'History renders the server-recorded event time');
+    await page.screenshot({ path: path.join(screenshots, 'operations.png'), fullPage: true });
+    const xssName = '<img src=x onerror="window.injected=true">';
+    lossAction = 'End'; loseResponse = true; commands.length = 0;
+    page.once('dialog', dialog => dialog.accept()); await page.locator('[data-command=End]').click();
+    await page.locator('#pending-command').waitFor({ state: 'visible' });
+    await delay(2300); // Span the normal 2-second refresh interval to expose lost-End selection bugs.
+    check(await page.locator('#session-panel').isVisible() && await page.locator('#pending-command').isVisible() && await page.locator('#refresh').isDisabled() && (await api('/sessions/' + session.id)).state === 'Ended', 'Lost End response retains its retry controls even after the server archives the session');
+    await page.locator('#retry-command').click();
+    await page.locator('#pending-command').waitFor({ state: 'hidden' });
+    check(commands.length === 2 && JSON.stringify(commands[0]) === JSON.stringify(commands[1]) && (await api('/sessions/' + session.id + '/events?limit=500')).filter(event => event.kind === 'ControlApplied' && event.payload.action === 'End').length === 1, 'End can be confirmed by retry without ending twice or stranding the workspace');
+    await page.locator('#launch-mode').selectOption('Linked'); await page.locator('#create-session-form button').click();
+    await page.waitForFunction(() => document.querySelector('#session-phase').textContent === '準備中' && document.querySelector('#session-meta').textContent.startsWith('五房全連線'));
+    const linked = (await api('/sessions'))[0];
+    check(linked.mode === 'Linked' && linked.roomIds.length === 5 && (await api('/rooms')).every(room => room.sessionId === linked.id), 'Master can prepare one linked session reserving all five rooms from the console');
+    await api('/sessions/' + linked.id + '/players', 'POST', { playerId: randomUUID(), name: xssName, roomId: 2, headset: 'Quest3' });
+    const roomContext = await browser.newContext({ viewport: { width: 390, height: 844 } }), roomPage = await roomContext.newPage(); captureErrors(roomPage);
+    await roomPage.goto(base + '/console/'); await roomPage.locator('#login-key').fill(tokens.Room1); await roomPage.locator('#login-form button').click();
+    await roomPage.waitForFunction(() => document.querySelector('#identity').textContent === '房間 1 控制台' && !document.querySelector('#session-panel').hidden);
+    check(await roomPage.locator('.room-card').count() === 1 && await roomPage.locator('[data-command=End]').isDisabled() && await roomPage.locator('#player-room option').count() === 1, 'Room controller sees its own room, cannot command a linked session and can select only its player room');
+    check(await roomPage.locator('#roster img').count() === 0 && !(await roomPage.evaluate(() => window.injected)), 'Untrusted player names render as text rather than executable markup');
+    check(await roomPage.locator('#roster button').first().isDisabled(), 'Room controller cannot remove or issue tickets to another room player');
+    await roomPage.locator('#player-name').fill('Room 1 Alpha'); await roomPage.locator('#join-form button').click();
+    await roomPage.waitForFunction(() => document.querySelectorAll('#roster tr').length === 2);
+    check((await api('/sessions/' + linked.id)).players.some(player => player.name === 'Room 1 Alpha' && player.roomId === 1), 'Room controller can add its own player to the linked roster');
+    await roomPage.locator('#tab-missions').click();
+    check(await roomPage.locator('#draft-name').isDisabled() && await roomPage.locator('#mission-form button[type=submit]').isDisabled(), 'Room controller mission editing remains read-only');
+    check(await roomPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'Console layout fits a 390-pixel viewport without page overflow');
+    await roomPage.locator('#tab-operations').click(); await roomPage.screenshot({ path: path.join(screenshots, 'room-controller.png'), fullPage: true });
+    await page.locator('#include-ended').check(); await page.locator('#refresh').click();
+    await page.locator('#session-select').selectOption(session.id);
+    await page.waitForFunction(() => document.querySelector('#session-phase').textContent === '已結束');
+    check(await page.locator('[data-command=Begin]').isDisabled() && (await page.locator('#statistics').innerText()).includes('80'), 'Archived session remains viewable with statistics and no lifecycle writes');
+    check(await page.evaluate(() => localStorage.length === 0 && sessionStorage.length === 0 && !document.cookie), 'Operator credentials are not persisted in browser storage or cookies');
+    await page.locator('#logout').click();
+    check(await page.locator('#login-panel').isVisible() && await page.locator('#workspace').isHidden(), 'Logout clears access to the console workspace');
+    await page.reload();
+    check(await page.locator('#login-panel').isVisible(), 'Reload requires authentication again');
+    check(browserErrors.length === 0, 'Browser has no uncaught script errors or CSP violations');
+    await api('/sessions/' + linked.id + '/commands', 'POST', { commandId: randomUUID(), action: 'End' });
+    await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), playwright: require('playwright/package.json').version, result: 'passed', scope: 'isolated real API and browser console; no Unity or headset test' }, null, 2));
+    console.log(`PASS: ${checks} real-browser checks. Screenshots: ${screenshots}`);
+  } catch (error) {
+    if (diagnosticPage && !diagnosticPage.isClosed()) await diagnosticPage.screenshot({ path: path.join(screenshots, 'failure.png'), fullPage: true }).catch(() => {});
+    throw error;
+  } finally {
+    if (browser) await browser.close();
+    const stopped = new Promise(resolve => processApi.once('exit', resolve));
+    if (processApi.exitCode === null) { processApi.kill(); await stopped; }
+    // The unique directory was checked against the OS temp root before any recursive cleanup.
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+}
+main().catch(error => { console.error(error); process.exitCode = 1; });

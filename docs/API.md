@@ -1,6 +1,8 @@
-# 管理、統計與玩家接入 API v0.5
+# 管理、統計與玩家接入 API v0.6
 
 REST、UTF-8 JSON；預設範例地址 `http://127.0.0.1:5080`。列舉使用字串，不接受數字列舉。提供管理、統計與短效入場票券；姿態不經此 API。Unity 遊戲來源碼尚待編譯／運行。所有 `/api` 呼叫須帶 `Authorization: Bearer <credential>`；配置與角色表見 [AUTHORIZATION.md](AUTHORIZATION.md)。
+
+v0.6 新增瀏覽器介面 `/console/`，操作見 [CONSOLE.md](CONSOLE.md)。靜態介面可匿名載入，資料與操作仍經下列已認證 API；任務每次儲存使用 POST 建立新 ID，未新增覆寫或版本修改端點。
 
 | 方法 | 路徑 | 行為 |
 |---|---|---|

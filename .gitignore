@@ -19,6 +19,7 @@ artifacts/
 *.aab
 *.mp4
 __pycache__/
+node_modules/
 *.py[cod]
 clients/unity/*.csproj
 clients/unity/*.sln

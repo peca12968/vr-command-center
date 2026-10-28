@@ -4,7 +4,7 @@
 
 依 2026-10-29 的使用者指示，**優先開發 Meta Quest 3**，暫以 Android 獨立執行為工作假設；VIVE 延後接入，共用架構與原始雙平台目標保留。
 
-目前為 **v0.5 後端與 Quest 3 接入來源碼原型**。後端已有五房權限、場次、SQLite 事件、戰鬥統計與短效玩家票券；Unity 工程已有共同場景生成、頭手姿態與管理狀態同步程式。Unity 編輯器已安裝，但實際 Prepare 因尚無有效授權而退出，尚無成功編譯或 APK；沒有實機相容證據。實際射擊／AI、管理畫面、硬體控制與 3D 觀戰回放仍待開發。
+目前為 **v0.6 瀏覽器主控台與 Quest 3 接入原型**。可登入主控／房間介面、編輯儲存任務、拖曳配置沙包／油桶、準備場次與名冊、配發玩家連線檔、控制環境／敵軍設定及查看統計。Unity 工程已有共同場景生成、頭手姿態與狀態同步來源碼；實際 Prepare 因尚無有效授權而退出，尚無成功編譯或 APK。實際射擊／AI、Unity 套用任務配置、硬體控制、自由觀戰與 3D 回放仍待開發。
 
 ## 開發位置
 
@@ -21,6 +21,7 @@
 - 戰鬥事件與統計：[COMBAT_PROTOCOL.md](docs/COMBAT_PROTOCOL.md)
 - SQLite 儲存與升級：[STORAGE.md](docs/STORAGE.md)
 - Quest 3 工程、建置與待驗操作：[QUEST3.md](docs/QUEST3.md)
+- 瀏覽器主控台與任務配置：[CONSOLE.md](docs/CONSOLE.md)
 
 ## 啟動
 
@@ -32,6 +33,8 @@ dotnet build VrCommand.slnx --configuration Release --no-restore
 dotnet run --project tests/VrCommand.Checks --configuration Release --no-build
 .\scripts\start-local.ps1
 ```
+
+啟動後開啟 **http://127.0.0.1:5080/console/**，以單一 Master 或所屬房間憑證登入。任務儲存後可選取開局；畫面中的人數是名冊，不代表頭盔在線。操作與驗證見 [CONSOLE.md](docs/CONSOLE.md)。
 
 啟動助手首次在 `data/operator-keys.local.json` 產生七份不同的隨機憑證，分別供主控、五房控制台與遊戲事件來源使用；檔案已排除於 Git，畫面不輸出憑證。重新啟動沿用原檔。`GET http://127.0.0.1:5080/health` 無需登入；所有 `/api` 端點需帶 Bearer 憑證。頭盔設定使用另行配發的短效玩家票券，不含上述憑證；尚無人員帳號登入或實際頭盔驗證。其他部署方式見權限文件。
 
@@ -74,7 +77,7 @@ $receipt.session
 python scripts/smoke_api.py
 ```
 
-腳本使用隨機測試憑證及暫存資料，驗證權限、名額、場次狀態、去重、SQLite 交易儲存、戰鬥因果、玩家票券及設定產生，並兩次實際重啟 API 驗證復原。核心檢查另包含 JSON 升級、回滾、資料損壞及五房 25 個玩家的模擬統計。目前 128 項核心檢查、229 項 HTTP 斷言通過；這不等同 Unity 編譯或 25 台頭盔連線效能驗收。
+腳本使用隨機測試憑證及暫存資料，驗證權限、名額、場次狀態、去重、SQLite 交易儲存、戰鬥因果、玩家票券及設定產生，並兩次實際重啟 API 驗證復原。核心檢查另包含 JSON 升級、回滾、資料損壞及五房 25 個玩家的模擬統計。目前 128 項核心檢查、229 項 HTTP 斷言通過；另有 36 項實際 Chromium 主控台檢查，見 CONSOLE 文件。這不等同 Unity 編譯或 25 台頭盔連線效能驗收。
 
 本機 API 啟動後，也可在空閒房間執行一場明確標記的模擬紀錄：
 
@@ -90,8 +93,10 @@ python scripts/demo_combat.py --room 1
 src/VrCommand.Core/      任務與場次管理規則
 src/VrCommand.Persistence/ SQLite 交易式事件儲存
 src/VrCommand.Api/       ASP.NET Core 管理 API
+src/VrCommand.Api/wwwroot/console/ 瀏覽器主控台與平面配置器
 clients/unity/          Quest 3 Unity 來源碼工程
 tests/VrCommand.Checks/  無外部測試套件的核心規則驗證
+tests/browser/          Chromium 與實際 API 的操作驗證
 scripts/                HTTP 整合驗證
 examples/               可直接送入 API 的任務範例
 docs/                   規格、開發路線、驗收與外部依賴

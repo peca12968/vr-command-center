@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>VR COMMAND｜場館主控台</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./console.css">
+  <script type="module" src="./console.js"></script>
+</head>
+<body>
+  <header class="masthead">
+    <div><p class="eyebrow">VR COMMAND / OPERATIONS</p><h1>場館主控台</h1></div>
+    <div class="system-status"><span class="status-dot"></span><span id="identity">尚未登入</span><button id="logout" class="quiet" hidden>登出</button></div>
+  </header>
+  <main>
+    <section id="login-panel" class="panel login-panel">
+      <p class="eyebrow">CONTROL ACCESS</p><h2>連接你的控制台</h2>
+      <p class="muted">使用主控台或所屬房間的操作憑證登入。</p>
+      <form id="login-form">
+        <label>操作憑證<input id="login-key" type="password" required autocomplete="off" maxlength="512"></label>
+        <button type="submit">登入控制台</button>
+      </form>
+      <p class="hint">憑證僅保留於本頁記憶體，關閉或重新載入後需重新登入。</p>
+    </section>
+    <div id="notice" role="status" aria-live="polite" hidden></div>
+    <div id="workspace" hidden>
+      <div class="toolbar"><nav aria-label="工作區"><button id="tab-operations" class="tab active" aria-pressed="true">房間與場次</button><button id="tab-missions" class="tab" aria-pressed="false">任務庫與編輯</button></nav><span id="last-update" class="hint">等待更新</span><button id="refresh" class="quiet">重新整理</button></div>
+      <section id="operations-view">
+        <div class="section-heading"><div><p class="eyebrow">VENUE STATUS</p><h2>五房間總覽</h2></div><span class="badge">Quest 3 優先</span></div>
+        <div id="rooms" class="rooms"></div>
+        <div class="two-columns">
+          <section class="panel"><h3>準備新場次</h3><form id="create-session-form">
+            <fieldset id="create-fields"><label>任務<select id="launch-mission" required></select></label>
+              <div class="form-row"><label>連線模式<select id="launch-mode"><option value="Independent">單房獨立</option><option value="Linked">五房全連線</option></select></label><label>房間<select id="launch-room"></select></label></div>
+              <button type="submit">建立準備場次</button>
+            </fieldset>
+          </form><p class="hint">建立後加入玩家，再開始任務。頭盔連線與就緒狀態尚未回報。</p></section>
+          <section class="panel"><h3>選取場次</h3><label class="check"><input id="include-ended" type="checkbox">包含已結束紀錄</label><label>場次<select id="session-select"><option value="">目前沒有場次</option></select></label><p id="selection-hint" class="hint">選取後可查看名冊、控制環境與統計。</p></section>
+        </div>
+        <section id="session-panel" class="panel" hidden>
+          <div class="section-heading"><div><p id="session-meta" class="eyebrow"></p><h2 id="session-name"></h2></div><span id="session-phase" class="badge"></span></div>
+          <p id="session-briefing" class="briefing"></p>
+          <div id="session-controls" class="button-row"><button data-command="Begin">開始任務</button><button data-command="Pause" class="secondary">暫停</button><button data-command="Resume" class="secondary">繼續</button><button data-command="End" class="danger">結束場次</button></div>
+          <div id="pending-command" class="warning" hidden><span>命令結果尚未確認。重試會沿用同一筆命令，不會重複套用。</span><button id="retry-command">重試確認結果</button></div>
+          <div class="two-columns controls-grid">
+            <section><h3>即時環境</h3><p id="live-environment" class="hint"></p><form id="environment-form"><fieldset id="environment-fields"><div class="form-row"><label>模式<select id="live-mode"><option value="VR">VR</option><option value="MR">MR</option></select></label><label>天氣<select id="live-weather"><option value="Clear">晴朗</option><option value="Rain">下雨</option><option value="Fog">濃霧</option><option value="Storm">暴風雨</option></select></label><label>時段<select id="live-time"><option value="Day">白天</option><option value="Night">夜晚</option></select></label></div><label class="check"><input id="live-lightning" type="checkbox">閃電</label><div class="button-row"><button type="submit" class="secondary">套用環境</button><button type="button" id="reload-environment" class="quiet">載入目前設定</button></div></fieldset></form></section>
+            <section><h3>敵軍設定</h3><p id="live-enemies" class="hint"></p><form id="enemies-form"><fieldset id="enemies-fields"><div class="form-row"><label>敵軍數量<input id="live-count" type="number" min="0" max="100" required></label><label>攻擊方式<select id="live-behavior"><option value="Hold">守備</option><option value="Patrol">巡邏</option><option value="Advance">推進</option></select></label></div><label class="check"><input id="live-auto-attack" type="checkbox">自動攻擊</label><div class="button-row"><button type="submit" class="secondary">套用敵軍設定</button><button type="button" id="reload-enemies" class="quiet">載入目前設定</button></div></fieldset></form></section>
+          </div><p class="hint">設定會儲存至場次紀錄。Quest 畫面同步程式尚待編譯驗證；實際敵軍 AI、MR 與硬體控制尚未接入。</p>
+          <div class="subheading"><h3>玩家名冊</h3><span id="player-count" class="hint"></span></div>
+          <form id="join-form"><fieldset id="join-fields" class="join-fields"><label>玩家名稱<input id="player-name" required maxlength="80" placeholder="例如 Alpha 01"></label><label>房間<select id="player-room"></select></label><label>頭盔<select id="player-headset"><option value="Quest3">Meta Quest 3</option><option value="ViveXr">VIVE XR（後續整合）</option></select></label><button type="submit">加入名冊</button></fieldset></form>
+          <div class="table-scroll"><table><caption class="sr-only">目前場次玩家名冊</caption><thead><tr><th>玩家</th><th>房間／席位</th><th>頭盔分類</th><th>操作</th></tr></thead><tbody id="roster"></tbody></table></div>
+          <fieldset id="ticket-fields" class="form-row ticket-fields"><label>遊戲伺服器地址<input id="game-address" placeholder="例如 192.168.1.100" maxlength="253"></label><label>連線埠<input id="game-port" type="number" value="7777" min="1024" max="65535"></label><p class="hint">點選玩家的「下載連線檔」配發五分鐘入場票券。檔案不含控制台憑證；地址須為頭盔可連到的遊戲伺服器。</p></fieldset>
+          <div class="subheading"><h3>任務統計</h3><span id="statistics-origin" class="badge"></span></div>
+          <div class="table-scroll"><table><caption class="sr-only">玩家戰鬥統計，含已離開玩家</caption><thead><tr><th>玩家</th><th>彈藥</th><th>擊殺</th><th>耗損</th><th>中彈</th><th>命中率</th><th>剩餘血量</th></tr></thead><tbody id="statistics"></tbody></table></div>
+          <p class="hint">含曾離開的玩家。未收到戰鬥事件時數值為零；名冊與統計不代表裝置在線。</p>
+          <div class="subheading"><h3>最近操作紀錄</h3><span class="hint">最多 20 筆，非 3D 回放</span></div>
+          <ol id="event-list" class="event-list"></ol>
+        </section>
+      </section>
+      <section id="missions-view" hidden>
+        <div class="section-heading"><div><p class="eyebrow">MISSION PLANNER</p><h2>任務庫與編輯</h2></div><span id="mission-permission" class="hint"></span></div>
+        <section class="panel"><div class="form-row"><label>已儲存任務<select id="edit-mission"></select></label><button id="load-mission" class="secondary">載入為草稿</button><button id="new-mission" class="quiet">新任務</button></div><p class="hint">每次儲存建立一份新任務，既有任務及進行中的場次不變。</p></section>
+        <form id="mission-form" class="panel"><fieldset id="mission-fields">
+          <div class="form-row"><label>任務名稱<input id="draft-name" required maxlength="100" placeholder="輸入任務名稱"></label><label>任務時間（秒）<input id="draft-duration" type="number" min="60" max="14400" value="900" required></label></div>
+          <label>任務內容<textarea id="draft-briefing" rows="3" maxlength="10000"></textarea></label>
+          <div class="two-columns"><section><h3>初始環境</h3><div class="form-row"><label>模式<select id="draft-mode"><option value="VR">VR</option><option value="MR">MR</option></select></label><label>天氣<select id="draft-weather"><option value="Clear">晴朗</option><option value="Rain">下雨</option><option value="Fog">濃霧</option><option value="Storm">暴風雨</option></select></label><label>時段<select id="draft-time"><option value="Day">白天</option><option value="Night">夜晚</option></select></label></div><label class="check"><input id="draft-lightning" type="checkbox">閃電</label></section><section><h3>初始敵軍</h3><div class="form-row"><label>數量<input id="draft-count" type="number" min="0" max="100" value="8" required></label><label>攻擊方式<select id="draft-behavior"><option value="Hold">守備</option><option value="Patrol">巡邏</option><option value="Advance">推進</option></select></label></div><label class="check"><input id="draft-auto-attack" type="checkbox" checked>自動攻擊</label></section></div>
+          <div class="subheading"><h3>場景物件配置</h3><span class="hint">上視圖 · 公尺 · 0.5 m 格點</span></div>
+          <div class="layout-editor"><div><svg id="layout-map" viewBox="-11 -11 22 22" role="group" aria-label="物件配置圖，可拖曳物件或用方向鍵移動" tabindex="0"><defs><pattern id="grid" width="1" height="1" patternUnits="userSpaceOnUse"><path d="M 1 0 L 0 0 0 1" fill="none" stroke="#36453b" stroke-width="0.025"/></pattern></defs><rect x="-10" y="-10" width="20" height="20" fill="url(#grid)"/><path d="M -10 0 H 10 M 0 -10 V 10" stroke="#758c77" stroke-width="0.04"/><g id="prop-layer"></g></svg><p class="hint">拖曳移動，選取後方向鍵微調。圖面僅供配置，尚無碰撞檢查或場館校正；Unity 尚未載入此配置。</p></div><div class="prop-inspector"><div class="button-row"><button id="add-sandbag" type="button" class="secondary">加入沙包</button><button id="add-barrel" type="button" class="secondary">加入油桶</button></div><label>選取物件<select id="prop-select"></select></label><div id="prop-inspector"><label>素材代碼<input id="prop-asset" maxlength="100"></label><div class="form-row"><label>X<input id="prop-x" type="number" step="0.5"></label><label>Y<input id="prop-y" type="number" step="0.5"></label><label>Z<input id="prop-z" type="number" step="0.5"></label></div><label>水平旋轉（度）<input id="prop-yaw" type="number" step="15"></label><div class="button-row"><button id="rotate-prop" type="button" class="quiet">旋轉 15°</button><button id="remove-prop" type="button" class="danger">移除物件</button></div></div></div></div>
+          <div class="save-row"><button type="submit">儲存為新任務</button><span id="draft-status" class="hint">尚未儲存的草稿</span></div>
+        </fieldset></form>
+      </section>
+      <footer>開發原型 v0.6 · 頭盔實機、25 人連線、AI、硬體與 3D 回放仍待驗證。</footer>
+    </div>
+  </main>
+</body>
+</html>

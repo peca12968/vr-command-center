@@ -3,4 +3,7 @@
     <ProjectReference Include="../VrCommand.Core/VrCommand.Core.csproj" />
     <ProjectReference Include="..\VrCommand.Persistence\VrCommand.Persistence.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

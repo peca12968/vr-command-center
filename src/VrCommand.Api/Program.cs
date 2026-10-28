@@ -2,7 +2,11 @@ using System.Text.Json.Serialization;
 using VrCommand.Core;
 using VrCommand.Persistence;
 
-var builder = WebApplication.CreateBuilder(args);
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+{
+    Args = args,
+    WebRootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot")
+});
 var operatorKeyFile = builder.Configuration["OperatorKeyFile"];
 if (!string.IsNullOrWhiteSpace(operatorKeyFile))
     builder.Configuration.AddJsonFile(Path.GetFullPath(operatorKeyFile), optional: false, reloadOnChange: false)
@@ -25,6 +29,20 @@ builder.Services.AddSingleton(services => new SessionManager(services.GetRequire
 var app = builder.Build();
 // Fail startup on inconsistent persisted histories, before reporting a healthy service.
 app.Services.GetRequiredService<SessionManager>();
+
+app.Use(async (context, next) =>
+{
+    context.Response.Headers.XContentTypeOptions = "nosniff";
+    context.Response.Headers["Referrer-Policy"] = "no-referrer";
+    if (context.Request.Path.StartsWithSegments("/console"))
+    {
+        context.Response.Headers.ContentSecurityPolicy = "default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
+        context.Response.Headers.CacheControl = "no-store";
+    }
+    await next(context);
+});
+app.UseDefaultFiles();
+app.UseStaticFiles();
 
 app.Use(async (context, next) =>
 {
@@ -59,7 +77,7 @@ app.Use(async (context, next) =>
     }
 });
 
-app.MapGet("/", () => new { service = "VR Command Center", stage = "control, telemetry and Quest integration prototype", version = "0.5.0" });
+app.MapGet("/", () => new { service = "VR Command Center", stage = "operator console and Quest integration prototype", version = "0.6.0" });
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/api/me", (HttpContext context) => Actor(context));
 app.MapGet("/api/rooms", (SessionManager manager, HttpContext context) => manager.Rooms(Actor(context)));

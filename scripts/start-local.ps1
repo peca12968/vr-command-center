@@ -13,6 +13,7 @@ if (-not (Test-Path -LiteralPath $keyPath)) {
     @{ OperatorKeys = $keys } | ConvertTo-Json | Set-Content -LiteralPath $keyPath -Encoding utf8NoBOM
 }
 Write-Host "Local credential file: $keyPath (excluded from Git; keys are not printed)"
+Write-Host "Operator console: http://127.0.0.1:$Port/console/"
 Push-Location $projectRoot
 try {
     dotnet run --project src/VrCommand.Api --configuration Release -- --urls "http://127.0.0.1:$Port" --OperatorKeyFile $keyPath

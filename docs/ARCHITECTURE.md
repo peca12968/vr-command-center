@@ -24,7 +24,7 @@ flowchart TB
     Sim --> Spectator
 ```
 
-圖為目標架構。v0.5 已驗證控制台授權、管理 API、任務 JSON、SQLite 事件／統計及短效玩家票券；Unity 的桌面伺服器／頭盔接入來源碼在 `clients/unity/`，仍待編譯與運行，沒有權威戰鬥或世界快照。事件契約見 `SESSION_PROTOCOL.md`、`COMBAT_PROTOCOL.md`，儲存見 `STORAGE.md`，Quest 原型見 `QUEST3.md`。
+圖為目標架構。v0.6 已驗證控制台授權、管理 API、任務 JSON、SQLite 事件／統計、短效玩家票券，以及同源 `/console/` 的管理／任務與平面配置介面。Unity 的桌面伺服器／頭盔接入來源碼在 `clients/unity/`，仍待編譯與運行，沒有權威戰鬥或世界快照。事件契約見 `SESSION_PROTOCOL.md`、`COMBAT_PROTOCOL.md`，儲存見 `STORAGE.md`，Quest 原型見 `QUEST3.md`，瀏覽器操作見 `CONSOLE.md`。
 
 管理 API 處理低頻設定與場次生命週期；頭部／手部姿態、射擊與 AI 不經此 REST API 做每幀同步。原型選用 NGO 2.7.0／Unity Transport，桌面伺服器向管理 API 驗票及讀取設定，頭盔只帶短效玩家票券。後續遊戲伺服器負責權威命中判定、AI、環境狀態與事件排序。網路框架仍須雙裝置實測評估，尚未承諾第三方付費服務。
 
