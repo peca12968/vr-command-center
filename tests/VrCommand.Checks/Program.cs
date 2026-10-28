@@ -28,18 +28,18 @@ try
     Reject<ArgumentException>(() => store.Create(draft with { Props = [new("barrel", new(float.NaN, 0, 0), 0)] }),
         "Non-finite prop coordinates rejected");
     var manager = new SessionManager();
-    Reject<ArgumentException>(() => manager.Start(SessionMode.Linked, [1, 2, 3, 4, 4], mission), "Repeated room rejected");
-    Reject<ArgumentException>(() => manager.Start(SessionMode.Independent, [0], mission), "Invalid room rejected");
-    var independent = Enumerable.Range(1, 5).Select(room => manager.Start(SessionMode.Independent, [room], mission)).ToArray();
+    Reject<ArgumentException>(() => manager.Create(SessionMode.Linked, [1, 2, 3, 4, 4], mission), "Repeated room rejected");
+    Reject<ArgumentException>(() => manager.Create(SessionMode.Independent, [0], mission), "Invalid room rejected");
+    var independent = Enumerable.Range(1, 5).Select(room => manager.Create(SessionMode.Independent, [room], mission)).ToArray();
     Check(manager.Rooms().All(r => r.SessionId.HasValue), "Five independent rooms coexist");
-    Reject<InvalidOperationException>(() => manager.Start(SessionMode.Linked, [1, 2, 3, 4, 5], mission),
+    Reject<InvalidOperationException>(() => manager.Create(SessionMode.Linked, [1, 2, 3, 4, 5], mission),
         "Occupied rooms cannot join another session");
     var playerId = Guid.NewGuid();
     manager.Join(independent[0].Id, playerId, "Alpha", 1, HeadsetKind.Quest3);
     Reject<InvalidOperationException>(() => manager.Join(independent[1].Id, playerId, "Alpha", 2, HeadsetKind.ViveXr),
         "One player cannot occupy two rooms");
     foreach (var session in independent) manager.End(session.Id);
-    var linked = manager.Start(SessionMode.Linked, [1, 2, 3, 4, 5], mission);
+    var linked = manager.Create(SessionMode.Linked, [1, 2, 3, 4, 5], mission);
     foreach (var room in Enumerable.Range(1, 5))
         foreach (var index in Enumerable.Range(1, 5))
             manager.Join(linked.Id, Guid.NewGuid(), $"P{room}-{index}", room,
@@ -57,8 +57,8 @@ try
     Check(manager.Get(linked.Id).Players.Length == 25, "Leaving releases a player slot");
     manager.End(linked.Id);
     Check(manager.Rooms().All(r => r.SessionId is null && r.PlayerCount == 0), "Ending releases every room and player");
-    Reject<KeyNotFoundException>(() => manager.Get(linked.Id), "Ended session is unavailable");
-    var concurrent = manager.Start(SessionMode.Independent, [1], mission);
+    Check(manager.Get(linked.Id).State == SessionState.Ended, "Ended session remains available as history");
+    var concurrent = manager.Create(SessionMode.Independent, [1], mission);
     var accepted = 0;
     Parallel.For(0, 30, i =>
     {
@@ -66,6 +66,7 @@ try
         catch (InvalidOperationException) { }
     });
     Check(accepted == 5 && manager.Get(concurrent.Id).Players.Length == 5, "Concurrent joins cannot exceed room capacity");
+    LifecycleChecks.Run(Check, directory, mission);
     Console.WriteLine($"All {checks} checks passed. These are control-plane checks, not headset or network load tests.");
 }
 finally

@@ -73,12 +73,8 @@ public sealed class MissionStore(string directory)
             throw new ArgumentException("Briefing must be a string of at most 10000 characters.");
         if (draft.DurationSeconds is < 60 or > 14400)
             throw new ArgumentException("Mission duration must be 60–14400 seconds.");
-        if (draft.Environment is null || !Enum.IsDefined(draft.Environment.Mode)
-            || !Enum.IsDefined(draft.Environment.Weather) || !Enum.IsDefined(draft.Environment.TimeOfDay))
-            throw new ArgumentException("Environment settings are invalid.");
-        if (draft.Enemies is null || draft.Enemies.Count is < 0 or > 100
-            || !Enum.IsDefined(draft.Enemies.Behavior))
-            throw new ArgumentException("Enemy settings are invalid.");
+        ValidateEnvironment(draft.Environment);
+        ValidateEnemies(draft.Enemies);
         if (draft.Props is null || draft.Props.Length > 500)
             throw new ArgumentException("At most 500 props may be configured.");
         foreach (var prop in draft.Props)
@@ -89,5 +85,18 @@ public sealed class MissionStore(string directory)
                 || !float.IsFinite(prop.YawDegrees))
                 throw new ArgumentException("Prop placement is invalid.");
         }
+    }
+
+    public static void ValidateEnvironment(EnvironmentSettings? settings)
+    {
+        if (settings is null || !Enum.IsDefined(settings.Mode)
+            || !Enum.IsDefined(settings.Weather) || !Enum.IsDefined(settings.TimeOfDay))
+            throw new ArgumentException("Environment settings are invalid.");
+    }
+
+    public static void ValidateEnemies(EnemySettings? settings)
+    {
+        if (settings is null || settings.Count is < 0 or > 100 || !Enum.IsDefined(settings.Behavior))
+            throw new ArgumentException("Enemy settings are invalid.");
     }
 }

@@ -2,7 +2,7 @@
 
 五房間、總計 25 人的 VR/MR 軍事戰鬥遊戲系統，目標支援 VIVE XR 與 Meta Quest 3。
 
-目前為 **v0.1 管理後端原型**。已提供房間與玩家名額管理、任務設定儲存及 REST API；尚未交付頭盔遊戲端、戰鬥模擬、管理畫面、硬體控制、3D 觀戰或回放。`ViveXr`、`Quest3` 目前只是玩家裝置分類，不能作為實機相容證據。
+目前為 **v0.2 管理後端原型**。已提供房間與玩家名額管理、任務設定儲存、場次開始／暫停／恢復／結束、環境與敵軍設定命令，以及可在重啟後重建狀態的事件紀錄。尚未交付頭盔遊戲端、戰鬥模擬、管理畫面、硬體控制、3D 觀戰或回放。`ViveXr`、`Quest3` 目前只是玩家裝置分類，不能作為實機相容證據。
 
 ## 開發位置
 
@@ -14,6 +14,7 @@
 - 本次進度與接續工作：[PROGRESS.md](docs/PROGRESS.md)
 - 硬體對接資料清單：[HARDWARE.md](docs/HARDWARE.md)
 - API：[API.md](docs/API.md)
+- 場次與事件契約：[SESSION_PROTOCOL.md](docs/SESSION_PROTOCOL.md)
 
 ## 啟動
 
@@ -27,7 +28,7 @@ dotnet run --project src/VrCommand.Api --configuration Release --no-build -- --u
 
 `GET http://127.0.0.1:5080/health` 回傳服務狀態。這是本機開發 API，尚無登入與角色授權；目前僅綁定 loopback 使用。正式部署及房間控制台接入前須完成角色、裝置身分、傳輸保護與稽核。
 
-任務預設存於 API 專案的 `data/missions/`，已排除於 Git。可透過 `DataDirectory` 環境變數指定絕對路徑。場次與玩家名冊目前僅存記憶體，服務重啟會清空；任務會保留。任務時間是設定欄位，目前不會自動結束場次。
+任務預設存於 API 專案的 `data/missions/`，可透過 `DataDirectory` 環境變數指定絕對路徑。場次事件預設位於任務目錄旁的 `sessions/`，亦可用 `SessionDataDirectory` 指定另一目錄；兩者不可相同，均已排除於 Git。場次、名冊、執行設定與命令去重紀錄會在重啟後恢復；結束後保留歷史並釋放房間。事件目錄限單一 API 程序寫入。任務時間目前不會自動結束場次。
 
 ## 操作範例
 
@@ -44,6 +45,18 @@ Invoke-RestMethod "$baseUrl/api/rooms"
 
 `Independent` 每次指定一個房間；可同時建立五場。`Linked` 必須指定全部五個房間，且全部空閒。每房最多五人是初始設計假設，可於後續需求確認後調整；總上限維持 25 人。
 
+建立場次後狀態為 `Preparing`，至少加入一名玩家後才能發送 `Begin`。以下接續上例：
+
+```powershell
+$player = @{ playerId = [guid]::NewGuid().ToString(); name = 'Alpha'; roomId = 1; headset = 'Quest3' } | ConvertTo-Json
+$session = Invoke-RestMethod "$baseUrl/api/sessions/$($session.id)/players" -Method Post -ContentType application/json -Body $player
+$command = @{ commandId = [guid]::NewGuid().ToString(); action = 'Begin'; expectedSequence = $session.sequence } | ConvertTo-Json
+$receipt = Invoke-RestMethod "$baseUrl/api/sessions/$($session.id)/commands" -Method Post -ContentType application/json -Body $command
+$receipt.session
+```
+
+命令回應遺失時重送相同 `commandId` 與相同內容；伺服器回覆原始接受序號及最新狀態，不會再次套用命令。修改命令內容須使用新的 ID。這個契約適用於 `/commands`；建立場次與加入／離開的舊操作尚未支援呼叫端指定去重 ID。
+
 ## HTTP 整合驗證
 
 需要 Python 3.12 以上，使用標準函式庫，不需安裝套件：
@@ -52,7 +65,7 @@ Invoke-RestMethod "$baseUrl/api/rooms"
 python scripts/smoke_api.py
 ```
 
-腳本啟動獨立的本機 API、使用測試資料目錄，驗證任務儲存、HTTP 錯誤碼、五房間連線名額及場次結束後釋放，最後關閉服務並清理測試資料。這不等同 25 台頭盔的連線效能驗收。
+腳本啟動獨立的本機 API，驗證任務儲存、名額、狀態轉移、併發命令去重、版本衝突、第二個寫入程序被拒絕，以及兩次實際重啟後的活動／歷史場次恢復；最後關閉服務並清理測試資料。這不等同 25 台頭盔的連線效能驗收。
 
 ## 目錄
 

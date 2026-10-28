@@ -2,62 +2,94 @@ namespace VrCommand.Core;
 
 public enum SessionMode { Independent, Linked }
 public enum HeadsetKind { ViveXr, Quest3 }
+public enum SessionState { Preparing, Running, Paused, Ended }
+public enum ControlAction { Unspecified, Begin, Pause, Resume, End, SetEnvironment, SetEnemies }
 public record Player(Guid Id, string Name, int RoomId, HeadsetKind Headset);
 public record SessionView(Guid Id, SessionMode Mode, int[] RoomIds, Mission Mission,
-    DateTimeOffset StartedAtUtc, Player[] Players);
+    DateTimeOffset CreatedAtUtc, DateTimeOffset? StartedAtUtc, DateTimeOffset? EndedAtUtc,
+    SessionState State, Player[] Players, EnvironmentSettings Environment, EnemySettings Enemies, long Sequence);
 public record RoomView(int Id, int Capacity, Guid? SessionId, int PlayerCount);
+public record ControlCommand(Guid CommandId, ControlAction Action, EnvironmentSettings? Environment = null,
+    EnemySettings? Enemies = null, long? ExpectedSequence = null);
+public record CommandReceipt(Guid CommandId, long AppliedAtSequence, bool Duplicate, SessionView Session);
 
-// Control-plane prototype only. This does not run a combat simulation or track physical presence.
+// Control-plane only. Management events do not contain a 3D world or combat simulation.
 public sealed class SessionManager
 {
     public const int RoomCount = 5;
     public const int PlayersPerRoom = 5;
     public const int MaxPlayers = RoomCount * PlayersPerRoom;
     private readonly object gate = new();
-    private readonly Dictionary<Guid, SessionView> sessions = [];
+    private readonly ISessionEventStore eventStore;
+    private readonly Dictionary<Guid, History> sessions = [];
+    private sealed record History(SessionView View, SessionEvent[] Events);
 
-    public SessionView Start(SessionMode mode, int[] roomIds, Mission mission)
+    public SessionManager(ISessionEventStore? eventStore = null)
     {
-        ArgumentNullException.ThrowIfNull(roomIds);
-        ArgumentNullException.ThrowIfNull(mission);
-        MissionStore.Validate(mission.Definition);
-        if (!Enum.IsDefined(mode)) throw new ArgumentException("Invalid session mode.");
-        var expected = mode == SessionMode.Independent ? 1 : RoomCount;
-        if (roomIds.Length != expected || roomIds.Distinct().Count() != expected
-            || roomIds.Any(id => id < 1 || id > RoomCount))
-            throw new ArgumentException("Independent mode requires one room; linked mode requires rooms 1–5.");
+        this.eventStore = eventStore ?? new MemorySessionEventStore();
+        foreach (var events in this.eventStore.Load())
+        {
+            SessionView? view = null;
+            var ids = new HashSet<Guid>();
+            var commands = new HashSet<Guid>();
+            foreach (var entry in events)
+            {
+                if (!ids.Add(entry.EventId)) throw new InvalidDataException("Duplicate event ID in session history.");
+                if (entry.Kind == SessionEventKind.ControlApplied && !commands.Add(entry.Read<ControlCommand>().CommandId))
+                    throw new InvalidDataException("Duplicate command ID in session history.");
+                view = SessionProjection.Apply(view, entry);
+            }
+            if (view is null || !sessions.TryAdd(view.Id, new(view, events)))
+                throw new InvalidDataException("Empty or duplicate session history.");
+        }
+        var active = Active().ToArray();
+        var rooms = active.SelectMany(s => s.RoomIds).ToArray();
+        var players = active.SelectMany(s => s.Players).Select(p => p.Id).ToArray();
+        if (rooms.Distinct().Count() != rooms.Length || players.Distinct().Count() != players.Length)
+            throw new InvalidDataException("Restored active sessions contain conflicting reservations.");
+    }
+
+    public SessionView Create(SessionMode mode, int[] roomIds, Mission mission)
+    {
+        SessionProjection.ValidateCreation(new(mode, roomIds, mission));
         lock (gate)
         {
-            if (sessions.Values.Any(s => s.RoomIds.Intersect(roomIds).Any()))
+            if (Active().Any(s => s.RoomIds.Intersect(roomIds).Any()))
                 throw new InvalidOperationException("A requested room is already in use.");
-            var session = new SessionView(Guid.NewGuid(), mode, roomIds.Order().ToArray(),
-                CloneMission(mission), DateTimeOffset.UtcNow, []);
-            sessions.Add(session.Id, session);
-            return Snapshot(session);
+            var id = Guid.NewGuid();
+            var entry = SessionEvent.Create(id, 1, SessionEventKind.Created,
+                new SessionCreated(mode, roomIds.Order().ToArray(), mission));
+            return Commit(null, entry);
         }
     }
 
     public SessionView Get(Guid id)
     {
-        lock (gate) return Snapshot(Find(id));
+        lock (gate) return Snapshot(Find(id).View);
+    }
+
+    public SessionView[] List(bool includeEnded = false)
+    {
+        lock (gate) return sessions.Values.Select(h => h.View)
+            .Where(s => includeEnded || s.State != SessionState.Ended)
+            .OrderByDescending(s => s.CreatedAtUtc).Select(Snapshot).ToArray();
+    }
+
+    public SessionEvent[] Events(Guid id, long after = 0, int limit = 100)
+    {
+        if (after < 0 || limit is < 1 or > 500) throw new ArgumentException("Use after >= 0 and limit 1–500.");
+        lock (gate) return Find(id).Events.Where(e => e.Sequence > after).Take(limit).ToArray();
     }
 
     public SessionView Join(Guid sessionId, Guid playerId, string name, int roomId, HeadsetKind headset)
     {
-        if (playerId == Guid.Empty || string.IsNullOrWhiteSpace(name) || name.Length > 80
-            || !Enum.IsDefined(headset)) throw new ArgumentException("Invalid player details.");
         lock (gate)
         {
-            var session = Find(sessionId);
-            if (!session.RoomIds.Contains(roomId)) throw new ArgumentException("Room is outside this session.");
-            if (sessions.Values.Any(s => s.Players.Any(p => p.Id == playerId)))
+            var history = Find(sessionId);
+            if (Active().Any(s => s.Players.Any(p => p.Id == playerId)))
                 throw new InvalidOperationException("Player already belongs to a session.");
-            if (session.Players.Count(p => p.RoomId == roomId) >= PlayersPerRoom
-                || sessions.Values.Sum(s => s.Players.Length) >= MaxPlayers)
-                throw new InvalidOperationException("Player capacity reached.");
-            var updated = session with { Players = [.. session.Players, new(playerId, name, roomId, headset)] };
-            sessions[sessionId] = updated;
-            return Snapshot(updated);
+            return Commit(history, SessionEvent.Create(sessionId, history.View.Sequence + 1,
+                SessionEventKind.PlayerJoined, new Player(playerId, name, roomId, headset)));
         }
     }
 
@@ -65,41 +97,61 @@ public sealed class SessionManager
     {
         lock (gate)
         {
-            var session = Find(sessionId);
-            if (!session.Players.Any(p => p.Id == playerId)) throw new KeyNotFoundException("Player does not exist.");
-            sessions[sessionId] = session with { Players = session.Players.Where(p => p.Id != playerId).ToArray() };
+            var history = Find(sessionId);
+            Commit(history, SessionEvent.Create(sessionId, history.View.Sequence + 1,
+                SessionEventKind.PlayerLeft, new PlayerLeft(playerId)));
         }
     }
 
-    public void End(Guid id)
+    public CommandReceipt Execute(Guid id, ControlCommand command)
     {
+        ArgumentNullException.ThrowIfNull(command);
+        SessionProjection.ValidateCommand(command);
         lock (gate)
         {
-            Find(id);
-            sessions.Remove(id);
+            var history = Find(id);
+            var previous = history.Events.FirstOrDefault(e => e.Kind == SessionEventKind.ControlApplied
+                && e.Read<ControlCommand>().CommandId == command.CommandId);
+            if (previous is not null)
+            {
+                if (previous.Read<ControlCommand>() != command)
+                    throw new InvalidOperationException("Command ID already used with different content.");
+                return new(command.CommandId, previous.Sequence, true, Snapshot(history.View));
+            }
+            if (command.ExpectedSequence.HasValue && command.ExpectedSequence != history.View.Sequence)
+                throw new InvalidOperationException("Session changed; refresh before issuing this command.");
+            var entry = SessionEvent.Create(id, history.View.Sequence + 1, SessionEventKind.ControlApplied, command);
+            var updated = Commit(history, entry);
+            return new(command.CommandId, entry.Sequence, false, updated);
         }
     }
+
+    public void End(Guid id) => Execute(id, new(Guid.NewGuid(), ControlAction.End));
 
     public RoomView[] Rooms()
     {
-        lock (gate)
+        lock (gate) return Enumerable.Range(1, RoomCount).Select(id =>
         {
-            return Enumerable.Range(1, RoomCount).Select(id =>
-            {
-                var session = sessions.Values.SingleOrDefault(s => s.RoomIds.Contains(id));
-                return new RoomView(id, PlayersPerRoom, session?.Id, session?.Players.Count(p => p.RoomId == id) ?? 0);
-            }).ToArray();
-        }
+            var session = Active().SingleOrDefault(s => s.RoomIds.Contains(id));
+            return new RoomView(id, PlayersPerRoom, session?.Id, session?.Players.Count(p => p.RoomId == id) ?? 0);
+        }).ToArray();
     }
 
-    private SessionView Find(Guid id) => sessions.TryGetValue(id, out var session)
-        ? session : throw new KeyNotFoundException("Session does not exist.");
-    private static Mission CloneMission(Mission mission) => mission with
+    private SessionView Commit(History? previous, SessionEvent entry)
     {
-        Definition = mission.Definition with { Props = [.. mission.Definition.Props] }
-    };
+        var view = SessionProjection.Apply(previous?.View, entry);
+        SessionEvent[] events = [.. previous?.Events ?? [], entry];
+        eventStore.Save(entry.SessionId, events); // Memory advances only after the durable write succeeds.
+        sessions[entry.SessionId] = new(view, events);
+        return Snapshot(view);
+    }
+
+    private IEnumerable<SessionView> Active() => sessions.Values.Select(h => h.View).Where(s => s.State != SessionState.Ended);
+    private History Find(Guid id) => sessions.TryGetValue(id, out var history)
+        ? history : throw new KeyNotFoundException("Session does not exist.");
     private static SessionView Snapshot(SessionView session) => session with
     {
-        RoomIds = [.. session.RoomIds], Players = [.. session.Players], Mission = CloneMission(session.Mission)
+        RoomIds = [.. session.RoomIds], Players = [.. session.Players],
+        Mission = session.Mission with { Definition = session.Mission.Definition with { Props = [.. session.Mission.Definition.Props] } }
     };
 }
