@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import secrets
+import sqlite3
 import socket
 import struct
 import subprocess
@@ -166,6 +167,7 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         result = json.loads(stdout)
         frames = [json.loads(line) for line in recording.read_text(encoding="utf-8").splitlines()]
         info = request(route)
+        check(info["header"]["environmentVersion"] == 1, "New world source explicitly versions its deterministic environment presentation")
         check(info["complete"] and info["acceptedSequence"] == result["frames"] == 44, "All ordered source frames durably seal after combat confirmation")
         check(len(info["header"]["props"]) == 2, "World archive uses actual canonical mission geometry")
         check(any(player["rig"]["kind"] == "Simulated" for row in frames if row["type"] == "frame" for player in row["payload"]["frame"]["players"]), "Head and both hands retain explicit synthetic rig provenance")
@@ -196,6 +198,15 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         request(route + "/watch?rate=999", expected=400)
         request(route + "/watch?fromMs=-1", expected=400)
         check(True, "Unbounded replay speed and invalid seeks are rejected")
+        unsupported_header = json.loads(json.dumps(info["header"]))
+        unsupported_header["environmentVersion"] = 2
+        publisher = WebSocket(port, route + "/publish", tokens["GameServer"])
+        check(publisher.send({"type": "header", "payload": unsupported_header})["type"] == "error", "Unknown environment versions cannot publish a world")
+        publisher.close()
+        unsupported_header["environmentVersion"] = 0
+        publisher = WebSocket(port, route + "/publish", tokens["GameServer"])
+        check(publisher.send({"type": "header", "payload": unsupported_header})["type"] == "error", "Existing versioned world cannot be relabeled as a legacy presentation")
+        publisher.close()
         cameras = route + "/cameras"
         camera_id = str(uuid4())
         camera_route = cameras + "/" + camera_id
@@ -223,8 +234,20 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         check(request(camera_route, method="PUT", body=camera)["deleted"] and request(cameras) == [], "Late camera save and remove retries do not resurrect a removed position")
         process.terminate()
         process.wait(timeout=10)
+        # A pre-v0.16 fixture: same known frames and source, header stored before the new optional field existed.
+        legacy_header = {key: value for key, value in info["header"].items() if key != "environmentVersion"}
+        legacy_db = sqlite3.connect(directory / "sessions/worlds.db")
+        try:
+            with legacy_db:
+                legacy_db.execute("UPDATE recordings SET header=? WHERE session=?", (json.dumps(legacy_header, separators=(",", ":")), session))
+        finally:
+            legacy_db.close()
+        frames[0]["payload"] = legacy_header
+        recording.write_text("".join(json.dumps(row, separators=(",", ":")) + "\n" for row in frames), encoding="utf-8")
+        info["header"]["environmentVersion"] = 0
         process = start()
         check(request(route) == info, "SQLite restart restores recording identity, cursor, time and completion")
+        check(request(route)["header"]["environmentVersion"] == 0, "Pre-versioned stored headers remain explicitly legacy instead of acquiring invented effects")
         check(request(cameras) == [] and request(cameras, "Room5") == [room_camera]
               and request(camera_route, method="PUT", body=camera)["deleted"], "SQLite restart preserves saved camera positions and removal history without changing world metadata")
         recovery = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30)

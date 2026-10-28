@@ -6,5 +6,6 @@
   </ItemGroup>
   <ItemGroup>
     <Content Update="wwwroot\**" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../clients/unity/Assets/VrCommand/Audio/*.wav" Link="wwwroot/console/audio/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -1,4 +1,6 @@
-# 場館主控台 v0.15
+# 場館主控台 v0.16
+
+v0.16 觀戰／持久回放新增依錄製 tick 重建的雨景與閃電，以及需點擊開啟的雨聲／雷聲。暫停、中斷或過期停止聲光活動，跳轉不補播過去雷聲；legacy 錄製保留原光霧，沒有原始音軌。操作／格式／驗證見 [ENVIRONMENT.md](ENVIRONMENT.md)。本機 122 項 Chromium 檢查通過，Unity protocol 現為 16；下方版本段落為歷次變更。
 
 v0.15 任務編輯新增「保存為下一版」、歷史版號分頁／讀回及新舊版明確開場；任務庫移至 SQLite，原 JSON 一次交易匯入並保留原檔。保存與讀回失敗保留同一請求，舊草稿不覆蓋新 head、舊場次也不跟著任務庫變動。完整操作及升級見 [MISSION_VERSIONS.md](MISSION_VERSIONS.md)；Unity wire protocol 14 與實機驗證邊界不變。
 

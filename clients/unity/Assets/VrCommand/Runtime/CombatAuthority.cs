@@ -210,6 +210,7 @@ namespace VrCommand.Unity
                 foreach (var prop in session.Props) Props.Add(new CombatPropState { id = prop.Id.ToString("D"), center = Vector(prop.Center), half = Vector(prop.HalfSize), yaw = prop.Yaw, barrel = prop.Kind == PropKind.Barrel });
             }
             var frame = session.World.Snapshot();
+            GetComponent<SceneAuthority>()?.PublishTick(frame.Tick, frame.Phase.ToString());
             var actors = new List<CombatActorState>();
             foreach (var player in frame.Players) actors.Add(new CombatActorState { id = player.Id.ToString("D"), room = player.RoomId, position = Vector(player.Head),
                 health = player.Health, magazine = player.Magazine, reserve = player.Reserve, connected = player.Connected, reloading = player.Reloading });

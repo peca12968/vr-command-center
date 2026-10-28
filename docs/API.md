@@ -1,4 +1,6 @@
-# 管理、統計與玩家接入 API v0.15
+# 管理、統計與玩家接入 API v0.16
+
+v0.16 世界 header 新增選用 `environmentVersion`（0 legacy／1 時間重現），未知版本或改動既有版本拒絕；舊回應補 0，原始持久 header 不改寫。新來源、API 與 UI 協同更新，見 [ENVIRONMENT.md](ENVIRONMENT.md)。管理命令路由不變。
 
 REST、UTF-8 JSON；預設範例地址 `http://127.0.0.1:5080`。列舉使用字串，不接受數字列舉。提供管理、統計與短效入場票券；姿態不經此 API。Unity 遊戲來源碼尚待編譯／運行。所有 `/api` 呼叫須帶 `Authorization: Bearer <credential>`；配置與角色表見 [AUTHORIZATION.md](AUTHORIZATION.md)。
 
@@ -55,7 +57,7 @@ REST、UTF-8 JSON；預設範例地址 `http://127.0.0.1:5080`。列舉使用字
 
 已處理的輸入錯誤回傳 400、認證失敗 401、權限不足 403、找不到任務／場次／玩家 404、房間占用／玩家重複／人數超限 409。領域錯誤 JSON 為 `{ "error": "原因" }`；JSON 語法與模型繫結錯誤由 ASP.NET Core 處理，回應內容格式可能不同。無法解析的 GUID 路徑因路由限制回傳 404。
 
-任務時間範圍 60–14400 秒；敵軍數量 0–100；物件最多 500。這些是原型輸入範圍，尚非實機效能承諾。環境可設定 `VR`／`MR`、`Clear`／`Rain`／`Fog`／`Storm`、`Day`／`Night` 及 `lightning` 布林值；可藉命令更新場次設定並留下事件。Unity 霧／光照／閃光程式尚待驗證，MR、雨粒子與雷聲尚未實作。
+任務時間範圍 60–14400 秒；敵軍數量 0–100；物件最多 500。這些是原型輸入範圍，尚非實機效能承諾。環境可設定 `VR`／`MR`、`Clear`／`Rain`／`Fog`／`Storm`、`Day`／`Night` 及 `lightning` 布林值；可藉命令更新場次設定並留下事件。v0.16 瀏覽器雨線／雷聲／光霧已有 Simulation 驗證，Unity 接入來源及單一天氣元件 SDK 型別檢查已完成，整個工程／MR／頭盔仍待驗。
 
 ## 玩家票券
 

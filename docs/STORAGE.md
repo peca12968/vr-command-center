@@ -1,4 +1,6 @@
-# 任務、事件儲存與升級 v0.15
+# 任務、事件儲存與升級 v0.16
+
+v0.16 worlds header 增加選用 environmentVersion，舊資料回應補 0 不改寫；binary 原始 header／checksum 保持。worlds.db schema 1、事件 envelope 6 與 missions.db schema 1 不變，仍需備份並一起更新 API／UI／來源，不能降回拒絕新欄位的 reader。Unity NGO 改 protocol 16；規範見 [ENVIRONMENT.md](ENVIRONMENT.md)，下段 v0.15 為前次遷移。
 
 v0.15 任務庫新增 DataDirectory/missions.db（獨立 schema 1）及 writer lease，原 GUID.json 在單一交易內匯入為各自第 1 版，之後以 SQLite 為權威來源。保存 request／作者／不可變版本與線性前置版本同交易，舊 JSON 保留備份，不再由 API 寫入；不可混用舊 API 或直接降版。完整保存 root data 及實際 API data／WAL，見 [MISSION_VERSIONS.md](MISSION_VERSIONS.md)。場次 envelope 6、events.db／worlds.db schema 1 及 NGO protocol 14 不變。
 

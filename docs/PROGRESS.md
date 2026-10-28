@@ -1,5 +1,25 @@
 # 開發進度
 
+## 2026-10-29：v0.16 天氣聲光、共用時間規則與舊錄製相容
+
+從乾淨 a3e2dee 接續完整長期目標，Quest 3 仍優先。本輪再次實際執行 Prepare，退出 198，日誌為「No valid Unity Editor license found」，沒有待執行中的建置；未操作登入／安全性提示、重裝已整理的 SDK 或重問已同意的條款。CLI 登入狀態不能單獨否定 Hub 授權，這裡以實際 Editor 結果為準。整個 Unity／NGO／ILPP／Shader／AudioImporter／18 項 EditMode／桌面程式／APK／頭盔均沒有成功證據。
+
+需求 5 新增共用 EnvironmentPresentation（C# 9／.NET Standard 2.1）：依權威 tick 決定雨、霧、日夜、閃電與延遲雷聲，不用本機時間推進戰鬥。每房 64／128 雨線，最多 640 根、1280 頂點單網格；聲音兩個可重用音源，都是顯示效果，不改命中／碰撞／尋路。首次觀察、倒退、長缺口及設定變更不補播錯過的雷聲，暫停／過期停止聲光活動。Unity 已接原子 WeatherState 與網格／AudioSource，生成器 NGO protocol／Android code 16、bundle 0.16.0，所有遊戲端需同版重建。
+
+新增 check-weather-unity-api.ps1，以本機真正 Unity 6000.3.27f1 的 CoreModule／AudioModule DLL 編譯單一 UnityWeatherView 與共用核心，0 警告／0 錯誤；不是 stub，但不涵蓋 SceneAuthority／NGO 或整個 Unity 工程。26 份 C# 9 語法檢查通過。新增三項未執行 EditMode，總數 18；沒有以部分 SDK 編譯替代實際 Editor 結果。
+
+世界 header 新增選用 environmentVersion，新來源預設 1、舊缺欄位保持 0，拒絕未知版本與改既有版本。舊資料庫 header 原文與 binary JSON／checksum 不改寫，WorldOutbox 用 codec 正規化後比對。新 NDJSON 也附擷取 UTC，舊來源仍保持原本未知／有時間狀態。worlds.db schema 1、session envelope 6 不變，但嚴格舊 reader 不接受新欄位，需 API／UI／來源協同升級且不可直接降版。schema 2 本機模擬回放沒有完整環境欄位，仍用既有顯示。
+
+瀏覽器觀戰／持久回放以同一時間規則重建雨、霧、日夜與閃電；按音效開關後才建立／恢復 Web Audio。兩份原創合成 PCM 由固定整數 DSP 生成，各 4 秒 mono／22050 Hz／16-bit，provenance 記 SHA-256，API 直接打包 Unity 同一份來源。重現不是原始音軌或影片，沒有聽感／聲壓或 MR 驗收；legacy 保留原光霧且音效關閉。規範、操作與可重現旗標 --environment-demo true 見 ENVIRONMENT。
+
+鎖定還原與 Release 建置通過，0 警告／0 錯誤；**472 核心、369 HTTP、43 世界串流、17 Node、122 Chromium，共 1023 項通過**。涵蓋 144 組 C#／JS 樣式、60 組雨座標、85 組雷聲步驟向量、舊 header／journal 恢復、版本拒絕、實際 Web Audio 非零輸出／延遲 cue、回放閃電、跳轉不補播、暫停與 legacy 顯示。世界測試首輪 43 項通過後，新增 fixture 的 Python sqlite connection 尚未關閉導致 Windows 清理失敗；已顯式 close，重跑整個世界測試退出 0。語法檢查首次誤用 Windows PowerShell 不支援 utf8NoBOM，改以環境的 PowerShell 7 執行後通過；腳本原本無需修改。已檢視 world-environment-rain-night.png，仍是基本幾何、合成頭手及軟體 WebGL，沒有頭盔證據。
+
+預覽確認活動 0／自有 PID 25348 後停止，root data 及實際 src/VrCommand.Api/data 完整備份至 artifacts/backups/pre-v016-20261029-075351，共 21 檔雜湊一致，pointer 為 artifacts/pre-v016-backup-path.txt。隔離 v0.16 DLL 明確指定資料目錄啟動，新 exec 29871。原 8 場歷史、9 任務版本／8 heads、3 world metadata 與主控鏡頭位置保留；metadata 僅在回應增加 legacy environmentVersion 0，另以備份 DB 比對確認原始 header 完全沒改寫。
+
+真實舊 v0.13 binary 來源 clocked-20261029-052526.worldlog 由 v0.16 工具恢復，64 幀 ack／complete 保持、整檔雜湊不變，API metadata 亦不變。另在自己的空房 5 新建 Simulation 夜間雷雨 d23778f9-1834-4afe-a50e-52a2760690b4，共 244 幀、environmentVersion 1、含 UTC 及 tick 140／180，完整封存後活動 0。所有原資料與鏡頭逐欄保留，兩份實際預覽 WAV 與 canonical bytes 一致；來源及摘要在 artifacts/v016-live-demo.json 與 artifacts/world-source-demo/weather-20261029-075426.worldlog。這不是 Quest 遊戲運行。
+
+後續先完成有效 Editor 授權與真正 Prepare／18 Tests／Desktop／Quest、雙 Quest 互見／頭手／撤銷／排空及聲光同步；再推進正式美術、MR、廠商硬體、VIVE 相容及 25 台效能。完整 11 項保持開發中，CI 按本輪推送實際結果另記，不改帳務或重跑已知受限工作。
+
 ## 2026-10-29：v0.15 不可變任務修訂、歷史與新舊版開場
 
 上一輪 v0.14.1 已推送及部署鏡頭位置，屬於具體進展。本輪從乾淨的 9639a32 接續，CLI 仍 loggedIn=false、active=false／licenses 空，未找到新的常見授權檔；沒有重跑同一個 Prepare 或重啟舊回呼。最近 Editor 結果仍為 198，Hub 登入／有效授權待本機確認。沒有新的 Unity／15 項 EditMode／桌面程式／APK／頭盔結果，也沒有操作登入、安全提示或重裝 SDK。Quest 3 主線優先及原始完整 11 項範圍保持。

@@ -137,7 +137,7 @@ namespace VrCommand.Simulation
                 var first = journal.Read(0) ?? throw new InvalidDataException("Missing recording header.");
                 if (first.Payload[0] != 0) throw new InvalidDataException("World source must start with its header.");
                 HeaderJson = Decode(first.Payload); savedHeader = codec.ReadHeader(HeaderJson); WorldRecordingValidation.Header(savedHeader);
-                if (header != null && codec.Header(header) != HeaderJson) throw new InvalidDataException("World source header identity changed.");
+                if (header != null && codec.Header(header) != codec.Header(savedHeader)) throw new InvalidDataException("World source header identity changed.");
                 pendingPosition = first.NextPosition; var position = first.NextPosition;
                 WorldJournalRecord? row;
                 while ((row = journal.Read(position)) != null)

@@ -39,8 +39,8 @@ namespace VrCommand.Unity.Editor
         {
             PlayerSettings.companyName = "VR Command";
             PlayerSettings.productName = "VR Command Quest";
-            PlayerSettings.bundleVersion = "0.14.0";
-            PlayerSettings.Android.bundleVersionCode = 14;
+            PlayerSettings.bundleVersion = "0.16.0";
+            PlayerSettings.Android.bundleVersionCode = 16;
             PlayerSettings.insecureHttpOption = InsecureHttpOption.DevelopmentOnly;
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, "com.vrcommand.quest");
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
@@ -104,13 +104,19 @@ namespace VrCommand.Unity.Editor
             spectator.transform.position = new Vector3(0, 18, -18);
             spectator.transform.LookAt(new Vector3(0, 0, 1));
 
-            var state = new GameObject("Scene Authority", typeof(NetworkObject), typeof(SceneAuthority), typeof(CombatAuthority));
-            state.GetComponent<SceneAuthority>().sun = sun;
+            var state = new GameObject("Scene Authority", typeof(NetworkObject), typeof(SceneAuthority), typeof(CombatAuthority), typeof(UnityWeatherView));
+            var weatherView = state.GetComponent<UnityWeatherView>(); weatherView.sun = sun;
+            weatherView.rainClip = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/VrCommand/Audio/rain-loop.wav");
+            weatherView.thunderClip = AssetDatabase.LoadAssetAtPath<AudioClip>("Assets/VrCommand/Audio/thunder.wav");
+            if (weatherView.rainClip == null || weatherView.thunderClip == null) throw new InvalidOperationException("Weather audio assets are missing.");
+            var rainMaterial = AssetDatabase.LoadAssetAtPath<Material>(Generated + "/Rain.mat");
+            if (rainMaterial == null) { rainMaterial = new Material(Shader.Find("Universal Render Pipeline/Unlit")); AssetDatabase.CreateAsset(rainMaterial, Generated + "/Rain.mat"); }
+            weatherView.rainMaterial = rainMaterial; state.GetComponent<SceneAuthority>().environmentView = weatherView;
             var network = new GameObject("Network Manager", typeof(NetworkManager), typeof(UnityTransport), typeof(VenueBootstrap));
             var manager = network.GetComponent<NetworkManager>();
             var bootstrap = network.GetComponent<VenueBootstrap>();
             manager.NetworkConfig = new NetworkConfig { NetworkTransport = network.GetComponent<UnityTransport>(), TickRate = 30,
-                ConnectionApproval = true, EnableSceneManagement = true, ForceSamePrefabs = true, ProtocolVersion = 14 };
+                ConnectionApproval = true, EnableSceneManagement = true, ForceSamePrefabs = true, ProtocolVersion = 16 };
             manager.NetworkConfig.PlayerPrefab = CreateAvatar(avatarMaterial, steel);
             var list = AssetDatabase.LoadAssetAtPath<NetworkPrefabsList>(Generated + "/NetworkPrefabs.asset");
             if (list == null)

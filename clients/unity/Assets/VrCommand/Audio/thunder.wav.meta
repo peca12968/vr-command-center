@@ -1,0 +1,13 @@
+fileFormatVersion: 2
+guid: ab2436ddaf2b570e9a68db67a0b2437f
+AudioImporter:
+  externalObjects: {}
+  serializedVersion: 7
+  forceToMono: 1
+  normalize: 0
+  preloadAudioData: 1
+  loadInBackground: 0
+  ambisonic: 0
+  userData:
+  assetBundleName:
+  assetBundleVariant:

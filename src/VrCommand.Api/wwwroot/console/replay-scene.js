@@ -1,4 +1,5 @@
 import * as THREE from './vendor/three/three.module.js';
+import { EnvironmentView } from './environment-view.js';
 
 const point = value => new THREE.Vector3(value.x, value.y, value.z);
 const roomX = id => (id - 3) * 14;
@@ -14,6 +15,7 @@ export class ReplayScene {
     this.stage = new THREE.Group(); this.traces = new THREE.Group(); this.scene.add(this.stage, this.traces);
     this.ambient = new THREE.HemisphereLight(0xd5e3dc, 0x394637, 2.2); this.scene.add(this.ambient);
     this.sun = new THREE.DirectionalLight(0xffe4ba, 2.5); this.sun.position.set(10, 18, -8); this.scene.add(this.sun);
+    this.weather = new EnvironmentView(this.scene, this.renderer, this.sun, this.ambient, canvas);
     this.marker = new THREE.Mesh(new THREE.RingGeometry(.5, .57, 32), new THREE.MeshBasicMaterial({ color: 0xe3f594, side: THREE.DoubleSide }));
     this.marker.rotation.x = -Math.PI / 2; this.marker.visible = false; this.scene.add(this.marker);
     this.observer = new ResizeObserver(() => this.resize()); this.observer.observe(canvas.parentElement);
@@ -26,6 +28,7 @@ export class ReplayScene {
   }
   load(recording) {
     this.roomIds = [...recording.roomIds];
+    this.weather.load(recording);
     this.clear(this.stage); this.clear(this.traces); this.actors.clear(); this.selected = ''; this.follow = false;
     for (const room of recording.roomIds) {
       const floor = this.mesh(new THREE.BoxGeometry(12, .2, 12), 0x344638); floor.position.set(roomX(room), -.12, 0); this.stage.add(floor);
@@ -53,7 +56,7 @@ export class ReplayScene {
     const facing = this.mesh(new THREE.BoxGeometry(.06, .04, .12), 0x344f40); facing.position.z = .18; head.add(facing);
     const entry = { group, body, head, gun, left, right, enemy }; this.actors.set(key, entry); this.stage.add(group); return entry;
   }
-  show(frame, previous, events) {
+  show(frame, previous, events, environment, continuous = true) {
     this.frame = frame;
     const present = new Set([...frame.players.map(player => 'p:' + player.id), ...frame.enemies.map(enemy => 'e:' + enemy.id)]);
     for (const [key, actor] of this.actors) if (!present.has(key)) { this.clear(actor.group); this.stage.remove(actor.group); this.actors.delete(key); }
@@ -88,8 +91,11 @@ export class ReplayScene {
       const hit = new THREE.Mesh(new THREE.SphereGeometry(.065, 8, 6), new THREE.MeshBasicMaterial({ color: event.hit === 'Cover' ? 0xffb454 : 0xf4ecba })); hit.position.copy(end); this.traces.add(hit);
     }
     this.canvas.dataset.traceCount = String(events.length);
-    this.ambient.intensity = frame.night ? .8 : 2.2; this.sun.intensity = frame.night ? .35 : 2.5;
-    this.scene.fog = frame.visibility === 'Clear' ? null : new THREE.FogExp2(frame.night ? 0x111e25 : 0x637266, frame.visibility === 'Fog' ? .035 : .015);
+    if (!this.weather.show(frame, environment, continuous)) {
+      this.ambient.intensity = frame.night ? .8 : 2.2; this.sun.intensity = frame.night ? .35 : 2.5;
+      this.sun.color.setHex(0xffe4ba); this.renderer.setClearColor(0x101a17);
+      this.scene.fog = frame.visibility === 'Clear' ? null : new THREE.FogExp2(frame.night ? 0x111e25 : 0x637266, frame.visibility === 'Fog' ? .035 : .015);
+    }
     this.draw();
   }
   select(key) { this.selected = key; this.draw(); }
@@ -158,5 +164,5 @@ export class ReplayScene {
     const hit = ray.intersectObjects([...this.actors.values()].filter(actor => actor.group.visible).map(actor => actor.group), true)[0];
     if (hit) { let object = hit.object; while (object && !object.userData.key) object = object.parent; if (object) this.onPick(object.userData.key); }
   }
-  reset() { this.frame = null; this.follow = false; this.selected = ''; this.clear(this.stage); this.clear(this.traces); this.actors.clear(); this.marker.visible = false; this.draw(); }
+  reset() { this.weather.reset(); this.frame = null; this.follow = false; this.selected = ''; this.clear(this.stage); this.clear(this.traces); this.actors.clear(); this.marker.visible = false; this.draw(); }
 }

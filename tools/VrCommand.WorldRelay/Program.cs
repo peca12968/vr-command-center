@@ -6,9 +6,11 @@ using VrCommand.Core;
 using VrCommand.Simulation;
 
 var options = args.Chunk(2).ToArray();
-if (options.Any(pair => pair.Length != 2 || pair[0] is not ("--recording" or "--world-journal" or "--combat-journal" or "--demo-room" or "--seconds" or "--base-url" or "--key-file"))
-    || options.Select(pair => pair[0]).Distinct().Count() != options.Length) throw new ArgumentException("Use named value pairs: --recording or --world-journal, optional --combat-journal, --demo-room, --seconds, --base-url, --key-file.");
+if (options.Any(pair => pair.Length != 2 || pair[0] is not ("--recording" or "--world-journal" or "--combat-journal" or "--demo-room" or "--seconds" or "--environment-demo" or "--base-url" or "--key-file"))
+    || options.Select(pair => pair[0]).Distinct().Count() != options.Length) throw new ArgumentException("Use named value pairs: --recording or --world-journal, optional --combat-journal, --demo-room, --seconds, --environment-demo, --base-url, --key-file.");
 var values = options.ToDictionary(pair => pair[0], pair => pair[1]);
+if (!bool.TryParse(values.GetValueOrDefault("--environment-demo", "false"), out var environmentDemo) || (values.ContainsKey("--environment-demo") && !values.ContainsKey("--demo-room")))
+    throw new ArgumentException("--environment-demo requires true/false and a new --demo-room simulation.");
 if (values.ContainsKey("--recording") == values.ContainsKey("--world-journal")) throw new ArgumentException("Choose exactly one of --recording (legacy NDJSON) or --world-journal (shared binary source).");
 var binary = values.ContainsKey("--world-journal");
 var path = Path.GetFullPath(values.GetValueOrDefault(binary ? "--world-journal" : "--recording")!);
@@ -109,7 +111,7 @@ using var master = new HttpClient { BaseAddress = http.BaseAddress, Timeout = ht
 master.DefaultRequestHeaders.Authorization = new("Bearer", keys.RootElement.GetProperty("OperatorKeys").GetProperty("Master").GetString());
 if ((await master.GetFromJsonAsync<RoomView[]>("/api/rooms", JsonFormat.Options))!.Single(entry => entry.Id == room).SessionId.HasValue) throw new InvalidOperationException("Room is occupied; no existing session changed.");
 var mission = await Post<Mission>(master, "/api/missions", new MissionDraft("World recording simulation", "Synthetic tracked rig; no headset attached", 900,
-    new(ExperienceMode.VR, Weather.Clear, TimeOfDay.Day, false), new(1, EnemyBehavior.Hold, true),
+    environmentDemo ? new(ExperienceMode.VR, Weather.Storm, TimeOfDay.Night, true) : new(ExperienceMode.VR, Weather.Clear, TimeOfDay.Day, false), new(1, EnemyBehavior.Hold, true),
     [new("sandbag", new(2, 0, 1), 15), new("barrel", new(3, 0, 3), 0)]));
 var session = await Post<SessionView>(master, "/api/sessions", new { missionId = mission.Id, mode = "Independent", roomIds = new[] { room } });
 var route = "/api/sessions/" + session.Id;
@@ -123,7 +125,7 @@ try
     await Refresh();
     var elapsed = System.Diagnostics.Stopwatch.StartNew();
     var header = WorldRecordingHeader.Create(session.Id, queue.StreamId, "Simulation", session.RoomIds, bridge.Props,
-        binary ? DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture) : "");
+        DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
     using var saved = binary ? WorldOutbox.Create(path, header, codec) : null;
     using var publisher = binary ? new WorldPublisher(saved!, codec, new WorldWebSocket(http.BaseAddress!.ToString(), session.Id, http.DefaultRequestHeaders.Authorization!.Parameter!)) : null;
     using var source = binary ? null : new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);

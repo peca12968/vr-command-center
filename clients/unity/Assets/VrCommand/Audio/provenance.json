@@ -1,0 +1,23 @@
+{
+  "generator": "scripts/generate-weather-audio.py",
+  "version": 1,
+  "source": "Original procedural noise synthesis; no third-party samples",
+  "files": {
+    "rain-loop.wav": {
+      "sha256": "84a0b2856cd15ad9eafc923e7629e1f437becad3dc9fe71c8e303f6dd29f9b60",
+      "sampleRate": 22050,
+      "channels": 1,
+      "bitsPerSample": 16,
+      "frames": 88200,
+      "peak": 9000
+    },
+    "thunder.wav": {
+      "sha256": "f54d6cbe8512d2e90d48d95e673cca4ab62b31867c42db3729f3ac9be42da81e",
+      "sampleRate": 22050,
+      "channels": 1,
+      "bitsPerSample": 16,
+      "frames": 88200,
+      "peak": 22000
+    }
+  }
+}

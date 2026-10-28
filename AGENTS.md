@@ -1,5 +1,7 @@
 # 開發指引
 
+v0.16 聲光規範見 docs/ENVIRONMENT.md：EnvironmentPresentation 為共用 tick 規則，header.environmentVersion 缺少保持 legacy 0、新來源 1，不補造舊音效；保留 binary 原始 header／checksum，以 codec 正規化比較。API／UI／來源一起升級，NGO protocol／Android code 16、bundle 0.16.0，18 項 EditMode 待驗。單一 UnityWeatherView 已綁真正 Core／Audio DLL 通過，不代表整個 Unity／NGO／shader／音訊匯入或 APK。新增天氣檢查需設 VR_COMMAND_CHECKS_DLL 指向同次隔離建置，聲音素材以 generate-weather-audio.py --check 驗證。
+
 開發根目錄為 `F:\Projects\vr-command-center`；以此庫的實際 Git 狀態與執行結果為準。
 
 開始接續工作時讀取 `docs/PROGRESS.md`、`docs/ROADMAP.md`、`docs/REQUIREMENTS.md`。使用者的完整目標為 11 項 VR/MR 遊戲需求及 VIVE XR／Quest 3 相容性，不能以管理原型或模擬測試通過替代完整交付。

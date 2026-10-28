@@ -1,3 +1,4 @@
+using System;
 using Unity.Collections;
 using Unity.Netcode;
 using UnityEngine;
@@ -5,35 +6,60 @@ using SessionSnapshot = VrCommand.Simulation.ManagementSnapshot;
 
 namespace VrCommand.Unity
 {
+    public struct WeatherState : INetworkSerializable, IEquatable<WeatherState>
+    {
+        public long tick;
+        public byte weather, phase;
+        public bool night, lightning;
+        public int rooms;
+        public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
+        {
+            serializer.SerializeValue(ref tick); serializer.SerializeValue(ref weather); serializer.SerializeValue(ref phase);
+            serializer.SerializeValue(ref night); serializer.SerializeValue(ref lightning); serializer.SerializeValue(ref rooms);
+        }
+        public bool Equals(WeatherState other) => tick == other.tick && weather == other.weather && phase == other.phase && night == other.night && lightning == other.lightning && rooms == other.rooms;
+    }
     public sealed class SceneAuthority : NetworkBehaviour
     {
         public NetworkVariable<FixedString32Bytes> Phase = new NetworkVariable<FixedString32Bytes>("Preparing");
-        public NetworkVariable<FixedString32Bytes> Weather = new NetworkVariable<FixedString32Bytes>("Clear");
-        public NetworkVariable<bool> Night = new NetworkVariable<bool>(false);
-        public NetworkVariable<bool> Lightning = new NetworkVariable<bool>(false);
-        public Light sun;
-
+        public NetworkVariable<WeatherState> Presentation = new NetworkVariable<WeatherState>();
+        public UnityWeatherView environmentView;
+        private double observed;
+        private static readonly string[] WeatherNames = { "Clear", "Rain", "Fog", "Storm" }, PhaseNames = { "Preparing", "Running", "Paused", "Ended" };
+        public override void OnNetworkSpawn()
+        {
+            if (environmentView == null) environmentView = GetComponent<UnityWeatherView>();
+            observed = Time.realtimeSinceStartupAsDouble; Presentation.OnValueChanged += Changed;
+        }
+        private void Changed(WeatherState before, WeatherState after) { observed = Time.realtimeSinceStartupAsDouble; }
         public void ApplyServerSnapshot(SessionSnapshot snapshot)
         {
             if (!IsServer || !IsSpawned || snapshot == null) return;
-            Phase.Value = snapshot.state;
-            Weather.Value = snapshot.environment.weather;
-            Night.Value = snapshot.environment.timeOfDay == "Night";
-            Lightning.Value = snapshot.environment.lightning;
+            var weather = Array.IndexOf(WeatherNames, snapshot.environment.weather); var phase = Array.IndexOf(PhaseNames, snapshot.state);
+            if (weather < 0 || phase < 0) throw new ArgumentException("Unsupported environment state.");
+            var value = Presentation.Value; value.weather = (byte)weather; value.phase = (byte)phase;
+            value.night = snapshot.environment.timeOfDay == "Night"; value.lightning = snapshot.environment.lightning; value.rooms = 0;
+            foreach (var room in snapshot.roomIds) value.rooms |= 1 << (room - 1);
+            Phase.Value = snapshot.state; Presentation.Value = value;
+        }
+        public void PublishTick(long tick, string phase)
+        {
+            if (!IsServer || !IsSpawned) return;
+            var value = Presentation.Value; value.tick = tick; value.phase = (byte)Array.IndexOf(PhaseNames, phase); Presentation.Value = value;
         }
         public void SuspendForManagementLoss()
         {
-            if (IsServer && IsSpawned) Phase.Value = "Paused";
+            if (!IsServer || !IsSpawned) return;
+            Phase.Value = "Paused"; var value = Presentation.Value; value.phase = 2; Presentation.Value = value;
         }
         private void Update()
         {
-            if (!IsSpawned) return;
-            RenderSettings.fog = Weather.Value.ToString() != "Clear";
-            RenderSettings.fogColor = Night.Value ? new Color(0.06f, 0.08f, 0.1f) : new Color(0.34f, 0.39f, 0.42f);
-            RenderSettings.fogDensity = Weather.Value.ToString() == "Fog" ? 0.035f : 0.012f;
-            RenderSettings.ambientLight = Night.Value ? new Color(0.12f, 0.15f, 0.2f) : new Color(0.55f, 0.57f, 0.53f);
-            var flash = Lightning.Value && NetworkManager.ServerTime.Time % 7 < 0.12;
-            if (sun != null) sun.intensity = flash ? 2.5f : Night.Value ? 0.08f : 1.15f;
+            if (!IsSpawned || environmentView == null) return;
+            var value = Presentation.Value;
+            if (value.weather > 3 || value.phase > 3 || value.tick < 0 || value.tick > VrCommand.Simulation.EnvironmentPresentation.MaximumTick) { environmentView.Clear(); return; }
+            var phase = value.phase == 1 && Time.realtimeSinceStartupAsDouble - observed > 1.5 ? "Paused" : PhaseNames[value.phase];
+            environmentView.Apply(value.tick, WeatherNames[value.weather], value.night, value.lightning, phase, value.rooms);
         }
+        public override void OnNetworkDespawn() { Presentation.OnValueChanged -= Changed; if (environmentView != null) environmentView.Clear(); }
     }
 }

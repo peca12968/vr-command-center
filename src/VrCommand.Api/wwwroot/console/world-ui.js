@@ -9,11 +9,11 @@ export function mountWorld(getKey, unauthorized) {
   let active = false, scene, controller, epoch = 0, listEpoch = 0, info, frame, previous, geometry = '', mode = '', connected = false, received = 0;
   const cameras = mountCameras(getKey, unauthorized, () => scene, () => { $('world-camera').value = 'free'; $('world-room').value = 'all'; });
   function message(text, error = false) { $('world-message').textContent = text; $('world-message').classList.toggle('replay-error', error); }
-  function stop() { epoch++; controller?.abort(); controller = null; connected = false; $('world-pause').textContent = '繼續回放'; }
+  function stop() { epoch++; controller?.abort(); controller = null; connected = false; scene?.weather.pause(); scene?.draw(); $('world-pause').textContent = '繼續回放'; }
   function reset() {
     stop(); listEpoch++; info = frame = previous = null; geometry = ''; mode = ''; cameras.reset();
     $('world-recording').replaceChildren(); $('world-player').hidden = true; message('選取已錄製的場次，開始觀戰或回放。');
-    if (scene) { scene.clear(scene.stage); scene.clear(scene.traces); scene.actors.clear(); scene.frame = null; }
+    scene?.reset(); $('world-sound').textContent = '音效：關閉'; $('world-sound').disabled = true;
   }
   async function response(url, signal) {
     const key = getKey(); if (!key) throw new Error('請先登入。');
@@ -40,15 +40,21 @@ export function mountWorld(getKey, unauthorized) {
   }
   function status() {
     if (!info) return;
+    $('world-sound').disabled = info.header.environmentVersion !== 1 || scene?.weather.audio.state === 'loading';
+    const audio = scene?.weather.audio.state || 'off';
+    $('world-sound').textContent = ({ on: '音效：開啟', off: '音效：關閉', loading: '音效載入中…', error: '音效：重試開啟' })[audio];
+    $('world-sound').setAttribute('aria-pressed', String(audio === 'on'));
     const phase = frame ? phases[frame.packet.frame.phase] : '等待第一份快照';
     $('world-status').textContent = `${info.header.origin} · ${info.complete ? '錄製已核對封存' : '錄製未封存'} · ${phase}`;
     if (mode === 'live') {
       const captured = info.header.captureStartedAtUtc ? Date.parse(info.header.captureStartedAtUtc) + (frame?.packet.elapsedMilliseconds ?? 0) : NaN;
       const age = Date.now() - captured, unknown = !Number.isFinite(age), clockInvalid = age < -1000;
       const stale = !connected || !received || performance.now() - received > 1500 || age > 1500;
+      if (stale || unknown || clockInvalid) { scene?.weather.pause(); scene?.draw(); }
       $('world-freshness').textContent = info.complete ? '場次已封存' : unknown ? '擷取時間未知' : clockInvalid ? '來源時鐘未同步' : stale ? '快照已中斷或過期' : '正在接收快照';
       $('world-freshness').classList.toggle('replay-error', (stale || unknown || clockInvalid) && !info.complete);
     } else { $('world-freshness').textContent = connected ? '回放中' : '回放已暫停／結束'; $('world-pause').textContent = connected ? '暫停回放' : '繼續回放'; }
+    if (!connected) { scene?.weather.pause(); scene?.draw(); }
   }
   function selectActor(key) { $('world-actor').value = key; scene?.select(key); actorInfo(); }
   function actorInfo() {
@@ -61,7 +67,9 @@ export function mountWorld(getKey, unauthorized) {
     previous = frame?.packet.frame; frame = value;
     info.durationMilliseconds = Math.max(info.durationMilliseconds, value.packet.elapsedMilliseconds);
     info.acceptedSequence = Math.max(info.acceptedSequence, value.packet.sequence);
-    scene.show(value.packet.frame, previous, value.packet.events.filter(event => event.hasRay));
+    const age = info.header.captureStartedAtUtc ? Date.now() - Date.parse(info.header.captureStartedAtUtc) - value.packet.elapsedMilliseconds : NaN;
+    const continuous = connected && (mode === 'replay' || (Number.isFinite(age) && age >= -1000 && age <= 1500));
+    scene.show(value.packet.frame, previous, value.packet.events.filter(event => event.hasRay), { weather: value.packet.weather, lightning: value.packet.lightning }, continuous);
     const selected = $('world-actor').value;
     const actors = [...value.packet.frame.players.map(player => ['p:' + player.id, `玩家 · 房間 ${player.roomId} · ${player.id.slice(0, 8)}`]), ...value.packet.frame.enemies.map(enemy => ['e:' + enemy.id, `敵軍 · 房間 ${enemy.roomId} · ${enemy.id.slice(0, 8)}`])];
     $('world-actor').replaceChildren(...actors.map(([id, name]) => { const option = document.createElement('option'); option.value = id; option.textContent = name; return option; }));
@@ -111,7 +119,7 @@ export function mountWorld(getKey, unauthorized) {
               }
               $('world-player').hidden = false; scene.resize(); $('world-name').textContent = info.missionName;
               cameras.bind(info.header.sessionId);
-              message(`${info.header.origin} · ${info.header.rulesVersion} · 基本幾何素材 · VR 未校正。${info.header.origin === 'Simulation' ? '此場次使用合成頭手資料，無頭盔連接。' : '頭手來源請見角色資訊。'}`);
+              message(`${info.header.origin} · ${info.header.rulesVersion} · 基本幾何素材 · VR 未校正。${info.header.origin === 'Simulation' ? '此場次使用合成頭手資料，無頭盔連接。' : '頭手來源請見角色資訊。'}${info.header.environmentVersion === 1 ? '環境聲光 v1 依保存的模擬時間重建，非原始音軌。' : '舊錄製沒有聲光效果版本，僅保留原有光霧顯示。'}`);
               status();
             } else if (type === 'frame') show(data);
             else if (type === 'status' || type === 'complete') { info = data; status(); }
@@ -122,6 +130,7 @@ export function mountWorld(getKey, unauthorized) {
     } catch (error) { if (request === epoch && !signal.aborted) { connected = false; message('觀戰已中斷：' + error.message + '；可重新連接。', true); status(); } }
   }
   $('world-refresh').addEventListener('click', refresh);
+  $('world-sound').addEventListener('click', async () => { if (scene?.weather.version === 1) { const pending = scene.weather.audio.toggle(); status(); await pending; if (active && getKey()) status(); } });
   $('world-recording').addEventListener('change', () => { stop(); cameras.bind(null); info = frame = previous = null; $('world-player').hidden = true; message('已切換場次，請開始觀戰或回放。'); });
   $('world-live').addEventListener('click', () => connect('live'));
   $('world-replay').addEventListener('click', () => connect('replay'));

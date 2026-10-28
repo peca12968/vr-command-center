@@ -1,6 +1,6 @@
 # Quest 3 接入原型與工具鏈 v0.14
 
-管理 API／控制台現為 v0.15，新增任務庫不可變修訂與明確新／舊版開場，見 MISSION_VERSIONS。遊戲收到的 Mission 本體仍 schema 1、NGO wire protocol 仍 14，本輪未改 Unity 來源，不能以管理版本號或任務庫檢查當作 Unity 編譯／APK 結果。
+管理 API／控制台現為 v0.16，任務不可變版本保持，見 MISSION_VERSIONS。Unity 新增 tick 驅動雨景／聲音與原子 WeatherState，NGO protocol／Android code 16、bundle 0.16.0；Mission 本體仍 schema 1。單一天氣元件以真正 Core／Audio DLL 編譯通過，整個 Unity 工程、NGO／ILPP、Shader／音訊匯入與 18 項 EditMode 仍待驗。最新實際 Prepare 仍因找不到有效 Editor 授權退出 198，沒有 APK／頭盔結果。效果與邊界見 [ENVIRONMENT.md](ENVIRONMENT.md)；下方舊版本段落保留歷次說明。
 
 v0.14 新增每次入場識別、票券 v2／protocol 2、If-Match-Admission 與跨輪詢重入撤銷，Unity／API 需同版升級並重發舊券，見 [ADMISSION.md](ADMISSION.md)。生成器 NGO protocol 14／bundle 0.14；15 項 EditMode 仍待執行，沒有 Unity／APK／頭盔結果。
 
@@ -14,7 +14,7 @@ v0.13 新增共用世界來源／發布器、接受後頭手錄製、追蹤中�
 
 **目前僅完成來源碼原型，沒有成功的 Unity 編譯、生成場景、EditMode 結果、桌面執行檔或 APK。** 2026-10-29 本機 Editor 已完整安裝，本輪 Prepare 仍因授權退出 198。23 份 C# 通過 C# 9 語法檢查，沒有綁定 Unity SDK；其中 embedded Runtime 另通過 .NET Standard 2.1 型別建置。399 項核心、322 項原 HTTP 及 32 項世界串流 檢查包含管理、票券、幾何核心與新任務接入層。
 
-沒有實機互見、Unity 射擊／AI 運行證據、雨粒子／雷聲、MR 透視／錨點、遊戲內物件編輯、自由觀戰或頭盔任務錄製。桌面觀察鏡頭固定，不能作為需求 10 的完成證據。Unity 已接入持久事件／補送來源碼，仍無實際統計整合運行證據；頻率與效能仍須量測，詳見 TELEMETRY。
+沒有實機互見、Unity 射擊／AI 運行證據、MR 透視／錨點、遊戲內物件編輯或頭盔任務錄製。雨線／雷聲已有 Unity 接入來源及瀏覽器 Simulation 驗證，沒有頭盔聲光結果。瀏覽器自由觀戰／鏡頭書籤已驗證；Unity 桌面觀察鏡頭固定，不能作為需求 10 的完整證據。Unity 已接入持久事件／補送來源碼，仍無實際統計整合運行證據；頻率與效能仍須量測，詳見 TELEMETRY。
 
 embedded package `com.vrcommand.simulation` 現為 0.11.0。Runtime asmdef 已引用它，ProjectBuilder／CombatAuthority 來源碼會建立世界及同步渲染，但尚未成功執行生成器；不能將 .NET 核心通過結果當作 Unity 工程成功編譯。規則與接入分別見 `SIMULATION.md`／`GAMEPLAY.md`。
 

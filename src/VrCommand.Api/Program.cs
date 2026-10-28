@@ -82,7 +82,7 @@ app.Use(async (context, next) =>
     }
 });
 
-app.MapGet("/", () => new { service = "VR Command Center", stage = "immutable mission revisions and Quest connection integration prototype", version = "0.15.0" });
+app.MapGet("/", () => new { service = "VR Command Center", stage = "versioned environment presentation and Quest connection integration prototype", version = "0.16.0" });
 app.MapWorldRoutes();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/api/me", (HttpContext context) => Actor(context));

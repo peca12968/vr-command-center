@@ -1,6 +1,6 @@
 # Quest 戰鬥接入來源碼 v0.14
 
-v0.14 新增每次入場識別、票券 v2／protocol 2、If-Match-Admission 與跨輪詢重入撤銷，Unity／API 需同版升級並重發舊券，見 [ADMISSION.md](ADMISSION.md)。生成器 NGO protocol 14／bundle 0.14；15 項 EditMode 仍待執行，沒有 Unity／APK／頭盔結果。
+目前 v0.16 以原子 WeatherState 同步 tick／天氣／日夜／雷電／phase／房間，NGO protocol 16、bundle 0.16.0；雨景及合成音效來源見 [ENVIRONMENT.md](ENVIRONMENT.md)。18 項 EditMode 待執行，單一天氣元件通過真實 Core／Audio DLL 編譯不代表整個 Unity 工程成功。v0.14 的每次入場識別、票券 v2／驗票 protocol 2 及撤銷契約保持，見 [ADMISSION.md](ADMISSION.md)。
 
 v0.13 已加入頭手來源 byte／追蹤狀態檢查、世界來源、共用發布及管理邊界錄製，詳見 [WORLD_SOURCE.md](WORLD_SOURCE.md)。NGO 生成器 protocol 13，兩端需同版重建；尚未有 Unity 編譯或實際傳輸結果。
 
@@ -46,6 +46,6 @@ v0.11 的 Unity 來源碼會把四種統計 WorldEvent 保存到共用 Telemetry
 
 本機 Release 建置通過，399 項核心檢查含原 41 項 ArenaSession／參戰狀態與新 30 項世界來源／時鐘檢查，使用真實管理模型 JSON。另通過 322 項原 HTTP、32 項世界串流、12 項回放資料及 78 項瀏覽器檢查。23 份 C# 通過 C# 9 語法；相同 embedded Runtime 真正建置為 .NET Standard 2.1。沒有使用假 Unity SDK stub 宣稱型別編譯成功。
 
-原有七個 EditMode 來源包含 AvatarPose、管理欄位及 NGO actor 往返；v0.13 另新增三項 pose 來源／距離／wire 往返及兩項 world codec，共 12 項。v0.14 另有三項入場契約測試，總數 15；建置腳本要求至少 15 項通過。實際 Prepare 本輪仍退出 198（授權），尚未進入可確認的 Unity 編譯或測試，不能使用舊七個結果宣稱通過。
+原有七個 EditMode 來源包含 AvatarPose、管理欄位及 NGO actor 往返；v0.13 增加五項姿態／world codec，v0.14 增加三項入場，v0.16 增加三項天氣／header，總數 18；建置腳本要求至少 18 項通過。實際 Prepare 仍退出 198（授權），尚無整個 Unity 工程編譯或 EditMode 結果，不能使用部分 SDK 檢查宣稱通過。
 
 授權可用後按 QUEST3 的 Prepare → Tests → Desktop → Quest 順序執行，再驗雙玩家射擊、掩體／死亡、AI 控制、斷線／追蹤遺失、名冊撤銷、管理服務中斷及 Host 審核；每項保留實際日誌與量測，不能以本文件或來源碼存在替代。

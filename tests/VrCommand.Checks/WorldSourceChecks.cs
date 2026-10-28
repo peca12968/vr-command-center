@@ -20,6 +20,13 @@ internal static class WorldSourceChecks
         void Refresh() => bridge.Apply(JsonSerializer.Deserialize<ManagementSnapshot>(JsonSerializer.Serialize(manager.Get(id), JsonFormat.Options), Codec.Json)!);
         Refresh();
         var header = WorldRecordingHeader.Create(id, combat.StreamId, "Simulation", [3], bridge.Props);
+        var legacy = WorldRecordingHeader.Create(Guid.NewGuid(), Guid.NewGuid(), "Simulation", [3], [], environmentVersion: 0);
+        var legacyJson = codec.Header(legacy).Replace("\"environmentVersion\":0,", "");
+        var legacyPath = Path.Combine(directory, "legacy-environment.worldlog");
+        using (var legacyJournal = new FileWorldJournal(legacyPath, true))
+            legacyJournal.Append(new byte[] { 0 }.Concat(System.Text.Encoding.UTF8.GetBytes(legacyJson)).ToArray());
+        using (var legacySource = new WorldOutbox(new FileWorldJournal(legacyPath, false), codec, legacy))
+            check(legacySource.Header.environmentVersion == 0 && legacySource.HeaderJson == legacyJson, "Legacy source without a presentation field recovers as zero while preserving its exact original header bytes");
         var sourcePath = Path.Combine(directory, "world-source.bin");
         var source = WorldOutbox.Create(sourcePath, header, codec);
         var storePath = Path.Combine(directory, "source-worlds"); Directory.CreateDirectory(storePath);

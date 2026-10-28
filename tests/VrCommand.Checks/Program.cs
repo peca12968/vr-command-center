@@ -1,5 +1,6 @@
 using VrCommand.Core;
 
+if (args.SequenceEqual(["--weather-vectors"])) { Console.WriteLine(EnvironmentChecks.Vectors()); return; }
 var checks = 0;
 void Check(bool condition, string message)
 {
@@ -79,6 +80,7 @@ try
     WorldChecks.Run(Check, directory);
     CameraBookmarkChecks.Run(Check, directory);
     MissionLibraryChecks.Run(Check, directory);
+    EnvironmentChecks.Run(Check);
     WorldSourceChecks.Run(Check, directory);
     Console.WriteLine($"All {checks} checks passed. These are domain checks, not headset or gameplay load tests.");
 }
