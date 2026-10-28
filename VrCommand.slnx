@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/VrCommand.Api/VrCommand.Api.csproj" />
+    <Project Path="src/VrCommand.Core/VrCommand.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/VrCommand.Checks/VrCommand.Checks.csproj" />
+  </Folder>
+</Solution>

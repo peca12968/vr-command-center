@@ -1,0 +1,11 @@
+{
+  "name": "夜間據點防衛",
+  "briefing": "合作守住據點，完成任務後檢討團隊表現。",
+  "durationSeconds": 900,
+  "environment": { "mode": "VR", "weather": "Storm", "timeOfDay": "Night", "lightning": true },
+  "enemies": { "count": 8, "behavior": "Hold", "autoAttack": true },
+  "props": [
+    { "assetId": "sandbag", "position": { "x": 0, "y": 0, "z": 3 }, "yawDegrees": 0 },
+    { "assetId": "barrel", "position": { "x": 2, "y": 0, "z": 4 }, "yawDegrees": 90 }
+  ]
+}
