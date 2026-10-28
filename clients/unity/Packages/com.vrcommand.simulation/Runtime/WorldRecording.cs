@@ -29,11 +29,12 @@ namespace VrCommand.Simulation
     {
         public int schemaVersion = 1;
         public string sessionId = "", streamId = "", origin = "Simulation", rulesVersion = "0.8.0", assetSet = "primitives-v1", calibration = "uncalibrated-vr";
+        public string captureStartedAtUtc = "";
         public int[] roomIds = new int[0];
         public RecordedProp[] props = new RecordedProp[0];
-        public static WorldRecordingHeader Create(Guid session, Guid stream, string origin, int[] rooms, WorldProp[] geometry) => new WorldRecordingHeader
+        public static WorldRecordingHeader Create(Guid session, Guid stream, string origin, int[] rooms, WorldProp[] geometry, string captureStartedAtUtc = "") => new WorldRecordingHeader
         {
-            sessionId = session.ToString("D"), streamId = stream.ToString("D"), origin = origin, roomIds = (int[])rooms.Clone(),
+            sessionId = session.ToString("D"), streamId = stream.ToString("D"), origin = origin, captureStartedAtUtc = captureStartedAtUtc, roomIds = (int[])rooms.Clone(),
             props = geometry.Select(prop => new RecordedProp { id = prop.Id.ToString("D"), roomId = prop.RoomId, kind = prop.Kind.ToString(), feet = new RecordedVector(prop.Feet), yaw = prop.Yaw }).ToArray()
         };
     }
@@ -90,6 +91,9 @@ namespace VrCommand.Simulation
                 || header.calibration != "uncalibrated-vr" || header.roomIds == null || (header.roomIds.Length != 1 && header.roomIds.Length != 5)
                 || header.roomIds.Distinct().Count() != header.roomIds.Length || header.roomIds.Any(room => room < 1 || room > 5)
                 || header.props == null || header.props.Length > 2500) throw new ArgumentException("Unsupported recording identity, profile or geometry.");
+            if (header.captureStartedAtUtc != "" && (!DateTimeOffset.TryParseExact(header.captureStartedAtUtc, "O", System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var started) || started.Offset != TimeSpan.Zero || started.Year < 2020 || started.Year > 2100))
+                throw new ArgumentException("Recording capture clock must be an explicit UTC timestamp, or empty for legacy sources.");
             var ids = new HashSet<string>();
             foreach (var prop in header.props)
                 if (prop == null || !Id(prop.id) || !ids.Add(prop.id) || !header.roomIds.Contains(prop.roomId)

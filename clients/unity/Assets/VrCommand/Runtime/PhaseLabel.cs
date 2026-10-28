@@ -14,7 +14,7 @@ namespace VrCommand.Unity
             {
                 message += "\nHEALTH " + player.health + "   AMMO " + player.magazine + " / " + player.reserve + (player.reloading ? "   RELOADING" : "");
                 message += !combat.Ready.Value ? "\nCONTROL LINK UNAVAILABLE - COMBAT PAUSED"
-                    : !avatar.PoseAccepted.Value || !player.connected ? "\nTRACKING INVALID - RETURN TO YOUR AREA"
+                    : !avatar.TrackingReady || !avatar.PoseAccepted.Value || !player.connected ? "\nTRACKING INVALID - RETURN TO YOUR AREA"
                     : player.health == 0 ? "\nELIMINATED" : "\nTRIGGER / LEFT CLICK: FIRE    A / R: RELOAD";
             }
             GetComponent<UnityEngine.UI.Text>().text = message;

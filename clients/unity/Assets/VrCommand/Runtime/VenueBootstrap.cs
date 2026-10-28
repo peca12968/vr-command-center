@@ -21,6 +21,7 @@ namespace VrCommand.Unity
         private string status = "WAITING FOR CONTROL DESK";
         private bool managementReady;
         private TelemetryOutbox outbox;
+        private WorldRecordingDelivery worldDelivery;
         public static VenueBootstrap Instance { get; private set; }
         public string State => sceneAuthority != null && sceneAuthority.IsSpawned ? sceneAuthority.Phase.Value.ToString() : "Preparing";
         public string Status => status + (outbox == null ? "" : " / REPORTS PENDING " + (outbox.LastSequence - outbox.AcknowledgedSequence));
@@ -63,6 +64,7 @@ namespace VrCommand.Unity
                     var directory = string.IsNullOrWhiteSpace(configuration.telemetryDirectory) ? System.IO.Path.Combine(Application.persistentDataPath, "telemetry") : configuration.telemetryDirectory;
                     combatAuthority.InitializeTelemetry(System.IO.Path.Combine(directory, configuration.sessionId + ".journal"), Guid.Parse(configuration.sessionId), configuration.telemetryOrigin);
                     outbox = combatAuthority.Outbox;
+                    combatAuthority.InitializeRecording(System.IO.Path.Combine(directory, configuration.sessionId + ".worldlog"));
                 }
                 catch (Exception) { status = "TELEMETRY JOURNAL NEEDS RECOVERY"; telemetryReady = false; }
                 if (!telemetryReady) yield break;
@@ -71,6 +73,8 @@ namespace VrCommand.Unity
                 yield return RefreshManagement();
                 if (!managementReady) yield break;
                 StartCoroutine(DeliverTelemetry());
+                worldDelivery = gameObject.AddComponent<WorldRecordingDelivery>();
+                worldDelivery.Initialize(combatAuthority.Recording, outbox, configuration, message => { status = message; combatAuthority.TelemetryFault(); });
                 if (configuration.role == "Host")
                 {
                     // NGO 2.7 ignores asynchronous host approval; validate before StartHost and answer it synchronously.
@@ -270,6 +274,8 @@ namespace VrCommand.Unity
         }
         private void OnDestroy()
         {
+            if (worldDelivery != null) worldDelivery.StopAndDispose();
+            else combatAuthority?.Recording?.Dispose();
             outbox?.Dispose();
             if (networkManager != null)
             {

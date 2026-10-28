@@ -1,8 +1,8 @@
-# 持久世界錄製與觀察 v0.12
+# 持久世界錄製與觀察 v0.13
 
 管理主控台的「觀戰與任務回放」讀取遊戲伺服器已接受的世界資料。世界發布走 WebSocket，觀察及回放走帶 Bearer 的 fetch SSE；逐幀遊戲輸入仍由 NGO 處理，不使用管理 REST。觀察者不加入玩家名冊。既有「3D 模擬回放」仍用本機 schema 2 檔案；兩種格式及來源不可混為一談。
 
-本輪已驗證的是 **.NET 共用核心 → 本機來源檔 → 真實 WebSocket → SQLite → 真實 SSE → Chromium 軟體 WebGL**。示範明確為 Simulation，雙手及旋轉為合成；不是頭盔錄影、實機追蹤或 Quest 驗收。Unity 目前只有共享錄製 DTO，**尚未接上世界發布器／實際頭手採樣**；原有統計 outbox 來源碼另見 TELEMETRY。Unity 編譯仍受授權未被工具讀取影響。
+本輪已驗證的是 **.NET 共用核心 → 本機來源檔 → 真實 WebSocket → SQLite → 真實 SSE → Chromium 軟體 WebGL**。示範明確為 Simulation，雙手及旋轉為合成；不是頭盔錄影、實機追蹤或 Quest 驗收。v0.13 的 Unity 已加入共用世界來源／發布器、接受後的頭手錄製與追蹤中斷處理來源碼，**尚未編譯／運行**；詳見 [WORLD_SOURCE.md](WORLD_SOURCE.md)。原有統計 outbox 來源碼另見 TELEMETRY。Unity 編譯仍受授權未被工具讀取影響。
 
 ## 操作
 
@@ -10,7 +10,7 @@
 2. 更新錄製列表，選場次；列表標示房間、來源及是否完整。
 3. 「即時觀戰」只取最新已保存快照；拖曳旋轉、Shift／右鍵平移、滾輪縮放，或用全景／上帝俯視／跟隨鏡頭。房間與角色可以選取。未參戰／死亡角色降低透明度。
 4. 「從頭回放」按保存時間播放，不重新執行 AI。支援 0.25–4 倍速、暫停及時間跳轉，透過 SQLite 時間索引取前一份快照，不下載整場檔案。角色資訊顯示頭手來源 None／Simulated／Tracked。
-5. 統計由各快照的已驗證事件前綴計算。來源超過 1.5 秒沒有新快照，畫面顯示中斷／過期；SSE 心跳不重設新鮮度。Ended 及未封存仍可能同時存在。
+5. 統計由各快照的已驗證事件前綴計算。以擷取時間計算超過 1.5 秒或串流中斷即顯示過期；SSE 心跳／補送不重設年齡，沒有時間標示未知，來源時間超前標時鐘未同步。Ended 及未封存仍可能同時存在。
 
 切頁、換場或登出會取消當前串流，舊回應不能恢復場景。所有文字採 textContent，不執行任務／玩家名稱內的標記。憑證只在頁面記憶體及 Authorization 標頭，不放 URL、localStorage、sessionStorage 或 cookie。
 
@@ -34,6 +34,8 @@ dotnet tools/VrCommand.WorldRelay/bin/Release/net10.0/VrCommand.WorldRelay.dll -
 
 先補送持久戰鬥報告，再逐行送出原始世界資料；已接受的同序同內容只確認，不再新增。來源缺少 seal／Ended 或戰鬥未完整，不會自行製造完成。JSON 壞尾端、內容衝突會停止，不截斷／忽略損壞資料。工具目前遇到網路錯誤會退出，保留來源供手動重送；不宣稱自動重連或崩潰後世界繼續運算。來源 NDJSON 沒有簽章／逐行 checksum，磁碟／傳輸可接受性仍依賴受信任來源及伺服器驗證。
 
+v0.13 首選 checksummed binary 世界來源，共用 Unity／.NET publisher、擷取時間與補送操作見 [WORLD_SOURCE.md](WORLD_SOURCE.md)。上述 --recording 範例保留為舊 NDJSON 相容模式。
+
 ## API 與封包
 
 所有端點都經既有 /api Bearer 驗證及 SessionManager 房間範圍檢查。
@@ -41,7 +43,7 @@ dotnet tools/VrCommand.WorldRelay/bin/Release/net10.0/VrCommand.WorldRelay.dll -
 | 路徑 | 用途 |
 |---|---|
 | GET `/api/world-recordings` | 只列可讀場次的錄製 metadata |
-| GET `/api/sessions/{id}/world` | header、acceptedSequence、durationMilliseconds、complete、updatedAtUtc、missionName |
+| GET `/api/sessions/{id}/world` | header、acceptedSequence、durationMilliseconds、complete、updatedAtUtc、capturedAtUtc、missionName |
 | WS `/api/sessions/{id}/world/publish` | 僅綁定該 combat-stream 的 GameServer 身分可發布 |
 | SSE `/api/sessions/{id}/world/watch` | 最新已保存快照；可跳過中間幀，以免慢速觀察者積壓 |
 | SSE `.../watch?mode=replay&fromMs=0&rate=1` | 順序回放；rate 僅 0.25／0.5／1／2／4 |
@@ -74,4 +76,4 @@ SSE 以 `header`、`frame`、`status`、`complete` 事件輸出單行 JSON。fra
 
 檢查包含核心拒絕／交易回滾、真實發布／觀察、跨程序來源重送、API 重啟、房間範圍、來源中斷、瀏覽器鏡頭／回放／行動版面。`python scripts/smoke_world.py` 是額外必要檢查；瀏覽器仍用 `tests/browser/check.cjs`，隔離建置另設 `VR_COMMAND_WORLD_RELAY_DLL`。
 
-GameServer 是受信任的權威來源；格式及統計一致不等於每條射線重新跑物理驗證，也不證明姿態來自真人頭盔。尚待 Unity 真正發布、Quest 頭手採樣與實機重連、正式美術／動畫／聲音、MR 校正、書籤、長任務壓測及 25 台設備效能驗收。
+GameServer 是受信任的權威來源；格式及統計一致不等於每條射線重新跑物理驗證，也不證明姿態來自真人頭盔。尚待 Unity 真正編譯運行發布器、Quest 頭手採樣與實機重連、正式美術／動畫／聲音、MR 校正、書籤、長任務壓測及 25 台設備效能驗收。

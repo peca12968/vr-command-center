@@ -13,16 +13,19 @@ namespace VrCommand.Unity
     {
         public Vector3 head, left, right;
         public Quaternion headRotation, leftRotation, rightRotation;
+        public byte source; // 1: desktop simulation; 2: client reports valid XR tracking on all three joints.
         public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
         {
             serializer.SerializeValue(ref head); serializer.SerializeValue(ref left); serializer.SerializeValue(ref right);
             serializer.SerializeValue(ref headRotation); serializer.SerializeValue(ref leftRotation); serializer.SerializeValue(ref rightRotation);
+            serializer.SerializeValue(ref source);
         }
         public bool Equals(AvatarPose other) => head == other.head && left == other.left && right == other.right
-            && headRotation == other.headRotation && leftRotation == other.leftRotation && rightRotation == other.rightRotation;
+            && headRotation == other.headRotation && leftRotation == other.leftRotation && rightRotation == other.rightRotation && source == other.source;
         public bool Valid()
         {
-            return Point(head) && Point(left) && Point(right) && Rotation(headRotation) && Rotation(leftRotation) && Rotation(rightRotation);
+            return (source == 1 || source == 2) && Point(head) && Point(left) && Point(right) && Rotation(headRotation) && Rotation(leftRotation) && Rotation(rightRotation)
+                && Vector3.Distance(head, left) <= 2.5f && Vector3.Distance(head, right) <= 2.5f;
         }
         private static bool Point(Vector3 value) => float.IsFinite(value.x) && float.IsFinite(value.y) && float.IsFinite(value.z)
             && Mathf.Abs(value.x) <= 10 && Mathf.Abs(value.z) <= 10 && value.y >= -1 && value.y <= 4;
@@ -40,6 +43,10 @@ namespace VrCommand.Unity
         public NetworkVariable<FixedString64Bytes> PlayerId = new NetworkVariable<FixedString64Bytes>();
         public NetworkVariable<bool> PoseAccepted = new NetworkVariable<bool>(false);
         private InputAction leftPosition, rightPosition, leftRotation, rightRotation, trigger, reload;
+        private InputAction headTracking, leftTracking, rightTracking;
+        private InputAction headTracked, leftTracked, rightTracked;
+        public bool TrackingReady => !tracked || HasTracking(headTracking, headTracked) && HasTracking(leftTracking, leftTracked) && HasTracking(rightTracking, rightTracked);
+        private static bool HasTracking(InputAction state, InputAction tracked) => state != null && tracked != null && tracked.ReadValue<float>() > .5f && (state.ReadValue<int>() & 3) == 3;
         private Camera localCamera;
         private float nextSend;
         private double nextServerAccept;
@@ -73,7 +80,13 @@ namespace VrCommand.Unity
                 var driver = head.gameObject.AddComponent<TrackedPoseDriver>();
                 driver.positionInput = new InputActionProperty(new InputAction("Head Position", InputActionType.Value, "<XRHMD>/centerEyePosition"));
                 driver.rotationInput = new InputActionProperty(new InputAction("Head Rotation", InputActionType.Value, "<XRHMD>/centerEyeRotation"));
-                driver.ignoreTrackingState = true;
+                headTracking = Action("Head Tracking", "<XRHMD>/trackingState");
+                leftTracking = Action("Left Tracking", "<XRController>{LeftHand}/trackingState");
+                rightTracking = Action("Right Tracking", "<XRController>{RightHand}/trackingState");
+                headTracked = Action("Head Is Tracked", "<XRHMD>/isTracked");
+                leftTracked = Action("Left Is Tracked", "<XRController>{LeftHand}/isTracked");
+                rightTracked = Action("Right Is Tracked", "<XRController>{RightHand}/isTracked");
+                driver.trackingStateInput = new InputActionProperty(headTracking); driver.ignoreTrackingState = false;
                 leftPosition = Action("Left Position", "<XRController>{LeftHand}/devicePosition");
                 rightPosition = Action("Right Aim Position", "<XRController>{RightHand}/pointerPosition");
                 leftRotation = Action("Left Rotation", "<XRController>{LeftHand}/deviceRotation");
@@ -99,6 +112,7 @@ namespace VrCommand.Unity
                 foreach (var visual in visuals) visual.enabled = body.connected && body.health > 0 && !(IsOwner && visual.transform.IsChildOf(head));
             if (IsOwner)
             {
+                if (!TrackingReady) return;
                 if (tracked)
                 {
                     leftHand.localPosition = leftPosition.ReadValue<Vector3>();
@@ -142,11 +156,11 @@ namespace VrCommand.Unity
         {
             if (!pose.Valid() || Time.realtimeSinceStartupAsDouble < nextServerAccept) return;
             nextServerAccept = Time.realtimeSinceStartupAsDouble + 0.025;
-            PoseAccepted.Value = CombatAuthority.Instance != null && CombatAuthority.Instance.AcceptPose(OwnerClientId, pose, transform.position);
+            PoseAccepted.Value = CombatAuthority.Instance != null && CombatAuthority.Instance.AcceptPose(OwnerClientId, pose, transform.position, transform.rotation);
             if (PoseAccepted.Value) Pose.Value = pose;
         }
 
-        private AvatarPose CurrentPose() => new AvatarPose { head = transform.InverseTransformPoint(head.position), left = transform.InverseTransformPoint(leftHand.position), right = transform.InverseTransformPoint(rightHand.position),
+        private AvatarPose CurrentPose() => new AvatarPose { source = (byte)(tracked ? 2 : 1), head = transform.InverseTransformPoint(head.position), left = transform.InverseTransformPoint(leftHand.position), right = transform.InverseTransformPoint(rightHand.position),
             headRotation = Quaternion.Inverse(transform.rotation) * head.rotation, leftRotation = Quaternion.Inverse(transform.rotation) * leftHand.rotation, rightRotation = Quaternion.Inverse(transform.rotation) * rightHand.rotation };
 
         public static void CreateTrackingSpace(Transform root, params Transform[] joints)
@@ -165,7 +179,7 @@ namespace VrCommand.Unity
         {
             if (!pose.Valid() || Time.realtimeSinceStartupAsDouble < nextWeaponAccept) return;
             nextWeaponAccept = Time.realtimeSinceStartupAsDouble + .025;
-            CombatAuthority.Instance?.Weapon(OwnerClientId, input, reloadWeapon, pose, transform.position);
+            CombatAuthority.Instance?.Weapon(OwnerClientId, input, reloadWeapon, pose, transform.position, transform.rotation);
         }
 
         private void DesktopPreview()
@@ -209,6 +223,8 @@ namespace VrCommand.Unity
         public override void OnNetworkDespawn()
         {
             leftPosition?.Dispose(); rightPosition?.Dispose(); leftRotation?.Dispose(); rightRotation?.Dispose(); trigger?.Dispose(); reload?.Dispose();
+            headTracking?.Dispose(); leftTracking?.Dispose(); rightTracking?.Dispose();
+            headTracked?.Dispose(); leftTracked?.Dispose(); rightTracked?.Dispose();
         }
     }
 

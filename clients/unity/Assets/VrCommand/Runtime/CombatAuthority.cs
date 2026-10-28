@@ -55,6 +55,46 @@ namespace VrCommand.Unity
         private long observedSequence;
         private bool journalFault;
         public TelemetryOutbox Outbox { get; private set; }
+        public WorldOutbox Recording { get; private set; }
+        private ManagementSnapshot management;
+        private double recordingStart, nextRecording;
+        private bool managementSuspended;
+        private sealed class AcceptedRig { internal ulong Connection; internal RecordedRig Rig; }
+        private readonly Dictionary<Guid, AcceptedRig> rigs = new Dictionary<Guid, AcceptedRig>();
+
+        public void InitializeRecording(string path)
+        {
+            if (Outbox == null || management == null || session.World.Phase != WorldPhase.Preparing) throw new InvalidOperationException("Initialize a preparing world and combat source first.");
+            recordingStart = Time.realtimeSinceStartupAsDouble;
+            var header = WorldRecordingHeader.Create(Guid.Parse(management.id), Outbox.StreamId, Outbox.Origin, management.roomIds, session.Props,
+                DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+            Recording = WorldOutbox.Create(path, header, new UnityWorldCodec());
+            if (!CaptureWorld(true)) throw new InvalidOperationException("Initial world frame could not be saved.");
+        }
+        private bool CaptureWorld(bool force = false)
+        {
+            if (journalFault) return false;
+            if (Recording == null || Recording.Complete || management == null) return true;
+            var now = Time.realtimeSinceStartupAsDouble;
+            if (!force && now < nextRecording) return true;
+            try
+            {
+                var packet = WorldRecordingPacket.Capture(session.World, Recording.LastSequence + 1,
+                    Recording.LastSequence == 0 ? 0 : (long)((now - recordingStart) * 1000), observedSequence, Outbox.LastSequence,
+                    Recording.ThroughWorldSequence, RecordedRigFor, management.environment.weather, management.environment.lightning, managementSuspended);
+                Recording.Append(packet); nextRecording = now + .1;
+                if (session.World.Phase == WorldPhase.Ended) Recording.Finish();
+                return true;
+            }
+            catch (Exception exception) when (exception is System.IO.IOException || exception is ArgumentException || exception is InvalidOperationException || exception is UnauthorizedAccessException)
+            { TelemetryFault(); return false; }
+        }
+        private RecordedRig RecordedRigFor(Guid player)
+        {
+            if (!session.World.PlayerSnapshot(player).Connected) return new RecordedRig();
+            if (!rigs.TryGetValue(player, out var accepted)) throw new InvalidOperationException("Connected world body has no accepted rig.");
+            return accepted.Rig;
+        }
 
         public void InitializeTelemetry(string path, Guid sessionId, string origin)
         {
@@ -91,35 +131,51 @@ namespace VrCommand.Unity
         public void ApplyManagement(ManagementSnapshot snapshot)
         {
             if (!Capture()) throw new InvalidOperationException("Telemetry is faulted.");
+            var changed = management == null || snapshot.sequence != observedSequence || managementSuspended;
+            if (changed && !CaptureWorld(true)) throw new InvalidOperationException("World recording is faulted.");
             session.Apply(snapshot); observedSequence = snapshot.sequence;
+            management = snapshot; managementSuspended = false;
             if (session.World.Phase == WorldPhase.Ended && Outbox != null)
             {
                 try { Outbox.Finish(session.World); }
                 catch (Exception exception) when (exception is System.IO.IOException || exception is System.IO.InvalidDataException || exception is UnauthorizedAccessException)
                 { TelemetryFault(); throw new InvalidOperationException("Telemetry completion could not be persisted.", exception); }
             }
+            if (changed && !CaptureWorld(true)) throw new InvalidOperationException("World recording is faulted.");
             lastManagement = Time.realtimeSinceStartupAsDouble; serverReady = true;
             if (IsSpawned && IsServer) { Ready.Value = true; Publish(); }
         }
         public void Suspend()
         {
-            session.Suspend(); serverReady = false;
+            var first = !managementSuspended; managementSuspended = true; session.Suspend(); serverReady = false;
+            if (first && !journalFault) CaptureWorld(true);
             if (IsSpawned && IsServer) Ready.Value = false;
         }
         public bool Bind(ulong client, TicketApproval admission) => serverReady && Guid.TryParse(admission.playerId, out var id)
             && session.Connect(client, id, admission.roomId, admission.seat);
-        public void Unbind(ulong client) => session.Disconnect(client);
+        public void Unbind(ulong client)
+        {
+            session.Disconnect(client);
+            foreach (var id in new List<Guid>(rigs.Keys)) if (rigs[id].Connection == client) rigs.Remove(id);
+        }
         private static Vec3 Vector(Vector3 value) => new Vec3(value.x, value.y, value.z);
         private static Vector3 Vector(Vec3 value) => new Vector3(value.X, value.Y, value.Z);
-        public bool AcceptPose(ulong client, AvatarPose pose, Vector3 root)
+        public bool AcceptPose(ulong client, AvatarPose pose, Vector3 root, Quaternion rotation)
         {
             if (!IsServer || !serverReady || !pose.Valid()) return false;
-            var forward = pose.rightRotation * Vector3.forward;
-            return session.Pose(client, Vector(root + pose.head), Vector(root + pose.right + forward * .15f), Vector(forward.normalized), Time.realtimeSinceStartupAsDouble);
+            var admission = VenueBootstrap.Instance?.Admission(client);
+            if (admission == null || !Guid.TryParse(admission.playerId, out var player)) return false;
+            var forward = rotation * pose.rightRotation * Vector3.forward;
+            if (!session.Pose(client, Vector(root + rotation * pose.head), Vector(root + rotation * pose.right + forward * .15f), Vector(forward.normalized), Time.realtimeSinceStartupAsDouble)) return false;
+            rigs[player] = new AcceptedRig { Connection = client, Rig = new RecordedRig { kind = pose.source == 2 ? "Tracked" : "Simulated",
+                left = new RecordedVector(Vector(root + rotation * pose.left)), right = new RecordedVector(Vector(root + rotation * pose.right)),
+                headRotation = Rotation(rotation * pose.headRotation), leftRotation = Rotation(rotation * pose.leftRotation), rightRotation = Rotation(rotation * pose.rightRotation) } };
+            return true;
         }
-        public bool Weapon(ulong client, ulong input, bool reload, AvatarPose pose, Vector3 root)
+        private static RecordedRotation Rotation(Quaternion value) => new RecordedRotation { x = value.x, y = value.y, z = value.z, w = value.w };
+        public bool Weapon(ulong client, ulong input, bool reload, AvatarPose pose, Vector3 root, Quaternion rotation)
         {
-            if (Outbox == null || journalFault || !AcceptPose(client, pose, root)) return false;
+            if (Outbox == null || Recording == null || journalFault || !AcceptPose(client, pose, root, rotation)) return false;
             var accepted = session.Weapon(client, input, reload, Time.realtimeSinceStartupAsDouble);
             return Capture() && accepted;
         }
@@ -140,7 +196,7 @@ namespace VrCommand.Unity
                 }
                 accumulator += Mathf.Min(Time.unscaledDeltaTime, .2f);
                 while (accumulator >= ArenaWorld.TickSeconds) { accumulator -= ArenaWorld.TickSeconds; session.Tick(Time.realtimeSinceStartupAsDouble); if (!Capture()) break; }
-                if (!journalFault && Time.unscaledTime >= nextPublish) { nextPublish = Time.unscaledTime + .1f; Publish(); }
+                if (!journalFault && CaptureWorld() && Time.unscaledTime >= nextPublish) { nextPublish = Time.unscaledTime + .1f; Publish(); }
             }
             Draw();
         }

@@ -41,9 +41,11 @@ export function mountWorld(getKey, unauthorized) {
     const phase = frame ? phases[frame.packet.frame.phase] : '等待第一份快照';
     $('world-status').textContent = `${info.header.origin} · ${info.complete ? '錄製已核對封存' : '錄製未封存'} · ${phase}`;
     if (mode === 'live') {
-      const stale = !connected || !received || performance.now() - received > 1500;
-      $('world-freshness').textContent = info.complete ? '場次已封存' : stale ? '快照已中斷或過期' : '正在接收快照';
-      $('world-freshness').classList.toggle('replay-error', stale && !info.complete);
+      const captured = info.header.captureStartedAtUtc ? Date.parse(info.header.captureStartedAtUtc) + (frame?.packet.elapsedMilliseconds ?? 0) : NaN;
+      const age = Date.now() - captured, unknown = !Number.isFinite(age), clockInvalid = age < -1000;
+      const stale = !connected || !received || performance.now() - received > 1500 || age > 1500;
+      $('world-freshness').textContent = info.complete ? '場次已封存' : unknown ? '擷取時間未知' : clockInvalid ? '來源時鐘未同步' : stale ? '快照已中斷或過期' : '正在接收快照';
+      $('world-freshness').classList.toggle('replay-error', (stale || unknown || clockInvalid) && !info.complete);
     } else { $('world-freshness').textContent = connected ? '回放中' : '回放已暫停／結束'; $('world-pause').textContent = connected ? '暫停回放' : '繼續回放'; }
   }
   function selectActor(key) { $('world-actor').value = key; scene?.select(key); actorInfo(); }

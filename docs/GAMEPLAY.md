@@ -1,4 +1,6 @@
-# Quest 戰鬥接入來源碼 v0.11
+# Quest 戰鬥接入來源碼 v0.13
+
+v0.13 已加入頭手來源 byte／追蹤狀態檢查、世界來源、共用發布及管理邊界錄製，詳見 [WORLD_SOURCE.md](WORLD_SOURCE.md)。NGO 生成器 protocol 13，兩端需同版重建；尚未有 Unity 編譯或實際傳輸結果。
 
 本版把共用戰鬥核心接到 Unity 的任務、入場、姿態、武器及 NGO 狀態同步來源碼。**尚未通過 Unity 編譯或運行，也沒有 APK、頭盔射擊、雙玩家互見或 25 台效能證據。** .NET 檢查證明相同任務接入層及遊戲規則可執行，不能代替 Unity SDK／IL2CPP／實機驗證。
 
@@ -40,8 +42,8 @@ v0.11 的 Unity 來源碼會把四種統計 WorldEvent 保存到共用 Telemetry
 
 ## 已執行與待執行的驗證
 
-本機 Release 建置通過，295 項核心檢查含 41 項 ArenaSession／參戰狀態檢查，使用真實管理模型 JSON。另通過 302 項 HTTP、12 項回放資料及 59 項瀏覽器檢查。16 份 C# 通過 C# 9 語法；相同 embedded Runtime 真正建置為 .NET Standard 2.1。沒有使用假 Unity SDK stub 宣稱型別編譯成功。
+本機 Release 建置通過，363 項核心檢查含原 41 項 ArenaSession／參戰狀態與新 30 項世界來源／時鐘檢查，使用真實管理模型 JSON。另通過 302 項原 HTTP、32 項世界串流、12 項回放資料及 76 項瀏覽器檢查。22 份 C# 通過 C# 9 語法；相同 embedded Runtime 真正建置為 .NET Standard 2.1。沒有使用假 Unity SDK stub 宣稱型別編譯成功。
 
-新增三個待執行 EditMode 測試：Unity JsonUtility 綁定完整管理欄位、拒絕缺欄位 JSON、NGO buffer 往返保留健康／武器／連線狀態。加上原四個 AvatarPose 測試共七個；建置腳本要求至少七個通過。實際 Prepare 本輪仍退出 198（授權），尚未進入可確認的 Unity 編譯或測試。
+原有七個 EditMode 來源包含 AvatarPose、管理欄位及 NGO actor 往返；v0.13 另新增三項 pose 來源／距離／wire 往返及兩項 world codec，共 12 項。建置腳本要求至少 12 項通過。實際 Prepare 本輪仍退出 198（授權），尚未進入可確認的 Unity 編譯或測試，不能使用舊七個結果宣稱通過。
 
 授權可用後按 QUEST3 的 Prepare → Tests → Desktop → Quest 順序執行，再驗雙玩家射擊、掩體／死亡、AI 控制、斷線／追蹤遺失、名冊撤銷、管理服務中斷及 Host 審核；每項保留實際日誌與量測，不能以本文件或來源碼存在替代。

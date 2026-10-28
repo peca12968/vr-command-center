@@ -17,7 +17,7 @@ public static class WorldJson
     public static T Read<T>(string value) => JsonSerializer.Deserialize<T>(value, Options) ?? throw new ArgumentException("Missing world data.");
 }
 
-public record WorldRecordingInfo(WorldRecordingHeader Header, long AcceptedSequence, long DurationMilliseconds, bool Complete, DateTimeOffset UpdatedAtUtc, string MissionName);
+public record WorldRecordingInfo(WorldRecordingHeader Header, long AcceptedSequence, long DurationMilliseconds, bool Complete, DateTimeOffset UpdatedAtUtc, string MissionName, DateTimeOffset? CapturedAtUtc);
 public record WorldFrameView(WorldRecordingPacket Packet, PlayerStatistics[] Statistics);
 
 // Indexed, append-only frames are read on demand; startup never loads an entire world recording.
@@ -82,7 +82,7 @@ public sealed class WorldRecordings : IDisposable
         var source = JsonSerializer.Serialize(view with { State = SessionState.Preparing }, JsonFormat.Options);
         var management = JsonSerializer.Deserialize<ManagementSnapshot>(source, new JsonSerializerOptions(JsonFormat.Options) { IncludeFields = true })!;
         bridge.Apply(management);
-        var expected = WorldRecordingHeader.Create(id, view.CombatStream.StreamId, header.origin, view.RoomIds, bridge.Props);
+        var expected = WorldRecordingHeader.Create(id, view.CombatStream.StreamId, header.origin, view.RoomIds, bridge.Props, header.captureStartedAtUtc);
         var json = WorldJson.Write(header);
         if (json != WorldJson.Write(expected)) throw new InvalidOperationException("Recording geometry must match the session's canonical VR mission.");
         lock (gate)
@@ -90,7 +90,7 @@ public sealed class WorldRecordings : IDisposable
             using var existing = Command("SELECT header FROM recordings WHERE session=$id", ("$id", id.ToString("D")));
             if (existing.ExecuteScalar() is string saved)
             {
-                if (saved != json) throw new InvalidOperationException("Recording header is immutable.");
+                if (WorldJson.Write(WorldJson.Read<WorldRecordingHeader>(saved)) != json) throw new InvalidOperationException("Recording header is immutable.");
                 return Info(id, actor);
             }
             using var insert = Command("INSERT INTO recordings(session,header,updated) VALUES($id,$header,$updated)",
@@ -107,7 +107,9 @@ public sealed class WorldRecordings : IDisposable
             using var command = Command("SELECT header,accepted,duration,complete,updated FROM recordings WHERE session=$id", ("$id", id.ToString("D")));
             using var row = command.ExecuteReader();
             if (!row.Read()) throw new KeyNotFoundException("No world recording for this session.");
-            return new(WorldJson.Read<WorldRecordingHeader>(row.GetString(0)), row.GetInt64(1), row.GetInt64(2), row.GetInt64(3) != 0, DateTimeOffset.Parse(row.GetString(4)), session.Mission.Definition.Name);
+            var header = WorldJson.Read<WorldRecordingHeader>(row.GetString(0));
+            var captured = header.captureStartedAtUtc == "" ? (DateTimeOffset?)null : DateTimeOffset.ParseExact(header.captureStartedAtUtc, "O", System.Globalization.CultureInfo.InvariantCulture).AddMilliseconds(row.GetInt64(2));
+            return new(header, row.GetInt64(1), row.GetInt64(2), row.GetInt64(3) != 0, DateTimeOffset.Parse(row.GetString(4)), session.Mission.Definition.Name, captured);
         }
     }
 

@@ -85,3 +85,8 @@ v0.3 新增強制控制台認證與房間範圍授權；匿名 `/api` 呼叫不�
 ## v0.12 世界串流
 
 GET /api/world-recordings、GET /api/sessions/{id}/world 為房間範圍內 metadata；WebSocket .../world/publish 僅 combat-stream owner 可發布；fetch SSE .../world/watch 為只讀 live／replay，不占玩家席位。所有端點仍帶 Bearer，逐幀輸入不走 REST。封包、限制、精確封存及真實驗證範圍見 [WORLD_RECORDING.md](WORLD_RECORDING.md)。
+
+
+## v0.13 世界擷取時間
+
+header 的 captureStartedAtUtc 為選用 round-trip UTC 基準，世界 metadata 另有 capturedAtUtc（基準加已接受 elapsed）；updatedAtUtc 仍為接收時間。舊無時間 header 讀取／確認時補空值，不能重設既有 header 來偽裝新擷取時間。新來源需使用 v0.13 API。共享發布器、binary journal 及頭手來源在 WORLD_SOURCE.md。

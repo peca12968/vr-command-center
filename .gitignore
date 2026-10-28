@@ -25,3 +25,7 @@ clients/unity/*.csproj
 clients/unity/*.sln
 clients/unity/*.slnx
 clients/unity/*.suo
+
+*.worldlog
+*.journal
+*.combat

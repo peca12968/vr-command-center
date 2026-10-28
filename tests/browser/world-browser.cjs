@@ -8,7 +8,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
   const relay = process.env.VR_COMMAND_WORLD_RELAY_DLL || path.join(root, 'tools/VrCommand.WorldRelay/bin/Release/net10.0/VrCommand.WorldRelay.dll');
   const children = [];
   function demo(name, seconds) {
-    const child = spawn('dotnet', [relay, '--recording', path.join(directory, name + '.ndjson'), '--base-url', base, '--key-file', keys, '--demo-room', '2', '--seconds', String(seconds)], { cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const child = spawn('dotnet', [relay, '--world-journal', path.join(directory, name + '.worldlog'), '--base-url', base, '--key-file', keys, '--demo-room', '2', '--seconds', String(seconds)], { cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let output = '', error = ''; child.stdout.on('data', data => { output += data.toString(); }); child.stderr.on('data', data => { error += data.toString(); });
     const finished = new Promise(resolve => child.once('exit', code => resolve({ code, output, error }))); children.push(child);
     return { child, finished };
@@ -41,6 +41,41 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await page.locator('#world-camera').selectOption('follow');
     await page.screenshot({ path: path.join(screenshots, 'world-live.png'), fullPage: true });
     check((await api('/sessions/' + live.header.sessionId)).players.length === 1, 'Observation creates no extra player seat');
+    await page.evaluate(() => {
+      const original = window.fetch; window.worldClockMode = 'old'; window.restoreWorldFetch = () => { window.fetch = original; };
+      window.fetch = async (...args) => {
+        const response = await original(...args);
+        if (!String(args[0]).includes('/world/watch') || !response.ok) return response;
+        let buffer = ''; const decoder = new TextDecoder(), encoder = new TextEncoder();
+        const body = response.body.pipeThrough(new TransformStream({ transform(bytes, controller) {
+          buffer += decoder.decode(bytes, { stream: true }); let end;
+          while ((end = buffer.indexOf('\n\n')) >= 0) {
+            let block = buffer.slice(0, end); buffer = buffer.slice(end + 2);
+            if (/^event: (header|status)\n/.test(block)) {
+              const value = JSON.parse(block.split('\ndata: ')[1]);
+              value.header.captureStartedAtUtc = window.worldClockMode === 'unknown' ? '' : new Date(Date.now() + (window.worldClockMode === 'old' ? -60000 : 60000)).toISOString();
+              block = block.split('\ndata: ')[0] + '\ndata: ' + JSON.stringify(value);
+            }
+            controller.enqueue(encoder.encode(block + '\n\n'));
+          }
+        } }));
+        return new Response(body, { status: response.status, headers: response.headers });
+      };
+    });
+    await page.locator('#world-live').click(); await page.waitForFunction(() => document.querySelector('#world-freshness').textContent.includes('過期'));
+    const staleSequence = Number(await canvas.getAttribute('data-sequence'));
+    await page.waitForFunction(sequence => Number(document.querySelector('#world-canvas').dataset.sequence) > sequence, staleSequence);
+    check((await page.locator('#world-freshness').innerText()).includes('過期'), 'Newly received historical frames remain stale according to capture time');
+    await page.screenshot({ path: path.join(screenshots, 'world-old-capture.png'), fullPage: true });
+    await page.evaluate(() => { window.worldClockMode = 'unknown'; }); await page.locator('#world-live').click();
+    await page.waitForFunction(() => document.querySelector('#world-freshness').textContent === '擷取時間未知');
+    check(true, 'Legacy source without a capture clock is explicitly unknown instead of fresh');
+    await page.evaluate(() => { window.worldClockMode = 'future'; }); await page.locator('#world-live').click();
+    await page.waitForFunction(() => document.querySelector('#world-freshness').textContent === '來源時鐘未同步');
+    check(true, 'Future source clock is not presented as current live data');
+    await page.evaluate(() => window.restoreWorldFetch()); await page.locator('#world-live').click();
+    await page.waitForFunction(() => document.querySelector('#world-freshness').textContent === '正在接收快照');
+    check(true, 'Synchronized current source resumes a fresh live view after reconnecting');
     source.child.kill(); await source.finished;
     await page.waitForFunction(() => document.querySelector('#world-freshness').textContent.includes('過期'));
     check((await page.locator('#world-status').innerText()).includes('未封存'), 'Stopped source becomes visibly stale while its archive remains incomplete');

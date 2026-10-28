@@ -6,10 +6,14 @@ using VrCommand.Core;
 using VrCommand.Simulation;
 
 var options = args.Chunk(2).ToArray();
-if (options.Any(pair => pair.Length != 2 || pair[0] is not ("--recording" or "--demo-room" or "--seconds" or "--base-url" or "--key-file"))
-    || options.Select(pair => pair[0]).Distinct().Count() != options.Length) throw new ArgumentException("Use named value pairs: --recording, --demo-room, --seconds, --base-url, --key-file.");
+if (options.Any(pair => pair.Length != 2 || pair[0] is not ("--recording" or "--world-journal" or "--combat-journal" or "--demo-room" or "--seconds" or "--base-url" or "--key-file"))
+    || options.Select(pair => pair[0]).Distinct().Count() != options.Length) throw new ArgumentException("Use named value pairs: --recording or --world-journal, optional --combat-journal, --demo-room, --seconds, --base-url, --key-file.");
 var values = options.ToDictionary(pair => pair[0], pair => pair[1]);
-var path = Path.GetFullPath(values.GetValueOrDefault("--recording") ?? throw new ArgumentException("--recording is required."));
+if (values.ContainsKey("--recording") == values.ContainsKey("--world-journal")) throw new ArgumentException("Choose exactly one of --recording (legacy NDJSON) or --world-journal (shared binary source).");
+var binary = values.ContainsKey("--world-journal");
+var path = Path.GetFullPath(values.GetValueOrDefault(binary ? "--world-journal" : "--recording")!);
+var combatPath = Path.GetFullPath(values.GetValueOrDefault("--combat-journal", path + ".combat"));
+var codec = new SystemWorldCodec();
 var root = new DirectoryInfo(Environment.CurrentDirectory);
 while (!File.Exists(Path.Combine(root.FullName, "VrCommand.slnx"))) root = root.Parent ?? throw new InvalidOperationException("Run from the repository.");
 using var keys = JsonDocument.Parse(File.ReadAllText(values.GetValueOrDefault("--key-file", Path.Combine(root.FullName, "data/operator-keys.local.json"))).TrimStart('\uFEFF'));
@@ -25,7 +29,7 @@ async Task<T> Post<T>(HttpClient client, string route, object body)
 async Task Deliver(TelemetryOutbox queue)
 {
     var route = "/api/sessions/" + queue.SessionId + "/combat-stream";
-    await Post<CombatStreamView>(http, route, new OpenCombatStream(queue.StreamId, CombatOrigin.Simulation));
+    await Post<CombatStreamView>(http, route, new OpenCombatStream(queue.StreamId, Enum.Parse<CombatOrigin>(queue.Origin)));
     while (queue.Pending is not null)
     {
         var batch = queue.PendingBatch(); using var response = await http.PostAsync(route + "/batch", new StringContent(TelemetryOutbox.BatchJson(batch), Encoding.UTF8, "application/json"));
@@ -71,7 +75,21 @@ async Task<JsonElement> Send(ClientWebSocket socket, string message)
 
 if (!values.TryGetValue("--demo-room", out var roomValue))
 {
-    using var queue = TelemetryOutbox.OpenExisting(path + ".combat"); await Deliver(queue);
+    using var queue = TelemetryOutbox.OpenExisting(combatPath);
+    if (binary)
+    {
+        using var saved = WorldOutbox.Recover(path, codec); var header = saved.Header;
+        if (header.sessionId != queue.SessionId.ToString("D") || header.streamId != queue.StreamId.ToString("D") || header.origin != queue.Origin) throw new InvalidDataException("World and combat source identities disagree.");
+        await Deliver(queue);
+        using var publisher = new WorldPublisher(saved, codec, new WorldWebSocket(http.BaseAddress!.ToString(), queue.SessionId, http.DefaultRequestHeaders.Authorization!.Parameter!));
+        while (saved.Pending != null || (saved.Complete && !saved.Sealed))
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            if (!await publisher.Deliver(queue.AcknowledgedSequence, queue.Sealed, timeout.Token)) break;
+        }
+        Console.WriteLine(Write(new { sessionId = queue.SessionId, frames = saved.LastSequence, acknowledged = saved.AcknowledgedSequence, complete = saved.Sealed, origin = header.origin })); return;
+    }
+    await Deliver(queue);
     using var socket = await Connect(queue.SessionId);
     // Exclusive source lease. Read one line at a time, retain no unbounded frame collection.
     using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None);
@@ -86,7 +104,7 @@ if (!values.TryGetValue("--demo-room", out var roomValue))
     Console.WriteLine(Write(new { sessionId = queue.SessionId, frames, complete, origin = "Simulation" })); return;
 }
 var room = int.Parse(roomValue); var seconds = int.Parse(values.GetValueOrDefault("--seconds", "3"));
-if (room is < 1 or > 5 || seconds is < 1 or > 60 || File.Exists(path) || File.Exists(path + ".combat")) throw new ArgumentException("Demo requires a free room 1–5, 1–60 seconds, and new output files.");
+if (room is < 1 or > 5 || seconds is < 1 or > 60 || File.Exists(path) || File.Exists(combatPath)) throw new ArgumentException("Demo requires a free room 1–5, 1–60 seconds, and new output files.");
 using var master = new HttpClient { BaseAddress = http.BaseAddress, Timeout = http.Timeout };
 master.DefaultRequestHeaders.Authorization = new("Bearer", keys.RootElement.GetProperty("OperatorKeys").GetProperty("Master").GetString());
 if ((await master.GetFromJsonAsync<RoomView[]>("/api/rooms", JsonFormat.Options))!.Single(entry => entry.Id == room).SessionId.HasValue) throw new InvalidOperationException("Room is occupied; no existing session changed.");
@@ -99,19 +117,33 @@ try
 {
     var player = Guid.NewGuid(); await Post<SessionView>(master, route + "/players", new { playerId = player, name = "World Simulation", roomId = room, headset = "Quest3" });
     Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-    using var queue = TelemetryOutbox.OpenFile(path + ".combat", session.Id, "Simulation"); await Deliver(queue);
+    using var queue = TelemetryOutbox.OpenFile(combatPath, session.Id, "Simulation"); await Deliver(queue);
     var bridge = new ArenaSession(); ManagementSnapshot management = null!;
     async Task Refresh() { management = (await http.GetFromJsonAsync<ManagementSnapshot>(route, json))!; bridge.Apply(management); }
     await Refresh();
-    using var source = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-    using var socket = await Connect(session.Id);
+    var elapsed = System.Diagnostics.Stopwatch.StartNew();
+    var header = WorldRecordingHeader.Create(session.Id, queue.StreamId, "Simulation", session.RoomIds, bridge.Props,
+        binary ? DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture) : "");
+    using var saved = binary ? WorldOutbox.Create(path, header, codec) : null;
+    using var publisher = binary ? new WorldPublisher(saved!, codec, new WorldWebSocket(http.BaseAddress!.ToString(), session.Id, http.DefaultRequestHeaders.Authorization!.Parameter!)) : null;
+    using var source = binary ? null : new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None);
+    using var socket = binary ? null : await Connect(session.Id);
     async Task SaveSend(object message)
     {
-        var line = Write(message); var bytes = Encoding.UTF8.GetBytes(line + "\n"); source.Write(bytes); source.Flush(true);
-        await Send(socket, line);
+        var line = Write(message);
+        if (binary)
+        {
+            using var payload = JsonDocument.Parse(line); var type = payload.RootElement.GetProperty("type").GetString();
+            if (type == "frame") saved!.Append(codec.ReadPacket(payload.RootElement.GetProperty("payload").GetRawText()));
+            else if (type == "seal") saved!.Finish();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await publisher!.Deliver(queue.AcknowledgedSequence, queue.Sealed, timeout.Token); return;
+        }
+        var bytes = Encoding.UTF8.GetBytes(line + "\n"); source!.Write(bytes); source.Flush(true);
+        await Send(socket!, line);
     }
-    await SaveSend(new { type = "header", payload = WorldRecordingHeader.Create(session.Id, queue.StreamId, "Simulation", session.RoomIds, bridge.Props) });
-    long sequence = 0, worldCursor = 0; var elapsed = System.Diagnostics.Stopwatch.StartNew();
+    await SaveSend(new { type = "header", payload = header });
+    long sequence = 0, worldCursor = 0;
     RecordedRig Rig(Guid id)
     {
         var body = bridge.World.PlayerSnapshot(id);
@@ -141,6 +173,7 @@ try
     await Post<CommandReceipt>(master, route + "/commands", new ControlCommand(Guid.NewGuid(), ControlAction.End)); await Refresh();
     queue.Finish(bridge.World); await Deliver(queue); await Capture();
     await SaveSend(new { type = "seal", finalSequence = sequence });
+    if (binary && !saved!.Sealed) throw new InvalidDataException("Shared source has not confirmed the final world seal.");
     Console.WriteLine(Write(new { sessionId = session.Id, frames = sequence, complete = true, origin = "Simulation", recording = path }));
 }
 catch

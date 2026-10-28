@@ -201,6 +201,24 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         check(recovery.returncode == 0 and json.loads(recovery.stdout)["complete"], "A second native process replays the full saved source idempotently")
         check(request(route) == info, "Whole-source retry changes no frame or archive metadata")
         check(request("/api/sessions/" + session)["players"][0]["name"] == "World Simulation", "Observer creates no extra player seat")
+        shared = directory / "shared.worldlog"
+        shared_command = ["dotnet", RELAY, "--world-journal", str(shared), "--base-url", base, "--key-file", str(keys)]
+        native = subprocess.run(shared_command + ["--demo-room", "5", "--seconds", "1"], cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30)
+        check(native.returncode == 0, "Shared netstandard publisher completes through a real authenticated WebSocket: " + native.stderr[-400:])
+        shared_result = json.loads(native.stdout)
+        shared_route = "/api/sessions/" + shared_result["sessionId"] + "/world"
+        shared_info = request(shared_route)
+        check(shared.read_bytes()[:8] == b"VRWORLD1", "Shared source uses a versioned binary checksummed journal")
+        check(shared_info["complete"] and shared_info["acceptedSequence"] == 24, "Shared publisher seals every world frame after combat confirmation")
+        check(bool(shared_info["header"]["captureStartedAtUtc"]) and bool(shared_info["capturedAtUtc"]), "Shared archive retains source capture time independently of upload time")
+        native = subprocess.run(shared_command, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30)
+        check(native.returncode == 0 and json.loads(native.stdout)["acknowledged"] == 24 and json.loads(native.stdout)["complete"], "Independent process recovers shared durable acknowledgments and final seal")
+        check(request(shared_route) == shared_info, "Shared source recovery preserves the exact accepted world archive")
+        intact = shared.read_bytes()
+        shared.write_bytes(intact[:-1])
+        native = subprocess.run(shared_command, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30)
+        check(native.returncode != 0 and shared.read_bytes() == intact[:-1], "Torn shared source fails closed in the native recovery process without truncation")
+        check(request(shared_route) == shared_info, "Rejected source recovery changes no persisted world state")
         print(f"All {count} world streaming checks passed. No Unity or headset execution.")
     finally:
         if demo is not None and demo.poll() is None:

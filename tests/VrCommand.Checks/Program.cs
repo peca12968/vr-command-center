@@ -76,6 +76,7 @@ try
     ArenaSessionChecks.Run(Check, directory);
     TelemetryChecks.Run(Check, directory, mission);
     WorldChecks.Run(Check, directory);
+    WorldSourceChecks.Run(Check, directory);
     Console.WriteLine($"All {checks} checks passed. These are domain checks, not headset or gameplay load tests.");
 }
 finally

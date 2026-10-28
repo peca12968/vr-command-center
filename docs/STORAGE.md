@@ -1,5 +1,7 @@
 # 事件儲存與升級 v0.11
 
+v0.13 header 新增選用 UTC 擷取基準與 capturedAtUtc metadata，舊無時間 header 可讀／原樣去重；DB schema 不變，但 v0.12 的嚴格 reader 不接受新欄位，寫入後不可直接降版。完整備份後再一同升級來源、API 與主控台。來源 binary journal 及 ack 規範見 WORLD_SOURCE.md。
+
 v0.12 另在相同 SessionDataDirectory 新增 worlds.db（schema 1），以交易保存逐幀世界／統計並以時間索引播放。管理 events.db 的 schema 與 envelope 5 不變；完整備份需包含兩個資料庫及來源檔，詳見 [WORLD_RECORDING.md](WORLD_RECORDING.md)。
 
 v0.11 新事件 schema 5，戰鬥來源／觀察位置／有序報告及封存各以事件保存，仍讀取 1–4，資料庫結構 user_version 不變。每筆有序報告單獨交易；批次失敗可能已有前綴，原樣重試去重續送。主控台以 pendingTelemetry 區分已 End 但尚未 seal 的統計。
