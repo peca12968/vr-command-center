@@ -1,8 +1,8 @@
 # Unity managed API 接入檢查
 
-後續真正 Editor 已完成 Prepare、46 項 EditMode、v0.20 Windows／Quest 建置，詳見 PROGRESS。本文是較窄的 SDK 診斷範圍；工具本身不執行 Editor／測試，舊 198 不再代表現況。
+後續真正 Editor 已完成 Prepare、51 項 EditMode、v0.20.1 Windows／Quest 建置，詳見 PROGRESS。本文是較窄的 SDK 診斷範圍；工具本身不執行 Editor／測試，舊 198 不再代表現況。
 
-`scripts/check-unity-sdk.py` 將遊戲執行端的 14 份 runtime C#、11 份 test 來源及其官方套件來源，以 .NET Standard 2.1／C# 9 編譯並綁定本機 Unity 6000.3.27f1 的真正 managed DLL。它補足只有語法檢查、或只綁定單一天氣元件的證據缺口；**不是整個 Unity 工程建置**。
+`scripts/check-unity-sdk.py` 將遊戲執行端的 14 份 runtime C#、12 份 test 來源及其官方套件來源，以 .NET Standard 2.1／C# 9 編譯並綁定本機 Unity 6000.3.27f1 的真正 managed DLL。它補足只有語法檢查、或只綁定單一天氣元件的證據缺口；**不是整個 Unity 工程建置**。
 
 ## 執行
 

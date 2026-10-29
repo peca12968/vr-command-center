@@ -1,5 +1,21 @@
 # 開發進度
 
+## 2026-10-30：新開 VR 場地配置檢查與草稿／歷史分離
+
+依使用者「目前沒有頭盔，先繼續電腦端」，從乾淨 `acbdb9c` 接續。API／控制台 **0.18.0** 新增配置預覽及真正新開場的後端檢查，Unity **0.20.1／Android code23／NGO仍19**。共用 `ArenaLayout` 使用現有旋轉沙包／油桶包圍盒，檢查 Y 地面、角度／素材、整體 ±6m 邊界、四軸 SAT 重疊及真正五席出生位的 0.3m 通行空間。貼齊沙包允許；初始敵軍容量與實際規劃共用有序 0.75m 網格，單房需求為總數、Linked 為每房最多 ceil(總數／5)。未改 rules0.8.0 的碰撞／命中／導航，不能把容量當效能、通路可達性或運行中增援保證。
+
+報告 version1／profile vr-room-v1／rulesVersion0.8.0／明確 mode，最多500物件、128問題但保留完整數量及全部無效索引。Master 的 POST `/api/mission-layout` 只預覽不保存；GET 精確任務版本 `/layout?mode=...` 沿用已認證共用範本讀取政策，每次明確 Actor。新 Create 的檢查在權限、已接受 request key 及房間衝突之後、任何提交之前，無效時400帶layout且不占房、不消耗未接受key。草稿仍可另存／修訂，舊場次投影、歷史世界及已接受原樣重試不重新套拒絕政策；測試涵蓋舊無效配置恢復、End後舊key只確認、修正後可重用先前未接受key。MR applies=false／canStart=null，不能稱校正通過。envelope6／任務schema1／world schema1／驗票2／NGO19不變；Core明確參考netstandard2.1 Simulation，Unity不引用後端。
+
+控制台草稿自動檢查、紅色全部問題物件、真實出生空間及可點選問題；開場區讀精確保存版本／模式，未完成或未知版本不放行，未保存修正不會批准舊版。各請求序號、登入epoch、精確草稿／選擇及每次登入快取防止晚回應誤批准；後端另獨立檢查。API／UI須一起升0.18。操作與限制見 [LAYOUT.md](LAYOUT.md)，仍無MR、硬體、複雜通路／地形、25台或頭盔證據。
+
+locked restore／Release build通過、0警告／錯誤，**510核心、403 HTTP、43世界串流、23 Node／158 Chromium**通過。新增旋轉角落／相切／AABB重疊但OBB分離、真正出生半徑、84格初始敵軍容量、128問題截斷、歷史與權限、草稿保存／修訂／新舊開場、模式切換與晚回應／登出／未知版本拒絕等檢查；沒有以dotnet test取代Checks。Core→Simulation新直接參考已更新全部相依lock，沒有套件升版。首次舊任務版本測試使用5.5m／45°沙包，角落出界，被正確擋住；改為4.5m並保留版本／重試目的。新增UI測試第二次嘗試從最新版選單直接選已移入歷史的原版而失敗，改以另一個現存無效head測換選晚回應，未放寬產品規則。桌面及390px截圖實際檢視，無頁面錯誤／CSP違反；失敗log／圖片保留在artifacts。
+
+真正Prepare、**51 EditMode（0 failed／skipped）**、Desktop／Quest均exit0，未RebuildArena；新增5項涵蓋實際初始規劃84／85差異、出生／旋轉／截斷與舊重疊世界仍可讀。scene／prefab識別保持，兩端fingerprint同為 `2173ae32671877346fb6d0dfb33c3335928ba834c7a2ac12928d45a4ea6582a1`。Desktop receipt UTC18:35:10.0418215Z、Quest18:42:38.6848331Z（10/29）；APK46,142,410 bytes，SHA-256 `3e3c1a3be70f5770bc1a964d4cdd4266f12e3445175d90686dda821c2cf72e72`，v2簽章、min32／target35及六個ELF64 AArch64含libil2cpp已核對。managed SDK兩分支各14 runtime／12 NUnit來源僅型別綁定，與真正執行分開。field-props-v1／音訊生成check及293官方Transport檔唯一補丁核對通過；素材pin與wire規則未變。
+
+新binary自己的SSD場 `desktop-venue/20261030-024255-e19b9185` **37項UI／native**通過，包含保存版本的UI／伺服器preflight、兩個真正client及替代peer、Begin／StormNight／Pause／Advance傷害／Resume／End、精確鏡頭與封存回放。已用computer-use檢視並保存白天、雨夜及Pause原生GPU原圖。736幀、最大來源年齡0.167620秒；回放／ledger一致、pendingTelemetry=false、活動0、cleanup零錯誤。停止writer後14檔複製回F與SSD逐檔SHA-256一致且保留原件；程式與binary仍在F，來源全部Simulation／Simulated。瀏覽器觀戰是SwiftShader，非真實GPU／頭盔效能。本輪未重跑聲光DSP或完整鍵盤碰撞，上一輪相同規則的證據仍保留，不能混算為新版重驗。
+
+新binary另於 `desktop-venue/20261030-024533-f361585a` 通過五個真正server／每房一個client、權限與環境／AI隔離、單房End／重用、全部封存後Linked及舊票拒絕；七場58／93／99／104／107／58／64幀（共583），最大來源年齡0.149419秒，全部回放一致、pendingTelemetry=false／活動0／cleanup零錯誤。writer停止後26檔SSD與F snapshot逐檔SHA-256一致，原件保留；不是25台負載。`unity-admission/20261030-024637-eb92d672` 8項無圖形入場／撤銷／真正transport釋放／同admission重連回歸通過，364幀、封存回放一致、活動0；本輪沒有走離出生點的互動重連，舊證據保留。機器證據彙整於artifacts/layout-validation.json；自有原生程序已清空。GitHub同步與CI結果於交付補記。原5080仍為原v0.16 DLL／資料且health ok，沒有為測試替換正式歷史。完整11項長期目標維持開發中；下一主線為人物／武器美術、複雜通路／地形、原停頓原因／啟動旗標、長任務與跨機，取得設備後再做Quest／VIVE、MR、廠商硬體及25台。
+
 ## 2026-10-30：原創沙包／油桶、保存素材版本及新舊觀戰
 
 上一輪姿態分類與診斷屬實際進度。本輪從乾淨 `389eaa5` 接續無頭盔的PC主線，將玩家原方盒掩體換成自製低多邊形三層沙包／十二邊油桶，含縫線、桶箍、封蓋與警示色。固定生成器產出相同Unity Resources／瀏覽器ES module位置、法線、索引及頂點色；沙包256／油桶386三角形，重用兩個Mesh及單一材質，不新增Physics Collider。自製URP光照／霧shader引用既有URP shadow／depth pass，玩家、NPC、武器其餘幾何仍為原型；不是完整人物美術或頭盔驗收。

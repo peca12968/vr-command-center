@@ -78,6 +78,7 @@ try
     WalkSurfaceChecks.Run(Check);
     ArenaSessionChecks.Run(Check, directory);
     TelemetryChecks.Run(Check, directory, mission);
+    MissionLayoutChecks.Run(Check, directory);
     WorldChecks.Run(Check, directory);
     CameraBookmarkChecks.Run(Check, directory);
     MissionLibraryChecks.Run(Check, directory);

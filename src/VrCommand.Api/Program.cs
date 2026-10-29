@@ -78,11 +78,13 @@ app.Use(async (context, next) =>
             KeyNotFoundException => 404,
             _ => 409
         };
-        await context.Response.WriteAsJsonAsync(new { error = ex.Message });
+        if (ex is MissionLayoutRejectedException layout)
+            await context.Response.WriteAsJsonAsync(new { error = ex.Message, layout = layout.Report });
+        else await context.Response.WriteAsJsonAsync(new { error = ex.Message });
     }
 });
 
-app.MapGet("/", () => new { service = "VR Command Center", stage = "versioned field props and Quest connection integration prototype", version = "0.17.0", worldAssetSets = new[] { VrCommand.Simulation.WorldAssetSets.Legacy, VrCommand.Simulation.WorldAssetSets.FieldProps } });
+app.MapGet("/", () => new { service = "VR Command Center", stage = "VR mission placement preflight and Quest connection integration prototype", version = "0.18.0", layoutProfile = "vr-room-v1", worldAssetSets = new[] { VrCommand.Simulation.WorldAssetSets.Legacy, VrCommand.Simulation.WorldAssetSets.FieldProps } });
 app.MapWorldRoutes();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/api/me", (HttpContext context) => Actor(context));
@@ -90,6 +92,13 @@ app.MapGet("/api/rooms", (SessionManager manager, HttpContext context) => manage
 app.MapGet("/api/missions", (SqliteMissionLibrary store, HttpContext context) => store.List(Actor(context)));
 app.MapGet("/api/mission-library", (SqliteMissionLibrary store, HttpContext context) => store.Heads(Actor(context)));
 app.MapGet("/api/missions/{id:guid}", (Guid id, SqliteMissionLibrary store, HttpContext context) => store.Get(id, Actor(context)));
+app.MapGet("/api/missions/{id:guid}/layout", (Guid id, SessionMode? mode, SqliteMissionLibrary store, HttpContext context) =>
+    MissionLayout.Inspect(store.Get(id, Actor(context)).Definition, mode ?? SessionMode.Independent));
+app.MapPost("/api/mission-layout", (MissionLayoutRequest request, HttpContext context) =>
+{
+    AccessPolicy.AuthorMission(Actor(context));
+    return MissionLayout.Inspect(request);
+});
 app.MapGet("/api/missions/{id:guid}/version", (Guid id, SqliteMissionLibrary store, HttpContext context) => store.Version(id, Actor(context)));
 app.MapGet("/api/missions/{id:guid}/history", (Guid id, int? before, int? limit, SqliteMissionLibrary store, HttpContext context) => store.History(id, before, limit ?? 20, Actor(context)));
 app.MapPost("/api/missions", (MissionDraft draft, SqliteMissionLibrary store, HttpContext context) =>

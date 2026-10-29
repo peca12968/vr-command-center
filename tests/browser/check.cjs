@@ -292,6 +292,7 @@ async function main() {
     check(await page.evaluate(() => localStorage.length === 0 && sessionStorage.length === 0 && !document.cookie), 'Operator credentials are not persisted in browser storage or cookies');
     await require('./world-browser.cjs')({ page, context, api, tokens, directory, root, base, screenshots, check });
     await require('./environment-browser.cjs')({ page, api, tokens, directory, root, base, screenshots, check });
+    await require('./layout-browser.cjs')({ context, api, tokens, base, mission, screenshots, check });
     let releaseReplay, requestedReplay;
     const replayGate = new Promise(resolve => { releaseReplay = resolve; }), replayRequested = new Promise(resolve => { requestedReplay = resolve; });
     await page.route('**/console/examples/simulation.json', async route => { requestedReplay(); await replayGate; await route.continue(); });

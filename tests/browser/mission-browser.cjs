@@ -12,7 +12,7 @@ module.exports = async function missionBrowser({ page, context, api, tokens, bas
     check(await editor.locator('#mission-version option').count() === 1 && await editor.locator('#save-revision').isEnabled(), 'Loaded mission identifies revision one and enables saving its next version');
     await editor.locator('#draft-name').fill('夜間防衛修訂 <第二版>'); await editor.locator('#draft-duration').fill('1500');
     await editor.locator('#draft-weather').selectOption('Clear'); await editor.locator('#draft-time').selectOption('Day');
-    await editor.locator('#prop-x').fill('5.5'); await editor.locator('#prop-x').blur();
+    await editor.locator('#prop-x').fill('4.5'); await editor.locator('#prop-x').blur();
     let loseRevision = true; const attempts = [];
     await editor.route('**/api/missions/*/revisions', async route => {
       attempts.push({ path: new URL(route.request().url()).pathname, body: route.request().postData(), key: route.request().headers()['idempotency-key'] });
@@ -93,7 +93,7 @@ module.exports = async function missionBrowser({ page, context, api, tokens, bas
     await editor.locator('#launch-room').selectOption('3'); await editor.locator('#create-session-form button').click();
     await editor.waitForFunction(() => !document.querySelector('#session-panel').hidden && document.querySelector('#session-phase').textContent.includes('準備'));
     created = (await api('/sessions')).find(row => row.roomIds.length === 1 && row.roomIds[0] === 3);
-    check(created?.mission.id === fourth.id && created.mission.definition.durationSeconds === 1500 && created.mission.definition.props[0].position.x === 5.5,
+    check(created?.mission.id === fourth.id && created.mission.definition.durationSeconds === 1500 && created.mission.definition.props[0].position.x === 4.5,
       'Latest version launch uses the revised duration, environment and layout');
     await api('/sessions/' + created.id + '/commands', 'POST', { commandId: randomUUID(), action: 'End' });
     await editor.locator('#tab-missions').click();

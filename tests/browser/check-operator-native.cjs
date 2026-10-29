@@ -61,8 +61,14 @@ async function main() {
     await page.locator('#new-mission').click(); await page.locator('#edit-mission').selectOption(mission.id); await page.locator('#load-mission').click();
     await until(async () => (await page.locator('#draft-name').inputValue()) === mission.definition.name, 'saved mission reloaded');
     check((await page.locator('#prop-select option').count()) === 2 && await page.locator('#draft-weather').inputValue() === 'Clear', 'Operator reloads saved task and geometry before selecting it for native play');
+    await page.waitForFunction(() => document.querySelector('#draft-layout-summary').dataset.status === 'valid');
+    check(await page.locator('#layout-spawns circle').count() === 5 && await page.locator('#prop-layer [data-layout-invalid=true]').count() === 0,
+      'The native task editor approves the saved geometry with all five real spawn margins');
     await page.screenshot({ path: path.join(evidence, 'mission-editor.png'), fullPage: true });
     await page.locator('#tab-operations').click(); await page.locator('#launch-mission').selectOption(mission.id); await page.locator('#launch-room').selectOption('1');
+    await page.waitForFunction(() => document.querySelector('#launch-layout-summary').dataset.status === 'valid');
+    check(await page.locator('#create-session-form button').isEnabled() && (await api(`/missions/${mission.id}/layout?mode=Independent`)).canStart === true,
+      'The exact saved native mission passes both operator UI and authenticated server preflight before reserving a room');
     await page.locator('#create-session-form button').click();
     await until(async () => (await api('/sessions')).length === 1, 'Preparing round'); session = (await api('/sessions'))[0].id;
     for (const name of ['Operator 01', 'Peer 02']) { await page.locator('#player-name').fill(name); await page.locator('#join-form button').click(); await until(async () => (await page.locator('#roster').innerText()).includes(name), 'roster ' + name); }

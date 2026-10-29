@@ -155,14 +155,8 @@ namespace VrCommand.Simulation
             for (var index = 0; index < count; index++)
             {
                 var room = rooms[(existing.Length + index) % rooms.Length];
-                var navigation = new GridNavigation(ArenaWorld.RoomOrigin(room), geometry.Where(prop => prop.RoomId == room).ToArray());
-                var candidates = new List<Vec3>();
-                for (var z = -1f; z <= 5; z += .75f) for (var x = -4.5f; x <= 4.5f; x += .75f)
-                {
-                    var position = ArenaWorld.RoomOrigin(room) + new Vec3(x, 0, z);
-                    if (navigation.Walkable(position) && existing.All(enemy => Vec3.Distance(enemy.Feet, position) > .7f)
-                        && plan.All(enemy => Vec3.Distance(enemy.Feet, position) > .7f)) candidates.Add(position);
-                }
+                var candidates = ArenaLayout.EnemyCandidates(room, geometry, position => existing.All(enemy => Vec3.Distance(enemy.Feet, position) > .7f)
+                    && plan.All(enemy => Vec3.Distance(enemy.Feet, position) > .7f));
                 if (candidates.Count == 0) throw new ArgumentException("Mission has no free enemy spawn area.");
                 var feet = candidates[0]; var patrol = candidates[candidates.Count - 1];
                 plan.Add(new EnemySpawn { Id = StableId(session, "enemy:" + (generation + index)), Room = room, Feet = feet, Patrol = patrol });

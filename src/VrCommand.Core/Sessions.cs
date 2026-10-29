@@ -79,6 +79,9 @@ public sealed partial class SessionManager
             }
             if (Active().Any(s => s.RoomIds.Intersect(roomIds).Any()))
                 throw new InvalidOperationException("A requested room is already in use.");
+            // Replayed histories and confirmed historical request keys retain the
+            // original acceptance. Only a genuinely new reservation uses preflight.
+            MissionLayout.RequireNewStart(mission.Definition, mode);
             var id = Guid.NewGuid();
             var entry = SessionEvent.Create(id, 1, SessionEventKind.Created,
                 creation, actor, requestId);

@@ -1,4 +1,6 @@
-# 管理、統計與玩家接入 API v0.16
+# 管理、統計與玩家接入 API v0.18
+
+v0.18 新增 [VR 配置檢查](LAYOUT.md)：Master 草稿預覽、精確保存版本報告及新 VR 場次的後端檢查。無效的新建立回 400 `{ error, layout }`，草稿仍可保存；舊場次／已接受 request key 保留原結果。MR 明確不適用。API／UI 須一起更新；事件與世界 schema 不變。v0.17 的 field-props-v1／舊 primitives-v1 持續支援。
 
 v0.16 世界 header 新增選用 `environmentVersion`（0 legacy／1 時間重現），未知版本或改動既有版本拒絕；舊回應補 0，原始持久 header 不改寫。新來源、API 與 UI 協同更新，見 [ENVIRONMENT.md](ENVIRONMENT.md)。管理命令路由不變。
 
@@ -16,6 +18,8 @@ REST、UTF-8 JSON；預設範例地址 `http://127.0.0.1:5080`。列舉使用字
 | GET | `/api/missions/{id}/version` | 精確版本及 series／number／previous／author |
 | GET | `/api/missions/{id}/history` | 版號 metadata 分頁，before 不含、limit 預設 20／最多 100 |
 | GET | `/api/missions/{id}` | 取得任務 |
+| GET | `/api/missions/{id}/layout?mode=Independent` | 以明確身分讀保存版本的配置報告；預設單房，支援 Linked |
+| POST | `/api/mission-layout` | 僅 Master，預覽 experienceMode／mode／enemyCount／props，不保存 |
 | POST | `/api/missions` | 以 `examples/mission.json` 格式建立任務，回傳 201 |
 | POST | `/api/missions/{id}/revisions` | 從精確 head 保存下一版，必須 Idempotency-Key；過時 base 為 409 |
 | POST | `/api/sessions` | 依任務建立場次，回傳 201 |

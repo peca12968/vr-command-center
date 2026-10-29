@@ -48,7 +48,10 @@
         }
       },
       "vrcommand.core": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "VrCommand.Simulation": "[1.0.0, )"
+        }
       },
       "vrcommand.persistence": {
         "type": "Project",

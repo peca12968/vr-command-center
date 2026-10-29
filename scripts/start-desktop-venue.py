@@ -90,7 +90,7 @@ class Venue:
         self.processes['api'] = subprocess.Popen(['dotnet', str(self.args.api_dll.resolve()), '--urls', self.base], cwd=ROOT,
             env=environment, stdout=self.api_log, stderr=self.api_log, creationflags=subprocess.CREATE_NO_WINDOW)
         self.wait(lambda: self.request('/health'), 30, 'API startup')
-        if self.request('/').get('version') != '0.17.0': raise RuntimeError('Build API 0.17.0 before provisioning the versioned field-prop venue')
+        if self.request('/').get('version') != '0.18.0': raise RuntimeError('Build API 0.18.0 before provisioning the placement-checked venue')
 
     def launch(self, name, config, visible=False, *, extra_args=()):
         self.save(name + '.json', config)
@@ -111,7 +111,7 @@ class Venue:
         definition = {'name': f'Room {room} PC venue - Simulation', 'briefing': 'Independent native desktop room, synthetic rigs; no headset',
             'durationSeconds': self.args.duration, 'environment': {'mode': 'VR', 'weather': weather, 'timeOfDay': 'Night' if night else 'Day', 'lightning': weather == 'Storm'},
             'enemies': {'count': room, 'behavior': 'Hold', 'autoAttack': False},
-            'props': [{'assetId': 'barrel' if index % 2 else 'sandbag', 'position': {'x': index - 2, 'y': 0, 'z': 3}, 'yawDegrees': room * 15} for index in range(room)]}
+            'props': [{'assetId': 'barrel' if index % 2 else 'sandbag', 'position': {'x': (index - (room - 1) / 2) * 2, 'y': 0, 'z': 3}, 'yawDegrees': room * 15} for index in range(room)]}
         return self.request('/api/missions', definition, expected=201)
 
     def create(self, mission, rooms, name, role='Master', players=None):

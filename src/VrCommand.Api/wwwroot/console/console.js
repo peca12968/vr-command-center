@@ -1,5 +1,6 @@
 import { mountWorld } from './world-ui.js';
 import { mountReplay } from './replay-ui.js';
+import { mountLayout } from './layout-ui.js';
 const replay = mountReplay();
 const $ = id => document.getElementById(id);
 const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫停', Ended: '已結束' };
@@ -7,6 +8,10 @@ const weatherNames = { Clear: '晴朗', Rain: '下雨', Fog: '濃霧', Storm: '�
 const behaviorNames = { Hold: '守備', Patrol: '巡邏', Advance: '推進' };
 const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: null, rooms: [], missions: [], catalog: [], launchPinned: null, history: null, draftBase: null, draftChanged: false, draftSavedAt: '', sessions: [], session: null, selected: '', pending: null, props: [], prop: -1, environmentSequence: null, enemiesSequence: null };
 const world = mountWorld(() => state.key, logout);
+const placement = mountLayout({ api, epoch: () => state.epoch, active: () => !!state.actor, editable: master,
+  draft: () => ({ experienceMode: $('draft-mode').value, mode: $('layout-session-mode').value, enemyCount: Number($('draft-count').value), props: structuredClone(state.props) }),
+  selection: () => ({ id: $('launch-mission').value, mode: $('launch-mode').value }), changed: applyPermissions,
+  selectProp: index => { if (!state.props[index]) return; state.prop = index; renderProps(); $('prop-select').focus(); } });
 let timer;
 
 function notify(message, error = false) {
@@ -46,12 +51,13 @@ async function api(path, method = 'GET', body, requestId, admissionId) {
     const content = await response.text();
     if (epoch !== state.epoch) throw new Error('登入狀態已變更，已忽略舊回應。');
     if (!response.ok) {
-      let message = '操作未完成，請重新整理後確認。';
-      try { message = JSON.parse(content).error || message; } catch { /* Non-domain errors have no stable JSON contract. */ }
+      let message = '操作未完成，請重新整理後確認。', layout;
+      try { const data = JSON.parse(content); message = data.error || message; layout = data.layout; } catch { /* Non-domain errors have no stable JSON contract. */ }
       if (response.status === 401) { logout(); message = '憑證無效或已更換，請重新登入。'; }
       if (response.status === 403) message = '目前身分沒有此操作權限。';
       if (response.status === 409) message = path.startsWith('/missions') ? '任務版本已變更或原請求內容不一致；草稿仍保留，可載入最新版或另存新任務。' : '場次狀態或名額已變更，請重新整理並確認後再操作。';
-      const error = new Error(message); error.status = response.status; throw error;
+      if (layout) message = '場地配置未通過檢查，請修正並保存新版本後再開場。';
+      const error = new Error(message); error.status = response.status; error.layout = layout; throw error;
     }
     return content ? JSON.parse(content) : null;
   } finally { clearTimeout(timeout); }
@@ -68,6 +74,7 @@ function logout() {
   state.epoch++; state.key = ''; state.actor = null; state.selected = ''; state.session = null; state.pending = null;
   state.rooms = []; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
   state.props = []; state.prop = -1;
+  placement.reset();
   clearInterval(timer);
   $('workspace').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true;
   $('identity').textContent = '尚未登入'; $('login-key').value = '';
@@ -138,7 +145,7 @@ function renderRooms() {
     const card = element('article', undefined, 'room-card'), session = state.sessions.find(s => s.id === room.sessionId);
     card.append(element('p', `ROOM 0${room.id}`, 'eyebrow'), element('h3', `房間 ${room.id}`), element('div', `${room.playerCount} / ${room.capacity}`, 'occupancy'), element('p', session ? `${phases[session.state]} · ${session.mission.definition.name}` : room.sessionId ? '場次使用中' : '房間空閒', 'room-mission'));
     const button = element('button', room.sessionId ? '查看場次' : '選擇此房間', 'quiet small');
-    button.type = 'button'; button.addEventListener('click', () => { if (room.sessionId) selectSession(room.sessionId); else { $('launch-room').value = String(room.id); $('launch-mode').value = 'Independent'; applyPermissions(); $('launch-mission').focus(); } });
+    button.type = 'button'; button.addEventListener('click', () => { if (room.sessionId) selectSession(room.sessionId); else { $('launch-room').value = String(room.id); $('launch-mode').value = 'Independent'; placement.scheduleLaunch(); applyPermissions(); $('launch-mission').focus(); } });
     card.append(button); return card;
   }));
 }
@@ -154,7 +161,7 @@ function applyPermissions() {
   const session = state.session, ended = session?.state === 'Ended', locked = state.busy || !!state.pending;
   $('create-fields').disabled = locked || state.actor.role === 'GameServer';
   $('launch-room').disabled = $('launch-mode').value === 'Linked';
-  $('create-session-form').querySelector('button').disabled = locked || !state.missions.length || ($('launch-mode').value === 'Linked' ? !master() || state.rooms.some(r => r.sessionId) : !!state.rooms.find(r => r.id === Number($('launch-room').value))?.sessionId);
+  $('create-session-form').querySelector('button').disabled = locked || !state.missions.length || !placement.canLaunch() || ($('launch-mode').value === 'Linked' ? !master() || state.rooms.some(r => r.sessionId) : !!state.rooms.find(r => r.id === Number($('launch-room').value))?.sessionId);
   $('mission-fields').disabled = locked || !master();
   $('load-mission').disabled = locked || !state.missions.length; $('new-mission').disabled = locked || !master();
   $('edit-mission').disabled = locked;
@@ -220,6 +227,7 @@ function loadEnvironment() { if (state.session) { setEnvironment('live', state.s
 function loadEnemies() { if (state.session) { setEnemies('live', state.session.enemies); state.enemiesSequence = state.session.sequence; } }
 async function createSession() {
   if (state.pending) return;
+  if (!placement.canLaunch()) { placement.scheduleLaunch(); notify('請先完成保存版本的場地檢查，再建立新場次。', true); return; }
   const mode = $('launch-mode').value;
   state.pending = { kind: 'create', path: '/sessions', method: 'POST', requestId: uuid(), body: { missionId: $('launch-mission').value, mode, roomIds: mode === 'Linked' ? [1, 2, 3, 4, 5] : [Number($('launch-room').value)] } };
   await sendPending();
@@ -257,6 +265,7 @@ async function sendPending() {
     await refresh(); loadEnvironment(); loadEnemies();
     notify({ create: '場次建立結果已確認。請核對目前狀態，再加入玩家及開始任務。', join: '玩家加入操作已確認，請核對目前名冊；尚不代表頭盔在線。', leave: '玩家移出操作已確認，請核對目前名冊。', command: '控制命令已確認。' }[pending.kind]);
   } catch (error) {
+    if (pending.kind === 'create' && error.layout) placement.rejected(pending.body.missionId, pending.body.mode, error.layout);
     if (state.pending === pending && !pending.accepted && error.status >= 400 && error.status < 500) state.pending = null;
     throw error;
   }
@@ -296,6 +305,7 @@ function missionOptions(launch, edit) {
   const launchEntries = pinned && !entries.some(([id]) => id === pinned.mission.id) ? [...entries, [pinned.mission.id, `${pinned.mission.definition.name} · 第 ${pinned.number} 版（歷史）`]] : entries;
   fillOptions('launch-mission', launchEntries.length ? launchEntries : [['', '請先儲存任務']], launch);
   fillOptions('edit-mission', entries.length ? entries : [['', '尚無儲存任務']], edit);
+  placement.scheduleLaunch();
 }
 function knownHeadNumber(seriesId) {
   return Math.max(state.catalog.find(row => row.seriesId === seriesId)?.number || 0, state.history?.seriesId === seriesId ? state.history.headNumber : 0);
@@ -359,6 +369,7 @@ function renderProps(updateInspector = true) {
     const envelope = svgNode('rect', { x: barrel ? '-.35' : '-1', y: '-.35', width: barrel ? '.7' : '2', height: '.7', fill: 'none', stroke: '#d2dca2', 'stroke-width': '.04', 'stroke-dasharray': '.1 .06', 'data-envelope': prop.assetId });
     const label = svgNode('text', { y: '.12' }); label.textContent = index + 1; group.append(shape, envelope, label); return group;
   }));
+  placement.scheduleDraft();
   if (!updateInspector) return;
   fillOptions('prop-select', state.props.length ? state.props.map((p, i) => [String(i), `${i + 1} · ${p.assetId}`]) : [['', '尚無物件']], String(state.prop));
   $('prop-inspector').hidden = state.prop < 0;
@@ -366,7 +377,7 @@ function renderProps(updateInspector = true) {
   if (prop) { $('prop-asset').value = prop.assetId; for (const axis of ['x', 'y', 'z']) $('prop-' + axis).value = prop.position[axis]; $('prop-yaw').value = prop.yawDegrees; }
 }
 function editable() { return master() && !state.busy && !state.pending; }
-function dirtyDraft() { state.draftChanged = true; draftStatus(); }
+function dirtyDraft() { state.draftChanged = true; draftStatus(); placement.scheduleDraft(); }
 function addProp(assetId) {
   if (!editable()) return;
   if (state.props.length >= 500) { notify('最多可放置 500 個物件。', true); return; }
@@ -410,7 +421,8 @@ $('logout').addEventListener('click', logout);
 $('refresh').addEventListener('click', () => refresh().then(() => notify('已更新。')).catch(showRefreshError));
 $('include-ended').addEventListener('change', () => refresh().catch(showRefreshError));
 $('session-select').addEventListener('change', () => selectSession($('session-select').value));
-$('launch-mode').addEventListener('change', applyPermissions);
+$('launch-mode').addEventListener('change', () => { placement.scheduleLaunch(); applyPermissions(); });
+$('launch-mission').addEventListener('change', () => { placement.scheduleLaunch(); applyPermissions(); });
 $('launch-room').addEventListener('change', applyPermissions);
 $('reload-environment').addEventListener('click', loadEnvironment);
 $('reload-enemies').addEventListener('click', loadEnemies);
@@ -442,7 +454,10 @@ $('add-sandbag').addEventListener('click', () => addProp('sandbag'));
 $('add-barrel').addEventListener('click', () => addProp('barrel'));
 $('rotate-prop').addEventListener('click', () => { if (editable() && state.props[state.prop]) { state.props[state.prop].yawDegrees = (state.props[state.prop].yawDegrees + 15) % 360; renderProps(); dirtyDraft(); } });
 $('remove-prop').addEventListener('click', () => { if (editable() && state.prop >= 0) { state.props.splice(state.prop, 1); state.prop = Math.min(state.prop, state.props.length - 1); renderProps(); dirtyDraft(); } });
-$('mission-form').addEventListener('input', dirtyDraft);
-$('mission-form').addEventListener('change', dirtyDraft);
+$('mission-form').addEventListener('input', event => { if (event.target.id !== 'layout-session-mode') dirtyDraft(); });
+$('mission-form').addEventListener('change', event => { if (event.target.id !== 'layout-session-mode') dirtyDraft(); });
+$('layout-session-mode').addEventListener('change', () => placement.scheduleDraft());
+$('layout-recheck-draft').addEventListener('click', () => placement.recheckDraft());
+$('layout-recheck-launch').addEventListener('click', () => placement.recheckLaunch());
 for (const name of ['operations', 'missions', 'replay', 'world']) $('tab-' + name).addEventListener('click', () => tab(name));
 window.addEventListener('beforeunload', event => { if (state.pending) { event.preventDefault(); event.returnValue = ''; } });

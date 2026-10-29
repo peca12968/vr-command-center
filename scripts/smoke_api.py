@@ -144,11 +144,32 @@ try:
                 require(len(own_rooms) == 1 and own_rooms[0]["id"] == room, f"Room {room} controller only lists its room")
             rooms = request("GET", "/api/rooms")
             require(len(rooms) == 5 and all(r["capacity"] == 5 for r in rooms), "Five rooms expose five slots each")
+            layout_body = {"experienceMode": "VR", "mode": "Independent", "enemyCount": 8, "props": []}
+            request("POST", "/api/mission-layout", layout_body, 401, identity=None)
+            request("POST", "/api/mission-layout", layout_body, 403, identity="Room1")
+            request("POST", "/api/mission-layout", layout_body, 403, identity="GameServer")
+            layout = request("POST", "/api/mission-layout", layout_body)
+            require(layout["version"] == 1 and layout["canStart"] and layout["enemyCapacityPerRoom"] == 117 and len(layout["spawns"]) == 5,
+                    "Authenticated draft preflight uses actual room and admission geometry")
+            blocked_prop = {"assetId": "barrel", "position": {"x": -3, "y": 0, "z": -3}, "yawDegrees": 0}
+            blocked = request("POST", "/api/mission-layout", {**layout_body, "props": [blocked_prop]})
+            require(not blocked["canStart"] and any(issue["code"] == "SpawnBlocked" and issue["seat"] == 0 for issue in blocked["issues"]),
+                    "Draft report identifies the exact blocked admission seat without persisting a mission")
+            unknown = request("POST", "/api/mission-layout", {**layout_body, "props": [{**blocked_prop, "assetId": "unknown"}]})
+            require(unknown["issues"][0]["code"] == "UnsupportedAsset", "Unsupported VR content is reported rather than launched")
+            mr_layout = request("POST", "/api/mission-layout", {**layout_body, "experienceMode": "MR", "props": [blocked_prop]})
+            require(not mr_layout["applies"] and mr_layout.get("canStart") is None, "MR preflight is explicitly not applicable instead of claiming calibration")
+            request("POST", "/api/mission-layout", {**layout_body, "props": [blocked_prop] * 501}, 400)
+            require(request("GET", "/api/missions") == [], "Draft validation creates no library rows")
             draft = json.loads((ROOT / "examples/mission.json").read_text(encoding="utf-8"))
             mission_key = str(uuid.uuid4())
             mission = request("POST", "/api/missions", draft, 201, request_id=mission_key)
             loaded = request("GET", f"/api/missions/{mission['id']}")
             require(loaded["definition"] == draft, "Mission round-trips through JSON persistence")
+            for role in ["Master", "Room1", "GameServer"]:
+                require(request("GET", f"/api/missions/{mission['id']}/layout?mode=Linked", identity=role)["canStart"],
+                        "Saved shared-template layout follows the existing read policy for " + role)
+            request("GET", f"/api/missions/{mission['id']}/layout?mode=999", expected=400)
             require(len(request("GET", "/api/missions")) == 1, "Saved mission appears in list")
             request("POST", "/api/missions", draft, 403, identity="Room1")
             request("POST", "/api/missions", draft, 403, identity="GameServer")
@@ -561,6 +582,22 @@ try:
                     "Six ordered reports and one seal remain in durable event history")
             retry = subprocess.run(relay_args, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30)
             require(retry.returncode == 0 and json.loads(retry.stdout)["statistics"] == delivered["statistics"], "Running recovery again returns unchanged sealed statistics")
+            bad_draft = {**draft, "name": "Saved invalid layout", "props": [blocked_prop]}
+            bad_mission = request("POST", "/api/missions", bad_draft, 201)
+            before_rooms = request("GET", "/api/rooms")
+            room = next(row["id"] for row in before_rooms if row["sessionId"] is None)
+            failed_key = str(uuid.uuid4())
+            rejection = request("POST", "/api/sessions", {"missionId": bad_mission["id"], "mode": "Independent", "roomIds": [room]}, 400, request_id=failed_key)
+            require(not rejection["layout"]["canStart"] and any(i["code"] == "SpawnBlocked" for i in rejection["layout"]["issues"]),
+                    "Server rejects an invalid saved VR mission even when the UI gate is bypassed")
+            require(request("GET", "/api/rooms") == before_rooms and request("GET", f"/api/missions/{bad_mission['id']}")["definition"] == bad_draft,
+                    "Rejected start leaves reservations and immutable mission content unchanged")
+            denied = request("POST", "/api/sessions", {"missionId": bad_mission["id"], "mode": "Independent", "roomIds": [2]}, 403, identity="Room1")
+            require("layout" not in denied, "Room scope is checked before a layout rejection can reveal operation details")
+            fixed = request("POST", f"/api/missions/{bad_mission['id']}/revisions", {**bad_draft, "props": []}, 201, request_id=str(uuid.uuid4()))
+            accepted = request("POST", "/api/sessions", {"missionId": fixed["id"], "mode": "Independent", "roomIds": [room]}, 201, request_id=failed_key)
+            require(accepted["mission"]["id"] == fixed["id"], "An unaccepted validation failure does not consume the lifecycle idempotency key")
+            request("POST", f"/api/sessions/{accepted['id']}/commands", {"commandId": str(uuid.uuid4()), "action": "End"})
         except BaseException:
             log.flush()
             diagnostic = (test_directory / "server.log").read_text(encoding="utf-8", errors="replace")

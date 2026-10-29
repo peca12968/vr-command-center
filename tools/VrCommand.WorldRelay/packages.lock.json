@@ -3,7 +3,10 @@
   "dependencies": {
     "net10.0": {
       "vrcommand.core": {
-        "type": "Project"
+        "type": "Project",
+        "dependencies": {
+          "VrCommand.Simulation": "[1.0.0, )"
+        }
       },
       "vrcommand.simulation": {
         "type": "Project"
