@@ -19,6 +19,8 @@ Prepare／**42項真正EditMode（0 failed／skipped）**／Desktop／Quest均ex
 完整機器證據在 `artifacts/pose-validation.json`、原資料核對在 `pose-historical-evidence.json`；操作／限制見 [TACTICAL_HUD.md](TACTICAL_HUD.md)。本輪無共享遊戲規則、後端或管理Web UI變更，不重算歷史485核心／369 HTTP／43世界／140 Chromium。5080 health仍ok，正式資料／DLL未換。啟動旗標提示、原停頓根因、長任務／跨機、3D軍事素材、頭盔／MR／VIVE、硬體與25台仍待；完整長期目標維持開發中。
 
 
+功能提交 `b835d8c0327a3999ed6c2b756ded859c7b610558` 已推送並核對遠端main相同。[CI run 40917071587](https://github.com/peca12968/vr-command-center/actions/runs/40917071587)／check123600047504已結束，jobs.steps=null；annotation明確為近期付款失敗或支出限制、工作未啟動，另有ubuntu遷移通知。未重跑、改帳務或將其算測試失敗；本機證據與雲端未執行分開記錄。GitHub #1已同步新證據、未解限制及目前ROADMAP，重新讀取確認保持open、前次內容完整保留。
+
 ## 2026-10-30：軍事戰鬥HUD、場地方位與遮擋標記
 
 上一輪原生聲光屬實際進度。本輪從乾淨 `65d5185` 接續無頭盔的電腦端與原始11項目標，新增 `TacticalHud`：軍綠狀態面板、血量條、大字彈匣／備彈、場地方位刻度、受遮擋限制的HOSTILE／ALLY短識別及血量條，桌面保留Simulation來源。準星沿用武器／掩體預測，射擊／換彈／傷害仍由server確認。XR既有world-space文字共用狀態優先序，修正淘汰被追蹤異常蓋過的情況；沒有把桌面方位或浮標直接套進HMD。
