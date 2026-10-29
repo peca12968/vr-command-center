@@ -1,0 +1,10 @@
+{
+  "assetSet": "field-props-v1",
+  "source": "Original procedural geometry; no external meshes, textures or fonts",
+  "generator": "scripts/generate-field-props.py",
+  "dataSha256": "7911140960f5e947f4cb7c474913608d7db5c1bec7c3558ffd9aac81eb6e3dc2",
+  "triangles": {
+    "Sandbag": 256,
+    "Barrel": 386
+  }
+}

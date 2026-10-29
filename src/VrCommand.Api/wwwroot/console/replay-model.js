@@ -13,6 +13,7 @@ function roomPosition(value, room) { return vector(value) && Math.abs(value.x - 
 // Validate snapshots against their event boundary. Playback never reruns AI or guesses missing damage.
 export function validateRecording(data) {
   need(data && data.schemaVersion === 2 && data.rulesVersion === '0.8.0', '需要 schema 2／rules 0.8.0，舊除錯檔請重新產生。');
+  need(data.assetSet === undefined || ['primitives-v1', 'field-props-v1'].includes(data.assetSet), '不支援的素材版本。');
   need(data.origin === 'Simulation' && data.statistics?.origin === 'Simulation', '此版僅支援明確標記的 Simulation 紀錄。');
   need(guid(data.sessionId) && data.statistics.sessionId === data.sessionId, '場次身分不一致。');
   need(Array.isArray(data.roomIds) && [1, 5].includes(data.roomIds.length) && new Set(data.roomIds).size === data.roomIds.length && data.roomIds.every(r => integer(r, 1, 5)), '房間配置錯誤。');

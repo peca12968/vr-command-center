@@ -25,7 +25,11 @@ internal static class WorldChecks
             bridge.Apply(JsonSerializer.Deserialize<ManagementSnapshot>(json, new JsonSerializerOptions(JsonFormat.Options) { IncludeFields = true })!);
         }
         Refresh();
-        var header = WorldRecordingHeader.Create(id, queue.StreamId, "Simulation", [1], bridge.Props);
+        var header = WorldRecordingHeader.Create(id, queue.StreamId, "Simulation", [1], bridge.Props, assetSet: WorldAssetSets.FieldProps);
+        check(WorldRecordingHeader.Create(id, queue.StreamId, "Simulation", [1], bridge.Props).assetSet == WorldAssetSets.Legacy, "Existing recording producers retain their original primitive asset profile");
+        WorldRecordingValidation.Header(header);
+        var legacy = Copy(header); legacy.assetSet = WorldAssetSets.Legacy; WorldRecordingValidation.Header(legacy);
+        check(true, "Legacy and versioned field-prop recording headers both remain readable");
         var worldDirectory = Path.Combine(directory, "world-database"); Directory.CreateDirectory(worldDirectory);
         using var store = new WorldRecordings(worldDirectory, manager);
         Reject<AccessDeniedException>(() => store.Open(id, header, master), "Operators cannot publish a world");
@@ -36,7 +40,10 @@ internal static class WorldChecks
         Reject<InvalidOperationException>(() => store.Open(id, wrong, owner), "Recorded cover must match canonical mission geometry");
         wrong = Copy(header); wrong.rulesVersion = "99";
         Reject<ArgumentException>(() => store.Open(id, wrong, owner), "Unknown recording rules fail closed");
+        wrong = Copy(header); wrong.assetSet = "field-props-v99";
+        Reject<ArgumentException>(() => store.Open(id, wrong, owner), "Unknown prop asset profiles fail closed");
         check(store.Open(id, header, owner).AcceptedSequence == 0 && store.Open(id, header, owner).AcceptedSequence == 0, "Immutable recording header is retryable");
+        Reject<InvalidOperationException>(() => store.Open(id, legacy, owner), "An accepted recording cannot switch appearance profiles on retry");
         Reject<AccessDeniedException>(() => store.Info(id, room2), "Archive metadata preserves room authorization");
         check(store.List(room2).Length == 0, "Scoped world list reveals no foreign archive");
         RecordedRig Rig(Guid value)

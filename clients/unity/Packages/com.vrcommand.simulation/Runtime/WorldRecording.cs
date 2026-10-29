@@ -4,6 +4,11 @@ using System.Linq;
 
 namespace VrCommand.Simulation
 {
+    public static class WorldAssetSets
+    {
+        public const string Legacy = "primitives-v1", FieldProps = "field-props-v1";
+        public static bool Supported(string value) => value == Legacy || value == FieldProps;
+    }
     [Serializable] public sealed class RecordedVector
     {
         public float x, y, z;
@@ -33,9 +38,9 @@ namespace VrCommand.Simulation
         public string captureStartedAtUtc = "";
         public int[] roomIds = new int[0];
         public RecordedProp[] props = new RecordedProp[0];
-        public static WorldRecordingHeader Create(Guid session, Guid stream, string origin, int[] rooms, WorldProp[] geometry, string captureStartedAtUtc = "", int environmentVersion = EnvironmentPresentation.Version) => new WorldRecordingHeader
+        public static WorldRecordingHeader Create(Guid session, Guid stream, string origin, int[] rooms, WorldProp[] geometry, string captureStartedAtUtc = "", int environmentVersion = EnvironmentPresentation.Version, string assetSet = WorldAssetSets.Legacy) => new WorldRecordingHeader
         {
-            sessionId = session.ToString("D"), streamId = stream.ToString("D"), origin = origin, captureStartedAtUtc = captureStartedAtUtc, environmentVersion = environmentVersion, roomIds = (int[])rooms.Clone(),
+            sessionId = session.ToString("D"), streamId = stream.ToString("D"), origin = origin, captureStartedAtUtc = captureStartedAtUtc, environmentVersion = environmentVersion, assetSet = assetSet, roomIds = (int[])rooms.Clone(),
             props = geometry.Select(prop => new RecordedProp { id = prop.Id.ToString("D"), roomId = prop.RoomId, kind = prop.Kind.ToString(), feet = new RecordedVector(prop.Feet), yaw = prop.Yaw }).ToArray()
         };
     }
@@ -88,7 +93,7 @@ namespace VrCommand.Simulation
         public static void Header(WorldRecordingHeader header)
         {
             if (header == null || header.schemaVersion != 1 || header.environmentVersion < 0 || header.environmentVersion > EnvironmentPresentation.Version || !Id(header.sessionId) || !Id(header.streamId)
-                || !new[] { "Simulation", "GameServer" }.Contains(header.origin) || header.rulesVersion != "0.8.0" || header.assetSet != "primitives-v1"
+                || !new[] { "Simulation", "GameServer" }.Contains(header.origin) || header.rulesVersion != "0.8.0" || !WorldAssetSets.Supported(header.assetSet)
                 || header.calibration != "uncalibrated-vr" || header.roomIds == null || (header.roomIds.Length != 1 && header.roomIds.Length != 5)
                 || header.roomIds.Distinct().Count() != header.roomIds.Length || header.roomIds.Any(room => room < 1 || room > 5)
                 || header.props == null || header.props.Length > 2500) throw new ArgumentException("Unsupported recording identity, profile or geometry.");

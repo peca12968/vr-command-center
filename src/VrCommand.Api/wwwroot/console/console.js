@@ -354,8 +354,10 @@ function renderProps(updateInspector = true) {
   const layer = $('prop-layer');
   layer.replaceChildren(...state.props.map((prop, index) => {
     const group = svgNode('g', { transform: `translate(${prop.position.x} ${-prop.position.z}) rotate(${-prop.yawDegrees})`, 'data-index': index, 'data-selected': index === state.prop, role: 'button', tabindex: '0', 'aria-label': `物件 ${index + 1} ${prop.assetId}` });
-    const shape = prop.assetId === 'barrel' ? svgNode('circle', { r: '.4', fill: '#658d87' }) : svgNode('rect', { x: '-.8', y: '-.3', width: '1.6', height: '.6', rx: '.1', fill: '#a69b63' });
-    const label = svgNode('text', { y: '.12' }); label.textContent = index + 1; group.append(shape, label); return group;
+    const barrel = prop.assetId === 'barrel';
+    const shape = barrel ? svgNode('circle', { r: '.35', fill: '#658d87' }) : svgNode('rect', { x: '-1', y: '-.35', width: '2', height: '.7', rx: '.08', fill: '#a69b63' });
+    const envelope = svgNode('rect', { x: barrel ? '-.35' : '-1', y: '-.35', width: barrel ? '.7' : '2', height: '.7', fill: 'none', stroke: '#d2dca2', 'stroke-width': '.04', 'stroke-dasharray': '.1 .06', 'data-envelope': prop.assetId });
+    const label = svgNode('text', { y: '.12' }); label.textContent = index + 1; group.append(shape, envelope, label); return group;
   }));
   if (!updateInspector) return;
   fillOptions('prop-select', state.props.length ? state.props.map((p, i) => [String(i), `${i + 1} · ${p.assetId}`]) : [['', '尚無物件']], String(state.prop));

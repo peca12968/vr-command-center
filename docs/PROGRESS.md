@@ -1,5 +1,31 @@
 # 開發進度
 
+## 2026-10-30：原創沙包／油桶、保存素材版本及新舊觀戰
+
+上一輪姿態分類與診斷屬實際進度。本輪從乾淨 `389eaa5` 接續無頭盔的PC主線，將玩家原方盒掩體換成自製低多邊形三層沙包／十二邊油桶，含縫線、桶箍、封蓋與警示色。固定生成器產出相同Unity Resources／瀏覽器ES module位置、法線、索引及頂點色；沙包256／油桶386三角形，重用兩個Mesh及單一材質，不新增Physics Collider。自製URP光照／霧shader引用既有URP shadow／depth pass，玩家、NPC、武器其餘幾何仍為原型；不是完整人物美術或頭盔驗收。
+
+新增明確assetSet=`field-props-v1`，只由新Unity來源指定；Create預設、既有來源及缺欄位舊匯出保持primitives-v1。API／UI **0.17.0**支援兩個已知版本、未知拒絕、已接受header不可變；world schema1、rules0.8.0、environmentVersion1、envelope6／票券2不變。原binary header／checksum不改寫，DB結構未變不表示可降舊reader。NGO **19**隔離舊遊戲程序的不同外觀，全部遊戲端需一起更新；沒有RebuildArena。shader／Resources JSON已納入兩端來源fingerprint。v1資料SHA `7911140960f5e947f4cb7c474913608d7db5c1bec7c3558ffd9aac81eb6e3dc2`固定，生成器check與記憶體改色反例拒絕均通過；改模型須新ID且保留v1，不能覆寫pin改舊回放。
+
+外觀不改碰撞／命中／導航：沙包2×.9×.7m，油桶.7×1.2×.7m，仍使用原旋轉方盒；桶邊角與袋體倒角／縫隙可能擋射線或行走，非逐pixel命中。觀戰明示包圍盒。配置圖原沙包僅畫1.6m、桶半徑.4m，現校正2m／.35m並畫虛線包圍盒；尚無擺放重疊／可玩區域檢查，沒有把示意圖稱MR校正。模型與操作／升級見[FIELD_PROPS.md](FIELD_PROPS.md)。
+
+真正Prepare／**46 EditMode（0 failed／skipped）**／Desktop／Quest均exit0。新增4項EditMode涵蓋原碰撞尺寸、400面預算、有限頂點／外向法線、資源重用／無Collider及壞網格；直接資產匯入與native GPU另驗，SDK Android／Windows各14 runtime／11 NUnit檔只證型別綁定，不含URP shader執行。bundle **0.20.0／Android code22／NGO19**；原scene／prefab ID保持，兩平台fingerprint同為 `638b0543095bf79ee3e54a682171cfc6858cc0b4d3d06bad52ac65b617d4b7ef`。APK46,128,950 bytes、SHA-256 `55b3c366c33409289823c643549233795da06f7b0ce78f08bad3443c212866d5`，v2簽章、min32／target35及六個ELF64 AArch64庫含libil2cpp核對通過；未安裝頭盔。
+
+locked restore／Release build通過、0警告／錯誤，**489核心、369 HTTP、43世界串流**通過。新增新舊profile、預設保留舊值、未知拒絕與重試不可換外觀。首次核心檢查發現API canonical header重建仍固定legacy，導致新profile被拒；保留field-checks-before-profile-fix.log，改為先驗證已知profile再以該profile重建canonical幾何後通過，房間／作者／身分檢查未放寬。
+
+**23 Node／142 Chromium**通過，包含Unity／Web資料一致、資料範圍、舊串流仍12面方盒、配置尺寸及原權限／任務／鏡頭／聲光。首次瀏覽器在夜間sun=.08斷言失敗，原PNG／log保留；舊檢查只等待雨線，而閃電期間也有雨線，現明確等待下雨且非閃電狀態。首輪沒有保存原始sun值，未回推其精確tick／成因；後續weather-first-rain.json記錄tick20／sun.08／非flash。這是採樣條件修正，不改聲光規則或放寬亮度值。頁尾升v0.17後另有完整native UI流程與截圖覆蓋，沒有再重跑所有純瀏覽器項目。
+
+| 原生場 | 範圍 | 幀／最高取樣來源年齡 | 結果 |
+|---|---|---|---|
+| 012703-9bbae7cd | 真正鍵盤掩體 | 5555／0.603690秒 | W17→沙包z=-2.6500003、S5→-2.9、D10→x=-2.5000005、W20→45°油桶z=-2.219239；各階段connected=true、健康100／30+90不變。先Down8觀看模型，移動仍只取yaw；輸入工具一次busy後重新觀測焦點及已接受z=-2.7000003，再完成原流程，未放寬斷言 |
+| 013745-0900ae86 | 真正GPU／本玩家DSP | 274／0.157371秒 | 新模型／shader的flash亮度增32.6950，首次採樣flash141／thunder184（預期180，既定4tick容差內）；雨／雷／storm非零，穩定Pause52／Clear57窗口RMS0、PCM能量核對通過 |
+| 013854-b0fa652b | 控制台＋真正PC | 1351／0.158653秒 | **35 UI／native**：保存／重載配置到GPU、新profile642面即時觀戰、精確鏡頭及封存末幀保留同版本、AI傷害與歷史名冊／回放一致；白天／雨夜／Pause／新素材回放均實際檢視 |
+| 014757-f97348ee | 五房獨立／重用／Linked | 七場共533／0.204837秒 | 五個真正server／每房一個client的環境／AI／權限隔離、單房End／重用、之後五房Linked、舊票／升權拒絕及七個獨立stream精確封存均通過；所有header為field-props-v1，非25台負載 |
+
+以上目錄前綴均20261030，來源維持Simulation／Simulated，全部pendingTelemetry=false、活動0、cleanup零錯誤。14／23／14／26檔於writer停止後複製回F，與SSD原件逐檔SHA-256一致並保留原件。原始GPU截圖未美化；瀏覽器為SwiftShader，不是頭盔／真實GPU效能。另 `unity-admission/20261030-015042-da81b3b3` **8項無圖形**入場／撤銷／真正transport release／同admission重連通過，370幀；這輪沒有重驗走離出生點後的視窗重連，舊互動證據保留。
+
+機器證據在artifacts/field-validation.json，原生成物、.meta及成功匯入狀態保存；上游Three／Transport未修改。原5080仍為原v0.16 DLL／歷史，health ok；新程式使用自己的v0.17 API及新runtime，沒有移動或替換正式資料。人物／武器、擺放合法性、原停頓原因／啟動旗標、長任務／跨機、頭盔／MR／VIVE、廠商硬體及25台仍待，完整11項長期目標維持開發中。
+
+
 ## 2026-10-30：姿態逾時分類與可重現封包中斷
 
 上一輪HUD屬實際進度。本輪從乾淨 `60713ba` 接續使用者「無頭盔、先繼續電腦端」。唯讀核對原場 `20261030-000040-9a2f550c` 的worlds.db：666→667幀相差688ms，tick仍1328；668幀connected=false，669幀100ms後恢復，頭部位置／健康100／彈藥29不變。先前警告把tracking、PoseAccepted及connected合併成POSE REJECTED，原PNG與0.25秒觀測不能分辨原因。這些新證據確認一次保存停頓與短暫非參戰狀態，不足以判定GPU、收件間隔、封包、CPU／IO或其他停頓根因；保留原資料，未宣稱修好延遲。

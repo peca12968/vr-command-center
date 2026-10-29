@@ -23,6 +23,13 @@ module.exports = async function environmentBrowser({ page, api, tokens, director
     await page.locator('#world-recording').selectOption(info.header.sessionId); await page.locator('#world-live').click();
     const canvas = page.locator('#world-canvas');
     await page.waitForFunction(() => document.querySelector('#world-canvas').dataset.rainCount === '128');
+    await fs.writeFile(path.join(screenshots, 'weather-first-rain.json'), JSON.stringify(await canvas.evaluate(node => ({ ...node.dataset })), null, 2));
+    // Rain also exists during lightning. Wait for the non-flash night state
+    // before asserting its regular sun intensity; do not alter cue timing.
+    await page.waitForFunction(() => {
+      const state = document.querySelector('#world-canvas').dataset;
+      return state.rainCount === '128' && state.weatherFlash === 'false' && state.weatherSun === '0.08';
+    });
     check(info.header.environmentVersion === 1 && (await page.locator('#world-message').innerText()).includes('非原始音軌') && await canvas.getAttribute('data-weather-sun') === '0.08',
       'Native versioned weather reaches a real night/rain rendering without claiming an original audio recording');
     check(await canvas.getAttribute('data-weather-audio') !== 'on' && await page.locator('#world-sound').getAttribute('aria-pressed') === 'false', 'Weather audio remains off before an explicit user gesture');

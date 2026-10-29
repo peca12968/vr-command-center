@@ -49,7 +49,8 @@ namespace VrCommand.Unity
         private readonly ArenaSession session = new ArenaSession();
         private readonly Dictionary<string, GameObject> propViews = new Dictionary<string, GameObject>();
         private readonly Dictionary<string, GameObject> enemyViews = new Dictionary<string, GameObject>();
-        private Material sand, steel, enemy;
+        private Material enemy;
+        private FieldPropModels fieldProps;
         private float accumulator, nextPublish;
         private double lastManagement = double.NegativeInfinity;
         private bool geometryDirty = true, geometryPublished, serverReady;
@@ -70,7 +71,7 @@ namespace VrCommand.Unity
             if (Outbox == null || management == null || session.World.Phase != WorldPhase.Preparing) throw new InvalidOperationException("Initialize a preparing world and combat source first.");
             recordingStart = Time.realtimeSinceStartupAsDouble;
             var header = WorldRecordingHeader.Create(Guid.Parse(management.id), Outbox.StreamId, Outbox.Origin, management.roomIds, session.Props,
-                DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+                DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), assetSet: WorldAssetSets.FieldProps);
             Recording = WorldOutbox.Create(path, header, new UnityWorldCodec());
             if (!CaptureWorld(true)) throw new InvalidOperationException("Initial world frame could not be saved.");
         }
@@ -122,7 +123,7 @@ namespace VrCommand.Unity
         {
             Instance = this;
             Props.OnListChanged += GeometryChanged;
-            sand = Material(new Color(.58f, .51f, .29f)); steel = Material(new Color(.25f, .35f, .34f)); enemy = Material(new Color(.8f, .25f, .15f));
+            fieldProps = new FieldPropModels(); enemy = Material(new Color(.8f, .25f, .15f));
             if (IsServer) { Ready.Value = serverReady; Publish(); }
         }
         private void GeometryChanged(NetworkListEvent<CombatPropState> change) { geometryDirty = true; walkSurfaces.Clear(); }
@@ -279,8 +280,10 @@ namespace VrCommand.Unity
                 propViews.Clear();
                 for (var index = 0; index < Props.Count; index++)
                 {
-                    var prop = Props[index]; var view = Primitive("Mission " + (prop.barrel ? "Barrel" : "Sandbag"), PrimitiveType.Cube, prop.barrel ? steel : sand);
-                    view.transform.position = prop.center; view.transform.rotation = Quaternion.Euler(0, prop.yaw, 0); view.transform.localScale = prop.half * 2;
+                    var prop = Props[index]; var view = fieldProps.Create(prop.barrel);
+                    view.transform.position = prop.center - Vector3.up * prop.half.y; view.transform.rotation = Quaternion.Euler(0, prop.yaw, 0);
+                    var original = prop.barrel ? new Vector3(.35f, .6f, .35f) : new Vector3(1, .45f, .35f);
+                    view.transform.localScale = new Vector3(prop.half.x / original.x, prop.half.y / original.y, prop.half.z / original.z);
                     propViews.Add(prop.id.ToString(), view);
                 }
             }
@@ -309,7 +312,7 @@ namespace VrCommand.Unity
             Props.OnListChanged -= GeometryChanged;
             foreach (var view in propViews.Values) Destroy(view); foreach (var view in enemyViews.Values) Destroy(view);
             propViews.Clear(); enemyViews.Clear(); geometryDirty = true; geometryPublished = false;
-            Destroy(sand); Destroy(steel); Destroy(enemy);
+            fieldProps?.Dispose(); fieldProps = null; Destroy(enemy);
             if (Instance == this) Instance = null;
         }
     }

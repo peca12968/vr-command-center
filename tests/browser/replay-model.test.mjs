@@ -21,6 +21,14 @@ test('time lookup selects the final state for equal ticks and clamps to the last
   assert.equal(frameAtTime(sample.frames, 100, sample.tickSeconds), sample.frames.length - 1);
 });
 test('legacy and unknown recording profiles are rejected', () => invalid(data => { data.schemaVersion = 1; }, /schema 2/));
+test('old exports retain their appearance while new exports may opt in explicitly', () => {
+  assert.doesNotThrow(() => validateRecording(structuredClone(sample)));
+  const value = structuredClone(sample); value.assetSet = 'field-props-v1'; assert.doesNotThrow(() => validateRecording(value));
+});
+test('unknown or null appearance profiles cannot silently downgrade to old art', () => {
+  invalid(data => { data.assetSet = 'field-props-v99'; }, /素材/);
+  invalid(data => { data.assetSet = null; }, /素材/);
+});
 test('sequence gaps cannot masquerade as complete recordings', () => invalid(data => { data.events[1].sequence = 5; }, /序號/));
 test('snapshot health must agree with accepted damage events', () => invalid(data => { data.frames[0].players[0].health = 80; }, /不一致/));
 test('final report cannot disagree with the world event stream', () => invalid(data => { data.statistics.players[0].kills = 99; }, /結束統計/));

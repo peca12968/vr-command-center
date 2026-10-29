@@ -32,6 +32,9 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     const canvas = page.locator('#world-canvas');
     await page.waitForFunction(() => Number(document.querySelector('#world-canvas').dataset.sequence) > 5 && Number(document.querySelector('#world-canvas').dataset.triangles) > 0);
     check((await page.locator('#world-status').innerText()).includes('Simulation') && (await page.locator('#world-message').innerText()).includes('無頭盔連接'), 'Real streamed world displays its simulation provenance and asset limits');
+    check(await canvas.getAttribute('data-asset-set') === 'primitives-v1'
+      && Number(await canvas.getAttribute('data-prop-triangles')) === live.header.props.length * 12,
+      'A legacy streamed world retains its recorded primitive cover rather than receiving new field-prop art');
     check((await page.locator('#world-freshness').innerText()) === '正在接收快照' && (await page.locator('#world-actor-info').innerText()).includes('Simulated'), 'Live viewer distinguishes fresh snapshots and synthetic head/hand data');
     const before = Number(await canvas.getAttribute('data-sequence'));
     await page.waitForFunction(sequence => Number(document.querySelector('#world-canvas').dataset.sequence) > sequence, before);

@@ -68,6 +68,10 @@ async function main() {
     await page.locator('#add-barrel').click();
     for (const [id, value] of [['prop-x', '2'], ['prop-z', '4']]) { await page.locator('#' + id).fill(value); await page.locator('#' + id).blur(); }
     await page.locator('#layout-map').scrollIntoViewIfNeeded();
+    check(await page.locator('[data-envelope=sandbag]').getAttribute('width') === '2'
+      && await page.locator('[data-envelope=sandbag]').getAttribute('height') === '.7'
+      && await page.locator('[data-envelope=barrel]').getAttribute('width') === '.7',
+      'Layout cover footprints use the authoritative 2m sandbag and 0.7m barrel envelopes');
     const coords = await page.locator('#layout-map').evaluate(svg => [[1, -3], [3, -2]].map(([x, y]) => { const p = svg.createSVGPoint(); p.x = x; p.y = y; const result = p.matrixTransform(svg.getScreenCTM()); return { x: result.x, y: result.y }; }));
     await page.mouse.move(coords[0].x, coords[0].y); await page.mouse.down(); await page.mouse.move(coords[1].x, coords[1].y, { steps: 8 }); await page.mouse.up();
     check(await page.locator('#prop-x').inputValue() === '3' && await page.locator('#prop-z').inputValue() === '2', 'Pointer drag moves a sandbag on the half-metre layout grid');

@@ -1,5 +1,6 @@
 import * as THREE from './vendor/three/three.module.js';
 import { EnvironmentView } from './environment-view.js';
+import { fieldPropFactory, supportedAssets, FIELD_ASSETS, LEGACY_ASSETS } from './field-props.js';
 
 const point = value => new THREE.Vector3(value.x, value.y, value.z);
 const roomX = id => (id - 3) * 14;
@@ -23,10 +24,17 @@ export class ReplayScene {
   }
   mesh(geometry, color) { return new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({ color, roughness: .8 })); }
   clear(group) {
-    group.traverse(object => { object.geometry?.dispose(); if (Array.isArray(object.material)) object.material.forEach(m => m.dispose()); else object.material?.dispose(); });
+    const geometries = new Set(), materials = new Set();
+    group.traverse(object => {
+      if (object.geometry) geometries.add(object.geometry);
+      for (const material of Array.isArray(object.material) ? object.material : [object.material]) if (material) materials.add(material);
+    });
+    for (const geometry of geometries) geometry.dispose(); for (const material of materials) material.dispose();
     group.clear();
   }
   load(recording) {
+    const assetSet = recording.assetSet === undefined ? LEGACY_ASSETS : recording.assetSet;
+    if (!supportedAssets(assetSet)) throw new Error('不支援的錄製素材版本。');
     this.roomIds = [...recording.roomIds];
     this.weather.load(recording);
     this.clear(this.stage); this.clear(this.traces); this.actors.clear(); this.selected = ''; this.follow = false;
@@ -35,13 +43,21 @@ export class ReplayScene {
       const grid = new THREE.GridHelper(12, 24, 0x8b9b6c, 0x4c6354); grid.position.set(roomX(room), -.005, 0); this.stage.add(grid);
       const boundary = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([[-6,-6],[6,-6],[6,6],[-6,6]].map(([x,z]) => new THREE.Vector3(roomX(room) + x, .01, z))), new THREE.LineBasicMaterial({ color: 0xc1d281 })); this.stage.add(boundary);
     }
+    const createProp = assetSet === FIELD_ASSETS && recording.props.length ? fieldPropFactory() : null;
+    let propTriangles = 0;
     for (const prop of recording.props) {
+      if (createProp) {
+        const mesh = createProp(prop.kind); mesh.position.copy(point(prop.feet)); mesh.rotation.y = prop.yaw * Math.PI / 180;
+        propTriangles += mesh.geometry.index.count / 3; this.stage.add(mesh); continue;
+      }
       const half = prop.kind === 'Barrel' ? [.35, .6, .35] : [1, .45, .35];
       // These are the exact box colliders used by the simulation, not decorative geometry.
       const mesh = this.mesh(new THREE.BoxGeometry(half[0] * 2, half[1] * 2, half[2] * 2), prop.kind === 'Barrel' ? 0x6b8e91 : 0xa59a69);
       mesh.position.copy(point(prop.feet)).add(new THREE.Vector3(0, half[1], 0)); mesh.rotation.y = prop.yaw * Math.PI / 180; this.stage.add(mesh);
       const edges = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry), new THREE.LineBasicMaterial({ color: 0xc9d4ba })); mesh.add(edges);
+      propTriangles += mesh.geometry.index.count / 3;
     }
+    this.canvas.dataset.assetSet = assetSet; this.canvas.dataset.propTriangles = String(propTriangles);
     this.defaultTarget = new THREE.Vector3(recording.roomIds.reduce((sum, id) => sum + roomX(id), 0) / recording.roomIds.length, .8, 0);
     this.defaultRadius = recording.roomIds.length === 5 ? 49 : 15; this.preset('overview');
   }

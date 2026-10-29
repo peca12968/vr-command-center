@@ -25,6 +25,7 @@ def source_fingerprint():
     project = ROOT / 'clients/unity'
     files = [p for folder in ['Assets/VrCommand', 'Packages/com.vrcommand.simulation', 'Packages/com.unity.transport']
              for p in (project / folder).rglob('*') if p.suffix in ('.cs', '.asmdef')]
+    files += [p for p in (project / 'Assets/VrCommand/Resources').rglob('*') if p.suffix in ('.json', '.shader')]
     files += [project / p for p in ['Packages/manifest.json', 'Packages/packages-lock.json', 'Packages/com.unity.transport/UPSTREAM.json', 'ProjectSettings/ProjectVersion.txt']]
     digest = hashlib.sha256()
     for path in sorted(files, key=lambda p: p.relative_to(project).as_posix()):
@@ -138,7 +139,7 @@ def main():
                                stdout=api_log, stderr=api_log, creationflags=subprocess.CREATE_NO_WINDOW)
         live['api'] = api; all_processes.append(api)
         wait_for(lambda: request('/health'), 30, 'API')
-        if request('/').get('version') != '0.16.0': raise RuntimeError('Use API 0.16.0 for this player contract')
+        if request('/').get('version') != '0.17.0': raise RuntimeError('Use API 0.17.0 for the versioned field-prop contract')
         mission = request('/api/missions', {'name': 'Native admission check - Simulation', 'briefing': 'Synthetic desktop rigs, no headset', 'durationSeconds': 1800,
             'environment': {'mode': 'VR', 'weather': 'Clear', 'timeOfDay': 'Day', 'lightning': False},
             'enemies': {'count': 2, 'behavior': 'Hold', 'autoAttack': False}, 'props': []}, expected=201)
