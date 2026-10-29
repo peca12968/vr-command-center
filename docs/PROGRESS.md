@@ -23,7 +23,7 @@ locked restore／Release build通過，0警告／錯誤；**512核心、403 HTTP
 
 四場組均Simulation／Simulated、pendingTelemetry=false、活動0、cleanup零錯誤；writer關閉後30／14／26／14檔複製回F與SSD原件逐檔SHA-256一致且保留原件。另 `unity-admission/20261030-032225-ed6333fe` **8項無圖形**入場／撤銷／transport釋放／同admission重連通過，375幀、封存回放一致、活動0；未重跑走離出生點的互動重連。自有原生程序清空，相關log無NullReference／MissingReference／ObjectDisposed等異常。程式與binary仍F、runtime明確SSD；F USB全資料、跨機及25台未驗收。source age是擷取新鮮度，非玩家RTT或FPS。本輪雨夜／Pause看見新武器但沒有重做DSP量測；舊聲光／鍵盤碰撞證據保留，不混算新版。
 
-機器證據彙整於artifacts/rifle-validation.json，包含原生接受的pointer到muzzle0.15m及資料／圖片／snapshot雜湊。原5080仍API0.16與原歷史且health ok，未替換正式資料／憑證。GitHub提交、CI與長期追蹤同步待交付補記。完整11項長期目標維持開發中；接續人物／敵軍美術、握持／換彈動畫、複雜通路／地形、原停頓原因／啟動旗標、長任務／跨機；Quest／VIVE、MR、廠商硬體及25台待設備與分階段驗收。
+機器證據彙整於artifacts/rifle-validation.json，包含原生接受的pointer到muzzle0.15m及資料／圖片／snapshot雜湊。原5080仍API0.16與原歷史且health ok，未替換正式資料／憑證。功能提交 `b33d76074d1362a74f573b2aae1c855e35a1d703` 已推送並核對遠端main相同。[CI run40942043585](https://github.com/peca12968/vr-command-center/actions/runs/40942043585)／check123687654479已結束，steps=null、annotation為近期付款失敗或支出限制、工作未啟動；另有ubuntu遷移通知。未改帳務或重跑；GitHub #1已同步新ROADMAP、結果與限制，保持open並保留前次完整內容。完整11項長期目標維持開發中；接續人物／敵軍美術、握持／換彈動畫、複雜通路／地形、原停頓原因／啟動旗標、長任務／跨機；Quest／VIVE、MR、廠商硬體及25台待設備與分階段驗收。
 
 ## 2026-10-30：新開 VR 場地配置檢查與草稿／歷史分離
 
