@@ -16,6 +16,8 @@
 
 三個 Venue runtime 在關閉 writer 後複製回 F，14／26／14 檔逐檔 SHA-256 與 SSD 原件一致，保留原件；不能宣稱 F USB 配置通過。機器可讀總驗證在 `artifacts/collision-validation.json`，各 build／check log 均保留。Unity 測試產生的 PerformanceTestRun JSON 明確忽略，不提交機器資訊或生成執行資料。操作與規則見 [DESKTOP_COLLISION.md](DESKTOP_COLLISION.md)。下一步是原生閃電／雷聲、自由鏡頭完整人工操作、軍事美術及跨機部署；Quest／VIVE、MR、廠商硬體、25 台及完整 11 項仍待驗，長期目標保持開發中。
 
+功能提交 `c2ad954418f7dcc75cdb34392ad039a254e994d8` 已推送並核對遠端 main 相同。CI run `40891989275`／check `123510980195` 已結束，steps=[]、無可下載日誌（404 BlobNotFound）；annotation 明確為近期付款失敗或支出限制，另有 ubuntu-latest 遷移通知，未改帳務或重跑。原 5080 health ok，自有 Unity 程序已清空，沒有換正式 DLL／資料。GitHub #1 同步本輪與限制並保持開啟。
+
 ## 2026-10-29：控制台自訂任務接到真正 PC、圖形環境與原生觀戰
 
 上一輪五房已交付，本輪從乾淨 `9c14d4d` 接續完整 11 項目標。新增 `scripts/start-desktop-control.py`，由操作員在自己的控制台建立／儲存／重載任務、建立 Preparing VR 場次與名冊；工具才啟動真正 Unity server，按 playerId＋admissionId 配發短效票券並啟動 client。開始、暫停、天氣與 AI 仍由控制台發令，不預先代替操作員建立固定任務。只接本工具自己新建 API，拒絕接管 Running／既有 combat source，玩家檔沒有 Master／GameServer key。
