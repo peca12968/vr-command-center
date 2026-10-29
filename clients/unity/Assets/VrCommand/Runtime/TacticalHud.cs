@@ -158,7 +158,7 @@ namespace VrCommand.Unity
             }
             if (active)
             {
-                var aim = camera.WorldToScreenPoint(combat.PreviewAimPoint(weapon.position + weapon.forward * .15f, weapon.forward, avatar.PlayerId.Value.ToString()));
+                var aim = camera.WorldToScreenPoint(combat.PreviewAimPoint(weapon.position + weapon.forward * AvatarPose.MuzzleOffset, weapon.forward, avatar.PlayerId.Value.ToString()));
                 if (aim.z > 0)
                 {
                     var x = aim.x; var y = Screen.height - aim.y;

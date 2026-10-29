@@ -1,5 +1,7 @@
 # 開發指引
 
+2026-10-30 玩家步槍規範見 docs/SERVICE_RIFLE.md：API／UI0.19、Unity0.21／code24／NGO20，56真正EditMode與同源雙平台成功，原生按鍵／GPU及39項UI整合見PROGRESS。service-rifle-v1固定網格pin與生成器，完整保留field-props-v1／primitives-v1，不能改舊資料／回放。模型原點是pointer前0.15m的真正muzzle，與server／HUD共用AvatarPose.MuzzleOffset；桌面合成RightOffset(.18,-.12,.75)不套用Tracked XR。不要把pointer marker當握掌，不能移動追蹤資料來配模型；不加Collider或偷偷改rules0.8.0。資源跨avatar引用計數／場景池，舊Weapon只執行時停用而非重建prefab。API／UI及全體遊戲端一起更新，新profile寫入後不能降舊reader。
+
 2026-10-30 API／UI 0.18 的配置規範見 docs/LAYOUT.md：profile vr-room-v1／version1／rules0.8.0，使用共用 ArenaLayout 的旋轉包圍盒、五席 0.3m 出生空間與真正初始敵軍候選網格。Core 新開 Create 在權限／已接受 request key 確認後才檢查；不能把拒絕政策加入歷史 projection、已接受重試或 ArenaSession 舊世界讀取。無效草稿仍可保存，修正需保存下一版並明確選用；MR applies=false／canStart=null，不能稱校正通過。API／UI 一起更新，新增報告 mode、版本與非同步 epoch／序號／選擇 fence；後端必須獨立拒絕無效新 VR 開場，不能只靠 UI。envelope6／world schema1／NGO19 不變，bundle0.20.1／code23；本輪真正51 EditMode、同源雙平台成功，PC 回歸以最新 PROGRESS 為準。
 
 2026-10-30 前輪為 API／UI 0.17、Unity 0.20.0／Android code22／NGO19，真正46項EditMode、同源Windows／Quest與原生掩體／聲光／35項UI整合均已通過；完整結果與限制以PROGRESS為準，仍無頭盔／25台。field-props-v1自製沙包／油桶在玩家與觀戰共用固定資料，舊primitives-v1保留舊外觀。原命中／行走仍為旋轉包圍盒（圓桶角落／沙包縫隙非逐像素碰撞），不得以外觀變更偷偷改rules0.8.0。見docs/FIELD_PROPS.md。
@@ -12,13 +14,13 @@
 
 Transport 2.7.4 固定官方來源嵌入 Packages/com.unity.transport，只修失敗 receive completion 釋放 buffer；保留通知／逐檔雜湊，以 python scripts/check-transport-patch.py 驗證，不改 Library 快取或安全設定。UPM lock 為 embedded，receipt 指紋包含嵌入 C#／asmdef／UPSTREAM.json。來源及原生反例見 docs/TRANSPORT_PATCH.md；29 Tests 含真正 Windows 小佇列 UDP 回歸。scripts/check-unity-admission.py 使用自有隔離資料／憑證，--interactive 才驗證原程序按鈕／鍵鼠，不可注入姿態取代。
 
-桌面碰撞見 docs/DESKTOP_COLLISION.md：ArenaWalkSurface 與權威／AI 共用 0.3m 足跡及 0.05m 線段取樣，只有 untracked 桌面預測裁切／拒絕後回到接受姿態，不能搬動 Tracked XR。CombatPropState 新增 room 是 NGO 18 wire 變更；API 0.16／驗票 2 保持。build-unity Tests 當前門檻51。真正鍵盤四階段、五房／Linked、重連及同源雙平台證據以 PROGRESS 為準。
+桌面碰撞見 docs/DESKTOP_COLLISION.md：ArenaWalkSurface 與權威／AI 共用 0.3m 足跡及 0.05m 線段取樣，只有 untracked 桌面預測裁切／拒絕後回到接受姿態，不能搬動 Tracked XR。CombatPropState 新增 room 是 NGO 18 wire 變更；API 0.16／驗票 2 保持。build-unity Tests 當前門檻56。真正鍵盤四階段、五房／Linked、重連及同源雙平台證據以 PROGRESS 為準。
 
-Prepare 必須重用已保存 Arena／PlayerAvatar 的本地 file ID；先前每次重建新 scene 會改變 NGO 識別、破壞跨目標連線。需重建時用 RebuildArena 並一起重建全部玩家；不能 Desktop／Quest 分別重建不同場景。生成物、OpenXR 設定與 packages-lock.json 應隨成功匯入結果保存。ProjectGeneration 測試涵蓋重複 Prepare 識別、非零 hash、場景／音訊引用與 Android XR 設定；build-unity Tests 當前門檻為51，腳本明確回傳 exit 0／1。
+Prepare 必須重用已保存 Arena／PlayerAvatar 的本地 file ID；先前每次重建新 scene 會改變 NGO 識別、破壞跨目標連線。需重建時用 RebuildArena 並一起重建全部玩家；不能 Desktop／Quest 分別重建不同場景。生成物、OpenXR 設定與 packages-lock.json 應隨成功匯入結果保存。ProjectGeneration 測試涵蓋重複 Prepare 識別、非零 hash、場景／音訊引用與 Android XR 設定；build-unity Tests 當前門檻為56，腳本明確回傳 exit 0／1。
 
 生成器另外有 scripts/check-unity-editor-sdk.py --offline --verify-missing-reference：重新檢查 Windows player 基線，再以真正 Editor／XR SDK 綁定 ProjectBuilder，直接讀自己的 asmdef 參考、禁止隱含傳遞 ProjectReference。MetaQuestFeature 位於 Unity.XR.OpenXR.Features.MetaQuestSupport，Editor asmdef 必須直接參考它；反例只修改生成的診斷 csproj，應重現 CS0234。此圖明確不含 URP 專用驗證分支（見報告），不是完整 Editor／UPM／資產生成／ILPP／APK 證據。範圍見 docs/UNITY_SDK_CHECK.md。
 
-Unity 接入另有 scripts/check-unity-sdk.py（Windows／Python 3.12+），以官方固定來源與真正 Editor DLL 編譯 13 runtime／10 test 檔案的 Android／Windows 分支；UnityTest 引用真正匯入的 Library/ScriptAssemblies/UnityEngine.TestRunner.dll，不使用 stub。快取與報告在 artifacts/unity-sdk-check，--offline 會拒絕來源 hash 改動。這不是 Unity CompilationPipeline、Editor／UPM／ILPP／EditMode／APK；不要部署診斷 DLL。manifest URP 已對齊 Editor 隨附 17.3.0，Collections 診斷 pin 2.4.3；此較窄圖仍用 registry Transport 2.6.0，不驗證正式嵌入修正。範圍與剩餘驗收見 docs/UNITY_SDK_CHECK.md；舊語法／單一天氣型別檢查仍只是較窄證據。
+Unity 接入另有 scripts/check-unity-sdk.py（Windows／Python 3.12+），以官方固定來源與真正 Editor DLL 編譯 15 runtime／13 test 檔案的 Android／Windows 分支；UnityTest 引用真正匯入的 Library/ScriptAssemblies/UnityEngine.TestRunner.dll，不使用 stub。快取與報告在 artifacts/unity-sdk-check，--offline 會拒絕來源 hash 改動。這不是 Unity CompilationPipeline、Editor／UPM／ILPP／EditMode／APK；不要部署診斷 DLL。manifest URP 已對齊 Editor 隨附 17.3.0，Collections 診斷 pin 2.4.3；此較窄圖仍用 registry Transport 2.6.0，不驗證正式嵌入修正。範圍與剩餘驗收見 docs/UNITY_SDK_CHECK.md；舊語法／單一天氣型別檢查仍只是較窄證據。
 
 v0.16 聲光規範見 docs/ENVIRONMENT.md：EnvironmentPresentation 為共用 tick 規則，header.environmentVersion 缺少保持 legacy 0、新來源 1，不補造舊音效；保留 binary 原始 header／checksum，以 codec 正規化比較。API／UI／來源一起升級，NGO protocol／Android code 16、bundle 0.16.0，18 項 EditMode 待驗。單一 UnityWeatherView 已綁真正 Core／Audio DLL 通過，不代表整個 Unity／NGO／shader／音訊匯入或 APK。新增天氣檢查需設 VR_COMMAND_CHECKS_DLL 指向同次隔離建置，聲音素材以 generate-weather-audio.py --check 驗證。
 

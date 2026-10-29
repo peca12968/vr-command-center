@@ -1,5 +1,7 @@
 # 從控制台開啟電腦任務
 
+API／UI v0.19 支援 [玩家步槍](SERVICE_RIFLE.md)，新原生來源採service-rifle-v1，保留舊錄製外觀；39項UI／native包含即時及封存回放的新玩家武器網格。完整結果以PROGRESS為準。
+
 `scripts/start-desktop-control.py` 啟動自己的 API／任務庫，將操作員在該控制台建立的 Preparing VR 場次接到真正 Windows Unity server。從實際名冊配發短效票券並啟動玩家；開始、暫停、環境、AI 及結束都由控制台操作，不預先代替操作員建立任務或開始遊戲。這是 **Simulation**，頭盔分類不代表實際連線設備。
 
 API／UI v0.18 增加 [場地檢查](LAYOUT.md)：保存草稿後，選定保存版本與單房／全館模式，通過配置檢查才建立新 VR 場次。問題可點選回物件修正並保存下一版；不能以尚未保存的草稿放行舊版。工具在建立任何場次前拒絕舊 API。MR／實體校正與複雜通路仍待驗。

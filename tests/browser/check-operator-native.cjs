@@ -112,9 +112,12 @@ async function main() {
     await page.locator('#tab-world').click(); await page.locator('#world-refresh').click(); await until(async () => (await page.locator('#world-recording option').count()) > 0, 'native recording in console');
     await page.locator('#world-recording').selectOption(session); await page.locator('#world-live').click();
     await until(async () => (await page.locator('#world-environment').innerText()).includes('Storm') || (await page.locator('#world-environment').innerText()).includes('暴風雨'), 'native world observed');
-    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'field-props-v1'
+    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'service-rifle-v1'
       && Number(await page.locator('#world-canvas').getAttribute('data-prop-triangles')) === 642,
       'Actual native header selects the same 256-triangle sandbags and 386-triangle drum in live observation');
+    check(await page.locator('#world-canvas').getAttribute('data-rifle-triangles') === '264'
+      && Number(await page.locator('#world-canvas').getAttribute('data-rifle-count')) >= 2,
+      'Live actual-native observation renders the versioned player rifles from accepted muzzle poses');
     await page.locator('#world-camera').selectOption('top'); await page.locator('#camera-name').fill('Operator overhead'); await page.locator('#camera-save').click();
     await until(async () => (await api('/sessions/' + session + '/world/cameras')).length === 1, 'persisted camera');
     const camera = (await api('/sessions/' + session + '/world/cameras'))[0];
@@ -157,9 +160,12 @@ async function main() {
     await until(async () => (await page.locator('#world-timeline').inputValue()) === (await page.locator('#world-timeline').getAttribute('max')), 'replay final seek');
     const finalInfo = await api('/sessions/' + session + '/world');
     await until(async () => (await page.locator('#world-time').innerText()).includes('幀 ' + finalInfo.acceptedSequence), 'rendered final replay frame');
-    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'field-props-v1'
+    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'service-rifle-v1'
       && Number(await page.locator('#world-canvas').getAttribute('data-prop-triangles')) === 642,
       'Sealed native replay retains its saved field-prop appearance profile after camera recall / final seek');
+    check(await page.locator('#world-canvas').getAttribute('data-rifle-triangles') === '264'
+      && Number(await page.locator('#world-canvas').getAttribute('data-rifle-count')) >= 2,
+      'Sealed native replay retains the same player rifle meshes after final seek and camera recall');
     await page.screenshot({ path: path.join(evidence, 'native-replay.png'), fullPage: true });
     const stats = await api('/sessions/' + session + '/statistics');
     check(stats.origin === 'Simulation' && !stats.pendingTelemetry && stats.players.some(p => p.hitsReceived > 0), 'UI-controlled AI produces sealed actual-native combat statistics');

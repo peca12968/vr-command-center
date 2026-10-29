@@ -1,0 +1,8 @@
+{
+  "assetSet": "service-rifle-v1",
+  "source": "Original fictional decorative game mesh; no external assets or real weapon specifications",
+  "generator": "scripts/generate-service-rifle.py",
+  "dataSha256": "b054b9780b19104c6ff33a2384df15e9e4f6e2c73293297c4f70e2dd0d8eda25",
+  "triangles": 264,
+  "origin": "accepted muzzle, +Z forward; no collider or gameplay changes"
+}

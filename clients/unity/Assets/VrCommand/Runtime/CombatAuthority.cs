@@ -71,7 +71,7 @@ namespace VrCommand.Unity
             if (Outbox == null || management == null || session.World.Phase != WorldPhase.Preparing) throw new InvalidOperationException("Initialize a preparing world and combat source first.");
             recordingStart = Time.realtimeSinceStartupAsDouble;
             var header = WorldRecordingHeader.Create(Guid.Parse(management.id), Outbox.StreamId, Outbox.Origin, management.roomIds, session.Props,
-                DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), assetSet: WorldAssetSets.FieldProps);
+                DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), assetSet: WorldAssetSets.ServiceRifle);
             Recording = WorldOutbox.Create(path, header, new UnityWorldCodec());
             if (!CaptureWorld(true)) throw new InvalidOperationException("Initial world frame could not be saved.");
         }
@@ -169,7 +169,7 @@ namespace VrCommand.Unity
             var admission = VenueBootstrap.Instance?.Admission(client);
             if (admission != null && Guid.TryParse(admission.playerId, out var player) && Guid.TryParse(admission.admissionId, out var epoch)
                 && desktopResume.TryRestore(player, epoch, out var saved)) return saved;
-            return new AvatarPose { source = 1, head = new Vector3(0, 1.65f, 0), left = new Vector3(-.3f, 1.3f, .4f), right = new Vector3(.3f, 1.3f, .4f),
+            return new AvatarPose { source = 1, head = new Vector3(0, 1.65f, 0), left = new Vector3(-.3f, 1.3f, .4f), right = new Vector3(0, 1.65f, 0) + DesktopPreviewControls.RightOffset,
                 headRotation = Quaternion.identity, leftRotation = Quaternion.identity, rightRotation = Quaternion.identity };
         }
         public bool AcceptPose(ulong client, AvatarPose pose, Vector3 root, Quaternion rotation)
@@ -178,7 +178,7 @@ namespace VrCommand.Unity
             var admission = VenueBootstrap.Instance?.Admission(client);
             if (admission == null || !Guid.TryParse(admission.playerId, out var player)) return false;
             var forward = rotation * pose.rightRotation * Vector3.forward;
-            if (!session.Pose(client, Vector(root + rotation * pose.head), Vector(root + rotation * pose.right + forward * .15f), Vector(forward.normalized), Time.realtimeSinceStartupAsDouble)) return false;
+            if (!session.Pose(client, Vector(root + rotation * pose.head), Vector(root + rotation * pose.right + forward * AvatarPose.MuzzleOffset), Vector(forward.normalized), Time.realtimeSinceStartupAsDouble)) return false;
             desktopResume.Remember(player, Guid.Parse(admission.admissionId), pose);
             rigs[player] = new AcceptedRig { Connection = client, Rig = new RecordedRig { kind = pose.source == 2 ? "Tracked" : "Simulated",
                 left = new RecordedVector(Vector(root + rotation * pose.left)), right = new RecordedVector(Vector(root + rotation * pose.right)),

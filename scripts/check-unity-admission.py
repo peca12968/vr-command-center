@@ -139,7 +139,7 @@ def main():
                                stdout=api_log, stderr=api_log, creationflags=subprocess.CREATE_NO_WINDOW)
         live['api'] = api; all_processes.append(api)
         wait_for(lambda: request('/health'), 30, 'API')
-        if request('/').get('version') != '0.18.0': raise RuntimeError('Use API 0.18.0 for the versioned field-prop contract')
+        if request('/').get('version') != '0.19.0': raise RuntimeError('Use API 0.19.0 for the versioned field-prop contract')
         mission = request('/api/missions', {'name': 'Native admission check - Simulation', 'briefing': 'Synthetic desktop rigs, no headset', 'durationSeconds': 1800,
             'environment': {'mode': 'VR', 'weather': 'Clear', 'timeOfDay': 'Day', 'lightning': False},
             'enemies': {'count': 2, 'behavior': 'Hold', 'autoAttack': False}, 'props': []}, expected=201)

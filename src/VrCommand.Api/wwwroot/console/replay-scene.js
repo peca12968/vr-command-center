@@ -1,6 +1,7 @@
 import * as THREE from './vendor/three/three.module.js';
 import { EnvironmentView } from './environment-view.js';
 import { fieldPropFactory, supportedAssets, FIELD_ASSETS, LEGACY_ASSETS } from './field-props.js';
+import { RIFLE_ASSETS, serviceRifleFactory, placeRifle } from './service-rifle.js';
 
 const point = value => new THREE.Vector3(value.x, value.y, value.z);
 const roomX = id => (id - 3) * 14;
@@ -26,7 +27,7 @@ export class ReplayScene {
   clear(group) {
     const geometries = new Set(), materials = new Set();
     group.traverse(object => {
-      if (object.geometry) geometries.add(object.geometry);
+      if (object.geometry && !object.geometry.userData.serviceRifleShared) geometries.add(object.geometry);
       for (const material of Array.isArray(object.material) ? object.material : [object.material]) if (material) materials.add(material);
     });
     for (const geometry of geometries) geometry.dispose(); for (const material of materials) material.dispose();
@@ -38,12 +39,13 @@ export class ReplayScene {
     this.roomIds = [...recording.roomIds];
     this.weather.load(recording);
     this.clear(this.stage); this.clear(this.traces); this.actors.clear(); this.selected = ''; this.follow = false;
+    this.rifles?.dispose(); this.rifles = assetSet === RIFLE_ASSETS ? serviceRifleFactory() : null;
     for (const room of recording.roomIds) {
       const floor = this.mesh(new THREE.BoxGeometry(12, .2, 12), 0x344638); floor.position.set(roomX(room), -.12, 0); this.stage.add(floor);
       const grid = new THREE.GridHelper(12, 24, 0x8b9b6c, 0x4c6354); grid.position.set(roomX(room), -.005, 0); this.stage.add(grid);
       const boundary = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([[-6,-6],[6,-6],[6,6],[-6,6]].map(([x,z]) => new THREE.Vector3(roomX(room) + x, .01, z))), new THREE.LineBasicMaterial({ color: 0xc1d281 })); this.stage.add(boundary);
     }
-    const createProp = assetSet === FIELD_ASSETS && recording.props.length ? fieldPropFactory() : null;
+    const createProp = [FIELD_ASSETS, RIFLE_ASSETS].includes(assetSet) && recording.props.length ? fieldPropFactory() : null;
     let propTriangles = 0;
     for (const prop of recording.props) {
       if (createProp) {
@@ -58,6 +60,7 @@ export class ReplayScene {
       propTriangles += mesh.geometry.index.count / 3;
     }
     this.canvas.dataset.assetSet = assetSet; this.canvas.dataset.propTriangles = String(propTriangles);
+    this.canvas.dataset.rifleTriangles = String(this.rifles?.triangles || 0); this.canvas.dataset.rifleCount = '0';
     this.defaultTarget = new THREE.Vector3(recording.roomIds.reduce((sum, id) => sum + roomX(id), 0) / recording.roomIds.length, .8, 0);
     this.defaultRadius = recording.roomIds.length === 5 ? 49 : 15; this.preset('overview');
   }
@@ -66,7 +69,7 @@ export class ReplayScene {
     const group = new THREE.Group(); group.userData.key = key;
     const body = this.mesh(new THREE.BoxGeometry(1, 1, 1), enemy ? 0xc26754 : 0x82bc94); group.add(body);
     const head = this.mesh(new THREE.SphereGeometry(.17, 12, 8), enemy ? 0xefad84 : 0xb7e7c6); group.add(head);
-    const gun = this.mesh(new THREE.BoxGeometry(.08, .08, .45), enemy ? 0x5e312a : 0x222e28); group.add(gun);
+    const gun = !enemy && this.rifles ? this.rifles.create() : this.mesh(new THREE.BoxGeometry(.08, .08, .45), enemy ? 0x5e312a : 0x222e28); group.add(gun);
     const left = this.mesh(new THREE.BoxGeometry(.09, .06, .18), 0xa6d9ce), right = this.mesh(new THREE.BoxGeometry(.09, .06, .18), 0xa6d9ce);
     left.visible = right.visible = false; group.add(left, right);
     const facing = this.mesh(new THREE.BoxGeometry(.06, .04, .12), 0x344f40); facing.position.z = .18; head.add(facing);
@@ -90,7 +93,9 @@ export class ReplayScene {
           const value = player.rig[side + 'Rotation']; actor[side].quaternion.set(value.x, value.y, value.z, value.w);
         }
       } else actor.left.visible = actor.right.visible = false;
+      if (this.rifles) actor.right.visible = false; // Pointer origin is the muzzle, not a measured grip pose.
       actor.gun.position.copy(point(player.muzzle)).sub(actor.group.position); actor.gun.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), point(player.forward).normalize());
+      if (this.rifles) placeRifle(actor.gun, player, actor.group.position);
       for (const mesh of [actor.body, actor.head, actor.gun, actor.left, actor.right]) { const faded = player.health === 0 || player.connected === false; mesh.material.transparent = faded; mesh.material.opacity = faded ? .25 : 1; }
     }
     for (const enemy of frame.enemies) {
@@ -107,6 +112,7 @@ export class ReplayScene {
       const hit = new THREE.Mesh(new THREE.SphereGeometry(.065, 8, 6), new THREE.MeshBasicMaterial({ color: event.hit === 'Cover' ? 0xffb454 : 0xf4ecba })); hit.position.copy(end); this.traces.add(hit);
     }
     this.canvas.dataset.traceCount = String(events.length);
+    this.canvas.dataset.rifleCount = String(this.rifles ? frame.players.length : 0);
     if (!this.weather.show(frame, environment, continuous)) {
       this.ambient.intensity = frame.night ? .8 : 2.2; this.sun.intensity = frame.night ? .35 : 2.5;
       this.sun.color.setHex(0xffe4ba); this.renderer.setClearColor(0x101a17);
@@ -180,5 +186,5 @@ export class ReplayScene {
     const hit = ray.intersectObjects([...this.actors.values()].filter(actor => actor.group.visible).map(actor => actor.group), true)[0];
     if (hit) { let object = hit.object; while (object && !object.userData.key) object = object.parent; if (object) this.onPick(object.userData.key); }
   }
-  reset() { this.weather.reset(); this.frame = null; this.follow = false; this.selected = ''; this.clear(this.stage); this.clear(this.traces); this.actors.clear(); this.marker.visible = false; this.draw(); }
+  reset() { this.weather.reset(); this.frame = null; this.follow = false; this.selected = ''; this.clear(this.stage); this.clear(this.traces); this.rifles?.dispose(); this.rifles = null; this.actors.clear(); this.canvas.dataset.rifleCount = '0'; this.canvas.dataset.rifleTriangles = '0'; this.marker.visible = false; this.draw(); }
 }

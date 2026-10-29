@@ -27,6 +27,6 @@ test('repeated views share geometry and material instead of allocating per prop'
   a.geometry.dispose(); bags.geometry.dispose(); a.material.dispose();
 });
 test('only explicit supported profiles can select the new appearance', () => {
-  for (const value of ['primitives-v1', 'field-props-v1']) assert.ok(supportedAssets(value));
+  for (const value of ['primitives-v1', 'field-props-v1', 'service-rifle-v1']) assert.ok(supportedAssets(value));
   for (const value of [null, '', 'field-props-v99', '../field-props-v1', undefined]) assert.equal(supportedAssets(value), false);
 });

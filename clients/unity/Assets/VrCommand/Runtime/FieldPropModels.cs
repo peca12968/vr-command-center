@@ -37,7 +37,7 @@ namespace VrCommand.Unity
             }
             catch { Dispose(); throw; }
         }
-        public static Mesh BuildMesh(FieldPropMesh source)
+        public static Mesh BuildMesh(FieldPropMesh source, string assetSet = WorldAssetSets.FieldProps)
         {
             if (source == null || source.positions == null || source.positions.Length == 0 || source.positions.Length % 3 != 0
                 || source.positions.Length > 6000 || source.normals == null || source.normals.Length != source.positions.Length
@@ -54,7 +54,7 @@ namespace VrCommand.Unity
                     || Mathf.Abs(normals[i].magnitude - 1) > .001f || !ValidColor(colors[i])) throw new ArgumentException("Invalid field prop vertex.");
             }
             foreach (var index in source.triangles) if (index < 0 || index >= count) throw new ArgumentException("Invalid field prop triangle.");
-            var mesh = new Mesh { name = source.kind + " / " + WorldAssetSets.FieldProps, vertices = positions, normals = normals, colors = colors, triangles = source.triangles };
+            var mesh = new Mesh { name = source.kind + " / " + assetSet, vertices = positions, normals = normals, colors = colors, triangles = source.triangles };
             mesh.RecalculateBounds(); return mesh;
         }
         private static bool ValidColor(Color value) => float.IsFinite(value.r) && float.IsFinite(value.g) && float.IsFinite(value.b)

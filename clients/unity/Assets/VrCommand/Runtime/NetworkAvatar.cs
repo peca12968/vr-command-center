@@ -12,6 +12,7 @@ namespace VrCommand.Unity
 {
     public struct AvatarPose : INetworkSerializable, IEquatable<AvatarPose>
     {
+        public const float MuzzleOffset = .15f;
         public Vector3 head, left, right;
         public Quaternion headRotation, leftRotation, rightRotation;
         public byte source; // 1: desktop simulation; 2: client reports valid XR tracking on all three joints.
@@ -60,11 +61,22 @@ namespace VrCommand.Unity
         private bool desktopFire, desktopReload, windowKeyFallbackLogged;
         private Vector2 windowLook, windowMovement;
         private readonly TacticalHud tacticalHud = new TacticalHud();
+        private ServiceRifleModels rifleModels;
+        private GameObject rifle;
 
         public override void OnNetworkSpawn()
         {
             PoseAccepted.OnValueChanged += AcceptanceChanged;
-            visuals = GetComponentsInChildren<Renderer>();
+            // Keep saved prefab file IDs and tracked joint scales intact. The
+            // old tiny cube is inactive; the new mesh is a full-scale sibling.
+            var oldWeapon = rightHand.Find("Weapon");
+            if (oldWeapon != null) oldWeapon.gameObject.SetActive(false);
+            var pointerMarker = rightHand.GetComponent<Renderer>();
+            if (pointerMarker != null) pointerMarker.enabled = false;
+            rifleModels = new ServiceRifleModels(); rifle = rifleModels.Create();
+            rifle.transform.SetParent(transform, false); ServiceRifleModels.Align(rifle.transform, rightHand);
+            var activeVisuals = new List<Renderer>(GetComponentsInChildren<Renderer>());
+            activeVisuals.Remove(pointerMarker); visuals = activeVisuals.ToArray();
             if (IsServer)
             {
                 var admission = VenueBootstrap.Instance?.Admission(OwnerClientId);
@@ -187,6 +199,9 @@ namespace VrCommand.Unity
             }
         }
 
+        private void LateUpdate()
+        { if (IsSpawned && rifle != null) ServiceRifleModels.Align(rifle.transform, rightHand); }
+
         [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner, Delivery = RpcDelivery.Unreliable)]
         private void SubmitPoseRpc(AvatarPose pose)
         {
@@ -236,7 +251,7 @@ namespace VrCommand.Unity
             }
             windowLook = windowMovement = Vector2.zero;
             leftHand.localPosition = head.localPosition + head.localRotation * new Vector3(-0.3f, -0.35f, 0.4f);
-            rightHand.localPosition = head.localPosition + head.localRotation * new Vector3(0.3f, -0.35f, 0.4f);
+            rightHand.localPosition = head.localPosition + head.localRotation * DesktopPreviewControls.RightOffset;
             leftHand.localRotation = rightHand.localRotation = head.localRotation;
         }
         private static bool Pressed(ButtonControl button) => button.isPressed || button.wasPressedThisFrame;
@@ -315,11 +330,15 @@ namespace VrCommand.Unity
             leftPosition?.Dispose(); rightPosition?.Dispose(); leftRotation?.Dispose(); rightRotation?.Dispose(); trigger?.Dispose(); reload?.Dispose();
             headTracking?.Dispose(); leftTracking?.Dispose(); rightTracking?.Dispose();
             headTracked?.Dispose(); leftTracked?.Dispose(); rightTracked?.Dispose();
+            if (rifle != null) Destroy(rifle); rifle = null;
+            rifleModels?.Dispose(); rifleModels = null;
         }
     }
 
     public static class DesktopPreviewControls
     {
+        // Synthetic desktop pose only. Real XR pointer input is never moved.
+        public static Vector3 RightOffset => new Vector3(.18f, -.12f, .75f);
         public static Quaternion Look(Quaternion rotation, Vector2 degrees)
         {
             var pitch = Mathf.DeltaAngle(0, rotation.eulerAngles.x);

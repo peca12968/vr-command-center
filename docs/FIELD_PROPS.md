@@ -1,5 +1,7 @@
 # 軍事掩體素材 field-props-v1
 
+後續 [service-rifle-v1](SERVICE_RIFLE.md) 增加第三種素材版本，沿用本文固定掩體並加入玩家步槍。舊field-props-v1保留舊武器，本文v0.20／NGO19為導入時紀錄；最新狀態與二進位以PROGRESS為準。
+
 Unity v0.20／NGO19與API／觀戰端v0.17加入自製低多邊形掩體：三層交錯沙包、十二邊油桶、桶箍、封蓋與警示色。玩家、敵軍及武器仍使用原先幾何；這是場景素材進度，不代表整套正式軍事美術或頭盔驗收。
 
 `scripts/generate-field-props.py`以固定數值產生原創網格，沒有外部模型、紋理、字型、下載或隨機輸入。Unity Resources的JSON與瀏覽器本地ES module包含相同位置、法線、三角索引及頂點顏色，provenance保存資料SHA-256與面數。所有相依均在庫內／既有Unity套件，不新增CDN。

@@ -6,8 +6,8 @@ namespace VrCommand.Simulation
 {
     public static class WorldAssetSets
     {
-        public const string Legacy = "primitives-v1", FieldProps = "field-props-v1";
-        public static bool Supported(string value) => value == Legacy || value == FieldProps;
+        public const string Legacy = "primitives-v1", FieldProps = "field-props-v1", ServiceRifle = "service-rifle-v1";
+        public static bool Supported(string value) => value == Legacy || value == FieldProps || value == ServiceRifle;
     }
     [Serializable] public sealed class RecordedVector
     {

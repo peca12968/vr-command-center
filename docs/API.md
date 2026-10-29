@@ -1,4 +1,6 @@
-# 管理、統計與玩家接入 API v0.18
+# 管理、統計與玩家接入 API v0.19
+
+v0.19 新增 [service-rifle-v1](SERVICE_RIFLE.md) 素材版本，保留field-props-v1／primitives-v1的讀取、預設及既有外觀。新Unity來源明確指定；未知版本與已接受header換版本仍拒絕。API／UI及遊戲端須協同更新；world schema1不表示可降版，管理及票券契約不變。
 
 v0.18 新增 [VR 配置檢查](LAYOUT.md)：Master 草稿預覽、精確保存版本報告及新 VR 場次的後端檢查。無效的新建立回 400 `{ error, layout }`，草稿仍可保存；舊場次／已接受 request key 保留原結果。MR 明確不適用。API／UI 須一起更新；事件與世界 schema 不變。v0.17 的 field-props-v1／舊 primitives-v1 持續支援。
 

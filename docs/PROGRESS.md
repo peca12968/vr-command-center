@@ -1,5 +1,30 @@
 # 開發進度
 
+## 2026-10-30：玩家步槍、槍口對齊及實際命中
+
+上一輪配置檢查已交付，從乾淨 `245ddb0` 接續使用者無頭盔的PC主線。新增自製264三角形步槍，槍托、機匣、握把、彈匣、護木、槍管及瞄具共用固定位置／法線／頂點色。生成器與Unity Resources／瀏覽器ES module同源，資料SHA `b054b9780b19104c6ff33a2384df15e9e4f6e2c73293297c4f70e2dd0d8eda25` 固定；生成check及記憶體改色反例拒絕通過。沒有外部模型／紋理／下載，沒有改field-props-v1 pin。人物／NPC、左手／頭部仍為原型，武器是靜態外觀，非完整人物、握持IK、換彈／後座動畫、槍械音效或廠商武器整合。
+
+新header assetSet=`service-rifle-v1`明確由新Unity來源指定，完全沿用field-props-v1掩體、只換玩家步槍；field-props-v1及primitives-v1仍保留原武器，Create預設與缺欄位舊匯出維持legacy。API／UI **0.19.0**支援三種版本，未知／已接受header換版本拒絕；原binary header／checksum不改寫。envelope6／任務schema1／world schema1／environmentVersion1／票券2及rules0.8.0保持，不能降回不認識新profile的reader。NGO **20**隔離不同遊戲外觀與桌面預設，全部遊戲端一起更新。規範見 [SERVICE_RIFLE.md](SERVICE_RIFLE.md)。
+
+Unity新模型為avatar根下的完整尺寸物件，跟隨pointer的旋轉及前方0.15m槍口；不繼承手部(.12,.12,.2)縮放。舊Weapon物件保留file ID但只在執行時停用；隱藏位於pointer的方盒Renderer，不假稱量測的握把／手掌。模型／server／HUD共用原0.15m常數，射擊仍由同一接受流程／射線確認，無新增Collider／NetworkObject或權威幾何。程序跨avatar共用Mesh／材質及引用計數；瀏覽器共用geometry、各角色獨立淡出材質，移除單一角色不釋放仍使用的共用網格。觀戰按已保存muzzle／forward，匹配的rightRotation保留roll，缺失／不匹配則按保存射線重建；本地畫面仍屬輸入預測／遠端插值，非逐幀伺服器影像。
+
+候選場 `030454-deb7b4a2` 實際Space／R／Right20及傷害／Pause／淘汰基線雖通過（2393幀、最大來源年齡0.414904秒、30檔snapshot一致），GPU卻顯示自身武器在視野外。又從真正AcceptPose確認模型原點需要pointer前0.15m，原候選未對齊，不能稱視覺整合完成。已共用原常數並將**僅桌面合成**pointer預設由(.3,-.35,.4)改(.18,-.12,.75)，初始及更新一致；頭部、實體XR座標／來源與權威規則不改，保存的射擊原點沿實際接受姿態，舊錄製不重算。這是明確的桌面輸入預設變更，不能稱原姿態完全不變。新56項測試覆蓋原60°視野及多pitch／yaw、槍管前端可見與既有槍口範圍，真正GPU再驗如下。
+
+locked restore／Release build通過，0警告／錯誤；**512核心、403 HTTP、43世界串流、27 Node／162 Chromium**通過。新profile實際經SQLite／canonical header／不可變重試與禁止降回field profile驗證；Node核對相同資料／pin、法線、槍口／方向／roll、資源池及壞資料。真正WebGL比較新舊玩家武器面數差異、seek統計及反覆切換，桌面／近距離回放截圖已檢視，瀏覽器為SwiftShader。首輪Prepare在測試的namespace解析出現CS0234，補global::；首輪55測試54通過／1項lossyScale精確相等失敗，改1e-5浮點容差而非放寬武器尺寸，再加視野測試後**56真正EditMode（0 failed／skipped）**全部通過。失敗wrapper保留，Editor標準路徑為最後成功log；managed SDK兩分支各15 runtime／13 NUnit來源僅型別綁定，不當作執行／Shader／APK證據。
+
+真正Prepare、最終Desktop／Quest均exit0，未RebuildArena；scene／prefab識別保持，生成場景僅NGO19→20。bundle **0.21.0／Android code24**，兩端fingerprint同為 `32e2db5110d59fd3ce4a262b6a1d4bc59efacbef4732afafe5a391a6eb4b9523`。Desktop receipt UTC19:12:16.2548406Z、Quest19:27:52.6538646Z（10/29）；APK46,145,650 bytes，SHA `ebb3ad08021b74acf78bc9ab385b7175f6d74db11cec20f8c8f510739b7b49c4`，v2、min32／target35、六個ELF64 AArch64含libil2cpp已核對；沒有頭盔安裝。
+
+| 最終PC場（前綴20261030） | 幀／最大來源年齡 | 證據 |
+|---|---|---|
+| 031303-baf6e9b4 | 2144／0.186412秒 | 真正Space1／R1／Right20，GPU看見自身與同伴步槍，彈藥29→30／89、方位60°，AI血量60／Pause／淘汰0與隱藏自身武器；封存耗彈1／中彈5／耗損100，無PCM |
+| 031732-438e779c | 1800／0.195382秒 | **39 UI／native**：保存配置與preflight、動態名冊、天氣／AI／Pause／Resume／End、鏡頭及封存回放；新profile即時／末幀玩家步槍264面、掩體642面均保留，原生day／storm／pause實際檢視 |
+| 032205-e46fb4ea | 七場509／0.220640秒 | 五個真正server／每房一個client隔離、單房End／重用、之後Linked、舊票／升權拒絕、七個stream封存；每場均service-rifle-v1，非25台負載 |
+| 032841-f0e9103e | 2573／0.379273秒 | 新check-desktop-rifle.py，一般未掛診斷的可見玩家；真正Left14／Down5瞄準黃準星、Space兩次，敵軍100→50→0、彈匣30→29→28；封存ammo2／hit2／kill1／100%、自身血量100，回放一致；沒有注入pose／combat |
+
+四場組均Simulation／Simulated、pendingTelemetry=false、活動0、cleanup零錯誤；writer關閉後30／14／26／14檔複製回F與SSD原件逐檔SHA-256一致且保留原件。另 `unity-admission/20261030-032225-ed6333fe` **8項無圖形**入場／撤銷／transport釋放／同admission重連通過，375幀、封存回放一致、活動0；未重跑走離出生點的互動重連。自有原生程序清空，相關log無NullReference／MissingReference／ObjectDisposed等異常。程式與binary仍F、runtime明確SSD；F USB全資料、跨機及25台未驗收。source age是擷取新鮮度，非玩家RTT或FPS。本輪雨夜／Pause看見新武器但沒有重做DSP量測；舊聲光／鍵盤碰撞證據保留，不混算新版。
+
+機器證據彙整於artifacts/rifle-validation.json，包含原生接受的pointer到muzzle0.15m及資料／圖片／snapshot雜湊。原5080仍API0.16與原歷史且health ok，未替換正式資料／憑證。GitHub提交、CI與長期追蹤同步待交付補記。完整11項長期目標維持開發中；接續人物／敵軍美術、握持／換彈動畫、複雜通路／地形、原停頓原因／啟動旗標、長任務／跨機；Quest／VIVE、MR、廠商硬體及25台待設備與分階段驗收。
+
 ## 2026-10-30：新開 VR 場地配置檢查與草稿／歷史分離
 
 依使用者「目前沒有頭盔，先繼續電腦端」，從乾淨 `acbdb9c` 接續。API／控制台 **0.18.0** 新增配置預覽及真正新開場的後端檢查，Unity **0.20.1／Android code23／NGO仍19**。共用 `ArenaLayout` 使用現有旋轉沙包／油桶包圍盒，檢查 Y 地面、角度／素材、整體 ±6m 邊界、四軸 SAT 重疊及真正五席出生位的 0.3m 通行空間。貼齊沙包允許；初始敵軍容量與實際規劃共用有序 0.75m 網格，單房需求為總數、Linked 為每房最多 ceil(總數／5)。未改 rules0.8.0 的碰撞／命中／導航，不能把容量當效能、通路可達性或運行中增援保證。

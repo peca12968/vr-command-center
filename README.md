@@ -4,17 +4,19 @@
 
 依 2026-10-29 的使用者指示，**優先開發 Meta Quest 3**，暫以 Android 獨立執行為工作假設；VIVE 延後接入，共用架構與原始雙平台目標保留。
 
-目前為 **API v0.18／Unity 遊戲端 v0.20.1 原型**。真正 Editor 已完成 Prepare、51 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 19，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
+目前為 **API v0.19／Unity 遊戲端 v0.21 原型**。真正 Editor 已完成 Prepare、56 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 20，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
 
-較窄的 [managed SDK 檢查](docs/UNITY_SDK_CHECK.md) 仍可補充 API／直接參考診斷，其本身不執行 Unity 或產出播放器；目前較強的真正 Editor、51 項測試及 binary 結果以 PROGRESS 為準。
+較窄的 [managed SDK 檢查](docs/UNITY_SDK_CHECK.md) 仍可補充 API／直接參考診斷，其本身不執行 Unity 或產出播放器；目前較強的真正 Editor、56 項測試及 binary 結果以 PROGRESS 為準。
+
+新增 [玩家步槍](docs/SERVICE_RIFLE.md)：原創固定網格、真正槍口對齊與桌面持槍位置，玩家／觀戰／回放共用；正常PC視窗已實際完成瞄準、兩發命中／一擊殺／100%命中率及封存統計，舊錄製保留原外觀。人物及武器動畫仍待。
 
 新增 [VR 場地配置檢查](docs/LAYOUT.md)：旋轉後越界、掩體重疊、出生點阻擋及初始敵軍容量可在編輯時預覽，後端會拒絕無效的新開場；草稿、歷史版本與已接受重試保留。
 
 新 [軍事掩體素材](docs/FIELD_PROPS.md) 已接真正PC玩家、即時觀戰與封存回放，舊錄製保留原方盒；遊戲命中／碰撞仍採包圍盒。
 
-可用 [控制台自訂電腦任務](docs/DESKTOP_CONTROL.md) 從編輯／保存／重載配置直接啟動真正 PC server／玩家，控制天氣、AI、觀戰與回放；已看見原生白天／雨夜／暫停畫面。最新37項 UI／native整合、23 Node＋158 Chromium通過；原生GPU聲光／自身DSP已驗證，實體聽感與頭盔仍待。
+可用 [控制台自訂電腦任務](docs/DESKTOP_CONTROL.md) 從編輯／保存／重載配置直接啟動真正 PC server／玩家，控制天氣、AI、觀戰與回放；已看見原生白天／雨夜／暫停畫面。最新39項 UI／native整合、27 Node＋162 Chromium通過；原生GPU聲光／自身DSP已驗證，實體聽感與頭盔仍待。
 
-已完成 [電腦掩體碰撞](docs/DESKTOP_COLLISION.md)：真正鍵盤推沙包、退回、側移及旋轉油桶阻擋保持有效姿態；新增共用通行規則與原生操作檢查器。NGO 19 須所有遊戲程序同版。
+已完成 [電腦掩體碰撞](docs/DESKTOP_COLLISION.md)：真正鍵盤推沙包、退回、側移及旋轉油桶阻擋保持有效姿態；新增共用通行規則與原生操作檢查器。NGO 20 須所有遊戲程序同版。
 
 觀戰新增 [精確位置與角度控制](docs/OBSERVER_CAMERA.md)：可輸入看向座標、水平／俯視角及距離，搭配拖曳、縮放與保存書籤。真正 PC 錄製的自訂視角保存／封存回放已驗證；觀戰瀏覽器仍為軟體 WebGL。
 

@@ -25,7 +25,9 @@ internal static class WorldChecks
             bridge.Apply(JsonSerializer.Deserialize<ManagementSnapshot>(json, new JsonSerializerOptions(JsonFormat.Options) { IncludeFields = true })!);
         }
         Refresh();
-        var header = WorldRecordingHeader.Create(id, queue.StreamId, "Simulation", [1], bridge.Props, assetSet: WorldAssetSets.FieldProps);
+        var header = WorldRecordingHeader.Create(id, queue.StreamId, "Simulation", [1], bridge.Props, assetSet: WorldAssetSets.ServiceRifle);
+        var field = Copy(header); field.assetSet = WorldAssetSets.FieldProps; WorldRecordingValidation.Header(field);
+        check(WorldAssetSets.Supported(WorldAssetSets.ServiceRifle) && field.assetSet == WorldAssetSets.FieldProps, "New rifle and retained field-prop profiles are explicitly supported without changing the default");
         check(WorldRecordingHeader.Create(id, queue.StreamId, "Simulation", [1], bridge.Props).assetSet == WorldAssetSets.Legacy, "Existing recording producers retain their original primitive asset profile");
         WorldRecordingValidation.Header(header);
         var legacy = Copy(header); legacy.assetSet = WorldAssetSets.Legacy; WorldRecordingValidation.Header(legacy);
@@ -44,6 +46,7 @@ internal static class WorldChecks
         Reject<ArgumentException>(() => store.Open(id, wrong, owner), "Unknown prop asset profiles fail closed");
         check(store.Open(id, header, owner).AcceptedSequence == 0 && store.Open(id, header, owner).AcceptedSequence == 0, "Immutable recording header is retryable");
         Reject<InvalidOperationException>(() => store.Open(id, legacy, owner), "An accepted recording cannot switch appearance profiles on retry");
+        Reject<InvalidOperationException>(() => store.Open(id, field, owner), "A rifle recording cannot be silently downgraded to the old weapon appearance");
         Reject<AccessDeniedException>(() => store.Info(id, room2), "Archive metadata preserves room authorization");
         check(store.List(room2).Length == 0, "Scoped world list reveals no foreign archive");
         RecordedRig Rig(Guid value)
