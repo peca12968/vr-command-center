@@ -92,11 +92,11 @@ class Venue:
         self.wait(lambda: self.request('/health'), 30, 'API startup')
         if self.request('/').get('version') != '0.16.0': raise RuntimeError('Build API 0.16.0 before provisioning the venue')
 
-    def launch(self, name, config, visible=False):
+    def launch(self, name, config, visible=False, *, extra_args=()):
         self.save(name + '.json', config)
         flags = ['-screen-fullscreen', '0', '-screen-width', '1100', '-screen-height', '760'] if visible else ['-batchmode', '-nographics']
         self.processes[name] = subprocess.Popen([str(self.args.player_exe.resolve()), *flags, '-job-worker-count', str(self.args.job_workers), '-logFile', str(self.directory / (name + '.log')),
-            '--vr-config', str(self.directory / (name + '.json'))], cwd=self.args.player_exe.resolve().parent, creationflags=subprocess.CREATE_NO_WINDOW)
+            '--vr-config', str(self.directory / (name + '.json')), *extra_args], cwd=self.args.player_exe.resolve().parent, creationflags=subprocess.CREATE_NO_WINDOW)
 
     def stop(self, name):
         process = self.processes[name]

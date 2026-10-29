@@ -1,6 +1,8 @@
 # 天氣聲光與版本化重現 v0.16
 
-需求 5 的顯示來源為同一份 C# 9／.NET Standard 2.1 `EnvironmentPresentation`。Unity 有雨線網格、霧、日夜光照、閃電及兩個 AudioSource 的接入來源；瀏覽器觀戰／持久世界回放已有實際 Chromium／Web Audio 驗證。後續真正 Unity 已通過整個工程匯入／編譯、Shader／AudioImporter、NGO、29 項 EditMode、Windows 及 Quest APK；五房 PC 已執行各自環境，完整 GPU／聲音聽感與頭盔仍待驗。下方保留初版 v0.16 診斷歷史，最新範圍以 PROGRESS／DESKTOP_VENUE 為準。
+需求 5 的顯示來源為同一份 C# 9／.NET Standard 2.1 `EnvironmentPresentation`。Unity 有雨線網格、霧、日夜光照、閃電及兩個 AudioSource 的接入來源；瀏覽器觀戰／持久世界回放已有實際 Chromium／Web Audio 驗證。後續真正 Unity 已通過整個工程匯入／編譯、Shader／AudioImporter、NGO、34 項 EditMode、Windows 及 Quest APK；五房 PC 已執行各自環境，完整 GPU／聲音聽感與頭盔仍待驗。下方保留初版 v0.16 診斷歷史，最新範圍以 PROGRESS／DESKTOP_VENUE 為準。
+
+已新增 [原生Windows聲光量測](NATIVE_WEATHER.md)：實際GPU閃電截圖、玩家AudioListener雨雷混音與暫停／晴天靜音；沒有錄麥克風或其他應用程式。DSP非零與GPU亮度證據不等同人員聽感、實體裝置／聲壓或頭盔。
 
 ## 操作與時間
 
@@ -8,7 +10,7 @@
 
 效果僅從權威模擬 tick 取樣，不在客戶端推進戰鬥時間。20 Hz 下每 140 tick（7 秒）一個閃電週期，閃光 3 tick（150 ms），觀察到該次閃電且連續接收後於 40 tick（2 秒）播放一次雷聲。首次加入、倒退、超過 10 tick 的缺口、設定變更及跳轉不補播錯過的雷聲。暫停凍結雨的位置、取消持續閃光並停止聲音；繼續後按新的連續觀察判斷。雷聲間隔固定，並非依聲源距離傳播。
 
-即時觀戰按 UTC 擷取時間判斷新鮮度，未知、超前超過 1 秒或過期超過 1.5 秒即停止聲光活動；重新收到資料不會把舊擷取時間改新。Unity 按最後收到 Presentation 的本機單調時間，超過 1.5 秒視為暫停。日夜／天氣／phase／tick／房間位元遮罩使用同一個 NGO WeatherState，原 v0.16 使用 protocol／Android code 16、bundle 0.16.0；目前 Unity 為 17／0.17.0、API 仍 0.16，環境規則不變；所有遊戲端與 GameServer 需同版重建。
+即時觀戰按 UTC 擷取時間判斷新鮮度，未知、超前超過 1 秒或過期超過 1.5 秒即停止聲光活動；重新收到資料不會把舊擷取時間改新。Unity 按最後收到 Presentation 的本機單調時間，超過 1.5 秒視為暫停。日夜／天氣／phase／tick／房間位元遮罩使用同一個 NGO WeatherState，原 v0.16 使用 protocol／Android code 16、bundle 0.16.0；目前 Unity NGO仍18／bundle0.18.1／Android code19、API 仍 0.16，環境規則不變；所有遊戲端與 GameServer 需同版重建。
 
 Rain 每房 64 根雨線，Storm 每房 128 根；最多五房 640 根、1280 頂點，以單一網格繪製。位置在每房 12 × 12 × 6 m 的開發空間依固定公式重建。效果不影響命中、碰撞、尋路或傷害；目前沒有雨遮蔽、積水、風、真實天空、美術材質、MR 透視／錨點或實機效能證據。Fog 使用指數平方霧，Clear 無霧。
 

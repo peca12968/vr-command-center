@@ -10,6 +10,8 @@ namespace VrCommand.Unity
         public Light sun;
         public Material rainMaterial;
         public AudioClip rainClip, thunderClip;
+        public EnvironmentStyle LastApplied { get; private set; }
+        public string AppliedPhase { get; private set; } = "Preparing";
         private readonly EnvironmentCueTracker cues = new EnvironmentCueTracker();
         private readonly Vector3[] vertices = new Vector3[1280];
         private readonly int[] indices = new int[1280];
@@ -34,6 +36,7 @@ namespace VrCommand.Unity
         public void Apply(long tick, string weather, bool night, bool lightning, string phase, int roomMask)
         {
             var style = EnvironmentPresentation.Sample(tick, weather, night, lightning, phase);
+            LastApplied = style; AppliedPhase = phase;
             var sound = cues.Advance(tick, weather, night, lightning, phase);
             var sky = new Color(style.SkyR, style.SkyG, style.SkyB);
             RenderSettings.fog = style.Fog > 0; RenderSettings.fogMode = FogMode.ExponentialSquared;
@@ -75,6 +78,7 @@ namespace VrCommand.Unity
         }
         public void Clear()
         {
+            LastApplied = default; AppliedPhase = "Cleared";
             cues.Reset(); if (rain != null) rain.Stop(); if (thunder != null) thunder.Stop();
             if (rainRenderer != null) rainRenderer.enabled = false;
             RenderSettings.fog = false; if (sun != null) sun.intensity = 1.15f;

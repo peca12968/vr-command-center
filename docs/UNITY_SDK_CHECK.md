@@ -19,7 +19,7 @@ python scripts/check-unity-sdk.py --offline
 
 產物均在 Git 忽略的 `artifacts/unity-sdk-check/`。`android.log`／`windows.log` 保留完整編譯診斷，`report.json` 保存嘗試時間、檢查器 SHA-256、Editor 版本、來源與引用 DLL 的 SHA-256、每個 assembly 的符號及退出碼；開始時清除舊成功標記，僅指定的分支全數通過才有 complete=true。不要把這些診斷 DLL 部署到 Unity 或頭盔；Unity 必須自行匯入、解析套件並產生正式組件。
 
-2026-10-29 更新：Android／Windows 離線型別編譯均成功，11 runtime／9 test；直接引用 Transport 與真正 TestRunner DLL，未執行 coroutine 或 NUnit。此診斷仍用下列 registry Transport 2.6.0，不能證明正式 embedded 2.7.4 修正；該修正另有真正 EditMode／原生 player 證據，見 TRANSPORT_PATCH／PROGRESS。
+2026-10-29 更新：Android／Windows 離線型別編譯均成功，12 runtime／9 test；直接引用 Transport 與真正 TestRunner DLL，未執行 coroutine 或 NUnit。此診斷仍用下列 registry Transport 2.6.0，不能證明正式 embedded 2.7.4 修正；該修正另有真正 EditMode／原生 player 證據，見 TRANSPORT_PATCH／PROGRESS。
 
 ## 來源與分支
 
@@ -63,3 +63,5 @@ python scripts/check-unity-editor-sdk.py --offline --verify-missing-reference
 工具直接讀取本工程 asmdef 的 references，關閉 .NET 的自動傳遞 ProjectReference；`--verify-missing-reference` 只在另外生成的診斷專案移除該直接參考，必須因 ProjectBuilder 的 MetaQuestSupport 產生 CS0234 才通過回歸檢查。它不修改本工程 asmdef／C# 或正式 SDK 來源。`editor-report.json` 保存輸入／DLL 雜湊、選定符號、asmdef 雜湊與正／反例結果；`editor-player-report.json` 保留本次基線快照，log 為 editor.log／editor-missing-reference.log。開始即清除舊成功標記。
 
 這個診斷圖涵蓋生成器使用的公開 API 表面，**不是完整 Editor／套件編譯圖**。URP 專用驗證分支（UNITY_RENDER_PIPELINES_UNIVERSAL、ENABLE_RENDER_GRAPH_COMPATIBILITY_MODE_SUPPORTED）明確未啟用且記入報告；它們及 URP renderer 仍須真正 Unity 編譯／執行驗證。其餘 Editor 相依以真實 Input／UI 的 Editor 來源、Android Editor 擴充及隨附 Registry reference DLL 編譯，沒有執行 Editor 程式、讀取登錄或載入原生 XR plugin。場景、資產、UPM、ILPP、EditMode、IL2CPP、APK 與頭盔驗收不由此工具證明。
+
+新增NativeWeatherProbe後，兩分支實際型別編譯為12 runtime／9 test。診斷圖未定義DEVELOPMENT_BUILD，CLI開關的啟用分支由真正Windows Development build及原生GPU／DSP運行驗證，見 NATIVE_WEATHER；不把此診斷當開關、混音或畫面實測。

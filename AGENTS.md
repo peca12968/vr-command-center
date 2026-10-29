@@ -2,7 +2,7 @@
 
 2026-10-29 使用者已確認 Hub 有效授權，真正 Editor 已成功 Prepare、執行 34 項 EditMode，並產出同源 Windows 播放器與 ARM64／IL2CPP Quest APK；舊 CLI／198 是歷史狀態，不再當作目前阻礙。已有真正 PC 視窗的方向鍵／Space／滑鼠射擊、擊殺／命中率、換彈／暫停與封存證據；練習場操作見 docs/DESKTOP.md。沒有頭盔連線／實測證據。最新二進位與觀戰延遲修正驗證以 PROGRESS／實際 build log 為準，不能拿 SDK 檢查代替。
 
-當前遊戲端 v0.18.0／Android code 18／NGO protocol 18，API 仍 0.16.0、驗票 protocol 2。Prepare 可在保存 Arena 上從 16／17 升至 18，不能改 file ID；全部遊戲程序一起更新。PC 撤銷／重連與已接受 Simulated 姿態的 admission 快取見 docs/RECONNECT.md。真正視窗已驗證強制離線後 0.65 公尺外位置與健康／彈藥保持，仍非頭盔／server 崩潰恢復。
+當前遊戲端 v0.18.1／Android code 19／NGO protocol 18，API 仍 0.16.0、驗票 protocol 2。Prepare 可在保存 Arena 上從 16／17 升至 18，不能改 file ID；全部遊戲程序一起更新。PC 撤銷／重連與已接受 Simulated 姿態的 admission 快取見 docs/RECONNECT.md。真正視窗已驗證強制離線後 0.65 公尺外位置與健康／彈藥保持，仍非頭盔／server 崩潰恢復。
 
 Transport 2.7.4 固定官方來源嵌入 Packages/com.unity.transport，只修失敗 receive completion 釋放 buffer；保留通知／逐檔雜湊，以 python scripts/check-transport-patch.py 驗證，不改 Library 快取或安全設定。UPM lock 為 embedded，receipt 指紋包含嵌入 C#／asmdef／UPSTREAM.json。來源及原生反例見 docs/TRANSPORT_PATCH.md；29 Tests 含真正 Windows 小佇列 UDP 回歸。scripts/check-unity-admission.py 使用自有隔離資料／憑證，--interactive 才驗證原程序按鈕／鍵鼠，不可注入姿態取代。
 
@@ -12,11 +12,13 @@ Prepare 必須重用已保存 Arena／PlayerAvatar 的本地 file ID；先前每
 
 生成器另外有 scripts/check-unity-editor-sdk.py --offline --verify-missing-reference：重新檢查 Windows player 基線，再以真正 Editor／XR SDK 綁定 ProjectBuilder，直接讀自己的 asmdef 參考、禁止隱含傳遞 ProjectReference。MetaQuestFeature 位於 Unity.XR.OpenXR.Features.MetaQuestSupport，Editor asmdef 必須直接參考它；反例只修改生成的診斷 csproj，應重現 CS0234。此圖明確不含 URP 專用驗證分支（見報告），不是完整 Editor／UPM／資產生成／ILPP／APK 證據。範圍見 docs/UNITY_SDK_CHECK.md。
 
-Unity 接入另有 scripts/check-unity-sdk.py（Windows／Python 3.12+），以官方固定來源與真正 Editor DLL 編譯 11 runtime／9 test 檔案的 Android／Windows 分支；UnityTest 引用真正匯入的 Library/ScriptAssemblies/UnityEngine.TestRunner.dll，不使用 stub。快取與報告在 artifacts/unity-sdk-check，--offline 會拒絕來源 hash 改動。這不是 Unity CompilationPipeline、Editor／UPM／ILPP／EditMode／APK；不要部署診斷 DLL。manifest URP 已對齊 Editor 隨附 17.3.0，Collections 診斷 pin 2.4.3；此較窄圖仍用 registry Transport 2.6.0，不驗證正式嵌入修正。範圍與剩餘驗收見 docs/UNITY_SDK_CHECK.md；舊語法／單一天氣型別檢查仍只是較窄證據。
+Unity 接入另有 scripts/check-unity-sdk.py（Windows／Python 3.12+），以官方固定來源與真正 Editor DLL 編譯 12 runtime／9 test 檔案的 Android／Windows 分支；UnityTest 引用真正匯入的 Library/ScriptAssemblies/UnityEngine.TestRunner.dll，不使用 stub。快取與報告在 artifacts/unity-sdk-check，--offline 會拒絕來源 hash 改動。這不是 Unity CompilationPipeline、Editor／UPM／ILPP／EditMode／APK；不要部署診斷 DLL。manifest URP 已對齊 Editor 隨附 17.3.0，Collections 診斷 pin 2.4.3；此較窄圖仍用 registry Transport 2.6.0，不驗證正式嵌入修正。範圍與剩餘驗收見 docs/UNITY_SDK_CHECK.md；舊語法／單一天氣型別檢查仍只是較窄證據。
 
 v0.16 聲光規範見 docs/ENVIRONMENT.md：EnvironmentPresentation 為共用 tick 規則，header.environmentVersion 缺少保持 legacy 0、新來源 1，不補造舊音效；保留 binary 原始 header／checksum，以 codec 正規化比較。API／UI／來源一起升級，NGO protocol／Android code 16、bundle 0.16.0，18 項 EditMode 待驗。單一 UnityWeatherView 已綁真正 Core／Audio DLL 通過，不代表整個 Unity／NGO／shader／音訊匯入或 APK。新增天氣檢查需設 VR_COMMAND_CHECKS_DLL 指向同次隔離建置，聲音素材以 generate-weather-audio.py --check 驗證。
 
 觀戰精確數值控制在 world-camera-form.js，操作見 docs/OBSERVER_CAMERA.md；欄位為看向目標、度數與距離，套用不自動保存。快照不蓋草稿，登出／換錄製清空，同場回放不清。camera-controls.cjs 由一般／native 檢查器共用；不可將軟體 WebGL 或33項整合當人工GPU／頭盔證據。
+
+原生天氣驗證見 docs/NATIVE_WEATHER.md；NativeWeatherProbe 僅 Windows Development、未追蹤可見client且明確 --vr-weather-probe 全新絕對目錄啟用。只記錄本玩家AudioListener混音與GPU，沒有麥克風／OS loopback，不把DSP／截圖當聽感／頭盔。一般啟動不掛載探針；診斷有85秒／有界緩衝限制。新增正式builtin imageconversion模組與lock，NGO18／environmentVersion1保持。
 
 開發根目錄為 `F:\Projects\vr-command-center`；以此庫的實際 Git 狀態與執行結果為準。
 

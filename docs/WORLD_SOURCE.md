@@ -1,6 +1,6 @@
 # 世界來源、頭手與補送
 
-目前 Unity NGO protocol／Android code 18、bundle 0.18.0，API 仍 0.16；真正 Editor 已通過 34 項 EditMode 及 Windows／Quest 同源建置。PC 重連及 Simulated 恢復姿態的 admission 隔離見 [RECONNECT](RECONNECT.md)；不能把桌面快取當 Tracked 或持久世界恢復。下方 v0.13／14 為歷次改動。新 header 預設 environmentVersion 1，舊 journal 保持 0／原始 JSON／checksum，codec 正規化比較支援缺少選用欄位的原樣恢復。`--environment-demo true` 只搭配新 `--demo-room` 產生 Storm／Night／雷電 Simulation；完整聲光規則、UTC 與升級見 [ENVIRONMENT.md](ENVIRONMENT.md)。
+目前 Unity NGO protocol18／Android code19、bundle0.18.1，API 仍 0.16；真正 Editor 已通過 34 項 EditMode 及 Windows／Quest 同源建置。PC 重連及 Simulated 恢復姿態的 admission 隔離見 [RECONNECT](RECONNECT.md)；不能把桌面快取當 Tracked 或持久世界恢復。下方 v0.13／14 為歷次改動。新 header 預設 environmentVersion 1，舊 journal 保持 0／原始 JSON／checksum，codec 正規化比較支援缺少選用欄位的原樣恢復。`--environment-demo true` 只搭配新 `--demo-room` 產生 Storm／Night／雷電 Simulation；完整聲光規則、UTC 與升級見 [ENVIRONMENT.md](ENVIRONMENT.md)。
 
 v0.14 新增每次入場識別、票券 v2／protocol 2、If-Match-Admission 與跨輪詢重入撤銷，Unity／API 需同版升級並重發舊券，見 [ADMISSION.md](ADMISSION.md)。生成器 NGO protocol 14／bundle 0.14；當時的 15 項 EditMode／建置尚待執行；最新真正 Editor／PC 結果以上方與 NATIVE_VALIDATION 為準，頭盔仍待驗。
 

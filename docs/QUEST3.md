@@ -1,6 +1,6 @@
 # Quest 3 接入原型與工具鏈 v0.18
 
-管理 API／控制台現為 v0.16，NGO protocol／Android code 18、bundle 0.18.0。2026-10-29 使用者確認 Hub 有有效授權後，真正 Unity 6000.3.27f1 已成功 Prepare、34 項 EditMode、Windows 播放器及 ARM64／IL2CPP Quest Development APK。SDK 診斷已被這些較強的實際結果補充；完整 11 項與頭盔實機驗收尚未完成。最終建置雜湊及多人／觀戰驗證以 [PROGRESS.md](PROGRESS.md) 為準；下方舊版本段落保留歷次說明。
+管理 API／控制台現為 v0.16，NGO protocol18／Android code19、bundle0.18.1。2026-10-29 使用者確認 Hub 有有效授權後，真正 Unity 6000.3.27f1 已成功 Prepare、34 項 EditMode、Windows 播放器及 ARM64／IL2CPP Quest Development APK。SDK 診斷已被這些較強的實際結果補充；完整 11 項與頭盔實機驗收尚未完成。最終建置雜湊及多人／觀戰驗證以 [PROGRESS.md](PROGRESS.md) 為準；下方舊版本段落保留歷次說明。
 
 v0.14 新增每次入場識別、票券 v2／protocol 2、If-Match-Admission 與跨輪詢重入撤銷，Unity／API 需同版升級並重發舊券，見 [ADMISSION.md](ADMISSION.md)。生成器 NGO protocol 14／bundle 0.14；當時 15 項 EditMode 尚待執行；現已擴為 34 項並通過，頭盔仍待驗。
 
@@ -8,7 +8,7 @@ v0.13 新增共用世界來源／發布器、接受後頭手錄製、追蹤中�
 
 使用者指定先用 Meta Quest 3；暫按 Android 獨立執行規劃。工程在 `clients/unity/`，後端仍獨立使用 .NET 10，不把後端 DLL 放進 Unity。
 
-目前遊戲端 v0.18.0／Android code 18／NGO 18，API 仍 0.16.0／驗票 2。保存的 Arena 原位升級，不重建場景；全部遊戲 server／client 同版。PC 重連與嵌入 Transport 修正見 [RECONNECT](RECONNECT.md)／[TRANSPORT_PATCH](TRANSPORT_PATCH.md)，Windows／Quest receipt 來源指紋一致。
+目前遊戲端 v0.18.1／Android code19／NGO18，API 仍 0.16.0／驗票 2。保存的 Arena 原位升級，不重建場景；全部遊戲 server／client 同版。PC 重連與嵌入 Transport 修正見 [RECONNECT](RECONNECT.md)／[TRANSPORT_PATCH](TRANSPORT_PATCH.md)，Windows／Quest receipt 來源指紋一致。
 
 ## 已有程式與驗證邊界
 
@@ -35,7 +35,7 @@ embedded package `com.vrcommand.simulation` 現為 0.11.0。Runtime asmdef 已�
 
 版本由官方 Unity release feed、套件 metadata 與 URP Blank 17.1.0 模板選定。URP 已對齊 Editor 隨附 17.3.0，真正 Editor 完成匯入與資產升級，原範本授權保留。已產生真正 packages-lock.json；Editor 最低版本政策使 Transport／Collections／Burst／Math 等相依提高，實際為 2.7.4／2.7.1／1.8.31／1.3.3，XR Core Utils／Legacy Input Helpers 為 2.6.0／2.1.13。先前 managed SDK 的最低相依診斷圖不是此 UPM 圖，不能混稱。
 
-新增 [managed SDK 接入檢查](UNITY_SDK_CHECK.md)：11 份 runtime 與 9 份測試來源使用官方 NGO／Input／Transport 等來源及真正 Unity DLL，在 Android／Windows 條件分支均通過型別編譯。該工具不執行 NUnit 或 Editor／ILPP／IL2CPP／APK；本輪真正 Editor 的 34 項測試與建置另有日誌，不混用證據。
+新增 [managed SDK 接入檢查](UNITY_SDK_CHECK.md)：12 份 runtime 與 9 份測試來源使用官方 NGO／Input／Transport 等來源及真正 Unity DLL，在 Android／Windows 條件分支均通過型別編譯。該工具不執行 NUnit 或 Editor／ILPP／IL2CPP／APK；本輪真正 Editor 的 34 項測試與建置另有日誌，不混用證據。
 
 使用者已明確同意 SDK／NDK 條款；Android Build Support 與 OpenJDK 已由 CLI 安裝，SDK／NDK 目錄修復及實際原生編譯結果見下節，不再等待條款確認。
 

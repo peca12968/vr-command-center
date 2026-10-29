@@ -1,5 +1,21 @@
 # 開發進度
 
+## 2026-10-29：原生GPU閃電與本玩家DSP雨雷輸出
+
+上一輪精確觀戰屬實際進度。本輪從乾淨 `893332e` 接續無頭盔的PC主線，針對需求5補強原生證據。新增 `NativeWeatherProbe` 與 `scripts/check-desktop-weather.py`：只有未追蹤、可見的Windows Development玩家，在明確CLI開關及全新絕對目錄下才附掛；一般啟動、Editor、Android或batch不附掛。只讀本玩家AudioListener DSP及GPU backbuffer，沒有麥克風、OS loopback、其他應用程式或遊戲輸入注入。兩個AudioSource仍由既有權威tick規則控制，僅增加LastApplied本地觀測欄位；不改戰鬥、網路或環境v1語意。
+
+首次真正Prepare發現未宣告Image Conversion模組而出現CS1061；新增正式builtin imageconversion1.0.0後，UPM成功匯入並保存lock，Prepare／**34項EditMode**／Desktop／Quest均exit0。保存Arena／PlayerAvatar識別未變，無RebuildArena。bundle **0.18.1／Android code19／NGO仍18**，API0.16／驗票2／envelope6／world schema1／environmentVersion1保持。兩平台fingerprint相同：`ce2222224a687942a6492e9e861e72e4c5452134cf7cf6bb5537b09289faa7f5`。Quest ARM64／IL2CPP APK為46,085,944 bytes、SHA-256 `b0fd3ba170e953af7e2b388e52e51916b293e5cd0edefa2ee734c63c483094a0`，v2簽章、code19／0.18.1、min32／target35及六個AArch64原生庫含libil2cpp核對通過，沒有頭盔安裝或運行。
+
+固定雨雷素材 `generate-weather-audio.py --check` 通過；離線managed SDK Android／Windows各12 runtime／9 test型別編譯通過，單一WeatherView Core／Audio窄檢查也通過。窄SDK圖沒有DEVELOPMENT_BUILD開關啟用分支，該分支以真正Windows建置與運行覆蓋；不把SDK當Editor／DSP或GPU證據。原生probe使用有界緩衝及音訊執行緒純記憶體採樣，End後才輸出PCM WAV並核對格式／樣本／量化能量，截圖於真實渲染幀結束後讀回。分析使用現有bundled Python／Pillow12.3.0，沒有全域安裝或更改系統音效設定。
+
+第一場 `20261029-230508-0b5e7d5e` CLI通過：276幀、最大來源年齡0.614726秒，GPU閃電區域平均亮度比夜間增加34.5419（0–255）；48kHz雙聲道／24.085秒PCM，已檢視night.png及flash.png。第二場 `20261029-231752-cb648d31` 的靜音分類檢查失敗：10Hz主執行緒觀測把Resume後的兩個非零DSP回呼，誤歸到前一筆Paused快照；原始回呼時間12.532／12.551秒，第一筆已保存Running快照在12.554秒，穩定暫停區間均為零。保留失敗及278幀封存，修正分析器同時檢查狀態切換兩側、只分類穩定內部區間，不降低1e-6靜音或1.5秒來源門檻，也不更改遊戲播放邏輯。
+
+最終 `20261029-232018-64b01ff3` 完整重驗通過：273幀、最大來源年齡0.154812秒；首次觀測閃電tick140、雷聲tick180，符合既有40tick延遲及10Hz觀測容差。2,263,040個交錯樣本／48kHz雙聲道、WAV RMS0.0164812；穩定雷聲／雨聲／暴風雨最大RMS0.0715666／0.0106800／0.0679965，暫停53批、尾音後晴天57批RMS皆0。閃電區域亮度增加34.5419，六份GPU截圖保存。關閉雷電不啟動新雷聲，但既有雷聲保留尾音；Pause停止聲音。這是原有規則，檢查不把自然尾音誤稱立即靜音。完整操作與範圍見 [NATIVE_WEATHER.md](NATIVE_WEATHER.md)。
+
+一般未啟用probe、visible-room1的新binary場 `20261029-232121-aeab2eb8` **33項 UI／native**回歸通過，124幀、最大來源年齡0.133583秒。任務配置／動態名冊、天氣／AI／暫停、鏡頭保存及封存回放統計一致；所有自有場次皆精確封存、pendingTelemetry=false、活動0、cleanup零錯誤。三個聲光場各23檔及一般場14檔，在writer全停後複製回F，與實際解析的SSD原件逐檔SHA-256一致；原件保留。診斷PCM不進入worlds.db或一般回放，不等同任務原始音軌／影片交付。總驗證在 artifacts/weather-probe-validation.json，原5080 health ok，自有Unity程序清空，未更換正式服務DLL／資料。
+
+本輪沒有後端／共享遊戲規則或管理Web UI變更，不重算歷史485核心／140 Chromium；新34 EditMode與33 native分開記錄。GPU擷取證明真正Windows閃光，DSP證明本遊戲混音有雨雷及穩定靜音，仍不證明人員聽感、實體喇叭／耳機、聲壓、Quest／VIVE、MR或25台。長期目標及完整11項保持開發中，接續軍事美術／長任務操作、跨機、頭盔／MR／硬體及25台分階段驗收。
+
 ## 2026-10-29：精確觀戰位置、角度與原生錄製回放
 
 上一輪屬實際進度：掩體修正與 Windows／Quest v0.18 已交付。本輪從乾淨 `c46ea42` 接續完整長期目標與使用者「先繼續電腦端」。在既有自由觀戰旁新增看向 X／Y／Z、水平角／俯視角（度）、距離，以及讀取／套用按鈕及 Enter 操作；配合原拖曳、平移、縮放、角色跟隨及書籤，不占玩家席位。欄位是全館世界座標的觀看中心，不冒充相機位置或玩家姿態。
