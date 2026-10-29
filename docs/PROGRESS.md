@@ -1,5 +1,21 @@
 # 開發進度
 
+## 2026-10-29：擴大 Quest managed SDK 綁定與 URP 版本對齊
+
+上一輪 v0.16 已推送、部署並完成資料保留／模擬聲光驗證，屬於具體進展；本輪從乾淨 e6b6d86 接續，完整目標與 Quest 3 優先保持。最新真正 Prepare 仍是上一輪授權退出 198；本輪沒有新授權可用的證據，也沒有重複啟動相同失敗工作、重裝工具或操作登入／安全性提示。
+
+新增 scripts/check-unity-sdk.py，將原本僅語法／單一天氣元件的檢查擴為 10 runtime／5 NUnit 檔案的實際 managed API 型別編譯。官方 NGO 2.7.0、Input 1.17.0、Transport 2.6.0、Burst 1.8.24、Collections 2.4.3、Math 1.3.2，綁定本機真正 Editor Core／Audio／UI／XR 等 DLL 與隨附 UI／NUnit。每個 Android／Windows 分支編譯 976 份 managed 來源（含上游），另引用共用 Simulation；沒有自製 stub，不修改上游來源。
+
+本機實際 Unity.exe ProductVersion 為 6000.3.27f1_672d562a42a7，BuiltInPackages 的 URP／SRP Core 為 17.3.0，而 manifest 還指定 17.0.4，已對齊 17.3.0；Core 的 Collections 相依為 2.4.3。這是檔案／版本設定證據，不是 UPM 解析成功；原 17.1 範本資產及授權仍保留，匯入／升級待真正 Editor 驗證。API／bundle 0.16／NGO wire 16 不變，沒有替換預覽 DLL 或操作資料。
+
+六份官方 registry archive 下載時核對固定 SHA-1，來源 receipt 另記各檔 SHA-256，快取改動／遺失／新增來源會拒絕。首五份從本輪已驗證的探索快取保留原文初始化正式快取，Collections 2.4.3 由正式工具下載驗證；原 2.2.1 探索資料保留在 artifacts。產物與報告在 artifacts/unity-sdk-check，僅編譯所需來源／支援 DLL／授權文件保留於正式快取，第三方內容不提交。報告開始即設 complete=false，成功記時間、檢查器與來源／DLL 雜湊、符號及退出碼，避免舊成功冒充新嘗試。
+
+Android／Windows 與最終 --offline 重跑均通過，零錯誤；完整重建分別 18／19 警告（上游未使用欄位／隱藏成員、本工程 JsonUtility DTO 反射填入欄位的 CS0649），沒有宣稱零警告。18 項 NUnit 方法只完成型別編譯，沒有執行。另以自己的暫存 fixture 確認舊 URP pin 在編譯前拒絕；刻意修改自己的 Mathematics 快取來源後拒絕，finally 恢復原文及 receipt 核對成功，再實際離線編譯兩分支。證據為 artifacts/unity-sdk-guards.log、unity-sdk-offline.log 與 unity-sdk-check/report.json。
+
+探索工具首次漏列舊 Unity 版本符號、誤納 Unity 忽略的 bee~ 來源，以及將隨附 ILSupport DLL 誤當空白 C# 專案，已依官方來源／README 改正工具選檔與引用，沒有修改上游程式來讓它通過。正式工具使用對齊 Core 的 Collections 2.4.3 及兩個明確條件分支，通過的是 managed 綁定；沒有模擬完整 Unity CompilationPipeline／UPM。ProjectBuilder／OpenXR／URP 渲染程式、NGO／Burst／Collections ILPP、原生執行、Shader／音訊匯入、EditMode／Desktop／IL2CPP／APK／頭盔均仍待驗收，診斷 DLL 不可部署。
+
+文件已同步至 UNITY_SDK_CHECK、QUEST3、README、ROADMAP、REQUIREMENTS 與 AGENTS。管理服務 5080 當下 PID 17748、API 0.16.0／health 正常；沒有停止、換資料庫或新建場次。本輪未變更業務／UI，因此沒有重跑 v0.16 的 1023 項管理／模擬／瀏覽器檢查，該結果仍只是上一輪證據。下一主線仍為有效 Editor 授權、真正 Prepare／18 Tests／Desktop／Quest 及雙 Quest 實測；本輪可重複的完整 runtime 型別證據不能替代它們。CI 按推送實際結果另記，長期目標保持開發中。
+
 ## 2026-10-29：v0.16 天氣聲光、共用時間規則與舊錄製相容
 
 從乾淨 a3e2dee 接續完整長期目標，Quest 3 仍優先。本輪再次實際執行 Prepare，退出 198，日誌為「No valid Unity Editor license found」，沒有待執行中的建置；未操作登入／安全性提示、重裝已整理的 SDK 或重問已同意的條款。CLI 登入狀態不能單獨否定 Hub 授權，這裡以實際 Editor 結果為準。整個 Unity／NGO／ILPP／Shader／AudioImporter／18 項 EditMode／桌面程式／APK／頭盔均沒有成功證據。

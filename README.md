@@ -4,7 +4,9 @@
 
 依 2026-10-29 的使用者指示，**優先開發 Meta Quest 3**，暫以 Android 獨立執行為工作假設；VIVE 延後接入，共用架構與原始雙平台目標保留。
 
-目前為 **v0.16 天氣聲光重現與 Quest 接入原型**。觀戰／持久回放依保存時間顯示雨、霧、日夜與閃電，音效由使用者開啟，跳轉不補播舊雷聲；舊錄製維持原顯示。任務版本、鏡頭位置與入場撤銷功能保留。規範及升級見 [ENVIRONMENT.md](docs/ENVIRONMENT.md)，Unity wire protocol 為 16。**實際 Prepare 仍因有效 Editor 授權未找到而退出 198；僅天氣元件通過真正 Unity Core／Audio DLL 型別編譯，整個 Unity 工程、APK 或頭盔尚無成功證據**。所有遊戲示範仍為 Simulation，完整 11 項與雙平台需求保持開發中。
+目前為 **v0.16 天氣聲光重現與 Quest 接入原型**。觀戰／持久回放依保存時間顯示雨、霧、日夜與閃電，音效由使用者開啟，跳轉不補播舊雷聲；舊錄製維持原顯示。任務版本、鏡頭位置與入場撤銷功能保留。規範及升級見 [ENVIRONMENT.md](docs/ENVIRONMENT.md)，Unity wire protocol 為 16。**實際 Prepare 仍因有效 Editor 授權未找到而退出 198；managed API 型別編譯已有證據，整個 Unity 工程、APK 或頭盔尚無成功證據**。所有遊戲示範仍為 Simulation，完整 11 項與雙平台需求保持開發中。
+
+後續已擴大為 [managed SDK 檢查](docs/UNITY_SDK_CHECK.md)：10 份遊戲 runtime 與 5 份 NUnit 來源，在 Android／Windows 條件分支均綁定真正 Unity DLL／官方套件並編譯通過；manifest 的 URP 對齊 Editor 隨附 17.3.0。這是新的型別證據，仍未執行 18 項 EditMode、完整 Unity 匯入、ILPP、IL2CPP、APK 或頭盔。
 
 ## 開發位置
 

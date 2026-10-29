@@ -37,3 +37,5 @@ dotnet run --project tools/VrCommand.WorldRelay --configuration Release --no-bui
 本機 472 核心、369 HTTP、43 世界串流、17 Node 資料／跨語言向量、122 Chromium，共 1023 項通過。包含 144 組環境樣式、60 組雨座標、85 組 cue 步驟的 C#／JS 比較，舊 header／journal 補送、拒絕改版、真實 Web Audio 非零輸出及雷聲啟動、回放閃電、跳轉抑制與暫停。音訊圖驗證不代表人員聽感驗收。
 
 26 份 Unity C# 9 語法通過。`scripts/check-weather-unity-api.ps1` 另以已安裝 Editor 的真正 CoreModule／AudioModule DLL 編譯 **UnityWeatherView 單一元件**（0 警告／0 錯誤），不是 SDK stub；沒有編譯 SceneAuthority／NGO 或執行 Unity。18 項 EditMode 尚未執行。最新實際 Prepare 退出 198，日誌明確為找不到有效 Editor 授權。
+
+後續已擴大為 [managed SDK 檢查](UNITY_SDK_CHECK.md)，SceneAuthority、NGO 與所有 runtime／NUnit 來源在 Android／Windows 條件分支均能綁定真正 SDK 編譯；這補充上述較早的窄範圍證據。仍未執行 Unity／ILPP／18 項 EditMode，沒有 APK 或頭盔結果。

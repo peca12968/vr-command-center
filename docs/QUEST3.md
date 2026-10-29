@@ -1,6 +1,6 @@
 # Quest 3 接入原型與工具鏈 v0.14
 
-管理 API／控制台現為 v0.16，任務不可變版本保持，見 MISSION_VERSIONS。Unity 新增 tick 驅動雨景／聲音與原子 WeatherState，NGO protocol／Android code 16、bundle 0.16.0；Mission 本體仍 schema 1。單一天氣元件以真正 Core／Audio DLL 編譯通過，整個 Unity 工程、NGO／ILPP、Shader／音訊匯入與 18 項 EditMode 仍待驗。最新實際 Prepare 仍因找不到有效 Editor 授權退出 198，沒有 APK／頭盔結果。效果與邊界見 [ENVIRONMENT.md](ENVIRONMENT.md)；下方舊版本段落保留歷次說明。
+管理 API／控制台現為 v0.16，任務不可變版本保持，見 MISSION_VERSIONS。Unity 新增 tick 驅動雨景／聲音與原子 WeatherState，NGO protocol／Android code 16、bundle 0.16.0；Mission 本體仍 schema 1。後續 10 runtime／5 test 檔案已通過真正 managed SDK 型別編譯，整個 Unity 工程、NGO／ILPP、Shader／音訊匯入與 18 項 EditMode 仍待驗。最新實際 Prepare 仍因找不到有效 Editor 授權退出 198，沒有 APK／頭盔結果。效果見 [ENVIRONMENT.md](ENVIRONMENT.md)，編譯範圍見 [UNITY_SDK_CHECK.md](UNITY_SDK_CHECK.md)；下方舊版本段落保留歷次說明。
 
 v0.14 新增每次入場識別、票券 v2／protocol 2、If-Match-Admission 與跨輪詢重入撤銷，Unity／API 需同版升級並重發舊券，見 [ADMISSION.md](ADMISSION.md)。生成器 NGO protocol 14／bundle 0.14；15 項 EditMode 仍待執行，沒有 Unity／APK／頭盔結果。
 
@@ -27,11 +27,13 @@ embedded package `com.vrcommand.simulation` 現為 0.11.0。Runtime asmdef 已�
 | Unity CLI | 1.0.0-beta.14，已安裝 |
 | OpenXR / XR Management | 1.19.0 / 4.6.1 |
 | NGO / Transport | 2.7.0 / 由 NGO 相依解析（2.6.0） |
-| Input System / URP | 1.17.0 / 17.0.4 |
+| Input System / URP | 1.17.0 / 17.3.0（對齊固定 Editor 隨附版本） |
 | Test Framework / UGUI | 1.6.0 / 2.0.0 |
 | Quest 建置設定 | IL2CPP、ARM64、Vulkan、min API 32、target API 35，Development APK |
 
-版本由官方 Unity release feed、套件 metadata 與 URP Blank 17.1.0 模板選定；不是最新版套件一律升級。模板 ProjectSettings／URP 設定附原始授權於 `clients/unity/ThirdPartyNotices/`。Unity 套件鎖定檔尚待第一次成功套件解析產生並提交。
+版本由官方 Unity release feed、套件 metadata 與 URP Blank 17.1.0 模板選定。後續實際檢查本機 Editor 發現隨附 URP／SRP Core 為 17.3.0，manifest 已由 17.0.4 對齊；原範本資產與授權仍保留，真正匯入／升級待 Editor 驗證。Unity 套件鎖定檔尚待第一次成功套件解析產生並提交。
+
+新增 [managed SDK 接入檢查](UNITY_SDK_CHECK.md)：10 份 runtime 與 5 份測試來源使用官方 NGO／Input／Transport 等來源及真正 Unity DLL，在 Android／Windows 條件分支均通過型別編譯。18 個 NUnit 方法沒有執行，Editor 生成器／OpenXR／URP／ILPP／IL2CPP／APK 亦未驗證；不能把它當成整個 Unity 工程成功。
 
 使用者已明確同意 SDK／NDK 條款；Android Build Support 與 OpenJDK 已由 CLI 安裝，SDK／NDK 目錄修復及實際原生編譯結果見下節，不再等待條款確認。
 

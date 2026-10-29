@@ -8,7 +8,7 @@
 |---|---|---|---|
 | M0 專案與管理核心 | F 槽原始碼、私人 GitHub、需求追蹤、五房場次與任務 API、CI | 可重現建置、核心與 HTTP 驗證、推送成功 | 本機與推送完成；一次 Linux 建置／核心／HTTP 通過，瀏覽器列序斷言已修正並本機通過；修正提交的雲端 CI 再次受帳務限制未啟動 |
 | M1 場次控制與事件基礎 | 主控／房間權限、準備／開始／暫停／結束狀態、命令與事件、統計核心 | 五房隔離、權限、去重、狀態遷移、紀錄恢復測試 | 管理／統計核心、SQLite 追加、JSON 升級與模擬來源已驗證；建立／加入／離開可持久去重，v2 票券與移除／配票按每次 admission fence；API／SQLite／瀏覽器已驗證，Unity 連線撤銷來源碼待實測 |
-| M2 Quest 3 優先的遊戲垂直切片 | Unity 工程、Quest Android profile、基本移動／互動與共同場景；再接入 VIVE | Quest 3 實機操作及雙玩家互見；之後驗證混合頭盔、校正與定位 | 工程／票券已建立；Editor 與 Android 工具已安裝整理，ARM64 原生編譯通過。CLI 子模組仍有失敗登錄；Editor 授權仍未實測成功，無 Unity 編譯／APK／實機證據 |
+| M2 Quest 3 優先的遊戲垂直切片 | Unity 工程、Quest Android profile、基本移動／互動與共同場景；再接入 VIVE | Quest 3 實機操作及雙玩家互見；之後驗證混合頭盔、校正與定位 | 工程／票券已建立；Editor 與 Android 工具已整理，ARM64 原生編譯通過。10 runtime／5 test 檔案的 Android／Windows 分支已綁定真正 managed SDK 編譯；URP 對齊 Editor 17.3.0。這不是 Unity 匯入／ILPP／NUnit 執行；Editor 授權仍未實測成功，無整個 Unity 工程／APK／實機證據 |
 | M3 軍事戰鬥與 AI | 武器、傷害、健康、敵軍尋路／攻擊、操作員覆寫、HUD | 伺服器判定一致、AI 可控、事件與統計相符 | 同源核心與任務／連線接入層已通過 .NET；Unity 已接武器、AI／擺設同步、HUD、撤銷與共用世界／頭手來源。18 項 EditMode 及整個 Unity 工程仍未編譯運行，實機待驗 |
 | M4 任務與場景編輯 | 任務視覺編輯器、版本、物件擺設、天氣／日夜／雷電即時控制 | 儲存重載一致、獨立／全館環境正確同步 | 任務不可變版本、2D 配置、環境／AI 設定已有核心／HTTP／瀏覽器證據；v0.16 雨景、日夜、閃電及雨雷聲依保存 tick 重現，舊錄製保持原顯示。單一 Unity 天氣元件通過實際 Core／Audio DLL 編譯；碰撞／校正、整個 Unity 工程及頭盔同步仍待驗 |
 | M5 觀戰、回放與報表 | 自由／跟隨鏡頭、書籤、快照與事件回放、逐玩家統計 | 即時觀戰、跳轉倍速、回放與結束統計一致 | 本機 3D 模擬回放及持久世界的 WS 發布／SSE 觀戰、跳轉倍速、逐幀與最終統計核對已驗證；鏡頭位置按控制台身分與場次保存，重新登入可切換，含持久重試／移除保護及瀏覽器驗證。補送依擷取時間判斷新鮮度。Unity 已接世界／頭手來源碼，仍待真正編譯及實際頭手／觀戰驗收 |
@@ -24,3 +24,5 @@
 管理介面位於 `/console/`，目前 v0.16 天氣聲光規範見 ENVIRONMENT，任務版本見 MISSION_VERSIONS、鏡頭見 WORLD_RECORDING、入場票券見 ADMISSION。Unity wire protocol 16，場次 envelope 6／世界 schema 1 不變，header 新增選用 environmentVersion。本機通過 472 核心、369 HTTP、43 世界串流、17 Node 及 122 Chromium，共 1023 項；26 份 C# 9 語法與單一 UnityWeatherView 的真實 SDK 型別編譯通過，18 項 EditMode 尚未執行。實際 Prepare 仍因授權退出 198，沒有整個 Unity 工程、APK、真正頭手、25 台效能或頭盔驗收。
 
 不先承諾日程與成本；取得團隊規模、素材來源、頭盔型號、場地與協議後才能估算。每次交付更新 `PROGRESS.md`，有可驗證成果再更新本表。
+
+後續型別檢查已從單一天氣元件擴為 10 runtime／5 NUnit 來源，在 Android／Windows 分支各編譯 976 份 managed 來源（含上游），零錯誤，警告仍保留。18 個測試方法僅能編譯，未執行；SDK 圖不是 UPM lock，ProjectBuilder／OpenXR／URP 渲染程式與原生部分不在本檢查範圍。工具、快取驗證與 URP 17.3.0 修正見 [UNITY_SDK_CHECK.md](UNITY_SDK_CHECK.md)，不影響 wire 16 或原資料。本輪未重跑上段 1023 項管理／模擬／瀏覽器檢查。
