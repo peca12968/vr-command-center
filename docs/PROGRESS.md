@@ -26,6 +26,8 @@ locked restore／Release build通過、0警告／錯誤，**489核心、369 HTTP
 機器證據在artifacts/field-validation.json，原生成物、.meta及成功匯入狀態保存；上游Three／Transport未修改。原5080仍為原v0.16 DLL／歷史，health ok；新程式使用自己的v0.17 API及新runtime，沒有移動或替換正式資料。人物／武器、擺放合法性、原停頓原因／啟動旗標、長任務／跨機、頭盔／MR／VIVE、廠商硬體及25台仍待，完整11項長期目標維持開發中。
 
 
+功能提交 `df3a86552a3b2facb9c2d4f6dd89c615352cf055` 已推送並核對遠端main相同。[CI run40926478858](https://github.com/peca12968/vr-command-center/actions/runs/40926478858)／check123633239506已結束，steps=null、annotation為近期付款失敗或支出限制，工作未啟動；另有ubuntu遷移通知。未改帳務或重跑，新增生成器check尚未在雲端執行。GitHub #1已同步新版ROADMAP、證據及未解限制，保持開啟並保留前次內容。
+
 ## 2026-10-30：姿態逾時分類與可重現封包中斷
 
 上一輪HUD屬實際進度。本輪從乾淨 `60713ba` 接續使用者「無頭盔、先繼續電腦端」。唯讀核對原場 `20261030-000040-9a2f550c` 的worlds.db：666→667幀相差688ms，tick仍1328；668幀connected=false，669幀100ms後恢復，頭部位置／健康100／彈藥29不變。先前警告把tracking、PoseAccepted及connected合併成POSE REJECTED，原PNG與0.25秒觀測不能分辨原因。這些新證據確認一次保存停頓與短暫非參戰狀態，不足以判定GPU、收件間隔、封包、CPU／IO或其他停頓根因；保留原資料，未宣稱修好延遲。
