@@ -20,6 +20,8 @@ SSD 第一輪 `20261029-204334-40372c18` 七場封存幀數為 **63／95／99／
 
 機器可讀驗證在 `artifacts/venue-ui/validation.json`：三次成功 runtime-snapshot 與 SSD 原件逐檔一致、cleanup 零錯誤／零剩餘程序；播放器 receipt 指紋仍為 `d6baeb56101bc7adea85f4173d3e0a31788f1d5546ff6a2ab872a789ff242a20`，舊 receipt 反例在建立場次前拒絕。此次未改 C#／後端／管理 Web UI，不重建同源播放器，也不混算歷史 29 EditMode／.NET／Chromium。文件同步修正 API 舊票券範例及過時驗證狀態。下一步為圖形聲光／擺設、操作員控制與觀戰操作驗收，後續仍須跨機、Quest／VIVE、MR、廠商硬體及 25 台。操作見 [DESKTOP_VENUE.md](DESKTOP_VENUE.md)。
 
+功能提交 `1c86e627c1a8fe24e23137e55a520bcf1d7df708` 已推送並核對遠端 main 相同。CI run `40876982663`／check `123458210322` 在任何 step 開始前結束，steps／logs 為空；annotation 仍為近期付款失敗或支出限制，另有 ubuntu-latest 遷移通知。未改帳務或重跑。原預覽 5080／PID 52992 仍 health ok，本輪沒有換 DLL／資料；自有 native 視窗及程序均已停止。GitHub #1 同步本輪 SSD 條件及五房成果並保持開發中。
+
 ## 2026-10-29：電腦重連、入場撤銷與 Windows UDP 接收修正
 
 從乾淨 `2601c7d` 接續使用者「沒有頭盔，先繼續電腦端」。本輪遊戲端升為 **v0.17.0／Android code 17／NGO protocol 17**；API 仍為 0.16.0、驗票 protocol 2、場次 envelope 6／世界 schema 1 不變。所有遊戲 server／client 須一起更新，不混用 NGO 16／17。完整 11 項及 VIVE／Quest 相容目標仍開發中。
