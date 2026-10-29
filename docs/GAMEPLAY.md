@@ -1,8 +1,8 @@
-# Quest 戰鬥接入 v0.16
+# Quest／桌面戰鬥接入 v0.17
 
-目前 v0.16 以原子 WeatherState 同步 tick／天氣／日夜／雷電／phase／房間，NGO protocol 16、bundle 0.16.0；雨景及合成音效來源見 [ENVIRONMENT.md](ENVIRONMENT.md)。2026-10-29 真正 Editor 已通過 25 項 EditMode、Windows／Quest 建置，以及 Windows server／雙 client 的獨立與跨房 Simulation smoke（含 AI 傷害、暫停、封存與回放統計）。另有單機 GPU 視窗、方向鍵／Space／滑鼠射擊、換彈／暫停與報表證據，見 DESKTOP；頭盔操作仍待驗，詳見 [NATIVE_VALIDATION.md](NATIVE_VALIDATION.md)。v0.14 的每次入場識別、票券 v2／驗票 protocol 2 及撤銷契約保持，見 [ADMISSION.md](ADMISSION.md)。
+目前 Unity v0.17／NGO protocol 17，API 仍 0.16／驗票 2；29 項真正 EditMode、Windows／Quest 同源建置及 PC 獨立／跨房 Simulation 已通過。實際視窗亦驗證票券撤銷、原程序重新配票與強制離線後恢復位置／健康／彈藥，見 [RECONNECT](RECONNECT.md)／PROGRESS；Transport 失敗接收修正見 TRANSPORT_PATCH。v0.16 的原子 WeatherState 與環境版本規則保持，見 [ENVIRONMENT](ENVIRONMENT.md)。瞄準／射擊／換彈操作見 DESKTOP；頭盔與 25 台仍待驗。
 
-v0.13 已加入頭手來源 byte／追蹤狀態檢查、世界來源、共用發布及管理邊界錄製，詳見 [WORLD_SOURCE.md](WORLD_SOURCE.md)。該版 NGO protocol 13 為歷史；現行兩端使用 protocol 16 並保持同版場景識別。
+v0.13 已加入頭手來源 byte／追蹤狀態檢查、世界來源、共用發布及管理邊界錄製，詳見 [WORLD_SOURCE.md](WORLD_SOURCE.md)。該版 NGO protocol 13 為歷史；現行兩端使用 protocol 17 並保持同版場景識別。
 
 本版把共用戰鬥核心接到 Unity 的任務、入場、姿態、武器及 NGO 狀態同步來源碼。**已通過真正 Unity 編譯／建置及 PC 雙玩家連線、AI 傷害與封存，已有 PC GPU 視窗與鍵鼠射擊／擊殺證據，仍沒有頭盔射擊或 25 台效能證據。** .NET、無圖形 PC 及頭盔驗收分別記錄。
 

@@ -52,6 +52,7 @@ namespace VrCommand.Unity
         private float nextSend;
         private double nextServerAccept;
         private bool tracked;
+        private bool desktopInitialized;
         private float nextFire;
         private double nextWeaponAccept;
         private ulong inputSequence;
@@ -66,6 +67,7 @@ namespace VrCommand.Unity
             {
                 var admission = VenueBootstrap.Instance?.Admission(OwnerClientId);
                 if (admission != null) PlayerId.Value = admission.playerId;
+                Pose.Value = VenueBootstrap.Instance.combatAuthority.DesktopSpawnPose(OwnerClientId);
             }
             if (!IsOwner) return;
             var spectator = GameObject.Find("Desktop Spectator");
@@ -100,9 +102,21 @@ namespace VrCommand.Unity
             else
             {
                 head.localPosition = new Vector3(0, 1.65f, 0);
+                InitializeDesktopPose();
                 Debug.Log("Desktop preview input devices: keyboard=" + (Keyboard.current != null) + ", mouse=" + (Mouse.current != null));
             }
             if (tracked) CreateStatusPanel();
+        }
+
+        private bool InitializeDesktopPose()
+        {
+            if (desktopInitialized) return true;
+            var saved = Pose.Value;
+            if (saved.source != 1 || !saved.Valid()) return false;
+            head.localPosition = saved.head; head.localRotation = saved.headRotation;
+            leftHand.localPosition = saved.left; leftHand.localRotation = saved.leftRotation;
+            rightHand.localPosition = saved.right; rightHand.localRotation = saved.rightRotation;
+            desktopInitialized = true; return true;
         }
 
         private static InputAction Action(string name, string binding)
@@ -120,6 +134,7 @@ namespace VrCommand.Unity
             if (IsOwner)
             {
                 if (!TrackingReady) return;
+                if (!tracked && !InitializeDesktopPose()) return;
                 if (tracked)
                 {
                     leftHand.localPosition = leftPosition.ReadValue<Vector3>();

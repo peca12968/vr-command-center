@@ -1,12 +1,12 @@
 # Unity managed API 接入檢查
 
-後續使用者已確認 Hub 有效授權，真正 Editor 已完成 Prepare、21 項 EditMode、Windows 及首輪 Quest 建置，詳見 [NATIVE_VALIDATION.md](NATIVE_VALIDATION.md)。本文記錄 SDK 診斷工具及其較早證據範圍；其中「未執行 Unity」是指工具本身，舊 198／18 項未執行不再代表專案最新狀態。
+後續真正 Editor 已完成 Prepare、29 項 EditMode、v0.17 Windows／Quest 建置，詳見 PROGRESS。本文是較窄的 SDK 診斷範圍；工具本身不執行 Editor／測試，舊 198 不再代表現況。
 
-`scripts/check-unity-sdk.py` 將遊戲執行端的 10 份 C#、5 份 NUnit 來源及其官方套件來源，以 .NET Standard 2.1／C# 9 編譯並綁定本機 Unity 6000.3.27f1 的真正 managed DLL。它補足只有語法檢查、或只綁定單一天氣元件的證據缺口；**不是整個 Unity 工程建置**。
+`scripts/check-unity-sdk.py` 將遊戲執行端的 11 份 runtime C#、8 份 test 來源及其官方套件來源，以 .NET Standard 2.1／C# 9 編譯並綁定本機 Unity 6000.3.27f1 的真正 managed DLL。它補足只有語法檢查、或只綁定單一天氣元件的證據缺口；**不是整個 Unity 工程建置**。
 
 ## 執行
 
-需要 Windows、Python 3.12+、.NET SDK，以及本機固定 Editor 的完整 managed DLL／BuiltInPackages。從專案根目錄執行：
+需要 Windows、Python 3.12+、.NET SDK，以及本機固定 Editor 的完整 managed DLL／BuiltInPackages，以及工程真正匯入後的 `Library/ScriptAssemblies/UnityEngine.TestRunner.dll`（UnityTest attribute）。從專案根目錄執行：
 
 ```powershell
 python scripts/check-unity-sdk.py
@@ -18,6 +18,8 @@ python scripts/check-unity-sdk.py --offline
 首次下載官方固定套件（合計約 600 MB，Burst 約 470 MB），核對腳本固定的 registry tarball SHA-1，僅保留編譯所需的來源、asmdef、支援 DLL 及授權文件；套件原文不修改、不提交。快取每份檔案另記 SHA-256，重跑必須與 receipt 一致；新增、遺失或改動的編譯來源都會拒絕。`--offline` 不下載 SDK 套件；.NET 的 targeting packs／還原快取需先備妥。沒有完整 receipt 的快取不自動信任或覆寫。
 
 產物均在 Git 忽略的 `artifacts/unity-sdk-check/`。`android.log`／`windows.log` 保留完整編譯診斷，`report.json` 保存嘗試時間、檢查器 SHA-256、Editor 版本、來源與引用 DLL 的 SHA-256、每個 assembly 的符號及退出碼；開始時清除舊成功標記，僅指定的分支全數通過才有 complete=true。不要把這些診斷 DLL 部署到 Unity 或頭盔；Unity 必須自行匯入、解析套件並產生正式組件。
+
+2026-10-29 更新：Android／Windows 離線型別編譯均成功，11 runtime／8 test；直接引用 Transport 與真正 TestRunner DLL，未執行 coroutine 或 NUnit。此診斷仍用下列 registry Transport 2.6.0，不能證明正式 embedded 2.7.4 修正；該修正另有真正 EditMode／原生 player 證據，見 TRANSPORT_PATCH／PROGRESS。
 
 ## 來源與分支
 
@@ -33,7 +35,7 @@ python scripts/check-unity-sdk.py --offline
 
 兩個分支均使用 Editor 的 managed API 表面與明確列出的開發版符號。Android 分支啟用 UNITY_ANDROID／ENABLE_IL2CPP；Windows 分支啟用 UNITY_STANDALONE_WIN／ENABLE_MONO。這只是條件編譯，不執行 IL2CPP、Mono player 或 Android 原生工具。套件 asmdef 的來源邊界及此範圍的版本符號由腳本列出，沒有完整模擬 Unity CompilationPipeline 或 UPM 圖形。
 
-每分支目前編譯 976 份 managed 來源（含 10 runtime／5 test 檔案），另透過 ProjectReference 編譯共用 Simulation。涵蓋 VenueBootstrap、NetworkAvatar、CombatAuthority、SceneAuthority、世界發送、連線設定、HUD、天氣及 codec 的型別綁定；NUnit 來源中的 18 個測試方法能編譯，**未執行**。沒有替身或自製 Unity／NGO stub。
+最早每分支編譯 976 份 managed 來源（當時含 10 runtime／5 test 檔案；目前數量見 report），另透過 ProjectReference 編譯共用 Simulation。涵蓋 VenueBootstrap、NetworkAvatar、CombatAuthority、SceneAuthority、世界發送、連線設定、HUD、天氣及 codec 的型別綁定；NUnit 來源中的 18 個測試方法能編譯，**未執行**。沒有替身或自製 Unity／NGO stub。
 
 ## URP 與先行檢查
 

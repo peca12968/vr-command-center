@@ -54,7 +54,7 @@ if ($Target -in @('Desktop', 'Quest')) {
 if ($Target -eq 'Tests') {
     [xml]$results = Get-Content -LiteralPath $resultsPath -Raw
     $run = $results.'test-run'
-    if (-not $run -or $run.result -ne 'Passed' -or [int]$run.total -lt 25 -or [int]$run.failed -ne 0) {
+    if (-not $run -or $run.result -ne 'Passed' -or [int]$run.total -lt 29 -or [int]$run.failed -ne 0) {
         throw "Unity EditMode checks did not pass. Results: $resultsPath"
     }
 }

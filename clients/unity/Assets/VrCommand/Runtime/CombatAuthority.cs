@@ -61,6 +61,7 @@ namespace VrCommand.Unity
         private bool managementSuspended;
         private sealed class AcceptedRig { internal ulong Connection; internal RecordedRig Rig; }
         private readonly Dictionary<Guid, AcceptedRig> rigs = new Dictionary<Guid, AcceptedRig>();
+        private readonly DesktopResumeCache desktopResume = new DesktopResumeCache();
 
         public void InitializeRecording(string path)
         {
@@ -133,7 +134,7 @@ namespace VrCommand.Unity
             if (!Capture()) throw new InvalidOperationException("Telemetry is faulted.");
             var changed = management == null || snapshot.sequence != observedSequence || managementSuspended;
             if (changed && !CaptureWorld(true)) throw new InvalidOperationException("World recording is faulted.");
-            session.Apply(snapshot); observedSequence = snapshot.sequence;
+            session.Apply(snapshot); desktopResume.Retain(snapshot.players); observedSequence = snapshot.sequence;
             management = snapshot; managementSuspended = false;
             if (session.World.Phase == WorldPhase.Ended && Outbox != null)
             {
@@ -160,6 +161,14 @@ namespace VrCommand.Unity
         }
         private static Vec3 Vector(Vector3 value) => new Vec3(value.x, value.y, value.z);
         private static Vector3 Vector(Vec3 value) => new Vector3(value.X, value.Y, value.Z);
+        public AvatarPose DesktopSpawnPose(ulong client)
+        {
+            var admission = VenueBootstrap.Instance?.Admission(client);
+            if (admission != null && Guid.TryParse(admission.playerId, out var player) && Guid.TryParse(admission.admissionId, out var epoch)
+                && desktopResume.TryRestore(player, epoch, out var saved)) return saved;
+            return new AvatarPose { source = 1, head = new Vector3(0, 1.65f, 0), left = new Vector3(-.3f, 1.3f, .4f), right = new Vector3(.3f, 1.3f, .4f),
+                headRotation = Quaternion.identity, leftRotation = Quaternion.identity, rightRotation = Quaternion.identity };
+        }
         public bool AcceptPose(ulong client, AvatarPose pose, Vector3 root, Quaternion rotation)
         {
             if (!IsServer || !serverReady || !pose.Valid()) return false;
@@ -167,6 +176,7 @@ namespace VrCommand.Unity
             if (admission == null || !Guid.TryParse(admission.playerId, out var player)) return false;
             var forward = rotation * pose.rightRotation * Vector3.forward;
             if (!session.Pose(client, Vector(root + rotation * pose.head), Vector(root + rotation * pose.right + forward * .15f), Vector(forward.normalized), Time.realtimeSinceStartupAsDouble)) return false;
+            desktopResume.Remember(player, Guid.Parse(admission.admissionId), pose);
             rigs[player] = new AcceptedRig { Connection = client, Rig = new RecordedRig { kind = pose.source == 2 ? "Tracked" : "Simulated",
                 left = new RecordedVector(Vector(root + rotation * pose.left)), right = new RecordedVector(Vector(root + rotation * pose.right)),
                 headRotation = Rotation(rotation * pose.headRotation), leftRotation = Rotation(rotation * pose.leftRotation), rightRotation = Rotation(rotation * pose.rightRotation) } };

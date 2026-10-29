@@ -20,6 +20,7 @@ namespace VrCommand.Unity
         private LaunchConfiguration configuration;
         private string status = "WAITING FOR CONTROL DESK";
         private bool managementReady;
+        private float nextReconnect;
         private TelemetryOutbox outbox;
         private WorldRecordingDelivery worldDelivery;
         public static VenueBootstrap Instance { get; private set; }
@@ -44,6 +45,7 @@ namespace VrCommand.Unity
                 WaitingStatusPanel.Create(spectator.transform);
             }
             Application.targetFrameRate = Application.platform == RuntimePlatform.Android ? 72 : 90;
+            if (Application.platform != RuntimePlatform.Android) Application.runInBackground = true;
             try { configuration = LaunchConfiguration.Load(); }
             catch (Exception) { status = "PLEASE CONTACT THE CONTROL DESK"; }
             if (configuration == null) yield break;
@@ -51,6 +53,8 @@ namespace VrCommand.Unity
             transport.SetConnectionData(configuration.address, configuration.port, configuration.IsServer ? "0.0.0.0" : null);
             networkManager.OnClientDisconnectCallback += Disconnected;
             networkManager.OnClientConnectedCallback += Connected;
+            networkManager.OnServerStopped += ServerStopped;
+            networkManager.OnTransportFailure += TransportFailed;
             networkManager.NetworkConfig.ConnectionApproval = true;
             networkManager.NetworkConfig.ClientConnectionBufferTimeout = 20;
             if (configuration.IsServer)
@@ -88,6 +92,7 @@ namespace VrCommand.Unity
             status = "CONNECTING";
             var started = configuration.role == "Server" ? networkManager.StartServer()
                 : configuration.role == "Host" ? networkManager.StartHost() : networkManager.StartClient();
+            Debug.Log("VR_NETWORK_STARTED role=" + configuration.role + " started=" + started + " background=" + Application.runInBackground + " port=" + transport.ConnectionData.Port);
             if (!started) { status = "CONNECTION FAILED"; yield break; }
             if (configuration.IsServer)
             {
@@ -208,6 +213,7 @@ namespace VrCommand.Unity
 
         private void ApproveConnection(NetworkManager.ConnectionApprovalRequest request, NetworkManager.ConnectionApprovalResponse response)
         {
+            Debug.Log("VR_SERVER_CLIENT_PENDING id=" + request.ClientNetworkId);
             if (request.ClientNetworkId == NetworkManager.ServerClientId && configuration.role == "Host")
             {
                 if (admitted.TryGetValue(request.ClientNetworkId, out var host))
@@ -262,6 +268,7 @@ namespace VrCommand.Unity
                     if (existing.playerId == approval.playerId) { Reject(response); yield break; }
                 if (!combatAuthority.Bind(clientId, approval)) { Reject(response); yield break; }
                 admitted[clientId] = approval;
+                Debug.Log("VR_SERVER_ADMISSION_APPROVED id=" + clientId);
                 response.Approved = true;
                 response.CreatePlayerObject = true;
                 response.Position = RoomOrigin(approval.roomId) + new Vector3((approval.seat - 2) * 1.5f, 0, -3);
@@ -272,6 +279,7 @@ namespace VrCommand.Unity
 
         private static void Reject(NetworkManager.ConnectionApprovalResponse response)
         {
+            Debug.Log("VR_SERVER_ADMISSION_REJECTED");
             response.Approved = false;
             response.Reason = "Admission rejected. Please contact the control desk.";
             response.Pending = false;
@@ -279,18 +287,42 @@ namespace VrCommand.Unity
 
         public TicketApproval Admission(ulong clientId) => admitted.TryGetValue(clientId, out var identity) ? identity : null;
         public static Vector3 RoomOrigin(int roomId) => new Vector3((roomId - 3) * 14, 0, 0);
-        private void Connected(ulong clientId) { if (clientId == networkManager.LocalClientId) status = "CONNECTED"; }
+        private void ServerStopped(bool wasHost) { Debug.Log("VR_SERVER_STOPPED host=" + wasHost); }
+        private void TransportFailed() { Debug.LogError("VR_TRANSPORT_FAILED"); }
+        private void Connected(ulong clientId)
+        {
+            if (clientId == networkManager.LocalClientId) { status = "CONNECTED"; Debug.Log("VR_CLIENT_CONNECTED id=" + clientId); }
+        }
         private void Disconnected(ulong clientId)
         {
+            if (configuration != null && configuration.IsServer) Debug.Log("VR_SERVER_CLIENT_LEFT id=" + clientId);
             combatAuthority?.Unbind(clientId);
             admitted.Remove(clientId);
             if (clientId == networkManager.LocalClientId)
             {
+                Debug.Log(networkManager.DisconnectReason == "Admission rejected. Please contact the control desk."
+                    ? "VR_CLIENT_ADMISSION_REJECTED" : "VR_CLIENT_DISCONNECTED");
                 status = "DISCONNECTED - CONTACT CONTROL DESK";
                 var cameras = Resources.FindObjectsOfTypeAll<Camera>();
                 foreach (var camera in cameras)
                     if (camera.gameObject.scene.IsValid() && camera.name == "Desktop Spectator") camera.gameObject.SetActive(true);
             }
+        }
+        private void ReconnectClient()
+        {
+            if (configuration == null || configuration.role != "Client" || networkManager.IsListening || networkManager.ShutdownInProgress || Time.unscaledTime < nextReconnect) return;
+            nextReconnect = Time.unscaledTime + 2;
+            try
+            {
+                var fresh = LaunchConfiguration.Load();
+                if (fresh.role != "Client") throw new InvalidOperationException("A client reconnect cannot change server roles.");
+                var transport = (UnityTransport)networkManager.NetworkConfig.NetworkTransport;
+                transport.SetConnectionData(fresh.address, fresh.port);
+                networkManager.NetworkConfig.ConnectionData = Encoding.UTF8.GetBytes(fresh.joinTicket);
+                configuration = fresh; status = "CONNECTING";
+                if (!networkManager.StartClient()) status = "RECONNECT FAILED - CONTACT CONTROL DESK";
+            }
+            catch (Exception) { status = "CONNECTION FILE INVALID - CONTACT CONTROL DESK"; }
         }
         private void OnDestroy()
         {
@@ -301,6 +333,8 @@ namespace VrCommand.Unity
             {
                 networkManager.OnClientDisconnectCallback -= Disconnected;
                 networkManager.OnClientConnectedCallback -= Connected;
+                networkManager.OnServerStopped -= ServerStopped;
+                networkManager.OnTransportFailure -= TransportFailed;
             }
             if (Instance == this) Instance = null;
         }
@@ -310,6 +344,8 @@ namespace VrCommand.Unity
             if (networkManager != null && networkManager.IsConnectedClient && networkManager.LocalClient.PlayerObject != null) return;
             GUI.Box(new Rect(12, 12, 430, 58), "VR COMMAND - QUEST 3 VERTICAL SLICE");
             GUI.Label(new Rect(24, 40, 410, 24), Status + " / " + State);
+            if (configuration != null && configuration.role == "Client" && !networkManager.IsListening && !networkManager.ShutdownInProgress
+                && Time.unscaledTime >= nextReconnect && GUI.Button(new Rect(12, 82, 300, 42), "Reconnect / reload player ticket")) ReconnectClient();
         }
     }
 

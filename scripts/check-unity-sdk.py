@@ -14,7 +14,7 @@ from xml.sax.saxutils import escape
 ROOT = Path(__file__).resolve().parents[1]
 WORK = ROOT / 'artifacts/unity-sdk-check'
 # Official Unity registry tarball SHA-1 values. These are a diagnostic SDK graph,
-# not a replacement for the project's eventual UPM packages-lock.json.
+# not a replacement for the project's actual UPM packages-lock.json or embedded patch.
 PINS = {
     'com.unity.netcode.gameobjects': ('2.7.0', 'bd2a018756edad4b0a685634ffde855b1207c37e'),
     'com.unity.inputsystem': ('1.17.0', '02433b2481abc5c0063956fdc211f3d8c777447f'),
@@ -138,6 +138,9 @@ def generate(editor, builtin, packages, profile):
     if not engine:
         raise RuntimeError('Actual Unity engine reference DLLs are missing')
     engine.append(packages['com.unity.collections'] / 'Unity.Collections.LowLevel.ILSupport/Unity.Collections.LowLevel.ILSupport.dll')
+    # UnityTest is supplied by the genuine imported Test Framework assembly.
+    # This diagnostic only compiles the attribute; it does not execute the coroutine.
+    test_runner = ROOT / 'clients/unity/Library/ScriptAssemblies/UnityEngine.TestRunner.dll'
     defines = [f'UNITY_{year}_{minor}_OR_NEWER' for year in range(2017, 2024) for minor in range(1, 5 if year < 2020 else 4)]
     defines += [f'UNITY_6000_{minor}_OR_NEWER' for minor in range(4)]
     defines += [f'UNITY_5_{minor}_OR_NEWER' for minor in range(3, 7)]
@@ -152,7 +155,7 @@ def generate(editor, builtin, packages, profile):
         'UnityEngine.UI': (builtin / 'com.unity.ugui/Runtime/UGUI', [], ['PACKAGE_PHYSICS', 'PACKAGE_INPUTSYSTEM'], []),
         'Unity.InputSystem': (packages['com.unity.inputsystem'] / 'InputSystem', ['UnityEngine.UI'], ['UNITY_INPUT_SYSTEM_ENABLE_XR', 'UNITY_INPUT_SYSTEM_ENABLE_PHYSICS', 'UNITY_INPUT_SYSTEM_ENABLE_UI', 'UNITY_INPUT_SYSTEM_PLATFORM_SCROLL_DELTA', 'UNITY_INPUT_SYSTEM_INPUT_MODULE_SCROLL_DELTA', 'UNITY_INPUT_SYSTEM_INPUT_MODULE_NAVIGATION_DEVICE_TYPE', 'UNITY_INPUT_SYSTEM_SENDPOINTERHOVERTOPARENT', 'UNITY_INPUT_SYSTEM_PLATFORM_POLLING_FREQUENCY'], []),
         'VrCommand.Runtime': (ROOT / 'clients/unity/Assets/VrCommand/Runtime', ['Unity.Netcode.Runtime', 'Unity.Networking.Transport', 'Unity.InputSystem', 'Unity.Collections', 'UnityEngine.UI'], [], []),
-        'VrCommand.Tests': (ROOT / 'clients/unity/Assets/VrCommand/Tests/Editor', ['VrCommand.Runtime', 'Unity.Netcode.Runtime', 'Unity.Collections'], [], [builtin / 'com.unity.ext.nunit/net40/unity-custom/nunit.framework.dll']),
+        'VrCommand.Tests': (ROOT / 'clients/unity/Assets/VrCommand/Tests/Editor', ['VrCommand.Runtime', 'Unity.Netcode.Runtime', 'Unity.Collections', 'Unity.Networking.Transport'], [], [builtin / 'com.unity.ext.nunit/net40/unity-custom/nunit.framework.dll', test_runner]),
     }
     inventory = {}
     for name, (source, references, extra, libraries) in specs.items():

@@ -1,4 +1,5 @@
 * text=auto eol=lf
+clients/unity/Packages/com.unity.transport/** -text -whitespace
 *.png binary
 *.jpg binary
 *.fbx binary

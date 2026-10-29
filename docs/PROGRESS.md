@@ -1,5 +1,27 @@
 # 開發進度
 
+## 2026-10-29：電腦重連、入場撤銷與 Windows UDP 接收修正
+
+從乾淨 `2601c7d` 接續使用者「沒有頭盔，先繼續電腦端」。本輪遊戲端升為 **v0.17.0／Android code 17／NGO protocol 17**；API 仍為 0.16.0、驗票 protocol 2、場次 envelope 6／世界 schema 1 不變。所有遊戲 server／client 須一起更新，不混用 NGO 16／17。完整 11 項及 VIVE／Quest 相容目標仍開發中。
+
+新增桌面斷線後的 **Reconnect / reload player ticket**：重讀原玩家設定檔，只能以 Client 及短效票券重新連線。操作員移除舊 admission 後，即使相同 playerId／席位重新加入，舊票券及舊 If-Match-Admission 仍拒絕；更新玩家檔後可在原程序按鈕重連，不把 Master／GameServer key 放進玩家。連線日誌只記狀態及 transport client ID，不輸出票券或密鑰。
+
+同次 admission 的桌面恢復快取只保存權威核心已接受的 Simulated 頭手姿態。新玩家物件先接收該初始姿態，再送自己的輸入，避免走遠後從出生點重送而違反既有防瞬移規則。健康／彈藥保留於原戰鬥世界；快取按 playerId＋admissionId 隔離，名冊移除／換 admission 清除，Tracked 來源不使用桌面快取。這是單一 server 程序內的恢復，不是持久世界或頭盔追蹤恢復。
+
+真正 Windows 強制斷線揭露另一個問題：server 與 UDP 埠仍存在，新 client 卻進不了 approval。延長等待及背景更新都未修復；只轉送原封包的診斷代理觀察 client 送出而 server 無回應，這些試跑均保留為失敗，不算通過。真正使用的 Transport 2.7.4 在失敗 receive completion 分支未歸還 buffer；[Unity 工程師的確認](https://discussions.unity.com/t/unity-transport-6-6-0-udp-host-stops-receiving-after-abrupt-client-disconnect-on-windows/1736023) 支持該原因，但討論版本較新，本機結果仍須分別驗證。最初的舊版重連失敗同時受傳輸與姿態問題影響，不能把單次失敗全歸因於姿態。
+
+官方 registry 當下最新仍為 2.7.4，因此以固定官方 archive 嵌入 `Packages/com.unity.transport`，只在該分支增加 `ReceiveQueue.ReleaseBuffer(bufferIndex)`。保留 293 份官方檔案／授權／metadata，另存來源與逐檔雜湊；不修改 Library 快取、防火牆或接收容量。`check-transport-patch.py` 離線核對完整清單，隔離反例證明來源／ledger／額外檔案改動都拒絕；CI 亦加入核對。UPM lock 為 embedded，建置指紋納入嵌入來源與 UPSTREAM.json，詳見 TRANSPORT_PATCH。
+
+真正 Editor 新增三項 admission／姿態快取測試及一項 Windows 原生 NetworkDriver 小佇列強制斷線回歸，合計 **29 項 EditMode 全通過，零失敗／零跳過**。最初 coroutine 測試誤用 Temp allocator，已改為 Persistent 後重驗。第一次 Desktop 建置遇到 PlayerDataCache 目錄存取失敗，保留 `unity-reconnect-desktop-first-failure.log`；未刪快取／改權限，重新執行同一建置後成功。SDK 診斷補上真正已匯入的 UnityEngine.TestRunner DLL 與直接 Transport 參考，Android／Windows 均通過 11 runtime／8 test 來源型別編譯；它不執行測試，也不驗證嵌入 Transport 原生行為。
+
+Windows／Quest 最終成功 receipt 的來源指紋同為 `d6baeb56101bc7adea85f4173d3e0a31788f1d5546ff6a2ab872a789ff242a20`；scene file ID `1444571642`、prefab file ID `5227825248646244841` 保持，未重建場景。Prepare 在保存的 Arena 上將 NGO 16 升至 17。Windows 完成 UTC 11:56:05，Quest 完成 UTC 12:13:46；APK **45,987,512 bytes**、SHA-256 `a1d790645afab03bb9bb389e2856bf4392e4ee5daf2fb9b853504be7188fbccf`，v2 簽章、com.vrcommand.quest、版本 0.17.0／17、minSdk 32／targetSdk 35、六份 ARM64 native library 及 IL2CPP ELF64 AArch64 核對通過。這是 Development 建置，沒有頭盔安裝／執行證據。
+
+新 `check-unity-admission.py` 使用自己的 API／資料／憑證與真正 Windows UDP／NGO server 加 clients，八項入場／撤銷／重連／End 斷言全過。無圖形場 `20261029-195957-8a81f78a` 封存 **369 幀**；實際視窗場 `20261029-200137-a3569013` 封存 **1648 幀**。互動場在原 PID 23396 重新配票後點 Reconnect，再以 Space 射擊、W 前進 **0.65 公尺**；強制結束玩家程序、等真正 transport-left 回呼後重啟同 admission，權威位置仍為 **(25, 1.65, -2.35)**，健康 **60**、彈匣 **29**、備彈 **90** 均相同。統計耗彈 1／中彈 2／傷害 40；pendingTelemetry=false、末幀回放與報表一致、活動場次 0。全部是 Simulation／Simulated rig，沒有注入姿態或戰鬥 RPC。
+
+第一個修正後試跑曾完成封存卻因工具 finally 使用不同 End commandId 得到 409，CLI 失敗，不能算完整通過。已統一 End ID，清理路徑容許失敗回覆並停止所有自有程序；僅清理該隔離 fixture 程序，再以上述兩個全新場重驗成功。正常 Independent／Linked 連線亦回歸通過，目錄分別 `20261029-200542-b9edbf40`／`20261029-200557-c2c87ae6`，各 **113 幀**，最大來源年齡 **0.572172／0.48822 秒**，維持原 1.5 秒門檻。這只是本機該次量測，不能當跨機 LAN 或 25 台 SLA。
+
+完整機器可讀驗證在 `artifacts/reconnect-ui/validation.json`；原始日誌、失敗及截圖保留於忽略的 artifacts。ProjectBuilder 的較窄 Editor SDK 圖亦重新通過 947 來源／13 組件及移除 MetaQuestSupport 的編譯失敗反例，仍不含 URP 專用驗證分支。未變更後端／管理 Web UI，未混算歷史 .NET／Chromium 結果；末端原預覽 5080／PID 52992 仍回 health ok／API 0.16，本輪未換 DLL 或資料。操作見 [RECONNECT.md](RECONNECT.md)，一般練習場見 [DESKTOP.md](DESKTOP.md)。下一步為五場同時獨立與圖形聲光／操作員控制；跨機網路、server 崩潰恢復、Quest／VIVE、MR、硬體及 25 台仍待分別驗收。
+
 ## 2026-10-29：可操作電腦練習場、瞄準與真實視窗射擊統計
 
 上一輪 990b946／1b4f3a7 已完成真正 Unity 建置與雙 client 無圖形驗證，屬於具體進展。本輪依使用者「目前沒有頭盔，先繼續電腦端」從乾淨 1b4f3a7 接續，不縮減完整 11 項需求。沒有登入、SDK 重裝或頭盔操作。

@@ -4,9 +4,9 @@
 
 依 2026-10-29 的使用者指示，**優先開發 Meta Quest 3**，暫以 Android 獨立執行為工作假設；VIVE 延後接入，共用架構與原始雙平台目標保留。
 
-目前為 **v0.16 天氣聲光與 Unity 連線原型**。Hub 授權確認後，真正 Editor 已完成 Prepare、25 項 EditMode、Windows 播放器及首輪 ARM64／IL2CPP Quest APK。兩個真正 Windows client 已與 Unity server 連線，取得 AI 傷害、世界／統計封存與回放一致證據；另有真正視窗的瞄準、射擊／擊殺／命中率、換彈與暫停證據，可用 [電腦練習場](docs/DESKTOP.md) 直接操作；觀戰排隊修正與驗證範圍見 [NATIVE_VALIDATION.md](docs/NATIVE_VALIDATION.md)。Unity wire protocol 仍 16。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人驗收**。所有桌面示範頭手仍為 Simulation，完整 11 項保持開發中。
+目前為 **API v0.16／Unity 遊戲端 v0.17 原型**。真正 Editor 已完成 Prepare、29 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 17，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
 
-較早的 [managed SDK 檢查](docs/UNITY_SDK_CHECK.md) 仍可補充 API／直接參考診斷，其本身不執行 Unity 或產出播放器；目前較強的真正 Editor、ILPP、21 項測試及 binary 結果以上段與 NATIVE_VALIDATION 為準。
+較窄的 [managed SDK 檢查](docs/UNITY_SDK_CHECK.md) 仍可補充 API／直接參考診斷，其本身不執行 Unity 或產出播放器；目前較強的真正 Editor、29 項測試及 binary 結果以 PROGRESS 為準。
 
 ## 開發位置
 

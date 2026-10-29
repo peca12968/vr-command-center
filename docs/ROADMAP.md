@@ -7,20 +7,20 @@
 | 階段 | 交付 | 通過條件 | 目前狀態 |
 |---|---|---|---|
 | M0 專案與管理核心 | F 槽原始碼、私人 GitHub、需求追蹤、五房場次與任務 API、CI | 可重現建置、核心與 HTTP 驗證、推送成功 | 本機與推送完成；一次 Linux 建置／核心／HTTP 通過，瀏覽器列序斷言已修正並本機通過；修正提交的雲端 CI 再次受帳務限制未啟動 |
-| M1 場次控制與事件基礎 | 主控／房間權限、準備／開始／暫停／結束狀態、命令與事件、統計核心 | 五房隔離、權限、去重、狀態遷移、紀錄恢復測試 | 管理／統計核心、SQLite 追加、JSON 升級與模擬來源已驗證；建立／加入／離開可持久去重，v2 票券與移除／配票按每次 admission fence；API／SQLite／瀏覽器已驗證，Unity 連線撤銷來源碼待實測 |
-| M2 Quest 3 優先的遊戲垂直切片 | Unity 工程、Quest Android profile、基本移動／互動與共同場景；再接入 VIVE | Quest 3 實機操作及雙玩家互見；之後驗證混合頭盔、校正與定位 | 真正 Editor 已通過 UPM／ILPP／資產匯入、25 項 EditMode、Windows 與 ARM64／IL2CPP Quest APK；兩平台來源 fingerprint／網路識別一致。無頭盔，依使用者指示先繼續 PC；雙 Quest 操作與混合裝置待驗 |
+| M1 場次控制與事件基礎 | 主控／房間權限、準備／開始／暫停／結束狀態、命令與事件、統計核心 | 五房隔離、權限、去重、狀態遷移、紀錄恢復測試 | 管理／統計核心、SQLite 追加、JSON 升級與模擬來源已驗證；建立／加入／離開可持久去重，v2 票券與移除／配票按每次 admission fence；API／SQLite／瀏覽器已驗證；真正 Windows 另通過重複連線拒絕、移除撤銷、同 ID 新 admission、舊 fence／票券拒絕與同次入場強制斷線恢復 |
+| M2 Quest 3 優先的遊戲垂直切片 | Unity 工程、Quest Android profile、基本移動／互動與共同場景；再接入 VIVE | Quest 3 實機操作及雙玩家互見；之後驗證混合頭盔、校正與定位 | 真正 Editor 已通過 UPM／ILPP／資產匯入、29 項 EditMode、Windows 與 ARM64／IL2CPP Quest APK；兩平台來源 fingerprint／網路識別一致。無頭盔，依使用者指示先繼續 PC；雙 Quest 操作與混合裝置待驗 |
 | M3 軍事戰鬥與 AI | 武器、傷害、健康、敵軍尋路／攻擊、操作員覆寫、HUD | 伺服器判定一致、AI 可控、事件與統計相符 | Windows server 加兩個 desktop client 已通過獨立／跨房 Simulation AI 傷害、暫停、封存及回放統計；真正視窗已完成方向鍵／Space／滑鼠射擊、擊殺／命中率、換彈及暫停；正式美術、完整操作組合、追蹤及實機戰鬥待驗 |
 | M4 任務與場景編輯 | 任務視覺編輯器、版本、物件擺設、天氣／日夜／雷電即時控制 | 儲存重載一致、獨立／全館環境正確同步 | 任務版本、2D 配置及環境／AI 控制已有核心／HTTP／瀏覽器證據；Unity 場景／音訊／Shader 匯入與 Storm／Night PC 任務運行通過。圖形擺設、聲光同步、碰撞／MR 校正及頭盔待驗 |
-| M5 觀戰、回放與報表 | 自由／跟隨鏡頭、書籤、快照與事件回放、逐玩家統計 | 即時觀戰、跳轉倍速、回放與結束統計一致 | 持久世界、SSE／回放、書籤及統計已有核心／瀏覽器證據；真正 PC 雙客戶端世界發布／封存通過，修正約 12 秒排隊後本機取樣最大來源年齡獨立 0.46 秒、Linked 0.42 秒。無實際頭手、GPU 或 25 台證據 |
-| M6 硬體與場館驗收 | 廠商轉接器、MR 場地、斷線恢復、25 人完整任務 | 混合頭盔與實體硬體完整任務、效能紀錄、部署手冊 | 待資料、設備與前述階段 |
+| M5 觀戰、回放與報表 | 自由／跟隨鏡頭、書籤、快照與事件回放、逐玩家統計 | 即時觀戰、跳轉倍速、回放與結束統計一致 | 持久世界、SSE／回放、書籤及統計已有核心／瀏覽器證據；真正 PC 雙客戶端世界發布／封存通過，修正約 12 秒排隊後本機取樣最大來源年齡最新獨立 0.572 秒、Linked 0.488 秒；實際頭手、完整觀戰 GPU 操作及 25 台待驗 |
+| M6 硬體與場館驗收 | 廠商轉接器、MR 場地、斷線恢復、25 人完整任務 | 混合頭盔與實體硬體完整任務、效能紀錄、部署手冊 | PC 同 admission 斷線恢復已有證據；跨機／server 崩潰、MR、硬體與 25 台仍待 |
 
 ## 下一個開發順序
 
-1. 使用者目前無頭盔，Windows 可操作練習場及射擊／擊殺／命中率端到端已有證據；接續 PC 重連／撤銷、五場同時隔離及圖形聲光／控制操作。保留無圖形獨立／Linked smoke 作為連線回歸，見 DESKTOP。
-2. 驗證 PC 重入／票券撤銷、斷線與補送；避免分平台重建場景，維持相同網路識別。Prepare、25 Tests、Desktop／Quest 已有真正成功結果，SDK／授權不再是目前阻礙。
+1. 使用者目前無頭盔，先推進五場同時獨立、圖形聲光／擺設與操作員控制。Windows 可操作射擊／擊殺／命中率及同 admission 重連已有證據，見 DESKTOP／RECONNECT。
+2. 擴大跨機網路、異常中斷及補送驗收，維持 admission fence、防瞬移與 Simulation。避免分平台重建場景，Prepare、29 Tests、Desktop／Quest 已有真正成功結果；嵌入 Transport 修正須保留來源雜湊與原生回歸。
 3. 取得 Quest 後驗證控制器／追蹤中斷、雙玩家互見、聲光／效能與封存；之後進行 MR、VIVE、廠商硬體及 5／10／25 人分階段驗收。合成姿態維持 Simulation。
 4. GitHub 雲端待帳務允許後再驗證完整執行結果；不改帳務、不重跑已知無法啟動的工作。
 
-管理介面在 `/console/`；完整結果見 [DESKTOP.md](DESKTOP.md)、[NATIVE_VALIDATION.md](NATIVE_VALIDATION.md) 及 PROGRESS。上一輪共用發布器修正後通過 472 核心、369 HTTP、43 世界串流及 21 項 EditMode，Release 0 警告／0 錯誤。本輪 Unity 增為 25 項全過，新增真正 GPU 視窗操作、空場與獨立／Linked 原生回歸；沒有重跑或混算舊 .NET／Node／Chromium 結果。Windows／Quest Development 建置同源成功，仍無頭盔／25 台驗收。wire 16、場次 envelope 6／世界 schema 1 保持；編譯並行曾超過快照年齡門檻，不宣稱所有負載達標。
+管理介面在 `/console/`；完整結果見 [DESKTOP.md](DESKTOP.md)、[RECONNECT.md](RECONNECT.md)、[TRANSPORT_PATCH.md](TRANSPORT_PATCH.md) 及 PROGRESS。本輪 29 項真正 EditMode、無圖形／視窗各八項 admission 檢查、獨立／Linked 回歸及 Windows／Quest 同源建置成功。視窗場強制離線後保留走離出生點 0.65 公尺的位置與健康／彈藥，1648 幀封存且回放一致。API 0.16／場次 envelope 6／世界 schema 1 保持；Unity v0.17／NGO 17 需全體遊戲程序同版。未重跑或混算歷史 .NET／Node／Chromium；頭盔／25 台待驗，編譯並行曾超過快照門檻，不宣稱所有負載達標。
 
 不先承諾日程與成本；取得團隊規模、素材來源、頭盔型號、場地與協議後才能估算。每次交付更新 `PROGRESS.md`，有可驗證成果再更新本表。

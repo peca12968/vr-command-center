@@ -46,9 +46,10 @@ namespace VrCommand.Unity.Editor
             var bootstrap = network == null ? null : network.GetComponent<VenueBootstrap>();
             var manager = network == null ? null : network.GetComponent<NetworkManager>();
             if (state == null || state.GetComponent<UnityWeatherView>() == null || bootstrap == null || manager == null
-                || bootstrap.sceneAuthority != state.GetComponent<SceneAuthority>() || manager.NetworkConfig.ProtocolVersion != 16
+                || bootstrap.sceneAuthority != state.GetComponent<SceneAuthority>() || (manager.NetworkConfig.ProtocolVersion != 16 && manager.NetworkConfig.ProtocolVersion != 17)
                 || manager.NetworkConfig.PlayerPrefab == null)
                 throw new BuildFailedException("Generated arena is incompatible. Rebuild Arena, then rebuild ALL player targets together.");
+            manager.NetworkConfig.ProtocolVersion = 17;
             RequireNetworkIdentity(state.GetComponent<NetworkObject>());
             RequireNetworkIdentity(manager.NetworkConfig.PlayerPrefab.GetComponent<NetworkObject>());
             if (PrefabUtility.SavePrefabAsset(manager.NetworkConfig.PlayerPrefab) == null)
@@ -70,8 +71,8 @@ namespace VrCommand.Unity.Editor
         {
             PlayerSettings.companyName = "VR Command";
             PlayerSettings.productName = "VR Command Quest";
-            PlayerSettings.bundleVersion = "0.16.0";
-            PlayerSettings.Android.bundleVersionCode = 16;
+            PlayerSettings.bundleVersion = "0.17.0";
+            PlayerSettings.Android.bundleVersionCode = 17;
             PlayerSettings.insecureHttpOption = InsecureHttpOption.DevelopmentOnly;
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, "com.vrcommand.quest");
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
@@ -151,7 +152,7 @@ namespace VrCommand.Unity.Editor
             var manager = network.GetComponent<NetworkManager>();
             var bootstrap = network.GetComponent<VenueBootstrap>();
             manager.NetworkConfig = new NetworkConfig { NetworkTransport = network.GetComponent<UnityTransport>(), TickRate = 30,
-                ConnectionApproval = true, EnableSceneManagement = true, ForceSamePrefabs = true, ProtocolVersion = 16 };
+                ConnectionApproval = true, EnableSceneManagement = true, ForceSamePrefabs = true, ProtocolVersion = 17 };
             manager.NetworkConfig.PlayerPrefab = CreateAvatar(avatarMaterial, steel);
             var list = AssetDatabase.LoadAssetAtPath<NetworkPrefabsList>(Generated + "/NetworkPrefabs.asset");
             if (list == null)
@@ -250,9 +251,10 @@ namespace VrCommand.Unity.Editor
             var project = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
             var files = Directory.GetFiles(Path.Combine(project, "Assets/VrCommand"), "*", SearchOption.AllDirectories)
                 .Concat(Directory.GetFiles(Path.Combine(project, "Packages/com.vrcommand.simulation"), "*", SearchOption.AllDirectories))
+                .Concat(Directory.GetFiles(Path.Combine(project, "Packages/com.unity.transport"), "*", SearchOption.AllDirectories))
                 .Where(file => file.EndsWith(".cs", StringComparison.Ordinal) || file.EndsWith(".asmdef", StringComparison.Ordinal))
-                .Concat(new[] { Path.Combine(project, "Packages/manifest.json"), Path.Combine(project, "Packages/packages-lock.json"), Path.Combine(project, "ProjectSettings/ProjectVersion.txt") })
-                .OrderBy(file => file, StringComparer.Ordinal);
+                .Concat(new[] { Path.Combine(project, "Packages/manifest.json"), Path.Combine(project, "Packages/packages-lock.json"), Path.Combine(project, "Packages/com.unity.transport/UPSTREAM.json"), Path.Combine(project, "ProjectSettings/ProjectVersion.txt") })
+                .OrderBy(file => Path.GetRelativePath(project, file).Replace('\\', '/'), StringComparer.Ordinal);
             using (var memory = new MemoryStream())
             using (var writer = new BinaryWriter(memory))
             using (var hash = SHA256.Create())

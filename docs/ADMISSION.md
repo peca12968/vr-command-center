@@ -2,7 +2,7 @@
 
 玩家 ID 是邏輯玩家，每次加入則有獨立 admissionId。離場後即使以相同 ID、房間及席位重新加入，先前票券仍保持撤銷；舊移除操作也不能套用到新入場。API、持久資料、共用 ArenaSession 與 Unity 接入來源碼使用同一識別。
 
-本輪已驗證 .NET 核心、SQLite 重啟、真實 HTTP、原始世界發布／回放與瀏覽器。**Unity 接入尚未編譯／運行**；Prepare 仍退出 198，沒有 APK、Quest／VIVE 或 25 台效能結果。這不是裝置身分認證或完整的伺服器崩潰恢復。
+原 v0.14 已驗證 .NET 核心、SQLite 重啟、真實 HTTP、世界發布／回放與瀏覽器。後續真正 Editor 已通過 29 項 EditMode、Windows／Quest 同源建置；v0.17 真正 Windows client 已驗證重複連線、移除撤銷、相同 ID 新 admission、舊 fence／票券拒絕、原程序重新配票及強制斷線後同 admission 恢復，見 [RECONNECT.md](RECONNECT.md)／PROGRESS。沒有 Quest／VIVE、25 台或完整 server 崩潰恢復證據；舊 Prepare 198 僅為歷史。
 
 ## 身分與持久化
 
