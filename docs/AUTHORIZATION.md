@@ -38,7 +38,7 @@ OperatorKeys__GameServer
 
 簽章鑰預設以隨機 32 bytes 建立，Base64 保存於 `DataDirectory` 父目錄的 `player-ticket-signing.key`，例如 API 專案預設 `data/player-ticket-signing.key`。實際位置以任務資料路徑為準，與 `OperatorKeyFile` 的位置無關。可透過 `PlayerTicketSigningKey` 配置至少 32 bytes 的 Base64 鑰匙。鑰匙依賴主機檔案權限，不能放入 Unity 或 Git；備份與部署需保留，換鑰重啟會使舊票券失效。票券本身不保存於場次事件。
 
-v0.14 每次入場有獨立 admissionId，v1 券全部拒絕並須重發。驗票需 protocolVersion:2；配票及新的 HTTP 移除需 If-Match-Admission。v2 不做一次性消耗，期限限制入場驗證。Unity 已接管理輪詢後的 epoch 撤銷來源碼，正常目標 0.5 秒、管理過期 1.5 秒暫停，但尚未編譯／實測；驗票成功不是傳輸加密、設備證明或頭盔驗收。GameServer 身分仍可跨場讀取，部署收斂待做。完整規範見 ADMISSION.md。
+v0.14 每次入場有獨立 admissionId，v1 券全部拒絕並須重發。驗票需 protocolVersion:2；配票及新的 HTTP 移除需 If-Match-Admission。v2 不做一次性消耗，期限限制入場驗證。Unity 已接管理輪詢後的 epoch 撤銷來源碼，正常目標 0.5 秒、管理過期 1.5 秒暫停，原生 PC 撤銷／重連及五房控制台範圍已有驗證，見 RECONNECT／DESKTOP_VENUE；上述時間仍不是跨機 SLA。驗票成功不是傳輸加密、設備證明或頭盔驗收。GameServer 身分仍可跨場讀取，部署收斂待做。完整規範見 ADMISSION.md。
 
 ## 事件與復原
 

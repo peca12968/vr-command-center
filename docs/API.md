@@ -2,7 +2,7 @@
 
 v0.16 世界 header 新增選用 `environmentVersion`（0 legacy／1 時間重現），未知版本或改動既有版本拒絕；舊回應補 0，原始持久 header 不改寫。新來源、API 與 UI 協同更新，見 [ENVIRONMENT.md](ENVIRONMENT.md)。管理命令路由不變。
 
-REST、UTF-8 JSON；預設範例地址 `http://127.0.0.1:5080`。列舉使用字串，不接受數字列舉。提供管理、統計與短效入場票券；姿態不經此 API。Unity 遊戲來源碼尚待編譯／運行。所有 `/api` 呼叫須帶 `Authorization: Bearer <credential>`；配置與角色表見 [AUTHORIZATION.md](AUTHORIZATION.md)。
+REST、UTF-8 JSON；預設範例地址 `http://127.0.0.1:5080`。列舉使用字串，不接受數字列舉。提供管理、統計與短效入場票券；姿態不經此 API。Unity v0.17／NGO 17 已真正建置，PC 連線、撤銷／重連及五房證據見 PROGRESS；頭盔仍待驗。所有 `/api` 呼叫須帶 `Authorization: Bearer <credential>`；配置與角色表見 [AUTHORIZATION.md](AUTHORIZATION.md)。
 
 瀏覽器介面 `/console/` 的操作見 [CONSOLE.md](CONSOLE.md)。靜態介面可匿名載入，資料與操作仍經下列已認證 API。v0.15 新增不可變任務修訂、metadata 歷史與 latest library；舊版本及既有場次不被改動，規範與資料遷移見 [MISSION_VERSIONS.md](MISSION_VERSIONS.md)。
 
@@ -51,27 +51,27 @@ REST、UTF-8 JSON；預設範例地址 `http://127.0.0.1:5080`。列舉使用字
 
 `headset` 可為 `Quest3`、`ViveXr`。此資料由呼叫者提供，目前不會確認設備實際連線，也不會偵測離線；名額需明確呼叫離開或結束場次釋放。伺服器配發每房 `seat` 0–4，回傳名冊中的席位不因其他玩家離開而改變；呼叫者不能選擇席位。
 
-建立場次進入 `Preparing`，此時才可加入玩家。開始後可離開但不能新增／重新加入玩家；重連與保留席位將在遊戲接入階段實作。`Begin` 至少需要一名玩家，尚未要求每房滿額或設備準備完成。
+建立場次進入 `Preparing`，此時才可加入玩家。開始後可離開但不能新增／重新加入名冊；仍在名冊的同次 admission 可重新配票及傳輸重連，見 RECONNECT。`Begin` 至少需要一名玩家，尚未要求每房滿額或設備準備完成。
 
-控制命令、狀態圖、去重／版本語意與事件格式見 [SESSION_PROTOCOL.md](SESSION_PROTOCOL.md)。新命令使用 `Begin`、`Pause`、`Resume`、`End`、`SetEnvironment` 或 `SetEnemies`。Unity 狀態／環境接入程式尚待編譯；AI 與硬體尚未接入。
+控制命令、狀態圖、去重／版本語意與事件格式見 [SESSION_PROTOCOL.md](SESSION_PROTOCOL.md)。命令使用 `Begin`、`Pause`、`Resume`、`End`、`SetEnvironment` 或 `SetEnemies`。Unity PC 狀態／環境與 AI 已有原生執行證據；廠商硬體待文件與設備。
 
 已處理的輸入錯誤回傳 400、認證失敗 401、權限不足 403、找不到任務／場次／玩家 404、房間占用／玩家重複／人數超限 409。領域錯誤 JSON 為 `{ "error": "原因" }`；JSON 語法與模型繫結錯誤由 ASP.NET Core 處理，回應內容格式可能不同。無法解析的 GUID 路徑因路由限制回傳 404。
 
-任務時間範圍 60–14400 秒；敵軍數量 0–100；物件最多 500。這些是原型輸入範圍，尚非實機效能承諾。環境可設定 `VR`／`MR`、`Clear`／`Rain`／`Fog`／`Storm`、`Day`／`Night` 及 `lightning` 布林值；可藉命令更新場次設定並留下事件。v0.16 瀏覽器雨線／雷聲／光霧已有 Simulation 驗證，Unity 接入來源及單一天氣元件 SDK 型別檢查已完成，整個工程／MR／頭盔仍待驗。
+任務時間範圍 60–14400 秒；敵軍數量 0–100；物件最多 500。這些是原型輸入範圍，尚非實機效能承諾。環境可設定 `VR`／`MR`、`Clear`／`Rain`／`Fog`／`Storm`、`Day`／`Night` 及 `lightning` 布林值；可藉命令更新場次設定並留下事件。v0.16 瀏覽器雨線／雷聲／光霧已有 Simulation 驗證，真正 Unity 已完成編譯／匯入／Windows／Quest 建置，PC 已執行不同房間環境；圖形聲光完整操作、MR 與頭盔仍待驗，見 ENVIRONMENT／PROGRESS。
 
 ## 玩家票券
 
-配發端點無 body，回傳 `{ "ticket": "<opaque>", "expiresAtUtc": "<UTC>" }`。配發不消耗事件序號，重試會產生另一份票券。主控可配發任意本場玩家，房間控制台限自己的玩家；GameServer 無配發權。Preparing、Running、Paused 可配發，Ended 回傳 409。
+配發端點無 body，必須帶 `If-Match-Admission: <目前 admissionId>`，回傳 `{ "ticket": "<opaque>", "expiresAtUtc": "<UTC>" }`。配發不消耗事件序號，重試會產生另一份票券。主控可配發任意本場玩家，房間控制台限自己的玩家；GameServer 無配發權。Preparing、Running、Paused 可配發，Ended 回傳 409。
 
 遊戲伺服器帶 GameServer Bearer 呼叫驗證端點：
 
 ```json
-{ "sessionId": "<場次 GUID>", "ticket": "<玩家提供的票券>" }
+{ "sessionId": "<場次 GUID>", "ticket": "<玩家提供的票券>", "protocolVersion": 2 }
 ```
 
-成功回傳 `{ "sessionId": "<GUID>", "playerId": "<GUID>", "roomId": 1, "seat": 0 }`。票券格式／簽章／到期／跨場次錯誤、玩家已離開或場次已結束回傳 403；缺少 API 憑證仍為 401。票券不具有 REST 權限，頭盔不應取得 GameServer 憑證或直接呼叫此端點。
+成功回傳 sessionId、playerId、roomId、seat、admissionId、throughSequence 及 expiresAtUtc。票券格式／簽章／到期／跨場次錯誤、玩家已離開或場次已結束回傳 403；缺少 API 憑證仍為 401，缺少驗票 protocol 2 為 400。票券不具有 REST 權限，頭盔不應取得 GameServer 憑證或直接呼叫此端點。
 
-票券不是一次性：目前仍在名冊且未到期可再次驗證。同一玩家離開後又以相同 ID／房間加入，舊未到期票券可能再次有效；尚無每次加入的撤銷版本。Unity 伺服器有同一玩家同時重複連線拒絕程式，仍待運行驗證。移除玩家不會自動斷開現有 Unity 連線。詳見 [QUEST3.md](QUEST3.md)。
+票券不是一次性：目前仍在同一 admission 且未到期可再次驗證。相同 ID／房間重新加入會產生新 admission，舊未到期票券保持撤銷；移除後 Unity 重新取得管理快照會斷開舊連線，亦拒絕同一玩家同時重複連線。PC 原生撤銷／重連已驗證，詳見 [ADMISSION](ADMISSION.md)／[RECONNECT](RECONNECT.md)；不是頭盔或裝置認證證據。
 
 ## 相容性
 

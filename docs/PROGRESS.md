@@ -1,5 +1,25 @@
 # 開發進度
 
+## 2026-10-29：五房同時獨立、房間重用與之後的全館連線
+
+上一輪已交付 PC 撤銷／重連，本輪從乾淨 `b36ac5d` 接續使用者「先繼續電腦端」，完整 11 項與 Quest／VIVE 目標保持開發中。新增 `scripts/start-desktop-venue.py`：自己的 API／七份臨時控制台與來源憑證、五個獨立任務、五個真正 Windows Unity server、每房一個真正 client，使用不同 UDP 埠及持久來源。可選一個房間顯示玩家視窗，其餘背景運行，控制台 URL／room/session/port／PID 存於 ready.json；玩家只有短效票券，所有頭手與戰鬥來源均為 Simulation。
+
+新增 `--check` 原生流程，不注入戰鬥或姿態：五房不同天氣／日夜、敵軍 1–5、不同數量與角度的沙包／油桶，核對真正保存的世界、幾何及名冊。逐房控制台僅列自己的場次，跨房快照／統計／world／watch／Pause 全拒絕；有效 room-1 券送到 room-2 真正 server 亦拒絕。Room1 更新 Storm／Night／雷電及六名 Advance／autoAttack 敵軍，取得確認傷害後暫停，其他四房仍 Running、tick 前進且環境／AI／健康不變。
+
+結束 room-1 後只釋放該房，其餘四房繼續；保留原統計與錄製並在房間 1 開新獨立場。四房仍占用時，全館 Linked 建立回 409。六個獨立歷史場次都精確封存後，Master 以一份任務新開五房 Linked、一個權威 server 加五個 client；舊獨立票券在仍未過期時拒絕，名冊使用新 admission。房間控制台不可 Begin／修改整個 Linked 環境，Master 控制通過。Linked 確認 AI 傷害、共同暫停 tick 凍結、End 與回放統計一致；七場保留不同 stream，最後活動數 0。這是新開共享世界，不合併舊世界或舊報表。
+
+首次 F 槽全資料試跑落後 **13.996307 秒**，維持原 1.5 秒門檻而失敗；每程序兩個 job worker 的修正後試跑仍落後 **13.350486 秒**，移除物件的診斷也累積到約 23 秒，不能稱為成功。F 實際為 Seagate One Touch Hub／USB，C 為 Kingston NVMe；24 次 4 KiB flush+fsync 短測平均 F **17.166 ms**、C **1.754 ms**，支持同步持久寫入吞吐不足的判斷，並非完整磁碟／全負載保證。未關閉 flush、降低錄製頻率、丟棄幀、提高門檻、移除正式擺設或修改安全設定。
+
+工具新增明確 `--runtime-root`。本輪使用 C 槽本機 AppData 下全新隔離目錄保存 SQLite／journal；程式碼、播放器、設定與證據目錄仍在 F 槽，沒有搬動原 5080 或既有資料。未指定時仍使用 F artifacts，不能宣稱 USB 配置已通過五房新鮮度。全部自有寫入程序停止後，才將 runtime 完整複製回 F 的 runtime-snapshot，保留 SSD 原件；逐檔 SHA-256 與來源一致。每程序兩個 job worker 是明確記錄的配置，並非延遲修復的單獨證據，官方參數見 DESKTOP_VENUE。
+
+第一次兩 worker 探索因工具新增量測分支縮排錯誤而失敗，清理也被同一非預期例外中斷。已先查核該隔離 API 五場 End／世界全部封存，保存 manual-cleanup-seals，再僅停止該 fixture 的十個 native 與 API，未動正式預覽。現收尾各場獨立容錯、最外層 finally 一律停止自有程序；注入非預期 End／seal 例外的實際子程序守衛也通過。任何清理／快照錯誤均非零退出，不把該失敗試跑算成通過。
+
+SSD 第一輪 `20261029-204334-40372c18` 七場封存幀數為 **63／95／99／104／109／56／65**，最大量測來源年齡 **0.195271 秒**。補上幾何精確位置、舊券尚未到期、新 admission、空來源統計及清理守衛後，最終 `20261029-204521-bf4bf7ff` 再完整通過：幀數 **53／85／89／98／104／60／64**，七場回放／報表一致，最大來源年齡 **0.275004 秒**，活動數 0。六個斷言群組涵蓋上述原生流程；不是 25 人或跨機效能數字。
+
+一般可操作模式 `20261029-204600-12e42550` 也實測：computer-use 選取真正玩家視窗，看到 Running／Room1／100 血量／30/90 彈藥與場景；關閉標題列按鈕後，工具自動 End 五場，各封存 **797／801／810／814／815 幀**，合計 **4037 幀**、回放統計一致、活動數 0，CLI 退出 0。此輪只驗證可操作視窗啟動與關窗，不重複宣稱測過射擊或五房觀戰圖形。截圖為 artifacts/venue-ui/room1-running.png。
+
+機器可讀驗證在 `artifacts/venue-ui/validation.json`：三次成功 runtime-snapshot 與 SSD 原件逐檔一致、cleanup 零錯誤／零剩餘程序；播放器 receipt 指紋仍為 `d6baeb56101bc7adea85f4173d3e0a31788f1d5546ff6a2ab872a789ff242a20`，舊 receipt 反例在建立場次前拒絕。此次未改 C#／後端／管理 Web UI，不重建同源播放器，也不混算歷史 29 EditMode／.NET／Chromium。文件同步修正 API 舊票券範例及過時驗證狀態。下一步為圖形聲光／擺設、操作員控制與觀戰操作驗收，後續仍須跨機、Quest／VIVE、MR、廠商硬體及 25 台。操作見 [DESKTOP_VENUE.md](DESKTOP_VENUE.md)。
+
 ## 2026-10-29：電腦重連、入場撤銷與 Windows UDP 接收修正
 
 從乾淨 `2601c7d` 接續使用者「沒有頭盔，先繼續電腦端」。本輪遊戲端升為 **v0.17.0／Android code 17／NGO protocol 17**；API 仍為 0.16.0、驗票 protocol 2、場次 envelope 6／世界 schema 1 不變。所有遊戲 server／client 須一起更新，不混用 NGO 16／17。完整 11 項及 VIVE／Quest 相容目標仍開發中。

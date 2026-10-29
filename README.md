@@ -10,6 +10,8 @@
 
 ## 開發位置
 
+已新增 [五房電腦場館](docs/DESKTOP_VENUE.md)：五個真正 Windows server／每房一個 client 同時獨立、單房結束與重用、全部封存後另開 Linked，回放統計一致。這是在明確 SSD runtime 配置下的本機 Simulation；F 槽 USB 硬碟全資料配置未達原新鮮度門檻，程式碼與建置仍在 F 槽。完整證據見 PROGRESS，仍無 25 台或頭盔驗收。
+
 - GitHub：<https://github.com/peca12968/vr-command-center>（私人）
 - 本機：`F:\Projects\vr-command-center`
 - 長期目標與階段驗收：[ROADMAP.md](docs/ROADMAP.md)
