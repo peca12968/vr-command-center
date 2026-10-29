@@ -16,6 +16,8 @@ Android／Windows 與最終 --offline 重跑均通過，零錯誤；完整重建
 
 文件已同步至 UNITY_SDK_CHECK、QUEST3、README、ROADMAP、REQUIREMENTS 與 AGENTS。管理服務 5080 當下 PID 17748、API 0.16.0／health 正常；沒有停止、換資料庫或新建場次。本輪未變更業務／UI，因此沒有重跑 v0.16 的 1023 項管理／模擬／瀏覽器檢查，該結果仍只是上一輪證據。下一主線仍為有效 Editor 授權、真正 Prepare／18 Tests／Desktop／Quest 及雙 Quest 實測；本輪可重複的完整 runtime 型別證據不能替代它們。CI 按推送實際結果另記，長期目標保持開發中。
 
+fc44414 已推送，遠端 main 核對相同。CI run 40792806909／check 123181895880 已終止且 steps／logs 為空，annotation 再次明確為近期付款失敗或支出限制，工作未啟動；另有 ubuntu-latest 遷移 notice。沒有雲端通過證據，未修改帳務或重跑受限工作；本機 SDK 檢查結果與範圍如上。
+
 ## 2026-10-29：v0.16 天氣聲光、共用時間規則與舊錄製相容
 
 從乾淨 a3e2dee 接續完整長期目標，Quest 3 仍優先。本輪再次實際執行 Prepare，退出 198，日誌為「No valid Unity Editor license found」，沒有待執行中的建置；未操作登入／安全性提示、重裝已整理的 SDK 或重問已同意的條款。CLI 登入狀態不能單獨否定 Hub 授權，這裡以實際 Editor 結果為準。整個 Unity／NGO／ILPP／Shader／AudioImporter／18 項 EditMode／桌面程式／APK／頭盔均沒有成功證據。
