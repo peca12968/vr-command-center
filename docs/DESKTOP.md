@@ -5,11 +5,15 @@
 先依 QUEST3／NATIVE_VALIDATION 建置 API 與 Desktop，再於專案根目錄執行：
 
 ```powershell
+dotnet restore VrCommand.slnx --locked-mode
+dotnet build VrCommand.slnx --configuration Release --no-restore
 python scripts/start-desktop-demo.py
 # 指定隔離 API 建置，例如：
 # --api-dll artifacts/build-unity-first/bin/VrCommand.Api/release/VrCommand.Api.dll
 # --enemies 1 --peers 1 --duration 900
 ```
+
+啟動器會在建立場次前檢查 API 0.16.0，舊 DLL 會立即提示重新建置；不能只憑檔案存在就當作同版。上方 .NET 建置可更新一般 Release 輸出；若 API 正在鎖住該輸出，改用 SIMULATION 的隔離建置並指定 `--api-dll`，不要為了示範停止既有服務。
 
 啟動器建立自己的本機 API、任務與房間 5，啟動一個無圖形 Unity server、一個可操作玩家視窗，以及預設一個無圖形同伴。敵軍預設 Hold／不自動開火，環境 Clear／Day，含沙包與油桶；方便驗證玩家輸入。`--peers 0..4` 控制同伴數，`--enemies 0..12` 控制敵軍，`--duration 60..1800` 控制練習秒數。這不是五台／25 台效能量測或正式部署。
 

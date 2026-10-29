@@ -24,6 +24,8 @@
 
 功能提交 b080a39 已推送並核對遠端 main 相同。CI run 40860603854／check 123402555735 在任何 step 開始前即結束，steps／logs 為空；annotation 仍明確為近期付款失敗或支出限制，另有 ubuntu-latest 遷移通知。未修改帳務或重跑受限工作，本機實際驗證與雲端未執行分開記錄。
 
+交付前另外實測不帶 --api-dll 的預設命令，發現一般 Release 目錄仍是舊 API，雖能 health 卻無法發布目前世界。新增建立場次前的 API 0.16.0 檢查；舊 DLL 的反例立即拒絕（desktop-demo-stale-api-rejection.log），不以檔案存在當同版。鎖定還原與一般 Release 建置完成、0 警告／0 錯誤後，以預設 API 再成功啟動並收尾（artifacts/desktop-demo/20261029-185350-7c435723）；DESKTOP 已列出完整建置／啟動命令。原預覽仍使用自己的 build-v016 DLL 與原資料，沒有為更新一般輸出停止預覽。這次只更新啟動器及文件，不需重新建置相同 Unity 來源。
+
 操作見 DESKTOP。原始完整目標仍開發中；接續 PC 重連／撤銷、五場同時隔離、圖形聲光與操作員控制驗收，取得設備後再做 Quest／VIVE、MR、硬體與 25 人。當前可繼續 PC 工作，沒有因缺頭盔或 CI 帳務限制宣告整個目標 blocked。
 
 ## 2026-10-29：真正 Unity 建置、穩定跨平台識別與電腦雙玩家驗證
