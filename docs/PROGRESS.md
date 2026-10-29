@@ -1,5 +1,25 @@
 # 開發進度
 
+## 2026-10-29：控制台自訂任務接到真正 PC、圖形環境與原生觀戰
+
+上一輪五房已交付，本輪從乾淨 `9c14d4d` 接續完整 11 項目標。新增 `scripts/start-desktop-control.py`，由操作員在自己的控制台建立／儲存／重載任務、建立 Preparing VR 場次與名冊；工具才啟動真正 Unity server，按 playerId＋admissionId 配發短效票券並啟動 client。開始、暫停、天氣與 AI 仍由控制台發令，不預先代替操作員建立固定任務。只接本工具自己新建 API，拒絕接管 Running／既有 combat source，玩家檔沒有 Master／GameServer key。
+
+動態名冊可啟動新 client、關閉被移除入場的舊 client，並保留離場統計；最終按持久 PlayerJoined 事件分頁核對所有曾入場 ID，不用當前名冊取代歷史。共用 Venue 抽出 receipt／來源驗證及 server 啟動，舊五房工具沿用。operator-status 取自真正已接受世界幀的 phase／tick／環境／AI／連線玩家，持續維持 UTC 來源年齡 1.5 秒門檻。所有世界、頭手及戰鬥來源仍 Simulation。
+
+`tests/browser/check-operator-native.cjs` 只接受本庫隔離目錄及 localhost 非 5080 的 Simulation ready；憑證直接讀自己的檔案進入頁面記憶體，不輸出值、不用正式預覽憑證。它實際透過 UI 配置沙包 (-3,0,0)／15°、油桶 (-1,0,1.5)／90°，儲存後清草稿、重新載入，再選已保存任務開房間 1。真正 native header 的世界座標為沙包 x=-31、油桶 z=1.5，與房間原點一致；兩名 client 以真實票券入場。測試亦在 Preparing 移除 Peer02，啟動 Peer03，最終統計保留三位歷史玩家。
+
+首輪 `20261029-210117-f04e557f` 使用 computer-use 檢視真正 Direct3D 玩家視窗，看到配置、Clear／Day、由控制台改成 Storm／Night 後的暗場與雨線，以及 Pause HUD。原始截圖另複製到 artifacts/operator-ui/native-day.png／native-storm.png／native-paused.png。沒有錄到原生閃電瞬間或驗證雷聲聽感；不能把閃電設定啟用或瀏覽器音效圖當作原生聲光全驗收。此輪瀏覽器測試漏處理 End 確認框，最後 exact-seal 等待失敗，完整瀏覽器流程不算通過；修正對自己測試場確認框的處理後重驗。原場由工具正常 End，2730 幀完整封存、回放統計一致、活動數 0、cleanup 零錯誤，未動其他程序或預覽資料。
+
+最終整合另確認真正世界 Running、Storm／Night／lightning、Paused tick 400 ms 不變、兩名 Advance／autoAttack 敵軍與確認傷害，並從 native recording 的控制台即時俯視、保存鏡頭、切跟隨後讀回位置、倍速與跳至末幀回放。**15 項 UI／native 檢查全過**，不是只檢查管理命令回應。隔離 API 場 `20261029-212125-ef9f8c83` 封存 **92 幀**、最大量測來源年齡 **0.15173 秒**。更新一般 Release 後，以不帶 --api-dll 的預設命令再重驗 `20261029-212436-81187953`：同樣 15 項通過、**94 幀**、最大年齡 **0.170777 秒**；Operator01 中彈 2／耗損 40／健康 60，Peer02 的歷史及 Peer03 均保留。兩場 pendingTelemetry=false、回放末幀／ledger 一致、活動 0。
+
+測試觀戰瀏覽器明確為 Chromium SwiftShader，原生 GPU 畫面是上方獨立的 computer-use 證據；沒有稱瀏覽器已測真實 GPU、實際頭手或頭盔。控制台三處過時提示已更新為目前接入與仍待實機範圍。鎖定還原、隔離／一般 Release 建置都 0 警告／0 錯誤；完整既有瀏覽器回歸 **17 Node 資料＋122 Chromium** 通過，已檢視 artifacts/console/mission-planner.png 及 native-live-overhead 圖。
+
+共用工具改動後，五房原生回歸 `20261029-211936-917f7f56` 也全過：七場 **62／100／104／108／114／56／63 幀**，最大來源年齡 **0.254718 秒**、回放統計一致、活動 0。仍使用明確 SSD runtime，關閉 writer 後複製回 F，與原件逐檔 SHA-256 一致；F USB 硬碟的限制不因本輪通過而解除。整體機器可讀驗證在 artifacts/operator-ui/validation.json，兩個啟動器的舊 receipt 反例均在建立場次前拒絕。
+
+最後補強 UI 檢查器的版本競態：刷新允許已前進的較新序號，控制命令若確實收到 409，才由 UI 重新刷新並提出新操作，不重送已接受命令或移除版本／入場限制。全新預設命令場 `20261029-213239-26180ff6` 再通過 15 項、92 幀、最大來源年齡 0.212172 秒，雙管道精確封存、回放一致、活動 0、cleanup 零錯誤。可操作玩家原始日誌也確認 Direct3D 12 [level 12.2]，與觀戰的 SwiftShader 分開記錄。
+
+Unity C#／NGO 17／bundle 0.17.0 及管理契約未變，沿用同源 fingerprint `d6baeb56101bc7adea85f4173d3e0a31788f1d5546ff6a2ab872a789ff242a20`，沒有為 Python／提示文字重建播放器，也不把歷史 29 EditMode／.NET 規則數字算成本輪新結果。操作見 [DESKTOP_CONTROL.md](DESKTOP_CONTROL.md)。下一步仍有原生完整聲光／碰撞／鏡頭人工操作、軍事美術、跨機部署／效能、Quest／VIVE、MR、硬體與 25 台；本機端到端操作不完成整體驗收。
+
 ## 2026-10-29：五房同時獨立、房間重用與之後的全館連線
 
 上一輪已交付 PC 撤銷／重連，本輪從乾淨 `b36ac5d` 接續使用者「先繼續電腦端」，完整 11 項與 Quest／VIVE 目標保持開發中。新增 `scripts/start-desktop-venue.py`：自己的 API／七份臨時控制台與來源憑證、五個獨立任務、五個真正 Windows Unity server、每房一個真正 client，使用不同 UDP 埠及持久來源。可選一個房間顯示玩家視窗，其餘背景運行，控制台 URL／room/session/port／PID 存於 ready.json；玩家只有短效票券，所有頭手與戰鬥來源均為 Simulation。

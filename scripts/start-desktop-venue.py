@@ -22,6 +22,17 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def verify_player(args):
+    if os.name != 'nt' or not args.player_exe.is_file() or not args.api_dll.is_file():
+        raise RuntimeError('Build the Windows player and API first')
+    spec = importlib.util.spec_from_file_location('native_admission', ROOT / 'scripts/check-unity-admission.py')
+    checker = importlib.util.module_from_spec(spec); spec.loader.exec_module(checker)
+    receipt = json.loads((args.player_exe.parent / 'build-receipt.json').read_text())
+    if receipt.get('schemaVersion') != 1 or receipt.get('target') != 'StandaloneWindows64' or receipt.get('sourceFingerprint') != checker.source_fingerprint():
+        raise RuntimeError('Windows player receipt does not match current sources; build Desktop first')
+    subprocess.run([sys.executable, str(ROOT / 'scripts/check-transport-patch.py')], check=True)
+
+
 class Venue:
     def __init__(self, args):
         self.args = args
@@ -111,6 +122,22 @@ class Venue:
             player = players[room] if players else str(uuid.uuid4())
             state = self.request(f'/api/sessions/{entry["id"]}/players', {'playerId': player, 'roomId': room, 'name': f'PC room {room}', 'headset': 'Quest3'}, role='Room' + str(room))
             entry['players'].append(next(p for p in state['players'] if p['id'] == player))
+        self.start_server(entry)
+        return entry
+
+    def adopt(self, state, name):
+        # Only this fixture's fresh preparing worlds. Never claim a running source
+        # or restart an already bound combat journal as if it were a new world.
+        if state['state'] != 'Preparing' or state['combatStream'] is not None or state['environment']['mode'] != 'VR':
+            raise RuntimeError('The local PC operator helper requires a fresh Preparing VR session with no bound source')
+        entry = {'name': name, 'id': state['id'], 'roomIds': state['roomIds'], 'mission': state['mission'],
+                 'players': [], 'endId': str(uuid.uuid4()), 'sealed': None, 'sourceAges': []}
+        self.rounds.append(entry)
+        self.start_server(entry)
+        return entry
+
+    def start_server(self, entry):
+        name = entry['name']
         while True:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
                 probe.bind(('127.0.0.1', 0)); port = probe.getsockname()[1]
@@ -118,7 +145,6 @@ class Venue:
         self.ports.add(port); entry['port'] = port
         self.launch(name + '-server', {'role': 'Server', 'address': '127.0.0.1', 'port': port, 'sessionId': entry['id'], 'managementApiUrl': self.base,
             'gameServerKey': self.tokens['GameServer'], 'telemetryOrigin': 'Simulation', 'telemetryDirectory': str(self.runtime_directory / (name + '-telemetry'))})
-        return entry
 
     def ticket(self, entry, player):
         invitation = self.request(f'/api/sessions/{entry["id"]}/players/{player["id"]}/join-ticket', {}, admission=player['admissionId'], role='Room' + str(player['roomId']))
@@ -184,7 +210,17 @@ class Venue:
         if statistics['origin'] is None and any(p[field] for p in statistics['players'] for field in ['ammoUsed', 'shotsHit', 'kills', 'hitsReceived', 'damageTaken']):
             raise RuntimeError('Nonempty combat statistics must identify their source')
         if sorted(final['statistics'], key=lambda p: p['playerId']) != sorted(statistics['players'], key=lambda p: p['playerId']): raise RuntimeError('Replay / ledger statistics disagree')
-        if {p['playerId'] for p in statistics['players']} != {p['id'] for p in entry['players']}: raise RuntimeError('Foreign or missing player statistics')
+        expected_players = {p['id'] for p in entry['players']}
+        if entry.get('dynamicRoster'):
+            expected_players, cursor = set(), 0
+            while True:
+                events = self.request(f'/api/sessions/{entry["id"]}/events?after={cursor}&limit=500')
+                if not events: break
+                for event in events:
+                    if event['kind'] == 'PlayerJoined': expected_players.add(event['payload']['id'])
+                if events[-1]['sequence'] <= cursor: raise RuntimeError('Management event history did not advance')
+                cursor = events[-1]['sequence']
+        if {p['playerId'] for p in statistics['players']} != expected_players: raise RuntimeError('Foreign or missing player statistics')
         entry['sealed'] = {'name': entry['name'], 'world': world, 'statistics': statistics, 'replayStatisticsMatch': True,
                            'maximumSourceAgeSeconds': max(entry['sourceAges'], default=None)}
         self.save(entry['name'] + '-sealed.json', entry['sealed'])
@@ -328,13 +364,8 @@ def main():
     parser.add_argument('--job-workers', type=int, choices=range(1,17), default=2, help='Unity job workers per native process; recorded in evidence')
     parser.add_argument('--runtime-root', type=Path, help='Optional SSD directory for fresh isolated SQLite / journals; closed snapshot is copied back to F artifacts')
     args = parser.parse_args()
-    if os.name != 'nt' or not args.player_exe.is_file() or not args.api_dll.is_file(): parser.error('Build the Windows player and API first')
-    spec = importlib.util.spec_from_file_location('native_admission', ROOT / 'scripts/check-unity-admission.py')
-    checker = importlib.util.module_from_spec(spec); spec.loader.exec_module(checker)
-    receipt = json.loads((args.player_exe.parent / 'build-receipt.json').read_text())
-    if receipt.get('schemaVersion') != 1 or receipt.get('target') != 'StandaloneWindows64' or receipt.get('sourceFingerprint') != checker.source_fingerprint():
-        parser.error('Windows player receipt does not match current sources; build Desktop first')
-    subprocess.run([sys.executable, str(ROOT / 'scripts/check-transport-patch.py')], check=True)
+    try: verify_player(args)
+    except (OSError, RuntimeError, ValueError) as error: parser.error(str(error))
     if args.check: args.visible_room = 0
     venue = Venue(args)
     try:

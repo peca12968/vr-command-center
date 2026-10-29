@@ -2,6 +2,8 @@
 
 `scripts/start-desktop-venue.py` 在自己的 API／SQLite 上啟動五個獨立房間、五個真正 Windows Unity server 與每房一個真正 client。每房有不同任務、天氣／日夜、敵軍數量及沙包／油桶；預設只顯示房間 1 的可操作視窗，其餘合成玩家在背景運行。來源一律 **Simulation**，不是五台頭盔或 25 人效能測試。
 
+從空任務庫開始、由控制台編輯並建立自己的任務，另見 [DESKTOP_CONTROL.md](DESKTOP_CONTROL.md)；本工具保留預先配置的五房及回歸模式。
+
 先依 DESKTOP 建置目前 API 與 Desktop，再於專案根目錄執行：
 
 ```powershell

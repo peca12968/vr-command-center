@@ -2,6 +2,8 @@
 
 在 Windows 不接頭盔操作同一份 Unity 遊戲接入。這是桌面合成頭手的 **Simulation**，不代表 Quest／VIVE 或正式軍事美術驗收。
 
+要從控制台自行編輯／保存／選取任務並啟動真正 PC，見 [DESKTOP_CONTROL.md](DESKTOP_CONTROL.md)。本頁保留固定練習任務。
+
 五房同時獨立的啟動、房間重用與之後新開 Linked 的驗證見 [DESKTOP_VENUE.md](DESKTOP_VENUE.md)；本機五房即時 SQLite／journal 已使用明確指定的 SSD runtime，程式碼及建置仍在 F 槽。
 
 先依 QUEST3／NATIVE_VALIDATION 建置 API 與 Desktop，再於專案根目錄執行：

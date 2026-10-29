@@ -8,6 +8,8 @@
 
 較窄的 [managed SDK 檢查](docs/UNITY_SDK_CHECK.md) 仍可補充 API／直接參考診斷，其本身不執行 Unity 或產出播放器；目前較強的真正 Editor、29 項測試及 binary 結果以 PROGRESS 為準。
 
+可用 [控制台自訂電腦任務](docs/DESKTOP_CONTROL.md) 從編輯／保存／重載配置直接啟動真正 PC server／玩家，控制天氣、AI、觀戰與回放；已看見原生白天／雨夜／暫停畫面。新的 15 項 UI／native 整合與既有 17 Node＋122 Chromium 通過，原生雷聲與完整聲光仍待驗。
+
 ## 開發位置
 
 已新增 [五房電腦場館](docs/DESKTOP_VENUE.md)：五個真正 Windows server／每房一個 client 同時獨立、單房結束與重用、全部封存後另開 Linked，回放統計一致。這是在明確 SSD runtime 配置下的本機 Simulation；F 槽 USB 硬碟全資料配置未達原新鮮度門檻，程式碼與建置仍在 F 槽。完整證據見 PROGRESS，仍無 25 台或頭盔驗收。

@@ -18,6 +18,8 @@ v0.16 聲光規範見 docs/ENVIRONMENT.md：EnvironmentPresentation 為共用 ti
 
 五房 PC 工具為 scripts/start-desktop-venue.py，操作見 docs/DESKTOP_VENUE.md。--check 啟動五個真正獨立 server／每房一個 client，驗證隔離／權限、單房重用，再於全部 End／精確封存後開新 Linked 世界；不合併歷史。F 為 USB 硬碟，五房資料全放 F 的原生試跑未達 1.5 秒門檻；成功證據為明確 --runtime-root 指向 C NVMe 的全新自有 SQLite／journal，來源及 binary 仍在 F，不得稱為 F USB 或跨機／25 台通過。全部 writer 停止後才複製 runtime-snapshot 回 F，保留原件；不可搬動既有預覽資料。每程序 job workers=2 已記錄，降低 workers 本身未修復 F 延遲。最終七場最大取樣來源年齡 0.275004 秒、回放／報表一致；可操作模式關窗五場共 4037 幀封存。來源與頭手仍 Simulation。
 
+操作員自訂 PC 流程為 scripts/start-desktop-control.py，操作見 docs/DESKTOP_CONTROL.md。僅監看自己新建的隔離 API，全新 Preparing VR、無既有 combat source 才啟動 server；名冊以 playerId＋admissionId 啟停短效票券 client，玩家不持有控制台／GameServer key。dynamicRoster 最終按持久 PlayerJoined 分頁核對所有歷史玩家，不只看目前名冊。operator-status 來自真正世界幀，維持 UTC 1.5 秒門檻。tests/browser/check-operator-native.cjs 需要該次 ready.json，15 項 UI／native／動態名冊／回放通過；不是一般 Linux CI 或頭盔測試。Native 白天／雨夜／Pause 截圖與 Chromium SwiftShader 觀戰分開；不能把 lightning=true 或 Web Audio 當原生閃電／雷聲聽感。
+
 開始接續工作時讀取 `docs/PROGRESS.md`、`docs/ROADMAP.md`、`docs/REQUIREMENTS.md`。使用者的完整目標為 11 項 VR/MR 遊戲需求及 VIVE XR／Quest 3 相容性，不能以管理原型或模擬測試通過替代完整交付。
 
 後端為 .NET 10；Unity 工程位於 `clients/unity/`，固定 Editor 6000.3.27f1，不直接引用後端組件。未知硬體協議使用模擬器，實機整合待廠商文件及設備。

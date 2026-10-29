@@ -4,7 +4,7 @@ v0.16 新增 `environmentVersion:1`，依保存的 tick／環境重現雨、日�
 
 管理主控台的「觀戰與任務回放」讀取遊戲伺服器已接受的世界資料。世界發布走 WebSocket，觀察及回放走帶 Bearer 的 fetch SSE；逐幀遊戲輸入仍由 NGO 處理，不使用管理 REST。觀察者不加入玩家名冊。既有「3D 模擬回放」仍用本機 schema 2 檔案；兩種格式及來源不可混為一談。
 
-本輪已驗證的是 **.NET 共用核心 → 本機來源檔 → 真實 WebSocket → SQLite → 真實 SSE → Chromium 軟體 WebGL**。示範明確為 Simulation，雙手及旋轉為合成；不是頭盔錄影、實機追蹤或 Quest 驗收。v0.13 的 Unity 已加入共用世界來源／發布器、接受後的頭手錄製與追蹤中斷處理來源碼，**尚未編譯／運行**；詳見 [WORLD_SOURCE.md](WORLD_SOURCE.md)。原有統計 outbox 來源碼另見 TELEMETRY。Unity 編譯仍受授權未被工具讀取影響。
+目前另有 **真正 Windows Unity → 共用來源／WebSocket → SQLite → SSE → 控制台即時觀戰／鏡頭與回放** 證據，見 [DESKTOP_CONTROL.md](DESKTOP_CONTROL.md)／PROGRESS。瀏覽器為 Chromium 軟體 WebGL；原生玩家 GPU 白天／雨夜／Pause 另行檢視。來源明確 Simulation、頭手合成，不是頭盔錄影或 Quest 驗收。原 v0.13 未編譯／授權問題僅為歷史，最新真正建置見 WORLD_SOURCE／NATIVE_VALIDATION。
 
 ## 操作
 
