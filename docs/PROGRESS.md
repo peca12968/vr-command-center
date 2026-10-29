@@ -18,6 +18,8 @@
 
 完整驗證在 artifacts/tactical-validation.json，操作及界線見 [TACTICAL_HUD.md](TACTICAL_HUD.md)。本輪無後端／共享遊戲規則或管理Web UI變更，不重算歷史485核心／140 Chromium。3D軍事素材、完整長任務／一般模式抖動、頭盔／MR／VIVE、硬體、跨機及25台仍待，完整長期目標保持開發中。
 
+功能提交 `0678c8f57aab2d20bc5c9bb25ac82bf8c4cef8af` 已推送並核對遠端main相同。CI run `40912886942`／check `123585281027` 已結束，steps=[]、日誌404 BlobNotFound；annotation仍為近期付款失敗或支出限制，另有ubuntu遷移通知，未改帳務或重跑。GitHub #1同步新HUD、原生證據與短暫姿態拒絕限制，保持開啟。原5080 health ok，自有Unity程序清空，正式DLL／資料未換。
+
 ## 2026-10-29：原生GPU閃電與本玩家DSP雨雷輸出
 
 上一輪精確觀戰屬實際進度。本輪從乾淨 `893332e` 接續無頭盔的PC主線，針對需求5補強原生證據。新增 `NativeWeatherProbe` 與 `scripts/check-desktop-weather.py`：只有未追蹤、可見的Windows Development玩家，在明確CLI開關及全新絕對目錄下才附掛；一般啟動、Editor、Android或batch不附掛。只讀本玩家AudioListener DSP及GPU backbuffer，沒有麥克風、OS loopback、其他應用程式或遊戲輸入注入。兩個AudioSource仍由既有權威tick規則控制，僅增加LastApplied本地觀測欄位；不改戰鬥、網路或環境v1語意。
