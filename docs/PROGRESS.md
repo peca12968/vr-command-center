@@ -22,6 +22,8 @@ Windows／Quest 最終成功 receipt 的來源指紋同為 `d6baeb56101bc7adea85
 
 完整機器可讀驗證在 `artifacts/reconnect-ui/validation.json`；原始日誌、失敗及截圖保留於忽略的 artifacts。ProjectBuilder 的較窄 Editor SDK 圖亦重新通過 947 來源／13 組件及移除 MetaQuestSupport 的編譯失敗反例，仍不含 URP 專用驗證分支。未變更後端／管理 Web UI，未混算歷史 .NET／Chromium 結果；末端原預覽 5080／PID 52992 仍回 health ok／API 0.16，本輪未換 DLL 或資料。操作見 [RECONNECT.md](RECONNECT.md)，一般練習場見 [DESKTOP.md](DESKTOP.md)。下一步為五場同時獨立與圖形聲光／操作員控制；跨機網路、server 崩潰恢復、Quest／VIVE、MR、硬體及 25 台仍待分別驗收。
 
+功能提交 `94c49fc935ba233c72e72098c2bbb8f675626b22` 已推送，核對遠端 main 相同。GitHub CI run `40873523761`／check `123446386429` 已結束，steps／logs 為空；annotation 明確為近期付款失敗或支出限制，工作尚未啟動，另有 ubuntu-latest 遷移通知。未改帳務或重跑，沒有將雲端未執行稱為通過。GitHub 長期追蹤 #1 保持開發中；本機結果與完整實機目標分開。
+
 ## 2026-10-29：可操作電腦練習場、瞄準與真實視窗射擊統計
 
 上一輪 990b946／1b4f3a7 已完成真正 Unity 建置與雙 client 無圖形驗證，屬於具體進展。本輪依使用者「目前沒有頭盔，先繼續電腦端」從乾淨 1b4f3a7 接續，不縮減完整 11 項需求。沒有登入、SDK 重裝或頭盔操作。
