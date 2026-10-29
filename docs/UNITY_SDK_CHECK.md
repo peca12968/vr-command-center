@@ -1,6 +1,6 @@
 # Unity managed API 接入檢查
 
-後續真正 Editor 已完成 Prepare、34 項 EditMode、v0.18 Windows／Quest 建置，詳見 PROGRESS。本文是較窄的 SDK 診斷範圍；工具本身不執行 Editor／測試，舊 198 不再代表現況。
+後續真正 Editor 已完成 Prepare、39 項 EditMode、v0.19 Windows／Quest 建置，詳見 PROGRESS。本文是較窄的 SDK 診斷範圍；工具本身不執行 Editor／測試，舊 198 不再代表現況。
 
 `scripts/check-unity-sdk.py` 將遊戲執行端的 11 份 runtime C#、8 份 test 來源及其官方套件來源，以 .NET Standard 2.1／C# 9 編譯並綁定本機 Unity 6000.3.27f1 的真正 managed DLL。它補足只有語法檢查、或只綁定單一天氣元件的證據缺口；**不是整個 Unity 工程建置**。
 
@@ -19,7 +19,7 @@ python scripts/check-unity-sdk.py --offline
 
 產物均在 Git 忽略的 `artifacts/unity-sdk-check/`。`android.log`／`windows.log` 保留完整編譯診斷，`report.json` 保存嘗試時間、檢查器 SHA-256、Editor 版本、來源與引用 DLL 的 SHA-256、每個 assembly 的符號及退出碼；開始時清除舊成功標記，僅指定的分支全數通過才有 complete=true。不要把這些診斷 DLL 部署到 Unity 或頭盔；Unity 必須自行匯入、解析套件並產生正式組件。
 
-2026-10-29 更新：Android／Windows 離線型別編譯均成功，12 runtime／9 test；直接引用 Transport 與真正 TestRunner DLL，未執行 coroutine 或 NUnit。此診斷仍用下列 registry Transport 2.6.0，不能證明正式 embedded 2.7.4 修正；該修正另有真正 EditMode／原生 player 證據，見 TRANSPORT_PATCH／PROGRESS。
+2026-10-29 更新：Android／Windows 離線型別編譯均成功，13 runtime／10 test；直接引用 Transport 與真正 TestRunner DLL，未執行 coroutine 或 NUnit。此診斷仍用下列 registry Transport 2.6.0，不能證明正式 embedded 2.7.4 修正；該修正另有真正 EditMode／原生 player 證據，見 TRANSPORT_PATCH／PROGRESS。
 
 ## 來源與分支
 
@@ -64,4 +64,4 @@ python scripts/check-unity-editor-sdk.py --offline --verify-missing-reference
 
 這個診斷圖涵蓋生成器使用的公開 API 表面，**不是完整 Editor／套件編譯圖**。URP 專用驗證分支（UNITY_RENDER_PIPELINES_UNIVERSAL、ENABLE_RENDER_GRAPH_COMPATIBILITY_MODE_SUPPORTED）明確未啟用且記入報告；它們及 URP renderer 仍須真正 Unity 編譯／執行驗證。其餘 Editor 相依以真實 Input／UI 的 Editor 來源、Android Editor 擴充及隨附 Registry reference DLL 編譯，沒有執行 Editor 程式、讀取登錄或載入原生 XR plugin。場景、資產、UPM、ILPP、EditMode、IL2CPP、APK 與頭盔驗收不由此工具證明。
 
-新增NativeWeatherProbe後，兩分支實際型別編譯為12 runtime／9 test。診斷圖未定義DEVELOPMENT_BUILD，CLI開關的啟用分支由真正Windows Development build及原生GPU／DSP運行驗證，見 NATIVE_WEATHER；不把此診斷當開關、混音或畫面實測。
+新增NativeWeatherProbe後，兩分支實際型別編譯為13 runtime／10 test。2026-10-30更正：此player診斷圖實際已定義DEVELOPMENT_BUILD（舊提交腳本亦相同），先前未定義的敘述有誤。它可編譯啟用分支，但不會執行開關、混音或畫面；原生運行證據另見 NATIVE_WEATHER／TACTICAL_HUD。

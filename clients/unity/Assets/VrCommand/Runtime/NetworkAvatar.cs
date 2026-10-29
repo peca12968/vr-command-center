@@ -59,6 +59,7 @@ namespace VrCommand.Unity
         private Renderer[] visuals;
         private bool desktopFire, desktopReload, windowKeyFallbackLogged;
         private Vector2 windowLook, windowMovement;
+        private readonly TacticalHud tacticalHud = new TacticalHud();
 
         public override void OnNetworkSpawn()
         {
@@ -282,34 +283,9 @@ namespace VrCommand.Unity
             DesktopWindowKey();
             var combat = CombatAuthority.Instance;
             if (combat == null || !combat.Player(PlayerId.Value.ToString(), out var player)) return;
-            var phase = VenueBootstrap.Instance == null ? "CONNECTING" : VenueBootstrap.Instance.State.ToUpperInvariant();
-            var scale = Mathf.Max(.5f, Mathf.Min(Screen.width / 1100f, Screen.height / 760f));
-            var previous = GUI.matrix; GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1));
-            var width = Screen.width / scale; var height = Screen.height / scale;
-            var heading = new GUIStyle(GUI.skin.label) { fontSize = 20, fontStyle = FontStyle.Bold };
-            var text = new GUIStyle(GUI.skin.label) { fontSize = 17 };
-            GUI.Box(new Rect(16, 16, 570, 112), "");
-            GUI.Label(new Rect(30, 24, 540, 28), "VR COMMAND  /  " + phase + "  /  ROOM " + player.room, heading);
-            GUI.Label(new Rect(30, 56, 540, 28), "HEALTH " + player.health + "     AMMO " + player.magazine + " / " + player.reserve
-                + (player.reloading ? "    RELOADING" : ""), text);
-            var status = !combat.Ready.Value ? "CONTROL LINK UNAVAILABLE - COMBAT PAUSED"
-                : player.health == 0 ? "ELIMINATED" : !PoseAccepted.Value || !player.connected ? "POSE REJECTED - RETURN TO YOUR AREA" : "DESKTOP SIMULATION - SYNTHETIC HEAD / HANDS";
-            GUI.Label(new Rect(30, 87, 540, 28), Keyboard.current == null ? "KEYBOARD UNAVAILABLE - CHECK INPUT DEVICE" : status, text);
-            GUI.Box(new Rect(16, height - 66, width - 32, 50), "");
-            GUI.Label(new Rect(30, height - 59, width - 60, 36), "WASD: MOVE    RIGHT DRAG / ARROWS: AIM    CLICK / SPACE: FIRE    R: RELOAD", text);
-            GUI.matrix = previous;
-            if (!player.connected || player.health <= 0 || !PoseAccepted.Value || !combat.Ready.Value || phase != "RUNNING") return;
-            var forward = rightHand.forward;
-            var origin = rightHand.position + forward * .15f;
-            var point = localCamera.WorldToScreenPoint(combat.PreviewAimPoint(origin, forward, PlayerId.Value.ToString()));
-            if (point.z <= 0) return;
-            var x = point.x; var y = Screen.height - point.y;
-            var color = GUI.color; GUI.color = new Color(.7f, 1, .75f);
-            GUI.DrawTexture(new Rect(x - 10, y - 1, 6, 2), Texture2D.whiteTexture);
-            GUI.DrawTexture(new Rect(x + 4, y - 1, 6, 2), Texture2D.whiteTexture);
-            GUI.DrawTexture(new Rect(x - 1, y - 10, 2, 6), Texture2D.whiteTexture);
-            GUI.DrawTexture(new Rect(x - 1, y + 4, 2, 6), Texture2D.whiteTexture);
-            GUI.color = color;
+            if (Event.current.type != EventType.Repaint) return;
+            var phaseName = VenueBootstrap.Instance == null ? "Preparing" : VenueBootstrap.Instance.State;
+            tacticalHud.Draw(this, combat, player, localCamera, rightHand, phaseName);
         }
 
         private void CreateStatusPanel()
@@ -334,6 +310,7 @@ namespace VrCommand.Unity
 
         public override void OnNetworkDespawn()
         {
+            if (IsOwner) tacticalHud.Reset();
             PoseAccepted.OnValueChanged -= AcceptanceChanged;
             leftPosition?.Dispose(); rightPosition?.Dispose(); leftRotation?.Dispose(); rightRotation?.Dispose(); trigger?.Dispose(); reload?.Dispose();
             headTracking?.Dispose(); leftTracking?.Dispose(); rightTracking?.Dispose();

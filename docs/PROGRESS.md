@@ -1,12 +1,30 @@
 # 開發進度
 
+## 2026-10-30：軍事戰鬥HUD、場地方位與遮擋標記
+
+上一輪原生聲光屬實際進度。本輪從乾淨 `65d5185` 接續無頭盔的電腦端與原始11項目標，新增 `TacticalHud`：軍綠狀態面板、血量條、大字彈匣／備彈、場地方位刻度、受遮擋限制的HOSTILE／ALLY短識別及血量條，桌面保留Simulation來源。準星沿用武器／掩體預測，射擊／換彈／傷害仍由server確認。XR既有world-space文字共用狀態優先序，修正淘汰被追蹤異常蓋過的情況；沒有把桌面方位或浮標直接套進HMD。
+
+標記只讀同房、存活參戰者及已複製幾何，以與命中預測相同的盒檢查胸部視線，其他活角色亦可遮擋。候選10Hz、最多32個／8標記，每繪製幀用最新收到狀態重新檢查；不在掩體後保留舊標籤。這是保守顯示，部分露頭可能無標記，非逐pixel遮擋或防作弊／保密邊界。000°是場景正Z、不是地理北。原本角色／武器／物件幾何未改，primitives-v1、rules0.8.0、NGO18／API0.16及所有世界／事件契約保持。
+
+首次真正Prepare抓到NetworkList不實作IEnumerable的CS1503，改為重用當幀自有快照後通過；最終 **39項真正EditMode（0 failed／skipped）**、Desktop／Quest均exit0，保存場景／玩家識別保持，無RebuildArena。生成設定依成功匯入結果保留；Quest建置後URP清單無最終差異。bundle **0.19.0／Android code20／NGO仍18**，兩平台fingerprint同為 `8fa5a0e8609b8f3521d14f98effa437075aecef2fcaed05963c8e585c48053df`。APK46,106,368 bytes，SHA-256 `2cd48b1c9371e4d8bbccb807ce133a0f0a718557982abbe8742bc7a6b44bbe9c`；簽章v2、min32／target35及六個AArch64庫含libil2cpp核對通過，無頭盔運行。
+
+新增5個有意義EditMode檢查，涵蓋狀態優先序、方位、旋轉掩體／角色遮擋、同房／參戰／死亡／距離及移動後的新遮擋。離線SDK Android／Windows各13 runtime／10 test型別編譯通過。另核對 `65d5185` 的腳本，確實已定義DEVELOPMENT_BUILD；上一輪文件寫成未定義是記錄錯誤，已更正UNITY_SDK_CHECK及歷史段落。這補正編譯範圍，不把型別綁定當執行、GPU或DSP證據。
+
+新增 `check-desktop-hud.py`，自己的API／room3 server、可見玩家及真正peer。HUD-only診斷與weather音訊模式互斥，285秒上限，不配置／保存PCM；GPU讀回與HUD繪製快照有界，正常啟動不附掛。原生場 `20261030-000040-9a2f550c` 以computer-use真正按鍵：Space1次→30降29，R→30／89並看見RELOADING，Right20次→060°及右方友軍；初始兩名敵軍只標記胸部未被油桶擋住的一名。AI造成血量60後Pause，之後淘汰血量0顯示ELIMINATED；全部已實際檢視截圖。2680幀、最大來源年齡0.767627秒；耗彈1／中彈5／耗損100、回放ledger一致、活動0、cleanup零錯誤。14份引擎截圖與五份Windows畫面保存，audioSamples=callbackCount=0且無audio.wav。
+
+同場一份自動PNG亦實際看見短暫POSE_REJECTED；0.25秒保存觀測未捕捉該狀態，各輸入檢查點為ACTIVE且body.connected=true，後續射擊／換彈／轉向正常。保留原圖，未量測該次原因／確切持續時間；不宣稱全程無短暫拒絕或診斷模式效能。HUD忠實顯示拒絕狀態，未放寬權威姿態／時間檢查或以隱藏警告修飾結果，後續需在一般模式補充抖動定位。
+
+新binary再跑weather模式 `20261030-000808-6ae72ca2`：274幀／最大年齡0.167383秒，GPU閃電區域亮度增加27.6674（新HUD遮住部分比較區域），flash140／thunder180，雨雷非零／穩定暫停及晴天RMS0，PCM量化能量一致。一般無probe、visible-room1場 `20261030-001934-4bc01194` **33項 UI／native**也通過，127幀／0.167325秒，控制台任務、動態名冊、環境／AI、鏡頭及封存回放一致。三場全數精確封存、pendingTelemetry=false、活動0、cleanup零錯誤；30／23／14檔在writer關閉後複製回F，與SSD原件SHA-256一致，保留原件，未移動5080資料。
+
+完整驗證在 artifacts/tactical-validation.json，操作及界線見 [TACTICAL_HUD.md](TACTICAL_HUD.md)。本輪無後端／共享遊戲規則或管理Web UI變更，不重算歷史485核心／140 Chromium。3D軍事素材、完整長任務／一般模式抖動、頭盔／MR／VIVE、硬體、跨機及25台仍待，完整長期目標保持開發中。
+
 ## 2026-10-29：原生GPU閃電與本玩家DSP雨雷輸出
 
 上一輪精確觀戰屬實際進度。本輪從乾淨 `893332e` 接續無頭盔的PC主線，針對需求5補強原生證據。新增 `NativeWeatherProbe` 與 `scripts/check-desktop-weather.py`：只有未追蹤、可見的Windows Development玩家，在明確CLI開關及全新絕對目錄下才附掛；一般啟動、Editor、Android或batch不附掛。只讀本玩家AudioListener DSP及GPU backbuffer，沒有麥克風、OS loopback、其他應用程式或遊戲輸入注入。兩個AudioSource仍由既有權威tick規則控制，僅增加LastApplied本地觀測欄位；不改戰鬥、網路或環境v1語意。
 
 首次真正Prepare發現未宣告Image Conversion模組而出現CS1061；新增正式builtin imageconversion1.0.0後，UPM成功匯入並保存lock，Prepare／**34項EditMode**／Desktop／Quest均exit0。保存Arena／PlayerAvatar識別未變，無RebuildArena。bundle **0.18.1／Android code19／NGO仍18**，API0.16／驗票2／envelope6／world schema1／environmentVersion1保持。兩平台fingerprint相同：`ce2222224a687942a6492e9e861e72e4c5452134cf7cf6bb5537b09289faa7f5`。Quest ARM64／IL2CPP APK為46,085,944 bytes、SHA-256 `b0fd3ba170e953af7e2b388e52e51916b293e5cd0edefa2ee734c63c483094a0`，v2簽章、code19／0.18.1、min32／target35及六個AArch64原生庫含libil2cpp核對通過，沒有頭盔安裝或運行。
 
-固定雨雷素材 `generate-weather-audio.py --check` 通過；離線managed SDK Android／Windows各12 runtime／9 test型別編譯通過，單一WeatherView Core／Audio窄檢查也通過。窄SDK圖沒有DEVELOPMENT_BUILD開關啟用分支，該分支以真正Windows建置與運行覆蓋；不把SDK當Editor／DSP或GPU證據。原生probe使用有界緩衝及音訊執行緒純記憶體採樣，End後才輸出PCM WAV並核對格式／樣本／量化能量，截圖於真實渲染幀結束後讀回。分析使用現有bundled Python／Pillow12.3.0，沒有全域安裝或更改系統音效設定。
+固定雨雷素材 `generate-weather-audio.py --check` 通過；離線managed SDK Android／Windows各12 runtime／9 test型別編譯通過，單一WeatherView Core／Audio窄檢查也通過。當時誤記「窄SDK圖沒有DEVELOPMENT_BUILD」；2026-10-30核對當時腳本已有該旗標，已更正文件。此圖仍只做型別綁定，真正Windows另有建置與運行；不把SDK當Editor／DSP或GPU證據。原生probe使用有界緩衝及音訊執行緒純記憶體採樣，End後才輸出PCM WAV並核對格式／樣本／量化能量，截圖於真實渲染幀結束後讀回。分析使用現有bundled Python／Pillow12.3.0，沒有全域安裝或更改系統音效設定。
 
 第一場 `20261029-230508-0b5e7d5e` CLI通過：276幀、最大來源年齡0.614726秒，GPU閃電區域平均亮度比夜間增加34.5419（0–255）；48kHz雙聲道／24.085秒PCM，已檢視night.png及flash.png。第二場 `20261029-231752-cb648d31` 的靜音分類檢查失敗：10Hz主執行緒觀測把Resume後的兩個非零DSP回呼，誤歸到前一筆Paused快照；原始回呼時間12.532／12.551秒，第一筆已保存Running快照在12.554秒，穩定暫停區間均為零。保留失敗及278幀封存，修正分析器同時檢查狀態切換兩側、只分類穩定內部區間，不降低1e-6靜音或1.5秒來源門檻，也不更改遊戲播放邏輯。
 

@@ -37,3 +37,5 @@ GPU圖像由實際渲染幀結束後的 ReadPixels 取得，保存夜間、閃�
 遊戲端bundle0.18.1／Android code19，NGO仍18；API0.16、世界schema1／environmentVersion1及驗票2不變。這輪沒有新NGO欄位或遊戲規則改動，所有交付仍以成功receipt及保存場景識別為準。
 
 PCM與GPU截圖只在明確啟用的開發診斷中保存，不進入worlds.db，也不是一般任務的原始音軌／影片錄製。控制台回放仍依保存tick重建環境聲光，見 [ENVIRONMENT.md](ENVIRONMENT.md)。人員聽感、音量／聲壓、實體輸出裝置、長任務與混合頭盔仍須另驗，完整11項保持開發中。
+
+v0.19另有互斥的 --vr-hud-probe 模式，285秒／不保存PCM，見 TACTICAL_HUD；weather模式仍85秒與90秒有界音訊緩衝。report新增選用HUD繪製快照，只作診斷，不更改世界／事件資料契約。

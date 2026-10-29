@@ -2,12 +2,12 @@
 
 基準日期：2026-10-29。完成定義須同時有程式、操作途徑與符合範圍的驗證證據。以下「規劃」項目皆未完成。
 
-真正 Editor 已完成 UPM／ILPP／匯入、34 項 EditMode、v0.18 Windows 及 Quest APK；Windows 獨立／五房 Linked Simulation、票券撤銷及真正視窗斷線後保留位置／健康／彈藥均通過。使用者目前沒有頭盔，先繼續電腦端；五房原生隔離及之後新開 Linked 亦已通過，條件與限制見 [DESKTOP_VENUE](DESKTOP_VENUE.md)；這不完成以下整體驗收。最新證據見 [RECONNECT.md](RECONNECT.md)／PROGRESS，首輪原生範圍見 [NATIVE_VALIDATION.md](NATIVE_VALIDATION.md)，較窄的診斷另見 [UNITY_SDK_CHECK.md](UNITY_SDK_CHECK.md)。
+真正 Editor 已完成 UPM／ILPP／匯入、39 項 EditMode、v0.19 Windows 及 Quest APK；Windows 獨立／五房 Linked Simulation、票券撤銷及真正視窗斷線後保留位置／健康／彈藥均通過。使用者目前沒有頭盔，先繼續電腦端；五房原生隔離及之後新開 Linked 亦已通過，條件與限制見 [DESKTOP_VENUE](DESKTOP_VENUE.md)；這不完成以下整體驗收。最新證據見 [RECONNECT.md](RECONNECT.md)／PROGRESS，首輪原生範圍見 [NATIVE_VALIDATION.md](NATIVE_VALIDATION.md)，較窄的診斷另見 [UNITY_SDK_CHECK.md](UNITY_SDK_CHECK.md)。
 
-| 編號 | 使用者需求 | 最終驗收證據 | API 0.16／Unity 0.18 狀態 |
+| 編號 | 使用者需求 | 最終驗收證據 | API 0.16／Unity 0.19 狀態 |
 |---|---|---|---|
 | 1 | 主控台與五房間；可獨立、可全連線 | 五個房間獨立開局且互不干擾；全部合併後同一世界、同一任務；管理員可操作 | 五房權限與管理 UI、獨立／Linked 準備、名冊與生命週期操作已有瀏覽器／API 驗證，建立／加入／離開可持久去重，票券 v2 及移除／配票按本次 admission 驗證，舊移除重試不影響重新入場者；真正 Windows server 加兩個 client 已通過獨立房及五房 Linked 跨房入場／暫停／結束；另已通過真正 client 的票券撤銷／舊 fence 拒絕、原程序重新配票及強制斷線恢復；SSD runtime 下五個真正獨立 server／每房一個 client 同時運行、單房命令隔離／重用及封存後新開 Linked 已驗證；F USB 配置不達新鮮度門檻，跨機／滿房／實機同步仍待驗 |
-| 2 | 軍事戰鬥介面 | 頭盔內 HUD、主控台、敵我辨識與任務狀態可操作 | 已有武器盒／敵軍、階段／健康／彈藥／換彈 HUD 來源碼，已真正編譯並有 PC GPU 視窗／HUD、方向鍵瞄準、Space／滑鼠射擊與 R 換彈證據，正式軍事美術與完整操作待驗；無頭盔介面驗證 |
+| 2 | 軍事戰鬥介面 | 頭盔內 HUD、主控台、敵我辨識與任務狀態可操作 | 已有武器盒／敵軍、階段／健康／彈藥／換彈 HUD 來源碼，已真正編譯並有 PC GPU 視窗／HUD、方向鍵瞄準、Space／滑鼠射擊與 R 換彈證據，新增軍事HUD、血量條／大字彈藥、場地方位及遮擋敵我標記，真正按鍵射擊／換彈／轉向、受傷暫停及淘汰已有GPU／數值證據，見 TACTICAL_HUD；3D正式美術、一般模式短暫姿態拒絕定位與完整操作待驗，無頭盔介面驗證 |
 | 3 | 與其他公司負責的硬體整合 | 依廠商文件實測連接、輸入事件、輸出命令、斷線恢復 | 等待廠商文件，已有對接資料清單 |
 | 4 | 五房間總計 25 人 | 25 台裝置混合 VIVE／Quest 同時遊玩並取得延遲、頻寬、幀率紀錄 | 已有 25 個玩家名額規則；非實機效能測試 |
 | 5 | VR/MR 天氣、日夜、打雷 | 各頭盔同步套用並可由控制者修改；MR 場地定位與遮擋實測 | 共用 tick 規則、瀏覽器雨線／霧／日夜／閃電／選用雨雷聲及持久回放已有 Simulation 驗證，舊錄製不補造效果。Unity 原子狀態／網格／AudioSource 已接來源，真正 Unity／NGO／音訊／Shader 匯入及 APK 建置成功，無圖形 PC 已使用 Storm／Night 任務；控制台套用後已看見真正 PC 白天／雨夜雨線／Pause。新增真正Windows GPU閃電亮度與本玩家AudioListener雨雷DSP／暫停及晴天靜音驗證，見 NATIVE_WEATHER；人員聽感、實體裝置／聲壓、頭盔及MR仍待驗 |

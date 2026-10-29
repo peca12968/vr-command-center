@@ -12,10 +12,11 @@ namespace VrCommand.Unity
             var combat = CombatAuthority.Instance;
             if (avatar != null && combat != null && combat.Player(avatar.PlayerId.Value.ToString(), out var player))
             {
-                message += "\nHEALTH " + player.health + "   AMMO " + player.magazine + " / " + player.reserve + (player.reloading ? "   RELOADING" : "");
-                message += !combat.Ready.Value ? "\nCONTROL LINK UNAVAILABLE - COMBAT PAUSED"
-                    : !avatar.TrackingReady || !avatar.PoseAccepted.Value || !player.connected ? "\nTRACKING INVALID - RETURN TO YOUR AREA"
-                    : player.health == 0 ? "\nELIMINATED" : "\nTRIGGER / LEFT CLICK: FIRE    A / R: RELOAD";
+                var status = TacticalHudRules.Status(VenueBootstrap.Instance.State, player.health, combat.Ready.Value,
+                    avatar.PoseAccepted.Value, player.connected, avatar.TrackingReady, true);
+                message += " / ROOM " + player.room.ToString("00") + "\nVITALS " + player.health + "  /  AMMO " + player.magazine.ToString("00") + " / " + player.reserve.ToString("000");
+                message += "\n" + (status == "ACTIVE" ? "XR INPUT / TRIGGER FIRE / A RELOAD" : status);
+                GetComponent<UnityEngine.UI.Text>().color = status == "ACTIVE" ? new Color(.72f, .88f, .53f) : new Color(1, .6f, .3f);
             }
             GetComponent<UnityEngine.UI.Text>().text = message;
         }

@@ -8,8 +8,8 @@
 |---|---|---|---|
 | M0 專案與管理核心 | F 槽原始碼、私人 GitHub、需求追蹤、五房場次與任務 API、CI | 可重現建置、核心與 HTTP 驗證、推送成功 | 本機與推送完成；一次 Linux 建置／核心／HTTP 通過，瀏覽器列序斷言已修正並本機通過；修正提交的雲端 CI 再次受帳務限制未啟動 |
 | M1 場次控制與事件基礎 | 主控／房間權限、準備／開始／暫停／結束狀態、命令與事件、統計核心 | 五房隔離、權限、去重、狀態遷移、紀錄恢復測試 | 管理／統計核心、SQLite 追加、JSON 升級與模擬來源已驗證；建立／加入／離開可持久去重，v2 票券與移除／配票按每次 admission fence；API／SQLite／瀏覽器已驗證；真正 Windows 撤銷／重連已通過；新增 SSD runtime 下五個原生獨立世界、每房一個 client 的權限／命令隔離、單房 End／重用，以及全部封存後新開 Linked |
-| M2 Quest 3 優先的遊戲垂直切片 | Unity 工程、Quest Android profile、基本移動／互動與共同場景；再接入 VIVE | Quest 3 實機操作及雙玩家互見；之後驗證混合頭盔、校正與定位 | 真正 Editor 已通過 UPM／ILPP／資產匯入、34 項 EditMode、Windows 與 ARM64／IL2CPP Quest APK；兩平台來源 fingerprint／網路識別一致。無頭盔，依使用者指示先繼續 PC；雙 Quest 操作與混合裝置待驗 |
-| M3 軍事戰鬥與 AI | 武器、傷害、健康、敵軍尋路／攻擊、操作員覆寫、HUD | 伺服器判定一致、AI 可控、事件與統計相符 | Windows server 加兩個 desktop client 已通過獨立／跨房 Simulation AI 傷害、暫停、封存及回放統計；真正視窗已完成方向鍵／Space／滑鼠射擊、擊殺／命中率、換彈及暫停；控制台自訂任務／動態名冊及 Advance／autoAttack 到真正 native 傷害、Pause／Resume／End 已通過；正式美術、完整策略、追蹤及實機戰鬥待驗 |
+| M2 Quest 3 優先的遊戲垂直切片 | Unity 工程、Quest Android profile、基本移動／互動與共同場景；再接入 VIVE | Quest 3 實機操作及雙玩家互見；之後驗證混合頭盔、校正與定位 | 真正 Editor 已通過 UPM／ILPP／資產匯入、39 項 EditMode、Windows 與 ARM64／IL2CPP Quest APK；兩平台來源 fingerprint／網路識別一致。無頭盔，依使用者指示先繼續 PC；雙 Quest 操作與混合裝置待驗 |
+| M3 軍事戰鬥與 AI | 武器、傷害、健康、敵軍尋路／攻擊、操作員覆寫、HUD | 伺服器判定一致、AI 可控、事件與統計相符 | Windows server 加兩個 desktop client 已通過獨立／跨房 Simulation AI 傷害、暫停、封存及回放統計；真正視窗已完成方向鍵／Space／滑鼠射擊、擊殺／命中率、換彈及暫停；控制台自訂任務／動態名冊及 Advance／autoAttack 到真正 native 傷害、Pause／Resume／End 已通過；新增軍事HUD／方位／遮擋標記，真正鍵盤與受傷／淘汰已驗；3D正式美術、一般模式抖動、完整策略、追蹤及實機戰鬥待驗 |
 | M4 任務與場景編輯 | 任務視覺編輯器、版本、物件擺設、天氣／日夜／雷電即時控制 | 儲存重載一致、獨立／全館環境正確同步 | 任務版本、2D 配置及環境／AI 控制已有核心／HTTP／瀏覽器證據；Unity 場景／音訊／Shader 匯入與 Storm／Night PC 任務運行通過。已實際以 UI 保存／重載擺設並在 Unity GPU 看見配置、白天／雨夜／Pause；原生沙包／45° 油桶阻擋、退回／側移已通過；原生GPU閃電與自身DSP雨雷／靜音已量測；聽感／實體輸出、MR校正及頭盔待驗 |
 | M5 觀戰、回放與報表 | 自由／跟隨鏡頭、書籤、快照與事件回放、逐玩家統計 | 即時觀戰、跳轉倍速、回放與結束統計一致 | 持久世界、SSE／回放、書籤及統計已有核心／瀏覽器證據；真正 PC 發布／封存及控制台俯視、鏡頭保存／跟隨後讀回、倍速／末幀回放已驗證；SSD 最新五房最大來源年齡 0.255 秒、自訂任務 0.212 秒。觀戰瀏覽器為軟體 WebGL；已新增精確座標／度數／距離與原生錄製自訂視角保存／封存回放33項整合；真實GPU／長任務手感、實際頭手及25台待驗 |
 | M6 硬體與場館驗收 | 廠商轉接器、MR 場地、斷線恢復、25 人完整任務 | 混合頭盔與實體硬體完整任務、效能紀錄、部署手冊 | PC 同 admission 斷線恢復已有證據；跨機／server 崩潰、MR、硬體與 25 台仍待 |
@@ -17,7 +17,7 @@
 ## 下一個開發順序
 
 1. 使用者目前無頭盔，接續軍事美術、自由鏡頭／長任務操作、複雜地形及跨機部署；原生GPU閃電及DSP已有證據，聽感／實體輸出仍待驗。控制台自訂任務、保存重載配置到真正 PC、天氣／AI／名冊／觀戰及回放已接通，見 DESKTOP_CONTROL；五房與跨機範圍仍分開。
-2. 擴大跨機網路、異常中斷及補送驗收，維持 admission fence、防瞬移與 Simulation。避免分平台重建場景，Prepare、34 Tests、Desktop／Quest 已有真正成功結果；嵌入 Transport 修正須保留來源雜湊與原生回歸。
+2. 擴大跨機網路、異常中斷及補送驗收，維持 admission fence、防瞬移與 Simulation。避免分平台重建場景，Prepare、39 Tests、Desktop／Quest 已有真正成功結果；嵌入 Transport 修正須保留來源雜湊與原生回歸。
 3. 取得 Quest 後驗證控制器／追蹤中斷、雙玩家互見、聲光／效能與封存；之後進行 MR、VIVE、廠商硬體及 5／10／25 人分階段驗收。合成姿態維持 Simulation。
 4. GitHub 雲端待帳務允許後再驗證完整執行結果；不改帳務、不重跑已知無法啟動的工作。
 
@@ -30,3 +30,5 @@
 最新操作員鏡頭見 [OBSERVER_CAMERA.md](OBSERVER_CAMERA.md)：17 Node／140 Chromium，真正 Windows 遊戲錄製33項整合；數值草稿不被即時快照覆蓋，已有無效值／登出／換場與保存回放驗證，仍不是頭盔或完整人工手感。
 
 最新原生聲光量測見 [NATIVE_WEATHER.md](NATIVE_WEATHER.md)：bundle0.18.1／Android code19／NGO仍18，34 EditMode、同源Windows／Quest成功，真實GPU閃電及本玩家DSP雨雷／穩定靜音已驗證，一般可見玩家33項整合通過。此為開發診斷，非任務原始音軌、聽感或頭盔驗收。
+
+最新軍事HUD見 [TACTICAL_HUD.md](TACTICAL_HUD.md)：v0.19.0／Android code20／NGO仍18，39真正EditMode、同源雙平台與原生鍵盤／GPU操作通過，一般33項整合回歸通過。診斷模式有短暫POSE_REJECTED原圖，未當作無抖動效能證據；一般模式定位、3D素材與實機仍待。
