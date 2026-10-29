@@ -20,6 +20,8 @@
 
 Unity C#／NGO 17／bundle 0.17.0 及管理契約未變，沿用同源 fingerprint `d6baeb56101bc7adea85f4173d3e0a31788f1d5546ff6a2ab872a789ff242a20`，沒有為 Python／提示文字重建播放器，也不把歷史 29 EditMode／.NET 規則數字算成本輪新結果。操作見 [DESKTOP_CONTROL.md](DESKTOP_CONTROL.md)。下一步仍有原生完整聲光／碰撞／鏡頭人工操作、軍事美術、跨機部署／效能、Quest／VIVE、MR、硬體與 25 台；本機端到端操作不完成整體驗收。
 
+功能提交 `86b7b32e7544133ba83d8ed454563ade4e325edb` 已推送並核對遠端 main 相同。CI run `40883545618`／check `123481119824` 已結束，steps／logs 為空；annotation 明確仍為近期付款失敗或支出限制，另有 ubuntu-latest 遷移通知。未改帳務或重跑；本機結果與雲端未執行分開。原 5080／PID 52992 仍 health ok，未換 DLL／資料；自有 native 程序均已停止。GitHub #1 同步本輪操作與限制，保持開發中。
+
 ## 2026-10-29：五房同時獨立、房間重用與之後的全館連線
 
 上一輪已交付 PC 撤銷／重連，本輪從乾淨 `b36ac5d` 接續使用者「先繼續電腦端」，完整 11 項與 Quest／VIVE 目標保持開發中。新增 `scripts/start-desktop-venue.py`：自己的 API／七份臨時控制台與來源憑證、五個獨立任務、五個真正 Windows Unity server、每房一個真正 client，使用不同 UDP 埠及持久來源。可選一個房間顯示玩家視窗，其餘背景運行，控制台 URL／room/session/port／PID 存於 ready.json；玩家只有短效票券，所有頭手與戰鬥來源均為 Simulation。
