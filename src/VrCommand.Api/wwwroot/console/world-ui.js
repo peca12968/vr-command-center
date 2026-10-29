@@ -1,5 +1,6 @@
 import { ReplayScene } from './replay-scene.js';
 import { mountCameras } from './camera-ui.js';
+import { mountWorldCameraForm } from './world-camera-form.js';
 
 const $ = id => document.getElementById(id);
 const time = milliseconds => (milliseconds / 1000).toFixed(2) + ' 秒';
@@ -8,10 +9,11 @@ const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫�
 export function mountWorld(getKey, unauthorized) {
   let active = false, scene, controller, epoch = 0, listEpoch = 0, info, frame, previous, geometry = '', mode = '', connected = false, received = 0;
   const cameras = mountCameras(getKey, unauthorized, () => scene, () => { $('world-camera').value = 'free'; $('world-room').value = 'all'; });
+  const cameraForm = mountWorldCameraForm(() => scene, () => { $('world-camera').value = 'free'; $('world-room').value = 'all'; });
   function message(text, error = false) { $('world-message').textContent = text; $('world-message').classList.toggle('replay-error', error); }
   function stop() { epoch++; controller?.abort(); controller = null; connected = false; scene?.weather.pause(); scene?.draw(); $('world-pause').textContent = '繼續回放'; }
   function reset() {
-    stop(); listEpoch++; info = frame = previous = null; geometry = ''; mode = ''; cameras.reset();
+    stop(); listEpoch++; info = frame = previous = null; geometry = ''; mode = ''; cameras.reset(); cameraForm.reset();
     $('world-recording').replaceChildren(); $('world-player').hidden = true; message('選取已錄製的場次，開始觀戰或回放。');
     scene?.reset(); $('world-sound').textContent = '音效：關閉'; $('world-sound').disabled = true;
   }
@@ -119,6 +121,7 @@ export function mountWorld(getKey, unauthorized) {
               }
               $('world-player').hidden = false; scene.resize(); $('world-name').textContent = info.missionName;
               cameras.bind(info.header.sessionId);
+              cameraForm.bind(info.header.sessionId);
               message(`${info.header.origin} · ${info.header.rulesVersion} · 基本幾何素材 · VR 未校正。${info.header.origin === 'Simulation' ? '此場次使用合成頭手資料，無頭盔連接。' : '頭手來源請見角色資訊。'}${info.header.environmentVersion === 1 ? '環境聲光 v1 依保存的模擬時間重建，非原始音軌。' : '舊錄製沒有聲光效果版本，僅保留原有光霧顯示。'}`);
               status();
             } else if (type === 'frame') show(data);
@@ -131,7 +134,7 @@ export function mountWorld(getKey, unauthorized) {
   }
   $('world-refresh').addEventListener('click', refresh);
   $('world-sound').addEventListener('click', async () => { if (scene?.weather.version === 1) { const pending = scene.weather.audio.toggle(); status(); await pending; if (active && getKey()) status(); } });
-  $('world-recording').addEventListener('change', () => { stop(); cameras.bind(null); info = frame = previous = null; $('world-player').hidden = true; message('已切換場次，請開始觀戰或回放。'); });
+  $('world-recording').addEventListener('change', () => { stop(); cameras.bind(null); cameraForm.reset(); info = frame = previous = null; $('world-player').hidden = true; message('已切換場次，請開始觀戰或回放。'); });
   $('world-live').addEventListener('click', () => connect('live'));
   $('world-replay').addEventListener('click', () => connect('replay'));
   $('world-pause').addEventListener('click', () => { if (mode === 'replay' && connected) { stop(); status(); } else connect('replay', frame?.packet.elapsedMilliseconds ?? 0); });

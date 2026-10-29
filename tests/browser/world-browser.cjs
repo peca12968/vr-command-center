@@ -40,6 +40,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     check(await canvas.getAttribute('data-camera') !== camera, 'Streamed world supports the god-view camera preset');
     await page.locator('#world-room').selectOption('2'); await page.locator('#world-room').selectOption('all');
     check((await canvas.getAttribute('data-camera')).split(',').every(value => Number.isFinite(Number(value))), 'All-room focus restores a finite camera instead of using an invalid room coordinate');
+    await require('./camera-controls.cjs')({ page, check, screenshots });
     async function customCamera() {
       await page.locator('#world-camera').selectOption('top');
       await canvas.scrollIntoViewIfNeeded();
@@ -100,6 +101,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     const lateCamera = (await api(cameraRoute)).find(row => row.name === '離開前的待確認位置');
     await remembered.locator('#logout').click();
     check(await remembered.locator('#camera-positions option').count() === 0 && await remembered.locator('#camera-name').inputValue() === '', 'Logout clears camera names, saved positions and pending state from the page');
+    check(await remembered.locator('#world-camera-x').inputValue() === '' && await remembered.locator('#world-camera-apply').isDisabled(), 'Logout clears the precise camera draft and disables applying it');
     await remembered.locator('#login-key').fill(tokens.Room2); await remembered.locator('#login-form button').click();
     await remembered.locator('#tab-world').click(); await remembered.locator('#world-recording option').waitFor({ state: 'attached' }); await remembered.locator('#world-live').click();
     await remembered.waitForFunction(() => !document.querySelector('#camera-save').disabled); releaseSave();
@@ -158,7 +160,9 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     check(result.code === 0, 'Native simulation produces a second complete persisted world: ' + result.error.slice(-300));
     const completed = JSON.parse(result.output);
     await page.locator('#world-refresh').click(); await page.locator(`#world-recording option[value="${completed.sessionId}"]`).waitFor({ state: 'attached' });
-    await page.locator('#world-recording').selectOption(completed.sessionId); await page.locator('#world-replay').click();
+    await page.locator('#world-recording').selectOption(completed.sessionId);
+    check(await page.locator('#world-camera-x').inputValue() === '' && await page.locator('#world-camera-apply').isDisabled(), 'Switching recordings clears the precise camera draft before reading a new world');
+    await page.locator('#world-replay').click();
     await page.locator('#world-player').waitFor(); await page.locator('#world-speed').selectOption('4');
     await page.waitForFunction(() => !document.querySelector('#camera-save').disabled);
     check(await page.locator('#camera-positions option').count() === 0 && await page.locator('#camera-name').inputValue() === '', 'Switching recordings clears camera selection and draft names');

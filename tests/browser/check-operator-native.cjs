@@ -112,6 +112,14 @@ async function main() {
     const savedPose = await page.locator('#world-canvas').getAttribute('data-camera');
     check(camera.name === 'Operator overhead', 'Operator saves an overhead camera on an actual native recording');
     await page.screenshot({ path: path.join(evidence, 'native-live-overhead.png'), fullPage: true });
+    await require('./camera-controls.cjs')({ page, check, screenshots: evidence });
+    await page.locator('#camera-name').fill('Precise native view'); await page.locator('#camera-save').click();
+    await until(async () => (await api('/sessions/' + session + '/world/cameras')).length === 2, 'persisted custom camera');
+    const preciseCamera = (await api('/sessions/' + session + '/world/cameras')).find(row => row.name === 'Precise native view');
+    const precisePose = await page.locator('#world-canvas').getAttribute('data-camera');
+    check(preciseCamera && preciseCamera.view.target[1] === 1.25 && preciseCamera.view.target[2] === .4
+      && Math.abs(preciseCamera.view.theta - Math.PI / 4) < 1e-12 && Math.abs(preciseCamera.view.phi - Math.PI / 4) < 1e-12
+      && preciseCamera.view.radius === 12, 'The numeric native-world target, degree angles and distance persist through the authenticated bookmark API');
     await page.locator('#tab-operations').click(); await command('Pause'); await until(async () => (await api('/sessions/' + session)).state === 'Paused', 'Pause');
     const paused = await until(() => native(state => state.phase === 'Paused'), 'native Pause observation');
     await sleep(400);
@@ -130,9 +138,12 @@ async function main() {
     await page.locator('#tab-world').click(); await page.locator('#world-replay').click();
     await until(async () => await page.locator('#world-pause').isEnabled(), 'native replay');
     await page.locator('#world-camera').selectOption('follow'); await page.locator('#world-speed').selectOption('2');
+    await page.locator('#camera-positions').selectOption(camera.id);
     await page.locator('#camera-recall').click();
     await until(async () => (await page.locator('#world-canvas').getAttribute('data-camera')) === savedPose, 'camera recalled on native replay');
     check(true, 'Saved native-world overhead position is recalled after switching to follow mode');
+    await page.locator('#camera-positions').selectOption(preciseCamera.id); await page.locator('#camera-recall').click();
+    check((await page.locator('#world-canvas').getAttribute('data-camera')) === precisePose, 'Custom native-world position and angles are restored exactly in sealed replay');
     await page.locator('#world-timeline').press('End');
     await until(async () => (await page.locator('#world-timeline').inputValue()) === (await page.locator('#world-timeline').getAttribute('max')), 'replay final seek');
     const finalInfo = await api('/sessions/' + session + '/world');
@@ -142,7 +153,7 @@ async function main() {
     check(stats.origin === 'Simulation' && !stats.pendingTelemetry && stats.players.some(p => p.hitsReceived > 0), 'UI-controlled AI produces sealed actual-native combat statistics');
     check(stats.players.some(p => p.playerId === removedPeer.id && p.name === 'Peer 02') && stats.players.some(p => p.playerId === replacement.id), 'Final native replay / ledger preserves removed and replacement player history');
     check((await api('/sessions')).length === 0, 'Operator End releases the round'); check(errors.length === 0, 'No browser page errors');
-    await fs.writeFile(path.join(evidence, 'summary.json'), JSON.stringify({ sessionId: session, mission, statistics: stats, camera, checks, browserRenderer: 'Chromium SwiftShader; native GPU inspected separately', pageErrors: errors }, null, 2));
+    await fs.writeFile(path.join(evidence, 'summary.json'), JSON.stringify({ sessionId: session, mission, statistics: stats, camera, preciseCamera, precisePose, checks, browserRenderer: 'Chromium SwiftShader; native GPU rendering requires separate inspection', pageErrors: errors }, null, 2));
     await fs.writeFile(path.join(directory, 'end.request'), '');
     console.log('Operator/native UI checks passed: ' + checks);
   } catch (error) { await page.screenshot({ path: path.join(evidence, 'failure.png'), fullPage: true }).catch(()=>{}); throw error; }

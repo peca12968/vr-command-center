@@ -21,6 +21,8 @@ python scripts/start-desktop-control.py --runtime-root $operatorData --visible-r
 6. 透過控制台開始、暫停、繼續，調整場次天氣／日夜／閃電及敵軍數量／策略／自動攻擊。表單過時依原 409 規則重新載入，不強行覆寫。設定須由 server 接受後才出現在世界；頭手與戰鬥走 NGO，不走管理 REST。
 7. 在「觀戰與任務回放」選該實際錄製，即時全景／俯視／跟隨／自由調整，命名保存鏡頭。End 後等待精確封存，再從頭回放、跳轉或切換保存鏡頭。觀察不占名額。
 
+亦可輸入看向世界座標、水平／俯視角與距離，精確切換視角；讀取目前鏡頭、草稿及書籤操作見 [OBSERVER_CAMERA.md](OBSERVER_CAMERA.md)。
+
 操作員 End 某場後，工具等雙管道封存並停止該場自有 native 程序，仍可在時限內開下一場；舊回放／統計保留。關閉可操作玩家、Ctrl+C、時限到，或在該次目錄建立空白 `end.request`，會結束所有已接入場次並收尾。工具不是正式場館服務管理器、世界崩潰恢復或任意外部 API 啟動器。
 
 `ready.json` 保存自己的 URL／runtime 及 build receipt；`operator-status.json` 從實際接受的世界幀記錄 phase／tick／環境／AI／連線玩家，不是自造控制回應。持續量測來源 UTC 年齡，維持原 1.5 秒門檻，過期即失敗並保留 journal。`summary.json` 及 `cleanup.json` 分開記錄封存／報表一致性與清理／runtime 快照；清理失敗非零退出。動態名冊的最終統計按持久 PlayerJoined 歷史核對，不丟掉已離場者。
