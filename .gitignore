@@ -25,6 +25,7 @@ clients/unity/*.csproj
 clients/unity/*.sln
 clients/unity/*.slnx
 clients/unity/*.suo
+clients/unity/Assets/Resources/PerformanceTestRun*.json*
 
 *.worldlog
 *.journal

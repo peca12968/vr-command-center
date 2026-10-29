@@ -1,20 +1,20 @@
-# Quest 3 接入原型與工具鏈 v0.16
+# Quest 3 接入原型與工具鏈 v0.18
 
-管理 API／控制台現為 v0.16，NGO protocol／Android code 16、bundle 0.16.0。2026-10-29 使用者確認 Hub 有有效授權後，真正 Unity 6000.3.27f1 已成功 Prepare、29 項 EditMode、Windows 播放器及 ARM64／IL2CPP Quest Development APK。SDK 診斷已被這些較強的實際結果補充；完整 11 項與頭盔實機驗收尚未完成。最終建置雜湊及多人／觀戰驗證以 [PROGRESS.md](PROGRESS.md) 為準；下方舊版本段落保留歷次說明。
+管理 API／控制台現為 v0.16，NGO protocol／Android code 18、bundle 0.18.0。2026-10-29 使用者確認 Hub 有有效授權後，真正 Unity 6000.3.27f1 已成功 Prepare、34 項 EditMode、Windows 播放器及 ARM64／IL2CPP Quest Development APK。SDK 診斷已被這些較強的實際結果補充；完整 11 項與頭盔實機驗收尚未完成。最終建置雜湊及多人／觀戰驗證以 [PROGRESS.md](PROGRESS.md) 為準；下方舊版本段落保留歷次說明。
 
-v0.14 新增每次入場識別、票券 v2／protocol 2、If-Match-Admission 與跨輪詢重入撤銷，Unity／API 需同版升級並重發舊券，見 [ADMISSION.md](ADMISSION.md)。生成器 NGO protocol 14／bundle 0.14；當時 15 項 EditMode 尚待執行；現已擴為 29 項並通過，頭盔仍待驗。
+v0.14 新增每次入場識別、票券 v2／protocol 2、If-Match-Admission 與跨輪詢重入撤銷，Unity／API 需同版升級並重發舊券，見 [ADMISSION.md](ADMISSION.md)。生成器 NGO protocol 14／bundle 0.14；當時 15 項 EditMode 尚待執行；現已擴為 34 項並通過，頭盔仍待驗。
 
 v0.13 新增共用世界來源／發布器、接受後頭手錄製、追蹤中斷與 NGO protocol 13；接入／補送見 [WORLD_SOURCE.md](WORLD_SOURCE.md)。該版本當時 Prepare 退出 198、12 項 EditMode 尚待執行；最新真正 Editor 結果以上方與 NATIVE_VALIDATION 為準。
 
 使用者指定先用 Meta Quest 3；暫按 Android 獨立執行規劃。工程在 `clients/unity/`，後端仍獨立使用 .NET 10，不把後端 DLL 放進 Unity。
 
-目前遊戲端 v0.17.0／Android code 17／NGO 17，API 仍 0.16.0／驗票 2。保存的 Arena 原位升級，不重建場景；全部遊戲 server／client 同版。PC 重連與嵌入 Transport 修正見 [RECONNECT](RECONNECT.md)／[TRANSPORT_PATCH](TRANSPORT_PATCH.md)，Windows／Quest receipt 來源指紋一致。
+目前遊戲端 v0.18.0／Android code 18／NGO 18，API 仍 0.16.0／驗票 2。保存的 Arena 原位升級，不重建場景；全部遊戲 server／client 同版。PC 重連與嵌入 Transport 修正見 [RECONNECT](RECONNECT.md)／[TRANSPORT_PATCH](TRANSPORT_PATCH.md)，Windows／Quest receipt 來源指紋一致。
 
 ## 已有程式與驗證邊界
 
 已有場地生成器、玩家頭部／雙手及武器物件、OpenXR 瞄準／射擊／換彈、NGO 連線審核、固定出生席位，以及管理狀態／環境、任務擺設、敵軍與健康／彈藥的接入來源碼。姿態透過 NGO 傳送，不走 REST。姿態目標 20 Hz、戰鬥狀態 10 Hz 是設定值，沒有實機量測；支援範圍與未接通的報告見 `GAMEPLAY.md`。
 
-**目前已完成真正 Unity 編譯、生成資產、29 項 EditMode、Windows 及 Quest APK。** Windows server 加兩個 client 以無圖形模式通過獨立／Linked Simulation 入場、AI 傷害、暫停及封存；共用發布器變更後另通過 472 核心、369 HTTP、43 世界串流。另有真正 PC GPU 視窗／鍵鼠射擊證據，見 DESKTOP；沒有頭盔實機。
+**目前已完成真正 Unity 編譯、生成資產、34 項 EditMode、Windows 及 Quest APK。** Windows server 加兩個 client 以無圖形模式通過獨立／Linked Simulation 入場、AI 傷害、暫停及封存；共用發布器變更後本輪通過 485 核心、369 HTTP、43 世界串流。另有真正 PC GPU 視窗／鍵鼠射擊證據，見 DESKTOP；沒有頭盔實機。
 
 沒有實機互見或頭盔射擊操作；電腦鍵鼠射擊已驗證、MR 透視／錨點、遊戲內物件編輯或頭盔任務錄製；已有真正 PC AI 傷害證據。雨線／雷聲已有 Unity 接入來源及瀏覽器 Simulation 驗證，沒有頭盔聲光結果。瀏覽器自由觀戰／鏡頭書籤已驗證；Unity 桌面觀察鏡頭固定，不能作為需求 10 的完整證據。Unity 持久事件／補送已通過 PC 統計與回放封存整合；頻率與效能仍須量測，詳見 TELEMETRY。
 
@@ -35,7 +35,7 @@ embedded package `com.vrcommand.simulation` 現為 0.11.0。Runtime asmdef 已�
 
 版本由官方 Unity release feed、套件 metadata 與 URP Blank 17.1.0 模板選定。URP 已對齊 Editor 隨附 17.3.0，真正 Editor 完成匯入與資產升級，原範本授權保留。已產生真正 packages-lock.json；Editor 最低版本政策使 Transport／Collections／Burst／Math 等相依提高，實際為 2.7.4／2.7.1／1.8.31／1.3.3，XR Core Utils／Legacy Input Helpers 為 2.6.0／2.1.13。先前 managed SDK 的最低相依診斷圖不是此 UPM 圖，不能混稱。
 
-新增 [managed SDK 接入檢查](UNITY_SDK_CHECK.md)：11 份 runtime 與 8 份測試來源使用官方 NGO／Input／Transport 等來源及真正 Unity DLL，在 Android／Windows 條件分支均通過型別編譯。該工具不執行 NUnit 或 Editor／ILPP／IL2CPP／APK；本輪真正 Editor 的 29 項測試與建置另有日誌，不混用證據。
+新增 [managed SDK 接入檢查](UNITY_SDK_CHECK.md)：11 份 runtime 與 9 份測試來源使用官方 NGO／Input／Transport 等來源及真正 Unity DLL，在 Android／Windows 條件分支均通過型別編譯。該工具不執行 NUnit 或 Editor／ILPP／IL2CPP／APK；本輪真正 Editor 的 34 項測試與建置另有日誌，不混用證據。
 
 使用者已明確同意 SDK／NDK 條款；Android Build Support 與 OpenJDK 已由 CLI 安裝，SDK／NDK 目錄修復及實際原生編譯結果見下節，不再等待條款確認。
 
@@ -79,7 +79,7 @@ embedded package `com.vrcommand.simulation` 現為 0.11.0。Runtime asmdef 已�
 .\scripts\build-unity.ps1 -Target Quest
 ```
 
-`Prepare` 首次建立 `Assets/VrCommand/Generated/Arena.unity`、玩家 prefab 與 XR 設定，之後重用保存的網路識別；需重建時明確執行 RebuildArena，並一起重建所有平台。Tests 要求新 XML 至少 29 項全數通過。Desktop 輸出 `artifacts/desktop/VrCommand.exe`（須連同整個資料夾使用），Quest 輸出 `artifacts/quest/VrCommand.apk`。腳本檢查 exit 0／1，Desktop／Quest 另核對本次成功 BuildReport 的新 build-receipt.json，日誌在 `artifacts/unity-logs/`。PC 自動 smoke 與限制見 NATIVE_VALIDATION，下方頭盔步驟仍待設備。
+`Prepare` 首次建立 `Assets/VrCommand/Generated/Arena.unity`、玩家 prefab 與 XR 設定，之後重用保存的網路識別；需重建時明確執行 RebuildArena，並一起重建所有平台。Tests 要求新 XML 至少 34 項全數通過。Desktop 輸出 `artifacts/desktop/VrCommand.exe`（須連同整個資料夾使用），Quest 輸出 `artifacts/quest/VrCommand.apk`。腳本檢查 exit 0／1，Desktop／Quest 另核對本次成功 BuildReport 的新 build-receipt.json，日誌在 `artifacts/unity-logs/`。PC 自動 smoke 與限制見 NATIVE_VALIDATION，下方頭盔步驟仍待設備。
 
 無授權時可先執行 `.\scripts\check-unity-source.ps1`，但只能回報語法檢查結果。不得把其輸出視為可執行的 Unity 工程。
 

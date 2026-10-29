@@ -26,15 +26,16 @@ namespace VrCommand.Unity
     public struct CombatPropState : INetworkSerializable, IEquatable<CombatPropState>
     {
         public FixedString64Bytes id;
+        public int room;
         public Vector3 center, half;
         public float yaw;
         public bool barrel;
         public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
         {
-            serializer.SerializeValue(ref id); serializer.SerializeValue(ref center); serializer.SerializeValue(ref half);
+            serializer.SerializeValue(ref id); serializer.SerializeValue(ref room); serializer.SerializeValue(ref center); serializer.SerializeValue(ref half);
             serializer.SerializeValue(ref yaw); serializer.SerializeValue(ref barrel);
         }
-        public bool Equals(CombatPropState other) => id.Equals(other.id) && center == other.center && half == other.half
+        public bool Equals(CombatPropState other) => id.Equals(other.id) && room == other.room && center == other.center && half == other.half
             && yaw.Equals(other.yaw) && barrel == other.barrel;
     }
 
@@ -62,6 +63,7 @@ namespace VrCommand.Unity
         private sealed class AcceptedRig { internal ulong Connection; internal RecordedRig Rig; }
         private readonly Dictionary<Guid, AcceptedRig> rigs = new Dictionary<Guid, AcceptedRig>();
         private readonly DesktopResumeCache desktopResume = new DesktopResumeCache();
+        private readonly Dictionary<int, ArenaWalkSurface> walkSurfaces = new Dictionary<int, ArenaWalkSurface>();
 
         public void InitializeRecording(string path)
         {
@@ -123,7 +125,7 @@ namespace VrCommand.Unity
             sand = Material(new Color(.58f, .51f, .29f)); steel = Material(new Color(.25f, .35f, .34f)); enemy = Material(new Color(.8f, .25f, .15f));
             if (IsServer) { Ready.Value = serverReady; Publish(); }
         }
-        private void GeometryChanged(NetworkListEvent<CombatPropState> change) { geometryDirty = true; }
+        private void GeometryChanged(NetworkListEvent<CombatPropState> change) { geometryDirty = true; walkSurfaces.Clear(); }
         private static Material Material(Color color)
         {
             var shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
@@ -195,6 +197,26 @@ namespace VrCommand.Unity
                 if (!Actors[index].enemy && Actors[index].id.ToString() == id) { state = Actors[index]; return true; }
             state = default; return false;
         }
+        public bool ConstrainDesktop(int room, Vector3 from, Vector3 desired, out Vector3 result)
+        {
+            result = from;
+            if (!IsSpawned || !Ready.Value || room < 1 || room > 5) return false;
+            if (!walkSurfaces.TryGetValue(room, out var surface))
+            {
+                var geometry = new List<WorldProp>();
+                foreach (var prop in Props)
+                {
+                    if (prop.room != room) continue;
+                    var item = new WorldProp(Guid.Parse(prop.id.ToString()), room, prop.barrel ? PropKind.Barrel : PropKind.Sandbag,
+                        Vector(prop.center - Vector3.up * prop.half.y), prop.yaw);
+                    if (Vector3.Distance(Vector(item.HalfSize), prop.half) > .0001f) return false;
+                    geometry.Add(item);
+                }
+                surface = new ArenaWalkSurface(Vector(VenueBootstrap.RoomOrigin(room)), geometry.ToArray());
+                walkSurfaces[room] = surface;
+            }
+            result = Vector(surface.Constrain(Vector(from), Vector(desired))); return true;
+        }
         // Display prediction only: the server still casts its own accepted weapon intent.
         public Vector3 PreviewAimPoint(Vector3 origin, Vector3 forward, string ignorePlayer)
         {
@@ -236,7 +258,7 @@ namespace VrCommand.Unity
             {
                 geometryPublished = true;
                 Props.Clear();
-                foreach (var prop in session.Props) Props.Add(new CombatPropState { id = prop.Id.ToString("D"), center = Vector(prop.Center), half = Vector(prop.HalfSize), yaw = prop.Yaw, barrel = prop.Kind == PropKind.Barrel });
+                foreach (var prop in session.Props) Props.Add(new CombatPropState { id = prop.Id.ToString("D"), room = prop.RoomId, center = Vector(prop.Center), half = Vector(prop.HalfSize), yaw = prop.Yaw, barrel = prop.Kind == PropKind.Barrel });
             }
             var frame = session.World.Snapshot();
             GetComponent<SceneAuthority>()?.PublishTick(frame.Tick, frame.Phase.ToString());

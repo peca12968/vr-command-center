@@ -1,6 +1,6 @@
 # 桌面重連與入場識別
 
-Unity 遊戲端 v0.17.0／Android code 17／NGO protocol 17；管理 API 仍為 0.16.0、驗票 protocol 2，場次 envelope 6／世界 schema 1 不變。更新所有遊戲伺服器與玩家程式，不混用 NGO 16／17。Prepare 會在既有 Arena 上將設定 16 升為 17，保留 scene／PlayerAvatar 的 GUID、本地 file ID 及 NGO hash；不分平台重建場景。
+Unity 遊戲端 v0.18.0／Android code 18／NGO protocol 18；管理 API 仍為 0.16.0、驗票 protocol 2，場次 envelope 6／世界 schema 1 不變。更新所有遊戲伺服器與玩家程式，不混用 NGO 16／17／18。Prepare 會在既有 Arena 上將設定 16／17 升為 18，保留 scene／PlayerAvatar 的 GUID、本地 file ID 及 NGO hash；不分平台重建場景。
 
 ## 玩家操作
 

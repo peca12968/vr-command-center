@@ -75,6 +75,7 @@ try
     AdmissionChecks.Run(Check, directory, mission);
     RequestRetryChecks.Run(Check, directory, mission);
     SimulationChecks.Run(Check);
+    WalkSurfaceChecks.Run(Check);
     ArenaSessionChecks.Run(Check, directory);
     TelemetryChecks.Run(Check, directory, mission);
     WorldChecks.Run(Check, directory);

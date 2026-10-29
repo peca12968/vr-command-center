@@ -62,6 +62,7 @@ namespace VrCommand.Unity
 
         public override void OnNetworkSpawn()
         {
+            PoseAccepted.OnValueChanged += AcceptanceChanged;
             visuals = GetComponentsInChildren<Renderer>();
             if (IsServer)
             {
@@ -113,10 +114,18 @@ namespace VrCommand.Unity
             if (desktopInitialized) return true;
             var saved = Pose.Value;
             if (saved.source != 1 || !saved.Valid()) return false;
+            ApplyDesktopPose(saved); return true;
+        }
+        private void ApplyDesktopPose(AvatarPose saved)
+        {
             head.localPosition = saved.head; head.localRotation = saved.headRotation;
             leftHand.localPosition = saved.left; leftHand.localRotation = saved.leftRotation;
             rightHand.localPosition = saved.right; rightHand.localRotation = saved.rightRotation;
-            desktopInitialized = true; return true;
+            desktopInitialized = true;
+        }
+        private void AcceptanceChanged(bool before, bool after)
+        {
+            if (IsOwner && !tracked && desktopInitialized && !after && Pose.Value.source == 1 && Pose.Value.Valid()) ApplyDesktopPose(Pose.Value);
         }
 
         private static InputAction Action(string name, string binding)
@@ -232,9 +241,12 @@ namespace VrCommand.Unity
         private static float Turn(ButtonControl button) => button.wasPressedThisFrame ? 3 : button.isPressed ? 60 * Time.unscaledDeltaTime : 0;
         private void MoveDesktop(Vector2 movement, float seconds)
         {
-            var origin = transform.position;
-            if (CombatAuthority.Instance != null && CombatAuthority.Instance.Player(PlayerId.Value.ToString(), out var player)) origin = VenueBootstrap.RoomOrigin(player.room);
-            head.localPosition = DesktopPreviewControls.Move(head.localPosition, head.localRotation, movement, seconds, transform.position - origin);
+            var authority = CombatAuthority.Instance;
+            if (authority == null || !authority.Player(PlayerId.Value.ToString(), out var player)) return;
+            var origin = VenueBootstrap.RoomOrigin(player.room);
+            var desired = DesktopPreviewControls.Move(head.localPosition, head.localRotation, movement, seconds, transform.position - origin);
+            if (authority.ConstrainDesktop(player.room, head.position, transform.TransformPoint(desired), out var constrained))
+                head.localPosition = transform.InverseTransformPoint(constrained);
         }
         private void DesktopWindowKey()
         {
@@ -321,6 +333,7 @@ namespace VrCommand.Unity
 
         public override void OnNetworkDespawn()
         {
+            PoseAccepted.OnValueChanged -= AcceptanceChanged;
             leftPosition?.Dispose(); rightPosition?.Dispose(); leftRotation?.Dispose(); rightRotation?.Dispose(); trigger?.Dispose(); reload?.Dispose();
             headTracking?.Dispose(); leftTracking?.Dispose(); rightTracking?.Dispose();
             headTracked?.Dispose(); leftTracked?.Dispose(); rightTracked?.Dispose();

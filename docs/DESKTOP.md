@@ -35,7 +35,7 @@ v0.17 新增斷線後 **Reconnect / reload player ticket**，可在玩家程序�
 
 短按也會讀取按下事件；視窗系統按鍵與 InputSystem 原始裝置輸入合併，讓輔助鍵盤仍能操作，避免同一按鍵重複執行。原始鍵盤／右鍵拖曳的完整組合與手感仍待人工驗收。
 
-移動依房間邊界限制，而不是依各出生席位的根物件限制；長幀不會直接大幅跳位。掩體碰撞仍由共用權威核心拒絕，未通過姿態時須退回有效位置，這不是完整的客戶端碰撞／移動預測。
+v0.18 桌面移動依同房間伺服器幾何預先裁切，不再持續將相機推進掩體而失去參戰資格。沙包、旋轉油桶、退回與側移已用真正鍵盤驗證；共用規則、重現操作及限制見 [DESKTOP_COLLISION.md](DESKTOP_COLLISION.md)。長幀位移／房間界線與伺服器姿態審核保留，Tracked XR 不被此功能搬動。
 
 自己的 API 埠、場次、播放器 receipt／程序 ID 與記錄在 `artifacts/desktop-demo/<時間-識別>/ready.json`；最新路徑在 `artifacts/latest-desktop-demo-path.txt`。啟動後會顯示隔離控制台 URL；若需操作該控制台，僅使用該目錄 `keys.json` 的臨時 Master 值。不要使用正式預覽憑證，也不要把 keys、server／client 設定或票券加入 Git／貼出。頭盔／玩家檔仍只有短效票券，GameServer key 只在伺服器。
 

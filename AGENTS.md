@@ -1,12 +1,14 @@
 # 開發指引
 
-2026-10-29 使用者已確認 Hub 有效授權，真正 Editor 已成功 Prepare、執行 29 項 EditMode，並產出同源 Windows 播放器與 ARM64／IL2CPP Quest APK；舊 CLI／198 是歷史狀態，不再當作目前阻礙。已有真正 PC 視窗的方向鍵／Space／滑鼠射擊、擊殺／命中率、換彈／暫停與封存證據；練習場操作見 docs/DESKTOP.md。沒有頭盔連線／實測證據。最新二進位與觀戰延遲修正驗證以 PROGRESS／實際 build log 為準，不能拿 SDK 檢查代替。
+2026-10-29 使用者已確認 Hub 有效授權，真正 Editor 已成功 Prepare、執行 34 項 EditMode，並產出同源 Windows 播放器與 ARM64／IL2CPP Quest APK；舊 CLI／198 是歷史狀態，不再當作目前阻礙。已有真正 PC 視窗的方向鍵／Space／滑鼠射擊、擊殺／命中率、換彈／暫停與封存證據；練習場操作見 docs/DESKTOP.md。沒有頭盔連線／實測證據。最新二進位與觀戰延遲修正驗證以 PROGRESS／實際 build log 為準，不能拿 SDK 檢查代替。
 
-當前遊戲端 v0.17.0／Android code 17／NGO protocol 17，API 仍 0.16.0、驗票 protocol 2。Prepare 可在保存 Arena 上從 16 升至 17，不能改 file ID；全部遊戲程序一起更新。PC 撤銷／重連與已接受 Simulated 姿態的 admission 快取見 docs/RECONNECT.md。真正視窗已驗證強制離線後 0.65 公尺外位置與健康／彈藥保持，仍非頭盔／server 崩潰恢復。
+當前遊戲端 v0.18.0／Android code 18／NGO protocol 18，API 仍 0.16.0、驗票 protocol 2。Prepare 可在保存 Arena 上從 16／17 升至 18，不能改 file ID；全部遊戲程序一起更新。PC 撤銷／重連與已接受 Simulated 姿態的 admission 快取見 docs/RECONNECT.md。真正視窗已驗證強制離線後 0.65 公尺外位置與健康／彈藥保持，仍非頭盔／server 崩潰恢復。
 
 Transport 2.7.4 固定官方來源嵌入 Packages/com.unity.transport，只修失敗 receive completion 釋放 buffer；保留通知／逐檔雜湊，以 python scripts/check-transport-patch.py 驗證，不改 Library 快取或安全設定。UPM lock 為 embedded，receipt 指紋包含嵌入 C#／asmdef／UPSTREAM.json。來源及原生反例見 docs/TRANSPORT_PATCH.md；29 Tests 含真正 Windows 小佇列 UDP 回歸。scripts/check-unity-admission.py 使用自有隔離資料／憑證，--interactive 才驗證原程序按鈕／鍵鼠，不可注入姿態取代。
 
-Prepare 必須重用已保存 Arena／PlayerAvatar 的本地 file ID；先前每次重建新 scene 會改變 NGO 識別、破壞跨目標連線。需重建時用 RebuildArena 並一起重建全部玩家；不能 Desktop／Quest 分別重建不同場景。生成物、OpenXR 設定與 packages-lock.json 應隨成功匯入結果保存。ProjectGeneration 測試涵蓋重複 Prepare 識別、非零 hash、場景／音訊引用與 Android XR 設定；build-unity Tests 門檻為 29，腳本明確回傳 exit 0／1。
+桌面碰撞見 docs/DESKTOP_COLLISION.md：ArenaWalkSurface 與權威／AI 共用 0.3m 足跡及 0.05m 線段取樣，只有 untracked 桌面預測裁切／拒絕後回到接受姿態，不能搬動 Tracked XR。CombatPropState 新增 room 是 NGO 18 wire 變更；API 0.16／驗票 2 保持。build-unity Tests 門檻 34。真正鍵盤四階段、五房／Linked、重連及同源雙平台證據以 PROGRESS 為準。
+
+Prepare 必須重用已保存 Arena／PlayerAvatar 的本地 file ID；先前每次重建新 scene 會改變 NGO 識別、破壞跨目標連線。需重建時用 RebuildArena 並一起重建全部玩家；不能 Desktop／Quest 分別重建不同場景。生成物、OpenXR 設定與 packages-lock.json 應隨成功匯入結果保存。ProjectGeneration 測試涵蓋重複 Prepare 識別、非零 hash、場景／音訊引用與 Android XR 設定；build-unity Tests 門檻為 34，腳本明確回傳 exit 0／1。
 
 生成器另外有 scripts/check-unity-editor-sdk.py --offline --verify-missing-reference：重新檢查 Windows player 基線，再以真正 Editor／XR SDK 綁定 ProjectBuilder，直接讀自己的 asmdef 參考、禁止隱含傳遞 ProjectReference。MetaQuestFeature 位於 Unity.XR.OpenXR.Features.MetaQuestSupport，Editor asmdef 必須直接參考它；反例只修改生成的診斷 csproj，應重現 CS0234。此圖明確不含 URP 專用驗證分支（見報告），不是完整 Editor／UPM／資產生成／ILPP／APK 證據。範圍見 docs/UNITY_SDK_CHECK.md。
 

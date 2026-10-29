@@ -7,13 +7,12 @@ namespace VrCommand.Simulation
     internal sealed class GridNavigation
     {
         private const int Size = 25;
-        private const float Radius = .3f;
         private readonly Vec3 origin;
-        private readonly WorldProp[] props;
+        private readonly ArenaWalkSurface surface;
         private readonly bool[] open = new bool[Size * Size];
         internal GridNavigation(Vec3 origin, WorldProp[] props)
         {
-            this.origin = origin; this.props = props;
+            this.origin = origin; surface = new ArenaWalkSurface(origin, props);
             for (var i = 0; i < open.Length; i++) open[i] = Walkable(Point(i));
         }
         private Vec3 Point(int index) => origin + new Vec3(index % Size * .5f - 6, 0, index / Size * .5f - 6);
@@ -25,21 +24,11 @@ namespace VrCommand.Simulation
         }
         internal bool Walkable(Vec3 point)
         {
-            if (!point.Finite || Math.Abs(point.X - origin.X) > 6 - Radius || Math.Abs(point.Z - origin.Z) > 6 - Radius) return false;
-            foreach (var prop in props)
-            {
-                if (prop.Feet.Y > 1.8f || prop.Center.Y + prop.HalfSize.Y < .1f) continue;
-                var local = Vec3.Rotate(point - prop.Center, -prop.Yaw);
-                if (Math.Abs(local.X) <= prop.HalfSize.X + Radius && Math.Abs(local.Z) <= prop.HalfSize.Z + Radius) return false;
-            }
-            return true;
+            return surface.Walkable(point);
         }
         internal bool ClearSegment(Vec3 a, Vec3 b)
         {
-            // Small movement steps and centre samples conservatively check the swept actor radius.
-            var distance = Vec3.Distance(a, b); var count = Math.Max(1, (int)Math.Ceiling(distance / .05f));
-            for (var i = 0; i <= count; i++) if (!Walkable(a + (b - a) * ((float)i / count))) return false;
-            return true;
+            return surface.ClearSegment(a, b);
         }
         internal List<Vec3> Find(Vec3 from, Vec3 to)
         {

@@ -1,5 +1,21 @@
 # 開發進度
 
+## 2026-10-29：電腦掩體移動 v0.18 與真正鍵盤驗證
+
+從乾淨 `3106708` 接續使用者「沒有頭盔，先繼續電腦端」及完整長期目標。先在舊 v0.17 真正 Windows 玩家視窗重現問題：對沙包連續 W 17 次，伺服器保留最後合法 z=-2.65，但相機繼續向前、HUD 顯示 POSE REJECTED、connected=false。反例 `20261029-214952-e8fee276` 正常結束封存，只計為問題重現。
+
+新增共用 `ArenaWalkSurface`，抽出原 GridNavigation 的 0.3m 半徑／旋轉矩形足跡及每最多 0.05m 線段取樣，供權威、AI 與桌面預測使用。桌面按同房間已複製幾何裁切移動、比較原位置出發的單軸候選，拒絕後回到最後接受的合成姿態；伺服器時間／位移／掩體檢查保持。不是解析掃掠或完整物理，Tracked XR 不被搬動。`CombatPropState` 新增 room 是 wire 變更，**NGO 18／bundle 0.18.0／Android code 18**，所有遊戲程序一起更新。API 0.16／驗票 2／envelope 6／world schema 1／rules 0.8.0 保持。Prepare 原位保存，沒有 RebuildArena，兩平台網路識別一致。
+
+真正 Editor Prepare、**34 項 EditMode（0 failed／skipped）**、Windows 與 Quest 均 exit 0。Windows receipt 完成 UTC 14:07:11、Quest 14:15:35，來源 fingerprint 同為 `db5433bed1791b8e0b9be4587a657a005cb7471aa1f35a16d6fda0121c95eea1`。APK 45,993,624 bytes，SHA-256 `3f1303df47e52427f189f7305104f7dd9441e5b900239ed973db9cbb9aa24d41`；apksigner v2、code 18／0.18.0、min 32／target 35、六個 ELF64 AArch64 原生庫含 libil2cpp 核對通過。只是建置及靜態檢查，沒有安裝至頭盔。
+
+鎖定還原及隔離／一般 Release 均成功、0 警告／0 錯誤；本輪實際 **485 核心、369 HTTP、43 世界串流** 通過。離線 managed 診斷 Android／Windows 各 11 runtime／9 test 型別編譯通過；Editor SDK 947 managed sources／13 assemblies 綁定及缺少 MetaQuest 直接參考的預期拒絕亦通過。診斷沒有執行 NUnit／UPM／ILPP／原生輸入，不能代替上方真正 Editor／binary 證據。嵌入 Transport 293 檔來源檢查保持通過。
+
+新增可重現的 `scripts/check-desktop-collision.py`，自己的 API、room 3 server／可見 client、臨時票券與 SSD runtime；只接受外部操作完成檔，不注入姿態。`20261029-221556-be8bb604` 以 computer-use 真正鍵盤 W17／S5／D10／W20 四階段全部通過：沙包停在 (-3,1.65,-2.6500003)，退回 z=-2.9，側移 x=-2.5000005，再停在 45° 油桶前 z=-2.219239。每階段 connected=true、Simulated、健康100／彈匣30／備彈90；原生 HUD 沒有姿態拒絕，截圖 sandbag.png／barrel.png。共 **3889 幀**完整封存、最大量測來源年齡 **0.689724 秒**，回放／ledger 一致、活動0、cleanup零錯誤。
+
+新 binary 另重驗：五房 `20261029-222305-af15ab00` 六組檢查、七場 **62／95／100／104／108／56／64 幀**，最大年齡 **0.22675 秒**；同 admission 撤銷／斷線恢復 `20261029-222346-d37c759b` **8 項／377 幀**，保留位置與健康／彈藥；控制台任務 `20261029-222449-7e99ae21` **15 項 UI／native／103 幀**、最大年齡 **0.164206 秒**，包含保存重載擺設、動態名冊、環境／AI／暫停、觀戰書籤與回放。全部精確封存、pendingTelemetry=false、統計一致及活動0。瀏覽器仍 SwiftShader，此輪沒有改 Web UI，不重算歷史 17 Node／122 Chromium。
+
+三個 Venue runtime 在關閉 writer 後複製回 F，14／26／14 檔逐檔 SHA-256 與 SSD 原件一致，保留原件；不能宣稱 F USB 配置通過。機器可讀總驗證在 `artifacts/collision-validation.json`，各 build／check log 均保留。Unity 測試產生的 PerformanceTestRun JSON 明確忽略，不提交機器資訊或生成執行資料。操作與規則見 [DESKTOP_COLLISION.md](DESKTOP_COLLISION.md)。下一步是原生閃電／雷聲、自由鏡頭完整人工操作、軍事美術及跨機部署；Quest／VIVE、MR、廠商硬體、25 台及完整 11 項仍待驗，長期目標保持開發中。
+
 ## 2026-10-29：控制台自訂任務接到真正 PC、圖形環境與原生觀戰
 
 上一輪五房已交付，本輪從乾淨 `9c14d4d` 接續完整 11 項目標。新增 `scripts/start-desktop-control.py`，由操作員在自己的控制台建立／儲存／重載任務、建立 Preparing VR 場次與名冊；工具才啟動真正 Unity server，按 playerId＋admissionId 配發短效票券並啟動 client。開始、暫停、天氣與 AI 仍由控制台發令，不預先代替操作員建立固定任務。只接本工具自己新建 API，拒絕接管 Running／既有 combat source，玩家檔沒有 Master／GameServer key。
