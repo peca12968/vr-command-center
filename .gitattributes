@@ -5,5 +5,11 @@
 *.glb binary
 *.wav binary
 *.ogg binary
+# Unity emits a space after empty serialized YAML values.
+*.asset whitespace=-blank-at-eol
+*.unity whitespace=-blank-at-eol
+*.prefab whitespace=-blank-at-eol
+*.mat whitespace=-blank-at-eol
+*.meta whitespace=-blank-at-eol
 # Preserve upstream Three.js bytes and its original formatting.
 src/VrCommand.Api/wwwroot/console/vendor/three/three.*.js -text -whitespace

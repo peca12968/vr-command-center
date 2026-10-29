@@ -1,5 +1,7 @@
 # Unity managed API 接入檢查
 
+後續使用者已確認 Hub 有效授權，真正 Editor 已完成 Prepare、21 項 EditMode、Windows 及首輪 Quest 建置，詳見 [NATIVE_VALIDATION.md](NATIVE_VALIDATION.md)。本文記錄 SDK 診斷工具及其較早證據範圍；其中「未執行 Unity」是指工具本身，舊 198／18 項未執行不再代表專案最新狀態。
+
 `scripts/check-unity-sdk.py` 將遊戲執行端的 10 份 C#、5 份 NUnit 來源及其官方套件來源，以 .NET Standard 2.1／C# 9 編譯並綁定本機 Unity 6000.3.27f1 的真正 managed DLL。它補足只有語法檢查、或只綁定單一天氣元件的證據缺口；**不是整個 Unity 工程建置**。
 
 ## 執行
@@ -44,3 +46,18 @@ python scripts/check-unity-sdk.py --offline
 兩分支零錯誤；完整重建 Android 18 個、Windows 19 個警告，包含上游未使用欄位、隱藏成員，以及本工程 JsonUtility 反射填入的 receipt DTO 欄位 CS0649。警告保留在 log，未宣稱零警告。已驗證舊 URP pin 拒絕、快取來源刻意改動拒絕及原文恢復後離線成功。
 
 最新真正 Prepare 結果仍為上一輪的授權退出 198；本輪沒有重複相同失敗建置。尚未執行 Unity 場景／資產匯入、ProjectBuilder、NGO／Collections／Burst IL postprocessor、Shader／音訊匯入、18 項 EditMode、Desktop／APK、網路雙玩家或頭盔測試。沒有以 managed 編譯結果替代任何一項。
+
+## ProjectBuilder 與 OpenXR 型別檢查
+
+另有 `scripts/check-unity-editor-sdk.py`，專門檢查生成器呼叫的 Editor／OpenXR API 及自己的直接組件參考。先真正重建 Windows player SDK 基線，再以 UNITY_EDITOR／UNITY_EDITOR_WIN 編譯所需的 UI、Input、XR 與生成器來源，共 947 份／13 個組件；額外四份官方來源為 OpenXR 1.19.0、XR Management 4.6.1、Core Utils 2.3.0、Legacy Input Helpers 2.1.11，沿用 archive hash／來源 receipt 核對。
+
+```powershell
+python scripts/check-unity-editor-sdk.py --offline --verify-missing-reference
+# 初次沒有 XR 快取時先去掉 --offline
+```
+
+修正 `VrCommand.Editor.asmdef` 未直接參考 `Unity.XR.OpenXR.Features.MetaQuestSupport` 的缺口。官方 1.19.0 將 `MetaQuestFeature` 放在此獨立組件，原生成器的 using 在嚴格直接參考下重現 CS0234；補參考後零錯誤（完整 SDK 重建保留 36 個上游警告）。Unity 自訂組件使用另一個 asmdef 組件的型別時需要宣告參考，`Auto Referenced` 對預定義組件的作用不能替代此依賴，見 [Unity 6.3 組件參考規範](https://docs.unity.com/en-us/engine/6000.3/manual/programming-environment/script-compilation/assembly-definition-files/assembly-definitions-referencing)。
+
+工具直接讀取本工程 asmdef 的 references，關閉 .NET 的自動傳遞 ProjectReference；`--verify-missing-reference` 只在另外生成的診斷專案移除該直接參考，必須因 ProjectBuilder 的 MetaQuestSupport 產生 CS0234 才通過回歸檢查。它不修改本工程 asmdef／C# 或正式 SDK 來源。`editor-report.json` 保存輸入／DLL 雜湊、選定符號、asmdef 雜湊與正／反例結果；`editor-player-report.json` 保留本次基線快照，log 為 editor.log／editor-missing-reference.log。開始即清除舊成功標記。
+
+這個診斷圖涵蓋生成器使用的公開 API 表面，**不是完整 Editor／套件編譯圖**。URP 專用驗證分支（UNITY_RENDER_PIPELINES_UNIVERSAL、ENABLE_RENDER_GRAPH_COMPATIBILITY_MODE_SUPPORTED）明確未啟用且記入報告；它們及 URP renderer 仍須真正 Unity 編譯／執行驗證。其餘 Editor 相依以真實 Input／UI 的 Editor 來源、Android Editor 擴充及隨附 Registry reference DLL 編譯，沒有執行 Editor 程式、讀取登錄或載入原生 XR plugin。場景、資產、UPM、ILPP、EditMode、IL2CPP、APK 與頭盔驗收不由此工具證明。

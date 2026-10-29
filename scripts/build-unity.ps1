@@ -3,6 +3,7 @@ param(
     [string]$EditorPath = 'F:\Tools\UnityEditors\6000.3.27f1\Editor\Unity.exe'
 )
 $ErrorActionPreference = 'Stop'
+trap { Write-Error $_ -ErrorAction Continue; exit 1 }
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $unityProject = Join-Path $projectRoot 'clients/unity'
 $logDirectory = Join-Path $projectRoot 'artifacts/unity-logs'
@@ -34,14 +35,28 @@ $expectedOutput = switch ($Target) {
     'Quest' { Join-Path $projectRoot 'artifacts/quest/VrCommand.apk' }
     'Tests' { $resultsPath }
 }
-if (-not (Test-Path -LiteralPath $expectedOutput) -or (Get-Item -LiteralPath $expectedOutput).LastWriteTimeUtc -lt $startedAt.AddSeconds(-2)) {
+if (-not (Test-Path -LiteralPath $expectedOutput)) {
+    throw "Unity did not produce a $Target output. Log: $logPath"
+}
+if ($Target -in @('Desktop', 'Quest')) {
+    $receiptPath = Join-Path (Split-Path -Parent $expectedOutput) 'build-receipt.json'
+    if (-not (Test-Path -LiteralPath $receiptPath) -or (Get-Item -LiteralPath $receiptPath).LastWriteTimeUtc -lt $startedAt.AddSeconds(-2)) {
+        throw "Unity did not produce a fresh build receipt. Log: $logPath"
+    }
+    $receipt = Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+    $expectedTarget = if ($Target -eq 'Quest') { 'Android' } else { 'StandaloneWindows64' }
+    if ($receipt.schemaVersion -ne 1 -or $receipt.target -ne $expectedTarget -or [IO.Path]::GetFullPath($receipt.outputPath) -ne [IO.Path]::GetFullPath($expectedOutput) -or $receipt.sourceFingerprint -notmatch '^[a-f0-9]{64}$') {
+        throw "Unity build receipt does not match $Target. Log: $logPath"
+    }
+} elseif ((Get-Item -LiteralPath $expectedOutput).LastWriteTimeUtc -lt $startedAt.AddSeconds(-2)) {
     throw "Unity did not produce a fresh $Target output. Log: $logPath"
 }
 if ($Target -eq 'Tests') {
     [xml]$results = Get-Content -LiteralPath $resultsPath -Raw
     $run = $results.'test-run'
-    if (-not $run -or $run.result -ne 'Passed' -or [int]$run.total -lt 18 -or [int]$run.failed -ne 0) {
+    if (-not $run -or $run.result -ne 'Passed' -or [int]$run.total -lt 21 -or [int]$run.failed -ne 0) {
         throw "Unity EditMode checks did not pass. Results: $resultsPath"
     }
 }
 Write-Host "Unity $Target succeeded. Log: $logPath"
+exit 0

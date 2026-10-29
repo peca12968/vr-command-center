@@ -1,0 +1,7 @@
+{
+  "name": "VrCommand.ProjectTests",
+  "references": ["VrCommand.Editor", "VrCommand.Runtime", "Unity.Netcode.Runtime", "Unity.XR.Management", "Unity.XR.Management.Editor", "Unity.XR.OpenXR", "Unity.XR.OpenXR.Features.MetaQuestSupport"],
+  "includePlatforms": ["Editor"],
+  "optionalUnityReferences": ["TestAssemblies"],
+  "autoReferenced": false
+}

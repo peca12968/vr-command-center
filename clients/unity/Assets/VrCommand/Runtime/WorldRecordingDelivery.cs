@@ -27,7 +27,7 @@ namespace VrCommand.Unity
             var codec = new UnityWorldCodec();
             while (!stopped && !source.Sealed)
             {
-                Exception failure = null;
+                Exception failure = null; var delivered = false;
                 try
                 {
                     if (publisher == null) publisher = new WorldPublisher(source, codec, new WorldWebSocket(configuration.managementApiUrl, Guid.Parse(configuration.sessionId), configuration.gameServerKey));
@@ -39,7 +39,7 @@ namespace VrCommand.Unity
                 {
                     while (!active.IsCompleted && !stopped) yield return null;
                     if (stopped) yield break;
-                    try { active.GetAwaiter().GetResult(); } catch (Exception exception) { failure = exception; }
+                    try { delivered = active.GetAwaiter().GetResult(); } catch (Exception exception) { failure = exception; }
                 }
                 operation?.Dispose(); operation = null; active = null;
                 if (failure != null)
@@ -48,7 +48,8 @@ namespace VrCommand.Unity
                     if (!(failure is WorldConnectionInterrupted) && !(failure is OperationCanceledException))
                     { fault("WORLD RECORDING REJECTED OR DISK ERROR - RECOVER SOURCE"); yield break; }
                 }
-                yield return new WaitForSecondsRealtime(failure == null ? .05f : .5f);
+                if (delivered) yield return null;
+                else yield return new WaitForSecondsRealtime(failure == null ? .05f : .5f);
             }
             publisher?.Dispose(); publisher = null;
         }

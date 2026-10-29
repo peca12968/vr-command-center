@@ -74,8 +74,8 @@ namespace VrCommand.Simulation
             {
                 if (!attached)
                 {
-                    await connection.Connect(cancellation);
-                    var info = Read(await connection.Exchange("{\"type\":\"header\",\"payload\":" + source.HeaderJson + "}", cancellation));
+                    await connection.Connect(cancellation).ConfigureAwait(false);
+                    var info = Read(await connection.Exchange("{\"type\":\"header\",\"payload\":" + source.HeaderJson + "}", cancellation).ConfigureAwait(false));
                     if (info.header == null || info.header.sessionId != source.Header.sessionId || info.header.streamId != source.Header.streamId
                         || info.header.origin != source.Header.origin || info.acceptedSequence < 0 || info.acceptedSequence > source.LastSequence)
                         throw new WorldPublicationRejected("World attachment receipt disagrees with the saved source.");
@@ -85,14 +85,14 @@ namespace VrCommand.Simulation
                 if (pending != null)
                 {
                     if (pending.ThroughCombatSequence > combatAcknowledged) return false;
-                    var info = Read(await connection.Exchange("{\"type\":\"frame\",\"payload\":" + pending.Json + "}", cancellation));
+                    var info = Read(await connection.Exchange("{\"type\":\"frame\",\"payload\":" + pending.Json + "}", cancellation).ConfigureAwait(false));
                     if (info.acceptedSequence < pending.Sequence || info.acceptedSequence > source.LastSequence) throw new WorldPublicationRejected("World receipt has not accepted the saved frame.");
                     source.Acknowledge(pending.Sequence); return true;
                 }
                 if (source.Complete && !source.Sealed && combatSealed)
                 {
                     var sequence = source.LastSequence.ToString(System.Globalization.CultureInfo.InvariantCulture);
-                    var info = Read(await connection.Exchange("{\"type\":\"seal\",\"finalSequence\":" + sequence + "}", cancellation));
+                    var info = Read(await connection.Exchange("{\"type\":\"seal\",\"finalSequence\":" + sequence + "}", cancellation).ConfigureAwait(false));
                     if (!info.complete || info.acceptedSequence != source.LastSequence) throw new WorldPublicationRejected("World seal receipt disagrees with its final source boundary.");
                     source.MarkSealed(); return true;
                 }

@@ -1,5 +1,11 @@
 # 開發指引
 
+2026-10-29 使用者已確認 Hub 有效授權，真正 Editor 已成功 Prepare、執行 21 項 EditMode，並產出第一輪 Windows 播放器與 ARM64／IL2CPP Quest APK；舊 CLI／198 是歷史狀態，不再當作目前阻礙。沒有頭盔連線／實測證據。最新二進位與觀戰延遲修正驗證以 PROGRESS／實際 build log 為準，不能拿 SDK 檢查代替。
+
+Prepare 必須重用已保存 Arena／PlayerAvatar 的本地 file ID；先前每次重建新 scene 會改變 NGO 識別、破壞跨目標連線。需重建時用 RebuildArena 並一起重建全部玩家；不能 Desktop／Quest 分別重建不同場景。生成物、OpenXR 設定與 packages-lock.json 應隨成功匯入結果保存。ProjectGeneration 測試涵蓋重複 Prepare 識別、非零 hash、場景／音訊引用與 Android XR 設定；build-unity Tests 門檻為 21，腳本明確回傳 exit 0／1。
+
+生成器另外有 scripts/check-unity-editor-sdk.py --offline --verify-missing-reference：重新檢查 Windows player 基線，再以真正 Editor／XR SDK 綁定 ProjectBuilder，直接讀自己的 asmdef 參考、禁止隱含傳遞 ProjectReference。MetaQuestFeature 位於 Unity.XR.OpenXR.Features.MetaQuestSupport，Editor asmdef 必須直接參考它；反例只修改生成的診斷 csproj，應重現 CS0234。此圖明確不含 URP 專用驗證分支（見報告），不是完整 Editor／UPM／資產生成／ILPP／APK 證據。範圍見 docs/UNITY_SDK_CHECK.md。
+
 Unity 接入另有 scripts/check-unity-sdk.py（Windows／Python 3.12+），以官方固定來源與真正 Editor DLL 編譯 10 runtime／5 NUnit 檔案的 Android／Windows 分支。快取與報告在 artifacts/unity-sdk-check，--offline 會拒絕來源 hash 改動。這不是 Unity CompilationPipeline、Editor／UPM／ILPP／EditMode／APK；不要部署診斷 DLL。manifest URP 已對齊 Editor 隨附 17.3.0，Collections 診斷 pin 2.4.3，無新 NGO wire 變更。範圍與剩餘驗收見 docs/UNITY_SDK_CHECK.md；舊語法／單一天氣型別檢查仍只是較窄證據。
 
 v0.16 聲光規範見 docs/ENVIRONMENT.md：EnvironmentPresentation 為共用 tick 規則，header.environmentVersion 缺少保持 legacy 0、新來源 1，不補造舊音效；保留 binary 原始 header／checksum，以 codec 正規化比較。API／UI／來源一起升級，NGO protocol／Android code 16、bundle 0.16.0，18 項 EditMode 待驗。單一 UnityWeatherView 已綁真正 Core／Audio DLL 通過，不代表整個 Unity／NGO／shader／音訊匯入或 APK。新增天氣檢查需設 VR_COMMAND_CHECKS_DLL 指向同次隔離建置，聲音素材以 generate-weather-audio.py --check 驗證。
@@ -33,7 +39,7 @@ python scripts/smoke_api.py
 
 Windows 執行中的本機 API 可能鎖住一般輸出 DLL；採 SIMULATION 文件的 `--artifacts-path` 隔離建置，不為測試任意停止現有服務。HTTP／瀏覽器檢查可用 `VR_COMMAND_API_DLL` 指定隔離 API，HTTP 另以 `VR_COMMAND_SIMULATION_DEMO_DLL` 指定同次建置的示範工具。
 
-Quest 接入與建置見 `docs/QUEST3.md`。`scripts/check-unity-source.ps1` 只檢查 C# 9 語法，不能代替 Unity 編譯與 EditMode 測試。Editor 已安裝至 F 槽。使用者已明確同意 SDK／NDK 條款，不再要求相同確認；CLI 子模組失敗後已整理官方目錄，`check-android-toolchain.ps1` 的 API 32 ARM64 編譯通過。CLI 失敗登錄仍在，不盲目重裝。使用者雖回覆已登入，實際 CLI 仍無 session／license、Prepare 退出 198，一次瀏覽器回呼等待亦已逾時。後續已補裝並啟動 Hub 3.22.5（Appx 3.22.5.65535），套件雜湊及 Unity 簽章通過；Windows 安全性對 adb.exe 提示遮住畫面，待使用者自行處理及確認 Hub 授權，不自動操作安全提示或登入。不再把 Hub 說成未安裝；CLI 未登入不是否定 Hub／浮動授權的充分證據，後續以實際 Editor 建置為準。
+Quest 接入與建置見 `docs/QUEST3.md`。`scripts/check-unity-source.ps1` 只檢查 C# 9 語法，不能代替 Unity 編譯與 EditMode。Editor 與 Android 工具已安裝至 F 槽，使用者已明確同意 SDK／NDK 條款，不再要求相同確認或盲目重裝。Hub 3.22.5 已安裝，使用者完成本機授權確認後，真正 Editor 已可編譯／建置；先前 CLI 無 session／198、過期回呼與 Windows 提示均只保留為歷史診斷。不要自動操作登入／安全性提示，不因 CLI 狀態否定已通過的 Editor 建置。
 
 3D 模擬回放在 `replay-*.js`，資料與操作見 `docs/REPLAY.md`。維護 schema 2／rules 0.8.0、明確 Simulation 來源、射線與快照／統計的一致性。`tests/browser` 的 test 會執行資料驗證與軟體 WebGL 檢查，不能視為真實 GPU、Unity 或頭盔測試。Three.js 上游原始檔、MIT 及 provenance 一併保留，不混入 CDN 執行相依。
 

@@ -1,10 +1,10 @@
-# Quest 戰鬥接入來源碼 v0.14
+# Quest 戰鬥接入 v0.16
 
-目前 v0.16 以原子 WeatherState 同步 tick／天氣／日夜／雷電／phase／房間，NGO protocol 16、bundle 0.16.0；雨景及合成音效來源見 [ENVIRONMENT.md](ENVIRONMENT.md)。18 項 EditMode 待執行，單一天氣元件通過真實 Core／Audio DLL 編譯不代表整個 Unity 工程成功。v0.14 的每次入場識別、票券 v2／驗票 protocol 2 及撤銷契約保持，見 [ADMISSION.md](ADMISSION.md)。
+目前 v0.16 以原子 WeatherState 同步 tick／天氣／日夜／雷電／phase／房間，NGO protocol 16、bundle 0.16.0；雨景及合成音效來源見 [ENVIRONMENT.md](ENVIRONMENT.md)。2026-10-29 真正 Editor 已通過 21 項 EditMode、Windows／Quest 建置，以及 Windows server／雙 client 的獨立與跨房 Simulation smoke（含 AI 傷害、暫停、封存與回放統計）。沒有 GPU、鍵鼠射擊或頭盔操作證據，詳見 [NATIVE_VALIDATION.md](NATIVE_VALIDATION.md)。v0.14 的每次入場識別、票券 v2／驗票 protocol 2 及撤銷契約保持，見 [ADMISSION.md](ADMISSION.md)。
 
-v0.13 已加入頭手來源 byte／追蹤狀態檢查、世界來源、共用發布及管理邊界錄製，詳見 [WORLD_SOURCE.md](WORLD_SOURCE.md)。NGO 生成器 protocol 13，兩端需同版重建；尚未有 Unity 編譯或實際傳輸結果。
+v0.13 已加入頭手來源 byte／追蹤狀態檢查、世界來源、共用發布及管理邊界錄製，詳見 [WORLD_SOURCE.md](WORLD_SOURCE.md)。該版 NGO protocol 13 為歷史；現行兩端使用 protocol 16 並保持同版場景識別。
 
-本版把共用戰鬥核心接到 Unity 的任務、入場、姿態、武器及 NGO 狀態同步來源碼。**尚未通過 Unity 編譯或運行，也沒有 APK、頭盔射擊、雙玩家互見或 25 台效能證據。** .NET 檢查證明相同任務接入層及遊戲規則可執行，不能代替 Unity SDK／IL2CPP／實機驗證。
+本版把共用戰鬥核心接到 Unity 的任務、入場、姿態、武器及 NGO 狀態同步來源碼。**已通過真正 Unity 編譯／建置及 PC 雙玩家連線、AI 傷害與封存，仍沒有圖形互見、鍵鼠／頭盔射擊或 25 台效能證據。** .NET、無圖形 PC 及頭盔驗收分別記錄。
 
 ## 同一套任務與戰鬥規則
 
@@ -26,7 +26,7 @@ Quest 來源碼使用 OpenXR 右手 pointerPosition／pointerRotation 瞄準、�
 
 可靠 owner RPC 傳送武器意圖及當下姿態，20 Hz 姿態 RPC 使用不可靠傳輸。伺服器仍執行射速、彈藥、換彈、健康與最近射線碰撞判定。輸入序號重送／倒退不再次扣彈；舊連線的輸入與斷線通知不能影響後來的綁定。
 
-NGO 2.7 的 HostServerInitialize 不等待非同步 Host approval，來源碼因此先向 API 驗 Host 票券，再同步回答本機入場。專用 Server 不占玩家席位，建議優先測此模式。Host 玩家被撤銷時關閉整個 Host；其他遠端玩家被撤銷則斷開該連線。非同步驗票完成後也確認該 pending client 尚存在，避免斷線後保留幽靈綁定。這些 Unity 路徑尚未實際運行。
+NGO 2.7 的 HostServerInitialize 不等待非同步 Host approval，來源碼因此先向 API 驗 Host 票券，再同步回答本機入場。專用 Server 不占玩家席位，建議優先測此模式。Host 玩家被撤銷時關閉整個 Host；其他遠端玩家被撤銷則斷開該連線。非同步驗票完成後也確認該 pending client 尚存在，避免斷線後保留幽靈綁定。專用 Server／兩個遠端 Client 已通過本機 smoke；Host／撤銷競態仍待獨立原生驗收。
 
 ## 場景、同步與顯示
 
@@ -38,14 +38,14 @@ ProjectBuilder 生成地板及戰鬥元件，不再放入未經核心判定的�
 
 ## 戰鬥統計管道與仍待接入的回放
 
-v0.11 的 Unity 來源碼會把四種統計 WorldEvent 保存到共用 TelemetryOutbox，綁定有序來源後批次送入 API，並於 End 補送／封存。相同 journal 及後端已通過跨程序 .NET／HTTP 驗證，但 Unity 發送器尚未編譯運行；不能宣稱實際頭盔 HUD 與主控台數值已實測一致。預設標記 Simulation，詳見 TELEMETRY。
+v0.11 的 Unity 來源碼會把四種統計 WorldEvent 保存到共用 TelemetryOutbox，綁定有序來源後批次送入 API，並於 End 補送／封存。相同 journal 及後端已通過跨程序 .NET／HTTP 驗證，且真正 Unity PC 發送器已通過 AI 傷害與封存統計整合；仍不能宣稱頭盔 HUD 與主控台數值已實測一致。預設標記 Simulation，詳見 TELEMETRY。
 
-持久 outbox、Pause／End 補送及封存邊界已實作，接續仍須 Unity／實機驗收、量測與損壞檔恢復流程。正式世界快照、頭手六軸與操作者事件仍待保存，才能支援真正頭盔任務回放及即時觀戰。瀏覽器維持既有 schema 2／rules 0.8.0 合成紀錄，不把此管道當作頭盔錄製驗收。
+持久 outbox、Pause／End 補送及封存邊界已實作，接續仍須原生故障／實機驗收、量測與損壞檔恢復流程。世界／頭手來源已保存並由 PC 合成頭手完成補送／封存，實際頭盔追蹤與操作者完整事件仍須分別驗收。瀏覽器維持既有 schema 2／rules 0.8.0 合成紀錄，不把此管道當作頭盔錄製驗收。
 
 ## 已執行與待執行的驗證
 
-本機 Release 建置通過，399 項核心檢查含原 41 項 ArenaSession／參戰狀態與新 30 項世界來源／時鐘檢查，使用真實管理模型 JSON。另通過 322 項原 HTTP、32 項世界串流、12 項回放資料及 78 項瀏覽器檢查。23 份 C# 通過 C# 9 語法；相同 embedded Runtime 真正建置為 .NET Standard 2.1。沒有使用假 Unity SDK stub 宣稱型別編譯成功。
+歷史 v0.13 檢查：本機 Release 建置通過，399 項核心檢查含原 41 項 ArenaSession／參戰狀態與新 30 項世界來源／時鐘檢查，使用真實管理模型 JSON。另通過 322 項原 HTTP、32 項世界串流、12 項回放資料及 78 項瀏覽器檢查。23 份 C# 通過 C# 9 語法；相同 embedded Runtime 真正建置為 .NET Standard 2.1。沒有使用假 Unity SDK stub 宣稱型別編譯成功。
 
-原有七個 EditMode 來源包含 AvatarPose、管理欄位及 NGO actor 往返；v0.13 增加五項姿態／world codec，v0.14 增加三項入場，v0.16 增加三項天氣／header，總數 18；建置腳本要求至少 18 項通過。實際 Prepare 仍退出 198（授權），尚無整個 Unity 工程編譯或 EditMode 結果，不能使用部分 SDK 檢查宣稱通過。
+原有七個 EditMode 來源包含 AvatarPose、管理欄位及 NGO actor 往返；v0.13 增加五項姿態／world codec，v0.14 增加三項入場，v0.16 增加三項天氣／header，原為 18 項；本輪增加三項生成資產／XR 整合，腳本要求至少 21 項，真正 Editor 全數通過。真正 Desktop／Quest 也已成功，不再以舊 Prepare 198 判定目前狀態。
 
-授權可用後按 QUEST3 的 Prepare → Tests → Desktop → Quest 順序執行，再驗雙玩家射擊、掩體／死亡、AI 控制、斷線／追蹤遺失、名冊撤銷、管理服務中斷及 Host 審核；每項保留實際日誌與量測，不能以本文件或來源碼存在替代。
+按 QUEST3 的 Prepare → Tests → Desktop → Quest 可重現建置；後續驗雙玩家射擊、掩體／死亡、AI 控制、斷線／追蹤遺失、名冊撤銷、管理服務中斷及 Host 審核；每項保留實際日誌與量測，不能以本文件或來源碼存在替代。

@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
 using Unity.Netcode;
 using Unity.Netcode.Transports.UTP;
 using UnityEditor;
@@ -24,15 +26,44 @@ namespace VrCommand.Unity.Editor
         private const string ScenePath = Generated + "/Arena.unity";
 
         [MenuItem("VR Command/Prepare Quest 3 Project")]
-        public static void Prepare()
+        public static void Prepare() => PrepareAssets(false);
+
+        [MenuItem("VR Command/Rebuild Arena (rebuild ALL players afterwards)")]
+        public static void RebuildArena() => PrepareAssets(true);
+
+        private static void PrepareAssets(bool rebuild)
         {
             Directory.CreateDirectory(Generated);
             AssetDatabase.Refresh();
             ConfigureQuest();
-            CreateScene();
+            if (rebuild || !File.Exists(ScenePath)) CreateScene();
+            // Reload saved objects so NGO validates persistent GlobalObjectIds, then keep
+            // their local file IDs identical for desktop and Android builds.
+            AssetDatabase.ImportAsset(Generated + "/PlayerAvatar.prefab", ImportAssetOptions.ForceUpdate);
+            var scene = EditorSceneManager.OpenScene(ScenePath, OpenSceneMode.Single);
+            var state = GameObject.Find("Scene Authority");
+            var network = GameObject.Find("Network Manager");
+            var bootstrap = network == null ? null : network.GetComponent<VenueBootstrap>();
+            var manager = network == null ? null : network.GetComponent<NetworkManager>();
+            if (state == null || state.GetComponent<UnityWeatherView>() == null || bootstrap == null || manager == null
+                || bootstrap.sceneAuthority != state.GetComponent<SceneAuthority>() || manager.NetworkConfig.ProtocolVersion != 16
+                || manager.NetworkConfig.PlayerPrefab == null)
+                throw new BuildFailedException("Generated arena is incompatible. Rebuild Arena, then rebuild ALL player targets together.");
+            RequireNetworkIdentity(state.GetComponent<NetworkObject>());
+            RequireNetworkIdentity(manager.NetworkConfig.PlayerPrefab.GetComponent<NetworkObject>());
+            if (PrefabUtility.SavePrefabAsset(manager.NetworkConfig.PlayerPrefab) == null)
+                throw new BuildFailedException("Validated player prefab could not be saved.");
+            EditorSceneManager.MarkSceneDirty(scene);
+            if (!EditorSceneManager.SaveScene(scene, ScenePath)) throw new BuildFailedException("Prepared scene could not be saved.");
             EditorBuildSettings.scenes = new[] { new EditorBuildSettingsScene(ScenePath, true) };
             AssetDatabase.SaveAssets();
             Debug.Log("VR Command project prepared. Hardware and multiplayer validation remain required.");
+        }
+
+        private static void RequireNetworkIdentity(NetworkObject value)
+        {
+            if (value == null || new SerializedObject(value).FindProperty("GlobalObjectIdHash").uintValue == 0)
+                throw new BuildFailedException("Generated network object has no persistent NGO identity. Reopen/import the generated assets before building.");
         }
 
         private static void ConfigureQuest()
@@ -80,6 +111,10 @@ namespace VrCommand.Unity.Editor
             controllers.enabled = true;
             openXR.renderMode = OpenXRSettings.RenderMode.SinglePassInstanced;
             EditorUtility.SetDirty(openXR);
+            EditorUtility.SetDirty(quest);
+            EditorUtility.SetDirty(controllers);
+            EditorUtility.SetDirty(settings);
+            EditorUtility.SetDirty(settings.AssignedSettings);
             EditorUtility.SetDirty(xr);
         }
 
@@ -191,9 +226,40 @@ namespace VrCommand.Unity.Editor
         {
             var path = Path.GetFullPath(Path.Combine(Application.dataPath, "../../..", relativePath));
             Directory.CreateDirectory(Path.GetDirectoryName(path));
+            var receipt = new PlayerBuildReceipt { target = target.ToString(), outputPath = path, unityVersion = Application.unityVersion,
+                sourceFingerprint = SourceFingerprint(),
+                sceneNetworkId = GlobalObjectId.GetGlobalObjectIdSlow(GameObject.Find("Scene Authority").GetComponent<NetworkObject>()).ToString(),
+                playerPrefabId = GlobalObjectId.GetGlobalObjectIdSlow(GameObject.Find("Network Manager").GetComponent<NetworkManager>().NetworkConfig.PlayerPrefab.GetComponent<NetworkObject>()).ToString() };
             var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions { scenes = new[] { ScenePath }, locationPathName = path,
                 target = target, options = BuildOptions.Development });
             if (report.summary.result != BuildResult.Succeeded) throw new BuildFailedException("VR Command player build failed.");
+            receipt.completedAtUtc = DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+            receipt.totalBytes = (long)report.summary.totalSize;
+            File.WriteAllText(Path.Combine(Path.GetDirectoryName(path), "build-receipt.json"), JsonUtility.ToJson(receipt, true));
+        }
+
+        [Serializable] private sealed class PlayerBuildReceipt
+        {
+            public int schemaVersion = 1;
+            public string target, outputPath, completedAtUtc, unityVersion, sourceFingerprint, sceneNetworkId, playerPrefabId;
+            public long totalBytes;
+        }
+
+        private static string SourceFingerprint()
+        {
+            var project = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            var files = Directory.GetFiles(Path.Combine(project, "Assets/VrCommand"), "*", SearchOption.AllDirectories)
+                .Concat(Directory.GetFiles(Path.Combine(project, "Packages/com.vrcommand.simulation"), "*", SearchOption.AllDirectories))
+                .Where(file => file.EndsWith(".cs", StringComparison.Ordinal) || file.EndsWith(".asmdef", StringComparison.Ordinal))
+                .Concat(new[] { Path.Combine(project, "Packages/manifest.json"), Path.Combine(project, "Packages/packages-lock.json"), Path.Combine(project, "ProjectSettings/ProjectVersion.txt") })
+                .OrderBy(file => file, StringComparer.Ordinal);
+            using (var memory = new MemoryStream())
+            using (var writer = new BinaryWriter(memory))
+            using (var hash = SHA256.Create())
+            {
+                foreach (var file in files) { writer.Write(Path.GetRelativePath(project, file).Replace('\\', '/')); var bytes = File.ReadAllBytes(file); writer.Write(bytes.Length); writer.Write(bytes); }
+                writer.Flush(); return BitConverter.ToString(hash.ComputeHash(memory.ToArray())).Replace("-", "").ToLowerInvariant();
+            }
         }
     }
 }

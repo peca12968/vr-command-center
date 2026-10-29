@@ -2,7 +2,7 @@
 
 v0.13 另有同源世界 journal／publisher，會等待此 outbox 的 durable ack 後才送相應世界幀；操作與限制見 [WORLD_SOURCE.md](WORLD_SOURCE.md)。兩份來源及 API durable state 需一起保留，補送不是世界恢復。
 
-已實作有順序的戰鬥來源、桌面持久 outbox、補送工具及主控台完整性提示。實際 .NET／HTTP 跨程序測試通過；Unity 發送接入仍只有來源碼，沒有 Unity 編譯、APK 或頭盔驗證。這是戰鬥統計管道，尚非完整世界／頭手姿態錄影或崩潰後的世界恢復。
+已實作有順序的戰鬥來源、桌面持久 outbox、補送工具及主控台完整性提示。實際 .NET／HTTP 跨程序測試通過；2026-10-29 Unity 已真正編譯、產出 Windows／APK，並以 Windows server 加兩個 desktop client 驗證獨立／跨房的 AI 傷害、戰鬥封存及回放統計一致；來源仍明確 Simulation，沒有頭盔驗證，見 [NATIVE_VALIDATION.md](NATIVE_VALIDATION.md)。這是戰鬥統計管道，尚非完整世界／頭手姿態錄影或崩潰後的世界恢復。
 
 ## API 契約
 

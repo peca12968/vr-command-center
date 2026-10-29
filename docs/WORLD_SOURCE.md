@@ -1,10 +1,10 @@
 # 世界來源、頭手與補送 v0.16
 
-目前生成器 NGO protocol／Android code 16、bundle 0.16.0，18 項 EditMode 待執行；下方 v0.13／14 為歷次改動。新 header 預設 environmentVersion 1，舊 journal 保持 0／原始 JSON／checksum，codec 正規化比較支援缺少選用欄位的原樣恢復。`--environment-demo true` 只搭配新 `--demo-room` 產生 Storm／Night／雷電 Simulation；完整聲光規則、UTC 與升級見 [ENVIRONMENT.md](ENVIRONMENT.md)。
+目前生成器 NGO protocol／Android code 16、bundle 0.16.0，真正 Editor 已通過 21 項 EditMode 及 Windows／Quest 建置；下方 v0.13／14 為歷次改動。新 header 預設 environmentVersion 1，舊 journal 保持 0／原始 JSON／checksum，codec 正規化比較支援缺少選用欄位的原樣恢復。`--environment-demo true` 只搭配新 `--demo-room` 產生 Storm／Night／雷電 Simulation；完整聲光規則、UTC 與升級見 [ENVIRONMENT.md](ENVIRONMENT.md)。
 
-v0.14 新增每次入場識別、票券 v2／protocol 2、If-Match-Admission 與跨輪詢重入撤銷，Unity／API 需同版升級並重發舊券，見 [ADMISSION.md](ADMISSION.md)。生成器 NGO protocol 14／bundle 0.14；15 項 EditMode 仍待執行，沒有 Unity／APK／頭盔結果。
+v0.14 新增每次入場識別、票券 v2／protocol 2、If-Match-Admission 與跨輪詢重入撤銷，Unity／API 需同版升級並重發舊券，見 [ADMISSION.md](ADMISSION.md)。生成器 NGO protocol 14／bundle 0.14；當時的 15 項 EditMode／建置尚待執行；最新真正 Editor／PC 結果以上方與 NATIVE_VALIDATION 為準，頭盔仍待驗。
 
-WorldOutbox／WorldPublisher 是 Unity 與 .NET 工具共用的唯一來源，位於 embedded Simulation Runtime，實際編譯為 C# 9／.NET Standard 2.1，不引用後端或 UnityEngine。JSON 由 IWorldCodec 提供：工具使用 System.Text.Json，Unity 使用 JsonUtility。真實 WebSocket、API、SQLite、SSE 及 Chromium 已以此 .NET 發送器驗證；**Unity 接入仍是未編譯／運行的來源碼**，沒有 APK、Quest／VIVE、實際 Tracked 姿態或 25 台效能證據。
+WorldOutbox／WorldPublisher 是 Unity 與 .NET 工具共用的唯一來源，位於 embedded Simulation Runtime，實際編譯為 C# 9／.NET Standard 2.1，不引用後端或 UnityEngine。JSON 由 IWorldCodec 提供：工具使用 System.Text.Json，Unity 使用 JsonUtility。真實 WebSocket、API、SQLite、SSE 及 Chromium 已以此 .NET 發送器驗證；Unity 已由真正 Windows server 與兩個 desktop client 通過獨立／跨房 Simulation 世界發布、暫停及精確封存，觀戰排隊也已修正；已建置 APK，沒有 Quest／VIVE、實際 Tracked 姿態或 25 台效能證據。最新範圍見 [NATIVE_VALIDATION.md](NATIVE_VALIDATION.md)。
 
 伺服器、主控台與新來源一起升至 v0.13：header 增加 captureStartedAtUtc，嚴格的 v0.12 API 不接受此欄位。舊 schema 1 世界 header 缺少時間仍可讀／去重，回應補空值及 capturedAtUtc:null；未改 SQLite schema 1、session envelope 5 或 rules 0.8.0。不要只更新發布器卻繼續使用舊 API。
 

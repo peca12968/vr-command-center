@@ -1,5 +1,23 @@
 # 開發進度
 
+## 2026-10-29：真正 Unity 建置、穩定跨平台識別與電腦雙玩家驗證
+
+使用者確認 Hub 有效授權後，真正 Editor 6000.3.27f1 已成功解析 UPM、編譯／ILPP、匯入音訊／Shader、Prepare、執行 **21 項 EditMode 全數通過**，並完成 Windows 播放器與 ARM64／IL2CPP Quest APK。這是目前狀態；下方舊 CLI session／Prepare 198 僅為歷史。使用者目前沒有頭盔，明確指定先繼續電腦端；完整 11 項與 VIVE／Quest 相容目標仍開發中。
+
+真正匯入揭露並修正 Editor asmdef 缺少直接 MetaQuestSupport 引用、不存在的 textrendering module，以及 TestAssemblies 重複 TestRunner 引用。新增可離線的真正 Editor SDK 診斷工具及移除引用的 CS0234 反例；其較窄範圍見 UNITY_SDK_CHECK，不代替此輪真正 Editor 結果。保存實際 packages-lock.json、URP 升級結果、生成資產與全部 meta／OpenXR 設定。UPM 實際選用 Transport 2.7.4、Collections 2.7.1、Burst 1.8.31 等，與較早診斷圖分開記錄。
+
+原 Prepare 每次重建場景會改變本地 file ID，不能將 Desktop／Quest 各生成一個世界。現在重用保存的 Arena／PlayerAvatar，驗證並持久保存非零 NGO hash；明確 RebuildArena 後須重建所有平台。新增三項實際資產整合測試，涵蓋重複 Prepare 識別、scene／prefab／音訊引用及 Android XR 設定。建置腳本最低 21 Tests，成功／失敗明確 exit 0／1；失敗反例已確認。增量建置的啟動 exe 可能維持舊時間，改以真正成功 BuildReport 後產生的新 receipt 驗證此次輸出。
+
+最終 Desktop／Quest receipt 的來源 fingerprint 同為 `563c2b38ff5c0b079b0b5bfbf0e72db72348f5046494f02d8c27fa3a866c616b`，scene GlobalObjectId 尾端 `1444571642-0`、prefab 尾端 `5227825248646244841-0` 相同。Quest 最終完成 UTC 2026-10-29T03:46:02Z，APK 67,969,388 bytes，application-id com.vrcommand.quest、minSdk 32／targetSdk 35、簽章 v2 驗證成功；ARM64 與檔案雜湊詳見 artifacts/native-build-validation.json。Windows 完整播放器在 artifacts/desktop，不能只複製啟動 exe。兩者為 Development 建置，不是發行包或頭盔驗收。
+
+新增 scripts/smoke-unity-player.py，建立自己的隔離 API／SQLite／短效玩家票券與憑證，啟動真正 Windows Unity server 加兩個真正 desktop client，使用 UDP／NGO。獨立房間 5 與五房 Linked（客戶端分別在房間 1／5）均驗證入場、兩份 Simulated rig、Running、敵軍確認傷害、Pause tick 凍結、End 戰鬥／世界精確封存及回放末幀統計一致；最終活動場次 0。全部使用 Simulation，沒有頭盔或正式服務資料寫入。
+
+首次原生觀戰雖可封存，卻觀察約 12 秒排隊。WorldPublisher 網路 await 改為不捕捉 Unity 同步內容，成功送幀後移除額外固定 50 ms 等候，保留單份 outstanding、戰鬥依賴及 durable ack／seal。修正後獨立 smoke 保存 116 幀、暫停 tick 167、最大取樣來源年齡 0.46213 秒、AI 確認傷害合計 40；Linked 保存 115 幀、暫停 tick 172、最大取樣年齡 0.424355 秒、傷害 100。證據分別為 artifacts/unity-player-smoke/20261029-113725-8744e1bd 與 20261029-113913-7fc522c5。這是本機三個 Unity 程序的無圖形 smoke，不是所有網路條件的延遲分布、鍵鼠射擊、GPU、聲音聽感或 25 人證據。
+
+共用發布器變更後，鎖定還原／隔離 Release 建置 0 警告／0 錯誤，重新通過 **472 核心、369 HTTP、43 世界串流**；Unity **21 項 EditMode** 實際執行通過。UI 未改，本輪沒有重跑先前 17 Node／122 Chromium，不將舊 1023 項混算為此次新結果。完整規範與限制見 NATIVE_VALIDATION。正式預覽 5080 未停止、未更換 DLL 或資料庫。ADB 最近為 0 裝置，使用者已明確無頭盔，不再要求立即連接。
+
+下一步繼續電腦端的可操作畫面、鍵鼠射擊、重入／撤銷與斷線驗證；之後取得設備再做 Quest 控制器／追蹤、聲光／圖形、MR、VIVE／廠商硬體與 25 台效能。CI 與 GitHub 推送結果另記，完整長期目標不以此輪建置成功結案。
+
 ## 2026-10-29：擴大 Quest managed SDK 綁定與 URP 版本對齊
 
 上一輪 v0.16 已推送、部署並完成資料保留／模擬聲光驗證，屬於具體進展；本輪從乾淨 e6b6d86 接續，完整目標與 Quest 3 優先保持。最新真正 Prepare 仍是上一輪授權退出 198；本輪沒有新授權可用的證據，也沒有重複啟動相同失敗工作、重裝工具或操作登入／安全性提示。
