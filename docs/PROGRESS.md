@@ -1,5 +1,29 @@
 # 開發進度
 
+## 2026-10-29：可操作電腦練習場、瞄準與真實視窗射擊統計
+
+上一輪 990b946／1b4f3a7 已完成真正 Unity 建置與雙 client 無圖形驗證，屬於具體進展。本輪依使用者「目前沒有頭盔，先繼續電腦端」從乾淨 1b4f3a7 接續，不縮減完整 11 項需求。沒有登入、SDK 重裝或頭盔操作。
+
+新增 scripts/start-desktop-demo.py，直接啟動自己的 API／SQLite／Master 與 GameServer 憑證、無圖形 Unity server、一個可操作視窗及預設一個無圖形同伴。Clear／Day、Hold 且不自動攻擊的練習任務含沙包／油桶；玩家只有短效票券，來源明確 Simulation。關閉玩家視窗、Ctrl+C 或時間結束後送 End，等待雙管道精確封存並比對回放／報表，再停止自有程序。產物與私密設定都留在忽略的 artifacts/desktop-demo，不讀取正式預覽憑證或改動 5080 資料。
+
+桌面 HUD 改為可讀的畫面固定血量／彈藥／房間／phase 與操作提示，保留頭盔的原 world-space HUD。準星依收到的幾何與槍口預測投影，不把預覽當命中確認；伺服器仍處理姿態／射速／傷害。新增上下瞄準、方向鍵、Space 射擊；WASD 依水平視角前進、斜走不加速，按房間而非各出生席位根物件限制邊界，長幀不大幅跳位。掩體碰撞仍由核心拒絕，尚無完整本地移動預測。
+
+實際視窗先證實滑鼠能扣彈，但自動鍵盤未改變畫面；補上短按 wasPressedThisFrame 後仍無效，不能只憑推測稱為修復。新增裝置診斷確認 keyboard／mouse 均存在，再接入視窗 key event 的後備路徑，才取得真正方向鍵／Space／R／W 操作證據。後備輸入在下一次 Update 與 InputSystem 狀態合併，避免同一原始按鍵重複套用；這是系統視窗事件相容，不是測試 RPC、直接寫命中或繞過伺服器。實體鍵盤的所有組合／手感仍待人工量測。
+
+最終 Windows receipt 來源 fingerprint `05d97ef51db1b3f505fc6da89867325dcd8aff5af7f4a9382053fb74f64e5ef8`。在真正 Direct3D 玩家視窗以 computer-use 執行方向鍵轉向、Space 與左鍵射擊：兩次命中造成一個擊殺，再打一發空槍。API 報表為耗彈 **3**、命中 **2**、擊殺 **1**、命中率 **66.67%**，同伴耗彈 0。R 換彈由 27／90 到 **30／87**；W 前進後權威頭部位置由 (25, 1.65, -3) 到 (24.966543, 1.65, -2.9628427)，Up 後 forward.y 約 0.052336。Pause 後 Space 不扣彈，tick 保持 3505。
+
+關閉真正玩家視窗後啟動器完成 **1967 幀**世界封存，pendingTelemetry=false、回放末幀統計與報表一致、活動場次 0。證據在 artifacts/desktop-demo/20261029-183207-5901bf78，實際畫面為 artifacts/desktop-ui/aim-hit.png 與 paused-reloaded.png。這是單機桌面 GPU 畫面與合成頭手操作，不是頭盔、軍事美術定稿、音效聽感、完整觀戰畫面或 25 人量測。
+
+空事件試跑曾因統計 origin=null 被工具誤判來源混用；無戰鬥事件的空報表合法為 null。已改為只允許空計數的 null 或 Simulation，世界 header 仍須 Simulation，不允許 GameServer 混入。空場重驗保存 325 幀、完整封存／回放統計一致／活動 0，證據在 artifacts/desktop-demo/20261029-183610-a85e5ea9。新增四項真正 EditMode 測試驗證俯仰／無翻滾、水平相對移動／斜走速度、長幀及五席房界，總數 **25 項全通過**，Tests 門檻同步為 25。未改後端／管理 Web UI，沒有重跑或混算上一輪 .NET／Chromium 數字。
+
+最終 Quest Development APK 亦成功，來源 fingerprint／scene／prefab 識別與上述 Windows 一致，沒有另建場景。APK 67,977,028 bytes、SHA-256 `f78b2ace8765109d39860d49754c501c4f12b3b7b6052222dbd348ff87a3d055`，v2 簽章、com.vrcommand.quest、minSdk 32／targetSdk 35、六份 ARM64 native library 與 IL2CPP ELF64 AArch64 核對通過。這不是頭盔執行證據。完整機器可讀驗證在 artifacts/desktop-ui/validation.json。
+
+與 Android 建置並行的第一個連線回歸因快照來源年齡 6.263257 秒超過原 1.5 秒門檻而失敗，保留 artifacts/unity-pc-input-independent-smoke.log；沒有放寬門檻或宣稱該次封存成功。建置終止後，以新隔離場重驗 Independent：108 幀、tick 167、最大取樣年齡 0.405851 秒；Linked：112 幀、tick 171、0.39335 秒。兩者雙 client、AI 傷害、Pause、精確封存與回放統計均通過，證據目錄分別 20261029-184230-c46bf89a／20261029-184314-3cf58642。這證明本機該次條件；編譯並行或其他負載的延遲不達標仍需場館效能驗收，不能稱為所有負載的 SLA。
+
+末端 health 檢查發現原 5080 無 listener、舊 PID 17748 已不存在；本輪自己的 API 都使用隨機埠且已停止，未宣稱原預覽一直健康。先將 root data 與 src/VrCommand.Api/data 的 21 檔備份並逐檔核對 SHA-256，再用原 build-v016 API DLL、原憑證與明確原 missions／sessions 路徑恢復，沒有重建空資料庫或升級後端。新自有 PID 52992／0.16.0／health ok，三個 SQLite 邏輯內容雜湊與重啟前完全相同，9 場歷史、10 任務版本／9 heads、4 world recording、活動 0。證據在 artifacts/pc-preview-restart-backup.json／pc-preview-restart-verified.json。
+
+操作見 DESKTOP。原始完整目標仍開發中；接續 PC 重連／撤銷、五場同時隔離、圖形聲光與操作員控制驗收，取得設備後再做 Quest／VIVE、MR、硬體與 25 人。當前可繼續 PC 工作，沒有因缺頭盔或 CI 帳務限制宣告整個目標 blocked。
+
 ## 2026-10-29：真正 Unity 建置、穩定跨平台識別與電腦雙玩家驗證
 
 使用者確認 Hub 有效授權後，真正 Editor 6000.3.27f1 已成功解析 UPM、編譯／ILPP、匯入音訊／Shader、Prepare、執行 **21 項 EditMode 全數通過**，並完成 Windows 播放器與 ARM64／IL2CPP Quest APK。這是目前狀態；下方舊 CLI session／Prepare 198 僅為歷史。使用者目前沒有頭盔，明確指定先繼續電腦端；完整 11 項與 VIVE／Quest 相容目標仍開發中。

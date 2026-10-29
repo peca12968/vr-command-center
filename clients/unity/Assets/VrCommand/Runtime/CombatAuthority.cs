@@ -185,6 +185,25 @@ namespace VrCommand.Unity
                 if (!Actors[index].enemy && Actors[index].id.ToString() == id) { state = Actors[index]; return true; }
             state = default; return false;
         }
+        // Display prediction only: the server still casts its own accepted weapon intent.
+        public Vector3 PreviewAimPoint(Vector3 origin, Vector3 forward, string ignorePlayer)
+        {
+            var distance = 30f;
+            var start = Vector(origin); var direction = Vector(forward);
+            foreach (var prop in Props) Consider(prop.center, prop.half, prop.yaw);
+            foreach (var actor in Actors)
+            {
+                if (actor.health <= 0 || !actor.connected || actor.id.ToString() == ignorePlayer) continue;
+                var height = actor.enemy ? 1.8f : actor.position.y + .15f;
+                Consider(new Vector3(actor.position.x, height / 2, actor.position.z), new Vector3(actor.enemy ? .3f : .25f, height / 2, actor.enemy ? .3f : .25f), 0);
+            }
+            return origin + forward * distance;
+            void Consider(Vector3 center, Vector3 half, float yaw)
+            {
+                var hit = ArenaGeometry.RayBox(start, direction, Vector(center), Vector(half), yaw, distance);
+                if (hit.HasValue) distance = Mathf.Min(distance, hit.Value);
+            }
+        }
         private void Update()
         {
             if (!IsSpawned) return;

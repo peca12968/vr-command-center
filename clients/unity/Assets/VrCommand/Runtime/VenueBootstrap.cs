@@ -307,6 +307,7 @@ namespace VrCommand.Unity
         private void OnGUI()
         {
             if (Application.platform == RuntimePlatform.Android) return;
+            if (networkManager != null && networkManager.IsConnectedClient && networkManager.LocalClient.PlayerObject != null) return;
             GUI.Box(new Rect(12, 12, 430, 58), "VR COMMAND - QUEST 3 VERTICAL SLICE");
             GUI.Label(new Rect(24, 40, 410, 24), Status + " / " + State);
         }

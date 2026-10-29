@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Unity.Netcode;
 using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.Controls;
 using UnityEngine.InputSystem.XR;
 using UnityEngine.XR;
 using Unity.Collections;
@@ -55,6 +56,8 @@ namespace VrCommand.Unity
         private double nextWeaponAccept;
         private ulong inputSequence;
         private Renderer[] visuals;
+        private bool desktopFire, desktopReload, windowKeyFallbackLogged;
+        private Vector2 windowLook, windowMovement;
 
         public override void OnNetworkSpawn()
         {
@@ -94,8 +97,12 @@ namespace VrCommand.Unity
                 trigger = Action("Fire", "<XRController>{RightHand}/triggerPressed");
                 reload = Action("Reload", "<XRController>{RightHand}/primaryButton");
             }
-            else head.localPosition = new Vector3(0, 1.65f, 0);
-            CreateStatusPanel();
+            else
+            {
+                head.localPosition = new Vector3(0, 1.65f, 0);
+                Debug.Log("Desktop preview input devices: keyboard=" + (Keyboard.current != null) + ", mouse=" + (Mouse.current != null));
+            }
+            if (tracked) CreateStatusPanel();
         }
 
         private static InputAction Action(string name, string binding)
@@ -128,14 +135,17 @@ namespace VrCommand.Unity
                     if (pose.Valid()) SubmitPoseRpc(pose);
                 }
                 var authority = CombatAuthority.Instance;
-                if (authority != null && authority.Ready.Value && VenueBootstrap.Instance.State == "Running")
+                if (authority != null && authority.Ready.Value && VenueBootstrap.Instance.State == "Running"
+                    && (tracked || Application.isFocused || Application.isBatchMode))
                 {
-                    var wantsReload = tracked ? reload.WasPressedThisFrame() : Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame;
-                    var wantsFire = tracked ? trigger.ReadValue<float>() > .5f : Mouse.current != null && Mouse.current.leftButton.isPressed;
+                    var wantsReload = tracked ? reload.WasPressedThisFrame() : desktopReload || Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame;
+                    var wantsFire = tracked ? trigger.ReadValue<float>() > .5f
+                        : desktopFire || Mouse.current != null && Pressed(Mouse.current.leftButton) || Keyboard.current != null && Pressed(Keyboard.current.spaceKey);
                     if (wantsReload) SubmitWeaponRpc(++inputSequence, true, CurrentPose());
                     else if (wantsFire && Time.unscaledTime >= nextFire)
                     { nextFire = Time.unscaledTime + .2f; SubmitWeaponRpc(++inputSequence, false, CurrentPose()); }
                 }
+                desktopFire = desktopReload = false;
             }
             else
             {
@@ -185,19 +195,93 @@ namespace VrCommand.Unity
         private void DesktopPreview()
         {
             var keyboard = Keyboard.current;
-            if (keyboard == null) return;
-            var motion = new Vector3((keyboard.dKey.isPressed ? 1 : 0) - (keyboard.aKey.isPressed ? 1 : 0), 0,
-                (keyboard.wKey.isPressed ? 1 : 0) - (keyboard.sKey.isPressed ? 1 : 0));
-            head.localPosition += motion * (2 * Time.deltaTime);
-            head.localPosition = new Vector3(Mathf.Clamp(head.localPosition.x, -5, 5), 1.65f, Mathf.Clamp(head.localPosition.z, -5, 5));
-            if (Mouse.current != null && Mouse.current.rightButton.isPressed)
+            if (Application.isFocused || Application.isBatchMode)
             {
-                var delta = Mouse.current.delta.ReadValue();
-                head.localRotation = Quaternion.Euler(0, delta.x * 0.15f, 0) * head.localRotation;
+                var look = keyboard == null ? Vector2.zero : new Vector2(Turn(keyboard.rightArrowKey) - Turn(keyboard.leftArrowKey), Turn(keyboard.downArrowKey) - Turn(keyboard.upArrowKey));
+                if (look.x == 0) look.x = windowLook.x;
+                if (look.y == 0) look.y = windowLook.y;
+                if (Mouse.current != null && Mouse.current.rightButton.isPressed)
+                { var delta = Mouse.current.delta.ReadValue(); look += new Vector2(delta.x, -delta.y) * .15f; }
+                head.localRotation = DesktopPreviewControls.Look(head.localRotation, look);
+                var movement = keyboard == null ? Vector2.zero : new Vector2((Pressed(keyboard.dKey) ? 1 : 0) - (Pressed(keyboard.aKey) ? 1 : 0),
+                    (Pressed(keyboard.wKey) ? 1 : 0) - (Pressed(keyboard.sKey) ? 1 : 0));
+                if (movement == Vector2.zero && windowMovement != Vector2.zero) MoveDesktop(windowMovement, .025f);
+                else MoveDesktop(movement, Time.unscaledDeltaTime);
             }
+            windowLook = windowMovement = Vector2.zero;
             leftHand.localPosition = head.localPosition + head.localRotation * new Vector3(-0.3f, -0.35f, 0.4f);
             rightHand.localPosition = head.localPosition + head.localRotation * new Vector3(0.3f, -0.35f, 0.4f);
             leftHand.localRotation = rightHand.localRotation = head.localRotation;
+        }
+        private static bool Pressed(ButtonControl button) => button.isPressed || button.wasPressedThisFrame;
+        private static float Turn(ButtonControl button) => button.wasPressedThisFrame ? 3 : button.isPressed ? 60 * Time.unscaledDeltaTime : 0;
+        private void MoveDesktop(Vector2 movement, float seconds)
+        {
+            var origin = transform.position;
+            if (CombatAuthority.Instance != null && CombatAuthority.Instance.Player(PlayerId.Value.ToString(), out var player)) origin = VenueBootstrap.RoomOrigin(player.room);
+            head.localPosition = DesktopPreviewControls.Move(head.localPosition, head.localRotation, movement, seconds, transform.position - origin);
+        }
+        private void DesktopWindowKey()
+        {
+            if (!Application.isFocused || Event.current.type != EventType.KeyDown) return;
+            var keyboard = Keyboard.current; ButtonControl raw = null;
+            var look = Vector2.zero; var movement = Vector2.zero; var fire = false; var reloadWeapon = false;
+            switch (Event.current.keyCode)
+            {
+                case KeyCode.LeftArrow: raw = keyboard?.leftArrowKey; look.x = -3; break;
+                case KeyCode.RightArrow: raw = keyboard?.rightArrowKey; look.x = 3; break;
+                case KeyCode.UpArrow: raw = keyboard?.upArrowKey; look.y = -3; break;
+                case KeyCode.DownArrow: raw = keyboard?.downArrowKey; look.y = 3; break;
+                case KeyCode.W: raw = keyboard?.wKey; movement.y = 1; break;
+                case KeyCode.S: raw = keyboard?.sKey; movement.y = -1; break;
+                case KeyCode.A: raw = keyboard?.aKey; movement.x = -1; break;
+                case KeyCode.D: raw = keyboard?.dKey; movement.x = 1; break;
+                case KeyCode.Space: raw = keyboard?.spaceKey; fire = true; break;
+                case KeyCode.R: raw = keyboard?.rKey; reloadWeapon = true; break;
+                default: return;
+            }
+            // Window-message input (e.g. accessibility keyboards) may not appear on the raw device.
+            // A physical press already observed by InputSystem must never be applied twice.
+            if (raw != null && Pressed(raw)) return;
+            if (!windowKeyFallbackLogged) { windowKeyFallbackLogged = true; Debug.Log("Desktop window key fallback active."); }
+            windowLook += look; windowMovement += movement; desktopFire |= fire; desktopReload |= reloadWeapon;
+            Event.current.Use();
+        }
+
+        private void OnGUI()
+        {
+            if (!IsSpawned || !IsOwner || tracked || localCamera == null) return;
+            DesktopWindowKey();
+            var combat = CombatAuthority.Instance;
+            if (combat == null || !combat.Player(PlayerId.Value.ToString(), out var player)) return;
+            var phase = VenueBootstrap.Instance == null ? "CONNECTING" : VenueBootstrap.Instance.State.ToUpperInvariant();
+            var scale = Mathf.Max(.5f, Mathf.Min(Screen.width / 1100f, Screen.height / 760f));
+            var previous = GUI.matrix; GUI.matrix = Matrix4x4.Scale(new Vector3(scale, scale, 1));
+            var width = Screen.width / scale; var height = Screen.height / scale;
+            var heading = new GUIStyle(GUI.skin.label) { fontSize = 20, fontStyle = FontStyle.Bold };
+            var text = new GUIStyle(GUI.skin.label) { fontSize = 17 };
+            GUI.Box(new Rect(16, 16, 570, 112), "");
+            GUI.Label(new Rect(30, 24, 540, 28), "VR COMMAND  /  " + phase + "  /  ROOM " + player.room, heading);
+            GUI.Label(new Rect(30, 56, 540, 28), "HEALTH " + player.health + "     AMMO " + player.magazine + " / " + player.reserve
+                + (player.reloading ? "    RELOADING" : ""), text);
+            var status = !combat.Ready.Value ? "CONTROL LINK UNAVAILABLE - COMBAT PAUSED"
+                : player.health == 0 ? "ELIMINATED" : !PoseAccepted.Value || !player.connected ? "POSE REJECTED - RETURN TO YOUR AREA" : "DESKTOP SIMULATION - SYNTHETIC HEAD / HANDS";
+            GUI.Label(new Rect(30, 87, 540, 28), Keyboard.current == null ? "KEYBOARD UNAVAILABLE - CHECK INPUT DEVICE" : status, text);
+            GUI.Box(new Rect(16, height - 66, width - 32, 50), "");
+            GUI.Label(new Rect(30, height - 59, width - 60, 36), "WASD: MOVE    RIGHT DRAG / ARROWS: AIM    CLICK / SPACE: FIRE    R: RELOAD", text);
+            GUI.matrix = previous;
+            if (!player.connected || player.health <= 0 || !PoseAccepted.Value || !combat.Ready.Value || phase != "RUNNING") return;
+            var forward = rightHand.forward;
+            var origin = rightHand.position + forward * .15f;
+            var point = localCamera.WorldToScreenPoint(combat.PreviewAimPoint(origin, forward, PlayerId.Value.ToString()));
+            if (point.z <= 0) return;
+            var x = point.x; var y = Screen.height - point.y;
+            var color = GUI.color; GUI.color = new Color(.7f, 1, .75f);
+            GUI.DrawTexture(new Rect(x - 10, y - 1, 6, 2), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(x + 4, y - 1, 6, 2), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(x - 1, y - 10, 2, 6), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(x - 1, y + 4, 2, 6), Texture2D.whiteTexture);
+            GUI.color = color;
         }
 
         private void CreateStatusPanel()
@@ -225,6 +309,22 @@ namespace VrCommand.Unity
             leftPosition?.Dispose(); rightPosition?.Dispose(); leftRotation?.Dispose(); rightRotation?.Dispose(); trigger?.Dispose(); reload?.Dispose();
             headTracking?.Dispose(); leftTracking?.Dispose(); rightTracking?.Dispose();
             headTracked?.Dispose(); leftTracked?.Dispose(); rightTracked?.Dispose();
+        }
+    }
+
+    public static class DesktopPreviewControls
+    {
+        public static Quaternion Look(Quaternion rotation, Vector2 degrees)
+        {
+            var pitch = Mathf.DeltaAngle(0, rotation.eulerAngles.x);
+            return Quaternion.Euler(Mathf.Clamp(pitch + degrees.y, -70, 70), rotation.eulerAngles.y + degrees.x, 0);
+        }
+        public static Vector3 Move(Vector3 position, Quaternion rotation, Vector2 axes, float seconds, Vector3 rootInRoom)
+        {
+            var yaw = Quaternion.Euler(0, rotation.eulerAngles.y, 0);
+            var motion = yaw * new Vector3(axes.x, 0, axes.y).normalized * (Mathf.Min(Mathf.Max(seconds, 0), .1f) * 2 * Mathf.Min(axes.magnitude, 1));
+            return new Vector3(Mathf.Clamp(position.x + motion.x, -5 - rootInRoom.x, 5 - rootInRoom.x), 1.65f,
+                Mathf.Clamp(position.z + motion.z, -5 - rootInRoom.z, 5 - rootInRoom.z));
         }
     }
 

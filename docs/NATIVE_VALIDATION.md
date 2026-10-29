@@ -1,5 +1,7 @@
 # 真正 Unity 建置與電腦端驗證
 
+後續桌面可操作練習場與 GPU／鍵鼠結果見 [DESKTOP.md](DESKTOP.md) 及 PROGRESS：最新為 25 項 EditMode、實際射擊／擊殺／換彈／暫停與統計封存。下方保留第一輪 21 項建置與觀戰排隊修正的證據。
+
 2026-10-29 使用者確認 Hub 已有有效授權後，Editor 6000.3.27f1 已完成真正套件解析、編譯／ILPP、資產匯入、場景生成、21 項 EditMode、Windows 播放器與同源 Quest APK。這取代先前「只有 SDK 型別檢查／Prepare 198」的狀態。使用者目前沒有頭盔，後續先驗證電腦端；APK 的產出不代表已安裝或通過 Quest／VIVE 實機驗收。
 
 ## 建置與穩定識別
@@ -11,7 +13,7 @@
 ./scripts/build-unity.ps1 -Target Quest
 ```
 
-Tests 要求新結果 XML、Passed、至少 21 項且零失敗。建置助手明確回傳 exit 0／1；找不到 Editor 的反例已確認回 1。Desktop／Quest 以新鮮的 build-receipt.json 判定這一次是否成功，不能只看 exe 的時間：Unity 增量建置可能保留未改動的啟動 exe，同時更新資料／managed 程式。
+Tests 要求新結果 XML、Passed、至少 25 項且零失敗（首輪為 21 項）。建置助手明確回傳 exit 0／1；找不到 Editor 的反例已確認回 1。Desktop／Quest 以新鮮的 build-receipt.json 判定這一次是否成功，不能只看 exe 的時間：Unity 增量建置可能保留未改動的啟動 exe，同時更新資料／managed 程式。
 
 receipt 只在 BuildReport 成功後寫入，包含目標、Unity 版本、完成 UTC、輸出路徑、程式／asmdef／套件鎖定的 SHA-256 fingerprint，以及 scene／prefab 的 GlobalObjectId。比較 Desktop／Quest 時，兩者應使用同一份來源 fingerprint 與網路物件識別；不部署 SDK 診斷產物。
 

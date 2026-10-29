@@ -1,10 +1,10 @@
 # Quest 戰鬥接入 v0.16
 
-目前 v0.16 以原子 WeatherState 同步 tick／天氣／日夜／雷電／phase／房間，NGO protocol 16、bundle 0.16.0；雨景及合成音效來源見 [ENVIRONMENT.md](ENVIRONMENT.md)。2026-10-29 真正 Editor 已通過 21 項 EditMode、Windows／Quest 建置，以及 Windows server／雙 client 的獨立與跨房 Simulation smoke（含 AI 傷害、暫停、封存與回放統計）。沒有 GPU、鍵鼠射擊或頭盔操作證據，詳見 [NATIVE_VALIDATION.md](NATIVE_VALIDATION.md)。v0.14 的每次入場識別、票券 v2／驗票 protocol 2 及撤銷契約保持，見 [ADMISSION.md](ADMISSION.md)。
+目前 v0.16 以原子 WeatherState 同步 tick／天氣／日夜／雷電／phase／房間，NGO protocol 16、bundle 0.16.0；雨景及合成音效來源見 [ENVIRONMENT.md](ENVIRONMENT.md)。2026-10-29 真正 Editor 已通過 25 項 EditMode、Windows／Quest 建置，以及 Windows server／雙 client 的獨立與跨房 Simulation smoke（含 AI 傷害、暫停、封存與回放統計）。另有單機 GPU 視窗、方向鍵／Space／滑鼠射擊、換彈／暫停與報表證據，見 DESKTOP；頭盔操作仍待驗，詳見 [NATIVE_VALIDATION.md](NATIVE_VALIDATION.md)。v0.14 的每次入場識別、票券 v2／驗票 protocol 2 及撤銷契約保持，見 [ADMISSION.md](ADMISSION.md)。
 
 v0.13 已加入頭手來源 byte／追蹤狀態檢查、世界來源、共用發布及管理邊界錄製，詳見 [WORLD_SOURCE.md](WORLD_SOURCE.md)。該版 NGO protocol 13 為歷史；現行兩端使用 protocol 16 並保持同版場景識別。
 
-本版把共用戰鬥核心接到 Unity 的任務、入場、姿態、武器及 NGO 狀態同步來源碼。**已通過真正 Unity 編譯／建置及 PC 雙玩家連線、AI 傷害與封存，仍沒有圖形互見、鍵鼠／頭盔射擊或 25 台效能證據。** .NET、無圖形 PC 及頭盔驗收分別記錄。
+本版把共用戰鬥核心接到 Unity 的任務、入場、姿態、武器及 NGO 狀態同步來源碼。**已通過真正 Unity 編譯／建置及 PC 雙玩家連線、AI 傷害與封存，已有 PC GPU 視窗與鍵鼠射擊／擊殺證據，仍沒有頭盔射擊或 25 台效能證據。** .NET、無圖形 PC 及頭盔驗收分別記錄。
 
 ## 同一套任務與戰鬥規則
 
@@ -46,6 +46,6 @@ v0.11 的 Unity 來源碼會把四種統計 WorldEvent 保存到共用 Telemetry
 
 歷史 v0.13 檢查：本機 Release 建置通過，399 項核心檢查含原 41 項 ArenaSession／參戰狀態與新 30 項世界來源／時鐘檢查，使用真實管理模型 JSON。另通過 322 項原 HTTP、32 項世界串流、12 項回放資料及 78 項瀏覽器檢查。23 份 C# 通過 C# 9 語法；相同 embedded Runtime 真正建置為 .NET Standard 2.1。沒有使用假 Unity SDK stub 宣稱型別編譯成功。
 
-原有七個 EditMode 來源包含 AvatarPose、管理欄位及 NGO actor 往返；v0.13 增加五項姿態／world codec，v0.14 增加三項入場，v0.16 增加三項天氣／header，原為 18 項；本輪增加三項生成資產／XR 整合，腳本要求至少 21 項，真正 Editor 全數通過。真正 Desktop／Quest 也已成功，不再以舊 Prepare 198 判定目前狀態。
+原有七個 EditMode 來源包含 AvatarPose、管理欄位及 NGO actor 往返；v0.13 增加五項姿態／world codec，v0.14 增加三項入場，v0.16 增加三項天氣／header，原為 18 項；本輪增加三項生成資產／XR 整合，另有四項桌面控制測試，腳本要求至少 25 項，真正 Editor 全數通過。真正 Desktop／Quest 也已成功，不再以舊 Prepare 198 判定目前狀態。
 
 按 QUEST3 的 Prepare → Tests → Desktop → Quest 可重現建置；後續驗雙玩家射擊、掩體／死亡、AI 控制、斷線／追蹤遺失、名冊撤銷、管理服務中斷及 Host 審核；每項保留實際日誌與量測，不能以本文件或來源碼存在替代。

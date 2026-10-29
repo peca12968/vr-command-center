@@ -1,8 +1,8 @@
 # 開發指引
 
-2026-10-29 使用者已確認 Hub 有效授權，真正 Editor 已成功 Prepare、執行 21 項 EditMode，並產出第一輪 Windows 播放器與 ARM64／IL2CPP Quest APK；舊 CLI／198 是歷史狀態，不再當作目前阻礙。沒有頭盔連線／實測證據。最新二進位與觀戰延遲修正驗證以 PROGRESS／實際 build log 為準，不能拿 SDK 檢查代替。
+2026-10-29 使用者已確認 Hub 有效授權，真正 Editor 已成功 Prepare、執行 25 項 EditMode，並產出同源 Windows 播放器與 ARM64／IL2CPP Quest APK；舊 CLI／198 是歷史狀態，不再當作目前阻礙。已有真正 PC 視窗的方向鍵／Space／滑鼠射擊、擊殺／命中率、換彈／暫停與封存證據；練習場操作見 docs/DESKTOP.md。沒有頭盔連線／實測證據。最新二進位與觀戰延遲修正驗證以 PROGRESS／實際 build log 為準，不能拿 SDK 檢查代替。
 
-Prepare 必須重用已保存 Arena／PlayerAvatar 的本地 file ID；先前每次重建新 scene 會改變 NGO 識別、破壞跨目標連線。需重建時用 RebuildArena 並一起重建全部玩家；不能 Desktop／Quest 分別重建不同場景。生成物、OpenXR 設定與 packages-lock.json 應隨成功匯入結果保存。ProjectGeneration 測試涵蓋重複 Prepare 識別、非零 hash、場景／音訊引用與 Android XR 設定；build-unity Tests 門檻為 21，腳本明確回傳 exit 0／1。
+Prepare 必須重用已保存 Arena／PlayerAvatar 的本地 file ID；先前每次重建新 scene 會改變 NGO 識別、破壞跨目標連線。需重建時用 RebuildArena 並一起重建全部玩家；不能 Desktop／Quest 分別重建不同場景。生成物、OpenXR 設定與 packages-lock.json 應隨成功匯入結果保存。ProjectGeneration 測試涵蓋重複 Prepare 識別、非零 hash、場景／音訊引用與 Android XR 設定；build-unity Tests 門檻為 25，腳本明確回傳 exit 0／1。
 
 生成器另外有 scripts/check-unity-editor-sdk.py --offline --verify-missing-reference：重新檢查 Windows player 基線，再以真正 Editor／XR SDK 綁定 ProjectBuilder，直接讀自己的 asmdef 參考、禁止隱含傳遞 ProjectReference。MetaQuestFeature 位於 Unity.XR.OpenXR.Features.MetaQuestSupport，Editor asmdef 必須直接參考它；反例只修改生成的診斷 csproj，應重現 CS0234。此圖明確不含 URP 專用驗證分支（見報告），不是完整 Editor／UPM／資產生成／ILPP／APK 證據。範圍見 docs/UNITY_SDK_CHECK.md。
 
