@@ -11,7 +11,9 @@ namespace VrCommand.Unity
         {
             if (!ready) return "CONTROL LINK UNAVAILABLE";
             if (health <= 0) return "ELIMINATED";
-            if (!tracking || !accepted || !connected) return xr ? "TRACKING INVALID" : "POSE REJECTED";
+            if (!tracking) return "TRACKING INVALID";
+            if (!accepted) return "POSE REJECTED";
+            if (!connected) return "POSE STREAM STALE";
             return phase == "Running" ? "ACTIVE" : phase == "Paused" ? "MISSION PAUSED" : phase == "Ended" ? "MISSION ENDED" : "AWAITING START";
         }
         public static float Bearing(Vector3 forward) => Point(forward).Finite ? Mathf.Repeat(Mathf.Atan2(forward.x, forward.z) * Mathf.Rad2Deg, 360) : 0;
@@ -55,8 +57,37 @@ namespace VrCommand.Unity
         public string phase, status, source = "Simulation";
         public int room, health, magazine, reserve;
         public float bearing;
-        public bool reloading;
+        public bool reloading, ready, poseAccepted, connected, tracking;
+        public double renderedAtSeconds;
+        public float frameDeltaSeconds;
         public string[] labels;
+    }
+
+    [Serializable] public sealed class HudTransition
+    { public double seconds; public TacticalHudSnapshot hud; }
+
+    // Capture every rendered status transition, including ones shorter than the
+    // probe's periodic sample. No per-frame file writes; capacity is explicit.
+    public sealed class HudTransitionLog
+    {
+        private readonly List<HudTransition> entries = new List<HudTransition>();
+        private TacticalHudSnapshot previous;
+        private readonly int capacity;
+        public bool Truncated { get; private set; }
+        public HudTransitionLog(int capacity = 512)
+        { if (capacity < 1) throw new ArgumentOutOfRangeException(nameof(capacity)); this.capacity = capacity; }
+        public void Observe(double seconds, TacticalHudSnapshot hud)
+        {
+            if (hud == null || double.IsNaN(seconds) || double.IsInfinity(seconds) || seconds < 0) return;
+            var changed = previous == null || previous.status != hud.status || previous.phase != hud.phase
+                || previous.ready != hud.ready || previous.poseAccepted != hud.poseAccepted
+                || previous.connected != hud.connected || previous.tracking != hud.tracking;
+            previous = hud;
+            if (!changed) return;
+            if (entries.Count < capacity) entries.Add(new HudTransition { seconds = seconds, hud = hud });
+            else Truncated = true;
+        }
+        public HudTransition[] Snapshot() => entries.ToArray();
     }
 
     // Desktop presentation only; all values come from accepted replicated state.
@@ -115,7 +146,7 @@ namespace VrCommand.Unity
             if (!active)
             {
                 PanelAt(new Rect(width / 2 - 235, height * .28f, 470, 53));
-                var color = GUI.color; GUI.color = player.health <= 0 || status.Contains("REJECTED") ? Red : Amber;
+                var color = GUI.color; GUI.color = player.health <= 0 || status.Contains("REJECTED") || status.Contains("STALE") ? Red : Amber;
                 GUI.Label(new Rect(width / 2 - 225, height * .28f + 10, 450, 32), status, center); GUI.color = color;
             }
             else DrawLabels(avatar, combat, player, camera, scale);
@@ -139,7 +170,10 @@ namespace VrCommand.Unity
             {
                 var labels = new List<string>(); foreach (var actor in drawn) labels.Add(actor.id.ToString());
                 LastDrawn = new TacticalHudSnapshot { phase = phase, status = status, room = player.room, health = player.health,
-                    magazine = player.magazine, reserve = player.reserve, reloading = player.reloading, bearing = bearing, labels = labels.ToArray() };
+                    magazine = player.magazine, reserve = player.reserve, reloading = player.reloading, bearing = bearing, labels = labels.ToArray(),
+                    ready = combat.Ready.Value, poseAccepted = avatar.PoseAccepted.Value, connected = player.connected, tracking = avatar.TrackingReady,
+                    renderedAtSeconds = Time.realtimeSinceStartupAsDouble, frameDeltaSeconds = Time.unscaledDeltaTime };
+                NativeWeatherProbe.ObserveHud(LastDrawn);
             }
         }
         private static bool OnScreen(Camera camera, CombatActorState actor, out Vector3 point)

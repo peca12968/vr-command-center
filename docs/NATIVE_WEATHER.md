@@ -1,5 +1,7 @@
 # 原生 Windows 天氣畫面與音訊量測
 
+2026-10-30 v0.19.1／Android code21／NGO仍18同源建置後，再以 `20261030-005548-22ee28c2` 通過原生GPU／DSP回歸：275幀、最大來源年齡0.160839秒、閃電亮度差27.6674、首次觀測flash141／thunder181（預期180）。穩定Pause52／Clear59窗口RMS0；六次GPU讀回／PNG／寫入18.32–24.30ms，不能回推舊場停頓原因。詳見PROGRESS與TACTICAL_HUD，以下保留首輪v0.18.1紀錄。
+
 需求5的電腦端驗證現在可直接啟動真正 Unity server／可見玩家，量測該玩家實際 AudioListener 混音及 GPU backbuffer。素材仍是開發用合成雨雷聲，頭手及戰鬥來源均為 **Simulation**。這不代表實體喇叭／耳機、人員聽感、Quest／VIVE、MR或25台驗收。
 
 ## 啟動

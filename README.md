@@ -4,9 +4,9 @@
 
 依 2026-10-29 的使用者指示，**優先開發 Meta Quest 3**，暫以 Android 獨立執行為工作假設；VIVE 延後接入，共用架構與原始雙平台目標保留。
 
-目前為 **API v0.16／Unity 遊戲端 v0.19 原型**。真正 Editor 已完成 Prepare、39 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 18，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
+目前為 **API v0.16／Unity 遊戲端 v0.19.1 原型**。真正 Editor 已完成 Prepare、42 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 18，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
 
-較窄的 [managed SDK 檢查](docs/UNITY_SDK_CHECK.md) 仍可補充 API／直接參考診斷，其本身不執行 Unity 或產出播放器；目前較強的真正 Editor、39 項測試及 binary 結果以 PROGRESS 為準。
+較窄的 [managed SDK 檢查](docs/UNITY_SDK_CHECK.md) 仍可補充 API／直接參考診斷，其本身不執行 Unity 或產出播放器；目前較強的真正 Editor、42 項測試及 binary 結果以 PROGRESS 為準。
 
 可用 [控制台自訂電腦任務](docs/DESKTOP_CONTROL.md) 從編輯／保存／重載配置直接啟動真正 PC server／玩家，控制天氣、AI、觀戰與回放；已看見原生白天／雨夜／暫停畫面。新的 15 項 UI／native 整合與既有 17 Node＋122 Chromium 通過，原生雷聲與完整聲光仍待驗。
 
@@ -102,7 +102,7 @@ python scripts/smoke_api.py
 python scripts/smoke_world.py
 ```
 
-腳本使用隨機測試憑證及暫存資料，驗證權限、名額、場次狀態、去重、SQLite 儲存、戰鬥因果、票券及幾何模擬接入，並多次實際重啟 API。另有任務／連線／戰鬥接入、回放資料與瀏覽器 WebGL 檢查。目前 399 項核心、322 項管理／戰鬥 HTTP、32 項世界串流、12 項回放資料及 78 項 Chromium 檢查通過，共 843 項。23 份 C# 通過語法檢查，仍不等同 Unity 編譯或 25 台頭盔效能驗收。
+腳本使用隨機測試憑證及暫存資料，驗證權限、名額、場次狀態、去重、SQLite 儲存、戰鬥因果、票券及幾何模擬接入，並多次實際重啟 API。另有任務／連線／戰鬥接入、回放資料與瀏覽器 WebGL 檢查。後端、瀏覽器與原生各版的執行結果及範圍分別記於 PROGRESS，不將歷史或不同平台測試加總為本輪結果。C# 語法／SDK 型別檢查不能替代真正 Editor、原生執行或 25 台頭盔效能驗收。
 
 本機 API 啟動後，也可在空閒房間執行一場明確標記的模擬紀錄：
 

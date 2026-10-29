@@ -32,7 +32,8 @@ def run(v):
     v.wait(lambda: v.request('/api/sessions/' + entry['id'] + '/world', optional=True), 90, 'native recording')
     v.launch('hud-peer', v.client_config(entry, v.ticket(entry, peer)))
     probe = v.runtime_directory / 'hud-probe'; player = entry['players'][0]
-    v.launch('hud-player', v.client_config(entry, v.ticket(entry, player)), True, extra_args=['--vr-hud-probe', str(probe.resolve())])
+    v.launch('hud-player', v.client_config(entry, v.ticket(entry, player)), True,
+        extra_args=['--vr-hud-trace' if v.args.trace_only else '--vr-hud-probe', str(probe.resolve())])
     samples = []; seen_reload = False
 
     def sample():
@@ -88,15 +89,20 @@ def run(v):
         except (FileNotFoundError, json.JSONDecodeError): return None
         return value if value['complete'] else None
     report = v.wait(final, 15, 'HUD report')
-    assert report['mode'] == 'hud' and not report['error'] and report['audioSamples'] == report['callbackCount'] == 0 and not (probe / 'audio.wav').exists()
+    assert report['mode'] == ('hud-trace' if v.args.trace_only else 'hud') and not report['error'] and report['audioSamples'] == report['callbackCount'] == 0 and not (probe / 'audio.wav').exists()
+    assert report['hudTransitions'] and not report['hudTransitionsTruncated'], 'Rendered transitions were not retained'
+    if v.args.trace_only:
+        assert not report['captures'] and not report['captureTimings'] and not list(probe.glob('*.png')), 'Trace-only mode performed GPU readback'
     v.evidence.extend(['Actual keyboard fire / reload agrees with HUD and sealed ammo', 'Rotated-view bearing / ally tag; occluded hostile omitted', 'Actual AI damage, Pause and eliminated HUD; no PCM captured'])
     v.summary(); v.save('hud-result.json', {'source': 'Actual Windows keyboard / GPU HUD; Simulation', 'headsets': 0, 'baseline': baseline, 'fired': fired,
-        'reloaded': reloaded, 'turned': turned, 'damaged': damaged, 'eliminated': eliminated, 'captures': report['captures'], 'ownStatistics': own, 'audioCaptured': False})
+        'reloaded': reloaded, 'turned': turned, 'damaged': damaged, 'eliminated': eliminated, 'captures': report['captures'],
+        'hudTransitions': report['hudTransitions'], 'captureTimings': report['captureTimings'], 'mode': report['mode'], 'ownStatistics': own, 'audioCaptured': False})
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--runtime-root', type=Path)
+    p.add_argument('--trace-only', action='store_true', help='No GPU readback or PCM; retain every rendered HUD status transition')
     p.add_argument('--player-exe', type=Path, default=Path(os.environ.get('VR_COMMAND_UNITY_PLAYER', ROOT / 'artifacts/desktop/VrCommand.exe')))
     p.add_argument('--api-dll', type=Path, default=Path(os.environ.get('VR_COMMAND_API_DLL', ROOT / 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')))
     args = p.parse_args(); args.duration = 300; args.visible_room = 3; args.job_workers = 2; args.check = False

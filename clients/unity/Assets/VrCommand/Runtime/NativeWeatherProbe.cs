@@ -23,6 +23,8 @@ namespace VrCommand.Unity
         }
         [Serializable] public sealed class AudioWindow
         { public double seconds, rms; public float peak; public int samples, channels; }
+        [Serializable] public sealed class CaptureTiming
+        { public string name; public double startedSeconds, durationSeconds; }
         [Serializable] public sealed class Report
         {
             public int schemaVersion = 1, sampleRate, channels, audioSamples, callbackCount;
@@ -32,6 +34,9 @@ namespace VrCommand.Unity
             public Frame[] frames;
             public AudioWindow[] audio;
             public string[] captures;
+            public HudTransition[] hudTransitions;
+            public CaptureTiming[] captureTimings;
+            public bool hudTransitionsTruncated;
         }
         private readonly object gate = new object();
         private readonly Stopwatch clock = new Stopwatch();
@@ -40,6 +45,9 @@ namespace VrCommand.Unity
         private readonly List<string> captures = new List<string>();
         private readonly HashSet<string> requested = new HashSet<string>();
         private readonly Report report = new Report();
+        private readonly HudTransitionLog hudTransitions = new HudTransitionLog();
+        private readonly List<CaptureTiming> captureTimings = new List<CaptureTiming>();
+        private static NativeWeatherProbe current;
         private string directory;
         private SceneAuthority scene;
         private UnityWeatherView view;
@@ -57,27 +65,31 @@ namespace VrCommand.Unity
             if (Application.isBatchMode || Application.isEditor || listener.GetComponent<AudioListener>() == null) return;
             var args = Environment.GetCommandLineArgs(); var index = Array.IndexOf(args, "--vr-weather-probe");
             var hudIndex = Array.IndexOf(args, "--vr-hud-probe");
-            if (index >= 0 && hudIndex >= 0) throw new ArgumentException("Select either weather audio or HUD-only capture.");
-            var captureAudio = index >= 0; if (index < 0) index = hudIndex;
+            var traceIndex = Array.IndexOf(args, "--vr-hud-trace");
+            if ((index >= 0 ? 1 : 0) + (hudIndex >= 0 ? 1 : 0) + (traceIndex >= 0 ? 1 : 0) > 1)
+                throw new ArgumentException("Select one weather, HUD image or HUD trace mode.");
+            var captureAudio = index >= 0; if (index < 0) index = hudIndex >= 0 ? hudIndex : traceIndex;
             if (index < 0) return;
             if (index + 1 >= args.Length || !Path.IsPathRooted(args[index + 1])) throw new ArgumentException("Weather probe requires an absolute fresh directory.");
             var path = Path.GetFullPath(args[index + 1]);
             if (Directory.Exists(path) || File.Exists(path)) throw new IOException("Weather probe directory must not already exist.");
             Directory.CreateDirectory(path);
-            var probe = listener.AddComponent<NativeWeatherProbe>(); probe.Begin(path, captureAudio);
+            var probe = listener.AddComponent<NativeWeatherProbe>(); probe.Begin(path, captureAudio, traceIndex >= 0);
 #endif
         }
-        private void Begin(string path, bool captureAudio)
+        private void Begin(string path, bool captureAudio, bool traceOnly)
         {
             directory = path; report.startedAtUtc = DateTimeOffset.UtcNow.ToString("O");
             report.sampleRate = AudioSettings.outputSampleRate;
             var mode = AudioSettings.speakerMode;
             var expectedChannels = mode == AudioSpeakerMode.Mono ? 1 : mode == AudioSpeakerMode.Quad ? 4
                 : mode == AudioSpeakerMode.Surround ? 5 : mode == AudioSpeakerMode.Mode5point1 ? 6 : mode == AudioSpeakerMode.Mode7point1 ? 8 : 2;
-            report.mode = captureAudio ? "weather" : "hud";
+            report.mode = captureAudio ? "weather" : traceOnly ? "hud-trace" : "hud";
             if (captureAudio) pcm = new float[checked(report.sampleRate * expectedChannels * 90)];
-            clock.Start(); recording = captureAudio; Recording = true;
+            clock.Start(); recording = captureAudio; current = this; Recording = true;
         }
+        public static void ObserveHud(TacticalHudSnapshot hud)
+        { if (current != null && !current.finished) current.hudTransitions.Observe(current.clock.Elapsed.TotalSeconds, hud); }
         private void OnAudioFilterRead(float[] data, int channelCount)
         {
             lock (gate)
@@ -130,20 +142,22 @@ namespace VrCommand.Unity
                 if (clock.Elapsed.TotalSeconds >= next)
                 {
                     if (frames.Count < 1200) frames.Add(report.frame); else truncated = true;
-                    Write(false); next = clock.Elapsed.TotalSeconds + (report.mode == "hud" ? .25 : .1);
+                    Write(false); next = clock.Elapsed.TotalSeconds + (report.mode == "weather" ? .1 : .25);
                 }
                 if (view.AppliedPhase == "Ended") { if (ended < 0) ended = clock.Elapsed.TotalSeconds; if (clock.Elapsed.TotalSeconds - ended > .6) Finish(); }
-                if (clock.Elapsed.TotalSeconds > (report.mode == "hud" ? 285 : 85)) { report.error = "Probe time limit reached before End."; Finish(); }
+                if (clock.Elapsed.TotalSeconds > (report.mode == "weather" ? 85 : 285)) { report.error = "Probe time limit reached before End."; Finish(); }
             }
             catch (Exception error) { report.error = error.GetType().Name + ": " + error.Message; Finish(); }
         }
         private void Capture(string name)
         {
+            if (report.mode == "hud-trace") return;
             if (requested.Add(name)) StartCoroutine(CaptureFrame(name));
         }
         private IEnumerator CaptureFrame(string name)
         {
             yield return new WaitForEndOfFrame();
+            var started = clock.Elapsed.TotalSeconds;
             Texture2D texture = null;
             try
             {
@@ -152,7 +166,11 @@ namespace VrCommand.Unity
                 File.WriteAllBytes(Path.Combine(directory, name + ".png"), texture.EncodeToPNG()); captures.Add(name);
             }
             catch (Exception error) { report.error = "Capture: " + error.Message; }
-            finally { if (texture != null) Destroy(texture); }
+            finally
+            {
+                captureTimings.Add(new CaptureTiming { name = name, startedSeconds = started, durationSeconds = clock.Elapsed.TotalSeconds - started });
+                if (texture != null) Destroy(texture);
+            }
         }
         private void Write(bool complete)
         {
@@ -163,12 +181,15 @@ namespace VrCommand.Unity
                 report.audio = complete ? audio.ToArray() : null;
             }
             report.complete = complete; report.frames = complete ? frames.ToArray() : null; report.captures = captures.ToArray();
+            report.hudTransitions = complete ? hudTransitions.Snapshot() : null;
+            report.hudTransitionsTruncated = hudTransitions.Truncated; report.captureTimings = complete ? captureTimings.ToArray() : null;
             File.WriteAllText(Path.Combine(directory, complete ? "report.json" : "status.json"), JsonUtility.ToJson(report, true));
         }
         private void Finish()
         {
             if (directory == null || finished) return;
             finished = true; lock (gate) recording = false; Recording = false;
+            if (current == this) current = null;
             try
             {
                 if (channels > 0)

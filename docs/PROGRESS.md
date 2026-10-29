@@ -1,5 +1,24 @@
 # 開發進度
 
+## 2026-10-30：姿態逾時分類與可重現封包中斷
+
+上一輪HUD屬實際進度。本輪從乾淨 `60713ba` 接續使用者「無頭盔、先繼續電腦端」。唯讀核對原場 `20261030-000040-9a2f550c` 的worlds.db：666→667幀相差688ms，tick仍1328；668幀connected=false，669幀100ms後恢復，頭部位置／健康100／彈藥29不變。先前警告把tracking、PoseAccepted及connected合併成POSE REJECTED，原PNG與0.25秒觀測不能分辨原因。這些新證據確認一次保存停頓與短暫非參戰狀態，不足以判定GPU、收件間隔、封包、CPU／IO或其他停頓根因；保留原資料，未宣稱修好延遲。
+
+HUD現在分別顯示TRACKING INVALID、POSE REJECTED（PoseAccepted=false）及POSE STREAM STALE（前兩者有效但body.connected=false），桌面／XR文字共用。STALE維持紅色警告、非ACTIVE時不顯示準星／標籤；沒有延遲隱藏警告，也沒有改伺服器0.5秒姿態新鮮度、防瞬移、碰撞、admission或射擊規則。各複製旗標不是原子快照，不能把標題當封包根因或跨機時間證明。
+
+NativeWeatherProbe新增互斥 `--vr-hud-trace`，只限明確選用、全新絕對目錄、Windows Development自己的未追蹤可見玩家。不配置PCM、不讀GPU／輸出PNG；0.25秒狀態之外，每個實際HUD Repaint保存狀態／原始旗標轉換，512筆有界、截斷明示且保留最初證據，結束才寫出轉換。快照含引擎時間／frame delta；原圖像模式另保存ReadPixels／PNG／寫檔耗時。一般啟動不附掛，沒有麥克風、OS loopback、遠端輸入注入或新網路欄位。
+
+新增 `check-desktop-pose.py`：自己的API／room3 server／可見玩家，僅兩個127.0.0.1端點間原樣轉送UDP，暫時丟棄該玩家上行1.2／1.2／6秒，下行維持。不解析／保存payload、不改防火牆或正式服務。原生場 `20261030-005407-10c17163` 三次均驗證body.connected=false及HUD的poseAccepted／ready／tracking=true；已用computer-use實際看見紅色STALE、無準星，恢復後同admission／原位置／健康／彈藥維持，真正Space一次30→29，封存耗彈1／耗損0與回放一致。共丟棄386 datagrams、保存618幀、最大來源年齡0.160829秒；這是世界發布新鮮度，不能拿來充當被丟棄的玩家上行延遲。
+
+逐繪製trace保存10次轉換，三次受控STALE到下一次ACTIVE為約0.8002／0.7009／5.5004秒。另捕捉入場初期POSE REJECTED約0.0369秒、其後STALE約0.0887秒才到AWAITING START，反映初始false及分開複製的到達順序；未隱藏這些警告、未把初始化當作實際拒絕封包證明。ACTIVE之後除了三次指定中斷沒有其他警告轉換；單次本機場不能證明零抖動。trace模式audioSamples=callbackCount=0、captures及captureTimings空、無PNG／WAV；三份Windows GPU截圖另存證據。
+
+Prepare／**42項真正EditMode（0 failed／skipped）**／Desktop／Quest均exit0。新增3項測試涵蓋分類、短於週期採樣的轉換及容量／首筆保留；離線SDK Android／Windows各13 runtime／10 NUnit檔型別綁定通過，非執行證據。Transport的293官方檔／唯一修正驗證通過，未改上游補丁。沒有RebuildArena，原scene／prefab ID不變；bundle **0.19.1／Android code21／NGO仍18**，兩平台fingerprint同為 `b555847946006ec29716f4b302d9b331d15d914672774f308187c3d0bb7b4b93`。APK46,113,704 bytes、SHA-256 `36c8c52b9cfde24ae066ceb6649224d4018b0a879a4af2bca0b628e109dfff42`，v2簽章、min32／target35及六個ELF64 AArch64庫含libil2cpp核對通過；沒有頭盔運行。
+
+同binary原生weather回歸 `20261030-005548-22ee28c2`：275幀／最大來源年齡0.160839秒；GPU閃電區域亮度增加27.6674，首次採樣flash141／thunder181（預期180，10Hz觀測容差內）。雨／雷／storm DSP非零，穩定Pause52／Clear59音訊窗口RMS均0，PCM量化核對通過；night／flash PNG已實際檢視。六次GPU讀回／編碼／寫檔耗時18.32–24.30ms，不能回推舊場停頓原因。兩場均pendingTelemetry=false、活動0、cleanup零錯誤；16／23檔於writer關閉後複製回F，與SSD原件SHA-256一致，原件保留。
+
+完整機器證據在 `artifacts/pose-validation.json`、原資料核對在 `pose-historical-evidence.json`；操作／限制見 [TACTICAL_HUD.md](TACTICAL_HUD.md)。本輪無共享遊戲規則、後端或管理Web UI變更，不重算歷史485核心／369 HTTP／43世界／140 Chromium。5080 health仍ok，正式資料／DLL未換。啟動旗標提示、原停頓根因、長任務／跨機、3D軍事素材、頭盔／MR／VIVE、硬體與25台仍待；完整長期目標維持開發中。
+
+
 ## 2026-10-30：軍事戰鬥HUD、場地方位與遮擋標記
 
 上一輪原生聲光屬實際進度。本輪從乾淨 `65d5185` 接續無頭盔的電腦端與原始11項目標，新增 `TacticalHud`：軍綠狀態面板、血量條、大字彈匣／備彈、場地方位刻度、受遮擋限制的HOSTILE／ALLY短識別及血量條，桌面保留Simulation來源。準星沿用武器／掩體預測，射擊／換彈／傷害仍由server確認。XR既有world-space文字共用狀態優先序，修正淘汰被追蹤異常蓋過的情況；沒有把桌面方位或浮標直接套進HMD。

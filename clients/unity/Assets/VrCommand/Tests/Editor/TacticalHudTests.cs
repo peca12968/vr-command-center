@@ -15,10 +15,40 @@ namespace VrCommand.Unity.Tests
         {
             Assert.AreEqual("ELIMINATED", TacticalHudRules.Status("Running", 0, true, false, false, false, true));
             Assert.AreEqual("CONTROL LINK UNAVAILABLE", TacticalHudRules.Status("Running", 100, false, true, true, true, false));
-            Assert.AreEqual("TRACKING INVALID", TacticalHudRules.Status("Running", 100, true, false, true, true, true));
+            Assert.AreEqual("TRACKING INVALID", TacticalHudRules.Status("Running", 100, true, true, true, false, true));
             Assert.AreEqual("POSE REJECTED", TacticalHudRules.Status("Running", 100, true, false, true, true, false));
             foreach (var pair in new[] { new[] { "Preparing", "AWAITING START" }, new[] { "Paused", "MISSION PAUSED" }, new[] { "Ended", "MISSION ENDED" }, new[] { "Running", "ACTIVE" } })
                 Assert.AreEqual(pair[1], TacticalHudRules.Status(pair[0], 100, true, true, true, true, false));
+        }
+        [Test] public void StaleStreamIsDistinctFromRejectedPoseAndInvalidTracking()
+        {
+            foreach (var xr in new[] { false, true })
+            {
+                Assert.AreEqual("POSE STREAM STALE", TacticalHudRules.Status("Running", 100, true, true, false, true, xr));
+                Assert.AreEqual("POSE REJECTED", TacticalHudRules.Status("Running", 100, true, false, false, true, xr));
+                Assert.AreEqual("TRACKING INVALID", TacticalHudRules.Status("Running", 100, true, false, false, false, xr));
+                Assert.AreEqual("ELIMINATED", TacticalHudRules.Status("Running", 0, true, false, false, false, xr));
+            }
+        }
+        [Test] public void SubSampleWarningTransitionsRetainTheirRawFlags()
+        {
+            var log = new HudTransitionLog();
+            TacticalHudSnapshot State(bool connected) => new TacticalHudSnapshot { phase = "Running", status = connected ? "ACTIVE" : "POSE STREAM STALE",
+                ready = true, poseAccepted = true, tracking = true, connected = connected };
+            log.Observe(1, State(true)); log.Observe(1.01, State(true));
+            log.Observe(1.02, State(false)); log.Observe(1.03, State(true));
+            var entries = log.Snapshot(); Assert.AreEqual(3, entries.Length);
+            Assert.AreEqual(1.02, entries[1].seconds); Assert.IsFalse(entries[1].hud.connected); Assert.IsTrue(entries[1].hud.poseAccepted);
+            Assert.AreEqual(1.03, entries[2].seconds); Assert.IsFalse(log.Truncated);
+        }
+        [Test] public void TransitionTraceIsBoundedWithoutOverwritingFirstEvidence()
+        {
+            var log = new HudTransitionLog(2);
+            log.Observe(0, new TacticalHudSnapshot { status = "ACTIVE" });
+            log.Observe(1, new TacticalHudSnapshot { status = "POSE REJECTED" });
+            log.Observe(2, new TacticalHudSnapshot { status = "ACTIVE" });
+            Assert.IsTrue(log.Truncated); Assert.AreEqual(2, log.Snapshot().Length); Assert.AreEqual(0, log.Snapshot()[0].seconds);
+            Assert.Throws<System.ArgumentOutOfRangeException>(() => new HudTransitionLog(0));
         }
         [Test] public void VenueBearingUsesPositiveZAndWrapsWithoutInventingGeographicNorth()
         {
