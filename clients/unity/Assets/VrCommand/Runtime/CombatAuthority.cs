@@ -52,8 +52,8 @@ namespace VrCommand.Unity
         public NetworkVariable<bool> Ready = new NetworkVariable<bool>(false);
         private readonly ArenaSession session = new ArenaSession();
         private readonly Dictionary<string, GameObject> propViews = new Dictionary<string, GameObject>();
-        private readonly Dictionary<string, EnemyView> enemyViews = new Dictionary<string, EnemyView>();
-        private EnemyModels enemies;
+        private readonly Dictionary<string, ArmedEnemyView> enemyViews = new Dictionary<string, ArmedEnemyView>();
+        private ArmedEnemyModels enemies;
         private FieldPropModels fieldProps;
         private float accumulator, nextPublish;
         private double lastManagement = double.NegativeInfinity;
@@ -75,7 +75,7 @@ namespace VrCommand.Unity
             if (Outbox == null || management == null || session.World.Phase != WorldPhase.Preparing) throw new InvalidOperationException("Initialize a preparing world and combat source first.");
             recordingStart = Time.realtimeSinceStartupAsDouble;
             var header = WorldRecordingHeader.Create(Guid.Parse(management.id), Outbox.StreamId, Outbox.Origin, management.roomIds, session.Props,
-                DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), assetSet: WorldAssetSets.WeaponActions, enemyPresentationVersion: EnemyPresentation.Version, weaponPresentationVersion: WeaponPresentation.Version);
+                DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), assetSet: WorldAssetSets.ArmedCombatants, enemyPresentationVersion: EnemyPresentation.Version, weaponPresentationVersion: WeaponPresentation.Version);
             Recording = WorldOutbox.Create(path, header, new UnityWorldCodec());
             if (!CaptureWorld(true)) throw new InvalidOperationException("Initial world frame could not be saved.");
         }
@@ -127,7 +127,7 @@ namespace VrCommand.Unity
         {
             Instance = this;
             Props.OnListChanged += GeometryChanged;
-            fieldProps = new FieldPropModels(); enemies = new EnemyModels();
+            fieldProps = new FieldPropModels(); enemies = new ArmedEnemyModels();
             if (IsServer) { Ready.Value = serverReady; Publish(); }
         }
         private void GeometryChanged(NetworkListEvent<CombatPropState> change) { geometryDirty = true; walkSurfaces.Clear(); }
@@ -298,7 +298,7 @@ namespace VrCommand.Unity
                     view.Root.transform.position = actor.position; enemyViews.Add(id, view);
                 }
                 view.Root.SetActive(actor.health > 0);
-                view.Root.transform.position = Vector3.Lerp(view.Root.transform.position, actor.position, 1 - Mathf.Exp(-20 * Time.unscaledDeltaTime));
+                view.Root.transform.position = actor.position;
                 view.Apply(Vector(actor.facing), actor.walking, actor.presentationTick);
             }
             foreach (var id in new List<string>(enemyViews.Keys)) if (!live.Contains(id)) { Destroy(enemyViews[id].Root); enemyViews.Remove(id); }

@@ -5,6 +5,8 @@ import { RIFLE_ASSETS, serviceRifleFactory, placeRifle } from './service-rifle.j
 import { WEAPON_ACTION_ASSETS, weaponActionsFactory, applyWeaponPose } from './weapon-actions.js';
 import { COMBATANT_ASSETS, opponentFactory, poseOpponent } from './combatants.js';
 
+import { ARMED_ASSETS, armedOpponentFactory, poseArmedOpponent } from './armed-combatants.js';
+
 const point = value => new THREE.Vector3(value.x, value.y, value.z);
 const roomX = id => (id - 3) * 14;
 export class ReplayScene {
@@ -39,18 +41,18 @@ export class ReplayScene {
     const assetSet = recording.assetSet === undefined ? LEGACY_ASSETS : recording.assetSet;
     if (!supportedAssets(assetSet)) throw new Error('不支援的錄製素材版本。');
     if (![0,1].includes(recording.enemyPresentationVersion ?? 0) || assetSet === COMBATANT_ASSETS && recording.enemyPresentationVersion !== 1) throw new Error('不支援的敵軍姿態版本。');
-    if (![0,1].includes(recording.weaponPresentationVersion ?? 0) || assetSet === WEAPON_ACTION_ASSETS && (recording.weaponPresentationVersion !== 1 || recording.enemyPresentationVersion !== 1)) throw new Error('不支援的武器動作版本。');
+    if (![0,1].includes(recording.weaponPresentationVersion ?? 0) || [WEAPON_ACTION_ASSETS,ARMED_ASSETS].includes(assetSet) && (recording.weaponPresentationVersion !== 1 || recording.enemyPresentationVersion !== 1)) throw new Error('不支援的武器動作版本。');
     this.roomIds = [...recording.roomIds];
     this.weather.load(recording);
     this.clear(this.stage); this.clear(this.traces); this.actors.clear(); this.selected = ''; this.follow = false;
-    this.rifles?.dispose(); this.rifles = assetSet === WEAPON_ACTION_ASSETS ? weaponActionsFactory() : [RIFLE_ASSETS, COMBATANT_ASSETS].includes(assetSet) ? serviceRifleFactory() : null;
-    this.opponents?.dispose(); this.opponents = [COMBATANT_ASSETS, WEAPON_ACTION_ASSETS].includes(assetSet) ? opponentFactory() : null;
+    this.rifles?.dispose(); this.rifles = [WEAPON_ACTION_ASSETS,ARMED_ASSETS].includes(assetSet) ? weaponActionsFactory() : [RIFLE_ASSETS, COMBATANT_ASSETS].includes(assetSet) ? serviceRifleFactory() : null;
+    this.opponents?.dispose(); this.opponents = assetSet === ARMED_ASSETS ? armedOpponentFactory() : [COMBATANT_ASSETS, WEAPON_ACTION_ASSETS].includes(assetSet) ? opponentFactory() : null;
     for (const room of recording.roomIds) {
       const floor = this.mesh(new THREE.BoxGeometry(12, .2, 12), 0x344638); floor.position.set(roomX(room), -.12, 0); this.stage.add(floor);
       const grid = new THREE.GridHelper(12, 24, 0x8b9b6c, 0x4c6354); grid.position.set(roomX(room), -.005, 0); this.stage.add(grid);
       const boundary = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([[-6,-6],[6,-6],[6,6],[-6,6]].map(([x,z]) => new THREE.Vector3(roomX(room) + x, .01, z))), new THREE.LineBasicMaterial({ color: 0xc1d281 })); this.stage.add(boundary);
     }
-    const createProp = [FIELD_ASSETS, RIFLE_ASSETS, COMBATANT_ASSETS, WEAPON_ACTION_ASSETS].includes(assetSet) && recording.props.length ? fieldPropFactory() : null;
+    const createProp = [FIELD_ASSETS, RIFLE_ASSETS, COMBATANT_ASSETS, WEAPON_ACTION_ASSETS, ARMED_ASSETS].includes(assetSet) && recording.props.length ? fieldPropFactory() : null;
     let propTriangles = 0;
     for (const prop of recording.props) {
       if (createProp) {
@@ -111,7 +113,7 @@ export class ReplayScene {
     for (const enemy of frame.enemies) {
       const actor = this.actor('e:' + enemy.id, true); actor.group.visible = true; actor.group.position.copy(point(enemy.feet));
       if (actor.model) {
-        poseOpponent(actor, enemy, frame.tick);
+        if(actor.armed) poseArmedOpponent(actor,enemy,frame.tick); else poseOpponent(actor, enemy, frame.tick);
         for (const mesh of [actor.body, actor.head, actor.leftLeg, actor.rightLeg]) { mesh.material.transparent = enemy.health === 0; mesh.material.opacity = enemy.health === 0 ? .18 : 1; }
         continue;
       }
@@ -128,6 +130,10 @@ export class ReplayScene {
     }
     this.canvas.dataset.traceCount = String(events.length);
     this.canvas.dataset.rifleCount = String(this.rifles ? frame.players.length : 0);
+    this.canvas.dataset.armedPoses=JSON.stringify([...this.actors.values()].filter(a=>a.armed&&a.group.visible).map(a=>{
+      a.group.updateMatrixWorld(true); const v=p=>p.toArray(); const end=m=>v(m.localToWorld(new THREE.Vector3(0,1,0)));
+      return {id:a.group.userData.key.slice(2),muzzle:v(a.gun.getWorldPosition(new THREE.Vector3())),forward:v(new THREE.Vector3(0,0,1).applyQuaternion(a.gun.getWorldQuaternion(new THREE.Quaternion()))),
+        leftElbow:end(a.leftUpper),leftWrist:end(a.leftLower),rightElbow:end(a.rightUpper),rightWrist:end(a.rightLower)};}));
     this.canvas.dataset.enemyPoses = JSON.stringify([...this.actors.values()].filter(a => a.model && a.group.visible).map(a => ({ id: a.group.userData.key.slice(2),
       yaw: a.group.rotation.y * 180 / Math.PI, pitch: a.head.rotation.x * 180 / Math.PI, left: a.leftLeg.rotation.x * 180 / Math.PI, right: a.rightLeg.rotation.x * 180 / Math.PI })));
     this.canvas.dataset.weaponPoses=JSON.stringify([...this.actors.values()].filter(a=>!a.enemy&&a.gun.userData.weaponActions).map(a=>{

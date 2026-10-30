@@ -23,7 +23,7 @@ async function main(){
     await page.locator('#world-actor').selectOption('p:'+own);
     const target=[player.muzzle.x,player.muzzle.y-.1,player.muzzle.z-.35];for(const [key,v] of [['x',target[0]],['y',target[1]],['z',target[2]],['azimuth',-110],['elevation',15],['distance',2.4]])await page.locator('#world-camera-'+key).fill(String(v));
     await page.locator('#world-camera-apply').click();await page.screenshot({path:path.join(dir,'reload-observer.png'),fullPage:true});
-    check(Number(await page.locator('#world-canvas').getAttribute('data-triangles'))>0&&await page.locator('#world-canvas').getAttribute('data-asset-set')==='weapon-actions-v1','Real software WebGL renders the versioned native reload from an operator camera');
+    check(Number(await page.locator('#world-canvas').getAttribute('data-triangles'))>0&&await page.locator('#world-canvas').getAttribute('data-asset-set')==='armed-combatants-v1','Real software WebGL renders the versioned native reload from an operator camera');
     check(errors.length===0,'Actual-native reload observation has no page errors');
     await fs.writeFile(path.join(dir,'reload-observer.json'),JSON.stringify({source:'Actual native recording; Chromium SwiftShader observer',frame,expected,rendered,checks,errors},null,2));
   }catch(error){await page.screenshot({path:path.join(dir,'reload-observer-failure.png'),fullPage:true}).catch(()=>{});throw error;}

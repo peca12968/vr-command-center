@@ -25,7 +25,7 @@ internal static class WorldChecks
             bridge.Apply(JsonSerializer.Deserialize<ManagementSnapshot>(json, new JsonSerializerOptions(JsonFormat.Options) { IncludeFields = true })!);
         }
         Refresh();
-        var header = WorldRecordingHeader.Create(id, queue.StreamId, "Simulation", [1], bridge.Props, assetSet: WorldAssetSets.WeaponActions, enemyPresentationVersion: 1, weaponPresentationVersion: 1);
+        var header = WorldRecordingHeader.Create(id, queue.StreamId, "Simulation", [1], bridge.Props, assetSet: WorldAssetSets.ArmedCombatants, enemyPresentationVersion: 1, weaponPresentationVersion: 1);
         var field = Copy(header); field.assetSet = WorldAssetSets.FieldProps; WorldRecordingValidation.Header(field);
         check(WorldAssetSets.Supported(WorldAssetSets.ServiceRifle) && field.assetSet == WorldAssetSets.FieldProps, "New rifle and retained field-prop profiles are explicitly supported without changing the default");
         check(WorldRecordingHeader.Create(id, queue.StreamId, "Simulation", [1], bridge.Props).assetSet == WorldAssetSets.Legacy, "Existing recording producers retain their original primitive asset profile");
@@ -58,7 +58,7 @@ internal static class WorldChecks
         }
         var initial = WorldRecordingPacket.Capture(bridge.World, 1, 0, manager.Get(id).Sequence, 0, 0, Rig, enemyPresentationVersion: 1, weaponPresentationVersion: 1);
         check(store.Append(id, initial, owner).AcceptedSequence == 1 && store.Append(id, Copy(initial), owner).AcceptedSequence == 1, "Initial preparing frame is persisted once");
-        check(store.Info(id, master).Header.assetSet == WorldAssetSets.WeaponActions && store.Info(id, master).Header.enemyPresentationVersion == 1
+        check(store.Info(id, master).Header.assetSet == WorldAssetSets.ArmedCombatants && store.Info(id, master).Header.enemyPresentationVersion == 1
             && store.Frame(id, 1, master)!.Packet.frame.enemies[0].hasPresentation, "SQLite records the humanoid profile and explicit initial enemy presentation together");
         check(store.Frame(id,1,master)!.Packet.frame.players[0].hasWeaponPresentation && store.Info(id,master).Header.weaponPresentationVersion==1,"SQLite retains the new action profile and explicit player action clock");
         var initialBad = Copy(initial); initialBad.elapsedMilliseconds = 1;

@@ -1,5 +1,7 @@
 # 人形敵軍與保存姿態
 
+本頁說明保留的combatants-v1。最新持槍模型與裝飾性雙臂見 [ARMED_ENEMIES.md](ARMED_ENEMIES.md)，不回寫此舊素材。
+
 `combatants-v1` 在既有沙包／油桶與玩家步槍上增加原創低多邊形敵軍：頭盔、護目鏡、背心／彈袋、臂帶、手套、褲子、護膝及靴子。每名404三角形，三個Mesh（軀幹180、頭104、腿60重用兩次）。`scripts/generate-combatants.py` 產出相同Unity Resources JSON與瀏覽器module；無外部模型、貼圖或下載。SHA-256固定為 `39fa5e9baceec0eb71ce6a4664fc4460e7b0f212f2c58b75c7b4d75b3565fdf2`，`--check` 核對資料及provenance；改模型必須新增profile，不能覆寫pin或改舊回放。
 
 API／UI **0.20.0**、Unity **0.22.0／Android code25／NGO21**。管理envelope6、任務schema1、world schema1、票券2、environmentVersion1與rules0.8.0保持。NGO的敵軍actor row新增facing、walking與presentationTick，一列保存同次姿態，不以另一個時鐘推測步態。Prepare只原位升protocol並重用Arena／PlayerAvatar ID；全體遊戲server／client與API／UI一起更新。新profile／欄位寫入後不能降舊reader，DB schema不變不是降版許可。

@@ -116,13 +116,13 @@ async function main() {
     await page.locator('#tab-world').click(); await page.locator('#world-refresh').click(); await until(async () => (await page.locator('#world-recording option').count()) > 0, 'native recording in console');
     await page.locator('#world-recording').selectOption(session); await page.locator('#world-live').click();
     await until(async () => (await page.locator('#world-environment').innerText()).includes('Storm') || (await page.locator('#world-environment').innerText()).includes('暴風雨'), 'native world observed');
-    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'weapon-actions-v1'
+    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'armed-combatants-v1'
       && Number(await page.locator('#world-canvas').getAttribute('data-prop-triangles')) === 642,
       'Actual native header selects the same 256-triangle sandbags and 386-triangle drum in live observation');
     check(await page.locator('#world-canvas').getAttribute('data-rifle-triangles') === '264'
       && Number(await page.locator('#world-canvas').getAttribute('data-rifle-count')) >= 2,
       'Live actual-native observation renders the versioned player rifles from accepted muzzle poses');
-    check(await page.locator('#world-canvas').getAttribute('data-enemy-triangles') === '404'
+    check(await page.locator('#world-canvas').getAttribute('data-enemy-triangles') === '728'
       && JSON.parse(await page.locator('#world-canvas').getAttribute('data-enemy-poses')).length === 1,
       'Actual native world explicitly selects the shared humanoid model and saved enemy orientation');
     await page.locator('#world-camera').selectOption('top'); await page.locator('#camera-name').fill('Operator overhead'); await page.locator('#camera-save').click();
@@ -183,7 +183,7 @@ async function main() {
     await until(async () => (await page.locator('#world-timeline').inputValue()) === (await page.locator('#world-timeline').getAttribute('max')), 'replay final seek');
     const finalInfo = await api('/sessions/' + session + '/world');
     await until(async () => (await page.locator('#world-time').innerText()).includes('幀 ' + finalInfo.acceptedSequence), 'rendered final replay frame');
-    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'weapon-actions-v1'
+    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'armed-combatants-v1'
       && Number(await page.locator('#world-canvas').getAttribute('data-prop-triangles')) === 642,
       'Sealed native replay retains its saved field-prop appearance profile after camera recall / final seek');
     check(await page.locator('#world-canvas').getAttribute('data-rifle-triangles') === '264'
@@ -197,6 +197,15 @@ async function main() {
         pitch=Math.max(-45,Math.min(45,-Math.asin(Math.max(-1,Math.min(1,e.forward.y)))*180/Math.PI)),stride=e.walking?Math.sin((finalFrame.tick%12)*Math.PI/6)*18:0;
       return e.hasPresentation && Math.abs(p.yaw-yaw)<.0001 && Math.abs(p.pitch-pitch)<.0001 && Math.abs(p.left-stride)<.0001 && Math.abs(p.right+stride)<.0001;
     }),'Sealed real-native replay renders exact recorded facing and opposite-leg pose at the frozen final tick');
+    const armed=JSON.parse(await page.locator('#world-canvas').getAttribute('data-armed-poses'));
+    const {armedEnemyPose}=await import('../../src/VrCommand.Api/wwwroot/console/armed-combatants.js');
+    const close=(a,b)=>Math.hypot(...a.map((v,i)=>v-b[i]))<.00001;
+    const worldPoint=(local,e)=>{const yaw=Math.atan2(e.forward.x,e.forward.z),c=Math.cos(yaw),s=Math.sin(yaw);return[e.feet.x+c*local[0]+s*local[2],e.feet.y+local[1],e.feet.z-s*local[0]+c*local[2]];};
+    check(armed.length===finalFrame.enemies.length && armed.every(p=>{const e=finalFrame.enemies.find(e=>e.id===p.id);return close(p.muzzle,[e.feet.x,e.feet.y+1.4,e.feet.z])&&close(p.forward,[e.forward.x,e.forward.y,e.forward.z]);}),
+      'Actual native sealed replay keeps every sidearm on the original authority muzzle and full direction');
+    check(armed.every(p=>{const e=finalFrame.enemies.find(e=>e.id===p.id),v=armedEnemyPose(e.forward,e.walking,finalFrame.tick);return ['left','right'].every(side=>close(p[side+'Elbow'],worldPoint(v[side].elbow,e))&&close(p[side+'Wrist'],worldPoint(v[side].wrist,e)));}),
+      'Actual rendered elbows and wrists agree with the saved native frame after final direct seek');
+    await fs.writeFile(path.join(evidence,'armed-final-pose.json'),JSON.stringify({frame:finalFrame,rendered:armed},null,2));
     await page.screenshot({ path: path.join(evidence, 'native-replay.png'), fullPage: true });
     const stats = await api('/sessions/' + session + '/statistics');
     check(stats.origin === 'Simulation' && !stats.pendingTelemetry && stats.players.some(p => p.hitsReceived > 0), 'UI-controlled AI produces sealed actual-native combat statistics');

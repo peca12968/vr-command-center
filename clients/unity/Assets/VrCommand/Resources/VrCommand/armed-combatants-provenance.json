@@ -1,0 +1,20 @@
+{
+  "assetSet": "armed-combatants-v1",
+  "source": "Original fictional compact sidearm and two-arm opponent; no external art",
+  "generator": "scripts/generate-armed-combatants.py",
+  "combatantsSha256": "39fa5e9baceec0eb71ce6a4664fc4460e7b0f212f2c58b75c7b4d75b3565fdf2",
+  "weaponActionsSha256": "517c3616ec12dad34f25cc50f5309eae1033b62bcbbb636b4a3f378a5c12cab3",
+  "dataSha256": "cc011e951163d4b846c4e2c217592251906844c0dfcee2f795618c8c1c388102",
+  "triangles": {
+    "Torso": 84,
+    "Head": 104,
+    "Leg": 60,
+    "UpperArm": 24,
+    "LowerArm": 24,
+    "Sidearm": 84,
+    "RightGlove": 120,
+    "LeftGlove": 120
+  },
+  "totalPerEnemy": 728,
+  "scope": "Cosmetic compressed two-hand stance and two-bone solve; original authority muzzle/box/rules unchanged. No tracked hands, recoil, flash or foot IK."
+}

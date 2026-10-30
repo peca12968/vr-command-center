@@ -6,8 +6,8 @@ namespace VrCommand.Simulation
 {
     public static class WorldAssetSets
     {
-        public const string Legacy = "primitives-v1", FieldProps = "field-props-v1", ServiceRifle = "service-rifle-v1", Combatants = "combatants-v1", WeaponActions = "weapon-actions-v1";
-        public static bool Supported(string value) => value == Legacy || value == FieldProps || value == ServiceRifle || value == Combatants || value == WeaponActions;
+        public const string Legacy = "primitives-v1", FieldProps = "field-props-v1", ServiceRifle = "service-rifle-v1", Combatants = "combatants-v1", WeaponActions = "weapon-actions-v1", ArmedCombatants = "armed-combatants-v1";
+        public static bool Supported(string value) => value == Legacy || value == FieldProps || value == ServiceRifle || value == Combatants || value == WeaponActions || value == ArmedCombatants;
     }
     [Serializable] public sealed class RecordedVector
     {
@@ -114,7 +114,7 @@ namespace VrCommand.Simulation
             if (header == null || header.schemaVersion != 1 || header.environmentVersion < 0 || header.environmentVersion > EnvironmentPresentation.Version
                 || header.enemyPresentationVersion < 0 || header.enemyPresentationVersion > EnemyPresentation.Version
                 || header.weaponPresentationVersion < 0 || header.weaponPresentationVersion > WeaponPresentation.Version
-                || (header.assetSet == WorldAssetSets.WeaponActions && (header.weaponPresentationVersion != 1 || header.enemyPresentationVersion != 1))
+                || ((header.assetSet == WorldAssetSets.WeaponActions || header.assetSet == WorldAssetSets.ArmedCombatants) && (header.weaponPresentationVersion != 1 || header.enemyPresentationVersion != 1))
                 || (header.assetSet == WorldAssetSets.Combatants && header.enemyPresentationVersion != 1) || !Id(header.sessionId) || !Id(header.streamId)
                 || !new[] { "Simulation", "GameServer" }.Contains(header.origin) || header.rulesVersion != "0.8.0" || !WorldAssetSets.Supported(header.assetSet)
                 || header.calibration != "uncalibrated-vr" || header.roomIds == null || (header.roomIds.Length != 1 && header.roomIds.Length != 5)

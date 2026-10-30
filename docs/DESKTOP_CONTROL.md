@@ -1,5 +1,7 @@
 # 從控制台開啟電腦任務
 
+目前來源API／UI0.22、Unity0.24／code27／NGO22，採armed-combatants-v1；NPC雙手手槍／裝飾性雙臂見 [ARMED_ENEMIES.md](ARMED_ENEMIES.md)，玩家換彈沿用WEAPON_ACTIONS。新版原生觀戰檢查另讀實際槍口／方向／肘腕世界矩陣，最新通過數與binary以PROGRESS為準。下文舊版數字為各功能首輪證據。
+
 API／UI v0.19 支援 [玩家步槍](SERVICE_RIFLE.md)，新原生來源採service-rifle-v1，保留舊錄製外觀；39項UI／native包含即時及封存回放的新玩家武器網格。完整結果以PROGRESS為準。
 
 `scripts/start-desktop-control.py` 啟動自己的 API／任務庫，將操作員在該控制台建立的 Preparing VR 場次接到真正 Windows Unity server。從實際名冊配發短效票券並啟動玩家；開始、暫停、環境、AI 及結束都由控制台操作，不預先代替操作員建立任務或開始遊戲。這是 **Simulation**，頭盔分類不代表實際連線設備。

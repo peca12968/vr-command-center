@@ -14,11 +14,11 @@ function roomPosition(value, room) { return vector(value) && Math.abs(value.x - 
 // Validate snapshots against their event boundary. Playback never reruns AI or guesses missing damage.
 export function validateRecording(data) {
   need(data && data.schemaVersion === 2 && data.rulesVersion === '0.8.0', '需要 schema 2／rules 0.8.0，舊除錯檔請重新產生。');
-  need(data.assetSet === undefined || ['primitives-v1', 'field-props-v1', 'service-rifle-v1', 'combatants-v1', 'weapon-actions-v1'].includes(data.assetSet), '不支援的素材版本。');
+  need(data.assetSet === undefined || ['primitives-v1', 'field-props-v1', 'service-rifle-v1', 'combatants-v1', 'weapon-actions-v1', 'armed-combatants-v1'].includes(data.assetSet), '不支援的素材版本。');
   need(data.enemyPresentationVersion === undefined || [0, 1].includes(data.enemyPresentationVersion), '不支援的敵軍姿態版本。');
   need(data.assetSet !== 'combatants-v1' || data.enemyPresentationVersion === 1, '人形敵軍需要保存的姿態版本。');
   need(data.weaponPresentationVersion === undefined || [0,1].includes(data.weaponPresentationVersion), '不支援的武器動作版本。');
-  need(data.assetSet !== 'weapon-actions-v1' || data.weaponPresentationVersion === 1 && data.enemyPresentationVersion === 1, '新武器需要保存的動作與敵軍版本。');
+  need(!['weapon-actions-v1','armed-combatants-v1'].includes(data.assetSet) || data.weaponPresentationVersion === 1 && data.enemyPresentationVersion === 1, '新武器需要保存的動作與敵軍版本。');
   need(data.origin === 'Simulation' && data.statistics?.origin === 'Simulation', '此版僅支援明確標記的 Simulation 紀錄。');
   need(guid(data.sessionId) && data.statistics.sessionId === data.sessionId, '場次身分不一致。');
   need(Array.isArray(data.roomIds) && [1, 5].includes(data.roomIds.length) && new Set(data.roomIds).size === data.roomIds.length && data.roomIds.every(r => integer(r, 1, 5)), '房間配置錯誤。');

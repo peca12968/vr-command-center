@@ -1,5 +1,28 @@
 # 開發進度
 
+## 2026-10-31：敵軍雙手手槍與裝飾性雙臂
+
+從乾淨 `3c3d71b` 接續無頭盔的PC主線。新增 `armed-combatants-v1`：原創緊湊型手槍、分離上下臂及合成手套，每NPC728面、八個共用Mesh／一材質；頭及腿取固定combatants-v1、手套為固定weapon-actions-v1的0.65倍副本，原五profile／pin完整保留。生成器先驗舊pin，新資料SHA `cc011e951163d4b846c4e2c217592251906844c0dfcee2f795618c8c1c388102`；check與記憶體改色反例拒絕通過。無外部素材／下載，規範見 [ARMED_ENEMIES.md](ARMED_ENEMIES.md)。
+
+API／UI **0.22.0**、Unity **0.24.0／code27／NGO仍22**。新profile要求enemyPresentationVersion1及weaponPresentationVersion1，未加wire欄位；來源／API／UI與全部遊戲端一起更新。envelope6、任務schema1、world schema1、票券2、environmentVersion1與rules0.8.0保持，binary原header／payload／checksum與舊外觀不改，不能降舊reader。
+
+共用C#9／JS依保存forward／tick求解雙臂，upper .22m／lower .25m，wrist附槍握點、elbow朝外下hint；不靠移動feet／追蹤資料補救。槍口仍feet+(0,1.4,0)、完整±90°pitch，頭仍±45°，命中half(.3,.9,.3)與AI射速／傷害不改。軀幹／頭位置是新裝飾性外觀，不改保存feet。Unity改用同一atomic actor row的原始位置，避免本地插值讓槍口偏離；10Hz階梯感未解。Paused／Ended及seek還原同姿勢，無Collider／NetworkObject。開火閃光需另保存射擊當下位置／方向及事件，本輪沒有補造；後座／NPC換彈／死亡、完整人體／手指／腳底IK、極端姿勢防穿插與音效仍待。
+
+locked restore／Release build0警告／錯誤，**555核心、403 HTTP、43世界串流、41 Node／179 Chromium**通過。核心181個pitch核對方向／臂長、共線fallback／不可達拒絕、新profile版本政策及原20點傷害；SQLite保存重開新profile，保留舊reader測例。C#／JS向量、真正WebGL面數／子物件世界矩陣、直接seek、舊profile切換及精確結束統計通過，瀏覽器為SwiftShader。真正Prepare與**70 EditMode**通過，新增4項涵蓋外向網格、八Mesh重用／無碰撞、實際槍口／腕點及seek。Editor保存實際新增meta；曾暫時更新URP清單，最終Android匯入後與原檔無差異，未RebuildArena，原scene／prefab ID保持。
+
+第一版Windows成功後覆核發現合法forward有微小長度容差，補上槍pitch前正規化及近單位向量測例，再重跑70 Tests／555核心／41 Node及179 Chromium，最終Desktop exit0。舊成功receipt另存artifacts/armed-desktop-before-normalization.json，最終receipt UTC2026-10-30T18:11:01.5598325Z，fingerprint `a712a41accad34ab19d2032cd1e204a2885e9158fd5decd4c6ea5fe74f27357f`；不能拿初版receipt配最終來源。較窄SDK在正規化修正前通過兩分支18 runtime／16 NUnit型別綁定，未當作最終Editor／APK證據。
+
+| 最終PC場（前綴20261031） | 幀／最大來源年齡 | 證據 |
+|---|---|---|
+| 021117-c7d69f7a | 831／0.266805秒 | **44 UI／native**：保存配置／preflight、動態名冊、白天／雨夜／Pause的真正GPU畫面，近距離NPC雙手槍已檢視；AI傷害後GPU健康60／彈藥30/90、Patrol中Pause保留非零步態。封存回放的真正渲染槍口／完整方向／肘腕世界矩陣與保存frame核對一致，書籤／精確鏡頭及歷史玩家統計一致 |
+| 021329-c5842479 | 七場605／0.165719秒 | 五個真正server／每房一個client隔離、單房End／重用、全部封存後Linked；舊票／升權拒絕，七個獨立stream精確封存且皆新profile／enemy1／weapon1 |
+
+兩組均Simulation／Simulated、pendingTelemetry=false、活動0、cleanup零錯誤；14／26檔由helper在writer關閉後複製回F，再與保留SSD原件逐檔SHA一致。首次手動複製前的assert發現helper已產生snapshot，未覆寫；改核對既有副本。程式與binary仍F、上述runtime明確SSD，非F USB全資料或25台負載。source age為擷取新鮮度，非RTT／FPS。
+
+另 `unity-admission/20261031-021401-e1fdfde9` **8項無圖形**入場／撤銷／transport釋放／同admission重連通過，381幀、精確封存／回放統計及活動0。三組共35個log未見NullReference／MissingReference／ObjectDisposed／IndexOutOfRange例外。本輪未重跑真正按鍵兩發擊殺、走離出生點的互動重連、完整碰撞、GPU閃電或DSP／聽感；既有結果保留為歷史，不混算新binary驗收。
+
+Quest ARM64／IL2CPP亦exit0，receipt UTC2026-10-30T18:24:52.1314526Z；與最終Desktop來源fingerprint及scene／prefab ID完全一致。APK46,190,262 bytes、SHA `ad974f992046c7d70adcb19c7f9d0731e8e21ea79e869178fc96565d763caf5b`，簽章v2、min32／target35、code27／bundle0.24及六個ELF64 AArch64庫含libil2cpp核對通過。四張原生GPU截圖為Sky原始JPEG位元組，副檔名已對齊；完整機器證據在artifacts/armed-validation.json，未將舊APK或較窄SDK當本輪結果，沒有頭盔安裝。原5080已唯讀確認health ok、仍API0.16／原歷史，未替換DLL／正式憑證。完整11項長期目標持續開發中；後續接射擊事件及閃光／後座、玩家人物、完整動畫／音效、複雜地形／跨機與原停頓原因。Quest／VIVE實機、MR、廠商硬體及25台仍待分階段驗收。
+
 ## 2026-10-31：保存換彈時鐘、分離彈匣及合成手套
 
 從乾淨 `df2e649` 接續無頭盔的PC主線。新增 `weapon-actions-v1`，完整沿用既有人形敵軍／掩體，將固定264面步槍分為槍身240／彈匣24，加各120面的兩個原創手套；四Mesh／一材質跨avatar引用計數，無Collider或NetworkObject。生成器先驗證舊pin，再分離原三角形，新資料SHA `517c3616ec12dad34f25cc50f5309eae1033b62bcbbb636b4a3f378a5c12cab3` 固定；原四個profile及pin保留，沒有外部模型／貼圖。新舊原位264面的位置／法線／色彩已逐三角形核對，不能改舊回放。規範見 [WEAPON_ACTIONS.md](WEAPON_ACTIONS.md)。
