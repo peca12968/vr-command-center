@@ -87,12 +87,13 @@ namespace VrCommand.Unity
             if (Recording == null || Recording.Complete || management == null) return true;
             var now = Time.realtimeSinceStartupAsDouble;
             if (!force && now < nextRecording) return true;
+            using var captureTiming=NativePoseTrace.Measure("WorldCapture");
             try
             {
                 var packet = WorldRecordingPacket.Capture(session.World, Recording.LastSequence + 1,
                     Recording.LastSequence == 0 ? 0 : (long)((now - recordingStart) * 1000), observedSequence, Outbox.LastSequence,
                     Recording.ThroughWorldSequence, RecordedRigFor, management.environment.weather, management.environment.lightning, managementSuspended, EnemyPresentation.Version, WeaponPresentation.Version, EnemyFirePresentation.Version, PlayerFirePresentation.Version);
-                Recording.Append(packet); nextRecording = now + .1;
+                using(NativePoseTrace.Measure("WorldJournal"))Recording.Append(packet); nextRecording = now + .1;
                 if (session.World.Phase == WorldPhase.Ended) Recording.Finish();
                 return true;
             }
@@ -119,7 +120,7 @@ namespace VrCommand.Unity
         {
             if (journalFault) return false;
             if (Outbox == null || session.World == null) return true;
-            try { Outbox.Capture(session.World, observedSequence); return true; }
+            try { using(NativePoseTrace.Measure("CombatJournal"))Outbox.Capture(session.World, observedSequence); return true; }
             catch (Exception exception) when (exception is System.IO.IOException || exception is System.IO.InvalidDataException || exception is UnauthorizedAccessException || exception is InvalidOperationException || exception is ArgumentException)
             { TelemetryFault(); return false; }
         }
@@ -135,6 +136,7 @@ namespace VrCommand.Unity
         private void GeometryChanged(NetworkListEvent<CombatPropState> change) { geometryDirty = true; walkSurfaces.Clear(); }
         public void ApplyManagement(ManagementSnapshot snapshot)
         {
+            using var timing=NativePoseTrace.Measure("ManagementApply");
             if (!Capture()) throw new InvalidOperationException("Telemetry is faulted.");
             var changed = management == null || snapshot.sequence != observedSequence || managementSuspended;
             if (changed && !CaptureWorld(true)) throw new InvalidOperationException("World recording is faulted.");
@@ -256,6 +258,7 @@ namespace VrCommand.Unity
         private void Publish()
         {
             if (!IsSpawned || !IsServer || session.World == null) return;
+            using var timing=NativePoseTrace.Measure("WorldPublish");
             if (!geometryPublished)
             {
                 geometryPublished = true;
@@ -263,6 +266,8 @@ namespace VrCommand.Unity
                 foreach (var prop in session.Props) Props.Add(new CombatPropState { id = prop.Id.ToString("D"), room = prop.RoomId, center = Vector(prop.Center), half = Vector(prop.HalfSize), yaw = prop.Yaw, barrel = prop.Kind == PropKind.Barrel });
             }
             var frame = session.World.Snapshot();
+            if(NativePoseTrace.Enabled)foreach(var player in frame.Players)
+                if(rigs.TryGetValue(player.Id,out var rig))NativePoseTrace.Body(rig.Connection,player.Connected);
             GetComponent<SceneAuthority>()?.PublishTick(frame.Tick, frame.Phase.ToString());
             var actors = new List<CombatActorState>();
             foreach (var player in frame.Players) actors.Add(new CombatActorState { id = player.Id.ToString("D"), room = player.RoomId, position = Vector(player.Head),

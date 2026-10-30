@@ -4,9 +4,11 @@
 
 依 2026-10-29 的使用者指示，**優先開發 Meta Quest 3**，暫以 Android 獨立執行為工作假設；VIVE 延後接入，共用架構與原始雙平台目標保留。
 
-目前為 **API v0.24／Unity 遊戲端 v0.26 原型**。真正 Editor 已完成 Prepare、82 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 24，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
+目前為 **API v0.24／Unity 遊戲端 v0.26.1 原型**。真正 Editor 已完成 Prepare、87 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 24，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
 
-較窄的 [managed SDK 檢查](docs/UNITY_SDK_CHECK.md) 仍可補充 API／直接參考診斷，其本身不執行 Unity 或產出播放器；目前較強的真正 Editor、82 項測試及 binary 結果以 PROGRESS 為準。
+較窄的 [managed SDK 檢查](docs/UNITY_SDK_CHECK.md) 仍可補充 API／直接參考診斷，其本身不執行 Unity 或產出播放器；目前較強的真正 Editor、87 項測試及 binary 結果以 PROGRESS 為準。
+
+新增 [兩端姿態時序診斷](docs/POSE_TIMING.md)：以有界記憶體記錄RPC呼叫／收件、主線程空窗及日誌／GPU擷取區段；已用自然60秒、受控丟包與真正Space核對，能區分控制段收件空窗與玩家停頓。一般執行不啟用，原0.5秒規則不改；歷史偶發原因尚未重現。
 
 新增 [玩家射擊閃光與後座](docs/PLAYER_FIRE.md)：實際Space白天／夜間閃光及22mm槍身位移已由原生GPU核對，保存射線與封存事件精確一致；只動子槍身／彈匣，pointer與Tracked資料不改，原七profile保留。兩發扣彈／轉向／回放一致，音效與全身人物仍待。
 

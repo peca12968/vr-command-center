@@ -49,6 +49,7 @@ namespace VrCommand.Unity
             try { configuration = LaunchConfiguration.Load(); }
             catch (Exception) { status = "PLEASE CONTACT THE CONTROL DESK"; }
             if (configuration == null) yield break;
+            NativePoseTrace.Install(gameObject,configuration.role);
             var transport = (UnityTransport)networkManager.NetworkConfig.NetworkTransport;
             transport.SetConnectionData(configuration.address, configuration.port, configuration.IsServer ? "0.0.0.0" : null);
             networkManager.OnClientDisconnectCallback += Disconnected;

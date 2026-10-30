@@ -65,8 +65,10 @@ namespace VrCommand.Unity
             var texture=new Texture2D(Screen.width,Screen.height,TextureFormat.RGB24,false);
             try
             {
-                texture.ReadPixels(new Rect(0,0,Screen.width,Screen.height),0,0);texture.Apply();
-                File.WriteAllBytes(Path.Combine(directory,name+".png"),texture.EncodeToPNG());captures.Add(new Capture{file=name+".png",phase=phase,players=rows});Write(false,"");
+                using(NativePoseTrace.Measure("PlayerGpuReadback")){texture.ReadPixels(new Rect(0,0,Screen.width,Screen.height),0,0);texture.Apply();}
+                byte[] encoded;using(NativePoseTrace.Measure("PlayerPngEncode"))encoded=texture.EncodeToPNG();
+                using(NativePoseTrace.Measure("PlayerPngWrite"))File.WriteAllBytes(Path.Combine(directory,name+".png"),encoded);
+                captures.Add(new Capture{file=name+".png",phase=phase,players=rows});Write(false,"");
             }
             finally{Destroy(texture);}
         }

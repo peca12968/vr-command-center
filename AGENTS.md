@@ -1,5 +1,7 @@
 # 開發指引
 
+2026-10-31 姿態時序見 docs/POSE_TIMING.md：Unity0.26.1／code30、87真正EditMode；API／UI0.24、NGO24／所有世界與遊戲契約保持。--vr-pose-trace僅明確Windows Development／全新絕對目錄，server可batch；一般／Editor／Android不安裝。32768列、240秒、保留最早資料並明示截斷，收集期間不寫trace狀態，finish.request才完整停止，最後report序列化／IO在觀察截止後。無位置／旋轉／玩家姓名／憑證／payload／GPU／PCM。PoseSend是RPC呼叫前，不是transport完成；BodyConnection是10Hz發布觀察，不是每tick。MainThreadGap只記>100ms。不能由乾淨基線推定舊偶發原因已修復，不改0.5秒姿態或1.5秒世界新鮮度。check-desktop-pose-trace.py只用自己的loopback gate及真實Space；analyze-pose-trace.py只讀關閉後JSON／不開SQLite，時鐘跳動或控制段主線程停頓使校準失敗。60秒基線／1.2秒丟包／實際GPU結果見PROGRESS，無跨機／頭盔／25台證據。
+
 2026-10-31 玩家射擊效果見 docs/PLAYER_FIRE.md：API／UI0.24、Unity0.26／code29／NGO24，82真正EditMode；雙平台及PC結果以最新PROGRESS／receipt為準。player-fire-v1固定組合pin，保留七個舊profile；header playerFireVersion缺失0／新來源1，玩家fire欄位只由接受ShotFired的sequence／tick+1／世界射線產生，逐packet核對。age0–2閃光、14／22／12／4mm子槍身後座，不移pointer／根槍口／手套／Tracked資料，原rules0.8.0與命中不變。Unity閃光脫離avatar父層以免before-render追蹤移動歷史射線，view銷毀自己的flash、模型最後lease才釋放共用資源。新來源／API／UI／全部遊戲程序一起更新，Prepare重用識別，不降reader。--vr-player-fire-probe僅明確Windows Development／untracked可見client，全新絕對目錄、300秒／8圖／無PCM或輸入。diagnostic complete與真正End／精確seal分開。PC檢查保留短暫pose失聯樣本，實際輸入階段須等待有效Simulated rig，不能放寬來源1.5秒門檻。SQLite稽核在額外副本執行，mode=ro仍可能重建SHM；不要因此改原runtime／封存副本。
 
 GitHub #1本文接近長度上限，原63864字全文已精確封存於 https://github.com/peca12968/vr-command-center/issues/1#issuecomment-6532297157 。之後本文維持目前目標、最新交付與ROADMAP／PROGRESS連結，舊進度留在文件／封存留言，不遞迴貼入全部舊本文；更新前先讀回當前狀態，完整目標仍open／開發中。
@@ -26,9 +28,9 @@ GitHub #1本文接近長度上限，原63864字全文已精確封存於 https://
 
 Transport 2.7.4 固定官方來源嵌入 Packages/com.unity.transport，只修失敗 receive completion 釋放 buffer；保留通知／逐檔雜湊，以 python scripts/check-transport-patch.py 驗證，不改 Library 快取或安全設定。UPM lock 為 embedded，receipt 指紋包含嵌入 C#／asmdef／UPSTREAM.json。來源及原生反例見 docs/TRANSPORT_PATCH.md；29 Tests 含真正 Windows 小佇列 UDP 回歸。scripts/check-unity-admission.py 使用自有隔離資料／憑證，--interactive 才驗證原程序按鈕／鍵鼠，不可注入姿態取代。
 
-桌面碰撞見 docs/DESKTOP_COLLISION.md：ArenaWalkSurface 與權威／AI 共用 0.3m 足跡及 0.05m 線段取樣，只有 untracked 桌面預測裁切／拒絕後回到接受姿態，不能搬動 Tracked XR。CombatPropState 新增 room 是 NGO 18 wire 變更；API 0.16／驗票 2 保持。build-unity Tests 當前門檻66。真正鍵盤四階段、五房／Linked、重連及同源雙平台證據以 PROGRESS 為準。
+桌面碰撞見 docs/DESKTOP_COLLISION.md：ArenaWalkSurface 與權威／AI 共用 0.3m 足跡及 0.05m 線段取樣，只有 untracked 桌面預測裁切／拒絕後回到接受姿態，不能搬動 Tracked XR。CombatPropState 新增 room 是 NGO 18 wire 變更；API 0.16／驗票 2 保持。build-unity Tests 當前門檻87。真正鍵盤四階段、五房／Linked、重連及同源雙平台證據以 PROGRESS 為準。
 
-Prepare 必須重用已保存 Arena／PlayerAvatar 的本地 file ID；先前每次重建新 scene 會改變 NGO 識別、破壞跨目標連線。需重建時用 RebuildArena 並一起重建全部玩家；不能 Desktop／Quest 分別重建不同場景。生成物、OpenXR 設定與 packages-lock.json 應隨成功匯入結果保存。ProjectGeneration 測試涵蓋重複 Prepare 識別、非零 hash、場景／音訊引用與 Android XR 設定；build-unity Tests 當前門檻為66，腳本明確回傳 exit 0／1。
+Prepare 必須重用已保存 Arena／PlayerAvatar 的本地 file ID；先前每次重建新 scene 會改變 NGO 識別、破壞跨目標連線。需重建時用 RebuildArena 並一起重建全部玩家；不能 Desktop／Quest 分別重建不同場景。生成物、OpenXR 設定與 packages-lock.json 應隨成功匯入結果保存。ProjectGeneration 測試涵蓋重複 Prepare 識別、非零 hash、場景／音訊引用與 Android XR 設定；build-unity Tests 當前門檻為87，腳本明確回傳 exit 0／1。
 
 生成器另外有 scripts/check-unity-editor-sdk.py --offline --verify-missing-reference：重新檢查 Windows player 基線，再以真正 Editor／XR SDK 綁定 ProjectBuilder，直接讀自己的 asmdef 參考、禁止隱含傳遞 ProjectReference。MetaQuestFeature 位於 Unity.XR.OpenXR.Features.MetaQuestSupport，Editor asmdef 必須直接參考它；反例只修改生成的診斷 csproj，應重現 CS0234。此圖明確不含 URP 專用驗證分支（見報告），不是完整 Editor／UPM／資產生成／ILPP／APK 證據。範圍見 docs/UNITY_SDK_CHECK.md。
 

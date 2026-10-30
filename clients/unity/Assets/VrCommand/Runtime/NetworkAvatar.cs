@@ -160,8 +160,8 @@ namespace VrCommand.Unity
                 foreach (var visual in visuals) visual.enabled = body.connected && body.health > 0 && !(IsOwner && visual.transform.IsChildOf(head));
             if (IsOwner)
             {
-                if (!TrackingReady) return;
-                if (!tracked && !InitializeDesktopPose()) return;
+                if (!TrackingReady) {NativePoseTrace.OwnerUnavailable("TrackingUnavailable",OwnerClientId);return;}
+                if (!tracked && !InitializeDesktopPose()) {NativePoseTrace.OwnerUnavailable("DesktopInitializing",OwnerClientId);return;}
                 if (tracked)
                 {
                     leftHand.localPosition = leftPosition.ReadValue<Vector3>();
@@ -174,7 +174,8 @@ namespace VrCommand.Unity
                 {
                     nextSend = Time.unscaledTime + 0.05f;
                     var pose = CurrentPose();
-                    if (pose.Valid()) SubmitPoseRpc(pose);
+                    if (pose.Valid()) {NativePoseTrace.Sending(OwnerClientId,pose.source);SubmitPoseRpc(pose);}
+                    else NativePoseTrace.OwnerUnavailable("LocalPoseInvalid",OwnerClientId);
                 }
                 var authority = CombatAuthority.Instance;
                 if (authority != null && authority.Ready.Value && VenueBootstrap.Instance.State == "Running"
@@ -226,10 +227,13 @@ namespace VrCommand.Unity
         [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner, Delivery = RpcDelivery.Unreliable)]
         private void SubmitPoseRpc(AvatarPose pose)
         {
-            if (!pose.Valid() || Time.realtimeSinceStartupAsDouble < nextServerAccept) return;
+            NativePoseTrace.Event("PoseReceive",OwnerClientId,pose.source);
+            if (!pose.Valid()) {NativePoseTrace.Event("PoseInvalid",OwnerClientId,pose.source);return;}
+            if (Time.realtimeSinceStartupAsDouble < nextServerAccept) {NativePoseTrace.Event("PoseThrottled",OwnerClientId,pose.source);return;}
             nextServerAccept = Time.realtimeSinceStartupAsDouble + 0.025;
             PoseAccepted.Value = CombatAuthority.Instance != null && CombatAuthority.Instance.AcceptPose(OwnerClientId, pose, transform.position, transform.rotation);
-            if (PoseAccepted.Value) Pose.Value = pose;
+            if (PoseAccepted.Value) {Pose.Value = pose;NativePoseTrace.Accepted(OwnerClientId,pose.source);}
+            else NativePoseTrace.Event("PoseRejected",OwnerClientId,pose.source);
         }
 
         private AvatarPose CurrentPose() => new AvatarPose { source = (byte)(tracked ? 2 : 1), head = transform.InverseTransformPoint(head.position), left = transform.InverseTransformPoint(leftHand.position), right = transform.InverseTransformPoint(rightHand.position),

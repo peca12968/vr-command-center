@@ -1,5 +1,37 @@
 # 開發進度
 
+## 2026-10-31：兩端姿態時序與受控丟包校準
+
+前輪玩家射擊效果已提交，屬實際進度；本輪從乾淨 `bcdeed9` 接續無頭盔PC主線，追查偶發姿態過期。新增明確選用的NativePoseTrace，分開記錄owner的RPC呼叫、server RPC接收／格式／節流／接受或拒絕、發布時的參戰轉換，以及>100ms主線程空窗。WorldCapture／WorldJournal／CombatJournal／ManagementApply／WorldPublish與玩家GPU讀回／PNG編碼／寫檔各自量測，使用Stopwatch及UTC ticks保留同主機階段時間。規範及操作見 [POSE_TIMING.md](POSE_TIMING.md)。
+
+Unity **0.26.1／Android code30**，API／UI **0.24.0**、NGO **24**及原player-fire-v1／所有pin、header版本、envelope／schema／rules保持。沒有新wire、沒有改0.5秒姿態新鮮度、防瞬移、Tracked座標、碰撞、射擊、admission或HUD警告，也沒有改1.5秒世界來源門檻。一般不帶旗標、Editor及Android不安裝；Windows Development明確--vr-pose-trace且全新絕對目錄才建立。普通呼叫只經未啟用guard，不另建資料／背景worker。
+
+緩衝上限32768列／正常240秒，溢出明示truncated=true／complete=false並保留最早證據；主線程阻塞時須待Update恢復才能截止。只在記憶體收集，每0.25秒檢查finish.request，截止後才序列化／寫出最終report，該段輸出不在觀察內。沒有姿態位置／旋轉、姓名、憑證、UDP payload、GPU或PCM；可以配合另選用的GPU探針量測其區段。report.complete只代表診斷收集，真正End／精確seal另驗。
+
+真正Prepare、**87項EditMode（0 failed／skipped）**、Desktop均成功；5項新測例覆蓋有界保留最早資料、不可變快照、無效時鐘／容量、JsonUtility精確64位UTC、一般未啟用行為，以及非法來源byte255仍可記錄而權威拒絕保持。原scene／prefab ID保持，未RebuildArena。Desktop receipt UTC2026-10-30T20:34:15.2740417Z，fingerprint `6615ee45cb079cc5c342c68f797669944671153412780358364727d3f811e239`。另**3項Python分析反例**通過，涵蓋跨邊界收件間隔、玩家主線程停頓混雜與UTC跳動；已加入CI。這輪沒有後端／管理UI／共用simulation變更，未重算前輪597核心／403 HTTP／43世界／49 Node／189 Chromium為本輪執行。
+
+初版86 Tests、a65來源的雙平台與041743-af6d8459校準雖已成功，覆核發現記錄器僅接受source0–2，會在原驗證拒絕非法來源byte前先拋錯。改為保存完整原始byte0–255，仍由原AvatarPose.Valid拒絕非法姿態；補第87項反例後重跑Tests／Desktop與最終原生。初版receipt／資料保留，不配用最終來源。
+
+新增check-desktop-pose-trace.py：自己的API／room3 server／可見Simulated玩家與loopback gate，先自然60秒（沒有GPU readback），再原樣丟棄單一玩家上行1.2秒，下行維持，最後真正Space一次與原生GPU探針。沒有RPC／姿態／武器注入、沒有防火牆變更。analyze-pose-trace.py只讀關閉後JSON及階段時間，不開SQLite／憑證，不會重建原資料SHM；若控制段玩家或server停頓、或時鐘跳動造成混雜，不能稱校準通過。
+
+`desktop-venue/20261031-043445-1af91e65` **4項原生流程及分析校準通過**：
+
+| 階段 | 實際觀察 |
+|---|---|
+| 自然60.151秒 | 1084個間隔，玩家RPC呼叫最大56.089ms、server接收66.677ms／接受66.677ms；沒有發布非參戰轉換、拒絕或>100ms主線程空窗。約18次／秒是這個場的實際取樣呼叫頻率，20Hz仍為設定目標，不冒充精確20Hz或頭盔實測 |
+| 上行丟包1.2秒 | gate丟棄53 datagrams；玩家呼叫最大55.717ms且兩端沒有>100ms主線程空窗，server接收／接受空窗1.222318秒；最後接受姿態年齡0.588976秒時發布非參戰，恢復後同admission／原位置／健康／彈藥。沒有將發布觀察年齡當成政策閾值或RTT |
+| 真正Space與GPU | 彈藥30→29、tick2091閃光／22mm後座、tick2128 Pause歸零，兩張原生PNG已檢視。GPU讀回最大38.168ms、PNG編碼13.939ms、寫檔1.086ms；該段玩家呼叫最大134.974ms、server接收183.526ms、一次主線程空窗134.971ms，沒有0.5秒收件空窗／發布失聯。不能把134.971ms全部歸因於GPU |
+
+此場client／server分別2116／10842列，觀察118.471／122.482秒，complete=true、未截斷。相鄰UTC與單調時鐘步進差最大1.456／1.284ms，控制段未受大時鐘跳動混雜。GPU probe另以明確local stop完成，observedEnd=false、audioSamples／callbackCount0；遊戲另精確seal，耗彈1／命中0／擊殺0／耗損0／健康100，回放／ledger一致。1153幀、最大來源年齡0.188868秒，活動0、cleanup及gate-cleanup零錯誤。
+
+普通未啟用旗標的 `20261031-043659-71fdf936` 七場五房／單房重用／封存後Linked通過，607幀、最大來源年齡0.229533秒，沒有產生trace目錄；非25台。兩場均自己的SSD runtime，writer停止後23／26檔由helper回存F，與保留SSD原件逐檔SHA一致，沒有另開SQLite改動副本。來源與binary仍F，不能稱F USB全資料通過。另 `unity-admission/20261031-043721-aa8aa0da` **8項無圖形**入場／撤銷／transport釋放／同admission重連通過，397幀、精確封存／回放一致／活動0。三組33個log未見指定NullReference／MissingReference／ObjectDisposed／IndexOutOfRange或Shader error。機器證據在artifacts/pose-timing-validation.json。
+
+受控恢復另外在額外完整SQLite副本唯讀核對：保存packet616為非參戰、623已恢復，head／muzzle／forward／health／magazine／reserve完全一致；所有writer早已停止。檢查後再次核對保留SSD原件與F snapshot全部SHA未變，沒有直接開原DB／SHM。檢查器亦補上這些欄位的直接保存／比較；本場以封存副本核對作為證據。
+
+這次診斷能辨別受控上行收件空窗與本機大停頓，但**沒有重現或證明歷史偶發原因，也沒有宣稱已修好失聯**。PoseSend只是RPC呼叫前，不是transport完成；無逐packet配對，不能單靠它分辨NGO排程與網路。BodyConnection只在10Hz發布觀察，不是每tick；乾淨樣本不能排除更短中間狀態。主線程最大值0只是沒有記到>100ms空窗。資料只證明此單次同主機／單房情境，不是跨機RTT、FPS或25台／頭盔效能。
+
+最終Quest首次重建在建立Library/Bee/PlayerScriptAssemblies時Access denied，Editor明確exit1，未產生新receipt；失敗log保留。程序退出後該目錄已不存在，F空間足夠、無活躍Editor／編譯子程序；未改快取內容／ACL／安全設定，以相同來源重試。重試Editor exit0，Quest receipt UTC2026-10-30T20:47:25.4333944Z，fingerprint `6615ee45cb079cc5c342c68f797669944671153412780358364727d3f811e239` 及原scene／prefab ID與最終Desktop完全一致。APK68,404,947 bytes、SHA `4fe0ded3395f6dcb4136ff982cc29d9622c7bf610e151b5154e7a5591851bd14`；v2簽章、min32／target35、code30／bundle0.26.1及六個ELF64 AArch64庫含libil2cpp核對通過，沒有頭盔安裝。體積覆核發現ZIP中央目錄引用的壓縮資料46,239,658 bytes，另兩段未引用間隙共22,144,012 bytes，已保存包裝稽核；沒有重封裝或重簽，保留Unity原始成功產物，不把APK體積變化當作診斷／裝置效能證據。完整11項長期目標保持開發中；後續持續取證偶發原因，並接續射擊音效、玩家全身、完整動畫／場地操作與跨機。Quest／VIVE／MR、廠商硬體及25台仍待分別驗收。
+
 ## 2026-10-31：玩家接受射線、原生閃光與槍身後座
 
 從乾淨 `141652d` 接續使用者「目前沒有頭盔，先繼續電腦端」。新增 `player-fire-v1`，組合固定264面玩家步槍、原合成手套、728面NPC與32面閃光；玩家脈衝倍率1.2，沒有外部素材。組合資料SHA `187c7df5346419edadafa1cc74a04db0763dda268650e066dbbcaf8304e60ff0` 固定，生成器先驗舊pin，原七profile／網格／色彩／reader完整保留。規範見 [PLAYER_FIRE.md](PLAYER_FIRE.md)。
