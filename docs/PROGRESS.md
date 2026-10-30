@@ -16,6 +16,8 @@ writer全停後helper回F的runtime-snapshot共14檔與保留C SSD原件SHA一�
 
 首輪HTTP在既有無效憑證啟動檢查等待退出10秒逾時，finally另有臨時server.log sharing violation；失敗 `artifacts/report-v1-http.log`保留，未放寬timeout／修改憑證政策。確認本輪owned dotnet已無存活後，正常完整重跑446通過，根因未證實。瀏覽器先有214通過；補輪詢提示保持及精確MIME後，下載比對另曾失敗，記錄在report-v1-browser-selection-failed.log。檢視發現selectSession等待背景更新前尚未清掉舊場狀態，改為立即取消下載／清統計／隱藏面板，再以selection epoch只接受最後選擇；新增明確hold背景更新的兩個回歸。新測試的首輪unroute早於delayed fulfill，觸發Route already handled，失敗report-v1-browser-gate-failed.log保留，改等fulfill完成才unroute；未放寬產品政策或斷言。最終58／217全部通過，包含text/csv-fake拒絕。最終原生49重新執行；先前071253-1dc01ef2的49項／143幀／0.296376秒證據及14檔snapshot另保留，不混算成最終場。完整11項仍開發中，接續完整人物／動畫／聲學、複雜通路、長任務／跨機及實機／MR／硬體／25台，沒有因報表完成縮減目標。
 
+功能提交 `46794a09d5e7d6439c704e537affc81fab5b4e1d` 已推送main並確認遠端一致；GitHub #1保持open，更新後獨立讀回2955字本文一致，保留原11項、完整目標及原63864字封存連結。[本次CI run41144100763](https://github.com/peca12968/vr-command-center/actions/runs/41144100763)／check124365009147實際failure、steps=null，annotation明示帳戶付款失敗或支出上限、工作未開始，沒有雲端測試執行結果；未改帳務／重跑。完整目標繼續進行。
+
 ## 2026-10-31：軍事玩家人物、保存步態與桌面換彈雙臂
 
 從乾淨 `35ad78e` 接續無頭盔PC主線，新增 [PLAYER_BODY.md](PLAYER_BODY.md) 的 `player-body-v1`：原創頭盔／護目鏡、背心／彈袋、雙腿／靴及桌面雙臂，404面、五個Mesh／一材質，SHA `1035ca0dffafc31226616485c58ef530d8e7b809feef2b5e461229424bc9703b` 固定。原步槍／手套／閃光／NPC／掩體及獨立combat-audio-v1沿用，八個既有外觀與reader保留。
