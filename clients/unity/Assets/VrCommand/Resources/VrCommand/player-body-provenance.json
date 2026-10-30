@@ -1,0 +1,15 @@
+{
+  "assetSet": "player-body-v1",
+  "source": "Original fictional military player, integer box/prism construction; no external art",
+  "generator": "scripts/generate-player-body.py",
+  "dataSha256": "1035ca0dffafc31226616485c58ef530d8e7b809feef2b5e461229424bc9703b",
+  "triangles": {
+    "Torso": 96,
+    "Head": 92,
+    "Leg": 60,
+    "UpperArm": 24,
+    "LowerArm": 24
+  },
+  "totalPerPlayer": 404,
+  "scope": "Cosmetic head / torso / legs and adaptive simulated arms; no collider or tracked body measurement"
+}

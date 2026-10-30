@@ -1,5 +1,7 @@
 # 持久世界錄製與觀察 v0.16
 
+2026-10-31 新player-body-v1保存playerPresentationVersion1與每玩家hasPlayerPresentation／walking，按接受移動及保存tick重建人物。舊缺失0不推測人物步態，body與腕點不改原rig。遠端即時插值與10Hz保存幀分開比對，規範及新reader要求見 [PLAYER_BODY](PLAYER_BODY.md)。
+
 2026-10-31 新來源另有combatAudioVersion1，缺失保持0；只依已接受的玩家／敵軍fire witness重建短聲音，不保存或宣稱原始音軌。新版本、音效gesture、跳轉／過期抑制及NGO25協同更新見 [COMBAT_AUDIO](COMBAT_AUDIO.md)。world schema1與原binary checksum保持，schema相同不代表可降舊reader。
 
 2026-10-31 最新換彈／合成手套為API／UI0.21、Unity0.23／code26／NGO22；weaponPresentationVersion1及weapon-actions-v1需來源／API／UI／全體遊戲端一起更新，舊資料保持0／舊外觀，不可降舊reader。保存時鐘、Tracked界線及實際證據見 [WEAPON_ACTIONS](WEAPON_ACTIONS.md)／PROGRESS。

@@ -4,15 +4,17 @@
 
 依 2026-10-29 的使用者指示，**優先開發 Meta Quest 3**，暫以 Android 獨立執行為工作假設；VIVE 延後接入，共用架構與原始雙平台目標保留。
 
-目前為 **API v0.25／Unity 遊戲端 v0.27 原型**。真正 Editor 已完成 Prepare、93 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 25，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
+目前為 **API v0.26／Unity 遊戲端 v0.28 原型**。真正 Editor 已完成 Prepare、102 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 26，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
 
-較窄的 [managed SDK 檢查](docs/UNITY_SDK_CHECK.md) 仍可補充 API／直接參考診斷，其本身不執行 Unity 或產出播放器；目前較強的真正 Editor、93 項測試及 binary 結果以 PROGRESS 為準。
+較窄的 [managed SDK 檢查](docs/UNITY_SDK_CHECK.md) 仍可補充 API／直接參考診斷，其本身不執行 Unity 或產出播放器；目前較強的真正 Editor、102 項測試及 binary 結果以 PROGRESS 為準。
 
-新增 [玩家與敵軍射擊音效](docs/COMBAT_AUDIO.md)：原創固定PCM、保存事件槍口的空間聲音，Unity普通遊戲及瀏覽器觀戰／回放共用接受序號與時鐘；加入／跳轉／過期不補播，舊錄製保持無射擊聲。真正Space、AI、AudioListener非零與Pause／Resume靜音已量測；聲源不是原始音軌，人工聽感／頭盔仍待。612核心、403 HTTP、43世界、53 Node／196 Chromium及45項UI／native通過。
+新增 [玩家軍事人物](docs/PLAYER_BODY.md)：原創404面頭盔／背心／腿靴與桌面持槍雙臂，伺服器接受移動產生保存步態，PC遊戲、觀戰與回放共用；Tracked不合成握持雙臂，舊錄製保留原外觀。真正雙PC的W／Space／R、六張observer GPU、暫停及封存已核對；629核心、403 HTTP、43世界、58 Node／201 Chromium及47項UI／native通過。完整追蹤人物與動畫仍待。
+
+新增 [玩家與敵軍射擊音效](docs/COMBAT_AUDIO.md)：原創固定PCM、保存事件槍口的空間聲音，Unity普通遊戲及瀏覽器觀戰／回放共用接受序號與時鐘；加入／跳轉／過期不補播，舊錄製保持無射擊聲。真正Space、AI、AudioListener非零與Pause／Resume靜音已量測；聲源不是原始音軌，人工聽感／頭盔仍待。音效當輪與最新回歸結果見PROGRESS。
 
 新增 [兩端姿態時序診斷](docs/POSE_TIMING.md)：以有界記憶體記錄RPC呼叫／收件、主線程空窗及日誌／GPU擷取區段；已用自然60秒、受控丟包與真正Space核對，能區分控制段收件空窗與玩家停頓。一般執行不啟用，原0.5秒規則不改；歷史偶發原因尚未重現。
 
-新增 [玩家射擊閃光與後座](docs/PLAYER_FIRE.md)：實際Space白天／夜間閃光及22mm槍身位移已由原生GPU核對，保存射線與封存事件精確一致；只動子槍身／彈匣，pointer與Tracked資料不改，原七profile保留。兩發扣彈／轉向／回放一致，音效另見COMBAT_AUDIO，全身人物仍待。
+新增 [玩家射擊閃光與後座](docs/PLAYER_FIRE.md)：實際Space白天／夜間閃光及22mm槍身位移已由原生GPU核對，保存射線與封存事件精確一致；只動子槍身／彈匣，pointer與Tracked資料不改，原七profile保留。兩發扣彈／轉向／回放一致，音效另見COMBAT_AUDIO，玩家人物新增見PLAYER_BODY，完整動畫仍待。
 
 新增 [敵軍射擊閃光與後座](docs/ENEMY_FIRE.md)：保存已接受的射擊原點／方向與tick，真正PC白天／夜間GPU脈衝及封存射線已核對；只移動槍身子Renderer，舊六profile保留。玩家效果另見PLAYER_FIRE，音效另見COMBAT_AUDIO。
 
@@ -28,7 +30,7 @@
 
 新 [軍事掩體素材](docs/FIELD_PROPS.md) 已接真正PC玩家、即時觀戰與封存回放，舊錄製保留原方盒；遊戲命中／碰撞仍採包圍盒。
 
-可用 [控制台自訂電腦任務](docs/DESKTOP_CONTROL.md) 從編輯／保存／重載配置直接啟動真正 PC server／玩家，控制天氣、AI、觀戰與回放；已看見原生白天／雨夜／暫停畫面。最新45項 UI／native整合、53 Node＋196 Chromium通過；原生GPU聲光／自身DSP已驗證，實體聽感與頭盔仍待。
+可用 [控制台自訂電腦任務](docs/DESKTOP_CONTROL.md) 從編輯／保存／重載配置直接啟動真正 PC server／玩家，控制天氣、AI、觀戰與回放；已看見原生白天／雨夜／暫停畫面。最新47項 UI／native整合、58 Node＋201 Chromium通過；原生GPU聲光／自身DSP已驗證，實體聽感與頭盔仍待。
 
 已完成 [電腦掩體碰撞](docs/DESKTOP_COLLISION.md)：真正鍵盤推沙包、退回、側移及旋轉油桶阻擋保持有效姿態；新增共用通行規則與原生操作檢查器。NGO版本以目前來源為準，所有遊戲程序須同版。
 

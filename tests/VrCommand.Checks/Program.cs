@@ -7,6 +7,7 @@ if (args.SequenceEqual(["--armed-enemy-vectors"])) { Console.WriteLine(ArmedEnem
 if (args.SequenceEqual(["--enemy-fire-vectors"])) { Console.WriteLine(EnemyFireChecks.Vectors()); return; }
 if (args.SequenceEqual(["--player-fire-vectors"])) { Console.WriteLine(PlayerFireChecks.Vectors()); return; }
 if (args.SequenceEqual(["--combat-audio-vectors"])) { Console.WriteLine(CombatAudioChecks.Vectors()); return; }
+if(args.SequenceEqual(["--player-body-vectors"])) {Console.WriteLine(PlayerBodyChecks.Vectors());return;}
 var checks = 0;
 void Check(bool condition, string message)
 {
@@ -94,6 +95,7 @@ try
     EnemyFireChecks.Run(Check);
     PlayerFireChecks.Run(Check);
     CombatAudioChecks.Run(Check);
+    PlayerBodyChecks.Run(Check);
     WeaponPresentationChecks.Run(Check);
     WorldSourceChecks.Run(Check, directory);
     Console.WriteLine($"All {checks} checks passed. These are domain checks, not headset or gameplay load tests.");

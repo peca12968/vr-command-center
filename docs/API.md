@@ -1,5 +1,7 @@
 # 管理、統計與玩家接入 API v0.19
 
+最新API／UI0.26新增player-body-v1及playerPresentationVersion1、每玩家hasPlayerPresentation／walking；舊缺失保持0，來源／API／UI／全部NGO26遊戲端一起更新。新profile需原enemy／weapon／雙方fire版本1，漏標記與無版本姿態由伺服器拒絕；envelope6／world schema1／驗票2保持，不代表可降reader。規範見 [PLAYER_BODY](PLAYER_BODY.md)。
+
 最新API／UI0.25加入獨立的combatAudioVersion1，必須同時有已接受的player／enemyFireVersion1；舊缺失保持0。已接受的stream重開不能移除音效政策。world schema1、envelope6與驗票2不變，新來源／API／UI／全部NGO25遊戲端一起更新，不可降reader，見 [COMBAT_AUDIO](COMBAT_AUDIO.md)。下方為保留的歷次契約說明。
 
 v0.19 新增 [service-rifle-v1](SERVICE_RIFLE.md) 素材版本，保留field-props-v1／primitives-v1的讀取、預設及既有外觀。新Unity來源明確指定；未知版本與已接受header換版本仍拒絕。API／UI及遊戲端須協同更新；world schema1不表示可降版，管理及票券契約不變。

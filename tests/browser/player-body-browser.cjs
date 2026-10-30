@@ -1,0 +1,18 @@
+const fs=require('node:fs/promises'),path=require('node:path');
+module.exports=async function({context,tokens,base,root,screenshots,check}){
+ const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+ const {playerFireFixture}=await import('./player-fire-fixture.mjs'),{playerBodyPose}=await import('../../src/VrCommand.Api/wwwroot/console/player-body.js');
+ const sample=JSON.parse(await fs.readFile(path.join(root,'src/VrCommand.Api/wwwroot/console/examples/simulation.json'),'utf8')),d=playerFireFixture(sample);d.assetSet='player-body-v1';d.playerPresentationVersion=1;
+ for(const f of d.frames)for(const p of f.players){p.hasPlayerPresentation=true;p.walking=f.phase!=='Preparing'&&p.health>0&&p.connected;}
+ const load=async data=>{await page.locator('#replay-file').setInputFiles({name:'player-body.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(data))});await page.waitForFunction(set=>document.querySelector('#replay-canvas').dataset.assetSet===set,data.assetSet);};
+ try{await page.goto(base+'/console/');await page.locator('#login-key').fill(tokens.Master);await page.locator('#login-form button').click();await page.locator('#tab-replay').click();await load(d);
+  check(Number(await page.locator('#replay-canvas').getAttribute('data-player-body-triangles'))>300&&await page.locator('#replay-canvas').getAttribute('data-rifle-triangles')==='264','Player replay renders the new military head, vest, legs and arms while preserving the original rifle');
+  const i=d.frames.findIndex(f=>f.players.some(p=>p.walking)&&f.tick%12===3);if(i<0)throw Error('Fixture lacks nonzero player gait');await page.locator('#replay-timeline').fill(String(i));
+  const rows=()=>page.locator('#replay-canvas').getAttribute('data-player-body-poses').then(JSON.parse),first=await rows(),p=d.frames[i].players[0],pose=playerBodyPose(p,d.frames[i].tick),row=first.find(v=>v.id===p.id);
+  check(row&&Math.abs(row.stride-pose.stride)<.00001&&row.arms&&row.head.every((v,k)=>Math.abs(v-[p.head.x,p.head.y,p.head.z][k])<.00001)&&row.rightWrist.every((v,k)=>Math.abs(v-pose.right.wrist[k])<.00001),'Rendered player head and adaptive glove wrist match the saved rig and accepted gait clock');
+  await page.locator('#replay-timeline').focus();await page.locator('#replay-timeline').press('End');await page.locator('#replay-timeline').fill(String(i));check(JSON.stringify(await rows())===JSON.stringify(first),'Direct player replay seeks restore identical body, wrist and gait transforms');
+  await page.screenshot({path:path.join(screenshots,'player-body-replay.png'),fullPage:true});
+  const tracked=structuredClone(d);for(const f of tracked.frames)for(const p of f.players)if(p.rig.kind!=='None')p.rig.kind='Tracked';await page.locator('#replay-file').setInputFiles({name:'tracked-shape.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify(tracked))});await page.waitForFunction(()=>JSON.parse(document.querySelector('#replay-canvas').dataset.playerBodyPoses||'[]').every(p=>!p.arms));check((await rows()).every(p=>!p.arms),'Tracked fixture keeps its real joint markers and hides synthetic glove arms without claiming headset evidence');
+  await load(playerFireFixture(sample));check(await page.locator('#replay-canvas').getAttribute('data-player-body-triangles')==='0'&&errors.length===0,'Retained player-fire recordings keep old player shapes and release new body resources without page errors');
+ }catch(e){await page.screenshot({path:path.join(screenshots,'player-body-failure.png'),fullPage:true}).catch(()=>{});throw e;}finally{await page.close();}
+};

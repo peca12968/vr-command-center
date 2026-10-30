@@ -1,5 +1,32 @@
 # 開發進度
 
+## 2026-10-31：軍事玩家人物、保存步態與桌面換彈雙臂
+
+從乾淨 `35ad78e` 接續無頭盔PC主線，新增 [PLAYER_BODY.md](PLAYER_BODY.md) 的 `player-body-v1`：原創頭盔／護目鏡、背心／彈袋、雙腿／靴及桌面雙臂，404面、五個Mesh／一材質，SHA `1035ca0dffafc31226616485c58ef530d8e7b809feef2b5e461229424bc9703b` 固定。原步槍／手套／閃光／NPC／掩體及獨立combat-audio-v1沿用，八個既有外觀與reader保留。
+
+API／UI **0.26.0**、Unity **0.28.0／Android code32／NGO26**。header playerPresentationVersion新1／缺失0，每玩家hasPlayerPresentation及walking明確保存；新profile要求原敵軍／武器／雙方fire版本1。NGO既有walking欄位新增玩家語意並與presentationTick原子複製，需來源／API／UI／全部遊戲程序一起更新，不降reader。rules0.8.0、envelope6、mission／world schema1、票券2、environment1及原始binary header／checksum保持，沒有更動傷害、射速、命中、碰撞、0.5秒姿態／1.5秒世界新鮮度或admission。
+
+只有原本接受成功、Running／存活／連線玩家的平面移動>1mm會標記移動tick，四tick內walking；轉頭／高度、拒絕及Preparing不觸發。保存tick%12產生±18度對向腿旋轉，Pause不推進步態時鐘，但原頭手追蹤仍可更新。根在頭部平面座標／地面Y0、軀幹垂直比例eyeHeight／1.65，身向取頭部yaw；這是裝飾性三點推算，不是腰腳追蹤、屈膝或腳掌IK。桌面腕點跟隨既有合成手套／保存換彈時鐘，兩節臂可延展、超出範圍隱藏；Tracked不把pointer當握點、不合成雙臂或改追蹤資料。只對新視覺的quaternion副本正規化，本玩家body隱藏且不求解live姿態，原接受旋轉容差／界線保持。
+
+真正Prepare、**102項EditMode（0 failed／skipped）**、Desktop成功，原scene／prefab ID保持，未RebuildArena。測試覆蓋共用資源最後lease釋放、實際頭／腿／腕Mesh矩陣、NGO walking／Equals、owner隱藏、合法非單位四元數、JsonUtility新／舊契約，以及真正保存prefab的Visual子物件。Desktop receipt UTC2026-10-30T22:28:56.4385532Z，fingerprint `792a3aaac9a7903159718a898324def8f6ba4769f908f1f46f30a6c77744c725`。locked restore／Release build零警告錯誤、**629核心、403 HTTP、43世界、58 Node／201 Chromium**通過；涵蓋接受／拒絕／idle／Pause步態、新資料不能漏標記、舊外觀、C#／JS向量及實際Mesh跳轉還原。瀏覽器為SwiftShader，不當作原生GPU。
+
+最終 `desktop-venue/20261031-063112-834f3646` **4項真正雙PC流程**通過。第一玩家實際S／Down／Right到z=-4.504、heading54／pitch15，第二玩家實際W、Space一次及R，六張自己的observer GPU PNG均已檢視。新頭盔／背心／腿／靴可見，舊綠色頭手標記已在Visual子層正確停用；只改執行時Renderer，不改prefab／joint Transform。Probe只在明確Windows Development／可見untracked owner及全新絕對目錄安裝，600秒／8張／900萬像素，沒有PCM／麥克風／OS畫面／RPC或姿態輸入；一般／Editor／Android不安裝。
+
+| 原生取樣 | 實際結果 |
+|---|---|
+| Running移動 | tick4496、walking=true、stride=-15.58844°，真正步態PNG。該幀遠端頭部仍插值中，與保存的接受位置相差0.02246647m；不能把它稱為精確保存的繪製幀 |
+| 兩張Pause | 同tick4499／walking=true／stride=-9°，步態與時鐘相同；端點逐軸最大差2.38419e-7m，在1微米界線內。回到Running的tick4522為idle／stride0 |
+| 換彈Pause | tick4787、reloadUntil4790，即第27tick；左腕依原換彈回位動作改變，非峰值抽匣畫面。槍口／原動作／彈藥規則不改 |
+| 任務封存 | 2536幀、耗彈1／命中0／擊殺0／雙玩家損耗0／健康100，回放與ledger一致、pending=false、活動0；最大來源年齡0.243825秒 |
+
+六個取樣已在**額外完整SQLite副本**稽核。兩張Pause與換彈為相同保存tick，頭部／腕點與保存資料求解的最大世界端點差約3.15e-7m。Running／idle有兩張NGO取樣比最近10Hz保存packet晚1tick，按實際觀察tick及相對腕點比較；沒有假稱每張都精確對到保存幀。原件及F snapshot的24檔SHA於稽核前後保持，沒有直接開原DB／SHM。
+
+新增47項控制台UI／native整合，`20261031-063618-c4df481b` 167幀／最大來源年齡0.308984秒；含真實來源的404面人物及封存後頭部／步態／腕點核對，client為無圖形、瀏覽器SwiftShader。普通無probe的 `20261031-063915-8b74dc78` 七場五房獨立／重用／封存後Linked通過，583幀／0.200379秒；`unity-admission/20261031-063937-7264fe3b` 八項無圖形入場／撤銷／transport釋放／同admission重連通過，373幀。成功組cleanup零錯誤、活動0，三組venue自己的SSD runtime在writer全停後回F，24／14／26檔與保留原件SHA一致；來源／binary仍F，非F USB全資料或跨機／25台驗收。
+
+失敗及修正保留：首輪向量輸出Yaw／yaw大小寫衝突，改為inputYaw後Node通過。原生首輪150秒視角定位超時，次輪在單次W已回idle後要求非零Pause而等待超時；其後改直接擷取真正Running步態，保留原四tick呈現政策。原生圖另揭露head／hand Renderer在Visual子物件，修正層級停用並新增保存prefab回歸。`060538-b116deea` 是明確停止自有target的失敗組，cleanup另有seal錯誤、原資料保留，不列為通過；其他失敗組及成功組分開。`061347-f54c8112` 的暫停字典逐位相等斷言被2.38e-7m浮點差觸發，改明示1微米門檻及保存實測差值。`061931-a2d2b497` 診斷請求原位寫入造成Sharing violation，改同目錄原子replace、reader共享ReadWrite／Delete，helper優先讀終止report而非繼續等舊status；最終來源／102 Tests／Desktop及原生均重跑。HTTP首輪無效憑證程序10秒退出逾時，未放寬timeout，後續完整403／43通過；未證實根因。
+
+Quest首輪在Bee後處理exit3／Editor exit1，UnityLinker成功且沒有具體編譯錯誤；已保存Editor／Bee／buildreport失敗檔，程序終止且F空間足夠後以同來源重試，沒有改Library／ACL／安全設定。重試Editor exit0，Quest receipt UTC2026-10-30T22:52:26.8221840Z，與Desktop相同fingerprint及原scene／prefab ID。APK46,309,126 bytes、SHA `a445f8e1e18d9114df5787dda60d3069ec5346ebb0ce6564f14155d2e2865583`，v2簽章、min32／target35、code32／bundle0.28.0及六個ELF64 AArch64庫含libil2cpp已核對；沒有手動重封裝／重簽或頭盔安裝。成功的三組venue及admission共39個原生／API log未見指定NullReference／MissingReference／ObjectDisposed／IndexOutOfRange／Shader error，完整本機證據在artifacts/player-body-validation.json。原5080仍API0.16／原歷史，未替換。完整11項目標保持開發中；第一人稱全身、真正腰腳／手指及完整動畫、複雜地形、原偶發姿態原因、跨機，以及Quest／VIVE／MR／廠商硬體／25台仍分別待驗。
+
 ## 2026-10-31：接受射擊事件的玩家／敵軍空間音效
 
 從乾淨 `f25b097` 接續使用者「無頭盔，先繼續電腦端」。新增獨立固定的 `combat-audio-v1`、原創合成步槍／手槍PCM與Unity／瀏覽器共用接受事件游標；規範、操作及pin見 [COMBAT_AUDIO.md](COMBAT_AUDIO.md)。API／UI **0.25.0**、Unity **0.27.0／code31／NGO25**。header combatAudioVersion缺失0／新來源1，必須有player／enemyFireVersion1；actor presentationRunning與原fire欄位原子複製。固定player-fire-v1與八個舊幾何profile、rules0.8.0、envelope6、mission／world schema1、票券2及environment1保持。協同更新來源／API／UI／全部遊戲程序，不能降reader或重寫歷史header／checksum。

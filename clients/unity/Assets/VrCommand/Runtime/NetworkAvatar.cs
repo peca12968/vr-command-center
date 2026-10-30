@@ -65,6 +65,9 @@ namespace VrCommand.Unity
         private FiringRifleModels rifleModels;
         private FiringRifleView firingRifle;
         private GameObject rifle;
+        private PlayerBodyModels bodyModels;
+        private PlayerBodyView bodyView;
+        internal PlayerBodyObservation ObservePlayerBody()=>bodyView?.Observation;
 
         public override void OnNetworkSpawn()
         {
@@ -78,6 +81,8 @@ namespace VrCommand.Unity
             rifleModels = new FiringRifleModels(); firingRifle = rifleModels.Create(); rifle = firingRifle.Root;
             rifle.transform.SetParent(transform, false); ServiceRifleModels.Align(rifle.transform, rightHand);
             var activeVisuals = new List<Renderer>(GetComponentsInChildren<Renderer>());
+            foreach(var oldHead in head.GetComponentsInChildren<Renderer>(true)){oldHead.enabled=false;activeVisuals.Remove(oldHead);}
+            bodyModels=new PlayerBodyModels();bodyView=bodyModels.Create();bodyView.Root.SetActive(false);
             activeVisuals.Remove(pointerMarker);activeVisuals.Remove(firingRifle.HiddenBody); visuals = activeVisuals.ToArray();
             if (IsServer)
             {
@@ -120,6 +125,7 @@ namespace VrCommand.Unity
             {
                 head.localPosition = new Vector3(0, 1.65f, 0);
                 InitializeDesktopPose();
+                NativePlayerBodyProbe.Install(head.gameObject);
                 NativeCombatAudioProbe.Install(head.gameObject);
                 NativePlayerFireProbe.Install(head.gameObject);
                 NativeEnemyFireProbe.Install(head.gameObject);
@@ -211,11 +217,15 @@ namespace VrCommand.Unity
             if (!IsSpawned || rifle == null) return;
             ServiceRifleModels.Align(rifle.transform,rightHand);
             if (CombatAuthority.Instance!=null && CombatAuthority.Instance.Player(PlayerId.Value.ToString(),out var body))
+            {
                 firingRifle.Apply(body.presentationTick,body.health,body.connected,IsOwner?!tracked:Pose.Value.source==1,body.reloading,body.reloadUntilTick,
                     new PlayerFireState(body.fireSequence,body.fireTickPlusOne,new Vec3(body.fireOrigin.x,body.fireOrigin.y,body.fireOrigin.z),new Vec3(body.fireDirection.x,body.fireDirection.y,body.fireDirection.z)));
+                bodyView.Apply(PlayerId.Value.ToString(),head.position,head.rotation,rifle.transform.position,rifle.transform.forward,body,IsOwner?!tracked:Pose.Value.source==1,!IsOwner);
+            }
             // Desktop gloves are cosmetic siblings; never move the tracked joints.
-            var marker=leftHand.GetComponent<Renderer>();if(marker!=null && (IsOwner?!tracked:Pose.Value.source==1))marker.enabled=false;
+            if(IsOwner?!tracked:Pose.Value.source==1){HideJoint(leftHand);HideJoint(rightHand);}
         }
+        private static void HideJoint(Transform joint){foreach(var renderer in joint.GetComponentsInChildren<Renderer>(true))renderer.enabled=false;}
 
         internal PlayerFireObservation ObservePlayerFire()
         {
@@ -359,6 +369,7 @@ namespace VrCommand.Unity
             headTracking?.Dispose(); leftTracking?.Dispose(); rightTracking?.Dispose();
             headTracked?.Dispose(); leftTracked?.Dispose(); rightTracked?.Dispose();
             firingRifle?.Dispose();firingRifle=null;
+            bodyView?.Dispose();bodyView=null;bodyModels?.Dispose();bodyModels=null;
             if (rifle != null) Destroy(rifle); rifle = null;
             rifleModels?.Dispose(); rifleModels = null;
         }

@@ -14,17 +14,19 @@ function roomPosition(value, room) { return vector(value) && Math.abs(value.x - 
 // Validate snapshots against their event boundary. Playback never reruns AI or guesses missing damage.
 export function validateRecording(data) {
   need(data && data.schemaVersion === 2 && data.rulesVersion === '0.8.0', '需要 schema 2／rules 0.8.0，舊除錯檔請重新產生。');
-  need(data.assetSet === undefined || ['primitives-v1', 'field-props-v1', 'service-rifle-v1', 'combatants-v1', 'weapon-actions-v1', 'armed-combatants-v1', 'combat-effects-v1','player-fire-v1'].includes(data.assetSet), '不支援的素材版本。');
+  need(data.assetSet === undefined || ['primitives-v1', 'field-props-v1', 'service-rifle-v1', 'combatants-v1', 'weapon-actions-v1', 'armed-combatants-v1', 'combat-effects-v1','player-fire-v1','player-body-v1'].includes(data.assetSet), '不支援的素材版本。');
   need(data.enemyPresentationVersion === undefined || [0, 1].includes(data.enemyPresentationVersion), '不支援的敵軍姿態版本。');
   need(data.assetSet !== 'combatants-v1' || data.enemyPresentationVersion === 1, '人形敵軍需要保存的姿態版本。');
   need(data.weaponPresentationVersion === undefined || [0,1].includes(data.weaponPresentationVersion), '不支援的武器動作版本。');
-  need(!['weapon-actions-v1','armed-combatants-v1', 'combat-effects-v1','player-fire-v1'].includes(data.assetSet) || data.weaponPresentationVersion === 1 && data.enemyPresentationVersion === 1, '新武器需要保存的動作與敵軍版本。');
+  need(!['weapon-actions-v1','armed-combatants-v1', 'combat-effects-v1','player-fire-v1','player-body-v1'].includes(data.assetSet) || data.weaponPresentationVersion === 1 && data.enemyPresentationVersion === 1, '新武器需要保存的動作與敵軍版本。');
   need(data.enemyFireVersion===undefined || [0,1].includes(data.enemyFireVersion),'不支援的敵軍射擊效果版本。');
   need(data.assetSet!=='combat-effects-v1' || data.enemyFireVersion===1,'射擊效果需要保存版本。');
   need(data.playerFireVersion===undefined||[0,1].includes(data.playerFireVersion),'不支援的玩家射擊版本。');
   need(data.combatAudioVersion===undefined||[0,1].includes(data.combatAudioVersion),'不支援的戰鬥音效版本。');
   need(data.combatAudioVersion!==1||data.enemyFireVersion===1&&data.playerFireVersion===1,'戰鬥音效需要保存的接受射擊版本。');
   need(data.assetSet!=='player-fire-v1'||data.playerFireVersion===1&&data.enemyFireVersion===1,'玩家射擊需要保存的完整版本。');
+  need(data.playerPresentationVersion===undefined||[0,1].includes(data.playerPresentationVersion),'不支援的玩家人物版本。');
+  need(data.assetSet!=='player-body-v1'||data.playerPresentationVersion===1&&data.playerFireVersion===1&&data.enemyFireVersion===1&&data.weaponPresentationVersion===1&&data.enemyPresentationVersion===1,'玩家人物需要完整的保存版本。');
   need(data.origin === 'Simulation' && data.statistics?.origin === 'Simulation', '此版僅支援明確標記的 Simulation 紀錄。');
   need(guid(data.sessionId) && data.statistics.sessionId === data.sessionId, '場次身分不一致。');
   need(Array.isArray(data.roomIds) && [1, 5].includes(data.roomIds.length) && new Set(data.roomIds).size === data.roomIds.length && data.roomIds.every(r => integer(r, 1, 5)), '房間配置錯誤。');
@@ -51,6 +53,7 @@ export function validateRecording(data) {
     need(Array.isArray(frame.players) && frame.players.length <= 25 && Array.isArray(frame.enemies) && frame.enemies.length <= 100, '快照角色數量錯誤。');
     const ids = new Set(), seats = new Map();
     for (const player of frame.players) {
+      if(data.playerPresentationVersion===1)need(player.hasPlayerPresentation===true&&typeof player.walking==='boolean'&&(!player.walking||player.health>0&&player.connected&&frame.phase!=='Preparing'),'玩家人物姿態不完整。');else need(!player.hasPlayerPresentation&&!player.walking,'舊玩家不能宣稱未版本化人物姿態。');
       const identity = players.get(player.id);
       need(identity && identity.roomId === player.roomId && !ids.has(player.id), '快照玩家身分不一致。'); ids.add(player.id);
       seats.set(player.roomId, (seats.get(player.roomId) || 0) + 1); need(seats.get(player.roomId) <= 5, '單房玩家超過五人。');

@@ -116,12 +116,15 @@ async function main() {
     await page.locator('#tab-world').click(); await page.locator('#world-refresh').click(); await until(async () => (await page.locator('#world-recording option').count()) > 0, 'native recording in console');
     await page.locator('#world-recording').selectOption(session); await page.locator('#world-live').click();
     await until(async () => (await page.locator('#world-environment').innerText()).includes('Storm') || (await page.locator('#world-environment').innerText()).includes('暴風雨'), 'native world observed');
-    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'player-fire-v1'
+    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'player-body-v1'
       && Number(await page.locator('#world-canvas').getAttribute('data-prop-triangles')) === 642,
       'Actual native header selects the same 256-triangle sandbags and 386-triangle drum in live observation');
     check(await page.locator('#world-canvas').getAttribute('data-rifle-triangles') === '264'
       && Number(await page.locator('#world-canvas').getAttribute('data-rifle-count')) >= 2,
       'Live actual-native observation renders the versioned player rifles from accepted muzzle poses');
+    check(world.header.playerPresentationVersion===1 && await page.locator('#world-canvas').getAttribute('data-player-body-triangles')==='404'
+      && JSON.parse(await page.locator('#world-canvas').getAttribute('data-player-body-poses')).length>=2,
+      'Actual native source selects the original player military body alongside its retained rifles');
     check(await page.locator('#world-canvas').getAttribute('data-enemy-triangles') === '760'
       && JSON.parse(await page.locator('#world-canvas').getAttribute('data-enemy-poses')).length === 1,
       'Actual native world explicitly selects the shared humanoid model and saved enemy orientation');
@@ -183,7 +186,7 @@ async function main() {
     await until(async () => (await page.locator('#world-timeline').inputValue()) === (await page.locator('#world-timeline').getAttribute('max')), 'replay final seek');
     const finalInfo = await api('/sessions/' + session + '/world');
     await until(async () => (await page.locator('#world-time').innerText()).includes('幀 ' + finalInfo.acceptedSequence), 'rendered final replay frame');
-    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'player-fire-v1'
+    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'player-body-v1'
       && Number(await page.locator('#world-canvas').getAttribute('data-prop-triangles')) === 642,
       'Sealed native replay retains its saved field-prop appearance profile after camera recall / final seek');
     check(await page.locator('#world-canvas').getAttribute('data-rifle-triangles') === '264'
@@ -200,6 +203,15 @@ async function main() {
     const armed=JSON.parse(await page.locator('#world-canvas').getAttribute('data-armed-poses'));
     const {armedEnemyPose}=await import('../../src/VrCommand.Api/wwwroot/console/armed-combatants.js');
     const close=(a,b)=>Math.hypot(...a.map((v,i)=>v-b[i]))<.00001;
+    const playerBodies=JSON.parse(await page.locator('#world-canvas').getAttribute('data-player-body-poses'));
+    const {playerBodyPose}=await import('../../src/VrCommand.Api/wwwroot/console/player-body.js');
+    check(finalInfo.header.playerPresentationVersion===1 && playerBodies.length===finalFrame.players.length && playerBodies.every(row=>{
+      const p=finalFrame.players.find(p=>p.id===row.id),v=playerBodyPose(p,finalFrame.tick);
+      return p.hasPlayerPresentation && row.visible===(p.connected&&p.health>0) && close(row.head,[p.head.x,p.head.y,p.head.z])
+        && Math.abs(row.heightScale-v.scale)<.00001 && Math.abs(row.stride-v.stride)<.00001 && row.arms===v.arms
+        && (!row.arms||close(row.leftWrist,v.left.wrist)&&close(row.rightWrist,v.right.wrist));
+    }),'Sealed actual-native replay restores exact saved player head, gait and cosmetic glove wrists');
+    await fs.writeFile(path.join(evidence,'player-body-final-pose.json'),JSON.stringify({frame:finalFrame,rendered:playerBodies},null,2));
     const worldPoint=(local,e)=>{const yaw=Math.atan2(e.forward.x,e.forward.z),c=Math.cos(yaw),s=Math.sin(yaw);return[e.feet.x+c*local[0]+s*local[2],e.feet.y+local[1],e.feet.z-s*local[0]+c*local[2]];};
     check(armed.length===finalFrame.enemies.length && armed.every(p=>{const e=finalFrame.enemies.find(e=>e.id===p.id);return close(p.muzzle,[e.feet.x,e.feet.y+1.4,e.feet.z])&&close(p.forward,[e.forward.x,e.forward.y,e.forward.z]);}),
       'Actual native sealed replay keeps every sidearm on the original authority muzzle and full direction');

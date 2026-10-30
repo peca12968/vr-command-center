@@ -13,7 +13,7 @@ namespace VrCommand.Simulation
         {
             internal Guid Id; internal int Room; internal Vec3 Head, Muzzle, Forward;
             internal int Health = 100, Magazine = MagazineSize, Reserve = 90;
-            internal long NextShot, ReloadUntil;
+            internal long NextShot, ReloadUntil, LastMotionTick = -100;
             internal PlayerFireState Fire;
             internal bool Connected = true;
         }
@@ -124,6 +124,7 @@ namespace VrCommand.Simulation
         {
             Active(); var player = FindPlayer(id); ValidatePose(player.Room, head, muzzle, forward);
             if (!rooms[player.Room].ClearSegment(Vec3.Flat(player.Head), Vec3.Flat(head))) throw new ArgumentException("Player movement crosses cover.");
+            if(Phase==WorldPhase.Running && player.Connected && player.Health>0 && Vec3.Distance(Vec3.Flat(player.Head),Vec3.Flat(head))>.001f)player.LastMotionTick=TickNumber;
             player.Head = head; player.Muzzle = muzzle; player.Forward = forward;
         }
         public ShotResult Fire(Guid playerId, Guid shotId)
@@ -253,7 +254,7 @@ namespace VrCommand.Simulation
             if (after < 0 || limit < 1 || limit > 500) throw new ArgumentException("Invalid world event page.");
             var start = (int)Math.Min(after, events.Count); return events.GetRange(start, Math.Min(limit, events.Count - start)).ToArray();
         }
-        private static PlayerFrame Frame(Player p) => new PlayerFrame(p.Id, p.Room, p.Head, p.Muzzle, p.Forward, p.Health, p.Magazine, p.Reserve, p.ReloadUntil != 0, p.Connected, p.ReloadUntil, p.Fire);
+        private PlayerFrame Frame(Player p) => new PlayerFrame(p.Id, p.Room, p.Head, p.Muzzle, p.Forward, p.Health, p.Magazine, p.Reserve, p.ReloadUntil != 0, p.Connected, p.ReloadUntil, p.Fire, p.Connected && p.Health>0 && TickNumber-p.LastMotionTick<=PlayerPresentation.WalkHoldTicks);
         public PlayerFrame PlayerSnapshot(Guid id) => Frame(FindPlayer(id));
         public WorldFrame Snapshot() => new WorldFrame(TickNumber, Phase, events.Count, Behavior, AutoAttack, Visibility, Night,
             players.Select(Frame).ToArray(),

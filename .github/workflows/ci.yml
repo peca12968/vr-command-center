@@ -28,6 +28,7 @@ jobs:
       - run: python scripts/generate-armed-combatants.py --check
       - run: python scripts/generate-combat-effects.py --check
       - run: python scripts/generate-player-fire.py --check
+      - run: python scripts/generate-player-body.py --check
       - run: python scripts/check-transport-patch.py
       - uses: actions/setup-node@v4
         with:
