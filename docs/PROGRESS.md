@@ -22,7 +22,7 @@ locked restore／Release build通過，0警告／錯誤；**534核心、403 HTTP
 
 以上最終三組均Simulation／Simulated、pendingTelemetry=false、活動0、cleanup零錯誤；writer關閉後14／26／14檔複製回F與SSD逐檔SHA-256一致且保留原件。另 `unity-admission/20261030-224203-4dd71abf` **8項無圖形**入場／撤銷／transport釋放／同admission重連通過，370幀、封存回放一致、活動0；未重跑走離出生點的互動重連。本輪不重做DSP／聽感／完整鍵盤碰撞，舊證據保留；source age為擷取新鮮度，非RTT或FPS。程式與binary仍F、runtime明確SSD，不代表F USB全資料、跨機、25台或頭盔通過。
 
-最終原生各自log共38檔未見NullReference／MissingReference／ObjectDisposed／IndexOutOfRange例外；機器證據彙整於artifacts/enemy-validation.json。原5080仍API0.16與原歷史且health ok，未替換正式資料／憑證。完整11項長期目標維持開發中；下一步為NPC武器握持／玩家人物、換彈與死亡動畫、複雜通路／地形、原停頓原因／啟動旗標、長任務與跨機；Quest／VIVE實機、MR、廠商硬體及25台仍待設備與分階段驗收。
+最終原生各自log共38檔未見NullReference／MissingReference／ObjectDisposed／IndexOutOfRange例外；機器證據彙整於artifacts/enemy-validation.json。原5080仍API0.16與原歷史且health ok，未替換正式資料／憑證。功能提交 `f4d9c749629101558ed419600d70c65cb82356b5` 已推送並核對遠端main相同。[CI run41076508175](https://github.com/peca12968/vr-command-center/actions/runs/41076508175)／check124134028244已結束，steps=null、annotation明確為近期付款失敗或支出限制、工作未啟動；另有ubuntu遷移通知，未改帳務或重跑。GitHub #1已同步ROADMAP、新結果與限制，讀回確認open且保留前次完整內容。完整11項長期目標維持開發中；下一步為NPC武器握持／玩家人物、換彈與死亡動畫、複雜通路／地形、原停頓原因／啟動旗標、長任務與跨機；Quest／VIVE實機、MR、廠商硬體及25台仍待設備與分階段驗收。
 
 ## 2026-10-30：玩家步槍、槍口對齊及實際命中
 
