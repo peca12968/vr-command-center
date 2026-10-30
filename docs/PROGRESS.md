@@ -22,6 +22,8 @@ locked restore／Release build0警告錯誤、**575核心、403 HTTP、43世界�
 
 三組均Simulation／Simulated、pendingTelemetry=false、活動0、cleanup零錯誤，writer停止後22／14／26檔回F並與保留SSD原件逐檔SHA相同。程式及binary仍F、這些runtime明確SSD，不是F USB全資料通過，source age非RTT／FPS。另 `unity-admission/20261031-030456-f7254c15` **8項無圖形**入場／撤銷／transport釋放／同admission重連通過，401幀、精確seal／回放一致與活動0。四組38個log未見指定NullReference／MissingReference／ObjectDisposed／IndexOutOfRange或Shader error。本輪未重跑真正按鍵擊殺／換彈、互動走離出生點重連、完整碰撞、GPU閃電或DSP／聽感；較窄SDK未另外重跑。原5080仍API0.16／health ok及原歷史，沒有替換正式DLL／憑證。完整11項長期目標保持開發中，實際Quest／VIVE、MR、廠商硬體、跨機與25台仍待。
 
+功能提交 `7fb5ce2b376dd076255ae8a7de0358c7bfb3a36b` 已推送，遠端main核對相同。GitHub #1已同步本輪，讀回open／63864字，原62127字內容完整保留。 [CI run41114384316](https://github.com/peca12968/vr-command-center/actions/runs/41114384316)／check124264676068實際failure、steps=null；annotation明示付款失敗或支出上限，工作未啟動，不能稱雲端測試通過。未改帳務或重跑。
+
 ## 2026-10-31：敵軍雙手手槍與裝飾性雙臂
 
 從乾淨 `3c3d71b` 接續無頭盔的PC主線。新增 `armed-combatants-v1`：原創緊湊型手槍、分離上下臂及合成手套，每NPC728面、八個共用Mesh／一材質；頭及腿取固定combatants-v1、手套為固定weapon-actions-v1的0.65倍副本，原五profile／pin完整保留。生成器先驗舊pin，新資料SHA `cc011e951163d4b846c4e2c217592251906844c0dfcee2f795618c8c1c388102`；check與記憶體改色反例拒絕通過。無外部素材／下載，規範見 [ARMED_ENEMIES.md](ARMED_ENEMIES.md)。
