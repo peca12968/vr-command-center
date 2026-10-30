@@ -28,6 +28,8 @@ locked restore、Release build0警告／錯誤，**597核心、403 HTTP、43世�
 
 Quest ARM64／IL2CPP亦exit0，receipt UTC2026-10-30T20:06:54.3684764Z，來源fingerprint與原scene／prefab ID和最終Desktop完全一致。APK46,228,012 bytes、SHA `6651622b5695d968f7222fa306a501b3cefb41330864050090abe8ab5cea1e71`，簽章v2、min32／target35、code29／bundle0.26及六個ELF64 AArch64庫含libil2cpp核對通過。沒有頭盔安裝。完整11項長期目標保持開發中；玩家／敵軍射擊音效、全身人物、完整動畫、原暫時失聯原因與跨機仍需推進，Quest／VIVE實機、MR、廠商硬體及25台須分別驗收。
 
+功能提交 `96ab34918d8fa2619f7f674557d356cd70f0ccbf` 已推送，遠端main核對相同。GitHub #1原63864字本文已[完整封存於留言](https://github.com/peca12968/vr-command-center/issues/1#issuecomment-6532297157)，讀回確認原文完整後，本文改為目前11項目標／最新交付／後續及文件連結，保持open。原文SHA `d56064c431b1d8c83e5eef3f6cf3945f6270752b9582b83416a182f862c42fed`；新本文2413字讀回相同。[CI run41120847295](https://github.com/peca12968/vr-command-center/actions/runs/41120847295)／check124286744394目前queued、尚無步驟或雲端通過結果；不拿前輪帳務annotation推定本輪狀態，未改帳務或重跑。
+
 ## 2026-10-31：按接受射線還原敵軍閃光與槍身後座
 
 從乾淨 `d8ee348` 接續無頭盔的PC主線。新增 `combat-effects-v1`，沿用固定728面持槍NPC／玩家換彈／掩體，再加原創32面封閉星形脈衝，每NPC最大760面。資料SHA `b8fe83d66781c2f65816d6873cc08ba01314418d42777a55e9eea2d1ee34a9bb` 固定，生成器先驗舊pin、Unity／瀏覽器共源；原六profile、原網格／色彩及reader保留，沒有外部素材。新unlit Shader保留instancing／stereo宏，不加Light或音效。規範見 [ENEMY_FIRE.md](ENEMY_FIRE.md)。
