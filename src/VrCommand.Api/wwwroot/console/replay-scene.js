@@ -2,6 +2,7 @@ import * as THREE from './vendor/three/three.module.js';
 import { EnvironmentView } from './environment-view.js';
 import { fieldPropFactory, supportedAssets, FIELD_ASSETS, LEGACY_ASSETS } from './field-props.js';
 import { RIFLE_ASSETS, serviceRifleFactory, placeRifle } from './service-rifle.js';
+import { COMBATANT_ASSETS, opponentFactory, poseOpponent } from './combatants.js';
 
 const point = value => new THREE.Vector3(value.x, value.y, value.z);
 const roomX = id => (id - 3) * 14;
@@ -27,7 +28,7 @@ export class ReplayScene {
   clear(group) {
     const geometries = new Set(), materials = new Set();
     group.traverse(object => {
-      if (object.geometry && !object.geometry.userData.serviceRifleShared) geometries.add(object.geometry);
+      if (object.geometry && !object.geometry.userData.serviceRifleShared && !object.geometry.userData.enemyModelShared) geometries.add(object.geometry);
       for (const material of Array.isArray(object.material) ? object.material : [object.material]) if (material) materials.add(material);
     });
     for (const geometry of geometries) geometry.dispose(); for (const material of materials) material.dispose();
@@ -36,16 +37,18 @@ export class ReplayScene {
   load(recording) {
     const assetSet = recording.assetSet === undefined ? LEGACY_ASSETS : recording.assetSet;
     if (!supportedAssets(assetSet)) throw new Error('不支援的錄製素材版本。');
+    if (![0,1].includes(recording.enemyPresentationVersion ?? 0) || assetSet === COMBATANT_ASSETS && recording.enemyPresentationVersion !== 1) throw new Error('不支援的敵軍姿態版本。');
     this.roomIds = [...recording.roomIds];
     this.weather.load(recording);
     this.clear(this.stage); this.clear(this.traces); this.actors.clear(); this.selected = ''; this.follow = false;
-    this.rifles?.dispose(); this.rifles = assetSet === RIFLE_ASSETS ? serviceRifleFactory() : null;
+    this.rifles?.dispose(); this.rifles = [RIFLE_ASSETS, COMBATANT_ASSETS].includes(assetSet) ? serviceRifleFactory() : null;
+    this.opponents?.dispose(); this.opponents = assetSet === COMBATANT_ASSETS ? opponentFactory() : null;
     for (const room of recording.roomIds) {
       const floor = this.mesh(new THREE.BoxGeometry(12, .2, 12), 0x344638); floor.position.set(roomX(room), -.12, 0); this.stage.add(floor);
       const grid = new THREE.GridHelper(12, 24, 0x8b9b6c, 0x4c6354); grid.position.set(roomX(room), -.005, 0); this.stage.add(grid);
       const boundary = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([[-6,-6],[6,-6],[6,6],[-6,6]].map(([x,z]) => new THREE.Vector3(roomX(room) + x, .01, z))), new THREE.LineBasicMaterial({ color: 0xc1d281 })); this.stage.add(boundary);
     }
-    const createProp = [FIELD_ASSETS, RIFLE_ASSETS].includes(assetSet) && recording.props.length ? fieldPropFactory() : null;
+    const createProp = [FIELD_ASSETS, RIFLE_ASSETS, COMBATANT_ASSETS].includes(assetSet) && recording.props.length ? fieldPropFactory() : null;
     let propTriangles = 0;
     for (const prop of recording.props) {
       if (createProp) {
@@ -61,11 +64,15 @@ export class ReplayScene {
     }
     this.canvas.dataset.assetSet = assetSet; this.canvas.dataset.propTriangles = String(propTriangles);
     this.canvas.dataset.rifleTriangles = String(this.rifles?.triangles || 0); this.canvas.dataset.rifleCount = '0';
+    this.canvas.dataset.enemyTriangles = String(this.opponents?.triangles || 0); this.canvas.dataset.enemyPoses = '[]';
     this.defaultTarget = new THREE.Vector3(recording.roomIds.reduce((sum, id) => sum + roomX(id), 0) / recording.roomIds.length, .8, 0);
     this.defaultRadius = recording.roomIds.length === 5 ? 49 : 15; this.preset('overview');
   }
   actor(key, enemy) {
     if (this.actors.has(key)) return this.actors.get(key);
+    if (enemy && this.opponents) {
+      const entry = this.opponents.create(); entry.group.userData.key = key; this.actors.set(key, entry); this.stage.add(entry.group); return entry;
+    }
     const group = new THREE.Group(); group.userData.key = key;
     const body = this.mesh(new THREE.BoxGeometry(1, 1, 1), enemy ? 0xc26754 : 0x82bc94); group.add(body);
     const head = this.mesh(new THREE.SphereGeometry(.17, 12, 8), enemy ? 0xefad84 : 0xb7e7c6); group.add(head);
@@ -100,6 +107,11 @@ export class ReplayScene {
     }
     for (const enemy of frame.enemies) {
       const actor = this.actor('e:' + enemy.id, true); actor.group.visible = true; actor.group.position.copy(point(enemy.feet));
+      if (actor.model) {
+        poseOpponent(actor, enemy, frame.tick);
+        for (const mesh of [actor.body, actor.head, actor.leftLeg, actor.rightLeg]) { mesh.material.transparent = enemy.health === 0; mesh.material.opacity = enemy.health === 0 ? .18 : 1; }
+        continue;
+      }
       actor.body.scale.set(.5, 1.25, .4); actor.body.position.set(0, .68, 0); actor.head.position.set(0, 1.52, 0); actor.gun.position.set(.25, 1.1, -.3);
       const before = previous?.enemies.find(value => value.id === enemy.id);
       if (before && Math.hypot(enemy.feet.x - before.feet.x, enemy.feet.z - before.feet.z) > .001) actor.group.rotation.y = Math.atan2(enemy.feet.x - before.feet.x, enemy.feet.z - before.feet.z);
@@ -113,6 +125,8 @@ export class ReplayScene {
     }
     this.canvas.dataset.traceCount = String(events.length);
     this.canvas.dataset.rifleCount = String(this.rifles ? frame.players.length : 0);
+    this.canvas.dataset.enemyPoses = JSON.stringify([...this.actors.values()].filter(a => a.model && a.group.visible).map(a => ({ id: a.group.userData.key.slice(2),
+      yaw: a.group.rotation.y * 180 / Math.PI, pitch: a.head.rotation.x * 180 / Math.PI, left: a.leftLeg.rotation.x * 180 / Math.PI, right: a.rightLeg.rotation.x * 180 / Math.PI })));
     if (!this.weather.show(frame, environment, continuous)) {
       this.ambient.intensity = frame.night ? .8 : 2.2; this.sun.intensity = frame.night ? .35 : 2.5;
       this.sun.color.setHex(0xffe4ba); this.renderer.setClearColor(0x101a17);
@@ -186,5 +200,5 @@ export class ReplayScene {
     const hit = ray.intersectObjects([...this.actors.values()].filter(actor => actor.group.visible).map(actor => actor.group), true)[0];
     if (hit) { let object = hit.object; while (object && !object.userData.key) object = object.parent; if (object) this.onPick(object.userData.key); }
   }
-  reset() { this.weather.reset(); this.frame = null; this.follow = false; this.selected = ''; this.clear(this.stage); this.clear(this.traces); this.rifles?.dispose(); this.rifles = null; this.actors.clear(); this.canvas.dataset.rifleCount = '0'; this.canvas.dataset.rifleTriangles = '0'; this.marker.visible = false; this.draw(); }
+  reset() { this.weather.reset(); this.frame = null; this.follow = false; this.selected = ''; this.clear(this.stage); this.clear(this.traces); this.rifles?.dispose(); this.rifles = null; this.opponents?.dispose(); this.opponents = null; this.actors.clear(); this.canvas.dataset.rifleCount = '0'; this.canvas.dataset.rifleTriangles = '0'; this.canvas.dataset.enemyTriangles = '0'; this.canvas.dataset.enemyPoses = '[]'; this.marker.visible = false; this.draw(); }
 }

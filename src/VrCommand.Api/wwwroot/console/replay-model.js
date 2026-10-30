@@ -13,7 +13,9 @@ function roomPosition(value, room) { return vector(value) && Math.abs(value.x - 
 // Validate snapshots against their event boundary. Playback never reruns AI or guesses missing damage.
 export function validateRecording(data) {
   need(data && data.schemaVersion === 2 && data.rulesVersion === '0.8.0', '需要 schema 2／rules 0.8.0，舊除錯檔請重新產生。');
-  need(data.assetSet === undefined || ['primitives-v1', 'field-props-v1', 'service-rifle-v1'].includes(data.assetSet), '不支援的素材版本。');
+  need(data.assetSet === undefined || ['primitives-v1', 'field-props-v1', 'service-rifle-v1', 'combatants-v1'].includes(data.assetSet), '不支援的素材版本。');
+  need(data.enemyPresentationVersion === undefined || [0, 1].includes(data.enemyPresentationVersion), '不支援的敵軍姿態版本。');
+  need(data.assetSet !== 'combatants-v1' || data.enemyPresentationVersion === 1, '人形敵軍需要保存的姿態版本。');
   need(data.origin === 'Simulation' && data.statistics?.origin === 'Simulation', '此版僅支援明確標記的 Simulation 紀錄。');
   need(guid(data.sessionId) && data.statistics.sessionId === data.sessionId, '場次身分不一致。');
   need(Array.isArray(data.roomIds) && [1, 5].includes(data.roomIds.length) && new Set(data.roomIds).size === data.roomIds.length && data.roomIds.every(r => integer(r, 1, 5)), '房間配置錯誤。');
@@ -51,6 +53,9 @@ export function validateRecording(data) {
       need(guid(enemy.id) && !ids.has(enemy.id) && !players.has(enemy.id) && !propIds.has(enemy.id) && data.roomIds.includes(enemy.roomId), '敵軍身分錯誤。'); ids.add(enemy.id);
       need(!enemies.has(enemy.id) || enemies.get(enemy.id) === enemy.roomId, '敵軍跨房間變更身分。'); enemies.set(enemy.id, enemy.roomId);
       need(roomPosition(enemy.feet, enemy.roomId) && Math.abs(enemy.feet.y) <= .001 && integer(enemy.health, 0, 100), '敵軍位置或血量錯誤。');
+      if (data.enemyPresentationVersion === 1) need(enemy.hasPresentation === true && unit(enemy.forward)
+        && Math.abs(Math.hypot(enemy.forward.x, enemy.forward.y, enemy.forward.z) - 1) <= .01 && typeof enemy.walking === 'boolean'
+        && !(enemy.walking && (enemy.health === 0 || frame.phase === 'Preparing')), '敵軍姿態資料不完整。');
     }
     lastTick = frame.tick; lastSequence = frame.throughSequence;
   }

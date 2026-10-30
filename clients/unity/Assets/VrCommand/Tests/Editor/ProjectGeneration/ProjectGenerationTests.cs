@@ -31,7 +31,7 @@ namespace VrCommand.Unity.Tests
             var state = GameObject.Find("Scene Authority");
             var bootstrap = GameObject.Find("Network Manager").GetComponent<VenueBootstrap>();
             var manager = bootstrap.networkManager;
-            Assert.AreEqual(20, manager.NetworkConfig.ProtocolVersion);
+            Assert.AreEqual(21, manager.NetworkConfig.ProtocolVersion);
             Assert.AreSame(state.GetComponent<SceneAuthority>(), bootstrap.sceneAuthority);
             Assert.AreSame(state.GetComponent<CombatAuthority>(), bootstrap.combatAuthority);
             Assert.Greater(new SerializedObject(state.GetComponent<NetworkObject>()).FindProperty("GlobalObjectIdHash").uintValue, 0);

@@ -1,5 +1,7 @@
 # 持久世界錄製與觀察 v0.16
 
+2026-10-30 最新人形敵軍接入為API／UI0.20、Unity0.22／Android code25／NGO21，header enemyPresentationVersion1及combatants-v1需協同更新；舊來源／外觀保留，不能降舊reader。保存姿態、原命中盒與限制見 [ENEMY_PRESENTATION](ENEMY_PRESENTATION.md)，真正建置／PC結果以 PROGRESS 為準。
+
 v0.16 新增 `environmentVersion:1`，依保存的 tick／環境重現雨、日夜、閃電及選用聲音，非原始音軌。缺少欄位維持 0 legacy，不補造效果；UI 有音效開關，暫停／跳轉／過期的行為與協同升級見 [ENVIRONMENT.md](ENVIRONMENT.md)。新 NDJSON 示範也附擷取 UTC，舊來源不變。world schema 1 不變，但舊嚴格 reader 不接受新 header 欄位，不可直接降版。
 
 管理主控台的「觀戰與任務回放」讀取遊戲伺服器已接受的世界資料。世界發布走 WebSocket，觀察及回放走帶 Bearer 的 fetch SSE；逐幀遊戲輸入仍由 NGO 處理，不使用管理 REST。觀察者不加入玩家名冊。既有「3D 模擬回放」仍用本機 schema 2 檔案；兩種格式及來源不可混為一談。

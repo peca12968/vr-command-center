@@ -8,7 +8,7 @@ internal sealed class SystemWorldCodec : IWorldCodec
     public string Header(WorldRecordingHeader value) => JsonSerializer.Serialize(value, Json);
     public string Packet(WorldRecordingPacket value) => JsonSerializer.Serialize(value, Json);
     public WorldRecordingHeader ReadHeader(string value) => Read<WorldRecordingHeader>(value);
-    public WorldRecordingPacket ReadPacket(string value) => Read<WorldRecordingPacket>(value);
+    public WorldRecordingPacket ReadPacket(string value) => WorldRecordingValidation.NormalizeLegacyPresentation(Read<WorldRecordingPacket>(value));
     public WorldPublicationAck ReadAck(string value) => Read<WorldPublicationAck>(value);
     private static T Read<T>(string value)
     {

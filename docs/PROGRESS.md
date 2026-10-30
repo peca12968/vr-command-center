@@ -1,5 +1,29 @@
 # 開發進度
 
+## 2026-10-30：人形敵軍、權威朝向及可還原步態
+
+從乾淨 `0170bb0` 接續使用者無頭盔的PC主線；前輪已交付玩家步槍，本輪新增原創404三角形人形敵軍（軀幹180、頭104、腿60重用兩次），含頭盔／護目鏡、背心／彈袋、紅色臂帶、護膝及靴子。生成器產出相同Unity Resources／瀏覽器頂點、法線、色彩與索引，固定資料SHA `39fa5e9baceec0eb71ce6a4664fc4460e7b0f212f2c58b75c7b4d75b3565fdf2`。生成check及記憶體改色反例拒絕通過；沒有外部模型／貼圖／下載，原掩體與步槍pin不改。NPC尚無武器模型、握持／換彈／死亡動畫或腳底IK，玩家身體與頭手仍為原型，不能稱完整人物美術。規範見 [ENEMY_PRESENTATION.md](ENEMY_PRESENTATION.md)。
+
+新header assetSet=`combatants-v1`沿用固定掩體／玩家步槍，要求明確 `enemyPresentationVersion=1`；每個敵軍保存hasPresentation、單位forward及walking，未知／缺失版本拒絕。預設Create／Capture及缺欄位舊header仍0，完整保留三個舊profile與NPC外觀；binary原header／payload／checksum不改寫，codec只正規化舊缺失零向量。API／UI **0.20.0**、Unity **0.22.0／Android code25／NGO21**；envelope6、任務schema1、world schema1、票券2、environmentVersion1與rules0.8.0保持。新欄位及profile不能降舊reader，所有API／UI／遊戲程序一起更新。
+
+ArenaWorld只在成功移動後標記walking及方向，有autoAttack目標時使用原射擊原點到目標的單位向量作朝向。沒有改目標選擇、導航、兩公尺Advance停止距離、攻擊間隔、原feet+(0,1.4,0)射擊原點或命中盒。NGO每個敵軍row原子複製facing／walking／presentationTick；Unity與觀戰共用保存tick規則，頭pitch視覺±45°、雙腿相反sin步態±18°。Paused／Ended保留最後模式與tick，直接seek相同；Unity位置仍插值，非逐pixel伺服器影像。模型無Collider／NetworkObject，原軸對齊敵軍half(.3,.9,.3)命中盒保留，擺腿輪廓不改命中；同點重疊／人群避讓仍待。
+
+locked restore／Release build通過，0警告／錯誤；**534核心、403 HTTP、43世界串流、32 Node／167 Chromium**通過。涵蓋實際移動與原射線傷害、版本拒絕、SQLite重開與原binary逐byte保留、三Mesh資源池、固定法線、C#／JS時鐘向量及真正WebGL非零步態／seek／統計。審查發現JS原通用unit容差.011比renderer的.01寬，新NPC檢查已對齊.01並加1.0105反例，最後完整瀏覽器重跑通過；沒有改舊玩家容差。桌面／近距離回放截圖已檢視，瀏覽器為SwiftShader。首輪.NET建置抓到nullable約束，修正缺packet與forward guard；新核心測例先漏合成rig而被拒，補正測例，未放寬參戰姿態驗證。
+
+真正Prepare、**61 EditMode（0 failed／skipped）**、Desktop／Quest均exit0，未RebuildArena，原scene／prefab識別保持。新增5項測試涵蓋真正匯入網格、共享資源／無Collider、實際Transform與seek、NGO序列化、JsonUtility舊資料；Tests門檻61。Desktop receipt UTC2026-10-29T20:04:05.5902819Z，fingerprint `7c4d759065020885b43d7dc5d4c04d42a91d822813b33c054434880f288ab2b3`。離線managed SDK兩分支各16 runtime／14 NUnit來源僅型別綁定，不冒充Editor／音訊／Shader／APK執行。Quest receipt UTC2026-10-30T14:53:43.7390900Z，fingerprint與識別同Desktop；兩次建置間有工作中斷，來源重新核對未變。APK46,147,574 bytes，SHA `11f8280ebcde4d30d1415bd6ac680c2650787be4a514fd63d816e633a3824200`，v2簽章、min32／target35、code25／bundle0.22及六個ELF64 AArch64庫含libil2cpp核對通過，沒有頭盔安裝。
+
+人工檢視第一場 `040445-dde5b466` 因跨回合中斷逾時，不能稱UI全通過；helper到期後8250幀封存、清理正常。第二場 `223112-3335acc2` 實際看見敵軍前進／傷害及停止，最後walking=false使原測試要求移動的斷言失敗；因Advance已到原兩公尺門檻，改以真正控制台Patrol／Resume／Pause另驗非零步態，沒有為測試改AI停止距離或注入pose。失敗log／圖片／原資料與snapshot均保留，不能混作最終42項證據。
+
+| 最終PC場（前綴20261030） | 幀／最大來源年齡 | 證據 |
+|---|---|---|
+| 223557-d36552a9 | 2757／0.175022秒 | **42 UI／native**：配置保存／preflight、動態名冊、天氣／AI Advance傷害、Patrol移動、Pause／Resume／End、鏡頭與封存回放；真正GPU白天全身、雨夜、Pause及巡邏中暫停均已檢視。最後保存tick3169、兩敵walking=true，實際觀戰物件yaw／head pitch／相反腿角與原生frame一致；自身健康60 |
+| 224124-1ecc97e0 | 七場537／0.201650秒 | 五個真正server／每房一個client的隔離、單房End／重用、封存後Linked、舊票／升權拒絕與七個stream精確封存；每場combatants-v1／presentation1，非25台 |
+| 224306-4ae70119 | 1587／0.171834秒 | 一般未掛探針的可見玩家，真正Left14／Down5瞄準及Space兩次，GPU看見新人形敵軍100→50→0、彈匣30→29→28，封存ammo2／hit2／kill1／100%、自身健康100，回放一致；無pose／combat注入 |
+
+以上最終三組均Simulation／Simulated、pendingTelemetry=false、活動0、cleanup零錯誤；writer關閉後14／26／14檔複製回F與SSD逐檔SHA-256一致且保留原件。另 `unity-admission/20261030-224203-4dd71abf` **8項無圖形**入場／撤銷／transport釋放／同admission重連通過，370幀、封存回放一致、活動0；未重跑走離出生點的互動重連。本輪不重做DSP／聽感／完整鍵盤碰撞，舊證據保留；source age為擷取新鮮度，非RTT或FPS。程式與binary仍F、runtime明確SSD，不代表F USB全資料、跨機、25台或頭盔通過。
+
+最終原生各自log共38檔未見NullReference／MissingReference／ObjectDisposed／IndexOutOfRange例外；機器證據彙整於artifacts/enemy-validation.json。原5080仍API0.16與原歷史且health ok，未替換正式資料／憑證。完整11項長期目標維持開發中；下一步為NPC武器握持／玩家人物、換彈與死亡動畫、複雜通路／地形、原停頓原因／啟動旗標、長任務與跨機；Quest／VIVE實機、MR、廠商硬體及25台仍待設備與分階段驗收。
+
 ## 2026-10-30：玩家步槍、槍口對齊及實際命中
 
 上一輪配置檢查已交付，從乾淨 `245ddb0` 接續使用者無頭盔的PC主線。新增自製264三角形步槍，槍托、機匣、握把、彈匣、護木、槍管及瞄具共用固定位置／法線／頂點色。生成器與Unity Resources／瀏覽器ES module同源，資料SHA `b054b9780b19104c6ff33a2384df15e9e4f6e2c73293297c4f70e2dd0d8eda25` 固定；生成check及記憶體改色反例拒絕通過。沒有外部模型／紋理／下載，沒有改field-props-v1 pin。人物／NPC、左手／頭部仍為原型，武器是靜態外觀，非完整人物、握持IK、換彈／後座動畫、槍械音效或廠商武器整合。

@@ -11,6 +11,9 @@ namespace VrCommand.Unity
     {
         public FixedString64Bytes id;
         public Vector3 position;
+        public Vector3 facing;
+        public bool walking;
+        public long presentationTick;
         public int room, health, magazine, reserve;
         public bool enemy, connected, reloading;
         public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
@@ -18,10 +21,11 @@ namespace VrCommand.Unity
             serializer.SerializeValue(ref id); serializer.SerializeValue(ref position); serializer.SerializeValue(ref room);
             serializer.SerializeValue(ref health); serializer.SerializeValue(ref magazine); serializer.SerializeValue(ref reserve);
             serializer.SerializeValue(ref enemy); serializer.SerializeValue(ref connected); serializer.SerializeValue(ref reloading);
+            serializer.SerializeValue(ref facing); serializer.SerializeValue(ref walking); serializer.SerializeValue(ref presentationTick);
         }
         public bool Equals(CombatActorState other) => id.Equals(other.id) && position == other.position && room == other.room
             && health == other.health && magazine == other.magazine && reserve == other.reserve && enemy == other.enemy
-            && connected == other.connected && reloading == other.reloading;
+            && connected == other.connected && reloading == other.reloading && facing == other.facing && walking == other.walking && presentationTick == other.presentationTick;
     }
     public struct CombatPropState : INetworkSerializable, IEquatable<CombatPropState>
     {
@@ -48,8 +52,8 @@ namespace VrCommand.Unity
         public NetworkVariable<bool> Ready = new NetworkVariable<bool>(false);
         private readonly ArenaSession session = new ArenaSession();
         private readonly Dictionary<string, GameObject> propViews = new Dictionary<string, GameObject>();
-        private readonly Dictionary<string, GameObject> enemyViews = new Dictionary<string, GameObject>();
-        private Material enemy;
+        private readonly Dictionary<string, EnemyView> enemyViews = new Dictionary<string, EnemyView>();
+        private EnemyModels enemies;
         private FieldPropModels fieldProps;
         private float accumulator, nextPublish;
         private double lastManagement = double.NegativeInfinity;
@@ -71,7 +75,7 @@ namespace VrCommand.Unity
             if (Outbox == null || management == null || session.World.Phase != WorldPhase.Preparing) throw new InvalidOperationException("Initialize a preparing world and combat source first.");
             recordingStart = Time.realtimeSinceStartupAsDouble;
             var header = WorldRecordingHeader.Create(Guid.Parse(management.id), Outbox.StreamId, Outbox.Origin, management.roomIds, session.Props,
-                DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), assetSet: WorldAssetSets.ServiceRifle);
+                DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), assetSet: WorldAssetSets.Combatants, enemyPresentationVersion: EnemyPresentation.Version);
             Recording = WorldOutbox.Create(path, header, new UnityWorldCodec());
             if (!CaptureWorld(true)) throw new InvalidOperationException("Initial world frame could not be saved.");
         }
@@ -85,7 +89,7 @@ namespace VrCommand.Unity
             {
                 var packet = WorldRecordingPacket.Capture(session.World, Recording.LastSequence + 1,
                     Recording.LastSequence == 0 ? 0 : (long)((now - recordingStart) * 1000), observedSequence, Outbox.LastSequence,
-                    Recording.ThroughWorldSequence, RecordedRigFor, management.environment.weather, management.environment.lightning, managementSuspended);
+                    Recording.ThroughWorldSequence, RecordedRigFor, management.environment.weather, management.environment.lightning, managementSuspended, EnemyPresentation.Version);
                 Recording.Append(packet); nextRecording = now + .1;
                 if (session.World.Phase == WorldPhase.Ended) Recording.Finish();
                 return true;
@@ -123,15 +127,10 @@ namespace VrCommand.Unity
         {
             Instance = this;
             Props.OnListChanged += GeometryChanged;
-            fieldProps = new FieldPropModels(); enemy = Material(new Color(.8f, .25f, .15f));
+            fieldProps = new FieldPropModels(); enemies = new EnemyModels();
             if (IsServer) { Ready.Value = serverReady; Publish(); }
         }
         private void GeometryChanged(NetworkListEvent<CombatPropState> change) { geometryDirty = true; walkSurfaces.Clear(); }
-        private static Material Material(Color color)
-        {
-            var shader = Shader.Find("Universal Render Pipeline/Lit") ?? Shader.Find("Standard");
-            return new Material(shader) { color = color };
-        }
         public void ApplyManagement(ManagementSnapshot snapshot)
         {
             if (!Capture()) throw new InvalidOperationException("Telemetry is faulted.");
@@ -266,7 +265,8 @@ namespace VrCommand.Unity
             var actors = new List<CombatActorState>();
             foreach (var player in frame.Players) actors.Add(new CombatActorState { id = player.Id.ToString("D"), room = player.RoomId, position = Vector(player.Head),
                 health = player.Health, magazine = player.Magazine, reserve = player.Reserve, connected = player.Connected, reloading = player.Reloading });
-            foreach (var npc in frame.Enemies) actors.Add(new CombatActorState { id = npc.Id.ToString("D"), room = npc.RoomId, position = Vector(npc.Feet), health = npc.Health, enemy = true, connected = true });
+            foreach (var npc in frame.Enemies) actors.Add(new CombatActorState { id = npc.Id.ToString("D"), room = npc.RoomId, position = Vector(npc.Feet), health = npc.Health, enemy = true, connected = true,
+                facing = Vector(npc.Forward), walking = npc.Walking, presentationTick = frame.Tick });
             for (var index = 0; index < actors.Count; index++)
                 if (index >= Actors.Count) Actors.Add(actors[index]); else if (!Actors[index].Equals(actors[index])) Actors[index] = actors[index];
             while (Actors.Count > actors.Count) Actors.RemoveAt(Actors.Count - 1);
@@ -294,25 +294,21 @@ namespace VrCommand.Unity
                 var id = actor.id.ToString(); live.Add(id);
                 if (!enemyViews.TryGetValue(id, out var view))
                 {
-                    view = Primitive("Enemy " + id, PrimitiveType.Capsule, enemy); view.transform.localScale = new Vector3(.6f, .9f, .6f);
-                    view.transform.position = actor.position + Vector3.up * .9f; enemyViews.Add(id, view);
+                    view = enemies.Create(); view.Root.name = "Opponent " + id;
+                    view.Root.transform.position = actor.position; enemyViews.Add(id, view);
                 }
-                view.SetActive(actor.health > 0);
-                view.transform.position = Vector3.Lerp(view.transform.position, actor.position + Vector3.up * .9f, 1 - Mathf.Exp(-20 * Time.unscaledDeltaTime));
+                view.Root.SetActive(actor.health > 0);
+                view.Root.transform.position = Vector3.Lerp(view.Root.transform.position, actor.position, 1 - Mathf.Exp(-20 * Time.unscaledDeltaTime));
+                view.Apply(Vector(actor.facing), actor.walking, actor.presentationTick);
             }
-            foreach (var id in new List<string>(enemyViews.Keys)) if (!live.Contains(id)) { Destroy(enemyViews[id]); enemyViews.Remove(id); }
-        }
-        private static GameObject Primitive(string name, PrimitiveType type, Material material)
-        {
-            var view = GameObject.CreatePrimitive(type); view.name = name; view.GetComponent<Renderer>().sharedMaterial = material;
-            Destroy(view.GetComponent<Collider>()); return view;
+            foreach (var id in new List<string>(enemyViews.Keys)) if (!live.Contains(id)) { Destroy(enemyViews[id].Root); enemyViews.Remove(id); }
         }
         public override void OnNetworkDespawn()
         {
             Props.OnListChanged -= GeometryChanged;
-            foreach (var view in propViews.Values) Destroy(view); foreach (var view in enemyViews.Values) Destroy(view);
+            foreach (var view in propViews.Values) Destroy(view); foreach (var view in enemyViews.Values) Destroy(view.Root);
             propViews.Clear(); enemyViews.Clear(); geometryDirty = true; geometryPublished = false;
-            fieldProps?.Dispose(); fieldProps = null; Destroy(enemy);
+            fieldProps?.Dispose(); fieldProps = null; enemies?.Dispose(); enemies = null;
             if (Instance == this) Instance = null;
         }
     }

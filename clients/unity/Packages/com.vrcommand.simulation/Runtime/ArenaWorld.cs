@@ -20,6 +20,8 @@ namespace VrCommand.Simulation
         {
             internal Guid Id; internal int Room; internal Vec3 Feet, Start, Patrol, RouteTarget;
             internal int Health = 100; internal long NextShot, NextPlan; internal bool Returning;
+            internal Vec3 Forward = new Vec3(0, 0, -1);
+            internal bool Walking;
             internal List<Vec3> Route = new List<Vec3>();
         }
         private sealed class Hit
@@ -173,6 +175,7 @@ namespace VrCommand.Simulation
             var range = Math.Min(Visibility == Visibility.Fog ? 6 : Visibility == Visibility.Storm ? 10 : 15, Night ? 8 : 15);
             foreach (var enemy in enemies)
             {
+                enemy.Walking = false;
                 if (enemy.Health <= 0) continue;
                 var target = players.Where(p => p.Connected && p.Health > 0 && p.Room == enemy.Room && Vec3.Distance(p.Head, enemy.Feet + new Vec3(0, 1.4f, 0)) <= range)
                     .OrderBy(p => Vec3.Distance(p.Head, enemy.Feet)).ThenBy(p => p.Id).FirstOrDefault();
@@ -184,6 +187,13 @@ namespace VrCommand.Simulation
                 }
                 else if (Behavior == AiBehavior.Advance && target != null && Vec3.Distance(enemy.Feet, Vec3.Flat(target.Head)) > 2)
                     Move(enemy, Vec3.Flat(target.Head));
+                // Presentation metadata only: do not feed this orientation back
+                // into target selection, navigation, cooldown or the shot cast.
+                if (AutoAttack && target != null)
+                {
+                    var aim = target.Head - (enemy.Feet + new Vec3(0, 1.4f, 0));
+                    if (aim.Length >= .001f) enemy.Forward = aim.Normalized();
+                }
                 if (!AutoAttack || target == null || TickNumber < enemy.NextShot) continue;
                 var muzzle = enemy.Feet + new Vec3(0, 1.4f, 0); var direction = target.Head - muzzle;
                 if (direction.Length < .001f) continue;
@@ -206,7 +216,9 @@ namespace VrCommand.Simulation
             if (enemy.Route.Count == 0) return;
             var delta = enemy.Route[0] - enemy.Feet; var length = delta.Length;
             var next = enemy.Feet + delta * (Math.Min(.1f, length) / length);
-            if (rooms[enemy.Room].ClearSegment(enemy.Feet, next)) enemy.Feet = next; else enemy.Route.Clear();
+            if (rooms[enemy.Room].ClearSegment(enemy.Feet, next))
+            { enemy.Forward = delta.Normalized(); enemy.Walking = true; enemy.Feet = next; }
+            else enemy.Route.Clear();
         }
         private Hit Cast(Vec3 origin, Vec3 direction, float range, Guid? ignorePlayer, Guid? ignoreEnemy)
         {
@@ -239,6 +251,6 @@ namespace VrCommand.Simulation
         public PlayerFrame PlayerSnapshot(Guid id) => Frame(FindPlayer(id));
         public WorldFrame Snapshot() => new WorldFrame(TickNumber, Phase, events.Count, Behavior, AutoAttack, Visibility, Night,
             players.Select(Frame).ToArray(),
-            enemies.Select(e => new EnemyFrame(e.Id, e.Room, e.Feet, e.Health)).ToArray());
+            enemies.Select(e => new EnemyFrame(e.Id, e.Room, e.Feet, e.Health, e.Forward, e.Walking && e.Health > 0)).ToArray());
     }
 }

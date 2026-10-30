@@ -33,6 +33,10 @@ async function main() {
     try { const state = JSON.parse(await fs.readFile(path.join(directory, 'operator-status.json'), 'utf8')); return state.sessionId === session && predicate(state) ? state : false; }
     catch { return false; }
   }
+  async function nativeFrame(predicate) {
+    try { const row=JSON.parse(await fs.readFile(path.join(directory,'operator-'+session+'-latest-frame.json'),'utf8'));
+      return predicate(row.packet.frame) ? row.packet.frame : false; } catch { return false; }
+  }
   async function manual(stage) {
     if (!process.argv.includes('--manual-inspection')) return;
     await fs.writeFile(path.join(evidence, 'stage.json'), JSON.stringify({ stage, sessionId: session }));
@@ -112,12 +116,15 @@ async function main() {
     await page.locator('#tab-world').click(); await page.locator('#world-refresh').click(); await until(async () => (await page.locator('#world-recording option').count()) > 0, 'native recording in console');
     await page.locator('#world-recording').selectOption(session); await page.locator('#world-live').click();
     await until(async () => (await page.locator('#world-environment').innerText()).includes('Storm') || (await page.locator('#world-environment').innerText()).includes('暴風雨'), 'native world observed');
-    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'service-rifle-v1'
+    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'combatants-v1'
       && Number(await page.locator('#world-canvas').getAttribute('data-prop-triangles')) === 642,
       'Actual native header selects the same 256-triangle sandbags and 386-triangle drum in live observation');
     check(await page.locator('#world-canvas').getAttribute('data-rifle-triangles') === '264'
       && Number(await page.locator('#world-canvas').getAttribute('data-rifle-count')) >= 2,
       'Live actual-native observation renders the versioned player rifles from accepted muzzle poses');
+    check(await page.locator('#world-canvas').getAttribute('data-enemy-triangles') === '404'
+      && JSON.parse(await page.locator('#world-canvas').getAttribute('data-enemy-poses')).length === 1,
+      'Actual native world explicitly selects the shared humanoid model and saved enemy orientation');
     await page.locator('#world-camera').selectOption('top'); await page.locator('#camera-name').fill('Operator overhead'); await page.locator('#camera-save').click();
     await until(async () => (await api('/sessions/' + session + '/world/cameras')).length === 1, 'persisted camera');
     const camera = (await api('/sessions/' + session + '/world/cameras'))[0];
@@ -145,6 +152,20 @@ async function main() {
     await until(async () => (await api('/sessions/' + session + '/statistics')).players.some(p => p.hitsReceived > 0), 'UI-controlled native AI damage');
     // Stop combat first so the subsequent End uses a stable, explicitly refreshed version.
     await command('Pause'); await until(async () => (await api('/sessions/' + session)).state === 'Paused', 'final Pause');
+    // Advance can reach its two-metre stop before the management poll. Use the
+    // actual operator Patrol setting to verify moving poses independently.
+    await refresh(); await page.locator('#reload-enemies').click(); await page.locator('#live-behavior').selectOption('Patrol'); await page.locator('#live-auto-attack').uncheck(); await page.locator('#enemies-form button[type=submit]').click();
+    await until(() => native(s=>s.phase==='Paused' && s.behavior==='Patrol' && !s.autoAttack), 'native Patrol policy');
+    let strideFrame;
+    for(let attempt=0;attempt<4;attempt++) {
+      await command('Resume');
+      await until(()=>nativeFrame(f=>f.phase==='Running' && f.enemies.some(e=>e.walking) && f.tick%6!==0),'native walking stride');
+      await command('Pause'); await until(()=>native(s=>s.phase==='Paused'),'native stride pause');
+      strideFrame=await until(()=>nativeFrame(f=>f.phase==='Paused' && f.enemies.some(e=>e.walking)),'saved paused stride');
+      if(strideFrame.tick%6!==0)break;
+    }
+    check(strideFrame.tick%6!==0 && strideFrame.enemies.some(e=>e.hasPresentation&&e.walking),'Operator Patrol moves actual native opponents and Pause preserves a nonzero saved stride');
+    await manual('native-opponents');
     await command('End');
     await until(async () => (await api('/sessions/' + session + '/world')).complete, 'native exact seal');
     await page.locator('#tab-world').click(); await page.locator('#world-replay').click();
@@ -160,12 +181,20 @@ async function main() {
     await until(async () => (await page.locator('#world-timeline').inputValue()) === (await page.locator('#world-timeline').getAttribute('max')), 'replay final seek');
     const finalInfo = await api('/sessions/' + session + '/world');
     await until(async () => (await page.locator('#world-time').innerText()).includes('幀 ' + finalInfo.acceptedSequence), 'rendered final replay frame');
-    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'service-rifle-v1'
+    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'combatants-v1'
       && Number(await page.locator('#world-canvas').getAttribute('data-prop-triangles')) === 642,
       'Sealed native replay retains its saved field-prop appearance profile after camera recall / final seek');
     check(await page.locator('#world-canvas').getAttribute('data-rifle-triangles') === '264'
       && Number(await page.locator('#world-canvas').getAttribute('data-rifle-count')) >= 2,
       'Sealed native replay retains the same player rifle meshes after final seek and camera recall');
+    const finalFrame = await until(async () => { try { const row=JSON.parse(await fs.readFile(path.join(directory,'operator-'+session+'-latest-frame.json'),'utf8'));
+      return row.packet.frame.phase==='Ended'?row.packet.frame:false; } catch { return false; } }, 'saved native final enemy poses');
+    const rendered=JSON.parse(await page.locator('#world-canvas').getAttribute('data-enemy-poses'));
+    check(finalInfo.header.enemyPresentationVersion===1 && finalFrame.enemies.some(e=>e.walking) && rendered.length===finalFrame.enemies.length && rendered.every(p=>{
+      const e=finalFrame.enemies.find(e=>e.id===p.id), yaw=Math.atan2(e.forward.x,e.forward.z)*180/Math.PI,
+        pitch=Math.max(-45,Math.min(45,-Math.asin(Math.max(-1,Math.min(1,e.forward.y)))*180/Math.PI)),stride=e.walking?Math.sin((finalFrame.tick%12)*Math.PI/6)*18:0;
+      return e.hasPresentation && Math.abs(p.yaw-yaw)<.0001 && Math.abs(p.pitch-pitch)<.0001 && Math.abs(p.left-stride)<.0001 && Math.abs(p.right+stride)<.0001;
+    }),'Sealed real-native replay renders exact recorded facing and opposite-leg pose at the frozen final tick');
     await page.screenshot({ path: path.join(evidence, 'native-replay.png'), fullPage: true });
     const stats = await api('/sessions/' + session + '/statistics');
     check(stats.origin === 'Simulation' && !stats.pendingTelemetry && stats.players.some(p => p.hitsReceived > 0), 'UI-controlled AI produces sealed actual-native combat statistics');

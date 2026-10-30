@@ -21,12 +21,24 @@ internal static class WorldSourceChecks
         Refresh();
         var header = WorldRecordingHeader.Create(id, combat.StreamId, "Simulation", [3], bridge.Props);
         var legacy = WorldRecordingHeader.Create(Guid.NewGuid(), Guid.NewGuid(), "Simulation", [3], [], environmentVersion: 0);
-        var legacyJson = codec.Header(legacy).Replace("\"environmentVersion\":0,", "");
+        var legacyJson = codec.Header(legacy).Replace("\"environmentVersion\":0,", "").Replace("\"enemyPresentationVersion\":0,", "");
         var legacyPath = Path.Combine(directory, "legacy-environment.worldlog");
         using (var legacyJournal = new FileWorldJournal(legacyPath, true))
             legacyJournal.Append(new byte[] { 0 }.Concat(System.Text.Encoding.UTF8.GetBytes(legacyJson)).ToArray());
         using (var legacySource = new WorldOutbox(new FileWorldJournal(legacyPath, false), codec, legacy))
-            check(legacySource.Header.environmentVersion == 0 && legacySource.HeaderJson == legacyJson, "Legacy source without a presentation field recovers as zero while preserving its exact original header bytes");
+            check(legacySource.Header.environmentVersion == 0 && legacySource.Header.enemyPresentationVersion == 0 && legacySource.HeaderJson == legacyJson, "Legacy source without a presentation field recovers as zero while preserving its exact original header bytes");
+        var legacyWorld = new ArenaWorld([3], []); legacyWorld.AddEnemy(Guid.NewGuid(), 3, new(0,0,3), new(2,0,3));
+        var oldPacket = System.Text.Json.Nodes.JsonNode.Parse(codec.Packet(WorldRecordingPacket.Capture(legacyWorld,1,0,1,0,0,_=>new())))!;
+        foreach (var enemyNode in oldPacket["frame"]!["enemies"]!.AsArray())
+        { var enemy = enemyNode!.AsObject(); enemy.Remove("forward"); enemy.Remove("walking"); enemy.Remove("hasPresentation"); }
+        var oldPayload = oldPacket.ToJsonString();
+        using (var journal = new FileWorldJournal(legacyPath, false)) journal.Append(new byte[]{1}.Concat(System.Text.Encoding.UTF8.GetBytes(oldPayload)).ToArray());
+        var beforeRecovery = File.ReadAllBytes(legacyPath);
+        using (var legacySource = WorldOutbox.Recover(legacyPath, codec))
+            check(legacySource.Header.enemyPresentationVersion == 0 && legacySource.Pending!.Json == oldPayload
+                && !codec.ReadPacket(legacySource.Pending.Json).frame.enemies[0].hasPresentation,
+                "Old binary enemy packets retain their exact payload while parsed metadata stays legacy");
+        check(beforeRecovery.SequenceEqual(File.ReadAllBytes(legacyPath)), "Reading old opponent records preserves the original binary header, payload and checksums byte for byte");
         var sourcePath = Path.Combine(directory, "world-source.bin");
         var source = WorldOutbox.Create(sourcePath, header, codec);
         var storePath = Path.Combine(directory, "source-worlds"); Directory.CreateDirectory(storePath);

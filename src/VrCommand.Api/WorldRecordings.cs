@@ -14,7 +14,12 @@ public static class WorldJson
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow, MaxDepth = 32
     };
     public static string Write<T>(T value) => JsonSerializer.Serialize(value, Options);
-    public static T Read<T>(string value) => JsonSerializer.Deserialize<T>(value, Options) ?? throw new ArgumentException("Missing world data.");
+    public static T Read<T>(string value)
+    {
+        var result = JsonSerializer.Deserialize<T>(value, Options) ?? throw new ArgumentException("Missing world data.");
+        if (result is WorldRecordingPacket packet) WorldRecordingValidation.NormalizeLegacyPresentation(packet);
+        return result;
+    }
 }
 
 public record WorldRecordingInfo(WorldRecordingHeader Header, long AcceptedSequence, long DurationMilliseconds, bool Complete, DateTimeOffset UpdatedAtUtc, string MissionName, DateTimeOffset? CapturedAtUtc);
@@ -86,7 +91,7 @@ public sealed partial class WorldRecordings : IDisposable
         var source = JsonSerializer.Serialize(view with { State = SessionState.Preparing }, JsonFormat.Options);
         var management = JsonSerializer.Deserialize<ManagementSnapshot>(source, new JsonSerializerOptions(JsonFormat.Options) { IncludeFields = true })!;
         bridge.Apply(management);
-        var expected = WorldRecordingHeader.Create(id, view.CombatStream.StreamId, header.origin, view.RoomIds, bridge.Props, header.captureStartedAtUtc, header.environmentVersion, header.assetSet);
+        var expected = WorldRecordingHeader.Create(id, view.CombatStream.StreamId, header.origin, view.RoomIds, bridge.Props, header.captureStartedAtUtc, header.environmentVersion, header.assetSet, header.enemyPresentationVersion);
         var json = WorldJson.Write(header);
         if (json != WorldJson.Write(expected)) throw new InvalidOperationException("Recording geometry must match the session's canonical VR mission.");
         lock (gate)

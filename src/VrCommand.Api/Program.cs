@@ -84,7 +84,7 @@ app.Use(async (context, next) =>
     }
 });
 
-app.MapGet("/", () => new { service = "VR Command Center", stage = "VR mission placement preflight and Quest connection integration prototype", version = "0.19.0", layoutProfile = "vr-room-v1", worldAssetSets = new[] { VrCommand.Simulation.WorldAssetSets.Legacy, VrCommand.Simulation.WorldAssetSets.FieldProps, VrCommand.Simulation.WorldAssetSets.ServiceRifle } });
+app.MapGet("/", () => new { service = "VR Command Center", stage = "VR mission placement preflight and Quest connection integration prototype", version = "0.20.0", layoutProfile = "vr-room-v1", worldAssetSets = new[] { VrCommand.Simulation.WorldAssetSets.Legacy, VrCommand.Simulation.WorldAssetSets.FieldProps, VrCommand.Simulation.WorldAssetSets.ServiceRifle, VrCommand.Simulation.WorldAssetSets.Combatants }, enemyPresentationVersion = 1 });
 app.MapWorldRoutes();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/api/me", (HttpContext context) => Actor(context));

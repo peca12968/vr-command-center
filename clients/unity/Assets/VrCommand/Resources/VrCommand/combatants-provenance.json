@@ -1,0 +1,14 @@
+{
+  "assetSet": "combatants-v1",
+  "source": "Original fictional opponent geometry; no external models, textures or fonts",
+  "generator": "scripts/generate-combatants.py",
+  "meshBuilder": "scripts/generate-service-rifle.py",
+  "dataSha256": "39fa5e9baceec0eb71ce6a4664fc4460e7b0f212f2c58b75c7b4d75b3565fdf2",
+  "triangles": {
+    "Torso": 180,
+    "Head": 104,
+    "Leg": 60
+  },
+  "totalPerEnemy": 404,
+  "scope": "Decorative head/torso/legs, no collider, weapon, IK or tracking claims"
+}

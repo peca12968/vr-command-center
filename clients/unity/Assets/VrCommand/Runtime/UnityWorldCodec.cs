@@ -8,7 +8,7 @@ namespace VrCommand.Unity
         public string Header(WorldRecordingHeader value) => JsonUtility.ToJson(value);
         public string Packet(WorldRecordingPacket value) => JsonUtility.ToJson(value);
         public WorldRecordingHeader ReadHeader(string value) => JsonUtility.FromJson<WorldRecordingHeader>(value);
-        public WorldRecordingPacket ReadPacket(string value) => JsonUtility.FromJson<WorldRecordingPacket>(value);
+        public WorldRecordingPacket ReadPacket(string value) => WorldRecordingValidation.NormalizeLegacyPresentation(JsonUtility.FromJson<WorldRecordingPacket>(value));
         public WorldPublicationAck ReadAck(string value) => JsonUtility.FromJson<WorldPublicationAck>(value);
     }
 }

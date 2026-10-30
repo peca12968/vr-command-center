@@ -294,6 +294,7 @@ async function main() {
     await require('./environment-browser.cjs')({ page, api, tokens, directory, root, base, screenshots, check });
     await require('./layout-browser.cjs')({ context, api, tokens, base, mission, screenshots, check });
     await require('./rifle-browser.cjs')({ context, tokens, base, root, screenshots, check });
+    await require('./combatants-browser.cjs')({ context, tokens, base, root, screenshots, check });
     let releaseReplay, requestedReplay;
     const replayGate = new Promise(resolve => { releaseReplay = resolve; }), replayRequested = new Promise(resolve => { requestedReplay = resolve; });
     await page.route('**/console/examples/simulation.json', async route => { requestedReplay(); await replayGate; await route.continue(); });

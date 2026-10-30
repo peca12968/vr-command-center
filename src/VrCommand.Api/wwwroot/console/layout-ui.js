@@ -93,7 +93,7 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
         cache.set(key, report); launchReport = report; paint('launch', report); changed();
       } catch {
         if (identity !== epoch() || token !== generation || serial !== launchSerial) return;
-        launchKey = ''; launchReport = null; paint('launch', null, '場地檢查未完成。請確認已使用 API v0.19，重新整理後再試。'); changed();
+        launchKey = ''; launchReport = null; paint('launch', null, '場地檢查未完成。請確認已使用 API v0.20，重新整理後再試。'); changed();
       }
     }, 100);
   }
