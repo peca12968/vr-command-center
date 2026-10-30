@@ -1,5 +1,32 @@
 # 開發進度
 
+## 2026-10-31：修復電腦練習場入口、五人同房與關窗封存
+
+從乾淨`35bff7f`接續PC主線。實際執行舊`start-desktop-demo.py`搭本輪既有API0.27，程式在建立場次前因仍要求**0.21.0**而exit1，保留`artifacts/practice-old-launcher-failure.log`。原DESKTOP文件另仍寫0.16，兩者均已修正；沒有改回舊reader或替換5080歷史來配合。
+
+練習場改共用已驗證Venue：API0.27版本gate、Windows receipt／當前Unity source fingerprint及嵌入Transport293檔檢查、短效admission票券、同一份CSV／世界／戰鬥精確seal與原擷取UTC1.5秒門檻。明確`--runtime-root`可將全新runtime放C SSD，來源／binary／設定仍F；每程序job workers預設2，沒有當作F USB或姿態偶發的修復。Venue新增受限artifact_family，預設desktop-venue及其latest pointer保持；練習獨立desktop-demo／latest-desktop-demo-path.txt，不覆蓋五房入口。來源／API／UI及NGO版本均不新增，本輪沒有任何Unity或後端產品變更。
+
+每位client以admissionId命名，不再沿用同房號互相覆蓋；支援主玩家加0–4同伴，同房最多5個真正PC程序。正常關窗移除已停止handle，End後退場其餘自有client，只等API／server精確封存，不讓已關窗client誤觸live-child fence。控制台End、end.request、到時及Ctrl+C保留既有語意，duration為包含Pause的wall-clock上限。完成後從授權report.csv取得CSV，以標準csv／Decimal檢查玩家集合、身份／房間、全部指標、來源及stream尾界，再保存final-report.csv／SHA。舊summary頂層world／statistics／replayStatisticsMatch保留，新增stopReason／runtime／workers／finalReport；cleanup失敗仍exit非零，資料／原件保留。
+
+新增可重現的`scripts/check-desktop-practice.py`。**27項真正無圖形流程**及**9項實際視窗流程**通過，來源皆Simulation；不是5台硬體、跨機或25台測試：
+
+| 場次／結束方式 | 玩家／世界幀 | 最大來源年齡 | 結果 |
+|---|---|---|---|
+| `072944-8717ce7a`／控制台End | 5／48 | 0.145045秒 | 五席全部連線、Pause凍結tick／Resume、精確seal／CSV及14檔snapshot一致 |
+| `072953-e2edc784`／end.request | 1／43 | 0.140979秒 | 同上單人收尾，stopReason=endRequested |
+| `073000-1d385f64`／60秒到時 | 2／578 | 0.164424秒 | 同上雙人，stopReason=durationElapsed，不冒充遊戲內精確扣Pause倒數 |
+| `073121-5b3def38`／正常關窗 | 2／582 | 0.303067秒 | 真正W／Space／R與Alt+F4；stopReason=windowClosed、精確seal／CSV及14檔snapshot一致 |
+
+四場位於`artifacts/desktop-demo/20261031-<表內識別>`，活動0／pending=false／cleanup零錯誤且無剩餘追蹤程序，世界complete及回放／ledger一致。無圖形27項在`desktop-practice-checks/20261031-072944-7d9e81ba`，實際視窗9項在`20261031-073121-140758c9`。用computer-use技能的真實視窗按鍵；接受的玩家從(25,1.65,-3)移到(25,1.65,-2.95)，一次Space耗彈1／命中0／擊殺0／健康100，R完成後HUD及接受狀態30／89。普通遊戲影像／HUD已檢視，不是新的GPU探針或音效量測；射擊後一張擷取出現POSE STREAM STALE、下一張恢復，原0.5秒政策、歷史偶發根因均未改或證實修復。關窗後沒有強制停止正式服務或注入姿態／RPC。
+
+另**3項preflight反例**通過：刻意錯誤fingerprint的自有假exe／receipt在新建run／API前以exit2拒絕、第六個玩家由參數拒絕、artifact family路徑穿越在建立資料前拒絕。新加入starting階段於API／native啟動前提供本輪目錄，checker的startup觀察界線涵蓋既有API／recording／admission等待；它不是放寬來源新鮮度，未就觀察逾時重新啟動程序。
+
+**3項受控原生失敗檢查**亦通過：`20261031-073747-3ab76c77`在ready後，以launcher parent PID、exe絕對路徑、本輪config目錄及practice-client名稱確認兩個自有無圖形client，才停止其中一個。launcher實際exit1／stage failed，沒有完成summary；cleanup仍精確封存、停止全部自有程序且無錯誤，journal／snapshot保留，不能把這場當正常完成。詳見`artifacts/practice-expected-client-failure.json`。
+
+共用Venue預設路徑的**49項既有UI／native回歸**重新通過，`desktop-venue/20261031-073345-0ae94b64`，166幀／0.172879秒，動態名冊、操作員天氣／AI／觀戰／回放及CSV一致、活動0／cleanup零錯誤；client無圖形、觀戰SwiftShader。全部正常練習與此回歸的SSD runtime在writer全停後各14檔複製回F，SHA與保留原件一致；稽核只讀檔案bytes／JSON／CSV，沒有開原DB或再覆寫snapshot。摘要`artifacts/practice-validation.json`。
+
+僅Python啟動／檢查器、文件及CI語法步驟變更，`py_compile`通過；Linux CI此步不代表Windows程序曾執行。Unity fingerprint仍`792a3aaac9a7903159718a898324def8f6ba4769f908f1f46f30a6c77744c725`，Windows／Quest receipts及原識別保持，API／UI0.27、Unity0.28／code32／NGO26、rules0.8.0、header／checksum不變。沒有重跑前輪654核心／446 HTTP／43世界／58 Node／217 Chromium或102 EditMode／APK，沒有將歷史檢查計入本輪。原5080再次確認0.16／原歷史。本輪修復的是可操作入口與收尾；完整人物／動畫／聲學、複雜通路、長任務／跨機，以及頭盔／MR／VIVE／硬體／25台仍分別待驗，完整11項目標保持開發中。
+
 ## 2026-10-31：最終任務 CSV、封存界線與原生報表整合
 
 從乾淨 `95eae21` 接續PC主線，新增 [REPORTS.md](REPORTS.md) 的 `GET /api/sessions/{id}/report.csv` 與「下載最終報表 CSV」。API／UI **0.27.0**，reportVersion1；Unity仍0.28／code32／NGO26。這是最終戰鬥 ledger 匯出，包含離場玩家、原任務ID／名稱、來源、throughSequence、stream ID／接受尾界與原11項中的全部玩家統計，不依目前名冊重算。不宣稱世界錄影已完整、頭盔在線或25台通過。

@@ -34,9 +34,12 @@ def verify_player(args):
 
 
 class Venue:
-    def __init__(self, args):
+    def __init__(self, args, *, artifact_family='desktop-venue'):
+        if artifact_family not in ('desktop-venue', 'desktop-demo'):
+            raise ValueError('Unknown native fixture artifact family')
         self.args = args
-        self.directory = ROOT / 'artifacts/desktop-venue' / (time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
+        self.artifact_family = artifact_family
+        self.directory = ROOT / 'artifacts' / artifact_family / (time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
         self.directory.mkdir(parents=True)
         runtime_root = getattr(args, 'runtime_root', None)
         self.runtime_directory = self.directory if runtime_root is None else runtime_root.resolve() / self.directory.name
@@ -54,7 +57,7 @@ class Venue:
 
     def stage(self, stage, **extra):
         self.save('stage.json', {'stage': stage, **extra})
-        (ROOT / 'artifacts/latest-desktop-venue-path.txt').write_text(str(self.directory), encoding='utf-8')
+        (ROOT / 'artifacts' / ('latest-' + self.artifact_family + '-path.txt')).write_text(str(self.directory), encoding='utf-8')
         print(json.dumps({'stage': stage, 'directory': str(self.directory), **extra}), flush=True)
 
     def request(self, route, body=None, *, role='Master', expected=200, admission=None, optional=False):
