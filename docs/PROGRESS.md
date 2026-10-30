@@ -25,6 +25,8 @@ locked restore、Release build **0警告／錯誤**，**612核心、403 HTTP、4
 
 Quest真正Editor exit0，receipt UTC2026-10-30T21:34:56.0225326Z，與Desktop相同fingerprint及原scene／prefab ID；APK46,285,274 bytes、SHA `c1df68caf967e819c1ae0b9f9ca1dcd958c55cab9185419de386a81f2d244351`，v2簽章、min32／target35、code31／bundle0.27.0與六個ELF64 AArch64庫含libil2cpp核對通過。這次APK為Unity原始建置，沒有手動重封裝／重簽，未安裝頭盔。三組venue及admission共38個原生／API log未見指定Exception／NullReference／MissingReference／ObjectDisposed／IndexOutOfRange／Shader error；完整本機證據為artifacts/combat-audio-validation.json。本機原5080仍原API0.16／原歷史，未被測試替換。完整11項長期目標持續開發；玩家全身、完整動畫／聲學、複雜場地、原偶發姿態原因、長任務／跨機，以及Quest／VIVE／MR／廠商硬體／25台仍分別待驗。
 
+功能提交 `32725d1467b2e8990b793e9d90a33a416a31daef` 已推送main並核對遠端，GitHub #1已更新且讀回open／2925字與送出本文完全一致；原11項範圍與63864字歷史封存留言連結保留。[CI run41132393727](https://github.com/peca12968/vr-command-center/actions/runs/41132393727)／check124326302315實際failure、steps=null，annotation明示帳戶付款失敗或支出上限，工作未開始，不能稱雲端測試通過；未改帳務或重跑。另有ubuntu-latest遷移通知，不影響本輪本機結果。
+
 ## 2026-10-31：兩端姿態時序與受控丟包校準
 
 前輪玩家射擊效果已提交，屬實際進度；本輪從乾淨 `bcdeed9` 接續無頭盔PC主線，追查偶發姿態過期。新增明確選用的NativePoseTrace，分開記錄owner的RPC呼叫、server RPC接收／格式／節流／接受或拒絕、發布時的參戰轉換，以及>100ms主線程空窗。WorldCapture／WorldJournal／CombatJournal／ManagementApply／WorldPublish與玩家GPU讀回／PNG編碼／寫檔各自量測，使用Stopwatch及UTC ticks保留同主機階段時間。規範及操作見 [POSE_TIMING.md](POSE_TIMING.md)。
