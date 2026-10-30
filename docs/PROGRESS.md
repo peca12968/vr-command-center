@@ -27,6 +27,8 @@
 
 僅Python啟動／檢查器、文件及CI語法步驟變更，`py_compile`通過；Linux CI此步不代表Windows程序曾執行。Unity fingerprint仍`792a3aaac9a7903159718a898324def8f6ba4769f908f1f46f30a6c77744c725`，Windows／Quest receipts及原識別保持，API／UI0.27、Unity0.28／code32／NGO26、rules0.8.0、header／checksum不變。沒有重跑前輪654核心／446 HTTP／43世界／58 Node／217 Chromium或102 EditMode／APK，沒有將歷史檢查計入本輪。原5080再次確認0.16／原歷史。本輪修復的是可操作入口與收尾；完整人物／動畫／聲學、複雜通路、長任務／跨機，以及頭盔／MR／VIVE／硬體／25台仍分別待驗，完整11項目標保持開發中。
 
+功能提交`e397b443254ec5ccaad16150dcfc706a2463d94f`已推送main並核對遠端一致；GitHub #1仍open，更新後獨立讀回3152字本文一致，原11項及歷史封存連結保留。[功能提交CI run41146227105](https://github.com/peca12968/vr-command-center/actions/runs/41146227105)／check124371855173實際failure、steps=null，annotation明示付款失敗或支出上限，工作未開始，沒有雲端執行結果；未改帳務或重跑。
+
 ## 2026-10-31：最終任務 CSV、封存界線與原生報表整合
 
 從乾淨 `95eae21` 接續PC主線，新增 [REPORTS.md](REPORTS.md) 的 `GET /api/sessions/{id}/report.csv` 與「下載最終報表 CSV」。API／UI **0.27.0**，reportVersion1；Unity仍0.28／code32／NGO26。這是最終戰鬥 ledger 匯出，包含離場玩家、原任務ID／名稱、來源、throughSequence、stream ID／接受尾界與原11項中的全部玩家統計，不依目前名冊重算。不宣稱世界錄影已完整、頭盔在線或25台通過。
