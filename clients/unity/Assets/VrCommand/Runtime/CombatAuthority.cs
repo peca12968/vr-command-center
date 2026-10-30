@@ -77,7 +77,7 @@ namespace VrCommand.Unity
             if (Outbox == null || management == null || session.World.Phase != WorldPhase.Preparing) throw new InvalidOperationException("Initialize a preparing world and combat source first.");
             recordingStart = Time.realtimeSinceStartupAsDouble;
             var header = WorldRecordingHeader.Create(Guid.Parse(management.id), Outbox.StreamId, Outbox.Origin, management.roomIds, session.Props,
-                DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), assetSet: WorldAssetSets.CombatEffects, enemyPresentationVersion: EnemyPresentation.Version, weaponPresentationVersion: WeaponPresentation.Version, enemyFireVersion: EnemyFirePresentation.Version);
+                DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), assetSet: WorldAssetSets.PlayerFire, enemyPresentationVersion: EnemyPresentation.Version, weaponPresentationVersion: WeaponPresentation.Version, enemyFireVersion: EnemyFirePresentation.Version, playerFireVersion: PlayerFirePresentation.Version);
             Recording = WorldOutbox.Create(path, header, new UnityWorldCodec());
             if (!CaptureWorld(true)) throw new InvalidOperationException("Initial world frame could not be saved.");
         }
@@ -91,7 +91,7 @@ namespace VrCommand.Unity
             {
                 var packet = WorldRecordingPacket.Capture(session.World, Recording.LastSequence + 1,
                     Recording.LastSequence == 0 ? 0 : (long)((now - recordingStart) * 1000), observedSequence, Outbox.LastSequence,
-                    Recording.ThroughWorldSequence, RecordedRigFor, management.environment.weather, management.environment.lightning, managementSuspended, EnemyPresentation.Version, WeaponPresentation.Version, EnemyFirePresentation.Version);
+                    Recording.ThroughWorldSequence, RecordedRigFor, management.environment.weather, management.environment.lightning, managementSuspended, EnemyPresentation.Version, WeaponPresentation.Version, EnemyFirePresentation.Version, PlayerFirePresentation.Version);
                 Recording.Append(packet); nextRecording = now + .1;
                 if (session.World.Phase == WorldPhase.Ended) Recording.Finish();
                 return true;
@@ -266,7 +266,7 @@ namespace VrCommand.Unity
             GetComponent<SceneAuthority>()?.PublishTick(frame.Tick, frame.Phase.ToString());
             var actors = new List<CombatActorState>();
             foreach (var player in frame.Players) actors.Add(new CombatActorState { id = player.Id.ToString("D"), room = player.RoomId, position = Vector(player.Head),
-                health = player.Health, magazine = player.Magazine, reserve = player.Reserve, connected = player.Connected, reloading = player.Reloading, presentationTick = frame.Tick, reloadUntilTick = player.ReloadUntilTick });
+                health = player.Health, magazine = player.Magazine, reserve = player.Reserve, connected = player.Connected, reloading = player.Reloading, presentationTick = frame.Tick, reloadUntilTick = player.ReloadUntilTick, fireSequence=player.Fire.Sequence,fireTickPlusOne=player.Fire.TickPlusOne,fireOrigin=Vector(player.Fire.Origin),fireDirection=Vector(player.Fire.Direction) });
             foreach (var npc in frame.Enemies) actors.Add(new CombatActorState { id = npc.Id.ToString("D"), room = npc.RoomId, position = Vector(npc.Feet), health = npc.Health, enemy = true, connected = true,
                 facing = Vector(npc.Forward), walking = npc.Walking, presentationTick = frame.Tick,fireSequence=npc.Fire.Sequence,fireTickPlusOne=npc.Fire.TickPlusOne,fireOrigin=Vector(npc.Fire.Origin),fireDirection=Vector(npc.Fire.Direction) });
             for (var index = 0; index < actors.Count; index++)

@@ -1,3 +1,4 @@
+using VrCommand.Simulation;
 using System;
 using System.Collections.Generic;
 using Unity.Netcode;
@@ -61,8 +62,8 @@ namespace VrCommand.Unity
         private bool desktopFire, desktopReload, windowKeyFallbackLogged;
         private Vector2 windowLook, windowMovement;
         private readonly TacticalHud tacticalHud = new TacticalHud();
-        private AnimatedRifleModels rifleModels;
-        private AnimatedRifleView actionRifle;
+        private FiringRifleModels rifleModels;
+        private FiringRifleView firingRifle;
         private GameObject rifle;
 
         public override void OnNetworkSpawn()
@@ -74,10 +75,10 @@ namespace VrCommand.Unity
             if (oldWeapon != null) oldWeapon.gameObject.SetActive(false);
             var pointerMarker = rightHand.GetComponent<Renderer>();
             if (pointerMarker != null) pointerMarker.enabled = false;
-            rifleModels = new AnimatedRifleModels(); actionRifle = rifleModels.Create(); rifle = actionRifle.Root;
+            rifleModels = new FiringRifleModels(); firingRifle = rifleModels.Create(); rifle = firingRifle.Root;
             rifle.transform.SetParent(transform, false); ServiceRifleModels.Align(rifle.transform, rightHand);
             var activeVisuals = new List<Renderer>(GetComponentsInChildren<Renderer>());
-            activeVisuals.Remove(pointerMarker); visuals = activeVisuals.ToArray();
+            activeVisuals.Remove(pointerMarker);activeVisuals.Remove(firingRifle.HiddenBody); visuals = activeVisuals.ToArray();
             if (IsServer)
             {
                 var admission = VenueBootstrap.Instance?.Admission(OwnerClientId);
@@ -118,6 +119,7 @@ namespace VrCommand.Unity
             {
                 head.localPosition = new Vector3(0, 1.65f, 0);
                 InitializeDesktopPose();
+                NativePlayerFireProbe.Install(head.gameObject);
                 NativeEnemyFireProbe.Install(head.gameObject);
                 NativeWeatherProbe.Install(head.gameObject);
                 Debug.Log("Desktop preview input devices: keyboard=" + (Keyboard.current != null) + ", mouse=" + (Mouse.current != null));
@@ -206,11 +208,21 @@ namespace VrCommand.Unity
             if (!IsSpawned || rifle == null) return;
             ServiceRifleModels.Align(rifle.transform,rightHand);
             if (CombatAuthority.Instance!=null && CombatAuthority.Instance.Player(PlayerId.Value.ToString(),out var body))
-                actionRifle.Apply(body.presentationTick,body.health,body.connected,IsOwner?!tracked:Pose.Value.source==1,body.reloading,body.reloadUntilTick);
+                firingRifle.Apply(body.presentationTick,body.health,body.connected,IsOwner?!tracked:Pose.Value.source==1,body.reloading,body.reloadUntilTick,
+                    new PlayerFireState(body.fireSequence,body.fireTickPlusOne,new Vec3(body.fireOrigin.x,body.fireOrigin.y,body.fireOrigin.z),new Vec3(body.fireDirection.x,body.fireDirection.y,body.fireDirection.z)));
             // Desktop gloves are cosmetic siblings; never move the tracked joints.
             var marker=leftHand.GetComponent<Renderer>();if(marker!=null && (IsOwner?!tracked:Pose.Value.source==1))marker.enabled=false;
         }
 
+        internal PlayerFireObservation ObservePlayerFire()
+        {
+            if(!IsSpawned || !IsOwner || firingRifle==null)return null;
+            var fire=firingRifle.AppliedFire;
+            return new PlayerFireObservation{id=PlayerId.Value.ToString(),tick=firingRifle.AppliedTick,fireSequence=fire.Sequence,fireTickPlusOne=fire.TickPlusOne,
+                acceptedOrigin=new Vector3(fire.Origin.X,fire.Origin.Y,fire.Origin.Z),acceptedDirection=new Vector3(fire.Direction.X,fire.Direction.Y,fire.Direction.Z),
+                visible=firingRifle.Flash.gameObject.activeInHierarchy,recoil=-firingRifle.RecoilVisual.localPosition.z,gun=rifle.transform.position,
+                pointer=rightHand.position,pointerDirection=rightHand.forward,flashOrigin=firingRifle.Flash.position,flashDirection=firingRifle.Flash.forward};
+        }
         [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner, Delivery = RpcDelivery.Unreliable)]
         private void SubmitPoseRpc(AvatarPose pose)
         {
@@ -339,6 +351,7 @@ namespace VrCommand.Unity
             leftPosition?.Dispose(); rightPosition?.Dispose(); leftRotation?.Dispose(); rightRotation?.Dispose(); trigger?.Dispose(); reload?.Dispose();
             headTracking?.Dispose(); leftTracking?.Dispose(); rightTracking?.Dispose();
             headTracked?.Dispose(); leftTracked?.Dispose(); rightTracked?.Dispose();
+            firingRifle?.Dispose();firingRifle=null;
             if (rifle != null) Destroy(rifle); rifle = null;
             rifleModels?.Dispose(); rifleModels = null;
         }

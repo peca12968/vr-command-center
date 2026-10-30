@@ -14,6 +14,7 @@ namespace VrCommand.Simulation
             internal Guid Id; internal int Room; internal Vec3 Head, Muzzle, Forward;
             internal int Health = 100, Magazine = MagazineSize, Reserve = 90;
             internal long NextShot, ReloadUntil;
+            internal PlayerFireState Fire;
             internal bool Connected = true;
         }
         private sealed class Enemy
@@ -139,6 +140,8 @@ namespace VrCommand.Simulation
             var hit = Cast(player.Muzzle, player.Forward, 40, player.Id, null);
             player.Magazine--; player.NextShot = TickNumber + 4;
             Emit(WorldEventKind.ShotFired, playerId, shotId, origin: player.Muzzle, direction: player.Forward.Normalized(), distance: hit.Distance, hit: hit.Kind, target: hit.Id);
+            var accepted=events[events.Count-1];
+            player.Fire=new PlayerFireState(accepted.Sequence,accepted.Tick+1,accepted.Origin??throw new InvalidOperationException("Accepted player shot has no origin."),accepted.Direction??throw new InvalidOperationException("Accepted player shot has no direction."));
             var eliminated = false;
             if (hit.Kind == HitKind.Enemy)
             {
@@ -250,7 +253,7 @@ namespace VrCommand.Simulation
             if (after < 0 || limit < 1 || limit > 500) throw new ArgumentException("Invalid world event page.");
             var start = (int)Math.Min(after, events.Count); return events.GetRange(start, Math.Min(limit, events.Count - start)).ToArray();
         }
-        private static PlayerFrame Frame(Player p) => new PlayerFrame(p.Id, p.Room, p.Head, p.Muzzle, p.Forward, p.Health, p.Magazine, p.Reserve, p.ReloadUntil != 0, p.Connected, p.ReloadUntil);
+        private static PlayerFrame Frame(Player p) => new PlayerFrame(p.Id, p.Room, p.Head, p.Muzzle, p.Forward, p.Health, p.Magazine, p.Reserve, p.ReloadUntil != 0, p.Connected, p.ReloadUntil, p.Fire);
         public PlayerFrame PlayerSnapshot(Guid id) => Frame(FindPlayer(id));
         public WorldFrame Snapshot() => new WorldFrame(TickNumber, Phase, events.Count, Behavior, AutoAttack, Visibility, Night,
             players.Select(Frame).ToArray(),

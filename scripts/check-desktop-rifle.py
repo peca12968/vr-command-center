@@ -50,7 +50,7 @@ def run(v):
     sealed = v.seal(entry); stats = next(p for p in sealed['statistics']['players'] if p['playerId'] == player)
     assert stats['ammoUsed'] == 2 and stats['shotsHit'] == 2 and stats['kills'] == 1 and stats['accuracyPercent'] == 100
     assert stats['damageTaken'] == stats['hitsReceived'] == 0 and stats['health'] == 100
-    assert sealed['world']['header']['assetSet'] == 'combat-effects-v1'
+    assert sealed['world']['header']['assetSet'] == 'player-fire-v1'
     v.save('rifle-result.json', {'source': 'Actual normal Windows player keyboard / native GPU review; Simulation', 'headsets': 0,
         'baseline': baseline, 'aimed': aimed, 'after': after, 'statistics': stats, 'replayStatisticsMatch': sealed['replayStatisticsMatch'],
         'poseOrCombatInjected': False, 'diagnosticProbeEnabled': False})

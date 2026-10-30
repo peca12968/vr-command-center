@@ -1,5 +1,9 @@
 # 開發指引
 
+2026-10-31 玩家射擊效果見 docs/PLAYER_FIRE.md：API／UI0.24、Unity0.26／code29／NGO24，82真正EditMode；雙平台及PC結果以最新PROGRESS／receipt為準。player-fire-v1固定組合pin，保留七個舊profile；header playerFireVersion缺失0／新來源1，玩家fire欄位只由接受ShotFired的sequence／tick+1／世界射線產生，逐packet核對。age0–2閃光、14／22／12／4mm子槍身後座，不移pointer／根槍口／手套／Tracked資料，原rules0.8.0與命中不變。Unity閃光脫離avatar父層以免before-render追蹤移動歷史射線，view銷毀自己的flash、模型最後lease才釋放共用資源。新來源／API／UI／全部遊戲程序一起更新，Prepare重用識別，不降reader。--vr-player-fire-probe僅明確Windows Development／untracked可見client，全新絕對目錄、300秒／8圖／無PCM或輸入。diagnostic complete與真正End／精確seal分開。PC檢查保留短暫pose失聯樣本，實際輸入階段須等待有效Simulated rig，不能放寬來源1.5秒門檻。SQLite稽核在額外副本執行，mode=ro仍可能重建SHM；不要因此改原runtime／封存副本。
+
+GitHub #1本文接近長度上限，原63864字全文已精確封存於 https://github.com/peca12968/vr-command-center/issues/1#issuecomment-6532297157 。之後本文維持目前目標、最新交付與ROADMAP／PROGRESS連結，舊進度留在文件／封存留言，不遞迴貼入全部舊本文；更新前先讀回當前狀態，完整目標仍open／開發中。
+
 2026-10-31 敵軍射擊效果見 docs/ENEMY_FIRE.md：API／UI0.23、Unity0.25／code28／NGO23，76真正EditMode；雙平台／PC以最新PROGRESS／receipt為準。combat-effects-v1固定32面脈衝pin，沿用728面NPC、保留舊六profile。header enemyFireVersion缺失0／新來源1，hasFireState及fireSequence／fireTickPlusOne／fireOrigin／fireDirection逐EnemyShot核對，不能用目前NPC位置／朝向補造歷史射線或改rules0.8.0。閃光在保存世界射線、後座只移槍身子Renderer，authority Gun／手套／Tracked資料不動。新wire、來源／API／UI／全部遊戲端一起更新，Prepare重用原識別，不可降舊reader。--vr-enemy-fire-probe僅明確Windows Development／untracked可見client全新目錄，最多8圖／180秒，無PCM／輸入；finish.request僅結束收集，report.complete不代表任務End，另看observedEnd／stopReason及伺服器精確seal。不要以被End撤銷前沒收到Ended畫面推定遊戲未封存。
 
 2026-10-31 敵軍持槍見 docs/ARMED_ENEMIES.md：API／UI0.22、Unity0.24／code27／NGO仍22，70真正EditMode；雙平台／PC結果以最新PROGRESS與receipt為準。armed-combatants-v1固定728面／八Mesh／一材質pin，保留舊五profile。要求enemyPresentationVersion1＋weaponPresentationVersion1，不增wire欄位。裝飾性兩節臂upper.22／lower.25；槍口仍feet+(0,1.4,0)，正規化forward後用完整pitch，不搬動feet／Tracked資料、不改rules0.8.0或Collider。新NPC本地位置不插值，使用同一actor row避免槍口偏離保存位置；10Hz階梯感仍待改善。原始binary／舊模型不改；閃光需另存射擊當下原點／方向及事件，不能拿目前姿態補造。原5080不換新版資料／DLL。

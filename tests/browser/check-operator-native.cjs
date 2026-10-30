@@ -116,7 +116,7 @@ async function main() {
     await page.locator('#tab-world').click(); await page.locator('#world-refresh').click(); await until(async () => (await page.locator('#world-recording option').count()) > 0, 'native recording in console');
     await page.locator('#world-recording').selectOption(session); await page.locator('#world-live').click();
     await until(async () => (await page.locator('#world-environment').innerText()).includes('Storm') || (await page.locator('#world-environment').innerText()).includes('暴風雨'), 'native world observed');
-    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'combat-effects-v1'
+    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'player-fire-v1'
       && Number(await page.locator('#world-canvas').getAttribute('data-prop-triangles')) === 642,
       'Actual native header selects the same 256-triangle sandbags and 386-triangle drum in live observation');
     check(await page.locator('#world-canvas').getAttribute('data-rifle-triangles') === '264'
@@ -183,7 +183,7 @@ async function main() {
     await until(async () => (await page.locator('#world-timeline').inputValue()) === (await page.locator('#world-timeline').getAttribute('max')), 'replay final seek');
     const finalInfo = await api('/sessions/' + session + '/world');
     await until(async () => (await page.locator('#world-time').innerText()).includes('幀 ' + finalInfo.acceptedSequence), 'rendered final replay frame');
-    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'combat-effects-v1'
+    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'player-fire-v1'
       && Number(await page.locator('#world-canvas').getAttribute('data-prop-triangles')) === 642,
       'Sealed native replay retains its saved field-prop appearance profile after camera recall / final seek');
     check(await page.locator('#world-canvas').getAttribute('data-rifle-triangles') === '264'

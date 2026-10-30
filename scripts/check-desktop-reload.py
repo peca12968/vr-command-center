@@ -50,7 +50,7 @@ def run(v):
     v.wait(lambda:observe('complete-review') and (v.directory/'complete.done').exists(),600,'actual complete review')
     sealed=v.seal(entry);stats=next(p for p in sealed['statistics']['players'] if p['playerId']==own['id'])
     assert stats['ammoUsed']==1 and stats['shotsHit']==stats['kills']==stats['damageTaken']==0 and stats['health']==100
-    assert sealed['world']['header']['assetSet']=='combat-effects-v1' and sealed['world']['header']['weaponPresentationVersion']==1
+    assert sealed['world']['header']['assetSet']=='player-fire-v1' and sealed['world']['header']['weaponPresentationVersion']==1
     report=v.wait(lambda:json.loads((probe/'report.json').read_text(encoding='utf-8-sig')) if (probe/'report.json').exists() else None,10,'native HUD GPU report')
     assert report['mode']=='hud' and report['complete'] and report['audioSamples']==report['callbackCount']==0 and not report['error']
     v.save('reload-result.json',{'source':'Actual Windows keyboard / own native HUD GPU probe; Simulation','headsets':0,'baseline':baseline,'active':active,'paused':paused,'still':still,

@@ -21,7 +21,7 @@ internal static class WorldSourceChecks
         Refresh();
         var header = WorldRecordingHeader.Create(id, combat.StreamId, "Simulation", [3], bridge.Props);
         var legacy = WorldRecordingHeader.Create(Guid.NewGuid(), Guid.NewGuid(), "Simulation", [3], [], environmentVersion: 0);
-        var legacyJson = codec.Header(legacy).Replace("\"environmentVersion\":0,", "").Replace("\"enemyPresentationVersion\":0,", "").Replace("\"weaponPresentationVersion\":0,", "").Replace("\"enemyFireVersion\":0,", "");
+        var legacyJson = codec.Header(legacy).Replace("\"environmentVersion\":0,", "").Replace("\"enemyPresentationVersion\":0,", "").Replace("\"weaponPresentationVersion\":0,", "").Replace("\"enemyFireVersion\":0,", "").Replace("\"playerFireVersion\":0,", "");
         var legacyPath = Path.Combine(directory, "legacy-environment.worldlog");
         using (var legacyJournal = new FileWorldJournal(legacyPath, true))
             legacyJournal.Append(new byte[] { 0 }.Concat(System.Text.Encoding.UTF8.GetBytes(legacyJson)).ToArray());

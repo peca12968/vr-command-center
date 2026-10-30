@@ -73,7 +73,7 @@ def run(v):
     assert final['stopReason']=='Explicit local diagnostic stop' and not final['observedEnd']
     sealed=v.seal(entry);stats=next(p for p in sealed['statistics']['players'] if p['playerId']==own['id'])
     assert 2<=stats['hitsReceived']<5 and stats['damageTaken']==stats['hitsReceived']*20 and stats['health']==100-stats['damageTaken'] and stats['ammoUsed']==0
-    assert sealed['world']['header']['assetSet']=='combat-effects-v1' and sealed['world']['header']['enemyFireVersion']==1
+    assert sealed['world']['header']['assetSet']=='player-fire-v1' and sealed['world']['header']['enemyFireVersion']==1
     assert final['audioSamples']==final['callbackCount']==0 and final['source']=='NativeWindowsFramebuffer'
     v.save('fire-result.json',{'statistics':stats,'replayStatisticsMatch':sealed['replayStatisticsMatch'],'probe':final,'poseOrCombatInjected':False})
     v.evidence.extend(['Actual AI accepted shots render on their historical muzzle/direction with nonzero recoil','Native Pause, Patrol, settled effect retain the original accepted shot','GPU PNGs reviewed; diagnostic records no PCM or input','Final native replay and twenty-point damage statistics seal exactly'])

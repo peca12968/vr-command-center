@@ -91,7 +91,7 @@ public sealed partial class WorldRecordings : IDisposable
         var source = JsonSerializer.Serialize(view with { State = SessionState.Preparing }, JsonFormat.Options);
         var management = JsonSerializer.Deserialize<ManagementSnapshot>(source, new JsonSerializerOptions(JsonFormat.Options) { IncludeFields = true })!;
         bridge.Apply(management);
-        var expected = WorldRecordingHeader.Create(id, view.CombatStream.StreamId, header.origin, view.RoomIds, bridge.Props, header.captureStartedAtUtc, header.environmentVersion, header.assetSet, header.enemyPresentationVersion, header.weaponPresentationVersion, header.enemyFireVersion);
+        var expected = WorldRecordingHeader.Create(id, view.CombatStream.StreamId, header.origin, view.RoomIds, bridge.Props, header.captureStartedAtUtc, header.environmentVersion, header.assetSet, header.enemyPresentationVersion, header.weaponPresentationVersion, header.enemyFireVersion, header.playerFireVersion);
         var json = WorldJson.Write(header);
         if (json != WorldJson.Write(expected)) throw new InvalidOperationException("Recording geometry must match the session's canonical VR mission.");
         lock (gate)

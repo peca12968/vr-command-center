@@ -1,0 +1,10 @@
+{
+  "assetSet": "player-fire-v1",
+  "source": "Original deterministic player presentation; reuses frozen rifle/gloves/muzzle pulse; no external assets",
+  "generator": "scripts/generate-player-fire.py",
+  "dataSha256": "187c7df5346419edadafa1cc74a04db0763dda268650e066dbbcaf8304e60ff0",
+  "rifleTriangles": 264,
+  "gloveTriangles": 240,
+  "pulseTriangles": 32,
+  "scope": "Cosmetic child rifle/magazine recoil and saved-world flash only; no tracked-joint, gameplay, audio, light or collider change"
+}

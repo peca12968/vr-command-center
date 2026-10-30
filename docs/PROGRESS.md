@@ -1,5 +1,33 @@
 # 開發進度
 
+## 2026-10-31：玩家接受射線、原生閃光與槍身後座
+
+從乾淨 `141652d` 接續使用者「目前沒有頭盔，先繼續電腦端」。新增 `player-fire-v1`，組合固定264面玩家步槍、原合成手套、728面NPC與32面閃光；玩家脈衝倍率1.2，沒有外部素材。組合資料SHA `187c7df5346419edadafa1cc74a04db0763dda268650e066dbbcaf8304e60ff0` 固定，生成器先驗舊pin，原七profile／網格／色彩／reader完整保留。規範見 [PLAYER_FIRE.md](PLAYER_FIRE.md)。
+
+API／UI **0.24.0**、Unity **0.26.0／code29／NGO24**。新header playerFireVersion1，缺失仍0，新profile同時要求enemy1／weapon1／enemyFire1；NGO既有原子fire欄位加入玩家語意，全部來源／API／UI／遊戲程序一起更新，不能降reader。envelope6、mission schema1、world schema1、票券2、environmentVersion1及rules0.8.0保持，binary原header／payload／checksum不重寫。
+
+只在實際接受ShotFired後保存sequence、tick+1、原點及方向；去重／拒絕快速射擊不重啟效果或多扣彈藥。逐packet以上次狀態及本次事件核對最後一發，原合法muzzle範圍保持。閃光age0–2（0.15秒）跨正常10Hz發布，槍身後退依age0–3為14／22／12／4mm，age4復位。暫停／結束／seek只依保存tick，死亡／離線隱藏、換彈停止槍身後退但不抹去接受閃光。沒有聲音、Light、Collider或規則變更。
+
+只把借用原Mesh的槍身Renderer及原彈匣放在後座子物件；原根Renderer執行時停用並排除通用顯示列表，真正根槍口／pointer／握點／Tracked資料不移動。Unity閃光脫離avatar父層，避免before-render追蹤更新挪動歷史射線。view銷毀自己的flash，最後model lease才釋放共享網格／材質，沒有重建prefab。
+
+locked restore、Release build0警告／錯誤，**597核心、403 HTTP、43世界、49 Node／189 Chromium**通過。涵蓋tick0接受、去重、拒絕快速連射、同tick換彈、原邊界、事件射線不可改寫、SQLite非零玩家射擊重開、legacy缺欄位及原binary。C#／JS向量、實際WebGL非零後座／歷史閃光／直接seek及最終統計一致，瀏覽器為SwiftShader。真正Prepare、**82 EditMode（0 failed／skipped）**及最終Desktop成功；未RebuildArena，原scene／prefab ID保持。Desktop receipt UTC2026-10-30T19:52:40.1413652Z，fingerprint `9c9d9539bf209f2f66a4ac23483e8e67ab9cbcaf8ef2022de30da0208f0adef7`。完整本機證據在artifacts/player-fire-validation.json。
+
+首次Prepare漏引VrCommand.Simulation造成CS0246，補直接using後通過，失敗log保留。早期暫用2tick脈衝，在發布取樣覆核後於未發布profile定為3tick並固定最終pin；重新生成、82 Tests、Desktop與完整核心／Node／瀏覽器皆用最終3tick來源。HTTP首輪在競爭writer程序10秒退出檢查逾時，接著cp950輸出失敗；第二輪在無效憑證程序10秒退出逾時且temp log清理遭鎖。兩份失敗log保留，未放寬timeout；第三輪以UTF-8完整403通過。未證實逾時的根因，不能歸結為已修復。
+
+新NativePlayerFireProbe僅明確Windows Development／可見untracked client／全新絕對目錄，300秒／8圖／每圖900萬像素上限，無PCM／OS擷取／輸入。首場 `035311-ec9f5ddb` 白天實際Space扣彈並擷取閃光後，觀察到frame338／tick592短暫connected=false／rig=None，檢查器assert中止；frame340／tick597已恢復。cleanup正常、原場資料保留，不列全通過。檢查器改保留此類樣本，實際輸入階段只接受有效Simulated rig，不改遊戲或1.5秒新鮮度門檻，原暫時失聯根因仍待。
+
+| 最終PC場（前綴20261031） | 幀／最大來源年齡 | 證據 |
+|---|---|---|
+| 035502-2fb88aa3 | 779／0.301179秒 | **4項真正按鍵／GPU流程**：Space白天與夜間各一次，兩張實際脈衝在tick740／909、後座均22mm；接受事件tick739／908，SQLite event packet398／487，射線float32精確相符。GPU時鐘與10Hz存幀不必同tick。Right一次後HUD方位003°、瞄準改變但保存射線不改；真正根仍pointer前0.15m。Pause在770／1120，效果已歸零，沒有峰值暫停GPU宣稱；峰值Pause由核心與Unity測試證明。四張GPU圖已檢視；complete=true／observedEnd=false／明確local diagnostic stop，audioSamples／callbackCount皆0。遊戲另精確seal，耗彈2／命中0／擊殺0／中彈0／健康100，回放一致 |
+| 035635-194329c4 | 153／0.159144秒 | **45 UI／native，client無圖形**：任務保存／配置、動態名冊、天氣／AI／Patrol／Pause／End、鏡頭及封存回放，含真正NPC接受射線與WebGL效果核對。沒有本輪原生雨夜／雷聲人工檢視 |
+| 035735-8b13eb6c | 七場580／0.192192秒 | 五個真正server／每房一個client隔離、單房End／重用、全部seal後Linked、舊票／升權拒絕及七個stream精確封存，新profile／playerFire1；非25台負載 |
+
+三組均Simulation／Simulated、pendingTelemetry=false、活動0、cleanup零錯誤；writer停止後21／14／26檔回F並與保留SSD原件逐檔SHA相同。首次SQLite唯讀稽核重建了封存副本的worlds.db-shm（mode=ro仍可寫派生index）；已保留該派生SHM於額外artifact並從未變動的原件恢復，重新核對全部檔案一致。正式數值稽核改在另一份完整副本執行，前後再次確認原件及封存SHA不變。未重寫DB／WAL／journal／事件。程式及binary仍F、runtime明確SSD，source age非RTT／FPS，不能稱F USB全資料或25台通過。
+
+另 `unity-admission/20261031-035827-e474b2ca` **8項無圖形**入場／撤銷／transport釋放／同admission重連通過，365幀、精確seal／回放一致與活動0。四組38個log未見指定NullReference／MissingReference／ObjectDisposed／IndexOutOfRange或Shader error。本輪未重跑真正按鍵擊殺／R換彈、互動走離出生點的重連、完整碰撞、GPU閃電或DSP／聽感；較窄SDK未另跑。原5080唯讀health ok，仍API0.16／原歷史，沒有替換DLL／資料／憑證。
+
+Quest ARM64／IL2CPP亦exit0，receipt UTC2026-10-30T20:06:54.3684764Z，來源fingerprint與原scene／prefab ID和最終Desktop完全一致。APK46,228,012 bytes、SHA `6651622b5695d968f7222fa306a501b3cefb41330864050090abe8ab5cea1e71`，簽章v2、min32／target35、code29／bundle0.26及六個ELF64 AArch64庫含libil2cpp核對通過。沒有頭盔安裝。完整11項長期目標保持開發中；玩家／敵軍射擊音效、全身人物、完整動畫、原暫時失聯原因與跨機仍需推進，Quest／VIVE實機、MR、廠商硬體及25台須分別驗收。
+
 ## 2026-10-31：按接受射線還原敵軍閃光與槍身後座
 
 從乾淨 `d8ee348` 接續無頭盔的PC主線。新增 `combat-effects-v1`，沿用固定728面持槍NPC／玩家換彈／掩體，再加原創32面封閉星形脈衝，每NPC最大760面。資料SHA `b8fe83d66781c2f65816d6873cc08ba01314418d42777a55e9eea2d1ee34a9bb` 固定，生成器先驗舊pin、Unity／瀏覽器共源；原六profile、原網格／色彩及reader保留，沒有外部素材。新unlit Shader保留instancing／stereo宏，不加Light或音效。規範見 [ENEMY_FIRE.md](ENEMY_FIRE.md)。
