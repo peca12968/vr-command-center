@@ -6,8 +6,8 @@ namespace VrCommand.Simulation
 {
     public static class WorldAssetSets
     {
-        public const string Legacy = "primitives-v1", FieldProps = "field-props-v1", ServiceRifle = "service-rifle-v1", Combatants = "combatants-v1", WeaponActions = "weapon-actions-v1", ArmedCombatants = "armed-combatants-v1";
-        public static bool Supported(string value) => value == Legacy || value == FieldProps || value == ServiceRifle || value == Combatants || value == WeaponActions || value == ArmedCombatants;
+        public const string Legacy = "primitives-v1", FieldProps = "field-props-v1", ServiceRifle = "service-rifle-v1", Combatants = "combatants-v1", WeaponActions = "weapon-actions-v1", ArmedCombatants = "armed-combatants-v1", CombatEffects = "combat-effects-v1";
+        public static bool Supported(string value) => value == Legacy || value == FieldProps || value == ServiceRifle || value == Combatants || value == WeaponActions || value == ArmedCombatants || value == CombatEffects;
     }
     [Serializable] public sealed class RecordedVector
     {
@@ -36,13 +36,14 @@ namespace VrCommand.Simulation
         public int environmentVersion;
         public int enemyPresentationVersion;
         public int weaponPresentationVersion;
+        public int enemyFireVersion;
         public string sessionId = "", streamId = "", origin = "Simulation", rulesVersion = "0.8.0", assetSet = "primitives-v1", calibration = "uncalibrated-vr";
         public string captureStartedAtUtc = "";
         public int[] roomIds = new int[0];
         public RecordedProp[] props = new RecordedProp[0];
-        public static WorldRecordingHeader Create(Guid session, Guid stream, string origin, int[] rooms, WorldProp[] geometry, string captureStartedAtUtc = "", int environmentVersion = EnvironmentPresentation.Version, string assetSet = WorldAssetSets.Legacy, int enemyPresentationVersion = 0, int weaponPresentationVersion = 0) => new WorldRecordingHeader
+        public static WorldRecordingHeader Create(Guid session, Guid stream, string origin, int[] rooms, WorldProp[] geometry, string captureStartedAtUtc = "", int environmentVersion = EnvironmentPresentation.Version, string assetSet = WorldAssetSets.Legacy, int enemyPresentationVersion = 0, int weaponPresentationVersion = 0, int enemyFireVersion = 0) => new WorldRecordingHeader
         {
-            sessionId = session.ToString("D"), streamId = stream.ToString("D"), origin = origin, captureStartedAtUtc = captureStartedAtUtc, environmentVersion = environmentVersion, enemyPresentationVersion = enemyPresentationVersion, weaponPresentationVersion = weaponPresentationVersion, assetSet = assetSet, roomIds = (int[])rooms.Clone(),
+            sessionId = session.ToString("D"), streamId = stream.ToString("D"), origin = origin, captureStartedAtUtc = captureStartedAtUtc, environmentVersion = environmentVersion, enemyPresentationVersion = enemyPresentationVersion, weaponPresentationVersion = weaponPresentationVersion, enemyFireVersion = enemyFireVersion, assetSet = assetSet, roomIds = (int[])rooms.Clone(),
             props = geometry.Select(prop => new RecordedProp { id = prop.Id.ToString("D"), roomId = prop.RoomId, kind = prop.Kind.ToString(), feet = new RecordedVector(prop.Feet), yaw = prop.Yaw }).ToArray()
         };
     }
@@ -58,6 +59,8 @@ namespace VrCommand.Simulation
         public string id = ""; public int roomId, health;
         public RecordedVector feet = new RecordedVector(), forward = new RecordedVector();
         public bool hasPresentation, walking;
+        public bool hasFireState; public long fireSequence,fireTickPlusOne;
+        public RecordedVector fireOrigin=new RecordedVector(),fireDirection=new RecordedVector();
     }
     [Serializable] public sealed class RecordedFrame
     {
@@ -78,10 +81,11 @@ namespace VrCommand.Simulation
         public bool suspended, lightning; public string weather = "Clear";
         public RecordedFrame frame = new RecordedFrame(); public RecordedEvent[] events = new RecordedEvent[0];
         public static WorldRecordingPacket Capture(ArenaWorld world, long sequence, long elapsed, long observed, long combat,
-            long afterWorld, Func<Guid, RecordedRig> rig, string weather = "Clear", bool lightning = false, bool suspended = false, int enemyPresentationVersion = 0, int weaponPresentationVersion = 0)
+            long afterWorld, Func<Guid, RecordedRig> rig, string weather = "Clear", bool lightning = false, bool suspended = false, int enemyPresentationVersion = 0, int weaponPresentationVersion = 0, int enemyFireVersion = 0)
         {
             if (enemyPresentationVersion < 0 || enemyPresentationVersion > EnemyPresentation.Version) throw new ArgumentException("Unknown enemy presentation version.");
             if (weaponPresentationVersion < 0 || weaponPresentationVersion > WeaponPresentation.Version) throw new ArgumentException("Unknown weapon presentation version.");
+            if(enemyFireVersion<0 || enemyFireVersion>EnemyFirePresentation.Version)throw new ArgumentException("Unknown enemy fire version.");
             var snapshot = world.Snapshot(); var events = new List<WorldEvent>(); var cursor = afterWorld;
             while (cursor < snapshot.ThroughSequence) { var page = world.Events(cursor); events.AddRange(page); cursor = page[page.Length - 1].Sequence; }
             return new WorldRecordingPacket { sequence = sequence, elapsedMilliseconds = elapsed, observedSequence = observed, throughCombatSequence = combat,
@@ -93,7 +97,9 @@ namespace VrCommand.Simulation
                         connected = player.Connected, reloading = player.Reloading, hasWeaponPresentation = weaponPresentationVersion == 1,
                         reloadUntilTick = weaponPresentationVersion == 1 ? player.ReloadUntilTick : 0, rig = rig(player.Id) }).ToArray(),
                     enemies = snapshot.Enemies.Select(enemy => new RecordedEnemy { id = enemy.Id.ToString("D"), roomId = enemy.RoomId, health = enemy.Health, feet = new RecordedVector(enemy.Feet),
-                        hasPresentation = enemyPresentationVersion == 1, forward = new RecordedVector(enemyPresentationVersion == 1 ? enemy.Forward : default), walking = enemyPresentationVersion == 1 && enemy.Walking }).ToArray() },
+                        hasPresentation = enemyPresentationVersion == 1, forward = new RecordedVector(enemyPresentationVersion == 1 ? enemy.Forward : default), walking = enemyPresentationVersion == 1 && enemy.Walking, hasFireState=enemyFireVersion==1,
+                        fireSequence=enemyFireVersion==1?enemy.Fire.Sequence:0,fireTickPlusOne=enemyFireVersion==1?enemy.Fire.TickPlusOne:0,
+                        fireOrigin=new RecordedVector(enemyFireVersion==1?enemy.Fire.Origin:default),fireDirection=new RecordedVector(enemyFireVersion==1?enemy.Fire.Direction:default) }).ToArray() },
                 events = events.Select(entry => new RecordedEvent { sequence = entry.Sequence, eventId = entry.EventId.ToString("D"), tick = entry.Tick, kind = entry.Kind.ToString(),
                     playerId = entry.PlayerId.ToString("D"), shotId = entry.ShotId?.ToString("D") ?? "", enemyId = entry.EnemyId?.ToString("D") ?? "", damage = entry.Damage,
                     hasRay = entry.Origin.HasValue, origin = new RecordedVector(entry.Origin ?? default), direction = new RecordedVector(entry.Direction ?? default),
@@ -106,13 +112,18 @@ namespace VrCommand.Simulation
         {
             if (packet == null) throw new ArgumentException("Missing recording packet.");
             if (packet.frame?.enemies != null) foreach (var enemy in packet.frame.enemies)
-                if (enemy != null && !enemy.hasPresentation && enemy.forward == null) enemy.forward = new RecordedVector();
+                {
+                    if (enemy != null && !enemy.hasPresentation && enemy.forward == null) enemy.forward = new RecordedVector();
+                    if (enemy != null && !enemy.hasFireState) { if(enemy.fireOrigin==null)enemy.fireOrigin=new RecordedVector(); if(enemy.fireDirection==null)enemy.fireDirection=new RecordedVector(); }
+                }
             return packet;
         }
         public static void Header(WorldRecordingHeader header)
         {
             if (header == null || header.schemaVersion != 1 || header.environmentVersion < 0 || header.environmentVersion > EnvironmentPresentation.Version
                 || header.enemyPresentationVersion < 0 || header.enemyPresentationVersion > EnemyPresentation.Version
+                || header.enemyFireVersion < 0 || header.enemyFireVersion > EnemyFirePresentation.Version
+                || (header.assetSet == WorldAssetSets.CombatEffects && (header.enemyFireVersion != 1 || header.enemyPresentationVersion != 1 || header.weaponPresentationVersion != 1))
                 || header.weaponPresentationVersion < 0 || header.weaponPresentationVersion > WeaponPresentation.Version
                 || ((header.assetSet == WorldAssetSets.WeaponActions || header.assetSet == WorldAssetSets.ArmedCombatants) && (header.weaponPresentationVersion != 1 || header.enemyPresentationVersion != 1))
                 || (header.assetSet == WorldAssetSets.Combatants && header.enemyPresentationVersion != 1) || !Id(header.sessionId) || !Id(header.streamId)
@@ -189,6 +200,7 @@ namespace VrCommand.Simulation
                     || ((kind == WorldEventKind.ShotHit || kind == WorldEventKind.EnemyEliminated || kind == WorldEventKind.EnemyShot || kind == WorldEventKind.PlayerDamaged) ? !Id(entry.enemyId) : entry.enemyId != "")
                     || (entry.targetId != "" && !Id(entry.targetId)) || (kind == WorldEventKind.PlayerDamaged && entry.damage == 0)) throw new ArgumentException("Invalid recorded event content.");
             }
+            EnemyFireValidation.Packet(header,packet,previous);
             if (combat != packet.throughCombatSequence) throw new ArgumentException("Recorded combat boundary disagrees with its world events.");
             foreach (var player in packet.frame.players)
             {

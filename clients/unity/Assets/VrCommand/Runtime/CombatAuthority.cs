@@ -11,7 +11,8 @@ namespace VrCommand.Unity
     {
         public FixedString64Bytes id;
         public Vector3 position;
-        public Vector3 facing;
+        public Vector3 facing,fireOrigin,fireDirection;
+        public long fireSequence,fireTickPlusOne;
         public bool walking;
         public long presentationTick, reloadUntilTick;
         public int room, health, magazine, reserve;
@@ -22,10 +23,11 @@ namespace VrCommand.Unity
             serializer.SerializeValue(ref health); serializer.SerializeValue(ref magazine); serializer.SerializeValue(ref reserve);
             serializer.SerializeValue(ref enemy); serializer.SerializeValue(ref connected); serializer.SerializeValue(ref reloading);
             serializer.SerializeValue(ref facing); serializer.SerializeValue(ref walking); serializer.SerializeValue(ref presentationTick); serializer.SerializeValue(ref reloadUntilTick);
+            serializer.SerializeValue(ref fireSequence);serializer.SerializeValue(ref fireTickPlusOne);serializer.SerializeValue(ref fireOrigin);serializer.SerializeValue(ref fireDirection);
         }
         public bool Equals(CombatActorState other) => id.Equals(other.id) && position == other.position && room == other.room
             && health == other.health && magazine == other.magazine && reserve == other.reserve && enemy == other.enemy
-            && connected == other.connected && reloading == other.reloading && facing == other.facing && walking == other.walking && presentationTick == other.presentationTick && reloadUntilTick == other.reloadUntilTick;
+            && connected == other.connected && reloading == other.reloading && facing == other.facing && walking == other.walking && presentationTick == other.presentationTick && reloadUntilTick == other.reloadUntilTick && fireSequence==other.fireSequence && fireTickPlusOne==other.fireTickPlusOne && fireOrigin==other.fireOrigin && fireDirection==other.fireDirection;
     }
     public struct CombatPropState : INetworkSerializable, IEquatable<CombatPropState>
     {
@@ -52,8 +54,8 @@ namespace VrCommand.Unity
         public NetworkVariable<bool> Ready = new NetworkVariable<bool>(false);
         private readonly ArenaSession session = new ArenaSession();
         private readonly Dictionary<string, GameObject> propViews = new Dictionary<string, GameObject>();
-        private readonly Dictionary<string, ArmedEnemyView> enemyViews = new Dictionary<string, ArmedEnemyView>();
-        private ArmedEnemyModels enemies;
+        private readonly Dictionary<string, EnemyFireView> enemyViews = new Dictionary<string, EnemyFireView>();
+        private EnemyFireModels enemies;
         private FieldPropModels fieldProps;
         private float accumulator, nextPublish;
         private double lastManagement = double.NegativeInfinity;
@@ -75,7 +77,7 @@ namespace VrCommand.Unity
             if (Outbox == null || management == null || session.World.Phase != WorldPhase.Preparing) throw new InvalidOperationException("Initialize a preparing world and combat source first.");
             recordingStart = Time.realtimeSinceStartupAsDouble;
             var header = WorldRecordingHeader.Create(Guid.Parse(management.id), Outbox.StreamId, Outbox.Origin, management.roomIds, session.Props,
-                DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), assetSet: WorldAssetSets.ArmedCombatants, enemyPresentationVersion: EnemyPresentation.Version, weaponPresentationVersion: WeaponPresentation.Version);
+                DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), assetSet: WorldAssetSets.CombatEffects, enemyPresentationVersion: EnemyPresentation.Version, weaponPresentationVersion: WeaponPresentation.Version, enemyFireVersion: EnemyFirePresentation.Version);
             Recording = WorldOutbox.Create(path, header, new UnityWorldCodec());
             if (!CaptureWorld(true)) throw new InvalidOperationException("Initial world frame could not be saved.");
         }
@@ -89,7 +91,7 @@ namespace VrCommand.Unity
             {
                 var packet = WorldRecordingPacket.Capture(session.World, Recording.LastSequence + 1,
                     Recording.LastSequence == 0 ? 0 : (long)((now - recordingStart) * 1000), observedSequence, Outbox.LastSequence,
-                    Recording.ThroughWorldSequence, RecordedRigFor, management.environment.weather, management.environment.lightning, managementSuspended, EnemyPresentation.Version, WeaponPresentation.Version);
+                    Recording.ThroughWorldSequence, RecordedRigFor, management.environment.weather, management.environment.lightning, managementSuspended, EnemyPresentation.Version, WeaponPresentation.Version, EnemyFirePresentation.Version);
                 Recording.Append(packet); nextRecording = now + .1;
                 if (session.World.Phase == WorldPhase.Ended) Recording.Finish();
                 return true;
@@ -127,7 +129,7 @@ namespace VrCommand.Unity
         {
             Instance = this;
             Props.OnListChanged += GeometryChanged;
-            fieldProps = new FieldPropModels(); enemies = new ArmedEnemyModels();
+            fieldProps = new FieldPropModels(); enemies = new EnemyFireModels();
             if (IsServer) { Ready.Value = serverReady; Publish(); }
         }
         private void GeometryChanged(NetworkListEvent<CombatPropState> change) { geometryDirty = true; walkSurfaces.Clear(); }
@@ -266,7 +268,7 @@ namespace VrCommand.Unity
             foreach (var player in frame.Players) actors.Add(new CombatActorState { id = player.Id.ToString("D"), room = player.RoomId, position = Vector(player.Head),
                 health = player.Health, magazine = player.Magazine, reserve = player.Reserve, connected = player.Connected, reloading = player.Reloading, presentationTick = frame.Tick, reloadUntilTick = player.ReloadUntilTick });
             foreach (var npc in frame.Enemies) actors.Add(new CombatActorState { id = npc.Id.ToString("D"), room = npc.RoomId, position = Vector(npc.Feet), health = npc.Health, enemy = true, connected = true,
-                facing = Vector(npc.Forward), walking = npc.Walking, presentationTick = frame.Tick });
+                facing = Vector(npc.Forward), walking = npc.Walking, presentationTick = frame.Tick,fireSequence=npc.Fire.Sequence,fireTickPlusOne=npc.Fire.TickPlusOne,fireOrigin=Vector(npc.Fire.Origin),fireDirection=Vector(npc.Fire.Direction) });
             for (var index = 0; index < actors.Count; index++)
                 if (index >= Actors.Count) Actors.Add(actors[index]); else if (!Actors[index].Equals(actors[index])) Actors[index] = actors[index];
             while (Actors.Count > actors.Count) Actors.RemoveAt(Actors.Count - 1);
@@ -299,9 +301,21 @@ namespace VrCommand.Unity
                 }
                 view.Root.SetActive(actor.health > 0);
                 view.Root.transform.position = actor.position;
-                view.Apply(Vector(actor.facing), actor.walking, actor.presentationTick);
+                view.Apply(Vector(actor.facing), actor.walking, actor.presentationTick, actor.health,new EnemyFireState(actor.fireSequence,actor.fireTickPlusOne,Vector(actor.fireOrigin),Vector(actor.fireDirection)));
             }
             foreach (var id in new List<string>(enemyViews.Keys)) if (!live.Contains(id)) { Destroy(enemyViews[id].Root); enemyViews.Remove(id); }
+        }
+        internal EnemyFireObservation[] ObserveEnemyFire()
+        {
+            var rows=new List<EnemyFireObservation>();
+            foreach(var pair in enemyViews)
+            {
+                var view=pair.Value;var fire=view.AppliedFire;
+                rows.Add(new EnemyFireObservation{id=pair.Key,tick=view.AppliedTick,fireSequence=fire.Sequence,fireTickPlusOne=fire.TickPlusOne,
+                    acceptedOrigin=Vector(fire.Origin),acceptedDirection=Vector(fire.Direction),visible=view.Root.activeInHierarchy && view.Flash.gameObject.activeInHierarchy,
+                    recoil=-view.RecoilVisual.localPosition.z,gun=view.Body.Gun.position,flashOrigin=view.Flash.position,flashDirection=view.Flash.forward});
+            }
+            return rows.ToArray();
         }
         public override void OnNetworkDespawn()
         {

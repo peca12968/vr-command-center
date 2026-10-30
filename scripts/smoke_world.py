@@ -171,7 +171,10 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         check(info["complete"] and info["acceptedSequence"] == result["frames"] == 44, "All ordered source frames durably seal after combat confirmation")
         check(len(info["header"]["props"]) == 2, "World archive uses actual canonical mission geometry")
         check(any(player["rig"]["kind"] == "Simulated" for row in frames if row["type"] == "frame" for player in row["payload"]["frame"]["players"]), "Head and both hands retain explicit synthetic rig provenance")
-        with request(route + "/watch?mode=replay&fromMs=200&rate=4") as stream:
+        packets = [row["payload"] for row in frames if row["type"] == "frame"]
+        seek_ms = packets[5]["elapsedMilliseconds"]
+        expected_seek = [packet for packet in packets if packet["elapsedMilliseconds"] <= seek_ms][-1]
+        with request(route + f"/watch?mode=replay&fromMs={seek_ms}&rate=4") as stream:
             check(event(stream)[0] == "header", "Persisted replay starts with versioned metadata")
             replay = []
             while True:
@@ -180,7 +183,12 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
                     replay.append(data)
                 if kind == "complete":
                     break
-            check(replay[0]["packet"]["elapsedMilliseconds"] <= 200 and replay[0]["packet"]["sequence"] > 1, "Indexed replay seeks to the preceding stored frame")
+            evidence = {"requestedMilliseconds": seek_ms, "expectedSequence": expected_seek["sequence"],
+                        "actualSequence": replay[0]["packet"]["sequence"], "actualMilliseconds": replay[0]["packet"]["elapsedMilliseconds"],
+                        "storedTimestamps": [{"sequence": p["sequence"], "milliseconds": p["elapsedMilliseconds"]} for p in packets]}
+            (ROOT / "artifacts").mkdir(exist_ok=True)
+            (ROOT / "artifacts/world-smoke-seek.json").write_text(json.dumps(evidence, indent=2), encoding="utf-8")
+            check(replay[0]["packet"]["elapsedMilliseconds"] <= seek_ms and replay[0]["packet"]["sequence"] == expected_seek["sequence"] > 1, "Indexed replay seeks to the exact preceding stored frame")
             final = replay[-1]
             stats = final["statistics"][0]
             check(final["packet"]["frame"]["phase"] == "Ended" and final["packet"]["weather"] == "Storm" and final["packet"]["frame"]["night"], "Replay retains pause, environment changes and the final world")

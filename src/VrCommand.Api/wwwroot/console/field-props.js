@@ -3,7 +3,7 @@ import { FIELD_PROPS } from './field-props-data.js';
 
 export const LEGACY_ASSETS = 'primitives-v1';
 export const FIELD_ASSETS = 'field-props-v1';
-export function supportedAssets(value) { return value === LEGACY_ASSETS || value === FIELD_ASSETS || value === 'service-rifle-v1' || value === 'combatants-v1' || value === 'weapon-actions-v1' || value === 'armed-combatants-v1'; }
+export function supportedAssets(value) { return value === LEGACY_ASSETS || value === FIELD_ASSETS || value === 'service-rifle-v1' || value === 'combatants-v1' || value === 'weapon-actions-v1' || value === 'armed-combatants-v1' || value === 'combat-effects-v1'; }
 
 // One cached geometry per kind and one vertex-colour material per scene load.
 // Positions and winding use the same world axes as the recorded rigs / rays.

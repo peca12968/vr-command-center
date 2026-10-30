@@ -90,7 +90,7 @@ class Venue:
         self.processes['api'] = subprocess.Popen(['dotnet', str(self.args.api_dll.resolve()), '--urls', self.base], cwd=ROOT,
             env=environment, stdout=self.api_log, stderr=self.api_log, creationflags=subprocess.CREATE_NO_WINDOW)
         self.wait(lambda: self.request('/health'), 30, 'API startup')
-        if self.request('/').get('version') != '0.22.0': raise RuntimeError('Build API 0.22.0 before provisioning the placement-checked venue')
+        if self.request('/').get('version') != '0.23.0': raise RuntimeError('Build API 0.23.0 before provisioning the placement-checked venue')
 
     def launch(self, name, config, visible=False, *, extra_args=()):
         self.save(name + '.json', config)

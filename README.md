@@ -4,9 +4,11 @@
 
 依 2026-10-29 的使用者指示，**優先開發 Meta Quest 3**，暫以 Android 獨立執行為工作假設；VIVE 延後接入，共用架構與原始雙平台目標保留。
 
-目前為 **API v0.22／Unity 遊戲端 v0.24 原型**。真正 Editor 已完成 Prepare、70 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 22，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
+目前為 **API v0.23／Unity 遊戲端 v0.25 原型**。真正 Editor 已完成 Prepare、76 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 23，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
 
-較窄的 [managed SDK 檢查](docs/UNITY_SDK_CHECK.md) 仍可補充 API／直接參考診斷，其本身不執行 Unity 或產出播放器；目前較強的真正 Editor、70 項測試及 binary 結果以 PROGRESS 為準。
+較窄的 [managed SDK 檢查](docs/UNITY_SDK_CHECK.md) 仍可補充 API／直接參考診斷，其本身不執行 Unity 或產出播放器；目前較強的真正 Editor、76 項測試及 binary 結果以 PROGRESS 為準。
+
+新增 [敵軍射擊閃光與後座](docs/ENEMY_FIRE.md)：保存已接受的射擊原點／方向與tick，真正PC白天／夜間GPU脈衝及封存射線已核對；只移動槍身子Renderer，舊六profile保留。玩家效果／音效仍待。
 
 新增 [敵軍雙手持槍](docs/ARMED_ENEMIES.md)：原創手槍與裝飾性兩節雙臂，槍口維持原權威原點，玩家、觀戰與回放共用；真正PC GPU與保存肘腕矩陣已核對，舊五個profile保留。閃光／後座與完整人物仍待。
 
@@ -20,7 +22,7 @@
 
 新 [軍事掩體素材](docs/FIELD_PROPS.md) 已接真正PC玩家、即時觀戰與封存回放，舊錄製保留原方盒；遊戲命中／碰撞仍採包圍盒。
 
-可用 [控制台自訂電腦任務](docs/DESKTOP_CONTROL.md) 從編輯／保存／重載配置直接啟動真正 PC server／玩家，控制天氣、AI、觀戰與回放；已看見原生白天／雨夜／暫停畫面。最新44項 UI／native整合、41 Node＋179 Chromium通過；原生GPU聲光／自身DSP已驗證，實體聽感與頭盔仍待。
+可用 [控制台自訂電腦任務](docs/DESKTOP_CONTROL.md) 從編輯／保存／重載配置直接啟動真正 PC server／玩家，控制天氣、AI、觀戰與回放；已看見原生白天／雨夜／暫停畫面。最新45項 UI／native整合、45 Node＋184 Chromium通過；原生GPU聲光／自身DSP已驗證，實體聽感與頭盔仍待。
 
 已完成 [電腦掩體碰撞](docs/DESKTOP_COLLISION.md)：真正鍵盤推沙包、退回、側移及旋轉油桶阻擋保持有效姿態；新增共用通行規則與原生操作檢查器。NGO版本以目前來源為準，所有遊戲程序須同版。
 

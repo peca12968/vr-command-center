@@ -25,7 +25,7 @@ internal static class WorldChecks
             bridge.Apply(JsonSerializer.Deserialize<ManagementSnapshot>(json, new JsonSerializerOptions(JsonFormat.Options) { IncludeFields = true })!);
         }
         Refresh();
-        var header = WorldRecordingHeader.Create(id, queue.StreamId, "Simulation", [1], bridge.Props, assetSet: WorldAssetSets.ArmedCombatants, enemyPresentationVersion: 1, weaponPresentationVersion: 1);
+        var header = WorldRecordingHeader.Create(id, queue.StreamId, "Simulation", [1], bridge.Props, assetSet: WorldAssetSets.CombatEffects, enemyPresentationVersion: 1, weaponPresentationVersion: 1, enemyFireVersion: 1);
         var field = Copy(header); field.assetSet = WorldAssetSets.FieldProps; WorldRecordingValidation.Header(field);
         check(WorldAssetSets.Supported(WorldAssetSets.ServiceRifle) && field.assetSet == WorldAssetSets.FieldProps, "New rifle and retained field-prop profiles are explicitly supported without changing the default");
         check(WorldRecordingHeader.Create(id, queue.StreamId, "Simulation", [1], bridge.Props).assetSet == WorldAssetSets.Legacy, "Existing recording producers retain their original primitive asset profile");
@@ -56,9 +56,9 @@ internal static class WorldChecks
             var body = bridge.World.PlayerSnapshot(value);
             return body.Connected ? new() { kind = "Simulated", left = new(body.Head + new Vec3(-.2f, -.3f, .2f)), right = new(body.Muzzle) } : new();
         }
-        var initial = WorldRecordingPacket.Capture(bridge.World, 1, 0, manager.Get(id).Sequence, 0, 0, Rig, enemyPresentationVersion: 1, weaponPresentationVersion: 1);
+        var initial = WorldRecordingPacket.Capture(bridge.World, 1, 0, manager.Get(id).Sequence, 0, 0, Rig, enemyPresentationVersion: 1, weaponPresentationVersion: 1, enemyFireVersion: 1);
         check(store.Append(id, initial, owner).AcceptedSequence == 1 && store.Append(id, Copy(initial), owner).AcceptedSequence == 1, "Initial preparing frame is persisted once");
-        check(store.Info(id, master).Header.assetSet == WorldAssetSets.ArmedCombatants && store.Info(id, master).Header.enemyPresentationVersion == 1
+        check(store.Info(id, master).Header.assetSet == WorldAssetSets.CombatEffects && store.Info(id, master).Header.enemyPresentationVersion == 1
             && store.Frame(id, 1, master)!.Packet.frame.enemies[0].hasPresentation, "SQLite records the humanoid profile and explicit initial enemy presentation together");
         check(store.Frame(id,1,master)!.Packet.frame.players[0].hasWeaponPresentation && store.Info(id,master).Header.weaponPresentationVersion==1,"SQLite retains the new action profile and explicit player action clock");
         var initialBad = Copy(initial); initialBad.elapsedMilliseconds = 1;
@@ -67,7 +67,7 @@ internal static class WorldChecks
         bridge.Connect(1, player, 1, 0, manager.Get(id).Players.Single().AdmissionId); var head = ArenaSession.Spawn(1, 0); var target = bridge.World.Snapshot().Enemies[0].Feet + new Vec3(0, .9f, 0);
         bridge.Pose(1, head, head, (target - head).Normalized(), 0); bridge.Weapon(1, 1, false, 0); bridge.Tick(.05);
         var observed = manager.Get(id).Sequence; queue.Capture(bridge.World, observed);
-        var running = WorldRecordingPacket.Capture(bridge.World, 2, 50, observed, queue.LastSequence, 0, Rig, enemyPresentationVersion: 1, weaponPresentationVersion: 1);
+        var running = WorldRecordingPacket.Capture(bridge.World, 2, 50, observed, queue.LastSequence, 0, Rig, enemyPresentationVersion: 1, weaponPresentationVersion: 1, enemyFireVersion: 1);
         Reject<InvalidOperationException>(() => store.Append(id, running, owner), "World frame waits for its matching durable combat reports");
         manager.ReportStreamBatch(id, JsonSerializer.Deserialize<StreamCombatRecord[]>(TelemetryOutbox.BatchJson(queue.PendingBatch()), JsonFormat.Options)!, owner);
         void Bad<T>(Action<WorldRecordingPacket> mutate, string message) where T : Exception
@@ -95,7 +95,7 @@ internal static class WorldChecks
         Reject<AccessDeniedException>(() => manager.Observed(id, observed, room2), "Historical observation accessor is scoped");
         Reject<AccessDeniedException>(() => manager.CombatWitness(id, Guid.Parse(running.events[0].eventId), room2), "Combat witness accessor is scoped");
         manager.Execute(id, new(Guid.NewGuid(), ControlAction.End), master); Refresh();
-        var final = WorldRecordingPacket.Capture(bridge.World, 3, 100, manager.Get(id).Sequence, queue.LastSequence, bridge.World.EventSequence, Rig, enemyPresentationVersion: 1, weaponPresentationVersion: 1);
+        var final = WorldRecordingPacket.Capture(bridge.World, 3, 100, manager.Get(id).Sequence, queue.LastSequence, bridge.World.EventSequence, Rig, enemyPresentationVersion: 1, weaponPresentationVersion: 1, enemyFireVersion: 1);
         var duplicateEvent = Copy(final); duplicateEvent.frame.throughSequence++;
         duplicateEvent.events = [new() { sequence = duplicateEvent.frame.throughSequence, tick = final.frame.tick, eventId = running.events[0].eventId, kind = "ReloadStarted", playerId = player.ToString("D") }];
         duplicateEvent.frame.players[0].reloading=true; duplicateEvent.frame.players[0].reloadUntilTick=final.frame.tick+30; // Keep the new action witness valid before exercising the duplicate event transaction.
@@ -111,6 +111,9 @@ internal static class WorldChecks
         var savedEnemy = restarted.Frame(id, 2, master)!.Packet.frame.enemies[0];
         check(savedEnemy.hasPresentation && savedEnemy.forward.ToVector().Equals(running.frame.enemies[0].forward.ToVector()) && savedEnemy.walking == running.frame.enemies[0].walking,
             "Reopened SQLite archive preserves exact enemy facing and stride mode for direct seeks");
+        check(savedEnemy.hasFireState && savedEnemy.fireSequence>0 && savedEnemy.fireSequence==running.frame.enemies[0].fireSequence
+            && savedEnemy.fireTickPlusOne==running.frame.enemies[0].fireTickPlusOne && savedEnemy.fireOrigin.ToVector().Equals(running.frame.enemies[0].fireOrigin.ToVector())
+            && savedEnemy.fireDirection.ToVector().Equals(running.frame.enemies[0].fireDirection.ToVector()),"Reopened SQLite preserves a nonzero accepted enemy fire clock and exact historical ray");
         check(restarted.Append(id, running, owner).Complete, "Reopened archive accepts an exact historical retry");
     }
 }

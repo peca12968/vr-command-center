@@ -295,6 +295,7 @@ async function main() {
     await require('./layout-browser.cjs')({ context, api, tokens, base, mission, screenshots, check });
     await require('./rifle-browser.cjs')({ context, tokens, base, root, screenshots, check });
     await require('./combatants-browser.cjs')({ context, tokens, base, root, screenshots, check });
+    await require('./combat-effects-browser.cjs')({ context, tokens, base, root, screenshots, check });
     await require('./armed-combatants-browser.cjs')({ context, tokens, base, root, screenshots, check });
     await require('./weapon-actions-browser.cjs')({ context, tokens, base, root, screenshots, check });
     let releaseReplay, requestedReplay;

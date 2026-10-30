@@ -7,6 +7,8 @@ import { COMBATANT_ASSETS, opponentFactory, poseOpponent } from './combatants.js
 
 import { ARMED_ASSETS, armedOpponentFactory, poseArmedOpponent } from './armed-combatants.js';
 
+import { COMBAT_EFFECT_ASSETS, firingOpponentFactory, poseFiringOpponent } from './combat-effects.js';
+
 const point = value => new THREE.Vector3(value.x, value.y, value.z);
 const roomX = id => (id - 3) * 14;
 export class ReplayScene {
@@ -41,18 +43,19 @@ export class ReplayScene {
     const assetSet = recording.assetSet === undefined ? LEGACY_ASSETS : recording.assetSet;
     if (!supportedAssets(assetSet)) throw new Error('不支援的錄製素材版本。');
     if (![0,1].includes(recording.enemyPresentationVersion ?? 0) || assetSet === COMBATANT_ASSETS && recording.enemyPresentationVersion !== 1) throw new Error('不支援的敵軍姿態版本。');
-    if (![0,1].includes(recording.weaponPresentationVersion ?? 0) || [WEAPON_ACTION_ASSETS,ARMED_ASSETS].includes(assetSet) && (recording.weaponPresentationVersion !== 1 || recording.enemyPresentationVersion !== 1)) throw new Error('不支援的武器動作版本。');
+    if (![0,1].includes(recording.weaponPresentationVersion ?? 0) || [WEAPON_ACTION_ASSETS,ARMED_ASSETS,COMBAT_EFFECT_ASSETS].includes(assetSet) && (recording.weaponPresentationVersion !== 1 || recording.enemyPresentationVersion !== 1)) throw new Error('不支援的武器動作版本。');
+    if(![0,1].includes(recording.enemyFireVersion??0) || assetSet===COMBAT_EFFECT_ASSETS && (recording.enemyFireVersion!==1 || recording.enemyPresentationVersion!==1 || recording.weaponPresentationVersion!==1))throw new Error('不支援的敵軍射擊效果版本。');
     this.roomIds = [...recording.roomIds];
     this.weather.load(recording);
     this.clear(this.stage); this.clear(this.traces); this.actors.clear(); this.selected = ''; this.follow = false;
-    this.rifles?.dispose(); this.rifles = [WEAPON_ACTION_ASSETS,ARMED_ASSETS].includes(assetSet) ? weaponActionsFactory() : [RIFLE_ASSETS, COMBATANT_ASSETS].includes(assetSet) ? serviceRifleFactory() : null;
-    this.opponents?.dispose(); this.opponents = assetSet === ARMED_ASSETS ? armedOpponentFactory() : [COMBATANT_ASSETS, WEAPON_ACTION_ASSETS].includes(assetSet) ? opponentFactory() : null;
+    this.rifles?.dispose(); this.rifles = [WEAPON_ACTION_ASSETS,ARMED_ASSETS,COMBAT_EFFECT_ASSETS].includes(assetSet) ? weaponActionsFactory() : [RIFLE_ASSETS, COMBATANT_ASSETS].includes(assetSet) ? serviceRifleFactory() : null;
+    this.opponents?.dispose(); this.opponents = assetSet === COMBAT_EFFECT_ASSETS ? firingOpponentFactory() : assetSet === ARMED_ASSETS ? armedOpponentFactory() : [COMBATANT_ASSETS, WEAPON_ACTION_ASSETS].includes(assetSet) ? opponentFactory() : null;
     for (const room of recording.roomIds) {
       const floor = this.mesh(new THREE.BoxGeometry(12, .2, 12), 0x344638); floor.position.set(roomX(room), -.12, 0); this.stage.add(floor);
       const grid = new THREE.GridHelper(12, 24, 0x8b9b6c, 0x4c6354); grid.position.set(roomX(room), -.005, 0); this.stage.add(grid);
       const boundary = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints([[-6,-6],[6,-6],[6,6],[-6,6]].map(([x,z]) => new THREE.Vector3(roomX(room) + x, .01, z))), new THREE.LineBasicMaterial({ color: 0xc1d281 })); this.stage.add(boundary);
     }
-    const createProp = [FIELD_ASSETS, RIFLE_ASSETS, COMBATANT_ASSETS, WEAPON_ACTION_ASSETS, ARMED_ASSETS].includes(assetSet) && recording.props.length ? fieldPropFactory() : null;
+    const createProp = [FIELD_ASSETS, RIFLE_ASSETS, COMBATANT_ASSETS, WEAPON_ACTION_ASSETS, ARMED_ASSETS, COMBAT_EFFECT_ASSETS].includes(assetSet) && recording.props.length ? fieldPropFactory() : null;
     let propTriangles = 0;
     for (const prop of recording.props) {
       if (createProp) {
@@ -68,7 +71,7 @@ export class ReplayScene {
     }
     this.canvas.dataset.assetSet = assetSet; this.canvas.dataset.propTriangles = String(propTriangles);
     this.canvas.dataset.rifleTriangles = String(this.rifles?.triangles || 0); this.canvas.dataset.rifleCount = '0';
-    this.canvas.dataset.enemyTriangles = String(this.opponents?.triangles || 0); this.canvas.dataset.enemyPoses = '[]'; this.canvas.dataset.weaponPoses = '[]';
+    this.canvas.dataset.enemyTriangles = String(this.opponents?.triangles || 0); this.canvas.dataset.enemyPoses = '[]'; this.canvas.dataset.weaponPoses = '[]'; this.canvas.dataset.enemyFirePoses='[]';
     this.defaultTarget = new THREE.Vector3(recording.roomIds.reduce((sum, id) => sum + roomX(id), 0) / recording.roomIds.length, .8, 0);
     this.defaultRadius = recording.roomIds.length === 5 ? 49 : 15; this.preset('overview');
   }
@@ -113,7 +116,7 @@ export class ReplayScene {
     for (const enemy of frame.enemies) {
       const actor = this.actor('e:' + enemy.id, true); actor.group.visible = true; actor.group.position.copy(point(enemy.feet));
       if (actor.model) {
-        if(actor.armed) poseArmedOpponent(actor,enemy,frame.tick); else poseOpponent(actor, enemy, frame.tick);
+        if(actor.fire)poseFiringOpponent(actor,enemy,frame.tick);else if(actor.armed) poseArmedOpponent(actor,enemy,frame.tick); else poseOpponent(actor, enemy, frame.tick);
         for (const mesh of [actor.body, actor.head, actor.leftLeg, actor.rightLeg]) { mesh.material.transparent = enemy.health === 0; mesh.material.opacity = enemy.health === 0 ? .18 : 1; }
         continue;
       }
@@ -130,6 +133,9 @@ export class ReplayScene {
     }
     this.canvas.dataset.traceCount = String(events.length);
     this.canvas.dataset.rifleCount = String(this.rifles ? frame.players.length : 0);
+    this.canvas.dataset.enemyFirePoses=JSON.stringify([...this.actors.values()].filter(a=>a.fire&&a.group.visible).map(a=>{
+      a.group.updateMatrixWorld(true);return {id:a.group.userData.key.slice(2),flash:a.flash.visible,recoil:-a.sidearm.position.z,
+        origin:a.flash.getWorldPosition(new THREE.Vector3()).toArray(),direction:new THREE.Vector3(0,0,1).applyQuaternion(a.flash.getWorldQuaternion(new THREE.Quaternion())).toArray()};}));
     this.canvas.dataset.armedPoses=JSON.stringify([...this.actors.values()].filter(a=>a.armed&&a.group.visible).map(a=>{
       a.group.updateMatrixWorld(true); const v=p=>p.toArray(); const end=m=>v(m.localToWorld(new THREE.Vector3(0,1,0)));
       return {id:a.group.userData.key.slice(2),muzzle:v(a.gun.getWorldPosition(new THREE.Vector3())),forward:v(new THREE.Vector3(0,0,1).applyQuaternion(a.gun.getWorldQuaternion(new THREE.Quaternion()))),
@@ -212,5 +218,5 @@ export class ReplayScene {
     const hit = ray.intersectObjects([...this.actors.values()].filter(actor => actor.group.visible).map(actor => actor.group), true)[0];
     if (hit) { let object = hit.object; while (object && !object.userData.key) object = object.parent; if (object) this.onPick(object.userData.key); }
   }
-  reset() { this.weather.reset(); this.frame = null; this.follow = false; this.selected = ''; this.clear(this.stage); this.clear(this.traces); this.rifles?.dispose(); this.rifles = null; this.opponents?.dispose(); this.opponents = null; this.actors.clear(); this.canvas.dataset.rifleCount = '0'; this.canvas.dataset.rifleTriangles = '0'; this.canvas.dataset.enemyTriangles = '0'; this.canvas.dataset.enemyPoses = '[]'; this.canvas.dataset.weaponPoses = '[]'; this.marker.visible = false; this.draw(); }
+  reset() { this.weather.reset(); this.frame = null; this.follow = false; this.selected = ''; this.clear(this.stage); this.clear(this.traces); this.rifles?.dispose(); this.rifles = null; this.opponents?.dispose(); this.opponents = null; this.actors.clear(); this.canvas.dataset.rifleCount = '0'; this.canvas.dataset.rifleTriangles = '0'; this.canvas.dataset.enemyTriangles = '0'; this.canvas.dataset.enemyPoses = '[]'; this.canvas.dataset.weaponPoses = '[]'; this.canvas.dataset.enemyFirePoses='[]'; this.marker.visible = false; this.draw(); }
 }

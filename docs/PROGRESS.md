@@ -1,5 +1,27 @@
 # 開發進度
 
+## 2026-10-31：按接受射線還原敵軍閃光與槍身後座
+
+從乾淨 `d8ee348` 接續無頭盔的PC主線。新增 `combat-effects-v1`，沿用固定728面持槍NPC／玩家換彈／掩體，再加原創32面封閉星形脈衝，每NPC最大760面。資料SHA `b8fe83d66781c2f65816d6873cc08ba01314418d42777a55e9eea2d1ee34a9bb` 固定，生成器先驗舊pin、Unity／瀏覽器共源；原六profile、原網格／色彩及reader保留，沒有外部素材。新unlit Shader保留instancing／stereo宏，不加Light或音效。規範見 [ENEMY_FIRE.md](ENEMY_FIRE.md)。
+
+API／UI **0.23.0**、Unity **0.25.0／code28／NGO23**。新header enemyFireVersion1，缺失仍0；新profile還要求enemy1／weapon1。NGO enemy row原子新增fireSequence、fireTickPlusOne及原點／方向；來源／API／UI及全部遊戲端一起更新。envelope6、任務schema1、world schema1、票券2、environmentVersion1及rules0.8.0保持，不能降reader，binary原header／payload／checksum不重寫。
+
+ArenaWorld只在原AI實際Emit EnemyShot後複製接受事件，逐packet驗證以上次狀態＋本次事件重建最後射擊；拒絕缺旗標、未來時鐘、憑空序號、改原點／方向或後續改寫。從未射擊明確true／sequence0／tick0／零向量。閃光使用保存世界射線，即使NPC已移動／轉向；age0–2顯示，槍身後退依tick為12／18／10／4／1mm、age5復位。僅停用原Gun Renderer並借同網格到子Renderer，真正槍口／手套／雙臂／Tracked資料、射速、原20點傷害與命中盒不動。Pause／Ended／seek保持保存tick，死亡隱藏效果但不刪歷史。沒有玩家步槍效果、聲音或實體後座，亦未完成完整人體／死亡／換彈動畫。
+
+locked restore／Release build0警告錯誤、**575核心、403 HTTP、43世界、45 Node／184 Chromium**通過。新增事件證據、跨packet移動／改向、真實ArenaWorld暫停、死亡、SQLite非零射擊狀態重開、舊binary缺欄位與原位元組保留；C#／JS向量核對及實際WebGL閃光／位移／歷史射線／直接seek與統計一致。瀏覽器為SwiftShader。真正Prepare、**76 EditMode**及最終Desktop通過，原scene／prefab ID保持，未RebuildArena。最終Desktop receipt UTC2026-10-30T18:58:01.7951618Z，fingerprint `e2c4dba4f763a7109be018342b8e01154f0b247d921eddc383ed81da59470dbd`；Quest ARM64／IL2CPP亦exit0，receipt UTC2026-10-30T19:16:28.8845657Z，來源fingerprint及scene／prefab ID與最終Desktop完全一致；APK46,210,244 bytes、SHA `c7c4a34d13ef5126c2998cd597b863d4006bfbfad0bfe535ef139b48ae328013`，簽章v2、min32／target35、code28／bundle0.25及六個ELF64 AArch64庫含libil2cpp核對通過。沒有頭盔安裝。完整機器證據在artifacts/fire-validation.json。
+
+首輪76 Tests有2項失敗：生成測例仍預期NGO22、Transform精確float相等；改預期23及1e-5m容差後重跑通過。首次世界smoke的固定fromMs200且假設必有非初始frame失敗，未保留當時數值，不能回推精確原因；改從來源實際保存的第6個packet時間求rightmost preceding sequence，要求精確序號且>1，另保存world-smoke-seek.json。最終requested409ms／expected6／actual6，43項通過；未放寬1.5秒來源或遊戲規則。Node測例的-0與0比較改驗證位移絕對值零，實際渲染／資料不改。失敗XML／log保留。
+
+新NativeEnemyFireProbe只在明確Windows Development／可見untracked client／全新絕對目錄安裝，最多8圖／180秒、無PCM／輸入／OS擷取。EndOfFrame記錄實際套用而非較晚到的actor row，GPU影像與時鐘／Transform同行。首場 `025342-d1194176` 確有日夜GPU脈衝（tick1／22、12／18mm），但End撤銷入場會先despawn頭部，診斷未收到Ended而收尾失敗，不列全通過；cleanup正常、部分圖／資料保留。增加只停止診斷的本機finish.request，complete明確為收集完成，另有observedEnd／stopReason；伺服器seal獨立證明遊戲結束。重跑76及Desktop後才做最終原生。未使用的等待控制台場 `025526-971d0c03` 在未建立任何場次時正常停止，未算功能驗收。
+
+| 最終PC場（前綴20261031） | 幀／最大來源年齡 | 證據 |
+|---|---|---|
+| 025840-cfe18ea8 | 582／0.158654秒 | **4項原生AI／GPU流程**：白天tick1及夜間tick21均有閃光／12mm槍身位移，圖片已檢視；對應world序號1／3及兩次傷害。Pause在tick11／32／43，效果已歸零，沒有宣稱此場在閃光中暫停。Patrol移動後仍保留原射線。兩張GPU擷取另外唯讀與封存SQLite逐event／float32射線精確核對。診斷complete=true／observedEnd=false／明確local stop，audioSamples及callbackCount皆0；真正場次另精確封存，耗彈0／中彈2／損耗40／健康60及回放一致 |
+| 030033-6c7e1a82 | 155／0.163004秒 | **45 UI／native，client無圖形**：配置／任務保存、動態名冊、天氣／AI／Patrol／Pause／End、鏡頭及封存回放；新增實際WebGL射線／fire clock／flash與recoil核對，資料含真正接受射擊，非fixture注入。沒有人工GPU雨夜／雷聲檢視 |
+| 030258-ac140d8d | 七場601／0.224976秒 | 五個真正server／每房一個client隔離、單房End／重用、全部seal後Linked、舊票／升權拒絕與七個精確stream封存，皆新profile／enemyFire1；非25台負載 |
+
+三組均Simulation／Simulated、pendingTelemetry=false、活動0、cleanup零錯誤，writer停止後22／14／26檔回F並與保留SSD原件逐檔SHA相同。程式及binary仍F、這些runtime明確SSD，不是F USB全資料通過，source age非RTT／FPS。另 `unity-admission/20261031-030456-f7254c15` **8項無圖形**入場／撤銷／transport釋放／同admission重連通過，401幀、精確seal／回放一致與活動0。四組38個log未見指定NullReference／MissingReference／ObjectDisposed／IndexOutOfRange或Shader error。本輪未重跑真正按鍵擊殺／換彈、互動走離出生點重連、完整碰撞、GPU閃電或DSP／聽感；較窄SDK未另外重跑。原5080仍API0.16／health ok及原歷史，沒有替換正式DLL／憑證。完整11項長期目標保持開發中，實際Quest／VIVE、MR、廠商硬體、跨機與25台仍待。
+
 ## 2026-10-31：敵軍雙手手槍與裝飾性雙臂
 
 從乾淨 `3c3d71b` 接續無頭盔的PC主線。新增 `armed-combatants-v1`：原創緊湊型手槍、分離上下臂及合成手套，每NPC728面、八個共用Mesh／一材質；頭及腿取固定combatants-v1、手套為固定weapon-actions-v1的0.65倍副本，原五profile／pin完整保留。生成器先驗舊pin，新資料SHA `cc011e951163d4b846c4e2c217592251906844c0dfcee2f795618c8c1c388102`；check與記憶體改色反例拒絕通過。無外部素材／下載，規範見 [ARMED_ENEMIES.md](ARMED_ENEMIES.md)。

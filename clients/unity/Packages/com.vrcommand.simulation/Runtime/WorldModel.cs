@@ -45,8 +45,9 @@ namespace VrCommand.Simulation
         public int Health { get; }
         public Vec3 Forward { get; }
         public bool Walking { get; }
-        internal EnemyFrame(Guid id, int room, Vec3 feet, int health, Vec3 forward, bool walking)
-        { Id = id; RoomId = room; Feet = feet; Health = health; Forward = forward; Walking = walking; }
+        public EnemyFireState Fire { get; }
+        internal EnemyFrame(Guid id, int room, Vec3 feet, int health, Vec3 forward, bool walking, EnemyFireState fire)
+        { Id = id; RoomId = room; Feet = feet; Health = health; Forward = forward; Walking = walking; Fire = fire; }
     }
     public sealed class WorldFrame
     {

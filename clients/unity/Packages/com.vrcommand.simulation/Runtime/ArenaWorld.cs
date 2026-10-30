@@ -22,6 +22,7 @@ namespace VrCommand.Simulation
             internal int Health = 100; internal long NextShot, NextPlan; internal bool Returning;
             internal Vec3 Forward = new Vec3(0, 0, -1);
             internal bool Walking;
+            internal EnemyFireState Fire;
             internal List<Vec3> Route = new List<Vec3>();
         }
         private sealed class Hit
@@ -201,6 +202,8 @@ namespace VrCommand.Simulation
                 if (hit.Kind != HitKind.Friendly || hit.Id != target.Id) continue;
                 enemy.NextShot = TickNumber + 20;
                 Emit(WorldEventKind.EnemyShot, target.Id, null, enemy.Id, origin: muzzle, direction: direction.Normalized(), distance: hit.Distance, hit: hit.Kind, target: hit.Id);
+                var accepted=events[events.Count-1];
+                enemy.Fire=new EnemyFireState(accepted.Sequence,accepted.Tick+1,accepted.Origin??throw new InvalidOperationException("Accepted shot has no origin."),accepted.Direction??throw new InvalidOperationException("Accepted shot has no direction."));
                 var damage = Math.Min(20, target.Health); target.Health -= damage;
                 Emit(WorldEventKind.PlayerDamaged, target.Id, null, enemy.Id, damage);
             }
@@ -251,6 +254,6 @@ namespace VrCommand.Simulation
         public PlayerFrame PlayerSnapshot(Guid id) => Frame(FindPlayer(id));
         public WorldFrame Snapshot() => new WorldFrame(TickNumber, Phase, events.Count, Behavior, AutoAttack, Visibility, Night,
             players.Select(Frame).ToArray(),
-            enemies.Select(e => new EnemyFrame(e.Id, e.Room, e.Feet, e.Health, e.Forward, e.Walking && e.Health > 0)).ToArray());
+            enemies.Select(e => new EnemyFrame(e.Id, e.Room, e.Feet, e.Health, e.Forward, e.Walking && e.Health > 0, e.Fire)).ToArray());
     }
 }

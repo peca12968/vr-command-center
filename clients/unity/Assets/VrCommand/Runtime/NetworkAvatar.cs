@@ -118,6 +118,7 @@ namespace VrCommand.Unity
             {
                 head.localPosition = new Vector3(0, 1.65f, 0);
                 InitializeDesktopPose();
+                NativeEnemyFireProbe.Install(head.gameObject);
                 NativeWeatherProbe.Install(head.gameObject);
                 Debug.Log("Desktop preview input devices: keyboard=" + (Keyboard.current != null) + ", mouse=" + (Mouse.current != null));
             }

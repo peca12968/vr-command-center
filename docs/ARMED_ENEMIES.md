@@ -1,5 +1,7 @@
 # 敵軍雙手持槍
 
+本頁固定armed-combatants-v1保持原外觀；後續敵軍射擊閃光與後座見 [ENEMY_FIRE.md](ENEMY_FIRE.md)，不回寫此舊profile。
+
 `armed-combatants-v1` 增加原創緊湊型手槍、分離上下臂及雙手手套，沿用既有軍事掩體、玩家步槍／換彈。每名728三角形、八個共用Mesh及一材質；頭104、腿60重用兩次，取自固定combatants-v1；手套各120面，為固定weapon-actions-v1的0.65倍副本。軀幹84、上下臂各24重用兩次、手槍84面為本次原創，無外部素材。生成器先驗證舊pin，所有舊檔／reader保留。
 
 `python scripts/generate-armed-combatants.py --check` 核對Unity JSON、瀏覽器module及provenance，SHA256為 `cc011e951163d4b846c4e2c217592251906844c0dfcee2f795618c8c1c388102`。發布後改模型必須新profile，不能重寫pin或舊回放。控制台可直接依保存header選模型，舊五個profile保持舊外觀。

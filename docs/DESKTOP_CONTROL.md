@@ -1,6 +1,6 @@
 # 從控制台開啟電腦任務
 
-目前來源API／UI0.22、Unity0.24／code27／NGO22，採armed-combatants-v1；NPC雙手手槍／裝飾性雙臂見 [ARMED_ENEMIES.md](ARMED_ENEMIES.md)，玩家換彈沿用WEAPON_ACTIONS。新版原生觀戰檢查另讀實際槍口／方向／肘腕世界矩陣，最新通過數與binary以PROGRESS為準。下文舊版數字為各功能首輪證據。
+目前來源API／UI0.23、Unity0.25／code28／NGO23，採combat-effects-v1；敵軍射擊閃光／後座見 [ENEMY_FIRE.md](ENEMY_FIRE.md)，NPC雙手手槍／裝飾性雙臂見 [ARMED_ENEMIES.md](ARMED_ENEMIES.md)，玩家換彈沿用WEAPON_ACTIONS。新版原生觀戰檢查另讀實際槍口／方向／肘腕世界矩陣，最新通過數與binary以PROGRESS為準。下文舊版數字為各功能首輪證據。
 
 API／UI v0.19 支援 [玩家步槍](SERVICE_RIFLE.md)，新原生來源採service-rifle-v1，保留舊錄製外觀；39項UI／native包含即時及封存回放的新玩家武器網格。完整結果以PROGRESS為準。
 

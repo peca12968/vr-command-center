@@ -1,0 +1,9 @@
+{
+  "assetSet": "combat-effects-v1",
+  "source": "Original fictional opaque game muzzle pulse; no external assets",
+  "generator": "scripts/generate-combat-effects.py",
+  "armedSourceSha256": "cc011e951163d4b846c4e2c217592251906844c0dfcee2f795618c8c1c388102",
+  "dataSha256": "b8fe83d66781c2f65816d6873cc08ba01314418d42777a55e9eea2d1ee34a9bb",
+  "triangles": 32,
+  "scope": "Enemy shot flash at its saved ray, cosmetic sidearm recoil; no gameplay, tracking, light, audio or ballistic changes"
+}
