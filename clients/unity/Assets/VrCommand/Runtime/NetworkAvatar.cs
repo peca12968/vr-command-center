@@ -94,6 +94,7 @@ namespace VrCommand.Unity
             localCamera.farClipPlane = 150;
             localCamera.tag = "MainCamera";
             head.gameObject.AddComponent<AudioListener>();
+            CombatAudioView.Install(head.gameObject,this);
             tracked = XRSettings.isDeviceActive || Application.platform == RuntimePlatform.Android;
             if (tracked)
             {
@@ -119,6 +120,7 @@ namespace VrCommand.Unity
             {
                 head.localPosition = new Vector3(0, 1.65f, 0);
                 InitializeDesktopPose();
+                NativeCombatAudioProbe.Install(head.gameObject);
                 NativePlayerFireProbe.Install(head.gameObject);
                 NativeEnemyFireProbe.Install(head.gameObject);
                 NativeWeatherProbe.Install(head.gameObject);
@@ -350,6 +352,7 @@ namespace VrCommand.Unity
 
         public override void OnNetworkDespawn()
         {
+            head.GetComponent<CombatAudioView>()?.Dispose();
             if (IsOwner) tacticalHud.Reset();
             PoseAccepted.OnValueChanged -= AcceptanceChanged;
             leftPosition?.Dispose(); rightPosition?.Dispose(); leftRotation?.Dispose(); rightRotation?.Dispose(); trigger?.Dispose(); reload?.Dispose();

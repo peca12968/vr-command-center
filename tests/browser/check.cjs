@@ -296,6 +296,7 @@ async function main() {
     await require('./rifle-browser.cjs')({ context, tokens, base, root, screenshots, check });
     await require('./combatants-browser.cjs')({ context, tokens, base, root, screenshots, check });
     await require('./player-fire-browser.cjs')({ context, tokens, base, root, screenshots, check });
+    await require('./combat-audio-browser.cjs')({ context, tokens, base, root, screenshots, check });
     await require('./combat-effects-browser.cjs')({ context, tokens, base, root, screenshots, check });
     await require('./armed-combatants-browser.cjs')({ context, tokens, base, root, screenshots, check });
     await require('./weapon-actions-browser.cjs')({ context, tokens, base, root, screenshots, check });

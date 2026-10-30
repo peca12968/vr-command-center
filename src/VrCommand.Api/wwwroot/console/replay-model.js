@@ -22,6 +22,8 @@ export function validateRecording(data) {
   need(data.enemyFireVersion===undefined || [0,1].includes(data.enemyFireVersion),'不支援的敵軍射擊效果版本。');
   need(data.assetSet!=='combat-effects-v1' || data.enemyFireVersion===1,'射擊效果需要保存版本。');
   need(data.playerFireVersion===undefined||[0,1].includes(data.playerFireVersion),'不支援的玩家射擊版本。');
+  need(data.combatAudioVersion===undefined||[0,1].includes(data.combatAudioVersion),'不支援的戰鬥音效版本。');
+  need(data.combatAudioVersion!==1||data.enemyFireVersion===1&&data.playerFireVersion===1,'戰鬥音效需要保存的接受射擊版本。');
   need(data.assetSet!=='player-fire-v1'||data.playerFireVersion===1&&data.enemyFireVersion===1,'玩家射擊需要保存的完整版本。');
   need(data.origin === 'Simulation' && data.statistics?.origin === 'Simulation', '此版僅支援明確標記的 Simulation 紀錄。');
   need(guid(data.sessionId) && data.statistics.sessionId === data.sessionId, '場次身分不一致。');

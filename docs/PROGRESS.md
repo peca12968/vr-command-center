@@ -1,5 +1,30 @@
 # 開發進度
 
+## 2026-10-31：接受射擊事件的玩家／敵軍空間音效
+
+從乾淨 `f25b097` 接續使用者「無頭盔，先繼續電腦端」。新增獨立固定的 `combat-audio-v1`、原創合成步槍／手槍PCM與Unity／瀏覽器共用接受事件游標；規範、操作及pin見 [COMBAT_AUDIO.md](COMBAT_AUDIO.md)。API／UI **0.25.0**、Unity **0.27.0／code31／NGO25**。header combatAudioVersion缺失0／新來源1，必須有player／enemyFireVersion1；actor presentationRunning與原fire欄位原子複製。固定player-fire-v1與八個舊幾何profile、rules0.8.0、envelope6、mission／world schema1、票券2及environment1保持。協同更新來源／API／UI／全部遊戲程序，不能降reader或重寫歷史header／checksum。
+
+聲音只來自已接受的新sequence，保留世界槍口；最多age3 tick／相鄰觀察差10 tick，首次加入、seek、長缺口、重新啟用先baseline，Pause／Ended停止。每listener32個同房空間聲源，1–25m線性衰減／doppler0；滿載重用最舊。沒有本地射擊預測、傷害／射速／碰撞／姿態規則改動，pointer／Tracked不搬動。瀏覽器明確點音效才啟用，換錄製／登出關閉，手動定位不補播；回放依事件重建短聲音，非原始音軌。沒有遮擋／混響／完整聲學設計或漏包每發可聞保證。
+
+locked restore、Release build **0警告／錯誤**，**612核心、403 HTTP、43世界、53 Node／196 Chromium**通過；包含舊header0、未知版本拒絕、新版本fire witness條件、已接受stream不能移除音效政策、C#／JS游標對照、實際Web Audio非零、歷史序號／tick／槍口一致、Pause釋放聲源、舊錄製及按鈕狀態。真正Prepare、**93項EditMode（0 failed／skipped）**、Desktop成功；測例逐sample比對匯入PCM、32個無Collider聲源與明確釋放、NGO phase原子複製／Equals及重複Prepare資源GUID保持。未RebuildArena，原scene／prefab ID保持。Desktop receipt UTC2026-10-30T21:20:34.0971906Z，fingerprint `a62c4eb5139e5e64a2074f86bfe5954fd1067a544899cda3ee8a7238d7c0324e`；現在也包含WAV／meta與Resources資產引用。
+
+首輪Prepare因測試組件直接引用與AudioImporter舊API失敗，改為正確Editor測試組件及defaultSampleSettings.preloadAudioData；93測試首輪92通過、1個EditMode清理反例失敗，新增明確IDisposable／despawn釋放後93全通過。瀏覽器首輪用environmentVersion0 fixture卻等待weather峰值，改為獨立combat峰值；後續196通過，另補換錄製音效狀態／epoch及reset後再全跑。兩次HTTP無效憑證程序10秒退出逾時，保留失敗log、未放寬timeout；其後以UTF-8正常完整403及43世界通過，沒有證實逾時原因。原生新helper首輪Python comprehension iterable內assignment expression語法錯誤，啟動前即失敗，改為明確predicate後才實際運行；不把該次當原生證據。
+
+`desktop-venue/20261031-052256-580e3a99` **4項真正原生流程**通過。Sky實際Space一次、HUD30→29，之後操作員開AI至兩次原20點傷害，再停止AI／Pause／Resume，沒有姿態／RPC／武器注入。自己的AudioListener probe明確finish後才真正End／精確seal：
+
+| 證據 | 實際結果 |
+|---|---|
+| 保存的聲源序號 | 玩家1／敵軍2、4；事件tick287／439／459，播放觀察tick288／440／459，保存槍口逐軸核對一致，沒有重複cue |
+| PCM | 48000Hz stereo16-bit、1,287,168 frames／26.816秒、1257 callbacks、2,574,336 float samples；峰值0.158417、RMS0.00290234；WAV SHA `62e6035abbe5a8647d7b351d039a14032dc27749403449132a9458b675ddd648` |
+| 靜音 | AI尚未啟用／玩家尚未開火基線、Pause穩定段與無新發的Resume尾段峰值均0，cue總數保持3 |
+| 遊戲封存 | 314幀、耗彈1／命中0／擊殺0／中彈2／損耗40／健康60，回放與ledger一致、pending=false、活動0；最大來源年齡0.374625秒 |
+
+這些是本遊戲混音DSP與實際播放呼叫，沒有麥克風／OS loopback、GPU擷取或人員聽感。Probe只在明確Windows Development／可見untracked owner、全新絕對目錄才安裝；180秒／1600萬float／12000視窗／1024 cue，超限或格式變更不算complete。普通遊戲有音效但無診斷，Editor／Android不裝探針。所有播放射線已在**額外完整SQLite副本**核對，未直接開保留原DB或snapshot；稽核後18檔原件／snapshot SHA不變。
+
+普通無音訊診斷的 `20261031-052512-bdd7f05b` 七場五房獨立／單房重用／封存後Linked通過，581幀、最大來源年齡0.223837秒；不是25台。`20261031-052417-d15f5c04` 控制台自訂任務／動態名冊／觀戰及封存回放 **45項UI／native整合**通過，152幀、最大來源年齡0.137755秒；該組client為無圖形，瀏覽器SwiftShader。三組cleanup零錯誤、活動0，自己的SSD runtime在writer停止後由helper回F，18／14／26檔與保留原件逐檔SHA一致；來源及binary仍F，非F USB全資料配置。`unity-admission/20261031-052534-604e8f45` **8項無圖形**入場／撤銷／transport釋放／同admission重連通過，448幀、封存與回放一致、活動0。
+
+Quest真正Editor exit0，receipt UTC2026-10-30T21:34:56.0225326Z，與Desktop相同fingerprint及原scene／prefab ID；APK46,285,274 bytes、SHA `c1df68caf967e819c1ae0b9f9ca1dcd958c55cab9185419de386a81f2d244351`，v2簽章、min32／target35、code31／bundle0.27.0與六個ELF64 AArch64庫含libil2cpp核對通過。這次APK為Unity原始建置，沒有手動重封裝／重簽，未安裝頭盔。三組venue及admission共38個原生／API log未見指定Exception／NullReference／MissingReference／ObjectDisposed／IndexOutOfRange／Shader error；完整本機證據為artifacts/combat-audio-validation.json。本機原5080仍原API0.16／原歷史，未被測試替換。完整11項長期目標持續開發；玩家全身、完整動畫／聲學、複雜場地、原偶發姿態原因、長任務／跨機，以及Quest／VIVE／MR／廠商硬體／25台仍分別待驗。
+
 ## 2026-10-31：兩端姿態時序與受控丟包校準
 
 前輪玩家射擊效果已提交，屬實際進度；本輪從乾淨 `bcdeed9` 接續無頭盔PC主線，追查偶發姿態過期。新增明確選用的NativePoseTrace，分開記錄owner的RPC呼叫、server RPC接收／格式／節流／接受或拒絕、發布時的參戰轉換，以及>100ms主線程空窗。WorldCapture／WorldJournal／CombatJournal／ManagementApply／WorldPublish與玩家GPU讀回／PNG編碼／寫檔各自量測，使用Stopwatch及UTC ticks保留同主機階段時間。規範及操作見 [POSE_TIMING.md](POSE_TIMING.md)。

@@ -6,7 +6,8 @@ const visibilityNames = { Clear: '晴朗', Fog: '濃霧', Storm: '暴風雨' };
 export function mountReplay() {
   let recording = null, index = 0, cursor = 0, playing = false, active = false, lastNow = performance.now(), scene = null, loadEpoch = 0;
   function message(text, error = false) { $('replay-message').textContent = text; $('replay-message').classList.toggle('replay-error', error); }
-  function pause() { playing = false; $('replay-play').textContent = '播放'; }
+  function pause() { playing = false; $('replay-play').textContent = '播放'; scene?.weather.pause(); }
+  function soundState() { const on=scene?.weather.audio.state==='on';$('replay-sound').textContent=on?'音效：開啟':'音效：關閉';$('replay-sound').setAttribute('aria-pressed',String(on)); }
   async function load(text, epoch) {
     if (epoch !== loadEpoch) return;
     pause();
@@ -26,6 +27,8 @@ export function mountReplay() {
       $('replay-actor').replaceChildren(...[...actorOptions].map(([key, name]) => { const option = document.createElement('option'); option.value = key; option.textContent = name; return option; }));
       $('replay-timeline').max = recording.data.frames.length - 1; $('replay-camera').value = 'overview';
       scene.load(recording.data); scene.selected = $('replay-actor').value;
+      $('replay-sound').disabled=recording.data.environmentVersion!==1&&recording.data.combatAudioVersion!==1;
+      soundState();
       show(0); scene.resize();
       message(`已載入 ${recording.data.frames.length} 份快照、${recording.data.events.length} 筆事件；結束統計核對一致。`);
     } catch (error) { if (epoch === loadEpoch) message(error instanceof SyntaxError ? '無法讀取 JSON 紀錄。' : '無法載入：' + error.message, true); }
@@ -41,7 +44,7 @@ export function mountReplay() {
     $('replay-phase').textContent = phaseNames[frame.phase];
     $('replay-environment').textContent = `${frame.night ? '夜晚' : '白天'} · ${visibilityNames[frame.visibility]} · ${{ Hold: '守備', Patrol: '巡邏', Advance: '推進' }[frame.behavior]} · ${frame.autoAttack ? '自動攻擊' : '停止自動攻擊'}`;
     const traces = recording.data.events.filter(event => event.sequence <= frame.throughSequence && frame.tick - event.tick <= 6 && ['ShotFired', 'EnemyShot'].includes(event.kind));
-    scene.show(frame, recording.data.frames[Math.max(0, index - 1)], traces);
+    scene.show(frame, recording.data.frames[Math.max(0, index - 1)], traces,undefined,keepTime&&playing&&active&&document.visibilityState==='visible');
     $('replay-canvas').dataset.frame = index;
     $('replay-statistics').replaceChildren(...recording.frameStatistics[index].map(player => {
       const row = document.createElement('tr');
@@ -79,6 +82,8 @@ export function mountReplay() {
     if (playing) pause();
     else { if (cursor >= recording.duration) show(0); playing = true; lastNow = performance.now(); $('replay-play').textContent = '暫停'; }
   });
+  $('replay-sound').addEventListener('click',async()=>{if(!scene)return;const epoch=loadEpoch;await scene.weather.audio.toggle();if(epoch===loadEpoch)soundState();});
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState!=='visible')scene?.weather.pause();});
   $('replay-timeline').addEventListener('input', () => { pause(); show(Number($('replay-timeline').value)); });
   $('replay-back').addEventListener('click', () => { pause(); show(index - 1); });
   $('replay-next').addEventListener('click', () => { pause(); show(index + 1); });
@@ -103,6 +108,6 @@ export function mountReplay() {
   requestAnimationFrame(loop);
   return {
     active(value) { active = value; if (!value) pause(); else if (scene) requestAnimationFrame(() => scene.resize()); },
-    reset() { loadEpoch++; pause(); recording = null; index = 0; cursor = 0; $('replay-player').hidden = true; $('replay-file').value = ''; $('replay-statistics').replaceChildren(); $('replay-name').textContent = ''; $('replay-description').textContent = ''; $('replay-actor-info').textContent = ''; $('replay-actor').replaceChildren(); scene?.reset(); message('請載入範例或選擇模擬紀錄。'); }
+    reset() { loadEpoch++; pause(); recording = null; index = 0; cursor = 0; $('replay-player').hidden = true; $('replay-file').value = ''; $('replay-statistics').replaceChildren(); $('replay-name').textContent = ''; $('replay-description').textContent = ''; $('replay-actor-info').textContent = ''; $('replay-actor').replaceChildren(); scene?.reset();soundState();$('replay-sound').disabled=true; message('請載入範例或選擇模擬紀錄。'); }
   };
 }

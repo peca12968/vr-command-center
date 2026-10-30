@@ -1,0 +1,16 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a78a7bdd64bf0b447973c4ad4b962662, type: 3}
+  m_Name: CombatAudioAssets
+  m_EditorClassIdentifier: VrCommand.Runtime::VrCommand.Unity.CombatAudioAssets
+  rifle: {fileID: 8300000, guid: 8b754a851b65520292ffdc81839d902f, type: 3}
+  pistol: {fileID: 8300000, guid: 452eece87afc5f74915e1385678cd051, type: 3}

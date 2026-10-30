@@ -1,5 +1,7 @@
 # Quest 3 接入原型與工具鏈 v0.20
 
+2026-10-31 最新戰鬥音效為API／UI0.25、Unity0.27／code31／NGO25，93真正EditMode。新header combatAudioVersion1、actor原子presentationRunning及固定combat-audio-v1需來源／API／UI／全部遊戲端一起更新；舊header0不補聲。來源fingerprint新增WAV／meta及Resources資產引用，雙平台結果以最新PROGRESS／receipt為準。音效在Android正常接入，NativeCombatAudioProbe只限明確Windows Development，不把PC DSP或APK建置當頭盔聽感，見 [COMBAT_AUDIO](COMBAT_AUDIO.md)。
+
 2026-10-31 姿態時序patch為Unity0.26.1／code30、87真正EditMode，API／UI0.24及NGO24／player-fire-v1與網路資料保持；雙平台以最新PROGRESS／receipt為準。--vr-pose-trace僅明確Windows Development安裝，Android不啟用，不把本機診斷當頭盔證據。操作與邊界見 [POSE_TIMING](POSE_TIMING.md)。
 
 2026-10-31 最新換彈／合成手套為API／UI0.21、Unity0.23／code26／NGO22；weaponPresentationVersion1及weapon-actions-v1需來源／API／UI／全體遊戲端一起更新，舊資料保持0／舊外觀，不可降舊reader。保存時鐘、Tracked界線及實際證據見 [WEAPON_ACTIONS](WEAPON_ACTIONS.md)／PROGRESS。

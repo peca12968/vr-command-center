@@ -25,7 +25,7 @@ internal static class WorldChecks
             bridge.Apply(JsonSerializer.Deserialize<ManagementSnapshot>(json, new JsonSerializerOptions(JsonFormat.Options) { IncludeFields = true })!);
         }
         Refresh();
-        var header = WorldRecordingHeader.Create(id, queue.StreamId, "Simulation", [1], bridge.Props, assetSet: WorldAssetSets.PlayerFire, enemyPresentationVersion: 1, weaponPresentationVersion: 1, enemyFireVersion: 1, playerFireVersion: 1);
+        var header = WorldRecordingHeader.Create(id, queue.StreamId, "Simulation", [1], bridge.Props, assetSet: WorldAssetSets.PlayerFire, enemyPresentationVersion: 1, weaponPresentationVersion: 1, enemyFireVersion: 1, playerFireVersion: 1, combatAudioVersion: 1);
         var field = Copy(header); field.assetSet = WorldAssetSets.FieldProps; WorldRecordingValidation.Header(field);
         check(WorldAssetSets.Supported(WorldAssetSets.ServiceRifle) && field.assetSet == WorldAssetSets.FieldProps, "New rifle and retained field-prop profiles are explicitly supported without changing the default");
         check(WorldRecordingHeader.Create(id, queue.StreamId, "Simulation", [1], bridge.Props).assetSet == WorldAssetSets.Legacy, "Existing recording producers retain their original primitive asset profile");
@@ -45,6 +45,8 @@ internal static class WorldChecks
         wrong = Copy(header); wrong.assetSet = "field-props-v99";
         Reject<ArgumentException>(() => store.Open(id, wrong, owner), "Unknown prop asset profiles fail closed");
         check(store.Open(id, header, owner).AcceptedSequence == 0 && store.Open(id, header, owner).AcceptedSequence == 0, "Immutable recording header is retryable");
+        var silentRetry=Copy(header);silentRetry.combatAudioVersion=0;
+        Reject<InvalidOperationException>(()=>store.Open(id,silentRetry,owner),"Accepted audio policy cannot be silently removed from an immutable recording");
         Reject<InvalidOperationException>(() => store.Open(id, legacy, owner), "An accepted recording cannot switch appearance profiles on retry");
         Reject<InvalidOperationException>(() => store.Open(id, field, owner), "A rifle recording cannot be silently downgraded to the old weapon appearance");
         var noPoseHeader = Copy(header); noPoseHeader.assetSet = WorldAssetSets.ServiceRifle; noPoseHeader.enemyPresentationVersion = 0;

@@ -1,5 +1,7 @@
 # 持久世界錄製與觀察 v0.16
 
+2026-10-31 新來源另有combatAudioVersion1，缺失保持0；只依已接受的玩家／敵軍fire witness重建短聲音，不保存或宣稱原始音軌。新版本、音效gesture、跳轉／過期抑制及NGO25協同更新見 [COMBAT_AUDIO](COMBAT_AUDIO.md)。world schema1與原binary checksum保持，schema相同不代表可降舊reader。
+
 2026-10-31 最新換彈／合成手套為API／UI0.21、Unity0.23／code26／NGO22；weaponPresentationVersion1及weapon-actions-v1需來源／API／UI／全體遊戲端一起更新，舊資料保持0／舊外觀，不可降舊reader。保存時鐘、Tracked界線及實際證據見 [WEAPON_ACTIONS](WEAPON_ACTIONS.md)／PROGRESS。
 
 2026-10-30 最新人形敵軍接入為API／UI0.20、Unity0.22／Android code25／NGO21，header enemyPresentationVersion1及combatants-v1需協同更新；舊來源／外觀保留，不能降舊reader。保存姿態、原命中盒與限制見 [ENEMY_PRESENTATION](ENEMY_PRESENTATION.md)，真正建置／PC結果以 PROGRESS 為準。

@@ -25,6 +25,7 @@ namespace VrCommand.Unity
         public NetworkVariable<WeatherState> Presentation = new NetworkVariable<WeatherState>();
         public UnityWeatherView environmentView;
         private double observed;
+        public bool AudioRunning=>IsSpawned && Presentation.Value.phase==1 && Time.realtimeSinceStartupAsDouble-observed<=1.5;
         private static readonly string[] WeatherNames = { "Clear", "Rain", "Fog", "Storm" }, PhaseNames = { "Preparing", "Running", "Paused", "Ended" };
         public override void OnNetworkSpawn()
         {

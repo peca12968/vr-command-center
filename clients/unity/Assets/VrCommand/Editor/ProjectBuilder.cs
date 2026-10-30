@@ -36,6 +36,7 @@ namespace VrCommand.Unity.Editor
             Directory.CreateDirectory(Generated);
             AssetDatabase.Refresh();
             ConfigureQuest();
+            PrepareCombatAudio();
             using (var fieldProps = new FieldPropModels()) { }
             using (var rifle = new ServiceRifleModels()) { }
             using (var opponents = new EnemyModels()) { }
@@ -50,10 +51,10 @@ namespace VrCommand.Unity.Editor
             var bootstrap = network == null ? null : network.GetComponent<VenueBootstrap>();
             var manager = network == null ? null : network.GetComponent<NetworkManager>();
             if (state == null || state.GetComponent<UnityWeatherView>() == null || bootstrap == null || manager == null
-                || bootstrap.sceneAuthority != state.GetComponent<SceneAuthority>() || (manager.NetworkConfig.ProtocolVersion < 16 || manager.NetworkConfig.ProtocolVersion > 24)
+                || bootstrap.sceneAuthority != state.GetComponent<SceneAuthority>() || (manager.NetworkConfig.ProtocolVersion < 16 || manager.NetworkConfig.ProtocolVersion > 25)
                 || manager.NetworkConfig.PlayerPrefab == null)
                 throw new BuildFailedException("Generated arena is incompatible. Rebuild Arena, then rebuild ALL player targets together.");
-            manager.NetworkConfig.ProtocolVersion = 24;
+            manager.NetworkConfig.ProtocolVersion = 25;
             RequireNetworkIdentity(state.GetComponent<NetworkObject>());
             RequireNetworkIdentity(manager.NetworkConfig.PlayerPrefab.GetComponent<NetworkObject>());
             if (PrefabUtility.SavePrefabAsset(manager.NetworkConfig.PlayerPrefab) == null)
@@ -65,6 +66,25 @@ namespace VrCommand.Unity.Editor
             Debug.Log("VR Command project prepared. Hardware and multiplayer validation remain required.");
         }
 
+        private static void PrepareCombatAudio()
+        {
+            AudioClip Clip(string name)
+            {
+                var path="Assets/VrCommand/Audio/"+name;
+                var importer=AssetImporter.GetAtPath(path) as AudioImporter;if(importer==null)throw new BuildFailedException("Missing combat PCM: "+name);
+                var settings=importer.defaultSampleSettings;
+                if(settings.loadType!=AudioClipLoadType.DecompressOnLoad || settings.compressionFormat!=AudioCompressionFormat.PCM
+                    || settings.sampleRateSetting!=AudioSampleRateSetting.PreserveSampleRate || !settings.preloadAudioData || !importer.forceToMono)
+                {settings.loadType=AudioClipLoadType.DecompressOnLoad;settings.compressionFormat=AudioCompressionFormat.PCM;settings.sampleRateSetting=AudioSampleRateSetting.PreserveSampleRate;
+                    importer.defaultSampleSettings=settings;settings.preloadAudioData=true;importer.defaultSampleSettings=settings;importer.forceToMono=true;importer.SaveAndReimport();}
+                return AssetDatabase.LoadAssetAtPath<AudioClip>(path);
+            }
+            const string destination="Assets/VrCommand/Resources/VrCommand/CombatAudioAssets.asset";
+            var assets=AssetDatabase.LoadAssetAtPath<CombatAudioAssets>(destination);
+            if(assets==null){assets=ScriptableObject.CreateInstance<CombatAudioAssets>();AssetDatabase.CreateAsset(assets,destination);}
+            assets.rifle=Clip("rifle-shot-v1.wav");assets.pistol=Clip("pistol-shot-v1.wav");
+            if(assets.rifle==null||assets.pistol==null)throw new BuildFailedException("Combat PCM import failed.");EditorUtility.SetDirty(assets);
+        }
         private static void RequireNetworkIdentity(NetworkObject value)
         {
             if (value == null || new SerializedObject(value).FindProperty("GlobalObjectIdHash").uintValue == 0)
@@ -75,8 +95,8 @@ namespace VrCommand.Unity.Editor
         {
             PlayerSettings.companyName = "VR Command";
             PlayerSettings.productName = "VR Command Quest";
-            PlayerSettings.bundleVersion = "0.26.1";
-            PlayerSettings.Android.bundleVersionCode = 30;
+            PlayerSettings.bundleVersion = "0.27.0";
+            PlayerSettings.Android.bundleVersionCode = 31;
             PlayerSettings.insecureHttpOption = InsecureHttpOption.DevelopmentOnly;
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, "com.vrcommand.quest");
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
@@ -156,7 +176,7 @@ namespace VrCommand.Unity.Editor
             var manager = network.GetComponent<NetworkManager>();
             var bootstrap = network.GetComponent<VenueBootstrap>();
             manager.NetworkConfig = new NetworkConfig { NetworkTransport = network.GetComponent<UnityTransport>(), TickRate = 30,
-                ConnectionApproval = true, EnableSceneManagement = true, ForceSamePrefabs = true, ProtocolVersion = 24 };
+                ConnectionApproval = true, EnableSceneManagement = true, ForceSamePrefabs = true, ProtocolVersion = 25 };
             manager.NetworkConfig.PlayerPrefab = CreateAvatar(avatarMaterial, steel);
             var list = AssetDatabase.LoadAssetAtPath<NetworkPrefabsList>(Generated + "/NetworkPrefabs.asset");
             if (list == null)
@@ -258,7 +278,9 @@ namespace VrCommand.Unity.Editor
                 .Concat(Directory.GetFiles(Path.Combine(project, "Packages/com.unity.transport"), "*", SearchOption.AllDirectories))
                 .Where(file => file.EndsWith(".cs", StringComparison.Ordinal) || file.EndsWith(".asmdef", StringComparison.Ordinal))
                 .Concat(Directory.GetFiles(Path.Combine(project, "Assets/VrCommand/Resources"), "*", SearchOption.AllDirectories)
-                    .Where(file => file.EndsWith(".json", StringComparison.Ordinal) || file.EndsWith(".shader", StringComparison.Ordinal)))
+                    .Where(file => file.EndsWith(".json", StringComparison.Ordinal) || file.EndsWith(".shader", StringComparison.Ordinal) || file.EndsWith(".asset", StringComparison.Ordinal) || file.EndsWith(".asset.meta", StringComparison.Ordinal)))
+                .Concat(Directory.GetFiles(Path.Combine(project,"Assets/VrCommand/Audio"),"*",SearchOption.AllDirectories)
+                    .Where(file=>file.EndsWith(".wav",StringComparison.Ordinal)||file.EndsWith(".wav.meta",StringComparison.Ordinal)))
                 .Concat(new[] { Path.Combine(project, "Packages/manifest.json"), Path.Combine(project, "Packages/packages-lock.json"), Path.Combine(project, "Packages/com.unity.transport/UPSTREAM.json"), Path.Combine(project, "ProjectSettings/ProjectVersion.txt") })
                 .OrderBy(file => Path.GetRelativePath(project, file).Replace('\\', '/'), StringComparer.Ordinal);
             using (var memory = new MemoryStream())

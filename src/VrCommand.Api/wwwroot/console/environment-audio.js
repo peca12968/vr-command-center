@@ -1,5 +1,6 @@
+import {CombatAudio} from './combat-audio.js';
 export class EnvironmentAudio {
-  constructor(canvas) { this.canvas = canvas; this.enabled = false; this.epoch = 0; this.state = 'off'; this.level = 0; }
+  constructor(canvas) { this.canvas = canvas; this.enabled = false; this.epoch = 0; this.state = 'off'; this.level = 0; this.combat=new CombatAudio(this); }
   status(value) { this.state = value; this.canvas.dataset.weatherAudio = value; }
   async toggle() {
     if (this.enabled) { this.reset(); return; }
@@ -7,6 +8,7 @@ export class EnvironmentAudio {
     try {
       this.context ??= new AudioContext(); await this.context.resume();
       if (current !== this.epoch) return;
+      await this.combat.prepare(this.context);if(current!==this.epoch)return;
       this.gain ??= this.context.createGain(); this.gain.gain.value = .45;
       if (!this.analyser) { this.analyser = this.context.createAnalyser(); this.analyser.fftSize = 256; this.gain.connect(this.analyser); this.analyser.connect(this.context.destination); }
       this.buffers ??= await Promise.all(['rain-loop.wav', 'thunder.wav'].map(async name => {
@@ -18,6 +20,7 @@ export class EnvironmentAudio {
     } catch { if (current === this.epoch) { this.enabled = false; this.stop(); this.status('error'); } }
   }
   stop() {
+    this.combat?.pause();
     for (const name of ['rain', 'thunder']) if (this[name]) { try { this[name].stop(); } catch { } this[name].disconnect(); this[name] = null; }
     this.rainGain?.disconnect(); this.rainGain = null;
   }
@@ -38,7 +41,7 @@ export class EnvironmentAudio {
   pause() { this.level = 0; this.stop(); }
   peak() { if (!this.analyser) return 0; const values = new Float32Array(this.analyser.fftSize); this.analyser.getFloatTimeDomainData(values); return Math.max(...values.map(Math.abs)); }
   reset() {
-    this.epoch++; this.enabled = false; this.level = 0; this.stop(); this.rainGain?.disconnect(); this.rainGain = null;
+    this.epoch++; this.enabled = false; this.level = 0; this.stop(); this.combat.reset(); this.rainGain?.disconnect(); this.rainGain = null;
     this.status('off'); this.context?.suspend().catch(() => {}); this.canvas.dataset.thunderCount = '0'; this.canvas.dataset.weatherAudioPeak = '0';
   }
 }

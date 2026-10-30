@@ -16,18 +16,18 @@ namespace VrCommand.Unity
         public bool walking;
         public long presentationTick, reloadUntilTick;
         public int room, health, magazine, reserve;
-        public bool enemy, connected, reloading;
+        public bool enemy, connected, reloading, presentationRunning;
         public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
         {
             serializer.SerializeValue(ref id); serializer.SerializeValue(ref position); serializer.SerializeValue(ref room);
             serializer.SerializeValue(ref health); serializer.SerializeValue(ref magazine); serializer.SerializeValue(ref reserve);
             serializer.SerializeValue(ref enemy); serializer.SerializeValue(ref connected); serializer.SerializeValue(ref reloading);
-            serializer.SerializeValue(ref facing); serializer.SerializeValue(ref walking); serializer.SerializeValue(ref presentationTick); serializer.SerializeValue(ref reloadUntilTick);
+            serializer.SerializeValue(ref facing); serializer.SerializeValue(ref walking); serializer.SerializeValue(ref presentationTick); serializer.SerializeValue(ref reloadUntilTick); serializer.SerializeValue(ref presentationRunning);
             serializer.SerializeValue(ref fireSequence);serializer.SerializeValue(ref fireTickPlusOne);serializer.SerializeValue(ref fireOrigin);serializer.SerializeValue(ref fireDirection);
         }
         public bool Equals(CombatActorState other) => id.Equals(other.id) && position == other.position && room == other.room
             && health == other.health && magazine == other.magazine && reserve == other.reserve && enemy == other.enemy
-            && connected == other.connected && reloading == other.reloading && facing == other.facing && walking == other.walking && presentationTick == other.presentationTick && reloadUntilTick == other.reloadUntilTick && fireSequence==other.fireSequence && fireTickPlusOne==other.fireTickPlusOne && fireOrigin==other.fireOrigin && fireDirection==other.fireDirection;
+            && connected == other.connected && reloading == other.reloading && facing == other.facing && walking == other.walking && presentationTick == other.presentationTick && reloadUntilTick == other.reloadUntilTick && presentationRunning==other.presentationRunning && fireSequence==other.fireSequence && fireTickPlusOne==other.fireTickPlusOne && fireOrigin==other.fireOrigin && fireDirection==other.fireDirection;
     }
     public struct CombatPropState : INetworkSerializable, IEquatable<CombatPropState>
     {
@@ -77,7 +77,7 @@ namespace VrCommand.Unity
             if (Outbox == null || management == null || session.World.Phase != WorldPhase.Preparing) throw new InvalidOperationException("Initialize a preparing world and combat source first.");
             recordingStart = Time.realtimeSinceStartupAsDouble;
             var header = WorldRecordingHeader.Create(Guid.Parse(management.id), Outbox.StreamId, Outbox.Origin, management.roomIds, session.Props,
-                DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), assetSet: WorldAssetSets.PlayerFire, enemyPresentationVersion: EnemyPresentation.Version, weaponPresentationVersion: WeaponPresentation.Version, enemyFireVersion: EnemyFirePresentation.Version, playerFireVersion: PlayerFirePresentation.Version);
+                DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), assetSet: WorldAssetSets.PlayerFire, enemyPresentationVersion: EnemyPresentation.Version, weaponPresentationVersion: WeaponPresentation.Version, enemyFireVersion: EnemyFirePresentation.Version, playerFireVersion: PlayerFirePresentation.Version, combatAudioVersion: CombatAudioPresentation.Version);
             Recording = WorldOutbox.Create(path, header, new UnityWorldCodec());
             if (!CaptureWorld(true)) throw new InvalidOperationException("Initial world frame could not be saved.");
         }
@@ -271,9 +271,9 @@ namespace VrCommand.Unity
             GetComponent<SceneAuthority>()?.PublishTick(frame.Tick, frame.Phase.ToString());
             var actors = new List<CombatActorState>();
             foreach (var player in frame.Players) actors.Add(new CombatActorState { id = player.Id.ToString("D"), room = player.RoomId, position = Vector(player.Head),
-                health = player.Health, magazine = player.Magazine, reserve = player.Reserve, connected = player.Connected, reloading = player.Reloading, presentationTick = frame.Tick, reloadUntilTick = player.ReloadUntilTick, fireSequence=player.Fire.Sequence,fireTickPlusOne=player.Fire.TickPlusOne,fireOrigin=Vector(player.Fire.Origin),fireDirection=Vector(player.Fire.Direction) });
+                health = player.Health, magazine = player.Magazine, reserve = player.Reserve, connected = player.Connected, reloading = player.Reloading, presentationTick = frame.Tick, presentationRunning=frame.Phase==WorldPhase.Running, reloadUntilTick = player.ReloadUntilTick, fireSequence=player.Fire.Sequence,fireTickPlusOne=player.Fire.TickPlusOne,fireOrigin=Vector(player.Fire.Origin),fireDirection=Vector(player.Fire.Direction) });
             foreach (var npc in frame.Enemies) actors.Add(new CombatActorState { id = npc.Id.ToString("D"), room = npc.RoomId, position = Vector(npc.Feet), health = npc.Health, enemy = true, connected = true,
-                facing = Vector(npc.Forward), walking = npc.Walking, presentationTick = frame.Tick,fireSequence=npc.Fire.Sequence,fireTickPlusOne=npc.Fire.TickPlusOne,fireOrigin=Vector(npc.Fire.Origin),fireDirection=Vector(npc.Fire.Direction) });
+                facing = Vector(npc.Forward), walking = npc.Walking, presentationTick = frame.Tick,presentationRunning=frame.Phase==WorldPhase.Running,fireSequence=npc.Fire.Sequence,fireTickPlusOne=npc.Fire.TickPlusOne,fireOrigin=Vector(npc.Fire.Origin),fireDirection=Vector(npc.Fire.Direction) });
             for (var index = 0; index < actors.Count; index++)
                 if (index >= Actors.Count) Actors.Add(actors[index]); else if (!Actors[index].Equals(actors[index])) Actors[index] = actors[index];
             while (Actors.Count > actors.Count) Actors.RemoveAt(Actors.Count - 1);

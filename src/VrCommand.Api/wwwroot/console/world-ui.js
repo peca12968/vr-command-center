@@ -42,7 +42,7 @@ export function mountWorld(getKey, unauthorized) {
   }
   function status() {
     if (!info) return;
-    $('world-sound').disabled = info.header.environmentVersion !== 1 || scene?.weather.audio.state === 'loading';
+    $('world-sound').disabled = info.header.environmentVersion !== 1 && info.header.combatAudioVersion !== 1 || scene?.weather.audio.state === 'loading';
     const audio = scene?.weather.audio.state || 'off';
     $('world-sound').textContent = ({ on: '音效：開啟', off: '音效：關閉', loading: '音效載入中…', error: '音效：重試開啟' })[audio];
     $('world-sound').setAttribute('aria-pressed', String(audio === 'on'));
@@ -133,7 +133,7 @@ export function mountWorld(getKey, unauthorized) {
     } catch (error) { if (request === epoch && !signal.aborted) { connected = false; message('觀戰已中斷：' + error.message + '；可重新連接。', true); status(); } }
   }
   $('world-refresh').addEventListener('click', refresh);
-  $('world-sound').addEventListener('click', async () => { if (scene?.weather.version === 1) { const pending = scene.weather.audio.toggle(); status(); await pending; if (active && getKey()) status(); } });
+  $('world-sound').addEventListener('click', async () => { if (scene?.weather.version === 1 || scene?.weather.audio.combat.version === 1) { const pending = scene.weather.audio.toggle(); status(); await pending; if (active && getKey()) status(); } });
   $('world-recording').addEventListener('change', () => { stop(); cameras.bind(null); cameraForm.reset(); info = frame = previous = null; $('world-player').hidden = true; message('已切換場次，請開始觀戰或回放。'); });
   $('world-live').addEventListener('click', () => connect('live'));
   $('world-replay').addEventListener('click', () => connect('replay'));

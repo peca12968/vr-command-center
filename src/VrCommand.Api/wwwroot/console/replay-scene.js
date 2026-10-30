@@ -49,7 +49,11 @@ export class ReplayScene {
     if(![0,1].includes(recording.enemyFireVersion??0) || assetSet===COMBAT_EFFECT_ASSETS && (recording.enemyFireVersion!==1 || recording.enemyPresentationVersion!==1 || recording.weaponPresentationVersion!==1))throw new Error('不支援的敵軍射擊效果版本。');
     if(![0,1].includes(recording.playerFireVersion??0)||assetSet===PLAYER_FIRE_ASSETS&&(recording.playerFireVersion!==1||recording.enemyFireVersion!==1||recording.enemyPresentationVersion!==1||recording.weaponPresentationVersion!==1))throw new Error('不支援的玩家射擊效果版本。');
     this.roomIds = [...recording.roomIds];
+    this.audioRoom='all';
+    this.weather.audio.reset();
     this.weather.load(recording);
+    if(![0,1].includes(recording.combatAudioVersion??0)||recording.combatAudioVersion===1&&(recording.enemyFireVersion!==1||recording.playerFireVersion!==1))throw new Error('不支援的戰鬥音效版本。');
+    this.weather.audio.combat.load(recording);
     this.clear(this.stage); this.clear(this.traces); this.actors.clear(); this.selected = ''; this.follow = false;
     this.rifles?.dispose(); this.rifles = assetSet===PLAYER_FIRE_ASSETS ? firingRifleFactory() : [WEAPON_ACTION_ASSETS,ARMED_ASSETS,COMBAT_EFFECT_ASSETS,PLAYER_FIRE_ASSETS].includes(assetSet) ? weaponActionsFactory() : [RIFLE_ASSETS, COMBATANT_ASSETS].includes(assetSet) ? serviceRifleFactory() : null;
     this.opponents?.dispose(); this.opponents = [COMBAT_EFFECT_ASSETS,PLAYER_FIRE_ASSETS].includes(assetSet) ? firingOpponentFactory() : assetSet === ARMED_ASSETS ? armedOpponentFactory() : [COMBATANT_ASSETS, WEAPON_ACTION_ASSETS].includes(assetSet) ? opponentFactory() : null;
@@ -158,10 +162,13 @@ export class ReplayScene {
       this.scene.fog = frame.visibility === 'Clear' ? null : new THREE.FogExp2(frame.night ? 0x111e25 : 0x637266, frame.visibility === 'Fog' ? .035 : .015);
     }
     this.draw();
+    this.weather.audio.combat.show(frame,this.camera,this.audioRoom,continuous);
+    this.canvas.dataset.combatAudioPeak=String(this.weather.audio.peak());
   }
   select(key) { this.selected = key; this.draw(); }
   fitRadius(radius) { const aspect = this.canvas.parentElement.clientWidth / Math.max(1, this.canvas.parentElement.clientHeight); return radius * Math.max(1, 1.5 / Math.max(.4, aspect)); }
   focus(room) {
+    this.audioRoom=String(room);this.weather.audio.combat.pause();
     if (room === 'all') { this.preset('overview'); return; }
     const id = Number(room); if (!this.roomIds?.includes(id)) return;
     this.follow = false; this.target.set(roomX(id), .8, 0); this.radius = Math.min(240, this.fitRadius(15)); this.draw();
