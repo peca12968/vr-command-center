@@ -1,6 +1,7 @@
 import { mountWorld } from './world-ui.js';
 import { mountReplay } from './replay-ui.js';
 import { mountLayout } from './layout-ui.js';
+import { mountReport } from './report-ui.js';
 const replay = mountReplay();
 const $ = id => document.getElementById(id);
 const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫停', Ended: '已結束' };
@@ -8,11 +9,13 @@ const weatherNames = { Clear: '晴朗', Rain: '下雨', Fog: '濃霧', Storm: '�
 const behaviorNames = { Hold: '守備', Patrol: '巡邏', Advance: '推進' };
 const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: null, rooms: [], missions: [], catalog: [], launchPinned: null, history: null, draftBase: null, draftChanged: false, draftSavedAt: '', sessions: [], session: null, selected: '', pending: null, props: [], prop: -1, environmentSequence: null, enemiesSequence: null };
 const world = mountWorld(() => state.key, logout);
+const report = mountReport(() => state, logout);
 const placement = mountLayout({ api, epoch: () => state.epoch, active: () => !!state.actor, editable: master,
   draft: () => ({ experienceMode: $('draft-mode').value, mode: $('layout-session-mode').value, enemyCount: Number($('draft-count').value), props: structuredClone(state.props) }),
   selection: () => ({ id: $('launch-mission').value, mode: $('launch-mode').value }), changed: applyPermissions,
   selectProp: index => { if (!state.props[index]) return; state.prop = index; renderProps(); $('prop-select').focus(); } });
 let timer;
+let selectionEpoch = 0;
 
 function notify(message, error = false) {
   $('notice').textContent = message;
@@ -70,6 +73,8 @@ async function run(action) {
   finally { state.busy = false; applyPermissions(); }
 }
 function logout() {
+  selectionEpoch++;
+  report.reset(); state.statistics = null;
   replay.active(false); replay.reset(); world.active(false); world.reset();
   state.epoch++; state.key = ''; state.actor = null; state.selected = ''; state.session = null; state.pending = null;
   state.rooms = []; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
@@ -121,7 +126,7 @@ async function refreshData(epoch) {
   const editedSeries = state.catalog.find(row => row.mission.id === edit)?.seriesId;
   state.launchPinned = prior && !heads.some(row => row.mission.id === launch) ? prior : null;
   state.rooms = rooms; state.catalog = heads; state.missions = heads.map(row => row.mission); state.sessions = sessions;
-  if (!sessions.some(s => s.id === state.selected)) state.selected = sessions[0]?.id || '';
+  if (!sessions.some(s => s.id === state.selected)) { report.reset(); state.statistics = null; state.selected = sessions[0]?.id || ''; }
   missionOptions(launch, heads.find(row => row.seriesId === editedSeries)?.mission.id || edit);
   draftStatus();
   fillOptions('session-select', sessions.length ? sessions.map(s => [s.id, `${phases[s.state]} · ${s.mission.definition.name} · 房 ${s.roomIds.join('、')}`]) : [['', '目前沒有場次']], state.selected);
@@ -136,7 +141,7 @@ async function refreshData(epoch) {
     state.session = session;
     if (previous?.id !== session.id) { loadEnvironment(); loadEnemies(); }
     renderSession(statistics, events);
-  } else { state.session = null; $('session-panel').hidden = true; }
+  } else { state.session = null; state.statistics = null; report.reset(); $('session-panel').hidden = true; }
   $('last-update').textContent = '更新於 ' + time(Date.now());
   applyPermissions();
 }
@@ -151,9 +156,11 @@ function renderRooms() {
 }
 async function selectSession(id) {
   if (state.pending || state.busy) { notify('請先確認目前命令的結果。', true); return; }
-  if (state.refreshPromise) { try { await state.refreshPromise; } catch { /* Refresh below reports errors. */ } }
-  state.selected = id; state.session = null;
+  const selection = ++selectionEpoch, epoch = state.epoch;
+  report.reset(); state.statistics = null; state.selected = id; state.session = null;
   $('session-panel').hidden = true;
+  if (state.refreshPromise) { try { await state.refreshPromise; } catch { /* Refresh below reports errors. */ } }
+  if (selection !== selectionEpoch || epoch !== state.epoch) return;
   try { await refresh(); } catch (error) { showRefreshError(error); }
 }
 function applyPermissions() {
@@ -188,6 +195,7 @@ function applyPermissions() {
 function row(cells) { const tr = element('tr'); for (const value of cells) { const td = element('td'); if (value instanceof Node) td.append(value); else td.textContent = value; tr.append(td); } return tr; }
 function emptyTable(id, columns, message) { const tr = element('tr'), td = element('td', message, 'empty-cell'); td.colSpan = columns; tr.append(td); $(id).replaceChildren(tr); }
 function renderSession(statistics, events) {
+  state.statistics = statistics; report.update();
   const session = state.session;
   $('session-panel').hidden = false;
   $('session-name').textContent = session.mission.definition.name;

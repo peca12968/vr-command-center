@@ -236,6 +236,7 @@ async function main() {
     page.once('dialog', dialog => dialog.accept()); await page.locator('[data-command=End]').click();
     await page.waitForFunction(() => document.querySelector('#session-phase').textContent === '已結束' && document.querySelector('#telemetry-status').textContent.includes('尚未確認完整'));
     check(await page.locator('#session-panel').isVisible() && await page.locator('#include-ended').isChecked(), 'Ending a bound stream retains its archived session and visibly pending final statistics');
+    check(await page.locator('#export-report').isDisabled(), 'Unsealed ended session cannot offer a final report download');
     await page.screenshot({ path: path.join(screenshots, 'telemetry-pending.png'), fullPage: true });
     await api('/sessions/' + linked.id + '/combat-stream/batch', 'POST', [{ streamId, streamSequence: 1, observedSequence: observed.sequence,
       report: { reportId: randomUUID(), kind: 'ShotFired', origin: 'Simulation', playerId: streamedPlayer.id, shotId: randomUUID() } }], 'GameServer');
@@ -246,6 +247,8 @@ async function main() {
     await page.locator('#refresh').click();
     await page.waitForFunction(() => document.querySelector('#telemetry-status').textContent.includes('全部確認並封存'));
     check((await api('/sessions/' + linked.id + '/statistics')).pendingTelemetry === false, 'Final-report UI changes only after the server accepts the exact seal boundary');
+    await page.waitForFunction(() => !document.querySelector('#export-report').disabled);
+    await require('./report-browser.cjs')({ context, tokens, base, api, session, linked, screenshots, check });
     await page.locator('#tab-replay').click(); await page.locator('#replay-example').click();
     await page.waitForFunction(() => !document.querySelector('#replay-player').hidden && Number(document.querySelector('#replay-canvas').dataset.triangles) > 0);
     check((await page.locator('#replay-message').innerText()).includes('統計核對一致') && (await page.locator('#replay-time').innerText()).includes('10.40'), 'Real WebGL viewer loads the recorded geometric simulation and validates its final statistics');

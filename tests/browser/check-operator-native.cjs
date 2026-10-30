@@ -229,6 +229,22 @@ async function main() {
     const stats = await api('/sessions/' + session + '/statistics');
     check(stats.origin === 'Simulation' && !stats.pendingTelemetry && stats.players.some(p => p.hitsReceived > 0), 'UI-controlled AI produces sealed actual-native combat statistics');
     check(stats.players.some(p => p.playerId === removedPeer.id && p.name === 'Peer 02') && stats.players.some(p => p.playerId === replacement.id), 'Final native replay / ledger preserves removed and replacement player history');
+    await page.locator('#tab-operations').click(); await page.locator('#refresh').click();
+    await until(async () => await page.locator('#export-report').isEnabled(), 'native final report export');
+    const downloading = page.waitForEvent('download'); await page.locator('#export-report').click();
+    const downloaded = await downloading, reportBytes = await fs.readFile(await downloaded.path());
+    const reportRows = require('./csv.cjs')(reportBytes), finalSession = await api('/sessions/' + session);
+    check(downloaded.suggestedFilename() === `vr-command-report-v1-${session}.csv` && reportRows.length === stats.players.length
+      && reportRows.every(row => row.origin === 'Simulation' && row.sessionId === session && Number(row.throughSequence) === finalSession.sequence
+        && Number(row.finalStreamSequence) === finalSession.combatStream.acceptedSequence),
+      'Actual native sealed mission downloads a final CSV with exact source, player count and stream boundary');
+    check(reportRows.every(row => {
+      const metric = stats.players.find(player => player.playerId === row.playerId);
+      return metric && row.playerName === metric.name && ['ammoUsed','shotsHit','kills','damageTaken','hitsReceived','accuracyPercent','health']
+        .every(key => Number(row[key]) === metric[key]);
+    }) && reportRows.some(row => row.playerId === removedPeer.id), 'Downloaded native CSV matches every ledger / replay statistic and retains the removed peer');
+    await fs.writeFile(path.join(evidence, 'final-report.csv'), reportBytes);
+    await page.screenshot({ path: path.join(evidence, 'final-report.png'), fullPage: true });
     check((await api('/sessions')).length === 0, 'Operator End releases the round'); check(errors.length === 0, 'No browser page errors');
     await fs.writeFile(path.join(evidence, 'summary.json'), JSON.stringify({ sessionId: session, mission, statistics: stats, camera, preciseCamera, precisePose, checks, browserRenderer: 'Chromium SwiftShader; native GPU rendering requires separate inspection', pageErrors: errors }, null, 2));
     await fs.writeFile(path.join(directory, 'end.request'), '');

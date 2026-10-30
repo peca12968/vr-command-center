@@ -31,6 +31,8 @@ python scripts/start-desktop-control.py --runtime-root $operatorData --visible-r
 
 操作員 End 某場後，工具等雙管道封存並停止該場自有 native 程序，仍可在時限內開下一場；舊回放／統計保留。關閉可操作玩家、Ctrl+C、時限到，或在該次目錄建立空白 `end.request`，會結束所有已接入場次並收尾。工具不是正式場館服務管理器、世界崩潰恢復或任意外部 API 啟動器。
 
+API／UI0.27 可在 End 且戰鬥精確 seal 後，從任務統計下載[最終 CSV](REPORTS.md)，含離場玩家與來源／封存序號。這不取代世界錄影自己的 seal；49 項 UI／native 已核對下載與同次 ledger／回放，實測條件見 PROGRESS。原5080仍是保留歷史的舊API，請使用工具新開的隔離控制台。
+
 `ready.json` 保存自己的 URL／runtime 及 build receipt；`operator-status.json` 從實際接受的世界幀記錄 phase／tick／環境／AI／連線玩家，不是自造控制回應。持續量測來源 UTC 年齡，維持原 1.5 秒門檻，過期即失敗並保留 journal。`summary.json` 及 `cleanup.json` 分開記錄封存／報表一致性與清理／runtime 快照；清理失敗非零退出。動態名冊的最終統計按持久 PlayerJoined 歷史核對，不丟掉已離場者。
 
 ## 重複驗證

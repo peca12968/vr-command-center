@@ -4,7 +4,9 @@
 
 依 2026-10-29 的使用者指示，**優先開發 Meta Quest 3**，暫以 Android 獨立執行為工作假設；VIVE 延後接入，共用架構與原始雙平台目標保留。
 
-目前為 **API v0.26／Unity 遊戲端 v0.28 原型**。真正 Editor 已完成 Prepare、102 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 26，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
+目前為 **API v0.27／Unity 遊戲端 v0.28 原型**。真正 Editor 已完成 Prepare、102 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 26，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
+
+新增 [最終任務報表 CSV](docs/REPORTS.md)：結束並完成戰鬥精確封存後，可下載含離場玩家、原任務版本、Simulation／GameServer來源及封存序號的逐玩家數據。後端獨立檢查權限與完整性；下載不跨登入或場次。這是最終戰鬥 ledger，世界錄影完整性另有驗收，不代表頭盔／25台通過。
 
 較窄的 [managed SDK 檢查](docs/UNITY_SDK_CHECK.md) 仍可補充 API／直接參考診斷，其本身不執行 Unity 或產出播放器；目前較強的真正 Editor、102 項測試及 binary 結果以 PROGRESS 為準。
 

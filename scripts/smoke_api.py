@@ -13,6 +13,8 @@ import uuid
 import secrets
 import sys
 import sqlite3
+import csv
+import io
 from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
 
@@ -29,7 +31,7 @@ checks = 0
 tokens = {name: secrets.token_urlsafe(32) for name in ["Master", "GameServer", *[f"Room{i}" for i in range(1, 6)]]}
 
 
-def request(method, path, body=None, expected=200, identity="Master", request_id=None, admission_id=None):
+def request(method, path, body=None, expected=200, identity="Master", request_id=None, admission_id=None, raw=False):
     global checks
     data = None if body is None else json.dumps(body, ensure_ascii=False).encode("utf-8")
     headers = {"Content-Type": "application/json; charset=utf-8"}
@@ -52,6 +54,8 @@ def request(method, path, body=None, expected=200, identity="Master", request_id
         if response.status not in (expected if isinstance(expected, tuple) else (expected,)):
             raise AssertionError(f"{method} {path}: expected {expected}, got {response.status}: {payload!r}")
     checks += 1
+    if raw:
+        return payload, response.headers
     return json.loads(payload) if payload else None
 
 
@@ -371,6 +375,8 @@ try:
                 return request("POST", session_path + "/combat", body, expected, identity)
 
             baseline = request("GET", session_path + "/statistics")
+            request("GET", session_path + "/report.csv", expected=409)
+            request("GET", session_path + "/report.csv", expected=403, identity="GameServer")
             require(baseline["origin"] is None and all(p["ammoUsed"] == 0 and p["health"] == 100 for p in baseline["players"]),
                     "Statistics start empty and include previously departed players")
             report(fired, 403, identity="Master")
@@ -478,6 +484,24 @@ try:
             require(request("GET", session_path)["state"] == "Ended", "Ended history remains readable")
             request("POST", "/api/player-tickets/validate", live_validation, 403, identity="GameServer")
             require(request("GET", session_path + "/statistics")["players"] == statistics["players"], "Ended session preserves combat statistics")
+            final_csv, final_headers = request("GET", session_path + "/report.csv", raw=True)
+            final_rows = list(csv.DictReader(io.StringIO(final_csv.decode("utf-8-sig"), newline="")))
+            require(final_csv.startswith(b"\xef\xbb\xbf") and final_headers.get_content_type() == "text/csv"
+                    and final_headers["Cache-Control"] == "no-store" and "attachment;" in final_headers["Content-Disposition"],
+                    "Final CSV is an authenticated UTF-8 BOM attachment with no-store caching")
+            require(len(final_rows) == len(statistics["players"]) and all(row["origin"] == "Simulation" and row["reportVersion"] == "1" for row in final_rows),
+                    "Final CSV includes every historical ledger player and explicit Simulation provenance")
+            final_view = request("GET", session_path)
+            require(all(int(row["throughSequence"]) == final_view["sequence"] and row["sessionId"] == final_view["id"] for row in final_rows),
+                    "CSV identifies the same final durable session boundary")
+            for row in final_rows:
+                metric = next(value for value in statistics["players"] if value["playerId"] == row["playerId"])
+                require(all(float(row[name]) == metric[name] for name in ("ammoUsed", "shotsHit", "kills", "damageTaken", "hitsReceived", "accuracyPercent", "health")),
+                        "Parsed final CSV agrees with every accepted player statistic")
+            require(request("GET", session_path + "/report.csv", identity="Room1", raw=True)[0] == final_csv,
+                    "Linked room controller exports the same report under existing full-session read policy")
+            request("GET", session_path + "/report.csv", expected=401, identity=None)
+            request("GET", session_path + "/report.csv", expected=403, identity="GameServer")
             require(report(fired)["duplicate"], "Combat report retry is available after session end")
             report({**fired, "reportId": str(uuid.uuid4()), "shotId": str(uuid.uuid4())}, 409)
             require(request("GET", "/api/sessions") == [], "Active list excludes archived sessions")
@@ -496,6 +520,8 @@ try:
                     "Second restart preserves archived state and released rooms")
             request("POST", session_path + "/commands", {"commandId": str(uuid.uuid4()), "action": "Pause"}, 409)
             require(request("GET", session_path + "/statistics")["players"] == statistics["players"], "Archived statistics also survive a second restart")
+            require(request("GET", session_path + "/report.csv", raw=True)[0] == final_csv,
+                    "Real HTTP CSV bytes survive API restart and operator-key rotation")
             demo = subprocess.run([sys.executable, str(ROOT / "scripts/demo_combat.py"), "--base-url", base_url,
                                    "--key-file", str(key_file), "--room", "1"], capture_output=True, text=True, encoding="utf-8", timeout=30)
             if demo.returncode != 0:
@@ -552,6 +578,8 @@ try:
             stream_path = "/api/sessions/" + queued["sessionId"]
             require(queued["origin"] == "Simulation" and queued["queuedReports"] == 6 and queued["pendingTelemetry"],
                     "Real simulation persists six causal reports, ends the session and exits before delivering them")
+            request("GET", stream_path + "/report.csv", expected=409)
+            request("GET", stream_path + "/report.csv", expected=403, identity="Room2")
             first = queued["firstReport"]
             request("POST", stream_path + "/combat-stream/reports", first, 403)
             request("POST", stream_path + "/combat-stream/reports", first, 403, identity="Room1")
@@ -575,6 +603,11 @@ try:
             player_stats = delivered["statistics"]["players"][0]
             require(delivered["complete"] and delivered["sealedStream"] and delivered["acknowledged"] == 6 and not delivered["statistics"]["pendingTelemetry"],
                     "Separate recovery process drains the durable journal after API restart and seals its exact boundary")
+            sealed_csv, _ = request("GET", stream_path + "/report.csv", raw=True)
+            sealed_rows = list(csv.DictReader(io.StringIO(sealed_csv.decode("utf-8-sig"))))
+            require(len(sealed_rows) == 1 and int(sealed_rows[0]["finalStreamSequence"]) == 6
+                    and sealed_rows[0]["streamId"] == first["streamId"] and sealed_rows[0]["origin"] == "Simulation",
+                    "Recovered exact seal unlocks a CSV naming the precise stream and final boundary")
             require((player_stats["ammoUsed"], player_stats["shotsHit"], player_stats["kills"], player_stats["hitsReceived"], player_stats["damageTaken"], player_stats["health"], player_stats["accuracyPercent"]) == (2, 2, 1, 1, 20, 80, 100),
                     "Recovered geometric combat preserves every requested statistic without double counting the lost-response prefix")
             history = request("GET", stream_path + "/events?limit=500")

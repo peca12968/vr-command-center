@@ -1,5 +1,21 @@
 # 開發進度
 
+## 2026-10-31：最終任務 CSV、封存界線與原生報表整合
+
+從乾淨 `95eae21` 接續PC主線，新增 [REPORTS.md](REPORTS.md) 的 `GET /api/sessions/{id}/report.csv` 與「下載最終報表 CSV」。API／UI **0.27.0**，reportVersion1；Unity仍0.28／code32／NGO26。這是最終戰鬥 ledger 匯出，包含離場玩家、原任務ID／名稱、來源、throughSequence、stream ID／接受尾界與原11項中的全部玩家統計，不依目前名冊重算。不宣稱世界錄影已完整、頭盔在線或25台通過。
+
+FinalReport在同一session gate內授權、檢查Ended及combat精確seal後取metadata／statistics，拒絕進行中、Pause、僅End及尚未seal的尾端。來源／房間先檢查；HTTP明確傳入Actor，GameServer403／未驗證401。Linked房控沿既有全場讀取政策，外房獨立場拒絕。未綁stream的已結束歷史可匯出；合法空stream保留宣告來源及尾界0，無來源明示None。空場只有Session metadata列，不造玩家。沒有新的持久資料、事件或schema。
+
+CSV為UTF-8 BOM、全欄引用、逗號／CRLF，數字invariant、accuracyPercent沿用原兩位小數；任務秒數標planned，不冒充扣Pause的實玩時間。公式開頭／控制文字只在CSV加單引號，原名字與JSON不變。重複下載、接受tail／seal重試與SQLite重啟位元組一致；不是簽章證書。HTTP attachment、no-store，檔名只含UUID；沒有憑證／地址或伺服器匯出檔案。前端以Bearer fetch下載、抑制重複並釋放ObjectURL；generation＋login epoch阻擋切離再回同場／登出再登入晚回應。讀header及blob後重查，錯誤MIME不下載，409可重試，當前401登出。一般輪詢不抹掉下載成功／錯誤文字。
+
+locked restore、Release build **0警告／錯誤**、真正執行VrCommand.Checks **654項**（新增25）、**446 HTTP、43世界、58 Node／217 Chromium**全部通過。包含並行seal只能觀察拒絕或完整快照、返回陣列不可改ledger、離場／零發／空場、fr-FR小數、CSV公式／引號／換行、SQLite及HTTP真正重啟／key輪替後完全相同、實際瀏覽器下載bytes／檔名與read-only序號、切離再回及重登入晚回應、409／錯誤MIME／401與既有回放／素材回歸。API／UI來源與該次隔離輸出的三個JS／HTML逐位核對，檢視 `artifacts/console/final-report.png`；軟體WebGL不是原生GPU證據。
+
+真正 Windows operator run **`desktop-venue/20261031-072120-4e03e4bb`**，**49項UI／native**（新增2）通過。使用現有同源0.28原生server／clients、Simulation rigs及自己的API0.27／C SSD runtime；不是注入姿態或新GPU／頭盔測試。163幀、最大來源年齡 **0.176034秒**，世界complete、回放／ledger一致、pending=false、活動0、cleanup零錯誤且無追蹤子程序。CSV含Operator01／已移除Peer02／替換Peer03共3列，throughSequence21／combat尾界2，Operator01中彈2／耗損40／健康60，三人耗彈／擊殺皆0；每項與該次ledger及封存回放一致。真正下載CSV SHA `f0de1ae7c3b095c02f722bb10e8c5eaebee2bb19ca801d434345bb85a727d0b5`，獨立Python標準csv parser再次核對。原生流程觀戰瀏覽器仍SwiftShader，client無圖形，沒有新增GPU／聽感證據。
+
+writer全停後helper回F的runtime-snapshot共14檔與保留C SSD原件SHA一致，唯讀稽核前後皆保持；本輪沒有直接開原DB／snapshot SQLite，沒有二次覆寫snapshot。來源／binary仍F，非F USB全資料或跨機／25台驗收。`artifacts/report-v1-validation.json`保存本輪完整摘要。Unity source fingerprint仍 `792a3aaac9a7903159718a898324def8f6ba4769f908f1f46f30a6c77744c725`，既有Windows／Quest receipts及原scene／prefab識別相同；沒有改Unity來源／資產pin／shader、rules0.8.0、envelope6／world schema1／原binary header／checksum，未重建Editor／102 EditMode／APK，前輪結果保持歷史證據。只同步API／UI及兩個PC helper的明確版本gate，不需因報表重新生成場景。原5080確認仍0.16／原歷史，沒有替換。
+
+首輪HTTP在既有無效憑證啟動檢查等待退出10秒逾時，finally另有臨時server.log sharing violation；失敗 `artifacts/report-v1-http.log`保留，未放寬timeout／修改憑證政策。確認本輪owned dotnet已無存活後，正常完整重跑446通過，根因未證實。瀏覽器先有214通過；補輪詢提示保持及精確MIME後，下載比對另曾失敗，記錄在report-v1-browser-selection-failed.log。檢視發現selectSession等待背景更新前尚未清掉舊場狀態，改為立即取消下載／清統計／隱藏面板，再以selection epoch只接受最後選擇；新增明確hold背景更新的兩個回歸。新測試的首輪unroute早於delayed fulfill，觸發Route already handled，失敗report-v1-browser-gate-failed.log保留，改等fulfill完成才unroute；未放寬產品政策或斷言。最終58／217全部通過，包含text/csv-fake拒絕。最終原生49重新執行；先前071253-1dc01ef2的49項／143幀／0.296376秒證據及14檔snapshot另保留，不混算成最終場。完整11項仍開發中，接續完整人物／動畫／聲學、複雜通路、長任務／跨機及實機／MR／硬體／25台，沒有因報表完成縮減目標。
+
 ## 2026-10-31：軍事玩家人物、保存步態與桌面換彈雙臂
 
 從乾淨 `35ad78e` 接續無頭盔PC主線，新增 [PLAYER_BODY.md](PLAYER_BODY.md) 的 `player-body-v1`：原創頭盔／護目鏡、背心／彈袋、雙腿／靴及桌面雙臂，404面、五個Mesh／一材質，SHA `1035ca0dffafc31226616485c58ef530d8e7b809feef2b5e461229424bc9703b` 固定。原步槍／手套／閃光／NPC／掩體及獨立combat-audio-v1沿用，八個既有外觀與reader保留。

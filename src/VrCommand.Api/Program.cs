@@ -84,7 +84,7 @@ app.Use(async (context, next) =>
     }
 });
 
-app.MapGet("/", () => new { service = "VR Command Center", stage = "VR mission placement preflight and Quest connection integration prototype", version = "0.26.0", layoutProfile = "vr-room-v1", worldAssetSets = new[] { VrCommand.Simulation.WorldAssetSets.Legacy, VrCommand.Simulation.WorldAssetSets.FieldProps, VrCommand.Simulation.WorldAssetSets.ServiceRifle, VrCommand.Simulation.WorldAssetSets.Combatants, VrCommand.Simulation.WorldAssetSets.WeaponActions, VrCommand.Simulation.WorldAssetSets.ArmedCombatants, VrCommand.Simulation.WorldAssetSets.CombatEffects, VrCommand.Simulation.WorldAssetSets.PlayerFire, VrCommand.Simulation.WorldAssetSets.PlayerBody }, enemyPresentationVersion = 1, weaponPresentationVersion = 1, enemyFireVersion = 1, playerFireVersion = 1, combatAudioVersion = 1, playerPresentationVersion=1 });
+app.MapGet("/", () => new { service = "VR Command Center", stage = "VR mission placement preflight and Quest connection integration prototype", version = "0.27.0", layoutProfile = "vr-room-v1", worldAssetSets = new[] { VrCommand.Simulation.WorldAssetSets.Legacy, VrCommand.Simulation.WorldAssetSets.FieldProps, VrCommand.Simulation.WorldAssetSets.ServiceRifle, VrCommand.Simulation.WorldAssetSets.Combatants, VrCommand.Simulation.WorldAssetSets.WeaponActions, VrCommand.Simulation.WorldAssetSets.ArmedCombatants, VrCommand.Simulation.WorldAssetSets.CombatEffects, VrCommand.Simulation.WorldAssetSets.PlayerFire, VrCommand.Simulation.WorldAssetSets.PlayerBody }, enemyPresentationVersion = 1, weaponPresentationVersion = 1, enemyFireVersion = 1, playerFireVersion = 1, combatAudioVersion = 1, playerPresentationVersion=1 });
 app.MapWorldRoutes();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/api/me", (HttpContext context) => Actor(context));
@@ -126,6 +126,12 @@ app.MapPost("/api/sessions/{id:guid}/commands", (Guid id, ControlCommand command
     manager.Execute(id, command, Actor(context)));
 app.MapGet("/api/sessions/{id:guid}/statistics", (Guid id, SessionManager manager, HttpContext context) =>
     manager.Statistics(id, Actor(context)));
+app.MapGet("/api/sessions/{id:guid}/report.csv", (Guid id, SessionManager manager, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var report = manager.FinalReport(id, Actor(context));
+    return Results.File(FinalReportCsv.Encode(report), "text/csv; charset=utf-8", FinalReportCsv.FileName(id));
+});
 app.MapPost("/api/sessions/{id:guid}/combat", (Guid id, CombatReport report, SessionManager manager, HttpContext context) =>
     manager.ReportCombat(id, report, Actor(context)));
 app.MapPost("/api/sessions/{id:guid}/combat-stream", (Guid id, OpenCombatStream request, SessionManager manager, HttpContext context) =>

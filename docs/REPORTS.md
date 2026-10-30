@@ -1,0 +1,46 @@
+# 最終任務報表 CSV
+
+API／控制台 **0.27.0** 新增 `GET /api/sessions/{id}/report.csv`。在「場館操作」選取場次，勾選「包含已結束紀錄」，於任務統計下按「下載最終報表 CSV」。進行中、暫停中及等待戰鬥補送封存的場次不提供最終下載；後端也獨立檢查。
+
+檔案為 UTF-8 BOM、逗號分隔、CRLF 換行，所有欄位加雙引號，內部雙引號重複。固定名稱 `vr-command-report-v1-{sessionId}.csv`，可供試算表或標準 CSV reader 讀取。HTTP 使用 `text/csv; charset=utf-8`、attachment、`Cache-Control: no-store`。
+
+## 最終性與權限
+
+SessionManager 在同一把鎖內檢查身分／房間、Ended 與戰鬥封存，再擷取場次及 ledger。已綁 combat stream 必須接受精確 seal，只有 End 不足以匯出；尾端補送完成但尚未 seal 仍回 409。未綁 stream 的歷史場次 End 後不能接受新戰鬥，故可匯出。報表不新增事件、不更動歷史，也不寫入伺服器的匯出檔案。
+
+Master 可讀全部；RoomController 依既有場次讀取政策，只能匯出包含其房間的場次。Linked 的房控可讀該場全部玩家，與現有 statistics／觀戰權限一致。GameServer 憑證回 403；未驗證回 401；不存在回 404。HTTP 必須明確傳入認證的 OperatorIdentity，不能退回預設 Internal。
+
+這是**最終戰鬥 ledger 報表**，不是世界錄影封存證書。它不宣稱 worlds.db 已 complete、每個世界繪製幀已驗證、頭盔在線或 25 台效能通過。世界回放有自己的精確 seal 與 witness 檢查，仍依 WORLD_RECORDING／TELEMETRY 流程驗收。GameServer 是宣告的來源類型，不代表頭盔或實體硬體已驗收。
+
+## reportVersion 1 欄位
+
+每位 ledger 玩家一列，排序沿用 roomId、playerId，包含已離場玩家；不依目前名冊篩選。每列重複同一份場次 metadata，沒有可被誤加總的總計列。若從未加入玩家，輸出一列 `rowType=Session`，玩家欄位全空。已有玩家但無戰鬥則為 Player 列及零統計，不冒造射擊事件。
+
+| 欄位 | 意義 |
+|---|---|
+| reportVersion／rowType | 固定 1；Player 或空場的 Session |
+| sessionId／missionId／missionName | 原場次及當時選用的不可變任務 ID／名稱，不讀任務庫目前 head |
+| sessionMode／roomIds | Independent／Linked；房號以 `\|` 分隔 |
+| createdAtUtc／startedAtUtc／endedAtUtc | ISO 8601 UTC；未 Begin 的 startedAtUtc 留空 |
+| plannedDurationSeconds | 任務定義秒數，不冒充扣除 Pause 後的實際遊玩時間 |
+| throughSequence | 同一次最終管理／戰鬥事件快照的序號 |
+| origin | ledger 的 Simulation／GameServer；零事件但有綁 stream 時保留該 stream 宣告；沒有事件也沒有 stream 時為 None |
+| streamId／finalStreamSequence | 已封存 combat stream ID／接受的最終序號；未綁則空，合法空 stream 為 0 |
+| playerId／playerName／playerRoomId | 與既有統計 ledger 相同的玩家 ID／姓名／房號 |
+| ammoUsed／shotsHit／kills | 接受的玩家發射、命中射擊及擊殺數，不含敵軍開火或換彈 |
+| damageTaken／hitsReceived／health | 已確認健康損失、傷害事件數及剩餘健康，沿用既有 overkill 截斷規則 |
+| accuracyPercent | shotsHit／ammoUsed ×100，未射擊為 0，沿用兩位小數；66.67 表示 66.67%，不是 0.6667 |
+
+數字採 invariant culture。為避免試算表執行文字公式，任務／玩家名稱若在前導空白後以 `= + - @` 開始，或包含控制字元，CSV 加前導單引號；其後保留原文字，逗號／引號／內嵌換行仍按 CSV 引用。這是匯出呈現，原資料、JSON statistics 及回放姓名不改。程式讀者如需原姓名，應使用已有的授權 statistics JSON，不自行把受保護欄位當公式執行。
+
+同一場已完成報表重複下載及 SQLite 重啟後位元組一致，沒有每次變動的匯出時間。throughSequence 與 stream 最終序號可供追溯，但不是簽章或防竄改證書。
+
+## 瀏覽器下載生命週期
+
+下載以 Bearer fetch 進行，憑證只在頁面記憶體，不寫網址、CSV 或瀏覽器儲存區。只將正確 CSV MIME 的成功回應轉為 Blob；檔名只用場次 UUID。產生的 ObjectURL 於點擊後釋放。
+
+下載中抑制重複點擊，仍可切換場次或登出；selection generation 與登入 epoch 阻擋晚回應，切離後再選回同場也不能觸發舊下載。重設會中止 fetch，讀 header／blob 後再次核對身分與場次。一般更新不清掉下載結果／錯誤；只有可用狀態改變才換回提示。409／錯誤 MIME 不下載並可重試；當前 401 登出，過期登入的 401 不影響新登入。
+
+切換場次在等待既有背景更新前，就清掉上一場統計、隱藏舊場面板並停用下載；selection epoch 讓等待期間的快速多次切換只接受最後一次。MIME 以完整 media type 比對，不接受 text/csv-fake 之類相似前綴。
+
+本功能只新增 API／UI 唯讀匯出，不改 Unity 0.28／code32／NGO26、資源 pin、rules0.8.0、envelope6、world schema1 或現存 header／checksum。Unity source fingerprint 與已成功的 Windows／Quest binary 保持；不把上一輪 102 EditMode／APK 當成本輪重新執行。驗證結果與原生錄製整合見 [PROGRESS.md](PROGRESS.md)。
