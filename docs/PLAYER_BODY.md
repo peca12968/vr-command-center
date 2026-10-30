@@ -4,6 +4,8 @@
 
 API／UI **0.26.0**、Unity **0.28.0／Android code32／NGO26**。新header `playerPresentationVersion=1`；新profile還要求enemyPresentationVersion1／weaponPresentationVersion1／enemyFireVersion1／playerFireVersion1。音效維持獨立combatAudioVersion，新Unity來源仍1。缺失玩家人物版本保持0，舊錄製保留舊方盒／頭部，不從相鄰快照猜步態。每個新玩家packet明確`hasPlayerPresentation=true`與`walking`，無版本不得宣稱新狀態；Preparing／死亡／離線不能walking。未知版本、漏標記或不完整profile由核心／API及瀏覽器各自拒絕。
 
+步態週期／角度、比例及腕點／延展數學也是v1回放契約；變更需新playerPresentationVersion並保留舊求解／reader，不能只改共用常數或重寫舊pin。
+
 伺服器只在原本驗證成功的Running、連線且存活玩家平面移動超過1mm時標記最後移動tick；四tick內保存walking，其後停止。轉頭／只改高度、拒絕姿態及Preparing移動不觸發；沒有改接受條件、0.5秒姿態／1.5秒世界新鮮度、傷害、彈藥或admission。步態為保存tick%12的±18度對向腿部旋轉。Pause／Ended不推進模擬tick，所以腿部姿勢固定；原有頭手追蹤／姿態接受仍可更新，這不是凍結真實人體或強制鎖位置。
 
 NGO既有原子actor walking欄位開始具有玩家語意，與presentationTick一起複製，故protocol26要求全部遊戲程序同版。envelope6、mission／world schema1、票券2、environment1及rules0.8.0保持。來源／API／UI／全體遊戲端一起更新，保存新欄位後不可降舊reader；Prepare只原位升版並重用原scene／prefab ID。

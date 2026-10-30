@@ -27,6 +27,8 @@ API／UI **0.26.0**、Unity **0.28.0／Android code32／NGO26**。header playerP
 
 Quest首輪在Bee後處理exit3／Editor exit1，UnityLinker成功且沒有具體編譯錯誤；已保存Editor／Bee／buildreport失敗檔，程序終止且F空間足夠後以同來源重試，沒有改Library／ACL／安全設定。重試Editor exit0，Quest receipt UTC2026-10-30T22:52:26.8221840Z，與Desktop相同fingerprint及原scene／prefab ID。APK46,309,126 bytes、SHA `a445f8e1e18d9114df5787dda60d3069ec5346ebb0ce6564f14155d2e2865583`，v2簽章、min32／target35、code32／bundle0.28.0及六個ELF64 AArch64庫含libil2cpp已核對；沒有手動重封裝／重簽或頭盔安裝。成功的三組venue及admission共39個原生／API log未見指定NullReference／MissingReference／ObjectDisposed／IndexOutOfRange／Shader error，完整本機證據在artifacts/player-body-validation.json。原5080仍API0.16／原歷史，未替換。完整11項目標保持開發中；第一人稱全身、真正腰腳／手指及完整動畫、複雜地形、原偶發姿態原因、跨機，以及Quest／VIVE／MR／廠商硬體／25台仍分別待驗。
 
+功能提交 `241f2acb0dc4e4b8ca6313f1407c4576c9de1090` 已推送main並核對遠端。GitHub #1已更新，讀回open／3470字與送出本文完全一致；原11項範圍與63864字封存留言連結保留。[CI run41141572882](https://github.com/peca12968/vr-command-center/actions/runs/41141572882)／check124356841079實際failure、steps=null，annotation明示付款失敗或支出上限，工作未開始，不能稱雲端測試通過。另有ubuntu-latest遷移通知；未改帳務或重跑。
+
 ## 2026-10-31：接受射擊事件的玩家／敵軍空間音效
 
 從乾淨 `f25b097` 接續使用者「無頭盔，先繼續電腦端」。新增獨立固定的 `combat-audio-v1`、原創合成步槍／手槍PCM與Unity／瀏覽器共用接受事件游標；規範、操作及pin見 [COMBAT_AUDIO.md](COMBAT_AUDIO.md)。API／UI **0.25.0**、Unity **0.27.0／code31／NGO25**。header combatAudioVersion缺失0／新來源1，必須有player／enemyFireVersion1；actor presentationRunning與原fire欄位原子複製。固定player-fire-v1與八個舊幾何profile、rules0.8.0、envelope6、mission／world schema1、票券2及environment1保持。協同更新來源／API／UI／全部遊戲程序，不能降reader或重寫歷史header／checksum。
