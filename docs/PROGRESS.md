@@ -32,6 +32,8 @@ Unity **0.26.1／Android code30**，API／UI **0.24.0**、NGO **24**及原player
 
 最終Quest首次重建在建立Library/Bee/PlayerScriptAssemblies時Access denied，Editor明確exit1，未產生新receipt；失敗log保留。程序退出後該目錄已不存在，F空間足夠、無活躍Editor／編譯子程序；未改快取內容／ACL／安全設定，以相同來源重試。重試Editor exit0，Quest receipt UTC2026-10-30T20:47:25.4333944Z，fingerprint `6615ee45cb079cc5c342c68f797669944671153412780358364727d3f811e239` 及原scene／prefab ID與最終Desktop完全一致。APK68,404,947 bytes、SHA `4fe0ded3395f6dcb4136ff982cc29d9622c7bf610e151b5154e7a5591851bd14`；v2簽章、min32／target35、code30／bundle0.26.1及六個ELF64 AArch64庫含libil2cpp核對通過，沒有頭盔安裝。體積覆核發現ZIP中央目錄引用的壓縮資料46,239,658 bytes，另兩段未引用間隙共22,144,012 bytes，已保存包裝稽核；沒有重封裝或重簽，保留Unity原始成功產物，不把APK體積變化當作診斷／裝置效能證據。完整11項長期目標保持開發中；後續持續取證偶發原因，並接續射擊音效、玩家全身、完整動畫／場地操作與跨機。Quest／VIVE／MR、廠商硬體及25台仍待分別驗收。
 
+功能提交 `2b4f1396a25350010ac38c87a63ee3137352f9f5` 已推送，遠端main核對相同。GitHub #1更新為本輪結果，讀回open／2946字與提交內容完全相同，原11項範圍、後續依賴及原63864字封存留言連結保留。[CI run41126416900](https://github.com/peca12968/vr-command-center/actions/runs/41126416900)／check124305993088實際failure、steps=null；讀回annotation明示付款失敗或支出上限，工作未開始，不能稱雲端通過。另有ubuntu-latest遷移通知；未改帳務或重跑。
+
 ## 2026-10-31：玩家接受射線、原生閃光與槍身後座
 
 從乾淨 `141652d` 接續使用者「目前沒有頭盔，先繼續電腦端」。新增 `player-fire-v1`，組合固定264面玩家步槍、原合成手套、728面NPC與32面閃光；玩家脈衝倍率1.2，沒有外部素材。組合資料SHA `187c7df5346419edadafa1cc74a04db0763dda268650e066dbbcaf8304e60ff0` 固定，生成器先驗舊pin，原七profile／網格／色彩／reader完整保留。規範見 [PLAYER_FIRE.md](PLAYER_FIRE.md)。
