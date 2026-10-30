@@ -25,7 +25,7 @@ internal static class WorldChecks
             bridge.Apply(JsonSerializer.Deserialize<ManagementSnapshot>(json, new JsonSerializerOptions(JsonFormat.Options) { IncludeFields = true })!);
         }
         Refresh();
-        var header = WorldRecordingHeader.Create(id, queue.StreamId, "Simulation", [1], bridge.Props, assetSet: WorldAssetSets.Combatants, enemyPresentationVersion: 1);
+        var header = WorldRecordingHeader.Create(id, queue.StreamId, "Simulation", [1], bridge.Props, assetSet: WorldAssetSets.WeaponActions, enemyPresentationVersion: 1, weaponPresentationVersion: 1);
         var field = Copy(header); field.assetSet = WorldAssetSets.FieldProps; WorldRecordingValidation.Header(field);
         check(WorldAssetSets.Supported(WorldAssetSets.ServiceRifle) && field.assetSet == WorldAssetSets.FieldProps, "New rifle and retained field-prop profiles are explicitly supported without changing the default");
         check(WorldRecordingHeader.Create(id, queue.StreamId, "Simulation", [1], bridge.Props).assetSet == WorldAssetSets.Legacy, "Existing recording producers retain their original primitive asset profile");
@@ -56,17 +56,18 @@ internal static class WorldChecks
             var body = bridge.World.PlayerSnapshot(value);
             return body.Connected ? new() { kind = "Simulated", left = new(body.Head + new Vec3(-.2f, -.3f, .2f)), right = new(body.Muzzle) } : new();
         }
-        var initial = WorldRecordingPacket.Capture(bridge.World, 1, 0, manager.Get(id).Sequence, 0, 0, Rig, enemyPresentationVersion: 1);
+        var initial = WorldRecordingPacket.Capture(bridge.World, 1, 0, manager.Get(id).Sequence, 0, 0, Rig, enemyPresentationVersion: 1, weaponPresentationVersion: 1);
         check(store.Append(id, initial, owner).AcceptedSequence == 1 && store.Append(id, Copy(initial), owner).AcceptedSequence == 1, "Initial preparing frame is persisted once");
-        check(store.Info(id, master).Header.assetSet == WorldAssetSets.Combatants && store.Info(id, master).Header.enemyPresentationVersion == 1
+        check(store.Info(id, master).Header.assetSet == WorldAssetSets.WeaponActions && store.Info(id, master).Header.enemyPresentationVersion == 1
             && store.Frame(id, 1, master)!.Packet.frame.enemies[0].hasPresentation, "SQLite records the humanoid profile and explicit initial enemy presentation together");
+        check(store.Frame(id,1,master)!.Packet.frame.players[0].hasWeaponPresentation && store.Info(id,master).Header.weaponPresentationVersion==1,"SQLite retains the new action profile and explicit player action clock");
         var initialBad = Copy(initial); initialBad.elapsedMilliseconds = 1;
         Reject<InvalidOperationException>(() => store.Append(id, initialBad, owner), "Accepted frame cannot be changed by a retry");
         manager.Execute(id, new(Guid.NewGuid(), ControlAction.Begin), master); Refresh();
         bridge.Connect(1, player, 1, 0, manager.Get(id).Players.Single().AdmissionId); var head = ArenaSession.Spawn(1, 0); var target = bridge.World.Snapshot().Enemies[0].Feet + new Vec3(0, .9f, 0);
         bridge.Pose(1, head, head, (target - head).Normalized(), 0); bridge.Weapon(1, 1, false, 0); bridge.Tick(.05);
         var observed = manager.Get(id).Sequence; queue.Capture(bridge.World, observed);
-        var running = WorldRecordingPacket.Capture(bridge.World, 2, 50, observed, queue.LastSequence, 0, Rig, enemyPresentationVersion: 1);
+        var running = WorldRecordingPacket.Capture(bridge.World, 2, 50, observed, queue.LastSequence, 0, Rig, enemyPresentationVersion: 1, weaponPresentationVersion: 1);
         Reject<InvalidOperationException>(() => store.Append(id, running, owner), "World frame waits for its matching durable combat reports");
         manager.ReportStreamBatch(id, JsonSerializer.Deserialize<StreamCombatRecord[]>(TelemetryOutbox.BatchJson(queue.PendingBatch()), JsonFormat.Options)!, owner);
         void Bad<T>(Action<WorldRecordingPacket> mutate, string message) where T : Exception
@@ -94,9 +95,10 @@ internal static class WorldChecks
         Reject<AccessDeniedException>(() => manager.Observed(id, observed, room2), "Historical observation accessor is scoped");
         Reject<AccessDeniedException>(() => manager.CombatWitness(id, Guid.Parse(running.events[0].eventId), room2), "Combat witness accessor is scoped");
         manager.Execute(id, new(Guid.NewGuid(), ControlAction.End), master); Refresh();
-        var final = WorldRecordingPacket.Capture(bridge.World, 3, 100, manager.Get(id).Sequence, queue.LastSequence, bridge.World.EventSequence, Rig, enemyPresentationVersion: 1);
+        var final = WorldRecordingPacket.Capture(bridge.World, 3, 100, manager.Get(id).Sequence, queue.LastSequence, bridge.World.EventSequence, Rig, enemyPresentationVersion: 1, weaponPresentationVersion: 1);
         var duplicateEvent = Copy(final); duplicateEvent.frame.throughSequence++;
         duplicateEvent.events = [new() { sequence = duplicateEvent.frame.throughSequence, tick = final.frame.tick, eventId = running.events[0].eventId, kind = "ReloadStarted", playerId = player.ToString("D") }];
+        duplicateEvent.frame.players[0].reloading=true; duplicateEvent.frame.players[0].reloadUntilTick=final.frame.tick+30; // Keep the new action witness valid before exercising the duplicate event transaction.
         Reject<InvalidOperationException>(() => store.Append(id, duplicateEvent, owner), "World event IDs are unique across frame transactions");
         check(store.Info(id, owner).AcceptedSequence == 2 && store.Frame(id, 3, owner) is null, "Rejected frame transaction leaves no row or cursor advancement");
         store.Append(id, final, owner);

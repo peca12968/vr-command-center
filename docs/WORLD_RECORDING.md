@@ -1,5 +1,7 @@
 # 持久世界錄製與觀察 v0.16
 
+2026-10-31 最新換彈／合成手套為API／UI0.21、Unity0.23／code26／NGO22；weaponPresentationVersion1及weapon-actions-v1需來源／API／UI／全體遊戲端一起更新，舊資料保持0／舊外觀，不可降舊reader。保存時鐘、Tracked界線及實際證據見 [WEAPON_ACTIONS](WEAPON_ACTIONS.md)／PROGRESS。
+
 2026-10-30 最新人形敵軍接入為API／UI0.20、Unity0.22／Android code25／NGO21，header enemyPresentationVersion1及combatants-v1需協同更新；舊來源／外觀保留，不能降舊reader。保存姿態、原命中盒與限制見 [ENEMY_PRESENTATION](ENEMY_PRESENTATION.md)，真正建置／PC結果以 PROGRESS 為準。
 
 v0.16 新增 `environmentVersion:1`，依保存的 tick／環境重現雨、日夜、閃電及選用聲音，非原始音軌。缺少欄位維持 0 legacy，不補造效果；UI 有音效開關，暫停／跳轉／過期的行為與協同升級見 [ENVIRONMENT.md](ENVIRONMENT.md)。新 NDJSON 示範也附擷取 UTC，舊來源不變。world schema 1 不變，但舊嚴格 reader 不接受新 header 欄位，不可直接降版。

@@ -102,8 +102,8 @@ def main():
                                stdout=api_log, stderr=api_log, creationflags=subprocess.CREATE_NO_WINDOW)
         processes.append(api)
         wait_for(lambda: request('/health'), 30, 'isolated API')
-        if request('/').get('version') != '0.20.0':
-            raise RuntimeError('This player requires API 0.20.0. Build the current Release API or pass --api-dll with the matching build; an older DLL cannot read the new field-prop recording profile.')
+        if request('/').get('version') != '0.21.0':
+            raise RuntimeError('This player requires API 0.21.0. Build the current Release API or pass --api-dll with the matching build; an older DLL cannot read the new field-prop recording profile.')
         mission = request('/api/missions', {'name': 'Desktop practice - Simulation', 'briefing': 'Keyboard / mouse preview; synthetic head and hands, no headset.',
             'durationSeconds': args.duration, 'environment': {'mode': 'VR', 'weather': 'Clear', 'timeOfDay': 'Day', 'lightning': False},
             'enemies': {'count': args.enemies, 'behavior': 'Hold', 'autoAttack': False},

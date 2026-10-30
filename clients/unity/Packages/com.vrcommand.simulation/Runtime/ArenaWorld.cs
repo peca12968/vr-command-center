@@ -247,7 +247,7 @@ namespace VrCommand.Simulation
             if (after < 0 || limit < 1 || limit > 500) throw new ArgumentException("Invalid world event page.");
             var start = (int)Math.Min(after, events.Count); return events.GetRange(start, Math.Min(limit, events.Count - start)).ToArray();
         }
-        private static PlayerFrame Frame(Player p) => new PlayerFrame(p.Id, p.Room, p.Head, p.Muzzle, p.Forward, p.Health, p.Magazine, p.Reserve, p.ReloadUntil != 0, p.Connected);
+        private static PlayerFrame Frame(Player p) => new PlayerFrame(p.Id, p.Room, p.Head, p.Muzzle, p.Forward, p.Health, p.Magazine, p.Reserve, p.ReloadUntil != 0, p.Connected, p.ReloadUntil);
         public PlayerFrame PlayerSnapshot(Guid id) => Frame(FindPlayer(id));
         public WorldFrame Snapshot() => new WorldFrame(TickNumber, Phase, events.Count, Behavior, AutoAttack, Visibility, Night,
             players.Select(Frame).ToArray(),

@@ -116,7 +116,7 @@ async function main() {
     await page.locator('#tab-world').click(); await page.locator('#world-refresh').click(); await until(async () => (await page.locator('#world-recording option').count()) > 0, 'native recording in console');
     await page.locator('#world-recording').selectOption(session); await page.locator('#world-live').click();
     await until(async () => (await page.locator('#world-environment').innerText()).includes('Storm') || (await page.locator('#world-environment').innerText()).includes('暴風雨'), 'native world observed');
-    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'combatants-v1'
+    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'weapon-actions-v1'
       && Number(await page.locator('#world-canvas').getAttribute('data-prop-triangles')) === 642,
       'Actual native header selects the same 256-triangle sandbags and 386-triangle drum in live observation');
     check(await page.locator('#world-canvas').getAttribute('data-rifle-triangles') === '264'
@@ -142,7 +142,9 @@ async function main() {
     await page.locator('#tab-operations').click(); await command('Pause'); await until(async () => (await api('/sessions/' + session)).state === 'Paused', 'Pause');
     const paused = await until(() => native(state => state.phase === 'Paused'), 'native Pause observation');
     await sleep(400);
-    check(await native(state => state.phase === 'Paused' && state.tick === paused.tick), 'Native tick freezes after the actual operator Pause');
+    const stablePause=await until(()=>native(state=>state.phase==='Paused'&&state.tick===paused.tick),'stable native paused tick');
+    await fs.writeFile(path.join(evidence,'pause-observation.json'),JSON.stringify({initial:paused,stable:stablePause},null,2));
+    check(stablePause.tick===paused.tick, 'Native tick freezes after the actual operator Pause');
     check(true, 'Operator Pause reaches the native world');
     await manual('native-paused');
     await refresh(); await page.locator('#reload-enemies').click(); await page.locator('#live-count').fill('2'); await page.locator('#live-behavior').selectOption('Advance'); await page.locator('#live-auto-attack').check(); await page.locator('#enemies-form button[type=submit]').click();
@@ -181,7 +183,7 @@ async function main() {
     await until(async () => (await page.locator('#world-timeline').inputValue()) === (await page.locator('#world-timeline').getAttribute('max')), 'replay final seek');
     const finalInfo = await api('/sessions/' + session + '/world');
     await until(async () => (await page.locator('#world-time').innerText()).includes('幀 ' + finalInfo.acceptedSequence), 'rendered final replay frame');
-    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'combatants-v1'
+    check(await page.locator('#world-canvas').getAttribute('data-asset-set') === 'weapon-actions-v1'
       && Number(await page.locator('#world-canvas').getAttribute('data-prop-triangles')) === 642,
       'Sealed native replay retains its saved field-prop appearance profile after camera recall / final seek');
     check(await page.locator('#world-canvas').getAttribute('data-rifle-triangles') === '264'

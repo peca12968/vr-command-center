@@ -1,0 +1,14 @@
+{
+  "assetSet": "weapon-actions-v1",
+  "source": "Original fictional decorative rifle split and gloves; no external models or textures",
+  "generator": "scripts/generate-weapon-actions.py",
+  "rifleSourceSha256": "b054b9780b19104c6ff33a2384df15e9e4f6e2c73293297c4f70e2dd0d8eda25",
+  "dataSha256": "517c3616ec12dad34f25cc50f5309eae1033b62bcbbb636b4a3f378a5c12cab3",
+  "triangles": {
+    "Body": 240,
+    "Magazine": 24,
+    "RightGlove": 120,
+    "LeftGlove": 120
+  },
+  "scope": "Cosmetic magazine / simulated gloves only; no collider, tracking or weapon-rule changes"
+}

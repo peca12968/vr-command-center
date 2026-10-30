@@ -61,7 +61,8 @@ namespace VrCommand.Unity
         private bool desktopFire, desktopReload, windowKeyFallbackLogged;
         private Vector2 windowLook, windowMovement;
         private readonly TacticalHud tacticalHud = new TacticalHud();
-        private ServiceRifleModels rifleModels;
+        private AnimatedRifleModels rifleModels;
+        private AnimatedRifleView actionRifle;
         private GameObject rifle;
 
         public override void OnNetworkSpawn()
@@ -73,7 +74,7 @@ namespace VrCommand.Unity
             if (oldWeapon != null) oldWeapon.gameObject.SetActive(false);
             var pointerMarker = rightHand.GetComponent<Renderer>();
             if (pointerMarker != null) pointerMarker.enabled = false;
-            rifleModels = new ServiceRifleModels(); rifle = rifleModels.Create();
+            rifleModels = new AnimatedRifleModels(); actionRifle = rifleModels.Create(); rifle = actionRifle.Root;
             rifle.transform.SetParent(transform, false); ServiceRifleModels.Align(rifle.transform, rightHand);
             var activeVisuals = new List<Renderer>(GetComponentsInChildren<Renderer>());
             activeVisuals.Remove(pointerMarker); visuals = activeVisuals.ToArray();
@@ -200,7 +201,14 @@ namespace VrCommand.Unity
         }
 
         private void LateUpdate()
-        { if (IsSpawned && rifle != null) ServiceRifleModels.Align(rifle.transform, rightHand); }
+        {
+            if (!IsSpawned || rifle == null) return;
+            ServiceRifleModels.Align(rifle.transform,rightHand);
+            if (CombatAuthority.Instance!=null && CombatAuthority.Instance.Player(PlayerId.Value.ToString(),out var body))
+                actionRifle.Apply(body.presentationTick,body.health,body.connected,IsOwner?!tracked:Pose.Value.source==1,body.reloading,body.reloadUntilTick);
+            // Desktop gloves are cosmetic siblings; never move the tracked joints.
+            var marker=leftHand.GetComponent<Renderer>();if(marker!=null && (IsOwner?!tracked:Pose.Value.source==1))marker.enabled=false;
+        }
 
         [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner, Delivery = RpcDelivery.Unreliable)]
         private void SubmitPoseRpc(AvatarPose pose)

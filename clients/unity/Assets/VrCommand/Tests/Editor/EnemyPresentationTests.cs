@@ -74,9 +74,13 @@ namespace VrCommand.Unity.Tests
         {
             var world=new ArenaWorld(new[]{3},new WorldProp[0]);world.AddEnemy(Guid.NewGuid(),3,new Vec3(0,0,3),new Vec3(2,0,3));
             var codec=new UnityWorldCodec();var packet=WorldRecordingPacket.Capture(world,1,0,1,0,0,_=>new RecordedRig());
-            var json="{\"sequence\":1,\"observedSequence\":1,\"frame\":{\"enemies\":[{\"id\":\""+world.Snapshot().Enemies[0].Id+"\",\"roomId\":3,\"health\":100,\"feet\":{\"x\":0,\"y\":0,\"z\":3}}]}}";
+            var json=codec.Packet(packet);var forward="\"forward\":"+JsonUtility.ToJson(packet.frame.enemies[0].forward)+",";
+            Assert.IsTrue(json.Contains(forward));
+            json=json.Replace(forward,"").Replace(",\"hasPresentation\":false","").Replace(",\"walking\":false","");
             var old=codec.ReadPacket(json);Assert.IsFalse(old.frame.enemies[0].hasPresentation);Assert.IsFalse(old.frame.enemies[0].walking);
             Assert.IsNotNull(old.frame.enemies[0].forward);Assert.AreEqual(0,old.frame.enemies[0].forward.ToVector().Length);
+            var legacy=WorldRecordingHeader.Create(Guid.NewGuid(),Guid.NewGuid(),"Simulation",new[]{3},new WorldProp[0]);
+            WorldRecordingValidation.Packet(legacy,old,null);
             var header=WorldRecordingHeader.Create(Guid.NewGuid(),Guid.NewGuid(),"Simulation",new[]{3},new WorldProp[0],assetSet:WorldAssetSets.Combatants,enemyPresentationVersion:1);
             Assert.Throws<ArgumentException>(()=>WorldRecordingValidation.Packet(header,old,null));
             var current=WorldRecordingPacket.Capture(world,1,0,1,0,0,_=>new RecordedRig(),enemyPresentationVersion:1);

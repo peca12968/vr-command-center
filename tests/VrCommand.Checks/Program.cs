@@ -2,6 +2,7 @@ using VrCommand.Core;
 
 if (args.SequenceEqual(["--weather-vectors"])) { Console.WriteLine(EnvironmentChecks.Vectors()); return; }
 if (args.SequenceEqual(["--enemy-vectors"])) { Console.WriteLine(EnemyPresentationChecks.Vectors()); return; }
+if (args.SequenceEqual(["--weapon-vectors"])) { Console.WriteLine(WeaponPresentationChecks.Vectors()); return; }
 var checks = 0;
 void Check(bool condition, string message)
 {
@@ -85,6 +86,7 @@ try
     MissionLibraryChecks.Run(Check, directory);
     EnvironmentChecks.Run(Check);
     EnemyPresentationChecks.Run(Check);
+    WeaponPresentationChecks.Run(Check);
     WorldSourceChecks.Run(Check, directory);
     Console.WriteLine($"All {checks} checks passed. These are domain checks, not headset or gameplay load tests.");
 }

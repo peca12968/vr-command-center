@@ -8,14 +8,17 @@ function guid(value) { return typeof value === 'string' && /^[0-9a-f]{8}(-[0-9a-
 function text(value, max) { return typeof value === 'string' && value.length <= max; }
 function vector(value, bound = 100) { return value && number(value.x, -bound, bound) && number(value.y, -bound, bound) && number(value.z, -bound, bound); }
 function unit(value) { return vector(value, 1.01) && Math.abs(Math.hypot(value.x, value.y, value.z) - 1) < .011; }
+function rotation(value) { return value && [value.x,value.y,value.z,value.w].every(Number.isFinite) && Math.abs(value.x*value.x+value.y*value.y+value.z*value.z+value.w*value.w-1)<.1; }
 function roomPosition(value, room) { return vector(value) && Math.abs(value.x - (room - 3) * 14) <= 6.01 && Math.abs(value.z) <= 6.01; }
 
 // Validate snapshots against their event boundary. Playback never reruns AI or guesses missing damage.
 export function validateRecording(data) {
   need(data && data.schemaVersion === 2 && data.rulesVersion === '0.8.0', '需要 schema 2／rules 0.8.0，舊除錯檔請重新產生。');
-  need(data.assetSet === undefined || ['primitives-v1', 'field-props-v1', 'service-rifle-v1', 'combatants-v1'].includes(data.assetSet), '不支援的素材版本。');
+  need(data.assetSet === undefined || ['primitives-v1', 'field-props-v1', 'service-rifle-v1', 'combatants-v1', 'weapon-actions-v1'].includes(data.assetSet), '不支援的素材版本。');
   need(data.enemyPresentationVersion === undefined || [0, 1].includes(data.enemyPresentationVersion), '不支援的敵軍姿態版本。');
   need(data.assetSet !== 'combatants-v1' || data.enemyPresentationVersion === 1, '人形敵軍需要保存的姿態版本。');
+  need(data.weaponPresentationVersion === undefined || [0,1].includes(data.weaponPresentationVersion), '不支援的武器動作版本。');
+  need(data.assetSet !== 'weapon-actions-v1' || data.weaponPresentationVersion === 1 && data.enemyPresentationVersion === 1, '新武器需要保存的動作與敵軍版本。');
   need(data.origin === 'Simulation' && data.statistics?.origin === 'Simulation', '此版僅支援明確標記的 Simulation 紀錄。');
   need(guid(data.sessionId) && data.statistics.sessionId === data.sessionId, '場次身分不一致。');
   need(Array.isArray(data.roomIds) && [1, 5].includes(data.roomIds.length) && new Set(data.roomIds).size === data.roomIds.length && data.roomIds.every(r => integer(r, 1, 5)), '房間配置錯誤。');
@@ -47,6 +50,11 @@ export function validateRecording(data) {
       seats.set(player.roomId, (seats.get(player.roomId) || 0) + 1); need(seats.get(player.roomId) <= 5, '單房玩家超過五人。');
       need(roomPosition(player.head, player.roomId) && number(player.head.y, .45, 2.4) && roomPosition(player.muzzle, player.roomId) && number(player.muzzle.y, .1, 2.6) && unit(player.forward)
         && Math.hypot(player.head.x - player.muzzle.x, player.head.y - player.muzzle.y, player.head.z - player.muzzle.z) <= 1.201, '玩家姿態錯誤。');
+      if(data.weaponPresentationVersion===1) need(player.hasWeaponPresentation===true && typeof player.connected==='boolean' && integer(player.reloadUntilTick,0,1728030)
+        && player.rig && ['None','Simulated','Tracked'].includes(player.rig.kind) && (!player.connected||player.rig.kind!=='None')
+        && rotation(player.rig.headRotation) && rotation(player.rig.leftRotation) && rotation(player.rig.rightRotation) && vector(player.rig.left) && vector(player.rig.right)
+        && (player.rig.kind==='None'||['left','right'].every(k=>Math.hypot(player.rig[k].x-player.head.x,player.rig[k].y-player.head.y,player.rig[k].z-player.head.z)<=2.5))
+        && (player.reloading ? player.reloadUntilTick>=30 && player.reloadUntilTick-30<=frame.tick && (player.health===0 || player.reloadUntilTick>frame.tick) : player.reloadUntilTick===0), '玩家武器動作資料不完整。');
       need(integer(player.health, 0, 100) && integer(player.magazine, 0, 30) && integer(player.reserve, 0, 90) && typeof player.reloading === 'boolean', '玩家血量或彈藥錯誤。');
     }
     for (const enemy of frame.enemies) {
@@ -88,11 +96,13 @@ export function validateRecording(data) {
       && event.tick - (enemyFireTicks.get(event.enemyId) ?? -20) >= 20, '敵軍射擊身分、射速或目標錯誤。'); enemyFireTicks.set(event.enemyId, event.tick); }
     if (event.kind === 'PlayerDamaged') { const previous = data.events[i - 1]; need(integer(event.damage, 1, 20) && previous?.kind === 'EnemyShot' && previous.playerId === event.playerId && previous.enemyId === event.enemyId && previous.tick === event.tick, '傷害缺少對應敵軍射線。'); playerHealth.set(event.playerId, playerHealth.get(event.playerId) - event.damage); }
   }
-  const frameStatistics = []; let eventIndex = 0;
+  const frameStatistics = [], reloadDeadlines=new Map(); let eventIndex = 0;
   for (const frame of data.frames) {
     while (eventIndex < frame.throughSequence) {
       const event = data.events[eventIndex++], metric = metrics.get(event.playerId);
       need(event.tick <= frame.tick, '快照引用未來事件。');
+      if(data.weaponPresentationVersion===1 && event.kind==='ReloadStarted') {need(!reloadDeadlines.get(event.playerId),'重複的換彈動作。');reloadDeadlines.set(event.playerId,event.tick+30);}
+      if(data.weaponPresentationVersion===1 && event.kind==='ReloadCompleted') {need(reloadDeadlines.get(event.playerId)===event.tick,'換彈完成缺少原始事件。');reloadDeadlines.set(event.playerId,0);}
       if (event.kind === 'ShotFired') metric.ammoUsed++;
       if (event.kind === 'ShotHit') { metric.shotsHit++; enemyDamage.set(event.enemyId, (enemyDamage.get(event.enemyId) || 0) + 50); }
       if (event.kind === 'EnemyEliminated') metric.kills++;
@@ -100,6 +110,7 @@ export function validateRecording(data) {
     }
     for (const player of frame.players) {
       const metric = metrics.get(player.id);
+      if(data.weaponPresentationVersion===1)need(player.reloadUntilTick===(reloadDeadlines.get(player.id)||0),'換彈時鐘與已保存事件不一致。');
       need(player.health === metric.health && player.magazine + player.reserve === 120 - metric.ammoUsed, '快照血量／彈藥與事件不一致。');
     }
     for (const enemy of frame.enemies) need(enemy.health === Math.max(0, 100 - (enemyDamage.get(enemy.id) || 0)), '敵軍血量與事件不一致。');

@@ -1,5 +1,31 @@
 # 開發進度
 
+## 2026-10-31：保存換彈時鐘、分離彈匣及合成手套
+
+從乾淨 `df2e649` 接續無頭盔的PC主線。新增 `weapon-actions-v1`，完整沿用既有人形敵軍／掩體，將固定264面步槍分為槍身240／彈匣24，加各120面的兩個原創手套；四Mesh／一材質跨avatar引用計數，無Collider或NetworkObject。生成器先驗證舊pin，再分離原三角形，新資料SHA `517c3616ec12dad34f25cc50f5309eae1033b62bcbbb636b4a3f378a5c12cab3` 固定；原四個profile及pin保留，沒有外部模型／貼圖。新舊原位264面的位置／法線／色彩已逐三角形核對，不能改舊回放。規範見 [WEAPON_ACTIONS.md](WEAPON_ACTIONS.md)。
+
+API／UI **0.21.0**、Unity **0.23.0／code26／NGO22**。新header weaponPresentationVersion1及hasWeaponPresentation／reloadUntilTick直接保存原世界的30-tick完成點；共用驗證逐事件核對ReloadStarted／Completed，拒絕憑空、重疊或改時鐘。NGO玩家row原子含tick及until，來源／API／UI／遊戲端一起更新。預設及缺欄位舊header仍0，不補造動作，binary原header／payload／checksum保持；envelope6、任務schema1、world schema1、票券2、environmentVersion1與rules0.8.0不改，新資料不可降舊reader。
+
+Unity／JS按保存tick做左手移向彈匣、抽出、短暫隱藏表示替換、插回與回握；Paused／Ended保留局部姿勢，seek不依本地wall clock。合成手套限Simulated且連線／存活，Tracked仍保留實際左手標記，不搬動關節資料配模型。槍口仍為原pointer前0.15m，動畫只動子物件；原射線、射速、換彈時間與彈藥規則不改。死亡／離線停止合成動作，原死亡可能留過期reloading旗標的規則保留；玩家身體／NPC武器、前臂／手指IK、物品庫、後座／死亡動畫、音效及真實換匣仍待，不能稱完整人物或追蹤握持。
+
+locked restore／Release build通過、0警告／錯誤，**548核心、403 HTTP、43世界串流、37 Node／173 Chromium**通過。新增時鐘／事件證據、Pause／完成／原彈藥、無效及死亡狀態、原位幾何與資源生命週期、C#／JS全部30 tick與Tracked政策、真正WebGL子物件／非零位移／直接seek及統計。SQLite新profile保存／重開已覆蓋。原重複event交易反例因新換彈證據先被ArgumentException拒絕，補齊合法換彈狀態後仍確認原SQL唯一性拒絕，未放寬產品規則。
+
+瀏覽器第一輪因API輸出目錄仍舊field-props.js而不識新profile，重新整包build；第二輪範例原無connected／rig，不能冒充合成手套，新增明確Synthetic測例rig並讓新版本匯入嚴格驗證；最後全套通過。舊無rig範例保持舊政策，沒有改其射線。失敗log／圖片保留。66項真正EditMode（0 failed／skipped）及Prepare／Desktop／Quest均exit0；新增5項覆蓋真正網格、共享無Collider、實際子Transform／根不動、Tracked資料不改、NGO及JsonUtility。另補強前輪舊NPC JSON測例為完整合法packet並驗證legacy讀取。未RebuildArena，原scene／prefab ID保持；Desktop receipt UTC2026-10-30T15:24:17.9621245Z，fingerprint `ab159159d9dbc182b4477d99125019db8052b6287485b362d8443bab0a1e8ef4`。離線SDK兩分支17 runtime／15 NUnit只證型別綁定。Quest receipt UTC2026-10-30T17:38:54.7872925Z，fingerprint與識別同Desktop；中斷前後來源再次核對一致。APK46,172,166 bytes，SHA `ae974c5fd51c5b34af2a346502a3dbba09cb102f313b1582fb3783b3b0602dde`，v2、min32／target35、code26／bundle0.23及六個ELF64 AArch64庫含libil2cpp核對通過；沒有頭盔安裝。
+
+原生第一場 `20261030-232831-54ea8099` 在實際R／Pause後被中斷並斷線，不能算完整通過；`20261031-011139-67be926f` 早期第4 tick暫停、Space及30／89已觀察，但complete review標記逾時，亦不算全通過。兩場cleanup正常且原資料／快照保留。最終流程等到抽出階段才Pause，人工review等待改600秒，未放寬遊戲時間／來源新鮮度門檻。曾取到非遊戲視窗影像，未保存為遊戲證據；改用明確HUD影像探針，再以重新確認的遊戲視窗補完成畫面。探針有界285秒且audioSamples／callbackCount皆0，非聽感或頭盔證據；初期POSE REJECTED／STALE擷取亦保留，未宣稱原啟動旗標問題已解決。
+
+| 最終PC場（前綴20261031） | 幀／最大來源年齡 | 證據 |
+|---|---|---|
+| 011829-38a0829c | 1938／0.160171秒 | **4項實際鍵盤／GPU流程**：Space1→29、R1，保存tick616／until632、elapsed14；GPU交換期手套／彈匣狀態已檢視，暫停再Space不耗彈，Resume後30／89、until0及回握畫面已確認。另**5項真正原生錄製觀戰**核對實際WebGL彈匣／手套位置、旋轉與隱藏狀態；保存完整數值及近距離鏡頭。封存耗彈1、命中／擊殺0、健康100且回放一致，無pose／combat注入 |
+| 012755-8c66b16b | 115／0.156563秒 | **42 UI／native，客戶端無圖形**：保存配置／preflight、動態名冊、天氣／AI、Patrol／Pause／Resume／End、鏡頭、封存及最後姿勢；瀏覽器SwiftShader。此場沒有重做原生雨夜GPU／DSP |
+| 012959-c53acede | 七場530／0.202684秒 | 五個真正server／每房一個client隔離、End／重用、封存後Linked、舊票／升權拒絕與七個精確stream封存；全為新profile／weapon version1，非25台 |
+
+控制台前場 `012543-62053ba3` 單次讀狀態檔的暫停斷言未通過；其SQLite共722個Paused幀均tick62，沒有保存當下失敗讀回的原值，不能回推精確原因。改為等待同tick的有效讀回並保存前後樣本，若實際tick改變仍會失敗；最終42項通過。原生觀戰新工具首輪把option可見性當選單存在條件而timeout，改等attached後5項通過，不改產品。
+
+最終三組均Simulation／Simulated、pendingTelemetry=false、活動0、cleanup零錯誤；writer關閉後25／14／26檔複製回F與SSD逐檔SHA一致且保留原件。另 `unity-admission/20261031-013124-c61855d2` 8項無圖形入場／撤銷／transport釋放／同admission重連通過，369幀、回放報表一致及活動0。沒有重跑走離出生點的互動重連、完整鍵盤碰撞、DSP／聽感、跨機或F USB全資料；source age為擷取新鮮度，非RTT或FPS。程式與binary仍F、runtime明確SSD。
+
+最終原生39個log未見NullReference／MissingReference／ObjectDisposed／IndexOutOfRange例外。機器證據彙整於artifacts/actions-validation.json；原5080仍API0.16與原歷史且health ok，未替換正式資料／憑證。完整11項長期目標維持開發中；接續玩家人物／NPC武器、完整動畫／音效、複雜通路／地形、原停頓原因／啟動旗標、長任務與跨機；Quest／VIVE、MR、廠商硬體與25台仍待分階段實測。
+
 ## 2026-10-30：人形敵軍、權威朝向及可還原步態
 
 從乾淨 `0170bb0` 接續使用者無頭盔的PC主線；前輪已交付玩家步槍，本輪新增原創404三角形人形敵軍（軀幹180、頭104、腿60重用兩次），含頭盔／護目鏡、背心／彈袋、紅色臂帶、護膝及靴子。生成器產出相同Unity Resources／瀏覽器頂點、法線、色彩與索引，固定資料SHA `39fa5e9baceec0eb71ce6a4664fc4460e7b0f212f2c58b75c7b4d75b3565fdf2`。生成check及記憶體改色反例拒絕通過；沒有外部模型／貼圖／下載，原掩體與步槍pin不改。NPC尚無武器模型、握持／換彈／死亡動畫或腳底IK，玩家身體與頭手仍為原型，不能稱完整人物美術。規範見 [ENEMY_PRESENTATION.md](ENEMY_PRESENTATION.md)。
