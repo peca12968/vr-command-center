@@ -24,7 +24,7 @@ locked restore／Release build通過、0警告／錯誤，**548核心、403 HTTP
 
 最終三組均Simulation／Simulated、pendingTelemetry=false、活動0、cleanup零錯誤；writer關閉後25／14／26檔複製回F與SSD逐檔SHA一致且保留原件。另 `unity-admission/20261031-013124-c61855d2` 8項無圖形入場／撤銷／transport釋放／同admission重連通過，369幀、回放報表一致及活動0。沒有重跑走離出生點的互動重連、完整鍵盤碰撞、DSP／聽感、跨機或F USB全資料；source age為擷取新鮮度，非RTT或FPS。程式與binary仍F、runtime明確SSD。
 
-最終原生39個log未見NullReference／MissingReference／ObjectDisposed／IndexOutOfRange例外。機器證據彙整於artifacts/actions-validation.json；原5080仍API0.16與原歷史且health ok，未替換正式資料／憑證。完整11項長期目標維持開發中；接續玩家人物／NPC武器、完整動畫／音效、複雜通路／地形、原停頓原因／啟動旗標、長任務與跨機；Quest／VIVE、MR、廠商硬體與25台仍待分階段實測。
+最終原生39個log未見NullReference／MissingReference／ObjectDisposed／IndexOutOfRange例外。機器證據彙整於artifacts/actions-validation.json；原5080仍API0.16與原歷史且health ok，未替換正式資料／憑證。功能提交 `4ca6a59d059154c74a574541103dd3ab6e3d7052` 已推送並核對遠端main相同。[CI run41101273280](https://github.com/peca12968/vr-command-center/actions/runs/41101273280)／check124218763936目前queued、steps=null，尚無執行結果；不以歷史帳務失敗推定本輪結果，亦未改帳務或重跑。GitHub #1已同步目前ROADMAP、結果及限制，讀回確認open且保留前次完整內容。完整11項長期目標維持開發中；接續玩家人物／NPC武器、完整動畫／音效、複雜通路／地形、原停頓原因／啟動旗標、長任務與跨機；Quest／VIVE、MR、廠商硬體與25台仍待分階段實測。
 
 ## 2026-10-30：人形敵軍、權威朝向及可還原步態
 
