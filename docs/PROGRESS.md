@@ -23,6 +23,8 @@ locked restore／Release build0警告／錯誤，**555核心、403 HTTP、43世�
 
 Quest ARM64／IL2CPP亦exit0，receipt UTC2026-10-30T18:24:52.1314526Z；與最終Desktop來源fingerprint及scene／prefab ID完全一致。APK46,190,262 bytes、SHA `ad974f992046c7d70adcb19c7f9d0731e8e21ea79e869178fc96565d763caf5b`，簽章v2、min32／target35、code27／bundle0.24及六個ELF64 AArch64庫含libil2cpp核對通過。四張原生GPU截圖為Sky原始JPEG位元組，副檔名已對齊；完整機器證據在artifacts/armed-validation.json，未將舊APK或較窄SDK當本輪結果，沒有頭盔安裝。原5080已唯讀確認health ok、仍API0.16／原歷史，未替換DLL／正式憑證。完整11項長期目標持續開發中；後續接射擊事件及閃光／後座、玩家人物、完整動畫／音效、複雜地形／跨機與原停頓原因。Quest／VIVE實機、MR、廠商硬體及25台仍待分階段驗收。
 
+功能提交 `5031250791b47da74363999659d41eb74c959064` 已推送，遠端main核對相同。GitHub #1已同步最新交付並完整保留原60538字內容，讀回open／62127字確認。 [CI run41106904487](https://github.com/peca12968/vr-command-center/actions/runs/41106904487)／check124239002725實際failure、steps=null；annotation明示近期付款失敗或支出上限，工作未啟動，非本輪雲端測試執行結果。未改帳務或重跑；本機結果獨立保存。
+
 ## 2026-10-31：保存換彈時鐘、分離彈匣及合成手套
 
 從乾淨 `df2e649` 接續無頭盔的PC主線。新增 `weapon-actions-v1`，完整沿用既有人形敵軍／掩體，將固定264面步槍分為槍身240／彈匣24，加各120面的兩個原創手套；四Mesh／一材質跨avatar引用計數，無Collider或NetworkObject。生成器先驗證舊pin，再分離原三角形，新資料SHA `517c3616ec12dad34f25cc50f5309eae1033b62bcbbb636b4a3f378a5c12cab3` 固定；原四個profile及pin保留，沒有外部模型／貼圖。新舊原位264面的位置／法線／色彩已逐三角形核對，不能改舊回放。規範見 [WEAPON_ACTIONS.md](WEAPON_ACTIONS.md)。
