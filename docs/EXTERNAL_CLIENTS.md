@@ -1,5 +1,7 @@
 # 分開啟動玩家與遊戲伺服器
 
+玩家端新版[連線狀態](PLAYER_CONNECTION_STATUS.md)可區分程式啟動與遊戲回報入場、拒絕、未確認及戰績保留；這不新增網路可達性探測，也不以同機驗證宣稱跨機成功。
+
 Windows玩家可使用[可攜玩家包](WINDOWS_PLAYER_PACKAGE.md)：完整解壓後開啟Launch-Player.exe，選擇自己的下載檔；不用手動輸入Unity啟動命令。最終包已有背景雙PC／封存與程序收尾證據，GUI安全性提示及跨機另驗，見PROGRESS。
 
 API／控制台0.30、Unity0.32.0／Android code39／NGO29。操作員啟動器新增external模式：只啟動自己場次的server，不自動替名冊中的每個人開本機client、領票或占用入場。原本local模式仍是預設，供同機PC練習。

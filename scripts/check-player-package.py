@@ -51,6 +51,15 @@ def main():
         check('Rejects ' + label + ' before spawning a player', ['--config', str(file), '--launch', '--headless'])
     oversized = directory / 'oversized.json'; oversized.write_text('x' * 32769, encoding='utf-8')
     check('Rejects oversized input without logging its contents', ['--config', str(oversized), '--launch', '--headless'])
+    valid = directory / 'status-input.json'; valid.write_text(json.dumps(base), encoding='utf-8')
+    check('Rejects status output without an owned waited launch', ['--status-report', str(directory / 'not-started.json')])
+    common = ['--config', str(valid), '--launch', '--headless', '--wait']
+    future_log = directory / 'new-log.txt'
+    check('Rejects case-aliased status and game log paths before launch', [*common, '--log', str(future_log), '--status-report', str(future_log).upper()])
+    check('Rejects status output inside the delivered package', [*common, '--log', str(future_log), '--status-report', str(folder / 'new-status.json')])
+    existing = directory / 'existing-status.json'; existing.write_text('preserve owned fixture', encoding='utf-8')
+    check('Rejects existing status output without overwriting it', [*common, '--log', str(future_log), '--status-report', str(existing)])
+    assert existing.read_text(encoding='utf-8') == 'preserve owned fixture' and not future_log.exists() and not (folder / 'new-status.json').exists()
     # A fresh minimal copy is intentionally incomplete. Never alter the delivered package.
     broken = directory / 'broken-package'; broken.mkdir(); shutil.copyfile(folder / 'Launch-Player.exe', broken / 'Launch-Player.exe')
     shutil.copyfile(folder / 'player-package.json', broken / 'player-package.json')

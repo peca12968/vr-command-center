@@ -1,5 +1,7 @@
 # 開發指引
 
+Windows玩家狀態見docs/PLAYER_CONNECTION_STATUS.md：啟動器只讀自己新遊戲log，不讀全域Player.log／別的程序，不用ping／TCP或程序啟動假造入場；Connected是遊戲回報、非readiness或即時姿態保證。Waiting30秒只Unconfirmed、不猜防火牆；Final保留到新Connected。64KiB／poll、4096字元列、64狀態／2MiB積壓及倒退界線；status-report需wait＋新log且大小寫路徑不可重疊，complete只是快照未超界、exited獨立，均非任務成功。17真正Framework、19啟動器及13原生整合已驗，GUI／跨機仍待。API/UI0.30、Unity0.33／code40／NGO29及原152／c98f1雙平台不變，沒有新Editor；新1 runtime14檔、前27 runtime599檔raw保持，完整11項active。
+
 五房獨立900秒工具見docs/DESKTOP_INDEPENDENT_LONG.md／PROGRESS：同源0.33／code40／NGO29、API/UI0.30保持，5 server＋25 headless client、25原admission結果／各CSV／雙seal、42293完整回放／209235人次成功；房1Pause13→Resume14、tick2404／35個Paused幀，其他四房持續前進。只有明確原Pause fence可排除Running人次，不能把其他房意外Pause或暫停中失效放過。32 Python、新1 runtime22檔／前26 runtime577檔raw保存核對成功。真正handle需terminal才比較／snapshot，不開保存SQLite；independent-checks.json與Linked跨場比較器不同格式，不混套。沒有新Editor／雙平台，原152與c98f1 receipt保持；仍是同機靜止Simulation，原31筆未修復、完整11項active，實機／跨機另驗。
 
 同源未啟用診斷對照與跨場工具見docs/CONTINUITY_COMPARISON.md／PROGRESS：新25程序900秒、8475全回放／8412 Running／210300人次、25份結果／CSV／雙seal成功；原同c98f1稀疏場也未重現，舊2幀31筆失效保持未通過，不能稱根因或修復。比較需先確認原handle terminal與全部cleanup，只讀JSON／CSV、不開保存SQLite；明確null才是DisabledByTool，舊缺欄位為NotRecorded。不同source／模式及未量測主機條件不可當因果控制，complete只表示比較完成。API/UI0.30、Unity0.33／code40／NGO29及原152 Editor／雙平台不變，本輪未重建；新27項Python與raw bytes新14檔／前25 runtime563檔保存核對成功，完整11項仍active。

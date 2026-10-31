@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+新版啟動器加入[玩家入場狀態](PLAYER_CONNECTION_STATUS.md)：區分程式啟動、遊戲回報入場／拒絕／中斷、30秒未確認與最終戰績；Unity0.33／code40來源與原成功建置保持。新版ZIP、真正類別／原生背景驗證及GUI／跨機限制見PROGRESS。
+
 本輪另產生Unity0.33／code40同源Windows玩家包，啟動器邏輯不變；ZIP與解壓核對及新版DLL的一般原生回歸見PROGRESS。一般雙擊不開長診斷，診斷必須明確CLI選用；0.32舊包及其原始驗證保持，沒有將未完成的GUI安全性提示驗收改為成功。
 
 玩家包 v1 使用現有 Unity0.32.0／NGO29 的真正 Windows 建置，API／UI0.30不變。控制人員可交付一份 ZIP，玩家完整解壓後開啟 `Launch-Player.exe`、選擇自己的控制台下載連線檔，再按「開始遊戲」。玩家電腦不需要 Unity Editor、Python或.NET 10 SDK；啟動器使用 Windows 的.NET Framework 4.8，遊戲仍使用原 Unity runtime。不同電腦的相容性仍須實測。
@@ -42,7 +44,7 @@ python scripts/check-player-package.py '<解壓目錄>/VRCommand-Player'
 
 這份清單不是數位簽章、可信發行者或惡意程式檢測；不能以清單證明任意來源的ZIP可信。離線核對不證明網路、實機、MR或25台相容性。
 
-啟動器另有選用診斷：`--verify`只核對包，`--config <檔案>`預選連線檔，`--launch`直接啟動，`--headless`及`--wait`僅搭配直接啟動。`--log <全新絕對路徑>`指定遊戲原生日誌，`--report <全新絕對路徑>`保存啟動／退出狀態及自有子程序PID；兩者必須位於玩家包外，不覆蓋既有檔或輸入。一般雙擊不產生這些診斷報告，遊戲仍沿用原預設日誌。
+啟動器另有選用診斷：`--verify`只核對包，`--config <檔案>`預選連線檔，`--launch`直接啟動，`--headless`及`--wait`僅搭配直接啟動。`--log <全新絕對路徑>`指定遊戲原生日誌，`--report <全新絕對路徑>`保存啟動／退出狀態及自有子程序PID；兩者必須位於玩家包外，不覆蓋既有檔或輸入。一般雙擊不產生診斷報告，新版GUI將Unity原生日誌放入自己的LocalAppData PlayerRuns目錄供入場狀態使用；原CLI未指定log時仍沿用Unity預設。選用`--status-report`條件及有界範圍見PLAYER_CONNECTION_STATUS。
 
 真正API下載、兩個獨立原生玩家與封存的驗證入口：
 

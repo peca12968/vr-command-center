@@ -1,5 +1,27 @@
 # 開發進度
 
+## 2026-10-31：Windows玩家的入場／拒絕／未確認與戰績狀態
+
+前輪五房長測為實際進展；從乾淨`aa4b866`接續[玩家連線狀態](PLAYER_CONNECTION_STATUS.md)。現有external地址公告及四欄連線檔已可分開啟動玩家，這輪補上啟動器只顯示「程式啟動」卻無法辨別真正入場的操作缺口。**API/UI0.30、Unity0.33.0／code40／NGO29保持**，不改後端、Unity、Tracked、票券、規則或世界格式；沒有新Editor／雙平台重建，原152真正EditMode與成功receipt保持。目前重算及Windows／Quest receipt仍`c98f1e1d9b6857de6fc17ea3c9d585ba41881ac528314f5e7fc0073ee5958b1f`，原Scene／prefab ID不變。
+
+原生.NET Framework啟動器新增同類別的有界日誌監看，顯示Waiting／Connected／Rejected／Disconnected／Unconfirmed／Final；Connected必須由自己這次遊戲的精確marker回報，不從程序啟動、ping或TCP推成入場。至少30秒未確認只請人核對IPv4／UDP埠／版本，不猜防火牆或其他網路根因。Final不被正常結束斷線覆蓋，新Connected才開始新狀態；記錄不可讀時明示僅是先前回報，控制台readiness仍是另一個權威快照。
+
+GUI來源在每次啟動將Unity原生日誌指定到自己的LocalAppData PlayerRuns新目錄，不讀全域Player.log或其他程序；關閉啟動器仍不終止遊戲／End。每次最多64KiB、跨讀UTF8 decoder、完整換行才辨認、單列4096字元／過長整列忽略，狀態歷史64筆，日誌倒退或積壓>2MiB停止推定；不新增姿態／GPU／PCM或網路探測，不讀其他程序memory或OS畫面。普通GUI不寫狀態報告，原CLI未要求監看則保持原流程。
+
+選用`--status-report`必須搭配waited launch與自己的新log，僅保存固定state／PID／exited／availability／有界transitions，不保存ticket、actor ID或raw結果。只在內容改變時寫入；大小寫路徑別名、包內輸出或覆寫輸入／舊檔在啟動前拒絕。complete僅表示狀態快照未超界，exited是獨立的退出欄位，均不代表任務、網路或設備成功。
+
+真正Framework compiler編譯同一`PlayerConnectionMonitor`、**17項C#檢查**通過：等待30秒不假裝連線、拒絕／斷線／重連、Final保留、半列／UTF8半字元、prefix假marker／超長列、日誌倒退／2MiB及64筆界線、不洩漏內容。來源SHA `a65846da6f3a77de38356dbd9e448e55a220288ef170a407bba52cb227e63d57`；檢查來源SHA `d78e44aed9ad1e2178068cb21a8780b97099146ec71fceab44b4a0ebadb9aebf`。初次手動csc相對路徑參數未找到來源（CS1504），改實際絕對路徑重跑才成功；正式`check-player-connection-status.py`固定使用絕對來源並保存compile／run log。這是fixture parser檢查，不是Unity、原生入場或GUI證據。
+
+新玩家包`windows-player-0.33.0-status-v1.zip` **82,633,458 bytes**、SHA `cff0c88aeaf89262f09f3efffb263a2980f7df68e13dae7d7a81f4ccdcf2e691`，311檔＋manifest；真正複製原runtime／編譯／ZIP成功，實際解壓新C目錄並核對全部檔案。原生啟動器**19項**核對／拒絕檢查成功（增加狀態輸出需wait、大小寫重疊、包內及舊檔保留）；Python包規則6成功／1因Windows symlink權限skip，語法、Node --check及diff檢查成功。ZIP／EXE／SDK／票券／資料不提交Git。
+
+實際external場`desktop-venue/20261031-200737-de93284a`使用自己全新API／C SSD runtime、loopback／Simulation；Node的`--launcher-status`模式完成**13項原生／控制台整合**，真正handle58435 exit0。兩個獨立玩家使用控制台實際下載的票券、原解壓包啟動，其狀態皆Waiting→Connected→Final；原生與控制台readiness一致，Begin／Pause／End、380幀世界及七統計／原admission／精確雙seal一致，正常斷線不覆蓋Final。這是同機背景程序及Chromium SwiftShader，沒有GUI啟動器按鈕／截圖、GPU或跨機證據。
+
+另兩個自有原生玩家分別使用錯誤票券、自己的不回應UDP端點（無GameServer，不讀payload）：真正狀態Waiting→Rejected及Waiting→Unconfirmed，均未出現Connected，原兩位參與者未受影響。Unconfirmed是本次30秒未收到確認，不當作已證明網路／防火牆故障。四個原生玩家／啟動器全清理、status報告exited=true且無ticket／actor ID／raw結果；部分由測試主動停止、native exit1屬清理，不拿它當自然退出或登入失敗。external helper自身仍allAcknowledged=null、headsets=null，兩份結果由獨立檢查器核對，不以空集合偽造全部收到。
+
+原helper handle23787真正exit0，全部自有actor terminal，cleanup／native-cleanup無錯誤。`launcher-status-runtime-validation.json`raw bytes核對新**1 runtime／14檔**C原件與F snapshot一致、前**27 runtime／599檔**原件及snapshot未變、C API／三工具159檔保持；不開保存SQLite。writer停後一次snapshot、保留原件，source／binary仍F，資料明確C SSD，不是F USB效能。原5080、帳務、登入／授權／防火牆未動，既有GUI安全性提示由使用者自行處理。
+
+這輪交付玩家端狀態來源與實際背景原生證據，**GUI完整操作、跨機／25台、頭盔與原Linked31筆根因／修復仍未驗證**。沒有新後端／瀏覽器UI行為變更，未重跑.NET／完整瀏覽器套件或Unity。完整11項目標保持active，後續取得安全性提示人工處理後驗GUI與實際跨機；仍可接續PC多人操作、原姿態自然窗口定位，Quest／VIVE／MR及廠商硬體分開驗收。
+
 ## 2026-10-31：五個獨立世界／25程序的15分鐘任務
 
 功能 [171dabc](https://github.com/peca12968/vr-command-center/commit/171dabcf1c835924213e87ef7dc7d6fa3bd5a19b) 已推送main、遠端SHA一致。[本次CI run41199169762](https://github.com/peca12968/vr-command-center/actions/runs/41199169762)／check124531368540為failure且steps空；fresh annotation為近期付款失敗或支出上限，job未啟動，沒有雲端測試結果。沒有改帳務或手動重跑；下列本機原生與32項Python為實際結果。

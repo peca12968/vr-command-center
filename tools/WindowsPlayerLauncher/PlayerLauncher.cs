@@ -17,6 +17,9 @@ internal static class PlayerLauncher
     private static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = 4 * 1024 * 1024 };
     private static readonly string Root = AppDomain.CurrentDomain.BaseDirectory;
     private static string report;
+    private static string statusReport;
+    private static string lastStatusReport;
+    private static bool SamePath(string a, string b) { return a != null && b != null && String.Equals(a, b, StringComparison.OrdinalIgnoreCase); }
     private static Dictionary<string, object> Map(object value) { return value as Dictionary<string, object>; }
     private static string Text(Dictionary<string, object> value, string key)
     { object result; return value.TryGetValue(key, out result) ? result as string : null; }
@@ -99,6 +102,18 @@ internal static class PlayerLauncher
         if (File.Exists(report)) File.Delete(report);
         File.Move(temporary, report);
     }
+    private static void StatusReport(PlayerConnectionMonitor monitor, int processId, bool exited)
+    {
+        if (statusReport == null) return;
+        var value = Json.Serialize(new { version = 1, processId = processId, exited = exited,
+            state = monitor.State, logAvailable = monitor.LogAvailable, complete = !monitor.Truncated, transitions = monitor.Transitions });
+        if (value == lastStatusReport) return;
+        var temporary = statusReport + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        File.WriteAllText(temporary, value, new UTF8Encoding(false));
+        if (File.Exists(statusReport)) File.Delete(statusReport);
+        File.Move(temporary, statusReport);
+        lastStatusReport = value;
+    }
     private static Process Launch(string config, bool headless, string log)
     {
         Verify(); Config(config);
@@ -123,17 +138,19 @@ internal static class PlayerLauncher
                 else if (args[i] == "--wait") wait = true;
                 else if (args[i] == "--headless") headless = true;
                 else if (args[i] == "--verify") verify = true;
-                else if ((args[i] == "--config" || args[i] == "--log" || args[i] == "--report") && i + 1 < args.Length)
+                else if ((args[i] == "--config" || args[i] == "--log" || args[i] == "--report" || args[i] == "--status-report") && i + 1 < args.Length)
                 {
                     var option = args[i++]; var path = Path.GetFullPath(args[i]);
-                    if (option == "--config") config = path; else if (option == "--log") log = path; else report = path;
+                    if (option == "--config") config = path; else if (option == "--log") log = path; else if (option == "--report") report = path; else statusReport = path;
                 }
                 else throw new InvalidDataException("啟動選項不正確。");
             }
-            Require(report == null || (!File.Exists(report) && !report.StartsWith(Root, StringComparison.OrdinalIgnoreCase) && report != config && report != log),
+            Require(report == null || (!File.Exists(report) && !report.StartsWith(Root, StringComparison.OrdinalIgnoreCase) && !SamePath(report, config) && !SamePath(report, log)),
                 "診斷報告須使用玩家包外的新路徑。");
-            Require(log == null || (!File.Exists(log) && !log.StartsWith(Root, StringComparison.OrdinalIgnoreCase) && log != config),
+            Require(log == null || (!File.Exists(log) && !log.StartsWith(Root, StringComparison.OrdinalIgnoreCase) && !SamePath(log, config)),
                 "診斷記錄須使用玩家包外的新路徑。");
+            Require(statusReport == null || (!verify && launch && wait && log != null && !File.Exists(statusReport) && !statusReport.StartsWith(Root, StringComparison.OrdinalIgnoreCase)
+                && !SamePath(statusReport, config) && !SamePath(statusReport, log) && !SamePath(statusReport, report)), "連線狀態報告須搭配等待啟動及獨立的新記錄路徑。");
             Require((!headless && !wait || launch) && (!launch || config != null), "請提供玩家連線檔。");
             if (verify) { Verify(); Report(new { status = "verified" }); return 0; }
             if (launch)
@@ -141,7 +158,14 @@ internal static class PlayerLauncher
                 using (var child = Launch(config, headless, log))
                 {
                     if (!wait) return 0;
-                    child.WaitForExit(); Report(new { status = "exited", processId = child.Id, exitCode = child.ExitCode }); return child.ExitCode;
+                    if (statusReport == null) child.WaitForExit();
+                    else
+                    {
+                        var monitor = new PlayerConnectionMonitor(log);
+                        while (!child.WaitForExit(200)) { monitor.Poll(); StatusReport(monitor, child.Id, false); }
+                        monitor.Poll(); StatusReport(monitor, child.Id, true);
+                    }
+                    Report(new { status = "exited", processId = child.Id, exitCode = child.ExitCode }); return child.ExitCode;
                 }
             }
             Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
@@ -150,7 +174,7 @@ internal static class PlayerLauncher
         catch
         {
             // Serializer / IO exception text can contain input. Do not echo secrets or file contents.
-            if (report != null && !File.Exists(report) && !report.StartsWith(Root, StringComparison.OrdinalIgnoreCase) && report != config && report != log)
+            if (report != null && !File.Exists(report) && !report.StartsWith(Root, StringComparison.OrdinalIgnoreCase) && !SamePath(report, config) && !SamePath(report, log))
                 try { Report(new { status = "rejected", reason = "Package, connection file or launch options are invalid." }); } catch { }
             if (report == null) MessageBox.Show("無法啟動。請確認玩家包已完整解壓，並重新選擇控制台下載的玩家連線檔。", "VR Command 玩家", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return 1;
@@ -161,7 +185,7 @@ internal static class PlayerLauncher
         private readonly Label selected = new Label { AutoSize = false, Dock = DockStyle.Top, Height = 75, UseMnemonic = false };
         private readonly Label status = new Label { AutoSize = false, Dock = DockStyle.Top, Height = 65 };
         private readonly Button play = new Button { Text = "開始遊戲", AutoSize = true, Enabled = false };
-        private string config; private Process child;
+        private string config; private Process child; private PlayerConnectionMonitor monitor;
         public PlayerForm(string initial, string diagnosticLog)
         {
             Text = "VR Command 玩家"; ClientSize = new Size(560, 285); MinimumSize = new Size(576, 324);
@@ -180,11 +204,30 @@ internal static class PlayerLauncher
             play.Click += delegate
             {
                 play.Enabled = false; status.Text = "正在核對玩家包…"; Refresh();
-                try { child = Launch(config, false, diagnosticLog); choose.Enabled = false; status.Text = "遊戲已啟動。請切換到遊戲視窗；可關閉此啟動器。"; }
+                try
+                {
+                    var ownLog = diagnosticLog;
+                    if (ownLog == null)
+                    {
+                        var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrCommand", "PlayerRuns", Guid.NewGuid().ToString("N"));
+                        Directory.CreateDirectory(directory); ownLog = Path.Combine(directory, "player.log");
+                    }
+                    child = Launch(config, false, ownLog); monitor = new PlayerConnectionMonitor(ownLog);
+                    choose.Enabled = false; status.Text = monitor.Message;
+                }
                 catch { status.Text = "無法啟動，請重新解壓玩家包並選擇正確的玩家連線檔。"; play.Enabled = true; }
             };
             var timer = new Timer { Interval = 500 };
-            timer.Tick += delegate { if (child != null && child.HasExited) { child.Dispose(); child = null; choose.Enabled = true; play.Enabled = config != null; status.Text = "遊戲已關閉。再次入場前，請確認票券仍有效。"; } };
+            timer.Tick += delegate
+            {
+                if (child == null) return;
+                monitor.Poll(); status.Text = monitor.Message;
+                if (child.HasExited)
+                {
+                    var final = monitor.State == "Final"; child.Dispose(); child = null; choose.Enabled = true; play.Enabled = config != null;
+                    status.Text = final ? "遊戲已關閉；本次已收到最終戰績。" : "遊戲已關閉。" + monitor.Message;
+                }
+            };
             timer.Start(); FormClosed += delegate { timer.Dispose(); if (child != null) child.Dispose(); };
             selected.Text = "尚未選擇連線檔";
             if (initial != null) SelectConfig(initial);
@@ -195,5 +238,80 @@ internal static class PlayerLauncher
             catch { config = null; play.Enabled = false; selected.Text = "未接受此連線檔"; status.Text = "請使用控制台下載的玩家連線檔。"; }
         }
         private static string TextValue(Dictionary<string, object> value) { return PlayerLauncher.Text(value, "address") + ":" + Number(value, "port"); }
+    }
+}
+
+// Reads only the fresh log explicitly assigned to this launch. No global Player.log,
+// network probe, payload parsing, process inspection or changes to game state.
+internal sealed class PlayerConnectionMonitor
+{
+    private readonly string path;
+    private readonly Stopwatch clock = Stopwatch.StartNew();
+    private readonly Decoder decoder = Encoding.UTF8.GetDecoder();
+    private readonly StringBuilder line = new StringBuilder();
+    private long offset;
+    private bool discardLine;
+    private bool invalidLog;
+    public string State { get; private set; }
+    public bool LogAvailable { get; private set; }
+    public bool Truncated { get; private set; }
+    public readonly List<string> Transitions = new List<string>();
+    public PlayerConnectionMonitor(string log) { path = log; Change("Waiting"); }
+    private void Change(string state)
+    {
+        if (State == state) return;
+        State = state;
+        if (Transitions.Count < 64) Transitions.Add(state); else Truncated = true;
+    }
+    internal void Observe(string value)
+    {
+        // Exact markers only. Never serialize or display arbitrary log text / IDs.
+        if (Regex.IsMatch(value, "^VR_CLIENT_CONNECTED id=[0-9]+$")) Change("Connected");
+        else if (State == "Final") return;
+        else if (value == "VR_CLIENT_ADMISSION_REJECTED") Change("Rejected");
+        else if (value == "VR_CLIENT_DISCONNECTED" && State != "Final") Change("Disconnected");
+        else if (value.StartsWith("VR_CLIENT_DEBRIEF_FINAL {", StringComparison.Ordinal) && State == "Connected") Change("Final");
+    }
+    internal void WaitingSeconds(double seconds) { if (State == "Waiting" && seconds >= 30) Change("Unconfirmed"); }
+    internal void Feed(string value)
+    {
+        foreach (var c in value)
+        {
+            if (c == '\n') { if (!discardLine) Observe(line.ToString().TrimEnd('\r')); line.Clear(); discardLine = false; }
+            else if (!discardLine)
+            {
+                if (line.Length < 4096) line.Append(c);
+                else { line.Clear(); discardLine = true; }
+            }
+        }
+    }
+    public void Poll()
+    {
+        WaitingSeconds(clock.Elapsed.TotalSeconds);
+        if (invalidLog) return;
+        try
+        {
+            using (var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            {
+                if (file.Length < offset || file.Length - offset > 2 * 1024 * 1024)
+                { LogAvailable = false; Truncated = true; invalidLog = true; return; }
+                file.Position = offset; var bytes = new byte[65536]; var chars = new char[65536];
+                var length = file.Read(bytes, 0, bytes.Length); offset += length;
+                Feed(new string(chars, 0, decoder.GetChars(bytes, 0, length, chars, 0, false))); LogAvailable = true;
+            }
+        }
+        catch (IOException) { LogAvailable = false; }
+        catch (UnauthorizedAccessException) { LogAvailable = false; }
+    }
+    public string Message
+    {
+        get
+        {
+            if (State == "Final") return "遊戲回報已收到最終戰績。結束斷線不會清除戰績。";
+            if (State == "Rejected") return "遊戲回報入場遭拒。請向控制人員重新取得自己的連線檔。";
+            if (State == "Disconnected") return "遊戲回報連線中斷。可在遊戲內重新讀取控制人員更新的票券。";
+            if (State == "Connected") return LogAvailable ? "遊戲已回報入場。請切換到遊戲視窗；可關閉此啟動器。" : "先前已回報入場，目前無法讀取連線記錄。請查看遊戲視窗。";
+            return State == "Unconfirmed" ? "尚未收到入場確認。請核對伺服器IPv4、UDP埠與遊戲版本，並查看遊戲視窗。" : "遊戲已啟動，正在等待入場確認…";
+        }
     }
 }

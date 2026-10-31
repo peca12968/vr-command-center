@@ -1,5 +1,7 @@
 # VR Command Center
 
+玩家啟動器新增[入場狀態](docs/PLAYER_CONNECTION_STATUS.md)：顯示遊戲回報的入場、拒絕、中斷、未確認與最終戰績，區分程式啟動與真正入場；新版Windows玩家包及同機原生整合已驗，GUI完整操作與跨機仍待。
+
 新增[五房獨立15分鐘任務驗證](docs/DESKTOP_INDEPENDENT_LONG.md)：5個server與25個PC client各自倒數，單房Pause時其他四房持續；42293幀完整回放、25份戰績與各房封存一致，本場無失效。仍為同機靜止Simulation，完整跨機／頭盔容量及原偶發失效根因另驗。
 
 新增[同源25程序長任務對照](docs/CONTINUITY_COMPARISON.md)：未啟用診斷的15分鐘場完成8475幀回放、25份戰績／CSV與雙seal，未發現姿態失效。跨場報告仍保留舊31筆失效為未通過；兩場未重現不代表根因已修復。這是同機靜止Simulation，完整實機容量仍待驗。

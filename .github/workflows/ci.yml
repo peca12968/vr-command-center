@@ -60,6 +60,7 @@ jobs:
       - run: python -m unittest discover -s tests -p test_desktop_external.py
       - run: python -m unittest discover -s tests -p test_player_package.py
       - run: python -m py_compile scripts/package-windows-player.py scripts/check-player-package.py
+      - run: python -m py_compile scripts/check-player-connection-status.py
       - run: python -m py_compile scripts/start-desktop-control.py
       - uses: actions/setup-node@v4
         with:

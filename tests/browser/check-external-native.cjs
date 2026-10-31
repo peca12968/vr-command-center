@@ -19,6 +19,8 @@ async function main() {
   const ready = JSON.parse(await fs.readFile(readyPath, 'utf8')); const base = new URL(ready.baseUrl);
   const packageRoot = process.argv[3] ? path.resolve(process.argv[3]) : null;
   const interactivePackage = !!packageRoot && process.argv.includes('--package-interactive');
+  const launcherStatus = process.argv.includes('--launcher-status');
+  assert.ok(!launcherStatus || packageRoot && !interactivePackage, 'Status CLI checks require a package and no GUI mode');
   const packageManifest = packageRoot ? JSON.parse(await fs.readFile(path.join(packageRoot, 'player-package.json'), 'utf8')) : null;
   if (packageRoot) {
     assert.equal(path.basename(packageRoot), 'VRCommand-Player');
@@ -30,7 +32,7 @@ async function main() {
   assert.equal(base.hostname, '127.0.0.1'); assert.equal(base.protocol, 'http:'); assert.notEqual(base.port, '5080');
   assert.ok(!base.username && !base.password && !base.search && !base.hash && base.pathname === '/');
   const tokens = JSON.parse(await fs.readFile(path.join(directory, 'keys.json'), 'utf8')).OperatorKeys;
-  const children = [], findings = [], errors = []; let checks = 0, page, browser, outcome;
+  const children = [], findings = [], errors = [], socketsToClose = []; let checks = 0, page, browser, outcome;
   const evidence = path.join(directory, 'external-ui'); await fs.mkdir(evidence, { recursive: false });
   async function fingerprint() {
     const hash = createHash('sha256');
@@ -87,10 +89,11 @@ async function main() {
       const log = path.join(evidence, 'player ' + (index + 1) + ' native.log'), report = path.join(evidence, 'launcher-' + (index + 1) + '.json');
       const executable = packageRoot ? path.join(packageRoot, 'Launch-Player.exe') : ready.playerBuildReceipt.outputPath;
       const gui = interactivePackage && index === 0;
-      const args = packageRoot ? ['--config', file, ...gui ? [] : ['--launch', '--headless', '--wait'], '--log', log, '--report', report]
+      const statusPath = path.join(evidence, 'connection-' + (index + 1) + '.json');
+      const args = packageRoot ? ['--config', file, ...gui ? [] : ['--launch', '--headless', '--wait'], '--log', log, '--report', report, ...launcherStatus ? ['--status-report', statusPath] : []]
         : ['-batchmode', '-nographics', '-job-worker-count', '2', '-logFile', log, '--vr-config', file];
       const child = spawn(executable, args, { cwd: path.dirname(executable), windowsHide: !gui, stdio: 'ignore' });
-      child.on('error', error => { errors.push(error.message); }); const owned = { child, log, player, gui }; children.push(owned);
+      child.on('error', error => { errors.push(error.message); }); const owned = { child, log, player, gui, statusPath }; children.push(owned);
       if (packageRoot) {
         if (gui) console.log('PACKAGED_LAUNCHER_UI_READY ' + JSON.stringify({ processId: child.pid, configPath: file }));
         const started = await until(async () => { if (child.exitCode !== null) throw Error('Packaged launcher exited before starting a player'); const value = JSON.parse(await fs.readFile(report, 'utf8').catch(() => '{}')); if (value.status === 'rejected') throw Error('Packaged launcher rejected the real downloaded config'); return value.status === 'started' && value; }, 'packaged player child', gui ? 240 : 35);
@@ -101,6 +104,28 @@ async function main() {
     }
     await page.waitForFunction(() => document.querySelectorAll('#roster .ready-player').length === 2);
     check(true, 'Two separately owned real Unity clients join using only the actual UI-downloaded short-ticket configs');
+    if (launcherStatus) {
+      for (const owned of children) {
+        const state = await until(async () => { const s = JSON.parse(await fs.readFile(owned.statusPath, 'utf8').catch(() => '{}')); return s.state === 'Connected' && s; }, 'launcher actual admission status');
+        assert.equal(state.processId, owned.nativeId); assert.equal(state.complete, true); assert.equal(state.logAvailable, true);
+      }
+      check(true, 'Both actual launchers distinguish their own native Connected marker from process startup');
+      const config = JSON.parse(await fs.readFile(path.join(evidence, 'player 1 玩家 &.json'), 'utf8'));
+      const socket = require('node:dgram').createSocket('udp4'); socketsToClose.push(socket);
+      await new Promise((resolve, reject) => { socket.once('error', reject); socket.bind(0, '127.0.0.1', resolve); });
+      for (const [label, value, expected] of [['rejected', { ...config, joinTicket: 'invalid-status-test-ticket' }, ['Rejected']],
+        ['no-gameserver', { ...config, port: socket.address().port }, ['Unconfirmed', 'Disconnected']]]) {
+        const file = path.join(evidence, label + '.json'), log = path.join(evidence, label + '.log'), report = path.join(evidence, label + '-launch.json'), statusPath = path.join(evidence, label + '-status.json');
+        await fs.writeFile(file, JSON.stringify(value), { flag: 'wx' });
+        const child = spawn(path.join(packageRoot, 'Launch-Player.exe'), ['--config', file, '--launch', '--headless', '--wait', '--log', log, '--report', report, '--status-report', statusPath], { cwd: packageRoot, windowsHide: true, stdio: 'ignore' });
+        child.on('error', error => errors.push(error.message)); const owned = { child, log, gui: false, statusPath }; children.push(owned);
+        const started = await until(async () => { const r = JSON.parse(await fs.readFile(report, 'utf8').catch(() => '{}')); return r.status === 'started' && r; }, 'status probe child'); owned.nativeId = started.processId;
+        const state = await until(async () => { const s = JSON.parse(await fs.readFile(statusPath, 'utf8').catch(() => '{}')); return expected.includes(s.state) && s; }, 'actual native ' + label + ' status', 45);
+        assert.equal(state.complete, true); assert.ok(!state.transitions.includes('Connected'));
+        check(true, label + ': actual native log status never fabricates admission or a specific network root cause');
+      }
+      assert.equal((await api(`/sessions/${id}/readiness`)).players.filter(p => p.canParticipate).length, 2);
+    }
     await page.screenshot({ path: path.join(evidence, 'external-connected.png'), fullPage: true });
     await page.locator('[data-command=Begin]').click(); await page.waitForFunction(() => document.querySelector('#session-phase').textContent === '執行中');
     await page.waitForFunction(() => document.querySelectorAll('#roster .ready-player').length === 2);
@@ -112,7 +137,7 @@ async function main() {
     const world = await until(async () => { const value = await api(`/sessions/${id}/world`); return value.complete && value; }, 'exact world seal');
     const stats = await api(`/sessions/${id}/statistics`); assert.equal(stats.pendingTelemetry, false);
     const results = [];
-    for (const { log, player } of children) {
+    for (const { log, player, statusPath } of children.filter(child => child.player)) {
       const result = await until(async () => {
         const text = await fs.readFile(log, 'utf8').catch(() => ''); const found = text.match(/VR_CLIENT_DEBRIEF_FINAL (\{[^\r\n]+\})/);
         return found && text.includes('VR_CLIENT_DISCONNECTED') && JSON.parse(found[1]);
@@ -122,8 +147,14 @@ async function main() {
       assert.equal(result.streamId, world.header.streamId); assert.equal(result.worldSequence, world.acceptedSequence); assert.equal(result.throughSequence, stats.throughSequence);
       for (const field of ['ammoUsed', 'shotsHit', 'kills', 'hitsReceived', 'damageTaken', 'health', 'accuracyPercent']) assert.equal(result[field], expected[field]);
       results.push(result);
+      if (launcherStatus) {
+        const state = await until(async () => { const s = JSON.parse(await fs.readFile(statusPath, 'utf8').catch(() => '{}')); return s.state === 'Final' && s; }, 'launcher retained sealed result status');
+        assert.equal(state.complete, true); assert.deepEqual(state.transitions, ['Waiting', 'Connected', 'Final']);
+        const serialized = JSON.stringify(state); assert.ok(!serialized.includes(player.id) && !serialized.includes(player.admissionId) && !Object.values(tokens).some(token => serialized.includes(token)));
+      }
     }
     check(results.length === 2, 'Both external clients receive only their own final admission result, matching all sealed ledger fields and world sequence');
+    if (launcherStatus) check(true, 'Launcher Final survives normal disconnect and status reports contain no ticket, actor identity or raw result payload');
     await page.screenshot({ path: path.join(evidence, 'external-ended.png'), fullPage: true });
     check(await page.locator('#apply-connection-endpoint').isDisabled() && await page.locator('#roster .ready-player').count() === 0, 'Ended endpoint remains historical metadata and cannot restore player participation');
     check(errors.length === 0 && await page.evaluate(() => !localStorage.length && !sessionStorage.length && !document.cookie), 'External workflow has no script errors or persisted operator credentials');
@@ -135,6 +166,7 @@ async function main() {
     if (page && !page.isClosed()) await page.screenshot({ path: path.join(evidence, 'failure.png'), fullPage: true }).catch(() => {});
     throw error;
   } finally {
+    for (const socket of socketsToClose) socket.close();
     const cleanupErrors = [], stopped = [];
     for (const { child, nativeId, gui } of children) {
       try {
