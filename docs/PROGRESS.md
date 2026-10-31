@@ -2,6 +2,8 @@
 
 ## 2026-10-31：原生journal區段計時與再次負載重現
 
+功能 [32e6ed7](https://github.com/peca12968/vr-command-center/commit/32e6ed7bb3ef5b7d51517c1315aca08ae5fd9a76) 已推送main、遠端SHA一致。[本次CI run41206671836](https://github.com/peca12968/vr-command-center/actions/runs/41206671836)／check124553038805為failure、steps空；fresh annotation為付款失敗或支出上限，job未啟動，沒有雲端測試結果。未改帳務或手動重跑，下列37項Python與原生結果為本機實際證據。
+
 從乾淨`82ea45b`接續[發布區段計時](PUBLICATION_TIMING.md)，上一輪為實際進展。本輪以**原c233 Windows播放器既有探針**取得新證據，API/UI0.30、Unity0.34／code41／NGO29不變，沒有修改Unity／後端／共享程式、重建163 Editor／雙平台或改原0.5／1.5秒政策。一般玩家不附掛新診斷。
 
 checker選用`--server-trace`只啟用自己的server既有240秒／32768列NativePoseTrace，結束／失敗時先request finish並取得完整report，再End／停止程序；缺report、overflow或cleanup失敗仍exit1。新分析器將原生UTC／Stopwatch與同場Begin窗口對應，先裁切再取同point區間聯集；WorldCapture內含WorldJournal，不相加。trace／witness不完整直接拒絕、時鐘差>0.05秒或未覆蓋窗口則相關數字unknown；該容差不是遊戲新政策。journal另確認sessionId，不能跨場借用接受序號。
