@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Netcode;
 using UnityEngine;
@@ -37,6 +38,25 @@ namespace VrCommand.Unity
         public NetworkVariable<FixedString32Bytes> Phase = new NetworkVariable<FixedString32Bytes>("Preparing");
         public NetworkVariable<WeatherState> Presentation = new NetworkVariable<WeatherState>();
         public NetworkVariable<MissionClockState> Clock = new NetworkVariable<MissionClockState>();
+        public NetworkVariable<BriefingHeader> Briefing = new NetworkVariable<BriefingHeader>();
+        public NetworkList<FixedString512Bytes> BriefingParts;
+        private bool briefingDirty = true;
+        private FixedString512Bytes[] briefingCache = Array.Empty<FixedString512Bytes>();
+        private string appliedBriefingName, appliedBriefingText;
+        public IReadOnlyList<FixedString512Bytes> ReadBriefingParts()
+        {
+            if (briefingDirty)
+            {
+                if (BriefingParts.Count > MissionBriefingText.MaximumChunks) { briefingCache = Array.Empty<FixedString512Bytes>(); briefingDirty = false; return briefingCache; }
+                briefingCache = new FixedString512Bytes[BriefingParts.Count];
+                for (var i = 0; i < briefingCache.Length; i++) briefingCache[i] = BriefingParts[i];
+                briefingDirty = false;
+            }
+            return briefingCache;
+        }
+        private void Awake() { BriefingParts = new NetworkList<FixedString512Bytes>(); }
+        private void BriefingChanged(BriefingHeader before, BriefingHeader after) { briefingDirty = true; }
+        private void PartsChanged(NetworkListEvent<FixedString512Bytes> change) { briefingDirty = true; }
         public bool ClockDue => IsSpawned && Clock.Value.Valid && Clock.Value.autoEnd
             && VrCommand.Simulation.MissionClock.Due(Presentation.Value.tick, Clock.Value.durationSeconds);
         public UnityWeatherView environmentView;
@@ -47,6 +67,7 @@ namespace VrCommand.Unity
         {
             if (environmentView == null) environmentView = GetComponent<UnityWeatherView>();
             observed = Time.realtimeSinceStartupAsDouble; Presentation.OnValueChanged += Changed;
+            Briefing.OnValueChanged += BriefingChanged; BriefingParts.OnListChanged += PartsChanged; briefingDirty = true;
         }
         private void Changed(WeatherState before, WeatherState after) { observed = Time.realtimeSinceStartupAsDouble; }
         public void ApplyServerSnapshot(SessionSnapshot snapshot)
@@ -60,6 +81,15 @@ namespace VrCommand.Unity
             Phase.Value = snapshot.state; Presentation.Value = value;
             Clock.Value = new MissionClockState { version = 1, durationSeconds = snapshot.mission.definition.durationSeconds,
                 autoEnd = snapshot.missionClock?.autoEnd == true };
+            var definition = snapshot.mission.definition;
+            if (MissionBriefingText.Valid(definition.name, definition.briefing)
+                && (appliedBriefingName != definition.name || appliedBriefingText != definition.briefing))
+            {
+                var header = MissionBriefingText.Pack(definition.name, definition.briefing, out var parts);
+                if (!Briefing.Value.Equals(header))
+                { BriefingParts.Clear(); foreach (var part in parts) BriefingParts.Add(part); Briefing.Value = header; }
+                appliedBriefingName = definition.name; appliedBriefingText = definition.briefing;
+            }
         }
         public void PublishTick(long tick, string phase)
         {
@@ -79,6 +109,11 @@ namespace VrCommand.Unity
             var phase = value.phase == 1 && Time.realtimeSinceStartupAsDouble - observed > 1.5 ? "Paused" : PhaseNames[value.phase];
             environmentView.Apply(value.tick, WeatherNames[value.weather], value.night, value.lightning, phase, value.rooms);
         }
-        public override void OnNetworkDespawn() { Presentation.OnValueChanged -= Changed; if (environmentView != null) environmentView.Clear(); }
+        public override void OnNetworkDespawn()
+        {
+            Presentation.OnValueChanged -= Changed; Briefing.OnValueChanged -= BriefingChanged;
+            BriefingParts.OnListChanged -= PartsChanged; briefingDirty = true;
+            if (environmentView != null) environmentView.Clear();
+        }
     }
 }

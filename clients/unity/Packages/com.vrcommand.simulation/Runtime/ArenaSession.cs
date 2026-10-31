@@ -19,7 +19,7 @@ namespace VrCommand.Simulation
         public ManagedMissionClock? missionClock;
     }
     [Serializable] public sealed class ManagedMission { public string id = null!; public ManagedDefinition definition = null!; }
-    [Serializable] public sealed class ManagedDefinition { public string name = null!; public ManagedProp[] props = null!; public int durationSeconds; }
+    [Serializable] public sealed class ManagedDefinition { public string name = null!, briefing = null!; public ManagedProp[] props = null!; public int durationSeconds; }
     [Serializable] public sealed class ManagedMissionClock { public int version; public bool autoEnd; public long configuredAtSequence; }
     [Serializable] public sealed class ManagedProp { public string assetId = null!; public ManagedPosition position = null!; public float yawDegrees; }
     [Serializable] public sealed class ManagedPosition { public float x, y, z; public Vec3 Vector => new Vec3(x, y, z); }

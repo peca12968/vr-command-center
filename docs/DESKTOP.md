@@ -1,5 +1,7 @@
 # 電腦練習場
 
+最新[玩家任務簡報](PLAYER_BRIEFING.md)可在遊戲內按B開啟／下一頁、Escape關閉、L查看字型授權。內容取自控制者保存並選定的任務，支援繁中及完整10000字分頁。閱讀不暫停全場，會抑制自己的射擊／換彈，關閉後須放開再按；仍可能受敵軍攻擊。Unity0.31.0／NGO29的全部遊戲程序須一起更新。
+
 目前玩家End流程見[DESKTOP_DEBRIEF](DESKTOP_DEBRIEF.md)：Unity0.29／NGO27；雙seal後傳送自己的最終戰績、ack斷線保留。`--results-seconds`預設30（0–300），可關窗或以`dismiss-results.request`提早結束；新任務玩家可取代舊結果視窗。最新建置／125 EditMode與原生驗證以PROGRESS為準，下文版本數字為功能首輪歷史。
 
 在 Windows 不接頭盔操作同一份 Unity 遊戲接入。這是桌面合成頭手的 **Simulation**，不代表 Quest／VIVE 或正式軍事美術驗收。

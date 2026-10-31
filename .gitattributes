@@ -6,6 +6,9 @@ clients/unity/Packages/com.unity.transport/** -text -whitespace
 *.glb binary
 *.wav binary
 *.ogg binary
+*.otf binary
+# Preserve the pinned font license and notice bytes, including their line endings.
+clients/unity/Assets/VrCommand/Resources/VrCommand/Fonts/*.txt -text -whitespace
 # Unity emits a space after empty serialized YAML values.
 *.asset whitespace=-blank-at-eol
 *.unity whitespace=-blank-at-eol

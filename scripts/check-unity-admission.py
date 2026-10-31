@@ -25,7 +25,7 @@ def source_fingerprint():
     project = ROOT / 'clients/unity'
     files = [p for folder in ['Assets/VrCommand', 'Packages/com.vrcommand.simulation', 'Packages/com.unity.transport']
              for p in (project / folder).rglob('*') if p.suffix in ('.cs', '.asmdef')]
-    files += [p for p in (project / 'Assets/VrCommand/Resources').rglob('*') if p.suffix in ('.json', '.shader', '.asset') or p.name.endswith('.asset.meta')]
+    files += [p for p in (project / 'Assets/VrCommand/Resources').rglob('*') if p.suffix in ('.json', '.shader', '.asset', '.otf', '.txt') or p.name.endswith(('.asset.meta', '.otf.meta', '.txt.meta'))]
     files += [p for p in (project / 'Assets/VrCommand/Audio').rglob('*') if p.suffix == '.wav' or p.name.endswith('.wav.meta')]
     files += [project / p for p in ['Packages/manifest.json', 'Packages/packages-lock.json', 'Packages/com.unity.transport/UPSTREAM.json', 'ProjectSettings/ProjectVersion.txt']]
     digest = hashlib.sha256()

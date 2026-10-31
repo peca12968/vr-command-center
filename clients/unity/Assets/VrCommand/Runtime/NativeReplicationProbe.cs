@@ -32,6 +32,9 @@ namespace VrCommand.Unity
             public bool listening,ready;
             public int packetQueueCapacity,actorListSerializedBytes;
             public ulong localConnection;
+            public bool briefingValid, briefingOpen;
+            public int briefingCharacters, briefingChunks, briefingPage, briefingPages, briefingSuppressedInputs;
+            public string briefingDigest;
             public Actor[] actors;
             public Avatar[] avatars;
         }
@@ -146,6 +149,14 @@ namespace VrCommand.Unity
                 presentation=WeatherObservation.From(scene!=null&&scene.IsSpawned?scene.Presentation.Value:default),
                 ready=combat!=null&&combat.IsSpawned&&combat.Ready.Value};
             snapshot.packetQueueCapacity=((UnityTransport)owner.networkManager.NetworkConfig.NetworkTransport).MaxPacketQueueSize;
+            if (scene != null && scene.IsSpawned)
+            {
+                snapshot.briefingValid = MissionBriefingText.TryRead(scene.Briefing.Value, scene.ReadBriefingParts(), out var missionName, out var missionText);
+                snapshot.briefingCharacters = snapshot.briefingValid ? missionText.Length : 0;
+                snapshot.briefingChunks = scene.Briefing.Value.chunks; snapshot.briefingDigest = scene.Briefing.Value.digest.ToString();
+                var own = owner.networkManager.LocalClient?.PlayerObject?.GetComponent<NetworkAvatar>();
+                if (own != null) { snapshot.briefingOpen = own.BriefingOpen; snapshot.briefingPage = own.BriefingPage; snapshot.briefingPages = own.BriefingPageCount; snapshot.briefingSuppressedInputs = own.BriefingSuppressedInputs; }
+            }
             if(combat!=null&&combat.IsSpawned)
                 using(var writer=new FastBufferWriter(65536,Allocator.Temp))
                 {combat.Actors.WriteField(writer);snapshot.actorListSerializedBytes=writer.Length;}

@@ -1,5 +1,33 @@
 # 開發進度
 
+## 2026-10-31：繁中玩家任務簡報與原生輸入
+
+從乾淨`5d4ac95`接續，新增[PLAYER_BRIEFING](PLAYER_BRIEFING.md)。原任務庫保存的名稱／內容，現在由GameServer送至玩家閱讀；不是另建一份任務。遊戲端**0.31.0／Android code38／NGO29**，API/UI保持0.28，envelope7／world schema1／驗票2／rules0.8.0及原素材profile不改。所有遊戲程序一起更新，Prepare原位保存Scene／PlayerAvatar ID，不重建歷史。
+
+名稱100／內容10000 UTF-16單位、最多80個FixedString512塊，不切有效surrogate pair；header1保存完整長度／塊數／SHA，缺塊、內容異動或未知版本不能成為可讀簡報。20個code point一行、10行一頁，純文字標籤原樣保留。管理更新及晚連線不重設同一頁；本地頁碼／開關沒有新增world錄影欄位，不補造舊閱讀過程。
+
+PC用B開啟／下一頁、Escape關閉、L授權，另有面板按鈕；Quest來源使用左X／Y／握柄，實體操作仍待。閱讀只抑制自己的射擊／換彈，關閉後須放開再按；姿態繼續、全場不暫停、仍可能受傷，End戰績接管。Tracked頭手與muzzle不改，XR只新增頭部前0.9m的Canvas。不是防作弊政策或無敵模式，沒有修改碰撞、AI或命中規則。
+
+隨附官方未修改Noto Sans CJK TC Regular2.004，commit `f8d157532fbfaeda587e826d4cd5b21a49186f7c`、OTF16,435,884 bytes；SIL OFL1.1及NOTICE隨包並可在面板閱讀，不依賴OS字型。mission-fonts-v1三份固定SHA／真正OTF cmap檢查通過，OTF／TXT與meta納入來源指紋；改版需新profile，不可重寫舊pin。不是任意emoji／罕見字涵蓋或頭盔閱讀舒適度驗收。
+
+**真正141 EditMode通過**，新增10項涵蓋完整長文／surrogate、部分與錯誤摘要、真正NGO序列化、純文字分頁、重複管理不重設頁、按住射擊須放開、Tracked頭部不搬動、真字型／授權載入與Unity JSON內容。最後不透明底板版再次141成功；Tests門檻與UI直接asmdef參考同步更新。Unity既有nullable／audio／ServerRpc warnings保留，沒有把managed SDK當本次Editor結果。
+
+原生`check-desktop-briefing.py`本輪同一tool fingerprint `5628896249eda2a3f81c863388a7ba069b128d3d8aaf7f05ea37acbfe439d092`，一個server及兩個client，其中第二位在Running後晚連線。Preparing先收到真正10000字、79塊；三程序完整摘要均為 `64dfb429551b908a3000927c91c6f0416b5dd9e602317b387a3be9b700c45216`，頁數51，不截斷文字來通過。
+
+`desktop-briefing/20261031-154143-b0890b35`先完整8項通過，但原生觀察發現底板半透明、後方HUD透出。改為不透明底板、重建Windows及再次141後，最終`20261031-154501-4648aef5`重新**8項**完整通過：真正B開啟繁中第一頁及literal `<b>`、Space被抑制、B第二頁、Escape後仍30／90、下一次Space變29／90；B／L可讀官方字型來源與授權。沒有注入姿態／射擊RPC／統計。UI helper一次active-request錯誤後先重新觀察，未誤標已按鍵。
+
+最終穩定雙玩家閱讀區間，server changed-tick診斷**405列、失效0**，兩個身體connected／ready／coherent且tick持續。此為有界取樣，不是每render幀／網路RTT或完整25人容量。主玩家耗彈1、晚連線者0，兩者健康100、命中／擊殺／受傷0，各自原admission的final／stream／combat及world最終序號與ledger一致並ack；雙精確seal、world sequence758，保存任務原文不變。probe仍240秒／64captures，普通啟動不附掛。
+
+首次`20261031-153913-dcd7167c`等待原生按鍵時逾時，失敗run保留，不當成功。兩個成功run及失敗run共**3個runtime／88檔**原件與F snapshot逐檔SHA一致；之前9個runtime／229檔亦未變，見`briefing-runtime-validation.json`。全停writer才一次snapshot且保留C原件，僅讀JSON／logs／raw bytes、沒有在保存SQLite開連線；cleanup errors空／tracked child空，測試玩家程序0。原5080仍0.16，未替換正式DLL／資料、未操作登入或安全設定。
+
+本機.NET locked restore／Release零警告錯誤、**680規則／446 HTTP／43世界串流**通過，另17個既有desktop Python、字型pin／cmap、語法與293官方Transport單一修補核對成功。web UI沒有修改，本輪未重跑Node／Chromium，不把先前瀏覽器數量當新結果。
+
+兩次從F隔離輸出的HTTP檢查先失敗：競爭writer程序及invalid-key程序各未在原10秒內退出，第一個診斷還被cp950的Unicode輸出遮住；UTF-8重試仍保留逾時。未放寬timeout／認證／安全設定。把本次API及三工具輸出的原樣副本放到全新C BuildRuns後，以相同檢查通過446／43；155檔與F來源逐檔SHA一致。這是測試部署路徑的結果，不證明F延遲或AV根因已查明；新原生試跑用該C API副本，遊戲binary及source仍F、DB／journal明確C SSD，不能稱F USB效能驗收。
+
+真正Windows receipt `2026-10-31T07:44:51.3566843Z`、Quest ARM64 IL2CPP receipt `2026-10-31T07:54:06.8782171Z`成功，source fingerprint同為 `213b9b04e02d506c73110ba6df23109fc5ce3f14bf8f233b9d803ef8dde4777c`，也與目前來源Python重算一致。原Scene `4314adcd8c63d86469d16497127d8cfb／1444571642`、prefab `6f3f36cb9d710e847b5ecc569665e1ce／5227825248646244841`保持。aapt確認0.31.0／code38、min32／target35／arm64；實際APK60,189,546 bytes、libil2cpp81,607,904及metadata9,264,256 bytes，含新簡報型別，見`briefing-apk-validation.json`。receipt totalBytes是BuildReport總輸出，不當APK大小；沒有頭盔安裝／運行證據。
+
+完整11項長期目標保持active。本輪為兩位同機PC Simulation，尚無Quest／VIVE、MR校正、廠商硬體、跨機與25台實機驗收；25端最大長文同時入場頻寬及Android字型記憶體也未量測。後續接續多玩家持續操作與場館流程，實機控制器／追蹤與閱讀舒適度分開驗收。
+
 ## 2026-10-31：15分鐘原生任務、完整連續性與封存失聯
 
 前輪有實際進展；從乾淨`524667d`接續新增 [DESKTOP_LONG](DESKTOP_LONG.md)／`check-desktop-long.py` 及 [SEAL_RECOVERY](SEAL_RECOVERY.md)／`check-desktop-seal-faults.py`。本輪只改Python工具／測試／CI與文件；遊戲仍**API／UI0.28、Unity0.30.0／code37／NGO28**、原source fingerprint `d43085f4e6b755649b5da36b0885d6b690d7042f7ce4a871a947bc2e15ede53f`、原ID與同源Windows／Quest receipt。131 Editor／雙平台、680規則／446 HTTP／43串流／60 Node／223 Chromium為前輪成功結果，本輪未重建或重跑，不當新頭盔或UI證據。

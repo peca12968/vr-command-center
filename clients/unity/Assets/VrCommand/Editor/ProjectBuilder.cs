@@ -52,10 +52,10 @@ namespace VrCommand.Unity.Editor
             var bootstrap = network == null ? null : network.GetComponent<VenueBootstrap>();
             var manager = network == null ? null : network.GetComponent<NetworkManager>();
             if (state == null || state.GetComponent<UnityWeatherView>() == null || bootstrap == null || manager == null
-                || bootstrap.sceneAuthority != state.GetComponent<SceneAuthority>() || (manager.NetworkConfig.ProtocolVersion < 16 || manager.NetworkConfig.ProtocolVersion > 28)
+                || bootstrap.sceneAuthority != state.GetComponent<SceneAuthority>() || (manager.NetworkConfig.ProtocolVersion < 16 || manager.NetworkConfig.ProtocolVersion > 29)
                 || manager.NetworkConfig.PlayerPrefab == null)
                 throw new BuildFailedException("Generated arena is incompatible. Rebuild Arena, then rebuild ALL player targets together.");
-            manager.NetworkConfig.ProtocolVersion = 28;
+            manager.NetworkConfig.ProtocolVersion = 29;
             RequireNetworkIdentity(state.GetComponent<NetworkObject>());
             RequireNetworkIdentity(manager.NetworkConfig.PlayerPrefab.GetComponent<NetworkObject>());
             if (PrefabUtility.SavePrefabAsset(manager.NetworkConfig.PlayerPrefab) == null)
@@ -96,8 +96,8 @@ namespace VrCommand.Unity.Editor
         {
             PlayerSettings.companyName = "VR Command";
             PlayerSettings.productName = "VR Command Quest";
-            PlayerSettings.bundleVersion = "0.30.0";
-            PlayerSettings.Android.bundleVersionCode = 37;
+            PlayerSettings.bundleVersion = "0.31.0";
+            PlayerSettings.Android.bundleVersionCode = 38;
             PlayerSettings.insecureHttpOption = InsecureHttpOption.DevelopmentOnly;
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, "com.vrcommand.quest");
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
@@ -177,7 +177,7 @@ namespace VrCommand.Unity.Editor
             var manager = network.GetComponent<NetworkManager>();
             var bootstrap = network.GetComponent<VenueBootstrap>();
             manager.NetworkConfig = new NetworkConfig { NetworkTransport = network.GetComponent<UnityTransport>(), TickRate = 30,
-                ConnectionApproval = true, EnableSceneManagement = true, ForceSamePrefabs = true, ProtocolVersion = 28 };
+                ConnectionApproval = true, EnableSceneManagement = true, ForceSamePrefabs = true, ProtocolVersion = 29 };
             manager.NetworkConfig.PlayerPrefab = CreateAvatar(avatarMaterial, steel);
             var list = AssetDatabase.LoadAssetAtPath<NetworkPrefabsList>(Generated + "/NetworkPrefabs.asset");
             if (list == null)
@@ -279,7 +279,7 @@ namespace VrCommand.Unity.Editor
                 .Concat(Directory.GetFiles(Path.Combine(project, "Packages/com.unity.transport"), "*", SearchOption.AllDirectories))
                 .Where(file => file.EndsWith(".cs", StringComparison.Ordinal) || file.EndsWith(".asmdef", StringComparison.Ordinal))
                 .Concat(Directory.GetFiles(Path.Combine(project, "Assets/VrCommand/Resources"), "*", SearchOption.AllDirectories)
-                    .Where(file => file.EndsWith(".json", StringComparison.Ordinal) || file.EndsWith(".shader", StringComparison.Ordinal) || file.EndsWith(".asset", StringComparison.Ordinal) || file.EndsWith(".asset.meta", StringComparison.Ordinal)))
+                    .Where(file => file.EndsWith(".json", StringComparison.Ordinal) || file.EndsWith(".shader", StringComparison.Ordinal) || file.EndsWith(".asset", StringComparison.Ordinal) || file.EndsWith(".asset.meta", StringComparison.Ordinal) || file.EndsWith(".otf", StringComparison.Ordinal) || file.EndsWith(".otf.meta", StringComparison.Ordinal) || file.EndsWith(".txt", StringComparison.Ordinal) || file.EndsWith(".txt.meta", StringComparison.Ordinal)))
                 .Concat(Directory.GetFiles(Path.Combine(project,"Assets/VrCommand/Audio"),"*",SearchOption.AllDirectories)
                     .Where(file=>file.EndsWith(".wav",StringComparison.Ordinal)||file.EndsWith(".wav.meta",StringComparison.Ordinal)))
                 .Concat(new[] { Path.Combine(project, "Packages/manifest.json"), Path.Combine(project, "Packages/packages-lock.json"), Path.Combine(project, "Packages/com.unity.transport/UPSTREAM.json"), Path.Combine(project, "ProjectSettings/ProjectVersion.txt") })

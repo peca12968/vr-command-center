@@ -4,7 +4,9 @@
 
 依 2026-10-29 的使用者指示，**優先開發 Meta Quest 3**，暫以 Android 獨立執行為工作假設；VIVE 延後接入，共用架構與原始雙平台目標保留。
 
-目前為 **API v0.28／Unity 遊戲端 v0.30.0 原型**。真正 Editor 已完成 Prepare、131 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 28，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人完整驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
+目前為 **API v0.28／Unity 遊戲端 v0.31.0 原型**。真正 Editor 已完成 Prepare、141 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 29，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人完整驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
+
+新增[玩家任務簡報](docs/PLAYER_BRIEFING.md)：B開啟／翻頁、Escape關閉，完整10000字與繁中隨附字型；閱讀時抑制自己的武器輸入，頭手與全場計時繼續。真正雙PC按鍵、晚連線、原任務與封存戰績核對通過；Quest同源APK成功，實體控制器仍待驗。
 
 新增[15分鐘PC驗證](docs/DESKTOP_LONG.md)與[封存失聯回歸](docs/SEAL_RECOVERY.md)：原入場與受傷狀態、完整回放及最終戰績一致；封存或統計暫時失聯時保留正確等待狀態。此為單玩家同機Simulation，完整25人／實機驗收仍待。
 

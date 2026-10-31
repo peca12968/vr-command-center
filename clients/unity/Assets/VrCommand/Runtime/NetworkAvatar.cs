@@ -46,6 +46,13 @@ namespace VrCommand.Unity
         public NetworkVariable<FixedString64Bytes> PlayerId = new NetworkVariable<FixedString64Bytes>();
         public NetworkVariable<bool> PoseAccepted = new NetworkVariable<bool>(false);
         private InputAction leftPosition, rightPosition, leftRotation, rightRotation, trigger, reload;
+        private InputAction briefNext, briefClose, briefLicense;
+        private readonly MissionBriefingPanel briefingPanel = new MissionBriefingPanel();
+        private bool desktopBriefNext, desktopBriefClose, desktopBriefLicense;
+        public bool BriefingOpen => briefingPanel.Open;
+        public int BriefingPage => briefingPanel.Page;
+        public int BriefingPageCount => briefingPanel.PageCount;
+        public int BriefingSuppressedInputs => briefingPanel.Weapons.SuppressedPresses;
         private InputAction headTracking, leftTracking, rightTracking;
         private InputAction headTracked, leftTracked, rightTracked;
         public bool TrackingReady => !tracked || HasTracking(headTracking, headTracked) && HasTracking(leftTracking, leftTracked) && HasTracking(rightTracking, rightTracked);
@@ -120,6 +127,10 @@ namespace VrCommand.Unity
                 rightRotation = Action("Right Aim Rotation", "<XRController>{RightHand}/pointerRotation");
                 trigger = Action("Fire", "<XRController>{RightHand}/triggerPressed");
                 reload = Action("Reload", "<XRController>{RightHand}/primaryButton");
+                briefNext = Action("Briefing Next", "<XRController>{LeftHand}/primaryButton");
+                briefClose = Action("Briefing Close", "<XRController>{LeftHand}/secondaryButton");
+                briefLicense = Action("Briefing Font License", "<XRController>{LeftHand}/gripPressed");
+                briefingPanel.CreateTracked(head);
             }
             else
             {
@@ -168,6 +179,17 @@ namespace VrCommand.Unity
                 foreach (var visual in visuals) visual.enabled = body.connected && body.health > 0 && !(IsOwner && visual.transform.IsChildOf(head));
             if (IsOwner)
             {
+                var mission = VenueBootstrap.Instance?.sceneAuthority;
+                if (mission != null && mission.IsSpawned) briefingPanel.Set(mission.Briefing.Value, mission.ReadBriefingParts());
+                var ending = VenueBootstrap.Instance?.Debrief.Active == true;
+                if (ending) briefingPanel.Close();
+                else if (tracked || Application.isFocused || Application.isBatchMode)
+                {
+                    if (tracked ? briefClose?.WasPressedThisFrame() == true : desktopBriefClose || Keyboard.current?.escapeKey.wasPressedThisFrame == true) briefingPanel.Close();
+                    else if (tracked ? briefNext?.WasPressedThisFrame() == true : desktopBriefNext || Keyboard.current?.bKey.wasPressedThisFrame == true) briefingPanel.Next();
+                    if (tracked ? briefLicense?.WasPressedThisFrame() == true : desktopBriefLicense || Keyboard.current?.lKey.wasPressedThisFrame == true) briefingPanel.License();
+                }
+                desktopBriefNext = desktopBriefClose = desktopBriefLicense = false;
                 if (!TrackingReady) {NativePoseTrace.OwnerUnavailable("TrackingUnavailable",OwnerClientId);return;}
                 if (!tracked && !InitializeDesktopPose()) {NativePoseTrace.OwnerUnavailable("DesktopInitializing",OwnerClientId);return;}
                 if (tracked)
@@ -186,8 +208,13 @@ namespace VrCommand.Unity
                     else NativePoseTrace.OwnerUnavailable("LocalPoseInvalid",OwnerClientId);
                 }
                 var authority = CombatAuthority.Instance;
+                var held = tracked ? trigger.ReadValue<float>() > .5f || reload.ReadValue<float>() > .5f
+                    : desktopFire || desktopReload || Mouse.current?.leftButton.isPressed == true || Keyboard.current?.spaceKey.isPressed == true || Keyboard.current?.rKey.isPressed == true;
+                var pressed = tracked ? trigger.WasPressedThisFrame() || reload.WasPressedThisFrame()
+                    : desktopFire || desktopReload || Mouse.current?.leftButton.wasPressedThisFrame == true || Keyboard.current?.spaceKey.wasPressedThisFrame == true || Keyboard.current?.rKey.wasPressedThisFrame == true;
+                var allowWeapon = briefingPanel.Weapons.Allows(briefingPanel.Open, held, pressed);
                 if (authority != null && authority.Ready.Value && VenueBootstrap.Instance.State == "Running"
-                    && (tracked || Application.isFocused || Application.isBatchMode))
+                    && allowWeapon && !ending && (tracked || Application.isFocused || Application.isBatchMode))
                 {
                     var wantsReload = tracked ? reload.WasPressedThisFrame() : desktopReload || Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame;
                     var wantsFire = tracked ? trigger.ReadValue<float>() > .5f
@@ -319,6 +346,9 @@ namespace VrCommand.Unity
                 case KeyCode.D: raw = keyboard?.dKey; movement.x = 1; break;
                 case KeyCode.Space: raw = keyboard?.spaceKey; fire = true; break;
                 case KeyCode.R: raw = keyboard?.rKey; reloadWeapon = true; break;
+                case KeyCode.B: if (keyboard?.bKey.wasPressedThisFrame != true) desktopBriefNext = true; Event.current.Use(); return;
+                case KeyCode.Escape: if (keyboard?.escapeKey.wasPressedThisFrame != true) desktopBriefClose = true; Event.current.Use(); return;
+                case KeyCode.L: if (keyboard?.lKey.wasPressedThisFrame != true) desktopBriefLicense = true; Event.current.Use(); return;
                 default: return;
             }
             // Window-message input (e.g. accessibility keyboards) may not appear on the raw device.
@@ -335,9 +365,9 @@ namespace VrCommand.Unity
             DesktopWindowKey();
             var combat = CombatAuthority.Instance;
             if (combat == null || !combat.Player(PlayerId.Value.ToString(), out var player)) return;
-            if (Event.current.type != EventType.Repaint) return;
             var phaseName = VenueBootstrap.Instance == null ? "Preparing" : VenueBootstrap.Instance.State;
-            tacticalHud.Draw(this, combat, player, localCamera, rightHand, phaseName);
+            if (Event.current.type == EventType.Repaint) tacticalHud.Draw(this, combat, player, localCamera, rightHand, phaseName);
+            briefingPanel.Draw();
         }
 
         private void CreateStatusPanel()
@@ -368,6 +398,7 @@ namespace VrCommand.Unity
             leftPosition?.Dispose(); rightPosition?.Dispose(); leftRotation?.Dispose(); rightRotation?.Dispose(); trigger?.Dispose(); reload?.Dispose();
             headTracking?.Dispose(); leftTracking?.Dispose(); rightTracking?.Dispose();
             headTracked?.Dispose(); leftTracked?.Dispose(); rightTracked?.Dispose();
+            briefNext?.Dispose(); briefClose?.Dispose(); briefLicense?.Dispose(); briefingPanel.Dispose();
             firingRifle?.Dispose();firingRifle=null;
             bodyView?.Dispose();bodyView=null;bodyModels?.Dispose();bodyModels=null;
             if (rifle != null) Destroy(rifle); rifle = null;

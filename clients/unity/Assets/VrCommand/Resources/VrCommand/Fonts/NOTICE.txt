@@ -1,0 +1,4 @@
+Noto Sans CJK TC Regular 2.004
+Copyright 2014-2021 Adobe (http://www.adobe.com/).
+Unmodified upstream font, licensed under SIL OFL 1.1.
+Source: https://github.com/notofonts/noto-cjk/tree/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans

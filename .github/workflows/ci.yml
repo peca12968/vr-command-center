@@ -46,6 +46,8 @@ jobs:
       - run: python scripts/generate-player-fire.py --check
       - run: python scripts/generate-player-body.py --check
       - run: python scripts/check-transport-patch.py
+      - run: python scripts/check-mission-font.py
+      - run: python -m py_compile scripts/check-desktop-briefing.py
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
