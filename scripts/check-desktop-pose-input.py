@@ -28,6 +28,7 @@ class InputVenue(venue_module.Venue):
         flags = list(extra_args)
         if name in ('pose-input-server', 'pose-input-player', 'pose-input-peer'):
             flags += ['--vr-pose-trace', str((self.runtime_directory / (name + '-trace')).resolve())]
+            if self.args.player_loop: flags += ['--vr-pose-loop-trace']
         return super().launch(name, config, visible, extra_args=flags)
 
 
@@ -106,6 +107,8 @@ def run(v, heartbeats):
         try: value = json.loads((v.runtime_directory / f'pose-input-{name}-trace/report.json').read_text(encoding='utf-8-sig'))
         except (OSError, ValueError): return None
         if not value['complete'] or value['truncated'] or value['error'] or value['role'] != role: raise RuntimeError('Timing report incomplete')
+        if v.args.player_loop and (not value.get('playerLoop') or not value['playerLoop']['complete'] or not value['playerLoop']['detached']):
+            raise RuntimeError('Player loop diagnostic incomplete or not detached')
         return value
     reports = {label: v.wait(lambda name=name, role=role: report(name, role), 10, label + ' explicit diagnostic finish')
                for label, (name, role) in roles.items()}
@@ -122,6 +125,7 @@ def run(v, heartbeats):
     v.save('input-timing-result.json', {'source': 'Actual Windows / direct loopback / Simulation', 'headsets': 0,
         'directLoopback': True, 'poseOrWeaponInjected': False, 'observationOnly': v.args.observation_only,
         'independentHeartbeat': heartbeat is not None, 'marks': marks, 'statistics': metric,
+        'playerLoop': v.args.player_loop,
         'reports': {label: {'rows': len(value['rows']), 'seconds': value['endedSeconds']} for label, value in reports.items()},
         'hudTransitions': state['hudTransitions']})
     v.evidence.extend(['Two direct-loopback current native clients; natural baseline without packet-loss control',
@@ -135,6 +139,7 @@ def main():
     parser.add_argument('--runtime-root', type=Path, required=True)
     parser.add_argument('--baseline-seconds', type=int, choices=range(5, 61), default=15)
     parser.add_argument('--heartbeat', action='store_true', help='Independent bounded process timing; no game access')
+    parser.add_argument('--player-loop', action='store_true', help='Explicit native PlayerLoop boundary observers; needs new matching player build')
     parser.add_argument('--observation-only', action='store_true', help='Quiet / window-observation / quiet; no shooting')
     parser.add_argument('--api-dll', type=Path, default=Path(os.environ.get('VR_COMMAND_API_DLL', ROOT / 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')))
     parser.add_argument('--player-exe', type=Path, default=Path(os.environ.get('VR_COMMAND_UNITY_PLAYER', ROOT / 'artifacts/desktop/VrCommand.exe')))

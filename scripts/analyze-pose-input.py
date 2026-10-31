@@ -7,6 +7,7 @@ cross-process joins instead of treating a clock step as a shared stall.
 import argparse
 import importlib.util
 import json
+import math
 from pathlib import Path
 import re
 
@@ -36,6 +37,68 @@ def intervals(report):
         if merged and start <= merged[-1][1]: merged[-1] = (merged[-1][0], max(merged[-1][1], end))
         else: merged.append((start, end))
     return merged
+
+
+def loop_analysis(report, native, periods, shared, native_clock_valid):
+    if report['version'] != 1 or report['source'] != 'NativeWindowsPlayerLoopBoundaries' \
+        or not report['complete'] or report['truncated'] or not report['detached']:
+        raise ValueError('Incomplete or attached PlayerLoop diagnostic')
+    boundaries=report['boundaries']; gaps=report['gaps']
+    if not 0 < len(boundaries) <= 1024 or report['maximumNodes'] != 512 or report['capacity'] != 4096 or len(gaps)>4096:
+        raise ValueError('Invalid PlayerLoop bounds')
+    for b in boundaries:
+        if not re.fullmatch(r'(?:/\d+)+',b['path']) or not b['system'] or b['side'] not in ('before','after') \
+            or type(b['calls']) is not int or b['calls']<0 or not math.isfinite(b['maximumIncomingGapSeconds']) or b['maximumIncomingGapSeconds']<0:
+            raise ValueError('Invalid PlayerLoop boundary')
+    identities={(b['path'],b['side']) for b in boundaries}
+    if len(identities)!=len(boundaries) or any((b['path'],'after' if b['side']=='before' else 'before') not in identities for b in boundaries):
+        raise ValueError('Incomplete PlayerLoop boundary pairs')
+    if any(len({b['system'] for b in boundaries if b['path']==path})!=1 for path,_ in identities):
+        raise ValueError('Inconsistent PlayerLoop system pair')
+    if type(report['callbacks']) is not int or report['callbacks'] <= 0 or sum(b['calls'] for b in boundaries)!=report['callbacks']:
+        raise ValueError('Invalid PlayerLoop callback count')
+    for k in ('firstSeconds','lastSeconds','maximumClockStepSeconds'):
+        if not math.isfinite(report[k]) or report[k]<0: raise ValueError('Invalid PlayerLoop time')
+    if not report['firstSeconds'] <= report['lastSeconds'] <= native['endedSeconds'] \
+        or any(type(report[k]) is not int or report[k]<=0 for k in ('firstUtcTicks','lastUtcTicks')) \
+        or report['firstUtcTicks']>=report['lastUtcTicks']:
+        raise ValueError('Invalid PlayerLoop coverage')
+    clock_error=max(report['maximumClockStepSeconds'], abs((report['lastUtcTicks']-report['firstUtcTicks'])/SCALE-(report['lastSeconds']-report['firstSeconds'])))
+    previous=report['firstSeconds']; observations=[]
+    for g in gaps:
+        if any(type(g[k]) is not int for k in ('fromBoundary','toBoundary','fromUtcTicks','toUtcTicks','fromFrame','toFrame')) \
+            or not 0<=g['fromBoundary']<len(boundaries) or not 0<=g['toBoundary']<len(boundaries) \
+            or not 0<=g['fromFrame']<=g['toFrame'] or not all(math.isfinite(g[k]) for k in ('fromSeconds','toSeconds')) \
+            or not previous<=g['fromSeconds']<g['toSeconds']<=report['lastSeconds']:
+            raise ValueError('Invalid PlayerLoop gap')
+        a=boundaries[g['fromBoundary']];b=boundaries[g['toBoundary']];duration=g['toSeconds']-g['fromSeconds']
+        if duration<=.1 or b['maximumIncomingGapSeconds']+1e-9<duration: raise ValueError('Inconsistent PlayerLoop gap')
+        previous=g['toSeconds']
+        clock_error=max(clock_error,abs((g['toUtcTicks']-g['fromUtcTicks'])/SCALE-duration),
+            abs((g['fromUtcTicks']-report['firstUtcTicks'])/SCALE-(g['fromSeconds']-report['firstSeconds'])),
+            abs((g['toUtcTicks']-report['firstUtcTicks'])/SCALE-(g['toSeconds']-report['firstSeconds'])))
+        inside=a['path']==b['path'] and a['system']==b['system'] and a['side']=='before' and b['side']=='after'
+        observations.append({**g,'seconds':duration,'from':{k:a[k] for k in ('path','system','side')},
+            'to':{k:b[k] for k in ('path','system','side')},'location':'inside observed system' if inside else 'between observers'})
+    for index,b in enumerate(boundaries):
+        if b['maximumIncomingGapSeconds']>.1 and abs(max((g['seconds'] for g in observations if g['toBoundary']==index),default=0)-b['maximumIncomingGapSeconds'])>1e-9:
+            raise ValueError('PlayerLoop maximum gap is missing from complete evidence')
+    valid=native_clock_valid and clock_error<.05
+    covered=[r for r in shared or [] if report['firstUtcTicks']<=r['fromUtcTicks'] and r['toUtcTicks']<=report['lastUtcTicks']]
+    def in_period(g,p):return g['fromUtcTicks']<=p[1] and g['toUtcTicks']>=p[0]
+    return {'clockJoinValid':valid,'maximumClockStepSeconds':clock_error,'callbacks':report['callbacks'],'boundaryCount':len(boundaries),
+        'observationFullyCovered':report['firstUtcTicks']<=periods['observation'][0] and report['lastUtcTicks']>=periods['observation'][1] if valid else None,
+        'maximumAdjacentBoundaryGapSeconds':max(b['maximumIncomingGapSeconds'] for b in boundaries),
+        'fullyCoveredNativeTripleGaps':len(covered) if valid else None,
+        'uncoveredNativeTripleGaps':len(shared or [])-len(covered) if valid else None,
+        'gaps':observations,'phaseGaps':{name:[g for g in observations if in_period(g,p)] for name,p in periods.items()} if valid else None,
+        'nativeTripleIntersections':[{'seconds':(end-start)/SCALE,'fromUtcTicks':start,'toUtcTicks':end,'boundaryGap':index}
+            for index,g in enumerate(observations) for start,end in intersection([(g['fromUtcTicks'],g['toUtcTicks'])],
+                [(r['fromUtcTicks'],r['toUtcTicks']) for r in shared or []])] if valid else None,
+        'limits':['Intervals between inserted observers are wall time, not native system CPU duration',
+            'An inside-system interval includes waiting, scheduling and instrumentation; it does not prove that system caused it',
+            'A between-observer gap may cross frame boundaries or engine work outside the instrumented tree',
+            'Observer overhead / perturbation and external-tool influence are not excluded']}
 
 
 def heartbeat_analysis(report, shared, periods, native_clock_valid):
@@ -161,9 +224,26 @@ def analyze(directory):
     heartbeat_path = root / 'pose-input-heartbeat/report.json'
     heartbeat = heartbeat_analysis(json.loads(heartbeat_path.read_text()), overlap, periods, join_valid) if heartbeat_path.exists() else None
     result_path = directory / 'input-timing-result.json'
-    if result_path.exists() and json.loads(result_path.read_text()).get('independentHeartbeat') and heartbeat is None:
+    fixture=json.loads(result_path.read_text()) if result_path.exists() else {}
+    loop_reports={}
+    for role,report in reports.items():
+        raw=report.get('playerLoop')
+        if not raw:continue
+        if fixture.get('playerLoop') is False:
+            # Actual JsonUtility output materializes an unrequested null class.
+            # Ignore ONLY its exact empty default, with explicit fixture mode.
+            empty={'version':1,'capacity':4096,'maximumNodes':512,'source':'NativeWindowsPlayerLoopBoundaries',
+                'complete':False,'truncated':False,'detached':False,'callbacks':0,'firstUtcTicks':0,'lastUtcTicks':0,
+                'firstSeconds':0,'lastSeconds':0,'maximumClockStepSeconds':0,'boundaries':[],'gaps':[]}
+            if raw!=empty:raise ValueError('Unexpected PlayerLoop evidence in a disabled fixture')
+            continue
+        loop_reports[role]=loop_analysis(raw,report,periods,overlap,join_valid)
+    if loop_reports and len(loop_reports)!=3: raise ValueError('Partial three-process PlayerLoop evidence')
+    if fixture.get('independentHeartbeat') and heartbeat is None:
         raise ValueError('Declared independent heartbeat report is missing')
-    return {'source': 'Actual native same-host timing; individual connections; no per-packet correlation', 'independentHeartbeat': heartbeat,
+    if fixture.get('playerLoop') and len(loop_reports)!=3:
+        raise ValueError('Declared PlayerLoop reports are missing')
+    return {'source': 'Actual native same-host timing; individual connections; no per-packet correlation', 'independentHeartbeat': heartbeat,'playerLoop':loop_reports or None,
         'connectionIds': connections, 'clockStepMaximumSeconds': clock_steps, 'clockJoinValid': join_valid,
         'phases': {name: phase_summary(period) for name, period in periods.items()} if join_valid else None, 'hudStaleTransitions': stale_hud,
         'overlappingThreeProcessMainThreadGaps': overlap,
@@ -187,12 +267,17 @@ def main():
     heartbeat_cleanup = directory / 'heartbeat-cleanup.json'
     if heartbeat_cleanup.exists() and json.loads(heartbeat_cleanup.read_text()) != {'errors': [], 'remaining': []}:
         raise ValueError('Heartbeat writer did not stop cleanly')
+    if not (directory/'input-timing-result.json').exists():raise ValueError('Completed native input fixture metadata is missing')
     result = analyze(directory)
     (directory / 'input-timing-analysis.json').write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
     print(json.dumps(result, indent=2))
     if not result['clockJoinValid']: raise SystemExit('Unstable UTC: cross-process joins withheld')
     if result['independentHeartbeat'] is not None and not result['independentHeartbeat']['clockJoinValid']:
         raise SystemExit('Unstable heartbeat clock: independent joins withheld')
+    if result['playerLoop'] is not None and not all(r['clockJoinValid'] for r in result['playerLoop'].values()):
+        raise SystemExit('Unstable PlayerLoop clock: boundary joins withheld')
+    if result['playerLoop'] is not None and not all(r['observationFullyCovered'] for r in result['playerLoop'].values()):
+        raise SystemExit('PlayerLoop boundary observations did not cover the full observation period')
 
 
 if __name__ == '__main__': main()

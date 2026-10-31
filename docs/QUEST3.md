@@ -1,5 +1,7 @@
 # Quest 3 接入原型與工具鏈 v0.20
 
+2026-10-31 新姿態診斷patch為Unity0.28.1／code33，API／UI0.27及NGO26／全部遊戲契約保持。`--vr-pose-loop-trace`只在明確Windows Development與原pose trace一起啟用，Android不安裝觀察點；不改原0.5／1.5秒政策。新增7項PlayerLoop EditMode、總門檻109，最終真正Tests／Windows／Quest結果以PROGRESS及當次receipt為準；不因Editor通過推定Windows條件分支或實機成功。操作見[POSE_TIMING](POSE_TIMING.md)。
+
 2026-10-31 最新玩家人物為API／UI0.26、Unity0.28／code32／NGO26，102真正EditMode；新player-body-v1及header playerPresentationVersion1需來源／API／UI／全部遊戲端一起更新，舊缺失0不補步態。頭部／比例及桌面腕點為裝飾性呈現，Tracked不合成握持雙臂或改追蹤資料；原scope／rules保持，見 [PLAYER_BODY](PLAYER_BODY.md)。新Quest實際結果以最新PROGRESS／receipt為準，不把PC GPU、managed SDK或舊APK算成本輪實機成果。
 
 2026-10-31 最新戰鬥音效為API／UI0.25、Unity0.27／code31／NGO25，93真正EditMode。新header combatAudioVersion1、actor原子presentationRunning及固定combat-audio-v1需來源／API／UI／全部遊戲端一起更新；舊header0不補聲。來源fingerprint新增WAV／meta及Resources資產引用，雙平台結果以最新PROGRESS／receipt為準。音效在Android正常接入，NativeCombatAudioProbe只限明確Windows Development，不把PC DSP或APK建置當頭盔聽感，見 [COMBAT_AUDIO](COMBAT_AUDIO.md)。

@@ -4,19 +4,19 @@
 
 依 2026-10-29 的使用者指示，**優先開發 Meta Quest 3**，暫以 Android 獨立執行為工作假設；VIVE 延後接入，共用架構與原始雙平台目標保留。
 
-目前為 **API v0.27／Unity 遊戲端 v0.28 原型**。真正 Editor 已完成 Prepare、102 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 26，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
+目前為 **API v0.27／Unity 遊戲端 v0.28.1 原型**。真正 Editor 已完成 Prepare、109 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 26，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
 
 [電腦練習場入口](docs/DESKTOP.md)已接上目前API0.27及共用原生生命週期，拒絕過期receipt，支援明確SSD runtime、同房最多五個PC client、正常關窗／控制台End／到時封存，結束自動核對CSV。27項無圖形及9項真正視窗流程通過；這是同機Simulation，非25台或跨機驗收。
 
 新增 [最終任務報表 CSV](docs/REPORTS.md)：結束並完成戰鬥精確封存後，可下載含離場玩家、原任務版本、Simulation／GameServer來源及封存序號的逐玩家數據。後端獨立檢查權限與完整性；下載不跨登入或場次。這是最終戰鬥 ledger，世界錄影完整性另有驗收，不代表頭盔／25台通過。
 
-較窄的 [managed SDK 檢查](docs/UNITY_SDK_CHECK.md) 仍可補充 API／直接參考診斷，其本身不執行 Unity 或產出播放器；目前較強的真正 Editor、102 項測試及 binary 結果以 PROGRESS 為準。
+較窄的 [managed SDK 檢查](docs/UNITY_SDK_CHECK.md) 仍可補充 API／直接參考診斷，其本身不執行 Unity 或產出播放器；目前較強的真正 Editor、109 項測試及 binary 結果以 PROGRESS 為準。
 
 新增 [玩家軍事人物](docs/PLAYER_BODY.md)：原創404面頭盔／背心／腿靴與桌面持槍雙臂，伺服器接受移動產生保存步態，PC遊戲、觀戰與回放共用；Tracked不合成握持雙臂，舊錄製保留原外觀。真正雙PC的W／Space／R、六張observer GPU、暫停及封存已核對；629核心、403 HTTP、43世界、58 Node／201 Chromium及47項UI／native通過。完整追蹤人物與動畫仍待。
 
 新增 [玩家與敵軍射擊音效](docs/COMBAT_AUDIO.md)：原創固定PCM、保存事件槍口的空間聲音，Unity普通遊戲及瀏覽器觀戰／回放共用接受序號與時鐘；加入／跳轉／過期不補播，舊錄製保持無射擊聲。真正Space、AI、AudioListener非零與Pause／Resume靜音已量測；聲源不是原始音軌，人工聽感／頭盔仍待。音效當輪與最新回歸結果見PROGRESS。
 
-目前版本的[雙玩家時序取證](docs/POSE_TIMING.md)已重現短暫姿態過期；新增獨立程序心跳，在三Unity共同0.70秒Update空窗期間仍每13.35ms內執行。文字／截圖與六次輸出輪詢對照未重現，仍未確定根因或排除特定外部操作影響，維持原門檻，沒有宣稱修復。
+目前版本的[雙玩家時序取證](docs/POSE_TIMING.md)新增明確選用的主迴圈邊界記錄：三程序的長空窗位於after時間等待節點與before TimeUpdate之間，邊界共同0.717秒、原Update共同0.727秒，獨立timer仍≤16.433ms。不是該節點CPU耗時或底層根因證明；同版未啟用loop的對照乾淨，仍未排除診斷／外部操作擾動，維持原門檻，沒有宣稱修復。
 
 新增 [兩端姿態時序診斷](docs/POSE_TIMING.md)：以有界記憶體記錄RPC呼叫／收件、主線程空窗及日誌／GPU擷取區段；歷史自然60秒、受控丟包與真正Space核對，能區分控制段收件空窗與玩家停頓。一般執行不啟用，原0.5秒規則不改；最新自然重現與獨立心跳證據見PROGRESS，根因仍待。
 

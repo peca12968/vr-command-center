@@ -130,6 +130,36 @@ class PoseInputAnalysisTests(unittest.TestCase):
             with self.assertRaises(ValueError): analysis.analyze(d)
         self.run_case(verify)
 
+    def test_declared_player_loop_cannot_silently_lose_its_report(self):
+        def verify(d):
+            (d/'input-timing-result.json').write_text(json.dumps({'playerLoop':True}))
+            with self.assertRaises(ValueError):analysis.analyze(d)
+        self.run_case(verify)
+
+    def empty_loop(self):
+        # Observed Windows JsonUtility representation of a null report field.
+        return {'version':1,'capacity':4096,'maximumNodes':512,'source':'NativeWindowsPlayerLoopBoundaries',
+            'complete':False,'truncated':False,'detached':False,'callbacks':0,'firstUtcTicks':0,'lastUtcTicks':0,
+            'firstSeconds':0.,'lastSeconds':0.,'maximumClockStepSeconds':0.,'boundaries':[],'gaps':[]}
+
+    def test_actual_serialized_empty_class_requires_explicit_disabled_mode(self):
+        def verify(d):
+            for name in ('player','peer','server'):self.edit(d,name,lambda r:r.__setitem__('playerLoop',self.empty_loop()))
+            with self.assertRaises(ValueError):analysis.analyze(d)
+            (d/'input-timing-result.json').write_text(json.dumps({'playerLoop':False}))
+            self.assertIsNone(analysis.analyze(d)['playerLoop'])
+            (d/'input-timing-result.json').write_text(json.dumps({'playerLoop':True}))
+            with self.assertRaises(ValueError):analysis.analyze(d)
+        self.run_case(verify)
+
+    def test_disabled_mode_does_not_hide_nonempty_or_failed_loop_evidence(self):
+        def verify(d):
+            (d/'input-timing-result.json').write_text(json.dumps({'playerLoop':False}))
+            raw=self.empty_loop();raw['callbacks']=1
+            self.edit(d,'player',lambda r:r.__setitem__('playerLoop',raw))
+            with self.assertRaises(ValueError):analysis.analyze(d)
+        self.run_case(verify)
+
     def test_observation_phase_names_do_not_require_shooting_stages(self):
         def verify(d):
             path=d/'input-stages.json';rows=json.loads(path.read_text())

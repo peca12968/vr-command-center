@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using UnityEngine;
+using UnityEngine.LowLevel;
 
 namespace VrCommand.Unity
 {
@@ -45,6 +46,7 @@ namespace VrCommand.Unity
             public double endedSeconds;
             public long stopwatchFrequency;
             public PoseTraceRow[] rows;
+            public NativePoseLoopTrace.Report playerLoop;
         }
         private static NativePoseTrace active;
         private readonly PoseTraceBuffer buffer=new PoseTraceBuffer();
@@ -55,18 +57,27 @@ namespace VrCommand.Unity
         private string directory,role,startedAtUtc;
         private double lastFrame,nextCheck;
         private bool finished;
+        private NativePoseLoopTrace loopTrace;
         public static bool Enabled=>active!=null && !active.finished;
         public static void Install(GameObject owner,string role)
         {
 #if UNITY_STANDALONE_WIN && DEVELOPMENT_BUILD
             if(Application.isEditor)return;
-            var args=Environment.GetCommandLineArgs();var index=Array.IndexOf(args,"--vr-pose-trace");if(index<0)return;
+            var args=Environment.GetCommandLineArgs();var index=Array.IndexOf(args,"--vr-pose-trace");
+            var loopRequested=Array.IndexOf(args,"--vr-pose-loop-trace")>=0;
+            if(index<0){if(loopRequested)throw new ArgumentException("Loop trace requires --vr-pose-trace.");return;}
             if(active!=null)throw new InvalidOperationException("Pose trace is already installed.");
             if(index+1>=args.Length || !Path.IsPathRooted(args[index+1]))throw new ArgumentException("Pose trace requires a fresh absolute directory.");
             if(role!="Client" && role!="Server" && role!="Host")throw new ArgumentException("Unsupported pose trace role.");
             var path=Path.GetFullPath(args[index+1]);if(Directory.Exists(path)||File.Exists(path))throw new IOException("Pose trace directory exists.");
             Directory.CreateDirectory(path);active=owner.AddComponent<NativePoseTrace>();active.directory=path;active.role=role;
             active.startedAtUtc=DateTime.UtcNow.ToString("O",System.Globalization.CultureInfo.InvariantCulture);active.clock.Start();
+            if(loopRequested)
+            {
+                var traceOwner=active;
+                traceOwner.loopTrace=new NativePoseLoopTrace(()=>traceOwner.clock.Elapsed.TotalSeconds,()=>DateTime.UtcNow.Ticks,()=>Time.frameCount);
+                PlayerLoop.SetPlayerLoop(traceOwner.loopTrace.Decorate(PlayerLoop.GetCurrentPlayerLoop()));
+            }
 #endif
         }
         public static void Event(string point,ulong connection=0,int source=0,double duration=0)
@@ -118,10 +129,16 @@ namespace VrCommand.Unity
         private void Finish(bool complete,string reason)
         {
             if(finished)return;finished=true;
+            NativePoseLoopTrace.Report loopReport=null;
+            if(loopTrace!=null)
+            {
+                PlayerLoop.SetPlayerLoop(loopTrace.Remove(PlayerLoop.GetCurrentPlayerLoop()));
+                loopReport=loopTrace.Stop(complete,true);
+            }
             // End observation BEFORE report serialization / disk IO. That final
             // write can itself block the main thread and is outside this trace.
             var report=new Report{role=role,startedAtUtc=startedAtUtc,stopReason=reason,complete=complete&&!buffer.Truncated,
-                truncated=buffer.Truncated,endedSeconds=clock.Elapsed.TotalSeconds,stopwatchFrequency=Stopwatch.Frequency,rows=buffer.Snapshot()};
+                truncated=buffer.Truncated,endedSeconds=clock.Elapsed.TotalSeconds,stopwatchFrequency=Stopwatch.Frequency,rows=buffer.Snapshot(),playerLoop=loopReport};
             File.WriteAllText(Path.Combine(directory,"report.json"),JsonUtility.ToJson(report));
         }
         private void OnApplicationQuit(){if(directory!=null&&!finished)Finish(false,"Application quit");}

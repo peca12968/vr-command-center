@@ -1,5 +1,33 @@
 # 開發進度
 
+## 2026-10-31：主迴圈邊界定位、同版對照與0.28.1雙平台
+
+從乾淨`19843f2`接續PC姿態過期。Unity **0.28.1／Android code33**，API／UI0.27及NGO26保持。新增明確選用的`--vr-pose-loop-trace`與helper `--player-loop`，只在原Windows Development pose trace一起安裝；一般啟動、Editor與Android不安裝。從目前PlayerLoop在當時既有節點前後插入自己的兄弟觀察點，不改原type／delegate／native function／loop condition與次序。512節點／32層前置界線、4096個>100ms稀疏空窗、240秒上限；保留最早資料，完整性／截斷獨立。每點讀單調時間、UTC、frame並更新有界計數，不做GPU、PCM、網路或收集期間檔案輸出。停止時只移除目前樹中屬於自己的marker，保留後來的NGO／其他變更；剩餘當幀callback由stopped旗標no-op，不還原舊樹快照。
+
+真正Editor Prepare、**109 EditMode**（新增7）及**同源Windows／ARM64 IL2CPP Quest APK**成功。最終Tests XML 00:59:11–00:59:17 UTC、109／0失敗；Windows receipt 00:49:13、Quest 00:58:40 UTC，來源fingerprint皆 **`5eee75868e70237e91b4c6be989c0f4421da98e7e41c5c8adc31878bcb7617b6`**，目前來源再次計算相同，原scene／prefab GlobalObjectId保持。生成設定／新C# meta已保存，沒有重建Arena或舊profile／pin。首輪Desktop因我新增的`owner`區域變數與參數同名，在Windows Development分支CS0136／exit1；Editor條件未涵蓋該段，不能以109測試代替Windows編譯。失敗日誌`pose-loop-desktop-first-failure.log`保留，修為traceOwner後真正Desktop／Quest及最後Editor檢查皆成功。原有兩個audio名稱遮蔽警告仍在，不稱零警告。
+
+同一新版本、直接loopback、可見玩家＋無圖形peer＋server、真正Space三次（兩場HUD均29／28／27），無故意丟包、姿態或武器注入。建置與最終Editor全停後才開始時序試跑；各有普通優先級獨立心跳、原有三份NativePoseTrace與visible HUD trace，沒有原生GPU讀回／PCM：
+
+另以SDK真正aapt讀本次APK，確認versionName0.28.1／versionCode33、min API32／target35及arm64-v8a；輸出`artifacts/pose-loop-apk-badging.log`。這是APK內容核對，不是裝置啟動或追蹤驗證。
+
+| 場次desktop-venue／20261031前綴 | 模式 | 幀／最大擷取UTC來源年齡 | 結果 |
+|---|---|---|---|
+| `085931-26eeed5d` | --heartbeat --player-loop | 649／0.763435秒 | 4項真正流程、再次重現HUD過期及三程序共同空窗 |
+| `090053-3cd88fd6` | --heartbeat，未啟用loop記錄 | 850／0.288351秒 | 4項真正流程、觀察期無>100ms Update空窗／HUD過期 |
+| `090233-64a95e32` | 一般控制台，未啟用任何pose／loop探針 | 164／0.158143秒 | **49項UI／native回歸**、動態名冊／天氣AI／觀戰回放／最終CSV一致 |
+
+啟用場每程序實際**294個邊界（147節點）**；可見／peer／server callback分別1,605,352／1,706,390／1,721,790，時鐘guard最大1.8584ms，三份報告complete／detached且覆蓋完整觀察期。三程序的>0.5秒相鄰觀察空窗，都從 **`TimeUpdate+WaitForLastPresentationAndUpdateTime` 的after（path /0/0）到 `TimeUpdate` 的before（path /0）**，各0.8695835／0.7297024／0.7255199秒，記錄的frame起訖各自相同。這是**between observers**，不能把整段說成在該Wait節點內執行；可見玩家另有真正before→after的0.1291602秒Wait區段，與此共同長空窗分開。server啟動期ExecuteMainThreadJobs約0.136秒在觀察區間外，沒有混算。
+
+原Update三方交集為 **0.727348秒**；新增三方邊界空窗共同交集是 **0.7167323秒**（ticks639290052032020974–639290052039188297）。兩者起點不同，不能混稱同一精確長度。HUD本次STALE約0.125008秒後ACTIVE，poseAccepted=true；發生於shot-1階段，該階段包含真實輸入後的視窗／輸出觀察與確認等待，不能當扣彈／武器處理耗時。外部Space呼叫時間另存根目錄，不當逐packet序號。獨立心跳6166次、64.0195秒、最大wake **16.4326ms**、UTC步進差1.2168ms，完整覆蓋共同區間，沒有>100ms列；不支持全部程序或整個OS一起暫停。
+
+**定位更精確，底層原因及修復仍未證明。**節點名稱只標實際相鄰觀察點，不能假定引擎每次都依教科書框架順序執行，更不能把wall time當CPU／GPU／音效／排程或transport歸因。未啟用loop的同版單次對照乾淨，不能排除新記錄本身的成本／擾動或特定外部操作；舊版沒有新marker也曾有同類提示，但不能只由症狀相同斷言底層成因相同。接續針對這兩個觀察點間的引擎／訊息處理與各自有程序執行狀態取證，維持原0.5秒姿態與1.5秒來源門檻，不臆測「修正」引擎等待設定。
+
+分析新增pair／系統名稱／計數、gap與最大值一致、時鐘與完整觀察覆蓋檢查；missing／partial／attached／截斷拒絕，UTC偏差達50ms不做loop phase／join，CLI非零。原生fixture完成metadata也是CLI必要條件。未啟用場首次分析exit1，實際發現JsonUtility把null class寫為完整的**空預設物件**，不是JSON null；保留原raw檔，以fixture明確playerLoop=false且物件逐欄等於空預設才忽略，不能藉disabled隱藏callbacks／失敗／非空資料。新增實例反例後兩場重新分析exit0，loop未啟用回null；舊無loop資料亦重新讀取通過。**33項Python檢查**通過：8個loop分析、15個輸入、7個心跳（含一個真正獨立timer程序）、3個舊分析；不是33次原生或頭盔試跑。
+
+兩射擊場皆耗彈3／命中0／擊殺0／健康100，先明確finish三份trace再獨立End／戰鬥與世界精確seal。一般控制台回歸主玩家損耗40／中彈2／健康60，保留離場Peer02及替換Peer03，CSV全部指標／封存界線與ledger／回放一致；檢視`operator-ui/final-report.png`，瀏覽器觀戰為SwiftShader、native client無圖形，不稱新GPU／DSP探針或人工聽感。一般runtime沒有診斷report檔。三場world complete／pending=false／活動0／cleanup無錯誤無殘留；射擊場另heartbeat-cleanup無殘留。24／24／14檔SSD runtime在writer全停後回F，與保留原件SHA相同，稽核前後不變；僅讀JSON／bytes，未開原SQLite或重寫snapshot。摘要`artifacts/pose-loop-validation.json`。
+
+不變：API／UI0.27、NGO26、rules0.8.0、envelope6／world schema1、原header／checksum、全部素材pin、追蹤資料與pointer／槍口。沒有重跑歷史654核心／446 HTTP／43世界／58 Node／217 Chromium、七場五房或8項入場重連，不混入本輪數量。原5080唯讀GET仍0.16／原歷史，unity CLI serve未碰。來源／binary仍F，明確C SSD全新runtime；非F USB全資料、跨機、MR／VIVE／Quest實機、廠商硬體或25台證據。完整11項及長期目標保持開發中。
+
 ## 2026-10-31：獨立程序心跳與視窗／輸出輪詢對照
 
 從乾淨`bbde0a1`接續PC偶發姿態過期調查。新增`scripts/pose-heartbeat.py`，由原生檢查器以明確`--heartbeat`啟動自己的獨立、一般優先級Python程序，每10ms sleep後量perf_counter、UTC與process CPU；沒有遊戲／網路／UI接入，也不調整優先級、計時器或系統設定。只在記憶體保留>100ms空窗及每秒clock anchor，4096列／256 anchors／240秒上限，明確finish才完整；報告序列化在觀察結束後。檢查器持有Popen handle，正常與失敗finally均收尾，另保存heartbeat-cleanup。沒有改C#、API／UI0.27或Unity0.28／code32／NGO26及原0.5／1.5秒門檻。

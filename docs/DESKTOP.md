@@ -17,7 +17,7 @@ python scripts/start-desktop-demo.py --api-dll artifacts/build-practice/bin/VrCo
 # --enemies 1 --peers 1 --duration 900
 ```
 
-啟動器共用五房 Venue 的來源 fingerprint、官方嵌入 Transport 檢查與 API **0.27.0** 版本 gate，場次建立前即拒絕過期 receipt／API，不只看檔案存在。Unity 仍為同源0.28／NGO26；這輪沒有重建遊戲端。舊啟動器實際仍要求0.21，已確認無法啟動目前API並修復，不要改回舊reader來配合。
+啟動器共用五房 Venue 的來源 fingerprint、官方嵌入 Transport 檢查與 API **0.27.0** 版本 gate，場次建立前即拒絕過期 receipt／API，不只看檔案存在。目前Unity為同源0.28.1／NGO26，新選用診斷見[POSE_TIMING](POSE_TIMING.md)，一般練習不啟用；入口修復當輪為0.28且當輪未重建遊戲端。舊啟動器實際仍要求0.21，已確認無法啟動目前API並修復，不要改回舊reader來配合。
 
 上例明確將全新 SQLite／journal runtime 放在本機 SSD；此機為 C 槽，來源、API、遊戲 binary、設定與最終檔案仍在 F。writer 全停後複製一份 runtime-snapshot 回本輪 F 目錄，保留原件，不搬動既有歷史。省略 `--runtime-root` 仍全部放 F，但 F USB 全資料的既有量測未達1.5秒門檻；本工具照原擷取UTC門檻失敗並保留資料，不偷偷放寬。`--job-workers` 預設2，不代表減少worker已修復F延遲或歷史偶發姿態原因。
 

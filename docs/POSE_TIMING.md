@@ -1,5 +1,23 @@
 # 電腦端姿態時序診斷
 
+## 明確選用的主迴圈邊界
+
+Unity0.28.1／Android code33新增`--vr-pose-loop-trace`，必須同時有`--vr-pose-trace`，仍只限Windows Development／非Editor。一般啟動與Android不安裝。檢查器以`--player-loop`向自己的三個程序傳遞旗標，建議另帶`--heartbeat`對照獨立程序；其餘操作與原三發流程相同：
+
+```powershell
+python scripts/check-desktop-pose-input.py --heartbeat --player-loop --api-dll artifacts/build-report-v1/bin/VrCommand.Api/release/VrCommand.Api.dll --runtime-root "$env:LOCALAPPDATA/VrCommand/SimulationRuns"
+```
+
+記錄器從**目前**PlayerLoop樹，在每個既有節點前後插入自己的兄弟觀察點，保留原type／delegate／native function／loop condition與次序，不替換引擎或NGO。最多512節點／32層，超界在安裝前拒絕；不在運行中反覆重建樹。每個觀察點只讀單調時間／UTC／frame與更新有界計數，不做GPU、音訊、網路或檔案輸出。原trace仍32768列／240秒；新增獨立4096個>100ms相鄰觀察空窗，保留最早證據，截斷不能complete。每節點統計保留實際最大相鄰間隔，沒有稀疏列不能當零frame delta。
+
+診斷finish時從**當時目前的樹**只移除屬於自己的marker，再停止收集與序列化`report.playerLoop`；不把舊樹快照寫回而覆蓋後來的NGO／其他變更。Unity的[PlayerLoop API](https://docs.unity.com/en-us/engine/6000.3/script-reference/unityengine/lowlevel/playerloop/setplayerloop)在下一次完整迴圈才套用新次序，因此剩餘當幀marker由stopped旗標成為no-op。結束診斷仍須另做End／精確seal，detached不代表遊戲結束。
+
+分析保留from／to的節點path、名稱、before／after及frame。相同path的before→after標為inside observed system，其他為between observers；跨幀／樹外時間亦保留。這是觀察點間的**wall time**，包含等待、排程及診斷成本，不能由名稱斷言某子系統CPU耗時或根因。核對pair、計數、稀疏列與max一致、完整性、時鐘／UTC覆蓋後才做phase及三程序交集；缺失宣告的報告拒絕。沒有新的遊戲事件／world／NGO欄位，API／UI0.27及NGO26保持；新的來源指紋需同源雙平台建置，不能用舊receipt啟動。
+
+本輪`085931-26eeed5d`真正取得三程序相同的after WaitForLastPresentationAndUpdateTime→before TimeUpdate空窗（0.869584／0.729702／0.725520秒）。這不是該Wait的before→after；三方邊界共同0.7167323秒，原Update共同0.727348秒，獨立timer整場≤16.433ms。不得只由標籤假設引擎的實際執行順序或歸因該節點。未啟用loop的同版實際三發對照乾淨，仍未排除診斷及外部操作擾動，不稱修復。三份294邊界報告都detached並覆蓋完整觀察期，否則CLI非零；109真正EditMode／同源Windows與Quest、33項Python及49項一般UI／native回歸，完整數據見PROGRESS。
+
+CLI要求完成的input-timing-result及cleanup metadata；不能分析失敗／仍開啟的fixture當成功。JsonUtility會把未啟用的null報告class寫成空預設物件，只有fixture明確playerLoop=false且每欄皆為該空預設才能忽略；declared true、未知模式或非空／失敗資料仍拒絕。不修改raw報告來配分析器，舊沒有欄位的資料保持可讀。
+
 ## 獨立程序心跳與操作對照
 
 目前檢查器另有明確選用的`--heartbeat`，啟動自己的普通優先級Python程序，每10ms sleep後量單調時間、UTC及process CPU。沒有UI、遊戲或網路介面，不改系統設定。只在記憶體記>100ms空窗與每秒clock anchor，4096列／256 anchors／240秒上限；明確finish才complete，輸出在觀察結束後。helper持有自己的程序handle並在finally收尾；heartbeat-cleanup與native cleanup必須皆無殘留。
