@@ -1,5 +1,7 @@
 # 開發指引
 
+入場發布積壓見docs/STARTUP_WITNESS.md／PROGRESS：F＋真正封裝重疊新反例接受7、live37次Preparing／observed6，但關閉來源world137已Running tick8、最後232／ack126、106未確認，不能稱來源未套用。明確C SSD原8項／358幀成功、凍結三檔observer graph f028c34d...；F baseline380／兩檔7104ff9e...也保存。--runtime-root只建新目錄、writer全停才snapshot保留原件；新C14檔／前29 runtime633檔及API三工具159檔raw保持。新8＋10＋既有5項Python通過，analyze-world-journal僅rb／checksum／序號metadata不開SQLite、不ack修復、不當完整規則驗證。原204538缺Begin回應不能套新場7；發布積壓階段已證明，F單一因果／所有逾時及31筆未修復。API/UI0.30／Unity0.34 code41 NGO29與原163／雙平台保持，完整11項active。
+
 Begin觀察見docs/STARTUP_WITNESS.md：接受回應不等於來源已套用，需observed>=接受序號、Running、tick>0、非suspended並保持原來源UTC門檻／15秒界線。3直接＋1受控管理503、96全回放／八份結果成功，新C runtime20檔／前28 runtime613檔raw保持；版本／原163 Editor及雙平台不變，本輪未重建。live與回放最早幀分開，延遲含輪詢／發布不是RTT，腳本SHA不當完整依賴graph。舊逾時缺命令回應，不能從observed6猜Begin序號、不能由單舊false旗標排除中間失聯或以校準宣稱根因。完整11項active，原逾時／31筆／實機另驗。
 
 Quest右B重連見docs/QUEST_RECONNECT.md：Unity0.34／code41、NGO29／API UI0.30保持，163真正Editor（3項在Editor PlayMode Dynamic更新的官方Touch虛擬action）及同源Windows／ARM64 APK成功，c233d804...來源與原Scene／prefab ID一致。Client需停止／非shutdown／兩秒冷卻、焦點／完整右控制器追蹤，放開再按；OnApplicationFocus／Pause／Disable也解除，不能依賴暫停仍有Update。重用原讀檔／驗票，不改Tracked／槍口／wire或rules。最終PC8項372幀成功，五輪測試反例及Running15秒逾時保留，不當根因修復或頭盔B鍵證據。checker新增starting／命令回應／failure快照／cleanup，不能信舊latest指標；保存SQLite不開。前28 runtime613檔／API三工具159檔保持，正式ZIP／APK精確hash與容器空間差異見PROGRESS；完整11項active，實機／跨機／原31筆另驗。

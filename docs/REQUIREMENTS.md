@@ -1,5 +1,7 @@
 # 需求與驗收追蹤
 
+第1／9／10項新增[原入場來源窗口](STARTUP_WITNESS.md)：F＋封裝重疊重現逾時，唯讀journal證明來源已套用而API/live落後106幀；明確SSD新場原8項／358幀與seal成功。23項Python／原件保存核對與限制見PROGRESS。這是發布積壓證據及執行資料配置選項，不是F USB效能修復、所有舊逾時／31筆或跨機／實機驗收；API／Unity保持，11項active。
+
 第1項新增[開場觀察](STARTUP_WITNESS.md)：管理接受Begin與來源實際套用分開驗證，3直接＋1受控失聯、96幀回放與八份結果一致。未重現原撤銷／重加入及F負載逾時，不能稱根因修復、容量或實機驗收；API／Unity及原建置保持，詳見PROGRESS。
 
 第1／2項Quest操作新增[右B重連](QUEST_RECONNECT.md)，填補Android沒有桌面Reconnect按鈕的來源缺口，放開再按、焦點／追蹤／暫停解除後仍由原GameServer驗票。0.34／code41、163真正Editor含3項PlayMode Dynamic虛擬Touch action、同源Windows／Quest及最終PC8項372幀成功；不是實體B鍵／頭盔、跨機或原31筆及新Running逾時已修復，詳見PROGRESS。

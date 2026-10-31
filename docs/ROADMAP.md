@@ -1,5 +1,7 @@
 # 長期開發目標
 
+2026-10-31 [原入場窗口與journal](STARTUP_WITNESS.md)重現F資料＋真正封裝重疊的Preparing逾時：Begin接受7，來源world137有效Running，live仍Preparing且106幀未確認；明確C SSD同情境8項／358幀與seal成功。新增有界witness、唯讀checksum／序號分析與選用runtime-root，23項Python含Windows lease通過，原Unity／API不變。已定位該場發布積壓，尚未證明所有舊逾時／31筆根因；下一步量測發布階段與多人操作，完整11項active。
+
 2026-10-31 新增[開場接受／套用觀察](STARTUP_WITNESS.md)：3直接＋1受控管理失聯場、八份結果／96完整回放與雙seal成功；HTTP接受與來源Running按序號／tick／suspended分開，4項反例通過。版本及原建置不變。舊逾時缺命令回應，新場無原撤銷／F負載條件，根因仍未證明；接續原情境窗口，完整11項active。
 
 2026-10-31 新增[Quest右B重連](QUEST_RECONNECT.md)：Android原略過桌面重連按鈕，現可明確放開再按B重讀原票券，角色／冷卻／焦點／追蹤及暫停解除沿用原驗票。163真正Editor含3項PlayMode Dynamic官方Touch action、同源Windows／ARM64 APK成功，0.34／code41、NGO29／API UI0.30；最終PC8項372幀通過。五輪測試失敗與Running逾時保存，未稱根因已修復；實機控制器／GUI／跨機另驗，完整11項active。

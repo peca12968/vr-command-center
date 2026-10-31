@@ -5,6 +5,7 @@ No test RPC or injected combat/pose data is used. All rigs remain Simulation.
 """
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -40,8 +41,10 @@ def source_fingerprint():
 
 
 def main():
+    from admission_witness import BeginWitness, observer_fingerprint
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--interactive', action='store_true')
+    parser.add_argument('--runtime-root', type=Path, help='Fresh isolated SQLite / journals on an explicit SSD root; keep originals and copy a closed snapshot to artifacts')
     parser.add_argument('--player-exe', type=Path, default=Path(os.environ.get('VR_COMMAND_UNITY_PLAYER', ROOT / 'artifacts/desktop/VrCommand.exe')))
     parser.add_argument('--api-dll', type=Path, default=Path(os.environ.get('VR_COMMAND_API_DLL', ROOT / 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')))
     args = parser.parse_args()
@@ -51,6 +54,9 @@ def main():
         parser.error('Player receipt does not match current sources; build Desktop before this check')
     directory = ROOT / 'artifacts/unity-admission' / (time.strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
     directory.mkdir(parents=True)
+    runtime_directory = directory if args.runtime_root is None else args.runtime_root.resolve() / directory.name
+    if runtime_directory != directory: runtime_directory.mkdir(parents=True, exist_ok=False)
+    observer_source = observer_fingerprint()
     keys = {role: secrets.token_hex(32) for role in ['Master', 'GameServer']}
     (directory / 'keys.json').write_text(json.dumps({'OperatorKeys': keys}), encoding='utf-8')
     with socket.socket() as probe:
@@ -59,12 +65,13 @@ def main():
         probe.bind(('127.0.0.1', 0)); game_port = probe.getsockname()[1]
     base = f'http://127.0.0.1:{http_port}'
     environment = {k: v for k, v in os.environ.items() if not k.lower().startswith('operatorkeys__') and k.lower() not in ['operatorkeyfile', 'playerticketsigningkey']}
-    environment.update(DataDirectory=str(directory / 'missions'), SessionDataDirectory=str(directory / 'sessions'),
+    environment.update(DataDirectory=str(runtime_directory / 'missions'), SessionDataDirectory=str(runtime_directory / 'sessions'),
                        OperatorKeyFile=str(directory / 'keys.json'), Logging__LogLevel__Default='Warning')
     all_processes, live = [], {}
     session = None
     end_command_id = str(uuid.uuid4())
     events = []
+    begin_witness = None
     api_log = (directory / 'api.log').open('wb')
 
     def request(route, body=None, *, method=None, admission=None, role='Master', expected=200, optional=False):
@@ -81,19 +88,26 @@ def main():
         return json.loads(raw) if raw else None
 
     def control(action, **options):
+        nonlocal begin_witness
         result = request(f'/api/sessions/{session}/commands', {'commandId': end_command_id if action == 'End' else str(uuid.uuid4()), 'action': action, **options})
+        if action == 'Begin': begin_witness = BeginWitness(result['session']['sequence'])
         (directory / ('control-' + action + '.json')).write_text(json.dumps(result, indent=2), encoding='utf-8')
         return result
 
     def world_frame():
         message = urllib.request.Request(base + f'/api/sessions/{session}/world/watch?mode=live', headers={'Authorization': 'Bearer ' + keys['Master']})
         with urllib.request.urlopen(message, timeout=5) as response:
-            kind = ''
+            kind = ''; capture_start = None
             for _ in range(60):
                 line = response.readline().decode().strip()
                 if line.startswith('event: '): kind = line[7:]
+                if kind == 'header' and line.startswith('data: '): capture_start = json.loads(line[6:])['header'].get('captureStartedAtUtc')
                 if kind == 'frame' and line.startswith('data: '):
-                    value = json.loads(line[6:]); (directory / 'latest-frame.json').write_text(json.dumps(value), encoding='utf-8'); return value
+                    value = json.loads(line[6:]); (directory / 'latest-frame.json').write_text(json.dumps(value), encoding='utf-8')
+                    if begin_witness is not None and not begin_witness.applied:
+                        begin_witness.observe(value['packet'], capture_start)
+                        (directory / 'begin-witness.json').write_text(json.dumps(begin_witness.snapshot(), indent=2), encoding='utf-8')
+                    return value
         return None
 
     def wait_for(predicate, seconds, label):
@@ -108,7 +122,7 @@ def main():
         raise RuntimeError('Timed out: ' + label)
 
     def stage(name, **extra):
-        value = {'stage': name, 'directory': str(directory), 'interactive': args.interactive, **extra}
+        value = {'stage': name, 'directory': str(directory), 'runtimeDirectory': str(runtime_directory), 'interactive': args.interactive, 'observerFingerprint': observer_source, **extra}
         (directory / 'stage.json').write_text(json.dumps(value, indent=2), encoding='utf-8')
         (ROOT / 'artifacts/latest-unity-admission-path.txt').write_text(str(directory), encoding='utf-8')
         print(json.dumps(value), flush=True)
@@ -159,7 +173,7 @@ def main():
         _, peer_ticket = invitation(state, players[1])
         def client(ticket): return {'role': 'Client', 'address': '127.0.0.1', 'port': game_port, 'joinTicket': ticket}
         launch('server', {'role': 'Server', 'address': '127.0.0.1', 'port': game_port, 'sessionId': session, 'managementApiUrl': base,
-                          'gameServerKey': keys['GameServer'], 'telemetryOrigin': 'Simulation', 'telemetryDirectory': str(directory / 'telemetry')})
+                          'gameServerKey': keys['GameServer'], 'telemetryOrigin': 'Simulation', 'telemetryDirectory': str(runtime_directory / 'telemetry')})
         wait_for(lambda: request(f'/api/sessions/{session}/world', optional=True), 90, 'server recording')
         launch('peer', client(peer_ticket)); persistent = launch('client', client(old_ticket), args.interactive)
         wait_for(lambda: connected(players[0]) and connected(players[1]), 90, 'both clients')
@@ -186,7 +200,7 @@ def main():
         stable = wait_for(lambda: connected(players[0]) and connected(players[1]), 15, 'new binding survives old probe exits')
         events += ['roster revoked old client', 'same-ID reentry fenced', 'stale removal rejected', 'old ticket rejected by API and transport', 'late old exits preserve current binding']
         control('Begin')
-        wait_for(lambda: (value if (value := world_frame()) and value['packet']['frame']['phase'] == 'Running' else None), 15, 'Running')
+        wait_for(lambda: (value if (value := world_frame()) and begin_witness.applied else None), 15, 'Running')
         if args.interactive:
             stage('fire_once')
             wait_for(lambda: next(p for p in request(f'/api/sessions/{session}/statistics')['players'] if p['playerId'] == players[0])['ammoUsed'] >= 1, 300, 'actual window shot')
@@ -230,7 +244,8 @@ def main():
         assert request(f'/api/sessions/{session}/statistics') == stats
         summary = {'source': 'Actual Unity Windows server / clients; Simulation rigs', 'headsets': 0, 'interactive': args.interactive,
                    'playerBuildReceipt': receipt, 'events': events + ['ended admission rejected without changing final statistics'],
-                   'beforeReconnect': before, 'afterReconnect': after, 'world': world, 'statistics': stats, 'replayStatisticsMatch': True, 'activeSessions': 0}
+                   'beforeReconnect': before, 'afterReconnect': after, 'world': world, 'statistics': stats, 'replayStatisticsMatch': True, 'activeSessions': 0,
+                   'beginWitness': begin_witness.snapshot(), 'observerFingerprint': observer_source, 'runtimeDirectory': str(runtime_directory)}
         (directory / 'summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
         stage('passed', checks=len(summary['events']), frames=world['acceptedSequence'])
     except BaseException as error:
@@ -254,12 +269,21 @@ def main():
                     except subprocess.TimeoutExpired: process.kill(); process.wait(timeout=5)
             except Exception as error: cleanup_errors.append({'processId': process.pid, 'errorType': type(error).__name__})
         api_log.close()
+        if runtime_directory != directory and not any(p.poll() is None for p in all_processes):
+            try:
+                spec = importlib.util.spec_from_file_location('admission_snapshot', ROOT / 'scripts/start-desktop-venue.py')
+                venue = importlib.util.module_from_spec(spec); spec.loader.exec_module(venue)
+                venue.snapshot_runtime(runtime_directory, directory / 'runtime-snapshot')
+            except Exception as error: cleanup_errors.append({'operation': 'runtime snapshot', 'errorType': type(error).__name__})
         (directory / 'cleanup.json').write_text(json.dumps({'errors': cleanup_errors,
             'remainingTrackedChildren': [p.pid for p in all_processes if p.poll() is None],
             'processes': [{'processId': p.pid, 'exitCode': p.poll()} for p in all_processes]}, indent=2), encoding='utf-8')
         if cleanup_errors or any(p.poll() is None for p in all_processes):
             stage('failed', errorType='CleanupError')
             raise RuntimeError('Admission fixture cleanup failed; preserve cleanup.json')
+        if observer_fingerprint() != observer_source:
+            stage('failed', errorType='ObserverSourceChanged')
+            raise RuntimeError('Admission observer changed during execution; original evidence retained')
 
 
 if __name__ == '__main__':

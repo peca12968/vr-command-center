@@ -62,6 +62,10 @@ jobs:
       - run: python -m py_compile scripts/package-windows-player.py scripts/check-player-package.py
       - run: python -m py_compile scripts/check-player-connection-status.py
       - run: python -m unittest discover -s tests -p test_desktop_startup.py
+      - run: python -m unittest discover -s tests -p test_admission_witness.py
+      - run: python -m unittest discover -s tests -p test_world_journal_analysis.py
+      - run: python -m py_compile scripts/analyze-world-journal.py
+      - run: python -m py_compile scripts/admission_witness.py scripts/check-unity-admission.py
       - run: python -m py_compile scripts/check-desktop-startup.py
       - run: python -m py_compile scripts/start-desktop-control.py
       - uses: actions/setup-node@v4

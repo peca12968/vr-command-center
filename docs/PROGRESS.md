@@ -1,5 +1,29 @@
 # 開發進度
 
+## 2026-10-31：Preparing逾時重現、來源journal與SSD入場比較
+
+從乾淨`e0ea233`接續[開場觀察](STARTUP_WITNESS.md)，本輪在原撤銷／重新加入流程、真正玩家封裝編譯／壓縮同時執行的情境重現Running逾時，並分開核對live與關閉的來源journal。**API/UI0.30、Unity0.34／code41／NGO29及c233d804...來源保持**，未改遊戲／後端／wire／Tracked／規則或0.5／1.5秒政策；沒有新Editor或雙平台重建，原163與成功receipt仍屬前輪證據。
+
+入場checker新增有界metadata witness，依Begin接受序號、Running／tick>0／非suspended判斷套用，保留來源UTC／年齡和原15秒觀察；新唯讀journal分析器逐筆驗證VRWORLD1長度／SHA／序號與receipt邊界，只輸出metadata、不開SQLite或寫回／修復。8項witness＋10項journal反例＋5項既有真實Windows artifact／writer lease及4項既有startup測試成功，共27項，語法／diff成功；CI加入相應檢查。checksum／序號不冒充完整世界規則驗證。
+
+| 原生自有新場 | 實際終態 | Begin／來源與接收證據 |
+|---|---|---|
+| `unity-admission/20261031-211904-9cfe99f1`，F資料、無封裝重疊 | 真正handle28285 exit0、原8項／380幀精確seal、cleanup空 | 接受7；首次有效live world57／tick6／observed7，回應後0.984秒、年齡0.788秒；journal同最早有效幀、ack380、無積壓 |
+| `unity-admission/20261031-212112-f59b1f99`，F資料、真正封裝重疊 | parent69722 exit1、admission exit1、package exit0；無summary，cleanup空 | 接受7／管理Running；37次live皆observed6／Preparing／tick0，年齡6.748→16.383秒。來源journal有232幀，world136已Running但tick0不算有效；world137／tick8／observed7非suspended才有效，擷取UTC為回應後0.801秒。最後來源world232／tick301，持久ack只126，**106幀未確認、未complete／未seal** |
+| `unity-admission/20261031-212633-2f8c41bf`，明確C SSD資料、真正封裝重疊 | parent13610 exit0、admission／package均0；原8項／358幀精確seal、cleanup空 | 接受7；首次有效live與journal皆world49／tick2／observed7，回應後0.531秒、年齡0.083987秒；來源擷取為回應後0.451秒，ack358、無積壓 |
+
+兩次重疊parent各保存獨立ZIP／log／result：`admission-package-overlap-901c47fe8eec4acfb7c8297134ec586a`與`...d8e054cbd7fb4dd68a7b3cbf12d305ab`，均核對package在native啟動及control-Begin檔出現時仍存活，不以排程意圖冒充實際重疊。F反例原始worldlog SHA `df77fc1ccb930cc92751cb9bb2b0ec57f6f1de9e9f87cd4117f64fab2406ae8d`／601712 bytes，全部359筆checksum／邊界核對通過（header1、frame232、ack126）。不是以提高15秒門檻、跳幀、刪掉Preparing或重發Begin取得通過。
+
+這次已證明**該新反例的來源有套用Begin、API/live仍落後**，不能再把此場描述為來源一直停Preparing。發布積壓階段明確，但尚未量測每筆fsync／WS／DB／主機IO的耗時；不同輪次未控制所有排程／負載，**沒有證明單一F硬碟因果或所有舊逾時已修復**。原`204538-5c3e58ba`沒有Begin回應，不能把新場7套回舊場；原31筆姿態失效也不能與本場合併成同一根因。
+
+checker新增明確`--runtime-root`，僅建立自己的新目錄；SQLite與journal移到所指定SSD，來源／binary仍F，不移既有資料。全部writer停止後以共用snapshot fence複製回F並保留C原件。最終observerFingerprint `f028c34d6811305904c44ea2777f189944cda290d404eab6d33822165ae87922`包括兩observer腳本及共用snapshot的venue檔，不當作完整OS／native依賴graph；前一組F baseline／反例的兩腳本graph為`7104ff9e...`。兩者原生receipt同c233；比較明列Python工具差異。
+
+另保留本輪前兩場：`211254-eb2a9de6`／handle7977 exit0、8項365幀為加入witness前基線；`211658-6f8b48ab`／handle78548 exit0、8項377幀為探索輪，過程中曾修改空UTC處理，**不稱最終封閉工具來源結果**。最後F baseline與SSD場分別在工具凍結下完成。
+
+`admission-backlog-runtime-validation.json`raw bytes核對新C runtime14檔／F snapshot一致、前29 runtime633檔及其snapshot未變；前API＋三工具159檔保持，四個本輪自有F run共167檔保存雜湊。初次audit誤把buildCopies陣列當hash字典，exit1、沒有寫成功報告；依實際manifest逐目錄核對後exit0。保存SQLite不開、未動5080／原正式ZIP及APK、未改帳務／登入／安全性設定。
+
+下一步保留自然負載下來源／發布階段的有界因果量測，再檢查多人持續操作與跨機部署；不把一次SSD成功稱F USB效能修復、25台／實機／MR或硬體驗收。完整11項長期目標仍active。
+
 ## 2026-10-31：原生Begin接受／套用觀察與受控校準
 
 功能 [395c156](https://github.com/peca12968/vr-command-center/commit/395c156bbae50a67a2b0741db405b3505d946547) 已推送main、遠端SHA一致。[本次CI run41204413573](https://github.com/peca12968/vr-command-center/actions/runs/41204413573)／check124546467295為failure、steps空；fresh annotation為近期付款失敗或支出上限，job未啟動，無雲端測試結果。未改帳務或手動重跑，下列原生與4項Python是本機實際結果。
