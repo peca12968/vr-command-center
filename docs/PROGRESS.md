@@ -2,6 +2,8 @@
 
 ## 2026-10-31：Quest右手B鍵重連與暫停解除
 
+功能 [8eabda9](https://github.com/peca12968/vr-command-center/commit/8eabda9d987ba684e46e46446b6b19a3b5f0ae40) 已推送main、遠端SHA一致。[本次CI run41203749271](https://github.com/peca12968/vr-command-center/actions/runs/41203749271)／check124544547164為failure、steps空；fresh annotation為近期付款失敗或支出上限，job未啟動，沒有雲端測試結果。未改帳務或手動重跑；下列真正Editor／建置／原生結果為本機實際證據。
+
 前輪玩家狀態為實際進展；從乾淨`8dcc61d`補上[Quest控制器重連](QUEST_RECONNECT.md)。原Android會略過桌面OnGUI，故其Reconnect按鈕無法在頭盔使用；新增獨立於avatar的右手secondaryButton（Quest B）及等待畫面提示，重用原`ReconnectClient`重讀原路徑票券與GameServer驗票。**Unity0.34.0／code41，NGO29、API/UI0.30保持**；不改wire、world schema、票券／admission政策、Tracked姿態、模型／槍口、命中或0.5／1.5秒規則。
 
 Client且NGO停止listening／shutdown、兩秒間隔到期才可嘗試，焦點及右控制器isTracked＋位置／旋轉trackingState均有效；必須先放開B再按，不能從斷線／冷卻／失焦／追蹤缺失帶入一直按住的狀態。另以OnApplicationFocus、OnApplicationPause及OnDisable明確解除準備，避免Unity停止Update時漏掉失焦。Server／Host不提供此控制，左Y不當右B；不自行配票、呼叫主控API、清除未重試的戰績或改追蹤資料。輸入action在bootstrap銷毀時釋放，原桌面按鈕共用同一可重連判定。
