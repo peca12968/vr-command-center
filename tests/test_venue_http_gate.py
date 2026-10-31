@@ -116,5 +116,21 @@ class VenueHttpGateTests(unittest.TestCase):
         self.assertFalse(closer.is_alive()); self.assertFalse(requester.is_alive()); self.assertEqual(200, results[0][0])
         self.gates.remove(gate)  # Already closed and all handlers joined.
 
+    def test_seal_fault_preserves_batch_delivery_management_and_later_retry(self):
+        gate = self.gate(); gate.block('combat-seal')
+        self.assertEqual(503, self.request(gate, '/combat-stream/seal', 'POST', b'unchanged seal')[0])
+        self.assertEqual(200, self.request(gate)[0])
+        self.assertEqual((200, b'events|'), self.request(gate, '/combat-stream/batch', 'POST', b'events'))
+        gate.release(); self.assertEqual((200, b'unchanged seal|'), self.request(gate, '/combat-stream/seal', 'POST', b'unchanged seal'))
+        self.assertEqual(1, gate.snapshot()['counts']['combatSealBlocked'])
+
+    def test_statistics_fault_preserves_seal_and_management(self):
+        gate = self.gate(); gate.block('statistics')
+        self.assertEqual(503, self.request(gate, '/statistics')[0])
+        self.assertEqual(200, self.request(gate)[0])
+        self.assertEqual(200, self.request(gate, '/combat-stream/seal', 'POST', b'seal')[0])
+        gate.release(); self.assertEqual(200, self.request(gate, '/statistics')[0])
+        self.assertEqual(1, gate.snapshot()['counts']['statisticsBlocked'])
+
 
 if __name__ == '__main__': unittest.main()

@@ -1,5 +1,7 @@
 # 開發指引
 
+2026-10-31 長任務／封存規範見 docs/DESKTOP_LONG.md、docs/SEAL_RECOVERY.md：本輪Python／文件／CI，API/UI0.28、Unity0.30.0／code37／NGO28及d430...de53f原receipt保持，未重建131 Editor／雙平台。單PC900秒、8475全回放／8460 Running無bad，原admission跨票券到期／健康80／唯一tick18000End；live跳1序號已完整replay補查，0.363945秒為收到資料時年齡、681ms為保存擷取間隔，非RTT／render／25人或歷史停頓修復。封存503與最終stats503各8秒保持pending後恢復，CSV依Ended+combat seal，玩家final另等world seal及GameServer統計，不可混同兩者。代理新增兩mode仍20秒／240秒／handler join，不記payload不注入；49 Python。新3runtime42檔及舊187檔SHA一致，保存SQLite不開；所有writer停後一次snapshot。完整目標active、頭盔／25台仍待。
+
 2026-10-31 計時失聯規範見 docs/CLOCK_RECOVERY.md：本輪僅Python／文件／CI，遊戲API/UI0.28、Unity0.30.0／code37／NGO28及d430...de53f原receipt不變，未重跑131 Editor／雙平台。60／180秒各8項真正PC：只切管理GET應source suspended／Paused停表但API仍Running；只切world發布應本地精確到期Ready=false、API在接受幀前仍Running，恢復才唯一內部End／雙seal。工具只作用於新自有API，opaque WS不讀payload；8連線、20秒fault／240秒life自動上限不得passed，probe保持240秒／64 captures。完整回放、client原admission結果、tool fingerprint及writer全停snapshot均須核對；新4runtime159檔及前輪28檔SHA一致。44 Python、無新GPU／頭盔／25台／長期驗收；原正式5080不動。
 
 2026-10-31 最新任務計時見 docs/MISSION_CLOCK.md：API／UI0.28、Unity0.30.0／code37／NGO28，131真正EditMode及同源雙平台成功。SetMissionClock僅Preparing明確選用，舊／未設定場次手動；20Hz活動tick、Pause停表，到期先凍結戰鬥，再由API已接受世界幀以內部mission-clock提交正常End／雙seal，不能拿未發布本地時間授權End或給HTTP Internal身分。envelope7讀1–7，world schema1／rules0.8.0／驗票2保持，新寫入不可降舊reader，所有遊戲程序與API/UI協同更新。兩房PC到期／手動超時、結果與回放證據以PROGRESS為準，仍無頭盔／25台；Tests門檻131。

@@ -1,5 +1,34 @@
 # 開發進度
 
+## 2026-10-31：15分鐘原生任務、完整連續性與封存失聯
+
+前輪有實際進展；從乾淨`524667d`接續新增 [DESKTOP_LONG](DESKTOP_LONG.md)／`check-desktop-long.py` 及 [SEAL_RECOVERY](SEAL_RECOVERY.md)／`check-desktop-seal-faults.py`。本輪只改Python工具／測試／CI與文件；遊戲仍**API／UI0.28、Unity0.30.0／code37／NGO28**、原source fingerprint `d43085f4e6b755649b5da36b0885d6b690d7042f7ce4a871a947bc2e15ede53f`、原ID與同源Windows／Quest receipt。131 Editor／雙平台、680規則／446 HTTP／43串流／60 Node／223 Chromium為前輪成功結果，本輪未重建或重跑，不當新頭盔或UI證據。
+
+**真正15分鐘通過**：`desktop-long/20261031-143453-51928ddf`，一個Windows server／一個headless client、stationary Simulation rig，沒有附掛240秒診斷或故障代理，也未延長其限制。先由真正AI造成20損耗／1次中彈，控制者停攻擊，健康80持續保存。工具fingerprint `7d684e6225dca664259dc78f058633de59497dc8d640acf1a5554ba5f53d1e79`，原player／admission／連線不重建；原票券到期後在tick5961仍收到同一身分的有效Running快照（UTC `2026-10-31T06:39:55.097841+00:00`），這是既有連線延續，不是讓過期票券重新入場。原生client只有一次CONNECTED。
+
+固定900秒活動時間、唯一內部mission-clock End恰好tick18000；combat與world精確seal、pending=false、玩家自己的final JSON與原admission／stream／全部統計及兩個最終序號一致並ack。live觀察8453幀及869份status、來源年齡最大0.363945秒，badActive／badAge均0；live跳過1個序號，不忽略此事，而用完整封存回放逐幀補足。
+
+完整replay自1走到8475，其中8460個Running幀：原玩家存在、connected、rig=Simulated；停攻政策生效後健康維持80，badRunning=0，沒有無意Pause。保存擷取間隔最大681ms、>=1500ms為0，tick不倒退／不超18000，末packet及所有statistics等於精確seal。回放另以4倍速實際讀完約3分45秒。`executionFinished`與`acceptancePassed`分開，任一反例不得complete，沒有篩掉失效幀或改規則來過。
+
+這是**本次單玩家15分鐘的保存與收到快照範圍**；source UTC age是每份收到frame／status的觀察，不是每個時間點的網路延遲／RTT／FPS，也不是原生每render幀或完整0.5秒姿態接收統計。保存幀最大681ms與全Running body有效，仍不證明已修復歷史主迴圈停頓或25人情境。15分鐘不可外推4小時／長期穩定性。
+
+15分鐘活動與雙seal完成後，才在完整replay讀取期間開另外兩個隔離短試跑，未在900秒活動量測中增加第二個原生負載。每場真正一server／一client，先AI造成20損耗／健康80，再Pause及操作員End；工具fingerprint `e0592a83cc72db0715dd50821d73b5db5c121813ea3155e6ade8a8e33a234bb1`，每場**8項**通過：
+
+| desktop-seal-faults／20261031場次 | 模式 | 故障總秒／pending觀察秒 | 實際拒絕 | API狀態與CSV | 完整回放 |
+|---|---|---|---|---|---|
+| 145042-77e7c9b1 | combat-seal | 8.844／8.344 | 40次503 | combat未seal／pending=true／world未complete／CSV409 | 32幀 |
+| 145100-e505c83d | statistics | 8.703／8.063 | 31次503 | 雙seal／pending=false／CSV可匯出，玩家仍pending | 32幀 |
+
+兩種模式都至少8秒維持玩家pending，未接受final、未提早斷線；恢復後原請求重試、自己原admission的非零受傷結果／所有統計／stream及最終序號正確並ack，無DEBRIEF_TIMEOUT。CSV的session／player／room／origin／stream／through／finalStream及7項戰鬥數值、整段回放與ledger逐值一致。CSV既有政策是Ended＋combat seal，玩家final另須world seal及GameServer取得統計；依原契約分辨，沒有把已封存數字錯標pending或提前顯示final。
+
+代理只新增`combat-seal` POST503及`statistics` GET503，原management／publication邊界保持；10項代理測試含舊8回歸及新2分流。8連線／HTTP1MiB／response2MiB／opaque WS64KiB、20秒fault／240秒life及non-daemon handler join均維持。兩場route／handler／capacity錯誤0、無自動上限、收尾tunnels0；不記payload／token／key，不注入姿態／武器／統計，不改OS／安全設定。舊試跑保持其原tool fingerprint，不覆寫歷史。
+
+**49 Python**通過（原36 desktop＋新3 long連續性＋10 gate）；語法／293官方Transport單一修補亦通過，CI新增3項與兩個入口語法。本輪沒有新的.NET／Editor／APK／瀏覽器／GPU／PCM／鍵鼠／頭盔結果。native三場各自新資料／憑證，來源全Simulation，不把名冊Quest3標籤當接了頭盔。
+
+`long-seal-validation.json`核對本輪**3個runtime／42檔**原件與snapshot SHA逐檔一致，之前6個runtime／187檔亦未變；僅JSON／logs／raw bytes，沒有在保存SQLite上開連線。資料明確C SSD、source／binary仍F，全停writer才一次回F且原件保留；三場cleanup無錯／tracked child空、原生玩家程序0，正式5080仍0.16。未操作Unity登入／授權／安全設定，沒有資料／憑證／binary提交。
+
+完整11項長期目標保持active。這次通過一位同機PC的900秒與兩個可恢復約8秒故障，不是多玩家長期、25位持續操作、跨機、完整API／server崩潰、封存超過玩家期限或Quest／VIVE／MR／廠商硬體驗收。後續優先增加多玩家持續操作與更長／封存期限情境，實機項目分開保留。
+
 ## 2026-10-31：管理與發布分通道失聯、原生計時恢復
 
 前輪交付屬實際進展；從乾淨`0d39885`接續驗證 [CLOCK_RECOVERY](CLOCK_RECOVERY.md)。新增 `venue_http_gate.py` 及 `check-desktop-clock-faults.py`，本輪只改Python工具／測試／CI與文件。**遊戲仍API／UI0.28、Unity0.30.0／code37／NGO28**，原source fingerprint `d43085f4e6b755649b5da36b0885d6b690d7042f7ce4a871a947bc2e15ede53f`、Scene／prefab ID及同源Windows／Quest receipt保留。131真正EditMode、680規則／446 HTTP／43串流／60 Node／223 Chromium為前輪成功證據，**本輪未重建或重跑這些套件**，不當作新的頭盔或瀏覽器結果。

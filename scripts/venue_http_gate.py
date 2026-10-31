@@ -1,7 +1,7 @@
 """Bounded loopback-only fault proxy for one owned Unity server / session.
 
 HTTP bodies and credentials are forwarded in memory, never recorded. WebSocket
-bytes are opaque. Only management GET or the publication tunnel can be blocked.
+bytes are opaque. Only explicitly selected session routes / publication are blocked.
 """
 import http.client
 from contextlib import closing
@@ -43,7 +43,7 @@ class VenueHttpGate:
         self.upstream = ('127.0.0.1', target.port); self.max_block_seconds = max_block_seconds
         self.maximum_seconds = maximum_seconds; self.lock = threading.RLock(); self.slots = threading.BoundedSemaphore(8)
         self.mode = None; self.block_started = None; self.block_history = []; self.tunnels = set(); self.stop = threading.Event()
-        self.counts = dict.fromkeys(['managementBlocked', 'publicationBlocked', 'tunnelsClosed', 'httpForwarded', 'webSockets', 'capacityRejected', 'handlerErrors', 'routeRejected'], 0)
+        self.counts = dict.fromkeys(['managementBlocked', 'publicationBlocked', 'combatSealBlocked', 'statisticsBlocked', 'tunnelsClosed', 'httpForwarded', 'webSockets', 'capacityRejected', 'handlerErrors', 'routeRejected'], 0)
         self.limits_triggered = []; self.server = _Server(('127.0.0.1', 0), _Handler); self.server.owner = self
         self.base = 'http://127.0.0.1:' + str(self.server.server_port)
         self.thread = threading.Thread(target=self.server.serve_forever, kwargs={'poll_interval': .05}, daemon=True)
@@ -56,7 +56,7 @@ class VenueHttpGate:
         self.started = time.monotonic(); self.thread.start(); self.watchdog.start(); return self
 
     def block(self, mode):
-        if mode not in ('management', 'publication'): raise ValueError('Unknown fault mode')
+        if mode not in ('management', 'publication', 'combat-seal', 'statistics'): raise ValueError('Unknown fault mode')
         with self.lock:
             if self.mode is not None: raise ValueError('Release the current fault first')
             self.mode = mode; self.block_started = time.monotonic()
@@ -79,6 +79,12 @@ class VenueHttpGate:
     def allowed(self, method, path):
         return (method == 'GET' and path in (self.prefix, self.prefix + '/statistics')) or (method == 'POST' and path in (
             '/api/player-tickets/validate', self.prefix + '/combat-stream', self.prefix + '/combat-stream/batch', self.prefix + '/combat-stream/seal'))
+
+    def blocked_http(self, method, path):
+        if method == 'GET' and path == self.prefix and self.blocked('management'): return 'managementBlocked'
+        if method == 'POST' and path == self.prefix + '/combat-stream/seal' and self.blocked('combat-seal'): return 'combatSealBlocked'
+        if method == 'GET' and path == self.prefix + '/statistics' and self.blocked('statistics'): return 'statisticsBlocked'
+        return None
 
     def _watch(self):
         while not self.stop.wait(.02):
@@ -121,8 +127,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             return self.tunnel()
         if not gate.allowed(self.command, self.path):
             gate.bump('routeRejected'); return self.reject(403)
-        if self.command == 'GET' and self.path == gate.prefix and gate.blocked('management'):
-            gate.bump('managementBlocked'); return self.reject(503)
+        blocked = gate.blocked_http(self.command, self.path)
+        if blocked:
+            gate.bump(blocked); return self.reject(503)
         if self.headers.get('Transfer-Encoding'): return self.reject(400)
         try: size = int(self.headers.get('Content-Length', '0'))
         except ValueError: return self.reject(400)
