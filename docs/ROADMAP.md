@@ -1,5 +1,7 @@
 # 長期開發目標
 
+2026-11-01 [背景世界writer](ASYNC_WORLD_WRITER.md)：Unity0.36／code43、177 Editor與7194dc98...雙平台成功，API/UI0.30／NGO29不變。主線世界幀IO／狀態讀鎖移出，32幀／8MiB bounded queue不冒充durable；F本場Main world GateEnter／Flush皆0但224未確認，仍不通過。SSD8項354幀、一般8項400幀及故障恢復8項743全回放成功；717／459／47、48 Python與19 launcher成功。下一步發布吞吐／SSD部署及長壓，不關durability／跳幀；完整11項active，實機／31筆另驗。
+
 2026-11-01 [journal細分](JOURNAL_STAGES.md)：Unity0.35／code42、169真正Editor與d30cc34c...同源Windows／ARM64 APK成功，API/UI0.30／NGO29保持。最終F有128未確認，Main Frame Flush8.814804秒、Main gate等待3.134420秒（多為CompleteState讀取）、與背景ack flush交集3.133609秒；SSD8項355幀seal／一般8項363幀成功。717規則／459 HTTP／47串流、47 Python／19啟動器與原件保持核對通過。下一步評估保持durability的writer／明確SSD部署，不稱單一硬碟或31筆全局修復；完整11項active。
 
 2026-10-31 [發布區段計時](PUBLICATION_TIMING.md)以原播放器既有trace再次重現F負載逾時，15.243秒窗口的主執行緒WorldJournal聯集9.379684秒、129幀未確認；C SSD同帶trace重疊場8項／354幀seal成功。37 Python及原件保持核對成功，版本／Unity建置不變。區段含鎖／JSON／flush而非單獨fsync，下一步分離frame／背景ack等待與寫入成本、保持durability；完整11項active，原31筆／實機另驗。
@@ -46,7 +48,7 @@
 |---|---|---|---|
 | M0 專案與管理核心 | F 槽原始碼、私人 GitHub、需求追蹤、五房場次與任務 API、CI | 可重現建置、核心與 HTTP 驗證、推送成功 | 本機與推送完成；一次 Linux 建置／核心／HTTP 通過，瀏覽器列序斷言已修正並本機通過；修正提交的雲端 CI 再次受帳務限制未啟動 |
 | M1 場次控制與事件基礎 | 主控／房間權限、準備／開始／暫停／結束狀態、命令與事件、統計核心 | 五房隔離、權限、去重、狀態遷移、紀錄恢復測試 | 管理／統計核心、SQLite 追加、JSON 升級與模擬來源已驗證；建立／加入／離開可持久去重，v2 票券與移除／配票按每次 admission fence；API／SQLite／瀏覽器已驗證；真正 Windows 撤銷／重連已通過；新增 SSD runtime 下五個原生獨立世界、每房一個 client 的權限／命令隔離、單房 End／重用，以及全部封存後新開 Linked |
-| M2 Quest 3 優先的遊戲垂直切片 | Unity 工程、Quest Android profile、基本移動／互動與共同場景；再接入 VIVE | Quest 3 實機操作及雙玩家互見；之後驗證混合頭盔、校正與定位 | 真正 Editor 已通過 UPM／ILPP／資產匯入、169 項 Editor、0.35.0 Windows 與 ARM64／IL2CPP Quest APK；兩平台來源 fingerprint／網路識別一致。無頭盔，依使用者指示先繼續 PC；雙 Quest 操作與混合裝置待驗 |
+| M2 Quest 3 優先的遊戲垂直切片 | Unity 工程、Quest Android profile、基本移動／互動與共同場景；再接入 VIVE | Quest 3 實機操作及雙玩家互見；之後驗證混合頭盔、校正與定位 | 真正 Editor 已通過 UPM／ILPP／資產匯入、177 項 Editor、0.36.0 Windows 與 ARM64／IL2CPP Quest APK；兩平台來源 fingerprint／網路識別一致。無頭盔，依使用者指示先繼續 PC；雙 Quest 操作與混合裝置待驗 |
 | M3 軍事戰鬥與 AI | 武器、傷害、健康、敵軍尋路／攻擊、操作員覆寫、HUD | 伺服器判定一致、AI 可控、事件與統計相符 | Windows server 加兩個 desktop client 已通過獨立／跨房 Simulation AI 傷害、暫停、封存及回放統計；真正視窗已完成方向鍵／Space／滑鼠射擊、擊殺／命中率、換彈及暫停；控制台自訂任務／動態名冊及 Advance／autoAttack 到真正 native 傷害、Pause／Resume／End 已通過；新增軍事HUD／方位／遮擋標記、自製沙包／油桶及不可變素材版本，真正鍵盤與受傷／淘汰已驗；新增固定玩家步槍、保存朝向／步態的人形敵軍及保存時鐘的換彈／合成手套及原創雙手手槍／裝飾性雙臂、保存射線的玩家及敵軍閃光／後座、原生視窗兩發命中／一擊殺與封存統計；新增404面玩家人物、保存步態及桌面腕點／換彈雙臂，真正雙PC GPU／W／Space／R已驗，完整第一人稱／追蹤人物及武器動畫、啟動旗標／原停頓原因、完整策略、追蹤及實機戰鬥待驗 |
 | M4 任務與場景編輯 | 任務視覺編輯器、版本、物件擺設、天氣／日夜／雷電即時控制 | 儲存重載一致、獨立／全館環境正確同步 | 任務版本、2D 配置及環境／AI 控制已有核心／HTTP／瀏覽器證據；Unity 場景／音訊／Shader 匯入與 Storm／Night PC 任務運行通過。已實際以 UI 保存／重載擺設並在 Unity GPU 看見配置、白天／雨夜／Pause；原生新沙包／45° 油桶阻擋、退回／側移已通過；配置圖顯示真實平面包圍盒；新增旋轉越界／重疊／五席出生空間及初始敵軍容量檢查，保存草稿與新開場政策分離，複雜通路／地形仍待；原生GPU閃電與自身DSP雨雷／靜音已量測；聽感／實體輸出、MR校正及頭盔待驗 |
 | M5 觀戰、回放與報表 | 自由／跟隨鏡頭、書籤、快照與事件回放、逐玩家統計 | 即時觀戰、跳轉倍速、回放與結束統計一致 | 持久世界、SSE／回放、書籤及統計已有核心／瀏覽器證據；新增已結束且戰鬥精確封存的逐玩家CSV匯出，保留離場者／來源／原任務及尾界；真正 PC 發布／封存及控制台俯視、鏡頭保存／跟隨後讀回、倍速／末幀回放已驗證；SSD 最新五房最大來源年齡0.200379秒、自訂任務0.308984秒。觀戰瀏覽器為軟體 WebGL；已新增精確座標／度數／距離與原生錄製自訂視角保存／封存回放45項整合（含素材版本）；真實GPU／長任務手感、實際頭手及25台待驗 |

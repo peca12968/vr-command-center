@@ -63,7 +63,7 @@ def correlate(trace, witness):
     coverage = first['utcTicks'] <= start <= end <= rows[-1]['utcTicks']
     usable = coverage and clock_error <= .05
     points = {}
-    for point in ('WorldJournal', 'WorldCapture', 'MainThreadGap'):
+    for point in ('WorldJournal', 'WorldEnqueue', 'WorldCapture', 'MainThreadGap'):
         selected = [r for r in rows if r['point'] == point]
         overlapping = [r for r in selected if r['utcTicks'] >= start and r['utcTicks'] - round(r['durationSeconds'] * SCALE) <= end]
         slow = [r for r in overlapping if r['durationSeconds'] >= .1]
@@ -74,15 +74,15 @@ def correlate(trace, witness):
             'slowWindowCount': len(slow) if usable else None,
             'earliestSlowWindow': [{'endUtcTicks': r['utcTicks'], 'durationSeconds': r['durationSeconds']} for r in slow[:64]] if usable else [],
             'slowWindowTruncated': len(slow) > 64 if usable else None}
-    if not points['WorldJournal']['totalSamples']: raise ValueError('No measured world journal spans')
+    if bool(points['WorldJournal']['totalSamples']) == bool(points['WorldEnqueue']['totalSamples']): raise ValueError('Need exactly one synchronous-journal or queued-capture timing mode')
     return {'version': 1, 'acceptedSequence': witness['acceptedSequence'], 'applicationObservedLive': witness['applicationObserved'],
         'windowStartUtc': witness['responseObservedAtUtc'], 'windowEndUtc': samples[-1]['receivedAtUtc'],
         'windowSeconds': (end - start) / SCALE, 'receiverSamples': len(samples),
         'traceSamples': len(rows), 'traceEndedSeconds': trace['endedSeconds'], 'windowCovered': coverage,
         'maximumClockDisagreementSeconds': clock_error, 'clockToleranceSeconds': .05, 'utcCorrelationUsable': usable,
-        'points': points, 'causalRootProven': False,
+        'points': points, 'captureMode': 'Queued' if points['WorldEnqueue']['totalSamples'] else 'Synchronous', 'causalRootProven': False,
         'unmeasured': ['Background world ack journal lock / append / flush', 'WebSocket exchange', 'API validation / SQLite / durable receipt'],
-        'scope': 'Existing main-thread elapsed spans include lock / serialization / append / flush, not fsync-only or CPU. WorldCapture includes WorldJournal; never sum them. No span-to-world-sequence mapping or original-fault causal verdict.'}
+        'scope': 'WorldJournal is legacy synchronous append; WorldEnqueue is buffered capture, not durable persistence. WorldCapture includes its nested capture mode; never sum them. Neither is CPU or fsync-only time. No span-to-world-sequence mapping or original-fault causal verdict.'}
 
 
 def read(path, limit=1024 * 1024):

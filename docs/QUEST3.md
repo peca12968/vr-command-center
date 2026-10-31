@@ -1,5 +1,7 @@
 # Quest 3 接入與工具鏈
 
+2026-11-01 Unity0.36／code43、NGO29／API UI0.30，177真正Editor與7194dc98...同源Windows／ARM64 IL2CPP APK成功，原ID保持。新增[背景世界writer](ASYNC_WORLD_WRITER.md)用純DTO、bounded queue及durable State，不在背景讀Unity場景／輸入；Quest client沒有server journal。PC及F反例範圍見PROGRESS，APK成功不是頭盔／MR／25台驗收。
+
 2026-11-01 最終Unity0.35／code42、NGO29／API UI0.30，169真正Editor與d30cc34c...同源Windows／ARM64 IL2CPP APK成功，原網路ID保持。新增[journal細分診斷](JOURNAL_STAGES.md)僅明確Windows專用server，Android不安裝；最終PC一般8項363幀／SSD負載8項355幀成功，F反例／候選與限制見PROGRESS。仍無頭盔／實體控制器／MR／25台驗收。
 
 2026-10-31 最新Unity0.34／code41／NGO29、API/UI0.30，163真正Editor（含3項PlayMode Dynamic官方Touch虛擬綁定）與同源Windows／ARM64 IL2CPP APK成功。新增[右手B鍵重連](QUEST_RECONNECT.md)，原票券／驗票與網路ID保持；PC8項372幀及保留的失敗／APK大小差異見PROGRESS。沒有頭盔按鍵、USB更新、MR或實體跨機驗收。
@@ -107,7 +109,7 @@ embedded package `com.vrcommand.simulation` 現為 0.11.0。Runtime asmdef 已�
 .\scripts\build-unity.ps1 -Target Quest
 ```
 
-`Prepare` 首次建立 `Assets/VrCommand/Generated/Arena.unity`、玩家 prefab 與 XR 設定，之後重用保存的網路識別；需重建時明確執行 RebuildArena，並一起重建所有平台。Tests 要求新 XML 至少 169 項全數通過，包含新版Touch綁定在真正Editor Play Mode的Dynamic更新檢查。Desktop 輸出 `artifacts/desktop/VrCommand.exe`（須連同整個資料夾使用），Quest 輸出 `artifacts/quest/VrCommand.apk`。腳本檢查 exit 0／1，Desktop／Quest 另核對本次成功 BuildReport 的新 build-receipt.json，日誌在 `artifacts/unity-logs/`。PC 自動 smoke 與限制見 NATIVE_VALIDATION，下方頭盔步驟仍待設備。
+`Prepare` 首次建立 `Assets/VrCommand/Generated/Arena.unity`、玩家 prefab 與 XR 設定，之後重用保存的網路識別；需重建時明確執行 RebuildArena，並一起重建所有平台。Tests 要求新 XML 至少 177 項全數通過，包含新版Touch綁定在真正Editor Play Mode的Dynamic更新檢查。Desktop 輸出 `artifacts/desktop/VrCommand.exe`（須連同整個資料夾使用），Quest 輸出 `artifacts/quest/VrCommand.apk`。腳本檢查 exit 0／1，Desktop／Quest 另核對本次成功 BuildReport 的新 build-receipt.json，日誌在 `artifacts/unity-logs/`。PC 自動 smoke 與限制見 NATIVE_VALIDATION，下方頭盔步驟仍待設備。
 
 無授權時可先執行 `.\scripts\check-unity-source.ps1`，但只能回報語法檢查結果。不得把其輸出視為可執行的 Unity 工程。
 

@@ -1,5 +1,7 @@
 # 世界來源的鎖、寫入與持久 flush 計時
 
+0.36已導入[背景世界writer](ASYNC_WORLD_WRITER.md)：下列原物理Write／Flush probe仍有效，但常態幀與publisher在背景，metadata讀取改durable immutable State，不再有state gate等待；主線點為WorldEnqueue、非舊WorldJournal。舊0.35量測及失敗保留，不混模式作提升倍率，最新結果見PROGRESS。
+
 接續[原生journal區段計時](PUBLICATION_TIMING.md)，將原本包住整個Recording.Append的區段細分。這是明確選用的Windows Development專用診斷；一般server／client及Android不安裝探針，world／journal／NGO／rules格式不變。
 
 ```powershell

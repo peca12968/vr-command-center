@@ -10,16 +10,17 @@ namespace VrCommand.Unity
     public sealed class WorldRecordingDelivery : MonoBehaviour
     {
         private WorldOutbox source;
+        private QueuedWorldRecorder writer;
         private TelemetryOutbox combat;
         private LaunchConfiguration configuration;
         private Action<string> fault;
         private WorldPublisher publisher;
         private CancellationTokenSource operation;
         private Task<bool> active;
-        private bool stopped;
-        public void Initialize(WorldOutbox source, TelemetryOutbox combat, LaunchConfiguration configuration, Action<string> fault)
+        private bool stopped, writerFaultReported;
+        public void Initialize(WorldOutbox source, QueuedWorldRecorder writer, TelemetryOutbox combat, LaunchConfiguration configuration, Action<string> fault)
         {
-            this.source = source; this.combat = combat; this.configuration = configuration; this.fault = fault;
+            this.source = source; this.writer = writer; this.combat = combat; this.configuration = configuration; this.fault = fault;
             StartCoroutine(Deliver());
         }
         private IEnumerator Deliver()
@@ -32,7 +33,8 @@ namespace VrCommand.Unity
                 {
                     if (publisher == null) publisher = new WorldPublisher(source, codec, new WorldWebSocket(configuration.managementApiUrl, Guid.Parse(configuration.sessionId), configuration.gameServerKey));
                     operation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-                    active = publisher.Deliver(combat.AcknowledgedSequence, combat.Sealed, operation.Token);
+                    var sender = publisher; var acknowledged = combat.AcknowledgedSequence; var sealedCombat = combat.Sealed; var token = operation.Token;
+                    active = Task.Run(() => sender.Deliver(acknowledged, sealedCombat, token));
                 }
                 catch (Exception exception) { failure = exception; }
                 if (failure == null)
@@ -56,10 +58,22 @@ namespace VrCommand.Unity
         public void StopAndDispose()
         {
             if (stopped) return; stopped = true;
+            writer?.Stop();
             operation?.Cancel(); publisher?.Dispose();
             var savedSource = source; var savedOperation = operation; var savedTask = active;
-            if (savedTask == null || savedTask.IsCompleted) { var observed = savedTask?.Exception; savedSource?.Dispose(); savedOperation?.Dispose(); }
-            else savedTask.ContinueWith(task => { var observed = task.Exception; savedSource?.Dispose(); savedOperation?.Dispose(); }, TaskScheduler.Default);
+            var savedWriter = writer;
+            Task.WhenAll((Task)savedTask ?? Task.CompletedTask, savedWriter?.Completion ?? Task.CompletedTask).ContinueWith(task =>
+            { var observed = task.Exception; try { savedSource?.Dispose(); } finally { savedOperation?.Dispose(); savedWriter?.Dispose(); } }, TaskScheduler.Default);
+        }
+        private void Update()
+        {
+            if (!stopped && !writerFaultReported && writer != null && writer.Faulted)
+            {
+                writerFaultReported = true;
+                Debug.LogError("VR_WORLD_WRITER_FAULT captured=" + writer.CapturedSequence + " durable=" + source.LastSequence
+                    + " pendingFrames=" + writer.PendingFrames + " pendingBytes=" + writer.PendingBytes);
+                fault("WORLD WRITER FAILED OR QUEUE FULL - RECOVER SOURCE");
+            }
         }
         private void OnDestroy() => StopAndDispose();
     }

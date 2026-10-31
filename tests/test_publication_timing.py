@@ -31,6 +31,14 @@ class PublicationTimingTests(unittest.TestCase):
     def test_union_does_not_double_count_overlapping_or_duplicate_utc_intervals(self):
         self.assertEqual(1., m.union_seconds([(0, m.SCALE), (0, m.SCALE), (m.SCALE // 2, m.SCALE), (2, 2)]))
 
+    def test_queued_capture_is_explicit_and_mixed_mode_is_rejected(self):
+        t, w = self.fixtures()
+        for row in t['rows']:
+            if row['point'] == 'WorldJournal': row['point'] = 'WorldEnqueue'
+        r = m.correlate(t, w); self.assertEqual('Queued', r['captureMode']); self.assertEqual(0, r['points']['WorldJournal']['totalSamples'])
+        t['rows'].insert(1, self.row(1.1, .01, 'WorldJournal'))
+        with self.assertRaises(ValueError): m.correlate(t, w)
+
     def test_clock_jump_keeps_native_totals_but_does_not_invent_correlated_durations(self):
         t, w = self.fixtures(); t['rows'][2]['utcTicks'] += m.SCALE
         r = m.correlate(t, w); self.assertFalse(r['utcCorrelationUsable'])

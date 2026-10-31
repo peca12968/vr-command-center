@@ -1,5 +1,7 @@
 # VR Command Center
 
+新增[有界背景世界writer](docs/ASYNC_WORLD_WRITER.md)：世界幀常態寫入與發布移到背景，captured和durable／ack明確分開，原逐筆flush／完整回放保持，滿載fail closed。Unity0.36／code43、177真正Editor與同源雙平台成功，PC一般8項／SSD負載8項／故障恢復8項通過；F主線世界IO已移除但發布仍積壓，失敗保留，未稱整體慢碟或實機容量已修復。
+
 新增[journal鎖等待／持久flush分段](docs/JOURNAL_STAGES.md)，只在明確Windows server診斷啟用，保留durable ack及完整journal。Unity0.35／code42、169真正Editor及同源Windows／Quest建置成功，最終PC一般8項／SSD負載8項通過；F逾時與128幀積壓保留，已量到狀態讀取等待背景ack持鎖flush。未稱全局修復、頭盔／MR／25台驗收，最新包與限制見PROGRESS。
 
 新增[Quest控制器重連](docs/QUEST_RECONNECT.md)：右手B放開再按可重讀原票券，失焦／暫停後須重新按下；163真正Editor檢查及同源0.34 Windows／Quest建置成功，最終PC8項回歸通過。實體控制器、頭盔與跨機仍待驗，保留失敗紀錄與原偶發問題。

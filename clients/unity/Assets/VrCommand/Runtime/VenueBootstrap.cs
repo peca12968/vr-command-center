@@ -101,7 +101,7 @@ namespace VrCommand.Unity
                 if (!managementReady) yield break;
                 StartCoroutine(DeliverTelemetry());
                 worldDelivery = gameObject.AddComponent<WorldRecordingDelivery>();
-                worldDelivery.Initialize(combatAuthority.Recording, outbox, configuration, message => { status = message; combatAuthority.TelemetryFault(); });
+                worldDelivery.Initialize(combatAuthority.Recording, combatAuthority.RecordingWriter, outbox, configuration, message => { status = message; combatAuthority.TelemetryFault(); });
                 if (configuration.role == "Host")
                 {
                     // NGO 2.7 ignores asynchronous host approval; validate before StartHost and answer it synchronously.
@@ -433,6 +433,11 @@ namespace VrCommand.Unity
         {
             reconnectInput?.Dispose(); reconnectInput = null;
             if (worldDelivery != null) worldDelivery.StopAndDispose();
+            else if (combatAuthority?.RecordingWriter != null)
+            {
+                var writer = combatAuthority.RecordingWriter; var source = combatAuthority.Recording;
+                writer.Stop(); writer.Completion.ContinueWith(_ => { try { source?.Dispose(); } finally { writer.Dispose(); } }, System.Threading.Tasks.TaskScheduler.Default);
+            }
             else combatAuthority?.Recording?.Dispose();
             outbox?.Dispose();
             if (networkManager != null)

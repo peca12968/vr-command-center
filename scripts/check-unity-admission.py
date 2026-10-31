@@ -119,6 +119,16 @@ def main():
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
             if any(process.poll() is not None for process in live.values()): raise RuntimeError('Unexpected child exit during ' + label)
+            if args.journal_trace and 'server' in live:
+                log = directory / 'server.log'
+                if log.exists():
+                    with log.open('rb') as trace_log:
+                        trace_log.seek(0, 2); length = trace_log.tell(); trace_log.seek(max(0, length - 65536))
+                        tail = trace_log.read(65536).decode('utf-8', errors='replace')
+                    marker = re.search(r'VR_WORLD_WRITER_FAULT captured=(\d+) durable=(\d+) pendingFrames=(\d+) pendingBytes=(\d+)', tail)
+                    if marker:
+                        (directory / 'failure-writer.json').write_text(json.dumps(dict(zip(['capturedSequence', 'durableSequence', 'pendingFrames', 'pendingBytes'], map(int, marker.groups()))), indent=2), encoding='utf-8')
+                        raise RuntimeError('World writer reported a persistence fault or bounded queue exhaustion during ' + label)
             try:
                 result = predicate()
                 if result: return result

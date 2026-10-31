@@ -111,6 +111,16 @@ namespace VrCommand.Simulation
         public string Json { get; }
         internal PendingWorldFrame(WorldRecordingPacket packet, string json) { Sequence = packet.sequence; ThroughCombatSequence = packet.throughCombatSequence; Json = json; }
     }
+    public sealed class WorldOutboxState
+    {
+        public long LastSequence { get; }
+        public long ThroughWorldSequence { get; }
+        public long AcknowledgedSequence { get; }
+        public bool Complete { get; }
+        public bool Sealed { get; }
+        internal WorldOutboxState(long last, long through, long acknowledged, bool complete, bool sealedStream)
+        { LastSequence = last; ThroughWorldSequence = through; AcknowledgedSequence = acknowledged; Complete = complete; Sealed = sealedStream; }
+    }
     // Single durable source, thread-safe against asynchronous delivery. Retains only the last and pending frame.
     public sealed class WorldOutbox : IDisposable
     {
@@ -123,13 +133,15 @@ namespace VrCommand.Simulation
         private long pendingPosition, acknowledged;
         private bool complete, sealedStream;
         private readonly WorldRecordingHeader savedHeader;
+        private WorldOutboxState state = new WorldOutboxState(0, 0, 0, false, false);
         public WorldRecordingHeader Header => codec.ReadHeader(HeaderJson);
         public string HeaderJson { get; }
-        public long LastSequence { get { using (Acquire(6)) return last?.sequence ?? 0; } }
-        public long ThroughWorldSequence { get { using (Acquire(7)) return last?.frame.throughSequence ?? 0; } }
-        public long AcknowledgedSequence { get { using (Acquire(8)) return acknowledged; } }
-        public bool Complete { get { using (Acquire(9)) return complete; } }
-        public bool Sealed { get { using (Acquire(10)) return sealedStream; } }
+        public WorldOutboxState State => Volatile.Read(ref state);
+        public long LastSequence => State.LastSequence;
+        public long ThroughWorldSequence => State.ThroughWorldSequence;
+        public long AcknowledgedSequence => State.AcknowledgedSequence;
+        public bool Complete => State.Complete;
+        public bool Sealed => State.Sealed;
 
         public static WorldOutbox Create(string path, WorldRecordingHeader header, IWorldCodec codec, WorldJournalTrace? trace = null)
         {
@@ -187,6 +199,7 @@ namespace VrCommand.Simulation
                     else throw new InvalidDataException("Unknown world source operation.");
                     position = row.NextPosition;
                 }
+                PublishState();
             }
             catch { journal.Dispose(); throw; }
         }
@@ -200,7 +213,7 @@ namespace VrCommand.Simulation
                 if (packet.observedSequence < (last?.observedSequence ?? 1)) throw new InvalidOperationException("World observation cannot rewind.");
                 var json = codec.Packet(packet); var detached = codec.ReadPacket(json);
                 WorldRecordingValidation.Packet(savedHeader, detached, last);
-                journal.Append(Text(1, json)); last = detached;
+                journal.Append(Text(1, json)); last = detached; PublishState();
             }
         }
         public PendingWorldFrame? Pending
@@ -230,7 +243,7 @@ namespace VrCommand.Simulation
             {
                 if (sequence == acknowledged) return;
                 if (Pending?.Sequence != sequence || sequence != acknowledged + 1) throw new InvalidOperationException("Acknowledge the exact pending world frame.");
-                journal.Append(Integer(2, sequence)); acknowledged = sequence; pending = null;
+                journal.Append(Integer(2, sequence)); acknowledged = sequence; pending = null; PublishState();
             }
         }
         public void Finish()
@@ -239,7 +252,7 @@ namespace VrCommand.Simulation
             {
                 if (complete) return;
                 if (last?.frame.phase != "Ended") throw new InvalidOperationException("Persist the final Ended world frame before completion.");
-                journal.Append(Integer(3, last.sequence)); complete = true;
+                journal.Append(Integer(3, last.sequence)); complete = true; PublishState();
             }
         }
         public void MarkSealed()
@@ -248,7 +261,7 @@ namespace VrCommand.Simulation
             {
                 if (sealedStream) return;
                 if (!complete || acknowledged != last!.sequence) throw new InvalidOperationException("Deliver every completed world frame before accepting its seal.");
-                journal.Append(Integer(4, acknowledged)); sealedStream = true;
+                journal.Append(Integer(4, acknowledged)); sealedStream = true; PublishState();
             }
         }
         private static byte[] Text(byte tag, string value)
@@ -272,6 +285,7 @@ namespace VrCommand.Simulation
             try { Monitor.Enter(gate, ref entered); return new GateLease(gate); }
             finally { timing.Finish(entered); }
         }
+        private void PublishState() => Volatile.Write(ref state, new WorldOutboxState(last?.sequence ?? 0, last?.frame.throughSequence ?? 0, acknowledged, complete, sealedStream));
         private readonly struct GateLease : IDisposable
         {
             private readonly object gate;

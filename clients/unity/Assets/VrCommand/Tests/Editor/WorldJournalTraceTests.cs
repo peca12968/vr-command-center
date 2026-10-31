@@ -71,7 +71,7 @@ namespace VrCommand.Unity.Tests
             }
             public void Dispose(){inner.Dispose();entered.Dispose();release.Dispose();}
         }
-        [Test] public void PendingReceiptGateAttributesFrameAndStateReadWaitsWithoutInventingDiskCost()
+        [Test] public void PendingReceiptBlocksFrameButDurableStateReadsRemainNonblocking()
         {
             var path=PathFor();var trace=new WorldJournalTrace();var codec=new UnityWorldCodec();
             var header=WorldRecordingHeader.Create(Guid.NewGuid(),Guid.NewGuid(),"Simulation",new[]{3},new WorldProp[0]);
@@ -81,9 +81,11 @@ namespace VrCommand.Unity.Tests
             {
                 source.Append(Packet(1));ack=Task.Run(()=>source.Acknowledge(1));Assert.IsTrue(journal.entered.Wait(3000));
                 frame=Task.Run(()=>source.Append(Packet(2)));state=Task.Run(()=>{var observed=source.LastSequence;Assert.GreaterOrEqual(observed,1);});
-                Assert.IsTrue(SpinWait.SpinUntil(()=>trace.InFlight>=2,3000));Thread.Sleep(80);journal.release.Set();
+                Assert.IsTrue(state.Wait(1000));Assert.AreEqual(0,source.AcknowledgedSequence);
+                Assert.IsTrue(SpinWait.SpinUntil(()=>trace.InFlight>=1,3000));Thread.Sleep(80);journal.release.Set();
                 Assert.IsTrue(Task.WaitAll(new[]{ack,frame,state},5000));trace.Stop();
-                foreach(var op in new[]{1,6})Assert.IsTrue(trace.Snapshot().Any(row=>row.stage==0&&row.operation==op&&(row.endedTimestamp-row.startedTimestamp)/(double)System.Diagnostics.Stopwatch.Frequency>=.05));
+                Assert.IsTrue(trace.Snapshot().Any(row=>row.stage==0&&row.operation==1&&(row.endedTimestamp-row.startedTimestamp)/(double)System.Diagnostics.Stopwatch.Frequency>=.05));
+                Assert.IsFalse(trace.Snapshot().Any(row=>row.stage==0&&row.operation==6));
                 Assert.AreEqual(1,source.AcknowledgedSequence);Assert.AreEqual(2,source.LastSequence);
             }
             finally

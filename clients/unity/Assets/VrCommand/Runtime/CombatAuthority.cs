@@ -64,6 +64,7 @@ namespace VrCommand.Unity
         private bool journalFault;
         public TelemetryOutbox Outbox { get; private set; }
         public WorldOutbox Recording { get; private set; }
+        public QueuedWorldRecorder RecordingWriter { get; private set; }
         public void SendDebrief(ulong client, MissionDebrief value, bool final)
         {
             if (!IsServer || !IsSpawned) return;
@@ -98,22 +99,23 @@ namespace VrCommand.Unity
             var header = WorldRecordingHeader.Create(Guid.Parse(management.id), Outbox.StreamId, Outbox.Origin, management.roomIds, session.Props,
                 DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), assetSet: WorldAssetSets.PlayerBody, enemyPresentationVersion: EnemyPresentation.Version, weaponPresentationVersion: WeaponPresentation.Version, enemyFireVersion: EnemyFirePresentation.Version, playerFireVersion: PlayerFirePresentation.Version, combatAudioVersion: CombatAudioPresentation.Version, playerPresentationVersion:PlayerPresentation.Version, missionClockVersion: MissionClock.Version, missionDurationSeconds: management.mission.definition.durationSeconds);
             Recording = WorldOutbox.Create(path, header, new UnityWorldCodec(), NativeWorldJournalTrace.Current);
+            RecordingWriter = new QueuedWorldRecorder(Recording, new UnityWorldCodec());
             if (!CaptureWorld(true)) throw new InvalidOperationException("Initial world frame could not be saved.");
         }
         private bool CaptureWorld(bool force = false)
         {
             if (journalFault) return false;
-            if (Recording == null || Recording.Complete || management == null) return true;
+            if (RecordingWriter != null && RecordingWriter.Faulted) { TelemetryFault(); return false; }
+            if (Recording == null || RecordingWriter.EndQueued || management == null) return true;
             var now = Time.realtimeSinceStartupAsDouble;
             if (!force && now < nextRecording) return true;
             using var captureTiming=NativePoseTrace.Measure("WorldCapture");
             try
             {
-                var packet = WorldRecordingPacket.Capture(session.World, Recording.LastSequence + 1,
-                    Recording.LastSequence == 0 ? 0 : (long)((now - recordingStart) * 1000), observedSequence, Outbox.LastSequence,
-                    Recording.ThroughWorldSequence, RecordedRigFor, management.environment.weather, management.environment.lightning, managementSuspended, EnemyPresentation.Version, WeaponPresentation.Version, EnemyFirePresentation.Version, PlayerFirePresentation.Version, PlayerPresentation.Version);
-                using(NativePoseTrace.Measure("WorldJournal"))Recording.Append(packet); nextRecording = now + .1;
-                if (session.World.Phase == WorldPhase.Ended) Recording.Finish();
+                var packet = WorldRecordingPacket.Capture(session.World, RecordingWriter.CapturedSequence + 1,
+                    RecordingWriter.CapturedSequence == 0 ? 0 : (long)((now - recordingStart) * 1000), observedSequence, Outbox.LastSequence,
+                    RecordingWriter.CapturedThroughWorldSequence, RecordedRigFor, management.environment.weather, management.environment.lightning, managementSuspended, EnemyPresentation.Version, WeaponPresentation.Version, EnemyFirePresentation.Version, PlayerFirePresentation.Version, PlayerPresentation.Version);
+                using(NativePoseTrace.Measure("WorldEnqueue"))RecordingWriter.Enqueue(packet); nextRecording = now + .1;
                 return true;
             }
             catch (Exception exception) when (exception is System.IO.IOException || exception is ArgumentException || exception is InvalidOperationException || exception is UnauthorizedAccessException)
