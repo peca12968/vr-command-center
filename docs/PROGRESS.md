@@ -23,6 +23,8 @@
 
 本輪只新增Python診斷／分析及文件／CI，沒有重跑前輪後端／瀏覽器／102 EditMode／APK。Unity source fingerprint仍`792a3aaac9a7903159718a898324def8f6ba4769f908f1f46f30a6c77744c725`，既有Windows／Quest receipts及原scene／prefab識別一致；不改schema、資源pin、header或checksum。原5080確認仍API0.16／原歷史，未替換。全11項保持開發中；這是同機Simulation量測，不是Quest／VIVE、MR、廠商硬體、跨機或25台效能證據。
 
+功能提交`54a724258e1407515bcf14365e0724b95526146c`已推送main並核對遠端；GitHub #1仍open，更新後獨立讀回3072字本文一致，原11項及歷史封存連結保留。[功能提交CI run41148997649](https://github.com/peca12968/vr-command-center/actions/runs/41148997649)／check124380747557實際failure、steps=null，annotation明示付款失敗或支出上限、工作未開始，沒有雲端執行結果；未改帳務或重跑。下一步繼續對未量測區段取證，沒有宣稱修復或完成整體目標。
+
 ## 2026-10-31：修復電腦練習場入口、五人同房與關窗封存
 
 從乾淨`35bff7f`接續PC主線。實際執行舊`start-desktop-demo.py`搭本輪既有API0.27，程式在建立場次前因仍要求**0.21.0**而exit1，保留`artifacts/practice-old-launcher-failure.log`。原DESKTOP文件另仍寫0.16，兩者均已修正；沒有改回舊reader或替換5080歷史來配合。
