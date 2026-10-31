@@ -84,7 +84,7 @@ def verify_player(args):
 
 class Venue:
     def __init__(self, args, *, artifact_family='desktop-venue'):
-        if artifact_family not in ('desktop-venue', 'desktop-demo', 'desktop-capacity'):
+        if artifact_family not in ('desktop-venue', 'desktop-demo', 'desktop-capacity', 'desktop-active'):
             raise ValueError('Unknown native fixture artifact family')
         self.args = args
         self.artifact_family = artifact_family

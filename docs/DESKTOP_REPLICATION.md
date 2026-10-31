@@ -1,5 +1,7 @@
 # 電腦端接收狀態診斷
 
+實際W／Space／R／Space到25端的檢查及新增全程條件見[DESKTOP_ACTIVE](DESKTOP_ACTIVE.md)。該工具分批要求快照、使用自己的artifact family；原靜態capacity範圍與歷史結果保留，不把單次檢查點一致推成全程持續可參戰。
+
 `check-desktop-capacity.py --replication-probe`在自己的Windows Development server／client加掛唯讀`NativeReplicationProbe`。它觀察各程序真正收到的NGO變數；沒有測試RPC、姿態／武器注入、網路設定變更、GPU讀回或PCM錄音。普通啟動、Editor與Android不安裝。頭手仍為Simulation，不是頭盔追蹤或25台驗收。
 
 ```powershell

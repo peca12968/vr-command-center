@@ -1,5 +1,32 @@
 # 開發進度
 
+## 2026-10-31：真正W／Space／R／Space與25端回放，補全程失效檢查
+
+從乾淨`d39bd9e`接續PC動態操作。新增[DESKTOP_ACTIVE](DESKTOP_ACTIVE.md)／`check-desktop-active.py`，使用既有Unity0.28.3／code35／NGO26及API UI0.27，**一位實際操作、24個接收端**，一個真正GPU視窗及24個nographics程序。使用computer-use真實按鍵，無測試RPC／姿態／武器注入。合法油桶配置使實際候選網格把Room3靶位安排在(-3,0,-1)，不直接指定NPC位置、不改rules；W實際前進0.05公尺，Space命中50傷害、R補至30／89、第二發擊殺至29／89。主玩家耗彈2／命中2／擊殺1／100%、健康100；其他24人的頭位、彈藥／射擊及統計未被本玩家輸入改動。
+
+第一個`desktop-capacity/20261031-111719-325e1088`舊版檢查器exit0、8功能項／130快照／518世界幀／6個回放參考／CSV一致，原始passed與248檔SSD-F副本保留。但逐列稽核發現**65筆Running失效列**，所有26份報告皆不符後加的全程條件：39列connected16／25、26列24／25，玩家數仍25／健康總和2500／Ready且coherent。server在tick242、244觀察16位，246為24位後恢復；最多本地新tick觀察空窗**0.9258025秒**，最大擷取UTC來源年齡0.569364秒（仍低於原1.5）。這是權威可參戰旗標短暫失效，不能單憑此斷言NGO連線已斷、是哪位玩家姿態／哪段CPU或GPU原因；不把後來的成功快照當作全程成功。稽核`active-first-continuity-audit.json`明示26份皆不通過，未改舊結果。
+
+因此新增嚴格條件：各完整report從初始成功capture起的**所有觀察Running列**須25人／connected25／健康2500／Ready／coherent，同一Running區間相鄰新tick觀察<1.5秒；刻意Pause另列。SSE回放逐序號走完整封存錄製，初始至最後參考間每張保存Running幀亦驗全名冊／Simulated／可參戰，所有保存參考packet與statistics逐值相同；任一失效不能以後續恢復洗掉。這不是每packet、所有瞬間或網路RTT的證明，原0.5秒姿態及1.5秒來源門檻保持。失敗時active-result不改成complete，只有cleanup後成功才passed。
+
+快照輸出從原同時26份改為預設`--capture-batch 1`，逐端要求／等待，同epoch共用參考tick下界、不稱同瞬間。可明確26重現fan-out，不刪失效列、不修改遊戲或放寬條件。新增自己`desktop-active` artifact family與pointer，不覆蓋靜態capacity入口。對照`--without-replication-probe`只檢查權威／回放、`localReplicaContinuityChecked=false`，空集合不算接收端證據。
+
+| desktop-active／20261031場次 | 終態／範圍 | 保存幀／回放參考 | 最大來源年齡 | SSD-F檔數 |
+|---|---|---|---|---|
+| `112924-5da663bb` | exit1，無probe末發UI等待逾時，三步完成 | 869／未完成新回放核對 | 不作成功時序證據 | 14 |
+| `113205-3d172a38` | exit1，無probe末發UI等待逾時，三步完成 | 913／未完成新回放核對 | 不作成功時序證據 | 14 |
+| `113444-5c76154c` | exit0，無probe **9項權威／回放對照** | 1127／6 | 0.159532秒 | 14 |
+| `113854-7e7d5f31` | exit0，分批probe **9項含全程／接收端檢查** | 966／5 | 0.167574秒 | 248 |
+
+最後分批場26份report完整、**130／130快照**通過，共20658列，其中初始capture後**19916個Running觀察列全符合條件**、本地最大相鄰新tick間隔0.1445342秒，server最後觀察Ended。所有保存Running幀檢查通過，最終CSV25人逐項對ledger／精確尾端，SHA `5bad592a232c48ffe4eb3542116e655d5cba715ebb941c23f1037a6b99c2de07`；兩個完成場raw send queue full皆0。最低抽樣可用實體記憶體分別7,771,242,496／6,481,555,456 bytes，原2GiB保留未觸發。無probe場沒有各端快照／report，最後確認訊息當時沿用「world and local replicas」文字過廣，實際只判world與空本地集合，metadata明確false；已將後續訊息改為world only，未補造資料。
+
+兩個中斷場都在確認畫面／恢復焦點時超過30／40秒的**操作員等待**，不是量到同長的網路延遲。曾收到不符遊戲的截圖，重選唯一自有window／activate後恢復正確畫面，沒有對非遊戲畫面輸入；第一場UI呼叫失敗後我誤寫kill.done，predicate沒有接受，未計擊殺或成功。後續改為呼叫成功、觀察正確畫面後，另一步才寫ack；無probe對照可用90秒等待，僅增加觀察／UI恢復時間，不改網路或姿態門檻。完成對照中的首次R呼叫結果未明，重新觀察29／90後一次重試並確認RELOADING，最後數值30／89及29／89符合；不把未知呼叫當成功。所有中斷場仍精確seal、cleanup無錯誤無殘留，failed及原件保留。
+
+兩個成功／兩個中斷場的全部tracked writer停止才一次回F，原件／副本bytes SHA逐檔一致、稽核前後不變；first場248檔亦已核對。只讀JSON／CSV／bytes，未開原或snapshot SQLite、未重寫副本。摘要`artifacts/active-validation.json`、`active-first-continuity-audit.json`、`active-final-validation.json`。25程序source／binary仍F、新runtime明確C SSD，非F USB全資料或跨機。原5080唯讀仍0.16歷史，Unity serve／登入／安全性設定未碰。
+
+**8 active規則／全程反例＋11容量＋5 artifact，共24項Python**與語法通過，CI新增active入口；不是24次原生試跑。只有Python／CI／文件變更，C#／資產／API UI與資料契約保持；目前來源fingerprint仍`e8ae6d846dc014e48984a035f2960c043d342a4fe192ff0feaae3891973ba3d0`，兩平台既有receipt及原scene／prefab ID一致。本輪沒有重建／重跑前輪114 EditMode或Quest／Windows，未重跑後端／全瀏覽器／49 UI native／27練習場／8重連，不混算。視窗觀察確實看見血條減半、RELOADING、30／89、敵軍移除與29／89；沒有新原生GPU讀回／PCM／FPS或聽感證據。
+
+這組fan-out／無probe／分批比較不足以證明診斷I/O、GUI觀察、GPU、GC、排程或舊主迴圈停頓的根因，**不稱遊戲端全局修復**。它補足真實操作到25端資料／保存回放的證據並消除只看檢查點的漏洞；`all25SimultaneouslyActive=false`及`networkCapacityAccepted=false`。持續25人同時操作、更多場景／長任務、跨機／Wi-Fi、MR／Quest／VIVE／廠商硬體仍待，完整11項與長期目標保持開發中。
+
 ## 2026-10-31：各玩家端複本證據與伺服器packet池
 
 從乾淨`22c432c`接續前輪105行send queue full，完整目標保持開發中。新增[DESKTOP_REPLICATION](DESKTOP_REPLICATION.md)：明確`--replication-probe`只在Windows Development的自有程序觀察真正本地NGO狀態，普通／Editor／Android不安裝。240秒／4096 tick列／4096錯誤／64次capture有界，保留最早資料；穩定期不逐幀寫檔，明確要求才輸出唯一快照，finish取消threaded log訂閱後一次report。無測試RPC、輸入／姿態注入、PCM／GPU、讀他程序記憶體或OS設定變更。

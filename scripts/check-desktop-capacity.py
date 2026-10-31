@@ -84,8 +84,8 @@ def native_log_findings(directory):
 
 
 class ReplicationVenue(venue_module.Venue):
-    def __init__(self,args):
-        super().__init__(args,artifact_family='desktop-capacity');self.probes={};self.capture_number=0;self.replica_checks=[]
+    def __init__(self,args,*,artifact_family='desktop-capacity'):
+        super().__init__(args,artifact_family=artifact_family);self.probes={};self.capture_number=0;self.replica_checks=[]
     def launch(self,name,config,visible=False,*,extra_args=()):
         if self.args.replication_probe:
             path=self.runtime_directory/'replication'/f'p{len(self.probes)+1:03d}';path.parent.mkdir(exist_ok=True)
