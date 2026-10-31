@@ -2,6 +2,8 @@
 
 ## 2026-10-31：來源連線公告、只開伺服器與下載檔玩家入場
 
+功能提交 [b699ccd](https://github.com/peca12968/vr-command-center/commit/b699ccdb5009d9d5ad46f9b3d50320335b2e07e7) 已推送main並核對遠端相同。[本次CI run41188116962](https://github.com/peca12968/vr-command-center/actions/runs/41188116962)／check124499094625為failure、steps空；fresh annotation確認因近期帳戶付款失敗或支出上限，job未啟動，沒有雲端測試結果。未更改帳務或手動重跑，本機各項成功證據如下；完整目標仍active。
+
 前輪屬實際進展；從乾淨`f2c278c`接續[EXTERNAL_CLIENTS](EXTERNAL_CLIENTS.md)。**API／UI0.30、Unity0.32.0／code39／NGO29**。修補操作員流程缺口：原本local工具會替所有名冊自動開PC client，外部玩家可能撞同一admission；新增external只開server、不領玩家票券／不占用入場。local維持預設，兩種模式分開記錄，不以外部未知設備填0或虛構ack。
 
 來源在world header存在後，用同server的GameServer身分公告所選IPv4與該場配置port。新GET／PUT connection-endpoint v1逐次傳Actor，限owner寫、Master／可讀Room讀，GameServer／Internal不能當控制台讀取捷徑；綁session／stream／完整owner，接受後不可換址或port。原內容重試保留createdAt，房間重用不繼承；Ended公告僅metadata，不開場或授權配票。worlds.db新增connection_endpoints，world schema1／envelope7、原header／checksum、rules0.8.0與素材pin不改；不將公告當連通性或裝置證明。
