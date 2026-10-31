@@ -2,6 +2,8 @@
 
 ## 2026-11-01：有界背景世界writer與durable狀態快照
 
+功能 [d18aad6](https://github.com/peca12968/vr-command-center/commit/d18aad6c3140628d33392ea3ad4949cda2f2480a) 已推送main、遠端SHA一致。[本功能CI run41249194813](https://github.com/peca12968/vr-command-center/actions/runs/41249194813)／check124678950692為failure、steps空；fresh annotation明確為付款失敗或支出上限，job未啟動，無雲端測試結果。未改帳務或手動重跑，下列為本機實際驗證。
+
 從乾淨`23f3a06`依上輪量測實作[背景世界writer](ASYNC_WORLD_WRITER.md)。**Unity0.36.0／code43，API/UI0.30／NGO29保持**。主執行緒仍擷取Arena／實際頭手及原UTC／事件cursor，僅detach／提交immutable JSON；獨立writer依FIFO執行原Append／逐筆Flush(true)，Ended幀成功才寫completion。publisher另在背景運作，只讀真正durable Pending並等待原combat ack／world ack／雙seal。Outbox immutable State只在成功持久寫入後以Volatile公布，常態讀取不再等待journal gate；寫入／Pending仍使用原gate。
 
 queue最多32幀（含in-flight）／8MiB UTF-8 JSON，單幀仍原record上限。滿載fail closed、停止新提交及暫停combat，已接受幀仍drain；IO失敗不補造frame／ack／completion。停止先拒新提交、等待writer及已取消／完成publisher後才關source lease，不同步阻塞主迴圈。captured／buffered不是durable；live NGO可能領先錄製，非正常process退出可能失去尚未落盤queue，補送仍不是引擎世界恢復。啟動header與combat journal仍可能同步IO，**不稱所有IO已移出主線或F USB吞吐量修復**。
