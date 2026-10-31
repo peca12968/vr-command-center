@@ -154,7 +154,7 @@ class Venue:
         self.processes['api'] = subprocess.Popen(['dotnet', str(self.args.api_dll.resolve()), '--urls', self.base], cwd=ROOT,
             env=environment, stdout=self.api_log, stderr=self.api_log, creationflags=subprocess.CREATE_NO_WINDOW)
         self.wait(lambda: self.request('/health'), 30, 'API startup')
-        if self.request('/').get('version') != '0.29.0': raise RuntimeError('Build API 0.29.0 before provisioning the report-capable venue')
+        if self.request('/').get('version') != '0.30.0': raise RuntimeError('Build API 0.30.0 before provisioning the report-capable venue')
 
     def launch(self, name, config, visible=False, *, extra_args=()):
         self.save(name + '.json', config)
@@ -207,7 +207,8 @@ class Venue:
                 probe.bind(('127.0.0.1', 0)); port = probe.getsockname()[1]
             if port not in self.ports: break
         self.ports.add(port); entry['port'] = port
-        self.launch(name + '-server', {'role': 'Server', 'address': '127.0.0.1', 'port': port, 'sessionId': entry['id'], 'managementApiUrl': self.base,
+        self.launch(name + '-server', {'role': 'Server', 'address': getattr(self.args, 'advertise_address', None) or '127.0.0.1',
+            'listenAddress': getattr(self.args, 'listen_address', None) or '127.0.0.1', 'port': port, 'sessionId': entry['id'], 'managementApiUrl': self.base,
             'gameServerKey': self.tokens['GameServer'], 'telemetryOrigin': 'Simulation', 'telemetryDirectory': str(self.runtime_directory / (name + '-telemetry'))})
 
     def ticket(self, entry, player):
@@ -325,7 +326,8 @@ class Venue:
 
     def summary(self):
         if self.request('/api/sessions'): raise RuntimeError('Venue still has active sessions')
-        self.save('summary.json', {'source': 'Actual Windows Unity UDP / NGO processes; Simulation rigs', 'headsets': 0,
+        self.save('summary.json', {'source': 'Actual Windows Unity UDP / NGO processes; Simulation source',
+            'headsets': None if getattr(self.args, 'client_mode', 'local') == 'external' else 0,
             'completedAtUtc': datetime.now(timezone.utc).isoformat(), 'playerBuildReceipt': self.receipt, 'jobWorkersPerProcess': self.args.job_workers,
             'runtimeDirectory': str(self.runtime_directory), 'checks': self.evidence,
             'rounds': [entry['sealed'] for entry in self.rounds], 'activeSessions': 0})

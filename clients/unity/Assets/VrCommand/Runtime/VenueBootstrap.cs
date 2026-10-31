@@ -65,7 +65,7 @@ namespace VrCommand.Unity
             NativeReplicationProbe.Install(this,configuration.role);
             var transport = (UnityTransport)networkManager.NetworkConfig.NetworkTransport;
             VenueTransportProfile.Apply(transport,configuration.IsServer);
-            transport.SetConnectionData(configuration.address, configuration.port, configuration.IsServer ? "0.0.0.0" : null);
+            transport.SetConnectionData(configuration.address, configuration.port, configuration.IsServer ? configuration.ServerListenAddress : null);
             networkManager.OnClientDisconnectCallback += Disconnected;
             networkManager.OnClientConnectedCallback += Connected;
             networkManager.OnServerStopped += ServerStopped;

@@ -5,6 +5,7 @@ clients from its live roster; it never launches programs against the preview API
 """
 import argparse
 import importlib.util
+import ipaddress
 import os
 from pathlib import Path
 import sys
@@ -14,16 +15,46 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('desktop_venue', ROOT / 'scripts/start-desktop-venue.py')
 venue_module = importlib.util.module_from_spec(spec); spec.loader.exec_module(venue_module)
 
+def configure_network(args):
+    external = args.client_mode == 'external'
+    if external and not args.advertise_address:
+        raise ValueError('External mode requires --advertise-address; the helper does not guess a reachable LAN address')
+    args.advertise_address = args.advertise_address or '127.0.0.1'
+    args.listen_address = args.listen_address or ('0.0.0.0' if external else '127.0.0.1')
+    advertised = ipaddress.IPv4Address(args.advertise_address); listen = ipaddress.IPv4Address(args.listen_address)
+    if str(advertised) != args.advertise_address or advertised.packed[0] == 0 or advertised.packed[0] >= 224:
+        raise ValueError('Advertise a canonical unicast IPv4 address, not a bind wildcard')
+    if str(listen) != args.listen_address or listen.packed[0] >= 224:
+        raise ValueError('Listen on a canonical IPv4 bind address')
+    if not external and (args.advertise_address != '127.0.0.1' or args.listen_address not in ('127.0.0.1', '0.0.0.0')):
+        raise ValueError('Local clients use loopback; use external mode for another address')
+    if external and args.listen_address != '0.0.0.0' and args.listen_address != args.advertise_address:
+        raise ValueError('A specific bind address must match the advertised endpoint')
+    if external: args.visible_room = 0
+
+def retain_results(venue, entry):
+    if getattr(venue.args, 'client_mode', 'local') != 'external':
+        venue.wait_for_player_results(entry)
+        return time.monotonic() + getattr(venue.args, 'results_seconds', 30)
+    if 'externalGraceUntil' not in entry:
+        seconds = max(36, getattr(venue.args, 'results_seconds', 30))
+        entry['externalGraceUntil'] = time.monotonic() + seconds
+        entry['playerResults'] = {'phases': {}, 'allAcknowledged': None, 'scope': 'External client delivery is not observed by this launcher', 'serverRetentionSeconds': seconds}
+        venue.save(entry['name'] + '-player-results.json', entry['playerResults'])
+    return entry['externalGraceUntil']
+
 
 def run(venue):
     venue.start()
-    ready = {'source': 'Simulation', 'headsets': 0, 'baseUrl': venue.base, 'consoleUrl': venue.base + '/console/',
+    external = getattr(venue.args, 'client_mode', 'local') == 'external'
+    ready = {'source': 'Simulation', 'headsets': None if external else 0, 'clientMode': 'External' if external else 'Local',
+             'advertiseAddress': venue.args.advertise_address, 'listenAddress': venue.args.listen_address, 'baseUrl': venue.base, 'consoleUrl': venue.base + '/console/',
              'directory': str(venue.directory), 'runtimeDirectory': str(venue.runtime_directory), 'playerBuildReceipt': venue.receipt}
     venue.save('ready.json', ready)
-    venue.stage('waiting_for_operator', consoleUrl=ready['consoleUrl'], source='Simulation', headsets=0)
+    venue.stage('waiting_for_operator', consoleUrl=ready['consoleUrl'], source='Simulation', headsets=ready['headsets'], clientMode=ready['clientMode'])
     print('Use the temporary Master / RoomN credential from this run\'s keys.json. Create a VR mission, Preparing session and roster in the console.', flush=True)
-    print('The first admitted player in --visible-room gets a native window. Begin / environment / AI / End stay under operator control.', flush=True)
-    print('Close that player, create end.request, press Ctrl+C or wait for duration to finish all owned rounds.', flush=True)
+    print('External mode starts servers only; download each player connection file in the control desk.' if external else 'The first admitted player in --visible-room gets a native window. Begin / environment / AI / End stay under operator control.', flush=True)
+    print('End rounds in the control desk, create end.request, press Ctrl+C or wait for duration to finish owned rounds.' if external else 'Close that player, create end.request, press Ctrl+C or wait for duration to finish all owned rounds.', flush=True)
     entries, clients = {}, {}
     visible = None
     deadline = time.monotonic() + venue.args.duration
@@ -63,9 +94,15 @@ def run(venue):
                 # Keep the real latest roster, including new admissions; no client chooses
                 # its own room, seat, epoch or Master/GameServer identity.
                 entry['players'] = state['players']
+                if 'connectionEndpoint' not in entry:
+                    endpoint = venue.request('/api/sessions/' + entry['id'] + '/connection-endpoint',
+                        {'version': 1, 'streamId': recording['header']['streamId'], 'address': venue.args.advertise_address, 'port': entry['port']}, method='PUT', role='GameServer')
+                    entry['connectionEndpoint'] = endpoint
+                    venue.save('connection-endpoints.json', {identity: value['connectionEndpoint'] for identity, value in entries.items() if 'connectionEndpoint' in value})
+                    venue.save('server-processes.json', {identity: {'processId': venue.processes[value['name'] + '-server'].pid,
+                        'port': value['port'], 'listenAddress': venue.args.listen_address} for identity, value in entries.items() if 'connectionEndpoint' in value and value['name'] + '-server' in venue.processes})
                 if state['state'] == 'Ended':
-                    venue.seal(entry); venue.wait_for_player_results(entry)
-                    entry['resultsUntil'] = time.monotonic() + getattr(venue.args, 'results_seconds', 30)
+                    venue.seal(entry); entry['resultsUntil'] = retain_results(venue, entry)
                     venue.stage('operator_round_sealed', sessionId=entry['id'], frames=entry['sealed']['world']['acceptedSequence'])
                     continue
                 wanted = {(entry['id'], p['id'], p['admissionId']) for p in state['players']}
@@ -73,7 +110,7 @@ def run(venue):
                     if identity[0] == entry['id'] and identity not in wanted:
                         venue.stop(name); del clients[identity]
                         if name == visible: visible = None
-                for player in state['players']:
+                for player in ([] if external else state['players']):
                     identity = (entry['id'], player['id'], player['admissionId'])
                     if identity in clients: continue
                     ticket = venue.ticket(entry, player)
@@ -103,10 +140,16 @@ def run(venue):
     # Explicit operator End is already honored; only still-active owned rounds need End.
     for entry in venue.rounds:
         venue.seal(entry)
+        if external:
+            retain_results(venue, entry)
+            continue
         if not entry.get('resultsUntil'):
             venue.wait_for_player_results(entry)
             if visible and visible.startswith(entry['name'] + '-'):
                 venue.inspect_player_results(entry, visible, getattr(venue.args, 'results_seconds', 30))
+    if external:
+        deadline = max((entry.get('externalGraceUntil', 0) for entry in venue.rounds), default=0)
+        while time.monotonic() < deadline: time.sleep(max(0, min(.1, deadline - time.monotonic())))
     venue.summary()
 
 
@@ -119,7 +162,12 @@ def main():
     parser.add_argument('--job-workers', type=int, choices=range(1,17), default=2)
     parser.add_argument('--runtime-root', type=Path)
     parser.add_argument('--results-seconds', type=int, choices=range(0,301), default=30, metavar='0..300')
+    parser.add_argument('--client-mode', choices=['local', 'external'], default='local', help='external starts servers only, without claiming player admissions locally')
+    parser.add_argument('--advertise-address', help='Explicit player-facing unicast IPv4; required for external mode')
+    parser.add_argument('--listen-address', help='Server IPv4 binding; external defaults to 0.0.0.0, local to 127.0.0.1')
     args = parser.parse_args(); args.check = False
+    try: configure_network(args)
+    except ValueError as error: parser.error(str(error))
     try: venue_module.verify_player(args)
     except (OSError, RuntimeError, ValueError) as error: parser.error(str(error))
     venue = venue_module.Venue(args)

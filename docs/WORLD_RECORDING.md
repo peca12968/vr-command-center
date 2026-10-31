@@ -1,5 +1,7 @@
 # 持久世界錄製與觀察 v0.16
 
+API0.30新增[來源連線公告](EXTERNAL_CLIENTS.md)：worlds.db的connection_endpoints保存session／stream／owner綁定的不可變地址／port，GET供控制台、PUT限GameServer owner且world header已存在。原header／世界schema1不變，公告不是連通性或戰鬥授權。
+
 API0.29新增唯讀[玩家參戰快照](PLAYER_READINESS.md)，以最後接受幀的Observed入場核對當前名冊，回報擷取年齡與狀態、不傳頭手座標。世界schema／歷史及原始header不變；GameServer不能使用此控制台診斷。
 
 2026-10-31新header missionClockVersion1／missionDurationSeconds，API0.28核對同一combat source capability及原任務秒數。觀戰／回放僅依保存tick顯示活動時間／計畫，支援能力不代表啟用自動結束；舊header0不補造倒數，raw bytes／checksum保持。見[MISSION_CLOCK](MISSION_CLOCK.md)，world schema1不代表可降版。

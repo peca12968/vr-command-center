@@ -1,5 +1,31 @@
 # 開發進度
 
+## 2026-10-31：來源連線公告、只開伺服器與下載檔玩家入場
+
+前輪屬實際進展；從乾淨`f2c278c`接續[EXTERNAL_CLIENTS](EXTERNAL_CLIENTS.md)。**API／UI0.30、Unity0.32.0／code39／NGO29**。修補操作員流程缺口：原本local工具會替所有名冊自動開PC client，外部玩家可能撞同一admission；新增external只開server、不領玩家票券／不占用入場。local維持預設，兩種模式分開記錄，不以外部未知設備填0或虛構ack。
+
+來源在world header存在後，用同server的GameServer身分公告所選IPv4與該場配置port。新GET／PUT connection-endpoint v1逐次傳Actor，限owner寫、Master／可讀Room讀，GameServer／Internal不能當控制台讀取捷徑；綁session／stream／完整owner，接受後不可換址或port。原內容重試保留createdAt，房間重用不繼承；Ended公告僅metadata，不開場或授權配票。worlds.db新增connection_endpoints，world schema1／envelope7、原header／checksum、rules0.8.0與素材pin不改；不將公告當連通性或裝置證明。
+
+控制台從相符stream採用空白的地址／port，保留人工修改、提供明確套用，切場／登出清草稿並fence晚回應。下載仍只有role／address／port／joinTicket，沒有Master／GameServer key。external必須明確提供advertise-address，預設listen0.0.0.0；local預設127.0.0.1。v1只canonical dotted IPv4 unicast／1024–65535，未支援DNS／IPv6／NAT／中繼。管理API仍loopback，沒有改OS／防火牆／安全設定。
+
+發現Unity原程式不論config.address都硬寫監聽0.0.0.0；現新增server listenAddress並真正傳入UTP第三參數。缺失／空值保留原Any，提供值才驗canonical IPv4；新managed工具明確寫loopback。**144真正EditMode成功**，新增3項舊JSON預設、真UnityTransport分開advertise／listen及錯誤地址反例。Prepare重用原ID，沒有更動NGO wire、追蹤資料、碰撞、槍口、AI或命中規則。
+
+真正Windows receipt `2026-10-31T08:42:39.7814594Z`、Quest ARM64 IL2CPP receipt `2026-10-31T08:51:27.5208986Z`成功，同一fingerprint `4f1173e9eac5aa82e0b37fa58ba73afa64c392b750218b790c85c08638c3b852`且與目前來源重算一致。原Scene `4314adcd8c63d86469d16497127d8cfb／1444571642`、prefab `6f3f36cb9d710e847b5ecc569665e1ce／5227825248646244841`保持。aapt確認0.32.0／39、min32／target35／arm64；實際APK60,187,786 bytes、libil2cpp81,608,584／metadata9,264,400 bytes，含新getter與欄位，見external-build-validation。BuildReport總輸出不當APK大小，仍無頭盔運行。
+
+本機locked restore／隔離Release零警告錯誤，**717規則／459 HTTP／47世界串流、67 Node／234 Chromium**通過；新增19規則、6 HTTP狀態／4世界斷言、3 Node規則與5 UI反例。普通UI fixture只證顯示／保留草稿／跨場／登出；實際來源整合另述。6新external Python＋原17 desktop共23項、語法及293官方Transport單一修補核對成功，CI加入新Python及語法。
+
+兩場真正server-only工具＋兩個另由測試程序啟動的Windows client，各**8項**完整成功：desktop-venue／`20261031-165613-bbc86e3f`（77幀，tool `b2da89ab808ff3faf802eea1bb2a082f25d7c136643dd9f024de986dffeafb8b`）與最終`170638-b2feb08f`（78幀，tool `47fc863ca2c70b15d5a380ba3b002e4fc13189d2d3ff6d98de173e41aafaa1c9`）。實際UI建任務／名冊，來源公告並自動填實際port；netstat只保存對應server PID／port，確認真正UDP綁127.0.0.1，最終PID58040／port58016。兩個名冊先保持未就緒、沒有工具自動client；再用真正UI下載的四欄短票券設定啟動兩個獨立PC程序，admission／seat驗證與正常姿態入場成功。
+
+UI Begin／Pause／End接到真正世界，來源明確Simulation。兩位各收到自己的current admission結果，耗彈／命中／擊殺／中彈／損耗0、健康100；stream／through8／world77或78及全部統計等於精確seal並ack，另raw核對finalStreamSequence皆0。helper本身仍保留allAcknowledged=null／headsets=null，不把本檢查器知道的兩個PC外推所有外部裝置或空集合成功。server非阻塞保留至少36秒，原始30秒＋最多5秒HTTP期限不改；不是送達保證、四小時或崩潰恢復。
+
+原local模式`165936-476c7855` **49項控制台／native回歸**通過，包含任務／配置、動態名冊、AI、觀戰／回放姿態及CSV，126幀精確seal。三場均無新的原生GPU／PCM／鍵盤觀察，Chromium為SwiftShader；只是同機分開程序／loopback，不是LAN、跨機、Quest／VIVE或25台驗收。已檢視來源公告、有效玩家與結束的控制台截圖，沒有把headset分類當實機。
+
+保留前端反例：回應與場次都缺stream時，舊比較會把undefined等同；新增負例先失敗，補非空string fence後3 Node及最後完整67／234再次通過，並重跑最終8項原生下載流程。另將下載提示改稱玩家端、external啟動提示改正；早期C stage保留，不在執行中替換其靜態資產。三個stage只差提示／fence對應JS、gzip與static-web-assets metadata，所有DLL相同；並未放寬來源、入場或測試時限來通過。
+
+`external-runtime-validation.json`核對**3個runtime／42檔**C原件與F snapshot逐檔SHA相同，前14個runtime／345檔亦未變；保存SQLite不開連線。全部writer停後一次snapshot、保留C原件，cleanup errors／tracked child空、測試玩家程序0。最終C API及三工具**159檔**與F輸出逐檔相同；source／遊戲binary仍F、DB／journal明確C SSD，不當F USB效能證據。原5080仍0.16，未動登入／授權／安全設定，憑證／DB／journal／binary不提交。
+
+完整11項保持active。下一步多玩家持續操作、場館流程與實際跨機，再取得Quest／VIVE／MR／廠商硬體與25台驗收；本輪不以server-only模式或APK成功替代實機證據。
+
 ## 2026-10-31：名冊旁的玩家參戰快照
 
 前輪有實際功能與驗證進展；從乾淨`01086d7`接續新增[PLAYER_READINESS](PLAYER_READINESS.md)。**API／UI0.29**，操作員可在名冊旁直接查看有效姿態數、等待來源／中斷／過期與本次入場同步，明確標示Simulation及合成／追蹤資料。這是已接受世界幀的觀察，不是裝置在線、型號、戴好頭盔或MR／安全校正證明；沒有加Begin條件、修改射擊授權、Tracked資料、rules0.8.0或DB格式。

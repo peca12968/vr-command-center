@@ -3,6 +3,7 @@ import { mountReplay } from './replay-ui.js';
 import { mountLayout } from './layout-ui.js';
 import { mountReport } from './report-ui.js';
 import { mountReadiness } from './readiness-ui.js';
+import { mountConnections } from './connection-ui.js';
 const replay = mountReplay();
 const $ = id => document.getElementById(id);
 const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫停', Ended: '已結束' };
@@ -12,6 +13,7 @@ const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: nul
 const world = mountWorld(() => state.key, logout);
 const report = mountReport(() => state, logout);
 const readiness = mountReadiness(() => state, logout);
+const connections = mountConnections(() => state, logout);
 const placement = mountLayout({ api, epoch: () => state.epoch, active: () => !!state.actor, editable: master,
   draft: () => ({ experienceMode: $('draft-mode').value, mode: $('layout-session-mode').value, enemyCount: Number($('draft-count').value), props: structuredClone(state.props) }),
   selection: () => ({ id: $('launch-mission').value, mode: $('launch-mode').value }), changed: applyPermissions,
@@ -77,7 +79,7 @@ async function run(action) {
 function logout() {
   selectionEpoch++;
   report.reset(); state.statistics = null;
-  replay.active(false); replay.reset(); world.active(false); world.reset(); readiness.active(false); readiness.reset();
+  replay.active(false); replay.reset(); world.active(false); world.reset(); readiness.active(false); readiness.reset(); connections.active(false); connections.reset();
   state.epoch++; state.key = ''; state.actor = null; state.selected = ''; state.session = null; state.pending = null;
   state.rooms = []; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
   state.props = []; state.prop = -1;
@@ -159,7 +161,7 @@ function renderRooms() {
 async function selectSession(id) {
   if (state.pending || state.busy) { notify('請先確認目前命令的結果。', true); return; }
   const selection = ++selectionEpoch, epoch = state.epoch;
-  report.reset(); readiness.reset(); state.statistics = null; state.selected = id; state.session = null;
+  report.reset(); readiness.reset(); connections.reset(); state.statistics = null; state.selected = id; state.session = null;
   $('session-panel').hidden = true;
   if (state.refreshPromise) { try { await state.refreshPromise; } catch { /* Refresh below reports errors. */ } }
   if (selection !== selectionEpoch || epoch !== state.epoch) return;
@@ -183,6 +185,7 @@ function applyPermissions() {
   $('clock-fields').disabled = locked || !manages() || session?.state !== 'Preparing' || session?.combatStream?.missionClockVersion !== 1;
   $('join-fields').disabled = locked || session?.state !== 'Preparing';
   $('ticket-fields').disabled = locked || ended || !session;
+  connections.update();
   for (const button of document.querySelectorAll('[data-command]')) {
     const action = button.dataset.command, phase = session?.state;
     const allowed = action === 'Begin' ? phase === 'Preparing' && session.players.length > 0 : action === 'Pause' ? phase === 'Running' : action === 'Resume' ? phase === 'Paused' : !!session && !ended;
@@ -222,6 +225,7 @@ function renderSession(statistics, events) {
   }));
   if (!session.players.length) emptyTable('roster', 5, '尚未加入玩家');
   readiness.update();
+  connections.update();
   $('statistics-origin').textContent = statistics.origin === 'Simulation' ? '模擬資料' : statistics.origin === 'GameServer' ? '遊戲伺服器回報' : '尚無戰鬥資料';
   $('telemetry-status').hidden = !session.combatStream;
   $('telemetry-status').textContent = statistics.pendingTelemetry ? '已要求結束；等待遊戲伺服器補送事件並封存，統計尚未確認完整。'
@@ -307,7 +311,7 @@ async function downloadTicket(player) {
   if (!address || /[\s/\\?#@]/.test(address) || !Number.isInteger(port) || port < 1024 || port > 65535) { notify('請先輸入遊戲伺服器地址及 1024–65535 的連線埠。', true); return; }
   const ticket = await api(`/sessions/${state.selected}/players/${player.id}/join-ticket`, 'POST', undefined, undefined, player.admissionId);
   download(`quest-player-${player.id}.json`, { role: 'Client', address, port, joinTicket: ticket.ticket });
-  notify(`玩家連線檔已產生，有效至 ${time(ticket.expiresAtUtc)}。請將各自檔案配置到對應頭盔。`);
+  notify(`玩家連線檔已產生，有效至 ${time(ticket.expiresAtUtc)}。請將各自檔案配置到對應玩家端。`);
 }
 
 function resetDraft() {
@@ -428,7 +432,7 @@ for (const id of ['prop-asset', 'prop-x', 'prop-y', 'prop-z', 'prop-yaw']) $(id)
 
 function tab(name) {
   for (const candidate of ['operations', 'missions', 'replay', 'world']) { const active = candidate === name; $(candidate + '-view').hidden = !active; $('tab-' + candidate).classList.toggle('active', active); $('tab-' + candidate).setAttribute('aria-pressed', String(active)); }
-  replay.active(name === 'replay'); world.active(name === 'world'); readiness.active(name === 'operations');
+  replay.active(name === 'replay'); world.active(name === 'world'); readiness.active(name === 'operations'); connections.active(name === 'operations');
 }
 function submit(id, action) { $(id).addEventListener('submit', event => { event.preventDefault(); run(action); }); }
 $('login-form').addEventListener('submit', login);

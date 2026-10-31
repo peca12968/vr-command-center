@@ -1,5 +1,7 @@
 # Quest 3 接入原型與工具鏈 v0.20
 
+2026-10-31 最新Unity0.32.0／code39／NGO29、API/UI0.30，144真正EditMode及同源Windows／ARM64 IL2CPP APK成功。新增server listenAddress及[外部玩家流程](EXTERNAL_CLIENTS.md)，頭盔仍只收四欄Client短票券設定；不把新版server設定或管理key配置到頭盔。原網路識別保留、wire不變，但需使用讀取listenAddress的同源新版server。真實Quest／VIVE／MR仍未驗。
+
 2026-10-31 最新Unity0.31.0／code38／NGO29，API/UI0.28；新增[玩家任務簡報](PLAYER_BRIEFING.md)，左手X／Y／握柄分頁與授權頁接入OpenXR，隨附固定來源繁中字型。141真正EditMode及PC原生輸入／晚連線通過，Windows／Android最終receipt見PROGRESS；Android建置不代表控制器／頭盔／MR已測。所有遊戲程序一起升29，保存原Scene／prefab ID與既有API reader規則。
 
 2026-10-31目前為Unity0.30.0／code37／NGO28、API UI0.28；131項真正EditMode及同源Windows／ARM64 IL2CPP Quest APK成功。新增[任務活動倒數](MISSION_CLOCK.md)，新寫入envelope7讀1–7，API／UI及所有遊戲程序協同更新；原ID保留。無頭盔運行證據，下文保留歷史。

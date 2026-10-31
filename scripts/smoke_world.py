@@ -169,6 +169,19 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         info = request(route)
         check(info["header"]["environmentVersion"] == 1, "New world source explicitly versions its deterministic environment presentation")
         check(info["complete"] and info["acceptedSequence"] == result["frames"] == 44, "All ordered source frames durably seal after combat confirmation")
+        endpoint_route = "/api/sessions/" + session + "/connection-endpoint"
+        endpoint_draft = {"version": 1, "streamId": info["header"]["streamId"], "address": "127.0.0.1", "port": 17777}
+        request(endpoint_route, "Room1", 403)
+        request(endpoint_route, "GameServer", 403)
+        request(endpoint_route, "Room5", 404)
+        request(endpoint_route, "Master", 403, "PUT", endpoint_draft)
+        check(True, "Endpoint metadata requires the correct reader scope and a source publisher")
+        endpoint = request(endpoint_route, "GameServer", method="PUT", body=endpoint_draft)
+        check(endpoint["version"] == 1 and endpoint["address"] == "127.0.0.1" and endpoint["port"] == 17777 and endpoint["sessionEnded"], "Owning source may preserve its declared endpoint as ended metadata without reopening gameplay")
+        check(request(endpoint_route, "Room5") == endpoint and request(endpoint_route, "GameServer", method="PUT", body=endpoint_draft) == endpoint, "Endpoint reads and exact retries retain the source identity and original creation time")
+        request(endpoint_route, "GameServer", 409, "PUT", {**endpoint_draft, "port": 17778})
+        request(endpoint_route, "GameServer", 400, "PUT", {**endpoint_draft, "address": "0.0.0.0"})
+        check(request(endpoint_route, "Room5") == endpoint, "Conflicting redirect and invalid wildcard leave the accepted endpoint unchanged")
         check(len(info["header"]["props"]) == 2, "World archive uses actual canonical mission geometry")
         check(any(player["rig"]["kind"] == "Simulated" for row in frames if row["type"] == "frame" for player in row["payload"]["frame"]["players"]), "Head and both hands retain explicit synthetic rig provenance")
         packets = [row["payload"] for row in frames if row["type"] == "frame"]

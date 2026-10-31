@@ -1,5 +1,7 @@
 # 長期開發目標
 
+2026-10-31 新增[外部玩家模式](EXTERNAL_CLIENTS.md)：操作員工具只開server，不占用名冊入場；來源公告地址／port與控制台下載接通，真正兩個分開啟動PC入場／End／雙seal及loopback socket已驗。API/UI0.30、Unity0.32.0／code39／NGO29、144真正EditMode及同源雙平台成功，原模式49項回歸通過。這是同機外部程序流程，非跨機／頭盔／25台；下一步實際多玩家操作、場館與跨機部署，完整11項保持active。
+
 2026-10-31 新增[玩家參戰快照](PLAYER_READINESS.md)：API/UI0.29在名冊直接顯示來源／姿態有效數，核對已接受世界與本次admission，不把名冊分類當連線。698規則、453 HTTP／43串流、64 Node／229 Chromium及真正雙PC的8原生＋8 UI通過，已關閉peer／同ID換入場／新端恢復／Begin-Pause-End／雙seal；Unity與原雙平台不變，本輪未重建。完整目標active；接續多玩家持續操作、場館流程與跨機，頭盔／25台另驗。
 
 2026-10-31 新增[玩家任務簡報](PLAYER_BRIEFING.md)：原保存任務名稱／10000字內容送到GameServer及玩家，繁中隨附字型、分頁及本機武器抑制；真正雙PC原生B／Space／Escape／L、晚連線、姿態持續與雙seal結果通過。Unity0.31.0／code38／NGO29、141真正EditMode，雙平台最終receipt見PROGRESS；API/UI0.28及規則／錄影格式保持。完整目標active，頭盔控制器與舒適度、25台／跨機仍待。下一步接續多玩家操作與完整場館流程，實機分開驗收。

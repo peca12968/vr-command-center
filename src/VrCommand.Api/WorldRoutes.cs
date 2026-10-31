@@ -15,6 +15,8 @@ public static class WorldRoutes
         app.MapGet("/api/world-recordings", (WorldRecordings store, HttpContext context) => Results.Json(store.List(Actor(context)), WorldJson.Options));
         app.MapGet("/api/sessions/{id:guid}/world", (Guid id, WorldRecordings store, HttpContext context) => Results.Json(store.Info(id, Actor(context)), WorldJson.Options));
         app.MapGet("/api/sessions/{id:guid}/readiness", (Guid id, WorldRecordings store, HttpContext context) => store.Readiness(id, Actor(context)));
+        app.MapGet("/api/sessions/{id:guid}/connection-endpoint", (Guid id, WorldRecordings store, HttpContext context) => store.ConnectionEndpoint(id, Actor(context)));
+        app.MapPut("/api/sessions/{id:guid}/connection-endpoint", (Guid id, ConnectionEndpointDraft draft, WorldRecordings store, HttpContext context) => store.PublishEndpoint(id, draft, Actor(context)));
         app.MapGet("/api/sessions/{id:guid}/world/publish", Publish);
         app.MapGet("/api/sessions/{id:guid}/world/watch", Watch);
         app.MapGet("/api/sessions/{id:guid}/world/cameras", (Guid id, WorldRecordings store, HttpContext context) => store.Bookmarks(id, Actor(context)));

@@ -1,5 +1,7 @@
 # 從控制台開啟電腦任務
 
+API/UI0.30與Unity0.32新增[外部玩家模式](EXTERNAL_CLIENTS.md)：`--client-mode external --advertise-address <玩家可連到的IPv4>`只啟動server，不替名冊開本機client。來源公布該場地址／port，控制台可採用或保留手動輸入；玩家用各自短票券下載檔另行啟動。external結果送達及設備數未知，server保留至少36秒；原local仍預設並已49項回歸。實際同機測試及限制見PROGRESS，非跨機或頭盔驗收。
+
 API/UI0.29新增[玩家參戰快照](PLAYER_READINESS.md)，可在名冊直接看本次入場的有效姿態、來源過期／中斷；不以「Quest3」分類或名冊人數宣稱頭盔在線。原生雙PC退出／換入場／恢復及控制台8項已驗，仍是Simulation；工具版本gate同步0.29，遊戲0.31.0／NGO29保持。開始任務的既有政策不改，狀態是抽樣觀察而非實體安全確認。
 
 目前玩家End流程見[DESKTOP_DEBRIEF](DESKTOP_DEBRIEF.md)：Unity0.29／NGO27；雙seal後傳送自己的最終戰績、ack斷線保留。`--results-seconds`預設30（0–300），可關窗或以`dismiss-results.request`提早結束；新任務玩家可取代舊結果視窗。最新建置／125 EditMode與原生驗證以PROGRESS為準，下文版本數字為功能首輪歷史。

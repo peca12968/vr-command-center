@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Net;
+using System.Net.Sockets;
 using UnityEngine;
 
 namespace VrCommand.Unity
@@ -9,6 +11,7 @@ namespace VrCommand.Unity
     {
         public string role = "Client";
         public string address = "127.0.0.1";
+        public string listenAddress = "";
         public ushort port = 7777;
         public string joinTicket = "";
         public string sessionId = "";
@@ -18,6 +21,17 @@ namespace VrCommand.Unity
         public string telemetryDirectory = "";
 
         public bool IsServer => role == "Server" || role == "Host";
+        public string ServerListenAddress
+        {
+            get
+            {
+                var value = string.IsNullOrEmpty(listenAddress) ? "0.0.0.0" : listenAddress;
+                if (!IPAddress.TryParse(value, out var ip) || ip.AddressFamily != AddressFamily.InterNetwork
+                    || ip.ToString() != value || ip.GetAddressBytes()[0] >= 224)
+                    throw new InvalidOperationException("Server listen address must be a canonical IPv4 bind address.");
+                return value;
+            }
+        }
 
         public static LaunchConfiguration Load()
         {
@@ -35,6 +49,7 @@ namespace VrCommand.Unity
                 throw new InvalidOperationException("Server management configuration is missing.");
             if (config.IsServer)
             {
+                _ = config.ServerListenAddress;
                 config.sessionId = Guid.Parse(config.sessionId).ToString("D");
                 if (string.IsNullOrEmpty(config.telemetryOrigin)) config.telemetryOrigin = "Simulation";
             }

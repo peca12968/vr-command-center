@@ -252,6 +252,13 @@ try:
             request("POST", f"/api/sessions/{independent[0]['id']}/players", player)
             room_player = {**player, "playerId": str(uuid.uuid4())}
             own_path = f"/api/sessions/{independent[0]['id']}"
+            endpoint_draft = {"version": 1, "streamId": str(uuid.uuid4()), "address": "127.0.0.1", "port": 17777}
+            request("GET", own_path + "/connection-endpoint", expected=401, identity=None)
+            request("GET", own_path + "/connection-endpoint", expected=403, identity="Room2")
+            request("GET", own_path + "/connection-endpoint", expected=403, identity="GameServer")
+            request("GET", own_path + "/connection-endpoint", expected=404, identity="Room1")
+            request("PUT", own_path + "/connection-endpoint", endpoint_draft, 403, identity="Master")
+            request("PUT", own_path + "/connection-endpoint", endpoint_draft, 403, identity="Room1")
             request("GET", own_path + "/readiness", expected=401, identity=None)
             request("GET", own_path + "/readiness", expected=403, identity="Room2")
             request("GET", own_path + "/readiness", expected=403, identity="GameServer")

@@ -4,7 +4,9 @@
 
 依 2026-10-29 的使用者指示，**優先開發 Meta Quest 3**，暫以 Android 獨立執行為工作假設；VIVE 延後接入，共用架構與原始雙平台目標保留。
 
-目前為 **API v0.29／Unity 遊戲端 v0.31.0 原型**。真正 Editor 已完成 Prepare、141 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 29，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人完整驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
+目前為 **API v0.30／Unity 遊戲端 v0.32.0 原型**。真正 Editor 已完成 Prepare、144 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 29，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人完整驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
+
+新增[外部玩家流程](docs/EXTERNAL_CLIENTS.md)：操作員模式可只啟動server，來源公告場次地址／port，兩個PC已用實際UI下載的短票券檔另行入場、結算與封存。真正loopback UDP綁定已核對，原local模式49項回歸；跨機與頭盔仍另驗。
 
 新增[玩家參戰快照](docs/PLAYER_READINESS.md)：名冊直接顯示本次入場的有效姿態數與來源中斷／過期，不把頭盔分類當在線。真正雙PC退出、同ID換入場、新端恢復及控制台流程通過；這是Simulation快照觀察，實體安全與25台另驗。
 
