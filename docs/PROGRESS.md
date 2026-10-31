@@ -1,5 +1,39 @@
 # 開發進度
 
+## 2026-11-01：背景世界錄製的戰績尾界競態
+
+從 `e387223` 接續電腦端，新增 [結果尾界修正](DEBRIEF_BOUNDARY.md)。**Unity0.36.1／Android code44，API/UI0.30／NGO29保持**。Ended 的 pending context 綁定 writer 已接受的 terminal capture，最終送出另外核對同一 immutable durable State 的 Complete／Sealed／Last／Ack 及 session／stream／origin；不以 buffered 或舊 durable 前綴冒充最終世界。原30秒等待、撤銷／admission、ack／Host收尾、客戶端精確序號及遊戲政策保持。
+
+原0.36的真正25端900秒場 `desktop-long/20261101-064213-cf891c07`，**handle46963真正exit1**，`Debrief world seal differs`。API／closed journal最終8442、Ended tick18000、雙seal成功；25份結果都有ack，但其中一份worldSequence8441，其餘24份8442。原journal8441為Running／observed36、8442為Ended／observed37，兩者tick18000；不能用相同到期tick或最終統計一致放過錯誤尾界。程式在逐玩家建立context時讀當時durable Last，背景End寫入可在迴圈中才完成，與反例一致。
+
+該場live8366幀／8365 Running、209125人次、無bad／來源過期，最大來源年齡0.345400秒，但live跳2序號；在結果檢查就失敗，**沒有完整API回放、final CSV或multiplayer-checks完成檔**，不把抽樣乾淨當整場接受。cleanup空／無殘留，writer全停後一次snapshot保留原件。`debrief-boundary-counterexample`另外用rb核對原checksum／序號與25份結果，不重寫原場；原worldlog SHA `139c158a9fe796d2d37494efccaa3afb1a0f16fc9141103d8378b0d5db71a5c2`。
+
+新增2項真正Editor測試，以自己的FileWorldJournal gate重現durable1／captured2，完整等待／落盤／ack／seal各階段與舊尾界／外場stream／失敗writer反例。**179 Editor全過，failed／skipped0**，包括原3項Editor PlayMode官方Touch虛擬action測試。最終來源 `e0594513140ff7fb4bc084929691b91c15f7d908e8f59c114aa5ab27daaf11eb`；真正Prepare保持原scene／prefab ID，無RebuildArena。
+
+Windows receipt10月31日23:04:56Z、Quest23:14:49Z，同e059來源與原scene／prefab識別；APK60311450 bytes、SHA `263ae66309ef5f1f604286c38277aa74ec3f53418fabc32c6e88dcc75920c2e2`，aapt0.36.1／44、min32／target35、arm64及v2一signer有效。105 entries、indexed compressed60289996／uncompressed160904695、libil2cpp81993392；不把ZIP容器大小當程式碼／效能指標。
+
+新 `windows-player-0.36.1.zip` 82642182 bytes、SHA `483a6f95b2944b622dffddd617559b742e480ee94072fd3b61fcf6b5dc8d3899`，311 runtime檔＋manifest，launcher source仍a65846da...。全新C解壓後19項真正核對／拒絕成功（`player-package-checks/20261101-072420-cde50e4f`），未重跑完整GUI／封裝雙PC瀏覽器或改launcher。封裝／驗包在長場Ended後的回放期執行，不作無負載對照。
+
+| 新e059來源真正PC場 | 結果 |
+|---|---|
+| `desktop-debrief/20261101-070547-86e98e87`，一般 | handle55675 exit0，4項／兩份精確結果；移除玩家無結果、Ended票券拒絕，cleanup乾淨 |
+| `desktop-debrief/20261101-070614-3ace3ad5`，Host | exit0，4項／兩份精確結果，Host等待peer ack後收尾，cleanup乾淨 |
+| `desktop-debrief/20261101-070614-d47a6f09`，Preparing取消 | exit0，4項／兩份零事件結果、原拒絕流程，cleanup乾淨 |
+
+新長場 `desktop-long/20261101-070628-e45c2643`，**handle80201真正exit0、executionFinished／acceptancePassed／complete均true**。25個原client＋1個server、900秒活動倒數／唯一tick18000內部End；8414完整回放、8331 Running／208275人次、無bad，25份原admission結果與CSV／combat及world精確雙seal全一致，全部worldSequence8414；cleanup空／無殘留、原生日誌無queue error。live8321幀／8320 Running、208000人次、跳4序號，已由全回放補查；最大保存擷取gap321ms、來源年齡0.173768秒，不當RTT／FPS。票券到期後tick5952仍25份原admission、每份只一個原連線，未重入場。三個短場及長場前段與真正Quest建置重疊（23:14:49Z完成），封裝在Ended後回放期，不稱無負載或隨機因果對照。
+
+三場closed比較 `continuity-comparison/debrief-boundary-20261101` 成功，逐玩家原admission／CSV七統計／世界與combat尾界獨立核對；原0.32失效場仍2幀／31筆／18位、acceptance=false，0.33既有乾淨場與新e059並列。source及診斷欄位不同，causalRootProven／networkCapacityAccepted均false；complete只是比較完成。原0.36的8441反例沒有完成報告，另用明確失敗資料核對，不強塞進要求完整格式的比較器。
+
+新場closed worldlog SHA `cedc9ad30a62e44955ed4677eb15751957eb28d566eaa3c6556865fad9199a89`，8414 frame／8414 ack／一completion與seal；尾端積壓0、歷史peak5，最早world5／ack0／byte82212。沒有保存Begin回應，applicationBoundaryKnown=false，不猜接受序號或套用延遲。這不是32幀writer queue的深度或網路延遲。
+
+離線journal reader新增最高本地持久回條積壓及最早record邊界（byte offset），結束歸零／seal不抹除歷史高峰；反例原場peak4、尾端0，兩者可同時成立。這是已保存幀與本地durable receipt差額，不是32幀記憶體queue／網路延遲，ack沒有獨立UTC，不造持續時間。無Begin回應可省略接受序號，applicationBoundaryKnown=false／firstApplied=null，不猜Begin或補造舊raw欄位。新增3個反例後，14 journal＋10 publication＋10 stages＋8 comparison＋11 multiplayer，**53 Python成功**；CI已含原journal測試入口。
+
+本輪沒有改後端／UI／共享Simulation／wire／rules／素材pin／Tracked，沒有重跑原717規則／459 HTTP／47串流或一般瀏覽器；API三工具仍取上一輪同版159檔C副本，原5080不動。來源／binary仍F，場次runtime明確C SSD；不是F USB吞吐修復、舊31筆修復或跨機／頭盔容量驗收。
+
+`debrief-boundary-runtime-validation.json`核對新4個C runtime56檔／F snapshot相符；前39 runtime813檔（含原失敗場14檔）、前F337檔及該失敗場F證據76檔保持，總43 C runtime869檔。保存SQLite不開、沒有ack／repair／truncate。0.36 Windows／Quest／logs321檔先完整保存於 `debrief-boundary-history-path.txt` 所指目錄，最終逐byte hash仍相符；原0.36 ZIP及更舊／0.35／本輪API三工具各159檔也保持。audit只表示原始資料保持，不是遊戲驗收。
+
+完整11項目標active；下一步推進同版五獨立房長任務及實際動態玩家PC驗收，慢碟發布吞吐、原31筆、實機／MR／跨機／25台及廠商硬體各自保留。
+
 ## 2026-11-01：有界背景世界writer與durable狀態快照
 
 功能 [d18aad6](https://github.com/peca12968/vr-command-center/commit/d18aad6c3140628d33392ea3ad4949cda2f2480a) 已推送main、遠端SHA一致。[本功能CI run41249194813](https://github.com/peca12968/vr-command-center/actions/runs/41249194813)／check124678950692為failure、steps空；fresh annotation明確為付款失敗或支出上限，job未啟動，無雲端測試結果。未改帳務或手動重跑，下列為本機實際驗證。

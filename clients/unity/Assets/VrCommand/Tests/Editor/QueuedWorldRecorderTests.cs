@@ -140,5 +140,38 @@ namespace VrCommand.Unity.Tests
                 f.Writer.Stop();Assert.IsTrue(f.Writer.Completion.Wait(3000));Assert.AreEqual(1,f.Source.LastSequence);
             }
         }
+        [Test] public void DebriefBindsQueuedEndAndRequiresItsExactDurableSeal()
+        {
+            using(var f=new Fixture())
+            {
+                f.Writer.Enqueue(Packet(1)); Assert.IsTrue(SpinWait.SpinUntil(()=>f.Source.LastSequence==1,3000));
+                f.Journal.Entered.Reset(); f.Journal.Block=true;
+                f.Writer.Enqueue(Packet(2,true)); Assert.IsTrue(f.Journal.Entered.Wait(3000));
+                Assert.AreEqual(1,f.Source.LastSequence);
+                var result=new MissionDebrief { sessionId=f.Header.sessionId,streamId=f.Header.streamId,origin=f.Header.origin,
+                    worldSequence=MissionDebrief.PendingWorldSequence(f.Writer) };
+                Assert.AreEqual(2,result.worldSequence); Assert.IsFalse(result.MatchesSealedWorld(f.Source));
+                f.Writer.Stop(); f.Journal.Release.Set(); Assert.IsTrue(f.Writer.Completion.Wait(3000));
+                Assert.IsFalse(result.MatchesSealedWorld(f.Source));
+                f.Source.Acknowledge(1); f.Source.Acknowledge(2); Assert.IsFalse(result.MatchesSealedWorld(f.Source));
+                f.Source.MarkSealed(); Assert.IsTrue(result.MatchesSealedWorld(f.Source));
+                result.worldSequence=1; Assert.IsFalse(result.MatchesSealedWorld(f.Source)); result.worldSequence=2;
+                result.streamId=Guid.NewGuid().ToString(); Assert.IsFalse(result.MatchesSealedWorld(f.Source));
+                result.streamId=f.Header.streamId; result.sessionId=Guid.NewGuid().ToString(); Assert.IsFalse(result.MatchesSealedWorld(f.Source));
+            }
+        }
+        [Test] public void DebriefCannotUseNonterminalOrFailedQueuedCaptureAsAnEndBoundary()
+        {
+            Assert.AreEqual(0,MissionDebrief.PendingWorldSequence(null));
+            using(var f=new Fixture(true))
+            {
+                f.Writer.Enqueue(Packet(1)); Assert.IsTrue(f.Journal.Entered.Wait(3000));
+                Assert.AreEqual(0,MissionDebrief.PendingWorldSequence(f.Writer));
+                f.Writer.Enqueue(Packet(2,true)); f.Journal.Fail=true; f.Journal.Release.Set();
+                Assert.IsTrue(f.Writer.Completion.Wait(3000)); Assert.IsTrue(f.Writer.Faulted);
+                Assert.AreEqual(0,MissionDebrief.PendingWorldSequence(f.Writer));
+                Assert.IsFalse(new MissionDebrief{worldSequence=2}.MatchesSealedWorld(f.Source));
+            }
+        }
     }
 }

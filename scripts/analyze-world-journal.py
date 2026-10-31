@@ -18,12 +18,14 @@ def utc(value):
     return result
 
 
-def analyze(path, accepted_sequence, response_utc=None, *, expected_session=None):
-    if type(accepted_sequence) is not int or accepted_sequence < 1: raise ValueError('Positive accepted Begin sequence required')
+def analyze(path, accepted_sequence=None, response_utc=None, *, expected_session=None):
+    if accepted_sequence is not None and (type(accepted_sequence) is not int or accepted_sequence < 1): raise ValueError('Positive accepted Begin sequence required')
+    if response_utc and accepted_sequence is None: raise ValueError('Response timing requires a known accepted Begin boundary')
     response = utc(response_utc) if response_utc else None
     digest = hashlib.sha256(); counts = {}; header = None; capture_start = None
     last = None; first = None; acknowledged = 0; complete = sealed = False
     transitions = []; transition_count = 0; previous_state = None
+    peak_unacknowledged = 0; peak_boundary = None
     with Path(path).open('rb') as source:
         before = os.fstat(source.fileno())
         def read(count):
@@ -32,6 +34,7 @@ def analyze(path, accepted_sequence, response_utc=None, *, expected_session=None
             return data
         if read(8) != b'VRWORLD1': raise ValueError('Unknown world journal format')
         while source.tell() < before.st_size:
+            record_offset = source.tell()
             count, = struct.unpack('<i', read(4))
             if not 1 <= count <= 1024 * 1024 - 128: raise ValueError('Invalid world record length')
             payload = read(count)
@@ -57,7 +60,7 @@ def analyze(path, accepted_sequence, response_utc=None, *, expected_session=None
                     transition_count += 1
                     if len(transitions) < 256: transitions.append(row)
                     previous_state = state
-                if first is None and row['observedSequence'] >= accepted_sequence and row['phase'] == 'Running' and row['tick'] > 0 and not row['suspended']:
+                if accepted_sequence is not None and first is None and row['observedSequence'] >= accepted_sequence and row['phase'] == 'Running' and row['tick'] > 0 and not row['suspended']:
                     first = row
                 last = row
             elif tag in (2, 3, 4):
@@ -73,21 +76,28 @@ def analyze(path, accepted_sequence, response_utc=None, *, expected_session=None
                     if not complete or sealed or sequence != acknowledged or sequence != last['worldSequence']: raise ValueError('Invalid final receipt')
                     sealed = True
             else: raise ValueError('Unknown world record tag')
+            pending = (last['worldSequence'] if last else 0) - acknowledged
+            if pending > peak_unacknowledged:
+                peak_unacknowledged = pending
+                peak_boundary = {'worldSequence': last['worldSequence'], 'acknowledgedSequence': acknowledged,
+                    'afterRecordTag': tag, 'recordOffsetBytes': record_offset}
         after = os.fstat(source.fileno())
         if (before.st_size, before.st_mtime_ns) != (after.st_size, after.st_mtime_ns): raise ValueError('Journal changed during read; stop its writer first')
     if header is None: raise ValueError('Missing world header')
     return {'version': 1, 'bytes': before.st_size, 'sha256': digest.hexdigest(), 'records': counts,
-        'acceptedSequence': accepted_sequence, 'captureStartedAtUtc': capture_start.isoformat() if capture_start else None,
+        'acceptedSequence': accepted_sequence, 'applicationBoundaryKnown': accepted_sequence is not None,
+        'captureStartedAtUtc': capture_start.isoformat() if capture_start else None,
         'responseObservedAtUtc': response_utc, 'firstApplied': first, 'lastFrame': last, 'acknowledgedSequence': acknowledged,
         'unacknowledgedFrames': (last['worldSequence'] if last else 0) - acknowledged, 'complete': complete, 'sealed': sealed,
+        'peakUnacknowledgedFrames': peak_unacknowledged, 'firstPeakBoundary': peak_boundary,
         'firstAppliedCaptureSecondsAfterResponse': (utc(first['capturedAtUtc']) - response).total_seconds() if first and first['capturedAtUtc'] and response else None,
         'transitions': transitions, 'transitionCount': transition_count, 'transitionsTruncated': transition_count > len(transitions),
-        'scope': 'Closed journal binary checksum / sequence metadata only; not full gameplay validation, RTT, seal success or a storage root-cause verdict'}
+        'scope': 'Closed journal binary checksum / sequence metadata only. Backlog counts persisted frames without local durable receipts; not buffered writer queue depth, wall-clock duration, API rejection or network latency. Unknown Begin stays unknown. Not full gameplay validation or a storage root-cause verdict.'}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('journal', type=Path); parser.add_argument('--accepted-sequence', required=True, type=int)
+    parser.add_argument('journal', type=Path); parser.add_argument('--accepted-sequence', type=int, help='Exact accepted Begin sequence; omit for persistence-only analysis without inferred application timing')
     parser.add_argument('--response-utc'); parser.add_argument('--output', type=Path)
     args = parser.parse_args(); report = analyze(args.journal, args.accepted_sequence, args.response_utc)
     if args.output:

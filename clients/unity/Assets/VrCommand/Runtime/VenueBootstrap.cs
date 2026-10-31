@@ -230,7 +230,7 @@ namespace VrCommand.Unity
                         admitted.Remove(clientId); combatAuthority.Unbind(clientId);
                         var context = new MissionDebrief { sessionId = snapshot.id, playerId = admission.playerId, admissionId = admission.admissionId,
                             roomId = admission.roomId, origin = outbox.Origin, streamId = outbox.StreamId.ToString("D"), throughSequence = snapshot.sequence,
-                            finalStreamSequence = outbox.LastSequence, worldSequence = combatAuthority.Recording.LastSequence };
+                            finalStreamSequence = outbox.LastSequence, worldSequence = MissionDebrief.PendingWorldSequence(combatAuthority.RecordingWriter) };
                         ending[clientId] = new EndingClient { Admission = admission, Context = context, Deadline = Time.realtimeSinceStartupAsDouble + 30 };
                         combatAuthority.SendDebrief(clientId, context, false);
                         continue;
@@ -279,6 +279,7 @@ namespace VrCommand.Unity
                                 foreach (var client in new List<ulong>(ending.Keys))
                                     if (ending.TryGetValue(client, out var delivery) && !delivery.Sent && Time.realtimeSinceStartupAsDouble < delivery.Deadline)
                                     {
+                                        if (!delivery.Context.MatchesSealedWorld(combatAuthority.Recording)) continue;
                                         var result = statistics.Select(delivery.Admission, delivery.Context);
                                         if (result == null) continue;
                                         delivery.Sent = true; combatAuthority.SendDebrief(client, result, true);

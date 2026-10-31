@@ -1,5 +1,7 @@
 # 玩家任務結束戰績
 
+背景 writer 的等待結果必須綁定已排入的 Ended 幀，不能用尚未完成寫入的 durable 前綴當任務終點；最終送出另核對精確 durable seal。0.36 長場反例與 0.36.1 修正見 [DEBRIEF_BOUNDARY](DEBRIEF_BOUNDARY.md)，不放寬原客戶端尾界檢查。
+
 Unity 0.29.0／Android code36／NGO27；API／UI 0.27、驗票2、rules0.8.0及歷史錄製格式不變。所有遊戲程序須一起更新，Prepare 原位保存場景／prefab識別。
 
 結束時的已批准入場延遲、pending後下行丟包與應用期限，另見[DESKTOP_END_NETWORK](DESKTOP_END_NETWORK.md)的真正PC故障檢查；既有版本在選定情境正確，沒有為此更改wire或重新建置。

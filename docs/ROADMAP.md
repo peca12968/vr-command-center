@@ -1,5 +1,7 @@
 # 長期開發目標
 
+2026-11-01 [戰績尾界](DEBRIEF_BOUNDARY.md)：Unity0.36.1／code44、179 Editor與e0594513...雙平台成功。原0.36真正25端900秒場在結果核對exit1，一份8441／實際Ended封存8442，完整失敗保存；pending改綁terminal capture、final仍另核對durable seal。三個原生短場12項／六份結果成功，長場完整驗證見PROGRESS；不把ack／live乾淨當整場接受，完整11項active，原31筆／慢碟／實機另驗。
+
 2026-11-01 [背景世界writer](ASYNC_WORLD_WRITER.md)：Unity0.36／code43、177 Editor與7194dc98...雙平台成功，API/UI0.30／NGO29不變。主線世界幀IO／狀態讀鎖移出，32幀／8MiB bounded queue不冒充durable；F本場Main world GateEnter／Flush皆0但224未確認，仍不通過。SSD8項354幀、一般8項400幀及故障恢復8項743全回放成功；717／459／47、48 Python與19 launcher成功。下一步發布吞吐／SSD部署及長壓，不關durability／跳幀；完整11項active，實機／31筆另驗。
 
 2026-11-01 [journal細分](JOURNAL_STAGES.md)：Unity0.35／code42、169真正Editor與d30cc34c...同源Windows／ARM64 APK成功，API/UI0.30／NGO29保持。最終F有128未確認，Main Frame Flush8.814804秒、Main gate等待3.134420秒（多為CompleteState讀取）、與背景ack flush交集3.133609秒；SSD8項355幀seal／一般8項363幀成功。717規則／459 HTTP／47串流、47 Python／19啟動器與原件保持核對通過。下一步評估保持durability的writer／明確SSD部署，不稱單一硬碟或31筆全局修復；完整11項active。

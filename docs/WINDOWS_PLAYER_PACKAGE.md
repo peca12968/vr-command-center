@@ -1,6 +1,8 @@
 # Windows 可攜玩家包
 
-2026-11-01 最新`windows-player-0.36.0.zip`（7194dc98...）原311 runtime檔＋manifest／相同launcher，C新解壓19項核對／拒絕成功。一般原生8項400幀／SSD負載8項354幀與故障恢復8項，是本輪unpacked玩家回歸，未重跑完整GUI／封裝雙PC瀏覽器。0.35兩包及舊history保留；精確hash與限制見PROGRESS。
+2026-11-01 最新`windows-player-0.36.1.zip`（e0594513...）修正[Ended結果尾界](DEBRIEF_BOUNDARY.md)，311 runtime檔＋manifest／原launcher，新C解壓19項真正核對／拒絕成功。179 Editor與同源Windows／Quest建置、原生結果與長場範圍見PROGRESS；沒有新完整GUI／封裝雙PC瀏覽器或頭盔證據。原0.36 ZIP及Windows／Quest／logs另存history，精確hash保持。
+
+2026-11-01 上一版`windows-player-0.36.0.zip`（7194dc98...）原311 runtime檔＋manifest／相同launcher，C新解壓19項核對／拒絕成功。一般原生8項400幀／SSD負載8項354幀與故障恢復8項，是本輪unpacked玩家回歸，未重跑完整GUI／封裝雙PC瀏覽器。0.35兩包及舊history保留；精確hash與限制見PROGRESS。
 
 2026-11-01 最後來源包為`windows-player-0.35.0-final.zip`（d30cc34c...），原311 runtime檔＋manifest／launcher source保持，真正新C解壓19項核對／拒絕通過；本輪一般原生8項363幀與SSD負載8項355幀是unpacked玩家回歸，未重跑完整GUI／封裝雙PC瀏覽器流程。非final檔名的0.35 ZIP屬f93候選，兩者皆保留，精確SHA／範圍見PROGRESS。
 

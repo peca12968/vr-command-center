@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using VrCommand.Simulation;
 
 namespace VrCommand.Unity
 {
@@ -11,6 +12,16 @@ namespace VrCommand.Unity
         public long throughSequence, finalStreamSequence, worldSequence;
         public long ammoUsed, shotsHit, kills, hitsReceived, damageTaken;
         public double accuracyPercent;
+        // This is an expected terminal boundary, never proof of persistence or delivery.
+        public static long PendingWorldSequence(QueuedWorldRecorder writer) => writer != null && writer.EndQueued && !writer.Faulted ? writer.CapturedSequence : 0;
+        public bool MatchesSealedWorld(WorldOutbox recording)
+        {
+            if (recording == null || worldSequence < 1) return false;
+            var state = recording.State;
+            if (!state.Sealed || !state.Complete || state.LastSequence != worldSequence || state.AcknowledgedSequence != worldSequence) return false;
+            var header = recording.Header;
+            return header.sessionId == sessionId && header.streamId == streamId && header.origin == origin;
+        }
         public bool Valid()
         {
             return version == 1 && Guid.TryParse(sessionId, out var s) && s != Guid.Empty

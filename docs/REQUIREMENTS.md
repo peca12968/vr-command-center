@@ -1,5 +1,7 @@
 # 需求與驗收追蹤
 
+第1／9／10／11項新增[結果尾界](DEBRIEF_BOUNDARY.md)：Unity0.36.1／code44、179真正Editor與同源雙平台。原25端長場一份戰績誤綁8441而真正Ended封存8442，原exit1保留；pending綁terminal capture，final必須另核對精確durable seal。三個原生短場12項／六份結果及長場證據見PROGRESS；不是舊31筆、F吞吐或頭盔容量驗收，11項active。
+
 第1／9／10項新增[有界背景世界writer](ASYNC_WORLD_WRITER.md)：0.36／code43、177 Editor／同源雙平台，原durable ack與回放保持，Main world IO移出但F積壓224幀仍失敗。SSD8項354幀／一般8項400幀及故障恢復8項743完整回放、717／459／47與48 Python通過；不得將buffered、main無世界IO或恢復後成功稱F容量／舊31筆修復，11項active，證據見PROGRESS。
 
 第1／9／10項新增[journal鎖／flush分段](JOURNAL_STAGES.md)：Unity0.35／code42、169 Editor及同源雙平台成功；最終F的Main讀鎖等待與背景ack flush交集3.133609秒，SSD8項355幀／一般8項363幀成功。717規則／459 HTTP／47串流、47 Python／19啟動器與原件證據見PROGRESS；未改durability／政策，不當單一硬碟／舊31筆根因或實機容量驗收，11項active。

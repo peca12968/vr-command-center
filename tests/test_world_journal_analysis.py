@@ -24,10 +24,10 @@ class JournalAnalysisTests(unittest.TestCase):
         return self.record(1, {'sequence': sequence, 'observedSequence': observed, 'elapsedMilliseconds': sequence * 100,
             'suspended': suspended, 'frame': {'phase': phase, 'tick': tick, 'players': [{'id': 'private'}]}})
 
-    def analyze(self, data, **options):
+    def analyze(self, data, *, accepted_sequence=7, **options):
         with tempfile.TemporaryDirectory(prefix='vr-journal-read-') as temporary:
             path = Path(temporary) / 'source.worldlog'; path.write_bytes(data)
-            try: return m.analyze(path, 7, **options)
+            try: return m.analyze(path, accepted_sequence, **options)
             finally: self.assertEqual(data, path.read_bytes(), 'Reader changed source bytes')
 
     def test_source_application_can_be_ahead_of_durable_ack(self):
@@ -80,6 +80,24 @@ class JournalAnalysisTests(unittest.TestCase):
     def test_expected_session_must_match_before_correlating_other_run_evidence(self):
         with self.assertRaises(ValueError): self.analyze(self.header() + self.frame(1), expected_session='different')
         self.assertEqual(1, self.analyze(self.header() + self.frame(1), expected_session='private')['firstApplied']['worldSequence'])
+
+    def test_sealed_zero_tail_retains_earliest_peak_local_receipt_backlog(self):
+        prefix = self.header() + self.frame(1) + self.frame(2)
+        data = prefix + self.frame(3) + self.record(2, 1) + self.frame(4, phase='Ended')
+        data += b''.join(self.record(2, i) for i in [2, 3, 4]) + self.record(3, 4) + self.record(4, 4)
+        r = self.analyze(data)
+        self.assertEqual(0, r['unacknowledgedFrames']); self.assertEqual(3, r['peakUnacknowledgedFrames']); self.assertTrue(r['sealed'])
+        self.assertEqual({'worldSequence': 3, 'acknowledgedSequence': 0, 'afterRecordTag': 1, 'recordOffsetBytes': len(prefix)}, r['firstPeakBoundary'])
+
+    def test_missing_begin_is_unknown_while_receipt_backlog_is_still_observable(self):
+        r = self.analyze(self.header() + self.frame(1), accepted_sequence=None)
+        self.assertFalse(r['applicationBoundaryKnown']); self.assertIsNone(r['acceptedSequence']); self.assertIsNone(r['firstApplied'])
+        self.assertEqual(1, r['peakUnacknowledgedFrames'])
+        with self.assertRaises(ValueError): self.analyze(self.header(), accepted_sequence=None, response_utc='2026-10-31T12:00:00+00:00')
+
+    def test_header_only_has_no_backlog_and_no_peak_boundary(self):
+        r = self.analyze(self.header(), accepted_sequence=None)
+        self.assertEqual(0, r['peakUnacknowledgedFrames']); self.assertIsNone(r['firstPeakBoundary'])
 
 
 if __name__ == '__main__': unittest.main()
