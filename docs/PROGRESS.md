@@ -28,6 +28,8 @@ PC用B開啟／下一頁、Escape關閉、L授權，另有面板按鈕；Quest�
 
 完整11項長期目標保持active。本輪為兩位同機PC Simulation，尚無Quest／VIVE、MR校正、廠商硬體、跨機與25台實機驗收；25端最大長文同時入場頻寬及Android字型記憶體也未量測。後續接續多玩家持續操作與場館流程，實機控制器／追蹤與閱讀舒適度分開驗收。
 
+功能提交 `a579ef5ec82f85024de40e23d818e7d57ce23332` 已推送main並核對遠端一致。[本功能CI run41182512425](https://github.com/peca12968/vr-command-center/actions/runs/41182512425)／check124482634848實際failure、steps空；fresh annotation明示付款失敗或支出上限，job未啟動，不能稱雲端測試執行／通過。未更改帳務或手動重跑，本輪以上均為本機證據。提交前另核對三份字型／OFL／NOTICE的Git blob SHA與固定pin相符，明確保留TXT原行尾，避免Git文字正規化破壞來源證據；沒有改pin來配合正規化。
+
 ## 2026-10-31：15分鐘原生任務、完整連續性與封存失聯
 
 前輪有實際進展；從乾淨`524667d`接續新增 [DESKTOP_LONG](DESKTOP_LONG.md)／`check-desktop-long.py` 及 [SEAL_RECOVERY](SEAL_RECOVERY.md)／`check-desktop-seal-faults.py`。本輪只改Python工具／測試／CI與文件；遊戲仍**API／UI0.28、Unity0.30.0／code37／NGO28**、原source fingerprint `d43085f4e6b755649b5da36b0885d6b690d7042f7ce4a871a947bc2e15ede53f`、原ID與同源Windows／Quest receipt。131 Editor／雙平台、680規則／446 HTTP／43串流／60 Node／223 Chromium為前輪成功結果，本輪未重建或重跑，不當新頭盔或UI證據。
