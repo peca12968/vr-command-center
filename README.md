@@ -1,5 +1,7 @@
 # VR Command Center
 
+同版[五獨立房長任務](docs/DESKTOP_INDEPENDENT_LONG.md)已完成5個server＋25個PC程序、每房900秒及42341幀完整回放，單房暫停與各房精確戰績／封存通過。新增閉源JSON／CSV讀回核對，仍是同機靜止Simulation；完整11項與實機／動態操作另見[進度](docs/PROGRESS.md)。
+
 新增[任務結果尾界修正](docs/DEBRIEF_BOUNDARY.md)：等待中的戰績綁定已排入的 Ended 世界幀，送出最終結果前精確核對真正 durable seal，避免背景錄製尚未完成時取到前一幀。Unity0.36.1／code44、179真正Editor與同源Windows／Quest建置成功；原25端長場反例及重跑結果見PROGRESS，完整11項仍在開發中。
 
 新增[有界背景世界writer](docs/ASYNC_WORLD_WRITER.md)：世界幀常態寫入與發布移到背景，captured和durable／ack明確分開，原逐筆flush／完整回放保持，滿載fail closed。Unity0.36／code43、177真正Editor與同源雙平台成功，PC一般8項／SSD負載8項／故障恢復8項通過；F主線世界IO已移除但發布仍積壓，失敗保留，未稱整體慢碟或實機容量已修復。

@@ -64,6 +64,8 @@ jobs:
       - run: python -m unittest discover -s tests -p test_desktop_startup.py
       - run: python -m unittest discover -s tests -p test_admission_witness.py
       - run: python -m unittest discover -s tests -p test_world_journal_analysis.py
+      - run: python -m unittest discover -s tests -p test_independent_evidence.py
+      - run: python -m py_compile scripts/verify-independent-evidence.py
       - run: python -m unittest discover -s tests -p test_publication_timing.py
       - run: python -m unittest discover -s tests -p test_journal_stages.py
       - run: python -m py_compile scripts/analyze-journal-stages.py

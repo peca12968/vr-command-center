@@ -1,5 +1,7 @@
 # 五個獨立世界的15分鐘PC任務
 
+2026-11-01 同源0.36.1／e059新場通過五房各5位／900秒、42341全回放／209420人次及25份精確結果／CSV／雙seal，Room1 tick2410／35個Paused幀與其餘四房隔離。沒有新Editor／雙平台建置，原179與receipt保持；具體數字及同機靜止範圍見[PROGRESS](PROGRESS.md)。
+
 `scripts/check-desktop-independent-long.py`在自己的新API與runtime啟動五個真正Windows server，每房預設五個真正client。五份任務有不同天氣／日夜、場景物件、session／world stream及UDP port，各自執行900秒活動時間並於tick18000自動結束。玩家全為靜止、無圖形Simulation；這不是25位持續操作、25台裝置、跨機／Wi-Fi或Quest／VIVE容量驗收。
 
 先依[DESKTOP](DESKTOP.md)完成目前同源API及Windows播放器，再執行：
@@ -22,3 +24,17 @@ python scripts/check-desktop-independent-long.py --api-dll '<目前同版API.dll
 證據位於全新`artifacts/desktop-long/<時間-識別>/`，以`independent-checks.json`／`fixtureKind=IndependentFiveRoomLong`與Linked工具區分，不能套用只支援Linked的跨場比較器。`executionFinished`表示已走完整驗證；`acceptancePassed`獨立保存全部live／replay、來源年齡及send queue full條件，只有通過且cleanup／snapshot成功才有`complete=true`與exit0。反例仍保留封存與原計數，不能因任務完成改寫成成功。
 
 全部writer停止後才一次複製runtime到該次F槽`runtime-snapshot/`，保留C原件；保存SQLite不需另外開連線。來源與遊戲binary仍F，顯式SSD runtime的結果不代表F USB通過；既有資料、journal、票券與憑證不提交Git。沒有替代原31筆姿態失效的根因定位，完整需求與實機驗收仍見[REQUIREMENTS](REQUIREMENTS.md)。
+
+## 已關閉證據讀回
+
+先由原工具handle確認terminal及全部cleanup完成，再執行：
+
+```powershell
+python scripts/verify-independent-evidence.py artifacts/desktop-long/<已關閉獨立房場次> --output artifacts/<全新讀回報告>.json
+```
+
+可一次提供多個明確的獨立房場次；拒絕Linked格式、重複輸入、未完成的execution／cleanup及寫入原輸入目錄。只讀固定名稱的JSON／CSV、不開SQLite或outbox，不ack／修復／補送；輸出另放全新artifacts檔案，原件保持。
+
+核對五個不同session／stream與各房header／物件範圍、原native名冊／admission／room／seat、獨立保存的seal／最後Ended幀、combat與world尾界、每位七統計、原連線ack名單及CSV hash／數值。Pause witness與報告須一致，其他四房的tick需前進；Running／Paused人次及環境／姿態失效計數與接受旗標也不能互相矛盾。live可合併略過幀，精確尾界／全序列要求仍由完整回放承擔，不另外改遊戲政策。
+
+`complete=true`只表示這次讀回流程完成，`runs[].acceptancePassed`保留各場原本成功或失敗；正確的CSV與seal不能把body失效改成成功。證據hash只是清單而非簽章。這是**既有報告與獨立檔案的一致性核對**，不會重跑原始世界的完整規則，也不能從metadata單獨證明歷史程序執行、逐幀輸入／渲染、原Pause命令因果、根因或實機容量。原生工具仍須先真正運行並保留全量回放證據；本讀回器也不能替代原handle的terminal觀察。

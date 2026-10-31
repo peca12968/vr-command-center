@@ -1,5 +1,37 @@
 # 開發進度
 
+## 2026-11-01：0.36.1五獨立房長任務與閉源證據讀回
+
+上一輪為實際進展；從乾淨 `6fa0d7b` 接續五房獨立驗收。**API/UI0.30、Unity0.36.1／code44／NGO29及e0594513140ff7fb4bc084929691b91c15f7d908e8f59c114aa5ab27daaf11eb來源保持**；本輪只有Python／文件／CI，沒有改遊戲或重建／重跑179 Editor與雙平台，沿用原成功receipt與scene／prefab ID。沒有新.NET、一般瀏覽器、GPU或頭盔結果。
+
+真正場 `desktop-long/20261101-073002-fab40f9a`，**原handle7849真正exit0，executionFinished／acceptancePassed／complete=true**。五個Windows server＋25個headless client，每房5位原admission、各自900秒活動倒數與唯一tick18000自動End。明確C SSD新runtime，來源與遊戲binary仍F；新API／159檔同版執行副本啟動前核對成功，原5080及正式資料不動。各房不同session／world stream／UDP port，Clear日／Fog日／Rain夜／Storm夜／Clear夜、各自barrel／sandbag與旋轉角度；Room控制台對其他房Begin與live watch均403，真正AI初始造成損耗後關閉自動攻擊，沒有玩家輸入／姿態／戰績注入或診斷probe。
+
+Room1 Pause接受13、Resume14，凍結tick2410；在3.094秒觀察窗口內，Room2 2388→2449、Room3 2378→2439、Room4 2355→2418、Room5 2333→2395，皆持續Running。全回放35個Paused幀均在該接受fence且tick相同，原名冊／姿態／健康有效；不計Running人次，其他房的非預期暫停仍算失敗。
+
+五房25份原playerId／admission／room／seat跨票券到期保持、各只一個原連線；每房5份final都對到自己精確world／combat封存，全部ack，CSV七統計／ledger through／stream tail一致。隨後五個4倍回放各自從第1幀到封存尾端，**42,341全幀／41,884 Running／209,420人次**全部核對，最終packet／統計一致：
+
+| 房間 | 全回放幀／世界尾端 | Running幀 | 應核對人次 | 最大保存capture gap ms | 最大觀察時來源年齡秒 |
+|---|---:|---:|---:|---:|---:|
+| 1 | 8455 | 8352 | 41760 | 112 | 0.350129 |
+| 2 | 8500 | 8422 | 42110 | 125 | 0.347735 |
+| 3 | 8468 | 8386 | 41930 | 131 | 0.219043 |
+| 4 | 8459 | 8367 | 41835 | 125 | 0.301952 |
+| 5 | 8459 | 8357 | 41785 | 130 | 0.322635 |
+
+每房live／replay均無body／Paused／環境失效、來源過期或send queue full；live分別跳6／3／3／2／9序號，由全回放補核，不稱丟包／RTT／render FPS。cleanup無錯誤／無殘留，原native script graph為 `40cb2d72a29d7e4bc2df222ca43e83871dbadd22b7dfc7ea6b70277012c0a2f5`，不是完整OS／binary依賴graph。主機其他負載未量測，不能當無負載或隨機因果對照；仍是同機靜止Simulation，headsets0／hosts1／networkCapacityAccepted=false，不是25位同時操作或跨機／Wi-Fi／頭盔驗收。
+
+新增 `scripts/verify-independent-evidence.py`，操作見[五房文件](DESKTOP_INDEPENDENT_LONG.md)。要求原handle先terminal及cleanup明確空列；只讀固定JSON／CSV，逐房交叉核對獨立headers／seal／最後Ended packet、原native admission／room／seat、ack名單、CSV SHA及七統計／session／room／source／雙尾界。檢查Pause witness、Running人次及接受計數；拒絕未知null當乾淨、錯格式／原件內輸出／覆寫。live可coalesce，完整回放仍精確，不新增遊戲政策。輸出complete只表示讀回完成，acceptancePassed另保留失敗；hash非簽章，metadata讀回不是重跑原始規則、歷史OS程序或全量輸入／渲染證據。
+
+新增17項反例涵蓋前一幀尾界、同ID換admission、獨立seal／ack／CSV篡改、統計相符但原body失敗仍false、Pause其他房不前進、replay缺幀、live既有政策及原檔byte保持。最後17＋原10 independent／11 multiplayer／8 comparison／14 journal，**60 Python通過**，語法及diff成功，CI已加入新入口。
+
+舊原工具handle96709已不存在，原exit0與完整cleanup證據保持；新7849也確認terminal後，對舊 `20261031-193917-b2f30b7d` 及新場做兩份各自獨立讀回，`independent-evidence-e059-20261101.json`成功、兩場acceptance保留true。這不是Linked跨場比較器，不推定不同source／主機條件相同，也沒有改寫原0.36尾界失敗或原31筆姿態失效。
+
+五份關閉VRWORLD1另作rb checksum／序號metadata核對，皆Ended tick18000、frame／ack精確相同、completion／seal各一、尾端積壓0；歷史最高本地durable回條積壓依房為4／3／3／3／3，**不是32幀記憶體queue、網路延遲或API拒收**。沒有保存精確Begin回應，applicationBoundaryKnown=false／firstApplied=null，不猜序號或套用延遲；詳見 `independent-e059-journals.json`，未開保存SQLite或outbox、未ack／修復／補送／截尾。
+
+`independent-e059-runtime-validation.json`核對新1個C runtime22檔／F snapshot逐檔一致，前43 runtime869檔、前F337及原失敗場F76、0.36 history321檔保持；新場F證據112檔另存hash。總44 C runtime891檔，所有writer全停才一次snapshot保留原件。舊／0.35／本輪API各159，以及原0.36 ZIP／history與0.36.1 Windows包／APK／receipt metadata保持；本輪沒有新封裝或launcher驗證。
+
+完整11項active。下一步推進同版動態玩家PC操作及連續性，慢碟發布吞吐、原31筆根因／修復、頭盔／MR／VIVE／跨機25台及廠商硬體仍各自待驗。
+
 ## 2026-11-01：背景世界錄製的戰績尾界競態
 
 功能 [5443835](https://github.com/peca12968/vr-command-center/commit/544383540896a746a0ac3ac417d4c72681a85a8c) 已推送main、遠端SHA一致。[本功能CI run41252650265](https://github.com/peca12968/vr-command-center/actions/runs/41252650265)／check124689197862為failure、steps空；fresh annotation明確為付款失敗或支出上限，job未啟動、無雲端測試結果。未改帳務或手動重跑，下列均為本機實際驗證。
