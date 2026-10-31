@@ -29,6 +29,10 @@
 
 完整11項長期目標保持active。這次通過一位同機PC的900秒與兩個可恢復約8秒故障，不是多玩家長期、25位持續操作、跨機、完整API／server崩潰、封存超過玩家期限或Quest／VIVE／MR／廠商硬體驗收。後續優先增加多玩家持續操作與更長／封存期限情境，實機項目分開保留。
 
+額外raw JSON稽核也核對三位原生final的finalStreamSequence等於最後世界packet的throughCombatSequence、worldSequence等於精確acceptedSequence、throughSequence等於ledger；900秒End的actor確為mission-clock且證據tick18000。此與上述SHA核對一併記在long-seal-validation，未重開保存SQLite。
+
+功能提交 `60bc110527d02caaeabb869125d942a94bcf9762` 已推送main、遠端一致。[本功能CI run41178736259](https://github.com/peca12968/vr-command-center/actions/runs/41178736259)／check124471590845實際failure、無步驟啟動；fresh annotation為付款失敗或支出上限，沒有雲端測試結果。未改帳務或手動重跑，本輪以上均為本機證據。
+
 ## 2026-10-31：管理與發布分通道失聯、原生計時恢復
 
 前輪交付屬實際進展；從乾淨`0d39885`接續驗證 [CLOCK_RECOVERY](CLOCK_RECOVERY.md)。新增 `venue_http_gate.py` 及 `check-desktop-clock-faults.py`，本輪只改Python工具／測試／CI與文件。**遊戲仍API／UI0.28、Unity0.30.0／code37／NGO28**，原source fingerprint `d43085f4e6b755649b5da36b0885d6b690d7042f7ce4a871a947bc2e15ede53f`、Scene／prefab ID及同源Windows／Quest receipt保留。131真正EditMode、680規則／446 HTTP／43串流／60 Node／223 Chromium為前輪成功證據，**本輪未重建或重跑這些套件**，不當作新的頭盔或瀏覽器結果。
