@@ -1,5 +1,36 @@
 # 開發進度
 
+## 2026-10-31：25個原生PC程序、場次容量檢查與觀察檔修正
+
+從乾淨`980d0c4`接續無頭盔的PC開發。新增[scripts/check-desktop-capacity.py](../scripts/check-desktop-capacity.py)，操作見[DESKTOP_CAPACITY](DESKTOP_CAPACITY.md)。只改Python／CI／文件，API／UI0.27、Unity0.28.1／code33／NGO26及原0.5秒姿態／1.5秒來源門檻保持。來源fingerprint仍`5eee75868e70237e91b4c6be989c0f4421da98e7e41c5c8adc31878bcb7617b6`，兩份既有receipt及原scene／prefab ID一致，沒有重跑109 EditMode或雙平台建置。
+
+全新隔離API／短效玩家票券，先一個Linked server＋25個真正Windows UDP／NGO client，再精確封存、停止該批程序，另開五個獨立server／每房五個client（同時25人）。全部無圖形、job workers=2、Simulation靜止出生姿態；無時序／GPU／PCM探針、姿態／武器注入、視窗自動化或故意丟包。每房席0–4、不同player／admission／PID／同server connection ID與第六人拒絕均核對。兩模式各60秒穩定期；Pause凍結、Resume tick前進，獨立其他房繼續；之後短暫啟用真正AI攻擊，五房皆有中彈，關閉後End／精確seal／六份CSV及授權SSE回放一致。這不是60秒持續25人移動射擊／戰鬥負載。
+
+成功完成的場次檢查run **`desktop-capacity/20261031-100055-1d0cee1d`**，原執行exit0、20項／六世界、complete=true且cleanup後才stage=passed：
+
+| 世界 | 總幀／逐張核對穩定期回放幀 | 最大擷取UTC來源年齡 | 玩家／中彈／損耗 |
+|---|---|---|---|
+| Linked | 647／556 | 0.157579秒 | 25／5／100 |
+| 獨立1 | 650／557 | 0.166231秒 | 5／1／20 |
+| 獨立2 | 651／552 | 0.152643秒 | 5／1／20 |
+| 獨立3 | 663／558 | 0.158965秒 | 5／1／20 |
+| 獨立4 | 668／557 | 0.160492秒 | 5／2／40 |
+| 獨立5 | 684／571 | 0.170800秒 | 5／1／20 |
+
+共3963保存幀、3351張穩定期幀逐張確認全名冊／健康100／正確房間出生位／Simulated且connected、Running未suspend；最後幀與ledger相符。來源年齡不是RTT／client延遲。穩定期後的AI傷害分開統計，玩家射擊耗彈／命中／擊殺均0。主機總實體記憶體34,088,247,296 bytes，最小可用8.031555 GiB，2GiB保留檢查未觸發；不是產品效能保證。
+
+**網路容量驗收仍未通過。**最後離線複查原生日誌發現Linked server有**105行send queue full**；其他原生日誌未有相同字串。原行無時間戳，未知發生階段／client接收影響，不能從world新鮮或回放／報表一致推論下行複本正常，也不能把錯誤行數當遺失封包數。20項僅是伺服器入場／靜止姿態／場次與封存證據，不是零網路錯誤或25人完整驗收。之後摘要明確validationScope、networkCapacityAccepted=false並掃描nativeLogFindings／WARN；只對已停原始日誌離線核對這項最後增補，未再啟動25人或重寫歷史capacity-result。下一步量測各client複本／時效與佇列錯誤階段，再判斷修正，不能盲目照log提高容量。
+
+首輪`094657-3a41bb29`雖20功能檢查完成，卻在F snapshot複製exit1；SSD原件24檔完整，失敗F副本22檔，缺兩個空writer lease。稍後僅另複製兩lease到新probe目錄成功，提示短暫存取競爭，但原shutil詳細錯誤未記錄，**不能確定OS根因**。不覆蓋失敗副本、不補改其stage／cleanup。修正共用snapshot_runtime：全部追蹤writer退出後，最多5秒等待自己的mission／session lease可共享讀取，保持read handles才copytree一次；既有／巢狀目的地拒絕，持續錯誤非零、不改ACL／強制解鎖。cleanup保留有界detail，容量passed移到cleanup成功之後。
+
+首輪練習場回歸`capacity-practice-regression.log`前兩case各9項，第三case因latest-frame.json原位截斷寫入而JSONDecodeError，exit1；finally自行End／收尾，不稱27項成功。共用Venue.save改同目錄唯一暫存完整寫入後replace，Windows分享／PermissionError最多2秒等待；read_json同類存取有界等待但不吞JSON格式錯誤，保存路徑不得逃出自有run。它不是journal的durable flush，也不把所有PermissionError直接歸因分享；持續權限錯誤仍失敗。CSV可指定安全檔名、六場各自保存，原練習場預設不變。
+
+修正後**6項容量規則＋5項觀察檔Python檢查**與語法通過，含真正Windows獨占lease釋放等待及並行JSON讀寫，非11次原生試跑。練習場`desktop-practice-checks/20261031-100622-91f27744` **27項**全部通過；控制台`desktop-venue/20261031-101101-c8454660` launcher／checker皆exit0、**49項UI／native整合**，128幀／最大來源年齡0.152128秒。檢視final-report.png，主玩家損耗40／中彈2／健康60，離場Peer02與替換Peer03保留；瀏覽器SwiftShader／native無圖形，沒有新GPU／聽感證據。
+
+容量24檔、三個練習場及控制台各14檔runtime皆全停writer才回F，cleanup無錯誤無殘留、活動0、world完整及精確戰鬥封存。SSD原件／F副本bytes SHA相同，稽核前後不變；只讀JSON／CSV／bytes，未開原SQLite、未重複複製或修改副本。摘要`artifacts/capacity-validation.json`及`capacity-regressions-validation.json`；容量日誌105行錯誤另明列上述限制。來源／binary仍F，runtime明確C SSD，不是F USB全資料成功。原5080唯讀GET仍0.16／原歷史，Unity serve未碰，憑證未輸出或提交。
+
+未驗各client遠端複本、25個玩家持續真實移動／射擊、繪圖FPS／音訊、跨機／Wi-Fi、Quest／VIVE／MR或廠商硬體；原偶發姿態停頓根因亦未修復。沒有重跑歷史後端／完整瀏覽器／七場五房／8項重連；完整11項與長期目標保持開發中。
+
 ## 2026-10-31：自有程序CPU時間／週期計數與主迴圈空窗
 
 從乾淨`7083906`接續PC穩定性。新增`pose-process-timing.py`／`analyze-process-timing.py`及helper明確`--process-timing`，**僅讀取本輪三個自有Unity程序**。父程序先借用自己的Popen原handle取得建立FILETIME／執行檔，借用結束不關原handle；probe以QUERY_LIMITED_INFORMATION＋SYNCHRONIZE重新開啟唯讀handle，核對建立時間／完整exe，固定持有同一process object、不追隨重用PID。只查GetProcessTimes／QueryProcessCycleTime與零等待存活狀態，不列舉其他程序、不讀記憶體／堆疊、不開thread、不暫停或改優先級／權限／系統設定。

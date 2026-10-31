@@ -8,6 +8,7 @@ import argparse
 import csv
 import hashlib
 import io
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,8 @@ import urllib.request
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
+spec=importlib.util.spec_from_file_location('practice_artifacts',ROOT/'scripts/start-desktop-venue.py')
+artifacts=importlib.util.module_from_spec(spec);spec.loader.exec_module(artifacts)
 
 
 def main():
@@ -72,8 +75,8 @@ def main():
                     directory = candidate
                 if stage.get('stage') == 'ready': break
             else: raise RuntimeError('Practice startup did not become ready')
-            ready = json.loads((directory / 'ready.json').read_text())
-            tokens = json.loads((directory / 'keys.json').read_text())['OperatorKeys']
+            ready = artifacts.read_json(directory/'ready.json')
+            tokens = artifacts.read_json(directory/'keys.json')['OperatorKeys']
             def api(route, body=None):
                 request = urllib.request.Request(ready['baseUrl'] + route,
                     data=None if body is None else json.dumps(body).encode(),
@@ -89,7 +92,7 @@ def main():
                     except (OSError, ValueError): pass
                     time.sleep(.1)
                 raise RuntimeError('Timed out: ' + label)
-            def frame(): return json.loads((directory / 'latest-frame.json').read_text())['packet']['frame']
+            def frame(): return artifacts.read_json(directory/'latest-frame.json')['packet']['frame']
             initial = until(lambda: (value if (value := frame())['phase'] == 'Running' else None), 'initial practice frame')
             session = ready['sessionId']; ids = set(ready['playerIds'])
             check(len(ids) == peers + 1 and {p['id'] for p in initial['players'] if p['connected'] and p['rig']['kind'] == 'Simulated'} == ids,
@@ -122,8 +125,8 @@ def main():
                 elif end == 'endRequested': (directory / 'end.request').write_text('', encoding='utf-8')
             rc = child.wait(timeout=300 if args.interactive else 100)
             check(rc == 0, label + ': launcher exits successfully after ' + end)
-            summary = json.loads((directory / 'summary.json').read_text())
-            cleanup = json.loads((directory / 'cleanup.json').read_text())
+            summary = artifacts.read_json(directory/'summary.json')
+            cleanup = artifacts.read_json(directory/'cleanup.json')
             report = (directory / 'final-report.csv').read_bytes()
             rows = list(csv.DictReader(io.StringIO(report.decode('utf-8-sig'))))
             check(summary['stopReason'] == end and summary['world']['complete'] and not summary['statistics']['pendingTelemetry']

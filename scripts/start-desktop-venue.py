@@ -4,6 +4,7 @@ All native players use Simulation rigs. Every process, credential and database i
 owned by this isolated fixture; the existing preview service is never touched.
 """
 import argparse
+from contextlib import ExitStack
 from datetime import datetime, timezone
 import importlib.util
 import json
@@ -22,6 +23,54 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def read_json(path):
+    deadline=time.monotonic()+2
+    while True:
+        try:return json.loads(path.read_text(encoding='utf-8'))
+        except OSError as error:
+            sharing=getattr(error,'winerror',None) in (32,33) or os.name=='nt' and isinstance(error,PermissionError)
+            if not sharing or time.monotonic()>=deadline:raise
+            time.sleep(.01)
+
+
+def atomic_json(path, value):
+    """Observation / config files only; journal durability is unchanged."""
+    temporary=path.with_name(path.name+'.'+uuid.uuid4().hex+'.tmp')
+    try:
+        with temporary.open('x',encoding='utf-8') as output:output.write(json.dumps(value,indent=2)+'\n')
+        deadline=time.monotonic()+2
+        while True:
+            try:os.replace(temporary,path);return
+            except OSError as error:
+                sharing=getattr(error,'winerror',None) in (32,33) or os.name=='nt' and isinstance(error,PermissionError)
+                if not sharing or time.monotonic()>=deadline:raise
+                time.sleep(.01)
+    finally:
+        if temporary.exists():temporary.unlink()
+
+
+def snapshot_runtime(source,destination):
+    source=source.resolve();destination=destination.resolve()
+    if source==destination or destination.is_relative_to(source) or source.is_relative_to(destination):raise ValueError('Snapshot directories must be separate')
+    if destination.exists():raise FileExistsError('Preserve the existing snapshot; never overwrite or retry into it')
+    deadline=time.monotonic()+5
+    while True:
+        readers=ExitStack()
+        try:
+            # All tracked writers have already exited. On Windows keep shared
+            # read handles while copying: a FileShare.None writer cannot reopen.
+            for name in ('missions/.library-writer.lock','sessions/.writer.lock'):
+                path=source/name
+                if path.exists():readers.enter_context(path.open('rb'))
+            break
+        except OSError as error:
+            readers.close()
+            sharing=getattr(error,'winerror',None) in (32,33) or os.name=='nt' and isinstance(error,PermissionError)
+            if not sharing or time.monotonic()>=deadline:raise
+            time.sleep(.05)
+    with readers:shutil.copytree(source,destination)
+
+
 def verify_player(args):
     if os.name != 'nt' or not args.player_exe.is_file() or not args.api_dll.is_file():
         raise RuntimeError('Build the Windows player and API first')
@@ -35,7 +84,7 @@ def verify_player(args):
 
 class Venue:
     def __init__(self, args, *, artifact_family='desktop-venue'):
-        if artifact_family not in ('desktop-venue', 'desktop-demo'):
+        if artifact_family not in ('desktop-venue', 'desktop-demo', 'desktop-capacity'):
             raise ValueError('Unknown native fixture artifact family')
         self.args = args
         self.artifact_family = artifact_family
@@ -53,7 +102,9 @@ class Venue:
         self.receipt = json.loads((args.player_exe.parent / 'build-receipt.json').read_text())
 
     def save(self, name, value):
-        (self.directory / name).write_text(json.dumps(value, indent=2) + '\n', encoding='utf-8')
+        path=self.directory/name
+        if path.parent.resolve()!=self.directory.resolve():raise ValueError('Artifact name must stay in this run directory')
+        atomic_json(path,value)
 
     def stage(self, stage, **extra):
         self.save('stage.json', {'stage': stage, **extra})
@@ -263,8 +314,8 @@ class Venue:
             # Copy only after all fixture writers have stopped. Keep original journals;
             # never move or delete an existing runtime or preview directory.
             if self.runtime_directory != self.directory and not self.processes:
-                try: shutil.copytree(self.runtime_directory, self.directory / 'runtime-snapshot')
-                except Exception as error: errors.append({'operation': 'runtime snapshot', 'errorType': type(error).__name__})
+                try: snapshot_runtime(self.runtime_directory, self.directory / 'runtime-snapshot')
+                except Exception as error: errors.append({'operation': 'runtime snapshot', 'errorType': type(error).__name__,'detail':str(error)[:4096]})
             self.save('cleanup.json', {'errors': errors, 'remainingTrackedChildren': list(self.processes)})
         return not errors and not self.processes
 

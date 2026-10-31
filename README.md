@@ -4,7 +4,9 @@
 
 依 2026-10-29 的使用者指示，**優先開發 Meta Quest 3**，暫以 Android 獨立執行為工作假設；VIVE 延後接入，共用架構與原始雙平台目標保留。
 
-目前為 **API v0.27／Unity 遊戲端 v0.28.1 原型**。真正 Editor 已完成 Prepare、109 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 26，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
+目前為 **API v0.27／Unity 遊戲端 v0.28.1 原型**。真正 Editor 已完成 Prepare、109 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 26，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人完整驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
+
+新增[25個原生PC程序檢查](docs/DESKTOP_CAPACITY.md)：Linked及五獨立房各25個同機無圖形client、各60秒，20項伺服器入場／場次／AI傷害／封存檢查通過；3351張穩定期回放幀全名冊核對。Linked日誌另有105行send queue full，尚無各client複本量測，**網路容量驗收未通過**。共用JSON原子保存及快照lease等待修正後，練習場27項、控制台49項回歸成功；詳見PROGRESS，不等於25台或持續移動射擊效能。
 
 [電腦練習場入口](docs/DESKTOP.md)已接上目前API0.27及共用原生生命週期，拒絕過期receipt，支援明確SSD runtime、同房最多五個PC client、正常關窗／控制台End／到時封存，結束自動核對CSV。27項無圖形及9項真正視窗流程通過；這是同機Simulation，非25台或跨機驗收。
 

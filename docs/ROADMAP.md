@@ -18,6 +18,8 @@
 
 ## 下一個開發順序
 
+最新[25原生PC程序檢查](DESKTOP_CAPACITY.md)已有兩模式各25 client／60秒、20項伺服器與封存檢查、3351穩定回放幀及SSD／F 24檔一致；但Linked日誌有105行send queue full，網路容量驗收仍未通過。先補各client遠端複本／時效及佇列錯誤階段，再推進真實移動射擊與跨機。共用JSON／snapshot修正已通過6＋5 Python、27練習場及49控制台回歸；不把來源新鮮度當client延遲，原偶發姿態問題仍待。
+
 最新[當前版本時序](POSE_TIMING.md)已在該觀察空窗內取得全程序CPU／cycles進展，不能一概解釋成三程序全程停止；仍未知主執行緒／其他worker的實際工作與等待。診斷與外部工具擾動尚未排除，接續識別main thread及主迴圈外區段，不放寬門檻，不稱修復。
 
 最新[電腦練習場](DESKTOP.md)修復已拒絕目前API的舊0.21 gate，改共用現有0.27來源／admission／精確seal，支援SSD runtime及自動核對CSV。27項無圖形／9項真正W／Space／R與關窗、6項前置／非預期關閉反例、49項既有控制台／native回歸通過；沒有重跑前輪後端／Unity／APK，也不當作頭盔／25台／跨機證據。

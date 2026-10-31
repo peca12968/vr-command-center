@@ -12,6 +12,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import time
@@ -23,7 +24,8 @@ spec = importlib.util.spec_from_file_location('practice_venue', ROOT / 'scripts/
 venue_module = importlib.util.module_from_spec(spec); spec.loader.exec_module(venue_module)
 
 
-def save_report(venue, entry, statistics):
+def save_report(venue, entry, statistics, *, filename='final-report.csv'):
+    if not re.fullmatch(r'[a-z0-9][a-z0-9-]*\.csv',filename):raise ValueError('Use a local report filename')
     request = urllib.request.Request(venue.base + f'/api/sessions/{entry["id"]}/report.csv',
         headers={'Authorization': 'Bearer ' + venue.tokens['Master']})
     with urllib.request.urlopen(request, timeout=8) as response:
@@ -43,7 +45,7 @@ def save_report(venue, entry, statistics):
             or int(row['finalStreamSequence']) != current['combatStream']['acceptedSequence'] \
             or any(Decimal(row[key]) != Decimal(str(player[key])) for key in ('ammoUsed','shotsHit','kills','hitsReceived','damageTaken','health','accuracyPercent')):
             raise RuntimeError('Final report does not match the sealed ledger')
-    destination = venue.directory / 'final-report.csv'
+    destination = venue.directory / filename
     destination.write_bytes(content)
     return {'path': str(destination), 'sha256': hashlib.sha256(content).hexdigest(), 'players': len(rows), 'verified': True}
 
