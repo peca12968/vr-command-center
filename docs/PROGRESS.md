@@ -33,6 +33,8 @@
 
 本輪只改Python／CI與文件；Unity來源fingerprint仍 **`5eee75868e70237e91b4c6be989c0f4421da98e7e41c5c8adc31878bcb7617b6`**，既有Windows／Quest receipts及原scene／prefab ID一致。API／UI0.27、Unity0.28.1／code33／NGO26、rules0.8.0、envelope6／world schema1、header／checksum、profile pins與Tracked資料保持。沒有重跑前輪109 EditMode／雙平台、49 UI／native或歷史後端／完整瀏覽器／五房／重連，不混算為本輪通過數。原5080唯讀GET仍0.16／原歷史，Unity serve未碰。來源／binary仍F、新runtime明確C SSD，非F USB全資料、跨機、MR／Quest／VIVE實機、廠商硬體或25台證據；完整11項與長期目標保持開發中。
 
+功能提交`079f3cec0ffaba5c45b1e05a14060b3763966d2a`已推送main並核對遠端一致；GitHub #1保持open，更新後獨立讀回3687字本文逐字一致，保留原11項與歷史封存連結。[功能提交CI run41155920513](https://github.com/peca12968/vr-command-center/actions/runs/41155920513)／check124402566095實際failure、steps=null，annotation明示付款失敗或支出上限、工作未開始，沒有雲端執行結果。未改帳務或重跑，本機／原生證據獨立記錄。
+
 ## 2026-10-31：主迴圈邊界定位、同版對照與0.28.1雙平台
 
 從乾淨`19843f2`接續PC姿態過期。Unity **0.28.1／Android code33**，API／UI0.27及NGO26保持。新增明確選用的`--vr-pose-loop-trace`與helper `--player-loop`，只在原Windows Development pose trace一起安裝；一般啟動、Editor與Android不安裝。從目前PlayerLoop在當時既有節點前後插入自己的兄弟觀察點，不改原type／delegate／native function／loop condition與次序。512節點／32層前置界線、4096個>100ms稀疏空窗、240秒上限；保留最早資料，完整性／截斷獨立。每點讀單調時間、UTC、frame並更新有界計數，不做GPU、PCM、網路或收集期間檔案輸出。停止時只移除目前樹中屬於自己的marker，保留後來的NGO／其他變更；剩餘當幀callback由stopped旗標no-op，不還原舊樹快照。
