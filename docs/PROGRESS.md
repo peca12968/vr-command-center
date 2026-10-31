@@ -22,6 +22,8 @@ computer-use實際視窗觀察：Paused REMAIN00:55，真正Space後仍30／90�
 
 限制：本輪兩位同機PC Simulation與明確暫停／到期案例；非25人同步操作、跨機／頭盔／MR／廠商硬體、長任務或API／server崩潰恢復驗收。原主迴圈停頓亦未證明修復。完整11項長期目標保持active。後續優先驗證計時期間管理／發布失聯與長任務，取得設備後另驗Quest追蹤、控制器、效能及VIVE相容。
 
+功能提交 `3d90c9b8221b49825f11a984d14c8a3af85156e0` 已推送main並核對遠端一致。[本提交CI run41175253162](https://github.com/peca12968/vr-command-center/actions/runs/41175253162)／check124461355970實際failure、無任何步驟啟動；fresh annotation明示付款失敗或支出上限，不能稱雲端測試執行／通過。未更改帳務或手動重跑；以上為本機證據。
+
 ## 2026-10-31：End入場延遲、結果丟包與真正期限回歸
 
 前輪交付及推送屬實際進展；本輪從乾淨`34ee9f7`接續驗證尚缺的結束競態。新增[DESKTOP_END_NETWORK](DESKTOP_END_NETWORK.md)／`check-desktop-end-race.py`及只供本輪自有client的`udp_gate.py`。最初推測剛approved的玩家可能因client尚未就緒而丟失結果，但第一個真正延遲實驗實際收到正確結果，**不以未重現的假設修改遊戲端／NGO協定**。
