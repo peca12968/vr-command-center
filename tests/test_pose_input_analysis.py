@@ -136,6 +136,12 @@ class PoseInputAnalysisTests(unittest.TestCase):
             with self.assertRaises(ValueError):analysis.analyze(d)
         self.run_case(verify)
 
+    def test_declared_process_timing_cannot_silently_lose_its_report(self):
+        def verify(d):
+            (d/'input-timing-result.json').write_text(json.dumps({'processTiming':True}))
+            with self.assertRaises(ValueError):analysis.analyze(d)
+        self.run_case(verify)
+
     def empty_loop(self):
         # Observed Windows JsonUtility representation of a null report field.
         return {'version':1,'capacity':4096,'maximumNodes':512,'source':'NativeWindowsPlayerLoopBoundaries',

@@ -4,7 +4,7 @@
 
 2026-10-29 使用者指定「先用 META QUEST 3」：M2 先交付 Quest 3 垂直切片，暫按 Android 獨立執行規劃；VIVE 的確切型號與接入移至後續相容階段。
 
-2026-10-31 PC穩定性新證據：Unity0.28.1／code33、109真正EditMode／同源Windows及Quest成功。新選用邊界記錄在三程序取得after WaitForLastPresentationAndUpdateTime→before TimeUpdate的共同0.7167323秒空窗，原Update交集0.727348秒、獨立timer≤16.433ms。這不是該Wait內CPU耗時或底層根因；繼續該觀察點間引擎／訊息處理與各自有程序執行狀態取證，保持原0.5／1.5秒政策。33 Python／49一般UI native及兩場真正三發見[POSE_TIMING](POSE_TIMING.md)及PROGRESS，不是實機／25台驗收。
+2026-10-31 PC穩定性新證據：外部唯讀取樣在共同loop0.594546秒空窗內，取得三程序CPU時間／cycles增加，且11對相鄰查詢每對均有cycles進展；另一場零時間計數不證明暫停。43 Python與兩場真正三發／精確封存通過，Unity0.28.1／code33／109 EditMode及雙平台為前輪已驗、本輪來源／binary不變。下一步辨識主執行緒與主迴圈外工作／等待，不將全程序CPU當main-thread CPU、不放寬0.5／1.5秒政策。詳見[POSE_TIMING](POSE_TIMING.md)及PROGRESS，非實機／25台驗收。
 
 | 階段 | 交付 | 通過條件 | 目前狀態 |
 |---|---|---|---|
@@ -18,7 +18,7 @@
 
 ## 下一個開發順序
 
-最新[當前版本時序](POSE_TIMING.md)已取得294個邊界的三程序完整報告，長空窗落在after時間等待與before TimeUpdate兩個觀察點之間，仍不是該Wait或其他子系統的根因證明。同版無loop實際三發對照乾淨，診斷與外部工具擾動尚未排除；接續該區段與各自有程序執行狀態取證，不放寬門檻，不稱修復。
+最新[當前版本時序](POSE_TIMING.md)已在該觀察空窗內取得全程序CPU／cycles進展，不能一概解釋成三程序全程停止；仍未知主執行緒／其他worker的實際工作與等待。診斷與外部工具擾動尚未排除，接續識別main thread及主迴圈外區段，不放寬門檻，不稱修復。
 
 最新[電腦練習場](DESKTOP.md)修復已拒絕目前API的舊0.21 gate，改共用現有0.27來源／admission／精確seal，支援SSD runtime及自動核對CSV。27項無圖形／9項真正W／Space／R與關窗、6項前置／非預期關閉反例、49項既有控制台／native回歸通過；沒有重跑前輪後端／Unity／APK，也不當作頭盔／25台／跨機證據。
 

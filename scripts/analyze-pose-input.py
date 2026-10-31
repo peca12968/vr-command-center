@@ -14,6 +14,8 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('timing_common', ROOT / 'scripts/analyze-pose-trace.py')
 common = importlib.util.module_from_spec(spec); spec.loader.exec_module(common)
+cpu_spec=importlib.util.spec_from_file_location('process_timing_analysis',ROOT/'scripts/analyze-process-timing.py')
+process_cpu=importlib.util.module_from_spec(cpu_spec);cpu_spec.loader.exec_module(process_cpu)
 SCALE = 10_000_000
 UNIX_TICKS = 621355968000000000
 
@@ -243,7 +245,24 @@ def analyze(directory):
         raise ValueError('Declared independent heartbeat report is missing')
     if fixture.get('playerLoop') and len(loop_reports)!=3:
         raise ValueError('Declared PlayerLoop reports are missing')
-    return {'source': 'Actual native same-host timing; individual connections; no per-packet correlation', 'independentHeartbeat': heartbeat,'playerLoop':loop_reports or None,
+    cpu_path=root/'pose-process-timing/report.json';cpu=None
+    if cpu_path.exists():
+        if fixture.get('processTiming') is False:raise ValueError('Unexpected CPU timing in disabled fixture')
+        manifest=json.loads((root/'pose-process-targets.json').read_text())
+        if manifest['schemaVersion']!=1 or manifest['source']!='OwnedProcessTimingTargets' or {t['role'] for t in manifest['targets']}!={'Visible','Peer','Server'}:
+            raise ValueError('Invalid three-process ownership manifest')
+        cpu_intervals=[dict(kind='sharedUpdate',**r) for r in overlap or []]
+        loop_valid=all(r['clockJoinValid'] for r in loop_reports.values())
+        if loop_reports and loop_valid:
+            shared_loop=None
+            for r in loop_reports.values():
+                values=[(g['fromUtcTicks'],g['toUtcTicks']) for g in r['gaps'] if g['seconds']>.5]
+                shared_loop=values if shared_loop is None else intersection(shared_loop,values)
+            cpu_intervals.extend({'kind':'sharedLoop','fromUtcTicks':a,'toUtcTicks':b,'seconds':(b-a)/SCALE}
+                for a,b in intersection(shared_loop,[periods['observation']]))
+        cpu=process_cpu.analyze(json.loads(cpu_path.read_text()),manifest['targets'],cpu_intervals,join_valid and loop_valid)
+    if fixture.get('processTiming') and cpu is None:raise ValueError('Declared process timing is missing')
+    return {'source': 'Actual native same-host timing; individual connections; no per-packet correlation', 'independentHeartbeat': heartbeat,'playerLoop':loop_reports or None,'processTiming':cpu,
         'connectionIds': connections, 'clockStepMaximumSeconds': clock_steps, 'clockJoinValid': join_valid,
         'phases': {name: phase_summary(period) for name, period in periods.items()} if join_valid else None, 'hudStaleTransitions': stale_hud,
         'overlappingThreeProcessMainThreadGaps': overlap,
@@ -268,6 +287,11 @@ def main():
     if heartbeat_cleanup.exists() and json.loads(heartbeat_cleanup.read_text()) != {'errors': [], 'remaining': []}:
         raise ValueError('Heartbeat writer did not stop cleanly')
     if not (directory/'input-timing-result.json').exists():raise ValueError('Completed native input fixture metadata is missing')
+    fixture=json.loads((directory/'input-timing-result.json').read_text())
+    cpu_cleanup=directory/'process-timing-cleanup.json'
+    if fixture.get('processTiming') and not cpu_cleanup.exists():raise ValueError('Process timing cleanup is missing')
+    if cpu_cleanup.exists() and json.loads(cpu_cleanup.read_text())!={'errors':[],'remaining':[]}:
+        raise ValueError('Process timing writer did not stop cleanly')
     result = analyze(directory)
     (directory / 'input-timing-analysis.json').write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
     print(json.dumps(result, indent=2))
@@ -278,6 +302,8 @@ def main():
         raise SystemExit('Unstable PlayerLoop clock: boundary joins withheld')
     if result['playerLoop'] is not None and not all(r['observationFullyCovered'] for r in result['playerLoop'].values()):
         raise SystemExit('PlayerLoop boundary observations did not cover the full observation period')
+    if result['processTiming'] is not None and not result['processTiming']['clockJoinValid']:
+        raise SystemExit('Unstable CPU timing clock: process joins withheld')
 
 
 if __name__ == '__main__': main()

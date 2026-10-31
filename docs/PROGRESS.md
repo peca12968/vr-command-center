@@ -1,5 +1,38 @@
 # 開發進度
 
+## 2026-10-31：自有程序CPU時間／週期計數與主迴圈空窗
+
+從乾淨`7083906`接續PC穩定性。新增`pose-process-timing.py`／`analyze-process-timing.py`及helper明確`--process-timing`，**僅讀取本輪三個自有Unity程序**。父程序先借用自己的Popen原handle取得建立FILETIME／執行檔，借用結束不關原handle；probe以QUERY_LIMITED_INFORMATION＋SYNCHRONIZE重新開啟唯讀handle，核對建立時間／完整exe，固定持有同一process object、不追隨重用PID。只查GetProcessTimes／QueryProcessCycleTime與零等待存活狀態，不列舉其他程序、不讀記憶體／堆疊、不開thread、不暫停或改優先級／權限／系統設定。
+
+每50ms查三份累積kernel／user時間與CPU cycles；每次查詢有前後perf_counter／UTC括號，最多5000輪／15000列／240秒，保留最早資料、不環狀覆寫。首份ready在基線前一次寫入，收集期除每250ms檢查自己的finish.request，不輸出樣本。明確finish才完整，先關全部唯讀handle、再一次寫report；child handle由helper持有，正常及失敗finally均收尾，另存process-timing-cleanup。這是外部唯讀診斷，沒有新的Unity或後端程式碼／遊戲資料契約。
+
+兩個真正直接loopback場，原Windows0.28.1／code33／NGO26、API／UI0.27、可見玩家＋無圖形peer＋server。都帶原有pose／loop trace、獨立10ms heartbeat與新CPU probe；無丟包控制／姿態或武器注入，computer-use真實Space三次，兩場HUD均29／28／27、權威耗彈3／命中0／擊殺0／健康100，各**4項真正原生流程**通過：
+
+| desktop-venue／20261031前綴 | 世界幀／最大擷取UTC來源年齡 | CPU取樣 | 原Update／三方邊界共同空窗 | 運行期HUD過期後回ACTIVE |
+|---|---|---|---|---|
+| `091639-4a14adf0` | 793／0.647925秒 | 1556輪／4668列，原始版本未記cycles | 0.642856／0.6374241秒 | 約0.196110秒 |
+| `092109-f446e5f7` | 687／0.577435秒 | 1336輪／4008列，cycleCounterVersion1 | 0.6070879／0.594546秒 | 約0.150704秒 |
+
+兩場長空窗都再次位於after `TimeUpdate+WaitForLastPresentationAndUpdateTime`→before `TimeUpdate`，不是該Wait節點的before→after。loop三報告完整／detached並覆蓋全觀察期，CPU UTC／perf guard最大1.3915／2.1863ms；最長單次查詢1.095／1.905ms，最大同程序樣本分隔53.771／56.773ms。獨立heartbeat最大wake14.3472／18.9925ms，完整覆蓋原Update交集。啟動期HUD提示仍明示在觀察區間外，不當作運行期樣本。
+
+第一場共同loop區間內，各程序都有**13個完整查詢括號**、實際首末跨度約0.606秒，kernel／user累積差皆0；相鄰名義等長前後窗口卻都增加（visible前0.21875／後0.15625 CPU秒，peer0.0625／0.03125，server0.078125／0.078125）。這只能記為noAccountedAdvanceObserved，**零值不證明整個程序被暫停**。因此在原場完全終止後，加入唯讀cycle counter再開第二場，沒有重啟仍存活的工作，也沒有補寫第一場raw cycles。
+
+第二場共同loop區間ticks **639290065068466589–639290065074412049**（0.594546秒），每程序12個內部樣本，實測首末跨度約0.5586秒、且前後皆有樣本包住：
+
+| 程序 | kernel＋user累積增加 | CPU cycles增加 | 11對相鄰內部查詢中cycles增加次數 | 前／後比較窗口CPU秒 |
+|---|---|---|---|---|
+| 可見玩家 | 0.03125秒 | 22,077,542 | 11／11 | 0.15625／0.140625 |
+| 背景peer | 0.03125秒 | 20,440,676 | 11／11 | 0.0625／0.046875 |
+| server | 0.015625秒 | 18,748,061 | 11／11 | 0.078125／0.046875 |
+
+這次**三個process的計數在主迴圈共同空窗內仍持續增加**，不支持把整段直接解釋成三程序全程停止；但計數加總全部threads，仍不知道主執行緒本身／其他worker各做了什麼，不能據此說主線程正常、證明特定等待／音效／GPU／I/O／排程／transport根因或已修復。第一場粒度受限的零值不能推成與第二場成因相同或相反。取樣及外部視窗／輸出查詢的擾動仍未排除；下一步須辨識主執行緒與主迴圈外工作／等待，維持原0.5秒姿態及1.5秒來源門檻。
+
+分析只用**查詢UTC括號完全落在區間內**的首末樣本差，不插值、不把外側CPU灌入；上界向外取整至100ns，少於兩點明示insufficientInteriorSamples／null。前後為名義等長比較窗口，實際首末樣本跨度不同，不把累積差直接當相同工作量。GetProcessTimes依[官方定義](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocesstimes)用100ns時間單位；[QueryProcessCycleTime](https://learn.microsoft.com/en-us/windows/win32/api/realtimeapiset/nf-realtimeapiset-queryprocesscycletime)是全程序threads的cycles，本工具不換算成秒或CPU百分比。檢查manifest身份逐字一致、角色／輪數／單調計數、handle關閉、完整性／clock guard；失敗或UTC差達50ms不做join，CLI非零。原始第一場缺cycle版本仍讀為0／unavailable，不造零cycles；舊0.28.1有／無loop的兩場資料重分析通過。
+
+**43項Python檢查**通過：9個程序計時（8個合成／規則方法＋1個真正Windows唯讀producer與自己的Python CPU worker）、16個輸入、8個loop、7個heartbeat（其中1個真正timer程序）、3個舊分析；Python語法通過。這不是43次原生或頭盔試跑，Linux的Windows producer項明確skip而非冒充執行；本輪只在Windows本機實際跑。兩場先停外部probe與三份native trace，再獨立End／戰鬥與世界精確seal，world complete、回放／ledger一致、pending=false／活動0，三份cleanup均無錯誤無殘留，CPU report各關閉3個唯讀handle。每場**28檔**SSD runtime全停writer後回F、與保留原件SHA一致，稽核前後不變；只讀JSON／bytes，未開原SQLite或重寫snapshot。摘要`artifacts/pose-cpu-validation.json`。
+
+本輪只改Python／CI與文件；Unity來源fingerprint仍 **`5eee75868e70237e91b4c6be989c0f4421da98e7e41c5c8adc31878bcb7617b6`**，既有Windows／Quest receipts及原scene／prefab ID一致。API／UI0.27、Unity0.28.1／code33／NGO26、rules0.8.0、envelope6／world schema1、header／checksum、profile pins與Tracked資料保持。沒有重跑前輪109 EditMode／雙平台、49 UI／native或歷史後端／完整瀏覽器／五房／重連，不混算為本輪通過數。原5080唯讀GET仍0.16／原歷史，Unity serve未碰。來源／binary仍F、新runtime明確C SSD，非F USB全資料、跨機、MR／Quest／VIVE實機、廠商硬體或25台證據；完整11項與長期目標保持開發中。
+
 ## 2026-10-31：主迴圈邊界定位、同版對照與0.28.1雙平台
 
 從乾淨`19843f2`接續PC姿態過期。Unity **0.28.1／Android code33**，API／UI0.27及NGO26保持。新增明確選用的`--vr-pose-loop-trace`與helper `--player-loop`，只在原Windows Development pose trace一起安裝；一般啟動、Editor與Android不安裝。從目前PlayerLoop在當時既有節點前後插入自己的兄弟觀察點，不改原type／delegate／native function／loop condition與次序。512節點／32層前置界線、4096個>100ms稀疏空窗、240秒上限；保留最早資料，完整性／截斷獨立。每點讀單調時間、UTC、frame並更新有界計數，不做GPU、PCM、網路或收集期間檔案輸出。停止時只移除目前樹中屬於自己的marker，保留後來的NGO／其他變更；剩餘當幀callback由stopped旗標no-op，不還原舊樹快照。

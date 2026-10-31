@@ -1,5 +1,21 @@
 # 電腦端姿態時序診斷
 
+## 外部唯讀程序CPU取樣
+
+在既有檢查器另加`--process-timing`，會為自己的visible／peer／server取得唯讀Windows CPU計數，不改Unity來源、二進位、遊戲規則或新鮮度門檻：
+
+```powershell
+python scripts/check-desktop-pose-input.py --heartbeat --player-loop --process-timing --api-dll artifacts/build-report-v1/bin/VrCommand.Api/release/VrCommand.Api.dll --runtime-root "$env:LOCALAPPDATA/VrCommand/SimulationRuns"
+python scripts/analyze-pose-input.py artifacts/desktop-venue/<本輪時間-識別>
+python -m unittest discover -s tests -p test_pose_process_timing.py
+```
+
+父程序借用原Popen handle確認exe／建立FILETIME，不關閉原handle；獨立probe重新以QUERY_LIMITED_INFORMATION＋SYNCHRONIZE開啟並核對同一身分，固定handle避免PID重用。只查[GetProcessTimes](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-getprocesstimes)與[QueryProcessCycleTime](https://learn.microsoft.com/en-us/windows/win32/api/realtimeapiset/nf-realtimeapiset-queryprocesscycletime)，無thread／memory／stack存取、暫停、優先級或權限設定。每50ms、最多5000輪／15000列／240秒；基線前一次ready，之後樣本只存記憶體，明確finish先關唯讀handle才一次寫report。所有cleanup必須無剩餘自有程序。
+
+manifest與report在runtime的pose-process-targets.json及pose-process-timing/；只有完成fixture才可分析。以每個查詢的前後UTC括號篩選完全在原生空窗內的樣本，不插值，上界向外取整，少於兩個點為未知／null。輸出原Update及三方loop共同區間，另提供名義等長的前後比較窗口；實際取樣跨度仍明示，不能把CPU累積差當固定負載／每核百分比。CPU時間與cycles加總全程序threads，不能由正值指定主線程或根因、也不能由零值證明suspend；cycles不轉換成秒。身份／完整性／關閉handle／clock檢查失敗拒絕，UTC差達50ms不join。
+
+2026-10-31兩場新證據：091639場共同loop0.6374241秒，各13個內部樣本CPU時間差為0，但前後計數均增加；原raw未記cycles，讀為version0／unavailable，不補寫。092109場共同loop0.594546秒，每程序12個樣本，三者CPU時間均增加0.015625–0.03125秒，cycles增加約1875萬–2208萬，11對相鄰查詢每對均增加。這不支持三程序在該區間全程停止，但仍不識別主線程／worker或解決根因；不能推論兩場同類提示底層成因相同。43項Python及兩場真正三發／精確封存，資料／限制見PROGRESS；Unity0.28.1與既有雙平台來源不變。
+
 ## 明確選用的主迴圈邊界
 
 Unity0.28.1／Android code33新增`--vr-pose-loop-trace`，必須同時有`--vr-pose-trace`，仍只限Windows Development／非Editor。一般啟動與Android不安裝。檢查器以`--player-loop`向自己的三個程序傳遞旗標，建議另帶`--heartbeat`對照獨立程序；其餘操作與原三發流程相同：

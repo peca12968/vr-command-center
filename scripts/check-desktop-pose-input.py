@@ -33,9 +33,10 @@ class InputVenue(venue_module.Venue):
 
 
 class Heartbeat:
-    def __init__(self, directory):
+    def __init__(self, directory, *, script='pose-heartbeat.py', extra_args=()):
         self.directory = directory
-        self.child = subprocess.Popen([sys.executable, str(ROOT / 'scripts/pose-heartbeat.py'), '--directory', str(directory.resolve())],
+        self.label='Independent heartbeat' if script=='pose-heartbeat.py' else 'Owned process timing'
+        self.child = subprocess.Popen([sys.executable, str(ROOT / 'scripts' / script), '--directory', str(directory.resolve()), *extra_args],
                                       creationflags=subprocess.CREATE_NO_WINDOW)
         self.report = None
 
@@ -47,14 +48,36 @@ class Heartbeat:
         try: self.child.wait(timeout=10)
         except subprocess.TimeoutExpired:
             self.child.terminate(); self.child.wait(timeout=5)
-            raise RuntimeError('Independent heartbeat did not stop')
-        if self.child.returncode != 0: raise RuntimeError('Independent heartbeat failed')
+            raise RuntimeError(self.label+' did not stop')
+        if self.child.returncode != 0: raise RuntimeError(self.label+' failed')
         report = json.loads((self.directory / 'report.json').read_text())
-        if not report['complete']: raise RuntimeError('Independent heartbeat incomplete')
+        if not report['complete']: raise RuntimeError(self.label+' incomplete')
         self.report = report; return report
 
 
-def run(v, heartbeats):
+class ProcessTiming(Heartbeat):
+    def __init__(self,v):
+        spec=importlib.util.spec_from_file_location('owned_process_query',ROOT/'scripts/pose-process-timing.py')
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        targets=[]
+        for role,name in [('Visible','pose-input-player'),('Peer','pose-input-peer'),('Server','pose-input-server')]:
+            child=v.processes[name]
+            if child.poll() is not None:raise RuntimeError('Owned native process stopped before timing')
+            # Borrow the original Popen handle only for identity; never close it.
+            query=module.ProcessQuery(child.pid,executable=v.args.player_exe,process_handle=child._handle)
+            try:targets.append(query.identity(role))
+            finally:query.close()
+            if child.poll() is not None:raise RuntimeError('Owned native process stopped during identity query')
+        manifest=v.runtime_directory/'pose-process-targets.json'
+        manifest.write_text(json.dumps({'schemaVersion':1,'source':'OwnedProcessTimingTargets','targets':targets}),encoding='utf-8')
+        super().__init__(v.runtime_directory/'pose-process-timing',script='pose-process-timing.py',extra_args=['--manifest',str(manifest.resolve())])
+
+    def ready(self):
+        if self.child.poll() is not None:raise RuntimeError('Owned process timing stopped before readiness')
+        return (self.directory/'ready.json').exists()
+
+
+def run(v, heartbeats, process_timings):
     v.start(); marks = []; samples = []
     def mark(phase):
         marks.append({'phase': phase, 'utc': datetime.now(timezone.utc).isoformat()}); v.save('input-stages.json', marks)
@@ -74,6 +97,9 @@ def run(v, heartbeats):
     v.wait(lambda: v.connected(entry), 100, 'both current native clients'); v.command(entry, 'Begin')
     heartbeat = Heartbeat(v.runtime_directory / 'pose-input-heartbeat') if v.args.heartbeat else None
     if heartbeat is not None: heartbeats.append(heartbeat)
+    process_timing=ProcessTiming(v) if v.args.process_timing else None
+    if process_timing is not None:
+        process_timings.append(process_timing);v.wait(process_timing.ready,10,'owned process timing ready')
     def observe(label):
         data = v.frame(entry, measure=True); frame = data['packet']['frame']; player = next(p for p in frame['players'] if p['id'] == own['id'])
         row = {'phase': label, 'utc': datetime.now(timezone.utc).isoformat(), 'tick': frame['tick'], 'connected': player['connected'],
@@ -100,6 +126,7 @@ def run(v, heartbeats):
             while time.monotonic() < deadline: observe(f'after-shot-{shot}'); time.sleep(.15)
     mark('observation-end')
     if heartbeat is not None: heartbeat.finish()
+    if process_timing is not None:process_timing.finish()
     roles = {'Visible': ('player', 'Client'), 'Peer': ('peer', 'Client'), 'Server': ('server', 'Server')}
     for name, _ in roles.values():
         (v.runtime_directory / f'pose-input-{name}-trace/finish.request').write_text('Stop diagnostic only', encoding='utf-8')
@@ -126,6 +153,7 @@ def run(v, heartbeats):
         'directLoopback': True, 'poseOrWeaponInjected': False, 'observationOnly': v.args.observation_only,
         'independentHeartbeat': heartbeat is not None, 'marks': marks, 'statistics': metric,
         'playerLoop': v.args.player_loop,
+        'processTiming': v.args.process_timing,
         'reports': {label: {'rows': len(value['rows']), 'seconds': value['endedSeconds']} for label, value in reports.items()},
         'hudTransitions': state['hudTransitions']})
     v.evidence.extend(['Two direct-loopback current native clients; natural baseline without packet-loss control',
@@ -140,20 +168,23 @@ def main():
     parser.add_argument('--baseline-seconds', type=int, choices=range(5, 61), default=15)
     parser.add_argument('--heartbeat', action='store_true', help='Independent bounded process timing; no game access')
     parser.add_argument('--player-loop', action='store_true', help='Explicit native PlayerLoop boundary observers; needs new matching player build')
+    parser.add_argument('--process-timing', action='store_true', help='Read-only CPU accounting of this fixture own three native processes')
     parser.add_argument('--observation-only', action='store_true', help='Quiet / window-observation / quiet; no shooting')
     parser.add_argument('--api-dll', type=Path, default=Path(os.environ.get('VR_COMMAND_API_DLL', ROOT / 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')))
     parser.add_argument('--player-exe', type=Path, default=Path(os.environ.get('VR_COMMAND_UNITY_PLAYER', ROOT / 'artifacts/desktop/VrCommand.exe')))
     args = parser.parse_args(); args.duration = 600; args.visible_room = 3; args.job_workers = 2; args.check = False
-    venue_module.verify_player(args); v = InputVenue(args); heartbeats = []
-    try: run(v, heartbeats)
+    venue_module.verify_player(args); v = InputVenue(args); heartbeats = [];process_timings=[]
+    try: run(v, heartbeats,process_timings)
     except BaseException as error: v.stage('failed', errorType=type(error).__name__); raise
     finally:
-        errors = []
-        for heartbeat in heartbeats:
-            try: heartbeat.finish()
-            except Exception as error: errors.append(type(error).__name__)
+        errors = [];process_errors=[]
+        for group,failures in [(heartbeats,errors),(process_timings,process_errors)]:
+            for probe in group:
+                try:probe.finish()
+                except Exception as error:failures.append(type(error).__name__)
         cleaned = v.cleanup(); v.save('heartbeat-cleanup.json', {'errors': errors, 'remaining': [h.child.pid for h in heartbeats if h.child.poll() is None]})
-        if (errors or not cleaned) and sys.exc_info()[0] is None: raise RuntimeError('Input timing cleanup failed')
+        if v.args.process_timing:v.save('process-timing-cleanup.json',{'errors':process_errors,'remaining':[h.child.pid for h in process_timings if h.child.poll() is None]})
+        if (errors or process_errors or not cleaned) and sys.exc_info()[0] is None: raise RuntimeError('Input timing cleanup failed')
 
 
 if __name__ == '__main__': main()
