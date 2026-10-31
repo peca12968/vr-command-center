@@ -23,7 +23,7 @@ namespace VrCommand.Unity
         }
         private void Update()
         {
-            if (VenueBootstrap.Instance != null) GetComponent<UnityEngine.UI.Text>().text = VenueBootstrap.Instance.PlayerStatus;
+            if (VenueBootstrap.Instance != null) GetComponent<UnityEngine.UI.Text>().text = VenueBootstrap.Instance.PlayerStatus + VenueBootstrap.Instance.ReconnectHint;
         }
     }
 }

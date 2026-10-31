@@ -1,5 +1,7 @@
 # VR Command Center
 
+新增[Quest控制器重連](docs/QUEST_RECONNECT.md)：右手B放開再按可重讀原票券，失焦／暫停後須重新按下；163真正Editor檢查及同源0.34 Windows／Quest建置成功，最終PC8項回歸通過。實體控制器、頭盔與跨機仍待驗，保留失敗紀錄與原偶發問題。
+
 玩家啟動器新增[入場狀態](docs/PLAYER_CONNECTION_STATUS.md)：顯示遊戲回報的入場、拒絕、中斷、未確認與最終戰績，區分程式啟動與真正入場；新版Windows玩家包及同機原生整合已驗，GUI完整操作與跨機仍待。
 
 新增[五房獨立15分鐘任務驗證](docs/DESKTOP_INDEPENDENT_LONG.md)：5個server與25個PC client各自倒數，單房Pause時其他四房持續；42293幀完整回放、25份戰績與各房封存一致，本場無失效。仍為同機靜止Simulation，完整跨機／頭盔容量及原偶發失效根因另驗。

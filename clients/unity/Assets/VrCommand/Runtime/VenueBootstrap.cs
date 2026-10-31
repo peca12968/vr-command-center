@@ -21,6 +21,10 @@ namespace VrCommand.Unity
         private string status = "WAITING FOR CONTROL DESK";
         private bool managementReady;
         private float nextReconnect;
+        private ClientReconnectInput reconnectInput;
+        public bool CanReconnect => networkManager != null && ClientReconnectInput.CanOffer(configuration?.role,
+            networkManager.IsListening, networkManager.ShutdownInProgress, Time.unscaledTime, nextReconnect);
+        public string ReconnectHint => reconnectInput != null && CanReconnect ? "\nRELEASE THEN PRESS RIGHT B TO RELOAD PLAYER TICKET" : "";
         private TelemetryOutbox outbox;
         private WorldRecordingDelivery worldDelivery;
         private sealed class EndingClient
@@ -61,6 +65,8 @@ namespace VrCommand.Unity
             try { configuration = LaunchConfiguration.Load(); }
             catch (Exception) { status = "PLEASE CONTACT THE CONTROL DESK"; }
             if (configuration == null) yield break;
+            if (configuration.role == "Client" && (Application.platform == RuntimePlatform.Android || UnityEngine.XR.XRSettings.isDeviceActive))
+                reconnectInput = new ClientReconnectInput();
             NativePoseContinuity.Install(gameObject,configuration.role);
             NativePoseTrace.Install(gameObject,configuration.role);
             NativeReplicationProbe.Install(this,configuration.role);
@@ -401,7 +407,7 @@ namespace VrCommand.Unity
         }
         private void ReconnectClient()
         {
-            if (configuration == null || configuration.role != "Client" || networkManager.IsListening || networkManager.ShutdownInProgress || Time.unscaledTime < nextReconnect) return;
+            if (!CanReconnect) return;
             nextReconnect = Time.unscaledTime + 2;
             try
             {
@@ -415,8 +421,16 @@ namespace VrCommand.Unity
             }
             catch (Exception) { status = "CONNECTION FILE INVALID - CONTACT CONTROL DESK"; }
         }
+        private void Update()
+        {
+            if (reconnectInput?.Poll(CanReconnect, Application.isFocused) == true) ReconnectClient();
+        }
+        private void OnApplicationFocus(bool focused) { if (!focused) reconnectInput?.Reset(); }
+        private void OnApplicationPause(bool paused) { if (paused) reconnectInput?.Reset(); }
+        private void OnDisable() { reconnectInput?.Reset(); }
         private void OnDestroy()
         {
+            reconnectInput?.Dispose(); reconnectInput = null;
             if (worldDelivery != null) worldDelivery.StopAndDispose();
             else combatAuthority?.Recording?.Dispose();
             outbox?.Dispose();
@@ -439,15 +453,13 @@ namespace VrCommand.Unity
                 GUI.Box(area, "AFTER ACTION REPORT");
                 GUI.Label(new Rect(area.x + 24, area.y + 34, area.width - 48, height - 52), PlayerStatus,
                     new GUIStyle(GUI.skin.label) { fontSize = 22, wordWrap = true, richText = false });
-                if (configuration != null && configuration.role == "Client" && !networkManager.IsListening && !networkManager.ShutdownInProgress
-                    && Time.unscaledTime >= nextReconnect && GUI.Button(new Rect(area.x, area.yMax + 12, 300, 42), "Reconnect / reload player ticket")) ReconnectClient();
+                if (CanReconnect && GUI.Button(new Rect(area.x, area.yMax + 12, 300, 42), "Reconnect / reload player ticket")) ReconnectClient();
                 return;
             }
             if (networkManager != null && networkManager.IsConnectedClient && networkManager.LocalClient.PlayerObject != null) return;
             GUI.Box(new Rect(12, 12, 430, 58), "VR COMMAND - QUEST 3 VERTICAL SLICE");
             GUI.Label(new Rect(24, 40, 410, 24), Status + " / " + State);
-            if (configuration != null && configuration.role == "Client" && !networkManager.IsListening && !networkManager.ShutdownInProgress
-                && Time.unscaledTime >= nextReconnect && GUI.Button(new Rect(12, 82, 300, 42), "Reconnect / reload player ticket")) ReconnectClient();
+            if (CanReconnect && GUI.Button(new Rect(12, 82, 300, 42), "Reconnect / reload player ticket")) ReconnectClient();
         }
     }
 

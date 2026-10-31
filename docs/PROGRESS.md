@@ -1,5 +1,29 @@
 # 開發進度
 
+## 2026-10-31：Quest右手B鍵重連與暫停解除
+
+前輪玩家狀態為實際進展；從乾淨`8dcc61d`補上[Quest控制器重連](QUEST_RECONNECT.md)。原Android會略過桌面OnGUI，故其Reconnect按鈕無法在頭盔使用；新增獨立於avatar的右手secondaryButton（Quest B）及等待畫面提示，重用原`ReconnectClient`重讀原路徑票券與GameServer驗票。**Unity0.34.0／code41，NGO29、API/UI0.30保持**；不改wire、world schema、票券／admission政策、Tracked姿態、模型／槍口、命中或0.5／1.5秒規則。
+
+Client且NGO停止listening／shutdown、兩秒間隔到期才可嘗試，焦點及右控制器isTracked＋位置／旋轉trackingState均有效；必須先放開B再按，不能從斷線／冷卻／失焦／追蹤缺失帶入一直按住的狀態。另以OnApplicationFocus、OnApplicationPause及OnDisable明確解除準備，避免Unity停止Update時漏掉失焦。Server／Host不提供此控制，左Y不當右B；不自行配票、呼叫主控API、清除未重試的戰績或改追蹤資料。輸入action在bootstrap銷毀時釋放，原桌面按鈕共用同一可重連判定。
+
+真正Prepare成功並保留原Scene `4314adcd8c63d86469d16497127d8cfb／1444571642`、prefab `6f3f36cb9d710e847b5ecc569665e1ce／5227825248646244841`，沒有RebuildArena。**最終163項真正Editor檢查全過、failed／skipped均0**，含新增8項政策／暫停解除及3項官方Oculus Touch配置的真實InputAction綁定。三項在空場景EnterPlayMode後，僅以自己的虛擬裝置／state event，在真正Dynamic更新回呼核對原控制值與action結果；臨時InputSettings還原、裝置／layout移除，沒有正式程式的輸入／姿態注入。測試asmdef直接參考Unity.InputSystem及Unity.XR.OpenXR，不靠隱含傳遞。
+
+保留五輪真正失敗XML／log：159／3、160／2、160／2、159／3、159／3。先是InputState.Change不支援Touch bitfield，再是無焦點Editor更新未將controller event送進玩家action；只改成StateEvent仍不足，EnterPlayMode後同步呼叫Update也仍讀到Editor狀態。最終改用真正Dynamic回呼、同時斷言原控制值及完整action結果才通過，沒有放寬斷言或接受界線。最初162項成功候選（source `bd4c6419...`，Windows12:33:35Z／Quest12:42:58Z、PC8項445幀）另完整保存；補生命週期解除後重新163項與雙平台，不能拿候選當最終來源。
+
+最終Windows receipt `2026-10-31T12:45:18.9215215Z`、Quest ARM64 IL2CPP receipt `12:52:48.9499476Z`真正成功，來源重算及兩receipt同為 **`c233d8048101109508490a9ff7b04a8c772fe71b1401223f3f69323a4cf74f5d`**，原網路ID相同。aapt確認bundle0.34／code41、min32／target35、arm64-v8a；APK實際**82,676,953 bytes**、SHA `fb5d1b469aa48202fbc0e46110ec46d1c6208142e6b28507a5ae5a7caae1fd97`。apksigner verify成功、v2 true、1 signer；ZIP checksum成功，metadata包含新輸入類別。沒有頭盔安裝或按鍵／焦點／面板實測。
+
+APK的libil2cpp81,867,888／metadata9,270,596 bytes；有效ZIP項目總解壓160,769,828 bytes，比0.33僅多5069，索引壓縮資料60,244,012 bytes。容器另有約22.4MB空間，libil2cpp索引移至後段；未將此差稱成新增22MB程式，沒有重封、重簽或清Library cache，體積整理另列待辦。BuildReport totalBytes不是APK大小。URP匯入過程的暫時資源list變動最終回復原保存設定，沒有提交外觀／資產pin變更；兩個新.meta、測試asmdef及實際bundle設定保存。
+
+最終原生回歸首場`unity-admission/20261031-204538-5c3e58ba`在等待Running15秒逾時、工具exit1，原last packet119／elapsed17261／observed6、Preparing／tick0／suspended=false、無summary，全部raw／journal保留。它與Quest建置及封裝並行，**未證明其原因**，不能推成新輸入bug、磁碟或建置已證實根因。原checker早期失敗不更新latest指標，因此仍指舊成功場；已補starting、命令回應、失敗state／world／events與cleanup紀錄，保留原15秒界線及所有接受條件，不把stale指標當本場結果。
+
+等建置停止後，以同c233來源及原接受條件重跑`unity-admission/20261031-205415-cb4efdfa`，**8項／372幀**、真正handle5548 exit0，撤銷／舊admission拒絕、同次入場重連位置／健康／彈藥保持、Ended拒絕、精確雙seal及回放統計一致。這是自己的F資料、無圖形Simulation及原程序啟停，非頭盔B鍵、桌面GUI按鈕、GPU或C SSD效能；無法由一次重跑通過宣稱前場逾時已修復。cleanup errors／remainingTrackedChildren空，所有自有actor terminal；測試主動停止的exit1屬清理，非自然失敗。
+
+正式`windows-player-0.34.0.zip` **82,634,575 bytes**、SHA `0862df2c0bc3d3e7daa62f05a10bd91e10e2be7cd53d988428702ce04e98f9f4`，311檔＋manifest；實際解壓新C目錄、Python全檔及真正Launch-Player.exe --verify成功，沿用launcher SHA `a65846da6f3a77de38356dbd9e448e55a220288ef170a407bba52cb227e63d57`。未重跑舊17／19／13啟動器套件，也不宣稱本輪GUI／跨機。首個bd4候選ZIP、APK／receipts／logs及舊0.33 APK（原fc0054... SHA）均保存於自己的history，未覆寫成新來源證據。
+
+`quest-reconnect-validation.json`以raw bytes核對前**28 runtime／613檔**C原件及F snapshot未變、C API／三工具159檔保持；不開保存SQLite。本輪兩次成功及一次失敗admission皆用自己的F runtime，沒有新C SQLite試跑或移動正式資料。首五測試反例XML／log SHA、原生逾時raw hashes、最終receipt／APK／ZIP均記錄；原5080、帳務、登入／授權及防火牆未動。沒有新後端／瀏覽器UI變更，未把原.NET／完整瀏覽器結果當本輪重跑。
+
+完整11項目標active。仍需Quest實際B鍵／失焦／追蹤／暫停、原票券檔USB更新、面板可讀性及實體重連；文檔提供不force-stop的暫存push成功後更名流程，尚未實機驗。原Linked31筆失效與本輪早期Running逾時都未證明根因／修復，接續因果證據、多人PC／跨機；VIVE／MR／25台／廠商硬體分開驗收。
+
 ## 2026-10-31：Windows玩家的入場／拒絕／未確認與戰績狀態
 
 功能 [ddfc617](https://github.com/peca12968/vr-command-center/commit/ddfc6179dbe78da46683248b0ae86cda807fbde7) 已推送main、遠端SHA一致。[本次CI run41200268833](https://github.com/peca12968/vr-command-center/actions/runs/41200268833)／check124534526644為failure、steps空；fresh annotation為近期付款失敗或支出上限，job未啟動，沒有雲端測試結果。未改帳務或手動重跑，本機真正Framework／原生結果如下。

@@ -1,5 +1,7 @@
 # 開發指引
 
+Quest右B重連見docs/QUEST_RECONNECT.md：Unity0.34／code41、NGO29／API UI0.30保持，163真正Editor（3項在Editor PlayMode Dynamic更新的官方Touch虛擬action）及同源Windows／ARM64 APK成功，c233d804...來源與原Scene／prefab ID一致。Client需停止／非shutdown／兩秒冷卻、焦點／完整右控制器追蹤，放開再按；OnApplicationFocus／Pause／Disable也解除，不能依賴暫停仍有Update。重用原讀檔／驗票，不改Tracked／槍口／wire或rules。最終PC8項372幀成功，五輪測試反例及Running15秒逾時保留，不當根因修復或頭盔B鍵證據。checker新增starting／命令回應／failure快照／cleanup，不能信舊latest指標；保存SQLite不開。前28 runtime613檔／API三工具159檔保持，正式ZIP／APK精確hash與容器空間差異見PROGRESS；完整11項active，實機／跨機／原31筆另驗。
+
 Windows玩家狀態見docs/PLAYER_CONNECTION_STATUS.md：啟動器只讀自己新遊戲log，不讀全域Player.log／別的程序，不用ping／TCP或程序啟動假造入場；Connected是遊戲回報、非readiness或即時姿態保證。Waiting30秒只Unconfirmed、不猜防火牆；Final保留到新Connected。64KiB／poll、4096字元列、64狀態／2MiB積壓及倒退界線；status-report需wait＋新log且大小寫路徑不可重疊，complete只是快照未超界、exited獨立，均非任務成功。17真正Framework、19啟動器及13原生整合已驗，GUI／跨機仍待。API/UI0.30、Unity0.33／code40／NGO29及原152／c98f1雙平台不變，沒有新Editor；新1 runtime14檔、前27 runtime599檔raw保持，完整11項active。
 
 五房獨立900秒工具見docs/DESKTOP_INDEPENDENT_LONG.md／PROGRESS：同源0.33／code40／NGO29、API/UI0.30保持，5 server＋25 headless client、25原admission結果／各CSV／雙seal、42293完整回放／209235人次成功；房1Pause13→Resume14、tick2404／35個Paused幀，其他四房持續前進。只有明確原Pause fence可排除Running人次，不能把其他房意外Pause或暫停中失效放過。32 Python、新1 runtime22檔／前26 runtime577檔raw保存核對成功。真正handle需terminal才比較／snapshot，不開保存SQLite；independent-checks.json與Linked跨場比較器不同格式，不混套。沒有新Editor／雙平台，原152與c98f1 receipt保持；仍是同機靜止Simulation，原31筆未修復、完整11項active，實機／跨機另驗。

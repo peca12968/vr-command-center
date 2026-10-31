@@ -81,7 +81,9 @@ def main():
         return json.loads(raw) if raw else None
 
     def control(action, **options):
-        return request(f'/api/sessions/{session}/commands', {'commandId': end_command_id if action == 'End' else str(uuid.uuid4()), 'action': action, **options})
+        result = request(f'/api/sessions/{session}/commands', {'commandId': end_command_id if action == 'End' else str(uuid.uuid4()), 'action': action, **options})
+        (directory / ('control-' + action + '.json')).write_text(json.dumps(result, indent=2), encoding='utf-8')
+        return result
 
     def world_frame():
         message = urllib.request.Request(base + f'/api/sessions/{session}/world/watch?mode=live', headers={'Authorization': 'Bearer ' + keys['Master']})
@@ -136,6 +138,7 @@ def main():
         return value if (body is not None and body['connected']) == expected else None
 
     try:
+        stage('starting')
         api = subprocess.Popen(['dotnet', str(args.api_dll.resolve()), '--urls', base], cwd=ROOT, env=environment,
                                stdout=api_log, stderr=api_log, creationflags=subprocess.CREATE_NO_WINDOW)
         live['api'] = api; all_processes.append(api)
@@ -230,16 +233,33 @@ def main():
                    'beforeReconnect': before, 'afterReconnect': after, 'world': world, 'statistics': stats, 'replayStatisticsMatch': True, 'activeSessions': 0}
         (directory / 'summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
         stage('passed', checks=len(summary['events']), frames=world['acceptedSequence'])
+    except BaseException as error:
+        evidence_errors = []
+        if session:
+            for name, route in [('state', f'/api/sessions/{session}'), ('world', f'/api/sessions/{session}/world'), ('events', f'/api/sessions/{session}/events?after=0&limit=500')]:
+                try: (directory / ('failure-' + name + '.json')).write_text(json.dumps(request(route), indent=2), encoding='utf-8')
+                except Exception as evidence_error: evidence_errors.append({'artifact': name, 'errorType': type(evidence_error).__name__})
+        stage('failed', errorType=type(error).__name__, evidenceErrors=evidence_errors)
+        raise
     finally:
+        cleanup_errors = []
         if session:
             try: control('End')
-            except (OSError, urllib.error.URLError, RuntimeError): pass
+            except (OSError, urllib.error.URLError, RuntimeError) as error: cleanup_errors.append({'operation': 'End', 'errorType': type(error).__name__})
         for process in reversed(all_processes):
-            if process.poll() is None:
-                process.terminate()
-                try: process.wait(timeout=10)
-                except subprocess.TimeoutExpired: process.kill(); process.wait(timeout=5)
+            try:
+                if process.poll() is None:
+                    process.terminate()
+                    try: process.wait(timeout=10)
+                    except subprocess.TimeoutExpired: process.kill(); process.wait(timeout=5)
+            except Exception as error: cleanup_errors.append({'processId': process.pid, 'errorType': type(error).__name__})
         api_log.close()
+        (directory / 'cleanup.json').write_text(json.dumps({'errors': cleanup_errors,
+            'remainingTrackedChildren': [p.pid for p in all_processes if p.poll() is None],
+            'processes': [{'processId': p.pid, 'exitCode': p.poll()} for p in all_processes]}, indent=2), encoding='utf-8')
+        if cleanup_errors or any(p.poll() is None for p in all_processes):
+            stage('failed', errorType='CleanupError')
+            raise RuntimeError('Admission fixture cleanup failed; preserve cleanup.json')
 
 
 if __name__ == '__main__':

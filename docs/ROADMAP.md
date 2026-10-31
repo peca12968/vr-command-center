@@ -1,5 +1,7 @@
 # 長期開發目標
 
+2026-10-31 新增[Quest右B重連](QUEST_RECONNECT.md)：Android原略過桌面重連按鈕，現可明確放開再按B重讀原票券，角色／冷卻／焦點／追蹤及暫停解除沿用原驗票。163真正Editor含3項PlayMode Dynamic官方Touch action、同源Windows／ARM64 APK成功，0.34／code41、NGO29／API UI0.30；最終PC8項372幀通過。五輪測試失敗與Running逾時保存，未稱根因已修復；實機控制器／GUI／跨機另驗，完整11項active。
+
 2026-10-31 新增[玩家入場狀態](PLAYER_CONNECTION_STATUS.md)：Windows啟動器從自己遊戲回報區分入場／拒絕／30秒未確認與Final保留，無網路探測／自動配票；17真正Framework類別、19原生啟動器拒絕及13項雙PC／拒絕／無GameServer整合通過。新版0.33玩家ZIP成功，Unity／API及原建置保持。GUI操作、跨機／頭盔及原31筆根因另驗，完整11項active；接續可操作PC流程及跨機部署。
 
 2026-10-31 新增[五房獨立長任務](DESKTOP_INDEPENDENT_LONG.md)：5 server＋25 client、各900秒，房1實際Pause3.265秒而其他四房前進；各自tick18000、25份結果／五份CSV／雙seal與42293完整回放一致，209235人次無失效。32項Python、原件／快照保存核對成功，版本及原Unity建置保持。這是同機靜止Simulation，原31筆Linked反例未修復、跨機／25台／頭盔另驗；接續多人持續操作與自然失效定位，完整11項active。
