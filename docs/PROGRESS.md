@@ -28,6 +28,8 @@
 
 不變：API／UI0.27、NGO26、rules0.8.0、envelope6／world schema1、原header／checksum、全部素材pin、追蹤資料與pointer／槍口。沒有重跑歷史654核心／446 HTTP／43世界／58 Node／217 Chromium、七場五房或8項入場重連，不混入本輪數量。原5080唯讀GET仍0.16／原歷史，unity CLI serve未碰。來源／binary仍F，明確C SSD全新runtime；非F USB全資料、跨機、MR／VIVE／Quest實機、廠商硬體或25台證據。完整11項及長期目標保持開發中。
 
+功能提交`2c79a7308b5923dd370e31e81121b91953370b1c`已推送main、遠端一致；GitHub #1保持open，更新後獨立讀回3581字本文逐字一致，保留原11項及歷史封存連結。[功能提交CI run41153866259](https://github.com/peca12968/vr-command-center/actions/runs/41153866259)／check124396246125實際failure、steps=null；annotation明示付款失敗或支出上限，工作未開始，沒有雲端執行結果。未改帳務或重跑，以上本機／原生證據獨立記錄。
+
 ## 2026-10-31：獨立程序心跳與視窗／輸出輪詢對照
 
 從乾淨`bbde0a1`接續PC偶發姿態過期調查。新增`scripts/pose-heartbeat.py`，由原生檢查器以明確`--heartbeat`啟動自己的獨立、一般優先級Python程序，每10ms sleep後量perf_counter、UTC與process CPU；沒有遊戲／網路／UI接入，也不調整優先級、計時器或系統設定。只在記憶體保留>100ms空窗及每秒clock anchor，4096列／256 anchors／240秒上限，明確finish才完整；報告序列化在觀察結束後。檢查器持有Popen handle，正常與失敗finally均收尾，另保存heartbeat-cleanup。沒有改C#、API／UI0.27或Unity0.28／code32／NGO26及原0.5／1.5秒門檻。
