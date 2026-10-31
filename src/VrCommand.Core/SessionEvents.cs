@@ -17,7 +17,7 @@ public record SessionEvent(int SchemaVersion, Guid EventId, Guid SessionId, long
         var data = kind == SessionEventKind.PlayerJoined && payload is Player player
             ? JsonSerializer.SerializeToElement(player with { AdmissionId = eventId }, JsonFormat.Options)
             : JsonSerializer.SerializeToElement(payload, JsonFormat.Options);
-        return new(6, eventId, id, sequence, DateTimeOffset.UtcNow, kind, data, actor, requestId);
+        return new(7, eventId, id, sequence, DateTimeOffset.UtcNow, kind, data, actor, requestId);
     }
 }
 
@@ -51,11 +51,16 @@ internal static class SessionProjection
             MissionStore.ValidateEnemies(command.Enemies);
         else if (command.Enemies is not null)
             throw new ArgumentException("Enemies is only allowed for SetEnemies.");
+        if ((command.Action == ControlAction.SetMissionClock) != (command.MissionClock is not null))
+            throw new ArgumentException("Mission clock settings are required only for SetMissionClock.");
+        if (command.ClockExpiration is { } expiration && (command.Action != ControlAction.End || expiration.StreamId == Guid.Empty
+            || expiration.ObservedSequence < 1 || expiration.Tick < 0))
+            throw new ArgumentException("Clock expiration requires an End and valid source evidence.");
     }
 
     internal static SessionView Apply(SessionView? current, SessionEvent entry)
     {
-        if (entry.SchemaVersion is not (1 or 2 or 3 or 4 or 5 or 6) || entry.EventId == Guid.Empty || entry.SessionId == Guid.Empty
+        if (entry.SchemaVersion is not (1 or 2 or 3 or 4 or 5 or 6 or 7) || entry.EventId == Guid.Empty || entry.SessionId == Guid.Empty
             || entry.Sequence != (current?.Sequence ?? 0) + 1 || !Enum.IsDefined(entry.Kind)
             || entry.RecordedAtUtc == default || entry.RecordedAtUtc.Offset != TimeSpan.Zero
             || (current is not null && current.Id != entry.SessionId))
@@ -106,6 +111,14 @@ internal static class SessionProjection
                 break;
             case SessionEventKind.ControlApplied:
                 AccessPolicy.Manage(actor, current.Mode, current.RoomIds);
+                var clockCommand = entry.Read<ControlCommand>();
+                if ((clockCommand.MissionClock is not null || clockCommand.ClockExpiration is not null) && entry.SchemaVersion < 7)
+                    throw new InvalidDataException("Mission clocks require event schema 7.");
+                if (clockCommand.ClockExpiration is { } expiration)
+                {
+                    if (actor != SessionManager.ClockIdentity) throw new AccessDeniedException("Only the internal mission clock may expire a session.");
+                    SessionManager.ValidateClockExpiration(current, expiration);
+                }
                 break;
             case SessionEventKind.CombatRecorded:
                 AccessPolicy.ReportCombat(actor);
@@ -117,7 +130,7 @@ internal static class SessionProjection
         {
             SessionEventKind.PlayerJoined => Join(current, entry.Read<Player>(), entry.EventId, entry.SchemaVersion),
             SessionEventKind.PlayerLeft => Leave(current, entry.Read<PlayerLeft>().PlayerId),
-            SessionEventKind.ControlApplied => Control(current, entry.Read<ControlCommand>(), entry.RecordedAtUtc),
+            SessionEventKind.ControlApplied => Control(current, entry.Read<ControlCommand>(), entry.RecordedAtUtc, entry.Sequence),
             SessionEventKind.CombatRecorded => current,
             _ => throw new InvalidDataException("Unexpected event kind.")
         };
@@ -148,7 +161,7 @@ internal static class SessionProjection
         return session with { Players = session.Players.Where(p => p.Id != playerId).ToArray() };
     }
 
-    private static SessionView Control(SessionView session, ControlCommand command, DateTimeOffset now)
+    private static SessionView Control(SessionView session, ControlCommand command, DateTimeOffset now, long sequence)
     {
         ValidateCommand(command);
         if (command.ExpectedSequence.HasValue && command.ExpectedSequence != session.Sequence)
@@ -162,6 +175,9 @@ internal static class SessionProjection
             ControlAction.End => session with { State = SessionState.Ended, EndedAtUtc = now },
             ControlAction.SetEnvironment => session with { Environment = command.Environment! },
             ControlAction.SetEnemies => session with { Enemies = command.Enemies! },
+            ControlAction.SetMissionClock when session.State == SessionState.Preparing
+                && (!command.MissionClock!.AutoEnd || session.CombatStream?.MissionClockVersion == 1)
+                => session with { MissionClock = new(1, command.MissionClock!.AutoEnd, sequence) },
             _ => throw new InvalidOperationException($"Cannot apply {command.Action} while {session.State} or without players.")
         };
     }

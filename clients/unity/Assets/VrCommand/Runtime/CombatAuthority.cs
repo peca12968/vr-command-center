@@ -82,6 +82,8 @@ namespace VrCommand.Unity
         private void AcknowledgeDebriefServerRpc(string sessionId, string playerId, string admissionId, ServerRpcParams request = default)
             => VenueBootstrap.Instance?.AcknowledgeDebrief(request.Receive.SenderClientId, sessionId, playerId, admissionId);
         private ManagementSnapshot management;
+        private bool clockBoundaryCaptured;
+        public bool ClockDue => session.ClockDue;
         private double recordingStart, nextRecording;
         private bool managementSuspended;
         private sealed class AcceptedRig { internal ulong Connection; internal RecordedRig Rig; }
@@ -94,7 +96,7 @@ namespace VrCommand.Unity
             if (Outbox == null || management == null || session.World.Phase != WorldPhase.Preparing) throw new InvalidOperationException("Initialize a preparing world and combat source first.");
             recordingStart = Time.realtimeSinceStartupAsDouble;
             var header = WorldRecordingHeader.Create(Guid.Parse(management.id), Outbox.StreamId, Outbox.Origin, management.roomIds, session.Props,
-                DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), assetSet: WorldAssetSets.PlayerBody, enemyPresentationVersion: EnemyPresentation.Version, weaponPresentationVersion: WeaponPresentation.Version, enemyFireVersion: EnemyFirePresentation.Version, playerFireVersion: PlayerFirePresentation.Version, combatAudioVersion: CombatAudioPresentation.Version, playerPresentationVersion:PlayerPresentation.Version);
+                DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), assetSet: WorldAssetSets.PlayerBody, enemyPresentationVersion: EnemyPresentation.Version, weaponPresentationVersion: WeaponPresentation.Version, enemyFireVersion: EnemyFirePresentation.Version, playerFireVersion: PlayerFirePresentation.Version, combatAudioVersion: CombatAudioPresentation.Version, playerPresentationVersion:PlayerPresentation.Version, missionClockVersion: MissionClock.Version, missionDurationSeconds: management.mission.definition.durationSeconds);
             Recording = WorldOutbox.Create(path, header, new UnityWorldCodec());
             if (!CaptureWorld(true)) throw new InvalidOperationException("Initial world frame could not be saved.");
         }
@@ -154,11 +156,19 @@ namespace VrCommand.Unity
         public void ApplyManagement(ManagementSnapshot snapshot)
         {
             using var timing=NativePoseTrace.Measure("ManagementApply");
+            if (snapshot?.mission?.definition == null || !MissionClock.ValidDuration(snapshot.mission.definition.durationSeconds)
+                || (snapshot.missionClock != null && (snapshot.missionClock.version == 0
+                    ? snapshot.missionClock.autoEnd || snapshot.missionClock.configuredAtSequence != 0
+                    : snapshot.missionClock.version != MissionClock.Version || snapshot.missionClock.configuredAtSequence < 1)))
+                throw new ArgumentException("Unsupported mission clock configuration.");
+            if (management != null && management.mission.definition.durationSeconds != snapshot.mission.definition.durationSeconds)
+                throw new ArgumentException("Mission duration is immutable within a session.");
             if (!Capture()) throw new InvalidOperationException("Telemetry is faulted.");
             var changed = management == null || snapshot.sequence != observedSequence || managementSuspended;
             if (changed && !CaptureWorld(true)) throw new InvalidOperationException("World recording is faulted.");
             session.Apply(snapshot); desktopResume.Retain(snapshot.players); observedSequence = snapshot.sequence;
             management = snapshot; managementSuspended = false;
+            if (!ClockDue) clockBoundaryCaptured = false;
             if (session.World.Phase == WorldPhase.Ended && Outbox != null)
             {
                 try { Outbox.Finish(session.World); }
@@ -175,7 +185,7 @@ namespace VrCommand.Unity
             if (first && !journalFault) CaptureWorld(true);
             if (IsSpawned && IsServer) Ready.Value = false;
         }
-        public bool Bind(ulong client, TicketApproval admission) => serverReady && Guid.TryParse(admission.playerId, out var id)
+        public bool Bind(ulong client, TicketApproval admission) => serverReady && !ClockDue && Guid.TryParse(admission.playerId, out var id)
             && Guid.TryParse(admission.admissionId, out var epoch) && session.Connect(client, id, admission.roomId, admission.seat, epoch);
         public void Unbind(ulong client)
         {
@@ -208,7 +218,7 @@ namespace VrCommand.Unity
         private static RecordedRotation Rotation(Quaternion value) => new RecordedRotation { x = value.x, y = value.y, z = value.z, w = value.w };
         public bool Weapon(ulong client, ulong input, bool reload, AvatarPose pose, Vector3 root, Quaternion rotation)
         {
-            if (Outbox == null || Recording == null || journalFault || !AcceptPose(client, pose, root, rotation)) return false;
+            if (Outbox == null || Recording == null || journalFault || ClockDue || !AcceptPose(client, pose, root, rotation)) return false;
             var accepted = session.Weapon(client, input, reload, Time.realtimeSinceStartupAsDouble);
             return Capture() && accepted;
         }
@@ -266,8 +276,20 @@ namespace VrCommand.Unity
                 {
                     Suspend(); VenueBootstrap.Instance?.sceneAuthority.SuspendForManagementLoss();
                 }
-                accumulator += Mathf.Min(Time.unscaledDeltaTime, .2f);
-                while (accumulator >= ArenaWorld.TickSeconds) { accumulator -= ArenaWorld.TickSeconds; session.Tick(Time.realtimeSinceStartupAsDouble); if (!Capture()) break; }
+                if (ClockDue)
+                {
+                    accumulator = 0;
+                    if (!clockBoundaryCaptured && Capture()) { clockBoundaryCaptured = true; CaptureWorld(true); }
+                }
+                else
+                {
+                    accumulator += Mathf.Min(Time.unscaledDeltaTime, .2f);
+                    while (accumulator >= ArenaWorld.TickSeconds)
+                    {
+                        accumulator -= ArenaWorld.TickSeconds; session.Tick(Time.realtimeSinceStartupAsDouble); if (!Capture()) break;
+                        if (ClockDue) { accumulator = 0; clockBoundaryCaptured = true; CaptureWorld(true); break; }
+                    }
+                }
                 if (!journalFault && CaptureWorld() && Time.unscaledTime >= nextPublish) { nextPublish = Time.unscaledTime + .1f; Publish(); }
             }
             Draw();
@@ -275,6 +297,7 @@ namespace VrCommand.Unity
         private void Publish()
         {
             if (!IsSpawned || !IsServer || session.World == null) return;
+            Ready.Value = serverReady && !ClockDue;
             using var timing=NativePoseTrace.Measure("WorldPublish");
             if (!geometryPublished)
             {

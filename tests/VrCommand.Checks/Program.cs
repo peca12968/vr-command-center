@@ -88,6 +88,7 @@ try
     TelemetryChecks.Run(Check, directory, mission);
     MissionLayoutChecks.Run(Check, directory);
     WorldChecks.Run(Check, directory);
+    MissionClockChecks.Run(Check, directory);
     CameraBookmarkChecks.Run(Check, directory);
     MissionLibraryChecks.Run(Check, directory);
     EnvironmentChecks.Run(Check);

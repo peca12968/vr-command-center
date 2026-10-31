@@ -9,6 +9,9 @@ namespace VrCommand.Unity
         {
             if (VenueBootstrap.Instance == null) return;
             var message = "VR COMMAND  /  " + VenueBootstrap.Instance.State.ToUpperInvariant();
+            var clock = VenueBootstrap.Instance.sceneAuthority;
+            if (clock != null && clock.IsSpawned && clock.Clock.Value.Valid)
+                message += "\n" + clock.Clock.Value.Label(clock.Presentation.Value.tick);
             var combat = CombatAuthority.Instance;
             if (avatar != null && combat != null && combat.Player(avatar.PlayerId.Value.ToString(), out var player))
             {

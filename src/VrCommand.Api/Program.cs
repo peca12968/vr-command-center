@@ -28,6 +28,7 @@ if (string.Equals(Path.TrimEndingDirectorySeparator(dataDirectory), Path.TrimEnd
 builder.Services.AddSingleton(_ => new SqliteSessionEventStore(sessionDirectory));
 builder.Services.AddSingleton(services => new SessionManager(services.GetRequiredService<SqliteSessionEventStore>()));
 builder.Services.AddSingleton(services => new WorldRecordings(sessionDirectory, services.GetRequiredService<SessionManager>()));
+builder.Services.AddHostedService<MissionClockService>();
 var app = builder.Build();
 // Fail startup on inconsistent persisted histories, before reporting a healthy service.
 app.Services.GetRequiredService<SessionManager>();
@@ -84,7 +85,7 @@ app.Use(async (context, next) =>
     }
 });
 
-app.MapGet("/", () => new { service = "VR Command Center", stage = "VR mission placement preflight and Quest connection integration prototype", version = "0.27.0", layoutProfile = "vr-room-v1", worldAssetSets = new[] { VrCommand.Simulation.WorldAssetSets.Legacy, VrCommand.Simulation.WorldAssetSets.FieldProps, VrCommand.Simulation.WorldAssetSets.ServiceRifle, VrCommand.Simulation.WorldAssetSets.Combatants, VrCommand.Simulation.WorldAssetSets.WeaponActions, VrCommand.Simulation.WorldAssetSets.ArmedCombatants, VrCommand.Simulation.WorldAssetSets.CombatEffects, VrCommand.Simulation.WorldAssetSets.PlayerFire, VrCommand.Simulation.WorldAssetSets.PlayerBody }, enemyPresentationVersion = 1, weaponPresentationVersion = 1, enemyFireVersion = 1, playerFireVersion = 1, combatAudioVersion = 1, playerPresentationVersion=1 });
+app.MapGet("/", () => new { service = "VR Command Center", stage = "VR mission placement preflight and Quest connection integration prototype", version = "0.28.0", layoutProfile = "vr-room-v1", worldAssetSets = new[] { VrCommand.Simulation.WorldAssetSets.Legacy, VrCommand.Simulation.WorldAssetSets.FieldProps, VrCommand.Simulation.WorldAssetSets.ServiceRifle, VrCommand.Simulation.WorldAssetSets.Combatants, VrCommand.Simulation.WorldAssetSets.WeaponActions, VrCommand.Simulation.WorldAssetSets.ArmedCombatants, VrCommand.Simulation.WorldAssetSets.CombatEffects, VrCommand.Simulation.WorldAssetSets.PlayerFire, VrCommand.Simulation.WorldAssetSets.PlayerBody }, enemyPresentationVersion = 1, weaponPresentationVersion = 1, enemyFireVersion = 1, playerFireVersion = 1, combatAudioVersion = 1, playerPresentationVersion=1 });
 app.MapWorldRoutes();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/api/me", (HttpContext context) => Actor(context));

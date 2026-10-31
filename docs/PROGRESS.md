@@ -1,5 +1,27 @@
 # 開發進度
 
+## 2026-10-31：選用任務活動倒數、到期 End 與兩房原生驗證
+
+從乾淨 `336410b` 接續原始任務「時間」需求，新增 [MISSION_CLOCK](MISSION_CLOCK.md)。API／UI **0.28**、Unity **0.30.0／code37／NGO28**。操作員只在 Preparing 明確選用自動結束；新舊場次預設手動，不把既有 DurationSeconds 靜默改成期限。開始後政策及任務秒數不可變，規則仍0.8.0，原素材 pin／舊資料讀取／原始 binary header及checksum保留。
+
+計時為原 ArenaWorld 20Hz 活動 tick，不是 UTC 或不中斷牆鐘；Preparing／Pause／管理中斷停表，主迴圈卡頓可使活動時間慢於現實。到期 ArenaSession 不再 tick、射擊／換彈或建立新遊戲 binding；Unity 強制保存邊界並持續發布。API 250ms服務只從已接受的同源世界幀確認版本、設定序號與期限，以固定內部 mission-clock 身分提交正常 End，再走原雙 journal／精確 seal／個人戰績 ack。未發布的本地時間不能授權 End，HTTP 沒有 Internal 捷徑；API失聯時只凍結等待，不能聲稱已結束／封存。手動 End 可先勝出，不追加第二筆。
+
+新寫入事件 **envelope7，讀1–7**，SetMissionClock／source capability／自動End證據持久化。新 header missionClockVersion1與保存任務秒數由API獨立核對；world schema1、驗票2不變，不代表可降回舊reader。Prepare原位升28、原Scene及PlayerAvatar ID保持；API／UI／全部遊戲程序須協同更新。原5080仍0.16，不拿新來源接它或替換歷史。
+
+**真正 Editor 131 EditMode**通過（6項新增：邊界／NGO序列化／HUD／Pause凍結／Unity null預設手動／header能力）。Windows receipt `2026-10-31T05:56:16.0212938Z`，Quest ARM64 IL2CPP receipt `2026-10-31T06:05:38.2561465Z`；同一來源 fingerprint `d43085f4e6b755649b5da36b0885d6b690d7042f7ce4a871a947bc2e15ede53f`。原Scene `4314adcd8c63d86469d16497127d8cfb／1444571642`、prefab `6f3f36cb9d710e847b5ecc569665e1ce／5227825248646244841`未變。aapt確認0.30.0／code37、min32／target35／arm64，實際APK46,416,866 bytes，包內libil2cpp81,313,216及metadata9,259,300 bytes，含MissionClockState；見clock-apk-validation.json。receipt totalBytes為BuildReport總輸出，不能當作APK實際大小。建置不是頭盔運行證據。
+
+本機隔離 .NET locked restore／Release零警告錯誤、**680規則、446 HTTP、43世界串流**通過。**60 Node／223 Chromium**全回歸成功，另有 **13項**新時間控制／真正native錄製觀戰／最終結果核對，最後提示文字更新後再次13項成功。瀏覽器為SwiftShader，沒有當作原生GPU。17項既有desktop debrief／snapshot Python及語法、293官方Transport／單一修補核對通過；本輪未重跑25端容量。
+
+真正Windows兩個獨立server／每房一個client，`desktop-clock/20261031-135731-313ea995` **8項完整通過**。60秒自動房Pause在tick103，35.157秒內每次採樣不變；恢復後恰好tick1200停表，只有一筆schema7／mission-clock End及同源證據。手動房在tick1906仍Running，未自動加政策，手動End在tick1927。兩場world complete／pending=false、兩位個別結果均ack。整段回放自動947幀／手動952幀，逐幀連續、auto無tick>1200，末統計等於精確ledger。
+
+computer-use實際視窗觀察：Paused REMAIN00:55，真正Space後仍30／90、耗彈0；Running後Space變29／90，依序見00:47與00:16，最後看到自己的SEALED RESULTS、耗彈1／健康100／0%並斷線保留。沒有注入姿態／命中。額外觀戰工具只在C建立新的audit copy，從該副本啟動自己的API；13項核對新header活動時間為自動01:00／計畫01:00、手動01:36／計畫01:00，兩位final JSON的session／player／admission／room／stream／combat與world序號及全部統計一致。沒有在保留的原件／runtime-snapshot上開SQLite。
+
+資料明確在C SSD，source／binary在F；所有writer停止後才回F一次副本。`clock-runtime-validation.json`核對本輪**2個runtime／28檔**原件與snapshot SHA逐檔相同、cleanup errors空且無tracked child；含原生工具初次失敗場次。正式5080／原Unity serve、授權、安全設定未動，沒有憑證／資料庫／binary提交。
+
+保留檢查器失敗：首次瀏覽器用UI編輯前的隔離輸出資產，缺clock欄位，重新build資產；第二次把fieldset拿Playwright isDisabled判斷，改讀真正DOM disabled；第三次未等非同步refresh更新政策文字，加入對應渲染等待。最後完整回歸通過，這些不當作遊戲故障。原生 `135715-168b5367` 使用錯誤start_clients方法名，改成既有clients，失敗原件／seal／清理亦保留。未改規則、期限或放寬權限來通過。
+
+限制：本輪兩位同機PC Simulation與明確暫停／到期案例；非25人同步操作、跨機／頭盔／MR／廠商硬體、長任務或API／server崩潰恢復驗收。原主迴圈停頓亦未證明修復。完整11項長期目標保持active。後續優先驗證計時期間管理／發布失聯與長任務，取得設備後另驗Quest追蹤、控制器、效能及VIVE相容。
+
 ## 2026-10-31：End入場延遲、結果丟包與真正期限回歸
 
 前輪交付及推送屬實際進展；本輪從乾淨`34ee9f7`接續驗證尚缺的結束競態。新增[DESKTOP_END_NETWORK](DESKTOP_END_NETWORK.md)／`check-desktop-end-race.py`及只供本輪自有client的`udp_gate.py`。最初推測剛approved的玩家可能因client尚未就緒而丟失結果，但第一個真正延遲實驗實際收到正確結果，**不以未重現的假設修改遊戲端／NGO協定**。

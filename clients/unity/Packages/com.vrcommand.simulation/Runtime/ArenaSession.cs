@@ -16,9 +16,11 @@ namespace VrCommand.Simulation
         public ManagedEnvironment environment = null!;
         public ManagedEnemies enemies = null!;
         public ManagedPlayer[] players = null!;
+        public ManagedMissionClock? missionClock;
     }
     [Serializable] public sealed class ManagedMission { public string id = null!; public ManagedDefinition definition = null!; }
-    [Serializable] public sealed class ManagedDefinition { public string name = null!; public ManagedProp[] props = null!; }
+    [Serializable] public sealed class ManagedDefinition { public string name = null!; public ManagedProp[] props = null!; public int durationSeconds; }
+    [Serializable] public sealed class ManagedMissionClock { public int version; public bool autoEnd; public long configuredAtSequence; }
     [Serializable] public sealed class ManagedProp { public string assetId = null!; public ManagedPosition position = null!; public float yawDegrees; }
     [Serializable] public sealed class ManagedPosition { public float x, y, z; public Vec3 Vector => new Vec3(x, y, z); }
     [Serializable] public sealed class ManagedEnvironment { public string mode = null!, weather = null!, timeOfDay = null!; public bool lightning; }
@@ -40,11 +42,14 @@ namespace VrCommand.Simulation
         private readonly List<Guid> enemySlots = new List<Guid>();
         private Guid sessionId, missionId;
         private int enemyGeneration;
+        private int missionDuration;
+        private bool clockAutoEnd;
         private long sequence;
         private int[] roomIds = null!;
         private WorldProp[] props = null!;
         public ArenaWorld World { get; private set; } = null!;
         public WorldProp[] Props => props == null ? new WorldProp[0] : (WorldProp[])props.Clone();
+        public bool ClockDue => World != null && clockAutoEnd && MissionClock.Due(World.TickNumber, missionDuration);
 
         public static Guid StableId(Guid session, string purpose)
         {
@@ -76,6 +81,15 @@ namespace VrCommand.Simulation
                 throw new InvalidOperationException("The running server cannot switch session, mission or rewind management state.");
             if ((World == null && phase != WorldPhase.Preparing) || (World != null && World.Phase == WorldPhase.Ended && phase != WorldPhase.Ended))
                 throw new InvalidOperationException("Start the game server during Preparing; ended worlds cannot restart.");
+            var clock = snapshot.missionClock; var autoEnd = clock?.autoEnd == true;
+            var duration = snapshot.mission.definition.durationSeconds;
+            if ((duration != 0 && !MissionClock.ValidDuration(duration)) || (clock != null && (clock.version == 0
+                ? autoEnd || clock.configuredAtSequence != 0 : clock.version != MissionClock.Version || clock.configuredAtSequence < 1
+                    || clock.configuredAtSequence > snapshot.sequence)) || (autoEnd && !MissionClock.ValidDuration(duration)))
+                throw new ArgumentException("Unsupported mission clock settings.");
+            if (World != null && ((missionDuration != 0 && missionDuration != duration)
+                || (World.Phase != WorldPhase.Preparing && clockAutoEnd != autoEnd)))
+                throw new InvalidOperationException("Running mission clock policy and duration are immutable.");
             var nextRoster = new Dictionary<Guid, ManagedPlayer>();
             foreach (var player in snapshot.players)
             {
@@ -138,6 +152,7 @@ namespace VrCommand.Simulation
                 else Disconnect(connection);
             }
             roster = nextRoster; sessionId = id; missionId = mission; sequence = snapshot.sequence;
+            clockAutoEnd = autoEnd; missionDuration = duration;
             if (World.Phase == WorldPhase.Ended)
             { if (phase != WorldPhase.Ended) throw new InvalidOperationException("World is already ended."); return; }
             World.SetPolicy(behavior, snapshot.enemies.autoAttack,
@@ -168,7 +183,7 @@ namespace VrCommand.Simulation
 
         public bool Connect(ulong connection, Guid player, int room, int seat, Guid admission)
         {
-            if (World == null || World.Phase == WorldPhase.Ended || connections.ContainsKey(connection)
+            if (World == null || World.Phase == WorldPhase.Ended || ClockDue || connections.ContainsKey(connection)
                 || connections.Values.Any(binding => binding.Player == player) || !roster.TryGetValue(player, out var entry)
                 || admission == Guid.Empty || entry.admissionId != admission.ToString("D") || entry.roomId != room || entry.seat != seat) return false;
             connections.Add(connection, new Binding { Player = player, Admission = admission }); return true;
@@ -190,7 +205,7 @@ namespace VrCommand.Simulation
         }
         public bool Weapon(ulong connection, ulong input, bool reload, double now)
         {
-            if (!connections.TryGetValue(connection, out var binding) || input == 0 || input <= binding.LastInput || !ValidTime(now)
+            if (ClockDue || !connections.TryGetValue(connection, out var binding) || input == 0 || input <= binding.LastInput || !ValidTime(now)
                 || now < binding.LastPose || now - binding.LastPose > .5 || World.Phase != WorldPhase.Running) return false;
             binding.LastInput = input;
             var id = StableId(sessionId, "input:" + connection + ":" + input);
@@ -199,7 +214,7 @@ namespace VrCommand.Simulation
         }
         public void Tick(double now)
         {
-            if (!ValidTime(now) || World == null) return;
+            if (!ValidTime(now) || World == null || ClockDue) return;
             if (World.Phase != WorldPhase.Ended)
                 foreach (var binding in connections.Values) World.SetPlayerConnected(binding.Player, now >= binding.LastPose && now - binding.LastPose <= .5);
             World.Tick();

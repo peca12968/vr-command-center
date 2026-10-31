@@ -3,15 +3,18 @@ namespace VrCommand.Core;
 public enum SessionMode { Independent, Linked }
 public enum HeadsetKind { ViveXr, Quest3 }
 public enum SessionState { Preparing, Running, Paused, Ended }
-public enum ControlAction { Unspecified, Begin, Pause, Resume, End, SetEnvironment, SetEnemies }
+public enum ControlAction { Unspecified, Begin, Pause, Resume, End, SetEnvironment, SetEnemies, SetMissionClock }
+public record MissionClockSettings(bool AutoEnd);
+public record MissionClockStatus(int Version, bool AutoEnd, long ConfiguredAtSequence);
+public record MissionClockExpiration(Guid StreamId, long ObservedSequence, long Tick);
 public record Player(Guid Id, string Name, int RoomId, HeadsetKind Headset, int Seat = -1, Guid AdmissionId = default);
 public record SessionView(Guid Id, SessionMode Mode, int[] RoomIds, Mission Mission,
     DateTimeOffset CreatedAtUtc, DateTimeOffset? StartedAtUtc, DateTimeOffset? EndedAtUtc,
     SessionState State, Player[] Players, EnvironmentSettings Environment, EnemySettings Enemies, long Sequence,
-    CombatStreamView? CombatStream = null);
+    CombatStreamView? CombatStream = null, MissionClockStatus? MissionClock = null);
 public record RoomView(int Id, int Capacity, Guid? SessionId, int PlayerCount);
 public record ControlCommand(Guid CommandId, ControlAction Action, EnvironmentSettings? Environment = null,
-    EnemySettings? Enemies = null, long? ExpectedSequence = null);
+    EnemySettings? Enemies = null, long? ExpectedSequence = null, MissionClockSettings? MissionClock = null, MissionClockExpiration? ClockExpiration = null);
 public record CommandReceipt(Guid CommandId, long AppliedAtSequence, bool Duplicate, SessionView Session);
 
 // Management and combat telemetry; this does not simulate a 3D world or determine physical collisions.

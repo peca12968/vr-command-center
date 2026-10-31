@@ -308,7 +308,7 @@ try:
             request("POST", own_path + "/commands", command, identity="Room1")
             request("POST", own_path + "/commands", command, 409)  # another identity cannot claim this retry
             own_events = request("GET", own_path + "/events", identity="Room1")
-            require(own_events[-1]["actor"]["id"] == "room-1" and own_events[-1]["schemaVersion"] == 6,
+            require(own_events[-1]["actor"]["id"] == "room-1" and own_events[-1]["schemaVersion"] == 7,
                     "Management events retain authenticated console identity")
             request("POST", f"/api/sessions/{independent[1]['id']}/players", {**player, "roomId": 2}, 409)
             request("POST", f"/api/sessions/{independent[0]['id']}/players", {**player, "playerId": str(uuid.uuid4()), "roomId": 2}, 400)
@@ -432,7 +432,7 @@ try:
                     "Runtime overrides preserve the saved template")
             events = request("GET", session_path + "/events?after=0&limit=500")
             combat_events = [event for event in events if event["kind"] == "CombatRecorded"]
-            require(len(combat_events) == 7 and all(event["actor"]["id"] == "game-server" and event["schemaVersion"] == 6 for event in combat_events),
+            require(len(combat_events) == 7 and all(event["actor"]["id"] == "game-server" and event["schemaVersion"] == 7 for event in combat_events),
                     "Combat and management share a versioned, authenticated event stream")
             with closing(sqlite3.connect(test_directory / "sessions/events.db")) as database:
                 stored = database.execute("SELECT COUNT(*) FROM session_events WHERE session_id=?", (session["id"],)).fetchone()[0]

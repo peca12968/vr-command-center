@@ -85,13 +85,15 @@ public sealed partial class WorldRecordings : IDisposable
     {
         var view = Owner(id, actor); WorldRecordingValidation.Header(header);
         if (header.sessionId != id.ToString("D") || header.streamId != view.CombatStream!.StreamId.ToString("D")
-            || header.origin != view.CombatStream.Origin.ToString()) throw new InvalidOperationException("World and combat stream identities disagree.");
+            || header.origin != view.CombatStream.Origin.ToString() || header.missionClockVersion != view.CombatStream.MissionClockVersion
+            || (header.missionClockVersion == 1 && header.missionDurationSeconds != view.Mission.Definition.DurationSeconds))
+            throw new InvalidOperationException("World and combat stream identities or clock capabilities disagree.");
         // Rebuild only canonical mission geometry, not a running or recovered world.
         var bridge = new ArenaSession();
         var source = JsonSerializer.Serialize(view with { State = SessionState.Preparing }, JsonFormat.Options);
         var management = JsonSerializer.Deserialize<ManagementSnapshot>(source, new JsonSerializerOptions(JsonFormat.Options) { IncludeFields = true })!;
         bridge.Apply(management);
-        var expected = WorldRecordingHeader.Create(id, view.CombatStream.StreamId, header.origin, view.RoomIds, bridge.Props, header.captureStartedAtUtc, header.environmentVersion, header.assetSet, header.enemyPresentationVersion, header.weaponPresentationVersion, header.enemyFireVersion, header.playerFireVersion, header.combatAudioVersion, header.playerPresentationVersion);
+        var expected = WorldRecordingHeader.Create(id, view.CombatStream.StreamId, header.origin, view.RoomIds, bridge.Props, header.captureStartedAtUtc, header.environmentVersion, header.assetSet, header.enemyPresentationVersion, header.weaponPresentationVersion, header.enemyFireVersion, header.playerFireVersion, header.combatAudioVersion, header.playerPresentationVersion, header.missionClockVersion, header.missionDurationSeconds);
         var json = WorldJson.Write(header);
         if (json != WorldJson.Write(expected)) throw new InvalidOperationException("Recording geometry must match the session's canonical VR mission.");
         lock (gate)

@@ -1,6 +1,7 @@
 import { ReplayScene } from './replay-scene.js';
 import { mountCameras } from './camera-ui.js';
 import { mountWorldCameraForm } from './world-camera-form.js';
+import { recordedClock } from './mission-clock.js';
 
 const $ = id => document.getElementById(id);
 const time = milliseconds => (milliseconds / 1000).toFixed(2) + ' 秒';
@@ -47,7 +48,8 @@ export function mountWorld(getKey, unauthorized) {
     $('world-sound').textContent = ({ on: '音效：開啟', off: '音效：關閉', loading: '音效載入中…', error: '音效：重試開啟' })[audio];
     $('world-sound').setAttribute('aria-pressed', String(audio === 'on'));
     const phase = frame ? phases[frame.packet.frame.phase] : '等待第一份快照';
-    $('world-status').textContent = `${info.header.origin} · ${info.complete ? '錄製已核對封存' : '錄製未封存'} · ${phase}`;
+    const clock = recordedClock(info.header, frame?.packet.frame.tick);
+    $('world-status').textContent = `${info.header.origin} · ${info.complete ? '錄製已核對封存' : '錄製未封存'} · ${phase}${clock ? ' · ' + clock : ''}`;
     if (mode === 'live') {
       const captured = info.header.captureStartedAtUtc ? Date.parse(info.header.captureStartedAtUtc) + (frame?.packet.elapsedMilliseconds ?? 0) : NaN;
       const age = Date.now() - captured, unknown = !Number.isFinite(age), clockInvalid = age < -1000;

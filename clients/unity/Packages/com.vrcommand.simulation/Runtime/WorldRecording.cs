@@ -40,13 +40,14 @@ namespace VrCommand.Simulation
         public int playerFireVersion;
         public int combatAudioVersion;
         public int playerPresentationVersion;
+        public int missionClockVersion, missionDurationSeconds;
         public string sessionId = "", streamId = "", origin = "Simulation", rulesVersion = "0.8.0", assetSet = "primitives-v1", calibration = "uncalibrated-vr";
         public string captureStartedAtUtc = "";
         public int[] roomIds = new int[0];
         public RecordedProp[] props = new RecordedProp[0];
-        public static WorldRecordingHeader Create(Guid session, Guid stream, string origin, int[] rooms, WorldProp[] geometry, string captureStartedAtUtc = "", int environmentVersion = EnvironmentPresentation.Version, string assetSet = WorldAssetSets.Legacy, int enemyPresentationVersion = 0, int weaponPresentationVersion = 0, int enemyFireVersion = 0, int playerFireVersion = 0, int combatAudioVersion = 0, int playerPresentationVersion = 0) => new WorldRecordingHeader
+        public static WorldRecordingHeader Create(Guid session, Guid stream, string origin, int[] rooms, WorldProp[] geometry, string captureStartedAtUtc = "", int environmentVersion = EnvironmentPresentation.Version, string assetSet = WorldAssetSets.Legacy, int enemyPresentationVersion = 0, int weaponPresentationVersion = 0, int enemyFireVersion = 0, int playerFireVersion = 0, int combatAudioVersion = 0, int playerPresentationVersion = 0, int missionClockVersion = 0, int missionDurationSeconds = 0) => new WorldRecordingHeader
         {
-            sessionId = session.ToString("D"), streamId = stream.ToString("D"), origin = origin, captureStartedAtUtc = captureStartedAtUtc, environmentVersion = environmentVersion, enemyPresentationVersion = enemyPresentationVersion, weaponPresentationVersion = weaponPresentationVersion, enemyFireVersion = enemyFireVersion, playerFireVersion = playerFireVersion, combatAudioVersion = combatAudioVersion, playerPresentationVersion=playerPresentationVersion, assetSet = assetSet, roomIds = (int[])rooms.Clone(),
+            sessionId = session.ToString("D"), streamId = stream.ToString("D"), origin = origin, captureStartedAtUtc = captureStartedAtUtc, environmentVersion = environmentVersion, enemyPresentationVersion = enemyPresentationVersion, weaponPresentationVersion = weaponPresentationVersion, enemyFireVersion = enemyFireVersion, playerFireVersion = playerFireVersion, combatAudioVersion = combatAudioVersion, playerPresentationVersion=playerPresentationVersion, assetSet = assetSet, roomIds = (int[])rooms.Clone(), missionClockVersion = missionClockVersion, missionDurationSeconds = missionDurationSeconds,
             props = geometry.Select(prop => new RecordedProp { id = prop.Id.ToString("D"), roomId = prop.RoomId, kind = prop.Kind.ToString(), feet = new RecordedVector(prop.Feet), yaw = prop.Yaw }).ToArray()
         };
     }
@@ -132,7 +133,9 @@ namespace VrCommand.Simulation
         }
         public static void Header(WorldRecordingHeader header)
         {
-            if (header == null || header.schemaVersion != 1 || header.environmentVersion < 0 || header.environmentVersion > EnvironmentPresentation.Version
+            if (header == null || header.schemaVersion != 1 || header.missionClockVersion < 0 || header.missionClockVersion > MissionClock.Version
+                || (header.missionClockVersion == 0 ? header.missionDurationSeconds != 0 : !MissionClock.ValidDuration(header.missionDurationSeconds))
+                || header.environmentVersion < 0 || header.environmentVersion > EnvironmentPresentation.Version
                 || header.enemyPresentationVersion < 0 || header.enemyPresentationVersion > EnemyPresentation.Version
                 || header.playerFireVersion < 0 || header.playerFireVersion > PlayerFirePresentation.Version
                 || header.playerPresentationVersion<0||header.playerPresentationVersion>1

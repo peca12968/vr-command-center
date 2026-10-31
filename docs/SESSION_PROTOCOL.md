@@ -1,5 +1,7 @@
 # 場次與事件契約 v0.11
 
+2026-10-31新增[任務計時](MISSION_CLOCK.md)：新寫入envelope7、讀1–7，Preparing的明確SetMissionClock政策與內部End證據持久化。舊場次仍手動；schema7寫入後不得降舊reader。真正PC的Pause／End與封存已驗，以下較早章節保留當時範圍。
+
 本契約目前僅實作管理資料狀態。狀態為 `Running` 不代表已連接遊戲伺服器，`Pause` 尚不會停止頭盔畫面或硬體。
 
 綁定戰鬥來源的場次可在 Pause／End 後補送已保存的 Running 觀察尾端，Ended 時 pendingTelemetry 保持 true 到 seal。新管理操作仍受原生命週期限制；管道／封存格式與完整性邊界見 `TELEMETRY.md`。Unity 有停止／補送來源碼，尚未運行驗證。

@@ -112,6 +112,7 @@ namespace VrCommand.Unity
             number ??= new GUIStyle(heading) { fontSize = 42 };
             center ??= new GUIStyle(heading) { alignment = TextAnchor.MiddleCenter };
             var status = TacticalHudRules.Status(phase, player.health, combat.Ready.Value, avatar.PoseAccepted.Value, player.connected, avatar.TrackingReady, false);
+            if (avatar.TrackingReady && VenueBootstrap.Instance?.sceneAuthority.ClockDue == true) status = "TIME LIMIT REACHED - FINALIZING";
             var active = status == "ACTIVE";
             if (previousHealth >= 0 && player.health < previousHealth) damageUntil = Time.unscaledTime + .35f;
             previousHealth = player.health;
@@ -122,6 +123,12 @@ namespace VrCommand.Unity
             GUI.Label(new Rect(34, 25, 230, 22), "VR COMMAND / TACTICAL", small);
             GUI.Label(new Rect(34, 48, 230, 29), "ROOM " + player.room.ToString("00") + " / " + phase.ToUpperInvariant(), heading);
             GUI.Label(new Rect(34, 77, 230, 22), "SIMULATION / SYNTHETIC RIG", small);
+            var clock = VenueBootstrap.Instance?.sceneAuthority;
+            if (clock != null && clock.IsSpawned && clock.Clock.Value.Valid)
+            {
+                PanelAt(new Rect(20, 110, 360, 36));
+                GUI.Label(new Rect(34, 115, 340, 26), clock.Clock.Value.Label(clock.Presentation.Value.tick), heading);
+            }
             var bearing = TacticalHudRules.Bearing(camera.transform.forward);
             var compass = width - 180;
             PanelAt(new Rect(compass - 160, 20, 320, 68));

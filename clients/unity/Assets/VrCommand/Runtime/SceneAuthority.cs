@@ -6,6 +6,19 @@ using SessionSnapshot = VrCommand.Simulation.ManagementSnapshot;
 
 namespace VrCommand.Unity
 {
+    public struct MissionClockState : INetworkSerializable, IEquatable<MissionClockState>
+    {
+        public int version, durationSeconds;
+        public bool autoEnd;
+        public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T:IReaderWriter
+        { serializer.SerializeValue(ref version); serializer.SerializeValue(ref durationSeconds); serializer.SerializeValue(ref autoEnd); }
+        public bool Equals(MissionClockState other) => version == other.version && durationSeconds == other.durationSeconds && autoEnd == other.autoEnd;
+        public bool Valid => version == VrCommand.Simulation.MissionClock.Version && VrCommand.Simulation.MissionClock.ValidDuration(durationSeconds);
+        public string Label(long tick) => !Valid || tick < 0 ? "" : autoEnd
+            ? "REMAIN " + VrCommand.Simulation.MissionClock.FormatSeconds(VrCommand.Simulation.MissionClock.RemainingSeconds(tick, durationSeconds))
+            : "ELAPSED " + VrCommand.Simulation.MissionClock.FormatSeconds(tick / VrCommand.Simulation.MissionClock.TicksPerSecond)
+                + " / PLAN " + VrCommand.Simulation.MissionClock.FormatSeconds(durationSeconds);
+    }
     public struct WeatherState : INetworkSerializable, IEquatable<WeatherState>
     {
         public long tick;
@@ -23,6 +36,9 @@ namespace VrCommand.Unity
     {
         public NetworkVariable<FixedString32Bytes> Phase = new NetworkVariable<FixedString32Bytes>("Preparing");
         public NetworkVariable<WeatherState> Presentation = new NetworkVariable<WeatherState>();
+        public NetworkVariable<MissionClockState> Clock = new NetworkVariable<MissionClockState>();
+        public bool ClockDue => IsSpawned && Clock.Value.Valid && Clock.Value.autoEnd
+            && VrCommand.Simulation.MissionClock.Due(Presentation.Value.tick, Clock.Value.durationSeconds);
         public UnityWeatherView environmentView;
         private double observed;
         public bool AudioRunning=>IsSpawned && Presentation.Value.phase==1 && Time.realtimeSinceStartupAsDouble-observed<=1.5;
@@ -42,6 +58,8 @@ namespace VrCommand.Unity
             value.night = snapshot.environment.timeOfDay == "Night"; value.lightning = snapshot.environment.lightning; value.rooms = 0;
             foreach (var room in snapshot.roomIds) value.rooms |= 1 << (room - 1);
             Phase.Value = snapshot.state; Presentation.Value = value;
+            Clock.Value = new MissionClockState { version = 1, durationSeconds = snapshot.mission.definition.durationSeconds,
+                autoEnd = snapshot.missionClock?.autoEnd == true };
         }
         public void PublishTick(long tick, string phase)
         {

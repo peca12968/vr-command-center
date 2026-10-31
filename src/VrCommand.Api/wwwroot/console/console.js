@@ -139,7 +139,7 @@ async function refreshData(epoch) {
     const events = await api(`/sessions/${selected}/events?after=${Math.max(0, session.sequence - 20)}&limit=20`);
     if (epoch !== state.epoch || selected !== state.selected) return;
     state.session = session;
-    if (previous?.id !== session.id) { loadEnvironment(); loadEnemies(); }
+    if (previous?.id !== session.id) { loadEnvironment(); loadEnemies(); loadClock(); }
     renderSession(statistics, events);
   } else { state.session = null; state.statistics = null; report.reset(); $('session-panel').hidden = true; }
   $('last-update').textContent = '更新於 ' + time(Date.now());
@@ -178,6 +178,7 @@ function applyPermissions() {
   $('launch-version').disabled = locked || !state.draftBase;
   $('save-revision').disabled = locked || !master() || !state.draftBase || state.draftBase.number !== knownHeadNumber(state.draftBase.seriesId);
   for (const id of ['environment-fields', 'enemies-fields']) $(id).disabled = locked || !manages() || ended || !session;
+  $('clock-fields').disabled = locked || !manages() || session?.state !== 'Preparing' || session?.combatStream?.missionClockVersion !== 1;
   $('join-fields').disabled = locked || session?.state !== 'Preparing';
   $('ticket-fields').disabled = locked || ended || !session;
   for (const button of document.querySelectorAll('[data-command]')) {
@@ -202,6 +203,7 @@ function renderSession(statistics, events) {
   $('session-meta').textContent = `${session.mode === 'Linked' ? '五房全連線' : '單房獨立'} / 房 ${session.roomIds.join('、')} / 序號 ${session.sequence}`;
   $('session-phase').textContent = phases[session.state]; $('session-phase').className = 'badge ' + session.state.toLowerCase();
   $('session-briefing').textContent = session.mission.definition.briefing;
+  $('clock-status').textContent = `計畫 ${session.mission.definition.durationSeconds} 秒 · ${session.missionClock?.autoEnd ? '已啟用到時自動結束' : '手動結束'}${session.combatStream?.missionClockVersion !== 1 ? ' · 等待支援計時的遊戲伺服器就緒' : ''}`;
   const env = session.environment, enemies = session.enemies;
   $('live-environment').textContent = `${env.mode} · ${weatherNames[env.weather]} · ${env.timeOfDay === 'Night' ? '夜晚' : '白天'} · ${env.lightning ? '閃電開啟' : '無閃電'}`;
   $('live-enemies').textContent = `${enemies.count} 名 · ${behaviorNames[enemies.behavior]} · ${enemies.autoAttack ? '自動攻擊' : '手動設定'}`;
@@ -233,6 +235,7 @@ function setEnvironment(prefix, value) { $(prefix + '-mode').value = value.mode;
 function setEnemies(prefix, value) { $(prefix + '-count').value = value.count; $(prefix + '-behavior').value = value.behavior; $(prefix + '-auto-attack').checked = value.autoAttack; }
 function loadEnvironment() { if (state.session) { setEnvironment('live', state.session.environment); state.environmentSequence = state.session.sequence; } }
 function loadEnemies() { if (state.session) { setEnemies('live', state.session.enemies); state.enemiesSequence = state.session.sequence; } }
+function loadClock() { if (state.session) { $('clock-auto-end').checked = state.session.missionClock?.autoEnd === true; state.clockSequence = state.session.sequence; } }
 async function createSession() {
   if (state.pending) return;
   if (!placement.canLaunch()) { placement.scheduleLaunch(); notify('請先完成保存版本的場地檢查，再建立新場次。', true); return; }
@@ -270,7 +273,7 @@ async function sendPending() {
     if (pending.kind === 'create') { $('include-ended').checked = response.state === 'Ended'; state.selected = response.id; state.session = null; }
     if (pending.kind === 'command' && pending.body.action === 'End' && response.session.combatStream && !response.session.combatStream.sealed) $('include-ended').checked = true;
     if (pending.kind === 'join') $('player-name').value = '';
-    await refresh(); loadEnvironment(); loadEnemies();
+    await refresh(); loadEnvironment(); loadEnemies(); loadClock();
     notify({ create: '場次建立結果已確認。請核對目前狀態，再加入玩家及開始任務。', join: '玩家加入操作已確認，請核對目前名冊；尚不代表頭盔在線。', leave: '玩家移出操作已確認，請核對目前名冊。', command: '控制命令已確認。' }[pending.kind]);
   } catch (error) {
     if (pending.kind === 'create' && error.layout) placement.rejected(pending.body.missionId, pending.body.mode, error.layout);
@@ -440,6 +443,9 @@ submit('create-session-form', createSession);
 submit('join-form', joinPlayer);
 submit('environment-form', () => command('SetEnvironment', { environment: environment('live') }, state.environmentSequence));
 submit('enemies-form', () => command('SetEnemies', { enemies: enemies('live') }, state.enemiesSequence));
+submit('clock-form', () => command('SetMissionClock', { missionClock: { autoEnd: $('clock-auto-end').checked } }, state.clockSequence));
+$('reload-clock').addEventListener('click', loadClock);
+$('clock-auto-end').addEventListener('change', () => { state.clockSequence = state.session?.sequence; });
 submit('mission-form', saveMission);
 $('load-mission').addEventListener('click', () => run(() => loadDraft()));
 $('load-version').addEventListener('click', () => run(() => loadDraft($('mission-version').value, true)));
