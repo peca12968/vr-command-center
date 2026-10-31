@@ -32,10 +32,12 @@ public sealed partial class WorldRecordings : IDisposable
     private readonly object gate = new();
     private readonly SqliteConnection db;
     private readonly SessionManager manager;
+    private readonly TimeProvider readinessClock;
 
-    public WorldRecordings(string directory, SessionManager manager)
+    public WorldRecordings(string directory, SessionManager manager, TimeProvider? clock = null)
     {
         this.manager = manager;
+        readinessClock = clock ?? TimeProvider.System;
         db = new(new SqliteConnectionStringBuilder { DataSource = Path.Combine(directory, "worlds.db"), Pooling = false }.ToString());
         try
         {

@@ -2,6 +2,7 @@ import { mountWorld } from './world-ui.js';
 import { mountReplay } from './replay-ui.js';
 import { mountLayout } from './layout-ui.js';
 import { mountReport } from './report-ui.js';
+import { mountReadiness } from './readiness-ui.js';
 const replay = mountReplay();
 const $ = id => document.getElementById(id);
 const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫停', Ended: '已結束' };
@@ -10,6 +11,7 @@ const behaviorNames = { Hold: '守備', Patrol: '巡邏', Advance: '推進' };
 const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: null, rooms: [], missions: [], catalog: [], launchPinned: null, history: null, draftBase: null, draftChanged: false, draftSavedAt: '', sessions: [], session: null, selected: '', pending: null, props: [], prop: -1, environmentSequence: null, enemiesSequence: null };
 const world = mountWorld(() => state.key, logout);
 const report = mountReport(() => state, logout);
+const readiness = mountReadiness(() => state, logout);
 const placement = mountLayout({ api, epoch: () => state.epoch, active: () => !!state.actor, editable: master,
   draft: () => ({ experienceMode: $('draft-mode').value, mode: $('layout-session-mode').value, enemyCount: Number($('draft-count').value), props: structuredClone(state.props) }),
   selection: () => ({ id: $('launch-mission').value, mode: $('launch-mode').value }), changed: applyPermissions,
@@ -75,7 +77,7 @@ async function run(action) {
 function logout() {
   selectionEpoch++;
   report.reset(); state.statistics = null;
-  replay.active(false); replay.reset(); world.active(false); world.reset();
+  replay.active(false); replay.reset(); world.active(false); world.reset(); readiness.active(false); readiness.reset();
   state.epoch++; state.key = ''; state.actor = null; state.selected = ''; state.session = null; state.pending = null;
   state.rooms = []; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
   state.props = []; state.prop = -1;
@@ -157,7 +159,7 @@ function renderRooms() {
 async function selectSession(id) {
   if (state.pending || state.busy) { notify('請先確認目前命令的結果。', true); return; }
   const selection = ++selectionEpoch, epoch = state.epoch;
-  report.reset(); state.statistics = null; state.selected = id; state.session = null;
+  report.reset(); readiness.reset(); state.statistics = null; state.selected = id; state.session = null;
   $('session-panel').hidden = true;
   if (state.refreshPromise) { try { await state.refreshPromise; } catch { /* Refresh below reports errors. */ } }
   if (selection !== selectionEpoch || epoch !== state.epoch) return;
@@ -215,9 +217,11 @@ function renderSession(statistics, events) {
       const button = element('button', label, cls + ' small'); button.type = 'button'; button.dataset.playerRoom = player.roomId;
       button.addEventListener('click', () => run(action)); actions.append(button);
     }
-    return row([player.name, `${player.roomId} / ${player.seat + 1}`, player.headset === 'Quest3' ? 'Quest 3' : 'VIVE XR', actions]);
+    const participation = element('span', '等待本次入場同步'); participation.dataset.readinessPlayer = player.id; participation.dataset.admission = player.admissionId;
+    return row([player.name, `${player.roomId} / ${player.seat + 1}`, player.headset === 'Quest3' ? 'Quest 3' : 'VIVE XR', participation, actions]);
   }));
-  if (!session.players.length) emptyTable('roster', 4, '尚未加入玩家');
+  if (!session.players.length) emptyTable('roster', 5, '尚未加入玩家');
+  readiness.update();
   $('statistics-origin').textContent = statistics.origin === 'Simulation' ? '模擬資料' : statistics.origin === 'GameServer' ? '遊戲伺服器回報' : '尚無戰鬥資料';
   $('telemetry-status').hidden = !session.combatStream;
   $('telemetry-status').textContent = statistics.pendingTelemetry ? '已要求結束；等待遊戲伺服器補送事件並封存，統計尚未確認完整。'
@@ -424,7 +428,7 @@ for (const id of ['prop-asset', 'prop-x', 'prop-y', 'prop-z', 'prop-yaw']) $(id)
 
 function tab(name) {
   for (const candidate of ['operations', 'missions', 'replay', 'world']) { const active = candidate === name; $(candidate + '-view').hidden = !active; $('tab-' + candidate).classList.toggle('active', active); $('tab-' + candidate).setAttribute('aria-pressed', String(active)); }
-  replay.active(name === 'replay'); world.active(name === 'world');
+  replay.active(name === 'replay'); world.active(name === 'world'); readiness.active(name === 'operations');
 }
 function submit(id, action) { $(id).addEventListener('submit', event => { event.preventDefault(); run(action); }); }
 $('login-form').addEventListener('submit', login);

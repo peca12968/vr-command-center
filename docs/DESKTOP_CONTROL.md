@@ -1,5 +1,7 @@
 # 從控制台開啟電腦任務
 
+API/UI0.29新增[玩家參戰快照](PLAYER_READINESS.md)，可在名冊直接看本次入場的有效姿態、來源過期／中斷；不以「Quest3」分類或名冊人數宣稱頭盔在線。原生雙PC退出／換入場／恢復及控制台8項已驗，仍是Simulation；工具版本gate同步0.29，遊戲0.31.0／NGO29保持。開始任務的既有政策不改，狀態是抽樣觀察而非實體安全確認。
+
 目前玩家End流程見[DESKTOP_DEBRIEF](DESKTOP_DEBRIEF.md)：Unity0.29／NGO27；雙seal後傳送自己的最終戰績、ack斷線保留。`--results-seconds`預設30（0–300），可關窗或以`dismiss-results.request`提早結束；新任務玩家可取代舊結果視窗。最新建置／125 EditMode與原生驗證以PROGRESS為準，下文版本數字為功能首輪歷史。
 
 目前來源API／UI0.23、Unity0.25／code28／NGO23，採combat-effects-v1；敵軍射擊閃光／後座見 [ENEMY_FIRE.md](ENEMY_FIRE.md)，NPC雙手手槍／裝飾性雙臂見 [ARMED_ENEMIES.md](ARMED_ENEMIES.md)，玩家換彈沿用WEAPON_ACTIONS。新版原生觀戰檢查另讀實際槍口／方向／肘腕世界矩陣，最新通過數與binary以PROGRESS為準。下文舊版數字為各功能首輪證據。

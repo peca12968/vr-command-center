@@ -1,5 +1,7 @@
 # 長期開發目標
 
+2026-10-31 新增[玩家參戰快照](PLAYER_READINESS.md)：API/UI0.29在名冊直接顯示來源／姿態有效數，核對已接受世界與本次admission，不把名冊分類當連線。698規則、453 HTTP／43串流、64 Node／229 Chromium及真正雙PC的8原生＋8 UI通過，已關閉peer／同ID換入場／新端恢復／Begin-Pause-End／雙seal；Unity與原雙平台不變，本輪未重建。完整目標active；接續多玩家持續操作、場館流程與跨機，頭盔／25台另驗。
+
 2026-10-31 新增[玩家任務簡報](PLAYER_BRIEFING.md)：原保存任務名稱／10000字內容送到GameServer及玩家，繁中隨附字型、分頁及本機武器抑制；真正雙PC原生B／Space／Escape／L、晚連線、姿態持續與雙seal結果通過。Unity0.31.0／code38／NGO29、141真正EditMode，雙平台最終receipt見PROGRESS；API/UI0.28及規則／錄影格式保持。完整目標active，頭盔控制器與舒適度、25台／跨機仍待。下一步接續多玩家操作與完整場館流程，實機分開驗收。
 
 2026-10-31 [15分鐘PC任務](DESKTOP_LONG.md)通過8475幀完整回放、8460個Running幀無失效body，原入場跨票券到期、健康80及tick18000／雙seal／結果一致；另[封存失聯](SEAL_RECOVERY.md)兩模式各8項通過，49 Python。仍是單玩家同機Simulation，不能外推4小時／25位／實機；遊戲版本與原雙平台receipt保持，本輪未重建。下一步多玩家持續操作與更長／封存期限情境。

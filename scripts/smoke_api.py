@@ -252,6 +252,16 @@ try:
             request("POST", f"/api/sessions/{independent[0]['id']}/players", player)
             room_player = {**player, "playerId": str(uuid.uuid4())}
             own_path = f"/api/sessions/{independent[0]['id']}"
+            request("GET", own_path + "/readiness", expected=401, identity=None)
+            request("GET", own_path + "/readiness", expected=403, identity="Room2")
+            request("GET", own_path + "/readiness", expected=403, identity="GameServer")
+            readiness = request("GET", own_path + "/readiness", identity="Room1")
+            require(readiness["version"] == 1 and readiness["sourceState"] == "NoRecording"
+                    and readiness["players"][0]["playerId"] == first_player_id and not readiness["players"][0]["canParticipate"]
+                    and readiness["players"][0]["admissionId"] == request("GET", own_path)["players"][0]["admissionId"],
+                    "Readiness requires an actual accepted world and preserves the current admission")
+            require(not {"head", "left", "right", "ticket", "gameServerKey"}.intersection(readiness["players"][0]),
+                    "Control readiness contains no pose coordinates, player ticket or server credential")
             join_key = str(uuid.uuid4())
             with ThreadPoolExecutor(max_workers=8) as pool:
                 joins = list(pool.map(lambda _: request("POST", own_path + "/players", room_player, identity="Room1", request_id=join_key), range(8)))

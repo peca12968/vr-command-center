@@ -1,5 +1,27 @@
 # 開發進度
 
+## 2026-10-31：名冊旁的玩家參戰快照
+
+前輪有實際功能與驗證進展；從乾淨`01086d7`接續新增[PLAYER_READINESS](PLAYER_READINESS.md)。**API／UI0.29**，操作員可在名冊旁直接查看有效姿態數、等待來源／中斷／過期與本次入場同步，明確標示Simulation及合成／追蹤資料。這是已接受世界幀的觀察，不是裝置在線、型號、戴好頭盔或MR／安全校正證明；沒有加Begin條件、修改射擊授權、Tracked資料、rules0.8.0或DB格式。
+
+新增GET readiness v1端點只限Master及可讀場次的RoomController，每次顯式Actor／範圍檢查，GameServer／Internal也拒絕。只回本次名冊的狀態／admission／room／seat及來源邊界，不含姿態座標、票券或管理key。WorldRecordings用最後已接受幀的observedSequence還原當時名冊，再對照本次管理快照；相同playerId的新admission不能繼承舊frame的connected。每份報告受其sessionSequence與抽樣時點限制，不授權戰鬥。
+
+來源時間仍header擷取UTC＋packet.elapsed，而非收到時間；未知、超前1000ms以外、過期1500ms、suspended、階段未同步或Ended皆不綠色。前端約1Hz診斷、250ms本地老化更新，從請求開始計performance經過時間，包含下載等待；登入／選擇epoch、報告序號及admission fence阻擋晚回應。沒有走REST傳逐幀頭手，沒有修改原0.5／1.5秒政策。暫停仍能有有效姿態，與場次已暫停並列，不當作正在戰鬥。
+
+**698規則檢查**成功，新增18項含真正SQLite／歷史投影、角色／範圍、header不等於frame、source時間雙邊界、舊admission、phase／suspended／End、legacy未知時間與唯讀性。本機locked restore及隔離Release零警告錯誤，**453 HTTP／43世界串流、64 Node／229 Chromium**通過。新增7個HTTP斷言、4個Node規則及6個UI反例；UI中mock的資料明確只驗顯示／時序，不當原生證據。已檢視過期、等待及實際原生資料的控制台截圖，仍為Chromium SwiftShader。
+
+使用同版真正Windows server／兩個headless client、全新自有API／資料／憑證，`desktop-readiness/20261031-161305-e18fecc5` **8個原生＋8個實際API資料UI檢查**通過。tool fingerprint `a474ffcd9a887bdd37919b54907415b2e3c14913eb84277e1de94a49c5e805f2`。啟動前兩個名冊body均PoseUnavailable；兩個真正程序正常送姿態後2份有效。工具只關閉自己的peer程序，該玩家變PoseUnavailable、primary仍有效；同playerId移除／重入後，frame233仍新鮮但新admission為AwaitingAdmission／None／false，不能沿用舊身體。新票券啟動新程序後，frame244兩端皆Simulated且有效。
+
+真正瀏覽器讀未mock的readiness並完成Begin／Pause／End，End後無綠色；兩份結果均為自己原current admission，耗彈／命中／擊殺／受傷0、健康100，combat與world精確seal、pending=false、through10／world287及全部統計等於ledger並ack。這是離散觀察與兩位同機Simulation，不是每render幀／RTT／25人容量，也沒有注入姿態、射擊RPC或統計；本輪沒有GPU／PCM／原生鍵盤／頭盔觀察。
+
+失敗保留：第一個.NET新增fixture把合成雙手留在世界原點，正常世界驗證拒絕Invalid recorded player or tracked rig；只修fixture相對身體位置，未放寬驗證。原生首場`161031-39d9192f`前六步成功，但測試瀏覽器預設dismiss既有End確認，任務仍Paused，UI20秒／工具60秒逾時；已補只對該End接受確認及顯示Ended紀錄後，重新整場成功。首次啟動browser時ready pointer尚未建立，未重開仍活著的native程序，等同一handle出現native-ready後才接上。失敗原件／cleanup／精確seal保留，不改成passed。
+
+`readiness-runtime-validation.json`核對本輪**2個runtime／28檔**C原件與F snapshot逐檔SHA相同，前12個runtime／317檔亦未變；保存SQLite不開連線。所有writer停後才一次snapshot，C原件保留，cleanup errors／tracked child空且測試玩家程序0。新的C API及三工具副本**157檔**與F隔離輸出一致；早期stage保留，最終只有index頁尾及其gzip／兩份static-web-assets metadata四檔不同，gzip分別還原為各自HTML、其餘檔及DLL相同。不是修改舊部署來冒充新證據；資料明確C SSD，遊戲source／binary仍F，原5080仍0.16，未動登入／授權／安全設定。
+
+**遊戲保持Unity0.31.0／code38／NGO29**，本輪未修改Unity來源／wire或重建141 Editor／雙平台。重新計算來源仍 `213b9b04e02d506c73110ba6df23109fc5ce3f14bf8f233b9d803ef8dde4777c`，原Windows／Quest receipt與Scene／prefab ID保持；不能把前輪建置當本輪新的頭盔結果。API/UI一起部署0.29，原生工具gate同步；17個既有desktop Python、語法與293官方Transport單一修補核對亦通過。
+
+完整11項目標保持active，後續持續多玩家操作、完整場館與跨機流程；25端最大長文／並行操作、實體Quest／VIVE、MR、廠商硬體與25台仍待驗收。GitHub提交／fresh CI紀錄接續補充於此輪末。
+
 ## 2026-10-31：繁中玩家任務簡報與原生輸入
 
 從乾淨`5d4ac95`接續，新增[PLAYER_BRIEFING](PLAYER_BRIEFING.md)。原任務庫保存的名稱／內容，現在由GameServer送至玩家閱讀；不是另建一份任務。遊戲端**0.31.0／Android code38／NGO29**，API/UI保持0.28，envelope7／world schema1／驗票2／rules0.8.0及原素材profile不改。所有遊戲程序一起更新，Prepare原位保存Scene／PlayerAvatar ID，不重建歷史。

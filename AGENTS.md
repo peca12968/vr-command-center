@@ -1,5 +1,7 @@
 # 開發指引
 
+2026-10-31 API/UI0.29新增docs/PLAYER_READINESS.md：readiness v1唯讀端點限Master／可讀房間控制台，HTTP必傳Actor；用最後已接受幀的Observed名冊比對當前admission／room／seat，不能拿同ID舊身體／名冊分類當在線。來源年齡仍header擷取UTC＋elapsed，unknown／超前／過期／suspended／phase pending／Ended不得綠色；前端從request開始計單調經過、登入／場次／序號／admission fence，不能用到達時間重設年齡。沒有新增Begin閘門或更動姿態／命中規則；只回狀態，不走REST送頭手座標。Unity0.31.0／code38／NGO29及213b...4777c原雙平台receipt保持，本輪未重建141 Editor。698規則／453 HTTP／43串流／64 Node／229 Chromium及真正雙headless PC的8原生＋8 UI檢查通過，仍無頭盔／25台。工具只自己的新runtime，全停writer再一次snapshot，保存SQLite不開；具體失敗／SHA／限制見PROGRESS。
+
 2026-10-31 玩家任務簡報見docs/PLAYER_BRIEFING.md：Unity0.31.0／code38／NGO29、API/UI0.28，Tests門檻141；Prepare原位升29與原ID保持，雙平台最終證據見PROGRESS。BriefingHeader1＋最多80個FixedString512塊保存100字名／10000 UTF16內容，完整長度／SHA驗證後才顯示，不能截斷或用部分metadata當完成；管理更新及晚加入不得重設同一讀頁。本地B/X下一頁、Esc/Y關閉、L/左握柄授權，閱讀抑制射擊／換彈並要求放開再按，姿態繼續、不改Tracked資料／全場Pause／rules0.8.0。mission-fonts-v1官方Noto／OFL／NOTICE pin固定，OTF/TXT/meta納入fingerprint；改字型需新profile，不能改舊pin。頁碼／開關非world錄影欄位。原生check-desktop-briefing只新自有runtime，實際鍵盤／GPU觀察後才done，probe仍240秒／64次；無頭盔／25台，完整目標active。
 
 2026-10-31 長任務／封存規範見 docs/DESKTOP_LONG.md、docs/SEAL_RECOVERY.md：本輪Python／文件／CI，API/UI0.28、Unity0.30.0／code37／NGO28及d430...de53f原receipt保持，未重建131 Editor／雙平台。單PC900秒、8475全回放／8460 Running無bad，原admission跨票券到期／健康80／唯一tick18000End；live跳1序號已完整replay補查，0.363945秒為收到資料時年齡、681ms為保存擷取間隔，非RTT／render／25人或歷史停頓修復。封存503與最終stats503各8秒保持pending後恢復，CSV依Ended+combat seal，玩家final另等world seal及GameServer統計，不可混同兩者。代理新增兩mode仍20秒／240秒／handler join，不記payload不注入；49 Python。新3runtime42檔及舊187檔SHA一致，保存SQLite不開；所有writer停後一次snapshot。完整目標active、頭盔／25台仍待。

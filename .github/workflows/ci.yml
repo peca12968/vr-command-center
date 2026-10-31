@@ -48,6 +48,7 @@ jobs:
       - run: python scripts/check-transport-patch.py
       - run: python scripts/check-mission-font.py
       - run: python -m py_compile scripts/check-desktop-briefing.py
+      - run: python -m py_compile scripts/check-desktop-readiness.py
       - uses: actions/setup-node@v4
         with:
           node-version: '24'

@@ -305,6 +305,7 @@ async function main() {
     await require('./armed-combatants-browser.cjs')({ context, tokens, base, root, screenshots, check });
     await require('./weapon-actions-browser.cjs')({ context, tokens, base, root, screenshots, check });
     await require('./clock-browser.cjs')({ context, api, tokens, base, mission, screenshots, check });
+    await require('./readiness-browser.cjs')({ context, api, tokens, base, mission, screenshots, check });
     let releaseReplay, requestedReplay;
     const replayGate = new Promise(resolve => { releaseReplay = resolve; }), replayRequested = new Promise(resolve => { requestedReplay = resolve; });
     await page.route('**/console/examples/simulation.json', async route => { requestedReplay(); await replayGate; await route.continue(); });

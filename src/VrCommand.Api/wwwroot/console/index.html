@@ -37,7 +37,7 @@
               <div class="form-row"><label>連線模式<select id="launch-mode"><option value="Independent">單房獨立</option><option value="Linked">五房全連線</option></select></label><label>房間<select id="launch-room"></select></label></div>
               <button type="submit">建立準備場次</button>
             </fieldset>
-          </form><div class="layout-report"><p id="launch-layout-summary" class="hint" role="status" aria-live="polite">選取保存的任務版本後檢查場地。</p><ul id="launch-layout-issues"></ul><button id="layout-recheck-launch" type="button" class="quiet small">重新檢查場地</button></div><p class="hint">建立後加入玩家，再開始任務。頭盔連線與就緒狀態尚未回報。</p></section>
+          </form><div class="layout-report"><p id="launch-layout-summary" class="hint" role="status" aria-live="polite">選取保存的任務版本後檢查場地。</p><ul id="launch-layout-issues"></ul><button id="layout-recheck-launch" type="button" class="quiet small">重新檢查場地</button></div><p class="hint">建立後加入玩家，再開始任務。玩家名冊旁會顯示已接受的姿態快照狀態；頭盔實機驗收仍待。</p></section>
           <section class="panel"><h3>選取場次</h3><label class="check"><input id="include-ended" type="checkbox">包含已結束紀錄</label><label>場次<select id="session-select"><option value="">目前沒有場次</option></select></label><p id="selection-hint" class="hint">選取後可查看名冊、控制環境與統計。</p></section>
         </div>
         <section id="session-panel" class="panel" hidden>
@@ -51,7 +51,9 @@
           </div><p class="hint">設定會儲存至場次紀錄，遊戲伺服器確認後同步環境與敵軍。電腦示範使用合成頭手；Quest／VIVE、MR 與廠商硬體仍待實機驗證。</p>
           <div class="subheading"><h3>玩家名冊</h3><span id="player-count" class="hint"></span></div>
           <form id="join-form"><fieldset id="join-fields" class="join-fields"><label>玩家名稱<input id="player-name" required maxlength="80" placeholder="例如 Alpha 01"></label><label>房間<select id="player-room"></select></label><label>頭盔<select id="player-headset"><option value="Quest3">Meta Quest 3</option><option value="ViveXr">VIVE XR（後續整合）</option></select></label><button type="submit">加入名冊</button></fieldset></form>
-          <div class="table-scroll"><table><caption class="sr-only">目前場次玩家名冊</caption><thead><tr><th>玩家</th><th>房間／席位</th><th>頭盔分類</th><th>操作</th></tr></thead><tbody id="roster"></tbody></table></div>
+          <p id="readiness-summary" class="hint" role="status" aria-live="polite">等待遊戲來源。</p>
+          <div class="table-scroll"><table><caption class="sr-only">目前場次玩家名冊</caption><thead><tr><th>玩家</th><th>房間／席位</th><th>頭盔分類</th><th>即時參戰快照</th><th>操作</th></tr></thead><tbody id="roster"></tbody></table></div>
+          <p class="hint">以已接受的世界快照核對本次入場與姿態；不是裝置型號、實體定位或安全校正驗證。快照過期即不顯示有效，開始任務仍由操作員決定。</p>
           <fieldset id="ticket-fields" class="form-row ticket-fields"><label>遊戲伺服器地址<input id="game-address" placeholder="例如 192.168.1.100" maxlength="253"></label><label>連線埠<input id="game-port" type="number" value="7777" min="1024" max="65535"></label><p class="hint">點選玩家的「下載連線檔」配發五分鐘入場票券。檔案不含控制台憑證；地址須為頭盔可連到的遊戲伺服器。</p></fieldset>
           <div class="subheading"><h3>任務統計</h3><span id="statistics-origin" class="badge"></span></div>
           <p id="telemetry-status" class="warning" role="status" hidden></p>
@@ -116,7 +118,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>開發原型 v0.28 · 已有任務版本、軍事掩體素材、天氣聲光重現與鏡頭位置保存；已有電腦端任務、戰鬥與觀戰整合；頭盔實機、MR、25 台與硬體仍待驗證。</footer>
+      <footer>開發原型 v0.29 · 已有任務版本、玩家參戰快照、軍事掩體素材、天氣聲光重現與鏡頭位置保存；已有電腦端任務、戰鬥與觀戰整合；頭盔實機、MR、25 台與硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

@@ -94,7 +94,7 @@ def player_result_phase(text):
 
 class Venue:
     def __init__(self, args, *, artifact_family='desktop-venue'):
-        if artifact_family not in ('desktop-venue', 'desktop-demo', 'desktop-capacity', 'desktop-active', 'desktop-debrief', 'desktop-end-race', 'desktop-clock', 'desktop-clock-faults', 'desktop-long', 'desktop-seal-faults', 'desktop-briefing'):
+        if artifact_family not in ('desktop-venue', 'desktop-demo', 'desktop-capacity', 'desktop-active', 'desktop-debrief', 'desktop-end-race', 'desktop-clock', 'desktop-clock-faults', 'desktop-long', 'desktop-seal-faults', 'desktop-briefing', 'desktop-readiness'):
             raise ValueError('Unknown native fixture artifact family')
         self.args = args
         self.artifact_family = artifact_family
@@ -154,7 +154,7 @@ class Venue:
         self.processes['api'] = subprocess.Popen(['dotnet', str(self.args.api_dll.resolve()), '--urls', self.base], cwd=ROOT,
             env=environment, stdout=self.api_log, stderr=self.api_log, creationflags=subprocess.CREATE_NO_WINDOW)
         self.wait(lambda: self.request('/health'), 30, 'API startup')
-        if self.request('/').get('version') != '0.28.0': raise RuntimeError('Build API 0.28.0 before provisioning the report-capable venue')
+        if self.request('/').get('version') != '0.29.0': raise RuntimeError('Build API 0.29.0 before provisioning the report-capable venue')
 
     def launch(self, name, config, visible=False, *, extra_args=()):
         self.save(name + '.json', config)
