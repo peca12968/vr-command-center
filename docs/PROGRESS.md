@@ -31,6 +31,8 @@
 
 未驗各client遠端複本、25個玩家持續真實移動／射擊、繪圖FPS／音訊、跨機／Wi-Fi、Quest／VIVE／MR或廠商硬體；原偶發姿態停頓根因亦未修復。沒有重跑歷史後端／完整瀏覽器／七場五房／8項重連；完整11項與長期目標保持開發中。
 
+功能提交`21d746ef64df0aac41178bd282cdd86f22fd0f2f`已推送main並核對遠端一致。GitHub #1保持open，最新本文與原11項／歷史封存連結均保留。[功能提交CI run41159068469](https://github.com/peca12968/vr-command-center/actions/runs/41159068469)／check124412315156實際failure、steps=null；annotation明示付款失敗或支出上限，工作未開始，沒有雲端測試結果。未改帳務或重跑，本機及原生證據獨立保存。
+
 ## 2026-10-31：自有程序CPU時間／週期計數與主迴圈空窗
 
 從乾淨`7083906`接續PC穩定性。新增`pose-process-timing.py`／`analyze-process-timing.py`及helper明確`--process-timing`，**僅讀取本輪三個自有Unity程序**。父程序先借用自己的Popen原handle取得建立FILETIME／執行檔，借用結束不關原handle；probe以QUERY_LIMITED_INFORMATION＋SYNCHRONIZE重新開啟唯讀handle，核對建立時間／完整exe，固定持有同一process object、不追隨重用PID。只查GetProcessTimes／QueryProcessCycleTime與零等待存活狀態，不列舉其他程序、不讀記憶體／堆疊、不開thread、不暫停或改優先級／權限／系統設定。
