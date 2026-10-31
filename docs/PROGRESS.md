@@ -2,6 +2,8 @@
 
 ## 2026-10-31：五個獨立世界／25程序的15分鐘任務
 
+功能 [171dabc](https://github.com/peca12968/vr-command-center/commit/171dabcf1c835924213e87ef7dc7d6fa3bd5a19b) 已推送main、遠端SHA一致。[本次CI run41199169762](https://github.com/peca12968/vr-command-center/actions/runs/41199169762)／check124531368540為failure且steps空；fresh annotation為近期付款失敗或支出上限，job未啟動，沒有雲端測試結果。沒有改帳務或手動重跑；下列本機原生與32項Python為實際結果。
+
 前輪為實際進展；從乾淨`2e69066`接續[五房獨立長任務](DESKTOP_INDEPENDENT_LONG.md)，補上Linked長場之外，五份獨立世界同時運行、單房Pause及各自倒數／封存的證據。**API/UI0.30、Unity0.33.0／code40／NGO29保持**；只新增Python原生檢查器／10項反例與文件，未改後端、Unity、Tracked資料、0.5／1.5秒政策或幾何規則。沒有新跑Editor／雙平台，沿用原152真正EditMode與Windows／Quest成功receipt；目前來源重算及兩receipt皆為`c98f1e1d9b6857de6fc17ea3c9d585ba41881ac528314f5e7fc0073ee5958b1f`，原Scene／prefab ID保持。
 
 真正場`desktop-long/20261031-193917-b2f30b7d`：5個Windows server＋25 headless client，每房5人、不同mission／session／world stream／UDP port、各自900秒活動任務；Clear日／Fog日／Rain夜／Storm夜／Clear夜與各房旋轉物件分開保存。原生程序分批入場、每次新增前檢查至少2 GiB可用記憶體，所有程序job workers=2，沒有啟用pose／replication probe或注入姿態／武器。名冊Quest3欄位只是分類，實際headsets0／hosts1、來源全為Simulation、networkCapacityAccepted=false。
