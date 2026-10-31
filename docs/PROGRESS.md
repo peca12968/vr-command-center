@@ -24,6 +24,8 @@
 
 隔離資料明確C SSD、source／binary在F；全停writer才複製回F，未移動原件。`end-network-validation.json`覆核本輪**10個runtime／140檔**原件與副本SHA逐檔相同、cleanup乾淨，前輪20個runtime的保存manifest亦逐一未變。只讀JSON／log／原始bytes，未開SQLite。正式5080仍0.16歷史服務；Unity serve／登入／安全設定未動，沒有憑證／payload／binary提交。
 
+功能提交`56b667b9872557fd9f2aa4a0f8de503834a17748`已推送main並核對遠端。最新[CI run41172328133](https://github.com/peca12968/vr-command-center/actions/runs/41172328133)／check124452732120實際failure、steps=null；annotation仍明示付款失敗或支出上限，job未開始，沒有雲端執行結果。未改帳務或重跑，以上測試為本機證據。
+
 限制：這只驗兩個同機Windows client、選定的一次延遲與兩種loss，不是所有時序／重排、25位同時操作、跨機、頭盔／MR或完整故障／server crash驗收；封存連線中斷及長任務仍待。完整11項長期目標保持active，原主迴圈偶發停頓亦未證明修復。
 
 ## 2026-10-31：玩家End戰績、零事件修正與一般PC入口
