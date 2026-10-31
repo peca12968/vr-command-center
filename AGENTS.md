@@ -1,5 +1,7 @@
 # 開發指引
 
+Begin觀察見docs/STARTUP_WITNESS.md：接受回應不等於來源已套用，需observed>=接受序號、Running、tick>0、非suspended並保持原來源UTC門檻／15秒界線。3直接＋1受控管理503、96全回放／八份結果成功，新C runtime20檔／前28 runtime613檔raw保持；版本／原163 Editor及雙平台不變，本輪未重建。live與回放最早幀分開，延遲含輪詢／發布不是RTT，腳本SHA不當完整依賴graph。舊逾時缺命令回應，不能從observed6猜Begin序號、不能由單舊false旗標排除中間失聯或以校準宣稱根因。完整11項active，原逾時／31筆／實機另驗。
+
 Quest右B重連見docs/QUEST_RECONNECT.md：Unity0.34／code41、NGO29／API UI0.30保持，163真正Editor（3項在Editor PlayMode Dynamic更新的官方Touch虛擬action）及同源Windows／ARM64 APK成功，c233d804...來源與原Scene／prefab ID一致。Client需停止／非shutdown／兩秒冷卻、焦點／完整右控制器追蹤，放開再按；OnApplicationFocus／Pause／Disable也解除，不能依賴暫停仍有Update。重用原讀檔／驗票，不改Tracked／槍口／wire或rules。最終PC8項372幀成功，五輪測試反例及Running15秒逾時保留，不當根因修復或頭盔B鍵證據。checker新增starting／命令回應／failure快照／cleanup，不能信舊latest指標；保存SQLite不開。前28 runtime613檔／API三工具159檔保持，正式ZIP／APK精確hash與容器空間差異見PROGRESS；完整11項active，實機／跨機／原31筆另驗。
 
 Windows玩家狀態見docs/PLAYER_CONNECTION_STATUS.md：啟動器只讀自己新遊戲log，不讀全域Player.log／別的程序，不用ping／TCP或程序啟動假造入場；Connected是遊戲回報、非readiness或即時姿態保證。Waiting30秒只Unconfirmed、不猜防火牆；Final保留到新Connected。64KiB／poll、4096字元列、64狀態／2MiB積壓及倒退界線；status-report需wait＋新log且大小寫路徑不可重疊，complete只是快照未超界、exited獨立，均非任務成功。17真正Framework、19啟動器及13原生整合已驗，GUI／跨機仍待。API/UI0.30、Unity0.33／code40／NGO29及原152／c98f1雙平台不變，沒有新Editor；新1 runtime14檔、前27 runtime599檔raw保持，完整11項active。

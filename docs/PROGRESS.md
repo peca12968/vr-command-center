@@ -1,5 +1,21 @@
 # 開發進度
 
+## 2026-10-31：原生Begin接受／套用觀察與受控校準
+
+從乾淨`1c59040`接續[開場觀察](STARTUP_WITNESS.md)。前輪為實際進展，這輪針對Preparing逾時補上可重跑的控制路徑證據；**API/UI0.30、Unity0.34／code41／NGO29與c233d804...來源保持**，未改Unity／後端、姿態、規則或0.5／1.5秒政策，也未新跑163 Editor／雙平台，不把前輪結果稱本輪重建。
+
+新工具保存Begin接受回應／序號、開場前幀、所有live取樣、首次有效Running及完整回放最早幀；要求observedSequence>=接受序號、非suspended、Running且tick>0，來源UTC仍<1.5秒、開場觀察仍15秒。每場兩個真正獨立client，兩份原admission結果／七統計／world及ledger邊界、精確雙seal與全回放一致；沒有輸入或pose注入、沒有新原生診斷模式。4項Python反例／語法／diff檢查成功，CI加入unit／語法。
+
+實際`desktop-clock-faults/20261031-210737-1e370d2d`由真正handle71811走到exit0：3場直接連線與1場受控管理失聯，每場一server＋兩client、新任務／session。Begin皆接受序號5；直接場在收到回應後0.266／0.297／0.718秒觀察到有效Running，live first world17／16／21、tick5／3／2；全回放最早為world16／16／21，兩種最早觀察分開保存。此數字包含本機輪詢、儲存／發布，不稱RTT或來源執行時間。
+
+受控場使用原有loopback VenueHttpGate，明確拒絕管理GET一次、0.187秒後requested release；只在記憶體轉送HTTP憑證／payload，不讀UDP。操作員Begin已被原API接受、管理狀態Running，但來源仍Preparing／tick0且suspended=true，不能當已套用；恢復後同接受序號、world22／tick3有效，回應後0.719秒／release後0.672秒觀察。全回放保留7個suspended Preparing幀，gate無handler／route／容量錯誤或界線自動釋放，關閉後無活躍tunnel／worker。
+
+四場完整回放21／21／26／28，共96幀，第1到各自seal尾端連續、末packet／統計一致；八份個別戰績均經原admission核對。所有actor及gate已關閉，cleanup無錯誤／殘留，startup-checks complete=true、causalRootProven=false、networkCapacityAccepted=false。toolFingerprint只是新腳本SHA，不冒充完整依賴graph；玩家receipt仍同c233來源。
+
+`startup-runtime-validation.json`raw bytes核對新1 runtime／20檔C原件與F snapshot一致、前28 runtime／613檔原件及snapshot未變，保存SQLite不開連線；writer停止才snapshot、保留原件。來源及binary仍F，資料明確C SSD，不能稱F USB、跨機／25台或頭盔通過。未動5080、帳務、登入／授權或防火牆。
+
+**仍未重現或修復舊Running15秒逾時。**舊場沒有保存Begin回應，不能推定observed6就是Begin；受控503會有明確suspended，但舊單幀false不能排除中間曾有其他狀態。新場沒有原撤銷／重加入與同時建置條件，不能以短場乾淨或已知校準當自然根因。下一步在原入場變動／F負載情境保留命令及來源時間窗口；原31筆姿態失效亦保持未解。完整11項active、實機／MR／跨機及硬體另驗。
+
 ## 2026-10-31：Quest右手B鍵重連與暫停解除
 
 功能 [8eabda9](https://github.com/peca12968/vr-command-center/commit/8eabda9d987ba684e46e46446b6b19a3b5f0ae40) 已推送main、遠端SHA一致。[本次CI run41203749271](https://github.com/peca12968/vr-command-center/actions/runs/41203749271)／check124544547164為failure、steps空；fresh annotation為近期付款失敗或支出上限，job未啟動，沒有雲端測試結果。未改帳務或手動重跑；下列真正Editor／建置／原生結果為本機實際證據。

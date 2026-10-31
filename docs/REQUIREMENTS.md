@@ -1,5 +1,7 @@
 # 需求與驗收追蹤
 
+第1項新增[開場觀察](STARTUP_WITNESS.md)：管理接受Begin與來源實際套用分開驗證，3直接＋1受控失聯、96幀回放與八份結果一致。未重現原撤銷／重加入及F負載逾時，不能稱根因修復、容量或實機驗收；API／Unity及原建置保持，詳見PROGRESS。
+
 第1／2項Quest操作新增[右B重連](QUEST_RECONNECT.md)，填補Android沒有桌面Reconnect按鈕的來源缺口，放開再按、焦點／追蹤／暫停解除後仍由原GameServer驗票。0.34／code41、163真正Editor含3項PlayMode Dynamic虛擬Touch action、同源Windows／Quest及最終PC8項372幀成功；不是實體B鍵／頭盔、跨機或原31筆及新Running逾時已修復，詳見PROGRESS。
 
 第1／2項的PC入場操作新增[玩家連線狀態](PLAYER_CONNECTION_STATUS.md)：啟動器區分程序啟動與遊戲回報入場、拒絕、未確認及戰績保留。17真正類別、19啟動器拒絕及13項真正雙PC／受控反例整合通過，仍非GUI完整操作、跨機／實機或容量證據；版本與原Unity建置保持，完整結果見PROGRESS。
