@@ -2,6 +2,8 @@
 
 ## 2026-10-31：25個PC原生程序的15分鐘Linked反例
 
+功能／反例提交 [3ff94cf](https://github.com/peca12968/vr-command-center/commit/3ff94cfcefdee18b484fe53ba18eb8f66fa8ae9b) 已推送main、遠端SHA一致。[本次CI run41192014101](https://github.com/peca12968/vr-command-center/actions/runs/41192014101)／check124510546996為failure、steps空；fresh annotation仍為近期付款失敗或支出上限，job未啟動，沒有雲端測試結果。未改帳務／手動重跑；這與本機900秒檢查確實執行後因body失效exit1是兩件事。
+
 前輪為實際進展；從乾淨`afc2b21`新增[DESKTOP_MULTIPLAYER_LONG](DESKTOP_MULTIPLAYER_LONG.md)及可重跑工具，將原單玩家900秒與25端短測之間的缺口接上。本輪**API/UI0.30、Unity0.32／code39／NGO29保持**，未修改Unity／規則、未重建或新跑144 Editor／雙平台；沿用原Windows receipt及source fingerprint `4f1173e9eac5aa82e0b37fa58ba73afa64c392b750218b790c85c08638c3b852`，原Scene／prefab ID保持。未以新Python檢查代替Unity或頭盔證據。
 
 真正場`desktop-long/20261031-175042-1ad7c3c8`：一個Windows server、25個headless client、自己的新API／角色憑證及C SSD runtime，五房Linked各5席，按5個一批正常入場；不注入姿態、武器或統計，不附掛240秒replication probe或延長其界線。Source全為Simulation、headsets0／hosts1／networkCapacityAccepted=false；名冊Quest3分類不是設備。25個原生程序持續900秒活動任務，唯一自動End為tick18000。
