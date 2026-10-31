@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+本輪另產生Unity0.33／code40同源Windows玩家包，啟動器邏輯不變；ZIP與解壓核對及新版DLL的一般原生回歸見PROGRESS。一般雙擊不開長診斷，診斷必須明確CLI選用；0.32舊包及其原始驗證保持，沒有將未完成的GUI安全性提示驗收改為成功。
+
 玩家包 v1 使用現有 Unity0.32.0／NGO29 的真正 Windows 建置，API／UI0.30不變。控制人員可交付一份 ZIP，玩家完整解壓後開啟 `Launch-Player.exe`、選擇自己的控制台下載連線檔，再按「開始遊戲」。玩家電腦不需要 Unity Editor、Python或.NET 10 SDK；啟動器使用 Windows 的.NET Framework 4.8，遊戲仍使用原 Unity runtime。不同電腦的相容性仍須實測。
 
 ## 建立與交付

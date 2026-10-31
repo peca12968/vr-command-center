@@ -59,6 +59,7 @@ namespace VrCommand.Unity
         private bool finished;
         private NativePoseLoopTrace loopTrace;
         public static bool Enabled=>active!=null && !active.finished;
+        public static bool AnyEnabled=>Enabled||NativePoseContinuity.Enabled;
         public static void Install(GameObject owner,string role)
         {
 #if UNITY_STANDALONE_WIN && DEVELOPMENT_BUILD
@@ -81,22 +82,25 @@ namespace VrCommand.Unity
 #endif
         }
         public static void Event(string point,ulong connection=0,int source=0,double duration=0)
-        {if(Enabled)active.Record(point,connection,source,duration,false);}
+        {NativePoseContinuity.Event(point,connection,source,duration);if(Enabled)active.Record(point,connection,source,duration,false);}
         public static void Accepted(ulong connection,int source)
         {
+            NativePoseContinuity.Event("PoseAccepted",connection,source);
             if(!Enabled)return;active.accepted[connection]=active.clock.Elapsed.TotalSeconds;
             active.Record("PoseAccepted",connection,source,0,true);
         }
         public static void OwnerUnavailable(string point,ulong connection)
         {
+            NativePoseContinuity.Event(point,connection,0);
             if(!Enabled)return;
             if(!active.unavailable.TryGetValue(connection,out var prior)||prior!=point)
             {active.unavailable[connection]=point;active.Record(point,connection,0,0,false);}
         }
         public static void Sending(ulong connection,int source)
-        {if(Enabled){active.unavailable.Remove(connection);active.Record("PoseSend",connection,source,0,false);}}
+        {NativePoseContinuity.Event("PoseSend",connection,source);if(Enabled){active.unavailable.Remove(connection);active.Record("PoseSend",connection,source,0,false);}}
         public static void Body(ulong connection,bool connected)
         {
+            NativePoseContinuity.Body(connection,connected);
             if(!Enabled)return;
             if(!active.connections.TryGetValue(connection,out var prior)||prior!=connected)
             {active.connections[connection]=connected;active.Record("BodyConnection",connection,0,0,connected);}
@@ -104,13 +108,19 @@ namespace VrCommand.Unity
         public readonly struct Span : IDisposable
         {
             private readonly NativePoseTrace owner;
+            private readonly NativePoseContinuity continuity;
             private readonly string point;
             private readonly long start;
-            internal Span(NativePoseTrace owner,string point){this.owner=owner;this.point=point;start=Stopwatch.GetTimestamp();}
+            internal Span(NativePoseTrace owner,NativePoseContinuity continuity,string point){this.owner=owner;this.continuity=continuity;this.point=point;start=Stopwatch.GetTimestamp();}
             public void Dispose()
-            {if(owner!=null&&!owner.finished)owner.Record(point,0,0,(Stopwatch.GetTimestamp()-start)/(double)Stopwatch.Frequency,false);}
+            {
+                if(owner==null&&continuity==null)return;
+                var duration=(Stopwatch.GetTimestamp()-start)/(double)Stopwatch.Frequency;
+                if(owner!=null&&!owner.finished)owner.Record(point,0,0,duration,false);
+                if(continuity!=null)continuity.Record(point,0,0,duration);
+            }
         }
-        public static Span Measure(string point)=>Enabled?new Span(active,point):default;
+        public static Span Measure(string point)=>AnyEnabled?new Span(Enabled?active:null,NativePoseContinuity.Current,point):default;
         private void Record(string point,ulong connection,int source,double duration,bool connected)
         {
             var now=clock.Elapsed.TotalSeconds;

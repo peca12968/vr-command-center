@@ -29,10 +29,43 @@ debrief = long.debrief
 vm = long.vm
 
 
+class DiagnosticVenue(vm.Venue):
+    def __init__(self, args, **options):
+        self.continuity_programs = []
+        super().__init__(args, **options)
+
+    def launch(self, name, config, visible=False, *, extra_args=()):
+        if getattr(self.args, 'pose_continuity', False):
+            directory = self.runtime_directory / 'continuity' / f'p{len(self.continuity_programs) + 1:03d}'
+            directory.parent.mkdir(exist_ok=True)
+            loop = config['role'] == 'Server'
+            self.continuity_programs.append({'name': name, 'role': config['role'], 'directory': str(directory), 'loop': loop})
+            extra_args = (*extra_args, '--vr-pose-continuity', str(directory), *(['--vr-pose-continuity-loop'] if loop else []))
+        return super().launch(name, config, visible, extra_args=extra_args)
+
+    def finish_continuity(self):
+        if not self.continuity_programs: return None
+        for program in self.continuity_programs: (Path(program['directory']) / 'finish.request').write_text('stop collection after all sealed individual receipts\n')
+        self.wait(lambda: all((Path(p['directory']) / 'report.json').is_file() for p in self.continuity_programs), 20, 'sparse continuity reports')
+        analyzer = load('finish_sparse_validation', 'analyze-pose-continuity.py')
+        for program in self.continuity_programs:
+            report = vm.read_json(Path(program['directory']) / 'report.json')
+            analyzer.validate(report, program['role'], program['loop'])
+            if program['role'] == 'Client':
+                import re
+                ids = re.findall(r'VR_CLIENT_CONNECTED id=(\d+)', debrief.log_text(self, program['name']))
+                if len(ids) != 1: raise ValueError('Diagnostic client did not retain one original native connection')
+                program['connection'] = int(ids[0])
+                if not any(s['point'] == 'PoseSend' and s['connection'] == program['connection'] and s['count'] > 0 for s in report['streams']):
+                    raise ValueError('Client diagnostic has no original pose sends')
+        result = {'version': 1, 'complete': True, 'programs': self.continuity_programs}
+        self.save('multiplayer-continuity.json', result); return result
+
+
 def fingerprint():
     digest = hashlib.sha256()
     for name in ['check-desktop-multiplayer-long.py', 'check-desktop-long.py', 'check-desktop-capacity.py',
-                 'check-desktop-debrief.py', 'start-desktop-venue.py', 'start-desktop-demo.py']:
+                 'check-desktop-debrief.py', 'start-desktop-venue.py', 'start-desktop-demo.py', 'analyze-pose-continuity.py', 'analyze-pose-input.py']:
         digest.update(name.encode()); digest.update((ROOT / 'scripts' / name).read_bytes())
     return digest.hexdigest()
 
@@ -58,6 +91,7 @@ class Continuity:
         self.frames = self.running = self.player_rows = self.bad = self.skipped = self.gaps = 0
         self.previous = self.tick = 0; self.elapsed = None; self.last = None; self.maximum_gap = 0
         self.reasons = Counter(); self.player_faults = Counter(); self.samples = []
+        self.running_from = self.running_to = None
 
     def observe(self, row):
         packet = row['packet']; frame = packet['frame']; sequence = packet['sequence']
@@ -69,7 +103,10 @@ class Continuity:
             if gap < 0: raise ValueError('Capture elapsed time rewound')
             self.maximum_gap = max(self.maximum_gap, gap); self.gaps += gap >= 1500
         self.frames += 1; self.running += frame['phase'] == 'Running'
-        if frame['phase'] == 'Running': self.player_rows += len(self.players)
+        if frame['phase'] == 'Running':
+            self.player_rows += len(self.players)
+            if self.running_from is None: self.running_from = packet['elapsedMilliseconds']
+            self.running_to = packet['elapsedMilliseconds']
         faults = roster_faults(row, self.players, self.stable_sequence, self.health)
         self.bad += bool(faults)
         for fault in faults:
@@ -83,6 +120,7 @@ class Continuity:
                 'badFrames': self.bad, 'reasonCounts': dict(self.reasons), 'perPlayerBadFrames': dict(self.player_faults), 'faultSamples': self.samples,
                 'skippedLiveSequences': self.skipped, 'maximumCaptureGapMilliseconds': self.maximum_gap,
                 'captureGapsAtLeast1500ms': self.gaps, 'finalSequence': self.previous, 'finalTick': self.tick,
+                'runningCaptureFromMs': self.running_from, 'runningCaptureToMs': self.running_to,
                 'passed': self.running > 0 and self.bad == 0 and (not self.replay or self.gaps == 0)}
 
 
@@ -111,8 +149,9 @@ def main():
     parser.add_argument('--player-exe', type=Path, default=ROOT / 'artifacts/desktop/VrCommand.exe')
     parser.add_argument('--api-dll', type=Path, default=Path(os.environ.get('VR_COMMAND_API_DLL', ROOT / 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')))
     parser.add_argument('--players-per-room', type=int, choices=range(1, 6), default=5)
+    parser.add_argument('--pose-continuity', action='store_true', help='Explicit sparse 1200s diagnostic in all processes, server PlayerLoop only; no gameplay changes')
     args = parser.parse_args(); args.duration = 900; args.job_workers = 2; args.visible_room = 0; args.check = True
-    vm.verify_player(args); tool = fingerprint(); venue = vm.Venue(args, artifact_family='desktop-long'); report = None; live = None
+    vm.verify_player(args); tool = fingerprint(); venue = DiagnosticVenue(args, artifact_family='desktop-long'); report = None; live = None
     age = {'frameSamples': 0, 'heartbeatSamples': 0, 'maximumSourceAgeSeconds': -1, 'badSamples': 0}
     native, resources = [], []
     def memory(stage):
@@ -188,6 +227,7 @@ def main():
             results.append(result)
         if after_expiry is None or not same_admissions(final_state['players'], entry['players']): raise ValueError('Original expired-ticket connections / admissions not retained')
         csv = capacity.practice.save_report(venue, entry, sealed['statistics'])
+        diagnostics = venue.finish_continuity()
         recorded = replay(venue, entry, sealed, Continuity(entry['players'], stable_sequence, health, replay=True))
         events = venue.request(f'/api/sessions/{entry["id"]}/events?after=0&limit=500')
         expiry = [e for e in events if e['kind'] == 'ControlApplied' and e['payload'].get('clockExpiration')]
@@ -199,7 +239,7 @@ def main():
             'participants': len(native), 'durationSeconds': 900, 'toolFingerprint': tool, 'playerBuildReceipt': venue.receipt,
             'stableSequence': stable_sequence, 'stableHealthByPlayer': health, 'latestTicketExpiryUtc': latest_expiry.isoformat(),
             'originalConnectionsAfterExpiry': after_expiry, 'live': live.result(), 'sourceAge': age, 'replay': recorded,
-            'nativeLogFindings': findings, 'clientResults': results, 'sealed': sealed, 'finalReportCsv': csv, 'automaticEnd': expiry[0]}
+            'nativeLogFindings': findings, 'clientResults': results, 'sealed': sealed, 'finalReportCsv': csv, 'automaticEnd': expiry[0], 'poseContinuity': diagnostics}
     except BaseException as error:
         venue.save('multiplayer-live.json', {'continuity': live.result() if live else None, 'sourceAge': age}); venue.stage('failed', errorType=type(error).__name__); raise
     finally:

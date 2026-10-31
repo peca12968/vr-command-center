@@ -1,14 +1,16 @@
 # 需求與驗收追蹤
 
+第4項新增[長任務稀疏診斷](POSE_CONTINUITY.md)及25端15分鐘乾淨對照：8449全回放／8391 Running、26份診斷完整。新收集器與未啟用的歷史條件不同，舊31筆失效保留且根因／修復未證明，不能稱25位操作或實體容量完成。Unity0.33／152 Editor與雙平台、一般8項PC回歸見PROGRESS。
+
 第4項新增[25程序15分鐘](DESKTOP_MULTIPLAYER_LONG.md)證據：五房Linked的25原入場延續、結果及8463全回放已核對；2幀共31筆body失效，故全程連續性與容量仍未通過。不得以900秒完成、最後恢復或25份CSV一致冒充25位持續操作／25台成功。根因與後續驗證見PROGRESS。
 
 Windows部署新增[可攜玩家包](WINDOWS_PLAYER_PACKAGE.md)：以原成功建置的runtime及獨立繁中選檔啟動器交付，最終解壓包雙PC背景／戰績／cleanup9項與原生拒絕15項通過；不要求玩家安裝Editor／Python。這是原第1／2項操作途徑的進展，不完成跨機、GUI安全性提示、頭盔或25台驗收；API／遊戲版本及原Unity建置證據保持。
 
 基準日期：2026-10-29。完成定義須同時有程式、操作途徑與符合範圍的驗證證據。以下「規劃」項目皆未完成。
 
-真正 Editor 已完成 UPM／ILPP／匯入、144 項 EditMode、v0.32.0同源Windows及Quest APK；Windows 獨立／五房 Linked Simulation、票券撤銷及真正視窗斷線後保留位置／健康／彈藥均通過，各輪範圍以PROGRESS為準。使用者目前沒有頭盔，先繼續電腦端；五房原生隔離及之後新開 Linked 亦已通過，條件與限制見 [DESKTOP_VENUE](DESKTOP_VENUE.md)；這不完成以下整體驗收。最新證據見 [RECONNECT.md](RECONNECT.md)／PROGRESS，首輪原生範圍見 [NATIVE_VALIDATION.md](NATIVE_VALIDATION.md)，較窄的診斷另見 [UNITY_SDK_CHECK.md](UNITY_SDK_CHECK.md)。
+真正 Editor 已完成 UPM／ILPP／匯入、152 項 EditMode、v0.33.0同源Windows及Quest APK；Windows 獨立／五房 Linked Simulation、票券撤銷及真正視窗斷線後保留位置／健康／彈藥均通過，各輪範圍以PROGRESS為準。使用者目前沒有頭盔，先繼續電腦端；五房原生隔離及之後新開 Linked 亦已通過，條件與限制見 [DESKTOP_VENUE](DESKTOP_VENUE.md)；這不完成以下整體驗收。最新證據見 [RECONNECT.md](RECONNECT.md)／PROGRESS，首輪原生範圍見 [NATIVE_VALIDATION.md](NATIVE_VALIDATION.md)，較窄的診斷另見 [UNITY_SDK_CHECK.md](UNITY_SDK_CHECK.md)。
 
-| 編號 | 使用者需求 | 最終驗收證據 | API 0.30／Unity 0.32.0 狀態 |
+| 編號 | 使用者需求 | 最終驗收證據 | API 0.30／Unity 0.33.0 狀態 |
 |---|---|---|---|
 | 1 | 主控台與五房間；可獨立、可全連線 | 五個房間獨立開局且互不干擾；全部合併後同一世界、同一任務；管理員可操作 | 五房權限與管理 UI、獨立／Linked 準備、名冊與生命週期操作已有瀏覽器／API 驗證，建立／加入／離開可持久去重，票券 v2 及移除／配票按本次 admission 驗證，舊移除重試不影響重新入場者；真正 Windows server 加兩個 client 已通過獨立房及五房 Linked 跨房入場／暫停／結束；另已通過真正 client 的票券撤銷／舊 fence 拒絕、原程序重新配票及強制斷線恢復；SSD runtime 下五個真正獨立 server／每房一個 client 同時運行、單房命令隔離／重用及封存後新開 Linked 已驗證；新增server-only外部玩家模式、來源公告場次地址／port，兩個另行啟動PC以UI下載檔入場／雙seal與真正loopback socket已驗，見EXTERNAL_CLIENTS；新增名冊旁的玩家參戰快照，核對最後已接受來源與本次admission，雙PC退出／重入／恢復及控制台已驗，見PLAYER_READINESS；F USB 配置不達新鮮度門檻，跨機／滿房／實機同步仍待驗 |
 | 2 | 軍事戰鬥介面 | 頭盔內 HUD、主控台、敵我辨識與任務狀態可操作 | 已有武器盒／敵軍、階段／健康／彈藥／換彈 HUD 來源碼，已真正編譯並有 PC GPU 視窗／HUD、方向鍵瞄準、Space／滑鼠射擊與 R 換彈證據，新增軍事HUD、血量條／大字彈藥、場地方位及遮擋敵我標記，真正按鍵射擊／換彈／轉向、受傷暫停及淘汰已有GPU／數值證據，見 TACTICAL_HUD；新增自製低多邊形沙包／油桶並保存素材版本，玩家與觀戰／回放一致；新增固定原創玩家步槍並對齊真正槍口，PC視窗瞄準、兩發命中／一擊殺／100%及回放統計已驗；新增原創人形敵軍、保存朝向與tick步態，原生巡邏中暫停及封存回放姿勢已核對；新增保存截止tick的分離彈匣及桌面合成手套，真正R／換彈中Pause／Resume及30／89、保存姿態觀戰已驗，不改Tracked關節；新增原創NPC雙手手槍／裝飾性雙臂，真正PC GPU及封存回放槍口／肘腕矩陣一致；原射擊原點／粗略命中盒不改。新增按保存射線／tick重建的敵軍閃光與槍身後座，真正日夜GPU及SQLite事件核對通過；新增玩家接受ShotFired射線、0.15秒閃光及子槍身後座，真正Space日夜GPU、轉向不改歷史射線、兩發扣彈與封存統計已驗；新增按接受序號與保存世界槍口播放的原創玩家／敵軍空間音效，真正Space／AI／自身PCM與Pause／Resume靜音已驗，舊錄製不補播，非原音軌／聽感／頭盔證據；新增404面軍事玩家、保存walking及tick步態、桌面合成腕點／換彈雙臂，真正雙PC GPU、W／Space／R／Pause與封存回放已驗；舊外觀保持、Tracked不合成握持雙臂，本玩家第三人稱body隱藏。完整第一人稱／追蹤人物、動畫／聲學仍待，見 PLAYER_BODY／COMBAT_AUDIO／PLAYER_FIRE／ENEMY_FIRE／ARMED_ENEMIES／WEAPON_ACTIONS／ENEMY_PRESENTATION／SERVICE_RIFLE。已區分姿態拒絕／逾時並驗證三次真實封包中斷恢復；原停頓原因、啟動旗標短暫警告與完整操作待驗，無頭盔介面驗證 |

@@ -306,7 +306,7 @@ namespace VrCommand.Unity
                 foreach (var prop in session.Props) Props.Add(new CombatPropState { id = prop.Id.ToString("D"), room = prop.RoomId, center = Vector(prop.Center), half = Vector(prop.HalfSize), yaw = prop.Yaw, barrel = prop.Kind == PropKind.Barrel });
             }
             var frame = session.World.Snapshot();
-            if(NativePoseTrace.Enabled)foreach(var player in frame.Players)
+            if(NativePoseTrace.AnyEnabled)foreach(var player in frame.Players)
                 if(rigs.TryGetValue(player.Id,out var rig))NativePoseTrace.Body(rig.Connection,player.Connected);
             GetComponent<SceneAuthority>()?.PublishTick(frame.Tick, frame.Phase.ToString());
             var actors = new List<CombatActorState>();

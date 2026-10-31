@@ -1,5 +1,7 @@
 # VR Command Center
 
+新增[長任務稀疏姿態診斷](docs/POSE_CONTINUITY.md)：可在Windows Development明確選用收發／主迴圈與自己的主執行緒CPU計數；舊240秒工具及參戰時限保持。受控上行丟包校準成功，25端新場15分鐘／8449全回放及26份報告乾淨；歷史31筆失效仍保留，**沒有宣稱根因已修復**。一般啟動與Android不收集。
+
 新增[25個PC程序的15分鐘檢查](docs/DESKTOP_MULTIPLAYER_LONG.md)：五房Linked、原入場跨票券到期、25份戰績／CSV與8463幀完整回放已完成。發現2幀共31筆失效body，故全程連續性**未通過**；已保存反例與回歸檢查，下一步追查姿態接收／主迴圈間隔。這是同機靜止Simulation，非25位操作、跨機或頭盔驗收。
 
 新增 [Windows可攜玩家包](docs/WINDOWS_PLAYER_PACKAGE.md)：完整解壓後，以繁中啟動器選擇控制台下載的玩家連線檔即可開啟遊戲；不需Unity Editor或Python。最終包的真正雙PC背景入場／End／戰績及程序收尾9項、原生拒絕檢查15項通過；互動GUI目前受Windows安全性提示阻擋，完整證據見PROGRESS。此為同機Simulation，非跨機或頭盔驗收。
@@ -8,7 +10,7 @@
 
 依 2026-10-29 的使用者指示，**優先開發 Meta Quest 3**，暫以 Android 獨立執行為工作假設；VIVE 延後接入，共用架構與原始雙平台目標保留。
 
-目前為 **API v0.30／Unity 遊戲端 v0.32.0 原型**。真正 Editor 已完成 Prepare、144 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 29，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人完整驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
+目前為 **API v0.30／Unity 遊戲端 v0.33.0 原型**。真正 Editor 已完成 Prepare、152 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 29，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人完整驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
 
 新增[外部玩家流程](docs/EXTERNAL_CLIENTS.md)：操作員模式可只啟動server，來源公告場次地址／port，兩個PC已用實際UI下載的短票券檔另行入場、結算與封存。真正loopback UDP綁定已核對，原local模式49項回歸；跨機與頭盔仍另驗。
 

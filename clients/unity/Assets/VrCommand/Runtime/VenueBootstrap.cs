@@ -61,6 +61,7 @@ namespace VrCommand.Unity
             try { configuration = LaunchConfiguration.Load(); }
             catch (Exception) { status = "PLEASE CONTACT THE CONTROL DESK"; }
             if (configuration == null) yield break;
+            NativePoseContinuity.Install(gameObject,configuration.role);
             NativePoseTrace.Install(gameObject,configuration.role);
             NativeReplicationProbe.Install(this,configuration.role);
             var transport = (UnityTransport)networkManager.NetworkConfig.NetworkTransport;

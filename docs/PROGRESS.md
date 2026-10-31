@@ -1,5 +1,33 @@
 # 開發進度
 
+## 2026-10-31：長任務稀疏收發／主執行緒診斷
+
+前輪為實際進展；從乾淨`223613b`接續[POSE_CONTINUITY](POSE_CONTINUITY.md)，補上原240秒逐事件工具不能涵蓋第12分鐘失效的缺口。**Unity0.33.0／code40／NGO29，API/UI0.30保持**。新Windows Development opt-in獨立為1200秒／256聚合streams／各4096稀疏gap、body轉換及主執行緒窗口，超界保留最早證據並判不完整；舊pose32768列／240秒及replication240秒保持且與舊pose模式互斥。一般／Editor／Android不安裝，不修改世界、DB、命中規則0.8.0、Tracked資料或原0.5／1.5秒政策。
+
+沿用原RPC前PoseSend、入口Receive／accepted／rejected／throttled與journal／capture／publish量測點，正常事件僅聚合，間隔／量測>200ms才留兩端，body只記轉換與接受姿態年齡；沒有位置、玩家姓名、key／ticket、UDP payload、GPU／PCM／OS畫面。只有server附加既有PlayerLoop邊界，client不裝loop。ManagementApply約0.5秒輪詢也會產生稀疏gap，不把總筆數稱姿態異常。
+
+Install與本收集器Update只查自己的呼叫執行緒GetThreadTimes／QueryThreadCycleTime，用pseudo handle、不列舉／開啟其他thread、不讀memory／stack、不改優先級／OS。保存thread ID／creation FILETIME、kernel／user100ns及cycles、查詢前後UTC／單調括號；僅留>200ms Update-to-Update窗口，另計總samples。CPU值屬整個sample括號，不是engine node內CPU；cycles不轉秒，量化或零值不證明全程停住。數值／身份倒退拒絕，clock step達50ms不做跨程序join。
+
+真正Editor Prepare、**152 EditMode**成功（新增8項聚合／上限／反例／snapshot／模式互斥、64位JSON及真正Windows呼叫thread API）；Windows receipt `2026-10-31T10:29:14.1866454Z`、Quest ARM64 IL2CPP receipt `10:39:20.8575012Z`同源成功，fingerprint `c98f1e1d9b6857de6fc17ea3c9d585ba41881ac528314f5e7fc0073ee5958b1f`與目前重算一致。原Scene `4314adcd8c63d86469d16497127d8cfb／1444571642`及prefab `6f3f36cb9d710e847b5ecc569665e1ce／5227825248646244841`保持，沒有RebuildArena。aapt確認0.33／40、min32／target35／arm64；實際APK60,264,566 bytes、SHA `fc0054d7b6a8bb3d87a82ea8c53ea705d8fd7430466f8cea8274e65571d5fd72`，libil2cpp81,864,328／metadata9,269,280 bytes且含新型別。BuildReport總輸出不當APK大小，仍無頭盔運行。
+
+首次Quest確實失敗，log為Bee／PlayerScriptAssemblies存取UnauthorizedAccessException，exit1與原log保留；不因開頭token warning否定已成功Editor／Desktop授權或要求重新登入。沒有改Library cache／ACL／安全設定，後續真正重試exit0才採為成功；未證明初次檔案存取根因。官方293檔Transport單一修補與原字型pin核對成功，實際匯入的兩個新.meta及版本設定保存。
+
+短校準第一場`desktop-long/20261031-183241-43db1261`完成受控1.2秒單一上行丟棄與恢復，但解析器把JsonUtility產生的未啟用loop初始化空物件誤判已宣告，父工具exit1。原raw／cleanup／封存保留，不補寫成passed。只接受精確空形狀、非空仍拒絕後，第二場`183431-27f2f323`真正重跑exit0：server主玩家PoseReceive gap **1.2776636秒**、body接受姿態年齡約0.5999984秒，sender無>200ms呼叫gap、peer仍有效、同admission恢復，原七統計／兩份結果／雙seal一致。轉送原UDP bytes、不讀payload，不注入姿態或武器；是已知受控原因的校準，不是自然31筆失效的根因證明。收集先停止／移除自己的marker再寫報告，輸出安排在End與全部ack後，與任務內觀察分開。
+
+新版未帶診斷的一般原生入場`unity-admission/20261031-184149-3d3b0b53` **8項、377幀**成功，含撤銷／原程序重連／已接受健康與彈藥保持／Ended拒絕及回放統計。此工具使用自己的F資料，非下方C SSD配置或頭盔，真正handle exit0、沒有GUI／鍵鼠操作。新8 Python解析反例、原11多人連續性及語法通過，JSON clock／role／counter／aggregate fence不以資料缺少當成功；CI加入unit／語法，不稱雲端執行原生。
+
+自然長場`desktop-long/20261031-184355-3b466dac`一server＋25 headless client、五房Linked各5，全部明確啟用新模式，僅server loop。固定900秒、原入場跨票券到期、AI每房一次20損耗後固定5位80／20位100、唯一tick18000、**25份個別ack及CSV／through38／combat final5／world8449精確雙seal一致**。完整4倍回放8449幀／8391 Running、209775應核對人次，badFrames0、保存最大gap114ms、source UTC最大0.220263秒／過期0、send queue full0；工具真正exit0、acceptancePassed及complete=true。是本場靜止Simulation的連續性通過，不是25位操作、物理網路、VIVE／Quest或容量完成。
+
+26份報告皆完整／未截斷、時鐘可對齊；client最短901.9851532秒／至少81157次main-thread samples、server907.3074891秒／81632 samples。任務Running窗口內無body loss、PoseSend／Receive>200ms gap、主執行緒>200ms窗口或PlayerLoop>100ms空窗；server一筆loop空窗在啟動期，不當作任務內根因。server原1769筆稀疏gap主要為正常ManagementApply，沒有把它們當資料遺失。`pose-continuity-analysis.json` complete=true、missionAcceptancePassed=true、**causalRootProven=false**；沒有窗口不能說CPU／frame delta為0。新工具指紋 `a6d8d68f53bec2279f0625199a41e80a63b7807477a970790d6d61d1a3402499`在結束後與目前helpers／analyzer重算相同。
+
+此場與原0.32未啟用的31筆反例條件不同，而且沒有針對已證明原因作行為修正；**沒有宣稱根因已解或修復**。原6931／6932幀13／18位及497ms窗口、完整raw與接受失敗保持不變。後續仍需自然失效窗口與未啟用對照、送出／接收／loop／CPU括號重疊分析，不能用乾淨一次或此校準取代原問題。
+
+`continuity-runtime-validation.json`raw bytes核對新**3 runtime／106檔**C原件與F snapshot一致，前**22 runtime／457檔**未變，原C API／三工具159檔保持。保存SQLite完全不開連線；所有真正actor／fixture handles已terminal，cleanup errors／remainingTrackedChildren空。writer全停才一次snapshot、保留C原件，源碼與遊戲binary仍F，資料明確C SSD，非F USB效能。原5080 API、登入／授權／防火牆未動，GUI安全性提示仍待使用者自行處理，沒有自動操作。
+
+另產生`windows-player-0.33.0.zip` **82,630,594 bytes**、SHA `d54bc0e97b5be90686a70e92e25169b507bafcd96af4dd874276cbfa6c38ca9c`，311檔＋manifest；正常啟動器來源`127a39d1d11a856070e6676ab566c4f4862e8e5ac168e2ed4d9a4a9b4660ab45`不變。已實際解壓C、Python與真正Launch-Player.exe --verify成功；本輪沒有重新完成GUI選檔或ZIP玩家入場流程，不把舊0.32 GUI未完成改成成功。APK／ZIP／SDK／憑證／DB／journal及artifacts不提交。
+
+完整11項保持active。下一步使用此有界診斷取得自然失效與未啟用對照、再依因果證據修正；多玩家持續操作、五獨立房長任務、跨機／25台、Quest／VIVE／MR與廠商硬體分別驗收。
+
 ## 2026-10-31：25個PC原生程序的15分鐘Linked反例
 
 功能／反例提交 [3ff94cf](https://github.com/peca12968/vr-command-center/commit/3ff94cfcefdee18b484fe53ba18eb8f66fa8ae9b) 已推送main、遠端SHA一致。[本次CI run41192014101](https://github.com/peca12968/vr-command-center/actions/runs/41192014101)／check124510546996為failure、steps空；fresh annotation仍為近期付款失敗或支出上限，job未啟動，沒有雲端測試結果。未改帳務／手動重跑；這與本機900秒檢查確實執行後因body失效exit1是兩件事。

@@ -1,5 +1,7 @@
 # 電腦端姿態時序診斷
 
+較長的25端場次可使用獨立[POSE_CONTINUITY](POSE_CONTINUITY.md)：1200秒稀疏聚合與自己主執行緒CPU括號；舊工具仍240秒、原32768列與SDK行為保持，不能混用。新模式不取代此頁的逐事件／獨立程序心跳與舊對照，也不自動證明根因。
+
 ## 外部唯讀程序CPU取樣
 
 在既有檢查器另加`--process-timing`，會為自己的visible／peer／server取得唯讀Windows CPU計數，不改Unity來源、二進位、遊戲規則或新鮮度門檻：
