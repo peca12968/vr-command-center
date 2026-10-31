@@ -1,5 +1,25 @@
 # 開發進度
 
+## 2026-10-31：25個PC原生程序的15分鐘Linked反例
+
+前輪為實際進展；從乾淨`afc2b21`新增[DESKTOP_MULTIPLAYER_LONG](DESKTOP_MULTIPLAYER_LONG.md)及可重跑工具，將原單玩家900秒與25端短測之間的缺口接上。本輪**API/UI0.30、Unity0.32／code39／NGO29保持**，未修改Unity／規則、未重建或新跑144 Editor／雙平台；沿用原Windows receipt及source fingerprint `4f1173e9eac5aa82e0b37fa58ba73afa64c392b750218b790c85c08638c3b852`，原Scene／prefab ID保持。未以新Python檢查代替Unity或頭盔證據。
+
+真正場`desktop-long/20261031-175042-1ad7c3c8`：一個Windows server、25個headless client、自己的新API／角色憑證及C SSD runtime，五房Linked各5席，按5個一批正常入場；不注入姿態、武器或統計，不附掛240秒replication probe或延長其界線。Source全為Simulation、headsets0／hosts1／networkCapacityAccepted=false；名冊Quest3分類不是設備。25個原生程序持續900秒活動任務，唯一自動End為tick18000。
+
+真正AI在每房造成一次非零損耗，操作員關自動攻擊並於policy sequence36後固定個別健康：5位80、20位100。原票券全部於`09:55:48Z`到期後，`09:55:48.029474Z`／tick5954再次核對全部playerId／admission／room／seat保持，整段每client僅一次本地connected。這驗既有連線延續，不以過期票券重入，也不是25位持續移動／交火。
+
+最終**25份各自current admission戰績全部ack、timedOut空**，七統計欄、world stream／sequence8463、combat finalStreamSequence5與ledger through38一致；CSV25列逐玩家核對，SHA `7318eeab778af2ca47ab22f99fbbdb809cc47f8942ccb9bc08952a270d584e8c`。combat／world雙seal完成，完整4倍速回放從1至8463，8400個Running幀、**210000應核對玩家人次**、最後完整packet與封存統計一致。這些完成項目不代表連續性接受。
+
+**本輪連續性未通過：executionFinished=true、acceptancePassed=false、complete=false，真正工具handle exit1**。live8394幀（Running8393、跳1個live sequence）及完整replay都找到2個相同失效幀，reasonCounts inactiveBody31、18位不同玩家受影響。世界sequence6931／tick14701有13位，6932／tick14703有18位；6933／tick14706全部恢復。全量計數不因反例取樣上限200而丟失，正常Ended退場另排除；未用最後恢復、25份結果一致或少數正常檢查點宣稱全程成功。
+
+封存後以同次授權API另讀6928–6935的原保存packet，另存`multiplayer-fault-window.json`，沒有開保存SQLite或注入／重寫資料。6929→6930的擷取elapsed gap **497ms**、tick14694→14695；之後6931為103ms／+6 tick、6932為100ms／+2、6933為106ms／+3並恢復。失效涵蓋五房及五席，policy36、Running、suspended=false與健康80／100保持。完整保存最大gap497ms、達1500ms的gap0；source UTC live最大年齡0.214368秒、badSamples0，原生日誌send queue full0。這證明僅查1.5秒來源新鮮度或擷取間隔會漏掉body失效；沒有收集此輪內部pose trace／主執行緒或packet時間，因此不能據此斷言GC、OS排程、傳輸、來源I/O或時鐘根因。原0.5秒姿態／1.5秒來源政策均未放寬，既有偶發問題沒有宣稱修復。
+
+新工具指紋 `07a0032e658e476cfba8ae659f60d5d634c09c9830d3d8e10f9a7779c123097d`在cleanup後重算，與實際跑的helper／來源相同。**11新Python**通過，涵蓋最後玩家、錯房／健康／rig、缺少／重複／外來名冊、原admission／席位fence、意外Pause、live跳序與replay不得跳序、原1500ms界線及全量反例計數。新增原生反例形狀的497ms＋13／18失效＋恢復測試，第一位保持健康仍必須判fail，31筆不因恢復而消失；另原single3／capacity11共14項與新語法通過。CI僅加入unit及Python語法，沒有把Linux CI當900秒Windows流程。
+
+`multiplayer-long-validation.json`raw-byte核對本輪**14檔**C原件與F snapshot SHA相同，前**21 runtime／443檔**未變、原C API及三工具159檔仍匹配舊SHA。保存SQLite不開連線；真正tool terminal後核對cleanup errors／remainingTrackedChildren空、沒有剩餘VrCommand程序。所有writer停後才一次snapshot、保留C原件與全部反例；raw audit complete=true是檔案審核完成，不會將acceptancePassed=false改為成功。資料明確C SSD，source及Unity binary仍F，不是F USB效能／跨機證據；5080舊API、登入／授權／安全設定未變，憑證／DB／journal／binary不提交。
+
+完整11項保持active，GUI安全性提示仍待使用者自行處理。本輪已把25端較長任務的失效窗口縮到可重查的原始幀；下一步針對接近0.5秒的窗口收集送出／接收與主迴圈工作證據，再修復並重跑，不能拿降低人數或短測當25端解決。25位操作／5獨立房長任務、跨機、Quest／VIVE／MR與廠商硬體仍另驗。
+
 ## 2026-10-31：Windows可攜玩家包與繁中啟動器
 
 功能 [2459725](https://github.com/peca12968/vr-command-center/commit/245972594d9898cde672aab63c25228c5c5b59d9) 已推送main且遠端SHA一致。[本次CI run41189792380](https://github.com/peca12968/vr-command-center/actions/runs/41189792380)／check124504023904為failure、steps空；fresh annotation仍為近期帳戶付款失敗或支出上限，job未啟動。沒有雲端測試結果，未改帳務或手動重跑；本機證據與GUI待驗限制如下。

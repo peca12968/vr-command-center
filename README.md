@@ -1,5 +1,7 @@
 # VR Command Center
 
+新增[25個PC程序的15分鐘檢查](docs/DESKTOP_MULTIPLAYER_LONG.md)：五房Linked、原入場跨票券到期、25份戰績／CSV與8463幀完整回放已完成。發現2幀共31筆失效body，故全程連續性**未通過**；已保存反例與回歸檢查，下一步追查姿態接收／主迴圈間隔。這是同機靜止Simulation，非25位操作、跨機或頭盔驗收。
+
 新增 [Windows可攜玩家包](docs/WINDOWS_PLAYER_PACKAGE.md)：完整解壓後，以繁中啟動器選擇控制台下載的玩家連線檔即可開啟遊戲；不需Unity Editor或Python。最終包的真正雙PC背景入場／End／戰績及程序收尾9項、原生拒絕檢查15項通過；互動GUI目前受Windows安全性提示阻擋，完整證據見PROGRESS。此為同機Simulation，非跨機或頭盔驗收。
 
 五房間、總計 25 人的 VR/MR 軍事戰鬥遊戲系統，目標支援 VIVE XR 與 Meta Quest 3。

@@ -1,5 +1,7 @@
 # 長期開發目標
 
+2026-10-31 新增[五房25程序15分鐘](DESKTOP_MULTIPLAYER_LONG.md)：25原入場／票券到期後延續、唯一tick18000及25份結果／CSV／精確雙seal一致，8463全回放完整；但2幀13／18位、共31筆body失效，acceptancePassed=false且工具exit1，未宣稱容量或根因修復。新11 Python含此恢復反例。下一步定位497ms擷取間隔附近的姿態送出／接收及主迴圈工作；完整11項保持active，實機／跨機分開驗收。
+
 2026-10-31 新增[Windows可攜玩家包](WINDOWS_PLAYER_PACKAGE.md)：繁中選檔啟動器及真正runtime封裝，最終解壓包雙PC背景流程9項及原生拒絕15項通過。API/UI0.30、Unity0.32／NGO29與144 Editor／雙平台為原證據，本輪未重建。互動GUI受Windows安全性提示阻擋，人工確認、跨機及頭盔分開驗收；下一步仍是多玩家持續操作與場館／跨機，完整11項active。
 
 2026-10-31 新增[外部玩家模式](EXTERNAL_CLIENTS.md)：操作員工具只開server，不占用名冊入場；來源公告地址／port與控制台下載接通，真正兩個分開啟動PC入場／End／雙seal及loopback socket已驗。API/UI0.30、Unity0.32.0／code39／NGO29、144真正EditMode及同源雙平台成功，原模式49項回歸通過。這是同機外部程序流程，非跨機／頭盔／25台；下一步實際多玩家操作、場館與跨機部署，完整11項保持active。

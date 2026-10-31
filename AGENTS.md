@@ -1,5 +1,7 @@
 # 開發指引
 
+25個同機PC的900秒Linked新證據見docs/DESKTOP_MULTIPLAYER_LONG.md／PROGRESS：8463全回放／8400 Running／210000應核對人次，6931／6932幀分別13／18個失效body、31筆／18位受影響，之後恢復。acceptancePassed／complete=false、真正工具exit1；25份ack／CSV／雙seal相符不代表連續性通過。前一幀擷取gap497ms、policy36與suspended=false、健康80／100保持，不能推定GC／排程／傳輸根因或修改0.5／1.5秒政策。新11 Python含恢復後仍失敗反例，舊single／capacity14項通過。API/UI0.30、Unity0.32／code39／NGO29與原144 Editor／雙平台保持，本輪未重建；25位操作／跨機／實機仍待。
+
 Windows可攜玩家包v1見docs/WINDOWS_PLAYER_PACKAGE.md：不改API/UI0.30或Unity0.32／NGO29來源，封裝真正receipt與原runtime，以Framework compiler產生獨立繁中啟動器；不含票券／server config／DB／journal。source fingerprint與原場景ID保持，無新Unity重建證據。檔案manifest是雜湊清單，不是簽章。最終背景雙PC9項含cleanup、原生拒絕15項；GUI安全性提示由使用者自行處理，不得自動操作或把受阻流程稱完整通過。檢查器須將signalCode列入terminal並在全部cleanup成功後才寫checks.json complete；細節與未完成輪次見PROGRESS。
 
 2026-10-31 外部玩家流程見docs/EXTERNAL_CLIENTS.md：API/UI0.30、Unity0.32.0／code39／NGO29，144真正EditMode及同源雙平台成功，717規則／459 HTTP／47串流／67 Node／234 Chromium。connection-endpoint v1只由已附掛stream且有world header的GameServer owner公布，Master／可讀Room讀取，顯式Actor、場次／stream／owner fence、IPv4 canonical unicast及port1024..65535；接受後immutable，Ended metadata不授權配票／重開。worlds.db新增connection_endpoints，原header／envelope7／schema1／rules0.8.0及素材pin保持。Unity listenAddress真正傳UTP第三參數，缺失仍舊Any；新工具明確loopback，不能用忽略欄位的舊server冒充。external不自動claim／領票／開client，headsets及allAcknowledged未知null，server至少36秒非阻塞保留，不把空集合當送達。控制台手動地址保留、選擇／登入／stream fence，兩邊都缺stream不可當相符。兩次同機外部PC各8項、49 local回歸、42檔新runtime與前345檔SHA一致；真正UDP127綁定已核對，非LAN／頭盔／25台，完整目標active。原識別及雙平台fingerprint4f117...3b852保持，詳見PROGRESS。

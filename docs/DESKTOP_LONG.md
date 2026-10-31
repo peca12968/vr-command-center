@@ -1,5 +1,7 @@
 # 15分鐘 PC 任務驗證
 
+五房Linked的多人版本另見[DESKTOP_MULTIPLAYER_LONG](DESKTOP_MULTIPLAYER_LONG.md)：已完成25個原生client／900秒與完整回放，發現2幀31筆失效body而判未通過；不修改或覆蓋本頁原單玩家成功紀錄，也不將它外推為多人成功。
+
 此工具使用自己的新API、一個真正Windows server／一個headless client、固定900秒活動時間，驗證任務倒數、原入場、受傷狀態、世界保存與最終結果。頭手為Simulation，未操作鍵鼠／頭盔；不是25人、跨機、GPU效能或4小時穩定性驗收。結果與限制見 PROGRESS，不以工具來源碼存在宣稱通過。
 
 不附掛既有240秒NativeReplicationProbe，也不經有240秒限制的故障代理。不能以放寬診斷上限或重開進程湊15分鐘。必須先有相符來源的Windows成功build receipt，正常API／來源／所有程序版本一致。
