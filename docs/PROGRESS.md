@@ -2,6 +2,8 @@
 
 ## 2026-10-31：Preparing逾時重現、來源journal與SSD入場比較
 
+功能 [d0b5f3c](https://github.com/peca12968/vr-command-center/commit/d0b5f3c929a113ef329aaa1ab411176cb1e44d2f) 已推送main、遠端SHA一致。[本次CI run41205865737](https://github.com/peca12968/vr-command-center/actions/runs/41205865737)／check124550701322為failure、steps空；fresh annotation明確為付款失敗或支出上限，job未啟動，沒有雲端測試結果。未改帳務或手動重跑，下列27項Python與原生結果為本機實際證據。
+
 從乾淨`e0ea233`接續[開場觀察](STARTUP_WITNESS.md)，本輪在原撤銷／重新加入流程、真正玩家封裝編譯／壓縮同時執行的情境重現Running逾時，並分開核對live與關閉的來源journal。**API/UI0.30、Unity0.34／code41／NGO29及c233d804...來源保持**，未改遊戲／後端／wire／Tracked／規則或0.5／1.5秒政策；沒有新Editor或雙平台重建，原163與成功receipt仍屬前輪證據。
 
 入場checker新增有界metadata witness，依Begin接受序號、Running／tick>0／非suspended判斷套用，保留來源UTC／年齡和原15秒觀察；新唯讀journal分析器逐筆驗證VRWORLD1長度／SHA／序號與receipt邊界，只輸出metadata、不開SQLite或寫回／修復。8項witness＋10項journal反例＋5項既有真實Windows artifact／writer lease及4項既有startup測試成功，共27項，語法／diff成功；CI加入相應檢查。checksum／序號不冒充完整世界規則驗證。
