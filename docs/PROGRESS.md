@@ -2,6 +2,8 @@
 
 ## 2026-10-31：同源25程序未啟用診斷對照與跨場核對
 
+功能 [a12fd01](https://github.com/peca12968/vr-command-center/commit/a12fd0180560ad966991187440b10667f5311fa3) 已推送main、遠端SHA一致。[本次CI run41197458889](https://github.com/peca12968/vr-command-center/actions/runs/41197458889)／check124526402137為failure且steps空；fresh annotation為近期付款失敗或支出上限，job未啟動，沒有雲端測試結果。沒有改帳務或手動重跑；下列本機原生及27項Python為實際結果。
+
 從乾淨`4497e9a`接續電腦端，補上[跨場證據比較](CONTINUITY_COMPARISON.md)與同源未啟用診斷的自然長場。**API/UI0.30、Unity0.33.0／code40／NGO29保持**；本輪只新增Python比較／測試及文件，未改Unity、後端、姿態／碰撞或0.5／1.5秒政策，也未重跑Editor／雙平台。沿用原152真正EditMode與成功receipt，不把它們稱本輪重建；目前來源重算及Windows／Quest receipt皆為`c98f1e1d9b6857de6fc17ea3c9d585ba41881ac528314f5e7fc0073ee5958b1f`，原Scene／prefab ID保持。
 
 真正未帶`--pose-continuity`長場`desktop-long/20261031-191455-4bd7c8c7`：一個Windows server＋25 headless client、五房Linked各5、固定900秒，全部Simulation／同機靜止；報告明確poseContinuity=null且沒有manifest，模式為DisabledByTool。保留同一工具handle10367直到真正exit0，不從stage／無輸出或等待逾時重啟；全部actor結束、cleanup errors及remainingTrackedChildren均空後才作離線比較。
