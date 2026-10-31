@@ -1,5 +1,7 @@
 # 開發指引
 
+五房獨立900秒工具見docs/DESKTOP_INDEPENDENT_LONG.md／PROGRESS：同源0.33／code40／NGO29、API/UI0.30保持，5 server＋25 headless client、25原admission結果／各CSV／雙seal、42293完整回放／209235人次成功；房1Pause13→Resume14、tick2404／35個Paused幀，其他四房持續前進。只有明確原Pause fence可排除Running人次，不能把其他房意外Pause或暫停中失效放過。32 Python、新1 runtime22檔／前26 runtime577檔raw保存核對成功。真正handle需terminal才比較／snapshot，不開保存SQLite；independent-checks.json與Linked跨場比較器不同格式，不混套。沒有新Editor／雙平台，原152與c98f1 receipt保持；仍是同機靜止Simulation，原31筆未修復、完整11項active，實機／跨機另驗。
+
 同源未啟用診斷對照與跨場工具見docs/CONTINUITY_COMPARISON.md／PROGRESS：新25程序900秒、8475全回放／8412 Running／210300人次、25份結果／CSV／雙seal成功；原同c98f1稀疏場也未重現，舊2幀31筆失效保持未通過，不能稱根因或修復。比較需先確認原handle terminal與全部cleanup，只讀JSON／CSV、不開保存SQLite；明確null才是DisabledByTool，舊缺欄位為NotRecorded。不同source／模式及未量測主機條件不可當因果控制，complete只表示比較完成。API/UI0.30、Unity0.33／code40／NGO29及原152 Editor／雙平台不變，本輪未重建；新27項Python與raw bytes新14檔／前25 runtime563檔保存核對成功，完整11項仍active。
 
 長任務稀疏診斷見docs/POSE_CONTINUITY.md：Unity0.33／code40／NGO29、API/UI0.30；152真正Editor與同源雙平台成功。新Windows Development opt-in為1200秒／256 streams／4096稀疏列，各自保留舊pose／replication的240秒界線與原0.5／1.5秒政策，不可同啟舊pose trace。主執行緒CPU為自己呼叫執行緒、整個Update sample括號，不是engine node CPU；cycles不轉秒。受控上行1.2秒校準與一般8項入場回歸成功，25端新場8449全回放／8391 Running、209775人次及26完整報告乾淨；只代表本場，舊31筆失效保留且未證明根因或修復。一般／Android不安裝，Header／DB／幾何規則不變；完整失敗與範圍見PROGRESS。

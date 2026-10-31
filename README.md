@@ -1,5 +1,7 @@
 # VR Command Center
 
+新增[五房獨立15分鐘任務驗證](docs/DESKTOP_INDEPENDENT_LONG.md)：5個server與25個PC client各自倒數，單房Pause時其他四房持續；42293幀完整回放、25份戰績與各房封存一致，本場無失效。仍為同機靜止Simulation，完整跨機／頭盔容量及原偶發失效根因另驗。
+
 新增[同源25程序長任務對照](docs/CONTINUITY_COMPARISON.md)：未啟用診斷的15分鐘場完成8475幀回放、25份戰績／CSV與雙seal，未發現姿態失效。跨場報告仍保留舊31筆失效為未通過；兩場未重現不代表根因已修復。這是同機靜止Simulation，完整實機容量仍待驗。
 
 新增[長任務稀疏姿態診斷](docs/POSE_CONTINUITY.md)：可在Windows Development明確選用收發／主迴圈與自己的主執行緒CPU計數；舊240秒工具及參戰時限保持。受控上行丟包校準成功，25端新場15分鐘／8449全回放及26份報告乾淨；歷史31筆失效仍保留，**沒有宣稱根因已修復**。一般啟動與Android不收集。

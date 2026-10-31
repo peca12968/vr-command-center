@@ -1,5 +1,7 @@
 # 五房電腦場館
 
+五房各五個原生client、各自900秒及完整回放的獨立長測見[DESKTOP_INDEPENDENT_LONG](DESKTOP_INDEPENDENT_LONG.md)。它與本頁每房一人的可操作場館工具分開，實際接受結果以PROGRESS為準。
+
 本工具的原生檢查配置是每房一個client。每房五人、總25個同機client的獨立工具與尚未解決的send queue full見[DESKTOP_CAPACITY](DESKTOP_CAPACITY.md)；不能將其中場次／封存通過當成網路容量完整驗收。
 
 `scripts/start-desktop-venue.py` 在自己的 API／SQLite 上啟動五個獨立房間、五個真正 Windows Unity server 與每房一個真正 client。每房有不同任務、天氣／日夜、敵軍數量及沙包／油桶；預設只顯示房間 1 的可操作視窗，其餘合成玩家在背景運行。來源一律 **Simulation**，不是五台頭盔或 25 人效能測試。

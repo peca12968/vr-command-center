@@ -1,5 +1,33 @@
 # 開發進度
 
+## 2026-10-31：五個獨立世界／25程序的15分鐘任務
+
+前輪為實際進展；從乾淨`2e69066`接續[五房獨立長任務](DESKTOP_INDEPENDENT_LONG.md)，補上Linked長場之外，五份獨立世界同時運行、單房Pause及各自倒數／封存的證據。**API/UI0.30、Unity0.33.0／code40／NGO29保持**；只新增Python原生檢查器／10項反例與文件，未改後端、Unity、Tracked資料、0.5／1.5秒政策或幾何規則。沒有新跑Editor／雙平台，沿用原152真正EditMode與Windows／Quest成功receipt；目前來源重算及兩receipt皆為`c98f1e1d9b6857de6fc17ea3c9d585ba41881ac528314f5e7fc0073ee5958b1f`，原Scene／prefab ID保持。
+
+真正場`desktop-long/20261031-193917-b2f30b7d`：5個Windows server＋25 headless client，每房5人、不同mission／session／world stream／UDP port、各自900秒活動任務；Clear日／Fog日／Rain夜／Storm夜／Clear夜與各房旋轉物件分開保存。原生程序分批入場、每次新增前檢查至少2 GiB可用記憶體，所有程序job workers=2，沒有啟用pose／replication probe或注入姿態／武器。名冊Quest3欄位只是分類，實際headsets0／hosts1、來源全為Simulation、networkCapacityAccepted=false。
+
+各房Room控制台對其他房的Begin及live watch都被後端403拒絕；原5份header確認房間、來源、900秒、stream與物件範圍。每房真正AI造成一次20損耗後停止自動攻擊，個別健康各1位80／4位100；25個原playerId／admission／room／seat跨原票券到期保持，房1於tick5792、房2–5於5880–5882再次核對，未用過期票券重入。
+
+房1自己的Pause接受序號13、Resume14，實際停在tick2404，主觀察3.265秒；同一期間房2由2384→2445、房3由2362→2424、房4由2343→2405、房5由2322→2388，皆持續Running。完整回放35個Paused幀都屬原接受序號區間且tick不變，逐玩家姿態／健康正常；不把它們算Running人次。其他房出現Pause仍算反例，沒有以本輪有暫停測試免除所有Pause。
+
+五個live SSE獨立讀取，來源UTC及heartbeat保持原1.5秒界線；五房各自唯一tick18000自動End，**每房5份、共25份原admission戰績全部ack**，逐玩家七統計、world stream／sequence、ledger through及combat final一致。房1through16、房2–5 through14，各combat final1；五份CSV各5列與sealed ledger核對。之後五個4倍回放並行讀取各自第1幀到精確封存尾端，全部**42,293幀／41,847 Running／209,235應核對人次**，最終packet／統計一致，明細如下。
+
+| 房間 | 全回放幀 | Running幀 | 應核對人次 | 最大capture gap ms | 最大來源年齡秒 |
+|---|---:|---:|---:|---:|---:|
+| 1 | 8417 | 8320 | 41600 | 118 | 0.155906 |
+| 2 | 8457 | 8385 | 41925 | 132 | 0.155804 |
+| 3 | 8469 | 8386 | 41930 | 117 | 0.155610 |
+| 4 | 8471 | 8379 | 41895 | 133 | 0.156270 |
+| 5 | 8479 | 8377 | 41885 | 132 | 0.153763 |
+
+每房live／replay badFrames0、badPausedFrames0、badEnvironmentFrames0，>=1500ms capture gap0、來源過期0、send queue full0。`independent-checks.json`的executionFinished／acceptancePassed／complete=true，真正原工具handle96709最終exit0，未從stage或等待逾時重啟。五場是各自保留的世界、統計與歷史，沒有合併進新Linked。
+
+新10 Python含Pause fence／原tick、最後一位玩家失效、其他房意外Pause、環境／suspended／敵軍跨房、保存gap與512界線及獨立header反例；既有11多人及11容量解析共**32項**實際通過，語法及git diff --check成功，CI加入新unit／語法。沒有後端／UI行為變更，本輪未重跑.NET／HTTP／瀏覽器，不把前輪結果當新跑。
+
+`independent-long-runtime-validation.json`以raw bytes核對新**1 runtime／22檔**C原件與F snapshot一致，前**26 runtime／577檔**原件及snapshot完全未變，C API與三工具159檔保持；不開保存SQLite。所有actor及父handle皆terminal，cleanup errors／remainingTrackedChildren空，writer停後才一次snapshot並保留C原件；來源及binary仍F，資料明確C SSD，不是F USB效能。工具fingerprint `40cb2d72a29d7e4bc2df222ca43e83871dbadd22b7dfc7ea6b70277012c0a2f5`與結束後來源重算一致；原5080、帳務、登入／授權及防火牆未動，GUI安全性提示仍由使用者自行處理。
+
+這證明本輪五個獨立、靜止、同機PC世界的長任務與封存，**不證明25位持續操作、25台、跨機／Wi-Fi、GPU／FPS或頭盔容量**。原Linked的31筆失效仍未通過，未證明根因／修復；不同模式未重現不能替代自然窗口定位。完整11項長期目標保持active，下一步多玩家持續操作與跨機部署、自然姿態失效的因果證據；Quest／VIVE／MR與廠商硬體另驗。
+
 ## 2026-10-31：同源25程序未啟用診斷對照與跨場核對
 
 功能 [a12fd01](https://github.com/peca12968/vr-command-center/commit/a12fd0180560ad966991187440b10667f5311fa3) 已推送main、遠端SHA一致。[本次CI run41197458889](https://github.com/peca12968/vr-command-center/actions/runs/41197458889)／check124526402137為failure且steps空；fresh annotation為近期付款失敗或支出上限，job未啟動，沒有雲端測試結果。沒有改帳務或手動重跑；下列本機原生及27項Python為實際結果。
