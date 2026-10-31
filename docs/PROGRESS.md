@@ -2,6 +2,8 @@
 
 ## 2026-11-01：背景世界錄製的戰績尾界競態
 
+功能 [5443835](https://github.com/peca12968/vr-command-center/commit/544383540896a746a0ac3ac417d4c72681a85a8c) 已推送main、遠端SHA一致。[本功能CI run41252650265](https://github.com/peca12968/vr-command-center/actions/runs/41252650265)／check124689197862為failure、steps空；fresh annotation明確為付款失敗或支出上限，job未啟動、無雲端測試結果。未改帳務或手動重跑，下列均為本機實際驗證。
+
 從 `e387223` 接續電腦端，新增 [結果尾界修正](DEBRIEF_BOUNDARY.md)。**Unity0.36.1／Android code44，API/UI0.30／NGO29保持**。Ended 的 pending context 綁定 writer 已接受的 terminal capture，最終送出另外核對同一 immutable durable State 的 Complete／Sealed／Last／Ack 及 session／stream／origin；不以 buffered 或舊 durable 前綴冒充最終世界。原30秒等待、撤銷／admission、ack／Host收尾、客戶端精確序號及遊戲政策保持。
 
 原0.36的真正25端900秒場 `desktop-long/20261101-064213-cf891c07`，**handle46963真正exit1**，`Debrief world seal differs`。API／closed journal最終8442、Ended tick18000、雙seal成功；25份結果都有ack，但其中一份worldSequence8441，其餘24份8442。原journal8441為Running／observed36、8442為Ended／observed37，兩者tick18000；不能用相同到期tick或最終統計一致放過錯誤尾界。程式在逐玩家建立context時讀當時durable Last，背景End寫入可在迴圈中才完成，與反例一致。
