@@ -2,6 +2,8 @@
 
 ## 2026-10-31：原生Begin接受／套用觀察與受控校準
 
+功能 [395c156](https://github.com/peca12968/vr-command-center/commit/395c156bbae50a67a2b0741db405b3505d946547) 已推送main、遠端SHA一致。[本次CI run41204413573](https://github.com/peca12968/vr-command-center/actions/runs/41204413573)／check124546467295為failure、steps空；fresh annotation為近期付款失敗或支出上限，job未啟動，無雲端測試結果。未改帳務或手動重跑，下列原生與4項Python是本機實際結果。
+
 從乾淨`1c59040`接續[開場觀察](STARTUP_WITNESS.md)。前輪為實際進展，這輪針對Preparing逾時補上可重跑的控制路徑證據；**API/UI0.30、Unity0.34／code41／NGO29與c233d804...來源保持**，未改Unity／後端、姿態、規則或0.5／1.5秒政策，也未新跑163 Editor／雙平台，不把前輪結果稱本輪重建。
 
 新工具保存Begin接受回應／序號、開場前幀、所有live取樣、首次有效Running及完整回放最早幀；要求observedSequence>=接受序號、非suspended、Running且tick>0，來源UTC仍<1.5秒、開場觀察仍15秒。每場兩個真正獨立client，兩份原admission結果／七統計／world及ledger邊界、精確雙seal與全回放一致；沒有輸入或pose注入、沒有新原生診斷模式。4項Python反例／語法／diff檢查成功，CI加入unit／語法。
