@@ -1,5 +1,29 @@
 # 電腦端姿態時序診斷
 
+## 目前版本的直接連線與重複按鍵
+
+2026-10-31新增`check-desktop-pose-input.py`及`analyze-pose-input.py`，使用現有API／UI0.27、Unity0.28／NGO26的同源binary。這輪不重建Unity，也不改0.5秒姿態／1.5秒世界新鮮度。原時序資料只來自較早0.26.1版；下方舊受控丟包測試保留，不能替代本版人物／射擊音效及雙client的實際紀錄。
+
+```powershell
+python scripts/check-desktop-pose-input.py --api-dll artifacts/build-report-v1/bin/VrCommand.Api/release/VrCommand.Api.dll --runtime-root "$env:LOCALAPPDATA/VrCommand/SimulationRuns"
+python scripts/analyze-pose-input.py artifacts/desktop-venue/<本輪時間-識別>
+python -m unittest discover -s tests -p test_pose_input_analysis.py
+```
+
+工具只建立自己的房間3／server、可見玩家及一個無圖形同伴；沒有UDP代理、故意丟包或payload改寫。三個程序各明確啟用現有`--vr-pose-trace`，可見玩家另啟用`--vr-hud-trace`，記錄每個渲染幀的狀態轉換、沒有原生GPU讀回／PCM／麥克風。先自然基線15秒，再依`stage.json`的input-shot實際按Space一次，檢視彈藥29／28／27後分別建立shot-1.done至shot-3.done。可在第二發前實按W一步；完成檔只確認操作，不注入姿態或射擊。每一shot階段包含操作員觀察／等待，不是武器處理耗時。
+
+三發接受後，先明確finish三份有界記憶體trace，才獨立End／戰鬥及世界精確seal，等HUD最終狀態檔、關閉全部writer再複製runtime-snapshot回F。分析器只讀已關閉的JSON，不開SQLite、憑證或改原trace；分析輸出存本輪F目錄。
+
+新分析按兩個client各自唯一PoseSend的connection ID篩server PoseReceive／Accepted／BodyConnection，避免背景玩家持續流量掩蓋另一人的空窗。保留跨階段邊界的間隔；connection改變拒絕分析，不能把重連前後當同一流。各程序UTC與Stopwatch步進差達50ms時，phases與三方交集均留null、CLI非零退出，不用錯時鐘做歸因。HUD相對時鐘以它自己的startedAtUtc近似對齊，沒有每packet／每發的對應序號。末尾過期但沒有下一狀態明示rightCensored，沒有把未知時長當零。
+
+本版實際`20261031-075207-5621fa8a`已重現提示：三個程序的Update觀察空窗有共同**0.6425932秒**交集，UTC約23:53:08.870723–23:53:09.513316。可見玩家RPC呼叫空窗0.812241秒、同ID server入口0.811725秒；背景玩家也有0.744546／0.745023秒空窗，server同時發布兩人姿態過期。HUD保留約0.133828秒的POSE STREAM STALE後回ACTIVE，poseAccepted仍true；不是把過期誤稱姿態拒絕。
+
+這個交集發生於兩發之間，已觀察到第一發彈藥29之後約4.6秒，而非扣彈當刻。**這只證明三個程序出現重疊觀察空窗，不證明整個OS暫停、音效／GPU／磁碟／排程器或transport的根因。**本輪有外部computer-use視窗觀察與輸入，尚未排除診斷及工具自身影響，不能直接推論一般人工操作／頭盔同樣成因。已標記的server記錄／發布區段在觀察期間最長2.7402ms，尚未涵蓋到停頓處；MainThreadGap是兩次Update之間的wall time，不能當CPU耗時。下一步需對未量測的PlayerLoop區段與獨立時間心跳取證，不調寬正式姿態門檻。
+
+本輪4項真正原生流程、10項新合成分析反例及原3項分析回歸通過，完整資料、來源年齡、封存與限制見PROGRESS。沒有宣稱已修復，也不是頭盔／跨機／25台效能證據。
+
+## 歷史的受控丟包／GPU區段
+
 Unity0.26.1／Android code30新增明確選用的兩端診斷，API／UI0.24、NGO24、player-fire-v1及所有資料／遊戲規則版本保持。它不修飾HUD警告，不改0.5秒姿態新鮮度、防瞬移、碰撞、入場或命中政策，也沒有新增網路欄位。原始碼與兩平台成功結果以 [PROGRESS](PROGRESS.md) 為準。
 
 ```powershell

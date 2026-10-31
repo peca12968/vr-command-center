@@ -16,6 +16,8 @@
 
 ## 下一個開發順序
 
+最新[當前版本時序](POSE_TIMING.md)已在Unity0.28直接雙client連線重現短暫姿態過期：三程序Update空窗共同0.6425932秒；10項新分析反例／3項原回歸及4項真正原生流程通過。根因及外部觀察影響未證明，接續獨立心跳／PlayerLoop對照，不放寬門檻，不稱修復。
+
 最新[電腦練習場](DESKTOP.md)修復已拒絕目前API的舊0.21 gate，改共用現有0.27來源／admission／精確seal，支援SSD runtime及自動核對CSV。27項無圖形／9項真正W／Space／R與關窗、6項前置／非預期關閉反例、49項既有控制台／native回歸通過；沒有重跑前輪後端／Unity／APK，也不當作頭盔／25台／跨機證據。
 
 最新 API／UI0.27 新增[最終報表 CSV](REPORTS.md)，654 核心／446 HTTP／43 世界／58 Node／217 Chromium，49項真正 Windows 程序資料的 UI／native 整合通過。Unity0.28來源與既有雙平台binary未變，本輪未重跑102 EditMode／APK。報表完整性依戰鬥精確seal，世界錄影完整性分開驗收；完整11項仍開發中。

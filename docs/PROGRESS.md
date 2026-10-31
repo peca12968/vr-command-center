@@ -1,5 +1,28 @@
 # 開發進度
 
+## 2026-10-31：目前版本雙玩家姿態提示重現與三程序時序
+
+從乾淨`e5fa9fa`接續PC穩定性。舊時序原生證據在Unity0.26.1、未含後續射擊音效及完整玩家人物；本輪新增[POSE_TIMING.md](POSE_TIMING.md)的`check-desktop-pose-input.py`／`analyze-pose-input.py`，用既有API／UI0.27及Unity0.28／code32／NGO26。自己的房間3、server、可見玩家及無圖形同伴直接loopback連線，沒有LossGate、故意丟包或payload改寫；三程序明確啟用原有NativePoseTrace，可見玩家另用原HUD trace。沒有改C#／正式輸入、防瞬移、傷害或0.5／1.5秒門檻，沒有原生GPU讀回／PCM／麥克風。
+
+`desktop-venue/20261031-075207-5621fa8a` **4項真正原生流程**通過。先15.171秒無射擊基線，透過computer-use真實視窗Space三次，HUD依序29／28／27；第二發前亦實按W一步，沒有姿態／武器RPC注入。三份trace在觀察結束後明確finish，complete=true／truncated=false，再獨立End與戰鬥／世界精確seal；1121幀、最大擷取UTC來源年齡0.624341秒、健康100／耗彈3／命中0／擊殺0，回放／ledger一致，pending=false／活動0／cleanup零錯誤、無追蹤子程序。22檔SSD runtime在writer全停後回F，與保留原件SHA一致；分析只讀JSON／檔案bytes，不開原DB或重寫snapshot。摘要`artifacts/pose-input-validation.json`。
+
+這次**取得真正POSE STREAM STALE樣本**，而非只重跑乾淨基線。HUD每渲染幀的五次狀態轉換保留，過期約0.133828秒後ACTIVE，poseAccepted=true／connected=false與原過期政策相符，沒有把它當姿態拒絕。可見client connection2，peer connection1；分析按ID篩server，不能用兩人交錯流量掩蓋其中一人的空窗：
+
+| 觀察 | 可見玩家 | 背景同伴 | 伺服器 |
+|---|---|---|---|
+| 基線最大RPC呼叫／同ID入口 | 55.741／55.718ms | 55.801／57.281ms | 無發布過期或>100ms主執行緒空窗 |
+| 全觀察最大RPC呼叫／同ID入口 | 0.812241／0.811725秒 | 0.744546／0.745023秒 | 兩個ID均曾發布過期 |
+| 最大Update觀察空窗 | 0.810708秒 | 0.719134秒 | 0.646577秒 |
+| 發布過期時接受姿態年齡 | 0.711310秒 | 0.700172秒 | 保持原0.5秒政策 |
+
+三程序空窗共同交集為**0.6425932秒**，UTC2026-10-30 23:53:08.870723–23:53:09.513316（本機10/31上午）。第一發彈藥29已於23:53:04.242605被世界取樣觀察，第二發彈藥28在23:53:38.753050才被觀察，交集在兩發之間，並非扣彈當刻。這不是每packet／每發精確CPU時間；shot階段包含操作者觀察／確認等待。UTC對Stopwatch步進差最大1.5285ms，通過本機join guard；已量測的server記錄／發布區段在觀察期最長2.7402ms，尚未涵蓋停頓處，不能將全trace含啟動期18.8318ms與此區段混算。
+
+**尚未證明底層根因或修復。**MainThreadGap只量兩次Update之間wall time，不是CPU耗時或整個OS暫停的證明。三程序同時缺口不能直接歸因於音效、GPU、磁碟、排程器、NGO／transport；也未排除診斷本身及外部computer-use視窗查詢／輸入的影響，不能推論一般人操作或頭盔同樣成因。這個新樣本改變下一步：對未量測的PlayerLoop及獨立時間心跳做對照，維持原警告與門檻，沒有把這輪診斷稱為修好。
+
+新分析保留跨階段邊界的收／發間隔，按connection篩BodyConnection；connection變動拒絕分析，不把重連併成單流。三份trace完整性獨立驗證，HUD末尾沒有下一狀態明示rightCensored／未知duration，UTC步進達50ms時phases與三方join留null且CLI非零。**10項合成反例**通過，涵蓋peer掩蓋／邊界間隔／三方交集／缺少交集／時鐘步進／connection變更／trace截斷／誤錄GPU／HUD未知尾端；另原**3項時序分析回歸**通過。這13項是合成分析規則，不能當13次原生或頭盔試跑。CI新增新單元測試與Python語法步驟，py_compile本機通過。
+
+本輪只新增Python診斷／分析及文件／CI，沒有重跑前輪後端／瀏覽器／102 EditMode／APK。Unity source fingerprint仍`792a3aaac9a7903159718a898324def8f6ba4769f908f1f46f30a6c77744c725`，既有Windows／Quest receipts及原scene／prefab識別一致；不改schema、資源pin、header或checksum。原5080確認仍API0.16／原歷史，未替換。全11項保持開發中；這是同機Simulation量測，不是Quest／VIVE、MR、廠商硬體、跨機或25台效能證據。
+
 ## 2026-10-31：修復電腦練習場入口、五人同房與關窗封存
 
 從乾淨`35bff7f`接續PC主線。實際執行舊`start-desktop-demo.py`搭本輪既有API0.27，程式在建立場次前因仍要求**0.21.0**而exit1，保留`artifacts/practice-old-launcher-failure.log`。原DESKTOP文件另仍寫0.16，兩者均已修正；沒有改回舊reader或替換5080歷史來配合。
