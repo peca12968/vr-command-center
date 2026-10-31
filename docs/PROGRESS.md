@@ -25,6 +25,8 @@
 
 本輪僅Python診斷／分析、CI與文件，沒有重跑歷史後端／瀏覽器／102 EditMode／APK。Unity fingerprint仍`792a3aaac9a7903159718a898324def8f6ba4769f908f1f46f30a6c77744c725`，Windows／Quest既有receipts及原scene／prefab ID一致；原5080唯讀GET仍0.16／原歷史。來源與binary在F、全新runtime明確在C SSD，非F USB全資料、跨機、頭盔／MR／VIVE／廠商硬體或25台證據。完整11項與長期目標保持開發中。
 
+功能提交`575216bc1820872bcf953d8f0567527cb2176771`已推送main並核對遠端一致；GitHub #1保持open，更新後獨立讀回3200字本文逐字一致，原11項與歷史封存連結保留。[功能提交CI run41151496751](https://github.com/peca12968/vr-command-center/actions/runs/41151496751)／check124388817676實際failure、steps=null，annotation明示付款失敗或支出上限、工作未開始，沒有雲端執行結果；未改帳務或重跑。本機檢查與原生證據如上，不把雲端未啟動當作通過。
+
 ## 2026-10-31：目前版本雙玩家姿態提示重現與三程序時序
 
 從乾淨`e5fa9fa`接續PC穩定性。舊時序原生證據在Unity0.26.1、未含後續射擊音效及完整玩家人物；本輪新增[POSE_TIMING.md](POSE_TIMING.md)的`check-desktop-pose-input.py`／`analyze-pose-input.py`，用既有API／UI0.27及Unity0.28／code32／NGO26。自己的房間3、server、可見玩家及無圖形同伴直接loopback連線，沒有LossGate、故意丟包或payload改寫；三程序明確啟用原有NativePoseTrace，可見玩家另用原HUD trace。沒有改C#／正式輸入、防瞬移、傷害或0.5／1.5秒門檻，沒有原生GPU讀回／PCM／麥克風。
