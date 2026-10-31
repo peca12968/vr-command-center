@@ -28,6 +28,8 @@ PC先顯示等待封存，再顯示耗彈／命中／擊殺／中彈／損耗／
 
 隔離runtime全部明確C SSD，來源／binary仍F；全停writer後才一次複製回F，保留原件，未開SQLite作稽核。`debrief-final-validation.json`覆核**20個runtime、280檔**，原件／副本逐檔SHA一致，最終來源10個runtime（含上述三個練習場）皆乾淨；之前七場已保存manifest也保持不變。早期`120744-0024ac98`因工具誤用description而非必要briefing在HTTP400停止、未啟動遊戲，12檔保留。其餘早期UI修正前`120754／120804／120817`與零事件修正前`121037／121044／121053`各14檔保留；後三場fingerprint `002550...`與其8項／382幀重連不是最終來源。早期HUD曾有POSE REJECTED及斷線Preparing小框，已由最終畫面修正；不重寫舊passed或把舊receipt當新建置。Host早期summary的最後label過廣，debrief-result始終正確區分host shutdown與dedicated票券檢查，現由同一checks陣列產生摘要。原5080歷史服務與Unity serve／登入／安全設定未更動。
 
+功能提交`c4917b6d70fc9e75e4f0361876a445e2d8d9dc32`已推送main、遠端一致。最新[CI run41170023324](https://github.com/peca12968/vr-command-center/actions/runs/41170023324)／check124445771935實際failure、steps=null；annotation明示付款失敗或支出上限，job未開始，不能當作雲端測試失敗或通過。未改帳務／重跑，以上為本機證據。
+
 限制：本輪兩位結果接收及最多五位無圖形練習場，未驗25人同時操作、跨機、Quest／VIVE實機、MR或廠商硬體。真正零事件bug曾觸發30秒timeout，但這不是刻意丟包／斷網／封存中斷的完整故障驗收。近End入場競態及更長任務仍待；原主迴圈偶發停頓未證明修復，完整11項長期目標仍active。
 
 ## 2026-10-31：真正W／Space／R／Space與25端回放，補全程失效檢查
