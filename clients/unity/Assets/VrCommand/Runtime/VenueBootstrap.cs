@@ -69,6 +69,7 @@ namespace VrCommand.Unity
                 reconnectInput = new ClientReconnectInput();
             NativePoseContinuity.Install(gameObject,configuration.role);
             NativePoseTrace.Install(gameObject,configuration.role);
+            NativeWorldJournalTrace.Install(gameObject,configuration.role);
             NativeReplicationProbe.Install(this,configuration.role);
             var transport = (UnityTransport)networkManager.NetworkConfig.NetworkTransport;
             VenueTransportProfile.Apply(transport,configuration.IsServer);

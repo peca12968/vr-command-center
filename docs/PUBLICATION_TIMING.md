@@ -1,5 +1,7 @@
 # 原生開場窗口的寫入區段計時
 
+後續已把mutex、Write與Flush(true)分開，並涵蓋原括號外的狀態讀取等待；明確開關、最終0.35來源與實測限制見[JOURNAL_STAGES](JOURNAL_STAGES.md)／PROGRESS。下列原區段工具與歷史結果保留。
+
 承接[Begin接受／套用及來源journal](STARTUP_WITNESS.md)。現有Windows Development播放器已提供`--vr-pose-trace`，在主執行緒量測`WorldJournal`／`WorldCapture`等區段。新入場檢查只在明確`--server-trace`時把它附掛到自己的server；一般執行／client／Android不新增探針，沒有修改Unity或共享遊戲程式。
 
 ```powershell

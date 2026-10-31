@@ -1,5 +1,7 @@
 # VR Command Center
 
+新增[journal鎖等待／持久flush分段](docs/JOURNAL_STAGES.md)，只在明確Windows server診斷啟用，保留durable ack及完整journal。Unity0.35／code42、169真正Editor及同源Windows／Quest建置成功，最終PC一般8項／SSD負載8項通過；F逾時與128幀積壓保留，已量到狀態讀取等待背景ack持鎖flush。未稱全局修復、頭盔／MR／25台驗收，最新包與限制見PROGRESS。
+
 新增[Quest控制器重連](docs/QUEST_RECONNECT.md)：右手B放開再按可重讀原票券，失焦／暫停後須重新按下；163真正Editor檢查及同源0.34 Windows／Quest建置成功，最終PC8項回歸通過。實體控制器、頭盔與跨機仍待驗，保留失敗紀錄與原偶發問題。
 
 玩家啟動器新增[入場狀態](docs/PLAYER_CONNECTION_STATUS.md)：顯示遊戲回報的入場、拒絕、中斷、未確認與最終戰績，區分程式啟動與真正入場；新版Windows玩家包及同機原生整合已驗，GUI完整操作與跨機仍待。

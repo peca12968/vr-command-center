@@ -1,5 +1,44 @@
 # 開發進度
 
+## 2026-11-01：journal鎖／flush分段與0.35同源交付
+
+從乾淨`5332886`接續[細分journal計時](JOURNAL_STAGES.md)。**Unity0.35.0／Android code42，API/UI0.30／NGO29保持**。共享C#9／netstandard2.1 collector及明確Windows Development／專用Server探針分別量測所有outbox gate進入、File Write及真正FileStream.Flush(true)，只保存metadata／managed thread ID／成功旗標。原mutex、逐筆durable flush、exclusive lease、checksum／ack／seal與回放位元組保持；不改world／wire／rules0.8.0／素材pin／Tracked／0.5與1.5秒政策，不是效能修復。
+
+collector上限32768完成列／64 in-flight，原生90秒、停止後最多5秒drain；完整／未truncated／inFlight0才可接受。一般／Editor／Android不安裝，finish.request僅每0.25秒查詢；cleanup先停兩個probe收集，再輸出／End／關閉。分析器用UTC終點減Stopwatch耗時定位、裁切聯集及Main wait與Background ack flush交集，避免raw UTC量化抹掉短呼叫；clock差>0.05秒或未覆蓋則null、不補造0。該診斷容差不是遊戲新政策。
+
+**最終來源`d30cc34c697a612ef05733e4fb116281807151658460c0550df3c5e825a703e3`**，真正Prepare／169 Editor全過（failed／skipped0，新增6項含真實gate阻塞、失敗Write、並行Stop／drain及有／無trace原journal逐byte相同）。10月31日Windows receipt14:12:21Z／Quest14:20:08Z同源成功，原scene `4314adcd8c63d86469d16497127d8cfb／1444571642`、prefab `6f3f36cb9d710e847b5ecc569665e1ce／5227825248646244841`保留，無RebuildArena。中斷後舊handle92079已消失、Editor PID48628亦不存在；重新核對成功log exit0、新receipt／目前fingerprint及XML確認完成，未因觀察中斷重建。
+
+| 最終d30來源的真正PC場 | 結果與來源 |
+|---|---|
+| `unity-admission/20261031-221302-b8a7421d`，C runtime、無probe | handle74773 exit0，原8項／363幀精確seal、cleanup空；沒有兩份trace。當時另有Quest建置，不當無負載基線 |
+| `unity-admission/20261101-055610-ab7c9421`，F資料＋真正封裝重疊 | parent94479 exit1、admission1／package0，Running15秒逾時、無summary、cleanup空。Begin接受7；41次live皆observed6／Preparing tick0、world126→192、年齡9.472→16.056秒。關閉來源world205／tick5已有效Running，擷取為回應後0.667191秒；最後world328／Ended tick321、ack200，**128未確認、未seal** |
+| `unity-admission/20261101-055717-fd2b98b6`，明確C SSD＋同封裝重疊 | parent66382 exit0、admission／package均0，原8項／355幀精確seal、cleanup空。接受7；首次有效live／journal皆world48／tick2／observed7，單調回應後0.563秒、年齡0.067086秒；ack355無積壓 |
+
+兩parent為`journal-stage-overlap-29bb544bf3734279bdc08ed11c525c15`與`...7f1e790fc81a4992b4e113661da5f0fb`，均確認封裝程序在native啟動及Begin檔出現時仍活著，非僅排程意圖；無輸入／姿態注入。API用同次159檔C執行副本，來源與Unity binary在F；F／SSD指場次SQLite／journal位置，不能把API副本也說全在F。
+
+| Begin UTC窗口內分段（重疊欄不可加總） | F最終反例 | C SSD最終場 |
+|---|---|---|
+| 窗口／完整分段列 | 15.077624秒／4328列，43.879866秒觀察 | 0.566151秒／9581列，37.865466秒觀察 |
+| 最大UTC／Stopwatch差 | 0.002379秒，可相關 | 0.001252秒，可相關 |
+| Main Frame DurableFlush聯集 | **8.814804秒**，窗口116筆 | 0.002560秒 |
+| Main GateEnter聯集 | **3.134420秒**；CompleteState讀取占3.134406秒 | 0.000051秒 |
+| Background Ack DurableFlush聯集 | 3.562025秒，窗口67筆 | 0.002721秒 |
+| Main等待與Background ack flush交集 | **3.133609秒** | 0秒 |
+
+兩份細分report皆complete／未truncated／inFlight0、failedOperations0。這次量到同一outbox gate的**狀態讀取**會等待背景ack持鎖flush；CompleteState讀取在原WorldCapture括號之前，不能漏算成沒有等待。Flush(true)耗時含OS／排程／儲存路徑，非純實體媒體時間；managed ID不是OS ID，File層Frame sequence0是unknown。WS／API／SQLite／combat journal未新增分段，不能由不同窗口比例推效能倍率、單一硬碟／原31筆或所有舊逾時已修復。
+
+observer graph `c5f7aaaddf82ff0ce0ee6f01ef85a1397a562909062df9ad843cb50bdb75d9f9`、三分析腳本graph `017c740ccb43861dbf596b3b09d63176958a121637259aec0700bcf9abb9e50f`，不當完整OS／binary依賴。最終F原worldlog SHA `46ec2c21db389037c344ac8ba208cab883a83973a6b9c703e1a51fe56edf0a6c`／840268 bytes，原checksum／序號核對成功，不截尾／補送／開SQLite。
+
+本輪隔離`--artifacts-path artifacts/journal-timing-dotnet` restore locked／Release成功，**717規則／459 HTTP／47串流**通過；共用.NET DLL及三工具整組使用，不只換單一Simulation DLL，不替換原5080。10項新分段反例（UTC量化／thread分類／unknown等）＋37既有，共**47 Python**成功，語法／diff成功。UI未改，沒有新瀏覽器／GPU或頭盔檢查。
+
+最終玩家包`artifacts/player-packages/windows-player-0.35.0-final.zip`，311個runtime檔＋manifest，82638063 bytes、SHA `a18b27dab40927e10dac50a392eb196037bad23c943cc4f6b9ee235e0e260e81`，launcher source仍a65846da...；全新C解壓通過19項真正啟動器核對／拒絕（`player-package-checks/20261031-221714-ae922d8f`）。這是offline launcher＋上列原生回歸，**未重跑完整GUI按鈕／封裝雙PC瀏覽器流程**。最終APK82742165 bytes、SHA `f4dde150a8cce6cd6b21e11c86476e22502422644b588be1cc7bb2782b5c137c`；aapt核對0.35／42、min32／target35／arm64，apksigner v2一signer有效。105 entries的compressed60278055／uncompressed160864436、libil2cpp81959304；候選APK曾60297850 bytes，容器差異不當功能或程式碼增減。
+
+保留探索／失敗：PS1被執行政策拒載後直接呼叫相同Editor入口，未改政策；.NET nullable CS8604／8602以原gate內明確null拒絕修正；首輪Prepare C#9 CS8773為測試PathFor漏括號。第一輪169實際Editor0／XML全過，但自有runner序列化XML Element時exit1，修正輸出後最終Prepare／Tests／雙平台依序成功，未把runner1稱0。`journal-candidate-path.txt`保存f93dbc9b... Windows／Quest／logs，`journal-timing-history-path.txt`保存更舊c233原0.34。候選正常363幀、F `220457-479bf14d`其實**Paused逾時**（Begin13.313秒才看見、年齡12.780秒，112未確認），候選SSD `220559-538c2cb0`8項354幀成功。初版每幀查結束檔增加干擾，改0.25秒後重新169／雙平台及最終兩場，候選不冒充最終。raw UTC相減探索分析另存，最終改Stopwatch投影並補反例，未修改原生資料。
+
+`journal-stages-runtime-validation.json`raw核對最終新2 C runtime32檔／F snapshot完全一致、前33 runtime695檔及snapshot保持；前自有F253檔／舊API三工具159檔保持，新API三工具159檔亦核對來源／副本，最終F反例42檔保存。writer全停後才snapshot、原件保留，舊0.34 ZIP／歷史APK不覆寫，不讀正式key或保存SQLite；未動登入／帳務／網路安全性設定。
+
+下一步評估已量到的main讀取等待／同步flush所需writer架構或明確SSD部署，不先關閉durability／跳幀／放寬政策。完整11項active；Quest／VIVE實機、MR、跨機／25台、廠商硬體及舊31筆因果驗收仍待。
+
 ## 2026-10-31：原生journal區段計時與再次負載重現
 
 功能 [32e6ed7](https://github.com/peca12968/vr-command-center/commit/32e6ed7bb3ef5b7d51517c1315aca08ae5fd9a76) 已推送main、遠端SHA一致。[本次CI run41206671836](https://github.com/peca12968/vr-command-center/actions/runs/41206671836)／check124553038805為failure、steps空；fresh annotation為付款失敗或支出上限，job未啟動，沒有雲端測試結果。未改帳務或手動重跑，下列37項Python與原生結果為本機實際證據。

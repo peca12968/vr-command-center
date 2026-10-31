@@ -3,6 +3,7 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text;
 using System.Linq;
+using System.Threading;
 
 namespace VrCommand.Simulation
 {
@@ -37,9 +38,11 @@ namespace VrCommand.Simulation
         public const int MaximumPayload = 1024 * 1024 - 128;
         private static readonly byte[] Magic = Encoding.ASCII.GetBytes("VRWORLD1");
         private readonly FileStream file;
+        private readonly WorldJournalTrace? trace;
         private bool fault;
-        public FileWorldJournal(string path, bool createNew)
+        public FileWorldJournal(string path, bool createNew, WorldJournalTrace? trace = null)
         {
+            this.trace = trace;
             path = Path.GetFullPath(path);
             if (createNew) Directory.CreateDirectory(Path.GetDirectoryName(path)!);
             file = new FileStream(path, createNew ? FileMode.CreateNew : FileMode.Open, FileAccess.ReadWrite, FileShare.None);
@@ -79,14 +82,25 @@ namespace VrCommand.Simulation
         {
             if (fault) throw new IOException("World journal writer is faulted.");
             if (payload == null || payload.Length < 1 || payload.Length > MaximumPayload) throw new ArgumentException("Invalid world journal payload size.");
+            var tag = payload[0]; long sequence = 0;
+            if (trace != null && tag >= 2 && tag <= 4 && payload.Length == 9)
+                for (var i = 8; i >= 1; i--) sequence = unchecked((sequence << 8) | payload[i]);
+            var write = trace?.Begin(1, tag, sequence) ?? default;
+            var written = false;
             try
             {
                 file.Position = file.Length;
                 using (var hash = SHA256.Create()) using (var writer = new BinaryWriter(file, Encoding.UTF8, true))
                 { writer.Write(payload.Length); writer.Write(payload); writer.Write(hash.ComputeHash(payload)); writer.Flush(); }
-                file.Flush(true);
+                written = true;
             }
             catch { fault = true; throw; }
+            finally { write.Finish(written); }
+            var flush = trace?.Begin(2, tag, sequence) ?? default;
+            var durable = false;
+            try { file.Flush(true); durable = true; }
+            catch { fault = true; throw; }
+            finally { flush.Finish(durable); }
         }
         public void Dispose() => file.Dispose();
     }
@@ -103,6 +117,7 @@ namespace VrCommand.Simulation
         private readonly object gate = new object();
         private readonly IWorldJournal journal;
         private readonly IWorldCodec codec;
+        private readonly WorldJournalTrace? trace;
         private WorldRecordingPacket? last;
         private PendingWorldFrame? pending;
         private long pendingPosition, acknowledged;
@@ -110,22 +125,22 @@ namespace VrCommand.Simulation
         private readonly WorldRecordingHeader savedHeader;
         public WorldRecordingHeader Header => codec.ReadHeader(HeaderJson);
         public string HeaderJson { get; }
-        public long LastSequence { get { lock (gate) return last?.sequence ?? 0; } }
-        public long ThroughWorldSequence { get { lock (gate) return last?.frame.throughSequence ?? 0; } }
-        public long AcknowledgedSequence { get { lock (gate) return acknowledged; } }
-        public bool Complete { get { lock (gate) return complete; } }
-        public bool Sealed { get { lock (gate) return sealedStream; } }
+        public long LastSequence { get { using (Acquire(6)) return last?.sequence ?? 0; } }
+        public long ThroughWorldSequence { get { using (Acquire(7)) return last?.frame.throughSequence ?? 0; } }
+        public long AcknowledgedSequence { get { using (Acquire(8)) return acknowledged; } }
+        public bool Complete { get { using (Acquire(9)) return complete; } }
+        public bool Sealed { get { using (Acquire(10)) return sealedStream; } }
 
-        public static WorldOutbox Create(string path, WorldRecordingHeader header, IWorldCodec codec)
+        public static WorldOutbox Create(string path, WorldRecordingHeader header, IWorldCodec codec, WorldJournalTrace? trace = null)
         {
             var detached = codec.ReadHeader(codec.Header(header));
             if (detached.captureStartedAtUtc == "") detached.captureStartedAtUtc = DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
-            return new WorldOutbox(new FileWorldJournal(path, true), codec, detached);
+            return new WorldOutbox(new FileWorldJournal(path, true, trace), codec, detached, trace);
         }
-        public static WorldOutbox Recover(string path, IWorldCodec codec) => new WorldOutbox(new FileWorldJournal(path, false), codec, null);
-        public WorldOutbox(IWorldJournal journal, IWorldCodec codec, WorldRecordingHeader? header)
+        public static WorldOutbox Recover(string path, IWorldCodec codec, WorldJournalTrace? trace = null) => new WorldOutbox(new FileWorldJournal(path, false, trace), codec, null, trace);
+        public WorldOutbox(IWorldJournal journal, IWorldCodec codec, WorldRecordingHeader? header, WorldJournalTrace? trace = null)
         {
-            this.journal = journal; this.codec = codec;
+            this.journal = journal; this.codec = codec; this.trace = trace;
             try
             {
                 if (journal.Length == 0)
@@ -177,9 +192,10 @@ namespace VrCommand.Simulation
         }
         public void Append(WorldRecordingPacket packet)
         {
-            lock (gate)
+            using (Acquire(1, packet?.sequence ?? 0))
             {
                 if (complete || last?.frame.phase == "Ended" || (last?.sequence ?? 0) >= 1000000) throw new InvalidOperationException("World source is terminal or full.");
+                if (packet == null) throw new ArgumentException("Missing recording packet.");
                 WorldRecordingValidation.Packet(savedHeader, packet, last);
                 if (packet.observedSequence < (last?.observedSequence ?? 1)) throw new InvalidOperationException("World observation cannot rewind.");
                 var json = codec.Packet(packet); var detached = codec.ReadPacket(json);
@@ -191,7 +207,7 @@ namespace VrCommand.Simulation
         {
             get
             {
-                lock (gate)
+                using (Acquire(5))
                 {
                     if (pending != null) return pending;
                     WorldJournalRecord? row;
@@ -210,7 +226,7 @@ namespace VrCommand.Simulation
         }
         public void Acknowledge(long sequence)
         {
-            lock (gate)
+            using (Acquire(2, sequence))
             {
                 if (sequence == acknowledged) return;
                 if (Pending?.Sequence != sequence || sequence != acknowledged + 1) throw new InvalidOperationException("Acknowledge the exact pending world frame.");
@@ -219,7 +235,7 @@ namespace VrCommand.Simulation
         }
         public void Finish()
         {
-            lock (gate)
+            using (Acquire(3))
             {
                 if (complete) return;
                 if (last?.frame.phase != "Ended") throw new InvalidOperationException("Persist the final Ended world frame before completion.");
@@ -228,7 +244,7 @@ namespace VrCommand.Simulation
         }
         public void MarkSealed()
         {
-            lock (gate)
+            using (Acquire(4))
             {
                 if (sealedStream) return;
                 if (!complete || acknowledged != last!.sequence) throw new InvalidOperationException("Deliver every completed world frame before accepting its seal.");
@@ -249,6 +265,19 @@ namespace VrCommand.Simulation
             if (payload.Length != 9) throw new InvalidDataException("Invalid world source receipt size.");
             using (var reader = new BinaryReader(new MemoryStream(payload))) { reader.ReadByte(); return reader.ReadInt64(); }
         }
-        public void Dispose() { lock (gate) journal.Dispose(); }
+        private GateLease Acquire(int operation, long sequence = 0)
+        {
+            var timing = trace?.Begin(0, operation, Math.Max(0, sequence)) ?? default;
+            var entered = false;
+            try { Monitor.Enter(gate, ref entered); return new GateLease(gate); }
+            finally { timing.Finish(entered); }
+        }
+        private readonly struct GateLease : IDisposable
+        {
+            private readonly object gate;
+            internal GateLease(object gate) { this.gate = gate; }
+            public void Dispose() => Monitor.Exit(gate);
+        }
+        public void Dispose() { using (Acquire(11)) journal.Dispose(); }
     }
 }

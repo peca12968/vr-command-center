@@ -45,10 +45,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--interactive', action='store_true')
     parser.add_argument('--server-trace', action='store_true', help='Opt in to the existing bounded Windows server timing trace; explicitly finish it before stopping its process')
+    parser.add_argument('--journal-trace', action='store_true', help='With --server-trace, opt in to bounded lock / write / durable-flush stages on a dedicated Windows server')
     parser.add_argument('--runtime-root', type=Path, help='Fresh isolated SQLite / journals on an explicit SSD root; keep originals and copy a closed snapshot to artifacts')
     parser.add_argument('--player-exe', type=Path, default=Path(os.environ.get('VR_COMMAND_UNITY_PLAYER', ROOT / 'artifacts/desktop/VrCommand.exe')))
     parser.add_argument('--api-dll', type=Path, default=Path(os.environ.get('VR_COMMAND_API_DLL', ROOT / 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')))
     args = parser.parse_args()
+    if args.journal_trace and not args.server_trace: parser.error('--journal-trace requires --server-trace')
     if os.name != 'nt' or not args.player_exe.is_file() or not args.api_dll.is_file(): parser.error('Build the Windows player and API first')
     receipt = json.loads((args.player_exe.parent / 'build-receipt.json').read_text())
     if receipt['target'] != 'StandaloneWindows64' or receipt['sourceFingerprint'] != source_fingerprint():
@@ -58,6 +60,7 @@ def main():
     runtime_directory = directory if args.runtime_root is None else args.runtime_root.resolve() / directory.name
     if runtime_directory != directory: runtime_directory.mkdir(parents=True, exist_ok=False)
     server_trace_directory = runtime_directory / 'server-trace' if args.server_trace else None
+    journal_trace_directory = runtime_directory / 'journal-trace' if args.journal_trace else None
     observer_source = observer_fingerprint()
     keys = {role: secrets.token_hex(32) for role in ['Master', 'GameServer']}
     (directory / 'keys.json').write_text(json.dumps({'OperatorKeys': keys}), encoding='utf-8')
@@ -124,7 +127,8 @@ def main():
         raise RuntimeError('Timed out: ' + label)
 
     def stage(name, **extra):
-        value = {'stage': name, 'directory': str(directory), 'runtimeDirectory': str(runtime_directory), 'serverTraceDirectory': str(server_trace_directory) if server_trace_directory else None, 'interactive': args.interactive, 'observerFingerprint': observer_source, **extra}
+        value = {'stage': name, 'directory': str(directory), 'runtimeDirectory': str(runtime_directory), 'serverTraceDirectory': str(server_trace_directory) if server_trace_directory else None,
+                 'journalTraceDirectory': str(journal_trace_directory) if journal_trace_directory else None, 'interactive': args.interactive, 'observerFingerprint': observer_source, **extra}
         (directory / 'stage.json').write_text(json.dumps(value, indent=2), encoding='utf-8')
         (ROOT / 'artifacts/latest-unity-admission-path.txt').write_text(str(directory), encoding='utf-8')
         print(json.dumps(value), flush=True)
@@ -133,6 +137,7 @@ def main():
         path = directory / (name + '.json'); path.write_text(json.dumps(config), encoding='utf-8')
         flags = ['-screen-fullscreen', '0', '-screen-width', '1100', '-screen-height', '760'] if visible else ['-batchmode', '-nographics']
         if name == 'server' and server_trace_directory: flags += ['--vr-pose-trace', str(server_trace_directory)]
+        if name == 'server' and journal_trace_directory: flags += ['--vr-journal-trace', str(journal_trace_directory)]
         process = subprocess.Popen([str(args.player_exe.resolve()), *flags, '-logFile', str(directory / (name + '.log')), '--vr-config', str(path)],
                                    cwd=args.player_exe.resolve().parent, creationflags=subprocess.CREATE_NO_WINDOW)
         live[name] = process; all_processes.append(process); return process
@@ -249,7 +254,8 @@ def main():
                    'playerBuildReceipt': receipt, 'events': events + ['ended admission rejected without changing final statistics'],
                    'beforeReconnect': before, 'afterReconnect': after, 'world': world, 'statistics': stats, 'replayStatisticsMatch': True, 'activeSessions': 0,
                    'beginWitness': begin_witness.snapshot(), 'observerFingerprint': observer_source, 'runtimeDirectory': str(runtime_directory),
-                   'serverTraceDirectory': str(server_trace_directory) if server_trace_directory else None}
+                   'serverTraceDirectory': str(server_trace_directory) if server_trace_directory else None,
+                   'journalTraceDirectory': str(journal_trace_directory) if journal_trace_directory else None}
         (directory / 'summary.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
         stage('passed', checks=len(summary['events']), frames=world['acceptedSequence'])
     except BaseException as error:
@@ -262,19 +268,23 @@ def main():
         raise
     finally:
         cleanup_errors = []
-        if server_trace_directory and 'server' in live:
+        trace_directories = [p for p in [server_trace_directory, journal_trace_directory] if p]
+        if trace_directories and 'server' in live:
             try:
                 if live['server'].poll() is not None: raise RuntimeError('Server exited before trace finish')
-                (server_trace_directory / 'finish.request').touch(exist_ok=False)
+                for trace_directory in trace_directories: (trace_directory / 'finish.request').touch(exist_ok=False)
+            except Exception as error: cleanup_errors.append({'operation': 'trace finish request', 'errorType': type(error).__name__})
+        for trace_directory in trace_directories if 'server' in live else []:
+            try:
                 deadline = time.monotonic() + 5
                 while time.monotonic() < deadline:
                     try:
-                        trace = json.loads((server_trace_directory / 'report.json').read_text(encoding='utf-8'))
+                        trace = json.loads((trace_directory / 'report.json').read_text(encoding='utf-8'))
                         if not trace['complete'] or trace['truncated'] or trace.get('error'): raise RuntimeError('Incomplete server trace')
                         break
                     except (FileNotFoundError, json.JSONDecodeError): time.sleep(.05)
                 else: raise RuntimeError('Timed out finishing server trace')
-            except Exception as error: cleanup_errors.append({'operation': 'server trace finish', 'errorType': type(error).__name__})
+            except Exception as error: cleanup_errors.append({'operation': trace_directory.name + ' finish', 'errorType': type(error).__name__})
         if session:
             try: control('End')
             except (OSError, urllib.error.URLError, RuntimeError) as error: cleanup_errors.append({'operation': 'End', 'errorType': type(error).__name__})

@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-01 最後來源包為`windows-player-0.35.0-final.zip`（d30cc34c...），原311 runtime檔＋manifest／launcher source保持，真正新C解壓19項核對／拒絕通過；本輪一般原生8項363幀與SSD負載8項355幀是unpacked玩家回歸，未重跑完整GUI／封裝雙PC瀏覽器流程。非final檔名的0.35 ZIP屬f93候選，兩者皆保留，精確SHA／範圍見PROGRESS。
+
 新版啟動器加入[玩家入場狀態](PLAYER_CONNECTION_STATUS.md)：區分程式啟動、遊戲回報入場／拒絕／中斷、30秒未確認與最終戰績；Unity0.33／code40來源與原成功建置保持。新版ZIP、真正類別／原生背景驗證及GUI／跨機限制見PROGRESS。
 
 本輪另產生Unity0.33／code40同源Windows玩家包，啟動器邏輯不變；ZIP與解壓核對及新版DLL的一般原生回歸見PROGRESS。一般雙擊不開長診斷，診斷必須明確CLI選用；0.32舊包及其原始驗證保持，沒有將未完成的GUI安全性提示驗收改為成功。

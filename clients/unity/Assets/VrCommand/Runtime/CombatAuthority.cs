@@ -97,7 +97,7 @@ namespace VrCommand.Unity
             recordingStart = Time.realtimeSinceStartupAsDouble;
             var header = WorldRecordingHeader.Create(Guid.Parse(management.id), Outbox.StreamId, Outbox.Origin, management.roomIds, session.Props,
                 DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), assetSet: WorldAssetSets.PlayerBody, enemyPresentationVersion: EnemyPresentation.Version, weaponPresentationVersion: WeaponPresentation.Version, enemyFireVersion: EnemyFirePresentation.Version, playerFireVersion: PlayerFirePresentation.Version, combatAudioVersion: CombatAudioPresentation.Version, playerPresentationVersion:PlayerPresentation.Version, missionClockVersion: MissionClock.Version, missionDurationSeconds: management.mission.definition.durationSeconds);
-            Recording = WorldOutbox.Create(path, header, new UnityWorldCodec());
+            Recording = WorldOutbox.Create(path, header, new UnityWorldCodec(), NativeWorldJournalTrace.Current);
             if (!CaptureWorld(true)) throw new InvalidOperationException("Initial world frame could not be saved.");
         }
         private bool CaptureWorld(bool force = false)
