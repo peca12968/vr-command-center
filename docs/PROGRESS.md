@@ -2,6 +2,8 @@
 
 ## 2026-10-31：Windows可攜玩家包與繁中啟動器
 
+功能 [2459725](https://github.com/peca12968/vr-command-center/commit/245972594d9898cde672aab63c25228c5c5b59d9) 已推送main且遠端SHA一致。[本次CI run41189792380](https://github.com/peca12968/vr-command-center/actions/runs/41189792380)／check124504023904為failure、steps空；fresh annotation仍為近期帳戶付款失敗或支出上限，job未啟動。沒有雲端測試結果，未改帳務或手動重跑；本機證據與GUI待驗限制如下。
+
 前輪為實際進展；由乾淨`9c8cd02`接續新增[WINDOWS_PLAYER_PACKAGE](WINDOWS_PLAYER_PACKAGE.md)，補上外部PC不便手動輸入命令的部署缺口。玩家完整解壓後開啟Launch-Player.exe、選擇控制台下載的個別玩家檔並開始。封裝及獨立WinForms啟動器v1，**API/UI0.30、Unity0.32／code39／NGO29保持**，沒有修改Unity來源、重新Prepare或重跑144 Editor／同源雙平台；這些仍是前輪成功receipt，不當作本輪新測試。
 
 封裝器要求真正Windows receipt、原輸出路徑與目前source fingerprint，使用.NET Framework系統compiler產生x64啟動器，/warnaserror編譯成功。玩家端不需Python、Editor或.NET10 SDK，仍需Windows x64／Framework4.8與適用驅動。只收原runtime允許目錄與檔案，DoNotShip debug不收；root其他config不包入，runtime內未知JSON／key／journal／DB／log則拒絕。原receipt與Transport／模板／字型通知保留，不讀正式憑證或歷史任務。
