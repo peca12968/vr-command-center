@@ -20,7 +20,9 @@
 
 **遊戲保持Unity0.31.0／code38／NGO29**，本輪未修改Unity來源／wire或重建141 Editor／雙平台。重新計算來源仍 `213b9b04e02d506c73110ba6df23109fc5ce3f14bf8f233b9d803ef8dde4777c`，原Windows／Quest receipt與Scene／prefab ID保持；不能把前輪建置當本輪新的頭盔結果。API/UI一起部署0.29，原生工具gate同步；17個既有desktop Python、語法與293官方Transport單一修補核對亦通過。
 
-完整11項目標保持active，後續持續多玩家操作、完整場館與跨機流程；25端最大長文／並行操作、實體Quest／VIVE、MR、廠商硬體與25台仍待驗收。GitHub提交／fresh CI紀錄接續補充於此輪末。
+完整11項目標保持active，後續持續多玩家操作、完整場館與跨機流程；25端最大長文／並行操作、實體Quest／VIVE、MR、廠商硬體與25台仍待驗收。
+
+功能提交 `fbb9818e30318c50fb4a835a7b65df611150d1a1` 已推送main、遠端一致。[本功能CI run41184537724](https://github.com/peca12968/vr-command-center/actions/runs/41184537724)／check124488624265實際failure、steps空；fresh annotation明示付款失敗或支出上限，job未啟動，沒有雲端測試執行／通過。未更改帳務或手動重跑，本輪上述均為本機證據。
 
 ## 2026-10-31：繁中玩家任務簡報與原生輸入
 
