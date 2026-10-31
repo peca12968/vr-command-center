@@ -1,0 +1,70 @@
+"""Run the actual compiled Windows launcher's offline rejection checks.
+
+Uses only freshly created fixture configs; does not connect to a game server.
+Actual downloaded-ticket admission is checked separately by check-external-native.cjs.
+"""
+import argparse
+from datetime import datetime
+import importlib.util
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import uuid
+
+ROOT = Path(__file__).resolve().parents[1]
+spec = importlib.util.spec_from_file_location('player_package', ROOT / 'scripts/package-windows-player.py')
+package = importlib.util.module_from_spec(spec); spec.loader.exec_module(package)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__); parser.add_argument('package_directory', type=Path)
+    args = parser.parse_args(); folder = package.plain(args.package_directory)
+    if os.name != 'nt' or folder.name != package.TOP: parser.error('Use an extracted Windows package')
+    manifest = package.verify(folder)
+    if manifest['launcherSourceSha256'] != package.digest(ROOT / 'tools/WindowsPlayerLauncher/PlayerLauncher.cs'):
+        parser.error('Repackage the current launcher source before testing')
+    directory = ROOT / 'artifacts/player-package-checks' / (datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
+    directory.mkdir(parents=True, exist_ok=False); findings = []
+
+    def check(label, options, success=False, executable=None):
+        report = directory / ('report-' + str(len(findings)) + '.json')
+        result = subprocess.run([str(executable or folder / 'Launch-Player.exe'), *options, '--report', str(report)],
+                                cwd=directory, timeout=45, creationflags=subprocess.CREATE_NO_WINDOW)
+        value = json.loads(report.read_text(encoding='utf-8'))
+        expected = 'verified' if success else 'rejected'
+        if result.returncode != (0 if success else 1) or value.get('status') != expected or 'processId' in value:
+            raise AssertionError('Actual launcher result differed: ' + label)
+        findings.append(label); print('PASS:', label, flush=True)
+
+    check('Actual launcher verifies the full extracted runtime', ['--verify'], success=True)
+    base = {'role': 'Client', 'address': '127.0.0.1', 'port': 7777, 'joinTicket': 'fixture-not-a-ticket'}
+    cases = [('server identity', dict(base, role='Server')), ('host identity', dict(base, role='Host')),
+             ('management key', dict(base, gameServerKey='fixture-secret')), ('missing ticket', {k: v for k, v in base.items() if k != 'joinTicket'}),
+             ('empty ticket', dict(base, joinTicket='')), ('URL destination', dict(base, address='http://127.0.0.1')),
+             ('ambiguous IPv4', dict(base, address='127.1')), ('wildcard destination', dict(base, address='0.0.0.0')),
+             ('multicast destination', dict(base, address='224.0.0.1')), ('boolean port', dict(base, port=True)),
+             ('out-of-range port', dict(base, port=65536))]
+    for index, (label, config) in enumerate(cases):
+        file = directory / ('invalid ' + str(index) + ' 玩家 &.json'); file.write_text(json.dumps(config), encoding='utf-8')
+        check('Rejects ' + label + ' before spawning a player', ['--config', str(file), '--launch', '--headless'])
+    oversized = directory / 'oversized.json'; oversized.write_text('x' * 32769, encoding='utf-8')
+    check('Rejects oversized input without logging its contents', ['--config', str(oversized), '--launch', '--headless'])
+    # A fresh minimal copy is intentionally incomplete. Never alter the delivered package.
+    broken = directory / 'broken-package'; broken.mkdir(); shutil.copyfile(folder / 'Launch-Player.exe', broken / 'Launch-Player.exe')
+    shutil.copyfile(folder / 'player-package.json', broken / 'player-package.json')
+    check('Rejects missing runtime files', ['--verify'], executable=broken / 'Launch-Player.exe')
+    bad = json.loads(json.dumps(manifest)); bad['files'][0]['path'] = '../outside'
+    (broken / 'player-package.json').write_text(json.dumps(bad), encoding='utf-8')
+    check('Rejects a manifest path outside the package', ['--verify'], executable=broken / 'Launch-Player.exe')
+    for report in directory.glob('report-*.json'):
+        if 'fixture-secret' in report.read_text(encoding='utf-8') or 'fixture-not-a-ticket' in report.read_text(encoding='utf-8'):
+            raise AssertionError('Diagnostic report leaked fixture credentials')
+    result = {'complete': True, 'checks': len(findings), 'findings': findings, 'packageDirectory': str(folder),
+              'launcherSourceSha256': manifest['launcherSourceSha256'], 'scope': 'Actual Windows launcher preflight; no game admission, GUI input, network or headset verification'}
+    (directory / 'checks.json').write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
+    print(json.dumps({'complete': True, 'checks': len(findings), 'directory': str(directory)}))
+
+
+if __name__ == '__main__': main()

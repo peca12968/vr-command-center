@@ -1,5 +1,7 @@
 # 電腦練習場
 
+玩家端另可交付[Windows可攜玩家包](WINDOWS_PLAYER_PACKAGE.md)，解壓後用繁中啟動器選擇個別短票券連線檔；對應[外部玩家模式](EXTERNAL_CLIENTS.md)，不需要在玩家PC安裝Python或Editor。這不包含管理API／伺服器，實際跨機與GUI安全性提示處理仍另驗。
+
 最新API/UI0.30、Unity0.32.0／code39／NGO29，144真正EditMode及同源雙平台成功；工具API gate同步0.30。新增[外部玩家流程](EXTERNAL_CLIENTS.md)可只開server並用控制台下載檔另行開PC，原練習場仍使用local模式。下文版本數字為歷史。
 
 最新[玩家任務簡報](PLAYER_BRIEFING.md)可在遊戲內按B開啟／下一頁、Escape關閉、L查看字型授權。內容取自控制者保存並選定的任務，支援繁中及完整10000字分頁。閱讀不暫停全場，會抑制自己的射擊／換彈，關閉後須放開再按；仍可能受敵軍攻擊。Unity0.31.0／NGO29的全部遊戲程序須一起更新。

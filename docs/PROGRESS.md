@@ -1,5 +1,29 @@
 # 開發進度
 
+## 2026-10-31：Windows可攜玩家包與繁中啟動器
+
+前輪為實際進展；由乾淨`9c8cd02`接續新增[WINDOWS_PLAYER_PACKAGE](WINDOWS_PLAYER_PACKAGE.md)，補上外部PC不便手動輸入命令的部署缺口。玩家完整解壓後開啟Launch-Player.exe、選擇控制台下載的個別玩家檔並開始。封裝及獨立WinForms啟動器v1，**API/UI0.30、Unity0.32／code39／NGO29保持**，沒有修改Unity來源、重新Prepare或重跑144 Editor／同源雙平台；這些仍是前輪成功receipt，不當作本輪新測試。
+
+封裝器要求真正Windows receipt、原輸出路徑與目前source fingerprint，使用.NET Framework系統compiler產生x64啟動器，/warnaserror編譯成功。玩家端不需Python、Editor或.NET10 SDK，仍需Windows x64／Framework4.8與適用驅動。只收原runtime允許目錄與檔案，DoNotShip debug不收；root其他config不包入，runtime內未知JSON／key／journal／DB／log則拒絕。原receipt與Transport／模板／字型通知保留，不讀正式憑證或歷史任務。
+
+啟動器先限制四欄Client／canonical unicast IPv4／port1024–65535，再核對包內每檔長度與SHA；不顯示或寫出ticket內容，以不經shell的Process.Start及Windows參數引號啟動自己的Unity程式。格式檢查不驗票券簽章、效期或admission，仍由原GameServer驗證。診斷log／report只接受包外新路徑，一般雙擊不需要診斷參數；關閉啟動器不End或關閉已啟動遊戲。雜湊清單不是數位簽章、發行者信任或網路探測。
+
+最終`artifacts/player-packages/windows-player-v3.zip` **82,625,103 bytes**、SHA256 `f477e8ebe196738330013a2cefdae27fc366f617d925395b627cd6703f8807d9`；311個runtime／啟動器／通知檔，另1個manifest，共312檔。launcher source SHA `127a39d1d11a856070e6676ab566c4f4862e8e5ac168e2ed4d9a4a9b4660ab45`，原遊戲source fingerprint仍`4f1173e9eac5aa82e0b37fa58ba73afa64c392b750218b790c85c08638c3b852`，Scene／prefab ID及原receipt保持。真正解壓至C自有`portable 玩家 & v3/VRCommand-Player`，ZIP checksum／全部312檔與解壓檔逐一SHA相同，執行後再核對一致。
+
+**15項真正編譯啟動器檢查**於`player-package-checks/20261031-173359-b97c5a46`通過：完整包、拒Server／Host／管理key／缺或空ticket、URL／縮寫／wildcard／multicast／bool或超界port、過大輸入、缺runtime及越界manifest，不產生玩家PID、不回顯fixture secret。另7項Python中**6通過、1 Windows symlink權限不足明確skip**，不稱7項全過；涵蓋receipt、DoNotShip／root config、runtime私有資料拒絕、hash／缺檔、路徑與大小寫重複。Python語法及Node driver語法通過，CI加入跨平台unit與語法；沒有改後端或控制台來源，不重述前輪717／459／47／67／234為本輪重跑。
+
+最終背景場`desktop-venue/20261031-173702-c7be6c84` **9項完整通過且檢查器exit0**：原真正API／控制台UI建任務與名冊、來源公布及實際loopback UDP，兩份實際UI下載檔含空白／繁中／&的路徑，分別透過解壓包的真Launch-Player.exe開兩個Unity client，正常原票券／admission入場；Begin／Pause／End與Simulation來源保持。78世界幀精確seal、through8／finalStream0，兩位各自己的current admission；七統計欄位逐一等於sealed ledger，耗彈／命中／擊殺／中彈／損耗0、健康100。未注入姿態、射擊或統計。
+
+最終tool fingerprint `8e4ddbea48c9c3ff9d1787fbbbca42c4fc77b2a003b964387110870894c2b23f`與當前helper／venue／driver／packager／launcher來源重算相同。native-cleanup兩份nativeGone=true、errors空；測試主動關閉自己Unity，兩個launcher轉傳exit1是測試關閉結果，不是遊戲自然exit0。helper真正handle exit0、36秒結果保留與雙seal後完成，allAcknowledged／headsets仍null，不能用本測試知道的兩個PC改成全體送達或設備證明。Chromium為SwiftShader、兩端headless，沒有本輪GPU／PCM／原生戰鬥輸入或跨機證據。
+
+未完成輪次全部保留：`172855-7fb29031`只過前三步，測試spawn誤用windowsHide將互動啟動器藏起；確認自有parent／child後停止自己的driver與launcher、End並保存空戰鬥世界，非通過。`173050-78ddc807`在v2真正繁中GUI顯示下載檔，以computer-use實際按開始並成功雙PC入場、416幀及九項工作流程核對，但cleanup把signalCode=SIGTERM／exitCode=null誤當仍活著，15秒後失敗。原先過早寫出的checks.json complete保留，**不能用它聲稱整場成功**；自己第二位native／driver經確認後停止、helper精確封存且exit0。新driver以exitCode或signalCode判terminal、逐一cleanup／關browser／End，先寫workflowComplete且cleanupPending的檔案，全部cleanup成功才寫最終checks.json；最終背景場已驗。
+
+GUI檢視亦發現WinForms檔名Label將&當助記符，v3設定UseMnemonic=false並重新封裝。`173413-5efdc8c1`的最終v3互動重跑因Windows防火牆提示遮住啟動器，已請使用者自行決定關閉，未代按安全性提示。等待240秒後檢查器按原期限失敗，沒有啟動該玩家、沒有complete checks；自己的GUI以SIGTERM收尾、native-cleanup成功、helper也精確封存及exit0。GUI選檔dialog曾開啟，但computer-use對焦點／set_value回報不一致，未把未完成輸入稱成功；最後完整選檔互動及安全性提示後回歸仍待。v2的按鈕成功不替代最終v3完整GUI驗收。
+
+`player-package-validation.json`用raw bytes核對本輪**4 runtime／56檔**C原件與F snapshot一致，前**17 runtime／387檔**未變，既有C API／三工具159檔與前輪SHA相同；保存SQLite完全不開連線。全部writer停後由helper一次snapshot、保留C原件，四個helper真正handle均exit0，cleanup errors／remainingTrackedChildren空；未改5080舊API、登入／授權／OS或防火牆設定。原件、未完成與成功紀錄都保留，DB／journal／ticket／binary／ZIP不提交Git。source／Unity binary原件仍F，本輪玩家使用C解壓副本、runtime亦C SSD，不稱F USB效能或另一台PC成功。
+
+完整11項保持active，仍優先電腦端。接續多玩家持續操作、實際場館／跨機部署，以及使用者處理提示後的GUI選檔／重連流程；Quest／VIVE／MR、廠商硬體及25台分別驗收。
+
 ## 2026-10-31：來源連線公告、只開伺服器與下載檔玩家入場
 
 功能提交 [b699ccd](https://github.com/peca12968/vr-command-center/commit/b699ccdb5009d9d5ad46f9b3d50320335b2e07e7) 已推送main並核對遠端相同。[本次CI run41188116962](https://github.com/peca12968/vr-command-center/actions/runs/41188116962)／check124499094625為failure、steps空；fresh annotation確認因近期帳戶付款失敗或支出上限，job未啟動，沒有雲端測試結果。未更改帳務或手動重跑，本機各項成功證據如下；完整目標仍active。

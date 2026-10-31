@@ -17,15 +17,24 @@ async function main() {
   assert.equal(path.basename(readyPath), 'ready.json'); assert.equal(path.dirname(directory), path.join(root, 'artifacts/desktop-venue'));
   assert.match(path.basename(directory), /^\d{8}-\d{6}-[a-f0-9]{8}$/);
   const ready = JSON.parse(await fs.readFile(readyPath, 'utf8')); const base = new URL(ready.baseUrl);
+  const packageRoot = process.argv[3] ? path.resolve(process.argv[3]) : null;
+  const interactivePackage = !!packageRoot && process.argv.includes('--package-interactive');
+  const packageManifest = packageRoot ? JSON.parse(await fs.readFile(path.join(packageRoot, 'player-package.json'), 'utf8')) : null;
+  if (packageRoot) {
+    assert.equal(path.basename(packageRoot), 'VRCommand-Player');
+    assert.equal(packageManifest.version, 1); assert.equal(packageManifest.platform, 'Windows-x64');
+    assert.equal(packageManifest.build.sourceFingerprint, ready.playerBuildReceipt.sourceFingerprint);
+    assert.equal(packageManifest.launcherSourceSha256, createHash('sha256').update(await fs.readFile(path.join(root, 'tools/WindowsPlayerLauncher/PlayerLauncher.cs'))).digest('hex'));
+  }
   assert.equal(ready.source, 'Simulation'); assert.equal(ready.clientMode, 'External'); assert.equal(ready.headsets, null);
   assert.equal(base.hostname, '127.0.0.1'); assert.equal(base.protocol, 'http:'); assert.notEqual(base.port, '5080');
   assert.ok(!base.username && !base.password && !base.search && !base.hash && base.pathname === '/');
   const tokens = JSON.parse(await fs.readFile(path.join(directory, 'keys.json'), 'utf8')).OperatorKeys;
-  const children = [], findings = [], errors = []; let checks = 0, page, browser;
+  const children = [], findings = [], errors = []; let checks = 0, page, browser, outcome;
   const evidence = path.join(directory, 'external-ui'); await fs.mkdir(evidence, { recursive: false });
   async function fingerprint() {
     const hash = createHash('sha256');
-    for (const file of ['scripts/start-desktop-control.py', 'scripts/start-desktop-venue.py', 'tests/browser/check-external-native.cjs']) { hash.update(file); hash.update(await fs.readFile(path.join(root, file))); }
+    for (const file of ['scripts/start-desktop-control.py', 'scripts/start-desktop-venue.py', 'tests/browser/check-external-native.cjs', ...(packageRoot ? ['scripts/package-windows-player.py', 'tools/WindowsPlayerLauncher/PlayerLauncher.cs'] : [])]) { hash.update(file); hash.update(await fs.readFile(path.join(root, file))); }
     return hash.digest('hex');
   }
   const originalTool = await fingerprint();
@@ -69,15 +78,26 @@ async function main() {
     for (let index = 0; index < 2; index++) {
       const name = 'External PC ' + (index + 1), row = page.locator('#roster tr').filter({ hasText: name });
       const [download] = await Promise.all([page.waitForEvent('download'), row.getByRole('button', { name: '下載連線檔' }).click()]);
-      const file = path.join(evidence, 'player-' + (index + 1) + '.json'); await download.saveAs(file);
+      const file = path.join(evidence, packageRoot ? 'player ' + (index + 1) + ' 玩家 &.json' : 'player-' + (index + 1) + '.json'); await download.saveAs(file);
       const config = JSON.parse(await fs.readFile(file, 'utf8'));
       assert.deepEqual(Object.keys(config).sort(), ['address', 'joinTicket', 'port', 'role']);
       assert.ok(!Object.values(tokens).some(token => JSON.stringify(config).includes(token))); assert.equal(config.port, endpoint.port); assert.equal(config.address, endpoint.address);
       const claims = await api('/player-tickets/validate', 'GameServer', 'POST', { sessionId: id, ticket: config.joinTicket, protocolVersion: 2 });
       const player = session.players.find(player => player.name === name); assert.equal(claims.playerId, player.id); assert.equal(claims.admissionId, player.admissionId);
-      const log = path.join(evidence, 'player-' + (index + 1) + '.log');
-      const child = spawn(ready.playerBuildReceipt.outputPath, ['-batchmode', '-nographics', '-job-worker-count', '2', '-logFile', log, '--vr-config', file], { cwd: path.dirname(ready.playerBuildReceipt.outputPath), windowsHide: true, stdio: 'ignore' });
-      child.on('error', error => { errors.push(error.message); }); children.push({ child, log, player }); configs.push({ role: config.role, address: config.address, port: config.port, playerId: player.id, admissionId: player.admissionId });
+      const log = path.join(evidence, 'player ' + (index + 1) + ' native.log'), report = path.join(evidence, 'launcher-' + (index + 1) + '.json');
+      const executable = packageRoot ? path.join(packageRoot, 'Launch-Player.exe') : ready.playerBuildReceipt.outputPath;
+      const gui = interactivePackage && index === 0;
+      const args = packageRoot ? ['--config', file, ...gui ? [] : ['--launch', '--headless', '--wait'], '--log', log, '--report', report]
+        : ['-batchmode', '-nographics', '-job-worker-count', '2', '-logFile', log, '--vr-config', file];
+      const child = spawn(executable, args, { cwd: path.dirname(executable), windowsHide: !gui, stdio: 'ignore' });
+      child.on('error', error => { errors.push(error.message); }); const owned = { child, log, player, gui }; children.push(owned);
+      if (packageRoot) {
+        if (gui) console.log('PACKAGED_LAUNCHER_UI_READY ' + JSON.stringify({ processId: child.pid, configPath: file }));
+        const started = await until(async () => { if (child.exitCode !== null) throw Error('Packaged launcher exited before starting a player'); const value = JSON.parse(await fs.readFile(report, 'utf8').catch(() => '{}')); if (value.status === 'rejected') throw Error('Packaged launcher rejected the real downloaded config'); return value.status === 'started' && value; }, 'packaged player child', gui ? 240 : 35);
+        assert.ok(Number.isSafeInteger(started.processId) && started.processId > 0 && started.processId !== process.pid && started.processId !== child.pid);
+        owned.nativeId = started.processId;
+      }
+      configs.push({ role: config.role, address: config.address, port: config.port, playerId: player.id, admissionId: player.admissionId });
     }
     await page.waitForFunction(() => document.querySelectorAll('#roster .ready-player').length === 2);
     check(true, 'Two separately owned real Unity clients join using only the actual UI-downloaded short-ticket configs');
@@ -108,17 +128,32 @@ async function main() {
     check(await page.locator('#apply-connection-endpoint').isDisabled() && await page.locator('#roster .ready-player').count() === 0, 'Ended endpoint remains historical metadata and cannot restore player participation');
     check(errors.length === 0 && await page.evaluate(() => !localStorage.length && !sessionStorage.length && !document.cookie), 'External workflow has no script errors or persisted operator credentials');
     assert.equal(await fingerprint(), originalTool);
-    await fs.writeFile(path.join(evidence, 'checks.json'), JSON.stringify({ complete: true, toolFingerprint: originalTool, checks, findings, configs, results, world, stats, scope: 'Two same-host separately launched PC clients / loopback / Chromium SwiftShader; zero headsets, not cross-machine' }, null, 2));
+    if (packageRoot) check(children.every(row => row.nativeId) && packageManifest.build.sourceFingerprint === ready.playerBuildReceipt.sourceFingerprint, 'Both players run from the extracted portable package via its real launcher, with Unicode / spaces / ampersand config paths');
+    outcome = { complete: true, toolFingerprint: originalTool, checks, findings, configs, results, world, stats, packageRoot, packageManifest, scope: 'Two same-host separately launched PC clients / loopback / Chromium SwiftShader; zero headsets, not cross-machine' };
+    await fs.writeFile(path.join(evidence, 'workflow-checks.json'), JSON.stringify({ ...outcome, complete: false, workflowComplete: true, cleanupPending: true }, null, 2));
   } catch (error) {
     if (page && !page.isClosed()) await page.screenshot({ path: path.join(evidence, 'failure.png'), fullPage: true }).catch(() => {});
     throw error;
   } finally {
-    for (const { child } of children) {
-      if (child.exitCode === null) { const exited = new Promise(resolve => child.once('exit', resolve)); child.kill(); await exited; }
+    const cleanupErrors = [], stopped = [];
+    for (const { child, nativeId, gui } of children) {
+      try {
+      const terminal = () => child.exitCode !== null || child.signalCode !== null;
+      if (nativeId) {
+        try { process.kill(nativeId); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+        await until(() => { try { process.kill(nativeId, 0); return false; } catch (error) { if (error.code === 'ESRCH') return true; throw error; } }, 'owned packaged native child exits', 15);
+        if (gui && !terminal()) child.kill();
+        await until(terminal, 'owned launcher exits', 15);
+      } else if (!terminal()) { const exited = new Promise(resolve => child.once('exit', resolve)); child.kill(); await exited; }
+      stopped.push({ processId: child.pid, nativeId, exitCode: child.exitCode, signal: child.signalCode, nativeGone: nativeId ? true : null });
+      } catch (error) { cleanupErrors.push(error.message); }
     }
-    if (browser) await browser.close();
-    await fs.writeFile(path.join(directory, 'end.request'), 'End this owned helper after its external result grace\n', { flag: 'wx' }).catch(error => { if (error.code !== 'EEXIST') throw error; });
+    try { if (browser) await browser.close(); } catch (error) { cleanupErrors.push(error.message); }
+    await fs.writeFile(path.join(directory, 'end.request'), 'End this owned helper after its external result grace\n', { flag: 'wx' }).catch(error => { if (error.code !== 'EEXIST') cleanupErrors.push(error.message); });
+    await fs.writeFile(path.join(evidence, 'native-cleanup.json'), JSON.stringify({ complete: cleanupErrors.length === 0, stopped, errors: cleanupErrors }, null, 2));
+    if (cleanupErrors.length) throw Error('Owned child cleanup failed: ' + cleanupErrors.join('; '));
   }
+  await fs.writeFile(path.join(evidence, 'checks.json'), JSON.stringify(outcome, null, 2));
   console.log('PASS: ' + checks + ' actual external-player workflow checks');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

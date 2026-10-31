@@ -1,5 +1,7 @@
 # VR Command Center
 
+新增 [Windows可攜玩家包](docs/WINDOWS_PLAYER_PACKAGE.md)：完整解壓後，以繁中啟動器選擇控制台下載的玩家連線檔即可開啟遊戲；不需Unity Editor或Python。最終包的真正雙PC背景入場／End／戰績及程序收尾9項、原生拒絕檢查15項通過；互動GUI目前受Windows安全性提示阻擋，完整證據見PROGRESS。此為同機Simulation，非跨機或頭盔驗收。
+
 五房間、總計 25 人的 VR/MR 軍事戰鬥遊戲系統，目標支援 VIVE XR 與 Meta Quest 3。
 
 依 2026-10-29 的使用者指示，**優先開發 Meta Quest 3**，暫以 Android 獨立執行為工作假設；VIVE 延後接入，共用架構與原始雙平台目標保留。

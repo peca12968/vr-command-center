@@ -1,5 +1,7 @@
 # 需求與驗收追蹤
 
+Windows部署新增[可攜玩家包](WINDOWS_PLAYER_PACKAGE.md)：以原成功建置的runtime及獨立繁中選檔啟動器交付，最終解壓包雙PC背景／戰績／cleanup9項與原生拒絕15項通過；不要求玩家安裝Editor／Python。這是原第1／2項操作途徑的進展，不完成跨機、GUI安全性提示、頭盔或25台驗收；API／遊戲版本及原Unity建置證據保持。
+
 基準日期：2026-10-29。完成定義須同時有程式、操作途徑與符合範圍的驗證證據。以下「規劃」項目皆未完成。
 
 真正 Editor 已完成 UPM／ILPP／匯入、144 項 EditMode、v0.32.0同源Windows及Quest APK；Windows 獨立／五房 Linked Simulation、票券撤銷及真正視窗斷線後保留位置／健康／彈藥均通過，各輪範圍以PROGRESS為準。使用者目前沒有頭盔，先繼續電腦端；五房原生隔離及之後新開 Linked 亦已通過，條件與限制見 [DESKTOP_VENUE](DESKTOP_VENUE.md)；這不完成以下整體驗收。最新證據見 [RECONNECT.md](RECONNECT.md)／PROGRESS，首輪原生範圍見 [NATIVE_VALIDATION.md](NATIVE_VALIDATION.md)，較窄的診斷另見 [UNITY_SDK_CHECK.md](UNITY_SDK_CHECK.md)。
