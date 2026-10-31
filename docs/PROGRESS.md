@@ -2,6 +2,8 @@
 
 ## 2026-10-31：Windows玩家的入場／拒絕／未確認與戰績狀態
 
+功能 [ddfc617](https://github.com/peca12968/vr-command-center/commit/ddfc6179dbe78da46683248b0ae86cda807fbde7) 已推送main、遠端SHA一致。[本次CI run41200268833](https://github.com/peca12968/vr-command-center/actions/runs/41200268833)／check124534526644為failure、steps空；fresh annotation為近期付款失敗或支出上限，job未啟動，沒有雲端測試結果。未改帳務或手動重跑，本機真正Framework／原生結果如下。
+
 前輪五房長測為實際進展；從乾淨`aa4b866`接續[玩家連線狀態](PLAYER_CONNECTION_STATUS.md)。現有external地址公告及四欄連線檔已可分開啟動玩家，這輪補上啟動器只顯示「程式啟動」卻無法辨別真正入場的操作缺口。**API/UI0.30、Unity0.33.0／code40／NGO29保持**，不改後端、Unity、Tracked、票券、規則或世界格式；沒有新Editor／雙平台重建，原152真正EditMode與成功receipt保持。目前重算及Windows／Quest receipt仍`c98f1e1d9b6857de6fc17ea3c9d585ba41881ac528314f5e7fc0073ee5958b1f`，原Scene／prefab ID不變。
 
 原生.NET Framework啟動器新增同類別的有界日誌監看，顯示Waiting／Connected／Rejected／Disconnected／Unconfirmed／Final；Connected必須由自己這次遊戲的精確marker回報，不從程序啟動、ping或TCP推成入場。至少30秒未確認只請人核對IPv4／UDP埠／版本，不猜防火牆或其他網路根因。Final不被正常結束斷線覆蓋，新Connected才開始新狀態；記錄不可讀時明示僅是先前回報，控制台readiness仍是另一個權威快照。
