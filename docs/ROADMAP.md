@@ -20,6 +20,8 @@
 
 ## 下一個開發順序
 
+新增[End期間封包故障](DESKTOP_END_NETWORK.md)：現有0.29.0在已approved但client未完成連線log的延遲仍送達正確結果，沒有據假設改遊戲端；另驗pending後全下行loss與>64-byte篩選loss的connection release／應用期限，三場各6項／37幀完整回放、45 Python及原件副本SHA一致。這是兩位同機Simulation，仍需封存中斷／server crash、更多時序、長任務與跨機，完整11項未縮減。
+
 最新[動態操作25端對照](DESKTOP_ACTIVE.md)補入一位PC實際W／Space／R／Space、24端接收與兩發命中／一擊殺／100%。首fan-out場130快照成功卻有65筆失效Running列，新增全程條件後保留反例；分批場9項、130快照／19916 Running列、966幀回放與CSV通過，無probe權威對照9項亦通過。這不是根因證明或25位同時操作；後續擴大多位操作、更多場景與長任務，並繼續釐清原姿態／主迴圈停頓、診斷與GUI觀察的擾動。
 
 最新[接收端25程序檢查](DESKTOP_REPLICATION.md)已補每client／server五檢查點及穩定新tick觀察，原driver128重現Running／Paused共112行queue錯誤；0.28.3 server1024／client128後，兩模式各25 client／60秒、22項、56份完整報告與280個同步快照皆通過，日誌0錯誤；無探針25人對照8項亦0。114真正EditMode、同源雙平台及8項原生入場／重連通過，534／14檔SSD與F SHA一致。下一步用實際移動／射擊、更多場景與長任務驗證25端同步，再推進跨機；不把本地tick觀察間隔或來源新鮮度當網路延遲，原偶發主迴圈停頓仍待，完整容量／頭盔驗收尚未完成。

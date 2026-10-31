@@ -16,6 +16,8 @@
 
 新增[玩家任務結束戰績](docs/DESKTOP_DEBRIEF.md)：combat及world都精確seal後，兩位PC玩家各自收到自己的最終數據，ack斷線後畫面保留；移除者與Ended票券收不到結果，Host等peer結束才shutdown。一般啟動器真正Space／封存／保留／Reconnect清除及新場取代舊結果已觀察；125 EditMode、36 Python、30練習場、49 UI native及8項原生票券重連回歸通過，零事件JSON反例已修正。來源仍Simulation，完整證據及限制見PROGRESS。
 
+新增[End期間的網路故障回歸](docs/DESKTOP_END_NETWORK.md)：兩位真正PC client的已批准入場延遲、pending後全部下行loss，以及只丟較大datagram三場各6項、各37幀完整回放通過；正常peer仍取得自己的結果，故障者沒有誤確認final，Ended新票券拒絕。既有Unity0.29.0／NGO27正確處理選定情境，本輪不改遊戲協定或重建APK；45 Python通過，同機Simulation，不是跨機／25台驗收。
+
 較窄的 [managed SDK 檢查](docs/UNITY_SDK_CHECK.md) 仍可補充 API／直接參考診斷，其本身不執行 Unity 或產出播放器；目前較強的真正 Editor、109 項測試及 binary 結果以 PROGRESS 為準。
 
 新增 [玩家軍事人物](docs/PLAYER_BODY.md)：原創404面頭盔／背心／腿靴與桌面持槍雙臂，伺服器接受移動產生保存步態，PC遊戲、觀戰與回放共用；Tracked不合成握持雙臂，舊錄製保留原外觀。真正雙PC的W／Space／R、六張observer GPU、暫停及封存已核對；629核心、403 HTTP、43世界、58 Node／201 Chromium及47項UI／native通過。完整追蹤人物與動畫仍待。

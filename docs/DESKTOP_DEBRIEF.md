@@ -2,6 +2,8 @@
 
 Unity 0.29.0／Android code36／NGO27；API／UI 0.27、驗票2、rules0.8.0及歷史錄製格式不變。所有遊戲程序須一起更新，Prepare 原位保存場景／prefab識別。
 
+結束時的已批准入場延遲、pending後下行丟包與應用期限，另見[DESKTOP_END_NETWORK](DESKTOP_END_NETWORK.md)的真正PC故障檢查；既有版本在選定情境正確，沒有為此更改wire或重新建置。
+
 End 後，原本仍在名冊且 admission／房間／座位相同的現有連線先解除遊戲綁定。畫面顯示等待封存，伺服器等 combat journal 及 world journal 都收到精確 seal，再以自己的 GameServer 身分讀取 statistics，僅向各自連線可靠傳送該玩家戰績。玩家端沒有新增 API／主控台憑證，不能查其他人的結果。
 
 最終畫面包含彈藥數、命中數、擊殺、中彈、損耗、健康及兩位小數命中率，並標示 Simulation／GameServer。session、player、admission、stream及兩個最終序號固定；ledger序號不得倒退。玩家確認接收後伺服器斷線，畫面保留至重新連線或關閉程式。結果不是新的本機永久檔案；重新開啟後由控制者查伺服器既有報表／回放。

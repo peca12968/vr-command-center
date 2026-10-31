@@ -1,5 +1,31 @@
 # 開發進度
 
+## 2026-10-31：End入場延遲、結果丟包與真正期限回歸
+
+前輪交付及推送屬實際進展；本輪從乾淨`34ee9f7`接續驗證尚缺的結束競態。新增[DESKTOP_END_NETWORK](DESKTOP_END_NETWORK.md)／`check-desktop-end-race.py`及只供本輪自有client的`udp_gate.py`。最初推測剛approved的玩家可能因client尚未就緒而丟失結果，但第一個真正延遲實驗實際收到正確結果，**不以未重現的假設修改遊戲端／NGO協定**。
+
+遊戲仍Unity0.29.0／code36／NGO27、API UI0.27，source fingerprint仍`a97b40a2836de7a8c5e8e64596b37feac3d545438a4538df4d403f5d73c4e9d3`，Windows／Quest receipt與原ID不變；125 EditMode及同源雙平台是前輪成功證據，**本輪未重建或重跑Unity／APK**，不是新的頭盔證據。rules0.8.0／資料格式／原資源與所有歷史保持。
+
+兩個真正無圖形Windows client，一位直連、一位只經自己的loopback gate；server及API／世界發布不經gate。合法名冊先加入兩位再Begin，第一位先由真正AI造成中彈2／損耗40／健康60，第二位健康100，因此不能用另一人的結果混過。只延遲或丟棄原始UDP datagram，不注入RPC／姿態／武器／命中，不讀封包內容、不寫PCAP或payload。只綁127.0.0.1及自有server port，固定一個client endpoint，其他sender丟棄；不改MTU／0.5或1.5秒門檻／安全設定。
+
+最終三場同一tool fingerprint `78ebb1f8ca3b7d580b0be3e6aba346a3501d240f19d2b3ec0d6daa94293a1bf8`，每場**6項**通過：入場及故障時機、正常peer自己的雙seal結果、延遲者結果或阻斷期間無final、Ended拒絕且ledger不變、combat stream尾界、整段回放連續且末packet／statistics完全相同。`complete=true`僅在gate停止及自有writer全停／snapshot成功後寫入，工具來源途中變動或自動queue／hold上限觸發都不能passed。
+
+| desktop-end-race／20261031場次 | 模式 | 實際觀察 | 完整封存回放 |
+|---|---|---|---|
+| 131131-86bb1cda | join-delay | server已approved、client無CONNECTED log時End；暫存320包、188265 bytes，hold1.969秒，seal後釋放；兩人各自正確結果及ack | 37幀、末packet／statistics逐值相同 |
+| 131140-00678de7 | result-drop | client先接受pending，再丟5033包下行；hold29.860秒，從End要求起30.578秒觀察connectionReleased，阻斷期間無final，解除後也無final | 37幀、同上；正常peer結果正確 |
+| 131218-71180c22 | result-large-drop | pending後丟大於64 bytes的436包，33個較小datagram通過；hold30.218秒，End要求起30.688秒觀察DEBRIEF_TIMEOUT，阻斷及解除後無final | 37幀、同上；正常peer結果正確 |
+
+64 bytes只按長度篩選，沒有把所有小包稱為keepalive。connectionReleased不指定未量測的傳輸根因，與明確的應用層DEBRIEF_TIMEOUT分開；觀察時間含HTTP及輪詢，不是修改後的遊戲期限、每包延遲、RTT或FPS。兩個loss場都先真正CONNECTED／接受pending，才啟用故障。延遲入場者End世界的connected=false／rig=None，未偽造參戰或Tracked，也不能從無CONNECTED log推定avatar尚未spawn；另一位為Simulated。新的Ended連線使用原票券仍被拒且收不到debrief；離線稽核確認拒絕時票券尚未過期，非拿過期冒充Ended拒絕。
+
+所有三場world complete／pending=false／活動0、最終stream／序號與ledger一致；完整SSE回放從1走至37，封存不因client丟包變動。原生沒有新GPU／PCM／UI觀察，只有headless日誌與授權API／回放。**45 Python**為9項真實kernel UDP／有界／順序／單client／下行loss／長度篩選測試，加36項既有desktop規則，非45次原生試跑；語法與293官方Transport／單一修補核對亦過。CI新增這9項與語法步驟，沒有改或重跑後端／全瀏覽器／25端容量。
+
+失敗與舊scope均保留：`125615-c80e9bcc`檢查器誤在Running加名冊被HTTP409拒，改為合法Preparing加入、Running才連線，未放寬政策；`125634-01b64006`原expect-missing假設失敗，結果其實正確，未宣稱遊戲bug；`130124-e1e5386a`過早數ack，把client先記final、server稍後才ack當失敗，改為獨立有界等待；`130402-fb6fc5e9`硬等應用期限，但實際先connection release，舊failed保留，現將兩個結果分型。`130355／130720／130756`先前成功只屬舊scope，未含整段replay／tool fingerprint，不當作最終三場。UDP工具初期drop位置及非原子計數假設由unit測試先擋下，修正後9項全過，未修改Unity Transport來源。
+
+隔離資料明確C SSD、source／binary在F；全停writer才複製回F，未移動原件。`end-network-validation.json`覆核本輪**10個runtime／140檔**原件與副本SHA逐檔相同、cleanup乾淨，前輪20個runtime的保存manifest亦逐一未變。只讀JSON／log／原始bytes，未開SQLite。正式5080仍0.16歷史服務；Unity serve／登入／安全設定未動，沒有憑證／payload／binary提交。
+
+限制：這只驗兩個同機Windows client、選定的一次延遲與兩種loss，不是所有時序／重排、25位同時操作、跨機、頭盔／MR或完整故障／server crash驗收；封存連線中斷及長任務仍待。完整11項長期目標保持active，原主迴圈偶發停頓亦未證明修復。
+
 ## 2026-10-31：玩家End戰績、零事件修正與一般PC入口
 
 新增[DESKTOP_DEBRIEF](DESKTOP_DEBRIEF.md)：Unity **0.29.0／code36／NGO27**，API／UI仍0.27，驗票2／rules0.8.0／歷史錄製與素材格式不變。End立即解除遊戲binding，只有原名冊player＋admission＋room＋seat相同的既有連線可等待自己的結果。combat及world journal都精確seal後，GameServer以原有認證statistics路由讀ledger，可靠target RPC只傳該玩家，含來源／session／admission／stream／最終序號；ack後斷線。Host須等peer結束才處理自己的ack／shutdown，不讓主持人先切掉其他結果。移除／換席仍立即撤銷，Ended不接受新入場，玩家不持有管理key。
