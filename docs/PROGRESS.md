@@ -1,5 +1,34 @@
 # 開發進度
 
+## 2026-10-31：管理與發布分通道失聯、原生計時恢復
+
+前輪交付屬實際進展；從乾淨`0d39885`接續驗證 [CLOCK_RECOVERY](CLOCK_RECOVERY.md)。新增 `venue_http_gate.py` 及 `check-desktop-clock-faults.py`，本輪只改Python工具／測試／CI與文件。**遊戲仍API／UI0.28、Unity0.30.0／code37／NGO28**，原source fingerprint `d43085f4e6b755649b5da36b0885d6b690d7042f7ce4a871a947bc2e15ede53f`、Scene／prefab ID及同源Windows／Quest receipt保留。131真正EditMode、680規則／446 HTTP／43串流／60 Node／223 Chromium為前輪成功證據，**本輪未重建或重跑這些套件**，不當作新的頭盔或瀏覽器結果。
+
+只把自己新建的Unity server指向本機代理；client NGO UDP不經代理，操作員觀察及命令直接到自己新建的API。先只拒絕同session管理GET，combat／world仍可發布；真正source保存suspended=true／Paused，原生server複本Ready=false／tick不變，而API管理狀態仍Running。這不是操作員Pause事件。恢復管理後原政策／同一場次接續，沒有重設倒數。
+
+再於期限前約5秒關閉自己world tunnel並拒絕publish upgrade，保留管理與combat HTTP。真正server及client的既有NativeReplicationProbe觀察local tick恰好期限、Ready=false且phase仍Running；API接受序號固定在期限前、管理仍Running。本地到期待接受再維持6.5秒，證明沒有拿未發布時間直接End。恢復publication後原publisher重連同源補送，API才保存唯一mission-clock End；雙seal、pending=false、自己的原入場final JSON／所有統計及序號均一致，client ack後斷線。
+
+同一tool fingerprint `9a842da5ebd55a0cff0d8ca839fda590e4422420206c06707d25e4308a0895d9`，兩個全新獨立runtime、每場一server／一headless client、Simulation頭手，各**8項**成功：
+
+| desktop-clock-faults／20261031場次 | 秒數／凍結tick | 管理失聯總秒／停表觀察秒 | 發布失聯總秒／本地到期待接受秒 | API未接受邊界tick | 完整回放 |
+|---|---|---|---|---|---|
+| 142318-373dc579 | 60／1200 | 6.141／5.766，tick104固定 | 12.281／6.531 | 1100 | 726幀、60個suspended、85個到期Running |
+| 142458-06088e37 | 180／3600 | 6.094／5.750，tick105固定 | 12.297／6.547 | 3502 | 1851幀、59個suspended、87個到期Running |
+
+完整SSE從1走至最後，tick不倒退／不超過期限，末packet與所有statistics等於精確seal；包含暫停幀與到期仍Running等待End幀，不把到期本身冒充已封存。兩場各一次內部End、原stream／設定序號／原admission一致，正常結果的來源為Simulation；combat ledger原本零事件仍保持原null來源，不補造事件。時間含HTTP、取樣及輪詢，不是RTT、FPS或新的期限；未量測完整0.5／1.5秒連續性，不宣稱修復原主迴圈停頓。
+
+每場各一個既有WS被關閉，分別12／12次管理GET回503、23／23次publication upgrade被拒，均2次成功WS連線（初次與恢復）。代理route／handler／capacity error全0、沒有自動block／lifetime上限、收尾active tunnel0。只有同一session所需路由，最多8連線、HTTP1MiB／response2MiB／opaque WS每塊64KiB；故障20秒／代理240秒固定上限。只在記憶體轉送原認證／body與不解析的WS bytes，不保存payload／票券／key，不注入姿態／射擊／RPC，不動OS／防火牆／安全設定。這不保證某個特定ACK曾被丟棄，亦非部署代理或認證邊界。
+
+**44 Python**通過：8項新代理測試（實際loopback HTTP／opaque TCP tunnel、分通道、轉送body／認證、容量、body／scope拒絕、自動故障與lifetime上限、HTTP worker收尾等待）加36項既有desktop，不是原生試跑次數。語法及293官方Transport單一修補核對通過；CI新增8項與語法。最初6項測試中3個錯誤先指出HTTPConnection不支援context manager，改用contextlib.closing後通過，再補lifetime及HTTP worker案例為8；這是工具錯誤，未修改Unity／API或放寬規則來通過。
+
+早期 `141303-3bc506ce`／`141505-ca55d190` 的計時與補送均通過，但代理只等待listener／watchdog，未明確等待HTTP處理執行緒，保留為舊scope，不當最終收尾證據。現改為non-daemon request handlers，server_close等待所有處理執行緒，新增真正in-flight HTTP等待反例；重新60／180秒兩場為上表最終結果，未改Unity／API。
+
+所有probe均complete且未truncated／send queue error，finish在正常client斷線及固定240秒前；本輪沒有GPU／PCM／Windows輸入／頭盔觀察。probe僅讀真正本地複本，不讀仍有exclusive lease的world journal，也不把診斷來源變成Tracked。180秒是有界較長運行，**不是15分鐘、4小時或長期穩定性通過**；沒有改probe上限來湊證據。
+
+資料明確C SSD、source／binary在F，全停writer後一次snapshot回F、原件保留。`clock-recovery-validation.json`核對本輪**4個runtime／159檔**原件與snapshot逐檔SHA一致，前輪兩個clock runtime／28檔亦逐檔未變；只讀JSON／log／raw bytes，未在保留SQLite上開連線。cleanup errors空且無tracked child；原5080仍0.16，Unity serve／原授權與安全設定未動，憑證／資料／binary不提交。
+
+限制與下一步：這只證明一位同機PC在指定管理503／world連線中斷、60及180秒活動期限的恢復，不是整個API重啟、server crash、封存中斷、跨機、25位持續操作或Quest／VIVE／MR／硬體驗收。完整11項長期目標保持active。下一步獨立驗證更長任務及封存階段失聯，不用本工具240秒診斷替代長期驗收。
+
 ## 2026-10-31：選用任務活動倒數、到期 End 與兩房原生驗證
 
 從乾淨 `336410b` 接續原始任務「時間」需求，新增 [MISSION_CLOCK](MISSION_CLOCK.md)。API／UI **0.28**、Unity **0.30.0／code37／NGO28**。操作員只在 Preparing 明確選用自動結束；新舊場次預設手動，不把既有 DurationSeconds 靜默改成期限。開始後政策及任務秒數不可變，規則仍0.8.0，原素材 pin／舊資料讀取／原始 binary header及checksum保留。

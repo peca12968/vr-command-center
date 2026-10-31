@@ -1,5 +1,7 @@
 # 開發指引
 
+2026-10-31 計時失聯規範見 docs/CLOCK_RECOVERY.md：本輪僅Python／文件／CI，遊戲API/UI0.28、Unity0.30.0／code37／NGO28及d430...de53f原receipt不變，未重跑131 Editor／雙平台。60／180秒各8項真正PC：只切管理GET應source suspended／Paused停表但API仍Running；只切world發布應本地精確到期Ready=false、API在接受幀前仍Running，恢復才唯一內部End／雙seal。工具只作用於新自有API，opaque WS不讀payload；8連線、20秒fault／240秒life自動上限不得passed，probe保持240秒／64 captures。完整回放、client原admission結果、tool fingerprint及writer全停snapshot均須核對；新4runtime159檔及前輪28檔SHA一致。44 Python、無新GPU／頭盔／25台／長期驗收；原正式5080不動。
+
 2026-10-31 最新任務計時見 docs/MISSION_CLOCK.md：API／UI0.28、Unity0.30.0／code37／NGO28，131真正EditMode及同源雙平台成功。SetMissionClock僅Preparing明確選用，舊／未設定場次手動；20Hz活動tick、Pause停表，到期先凍結戰鬥，再由API已接受世界幀以內部mission-clock提交正常End／雙seal，不能拿未發布本地時間授權End或給HTTP Internal身分。envelope7讀1–7，world schema1／rules0.8.0／驗票2保持，新寫入不可降舊reader，所有遊戲程序與API/UI協同更新。兩房PC到期／手動超時、結果與回放證據以PROGRESS為準，仍無頭盔／25台；Tests門檻131。
 
 2026-10-31 End封包故障見docs/DESKTOP_END_NETWORK.md：本輪Python／CI／文件，遊戲仍0.29.0／code36／NGO27／API UI0.27及a97b...e9d3、原receipt／ID不變，未重建／重跑125 EditMode／雙平台。剛approved、client未記CONNECTED就End的延遲實測仍能收到正確結果，不能臆測丟失而改NGO／Avatar身分。新增單client loopback gate（不讀內容／不存payload、不注入RPC或姿態），join-delay／全部下行drop／只丟>64-byte三場各6項及37幀完整回放通過；後兩者分別connection release與應用DEBRIEF_TIMEOUT，不混稱傳輸根因或RTT。delay1024包／2MiB／8秒、drop40秒、worker90秒有界，自動上限觸發不可passed；來源tool fingerprint及gate停止／writer全停／snapshot亦須成功。45 Python（9 UDP＋36 desktop），10個新runtime140檔及前20份manifest SHA一致；失敗與舊scope保留，見PROGRESS。無GPU／頭盔／25台／跨機證據，完整目標active。
