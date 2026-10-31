@@ -2,6 +2,8 @@
 
 ## 2026-11-01：0.36.1五獨立房長任務與閉源證據讀回
 
+功能 [4898c98](https://github.com/peca12968/vr-command-center/commit/4898c988e0cd1a5203d4b30ca7552c0bb5c8dd33) 已推送main、遠端SHA一致。[本功能CI run41254427165](https://github.com/peca12968/vr-command-center/actions/runs/41254427165)／check124694467148為failure、steps空；fresh annotation明確為付款失敗或支出上限，job未啟動，沒有雲端測試結果。未改帳務或手動重跑；下列為本機實際驗證。
+
 上一輪為實際進展；從乾淨 `6fa0d7b` 接續五房獨立驗收。**API/UI0.30、Unity0.36.1／code44／NGO29及e0594513140ff7fb4bc084929691b91c15f7d908e8f59c114aa5ab27daaf11eb來源保持**；本輪只有Python／文件／CI，沒有改遊戲或重建／重跑179 Editor與雙平台，沿用原成功receipt與scene／prefab ID。沒有新.NET、一般瀏覽器、GPU或頭盔結果。
 
 真正場 `desktop-long/20261101-073002-fab40f9a`，**原handle7849真正exit0，executionFinished／acceptancePassed／complete=true**。五個Windows server＋25個headless client，每房5位原admission、各自900秒活動倒數與唯一tick18000自動End。明確C SSD新runtime，來源與遊戲binary仍F；新API／159檔同版執行副本啟動前核對成功，原5080及正式資料不動。各房不同session／world stream／UDP port，Clear日／Fog日／Rain夜／Storm夜／Clear夜、各自barrel／sandbag與旋轉角度；Room控制台對其他房Begin與live watch均403，真正AI初始造成損耗後關閉自動攻擊，沒有玩家輸入／姿態／戰績注入或診斷probe。
