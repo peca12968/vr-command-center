@@ -27,6 +27,8 @@
 
 這組fan-out／無probe／分批比較不足以證明診斷I/O、GUI觀察、GPU、GC、排程或舊主迴圈停頓的根因，**不稱遊戲端全局修復**。它補足真實操作到25端資料／保存回放的證據並消除只看檢查點的漏洞；`all25SimultaneouslyActive=false`及`networkCapacityAccepted=false`。持續25人同時操作、更多場景／長任務、跨機／Wi-Fi、MR／Quest／VIVE／廠商硬體仍待，完整11項與長期目標保持開發中。
 
+功能提交`2cdaa1fd8955166392f2708d14481822f1e701ee`已推送main、遠端一致，提交後來源fingerprint重算仍e8ae6d846dc014e48984a035f2960c043d342a4fe192ff0feaae3891973ba3d0。GitHub #1保持open，原11項及歷史封存連結保留，更新後獨立讀回本文逐字一致。[功能提交CI run41166328563](https://github.com/peca12968/vr-command-center/actions/runs/41166328563)／check124434582620實際failure、steps=null；annotation明示付款失敗或支出上限，工作未開始，沒有雲端測試結果。未改帳務或重跑，本機證據獨立保存。
+
 ## 2026-10-31：各玩家端複本證據與伺服器packet池
 
 從乾淨`22c432c`接續前輪105行send queue full，完整目標保持開發中。新增[DESKTOP_REPLICATION](DESKTOP_REPLICATION.md)：明確`--replication-probe`只在Windows Development的自有程序觀察真正本地NGO狀態，普通／Editor／Android不安裝。240秒／4096 tick列／4096錯誤／64次capture有界，保留最早資料；穩定期不逐幀寫檔，明確要求才輸出唯一快照，finish取消threaded log訂閱後一次report。無測試RPC、輸入／姿態注入、PCM／GPU、讀他程序記憶體或OS設定變更。
