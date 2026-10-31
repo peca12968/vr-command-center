@@ -2,6 +2,8 @@
 
 ## 2026-11-01：journal鎖／flush分段與0.35同源交付
 
+功能 [2e77c8b](https://github.com/peca12968/vr-command-center/commit/2e77c8b1d8d31a3d625fb00d6827762d5af30f34) 已推送main、遠端SHA一致。[本功能CI run41246401262](https://github.com/peca12968/vr-command-center/actions/runs/41246401262)／check124670631224為failure、steps空；fresh annotation明確為付款失敗或支出上限，job未啟動、無雲端測試結果。未改帳務或手動重跑，下列結果均為本機實際驗證。
+
 從乾淨`5332886`接續[細分journal計時](JOURNAL_STAGES.md)。**Unity0.35.0／Android code42，API/UI0.30／NGO29保持**。共享C#9／netstandard2.1 collector及明確Windows Development／專用Server探針分別量測所有outbox gate進入、File Write及真正FileStream.Flush(true)，只保存metadata／managed thread ID／成功旗標。原mutex、逐筆durable flush、exclusive lease、checksum／ack／seal與回放位元組保持；不改world／wire／rules0.8.0／素材pin／Tracked／0.5與1.5秒政策，不是效能修復。
 
 collector上限32768完成列／64 in-flight，原生90秒、停止後最多5秒drain；完整／未truncated／inFlight0才可接受。一般／Editor／Android不安裝，finish.request僅每0.25秒查詢；cleanup先停兩個probe收集，再輸出／End／關閉。分析器用UTC終點減Stopwatch耗時定位、裁切聯集及Main wait與Background ack flush交集，避免raw UTC量化抹掉短呼叫；clock差>0.05秒或未覆蓋則null、不補造0。該診斷容差不是遊戲新政策。
