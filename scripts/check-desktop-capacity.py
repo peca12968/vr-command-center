@@ -10,6 +10,7 @@ from ctypes import wintypes
 from datetime import datetime,timezone
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -80,6 +81,95 @@ def native_log_findings(directory):
         count=path.read_text(errors='replace').count('send queue full')
         if count:findings.append({'file':path.name,'sendQueueFull':count})
     return findings
+
+
+class ReplicationVenue(venue_module.Venue):
+    def __init__(self,args):
+        super().__init__(args,artifact_family='desktop-capacity');self.probes={};self.capture_number=0;self.replica_checks=[]
+    def launch(self,name,config,visible=False,*,extra_args=()):
+        if self.args.replication_probe:
+            path=self.runtime_directory/'replication'/f'p{len(self.probes)+1:03d}';path.parent.mkdir(exist_ok=True)
+            self.probes[name]=path;extra_args=(*extra_args,'--vr-replication-probe',str(path))
+            self.save('replication-probes.json',{key:str(value) for key,value in self.probes.items()})
+        return super().launch(name,config,visible,extra_args=extra_args)
+
+
+def validate_replica(snapshot,frame,native,*,server=False):
+    phase=frame['phase'];players={p['id']:p for p in frame['players']};connections={p['playerId']:p['nativeConnectionId'] for p in native}
+    if not snapshot['listening'] or not snapshot['ready'] or snapshot['phase']!=phase or snapshot['presentation']['phase']!={'Running':1,'Paused':2}[phase]:
+        raise ValueError('Replica is not ready in the requested phase')
+    if snapshot['presentation']['tick']<frame['tick']:raise ValueError('Replica has not reached the authority tick')
+    if snapshot.get('packetQueueCapacity')!=(1024 if server else 128) or not 0<snapshot.get('actorListSerializedBytes',0)<=65536:
+        raise ValueError('Replica driver capacity / serialized actor evidence differs')
+    mask=sum(1<<(r-1) for r in {p['roomId'] for p in players.values()})
+    if snapshot['presentation']['rooms']!=mask or snapshot['presentation']['weather']!=0 or snapshot['presentation']['night'] or snapshot['presentation']['lightning']:
+        raise ValueError('Replica environment differs from the capacity mission')
+    actors=[p for p in snapshot['actors'] if not p['enemy']];avatars=snapshot['avatars']
+    if len(actors)!=len(players) or {p['id'] for p in actors}!=set(players) or len(avatars)!=len(players) or {p['playerId'] for p in avatars}!=set(players):
+        raise ValueError('Replica has missing / duplicate / foreign players or avatars')
+    for actor in actors:
+        expected=players[actor['id']]
+        if actor['room']!=expected['roomId'] or any(actor[key]!=expected[key] for key in ('health','magazine','reserve','connected','reloading')):
+            raise ValueError('Replica player state differs from authority')
+        if actor['presentationTick']!=snapshot['presentation']['tick'] or any(not math.isfinite(actor['position'][axis]) or abs(actor['position'][axis]-expected['head'][axis])>.02 for axis in ('x','y','z')):
+            raise ValueError('Replica position / presentation tick differs')
+    for avatar in avatars:
+        if avatar['connection']!=connections[avatar['playerId']] or avatar['source']!=1 or not avatar['accepted'] \
+            or any(not math.isfinite(avatar['head'][axis]) or abs(avatar['head'][axis]-players[avatar['playerId']]['head'][axis])>.02 for axis in ('x','y','z')):
+            raise ValueError('Replicated avatar pose / connection differs')
+    enemies={p['id']:p for p in frame['enemies']};replicas=[p for p in snapshot['actors'] if p['enemy']]
+    if len(replicas)!=len(enemies) or {p['id'] for p in replicas}!=set(enemies):raise ValueError('Replica enemy roster differs')
+    for actor in replicas:
+        expected=enemies[actor['id']]
+        if actor['health']!=expected['health'] or actor['room']!=expected['roomId'] or actor['fireSequence']!=expected['fireSequence'] \
+            or actor['presentationTick']!=snapshot['presentation']['tick'] or any(not math.isfinite(actor['position'][axis]) or abs(actor['position'][axis]-expected['feet'][axis])>.02 for axis in ('x','y','z')):
+            raise ValueError('Replica enemy state differs from authority')
+    owners=[p for p in avatars if p['owner']]
+    if len(owners)!=(0 if server else 1) or not server and owners[0]['connection']!=snapshot['localConnection']:
+        raise ValueError('Replica owner identity differs')
+
+
+def capture_replicas(v,entries,native,label):
+    if not v.args.replication_probe:return
+    targets={row['name']:(e,row) for e in entries for row in native if row['sessionId']==e['id']}
+    targets.update({e['name']+'-server':(e,None) for e in entries})
+    deadline=time.monotonic()+8;pending=set(targets)
+    while pending:
+        if time.monotonic()>deadline:raise RuntimeError('Replica convergence timeout: '+label+' '+', '.join(sorted(pending)))
+        v.capture_number+=1
+        if v.capture_number>64:raise RuntimeError('Replica observation request bound reached')
+        number=v.capture_number;frames={e['id']:v.frame(e)['packet']['frame'] for e in entries}
+        for name in pending:venue_module.atomic_json(v.probes[name]/'capture.request',number)
+        v.wait(lambda:all((v.probes[name]/f'capture-{number}.json').exists() for name in pending),5,'replica capture '+label)
+        for name in list(pending):
+            e,row=targets[name];snapshot=venue_module.read_json(v.probes[name]/f'capture-{number}.json')
+            error=None
+            try:validate_replica(snapshot,frames[e['id']],[r for r in native if r['sessionId']==e['id']],server=row is None)
+            except ValueError as issue:error=str(issue)
+            v.replica_checks.append({'name':name,'stage':label,'capture':number,'authorityTick':frames[e['id']]['tick'],
+                'observedTick':snapshot['presentation']['tick'],'seconds':snapshot['seconds'],'passed':error is None,'error':error})
+            if error is None:pending.remove(name)
+        v.save('replication-checks.json',v.replica_checks)
+        if pending:time.sleep(.2)
+
+
+def finish_probes(v,entries,*,kind):
+    if not v.args.replication_probe:return
+    names=[n for n in v.probes if any(n.startswith(e['name']+'-') for e in entries) and (n.endswith('-server'))==(kind=='servers')]
+    for name in names:(v.probes[name]/'finish.request').write_text('')
+    v.wait(lambda:all((v.probes[n]/'report.json').exists() for n in names),15,'replication reports')
+    for name in names:
+        report=venue_module.read_json(v.probes[name]/'report.json')
+        if not report['complete'] or report['truncated']:raise RuntimeError('Incomplete replication report: '+name)
+        start=next(r for r in v.replica_checks if r['name']==name and r['stage'].endswith('-running-start') and r['passed'])
+        end=next(r for r in v.replica_checks if r['name']==name and r['stage'].endswith('-running-end') and r['passed'])
+        count=len(next(e['players'] for e in entries if name.startswith(e['name']+'-')))
+        rows=[r for r in report['rows'] if start['seconds']<=r['seconds']<=end['seconds']]
+        if not rows or any(not r['ready'] or r['phase']!=1 or r['players']!=count or r['connected']!=count or r['health']!=count*100 or not r['coherent'] for r in rows):
+            raise RuntimeError('A stable local replica observation is incomplete / inconsistent: '+name)
+        times=[start['seconds'],*[r['seconds'] for r in rows],end['seconds']]
+        gap=max(b-a for a,b in zip(times,times[1:]))
+        if gap>=1.5:raise RuntimeError('Local replicated tick gap exceeded unchanged 1.5 second boundary: '+name)
 
 
 def verify_replay(v,entry,bounds):
@@ -168,6 +258,7 @@ def run(v):
         for entry in entries:
             value=v.wait(lambda e=entry:(f if (f:=v.frame(e,measure=True))['packet']['frame']['phase']=='Running' else None),30,'capacity Running')
             validate_frame(value,entry['players']);bounds[entry['id']]={'firstSequence':value['packet']['sequence'],'fromMs':value['packet']['elapsedMilliseconds']}
+        capture_replicas(v,entries,native,mode+'-running-start')
         v.stage('running',mode=mode,nativeClients=len(pairs),seconds=v.args.seconds)
         deadline=time.monotonic()+v.args.seconds;next_status=time.monotonic()+15;next_memory=time.monotonic()+5
         while time.monotonic()<deadline:
@@ -181,24 +272,33 @@ def run(v):
         for entry in entries:
             value=v.frame(entry,measure=True);validate_frame(value,entry['players']);bounds[entry['id']]['lastSequence']=value['packet']['sequence']
         v.save(mode+'-stable-observations.json',observations);check(bool(observations),mode+': all live stable samples have fresh healthy per-seat Simulation rigs')
+        capture_replicas(v,entries,native,mode+'-running-end')
         first=entries[0];v.command(first,'Pause')
         paused=v.wait(lambda:(f if (f:=v.frame(first,measure=True))['packet']['frame']['phase']=='Paused' else None),15,'capacity Pause')
         other_ticks={e['id']:v.frame(e)['packet']['frame']['tick'] for e in entries[1:]};time.sleep(.6)
         check(v.frame(first,measure=True)['packet']['frame']['tick']==paused['packet']['frame']['tick'],mode+': Pause freezes the targeted world tick')
+        capture_replicas(v,entries,native,mode+'-pause')
         for entry in entries[1:]:
             value=v.frame(entry,measure=True);validate_frame(value,entry['players'])
             if value['packet']['frame']['phase']!='Running' or value['packet']['frame']['tick']<=other_ticks[entry['id']]:raise RuntimeError('Independent room stopped with another room Pause')
         v.command(first,'Resume');v.wait(lambda:(f if (f:=v.frame(first,measure=True))['packet']['frame']['phase']=='Running'
             and f['packet']['frame']['tick']>paused['packet']['frame']['tick'] else None),15,'capacity Resume')
         check(True,mode+': Resume advances; other independent worlds retain active rigs')
+        capture_replicas(v,entries,native,mode+'-resume')
         for entry in entries:v.command(entry,'SetEnemies',enemies={'count':len(entry['roomIds']),'behavior':'Advance','autoAttack':True})
         for entry in entries:
             v.wait(lambda e=entry:{p['roomId'] for p in v.request(f'/api/sessions/{e["id"]}/statistics')['players'] if p['hitsReceived']>0}==set(e['roomIds']),30,'authoritative AI hit in every room')
         for entry in entries:v.command(entry,'SetEnemies',enemies={'count':len(entry['roomIds']),'behavior':'Hold','autoAttack':False})
         check(True,mode+': operator-enabled authoritative AI damage recorded in all five rooms')
+        if v.args.replication_probe:
+            for entry in entries:v.command(entry,'Pause')
+            for entry in entries:v.wait(lambda e=entry:v.frame(e)['packet']['frame']['phase']=='Paused',15,'post-AI Pause')
+            capture_replicas(v,entries,native,mode+'-ai-paused');finish_probes(v,entries,kind='clients')
+            check(True,mode+': every native client and server replica converges at five lifecycle checkpoints')
         reports=[]
         for entry in entries:
             sealed=v.seal(entry);report=practice.save_report(v,entry,sealed['statistics'],filename=entry['name']+'-report.csv')
+            finish_probes(v,[entry],kind='servers')
             v.stop_round(entry);reports.append({'sessionId':entry['id'],'csv':report})
         for entry,result in zip(entries,reports):
             for row in (r for r in native if r['sessionId']==entry['id']):
@@ -210,7 +310,7 @@ def run(v):
     findings=native_log_findings(v.directory)
     if findings:print('WARN: native send queue errors observed; lifecycle checks do not establish network capacity acceptance',flush=True)
     v.save('capacity-result.json',{'complete':False,'validationScope':'server admission / static poses / lifecycle / recording only',
-        'networkCapacityAccepted':False,'nativeLogFindings':findings,
+        'networkCapacityAccepted':False,'localReplicaCheckpointsPassed':v.args.replication_probe,'nativeLogFindings':findings,
         'source':'Actual Windows native UDP / NGO; Simulation','headsets':0,'hosts':1,'renderedClients':0,
         'inputInjected':False,'modes':results,'minimumFreePhysicalBytes':min(r['availablePhysicalBytes'] for r in resources)})
     v.summary()
@@ -221,10 +321,11 @@ def main():
     parser.add_argument('--mode',choices=('linked','independent','both'),default='both')
     parser.add_argument('--players-per-room',type=int,choices=range(1,6),default=5)
     parser.add_argument('--seconds',type=int,choices=range(30,301),default=60)
+    parser.add_argument('--replication-probe',action='store_true',help='Explicit bounded Windows Development local replica observations; not headset evidence')
     parser.add_argument('--api-dll',type=Path,default=Path(os.environ.get('VR_COMMAND_API_DLL',ROOT/'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')))
     parser.add_argument('--player-exe',type=Path,default=Path(os.environ.get('VR_COMMAND_UNITY_PLAYER',ROOT/'artifacts/desktop/VrCommand.exe')))
     args=parser.parse_args();args.duration=600;args.visible_room=0;args.job_workers=2;args.check=False
-    venue_module.verify_player(args);v=venue_module.Venue(args,artifact_family='desktop-capacity')
+    venue_module.verify_player(args);v=ReplicationVenue(args)
     try:v.stage('starting',source='Simulation',headsets=0);run(v)
     except BaseException as error:v.stage('failed',errorType=type(error).__name__);raise
     finally:

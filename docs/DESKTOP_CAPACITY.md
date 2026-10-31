@@ -1,5 +1,7 @@
 # 25個原生PC玩家的同機驗證
 
+新增明確選用`--replication-probe`，可核對每個原生client／server實際收到的名冊、姿態與狀態；步驟、界線及輸出見[DESKTOP_REPLICATION](DESKTOP_REPLICATION.md)。未啟用的舊檢查仍只有伺服器／場次／封存範圍，不補造歷史接收端證據。
+
 `scripts/check-desktop-capacity.py`使用自己的API／憑證／全新runtime，依序驗證一個Linked世界的25個原生client，再將該世界結束、精確封存並停止自有程序，另開五個獨立世界、每房五個client。這是Windows／UDP／NGO實際程序與合成頭手 **Simulation**，不是25台電腦或頭盔，也不合併歷史世界。
 
 ```powershell

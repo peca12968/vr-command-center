@@ -1,5 +1,35 @@
 # 開發進度
 
+## 2026-10-31：各玩家端複本證據與伺服器packet池
+
+從乾淨`22c432c`接續前輪105行send queue full，完整目標保持開發中。新增[DESKTOP_REPLICATION](DESKTOP_REPLICATION.md)：明確`--replication-probe`只在Windows Development的自有程序觀察真正本地NGO狀態，普通／Editor／Android不安裝。240秒／4096 tick列／4096錯誤／64次capture有界，保留最早資料；穩定期不逐幀寫檔，明確要求才輸出唯一快照，finish取消threaded log訂閱後一次report。無測試RPC、輸入／姿態注入、PCM／GPU、讀他程序記憶體或OS設定變更。
+
+每client／server五個檢查點（Running起點／60秒後、Pause、Resume、AI傷害後全Pause），核對實際收到的玩家／敵軍ID、房間、健康／彈藥／敵軍fireSequence、位置、avatar connection／owner、Simulated／accepted及Presentation／Actor tick。快照不早於自己的API參考tick；追趕失敗快照保留、不覆寫。起終點間每一筆本地新tick觀察亦須全名冊／健康100／coherent，含端點新tick間隔<1.5秒。這是端上觀察間隔，不是RTT、每packet送達、每張世界幀在所有client顯示或同一瞬間的跨端快照。client在End前明確finish，**不驗每client收到Ended**；server在精確seal後才finish。
+
+0.28.2／code34僅作中間Windows診斷版，保留原driver128，沒有建置或交付該版Quest。以下基線與最終0.28.3完成資料集（desktop-capacity／20261031前綴）已全停writer、JSON／bytes SHA稽核，不開原或snapshot SQLite：
+
+| 場次／版本 | 範圍／檢查 | 完整報告／成功capture | 本地tick列／穩定列 | 最大本地新tick間隔 | queue錯誤／SSD-F檔數 |
+|---|---|---|---|---|---|
+| `102502-3f9d73db`／0.28.2 | Linked25人60秒／9項 | 26／130 | 18252／17462 | 0.133572秒 | 0／264 |
+| `103038-997cffd4`／0.28.2 | Linked及五獨立房各25人60秒／22項 | 56／280（286次嘗試） | 38532／36402 | 0.144540秒 | 112／534 |
+| `105445-7f334dae`／0.28.3 | Linked及五獨立房各25人60秒／22項 | 56／280（286次嘗試） | 38087／36456 | 0.144500秒 | 0／534 |
+
+第二場**重現Linked server112行錯誤，probe亦完整捕捉112筆**：15組在最後觀察到的Running tick62–1152，一組在Paused tick1255，每組7筆；本地秒數9.455454–70.160036，server最後已觀察Ended。phase／tick是log callback讀的最近Update快取，不宣稱發送內部的原子狀態。來源端／全部接收端仍達上述檢查，錯誤數不等於丟包數；這不表示可忽略錯誤。首次無錯誤與之後重現分開保留，不挑只過場。原始105行沒有時間戳，不能倒填成同一根因或階段。
+
+官方UnityTransport的MaxPacketQueueSize是整個driver共用的每update send／receive packet容量，原128不是每peer。新增`VenueTransportProfile`，在StartServer／Host／Client前設定**server／host1024、client仍128**，不改MTU、reliable window、timeout、資料欄位、規則／權限或嵌入patch。此為有界伺服器突發保留候選配置，不能由數字本身稱修復。快照額外核對實際本地設定，並以Actors.WriteField只寫暫存記憶體量field bytes、不清dirty／變更集合。真正序列化測試30／125角色分別4232／17627 bytes，排除NGO／UTP包頭、其他狀態、重傳與入場；不當作實際頻寬或100敵軍負載已通過。
+
+新遊戲端**0.28.3／Android code35**，API／UI0.27、NGO26不變；114項真正EditMode（原109＋2個診斷JSON回歸＋3個driver設定／真實序列化檢查）於02:38:39–02:38:45 UTC通過，Windows receipt02:37:53、Quest02:54:30成功。兩份來源fingerprint均`e8ae6d846dc014e48984a035f2960c043d342a4fe192ff0feaae3891973ba3d0`，原scene／prefab ID一致。真正SDK aapt確認APK0.28.3／code35、min32／target35／arm64-v8a；不是裝置啟動證據。IL2CPP過程較久，確認既有build handle及同身分自有compiler仍有CPU／輸出增加，未因觀察逾時重啟，也未改OS／安全政策。
+
+最終兩模式22項及完整cleanup exit0後才stage=passed／complete=true；六世界4147保存幀，3374穩定期回放幀逐張全名冊／出生位／健康／來源核對，六份最終CSV／ledger／末幀一致。56份報告原始錯誤0、原生日誌亦0；六server均觀察到Ended才停止。端上快照實際server1024／client128、Actor field獨立房848／Linked4232 bytes；最小穩定區間60.222563秒、最小可用實體記憶體8,589,647,872 bytes，原2GiB保留未觸發。最大擷取UTC來源年齡0.179819秒，與本地tick間隔分開，不稱RTT／FPS改善。這證明此負載與本輪配置的錯誤由112到0，**不證明所有工作量／網路條件已修復或原偶發主迴圈停頓已解決**。資料摘要`artifacts/replication-validation.json`。
+
+兩個開發失敗保留：`102252-fa8155d0`首次capture KeyError，因直接匯出無Serializable的WeatherState而JSON缺presentation；改明確DTO，實際Unity JSON回歸測試防再漏欄，沒有改遊戲WeatherState／wire。`102700-27f090b1`Linked檢查完成，但獨立房capture因完整暫存路徑過長FileNotFound而整體exit1；改短`replication/p001`目錄並保存程序對照，新增長名稱回歸測試，不改系統長路徑／安全政策。兩場cleanup均無錯誤無殘留，92／292檔SSD原件與失敗F副本SHA一致、稽核前後不變，失敗不改成通過。第一個成功pilot server探針在End前停止，後續完整場改持續到seal，不能替pilot補造End觀察。
+
+同版未啟用probe的Linked25人／60秒對照`110021-8d1dc8e1` **8項**通過，658幀／561穩定回放幀、最大來源年齡0.155637秒，raw queue錯誤0；runtime無replication目錄或對照表，不補接收端證據，14檔SSD／F SHA一致、cleanup無錯誤無殘留／活動0。`unity-admission/20261031-110235-35459427` **8項真正原生入場／撤銷／同admission回連**亦exit0，392幀精確seal、回放／ledger一致、健康60及彈藥保持；沒有interactive按鍵／GPU、沒有移動後位置新證據。該既有小型fixture資料在F，只作正確性，不稱F USB的25人時序成功；37檔收尾後bytes稽核前後不變，全部自有Popen在finally終止／等待。兩場沒有queue錯誤。
+
+**11項容量／接收端Python＋5項共用artifact檢查**及語法通過，包含非有限值／過期tick／owner／connection／敵軍fireSequence／長目錄對照與真正Windows獨占lease釋放等待；不是16次原生或頭盔試跑。補充稽核`artifacts/replication-final-extra-validation.json`。25程序場的來源／binary仍F、runtime明確C SSD，所有writer停止才一次回F並保留原件，只讀JSON／CSV／bytes、不開SQLite或重寫副本。原5080唯讀仍0.16歷史，Unity serve／登入／安全性提示未碰；無憑證提交。
+
+規則0.8.0、envelope6／world schema1、原header／checksum、素材pins、Tracked資料／pointer／muzzle保持；沒有後端／UI／資產版本契約改動，不重跑歷史654核心／446 HTTP／43世界／217 Chromium、49 UI native／27練習場或人工GPU／DSP／主迴圈診斷，不混算前輪結果。沒有持續25玩家真實移動射擊、跨機／Wi-Fi、完整100敵軍／物件負載、長任務、FPS／聲學、Quest／VIVE／MR或廠商硬體證據，`networkCapacityAccepted`仍false。下一步以實際移動／射擊與更多場景驗證25端同步，再推跨機與設備；完整11項及長期目標保持開發中。
+
 ## 2026-10-31：25個原生PC程序、場次容量檢查與觀察檔修正
 
 從乾淨`980d0c4`接續無頭盔的PC開發。新增[scripts/check-desktop-capacity.py](../scripts/check-desktop-capacity.py)，操作見[DESKTOP_CAPACITY](DESKTOP_CAPACITY.md)。只改Python／CI／文件，API／UI0.27、Unity0.28.1／code33／NGO26及原0.5秒姿態／1.5秒來源門檻保持。來源fingerprint仍`5eee75868e70237e91b4c6be989c0f4421da98e7e41c5c8adc31878bcb7617b6`，兩份既有receipt及原scene／prefab ID一致，沒有重跑109 EditMode或雙平台建置。

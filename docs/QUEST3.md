@@ -1,5 +1,7 @@
 # Quest 3 接入原型與工具鏈 v0.20
 
+2026-10-31 最新遊戲端0.28.3／code35，API／UI0.27、NGO26保持；114真正EditMode及同源Windows／ARM64 IL2CPP Quest APK成功，aapt確認min32／target35。新增Windows明確選用的[本地複本診斷](DESKTOP_REPLICATION.md)，Editor／Android與普通啟動不安裝；server／host packet queue1024、client仍128，沒有改資料欄位、追蹤或舊回放。原生25程序前後對照及限制以PROGRESS為準，APK成功不代表頭盔啟動／效能。
+
 2026-10-31 新姿態診斷patch為Unity0.28.1／code33，API／UI0.27及NGO26／全部遊戲契約保持。`--vr-pose-loop-trace`只在明確Windows Development與原pose trace一起啟用，Android不安裝觀察點；不改原0.5／1.5秒政策。新增7項PlayerLoop EditMode、總門檻109，最終真正Tests／Windows／Quest結果以PROGRESS及當次receipt為準；不因Editor通過推定Windows條件分支或實機成功。操作見[POSE_TIMING](POSE_TIMING.md)。
 
 2026-10-31 最新玩家人物為API／UI0.26、Unity0.28／code32／NGO26，102真正EditMode；新player-body-v1及header playerPresentationVersion1需來源／API／UI／全部遊戲端一起更新，舊缺失0不補步態。頭部／比例及桌面腕點為裝飾性呈現，Tracked不合成握持雙臂或改追蹤資料；原scope／rules保持，見 [PLAYER_BODY](PLAYER_BODY.md)。新Quest實際結果以最新PROGRESS／receipt為準，不把PC GPU、managed SDK或舊APK算成本輪實機成果。
