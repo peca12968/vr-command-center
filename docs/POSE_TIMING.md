@@ -1,5 +1,22 @@
 # 電腦端姿態時序診斷
 
+## 獨立程序心跳與操作對照
+
+目前檢查器另有明確選用的`--heartbeat`，啟動自己的普通優先級Python程序，每10ms sleep後量單調時間、UTC及process CPU。沒有UI、遊戲或網路介面，不改系統設定。只在記憶體記>100ms空窗與每秒clock anchor，4096列／256 anchors／240秒上限；明確finish才complete，輸出在觀察結束後。helper持有自己的程序handle並在finally收尾；heartbeat-cleanup與native cleanup必須皆無殘留。
+
+```powershell
+python scripts/check-desktop-pose-input.py --heartbeat --api-dll artifacts/build-report-v1/bin/VrCommand.Api/release/VrCommand.Api.dll --runtime-root "$env:LOCALAPPDATA/VrCommand/SimulationRuns"
+python scripts/check-desktop-pose-input.py --heartbeat --observation-only --api-dll artifacts/build-report-v1/bin/VrCommand.Api/release/VrCommand.Api.dll --runtime-root "$env:LOCALAPPDATA/VrCommand/SimulationRuns"
+python scripts/analyze-pose-input.py artifacts/desktop-venue/<本輪時間-識別>
+python -m unittest discover -s tests -p test_pose_heartbeat.py
+```
+
+observation-only先安靜基線，在window-review階段只觀察、不按遊戲鍵，觀察後建立該輪`window-review.done`，再安靜同長時間。人工作業確認有120秒界線，這不是遊戲新鮮度門檻；trace仍240秒有界，耗時過長會拒絕不完整結果。外部操作起訖應另存該輪根目錄，不改runtime原始報告。
+
+2026-10-31真正射擊場`082536-8cb741cb`再次取得三Unity共同0.7017494秒Update觀察空窗與HUD約0.088214秒過期；獨立程序完整覆蓋它，整場最大wake間隔13.348ms、UTC／單調步進差1.456ms。這不支持「全部程序／整個OS一起暫停」，仍未證明Unity內哪個階段或外部因素造成。另文字／截圖各5次、無UI安靜場、同一exec handle六次輸出poll場皆無觀察期過期；不能由乾淨對照證明歷史偶發已修復。不同操作組合／時機、診斷與外部工具影響仍待排除，原0.5／1.5秒門檻保持。
+
+分析核對報告完整性、counter範圍／順序、UTC guard與覆蓋區間，明示fullyCovered／uncovered；沒有>100ms列不代表timer delta為零，須看maximumWakeGapSeconds。新報告使用明確UTC起訖，早期沒有欄位的檔案只用首末anchor保守覆蓋，不修改raw檔。時鐘偏差達50ms時心跳join留null、CLI非零；native join仍按自己時鐘獨立判斷。7項心跳（其中一個真正timer程序）、12項輸入與3項舊分析檢查通過；舊無心跳資料保持可讀。完整四場資料、失敗與限制見PROGRESS。
+
 ## 目前版本的直接連線與重複按鍵
 
 2026-10-31新增`check-desktop-pose-input.py`及`analyze-pose-input.py`，使用現有API／UI0.27、Unity0.28／NGO26的同源binary。這輪不重建Unity，也不改0.5秒姿態／1.5秒世界新鮮度。原時序資料只來自較早0.26.1版；下方舊受控丟包測試保留，不能替代本版人物／射擊音效及雙client的實際紀錄。

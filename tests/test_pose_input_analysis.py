@@ -124,5 +124,20 @@ class PoseInputAnalysisTests(unittest.TestCase):
             self.assertFalse(interval['withinPoseObservation']); self.assertTrue(interval['rightCensored'])
         self.run_case(verify)
 
+    def test_declared_heartbeat_cannot_silently_lose_its_report(self):
+        def verify(d):
+            (d / 'input-timing-result.json').write_text(json.dumps({'independentHeartbeat':True}))
+            with self.assertRaises(ValueError): analysis.analyze(d)
+        self.run_case(verify)
+
+    def test_observation_phase_names_do_not_require_shooting_stages(self):
+        def verify(d):
+            path=d/'input-stages.json';rows=json.loads(path.read_text())
+            for row in rows:row['phase']=row['phase'].replace('shot-1','window-review').replace('shot-2','quiet-after')
+            rows=[row for row in rows if not row['phase'].startswith('shot-3')];path.write_text(json.dumps(rows))
+            value=analysis.analyze(d);self.assertIn('window-review',value['phases']);self.assertIn('quiet-after',value['phases'])
+            self.assertNotIn('shot-1',value['phases'])
+        self.run_case(verify)
+
 
 if __name__ == '__main__': unittest.main()

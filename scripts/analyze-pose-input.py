@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('timing_common', ROOT / 'scripts/analyze-pose-trace.py')
 common = importlib.util.module_from_spec(spec); spec.loader.exec_module(common)
 SCALE = 10_000_000
+UNIX_TICKS = 621355968000000000
 
 
 def intersection(left, right):
@@ -37,6 +38,63 @@ def intervals(report):
     return merged
 
 
+def heartbeat_analysis(report, shared, periods, native_clock_valid):
+    if report['schemaVersion'] != 1 or report['source'] != 'IndependentPythonWakeTiming' or not report['complete'] or report['truncated']:
+        raise ValueError('Incomplete independent heartbeat')
+    if report['sampleSeconds'] != .01 or report['maximumGapRows'] != 4096 or len(report['gaps']) > 4096:
+        raise ValueError('Unsupported heartbeat bounds')
+    for key in ('startedCounterNs', 'endedCounterNs', 'durationNs', 'wakes', 'maximumGapNs', 'maximumClockStepNs'):
+        if type(report[key]) is not int or report[key] < 0: raise ValueError('Invalid heartbeat counter')
+    if report['wakes'] == 0 or report['durationNs'] != report['endedCounterNs'] - report['startedCounterNs']:
+        raise ValueError('Incomplete heartbeat duration')
+    previous = report['startedCounterNs']; gaps = []; gap_clock_error = 0
+    for row in report['gaps']:
+        for key in ('fromCounterNs','toCounterNs','fromUnixNs','toUnixNs','durationNs','processCpuNs'):
+            if type(row[key]) is not int or row[key] < 0: raise ValueError('Invalid heartbeat gap')
+        if not previous <= row['fromCounterNs'] < row['toCounterNs'] <= report['endedCounterNs'] \
+            or row['durationNs'] != row['toCounterNs'] - row['fromCounterNs'] or row['durationNs'] <= 100_000_000 \
+            or report['maximumGapNs'] < row['durationNs']:
+            raise ValueError('Inconsistent heartbeat gap')
+        previous = row['toCounterNs']
+        gap_clock_error = max(gap_clock_error, abs((row['toUnixNs'] - row['fromUnixNs']) - row['durationNs']))
+        if row['durationNs'] > 500_000_000:
+            gaps.append((UNIX_TICKS + row['fromUnixNs'] // 100, UNIX_TICKS + row['toUnixNs'] // 100))
+    anchors = report['anchors']; anchor_error = 0
+    if not anchors or len(anchors) > 256: raise ValueError('Missing heartbeat clock anchors')
+    for row in anchors:
+        if any(type(row[key]) is not int or row[key] < 0 for key in ('counterNs','unixNs')) \
+            or not report['startedCounterNs'] <= row['counterNs'] <= report['endedCounterNs']: raise ValueError('Invalid heartbeat anchor')
+    for a, b in zip(anchors, anchors[1:]):
+        if b['counterNs'] <= a['counterNs']: raise ValueError('Heartbeat anchor counter moved backwards')
+        anchor_error = max(anchor_error, abs((b['unixNs'] - a['unixNs']) - (b['counterNs'] - a['counterNs'])))
+    native = [(row['fromUtcTicks'], row['toUtcTicks']) for row in shared] if shared is not None else []
+    explicit = 'startedUnixNs' in report and 'endedUnixNs' in report
+    start_ns = report['startedUnixNs'] if explicit else anchors[0]['unixNs']
+    end_ns = report['endedUnixNs'] if explicit else anchors[-1]['unixNs']
+    if type(start_ns) is not int or type(end_ns) is not int or start_ns < 0 or end_ns <= start_ns:
+        raise ValueError('Invalid heartbeat UTC coverage')
+    coverage_error = abs(end_ns-start_ns-report['durationNs']) if explicit else 0
+    if explicit:
+        coverage_error = max(coverage_error, max(abs(row['unixNs']-start_ns-(row['counterNs']-report['startedCounterNs'])) for row in anchors))
+    clock_error = max(anchor_error, gap_clock_error, coverage_error, report['maximumClockStepNs'])
+    valid = native_clock_valid and clock_error < 50_000_000
+    coverage = (UNIX_TICKS + start_ns // 100, UNIX_TICKS + end_ns // 100)
+    covered = [(a,b) for a,b in native if coverage[0] <= a and b <= coverage[1]]
+    joined = intersection(native, sorted(gaps)) if valid else None
+    return {'source': report['source'], 'wakes': report['wakes'], 'durationSeconds': report['durationNs'] / 1e9,
+        'maximumWakeGapSeconds': report['maximumGapNs'] / 1e9, 'clockJoinValid': valid,
+        'maximumClockStepSeconds': clock_error / 1e9, 'gapRecordingThresholdSeconds': .1,
+        'coverageFromUtcTicks': coverage[0], 'coverageToUtcTicks': coverage[1], 'coverageSource': 'explicit' if explicit else 'conservative clock anchors',
+        'fullyCoveredNativeTripleGaps': len(covered) if valid else None, 'uncoveredNativeTripleGaps': len(native)-len(covered) if valid else None,
+        'gapsOverHalfSecond': [{'fromUtcTicks': a, 'toUtcTicks': b} for a, b in gaps],
+        'nativeTripleGapIntersections': [{'fromUtcTicks': a, 'toUtcTicks': b, 'seconds': (b-a) / SCALE} for a,b in joined] if joined is not None else None,
+        'phaseLongGaps': {name: len(intersection(sorted(gaps), [period])) for name, period in periods.items()} if valid else None,
+        'limits': ['Normal-priority independent process on the same host and execution environment; not an independent machine',
+                   'Wake gaps include requested sleep, scheduling, blocking and other causes; no OS or native-thread CPU attribution',
+                   'No gaps over 100ms retained does not mean a zero timer delta; use maximumWakeGapSeconds',
+                   'A clean control does not prove historical stalls were fixed or exclude external-tool influence']}
+
+
 def analyze(directory):
     root = directory / 'runtime-snapshot'
     reports = {label: common.load_report(root / f'pose-input-{name}-trace/report.json', role)
@@ -50,7 +108,9 @@ def analyze(directory):
     marks = {row['phase']: common.ticks(row['utc']) for row in json.loads((directory / 'input-stages.json').read_text())}
     periods = {'baseline': (marks['baseline-start'], marks['baseline-end']),
                'observation': (marks['baseline-start'], marks['observation-end'])}
-    for index in range(1, 4): periods[f'shot-{index}'] = (marks[f'shot-{index}-start'], marks[f'shot-{index}-end'])
+    for phase in marks:
+        if phase.endswith('-start') and phase != 'baseline-start':
+            name = phase[:-6]; periods[name] = (marks[phase], marks[name + '-end'])
     if any(start >= end for start, end in periods.values()): raise ValueError('Invalid observation window')
     clock_steps = {role: max((abs((b['utcTicks'] - a['utcTicks']) / SCALE - (b['seconds'] - a['seconds']))
                              for a, b in zip(report['rows'], report['rows'][1:])), default=0) for role, report in reports.items()}
@@ -98,7 +158,12 @@ def analyze(directory):
             'withinPoseObservation': periods['observation'][0] <= observed_at <= periods['observation'][1] if join_valid else None,
             'durationSeconds': following['seconds'] - row['seconds'] if following else None,
             'nextStatus': following['hud']['status'] if following else None, 'rightCensored': following is None})
-    return {'source': 'Actual native same-host timing; individual connections; no per-packet correlation',
+    heartbeat_path = root / 'pose-input-heartbeat/report.json'
+    heartbeat = heartbeat_analysis(json.loads(heartbeat_path.read_text()), overlap, periods, join_valid) if heartbeat_path.exists() else None
+    result_path = directory / 'input-timing-result.json'
+    if result_path.exists() and json.loads(result_path.read_text()).get('independentHeartbeat') and heartbeat is None:
+        raise ValueError('Declared independent heartbeat report is missing')
+    return {'source': 'Actual native same-host timing; individual connections; no per-packet correlation', 'independentHeartbeat': heartbeat,
         'connectionIds': connections, 'clockStepMaximumSeconds': clock_steps, 'clockJoinValid': join_valid,
         'phases': {name: phase_summary(period) for name, period in periods.items()} if join_valid else None, 'hudStaleTransitions': stale_hud,
         'overlappingThreeProcessMainThreadGaps': overlap,
@@ -119,10 +184,15 @@ def main():
     if directory.parent != ROOT / 'artifacts/desktop-venue' or not re.fullmatch(r'\d{8}-\d{6}-[a-f0-9]{8}', directory.name):
         parser.error('Pass this repository own closed desktop-venue run')
     if json.loads((directory / 'cleanup.json').read_text()) != {'errors': [], 'remainingTrackedChildren': []}: raise ValueError('Writers did not stop cleanly')
+    heartbeat_cleanup = directory / 'heartbeat-cleanup.json'
+    if heartbeat_cleanup.exists() and json.loads(heartbeat_cleanup.read_text()) != {'errors': [], 'remaining': []}:
+        raise ValueError('Heartbeat writer did not stop cleanly')
     result = analyze(directory)
     (directory / 'input-timing-analysis.json').write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
     print(json.dumps(result, indent=2))
     if not result['clockJoinValid']: raise SystemExit('Unstable UTC: cross-process joins withheld')
+    if result['independentHeartbeat'] is not None and not result['independentHeartbeat']['clockJoinValid']:
+        raise SystemExit('Unstable heartbeat clock: independent joins withheld')
 
 
 if __name__ == '__main__': main()

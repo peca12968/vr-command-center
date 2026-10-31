@@ -1,5 +1,30 @@
 # 開發進度
 
+## 2026-10-31：獨立程序心跳與視窗／輸出輪詢對照
+
+從乾淨`bbde0a1`接續PC偶發姿態過期調查。新增`scripts/pose-heartbeat.py`，由原生檢查器以明確`--heartbeat`啟動自己的獨立、一般優先級Python程序，每10ms sleep後量perf_counter、UTC與process CPU；沒有遊戲／網路／UI接入，也不調整優先級、計時器或系統設定。只在記憶體保留>100ms空窗及每秒clock anchor，4096列／256 anchors／240秒上限，明確finish才完整；報告序列化在觀察結束後。檢查器持有Popen handle，正常與失敗finally均收尾，另保存heartbeat-cleanup。沒有改C#、API／UI0.27或Unity0.28／code32／NGO26及原0.5／1.5秒門檻。
+
+增加`--observation-only`的安靜基線→window-review→安靜收尾；過程不得按遊戲鍵，window-review.done只確認觀察。四個完成場皆直接loopback、兩個真正client＋server、原有三份NativePoseTrace及visible HUD trace，無LossGate、姿態／武器注入、原生GPU讀回或PCM：
+
+| 本輪desktop-venue識別 | 實際操作 | 世界幀／最大擷取UTC來源年齡 | 心跳次數／最大wake間隔 | 結果 |
+|---|---|---|---|---|
+| `082241-c9a91e27` | 15秒基線，5次文字查詢＋5次截圖，無遊戲鍵，再安靜15秒 | 656／0.171283秒 | 6177／18.754ms | 觀察期無>100ms原生Update空窗、無HUD過期 |
+| `082536-8cb741cb` | 10秒基線，真正Space三次，HUD29／28／27 | 772／0.612307秒 | 7389／13.348ms | 重現三Unity共同0.7017494秒空窗及HUD過期 |
+| `083531-90e11646` | 無UI／遊戲鍵，接續時僅讀log，不能當完整輪詢對照 | 1184／0.166302秒 | 11669／14.518ms | 觀察期無>100ms原生空窗／HUD過期 |
+| `083806-990e7dae` | 5秒基線，同一原執行連線連續6次空輸出poll，每次約5秒，無UI／遊戲鍵 | 552／0.162059秒 | 5166／13.205ms | 觀察期無>100ms原生空窗／HUD過期 |
+
+完整目錄皆前綴`20261031-`。第一場保留外部10次查詢時間，先前初次activate及合併查詢另明示；最後一場保留6次實際unified-exec poll起訖時間。中間無UI場原exec handle在接續時不可取回，因此只以原PID、command line與log確認它仍在執行，再正常確認完成，沒有因缺少handle重啟；等原PID消失、sealed／summary及兩份cleanup完整後才另開匹配poll場。最後一場原handle持續保留並取得terminal exit0。這些乾淨對照不排除特定時機／組合操作、診斷或外部工具影響，也不能證明舊問題已修復。
+
+射擊場可見玩家／peer／server最大Update觀察空窗為0.777354／0.702231／0.702255秒，共同區間ticks **639290031824251115–639290031831268609**（0.7017494秒）。同ID server收件最大空窗可見0.803226、peer0.714325秒；HUD於過期後約0.088214秒回ACTIVE，poseAccepted仍true。**獨立心跳完整覆蓋該共同區間，整場最大wake間隔僅13.348ms、沒有>100ms列**，UTC／perf步進差最大1.456ms，不能稱整個OS／全部程序同時暫停。仍不能從Update間隔歸因CPU、Unity引擎共用資源、選擇性排程、音效、GPU、I/O或transport；未量測的PlayerLoop區段與外部影響繼續取證，不臆測修復。啟動期HUD短暫STALE獨立標記withinPoseObservation=false，沒有當成本輪運行期重現。
+
+分析器增加心跳完整性、單調counter／UTC guard、覆蓋區間與三方交集；不完整／缺失報告拒絕，UTC偏差達50ms時不做心跳join，不能以未覆蓋的時間宣稱獨立程序正常。前兩場raw report尚無exact起訖UTC欄位，使用首末clock anchors的保守覆蓋；不補寫或重造舊raw檔。後兩場及真正producer單元程序已有明確起訖欄位。階段自動支援window-review／quiet-after，舊無心跳075207場重新分析exit0且heartbeat=null，保持相容。
+
+**7項心跳檢查**（6個合成分析方法及1個真正獨立timer程序）、**12項輸入分析反例**及原**3項分析回歸**通過；Python語法通過，CI加入心跳步驟。這22項不是22次原生／頭盔試跑。四個完成原生場各4項流程、三份trace明確finish後獨立End／世界與戰鬥精確seal，world complete／pending=false／活動0、回放／ledger一致；無輸入三場耗彈0、射擊場3，健康100。每場24檔SSD runtime在全部writer停止後回F，與保留原件SHA一致，稽核前後不變；只讀JSON／bytes，未開原SQLite或覆寫snapshot。摘要`artifacts/pose-heartbeat-validation.json`。確認本輪沒有剩餘native／heartbeat／helper程序，未碰unity CLI／正式5080。
+
+首輪`081944-8218348a`未完成：外部視窗觀察在原60秒人工作業等待內未確認，helper timeout／exit1後關窗，第五次查詢因此找不到原視窗。失敗log與資料保留，核對原程序終止、無殘留視窗後才開新場；將**診斷人工作業確認上限**調為120秒，不是放寬0.5／1.5秒遊戲政策，240秒trace上限仍維持。此場不列入上述完成結果。
+
+本輪僅Python診斷／分析、CI與文件，沒有重跑歷史後端／瀏覽器／102 EditMode／APK。Unity fingerprint仍`792a3aaac9a7903159718a898324def8f6ba4769f908f1f46f30a6c77744c725`，Windows／Quest既有receipts及原scene／prefab ID一致；原5080唯讀GET仍0.16／原歷史。來源與binary在F、全新runtime明確在C SSD，非F USB全資料、跨機、頭盔／MR／VIVE／廠商硬體或25台證據。完整11項與長期目標保持開發中。
+
 ## 2026-10-31：目前版本雙玩家姿態提示重現與三程序時序
 
 從乾淨`e5fa9fa`接續PC穩定性。舊時序原生證據在Unity0.26.1、未含後續射擊音效及完整玩家人物；本輪新增[POSE_TIMING.md](POSE_TIMING.md)的`check-desktop-pose-input.py`／`analyze-pose-input.py`，用既有API／UI0.27及Unity0.28／code32／NGO26。自己的房間3、server、可見玩家及無圖形同伴直接loopback連線，沒有LossGate、故意丟包或payload改寫；三程序明確啟用原有NativePoseTrace，可見玩家另用原HUD trace。沒有改C#／正式輸入、防瞬移、傷害或0.5／1.5秒門檻，沒有原生GPU讀回／PCM／麥克風。
