@@ -1,5 +1,23 @@
 # 開發進度
 
+## 2026-10-31：同源25程序未啟用診斷對照與跨場核對
+
+從乾淨`4497e9a`接續電腦端，補上[跨場證據比較](CONTINUITY_COMPARISON.md)與同源未啟用診斷的自然長場。**API/UI0.30、Unity0.33.0／code40／NGO29保持**；本輪只新增Python比較／測試及文件，未改Unity、後端、姿態／碰撞或0.5／1.5秒政策，也未重跑Editor／雙平台。沿用原152真正EditMode與成功receipt，不把它們稱本輪重建；目前來源重算及Windows／Quest receipt皆為`c98f1e1d9b6857de6fc17ea3c9d585ba41881ac528314f5e7fc0073ee5958b1f`，原Scene／prefab ID保持。
+
+真正未帶`--pose-continuity`長場`desktop-long/20261031-191455-4bd7c8c7`：一個Windows server＋25 headless client、五房Linked各5、固定900秒，全部Simulation／同機靜止；報告明確poseContinuity=null且沒有manifest，模式為DisabledByTool。保留同一工具handle10367直到真正exit0，不從stage／無輸出或等待逾時重啟；全部actor結束、cleanup errors及remainingTrackedChildren均空後才作離線比較。
+
+原25個playerId／admission／room跨票券到期保持，tick5960再次核對，AI損耗後個別健康5位80／20位100。唯一tick18000自動End，25份各自結果全部ack，七統計／through38／combat final5／world8475與CSV25列逐玩家一致、精確雙seal完成。CSV SHA `7d2a262ec8611d26e598b196bb50da616ba4150c5527c8d240dd8b1a65de4cde`。完整4倍回放**8475幀／8412 Running／210300應核對玩家人次**，badFrames0、保存最大capture gap123ms、>=1500ms為0、來源UTC最大0.153497秒／過期0、send queue full0；executionFinished／acceptancePassed／complete=true。是本場連續性通過，不是25位操作、實體網路或頭盔容量通過。
+
+新`compare-desktop-continuity.py`只讀已結束場次的JSON／CSV，核對cleanup、獨立seal／diagnostic manifest、原入場／room、全部ack、七統計、world／ledger／combat邊界及CSV SHA；依全程live／replay、來源年齡、capture gap與queue反例重新核對接受結果。拒絕受控校準、未結束或不一致證據；輸出只寫全新artifacts，保存輸入檔SHA、不開保存SQLite或讀憑證。NotRecorded表示舊報告未保存模式，不能因欄位缺少當DisabledByTool。complete只表示比較完成，不表示每場成功。
+
+實際三場比較與同源開／關比較都exit0：舊0.32／4f1173場8400 Running／210000人次、**2幀／31筆失效仍未通過**；0.33／c98f1稀疏場8391 Running／209775人次、0失效；本輪同c98f1未啟用場8412 Running／210300人次、0失效。三場已記錄差異為sourceFingerprint及diagnosticMode；同源兩場差異為diagnosticMode。這是先後進行的觀察，未量測主機條件並未因此受控，**causalRootProven=false、networkCapacityAccepted=false**。沒有依已證明原因作行為修正，不能說原31筆根因已解或已修復；下一步仍需捕捉自然失效窗口及送出／接收／loop／CPU括號重疊證據，再作針對性修正。
+
+新8項Python反例、既有11項多人連續性及8項稀疏解析共**27項**實際通過，語法與git diff --check成功，CI加入新unit／語法。本輪沒有.NET／UI行為變更，未把原717規則／459 HTTP／47串流／234瀏覽器或Unity結果當新跑。
+
+`continuity-comparison-runtime-validation.json`以raw bytes核對新**1 runtime／14檔**C原件與F snapshot一致，前**25 runtime／563檔**原件及snapshot完全未變；原C API與三工具159檔保持。所有writer停止才一次snapshot，保留C原件，來源及遊戲binary仍F、資料明確C SSD，非F USB效能。長工具指紋`a6d8d68f53bec2279f0625199a41e80a63b7807477a970790d6d61d1a3402499`仍與目前來源一致；原5080服務、帳務、登入／授權／防火牆未動，GUI安全性提示仍由使用者自行處理。
+
+完整11項長期目標保持active。自然失效定位、多玩家持續操作、五獨立房長任務、跨機／25台、Quest／VIVE／MR及廠商硬體各自保留待驗收，不用同機靜止乾淨場取代完整交付。
+
 ## 2026-10-31：長任務稀疏收發／主執行緒診斷
 
 功能 [6018e88](https://github.com/peca12968/vr-command-center/commit/6018e882c7262b03fdb6312b9465842484552363) 已推送main且遠端SHA一致。[本次CI run41195892102](https://github.com/peca12968/vr-command-center/actions/runs/41195892102)／check124521846878為failure、steps空，fresh annotation仍為近期付款失敗或支出上限，job未啟動；沒有雲端測試結果，未更改帳務或手動重跑。本機實際測試與未解限制如下。

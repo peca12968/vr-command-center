@@ -1,5 +1,7 @@
 # 長任務的稀疏姿態診斷
 
+跨場整理與未啟用對照見[CONTINUITY_COMPARISON](CONTINUITY_COMPARISON.md)。比較只列觀察事實與已記錄條件，不能由乾淨場次推定根因或修復。
+
 Unity0.33.0／Android code40／NGO29新增獨立`--vr-pose-continuity <全新絕對目錄>`模式。只限Windows Development、非Editor；一般啟動與Android不安裝。舊NativePoseTrace仍32768列／240秒，NativeReplicationProbe仍240秒，沒有延長原工具或改舊資料／讀取器。新模式與舊pose／loop trace互斥；`--vr-pose-continuity-loop`必須同時有新收集器。
 
 目的為捕捉[25程序15分鐘](DESKTOP_MULTIPLAYER_LONG.md)在第12分鐘附近的失效。API/UI0.30、envelope7／world schema1／NGO29、rules0.8.0與0.5秒姿態／1.5秒來源政策不變；診斷不授權傷害、延長參戰或移動Tracked資料。需要本輪同源Windows／Quest建置，實際結果及限制見[PROGRESS](PROGRESS.md)，不能以儀表本身稱根因已解。

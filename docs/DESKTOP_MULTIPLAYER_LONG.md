@@ -1,5 +1,7 @@
 # 五房25個 PC 程序的15分鐘任務
 
+已關閉場次可用[跨場證據比較](CONTINUITY_COMPARISON.md)逐項核對來源、診斷模式、完整回放與每位玩家結果；歷史失敗保持，不從最終統計一致推成全程連續。
+
 新增[稀疏長診斷](POSE_CONTINUITY.md)選項`--pose-continuity`；新場8449完整回放／209775人次及26完整報告乾淨，不覆蓋下列原31筆失效。Unity0.33／code40，API/UI0.30與NGO29保持；模式成本與原始／受控場次分開，不以新模式乾淨一次稱根因已修復。
 
 `scripts/check-desktop-multiplayer-long.py`把原[單玩家長任務](DESKTOP_LONG.md)的連續性驗證擴至五房Linked世界，預設每房5個、共25個真正Windows client及1個server。使用新API與自有資料，固定900秒活動倒數，不重啟程序累計時間。所有client為靜止、無圖形Simulation，沒有鍵鼠／姿態／武器注入；**不是25位同時操作、25台裝置、跨機／Wi-Fi或頭盔容量驗收**。

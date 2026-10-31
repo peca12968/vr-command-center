@@ -1,5 +1,7 @@
 # 開發指引
 
+同源未啟用診斷對照與跨場工具見docs/CONTINUITY_COMPARISON.md／PROGRESS：新25程序900秒、8475全回放／8412 Running／210300人次、25份結果／CSV／雙seal成功；原同c98f1稀疏場也未重現，舊2幀31筆失效保持未通過，不能稱根因或修復。比較需先確認原handle terminal與全部cleanup，只讀JSON／CSV、不開保存SQLite；明確null才是DisabledByTool，舊缺欄位為NotRecorded。不同source／模式及未量測主機條件不可當因果控制，complete只表示比較完成。API/UI0.30、Unity0.33／code40／NGO29及原152 Editor／雙平台不變，本輪未重建；新27項Python與raw bytes新14檔／前25 runtime563檔保存核對成功，完整11項仍active。
+
 長任務稀疏診斷見docs/POSE_CONTINUITY.md：Unity0.33／code40／NGO29、API/UI0.30；152真正Editor與同源雙平台成功。新Windows Development opt-in為1200秒／256 streams／4096稀疏列，各自保留舊pose／replication的240秒界線與原0.5／1.5秒政策，不可同啟舊pose trace。主執行緒CPU為自己呼叫執行緒、整個Update sample括號，不是engine node CPU；cycles不轉秒。受控上行1.2秒校準與一般8項入場回歸成功，25端新場8449全回放／8391 Running、209775人次及26完整報告乾淨；只代表本場，舊31筆失效保留且未證明根因或修復。一般／Android不安裝，Header／DB／幾何規則不變；完整失敗與範圍見PROGRESS。
 
 25個同機PC的900秒Linked新證據見docs/DESKTOP_MULTIPLAYER_LONG.md／PROGRESS：8463全回放／8400 Running／210000應核對人次，6931／6932幀分別13／18個失效body、31筆／18位受影響，之後恢復。acceptancePassed／complete=false、真正工具exit1；25份ack／CSV／雙seal相符不代表連續性通過。前一幀擷取gap497ms、policy36與suspended=false、健康80／100保持，不能推定GC／排程／傳輸根因或修改0.5／1.5秒政策。新11 Python含恢復後仍失敗反例，舊single／capacity14項通過。API/UI0.30、Unity0.32／code39／NGO29與原144 Editor／雙平台保持，本輪未重建；25位操作／跨機／實機仍待。
