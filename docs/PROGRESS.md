@@ -30,6 +30,8 @@
 
 規則0.8.0、envelope6／world schema1、原header／checksum、素材pins、Tracked資料／pointer／muzzle保持；沒有後端／UI／資產版本契約改動，不重跑歷史654核心／446 HTTP／43世界／217 Chromium、49 UI native／27練習場或人工GPU／DSP／主迴圈診斷，不混算前輪結果。沒有持續25玩家真實移動射擊、跨機／Wi-Fi、完整100敵軍／物件負載、長任務、FPS／聲學、Quest／VIVE／MR或廠商硬體證據，`networkCapacityAccepted`仍false。下一步以實際移動／射擊與更多場景驗證25端同步，再推跨機與設備；完整11項及長期目標保持開發中。
 
+功能提交`54ef0c04c2541bfe555e24214dda5702d153db80`已推送main、遠端一致；提交後重算來源fingerprint仍e8ae6d846dc014e48984a035f2960c043d342a4fe192ff0feaae3891973ba3d0。GitHub #1保持open、原11項與歷史封存連結保留，更新後獨立讀回本文逐字一致。[功能提交CI run41163068604](https://github.com/peca12968/vr-command-center/actions/runs/41163068604)／check124424660203實際failure、steps=null；annotation明示付款失敗或支出上限，工作未開始，沒有雲端測試結果。未改帳務或重跑，本機及原生證據獨立記錄。
+
 ## 2026-10-31：25個原生PC程序、場次容量檢查與觀察檔修正
 
 從乾淨`980d0c4`接續無頭盔的PC開發。新增[scripts/check-desktop-capacity.py](../scripts/check-desktop-capacity.py)，操作見[DESKTOP_CAPACITY](DESKTOP_CAPACITY.md)。只改Python／CI／文件，API／UI0.27、Unity0.28.1／code33／NGO26及原0.5秒姿態／1.5秒來源門檻保持。來源fingerprint仍`5eee75868e70237e91b4c6be989c0f4421da98e7e41c5c8adc31878bcb7617b6`，兩份既有receipt及原scene／prefab ID一致，沒有重跑109 EditMode或雙平台建置。
