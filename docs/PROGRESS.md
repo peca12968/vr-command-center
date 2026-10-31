@@ -29,6 +29,8 @@
 
 限制與下一步：這只證明一位同機PC在指定管理503／world連線中斷、60及180秒活動期限的恢復，不是整個API重啟、server crash、封存中斷、跨機、25位持續操作或Quest／VIVE／MR／硬體驗收。完整11項長期目標保持active。下一步獨立驗證更長任務及封存階段失聯，不用本工具240秒診斷替代長期驗收。
 
+功能提交 `96f86d5a13f2793ba44f721b6859e0479ade0451` 已推送main、遠端一致。[本功能CI run41176835936](https://github.com/peca12968/vr-command-center/actions/runs/41176835936)／check124466037718實際failure，無步驟啟動；fresh annotation明示付款失敗或支出上限，沒有雲端測試結果。未更改帳務或手動重跑，本輪上述檢查為本機證據。
+
 ## 2026-10-31：選用任務活動倒數、到期 End 與兩房原生驗證
 
 從乾淨 `336410b` 接續原始任務「時間」需求，新增 [MISSION_CLOCK](MISSION_CLOCK.md)。API／UI **0.28**、Unity **0.30.0／code37／NGO28**。操作員只在 Preparing 明確選用自動結束；新舊場次預設手動，不把既有 DurationSeconds 靜默改成期限。開始後政策及任務秒數不可變，規則仍0.8.0，原素材 pin／舊資料讀取／原始 binary header及checksum保留。
