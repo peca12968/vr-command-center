@@ -64,6 +64,23 @@ namespace VrCommand.Unity
         private bool journalFault;
         public TelemetryOutbox Outbox { get; private set; }
         public WorldOutbox Recording { get; private set; }
+        public void SendDebrief(ulong client, MissionDebrief value, bool final)
+        {
+            if (!IsServer || !IsSpawned) return;
+            DebriefClientRpc(JsonUtility.ToJson(value), final, new ClientRpcParams { Send = new ClientRpcSendParams { TargetClientIds = new[] { client } } });
+        }
+        [ClientRpc]
+        private void DebriefClientRpc(string json, bool final, ClientRpcParams target = default)
+        {
+            if (VenueBootstrap.Instance == null || string.IsNullOrEmpty(json) || json.Length > 2048) return;
+            MissionDebrief value;
+            try { value = JsonUtility.FromJson<MissionDebrief>(json); } catch (ArgumentException) { return; }
+            if (VenueBootstrap.Instance.ReceiveDebrief(value, final) && final)
+                AcknowledgeDebriefServerRpc(value.sessionId, value.playerId, value.admissionId);
+        }
+        [ServerRpc(RequireOwnership = false)]
+        private void AcknowledgeDebriefServerRpc(string sessionId, string playerId, string admissionId, ServerRpcParams request = default)
+            => VenueBootstrap.Instance?.AcknowledgeDebrief(request.Receive.SenderClientId, sessionId, playerId, admissionId);
         private ManagementSnapshot management;
         private double recordingStart, nextRecording;
         private bool managementSuspended;

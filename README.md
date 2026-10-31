@@ -4,7 +4,7 @@
 
 依 2026-10-29 的使用者指示，**優先開發 Meta Quest 3**，暫以 Android 獨立執行為工作假設；VIVE 延後接入，共用架構與原始雙平台目標保留。
 
-目前為 **API v0.27／Unity 遊戲端 v0.28.3 原型**。真正 Editor 已完成 Prepare、114 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 26，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人完整驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
+目前為 **API v0.27／Unity 遊戲端 v0.29.0 原型**。真正 Editor 已完成 Prepare、125 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 27，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人完整驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
 
 新增[各玩家端接收狀態診斷](docs/DESKTOP_REPLICATION.md)：Linked及五獨立房各25個同機無圖形client、各60秒，22項檢查、280個同步快照及六場精確封存通過。舊128格driver重現112筆send queue full；server改1024、client仍128後，本輪原生日誌與56份完整報告皆0筆，同版未啟用探針的25人對照亦0筆。114真正EditMode及同源雙平台成功；這是有界的同機靜止Simulation負載，**完整網路／25台／實機驗收仍待**，原主迴圈停頓亦未證明修復。完整結果見PROGRESS。
 
@@ -13,6 +13,8 @@
 [電腦練習場入口](docs/DESKTOP.md)已接上目前API0.27及共用原生生命週期，拒絕過期receipt，支援明確SSD runtime、同房最多五個PC client、正常關窗／控制台End／到時封存，結束自動核對CSV。27項無圖形及9項真正視窗流程通過；這是同機Simulation，非25台或跨機驗收。
 
 新增 [最終任務報表 CSV](docs/REPORTS.md)：結束並完成戰鬥精確封存後，可下載含離場玩家、原任務版本、Simulation／GameServer來源及封存序號的逐玩家數據。後端獨立檢查權限與完整性；下載不跨登入或場次。這是最終戰鬥 ledger，世界錄影完整性另有驗收，不代表頭盔／25台通過。
+
+新增[玩家任務結束戰績](docs/DESKTOP_DEBRIEF.md)：combat及world都精確seal後，兩位PC玩家各自收到自己的最終數據，ack斷線後畫面保留；移除者與Ended票券收不到結果，Host等peer結束才shutdown。一般啟動器真正Space／封存／保留／Reconnect清除及新場取代舊結果已觀察；125 EditMode、36 Python、30練習場、49 UI native及8項原生票券重連回歸通過，零事件JSON反例已修正。來源仍Simulation，完整證據及限制見PROGRESS。
 
 較窄的 [managed SDK 檢查](docs/UNITY_SDK_CHECK.md) 仍可補充 API／直接參考診斷，其本身不執行 Unity 或產出播放器；目前較強的真正 Editor、109 項測試及 binary 結果以 PROGRESS 為準。
 

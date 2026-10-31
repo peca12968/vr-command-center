@@ -178,7 +178,7 @@ namespace VrCommand.Unity
                     rightHand.localRotation = rightRotation.ReadValue<Quaternion>();
                 }
                 else DesktopPreview();
-                if (Time.unscaledTime >= nextSend)
+                if (VenueBootstrap.Instance.State != "Ended" && Time.unscaledTime >= nextSend)
                 {
                     nextSend = Time.unscaledTime + 0.05f;
                     var pose = CurrentPose();
@@ -331,7 +331,7 @@ namespace VrCommand.Unity
 
         private void OnGUI()
         {
-            if (!IsSpawned || !IsOwner || tracked || localCamera == null) return;
+            if (!IsSpawned || !IsOwner || tracked || localCamera == null || VenueBootstrap.Instance?.Debrief.Active == true) return;
             DesktopWindowKey();
             var combat = CombatAuthority.Instance;
             if (combat == null || !combat.Player(PlayerId.Value.ToString(), out var player)) return;

@@ -82,9 +82,19 @@ def verify_player(args):
     subprocess.run([sys.executable, str(ROOT / 'scripts/check-transport-patch.py')], check=True)
 
 
+def player_result_phase(text):
+    connected = text.rfind('VR_CLIENT_CONNECTED id=')
+    if connected < 0: return 'notConnected'
+    final = text.rfind('VR_CLIENT_DEBRIEF_FINAL ')
+    left = text.rfind('VR_CLIENT_DISCONNECTED')
+    if final > connected: return 'acknowledged' if left > final else 'received'
+    if left > connected: return 'disconnected'
+    return 'pending' if text.rfind('VR_CLIENT_DEBRIEF_PENDING ') > connected else 'connected'
+
+
 class Venue:
     def __init__(self, args, *, artifact_family='desktop-venue'):
-        if artifact_family not in ('desktop-venue', 'desktop-demo', 'desktop-capacity', 'desktop-active'):
+        if artifact_family not in ('desktop-venue', 'desktop-demo', 'desktop-capacity', 'desktop-active', 'desktop-debrief'):
             raise ValueError('Unknown native fixture artifact family')
         self.args = args
         self.artifact_family = artifact_family
@@ -111,10 +121,10 @@ class Venue:
         (ROOT / 'artifacts' / ('latest-' + self.artifact_family + '-path.txt')).write_text(str(self.directory), encoding='utf-8')
         print(json.dumps({'stage': stage, 'directory': str(self.directory), **extra}), flush=True)
 
-    def request(self, route, body=None, *, role='Master', expected=200, admission=None, optional=False):
+    def request(self, route, body=None, *, role='Master', expected=200, admission=None, optional=False, method=None):
         headers = {'Authorization': 'Bearer ' + self.tokens[role], 'Content-Type': 'application/json'}
         if admission: headers['If-Match-Admission'] = admission
-        message = urllib.request.Request(self.base + route, data=None if body is None else json.dumps(body).encode(), headers=headers)
+        message = urllib.request.Request(self.base + route, data=None if body is None else json.dumps(body).encode(), headers=headers, method=method)
         try:
             with urllib.request.urlopen(message, timeout=5) as response:
                 status, raw = response.status, response.read()
@@ -124,10 +134,10 @@ class Venue:
         if status != expected: raise RuntimeError(f'{route}: expected {expected}, got {status}')
         return json.loads(raw) if raw else None
 
-    def wait(self, predicate, seconds, label):
+    def wait(self, predicate, seconds, label, *, required=None):
         deadline = time.monotonic() + seconds
         while time.monotonic() < deadline:
-            failed = [name for name, process in self.processes.items() if process.poll() is not None]
+            failed = [name for name, process in self.processes.items() if process.poll() is not None and (required is None or name in required)]
             if failed: raise RuntimeError('Unexpected child exit during ' + label + ': ' + ', '.join(failed))
             try:
                 value = predicate()
@@ -256,7 +266,7 @@ class Venue:
     def seal(self, entry):
         if entry['sealed']: return entry['sealed']
         if self.state(entry)['state'] != 'Ended': self.command(entry, 'End')
-        world = self.wait(lambda: (world if (world := self.request(f'/api/sessions/{entry["id"]}/world', optional=True)) and world['complete'] else None), 30, entry['name'] + ' exact seals')
+        world = self.wait(lambda: (world if (world := self.request(f'/api/sessions/{entry["id"]}/world', optional=True)) and world['complete'] else None), 30, entry['name'] + ' exact seals', required={'api', entry['name'] + '-server'})
         statistics = self.request(f'/api/sessions/{entry["id"]}/statistics'); final = self.frame(entry)
         if statistics['pendingTelemetry'] or final['packet']['frame']['phase'] != 'Ended': raise RuntimeError('Incomplete final telemetry')
         if world['header']['origin'] != 'Simulation' or world['header']['roomIds'] != entry['roomIds']: raise RuntimeError('World source / room isolation failed')
@@ -283,6 +293,35 @@ class Venue:
     def stop_round(self, entry):
         for name in list(self.processes):
             if name.startswith(entry['name'] + '-'): self.stop(name)
+
+    def wait_for_player_results(self, entry):
+        if not entry['sealed']: raise RuntimeError('Seal the world before waiting for player results')
+        if 'playerResults' in entry: return entry['playerResults']
+        names = [n for n in self.processes if n.startswith(entry['name'] + '-')]
+        deadline = time.monotonic() + 36
+        while True:
+            phases = {}
+            for name in names:
+                child = self.processes.get(name)
+                path = self.directory / (name + '.log')
+                phase = player_result_phase(path.read_text(encoding='utf-8', errors='replace')) if path.exists() else 'notConnected'
+                if phase == 'notConnected': continue  # dedicated server or rejected / never connected client
+                phases[name] = 'closed' if child is None or child.poll() is not None else phase
+            if not any(p in ('connected', 'pending', 'received') for p in phases.values()) or time.monotonic() >= deadline: break
+            time.sleep(.1)
+        result = {'phases': phases, 'allAcknowledged': bool(phases) and all(p == 'acknowledged' for p in phases.values()),
+                  'timedOut': [n for n, p in phases.items() if p in ('connected', 'pending', 'received')]}
+        self.save(entry['name'] + '-player-results.json', result)
+        entry['playerResults'] = result  # Retention expiry must not replace a receipt with a later empty set.
+        return result
+
+    def inspect_player_results(self, entry, visible_name, seconds):
+        deadline = time.monotonic() + seconds
+        if not visible_name or visible_name not in self.processes: return
+        self.stage('player_results', sessionId=entry['id'], seconds=seconds)
+        while time.monotonic() < deadline and self.processes[visible_name].poll() is None:
+            if (self.directory / 'dismiss-results.request').exists(): break
+            time.sleep(.1)
 
     def summary(self):
         if self.request('/api/sessions'): raise RuntimeError('Venue still has active sessions')

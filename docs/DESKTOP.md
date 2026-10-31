@@ -1,5 +1,7 @@
 # 電腦練習場
 
+目前玩家End流程見[DESKTOP_DEBRIEF](DESKTOP_DEBRIEF.md)：Unity0.29／NGO27；雙seal後傳送自己的最終戰績、ack斷線保留。`--results-seconds`預設30（0–300），可關窗或以`dismiss-results.request`提早結束；新任務玩家可取代舊結果視窗。最新建置／125 EditMode與原生驗證以PROGRESS為準，下文版本數字為功能首輪歷史。
+
 在 Windows 不接頭盔操作同一份 Unity 遊戲接入。這是桌面合成頭手的 **Simulation**，不代表 Quest／VIVE 或正式軍事美術驗收。
 
 要從控制台自行編輯／保存／選取任務並啟動真正 PC，見 [DESKTOP_CONTROL.md](DESKTOP_CONTROL.md)。本頁保留固定練習任務。

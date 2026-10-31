@@ -108,11 +108,9 @@ def run(venue):
     except KeyboardInterrupt:
         reason = 'interrupt'
     if venue.state(entry)['state'] != 'Ended': venue.command(entry, 'End')
-    # Only the authority and API are required to confirm the final boundary.
-    # Retire known closing clients before entering the strict live-child wait.
-    for name in list(venue.processes):
-        if name.startswith('practice-client-'): venue.stop(name)
     sealed = venue.seal(entry)
+    results = venue.wait_for_player_results(entry)
+    venue.inspect_player_results(entry, visible_name, getattr(venue.args, 'results_seconds', 30))
     venue.save('latest-frame.json', venue.frame(entry))
     venue.save('latest-statistics.json', sealed['statistics'])
     report = save_report(venue, entry, sealed['statistics'])
@@ -120,7 +118,7 @@ def run(venue):
     summary = json.loads((venue.directory / 'summary.json').read_text(encoding='utf-8'))
     # Preserve the earlier practice summary's top-level API while retaining venue evidence.
     summary.update(source='Simulation', stopReason=reason, world=sealed['world'], statistics=sealed['statistics'],
-                   replayStatisticsMatch=True, finalReport=report)
+                   replayStatisticsMatch=True, finalReport=report, playerResults=results)
     venue.save('summary.json', summary)
     venue.stage('sealed', stopReason=reason, finalReport='final-report.csv', frames=sealed['world']['acceptedSequence'])
 
@@ -135,6 +133,7 @@ def main():
     parser.add_argument('--runtime-root', type=Path, help='Explicit fresh runtime on SSD; closed snapshot copied back to F')
     parser.add_argument('--job-workers', type=int, choices=range(1, 17), default=2)
     parser.add_argument('--headless', action='store_true', help='Unattended native diagnostics; no visible player or GPU claim')
+    parser.add_argument('--results-seconds', type=int, choices=range(0, 301), default=30, metavar='0..300', help='Keep a visible End result for inspection; close it or create dismiss-results.request to finish early')
     args = parser.parse_args(); args.check = False
     try: venue_module.verify_player(args)
     except (OSError, RuntimeError, ValueError) as error: parser.error(str(error))

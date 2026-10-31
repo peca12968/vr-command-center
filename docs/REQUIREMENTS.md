@@ -2,7 +2,7 @@
 
 基準日期：2026-10-29。完成定義須同時有程式、操作途徑與符合範圍的驗證證據。以下「規劃」項目皆未完成。
 
-真正 Editor 已完成 UPM／ILPP／匯入、114 項 EditMode、v0.28.3同源Windows及Quest APK；Windows 獨立／五房 Linked Simulation、票券撤銷及真正視窗斷線後保留位置／健康／彈藥均通過，各輪範圍以PROGRESS為準。使用者目前沒有頭盔，先繼續電腦端；五房原生隔離及之後新開 Linked 亦已通過，條件與限制見 [DESKTOP_VENUE](DESKTOP_VENUE.md)；這不完成以下整體驗收。最新證據見 [RECONNECT.md](RECONNECT.md)／PROGRESS，首輪原生範圍見 [NATIVE_VALIDATION.md](NATIVE_VALIDATION.md)，較窄的診斷另見 [UNITY_SDK_CHECK.md](UNITY_SDK_CHECK.md)。
+真正 Editor 已完成 UPM／ILPP／匯入、125 項 EditMode、v0.29.0同源Windows及Quest APK；Windows 獨立／五房 Linked Simulation、票券撤銷及真正視窗斷線後保留位置／健康／彈藥均通過，各輪範圍以PROGRESS為準。使用者目前沒有頭盔，先繼續電腦端；五房原生隔離及之後新開 Linked 亦已通過，條件與限制見 [DESKTOP_VENUE](DESKTOP_VENUE.md)；這不完成以下整體驗收。最新證據見 [RECONNECT.md](RECONNECT.md)／PROGRESS，首輪原生範圍見 [NATIVE_VALIDATION.md](NATIVE_VALIDATION.md)，較窄的診斷另見 [UNITY_SDK_CHECK.md](UNITY_SDK_CHECK.md)。
 
 | 編號 | 使用者需求 | 最終驗收證據 | API 0.27／Unity 0.28.3 狀態 |
 |---|---|---|---|
@@ -16,7 +16,7 @@
 | 8 | 任務編輯、名稱、內容、時間、儲存及選取套用 | 編輯器可保存任務、列出既有任務、一鍵啟動並還原環境 | 已有任務庫、SQLite 不可變版本鏈、完整條件／配置重載、明確新舊版開場、修訂衝突與原樣重試；舊版及既有場次不改變。核心／HTTP／瀏覽器已有證據，真正 PC 已由 API 任務啟動並產生 AI／天氣世界資料；控制台保存重載→選任務→真正 PC 原生場景已驗證；頭盔環境還原與完整場館流程仍待驗收 |
 | 9 | 任務執行過程回放 | 儲存世界快照與事件，任意跳轉、暫停、倍速且統計一致 | 已有 WS 發布、SQLite 持久世界、SSE 索引跳轉／暫停／倍速回放及事件前綴／最終統計核對；Simulation 與合成頭手通過跨程序及瀏覽器檢查，真正 PC 發布、暫停、精確封存與回放統計已驗證，合成頭手維持 Simulation；實際頭手待驗 |
 | 10 | 即時觀戰、上帝視角與位置角度選取 | 操作員自由鏡頭、玩家跟隨、鏡頭書籤；不占玩家名額 | 已有房間範圍 SSE 即時觀戰、過期提示、自由旋轉／平移／縮放、俯視及跟隨；鏡頭位置可命名持久保存、重新登入讀取及快速切換，依身分與場次隔離並支援原樣重試。Simulation／SQLite／HTTP／瀏覽器已驗證，不占名額；真正 PC 世界已發布並以擷取 UTC 驗證本機新鮮度，真正 native recording 已由控制台即時俯視、保存鏡頭、跟隨後切回及末幀回放；新增看向座標／水平及俯視角／距離的數值輸入，真正 PC 錄製上的拖曳／平移／縮放、精確視角保存及封存回放讀回已有33項整合證據，見 OBSERVER_CAMERA；瀏覽器是軟體 WebGL，完整人工手感／真實GPU及實際頭手仍待驗收 |
-| 11 | 彈藥、擊殺、自身耗損、中彈、命中率 | 經遊戲伺服器確認事件產出統計，可對照回放、匯出結果 | 統計／UI、持久 outbox、跨程序補送及精確封存已有 Simulation 對照與 API 驗證；真正 PC 的 AI 傷害／中彈與回放封存統計一致；PC 真正視窗已驗證耗彈 3／命中 2／擊殺 1／66.67%、換彈及暫停，封存回放統計一致；新增最終戰鬥CSV匯出，僅Ended且精確seal完成可下載，含離場玩家、來源、原任務與封存序號，權限／重啟及原生整合證據見REPORTS／PROGRESS；實機仍待驗 |
+| 11 | 彈藥、擊殺、自身耗損、中彈、命中率 | 經遊戲伺服器確認事件產出統計，可對照回放、匯出結果 | 統計／UI、持久 outbox、跨程序補送及精確封存已有 Simulation 對照與 API 驗證；真正 PC 的 AI 傷害／中彈與回放封存統計一致；PC 真正視窗已驗證耗彈 3／命中 2／擊殺 1／66.67%、換彈及暫停，封存回放統計一致；新增最終戰鬥CSV匯出，僅Ended且精確seal完成可下載，含離場玩家、來源、原任務與封存序號，權限／重啟及原生整合證據見REPORTS／PROGRESS；新增玩家End戰績：combat及world雙seal後target傳送自己數據，ack斷線保留、Reconnect清除，Host等待peer；兩端及真正Space畫面已驗，見DESKTOP_DEBRIEF／PROGRESS；實機仍待驗 |
 
 ## 共同條件
 

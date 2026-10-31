@@ -1,5 +1,35 @@
 # 開發進度
 
+## 2026-10-31：玩家End戰績、零事件修正與一般PC入口
+
+新增[DESKTOP_DEBRIEF](DESKTOP_DEBRIEF.md)：Unity **0.29.0／code36／NGO27**，API／UI仍0.27，驗票2／rules0.8.0／歷史錄製與素材格式不變。End立即解除遊戲binding，只有原名冊player＋admission＋room＋seat相同的既有連線可等待自己的結果。combat及world journal都精確seal後，GameServer以原有認證statistics路由讀ledger，可靠target RPC只傳該玩家，含來源／session／admission／stream／最終序號；ack後斷線。Host須等peer結束才處理自己的ack／shutdown，不讓主持人先切掉其他結果。移除／換席仍立即撤銷，Ended不接受新入場，玩家不持有管理key。
+
+PC先顯示等待封存，再顯示耗彈／命中／擊殺／中彈／損耗／健康／命中率及來源。結果留在bootstrap，avatar despawn／斷線不清除，真正Reconnect才清除；Ended停止姿態送報且結果接管HUD，不移動Tracked資料。無final只顯示未確認；等待30秒，正在進行的HTTP最多再5秒。沒有新增client永久結果檔，伺服器報表／回放仍保留。Android等候標籤接相同文字，無頭盔排版／操作驗收。
+
+**找到並修正零事件漏測**：原練習場會先停client再seal，無法看結果；改為等送達後，`desktop-practice-checks/20261031-122249-c933da43`原27項仍通過，但五人／一人／兩人三場都只有pending，30秒後8人全部timeout，allAcknowledged=false（43／39／591世界幀）。精確報表封存不等於玩家收到結果，原passed只屬舊檢查範圍，結果及原件保留。真正EditMode新增API JSON `origin:null`反例，125項中1項失敗、訊息`JsonUtility null origin was []`，XML及log在`debrief-null-regression-*`。Unity把null string讀成空字串；現僅允許已封存、final combat sequence=0、全名冊零事件且健康100，來源取綁定stream，不補寫API的null combat origin。非零串流或任何玩家有事件的缺失來源仍拒絕。修正後 **125項真正EditMode全過**，新增共11項身分／序號／來源／不可覆寫／真實JSON驗證；Tests門檻125。
+
+最終fingerprint `a97b40a2836de7a8c5e8e64596b37feac3d545438a4538df4d403f5d73c4e9d3`；Windows receipt `2026-10-31T04:29:48.3629507Z`，Quest receipt `2026-10-31T04:42:20.0862064Z`，同源ARM64／IL2CPP APK成功。aapt為0.29.0／code36、min32／target35／arm64-v8a，實際46,486,635 bytes；包內有81,279,680-byte libil2cpp、9,257,336-byte metadata及新debrief型別（不是實機執行證據）。原Scene `4314adcd8c63d86469d16497127d8cfb／1444571642`及prefab `6f3f36cb9d710e847b5ecc569665e1ce／5227825248646244841`保持，Prepare不重建ID，所有遊戲程序一起更新。
+
+最終來源的原生證據（全為同機Windows、Simulation）：
+
+| 20261031 artifact場次 | 範圍 | 世界幀／結果 |
+|---|---|---|
+| desktop-debrief/123041-bbe00436 | Begin前取消、4項 | 27幀；兩位零事件結果ack、Ended舊票券拒絕 |
+| desktop-debrief/123047-12e8f352 | Host＋peer、4項 | 27幀；玩家一中彈1／損耗20／健康80，peer100；peer ack先於host shutdown |
+| desktop-debrief/123052-2b34dd7e | dedicated server、4項 | 27幀；兩份不同結果與精確combat／world seal一致；移除者與Ended舊票券無結果 |
+| desktop-demo/123058-1411a4e3 | 一般啟動器、真正GPU／Space及另列5項觀察 | 241幀；耗彈1／命中0／0%／健康100，peer全零；兩位ack、保留畫面、Reconnect清除及票券拒絕 |
+| desktop-practice-checks/123148-24d21ff8 | 更新為30項、五人／一人／兩人 | 43／43／589幀；End、end.request、60秒到時均逐位收到並ack、精確seal／CSV／cleanup一致 |
+| desktop-venue/123338-129116cb | 控制台49項UI／native，兩位在場及一位離場歷史 | 135幀；兩位結果ack，任務／配置／名冊／聲光設定／AI／觀戰／封存回放／CSV通過，Chromium SwiftShader另列 |
+| desktop-venue/123517-5aebaf1b | 操作員工具兩連續場及4項真正GPU觀察 | 55／123幀；第一場結果仍在90秒保留期時新玩家開啟新Preparing視窗，第二場獨立結果；兩場各一位ack |
+
+一般練習場及操作員入口新增`--results-seconds 0..300`（預設30），先等結果ack／斷線再處理保留畫面；操作員的保留期限不阻塞其他房間，新可見玩家優先取代舊結果。關閉結果或`dismiss-results.request`可提早結束保留。`*-player-results.json`將送達、只有斷線、關窗、逾時及空集合分開，空集合不當成功。送達結果以本場次cache固定，保留期限清掉程序後不能以空集合覆蓋已確認的receipt；新增單元反例與`desktop-venue/124502-969f19e5` results-seconds0／21幀及退出後receipt SHA一致。seal只要求自己API／authority存活，已正常關閉的玩家不阻止精確保存；一般等待仍檢查全部必需程序。
+
+同源`unity-admission/20261031-123655-db6519b6` **8項／367幀**通過：重複入場、撤銷、同ID新epoch、舊移除與票券、舊client遲退出、真正transport釋放後同admission重連的已接受位置／健康／彈藥，以及Ended拒絕／封存；這次為無圖形回歸，不補稱0.65公尺實際鍵盤。**36 Python**（8 active＋11 capacity＋5 artifact＋12 debrief／入口生命週期）、語法及293官方Transport／單一修補核對通過。API／UI來源未改，未重跑全後端／201 Chromium／25端容量或PCM／FPS。已檢視本次operator-ui/final-report.png；軟體WebGL不是原生GPU證據，原生結果與新場視窗另以computer-use觀察。
+
+隔離runtime全部明確C SSD，來源／binary仍F；全停writer後才一次複製回F，保留原件，未開SQLite作稽核。`debrief-final-validation.json`覆核**20個runtime、280檔**，原件／副本逐檔SHA一致，最終來源10個runtime（含上述三個練習場）皆乾淨；之前七場已保存manifest也保持不變。早期`120744-0024ac98`因工具誤用description而非必要briefing在HTTP400停止、未啟動遊戲，12檔保留。其餘早期UI修正前`120754／120804／120817`與零事件修正前`121037／121044／121053`各14檔保留；後三場fingerprint `002550...`與其8項／382幀重連不是最終來源。早期HUD曾有POSE REJECTED及斷線Preparing小框，已由最終畫面修正；不重寫舊passed或把舊receipt當新建置。Host早期summary的最後label過廣，debrief-result始終正確區分host shutdown與dedicated票券檢查，現由同一checks陣列產生摘要。原5080歷史服務與Unity serve／登入／安全設定未更動。
+
+限制：本輪兩位結果接收及最多五位無圖形練習場，未驗25人同時操作、跨機、Quest／VIVE實機、MR或廠商硬體。真正零事件bug曾觸發30秒timeout，但這不是刻意丟包／斷網／封存中斷的完整故障驗收。近End入場競態及更長任務仍待；原主迴圈偶發停頓未證明修復，完整11項長期目標仍active。
+
 ## 2026-10-31：真正W／Space／R／Space與25端回放，補全程失效檢查
 
 從乾淨`d39bd9e`接續PC動態操作。新增[DESKTOP_ACTIVE](DESKTOP_ACTIVE.md)／`check-desktop-active.py`，使用既有Unity0.28.3／code35／NGO26及API UI0.27，**一位實際操作、24個接收端**，一個真正GPU視窗及24個nographics程序。使用computer-use真實按鍵，無測試RPC／姿態／武器注入。合法油桶配置使實際候選網格把Room3靶位安排在(-3,0,-1)，不直接指定NPC位置、不改rules；W實際前進0.05公尺，Space命中50傷害、R補至30／89、第二發擊殺至29／89。主玩家耗彈2／命中2／擊殺1／100%、健康100；其他24人的頭位、彈藥／射擊及統計未被本玩家輸入改動。

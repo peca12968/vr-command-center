@@ -23,6 +23,18 @@ namespace VrCommand.Unity
         private float nextReconnect;
         private TelemetryOutbox outbox;
         private WorldRecordingDelivery worldDelivery;
+        private sealed class EndingClient
+        {
+            internal TicketApproval Admission;
+            internal MissionDebrief Context;
+            internal double Deadline;
+            internal bool Sent, Acknowledged;
+        }
+        private readonly Dictionary<ulong, EndingClient> ending = new Dictionary<ulong, EndingClient>();
+        public MissionDebriefState Debrief { get; } = new MissionDebriefState();
+        private bool deliveringDebriefs;
+        public string PlayerStatus => Debrief.Result != null ? Debrief.Result.Display : Debrief.Pending
+            ? (networkManager.IsConnectedClient ? "MISSION ENDED - WAITING FOR SEALED RESULTS" : "MISSION ENDED - RESULTS NOT CONFIRMED; CONTACT CONTROL DESK") : Status;
         public static VenueBootstrap Instance { get; private set; }
         public string State => sceneAuthority != null && sceneAuthority.IsSpawned ? sceneAuthority.Phase.Value.ToString() : "Preparing";
         public string Status => status + (outbox == null ? "" : " / REPORTS PENDING " + (outbox.LastSequence - outbox.AcknowledgedSequence));
@@ -202,16 +214,90 @@ namespace VrCommand.Unity
                 foreach (var clientId in new List<ulong>(admitted.Keys))
                 {
                     var admission = admitted[clientId];
-                    var present = snapshot.state != "Ended" && Array.Exists(snapshot.players, player => player.id == admission.playerId
+                    var present = Array.Exists(snapshot.players, player => player.id == admission.playerId
                         && player.roomId == admission.roomId && player.seat == admission.seat && player.admissionId == admission.admissionId);
-                    if (!present)
+                    if (present && snapshot.state == "Ended" && outbox != null && combatAuthority.Recording != null)
+                    {
+                        // Gameplay binding ends now. Only this pre-existing connection may receive its result.
+                        admitted.Remove(clientId); combatAuthority.Unbind(clientId);
+                        var context = new MissionDebrief { sessionId = snapshot.id, playerId = admission.playerId, admissionId = admission.admissionId,
+                            roomId = admission.roomId, origin = outbox.Origin, streamId = outbox.StreamId.ToString("D"), throughSequence = snapshot.sequence,
+                            finalStreamSequence = outbox.LastSequence, worldSequence = combatAuthority.Recording.LastSequence };
+                        ending[clientId] = new EndingClient { Admission = admission, Context = context, Deadline = Time.realtimeSinceStartupAsDouble + 30 };
+                        combatAuthority.SendDebrief(clientId, context, false);
+                        continue;
+                    }
+                    if (!present || snapshot.state == "Ended")
                     {
                         if (clientId == NetworkManager.ServerClientId && networkManager.IsHost)
                         { status = "HOST ADMISSION REVOKED"; networkManager.Shutdown(); yield break; }
                         admitted.Remove(clientId); combatAuthority.Unbind(clientId); networkManager.DisconnectClient(clientId);
                     }
                 }
+                if (ending.Count != 0 && !deliveringDebriefs) StartCoroutine(DeliverDebriefs());
             }
+        }
+
+        private IEnumerator DeliverDebriefs()
+        {
+            deliveringDebriefs = true;
+            try
+            {
+                while (ending.Count != 0 && networkManager.IsListening)
+                {
+                    foreach (var client in new List<ulong>(ending.Keys))
+                        if (ending.TryGetValue(client, out var delivery) && (delivery.Acknowledged || Time.realtimeSinceStartupAsDouble >= delivery.Deadline))
+                        {
+                            // A host's own ack must not shut down NGO before the other recipients finish.
+                            if (client == NetworkManager.ServerClientId && networkManager.IsHost && ending.Count > 1) continue;
+                            ending.Remove(client);
+                            Debug.Log(delivery.Acknowledged ? "VR_SERVER_DEBRIEF_ACK id=" + client : "VR_SERVER_DEBRIEF_TIMEOUT id=" + client);
+                            if (client == NetworkManager.ServerClientId && networkManager.IsHost) { networkManager.Shutdown(); yield break; }
+                            networkManager.DisconnectClient(client);
+                        }
+                    if (ending.Count == 0) yield break;
+                    var unsent = false;
+                    foreach (var delivery in ending.Values) if (!delivery.Sent) { unsent = true; break; }
+                    if (unsent && outbox.Sealed && combatAuthority.Recording.Sealed)
+                    {
+                        using (var request = UnityWebRequest.Get(configuration.managementApiUrl.TrimEnd('/') + "/api/sessions/" + configuration.sessionId + "/statistics"))
+                        {
+                            request.SetRequestHeader("Authorization", "Bearer " + configuration.gameServerKey); request.timeout = 5;
+                            yield return request.SendWebRequest();
+                            DebriefStatistics statistics = null;
+                            if (request.result == UnityWebRequest.Result.Success)
+                                try { statistics = JsonUtility.FromJson<DebriefStatistics>(request.downloadHandler.text); } catch (ArgumentException) { }
+                            if (statistics != null)
+                                foreach (var client in new List<ulong>(ending.Keys))
+                                    if (ending.TryGetValue(client, out var delivery) && !delivery.Sent && Time.realtimeSinceStartupAsDouble < delivery.Deadline)
+                                    {
+                                        var result = statistics.Select(delivery.Admission, delivery.Context);
+                                        if (result == null) continue;
+                                        delivery.Sent = true; combatAuthority.SendDebrief(client, result, true);
+                                    }
+                        }
+                    }
+                    yield return new WaitForSecondsRealtime(.25f);
+                }
+            }
+            finally { deliveringDebriefs = false; }
+        }
+        public void AcknowledgeDebrief(ulong client, string sessionId, string playerId, string admissionId)
+        {
+            if (ending.TryGetValue(client, out var delivery) && delivery.Sent && delivery.Context.sessionId == sessionId
+                && delivery.Admission.playerId == playerId && delivery.Admission.admissionId == admissionId) delivery.Acknowledged = true;
+        }
+        public bool ReceiveDebrief(MissionDebrief value, bool final)
+        {
+            if (networkManager == null || !networkManager.IsClient) return false;
+            if (final)
+            {
+                if (!Debrief.Accept(value)) return false;
+                Debug.Log("VR_CLIENT_DEBRIEF_FINAL " + JsonUtility.ToJson(value)); return true;
+            }
+            var avatar = networkManager.LocalClient?.PlayerObject?.GetComponent<NetworkAvatar>();
+            if (avatar == null || !Debrief.Begin(value, avatar.PlayerId.Value.ToString())) return false;
+            Debug.Log("VR_CLIENT_DEBRIEF_PENDING " + value.sessionId); return true;
         }
 
         private void ApproveConnection(NetworkManager.ConnectionApprovalRequest request, NetworkManager.ConnectionApprovalResponse response)
@@ -301,6 +387,7 @@ namespace VrCommand.Unity
             if (configuration != null && configuration.IsServer) Debug.Log("VR_SERVER_CLIENT_LEFT id=" + clientId);
             combatAuthority?.Unbind(clientId);
             admitted.Remove(clientId);
+            ending.Remove(clientId);
             if (clientId == networkManager.LocalClientId)
             {
                 Debug.Log(networkManager.DisconnectReason == "Admission rejected. Please contact the control desk."
@@ -322,7 +409,7 @@ namespace VrCommand.Unity
                 var transport = (UnityTransport)networkManager.NetworkConfig.NetworkTransport;
                 transport.SetConnectionData(fresh.address, fresh.port);
                 networkManager.NetworkConfig.ConnectionData = Encoding.UTF8.GetBytes(fresh.joinTicket);
-                configuration = fresh; status = "CONNECTING";
+                configuration = fresh; status = "CONNECTING"; Debrief.Clear();
                 if (!networkManager.StartClient()) status = "RECONNECT FAILED - CONTACT CONTROL DESK";
             }
             catch (Exception) { status = "CONNECTION FILE INVALID - CONTACT CONTROL DESK"; }
@@ -344,6 +431,17 @@ namespace VrCommand.Unity
         private void OnGUI()
         {
             if (Application.platform == RuntimePlatform.Android) return;
+            if (Debrief.Active)
+            {
+                var width = Mathf.Min(820, Screen.width - 32); var height = 280;
+                var area = new Rect((Screen.width - width) / 2, (Screen.height - height) / 2, width, height);
+                GUI.Box(area, "AFTER ACTION REPORT");
+                GUI.Label(new Rect(area.x + 24, area.y + 34, area.width - 48, height - 52), PlayerStatus,
+                    new GUIStyle(GUI.skin.label) { fontSize = 22, wordWrap = true, richText = false });
+                if (configuration != null && configuration.role == "Client" && !networkManager.IsListening && !networkManager.ShutdownInProgress
+                    && Time.unscaledTime >= nextReconnect && GUI.Button(new Rect(area.x, area.yMax + 12, 300, 42), "Reconnect / reload player ticket")) ReconnectClient();
+                return;
+            }
             if (networkManager != null && networkManager.IsConnectedClient && networkManager.LocalClient.PlayerObject != null) return;
             GUI.Box(new Rect(12, 12, 430, 58), "VR COMMAND - QUEST 3 VERTICAL SLICE");
             GUI.Label(new Rect(24, 40, 410, 24), Status + " / " + State);

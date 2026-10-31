@@ -29,9 +29,19 @@ def run(venue):
     deadline = time.monotonic() + venue.args.duration
     try:
         while time.monotonic() < deadline and not (venue.directory / 'end.request').exists():
+            # Retain Ended result windows without blocking other rooms or new admissions.
+            for entry in entries.values():
+                if entry.get('resultsUntil') is not None and (time.monotonic() >= entry['resultsUntil'] or (venue.directory / 'dismiss-results.request').exists()):
+                    venue.stop_round(entry); del entry['resultsUntil']
+                    for identity, name in list(clients.items()):
+                        if identity[0] == entry['id']:
+                            del clients[identity]
+                            if visible == name: visible = None
             if visible in venue.processes and venue.processes[visible].poll() is not None:
+                ended = any(e['sealed'] and visible.startswith(e['name'] + '-') for e in entries.values())
                 venue.stop(visible)
-                break
+                if ended: visible = None
+                else: break
             states = venue.request('/api/sessions?includeEnded=true')
             for state in states:
                 if state['id'] not in entries:
@@ -53,26 +63,33 @@ def run(venue):
                 # Keep the real latest roster, including new admissions; no client chooses
                 # its own room, seat, epoch or Master/GameServer identity.
                 entry['players'] = state['players']
-                wanted = {(entry['id'], p['id'], p['admissionId']) for p in state['players']} if state['state'] != 'Ended' else set()
+                if state['state'] == 'Ended':
+                    venue.seal(entry); venue.wait_for_player_results(entry)
+                    entry['resultsUntil'] = time.monotonic() + getattr(venue.args, 'results_seconds', 30)
+                    venue.stage('operator_round_sealed', sessionId=entry['id'], frames=entry['sealed']['world']['acceptedSequence'])
+                    continue
+                wanted = {(entry['id'], p['id'], p['admissionId']) for p in state['players']}
                 for identity, name in list(clients.items()):
                     if identity[0] == entry['id'] and identity not in wanted:
                         venue.stop(name); del clients[identity]
                         if name == visible: visible = None
-                if state['state'] == 'Ended':
-                    venue.seal(entry); venue.stop_round(entry)
-                    venue.stage('operator_round_sealed', sessionId=entry['id'], frames=entry['sealed']['world']['acceptedSequence'])
-                    continue
                 for player in state['players']:
                     identity = (entry['id'], player['id'], player['admissionId'])
                     if identity in clients: continue
                     ticket = venue.ticket(entry, player)
+                    if visible and player['roomId'] == venue.args.visible_room and any(e['sealed'] and visible.startswith(e['name'] + '-') for e in entries.values()):
+                        venue.stop(visible)
+                        for old_identity, old_name in list(clients.items()):
+                            if old_name == visible: del clients[old_identity]
+                        visible = None  # A new playable admission takes precedence over an old result window.
                     show = visible is None and player['roomId'] == venue.args.visible_room
                     name = entry['name'] + '-client-' + player['admissionId']
                     venue.launch(name, venue.client_config(entry, ticket), show)
                     clients[identity] = name
                     if show: visible = name
                     venue.stage('player_starting', sessionId=entry['id'], playerId=player['id'], roomId=player['roomId'], visible=show)
-                failed = [name for name, child in venue.processes.items() if child.poll() is not None]
+                failed = [name for name, child in venue.processes.items() if child.poll() is not None
+                          and not any(e['sealed'] and name.startswith(e['name'] + '-') for e in entries.values())]
                 if failed: raise RuntimeError('An owned native process exited; preserve journals and inspect the run logs')
                 frame = venue.frame(entry, measure=True)
                 venue.save('operator-status.json', {'sessionId': entry['id'], 'phase': frame['packet']['frame']['phase'], 'frame': frame['packet']['sequence'],
@@ -84,7 +101,12 @@ def run(venue):
     except KeyboardInterrupt:
         pass
     # Explicit operator End is already honored; only still-active owned rounds need End.
-    for entry in venue.rounds: venue.seal(entry)
+    for entry in venue.rounds:
+        venue.seal(entry)
+        if not entry.get('resultsUntil'):
+            venue.wait_for_player_results(entry)
+            if visible and visible.startswith(entry['name'] + '-'):
+                venue.inspect_player_results(entry, visible, getattr(venue.args, 'results_seconds', 30))
     venue.summary()
 
 
@@ -96,6 +118,7 @@ def main():
     parser.add_argument('--visible-room', type=int, choices=range(0,6), default=1)
     parser.add_argument('--job-workers', type=int, choices=range(1,17), default=2)
     parser.add_argument('--runtime-root', type=Path)
+    parser.add_argument('--results-seconds', type=int, choices=range(0,301), default=30, metavar='0..300')
     args = parser.parse_args(); args.check = False
     try: venue_module.verify_player(args)
     except (OSError, RuntimeError, ValueError) as error: parser.error(str(error))

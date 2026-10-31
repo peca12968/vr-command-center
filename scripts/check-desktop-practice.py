@@ -139,6 +139,10 @@ def main():
             original = hashes(Path(summary['runtimeDirectory'])); snapshot = hashes(directory / 'runtime-snapshot')
             check(bool(original) and original == snapshot, label + ': stopped SSD writers have an identical preserved F snapshot')
             check(-1 <= summary['rounds'][0]['maximumSourceAgeSeconds'] < 1.5, label + ': captured-UTC source age stays below the original limit')
+            if not args.interactive:
+                delivery = summary['playerResults']
+                check(delivery['allAcknowledged'] and not delivery['timedOut'] and len(delivery['phases']) == peers + 1,
+                      label + ': every connected native player receives and acknowledges its sealed result')
             case.update(summary=summary, snapshotFiles=len(original)); cases.append(case)
         finally:
             if directory is not None and child.poll() is None:
