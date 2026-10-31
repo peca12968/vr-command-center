@@ -18,7 +18,7 @@ def utc(value):
     return result
 
 
-def analyze(path, accepted_sequence, response_utc=None):
+def analyze(path, accepted_sequence, response_utc=None, *, expected_session=None):
     if type(accepted_sequence) is not int or accepted_sequence < 1: raise ValueError('Positive accepted Begin sequence required')
     response = utc(response_utc) if response_utc else None
     digest = hashlib.sha256(); counts = {}; header = None; capture_start = None
@@ -41,6 +41,7 @@ def analyze(path, accepted_sequence, response_utc=None):
             if tag == 0:
                 if header is not None: raise ValueError('Duplicate world header')
                 header = json.loads(payload[1:]); capture_start = utc(header['captureStartedAtUtc']) if header.get('captureStartedAtUtc') else None
+                if expected_session is not None and header.get('sessionId') != expected_session: raise ValueError('Journal belongs to a different session')
             elif tag == 1:
                 packet = json.loads(payload[1:]); frame = packet['frame']
                 if complete or last and last['phase'] == 'Ended': raise ValueError('Frame after terminal boundary')

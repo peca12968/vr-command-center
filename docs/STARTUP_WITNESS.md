@@ -28,6 +28,8 @@ python scripts/check-unity-admission.py --api-dll '<同版API.dll>' --runtime-ro
 
 ### 關閉來源的唯讀核對
 
+可選用原Windows server的既有trace，於停止writer前明確finish，再與同場窗口／journal作唯讀相關分析；操作、union／unknown與未量測範圍見[PUBLICATION_TIMING](PUBLICATION_TIMING.md)。這不改一般玩家或Unity來源。
+
 live只顯示API已接受資料，逾時不能據此斷言來源沒有套用。新增`analyze-world-journal.py`以`rb`讀取**已停止writer**的VRWORLD1檔，逐筆核對長度、SHA256、連續world sequence、不可倒退觀察與ack／completion／seal邊界；不開SQLite、不建立outbox writer、不ack／補送／修復／截尾。只輸出有界狀態轉換、第一個有效套用、最後來源幀／持久ack及未確認數，`--output`必須是新檔。這是binary envelope與序號核對，**不是完整遊戲規則／幾何驗證或封存成功宣告**。
 
 ```powershell

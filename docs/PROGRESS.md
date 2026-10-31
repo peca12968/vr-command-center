@@ -1,5 +1,30 @@
 # 開發進度
 
+## 2026-10-31：原生journal區段計時與再次負載重現
+
+從乾淨`82ea45b`接續[發布區段計時](PUBLICATION_TIMING.md)，上一輪為實際進展。本輪以**原c233 Windows播放器既有探針**取得新證據，API/UI0.30、Unity0.34／code41／NGO29不變，沒有修改Unity／後端／共享程式、重建163 Editor／雙平台或改原0.5／1.5秒政策。一般玩家不附掛新診斷。
+
+checker選用`--server-trace`只啟用自己的server既有240秒／32768列NativePoseTrace，結束／失敗時先request finish並取得完整report，再End／停止程序；缺report、overflow或cleanup失敗仍exit1。新分析器將原生UTC／Stopwatch與同場Begin窗口對應，先裁切再取同point區間聯集；WorldCapture內含WorldJournal，不相加。trace／witness不完整直接拒絕、時鐘差>0.05秒或未覆蓋窗口則相關數字unknown；該容差不是遊戲新政策。journal另確認sessionId，不能跨場借用接受序號。
+
+| 同主機、真正玩家包編譯／壓縮重疊的新場 | F資料 `unity-admission/20261031-213407-7c213c4e` | 明確C SSD資料 `unity-admission/20261031-213539-3a0d26e6` |
+|---|---|---|
+| 真正parent終態／cleanup | handle81146 exit1，admission1／package0，無summary；cleanup空 | handle23513 exit0，admission／package均0，原8項／354幀精確seal；cleanup空 |
+| Begin與live | 接受7；43次皆observed6／Preparing tick0；live106→180，年齡12.334→16.921秒 | 接受7；4 Preparing＋1 Running，first world47／tick2／observed7，單調回應後0.671秒、年齡0.069796秒 |
+| UTC觀察窗口／完整原生trace | 15.242625秒；4752列、41.9633094秒完整／未truncated | 0.673960秒；3494列、37.5978764秒完整／未truncated |
+| 最大UTC／單調差；全窗口覆蓋 | 0.011078秒、可相關 | 0.005593秒、可相關；UTC窗口與單調數字分開 |
+| 窗口WorldJournal | 115個區段、聯集**9.379684秒**、最大0.182471秒，32個>=0.1秒 | 7個區段、聯集**0.004067秒**、最大0.000625秒，0個>=0.1秒 |
+| 關閉來源journal | first有效world198／tick5／observed7，擷取為回應後0.879103秒；最後316／Ended tick312、ack187、**129未確認，未seal** | first有效world47同live，擷取為回應後0.604164秒；最後354／ack354、無積壓、已seal |
+
+兩個parent為`admission-trace-overlap-ea7dad6322dd46b1819a9b08981e6279`與`...945b4146d0bd48f2862299cbba7619a6`，皆保存package在native啟動及Begin檔出現時仍存活的證據，非只排程意圖；沒有輸入／姿態注入或重發Begin。F失敗經cleanup送End後有completion intent，但未seal且無成功summary，不能稱完成。trace停止後仍有4個清理期間來源幀，因此312個journal spans不冒充全部316幀映射。
+
+F窗口WorldCapture聯集9.383359秒、MainThreadGap聯集9.674268秒，與WorldJournal重疊，**不能加總**；MainThreadGap共有68個窗口異常，明細只留最早64、計數及聯集仍全量，這個明細旗標不表示原生trace溢位。這次已量到主執行緒長journal區段，但該區段包括mutex等待、序列化／驗證、append及Flush(true)，**不是單獨fsync或CPU時間**。背景ack鎖／flush、WebSocket及API／SQLite仍未分別量測，也沒有原生span-to-sequence標記。
+
+最終分析`publication-timing-final.json`的兩檔fingerprint為`12c97ca83dd9ea5b0aca93a88d288774ccfb10856d0378c93ce0ebb6df749085`；兩次native observer凍結同`ac3a2d0acef7e7e3591dcd4e39592479cecf8aebf76250b373a4c4fe8dd30bf1`，原receipt皆c233。F最初探索分析採區間相加（9.380564秒），保留原檔，最終改用聯集避免UTC重疊重算；未改native結果。不同時間／窗口長度、trace條件與未控制IO／排程，不能用兩數比例當因果或容量提升倍率；舊場與31筆不合併成同一根因。
+
+9項新相關性／裁切／重疊／unknown／溢位反例、11項journal（含新跨場拒絕）、8 witness、5真正Windows artifact lease及4 startup，共**37項Python成功**，語法／diff成功，CI加入新檢查。`publication-timing-runtime-validation.json`raw bytes核對新C16檔／F snapshot一致、前30 runtime647檔及其snapshot保持；前輪自有F167檔／API三工具159檔及正式0.34 ZIP／APK精確SHA保持。新F反例41檔保存，SQLite不開、5080／帳務／登入／安全性未動。
+
+下一步把frame及背景ack的journal鎖等待與真正Flush耗時分開量測，再評估保持durable ack／完整回放的writer架構；不能為F延遲先關閉持久化、跳幀或放寬姿態政策。完整11項仍active；實機／MR／跨機與廠商硬體待驗。
+
 ## 2026-10-31：Preparing逾時重現、來源journal與SSD入場比較
 
 功能 [d0b5f3c](https://github.com/peca12968/vr-command-center/commit/d0b5f3c929a113ef329aaa1ab411176cb1e44d2f) 已推送main、遠端SHA一致。[本次CI run41205865737](https://github.com/peca12968/vr-command-center/actions/runs/41205865737)／check124550701322為failure、steps空；fresh annotation明確為付款失敗或支出上限，job未啟動，沒有雲端測試結果。未改帳務或手動重跑，下列27項Python與原生結果為本機實際證據。

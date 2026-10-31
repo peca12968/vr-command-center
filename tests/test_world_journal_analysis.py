@@ -77,5 +77,9 @@ class JournalAnalysisTests(unittest.TestCase):
     def test_naive_timestamp_is_rejected_rather_than_using_local_timezone(self):
         with self.assertRaises(ValueError): self.analyze(self.header('2026-10-31T12:00:00'))
 
+    def test_expected_session_must_match_before_correlating_other_run_evidence(self):
+        with self.assertRaises(ValueError): self.analyze(self.header() + self.frame(1), expected_session='different')
+        self.assertEqual(1, self.analyze(self.header() + self.frame(1), expected_session='private')['firstApplied']['worldSequence'])
+
 
 if __name__ == '__main__': unittest.main()

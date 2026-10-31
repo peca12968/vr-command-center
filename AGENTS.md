@@ -1,5 +1,7 @@
 # 開發指引
 
+發布計時見docs/PUBLICATION_TIMING.md：入場checker明確--server-trace才掛原Windows server既有trace（240秒／32768列），cleanup先finish取得完整report再End／stop，失敗仍exit1。新分析同場Begin／session及閉源journal，UTC差>0.05秒或覆蓋不足窗口欄位null，不改遊戲政策；同point裁切聯集，WorldCapture／Journal／MainThreadGap不相加，point無world序號不可硬配。F新場15.243秒窗口WorldJournal9.379684秒、129未確認；SSD帶trace8項354幀seal成功，37 Python。區段含mutex／JSON／Flush，不當fsync-only／CPU；背景ack／WS／API未分別量測，單一硬碟及原31筆因果未證明。新C16檔／前30 runtime647檔／前F167／API三工具159及原ZIP／APK raw保持；native graph ac3a2d0a...、分析12c97ca8...。API/UI0.30 Unity0.34 code41 NGO29與原163／雙平台保持，完整11項active。
+
 入場發布積壓見docs/STARTUP_WITNESS.md／PROGRESS：F＋真正封裝重疊新反例接受7、live37次Preparing／observed6，但關閉來源world137已Running tick8、最後232／ack126、106未確認，不能稱來源未套用。明確C SSD原8項／358幀成功、凍結三檔observer graph f028c34d...；F baseline380／兩檔7104ff9e...也保存。--runtime-root只建新目錄、writer全停才snapshot保留原件；新C14檔／前29 runtime633檔及API三工具159檔raw保持。新8＋10＋既有5項Python通過，analyze-world-journal僅rb／checksum／序號metadata不開SQLite、不ack修復、不當完整規則驗證。原204538缺Begin回應不能套新場7；發布積壓階段已證明，F單一因果／所有逾時及31筆未修復。API/UI0.30／Unity0.34 code41 NGO29與原163／雙平台保持，完整11項active。
 
 Begin觀察見docs/STARTUP_WITNESS.md：接受回應不等於來源已套用，需observed>=接受序號、Running、tick>0、非suspended並保持原來源UTC門檻／15秒界線。3直接＋1受控管理503、96全回放／八份結果成功，新C runtime20檔／前28 runtime613檔raw保持；版本／原163 Editor及雙平台不變，本輪未重建。live與回放最早幀分開，延遲含輪詢／發布不是RTT，腳本SHA不當完整依賴graph。舊逾時缺命令回應，不能從observed6猜Begin序號、不能由單舊false旗標排除中間失聯或以校準宣稱根因。完整11項active，原逾時／31筆／實機另驗。

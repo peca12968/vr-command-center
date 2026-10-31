@@ -1,5 +1,7 @@
 # 需求與驗收追蹤
 
+第1／9／10項新增[原生journal區段計時](PUBLICATION_TIMING.md)：同場Begin／關閉來源／既有trace核對，F新逾時窗口寫入區段聯集9.379684秒、SSD新場8項／354幀seal成功；37 Python與保存核對見PROGRESS。已量到含鎖／JSON／flush的主執行緒成本，背景ack／WS／API尚未分別量測，不當單一硬碟因果、舊31筆根因或實機容量驗收；版本保持，11項active。
+
 第1／9／10項新增[原入場來源窗口](STARTUP_WITNESS.md)：F＋封裝重疊重現逾時，唯讀journal證明來源已套用而API/live落後106幀；明確SSD新場原8項／358幀與seal成功。23項Python／原件保存核對與限制見PROGRESS。這是發布積壓證據及執行資料配置選項，不是F USB效能修復、所有舊逾時／31筆或跨機／實機驗收；API／Unity保持，11項active。
 
 第1項新增[開場觀察](STARTUP_WITNESS.md)：管理接受Begin與來源實際套用分開驗證，3直接＋1受控失聯、96幀回放與八份結果一致。未重現原撤銷／重加入及F負載逾時，不能稱根因修復、容量或實機驗收；API／Unity及原建置保持，詳見PROGRESS。
