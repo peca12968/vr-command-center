@@ -2,6 +2,8 @@
 
 ## 2026-10-31：長任務稀疏收發／主執行緒診斷
 
+功能 [6018e88](https://github.com/peca12968/vr-command-center/commit/6018e882c7262b03fdb6312b9465842484552363) 已推送main且遠端SHA一致。[本次CI run41195892102](https://github.com/peca12968/vr-command-center/actions/runs/41195892102)／check124521846878為failure、steps空，fresh annotation仍為近期付款失敗或支出上限，job未啟動；沒有雲端測試結果，未更改帳務或手動重跑。本機實際測試與未解限制如下。
+
 前輪為實際進展；從乾淨`223613b`接續[POSE_CONTINUITY](POSE_CONTINUITY.md)，補上原240秒逐事件工具不能涵蓋第12分鐘失效的缺口。**Unity0.33.0／code40／NGO29，API/UI0.30保持**。新Windows Development opt-in獨立為1200秒／256聚合streams／各4096稀疏gap、body轉換及主執行緒窗口，超界保留最早證據並判不完整；舊pose32768列／240秒及replication240秒保持且與舊pose模式互斥。一般／Editor／Android不安裝，不修改世界、DB、命中規則0.8.0、Tracked資料或原0.5／1.5秒政策。
 
 沿用原RPC前PoseSend、入口Receive／accepted／rejected／throttled與journal／capture／publish量測點，正常事件僅聚合，間隔／量測>200ms才留兩端，body只記轉換與接受姿態年齡；沒有位置、玩家姓名、key／ticket、UDP payload、GPU／PCM／OS畫面。只有server附加既有PlayerLoop邊界，client不裝loop。ManagementApply約0.5秒輪詢也會產生稀疏gap，不把總筆數稱姿態異常。
