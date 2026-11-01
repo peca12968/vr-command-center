@@ -1,5 +1,15 @@
 # 開發進度
 
+## 2026-11-02：原長場走道失敗保留，位置回饋候選再驗
+
+原0.41／5d2e的064034-7c1ae2b7、真正handle51871終結exit1，cleanup空、C174／F raw同hash，整場failed。Linked5項／8621回放／8587 Running、25原結果／ACK／無timeout及45循環通過；Independent在Room5 world3400／tick7120／elapsed359770ms觸發生成器走道（首Z=-3.4091835），該房仍五位connected／health100／Simulated、在正常房內。完整失敗取證36896：Linked8621、五房3433／4309／5391／6721／8421；Room5三幀3400..3402共8筆走道不符，恢復後仍failed，8381保存Running無失聯。Independent僅36發18reload／活動跨度7074..7127，後段靜止取證及四房continuity綠不當900秒接受。輔助分析首Room-only混跨場ID/minempty原件保留，後依原player IDs重對齊；沒有補造CSV／成功。
+
+原0.41 binary/log321＋7來源＝328先C/F archive，更早327保持。[新0.41.1](DESKTOP_ENDURANCE.md)／code52／NGO29、242真正Editor0skip（新4）及同源4ebdcd12...雙平台原ID一致。長場只讀本機Z作起點..+.8m換向，回±.2、原Move／Constrain／RPC，不clamp／teleport／寫server pose；原短40tick與走道、0.5／1.5、武器彈藥／durability不動。Editor凍結舊換向公式配同一不均步長可漂移、新回饋有界，不補本場deltaTime trace或舊31／371根因。14 exercise／27 active／5 artifact與錯模式CLI通過，失敗另存partial-checks但complete=false。
+
+073233-32121819兩模式60秒18項／3760回放／50原結果6CSV／雙seal ACK成功、每人6發3reload／3週期。長場可選最多5個唯讀回放，各原rate4／期限／每幀與cycle／seal閘門，native先停；此路徑已預跑。玩家包19通過，新ZIP82651927／SHAdcc46...、server82673718／SHAb45d...、APK60361942／SHA766d...完整hash及ARM64/min32/target35/v2debug見文件。Server新包完整原生／普通入場尚待，無新WinForms GUI／頭盔。
+
+新900秒both／25Linked後五房各5端，真正handle33928／073638-487017bd正執行，不能提前接受；兩端建置全停、666新source snapshot在它之前完成，writer停前不runtime snapshot。原0.41 ZIP／APK保留，current APK為0.41.1，不當舊檔同hash；舊18a CI不冒充新候選，新CI另驗。保存SQLite不開／5080不動，完整11active及原31／world371／startup／F吞吐／PickerHost／跨機真人／頭盔MR／硬體仍待。
+
 ## 2026-11-02：長場來源與鏡頭等待fixture的完整雲端結果
 
 [CI41359154963](https://github.com/peca12968/vr-command-center/actions/runs/41359154963)／job125005569006、精確來源 **18a72f0cd97fd7c0fdeeeec98ddc3b90d980f754**完整 **success**：Linux772核心／459 HTTP／47 world、6 pipe／38硬體離線CLI、Python含14 exercise（新3長場）／素材、89 Node／296 Chromium，2 Windows限定skip非Editor／原生／GUI／頭盔證據。

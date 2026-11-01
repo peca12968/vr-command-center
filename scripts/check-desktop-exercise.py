@@ -2,7 +2,7 @@
 
 Automated Simulation input, not physical operators, XR tracking, LAN or capacity acceptance.
 """
-import argparse,importlib.util,json,math,os,re,sys,time,urllib.request,uuid
+import argparse,concurrent.futures,importlib.util,json,math,os,re,sys,time,urllib.request,uuid
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 def module(name,file):
@@ -75,7 +75,7 @@ def validate_report(report,owner,expected_fires=2,expected_reloads=1,minimum_tic
     if report.get('complete') is not True or report.get('truncated') is not False or report.get('reason')!='Requested' or report.get('fault') not in (None,''):raise ValueError('Exercise did not explicitly finish cleanly')
     if report['pid']!=owner['pid'] or report['playerId']!=owner['playerId'] or report['room']!=owner['roomId'] or report['connection']!=owner['nativeConnectionId']:raise ValueError('Exercise owner differs from original native process/connection')
     if report['fireSubmissions']!=expected_fires or report['reloadSubmissions']!=expected_reloads or report['movementFrames']<1 or report['activeFrames']<report['movementFrames'] or not 0<=report['firstTick']<report['lastTick'] or report['lastTick']-report['firstTick']<minimum_ticks:raise ValueError('Not all bounded production-path input attempts were made')
-    if endurance and (report.get('profile')!='Endurance' or report.get('maximumActiveTicks')!=19000 or report.get('maximumCollectionSeconds')!=1200):raise ValueError('Not the explicit bounded endurance profile')
+    if endurance and (report.get('profile')!='Endurance' or report.get('motion')!='LocalPositionFeedback' or report.get('maximumActiveTicks')!=19000 or report.get('maximumCollectionSeconds')!=1200):raise ValueError('Not the explicit bounded endurance feedback profile')
 
 def validate_endurance_cycles(cycles,expected):
     if set(cycles)!=set(range(expected)):raise ValueError('Endurance replay is missing a complete scheduled cycle')
@@ -220,22 +220,29 @@ def run(v):
             if not v.args.endurance:
                 playback=replay(v,e,pause if e is entries[0] else None);check(playback['complete'],e['name']+': all replay frames retain original bodies, movement/reload, seals and results')
         if v.args.endurance:
-            for e in entries:
-                playback=replay(v,e,pause if e is entries[0] else None);check(playback['complete'],e['name']+': complete endurance replay retains every original body and every movement/reload/two-shot cycle')
+            # All native sources are stopped first. Each independent reader still
+            # consumes every frame at the original rate4 and its original deadline.
+            with concurrent.futures.ThreadPoolExecutor(max_workers=v.args.replay_workers) as pool:
+                pending={pool.submit(replay,v,e,pause if e is entries[0] else None):e for e in entries}
+                for future in concurrent.futures.as_completed(pending):
+                    e=pending[future];playback=future.result();check(playback['complete'],e['name']+': complete endurance replay retains every original body and every movement/reload/two-shot cycle')
         findings=capacity.native_log_findings(v.directory);check(not findings,mode+': no native send queue errors')
-        modes.append({'mode':mode,'clients':len(native),'automatedInputs':True,'operatorControls':v.args.operator_controls,'endurance':v.args.endurance,'requestedSeconds':v.args.seconds,'physicalOperators':0,'networkCapacityAccepted':False})
+        modes.append({'mode':mode,'clients':len(native),'automatedInputs':True,'operatorControls':v.args.operator_controls,'endurance':v.args.endurance,'requestedSeconds':v.args.seconds,'maximumReplayWorkers':v.args.replay_workers,'replayRate':4,'physicalOperators':0,'networkCapacityAccepted':False})
     v.summary();v.save('exercise-result.json',{'complete':False,'modes':modes,'headsets':0,'hosts':1,'renderedClients':0,'posesWrittenDirectly':False,'newTestRpc':False,'automatedInput':True,'physicalOperators':0,'networkCapacityAccepted':False,'scope':'Actual Windows native clients using generated desktop movement/weapon intents through original RPCs; not humans, XR, LAN or capacity acceptance'})
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--runtime-root',type=Path,required=True);p.add_argument('--mode',choices=('linked','independent','both'),default='both');p.add_argument('--players-per-room',type=int,choices=(1,5),default=5);p.add_argument('--seconds',type=int,default=16)
     p.add_argument('--endurance',action='store_true',help='Explicit separate bounded native profile: --seconds 60 (smoke) or 900 (long); never combined with operator-controls')
+    p.add_argument('--replay-workers',type=int,choices=(1,5),default=1,help='Endurance only: independent closed-source replay readers; every stream retains rate4 and all original gates')
     p.add_argument('--operator-controls',action='store_true',help='After the base motion window, apply Storm Night Patrol then Fog Day Advance through normal management commands; no console UI or physical operator input')
     p.add_argument('--api-dll',type=Path,default=Path(os.environ.get('VR_COMMAND_API_DLL',ROOT/'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')));p.add_argument('--player-exe',type=Path,default=ROOT/'artifacts/desktop/VrCommand.exe');args=p.parse_args();args.duration=600;args.visible_room=0;args.job_workers=2;args.check=False
     if args.endurance and (args.seconds not in (60,900) or args.operator_controls) or not args.endurance and args.seconds not in range(12,41):p.error('Short seconds must be 12..40; endurance requires 60 or 900 and no operator-controls')
+    if args.replay_workers!=1 and not args.endurance:p.error('Parallel replay readers require the explicit endurance profile')
     vm.verify_player(args);v=ExerciseVenue(args)
     try:run(v)
     except BaseException as error:
         v.stage('failed',errorType=type(error).__name__);forensics=[]
+        v.save('partial-checks.json',{'complete':False,'checks':v.evidence,'scope':'Only completed assertions before the original failure; never whole-run acceptance'})
         for directory in v.exercise.values():
             if directory.is_dir() and not (directory/'report.json').exists():(directory/'finish.request').write_text('',encoding='utf-8')
         for entry in v.rounds:

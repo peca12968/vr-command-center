@@ -199,7 +199,7 @@ namespace VrCommand.Unity
                 var exercise = default(DesktopExerciseFrame);
                 if (exercising && CombatAuthority.Instance != null && CombatAuthority.Instance.Player(PlayerId.Value.ToString(), out var exerciseBody))
                     exercise = DesktopClientExercise.Sample(PlayerId.Value.ToString(), OwnerClientId, exerciseBody.room, exerciseBody.presentationTick,
-                        !ending && exerciseBody.connected && exerciseBody.health > 0 && CombatAuthority.Instance.Ready.Value && VenueBootstrap.Instance.State == "Running");
+                        !ending && exerciseBody.connected && exerciseBody.health > 0 && CombatAuthority.Instance.Ready.Value && VenueBootstrap.Instance.State == "Running", head.localPosition.z);
                 if (tracked)
                 {
                     leftHand.localPosition = leftPosition.ReadValue<Vector3>();

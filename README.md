@@ -1,6 +1,6 @@
 # VR Command Center
 
-2026-11-02 [長場生成輸入](docs/DESKTOP_ENDURANCE.md)：Unity0.41／51／238真Editor及同源5d2e雙平台，獨立旗標每20秒兩發一換彈、最多45循環；14 Python／60秒5端597回放及原短控制7項成功。900秒Linked25與五房各5端正在依序驗證，尚未通過；原長場失效與完整11項active保持。
+2026-11-02 [生成器位置回饋候選](docs/DESKTOP_ENDURANCE.md)：原0.41兩模式exit1／C174保留（Linked8621通過、Room5三幀走道失敗非失聯）；新0.41.1／52／242真Editor／4ebd雙平台、兩模式60秒18／3760／50結果成功。新900秒仍執行，不能提前接受；走道／0.5／1.5與舊31等不改判，完整11active。
 
 2026-11-02 [多人動態＋管理命令組合](docs/DESKTOP_EXERCISE.md)：選用operator-controls，25Linked及五房各5端全員移動時套用雨夜Patrol／霧天Advance，30項／2909完整回放／50原結果6CSV雙seal ACK成功。12階段24個原UUID／expectedSequence／來源observed fence、24個精確回放參考；閉源2627 Running幀逐房環境AI時間線一致。11 Python（新4）／27 active／5artifact，預跑7／202、未選用5／179通過。沿用Unity0.40／231／6098雙平台與原包，無新Editor／遊戲重建／GUI／GPU／頭盔；完整11active，舊31／371與跨機真人等仍待。
 

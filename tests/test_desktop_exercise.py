@@ -49,9 +49,9 @@ class EnduranceEvidenceTests(unittest.TestCase):
             with self.assertRaises(ValueError):m.validate_endurance_cycles(bad,3)
     def test_endurance_report_requires_its_own_bound_and_actual_tick_coverage(self):
         owner={'pid':100,'playerId':'alpha','roomId':3,'nativeConnectionId':1}
-        report={'version':1,'mode':'AutomatedSimulation','role':'Client','physicalInput':False,'headsets':0,'complete':True,'truncated':False,'reason':'Requested','fault':'','pid':100,'playerId':'alpha','room':3,'connection':1,'fireSubmissions':90,'reloadSubmissions':45,'movementFrames':100,'activeFrames':100,'firstTick':1,'lastTick':17999,'profile':'Endurance','maximumActiveTicks':19000,'maximumCollectionSeconds':1200}
+        report={'version':1,'mode':'AutomatedSimulation','role':'Client','physicalInput':False,'headsets':0,'complete':True,'truncated':False,'reason':'Requested','fault':'','pid':100,'playerId':'alpha','room':3,'connection':1,'fireSubmissions':90,'reloadSubmissions':45,'movementFrames':100,'activeFrames':100,'firstTick':1,'lastTick':17999,'profile':'Endurance','motion':'LocalPositionFeedback','maximumActiveTicks':19000,'maximumCollectionSeconds':1200}
         m.validate_report(report,owner,90,45,17900,True)
-        for field,value in [('profile','Short'),('maximumActiveTicks',1200),('maximumCollectionSeconds',240),('lastTick',17000),('fireSubmissions',88),('reloadSubmissions',44)]:
+        for field,value in [('profile','Short'),('motion','TickAlternation'),('maximumActiveTicks',1200),('maximumCollectionSeconds',240),('lastTick',17000),('fireSubmissions',88),('reloadSubmissions',44)]:
             with self.subTest(field=field),self.assertRaises(ValueError):m.validate_report({**report,field:value},owner,90,45,17900,True)
 
 class OperatorCombinationTests(unittest.TestCase):

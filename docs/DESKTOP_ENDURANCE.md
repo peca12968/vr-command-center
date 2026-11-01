@@ -1,39 +1,53 @@
 # 長場原生自動化輸入
 
-[CI41359154963](https://github.com/peca12968/vr-command-center/actions/runs/41359154963)對fixture來源18a72f0完整success：772核心／459 HTTP／47 world、6 pipe／38離線CLI、Python14／素材、89 Node／296 Chromium；2 Windows限定skip非原生／Editor證據。console50／control13／hardware26、完整hash與首7ed CI失敗17部分browser保留見[PROGRESS](PROGRESS.md)。1562＋17＋50＝1629 browser、nativeUI7＋2另列。18a只改DOM polling100與有界診斷，不改產品／15秒斷言或重建遊戲，不能證首失敗根因；238 Editor與同源5d2e建置、原生helper仍為7ed來源。900秒原生尚未全部完成，CI成功不代表長場通過。
-
-Unity **0.41.0／Android code51／NGO29** 新增獨立旗標 `--vr-desktop-endurance <新的本機絕對目錄>`。只接受Windows Development batch Client、無XR；與原 `--vr-desktop-exercise` 互斥。普通啟動沒有生成器；原短模式的1200活動tick／240秒上限保持。這是AutomatedSimulation，沒有真人鍵盤、頭盔、LAN或容量驗收。
+目前候選 **Unity0.41.1／code52／NGO29**、242真正Editor／0skip，同源Windows／ARM64 fingerprint **4ebdcd12b9cbf1d00f342cb25dbec21d84f60c048284d8333cb8fa01c42a495c**，原Scene／prefab ID保持。兩模式60秒預測試已通過，新的900秒尚在執行；舊0.41失敗保留，不提前當作修復或長場通過。這是AutomatedSimulation，非真人鍵盤、頭盔、LAN或網路容量驗收。
 
 ```powershell
-python scripts/check-desktop-exercise.py --api-dll <同次API0.31完整建置DLL> --runtime-root <SSD runtime根目錄> --mode both --players-per-room 5 --seconds 900 --endurance
+python scripts/check-desktop-exercise.py --api-dll <同次API0.31完整建置DLL> --runtime-root <SSD runtime根目錄> --mode both --players-per-room 5 --seconds 900 --endurance --replay-workers 5
 ```
 
-先Linked25端，再五個Independent房間各5端。每種模式實際執行900單調秒，完整回放仍使用原4倍速度，會另花時間；60秒選項僅供預測試。短模式仍只接受12..40秒，長場只接受60或900秒，不能與operator-controls合用。兩種原生輸入旗標不能同時出現。
+先Linked25端，再五個Independent房間各5端，每種模式執行900個caller單調秒；60秒只作預測試。底層 `--vr-desktop-endurance <新本機絕對目錄>` 僅Windows Development batch Client／無XR，與原短旗標互斥。普通啟動沒有生成器；短模式仍只接受12..40秒、1200活動tick／240秒。長場只接受60或900秒，不能合用operator-controls。
 
-## 排程與界線
+## 位置回饋、排程與界線
 
-每位原owner從自己的首個有效tick開始，透過原DesktopPreviewControls.Move／Constrain與SubmitPose／SubmitWeapon RPC，以0.4m/s每40tick前後反向。每400tick（20秒）在相對20／60／120tick提供fire／reload／fire，仍等原武器分支真正提交才記次數；原簡報、Ready、Running、冷卻、ownership／姿態／伺服器驗票及彈藥都保持。45週期最多90發／45次換彈，使用原30發彈匣＋90備彈，不生成彈藥。
+0.41.1長場只讀自己的head.localPosition.z，以首次有效位置至前方0.8m作換向依據，只回傳±0.2方向量，通過原Move／Constrain／SubmitPose RPC產生0.4m/s移動。不設定或clamp座標、不teleport／寫server pose、不搬動Tracked頭手。短模式保留原每40tick換向。
 
-如果上個週期沒有完成，或跳過整個週期，就以ScheduleIncomplete失敗並停止生成輸入；不補送漏掉的射擊。不倒退時鐘、不重設owner，不放寬0.5秒姿態／1.5秒來源或佇列／封存政策。活動tick滿19000（950秒）停止，收集最多1200單調秒；900秒後不再產生新武器意圖，只保留短暫移動收尾窗口。這些是新長場儀表的上限，不是已驗收950／1200秒遊戲。
+武器仍以來源tick排程，每400tick（20秒）相對20／60／120提供fire／reload／fire，等原SubmitWeaponRpc真正提交才記一次。最多45週期90發／45次換彈，使用原30發彈匣＋90備彈，不生成彈藥。簡報、Ready、Running、冷卻、ownership／驗票與伺服器規則保持；漏掉或未完成整週期就失敗，不追補射擊。
 
-report仍為version1／AutomatedSimulation，新增profile=Endurance／maximumActiveTicks=19000／maximumCollectionSeconds=1200；正常短模式profile=Short。明確finish後停止所有生成輸入，但原姿態／戰績流程保留；complete只表示儀表明確收尾。Tracked裝置／焦點等原路徑不搬動，追蹤裝置與owner改變仍失敗。
+長場19000活動tick（950秒）／1200收集秒是儀表界線，非已驗收時長；900秒後不新增武器意圖，只留移動收尾窗口。report仍version1／AutomatedSimulation，長場profile=Endurance／motion=LocalPositionFeedback／maximumActiveTicks=19000／maximumCollectionSeconds=1200，短場motion=TickAlternation。finish後停止生成輸入、原姿態與結果流程保留；complete僅儀表收尾。
 
-## 驗證範圍
+原0.5秒姿態／1.5秒來源、反瞬移、幾何／命中、佇列與durable政策保持。每位實際活動tick跨度至少達要求時間減5秒，是額外的執行證據條件，不是放寬姿態新鮮度；最後仍明列實測跨度。
 
-真正Editor **238／0skip**（原231＋7）通過：排程完整45週期／90發／45換彈、相同tick不重送、漏週期不追補、inactive與倒退時鐘、各自界線。Python **14 exercise（新3）／27 active／5 artifact**通過，另實際CLI拒絕三種錯誤模式組合，皆在配置任何場次前退出。
+## 完整驗證
 
-原生五端60秒預測試 `20261102-063727-2069ec28` **5項／597完整回放／577 Running幀**成功；每人6發／3換彈，實際活動tick跨度1202..1203，每個20秒週期都有接受的移動、換彈與精確累計彈數。原短模式＋管理命令五端 `063930-4ee0c139` **7項**成功。900秒原生 `064034-7c1ae2b7` 目前正在依序執行Linked與Independent；未完成前不得當作通過。
+每個保存Running body均核對原名冊／connected／health100／Simulated／房間／站姿與原測試走道Z=-3.4..-1.6、X原seat、Y1.65。capture gap達1500ms失敗，恢復不能抹去反例。依每位首tick分20秒區間，每區須有移動>0.1m、walking／reload來源幀及精確累計兩發，不能只看最後總數。
 
-完整回放逐幀核對原名冊／connected／Simulated／健康／房間／站姿有界移動與來源capture gap；每位以自己的首個tick分20秒區間，每個區間需要移動>0.1m、walking來源幀、reload來源幀與精確累計兩發。缺一週期或之後恢復不能抹去失效。原0.1m範圍是本測試移動證據，不更動遊戲幾何或命中規則。長場至少需要要求時間減5秒的實際活動tick跨度，以辨識未真正跑滿的報告；明確列出最後實測值，不把900秒caller窗口當精確900秒來源時間。
+每個原admission結果／CSV、combat與world尾界／雙seal／原server connection ACK另驗。Room1僅對原Pause／Resume接受序號窗口例外，該房tick停住時其他四房須前進。所有原生先停才逐房完整回放；選用replay-workers5允許最多五個唯讀SSE讀者，各自仍rate4、從0逐幀到原seal、原期限與全部斷言。預設1讀者保持；任一失敗仍令整個工具failed，其他讀者完成／關閉後才cleanup。
 
-每個原admission結果／CSV／雙seal／combat與world尾界／原server connection ACK另驗。長場模式在所有房間先各自收尾並停止原生程序，再逐房回放，避免其他房因等待前一房225秒回放而額外錄製大量靜止時間。失敗仍End／保存反例／cleanup，只有所有原writer停後才C→F snapshot，保存SQLite不開、正式5080不動。
+所有writer停才C→F snapshot，保存SQLite不開、5080不動。partial-checks.json僅記失敗前完成斷言、complete=false，不當整場成功。
 
-## 建置與交付
+## 原0.41失敗與保留
 
-Windows／Quest同源fingerprint **5d2ebd2a4bedd832c903144e508b44f8660c65e357c4dca6a0abde2cb7230a0c**，原Scene／prefab ID保持。兩端建置都結束才執行上述原生測試。原0.40 binary／log321及6來源共327檔先C／F archive，原APK與ZIP保留；當前APK是新0.41，不能混稱原檔未變。
+原0.41／code51／5d2ebd2a...的064034-7c1ae2b7，真正exec **exit1**、cleanup空，整場failed。Linked5項／8621回放／8587 Running、25原結果／ACK／無timeout與每人45週期成功，活動跨度17996..17999；Independent在Room5 world3400／tick7120／elapsed359770ms，首一位Z=-3.4091835越過測試-3.4下界。該房五位仍connected／health100／Simulated且在正常房內，非舊31筆失聯。
 
-- 玩家ZIP **82,651,687 bytes／SHA256 f2c84949ba9007b0dbe88c3460bb4f9cb84898de96d7c97938aca887a672ce93**，311 manifest／ZIP312，原啟動器source a65846da...保持；19離線檢查成功。
-- Server ZIP **82,673,487 bytes／SHA256 af8a08b3f9f92392f8577d52e01de835abc06f762df1801e86d8dd7a800bddc8**，311 manifest／ZIP312、啟動器1.1.0／source fb57807d...保持。首封裝指令缺stage-root而在建立前被拒絕，紀錄保存，補新目錄後成功。
-- APK **60,356,910 bytes／SHA256 1187dfd2f0e18c9f092b03d5de94bb6bfd5f17fe8bea00adfa0af2a8a9d5edce**，aapt確認ARM64／min32／target35／0.41.0／code51，v2 debug簽章成功；未裝頭盔。
+原輸入按收到的tick每40tick換向，本機位移卻依deltaTime積分，不均步長下不能保證長時間回到原位置。新Editor回歸以凍結舊換向公式＋同一Move／不均步長重現漂移，位置回饋在相同測試有界。這支持修正機制，不補造本場deltaTime trace或唯一主機因果。
 
-API0.31／console0.31.2／rules0.8.0保持，沒有更新後端產品或錄影／Tracked wire。完整11項仍active，舊31筆／world371／startup／F吞吐／PickerHost GUI、跨機／25位真人、頭盔／MR及廠商硬體仍待；新短場或後續乾淨長場都不能當作原根因修復。最新執行與CI結果見[PROGRESS](PROGRESS.md)。
+原失敗完整取證共36896回放：Linked8621、五房3433／4309／5391／6721／8421。Room5的8381保存Running沒有無效連線／健康／rig，三幀3400..3402有8筆走道不符，恢復後仍failed；首週期最低約-3.009，末第18週期約-3.396..-3.432。Independent僅每人36發18reload／活動跨度7074..7127，後段靜止取證不當900秒操作，四房continuity綠亦不當整體接受，沒有補CSV或成功旗標。C174／F raw同hash。
+
+輔助離線分析首Room-only混到Linked另一組ID而min(empty)失敗，原腳本／錯誤保留；後依該錄影原player IDs重對齊才生成readback，原資料不動。原0.41 binary/log321＋7來源＝328先C/F archive，更早0.40的327亦保持。
+
+## 目前候選證據與交付
+
+242真正Editor／0skip（原238＋4），含位置換向、不變tick仍可換向、不均步長舊漂移／新有界、非有限值拒絕。Python14 exercise／27 active／5 artifact與錯模式CLI拒絕成功。新報告必須明確motion=LocalPositionFeedback，舊0.41報告不能冒充新模式。
+
+073233-32121819兩模式60秒 **18項／3760回放／50原結果／6CSV／雙seal及原ACK**成功，每人6發3reload／3週期、無queue error，五路回放到原seal且cleanup空。玩家包19通過；新的900秒073638-487017bd／handle33928仍依序執行，不能提前建立接受檔或runtime snapshot。666新來源snapshot只含source，於新長場之前完成，兩端建置全停才原生。
+
+- 玩家ZIP **82,651,927 bytes／SHA256 dcc46c80c68d0a2861957c7d534b1abacd15964fb22f310ecdd1e60dddf7d2df**，311 manifest／ZIP312，原啟動器source a65846da...。
+- Server ZIP **82,673,718 bytes／SHA256 b45d67269143664d7c47a18905e72b3304364301ed64be68a5a9ec6757cebcea**，311 manifest／ZIP312、啟動器1.1.0／source fb57807d...；新包完整原生尚待，非WinForms GUI成功。
+- APK **60,361,942 bytes／SHA256 766d80180c0facf67136412d4f9a4b9e35ae0d6dc5f5cac9b128261282188e48**，ARM64／min32／target35／0.41.1／code52、v2 debug簽章，未裝頭盔。
+
+原0.41 ZIP／APK1187dfd2...保留，當前APK是0.41.1，不混稱原檔同hash；首server缺stage-root拒絕與後補新目錄成功的紀錄保持。API0.31／UI0.31.2／rules0.8.0與wire不變，沒有新的後端產品／WinForms GUI／頭盔驗收。
+
+舊18a72f0的[CI41359154963](https://github.com/peca12968/vr-command-center/actions/runs/41359154963)完整772／459／47／6pipe／38CLI／14Python／89Node／296 Chromium，但它測舊0.41功能＋鏡頭fixture，不當本候選CI。首7ed鏡頭等待CI failure／17部分browser保留，18a僅DOM polling100／有界診斷、原15000ms／斷言／產品期限不變，不證首失敗根因。原1629browser／nativeUI7＋2保持，新CI另記。
+
+完整11項active，舊31／world371／startup／F吞吐／PickerHost、跨機25真人、Quest／VIVE／MR與廠商SDK／實體硬體仍待；生成器修正不當這些根因修復。精確來源、CI與原生結果見[PROGRESS](PROGRESS.md)。

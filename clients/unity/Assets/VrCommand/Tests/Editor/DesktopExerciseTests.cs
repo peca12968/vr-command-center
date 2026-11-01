@@ -104,5 +104,42 @@ namespace VrCommand.Unity.Tests
             Assert.AreEqual(Vector2.zero, plan.Next(19000, true).Movement); Assert.IsTrue(plan.Exhausted); Assert.IsFalse(plan.Next(1, true).Fire);
             Assert.AreEqual(1200, DesktopExercisePlan.MaximumActiveTicks);
         }
+        [Test] public void EnduranceReversesAtItsOwnLocalPositionLimits()
+        {
+            var plan = new DesktopExercisePlan(true);
+            Assert.AreEqual(.2f, plan.Next(0, true, 10).Movement.y);
+            Assert.AreEqual(-.2f, plan.Next(1, true, 10.81f).Movement.y);
+            Assert.AreEqual(.2f, plan.Next(2, true, 9.99f).Movement.y);
+        }
+        [Test] public void EnduranceFeedbackWorksWhileTheReceivedTickIsUnchanged()
+        {
+            var plan = new DesktopExercisePlan(true);
+            Assert.AreEqual(.2f, plan.Next(0, true, 0).Movement.y);
+            Assert.AreEqual(-.2f, plan.Next(0, true, .81f).Movement.y);
+            Assert.AreEqual(-.2f, plan.Next(0, true, .4f).Movement.y);
+            Assert.AreEqual(.2f, plan.Next(0, true, -.01f).Movement.y);
+        }
+        [Test] public void UnevenUpdateDurationsCannotAccumulateOutsideTheOriginalTestLane()
+        {
+            var plan = new DesktopExercisePlan(true); var current = Vector3.zero; var original = Vector3.zero; var oldEscaped = false;
+            for (var tick = 0; tick < 18000; tick++)
+            {
+                var seconds = tick % 80 < 40 ? .049f : .051f;
+                var frame = plan.Next(tick, true, current.z);
+                if (frame.Reload) plan.SubmittedReload();
+                if (frame.Fire) plan.SubmittedFire();
+                current = DesktopPreviewControls.Move(current, Quaternion.identity, frame.Movement, seconds, Vector3.zero);
+                // Frozen 0.41 tick-direction formula, with the same Move/deltaTime.
+                original = DesktopPreviewControls.Move(original, Quaternion.identity, new Vector2(0, (tick / 40) % 2 == 0 ? .2f : -.2f), seconds, Vector3.zero);
+                oldEscaped |= original.z < -.4f || original.z > 1.4f;
+                Assert.That(current.z, Is.InRange(-.05f, .85f));
+            }
+            Assert.IsTrue(oldEscaped, "The former open-loop input must reproduce drift under unequal integration steps.");
+        }
+        [Test] public void EnduranceRejectsNonFiniteLocalFeedback()
+        {
+            foreach (var value in new[] { float.NaN, float.PositiveInfinity, float.NegativeInfinity })
+                Assert.Throws<System.InvalidOperationException>(() => new DesktopExercisePlan(true).Next(0, true, value));
+        }
     }
 }

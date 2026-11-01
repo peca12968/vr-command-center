@@ -22,6 +22,8 @@ namespace VrCommand.Unity
         public const int EnduranceCycleTicks = 400, EnduranceCycles = 45;
         private readonly bool endurance;
         private int cycle = -1;
+        private float? movementOrigin;
+        private float enduranceDirection = .2f;
         private long start = -1, last = -1;
         private int fires;
         private bool reloaded;
@@ -31,7 +33,7 @@ namespace VrCommand.Unity
         public DesktopExercisePlan(bool endurance = false) { this.endurance = endurance; }
         public static bool Allowed(string role, bool windows, bool development, bool batch, bool editor, bool tracked)
             => role == "Client" && windows && development && batch && !editor && !tracked;
-        public DesktopExerciseFrame Next(long tick, bool active)
+        public DesktopExerciseFrame Next(long tick, bool active, float localZ = 0)
         {
             if (!active || Exhausted) return default;
             if (tick < 0 || (last >= 0 && tick < last)) throw new InvalidOperationException("Exercise tick moved backwards.");
@@ -42,6 +44,11 @@ namespace VrCommand.Unity
             var forward = (elapsed / 40) % 2 == 0 ? .2f : -.2f;
             if (endurance)
             {
+                if (float.IsNaN(localZ) || float.IsInfinity(localZ)) throw new InvalidOperationException("Invalid endurance local position.");
+                if (!movementOrigin.HasValue) movementOrigin = localZ;
+                if (localZ >= movementOrigin.Value + .8f) enduranceDirection = -.2f;
+                else if (localZ <= movementOrigin.Value) enduranceDirection = .2f;
+                forward = enduranceDirection;
                 if (elapsed >= EnduranceWeaponTicks)
                 {
                     if (cycle != EnduranceCycles - 1 || fires != 2 || !reloaded) throw new InvalidOperationException("Endurance cycle incomplete.");
@@ -68,6 +75,7 @@ namespace VrCommand.Unity
             public int version = 1, pid, room, activeFrames, movementFrames, fireSubmissions, reloadSubmissions;
             public string mode = "AutomatedSimulation", role = "Client", playerId, reason, fault;
             public string profile = "Short";
+            public string motion = "TickAlternation";
             public int maximumCollectionSeconds = 240;
             public long maximumActiveTicks = DesktopExercisePlan.MaximumActiveTicks;
             public bool complete, truncated, physicalInput;
@@ -104,6 +112,7 @@ namespace VrCommand.Unity
                 Directory.CreateDirectory(path); var exercise = owner.AddComponent<DesktopClientExercise>(); exercise.directory = path;
                 exercise.plan = new DesktopExercisePlan(endurance);
                 exercise.report.profile = endurance ? "Endurance" : "Short";
+                exercise.report.motion = endurance ? "LocalPositionFeedback" : "TickAlternation";
                 exercise.report.maximumCollectionSeconds = endurance ? 1200 : 240;
                 exercise.report.maximumActiveTicks = endurance ? DesktopExercisePlan.EnduranceActiveTicks : DesktopExercisePlan.MaximumActiveTicks;
                 exercise.report.pid = System.Diagnostics.Process.GetCurrentProcess().Id; exercise.report.startedUtcTicks = DateTime.UtcNow.Ticks;
@@ -111,7 +120,7 @@ namespace VrCommand.Unity
             }
             catch (Exception) { Debug.LogError("Desktop exercise requires a fresh local directory and Windows Development batch Client without XR."); return false; }
         }
-        internal static DesktopExerciseFrame Sample(string playerId, ulong connection, int room, long tick, bool active)
+        internal static DesktopExerciseFrame Sample(string playerId, ulong connection, int room, long tick, bool active, float localZ)
         {
             var self = instance; if (self == null || self.finished) return default;
             if (!Guid.TryParse(playerId, out var id) || id == Guid.Empty || room < 1 || room > 5) return default;
@@ -120,7 +129,7 @@ namespace VrCommand.Unity
             { self.report.fault = "OwnerChanged"; self.Finish(false, "OwnerChanged"); return default; }
             try
             {
-                var frame = self.plan.Next(tick, active);
+                var frame = self.plan.Next(tick, active, localZ);
                 if (self.plan.Exhausted) { self.Finish(false, "ActiveTickLimit"); return default; }
                 if (active) { self.report.activeFrames++; if (frame.Movement != Vector2.zero) self.report.movementFrames++; }
                 return frame;
