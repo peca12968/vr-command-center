@@ -1,5 +1,21 @@
 # 開發進度
 
+## 2026-11-02：主控台任務收尾與已封存End重試
+
+新增[任務收尾](SESSION_CLOSURE.md)。API **0.31.0** REST／資料契約保持、控制台 **0.31.1**，分開顯示combat與world archive。只在選取的Ended來源場次頁可見時GET既有world，每兩秒／五秒逾時；同epoch／key／actor／session／sequence／stream與generation fence，世界header需同來源／rooms／clock、正數accepted與complete，統計精確同session序號／pending=false及combat.sealed才整體完成。隱藏／切頁／選取／登出／未知命令、刷新失敗或world讀取錯誤清除舊完成，401走原登出，404／403／5xx／異源不當綠。API的world seal已核對原Ended幀／combat尾界／統計，前端不讀live或保存journal／SQLite，不將archive當玩家送達／可關閉服務；原Begin、CSV閘門與0.5／1.5秒政策不動。
+
+新增明確before反例：`console-closure-retry-before-20261102`／handle30262 **exit1**。真正API先接受End後GameServer封存0 combat，UI丟失回應、手動重試沿原UUID／expectedSequence，取得真正duplicate=true／sealed=true回條，舊畫面selected空／includeEnded=false／panelHidden=true，原30秒DOM逾時。compiled before API整組在`closure-b0bc5b...`，其WWW三source SHA另保存，沒有替換單DLL。修正只把「已確認End」保留條件改為response.session.state=Ended，已封存／無stream也保持選取，不再限定未seal；沒有自動寫入重試或改UUID。最終完整 **83 Node／269 Chromium**成功，包含原11項closure UI讀取／失敗／390px／登出fence及兩個真End retry檢查；world多狀態部分為明確UI route fixture，不當原生source。
+
+新普通solution兩組各自保留；最終`closure-final-29fb7e09a7b2459aabed648f398c6e93`同次API136／三工具各9／Checks97，最終本機 **738規則／459 HTTP／47 world**成功。Windows HTTP這次成功不是舊startup根因修復。API/UI拆開版本以保持舊GameServer的0.31.0 gate，沒有新endpoint、world schema或Unity修改；Unity **0.39／code49／NGO29／e0d60e4e...／原224真正Editor與同源雙平台／Scene-prefab ID**保持。
+
+兩個自含publication是`control-server-5d23dc...`與最終`control-server-4bb90a...`，各481輸出、原lock依賴群組保持，repository locks不改。兩份新管理ZIP皆 **52,466,368 bytes**，初closure SHA684f1f4d92ce206eff8319486245bcbc6b1ef6f1dfa76266fdf780d3892d61cc為保留候選，最終`control-server-api0.31.0-ui0.31.1-closure-final-win-x64.zip` **SHA7d87669d0f8478feb328697c3d9d58005aa8f0e3331726080374fa6ab5a254e5**、501 manifest（ZIP502）／481 runtime，含consoleVersion metadata。Framework啟動器source266d93...不變、API根版本0.31.0；不能僅用相同大小或版本認定同包。初control42125／`run-86f7aa...`與final93192／`run-709c59...`各 **105項**成功，沒有因本輪重做Windows啟動器GUI或改判原PickerHost。
+
+首新native `server-package-checks/run-ad5b5fdd5ea34effb475ef463701b951`／21777 **exit1**：觀察器在原Running ready後等closure逾時，自己的browser22588正常exit0、cleanup乾淨，五房各已精確seal／回放，但未到Linked／公開10結果檢查。當時從別API通路End而未含Ended，可能被現有篩選移走；缺末刻DOM，不證唯一根因。改用真正UI End並補有限失敗state／五秒圖，60秒觀察期限保持。候選67639／`run-ce7572...` **106項／596完整回放**成功，scope與最終分開。
+
+最終native15604／`run-c8d93c6d2da3455fa95f26db408d24a5` **exit0／106項**：包內API＋原server v3（SHA6cecfbee...）／原Unity，五獨立server＋五接收client，後Linked一server＋五接收client。真正頁面先選中Running，正常End按鈕只送一筆非duplicate 200 POST／原expectedSequence，來源完整回條、頁面自動含Ended、同source的world GET／已封存提示與原native精確尾界一致，沒有route fulfill／UI state注入；browser原process exit0，沒有送達聲稱。六場 **619全API回放（153／129／110／95／76／56）**、10份原admission結果／CSV、雙seal／closed world journal精確durable尾界與原child cleanup成功；第七parent-exit仍刻意未seal且無success final，不混正常六場。terminal後closed-readback另外只讀JSON／CSV／log，10 CSV每列／10原network admission與server ACK精確、無timeout，非新的live檢查或第107項。
+
+本輪五family原C27＋60failed＋80candidate＋27＋80final＝**274檔**，全writer terminal後各一次F snapshot同hash，保存SQLite不開。`closure-delivery-validation.json`核對兩新pub／501主包、8管理ZIP／3 serverZIP、原玩家ZIP／APK／fingerprint及新API整組；`closure-prior-preservation.json`另核對前C52 native／C318 control及F370檔，前server package C163也保持。三browser資料夾47＋7before failed＋47final＝101，前1112＋101＝**1213 browser證據**，另兩成功／一failed native observer共5 PNG保持獨立範圍；原77／3399歷史native不混新family、不稱全重跑。7既有control／4既有server Python邊界成功。完整11active，原31／world371／Windows startup／F吞吐、完整server GUI／乾淨新機／LAN／25操作／頭盔MR／硬體仍待。
+
 ## 2026-11-02：Windows遊戲伺服器可攜啟動
 
 [功能95411a2](https://github.com/peca12968/vr-command-center/commit/95411a264ac85894669b9127f3b40989982b30d0)的[CI41335830454](https://github.com/peca12968/vr-command-center/actions/runs/41335830454)／job124935327276／精確95411a2完整**success**：Linux738規則／459 HTTP／47 world、6真正pipe程序／4新Python封裝邊界與原工作流程／素材、78 Node／256 Chromium。2 Windows限定skip不是Framework／原生GUI／Editor／頭盔；本機103與failed GUI分開保持。console43 artifact13094744913／ZIP **10,005,039 bytes／SHAfd9e1fa1995ef18c65339b68308de501138f3a3cd8a91008d89810e3e2de75f4**，control13 artifact13095560953／ZIP **3,919 bytes／SHAacdf31e1d6331e34946ff3a4862814728446453441995d1d28ce6bd5e014b4c5**及完整decoded log保存，ZIP digest與GitHub相符。`server-ci-validation.json`明列1069＋43＝**1112 browser證據**，另13新CI管線metadata，未混入GUI／native；本輪沒有新本機browser場，後續文件skip ci、測試來源精確95411a2。

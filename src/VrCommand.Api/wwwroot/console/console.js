@@ -4,6 +4,7 @@ import { mountLayout } from './layout-ui.js';
 import { mountReport } from './report-ui.js';
 import { mountReadiness } from './readiness-ui.js';
 import { mountConnections } from './connection-ui.js';
+import { mountClosure } from './closure-ui.js';
 const replay = mountReplay();
 const $ = id => document.getElementById(id);
 const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫停', Ended: '已結束' };
@@ -14,6 +15,7 @@ const world = mountWorld(() => state.key, logout);
 const report = mountReport(() => state, logout);
 const readiness = mountReadiness(() => state, logout);
 const connections = mountConnections(() => state, logout);
+const closure = mountClosure(() => state, logout);
 const placement = mountLayout({ api, epoch: () => state.epoch, active: () => !!state.actor, editable: master,
   draft: () => ({ experienceMode: $('draft-mode').value, mode: $('layout-session-mode').value, enemyCount: Number($('draft-count').value), props: structuredClone(state.props) }),
   selection: () => ({ id: $('launch-mission').value, mode: $('launch-mode').value }), changed: applyPermissions,
@@ -93,6 +95,7 @@ async function run(action, independentRead = false) {
 function logout() {
   selectionEpoch++;
   report.reset(); state.statistics = null;
+  closure.active(false); closure.reset();
   replay.active(false); replay.reset(); world.active(false); world.reset(); readiness.active(false); readiness.reset(); connections.active(false); connections.reset();
   state.epoch++; state.key = ''; state.actor = null; state.selected = ''; state.session = null; state.pending = null;
   state.rooms = []; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
@@ -129,7 +132,7 @@ function refresh() {
   if (!state.actor || state.pending) return Promise.resolve();
   if (state.refreshPromise) return state.refreshPromise;
   const epoch = state.epoch;
-  const pending = refreshData(epoch).finally(() => { if (state.refreshPromise === pending) state.refreshPromise = null; });
+  const pending = refreshData(epoch).catch(error => { if (epoch === state.epoch) closure.invalidate(); throw error; }).finally(() => { if (state.refreshPromise === pending) state.refreshPromise = null; });
   state.refreshPromise = pending;
   return pending;
 }
@@ -159,7 +162,7 @@ async function refreshData(epoch) {
     state.session = session;
     if (previous?.id !== session.id) { loadEnvironment(); loadEnemies(); loadClock(); }
     renderSession(statistics, events);
-  } else { state.session = null; state.statistics = null; report.reset(); $('session-panel').hidden = true; }
+  } else { state.session = null; state.statistics = null; report.reset(); closure.reset(); $('session-panel').hidden = true; }
   $('last-update').textContent = '更新於 ' + time(Date.now());
   applyPermissions();
 }
@@ -176,6 +179,7 @@ async function selectSession(id) {
   if (state.pending || state.busy) { notify('請先確認目前命令的結果。', true); return; }
   const selection = ++selectionEpoch, epoch = state.epoch;
   report.reset(); readiness.reset(); connections.reset(); state.statistics = null; state.selected = id; state.session = null;
+  closure.reset();
   $('session-panel').hidden = true;
   if (state.refreshPromise) { try { await state.refreshPromise; } catch { /* Refresh below reports errors. */ } }
   if (selection !== selectionEpoch || epoch !== state.epoch) return;
@@ -216,6 +220,7 @@ function row(cells) { const tr = element('tr'); for (const value of cells) { con
 function emptyTable(id, columns, message) { const tr = element('tr'), td = element('td', message, 'empty-cell'); td.colSpan = columns; tr.append(td); $(id).replaceChildren(tr); }
 function renderSession(statistics, events) {
   state.statistics = statistics; report.update();
+  closure.update(true);
   const session = state.session;
   $('session-panel').hidden = false;
   $('session-name').textContent = session.mission.definition.name;
@@ -293,7 +298,7 @@ async function sendPending() {
     }
     state.pending = null;
     if (pending.kind === 'create') { $('include-ended').checked = response.state === 'Ended'; state.selected = response.id; state.session = null; }
-    if (pending.kind === 'command' && pending.body.action === 'End' && response.session.combatStream && !response.session.combatStream.sealed) $('include-ended').checked = true;
+    if (pending.kind === 'command' && pending.body.action === 'End' && response.session.state === 'Ended') $('include-ended').checked = true;
     if (pending.kind === 'join') $('player-name').value = '';
     await refresh(); loadEnvironment(); loadEnemies(); loadClock();
     notify({ create: '場次建立結果已確認。請核對目前狀態，再加入玩家及開始任務。', join: '玩家加入操作已確認，請核對目前名冊；尚不代表頭盔在線。', leave: '玩家移出操作已確認，請核對目前名冊。', command: '控制命令已確認。' }[pending.kind]);
@@ -447,6 +452,7 @@ for (const id of ['prop-asset', 'prop-x', 'prop-y', 'prop-z', 'prop-yaw']) $(id)
 function tab(name) {
   for (const candidate of ['operations', 'missions', 'replay', 'world']) { const active = candidate === name; $(candidate + '-view').hidden = !active; $('tab-' + candidate).classList.toggle('active', active); $('tab-' + candidate).setAttribute('aria-pressed', String(active)); }
   replay.active(name === 'replay'); world.active(name === 'world'); readiness.active(name === 'operations'); connections.active(name === 'operations');
+  closure.active(name === 'operations');
 }
 function submit(id, action) { $(id).addEventListener('submit', event => { event.preventDefault(); run(action); }); }
 $('login-form').addEventListener('submit', login);

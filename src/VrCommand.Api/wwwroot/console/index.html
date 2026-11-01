@@ -44,6 +44,7 @@
           <div class="section-heading"><div><p id="session-meta" class="eyebrow"></p><h2 id="session-name"></h2></div><span id="session-phase" class="badge"></span></div>
           <p id="session-briefing" class="briefing"></p>
           <div id="session-controls" class="button-row"><button data-command="Begin">開始任務</button><button data-command="Pause" class="secondary">暫停</button><button data-command="Resume" class="secondary">繼續</button><button data-command="End" class="danger">結束場次</button></div>
+          <section id="closure-status" class="closure-status" aria-label="任務資料封存狀態"><h3>任務收尾</h3><div class="button-row"><span id="closure-combat">戰鬥統計：未確認</span><span id="closure-world">世界回放：未確認</span></div><p id="closure-summary" class="hint" role="status" aria-live="polite">選取場次後可確認資料封存狀態。</p></section>
           <form id="clock-form"><fieldset id="clock-fields"><p id="clock-status" class="hint"></p><label class="check"><input id="clock-auto-end" type="checkbox">依任務時間自動結束</label><div class="button-row"><button type="submit" class="secondary">套用時間設定</button><button type="button" id="reload-clock" class="quiet">載入目前時間設定</button></div><p class="hint">僅準備中可設定。只計算任務執行時間，暫停時停表；到時停止戰鬥並結束場次，再等待戰績封存。未勾選時由操作員手動結束。</p></fieldset></form>
           <div class="two-columns controls-grid">
             <section><h3>即時環境</h3><p id="live-environment" class="hint"></p><form id="environment-form"><fieldset id="environment-fields"><div class="form-row"><label>模式<select id="live-mode"><option value="VR">VR</option><option value="MR">MR</option></select></label><label>天氣<select id="live-weather"><option value="Clear">晴朗</option><option value="Rain">下雨</option><option value="Fog">濃霧</option><option value="Storm">暴風雨</option></select></label><label>時段<select id="live-time"><option value="Day">白天</option><option value="Night">夜晚</option></select></label></div><label class="check"><input id="live-lightning" type="checkbox">閃電</label><div class="button-row"><button type="submit" class="secondary">套用環境</button><button type="button" id="reload-environment" class="quiet">載入目前設定</button></div></fieldset></form></section>
@@ -118,7 +119,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>開發原型 v0.31.0 · 已有場次連線設定、任務版本、玩家參戰快照、軍事掩體素材、天氣聲光重現與鏡頭位置保存；頭盔實機、MR、25 台與硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.1 · 已有任務封存進度、場次連線設定、任務版本、玩家參戰快照與觀戰回放；頭盔實機、MR、25 台與硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

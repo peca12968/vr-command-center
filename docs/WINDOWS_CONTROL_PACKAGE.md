@@ -1,8 +1,10 @@
 # Windows 可攜管理服務
 
-API／控制台 **0.31.0**，管理服務可以獨立解壓執行。`Start-Control.exe`提供繁中介面，API隨包附帶.NET／ASP.NET Core **10.0.14 win-x64**，使用者電腦需要Windows x64及.NET Framework 4.8，管理服務不依賴Python或.NET SDK。遊戲伺服器可使用[獨立伺服器包](WINDOWS_SERVER_PACKAGE.md)，玩家另外啟動，參見[外部玩家流程](EXTERNAL_CLIENTS.md)與[Windows玩家包](WINDOWS_PLAYER_PACKAGE.md)。
+API **0.31.0**／控制台 **0.31.1**，管理服務可以獨立解壓執行。`Start-Control.exe`提供繁中介面，API隨包附帶.NET／ASP.NET Core **10.0.14 win-x64**，使用者電腦需要Windows x64及.NET Framework 4.8，管理服務不依賴Python或.NET SDK。遊戲伺服器可使用[獨立伺服器包](WINDOWS_SERVER_PACKAGE.md)，玩家另外啟動，參見[外部玩家流程](EXTERNAL_CLIENTS.md)與[Windows玩家包](WINDOWS_PLAYER_PACKAGE.md)。
 
-本輪主包為`artifacts/control-packages/control-server-0.31.0-release-win-x64.zip`，**52,456,642 bytes／SHA256 `b38391f1f72115a98a60ba1bc8f5cb1e7395abe633c1366c0fa9529dce794eb1`**、498份manifest檔案。檔名中的final、atomic、reviewed或ui是保留候選，驗收須對照本頁、manifest及[PROGRESS](PROGRESS.md)，不能只看版本或檔名。
+目前主包為`artifacts/control-packages/control-server-api0.31.0-ui0.31.1-closure-final-win-x64.zip`，**52,466,368 bytes／SHA256 `7d87669d0f8478feb328697c3d9d58005aa8f0e3331726080374fa6ab5a254e5`**、501 manifest／481 runtime檔案。新增[任務收尾與End重試](SESSION_CLOSURE.md)，新CLI105／真正browser UI End＋原生106通過；Windows啟動器C#來源保持，沒有新GUI啟停操作驗收。相同大小、SHA684f1f4d...的closure初候選保留，其舊End篩選反例未通過。以下初版0.31.0證據亦保留。
+
+原初版主包為`artifacts/control-packages/control-server-0.31.0-release-win-x64.zip`，**52,456,642 bytes／SHA256 `b38391f1f72115a98a60ba1bc8f5cb1e7395abe633c1366c0fa9529dce794eb1`**、498份manifest檔案。檔名中的final、atomic、reviewed或ui是保留候選，驗收須對照本頁、manifest及[PROGRESS](PROGRESS.md)，不能只看版本或檔名。
 
 ## 使用
 

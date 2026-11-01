@@ -5,7 +5,7 @@ from pathlib import Path,PurePosixPath
 ROOT=Path(__file__).resolve().parents[1];TOP='VRCommand-ControlServer'
 SECRET_KEYS={'operatorkeys','operatorkeyfile','gameserverkey','jointicket','playerticketsigningkey','controlpipetoken'}
 FORBIDDEN_PARTS={'data','missions','sessions','telemetry','journals'}
-README='''VR Command Windows 管理服務包 0.31.0
+README='''VR Command Windows 管理服務包 API 0.31.0／控制台 0.31.1
 
 完整解壓後開啟 Start-Control.exe。
 1. 首次選擇監聽IPv4與埠號（預設127.0.0.1:5081），按「新增資料實例」。
@@ -55,6 +55,7 @@ def payload(name,content=None):
 def publication(build):
     build=plain(build);receipt=read(build/'publish-receipt.json');folder=plain(build/'publication')
     if receipt.get('schemaVersion')!=1 or receipt.get('target')!='win-x64' or receipt.get('apiVersion')!='0.31.0':raise ValueError('Use an actual supported Windows publication')
+    if receipt.get('consoleVersion')!='0.31.1':raise ValueError('Publish the current console 0.31.1 before packaging')
     expected=receipt['files'];actual={p.relative_to(folder).as_posix() for p in folder.rglob('*') if p.is_file()}
     if actual!=set(expected):raise ValueError('Publication contains missing or additional files')
     for name,value in expected.items():
@@ -102,7 +103,7 @@ def main():
     source=ROOT/'tools/WindowsControlLauncher/ControlLauncher.cs';compiler=Path(os.environ.get('WINDIR','C:/Windows'))/'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
     with (stage/'compile.log').open('xb') as log:subprocess.run([str(compiler),'/nologo','/warnaserror','/codepage:65001','/target:winexe','/platform:x64','/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Web.Extensions.dll','/out:'+str(folder/'Start-Control.exe'),str(source)],stdout=log,stderr=subprocess.STDOUT,check=True)
     (folder/'README.txt').write_text(README,encoding='utf-8');(folder/'publish-receipt.json').write_text(json.dumps(receipt,indent=2)+'\n',encoding='utf-8')
-    manifest={'schemaVersion':1,'target':'win-x64','apiVersion':'0.31.0','createdAtUtc':datetime.now(timezone.utc).isoformat(),'launcherSourceSha256':digest(source),'runtimeFrameworks':receipt['runtimeFrameworks'],
+    manifest={'schemaVersion':1,'target':'win-x64','apiVersion':'0.31.0','consoleVersion':receipt['consoleVersion'],'createdAtUtc':datetime.now(timezone.utc).isoformat(),'launcherSourceSha256':digest(source),'runtimeFrameworks':receipt['runtimeFrameworks'],
         'scope':'Portable management API / private instance launcher; no Unity server, keys, tickets or databases. SHA manifest is not a signature.',
         'files':[{'path':p.relative_to(folder).as_posix(),'bytes':p.stat().st_size,'sha256':digest(p)} for p in sorted(folder.rglob('*')) if p.is_file()]}
     (folder/'control-package.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8');verify(folder)

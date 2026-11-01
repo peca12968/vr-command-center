@@ -1,5 +1,7 @@
 # VR Command Center
 
+2026-11-02 [任務收尾與End重試](docs/SESSION_CLOSURE.md)：控制台0.31.1／API0.31.0，分開顯示戰鬥與世界封存，異源／讀取失敗不沿用綠色，沒有送達／可關閉保證。真lost-End後sealed duplicate舊篩選反例exit1、新269 Chromium／83 Node及真正UI End＋原生106／619回放／10結果CSV ACK成功；管理包105。Unity0.39／224雙平台保持，新server GUI／跨機頭盔25操作仍待，11active。
+
 2026-11-02 [Windows遊戲伺服器包](docs/WINDOWS_SERVER_PACKAGE.md)：沿用Unity0.39與API0.31，Framework啟動器只使用GameServer角色、Preparing VR新來源／新資料，公告endpoint、雙seal後留36秒再收自己的原程序。103項原生整合／五獨立與後Linked／553全回放／10原admission結果CSV與closed journal尾界成功；Job父程序退出另為未封存反例。GUI被非目標PickerHost攔住，未完成／failed保持；沒有新Editor／APK或跨機／25操作，完整11active。
 
 API／控制台0.31.0新增[Windows可攜管理服務](docs/WINDOWS_CONTROL_PACKAGE.md)：繁中啟動器、自含.NET執行環境與獨立資料實例，支援既有任務／五房名冊重開。105項實際封裝檢查、原子報告反例、真正GUI啟停及五房原生回歸通過；跨機與頭盔仍待驗證，完整範圍見[進度](docs/PROGRESS.md)。
