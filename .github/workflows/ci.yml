@@ -28,6 +28,8 @@ jobs:
       - run: python -m unittest discover -s tests -p test_observer_sequence.py
       - run: python -m unittest discover -s tests -p test_observer_analysis.py
       - run: python -m unittest discover -s tests -p test_first_person.py
+      - run: python -m unittest discover -s tests -p test_desktop_navigation.py
+      - run: python -m py_compile scripts/check-desktop-navigation.py
       - run: python -m py_compile scripts/check-desktop-first-person.py
       - run: python -m py_compile scripts/observer-sequence.py scripts/analyze-observer-sequence.py
       - run: python -m unittest discover -s tests -p test_desktop_artifacts.py

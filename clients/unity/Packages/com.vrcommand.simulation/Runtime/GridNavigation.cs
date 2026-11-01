@@ -10,6 +10,9 @@ namespace VrCommand.Simulation
         private readonly Vec3 origin;
         private readonly ArenaWalkSurface surface;
         private readonly bool[] open = new bool[Size * Size];
+        // Geometry is immutable. Each undirected grid edge is sampled at most
+        // once, using the same clearance policy as the eventual movement.
+        private readonly sbyte[] edges = new sbyte[Size * Size * 4];
         internal GridNavigation(Vec3 origin, WorldProp[] props)
         {
             this.origin = origin; surface = new ArenaWalkSurface(origin, props);
@@ -39,17 +42,24 @@ namespace VrCommand.Simulation
             while (queue.Count > 0 && previous[end] == -1)
             {
                 var cell = queue.Dequeue(); var x = cell % Size; var z = cell / Size;
-                Visit(x + 1, z, cell); Visit(x - 1, z, cell); Visit(x, z + 1, cell); Visit(x, z - 1, cell);
+                Visit(x + 1, z, cell, 0); Visit(x - 1, z, cell, 1); Visit(x, z + 1, cell, 2); Visit(x, z - 1, cell, 3);
             }
             if (previous[end] == -1) return new List<Vec3>();
             var path = new List<Vec3>(); var cursor = end;
             while (cursor != start) { path.Add(Point(cursor)); cursor = previous[cursor]; }
             path.Add(Point(start)); path.Reverse(); return path;
-            void Visit(int x, int z, int parent)
+            void Visit(int x, int z, int parent, int direction)
             {
                 if (x < 0 || z < 0 || x >= Size || z >= Size) return;
                 var next = z * Size + x;
                 if (!open[next] || previous[next] != -1) return;
+                var edge = parent * 4 + direction;
+                if (edges[edge] == 0)
+                {
+                    var value = (sbyte)(ClearSegment(Point(parent), Point(next)) ? 1 : -1);
+                    edges[edge] = value; edges[next * 4 + (direction ^ 1)] = value;
+                }
+                if (edges[edge] < 0) return;
                 previous[next] = parent; queue.Enqueue(next);
             }
         }

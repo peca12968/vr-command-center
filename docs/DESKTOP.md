@@ -1,5 +1,7 @@
 # 電腦練習場
 
+2026-11-01 最新Unity0.37.1／code46／NGO29、API/UI0.30.1，新增[敵軍旋轉掩體繞路修正](AI_NAVIGATION.md)。保留既有軍服手臂、碰撞與戰鬥規則；189真正Editor／同源雙平台及原生巡邏／控制回歸成功。舊版本與GPU證據範圍保持，詳見PROGRESS。
+
 2026-11-01 電腦玩家新增[自己的第一人稱軍服手臂](DESKTOP_FIRST_PERSON.md)，正常啟動即可看見袖子與換彈，不需開診斷。最新Unity0.37.0／code45／NGO29及API/UI0.30.1，184真正Editor、同源Windows／Quest建置；單玩家GPU／回放、遠端人物、Host戰績與五房流程回歸範圍見PROGRESS。以下各版本段落為歷史，不當最新版本號。
 
 玩家端另可交付[Windows可攜玩家包](WINDOWS_PLAYER_PACKAGE.md)，解壓後用繁中啟動器選擇個別短票券連線檔；對應[外部玩家模式](EXTERNAL_CLIENTS.md)，不需要在玩家PC安裝Python或Editor。這不包含管理API／伺服器，實際跨機與GUI安全性提示處理仍另驗。

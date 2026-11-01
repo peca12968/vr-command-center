@@ -1,5 +1,34 @@
 # 開發進度
 
+## 2026-11-01：敵軍繞行旋轉掩體，保留端點觀察逾時
+
+從乾淨`0368b33`接續第6項，修正[AI_NAVIGATION](AI_NAVIGATION.md)。Unity **0.37.1／code46／NGO29**，API/UI0.30.1、world格式／rules0.8.0保持。新雙平台fingerprint **69d247a9ecfa7b42ee1e9314e0319869995f1876379850928f5725901e642fc2**，原scene／prefab ID一致；Prepare84165、Tests14853、Desktop55866、Quest67152原handle皆terminal exit0，**189真正Editor全過、0skip**。正式5080不動；新.NET API／三工具／Checks均在自己的C BuildRuns，第一份fixture失敗候選與舊API copies保留，原Windows完整HTTP startup問題沒有在本輪改判。
+
+舊GridNavigation只看格點可站立便相連，Move卻以原ClearSegment檢查實際路段，遇旋轉掩體角落會拒絕移動再選同一路。凍結舊來源反例：45°油桶(.25,0,.25)，(-2,0,1)→(2,0,1)產生9點／1條不可通行邊，320活動tick仍卡住。另一個真正任務產生器端點配置：油桶(.25,0,-1.75)、(-4.5,0,-1)→(4.5,0,5)，舊31點／1壞邊、320tick仍約(0,0,-1)。兩個.NET實際exit1、原JSON／C來源／binary保存，不當原生或頭盔。
+
+只改GridNavigation的凍結來源副本產生11點／0壞邊並可往返；前後50個Runtime檔只有該檔不同、Program逐byte相同。新搜尋以既有ClearSegment核對格邊，正反向共用不可變幾何的有界快取：每房625格／2500個sbyte槽／最多1200無向邊。原四方向／順序、.3m半徑／.05m取樣／.1m活動tick上限與Move再次檢查保持，沒有改傷害、目標、Tracked或封包。歷史回放使用原幀，不重新求路；不是完整3D地形、任意非格點端點／動態目標可達性或人群導航完成。
+
+本機**723核心檢查**（原717＋6）通過；Editor新增5案例含往返／逐tick通行速度、Hold／Pause、Linked兩外側房及封閉牆。首候選CoreChecks在第280項因fixture誤判封閉牆而崩潰退出：x=-4..4的五沙包仍留兩側通路，實際繞行合理；log／兩來源與C候選binary保留。修正fixture為x=-4.8..4.8／2.4m間距後新C建置與723成功，沒有修改遊戲半徑或刪除原失敗。新API採`navigation-final-build-path.txt`下bin，舊／失敗候選不覆蓋。
+
+| 真正原生場／原handle | 結果與範圍 |
+|---|---|
+| `desktop-navigation/20261101-125121-d130384b`，41746 exit0 | 4項／133完整回放、9 refs，原getter及初次live檢查點起的玩家／NPC核對；不是最後較早的Begin回放閘門 |
+| `20261101-125410-3d188963`，43827 exit1 | 提早回放閘門已加入，但原20秒getter沒讀到短暫端點，未進後續控制／完整回放／結果驗收。cleanup成功、原failed保留；closed world90／91、tick150／152確已到達，不當來源未到達 |
+| `20261101-125724-93f88fed`，35386 exit0 | 最終4項／**128完整回放／113已接受Begin後Running或Paused幀／9 refs**，fault0；live端點串流69幀連續17–85、tick150，Hold／Pause／Resume／Advance、零戰鬥統計、原admission結果／CSV／精確雙seal／唯一server ACK與cleanup成功 |
+| `desktop-venue/20261101-125821-51d9d6e5`，97903 exit0 | 原五房6項／7場、隔離／錯票／房1環境AI與Pause不擾其他房／席位重用／後續Linked及精確seal、活動0、cleanup無殘留。每房1位，非25位操作或逐client複本全程驗收 |
+
+端點getter逾時在writer全停後以closed journal的rb／record checksum／序號metadata另查：保存219幀、world90最短2.861e-6m、91仍<.2m。closed分析不是完整規則重放，不開保存SQLite、不修復／ack，也不把已保存端點補成live成功或推定主機／網路根因。工具改成單一連續live串流、20秒／256幀、序號不能跳、每packet用原header擷取UTC＋elapsed檢查1.5秒來源年齡，**不延長20秒或放寬.2m**。原逾時仍exit1，沒有重寫其結果。
+
+最終接受Begin4，回放最早納入world15、首live Running是17，兩者分開；不是從第一個live檢查點才開始忽略更早來源。每張已接受Begin的Running／Paused保存幀核對原玩家健康100／connected／Simulated、原NPC、房間／攻擊關閉、旋轉盒外位置及活動tick位移上限，中間失效恢復也失敗。保存之間缺少的tick不插補路徑；全20Hz通行另由共用規則／Editor檢查，不當每render或複本封包證據。新5helper SHA前後相同不是完整OS／runtime graph。端點最大收到時來源年齡0.117452秒，不是RTT／FPS或性能基線。前兩場與Quest建置重疊，最終場build已結束；負載不同，不當因果對照。
+
+本機7 navigation＋5 artifacts＋7 first-person＝**19 Python**，含短暫端點先於返回仍被串流觀察、舊來源不可當新鮮、原人物失效／換NPC、NaN／bool、凍結tick移動及缺tick不插補；語法／diff／原player-body pin與293官方transport＋1 scoped patch核對成功。無新GPU／PCM、遊戲按鍵或姿態注入；原0.37.0六張手臂GPU證據保持原範圍。
+
+新Windows包`windows-player-0.37.1.zip` **82,642,694 bytes／SHA cba3a25ba590c21f0b38b152042242b373ea656dce4c1ff434a742490f3b841f**，311 runtime檔／原launcher a65846da...；新C展開navigation-b0e09beb0a734d3f92cccfce3ddacec0、85847 exit0／19真正launcher核對拒絕，非完整封裝GUI／跨機。Quest APK **60,313,650 bytes／SHA723e57b59320b77a0b32523d092a75c6b5fe937325187be1f9fdc484505a980a**，com.vrcommand.quest／0.37.1／46／ARM64／min32 target35、v2 debug簽章成功；receipt建置總量不是APK大小，無實機安裝。建置前321舊binary／logs及10來源精確另存navigation-history-1fc294c6bd3f4748890eb85338834af5，原0.37.0及0.36.1 ZIP保持。
+
+`navigation-prior-validation.json`核對前60 C runtime3083與F snapshot、前F證據3540、舊321＋10與兩個新C build候選／凍結反例來源。`navigation-runtime-validation.json`再核對**新4 C runtime68檔與F snapshot逐檔一致、新F179檔、486份前瀏覽器／CI證據**，總64場3151 runtime檔；原三API組159、accepted mission API及三個舊候選、新accepted navigation API／三工具／Checks都依原hash保持。全部自己的writer停才一次snapshot回F，原件不移動、保存SQLite不開連線。完整CI另補本節。
+
+完整11項active，仍同機Simulation／headsets0。這個可重現的旋轉格邊錯誤與原31筆／world371姿態失效、Windows startup、F吞吐各自不同，後者未修復；多人持續操作、複雜地形、跨機／Wi-Fi／Quest／VIVE／MR與廠商硬體仍待驗。
+
 ## 2026-11-01：電腦端第一人稱軍服手臂
 
 從`e8b346a`接續完整11項中的軍事人物介面，新增[DESKTOP_FIRST_PERSON](DESKTOP_FIRST_PERSON.md)。Unity **0.37.0／code45／NGO29**、API/UI0.30.1／rules0.8.0保持；同源Windows與ARM64 Quest fingerprint **09eed85207b33d5304f6aae294a5aebe3237d48eca3f2b0cf9b01679530ed5c8**，原scene／prefab ID一致。Prepare9556、Tests46731、Desktop83079、Quest86239各原handle terminal exit0；**184真正Editor全部通過、0skip**，不是Python或雲端替代。新增5案例保護本機端點／隱藏、Tracked早退、死亡／失聯、切回遠端及保存換彈／Pause。沒有改API、wire、Shared數學或正式5080。

@@ -1,5 +1,7 @@
 # VR Command Center
 
+新增[敵軍繞行旋轉掩體修正](docs/AI_NAVIGATION.md)：修正格點可站立、連接路段卻被油桶阻擋時的巡邏卡住。Unity0.37.1／189真正Editor、723核心及原生巡邏／Hold／Pause／Advance與完整回放通過；觀察器的一次漏看端點逾時保留，完整證據見[進度](docs/PROGRESS.md)。
+
 電腦端新增[第一人稱軍服手臂](docs/DESKTOP_FIRST_PERSON.md)：轉動視角及換彈可見自己的袖子，隱藏自己的軀幹／頭盔，保留其他玩家的完整人物。Unity0.37.0／184真正Editor、同源Windows／Quest建置、6張原生畫面及1195幀回放通過；目前仍無頭盔，完整限制及失敗紀錄見[進度](docs/PROGRESS.md)。
 
 API／UI0.30.1修正[任務版本讀取恢復](docs/MISSION_READ_RECOVERY.md)：背景列表更新失敗時，仍可明確讀取已保存任務，並保留列表警告；寫入及登出限制保持。本機248項瀏覽器與原生8項／355幀回歸通過，完整成功／失敗見[進度](docs/PROGRESS.md)。
