@@ -1,6 +1,6 @@
 # 長期開發目標
 
-2026-11-02 [伺服器房間／任務清單](SERVER_CATALOG.md)：啟動器1.1可直接輸入管理實例路徑並更新，顯示房間、模式與任務，原UUID／版本另列；明確選取、路徑變更／失敗停用、同實例且仍存在才保留。38 CLI/API＋26真正Framework model與新版原生106／777回放／10結果CSV ACK成功；完整WinForms開場仍受PickerHost阻擋。API0.31／console0.31.1及Unity0.39／224雙平台保持，11active。
+2026-11-02 [伺服器房間／任務清單](SERVER_CATALOG.md)：啟動器1.1可直接輸入管理實例路徑並更新，顯示房間、模式與任務，原UUID／版本另列；明確選取、路徑變更／失敗停用、同實例且仍存在才保留。38 CLI/API＋26真正Framework model與新版原生106／777回放／10結果CSV ACK成功；完整WinForms開場仍受PickerHost阻擋。CI41344259683／a8855cc完整success，738／459／47、83 Node／269 Chromium；1260＋47＝1307 browser證據。API0.31／console0.31.1及Unity0.39／224雙平台保持，11active。
 
 2026-11-02 [任務收尾與End重試](SESSION_CLOSURE.md)：控制台0.31.1／API0.31.0，分開顯示戰鬥與世界封存，異源／讀取失敗不沿用綠色，沒有送達／可關閉保證。真lost-End後sealed duplicate舊篩選反例exit1、新269 Chromium／83 Node及真正UI End＋原生106／619回放／10結果CSV ACK成功；管理包105。Unity0.39／224雙平台保持，新server GUI／跨機頭盔25操作仍待，11active。
 
@@ -82,7 +82,7 @@
 
 | 階段 | 交付 | 通過條件 | 目前狀態 |
 |---|---|---|---|
-| M0 專案與管理核心 | F 槽原始碼、私人 GitHub、需求追蹤、五房場次與任務 API、CI | 可重現建置、核心與 HTTP 驗證、推送成功 | 本機與推送完成；2026-11-02 CI41339991116（7a0da65）真正success，Linux建置、738規則／459 HTTP／47串流、6私有管線、全部Python／素材與83 Node／269 Chromium成功；先前帳務阻擋及截圖失敗歷史保留 |
+| M0 專案與管理核心 | F 槽原始碼、私人 GitHub、需求追蹤、五房場次與任務 API、CI | 可重現建置、核心與 HTTP 驗證、推送成功 | 本機與推送完成；2026-11-02 CI41344259683（a8855cc）真正success，Linux建置、738規則／459 HTTP／47串流、6私有管線、全部Python／素材與83 Node／269 Chromium成功；先前帳務阻擋及截圖失敗歷史保留 |
 | M1 場次控制與事件基礎 | 主控／房間權限、準備／開始／暫停／結束狀態、命令與事件、統計核心 | 五房隔離、權限、去重、狀態遷移、紀錄恢復測試 | 管理／統計核心、SQLite 追加、JSON 升級與模擬來源已驗證；建立／加入／離開可持久去重，v2 票券與移除／配票按每次 admission fence；API／SQLite／瀏覽器已驗證；真正 Windows 撤銷／重連已通過；新增 SSD runtime 下五個原生獨立世界、每房一個 client 的權限／命令隔離、單房 End／重用，以及全部封存後新開 Linked |
 | M2 Quest 3 優先的遊戲垂直切片 | Unity 工程、Quest Android profile、基本移動／互動與共同場景；再接入 VIVE | Quest 3 實機操作及雙玩家互見；之後驗證混合頭盔、校正與定位 | 真正 Editor 已通過 UPM／ILPP／資產匯入、224 項 Editor、0.39.0 Windows 與 ARM64／IL2CPP Quest APK；兩平台來源 fingerprint／網路識別一致。無頭盔，依使用者指示先繼續 PC；雙 Quest 操作與混合裝置待驗 |
 | M3 軍事戰鬥與 AI | 武器、傷害、健康、敵軍尋路／攻擊、操作員覆寫、HUD | 伺服器判定一致、AI 可控、事件與統計相符 | Windows server 加兩個 desktop client 已通過獨立／跨房 Simulation AI 傷害、暫停、封存及回放統計；真正視窗已完成方向鍵／Space／滑鼠射擊、擊殺／命中率、換彈及暫停；控制台自訂任務／動態名冊及 Advance／autoAttack 到真正 native 傷害、Pause／Resume／End 已通過；新增軍事HUD／方位／遮擋標記、自製沙包／油桶及不可變素材版本，真正鍵盤與受傷／淘汰已驗；新增固定玩家步槍、保存朝向／步態的人形敵軍及保存時鐘的換彈／合成手套及原創雙手手槍／裝飾性雙臂、保存射線的玩家及敵軍閃光／後座、原生視窗兩發命中／一擊殺與封存統計；新增404面玩家人物、保存步態及桌面腕點／換彈雙臂，真正雙PC GPU／W／Space／R已驗，另有原生C蹲姿掩體／焦點恢復及792完整回放；完整第一人稱／追蹤人物及武器動畫、啟動旗標／原停頓原因、完整策略、追蹤及實機戰鬥待驗 |

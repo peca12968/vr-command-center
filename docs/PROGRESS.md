@@ -1,8 +1,12 @@
 # 開發進度
 
+## 2026-11-02：伺服器清單交付的CI與證據
+
+[功能a8855cc](https://github.com/peca12968/vr-command-center/commit/a8855cc96bdf8cb0ece5fcc4c2dc5e7e0743e2c0)的[CI41344259683](https://github.com/peca12968/vr-command-center/actions/runs/41344259683)／job124960591099完整 **success**：Linux738規則／459 HTTP／47 world、6 pipe、全部Python／素材及83 Node／269 Chromium通過；2 Windows限定skip不是Framework、WinForms、Unity、native或頭盔驗收。console47檔 artifact13098871115／ZIP **11,451,172 bytes／SHA256 bd4624e686c0f92778b9eee34dd3db57a128ac6d5b1c6f7a773955d0c22ee630**，control13檔 artifact13098607730／ZIP **3,918 bytes／SHA256 d8b15a858f0b43d5f07e934a8e2107bc0ab664d46660a75023526c8a2afd7d58**，均已下載核對GitHub digest、逐檔hash並保存完整decoded log（SHA256 4ad0493f6a621d9cc3d28a4e8a263daadaa9d096b9407c027d5ad24d16742829）。`server-catalog-ci-validation.json`明列1260＋47＝**1307 browser證據**，另13 metadata；既有native UI5與本輪native UI2另列。後續只有文件提交skip ci，測試來源精確a8855cc；本機38＋26與106／777範圍保持，GUI仍未完成。
+
 ## 2026-11-02：伺服器房間／任務清單與明確選取
 
-新增[伺服器待開場次清單](SERVER_CATALOG.md)。Launcher **1.1.0**，獨立於原Unity **0.39.0／code49／NGO29**、API **0.31.0**及控制台 **0.31.1**；原e0d60e4e...／224真正Editor／雙平台、Scene／prefab ID與規則／wire保持，沒有新Editor、Unity或API build。
+新增[伺服器待開場次清單](SERVER_CATALOG.md)。Launcher **1.1.0**，獨立於原Unity **0.39.0／code49／NGO29**、API **0.31.0**及控制台 **0.31.1**；原e0d60e4e...／224真正Editor／雙平台、Scene／prefab ID與規則／wire保持，沒有新Editor、Unity或本機API build；CI另有Linux build與驗證。
 
 原GUI只列UUID並需重選實例更新；現在直接輸入或選control-instance.json後載入／更新，清單顯示房間、模式、任務與id前綴，完整場次／任務版本ID另列，啟動仍用原UUID。初次不自選；路徑編輯先停用，載入失敗清原Current／Selected，不沿舊目標；更新只保留同path／instance ID／API／GameServer key且原id仍在的選取，不改選別房。Running／bound／MR不供啟動，原Start仍重新核對loaded API的GameServer／Preparing／未綁來源；清單不當預約／就緒。名稱顯示移除control／bidi並保留surrogate boundary，原name／id不改。新CLI --catalog只GET原身分／場次，bounded256Ki字元／5秒／最多5 active，拒絕錯id／mode／room重疊及資料錯型別；public JSON無key，complete只是read finished，不新增key、配票或管理寫入。
 
