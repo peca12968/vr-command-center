@@ -154,11 +154,18 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       await fs.writeFile(path.join(screenshots, 'world-camera-stalled-read.json'), JSON.stringify({ complete: stalledReadComplete, maximumRows: 4,
         scope: 'Bounded control-state metadata only; no input values, headers, bodies, credentials or cause proof', states: stalledReadStates }, null, 2));
     }
-    let releaseSave, saveAccepted;
+    let releaseSave, saveAccepted, finishHeldSave, heldSaveFailure, heldSaveRequests = 0;
     const saveGate = new Promise(resolve => { releaseSave = resolve; }), accepted = new Promise(resolve => { saveAccepted = resolve; });
+    const heldSaveFinished = new Promise(resolve => { finishHeldSave = resolve; });
     await remembered.route('**/world/cameras/*', async route => {
       if (route.request().method() !== 'PUT') { await route.continue(); return; }
-      const response = await route.fetch(); saveAccepted(); await saveGate; await route.fulfill({ response });
+      heldSaveRequests++;
+      try {
+        const response = await route.fetch(); saveAccepted(); await saveGate; await route.fulfill({ response });
+        finishHeldSave({ fulfilled: true });
+      } catch (error) {
+        heldSaveFailure = error; saveAccepted(); finishHeldSave({ fulfilled: false, error });
+      }
     });
     // Keep the pending-save action on its intended renderer. Observe only the
     // bounded control state: no HTML, input values, credentials or request data.
@@ -183,6 +190,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       await remembered.bringToFront(); await saveState('before-name');
       await remembered.locator('#camera-name').fill('離開前的待確認位置'); await saveState('before-click');
       await remembered.locator('#camera-save').click(); await saveState('after-click'); await accepted;
+      if (heldSaveFailure) throw heldSaveFailure;
     } catch (error) {
       await saveState('failure');
       await remembered.screenshot({ path: path.join(screenshots, 'world-pending-save-failure.png'), fullPage: true, timeout: 5000 }).catch(() => {});
@@ -192,6 +200,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await remembered.locator('#logout').click();
     check(await remembered.locator('#camera-positions option').count() === 0 && await remembered.locator('#camera-name').inputValue() === '', 'Logout clears camera names, saved positions and pending state from the page');
     check(await remembered.locator('#world-camera-x').inputValue() === '' && await remembered.locator('#world-camera-apply').isDisabled(), 'Logout clears the precise camera draft and disables applying it');
+    let reloginFailure;
     try {
       await remembered.bringToFront(); await saveState('before-relogin');
       await remembered.locator('#login-key').fill(tokens.Room2); await remembered.locator('#login-form button').click();
@@ -201,11 +210,18 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       await remembered.waitForFunction(() => !document.querySelector('#camera-save').disabled, null, { polling: 100, timeout: 30000 });
       await saveState('relogin-camera-enabled');
     } catch (error) {
+      reloginFailure = error;
       await saveState('relogin-failure');
       await remembered.screenshot({ path: path.join(screenshots, 'world-relogin-camera-failure.png'), fullPage: true, timeout: 5000, mask: [remembered.locator('#login-key')] }).catch(() => {});
       throw error;
     } finally {
-      releaseSave(); await remembered.unroute('**/world/cameras/*');
+      releaseSave(); const delivery = await heldSaveFinished;
+      await fs.writeFile(path.join(screenshots, 'world-pending-save-delivery.json'), JSON.stringify({
+        fulfilled: delivery.fulfilled, requests: heldSaveRequests, errorName: delivery.error?.name?.slice(0, 64) || null,
+        scope: 'This held original PUT callback only; fulfillment must succeed before the delayed-response isolation assertion' }, null, 2));
+      await remembered.unroute('**/world/cameras/*');
+      if (!reloginFailure && !delivery.fulfilled) throw delivery.error;
+      if (!reloginFailure && heldSaveRequests !== 1) throw new Error('Expected exactly one held original camera PUT');
     }
     await remembered.waitForTimeout(100);
     check(await remembered.locator('#camera-positions option').count() === 0 && !(await remembered.locator('#camera-message').innerText()).includes('離開前'), 'A delayed camera save response cannot repopulate a different operator after logout');

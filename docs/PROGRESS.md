@@ -1,5 +1,15 @@
 # 開發進度
 
+## 2026-11-02：重新登入fixture的held PUT回呼失敗保留
+
+來源1d023ff的[CI41364052976](https://github.com/peca12968/vr-command-center/actions/runs/41364052976)／job125020346533 **failure**，772／459／47、6pipe／38CLI、全部Python含14exercise／素材及89Node成功，2Windows限定skip；stalled-read與登出清理斷言已過，隨後world-browser161的held PUT route.fulfill出現「Route is already handled」未處理拒絕，Node終止，非30秒DOM逾時／完整296。
+
+console18（art13106372583／ZIP3935698／SHAe5925243ef5fd2fffa019ad3386d21140043b0b3026a22593791182cdc60ee7c）、control13（13106736338／3918／ba70a60ce4f3b9cb4163ce83095ffeb01bd104ca64f4a78d057199e125cfc3dc）、hardware26（13106606868／22368／2b248dbb21eb75af9defe476931c2db494dafdf54c6edfdd65084e5fb94b2425）及decoded log SHA99fc847414397ad17e5a981aebedd27be0ab09d825fdc6b00a86d6dca789ab7c另存核對。原1648＋18＝1666browser，原58／56失敗CI與89成功CI不覆蓋，nativeUI7＋2保持。
+
+調整僅測試：held回覆必須先完成，再解除route，回呼例外先收集、由主流程明確失敗，不能忽略已取消回覆來讓隔離斷言變綠。新delivery metadata必須fulfilled=true且只有一個原PUT，才會走原「晚到保存不能污染另一actor」斷言；若重新登入本身已失敗則保留原錯誤，不用回呼覆蓋原因。原30秒／100ms輪詢、產品JS／API／期限及所有隔離斷言不變，node syntax過，新CI另驗，不證先前兩次逾時根因。
+
+使用者已自行關閉先前阻擋GUI的PickerHost視窗；目前不打斷原33928／4ebd長場，待它與清理／包檢查完成再重驗WinForms流程。新的Linked完整8610回放／8576Running已通過，Independent正在原場次900秒，writer停前不snapshot，完整11active。
+
 ## 2026-11-02：位置回饋來源CI在另一個鏡頭等待點失敗
 
 來源4bdf294的[CI41363335600](https://github.com/peca12968/vr-command-center/actions/runs/41363335600)／job125018189228 **failure**。772核心／459 HTTP／47 world、6pipe／38硬體CLI、Python14 exercise／素材及89 Node成功，2 Windows限定skip；先前stalled-read已通過，這次world-browser196在Room2重新登入並開始原世界後，等待camera-save enabled的原30000ms逾時，未到完整296，不是auth-role等待。初分析標籤誤寫auth-role，原metadata副本保留後更正，不改原log／ZIP。
