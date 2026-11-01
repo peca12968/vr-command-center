@@ -1,5 +1,17 @@
 # 開發進度
 
+## 2026-11-02：25端持續移動與操作員命令組合
+
+[短動態驗證](DESKTOP_EXERCISE.md)新增明確選用 `--operator-controls`。原16秒基本輸入窗口後，玩家繼續走既有生成器／原Move與RPC，先等待每人兩發已被統計接受，再對每個原場次送正常SetEnvironment／SetEnemies：雨夜／雷電／Patrol，接著Fog Day／Advance，autoAttack=false、敵軍數固定每房1位。每次使用自己的新UUID及當下expectedSequence；接受回條先保存，同session／非duplicate／原commandId及遞增序號核對，來源observed到達該序號、Running／非suspended、tick至少再20且全員walking，原存活敵軍ID／room／health保持、每位移動>1cm才成功。接受不當套用，不改原60活動秒／240秒收集上限或0.5／1.5政策；這是ManagementApi組合測試，沒有操作員UI／真人鍵盤／GPU或頭盔觀察。
+
+先五端預跑 `061205-121a2aa8` **7項／202全回放**成功；最終 `061302-f5072feb` **30項／6場／2909完整回放**成功，Linked25後五房各5端。12階段／24個唯一正常命令、24個原before／applied checkpoint的packet及statistics精確重現於回放；50份原admission結果／6份CSV、雙seal／server原connection ACK一致、無timeout或send queue error。Linked Patrol／Storm的11幀及Advance／Fog的12幀為全部25位walking；五獨立房各自也有5位walking來源幀，不硬配跨房時鐘。
+
+原程序terminal且cleanup空後，僅讀closed JSON的 `operator-timeline-readback.json` 對 **2627 Running幀**依該房實際接受的環境／AI序號逐項推導狀態，含兩個命令間可能不同步的序號窗口；weather／lightning／night／visibility／behavior／autoAttack、原敵軍ID／room／health無不符。這是post-terminal附加讀回，不是第31項新live檢查或網路容量／根因證明。所有普通完整回放及Room1明確Pause／Resume、其他四房tick前進門檻保持，未授權Paused不例外。
+
+未選用新開關的 `061538-2e6870ad` **5項／179回放**成功，保留原無敵軍／兩發0中0殺／health100斷言；新模式同樣保持此精確統計。新4項負向證據測試覆蓋錯UUID／session／duplicate／倒序／bool序號、遺失命令及相同sequence卻不同packet／statistics；共 **11 exercise＋27 active＋5 artifact Python**成功。
+
+本輪無新Editor／Unity或Quest建置，沿用Unity0.40／code50／NGO29、原231真正Editor、6098b485...同源Windows／ARM64及原Scene／prefab ID。玩家ZIP24aef...／serverZIP642e...／APKadb9...核對保持；新三組 **C232／F runtime-snapshot**同hash、666份新來源snapshot，前輪C340／326history／666舊來源snapshot也核對保持，保存SQLite不開、5080不動。原1513 browser與nativeUI7＋2保持，本輪未新跑本機全browser或GUI。完整11項仍active；舊31筆／world371／Windows startup／F吞吐／PickerHost、長任務多人操作、LAN／跨機25真人、Quest／VIVE／MR與廠商硬體仍待。
+
 ## 2026-11-02：多客戶端動態來源的完整雲端驗證
 
 功能來源 **a4ff77c95553d04cfa90bfb33bd6cce55dcc0679** 的 [CI41354866315](https://github.com/peca12968/vr-command-center/actions/runs/41354866315)／job124992675470完整 **success**。Linux建置、772核心／459 HTTP／47 world、6 private pipe／38實際API＋.NET硬體離線CLI、全部Python（含新7項exercise）／素材、89 Node／296 Chromium成功。2個Windows限定skip不當Unity、Editor、Windows原生／啟動器GUI、頭盔或實體硬體證據。

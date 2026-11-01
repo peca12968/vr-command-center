@@ -1,5 +1,19 @@
 # 原生多客戶端自動化動態驗證
 
+## 多人動態與正常管理命令組合
+
+新增選用旗標：
+
+```powershell
+python scripts/check-desktop-exercise.py --api-dll <同次API0.31.0完整建置的DLL> --runtime-root <SSD runtime根目錄> --mode both --players-per-room 5 --seconds 16 --operator-controls
+```
+
+基本輸入窗口後，生成器繼續移動；先等每人兩發接受，再逐場送SetEnvironment／SetEnemies。每房一個原敵軍、autoAttack=false；雨夜雷電Patrol後Fog Day Advance。使用每個原UUID與當下expectedSequence，接受回條先存；同session／非duplicate／原commandId／序號遞增後，另等真正來源observed fence、Running／非suspended、至少20tick及全員walking，原存活敵軍ID／room／health保留、每位至少移動1cm。仍受原60活動秒／240秒儀表窗口限制，沒有為測試延長或重設。正常命令不等於操作員UI或真人操作，沒有新增autoAttack傷害驗收。
+
+最終30項／6場／2909完整回放、50原結果／6CSV／雙seal與原server ACK成功；12階段24命令、24個before／applied參考packet和statistics在回放精確相同。Linked雨夜巡邏11幀、霧天推進12幀全部25位walking；五房各有5位walking。附加closed JSON讀回依每房每個已接受環境／AI序號逐幀核對2627 Running幀及敵軍身分，無跨房狀態不符；這不是第31項live檢查，沒有對齊獨立時鐘。預跑7／202、未選用新旗標5／179也成功，兩模式仍保留每人兩發0中0殺／health100精確斷言。
+
+新4／完整11項Python負向測試涵蓋原意圖／session／順序與回放參考不一致，原27 active及5 artifact通過。新C232／F與666來源snapshot保存核對，前輪C340／326history／666舊來源及原ZIP／APK保持；沒有新Editor／Unity／Quest／本機全browser／GUI／GPU／頭盔，原231 Editor及6098同源版本保持。精確CI另見[PROGRESS](PROGRESS.md)，完整11項與原長場反例保持active。
+
 功能提交a4ff77c的[CI41354866315](https://github.com/peca12968/vr-command-center/actions/runs/41354866315)完整success：772核心／459 HTTP／47 world、6 pipe／38硬體離線CLI、Python含7新exercise／素材、89 Node／296 Chromium。2 Windows限定skip不代替本文件原生／231 Editor證據；console49、control13、hardware26及decoded log的精確hash見[PROGRESS](PROGRESS.md)，前88 CI檔保持。1464＋49＝1513 browser，nativeUI7及本輪serverUI2另列。後續文件skip ci，測試精確來源a4ff77c。
 
 Unity **0.40.0／Android code50／NGO29** 新增明確選用的Windows Development batch Client輸入模式，讓每個原生客戶端透過既有桌面移動及武器意圖路徑執行短測試。它產生的是 **AutomatedSimulation**，不是實體鍵盤、25位真人、頭盔追蹤、LAN或網路容量驗收。

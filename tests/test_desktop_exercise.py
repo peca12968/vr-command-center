@@ -35,4 +35,29 @@ class ExerciseEvidenceTests(unittest.TestCase):
         for field,value in [('pid',101),('connection',2),('mode','Physical'),('headsets',False),('reason','Timeout'),('complete',False),('reloadSubmissions',0)]:
             with self.assertRaises(ValueError):m.validate_report({**report,field:value},owner)
 
+class OperatorCombinationTests(unittest.TestCase):
+    def receipts(self):
+        return [{'commandId':identity,'appliedAtSequence':sequence,'duplicate':False,'session':{'id':'round'}} for identity,sequence in [('environment',11),('ai',13)]]
+    def test_accepted_intents_must_preserve_exact_identity_session_and_order(self):
+        original=self.receipts();self.assertEqual(m.validate_control_receipts(original,'round',['environment','ai'],10),13)
+        for field,value in [('commandId','other'),('session',{'id':'another'}),('duplicate',True),('appliedAtSequence',10),('appliedAtSequence',True)]:
+            bad=self.receipts();bad[1][field]=value
+            with self.subTest(field=field,value=value),self.assertRaises(ValueError):m.validate_control_receipts(bad,'round',['environment','ai'],10)
+        self.assertEqual(original,self.receipts())
+    def test_missing_duplicate_or_reversed_operator_intents_are_rejected(self):
+        for responses,identities in [(self.receipts()[:1],['environment','ai']),(self.receipts(),['environment','environment']),(list(reversed(self.receipts())),['ai','environment'])]:
+            with self.assertRaises(ValueError):m.validate_control_receipts(responses,'round',identities,10)
+    def test_exact_saved_source_and_statistics_must_both_reappear_in_replay(self):
+        reference={'packet':{'sequence':20,'observedSequence':13,'frame':{'behavior':'Patrol'}},'statistics':[{'playerId':'a','ammoUsed':2}]};matched=set();before=copy.deepcopy(reference)
+        m.match_control_reference(copy.deepcopy(reference),{20:reference},matched)
+        self.assertEqual(matched,{20});self.assertEqual(reference,before)
+        for change in [lambda v:v['packet']['frame'].update(behavior='Hold'),lambda v:v['statistics'][0].update(ammoUsed=1),lambda v:v['packet'].update(observedSequence=12)]:
+            bad=copy.deepcopy(reference);change(bad);seen=set()
+            with self.assertRaises(ValueError):m.match_control_reference(bad,{20:reference},seen)
+            self.assertEqual(seen,set())
+    def test_other_sequence_cannot_satisfy_a_missing_operator_checkpoint(self):
+        reference={'packet':{'sequence':20},'statistics':[]};seen=set()
+        m.match_control_reference({'packet':{'sequence':21},'statistics':[]},{20:reference},seen)
+        self.assertEqual(seen,set())
+
 if __name__=='__main__':unittest.main()

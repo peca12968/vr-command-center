@@ -1,5 +1,7 @@
 # 需求與驗收追蹤
 
+2026-11-02 [多人動態＋管理命令組合](DESKTOP_EXERCISE.md)：選用operator-controls，25Linked及五房各5端全員移動時套用雨夜Patrol／霧天Advance，30項／2909完整回放／50原結果6CSV雙seal ACK成功。12階段24個原UUID／expectedSequence／來源observed fence、24個精確回放參考；閉源2627 Running幀逐房環境AI時間線一致。11 Python（新4）／27 active／5artifact，預跑7／202、未選用5／179通過。沿用Unity0.40／231／6098雙平台與原包，無新Editor／遊戲重建／GUI／GPU／頭盔；完整11active，舊31／371與跨機真人等仍待。
+
 2026-11-02 [原生多端動態驗證](DESKTOP_EXERCISE.md)：Unity0.40／code50／NGO29、231真正Editor與6098b485...同源雙平台，原Scene／prefab ID保持。明確Windows Development batch Client自動輸入走原Move／RPC，25端Linked及五房各5端18項／1951全回放／50結果CSV ACK成功；Linked154幀25位同時walking。普通8／355、server包106／725、玩家包19成功。這是短場AutomatedSimulation，原31／371未修因，完整11active。
 
 2026-11-02 [硬體回饋離線模擬器](HARDWARE_SIMULATOR.md)：0.1.0以原事件／stream／admission規則重建，測試綁定、重送、虛擬到期與ACK，沒有設備I/O或實體停止保證。新34 Core／完整772、實際API＋.NET ArenaSession及最終38 CLI、解壓同位元結果與原錯權限輸入受控拒絕成功。API0.31／UI0.31.2／Unity0.39與原224雙平台保持；廠商SDK、實機及完整11項仍待驗。
