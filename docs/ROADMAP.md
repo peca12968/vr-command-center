@@ -1,5 +1,7 @@
 # 長期開發目標
 
+2026-11-02 [Windows管理服務包](WINDOWS_CONTROL_PACKAGE.md)：API/UI0.31.0、自含.NET/ASP.NET Core10.0.14及繁中啟動器，獨立保存角色／票券key與任務／場次資料。105封裝檢查、6私有管線、7Python邊界、實際GUI啟停／child handle及五房回歸成功；25個管理席位不是25端連線，跨機／乾淨新機仍待。Unity0.39／224／e0d60e4e雙平台保持、無新Editor／頭盔，11項active。
+
 2026-11-02 [電腦端蹲姿](DESKTOP_CROUCH.md)：Unity0.39／49／NGO29、API/UI0.30.2。Ctrl按住／C切換、保留移動高度與失焦恢復；224真正Editor、同源雙平台及實際C／W／視窗操作、792全回放／兩份戰績CSV雙sealACK、五房6項7場成功。Ctrl按住／放開為Editor官方Keyboard證據，原生本輪為C／W；無頭盔／跨機，11項active。
 
 2026-11-01 [AI可見目標](AI_VISIBLE_TARGETS.md)：Unity0.38／48／NGO29、API/UI0.30.2。保持移動與原Cast／傷害／冷卻，受阻時可選後續可命中玩家；738規則／208真正Editor、同源雙平台、三人原生4項32全回放／原結果及五房6項7場成功。舊三人原生exit1及誤分類兩人／未參戰候選保留；不是25人效能或舊姿態修復，11項active。

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "scope": "Unmodified license / notice references; no library source or binaries changed. Runtime and NuGet notices are additionally copied from the actual restored package versions.",
+  "files": [
+    {
+      "path": "SQLitePCLRaw-LICENSE.txt",
+      "githubBlobSha": "d645695673349e3947e8e5ae42332d0ac3164cd7",
+      "url": "https://github.com/ericsink/SQLitePCL.raw/blob/v2.1.12/LICENSE.TXT",
+      "scope": "Apache-2.0 license text; reference tag v2.1.12. Bundled 2.1.13 declares Apache-2.0 in its original nuspec; no 2.1.13 tag was found."
+    },
+    {
+      "path": "SQLitePCLRaw-NOTICE.txt",
+      "githubBlobSha": "9b4d10b6022750c492749e0b4bb22b0f0e70ef5b",
+      "url": "https://github.com/ericsink/SQLitePCL.raw/blob/v2.1.12/NOTICE.TXT",
+      "scope": "Unmodified upstream reference notices from v2.1.12; may mention components absent from this package. Bundled component inventory is the package manifest / original nuspec files."
+    },
+    {
+      "path": "Microsoft-Data-Sqlite-LICENSE.txt",
+      "githubBlobSha": "a616ed188dfce68ee308f674350ad242d8588c2b",
+      "url": "https://github.com/dotnet/efcore/blob/v10.0.14/LICENSE.txt",
+      "scope": "EF Core / Microsoft.Data.Sqlite upstream v10.0.14 license; original NuGet metadata copyright also retained."
+    }
+  ]
+}

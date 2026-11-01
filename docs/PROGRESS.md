@@ -1,5 +1,29 @@
 # 開發進度
 
+## 2026-11-02：Windows可攜管理服務與私有程序收尾
+
+API／控制台 **0.31.0** 新增[管理服務包](WINDOWS_CONTROL_PACKAGE.md)。Framework4.8編譯的繁中啟動器，可新增／選取自己的資料實例，明確選擇本機IPv4／埠、啟動／停止API及開啟控制台。API apphost自含.NET／ASP.NET Core **10.0.14 win-x64**，資料、七角色金鑰與票券簽章key獨立存放；Web／入場／統計／世界契約保持，Unity **0.39.0／code49／NGO29／e0d60e4e...**與原224 Editor／雙平台receipt保持，本輪沒有新Editor或Unity建置。
+
+API只在明確ControlPipeToken配置時監看私有stdin，ApplicationStarted發本次nonce就緒事件。啟動器另核對原child存活、實際包內coreclr及Master身分，自己的stderr／stdout診斷有限且遮蔽全部key／nonce。錯token短行不停止，匹配STOP要求正常停止；EOF／越界／非ASCII／讀取或就緒輸出IO失敗也收尾。普通API沒有此token仍沿原生命週期；沒有公開HTTP停機／取key端點。正常Stop等原child真正退出／exit0，40秒後的強制收尾或未知不能綠，GUI保留未確認狀態。繼承的角色key／資料等設定不能蓋過自己的實例；exclusive lease拒絕同實例雙啟動。
+
+publish採全新C來源snapshot，RID鎖定只在snapshot變動，原repository lock及原依賴群組／contentHash保持。第一次自含publish為`control-server-d9d920...`，後補就緒輸出IOException防護的最終為`control-server-09f992...`；兩組source／locks／478輸出均保留，沒有單換共用DLL。另兩個完整solution C build各自保留；最終regular API及三工具整組在`control-suite-final-0c4b4d...`，控制台／原生工具version gate同步0.31.0。
+
+初候選Notices完整包名／版本／nuspec名稱造成實際resolved檔名290字元（logical237），Python一般路徑失敗、extended同一原件存在；這次檢查在建新實例前失敗，沒有API場次。改短Notices/pN並保留完整package／originalFileName對照，stage採短Pkg根目錄，不改系統long-path設定；六份ZIP／各receipt原件保持。原runtime授權／NuGet metadata及明確版本的上游參考授權已保留，參考SQLitePCLRaw2.1.12的NOTICE不冒充實際2.1.13來源證明，Git blob bytes另有7項邊界測試核對。
+
+舊報告SaveNew在CreateNew後才序列化，第一個真正封裝場`control-package-checks/run-d2c1f2ed9e4143468cb7cbfff24b0815`／40749 **exit1**，讀取ready報告遇到未完成JSON；原runner於finally正常停止、first-final child19788 exit0／graceful及cleanup空列／閉源snapshot保存。修正為exclusive同目錄暫存、完整寫入／Flush後File.Move至新目的檔，不覆蓋既有檔。受控反射呼叫真正編譯方法、讓serializer getter等待時，舊版最終檔可見且0 bytes／原子斷言exit1，新版最終檔不可見／exit0，最後JSON相同；兩份來源／binary／getter proof保持，不把控制情境當原OS排程唯一原因或完整AppDomain證明。
+
+原子候選`run-758d60...`／18136及reviewed候選`run-a6ac68...`／95428，各**105項**完整成功；最終release `run-8ba6cac8c70640e1b14d60bdf3c4bcb6`／61594 **exit0／105項**。包含真正compiled CLI拒絕／資料與report路徑隔離、七角色身分、五獨立房25個原admission、Room隔離與越權403、同實例雙啟動拒絕、原Preparing場次／序號／任務／keys重開相同、正常End後新Linked／active0、原child handle的正常停止及父程序被終止後EOF退出、輸出不含生成key。每項數包含有限診斷逐檔遮蔽檢查；25個名冊席位不是25個遊戲連線。
+
+GUI首場`run-93dd11eb7d134dd5856d5350ab445c68`／77858 **exit1**，只開到舊樹狀資料夾對話框，未完成API啟停，取消／關窗後cleanup空列與snapshot保留。後改選control-instance.json的OpenFileDialog，可直接輸入完整路徑；新場`run-e8f5b5...`／80930及最終`run-8241a1ad5fa24de69ffdd7ac0f923af5`／95151皆**exit0**。實際選檔／Start／Stop／關窗、就緒／正常停止文字與GUI exit0觀察，自己的API48340／37612以原OS handle核對exit0、包內coreclr與Master，原三份私有檔案hash未改。GUI只重開CLI預先建立並暖啟動的實例，沒有UI生成key、剪貼簿或瀏覽器登入；沒有保存GPU probe圖／PCM或把review當程序退出證明。
+
+最終主包`control-server-0.31.0-release-win-x64.zip` **52,456,642 bytes／SHA `b38391f1f72115a98a60ba1bc8f5cb1e7395abe633c1366c0fa9529dce794eb1`**，478 runtime、498 manifest檔案／ZIP499含manifest，角色／票券／DB不放進包。移除測試程序dotnet PATH並設不存在DOTNET_ROOT，實際child coreclr仍在本包，這不是乾淨新機或遠端LAN驗收。舊名稱final／atomic／reviewed／ui為保留候選，不可依檔名認定主包。最終方法反例`control-report-checks/run-6d6a4726f4394b4fadfd3398787ecac9`外層工具exit0，舊方法原斷言exit1／新exit0；先前兩組方法對照也保留。
+
+真正普通API／私有管線最初兩個5案例、之後兩個6案例均保存。最終`control-pipe/run-67f9ec78c4904fd79a65ed08f941ebc0`／38152內6案例成功：普通stdin關閉仍活、非法token拒啟、錯STOP／128字短行不授權、正確STOP、EOF、129字越界與父端輸入輸出皆關閉收尾；這些子情境合計為6個程序案例，closed-pipes沒有觀察stdout，readyEvents明確null／DisabledByFixture，不填成0。GET與POST均無公開停機路由。原default案例以外部terminate結束、不是正常管線收尾成功。
+
+本機最終 **738規則／459 HTTP／47 world、6管線、7新Python封裝邊界、78 Node／256 Chromium**成功。初regular候選與最終各一份43 browser檔，前940＋86＝**1026份browser證據**，不是測試數。原生候選`desktop-venue/20261102-011035-4b788abf`／70763與最終`20261102-012431-fb1c45ff`／21310皆**exit0／6項／7場**，採同版原Unity0.39、各自整組新API0.31；獨立／重用／舊票／後續Linked與精確seal成功，非25位操作或封裝GameServer驗收。
+
+`control-delivery-validation.json`核對13個本輪已terminal場次：原生兩場C52、管理／管線／GUI各原件C275與各F snapshot逐byte相同，失敗仍failed；歷史native75場3347＋新2場52＝77場3399（不混入管理測試）。前940 browser、原0.39 binary／ZIP／APK／224、327 archive、原accepted API134＋三工具各9／Checks96均保持；新舊六ZIP與每份完整publish也核對。後補每pipe案例的接受／退出metadata與CI安全上傳，`run-c876b048f96a433a947e7e102f8c7e52`再6案例成功、原C43與F相同；control-pipe-metadata-validation.json記錄總14場、control318／native52，另13份有限log／status／checks，不把runtime keys／DB加入CI artifact。沒有開啟保存SQLite，自己writer全停才各一次snapshot。完整11項仍active，原31筆／world371姿態失效、Windows startup與F吞吐根因未由本輪修復；跨機／25位操作／頭盔／MR／廠商硬體與完整遊戲伺服器部署另驗。CI精確來源與結果於本節後續更新。
+
 ## 2026-11-02：電腦端蹲姿、掩體與焦點恢復
 
 功能[c78be60](https://github.com/peca12968/vr-command-center/commit/c78be6003513ba0e17c55db2ed281e2bd26a1517)的首[CI41324739444](https://github.com/peca12968/vr-command-center/actions/runs/41324739444)／job124902203001最終failure：738規則／459 HTTP／47 world、工作流程Python含6 crouch／素材與78 Node已過，browser在world-browser:141的camera-save點擊等待30秒逾時。原16檔artifact13091095943＋完整decoded log／ZIP **3,831,691 bytes／SHA `7cceb1bce999b8e9b14480a8141feb79772e573eeb55723afa83d166272534ac`**保存且與GitHub digest相符；沒有當刻save按鈕狀態或對應失敗圖，原GET metadata只涵蓋較早reload，不能由此證明disabled、焦點、RAF、渲染負載或產品唯一原因。

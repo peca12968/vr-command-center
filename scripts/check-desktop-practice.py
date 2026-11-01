@@ -97,7 +97,7 @@ def main():
             session = ready['sessionId']; ids = set(ready['playerIds'])
             check(len(ids) == peers + 1 and {p['id'] for p in initial['players'] if p['connected'] and p['rig']['kind'] == 'Simulated'} == ids,
                   label + ': every expected native client is connected with an accepted Simulation rig')
-            check(ready['headsets'] == 0 and ready['jobWorkersPerProcess'] == 2 and api('/')['version'] == '0.30.2',
+            check(ready['headsets'] == 0 and ready['jobWorkersPerProcess'] == 2 and api('/')['version'] == '0.31.0',
                   label + ': current API, two job workers and explicit no-headset provenance')
             case = {'label': label, 'directory': str(directory), 'initialFrame': initial}
             if args.interactive:

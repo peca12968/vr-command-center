@@ -1,0 +1,118 @@
+"""Package the self-contained management API and a Windows Framework launcher. No live data or credentials."""
+import argparse,hashlib,importlib.util,json,os,re,shutil,subprocess,uuid,zipfile
+from datetime import datetime,timezone
+from pathlib import Path,PurePosixPath
+ROOT=Path(__file__).resolve().parents[1];TOP='VRCommand-ControlServer'
+SECRET_KEYS={'operatorkeys','operatorkeyfile','gameserverkey','jointicket','playerticketsigningkey','controlpipetoken'}
+FORBIDDEN_PARTS={'data','missions','sessions','telemetry','journals'}
+README='''VR Command Windows 管理服務包 0.31.0
+
+完整解壓後開啟 Start-Control.exe。
+1. 首次選擇監聽IPv4與埠號（預設127.0.0.1:5081），按「新增資料實例」。
+2. 按「啟動管理服務」，等候「服務已就緒」，再按「開啟控制台」。
+3. 選擇Master或對應Room1–Room5角色，按「複製登入金鑰」，貼到控制台登入。
+4. 需要重開時，用「選取資料實例」選回原資料夾的control-instance.json，再啟動；請保留整個資料夾。
+5. 結束時按「停止管理服務」，等待正常停止後才關閉視窗。
+
+新實例資料預設在使用者的LocalAppData/VrCommand/ControlServers下，與本包分開。
+每實例有自己的七角色金鑰、玩家票券簽章金鑰及SQLite資料；不要交付或公開這些資料。
+本包本身沒有登入金鑰、票券、任務資料庫、遊戲伺服器設定或Unity遊戲。
+GameServer角色供遊戲伺服器使用，不能拿到玩家端；玩家使用控制台下載的短票券。
+停止管理API不會假造任務End、世界seal或玩家結果；遊戲伺服器與任務收尾分開處理。
+
+執行環境：Windows x64及.NET Framework 4.8。API已自含.NET/ASP.NET Core，不需安裝Python或.NET SDK。
+127.0.0.1只供本機；其他控制PC須用本機實際IPv4並能連到相同HTTP埠。
+本包沒有自動修改防火牆、部署TLS/NAT或證明LAN可達；實際跨機與頭盔仍待驗證。
+控制台可管理任務、五房名冊與觀戰資料；Unity GameServer與玩家包仍須另外啟動。
+
+control-package.json是檔案SHA256與建置紀錄，不是數位簽章或可信發行者證明。
+Notices/保留實際執行環境與NuGet metadata、授權及上游參考NOTICE；參考NOTICE可能提及未隨包附帶的元件。
+只在全體writer停止後備份完整資料實例（含WAL），不要用舊版本開啟新資料或替換部分資料檔。
+'''
+def digest(path):
+    with path.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
+def read(path):return json.loads(path.read_text(encoding='utf-8'))
+def plain(path):
+    path=Path(os.path.abspath(path))
+    for p in (path,*path.parents):
+        if p.is_symlink() or hasattr(p,'is_junction') and p.is_junction():raise ValueError('Package paths must not use links / junctions')
+    return path
+def relative(name):
+    if not isinstance(name,str) or not name or '\\' in name or ':' in name or name.startswith('/') or any(v in ('','.','..') for v in name.split('/')):raise ValueError('Unsafe package path')
+    return PurePosixPath(name)
+def payload(name,content=None):
+    path=relative(name);parts={part.lower() for part in path.parts}
+    if parts&FORBIDDEN_PARTS or path.suffix.lower() in {'.db','.sqlite','.sqlite3','.journal','.worldlog','.combat','.key'} or path.name.lower() in {'operator-keys.json','control-instance.json','keys.json'} or path.name.lower().endswith(('-wal','-shm')):raise ValueError('Live data / credentials cannot be packaged: '+name)
+    if path.suffix.lower()=='.json' and content is not None:
+        def visit(value):
+            if isinstance(value,dict):
+                for key,item in value.items():
+                    if key.lower() in SECRET_KEYS:raise ValueError('Credential configuration cannot be packaged')
+                    visit(item)
+            elif isinstance(value,list):
+                for item in value:visit(item)
+        visit(json.loads(content))
+def publication(build):
+    build=plain(build);receipt=read(build/'publish-receipt.json');folder=plain(build/'publication')
+    if receipt.get('schemaVersion')!=1 or receipt.get('target')!='win-x64' or receipt.get('apiVersion')!='0.31.0':raise ValueError('Use an actual supported Windows publication')
+    expected=receipt['files'];actual={p.relative_to(folder).as_posix() for p in folder.rglob('*') if p.is_file()}
+    if actual!=set(expected):raise ValueError('Publication contains missing or additional files')
+    for name,value in expected.items():
+        file=plain(folder/relative(name));payload(name,file.read_bytes() if file.suffix.lower()=='.json' else None)
+        if digest(file)!=value:raise ValueError('Publication file changed: '+name)
+    spec=importlib.util.spec_from_file_location('control_publish',ROOT/'scripts/publish-control-server.py');module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    if module.runtime_config(folder)!=receipt['runtimeFrameworks']:raise ValueError('Runtime framework mismatch')
+    for name,value in receipt['sourceFiles'].items():
+        if digest(ROOT/name)!=value:raise ValueError('Current API sources differ from publication: '+name)
+    return folder,receipt
+def notices(build,output):
+    assets=read(build/'work/obj/VrCommand.Api/project.assets.json');cache=[Path(v) for v in assets['packageFolders']]
+    receipt=read(build/'publish-receipt.json');packages=[name.lower() for name,value in assets['libraries'].items() if value['type']=='package']
+    packages += [name.lower()+'.runtime.win-x64/'+version for name,version in receipt['runtimeFrameworks'].items()]
+    sources=[]
+    for index,name in enumerate(sorted(set(packages)),1):
+        folder=next((p/name for p in cache if (p/name).is_dir()),None)
+        if folder is None:raise FileNotFoundError('Restore the actual NuGet / runtime package first: '+name)
+        selected=[p for p in folder.iterdir() if p.is_file() and (p.suffix=='.nuspec' or re.match(r'^(license|notice|third.party.notices|copying)',p.name,re.I))]
+        if not any(p.suffix=='.nuspec' for p in selected):raise ValueError('Package provenance missing')
+        for file in selected:
+            plain(file);target=output/'NuGet'/('p'+str(index))/('metadata.nuspec' if file.suffix=='.nuspec' else file.name);target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(file,target);sources.append({'package':name,'originalFileName':file.name,'path':target.relative_to(output).as_posix(),'sha256':digest(target)})
+    for file in sorted((ROOT/'tools/WindowsControlLauncher/Notices').iterdir()):
+        plain(file);shutil.copyfile(file,output/file.name)
+    (output/'bundled-packages.json').write_text(json.dumps({'packages':sources,'scope':'Original restored package licenses / metadata plus separately attributed upstream references'},indent=2)+'\n',encoding='utf-8')
+    return sources
+def verify(folder):
+    folder=plain(folder);manifest=read(folder/'control-package.json')
+    if manifest.get('schemaVersion')!=1 or manifest.get('target')!='win-x64' or manifest.get('apiVersion')!='0.31.0':raise ValueError('Unsupported control package')
+    seen=set()
+    for row in manifest['files']:
+        name=row['path'];key=name.lower()
+        if key in seen:raise ValueError('Case-aliased duplicate package path')
+        seen.add(key);file=plain(folder/relative(name));payload(name,file.read_bytes() if file.suffix.lower()=='.json' else None)
+        if file.stat().st_size!=row['bytes'] or digest(file)!=row['sha256']:raise ValueError('Package integrity check failed: '+name)
+    actual={p.relative_to(folder).as_posix().lower() for p in folder.rglob('*') if p.is_file()}
+    if actual!=seen|{'control-package.json'}:raise ValueError('Additional or missing package files')
+    return manifest
+def main():
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--publication',type=Path);parser.add_argument('--stage-root',type=Path);parser.add_argument('--output',type=Path);parser.add_argument('--verify',type=Path);args=parser.parse_args()
+    if args.verify:print(json.dumps({'complete':True,'files':len(verify(args.verify)['files'])}));return
+    if os.name!='nt' or not all([args.publication,args.stage_root,args.output]):parser.error('Use Windows with --publication, --stage-root and a new --output ZIP')
+    api,receipt=publication(args.publication);stage=plain(args.stage_root)/('control-server-'+uuid.uuid4().hex);stage.mkdir(parents=True,exist_ok=False);folder=stage/TOP;folder.mkdir();shutil.copytree(api,folder/'Runtime')
+    license_folder=folder/'Notices';license_folder.mkdir();notice_sources=notices(args.publication,license_folder)
+    source=ROOT/'tools/WindowsControlLauncher/ControlLauncher.cs';compiler=Path(os.environ.get('WINDIR','C:/Windows'))/'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+    with (stage/'compile.log').open('xb') as log:subprocess.run([str(compiler),'/nologo','/warnaserror','/codepage:65001','/target:winexe','/platform:x64','/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Web.Extensions.dll','/out:'+str(folder/'Start-Control.exe'),str(source)],stdout=log,stderr=subprocess.STDOUT,check=True)
+    (folder/'README.txt').write_text(README,encoding='utf-8');(folder/'publish-receipt.json').write_text(json.dumps(receipt,indent=2)+'\n',encoding='utf-8')
+    manifest={'schemaVersion':1,'target':'win-x64','apiVersion':'0.31.0','createdAtUtc':datetime.now(timezone.utc).isoformat(),'launcherSourceSha256':digest(source),'runtimeFrameworks':receipt['runtimeFrameworks'],
+        'scope':'Portable management API / private instance launcher; no Unity server, keys, tickets or databases. SHA manifest is not a signature.',
+        'files':[{'path':p.relative_to(folder).as_posix(),'bytes':p.stat().st_size,'sha256':digest(p)} for p in sorted(folder.rglob('*')) if p.is_file()]}
+    (folder/'control-package.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8');verify(folder)
+    output=plain(args.output);output.parent.mkdir(parents=True,exist_ok=True)
+    with zipfile.ZipFile(output,'x',compression=zipfile.ZIP_DEFLATED,compresslevel=6) as bundle:
+        for file in sorted(folder.rglob('*')):
+            if file.is_file():bundle.write(file,TOP+'/'+file.relative_to(folder).as_posix())
+    with zipfile.ZipFile(output) as bundle:
+        if bundle.testzip() is not None:raise ValueError('ZIP checksum failed')
+    result={'complete':True,'zip':str(output),'bytes':output.stat().st_size,'sha256':digest(output),'directory':str(folder),'files':len(manifest['files']),'launcherSourceSha256':digest(source),'notices':len(notice_sources)}
+    with output.with_suffix('.receipt.json').open('x',encoding='utf-8') as f:json.dump(result,f,indent=2)
+    (ROOT/'artifacts/control-server-package-path.txt').write_text(str(folder),encoding='utf-8');print(json.dumps(result))
+if __name__=='__main__':main()

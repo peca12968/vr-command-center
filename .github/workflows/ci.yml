@@ -18,6 +18,9 @@ jobs:
           python-version: '3.12'
       - run: python scripts/smoke_api.py
       - run: python scripts/smoke_world.py
+      - run: python scripts/smoke_control_pipe.py
+      - run: python -m unittest discover -s tests -p test_control_package.py
+      - run: python -m py_compile scripts/publish-control-server.py scripts/package-control-server.py scripts/check-control-package.py scripts/check-control-report.py scripts/check-control-gui.py
       - run: python -m unittest discover -s tests -p test_pose_trace_analysis.py
       - run: python -m unittest discover -s tests -p test_pose_input_analysis.py
       - run: python -m unittest discover -s tests -p test_pose_heartbeat.py
@@ -97,4 +100,13 @@ jobs:
         with:
           name: console-screenshots
           path: artifacts/console/
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: control-pipe-evidence
+          path: |
+            artifacts/control-pipe/*/*.log
+            artifacts/control-pipe/*/*-status.json
+            artifacts/control-pipe/*/checks.json
           if-no-files-found: ignore
