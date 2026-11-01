@@ -1,5 +1,7 @@
 # 開發指引
 
+2026-11-01 最終a1556bf／CI41260889785 job124713745724完整success：Linux717／459／47、工作流程Python／素材及67 Node235 Chromium成功，2個Windows限定skip不當雲端native證據；本機98816 exit0同67／235，原生33469保持。37檔artifact13064982961與log新目錄保存／hash，前42本機＋13／2失敗CI共57保持。任務DOM polling100不依賴raf、明確切頁／釋放已測viewer，原30秒等待／60秒relay／所有斷言保持；兩失敗原件留，不證唯一根因。文件證據skip ci、測試來源精確a155，完整11項active，版本／原179雙平台不變。
+
 2026-11-01 e12本機67605 exit0／67 Node235 Chromium；CI41260301809 job124712001366在mission-browser:54歷史草稿名稱DOM等待30秒逾時exit1，尚未到世界／相機；717／459／47、Python／素材67 Node過，2 PNG artifact13064888401及log保留。下一修正只任務DOM polling100（官方預設raf），切editor／回主頁明確啟用，失敗前另存editor無憑證狀態／5秒圖並重拋。原30秒與所有斷言保持；舊無editor狀態，不能證DOM正確／RAF根因或產品無缺陷。前42 console另封存與13失敗CI hash保持，修正結果另記，完整11項active。
 
 2026-11-01 b014 CI41259359885 job124709212647：.NET717／459／47、Python／素材與67 Node成功，瀏覽器新登入camera option在world-browser:84逾時exit1；原log與artifact13065165755另存，不當bringToFront根因修復或完整成功。下一修正提早啟用主／新頁，舊行動房控所有斷言／截圖後關context；原30秒等待、60秒relay及正式UI API保持。新頁失敗另存無憑證狀態JSON／5秒截圖並重拋；本機及修正CI結果另記。

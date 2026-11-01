@@ -34,6 +34,10 @@ End後完整API回放**1359連續幀／12參考**精確一致，參考區間每�
 
 任務fixture原跨主頁／editor後未明確切回，DOM狀態又以`waitForFunction`預設動畫幀輪詢。[Playwright官方文件](https://playwright.dev/docs/api/class-page#page-wait-for-function)說明預設raf與明確毫秒輪詢的差異；新版本僅將該任務DOM等待統一為polling100，啟用editor及結束後主頁，原30秒逾時與所有版本／保存／衝突斷言保持。失敗時在關editor之前另存visibility／草稿名稱／版本選擇／history／notice及最多5秒截圖，仍重拋。這消除測試對動畫幀排程的不必要依賴，但舊CI沒有editor狀態，**尚未證明逾時時DOM已正確、背景RAF停住或產品無缺陷**；不能以推測宣稱根因／修復。修正的本機完整與雲端結果另記。
 
+最終[a1556bf](https://github.com/peca12968/vr-command-center/commit/a1556bfc2b0575ead0810a4c71d7f1ef6841e25f)本機原handle98816真正exit0，**67 Node／235 Chromium再次完整成功**，不是只重跑任務小段。`mission-browser-evidence-validation.json`核對前42 console檔已完整封存（與前manifest逐檔相同）、目前42檔及e12失敗CI的2 PNG／log另存hash，原b014失敗CI13檔保持。以上Node互通檢查有自己的C# fixture，不是新產品API／三工具或Unity建置；既有同版產品DLL與receipt保持。
+
+最終同[a1556bf來源CI41260889785](https://github.com/peca12968/vr-command-center/actions/runs/41260889785)／job124713745724**完整success**。Linux restore／build、717規則／459 HTTP／47 world-stream、工作流程Python／語法／素材及67 Node／235 Chromium成功；process timing與desktop artifacts各一個Windows限定案例按平台skip，不能當雲端真正Windows探針證據，本輪原生證據仍為本機33469。37檔artifact13064982961、9460116 bytes，ZIP SHA256 `19d0573e4bd5afbc6cd635b684c7ba4026915941293643e63fc3a549b30ee5be`；下載／log原handle79468 exit0，保存新`ci-41260889785-*`。`operator-ci-success-validation.json`核對成功37檔、前本機42＋兩失敗CI13／2共57檔完整，完整log另存SHA。這證明本輪修正來源的整套回歸成功，不證明舊逾時的唯一根因；兩次失敗與既有8d成功歷史都保持。後續僅文件證據提交使用skip ci，不把文件SHA當新測試來源。
+
 `active-operator-runtime-validation.json`在原33469 terminal後核對新C runtime300檔／F snapshot完全一致，前48 runtime1727檔／前F337、前四動態F1138、原尾界反例與獨立房F證據、history321及各API159保持。總49 C runtime2027檔，新場F383檔另存hash；當前ZIP／APK／receipt metadata保持。所有writer全停才一次snapshot，C原件不動，保存SQLite只rb雜湊、不開連線／ack修復／截尾。完整11項active，原31筆／F發布吞吐、頭盔／MR／VIVE／跨機25台與廠商硬體仍各自待驗。
 
 ## 2026-11-01：同版動態PC與25份最終結果／server ack
