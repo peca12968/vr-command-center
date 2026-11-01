@@ -35,3 +35,5 @@ End後，戰鬥統計需要同場次、精確目前管理序號、明確pendingT
 第一個原生觀察場只有Running ready後等待closure而逾時；當時從另一API通路End且未勾含Ended，與篩選行為不一致，但沒有保存末刻DOM，不能證明唯一根因。後改為真正UI End並新增最多800字收尾狀態／500字notice及五秒失敗圖，原60秒觀察期限保持。初failed與所有已封存資料／cleanup保持，不改判成成功。
 
 可執行包、精確輪次／來源／雜湊與CI見[PROGRESS](PROGRESS.md)。這是同機PC／Simulation與控制台資料收尾，不是25位操作、LAN、GPU效能、頭盔／MR／硬體驗收；完整11項目標仍active。
+
+[精確7a0da65的CI41339991116](https://github.com/peca12968/vr-command-center/actions/runs/41339991116)完整success：738／459／47、6 pipe、Python／素材、83 Node／269 Chromium。console47與control13檔下載digest核對，1260 browser與另13新管線metadata分開；2 Windows skip不能代替本機105／106或GUI／Editor／頭盔驗收。後續文件證據提交skip ci，原失敗與before來源保持。
