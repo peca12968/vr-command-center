@@ -1,5 +1,7 @@
 # VR Command Center
 
+API／UI0.30.2新增[雙擊場地定位鏡頭](docs/OBSERVER_GROUND.md)：在即時觀戰／回放直接點選地面觀看位置，保留角度與距離、支援原書籤。78 Node／255瀏覽器與54真正Windows場次整合通過；完整範圍與待驗見[進度](docs/PROGRESS.md)。
+
 新增[敵軍非格點起終點修正](docs/AI_NAVIGATION_ANCHORS.md)：保留任務產生器的實際出生／巡邏座標，避免卡在錯誤取整格點。Unity0.37.2／199真正Editor、729核心、兩個原生端點案例與五房回歸通過；有界逐tick觀察與10Hz回放分開核對，保留初候選的取樣逾時。完整範圍見[進度](docs/PROGRESS.md)。
 
 新增[敵軍繞行旋轉掩體修正](docs/AI_NAVIGATION.md)：修正格點可站立、連接路段卻被油桶阻擋時的巡邏卡住。Unity0.37.1／189真正Editor、723核心及原生巡邏／Hold／Pause／Advance與完整回放通過；觀察器的一次漏看端點逾時保留，完整證據見[進度](docs/PROGRESS.md)。

@@ -274,6 +274,11 @@ async function main() {
     check(await canvas.getAttribute('data-camera') !== orbitCamera && await page.locator('#replay-camera').inputValue() === 'free', 'Keyboard pan changes camera position and identifies the free camera mode');
     await page.locator('#replay-camera').selectOption('top');
     check(await canvas.getAttribute('data-camera') !== initialCamera, 'God-view camera preset changes the rendered perspective');
+    await canvas.scrollIntoViewIfNeeded();
+    const topBounds = await canvas.boundingBox(), topCamera = await canvas.getAttribute('data-camera'), locatedFrame = await canvas.getAttribute('data-frame');
+    await page.mouse.dblclick(topBounds.x + topBounds.width * .55, topBounds.y + topBounds.height * .5);
+    check(await canvas.getAttribute('data-camera') !== topCamera && await page.locator('#replay-camera').inputValue() === 'free'
+      && await canvas.getAttribute('data-frame') === locatedFrame, 'Double-clicking a replay room relocates the camera without seeking or changing recorded combat');
     await page.locator('#replay-camera').selectOption('follow'); const followStart = (await canvas.getAttribute('data-camera')).split(',').map(Number);
     await page.locator('#replay-timeline').focus(); await page.locator('#replay-timeline').press('End');
     const followEnd = (await canvas.getAttribute('data-camera')).split(',').map(Number);

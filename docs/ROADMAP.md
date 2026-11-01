@@ -1,5 +1,7 @@
 # 長期開發目標
 
+2026-11-01 [雙擊觀戰場地定位](OBSERVER_GROUND.md)：API/UI0.30.2，保留角度距離／草稿／原書籤權限，房外不移動，回放不seek。78 Node／255 Chromium、54 UI/native與165幀回放／結果成功；Unity原0.37.2／199／同源雙平台不變。原HTTP這次459成功非舊startup根因修復，完整11項active。
+
 2026-11-01 [非格點起終點接線](AI_NAVIGATION_ANCHORS.md)：Unity0.37.2／code47／NGO29、API/UI0.30.1；729核心／199真正Editor、同源雙平台及兩個原生4項／268與148回放通過。原生逐tick觀察保持20秒／.2m，不改10Hz世界錄製；原缺失tick不能補造，首失敗與初候選保留。一般五房6項7場成功，非25位操作或NavMesh／複雜地形完成，11項active。
 
 2026-11-01 [敵軍繞行旋轉掩體](AI_NAVIGATION.md)：Unity0.37.1／code46／NGO29、API/UI0.30.1，格邊以既有步行通行政策核對並有界快取；723核心／189真正Editor、同源Windows／Quest及真正PC巡邏／Hold／Pause／Advance、128完整回放／113已接受來源幀通過。初次getter漏看短暫端點的exit1保留，連續串流不放寬期限／距離；不是完整三維尋路、25位操作或舊姿態根因修復，11項active。

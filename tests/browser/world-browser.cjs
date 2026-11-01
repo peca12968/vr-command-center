@@ -45,12 +45,14 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await page.locator('#world-room').selectOption('2'); await page.locator('#world-room').selectOption('all');
     check((await canvas.getAttribute('data-camera')).split(',').every(value => Number.isFinite(Number(value))), 'All-room focus restores a finite camera instead of using an invalid room coordinate');
     await require('./camera-controls.cjs')({ page, check, screenshots });
+    await require('./camera-ground-controls.cjs')({ page, check, screenshots });
     async function customCamera() {
       await page.locator('#world-camera').selectOption('top');
       await canvas.scrollIntoViewIfNeeded();
       const bounds = await canvas.boundingBox(), x = bounds.x + bounds.width / 2, y = bounds.y + bounds.height / 2;
       await page.mouse.move(x, y); await page.mouse.down({ button: 'right' }); await page.mouse.move(x + 45, y + 10, { steps: 4 }); await page.mouse.up({ button: 'right' });
       await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x + 30, y + 30, { steps: 4 }); await page.mouse.up();
+      await page.mouse.dblclick(x + bounds.width * .05, y);
       return canvas.getAttribute('data-camera');
     }
     let savedPosition = await customCamera();
@@ -76,8 +78,9 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await page.locator('#camera-name').fill('<東側>沙包上方'); await page.locator('#camera-save').click();
     await page.locator('#camera-positions option').waitFor({ state: 'attached' });
     check(await page.locator('#camera-positions option').innerText() === '<東側>沙包上方' && await page.locator('#camera-positions img').count() === 0, 'Saved camera names render as literal text');
+    check((await api(cameraRoute))[0].view.target[1] === .8, 'The authenticated bookmark stores the double-clicked room target at its viewing height');
     await page.locator('#world-camera').selectOption('overview'); await page.locator('#camera-recall').click();
-    check(await canvas.getAttribute('data-camera') === savedPosition && await page.locator('#world-camera').inputValue() === 'free', 'Recalling a position restores its fixed world target, angles and distance');
+    check(await canvas.getAttribute('data-camera') === savedPosition && await page.locator('#world-camera').inputValue() === 'free', 'Recalling a position restores its floor-located world target, angles and distance');
     const remembered = await context.newPage(); await remembered.setViewportSize({ width: 1440, height: 1080 });
     await remembered.bringToFront();
     // Observe only this page's first reload; no routing, headers, bodies, query

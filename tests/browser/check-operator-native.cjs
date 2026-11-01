@@ -135,6 +135,7 @@ async function main() {
     check(camera.name === 'Operator overhead', 'Operator saves an overhead camera on an actual native recording');
     await page.screenshot({ path: path.join(evidence, 'native-live-overhead.png'), fullPage: true });
     await require('./camera-controls.cjs')({ page, check, screenshots: evidence });
+    await require('./camera-ground-controls.cjs')({ page, check, screenshots: evidence, room: 1 });
     await page.locator('#camera-name').fill('Precise native view'); await page.locator('#camera-save').click();
     await until(async () => (await api('/sessions/' + session + '/world/cameras')).length === 2, 'persisted custom camera');
     const preciseCamera = (await api('/sessions/' + session + '/world/cameras')).find(row => row.name === 'Precise native view');

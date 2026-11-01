@@ -154,7 +154,7 @@ class Venue:
         self.processes['api'] = subprocess.Popen(['dotnet', str(self.args.api_dll.resolve()), '--urls', self.base], cwd=ROOT,
             env=environment, stdout=self.api_log, stderr=self.api_log, creationflags=subprocess.CREATE_NO_WINDOW)
         self.wait(lambda: self.request('/health'), 30, 'API startup')
-        if self.request('/').get('version') != '0.30.1': raise RuntimeError('Build API 0.30.1 before provisioning the report-capable venue')
+        if self.request('/').get('version') != '0.30.2': raise RuntimeError('Build API 0.30.2 before provisioning the report-capable venue')
 
     def launch(self, name, config, visible=False, *, extra_args=()):
         self.save(name + '.json', config)

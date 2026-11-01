@@ -1,4 +1,5 @@
 import {PLAYER_BODY_ASSETS,playerBodyFactory,posePlayerBody} from './player-body.js';
+import { cameraGroundTarget } from './camera-ground-target.js';
 import * as THREE from './vendor/three/three.module.js';
 import { EnvironmentView } from './environment-view.js';
 import { fieldPropFactory, supportedAssets, FIELD_ASSETS, LEGACY_ASSETS } from './field-props.js';
@@ -221,6 +222,17 @@ export class ReplayScene {
       drag = null;
     });
     for (const name of ['pointercancel', 'lostpointercapture']) this.canvas.addEventListener(name, () => { drag = null; });
+    this.canvas.addEventListener('dblclick', event => {
+      if (event.button !== 0 || event.shiftKey || event.ctrlKey || event.altKey || event.metaKey || !this.frame) return;
+      const bounds = this.canvas.getBoundingClientRect();
+      if (!bounds.width || !bounds.height) return;
+      this.draw(); // Resolve a current follow target before projecting the click.
+      const cursor = new THREE.Vector2((event.clientX - bounds.left) / bounds.width * 2 - 1, 1 - (event.clientY - bounds.top) / bounds.height * 2);
+      const ray = new THREE.Raycaster(); ray.setFromCamera(cursor, this.camera);
+      const location = cameraGroundTarget(ray.ray.origin, ray.ray.direction, this.roomIds);
+      if (!location) return;
+      this.follow = false; this.target.fromArray(location.target); this.onFreeMove(); this.draw();
+    });
     this.canvas.addEventListener('wheel', event => { event.preventDefault(); this.radius = Math.max(2, Math.min(240, this.radius * Math.exp(event.deltaY * .001))); this.draw(); }, { passive: false });
     this.canvas.addEventListener('keydown', event => {
       const keys = { ArrowLeft: [-15, 0], ArrowRight: [15, 0], ArrowUp: [0, -15], ArrowDown: [0, 15] };

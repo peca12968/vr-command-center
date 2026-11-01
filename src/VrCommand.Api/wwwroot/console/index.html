@@ -85,7 +85,7 @@
         <section id="world-player" class="panel" hidden>
           <div class="section-heading"><h3 id="world-name"></h3><span id="world-status" class="badge"></span></div>
           <div id="world-viewport"><canvas id="world-canvas" tabindex="0" aria-label="世界錄製 3D 觀察場景，可拖曳及點選角色"></canvas><div class="replay-overlay"><span id="world-environment"></span><span id="world-freshness"></span></div></div>
-          <p class="hint">拖曳旋轉 · Shift／右鍵拖曳平移 · 滾輪縮放 · 點選角色。綠色為玩家，紅色為敵軍；雙手依錄製來源顯示。</p>
+          <p class="hint">拖曳旋轉 · Shift／右鍵拖曳平移 · 滾輪縮放 · 雙擊場地定位鏡頭 · 點選角色。綠色為玩家，紅色為敵軍；雙手依錄製來源顯示。</p>
           <div class="replay-transport"><button id="world-pause" class="quiet">暫停回放</button><button id="world-sound" class="quiet" aria-pressed="false" disabled>音效：關閉</button><label>速度<select id="world-speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select></label><output id="world-time"></output></div>
           <label>跳轉已保存時間<input id="world-timeline" type="range" min="0" max="1" step="1" value="0" aria-label="世界錄製回放時間軸"></label>
           <div class="form-row"><label>鏡頭<select id="world-camera"><option value="overview">斜角全景</option><option value="top">上帝俯視</option><option value="follow">跟隨選取角色</option><option value="free">自由調整</option></select></label><label>房間<select id="world-room"></select></label><label>選取角色<select id="world-actor"></select></label></div>
@@ -109,7 +109,7 @@
         <section id="replay-player" class="panel" hidden>
           <div class="section-heading"><div><h3 id="replay-name"></h3><p id="replay-description" class="hint"></p></div><span id="replay-phase" class="badge"></span></div>
           <div id="replay-viewport"><canvas id="replay-canvas" tabindex="0" aria-label="3D 模擬場景，可拖曳旋轉、Shift 拖曳平移、滾輪縮放" aria-describedby="replay-help"></canvas><div class="replay-overlay"><span id="replay-environment"></span><span id="replay-tick"></span></div></div>
-          <p id="replay-help" class="hint">拖曳旋轉 · Shift／右鍵拖曳平移 · 滾輪縮放 · 方向鍵平移 · 點選角色查看狀態。綠色為玩家，紅色為敵軍，黃色為玩家射線。</p>
+          <p id="replay-help" class="hint">拖曳旋轉 · Shift／右鍵拖曳平移 · 滾輪縮放 · 方向鍵平移 · 雙擊場地定位鏡頭 · 點選角色查看狀態。綠色為玩家，紅色為敵軍，黃色為玩家射線。</p>
           <div class="replay-transport"><button id="replay-back" class="quiet" aria-label="前一份快照">上一格</button><button id="replay-play">播放</button><button id="replay-sound" class="quiet" aria-pressed="false" disabled>音效：關閉</button><button id="replay-next" class="quiet" aria-label="後一份快照">下一格</button><label>速度<select id="replay-speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select></label><output id="replay-time"></output></div>
           <label>時間軸<input id="replay-timeline" type="range" min="0" max="1" value="0" step="1" aria-label="回放快照時間軸"></label>
           <div class="form-row"><label>鏡頭<select id="replay-camera"><option value="overview">斜角全景</option><option value="top">上帝俯視</option><option value="follow">跟隨選取角色</option><option value="free">自由調整</option></select></label><label>房間<select id="replay-room"></select></label><label>選取角色<select id="replay-actor"></select></label></div>
@@ -118,7 +118,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>開發原型 v0.30.1 · 已有場次連線設定、任務版本、玩家參戰快照、軍事掩體素材、天氣聲光重現與鏡頭位置保存；頭盔實機、MR、25 台與硬體仍待驗證。</footer>
+      <footer>開發原型 v0.30.2 · 已有場次連線設定、任務版本、玩家參戰快照、軍事掩體素材、天氣聲光重現與鏡頭位置保存；頭盔實機、MR、25 台與硬體仍待驗證。</footer>
     </div>
   </main>
 </body>
