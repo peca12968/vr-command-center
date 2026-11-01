@@ -6,7 +6,11 @@
 
 原15檔artifact13073096399、log及ZIP3,813,684 bytes／SHA `1d2e87c7548e5abaa7be8d7d06e817d17d1be62628e70b2a0e95e57ab0aa8007`完整保留。僅browser fixture加入該新頁重載期間最多128個同源API GET metadata，記path／狀態／回呼相對時間／有限錯誤碼，不記headers、query、body或憑證，不改產品、路由、操作順序、30秒斷言或10秒API期限；超界仍失敗，完成只是觀察未超界，不代表請求全部成功、body已解碼或RTT。finally卸除listener並保存metadata，原failure仍保留。
 
-本機新場`console-navigation-anchors-diagnostic-20261101`完整248 Chromium通過，40檔含13條GET metadata；鏡頭GET 200並正常finished。這是新場成功，不是原逾時的根因或修復證明；使用本輪隔離C API與relay，不動正式5080。僅fixture變更，不重建Unity／APK或改稱另一來源。完整CI另補。
+本機新場`console-navigation-anchors-diagnostic-20261101`完整248 Chromium通過，40檔含13條GET metadata；鏡頭GET 200並正常finished。這是新場成功，不是原逾時的根因或修復證明；使用本輪隔離C API與relay，不動正式5080。僅fixture變更，不重建Unity／APK或改稱另一來源。
+
+[診斷f1dda0a](https://github.com/peca12968/vr-command-center/commit/f1dda0a4a956d2bab598ebccc883fbcd919aa2e9)已推送main；[完整CI41280898186](https://github.com/peca12968/vr-command-center/actions/runs/41280898186)／job124772433249／精確f1dda0a最終success：Linux729規則／459 HTTP／47 world-stream、工作流程Python含13 navigation／素材與72 Node／248 Chromium成功。2 Windows限定skip不是native／Editor或本機Windows完整HTTP通過；原startup失敗不改判。此場13條GET metadata中鏡頭GET 200並finished，仍非原失敗根因證明。
+
+40檔artifact13072709116、log與ZIP **9,683,723 bytes／SHA `e75e9de589076b63e3024fd135a989f3c9a071e989e02a602b482dbe0805d9ba`**已保存，下載與GitHub digest一致。`navigation-anchor-ci-success-validation.json`核對原525 browser／前CI失敗15／本機新40、共580份既有browser證據，新增CI40後合計620；新4場74 runtime與F snapshot、APK／ZIP仍原hash。`navigation-anchor-browser-diagnostic-validation.json`保留本機成功與前失敗hash；沒有覆寫40f失敗。後續僅文件證據skip ci，完整CI來源精確f1dda0a；Unity來源仍7d3e／199／雙平台，完整11項active。
 
 ## 2026-11-01：實際非格點起終點接線與原生逐tick端點觀察
 

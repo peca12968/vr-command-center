@@ -54,4 +54,6 @@ python scripts/check-desktop-navigation.py --case non-grid-goal --tick-probe --a
 
 正式build、封存與CI以[PROGRESS](PROGRESS.md)本輪紀錄為準。原64 runtime3151與F snapshot、前F3719保持；新4 runtime74逐檔相符，合計68場3225檔，新F190及525份前瀏覽器證據核對。舊321 binary／logs及10選定來源、初候選另一組321／10與原ZIP先精確封存，另存4份原commit來源blob，不當完整來源備份。原端點getter逾時、31筆／world371姿態失效、Windows完整HTTP startup、F吞吐與實機驗收各自保留，未由本輪修復。
 
+功能40f8516的CI41279882687在新登入頁鏡頭列表等待30秒逾時，15份artifact／log／ZIP保留，不能稱完整成功。只在browser fixture增加最多128條同源GET metadata，沒有改產品／順序／期限／斷言。診斷f1dda0a的[CI41280898186](https://github.com/peca12968/vr-command-center/actions/runs/41280898186)完整success：729／459／47、工作流程Python／素材、72 Node／248 Chromium；本機248亦成功，兩場各40份證據含13條GET metadata，鏡頭GET 200並finished。原525＋失敗15＋新本機40＋新CI40＝620份browser證據保持。成功是新場範圍，不證明原鏡頭逾時根因或修復；2 Windows限定skip不當原生／Editor，本輪Unity同源結果與Windows startup限制保持。
+
 完整11項active，仍無頭盔。持續推進多人操作、複雜場地、跨機／Wi-Fi、Quest／VIVE／MR及廠商硬體。
