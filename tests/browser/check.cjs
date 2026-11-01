@@ -56,6 +56,12 @@ async function main() {
     diagnosticPage = page;
     function captureErrors(target) { target.on('pageerror', error => browserErrors.push(error.message)); target.on('console', message => { if (/Content Security Policy|violates.*directive/i.test(message.text())) browserErrors.push(message.text()); }); }
     captureErrors(page);
+    if (process.argv.includes('--placement-history-only')) {
+      const mission = await api('/missions', 'POST', { name: 'Placement history focused fixture', briefing: 'Local editing with actual immutable revision saves', durationSeconds: 600, environment: { mode: 'VR', weather: 'Clear', timeOfDay: 'Day', lightning: false }, enemies: { count: 1, behavior: 'Hold', autoAttack: false }, props: [] }, 'Master', 201);
+      await require('./placement-history-browser.cjs')({ context, api, tokens, base, mission, screenshots, check });
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), result: 'passed', scope: 'focused object undo/redo UI with real mission revisions; no Unity or headset' }, null, 2));
+      console.log(`PASS: ${checks} focused placement-history checks. Screenshots: ${screenshots}`); return;
+    }
     if (process.argv.includes('--closure-only')) {
       const mission = await api('/missions', 'POST', { name: 'Closure focused fixture', briefing: 'UI source metadata fixtures and real End retry', durationSeconds: 600, environment: { mode: 'VR', weather: 'Clear', timeOfDay: 'Day', lightning: false }, enemies: { count: 1, behavior: 'Hold', autoAttack: false }, props: [] }, 'Master', 201);
       await require('./closure-browser.cjs')({ context, api, tokens, base, mission, screenshots, check });
@@ -335,6 +341,7 @@ async function main() {
     await require('./world-browser.cjs')({ page, context, api, tokens, directory, root, base, screenshots, check });
     await require('./environment-browser.cjs')({ page, api, tokens, directory, root, base, screenshots, check });
     await require('./layout-browser.cjs')({ context, api, tokens, base, mission, screenshots, check });
+    await require('./placement-history-browser.cjs')({ context, api, tokens, base, mission, screenshots, check });
     await require('./rifle-browser.cjs')({ context, tokens, base, root, screenshots, check });
     await require('./combatants-browser.cjs')({ context, tokens, base, root, screenshots, check });
     await require('./player-fire-browser.cjs')({ context, tokens, base, root, screenshots, check });

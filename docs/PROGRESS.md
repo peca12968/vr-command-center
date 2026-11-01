@@ -1,5 +1,15 @@
 # 開發進度
 
+## 2026-11-02：場景物件復原與重做
+
+新增[物件編輯紀錄](PLACEMENT_HISTORY.md)，控制台 **0.31.2**／API **0.31.0**。本地物件新增、刪除、數值／素材與旋轉可完整復原／重做，保留順序及selection；一次拖曳／按住方向鍵為一步，放開／取消／失焦／切頁收束。只在配置圖攔截Ctrl／Meta快捷鍵，文字欄不攔截；載入任務／新增草稿／登出清紀錄，Master／busy／pending fence保持。儲存前收手勢，成功後同草稿還能undo，但只標記dirty，不回滾原不可變版本或管理寫入。50步／雙向UTF8序列化2MiB，完整步淘汰、返回值分離，版本／命令／憑證不進歷史。
+
+新6 Node模型含500物件／參考隔離／分支與預算，完整 **89 Node／296 Chromium**成功。專項 **29項**實際拖曳／重複keydown／原物件鍵盤focus／快捷鍵／數值／刪除順序／儲存鎖定／新版保存／原版不可變／新草稿及登出房控；實際解壓包另29項成功。第一專項51184 exit1在保存後仍選已被head取代的原ID，30秒selectOption timeout、4原圖保持；後測真history.headId，不改期限。初隔離build漏複製Checks明確連結的AiTargetingCases.cs，CS2001／初snapshot保留，完成採新完整目錄，不當產品根因。
+
+最終本機build `placement-90b30ba99f884d1cb18d967c6f535ee1`，API130／三tools各9／Checks90檔同次組，Windows **738規則／459 HTTP／47 world**通過；本機HTTP成功不解舊startup。管理服務整組自含publish484檔（.NET/ASP.NET10.0.14），Windows啟動器C#來源266d93c7...不變；新包 **control-server-api0.31.0-ui0.31.2-placement-win-x64.zip**，**52,472,096 bytes／SHA256 1eac2676113b47c58b5649ce444201e612603167a16d1e5bccb0599fc1dcf9a2**、504 manifest／ZIP505含manifest。94860 exit0／`control-package-checks/run-bf4e40038aea4fefb585694a915ae5d6` **105項**管理角色／五房25席／原實例重開／私有管線child停止及cleanup成功，25席不是遊戲端；7 control／4 server Python邊界與腳本語法成功。無新的WinForms GUI啟停操作；原server GUI仍failed。
+
+`placement-delivery-validation.json`核對本輪管理runtime **C27／F snapshot**全raw hash，原四報告各C117／274／163／327及各F保持，原8管理ZIP＋新第9份、5serverZIP、玩家ZIP／APK、原e0d60e4e...／224 Editor雙平台及識別保持。新瀏覽器4failed＋3專項＋49完整＋3包專項＝**59檔**，原1307＋59＝**1366**；native UI7另列，原77場3399 runtime未全重跑。保存SQLite只rb/hash不開，自己writer已terminal且cleanup空才一次snapshot。沒有新native遊戲、Editor／Unity／APK或頭盔；完整11active，舊31／world371／Windows startup／F吞吐、完整server GUI／LAN／跨機／25操作／MR及廠商硬體各自待驗。
+
 ## 2026-11-02：伺服器清單交付的CI與證據
 
 [功能a8855cc](https://github.com/peca12968/vr-command-center/commit/a8855cc96bdf8cb0ece5fcc4c2dc5e7e0743e2c0)的[CI41344259683](https://github.com/peca12968/vr-command-center/actions/runs/41344259683)／job124960591099完整 **success**：Linux738規則／459 HTTP／47 world、6 pipe、全部Python／素材及83 Node／269 Chromium通過；2 Windows限定skip不是Framework、WinForms、Unity、native或頭盔驗收。console47檔 artifact13098871115／ZIP **11,451,172 bytes／SHA256 bd4624e686c0f92778b9eee34dd3db57a128ac6d5b1c6f7a773955d0c22ee630**，control13檔 artifact13098607730／ZIP **3,918 bytes／SHA256 d8b15a858f0b43d5f07e934a8e2107bc0ab664d46660a75023526c8a2afd7d58**，均已下載核對GitHub digest、逐檔hash並保存完整decoded log（SHA256 4ad0493f6a621d9cc3d28a4e8a263daadaa9d096b9407c027d5ad24d16742829）。`server-catalog-ci-validation.json`明列1260＋47＝**1307 browser證據**，另13 metadata；既有native UI5與本輪native UI2另列。後續只有文件提交skip ci，測試來源精確a8855cc；本機38＋26與106／777範圍保持，GUI仍未完成。

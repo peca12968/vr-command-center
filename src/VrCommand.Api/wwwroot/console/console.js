@@ -5,12 +5,14 @@ import { mountReport } from './report-ui.js';
 import { mountReadiness } from './readiness-ui.js';
 import { mountConnections } from './connection-ui.js';
 import { mountClosure } from './closure-ui.js';
+import { placementHistory } from './placement-history.js';
 const replay = mountReplay();
 const $ = id => document.getElementById(id);
 const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫停', Ended: '已結束' };
 const weatherNames = { Clear: '晴朗', Rain: '下雨', Fog: '濃霧', Storm: '暴風雨' };
 const behaviorNames = { Hold: '守備', Patrol: '巡邏', Advance: '推進' };
 const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: null, rooms: [], missions: [], catalog: [], launchPinned: null, history: null, draftBase: null, draftChanged: false, draftSavedAt: '', sessions: [], session: null, selected: '', pending: null, props: [], prop: -1, environmentSequence: null, enemiesSequence: null };
+const objectHistory = placementHistory();
 const world = mountWorld(() => state.key, logout);
 const report = mountReport(() => state, logout);
 const readiness = mountReadiness(() => state, logout);
@@ -19,7 +21,7 @@ const closure = mountClosure(() => state, logout);
 const placement = mountLayout({ api, epoch: () => state.epoch, active: () => !!state.actor, editable: master,
   draft: () => ({ experienceMode: $('draft-mode').value, mode: $('layout-session-mode').value, enemyCount: Number($('draft-count').value), props: structuredClone(state.props) }),
   selection: () => ({ id: $('launch-mission').value, mode: $('launch-mode').value }), changed: applyPermissions,
-  selectProp: index => { if (!state.props[index]) return; state.prop = index; renderProps(); $('prop-select').focus(); } });
+  selectProp: index => { if (!state.props[index]) return; finishPropGesture(); state.prop = index; renderProps(); $('prop-select').focus(); } });
 let timer;
 let selectionEpoch = 0;
 
@@ -74,7 +76,7 @@ async function api(path, method = 'GET', body, requestId, admissionId) {
 async function run(action, independentRead = false) {
   if (state.busy) return;
   const epoch = state.epoch; let refreshFailed = false;
-  state.busy = true; applyPermissions();
+  finishPropGesture(); state.busy = true; applyPermissions();
   try {
     if (state.refreshPromise) {
       try { await state.refreshPromise; }
@@ -99,7 +101,7 @@ function logout() {
   replay.active(false); replay.reset(); world.active(false); world.reset(); readiness.active(false); readiness.reset(); connections.active(false); connections.reset();
   state.epoch++; state.key = ''; state.actor = null; state.selected = ''; state.session = null; state.pending = null;
   state.rooms = []; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
-  state.props = []; state.prop = -1;
+  state.props = []; state.prop = -1; clearPropHistory();
   placement.reset();
   clearInterval(timer);
   $('workspace').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true;
@@ -192,6 +194,7 @@ function applyPermissions() {
   $('launch-room').disabled = $('launch-mode').value === 'Linked';
   $('create-session-form').querySelector('button').disabled = locked || !state.missions.length || !placement.canLaunch() || ($('launch-mode').value === 'Linked' ? !master() || state.rooms.some(r => r.sessionId) : !!state.rooms.find(r => r.id === Number($('launch-room').value))?.sessionId);
   $('mission-fields').disabled = locked || !master();
+  renderPropHistory();
   $('load-mission').disabled = locked || !state.missions.length; $('new-mission').disabled = locked || !master();
   $('edit-mission').disabled = locked;
   $('mission-version').disabled = locked || !state.history;
@@ -335,6 +338,7 @@ async function downloadTicket(player) {
 
 function resetDraft() {
   $('mission-form').reset(); state.props = []; state.prop = -1; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.history = null;
+  clearPropHistory();
   renderProps(); renderHistory(); draftStatus(); applyPermissions();
 }
 function missionOptions(launch, edit) {
@@ -386,7 +390,7 @@ async function loadDraft(id = $('edit-mission').value, older = false) {
   const draft = mission.definition;
   $('draft-name').value = draft.name; $('draft-briefing').value = draft.briefing; $('draft-duration').value = draft.durationSeconds;
   setEnvironment('draft', draft.environment); setEnemies('draft', draft.enemies);
-  state.props = structuredClone(draft.props); state.prop = state.props.length ? 0 : -1;
+  state.props = structuredClone(draft.props); state.prop = state.props.length ? 0 : -1; clearPropHistory();
   state.draftBase = revision; state.draftChanged = false; state.draftSavedAt = ''; state.history = history;
   if (!history.versions.some(row => row.id === mission.id)) history.versions.push({ id: mission.id, number: revision.number, name: draft.name, createdAtUtc: mission.createdAtUtc });
   renderProps(); renderHistory(mission.id); missionOptions(undefined, history.headId); draftStatus();
@@ -399,6 +403,7 @@ async function saveMission(revise = false) {
 }
 function svgNode(tag, attributes) { const node = document.createElementNS('http://www.w3.org/2000/svg', tag); for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value); return node; }
 function renderProps(updateInspector = true) {
+  renderPropHistory();
   const layer = $('prop-layer');
   layer.replaceChildren(...state.props.map((prop, index) => {
     const group = svgNode('g', { transform: `translate(${prop.position.x} ${-prop.position.z}) rotate(${-prop.yawDegrees})`, 'data-index': index, 'data-selected': index === state.prop, role: 'button', tabindex: '0', 'aria-label': `物件 ${index + 1} ${prop.assetId}` });
@@ -416,10 +421,34 @@ function renderProps(updateInspector = true) {
 }
 function editable() { return master() && !state.busy && !state.pending; }
 function dirtyDraft() { state.draftChanged = true; draftStatus(); placement.scheduleDraft(); }
+let propGesture = null;
+function propSnapshot() { return { props: structuredClone(state.props), prop: state.prop }; }
+function renderPropHistory() {
+  const status = objectHistory.status();
+  $('undo-prop').disabled = !editable() || !status.undo;
+  $('redo-prop').disabled = !editable() || !status.redo;
+  $('prop-history-status').textContent = `可復原 ${status.undo} 步 · 可重做 ${status.redo} 步`;
+}
+function finishPropGesture() {
+  if (propGesture) objectHistory.record(propGesture, propSnapshot());
+  propGesture = null; dragging = false; renderPropHistory();
+}
+function clearPropHistory() { propGesture = null; dragging = false; objectHistory.clear(); renderPropHistory(); }
+function beginPropGesture() { if (!propGesture) propGesture = propSnapshot(); }
+function editProp(action) {
+  if (!editable()) return;
+  finishPropGesture(); const before = propSnapshot(); action(); objectHistory.record(before, propSnapshot()); renderProps(); dirtyDraft();
+}
+function travelProps(undo) {
+  if (!editable()) return;
+  finishPropGesture(); const result = objectHistory[undo ? 'undo' : 'redo'](propSnapshot());
+  if (result) { state.props = result.props; state.prop = result.prop; renderProps(); dirtyDraft(); }
+  else renderPropHistory();
+}
 function addProp(assetId) {
   if (!editable()) return;
   if (state.props.length >= 500) { notify('最多可放置 500 個物件。', true); return; }
-  state.props.push({ assetId, position: { x: 0, y: 0, z: 0 }, yawDegrees: 0 }); state.prop = state.props.length - 1; renderProps(); dirtyDraft();
+  editProp(() => { state.props.push({ assetId, position: { x: 0, y: 0, z: 0 }, yawDegrees: 0 }); state.prop = state.props.length - 1; });
 }
 function moveProp(x, z) { const prop = state.props[state.prop]; if (prop && editable()) { prop.position.x = Math.round(Math.max(-10, Math.min(10, x)) * 2) / 2; prop.position.z = Math.round(Math.max(-10, Math.min(10, z)) * 2) / 2; renderProps(false); $('prop-x').value = prop.position.x; $('prop-z').value = prop.position.z; dirtyDraft(); } }
 let dragging = false, offset = { x: 0, z: 0 };
@@ -428,28 +457,41 @@ $('layout-map').addEventListener('pointerdown', event => {
   const target = event.target.closest('[data-index]');
   if (!target || !editable()) return;
   event.preventDefault(); state.prop = Number(target.dataset.index); const point = mapPoint(event), prop = state.props[state.prop];
+  finishPropGesture(); beginPropGesture();
   offset = { x: prop.position.x - point.x, z: prop.position.z - point.z }; dragging = true;
   $('layout-map').setPointerCapture(event.pointerId); renderProps(); $('layout-map').focus();
 });
 $('layout-map').addEventListener('pointermove', event => { if (dragging) { const point = mapPoint(event); moveProp(point.x + offset.x, point.z + offset.z); } });
-for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) $('layout-map').addEventListener(type, () => { dragging = false; });
+for (const type of ['pointerup', 'pointercancel', 'lostpointercapture', 'blur']) $('layout-map').addEventListener(type, finishPropGesture);
+$('layout-map').addEventListener('keyup', event => { if (event.key.startsWith('Arrow')) finishPropGesture(); });
+window.addEventListener('blur', finishPropGesture);
+document.addEventListener('visibilitychange', () => { if (document.hidden) finishPropGesture(); });
 $('layout-map').addEventListener('keydown', event => {
+  if ((event.ctrlKey || event.metaKey) && !event.altKey && ['z', 'y'].includes(event.key.toLowerCase())) {
+    event.preventDefault(); if (!event.repeat) travelProps(event.key.toLowerCase() === 'z' && !event.shiftKey); return;
+  }
   const target = event.target.closest('[data-index]');
   if ((event.key === 'Enter' || event.key === ' ') && target) { event.preventDefault(); state.prop = Number(target.dataset.index); renderProps(); $('layout-map').focus(); return; }
   const prop = state.props[state.prop];
   if (!prop || !editable()) return;
   const directions = { ArrowLeft: [-.5, 0], ArrowRight: [.5, 0], ArrowUp: [0, .5], ArrowDown: [0, -.5] }, delta = directions[event.key];
-  if (delta) { event.preventDefault(); moveProp(prop.position.x + delta[0], prop.position.z + delta[1]); }
+  if (delta && !event.ctrlKey && !event.metaKey && !event.altKey) { event.preventDefault(); $('layout-map').focus(); beginPropGesture(); moveProp(prop.position.x + delta[0], prop.position.z + delta[1]); }
 });
-$('prop-select').addEventListener('change', () => { state.prop = Number($('prop-select').value); renderProps(); });
+$('undo-prop').addEventListener('click', () => travelProps(true));
+$('redo-prop').addEventListener('click', () => travelProps(false));
+$('prop-select').addEventListener('change', () => { finishPropGesture(); state.prop = Number($('prop-select').value); renderProps(); });
 for (const id of ['prop-asset', 'prop-x', 'prop-y', 'prop-z', 'prop-yaw']) $(id).addEventListener('change', () => {
   const prop = state.props[state.prop]; if (!prop || !editable()) return;
-  if (id === 'prop-asset') { if (!$(id).value.trim()) { renderProps(); return; } prop.assetId = $(id).value.trim(); }
-  else if ($(id).value !== '' && Number.isFinite(Number($(id).value))) { if (id === 'prop-yaw') prop.yawDegrees = Number($(id).value); else prop.position[id.slice(-1)] = Number($(id).value); }
-  renderProps(); dirtyDraft();
+  const value = $(id).value;
+  if (id === 'prop-asset' ? !value.trim() : value === '' || !Number.isFinite(Number(value))) { renderProps(); return; }
+  editProp(() => {
+    if (id === 'prop-asset') prop.assetId = value.trim();
+    else if (id === 'prop-yaw') prop.yawDegrees = Number(value); else prop.position[id.slice(-1)] = Number(value);
+  });
 });
 
 function tab(name) {
+  finishPropGesture();
   for (const candidate of ['operations', 'missions', 'replay', 'world']) { const active = candidate === name; $(candidate + '-view').hidden = !active; $('tab-' + candidate).classList.toggle('active', active); $('tab-' + candidate).setAttribute('aria-pressed', String(active)); }
   replay.active(name === 'replay'); world.active(name === 'world'); readiness.active(name === 'operations'); connections.active(name === 'operations');
   closure.active(name === 'operations');
@@ -494,8 +536,8 @@ $('launch-version').addEventListener('click', () => {
 $('new-mission').addEventListener('click', () => { if (confirm('清除目前未儲存的草稿並建立新任務？')) resetDraft(); });
 $('add-sandbag').addEventListener('click', () => addProp('sandbag'));
 $('add-barrel').addEventListener('click', () => addProp('barrel'));
-$('rotate-prop').addEventListener('click', () => { if (editable() && state.props[state.prop]) { state.props[state.prop].yawDegrees = (state.props[state.prop].yawDegrees + 15) % 360; renderProps(); dirtyDraft(); } });
-$('remove-prop').addEventListener('click', () => { if (editable() && state.prop >= 0) { state.props.splice(state.prop, 1); state.prop = Math.min(state.prop, state.props.length - 1); renderProps(); dirtyDraft(); } });
+$('rotate-prop').addEventListener('click', () => { if (state.props[state.prop]) editProp(() => { state.props[state.prop].yawDegrees = (state.props[state.prop].yawDegrees + 15) % 360; }); });
+$('remove-prop').addEventListener('click', () => { if (state.prop >= 0) editProp(() => { state.props.splice(state.prop, 1); state.prop = Math.min(state.prop, state.props.length - 1); }); });
 $('mission-form').addEventListener('input', event => { if (event.target.id !== 'layout-session-mode') dirtyDraft(); });
 $('mission-form').addEventListener('change', event => { if (event.target.id !== 'layout-session-mode') dirtyDraft(); });
 $('layout-session-mode').addEventListener('change', () => placement.scheduleDraft());
