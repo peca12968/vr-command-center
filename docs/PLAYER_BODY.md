@@ -1,5 +1,7 @@
 # 玩家軍事人物與保存步態
 
+2026-11-01 新增[電腦端第一人稱手臂](DESKTOP_FIRST_PERSON.md)，Unity0.37.0／code45／NGO29、184真正Editor及同源雙平台成功。自己的袖子沿原保存姿態／換彈tick顯示，隱藏本機頭盔／軀幹；遠端仍用原完整人物與walking資料。重用原五Mesh／404面pin與數學，Tracked owner在計算前隱藏；不把本機袖子放進probe遠端players[]。舊版以下保留歷史，最新證據／限制見PROGRESS。
+
 新 `player-body-v1` 使用原創頭盔／護目鏡、背心／彈袋、雙腿／靴與桌面雙臂，404面，Native跨avatar共用五個Mesh／一材質，Web共用幾何、每人物一材質。生成器 `scripts/generate-player-body.py` 先核對全部舊模型pin；新JSON SHA256固定 `1035ca0dffafc31226616485c58ef530d8e7b809feef2b5e461229424bc9703b`。沿用原玩家步槍264面、合成手套240面與32面射擊閃光、NPC／掩體及combat-audio-v1，八個既有外觀profile及reader完整保留。新外觀不加Collider／NetworkObject，命中與行走仍是原規則的粗略幾何。
 
 API／UI **0.26.0**、Unity **0.28.0／Android code32／NGO26**。新header `playerPresentationVersion=1`；新profile還要求enemyPresentationVersion1／weaponPresentationVersion1／enemyFireVersion1／playerFireVersion1。音效維持獨立combatAudioVersion，新Unity來源仍1。缺失玩家人物版本保持0，舊錄製保留舊方盒／頭部，不從相鄰快照猜步態。每個新玩家packet明確`hasPlayerPresentation=true`與`walking`，無版本不得宣稱新狀態；Preparing／死亡／離線不能walking。未知版本、漏標記或不完整profile由核心／API及瀏覽器各自拒絕。

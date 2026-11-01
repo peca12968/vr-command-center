@@ -1,5 +1,7 @@
 # VR Command Center
 
+電腦端新增[第一人稱軍服手臂](docs/DESKTOP_FIRST_PERSON.md)：轉動視角及換彈可見自己的袖子，隱藏自己的軀幹／頭盔，保留其他玩家的完整人物。Unity0.37.0／184真正Editor、同源Windows／Quest建置、6張原生畫面及1195幀回放通過；目前仍無頭盔，完整限制及失敗紀錄見[進度](docs/PROGRESS.md)。
+
 API／UI0.30.1修正[任務版本讀取恢復](docs/MISSION_READ_RECOVERY.md)：背景列表更新失敗時，仍可明確讀取已保存任務，並保留列表警告；寫入及登出限制保持。本機248項瀏覽器與原生8項／355幀回歸通過，完整成功／失敗見[進度](docs/PROGRESS.md)。
 
 新增[PC視窗觀察診斷](docs/OBSERVER_TIMING.md)：25個接收端、12次無按鍵文字／截圖觀察與獨立心跳，原8項、1153幀回放及25份戰績通過。這輪未重現先前姿態失效，根因仍待查；詳見[進度](docs/PROGRESS.md)。

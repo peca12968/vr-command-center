@@ -27,6 +27,8 @@ jobs:
       - run: python -m unittest discover -s tests -p test_desktop_active.py
       - run: python -m unittest discover -s tests -p test_observer_sequence.py
       - run: python -m unittest discover -s tests -p test_observer_analysis.py
+      - run: python -m unittest discover -s tests -p test_first_person.py
+      - run: python -m py_compile scripts/check-desktop-first-person.py
       - run: python -m py_compile scripts/observer-sequence.py scripts/analyze-observer-sequence.py
       - run: python -m unittest discover -s tests -p test_desktop_artifacts.py
       - run: python -m py_compile scripts/start-desktop-demo.py scripts/start-desktop-venue.py scripts/check-desktop-practice.py scripts/check-desktop-pose-input.py scripts/analyze-pose-input.py scripts/pose-heartbeat.py scripts/pose-process-timing.py scripts/analyze-process-timing.py scripts/check-desktop-capacity.py scripts/check-desktop-active.py scripts/check-desktop-debrief.py

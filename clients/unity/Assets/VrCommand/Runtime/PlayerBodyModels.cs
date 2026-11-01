@@ -6,7 +6,7 @@ namespace VrCommand.Unity
     [Serializable] public sealed class PlayerBodyDefinition
     {public string assetSet,units,origin,forward,retainedAssetSet,retainedSha256;public int playerPresentationVersion;public float referenceEyeHeight;public FieldPropMesh[] parts;}
     [Serializable] public sealed class PlayerBodyObservation
-    {public string id;public long tick;public bool visible,walking,arms,simulated;public float yaw,heightScale,stride;public Vector3 head,feet,leftElbow,leftWrist,rightElbow,rightWrist;}
+    {public string id;public long tick;public bool visible,walking,arms,simulated,firstPerson;public float yaw,heightScale,stride;public Vector3 head,feet,leftElbow,leftWrist,rightElbow,rightWrist;}
     public sealed class PlayerBodyView:IDisposable
     {
         public readonly GameObject Root;public readonly Transform Body,Head,LeftLeg,RightLeg,LeftUpper,LeftLower,RightUpper,RightLower;
@@ -14,15 +14,22 @@ namespace VrCommand.Unity
         internal PlayerBodyView(GameObject root,Transform body,Transform head,Transform left,Transform right,Transform lu,Transform ll,Transform ru,Transform rl)
         {Root=root;Body=body;Head=head;LeftLeg=left;RightLeg=right;LeftUpper=lu;LeftLower=ll;RightUpper=ru;RightLower=rl;}
         public void Apply(string id,Vector3 head,Quaternion rotation,Vector3 muzzle,Vector3 forward,CombatActorState state,bool simulated,bool visible)
+            =>ApplyView(id,head,rotation,muzzle,forward,state,simulated,visible,false);
+        // Local desktop presentation only. A tracked owner stays hidden without
+        // evaluating, normalizing or moving its live XR joints.
+        public void ApplyFirstPerson(string id,Vector3 head,Quaternion rotation,Vector3 muzzle,Vector3 forward,CombatActorState state,bool desktop)
+            =>ApplyView(id,head,rotation,muzzle,forward,state,desktop,desktop,true);
+        private void ApplyView(string id,Vector3 head,Quaternion rotation,Vector3 muzzle,Vector3 forward,CombatActorState state,bool simulated,bool visible,bool firstPerson)
         {
             if(!visible){Root.SetActive(false);Observation=null;return;}
             rotation=Quaternion.Normalize(rotation);
             var p=PlayerPresentation.Pose(V(head),V(rotation*Vector3.forward),V(muzzle),V(forward),state.walking,state.presentationTick,state.health,state.connected,simulated,state.reloading,state.reloadUntilTick);
-            Root.SetActive(visible&&state.connected&&state.health>0);Body.position=P(p.Feet);Body.rotation=Quaternion.Euler(0,p.Yaw,0);Body.localScale=new Vector3(1,p.HeightScale,1);
+            Root.SetActive(visible&&state.connected&&state.health>0&&(!firstPerson||p.Arms));Body.position=P(p.Feet);Body.rotation=Quaternion.Euler(0,p.Yaw,0);Body.localScale=new Vector3(1,p.HeightScale,1);
+            Body.gameObject.SetActive(!firstPerson);Head.gameObject.SetActive(!firstPerson);
             Head.SetPositionAndRotation(head,rotation);LeftLeg.localRotation=Quaternion.Euler(p.Stride,0,0);RightLeg.localRotation=Quaternion.Euler(-p.Stride,0,0);
             foreach(var bone in new[]{LeftUpper,LeftLower,RightUpper,RightLower})bone.gameObject.SetActive(p.Arms);
             if(p.Arms){Bone(LeftUpper,p.Left.Shoulder,p.Left.Elbow);Bone(LeftLower,p.Left.Elbow,p.Left.Wrist);Bone(RightUpper,p.Right.Shoulder,p.Right.Elbow);Bone(RightLower,p.Right.Elbow,p.Right.Wrist);}
-            Observation=new PlayerBodyObservation{id=id,tick=state.presentationTick,visible=Root.activeInHierarchy,walking=state.walking,arms=p.Arms,simulated=simulated,
+            Observation=new PlayerBodyObservation{id=id,tick=state.presentationTick,visible=Root.activeInHierarchy,walking=state.walking,arms=p.Arms,simulated=simulated,firstPerson=firstPerson,
                 yaw=Mathf.DeltaAngle(0,Body.eulerAngles.y),heightScale=Body.localScale.y,stride=Mathf.DeltaAngle(0,LeftLeg.localEulerAngles.x),head=Head.position,feet=Body.position,
                 leftElbow=p.Arms?LeftUpper.TransformPoint(Vector3.up):Vector3.zero,leftWrist=p.Arms?LeftLower.TransformPoint(Vector3.up):Vector3.zero,
                 rightElbow=p.Arms?RightUpper.TransformPoint(Vector3.up):Vector3.zero,rightWrist=p.Arms?RightLower.TransformPoint(Vector3.up):Vector3.zero};

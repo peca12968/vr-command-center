@@ -74,7 +74,8 @@ namespace VrCommand.Unity
         private GameObject rifle;
         private PlayerBodyModels bodyModels;
         private PlayerBodyView bodyView;
-        internal PlayerBodyObservation ObservePlayerBody()=>bodyView?.Observation;
+        internal PlayerBodyObservation ObservePlayerBody()=>IsSpawned&&!IsOwner?bodyView?.Observation:null;
+        internal PlayerBodyObservation ObserveFirstPersonBody()=>IsSpawned&&IsOwner&&!tracked?bodyView?.Observation:null;
 
         public override void OnNetworkSpawn()
         {
@@ -247,7 +248,8 @@ namespace VrCommand.Unity
             {
                 firingRifle.Apply(body.presentationTick,body.health,body.connected,IsOwner?!tracked:Pose.Value.source==1,body.reloading,body.reloadUntilTick,
                     new PlayerFireState(body.fireSequence,body.fireTickPlusOne,new Vec3(body.fireOrigin.x,body.fireOrigin.y,body.fireOrigin.z),new Vec3(body.fireDirection.x,body.fireDirection.y,body.fireDirection.z)));
-                bodyView.Apply(PlayerId.Value.ToString(),head.position,head.rotation,rifle.transform.position,rifle.transform.forward,body,IsOwner?!tracked:Pose.Value.source==1,!IsOwner);
+                if(IsOwner)bodyView.ApplyFirstPerson(PlayerId.Value.ToString(),head.position,head.rotation,rifle.transform.position,rifle.transform.forward,body,!tracked);
+                else bodyView.Apply(PlayerId.Value.ToString(),head.position,head.rotation,rifle.transform.position,rifle.transform.forward,body,Pose.Value.source==1,true);
             }
             // Desktop gloves are cosmetic siblings; never move the tracked joints.
             if(IsOwner?!tracked:Pose.Value.source==1){HideJoint(leftHand);HideJoint(rightHand);}

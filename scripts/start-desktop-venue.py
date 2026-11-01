@@ -94,7 +94,7 @@ def player_result_phase(text):
 
 class Venue:
     def __init__(self, args, *, artifact_family='desktop-venue'):
-        if artifact_family not in ('desktop-venue', 'desktop-demo', 'desktop-capacity', 'desktop-active', 'desktop-debrief', 'desktop-end-race', 'desktop-clock', 'desktop-clock-faults', 'desktop-long', 'desktop-seal-faults', 'desktop-briefing', 'desktop-readiness'):
+        if artifact_family not in ('desktop-venue', 'desktop-demo', 'desktop-capacity', 'desktop-active', 'desktop-debrief', 'desktop-end-race', 'desktop-clock', 'desktop-clock-faults', 'desktop-long', 'desktop-seal-faults', 'desktop-briefing', 'desktop-readiness', 'desktop-first-person'):
             raise ValueError('Unknown native fixture artifact family')
         self.args = args
         self.artifact_family = artifact_family

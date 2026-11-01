@@ -1,5 +1,29 @@
 # 開發進度
 
+## 2026-11-01：電腦端第一人稱軍服手臂
+
+從`e8b346a`接續完整11項中的軍事人物介面，新增[DESKTOP_FIRST_PERSON](DESKTOP_FIRST_PERSON.md)。Unity **0.37.0／code45／NGO29**、API/UI0.30.1／rules0.8.0保持；同源Windows與ARM64 Quest fingerprint **09eed85207b33d5304f6aae294a5aebe3237d48eca3f2b0cf9b01679530ed5c8**，原scene／prefab ID一致。Prepare9556、Tests46731、Desktop83079、Quest86239各原handle terminal exit0；**184真正Editor全部通過、0skip**，不是Python或雲端替代。新增5案例保護本機端點／隱藏、Tracked早退、死亡／失聯、切回遠端及保存換彈／Pause。沒有改API、wire、Shared數學或正式5080。
+
+本機桌面owner現在顯示自己的軍服上臂／前臂及既有手套，隱藏自己的軀幹／腿／頭盔；其他玩家仍完整呈現原人物。重用五Mesh／404面與原player-body-v1 pin／lease／PlayerPresentation.Pose，不移動原槍口／pointer／Tracked關節、不新增Collider或改戰鬥規則；Tracked owner計算前隱藏返回。這是裝飾性兩節臂，不當完整追蹤人物、手指／腰腳或動畫完成。原0.5／1.5秒政策保持。
+
+新check-desktop-first-person只開自己隔離API／server／可見client，實際Right／Down、Space、R由computer-use操作；每次action後刷新並經模型觀察，六張原生GPU檢視後另呼叫寫review.done。沒有姿態／輸入注入。**desktop-first-person/20261101-114930-25078562、57292 exit0，4項／6張GPU／1195完整連續回放／5原來源檢查點**；初次checkpoint起全部Running原solo健康100／connected／Simulated／非suspended，無瞬間參戰失效。paused兩張端點delta0、head／右手套握點對來源最大差5.382805623455056e-08m，左腕隨保存換彈tick移動。彈匣30／備彈89、1發0中0殺健康100，原admission最終結果、CSV、精確combat／world seal及唯一server ACK一致。probe明確finish先於End、兩層cleanup乾淨才complete；五helper hash不是完整依賴graph。
+
+實際畫面可見左右袖，自己的頭盔／軀幹沒有擋住相機；槍仍會遮住部分手臂，沒有每角度完整可見或動畫品質宣稱。Quest建置與此功能場重疊、視窗尺寸隨焦點改變，不能作乾淨效能基線、像素benchmark或因果控制。NativePlayerBodyProbe保持明確Windows Development／visible untracked／600秒／8圖／900萬像素、無PCM／輸入；新增獨立firstPerson，遠端players[]及walking就緒語意不變。
+
+舊人物工具第一次`desktop-venue/20261101-115513-5ef0869d`，72822 exit1：原300秒observer定位期限已到、target尚未啟動，沒有observer.done，cleanup乾淨；CUA視窗已關時停止輸入並重觀察，原失敗保留。第二次`20261101-120615-644b0391`，30210 exit0／4項／6圖，原工具與300秒不變；實際組合鍵定位再W／Space／R，遠端walking非零、paused端點差2.384185791015625e-07m。前景槍／袖及Pause文字遮住部分遠端身體，沒有全像素可見宣稱。原工具只有最終replay／seal統計，不冒充新增全程連續性或全員ACK。
+
+Host場`desktop-debrief/20261101-121759-e60ee300`真正terminal exit0／4項：兩份原結果符合seal、移除admission不收結果、Host等peer ACK才shutdown。五房場`desktop-venue/20261101-121914-2748af54`已停止、stage passed／**6項／7場**、cleanup errors／remaining空：五房各1人隔離／錯票拒絕、房1環境與AI／Pause不干擾四房、重用席位及後續Linked、七個不同stream精確seal成功。**五房原shell回應在輸出裁切中遺失，不補造exit0**；依原stage／summary／cleanup及停止程序描述結果，不當25位同時操作。
+
+本機7 first-person＋5 artifacts＋27 active＋12 debrief＝**51 Python通過**；包含私有owner／Tracked／遠端分類、錯phase／tick／rig、端點錯誤、NaN／bool、cleanup IO反例及中途失效恢復仍失敗。語法／diff、原player-body幾何pin及293官方transport檔／1 scoped patch核對成功。CI已加入新suite，完整雲端結果待另錄，不能把本機51當完整.NET／瀏覽器結果。
+
+Quest實際APK **60,313,726 bytes／SHA067c41347a284e05fb5d8695277e0907052a984050c2220313dd23a21bce6e94**，包名com.vrcommand.quest、0.37.0／45、ARM64、min32／target35；receipt totalBytes1050650189是建置摘要、不是APK大小。首次apksigner.bat因JAVA_HOME缺失失敗log保留，之後明確Unity Java執行jar、v2驗證成功（Android Debug certificate），沒有改系統環境或宣稱商店／實機驗收。
+
+新`windows-20261101-120352-b2b5c1c3.zip` **82,642,471 bytes／SHA08aa93385e4e2b2688714fee56ce6d9dfe6592574d8e7e844e15020e815ae030**，311 runtime／manifest、原launcher source a65846da...；新C展開`first-person-2de5107449ec4491b9401a514db4a699`，64171 exit0／19真正launcher核對與拒絕。不是完整封裝GUI／跨機或安全性提示操作驗收；manifest不是簽章。建置前321舊binary／logs及9來源精確另存first-person-history-eb3833ea49864c95930e651b70cada11，原兩ZIP保持。
+
+`first-person-runtime-validation.json`在各場停止與cleanup核對後完成：**新5 C runtime102檔／F snapshot逐檔一致、新F證據221檔；前55 C runtime2981檔與各snapshot保持，合計60場3083檔**。原動態／observer／operator／尾界／獨立房歷史與三組API159、accepted mission API及拒絕候選、舊ZIP與archive321＋9、前CI39檔均核對原hash；保存SQLite只raw bytes、沒有開連線。新場五房shell exit未知另列，不把hash一致或stage成功補成原handle exit證據。
+
+完整11項active；無頭盔、同機Simulation，原31筆／較新world371、Windows完整HTTP startup與F吞吐各自未修復。下一步仍包括多人持續操作、完整人物動畫／追蹤、跨機／Wi-Fi／Quest／VIVE／MR與廠商硬體。精確CI來源會另補在本節，不重寫舊失敗。
+
 ## 2026-11-01：任務版本讀取不再被背景刷新失敗取消
 
 上一輪屬實際進展，從乾淨`ada9eee`接續完整11項目標的第8項。[MISSION_READ_RECOVERY](MISSION_READ_RECOVERY.md)更新API／UI **0.30.1**，任務／世界格式、rules0.8.0、NGO29、Unity0.36.1／code44／e0594513...與原scene／prefab ID／179真正Editor及雙平台receipt保持。本輪沒有Unity／APK／launcher重建，正式5080不動；新.NET輸出在C的新BuildRuns，F來源及既有C copies／Windows／Quest原件不覆寫。

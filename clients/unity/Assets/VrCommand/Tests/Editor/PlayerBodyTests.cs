@@ -54,5 +54,50 @@ namespace VrCommand.Unity.Tests
             using(var pool=new PlayerBodyModels()){var view=pool.Create();try{var unit=Quaternion.Euler(0,90,0);var saved=new Quaternion(unit.x*.97f,unit.y*.97f,unit.z*.97f,unit.w*.97f);var before=saved;
                 Assert.DoesNotThrow(()=>view.Apply("remote",new Vector3(0,1.65f,0),saved,new Vector3(.8f,1.5f,0),Vector3.right,State(),false,true));Assert.AreEqual(before,saved);Assert.Less(Quaternion.Angle(unit,view.Head.rotation),.001f);Assert.AreEqual(90,view.Observation.yaw,.001f);}finally{view.Dispose();}}
         }
+        [Test] public void DesktopFirstPersonKeepsOnlySleevesAndTheOriginalGloveEndpoints()
+        {
+            using(var pool=new PlayerBodyModels()){var view=pool.Create();try{var head=new Vector3(0,1.65f,0);var muzzle=head+new Vector3(.18f,-.12f,.9f);
+                view.ApplyFirstPerson("self",head,Quaternion.identity,muzzle,Vector3.forward,State(),true);
+                Assert.IsTrue(view.Root.activeSelf);Assert.IsTrue(view.Observation.firstPerson);Assert.IsTrue(view.Observation.arms);
+                Assert.IsFalse(view.Body.gameObject.activeSelf);Assert.IsFalse(view.Head.gameObject.activeSelf);Assert.IsFalse(view.LeftLeg.gameObject.activeInHierarchy);
+                Assert.IsTrue(view.LeftUpper.gameObject.activeInHierarchy);Assert.IsTrue(view.RightLower.gameObject.activeInHierarchy);
+                Assert.Less(Vector3.Distance(view.RightLower.TransformPoint(Vector3.up),muzzle+new Vector3(.06f,-.15f,-.595f)),.00001f);
+                Assert.IsEmpty(view.Root.GetComponentsInChildren<Collider>(true));Assert.IsEmpty(view.Root.GetComponentsInChildren<NetworkObject>(true));
+            }finally{view.Dispose();}}
+        }
+        [Test] public void FirstPersonNeverEvaluatesAnUnboundedTrackedOwner()
+        {
+            using(var pool=new PlayerBodyModels()){var view=pool.Create();try{
+                Assert.DoesNotThrow(()=>view.ApplyFirstPerson("xr",new Vector3(float.NaN,3,0),new Quaternion(0,0,0,0),Vector3.zero,Vector3.zero,State(),false));
+                Assert.IsFalse(view.Root.activeSelf);Assert.IsNull(view.Observation);
+            }finally{view.Dispose();}}
+        }
+        [Test] public void FirstPersonDisappearsWhenTheAcceptedPlayerIsDeadOrDisconnected()
+        {
+            using(var pool=new PlayerBodyModels()){var view=pool.Create();try{var head=new Vector3(0,1.65f,0);var muzzle=head+new Vector3(.18f,-.12f,.9f);
+                foreach(var dead in new[]{false,true}){var state=State();state.health=dead?0:100;state.connected=dead;state.walking=false;
+                    view.ApplyFirstPerson("self",head,Quaternion.identity,muzzle,Vector3.forward,state,true);
+                    Assert.IsFalse(view.Root.activeInHierarchy);Assert.IsFalse(view.LeftLower.gameObject.activeInHierarchy);Assert.IsFalse(view.Observation.visible);}
+            }finally{view.Dispose();}}
+        }
+        [Test] public void ChangingPresentationModeRestoresTheRemoteHeadTorsoAndLegs()
+        {
+            using(var pool=new PlayerBodyModels()){var view=pool.Create();try{var head=new Vector3(0,1.65f,0);var muzzle=head+new Vector3(.18f,-.12f,.9f);
+                view.ApplyFirstPerson("self",head,Quaternion.identity,muzzle,Vector3.forward,State(),true);
+                view.Apply("remote",head,Quaternion.identity,muzzle,Vector3.forward,State(),true,true);
+                Assert.IsTrue(view.Root.activeSelf);Assert.IsTrue(view.Head.gameObject.activeInHierarchy);Assert.IsTrue(view.Body.gameObject.activeInHierarchy);Assert.IsTrue(view.LeftLeg.gameObject.activeInHierarchy);
+                Assert.IsFalse(view.Observation.firstPerson);Assert.AreEqual(18,view.Observation.stride,.001f);
+            }finally{view.Dispose();}}
+        }
+        [Test] public void FirstPersonReloadUsesTheSavedWristClockAndHoldsAcrossPause()
+        {
+            using(var pool=new PlayerBodyModels()){var view=pool.Create();try{var head=new Vector3(0,1.65f,0);var muzzle=head+new Vector3(.18f,-.12f,.9f);var state=State();state.presentationTick=12;
+                view.ApplyFirstPerson("self",head,Quaternion.identity,muzzle,Vector3.forward,state,true);var idle=view.Observation.leftWrist;
+                state.reloading=true;state.reloadUntilTick=30;view.ApplyFirstPerson("self",head,Quaternion.identity,muzzle,Vector3.forward,state,true);
+                Assert.Greater(Vector3.Distance(idle,view.Observation.leftWrist),.01f);var left=view.LeftLower.localToWorldMatrix;var right=view.RightLower.localToWorldMatrix;
+                view.ApplyFirstPerson("self",head,Quaternion.identity,muzzle,Vector3.forward,state,true);Assert.AreEqual(left,view.LeftLower.localToWorldMatrix);Assert.AreEqual(right,view.RightLower.localToWorldMatrix);
+                Assert.AreEqual(12,view.Observation.tick);Assert.IsTrue(view.Observation.firstPerson);
+            }finally{view.Dispose();}}
+        }
     }
 }

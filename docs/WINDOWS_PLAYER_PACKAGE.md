@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-01 新包`windows-20261101-120352-b2b5c1c3.zip`為Unity0.37.0／09eed852...的[第一人稱軍服手臂](DESKTOP_FIRST_PERSON.md)，311 runtime檔／manifest／原launcher；82,642,471 bytes，SHA256 `08aa93385e4e2b2688714fee56ce6d9dfe6592574d8e7e844e15020e815ae030`。新C展開目錄19項真正launcher核對／拒絕成功；未當完整封裝GUI或跨機連線。舊0.36.1／0.36.0 ZIP與建置前321檔archive保持，雙平台建置／原生功能範圍見PROGRESS。以下版本為歷史。
+
 2026-11-01 最新`windows-player-0.36.1.zip`（e0594513...）修正[Ended結果尾界](DEBRIEF_BOUNDARY.md)，311 runtime檔＋manifest／原launcher，新C解壓19項真正核對／拒絕成功。179 Editor與同源Windows／Quest建置、原生結果與長場範圍見PROGRESS；沒有新完整GUI／封裝雙PC瀏覽器或頭盔證據。原0.36 ZIP及Windows／Quest／logs另存history，精確hash保持。
 
 2026-11-01 上一版`windows-player-0.36.0.zip`（7194dc98...）原311 runtime檔＋manifest／相同launcher，C新解壓19項核對／拒絕成功。一般原生8項400幀／SSD負載8項354幀與故障恢復8項，是本輪unpacked玩家回歸，未重跑完整GUI／封裝雙PC瀏覽器。0.35兩包及舊history保留；精確hash與限制見PROGRESS。
