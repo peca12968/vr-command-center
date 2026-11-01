@@ -1,5 +1,18 @@
 # 開發進度
 
+## 2026-11-02：多人命令組合來源的完整雲端驗證
+
+功能來源 **a58a52786ea4244940b3b2eb2c3dfd8e1ca6a4a1** 的[CI41356457654](https://github.com/peca12968/vr-command-center/actions/runs/41356457654)／job124997439220完整 **success**：Linux建置、772核心／459 HTTP／47 world、6 pipe／38實際API＋.NET硬體離線CLI、全部Python（含11 exercise／4新負向）／素材、89 Node／296 Chromium成功。2 Windows限定skip不當Editor／Windows原生／GUI／頭盔或實體硬體證據；本輪沒有重跑Unity或Quest建置，原231／6098雙平台保持。
+
+- console49，artifact13103641973，ZIP **12,005,675 bytes／SHA256 b17a2b53c8671440a6e629a6d68cab19cc5c99149484a643053d60452e6a4f22**。
+- control13，artifact13103766431，ZIP **3,919 bytes／SHA256 d1b8d7be81a4a4921b14a64a91721fbaab0a6932b77ea49a76d5b8e4fcc7597e**。
+- hardware26，artifact13103193804，ZIP **22,361 bytes／SHA256 4d31e153f5513cc3b0ca127471bd0a1e75d83582ae4050ccb1de2777b82d522b**。
+- decoded job log另存，SHA256 **e7506250d841ad5aabade21798b5d85f2e5cd6cc1f471b1a4de1aef6aaf67cd4**。三ZIP的GitHub digest／大小與逐檔hash核對，前輪88CI檔／三ZIP同hash。
+
+1513＋49＝**1562 browser檔**，control13／hardware26及既有nativeUI7＋2另列，沒有新本機全browser／GUI。新C232／F與666來源snapshot、前C340／326history／666舊來源及原玩家／server ZIP／APK保持，保存SQLite不開、5080不動。後續僅文件使用skip ci，精確測試來源a58a527；30項／2909原生與附加2627 Running閉源讀回不由Linux CI取代。
+
+原Linked／Independent生成器報告最大活動tick跨度分別361／550（18.05／27.5秒），全部明確Requested收尾；finish後停止生成輸入，但原姿態／結果流程持續。後面五房依序收尾增加了靜止回放，2909全回放或2627 Running幀不能當成全程動態輸入。 完整11項仍active，原31／world371／startup／F吞吐／PickerHost GUI、長任務多人與跨機／25真人／頭盔MR／廠商硬體仍待。
+
 ## 2026-11-02：25端持續移動與操作員命令組合
 
 [短動態驗證](DESKTOP_EXERCISE.md)新增明確選用 `--operator-controls`。原16秒基本輸入窗口後，玩家繼續走既有生成器／原Move與RPC，先等待每人兩發已被統計接受，再對每個原場次送正常SetEnvironment／SetEnemies：雨夜／雷電／Patrol，接著Fog Day／Advance，autoAttack=false、敵軍數固定每房1位。每次使用自己的新UUID及當下expectedSequence；接受回條先保存，同session／非duplicate／原commandId及遞增序號核對，來源observed到達該序號、Running／非suspended、tick至少再20且全員walking，原存活敵軍ID／room／health保持、每位移動>1cm才成功。接受不當套用，不改原60活動秒／240秒收集上限或0.5／1.5政策；這是ManagementApi組合測試，沒有操作員UI／真人鍵盤／GPU或頭盔觀察。

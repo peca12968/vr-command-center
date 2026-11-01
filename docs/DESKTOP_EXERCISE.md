@@ -2,6 +2,10 @@
 
 ## 多人動態與正常管理命令組合
 
+功能a58a527的[CI41356457654](https://github.com/peca12968/vr-command-center/actions/runs/41356457654)完整success：772核心／459 HTTP／47 world、6 pipe／38離線硬體CLI、Python含11 exercise／素材、89 Node／296 Chromium。2 Windows限定skip非原生／Editor證據；console49／control13／hardware26及decoded log的完整hash見[PROGRESS](PROGRESS.md)，1513＋49＝1562 browser、nativeUI7＋2保持。後續文件skip ci，測試精確來源a58a527。
+
+原Linked／Independent生成器報告最大活動tick跨度分別361／550（18.05／27.5秒），全部明確Requested收尾；finish後停止生成輸入，但原姿態／結果流程持續。後面五房依序收尾增加了靜止回放，2909全回放或2627 Running幀不能當成全程動態輸入。
+
 新增選用旗標：
 
 ```powershell
