@@ -17,7 +17,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await page.setViewportSize({ width: 1440, height: 1080 });
     await page.locator('#tab-world').click(); await page.waitForFunction(() => document.querySelector('#world-message').textContent.includes('目前沒有'));
     check((await page.locator('#world-message').innerText()).includes('目前沒有'), 'World viewer reports an empty archive without inventing a recording');
-    const source = demo('interrupted-world', 60);
+    let source = demo('camera-world', 60);
     // Test credentials stay in this fixture's Node process, never window properties or storage.
     let entries;
     for (let attempt = 0; attempt < 100; attempt++) {
@@ -26,7 +26,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       if (source.child.exitCode !== null) throw new Error('World source exited: ' + (await source.finished).error);
       await page.waitForTimeout(50);
     }
-    const live = entries[0];
+    let live = entries[0];
     await page.locator('#world-refresh').click(); await page.locator('#world-recording option').waitFor({ state: 'attached' });
     await page.locator('#world-recording').selectOption(live.header.sessionId); await page.locator('#world-live').click();
     const canvas = page.locator('#world-canvas');
@@ -83,6 +83,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await remembered.locator('#world-recording').selectOption(live.header.sessionId); await remembered.locator('#world-live').click();
     await remembered.locator('#camera-positions option').waitFor({ state: 'attached' }); await remembered.locator('#camera-recall').click();
     check(await remembered.locator('#world-canvas').getAttribute('data-camera') === savedPosition, 'A freshly authenticated page reloads and recalls the persisted camera position');
+    await remembered.bringToFront(); // Capture the intended tab, including with headless Chromium.
     await remembered.screenshot({ path: path.join(screenshots, 'world-camera-positions.png'), fullPage: true });
     let releaseRead, readAccepted;
     const readGate = new Promise(resolve => { releaseRead = resolve; }), requestedRead = new Promise(resolve => { readAccepted = resolve; });
@@ -111,6 +112,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await remembered.waitForTimeout(100);
     check(await remembered.locator('#camera-positions option').count() === 0 && !(await remembered.locator('#camera-message').innerText()).includes('離開前'), 'A delayed camera save response cannot repopulate a different operator after logout');
     await api(cameraRoute + '/' + lateCamera.id, 'DELETE', undefined, 'Master', 204); await remembered.close();
+    await page.bringToFront();
     check((await api(cameraRoute, 'GET', undefined, 'Room2')).length === 0, 'An authorized room observer has a separate camera collection');
     loseDelete = true; await page.locator('#camera-remove').click(); await page.locator('#camera-retry').waitFor({ state: 'visible' });
     await page.locator('#camera-retry').click(); await page.waitForFunction(() => document.querySelector('#camera-positions').options.length === 0 && document.querySelector('#camera-retry').hidden);
@@ -119,6 +121,28 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await page.locator('#world-camera').selectOption('follow');
     await page.screenshot({ path: path.join(screenshots, 'world-live.png'), fullPage: true });
     check((await api('/sessions/' + live.header.sessionId)).players.length === 1, 'Observation creates no extra player seat');
+    // Camera persistence and held-response checks may outlive the bounded 60-second
+    // relay. Give capture-clock checks their own live source, not an ended archive.
+    const cameraSession = live.header.sessionId;
+    if (source.child.exitCode === null && source.child.signalCode === null) { source.child.kill(); await source.finished; }
+    if ((await api('/sessions/' + cameraSession)).state !== 'Ended')
+      await api('/sessions/' + cameraSession + '/commands', 'POST', { commandId: randomUUID(), action: 'End' });
+    source = demo('interrupted-world', 60);
+    let clockWorld;
+    for (let attempt = 0; attempt < 100; attempt++) {
+      clockWorld = (await api('/world-recordings')).find(row => row.header.sessionId !== cameraSession && row.acceptedSequence > 5);
+      if (clockWorld) break;
+      if (source.child.exitCode !== null || source.child.signalCode !== null) throw new Error('Clock source exited before live observation');
+      await page.waitForTimeout(50);
+    }
+    if (!clockWorld) throw new Error('Clock source did not publish its initial frames');
+    live = clockWorld;
+    await page.locator('#world-refresh').click();
+    await page.locator(`#world-recording option[value="${live.header.sessionId}"]`).waitFor({ state: 'attached' });
+    await page.locator('#world-recording').selectOption(live.header.sessionId); await page.locator('#world-live').click();
+    await page.waitForFunction(() => document.querySelector('#world-freshness').textContent === '正在接收快照');
+    check((await api('/sessions/' + live.header.sessionId)).state === 'Running' && source.child.exitCode === null && source.child.signalCode === null,
+      'Capture-clock checks start from their own live bounded relay, not the completed camera fixture');
     await page.evaluate(() => {
       const original = window.fetch; window.worldClockMode = 'old'; window.restoreWorldFetch = () => { window.fetch = original; };
       window.fetch = async (...args) => {
