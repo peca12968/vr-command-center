@@ -19,7 +19,7 @@
 
 原候選工具與依賴共10檔（含working.patch、無憑證）先精確封存於`active-ui-candidate-a5f5b675638b4ea984d3fcc1fb3311cd`並hash；之後補嚴格UI意圖順序／單調期限／時間metadata、助手cleanup例外仍必須native cleanup的反例，以及明確`--diagnose-visible-pose`。這份10檔不是完整OS／binary依賴graph。新診斷只有server＋visible client，server才PlayerLoop，不擴大舊收集器界線或當零擾動。
 
-程序不合格場的兩份稀疏報告complete／clockJoinValid，client最大PoseSend gap0.5342256秒、server的pose streams最大gap0.5370066秒；關閉journal在初次capture後沒有保存Running參戰失效。`active-ui-pose-window-analysis.json`因此沒有可配對的fault窗口，missionAcceptancePassed仍false。**不把最大gap當另一個已保存失效、不能跨場套到原371、不能以本次時鐘檢查校準原無trace場次**。point沒有world序號，不硬配，clock／coverage不足須null。
+程序不合格場的兩份稀疏報告complete／clockJoinValid，client最大PoseSend gap0.5342256秒、server的pose streams最大gap0.5370066秒；關閉journal在初次capture後未找到可見玩家的保存Running connected／rig失效。`active-ui-pose-window-analysis.json`因此沒有可配對的fault窗口，missionAcceptancePassed仍false。**不把最大gap當另一個已保存失效、不能跨場套到原371、不能以本次時鐘檢查校準原無trace場次**。point沒有world序號，不硬配，clock／coverage不足須null。
 
 最終場三組接受31／32、44／45、48／49，Running來源分別world374 observed32 tick466、world1013 observed45 tick1528、world1077 observed49 tick1562。Patrol與Advance只要求命令前基準至少20活動tick後的實際活敵移動；原五敵ID／room／health保持，四個活敵各約0.2m／1.7m，原room3死敵不復活。不是固定速度或精確套用延遲。每檢查點仍逐一比對25端＋server的環境／AI來源、身分、姿態、彈藥／健康與敵軍position／fireSequence；不將其當所有render frame或所有封包。
 
@@ -28,6 +28,10 @@
 最終稀疏server／visible client各於118.354362／109.312755秒明確stop，clockJoinValid、最大檢查偏差0.0019386／0.00165秒，未截斷。client gaps0但threadWindows1；不能由稀疏列空集合宣稱全程無主執行緒空窗。報告在25份結果與精確seal後停止，diag complete不是任務接受。Windows雨夜／換彈／擊殺／暫停畫面已觀察；沒有新GPU／PCM量測或頭盔證據，CUA截圖payload未另解碼／保存。
 
 **27 active＋13 capacity＋12 debrief，共52本機Python與72 Node通過**；新增6 Python／5 Node涵蓋外場／錯request、錯表單／尾界／UUID、未知結果、成功後多送／錯意圖序號、單獨server／visible的診斷opt-in及UI cleanup錯誤仍收原生程序。一般235瀏覽器套件本輪由後續CI驗證，不混用前輪本機結果；語法與diff成功，CI既有入口已包括新案例。
+
+原生場後僅補UI cleanup例外／中斷仍在finally執行native cleanup，以及同session world header的顯式核對；27 active／5新Node反例重新成功，保存summary的原world header與UI config session讀回精確相同，沒有改遊戲或重跑整場假裝新的原生證據。[功能4102850](https://github.com/peca12968/vr-command-center/commit/4102850e9c35959cfcd36872f7e1d80f3753333f)的[CI41263637499](https://github.com/peca12968/vr-command-center/actions/runs/41263637499)／job124721781630**真正完整success**：Linux restore／build、717規則／459 HTTP／47 world-stream、工作流程Python／語法／素材及72 Node／235 Chromium通過。兩個Windows限定案例按平台skip，不能當雲端原生或重跑179 Editor的證據。這不改首場原生exit1／新371失效與原31筆狀態。
+
+37檔artifact13066661666、9464550 bytes，ZIP SHA256 `d3748ab2048df8eda10d1b6ee5fc0f07be26e2545e5ab893fe58da7fe5e99690`，下載與log原handle5737 exit0，保存新`ci-41263637499-*`；`active-ui-ci-validation.json`核對成功37檔、前CI37／本機console42／兩失敗CI13＋2共94檔仍相同，log另存SHA。完整CI不是Windows／25人容量驗收；後續僅文件證據提交使用skip ci，測試來源精確為4102850。
 
 `active-ui-closed-analysis.json`／`active-ui-runtime-validation.json`在四個原handle terminal後只讀關閉JSON／journal rb與checksum，保存SQLite不開連線、不ack／修復／截尾；metadata讀回不是完整raw規則重跑。新4 C runtime764檔／F snapshot相符，前49 runtime2027、前F337／四動態1138／前operator383／原尾界及獨立房證據、history321與各API159、當前ZIP／APK／receipt及舊0.36 ZIP保持；總53 C runtime2791檔，新場F1042檔另存hash。所有writer全停才一次snapshot、C原件不動，失敗也保存。
 
