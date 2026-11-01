@@ -19,21 +19,27 @@ async function availablePort() {
 async function main() {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'vr-console-'));
   if (path.dirname(path.resolve(directory)) !== path.resolve(os.tmpdir()) || !path.basename(directory).startsWith('vr-console-')) throw new Error('Unsafe cleanup target');
-  const screenshots = path.join(root, 'artifacts/console');
-  await fs.mkdir(screenshots, { recursive: true });
+  const screenshots = process.env.VR_COMMAND_BROWSER_ARTIFACTS ? path.resolve(process.env.VR_COMMAND_BROWSER_ARTIFACTS) : path.join(root, 'artifacts/console');
+  if (process.env.VR_COMMAND_BROWSER_ARTIFACTS && (path.dirname(screenshots) !== path.join(root, 'artifacts') || !/^console-[a-zA-Z0-9-]+$/.test(path.basename(screenshots)))) throw new Error('Use a new direct artifacts/console-* output directory');
+  await fs.mkdir(screenshots, { recursive: !process.env.VR_COMMAND_BROWSER_ARTIFACTS });
   const tokens = Object.fromEntries(['Master', 'Room1', 'Room2', 'GameServer'].map(role => [role, randomBytes(32).toString('hex')]));
   const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toLowerCase().startsWith('operatorkeys__') && !['operatorkeyfile', 'playerticketsigningkey'].includes(key.toLowerCase())));
   Object.assign(environment, { DataDirectory: path.join(directory, 'missions'), SessionDataDirectory: path.join(directory, 'sessions'), ASPNETCORE_ENVIRONMENT: 'Production', Logging__LogLevel__Default: 'Warning' });
   for (const [role, value] of Object.entries(tokens)) environment['OperatorKeys__' + role] = value;
   const base = 'http://127.0.0.1:' + await availablePort();
   const processApi = spawn('dotnet', [process.env.VR_COMMAND_API_DLL || path.join(root, 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll'), '--urls', base], { cwd: root, env: environment, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const apiStarted = performance.now(), apiTerminal = () => processApi.exitCode !== null || processApi.signalCode !== null;
   let apiLog = '';
   for (const stream of [processApi.stdout, processApi.stderr]) stream.on('data', data => { apiLog = (apiLog + data.toString()).slice(-6000); });
   let browser, diagnosticPage;
   try {
     for (let attempt = 0; ; attempt++) {
       try { if ((await fetch(base + '/health')).ok) break; } catch { /* Wait only for this fixture's live child process. */ }
-      if (processApi.exitCode !== null || attempt > 100) throw new Error('Isolated API did not start: ' + Object.values(tokens).reduce((text, key) => text.replaceAll(key, '[redacted]'), apiLog));
+      if (apiTerminal() || attempt > 100) {
+        const redacted = Object.values(tokens).reduce((text, key) => text.replaceAll(key, '[redacted]'), apiLog);
+        await fs.writeFile(path.join(screenshots, 'api-startup-failure.json'), JSON.stringify({ attempts: attempt, elapsedMilliseconds: performance.now() - apiStarted, exitCode: processApi.exitCode, signalCode: processApi.signalCode, log: redacted }, null, 2));
+        throw new Error('Isolated API did not start: ' + redacted);
+      }
       await delay(100);
     }
     async function api(route, method = 'GET', body, role = 'Master', expected = 200, admissionId, requestId) {
@@ -330,7 +336,7 @@ async function main() {
   } finally {
     if (browser) await browser.close();
     const stopped = new Promise(resolve => processApi.once('exit', resolve));
-    if (processApi.exitCode === null) { processApi.kill(); await stopped; }
+    if (!apiTerminal()) { processApi.kill(); await stopped; }
     // The unique directory was checked against the OS temp root before any recursive cleanup.
     await fs.rm(directory, { recursive: true, force: true });
   }

@@ -1,9 +1,26 @@
 const { randomUUID } = require('node:crypto');
 const path = require('node:path');
 const fs = require('node:fs/promises');
+const { performance } = require('node:perf_hooks');
 
 module.exports = async function missionBrowser({ page, context, api, tokens, base, mission, session, screenshots, check }) {
   const editor = await context.newPage(); const errors = []; editor.on('pageerror', error => errors.push(error.message));
+  // Bounded GET metadata only; no headers, credentials, request bodies or payloads.
+  const requests = new Map(), network = [];
+  editor.on('request', request => {
+    const pathname = new URL(request.url()).pathname;
+    if (request.method() !== 'GET' || !/^\/api\/(missions\/|mission-library$|rooms$|sessions$)/.test(pathname) || network.length >= 128) return;
+    const row = { path: pathname, startedAtUtc: new Date().toISOString(), startedMilliseconds: performance.now(), status: null, finished: false, failure: null };
+    network.push(row); requests.set(request, row);
+  });
+  editor.on('response', response => { const row = requests.get(response.request()); if (row) row.status = response.status(); });
+  function finish(request, failure) {
+    const row = requests.get(request); if (!row) return;
+    row.finished = true; row.failure = failure; row.elapsedMilliseconds = performance.now() - row.startedMilliseconds;
+    requests.delete(request);
+  }
+  editor.on('requestfinished', request => finish(request, null));
+  editor.on('requestfailed', request => finish(request, request.failure()?.errorText || 'Unknown'));
   const revise = (id, body) => api(`/missions/${id}/revisions`, 'POST', body, 'Master', 201, undefined, randomUUID());
   // These predicates inspect DOM state, including while another operator tab is
   // active. Do not depend on that editor receiving an animation frame.
@@ -116,6 +133,7 @@ module.exports = async function missionBrowser({ page, context, api, tokens, bas
       selectedVersion: document.querySelector('#mission-version').value,
       history: document.querySelector('#history-status').textContent, notice: document.querySelector('#notice').textContent })).catch(() => ({ unavailable: true }));
     await fs.writeFile(path.join(screenshots, 'mission-editor-failure.json'), JSON.stringify(diagnostic, null, 2));
+    await fs.writeFile(path.join(screenshots, 'mission-editor-network-failure.json'), JSON.stringify({ maximumRecords: 128, records: network, scriptErrors: errors }, null, 2));
     await editor.screenshot({ path: path.join(screenshots, 'mission-editor-failure.png'), fullPage: true, timeout: 5000 }).catch(() => {});
     throw error;
   } finally { await editor.close(); await page.bringToFront(); }
