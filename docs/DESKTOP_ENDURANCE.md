@@ -1,5 +1,7 @@
 # 長場原生自動化輸入
 
+[CI41359154963](https://github.com/peca12968/vr-command-center/actions/runs/41359154963)對fixture來源18a72f0完整success：772核心／459 HTTP／47 world、6 pipe／38離線CLI、Python14／素材、89 Node／296 Chromium；2 Windows限定skip非原生／Editor證據。console50／control13／hardware26、完整hash與首7ed CI失敗17部分browser保留見[PROGRESS](PROGRESS.md)。1562＋17＋50＝1629 browser、nativeUI7＋2另列。18a只改DOM polling100與有界診斷，不改產品／15秒斷言或重建遊戲，不能證首失敗根因；238 Editor與同源5d2e建置、原生helper仍為7ed來源。900秒原生尚未全部完成，CI成功不代表長場通過。
+
 Unity **0.41.0／Android code51／NGO29** 新增獨立旗標 `--vr-desktop-endurance <新的本機絕對目錄>`。只接受Windows Development batch Client、無XR；與原 `--vr-desktop-exercise` 互斥。普通啟動沒有生成器；原短模式的1200活動tick／240秒上限保持。這是AutomatedSimulation，沒有真人鍵盤、頭盔、LAN或容量驗收。
 
 ```powershell

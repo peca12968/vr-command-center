@@ -1,5 +1,18 @@
 # 開發進度
 
+## 2026-11-02：長場來源與鏡頭等待fixture的完整雲端結果
+
+[CI41359154963](https://github.com/peca12968/vr-command-center/actions/runs/41359154963)／job125005569006、精確來源 **18a72f0cd97fd7c0fdeeeec98ddc3b90d980f754**完整 **success**：Linux772核心／459 HTTP／47 world、6 pipe／38硬體離線CLI、Python含14 exercise（新3長場）／素材、89 Node／296 Chromium，2 Windows限定skip非Editor／原生／GUI／頭盔證據。
+
+- console50，art13104173114，ZIP **12,047,825 bytes／SHA256 dc449ceabe05f40c9317d61e3a420d230207d90d6a5d37a8d8b64c4bfc4f78a3**。
+- control13，art13104212927，ZIP **3,918 bytes／SHA256 67e83aca5aee339ab604ef76d3c947d1143cdbd66c3a000370386f99ac292af4**。
+- hardware26，art13103849142，ZIP **22,388 bytes／SHA256 8819ff5b35e7726aee53fa3f2e05db7e567d4fc60946b3654c8a54f3b9896592**。
+- decoded log SHA256 **e9a216c8fa4914a6d890c85adaf153ee8e7c2b1f0444d9565d2dade3863776ad**，三ZIP的GitHub digest／大小及逐檔hash核對成功；前88成功CI與首失敗56檔／三ZIP保持。
+
+新stalled-read metadata三列：本場visible／focused，before enabled、response-held disabled、約10242.77ms enabled＋error-class、仍1個option。這只描述本場，不能補作首7ed失敗的狀態，也不證RAF根因或產品無缺陷。原15000ms／集合與錯誤斷言及產品程式／期限保持；fixture只DOM polling100、有界診斷與finally釋放held GET。**首CI41358528198仍failure**，17部分browser／日誌保持。
+
+1562＋首failed17＋本次50＝**1629 browser檔**；control／hardware、既有nativeUI7＋2另列，無新本機全browser／GUI。238真正Editor與同源5d2e雙平台是7ed功能來源的先前實際建置，18a只改browser fixture／文件，未重建遊戲。原生900秒handle51871仍執行：Linked輸入窗口已結束，25原結果與25server ACK／無timeout已保存，完整回放與Independent尚待。沒有因CI終結而停止或重啟此原生場；writer停前不snapshot，保存SQLite不開。後續文件skip ci，CI精確來源18a72f0／原生helper7ed，完整11active。
+
 ## 2026-11-02：首長場來源CI的鏡頭讀取等待失敗
 
 來源7edb160的[CI41358528198](https://github.com/peca12968/vr-command-center/actions/runs/41358528198)／job125003707285 **failure**：Linux772核心／459 HTTP／47 world、6 pipe／38硬體離線CLI、Python含14 exercise／素材與89 Node已成功，2 Windows限定skip；瀏覽器在world-browser.cjs:131等待刻意stalled camera read的refresh按鈕恢復，原15000ms逾時，未完成296項，不當完整成功。
