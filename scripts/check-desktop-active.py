@@ -11,6 +11,8 @@ import math
 import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
 import sys
 import time
 import urllib.request
@@ -22,6 +24,134 @@ capacity=importlib.util.module_from_spec(spec);spec.loader.exec_module(capacity)
 venue_module=capacity.venue_module
 spec=importlib.util.spec_from_file_location('active_debrief',ROOT/'scripts/check-desktop-debrief.py')
 debrief=importlib.util.module_from_spec(spec);spec.loader.exec_module(debrief)
+
+
+def validate_ui_exchange(value,request,session_id,environment,behavior):
+    if value['request']!=request or value['sessionId']!=session_id:raise ValueError('UI response belongs to another request or session')
+    attempts=value['attempts'];accepted=[a for a in attempts if a['status']==200]
+    if not 2<=len(attempts)<=6 or [a['action'] for a in accepted]!=['SetEnvironment','SetEnemies'] \
+        or value['receipts']!=[a['receipt'] for a in accepted]:raise ValueError('Missing, duplicated or reordered UI commands')
+    identities=set();action_index=0;intents=0
+    for attempt in attempts:
+        body=attempt['body'];action=attempt['action']
+        intents+=1
+        if action_index>=2 or action!=('SetEnvironment','SetEnemies')[action_index] or intents>3 or attempt.get('intent')!=intents:
+            raise ValueError('UI intents continued after acceptance, changed order or exceeded the bound')
+        if attempt['request']!=request or attempt['status'] not in (200,409) or body['action']!=action \
+            or type(body.get('expectedSequence')) is not int or body['expectedSequence']<1 \
+            or action not in ('SetEnvironment','SetEnemies'):raise ValueError('Unexpected UI command attempt')
+        if action=='SetEnvironment' and body.get('environment')!=environment \
+            or action=='SetEnemies' and body.get('enemies')!={'count':5,'behavior':behavior,'autoAttack':False}:
+            raise ValueError('UI form did not submit the requested environment or AI')
+        identity=str(uuid.UUID(body['commandId']))
+        if identity in identities:raise ValueError('A rejected UI intent was repeated as another command')
+        identities.add(identity)
+        if attempt['status']==200:
+            receipt=attempt['receipt']
+            if receipt['commandId']!=body['commandId'] or receipt['duplicate'] is not False or receipt['session']['id']!=session_id \
+                or receipt['appliedAtSequence']<=body['expectedSequence']:raise ValueError('UI receipt differs from its actual submitted command')
+            action_index+=1;intents=0
+    return value['receipts']
+
+
+class OperatorUi:
+    def __init__(self,v,entry):
+        self.v=v;self.entry=entry;self.process=None;self.log=None;self.closed=False;self.cleaned=False;self.requests=0;self.report=None
+
+    def start(self):
+        node=shutil.which('node')
+        if not node:raise RuntimeError('Install the browser fixture Node dependencies before --operator-ui')
+        self.v.save('active-ui-config.json',{'source':'Simulation','headsets':0,'baseUrl':self.v.base,'sessionId':self.entry['id']})
+        self.log=(self.v.directory/'active-ui.log').open('wb')
+        self.process=subprocess.Popen([node,str(ROOT/'tests/browser/active-operator-ui.cjs'),str(self.v.directory/'active-ui-config.json')],
+            cwd=ROOT,stdout=self.log,stderr=self.log,creationflags=subprocess.CREATE_NO_WINDOW)
+        ready=self.v.wait(lambda:self.read('active-ui-ready.json'),20,'active console startup')
+        if ready['sessionId']!=self.entry['id']:raise ValueError('Console startup selected another session')
+
+    def read(self,name):
+        if self.process.poll() is not None:raise RuntimeError('Active console helper exited before explicit finish')
+        path=self.v.directory/name
+        return venue_module.read_json(path) if path.exists() else None
+
+    def apply(self,environment,behavior):
+        self.requests+=1
+        self.v.save('active-ui-request.json',{'request':self.requests,'sessionId':self.entry['id'],'environment':environment,'behavior':behavior})
+        value=self.v.wait(lambda:self.read(f'active-ui-response-{self.requests}.json'),30,'active console forms')
+        return validate_ui_exchange(value,self.requests,self.entry['id'],environment,behavior)
+
+    def close(self):
+        if self.closed:return self.cleaned
+        self.closed=True;errors=[]
+        try:
+            if self.process is not None:
+                self.v.save('active-ui-finish.json',{'finish':True})
+                try:self.process.wait(timeout=15)
+                except subprocess.TimeoutExpired:
+                    errors.append('Console did not close its browser after explicit finish')
+                    self.process.terminate()
+                    try:self.process.wait(timeout=5)
+                    except subprocess.TimeoutExpired:self.process.kill();self.process.wait(timeout=5)
+                if self.process.returncode!=0:errors.append('Console exited nonzero')
+                path=self.v.directory/'active-ui-report.json'
+                if path.exists():self.report=venue_module.read_json(path)
+                if not self.report or self.report['cleanShutdown'] is not True or self.report['reason']!='Requested':errors.append('Browser clean shutdown is unconfirmed')
+        except Exception as error:errors.append(type(error).__name__)
+        finally:
+            if self.log:self.log.close()
+        self.cleaned=not errors
+        self.v.save('active-ui-cleanup.json',{'errors':errors,'helperTerminal':self.process is None or self.process.poll() is not None})
+        return self.cleaned
+
+
+class ActiveVenue(capacity.ReplicationVenue):
+    def __init__(self,args,**options):
+        self.pose_programs=[];self.pose_finished=False
+        super().__init__(args,**options)
+
+    def launch(self,name,config,visible=False,*,extra_args=()):
+        if self.args.diagnose_visible_pose and (config['role']=='Server' or visible):
+            directory=self.runtime_directory/'continuity'/f'p{len(self.pose_programs)+1:03d}';directory.parent.mkdir(exist_ok=True)
+            loop=config['role']=='Server'
+            self.pose_programs.append({'name':name,'role':config['role'],'directory':str(directory),'loop':loop})
+            self.save('active-pose-programs.json',self.pose_programs)
+            extra_args=(*extra_args,'--vr-pose-continuity',str(directory),*(['--vr-pose-continuity-loop'] if loop else []))
+        return super().launch(name,config,visible,extra_args=extra_args)
+
+    def finish_pose_diagnostics(self,native):
+        if not self.pose_programs:return None
+        for program in self.pose_programs:(Path(program['directory'])/'finish.request').write_text('stop after exact seals and original individual results\n')
+        self.wait(lambda:all((Path(p['directory'])/'report.json').exists() for p in self.pose_programs),20,'active sparse pose finish')
+        spec=importlib.util.spec_from_file_location('active_sparse_validation',ROOT/'scripts/analyze-pose-continuity.py')
+        analyzer=importlib.util.module_from_spec(spec);spec.loader.exec_module(analyzer)
+        for program in self.pose_programs:
+            report=venue_module.read_json(Path(program['directory'])/'report.json');analyzer.validate(report,program['role'],program['loop'])
+            if program['role']=='Client':
+                owner=next(p for p in native if p['name']==program['name']);program['connection']=owner['nativeConnectionId']
+                if not any(s['point']=='PoseSend' and s['connection']==program['connection'] and s['count']>0 for s in report['streams']):
+                    raise ValueError('Sparse visible-client report has no original connection pose sends')
+        result={'complete':True,'scope':'Only server and visible client; diagnostic completeness is not mission acceptance','programs':self.pose_programs}
+        self.save('active-pose-diagnostics.json',result);self.pose_finished=True;return result
+
+    def cleanup(self):
+        errors=[]
+        if self.pose_programs and not self.pose_finished:
+            try:
+                path=self.directory/'active-native-clients.json'
+                self.finish_pose_diagnostics(venue_module.read_json(path) if path.exists() else [])
+            except Exception as error:errors.append(type(error).__name__)
+        result=super().cleanup()
+        if self.pose_programs:self.save('active-pose-cleanup.json',{'errors':errors,'finished':self.pose_finished})
+        return result and not errors
+
+
+def cleanup_active(v):
+    # Console shutdown/report IO must never prevent independent native cleanup.
+    ui_cleaned=False
+    try:
+        try:ui_cleaned=v.operator_ui.close() if v.operator_ui else True
+        except Exception:pass
+    finally:native_cleaned=v.cleanup()
+    return native_cleaned and ui_cleaned
 
 
 def validate_final_results(entry,native,sealed,delivery,results,combat_sequence,server_log):
@@ -192,14 +322,14 @@ def validate_enemy_motion(before,after):
 
 def operator_controls(v,entry,environment,behavior,label,references,*,movement=False):
     before=v.frame(entry,measure=True);minimum_tick=before['packet']['frame']['tick']+(20 if movement else 1)
-    responses=[v.command(entry,'SetEnvironment',environment=environment),
+    responses=v.operator_ui.apply(environment,behavior) if v.operator_ui else [v.command(entry,'SetEnvironment',environment=environment),
         v.command(entry,'SetEnemies',enemies={'count':5,'behavior':behavior,'autoAttack':False})]
     sequences=[r['appliedAtSequence'] for r in responses]
     if any(r['session']['id']!=entry['id'] or r['duplicate'] is not False for r in responses) or not sequences[0]<sequences[1]:
         raise ValueError('Operator receipts differ from this new session')
     fence=sequences[-1]
     # Save accepted receipts before polling: a timeout must retain the actual fence.
-    witness={'label':label,'environment':environment,'behavior':behavior,'receipts':responses,'acceptedSequence':fence,'applied':None}
+    witness={'label':label,'transport':'ConsoleUi' if v.operator_ui else 'ManagementApi','environment':environment,'behavior':behavior,'receipts':responses,'acceptedSequence':fence,'applied':None}
     v.operator_controls.append(witness);v.save('active-operator-controls.json',v.operator_controls)
     def observed():
         value=v.frame(entry,measure=True)
@@ -248,7 +378,10 @@ def run(v):
         if len(ids)!=1:raise RuntimeError('Active client does not have exactly one connection')
         row['nativeConnectionId']=int(ids.pop())
     check(len({r['pid'] for r in native})==25 and len({r['nativeConnectionId'] for r in native})==25,'25 distinct real native clients and connections, one visible')
-    v.save('active-native-clients.json',native);v.command(entry,'Begin')
+    v.save('active-native-clients.json',native)
+    if v.args.operator_ui:
+        v.operator_ui=OperatorUi(v,entry);v.operator_ui.start()
+    v.command(entry,'Begin')
     initial=v.wait(lambda:(p if (p:=v.frame(entry,measure=True))['packet']['frame']['phase']=='Running' else None),30,'active Running')
     capacity.validate_frame(initial,entry['players'])
     target=next(p for p in initial['packet']['frame']['enemies'] if p['roomId']==3)
@@ -288,6 +421,9 @@ def run(v):
             validate_input(frozen['packet']['frame'],v.request(f'/api/sessions/{entry["id"]}/statistics'),initial['packet']['frame'],own['id'],'kill')
             capture(v,entry,native,label,references)
             check(True,label+': original living enemies move; all replicas retain exact environment / combat and original identities')
+    if v.operator_ui:
+        check(v.operator_ui.close() and v.operator_ui.report['complete'] is True and v.operator_ui.report['requests']==3 \
+            and v.operator_ui.report['pageErrors']==[], 'all six management commands came from real console forms; browser and helper explicitly finished')
     finish(v,[r['name'] for r in native]);sealed=v.seal(entry)
     report=capacity.practice.save_report(v,entry,sealed['statistics']);finish(v,[entry['name']+'-server'])
     v.stage('active-results',players=len(native))
@@ -298,6 +434,7 @@ def run(v):
     if any(debrief.log_text(v,p['name']).count('VR_CLIENT_CONNECTED id=')!=1 for p in native):raise ValueError('A native player changed connection before its final result')
     v.save('active-player-results.json',{'delivery':delivery,'results':results,'serverAcknowledgedConnections':[int(value) for value in re.findall(r'VR_SERVER_DEBRIEF_ACK id=(\d+)',server_log)]})
     check(True,'all 25 original players acknowledge exact individual world / combat / ledger results before shutdown')
+    diagnostics=v.finish_pose_diagnostics(native)
     v.stop_round(entry)
     playback=replay(v,entry,references);check(playback['complete'],'every saved active checkpoint matches contiguous replay / final ledger and CSV')
     findings=capacity.native_log_findings(v.directory);check(not findings,'no native send queue full messages')
@@ -306,6 +443,8 @@ def run(v):
         'statistics':accepted[-1]['statistics'],'inputStages':accepted,'replay':playback,'csv':report,'nativeLogFindings':findings,
         'individualResults':results,'acknowledgedResults':len(results),
         'operatorControls':v.operator_controls if v.args.operator_controls else None,
+        'operatorUi':v.operator_ui.report if v.operator_ui else None,
+        'poseDiagnostics':diagnostics,
         'minimumFreePhysicalBytes':min(p['availablePhysicalBytes'] for p in resources),'networkCapacityAccepted':False,
         'localReplicaContinuityChecked':v.args.replication_probe,
         'captureBatch':v.args.capture_batch if v.args.replication_probe else None,
@@ -321,15 +460,19 @@ def main():
     parser.add_argument('--capture-batch',type=int,choices=range(1,27),default=1,help='Bound simultaneous local snapshot IO; 26 recreates fan-out observations')
     parser.add_argument('--input-timeout',type=int,choices=range(15,121),default=30)
     parser.add_argument('--operator-controls',action='store_true',help='Exercise normal environment / AI commands in the same real-input mission; not an operator UI test')
+    parser.add_argument('--operator-ui',action='store_true',help='Apply the environment / AI scenario through real Chromium console forms; lifecycle stays under the fixture')
+    parser.add_argument('--diagnose-visible-pose',action='store_true',help='Explicit existing sparse trace only on the server and visible client, server PlayerLoop only; no gameplay changes')
     parser.add_argument('--api-dll',type=Path,default=Path(os.environ.get('VR_COMMAND_API_DLL',ROOT/'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')))
     parser.add_argument('--player-exe',type=Path,default=Path(os.environ.get('VR_COMMAND_UNITY_PLAYER',ROOT/'artifacts/desktop/VrCommand.exe')))
-    args=parser.parse_args();args.duration=600;args.visible_room=3;args.job_workers=2;args.check=False;args.replication_probe=not args.without_replication_probe
+    args=parser.parse_args();args.operator_controls=args.operator_controls or args.operator_ui
+    args.duration=600;args.visible_room=3;args.job_workers=2;args.check=False;args.replication_probe=not args.without_replication_probe
     if args.replication_probe and args.input_timeout>40:parser.error('Replication probe has a 240-second lifetime; use at most 40 seconds per UI stage')
-    venue_module.verify_player(args);v=capacity.ReplicationVenue(args,artifact_family='desktop-active')
+    venue_module.verify_player(args);v=ActiveVenue(args,artifact_family='desktop-active');v.operator_ui=None
     try:v.stage('starting',source='Simulation',headsets=0,activePlayers=1,receivingPeers=24);run(v)
     except BaseException as error:v.stage('failed',errorType=type(error).__name__);raise
     finally:
-        failed=sys.exc_info()[0] is not None;cleaned=v.cleanup()
+        failed=sys.exc_info()[0] is not None
+        cleaned=cleanup_active(v)
         if not cleaned:
             v.stage('failed',errorType='CleanupError')
             if not failed:raise RuntimeError('Active fixture cleanup failed')

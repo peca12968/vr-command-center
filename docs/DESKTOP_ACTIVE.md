@@ -1,5 +1,19 @@
 # 實際 PC 輸入與25端狀態對照
 
+2026-11-01 新增`--operator-ui`，以真正Chromium控制台表單執行原環境／AI情境；Begin／Pause／Resume／End仍由fixture控制，不能稱本輪所有生命週期都經UI。一位實際W／Space／R／Space、24接收端的最終新場14項／182快照／1132完整回放與25份結果／server ack通過；**同輪第一場一幀參戰失效、API啟動逾時及一次確認順序失誤／換彈逾時均保留失敗**，不以最後成功宣稱修復。細節見[PROGRESS](PROGRESS.md)。
+
+```powershell
+python scripts/check-desktop-active.py --api-dll <同版API.dll> --runtime-root "$env:LOCALAPPDATA/VrCommand/SimulationRuns" --input-timeout 40 --operator-ui --diagnose-visible-pose
+```
+
+`--operator-ui`隱含operator-controls，需現有Node與`tests/browser`的Playwright依賴。助手只接受本庫新desktop-active目錄、Simulation／headsets0、canonical HTTP127.0.0.1且非5080的URL與同session五房world header。它使用這次臨時Master登入真正控制台，明確選原場，再以表單reload／fill／submit；只用額外GET核對UI序號，不用Node fetch／Python POST代替這六個SetEnvironment／SetEnemies。玩家動作仍由真正遊戲視窗輸入，沒有管理REST／RPC姿態或武器注入。
+
+最多三組請求，助手以單調時鐘180秒界線與200ms輪詢觀察自己的finish／期限，不是可中斷OS卡死的外部watchdog。每個表單最多三次明確意圖，只有已拒絕409才能refresh再提交新UUID；200即停止、未知結果／5xx不重做。`active-ui-attempts.json`立即保存每次真正POST body、HTTP status及回應，Python另核對原request／session、兩個動作順序、expectedSequence／UUID／非duplicate、精確環境／AI與接受尾界，仍須等Running來源observed fence。
+
+三組回應為`active-ui-response-1..3.json`，`active-operator-controls.json`另外記transport=ConsoleUi；未選UI仍走原API模式，舊缺欄位NotRecorded。新回應時間包含refresh／表單／瀏覽器等待與讀取，非RTT。finish先關瀏覽器、等待自己的helper terminal後寫`active-ui-report.json`／`active-ui-cleanup.json`；complete只代表助手這段生命週期完成，還需三組成功、無page error與原生／全程連續性所有閘門。即使助手關閉／報告IO失敗，也必須獨立執行遊戲／API cleanup，不能跳過writer停止與一次snapshot。
+
+`--diagnose-visible-pose`明確選用既有稀疏收集器，只安裝於server與唯一可見client，僅server加PlayerLoop；不是25份姿態診斷。新`active-pose-programs.json`綁定原程序、目錄與連線，正常在25份結果／精確seal後finish／validate再停程序，失敗cleanup也嘗試finish保留報告。原1200秒／256 streams／4096稀疏列及舊replication240秒界線保持；不是延長UI或遊戲門檻。diagnostic complete不是任務通過，clock／coverage與無world序號限制沿用[POSE_CONTINUITY](POSE_CONTINUITY.md)。
+
 2026-11-01 新增`--operator-controls`：在同一25端任務的實際射擊／換彈前，透過正常管理API切換Storm／Night／lightning／Hold；擊殺後測試Storm／Patrol與Fog／Day／Advance。這不是本輪操作員瀏覽器UI測試，沒有注入玩家動作或敵軍座標。真正13項／182快照／26報告、1359完整回放與25份個別結果／server ack成功，完整證據與限制見[PROGRESS](PROGRESS.md)。
 
 ```powershell

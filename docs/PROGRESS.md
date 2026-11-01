@@ -1,5 +1,38 @@
 # 開發進度
 
+## 2026-11-01：控制台表單接入25端動態任務，保留新參戰反例
+
+上一輪為實際進展，從乾淨`00d91a5`接續[動態PC](DESKTOP_ACTIVE.md)。**API/UI0.30、Unity0.36.1／code44／NGO29、e0594513140ff7fb4bc084929691b91c15f7d908e8f59c114aa5ab27daaf11eb、原scene／prefab／rules0.8.0保持**；本輪Python／Node驗收與文件，沒有新Unity／APK／launcher或產品.NET建置、沒有重跑原179 Editor；沿用原同源雙平台receipt，正式5080不動。
+
+新增`--operator-ui`，將原三組環境／AI命令改成真正Chromium控制台表單的reload／fill／submit，使用自己隔離API／臨時Master，選定原五房Linked場，保存真正HTTP POST body、status與CommandReceipt；只有GET用於額外讀回，不以直接管理POST代替這六個動作。Python仍核對原request／session、先環境再AI、精確設定／expectedSequence／原UUID／非duplicate／接受尾界及來源Running／observed fence。409最多三個明確意圖、拒絕後才能refresh新提交；200即止、未知結果／5xx不重做。Begin／Pause／Resume／End仍由fixture處理，**不是本輪全生命週期的UI驗收或autoAttack傷害測試**。
+
+助手僅本庫新desktop-active目錄、Simulation／headsets0、canonical127.0.0.1 HTTP非5080，server header必須原session的五房Simulation；不接受任意正式／遠端API或拿頭盔分類當在線。單調180秒／最多3組／每表單3意圖有界，finish輪詢先關browser並等helper terminal；report.complete只助手範圍。Python即使UI shutdown／報告IO例外仍須獨立native cleanup。原40秒UI確認、replication240秒／4096列與0.5秒姿態／1.5秒來源政策保持，沒有改Tracked、槍口、wire或戰鬥規則。
+
+| 真正場／原handle | 結果與範圍 |
+|---|---|
+| `desktop-active/20261101-093809-9f82680e`，47587 exit1 | 六UI命令、182快照／26完整report、25份精確結果／CSV／雙seal與server ack成功；前13項成功，但最後全程連續性失敗。1271完整回放／11參考中，world371／tick566只有可見玩家參戰失效；26份report各觀察到同tick connected24／health2500／ready及coherent=true。26010 Running觀察列、26 bad列；原active-result.complete／continuityPassed=false、無summary接受檔。沒有當場姿態trace，原因未知 |
+| `20261101-094604-d61ce911`，63574 exit1 | 新API health啟動30秒逾時，api.log空；尚未建立遊戲／UI／診斷程序。沒有調寬門檻／重用該場，cleanup空，原因未知 |
+| `20261101-094719-ababcf4b`，93035 exit1 | 第一發done在同一orchestration呼叫中先於模型檢視新畫面寫入，不合確認順序；另存operator-observation-issue.json acceptancePassed=false。之後未送R，actual UI reload40秒逾時，沒有補ack／結果接受檔。兩份稀疏報告仍明確finish，UI／native cleanup乾淨；不可當完整操作成功 |
+| `20261101-095005-60959386`，26798 exit0 | 正確分開觀察與ack，**14項／182快照／26 Requested完整report、21121 Running列無失效**，1132連續回放／11參考與25份精確結果／CSV／雙seal／server25唯一ack成功；UI與兩份稀疏診斷明確finish、cleanup無殘留。只代表本場 |
+
+第一失效場的closed worldlog已逐record checksum／序號核對；367–370與372–375可見玩家connected=true／rig Simulated，只有371 connected=false／rig None，健康100保持、名冊25。370→371保存capture相隔112ms，371→372為293ms；這不是失效持續時間／RTT或pose收發間隔。當時保存狀態仍Clear／Hold、observed28／非suspended，尚未在該幀觀察到第一組UI接受31／32套用；**不能從此推定接受時間、Begin序號或UI／天氣／GPU／傳輸根因**。每client仍一個原native連線，參戰body狀態不當新的transport重連。恢復、最終戰績或最後乾淨場均不能抹除這一幀；原31筆失效也未修復。
+
+原候選工具與依賴共10檔（含working.patch、無憑證）先精確封存於`active-ui-candidate-a5f5b675638b4ea984d3fcc1fb3311cd`並hash；之後補嚴格UI意圖順序／單調期限／時間metadata、助手cleanup例外仍必須native cleanup的反例，以及明確`--diagnose-visible-pose`。這份10檔不是完整OS／binary依賴graph。新診斷只有server＋visible client，server才PlayerLoop，不擴大舊收集器界線或當零擾動。
+
+程序不合格場的兩份稀疏報告complete／clockJoinValid，client最大PoseSend gap0.5342256秒、server的pose streams最大gap0.5370066秒；關閉journal在初次capture後沒有保存Running參戰失效。`active-ui-pose-window-analysis.json`因此沒有可配對的fault窗口，missionAcceptancePassed仍false。**不把最大gap當另一個已保存失效、不能跨場套到原371、不能以本次時鐘檢查校準原無trace場次**。point沒有world序號，不硬配，clock／coverage不足須null。
+
+最終場三組接受31／32、44／45、48／49，Running來源分別world374 observed32 tick466、world1013 observed45 tick1528、world1077 observed49 tick1562。Patrol與Advance只要求命令前基準至少20活動tick後的實際活敵移動；原五敵ID／room／health保持，四個活敵各約0.2m／1.7m，原room3死敵不復活。不是固定速度或精確套用延遲。每檢查點仍逐一比對25端＋server的環境／AI來源、身分、姿態、彈藥／健康與敵軍position／fireSequence；不將其當所有render frame或所有封包。
+
+最終一位實際W／Space／R／Space、24接收端，2發2中1殺／100%，其餘24未受其輸入改動，所有玩家健康100。world1132／combat5／ledger through52的25份原admission結果精確一致；全部server ack對原nativeConnectionId，無timeout／queue error。replication最晚117.630233秒／最多857列，最大相鄰觀察Running tick gap0.1340429秒，非RTT／FPS。client probe End前停、server seal後停，UI助手3組／6次200／無page error、105.863859秒 Requested clean shutdown，才另行核對個別結果。
+
+最終稀疏server／visible client各於118.354362／109.312755秒明確stop，clockJoinValid、最大檢查偏差0.0019386／0.00165秒，未截斷。client gaps0但threadWindows1；不能由稀疏列空集合宣稱全程無主執行緒空窗。報告在25份結果與精確seal後停止，diag complete不是任務接受。Windows雨夜／換彈／擊殺／暫停畫面已觀察；沒有新GPU／PCM量測或頭盔證據，CUA截圖payload未另解碼／保存。
+
+**27 active＋13 capacity＋12 debrief，共52本機Python與72 Node通過**；新增6 Python／5 Node涵蓋外場／錯request、錯表單／尾界／UUID、未知結果、成功後多送／錯意圖序號、單獨server／visible的診斷opt-in及UI cleanup錯誤仍收原生程序。一般235瀏覽器套件本輪由後續CI驗證，不混用前輪本機結果；語法與diff成功，CI既有入口已包括新案例。
+
+`active-ui-closed-analysis.json`／`active-ui-runtime-validation.json`在四個原handle terminal後只讀關閉JSON／journal rb與checksum，保存SQLite不開連線、不ack／修復／截尾；metadata讀回不是完整raw規則重跑。新4 C runtime764檔／F snapshot相符，前49 runtime2027、前F337／四動態1138／前operator383／原尾界及獨立房證據、history321與各API159、當前ZIP／APK／receipt及舊0.36 ZIP保持；總53 C runtime2791檔，新場F1042檔另存hash。所有writer全停才一次snapshot、C原件不動，失敗也保存。
+
+完整11項active。仍同機Simulation／一位操作24接收／headsets0／networkCapacityAccepted=false，不是25位同時操作、跨機／Wi-Fi或頭盔容量；診斷前後條件不同，不當因果對照。下一步以原失效樣本及獨立觀察／可見玩家診斷追查自然姿態空窗，並接續多人操作；原31筆／新371、F吞吐、MR／VIVE／跨機25台及廠商硬體各自待驗。
+
 ## 2026-11-01：25端動態任務中的環境與AI管理命令
 
 上一輪為實際進展，從乾淨`cf3c8b4`接續；新增[動態PC選用流程](DESKTOP_ACTIVE.md)。**API/UI0.30、Unity0.36.1／code44／NGO29、e0594513140ff7fb4bc084929691b91c15f7d908e8f59c114aa5ab27daaf11eb與原scene／prefab ID、rules0.8.0保持**，只有Python驗收及文件修改，沒有新Unity／APK／launcher、179 Editor或本機.NET建置。既有雙平台receipt保持；正式5080不動。

@@ -1,7 +1,10 @@
 import copy
 import importlib.util
 from pathlib import Path
+import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest.mock import Mock,patch
 
 ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('active',ROOT/'scripts/check-desktop-active.py')
@@ -115,6 +118,78 @@ class OperatorControlsTests(unittest.TestCase):
             lambda v:v['enemies'][0]['feet'].__setitem__('x',float('nan'))):
             candidate=copy.deepcopy(after);change(candidate)
             with self.assertRaises(ValueError):active.validate_enemy_motion(before,candidate)
+
+
+class OperatorUiTests(unittest.TestCase):
+    def test_console_cleanup_failure_cannot_skip_owned_native_cleanup(self):
+        for close in (Mock(return_value=False),Mock(side_effect=OSError('bounded report write failed'))):
+            venue=SimpleNamespace(operator_ui=SimpleNamespace(close=close),cleanup=Mock(return_value=True))
+            self.assertFalse(active.cleanup_active(venue));venue.cleanup.assert_called_once_with()
+        venue=SimpleNamespace(operator_ui=None,cleanup=Mock(return_value=True))
+        self.assertTrue(active.cleanup_active(venue));venue.cleanup.assert_called_once_with()
+        venue=SimpleNamespace(operator_ui=SimpleNamespace(close=Mock(side_effect=KeyboardInterrupt())),cleanup=Mock(return_value=True))
+        with self.assertRaises(KeyboardInterrupt):active.cleanup_active(venue)
+        venue.cleanup.assert_called_once_with()
+
+    def fixture(self):
+        environment={'mode':'VR','weather':'Storm','timeOfDay':'Night','lightning':True};attempts=[]
+        for index,action in enumerate(('SetEnvironment','SetEnemies'),1):
+            identity=f'11111111-2222-3333-4444-{index:012d}';body={'commandId':identity,'action':action,'expectedSequence':10+index}
+            body['environment' if index==1 else 'enemies']=environment if index==1 else {'count':5,'behavior':'Hold','autoAttack':False}
+            attempts.append({'request':1,'action':action,'intent':1,'status':200,'body':body,
+                'receipt':{'commandId':identity,'duplicate':False,'session':{'id':'session'},'appliedAtSequence':11+index}})
+        return {'request':1,'sessionId':'session','attempts':attempts,'receipts':[a['receipt'] for a in attempts]},environment
+
+    def validate(self,value,environment):return active.validate_ui_exchange(value,1,'session',environment,'Hold')
+
+    def test_exact_two_ui_form_receipts_are_bound_to_the_current_request(self):
+        value,environment=self.fixture();self.assertEqual(self.validate(value,environment),value['receipts'])
+        for change in (lambda v:v.__setitem__('request',2),lambda v:v.__setitem__('sessionId','other'),
+            lambda v:v['attempts'].pop(),lambda v:v['attempts'].reverse(),lambda v:v['receipts'].reverse()):
+            candidate=copy.deepcopy(value);change(candidate)
+            with self.assertRaises(ValueError):self.validate(candidate,environment)
+
+    def test_wrong_form_settings_sequence_and_unknown_results_fail_closed(self):
+        value,environment=self.fixture()
+        for change in (lambda a:a['body']['environment'].__setitem__('weather','Clear'),lambda a:a['body'].__setitem__('expectedSequence',None),
+            lambda a:a.__setitem__('status',503),lambda a:a['body'].__setitem__('action','End'),lambda a:a.__setitem__('request',0)):
+            candidate=copy.deepcopy(value);change(candidate['attempts'][0])
+            with self.assertRaises(ValueError):self.validate(candidate,environment)
+
+    def test_accepted_receipt_cannot_change_identity_or_reuse_a_conflicted_intent(self):
+        value,environment=self.fixture()
+        for change in (lambda r:r.__setitem__('commandId','another'),lambda r:r.__setitem__('duplicate',True),
+            lambda r:r['session'].__setitem__('id','other'),lambda r:r.__setitem__('appliedAtSequence',1)):
+            candidate=copy.deepcopy(value);change(candidate['attempts'][0]['receipt']);candidate['receipts']=[a['receipt'] for a in candidate['attempts']]
+            with self.assertRaises(ValueError):self.validate(candidate,environment)
+        candidate=copy.deepcopy(value);conflict=copy.deepcopy(candidate['attempts'][0]);conflict['status']=409;candidate['attempts'].insert(0,conflict)
+        with self.assertRaises(ValueError):self.validate(candidate,environment)
+        conflict['body']['commandId']='11111111-2222-3333-4444-000000000009';candidate['attempts'][1]['intent']=2
+        self.assertEqual(self.validate(candidate,environment),candidate['receipts'])
+
+    def test_ui_intents_must_stop_after_success_and_cannot_exceed_three_per_action(self):
+        value,environment=self.fixture();candidate=copy.deepcopy(value)
+        conflict=copy.deepcopy(candidate['attempts'][0]);conflict.update(status=409,intent=2)
+        conflict['body']['commandId']='11111111-2222-3333-4444-000000000009';candidate['attempts'].insert(1,conflict)
+        with self.assertRaises(ValueError):self.validate(candidate,environment)
+        candidate=copy.deepcopy(value);candidate['attempts'][0]['intent']=2
+        with self.assertRaises(ValueError):self.validate(candidate,environment)
+
+
+class ActiveDiagnosticTests(unittest.TestCase):
+    def test_sparse_diagnostic_is_opt_in_and_only_server_and_visible_client(self):
+        with tempfile.TemporaryDirectory(prefix='vr-active-sparse-') as temporary:
+            v=object.__new__(active.ActiveVenue);v.args=SimpleNamespace(diagnose_visible_pose=True)
+            v.directory=v.runtime_directory=Path(temporary);v.pose_programs=[]
+            with patch.object(active.capacity.ReplicationVenue,'launch') as launch:
+                v.launch('server',{'role':'Server'});v.launch('background',{'role':'Client'});v.launch('visible',{'role':'Client'},True)
+            self.assertEqual([p['name'] for p in v.pose_programs],['server','visible'])
+            self.assertIn('--vr-pose-continuity-loop',launch.call_args_list[0].kwargs['extra_args'])
+            self.assertEqual(launch.call_args_list[1].kwargs['extra_args'],())
+            self.assertNotIn('--vr-pose-continuity-loop',launch.call_args_list[2].kwargs['extra_args'])
+            v.args.diagnose_visible_pose=False
+            with patch.object(active.capacity.ReplicationVenue,'launch') as launch:v.launch('ordinary',{'role':'Server'})
+            self.assertEqual(launch.call_args.kwargs['extra_args'],());self.assertEqual(len(v.pose_programs),2)
 
 
 class FinalResultsTests(unittest.TestCase):

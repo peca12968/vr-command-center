@@ -1,5 +1,7 @@
 # 長期開發目標
 
+2026-11-01 [控制台表單＋動態25端](DESKTOP_ACTIVE.md)：operator-ui六個真正表單命令、正確W／Space／R／Space，最終14項／182快照、21121 Running列、1132全回放／25份結果及server ack成功。但首場1271回放的world371一位參戰失效、26份複本觀察失效仍exit1；另API啟動及操作確認逾時保留。新增只server／visible的稀疏診斷，不將乾淨場或最大gap當根因修復；52 Python／72 Node，遊戲版本／179雙平台保持，完整11項active。
+
 2026-11-01 [動態任務環境／AI命令](DESKTOP_ACTIVE.md)：選用operator-controls，雨夜實際射擊／換彈後測試Patrol／Fog Day Advance；13項、182快照／26報告、28204 Running列、1359完整回放與25份結果／server ack成功。接受回應與來源observed fence另存，原敵軍ID／健康保持；46 Python通過，Unity0.36.1／179及雙平台receipt不變。下一步操作員UI與動態玩家組合、多人持續操作，完整11項active，原31筆／慢碟／實機另驗。
 
 2026-11-01 [CI與瀏覽器fixture](PROGRESS.md)：8d2227a雲端完整success，717規則／459 HTTP／47串流、全部Python／素材及67 Node／235 Chromium通過；原第二分頁截圖逾時仍保存。明確啟用截圖分頁、camera與時鐘中斷各用自己的60秒來源，未放寬政策；遊戲0.36.1／原179 Editor與雙平台receipt保持，11項active。
