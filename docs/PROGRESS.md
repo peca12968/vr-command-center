@@ -1,5 +1,15 @@
 # 開發進度
 
+## 2026-11-01：統計來源標籤不能當完整數字讀回
+
+AI功能`17b75e9`的[CI41297698388](https://github.com/peca12968/vr-command-center/actions/runs/41297698388)／job124821936708最終failure：738規則／459 HTTP／47串流、工作流程Python含7 targeting／素材及78 Node已過，browser在check.cjs:205統計列精確斷言失敗。原只等「模擬資料」標籤後立即讀整列，沒有該刻row metadata；失敗後PNG的數字已正確，不能由較晚截圖推定斷言時也正確、或證明唯一CI原因。4檔artifact13080141669＋log／ZIP **1,053,078 bytes／SHA `9297eabd5a6fd7dfb3111cb6fb6ed96d0f01a634a3ce79b62fbd6c3071f78594`**精確保存，原failure不改判。
+
+自己的C BrowserRuns保留原origin-only等待與精確數字斷言，只加入可控的真實較早GET：先接受ShotFired、擷取through13統計但暫不交付；再接受其餘3筆到session16，交付原GET。產品確實顯示「模擬資料」及Alpha 01的1／0／0／0／0%／100，原等待成立、原斷言失敗，16486原handle exit1；metadata與斷言前PNG保留。沒有偽造統計body或重送寫入，只持有同一次授權API實際回應。這證明等待條件不足，不把受控情境套成原CI的時間根因。
+
+正式fixture保留同一受控前提，新增一項必須看見舊prefix的檢查；釋放後用原單一30秒DOM等待核對「來源＋完整統計列」同一讀取，再做原精確斷言，polling100。四筆原報告／ID／順序、產品JS/API／8秒API與遊戲0.5／1.5政策均不改，沒有寫入重試或提高期限；setup的擷取與舊prefix觀察也各有30秒界線，finally釋放兩gate／移除route。失敗另存無憑證的DOM統計列／phase／notice並重拋。
+
+新本機37059原handle exit0：**78 Node／256 Chromium**，42檔`console-ai-target-stats-after-20261101`包含through13／accepted16反例metadata與完整checks。`ai-target-stats-fence-validation.json`核對舊CI4／受控反例7／新42、原68 runtime／F及遊戲binary／ZIP／APK hash未變；702前browser＋初41＋CI失敗4＋反例7＋新42＝**796份browser證據**，不是796項測試。本輪沒有新Unity／API建置或重跑原生，0f8287b0...／208及原三人／五房結果保持。雲端新fixture結果另補，完整11項active。
+
 ## 2026-11-01：AI 受阻後選擇可命中的玩家
 
 從乾淨`5b4ff41`接續第6項，[AI_VISIBLE_TARGETS](AI_VISIBLE_TARGETS.md)修正只嘗試最近玩家的選敵：原同房／connected／存活／天氣日夜射程候選依距離與GUID排序，逐一原Cast，只有真正命中該玩家才接受。仍20tick／20傷害、原槍口、Hold／Patrol／Advance、Pause與0.5／1.5政策，Advance仍朝原最近合格者移動。AimTarget只供冷卻外觀追蹤，每發重新Cast，不改歷史射線、Tracked、wire、schema1／rules0.8.0或素材pin。最多每NPC5候選，完全受阻的Cast量可能增加，沒有據此宣稱25人效能完成。

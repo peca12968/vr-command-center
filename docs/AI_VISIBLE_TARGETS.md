@@ -34,4 +34,6 @@ python scripts/check-desktop-ai-targeting.py --api-dll <本輪API.dll> --runtime
 
 APK原82,782,417降至60,330,662 bytes，ZIP索引105項compressed僅60,306,850→60,309,211；非索引payload區段22,475,567→21,451。這是容器記帳，不當遊戲內容縮減、ELF／執行效能或唯一Gradle原因證明，兩份raw保持、不重封裝，receipt totalBytes不是APK大小。
 
-完整來源／證據與CI以[PROGRESS](PROGRESS.md)為準。沒有新GPU／PCM、實機／跨機或25位操作證據，原31筆／world371姿態失效與F吞吐等問題未由本輪修復，完整11項仍active。
+功能17b75e9的首CI41297698388在較早的統計列斷言失敗，4檔／log／ZIP保持；尚未完成該次完整browser。受控through13較早GET在四報告已接受到16後仍能顯示「模擬資料」，證明原標籤等待不足，但不是原CI時間根因證明。fixture改為等待來源與完整列、仍同一30秒與原精確值；產品、遊戲來源及binary不改，新本機78 Node／256 browser成功。原controlled舊等待exit1與新完整結果分開保留，完整CI來源與證據以[PROGRESS](PROGRESS.md)為準。
+
+沒有新GPU／PCM、實機／跨機或25位操作證據，原31筆／world371姿態失效與F吞吐等問題未由本輪修復，完整11項仍active。

@@ -199,10 +199,24 @@ async function main() {
     await page.locator('[data-command=Resume]').click();
     await page.waitForFunction(() => document.querySelector('#session-phase').textContent === '執行中');
     const playerId = session.players[0].id, shotId = randomUUID(), enemyId = randomUUID();
-    for (const report of [{ kind: 'ShotFired', shotId }, { kind: 'ShotHit', shotId, enemyId }, { kind: 'EnemyEliminated', shotId, enemyId }, { kind: 'PlayerDamaged', damage: 20 }]) await api('/sessions/' + session.id + '/combat', 'POST', { reportId: randomUUID(), origin: 'Simulation', playerId, ...report }, 'GameServer');
-    await page.locator('#refresh').click();
-    await page.waitForFunction(() => document.querySelector('#statistics-origin').textContent === '模擬資料');
-    check((await page.locator('#statistics tr').filter({ hasText: 'Alpha 01' }).locator('td').allTextContents()).join('|') === 'Alpha 01|1|1|20|1|100%|80', 'Console shows ammo, kills, damage, hits, accuracy and health from durable simulated events');
+    const heldStatistics = await require('./statistics-fence.cjs')({ page, api, base, session, playerId, shotId, enemyId, reportId: randomUUID, screenshots });
+    try {
+      check(heldStatistics.partial.origin === '模擬資料' && heldStatistics.partial.rows.some(row => row.join('|') === 'Alpha 01|1|0|0|0|0%|100'),
+        'A genuine older Simulation read does not prove the later accepted combat totals have reached the console');
+      heldStatistics.release();
+      try {
+        await page.waitForFunction(() => {
+          const row = [...document.querySelectorAll('#statistics tr')].find(row => row.cells[0]?.textContent === 'Alpha 01');
+          return document.querySelector('#statistics-origin').textContent === '模擬資料' && row && [...row.cells].map(cell => cell.textContent).join('|') === 'Alpha 01|1|1|20|1|100%|80';
+        }, undefined, { polling: 100 });
+      } catch (error) {
+        const diagnostic = await page.evaluate(() => ({ origin: document.querySelector('#statistics-origin').textContent,
+          rows: [...document.querySelectorAll('#statistics tr')].map(row => [...row.cells].map(cell => cell.textContent)),
+          phase: document.querySelector('#session-phase').textContent, notice: document.querySelector('#notice').textContent }));
+        await fs.writeFile(path.join(screenshots, 'statistics-completion-failure.json'), JSON.stringify(diagnostic, null, 2)); throw error;
+      }
+      check((await page.locator('#statistics tr').filter({ hasText: 'Alpha 01' }).locator('td').allTextContents()).join('|') === 'Alpha 01|1|1|20|1|100%|80', 'Console shows ammo, kills, damage, hits, accuracy and health from durable simulated events');
+    } finally { await heldStatistics.dispose(); }
     check(!(await page.locator('#event-list').innerText()).includes('Invalid Date'), 'History renders the server-recorded event time');
     await page.screenshot({ path: path.join(screenshots, 'operations.png'), fullPage: true });
     const xssName = '<img src=x onerror="window.injected=true">';

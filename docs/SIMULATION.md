@@ -1,5 +1,7 @@
 # 共用戰鬥模擬核心 v0.11
 
+Unity0.38.0新增[AI可見目標選擇](AI_VISIBLE_TARGETS.md)：自動攻擊按原距離／GUID順序逐一做原Cast，略過受阻玩家；Advance的最近玩家移動政策與原傷害／冷卻／射程保持。738規則、208真正Editor與三人原生／雙平台等最新證據見PROGRESS，下方保留原核心交付的歷史範圍。
+
 `clients/unity/Packages/com.vrcommand.simulation/Runtime/` 是唯一來源；`src/VrCommand.Simulation` 直接編譯為 .NET Standard 2.1／C# 9，無 Unity、後端組件或資料庫相依。新增 ArenaSession field DTO 與任務／連線／姿態接入層；Unity 轉接來源碼已引用 embedded package 並建立世界，但尚未實際匯入／編譯或執行。管理 API／瀏覽器介面為 v0.11；詳見 `GAMEPLAY.md`。
 
 目前已證明 .NET 遊戲規則與幾何模擬，以及讀取紀錄的瀏覽器 3D 回放，不能當作 Quest／VIVE、Unity Physics、IL2CPP、網路延遲或 25 台裝置驗收。Android 工具已安裝整理並通過 ARM64 原生編譯；Unity 編輯器仍未取得有效授權，見 `QUEST3.md`。
