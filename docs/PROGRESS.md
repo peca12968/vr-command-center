@@ -8,7 +8,11 @@ AI功能`17b75e9`的[CI41297698388](https://github.com/peca12968/vr-command-cent
 
 正式fixture保留同一受控前提，新增一項必須看見舊prefix的檢查；釋放後用原單一30秒DOM等待核對「來源＋完整統計列」同一讀取，再做原精確斷言，polling100。四筆原報告／ID／順序、產品JS/API／8秒API與遊戲0.5／1.5政策均不改，沒有寫入重試或提高期限；setup的擷取與舊prefix觀察也各有30秒界線，finally釋放兩gate／移除route。失敗另存無憑證的DOM統計列／phase／notice並重拋。
 
-新本機37059原handle exit0：**78 Node／256 Chromium**，42檔`console-ai-target-stats-after-20261101`包含through13／accepted16反例metadata與完整checks。`ai-target-stats-fence-validation.json`核對舊CI4／受控反例7／新42、原68 runtime／F及遊戲binary／ZIP／APK hash未變；702前browser＋初41＋CI失敗4＋反例7＋新42＝**796份browser證據**，不是796項測試。本輪沒有新Unity／API建置或重跑原生，0f8287b0...／208及原三人／五房結果保持。雲端新fixture結果另補，完整11項active。
+新本機37059原handle exit0：**78 Node／256 Chromium**，42檔`console-ai-target-stats-after-20261101`包含through13／accepted16反例metadata與完整checks。`ai-target-stats-fence-validation.json`核對舊CI4／受控反例7／新42、原68 runtime／F及遊戲binary／ZIP／APK hash未變；702前browser＋初41＋CI失敗4＋反例7＋新42＝**796份browser證據**，不是796項測試。本輪沒有新Unity／API建置或重跑原生，0f8287b0...／208及原三人／五房結果保持，完整11項active。
+
+[fixture8dbb874](https://github.com/peca12968/vr-command-center/commit/8dbb8749a2cb5bbfeda5defb3b1e99a29ceec315)的[完整CI41298762465](https://github.com/peca12968/vr-command-center/actions/runs/41298762465)／job124825142728／精確8dbb874最終success：Linux738規則／459 HTTP／47 world、工作流程Python含7 targeting／素材、78 Node／256 Chromium全部成功。CI也保存through13／accepted16受控前提。2 Windows限定skip不是新Unity／native或頭盔證據，本機各場與雲端分開；原17b CI及受控舊fence均仍failed，不當原CI時間根因／產品修復證明。
+
+42檔artifact13080935513與log／ZIP **10,040,719 bytes／SHA `20f05858ddf4861748e31d5c06414ed59541125acc0441a2c9fd71d4c182fc95`**已保存，下載與GitHub digest相符。`ai-target-ci-success-validation.json`重新核對前796 browser＋新42＝**838份browser證據**、本輪68原runtime／F snapshot、0.38 binary／ZIP／APK及舊327 archive未變。後續僅文件證據skip ci，測試來源精確8dbb874，遊戲來源仍0f8287b0...；ROADMAP目前M2／建置門檻更新208／0.38，不重寫歷史數量。完整11項active，跨機／頭盔／25位操作及原31／world371／startup／F吞吐仍另驗。
 
 ## 2026-11-01：AI 受阻後選擇可命中的玩家
 

@@ -36,4 +36,6 @@ APK原82,782,417降至60,330,662 bytes，ZIP索引105項compressed僅60,306,850�
 
 功能17b75e9的首CI41297698388在較早的統計列斷言失敗，4檔／log／ZIP保持；尚未完成該次完整browser。受控through13較早GET在四報告已接受到16後仍能顯示「模擬資料」，證明原標籤等待不足，但不是原CI時間根因證明。fixture改為等待來源與完整列、仍同一30秒與原精確值；產品、遊戲來源及binary不改，新本機78 Node／256 browser成功。原controlled舊等待exit1與新完整結果分開保留，完整CI來源與證據以[PROGRESS](PROGRESS.md)為準。
 
+[精確8dbb874的CI41298762465](https://github.com/peca12968/vr-command-center/actions/runs/41298762465)完整success：738規則／459 HTTP／47 world、工作流程Python／素材、78 Node／256 Chromium。42檔artifact13080935513與log／10,040,719 bytes ZIP／SHA20f05858...已下載核對，前796 browser＋新42＝838，原68 runtime／snapshot／0.38包與327 archive保持。2 Windows限定skip不是Unity／native或頭盔證據，首CI與受控舊fence仍failed，後續文件skip ci不改測試來源。
+
 沒有新GPU／PCM、實機／跨機或25位操作證據，原31筆／world371姿態失效與F吞吐等問題未由本輪修復，完整11項仍active。
