@@ -20,7 +20,11 @@
 
 `mission-read-runtime-validation.json`在全部自有handle terminal後只讀raw：新C runtime14檔／一次F snapshot一致、新F43檔；前54 C runtime2967／各F snapshot與前observer F264、UI1042／動態1138／operator383／F337／history321、原尾界及獨立房、API原三組各159、當前ZIP／APK／receipt及舊ZIP保持。總55 C runtime2981檔。三個.NET候選各API＋三工具159檔與Checks95檔均另存雜湊，只有第一候選採用；五個新瀏覽器目錄3／2／2／19／39共65檔，前失敗／成功不覆寫。Startup三份關閉raw log及HTTP temp殘留log已逐byte另存F並核對hash；暫存清理曾部分失敗，不宣稱保留完整HTTP temp，原殘件不刪／不解鎖。保存SQLite不開連線，native writer全停才snapshot。
 
-雲端CI結果於完成後補記。完整11項active，原31筆／world371、Windows startup與原CI時序問題、F吞吐及跨機／Quest／VIVE／MR／廠商硬體仍各自待驗；本輪不把受控修正當所有歷史逾時修復。
+採用建置的明確本機指標為`artifacts/mission-read-api-stage-path.txt`及`mission-read-api-stage-validation.json`（0.30.1／API132＋三工具各9＝159檔），指向第一候選的bin；名稱帶final／release的兩個候選**不採用**，原指標及原件仍保存，不能只憑名稱選部署來源。
+
+[CI41268781091](https://github.com/peca12968/vr-command-center/actions/runs/41268781091)／job124737033873／精確`2c33d1d9adec23da4dfe457711836a4037f942c7` **完整success**：Linux restore／build、717規則／459 HTTP／47 world、工作流程Python／素材及72 Node／248 Chromium通過。2 Windows限定案例在Linux skip，不當原生或179 Editor證據。本機Windows完整HTTP仍失敗，不能用此Linux結果改判。保存39檔artifact13068238061與log，ZIP9677130 bytes、實際下載SHA256 `622a0b211f2c3c7f1243945b4f6fa7ba47ce980e7a3e4dd45328202c1ff567a8`與GitHub digest一致；`mission-read-ci-validation.json`核對前209＋本輪65＝274份瀏覽器證據、新native及三個候選build均保持。最後只有文件證據skip ci，測試來源精確2c33d1d。
+
+完整11項active，原31筆／world371、Windows startup與原CI時序問題、F吞吐及跨機／Quest／VIVE／MR／廠商硬體仍各自待驗；本輪不把受控修正當所有歷史逾時修復。
 
 ## 2026-11-01：25端零按鍵視窗觀察與同場心跳對照
 

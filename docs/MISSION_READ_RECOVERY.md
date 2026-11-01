@@ -25,3 +25,5 @@ node tests/browser/check.cjs --mission-read-only
 2026-11-01 舊0.30.0 API的受控503在原handle46558 **exit1**重現：第一版已選、草稿仍第二版，沒有發出所選history讀取。新0.30.1的專項10項及擴充15項通過；新增情境包含於完整回歸。這是新的受控缺口與修正證據，**不能據此宣稱已證明前輪雲端歷史載入逾時的根因**。
 
 真正Windows遊戲端非互動入場／驗票／重連8項、355幀及cleanup成功，仍是同機Simulation、無新Unity建置／179 Editor重跑或頭盔操作。完整回歸、失敗、CI與原件保存證據見[PROGRESS](PROGRESS.md)。舊31筆／world371姿態失效、跨機／25位同時操作、MR及硬體另驗，完整11項維持開發中。
+
+[2c33d1d完整雲端CI](https://github.com/peca12968/vr-command-center/actions/runs/41268781091)成功，717規則／459 HTTP／47串流、Python／素材及72 Node／248 Chromium通過。本機248瀏覽器亦成功；本機完整HTTP在invalid credential程序退出等待逾時仍未解，沒有因Linux成功而改判。候選啟動調整未納入發布，正式憑證規則與期限保持，完整範圍見PROGRESS。
