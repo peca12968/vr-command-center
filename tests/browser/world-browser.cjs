@@ -14,6 +14,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     return { child, finished };
   }
   try {
+    await page.bringToFront();
     await page.setViewportSize({ width: 1440, height: 1080 });
     await page.locator('#tab-world').click(); await page.waitForFunction(() => document.querySelector('#world-message').textContent.includes('目前沒有'));
     check((await page.locator('#world-message').innerText()).includes('目前沒有'), 'World viewer reports an empty archive without inventing a recording');
@@ -78,10 +79,23 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await page.locator('#world-camera').selectOption('overview'); await page.locator('#camera-recall').click();
     check(await canvas.getAttribute('data-camera') === savedPosition && await page.locator('#world-camera').inputValue() === 'free', 'Recalling a position restores its fixed world target, angles and distance');
     const remembered = await context.newPage(); await remembered.setViewportSize({ width: 1440, height: 1080 });
+    await remembered.bringToFront();
     await remembered.goto(base + '/console/'); await remembered.locator('#login-key').fill(tokens.Master); await remembered.locator('#login-form button').click();
     await remembered.locator('#tab-world').click(); await remembered.locator('#world-recording option').waitFor({ state: 'attached' });
     await remembered.locator('#world-recording').selectOption(live.header.sessionId); await remembered.locator('#world-live').click();
-    await remembered.locator('#camera-positions option').waitFor({ state: 'attached' }); await remembered.locator('#camera-recall').click();
+    try {
+      await remembered.locator('#camera-positions option').waitFor({ state: 'attached' }); await remembered.locator('#camera-recall').click();
+    } catch (error) {
+      const diagnostic = await remembered.evaluate(() => ({ visibility: document.visibilityState,
+        worldMessage: document.querySelector('#world-message').textContent,
+        cameraMessage: document.querySelector('#camera-message').textContent,
+        worldStatus: document.querySelector('#world-status').textContent,
+        cameraOptions: document.querySelector('#camera-positions').options.length,
+        worldSequence: document.querySelector('#world-canvas').dataset.sequence })).catch(() => ({ unavailable: true }));
+      await fs.writeFile(path.join(screenshots, 'world-remembered-failure.json'), JSON.stringify(diagnostic, null, 2));
+      await remembered.screenshot({ path: path.join(screenshots, 'world-remembered-failure.png'), fullPage: true, timeout: 5000 }).catch(() => {});
+      throw error;
+    }
     check(await remembered.locator('#world-canvas').getAttribute('data-camera') === savedPosition, 'A freshly authenticated page reloads and recalls the persisted camera position');
     await remembered.bringToFront(); // Capture the intended tab, including with headless Chromium.
     await remembered.screenshot({ path: path.join(screenshots, 'world-camera-positions.png'), fullPage: true });

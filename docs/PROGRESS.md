@@ -18,11 +18,17 @@
 
 七個檢查點（initial／四動作／Patrol／Advance）共**182快照／26 Requested完整報告、28204觀察Running列**無失效。每個快照核對來源packet實際環境與25原連線／全名冊／姿態／彈藥／健康、敵軍位置與fireSequence。最晚145.318062秒finish、最多1134列，原240秒／4096列界線保持。相鄰觀察Running新tick最大間隔0.5542095秒，非RTT／FPS／精確PoseSend間隔；原0.5秒姿態與1.5秒世界政策未改，不能由此數值推根因或宣稱連續畫面。
 
+原handle terminal且cleanup明確空列後，`active-operator-checkpoint-validation.json`另外只讀原JSON／快照，將七段直接對到命令指定環境與原接受fence：initial world120／move342為Clear Day；shot683／reload928／kill1194仍Storm Night Hold且observed35／37／42>=32；Patrol world1254 observed46>=45、Advance1310 observed50>=49。各段26個原client／server快照全部相符，其他身分／姿態／戰鬥閘門仍執行。最初Begin無保存接受回應，這份讀回的initial／move minimumAcceptedFence=null，不猜序號；complete只表示這次182快照讀回，不當新原生run、全量世界規則重算或連續渲染。
+
 實際W短移動、雨夜第一發命中／R後30彈匣89備彈／第二發擊殺成功；主玩家2發2中1殺／100%，中彈與損耗0、健康100；其餘24位未受其輸入改動。25份原admission個別結果／CSV與combat及world精確雙seal一致，**world1359／combat5／ledger through52**，server25唯一ack集合精確對到原nativeConnectionId、沒有timeout／queue error。原probe先finish／server seal後finish、結果確認後才停程序的順序保持。
 
 End後完整API回放**1359連續幀／12參考**精確一致，參考區間每張保存Running世界幀與所有觀察Running列均無參戰失效；這是保存及觀察到的樣本，非25位同時操作或任意負載證明。源環境與接收端為離散檢查點，不把管理接受當連續渲染證明。computer-use兩次get_window_state回報active request：第一次等待後重新取得雨夜畫面才射擊；後一次重試回報foreground未有PID、當時進入結果／收尾階段，沒有再輸入或推定原因，**沒有霧天人工GPU畫面證據**。未保存／解碼CUA截圖payload。
 
 新增4 active＋2 capacity反例，含舊observed／Paused／suspended／未前進tick、正確fence但錯天氣／visibility／策略／autoAttack、死敵或靜止不能當移動、換敵／重生／換房／非有限移動、明確環境不放寬舊預設與未知枚舉／非bool拒絕。**21 active＋13 capacity＋12 debrief，共46本機Python通過**，語法及diff成功；既有CI入口涵蓋新案例。
+
+功能[b014f1a](https://github.com/peca12968/vr-command-center/commit/b014f1a9378a65d4a176fd04d6105fdfeeee6f6b)的[CI41259359885](https://github.com/peca12968/vr-command-center/actions/runs/41259359885)／job124709212647真正執行.NET／717／459／47、Python／素材與67 Node，但最後瀏覽器在`world-browser.cjs:84`等待新登入分頁的camera-positions option 30秒逾時，exit1；這次在舊截圖步驟前失敗，不能稱前輪bringToFront已證明根因修復或整套通過。Chromium安裝步驟01:03:47–01:09:31Z仍正常完成，沒有因等待而重啟工作。原log與artifact13065165755（3517165 bytes、ZIP SHA256 `d40f412408a19ce8cf4693039fd6d7447adbbda3c5d67814fca4966761f7ef54`）下載新`ci-41259359885-console`保留。
+
+瀏覽器fixture進一步在主觀戰及新登入分頁開始載入前明確bringToFront；行動房控分頁在原所有斷言／截圖完成後關閉其context，不讓已測完的viewer繼續占用renderer。沒有改正式UI／API、提高30秒等待或跳過原斷言；camera及clock仍用各自60秒來源。若新登入鏡頭載入再失敗，另外保存該分頁visibility／world及camera message／option count／world sequence與最多5秒失敗截圖，再重拋原錯誤；不記憑證／headers。這是fixture目標與生命週期修正，尚不當作已證明Chromium／CPU／網路根因。
 
 `active-operator-runtime-validation.json`在原33469 terminal後核對新C runtime300檔／F snapshot完全一致，前48 runtime1727檔／前F337、前四動態F1138、原尾界反例與獨立房F證據、history321及各API159保持。總49 C runtime2027檔，新場F383檔另存hash；當前ZIP／APK／receipt metadata保持。所有writer全停才一次snapshot，C原件不動，保存SQLite只rb雜湊、不開連線／ack修復／截尾。完整11項active，原31筆／F發布吞吐、頭盔／MR／VIVE／跨機25台與廠商硬體仍各自待驗。
 

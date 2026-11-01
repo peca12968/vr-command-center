@@ -291,6 +291,9 @@ async function main() {
     await roomPage.waitForFunction(() => Number(document.querySelector('#replay-canvas').dataset.triangles) > 0);
     check(await roomPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1 && document.querySelector('#replay-canvas').clientWidth > 200), 'Replay canvas and controls remain usable at a 390-pixel viewport');
     await roomPage.screenshot({ path: path.join(screenshots, 'replay-mobile.png'), fullPage: true });
+    // This mobile room viewer has finished all its assertions. Release its
+    // renderer before the streamed-world tests create a second observer page.
+    await roomContext.close();
     await page.locator('#tab-operations').click();
     check(await page.evaluate(() => localStorage.length === 0 && sessionStorage.length === 0 && !document.cookie), 'Operator credentials are not persisted in browser storage or cookies');
     await require('./world-browser.cjs')({ page, context, api, tokens, directory, root, base, screenshots, check });
