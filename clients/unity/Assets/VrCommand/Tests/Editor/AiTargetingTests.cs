@@ -1,0 +1,9 @@
+using NUnit.Framework;
+namespace VrCommand.Unity.Tests
+{
+    public sealed class AiTargetingTests
+    {
+        [TestCase(0), TestCase(1), TestCase(2), TestCase(3), TestCase(4), TestCase(5), TestCase(6), TestCase(7), TestCase(8)]
+        public void TargetSelectionPreservesCombatPolicy(int index) => Assert.IsTrue(AiTargetingCases.Run(index), AiTargetingCases.Names[index]);
+    }
+}

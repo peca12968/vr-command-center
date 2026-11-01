@@ -84,6 +84,8 @@ try
     RequestRetryChecks.Run(Check, directory, mission);
     SimulationChecks.Run(Check);
     NavigationChecks.Run(Check);
+    for (var targetingCase = 0; targetingCase < VrCommand.Unity.Tests.AiTargetingCases.Names.Length; targetingCase++)
+        Check(VrCommand.Unity.Tests.AiTargetingCases.Run(targetingCase), VrCommand.Unity.Tests.AiTargetingCases.Names[targetingCase]);
     WalkSurfaceChecks.Run(Check);
     ArenaSessionChecks.Run(Check, directory);
     TelemetryChecks.Run(Check, directory, mission);

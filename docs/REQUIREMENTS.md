@@ -1,5 +1,7 @@
 # 需求與驗收追蹤
 
+第6項新增[AI可見目標選擇](AI_VISIBLE_TARGETS.md)：Unity0.38／208真正Editor、738規則與同源雙平台；三人原生第1tick略過前兩個受阻玩家並射擊第三位，4項／32幀回放／三份結果CSV雙sealACK及五房回歸成功。原傷害、冷卻、射程與移動保持，舊反例仍failed，不當完整人群AI／25人操作、跨機／實機驗收，11項active。
+
 第9／10項新增[雙擊場地定位鏡頭](OBSERVER_GROUND.md)：API/UI0.30.2可直接定位錄製房間的地面觀看中心，保持角度／距離與草稿，原書籤保存／重載和回放不seek。78 Node／255瀏覽器、54 UI/native及165幀／結果封存成功；仍SwiftShader／同機Simulation，非頭盔／MR或25位操作，完整11項active。
 
 第6項新增[任務產生器非格點接線](AI_NAVIGATION_ANCHORS.md)：修正可走出生點取整到掩體內、巡邏端點被改成相差.25m格點兩個反例；729核心／199真正Editor、同源Windows／Quest及兩個正常原生場／回放／原結果與五房回歸成功。逐tick證據與world序號分開，10Hz缺失位置不補造；仍需地形、人群、多人操作及實機驗收，11項active。

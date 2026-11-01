@@ -1,5 +1,7 @@
 # VR Command Center
 
+Unity0.38.0新增[AI 可見目標選擇](docs/AI_VISIBLE_TARGETS.md)：最近玩家被擋住時，改試真正可命中的後續玩家；保持原傷害、射速、射程與移動政策。738規則／208真正Editor、同源Windows／Quest及三人原生4項／32幀回放與五房回歸通過，舊反例與完整範圍見[進度](docs/PROGRESS.md)。
+
 API／UI0.30.2新增[雙擊場地定位鏡頭](docs/OBSERVER_GROUND.md)：在即時觀戰／回放直接點選地面觀看位置，保留角度與距離、支援原書籤。78 Node／255瀏覽器與54真正Windows場次整合通過；完整範圍與待驗見[進度](docs/PROGRESS.md)。
 
 新增[敵軍非格點起終點修正](docs/AI_NAVIGATION_ANCHORS.md)：保留任務產生器的實際出生／巡邏座標，避免卡在錯誤取整格點。Unity0.37.2／199真正Editor、729核心、兩個原生端點案例與五房回歸通過；有界逐tick觀察與10Hz回放分開核對，保留初候選的取樣逾時。完整範圍見[進度](docs/PROGRESS.md)。

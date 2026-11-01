@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+最新`windows-player-0.38.0.zip`使用[AI可見目標](AI_VISIBLE_TARGETS.md)的同源Windows建置，82,646,224 bytes／SHA1f4a27d8...、311 runtime檔及原launcher，新C展開19項核對成功。完整receipt／APK及原生三人／五房證據見PROGRESS，仍非完整GUI／跨機或頭盔驗收。
+
 2026-11-01 主包`windows-player-0.37.2-final.zip`為[非格點端點修正](AI_NAVIGATION_ANCHORS.md)，7d3e1a92...／311 runtime與原launcher；82,645,932 bytes／SHA `25dd1ee56234cd7da3da1f9671877b6c8967a41f03d71f903f3008558425d5c4`。新C展開19項真正核對／拒絕成功，非完整GUI／跨機。無final的0.37.2 ZIP為2c96...初候選、未包含最終逐tick觀察來源，原件保持。199真正Editor、雙平台及原生／CI範圍見PROGRESS，不能僅依檔名或相同版本號判定同源。
 
 2026-11-01 `windows-player-0.37.1.zip`為[敵軍繞行旋轉掩體修正](AI_NAVIGATION.md)，69d247a9...／311 runtime檔與原launcher；82,642,694 bytes／SHA256 `cba3a25ba590c21f0b38b152042242b373ea656dce4c1ff434a742490f3b841f`。新C展開19項真正launcher核對／拒絕成功，非完整GUI／跨機；原0.37.0與0.36.1 ZIP保留。189真正Editor與同源Windows／Quest、原生及CI範圍見PROGRESS。

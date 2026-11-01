@@ -1,5 +1,7 @@
 # 敵軍射擊閃光與後座
 
+Unity0.38.0另修正[可見目標選擇](AI_VISIBLE_TARGETS.md)：受阻時改試後續可命中玩家，仍使用原接受事件的保存射線及此處同一外觀契約；沒有新增fire欄位、wire或素材profile。最新建置與驗證見PROGRESS，下方保留原效果交付的歷史範圍。
+
 `combat-effects-v1` 沿用固定armed-combatants-v1／weapon-actions-v1／field-props-v1，再加原創32面封閉星形槍口脈衝。每NPC最大760面；槍口脈衝只有三個保存tick（0.15秒），不是持續光源、火焰模擬、彈道或音效。`generate-combat-effects.py --check` 先驗證舊來源pin，新資料SHA256固定 `b8fe83d66781c2f65816d6873cc08ba01314418d42777a55e9eea2d1ee34a9bb`；Unity Resources與瀏覽器資料一致，無外部素材，舊六profile／pin不改。
 
 API／UI **0.23.0**、Unity **0.25.0／Android code28／NGO23**。新header `enemyFireVersion=1`，新profile同時要求enemyPresentationVersion1及weaponPresentationVersion1。NGO enemy actor row原子新增fireSequence／fireTickPlusOne／fireOrigin／fireDirection；Prepare原位升23、保留場景／prefab ID。來源、API／UI與所有遊戲程序須一起更新，新資料不可降舊reader。rules0.8.0、envelope6、任務schema1、world schema1、票券2及environmentVersion1保持。

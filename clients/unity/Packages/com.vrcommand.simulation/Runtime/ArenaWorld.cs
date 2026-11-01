@@ -24,6 +24,7 @@ namespace VrCommand.Simulation
             internal Vec3 Forward = new Vec3(0, 0, -1);
             internal bool Walking;
             internal EnemyFireState Fire;
+            internal Guid? AimTarget; // Presentation only; never authorizes a shot.
             internal List<Vec3> Route = new List<Vec3>();
         }
         private sealed class Hit
@@ -182,8 +183,9 @@ namespace VrCommand.Simulation
             {
                 enemy.Walking = false;
                 if (enemy.Health <= 0) continue;
-                var target = players.Where(p => p.Connected && p.Health > 0 && p.Room == enemy.Room && Vec3.Distance(p.Head, enemy.Feet + new Vec3(0, 1.4f, 0)) <= range)
-                    .OrderBy(p => Vec3.Distance(p.Head, enemy.Feet)).ThenBy(p => p.Id).FirstOrDefault();
+                var targets = players.Where(p => p.Connected && p.Health > 0 && p.Room == enemy.Room && Vec3.Distance(p.Head, enemy.Feet + new Vec3(0, 1.4f, 0)) <= range)
+                    .OrderBy(p => Vec3.Distance(p.Head, enemy.Feet)).ThenBy(p => p.Id).ToArray();
+                var target = targets.FirstOrDefault();
                 if (Behavior == AiBehavior.Patrol)
                 {
                     var destination = enemy.Returning ? enemy.Start : enemy.Patrol;
@@ -192,24 +194,36 @@ namespace VrCommand.Simulation
                 }
                 else if (Behavior == AiBehavior.Advance && target != null && Vec3.Distance(enemy.Feet, Vec3.Flat(target.Head)) > 2)
                     Move(enemy, Vec3.Flat(target.Head));
-                // Presentation metadata only: do not feed this orientation back
-                // into target selection, navigation, cooldown or the shot cast.
-                if (AutoAttack && target != null)
+                var muzzle = enemy.Feet + new Vec3(0, 1.4f, 0);
+                Player? attackTarget = null; Hit? hit = null; var direction = new Vec3();
+                if (AutoAttack && TickNumber >= enemy.NextShot)
                 {
-                    var aim = target.Head - (enemy.Feet + new Vec3(0, 1.4f, 0));
+                    // At most five candidates in this room. A blocked closest
+                    // player must not hide another player whose real cast hits.
+                    foreach (var candidate in targets)
+                    {
+                        var aim = candidate.Head - muzzle; if (aim.Length < .001f) continue;
+                        var candidateHit = Cast(muzzle, aim.Normalized(), range, null, enemy.Id);
+                        if (candidateHit.Kind != HitKind.Friendly || candidateHit.Id != candidate.Id) continue;
+                        attackTarget = candidate; hit = candidateHit; direction = aim.Normalized(); break;
+                    }
+                    enemy.AimTarget = attackTarget?.Id;
+                }
+                // Track the last selected player's current pose during cooldown.
+                // This ID is presentation only: every actual shot casts again.
+                var aimTarget = targets.FirstOrDefault(p => p.Id == enemy.AimTarget) ?? target;
+                if (AutoAttack && aimTarget != null)
+                {
+                    var aim = aimTarget.Head - muzzle;
                     if (aim.Length >= .001f) enemy.Forward = aim.Normalized();
                 }
-                if (!AutoAttack || target == null || TickNumber < enemy.NextShot) continue;
-                var muzzle = enemy.Feet + new Vec3(0, 1.4f, 0); var direction = target.Head - muzzle;
-                if (direction.Length < .001f) continue;
-                var hit = Cast(muzzle, direction.Normalized(), range, null, enemy.Id);
-                if (hit.Kind != HitKind.Friendly || hit.Id != target.Id) continue;
+                if (attackTarget == null || hit == null) continue;
                 enemy.NextShot = TickNumber + 20;
-                Emit(WorldEventKind.EnemyShot, target.Id, null, enemy.Id, origin: muzzle, direction: direction.Normalized(), distance: hit.Distance, hit: hit.Kind, target: hit.Id);
+                Emit(WorldEventKind.EnemyShot, attackTarget.Id, null, enemy.Id, origin: muzzle, direction: direction, distance: hit.Distance, hit: hit.Kind, target: hit.Id);
                 var accepted=events[events.Count-1];
                 enemy.Fire=new EnemyFireState(accepted.Sequence,accepted.Tick+1,accepted.Origin??throw new InvalidOperationException("Accepted shot has no origin."),accepted.Direction??throw new InvalidOperationException("Accepted shot has no direction."));
-                var damage = Math.Min(20, target.Health); target.Health -= damage;
-                Emit(WorldEventKind.PlayerDamaged, target.Id, null, enemy.Id, damage);
+                var damage = Math.Min(20, attackTarget.Health); attackTarget.Health -= damage;
+                Emit(WorldEventKind.PlayerDamaged, attackTarget.Id, null, enemy.Id, damage);
             }
         }
         private void Move(Enemy enemy, Vec3 destination)

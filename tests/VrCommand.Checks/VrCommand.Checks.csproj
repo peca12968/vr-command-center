@@ -3,4 +3,5 @@
   <ItemGroup><ProjectReference Include="../../src/VrCommand.Core/VrCommand.Core.csproj" /><ProjectReference Include="..\..\src\VrCommand.Persistence\VrCommand.Persistence.csproj" /></ItemGroup>
   <ItemGroup><ProjectReference Include="../../src/VrCommand.Simulation/VrCommand.Simulation.csproj" /></ItemGroup>
   <ItemGroup><ProjectReference Include="../../src/VrCommand.Api/VrCommand.Api.csproj" /></ItemGroup>
+  <ItemGroup><Compile Include="../../clients/unity/Assets/VrCommand/Tests/Editor/AiTargetingCases.cs" Link="AiTargetingCases.cs" /></ItemGroup>
 </Project>

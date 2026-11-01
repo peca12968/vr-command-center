@@ -1,5 +1,21 @@
 # 開發進度
 
+## 2026-11-01：AI 受阻後選擇可命中的玩家
+
+從乾淨`5b4ff41`接續第6項，[AI_VISIBLE_TARGETS](AI_VISIBLE_TARGETS.md)修正只嘗試最近玩家的選敵：原同房／connected／存活／天氣日夜射程候選依距離與GUID排序，逐一原Cast，只有真正命中該玩家才接受。仍20tick／20傷害、原槍口、Hold／Patrol／Advance、Pause與0.5／1.5政策，Advance仍朝原最近合格者移動。AimTarget只供冷卻外觀追蹤，每發重新Cast，不改歷史射線、Tracked、wire、schema1／rules0.8.0或素材pin。最多每NPC5候選，完全受阻的Cast量可能增加，沒有據此宣稱25人效能完成。
+
+Unity **0.38.0／code48／NGO29**、API/UI0.30.2；最終fingerprint **0f8287b002f46d0824bf4f3c27a450b672cc7554fdc156a4c238affdcd8f32b0**，原scene／prefab ID一致。Prepare79313、Tests37810、Desktop22837、Quest9574原handle均terminal exit0，**208真正Editor／0skip**；738規則／459 HTTP／47 world-stream、78 Node／255 Chromium與7新Python＋5 snapshot通過。初.NET fixture對nullable射線未明確檢查，CS8629失敗的C build／log保留；修正為pattern確認，採另一新C build，沒有放寬測試。首誤用Windows PowerShell5受執行政策拒絕、未啟動Editor；實際採既有PowerShell7 RemoteSigned，沒有改政策／授權或重裝工具。
+
+真正ArenaSession產生器以六個合法VR地面物件得到NPC(-3,0,-1)與(-3,0,-.25)，玩家原席0／1／2 head在X=-3／-1.5／0、Y1.65、Z-3，原Connect＋有效Pose後才可攻擊。舊來源第1tick健康80／100／100、後NPC無射擊；50個Runtime檔僅換ArenaWorld、Program逐byte相同的副本exit0，健康80／100／80，後NPC首tick選第三位。9個行為案例在.NET與真正Editor共用同一pure fixture，另驗掩體／GUID平手／冷卻重選／Pause停火／射程房間隔離／Advance政策／外觀不改保存射線。
+
+初未Connect、次未Pose候選不能當有效玩家；正確入場的兩人候選，其第二條射線仍被NPC身體邊緣擋住，舊／新不開火合理。這些C來源／log與原兩人native `20261101-145732-14715650` exit1均保留，不稱較遠玩家可見。修正為三人後，舊0.37.2 native `20261101-150050-725e00df`仍exit1、後NPC從未開火，兩場的原戰績／CSV／雙seal及cleanup成功。後續helper另加傷害配對、Pause序號與全回放靜止核對，不能稱native前後完全相同依賴graph；共用來源隔離對照另由相同Program／單Runtime檔提供。
+
+最終新native `20261101-182258-207e5e24`真正exit0／**4項、32全回放／12張已接受Begin後Running／Paused幀**：兩個tick1 EnemyShot及緊接20點傷害、最近玩家仍存活80才後NPC選第三位；三份原admission結果健康80／100／80、中彈1／0／1、CSV／雙seal／三個唯一server ACK、helper SHA前後與cleanup成功。原3玩家全程靜止Simulated／connected、兩NPC Hold原位健康100，無玩家輸入／姿態注入／GPU／PCM；收到時最大來源年齡0.150225秒非RTT。五房 `20261101-182316-77cc9ff6`／8844 exit0，原6項／7場隔離／錯票／重用／後續Linked及精確seal，仍每房1位非25位操作。
+
+新Windows包`windows-player-0.38.0.zip` **82,646,224 bytes／SHA `1f4a27d8ca7b310acfd24a4a018b44449fb73b1c2ac02107ea1af2251ed35d7c`**，311 runtime／原launcher a65846da...，新C展開19項核對／拒絕成功，非完整GUI／跨機。APK **60,330,662 bytes／SHA `7e175d4a4eb566758e454457d17a7adbfac5c615bae184525c2b6ad6ab3d517e`**，0.38.0／48／ARM64／min32 target35、v2簽章成功，無實機安裝。原82,782,417 APK與新檔各105 ZIP項，compressed60,306,850→60,309,211、非索引payload22,475,567→21,451；容器差異不當內容縮減／ELF／性能或唯一Gradle原因，raw不重封裝，receipt totalBytes不是APK大小。兩平台建置結束後才跑新原生，前後不當效能因果對照。
+
+`ai-target-before-validation.json`核對舊327（321binary/log＋6選定來源）archive、50檔Runtime／相同Program、兩失敗native28 runtime／F snapshot、前702 browser／上一場native48／runtime14；`ai-target-delivery-validation.json`新2場40 runtime與F snapshot、新F122，加前失敗F66共188／runtime68，歷史69場3239加4場68為**73場3307 runtime檔**，不是全數重跑。新41 browser與前702保持；原0.30.2 C API134＋三工具各9／Checks96依hash不變，新整組也各自保存，不單換Simulation DLL。全部自有writer停才一次snapshot，保存SQLite不開，原正式5080／舊ZIP與APK均保留。CI結果另補，完整11項active，原31筆／world371／Windows startup／F吞吐與跨機／實機各自未修復。
+
 ## 2026-11-01：雙擊場地定位觀戰鏡頭
 
 從乾淨`2e86a34`接續第9／10項，[OBSERVER_GROUND](OBSERVER_GROUND.md)新增即時觀戰與3D模擬回放的左鍵雙擊場地定位。API／UI **0.30.2**；目前渲染鏡頭射線與Y=0投影，只接受來源實際包含的12m房間，保持角度／距離、target高度0.8m，成功才退出follow。間隙／房外／未包含房間／無效射線不移動；草稿不被改寫，書籤仍明確保存與原身分／場次權限，回放不seek。沒有管理／玩家移動或碰撞規則變更。
