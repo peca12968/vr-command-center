@@ -76,8 +76,8 @@ def validate_input(frame,statistics,initial,identity,stage):
     return {'distanceMeters':distance,'shots':shots,'statistics':metric,'enemyId':target['id'],'enemyHealth':target['health']}
 
 
-def validate_active_replica(snapshot,frame,native,*,server):
-    capacity.validate_replica(snapshot,frame,native,server=server)
+def validate_active_replica(snapshot,frame,native,*,server,environment=None):
+    capacity.validate_replica(snapshot,frame,native,server=server,environment=environment)
     for p in snapshot['actors']:
         if not p['enemy'] and p['fireSequence']!=actor(frame,p['id'])['fireSequence']:
             raise ValueError('Local player fire witness differs from authority')
@@ -120,7 +120,9 @@ def capture(v,entry,native,label,references):
             v.wait(lambda:all((v.probes[n]/f'capture-{number}.json').exists() for n in group),5,'active capture '+label)
             for name in group:
                 snapshot=venue_module.read_json(v.probes[name]/f'capture-{number}.json');error=None
-                try:validate_active_replica(snapshot,reference['packet']['frame'],native,server=name.endswith('-server'))
+                packet=reference['packet']
+                environment=({'Clear':0,'Rain':1,'Fog':2,'Storm':3}[packet['weather']],packet['frame']['night'],packet['lightning'])
+                try:validate_active_replica(snapshot,packet['frame'],native,server=name.endswith('-server'),environment=environment)
                 except ValueError as issue:error=str(issue)
                 v.replica_checks.append({'name':name,'stage':label,'capture':number,'referenceSequence':reference['packet']['sequence'],
                     'authorityTick':reference['packet']['frame']['tick'],'observedTick':snapshot['presentation']['tick'],
@@ -165,6 +167,54 @@ def replay(v,entry,references):
     return {'frames':previous,'matchedReferences':len(matched),'complete':True,'worldContinuityFaults':faults,'continuityPassed':not faults}
 
 
+def validate_operator_packet(value,environment,behavior,fence,minimum_tick):
+    packet=value['packet'];frame=packet['frame']
+    if type(fence) is not int or fence<1 or packet['observedSequence']<fence or packet.get('suspended') is not False \
+        or frame['phase']!='Running' or frame['tick']<minimum_tick:
+        raise ValueError('Operator command has not reached an active source frame')
+    if packet['weather']!=environment['weather'] or packet['lightning']!=environment['lightning'] \
+        or frame['night']!=(environment['timeOfDay']=='Night') or frame['visibility']!=({'Storm':'Storm','Fog':'Fog'}.get(environment['weather'],'Clear')) \
+        or frame['behavior']!=behavior or frame['autoAttack'] is not False:
+        raise ValueError('Source environment or AI differs from the operator command')
+
+
+def validate_enemy_motion(before,after):
+    original={p['id']:p for p in before['enemies']};current={p['id']:p for p in after['enemies']}
+    if len(current)!=len(after['enemies']) or set(current)!=set(original) \
+        or any(current[k]['health']!=p['health'] or current[k]['roomId']!=p['roomId'] for k,p in original.items()):
+        raise ValueError('Operator movement changed the original enemy identities or health')
+    distances={k:sum((current[k]['feet'][axis]-p['feet'][axis])**2 for axis in ('x','y','z'))**.5
+        for k,p in original.items() if p['health']>0}
+    if not distances or any(not math.isfinite(d) for d in distances.values()) or max(distances.values())<=.01:
+        raise ValueError('No live enemy moved under the new operator strategy')
+    return distances
+
+
+def operator_controls(v,entry,environment,behavior,label,references,*,movement=False):
+    before=v.frame(entry,measure=True);minimum_tick=before['packet']['frame']['tick']+(20 if movement else 1)
+    responses=[v.command(entry,'SetEnvironment',environment=environment),
+        v.command(entry,'SetEnemies',enemies={'count':5,'behavior':behavior,'autoAttack':False})]
+    sequences=[r['appliedAtSequence'] for r in responses]
+    if any(r['session']['id']!=entry['id'] or r['duplicate'] is not False for r in responses) or not sequences[0]<sequences[1]:
+        raise ValueError('Operator receipts differ from this new session')
+    fence=sequences[-1]
+    # Save accepted receipts before polling: a timeout must retain the actual fence.
+    witness={'label':label,'environment':environment,'behavior':behavior,'receipts':responses,'acceptedSequence':fence,'applied':None}
+    v.operator_controls.append(witness);v.save('active-operator-controls.json',v.operator_controls)
+    def observed():
+        value=v.frame(entry,measure=True)
+        try:validate_operator_packet(value,environment,behavior,fence,minimum_tick)
+        except ValueError:return None
+        return value
+    value=v.wait(observed,15,'operator source '+label)
+    distances=validate_enemy_motion(before['packet']['frame'],value['packet']['frame']) if movement else None
+    references[value['packet']['sequence']]=value
+    witness['applied']={'sequence':value['packet']['sequence'],'observedSequence':value['packet']['observedSequence'],
+        'tick':value['packet']['frame']['tick'],'enemyMovementMeters':distances}
+    v.save('active-operator-controls.json',v.operator_controls)
+    return value
+
+
 def run(v):
     def check(value,message):
         if not value:raise RuntimeError(message)
@@ -172,7 +222,7 @@ def run(v):
     resources=[]
     def resource():
         value=capacity.memory_status();capacity.require_memory(value);resources.append(value);v.save('active-resources.json',resources)
-    v.active_continuity={};v.start();resource()
+    v.active_continuity={};v.operator_controls=[];v.start();resource()
     mission=v.request('/api/missions',{'name':'Active 25 native peers - Simulation','briefing':'One real PC operator, 24 receiving peers; no headset.',
         'durationSeconds':600,'environment':{'mode':'VR','weather':'Clear','timeOfDay':'Day','lightning':False},
         'enemies':{'count':5,'behavior':'Hold','autoAttack':False},
@@ -209,6 +259,9 @@ def run(v):
     observations=[];accepted=[];next_resource=time.monotonic()+5
     for stage,key in [('move','w'),('shot','space'),('reload','r'),('kill','space')]:
         if stage!='move':v.command(entry,'Resume');v.wait(lambda:v.frame(entry)['packet']['frame']['phase']=='Running',15,'active Resume')
+        if v.args.operator_controls and stage=='shot':
+            operator_controls(v,entry,{'mode':'VR','weather':'Storm','timeOfDay':'Night','lightning':True},'Hold','storm-before-shot',references)
+            check(True,'operator Storm / Night / lightning reaches the running source before real firing and reload')
         v.stage('active-input',action=stage,key=key,acknowledgement=stage+'.done',seconds=v.args.input_timeout)
         def observed():
             nonlocal next_resource
@@ -226,6 +279,15 @@ def run(v):
         scope='all 25 receiving replicas' if v.args.replication_probe else 'authority only (receiver state not observed)'
         check(True,stage+': actual input / authoritative damage / '+scope+' agree; passive players unchanged')
         v.save('active-input-observations.json',observations);v.save('active-input-results.json',accepted)
+    if v.args.operator_controls:
+        for weather,night,behavior in [('Storm',True,'Patrol'),('Fog',False,'Advance')]:
+            label='operator-'+behavior.lower();v.command(entry,'Resume')
+            v.wait(lambda:v.frame(entry)['packet']['frame']['phase']=='Running',15,label+' Resume')
+            operator_controls(v,entry,{'mode':'VR','weather':weather,'timeOfDay':'Night' if night else 'Day','lightning':weather=='Storm'},behavior,label,references,movement=True)
+            v.command(entry,'Pause');frozen=v.wait(lambda:(p if (p:=v.frame(entry,measure=True))['packet']['frame']['phase']=='Paused' else None),15,label+' Pause')
+            validate_input(frozen['packet']['frame'],v.request(f'/api/sessions/{entry["id"]}/statistics'),initial['packet']['frame'],own['id'],'kill')
+            capture(v,entry,native,label,references)
+            check(True,label+': original living enemies move; all replicas retain exact environment / combat and original identities')
     finish(v,[r['name'] for r in native]);sealed=v.seal(entry)
     report=capacity.practice.save_report(v,entry,sealed['statistics']);finish(v,[entry['name']+'-server'])
     v.stage('active-results',players=len(native))
@@ -243,6 +305,7 @@ def run(v):
         'activePlayers':1,'receivingPeers':24,'renderedClients':1,'poseOrWeaponInjected':False,'all25SimultaneouslyActive':False,
         'statistics':accepted[-1]['statistics'],'inputStages':accepted,'replay':playback,'csv':report,'nativeLogFindings':findings,
         'individualResults':results,'acknowledgedResults':len(results),
+        'operatorControls':v.operator_controls if v.args.operator_controls else None,
         'minimumFreePhysicalBytes':min(p['availablePhysicalBytes'] for p in resources),'networkCapacityAccepted':False,
         'localReplicaContinuityChecked':v.args.replication_probe,
         'captureBatch':v.args.capture_batch if v.args.replication_probe else None,
@@ -257,6 +320,7 @@ def main():
     parser.add_argument('--without-replication-probe',action='store_true',help='World/replay control only; does not establish receiving peer state')
     parser.add_argument('--capture-batch',type=int,choices=range(1,27),default=1,help='Bound simultaneous local snapshot IO; 26 recreates fan-out observations')
     parser.add_argument('--input-timeout',type=int,choices=range(15,121),default=30)
+    parser.add_argument('--operator-controls',action='store_true',help='Exercise normal environment / AI commands in the same real-input mission; not an operator UI test')
     parser.add_argument('--api-dll',type=Path,default=Path(os.environ.get('VR_COMMAND_API_DLL',ROOT/'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')))
     parser.add_argument('--player-exe',type=Path,default=Path(os.environ.get('VR_COMMAND_UNITY_PLAYER',ROOT/'artifacts/desktop/VrCommand.exe')))
     args=parser.parse_args();args.duration=600;args.visible_room=3;args.job_workers=2;args.check=False;args.replication_probe=not args.without_replication_probe

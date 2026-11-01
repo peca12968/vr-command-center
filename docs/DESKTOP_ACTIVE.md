@@ -1,5 +1,17 @@
 # 實際 PC 輸入與25端狀態對照
 
+2026-11-01 新增`--operator-controls`：在同一25端任務的實際射擊／換彈前，透過正常管理API切換Storm／Night／lightning／Hold；擊殺後測試Storm／Patrol與Fog／Day／Advance。這不是本輪操作員瀏覽器UI測試，沒有注入玩家動作或敵軍座標。真正13項／182快照／26報告、1359完整回放與25份個別結果／server ack成功，完整證據與限制見[PROGRESS](PROGRESS.md)。
+
+```powershell
+python scripts/check-desktop-active.py --api-dll <目前同版API.dll> --runtime-root "$env:LOCALAPPDATA/VrCommand/SimulationRuns" --input-timeout 40 --operator-controls
+```
+
+每組環境與AI命令先保存兩份原`CommandReceipt`，拒絕外場／duplicate或非遞增接受序號；輪詢要求非suspended、Running、tick前進且`observedSequence>=最後接受序號`，再核對真正來源天氣／日夜／閃電／visibility／behavior／autoAttack。接受不等於套用；逾時仍保留`applied:null`與原回應，不猜Begin或其他場序號。Patrol／Advance從命令前來源基準至少前進20活動tick，原敵軍ID／room／health均保持，至少一個仍活著的敵軍移動>1cm，不能以死敵移動或重生替代策略。
+
+各Pause檢查點仍以實際保存packet為準，比對25個client＋server的weather枚舉／night／lightning、全名冊／連線／姿態／彈藥／健康及敵軍位置／fireSequence；活躍玩家輸入與靜止24人的隔離檢查保持。共用capacity helper只有明確傳入時才接受該組環境，預設仍要求Clear／Day／無閃電，未知枚舉／非bool值拒絕。這是離散檢查點與保存Running樣本，不宣稱連續GPU畫面或每packet到達。
+
+`active-operator-controls.json`保存接受回應及來源首次觀察到符合條件的世界序號／observed／tick／移動量，結果也收錄於`active-result.json`；未選此選項為null，舊缺欄位仍NotRecorded。原default四步流程、40秒UI確認／240秒probe／4096列界線與0.5／1.5秒遊戲政策保持。End、個別結果、精確雙seal／CSV、server ack及全程回放／所有觀察Running列閘門不變。
+
 2026-11-01 同版0.36.1／e059新場10項通過：實際W／Space／R／Space、130快照／26完整報告、1420全回放與25份個別結果／精確雙seal／CSV一致；所有原連線server ack逐一核對後才停程序。仍是一位操作、24接收端、同機Simulation；原逾時與舊失效證據保持，範圍見[PROGRESS](PROGRESS.md)。
 
 `scripts/check-desktop-active.py`使用現有成功的Windows播放器與自己的API、憑證、全新SSD runtime，開一個五房Linked世界、25個原生client。**一位玩家實際操作，24個接收端；不是25位同時移動／射擊，也不是25台或頭盔驗收。** 一個可見視窗由人員或computer-use操作，其餘24端無圖形；合成頭手仍為Simulation。

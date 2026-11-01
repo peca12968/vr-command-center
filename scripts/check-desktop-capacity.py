@@ -94,7 +94,7 @@ class ReplicationVenue(venue_module.Venue):
         return super().launch(name,config,visible,extra_args=extra_args)
 
 
-def validate_replica(snapshot,frame,native,*,server=False):
+def validate_replica(snapshot,frame,native,*,server=False,environment=None):
     phase=frame['phase'];players={p['id']:p for p in frame['players']};connections={p['playerId']:p['nativeConnectionId'] for p in native}
     if not snapshot['listening'] or not snapshot['ready'] or snapshot['phase']!=phase or snapshot['presentation']['phase']!={'Running':1,'Paused':2}[phase]:
         raise ValueError('Replica is not ready in the requested phase')
@@ -102,7 +102,10 @@ def validate_replica(snapshot,frame,native,*,server=False):
     if snapshot.get('packetQueueCapacity')!=(1024 if server else 128) or not 0<snapshot.get('actorListSerializedBytes',0)<=65536:
         raise ValueError('Replica driver capacity / serialized actor evidence differs')
     mask=sum(1<<(r-1) for r in {p['roomId'] for p in players.values()})
-    if snapshot['presentation']['rooms']!=mask or snapshot['presentation']['weather']!=0 or snapshot['presentation']['night'] or snapshot['presentation']['lightning']:
+    weather,night,lightning=(0,False,False) if environment is None else environment
+    if type(weather) is not int or weather not in range(4) or type(night) is not bool or type(lightning) is not bool:
+        raise ValueError('Invalid explicit replica environment')
+    if snapshot['presentation']['rooms']!=mask or snapshot['presentation']['weather']!=weather or snapshot['presentation']['night']!=night or snapshot['presentation']['lightning']!=lightning:
         raise ValueError('Replica environment differs from the capacity mission')
     actors=[p for p in snapshot['actors'] if not p['enemy']];avatars=snapshot['avatars']
     if len(actors)!=len(players) or {p['id'] for p in actors}!=set(players) or len(avatars)!=len(players) or {p['playerId'] for p in avatars}!=set(players):

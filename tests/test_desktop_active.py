@@ -75,6 +75,48 @@ class ActiveTests(unittest.TestCase):
         with self.assertRaises(ValueError):active.validate_input(frame,stats,initial,own,'kill')
 
 
+class OperatorControlsTests(unittest.TestCase):
+    def fixture(self):
+        environment={'mode':'VR','weather':'Storm','timeOfDay':'Night','lightning':True}
+        value={'packet':{'observedSequence':20,'suspended':False,'weather':'Storm','lightning':True,
+            'frame':{'phase':'Running','tick':100,'visibility':'Storm','night':True,'behavior':'Hold','autoAttack':False}}}
+        return value,environment
+
+    def test_source_must_observe_the_real_command_fence_and_active_tick(self):
+        value,environment=self.fixture();active.validate_operator_packet(value,environment,'Hold',20,100)
+        for change in (lambda v:v['packet'].__setitem__('observedSequence',19),lambda v:v['packet'].__setitem__('suspended',True),
+            lambda v:v['packet']['frame'].__setitem__('phase','Paused'),lambda v:v['packet']['frame'].__setitem__('tick',99)):
+            candidate=copy.deepcopy(value);change(candidate)
+            with self.assertRaises(ValueError):active.validate_operator_packet(candidate,environment,'Hold',20,100)
+
+    def test_same_fence_does_not_hide_wrong_environment_ai_or_auto_attack(self):
+        value,environment=self.fixture()
+        for change in (lambda v:v['packet'].__setitem__('weather','Clear'),lambda v:v['packet'].__setitem__('lightning',False),
+            lambda v:v['packet']['frame'].__setitem__('night',False),lambda v:v['packet']['frame'].__setitem__('visibility','Clear'),
+            lambda v:v['packet']['frame'].__setitem__('behavior','Advance'),lambda v:v['packet']['frame'].__setitem__('autoAttack',True)):
+            candidate=copy.deepcopy(value);change(candidate)
+            with self.assertRaises(ValueError):active.validate_operator_packet(candidate,environment,'Hold',20,100)
+
+    def enemies(self):
+        return {'enemies':[{'id':'alive','health':100,'roomId':1,'feet':{'x':0,'y':0,'z':0}},
+            {'id':'dead','health':0,'roomId':3,'feet':{'x':1,'y':0,'z':0}}]}
+
+    def test_actual_live_enemy_motion_is_distinct_from_dead_or_stationary_actor(self):
+        before=self.enemies();after=copy.deepcopy(before)
+        after['enemies'][1]['feet']['x']+=1
+        with self.assertRaises(ValueError):active.validate_enemy_motion(before,after)
+        after['enemies'][0]['feet']['z']+=.1
+        self.assertEqual(active.validate_enemy_motion(before,after),{'alive':.1})
+
+    def test_movement_cannot_hide_respawn_roster_health_or_room_change(self):
+        before=self.enemies();after=copy.deepcopy(before);after['enemies'][0]['feet']['x']+=.1
+        for change in (lambda v:v['enemies'][0].__setitem__('id','replacement'),lambda v:v['enemies'][1].__setitem__('health',100),
+            lambda v:v['enemies'][0].__setitem__('roomId',2),lambda v:v['enemies'].append(copy.deepcopy(v['enemies'][0])),
+            lambda v:v['enemies'][0]['feet'].__setitem__('x',float('nan'))):
+            candidate=copy.deepcopy(after);change(candidate)
+            with self.assertRaises(ValueError):active.validate_enemy_motion(before,candidate)
+
+
 class FinalResultsTests(unittest.TestCase):
     def fixture(self):
         frame,statistics,_,_=ActiveTests().fixture()

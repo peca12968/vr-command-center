@@ -1,5 +1,7 @@
 # 開發指引
 
+2026-11-01 動態管理命令見docs/DESKTOP_ACTIVE.md／PROGRESS：operator-controls明確選用，正常API雨夜Hold射擊／換彈後Patrol與Fog Day Advance，非本輪操作員UI／autoAttack傷害。先存兩份receipt，非duplicate／同session／遞增，來源需Running／非suspended／tick前進及observed>=接受序號、環境／AI完整相符；不能接受當套用。原敵軍ID／room／health保持、只算活敵>1cm移動。33469 exit0，13項／182快照／26 Requested報告、28204 Running列及1359全回放／12參考成功；25原結果／CSV／雙seal／server ack精確world1359 combat5 through52。最晚145.318秒／最多1134列，原240／4096與0.5／1.5政策保持；0.5542095觀察tick gap非RTT／PoseSend。46 Python，capacity預設Clear Day保持、只有明確參數才動態環境。新C300／前48 runtime1727、新F383及前F337／動態1138／原反例／獨立／history321與各API159及當前ZIP APK receipt保持；writer停才snapshot，保存SQLite不開。仍一位操作24接收、無霧天人工GPU、非25人同時操作；Unity0.36.1 code44／NGO29／API UI0.30及原179雙平台不變，完整11項active，原31筆／F吞吐／實機／跨機另驗。
+
 2026-11-01 修正8d2227a／CI41258070247 job124705387031完整success，717／459／47、全部Python／素材與67 Node／235 Chromium成功；watch73920 exit0。37檔artifact13063049447及log新目錄保存／hash、前55本機與失敗CI檔保持；原console42檔封存核對。明確bringToFront、camera與clock各60秒來源，原30秒截圖及政策不改，原失敗CI保持，非Chromium根因證明。版本／原179 Unity雙平台保持，僅文件證據提交skip ci，完整11項active；M0舊帳務阻擋為歷史而非最新狀態。
 
 2026-11-01 瀏覽器fixture見PROGRESS：b906 CI41256605682真正執行717／459／47及67 Node，第二分頁截圖30秒逾時exit1，非帳務阻擋；原log與13檔artifact保留。測試明確bringToFront，camera流程與capture-clock／中斷各用自己的60秒relay、確認新場Running／程序活著，不提高上限／跳斷言／改UI API或0.5／1.5政策。本機67 Node／235 Chromium成功，原console42檔hash封存；後續修正CI另記，無新Unity／APK／179 Editor，完整11項active。

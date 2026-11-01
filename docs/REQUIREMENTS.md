@@ -1,5 +1,7 @@
 # 需求與驗收追蹤
 
+第1／5／6／9／10／11項新增[25端動態任務中的管理命令](DESKTOP_ACTIVE.md)：同場雨夜射擊／換彈、Patrol及Fog Day Advance，接受序號另對到Running來源observed，原敵軍身分／健康保持且活敵實際移動；13項／182快照／1359回放與25份戰績／server ack成功。46 Python與保存資料核對見PROGRESS；不是本輪操作員UI／自動攻擊／頭盔或25人同時操作，完整11項active。
+
 第1／2／9／10／11項新增[動態PC與結果送達](DESKTOP_ACTIVE.md)：最終同版10項、130快照／26報告及1420全回放，主玩家2發2中1殺／100%，其他24位不受其輸入影響；25份原admission個別結果／CSV／雙seal及server ack精確核對。57 Python與原逾時保存見PROGRESS；仍一位操作、同機Simulation，原31筆與實機／25人同時操作未完成，11項active。
 
 第1／5／6／9／10／11項新增[0.36.1五房長場](DESKTOP_INDEPENDENT_LONG.md)：每房5位、各900秒及獨立環境／Pause／End，42341全回放／209420人次、25份原admission結果／CSV與雙seal成功。新獨立格式讀回與60 Python證據見PROGRESS，沒有新Unity建置或頭盔／25台／跨機／動態操作驗收，原31筆與慢碟未修復，11項active。

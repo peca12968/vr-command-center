@@ -55,6 +55,20 @@ class CapacityTests(unittest.TestCase):
         snapshot['packetQueueCapacity']=128
         with self.assertRaises(ValueError):capacity.validate_replica(snapshot,frame,native)
 
+    def test_explicit_environment_matches_actual_replica_without_relaxing_default(self):
+        snapshot,frame,native=self.replica()
+        for weather,night,lightning in ((3,True,True),(2,False,False),(1,False,False)):
+            snapshot['presentation'].update(weather=weather,night=night,lightning=lightning)
+            capacity.validate_replica(snapshot,frame,native,environment=(weather,night,lightning))
+            with self.assertRaises(ValueError):capacity.validate_replica(snapshot,frame,native)
+            with self.assertRaises(ValueError):capacity.validate_replica(snapshot,frame,native,environment=(weather,not night,lightning))
+            with self.assertRaises(ValueError):capacity.validate_replica(snapshot,frame,native,environment=(weather,night,not lightning))
+
+    def test_unknown_or_untyped_expected_environment_cannot_override_replica_checks(self):
+        snapshot,frame,native=self.replica()
+        for environment in ((4,False,False),(True,False,False),(0,0,False),(0,False,1)):
+            with self.assertRaises(ValueError):capacity.validate_replica(snapshot,frame,native,environment=environment)
+
     def test_replica_rejects_wrong_owner_connection_stale_tick_and_nonfinite_pose(self):
         snapshot,frame,native=self.replica()
         for change in (lambda s:s.__setitem__('localConnection',25),lambda s:s['avatars'][3].__setitem__('connection',1),

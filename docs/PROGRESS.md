@@ -1,5 +1,31 @@
 # 開發進度
 
+## 2026-11-01：25端動態任務中的環境與AI管理命令
+
+上一輪為實際進展，從乾淨`cf3c8b4`接續；新增[動態PC選用流程](DESKTOP_ACTIVE.md)。**API/UI0.30、Unity0.36.1／code44／NGO29、e0594513140ff7fb4bc084929691b91c15f7d908e8f59c114aa5ab27daaf11eb與原scene／prefab ID、rules0.8.0保持**，只有Python驗收及文件修改，沒有新Unity／APK／launcher、179 Editor或本機.NET建置。既有雙平台receipt保持；正式5080不動。
+
+舊動態工具只驗Clear／Day／Hold，本輪新增明確`--operator-controls`，在實際W後、Space／R／Space前切Storm／Night／lightning／Hold，擊殺後切Storm／Patrol及Fog／Day／Advance；全程autoAttack=false以保留原動作隔離與健康基線。管理命令走正常API，玩家鍵盤走computer-use，沒有REST／RPC／UDP注入姿態、命中、座標或統計；**這輪沒有重跑操作員瀏覽器UI或自動攻擊傷害**，相關舊證據仍分開。
+
+原生場`desktop-active/20261101-085537-4eed0a0f`，**原handle33469真正exit0、13項成功、cleanup errors／remaining皆空**。一個server＋25個Windows native client，仍一位實際操作、24個無圖形接收端；source／binary在F，runtime明確C SSD、headsets0／hosts1／all25SimultaneouslyActive及networkCapacityAccepted=false。
+
+| 管理命令組 | 保存接受序號 | 第一個符合條件的來源幀／observed／tick | 真正策略移動 |
+|---|---|---|---|
+| Storm／Night／lightning／Hold，射擊前 | 31、32 | world391／32／483 | 不要求移動，保留原射線目標 |
+| Storm／Night／lightning／Patrol，擊殺後 | 44、45 | world1249／45／2043 | 原四個活敵各移動約1.300001m |
+| Fog／Day／無閃電／Advance | 48、49 | world1305／49／2075 | 原四個活敵各移動約0.699999m |
+
+兩份CommandReceipt先保存後輪詢，拒絕外場／duplicate／非遞增；來源必須非suspended、Running、tick前進、observed>=接受序號，且天氣／日夜／閃電／visibility／behavior／autoAttack相符。Patrol／Advance另外從命令前來源基準前進至少20 tick，原五敵ID／room／health完全保持，包括原room3死亡目標不復活；只算仍活敵的移動，不由死敵、重生或目前名冊猜測套用。`active-operator-controls.json`保存原回應及來源witness，逾時保留applied:null；這是輪詢首次符合條件的觀察，不是精確命令套用時間／RTT。
+
+七個檢查點（initial／四動作／Patrol／Advance）共**182快照／26 Requested完整報告、28204觀察Running列**無失效。每個快照核對來源packet實際環境與25原連線／全名冊／姿態／彈藥／健康、敵軍位置與fireSequence。最晚145.318062秒finish、最多1134列，原240秒／4096列界線保持。相鄰觀察Running新tick最大間隔0.5542095秒，非RTT／FPS／精確PoseSend間隔；原0.5秒姿態與1.5秒世界政策未改，不能由此數值推根因或宣稱連續畫面。
+
+實際W短移動、雨夜第一發命中／R後30彈匣89備彈／第二發擊殺成功；主玩家2發2中1殺／100%，中彈與損耗0、健康100；其餘24位未受其輸入改動。25份原admission個別結果／CSV與combat及world精確雙seal一致，**world1359／combat5／ledger through52**，server25唯一ack集合精確對到原nativeConnectionId、沒有timeout／queue error。原probe先finish／server seal後finish、結果確認後才停程序的順序保持。
+
+End後完整API回放**1359連續幀／12參考**精確一致，參考區間每張保存Running世界幀與所有觀察Running列均無參戰失效；這是保存及觀察到的樣本，非25位同時操作或任意負載證明。源環境與接收端為離散檢查點，不把管理接受當連續渲染證明。computer-use兩次get_window_state回報active request：第一次等待後重新取得雨夜畫面才射擊；後一次重試回報foreground未有PID、當時進入結果／收尾階段，沒有再輸入或推定原因，**沒有霧天人工GPU畫面證據**。未保存／解碼CUA截圖payload。
+
+新增4 active＋2 capacity反例，含舊observed／Paused／suspended／未前進tick、正確fence但錯天氣／visibility／策略／autoAttack、死敵或靜止不能當移動、換敵／重生／換房／非有限移動、明確環境不放寬舊預設與未知枚舉／非bool拒絕。**21 active＋13 capacity＋12 debrief，共46本機Python通過**，語法及diff成功；既有CI入口涵蓋新案例。
+
+`active-operator-runtime-validation.json`在原33469 terminal後核對新C runtime300檔／F snapshot完全一致，前48 runtime1727檔／前F337、前四動態F1138、原尾界反例與獨立房F證據、history321及各API159保持。總49 C runtime2027檔，新場F383檔另存hash；當前ZIP／APK／receipt metadata保持。所有writer全停才一次snapshot，C原件不動，保存SQLite只rb雜湊、不開連線／ack修復／截尾。完整11項active，原31筆／F發布吞吐、頭盔／MR／VIVE／跨機25台與廠商硬體仍各自待驗。
+
 ## 2026-11-01：同版動態PC與25份最終結果／server ack
 
 上一輪為實際進展；從乾淨 `8938968` 接續[動態PC流程](DESKTOP_ACTIVE.md)。**API/UI0.30、Unity0.36.1／code44／NGO29與e0594513140ff7fb4bc084929691b91c15f7d908e8f59c114aa5ab27daaf11eb保持**。原生階段只有Python驗收／文件修改，沒有重建或重跑原179 Editor／雙平台／APK／launcher；後續雲端.NET及瀏覽器測試修正結果見下文。原scene／prefab／rules0.8.0／Tracked與0.5／1.5秒政策保持，正式5080不動。
