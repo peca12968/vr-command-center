@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-02：首長場來源CI的鏡頭讀取等待失敗
+
+來源7edb160的[CI41358528198](https://github.com/peca12968/vr-command-center/actions/runs/41358528198)／job125003707285 **failure**：Linux772核心／459 HTTP／47 world、6 pipe／38硬體離線CLI、Python含14 exercise／素材與89 Node已成功，2 Windows限定skip；瀏覽器在world-browser.cjs:131等待刻意stalled camera read的refresh按鈕恢復，原15000ms逾時，未完成296項，不當完整成功。
+
+原console17（art13104158516／ZIP4239456／SHA8e52a5d860f58c3951ba9ec34d8adca4c5177d1442308951d97db1970a521a35）、control13（13104795827／3918／9d47fcb6ac0d997ea42dbf3201621d01b11a3af0b531f5649397302ab7845fe9）、hardware26（13104566898／22343／db32b3f06bf7511389f7aa9477185d5b04dd1581087bc39a457781c501562197）與decoded log SHA6ef00e0f85da8b2982d9efe42b102de9622ebdad9830a3fe7e454a06461c9055已另存、ZIP digest／大小／逐檔hash核對，前88CI檔保持。1562＋17＝1579 browser檔；本機原生仍是原handle51871／同源5d2e，沒有因CI觀察失敗重啟或提前snapshot。
+
+原失敗沒有該等待點的控制狀態，不能證RAF／timer／產品根因。只把同一DOM按鈕謂詞改為polling100，保留15000ms與原集合／錯誤斷言；新增最多4列visibility／focus／disabled／error-class／option-count及caller單調時間，不含input／headers／body／key。失敗最多5秒圖後原錯重拋，held GET於finally釋放；不改產品JS／API、路由、API期限或錄影政策。node syntax通過，雲端結果另記；不在25端長場旁另跑本機Chromium／新建置。原完整11active與舊31／371等反例保持。
+
 ## 2026-11-02：長場生成輸入已建置，900秒兩模式驗證進行中
 
 新增[獨立長場旗標](DESKTOP_ENDURANCE.md)，Unity0.41.0／code51／NGO29、238真正Editor／0skip與同源5d2ebd2a...Windows／ARM64、原Scene／prefab ID保持。每20秒fire／reload／fire，45循環最多90發／45換彈，仍走原Move／RPC／彈藥；漏循環失敗不追補。長場19000活動tick／1200收集秒與原短1200／240分開，原0.5／1.5政策保持。14 exercise（新3）／27 active／5 artifact Python及3錯CLI模式拒絕成功；沒有後端產品／UI／rules／wire改動。

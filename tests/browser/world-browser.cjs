@@ -127,11 +127,33 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await remembered.route('**/world/cameras', async route => {
       const response = await route.fetch(); readAccepted(); await readGate; await route.fulfill({ response }).catch(() => {});
     });
-    await remembered.locator('#camera-refresh').click(); await requestedRead;
-    await remembered.waitForFunction(() => !document.querySelector('#camera-refresh').disabled, null, { timeout: 15000 });
-    check(await remembered.locator('#camera-message').evaluate(node => node.classList.contains('replay-error')) && await remembered.locator('#camera-positions option').count() === 1,
-      'A stalled camera read times out, retains the last known collection and allows a new read');
-    releaseRead(); await remembered.unroute('**/world/cameras');
+    const stalledReadStates = [], stalledReadStart = process.hrtime.bigint(); let stalledReadComplete = false;
+    async function stalledReadState(stage) {
+      const state = await remembered.evaluate(() => ({ visibility: document.visibilityState, focused: document.hasFocus(),
+        disabled: document.querySelector('#camera-refresh').disabled,
+        error: document.querySelector('#camera-message').classList.contains('replay-error'),
+        optionCount: document.querySelector('#camera-positions').options.length }));
+      stalledReadStates.push({ stage, elapsedMilliseconds: Number(process.hrtime.bigint() - stalledReadStart) / 1e6, ...state });
+    }
+    try {
+      await stalledReadState('before-click');
+      await remembered.locator('#camera-refresh').click(); await requestedRead;
+      await stalledReadState('response-held');
+      // This is a DOM/control wait; it does not need the renderer's animation clock.
+      await remembered.waitForFunction(() => !document.querySelector('#camera-refresh').disabled, null, { polling: 100, timeout: 15000 });
+      await stalledReadState('button-enabled');
+      check(await remembered.locator('#camera-message').evaluate(node => node.classList.contains('replay-error')) && await remembered.locator('#camera-positions option').count() === 1,
+        'A stalled camera read times out, retains the last known collection and allows a new read');
+      stalledReadComplete = true;
+    } catch (error) {
+      await stalledReadState('failure').catch(() => {});
+      await remembered.screenshot({ path: path.join(screenshots, 'world-camera-stalled-read-failure.png'), fullPage: true, timeout: 5000 }).catch(() => {});
+      throw error;
+    } finally {
+      releaseRead(); await remembered.unroute('**/world/cameras');
+      await fs.writeFile(path.join(screenshots, 'world-camera-stalled-read.json'), JSON.stringify({ complete: stalledReadComplete, maximumRows: 4,
+        scope: 'Bounded control-state metadata only; no input values, headers, bodies, credentials or cause proof', states: stalledReadStates }, null, 2));
+    }
     let releaseSave, saveAccepted;
     const saveGate = new Promise(resolve => { releaseSave = resolve; }), accepted = new Promise(resolve => { saveAccepted = resolve; });
     await remembered.route('**/world/cameras/*', async route => {
