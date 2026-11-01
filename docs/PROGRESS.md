@@ -1,5 +1,18 @@
 # 開發進度
 
+## 2026-11-02：多客戶端動態來源的完整雲端驗證
+
+功能來源 **a4ff77c95553d04cfa90bfb33bd6cce55dcc0679** 的 [CI41354866315](https://github.com/peca12968/vr-command-center/actions/runs/41354866315)／job124992675470完整 **success**。Linux建置、772核心／459 HTTP／47 world、6 private pipe／38實際API＋.NET硬體離線CLI、全部Python（含新7項exercise）／素材、89 Node／296 Chromium成功。2個Windows限定skip不當Unity、Editor、Windows原生／啟動器GUI、頭盔或實體硬體證據。
+
+- console49檔，artifact13102913618，ZIP **12,020,478 bytes／SHA256 4c090653090f17dca468b835df73398afafae73334822d7ffdbec307ca66b436**。
+- control13檔，artifact13102684674，ZIP **3,918 bytes／SHA256 019f7e70600567a6f3fbab7994324b73479a950fbadea822d45ad02398a93515**。
+- hardware26檔，artifact13103435263，ZIP **22,396 bytes／SHA256 fcb79042cf36c25d03b98dfd13307135383f9fdf66a0b79df2b6c0ce7e912134**。
+- decoded job log另存，SHA256 **22deb5e4e9dc2066d79ed3d414862aa2882582da9823f0e582f7ff9f7e2183c8**；ZIP均與GitHub digest／大小相符，逐檔hash及前輪88檔／3ZIP核對成功。
+
+原1464＋本次49＝**1513 browser檔**；control13／hardware26、既有nativeUI7與本輪serverUI2分開計數。這不是新增本機完整瀏覽器或新一輪原生遊戲。Unity0.40.0／code50／231真正Editor、6098b485...同源雙平台、18項／1951回放及兩個失敗fixture、default8／355、server包106／725／10原結果、玩家包19均保持原證據；原生數字不由Linux CI取代。
+
+新C340／F與326份舊binary／source archive、666來源snapshot、舊75硬體及117／274／163／327 raw、9管理／5舊server／歷史玩家ZIP保持，保存SQLite不開。current0.40 APK與歷史0.39 APK分開保存。後續僅文件提交使用skip ci，測試精確來源a4ff77c；完整11項長期目標仍active，舊31筆／world371／startup／F吞吐／PickerHost GUI，以及跨機／25位真人、頭盔／MR／廠商硬體均未改判。
+
 ## 2026-11-02：原生多客戶端產生移動／射擊／換彈
 
 新增[Windows batch Client短動態輸入](DESKTOP_EXERCISE.md)，Unity **0.40.0／code50／NGO29**，API0.31.0／UI0.31.2保持。明確新旗標／新目錄才啟用，只接受Windows Development batch Client且無XR，原桌面Move／Constrain與SubmitPose／SubmitWeapon RPC、簡報／Ready／Running及原伺服器門檻保持，沒有test RPC或直接寫server pose。40tick反向／0.4m/s約0.8m幅度、相對20／60／120tick的fire／reload／fire；只計真正呼叫原武器RPC的嘗試，接受另核對。60秒活動tick／240秒總窗口、finish／退出與owner／clock錯誤有界，不把report.complete當任務成功；普通啟動無元件，Tracked不搬動。

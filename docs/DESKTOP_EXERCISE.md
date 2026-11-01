@@ -1,5 +1,7 @@
 # 原生多客戶端自動化動態驗證
 
+功能提交a4ff77c的[CI41354866315](https://github.com/peca12968/vr-command-center/actions/runs/41354866315)完整success：772核心／459 HTTP／47 world、6 pipe／38硬體離線CLI、Python含7新exercise／素材、89 Node／296 Chromium。2 Windows限定skip不代替本文件原生／231 Editor證據；console49、control13、hardware26及decoded log的精確hash見[PROGRESS](PROGRESS.md)，前88 CI檔保持。1464＋49＝1513 browser，nativeUI7及本輪serverUI2另列。後續文件skip ci，測試精確來源a4ff77c。
+
 Unity **0.40.0／Android code50／NGO29** 新增明確選用的Windows Development batch Client輸入模式，讓每個原生客戶端透過既有桌面移動及武器意圖路徑執行短測試。它產生的是 **AutomatedSimulation**，不是實體鍵盤、25位真人、頭盔追蹤、LAN或網路容量驗收。
 
 ```powershell
