@@ -69,10 +69,24 @@ async function api(path, method = 'GET', body, requestId, admissionId) {
     return content ? JSON.parse(content) : null;
   } finally { clearTimeout(timeout); }
 }
-async function run(action) {
+async function run(action, independentRead = false) {
   if (state.busy) return;
+  const epoch = state.epoch; let refreshFailed = false;
   state.busy = true; applyPermissions();
-  try { if (state.refreshPromise) await state.refreshPromise; await action(); }
+  try {
+    if (state.refreshPromise) {
+      try { await state.refreshPromise; }
+      catch (error) {
+        // Only explicit mission GETs may recover from an unrelated transport / 5xx
+        // failure. Writes, authentication failures and a changed login stay fenced.
+        if (!independentRead || epoch !== state.epoch || !state.actor || (error.status && error.status < 500)) throw error;
+        refreshFailed = true;
+      }
+    }
+    if (independentRead && (epoch !== state.epoch || !state.actor)) return;
+    await action();
+    if (refreshFailed && epoch === state.epoch && state.actor) notify('已讀取任務；背景列表更新失敗，請稍後重新整理。', true);
+  }
   catch (error) { notify(error.status ? error.message : '連線或操作結果未確認，請重新整理查看。' + (state.pending ? ' 可使用「重試確認結果」確認原命令。' : ''), true); }
   finally { state.busy = false; applyPermissions(); }
 }
@@ -455,8 +469,8 @@ submit('clock-form', () => command('SetMissionClock', { missionClock: { autoEnd:
 $('reload-clock').addEventListener('click', loadClock);
 $('clock-auto-end').addEventListener('change', () => { state.clockSequence = state.session?.sequence; });
 submit('mission-form', saveMission);
-$('load-mission').addEventListener('click', () => run(() => loadDraft()));
-$('load-version').addEventListener('click', () => run(() => loadDraft($('mission-version').value, true)));
+$('load-mission').addEventListener('click', () => run(() => loadDraft(), true));
+$('load-version').addEventListener('click', () => run(() => loadDraft($('mission-version').value, true), true));
 $('more-versions').addEventListener('click', () => run(async () => {
   if (!state.history?.nextBefore) return;
   const previous = state.history, epoch = state.epoch;
@@ -464,7 +478,7 @@ $('more-versions').addEventListener('click', () => run(async () => {
   if (epoch !== state.epoch || state.history !== previous) return;
   history.versions = [...previous.versions, ...history.versions.filter(row => !previous.versions.some(old => old.id === row.id))];
   state.history = history; renderHistory(); draftStatus();
-}));
+}, true));
 $('save-revision').addEventListener('click', () => { if ($('mission-form').reportValidity()) run(() => saveMission(true)); });
 $('launch-version').addEventListener('click', () => {
   if (!state.draftBase || state.pending || state.busy) return;

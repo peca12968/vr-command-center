@@ -1,5 +1,27 @@
 # 開發進度
 
+## 2026-11-01：任務版本讀取不再被背景刷新失敗取消
+
+上一輪屬實際進展，從乾淨`ada9eee`接續完整11項目標的第8項。[MISSION_READ_RECOVERY](MISSION_READ_RECOVERY.md)更新API／UI **0.30.1**，任務／世界格式、rules0.8.0、NGO29、Unity0.36.1／code44／e0594513...與原scene／prefab ID／179真正Editor及雙平台receipt保持。本輪沒有Unity／APK／launcher重建，正式5080不動；新.NET輸出在C的新BuildRuns，F來源及既有C copies／Windows／Quest原件不覆寫。
+
+舊`run`等待共用refreshPromise，一旦列表刷新失敗便在action前退出。先用真正隔離API0.30.0／Chromium重現：handle46558 terminal exit1，受控catalog503後第一版已選、草稿仍第二版，未發出所選history GET，30秒DOM等待失敗。這是新受控證據，不是原c71 CI歷史載入逾時的根因證明。
+
+只有載入最新版／選定版本／歷史分頁三個明確GET入口選用independentRead：等正在進行的刷新後，原epoch／actor且非HTTP狀態錯誤或5xx可以繼續重新讀history／version；成功仍警告背景列表未更新。401／403／其他4xx不恢復，登出／epoch變更取消尚未發出的讀取。版本本身503保留舊草稿，不取快取或別版。建立／修訂、場次命令、名冊、pending、原UUID／expectedSequence及認證權限保持。三個原生工具API gate同步0.30.1，沒有修改姿態、武器或錄影政策。
+
+新專項handle兩次均exit0：先10項、擴充15項（含原shell2項／情境13項）；真API22個不可變版本、20＋2分頁，受控503／transport／403／401、選定history503、寫入零發出、登出不恢復及警告皆通過。focused檢查有自己的scope，不能當完整回歸。最多256筆方法／path metadata，截斷不得成功，不記headers／key／payload；新目錄拒絕覆蓋。
+
+本機完整handle51663 terminal exit1：72 Node成功，後在原weather night複合斷言失敗，未到新讀取情境。保留weather-first-rain（tick20／sun0.08／非flash）及原畫面／log，該複合斷言沒有同時保存三個條件，不能證明唯一原因。fixture改為排除child啟動前已有session、只取新來源，並在單次JS觀察中同時確認選中錄影／rain128／nonflash／sun0.08／非原始音軌提示，保存night DTO及descriptor；原斷言與時間／天氣政策不放寬。最終handle98198 terminal exit0：**72 Node／248完整Chromium**成功（原235＋新13），39個畫面／資料檔。API／WorldRelay／Checks均指向同次C建置，不混root舊輸出；未將軟體WebGL當原生GPU。
+
+`.NET restore --locked-mode`／build成功、0警告0錯誤，717規則與47 world streaming（handle24781 exit0）成功；5 artifacts＋27 active＋13 capacity＝45 Python、三個工具py_compile／兩個CJS syntax及diff-check成功。**本機完整HTTP沒有通過**：handle93770及49590在invalid credential子程序10秒退出等待逾時，未放寬期限。各自finally停止自己的Popen，後續同build程序清查沒有殘留。
+
+為辨識啟動現象，自己的weak-key API在5秒觀察仍live、log已有Unhandled InvalidOperationException，原handle明確停止／terminal。曾做兩個未發布候選：捕捉後return＋exitCode仍live，explicitExit單次0.921秒exit1，但完整HTTP handle99746在第二個invalid credential仍10秒逾時，另有temp server.log清理Win32共享拒絕。這不足以證明整體修復，**已撤回兩種auth候選**，候選原C build／Program快照／probe及失敗log保留；不刪除殘件、不改ACL／Windows設定。最終Program的SHA與第一0.30.1候選精確相同，原憑證拒絕實作保持，不能稱Windows startup／本機459 HTTP成功或猜WER／防毒／檔案系統根因。
+
+真正遊戲回歸handle37885 terminal exit0，`unity-admission/20261101-110701-fe372a4b` **8項／355幀**，驗票／撤銷／重連、接受來源與精確seal／cleanup成功；沒有輸入／姿態注入、沒有新trace。這是最終採用的第一API候選及原遊戲binary，同機Simulation／非互動／headsets0，不是實際Reconnect按鈕或25台證據。
+
+`mission-read-runtime-validation.json`在全部自有handle terminal後只讀raw：新C runtime14檔／一次F snapshot一致、新F43檔；前54 C runtime2967／各F snapshot與前observer F264、UI1042／動態1138／operator383／F337／history321、原尾界及獨立房、API原三組各159、當前ZIP／APK／receipt及舊ZIP保持。總55 C runtime2981檔。三個.NET候選各API＋三工具159檔與Checks95檔均另存雜湊，只有第一候選採用；五個新瀏覽器目錄3／2／2／19／39共65檔，前失敗／成功不覆寫。Startup三份關閉raw log及HTTP temp殘留log已逐byte另存F並核對hash；暫存清理曾部分失敗，不宣稱保留完整HTTP temp，原殘件不刪／不解鎖。保存SQLite不開連線，native writer全停才snapshot。
+
+雲端CI結果於完成後補記。完整11項active，原31筆／world371、Windows startup與原CI時序問題、F吞吐及跨機／Quest／VIVE／MR／廠商硬體仍各自待驗；本輪不把受控修正當所有歷史逾時修復。
+
 ## 2026-11-01：25端零按鍵視窗觀察與同場心跳對照
 
 從乾淨`7bc82a1`接續，詳見[OBSERVER_TIMING](OBSERVER_TIMING.md)。API/UI0.30、Unity0.36.1／code44／NGO29、e0594513140ff7fb4bc084929691b91c15f7d908e8f59c114aa5ab27daaf11eb、原scene／prefab／rules0.8.0保持；本輪Python／文件，沒有Unity、APK、launcher或產品.NET重建，也沒有重跑原179 Editor。正式5080與原雙平台receipt保持。

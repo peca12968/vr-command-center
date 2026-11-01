@@ -1,5 +1,7 @@
 # 長期開發目標
 
+2026-11-01 [任務版本讀取恢復](MISSION_READ_RECOVERY.md)：API／UI0.30.1，背景傳輸／5xx失敗不連帶取消明確任務GET，401／403／登出及寫入限制保持。舊版受控503先失敗，新專項15／完整248 Chromium、72 Node、717規則／47串流及原生8項355幀成功；本機完整HTTP啟動拒絕逾時另保留，未當全部通過或前CI根因。Unity0.36.1／原179雙平台不變，完整11項active。
+
 2026-11-01 [PC無按鍵觀察](OBSERVER_TIMING.md)：25接收端／12外部觀察，原8項52快照／26報告28237 Running、1153全回放與25份精確結果成功；983保存幀後補stationary guard讀回成功。時鐘／coverage不合為null，各point裁切聯集不相加，不把呼叫括號當GPU或因果；65 Python、版本／原179及雙平台保持，舊31筆／新371未修復，完整11項active。
 
 2026-11-01 [控制台表單＋動態25端](DESKTOP_ACTIVE.md)：operator-ui六個真正表單命令、正確W／Space／R／Space，最終14項／182快照、21121 Running列、1132全回放／25份結果及server ack成功。但首場1271回放的world371一位參戰失效、26份複本觀察失效仍exit1；另API啟動及操作確認逾時保留。新增只server／visible的稀疏診斷，不將乾淨場或最大gap當根因修復；52 Python／72 Node，遊戲版本／179雙平台保持，完整11項active。

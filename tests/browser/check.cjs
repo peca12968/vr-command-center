@@ -56,6 +56,11 @@ async function main() {
     diagnosticPage = page;
     function captureErrors(target) { target.on('pageerror', error => browserErrors.push(error.message)); target.on('console', message => { if (/Content Security Policy|violates.*directive/i.test(message.text())) browserErrors.push(message.text()); }); }
     captureErrors(page);
+    if (process.argv.includes('--mission-read-only')) {
+      await require('./mission-read-recovery.cjs')({ context, api, tokens, base, screenshots, check });
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), playwright: require('playwright/package.json').version, result: 'passed', scope: 'focused mission read recovery only; isolated API and Chromium, no Unity or headset' }, null, 2));
+      console.log(`PASS: ${checks} focused mission-read checks. Screenshots: ${screenshots}`); return;
+    }
     await page.goto(base + '/console/');
     await page.locator('#login-key').fill('wrong-key'); await page.locator('#login-form button').click();
     await page.locator('#notice.error').waitFor();
@@ -316,6 +321,8 @@ async function main() {
     await require('./clock-browser.cjs')({ context, api, tokens, base, mission, screenshots, check });
     await require('./readiness-browser.cjs')({ context, api, tokens, base, mission, screenshots, check });
     await require('./connection-browser.cjs')({ context, api, tokens, base, mission, screenshots, check });
+    await require('./mission-read-recovery.cjs')({ context, api, tokens, base, screenshots, check });
+    await page.bringToFront();
     let releaseReplay, requestedReplay;
     const replayGate = new Promise(resolve => { releaseReplay = resolve; }), replayRequested = new Promise(resolve => { requestedReplay = resolve; });
     await page.route('**/console/examples/simulation.json', async route => { requestedReplay(); await replayGate; await route.continue(); });

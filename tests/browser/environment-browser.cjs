@@ -3,6 +3,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 
 module.exports = async function environmentBrowser({ page, api, tokens, directory, root, base, screenshots, check }) {
+  const previousSessions = new Set((await api('/world-recordings')).map(row => row.header.sessionId));
   const keys = path.join(directory, 'environment-keys.json'), recording = path.join(directory, 'environment.ndjson');
   await fs.writeFile(keys, JSON.stringify({ OperatorKeys: tokens }));
   const relay = process.env.VR_COMMAND_WORLD_RELAY_DLL || path.join(root, 'tools/VrCommand.WorldRelay/bin/Release/net10.0/VrCommand.WorldRelay.dll');
@@ -12,7 +13,7 @@ module.exports = async function environmentBrowser({ page, api, tokens, director
   try {
     let info;
     for (let attempt = 0; attempt < 150; attempt++) {
-      info = (await api('/world-recordings')).find(row => row.header.roomIds.includes(4) && row.acceptedSequence > 3);
+      info = (await api('/world-recordings')).find(row => !previousSessions.has(row.header.sessionId) && row.header.roomIds.includes(4) && row.acceptedSequence > 3);
       if (info) break;
       if (child.exitCode !== null) throw new Error('Environment source exited: ' + error.slice(-300));
       await page.waitForTimeout(50);
@@ -26,11 +27,15 @@ module.exports = async function environmentBrowser({ page, api, tokens, director
     await fs.writeFile(path.join(screenshots, 'weather-first-rain.json'), JSON.stringify(await canvas.evaluate(node => ({ ...node.dataset })), null, 2));
     // Rain also exists during lightning. Wait for the non-flash night state
     // before asserting its regular sun intensity; do not alter cue timing.
-    await page.waitForFunction(() => {
+    const nightHandle = await page.waitForFunction(id => {
       const state = document.querySelector('#world-canvas').dataset;
-      return state.rainCount === '128' && state.weatherFlash === 'false' && state.weatherSun === '0.08';
-    });
-    check(info.header.environmentVersion === 1 && (await page.locator('#world-message').innerText()).includes('非原始音軌') && await canvas.getAttribute('data-weather-sun') === '0.08',
+      const message = document.querySelector('#world-message').textContent;
+      return document.querySelector('#world-recording').value === id && state.rainCount === '128' && state.weatherFlash === 'false' && state.weatherSun === '0.08' && message.includes('非原始音軌')
+        ? { ...state, message, recording: id } : false;
+    }, info.header.sessionId);
+    const night = await nightHandle.jsonValue(); await nightHandle.dispose();
+    await fs.writeFile(path.join(screenshots, 'weather-night-assertion.json'), JSON.stringify({ info, previousSessions: [...previousSessions], night }, null, 2));
+    check(info.header.environmentVersion === 1 && night.message.includes('非原始音軌') && night.weatherSun === '0.08',
       'Native versioned weather reaches a real night/rain rendering without claiming an original audio recording');
     check(await canvas.getAttribute('data-weather-audio') !== 'on' && await page.locator('#world-sound').getAttribute('aria-pressed') === 'false', 'Weather audio remains off before an explicit user gesture');
     const rainTick = await canvas.getAttribute('data-weather-tick');
