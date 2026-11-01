@@ -8,7 +8,11 @@
 
 真正Windows `desktop-venue/20261101-143859-67587c42` helper36250／browser80356均exit0：**54 UI／native、165世界幀**，名冊替換／環境AI／Pause／End、精確雙seal／原玩家結果與CSV／回放ledger一致、active0及cleanup無殘留。最大來源年齡0.191771秒非RTT，SwiftShader觀戰不是新原生GPU。14個C runtime與F snapshot逐檔相符、新F48；歷史68場3225再加14為69場3239，不當25人／跨機／頭盔驗收。
 
-`ground-camera-validation.json`核對前620 browser／上一輪74 runtime與F snapshot／Unity二進位及包hash、新41 browser／48 F及14 runtime。新C API134（新JS與.gz）＋三工具各9、Checks96保存hash；Unity0.37.2／47／NGO29／7d3e...及原199 Editor／雙平台／ID保持，沒有新Editor或APK重建。首次準備腳本cp950讀HTML失敗的初C build保持，完成後採明確UTF-8與新C build；不覆蓋舊API或正式5080。CI結果另補，完整11項active，原31／world371／F吞吐及外部依賴未修復。
+`ground-camera-validation.json`核對前620 browser／上一輪74 runtime與F snapshot／Unity二進位及包hash、新41 browser／48 F及14 runtime。新C API134（新JS與.gz）＋三工具各9、Checks96保存hash；Unity0.37.2／47／NGO29／7d3e...及原199 Editor／雙平台／ID保持，沒有新Editor或APK重建。首次準備腳本cp950讀HTML失敗的初C build保持，完成後採明確UTF-8與新C build；不覆蓋舊API或正式5080。完整11項active，原31／world371／F吞吐及外部依賴未修復。
+
+[功能5df27a8](https://github.com/peca12968/vr-command-center/commit/5df27a8c2ff40ea268a22aa565ad2ce69a3e6f33)的[完整CI41281968515](https://github.com/peca12968/vr-command-center/actions/runs/41281968515)／job124775534858／精確5df27a8最終success：Linux729／459 HTTP／47 world、工作流程Python／素材、78 Node／255 Chromium全過。2 Windows限定skip不當本機Windows／Unity或頭盔證據；本機459是前述獨立成功場，不混為同一次執行。41檔artifact13073935856＋log／**10,018,457 bytes ZIP／SHA `7386c55d2cdbae6b531e384550c9dd98586a000d0b159efd87c5ca7f379fd42d`**下載與GitHub digest相符；`ground-camera-ci-validation.json`核對前620＋本機41＝661 browser、48份native與14 runtime／snapshot、原Unity binaries／ZIP／APK保持；新增CI41後合計702 browser證據。後續僅文件skip ci，測試來源精確5df27a8。
+
+ROADMAP已移除過期的「等待GitHub帳務」待辦並更新現有M2與建置檢查數量199／0.37.2，保留歷史失敗與完整待驗範圍，沒有把SDK或已恢復CI列為目前阻礙。
 
 ## 2026-11-01：鏡頭重載 CI 失敗與有界請求觀察
 

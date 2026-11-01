@@ -12,4 +12,8 @@
 
 本輪729規則／459 HTTP／47 world-stream、locked restore／零警告build成功；本機HTTP這次完整成功，不證明先前Windows拒絕startup逾時的根因／修復。只將API版本與三個既有PC工具gate協同升0.30.2，不改驗票／REST授權／world格式／rules0.8.0。原生來源仍Unity0.37.2／code47／NGO29與7d3e1a92...、原ID、既有199 Editor／雙平台／ZIP／APK；沒有新Editor測試或遊戲重建。
 
-`ground-camera-validation.json`核對前620 browser／前輪74 runtime與F snapshot／Unity binaries及包hash、新41 browser／48 F證據／14 runtime，保存新C API134（新增JS與SDK產生的.gz）與三工具各9／Checks96的hash；不是完整OS或依賴graph。首次準備腳本因Windows預設cp950讀HTML失敗，該份C build保留；完整腳本明確UTF-8並使用新C build，測試採後者。雲端CI另記[PROGRESS](PROGRESS.md)。完整11項active，原31筆／world371姿態失效、F吞吐、多人持續操作、跨機、頭盔／MR與硬體仍待。
+`ground-camera-validation.json`核對前620 browser／前輪74 runtime與F snapshot／Unity binaries及包hash、新41 browser／48 F證據／14 runtime，保存新C API134（新增JS與SDK產生的.gz）與三工具各9／Checks96的hash；不是完整OS或依賴graph。首次準備腳本因Windows預設cp950讀HTML失敗，該份C build保留；完整腳本明確UTF-8並使用新C build，測試採後者。
+
+[精確5df27a8的CI41281968515](https://github.com/peca12968/vr-command-center/actions/runs/41281968515)完整success：729／459／47、工作流程Python／素材、78 Node／255 Chromium；41檔artifact13073935856與log／10,018,457 bytes ZIP／SHA7386c55d...下載核對。前661 browser＋新CI41＝702份保持，native48與runtime14／snapshot、原Unity binaries／ZIP／APK再次核對。2 Windows限定skip非Unity／頭盔證據，完整記錄見[PROGRESS](PROGRESS.md)，後續文件skip ci不改測試來源。
+
+完整11項active，原31筆／world371姿態失效、F吞吐、多人持續操作、跨機、頭盔／MR與硬體仍待。
