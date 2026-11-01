@@ -1,5 +1,25 @@
 # 開發進度
 
+## 2026-11-01：25端零按鍵視窗觀察與同場心跳對照
+
+從乾淨`7bc82a1`接續，詳見[OBSERVER_TIMING](OBSERVER_TIMING.md)。API/UI0.30、Unity0.36.1／code44／NGO29、e0594513140ff7fb4bc084929691b91c15f7d908e8f59c114aa5ab27daaf11eb、原scene／prefab／rules0.8.0保持；本輪Python／文件，沒有Unity、APK、launcher或產品.NET重建，也沒有重跑原179 Editor。正式5080與原雙平台receipt保持。
+
+新增`--observer-sequence`：自己的25個原生client＋server、0位操作／25接收、一個可見；不用W／Space／R或管理環境／AI命令，`--operator-ui`僅閒置控制台零表單。固定A3／S3／A3／S3共12次呼叫，原PID／player／session／同視窗及外部caller UTC＋單調時間，8秒baseline／120秒窗口／8秒quiet有界；metadata64KiB不保存image／可及性內容／憑證。先觀察再獨立ack、失敗abort，選窗在量測外。自己的normal-priority心跳沿用原240秒上限，server＋visible稀疏／server loop、replication原上限及0.5／1.5秒政策保持；timer加入tracked children，明確finish及所有writer全停才一次snapshot，例外也收native程序。
+
+真正場`20261101-102507-8f94afad`／原handle8001 **terminal exit0**：8項／52快照／26 Requested完整報告、28237 Running列無失效，1153完整回放／2參考，25份原admission結果／CSV與精確雙seal及server25唯一ACK成功。world1153／combat0／ledger through31，25位健康100、零彈藥／命中／擊殺／損傷；閒置UI110.018秒零requests／attempts，native／UI／pose／timer cleanup皆乾淨，headsets0／hosts1／networkCapacityAccepted=false。
+
+唯讀`observer-analysis-20261101-102507.json`對12次caller窗口都具有native／獨立timer coverage；原visible connection25／source1的PoseSend、PoseReceive／Accepted與MainThreadGap、timer>100ms記錄皆無重疊。timer88.7660042秒、最大wake10.7578ms、clock step0.0004636秒；caller最大0.0009828秒。Accessibility33.2628–78.5295ms／Screenshot96.5465–161.07ms是**含SDK queue、helper及結果返回的外部括號，非GPU／CPU／FPS／RTT**。Screenshot可能delta region、不當全frame像素量測；小樣本固定順序、零記錄大gap不證因果、不排除觀察擾動／小間隔，也不能配前場world371或舊31筆。
+
+分析器校驗原visible／connection、closed cleanup及報告來源，UTC差>=0.05秒／不同主機／不足coverage返回null；同point裁切聯集、不同point與MainThreadGap／PlayerLoop不相加，CPU保留整個原Update sample括號、不比例切分或歸因。沒有world序號不能硬配。只讀關閉JSON，不開保存SQLite，輸出新檔且不得落原場／原runtime、不覆蓋raw；complete僅join資料完整、missionAcceptancePassed另列、rootCauseProven=false。
+
+live之後補上stationary sample及全回放閘門：名冊、head／muzzle／forward／彈藥／reload／fireSequence不變，短暫移動恢復也失敗，connected／rig另由原參戰規則處理。**原8項沒有冒充新增live第9項**。`observer-closed-stationary-validation.json`第一版把REST float短格式與raw double展開直接比較，983幀誤報，例(-31,1.65,-3)與raw y=1.649999976158142；原失敗檔保留。`...-v2.json`以同一raw序號122作baseline、rb／checksum／連續序號讀完122–1104共983幀全相同，並另核對原journal1153精確seal，沒有改遊戲容差／原runtime或宣稱另一次live。
+
+本機9 observer sequence＋6 analysis＋27 active＋7 heartbeat＋16 input analysis＝**65 Python通過**，含順序／錯場／錯window／clock step／host未知、缺coverage為null、交錯玩家／source不混流、同point union、完整CPU sample不縮放、暫時移動恢復仍失敗及timer報告IO失敗仍cleanup。py_compile／diff-check通過，CI新增兩個suite及新腳本compile。雲端結果另於完成後記錄，不以本機Python當全CI。
+
+`observer-runtime-validation.json`：新C runtime176檔與一次F snapshot逐檔SHA一致、新F264檔；前53 C runtime2791檔／各F snapshot及前UI1042／operator383／動態1138／F337、原尾界失敗／獨立房／history321、API三組各159及當前ZIP／APK／receipt與舊ZIP保持。總54 C runtime2967檔；全部原handle terminal才稽核，保存SQLite只raw bytes不開連線。新分析與兩版stationary輸出在原場之外，原成功與失敗檔均不重寫。
+
+完整11項active；下一步仍追查自然姿態空窗並接續多人持續操作。此輪沒有重現不等於修復舊31筆或前場371，沒有完成25人同時操作、跨機／Wi-Fi／Quest／VIVE／MR或廠商硬體驗收。
+
 ## 2026-11-01：控制台表單接入25端動態任務，保留新參戰反例
 
 上一輪為實際進展，從乾淨`00d91a5`接續[動態PC](DESKTOP_ACTIVE.md)。**API/UI0.30、Unity0.36.1／code44／NGO29、e0594513140ff7fb4bc084929691b91c15f7d908e8f59c114aa5ab27daaf11eb、原scene／prefab／rules0.8.0保持**；本輪Python／Node驗收與文件，沒有新Unity／APK／launcher或產品.NET建置、沒有重跑原179 Editor；沿用原同源雙平台receipt，正式5080不動。

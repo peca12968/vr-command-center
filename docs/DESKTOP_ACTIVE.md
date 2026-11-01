@@ -1,5 +1,7 @@
 # 實際 PC 輸入與25端狀態對照
 
+2026-11-01 新增[`--observer-sequence`零按鍵觀察流程](OBSERVER_TIMING.md)：25接收端、12次有界文字／截圖呼叫、獨立心跳與原姿態診斷同場保存。原8項／52快照／1153回放及25份結果成功，後補guard對關閉來源983幀讀回通過；並非新live第9項或根因修復。原動態流程與失敗樣本保持。
+
 2026-11-01 新增`--operator-ui`，以真正Chromium控制台表單執行原環境／AI情境；Begin／Pause／Resume／End仍由fixture控制，不能稱本輪所有生命週期都經UI。一位實際W／Space／R／Space、24接收端的最終新場14項／182快照／1132完整回放與25份結果／server ack通過；**同輪第一場一幀參戰失效、API啟動逾時及一次確認順序失誤／換彈逾時均保留失敗**，不以最後成功宣稱修復。細節見[PROGRESS](PROGRESS.md)。
 
 ```powershell

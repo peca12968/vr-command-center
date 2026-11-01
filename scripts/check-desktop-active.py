@@ -24,6 +24,8 @@ capacity=importlib.util.module_from_spec(spec);spec.loader.exec_module(capacity)
 venue_module=capacity.venue_module
 spec=importlib.util.spec_from_file_location('active_debrief',ROOT/'scripts/check-desktop-debrief.py')
 debrief=importlib.util.module_from_spec(spec);spec.loader.exec_module(debrief)
+spec=importlib.util.spec_from_file_location('active_observer',ROOT/'scripts/observer-sequence.py')
+observer=importlib.util.module_from_spec(spec);spec.loader.exec_module(observer)
 
 
 def validate_ui_exchange(value,request,session_id,environment,behavior):
@@ -105,7 +107,7 @@ class OperatorUi:
 
 class ActiveVenue(capacity.ReplicationVenue):
     def __init__(self,args,**options):
-        self.pose_programs=[];self.pose_finished=False
+        self.pose_programs=[];self.pose_finished=False;self.observer_heartbeat=None;self.observer_timer_report=None
         super().__init__(args,**options)
 
     def launch(self,name,config,visible=False,*,extra_args=()):
@@ -132,14 +134,30 @@ class ActiveVenue(capacity.ReplicationVenue):
         result={'complete':True,'scope':'Only server and visible client; diagnostic completeness is not mission acceptance','programs':self.pose_programs}
         self.save('active-pose-diagnostics.json',result);self.pose_finished=True;return result
 
+    def finish_observer_timer(self):
+        if self.observer_timer_report is not None:return self.observer_timer_report
+        if self.observer_heartbeat is None:return None
+        report=self.observer_heartbeat.finish()
+        if 'observer-independent-timer' in self.processes:self.stop('observer-independent-timer')
+        self.observer_timer_report=report
+        return self.observer_timer_report
+
     def cleanup(self):
-        errors=[]
-        if self.pose_programs and not self.pose_finished:
-            try:
-                path=self.directory/'active-native-clients.json'
-                self.finish_pose_diagnostics(venue_module.read_json(path) if path.exists() else [])
-            except Exception as error:errors.append(type(error).__name__)
-        result=super().cleanup()
+        errors=[];timer_errors=[]
+        try:
+            if self.observer_heartbeat:
+                try:self.finish_observer_timer()
+                except Exception as error:
+                    timer_errors.append(type(error).__name__)
+                    if 'observer-independent-timer' in self.processes and self.observer_heartbeat.child.poll() is not None:self.stop('observer-independent-timer')
+                errors.extend(timer_errors)
+            if self.pose_programs and not self.pose_finished:
+                try:
+                    path=self.directory/'active-native-clients.json'
+                    self.finish_pose_diagnostics(venue_module.read_json(path) if path.exists() else [])
+                except Exception as error:errors.append(type(error).__name__)
+        finally:result=super().cleanup()
+        if self.observer_heartbeat:self.save('observer-heartbeat-cleanup.json',{'errors':timer_errors,'remaining':[] if self.observer_heartbeat.child.poll() is not None else [self.observer_heartbeat.child.pid]})
         if self.pose_programs:self.save('active-pose-cleanup.json',{'errors':errors,'finished':self.pose_finished})
         return result and not errors
 
@@ -278,6 +296,7 @@ def finish(v,names):
 def replay(v,entry,references):
     request=urllib.request.Request(v.base+f'/api/sessions/{entry["id"]}/world/watch?mode=replay&fromMs=0&rate=4',headers={'Authorization':'Bearer '+v.tokens['Master']})
     previous=0;matched=set();last=None;faults=[];expected={p['id'] for p in entry['players']}
+    stationary=[];stationary_count=0;observe=getattr(v.args,'observer_sequence',False)
     deadline=time.monotonic()+entry['sealed']['world']['durationMilliseconds']/4000+30
     with urllib.request.urlopen(request,timeout=10) as response:
         for value in capacity.sse_frames(response):
@@ -288,13 +307,20 @@ def replay(v,entry,references):
             if min(references)<=number<=max(references):
                 fault=world_continuity_fault(value['packet']['frame'],expected)
                 if fault:faults.append({'sequence':number,**fault})
+                if observe:
+                    changes=observer.stationary_faults(value['packet']['frame'],references[min(references)]['packet']['frame'])
+                    if changes:
+                        stationary_count+=1
+                        if len(stationary)<64:stationary.append({'sequence':number,'faults':changes})
             if number in references:
                 if value['packet']!=references[number]['packet'] or value['statistics']!=references[number]['statistics']:
                     raise RuntimeError('Saved active checkpoint differs from replay')
                 matched.add(number)
     if matched!=set(references) or previous!=entry['sealed']['world']['acceptedSequence'] or last['packet']['frame']['phase']!='Ended':
         raise RuntimeError('Active replay did not include every reference / final seal')
-    return {'frames':previous,'matchedReferences':len(matched),'complete':True,'worldContinuityFaults':faults,'continuityPassed':not faults}
+    result={'frames':previous,'matchedReferences':len(matched),'complete':True,'worldContinuityFaults':faults,'continuityPassed':not faults}
+    if observe:result['stationary']={'passed':stationary_count==0,'faultFrameCount':stationary_count,'examples':stationary,'maximumExamples':64}
+    return result
 
 
 def validate_operator_packet(value,environment,behavior,fence,minimum_tick):
@@ -353,7 +379,8 @@ def run(v):
     def resource():
         value=capacity.memory_status();capacity.require_memory(value);resources.append(value);v.save('active-resources.json',resources)
     v.active_continuity={};v.operator_controls=[];v.start();resource()
-    mission=v.request('/api/missions',{'name':'Active 25 native peers - Simulation','briefing':'One real PC operator, 24 receiving peers; no headset.',
+    mission=v.request('/api/missions',{'name':'Observer timing 25 native peers - Simulation' if v.args.observer_sequence else 'Active 25 native peers - Simulation',
+        'briefing':'Zero game input; one visible observer, 25 receiving clients; no headset.' if v.args.observer_sequence else 'One real PC operator, 24 receiving peers; no headset.',
         'durationSeconds':600,'environment':{'mode':'VR','weather':'Clear','timeOfDay':'Day','lightning':False},
         'enemies':{'count':5,'behavior':'Hold','autoAttack':False},
         'props':[{'assetId':'barrel','position':{'x':-4.125,'y':0,'z':-1},'yawDegrees':0}]},expected=201)
@@ -389,8 +416,10 @@ def run(v):
     references={};capture(v,entry,native,'initial',references)
     v.save('active-ready.json',{'source':'Simulation','headsets':0,'visiblePlayerId':own['id'],'visiblePid':next(r['pid'] for r in native if r['visible']),
         'nativeClients':25,'renderedClients':1,'directory':str(v.directory),'runtimeDirectory':str(v.runtime_directory)})
-    observations=[];accepted=[];next_resource=time.monotonic()+5
-    for stage,key in [('move','w'),('shot','space'),('reload','r'),('kill','space')]:
+    observations=[];accepted=[];next_resource=time.monotonic()+5;observer_result=None;observation_statistic=None
+    if v.args.observer_sequence:
+        observation_statistic,observer_result=observer.run(v,entry,own,native,references,capture,check)
+    for stage,key in ([] if v.args.observer_sequence else [('move','w'),('shot','space'),('reload','r'),('kill','space')]):
         if stage!='move':v.command(entry,'Resume');v.wait(lambda:v.frame(entry)['packet']['frame']['phase']=='Running',15,'active Resume')
         if v.args.operator_controls and stage=='shot':
             operator_controls(v,entry,{'mode':'VR','weather':'Storm','timeOfDay':'Night','lightning':True},'Hold','storm-before-shot',references)
@@ -422,8 +451,9 @@ def run(v):
             capture(v,entry,native,label,references)
             check(True,label+': original living enemies move; all replicas retain exact environment / combat and original identities')
     if v.operator_ui:
-        check(v.operator_ui.close() and v.operator_ui.report['complete'] is True and v.operator_ui.report['requests']==3 \
-            and v.operator_ui.report['pageErrors']==[], 'all six management commands came from real console forms; browser and helper explicitly finished')
+        expected=0 if v.args.observer_sequence else 3
+        check(v.operator_ui.close() and v.operator_ui.report['complete'] is True and v.operator_ui.report['requests']==expected \
+            and v.operator_ui.report['pageErrors']==[], 'idle console closed without form writes' if v.args.observer_sequence else 'all six management commands came from real console forms; browser and helper explicitly finished')
     finish(v,[r['name'] for r in native]);sealed=v.seal(entry)
     report=capacity.practice.save_report(v,entry,sealed['statistics']);finish(v,[entry['name']+'-server'])
     v.stage('active-results',players=len(native))
@@ -437,10 +467,12 @@ def run(v):
     diagnostics=v.finish_pose_diagnostics(native)
     v.stop_round(entry)
     playback=replay(v,entry,references);check(playback['complete'],'every saved active checkpoint matches contiguous replay / final ledger and CSV')
+    if v.args.observer_sequence:check(playback['stationary']['passed'],'all saved observation-window frames retain original stationary pose / weapon state')
     findings=capacity.native_log_findings(v.directory);check(not findings,'no native send queue full messages')
-    v.save('active-result.json',{'complete':False,'source':'Actual Windows native input / UDP / NGO; Simulation','headsets':0,'hosts':1,
-        'activePlayers':1,'receivingPeers':24,'renderedClients':1,'poseOrWeaponInjected':False,'all25SimultaneouslyActive':False,
-        'statistics':accepted[-1]['statistics'],'inputStages':accepted,'replay':playback,'csv':report,'nativeLogFindings':findings,
+    v.save('active-result.json',{'complete':False,'source':'Actual Windows native observation / UDP / NGO; Simulation' if v.args.observer_sequence else 'Actual Windows native input / UDP / NGO; Simulation','headsets':0,'hosts':1,
+        'activePlayers':0 if v.args.observer_sequence else 1,'receivingPeers':25 if v.args.observer_sequence else 24,'renderedClients':1,'poseOrWeaponInjected':False,'all25SimultaneouslyActive':False,
+        'statistics':observation_statistic if v.args.observer_sequence else accepted[-1]['statistics'],'inputStages':accepted,'replay':playback,'csv':report,'nativeLogFindings':findings,
+        'observerSequence':observer_result,
         'individualResults':results,'acknowledgedResults':len(results),
         'operatorControls':v.operator_controls if v.args.operator_controls else None,
         'operatorUi':v.operator_ui.report if v.operator_ui else None,
@@ -462,13 +494,17 @@ def main():
     parser.add_argument('--operator-controls',action='store_true',help='Exercise normal environment / AI commands in the same real-input mission; not an operator UI test')
     parser.add_argument('--operator-ui',action='store_true',help='Apply the environment / AI scenario through real Chromium console forms; lifecycle stays under the fixture')
     parser.add_argument('--diagnose-visible-pose',action='store_true',help='Explicit existing sparse trace only on the server and visible client, server PlayerLoop only; no gameplay changes')
+    parser.add_argument('--observer-sequence',action='store_true',help='Zero-key alternating accessibility / screenshot observations with an independent timer; optional idle console, no form commands')
     parser.add_argument('--api-dll',type=Path,default=Path(os.environ.get('VR_COMMAND_API_DLL',ROOT/'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')))
     parser.add_argument('--player-exe',type=Path,default=Path(os.environ.get('VR_COMMAND_UNITY_PLAYER',ROOT/'artifacts/desktop/VrCommand.exe')))
-    args=parser.parse_args();args.operator_controls=args.operator_controls or args.operator_ui
+    args=parser.parse_args()
+    if args.observer_sequence and args.operator_controls:parser.error('Observer sequence does not submit environment / AI commands')
+    args.operator_controls=not args.observer_sequence and (args.operator_controls or args.operator_ui)
+    args.diagnose_visible_pose=args.diagnose_visible_pose or args.observer_sequence
     args.duration=600;args.visible_room=3;args.job_workers=2;args.check=False;args.replication_probe=not args.without_replication_probe
     if args.replication_probe and args.input_timeout>40:parser.error('Replication probe has a 240-second lifetime; use at most 40 seconds per UI stage')
     venue_module.verify_player(args);v=ActiveVenue(args,artifact_family='desktop-active');v.operator_ui=None
-    try:v.stage('starting',source='Simulation',headsets=0,activePlayers=1,receivingPeers=24);run(v)
+    try:v.stage('starting',source='Simulation',headsets=0,activePlayers=0 if args.observer_sequence else 1,receivingPeers=25 if args.observer_sequence else 24);run(v)
     except BaseException as error:v.stage('failed',errorType=type(error).__name__);raise
     finally:
         failed=sys.exc_info()[0] is not None
