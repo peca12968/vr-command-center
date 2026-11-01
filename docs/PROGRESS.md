@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-01：鏡頭重載 CI 失敗與有界請求觀察
+
+導航功能來源`40f8516da53feb9610dc75bb9fb19d85ddf23dbe`的[CI41279882687](https://github.com/peca12968/vr-command-center/actions/runs/41279882687)／job124769450079最終failure。729規則／459 HTTP／47 world-stream、工作流程Python／素材及72 Node已過；Chromium在新登入觀戰頁等待已保存鏡頭選項30秒逾時，不能稱248項通過。失敗畫面已載入世界，鏡頭提示回應不完整；原資料沒有該GET的狀態／完成時間，不能推定API、body decoding、主機或路由根因。
+
+原15檔artifact13073096399、log及ZIP3,813,684 bytes／SHA `1d2e87c7548e5abaa7be8d7d06e817d17d1be62628e70b2a0e95e57ab0aa8007`完整保留。僅browser fixture加入該新頁重載期間最多128個同源API GET metadata，記path／狀態／回呼相對時間／有限錯誤碼，不記headers、query、body或憑證，不改產品、路由、操作順序、30秒斷言或10秒API期限；超界仍失敗，完成只是觀察未超界，不代表請求全部成功、body已解碼或RTT。finally卸除listener並保存metadata，原failure仍保留。
+
+本機新場`console-navigation-anchors-diagnostic-20261101`完整248 Chromium通過，40檔含13條GET metadata；鏡頭GET 200並正常finished。這是新場成功，不是原逾時的根因或修復證明；使用本輪隔離C API與relay，不動正式5080。僅fixture變更，不重建Unity／APK或改稱另一來源。完整CI另補。
+
 ## 2026-11-01：實際非格點起終點接線與原生逐tick端點觀察
 
 從乾淨`13f22c7`接續第6項，[AI_NAVIGATION_ANCHORS](AI_NAVIGATION_ANCHORS.md)修正0.75m任務候選座標接到0.5m路網的問題。Unity **0.37.2／code47／NGO29**，API/UI0.30.1、world格式／rules0.8.0及原scene／prefab ID保持。最終Windows／ARM64 Quest同源 **7d3e1a926f1b1c9176f03809af75de0c2af7be0e5f3e4ec24851664327aa4f92**；最終Tests62491／Desktop70410／Quest21212原handle皆exit0、**199真正Editor全過0skip**。先前Prepare42518／Tests62157的195項／Desktop94888／Quest31685為2c96...初候選，後加觀察器的Prepare78173亦exit0；初候選321檔及XML／receipt另存，不能把相同0.37.2／47當成相同來源。

@@ -80,11 +80,27 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     check(await canvas.getAttribute('data-camera') === savedPosition && await page.locator('#world-camera').inputValue() === 'free', 'Recalling a position restores its fixed world target, angles and distance');
     const remembered = await context.newPage(); await remembered.setViewportSize({ width: 1440, height: 1080 });
     await remembered.bringToFront();
-    await remembered.goto(base + '/console/'); await remembered.locator('#login-key').fill(tokens.Master); await remembered.locator('#login-form button').click();
-    await remembered.locator('#tab-world').click(); await remembered.locator('#world-recording option').waitFor({ state: 'attached' });
-    await remembered.locator('#world-recording').selectOption(live.header.sessionId); await remembered.locator('#world-live').click();
+    // Observe only this page's first reload; no routing, headers, bodies, query
+    // strings or credentials. Callback intervals are not network RTT.
+    const requestStarted = performance.now(), requestRows = [], requests = new WeakMap();
+    let requestTruncated = false;
+    const at = () => performance.now() - requestStarted;
+    const requestObserved = request => {
+      const url = new URL(request.url());
+      if (request.method() !== 'GET' || url.origin !== new URL(base).origin || !url.pathname.startsWith('/api/')) return;
+      if (requestRows.length >= 128) { requestTruncated = true; return; }
+      const row = { index: requestRows.length + 1, path: url.pathname, startedMilliseconds: at() }; requests.set(request, row); requestRows.push(row);
+    };
+    const responseObserved = response => { const row = requests.get(response.request()); if (row) { row.status = response.status(); row.responseMilliseconds = at(); } };
+    const requestFinished = request => { const row = requests.get(request); if (row) row.finishedMilliseconds = at(); };
+    const requestFailed = request => { const row = requests.get(request); if (row) { const code = request.failure()?.errorText || ''; row.failure = /^net::ERR_[A-Z0-9_]{1,64}$/.test(code) ? code : 'Other'; row.failedMilliseconds = at(); } };
+    remembered.on('request', requestObserved); remembered.on('response', responseObserved); remembered.on('requestfinished', requestFinished); remembered.on('requestfailed', requestFailed);
     try {
+      await remembered.goto(base + '/console/'); await remembered.locator('#login-key').fill(tokens.Master); await remembered.locator('#login-form button').click();
+      await remembered.locator('#tab-world').click(); await remembered.locator('#world-recording option').waitFor({ state: 'attached' });
+      await remembered.locator('#world-recording').selectOption(live.header.sessionId); await remembered.locator('#world-live').click();
       await remembered.locator('#camera-positions option').waitFor({ state: 'attached' }); await remembered.locator('#camera-recall').click();
+      if (requestTruncated) throw new Error('Remembered camera request diagnostic exceeded 128 rows');
     } catch (error) {
       const diagnostic = await remembered.evaluate(() => ({ visibility: document.visibilityState,
         worldMessage: document.querySelector('#world-message').textContent,
@@ -95,6 +111,10 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       await fs.writeFile(path.join(screenshots, 'world-remembered-failure.json'), JSON.stringify(diagnostic, null, 2));
       await remembered.screenshot({ path: path.join(screenshots, 'world-remembered-failure.png'), fullPage: true, timeout: 5000 }).catch(() => {});
       throw error;
+    } finally {
+      remembered.off('request', requestObserved); remembered.off('response', responseObserved); remembered.off('requestfinished', requestFinished); remembered.off('requestfailed', requestFailed);
+      await fs.writeFile(path.join(screenshots, 'world-remembered-requests.json'), JSON.stringify({ complete: !requestTruncated, truncated: requestTruncated, maximumRows: 128,
+        scope: 'This page reload GET metadata only; not body decoding, complete dependencies, network RTT or cause proof', elapsedMilliseconds: at(), requests: requestRows }, null, 2));
     }
     check(await remembered.locator('#world-canvas').getAttribute('data-camera') === savedPosition, 'A freshly authenticated page reloads and recalls the persisted camera position');
     await remembered.bringToFront(); // Capture the intended tab, including with headless Chromium.
