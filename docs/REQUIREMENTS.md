@@ -1,5 +1,7 @@
 # 需求與驗收追蹤
 
+第2／6／9／11項新增[電腦端蹲姿與掩體](DESKTOP_CROUCH.md)：Unity0.39／224真正Editor、同源雙平台，實際C／W與視窗恢復、792完整回放、兩份原戰績／CSV／雙seal／ACK及五房回歸成功。蹲下維持滿血時敵軍確實向同伴開火，站起恰好20傷害；保留原Tracked／命中／姿態政策。仍為同機Simulation，非完整屈膝動畫、頭盔或25位操作驗收，11項active。
+
 第6項新增[AI可見目標選擇](AI_VISIBLE_TARGETS.md)：Unity0.38／208真正Editor、738規則與同源雙平台；三人原生第1tick略過前兩個受阻玩家並射擊第三位，4項／32幀回放／三份結果CSV雙sealACK及五房回歸成功。原傷害、冷卻、射程與移動保持，舊反例仍failed，不當完整人群AI／25人操作、跨機／實機驗收，11項active。
 
 第9／10項新增[雙擊場地定位鏡頭](OBSERVER_GROUND.md)：API/UI0.30.2可直接定位錄製房間的地面觀看中心，保持角度／距離與草稿，原書籤保存／重載和回放不seek。78 Node／255瀏覽器、54 UI/native及165幀／結果封存成功；仍SwiftShader／同機Simulation，非頭盔／MR或25位操作，完整11項active。

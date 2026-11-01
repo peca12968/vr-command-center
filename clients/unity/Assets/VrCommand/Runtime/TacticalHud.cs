@@ -148,7 +148,8 @@ namespace VrCommand.Unity
             GUI.Label(new Rect(width - 230, height - 134, 200, 20), player.reloading ? "RELOADING" : player.magazine == 0 ? "EMPTY / R TO RELOAD" : "AMMUNITION", small);
             GUI.Label(new Rect(width - 230, height - 115, 92, 54), player.magazine.ToString("00"), number);
             GUI.Label(new Rect(width - 140, height - 99, 110, 26), "/ " + player.reserve.ToString("000"), heading);
-            GUI.Label(new Rect(20, height - 32, width - 40, 25), "WASD MOVE   /   RIGHT DRAG + ARROWS AIM   /   CLICK + SPACE FIRE   /   R RELOAD", small);
+            GUI.Label(new Rect(290, height - 91, 240, 25), "STANCE / " + (!player.connected || !avatar.PoseAccepted.Value ? "UNCONFIRMED" : player.position.y < 1.325f ? "CROUCHED" : "STANDING"), small);
+            GUI.Label(new Rect(20, height - 32, width - 40, 25), "WASD MOVE / RIGHT DRAG + ARROWS AIM / CLICK + SPACE FIRE / R RELOAD / CTRL HOLD / C CROUCH", small);
             drawn.Clear();
             if (!active)
             {

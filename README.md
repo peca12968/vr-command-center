@@ -1,5 +1,7 @@
 # VR Command Center
 
+Unity0.39.0新增[電腦端蹲姿與掩體](docs/DESKTOP_CROUCH.md)：Ctrl按住或C切換、蹲姿移動及失焦站立恢復，使用原伺服器姿態／命中規則。224真正Editor、同源Windows／Quest及實際C／W／視窗操作、792完整回放／兩份戰績與五房回歸通過；目前無頭盔，完整範圍與原失敗見[進度](docs/PROGRESS.md)。
+
 Unity0.38.0新增[AI 可見目標選擇](docs/AI_VISIBLE_TARGETS.md)：最近玩家被擋住時，改試真正可命中的後續玩家；保持原傷害、射速、射程與移動政策。738規則／208真正Editor、同源Windows／Quest及三人原生4項／32幀回放與五房回歸通過，舊反例與完整範圍見[進度](docs/PROGRESS.md)。
 
 API／UI0.30.2新增[雙擊場地定位鏡頭](docs/OBSERVER_GROUND.md)：在即時觀戰／回放直接點選地面觀看位置，保留角度與距離、支援原書籤。78 Node／255瀏覽器與54真正Windows場次整合通過；完整範圍與待驗見[進度](docs/PROGRESS.md)。

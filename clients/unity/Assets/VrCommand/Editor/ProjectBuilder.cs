@@ -96,8 +96,8 @@ namespace VrCommand.Unity.Editor
         {
             PlayerSettings.companyName = "VR Command";
             PlayerSettings.productName = "VR Command Quest";
-            PlayerSettings.bundleVersion = "0.38.0";
-            PlayerSettings.Android.bundleVersionCode = 48;
+            PlayerSettings.bundleVersion = "0.39.0";
+            PlayerSettings.Android.bundleVersionCode = 49;
             PlayerSettings.insecureHttpOption = InsecureHttpOption.DevelopmentOnly;
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, "com.vrcommand.quest");
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);

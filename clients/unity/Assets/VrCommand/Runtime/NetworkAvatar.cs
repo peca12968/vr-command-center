@@ -68,6 +68,7 @@ namespace VrCommand.Unity
         private Renderer[] visuals;
         private bool desktopFire, desktopReload, windowKeyFallbackLogged;
         private Vector2 windowLook, windowMovement;
+        private readonly DesktopStanceInput desktopStance = new DesktopStanceInput();
         private readonly TacticalHud tacticalHud = new TacticalHud();
         private FiringRifleModels rifleModels;
         private FiringRifleView firingRifle;
@@ -200,7 +201,7 @@ namespace VrCommand.Unity
                     leftHand.localRotation = leftRotation.ReadValue<Quaternion>();
                     rightHand.localRotation = rightRotation.ReadValue<Quaternion>();
                 }
-                else DesktopPreview();
+                else DesktopPreview(!ending);
                 if (VenueBootstrap.Instance.State != "Ended" && Time.unscaledTime >= nextSend)
                 {
                     nextSend = Time.unscaledTime + 0.05f;
@@ -299,10 +300,13 @@ namespace VrCommand.Unity
             CombatAuthority.Instance?.Weapon(OwnerClientId, input, reloadWeapon, pose, transform.position, transform.rotation);
         }
 
-        private void DesktopPreview()
+        private void DesktopPreview(bool playing)
         {
             var keyboard = Keyboard.current;
-            if (Application.isFocused || Application.isBatchMode)
+            var active = playing && (Application.isFocused || Application.isBatchMode);
+            desktopStance.Poll(keyboard, active);
+            head.localPosition = new Vector3(head.localPosition.x, desktopStance.EyeHeight, head.localPosition.z);
+            if (active)
             {
                 var look = keyboard == null ? Vector2.zero : new Vector2(Turn(keyboard.rightArrowKey) - Turn(keyboard.leftArrowKey), Turn(keyboard.downArrowKey) - Turn(keyboard.upArrowKey));
                 if (look.x == 0) look.x = windowLook.x;
@@ -316,10 +320,24 @@ namespace VrCommand.Unity
                 else MoveDesktop(movement, Time.unscaledDeltaTime);
             }
             windowLook = windowMovement = Vector2.zero;
+            UpdateDesktopHands();
+        }
+        private void UpdateDesktopHands()
+        {
             leftHand.localPosition = head.localPosition + head.localRotation * new Vector3(-0.3f, -0.35f, 0.4f);
             rightHand.localPosition = head.localPosition + head.localRotation * DesktopPreviewControls.RightOffset;
             leftHand.localRotation = rightHand.localRotation = head.localRotation;
         }
+        private void ResetDesktopStance()
+        {
+            desktopStance.Reset();
+            if (!IsOwner || tracked || head == null) return;
+            head.localPosition = new Vector3(head.localPosition.x, DesktopStanceInput.StandingHeight, head.localPosition.z);
+            if (leftHand != null && rightHand != null) UpdateDesktopHands();
+        }
+        private void OnApplicationFocus(bool focused) { if (!focused) ResetDesktopStance(); }
+        private void OnApplicationPause(bool paused) { ResetDesktopStance(); }
+        private void OnDisable() { ResetDesktopStance(); }
         private static bool Pressed(ButtonControl button) => button.isPressed || button.wasPressedThisFrame;
         private static float Turn(ButtonControl button) => button.wasPressedThisFrame ? 3 : button.isPressed ? 60 * Time.unscaledDeltaTime : 0;
         private void MoveDesktop(Vector2 movement, float seconds)
@@ -333,8 +351,10 @@ namespace VrCommand.Unity
         }
         private void DesktopWindowKey()
         {
-            if (!Application.isFocused || Event.current.type != EventType.KeyDown) return;
+            if (!Application.isFocused || (Event.current.type != EventType.KeyDown && Event.current.type != EventType.KeyUp)) return;
             var keyboard = Keyboard.current; ButtonControl raw = null;
+            if (desktopStance.WindowKey(Event.current.keyCode, Event.current.type == EventType.KeyDown, keyboard)) { Event.current.Use(); return; }
+            if (Event.current.type != EventType.KeyDown) return;
             var look = Vector2.zero; var movement = Vector2.zero; var fire = false; var reloadWeapon = false;
             switch (Event.current.keyCode)
             {
@@ -421,7 +441,7 @@ namespace VrCommand.Unity
         {
             var yaw = Quaternion.Euler(0, rotation.eulerAngles.y, 0);
             var motion = yaw * new Vector3(axes.x, 0, axes.y).normalized * (Mathf.Min(Mathf.Max(seconds, 0), .1f) * 2 * Mathf.Min(axes.magnitude, 1));
-            return new Vector3(Mathf.Clamp(position.x + motion.x, -5 - rootInRoom.x, 5 - rootInRoom.x), 1.65f,
+            return new Vector3(Mathf.Clamp(position.x + motion.x, -5 - rootInRoom.x, 5 - rootInRoom.x), position.y,
                 Mathf.Clamp(position.z + motion.z, -5 - rootInRoom.z, 5 - rootInRoom.z));
         }
     }

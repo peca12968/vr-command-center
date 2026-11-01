@@ -1,5 +1,7 @@
 # 電腦練習場
 
+2026-11-02 Unity0.39.0／code49／NGO29、API/UI0.30.2，新增[蹲姿與掩體](DESKTOP_CROUCH.md)：Ctrl按住、C切換；失焦／暫停／停用清除蹲姿，回到視窗後須重新操作。224真正Editor、同源雙平台及實際C／W／最小化恢復、792幀回放與兩份戰績通過。Windows最新包為windows-player-0.39.0.zip，以下版本段落為歷史。
+
 2026-11-01 最新Unity0.37.2／code47／NGO29、API/UI0.30.1，新增[非格點出生與巡邏端點接線](AI_NAVIGATION_ANCHORS.md)。主包為windows-player-0.37.2-final.zip／7d3e1a92...，普通0.37.2 ZIP是保留的2c96...初候選；199真正Editor／同源雙平台與原生範圍見PROGRESS，檔名不是驗證證據。
 
 2026-11-01 最新Unity0.37.1／code46／NGO29、API/UI0.30.1，新增[敵軍旋轉掩體繞路修正](AI_NAVIGATION.md)。保留既有軍服手臂、碰撞與戰鬥規則；189真正Editor／同源雙平台及原生巡邏／控制回歸成功。舊版本與GPU證據範圍保持，詳見PROGRESS。
@@ -40,6 +42,7 @@ python scripts/start-desktop-demo.py --api-dll artifacts/build-practice/bin/VrCo
 | 操作 | 輸入 |
 |---|---|
 | 平面移動 | WASD，依目前朝向前進，斜走不加速 |
+| 蹲姿 | 按住左／右Ctrl，或C切換；蹲姿仍可WASD移動 |
 | 瞄準 | 按住右鍵拖曳，或方向鍵；上下最多 70 度；方向鍵短按 3 度 |
 | 射擊 | 左鍵或空白鍵，仍由伺服器判定射速／彈藥／射線 |
 | 換彈 | R |

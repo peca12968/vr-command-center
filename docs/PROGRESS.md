@@ -1,5 +1,23 @@
 # 開發進度
 
+## 2026-11-02：電腦端蹲姿、掩體與焦點恢復
+
+Unity **0.39.0／Android code49／NGO29**，API/UI0.30.2／rules0.8.0／world schema1保持。無頭盔owner新增左／右Ctrl按住與C切換蹲姿，眼高1.65→1.0m、手與槍口沿原相對旋轉；移動保留高度、原速度／房界／碰撞。HUD讀原server人物位置／有效性，失焦／應用暫停或恢復／停用立即清除stance並恢復本機站立，下一個原Pose再發布。Tracked、wire、header、素材profile、傷害及0.5／1.5政策不改。既有人物依高度縮放，未新增屈膝骨架動畫；完整機制見[DESKTOP_CROUCH](DESKTOP_CROUCH.md)。
+
+新增16項、共**224真正Editor／0失敗／0 skip**，3項是官方Keyboard在真正PlayMode Dynamic消費事件。首場224／218／6：EditMode SendMessage被引擎拒絕及3鍵盤事件未路由；改直接呼叫callback邏輯後第二場224／221／3，保存實際鍵盤值0診斷。測試依本機已安裝InputSystem的Editor鍵盤routing暫時導向GameView、finally恢復設定後才224全過，正式InputSettings未更動。兩次真正exit1的XML／log／選定來源先封存，沒有抑制錯誤或改判；不是完整生命週期引擎派送驗證。另6項Python證據反例與5項原snapshot測試成功。
+
+Windows／ARM64 Quest同源 fingerprint **`e0d60e4ed6cefe5cd885e6aabe1621939da945ce00d56b3ed8820c0aed4db879`**及原scene／prefab ID保持。雙平台建置結束後才執行真正Windows場。Windows包 **82,647,558 bytes／SHA `09f4ac14a9497329080d018dd634ebfdee13cabb0b7e0c7d2ed8b077173e47cc`**、311 runtime／原launcher，新C展開19項通過；第一次檢查指向誤寫的不存在子目錄、未啟動遊戲，修正pointer後採新driver，失敗driver保留。APK **60,334,582 bytes**、0.39.0／49／ARM64／min32 target35及v2簽章成功，尚無頭盔安裝。舊0.38 binary／log321＋6選定來源先封存327檔，不是完整source graph；舊ZIP及APK raw保持。
+
+真正互動場`desktop-crouch/20261102-000305-4f367a90`原handle35883 **exit0／6項**：實際C蹲下、C站起、C與W移動，再在明確Pause後最小化／恢復自有視窗、不按C仍回站姿。792完整回放／739張已接受Begin的Running／Paused幀、11保存參考逐幀相符；本場Paused失效幀0，不把排除規則稱為觀察到失效。原.5／1.5門檻保持，收到時最大來源年齡0.201763秒含輪詢／發布、非RTT。
+
+原席0 head=(-3,1.65,-3)、席1=(-1.5,1.65,-3)、Hold NPC feet=(-4.5,0,-1)，正常任務油桶feet=(-3.75,0,-2) yaw0，不注入姿態／武器。蹲姿source tick473→519維持100血，敵軍同期確實向站立同伴開火3次；站起恰好1發／20傷害，原管理命令關閉AutoAttack。W移動保留1.0m高度，同伴原位置／1.65m高度／彈藥不變。最後兩份原admission結果健康80／0、中彈1／5、耗彈均0；CSV、戰鬥6／world792／through17、雙seal與原兩連線唯一server ACK相符，active0／cleanup空列及writer全停後snapshot成功。官方Ctrl按住／放開僅Editor虛擬Keyboard證據，本輪原生實際輸入為C／W，沒有GPU probe圖檔／PCM／頭盔或跨機驗收。
+
+一般五房`desktop-venue/20261102-000500-7b756ab9`原handle98440 **exit0／6項／7場**，五獨立房、單房End／重用、舊票／越權拒絕、後續Linked及精確seal／active0／cleanup成功。每房一玩家，非25位操作。未重建API或共用Simulation，沿用上一輪accepted C API134＋三工具各9／Checks96的整組0.30.2輸出，沒有單換DLL。
+
+`desktop-crouch-validation.json`逐檔核對兩個新C runtime共40檔及F snapshot相符、新F evidence含snapshot共124檔；前838 browser、AI前4場68 runtime／snapshot、原accepted API整組、舊327 archive及兩次失敗測試5／6檔保持。歷史73場3307＋新2場40＝75場3347 runtime檔，不是全歷史重跑。新APK SHA **`0310fe1870668633e03f2413cb3b927e6eceb922f7cbe534efb7d45f14a2a263`**，raw未重封裝；保存SQLite僅rb雜湊、不開連線。
+
+完整11項仍active；原31筆／world371參戰失效、Windows startup與F吞吐問題未由本輪修復，頭盔、MR、跨機及25位操作仍待實際驗收。完整CI精確來源及raw雜湊核對結果另記於本節後續。
+
 ## 2026-11-01：統計來源標籤不能當完整數字讀回
 
 AI功能`17b75e9`的[CI41297698388](https://github.com/peca12968/vr-command-center/actions/runs/41297698388)／job124821936708最終failure：738規則／459 HTTP／47串流、工作流程Python含7 targeting／素材及78 Node已過，browser在check.cjs:205統計列精確斷言失敗。原只等「模擬資料」標籤後立即讀整列，沒有該刻row metadata；失敗後PNG的數字已正確，不能由較晚截圖推定斷言時也正確、或證明唯一CI原因。4檔artifact13080141669＋log／ZIP **1,053,078 bytes／SHA `9297eabd5a6fd7dfb3111cb6fb6ed96d0f01a634a3ce79b62fbd6c3071f78594`**精確保存，原failure不改判。

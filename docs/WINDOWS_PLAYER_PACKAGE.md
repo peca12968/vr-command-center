@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-02 最新`windows-player-0.39.0.zip`加入[電腦端蹲姿](DESKTOP_CROUCH.md)，82,647,558 bytes／SHA `09f4ac14a9497329080d018dd634ebfdee13cabb0b7e0c7d2ed8b077173e47cc`、311 runtime檔及原launcher，新C展開19項核對／拒絕成功。224真正Editor、同源雙平台與unpacked原生C／W／視窗實測見PROGRESS；未重跑完整封裝GUI／跨機或頭盔驗收。舊0.38與其他ZIP保持，以下為歷史。
+
 最新`windows-player-0.38.0.zip`使用[AI可見目標](AI_VISIBLE_TARGETS.md)的同源Windows建置，82,646,224 bytes／SHA1f4a27d8...、311 runtime檔及原launcher，新C展開19項核對成功。完整receipt／APK及原生三人／五房證據見PROGRESS，仍非完整GUI／跨機或頭盔驗收。
 
 2026-11-01 主包`windows-player-0.37.2-final.zip`為[非格點端點修正](AI_NAVIGATION_ANCHORS.md)，7d3e1a92...／311 runtime與原launcher；82,645,932 bytes／SHA `25dd1ee56234cd7da3da1f9671877b6c8967a41f03d71f903f3008558425d5c4`。新C展開19項真正核對／拒絕成功，非完整GUI／跨機。無final的0.37.2 ZIP為2c96...初候選、未包含最終逐tick觀察來源，原件保持。199真正Editor、雙平台及原生／CI範圍見PROGRESS，不能僅依檔名或相同版本號判定同源。
@@ -41,7 +43,7 @@ runtime只收VrCommand.exe／UnityPlayer／CrashHandler／WinPix及D3D12、MonoB
 1. 將ZIP完整解壓到本機資料夾，保留VrCommand_Data等所有檔案。不要直接在壓縮檔中執行，也不要只複製EXE。
 2. 開啟Launch-Player.exe，按「選擇連線檔…」，選擇控制人員提供的JSON。啟動器只顯示檔名與IPv4／port，不顯示票券。
 3. 按「開始遊戲」。啟動器核對玩家包中列出的全部檔案雜湊，再用獨立程序開啟遊戲；同一啟動器不重複開啟同一玩家。
-4. 用WASD移動、方向鍵或右鍵拖曳瞄準、Space／左鍵射擊、R換彈、B任務簡報。完整操作見[DESKTOP](DESKTOP.md)。結束時等待最終戰績。
+4. 用WASD移動、Ctrl按住或C切換蹲姿、方向鍵或右鍵拖曳瞄準、Space／左鍵射擊、R換彈、B任務簡報。完整操作見[DESKTOP](DESKTOP.md)。結束時等待最終戰績。
 
 關閉啟動器不會終止已開啟的遊戲或替操作員End。遊戲結束後啟動器可再次使用，但仍須有效短票券；重新配票後，將新檔存回相同路徑可使用遊戲原Reconnect流程。連線檔的角色／四欄結構、IPv4及port先離線檢查；票券簽章、效期、admission、room／seat仍由遊戲伺服器驗證，格式正確不代表可入場。
 
