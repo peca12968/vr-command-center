@@ -1,14 +1,19 @@
 const { randomUUID } = require('node:crypto');
 const path = require('node:path');
+const fs = require('node:fs/promises');
 
 module.exports = async function missionBrowser({ page, context, api, tokens, base, mission, session, screenshots, check }) {
   const editor = await context.newPage(); const errors = []; editor.on('pageerror', error => errors.push(error.message));
   const revise = (id, body) => api(`/missions/${id}/revisions`, 'POST', body, 'Master', 201, undefined, randomUUID());
-  async function ready() { await editor.waitForFunction(() => !document.querySelector('#mission-fields').disabled); }
+  // These predicates inspect DOM state, including while another operator tab is
+  // active. Do not depend on that editor receiving an animation frame.
+  const waitForDom = (predicate, arg) => editor.waitForFunction(predicate, arg, { polling: 100 });
+  async function ready() { await waitForDom(() => !document.querySelector('#mission-fields').disabled); }
   try {
+    await editor.bringToFront();
     await editor.goto(base + '/console/'); await editor.locator('#login-key').fill(tokens.Master); await editor.locator('#login-form button').click();
     await editor.locator('#tab-missions').click(); await editor.locator('#edit-mission option').waitFor({ state: 'attached' });
-    await editor.locator('#load-mission').click(); await editor.waitForFunction(() => document.querySelector('#draft-status').textContent.includes('第 1 版')); await ready();
+    await editor.locator('#load-mission').click(); await waitForDom(() => document.querySelector('#draft-status').textContent.includes('第 1 版')); await ready();
     check(await editor.locator('#mission-version option').count() === 1 && await editor.locator('#save-revision').isEnabled(), 'Loaded mission identifies revision one and enables saving its next version');
     await editor.locator('#draft-name').fill('夜間防衛修訂 <第二版>'); await editor.locator('#draft-duration').fill('1500');
     await editor.locator('#draft-weather').selectOption('Clear'); await editor.locator('#draft-time').selectOption('Day');
@@ -19,11 +24,11 @@ module.exports = async function missionBrowser({ page, context, api, tokens, bas
       if (loseRevision) { loseRevision = false; await route.fetch(); await route.abort('failed'); } else await route.continue();
     });
     await editor.locator('#save-revision').click(); await editor.locator('#pending-command').waitFor({ state: 'visible' });
-    await editor.waitForFunction(() => !document.querySelector('#retry-command').disabled);
+    await waitForDom(() => !document.querySelector('#retry-command').disabled);
     check(await editor.locator('#draft-name').isDisabled() && await editor.locator('#load-mission').isDisabled(), 'Lost revision response freezes the original mission request and draft');
     const secondId = (await api(`/missions/${mission.id}/history`)).headId, second = await api('/missions/' + secondId);
     const third = await revise(second.id, { ...second.definition, name: '另一主控的第三版' });
-    await editor.locator('#retry-command').click(); await editor.waitForFunction(() => document.querySelector('#pending-command').hidden && document.querySelector('#draft-status').textContent.startsWith('已儲存')); await ready();
+    await editor.locator('#retry-command').click(); await waitForDom(() => document.querySelector('#pending-command').hidden && document.querySelector('#draft-status').textContent.startsWith('已儲存')); await ready();
     check(attempts.length === 2 && JSON.stringify(attempts[0]) === JSON.stringify(attempts[1]) && attempts[0].key,
       'Revision retry preserves its exact parent, definition and durable request ID');
     check(await editor.locator('#draft-name').inputValue() === second.definition.name && (await editor.locator('#draft-status').innerText()).includes('已有第 3 版') && await editor.locator('#save-revision').isDisabled(),
@@ -36,7 +41,8 @@ module.exports = async function missionBrowser({ page, context, api, tokens, bas
       'Background revision refresh preserves the main operator draft and layout');
     check((await api('/sessions/' + session.id)).mission.id === mission.id && JSON.stringify((await api('/missions/' + mission.id)).definition) === JSON.stringify(mission.definition),
       'Running session and original library snapshot remain bound to their unchanged original mission');
-    await editor.locator('#load-mission').click(); await editor.waitForFunction(() => document.querySelector('#draft-status').textContent.includes('第 3 版') && !document.querySelector('#save-revision').disabled);
+    await editor.bringToFront();
+    await editor.locator('#load-mission').click(); await waitForDom(() => document.querySelector('#draft-status').textContent.includes('第 3 版') && !document.querySelector('#save-revision').disabled);
     const staleCatalog = await api('/mission-library');
     await editor.route('**/api/mission-library', route => route.fulfill({ json: staleCatalog }));
     await editor.locator('#draft-name').fill('保留這份衝突草稿');
@@ -44,14 +50,14 @@ module.exports = async function missionBrowser({ page, context, api, tokens, bas
     await editor.locator('#save-revision').click(); await editor.locator('#notice.error').waitFor(); await ready();
     check(await editor.locator('#draft-name').inputValue() === '保留這份衝突草稿' && (await api(`/missions/${mission.id}/history`)).headId === fourth.id,
       'Stale revision is rejected while retaining the operator draft and authoritative newer head');
-    await editor.locator('#load-mission').click(); await editor.waitForFunction(() => document.querySelector('#draft-status').textContent.includes('第 4 版') && !document.querySelector('#save-revision').disabled);
+    await editor.locator('#load-mission').click(); await waitForDom(() => document.querySelector('#draft-status').textContent.includes('第 4 版') && !document.querySelector('#save-revision').disabled);
     await editor.locator('#refresh').click(); await ready();
     check(await editor.locator('#edit-mission').inputValue() === fourth.id && await editor.locator('#save-revision').isEnabled(),
       'Fresh version history advances the known head and a late stale catalog cannot regress it');
     await editor.unroute('**/api/mission-library'); await editor.locator('#refresh').click();
     await editor.locator(`#edit-mission option[value="${fourth.id}"]`).waitFor({ state: 'attached' });
     await editor.locator('#mission-version').selectOption(mission.id); await editor.locator('#load-version').click(); await ready();
-    await editor.waitForFunction(name => document.querySelector('#draft-name').value === name, mission.definition.name);
+    await waitForDom(name => document.querySelector('#draft-name').value === name, mission.definition.name);
     check(await editor.locator('#prop-x').inputValue() === '3.5' && await editor.locator('#save-revision').isDisabled() && await editor.locator('#mission-version option').count() === 4,
       'History loads exact old geometry and conditions without enabling a conflicting revision branch');
     await editor.screenshot({ path: path.join(screenshots, 'mission-versions-desktop.png'), fullPage: true });
@@ -62,7 +68,7 @@ module.exports = async function missionBrowser({ page, context, api, tokens, bas
     await editor.locator('#launch-version').click();
     check(await editor.locator('#launch-mission').inputValue() === mission.id, 'Historical draft explicitly selects its saved original version for launch');
     await editor.locator('#launch-room').selectOption('3'); await editor.locator('#create-session-form button').click();
-    await editor.waitForFunction(() => !document.querySelector('#session-panel').hidden && document.querySelector('#session-phase').textContent.includes('準備'));
+    await waitForDom(() => !document.querySelector('#session-panel').hidden && document.querySelector('#session-phase').textContent.includes('準備'));
     let created = (await api('/sessions')).find(row => row.roomIds.length === 1 && row.roomIds[0] === 3);
     check(created?.mission.id === mission.id && JSON.stringify(created.mission.definition) === JSON.stringify(mission.definition), 'Launching a historical version uses its full original immutable definition');
     await api('/sessions/' + created.id + '/commands', 'POST', { commandId: randomUUID(), action: 'End' });
@@ -80,18 +86,18 @@ module.exports = async function missionBrowser({ page, context, api, tokens, bas
       if (loseReadback) { loseReadback = false; await route.fulfill({ status: 503, json: { error: 'Readback temporarily unavailable' } }); }
       else await route.continue();
     });
-    await editor.waitForFunction(() => !document.querySelector('#retry-command').disabled); await editor.locator('#retry-command').click();
-    await editor.waitForFunction(() => !document.querySelector('#retry-command').disabled && !document.querySelector('#pending-command').hidden);
+    await waitForDom(() => !document.querySelector('#retry-command').disabled); await editor.locator('#retry-command').click();
+    await waitForDom(() => !document.querySelector('#retry-command').disabled && !document.querySelector('#pending-command').hidden);
     check(await editor.locator('#draft-name').isDisabled(), 'Accepted mission save retains its retry receipt when reading version metadata fails');
     await editor.locator('#retry-command').click();
-    await editor.waitForFunction(() => document.querySelector('#pending-command').hidden && document.querySelector('#draft-status').textContent.startsWith('已儲存')); await ready();
+    await waitForDom(() => document.querySelector('#pending-command').hidden && document.querySelector('#draft-status').textContent.startsWith('已儲存')); await ready();
     const heads = await api('/mission-library'), copied = heads.find(row => row.mission.definition.name === '從舊版另存的獨立任務');
     check(heads.length === 2 && copied.number === 1 && copied.seriesId === copied.mission.id && creates.length === 3 && creates.every(row => JSON.stringify(row) === JSON.stringify(creates[0])),
       'Save-as-new retries once into a separate series without duplicating the accepted mission');
     await editor.unroute('**/api/missions'); await editor.locator('#edit-mission').selectOption(fourth.id); await editor.locator('#load-mission').click();
-    await editor.waitForFunction(() => document.querySelector('#draft-status').textContent.includes('第 4 版')); await ready(); await editor.locator('#launch-version').click();
+    await waitForDom(() => document.querySelector('#draft-status').textContent.includes('第 4 版')); await ready(); await editor.locator('#launch-version').click();
     await editor.locator('#launch-room').selectOption('3'); await editor.locator('#create-session-form button').click();
-    await editor.waitForFunction(() => !document.querySelector('#session-panel').hidden && document.querySelector('#session-phase').textContent.includes('準備'));
+    await waitForDom(() => !document.querySelector('#session-panel').hidden && document.querySelector('#session-phase').textContent.includes('準備'));
     created = (await api('/sessions')).find(row => row.roomIds.length === 1 && row.roomIds[0] === 3);
     check(created?.mission.id === fourth.id && created.mission.definition.durationSeconds === 1500 && created.mission.definition.props[0].position.x === 4.5,
       'Latest version launch uses the revised duration, environment and layout');
@@ -104,5 +110,13 @@ module.exports = async function missionBrowser({ page, context, api, tokens, bas
     check(await editor.locator('#mission-history').isHidden() && await editor.locator('#mission-version option').count() === 0 && await editor.locator('#edit-mission option').count() === 0 && await editor.locator('#draft-name').inputValue() === '',
       'Logout clears mission history and a delayed old history response cannot restore the draft');
     check(errors.length === 0, 'Mission revision workflow has no uncaught browser script errors');
-  } finally { await editor.close(); }
+  } catch (error) {
+    const diagnostic = await editor.evaluate(() => ({ visibility: document.visibilityState,
+      name: document.querySelector('#draft-name').value, status: document.querySelector('#draft-status').textContent,
+      selectedVersion: document.querySelector('#mission-version').value,
+      history: document.querySelector('#history-status').textContent, notice: document.querySelector('#notice').textContent })).catch(() => ({ unavailable: true }));
+    await fs.writeFile(path.join(screenshots, 'mission-editor-failure.json'), JSON.stringify(diagnostic, null, 2));
+    await editor.screenshot({ path: path.join(screenshots, 'mission-editor-failure.png'), fullPage: true, timeout: 5000 }).catch(() => {});
+    throw error;
+  } finally { await editor.close(); await page.bringToFront(); }
 };

@@ -1,5 +1,7 @@
 # 開發指引
 
+2026-11-01 e12本機67605 exit0／67 Node235 Chromium；CI41260301809 job124712001366在mission-browser:54歷史草稿名稱DOM等待30秒逾時exit1，尚未到世界／相機；717／459／47、Python／素材67 Node過，2 PNG artifact13064888401及log保留。下一修正只任務DOM polling100（官方預設raf），切editor／回主頁明確啟用，失敗前另存editor無憑證狀態／5秒圖並重拋。原30秒與所有斷言保持；舊無editor狀態，不能證DOM正確／RAF根因或產品無缺陷。前42 console另封存與13失敗CI hash保持，修正結果另記，完整11項active。
+
 2026-11-01 b014 CI41259359885 job124709212647：.NET717／459／47、Python／素材與67 Node成功，瀏覽器新登入camera option在world-browser:84逾時exit1；原log與artifact13065165755另存，不當bringToFront根因修復或完整成功。下一修正提早啟用主／新頁，舊行動房控所有斷言／截圖後關context；原30秒等待、60秒relay及正式UI API保持。新頁失敗另存無憑證狀態JSON／5秒截圖並重拋；本機及修正CI結果另記。
 
 2026-11-01 動態管理命令見docs/DESKTOP_ACTIVE.md／PROGRESS：operator-controls明確選用，正常API雨夜Hold射擊／換彈後Patrol與Fog Day Advance，非本輪操作員UI／autoAttack傷害。先存兩份receipt，非duplicate／同session／遞增，來源需Running／非suspended／tick前進及observed>=接受序號、環境／AI完整相符；不能接受當套用。原敵軍ID／room／health保持、只算活敵>1cm移動。33469 exit0，13項／182快照／26 Requested報告、28204 Running列及1359全回放／12參考成功；25原結果／CSV／雙seal／server ack精確world1359 combat5 through52。最晚145.318秒／最多1134列，原240／4096與0.5／1.5政策保持；0.5542095觀察tick gap非RTT／PoseSend。46 Python，capacity預設Clear Day保持、只有明確參數才動態環境。新C300／前48 runtime1727、新F383及前F337／動態1138／原反例／獨立／history321與各API159及當前ZIP APK receipt保持；writer停才snapshot，保存SQLite不開。仍一位操作24接收、無霧天人工GPU、非25人同時操作；Unity0.36.1 code44／NGO29／API UI0.30及原179雙平台不變，完整11項active，原31筆／F吞吐／實機／跨機另驗。

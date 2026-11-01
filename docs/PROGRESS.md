@@ -30,6 +30,10 @@ End後完整API回放**1359連續幀／12參考**精確一致，參考區間每�
 
 瀏覽器fixture進一步在主觀戰及新登入分頁開始載入前明確bringToFront；行動房控分頁在原所有斷言／截圖完成後關閉其context，不讓已測完的viewer繼續占用renderer。沒有改正式UI／API、提高30秒等待或跳過原斷言；camera及clock仍用各自60秒來源。若新登入鏡頭載入再失敗，另外保存該分頁visibility／world及camera message／option count／world sequence與最多5秒失敗截圖，再重拋原錯誤；不記憑證／headers。這是fixture目標與生命週期修正，尚不當作已證明Chromium／CPU／網路根因。
 
+該修正[e12a52a](https://github.com/peca12968/vr-command-center/commit/e12a52a4644ab3809a7ac4217344104e1a861865)本機原handle67605真正exit0，**67 Node／235 Chromium成功**、相機還原畫面已檢視。`operator-browser-evidence-validation.json`核對原console42檔先完整封存、現console42檔及b014失敗CI13檔／log另存hash，前原生runtime／證據不動。但[CI41260301809](https://github.com/peca12968/vr-command-center/actions/runs/41260301809)／job124712001366又真正exit1：.NET717／459／47、Python／素材與67 Node過，瀏覽器更早在`mission-browser.cjs:54`歷史版本草稿名稱等待30秒逾時，尚未到世界觀戰，不能稱相機修正已在這輪雲端驗過。原artifact13064888401為2 PNG、592388 bytes，ZIP SHA256 `e5debca0aff2da793649995aa8572e8cf509814d0de2ec6c4c8748bc062fd750`，與log保存在新`ci-41260301809-*`。
+
+任務fixture原跨主頁／editor後未明確切回，DOM狀態又以`waitForFunction`預設動畫幀輪詢。[Playwright官方文件](https://playwright.dev/docs/api/class-page#page-wait-for-function)說明預設raf與明確毫秒輪詢的差異；新版本僅將該任務DOM等待統一為polling100，啟用editor及結束後主頁，原30秒逾時與所有版本／保存／衝突斷言保持。失敗時在關editor之前另存visibility／草稿名稱／版本選擇／history／notice及最多5秒截圖，仍重拋。這消除測試對動畫幀排程的不必要依賴，但舊CI沒有editor狀態，**尚未證明逾時時DOM已正確、背景RAF停住或產品無缺陷**；不能以推測宣稱根因／修復。修正的本機完整與雲端結果另記。
+
 `active-operator-runtime-validation.json`在原33469 terminal後核對新C runtime300檔／F snapshot完全一致，前48 runtime1727檔／前F337、前四動態F1138、原尾界反例與獨立房F證據、history321及各API159保持。總49 C runtime2027檔，新場F383檔另存hash；當前ZIP／APK／receipt metadata保持。所有writer全停才一次snapshot，C原件不動，保存SQLite只rb雜湊、不開連線／ack修復／截尾。完整11項active，原31筆／F發布吞吐、頭盔／MR／VIVE／跨機25台與廠商硬體仍各自待驗。
 
 ## 2026-11-01：同版動態PC與25份最終結果／server ack
