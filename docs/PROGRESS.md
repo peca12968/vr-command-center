@@ -23,11 +23,15 @@
 
 新增9個反例含空／closed／未知delivery、缺失／重複結果、舊admission、前一幀世界尾界、錯combat tail／room／health及client已收但server ack缺失／重複／外連線／timeout。**17 active＋11 capacity＋12 debrief＋17 independent evidence，共57本機Python通過**，語法／diff成功；CI既有active入口自動包含新案例。這些原生檢查不當新跑179 Editor。
 
-功能[b906236](https://github.com/peca12968/vr-command-center/commit/b906236e874e1112ce3e0c4349933b534f39c16a)的[CI 41256605682](https://github.com/peca12968/vr-command-center/actions/runs/41256605682)這次真正啟動，雲端.NET建置及717規則／459 HTTP／47 world-stream、Python與素材檢查成功，67 Node通過；最後瀏覽器在`world-browser.cjs:86`的第二分頁完整截圖30秒逾時而exit1，不能沿用前輪帳務阻擋的說法或稱整套瀏覽器成功。原job log及artifact13063671486的14檔保存在`artifacts/ci-41256605682-*`，失敗畫面亦顯示原60秒camera來源已結束；這不證明Chromium底層根因。
+功能[b906236](https://github.com/peca12968/vr-command-center/commit/b906236e874e1112ce3e0c4349933b534f39c16a)的[CI 41256605682](https://github.com/peca12968/vr-command-center/actions/runs/41256605682)這次真正啟動，雲端.NET建置及717規則／459 HTTP／47 world-stream、Python與素材檢查成功，67 Node通過；最後瀏覽器在`world-browser.cjs:86`的第二分頁完整截圖30秒逾時而exit1，不能沿用前輪帳務阻擋的說法或稱整套瀏覽器成功。原job log一檔及artifact13063671486的13檔保存在`artifacts/ci-41256605682-*`，失敗畫面亦顯示原60秒camera來源已結束；這不證明Chromium底層根因。
 
 測試現在先以[Playwright官方bringToFront](https://playwright.dev/docs/api/class-page#page-bring-to-front)明確啟用要截圖的分頁，關閉後啟用原頁。相機儲存／延遲回應流程結束時，停止並正常End自己原場，再為擷取時鐘與中斷測試建立另一個原有60秒上限relay；先核對新場Running且程序仍活著，避免慢CI拿已Ended的相機來源冒充即時資料。沒有提高截圖30秒或relay上限、跳過斷言、改正式UI／API／遊戲新鮮度政策。原第三個完整封存回放流程保持。
 
-最終修正本機原handle30549真正exit0，**67 Node／235 Chromium**（新增一項獨立live來源前提）成功；Chromium151.0.7922.34／Playwright1.62.1，實際相機位置截圖已人工檢視。原console42檔先完整保存到`console-before-ci-focus-549e61a44ca645c785f23a43a576c519`並附hash，未覆寫原失敗或原生runtime證據。後續修正CI另記，不把本機結果當雲端通過。
+最終修正本機原handle30549真正exit0，**67 Node／235 Chromium**（新增一項獨立live來源前提）成功；Chromium151.0.7922.34／Playwright1.62.1，實際相機位置截圖已人工檢視。原console42檔先完整保存到`console-before-ci-focus-549e61a44ca645c785f23a43a576c519`並附hash，未覆寫原失敗或原生runtime證據。`browser-focus-evidence-validation.json`重新核對原42檔完整、現本機console42檔及原CI artifact13檔／job log另存SHA；後續修正CI另記，不把本機結果當雲端通過。
+
+修正[8d2227a](https://github.com/peca12968/vr-command-center/commit/8d2227aa02b3eb384a9926ad498cf9ae7bb3b5ad)的[CI 41258070247](https://github.com/peca12968/vr-command-center/actions/runs/41258070247)／job124705387031**真正完成success**，本機watch原handle73920也exit0。Linux .NET restore／build、**717規則／459 HTTP／47 world-stream**、工作流程全部Python／語法／素材檢查及**67 Node／235真正Chromium**成功，沒有跳過原斷言。artifact13063049447（9453864 bytes、ZIP SHA256 `da8b3ebe38337f86227230e5572167018ebf3b49efa9de3a4d7e76625a8340b6`）下載到新`ci-41258070247-console`，37檔及job log另存SHA；成功相機位置畫面已人工檢視，即使camera來源自然結束，時鐘／中斷流程仍使用自己的新live來源。
+
+`browser-focus-ci-success-validation.json`核對成功37檔、235通過metadata及前55份本機／失敗CI檔完整。兩次CI均保存，這是瀏覽器fixture修正與管理API回歸，不當Chromium底層根因證明、新Unity／XR／原生渲染或跨機容量驗收。後續僅文件證據提交使用`[skip ci]`，上述成功來源精確為8d2227a，沒有為文件重跑整套測試。
 
 `active-e059-runtime-validation.json`核對本輪4 C runtime共836檔／F snapshot逐檔一致，前44 runtime891檔、前F337／原尾界反例F76／獨立房F112／0.36 history321與三組API各159保持；總48 C runtime1727檔，新四場F證據1138檔另存hash，失敗也保存。既有0.36／0.36.1 Windows包、APK與receipt metadata保持，來源／binary仍F、runtime明確C SSD。所有writer全停才一次snapshot保留原件，保存SQLite不開連線、沒有修復／ack補送或截尾。
 

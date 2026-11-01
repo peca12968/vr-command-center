@@ -1,5 +1,7 @@
 # VR Command Center
 
+[最新雲端CI](https://github.com/peca12968/vr-command-center/actions/runs/41258070247)完整通過：717規則、459 HTTP、47串流，以及Python／素材與67 Node／235 Chromium。相機與即時來源測試各自隔離，原截圖逾時仍保存在[開發紀錄](docs/PROGRESS.md)；Unity版本與既有雙平台建置保持。
+
 新增[動態PC結束驗收](docs/DESKTOP_ACTIVE.md)：一位實際操作、24接收端，移動／射擊／換彈／擊殺與130快照、1420幀回放通過；25份個別戰績及原連線server ack精確核對後才停程序。同版0.36.1來源保持，實機／25人同時操作及舊姿態問題另驗。
 
 同版[五獨立房長任務](docs/DESKTOP_INDEPENDENT_LONG.md)已完成5個server＋25個PC程序、每房900秒及42341幀完整回放，單房暫停與各房精確戰績／封存通過。新增閉源JSON／CSV讀回核對，仍是同機靜止Simulation；完整11項與實機／動態操作另見[進度](docs/PROGRESS.md)。
