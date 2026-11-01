@@ -2,6 +2,10 @@
 
 ## 2026-11-02：Windows可攜管理服務與私有程序收尾
 
+[功能1a959c6](https://github.com/peca12968/vr-command-center/commit/1a959c6b89e627791815537a57784c3bcb4819b1)的[CI41332911824](https://github.com/peca12968/vr-command-center/actions/runs/41332911824)／job124926578810／精確1a959c6完整**success**：Linux738規則／459 HTTP／47 world、6個真正私有管線程序案例、7項新Python封裝邊界與工作流程原檢查／素材、78 Node／256 Chromium全部通過。2 Windows限定skip不是Framework／GUI／Unity或頭盔證據；本機105與GUI／原生另外保存，沒有以CI代替。
+
+CI下載console43檔artifact13093623576／ZIP **10,038,781 bytes／SHA `07e02d8202b099c6d6d21504aef3a89a26edb08cb32a3aee434346c9aa957df0`**，control-pipe13檔artifact13093473878／ZIP **3,918 bytes／SHA `34bc0eb51bdc4540ab33819ff56aa71f77e4fd4f58a47afa961c883f6e43d3b2`**及完整decoded job log，均與GitHub digest相符。control artifact只含6份遮蔽log／6份有限status／checks，closed-pipes stdout未觀察明確null，沒有runtime／key／DB。`control-ci-validation.json`核對前1026 browser／新43＝**1069份browser證據**與另13份CI管線metadata，原14場C52native／C318control與F snapshot、六候選ZIP／主包、478 publish、API整組、原Unity0.39／224及ZIP／APK保持。後續僅文件證據skip ci，測試來源精確1a959c6；Windows本輪459成功仍非舊startup根因修復，完整11項active。
+
 API／控制台 **0.31.0** 新增[管理服務包](WINDOWS_CONTROL_PACKAGE.md)。Framework4.8編譯的繁中啟動器，可新增／選取自己的資料實例，明確選擇本機IPv4／埠、啟動／停止API及開啟控制台。API apphost自含.NET／ASP.NET Core **10.0.14 win-x64**，資料、七角色金鑰與票券簽章key獨立存放；Web／入場／統計／世界契約保持，Unity **0.39.0／code49／NGO29／e0d60e4e...**與原224 Editor／雙平台receipt保持，本輪沒有新Editor或Unity建置。
 
 API只在明確ControlPipeToken配置時監看私有stdin，ApplicationStarted發本次nonce就緒事件。啟動器另核對原child存活、實際包內coreclr及Master身分，自己的stderr／stdout診斷有限且遮蔽全部key／nonce。錯token短行不停止，匹配STOP要求正常停止；EOF／越界／非ASCII／讀取或就緒輸出IO失敗也收尾。普通API沒有此token仍沿原生命週期；沒有公開HTTP停機／取key端點。正常Stop等原child真正退出／exit0，40秒後的強制收尾或未知不能綠，GUI保留未確認狀態。繼承的角色key／資料等設定不能蓋過自己的實例；exclusive lease拒絕同實例雙啟動。

@@ -39,6 +39,6 @@ publish從明確的來源清單建立全新C槽snapshot，在該snapshot增加RI
 
 105項Windows封裝檢查包含CLI拒絕、七角色與房控權限、五獨立API名冊共25席、原Preparing場次／admission及任務重開、私有檔案保持、後續Linked／active0、原API正常停止、父程序被終止後的EOF停止及有限診斷不含角色金鑰。25席只是管理名冊，沒有冒充25個遊戲端。GUI工具只準備自己的新實例及觀察程序；實際選檔／啟停／關窗透過native UI操作，review不能取代child退出及HTTP身分證據。先用CLI建立及暖啟動，GUI只重開同一實例，不操作新增金鑰、剪貼簿或瀏覽器登入。
 
-額外6項真正API私有管線案例與7項Python封裝邊界檢查納入CI；Windows Framework／GUI及受控編譯方法反例只在本機執行，不由Linux CI代替。舊樹狀資料夾選擇的GUI場次未完成而failed，後改為可輸入路徑的設定檔選取；原件與cleanup保持。最終場次、完整CI來源、其他候選及未驗限制見[PROGRESS](PROGRESS.md)。
+額外6項真正API私有管線案例與7項Python封裝邊界檢查納入[精確1a959c6的成功CI](https://github.com/peca12968/vr-command-center/actions/runs/41332911824)；738規則／459 HTTP／47 world、Python／素材、78 Node／256 Chromium全部通過。Windows Framework／GUI及受控編譯方法反例只在本機執行，不由Linux CI代替。舊樹狀資料夾選擇的GUI場次未完成而failed，後改為可輸入路徑的設定檔選取；原件與cleanup保持。最終場次、CI43＋13檔證據、其他候選及未驗限制見[PROGRESS](PROGRESS.md)。
 
 Notices保留實際NuGet／runtime包的原始metadata與授權；另附[SQLitePCLRaw上游參考授權](https://github.com/ericsink/SQLitePCL.raw/blob/v2.1.12/LICENSE.TXT)、[參考NOTICE](https://github.com/ericsink/SQLitePCL.raw/blob/v2.1.12/NOTICE.TXT)及[Microsoft.Data.Sqlite上游授權](https://github.com/dotnet/efcore/blob/v10.0.14/LICENSE.txt)，原blob byte雜湊已核對。SQLitePCLRaw實際2.1.13的原NuGet metadata保留；參考NOTICE來自明確標示的2.1.12，可能提到本包沒有的元件，不當成實際2.1.13來源版本證明。

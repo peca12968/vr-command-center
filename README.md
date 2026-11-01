@@ -2,6 +2,8 @@
 
 API／控制台0.31.0新增[Windows可攜管理服務](docs/WINDOWS_CONTROL_PACKAGE.md)：繁中啟動器、自含.NET執行環境與獨立資料實例，支援既有任務／五房名冊重開。105項實際封裝檢查、原子報告反例、真正GUI啟停及五房原生回歸通過；跨機與頭盔仍待驗證，完整範圍見[進度](docs/PROGRESS.md)。
 
+[完整CI（1a959c6）](https://github.com/peca12968/vr-command-center/actions/runs/41332911824)通過738規則／459 HTTP／47串流、6項程序管線、Python／素材與78 Node／256 Chromium；本機Windows封裝／GUI及原失敗證據另見進度，完整11項仍在開發中。
+
 Unity0.39.0新增[電腦端蹲姿與掩體](docs/DESKTOP_CROUCH.md)：Ctrl按住或C切換、蹲姿移動及失焦站立恢復，使用原伺服器姿態／命中規則。224真正Editor、同源Windows／Quest及實際C／W／視窗操作、792完整回放／兩份戰績與五房回歸通過；目前無頭盔，完整範圍與原失敗見[進度](docs/PROGRESS.md)。
 
 [完整CI（914051c）](https://github.com/peca12968/vr-command-center/actions/runs/41325529518)通過738規則／459 HTTP／47串流、Python／素材、78 Node／256 Chromium。首輪相機操作逾時與新增診斷分開保存；完整11項仍在開發中。
