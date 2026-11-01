@@ -1,5 +1,9 @@
 # 開發進度
 
+## 2026-11-02：硬體離線模擬器CI與證據
+
+[功能574df36](https://github.com/peca12968/vr-command-center/commit/574df36d3cd4246dec0ad67885e8a544fa4f47c1)的[CI41349387031](https://github.com/peca12968/vr-command-center/actions/runs/41349387031)／job124976066366完整 **success**：Linux772核心／459 HTTP／47 world、6 pipe、38實際API／.NET離線模擬CLI、全部Python／素材及89 Node／296 Chromium通過。2 Windows限定skip不是WinForms、Unity／Editor、native遊戲、實體硬體或頭盔驗收。console49 artifact13100741395／ZIP **12,022,752 bytes／SHA256 e24b2ce787ccae8aabb70c3bc32268a064ce9a89cc9c51313c37da983dd51d47**，control13 artifact13100701380／ZIP **3,919／SHA256 a2569dfd539a5c1fef56e3b703f7e83e1bc1dc9aa1eca2046fcff0311239077a**，hardware26 artifact13099889416／ZIP **22,380／SHA256 e8ce6368326ccb6080a5a9e4f7280e7a44bbeacad894929a079d8ad24f508172**，已下載核對GitHub digest／逐檔hash；hardware檢查與原API cleanup讀回成功，artifact不含DB、journal或角色金鑰。完整decoded log SHA256 **53685b090bb76aeb81af85d2c7270473cb3867b64fd50692c046af9eefc0f5fa**保存。`hardware-ci-validation.json`明列1415＋49＝**1464 browser證據**，control13／hardware26各自另列，nativeUI7保持；不是新本機全browser或Unity執行。本機C75／F與原C27／四舊報告、9管理／5server ZIP及原Unity0.39／e0d／224雙平台、玩家ZIP APK保持。後續只有文件提交skip ci，測試來源精確574df36，完整11active。
+
 ## 2026-11-02：硬體回饋離線模擬器
 
 新增[HardwareFeedbackSimulation／開發測試台](HARDWARE_SIMULATOR.md) **0.1.0**，不是廠商wire或實機介面。新tool以整段schema6／7重建已Ended且戰鬥精確seal的單場，沿用原SessionManager／CombatLedger／admission與權限；只把ShotFired／PlayerDamaged投影成模擬訊號。原event／stream／report／ObservedSequence及room／admission不丟，晚到的報告不讀最終名冊。設備ID是本地模擬UUID，不是USB序號；無任何設備I/O、輸入事件注入、震動強度或實體停止保證，檔案符合重建規則不等於API來源簽章。
