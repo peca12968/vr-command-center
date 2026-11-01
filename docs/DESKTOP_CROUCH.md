@@ -24,4 +24,6 @@ python scripts/check-desktop-crouch.py --api-dll <既有0.30.2隔離API.dll> --r
 
 正常End後核對兩份原admission結果、CSV、戰鬥／世界精確seal、兩個原連線唯一server ACK和完整SSE回放；事件／世界序號不能缺失，保存checkpoint須相同，原Hold NPC／名冊／同伴和兩種合法高度逐幀核對。所有writer停止、cleanup成功後才一次snapshot及complete。五helper雜湊只涵蓋列出的檔案，不是完整runtime／OS graph；不開啟保存SQLite。
 
-實際本輪結果、包與CI精確來源另記於[開發進度](PROGRESS.md)。原31筆參戰失效、world371、Windows startup與F吞吐問題保持待查。
+真正Windows本輪6項、792完整回放／739來源幀及11保存參考、兩份原戰績與CSV／雙seal／兩個唯一ACK成功；同源五房6項7場及新包19項核對成功。原生使用實際C／W與視窗最小化恢復，Ctrl持續按住／放開只在上述Editor官方Keyboard驗證。本場明確Paused內的參戰失效幀為0，沒有由排除條件補造成功。
+
+[精確914051c的CI](https://github.com/peca12968/vr-command-center/actions/runs/41325529518)完整738規則／459 HTTP／47 world、Python／素材、78 Node／256 Chromium通過，2 Windows skip非Editor／原生。首c78 CI的camera-save逾時與新fixture診斷分開保存，成功新場不當原失敗根因證明；遊戲來源e0d60e4e...與224雙平台保持，fixture後未重建。實際各場、包雜湊與限制見[開發進度](PROGRESS.md)。原31筆參戰失效、world371、Windows startup與F吞吐問題保持待查。

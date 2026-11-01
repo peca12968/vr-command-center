@@ -2,6 +2,8 @@
 
 Unity0.39.0新增[電腦端蹲姿與掩體](docs/DESKTOP_CROUCH.md)：Ctrl按住或C切換、蹲姿移動及失焦站立恢復，使用原伺服器姿態／命中規則。224真正Editor、同源Windows／Quest及實際C／W／視窗操作、792完整回放／兩份戰績與五房回歸通過；目前無頭盔，完整範圍與原失敗見[進度](docs/PROGRESS.md)。
 
+[完整CI（914051c）](https://github.com/peca12968/vr-command-center/actions/runs/41325529518)通過738規則／459 HTTP／47串流、Python／素材、78 Node／256 Chromium。首輪相機操作逾時與新增診斷分開保存；完整11項仍在開發中。
+
 Unity0.38.0新增[AI 可見目標選擇](docs/AI_VISIBLE_TARGETS.md)：最近玩家被擋住時，改試真正可命中的後續玩家；保持原傷害、射速、射程與移動政策。738規則／208真正Editor、同源Windows／Quest及三人原生4項／32幀回放與五房回歸通過，舊反例與完整範圍見[進度](docs/PROGRESS.md)。
 
 API／UI0.30.2新增[雙擊場地定位鏡頭](docs/OBSERVER_GROUND.md)：在即時觀戰／回放直接點選地面觀看位置，保留角度與距離、支援原書籤。78 Node／255瀏覽器與54真正Windows場次整合通過；完整範圍與待驗見[進度](docs/PROGRESS.md)。
@@ -20,7 +22,7 @@ API／UI0.30.1修正[任務版本讀取恢復](docs/MISSION_READ_RECOVERY.md)：
 
 新增[25端動態任務管理命令檢查](docs/DESKTOP_ACTIVE.md)：實際射擊／換彈時切換雨夜，擊殺後測試巡邏與推進；182份接收端快照、1359幀回放及25份精確戰績／server ack通過。仍是一位操作、24接收端的同機Simulation，詳細範圍見[進度](docs/PROGRESS.md)。
 
-[最新雲端CI（2c33d1d）](https://github.com/peca12968/vr-command-center/actions/runs/41268781091)完整通過：717規則、459 HTTP、47串流，以及Python／素材與72 Node／248 Chromium。本機248項及原生8項也通過；本機完整HTTP啟動逾時與舊失敗仍保存在[開發紀錄](docs/PROGRESS.md)，雲端成功不取代Windows證據；Unity版本與既有雙平台建置保持。
+[歷史雲端CI（2c33d1d）](https://github.com/peca12968/vr-command-center/actions/runs/41268781091)完整通過：717規則、459 HTTP、47串流，以及Python／素材與72 Node／248 Chromium。本機248項及原生8項也通過；本機完整HTTP啟動逾時與舊失敗仍保存在[開發紀錄](docs/PROGRESS.md)，雲端成功不取代Windows證據；Unity版本與既有雙平台建置保持。
 
 新增[動態PC結束驗收](docs/DESKTOP_ACTIVE.md)：一位實際操作、24接收端，移動／射擊／換彈／擊殺與130快照、1420幀回放通過；25份個別戰績及原連線server ack精確核對後才停程序。同版0.36.1來源保持，實機／25人同時操作及舊姿態問題另驗。
 
