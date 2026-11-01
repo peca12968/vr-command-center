@@ -48,3 +48,5 @@ package沿用原實際Windows build receipt及素材／Transport授權，保留�
 最終103項包含五個獨立server＋五個接收client，之後一個Linked server＋五個接收client；觀察原Begin的Running／tick／observed／原1.5秒來源界線，六場553完整API回放、10份原admission精確結果／CSV、雙seal與closed journal durable尾界及cleanup全部成功。parent-exit第七場刻意殺父程序，自己的Unity被Job收掉、沒有成功final報告，該journal保持未封存，不混入六個正常完成場。每組只在自己的所有writer終止後一次F snapshot，不開保存SQLite。詳見[PROGRESS](PROGRESS.md)。
 
 這些都是同機Simulation，非25位同時操作、跨機、GPU效能、頭盔／MR或硬體廠商整合。完整11項長期目標仍active；原31筆、world371、舊Windows startup及F吞吐問題不因新包成功而改判。
+
+[精確95411a2的CI41335830454](https://github.com/peca12968/vr-command-center/actions/runs/41335830454)完整success：Linux738／459／47、6私有管線、4新Python邊界及素材、78 Node／256 Chromium。console43與control13檔下載digest核對，1112 browser證據與另13 metadata分開。2 Windows skip不當Framework／Unity／GUI證據；本機103與failed GUI維持各自範圍。後補closed-readback僅讀原件，10 CSV及10原network admission／server ACK精確相符，非新live測試。

@@ -2,6 +2,10 @@
 
 ## 2026-11-02：Windows遊戲伺服器可攜啟動
 
+[功能95411a2](https://github.com/peca12968/vr-command-center/commit/95411a264ac85894669b9127f3b40989982b30d0)的[CI41335830454](https://github.com/peca12968/vr-command-center/actions/runs/41335830454)／job124935327276／精確95411a2完整**success**：Linux738規則／459 HTTP／47 world、6真正pipe程序／4新Python封裝邊界與原工作流程／素材、78 Node／256 Chromium。2 Windows限定skip不是Framework／原生GUI／Editor／頭盔；本機103與failed GUI分開保持。console43 artifact13094744913／ZIP **10,005,039 bytes／SHAfd9e1fa1995ef18c65339b68308de501138f3a3cd8a91008d89810e3e2de75f4**，control13 artifact13095560953／ZIP **3,919 bytes／SHAacdf31e1d6331e34946ff3a4862814728446453441995d1d28ce6bd5e014b4c5**及完整decoded log保存，ZIP digest與GitHub相符。`server-ci-validation.json`明列1069＋43＝**1112 browser證據**，另13新CI管線metadata，未混入GUI／native；本輪沒有新本機browser場，後續文件skip ci、測試來源精確95411a2。
+
+原handle27088 terminal後的`closed-readback.json`另外只讀既有JSON／CSV／log，核對六場10份CSV每列與sealed ledger一致，10個server admission network ID與10個原ACK集合精確相等、無server timeout。這是後補閉源讀回，不是第104項新live測試或又一場原生；原C78／F snapshot不動。`server-current-source.json`保存目前五份source byte且launcher SHA與v3實際編譯輸入相同，沒有冒充v1／v2來源原件備份。
+
 新增[Windows遊戲伺服器包](WINDOWS_SERVER_PACKAGE.md)，Framework4.8繁中啟動器／CLI與原Unity0.39.0／code49／NGO29整組runtime封裝，操作員不需Python／Editor／SDK。API/UI0.31.0、rules0.8.0／world schema1／envelope7與原224真正Editor、e0d60e4ed6cefe5cd885e6aabe1621939da945ce00d56b3ed8820c0aed4db879同源Windows／ARM64 APK、原Scene／prefab ID保持，本輪沒有新Editor／Unity重建。
 
 只用GameServer角色讀原Preparing VR且無combatStream的場次；新包外資料／私有log、同API／場次mutex，啟動前UDP衝突拒絕，Unity只收到GameServer key，沒有Master／玩家票券或代替管理Begin／End。原bootstrap先核對自己的combat UUID／origin／0 accepted／未seal，再StartServer寫真正network-start log；新啟動器沿這條原順序核對同場次API來源／world header才PUT immutable endpoint並驗回條，不開live獨佔journal。就緒不是玩家pose或Running證明。包內manifest逐檔SHA／大小及完整集合、拒絕連結／越界／額外檔，不是簽章。
