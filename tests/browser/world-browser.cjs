@@ -138,7 +138,33 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       if (route.request().method() !== 'PUT') { await route.continue(); return; }
       const response = await route.fetch(); saveAccepted(); await saveGate; await route.fulfill({ response });
     });
-    await remembered.locator('#camera-name').fill('離開前的待確認位置'); await remembered.locator('#camera-save').click(); await accepted;
+    // Keep the pending-save action on its intended renderer. Observe only the
+    // bounded control state: no HTML, input values, credentials or request data.
+    const saveDiagnostics = [];
+    async function saveState(stage) {
+      const state = await remembered.evaluate(() => {
+        const button = document.querySelector('#camera-save'), box = button.getBoundingClientRect(), style = getComputedStyle(button);
+        return { visibility: document.visibilityState, focused: document.hasFocus(), activeId: document.activeElement?.id,
+          disabled: button.disabled, hidden: button.hidden, display: style.display, cssVisibility: style.visibility,
+          box: { x: box.x, y: box.y, width: box.width, height: box.height },
+          cameraMessage: document.querySelector('#camera-message').textContent.slice(0, 500),
+          refreshDisabled: document.querySelector('#camera-refresh').disabled,
+          worldSequence: document.querySelector('#world-canvas').dataset.sequence,
+          worldStatus: document.querySelector('#world-status').textContent.slice(0, 500) };
+      }).catch(() => ({ unavailable: true }));
+      saveDiagnostics.push({ stage, elapsedMilliseconds: at(), ...state });
+      await fs.writeFile(path.join(screenshots, 'world-pending-save-state.json'), JSON.stringify({
+        scope: 'This camera-save control only; no original failure cause proof', observations: saveDiagnostics }, null, 2));
+    }
+    try {
+      await remembered.bringToFront(); await saveState('before-name');
+      await remembered.locator('#camera-name').fill('離開前的待確認位置'); await saveState('before-click');
+      await remembered.locator('#camera-save').click(); await saveState('after-click'); await accepted;
+    } catch (error) {
+      await saveState('failure');
+      await remembered.screenshot({ path: path.join(screenshots, 'world-pending-save-failure.png'), fullPage: true, timeout: 5000 }).catch(() => {});
+      releaseSave(); await remembered.unroute('**/world/cameras/*'); throw error;
+    }
     const lateCamera = (await api(cameraRoute)).find(row => row.name === '離開前的待確認位置');
     await remembered.locator('#logout').click();
     check(await remembered.locator('#camera-positions option').count() === 0 && await remembered.locator('#camera-name').inputValue() === '', 'Logout clears camera names, saved positions and pending state from the page');

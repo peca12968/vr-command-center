@@ -2,6 +2,10 @@
 
 ## 2026-11-02：電腦端蹲姿、掩體與焦點恢復
 
+功能[c78be60](https://github.com/peca12968/vr-command-center/commit/c78be6003513ba0e17c55db2ed281e2bd26a1517)的首[CI41324739444](https://github.com/peca12968/vr-command-center/actions/runs/41324739444)／job124902203001最終failure：738規則／459 HTTP／47 world、工作流程Python含6 crouch／素材與78 Node已過，browser在world-browser:141的camera-save點擊等待30秒逾時。原16檔artifact13091095943＋完整decoded log／ZIP **3,831,691 bytes／SHA `7cceb1bce999b8e9b14480a8141feb79772e573eeb55723afa83d166272534ac`**保存且與GitHub digest相符；沒有當刻save按鈕狀態或對應失敗圖，原GET metadata只涵蓋較早reload，不能由此證明disabled、焦點、RAF、渲染負載或產品唯一原因。
+
+後續fixture僅在該保存操作前明確bringToFront，保存最多4筆前／後／失敗control狀態與500字訊息、可見性／焦點／button rectangle／disabled，不收HTML、input值、key、header或payload；失敗另對正確remembered分頁5秒截圖並重拋、釋放save gate／route。原locator click30秒、API期限、60秒relay、所有原斷言及產品JS/API／遊戲政策不改，沒有force點擊或重試寫入。新本機69409原handle exit0：**78 Node／256 Chromium、43檔**，實際before-click為visible／focused／enabled，after-click進入pending、.046秒callback間隔含觀察成本非RTT；這是新場成功，非舊CI根因／修復證明。遊戲及API來源、224／雙平台／原生792與五房結果未重建或改判。前838＋失敗16＋本機43＝**897份browser證據**，不是測試數；新CI結果另記。
+
 Unity **0.39.0／Android code49／NGO29**，API/UI0.30.2／rules0.8.0／world schema1保持。無頭盔owner新增左／右Ctrl按住與C切換蹲姿，眼高1.65→1.0m、手與槍口沿原相對旋轉；移動保留高度、原速度／房界／碰撞。HUD讀原server人物位置／有效性，失焦／應用暫停或恢復／停用立即清除stance並恢復本機站立，下一個原Pose再發布。Tracked、wire、header、素材profile、傷害及0.5／1.5政策不改。既有人物依高度縮放，未新增屈膝骨架動畫；完整機制見[DESKTOP_CROUCH](DESKTOP_CROUCH.md)。
 
 新增16項、共**224真正Editor／0失敗／0 skip**，3項是官方Keyboard在真正PlayMode Dynamic消費事件。首場224／218／6：EditMode SendMessage被引擎拒絕及3鍵盤事件未路由；改直接呼叫callback邏輯後第二場224／221／3，保存實際鍵盤值0診斷。測試依本機已安裝InputSystem的Editor鍵盤routing暫時導向GameView、finally恢復設定後才224全過，正式InputSettings未更動。兩次真正exit1的XML／log／選定來源先封存，沒有抑制錯誤或改判；不是完整生命週期引擎派送驗證。另6項Python證據反例與5項原snapshot測試成功。
