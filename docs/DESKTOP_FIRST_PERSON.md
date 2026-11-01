@@ -43,4 +43,6 @@ Windows 與 Quest 都是真正同源建置，不把 receipt 的 `totalBytes` 當
 
 建置前已把舊 desktop305／quest3／logs13共321檔及9份來源精確另存 `first-person-history-*`；舊0.36.1與0.36.0 ZIP保持原處與原hash。詳細原件、runtime與CI結果見 [PROGRESS](PROGRESS.md)。fingerprint只依原明列來源集合，不當完整建置依賴 graph。
 
+[精確81108e1的CI41273127773](https://github.com/peca12968/vr-command-center/actions/runs/41273127773)已完整成功：717規則／459 HTTP／47 world、Python／素材、72 Node／248 Chromium；雲端沒有Unity Editor或頭盔。保存39檔與log、ZIP9,710,227 bytes／SHA `84d3f956d75fbd71e4ec680f03dc809b43266e9f3b924ad3d81a7a4fd787dec0`。新5 runtime102檔與F snapshot一致，前55場2981檔保持，全部60場3083檔；447份前瀏覽器／CI檔另依原manifest核對。後續文件skip ci，沒有冒充再次重跑。
+
 完整11項仍active。原31筆、較新world371、Windows完整HTTP startup、F吞吐皆未因袖子或本場成功而修復。後續仍要多人持續操作、跨機／Wi-Fi、Quest／VIVE／MR、完整人物動畫與廠商硬體驗收；目前沒有頭盔。

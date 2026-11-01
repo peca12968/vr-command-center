@@ -1,5 +1,7 @@
 # 開發指引
 
+2026-11-01 最新81108e1的CI41273127773 job124749808406完整success：Linux717／459／47、Python含7first-person及素材、72 Node248 Chromium；2 Windows skip非native／Editor。39檔artifact13069804420＋log／ZIP9710227 SHA84d3f956...已精確核對；前447browser檔依manifest保留，新5runtime102及前55runtime2981與F snapshot同hash，60場3083。保存SQLite不開，後續只有文件skip ci、測試來源81108e1；原操作timeout／31／world371／Windows HTTP startup不改判，完整11active。
+
 2026-11-01 電腦第一人稱見docs/DESKTOP_FIRST_PERSON.md／PROGRESS：Unity0.37.0 code45 NGO29、API UI0.30.1保持，184真正Editor／同源Windows ARM64 fingerprint09eed852...與原ID一致。只owner無頭盔軍服手臂，隱藏軀幹頭盔腿；重用player-body-v1五Mesh／pin及數學，Tracked計算前返回，不動槍口／pointer／wire／rules或0.5/1.5。probe獨立firstPerson、players仍遠端，600秒8圖9M像素不變；先finish再End／雙seal／原admission結果ACK／CSV。新4項6GPU1195全回放、paused delta0／來源誤差5.38e-8m；Quest建置重疊非效能基線。舊人物一次300秒操作timeout保留，後4項6圖遠端成功但遮擋非全像素／全程，Host4及五房6項7場cleanup成功；五房shell回應裁切遺失不補造exit0。新ZIP19核對非完整GUI／跨機，APK v2 debug非實機；舊321binary/log及9source精確archive。51 Python，完整11active，原31／world371／Windows startup未修復。
 
 2026-11-01 最終2c33d1d／CI41268781091 job124737033873完整success：Linux717／459／47、Python／素材72 Node248 Chromium，2 Windows限定skip非native。39檔artifact13068238061＋ZIP9677130 SHA622a0b21...及log保存，前274瀏覽器檔／新native及三candidate build hash保持。**Windows本機完整HTTP仍逾時，Linux成功不改判**；auth候選均撤回。採用0.30.1本機pointer是mission-read-api-stage-path.txt／validation（API132＋三tools9=159），不可用名稱final/release的拒絕候選，原三組API159保持。新C14／F43及前54runtime2967維持，總55／2981；所有writer停才snapshot、SQLite不開。文件skip ci、精確測試來源2c33d1d，Unity0.36.1／179雙平台保持，完整11active。

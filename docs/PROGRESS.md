@@ -22,7 +22,11 @@ Quest實際APK **60,313,726 bytes／SHA067c41347a284e05fb5d8695277e0907052a98405
 
 `first-person-runtime-validation.json`在各場停止與cleanup核對後完成：**新5 C runtime102檔／F snapshot逐檔一致、新F證據221檔；前55 C runtime2981檔與各snapshot保持，合計60場3083檔**。原動態／observer／operator／尾界／獨立房歷史與三組API159、accepted mission API及拒絕候選、舊ZIP與archive321＋9、前CI39檔均核對原hash；保存SQLite只raw bytes、沒有開連線。新場五房shell exit未知另列，不把hash一致或stage成功補成原handle exit證據。
 
-完整11項active；無頭盔、同機Simulation，原31筆／較新world371、Windows完整HTTP startup與F吞吐各自未修復。下一步仍包括多人持續操作、完整人物動畫／追蹤、跨機／Wi-Fi／Quest／VIVE／MR與廠商硬體。精確CI來源會另補在本節，不重寫舊失敗。
+[功能81108e1](https://github.com/peca12968/vr-command-center/commit/81108e1c46a934dc4f90ba59d03a41dadffb3db9)已推送main；[CI41273127773](https://github.com/peca12968/vr-command-center/actions/runs/41273127773)／job124749808406／精確81108e1 **完整success**：Linux restore／build、717規則／459 HTTP／47 world-stream、工作流程Python（含新7 first-person）／素材與72 Node／248 Chromium成功。2 Windows限定skip不當原生或重跑Editor；雲端成功不改判前輪Windows完整HTTP啟動逾時。
+
+保存39檔artifact13069804420、log與**9,710,227 bytes ZIP／SHA84d3f956d75fbd71e4ec680f03dc809b43266e9f3b924ad3d81a7a4fd787dec0**，實際下載與GitHub digest一致。`first-person-ci-validation.json`另核對新runtime102檔與snapshot未變；`first-person-browser-history-validation.json`依既有manifest核對447份前CI／本機瀏覽器檔，包含較早三個console快照及前輪讀取失敗／成功資料，範圍較前313份更廣、不是新增遊戲測試。後續只有文件證據使用skip ci，測試來源精確81108e1。
+
+完整11項active；無頭盔、同機Simulation，原31筆／較新world371、Windows完整HTTP startup與F吞吐各自未修復。下一步仍包括多人持續操作、完整人物動畫／追蹤、跨機／Wi-Fi／Quest／VIVE／MR與廠商硬體，不重寫舊失敗。
 
 ## 2026-11-01：任務版本讀取不再被背景刷新失敗取消
 
