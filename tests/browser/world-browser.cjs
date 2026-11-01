@@ -162,7 +162,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     });
     // Keep the pending-save action on its intended renderer. Observe only the
     // bounded control state: no HTML, input values, credentials or request data.
-    const saveDiagnostics = [];
+    const saveDiagnostics = []; let saveDiagnosticsTruncated = false;
     async function saveState(stage) {
       const state = await remembered.evaluate(() => {
         const button = document.querySelector('#camera-save'), box = button.getBoundingClientRect(), style = getComputedStyle(button);
@@ -174,9 +174,10 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
           worldSequence: document.querySelector('#world-canvas').dataset.sequence,
           worldStatus: document.querySelector('#world-status').textContent.slice(0, 500) };
       }).catch(() => ({ unavailable: true }));
-      saveDiagnostics.push({ stage, elapsedMilliseconds: at(), ...state });
+      if (saveDiagnostics.length < 8) saveDiagnostics.push({ stage, elapsedMilliseconds: at(), ...state });
+      else saveDiagnosticsTruncated = true;
       await fs.writeFile(path.join(screenshots, 'world-pending-save-state.json'), JSON.stringify({
-        scope: 'This camera-save control only; no original failure cause proof', observations: saveDiagnostics }, null, 2));
+        scope: 'This camera-save control only; no original failure cause proof', maximumRows: 8, truncated: saveDiagnosticsTruncated, observations: saveDiagnostics }, null, 2));
     }
     try {
       await remembered.bringToFront(); await saveState('before-name');
@@ -191,9 +192,21 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await remembered.locator('#logout').click();
     check(await remembered.locator('#camera-positions option').count() === 0 && await remembered.locator('#camera-name').inputValue() === '', 'Logout clears camera names, saved positions and pending state from the page');
     check(await remembered.locator('#world-camera-x').inputValue() === '' && await remembered.locator('#world-camera-apply').isDisabled(), 'Logout clears the precise camera draft and disables applying it');
-    await remembered.locator('#login-key').fill(tokens.Room2); await remembered.locator('#login-form button').click();
-    await remembered.locator('#tab-world').click(); await remembered.locator('#world-recording option').waitFor({ state: 'attached' }); await remembered.locator('#world-live').click();
-    await remembered.waitForFunction(() => !document.querySelector('#camera-save').disabled); releaseSave();
+    try {
+      await remembered.bringToFront(); await saveState('before-relogin');
+      await remembered.locator('#login-key').fill(tokens.Room2); await remembered.locator('#login-form button').click();
+      await remembered.locator('#tab-world').click(); await remembered.locator('#world-recording option').waitFor({ state: 'attached' });
+      await remembered.locator('#world-recording').selectOption(live.header.sessionId); await remembered.locator('#world-live').click();
+      await saveState('relogin-source-requested');
+      await remembered.waitForFunction(() => !document.querySelector('#camera-save').disabled, null, { polling: 100, timeout: 30000 });
+      await saveState('relogin-camera-enabled');
+    } catch (error) {
+      await saveState('relogin-failure');
+      await remembered.screenshot({ path: path.join(screenshots, 'world-relogin-camera-failure.png'), fullPage: true, timeout: 5000, mask: [remembered.locator('#login-key')] }).catch(() => {});
+      throw error;
+    } finally {
+      releaseSave(); await remembered.unroute('**/world/cameras/*');
+    }
     await remembered.waitForTimeout(100);
     check(await remembered.locator('#camera-positions option').count() === 0 && !(await remembered.locator('#camera-message').innerText()).includes('離開前'), 'A delayed camera save response cannot repopulate a different operator after logout');
     await api(cameraRoute + '/' + lateCamera.id, 'DELETE', undefined, 'Master', 204); await remembered.close();

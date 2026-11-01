@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-02：位置回饋來源CI在另一個鏡頭等待點失敗
+
+來源4bdf294的[CI41363335600](https://github.com/peca12968/vr-command-center/actions/runs/41363335600)／job125018189228 **failure**。772核心／459 HTTP／47 world、6pipe／38硬體CLI、Python14 exercise／素材及89 Node成功，2 Windows限定skip；先前stalled-read已通過，這次world-browser196在Room2重新登入並開始原世界後，等待camera-save enabled的原30000ms逾時，未到完整296，不是auth-role等待。初分析標籤誤寫auth-role，原metadata副本保留後更正，不改原log／ZIP。
+
+console19（art13105934910／ZIP4250536／SHA41b6d49b818180e7b2057bc70cb1c5b9957d6cf1128eb4ee2b8b3532dd803465）、control13（13106735184／3919／141b3522228f04f38f3d01e9019a89e34a891a1b7d5131844170fa91e2162058）、hardware26（13106540919／22348／aa5b0d80b987bda4c3571b3f20afda59b396c2255a6ea71c809c7e731ae96b79）與decoded log SHA730a67a0511f3987466070371b09ca1cc8ce0d823223f54f6ee92da8c38255a9保存核對。原1629＋19＝1648browser、nativeUI7＋2保持；所有先前失敗與成功原件不覆蓋。
+
+該場原save診斷只到初始PUT的after-click，沒有重新登入後失敗時的DOM，不能證RAF／產品根因。只把此一按鈕謂詞改polling100、原30000ms與延遲舊保存回應不能污染Room2的斷言不變；明確bringToFront／選原live.header.sessionId，最多8筆控制狀態（原訊息各500字）／截斷旗標，失敗5秒圖遮login-key再原錯重拋，held PUT於finally釋放／解除route。沒有改產品JS／API／路由／期限或新增本機Chromium負載；node syntax成功，新CI結果另記。原33928／4ebd長場仍live，不重啟或提前snapshot，完整11active。
+
 ## 2026-11-02：原長場走道失敗保留，位置回饋候選再驗
 
 原0.41／5d2e的064034-7c1ae2b7、真正handle51871終結exit1，cleanup空、C174／F raw同hash，整場failed。Linked5項／8621回放／8587 Running、25原結果／ACK／無timeout及45循環通過；Independent在Room5 world3400／tick7120／elapsed359770ms觸發生成器走道（首Z=-3.4091835），該房仍五位connected／health100／Simulated、在正常房內。完整失敗取證36896：Linked8621、五房3433／4309／5391／6721／8421；Room5三幀3400..3402共8筆走道不符，恢復後仍failed，8381保存Running無失聯。Independent僅36發18reload／活動跨度7074..7127，後段靜止取證及四房continuity綠不當900秒接受。輔助分析首Room-only混跨場ID/minempty原件保留，後依原player IDs重對齊；沒有補造CSV／成功。
