@@ -1,5 +1,7 @@
 # 需求與驗收追蹤
 
+2026-11-02 [Windows遊戲伺服器包](WINDOWS_SERVER_PACKAGE.md)：沿用Unity0.39與API0.31，Framework啟動器只使用GameServer角色、Preparing VR新來源／新資料，公告endpoint、雙seal後留36秒再收自己的原程序。103項原生整合／五獨立與後Linked／553全回放／10原admission結果CSV與closed journal尾界成功；Job父程序退出另為未封存反例。GUI被非目標PickerHost攔住，未完成／failed保持；沒有新Editor／APK或跨機／25操作，完整11active。
+
 第1／8／11項新增[可攜管理服務](WINDOWS_CONTROL_PACKAGE.md)：API/UI0.31.0可獨立解壓，以繁中介面選取實例、啟動與正常停止；封裝自含執行環境，既有任務、五房25席admission與金鑰重開一致。105實際Windows檢查／GUI與五房原生回歸通過，25席僅管理名冊，沒有冒充25位遊戲操作或跨機容量；Unity0.39雙平台與224原證據保持，完整11項仍active。
 
 第2／6／9／11項新增[電腦端蹲姿與掩體](DESKTOP_CROUCH.md)：Unity0.39／224真正Editor、同源雙平台，實際C／W與視窗恢復、792完整回放、兩份原戰績／CSV／雙seal／ACK及五房回歸成功。蹲下維持滿血時敵軍確實向同伴開火，站起恰好20傷害；保留原Tracked／命中／姿態政策。仍為同機Simulation，非完整屈膝動畫、頭盔或25位操作驗收，11項active。

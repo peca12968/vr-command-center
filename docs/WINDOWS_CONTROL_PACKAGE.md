@@ -1,6 +1,6 @@
 # Windows 可攜管理服務
 
-API／控制台 **0.31.0**，管理服務可以獨立解壓執行。`Start-Control.exe`提供繁中介面，API隨包附帶.NET／ASP.NET Core **10.0.14 win-x64**，使用者電腦需要Windows x64及.NET Framework 4.8，管理服務不依賴Python或.NET SDK。遊戲伺服器和玩家另外啟動，參見[外部玩家流程](EXTERNAL_CLIENTS.md)與[Windows玩家包](WINDOWS_PLAYER_PACKAGE.md)。
+API／控制台 **0.31.0**，管理服務可以獨立解壓執行。`Start-Control.exe`提供繁中介面，API隨包附帶.NET／ASP.NET Core **10.0.14 win-x64**，使用者電腦需要Windows x64及.NET Framework 4.8，管理服務不依賴Python或.NET SDK。遊戲伺服器可使用[獨立伺服器包](WINDOWS_SERVER_PACKAGE.md)，玩家另外啟動，參見[外部玩家流程](EXTERNAL_CLIENTS.md)與[Windows玩家包](WINDOWS_PLAYER_PACKAGE.md)。
 
 本輪主包為`artifacts/control-packages/control-server-0.31.0-release-win-x64.zip`，**52,456,642 bytes／SHA256 `b38391f1f72115a98a60ba1bc8f5cb1e7395abe633c1366c0fa9529dce794eb1`**、498份manifest檔案。檔名中的final、atomic、reviewed或ui是保留候選，驗收須對照本頁、manifest及[PROGRESS](PROGRESS.md)，不能只看版本或檔名。
 

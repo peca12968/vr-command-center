@@ -1,5 +1,7 @@
 # 分開啟動玩家與遊戲伺服器
 
+也可使用[Windows遊戲伺服器包](WINDOWS_SERVER_PACKAGE.md)獨立啟動既有Preparing VR場次，不依賴Python／Editor。CLI同機五房獨立及Linked／精確結果通過，新GUI被非目標PickerHost攔住仍未完成；不是LAN或頭盔驗收。
+
 API／控制台0.31.0可另用[Windows可攜管理服務](WINDOWS_CONTROL_PACKAGE.md)部署管理網站，含自己的.NET執行環境與繁中啟動器。已用真正GUI／封裝API驗證啟停、資料與角色重開，原Unity0.39／NGO29保持；管理服務、遊戲伺服器和玩家仍分開運行。以下0.30工具段落保留原功能範圍，實際LAN／頭盔仍待。
 
 玩家端新版[連線狀態](PLAYER_CONNECTION_STATUS.md)可區分程式啟動與遊戲回報入場、拒絕、未確認及戰績保留；這不新增網路可達性探測，也不以同機驗證宣稱跨機成功。

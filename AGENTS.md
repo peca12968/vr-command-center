@@ -1,5 +1,7 @@
 # 開發指引
 
+2026-11-02 伺服器包見docs/WINDOWS_SERVER_PACKAGE.md／PROGRESS：Framework只用GameServer、Preparing VR新world／私有log＋原bootstrap stream核對順序／API同源才公告endpoint，不能讀live獨佔journal。suspended→私人kill-on-close Job→Resume，雙seal＋36秒後OS終止自己的原handle，非Unity graceful／玩家送達，null保持。v3 ZIP82664818 SHA6cecfbee...／311，原Unity0.39／49／NGO29／e0d60e4e／224雙平台不變。27088 exit0 103項／五獨立後Linked／553全回放／10原admission結果CSV及closed journal尾界；初35529 71項保持，第七parent-exit故意未seal不混正常六場。新GUI6614 exit1被非目標PickerHost兩次攔住、停止UI、無來源，cleanup乾淨C9保持；未完整GUI驗收。新三family C163/F同hash，前C52native/C318control、六管理ZIP/原玩家ZIP APK/1069browser保持；保存SQLite不開，4Python，full11active，舊31/world371/startup/F吞吐與跨機頭盔25操作仍待。
+
 2026-11-02 最新1a959c6 CI41332911824 job124926578810完整success：Linux738/459/47、6真正pipe程序/7新Python邊界/素材78Node256Chromium，2Windows skip非Framework/GUI/Unity/頭盔。console43 artifact13093623576 ZIP10038781 SHA07e02d82...；control13 artifact13093473878 ZIP3918 SHA34bc0eb5...＋decoded log下載digest核對。control僅6遮蔽log/6status/checks，未觀察stdout為null無runtime/key/DB；前1026+43=1069browser，另13CI metadata。control-ci-validation核對C52native/C318control/Fsnapshot、六ZIP/478publish/原API整組/Unity0.39 e0d60e4e/224雙平台ZIP APK保持，文件後skip ci、測試精確1a959，full11active，原31/world371/startup/F吞吐/乾淨新機/LAN/頭盔/25操作未解。
 
 2026-11-02 管理包CI另收每pipe案例acceptance/真正exit metadata；後補run-c876b0六案例exit0、C43/F同hash，control-pipe-metadata-validation.json明列總14場control318/native52。只上傳13份遮蔽log/有限status/checks、無runtime keys/DB；前13場control275保持。完整11active，原姿態/慢碟/跨機限制不改。

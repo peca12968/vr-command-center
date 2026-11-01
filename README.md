@@ -1,5 +1,7 @@
 # VR Command Center
 
+2026-11-02 [Windows遊戲伺服器包](docs/WINDOWS_SERVER_PACKAGE.md)：沿用Unity0.39與API0.31，Framework啟動器只使用GameServer角色、Preparing VR新來源／新資料，公告endpoint、雙seal後留36秒再收自己的原程序。103項原生整合／五獨立與後Linked／553全回放／10原admission結果CSV與closed journal尾界成功；Job父程序退出另為未封存反例。GUI被非目標PickerHost攔住，未完成／failed保持；沒有新Editor／APK或跨機／25操作，完整11active。
+
 API／控制台0.31.0新增[Windows可攜管理服務](docs/WINDOWS_CONTROL_PACKAGE.md)：繁中啟動器、自含.NET執行環境與獨立資料實例，支援既有任務／五房名冊重開。105項實際封裝檢查、原子報告反例、真正GUI啟停及五房原生回歸通過；跨機與頭盔仍待驗證，完整範圍見[進度](docs/PROGRESS.md)。
 
 [完整CI（1a959c6）](https://github.com/peca12968/vr-command-center/actions/runs/41332911824)通過738規則／459 HTTP／47串流、6項程序管線、Python／素材與78 Node／256 Chromium；本機Windows封裝／GUI及原失敗證據另見進度，完整11項仍在開發中。
@@ -56,7 +58,7 @@ API／UI0.30.1修正[任務版本讀取恢復](docs/MISSION_READ_RECOVERY.md)：
 
 依 2026-10-29 的使用者指示，**優先開發 Meta Quest 3**，暫以 Android 獨立執行為工作假設；VIVE 延後接入，共用架構與原始雙平台目標保留。
 
-目前為 **API v0.30／Unity 遊戲端 v0.33.0 原型**。真正 Editor 已完成 Prepare、152 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 29，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人完整驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
+目前為 **API v0.31.0／Unity 遊戲端 v0.39.0 原型**。真正 Editor 已完成 Prepare、224 項 EditMode、同源 Windows 播放器及 ARM64／IL2CPP Quest APK。PC 已驗證 AI 傷害、射擊／擊殺／命中率、換彈／暫停、票券撤銷與重連；強制離線後保留已接受的位置、健康與彈藥，回放／報表一致。可用 [電腦練習場](docs/DESKTOP.md) 操作，重連與 Windows UDP 修正見 [RECONNECT](docs/RECONNECT.md)／[TRANSPORT_PATCH](docs/TRANSPORT_PATCH.md)。NGO protocol 29，所有遊戲 server／client 須一起更新。**使用者目前沒有頭盔，先繼續電腦端；沒有 Quest／VIVE 實機或 25 人完整驗收**。桌面頭手維持 Simulation，完整 11 項保持開發中。
 
 新增[外部玩家流程](docs/EXTERNAL_CLIENTS.md)：操作員模式可只啟動server，來源公告場次地址／port，兩個PC已用實際UI下載的短票券檔另行入場、結算與封存。真正loopback UDP綁定已核對，原local模式49項回歸；跨機與頭盔仍另驗。
 

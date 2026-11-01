@@ -1,5 +1,7 @@
 # 長期開發目標
 
+2026-11-02 [Windows遊戲伺服器包](WINDOWS_SERVER_PACKAGE.md)：沿用Unity0.39與API0.31，Framework啟動器只使用GameServer角色、Preparing VR新來源／新資料，公告endpoint、雙seal後留36秒再收自己的原程序。103項原生整合／五獨立與後Linked／553全回放／10原admission結果CSV與closed journal尾界成功；Job父程序退出另為未封存反例。GUI被非目標PickerHost攔住，未完成／failed保持；沒有新Editor／APK或跨機／25操作，完整11active。
+
 2026-11-02 [Windows管理服務包](WINDOWS_CONTROL_PACKAGE.md)：API/UI0.31.0、自含.NET/ASP.NET Core10.0.14及繁中啟動器，獨立保存角色／票券key與任務／場次資料。105封裝檢查、6私有管線、7Python邊界、實際GUI啟停／child handle及五房回歸成功；25個管理席位不是25端連線，跨機／乾淨新機仍待。Unity0.39／224／e0d60e4e雙平台保持、無新Editor／頭盔，11項active。
 
 2026-11-02 [電腦端蹲姿](DESKTOP_CROUCH.md)：Unity0.39／49／NGO29、API/UI0.30.2。Ctrl按住／C切換、保留移動高度與失焦恢復；224真正Editor、同源雙平台及實際C／W／視窗操作、792全回放／兩份戰績CSV雙sealACK、五房6項7場成功。Ctrl按住／放開為Editor官方Keyboard證據，原生本輪為C／W；無頭盔／跨機，11項active。

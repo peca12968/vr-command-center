@@ -1,5 +1,21 @@
 # 開發進度
 
+## 2026-11-02：Windows遊戲伺服器可攜啟動
+
+新增[Windows遊戲伺服器包](WINDOWS_SERVER_PACKAGE.md)，Framework4.8繁中啟動器／CLI與原Unity0.39.0／code49／NGO29整組runtime封裝，操作員不需Python／Editor／SDK。API/UI0.31.0、rules0.8.0／world schema1／envelope7與原224真正Editor、e0d60e4ed6cefe5cd885e6aabe1621939da945ce00d56b3ed8820c0aed4db879同源Windows／ARM64 APK、原Scene／prefab ID保持，本輪沒有新Editor／Unity重建。
+
+只用GameServer角色讀原Preparing VR且無combatStream的場次；新包外資料／私有log、同API／場次mutex，啟動前UDP衝突拒絕，Unity只收到GameServer key，沒有Master／玩家票券或代替管理Begin／End。原bootstrap先核對自己的combat UUID／origin／0 accepted／未seal，再StartServer寫真正network-start log；新啟動器沿這條原順序核對同場次API來源／world header才PUT immutable endpoint並驗回條，不開live獨佔journal。就緒不是玩家pose或Running證明。包內manifest逐檔SHA／大小及完整集合、拒絕連結／越界／額外檔，不是簽章。
+
+Unity程序先suspended建立，加入私人kill-on-close Windows Job再Resume，只設終止旗標，不改CPU／優先序／記憶體／OS設定。正常End30秒內需雙seal，留36秒後以OS終止自己的Unity，原handle退出才complete；不是Unity graceful或玩家全收到／local ack最後落盤證明，玩家送達欄位null。失敗／中止保留journal、不自動End或接管舊Running，來源／管理請求失敗也不冒充正常完成；真頭盔、MR、網路及恢復機制另驗。
+
+三份ZIP原件／receipt保持：v1 82,664,434／SHA26c44bed...、v2 82,664,466／SHAf77bf1a7...、主包v3 **82,664,818 bytes／SHA6cecfbeeffba1277000f93bc168c4ac387b825c34b73142628098dba28f67500**、311 manifest檔案（ZIP312含manifest），launcher來源SHA98c1f1db72049c301e8f1bee9a2835bbe388780027df75d84642131739b14642。v2是71項初輪；v3補完整包集合拒絕及GUI啟動等待中止，不重建Unity。Notices沿原玩家包素材／Transport授權。
+
+真正handle35529 exit0／`server-package-checks/run-681a8591d76a45418b759e64315ab4f4`：71項、五獨立後Linked、原戰績ack／closed journal雙seal，未取完整API replay或精確原admission比對。最終handle27088 exit0／`run-d1463f9bd5be4d1aa5ab0ef98c402179`：**103項**；五獨立各一server／一接收client、後Linked一server／五接收client，10份原admission結果／CSV、Running的原Begin sequence／tick／observed／1.5秒來源界線、六場**553全API回放**（138／114／99／80／66／56）及雙seal／closed journal完整與ack精確尾界成功。每場只取有限live觀察，不是全程姿態健康或25位操作／跨機容量。Master／Room／Client／Host、混淆／多播IPv4、越界與32bit wrap埠、額外key、占用UDP、已End／bound Preparing等拒絕。兩組測試的第七個parent-exit場刻意在就緒後殺父程序，原Unity handle被Job收掉且無final成功報告；該場journal未seal，不能混入六個正常場。
+
+新GUI handle6614／`server-gui/run-3c10b49ef207440aa060af85c0d6af41` **exit1／未完成**。CLI準備自己管理實例／API與Preparing場次，native Window31526058／GUI62088顯示欄位與disabled Start正確；選實例按鈕第一次及activate／新snapshot後一次重試均被非目標PickerHost.exe遮住（工具回報point over PickerHost而非Launch-Server），因此停止所有UI輸入，沒有選檔、啟動或遊戲來源成功。只終止自己的GUI，API正常Stop／exit0，cleanup空列，failed及原C9／F snapshot保存，不當PickerHost／Windows安全性根因或產品選檔驗收。後補helper關窗review在真GUI exit後最多等30秒，僅py_compile，沒有冒充新GUI場。管理服務包原GUI95151成功是另一產品流程。
+
+4項Python package邊界與三新腳本語法檢查成功，假bytes測試不當native。`server-delivery-validation.json`用rb／SHA核對新C76＋C78＋GUI C9＝**163檔**與各F snapshot精確相同；原13場及後補pipe的C52 native／C318 control與F保持，六管理ZIP與主包、原0.39玩家ZIP／APK及source fingerprint同hash。原77場3399歷史native保持，不把這三個封裝family或未seal反例混入原總數，也沒有全重跑。原1069 browser與13 CI metadata保持，本輪尚未新增browser。保存SQLite不開，所有自己writer確認terminal才一次snapshot。完整11active，原31／world371／舊Windows startup／F吞吐與乾淨新機、LAN、25位操作／實機待驗不改判。
+
 ## 2026-11-02：Windows可攜管理服務與私有程序收尾
 
 [功能1a959c6](https://github.com/peca12968/vr-command-center/commit/1a959c6b89e627791815537a57784c3bcb4819b1)的[CI41332911824](https://github.com/peca12968/vr-command-center/actions/runs/41332911824)／job124926578810／精確1a959c6完整**success**：Linux738規則／459 HTTP／47 world、6個真正私有管線程序案例、7項新Python封裝邊界與工作流程原檢查／素材、78 Node／256 Chromium全部通過。2 Windows限定skip不是Framework／GUI／Unity或頭盔證據；本機105與GUI／原生另外保存，沒有以CI代替。
