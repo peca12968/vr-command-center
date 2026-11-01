@@ -6,7 +6,7 @@
 
 新增[25端動態任務管理命令檢查](docs/DESKTOP_ACTIVE.md)：實際射擊／換彈時切換雨夜，擊殺後測試巡邏與推進；182份接收端快照、1359幀回放及25份精確戰績／server ack通過。仍是一位操作、24接收端的同機Simulation，詳細範圍見[進度](docs/PROGRESS.md)。
 
-[最新雲端CI（4102850）](https://github.com/peca12968/vr-command-center/actions/runs/41263637499)完整通過：717規則、459 HTTP、47串流，以及Python／素材與72 Node／235 Chromium。相機與即時來源測試各自隔離，原截圖逾時仍保存在[開發紀錄](docs/PROGRESS.md)；Unity版本與既有雙平台建置保持。
+[最新雲端CI（8e335d6）](https://github.com/peca12968/vr-command-center/actions/runs/41266688006)完整通過：717規則、459 HTTP、47串流，以及Python／素材與72 Node／235 Chromium。本機235項也通過；首CI歷史載入逾時與本機API啟動失敗仍保存在[開發紀錄](docs/PROGRESS.md)，只補診斷、未宣稱根因修復；Unity版本與既有雙平台建置保持。
 
 新增[動態PC結束驗收](docs/DESKTOP_ACTIVE.md)：一位實際操作、24接收端，移動／射擊／換彈／擊殺與130快照、1420幀回放通過；25份個別戰績及原連線server ack精確核對後才停程序。同版0.36.1來源保持，實機／25人同時操作及舊姿態問題另驗。
 

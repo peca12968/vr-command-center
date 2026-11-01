@@ -14,7 +14,15 @@
 
 live之後補上stationary sample及全回放閘門：名冊、head／muzzle／forward／彈藥／reload／fireSequence不變，短暫移動恢復也失敗，connected／rig另由原參戰規則處理。**原8項沒有冒充新增live第9項**。`observer-closed-stationary-validation.json`第一版把REST float短格式與raw double展開直接比較，983幀誤報，例(-31,1.65,-3)與raw y=1.649999976158142；原失敗檔保留。`...-v2.json`以同一raw序號122作baseline、rb／checksum／連續序號讀完122–1104共983幀全相同，並另核對原journal1153精確seal，沒有改遊戲容差／原runtime或宣稱另一次live。
 
-本機9 observer sequence＋6 analysis＋27 active＋7 heartbeat＋16 input analysis＝**65 Python通過**，含順序／錯場／錯window／clock step／host未知、缺coverage為null、交錯玩家／source不混流、同point union、完整CPU sample不縮放、暫時移動恢復仍失敗及timer報告IO失敗仍cleanup。py_compile／diff-check通過，CI新增兩個suite及新腳本compile。雲端結果另於完成後記錄，不以本機Python當全CI。
+本機9 observer sequence＋6 analysis＋27 active＋7 heartbeat＋16 input analysis＝**65 Python通過**，含順序／錯場／錯window／clock step／host未知、缺coverage為null、交錯玩家／source不混流、同point union、完整CPU sample不縮放、暫時移動恢復仍失敗及timer報告IO失敗仍cleanup。py_compile／diff-check通過，CI新增兩個suite及新腳本compile。
+
+首CI`41266207153`／job124729421211／精確c71a71d在mission-browser原第60行逾時，沒有完整通過；717規則／459 HTTP／47 world、Python／素材及72 Node成功，但歷史第一版已選取、草稿仍第四版、notice為更新失敗。保存4檔artifact13067331462（ZIP823374 bytes／SHA aab97eb4e5e61e2848138fcde58c7667a57a674687891faba7c3827dea2599d2）與log，前131份CI／本機證據保持；沒有當時request明細，不能證明路由／產品／主機根因。之後本機handle21473 terminal exit1：72 Node成功，原隔離API啟動期限內未就緒且log空，未開始browser checks；新目錄空白保存，原因未知，不當瀏覽器通過。
+
+`8e335d6`僅補fixture失敗診斷：最多128筆GET path／status／完成／時間／failure，不存headers／憑證／body／response payload；啟動失敗保存原attempt／elapsed／exit／signal及既有有界log並遮罩臨時key，terminal包含signalCode。可明確選新的直屬artifacts/console-*目錄，拒絕既有以保留原console資料。本輪未改console產品JS／API、路由情境、斷言或8秒API／30秒DOM／啟動界線，這不是歷史任務載入問題的修復宣稱；兩個CJS syntax及diff-check通過。API8秒計時是瀏覽器GET／管理呼叫，不是原生15秒來源入場政策。
+
+同`8e335d61e428dc37b6627918637bcc187142750d`本機handle46147 **terminal exit0、235 Chromium全部通過**，包含原歷史版本載入情境；37份原畫面／checks另存`console-observer-diagnostic-20261101`，先前空白啟動失敗目錄不動。前一handle21473的72 Node通過另計，不把未進browser的場稱完整成功。
+
+[最終CI41266688006](https://github.com/peca12968/vr-command-center/actions/runs/41266688006)／job124730838741／精確8e335d6 **完整success**：Linux restore／build、717規則／459 HTTP／47 world-stream、工作流程Python（含9 observer／6 analysis）／素材、72 Node／235 Chromium均通過。2 Windows限定案例在Linux skip，不當原生Windows／179 Editor證據。保存37檔artifact13068160426、9464113 bytes ZIP，實際下載SHA256 `c0eb7fe41cf25e7fbe41ad386fed18c967ff734c67d175bd36c08bb8c39bb25c`與GitHub digest一致；另存log與`observer-ci-success-validation.json`，前CI／本機131＋本輪失敗4＋新本機37＝172檔保持。**這是增加診斷後的成功場，不是修復或證明原c71a71d歷史載入逾時／21473啟動失敗根因**；原生姿態反例也不因此變更。最後只有文件證據skip ci，測試來源精確8e335d6。
 
 `observer-runtime-validation.json`：新C runtime176檔與一次F snapshot逐檔SHA一致、新F264檔；前53 C runtime2791檔／各F snapshot及前UI1042／operator383／動態1138／F337、原尾界失敗／獨立房／history321、API三組各159及當前ZIP／APK／receipt與舊ZIP保持。總54 C runtime2967檔；全部原handle terminal才稽核，保存SQLite只raw bytes不開連線。新分析與兩版stationary輸出在原場之外，原成功與失敗檔均不重寫。
 

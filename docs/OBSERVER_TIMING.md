@@ -36,3 +36,5 @@ python scripts/analyze-observer-sequence.py artifacts/desktop-active/<本輪目�
 live場之後才新增stationary guard及回放閘門，沒有將它冒充live第9項；關閉journal以rb／SHA／序號獨立讀回983幀（122–1104），同raw baseline比較通過。第一次讀回混用REST與raw浮點展開，983幀皆誤報head／muzzle差異；失敗檔保留，改用同一raw序號baseline的新v2證據，不改原場／原數字，也沒有放寬遊戲容差。完整來源與保存數量見[PROGRESS](PROGRESS.md)。
 
 API/UI0.30、Unity0.36.1／code44／NGO29、e0594513...、原179 Editor與雙平台receipt保持；本輪沒有Unity／產品.NET／APK重建。舊31筆失效及前場world371／26報告失效仍未修復。完整11項active，25位同時操作、跨機／Wi-Fi／頭盔、MR與廠商硬體另驗。
+
+65項本機Python、同8e335d6本機235 Chromium及[完整雲端CI](https://github.com/peca12968/vr-command-center/actions/runs/41266688006)成功；雲端含717／459／47、Python／素材及72 Node／235 Chromium，2 Windows限定skip不當原生證據。首CI歷史任務載入逾時與本機一次API啟動失敗保持，之後只增加有界request／startup診斷及新的輸出目錄選項，沒有改產品JS、等待門檻或宣稱修復；精確來源、artifact與限制見PROGRESS。
