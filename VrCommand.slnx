@@ -9,6 +9,7 @@
     <Project Path="tests/VrCommand.Checks/VrCommand.Checks.csproj" />
   </Folder>
   <Folder Name="/tools/">
+    <Project Path="tools/VrCommand.HardwareSimulator/VrCommand.HardwareSimulator.csproj" />
     <Project Path="tools/VrCommand.SimulationDemo/VrCommand.SimulationDemo.csproj" />
     <Project Path="tools/VrCommand.TelemetryRelay/VrCommand.TelemetryRelay.csproj" />
     <Project Path="tools/VrCommand.WorldRelay/VrCommand.WorldRelay.csproj" />

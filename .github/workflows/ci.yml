@@ -19,6 +19,8 @@ jobs:
       - run: python scripts/smoke_api.py
       - run: python scripts/smoke_world.py
       - run: python scripts/smoke_control_pipe.py
+      - run: python scripts/check-hardware-simulator.py
+      - run: python -m py_compile scripts/package-hardware-simulator.py
       - run: python -m unittest discover -s tests -p test_control_package.py
       - run: python -m unittest discover -s tests -p test_server_package.py
       - run: python -m py_compile scripts/package-windows-server.py scripts/check-server-package.py scripts/check-server-gui.py scripts/check-server-catalog.py
@@ -112,4 +114,20 @@ jobs:
             artifacts/control-pipe/*/*.log
             artifacts/control-pipe/*/*-status.json
             artifacts/control-pipe/*/checks.json
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hardware-simulator-evidence
+          path: |
+            artifacts/hardware-simulator/*/*.log
+            artifacts/hardware-simulator/*/checks.json
+            artifacts/hardware-simulator/*/cleanup.json
+            artifacts/hardware-simulator/*/simulation-report.json
+            artifacts/hardware-simulator/*/fault-report.json
+            artifacts/hardware-simulator/*/simulation-input.json
+            artifacts/hardware-simulator/*/fault-input.json
+            artifacts/hardware-simulator/*/source-events.json
+            artifacts/hardware-simulator/*/source-session.json
+            artifacts/hardware-simulator/*/source-statistics.json
           if-no-files-found: ignore

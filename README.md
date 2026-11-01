@@ -1,5 +1,7 @@
 # VR Command Center
 
+2026-11-02 [硬體回饋離線模擬器](docs/HARDWARE_SIMULATOR.md)：0.1.0以原事件／stream／admission規則重建，測試綁定、重送、虛擬到期與ACK，沒有設備I/O或實體停止保證。新34 Core／完整772、實際API＋.NET ArenaSession及最終38 CLI、解壓同位元結果與原錯權限輸入受控拒絕成功。API0.31／UI0.31.2／Unity0.39與原224雙平台保持；廠商SDK、實機及完整11項仍待驗。
+
 2026-11-02 [場景物件復原／重做](docs/PLACEMENT_HISTORY.md)：控制台0.31.2／API0.31.0，可還原新增、刪除、旋轉、數值與整段拖曳／方向鍵；只在配置圖攔截快捷鍵，儲存中鎖定、換任務／登出清紀錄。6新Node、89完整Node／296 Chromium、專項及實際解壓包各29、Windows管理包105成功；原版本不可變，Unity0.39／224雙平台保持。無新native遊戲／Editor／頭盔驗收，完整11active。
 
 2026-11-02 [伺服器房間／任務清單](docs/SERVER_CATALOG.md)：啟動器1.1可直接輸入管理實例路徑並更新，顯示房間、模式與任務，原UUID／版本另列；明確選取、路徑變更／失敗停用、同實例且仍存在才保留。38 CLI/API＋26真正Framework model與新版原生106／777回放／10結果CSV ACK成功；完整WinForms開場仍受PickerHost阻擋。API0.31／console0.31.1及Unity0.39／224雙平台保持，11active。

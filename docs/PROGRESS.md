@@ -1,5 +1,19 @@
 # 開發進度
 
+## 2026-11-02：硬體回饋離線模擬器
+
+新增[HardwareFeedbackSimulation／開發測試台](HARDWARE_SIMULATOR.md) **0.1.0**，不是廠商wire或實機介面。新tool以整段schema6／7重建已Ended且戰鬥精確seal的單場，沿用原SessionManager／CombatLedger／admission與權限；只把ShotFired／PlayerDamaged投影成模擬訊號。原event／stream／report／ObservedSequence及room／admission不丟，晚到的報告不讀最終名冊。設備ID是本地模擬UUID，不是USB序號；無任何設備I/O、輸入事件注入、震動強度或實體停止保證，檔案符合重建規則不等於API來源簽章。
+
+34新核心／**772完整核心**成功；128綁定、4096事件／步、虛擬0..600000ms、每設備32含in-flight、2秒虛擬期限，並不改遊戲0.5／1.5秒政策。重送／倒序拒絕、換綁與重連取消但不自動重播、錯設備／connection／delivery ACK不解除原flight；恰好期限先逾時。所有腳本最後取消殘留項，complete只表示腳本走完，SimulatedHardwareOnly=true／PhysicalDeliveryConfirmed=false。輸入8MiB、輸出64MiB、已有檔不覆蓋，受控錯誤exit1只型別。
+
+五場真正隔離API＋.NET ArenaSession／TelemetryOutbox／原relay補送，初24／33／34／36與最終**38 CLI**各自成功；全部是Simulation，非Unity/native遊戲／設備。最終`hardware-simulator/run-883edf2541fc4063ab6c90e4e5454857`原12 events、2發2中1殺／受傷20／health80，3個訊號逐欄核對原event、report、stream、ObservedSequence、admission、room、kind與damage。原API事件／統計前後同、active0；每場原API私有pipe正常exit0／cleanup空才一次C→F snapshot。CLI真正使用的API／relay／simulator完整binary graph前後同hash。post-terminal逐欄讀回不是新的第39 live項。
+
+最初錯權限輸入`hardware-rejection-before`已不寫報告，但CLI未捕捉原AccessDeniedException，Windows exit **3762504530**；輸入／stdout／無輸出反例保留。修正只將AccessDenied與KeyNotFound列為CLI受控拒絕，不改權限或歷史規則；同一位元原輸入在真正v2解壓包exit1／只型別／仍無輸出。原有效案例和初包保持，不能說先前已有受控拒絕。
+
+初包`hardware-simulator-0.1.0-net10.zip` **122,332／SHAff7b1c6868ed84b8d4f7f9029207b2538047741277e68748c087c4c5ccf0511a**保持；主包 **hardware-simulator-0.1.0-v2-net10.zip** **122,352 bytes／SHA256 72e73214c03948ac312cac52c246338ae061e498fb7f8aa9f5d4e0bd62d7412b**，7 manifest／ZIP8。只有5個自己DLL／deps／runtimeconfig、合成example及README，需要.NET10 runtime，不含apphost／runtime／SDK／金鑰／DB。v2真正解壓執行sample，結果與原run逐位元一致，包保持同hash；manifest不是簽章，不假造實體ACK或stop。
+
+`hardware-delivery-validation.json`核對新五場 **C75／F**、原C27及四舊報告117／274／163／327、9管理／5server ZIP、原玩家ZIP／APK／e0d60e4e...／224 Editor雙平台與原識別保持。最終build `hardware-c128f55c4c9442f5bebed300c9ba87c1`，197凍結輸入及同次輸出圖保存；Windows459 HTTP／47 world成功不改舊startup根因。API routes／UI／Unity來源未改，僅新Core離線類別／CLI／檢查；本機未新跑全browser或native遊戲，前1415 browser／nativeUI7保持。保存SQLite僅rb/hash不開，正式5080不動。完整11active，廠商協議／實機輸入輸出、MR、跨機25操作、原31／world371／startup／F吞吐與PickerHost GUI仍各自待驗。
+
 ## 2026-11-02：物件復原交付的CI與證據
 
 [功能fddc59c](https://github.com/peca12968/vr-command-center/commit/fddc59c4f2e2571265fb19a0c81e3622c1b93eb9)的[CI41346124781](https://github.com/peca12968/vr-command-center/actions/runs/41346124781)／job124966206406完整 **success**：Linux738規則／459 HTTP／47 world、6 pipe、全部Python／素材及89 Node／296 Chromium通過。2 Windows限定skip不是Framework、WinForms、Unity、native遊戲或頭盔驗收。console49檔 artifact13099980133／ZIP **12,015,192 bytes／SHA256 d6012c7a79fccd1e2ed44ed13640f669f7708134ae6ca533eaae1328167dc13a**，control13檔 artifact13099004432／ZIP **3,920 bytes／SHA256 b1cde4b7e8ccd8ac06b2ed58c73213e5e300e5f91ca54764907c79d0dfd2db58**，已下載核對GitHub digest、逐檔hash及完整decoded log（SHA256 ffba6bdd60c1066877c19fbb92bd75f041dda4bebc2f22e55ea59f315b4aee8e）。`placement-ci-validation.json`明列1366＋49＝**1415 browser證據**，另13 metadata，nativeUI7保持；前CI60檔及ZIP另核對保持。C27／F及四舊runtime報告、9管理／5server ZIP、原Unity0.39／e0d／224／玩家ZIP APK不變。後續只有文件提交skip ci，測試來源精確fddc59c；完整11active。
