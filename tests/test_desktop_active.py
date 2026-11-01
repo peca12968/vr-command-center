@@ -75,4 +75,67 @@ class ActiveTests(unittest.TestCase):
         with self.assertRaises(ValueError):active.validate_input(frame,stats,initial,own,'kill')
 
 
+class FinalResultsTests(unittest.TestCase):
+    def fixture(self):
+        frame,statistics,_,_=ActiveTests().fixture()
+        players=[{'id':p['id'],'admissionId':'a-'+p['id'],'roomId':p['roomId']} for p in frame['players']]
+        native=[{'name':'client-'+p['id'],'playerId':p['id'],'admissionId':p['admissionId'],'roomId':p['roomId'],'nativeConnectionId':index+1} for index,p in enumerate(players)]
+        entry={'id':'session','players':players}
+        ledger=[{**p,'roomId':next(v['roomId'] for v in players if v['id']==p['playerId']),'health':100} for p in statistics['players']]
+        sealed={'world':{'complete':True,'acceptedSequence':20,'header':{'streamId':'stream'}},
+            'statistics':{'pendingTelemetry':False,'throughSequence':30,'players':ledger}}
+        results=[{'version':1,'sessionId':'session','playerId':p['id'],'admissionId':p['admissionId'],'roomId':p['roomId'],
+            'origin':'Simulation','streamId':'stream','worldSequence':20,'throughSequence':30,'finalStreamSequence':2,
+            **{k:next(s[k] for s in ledger if s['playerId']==p['id']) for k in
+                ('ammoUsed','shotsHit','kills','hitsReceived','damageTaken','health','accuracyPercent')}} for p in players]
+        delivery={'allAcknowledged':True,'timedOut':[],'phases':{p['name']:'acknowledged' for p in native}}
+        return entry,native,sealed,delivery,results
+
+    def validate(self,values,server_log=None):
+        if server_log is None:server_log='\n'.join('VR_SERVER_DEBRIEF_ACK id='+str(p['nativeConnectionId']) for p in values[1])
+        return active.validate_final_results(*values,combat_sequence=2,server_log=server_log)
+
+    def test_all_original_results_need_exact_seals_and_leave_evidence_unchanged(self):
+        values=self.fixture();original=copy.deepcopy(values);results=self.validate(values)
+        self.assertEqual(25,len(results));self.assertEqual(values,original)
+
+    def test_empty_closed_or_unknown_delivery_cannot_be_acknowledged(self):
+        for change in (lambda d:d.update(phases={}),lambda d:d.update(timedOut=None),
+            lambda d:d['phases'].__setitem__('client-p1-0','closed')):
+            values=self.fixture();change(values[3])
+            with self.assertRaises(ValueError):self.validate(values)
+
+    def test_missing_or_duplicated_player_final_is_rejected(self):
+        for change in (lambda r:r.pop(),lambda r:r.__setitem__(0,None),lambda r:r.__setitem__(0,copy.deepcopy(r[1]))):
+            values=self.fixture();change(values[4])
+            with self.assertRaises(ValueError):self.validate(values)
+
+    def test_old_admission_in_result_or_native_owner_is_rejected(self):
+        for index in (1,4):
+            values=self.fixture();values[index][0]['admissionId']='previous-admission'
+            with self.assertRaises(ValueError):self.validate(values)
+
+    def test_previous_world_frame_cannot_be_a_final_result(self):
+        values=self.fixture();values[4][0]['worldSequence']=19
+        with self.assertRaisesRegex(ValueError,'world seal'):self.validate(values)
+
+    def test_combat_tail_must_match_actual_sealed_session_stream(self):
+        values=self.fixture();values[4][0]['finalStreamSequence']=1
+        with self.assertRaisesRegex(ValueError,'combat boundary'):self.validate(values)
+
+    def test_same_player_cannot_receive_another_rooms_statistics(self):
+        values=self.fixture();values[4][0]['roomId']=2
+        with self.assertRaisesRegex(ValueError,'room'):self.validate(values)
+
+    def test_final_health_cannot_differ_from_sealed_ledger(self):
+        values=self.fixture();values[4][0]['health']=99
+        with self.assertRaisesRegex(ValueError,'statistics'):self.validate(values)
+
+    def test_client_final_and_disconnect_cannot_substitute_for_server_ack(self):
+        values=self.fixture();correct='\n'.join('VR_SERVER_DEBRIEF_ACK id='+str(i) for i in range(1,26))
+        for text in ('',correct.replace('id=25','id=24'),correct.replace('id=25','id=99'),correct+'\nVR_SERVER_DEBRIEF_TIMEOUT id=25'):
+            with self.subTest(text=text):
+                with self.assertRaisesRegex(ValueError,'Server did not acknowledge'):self.validate(values,text)
+
+
 if __name__=='__main__':unittest.main()

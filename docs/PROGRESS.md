@@ -1,5 +1,32 @@
 # 開發進度
 
+## 2026-11-01：同版動態PC與25份最終結果／server ack
+
+上一輪為實際進展；從乾淨 `8938968` 接續[動態PC流程](DESKTOP_ACTIVE.md)。**API/UI0.30、Unity0.36.1／code44／NGO29與e0594513140ff7fb4bc084929691b91c15f7d908e8f59c114aa5ab27daaf11eb保持**。只有Python驗收／文件修改，沒有重建或重跑原179 Editor／雙平台、沒有新.NET／完整瀏覽器／APK／launcher結果。原scene／prefab／rules0.8.0／Tracked與0.5／1.5秒政策保持，正式5080不動。
+
+以computer-use技能只操作自己本輪唯一可見的Windows遊戲視窗，逐階段實際W／Space／R／Space，畫面確認後才寫該階段done檔；沒有REST／RPC／UDP注入姿態或命中。所有場為25個原native client、1個server，**一位操作、24接收、同機Simulation**；all25SimultaneouslyActive／networkCapacityAccepted=false、headsets0，不能稱25位同時操作或頭盔／跨機／Wi-Fi驗收。GPU畫面只為Windows視窗觀察，沒有新原生GPU／PCM探針、FPS／聲音或XR追蹤證據。
+
+| 真正PC場／原handle | 原結果與範圍 |
+|---|---|
+| `desktop-active/20261101-075730-56b9ca85`，43305 exit1 | 40秒actual UI move確認逾時；首次畫面不符後重新啟用並確認自己的遊戲視窗，W已送出，但確認時stage已failed，guard拒絕補寫move.done。沒有done、active-result／summary／全程continuity接受檔；26 initial snapshot與raw退出資料保持。cleanup空，不能稱引擎或姿態故障根因 |
+| `20261101-075928-d971525e`，8014 exit0 | 修改前9項、130快照／26報告、26599 Running列及1223連續回放／6參考全過。raw有25份final，但工具當時未提供停止前的個別結果／server ack閘門，不補造新接受欄位 |
+| `20261101-080727-7ba918cd`，56068 exit0 | 中間10項含25份精確個別結果與client phase，130快照／26報告、24252 Running列、1115全回放／6參考成功；server25 ack另離線相符，該版檔未記錄serverAcknowledgedConnections新閘門，原件保持 |
+| `20261101-081224-46713819`，40247 exit0 | 最終來源10項，130快照／26完整報告、**33256觀察Running列**無失效，1420連續全回放／7參考及參考間所有保存Running幀無失效；25份精確結果與實際server ack通過，cleanup無殘留 |
+
+最後三場各自明確finish、精確combat／world雙seal及25人CSV均成功，原生日誌無send queue full。最終26份probe皆reason=Requested、complete=true／truncated=false，各自收集起算最晚151.630929秒停止、最多1320列，沒有延長原240秒／4096列上限；client probe先停、server seal後停，之後才核對玩家結果。相鄰觀察Running新tick最大間隔0.383255秒，非RTT／FPS或每packet保證；不同報告樣本不當同一時刻。
+
+最終實際短W移動0.05公尺，第一發敵軍100→50、彈匣30→29，R顯示RELOADING後30／89，再Space擊倒目標為29／89。權威與所有端列出的狀態欄位一致，其他24位位置／彈藥／統計未被這位玩家輸入改動。最終主玩家耗彈2、命中2、擊殺1、命中率100%、中彈／損耗0、健康100；25人CSV與個別結果逐一等於各自sealed ledger，不能把主玩家數值套給其他人。
+
+原動態工具在seal後會直接stop_round，只核對操作、接收／回放與最終CSV；本輪先保持原9項baseline，再新增停止前等待結果。`validate_final_results`要求25個原native owner／admission／room、非空且精確相同的ack名單、25份無重複final、world stream／sequence／ledger through及實際API combat acceptedSequence。client每份只有一個原連線；server log另須25筆無重複VR_SERVER_DEBRIEF_ACK，ID集合精確等於原nativeConnectionId、沒有DEBRIEF_TIMEOUT。這區分final＋disconnect的client phase與真正server ack，沒有改遊戲30秒等待或斷線政策。
+
+新`active-player-results.json`保存delivery／個別結果／實際serverAcknowledgedConnections，active-result增加individualResults／acknowledgedResults。最終25份皆worldSequence1420／combat5／through42，server確認也全部對到原25條連線；完成驗收後才停原程序。舊缺欄位是NotRecorded，原9項／中間版範圍不改寫，不能由空集合當全部送達。
+
+新增9個反例含空／closed／未知delivery、缺失／重複結果、舊admission、前一幀世界尾界、錯combat tail／room／health及client已收但server ack缺失／重複／外連線／timeout。**17 active＋11 capacity＋12 debrief＋17 independent evidence，共57 Python通過**，語法／diff成功；CI既有active入口自動包含新案例。不是新跑179 Editor、717／459／47或一般瀏覽器套件。
+
+`active-e059-runtime-validation.json`核對本輪4 C runtime共836檔／F snapshot逐檔一致，前44 runtime891檔、前F337／原尾界反例F76／獨立房F112／0.36 history321與三組API各159保持；總48 C runtime1727檔，新四場F證據1138檔另存hash，失敗也保存。既有0.36／0.36.1 Windows包、APK與receipt metadata保持，來源／binary仍F、runtime明確C SSD。所有writer全停才一次snapshot保留原件，保存SQLite不開連線、沒有修復／ack補送或截尾。
+
+這是同版實際輸入／接收／個別戰績的進展，不證明舊31筆或F發布吞吐已修復，也不把視窗觀察工具的影響當已排除。完整11項active；下一步推進操作員即時控制與動態玩家組合，原31筆、慢碟、實機／MR／VIVE／跨機25台及廠商硬體各自另驗。
+
 ## 2026-11-01：0.36.1五獨立房長任務與閉源證據讀回
 
 功能 [4898c98](https://github.com/peca12968/vr-command-center/commit/4898c988e0cd1a5203d4b30ca7552c0bb5c8dd33) 已推送main、遠端SHA一致。[本功能CI run41254427165](https://github.com/peca12968/vr-command-center/actions/runs/41254427165)／check124694467148為failure、steps空；fresh annotation明確為付款失敗或支出上限，job未啟動，沒有雲端測試結果。未改帳務或手動重跑；下列為本機實際驗證。

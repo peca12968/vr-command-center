@@ -1,5 +1,7 @@
 # 實際 PC 輸入與25端狀態對照
 
+2026-11-01 同版0.36.1／e059新場10項通過：實際W／Space／R／Space、130快照／26完整報告、1420全回放與25份個別結果／精確雙seal／CSV一致；所有原連線server ack逐一核對後才停程序。仍是一位操作、24接收端、同機Simulation；原逾時與舊失效證據保持，範圍見[PROGRESS](PROGRESS.md)。
+
 `scripts/check-desktop-active.py`使用現有成功的Windows播放器與自己的API、憑證、全新SSD runtime，開一個五房Linked世界、25個原生client。**一位玩家實際操作，24個接收端；不是25位同時移動／射擊，也不是25台或頭盔驗收。** 一個可見視窗由人員或computer-use操作，其餘24端無圖形；合成頭手仍為Simulation。
 
 ```powershell
@@ -16,8 +18,10 @@ python scripts/check-desktop-active.py --api-dll artifacts/build-report-v1/bin/V
 
 **檢查點成功仍不足。** 完整report自初次成功capture起，所有觀察到的Running列都須Ready、coherent、玩家25／connected25／健康總和2500；同一連續Running區間的新tick觀察間隔須<1.5秒。刻意Paused的無新tick時間不當遺失；不過濾Running失效列。End後授權SSE從頭回放，序號必須連續，所有保存參考packet／statistics須逐字值一致；初始至最後參考之間每張保存的Running世界幀亦核對全名冊／Simulated／可參戰。這些是保存及觀察到的樣本，不宣稱所有瞬間／每packet或實際RTT。
 
-client在End前明確finish，server在精確seal後finish；不驗client收到Ended。最終CSV核對25人全部數值與精確戰鬥尾端。所有追蹤writer退出後才一次回F snapshot、保留SSD原件；失敗亦收尾、保留資料，不手工更改passed／failed。輸入等待是操作員觀察時限，不改0.5秒姿態、1.5秒來源或入場授權；probe模式最多每階段40秒以保留原240秒探針上限。
+client探針在End前明確finish，server探針在精確seal後finish；不要求client的探針收到Ended。所有原玩家程序仍保留至自己的final結果送達、確認及斷線：核對原player／admission／room、world stream／sequence、combat acceptedSequence、ledger through與七統計，client只允許一個原連線。另從自己的server log核對25個不重複ack ID，須精確等於原nativeConnectionId集合且無timeout，才停玩家程序。client phase的final＋disconnect不能單獨替代server ack。最終CSV核對25人全部數值與精確戰鬥尾端。所有追蹤writer退出後才一次回F snapshot、保留SSD原件；失敗亦收尾、保留資料，不手工更改passed／failed。輸入等待是操作員觀察時限，不改0.5秒姿態、1.5秒來源或入場授權；probe模式最多每階段40秒以保留原240秒探針上限。
 
 對照可用`--without-replication-probe --input-timeout 90`。該模式只驗權威／保存世界與報表，**沒有接收端報告**，不能把空集合判定當接收端通過；`localReplicaContinuityChecked=false`。它仍核對保存Running幀、實際輸入、原始日誌與精確seal，不修改來源標記。較長等待只讓操作員確認／恢復UI焦點，不放寬遊戲時序。
 
 首次fan-out場雖8個功能檢查／130快照成功，之後逐列稽核仍發現65個失效Running列，26份報告皆不符合新全程條件；原始passed結果保留為舊範圍，不能稱全程通過。分批場及無probe對照的實際結果見[PROGRESS](PROGRESS.md)。一場對照差異不證明失效由診斷取樣引起，也不證明舊主迴圈停頓已修復；原始反例持續保留。實際GPU截圖由Windows視窗觀察，沒有新Unity GPU／PCM探針、FPS／音效／頭盔測量。
+
+新接受檔增加`individualResults`／`acknowledgedResults`，另存`active-player-results.json`的delivery、結果與實際serverAcknowledgedConnections；空集合、missing／duplicate結果、舊admission、錯尾界或ack均失敗。舊檔缺欄位表示未記錄該項，不補造0／成功或改寫原passed範圍。確認檔仍必須在正確active-input階段且已看見操作後才建立；UI或畫面不符先重新觀察，已逾時不得補寫done把失敗翻成成功。

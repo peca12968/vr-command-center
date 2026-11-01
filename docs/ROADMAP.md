@@ -1,5 +1,7 @@
 # 長期開發目標
 
+2026-11-01 [同版動態PC](DESKTOP_ACTIVE.md)：0.36.1／e059來源保持，最終10項／130快照／26報告／33256 Running列、1420全回放與25份個別結果／server ack成功；一位實際W／Space／R／Space、24接收，不是25位同時操作。新增結果閘門與57 Python；首次UI40秒確認逾時保持失敗，原31筆／F吞吐／實機另驗，11項active。
+
 2026-11-01 [同版五獨立房長場](DESKTOP_INDEPENDENT_LONG.md)：0.36.1／e059來源保持，5 server＋25 PC、每房900秒、42341全回放／209420人次與25份原結果／各CSV／雙seal通過。Room1 tick2410停表、其餘四房前進；新獨立讀回器核對JSON／CSV，17新反例及共60 Python通過，無新Editor／雙平台重建。下一步動態PC；原31筆／F吞吐／實機另驗，完整11項active。
 
 2026-11-01 [戰績尾界](DEBRIEF_BOUNDARY.md)：Unity0.36.1／code44、179 Editor與e0594513...雙平台成功。原0.36真正25端900秒場在結果核對exit1，一份8441／實際Ended封存8442，完整失敗保存；pending改綁terminal capture、final仍另核對durable seal。三個原生短場12項／六份結果成功，長場完整驗證見PROGRESS；不把ack／live乾淨當整場接受，完整11項active，原31筆／慢碟／實機另驗。

@@ -20,6 +20,29 @@ ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('active_capacity',ROOT/'scripts/check-desktop-capacity.py')
 capacity=importlib.util.module_from_spec(spec);spec.loader.exec_module(capacity)
 venue_module=capacity.venue_module
+spec=importlib.util.spec_from_file_location('active_debrief',ROOT/'scripts/check-desktop-debrief.py')
+debrief=importlib.util.module_from_spec(spec);spec.loader.exec_module(debrief)
+
+
+def validate_final_results(entry,native,sealed,delivery,results,combat_sequence,server_log):
+    players={p['id']:p for p in entry['players']}
+    if len(native)!=25 or len(players)!=25 or {p['playerId'] for p in native}!=set(players) or len({p['name'] for p in native})!=25:
+        raise ValueError('Final result roster is not the original 25 native players')
+    if delivery['allAcknowledged'] is not True or delivery['timedOut']!=[] or set(delivery['phases'])!={p['name'] for p in native} \
+        or any(p!='acknowledged' for p in delivery['phases'].values()):
+        raise ValueError('All original players must acknowledge their final results')
+    if len(results)!=25 or any(not isinstance(p,dict) for p in results) or len({p['playerId'] for p in results})!=25:
+        raise ValueError('Missing or duplicated individual final results')
+    acknowledgments=[int(value) for value in re.findall(r'VR_SERVER_DEBRIEF_ACK id=(\d+)',server_log)]
+    if len(acknowledgments)!=25 or set(acknowledgments)!={p['nativeConnectionId'] for p in native} or 'VR_SERVER_DEBRIEF_TIMEOUT ' in server_log:
+        raise ValueError('Server did not acknowledge exactly the original 25 connections')
+    for owner,result in zip(native,results):
+        player=players[owner['playerId']]
+        if owner['admissionId']!=player['admissionId'] or owner['roomId']!=player['roomId']:
+            raise ValueError('Native result owner changed admission or room')
+        debrief.validate_result(result,entry,player,sealed)
+        if result['finalStreamSequence']!=combat_sequence:raise ValueError('Final player combat boundary differs')
+    return results
 
 
 def actor(frame,identity):return next(p for p in frame['players'] if p['id']==identity)
@@ -204,12 +227,22 @@ def run(v):
         check(True,stage+': actual input / authoritative damage / '+scope+' agree; passive players unchanged')
         v.save('active-input-observations.json',observations);v.save('active-input-results.json',accepted)
     finish(v,[r['name'] for r in native]);sealed=v.seal(entry)
-    report=capacity.practice.save_report(v,entry,sealed['statistics']);finish(v,[entry['name']+'-server']);v.stop_round(entry)
+    report=capacity.practice.save_report(v,entry,sealed['statistics']);finish(v,[entry['name']+'-server'])
+    v.stage('active-results',players=len(native))
+    delivery=v.wait_for_player_results(entry)
+    results=[debrief.final_result(v,p['name']) for p in native]
+    server_log=debrief.log_text(v,entry['name']+'-server')
+    validate_final_results(entry,native,sealed,delivery,results,v.state(entry)['combatStream']['acceptedSequence'],server_log)
+    if any(debrief.log_text(v,p['name']).count('VR_CLIENT_CONNECTED id=')!=1 for p in native):raise ValueError('A native player changed connection before its final result')
+    v.save('active-player-results.json',{'delivery':delivery,'results':results,'serverAcknowledgedConnections':[int(value) for value in re.findall(r'VR_SERVER_DEBRIEF_ACK id=(\d+)',server_log)]})
+    check(True,'all 25 original players acknowledge exact individual world / combat / ledger results before shutdown')
+    v.stop_round(entry)
     playback=replay(v,entry,references);check(playback['complete'],'every saved active checkpoint matches contiguous replay / final ledger and CSV')
     findings=capacity.native_log_findings(v.directory);check(not findings,'no native send queue full messages')
     v.save('active-result.json',{'complete':False,'source':'Actual Windows native input / UDP / NGO; Simulation','headsets':0,'hosts':1,
         'activePlayers':1,'receivingPeers':24,'renderedClients':1,'poseOrWeaponInjected':False,'all25SimultaneouslyActive':False,
         'statistics':accepted[-1]['statistics'],'inputStages':accepted,'replay':playback,'csv':report,'nativeLogFindings':findings,
+        'individualResults':results,'acknowledgedResults':len(results),
         'minimumFreePhysicalBytes':min(p['availablePhysicalBytes'] for p in resources),'networkCapacityAccepted':False,
         'localReplicaContinuityChecked':v.args.replication_probe,
         'captureBatch':v.args.capture_batch if v.args.replication_probe else None,

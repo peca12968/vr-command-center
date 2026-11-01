@@ -1,5 +1,7 @@
 # VR Command Center
 
+新增[動態PC結束驗收](docs/DESKTOP_ACTIVE.md)：一位實際操作、24接收端，移動／射擊／換彈／擊殺與130快照、1420幀回放通過；25份個別戰績及原連線server ack精確核對後才停程序。同版0.36.1來源保持，實機／25人同時操作及舊姿態問題另驗。
+
 同版[五獨立房長任務](docs/DESKTOP_INDEPENDENT_LONG.md)已完成5個server＋25個PC程序、每房900秒及42341幀完整回放，單房暫停與各房精確戰績／封存通過。新增閉源JSON／CSV讀回核對，仍是同機靜止Simulation；完整11項與實機／動態操作另見[進度](docs/PROGRESS.md)。
 
 新增[任務結果尾界修正](docs/DEBRIEF_BOUNDARY.md)：等待中的戰績綁定已排入的 Ended 世界幀，送出最終結果前精確核對真正 durable seal，避免背景錄製尚未完成時取到前一幀。Unity0.36.1／code44、179真正Editor與同源Windows／Quest建置成功；原25端長場反例及重跑結果見PROGRESS，完整11項仍在開發中。

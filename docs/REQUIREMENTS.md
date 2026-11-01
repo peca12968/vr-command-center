@@ -1,5 +1,7 @@
 # 需求與驗收追蹤
 
+第1／2／9／10／11項新增[動態PC與結果送達](DESKTOP_ACTIVE.md)：最終同版10項、130快照／26報告及1420全回放，主玩家2發2中1殺／100%，其他24位不受其輸入影響；25份原admission個別結果／CSV／雙seal及server ack精確核對。57 Python與原逾時保存見PROGRESS；仍一位操作、同機Simulation，原31筆與實機／25人同時操作未完成，11項active。
+
 第1／5／6／9／10／11項新增[0.36.1五房長場](DESKTOP_INDEPENDENT_LONG.md)：每房5位、各900秒及獨立環境／Pause／End，42341全回放／209420人次、25份原admission結果／CSV與雙seal成功。新獨立格式讀回與60 Python證據見PROGRESS，沒有新Unity建置或頭盔／25台／跨機／動態操作驗收，原31筆與慢碟未修復，11項active。
 
 第1／9／10／11項新增[結果尾界](DEBRIEF_BOUNDARY.md)：Unity0.36.1／code44、179真正Editor與同源雙平台。原25端長場一份戰績誤綁8441而真正Ended封存8442，原exit1保留；pending綁terminal capture，final必須另核對精確durable seal。三個原生短場12項／六份結果及長場證據見PROGRESS；不是舊31筆、F吞吐或頭盔容量驗收，11項active。
