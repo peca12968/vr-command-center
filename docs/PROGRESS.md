@@ -27,6 +27,10 @@
 
 `navigation-prior-validation.json`核對前60 C runtime3083與F snapshot、前F證據3540、舊321＋10與兩個新C build候選／凍結反例來源。`navigation-runtime-validation.json`再核對**新4 C runtime68檔與F snapshot逐檔一致、新F179檔、486份前瀏覽器／CI證據**，總64場3151 runtime檔；原三API組159、accepted mission API及三個舊候選、新accepted navigation API／三工具／Checks都依原hash保持。全部自己的writer停才一次snapshot回F，原件不移動、保存SQLite不開連線。完整CI另補本節。
 
+[功能9959c64](https://github.com/peca12968/vr-command-center/commit/9959c644bc91f93dcb24e87e43539b2fa3e6bf4b)已推送main；[CI41275385420](https://github.com/peca12968/vr-command-center/actions/runs/41275385420)／job124756415659／精確9959c64 **完整success**：Linux restore／build、723規則／459 HTTP／47 world-stream、工作流程Python（新增7 navigation）／素材與72 Node／248 Chromium通過。2 Windows限定skip不當原生、Editor或本機Windows完整HTTP啟動成功；先前startup失敗不改判。
+
+39檔artifact13071202925與log／**9,675,831 bytes ZIP／SHA565bde8df61294a09f141c7dc60332792c92cda2c25762f5f1d39bd18ec141a5**已保存，實際下載與GitHub digest一致。`navigation-ci-validation.json`再核對前486份瀏覽器／CI證據、新runtime68與snapshot、APK／ZIP未變。後續僅文件證據skip ci，測試來源精確9959c64，不重跑冒充另一場。
+
 完整11項active，仍同機Simulation／headsets0。這個可重現的旋轉格邊錯誤與原31筆／world371姿態失效、Windows startup、F吞吐各自不同，後者未修復；多人持續操作、複雜地形、跨機／Wi-Fi／Quest／VIVE／MR與廠商硬體仍待驗。
 
 ## 2026-11-01：電腦端第一人稱軍服手臂

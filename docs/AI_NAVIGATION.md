@@ -36,4 +36,6 @@ Windows與ARM64 Quest皆真正建置成功、同源`69d247a9ecfa7b42ee1e9314e031
 
 本輪真正build／原生／封存與CI結果統一列在[PROGRESS](PROGRESS.md)。建置前Windows305／Quest3／logs13共321檔及10份來源已精確另存navigation-history，原0.37.0／0.36.1 ZIP保持。第一人稱六張GPU是0.37.0的既有證據，不宣稱這輪重新擷取；本輪沒有改手臂素材或呈現程式。
 
+[精確9959c64的CI41275385420](https://github.com/peca12968/vr-command-center/actions/runs/41275385420)完整成功：Linux723規則／459 HTTP／47 world、Python／素材及72 Node／248 Chromium；2 Windows限定skip不是原生／Editor。保存39檔＋log及ZIP9,675,831 bytes、SHA `565bde8df61294a09f141c7dc60332792c92cda2c25762f5f1d39bd18ec141a5`，與GitHub一致。新4 runtime68與F snapshot相同、前60 runtime3083／前F3540／486份瀏覽器證據保持，合計64場3151 runtime檔；保存SQLite不開連線。之後僅文件skip ci，測試來源不變。
+
 原31筆、world371姿態失效、Windows完整HTTP startup及F吞吐未因這個可重現的尋路修正而解決。完整11項active；仍需多人持續操作、跨機／Wi-Fi、Quest／VIVE／MR與廠商硬體驗收。

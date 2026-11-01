@@ -1,5 +1,7 @@
 # 開發指引
 
+2026-11-01 最新9959c64的CI41275385420 job124756415659完整success：Linux723／459／47、Python含7navigation及素材、72 Node248 Chromium，2 Windows skip非native／Editor／Windows完整HTTP。39檔artifact13071202925＋log／ZIP9675831 SHA565bde8d...核對；前486browser檔、新4runtime68與F snapshot／APK ZIP保持，前60runtime3083＋新68＝64場3151。原三API159／accepted mission／拒絕候選與新navigation-final-build-path.txt的API／三工具／Checks保持，保存SQLite不開。後續文件skip ci、測試來源9959c64；getter timeout仍failed、舊31／371／Windows startup未修復，完整11active。
+
 2026-11-01 旋轉掩體AI見docs/AI_NAVIGATION.md／PROGRESS：Unity0.37.1 code46 NGO29、API UI0.30.1／rules0.8.0保持，723核心／189真正Editor及同源Windows ARM64 fingerprint69d247a9...原ID一致。Grid邊以原ClearSegment核對並每房2500 sbyte正反快取，不改.3半徑／.05取樣／.1位移或Tracked／傷害。舊凍結兩反例exit1／新Grid-only可繞行，首wall fixture留通路的失敗候選也保留。最終35386 exit0四項128回放／113 Begin4後來源幀，first replay15與live17分開，69連續live幀端點tick150；getter場43827 timeout仍failed，closed world90/91已到端點，不能稱沒到達／根因。連續live20秒256幀不放寬.2m或1.5來源年齡、缺tick不插補路徑，5helper SHA不是完整graph。五房97903 exit0六項七場／原結果CSV雙sealACK cleanup成功，非25位操作／GPU。新包19拒絕核對／APK v2 debug非實機；舊321binary/log及10source先archive，前60runtime3083與F保持；完整11active，原31/world371/Windows startup未修復。
 
 2026-11-01 最新81108e1的CI41273127773 job124749808406完整success：Linux717／459／47、Python含7first-person及素材、72 Node248 Chromium；2 Windows skip非native／Editor。39檔artifact13069804420＋log／ZIP9710227 SHA84d3f956...已精確核對；前447browser檔依manifest保留，新5runtime102及前55runtime2981與F snapshot同hash，60場3083。保存SQLite不開，後續只有文件skip ci、測試來源81108e1；原操作timeout／31／world371／Windows HTTP startup不改判，完整11active。
