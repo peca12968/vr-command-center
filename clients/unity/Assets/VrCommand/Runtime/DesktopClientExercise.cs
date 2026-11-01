@@ -18,12 +18,17 @@ namespace VrCommand.Unity
     public sealed class DesktopExercisePlan
     {
         public const long MaximumActiveTicks = 1200;
+        public const long EnduranceActiveTicks = 19000, EnduranceWeaponTicks = 18000;
+        public const int EnduranceCycleTicks = 400, EnduranceCycles = 45;
+        private readonly bool endurance;
+        private int cycle = -1;
         private long start = -1, last = -1;
         private int fires;
         private bool reloaded;
         public bool Exhausted { get; private set; }
         public long FirstTick => start;
         public long LastTick => last;
+        public DesktopExercisePlan(bool endurance = false) { this.endurance = endurance; }
         public static bool Allowed(string role, bool windows, bool development, bool batch, bool editor, bool tracked)
             => role == "Client" && windows && development && batch && !editor && !tracked;
         public DesktopExerciseFrame Next(long tick, bool active)
@@ -32,9 +37,24 @@ namespace VrCommand.Unity
             if (tick < 0 || (last >= 0 && tick < last)) throw new InvalidOperationException("Exercise tick moved backwards.");
             if (start < 0) start = tick;
             last = tick; var elapsed = tick - start;
-            if (elapsed >= MaximumActiveTicks) { Exhausted = true; return default; }
+            if (elapsed >= (endurance ? EnduranceActiveTicks : MaximumActiveTicks)) { Exhausted = true; return default; }
             // 0.4m/s through DesktopPreviewControls.Move; 0.8m forward/back.
             var forward = (elapsed / 40) % 2 == 0 ? .2f : -.2f;
+            if (endurance)
+            {
+                if (elapsed >= EnduranceWeaponTicks)
+                {
+                    if (cycle != EnduranceCycles - 1 || fires != 2 || !reloaded) throw new InvalidOperationException("Endurance cycle incomplete.");
+                    return new DesktopExerciseFrame(new Vector2(0, forward), false, false);
+                }
+                var next = (int)(elapsed / EnduranceCycleTicks);
+                if (next != cycle)
+                {
+                    if (next != cycle + 1 || (cycle >= 0 && (fires != 2 || !reloaded))) throw new InvalidOperationException("Endurance cycle missed.");
+                    cycle = next; fires = 0; reloaded = false;
+                }
+                elapsed %= EnduranceCycleTicks;
+            }
             return new DesktopExerciseFrame(new Vector2(0, forward), fires < 2 && elapsed >= (fires == 0 ? 20 : 120), !reloaded && elapsed >= 60);
         }
         public void SubmittedFire() { if (fires >= 2) throw new InvalidOperationException("Exercise fire bound."); fires++; }
@@ -47,6 +67,9 @@ namespace VrCommand.Unity
         {
             public int version = 1, pid, room, activeFrames, movementFrames, fireSubmissions, reloadSubmissions;
             public string mode = "AutomatedSimulation", role = "Client", playerId, reason, fault;
+            public string profile = "Short";
+            public int maximumCollectionSeconds = 240;
+            public long maximumActiveTicks = DesktopExercisePlan.MaximumActiveTicks;
             public bool complete, truncated, physicalInput;
             public int headsets;
             public ulong connection;
@@ -55,7 +78,7 @@ namespace VrCommand.Unity
         }
         private static DesktopClientExercise instance;
         public static bool Enabled => instance != null;
-        private readonly DesktopExercisePlan plan = new DesktopExercisePlan();
+        private DesktopExercisePlan plan = new DesktopExercisePlan();
         private readonly Stopwatch clock = new Stopwatch();
         private readonly Report report = new Report();
         private string directory;
@@ -64,10 +87,12 @@ namespace VrCommand.Unity
         public static bool Install(GameObject owner, string role)
         {
             var args = Environment.GetCommandLineArgs(); var index = Array.IndexOf(args, "--vr-desktop-exercise");
-            if (index < 0) return true;
+            var longIndex = Array.IndexOf(args, "--vr-desktop-endurance"); var endurance = longIndex >= 0;
+            if (index < 0 && longIndex < 0) return true;
+            if (endurance) index = longIndex;
             try
             {
-                var count = 0; foreach (var arg in args) if (arg == "--vr-desktop-exercise") count++;
+                var count = 0; foreach (var arg in args) if (arg == "--vr-desktop-exercise" || arg == "--vr-desktop-endurance") count++;
                 var windowsDevelopment = false;
 #if UNITY_STANDALONE_WIN && DEVELOPMENT_BUILD
                 windowsDevelopment = true;
@@ -77,6 +102,10 @@ namespace VrCommand.Unity
                 var path = Path.GetFullPath(args[index + 1]);
                 if (Directory.Exists(path) || File.Exists(path) || path.StartsWith(@"\\", StringComparison.Ordinal)) throw new IOException("Exercise directory rejected.");
                 Directory.CreateDirectory(path); var exercise = owner.AddComponent<DesktopClientExercise>(); exercise.directory = path;
+                exercise.plan = new DesktopExercisePlan(endurance);
+                exercise.report.profile = endurance ? "Endurance" : "Short";
+                exercise.report.maximumCollectionSeconds = endurance ? 1200 : 240;
+                exercise.report.maximumActiveTicks = endurance ? DesktopExercisePlan.EnduranceActiveTicks : DesktopExercisePlan.MaximumActiveTicks;
                 exercise.report.pid = System.Diagnostics.Process.GetCurrentProcess().Id; exercise.report.startedUtcTicks = DateTime.UtcNow.Ticks;
                 exercise.clock.Start(); exercise.Save("ready.json", "Ready", false); instance = exercise; return true;
             }
@@ -96,7 +125,11 @@ namespace VrCommand.Unity
                 if (active) { self.report.activeFrames++; if (frame.Movement != Vector2.zero) self.report.movementFrames++; }
                 return frame;
             }
-            catch (InvalidOperationException) { self.report.fault = "TickWentBackwards"; self.Finish(false, "TickWentBackwards"); return default; }
+            catch (InvalidOperationException)
+            {
+                self.report.fault = tick < self.plan.LastTick ? "TickWentBackwards" : "ScheduleIncomplete";
+                self.Finish(false, self.report.fault); return default;
+            }
         }
         internal static void Submitted(bool reload)
         {
@@ -112,7 +145,7 @@ namespace VrCommand.Unity
         private void Update()
         {
             if (finished || directory == null) return;
-            if (clock.Elapsed.TotalSeconds >= 240) { Finish(false, "Timeout"); return; }
+            if (clock.Elapsed.TotalSeconds >= report.maximumCollectionSeconds) { Finish(false, "Timeout"); return; }
             if (clock.Elapsed.TotalSeconds < nextCheck) return;
             nextCheck = clock.Elapsed.TotalSeconds + .1;
             if (File.Exists(Path.Combine(directory, "finish.request"))) Finish(true, "Requested");

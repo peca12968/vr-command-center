@@ -55,5 +55,54 @@ namespace VrCommand.Unity.Tests
             Assert.AreEqual(Vector2.zero, plan.Next(1210, true).Movement); Assert.IsTrue(plan.Exhausted);
             Assert.IsFalse(plan.Next(11, true).Fire);
         }
+        [Test] public void EnduranceUsesFortyFiveNormalTwoShotReloadCyclesWithinOriginalAmmunition()
+        {
+            var plan = new DesktopExercisePlan(true); var fires = 0; var reloads = 0;
+            for (var tick = 0; tick < DesktopExercisePlan.EnduranceWeaponTicks; tick++)
+            {
+                var frame = plan.Next(tick, true);
+                if (frame.Reload) { plan.SubmittedReload(); reloads++; }
+                if (frame.Fire) { plan.SubmittedFire(); fires++; }
+            }
+            Assert.AreEqual(90, fires); Assert.AreEqual(45, reloads); Assert.Less(fires, 120);
+            Assert.IsFalse(plan.Exhausted);
+            var tail = plan.Next(18000, true); Assert.IsFalse(tail.Fire); Assert.IsFalse(tail.Reload); Assert.AreNotEqual(Vector2.zero, tail.Movement);
+        }
+        [Test] public void EnduranceDoesNotRepeatAnIntentAtAnUnchangedTickOrAtCycleStart()
+        {
+            var plan = new DesktopExercisePlan(true); plan.Next(0, true);
+            Assert.IsTrue(plan.Next(20, true).Fire); plan.SubmittedFire(); Assert.IsFalse(plan.Next(20, true).Fire);
+            plan.Next(60, true); plan.SubmittedReload(); plan.Next(120, true); plan.SubmittedFire();
+            Assert.IsFalse(plan.Next(399, true).Fire); Assert.IsFalse(plan.Next(400, true).Fire);
+            Assert.IsTrue(plan.Next(420, true).Fire); plan.SubmittedFire(); Assert.IsFalse(plan.Next(420, true).Fire);
+        }
+        [Test] public void EnduranceCannotCatchUpAnIncompletePriorCycle()
+        {
+            var plan = new DesktopExercisePlan(true); plan.Next(0, true); plan.Next(20, true); plan.SubmittedFire();
+            Assert.Throws<System.InvalidOperationException>(() => plan.Next(400, true));
+        }
+        [Test] public void EnduranceCannotSkipACompleteCycleAndReplayMissingShots()
+        {
+            var plan = new DesktopExercisePlan(true); plan.Next(0, true);
+            plan.Next(20, true); plan.SubmittedFire(); plan.Next(60, true); plan.SubmittedReload(); plan.Next(120, true); plan.SubmittedFire();
+            Assert.Throws<System.InvalidOperationException>(() => plan.Next(800, true));
+        }
+        [Test] public void EnduranceInactiveObservationsCannotRestartOrAdvanceIntentCounters()
+        {
+            var plan = new DesktopExercisePlan(true); plan.Next(0, true); plan.Next(20, true); plan.SubmittedFire();
+            Assert.AreEqual(Vector2.zero, plan.Next(800, false).Movement); Assert.AreEqual(20, plan.LastTick);
+            Assert.IsFalse(plan.Next(20, true).Fire);
+        }
+        [Test] public void EnduranceRetainsBackwardClockRejection()
+        {
+            var plan = new DesktopExercisePlan(true); plan.Next(100, true);
+            Assert.Throws<System.InvalidOperationException>(() => plan.Next(99, true));
+        }
+        [Test] public void EnduranceHasItsOwnFiniteBoundWithoutChangingTheShortPlan()
+        {
+            var plan = new DesktopExercisePlan(true); plan.Next(0, true);
+            Assert.AreEqual(Vector2.zero, plan.Next(19000, true).Movement); Assert.IsTrue(plan.Exhausted); Assert.IsFalse(plan.Next(1, true).Fire);
+            Assert.AreEqual(1200, DesktopExercisePlan.MaximumActiveTicks);
+        }
     }
 }

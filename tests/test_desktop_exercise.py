@@ -35,6 +35,25 @@ class ExerciseEvidenceTests(unittest.TestCase):
         for field,value in [('pid',101),('connection',2),('mode','Physical'),('headsets',False),('reason','Timeout'),('complete',False),('reloadSubmissions',0)]:
             with self.assertRaises(ValueError):m.validate_report({**report,field:value},owner)
 
+class EnduranceEvidenceTests(unittest.TestCase):
+    def samples(self):return {i:{'min':-3,'max':-2.3,'reload':True,'ammoMax':2*(i+1),'frames':190,'walkingFrames':180} for i in range(3)}
+    def test_every_cycle_needs_its_own_accepted_movement_reload_and_shots(self):
+        samples=self.samples();m.validate_endurance_cycles(samples,3)
+        for field,value in [('max',-3),('reload',False),('ammoMax',2),('frames',0),('walkingFrames',0),('min',float('nan'))]:
+            bad=self.samples();bad[1][field]=value
+            with self.subTest(field=field),self.assertRaises(ValueError):m.validate_endurance_cycles(bad,3)
+        self.assertEqual(samples,self.samples())
+    def test_later_recovery_or_extra_cycles_do_not_replace_a_missing_cycle(self):
+        for action in [lambda d:d.pop(1),lambda d:d.update({3:d[2]}),lambda d:d.__setitem__(1,{**d[1],'ammoMax':6})]:
+            bad=self.samples();action(bad)
+            with self.assertRaises(ValueError):m.validate_endurance_cycles(bad,3)
+    def test_endurance_report_requires_its_own_bound_and_actual_tick_coverage(self):
+        owner={'pid':100,'playerId':'alpha','roomId':3,'nativeConnectionId':1}
+        report={'version':1,'mode':'AutomatedSimulation','role':'Client','physicalInput':False,'headsets':0,'complete':True,'truncated':False,'reason':'Requested','fault':'','pid':100,'playerId':'alpha','room':3,'connection':1,'fireSubmissions':90,'reloadSubmissions':45,'movementFrames':100,'activeFrames':100,'firstTick':1,'lastTick':17999,'profile':'Endurance','maximumActiveTicks':19000,'maximumCollectionSeconds':1200}
+        m.validate_report(report,owner,90,45,17900,True)
+        for field,value in [('profile','Short'),('maximumActiveTicks',1200),('maximumCollectionSeconds',240),('lastTick',17000),('fireSubmissions',88),('reloadSubmissions',44)]:
+            with self.subTest(field=field),self.assertRaises(ValueError):m.validate_report({**report,field:value},owner,90,45,17900,True)
+
 class OperatorCombinationTests(unittest.TestCase):
     def receipts(self):
         return [{'commandId':identity,'appliedAtSequence':sequence,'duplicate':False,'session':{'id':'round'}} for identity,sequence in [('environment',11),('ai',13)]]

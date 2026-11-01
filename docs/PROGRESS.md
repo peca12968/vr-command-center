@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-02：長場生成輸入已建置，900秒兩模式驗證進行中
+
+新增[獨立長場旗標](DESKTOP_ENDURANCE.md)，Unity0.41.0／code51／NGO29、238真正Editor／0skip與同源5d2ebd2a...Windows／ARM64、原Scene／prefab ID保持。每20秒fire／reload／fire，45循環最多90發／45換彈，仍走原Move／RPC／彈藥；漏循環失敗不追補。長場19000活動tick／1200收集秒與原短1200／240分開，原0.5／1.5政策保持。14 exercise（新3）／27 active／5 artifact Python及3錯CLI模式拒絕成功；沒有後端產品／UI／rules／wire改動。
+
+五端60秒原生063727-2069ec28，5項／597全回放／577 Running、每人6發／3換彈、3個20秒循環成功；來源活動tick跨度1202..1203。短場＋原管理命令063930-4ee0c139另7項成功；19玩家啟動器離線檢查成功。900秒Linked25後五房各5端，真正handle51871／064034-7c1ae2b7正在執行；此時尚未通過，不提前建立runtime snapshot或接受檔，最終結果另記。
+
+原0.40 binary/log321＋6來源＝327先C/F archive核對；666新來源snapshot只含source，沒有複製正在寫入的DB。新玩家ZIP82651687／SHAf2c84949...、serverZIP82673487／SHAaf8a08b3...／APK60356910／SHA1187dfd2...，完整hash／簽章見文件。首server封裝缺stage-root在建立前拒絕，原觀察exec exit1／native exit未量測保留，補新目錄後成功，不覆蓋原檔。兩端建置全停後才原生測試；API0.31/UI0.31.2保持，保存SQLite不開、5080不動。完整11active，舊31／world371／startup／F吞吐／PickerHost及跨機真人／頭盔MR／硬體未改判。
+
 ## 2026-11-02：多人命令組合來源的完整雲端驗證
 
 功能來源 **a58a52786ea4244940b3b2eb2c3dfd8e1ca6a4a1** 的[CI41356457654](https://github.com/peca12968/vr-command-center/actions/runs/41356457654)／job124997439220完整 **success**：Linux建置、772核心／459 HTTP／47 world、6 pipe／38實際API＋.NET硬體離線CLI、全部Python（含11 exercise／4新負向）／素材、89 Node／296 Chromium成功。2 Windows限定skip不當Editor／Windows原生／GUI／頭盔或實體硬體證據；本輪沒有重跑Unity或Quest建置，原231／6098雙平台保持。

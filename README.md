@@ -1,5 +1,7 @@
 # VR Command Center
 
+2026-11-02 [長場生成輸入](docs/DESKTOP_ENDURANCE.md)：Unity0.41／51／238真Editor及同源5d2e雙平台，獨立旗標每20秒兩發一換彈、最多45循環；14 Python／60秒5端597回放及原短控制7項成功。900秒Linked25與五房各5端正在依序驗證，尚未通過；原長場失效與完整11項active保持。
+
 2026-11-02 [多人動態＋管理命令組合](docs/DESKTOP_EXERCISE.md)：選用operator-controls，25Linked及五房各5端全員移動時套用雨夜Patrol／霧天Advance，30項／2909完整回放／50原結果6CSV雙seal ACK成功。12階段24個原UUID／expectedSequence／來源observed fence、24個精確回放參考；閉源2627 Running幀逐房環境AI時間線一致。11 Python（新4）／27 active／5artifact，預跑7／202、未選用5／179通過。沿用Unity0.40／231／6098雙平台與原包，無新Editor／遊戲重建／GUI／GPU／頭盔；完整11active，舊31／371與跨機真人等仍待。
 
 2026-11-02 [原生多端動態驗證](docs/DESKTOP_EXERCISE.md)：Unity0.40／code50／NGO29、231真正Editor與6098b485...同源雙平台，原Scene／prefab ID保持。明確Windows Development batch Client自動輸入走原Move／RPC，25端Linked及五房各5端18項／1951全回放／50結果CSV ACK成功；Linked154幀25位同時walking。普通8／355、server包106／725、玩家包19成功。這是短場AutomatedSimulation，原31／371未修因，完整11active。
