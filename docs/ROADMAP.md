@@ -1,5 +1,7 @@
 # 長期開發目標
 
+2026-11-01 [非格點起終點接線](AI_NAVIGATION_ANCHORS.md)：Unity0.37.2／code47／NGO29、API/UI0.30.1；729核心／199真正Editor、同源雙平台及兩個原生4項／268與148回放通過。原生逐tick觀察保持20秒／.2m，不改10Hz世界錄製；原缺失tick不能補造，首失敗與初候選保留。一般五房6項7場成功，非25位操作或NavMesh／複雜地形完成，11項active。
+
 2026-11-01 [敵軍繞行旋轉掩體](AI_NAVIGATION.md)：Unity0.37.1／code46／NGO29、API/UI0.30.1，格邊以既有步行通行政策核對並有界快取；723核心／189真正Editor、同源Windows／Quest及真正PC巡邏／Hold／Pause／Advance、128完整回放／113已接受來源幀通過。初次getter漏看短暫端點的exit1保留，連續串流不放寬期限／距離；不是完整三維尋路、25位操作或舊姿態根因修復，11項active。
 
 2026-11-01 [電腦端第一人稱軍服手臂](DESKTOP_FIRST_PERSON.md)：Unity0.37.0／code45／NGO29，API/UI0.30.1不變。184真正Editor與同源雙平台建置，6張本機GPU／1195完整回放、遠端人物／Host戰績／五房重用及Linked回歸。可攜包19項核對成功，舊人物工具一次300秒操作逾時保留；尚無封裝GUI／跨機／頭盔實測。完整11項active，原31筆及world371未修復。

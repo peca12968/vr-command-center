@@ -1,5 +1,7 @@
 # VR Command Center
 
+新增[敵軍非格點起終點修正](docs/AI_NAVIGATION_ANCHORS.md)：保留任務產生器的實際出生／巡邏座標，避免卡在錯誤取整格點。Unity0.37.2／199真正Editor、729核心、兩個原生端點案例與五房回歸通過；有界逐tick觀察與10Hz回放分開核對，保留初候選的取樣逾時。完整範圍見[進度](docs/PROGRESS.md)。
+
 新增[敵軍繞行旋轉掩體修正](docs/AI_NAVIGATION.md)：修正格點可站立、連接路段卻被油桶阻擋時的巡邏卡住。Unity0.37.1／189真正Editor、723核心及原生巡邏／Hold／Pause／Advance與完整回放通過；觀察器的一次漏看端點逾時保留，完整證據見[進度](docs/PROGRESS.md)。
 
 電腦端新增[第一人稱軍服手臂](docs/DESKTOP_FIRST_PERSON.md)：轉動視角及換彈可見自己的袖子，隱藏自己的軀幹／頭盔，保留其他玩家的完整人物。Unity0.37.0／184真正Editor、同源Windows／Quest建置、6張原生畫面及1195幀回放通過；目前仍無頭盔，完整限制及失敗紀錄見[進度](docs/PROGRESS.md)。

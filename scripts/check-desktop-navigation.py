@@ -1,18 +1,75 @@
-"""Native server patrol around a rotated barrel; no pose, input or GPU injection."""
+"""Native server navigation fixtures; no pose, input or GPU injection."""
 import argparse,hashlib,importlib.util,json,math,re,sys,time,urllib.request
 from pathlib import Path
 from datetime import datetime
 ROOT=Path(__file__).resolve().parents[1]
+CASES={'rotated-edge':(.25,-1.75,45,-4.5,4.5),'blocked-start':(-4.6,-1,0,-3.75,4.5),'non-grid-goal':(5.1,5,0,-4.5,3.75)}
 def module(name,file):
     s=importlib.util.spec_from_file_location(name,ROOT/'scripts'/file);m=importlib.util.module_from_spec(s);s.loader.exec_module(m);return m
 venue=module('navigation_venue','start-desktop-venue.py');capacity=module('navigation_capacity','check-desktop-capacity.py');debrief=module('navigation_debrief','check-desktop-debrief.py');practice=module('navigation_report','start-desktop-demo.py')
 def observer_sources():return {name:hashlib.sha256((ROOT/'scripts'/name).read_bytes()).hexdigest() for name in ('check-desktop-navigation.py','start-desktop-venue.py','check-desktop-capacity.py','check-desktop-debrief.py','start-desktop-demo.py')}
 def distance(a,b):return math.dist(tuple(a[k] for k in ('x','y','z')),tuple(b[k] for k in ('x','y','z')))
-def wait_endpoint(v,entry,header,begin,enemy):
+class NavigationVenue(venue.Venue):
+    def __init__(self,args):
+        super().__init__(args,artifact_family='desktop-navigation');self.probe=self.runtime_directory/'navigation-tick-probe';self.probe_report=None
+    def launch(self,name,config,visible=False,*,extra_args=()):
+        if self.args.tick_probe and config['role']=='Server':extra_args=(*extra_args,'--vr-navigation-probe',str(self.probe.resolve()))
+        return super().launch(name,config,visible,extra_args=extra_args)
+    def finish_probe(self):
+        if not self.args.tick_probe or not self.probe.exists():return None
+        if self.probe_report is None:
+            (self.probe/'finish.request').write_text('Explicit authority tick observation stop',encoding='utf-8')
+            def report():
+                try:return json.loads((self.probe/'report.json').read_text(encoding='utf-8-sig'))
+                except (FileNotFoundError,json.JSONDecodeError):return None
+            self.probe_report=self.wait(report,15,'navigation tick diagnostic finish')
+        value=self.probe_report
+        if value.get('complete') is not True or value.get('truncated') is not False or value.get('reason')!='Explicit diagnostic stop':raise RuntimeError('Navigation tick diagnostic incomplete')
+        return value
+    def cleanup(self):
+        errors=[]
+        try:
+            try:self.finish_probe()
+            except Exception as error:errors.append(type(error).__name__)
+        finally:cleaned=super().cleanup()
+        self.save('navigation-probe-cleanup.json',{'errors':errors,'finished':self.probe_report is not None,'requested':self.args.tick_probe})
+        return cleaned and not errors
+def foot_errors(feet,case):
+    if not isinstance(feet,dict) or set(feet)!={'x','y','z'} or any(type(v) not in (int,float) or not math.isfinite(v) for v in feet.values()):return ['invalid position']
+    cx,cz,yaw,_,_=CASES[case];x,z=feet['x']-cx,feet['z']-cz;c,s=math.cos(math.radians(yaw)),math.sin(math.radians(yaw))
+    return ['saved position intersects clearance'] if abs(feet['x'])>5.70001 or abs(feet['z'])>5.70001 or abs(feet['y'])>1e-5 or (abs(c*x-s*z)<=.65 and abs(s*x+c*z)<=.65) else []
+def validate_authority_probe(report,session,stream,enemy,begin,goal,case):
+    if report.get('complete') is not True or report.get('truncated') is not False:raise ValueError('Authority diagnostic not explicitly complete')
+    if any(report.get(k)!=v for k,v in {'schemaVersion':1,'source':'NativeAuthorityTick','sessionId':session,'streamId':stream,'maximumSeconds':180,'maximumRows':4096,'complete':True,'truncated':False,'reason':'Explicit diagnostic stop'}.items()):raise ValueError('Foreign / incomplete authority diagnostic')
+    rows=report.get('rows');ended=report.get('endedSeconds')
+    if not isinstance(rows,list) or not 1<=len(rows)<=4096 or type(report.get('samples')) is not int or report['samples']!=len(rows) or type(report.get('firstTick')) is not int or report['firstTick']!=1 or type(report.get('lastTick')) is not int or report['lastTick']!=len(rows) or type(ended) not in (int,float) or not math.isfinite(ended) or not 0<=ended<=180:raise ValueError('Incomplete authority tick coverage / bounds')
+    previous=None;first_begin=None;endpoint=None
+    for i,row in enumerate(rows,1):
+        if row.get('id')!=enemy or row.get('room')!=3 or row.get('health')!=100 or type(row.get('tick')) is not int or row['tick']!=i or type(row.get('observedSequence')) is not int or row['observedSequence']<0 or foot_errors(row['feet'],case):raise ValueError('Authority row identity / clock / position differs')
+        seconds=row.get('seconds')
+        if type(seconds) not in (int,float) or not math.isfinite(seconds) or not 0<=seconds<=ended:raise ValueError('Invalid authority monotonic time')
+        if previous and (seconds<previous['seconds'] or row['observedSequence']<previous['observedSequence'] or distance(row['feet'],previous['feet'])>.1001):raise ValueError('Authority tick rewind / movement differs')
+        if row['observedSequence']>=begin:
+            if first_begin is None:first_begin=seconds
+            if endpoint is None and seconds-first_begin<=20 and distance(row['feet'],goal)<.2:endpoint=row
+        previous=row
+    if endpoint is None:raise ValueError('No original endpoint observed within the unchanged 20 seconds / 0.2m')
+    return {'source':'NativeAuthorityTick','row':endpoint,'rows':len(rows),'firstTick':report['firstTick'],'lastTick':report['lastTick'],'sourceSecondsAfterBegin':endpoint['seconds']-first_begin,'worldSequence':None,'scope':'Actual authority tick, no interpolation or world-sequence mapping'}
+def observe_authority_endpoint(v,e,header,begin,enemy,goal,case):
+    deadline=time.monotonic()+20
+    while time.monotonic()<deadline:
+        q=v.frame(e,measure=True);p=q['packet'];row=next((r for r in p['frame']['enemies'] if r['id']==enemy),None)
+        if p['observedSequence']>=begin and p['frame']['phase']=='Running' and not p['suspended'] and row and distance(row['feet'],goal)<.2:break
+        time.sleep(.1)
+    report=v.finish_probe();observation=validate_authority_probe(report,e['id'],header['streamId'],enemy,begin,goal,case)
+    v.save('navigation-authority-endpoint.json',observation)
+    return v.frame(e,measure=True)
+def wait_endpoint(v,entry,header,begin,enemy,goal=None):
+    target={'x':4.5,'y':0,'z':5} if goal is None else goal
     deadline=time.monotonic()+20;started=datetime.fromisoformat(header['captureStartedAtUtc'])
     if started.utcoffset() is None:raise ValueError('Source capture UTC offset missing')
     request=urllib.request.Request(v.base+f'/api/sessions/{entry["id"]}/world/watch?mode=live',headers={'Authorization':'Bearer '+v.tokens['Master']})
-    report={'complete':False,'frames':0,'firstSequence':None,'lastSequence':None,'maximumSourceAgeSeconds':None,'scope':'One continuous live source stream, 20 seconds / 256 frames; original endpoint distance <0.2m'}
+    report={'complete':False,'frames':0,'firstSequence':None,'lastSequence':None,'maximumSourceAgeSeconds':None,'target':target,'scope':'One continuous live source stream, 20 seconds / 256 frames; original endpoint distance <0.2m'}
     try:
         with urllib.request.urlopen(request,timeout=5) as response:
             for q in capacity.sse_frames(response):
@@ -25,11 +82,11 @@ def wait_endpoint(v,entry,header,begin,enemy):
                 report['maximumSourceAgeSeconds']=max(age,report['maximumSourceAgeSeconds'] if report['maximumSourceAgeSeconds'] is not None else age)
                 if not -1<=age<1.5 or p['suspended']:raise RuntimeError('Native patrol source stale / suspended')
                 row=next((e for e in p['frame']['enemies'] if e['id']==enemy),None)
-                if p['observedSequence']>=begin and p['frame']['phase']=='Running' and p['frame']['tick']>0 and row and distance(row['feet'],{'x':4.5,'y':0,'z':5})<.2:
+                if p['observedSequence']>=begin and p['frame']['phase']=='Running' and p['frame']['tick']>0 and row and distance(row['feet'],target)<.2:
                     report['complete']=True;report['endpointTick']=p['frame']['tick'];return q
         raise RuntimeError('Native patrol live stream ended before endpoint')
     finally:v.save('navigation-patrol-observation.json',report)
-def inspect_frame(value,player,enemy,previous=None):
+def inspect_frame(value,player,enemy,previous=None,case='rotated-edge'):
     p=value['packet'];f=p['frame'];errors=[]
     if type(f.get('tick')) is not int or f['tick']<0:return ['invalid simulation clock']
     if p['suspended']:errors.append('source suspended')
@@ -37,27 +94,27 @@ def inspect_frame(value,player,enemy,previous=None):
     if len(f['enemies'])!=1 or f['enemies'][0]['id']!=enemy:return errors+['original enemy missing']
     row=f['enemies'][0];feet=row['feet']
     if row['health']!=100 or row['roomId']!=3 or f['autoAttack'] or row['fireSequence']!=0:errors.append('unexpected combat / room')
-    if set(feet)!={'x','y','z'} or any(type(v) not in (int,float) or not math.isfinite(v) for v in feet.values()):return errors+['invalid position']
-    # Independent saved-position check against this fixture's expanded rotated
+    position_errors=foot_errors(feet,case)
+    if position_errors:return errors+position_errors
+    # Independent saved-position check against this fixture's expanded
     # barrel footprint. Missing intermediate ticks are NOT interpolated as paths.
-    x,z=feet['x']-.25,feet['z']+1.75;c=math.sqrt(.5)
-    if abs(feet['x'])>5.70001 or abs(feet['z'])>5.70001 or abs(feet['y'])>1e-5 or (abs(c*x-c*z)<=.65 and abs(c*x+c*z)<=.65):errors.append('saved position intersects clearance')
     if previous:
         prior=previous['packet']['frame'];dt=f['tick']-prior['tick']
         old=next((e for e in prior['enemies'] if e['id']==enemy),None)
         if dt<0 or (old and distance(old['feet'],feet)>.1*dt+.0001):errors.append('movement exceeds elapsed tick bound')
     return errors
 def run(v):
-    v.start();mission=v.request('/api/missions',{'name':'Rotated barrel navigation - Simulation','briefing':'Server patrol / Hold / Pause / Advance. No client input.', 'durationSeconds':180,
+    case=v.args.case;cx,cz,yaw,start_x,end_x=CASES[case];goal={'x':end_x,'y':0,'z':5}
+    v.start();mission=v.request('/api/missions',{'name':'Navigation '+case+' - Simulation','briefing':'Server patrol / Hold / Pause / Advance. No client input.', 'durationSeconds':180,
         'environment':{'mode':'VR','weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':1,'behavior':'Patrol','autoAttack':False},
-        'props':[{'assetId':'barrel','position':{'x':.25,'y':0,'z':-1.75},'yawDegrees':45}]},expected=201)
+        'props':[{'assetId':'barrel','position':{'x':cx,'y':0,'z':cz},'yawDegrees':yaw}]},expected=201)
     e=v.create(mission,[3],'navigation',role='Room3');own=e['players'][0]
     v.clients([e]);initial=v.wait(lambda:v.connected(e),30,'original navigation player')
     header=v.request(f'/api/sessions/{e["id"]}/world')['header'];props=header['props']
-    if header['origin']!='Simulation' or header['roomIds']!=[3] or len(props)!=1 or props[0]['kind']!='Barrel' or props[0]['roomId']!=3 or props[0]['yaw']!=45 or props[0]['feet']!={'x':.25,'y':0,'z':-1.75}:raise RuntimeError('Accepted geometry differs from navigation fixture')
+    if header['origin']!='Simulation' or header['roomIds']!=[3] or len(props)!=1 or props[0]['kind']!='Barrel' or props[0]['roomId']!=3 or props[0]['yaw']!=yaw or distance(props[0]['feet'],{'x':cx,'y':0,'z':cz})>1e-6:raise RuntimeError('Accepted geometry differs from navigation fixture')
     v.save('navigation-world-header.json',header)
     enemy=initial['packet']['frame']['enemies'][0]['id'];feet=initial['packet']['frame']['enemies'][0]['feet']
-    if distance(feet,{'x':-4.5,'y':0,'z':-1})>1e-5:raise RuntimeError('Generated patrol spawn differs')
+    if distance(feet,{'x':start_x,'y':0,'z':-1})>1e-5:raise RuntimeError('Generated patrol spawn differs')
     refs={};receipts={}
     def frame():return v.frame(e,measure=True)
     def fence(label,action,**extra):
@@ -65,8 +122,9 @@ def run(v):
         value=v.wait(lambda:(q if (q:=frame())['packet']['observedSequence']>=receipt['appliedAtSequence'] and not q['packet']['suspended'] and q['packet']['frame']['phase']==('Paused' if action=='Pause' else 'Running') and q['packet']['frame']['tick']>0 else None),15,label+' applied by source')
         refs[label]=value;v.save('navigation-references.json',refs);return value
     running=fence('begin','Begin')
-    reached=wait_endpoint(v,e,header,receipts['begin']['appliedAtSequence'],enemy)
-    refs['patrol-endpoint']=reached
+    if v.args.tick_probe:
+        reached=observe_authority_endpoint(v,e,header,receipts['begin']['appliedAtSequence'],enemy,goal,case);refs['after-authority-endpoint-observation']=reached
+    else:reached=wait_endpoint(v,e,header,receipts['begin']['appliedAtSequence'],enemy,goal);refs['patrol-endpoint']=reached
     held=fence('hold','SetEnemies',enemies={'count':1,'behavior':'Hold','autoAttack':False})
     later=v.wait(lambda:(q if (q:=frame())['packet']['frame']['tick']>=held['packet']['frame']['tick']+12 else None),5,'Hold observation')
     if distance(held['packet']['frame']['enemies'][0]['feet'],later['packet']['frame']['enemies'][0]['feet'])>1e-6:raise RuntimeError('Hold moved the enemy')
@@ -92,7 +150,7 @@ def run(v):
             if p['observedSequence']>=receipts['begin']['appliedAtSequence'] and p['frame']['phase'] in ('Running','Paused'):
                 validated+=1
                 if first_validated is None:first_validated=count
-                errors=inspect_frame(q,own['id'],enemy,previous)
+                errors=inspect_frame(q,own['id'],enemy,previous,case)
                 if errors:
                     fault_count+=1
                     if len(faults)<128:faults.append({'sequence':count,'errors':errors})
@@ -105,12 +163,12 @@ def run(v):
         'acceptedBeginSequence':receipts['begin']['appliedAtSequence'],'faultCount':fault_count,'faults':faults,'matchedReferences':len(matched),'scope':'All accepted-Begin Running / Paused saved positions and elapsed-tick displacement; no intermediate-tick interpolation or render / replica evidence'}
     v.save('navigation-replay.json',replay)
     if not replay['complete'] or count!=sealed['world']['acceptedSequence'] or matched!=set(expected) or last['packet']['frame']['phase']!='Ended':raise RuntimeError('Navigation replay / exact seal failed')
-    v.save('navigation-result.json',{'complete':False,'headsets':0,'hosts':1,'source':'Actual Windows authority / headless client; Simulation','poseOrInputInjected':False,'replay':replay,'csv':csv,'result':result})
-    v.evidence.extend(['native generated patrol bypasses rotated cover and reaches its original endpoint','operator Hold and Pause preserve the original enemy clock / position; Advance resumes movement','full saved-world replay preserves original participant / enemy and clearance / tick bounds','exact dual seals / original player result / CSV / native server ACK'])
+    v.save('navigation-result.json',{'complete':False,'case':case,'tickProbe':v.args.tick_probe,'endpointSource':'NativeAuthorityTick' if v.args.tick_probe else 'AcceptedWorldPacket','headsets':0,'hosts':1,'source':'Actual Windows authority / headless client; Simulation','poseOrInputInjected':False,'replay':replay,'csv':csv,'result':result})
+    v.evidence.extend(['native generated '+case+' patrol reaches its original endpoint','operator Hold and Pause preserve the original enemy clock / position; Advance resumes movement','full saved-world replay preserves original participant / enemy and clearance / tick bounds','exact dual seals / original player result / CSV / native server ACK'])
     v.summary()
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--runtime-root',type=Path,required=True);p.add_argument('--api-dll',type=Path,required=True);p.add_argument('--player-exe',type=Path,default=ROOT/'artifacts/desktop/VrCommand.exe');args=p.parse_args();args.duration=180;args.visible_room=0;args.job_workers=2;args.check=False
-    venue.verify_player(args);v=venue.Venue(args,artifact_family='desktop-navigation');sources=observer_sources();v.save('observer-sources.json',{'files':sources,'scope':'Five helpers only; not the complete runtime / OS dependency graph'})
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--case',choices=CASES,default='rotated-edge');p.add_argument('--tick-probe',action='store_true',help='Explicit Windows Development server authority observations; finish before End, 180s / 4096 NPC rows');p.add_argument('--runtime-root',type=Path,required=True);p.add_argument('--api-dll',type=Path,required=True);p.add_argument('--player-exe',type=Path,default=ROOT/'artifacts/desktop/VrCommand.exe');args=p.parse_args();args.duration=180;args.visible_room=0;args.job_workers=2;args.check=False
+    venue.verify_player(args);v=NavigationVenue(args);sources=observer_sources();v.save('observer-sources.json',{'files':sources,'scope':'Five helpers only; not the complete runtime / OS dependency graph'})
     try:v.stage('starting',headsets=0);run(v)
     except BaseException as error:v.stage('failed',errorType=type(error).__name__);raise
     finally:

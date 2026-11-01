@@ -91,6 +91,7 @@ namespace VrCommand.Unity
         private readonly Dictionary<Guid, AcceptedRig> rigs = new Dictionary<Guid, AcceptedRig>();
         private readonly DesktopResumeCache desktopResume = new DesktopResumeCache();
         private readonly Dictionary<int, ArenaWalkSurface> walkSurfaces = new Dictionary<int, ArenaWalkSurface>();
+        private NativeNavigationProbe navigationProbe;
 
         public void InitializeRecording(string path)
         {
@@ -100,6 +101,7 @@ namespace VrCommand.Unity
                 DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), assetSet: WorldAssetSets.PlayerBody, enemyPresentationVersion: EnemyPresentation.Version, weaponPresentationVersion: WeaponPresentation.Version, enemyFireVersion: EnemyFirePresentation.Version, playerFireVersion: PlayerFirePresentation.Version, combatAudioVersion: CombatAudioPresentation.Version, playerPresentationVersion:PlayerPresentation.Version, missionClockVersion: MissionClock.Version, missionDurationSeconds: management.mission.definition.durationSeconds);
             Recording = WorldOutbox.Create(path, header, new UnityWorldCodec(), NativeWorldJournalTrace.Current);
             RecordingWriter = new QueuedWorldRecorder(Recording, new UnityWorldCodec());
+            navigationProbe = NativeNavigationProbe.Install(gameObject, header.sessionId, header.streamId);
             if (!CaptureWorld(true)) throw new InvalidOperationException("Initial world frame could not be saved.");
         }
         private bool CaptureWorld(bool force = false)
@@ -288,7 +290,7 @@ namespace VrCommand.Unity
                     accumulator += Mathf.Min(Time.unscaledDeltaTime, .2f);
                     while (accumulator >= ArenaWorld.TickSeconds)
                     {
-                        accumulator -= ArenaWorld.TickSeconds; session.Tick(Time.realtimeSinceStartupAsDouble); if (!Capture()) break;
+                        accumulator -= ArenaWorld.TickSeconds; session.Tick(Time.realtimeSinceStartupAsDouble); navigationProbe?.Sample(session.World,observedSequence); if (!Capture()) break;
                         if (ClockDue) { accumulator = 0; clockBoundaryCaptured = true; CaptureWorld(true); break; }
                     }
                 }

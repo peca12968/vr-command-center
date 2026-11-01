@@ -1,5 +1,34 @@
 # 開發進度
 
+## 2026-11-01：實際非格點起終點接線與原生逐tick端點觀察
+
+從乾淨`13f22c7`接續第6項，[AI_NAVIGATION_ANCHORS](AI_NAVIGATION_ANCHORS.md)修正0.75m任務候選座標接到0.5m路網的問題。Unity **0.37.2／code47／NGO29**，API/UI0.30.1、world格式／rules0.8.0及原scene／prefab ID保持。最終Windows／ARM64 Quest同源 **7d3e1a926f1b1c9176f03809af75de0c2af7be0e5f3e4ec24851664327aa4f92**；最終Tests62491／Desktop70410／Quest21212原handle皆exit0、**199真正Editor全過0skip**。先前Prepare42518／Tests62157的195項／Desktop94888／Quest31685為2c96...初候選，後加觀察器的Prepare78173亦exit0；初候選321檔及XML／receipt另存，不能把相同0.37.2／47當成相同來源。
+
+凍結0.37.1原始ArenaSession產生器兩反例實際exit1：油桶(-4.6,0,-1)使合法出生(-3.75,0,-1)取整到被擋(-4,0,-1)，路線0點／320tick仍不動；油桶(5.1,0,5)使巡邏目標(3.75,0,5)被改為(4,0,5)，路線30點／320tick仍差.25m。相同Program與50個Runtime檔只換GridNavigation，兩例exit0、保留精確起終點、到達與逐tick通行／位移合格，JSON／C工程與binary保存。這是.NET規則證據，非原生或硬體。
+
+實際兩端先Walkable，再各接所在格最多四個可見角點，起點→角點／角點→終點各依原ClearSegment核對；多起點／多終點BFS、625格四方向與2500 sbyte邊快取保持，回傳路線保留實際兩端。共享可見角點的近端點也須真實直線可走才直連；不是修改候選順序、搬動出生、傳送、放寬.3m半徑／.05m取樣／.1m活動tick或.15m巡邏切換。網格解析度與無可用局部角點的狹窄區域仍有限制，沒有完整3D／NavMesh／人群導航宣稱。原回放使用原幀，不重算歷史路線。
+
+新6核心與6導航Editor案例驗產生器兩端點、往返／逐tick安全、Linked外側兩房、同格真實目標及不能切過旋轉角；另4 Editor驗逐tick觀察器的瞬間端點、完整最早tick／row上限、漏tick／倒退拒絕、Editor不安裝。**729核心（原723＋6）、199 Editor（原189＋10）**通過。Python navigation13＋artifacts5＋first-person7＝25通過，包括profile幾何、非格點目標、原生身分／tick／期限及finish IO失敗仍native cleanup；語法／diff、原player-body pin與293官方transport＋1 scoped patch通過。
+
+| 真正原生場／原handle | 結果與範圍 |
+|---|---|
+| `desktop-navigation/20261101-132748-57972625`，46348 exit1 | 2c96初候選、未開逐tick觀察。20秒live189幀、16–204連續仍無<.2m端點；原failed與cleanup保存。closed209幀中world81／82為tick141／143、位置約(4.5,0,4.799997)、距.20000267m且forward相反；沒有142原始位置，不能插補到達或改判通過 |
+| `20261101-134848-394c3763`，30771 exit0 | 最終blocked-start，4項／268完整回放／248已接受Begin來源幀／9 refs，fault0；實際409 row連續tick1–409，端點row142距約.100003m、首次Begin來源row後7.052074秒，worldSequence=null |
+| `20261101-135057-d4dc1db0`，92372 exit0 | 最終non-grid-goal，4項／148完整回放／118來源幀／9 refs，fault0；143 row連續tick1–143，最早<.2m為row141距約.1500001m、6.991734秒，worldSequence=null |
+| `desktop-venue/20261101-135539-ac75f5f8`，14004 exit0 | 一般五房6項／7場，隔離／錯票／單房環境AI與Pause／席位重用／後續Linked及精確seal、活動0、cleanup成功；沒有navigation-tick-probe目錄，非25位操作或全複本逐幀證據 |
+
+無探針首場的closed rb／checksum／序號分析只證明已保存位置，沒有tick142資料；新場row142不能補舊場、不能用反向或clock校準猜到達／根因。兩個最終場都明確--tick-probe，僅自己的Windows Development server加--vr-navigation-probe：每個真實session.Tick後觀察當下NPC，不改20Hz規則或10Hz world錄製／傳輸；普通／Editor／Android／client不安裝。最多180秒／4096 NPC row，保持完整最早tick，自動上限／漏tick／倒退不可complete，收集中不寫狀態，明確finish停收集／clock後一次report。只輸出NPC欄位、原session／stream、observed及單調seconds，不輸出玩家姿態／憑證／GPU／PCM，不是零擾動。
+
+工具維持<.2m／20秒，原生row須完整1..N、原NPC／room／health、位置／位移、正確session／stream及已接受Begin；不以缺失tick插值或硬配world序號。原生證據獨立存，refs另取真正world，兩場最早replay/live分別20/21與30/32。普通回放仍逐張核對Begin4已套用後所有Running／Paused的原玩家健康100／connected／Simulated、NPC／房間／攻擊關閉與位置／位移。診斷在後續Hold／Pause／Advance與End前已finish；原admission結果、CSV、精確雙seal、唯一server ACK與兩層cleanup成功才complete，5helper SHA前後一致但不是完整graph。兩個場與最終Quest建置重疊，五房在build結束後；不同條件不當因果／效能對照，原31筆／world371未修復。
+
+最終`windows-player-0.37.2-final.zip` **82,645,932 bytes／SHA25dd1ee56234cd7da3da1f9671877b6c8967a41f03d71f903f3008558425d5c4**，311 runtime／原launcher a65846da...；新C展開da4070d46cef4107b80fbb63a6ac3576、28311 exit0／19真正核對拒絕，非完整GUI／跨機。普通0.37.2 ZIP為2c96初候選、5ca9a6f5...，其19項與原件保留。最終APK **82,782,417 bytes／SHAd804087c10e2c0b376d3eb2e3bd875a5ef3bf97760c0a6b30c5a0dadc47b5eaa**，0.37.2／47／ARM64／min32 target35、v2 debug簽章成功，無頭盔安裝。
+
+APK raw比初候選60,310,826 bytes大；ZIP索引仍105項，compressed payload僅從60,289,375增至60,306,850 bytes，非payload區段由21,451增至22,475,567 bytes。libil2cpp raw增67,632 bytes，額外大段位於目前索引payload之間；這是容器範圍觀察，不當完整ELF／遊戲內容增量、執行效能或唯一打包原因證明，raw與簽章保持、不重新封裝，receipt totalBytes不是APK大小。
+
+`navigation-anchor-prior-validation.json`核對前64 runtime3151與各F snapshot／前F3719；`navigation-anchor-runtime-validation.json`新4 C runtime74與F snapshot相符、新F190，合計68場3225 runtime檔，前525份browser／CI、原API三組159／mission accepted與拒絕候選／本輪C API及工具保持。`navigation-anchor-probe-validation.json`另核對兩份完整raw report、原生來源與null world序號、一般五房無probe、兩組321 binary/log＋各10選定來源、4個原Git source blob；另存原CombatAuthority blob，不稱完整依賴graph。全部自己的writer全停才一次snapshot，原C不移動，保存SQLite不開連線。
+
+完整11項active，仍同機Simulation／headsets0。CI結果另補；原31／world371、Windows完整HTTP startup、F吞吐、多人持續操作、跨機／Wi-Fi／Quest／VIVE／MR與廠商硬體各自未完成，不因這兩個導航反例或新場成功改判。
+
 ## 2026-11-01：敵軍繞行旋轉掩體，保留端點觀察逾時
 
 從乾淨`0368b33`接續第6項，修正[AI_NAVIGATION](AI_NAVIGATION.md)。Unity **0.37.1／code46／NGO29**，API/UI0.30.1、world格式／rules0.8.0保持。新雙平台fingerprint **69d247a9ecfa7b42ee1e9314e0319869995f1876379850928f5725901e642fc2**，原scene／prefab ID一致；Prepare84165、Tests14853、Desktop55866、Quest67152原handle皆terminal exit0，**189真正Editor全過、0skip**。正式5080不動；新.NET API／三工具／Checks均在自己的C BuildRuns，第一份fixture失敗候選與舊API copies保留，原Windows完整HTTP startup問題沒有在本輪改判。
