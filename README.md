@@ -1,5 +1,7 @@
 # VR Command Center
 
+2026-11-02 [原生多端動態驗證](docs/DESKTOP_EXERCISE.md)：Unity0.40／code50／NGO29、231真正Editor與6098b485...同源雙平台，原Scene／prefab ID保持。明確Windows Development batch Client自動輸入走原Move／RPC，25端Linked及五房各5端18項／1951全回放／50結果CSV ACK成功；Linked154幀25位同時walking。普通8／355、server包106／725、玩家包19成功。這是短場AutomatedSimulation，原31／371未修因，完整11active。
+
 2026-11-02 [硬體回饋離線模擬器](docs/HARDWARE_SIMULATOR.md)：0.1.0以原事件／stream／admission規則重建，測試綁定、重送、虛擬到期與ACK，沒有設備I/O或實體停止保證。新34 Core／完整772、實際API＋.NET ArenaSession及最終38 CLI、解壓同位元結果與原錯權限輸入受控拒絕成功。API0.31／UI0.31.2／Unity0.39與原224雙平台保持；廠商SDK、實機及完整11項仍待驗。
 
 2026-11-02 [場景物件復原／重做](docs/PLACEMENT_HISTORY.md)：控制台0.31.2／API0.31.0，可還原新增、刪除、旋轉、數值與整段拖曳／方向鍵；只在配置圖攔截快捷鍵，儲存中鎖定、換任務／登出清紀錄。6新Node、89完整Node／296 Chromium、專項及實際解壓包各29、Windows管理包105成功；原版本不可變，Unity0.39／224雙平台保持。無新native遊戲／Editor／頭盔驗收，完整11active。

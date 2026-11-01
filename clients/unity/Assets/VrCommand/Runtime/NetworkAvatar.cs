@@ -193,7 +193,13 @@ namespace VrCommand.Unity
                 }
                 desktopBriefNext = desktopBriefClose = desktopBriefLicense = false;
                 if (!TrackingReady) {NativePoseTrace.OwnerUnavailable("TrackingUnavailable",OwnerClientId);return;}
+                if (DesktopClientExercise.Enabled && tracked) { DesktopClientExercise.RejectTracked(); return; }
                 if (!tracked && !InitializeDesktopPose()) {NativePoseTrace.OwnerUnavailable("DesktopInitializing",OwnerClientId);return;}
+                var exercising = DesktopClientExercise.Enabled;
+                var exercise = default(DesktopExerciseFrame);
+                if (exercising && CombatAuthority.Instance != null && CombatAuthority.Instance.Player(PlayerId.Value.ToString(), out var exerciseBody))
+                    exercise = DesktopClientExercise.Sample(PlayerId.Value.ToString(), OwnerClientId, exerciseBody.room, exerciseBody.presentationTick,
+                        !ending && exerciseBody.connected && exerciseBody.health > 0 && CombatAuthority.Instance.Ready.Value && VenueBootstrap.Instance.State == "Running");
                 if (tracked)
                 {
                     leftHand.localPosition = leftPosition.ReadValue<Vector3>();
@@ -201,7 +207,7 @@ namespace VrCommand.Unity
                     leftHand.localRotation = leftRotation.ReadValue<Quaternion>();
                     rightHand.localRotation = rightRotation.ReadValue<Quaternion>();
                 }
-                else DesktopPreview(!ending);
+                else DesktopPreview(!ending, exercise);
                 if (VenueBootstrap.Instance.State != "Ended" && Time.unscaledTime >= nextSend)
                 {
                     nextSend = Time.unscaledTime + 0.05f;
@@ -210,20 +216,20 @@ namespace VrCommand.Unity
                     else NativePoseTrace.OwnerUnavailable("LocalPoseInvalid",OwnerClientId);
                 }
                 var authority = CombatAuthority.Instance;
-                var held = tracked ? trigger.ReadValue<float>() > .5f || reload.ReadValue<float>() > .5f
+                var held = exercising ? exercise.Fire || exercise.Reload : tracked ? trigger.ReadValue<float>() > .5f || reload.ReadValue<float>() > .5f
                     : desktopFire || desktopReload || Mouse.current?.leftButton.isPressed == true || Keyboard.current?.spaceKey.isPressed == true || Keyboard.current?.rKey.isPressed == true;
-                var pressed = tracked ? trigger.WasPressedThisFrame() || reload.WasPressedThisFrame()
+                var pressed = exercising ? exercise.Fire || exercise.Reload : tracked ? trigger.WasPressedThisFrame() || reload.WasPressedThisFrame()
                     : desktopFire || desktopReload || Mouse.current?.leftButton.wasPressedThisFrame == true || Keyboard.current?.spaceKey.wasPressedThisFrame == true || Keyboard.current?.rKey.wasPressedThisFrame == true;
                 var allowWeapon = briefingPanel.Weapons.Allows(briefingPanel.Open, held, pressed);
                 if (authority != null && authority.Ready.Value && VenueBootstrap.Instance.State == "Running"
                     && allowWeapon && !ending && (tracked || Application.isFocused || Application.isBatchMode))
                 {
-                    var wantsReload = tracked ? reload.WasPressedThisFrame() : desktopReload || Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame;
-                    var wantsFire = tracked ? trigger.ReadValue<float>() > .5f
+                    var wantsReload = exercising ? exercise.Reload : tracked ? reload.WasPressedThisFrame() : desktopReload || Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame;
+                    var wantsFire = exercising ? exercise.Fire : tracked ? trigger.ReadValue<float>() > .5f
                         : desktopFire || Mouse.current != null && Pressed(Mouse.current.leftButton) || Keyboard.current != null && Pressed(Keyboard.current.spaceKey);
-                    if (wantsReload) SubmitWeaponRpc(++inputSequence, true, CurrentPose());
+                    if (wantsReload) { SubmitWeaponRpc(++inputSequence, true, CurrentPose()); if (exercising) DesktopClientExercise.Submitted(true); }
                     else if (wantsFire && Time.unscaledTime >= nextFire)
-                    { nextFire = Time.unscaledTime + .2f; SubmitWeaponRpc(++inputSequence, false, CurrentPose()); }
+                    { nextFire = Time.unscaledTime + .2f; SubmitWeaponRpc(++inputSequence, false, CurrentPose()); if (exercising) DesktopClientExercise.Submitted(false); }
                 }
                 desktopFire = desktopReload = false;
             }
@@ -300,8 +306,14 @@ namespace VrCommand.Unity
             CombatAuthority.Instance?.Weapon(OwnerClientId, input, reloadWeapon, pose, transform.position, transform.rotation);
         }
 
-        private void DesktopPreview(bool playing)
+        private void DesktopPreview(bool playing, DesktopExerciseFrame exercise = default)
         {
+            if (DesktopClientExercise.Enabled)
+            {
+                desktopStance.Reset(); head.localPosition = new Vector3(head.localPosition.x, DesktopStanceInput.StandingHeight, head.localPosition.z);
+                if (playing) MoveDesktop(exercise.Movement, Time.unscaledDeltaTime);
+                windowLook = windowMovement = Vector2.zero; UpdateDesktopHands(); return;
+            }
             var keyboard = Keyboard.current;
             var active = playing && (Application.isFocused || Application.isBatchMode);
             desktopStance.Poll(keyboard, active);

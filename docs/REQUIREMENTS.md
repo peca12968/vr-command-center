@@ -1,5 +1,7 @@
 # 需求與驗收追蹤
 
+2026-11-02 [原生多端動態驗證](DESKTOP_EXERCISE.md)：Unity0.40／code50／NGO29、231真正Editor與6098b485...同源雙平台，原Scene／prefab ID保持。明確Windows Development batch Client自動輸入走原Move／RPC，25端Linked及五房各5端18項／1951全回放／50結果CSV ACK成功；Linked154幀25位同時walking。普通8／355、server包106／725、玩家包19成功。這是短場AutomatedSimulation，原31／371未修因，完整11active。
+
 2026-11-02 [硬體回饋離線模擬器](HARDWARE_SIMULATOR.md)：0.1.0以原事件／stream／admission規則重建，測試綁定、重送、虛擬到期與ACK，沒有設備I/O或實體停止保證。新34 Core／完整772、實際API＋.NET ArenaSession及最終38 CLI、解壓同位元結果與原錯權限輸入受控拒絕成功。API0.31／UI0.31.2／Unity0.39與原224雙平台保持；廠商SDK、實機及完整11項仍待驗。
 
 2026-11-02 [場景物件復原／重做](PLACEMENT_HISTORY.md)：控制台0.31.2／API0.31.0，可還原新增、刪除、旋轉、數值與整段拖曳／方向鍵；只在配置圖攔截快捷鍵，儲存中鎖定、換任務／登出清紀錄。6新Node、89完整Node／296 Chromium、專項及實際解壓包各29、Windows管理包105成功；原版本不可變，Unity0.39／224雙平台保持。無新native遊戲／Editor／頭盔驗收，完整11active。
@@ -55,6 +57,8 @@
 第1／4／8／9／11項新增[五房獨立長任務](DESKTOP_INDEPENDENT_LONG.md)證據：5個真正server與25個client各房900秒、不同條件、單房Pause不影響其他四房；25份原admission戰績／各CSV、五場唯一tick18000及精確雙seal、42293幀全回放／209235人次通過。32項Python與保存核對見PROGRESS，版本／原Unity建置不變。仍是同機靜止Simulation，未完成25位持續操作、跨機／實機或原31筆根因修復；完整11項active。
 
 第4項新增[同源開／關診斷跨場比較](CONTINUITY_COMPARISON.md)：未啟用新場25程序900秒、8475全回放／210300人次及個別戰績／雙seal成功，原c98f1稀疏場也未重現；比較明列條件，舊31筆失效保持未通過且根因未證明。27項Python、原件保存核對與限制見PROGRESS；不是25位持續操作、跨機或25台容量完成，Unity／API及原成功建置不變。
+
+第4項另有[25原生端短動態輸入](DESKTOP_EXERCISE.md)：0.40.0／231 Editor，產生的移動／射擊／換彈、50份原結果及雙seal回放成功，非真人／跨機容量或舊31筆修復。
 
 第4項新增[長任務稀疏診斷](POSE_CONTINUITY.md)及25端15分鐘乾淨對照：8449全回放／8391 Running、26份診斷完整。新收集器與未啟用的歷史條件不同，舊31筆失效保留且根因／修復未證明，不能稱25位操作或實體容量完成。Unity0.33／152 Editor與雙平台、一般8項PC回歸見PROGRESS。
 

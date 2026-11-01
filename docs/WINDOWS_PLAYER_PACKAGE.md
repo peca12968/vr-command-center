@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-02 最新`windows-player-0.40.0.zip`為[原生多端動態驗證](DESKTOP_EXERCISE.md)的同源runtime，**82,651,129 bytes／SHA256 `24aef191b5fc608430a5f131ffd34aabf2ec0b4938fefd3f2c8461c958cc50e2`**、311 manifest／ZIP312。231真正Editor、6098b485...雙平台、原ID及新19項包檢查成功。明確開發batch Client模式才能產生測試輸入，普通玩家流程未自動啟用；25端自動化、普通入場8項及server包106範圍見PROGRESS。不是25真人／跨機、完整GUI或頭盔驗收；原0.39與更早包保持。
+
 2026-11-02 最新`windows-player-0.39.0.zip`加入[電腦端蹲姿](DESKTOP_CROUCH.md)，82,647,558 bytes／SHA `09f4ac14a9497329080d018dd634ebfdee13cabb0b7e0c7d2ed8b077173e47cc`、311 runtime檔及原launcher，新C展開19項核對／拒絕成功。224真正Editor、同源雙平台與unpacked原生C／W／視窗實測見PROGRESS；未重跑完整封裝GUI／跨機或頭盔驗收。舊0.38與其他ZIP保持，以下為歷史。
 
 最新`windows-player-0.38.0.zip`使用[AI可見目標](AI_VISIBLE_TARGETS.md)的同源Windows建置，82,646,224 bytes／SHA1f4a27d8...、311 runtime檔及原launcher，新C展開19項核對成功。完整receipt／APK及原生三人／五房證據見PROGRESS，仍非完整GUI／跨機或頭盔驗收。

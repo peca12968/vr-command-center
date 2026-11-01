@@ -39,6 +39,8 @@ jobs:
       - run: python -m unittest discover -s tests -p test_ai_targeting.py
       - run: python -m unittest discover -s tests -p test_desktop_crouch.py
       - run: python -m py_compile scripts/check-desktop-crouch.py
+      - run: python -m unittest discover -s tests -p test_desktop_exercise.py
+      - run: python -m py_compile scripts/check-desktop-exercise.py
       - run: python -m py_compile scripts/check-desktop-ai-targeting.py
       - run: python -m py_compile scripts/check-desktop-navigation.py
       - run: python -m py_compile scripts/check-desktop-first-person.py

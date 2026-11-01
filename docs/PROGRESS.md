@@ -1,5 +1,21 @@
 # 開發進度
 
+## 2026-11-02：原生多客戶端產生移動／射擊／換彈
+
+新增[Windows batch Client短動態輸入](DESKTOP_EXERCISE.md)，Unity **0.40.0／code50／NGO29**，API0.31.0／UI0.31.2保持。明確新旗標／新目錄才啟用，只接受Windows Development batch Client且無XR，原桌面Move／Constrain與SubmitPose／SubmitWeapon RPC、簡報／Ready／Running及原伺服器門檻保持，沒有test RPC或直接寫server pose。40tick反向／0.4m/s約0.8m幅度、相對20／60／120tick的fire／reload／fire；只計真正呼叫原武器RPC的嘗試，接受另核對。60秒活動tick／240秒總窗口、finish／退出與owner／clock錯誤有界，不把report.complete當任務成功；普通啟動無元件，Tracked不搬動。
+
+真正Editor **231／0skip**（原224＋7）成功，Windows／ARM64 Quest同源 **6098b4857b36d4b24a6b4ab275cbd64b17aa12353329cad9c96f36a9d339911b**、原Scene／prefab ID保持。PowerShell腳本因ExecutionPolicy未執行，原錯誤log保存，改直接呼叫同一Unity批次入口，沒有調整策略／安全性。兩平台建置全結束才跑網路測試，沒有建置負載重疊。
+
+首`desktop-exercise/20261102-053940-74608ff9` memory helper名稱錯誤，在啟動玩家前failed；次`054005-b0589055`五端已移動，測試錯讀不存在的packet.observed而KeyError failed。兩場原C14／29、原log／原資料／cleanup空保持，不補成功旗標。修測試使用memory_status及實際observedSequence，另以原API名冊核對admission／room／seat，無產品pose規則修正。新7項Python證據驗證及5既有artifact檢查成功。
+
+`054142-2d7a0827` **5項／139全回放**的五端smoke通過；`054350-5fe3e1a0` **18項／1951全回放**通過，Linked25原生client後五個Independent server各5client，16秒產生輸入，每位接受移動／reload、2發／0中／0殺／health100。50份原admission結果／6逐場CSV、雙seal與原server ACK／無timeout相符，無send queue full。Room1 Pause接受後等來源真正Paused、tick固定，其他四房tick前進，Resume fence保存；意外Paused不放過。完整回放所有Running body均核對connected／Simulated／健康／房間／位置、1500ms gap不放寬。Linked159 Running保存幀中154幀25位walking=true；各房5位移動的post-terminal讀回另存，不是第19個live檢查，沒有把不同來源時鐘硬配。
+
+普通無旗標`unity-admission/20261102-054643-86ca91ed` **8項／355幀**撤銷／重連／精確seal成功。玩家包19 CLI檢查成功；server包`run-72e81d5697d64b43ace5cb2fb1d59ecb` **106項／725全回放（172/148/132/115/100/58）／10份原結果各CSV**、真browser正常UI End與精確來源／ACK、cleanup成功。parent-death仍是獨立未seal反例；此browser不是Windows launcher GUI，新GUI未驗，原PickerHost保持待解。
+
+新玩家ZIP **82,651,129／SHA24aef191b5fc608430a5f131ffd34aabf2ec0b4938fefd3f2c8461c958cc50e2**，serverZIP **82,672,917／SHA642e5307cf3d62af7b136d9baaca06c2d9cd9c3bd1ed66c7d4e915803a7f8710**，各311 manifest／ZIP312，launcher來源a658／fb578不變且server實際compiler input保持。APK **60,358,086／SHAadb9a8bc6c94b0e9842c1498f5a74417071daf388f79622f742f060e3c098fa5**，aapt確認ARM64／min32／target35／0.40.0／50、v2 debug，非實機／效能／商店release。舊0.39的321 binary/log＋5source＝326先C封存再F同hash，舊APK0310...保留history，current路徑是新APK。
+
+`desktop-exercise-delivery-validation.json`核對新C14＋29＋29＋174＋14＋80＝**340檔**／各F snapshot、666份凍結來源、兩平台receipt／包及原ID、舊C75與四報告117／274／163／327、舊9管理／5server ZIP及玩家ZIP保持，保存SQLite只rb/hash不開。前1464 browser／nativeUI7保持，新server browser2另列，舊77場3399 runtime未全重跑。新場是產生的Simulation輸入、0位實體操作者／1host／0rendered，不是25真人、LAN或完整容量；舊31／world371／Windows startup／F吞吐與完整GUI、頭盔MR／廠商硬體仍未修因／驗收。完整11active，正式5080不動。
+
 ## 2026-11-02：硬體離線模擬器CI與證據
 
 [功能574df36](https://github.com/peca12968/vr-command-center/commit/574df36d3cd4246dec0ad67885e8a544fa4f47c1)的[CI41349387031](https://github.com/peca12968/vr-command-center/actions/runs/41349387031)／job124976066366完整 **success**：Linux772核心／459 HTTP／47 world、6 pipe、38實際API／.NET離線模擬CLI、全部Python／素材及89 Node／296 Chromium通過。2 Windows限定skip不是WinForms、Unity／Editor、native遊戲、實體硬體或頭盔驗收。console49 artifact13100741395／ZIP **12,022,752 bytes／SHA256 e24b2ce787ccae8aabb70c3bc32268a064ce9a89cc9c51313c37da983dd51d47**，control13 artifact13100701380／ZIP **3,919／SHA256 a2569dfd539a5c1fef56e3b703f7e83e1bc1dc9aa1eca2046fcff0311239077a**，hardware26 artifact13099889416／ZIP **22,380／SHA256 e8ce6368326ccb6080a5a9e4f7280e7a44bbeacad894929a079d8ad24f508172**，已下載核對GitHub digest／逐檔hash；hardware檢查與原API cleanup讀回成功，artifact不含DB、journal或角色金鑰。完整decoded log SHA256 **53685b090bb76aeb81af85d2c7270473cb3867b64fd50692c046af9eefc0f5fa**保存。`hardware-ci-validation.json`明列1415＋49＝**1464 browser證據**，control13／hardware26各自另列，nativeUI7保持；不是新本機全browser或Unity執行。本機C75／F與原C27／四舊報告、9管理／5server ZIP及原Unity0.39／e0d／224雙平台、玩家ZIP APK保持。後續只有文件提交skip ci，測試來源精確574df36，完整11active。

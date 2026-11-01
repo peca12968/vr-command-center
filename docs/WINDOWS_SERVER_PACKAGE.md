@@ -1,6 +1,8 @@
 # Windows 遊戲伺服器包
 
-目前主包更新為[啟動器1.1／房間任務清單](SERVER_CATALOG.md)：`windows-server-0.39.0-v5-win-x64.zip`，82,669,350 bytes／SHA3eef78fbe8319e366afa80cdfad31557bf42fb8bc3992402b6f252525e2857a2。CLI38／Framework model26／原生106成功，完整GUI開場仍被PickerHost擋住；以下v3與舊failed證據保留，不能只看同一Unity版本選包。
+目前主包`windows-server-0.40.0-win-x64.zip`，**82,672,917 bytes／SHA256 `642e5307cf3d62af7b136d9baaca06c2d9cd9c3bd1ed66c7d4e915803a7f8710`**，原啟動器1.1／source fb57807d...及新Unity0.40 runtime／6098b485...，311 manifest／ZIP312。106項實際包驗證／725回放／原結果CSV及cleanup成功，原生自動化25端與普通入場另見[DESKTOP_EXERCISE](DESKTOP_EXERCISE.md)。不是新的Windows launcher GUI、LAN／25真人或頭盔驗收。
+
+前版[啟動器1.1／房間任務清單](SERVER_CATALOG.md)的`windows-server-0.39.0-v5-win-x64.zip`保持，82,669,350 bytes／SHA3eef78fbe8319e366afa80cdfad31557bf42fb8bc3992402b6f252525e2857a2。CLI38／Framework model26／原生106成功，完整GUI開場仍被PickerHost擋住；以下v3與舊failed證據保留，不能只看同一Unity版本選包。
 
 可搭配API0.31.0／控制台0.31.1的[任務收尾](SESSION_CLOSURE.md)顯示雙封存與保留已確認End；原server v3 runtime／SHA保持，不需要因這個唯讀UI更新Unity或頭盔。
 

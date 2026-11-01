@@ -65,6 +65,7 @@ namespace VrCommand.Unity
             try { configuration = LaunchConfiguration.Load(); }
             catch (Exception) { status = "PLEASE CONTACT THE CONTROL DESK"; }
             if (configuration == null) yield break;
+            if (!DesktopClientExercise.Install(gameObject, configuration.role)) { status = "DESKTOP EXERCISE REJECTED"; if (Application.isBatchMode && !Application.isEditor) Application.Quit(2); yield break; }
             if (configuration.role == "Client" && (Application.platform == RuntimePlatform.Android || UnityEngine.XR.XRSettings.isDeviceActive))
                 reconnectInput = new ClientReconnectInput();
             NativePoseContinuity.Install(gameObject,configuration.role);
