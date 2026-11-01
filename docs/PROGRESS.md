@@ -1,5 +1,9 @@
 # 開發進度
 
+## 2026-11-02：物件復原交付的CI與證據
+
+[功能fddc59c](https://github.com/peca12968/vr-command-center/commit/fddc59c4f2e2571265fb19a0c81e3622c1b93eb9)的[CI41346124781](https://github.com/peca12968/vr-command-center/actions/runs/41346124781)／job124966206406完整 **success**：Linux738規則／459 HTTP／47 world、6 pipe、全部Python／素材及89 Node／296 Chromium通過。2 Windows限定skip不是Framework、WinForms、Unity、native遊戲或頭盔驗收。console49檔 artifact13099980133／ZIP **12,015,192 bytes／SHA256 d6012c7a79fccd1e2ed44ed13640f669f7708134ae6ca533eaae1328167dc13a**，control13檔 artifact13099004432／ZIP **3,920 bytes／SHA256 b1cde4b7e8ccd8ac06b2ed58c73213e5e300e5f91ca54764907c79d0dfd2db58**，已下載核對GitHub digest、逐檔hash及完整decoded log（SHA256 ffba6bdd60c1066877c19fbb92bd75f041dda4bebc2f22e55ea59f315b4aee8e）。`placement-ci-validation.json`明列1366＋49＝**1415 browser證據**，另13 metadata，nativeUI7保持；前CI60檔及ZIP另核對保持。C27／F及四舊runtime報告、9管理／5server ZIP、原Unity0.39／e0d／224／玩家ZIP APK不變。後續只有文件提交skip ci，測試來源精確fddc59c；完整11active。
+
 ## 2026-11-02：場景物件復原與重做
 
 新增[物件編輯紀錄](PLACEMENT_HISTORY.md)，控制台 **0.31.2**／API **0.31.0**。本地物件新增、刪除、數值／素材與旋轉可完整復原／重做，保留順序及selection；一次拖曳／按住方向鍵為一步，放開／取消／失焦／切頁收束。只在配置圖攔截Ctrl／Meta快捷鍵，文字欄不攔截；載入任務／新增草稿／登出清紀錄，Master／busy／pending fence保持。儲存前收手勢，成功後同草稿還能undo，但只標記dirty，不回滾原不可變版本或管理寫入。50步／雙向UTF8序列化2MiB，完整步淘汰、返回值分離，版本／命令／憑證不進歷史。
