@@ -11,7 +11,7 @@ def free(kind=socket.SOCK_STREAM):
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('package',type=Path);p.add_argument('--control-package',type=Path,required=True);p.add_argument('--runtime-root',type=Path,required=True);args=p.parse_args()
     folder=args.package.resolve();manifest=package.verify(folder);assert manifest['launcherSourceSha256']==package.digest(ROOT/'tools/WindowsServerLauncher/ServerLauncher.cs')
-    out=ROOT/'artifacts/server-gui'/('run-'+uuid.uuid4().hex);out.mkdir(parents=True,exist_ok=False);runtime=args.runtime_root.resolve()/out.name;runtime.mkdir(parents=True,exist_ok=False);data=runtime/'control';port=free(socket.SOCK_DGRAM);api=None;api_witness=None;gui=None;witness=None;errors=[];observed=None;stopped=False;gui_report=None;gui_work=None;session=None;result=None
+    out=ROOT/'artifacts/server-gui'/('run-'+uuid.uuid4().hex);out.mkdir(parents=True,exist_ok=False);runtime=args.runtime_root.resolve()/out.name;runtime.mkdir(parents=True,exist_ok=False);data=runtime/'control';port=free(socket.SOCK_DGRAM);api=None;api_witness=None;gui=None;witness=None;errors=[];observed=None;stopped=False;gui_report=None;gui_work=None;session=None;result=None;other_session=None
     reports=Path(os.environ['LOCALAPPDATA'])/'VrCommand/GameServerReports';old=set(reports.glob('*.json')) if reports.exists() else set()
     def save(name,value):(out/name).write_text(json.dumps(value,indent=2)+'\n',encoding='utf-8')
     def stage(value,**extra):save('stage.json',{'stage':value,**extra});print(json.dumps({'stage':value,'directory':str(out),**extra}),flush=True)
@@ -31,6 +31,7 @@ def main():
             time.sleep(.05)
         api_witness=checks.ChildWitness(read(ready)['childPid']);original={name:checks.sha(data/name) for name in ['control-instance.json','operator-keys.json','player-ticket-signing.key']}
         mission=request('/api/missions',{'name':'GUI server fixture','briefing':'No GUI credential creation or player input','durationSeconds':600,'environment':{'mode':'VR','weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':1,'behavior':'Hold','autoAttack':False},'props':[]});session=request('/api/sessions',{'missionId':mission['id'],'mode':'Independent','roomIds':[1]})['id']
+        other_session=request('/api/sessions',{'missionId':mission['id'],'mode':'Independent','roomIds':[2]})['id']
         gui=subprocess.Popen([str(folder/'Launch-Server.exe')],cwd=runtime);stage('select-instance',guiPid=gui.pid,instance=str(data/'control-instance.json'),sessionId=session,udpPort=port)
         powershell=Path(os.environ['WINDIR'])/'System32/WindowsPowerShell/v1.0/powershell.exe'
         def children():
@@ -50,7 +51,20 @@ def main():
                 review=read(out/'gui-started.review.json')
                 if review!={'selected':True,'started':True}:raise RuntimeError('GUI start was not visually verified')
                 begin=request('/api/sessions/'+session+'/commands',{'commandId':str(uuid.uuid4()),'action':'Begin'});save('begin.json',begin)
-                time.sleep(3);end=request('/api/sessions/'+session+'/commands',{'commandId':str(uuid.uuid4()),'action':'End'});save('end.json',end);commanded=True;stage('waiting-seal-retention',guiPid=gui.pid)
+                sequence=begin['session']['sequence'];deadline_running=time.monotonic()+20;running=None
+                while time.monotonic()<deadline_running and running is None:
+                    req=urllib.request.Request(uri+'/api/sessions/'+session+'/world/watch?mode=live',headers={'Authorization':'Bearer '+keys['Master']})
+                    with urllib.request.urlopen(req,timeout=5) as response:
+                        kind=''
+                        for _ in range(40):
+                            line=response.readline().decode().strip()
+                            if line.startswith('event: '):kind=line[7:]
+                            if kind=='frame' and line.startswith('data: '):
+                                value=json.loads(line[6:]);packet=value['packet']
+                                if packet['frame']['phase']=='Running' and packet['frame']['tick']>0 and not packet['suspended'] and packet['observedSequence']>=sequence:running=value
+                                break
+                if running is None:raise RuntimeError('Original GUI native source did not apply Begin')
+                save('running.json',running);time.sleep(3);end=request('/api/sessions/'+session+'/commands',{'commandId':str(uuid.uuid4()),'action':'End'});save('end.json',end);commanded=True;stage('waiting-seal-retention',guiPid=gui.pid)
             if observed and not stopped and witness.kernel.WaitForSingleObject(witness.handle,0)==0:
                 witness.wait();witness.close();witness=None;stopped=True;stage('native-stopped-close-gui',guiPid=gui.pid)
             time.sleep(.2)
@@ -75,9 +89,9 @@ def main():
     except BaseException as e:stage('failed',errorType=type(e).__name__);raise
     finally:
         try:
-            if session and api and api.poll() is None:
-                state=request('/api/sessions/'+session)
-                if state['state']!='Ended':request('/api/sessions/'+session+'/commands',{'commandId':str(uuid.uuid4()),'action':'End'})
+            if api and api.poll() is None:
+                for own_session in [session,other_session]:
+                    if own_session and request('/api/sessions/'+own_session)['state']!='Ended':request('/api/sessions/'+own_session+'/commands',{'commandId':str(uuid.uuid4()),'action':'End'})
         except Exception as e:errors.append({'kind':'end','errorType':type(e).__name__})
         try:
             if gui and gui.poll() is None:gui.terminate();gui.wait(timeout=10)

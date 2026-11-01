@@ -6,13 +6,14 @@ ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('server_player_package',ROOT/'scripts/package-windows-player.py');player=importlib.util.module_from_spec(spec);spec.loader.exec_module(player)
 digest=player.digest;plain=player.plain
 TOP='VRCommand-GameServer'
-README='''VR Command Windows 遊戲伺服器包 1
+README='''VR Command Windows 遊戲伺服器啟動器 1.1／Unity 0.39.0
 
 完整解壓後開啟Launch-Server.exe。先啟動獨立的管理服務，在網頁控制台建立Preparing VR場次。
-按「選擇管理實例」，選該管理服務資料夾內的control-instance.json；只使用其中既有GameServer角色金鑰。
-選擇場次，填本機公告IPv4、綁定IPv4與UDP埠，按啟動。預設127.0.0.1只供同機。
+按「選擇檔案」選control-instance.json，或在路徑欄直接貼上完整檔案路徑，再按「載入／更新」。只使用既有GameServer角色金鑰。
+清單顯示房間、獨立／五房模式及任務名稱；明確選取後可核對完整場次與任務版本ID，再填IPv4與UDP埠、按啟動。預設127.0.0.1只供同機。
+更新只保留同一路徑／實例／API／GameServer金鑰中仍可啟動的原選取；消失或載入失敗不改選其他房間。路徑編輯後必須重新載入。
 獨立房間各開一個啟動器、各選場次與不同UDP埠；五房Linked場次只開一個。
-有新場次時重選管理實例以更新列表。已綁定來源／Running／MR場次不由此工具接管。
+有新場次時按載入／更新。已綁定來源／Running／MR場次不由此工具接管；啟動前仍重新向原API核對，不拿清單當保留或就緒。
 伺服器就緒後，從控制台下載各玩家自己的連線檔，交給玩家包；再由控制台開始任務。
 操作員由控制台End後，等戰鬥與世界雙封存，再保留36秒供玩家戰績傳送，啟動器才終止自己的Unity程序。
 「中止」會保留本次journal但不算正常完成；不自動End、不重新開舊戰場、不修復或重送舊journal。
@@ -24,6 +25,7 @@ role="Server",managementApiUrl="http://IPv4:埠",gameServerKey="既有GameServer
 sessionId="Preparing場次UUID",address="玩家看到的IPv4",listenAddress="本機IPv4或0.0.0.0",port=7777。
 不要把此私人JSON、管理實例或日誌資料加回共用ZIP。Unity只收到GameServer金鑰，沒有Master金鑰。
 CLI：Launch-Server.exe --run 私人JSON --work 全新資料夾 --seconds 3600 --ready-report 新就緒檔 --report 新結果檔
+唯讀列出待開場次：Launch-Server.exe --catalog control-instance.json完整路徑 --report 新結果檔；報告不含金鑰，輸出須在程式包與實例外。
 seconds為60..86400，期限結束仍未完成封存與36秒保留則失敗；結果與就緒檔必須在程式包與work外且不能重複。
 離線核對：Launch-Server.exe --verify package --report 新結果檔。
 
@@ -60,9 +62,11 @@ def main():
     for source,name in player.NOTICES.items():
         target=folder/name;target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(ROOT/source,target)
     source=ROOT/'tools/WindowsServerLauncher/ServerLauncher.cs';compiler=Path(os.environ.get('WINDIR','C:/Windows'))/'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
-    with (stage/'compile.log').open('xb') as log:subprocess.run([str(compiler),'/nologo','/warnaserror','/codepage:65001','/target:winexe','/platform:x64','/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Web.Extensions.dll','/out:'+str(folder/'Launch-Server.exe'),str(source)],stdout=log,stderr=subprocess.STDOUT,check=True)
+    frozen=stage/'ServerLauncher.input.cs';shutil.copyfile(source,frozen);source_hash=digest(frozen)
+    with (stage/'compile.log').open('xb') as log:subprocess.run([str(compiler),'/nologo','/warnaserror','/codepage:65001','/target:winexe','/platform:x64','/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Web.Extensions.dll','/out:'+str(folder/'Launch-Server.exe'),str(frozen)],stdout=log,stderr=subprocess.STDOUT,check=True)
+    if digest(source)!=source_hash:raise ValueError('Launcher source changed during compilation')
     (folder/'README.txt').write_text(README,encoding='utf-8')
-    manifest={'schemaVersion':1,'target':'win-x64','createdAtUtc':datetime.now(timezone.utc).isoformat(),'build':receipt,'launcherSourceSha256':digest(source),'scope':'Standalone server launcher, unchanged Unity Windows runtime; no keys, tickets or databases; manifest is not a signature.',
+    manifest={'schemaVersion':1,'target':'win-x64','launcherVersion':'1.1.0','createdAtUtc':datetime.now(timezone.utc).isoformat(),'build':receipt,'launcherSourceSha256':source_hash,'scope':'Standalone server launcher, unchanged Unity Windows runtime; no keys, tickets or databases; manifest is not a signature.',
         'files':[{'path':p.relative_to(folder).as_posix(),'bytes':p.stat().st_size,'sha256':digest(p)} for p in sorted(folder.rglob('*')) if p.is_file()]}
     (folder/'server-package.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8');verify(folder)
     output=plain(args.output);output.parent.mkdir(parents=True,exist_ok=True)

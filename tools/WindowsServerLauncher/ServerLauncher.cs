@@ -82,10 +82,14 @@ internal static class ServerLauncher
         internal void Validate()
         {
             Guid id; Need(Guid.TryParseExact(Session, "D", out id) && id != Guid.Empty && id.ToString("D") == Session, "場次ID格式錯誤。");
+            ValidateTarget();
+            IPv4(Address, false); LocalBind(Bind); Need(Bind == "0.0.0.0" || Bind == Address, "明確綁定地址須與公告地址相同。"); Need(Port >= 1024 && Port <= 65535, "UDP埠須為1024至65535。");
+        }
+        internal void ValidateTarget()
+        {
             Uri uri; Need(Uri.TryCreate(Api, UriKind.Absolute, out uri) && uri.Scheme == "http" && uri.AbsolutePath == "/" && uri.Query == "" && uri.Fragment == "" && uri.UserInfo == "" && uri.Port >= 1024 && uri.Port <= 65535, "管理地址須為http://IPv4:埠。");
             IPv4(uri.Host, false); Need(Api == "http://" + uri.Host + ":" + uri.Port, "管理地址須為http://IPv4:埠，不含結尾斜線。");
             Need(Key != null && Key.Length >= 32 && Key.Length <= 512, "GameServer金鑰格式錯誤。"); foreach (var c in Key) Need(c > 32 && c < 127, "GameServer金鑰格式錯誤。");
-            IPv4(Address, false); LocalBind(Bind); Need(Bind == "0.0.0.0" || Bind == Address, "明確綁定地址須與公告地址相同。"); Need(Port >= 1024 && Port <= 65535, "UDP埠須為1024至65535。");
         }
         internal object Config(string telemetry) { return new { role = "Server", address = Address, listenAddress = Bind, port = Port, sessionId = Session, managementApiUrl = Api, gameServerKey = Key, telemetryOrigin = "Simulation", telemetryDirectory = telemetry }; }
         internal Dictionary<string, object> Request(string path, object body = null, bool missing = false)
@@ -96,7 +100,78 @@ internal static class ServerLauncher
             try { using (var response = (HttpWebResponse)request.GetResponse()) using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8)) { Need(response.StatusCode == HttpStatusCode.OK, "管理服務回應不正確。"); var bytes = new char[256 * 1024 + 1]; var count = 0; int read; while ((read = reader.Read(bytes, count, bytes.Length - count)) > 0 && count < bytes.Length) count += read; Need(count <= 256 * 1024, "管理回應過大。"); var result = Map(Json.DeserializeObject(new string(bytes, 0, count))); Need(result != null, "管理回應格式錯誤。"); return result; } }
             catch (WebException error) { var response = error.Response as HttpWebResponse; var code = response == null ? 0 : (int)response.StatusCode; if (response != null) response.Dispose(); if (missing && code == 404) return null; throw new IOException("管理服務請求失敗，HTTP " + code + "。"); }
         }
-        internal void Identity() { Need(Text(Request("/"), "version") == "0.31.0", "需要管理服務0.31.0。"); Need(Text(Request("/api/me"), "role") == "GameServer", "請使用GameServer角色金鑰。"); }
+        internal void Identity() { ValidateTarget(); Need(Text(Request("/"), "version") == "0.31.0", "需要管理服務0.31.0。"); Need(Text(Request("/api/me"), "role") == "GameServer", "請使用GameServer角色金鑰。"); }
+        internal object[] Sessions()
+        {
+            var request = (HttpWebRequest)WebRequest.Create(Api + "/api/sessions"); request.Proxy = null; request.AllowAutoRedirect = false; request.Timeout = 5000; request.ReadWriteTimeout = 5000; request.Headers[HttpRequestHeader.Authorization] = "Bearer " + Key;
+            using (var response = (HttpWebResponse)request.GetResponse()) using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+            {
+                Need(response.StatusCode == HttpStatusCode.OK, "場次列表回應不正確。"); var chars = new char[256 * 1024 + 1]; var count = 0; int n;
+                while ((n = reader.Read(chars, count, chars.Length - count)) > 0 && count < chars.Length) count += n;
+                Need(count <= 256 * 1024, "場次回應過大。"); var rows = Json.DeserializeObject(new string(chars, 0, count)) as object[]; Need(rows != null && rows.Length <= 5, "場次列表格式或數量錯誤。"); return rows;
+            }
+        }
+    }
+    internal sealed class Choice
+    {
+        internal string Id, MissionId, MissionName, Mode; internal int[] Rooms;
+        internal static string GuidValue(string value) { Guid id; Need(Guid.TryParseExact(value, "D", out id) && id != Guid.Empty && id.ToString("D") == value, "場次或任務識別格式錯誤。"); return value; }
+        internal static Choice Parse(Dictionary<string, object> value)
+        {
+            Need(value != null, "場次列表內容錯誤。"); var mission = Child(value, "mission"); var name = Text(Child(mission, "definition"), "name");
+            Need(!String.IsNullOrWhiteSpace(name) && name.Length <= 100, "任務名稱格式錯誤。"); object raw; Need(value.TryGetValue("roomIds", out raw) && raw is object[], "場次房間缺失。"); var rows = (object[])raw;
+            var mode = Text(value, "mode"); Need(mode == "Independent" && rows.Length == 1 || mode == "Linked" && rows.Length == 5, "場次房間或連線模式錯誤。");
+            var seen = new HashSet<int>(); var rooms = new List<int>(); foreach (var row in rows) { Need(row is int && (int)row >= 1 && (int)row <= 5 && seen.Add((int)row), "場次房間重複或越界。"); rooms.Add((int)row); } rooms.Sort();
+            return new Choice { Id = GuidValue(Text(value, "id")), MissionId = GuidValue(Text(mission, "id")), MissionName = name, Mode = mode, Rooms = rooms.ToArray() };
+        }
+        internal static string Label(string value)
+        {
+            var text = new StringBuilder(); foreach (var c in value) { if (Char.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.Format) continue; text.Append(Char.IsControl(c) || Char.IsWhiteSpace(c) ? ' ' : c); }
+            var result = text.ToString().Trim(); if (result.Length > 32) { var length = Char.IsHighSurrogate(result[31]) ? 31 : 32; result = result.Substring(0, length) + "…"; } return result;
+        }
+        public override string ToString() { var rooms = Array.ConvertAll(Rooms, room => room.ToString(System.Globalization.CultureInfo.InvariantCulture)); return "房間 " + String.Join("、", rooms) + " · " + (Mode == "Linked" ? "五房全連線" : "單房獨立") + " · " + Label(MissionName) + " · " + Id.Substring(0, 8); }
+        internal object Public() { return new { id = Id, missionId = MissionId, missionName = MissionName, mode = Mode, roomIds = Rooms, display = ToString() }; }
+    }
+    internal sealed class Catalog
+    {
+        internal Settings Target; internal string PathName, InstanceId; internal List<Choice> Choices;
+        internal static Catalog Load(string path)
+        {
+            Need(!String.IsNullOrWhiteSpace(path), "請輸入control-instance.json完整路徑。");
+            path = Full(path.Trim()); Need(String.Equals(Path.GetFileName(path), "control-instance.json", StringComparison.OrdinalIgnoreCase) && !Inside(path, Root), "請選取包外的control-instance.json。");
+            var marker = Read(path, 4096); Need(Num(marker, "schemaVersion") == 1 && Text(marker, "kind") == "VrCommand-ControlServer" && Num(marker, "port") >= 1024 && Num(marker, "port") <= 65535, "管理實例格式不符。");
+            var id = Choice.GuidValue(Text(marker, "instanceId")); var keys = Child(Read(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(path), "operator-keys.json"), 8192), "OperatorKeys");
+            var target = new Settings { Api = "http://" + IPv4(Text(marker, "bindAddress"), false) + ":" + Num(marker, "port"), Key = Text(keys, "GameServer") }; target.Identity();
+            return new Catalog { Target = target, PathName = path, InstanceId = id, Choices = Parse(target.Sessions()) };
+        }
+        internal static List<Choice> Parse(object[] rows)
+        {
+            Need(rows != null && rows.Length <= 5, "場次列表超界。"); var choices = new List<Choice>(); var ids = new HashSet<string>(); var occupied = new HashSet<int>();
+            foreach (var item in rows)
+            {
+                var value = Map(item); Need(value != null, "場次列表內容錯誤。");
+                object bound; Need(value.TryGetValue("combatStream", out bound) && (bound == null || Map(bound) != null), "場次來源格式錯誤。");
+                var phase = Text(value, "state"); var experience = Text(Child(value, "environment"), "mode"); Need(phase == "Preparing" || phase == "Running" || phase == "Paused" || phase == "Ended", "場次階段格式錯誤。"); Need(experience == "VR" || experience == "MR", "場次環境格式錯誤。");
+                if (phase != "Preparing" || bound != null || experience != "VR") continue;
+                var choice = Choice.Parse(value); Need(ids.Add(choice.Id), "場次識別重複。"); foreach (var room in choice.Rooms) Need(occupied.Add(room), "待開場次房間重疊。"); choices.Add(choice);
+            }
+            choices.Sort((a, b) => a.Rooms[0] != b.Rooms[0] ? a.Rooms[0].CompareTo(b.Rooms[0]) : String.CompareOrdinal(a.Id, b.Id)); return choices;
+        }
+        internal bool Same(Catalog other) { return other != null && String.Equals(PathName, other.PathName, StringComparison.OrdinalIgnoreCase) && InstanceId == other.InstanceId && Target.Api == other.Target.Api && Target.Key == other.Target.Key; }
+        internal object Public() { return new { schemaVersion = 1, status = "catalogued", complete = true, instanceId = InstanceId, sessions = Choices.ConvertAll(choice => choice.Public()), scope = "Read-only Preparing VR choices; not reservation, server readiness or gameplay completion. No key in report." }; }
+    }
+    internal sealed class CatalogState
+    {
+        internal string Draft = ""; internal Catalog Current; internal Choice Selected; internal bool Loaded;
+        internal bool CanStart { get { return Loaded && Current != null && Selected != null && String.Equals(Full(Draft.Trim()), Current.PathName, StringComparison.OrdinalIgnoreCase); } }
+        internal void Edit(string path) { Draft = path; Loaded = false; }
+        internal void Load()
+        {
+            var old = Current; var selectedId = Selected == null ? null : Selected.Id; Loaded = false; Current = null; Selected = null;
+            var loaded = Catalog.Load(Draft); Current = loaded; Loaded = true;
+            if (loaded.Same(old) && selectedId != null) Selected = loaded.Choices.Find(choice => choice.Id == selectedId);
+        }
+        internal void Select(string id) { Need(Loaded && Current != null, "請先載入管理實例。"); Selected = id == null ? null : Current.Choices.Find(choice => choice.Id == id); }
     }
     // Kill-on-close job, assigned before native execution. No CPU, priority or memory limits.
     internal sealed class Native : IDisposable
@@ -215,45 +290,50 @@ internal static class ServerLauncher
     }
     internal sealed class Window : Form
     {
-        readonly TextBox selected = new TextBox { ReadOnly = true }, address = new TextBox { Text = "127.0.0.1" }, bind = new TextBox { Text = "127.0.0.1" };
-        readonly NumericUpDown port = new NumericUpDown { Minimum = 1024, Maximum = 65535, Value = 7777 }; readonly ComboBox session = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList };
-        readonly Button open = new Button { Text = "選擇管理實例" }, start = new Button { Text = "啟動伺服器", Enabled = false }, abort = new Button { Text = "中止伺服器", Enabled = false };
-        readonly Label state = new Label { Text = "先啟動管理服務，再選擇control-instance.json。", AutoSize = false }; Settings settings; Run active; volatile bool cancel; Thread worker;
+        readonly TextBox selected = new TextBox(), address = new TextBox { Text = "127.0.0.1" }, bind = new TextBox { Text = "127.0.0.1" };
+        readonly NumericUpDown port = new NumericUpDown { Minimum = 1024, Maximum = 65535, Value = 7777 }; readonly ComboBox session = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Enabled = false };
+        readonly Button open = new Button { Text = "選擇檔案" }, refresh = new Button { Text = "載入／更新" }, start = new Button { Text = "啟動伺服器", Enabled = false }, abort = new Button { Text = "中止伺服器", Enabled = false };
+        readonly Label state = new Label { Text = "先啟動管理服務，再載入其管理實例。", AutoSize = false }, detail = new Label { Text = "請先載入，再明確選擇要啟動的房間與任務。", AutoEllipsis = true };
+        readonly CatalogState catalog = new CatalogState(); Run active; volatile bool cancel; Thread worker;
         internal Window()
         {
-            Text = "VR Command 遊戲伺服器"; ClientSize = new Size(920, 430); Font = new Font("Microsoft JhengHei UI", 11); FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false;
-            Add(new Label { Text = "每個獨立房間一個伺服器；五房合併場次只需一個。", AutoSize = true }, 24, 24, 860, 30); Add(selected, 24, 70, 640, 32); Add(open, 680, 68, 210, 36);
-            Add(new Label { Text = "尚未綁定來源的VR場次", AutoSize = true }, 24, 122, 300, 30); Add(session, 24, 156, 866, 34);
-            Add(new Label { Text = "公告IPv4", AutoSize = true }, 24, 211, 210, 28); Add(address, 24, 242, 230, 32); Add(new Label { Text = "本機綁定IPv4", AutoSize = true }, 284, 211, 230, 28); Add(bind, 284, 242, 230, 32); Add(new Label { Text = "UDP埠", AutoSize = true }, 544, 211, 130, 28); Add(port, 544, 242, 130, 32);
-            Add(start, 24, 294, 260, 40); Add(abort, 310, 294, 260, 40); Add(state, 24, 351, 866, 64);
-            open.Click += delegate { using (var dialog = new OpenFileDialog { Filter = "管理實例|control-instance.json", CheckFileExists = true }) if (dialog.ShowDialog(this) == DialogResult.OK) Guard(delegate { LoadInstance(dialog.FileName); }); };
+            Text = "VR Command 遊戲伺服器"; ClientSize = new Size(920, 510); Font = new Font("Microsoft JhengHei UI", 11); FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false;
+            Add(new Label { Text = "每個獨立房間一個伺服器；五房合併場次只需一個。", AutoSize = true }, 24, 24, 860, 30);
+            Add(new Label { Text = "管理實例檔案完整路徑", AutoSize = true }, 24, 56, 600, 28); Add(selected, 24, 86, 594, 32); Add(open, 630, 84, 120, 36); Add(refresh, 766, 84, 124, 36);
+            Add(new Label { Text = "可選檔，也可直接貼上control-instance.json路徑，再按載入／更新。", AutoSize = true }, 24, 127, 866, 30);
+            Add(new Label { Text = "尚未綁定來源的VR場次", AutoSize = true }, 24, 164, 400, 28); Add(session, 24, 194, 866, 34); Add(detail, 24, 240, 866, 48);
+            Add(new Label { Text = "公告IPv4", AutoSize = true }, 24, 299, 210, 28); Add(address, 24, 330, 230, 32); Add(new Label { Text = "本機綁定IPv4", AutoSize = true }, 284, 299, 230, 28); Add(bind, 284, 330, 230, 32); Add(new Label { Text = "UDP埠", AutoSize = true }, 544, 299, 130, 28); Add(port, 544, 330, 130, 32);
+            Add(start, 24, 382, 260, 40); Add(abort, 310, 382, 260, 40); Add(state, 24, 440, 866, 64);
+            selected.TextChanged += delegate { catalog.Edit(selected.Text); start.Enabled = session.Enabled = false; detail.Text = "路徑已變更，請重新載入；未沿用舊場次。"; };
+            open.Click += delegate { using (var dialog = new OpenFileDialog { Filter = "管理實例|control-instance.json", CheckFileExists = true }) if (dialog.ShowDialog(this) == DialogResult.OK) { selected.Text = dialog.FileName; Guard(LoadInstance); } };
+            refresh.Click += delegate { Guard(LoadInstance); };
+            session.SelectedIndexChanged += delegate { if (catalog.Loaded) { var choice = session.SelectedItem as Choice; catalog.Select(choice == null ? null : choice.Id); start.Enabled = catalog.CanStart; detail.Text = choice == null ? "請明確選擇要啟動的房間與任務。" : "場次ID：" + choice.Id + "\r\n任務版本ID：" + choice.MissionId; } };
             start.Click += delegate { Guard(Begin); }; abort.Click += delegate { cancel = true; abort.Enabled = false; state.Text = "中止中；此輪不算正常封存完成。"; };
             FormClosing += delegate(object sender, FormClosingEventArgs e) { if (worker != null && worker.IsAlive) { e.Cancel = true; state.Text = "伺服器仍在執行；請由控制台結束任務，或按中止。"; } };
             var timer = new System.Windows.Forms.Timer { Interval = 500 }; timer.Tick += delegate { if (active != null && !cancel) state.Text = active.Status; }; timer.Start();
         }
         void Add(Control control, int x, int y, int w, int h) { control.SetBounds(x, y, w, h); Controls.Add(control); }
         void Guard(Action action) { try { action(); } catch (Exception e) { state.Text = "未完成：" + Safe(e); } }
-        void LoadInstance(string path)
+        void LoadInstance()
         {
-            var marker = Read(path, 4096); Need(Num(marker, "schemaVersion") == 1 && Text(marker, "kind") == "VrCommand-ControlServer", "管理實例格式不符。");
-            var keys = Child(Read(Path.Combine(Path.GetDirectoryName(path), "operator-keys.json"), 8192), "OperatorKeys"); var api = "http://" + IPv4(Text(marker, "bindAddress"), false) + ":" + Num(marker, "port");
-            var current = new Settings { Api = api, Key = Text(keys, "GameServer") }; current.Identity();
-            // Fetch separately: the bounded request helper deliberately accepts only objects.
-            var request = (HttpWebRequest)WebRequest.Create(api + "/api/sessions"); request.Proxy = null; request.AllowAutoRedirect = false; request.Timeout = 5000; request.ReadWriteTimeout = 5000; request.Headers[HttpRequestHeader.Authorization] = "Bearer " + current.Key;
-            string raw; using (var response = request.GetResponse()) using (var reader = new StreamReader(response.GetResponseStream())) { var chars = new char[256 * 1024 + 1]; var count = 0; int n; while ((n = reader.Read(chars, count, chars.Length - count)) > 0 && count < chars.Length) count += n; Need(count <= 256 * 1024, "場次回應過大。"); raw = new string(chars, 0, count); }
-            var values = Json.DeserializeObject(raw) as object[]; Need(values != null, "場次列表格式錯誤。"); session.Items.Clear();
-            foreach (var item in values) { var value = Map(item); if (Text(value, "state") == "Preparing" && Child(value, "combatStream") == null && Text(Child(value, "environment"), "mode") == "VR") session.Items.Add(Text(value, "id")); }
-            settings = current; selected.Text = path; if (session.Items.Count > 0) session.SelectedIndex = 0; start.Enabled = session.Items.Count > 0; state.Text = session.Items.Count > 0 ? "選擇場次與UDP埠後啟動。重選實例可更新列表。" : "沒有可啟動的Preparing VR場次，請先在控制台建立。";
+            start.Enabled = session.Enabled = false; detail.Text = "正在重新讀取管理服務；不保留未確認的啟動選取。";
+            try { catalog.Load(); }
+            catch { session.Items.Clear(); detail.Text = "載入未完成，已清除舊場次。請確認管理服務與路徑後重新載入。"; throw; }
+            var retained = catalog.Selected; session.Items.Clear(); foreach (var choice in catalog.Current.Choices) session.Items.Add(choice);
+            session.Enabled = true; if (retained != null) session.SelectedItem = retained;
+            start.Enabled = catalog.CanStart; detail.Text = retained == null ? "請明確選擇要啟動的房間與任務。" : "場次ID：" + retained.Id + "\r\n任務版本ID：" + retained.MissionId;
+            state.Text = session.Items.Count > 0 ? "清單已更新；只保留同一管理實例中仍可啟動的原選取。" : "沒有可啟動的Preparing VR場次，請先在控制台建立。";
         }
         void Begin()
         {
-            Need(settings != null && session.SelectedItem != null, "請先選擇待開場次。"); var config = new Settings { Api = settings.Api, Key = settings.Key, Session = (string)session.SelectedItem, Address = address.Text, Bind = bind.Text, Port = (int)port.Value }; config.Validate();
+            Need(catalog.CanStart, "請先載入實例並明確選擇待開場次。"); var target = catalog.Current.Target;
+            var config = new Settings { Api = target.Api, Key = target.Key, Session = catalog.Selected.Id, Address = address.Text, Bind = bind.Text, Port = (int)port.Value }; config.Validate();
             var work = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrCommand", "GameServers", DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N"));
             var reports = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrCommand", "GameServerReports"); Directory.CreateDirectory(reports); var report = Path.Combine(reports, Guid.NewGuid().ToString("N") + ".json");
-            active = new Run(config, work); cancel = false; open.Enabled = start.Enabled = address.Enabled = bind.Enabled = port.Enabled = session.Enabled = false; abort.Enabled = true;
+            active = new Run(config, work); cancel = false; open.Enabled = refresh.Enabled = start.Enabled = selected.Enabled = address.Enabled = bind.Enabled = port.Enabled = session.Enabled = false; abort.Enabled = true;
             worker = new Thread(delegate() { string error = null; try { active.Start(() => cancel); active.Wait(86400, () => cancel); } catch (Exception e) { error = Safe(e); } finally { try { active.Dispose(); } catch (Exception e) { error = Safe(e); } }
                 try { Save(report, active.Report(active.Complete && active.Cleanup ? "sealed-stopped" : "incomplete", error)); } catch (Exception e) { error = Safe(e); }
-                var final = error == null && active.Complete && active.Cleanup ? "任務已封存並停止。" : "未完成：" + (error ?? "封存未確認。"); BeginInvoke((Action)delegate { active = null; state.Text = final + " 結果：" + report; open.Enabled = address.Enabled = bind.Enabled = port.Enabled = session.Enabled = true; abort.Enabled = false; }); }); worker.IsBackground = false; worker.Start();
+                var final = error == null && active.Complete && active.Cleanup ? "任務已封存並停止。" : "未完成：" + (error ?? "封存未確認。"); BeginInvoke((Action)delegate { active = null; catalog.Edit(selected.Text); session.Enabled = false; detail.Text = "此輪已收尾；再次啟動前請重新載入場次。"; state.Text = final + " 結果：" + report; open.Enabled = refresh.Enabled = selected.Enabled = address.Enabled = bind.Enabled = port.Enabled = true; abort.Enabled = false; }); }); worker.IsBackground = false; worker.Start();
         }
     }
     [STAThread] static int Main(string[] args)
@@ -263,8 +343,9 @@ internal static class ServerLauncher
         try
         {
             var options = new Dictionary<string, string>(); for (var i = 0; i < args.Length; i += 2) { Need(i + 1 < args.Length && !options.ContainsKey(args[i]), "參數格式錯誤。"); options.Add(args[i], args[i + 1]); }
-            Need(options.ContainsKey("--report"), "需要結果路徑。"); report = options["--report"]; Output(report, options.ContainsKey("--work") ? options["--work"] : null); outputValid = true;
+            Need(options.ContainsKey("--report"), "需要結果路徑。"); report = options["--report"]; Output(report, options.ContainsKey("--catalog") ? Path.GetDirectoryName(Full(options["--catalog"])) : options.ContainsKey("--work") ? options["--work"] : null); outputValid = true;
             if (options.Count == 2 && options.ContainsKey("--verify")) { Need(options["--verify"] == "package", "驗證參數錯誤。"); Verify(); Save(report, new { schemaVersion = 1, complete = true, status = "verified" }); return 0; }
+            if (options.Count == 2 && options.ContainsKey("--catalog")) { Verify(); Save(report, Catalog.Load(options["--catalog"]).Public()); return 0; }
             Need(options.Count == 5 && options.ContainsKey("--run") && options.ContainsKey("--work") && options.ContainsKey("--seconds") && options.ContainsKey("--ready-report"), "需要run/work/seconds/ready-report/report五個參數。");
             int seconds; Need(Int32.TryParse(options["--seconds"], out seconds) && seconds >= 60 && seconds <= 86400, "執行期限須為60至86400秒。");
             var configPath = Full(options["--run"]); var work = Full(options["--work"]); Need(!Inside(configPath, Root) && !Inside(configPath, work) && !Inside(work, configPath), "設定必須在程式包與新資料夾之外。");

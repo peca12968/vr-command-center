@@ -1,5 +1,7 @@
 # 需求與驗收追蹤
 
+2026-11-02 [伺服器房間／任務清單](SERVER_CATALOG.md)：啟動器1.1可直接輸入管理實例路徑並更新，顯示房間、模式與任務，原UUID／版本另列；明確選取、路徑變更／失敗停用、同實例且仍存在才保留。38 CLI/API＋26真正Framework model與新版原生106／777回放／10結果CSV ACK成功；完整WinForms開場仍受PickerHost阻擋。API0.31／console0.31.1及Unity0.39／224雙平台保持，11active。
+
 2026-11-02 [任務收尾與End重試](SESSION_CLOSURE.md)：控制台0.31.1／API0.31.0，分開顯示戰鬥與世界封存，異源／讀取失敗不沿用綠色，沒有送達／可關閉保證。真lost-End後sealed duplicate舊篩選反例exit1、新269 Chromium／83 Node及真正UI End＋原生106／619回放／10結果CSV ACK成功；管理包105。Unity0.39／224雙平台保持，新server GUI／跨機頭盔25操作仍待，11active。
 
 2026-11-02 [Windows遊戲伺服器包](WINDOWS_SERVER_PACKAGE.md)：沿用Unity0.39與API0.31，Framework啟動器只使用GameServer角色、Preparing VR新來源／新資料，公告endpoint、雙seal後留36秒再收自己的原程序。103項原生整合／五獨立與後Linked／553全回放／10原admission結果CSV與closed journal尾界成功；Job父程序退出另為未封存反例。GUI被非目標PickerHost攔住，未完成／failed保持；沒有新Editor／APK或跨機／25操作，完整11active。

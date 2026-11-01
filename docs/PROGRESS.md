@@ -1,5 +1,21 @@
 # 開發進度
 
+## 2026-11-02：伺服器房間／任務清單與明確選取
+
+新增[伺服器待開場次清單](SERVER_CATALOG.md)。Launcher **1.1.0**，獨立於原Unity **0.39.0／code49／NGO29**、API **0.31.0**及控制台 **0.31.1**；原e0d60e4e...／224真正Editor／雙平台、Scene／prefab ID與規則／wire保持，沒有新Editor、Unity或API build。
+
+原GUI只列UUID並需重選實例更新；現在直接輸入或選control-instance.json後載入／更新，清單顯示房間、模式、任務與id前綴，完整場次／任務版本ID另列，啟動仍用原UUID。初次不自選；路徑編輯先停用，載入失敗清原Current／Selected，不沿舊目標；更新只保留同path／instance ID／API／GameServer key且原id仍在的選取，不改選別房。Running／bound／MR不供啟動，原Start仍重新核對loaded API的GameServer／Preparing／未綁來源；清單不當預約／就緒。名稱顯示移除control／bidi並保留surrogate boundary，原name／id不改。新CLI --catalog只GET原身分／場次，bounded256Ki字元／5秒／最多5 active，拒絕錯id／mode／room重疊及資料錯型別；public JSON無key，complete只是read finished，不新增key、配票或管理寫入。
+
+五份server ZIP全保留：新v4 **82,669,330 bytes／SHAf75b27e2d5fbcb106943808aa735651f93ebb6516e782716e1f56186529f6f4e**初候選，主包v5 **82,669,350 bytes／SHA3eef78fbe8319e366afa80cdfad31557bf42fb8bc3992402b6f252525e2857a2**、311 manifest／ZIP312，launcher input **fb57807d4744f06f6c2fe4f8737b1e7517543535a3d7eb8498a981f09340f073**；v4 input efec287c...。本輪package先凍結實際ServerLauncher.input.cs再編譯，原v3 source98c1f1...亦另保存；manifest不是簽章，無key／DB／ticket混入。原8份管理ZIP、玩家ZIP／APK及runtime未改。
+
+初catalog／`server-catalog/run-f8663646f3d04ca9963540dca45ba805`有26 wrapper＋26真正Framework assertions成功。最終64877／`run-e7a553783114426daafc864ae27deff5` **exit0／38 CLI/API＋26 Framework**，包含真正五獨立／Linked、bound／MR metadata過濾、原id／version／read-only、role／marker改變、failure清除、原選取消失不換房與public JSON無生成key。proof直接編譯production catalog/state methods、不建立或操作WinForms；只在自己fresh fixture改還原marker/key且hash相同，以Master做一次測試End以證明選取消失，不能當產品catalog寫入或頭盔／校正MR。
+
+新GUI70028／`server-gui/run-31f42864c4a0450a9d4daf9db9f70434` **exit1／未完成**：Window16189230／GUI10992，新增欄位與disabled Start可見；type_text未觀察落地，改用skill允許的ValuePattern後路徑確實改變、編輯提示與disabled Start生效。text-only click因geometry缺失未操作；補snapshot後兩次點擊（含activate／fresh state的一次重試）仍回報點上為PickerHost.exe而非Launch-Server，沒有load／selection／start或native來源成功。停止UI輸入、未操作PickerHost或任何權限／安全設定，只終止自己的GUI，API正常Stop／exit0，cleanup空列、C9／F保持；部分操作不當全GUI成功或根因修復。已向使用者非阻塞詢問是否有停留擷取／選檔視窗，其他PC工作繼續；沒有把未回覆當允許。
+
+新版v5真正CLI31606／`server-package-checks/run-a6f7466c8f25462d86f73b41ad3900d4` **exit0／106項**：五獨立server＋五接收client，後Linked一server＋五接收client，真browser選原Running／一筆正常UI End／同source world GET提示與原native終界；**777完整API回放（185／158／144／124／110／56）**、10份原admission結果／CSV、雙seal／closed world journal durable尾界與原程序cleanup成功。terminal後另讀回10 CSV所有列／10原server network admission與ACK精確、無timeout，非新live／第107項。第七parent-exit仍故意未seal且無success final，不混六正常場；仍同機Simulation／接收者，沒有25位操作或GPU／LAN容量。
+
+`server-catalog-delivery-validation.json`核對新C14＋14＋9failed＋80＝**117檔**與各F snapshot同hash、5份serverZIP／frozen compiler input、原8 controlZIP／玩家ZIP APK及e0d60e4e fingerprint，前C274／C163也同hash。1260 browser與原nativeUI5保持，新native UI2另列，未當新的全browser跑；4既有Python package邊界與新腳本語法成功。writer真正terminal才各一次snapshot，保存SQLite只rb/hash不開連線。完整11active，舊31／world371／Windows startup／F吞吐／完整GUI／乾淨新機／LAN／25操作／頭盔MR／廠商硬體各自待驗，不因本輪改判。
+
 ## 2026-11-02：主控台任務收尾與已封存End重試
 
 [功能7a0da65](https://github.com/peca12968/vr-command-center/commit/7a0da6542c039b4de97b212aa67e3a651830a06b)的[CI41339991116](https://github.com/peca12968/vr-command-center/actions/runs/41339991116)／job124947761594／精確7a0da65完整**success**：Linux738規則／459 HTTP／47 world、6真正pipe程序、全部Python／素材與83 Node／269 Chromium通過。2 Windows限定skip不是Framework、Unity、native GUI或頭盔驗收。console47 artifact13097202219／ZIP **11,443,289 bytes／SHA4091035e0016961322021371bf8bae003459fd66238ee78625a768730753a6df**，control13 artifact13097370766／ZIP **3,919 bytes／SHA156cdc83d14a4658b4266fb50e07d2556afb08fbc63ef7efa1829ce4bcb17c97**與完整decoded log保存，ZIP digest與GitHub相符。`closure-ci-validation.json`明列1213＋47＝**1260 browser證據**，另13新CI metadata；本機C274／F、8管理ZIP／3 serverZIP／原玩家ZIP APK與前C163／C52native／C318control保持。文件後skip ci、測試來源精確7a0da65，failed／before不改判，完整11active。
