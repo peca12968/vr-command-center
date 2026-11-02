@@ -6,7 +6,7 @@ ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('server_player_package',ROOT/'scripts/package-windows-player.py');player=importlib.util.module_from_spec(spec);spec.loader.exec_module(player)
 digest=player.digest;plain=player.plain
 TOP='VRCommand-GameServer'
-README='''VR Command Windows 遊戲伺服器啟動器 1.1／Unity 0.39.0
+README='''VR Command Windows 遊戲伺服器啟動器 1.1／Windows 遊戲程式
 
 完整解壓後開啟Launch-Server.exe。先啟動獨立的管理服務，在網頁控制台建立Preparing VR場次。
 按「選擇檔案」選control-instance.json，或在路徑欄直接貼上完整檔案路徑，再按「載入／更新」。只使用既有GameServer角色金鑰。
@@ -31,7 +31,7 @@ seconds為60..86400，期限結束仍未完成封存與36秒保留則失敗；�
 
 本機記錄：%LOCALAPPDATA%/VrCommand/GameServers（含私人金鑰）與GameServerReports。
 Windows x64與.NET Framework4.8；操作人員不需Python、Unity Editor或.NET SDK。
-沿用Unity0.39.0、原規則與Simulation來源；沒有在本包新增頭盔、MR或廠商硬體整合。
+使用隨包Unity Windows遊戲程式、原規則與Simulation來源；來源識別見Runtime/build-receipt.json。沒有在本包新增頭盔、MR或廠商硬體整合。
 未修改防火牆、未提供NAT/中繼；跨機網路與25位同時操作須另外驗收。
 server-package.json是SHA256完整性清單，不是數位簽章。Runtime/build-receipt.json保留原實際Unity建置紀錄。
 Notices保留玩家包相同的素材／Transport授權。Microsoft Job文件：https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects
