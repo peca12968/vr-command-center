@@ -1,6 +1,16 @@
 # Windows 遊戲伺服器包
 
-目前主包`windows-server-0.40.0-win-x64.zip`，**82,672,917 bytes／SHA256 `642e5307cf3d62af7b136d9baaca06c2d9cd9c3bd1ed66c7d4e915803a7f8710`**，原啟動器1.1／source fb57807d...及新Unity0.40 runtime／6098b485...，311 manifest／ZIP312。106項實際包驗證／725回放／原結果CSV及cleanup成功，原生自動化25端與普通入場另見[DESKTOP_EXERCISE](DESKTOP_EXERCISE.md)。不是新的Windows launcher GUI、LAN／25真人或頭盔驗收。
+2026-11-02 本輪同源Unity0.41.1／code52／NGO29／242真正Editor、4ebd雙平台：新server主包 `windows-server-0.41.1-v2-win-x64.zip`，**82,673,732 bytes／SHA256 `ca285a42e0c22bdde17f62eb6dd8a65523c9d3a5cae19a33cad41636899fb368`**、311 manifest／ZIP312。啟動器1.1來源fb57807d...不變但重新編譯binary不同，runtime逐byte同v1；v1與所有舊包保持。包說明改引用Runtime/build-receipt.json，不再寫死Unity0.39。
+
+實際F解壓包106項／623全回放、五房後Linked／10原結果與CSV／雙seal／原server ACK／無active成功，parent-death是另留的未封存反例；closure UI新增Running與Archived兩PNG、精確原session/stream/final world，nativeUI9＋2＝11，非雲端CI檔。
+
+**實際WinForms流程已成功**（run-3d179468...／真正handle64853 exit0）：直接輸入既有實例路徑、載入兩房清單、明確選房1完整UUID／任務版本、設定127.0.0.1及本次UDP、按啟動，fixture API Begin後原來源Running/tick>0/observed fence，再API End、雙seal保留36秒、原child停止、畫面「任務已封存並停止」後按關閉。原實例marker／三key檔hash不變；GUI exit0／closed journal精確ACK尾界／cleanup空、C14→F raw同hash。名冊只有fixture roster一位，**未啟動玩家client**；不宣稱玩家送達／操作／LAN／頭盔。此次沒有測系統「選擇檔案」視窗、GUI建立key或透過GUI按Begin/End；Begin/End仍是fixture正常API。
+
+使用者自行關PickerHost後重驗，舊PickerHost失敗保持。首新GUI run-e615...已選對並啟動，但fixture空名冊Begin被原API409拒絕、helper finally清理後C9→F同hash，仍failed；只修fixture先加一位明確roster，不改產品／API／啟動器或Begin原規則，py_compile與新真GUI成功。期間自動化bounds變更後重新選取/擷取再操作，沒有繞過任何安全提示。上述GUI不代表舊Windows startup／31／world371／F吞吐修復，完整11active。
+
+以下為歷史交付與當時驗證狀態；目前版本與新GUI結果以上段為準。
+
+前主包`windows-server-0.40.0-win-x64.zip`，**82,672,917 bytes／SHA256 `642e5307cf3d62af7b136d9baaca06c2d9cd9c3bd1ed66c7d4e915803a7f8710`**，原啟動器1.1／source fb57807d...及新Unity0.40 runtime／6098b485...，311 manifest／ZIP312。106項實際包驗證／725回放／原結果CSV及cleanup成功，原生自動化25端與普通入場另見[DESKTOP_EXERCISE](DESKTOP_EXERCISE.md)。不是新的Windows launcher GUI、LAN／25真人或頭盔驗收。
 
 前版[啟動器1.1／房間任務清單](SERVER_CATALOG.md)的`windows-server-0.39.0-v5-win-x64.zip`保持，82,669,350 bytes／SHA3eef78fbe8319e366afa80cdfad31557bf42fb8bc3992402b6f252525e2857a2。CLI38／Framework model26／原生106成功，完整GUI開場仍被PickerHost擋住；以下v3與舊failed證據保留，不能只看同一Unity版本選包。
 

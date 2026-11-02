@@ -1,8 +1,10 @@
 # 長場原生自動化輸入
 
-[CI41364751791](https://github.com/peca12968/vr-command-center/actions/runs/41364751791)對fixture來源659f026完整success：772／459／47、6pipe／38CLI、全部Python含14 exercise／素材、89 Node／296 Chromium，2 Windows限定skip非原生／Editor證據。console51／control13／hardware26與完整hash見[PROGRESS](PROGRESS.md)；原三次CI失敗保持、1717 browser／nativeUI7＋2另列。原held PUT必須fulfilled=true／只有1請求後隔離斷言才過，原15／30秒／產品期限不變，不證舊逾時根因。659只fixture／文件，242 Editor／4ebd建置與原生helper仍4bdf；新900秒尚未全部完成，CI不代替長場接受。
+最新[CI41367545805](https://github.com/peca12968/vr-command-center/actions/runs/41367545805)對65b072d完整success：772/459/47/6pipe/38CLI/Python/素材89Node296Chromium，2Windows限定skip。新51browser與control13/hardware26原ZIP逐hash保存，總1819browser/nativeUI11分列；65只GUI fixture roster，native4bdf、包說明c55、242/4ebd雙平台與新900秒長場均另有本機證據。以下659/c55及failed為歷史，最新交付以上述及PROGRESS為準。
 
-目前候選 **Unity0.41.1／code52／NGO29**、242真正Editor／0skip，同源Windows／ARM64 fingerprint **4ebdcd12b9cbf1d00f342cb25dbec21d84f60c048284d8333cb8fa01c42a495c**，原Scene／prefab ID保持。兩模式60秒預測試已通過，新的900秒尚在執行；舊0.41失敗保留，不提前當作修復或長場通過。這是AutomatedSimulation，非真人鍵盤、頭盔、LAN或網路容量驗收。
+[CI41364751791](https://github.com/peca12968/vr-command-center/actions/runs/41364751791)對fixture來源659f026完整success：772／459／47、6pipe／38CLI、全部Python含14 exercise／素材、89 Node／296 Chromium，2 Windows限定skip非原生／Editor證據。console51／control13／hardware26與完整hash見[PROGRESS](PROGRESS.md)；原三次CI失敗保持、1717 browser／nativeUI7＋2另列。原held PUT必須fulfilled=true／只有1請求後隔離斷言才過，原15／30秒／產品期限不變，不證舊逾時根因。659只fixture／文件，242 Editor／4ebd建置與原生helper仍4bdf；新900秒另以真正handle33928完成；CI不代替原生接受。
+
+目前候選 **Unity0.41.1／code52／NGO29**、242真正Editor／0skip，同源Windows／ARM64 fingerprint **4ebdcd12b9cbf1d00f342cb25dbec21d84f60c048284d8333cb8fa01c42a495c**，原Scene／prefab ID保持。兩模式60秒預測試與900秒長場均已通過；舊0.41失敗保留，兩者分開記錄。這是AutomatedSimulation，非真人鍵盤、頭盔、LAN或網路容量驗收。
 
 ```powershell
 python scripts/check-desktop-exercise.py --api-dll <同次API0.31完整建置DLL> --runtime-root <SSD runtime根目錄> --mode both --players-per-room 5 --seconds 900 --endurance --replay-workers 5
@@ -42,14 +44,14 @@ python scripts/check-desktop-exercise.py --api-dll <同次API0.31完整建置DLL
 
 242真正Editor／0skip（原238＋4），含位置換向、不變tick仍可換向、不均步長舊漂移／新有界、非有限值拒絕。Python14 exercise／27 active／5 artifact與錯模式CLI拒絕成功。新報告必須明確motion=LocalPositionFeedback，舊0.41報告不能冒充新模式。
 
-073233-32121819兩模式60秒 **18項／3760回放／50原結果／6CSV／雙seal及原ACK**成功，每人6發3reload／3週期、無queue error，五路回放到原seal且cleanup空。玩家包19通過；新的900秒073638-487017bd／handle33928仍依序執行，不能提前建立接受檔或runtime snapshot。666新來源snapshot只含source，於新長場之前完成，兩端建置全停才原生。
+073233-32121819兩模式60秒 **18項／3760回放／50原結果／6CSV／雙seal及原ACK**成功，每人6發3reload／3週期、無queue error，五路回放到原seal且cleanup空。玩家包19通過；新的900秒073638-487017bd／handle33928已terminal exit0：18項／51601完整回放／51351 Running、50原結果／6CSV／雙seal及原server ACK、無timeout或queue error，每人90發／45reload／45週期。Linked8610／8576 Running；Independent8582／8518、8590／8552、8580／8540、8600／8561、8639／8604。活動跨度17943..18003tick、最長收集902.3086214秒；active0／cleanup空後C174→F逐檔同hash。另普通無生成旗標入場／撤銷／重連8項／354幀成功。666新來源snapshot只含source，於新長場之前完成，兩端建置全停才原生。
 
 - 玩家ZIP **82,651,927 bytes／SHA256 dcc46c80c68d0a2861957c7d534b1abacd15964fb22f310ecdd1e60dddf7d2df**，311 manifest／ZIP312，原啟動器source a65846da...。
-- Server ZIP **82,673,718 bytes／SHA256 b45d67269143664d7c47a18905e72b3304364301ed64be68a5a9ec6757cebcea**，311 manifest／ZIP312、啟動器1.1.0／source fb57807d...；新包完整原生尚待，非WinForms GUI成功。
+- Server v2 ZIP **82,673,732 bytes／SHA256 ca285a42e0c22bdde17f62eb6dd8a65523c9d3a5cae19a33cad41636899fb368**，311 manifest／ZIP312、啟動器1.1.0／source fb57807d...；106項／623回放及實際WinForms流程成功，v1保留。直接輸入路徑、選場次／啟動／封存保留36秒停止／關閉的範圍見[WINDOWS_SERVER_PACKAGE](WINDOWS_SERVER_PACKAGE.md)。
 - APK **60,361,942 bytes／SHA256 766d80180c0facf67136412d4f9a4b9e35ae0d6dc5f5cac9b128261282188e48**，ARM64／min32／target35／0.41.1／code52、v2 debug簽章，未裝頭盔。
 
-原0.41 ZIP／APK1187dfd2...保留，當前APK是0.41.1，不混稱原檔同hash；首server缺stage-root拒絕與後補新目錄成功的紀錄保持。API0.31／UI0.31.2／rules0.8.0與wire不變，沒有新的後端產品／WinForms GUI／頭盔驗收。
+原0.41 ZIP／APK1187dfd2...保留，當前APK是0.41.1，不混稱原檔同hash；首server缺stage-root拒絕與後補新目錄成功的紀錄保持。API0.31／UI0.31.2／rules0.8.0與wire不變，沒有新的後端產品或頭盔驗收；新WinForms流程另記。
 
 舊18a72f0的[CI41359154963](https://github.com/peca12968/vr-command-center/actions/runs/41359154963)完整772／459／47／6pipe／38CLI／14Python／89Node／296 Chromium，但它測舊0.41功能＋鏡頭fixture，不當本候選CI。首7ed鏡頭等待CI failure／17部分browser保留，18a僅DOM polling100／有界診斷、原15000ms／斷言／產品期限不變，不證首失敗根因。原1629browser／nativeUI7＋2保持，新CI另記。
 
-完整11項active，舊31／world371／startup／F吞吐／PickerHost、跨機25真人、Quest／VIVE／MR與廠商SDK／實體硬體仍待；生成器修正不當這些根因修復。精確來源、CI與原生結果見[PROGRESS](PROGRESS.md)。
+完整11項active，PickerHost已由使用者關閉、GUI重驗另記；舊31／world371／startup／F吞吐、跨機25真人、Quest／VIVE／MR與廠商SDK／實體硬體仍待；生成器修正不當這些根因修復。精確來源、CI與原生結果見[PROGRESS](PROGRESS.md)。

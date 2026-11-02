@@ -1,5 +1,42 @@
 # 開發進度
 
+## 2026-11-02：最終GUI fixture來源65b072d完整雲端成功
+
+[CI41367545805](https://github.com/peca12968/vr-command-center/actions/runs/41367545805)／job125030805195，精確 **65b072d31f32afcc5e9da85713caa8b6451a3cd8**完整 **success**：Linux772核心／459 HTTP／47 world、6pipe／38硬體CLI、全部Python含14exercise／4server package及素材、89Node／296Chromium，2Windows限定skip非Editor/native/GUI/頭盔。此提交只補GUI fixture roster；本機實際GUI64853另驗，不由CI替代。
+
+- console51，art13107449934，ZIP **12,027,134 bytes／SHA256 837214959214b8890d3e03481e7011228dba38b9a6bf5eee4e8879e1fb1c384b**。
+- control13，art13107449938，ZIP **3,920 bytes／SHA256 bebc5438e939ef101a4c11066102fe740e2287501da1b576729a72f67a75604f**。
+- hardware26，art13107514651，ZIP **22,356 bytes／SHA256 6673f4ae64235908856ee698167f4d9443af3fc0d6d23b0b0d2fbd50ae0652c0**。
+- decoded log SHA256 **f6297ac22f5daf11cffad1d571d816b4f2ea6b3e184ff3b8613179b7970d4b6c**。GitHub digest/大小/逐檔hash核對；原c55與659成功、三次failed及更早證據保持，1768＋51＝**1819 browser**，nativeUI11另計。held PUT仍fulfilled=true／原1請求／errornull、原鏡頭隔離斷言與15/30秒保持，非舊逾時根因證明。
+
+目前PC里程碑採用0.41.1／code52／NGO29／242真正Editor／4ebd雙平台、900秒18／51601／50原結果6CSV、普通8／354、玩家包19、server v2包106／623及新真GUIexit0；完整11項仍active。新接受metadata只接受上述範圍，server-package-path改為已驗證F解壓v2，舊accepted與所有候選／failed保留。666原生snapshot、328與327歷史、smoke174／long174／ordinary14／package80／failed GUI9／passed GUI14 raw C/F保持，保存SQLite不開／5080不動。後續僅文件skip ci；精確CI65b072d／native4bdf／包說明c55，不以文件HEAD冒充測試來源。
+
+下一步繼續PC跨機部署準備與完整操作者流程；原31／world371／Windows startup根因／F吞吐仍未修復，25真人／Quest／VIVE／MR／廠商硬體仍另驗。以下各段為當時狀態，最新完成以上段為準。
+
+## 2026-11-02：包說明來源c55f21c完整雲端成功
+
+[CI41366924943](https://github.com/peca12968/vr-command-center/actions/runs/41366924943)／job125028931655，精確c55f21ce59bd1601f64f7e4520feec4a75e6bfb1完整success：Linux772／459／47、6pipe／38CLI、全部Python含14exercise與4server package／素材、89Node／296Chromium，2Windows限定skip非Editor/native/GUI/頭盔。console51 art13107323162／ZIP12029146／SHA7cca686b27857c4ac838f3344cdb893f7989e098c67205a489357052595054c6，control13 art13107029055／3918／SHAa3a2a3da9e722296c91578cde8eea22856bc1a27303732fe842a04d367cc6a5a，hardware26 art13107308336／22365／SHAaba8cc04b13179f7f75fe12aa11ec04df3e721daf16e2a9de2c2a54168ebfb01，decoded log SHAcead827ceb618d70158639bfd2a84b248aee6f942e99639afadee6bfa8eaa3bc；GitHub digest/大小/逐檔hash核對。原659成功及各failed CI保持，1717＋51＝1768browser，nativeUI11另列。
+
+c55只包內兩行說明，runtime不變。其後65b072d只補GUI fixture roster，真正新GUI64853已成功，CI41367545805尚待；不拿c55冒充65的精確測試。新GUI失敗9與成功14／包80／smoke174／long174／ordinary14都在各tool terminal及空cleanup後raw C/F同hash；原328與327來源/binary歷史加各manifest保持，首次auditor錯把manifest計入內容數而拒絕，改逐原hash子集＋manifest額外一檔，不改歷史。
+
+原666來源snapshot逐hash保持且與目前選定原生graph一致，沒有把其未收錄的package/gui/browser稱作完整snapshot；新launcher binary實際另驗。保存SQLite不開、完整11active，後續文件skip ci。
+
+## 2026-11-02：新版伺服器包與實際WinForms收尾成功
+
+同源0.41.1的v2 F解壓包真正handle18979 exit0、106項／623完整回放（五房143／123／115／100／86、Linked56）、10原admission結果／CSV／雙seal及server ACK、active0與cleanup空，C80→F raw同hash。parent-death是第七個刻意未封存反例不混作正常場。closure UI兩PNG與原final world同來源，nativeUI9＋2＝11，CI browser另計。
+
+使用者自行關PickerHost後，真正handle64853／GUI run-3d179468... **exit0／passed**：直接輸入既有實例、載入兩房清單、明確選房1、核對完整UUID／任務版本、設定127.0.0.1與64640、按啟動；fixture Begin後原來源Running/tick>0/observed fence，正常API End／雙seal保留36秒後原child25432停止，實際看見「任務已封存並停止」，再按視窗關閉。GUI68392 exit0、原實例marker／三key檔hash不變、closed journal complete/sealed/ACK尾精確、cleanup空後C14→F同hash。只有一位roster、未開玩家client；不是玩家結果送達、25操作、GUI建key或系統檔案picker成功。
+
+首新GUI run-e615...／handle63777 **exit1**：已實際選取/啟動正確來源69716，但fixture空名冊Begin被原API409拒絕，finally收GUI/native/API、cleanup空，C9→F同hash，原failed保留。產品原Begin規則要求非空名冊；只修check-server-gui先加一位明確roster、另存scope證據，不改API/launcher/遊戲。py_compile與新實際GUI驗證成功；功能提交65b072d，對應CI另記。電腦自動化曾遇geometry unavailable／bounds changed，重新選取與fresh state後成功，沒有操作安全／授權提示。舊PickerHost與原31／371／Windows startup／F吞吐仍保持原判，完整11active。
+
+## 2026-11-02：位置回饋900秒兩模式長場完成
+
+原handle33928真正terminal **exit0**，073638-487017bd的18項／**51601全回放／51351 Running**成功；Linked8610／8576，五獨立房8582／8518、8590／8552、8580／8540、8600／8561、8639／8604。50位原admission各90發／45reload／45週期、50原結果／6CSV／combat與world雙seal及原server ACK／無timeout或queue error，活動跨度17943..18003tick、最長收集902.3086214秒。Room1僅原授權Pause窗口例外、其他房前進，原走道與0.5／1.5政策不動。active0／全部cleanup空後C174→F raw逐檔同hash，desktop-endurance-feedback-long-validation.json只接受本場，不接受完整11項。
+
+另073233兩模式60秒18／3760、普通無生成旗標081609入場／撤銷／重連8／354、玩家包19成功。Unity0.41.1／code52／NGO29、242真正Editor與同源4ebd雙平台／原ID保持，沒有為包說明更新重建Unity。原0.41漂移場exit1、原31／world371／startup／F吞吐仍各自未解；同機AutomatedSimulation非25真人／LAN／頭盔／MR／廠商硬體驗收。
+
+使用者已關PickerHost，伺服器GUI接續另驗。新版server v1先在Path.resolve的AppData LocalCache視圖缺DLL，literal原路徑仍在，未啟動fixture；後F長stage超Windows路徑長度，copy失敗於ZIP建立前，原部分stage保留。新F短stage成功生成v2，runtime全部byte同v1、launcher來源fb57807d不變但重新編譯binary不同，不能稱整包二進位相同。初期強相等斷言拒絕也保留，後按實際三差異（launcher／README／manifest）核對。v2 ZIP82673732／SHAca285a42e0c22bdde17f62eb6dd8a65523c9d3a5cae19a33cad41636899fb368，311manifest／ZIP312、實際F短路徑解壓後逐檔驗證；真正包整合與GUI結果另記。包說明移除過期Unity0.39字樣，引用Runtime/build-receipt.json；4 Python package成功，c55f21c CI41366924943尚在執行。此前段落的「live／尚待」是當時狀態，以本節及後續結果為準；所有舊證據保留，保存SQLite不開，5080不動，完整11active。
+
 ## 2026-11-02：位置回饋候選的完整CI與held回覆收尾驗證
 
 [CI41364751791](https://github.com/peca12968/vr-command-center/actions/runs/41364751791)／job125022432098，精確來源 **659f026eb13021ed4eb6fd2defde066f5b8bd620**完整 **success**：Linux772核心／459 HTTP／47 world、6pipe／38離線硬體CLI、全部Python含14 exercise／素材、89 Node／296 Chromium，2 Windows限定skip非Editor／原生／GUI／頭盔。

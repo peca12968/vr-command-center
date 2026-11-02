@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-02 目前`windows-player-0.41.1.zip`，**82,651,927 bytes／SHA256 `dcc46c80c68d0a2861957c7d534b1abacd15964fb22f310ecdd1e60dddf7d2df`**，311 manifest／ZIP312，原launcher來源a65846da...；19項實際包檢查通過。Unity0.41.1／code52／NGO29、242真正Editor與同源4ebd雙平台／原ID保持。900秒兩模式18／51601／50原結果6CSV與普通入場8／354見[DESKTOP_ENDURANCE](DESKTOP_ENDURANCE.md)；長場只在明確Development batch旗標啟用生成輸入。APK60361942／SHA766d8018...、ARM64／min32／target35／v2 debug已驗，未裝頭盔。伺服器新包106與WinForms流程另見[WINDOWS_SERVER_PACKAGE](WINDOWS_SERVER_PACKAGE.md)；不是玩家完整GUI、25真人／LAN或頭盔驗收。以下較舊「最新」是當時歷史，原ZIP保持。
+
 2026-11-02 最新`windows-player-0.40.0.zip`為[原生多端動態驗證](DESKTOP_EXERCISE.md)的同源runtime，**82,651,129 bytes／SHA256 `24aef191b5fc608430a5f131ffd34aabf2ec0b4938fefd3f2c8461c958cc50e2`**、311 manifest／ZIP312。231真正Editor、6098b485...雙平台、原ID及新19項包檢查成功。明確開發batch Client模式才能產生測試輸入，普通玩家流程未自動啟用；25端自動化、普通入場8項及server包106範圍見PROGRESS。不是25真人／跨機、完整GUI或頭盔驗收；原0.39與更早包保持。
 
 2026-11-02 最新`windows-player-0.39.0.zip`加入[電腦端蹲姿](DESKTOP_CROUCH.md)，82,647,558 bytes／SHA `09f4ac14a9497329080d018dd634ebfdee13cabb0b7e0c7d2ed8b077173e47cc`、311 runtime檔及原launcher，新C展開19項核對／拒絕成功。224真正Editor、同源雙平台與unpacked原生C／W／視窗實測見PROGRESS；未重跑完整封裝GUI／跨機或頭盔驗收。舊0.38與其他ZIP保持，以下為歷史。

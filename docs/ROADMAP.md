@@ -1,8 +1,10 @@
 # 長期開發目標
 
-2026-11-02 [生成器位置回饋候選](DESKTOP_ENDURANCE.md)：原0.41兩模式exit1／C174保留（Linked8621通過、Room5三幀走道失敗非失聯）；新0.41.1／52／242真Editor／4ebd雙平台、兩模式60秒18／3760／50結果成功。新900秒仍執行，不能提前接受；走道／0.5／1.5與舊31等不改判，完整11active。
+2026-11-02 [電腦端900秒動態長場](DESKTOP_ENDURANCE.md)：Unity0.41.1／52／242真正Editor／4ebd雙平台，Linked25端後五房各5端、18項／51601全回放／51351 Running、50原結果／6CSV／雙seal與原ACK成功，每人90發45reload／45週期。普通入場8／354亦通過；原0.41走道失敗保留，未修復舊31／371等，非真人／跨機／頭盔容量，完整11active。
 
-2026-11-02 [長場生成輸入](DESKTOP_ENDURANCE.md)：Unity0.41／51／238真Editor及同源5d2e雙平台，獨立旗標每20秒兩發一換彈、最多45循環；14 Python／60秒5端597回放及原短控制7項成功。900秒Linked25與五房各5端正在依序驗證，尚未通過；原長場失效與完整11項active保持。
+2026-11-02 新版伺服器包106項／623回放與實際WinForms載入／選場／啟動／封存36秒／停止／關閉成功，首新GUI空名冊409失敗及舊PickerHost失敗均保留。詳見[伺服器包](WINDOWS_SERVER_PACKAGE.md)；以下較舊GUI待驗文字為當時歷史，完整11active。
+
+2026-11-02 [長場生成輸入](DESKTOP_ENDURANCE.md)：Unity0.41／51／238真Editor及同源5d2e雙平台，獨立旗標每20秒兩發一換彈、最多45循環；14 Python／60秒5端597回放及原短控制7項成功。此0.41原候選後來走道失敗，原件保留；新0.41.1結果見上；原長場失效與完整11項active保持。
 
 2026-11-02 [多人動態＋管理命令組合](DESKTOP_EXERCISE.md)：選用operator-controls，25Linked及五房各5端全員移動時套用雨夜Patrol／霧天Advance，30項／2909完整回放／50原結果6CSV雙seal ACK成功。12階段24個原UUID／expectedSequence／來源observed fence、24個精確回放參考；閉源2627 Running幀逐房環境AI時間線一致。11 Python（新4）／27 active／5artifact，預跑7／202、未選用5／179通過。沿用Unity0.40／231／6098雙平台與原包，無新Editor／遊戲重建／GUI／GPU／頭盔；完整11active，舊31／371與跨機真人等仍待。
 
