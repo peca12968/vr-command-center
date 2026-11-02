@@ -114,9 +114,10 @@ internal static class PlayerLauncher
         File.Move(temporary, statusReport);
         lastStatusReport = value;
     }
-    private static Process Launch(string config, bool headless, string log)
+    private static Process Launch(string config, bool headless, string log, string reviewedHash = null)
     {
         Verify(); Config(config);
+        Require(reviewedHash == null || Hash(config) == reviewedHash, "連線檔已變更，請重新載入後核對。");
         var args = "--vr-config " + Quote(config) + " -job-worker-count 2";
         if (headless) args += " -batchmode -nographics";
         if (log != null) args += " -logFile " + Quote(log);
@@ -180,22 +181,68 @@ internal static class PlayerLauncher
             return 1;
         }
     }
+    // A review is a local preflight, not a ticket validation or an atomic handoff
+    // to Unity. Reconnect still reads the original path using the original rules.
+    internal sealed class ConfigReview
+    {
+        public string FilePath { get; private set; }
+        public string ContentHash { get; private set; }
+        public string Endpoint { get; private set; }
+        public bool Loaded { get { return FilePath != null; } }
+        public void Clear() { FilePath = null; ContentHash = null; Endpoint = null; }
+        public void Load(string file)
+        {
+            Clear();
+            Require(!String.IsNullOrWhiteSpace(file) && Path.IsPathRooted(file) && Path.GetPathRoot(file).Length > 2, "請輸入連線檔完整路徑。");
+            var full = Path.GetFullPath(file); PlainPath(full);
+            // Prevent a writer changing the bytes between parsing and hashing.
+            using (var lease = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                var value = Config(full); var hash = Hash(full);
+                FilePath = full; ContentHash = hash;
+                Endpoint = Text(value, "address") + ":" + Number(value, "port");
+            }
+        }
+        public void RequireCurrent()
+        {
+            try
+            {
+                Require(Loaded, "請先載入連線檔。");
+                PlainPath(FilePath);
+                using (var lease = new FileStream(FilePath, FileMode.Open, FileAccess.Read, FileShare.Read))
+                    Require(Hash(FilePath) == ContentHash, "連線檔已變更，請重新載入後核對。");
+            }
+            catch { Clear(); throw; }
+        }
+    }
     private sealed class PlayerForm : Form
     {
         private readonly Label selected = new Label { AutoSize = false, Dock = DockStyle.Top, Height = 75, UseMnemonic = false };
         private readonly Label status = new Label { AutoSize = false, Dock = DockStyle.Top, Height = 65 };
         private readonly Button play = new Button { Text = "開始遊戲", AutoSize = true, Enabled = false };
-        private string config; private Process child; private PlayerConnectionMonitor monitor;
+        private readonly TextBox path = new TextBox { Dock = DockStyle.Top, AccessibleName = "玩家連線檔完整路徑" };
+        private readonly ConfigReview review = new ConfigReview();
+        private bool settingPath;
+        private Process child; private PlayerConnectionMonitor monitor;
         public PlayerForm(string initial, string diagnosticLog)
         {
-            Text = "VR Command 玩家"; ClientSize = new Size(560, 285); MinimumSize = new Size(576, 324);
+            Text = "VR Command 玩家"; ClientSize = new Size(660, 380); MinimumSize = new Size(676, 419);
             Font = new Font("Microsoft JhengHei UI", 11); Padding = new Padding(20); StartPosition = FormStartPosition.CenterScreen;
             var title = new Label { Text = "選擇控制台下載的玩家連線檔", Dock = DockStyle.Top, Height = 40 };
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 45 };
             var choose = new Button { Text = "選擇連線檔…", AutoSize = true };
-            buttons.Controls.Add(choose); buttons.Controls.Add(play);
+            var load = new Button { Text = "載入／更新", AutoSize = true };
+            buttons.Controls.Add(choose); buttons.Controls.Add(load); buttons.Controls.Add(play);
+            var pathHint = new Label { Text = "可選檔或貼上完整路徑，再按「載入／更新」。", Dock = DockStyle.Top, Height = 35 };
             var hint = new Label { Text = "票券過期或入場被拒絕時，請向控制人員重新取得連線檔。", Dock = DockStyle.Top, Height = 50 };
-            Controls.Add(hint); Controls.Add(status); Controls.Add(buttons); Controls.Add(selected); Controls.Add(title);
+            Controls.Add(hint); Controls.Add(status); Controls.Add(buttons); Controls.Add(selected); Controls.Add(pathHint); Controls.Add(path); Controls.Add(title);
+            path.TextChanged += delegate
+            {
+                if (settingPath) return;
+                review.Clear(); play.Enabled = false; selected.Text = "路徑已變更，請重新載入。";
+                status.Text = "未沿用先前選取的連線檔。";
+            };
+            load.Click += delegate { SelectConfig(path.Text); };
             choose.Click += delegate
             {
                 using (var dialog = new OpenFileDialog { Filter = "玩家連線檔 (*.json)|*.json", CheckFileExists = true, Multiselect = false })
@@ -206,16 +253,17 @@ internal static class PlayerLauncher
                 play.Enabled = false; status.Text = "正在核對玩家包…"; Refresh();
                 try
                 {
+                    review.RequireCurrent();
                     var ownLog = diagnosticLog;
                     if (ownLog == null)
                     {
                         var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrCommand", "PlayerRuns", Guid.NewGuid().ToString("N"));
                         Directory.CreateDirectory(directory); ownLog = Path.Combine(directory, "player.log");
                     }
-                    child = Launch(config, false, ownLog); monitor = new PlayerConnectionMonitor(ownLog);
-                    choose.Enabled = false; status.Text = monitor.Message;
+                    child = Launch(review.FilePath, false, ownLog, review.ContentHash); monitor = new PlayerConnectionMonitor(ownLog);
+                    choose.Enabled = false; load.Enabled = false; path.Enabled = false; status.Text = monitor.Message;
                 }
-                catch { status.Text = "無法啟動，請重新解壓玩家包並選擇正確的玩家連線檔。"; play.Enabled = true; }
+                catch { review.Clear(); selected.Text = "請重新載入並核對連線檔。"; status.Text = "無法啟動或檔案已變更。請確認玩家包完整，再重新載入正確的連線檔。"; play.Enabled = false; }
             };
             var timer = new Timer { Interval = 500 };
             timer.Tick += delegate
@@ -224,7 +272,7 @@ internal static class PlayerLauncher
                 monitor.Poll(); status.Text = monitor.Message;
                 if (child.HasExited)
                 {
-                    var final = monitor.State == "Final"; child.Dispose(); child = null; choose.Enabled = true; play.Enabled = config != null;
+                    var final = monitor.State == "Final"; child.Dispose(); child = null; choose.Enabled = true; load.Enabled = true; path.Enabled = true; play.Enabled = review.Loaded;
                     status.Text = final ? "遊戲已關閉；本次已收到最終戰績。" : "遊戲已關閉。" + monitor.Message;
                 }
             };
@@ -234,10 +282,15 @@ internal static class PlayerLauncher
         }
         private void SelectConfig(string file)
         {
-            try { var value = Config(file); config = Path.GetFullPath(file); selected.Text = Path.GetFileName(file) + "\n伺服器 " + TextValue(value); play.Enabled = true; status.Text = "連線檔已選擇。按「開始遊戲」入場。"; }
-            catch { config = null; play.Enabled = false; selected.Text = "未接受此連線檔"; status.Text = "請使用控制台下載的玩家連線檔。"; }
+            try
+            {
+                review.Load(file); settingPath = true;
+                try { path.Text = review.FilePath; } finally { settingPath = false; }
+                selected.Text = Path.GetFileName(review.FilePath) + "\n伺服器 " + review.Endpoint;
+                play.Enabled = true; status.Text = "連線檔已載入。核對伺服器後按「開始遊戲」。";
+            }
+            catch { review.Clear(); play.Enabled = false; selected.Text = "未接受此連線檔"; status.Text = "請使用控制台下載的玩家連線檔完整路徑。"; }
         }
-        private static string TextValue(Dictionary<string, object> value) { return PlayerLauncher.Text(value, "address") + ":" + Number(value, "port"); }
     }
 }
 

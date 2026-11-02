@@ -19,6 +19,8 @@ async function main() {
   const ready = JSON.parse(await fs.readFile(readyPath, 'utf8')); const base = new URL(ready.baseUrl);
   const packageRoot = process.argv[3] ? path.resolve(process.argv[3]) : null;
   const interactivePackage = !!packageRoot && process.argv.includes('--package-interactive');
+  const packagePathInput = process.argv.includes('--package-path-input');
+  assert.ok(!packagePathInput || interactivePackage, 'Path entry requires the actual interactive player launcher');
   const launcherStatus = process.argv.includes('--launcher-status');
   assert.ok(!launcherStatus || packageRoot && !interactivePackage, 'Status CLI checks require a package and no GUI mode');
   const packageManifest = packageRoot ? JSON.parse(await fs.readFile(path.join(packageRoot, 'player-package.json'), 'utf8')) : null;
@@ -90,7 +92,7 @@ async function main() {
       const executable = packageRoot ? path.join(packageRoot, 'Launch-Player.exe') : ready.playerBuildReceipt.outputPath;
       const gui = interactivePackage && index === 0;
       const statusPath = path.join(evidence, 'connection-' + (index + 1) + '.json');
-      const args = packageRoot ? ['--config', file, ...gui ? [] : ['--launch', '--headless', '--wait'], '--log', log, '--report', report, ...launcherStatus ? ['--status-report', statusPath] : []]
+      const args = packageRoot ? [...gui && packagePathInput ? [] : ['--config', file], ...gui ? [] : ['--launch', '--headless', '--wait'], '--log', log, '--report', report, ...launcherStatus ? ['--status-report', statusPath] : []]
         : ['-batchmode', '-nographics', '-job-worker-count', '2', '-logFile', log, '--vr-config', file];
       const child = spawn(executable, args, { cwd: path.dirname(executable), windowsHide: !gui, stdio: 'ignore' });
       child.on('error', error => { errors.push(error.message); }); const owned = { child, log, player, gui, statusPath }; children.push(owned);
