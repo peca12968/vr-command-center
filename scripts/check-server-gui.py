@@ -32,6 +32,11 @@ def main():
         api_witness=checks.ChildWitness(read(ready)['childPid']);original={name:checks.sha(data/name) for name in ['control-instance.json','operator-keys.json','player-ticket-signing.key']}
         mission=request('/api/missions',{'name':'GUI server fixture','briefing':'No GUI credential creation or player input','durationSeconds':600,'environment':{'mode':'VR','weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':1,'behavior':'Hold','autoAttack':False},'props':[]});session=request('/api/sessions',{'missionId':mission['id'],'mode':'Independent','roomIds':[1]})['id']
         other_session=request('/api/sessions',{'missionId':mission['id'],'mode':'Independent','roomIds':[2]})['id']
+        # Begin requires a nonempty roster. This fixture exercises the server GUI,
+        # not a connected player; keep that distinction in its saved evidence.
+        roster=request('/api/sessions/'+session+'/players',{'playerId':str(uuid.uuid4()),'roomId':1,'name':'GUI fixture roster only','headset':'Quest3'})
+        if len(roster['players'])!=1:raise RuntimeError('Expected one GUI fixture roster entry')
+        save('fixture-roster.json',{'sessionId':session,'players':roster['players'],'scope':'Roster only; no client launched or player connection claimed.'})
         gui=subprocess.Popen([str(folder/'Launch-Server.exe')],cwd=runtime);stage('select-instance',guiPid=gui.pid,instance=str(data/'control-instance.json'),sessionId=session,udpPort=port)
         powershell=Path(os.environ['WINDIR'])/'System32/WindowsPowerShell/v1.0/powershell.exe'
         def children():
