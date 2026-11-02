@@ -1,5 +1,18 @@
 # 開發進度
 
+## 2026-11-02：位置回饋候選的完整CI與held回覆收尾驗證
+
+[CI41364751791](https://github.com/peca12968/vr-command-center/actions/runs/41364751791)／job125022432098，精確來源 **659f026eb13021ed4eb6fd2defde066f5b8bd620**完整 **success**：Linux772核心／459 HTTP／47 world、6pipe／38離線硬體CLI、全部Python含14 exercise／素材、89 Node／296 Chromium，2 Windows限定skip非Editor／原生／GUI／頭盔。
+
+- console51，art13106359427，ZIP **12,016,184 bytes／SHA256 42bbc0d847f8ed767d27dcf6d756992c02b5b5f557c24a7a7a725df39801405c**。
+- control13，art13106254966，ZIP **3,918 bytes／SHA256 2bef12d403cda00da3ff32bf3d249390fac08873493275151c1cb81a889833fe**。
+- hardware26，art13106513838，ZIP **22,330 bytes／SHA256 06621fbb62648dde3b50b6cded39e7685591646532e6e2e7bb0cfaf393367c22**。
+- decoded log SHA256 **4f9fdf901a7251ec29221944d330e057442cdc3f2e9b14f6af56c29ae5d7209f**。GitHub digest／大小與逐檔hash核對，原18a成功89檔及三次failed56／58／57檔與各ZIP保持。
+
+新delivery metadata為fulfilled=true／requests1／errorName=null，且重新登入後camera-save enabled、原延遲回覆隔離斷言通過，不是吞掉取消回覆來變綠。這只證本場；首7ed stalled-read15秒、4bdf relogin-save30秒與1d route already-handled仍failed，原件保留，不能由本場推定原逾時唯一根因。產品JS／API／期限及原15／30秒與隔離斷言保持，659只fixture回呼收尾／文件，未新建置Unity。
+
+1629＋4bdf failed19＋1d failed18＋新51＝**1717 browser檔**；control／hardware與nativeUI7＋2另列，沒有新本機全browser／GUI。242真正Editor／4ebd雙平台與原生helper是4bdf功能來源，CI659不替代它們。原33928／073638長場仍live：Linked8610／8576Running已過，Independent正在900秒；不停止／重啟或提前snapshot。使用者已自行關PickerHost，待長場與cleanup後重驗GUI。後續文件skip ci，CI精確659／native4bdf，完整11active。
+
 ## 2026-11-02：重新登入fixture的held PUT回呼失敗保留
 
 來源1d023ff的[CI41364052976](https://github.com/peca12968/vr-command-center/actions/runs/41364052976)／job125020346533 **failure**，772／459／47、6pipe／38CLI、全部Python含14exercise／素材及89Node成功，2Windows限定skip；stalled-read與登出清理斷言已過，隨後world-browser161的held PUT route.fulfill出現「Route is already handled」未處理拒絕，Node終止，非30秒DOM逾時／完整296。

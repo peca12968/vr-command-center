@@ -1,5 +1,7 @@
 # 長場原生自動化輸入
 
+[CI41364751791](https://github.com/peca12968/vr-command-center/actions/runs/41364751791)對fixture來源659f026完整success：772／459／47、6pipe／38CLI、全部Python含14 exercise／素材、89 Node／296 Chromium，2 Windows限定skip非原生／Editor證據。console51／control13／hardware26與完整hash見[PROGRESS](PROGRESS.md)；原三次CI失敗保持、1717 browser／nativeUI7＋2另列。原held PUT必須fulfilled=true／只有1請求後隔離斷言才過，原15／30秒／產品期限不變，不證舊逾時根因。659只fixture／文件，242 Editor／4ebd建置與原生helper仍4bdf；新900秒尚未全部完成，CI不代替長場接受。
+
 目前候選 **Unity0.41.1／code52／NGO29**、242真正Editor／0skip，同源Windows／ARM64 fingerprint **4ebdcd12b9cbf1d00f342cb25dbec21d84f60c048284d8333cb8fa01c42a495c**，原Scene／prefab ID保持。兩模式60秒預測試已通過，新的900秒尚在執行；舊0.41失敗保留，不提前當作修復或長場通過。這是AutomatedSimulation，非真人鍵盤、頭盔、LAN或網路容量驗收。
 
 ```powershell
