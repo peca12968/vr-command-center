@@ -27,6 +27,8 @@ python scripts/check-server-package.py <VRCommand-GameServer> `
 
 搭配控制台 0.31.8 時，可在三包整合命令加上 `--check-room-reports`。測試會對照同一個五房連線場次的封存全場 CSV，逐房驗證每列戰績、房號、場次與封存序號，並確認房控指定別房時收到 403。 [分房匯出](REPORTS.md#五房分房匯出)
 
+搭配控制台 0.31.10，可加上 `--check-interrupted-replay`。測試在另一個獨立場次錄到敵軍實際傷害後終止該次啟動器，核對原遊戲程序退出，再檢查保存片段的尾端、戰績及未封存狀態。 [中斷場次回放](WORLD_RECORDING.md#回放未封存的已保存片段)
+
 2026-11-02 本輪同源Unity0.41.1／code52／NGO29／242真正Editor、4ebd雙平台：新server主包 `windows-server-0.41.1-v2-win-x64.zip`，**82,673,732 bytes／SHA256 `ca285a42e0c22bdde17f62eb6dd8a65523c9d3a5cae19a33cad41636899fb368`**、311 manifest／ZIP312。啟動器1.1來源fb57807d...不變但重新編譯binary不同，runtime逐byte同v1；v1與所有舊包保持。包說明改引用Runtime/build-receipt.json，不再寫死Unity0.39。
 
 實際F解壓包106項／623全回放、五房後Linked／10原結果與CSV／雙seal／原server ACK／無active成功，parent-death是另留的未封存反例；closure UI新增Running與Archived兩PNG、精確原session/stream/final world，nativeUI9＋2＝11，非雲端CI檔。

@@ -12,6 +12,8 @@
 
 ## 操作與狀態
 
+控制台 0.31.10 在場次結束後顯示同一來源已接受的戰鬥筆數及已保存的錄製格數。兩項各自核對，資料無法確認時會清除對應數量。若遊戲伺服器提前退出，可到「觀戰與任務回放」查看已保存片段，封存狀態仍分開顯示。 [回放已保存片段](WORLD_RECORDING.md#回放未封存的已保存片段)
+
 Preparing時提示先啟動本場遊戲伺服器、加入玩家、交付各自的連線檔，再開始任務。Running／Paused時只提示結束後確認資料，不把目前的姿態、來源或程序狀態當成封存完成。
 
 End後，戰鬥統計需要同場次、精確目前管理序號、明確pendingTelemetry=false及原combatStream.sealed=true。世界回放需要服務回傳complete=true、正數acceptedSequence，以及同session／stream／origin／房間與任務時鐘能力；舊clock0仍可讀。這裡信任既有world seal契約：API已核對最後Ended幀、原combat尾界與最終統計。前端沒有重新驗證全回放，也不讀local journal或SQLite。
