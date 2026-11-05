@@ -5,6 +5,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { createHash } = require('node:crypto');
+const { networkInterfaces } = require('node:os');
 const root = path.resolve(__dirname, '../..');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function until(predicate, label, seconds = 35) {
@@ -17,11 +18,28 @@ async function main() {
   assert.equal(path.basename(readyPath), 'ready.json'); assert.equal(path.dirname(directory), path.join(root, 'artifacts/desktop-venue'));
   assert.match(path.basename(directory), /^\d{8}-\d{6}-[a-f0-9]{8}$/);
   const ready = JSON.parse(await fs.readFile(readyPath, 'utf8')); const base = new URL(ready.baseUrl);
-  const packageRoot = process.argv[3] ? path.resolve(process.argv[3]) : null;
-  const interactivePackage = !!packageRoot && process.argv.includes('--package-interactive');
-  const packagePathInput = process.argv.includes('--package-path-input');
+  const options = process.argv.slice(3);
+  const packageRoot = options[0] && !options[0].startsWith('--') ? path.resolve(options.shift()) : null;
+  const addressOptions = options.filter(option => option.startsWith('--local-game-address='));
+  const knownOptions = ['--package-interactive', '--package-path-input', '--launcher-status'];
+  assert.ok(options.every(option => knownOptions.includes(option) || addressOptions.includes(option)), 'Unknown external workflow option');
+  assert.ok(addressOptions.length <= 1, 'Specify one local game address');
+  const gameAddress = addressOptions[0]?.slice('--local-game-address='.length) ?? '127.0.0.1';
+  if (addressOptions.length) {
+    const localInterface = Object.values(networkInterfaces()).flat().find(entry =>
+      entry.family === 'IPv4' && !entry.internal && entry.address === gameAddress);
+    assert.ok(localInterface, 'Game address must be an assigned non-loopback IPv4 on this host');
+    const [first, second] = gameAddress.split('.').map(Number);
+    assert.ok(first === 10 || (first === 172 && second >= 16 && second <= 31) ||
+      (first === 192 && second === 168), 'Use a private IPv4 for the local game interface test');
+  }
+  assert.equal(ready.advertiseAddress, gameAddress, 'Fixture must advertise the selected game address');
+  assert.equal(ready.listenAddress, gameAddress, 'Fixture must bind the selected game address');
+  const interactivePackage = options.includes('--package-interactive');
+  assert.ok(!interactivePackage || packageRoot, 'Interactive mode requires a player package');
+  const packagePathInput = options.includes('--package-path-input');
   assert.ok(!packagePathInput || interactivePackage, 'Path entry requires the actual interactive player launcher');
-  const launcherStatus = process.argv.includes('--launcher-status');
+  const launcherStatus = options.includes('--launcher-status');
   assert.ok(!launcherStatus || packageRoot && !interactivePackage, 'Status CLI checks require a package and no GUI mode');
   const packageManifest = packageRoot ? JSON.parse(await fs.readFile(path.join(packageRoot, 'player-package.json'), 'utf8')) : null;
   if (packageRoot) {
@@ -60,14 +78,14 @@ async function main() {
     await page.locator('#create-session-form button').click(); await page.waitForFunction(() => !document.querySelector('#session-panel').hidden);
     const id = await page.locator('#session-select').inputValue();
     const endpoint = await until(async () => { const rows = JSON.parse(await fs.readFile(path.join(directory, 'connection-endpoints.json'), 'utf8').catch(() => '{}')); return rows[id]; }, 'own source endpoint');
-    await page.waitForFunction(port => document.querySelector('#game-address').value === '127.0.0.1' && Number(document.querySelector('#game-port').value) === port, endpoint.port);
-    check(endpoint.version === 1 && endpoint.address === '127.0.0.1' && endpoint.sessionId === id, 'Server-only launcher publishes its own source-bound endpoint and the console applies its real port');
+    await page.waitForFunction(({ address, port }) => document.querySelector('#game-address').value === address && Number(document.querySelector('#game-port').value) === port, { address: gameAddress, port: endpoint.port });
+    check(endpoint.version === 1 && endpoint.address === gameAddress && endpoint.sessionId === id, 'Server-only launcher publishes its own source-bound endpoint and the console applies its real port');
     const processes = JSON.parse(await fs.readFile(path.join(directory, 'server-processes.json'), 'utf8'));
     const probe = spawn('netstat.exe', ['-ano', '-p', 'UDP'], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     let sockets = ''; probe.stdout.on('data', value => { sockets += value.toString(); });
     await new Promise((resolve, reject) => { probe.once('error', reject); probe.once('exit', code => code === 0 ? resolve() : reject(Error('Native UDP inventory failed'))); });
     const bound = sockets.split(/\r?\n/).map(line => line.trim().split(/\s+/)).filter(row => row[0] === 'UDP' && row.at(-1) === String(processes[id].processId) && row[1]?.endsWith(':' + endpoint.port));
-    check(bound.length === 1 && bound[0][1] === '127.0.0.1:' + endpoint.port, 'Actual owned server UDP socket binds loopback, not the old hardcoded wildcard');
+    check(bound.length === 1 && bound[0][1] === `${gameAddress}:${endpoint.port}`, 'Actual owned server UDP socket binds the selected address and port');
     await fs.writeFile(path.join(evidence, 'native-listen.json'), JSON.stringify({ processId: processes[id].processId, address: bound[0][1] }, null, 2));
     for (const name of ['External PC 1', 'External PC 2']) {
       await page.locator('#player-name').fill(name); await page.locator('#join-form button').click();
@@ -162,7 +180,8 @@ async function main() {
     check(errors.length === 0 && await page.evaluate(() => !localStorage.length && !sessionStorage.length && !document.cookie), 'External workflow has no script errors or persisted operator credentials');
     assert.equal(await fingerprint(), originalTool);
     if (packageRoot) check(children.every(row => row.nativeId) && packageManifest.build.sourceFingerprint === ready.playerBuildReceipt.sourceFingerprint, 'Both players run from the extracted portable package via its real launcher, with Unicode / spaces / ampersand config paths');
-    outcome = { complete: true, toolFingerprint: originalTool, checks, findings, configs, results, world, stats, packageRoot, packageManifest, scope: 'Two same-host separately launched PC clients / loopback / Chromium SwiftShader; zero headsets, not cross-machine' };
+    const networkScope = addressOptions.length ? 'same-host private IPv4' : 'same-host loopback';
+    outcome = { complete: true, toolFingerprint: originalTool, checks, findings, configs, results, world, stats, packageRoot, packageManifest, networkScope, gameAddress, scope: `Two separately launched PC clients / ${networkScope} / Chromium SwiftShader / zero headsets` };
     await fs.writeFile(path.join(evidence, 'workflow-checks.json'), JSON.stringify({ ...outcome, complete: false, workflowComplete: true, cleanupPending: true }, null, 2));
   } catch (error) {
     if (page && !page.isClosed()) await page.screenshot({ path: path.join(evidence, 'failure.png'), fullPage: true }).catch(() => {});

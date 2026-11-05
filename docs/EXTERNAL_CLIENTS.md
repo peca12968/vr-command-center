@@ -1,6 +1,6 @@
 # 分開啟動玩家與遊戲伺服器
 
-也可使用[Windows遊戲伺服器包](WINDOWS_SERVER_PACKAGE.md)獨立啟動既有Preparing VR場次，不依賴Python／Editor。CLI同機五房獨立及Linked／精確結果通過，新GUI被非目標PickerHost攔住仍未完成；不是LAN或頭盔驗收。
+Windows 遊戲伺服器包可獨立啟動既有 Preparing VR 場次。CLI 已通過同機五房獨立與 Linked，WinForms 已驗證載入場次、啟動和封存後停止。 [Windows 遊戲伺服器包](WINDOWS_SERVER_PACKAGE.md)
 
 API／控制台0.31.0可另用[Windows可攜管理服務](WINDOWS_CONTROL_PACKAGE.md)部署管理網站，含自己的.NET執行環境與繁中啟動器。已用真正GUI／封裝API驗證啟停、資料與角色重開，原Unity0.39／NGO29保持；管理服務、遊戲伺服器和玩家仍分開運行。以下0.30工具段落保留原功能範圍，實際LAN／頭盔仍待。
 
@@ -50,4 +50,18 @@ Unity新增server-only `listenAddress`，真正傳給UnityTransport的第三個�
 
 144真正EditMode、同源Windows／Quest、717規則、459 HTTP／47串流、67 Node／234 Chromium及6新Python檢查通過，完整結果見[PROGRESS](PROGRESS.md)。普通UI fixture只驗顯示，不能當可達性證明。
 
-`tests/browser/check-external-native.cjs <該次ready.json>`只接受自己新建的external／Simulation／loopback fixture。透過實際UI建任務／名冊、用下載檔另開兩個真正PC client；以netstat只保存對應server PID／port的127.0.0.1 socket，核對無自動claim、正常入場、Begin／Pause／End、個別結果與雙seal。這是同機分開啟動程序，不是跨機／25台／Quest或VIVE驗收；Chromium為SwiftShader，沒有新的原生GPU／PCM／鍵盤觀察。
+`tests/browser/check-external-native.cjs` 使用新建的 external／Simulation 測試場次。它透過控制台建任務與名冊，下載兩份連線檔，以真正的 Windows 玩家程序核對入場、Begin／Pause／End、個別戰績與雙封存。預設遊戲端使用 `127.0.0.1`。驗證本機網卡時，先用以下命令指定已指派給這台電腦的私有 IPv4，並在測試工具傳入同一個位址。
+
+```powershell
+python scripts/start-desktop-control.py --api-dll <本次API.dll> --runtime-root "$env:LOCALAPPDATA/VrCommand/SimulationRuns" --client-mode external --advertise-address <本機IPv4> --listen-address <本機IPv4>
+node tests/browser/check-external-native.cjs <本次ready.json> <解壓玩家包> --local-game-address=<本機IPv4> --launcher-status
+```
+
+工具會核對本機網卡、場次公告、控制台欄位、該遊戲伺服器 PID 的 UDP socket，以及兩份下載檔的目的地。管理 API 使用 loopback。結果記錄 `same-host private IPv4` 或 `same-host loopback`，供後續區分。Chromium 使用 SwiftShader。
+
+## 第二台電腦的驗收步驟
+
+1. 在伺服器電腦啟動管理服務和遊戲伺服器，選定本機 LAN IPv4 與 UDP 埠。先查該程序的 UDP socket，再核對控制台的場次公告。Independent 每個場次使用不同的 UDP 埠，Linked 使用該場的單一 UDP 埠。
+2. 從控制台分別下載兩份連線檔，其中一份在第二台 Windows 電腦使用同源玩家包開啟。將檔案個別交給對應玩家，並在五分鐘票券期限內加入。保存測試機角色、包版本、公告位址及埠，將連線檔與金鑰留在私有資料夾。
+3. 在控制台核對兩位玩家均可參戰後，執行 Begin、Pause、Resume 和 End。保存兩端玩家的入場與最終戰績，核對玩家身分、本次 admission、場次與世界封存序號，並確認戰鬥及世界均封存。
+4. 將結果標記為雙機測試，記錄使用的有線或無線網路。分開保存雙機、五房與實機的證據，以便後續擴至 5／10／25 人。
