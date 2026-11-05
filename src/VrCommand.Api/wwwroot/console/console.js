@@ -11,7 +11,7 @@ const $ = id => document.getElementById(id);
 const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫停', Ended: '已結束' };
 const weatherNames = { Clear: '晴朗', Rain: '下雨', Fog: '濃霧', Storm: '暴風雨' };
 const behaviorNames = { Hold: '守備', Patrol: '巡邏', Advance: '推進' };
-const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: null, rooms: [], missions: [], catalog: [], launchPinned: null, history: null, draftBase: null, draftChanged: false, draftSavedAt: '', sessions: [], session: null, selected: '', pending: null, props: [], prop: -1, environmentSequence: null, enemiesSequence: null };
+const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: null, rooms: [], missions: [], catalog: [], launchPinned: null, history: null, draftBase: null, draftChanged: false, draftSavedAt: '', sessions: [], session: null, selected: null, pending: null, props: [], prop: -1, environmentSequence: null, enemiesSequence: null };
 const objectHistory = placementHistory();
 const world = mountWorld(() => state.key, logout);
 const report = mountReport(() => state, logout);
@@ -88,19 +88,29 @@ async function run(action, independentRead = false) {
         refreshFailed = true;
       }
     }
-    if (independentRead && (epoch !== state.epoch || !state.actor)) return;
+    if (epoch !== state.epoch || !state.actor) return;
     await action();
     if (refreshFailed && epoch === state.epoch && state.actor) notify('已讀取任務；背景列表更新失敗，請稍後重新整理。', true);
   }
   catch (error) { notify(error.status ? error.message : '連線或操作結果未確認，請重新整理查看。' + (state.pending ? ' 可使用「重試確認結果」確認原命令。' : ''), true); }
   finally { state.busy = false; applyPermissions(); }
 }
+function runSession(action) {
+  const target = state.session?.id;
+  return run(() => {
+    if (!target || state.selected !== target || state.session?.id !== target || state.session.state === 'Ended') {
+      notify('原場次已結束或不在目前清單。請重新選擇要操作的場次。', true);
+      return;
+    }
+    return action();
+  });
+}
 function logout() {
   selectionEpoch++;
   report.reset(); state.statistics = null;
   closure.active(false); closure.reset();
   replay.active(false); replay.reset(); world.active(false); world.reset(); readiness.active(false); readiness.reset(); connections.active(false); connections.reset();
-  state.epoch++; state.key = ''; state.actor = null; state.selected = ''; state.session = null; state.pending = null;
+  state.epoch++; state.key = ''; state.actor = null; state.selected = null; state.session = null; state.pending = null;
   state.rooms = []; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
   state.props = []; state.prop = -1; clearPropHistory();
   placement.reset();
@@ -141,8 +151,10 @@ function refresh() {
   return pending;
 }
 async function refreshData(epoch) {
-  const [rooms, catalog, sessions] = await Promise.all([api('/rooms'), api('/mission-library'), api('/sessions?includeEnded=' + $('include-ended').checked)]);
-  if (epoch !== state.epoch) return;
+  const selection = selectionEpoch, includeEnded = $('include-ended').checked;
+  const current = () => epoch === state.epoch && selection === selectionEpoch && includeEnded === $('include-ended').checked;
+  const [rooms, catalog, sessions] = await Promise.all([api('/rooms'), api('/mission-library'), api('/sessions?includeEnded=' + includeEnded)]);
+  if (!current()) return;
   const merged = new Map(state.catalog.map(row => [row.seriesId, row]));
   for (const row of catalog) if (!merged.has(row.seriesId) || merged.get(row.seriesId).number < row.number) merged.set(row.seriesId, row);
   const heads = [...merged.values()].sort((a, b) => Date.parse(b.mission.createdAtUtc) - Date.parse(a.mission.createdAtUtc) || a.mission.id.localeCompare(b.mission.id));
@@ -151,10 +163,15 @@ async function refreshData(epoch) {
   const editedSeries = state.catalog.find(row => row.mission.id === edit)?.seriesId;
   state.launchPinned = prior && !heads.some(row => row.mission.id === launch) ? prior : null;
   state.rooms = rooms; state.catalog = heads; state.missions = heads.map(row => row.mission); state.sessions = sessions;
-  if (!sessions.some(s => s.id === state.selected)) { report.reset(); state.statistics = null; state.selected = sessions[0]?.id || ''; }
+  if (state.selected === null && sessions.length) state.selected = sessions[0].id;
+  else if (state.selected && !sessions.some(s => s.id === state.selected)) resetSelection('');
   missionOptions(launch, heads.find(row => row.seriesId === editedSeries)?.mission.id || edit);
   draftStatus();
-  fillOptions('session-select', sessions.length ? sessions.map(s => [s.id, `${phases[s.state]} · ${s.mission.definition.name} · 房 ${s.roomIds.join('、')}`]) : [['', '目前沒有場次']], state.selected);
+  fillOptions('session-select', [['', sessions.length ? '請選擇場次' : '目前沒有場次'],
+    ...sessions.map(s => [s.id, `${phases[s.state]} · ${s.mission.definition.name} · 房 ${s.roomIds.join('、')}`])], state.selected ?? '');
+  $('selection-hint').textContent = state.selected === ''
+    ? '請選擇要查看的場次。若要找已結束的場次，請勾選「包含已結束紀錄」。'
+    : '選取後可查看名冊、控制環境與統計。';
   const ownRooms = rooms.filter(r => ownsRoom(r.id));
   fillOptions('launch-room', ownRooms.map(r => [String(r.id), `房間 ${r.id}${r.sessionId ? '（使用中）' : '（空閒）'}`]));
   renderRooms();
@@ -162,11 +179,11 @@ async function refreshData(epoch) {
   if (selected) {
     const [session, statistics] = await Promise.all([api('/sessions/' + selected), api('/sessions/' + selected + '/statistics')]);
     const events = await api(`/sessions/${selected}/events?after=${Math.max(0, session.sequence - 20)}&limit=20`);
-    if (epoch !== state.epoch || selected !== state.selected) return;
+    if (!current() || selected !== state.selected) return;
     state.session = session;
     if (previous?.id !== session.id) { loadEnvironment(); loadEnemies(); loadClock(); }
     renderSession(statistics, events);
-  } else { state.session = null; state.statistics = null; report.reset(); closure.reset(); $('session-panel').hidden = true; }
+  }
   $('last-update').textContent = '更新於 ' + time(Date.now());
   applyPermissions();
 }
@@ -175,16 +192,20 @@ function renderRooms() {
     const card = element('article', undefined, 'room-card'), session = state.sessions.find(s => s.id === room.sessionId);
     card.append(element('p', `ROOM 0${room.id}`, 'eyebrow'), element('h3', `房間 ${room.id}`), element('div', `${room.playerCount} / ${room.capacity}`, 'occupancy'), element('p', session ? `${phases[session.state]} · ${session.mission.definition.name}` : room.sessionId ? '場次使用中' : '房間空閒', 'room-mission'));
     const button = element('button', room.sessionId ? '查看場次' : '選擇此房間', 'quiet small');
-    button.type = 'button'; button.addEventListener('click', () => { if (room.sessionId) selectSession(room.sessionId); else { $('launch-room').value = String(room.id); $('launch-mode').value = 'Independent'; placement.scheduleLaunch(); applyPermissions(); $('launch-mission').focus(); } });
+    button.type = 'button'; button.disabled = state.busy || !!state.pending;
+    button.addEventListener('click', () => { if (room.sessionId) selectSession(room.sessionId); else { $('launch-room').value = String(room.id); $('launch-mode').value = 'Independent'; placement.scheduleLaunch(); applyPermissions(); $('launch-mission').focus(); } });
     card.append(button); return card;
   }));
+}
+function resetSelection(id) {
+  report.reset(); readiness.reset(); connections.reset(); state.statistics = null; state.selected = id; state.session = null;
+  closure.reset();
+  $('session-panel').hidden = true;
 }
 async function selectSession(id) {
   if (state.pending || state.busy) { notify('請先確認目前命令的結果。', true); return; }
   const selection = ++selectionEpoch, epoch = state.epoch;
-  report.reset(); readiness.reset(); connections.reset(); state.statistics = null; state.selected = id; state.session = null;
-  closure.reset();
-  $('session-panel').hidden = true;
+  resetSelection(id);
   if (state.refreshPromise) { try { await state.refreshPromise; } catch { /* Refresh below reports errors. */ } }
   if (selection !== selectionEpoch || epoch !== state.epoch) return;
   try { await refresh(); } catch (error) { showRefreshError(error); }
@@ -220,6 +241,7 @@ function applyPermissions() {
   $('session-select').disabled = locked;
   $('include-ended').disabled = locked;
   $('refresh').disabled = !!state.pending;
+  document.querySelectorAll('.room-card button').forEach(button => { button.disabled = locked; });
   document.querySelectorAll('[data-player-room]').forEach(button => { button.disabled = locked || ended || !ownsRoom(Number(button.dataset.playerRoom)); });
 }
 function row(cells) { const tr = element('tr'); for (const value of cells) { const td = element('td'); if (value instanceof Node) td.append(value); else td.textContent = value; tr.append(td); } return tr; }
@@ -250,7 +272,7 @@ function renderSession(statistics, events) {
     const actions = element('div', undefined, 'button-row');
     for (const [label, action, cls] of [['下載連線檔', () => downloadTicket(player), 'secondary'], ['移除', () => removePlayer(player), 'danger']]) {
       const button = element('button', label, cls + ' small'); button.type = 'button'; button.dataset.playerRoom = player.roomId;
-      button.addEventListener('click', () => run(action)); actions.append(button);
+      button.addEventListener('click', () => runSession(action)); actions.append(button);
     }
     const participation = element('span', '等待本次入場同步'); participation.dataset.readinessPlayer = player.id; participation.dataset.admission = player.admissionId;
     return row([player.name, `${player.roomId} / ${player.seat + 1}`, player.headset === 'Quest3' ? 'Quest 3' : 'VIVE XR', participation, actions]);
@@ -285,7 +307,7 @@ async function createSession() {
 }
 async function command(action, extra = {}, expectedSequence = state.session.sequence) {
   if (state.pending) return;
-  if (action === 'End' && !confirm('結束此場次並釋放房間？歷史與統計會保留。')) return;
+  if (action === 'End' && !confirm(`結束房間 ${state.session.roomIds.join('、')} 的場次「${state.session.mission.definition.name}」並釋放房間？歷史與統計會保留。`)) return;
   state.pending = { kind: 'command', path: '/sessions/' + state.session.id + '/commands', method: 'POST', body: { commandId: uuid(), action, expectedSequence, ...extra } };
   await sendPending();
 }
@@ -310,7 +332,7 @@ async function sendPending() {
       notify('任務保存已確認，原版本與既有場次保持不變。可選擇此版本開場。'); return;
     }
     state.pending = null;
-    if (pending.kind === 'create') { $('include-ended').checked = response.state === 'Ended'; state.selected = response.id; state.session = null; }
+    if (pending.kind === 'create') { $('include-ended').checked = response.state === 'Ended'; resetSelection(response.id); }
     if (pending.kind === 'command' && pending.body.action === 'End' && response.session.state === 'Ended') $('include-ended').checked = true;
     if (pending.kind === 'join') $('player-name').value = '';
     await refresh(); loadEnvironment(); loadEnemies(); loadClock();
@@ -362,8 +384,7 @@ function downloadRoomTickets() {
   const players = session.players.filter(player => player.roomId === roomId)
     .map(player => ({ playerId: player.id, admissionId: player.admissionId }));
   if (!players.length) return;
-  void run(async () => {
-    if (state.session?.id !== session.id || state.selected !== session.id || !ownsRoom(roomId)) return;
+  void runSession(async () => {
     const bundle = await api(`/sessions/${session.id}/rooms/${roomId}/join-ticket-bundle`, 'POST',
       { ...destination, players }, undefined, undefined, 'blob');
     if (state.session?.id !== session.id || state.selected !== session.id || state.session.state === 'Ended') return;
@@ -533,11 +554,15 @@ function tab(name) {
   replay.active(name === 'replay'); world.active(name === 'world'); readiness.active(name === 'operations'); connections.active(name === 'operations');
   closure.active(name === 'operations');
 }
-function submit(id, action) { $(id).addEventListener('submit', event => { event.preventDefault(); run(action); }); }
+function submit(id, action, execute = run) { $(id).addEventListener('submit', event => { event.preventDefault(); execute(action); }); }
 $('login-form').addEventListener('submit', login);
 $('logout').addEventListener('click', logout);
 $('refresh').addEventListener('click', () => refresh().then(() => notify('已更新。')).catch(showRefreshError));
-$('include-ended').addEventListener('change', () => refresh().catch(showRefreshError));
+$('include-ended').addEventListener('change', async () => {
+  const epoch = state.epoch;
+  if (state.refreshPromise) { try { await state.refreshPromise; } catch { /* Refresh below reports errors. */ } }
+  if (epoch === state.epoch) await refresh().catch(showRefreshError);
+});
 $('session-select').addEventListener('change', () => selectSession($('session-select').value));
 $('launch-mode').addEventListener('change', () => { placement.scheduleLaunch(); applyPermissions(); });
 $('launch-mission').addEventListener('change', () => { placement.scheduleLaunch(); applyPermissions(); });
@@ -547,12 +572,12 @@ $('reload-enemies').addEventListener('click', loadEnemies);
 $('retry-command').addEventListener('click', () => run(sendPending));
 $('download-room-tickets').addEventListener('click', downloadRoomTickets);
 $('ticket-room').addEventListener('change', applyPermissions);
-document.querySelectorAll('[data-command]').forEach(button => button.addEventListener('click', () => run(() => command(button.dataset.command))));
+document.querySelectorAll('[data-command]').forEach(button => button.addEventListener('click', () => runSession(() => command(button.dataset.command))));
 submit('create-session-form', createSession);
-submit('join-form', joinPlayer);
-submit('environment-form', () => command('SetEnvironment', { environment: environment('live') }, state.environmentSequence));
-submit('enemies-form', () => command('SetEnemies', { enemies: enemies('live') }, state.enemiesSequence));
-submit('clock-form', () => command('SetMissionClock', { missionClock: { autoEnd: $('clock-auto-end').checked } }, state.clockSequence));
+submit('join-form', joinPlayer, runSession);
+submit('environment-form', () => command('SetEnvironment', { environment: environment('live') }, state.environmentSequence), runSession);
+submit('enemies-form', () => command('SetEnemies', { enemies: enemies('live') }, state.enemiesSequence), runSession);
+submit('clock-form', () => command('SetMissionClock', { missionClock: { autoEnd: $('clock-auto-end').checked } }, state.clockSequence), runSession);
 $('reload-clock').addEventListener('click', loadClock);
 $('clock-auto-end').addEventListener('change', () => { state.clockSequence = state.session?.sequence; });
 submit('mission-form', saveMission);

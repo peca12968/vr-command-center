@@ -84,5 +84,75 @@ module.exports = async ({ context, api, tokens, base, mission, screenshots, chec
       await page.screenshot({ path: path.join(screenshots, 'closure-retry-failure.png'), fullPage: true, timeout: 5000 }).catch(() => {}); throw error;
     }
     check(true, 'A confirmed already-sealed End retains its archived selection and closure view instead of switching away');
+
+    const live = [];
+    for (const room of rooms) {
+      const state = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [room.id] }, 'Master', 201);
+      await api(`/sessions/${state.id}/players`, 'POST', { playerId: randomUUID(), name: 'Room operator fixture', roomId: room.id, headset: 'Quest3' });
+      await api(`/sessions/${state.id}/commands`, 'POST', { commandId: randomUUID(), action: 'Begin' });
+      live.push(state);
+    }
+    const [ending, other] = live;
+    await page.locator('#include-ended').uncheck();
+    await page.locator('#session-select').selectOption(ending.id);
+    await page.waitForFunction(() => document.querySelector('#session-phase').textContent === '執行中'
+      && !document.querySelector('#session-panel').hidden && !document.querySelector('[data-command=Pause]').disabled);
+    const list = url => url.pathname === '/api/sessions' && url.searchParams.get('includeEnded') === 'false';
+    let requestHeld, allowList, finishList, held = false;
+    const holdList = new Promise(resolve => { allowList = resolve; });
+    const listRequested = new Promise(resolve => { requestHeld = resolve; });
+    const listSent = new Promise(resolve => { finishList = resolve; });
+    const writes = [];
+    const recordWrite = request => {
+      if (request.method() === 'POST' && new URL(request.url()).pathname.endsWith('/commands'))
+        writes.push({ path: new URL(request.url()).pathname, action: request.postDataJSON().action });
+    };
+    page.on('request', recordWrite);
+    const holdNextList = async route => {
+      if (held) return route.continue();
+      held = true; requestHeld();
+      await holdList;
+      try { await route.continue(); finishList(null); }
+      catch (error) { finishList(error); }
+    };
+    await page.route(list, holdNextList);
+    try {
+      await page.locator('#refresh').click();
+      await listRequested;
+      await api(`/sessions/${ending.id}/commands`, 'POST', { commandId: randomUUID(), action: 'End' });
+      await page.locator('[data-command=Pause]').click();
+      allowList();
+      const deliveryError = await listSent;
+      if (deliveryError) throw deliveryError;
+      await page.waitForFunction(() => !document.querySelector('#session-select').disabled, null, { timeout: 15000 });
+      const otherPhase = (await api(`/sessions/${other.id}`)).state;
+      await require('node:fs/promises').writeFile(path.join(screenshots, 'room-command-fence.json'),
+        JSON.stringify({ expectedTarget: ending.id, other: other.id, otherPhase, writes,
+          selected: await page.locator('#session-select').inputValue() }, null, 2));
+      check(otherPhase === 'Running' && writes.length === 0, 'Pause queued for an externally ended room never writes to the remaining live room');
+      check(await page.locator('#session-select').inputValue() === '' && await page.locator('#session-panel').isHidden(),
+        'Losing the selected room clears its controls without automatically switching to another room');
+      await page.locator('#refresh').click();
+      await page.waitForFunction(() => document.querySelector('#notice').textContent === '已更新。');
+      check(await page.locator('#session-select').inputValue() === '', 'A second refresh leaves the replacement room unselected');
+      await page.screenshot({ path: path.join(screenshots, 'room-command-fence.png'), fullPage: true });
+      await page.locator('#include-ended').check();
+      await page.locator('#session-select').selectOption(ending.id);
+      await page.waitForFunction(() => !document.querySelector('#session-panel').hidden && document.querySelector('#session-phase').textContent === '已結束');
+      check(await page.locator('[data-command=Pause]').isDisabled(), 'An explicitly chosen archived session remains readable and cannot be paused');
+      await page.locator('#include-ended').uncheck();
+      await page.waitForFunction(() => document.querySelector('#session-select').value === '');
+      await page.locator('#session-select').selectOption(other.id);
+      await page.locator('[data-command=Pause]').click();
+      await page.waitForFunction(() => document.querySelector('#session-phase').textContent === '已暫停');
+      check(writes.length === 1 && writes[0].path === `/api/sessions/${other.id}/commands` && writes[0].action === 'Pause',
+        'A fresh explicit room selection permits exactly one real Pause for that room');
+    } finally {
+      allowList();
+      if (held) await listSent;
+      await page.unroute(list, holdNextList);
+      page.off('request', recordWrite);
+      await api(`/sessions/${other.id}/commands`, 'POST', { commandId: randomUUID(), action: 'End' });
+    }
   } finally { release?.(); await page.close(); }
 };
