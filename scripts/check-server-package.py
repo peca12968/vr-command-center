@@ -16,6 +16,7 @@ def main():
     p.add_argument('--game-address',type=ipaddress.IPv4Address,help='Local private IPv4 for the three-package check')
     p.add_argument('--peer-diagnostics',action='store_true',help='Verify observed UDP peers in Linked and absence in default Independent runs')
     p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
+    p.add_argument('--check-layout-preview',action='store_true',help='Load a saved barricade opening and compare its preview with native world geometry')
     args=p.parse_args()
     if os.name!='nt':p.error('Actual Windows processes required')
     if bool(args.player_package)!=bool(args.game_address):p.error('Provide --player-package and --game-address together')
@@ -75,7 +76,9 @@ def main():
         file=runtime/(label+'.json');file.write_text(json.dumps(value),encoding='utf-8');work=runtime/(label+'-work');ready=out/(label+'-ready.json')
         call(label,['--run',file,'--work',work,'--seconds',options.get('seconds',60),'--ready-report',ready,*options.get('extra',())]);check(not work.exists() and not ready.exists(),label+' creates no native world')
     def create(rooms,label):
-        mission=request('/api/missions',{'name':'Portable '+label,'briefing':'Owned PC package fixture, Simulation only','durationSeconds':600,'environment':{'mode':'VR','weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':1,'behavior':'Hold','autoAttack':False},'props':[]},expected=201)
+        props=[{'assetId':'sandbag','position':{'x':x,'y':0,'z':-1},'yawDegrees':0}
+               for x in (-5,-3,-1,3,5)] if args.check_layout_preview else []
+        mission=request('/api/missions',{'name':'Portable '+label,'briefing':'Owned PC package fixture, Simulation only','durationSeconds':600,'environment':{'mode':'VR','weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':1,'behavior':'Hold','autoAttack':False},'props':props},expected=201)
         state=request('/api/sessions',{'missionId':mission['id'],'mode':'Linked' if len(rooms)==5 else 'Independent','roomIds':rooms},expected=201);sessions.append(state['id']);return state
     def launch(state,label):
         value=config(state['id']);file=runtime/(label+'.json');file.write_text(json.dumps(value),encoding='utf-8');ready=out/(label+'-ready.json');report=out/(label+'-final.json');work=runtime/(label+'-work')
@@ -86,6 +89,7 @@ def main():
             if child.poll() is not None:raise RuntimeError('Server launcher exited before ready '+label)
             return read(ready) if ready.exists() else None
         info=wait(is_ready,100,label+' ready');w=control.ChildWitness(info['childPid']);entry['witness']=w;witnesses.append(w);entry['ready']=info
+        if args.check_layout_preview:entry['layoutSession']=state
         endpoint=request('/api/sessions/'+state['id']+'/connection-endpoint');check(info['streamId']==endpoint['streamId'] and info['port']==endpoint['port'] and endpoint['address']==address,label+' original endpoint / child')
         return entry
     def player(entry,room):
@@ -219,6 +223,19 @@ def main():
     def finish(entry):
         entry['process'].wait(timeout=80);w=entry['witness'];w.wait();w.close();entry['witness']=None
         report=read(entry['reportPath']);check(entry['process'].returncode==0 and report['complete'] and report['cleanupCompleted'] and report['childExited'] and report['playerResultsAcknowledged'] is None,entry['label']+' dual seal / retained36 / original process terminal')
+        if args.check_layout_preview:
+            state=entry['layoutSession'];mission=state['mission']
+            preview=request('/api/missions/'+mission['id']+'/layout?mode='+state['mode'])
+            routes=preview['routePreview']['seats']
+            check(preview['canStart'] and [row['seat'] for row in routes]==list(range(5)) and all(
+                row['path'] and row['path'][-1]['z']==0 and any(point['z']==-1 and 0<point['x']<2 for point in row['path'])
+                for row in routes),entry['label']+' saved preview routes through the known opening')
+            header=report['finalWorld']['header']
+            expected={(room,'Sandbag',(room-3)*14+prop['position']['x'],prop['position']['y'],prop['position']['z'],prop['yawDegrees'])
+                for room in state['roomIds'] for prop in mission['definition']['props']}
+            actual={(prop['roomId'],prop['kind'],prop['feet']['x'],prop['feet']['y'],prop['feet']['z'],prop['yaw']) for prop in header['props']}
+            check(actual==expected and len(header['props'])==len(expected),entry['label']+' native world preserves every saved cover coordinate and opening')
+            save(entry['label']+'-layout-preview.json',preview)
         closed=world.analyze(entry['work']/'telemetry'/(entry['sessionId']+'.worldlog'),expected_session=entry['sessionId']);save(entry['label']+'-journal.json',closed)
         check(closed['complete'] and closed['sealed'] and closed['unacknowledgedFrames']==0 and closed['lastFrame']['worldSequence']==report['finalWorld']['acceptedSequence'],entry['label']+' closed original journal complete / sealed / exact durable tail')
         stats=request('/api/sessions/'+entry['sessionId']+'/statistics');entry['sealed']={'world':report['finalWorld'],'statistics':stats};save(entry['label']+'-statistics.json',stats)

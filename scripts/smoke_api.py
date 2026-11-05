@@ -154,6 +154,16 @@ try:
             request("POST", "/api/mission-layout", layout_body, 403, identity="Room1")
             request("POST", "/api/mission-layout", layout_body, 403, identity="GameServer")
             layout = request("POST", "/api/mission-layout", layout_body)
+            wall = [{"assetId": "sandbag", "position": {"x": x, "y": 0, "z": -1}, "yawDegrees": 0}
+                    for x in range(-5, 6, 2)]
+            separated = request("POST", "/api/mission-layout", {**layout_body, "props": wall})
+            require(separated["canStart"] and separated["routePreview"] == {"step": 0.5, "targetZ": 0,
+                    "seats": [{"seat": seat, "path": []} for seat in range(5)]},
+                    "Layout HTTP reports five isolated sampled routes while allowing an intentional barricade")
+            opening = request("POST", "/api/mission-layout", {**layout_body, "mode": "Linked",
+                              "props": [prop for prop in wall if prop["position"]["x"] != 1]})
+            require(opening["canStart"] and all(row["path"][-1]["z"] == 0 for row in opening["routePreview"]["seats"]),
+                    "Removing one bag produces a sampled route from each seat to the midfield")
             require(layout["version"] == 1 and layout["canStart"] and layout["enemyCapacityPerRoom"] == 117 and len(layout["spawns"]) == 5,
                     "Authenticated draft preflight uses actual room and admission geometry")
             blocked_prop = {"assetId": "barrel", "position": {"x": -3, "y": 0, "z": -3}, "yawDegrees": 0}

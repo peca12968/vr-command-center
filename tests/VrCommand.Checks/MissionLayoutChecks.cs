@@ -1,5 +1,6 @@
 using System.Text.Json;
 using VrCommand.Core;
+using VrCommand.Simulation;
 
 internal static class MissionLayoutChecks
 {
@@ -12,6 +13,28 @@ internal static class MissionLayoutChecks
         { try { action(); } catch (T) { check(true, message); return; } throw new Exception("Expected " + typeof(T).Name + ": " + message); }
         var empty = Inspect([]);
         check(empty.CanStart == true && empty.EnemyCapacityPerRoom == 117 && empty.Spawns.Length == 5 && empty.Spawns[0] == new LayoutSpawn(0, -3, -3), "Empty VR room uses all five real spawn positions and the actual 117-candidate enemy grid");
+        var wall = Enumerable.Range(0, 6).Select(i => Prop("sandbag", -5 + i * 2, -1)).ToArray();
+        var enclosed = Inspect(wall, 8);
+        check(enclosed.CanStart == true && enclosed.RoutePreview is { Step: .5f, TargetZ: 0 } enclosedPreview
+            && enclosedPreview.Seats.Select(route => route.Seat).SequenceEqual(Enumerable.Range(0, 5))
+            && enclosedPreview.Seats.All(route => route.Path.Length == 0),
+            "A full-width barricade clears the required checks but the route preview finds no sampled way to the middle");
+        var gap = wall.Where(prop => prop.Position.X != 1).ToArray();
+        var gapReport = Inspect(gap, 8, SessionMode.Linked);
+        var origin = ArenaWorld.RoomOrigin(3);
+        var walk = new ArenaWalkSurface(origin, gap.Select(prop =>
+            new WorldProp(Guid.NewGuid(), 3, PropKind.Sandbag, origin + new Vec3(prop.Position.X, prop.Position.Y, prop.Position.Z), prop.YawDegrees)).ToArray());
+        check(gapReport.RoutePreview is { } passable && passable.Seats.All(route =>
+        {
+            var spawn = gapReport.Spawns[route.Seat];
+            var path = route.Path;
+            return path.Length > 1 && path[0] == new LayoutRoutePoint(spawn.X, spawn.Z) && path[^1].Z == 0
+                && path.Zip(path.Skip(1)).All(edge =>
+                    Math.Abs(edge.First.X - edge.Second.X) + Math.Abs(edge.First.Z - edge.Second.Z) == .5f
+                    && walk.ClearSegment(origin + new Vec3(edge.First.X, 1.65f, edge.First.Z), origin + new Vec3(edge.Second.X, 1.65f, edge.Second.Z)));
+        }), "Removing one bag opens five sampled routes whose individual segments pass the actual walking surface");
+        check(JsonSerializer.Serialize(gapReport.RoutePreview) == JsonSerializer.Serialize(Inspect(gap, 8).RoutePreview),
+            "Identical room geometry gives deterministic routes independent of session topology");
         check(Inspect([Prop("sandbag", 5.2f, 1, 45)]).Issues.Any(i => i.Code == "OutsideRoom"), "Rotated cover corners cannot extend beyond the room even when its centre is inside");
         check(Inspect([Prop("barrel", 5.65f, 1)]).CanStart == true, "A cover face may touch the room boundary within the defined float tolerance");
         check(Inspect([Prop("sandbag", 0, 2), Prop("sandbag", 2, 2)]).CanStart == true, "Face-touching cover is allowed for barricades without positive-area overlap");
@@ -33,6 +56,7 @@ internal static class MissionLayoutChecks
         check(full.Truncated && full.Issues.Length == 128 && full.TotalIssueCount == 124750 && full.InvalidProps.Length == 500, "Large overlap reports are bounded while keeping all invalid prop indexes and the true count");
         var mr = Inspect([Prop("unsupported", 100, 100)], experience: ExperienceMode.MR);
         check(!mr.Applies && mr.CanStart is null, "MR is explicitly outside VR preflight rather than falsely passing calibration");
+        check(mr.RoutePreview is null && collision.RoutePreview is null, "Unsupported mode and invalid geometry do not emit route previews");
         var store = new MissionStore(Path.Combine(directory, "layout-missions"));
         var invalid = store.Create(new("Fixable layout", "Draft can be saved before layout corrections", 900,
             new(ExperienceMode.VR, Weather.Clear, TimeOfDay.Day, false), new(1, EnemyBehavior.Hold, false), [Prop("barrel", -3, -3)]));
@@ -41,6 +65,10 @@ internal static class MissionLayoutChecks
         check(manager.Rooms(actor).All(room => room.SessionId is null)
             && JsonSerializer.Serialize(store.Get(invalid.Id).Definition, JsonFormat.Options) == JsonSerializer.Serialize(invalid.Definition, JsonFormat.Options),
             "Rejection reserves no room and never rewrites the saved mission");
+        var defensive = store.Create(invalid.Definition with { Name = "Intentional barricade", Props = wall });
+        var defensiveSession = manager.Create(SessionMode.Independent, [3], defensive, actor);
+        check(defensiveSession.Mission.Id == defensive.Id && defensiveSession.State == SessionState.Preparing,
+            "A sampled route warning remains advisory and does not change the new-session gate");
         var memory = new MemorySessionEventStore(); var id = Guid.NewGuid(); var request = Guid.NewGuid();
         memory.Seed(id, [new(6, Guid.NewGuid(), id, 1, DateTimeOffset.UtcNow, SessionEventKind.Created,
             JsonSerializer.SerializeToElement(new SessionCreated(SessionMode.Independent, [3], invalid), JsonFormat.Options), actor, request)]);

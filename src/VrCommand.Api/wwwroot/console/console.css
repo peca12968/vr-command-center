@@ -20,3 +20,6 @@
 .closure-status.warning { display: block; }
 .closure-status .button-row > span { font-size: .9rem; }
 .closure-status.closure-complete { border-color: #81a878; }
+#layout-routes polyline{fill:none;stroke:#9ed3bd;stroke-width:.065;stroke-dasharray:.14 .12;stroke-linejoin:round;pointer-events:none}
+#layout-spawns [data-route-missing] circle{fill:#ffbb6333;stroke:#ffbb63}
+.layout-route-warning{color:#ffcb83}

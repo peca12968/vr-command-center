@@ -8,6 +8,8 @@ module.exports = async function layoutBrowser({ context, api, tokens, base, miss
   const bad = await api('/missions', 'POST', { ...mission.definition, name: '場地檢查・可修正草稿',
     enemies: { ...mission.definition.enemies, count: 0 },
     props: [prop('barrel', 0, -3), prop('sandbag', 5.5, 2, 45), prop('barrel', 2, 2), prop('barrel', 2, 2)] }, 'Master', 201);
+  const barricade = await api('/missions', 'POST', { ...mission.definition, name: '場地通路・連續沙包',
+    props: [-5, -3, -1, 1, 3, 5].map(x => prop('sandbag', x, -1)) }, 'Master', 201);
   const status = (prefix, value) => editor.waitForFunction(({ prefix, value }) => document.querySelector(`#${prefix}-layout-summary`).dataset.status === value, { prefix, value });
   async function set(id, value) { await editor.locator('#' + id).fill(String(value)); await editor.locator('#' + id).blur(); }
   async function launch(id) { await editor.locator('#launch-mission').selectOption(id); }
@@ -75,9 +77,32 @@ module.exports = async function layoutBrowser({ context, api, tokens, base, miss
     check(await editor.locator('#draft-layout-summary').getAttribute('data-status') === 'invalid' && await editor.locator('#prop-layer [data-index="1"]').getAttribute('data-layout-invalid') === 'true',
       'A late report for an older draft cannot clear current invalid markings');
     await editor.unroute('**/api/mission-layout');
+    await editor.locator('#edit-mission').selectOption(barricade.id);
+    await editor.locator('#load-mission').click();
+    await editor.locator('#draft-layout-route-summary').filter({ hasText: '未找到通往中線' }).waitFor();
+    check(await editor.locator('#layout-spawns [data-route-missing]').count() === 5 && await editor.locator('#layout-routes polyline').count() === 0,
+      'A saved full-width barricade highlights all five isolated spawn samples without fabricating routes');
+    await editor.screenshot({ path: path.join(screenshots, 'layout-route-isolated.png'), fullPage: true });
+    await editor.locator('#launch-version').click();
+    await editor.locator('#launch-layout-route-summary').filter({ hasText: '未找到通往中線' }).waitFor();
+    check(await editor.locator('#create-session-form button').isEnabled(), 'A sampled route warning on a saved mission leaves its intentional barricade startable');
+    await editor.locator('#tab-missions').click();
+    await editor.locator('#prop-select').selectOption('3');
+    await editor.locator('#remove-prop').click();
+    await editor.locator('#draft-layout-route-summary').filter({ hasText: '五個出生位皆有' }).waitFor();
+    check(await editor.locator('#layout-routes polyline').count() === 5 && await editor.locator('#layout-spawns [data-route-missing]').count() === 0,
+      'Removing the center bag draws five routes and clears the isolated spawn markings');
+    await editor.screenshot({ path: path.join(screenshots, 'layout-route-opening.png'), fullPage: true });
+    await editor.locator('#save-revision').click();
+    await editor.waitForFunction(() => document.querySelector('#draft-status').textContent.startsWith('已儲存') && !document.querySelector('#mission-fields').disabled);
+    const openedId = (await api(`/missions/${barricade.id}/history`)).headId;
+    await editor.locator('#launch-version').click();
+    await editor.locator('#launch-layout-route-summary').filter({ hasText: '五個出生位皆有' }).waitFor();
+    check(await editor.locator('#launch-mission').inputValue() === openedId && (await api(`/missions/${barricade.id}/layout`)).routePreview.seats.every(seat => !seat.path.length),
+      'Saving an opening updates only the new revision and its matching launch preview');
     let releaseLogout, observedLogout;
     const logoutGate = new Promise(resolve => { releaseLogout = resolve; }), logoutRequested = new Promise(resolve => { observedLogout = resolve; });
-    await editor.route(savedPattern, async route => { const response = await route.fetch(); observedLogout(); await logoutGate; await route.fulfill({ response }); });
+    await editor.route(`**/api/missions/${openedId}/layout?*`, async route => { const response = await route.fetch(); observedLogout(); await logoutGate; await route.fulfill({ response }); });
     await editor.locator('#tab-operations').click(); await editor.locator('#layout-recheck-launch').click(); await logoutRequested; await editor.locator('#logout').click(); releaseLogout(); await editor.waitForTimeout(150);
     check(await editor.locator('#launch-layout-summary').getAttribute('data-status') === 'unknown' && await editor.locator('#layout-spawns circle').count() === 0,
       'Logout clears preflight approvals and ignores an old authenticated response');
