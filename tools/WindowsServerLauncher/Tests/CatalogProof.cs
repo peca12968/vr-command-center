@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
+using System.Net.Sockets;
 using System.Text;
+using System.Threading;
 
 internal static class ServerCatalogProof
 {
@@ -13,11 +16,36 @@ internal static class ServerCatalogProof
         return ServerLauncher.Map(ServerLauncher.Json.DeserializeObject(ServerLauncher.Json.Serialize(new { id = Guid.NewGuid().ToString("D"), mode = "Independent", roomIds = new[] { room }, state = "Preparing", combatStream = (object)null, environment = new { mode = "VR" }, mission = new { id = Guid.NewGuid().ToString("D"), definition = new { name = name } } })));
     }
     static void Reject(object[] rows, string name) { bool rejected = false; try { ServerLauncher.Catalog.Parse(rows); } catch (InvalidDataException) { rejected = true; } Check(rejected, name); }
+    static void CheckUdpBindings()
+    {
+        int pid, port;
+        using (var process = Process.GetCurrentProcess()) pid = process.Id;
+        using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
+        {
+            socket.ExclusiveAddressUse = true;
+            socket.Bind(new IPEndPoint(IPAddress.Loopback, 0));
+            port = ((IPEndPoint)socket.LocalEndPoint).Port;
+            Check(ServerLauncher.UdpBinding.Find(pid, "127.0.0.1", port) != null, "OS table returns an actual bound UDP endpoint owned by this process");
+            Check(ServerLauncher.UdpBinding.Find(pid + 1, "127.0.0.1", port) == null, "Another PID cannot satisfy the same address and port");
+            Check(ServerLauncher.UdpBinding.Find(pid, "0.0.0.0", port) == null, "Loopback cannot satisfy a wildcard request");
+            Check(ServerLauncher.UdpBinding.Find(pid, "127.0.0.1", port == 65535 ? port - 1 : port + 1) == null, "A different port cannot satisfy the same owner and address");
+        }
+        Check(SpinWait.SpinUntil(() => ServerLauncher.UdpBinding.Find(pid, "127.0.0.1", port) == null, 1000), "The closed socket no longer satisfies an endpoint query");
+        using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
+        {
+            socket.ExclusiveAddressUse = true;
+            socket.Bind(new IPEndPoint(IPAddress.Any, 0));
+            port = ((IPEndPoint)socket.LocalEndPoint).Port;
+            Check(ServerLauncher.UdpBinding.Find(pid, "0.0.0.0", port) != null, "An actual wildcard socket satisfies only its exact bind address");
+            Check(ServerLauncher.UdpBinding.Find(pid, "127.0.0.1", port) == null, "Wildcard cannot satisfy an explicit loopback request");
+        }
+    }
     static int Main(string[] args)
     {
         var output = args[1];
         try
         {
+            CheckUdpBindings();
             var first = Row(1); var second = Row(2); var parsed = ServerLauncher.Catalog.Parse(new object[] { second, first });
             Check(parsed.Count == 2 && parsed[0].Id == (string)first["id"] && parsed[0].ToString().Contains("房間 1") && parsed[0].ToString().Contains("軍事任務"), "room/name display sorts without replacing original id");
             Check(parsed[0].MissionId != parsed[1].MissionId && parsed[0].MissionName == parsed[1].MissionName && parsed[0].Id != parsed[1].Id, "duplicate names retain distinct session / version identities");
@@ -55,7 +83,7 @@ internal static class ServerCatalogProof
             original = state.Current.Choices[0].Id;
             state.Select(original); state.Edit(""); failed = false; try { state.Load(); } catch (InvalidDataException) { failed = true; }
             Check(failed && !state.CanStart && state.Current == null, "empty path fails closed");
-            ServerLauncher.Save(output, new { complete = true, checks = checks, scope = "Actual Framework production catalog/state methods; controlled metadata and fresh API identity. No WinForms UI automation, game readiness or headset proof." }); return 0;
+            ServerLauncher.Save(output, new { complete = true, checks = checks, scope = "Actual Framework catalog/state methods and Windows UDP socket owner/address/port checks. No WinForms UI automation, game readiness or headset proof." }); return 0;
         }
         catch (Exception e) { ServerLauncher.Save(output, new { complete = false, checks = checks, error = ServerLauncher.Safe(e) }); return 1; }
     }

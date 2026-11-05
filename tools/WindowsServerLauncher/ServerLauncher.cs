@@ -71,6 +71,58 @@ internal static class ServerLauncher
         foreach (var n in NetworkInterface.GetAllNetworkInterfaces()) foreach (var a in n.GetIPProperties().UnicastAddresses) if (a.Address.AddressFamily == AddressFamily.InterNetwork && a.Address.ToString() == value) return;
         throw new InvalidDataException("綁定地址必須已配置在本機。");
     }
+    internal sealed class UdpBinding
+    {
+        const uint InsufficientBuffer = 122;
+        const uint Ipv4 = 2;
+        const int OwnerPid = 1;
+        // The table starts with a DWORD count. Each IPv4 row has three DWORDs.
+        const int HeaderBytes = 4, RowBytes = 12, MaximumBytes = 4 * 1024 * 1024;
+        [DllImport("iphlpapi.dll", ExactSpelling = true)]
+        static extern uint GetExtendedUdpTable(IntPtr table, ref int size, [MarshalAs(UnmanagedType.Bool)] bool ordered, uint family, int tableClass, uint reserved);
+
+        readonly int processId, port;
+        readonly string address;
+        readonly DateTimeOffset observedAt;
+        UdpBinding(int processId, string address, int port)
+        {
+            this.processId = processId; this.address = address; this.port = port; observedAt = DateTimeOffset.UtcNow;
+        }
+        internal object Public() { return new { processId = processId, address = address, port = port, observedAtUtc = observedAt.ToString("O") }; }
+
+        internal static UdpBinding Find(int processId, string address, int port)
+        {
+            var expectedAddress = BitConverter.ToInt32(IPAddress.Parse(address).GetAddressBytes(), 0);
+            var expectedPort = (ushort)IPAddress.HostToNetworkOrder((short)port);
+            int size = 0;
+            var result = GetExtendedUdpTable(IntPtr.Zero, ref size, false, Ipv4, OwnerPid, 0);
+            if (result != InsufficientBuffer) throw new IOException("無法讀取 Windows UDP 端點，錯誤 " + result + "。");
+            for (var attempt = 0; attempt < 3; attempt++)
+            {
+                Need(size >= HeaderBytes && size <= MaximumBytes, "Windows UDP 端點表大小超界。");
+                var capacity = size;
+                var table = Marshal.AllocHGlobal(capacity);
+                try
+                {
+                    result = GetExtendedUdpTable(table, ref size, false, Ipv4, OwnerPid, 0);
+                    if (result == InsufficientBuffer) continue;
+                    if (result != 0) throw new IOException("無法讀取 Windows UDP 端點，錯誤 " + result + "。");
+                    var count = Marshal.ReadInt32(table);
+                    Need(count >= 0 && count <= (capacity - HeaderBytes) / RowBytes, "Windows UDP 端點表內容超界。");
+                    for (var index = 0; index < count; index++)
+                    {
+                        var row = IntPtr.Add(table, HeaderBytes + index * RowBytes);
+                        if (Marshal.ReadInt32(row, 8) == processId && Marshal.ReadInt32(row, 0) == expectedAddress
+                            && (Marshal.ReadInt32(row, 4) & 0xffff) == expectedPort)
+                            return new UdpBinding(processId, address, port);
+                    }
+                    return null;
+                }
+                finally { Marshal.FreeHGlobal(table); }
+            }
+            throw new IOException("Windows UDP 端點表持續變動，無法核對本次綁定。");
+        }
+    }
     internal sealed class Settings
     {
         internal string Api, Key, Session, Address, Bind; internal int Port;
@@ -212,6 +264,7 @@ internal static class ServerLauncher
     internal sealed class Run : IDisposable
     {
         internal Settings Config; internal string Work, Stream; internal Native Process; internal volatile string Status = "準備中"; internal bool Complete, Cleanup; internal uint? Code; internal Dictionary<string, object> FinalWorld, FinalStream; Mutex lease; bool ownsLease;
+        internal UdpBinding VerifiedUdp;
         internal Run(Settings config, string work)
         {
             Config = config; Work = Full(work); Plain(Work); Need(!Inside(Work, Root) && !Inside(Root, Work) && !Directory.Exists(Work) && !File.Exists(Work), "請使用程式包之外的新資料夾。");
@@ -226,6 +279,7 @@ internal static class ServerLauncher
             Directory.CreateDirectory(Work); Save(Path.Combine(Work, "server-config.json"), Config.Config(Path.Combine(Work, "telemetry")));
             Process = new Native(Path.Combine(Work, "server-config.json"), Path.Combine(Work, "server.log"), peerDiagnostics);
             var timer = Stopwatch.StartNew(); Status = "等待遊戲來源與UDP啟動";
+            var awaitingUdp = false;
             while (timer.Elapsed.TotalSeconds < 90)
             {
                 Need(cancelled == null || !cancelled(), "已中止啟動；此輪未完成。");
@@ -242,13 +296,22 @@ internal static class ServerLauncher
                     {
                         Need(Text(Child(world, "header"), "sessionId") == Config.Session && Text(Child(world, "header"), "streamId") == Stream && Text(Child(world, "header"), "origin") == "Simulation", "世界來源身分不符。");
                         Need(Text(state, "state") == "Preparing", "公告前場次已離開Preparing。");
+                        var binding = UdpBinding.Find(Process.Pid, Config.Bind, Config.Port);
+                        if (binding == null)
+                        {
+                            awaitingUdp = true; Status = "等待 Windows 確認原遊戲程序的 UDP 綁定";
+                            Thread.Sleep(250);
+                            continue;
+                        }
+                        Need(!Process.Exited, "遊戲程序在公告前結束。");
                         var endpoint = Config.Request("/api/sessions/" + Config.Session + "/connection-endpoint", new { version = 1, streamId = Stream, address = Config.Address, port = Config.Port });
-                        Need(Text(endpoint, "sessionId") == Config.Session && Text(endpoint, "streamId") == Stream && Text(endpoint, "address") == Config.Address && Num(endpoint, "port") == Config.Port && !Yes(endpoint, "sessionEnded"), "公告回條不符。"); Status = "伺服器就緒，請在控制台開始任務"; return;
+                        Need(Text(endpoint, "sessionId") == Config.Session && Text(endpoint, "streamId") == Stream && Text(endpoint, "address") == Config.Address && Num(endpoint, "port") == Config.Port && !Yes(endpoint, "sessionEnded"), "公告回條不符。");
+                        VerifiedUdp = binding; Status = "伺服器就緒，請在控制台開始任務"; return;
                     }
                 }
                 Thread.Sleep(250);
             }
-            throw new IOException("遊戲來源90秒內未就緒。");
+            throw new IOException(awaitingUdp ? "90 秒內未確認原遊戲程序的 UDP 綁定。" : "遊戲來源90秒內未就緒。");
         }
         bool NetworkStarted()
         {
@@ -277,12 +340,12 @@ internal static class ServerLauncher
                     }
                     else { Need(ended.Elapsed.TotalSeconds < 30, "結束後30秒仍未完成雙封存。"); Status = "等待戰鬥與世界封存"; }
                 }
-                else Status = "伺服器運行中：" + Text(state, "state");
+                else Status = "伺服器運行中 " + Text(state, "state") + " · 啟動時已核對 UDP " + Config.Bind + ":" + Config.Port;
                 Thread.Sleep(250);
             }
             throw new IOException("已中止或超過保留期限；此輪不算正常封存完成。");
         }
-        internal object Report(string status, string error) { return new { schemaVersion = 1, status = status, complete = Complete && Cleanup, sessionId = Config.Session, streamId = Stream, childPid = Process == null ? (int?)null : Process.Pid, childExited = Process == null ? (bool?)null : Cleanup, cleanupCompleted = Cleanup, exitCode = Code, workDirectory = Work, finalWorld = FinalWorld, finalCombatStream = FinalStream, playerResultsAcknowledged = (bool?)null, error = error, scope = "Owned server lifecycle and API dual seals; 36s retention, intentional OS process termination after seals, no graceful Unity shutdown / client delivery / gameplay / LAN capacity claim." }; }
+        internal object Report(string status, string error) { return new { schemaVersion = 1, status = status, complete = Complete && Cleanup, sessionId = Config.Session, streamId = Stream, childPid = Process == null ? (int?)null : Process.Pid, childExited = Process == null ? (bool?)null : Cleanup, cleanupCompleted = Cleanup, exitCode = Code, workDirectory = Work, udpBinding = VerifiedUdp == null ? null : VerifiedUdp.Public(), finalWorld = FinalWorld, finalCombatStream = FinalStream, playerResultsAcknowledged = (bool?)null, error = error, scope = "Owned server lifecycle and API dual seals; 36s retention, intentional OS process termination after seals, no graceful Unity shutdown / client delivery / gameplay / LAN capacity claim." }; }
         public void Dispose()
         {
             try { if (Process != null) { Process.Stop(); Code = Process.ExitCode; Process.Dispose(); } Cleanup = true; }
@@ -354,7 +417,7 @@ internal static class ServerLauncher
             int seconds; Need(Int32.TryParse(options["--seconds"], out seconds) && seconds >= 60 && seconds <= 86400, "執行期限須為60至86400秒。");
             var configPath = Full(options["--run"]); var work = Full(options["--work"]); Need(!Inside(configPath, Root) && !Inside(configPath, work) && !Inside(work, configPath), "設定必須在程式包與新資料夾之外。");
             Output(report, work); Output(options["--ready-report"], work); Need(!String.Equals(Full(report), Full(options["--ready-report"]), StringComparison.OrdinalIgnoreCase), "結果路徑不能重複。");
-            run = new Run(Settings.From(Read(configPath, 8192)), work); run.Start(peerDiagnostics: peerDiagnostics); Save(options["--ready-report"], new { schemaVersion = 1, status = "ready", sessionId = run.Config.Session, streamId = run.Stream, childPid = run.Process.Pid, address = run.Config.Address, port = run.Config.Port, workDirectory = run.Work }); run.Wait(seconds, () => false);
+            run = new Run(Settings.From(Read(configPath, 8192)), work); run.Start(peerDiagnostics: peerDiagnostics); Save(options["--ready-report"], new { schemaVersion = 1, status = "ready", sessionId = run.Config.Session, streamId = run.Stream, childPid = run.Process.Pid, address = run.Config.Address, port = run.Config.Port, workDirectory = run.Work, udpBinding = run.VerifiedUdp.Public() }); run.Wait(seconds, () => false);
         }
         catch (Exception e) { error = Safe(e); }
         finally { if (run != null) try { run.Dispose(); } catch (Exception e) { error = Safe(e); } }

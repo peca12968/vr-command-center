@@ -83,8 +83,8 @@ def main():
                for x in (-5,-3,-1,3,5)] if args.check_layout_preview else []
         mission=request('/api/missions',{'name':'Portable '+label,'briefing':'Owned PC package fixture, Simulation only','durationSeconds':600,'environment':{'mode':'VR','weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':1,'behavior':'Hold','autoAttack':auto_attack},'props':props},expected=201)
         state=request('/api/sessions',{'missionId':mission['id'],'mode':'Linked' if len(rooms)==5 else 'Independent','roomIds':rooms},expected=201);sessions.append(state['id']);return state
-    def launch(state,label):
-        value=config(state['id']);file=runtime/(label+'.json');file.write_text(json.dumps(value),encoding='utf-8');ready=out/(label+'-ready.json');report=out/(label+'-final.json');work=runtime/(label+'-work')
+    def launch(state,label, *, listen_address=None):
+        value=config(state['id'], listenAddress=listen_address or address);file=runtime/(label+'.json');file.write_text(json.dumps(value),encoding='utf-8');ready=out/(label+'-ready.json');report=out/(label+'-final.json');work=runtime/(label+'-work')
         diagnostics=args.peer_diagnostics and label=='linked'
         options=['--peer-diagnostics','on'] if diagnostics else []
         child=subprocess.Popen([str(exe),'--run',str(file),'--work',str(work),'--seconds','600','--ready-report',str(ready),'--report',str(report),*options],cwd=out,env=env);entry={'process':child,'readyPath':ready,'reportPath':report,'work':work,'config':value,'label':label,'sessionId':state['id'],'witness':None,'peerDiagnostics':diagnostics};runners.append(entry)
@@ -94,6 +94,16 @@ def main():
         info=wait(is_ready,100,label+' ready');w=control.ChildWitness(info['childPid']);entry['witness']=w;witnesses.append(w);entry['ready']=info
         if args.check_layout_preview:entry['layoutSession']=state
         endpoint=request('/api/sessions/'+state['id']+'/connection-endpoint');check(info['streamId']==endpoint['streamId'] and info['port']==endpoint['port'] and endpoint['address']==address,label+' original endpoint / child')
+        binding = info['udpBinding']
+        observed = datetime.fromisoformat(binding['observedAtUtc'])
+        check(binding['processId'] == info['childPid'] and binding['address'] == value['listenAddress'] and binding['port'] == value['port']
+              and observed <= datetime.fromisoformat(endpoint['createdAtUtc']), label + ' owned binding observed before endpoint publication')
+        netstat = Path(os.environ['WINDIR']) / 'System32/netstat.exe'
+        rows = subprocess.check_output([str(netstat), '-ano', '-p', 'udp'], cwd=out, timeout=10, encoding='ascii', errors='ignore').splitlines()
+        local = f"{binding['address']}:{binding['port']}"
+        pid = str(binding['processId'])
+        check(any(len(parts) >= 4 and parts[0] == 'UDP' and parts[1] == local and parts[-1] == pid
+                  for parts in map(str.split, rows)), label + ' independent Windows UDP owner check')
         return entry
     def player(entry,room):
         state=request('/api/sessions/'+entry['sessionId']+'/players',{'playerId':str(uuid.uuid4()),'roomId':room,'name':'Portable server room '+str(room),'headset':'Quest3'},role='Room'+str(room));person=next(x for x in state['players'] if x['roomId']==room)
@@ -237,6 +247,7 @@ def main():
     def finish(entry):
         entry['process'].wait(timeout=80);w=entry['witness'];w.wait();w.close();entry['witness']=None
         report=read(entry['reportPath']);check(entry['process'].returncode==0 and report['complete'] and report['cleanupCompleted'] and report['childExited'] and report['playerResultsAcknowledged'] is None,entry['label']+' dual seal / retained36 / original process terminal')
+        check(report['udpBinding'] == entry['ready']['udpBinding'], entry['label'] + ' terminal report preserves the startup UDP observation')
         if args.check_layout_preview:
             state=entry['layoutSession'];mission=state['mission']
             preview=request('/api/missions/'+mission['id']+'/layout?mode='+state['mode'])
@@ -321,6 +332,9 @@ def main():
         if args.peer_diagnostics:rejected('invalid-peer-diagnostics',base,extra=['--peer-diagnostics','off'])
         with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as occupied:
             occupied.bind((address,0));rejected('occupied-udp',dict(base,port=occupied.getsockname()[1]))
+            request('/api/sessions/' + seed['id'] + '/connection-endpoint', expected=404)
+            check(request('/api/sessions/' + seed['id'])['combatStream'] is None,
+                  'occupied UDP preflight leaves the management session and endpoint unbound')
         command(seed['id'],'End');rejected('ended-session',base)
         # Run both topologies with separate native processes and fresh admissions.
         for linked in [False,True]:
@@ -381,7 +395,7 @@ def main():
             if player_folder:
                 for entry in entries:verify_delivery(entry,[c for c in round_clients if c['sessionId']==entry['sessionId']])
         # A killed launcher must close its already-assigned Job and stop the exact owned native handle.
-        crash=launch(create([1],'parent-exit',auto_attack=args.check_interrupted_replay),'parent-exit')
+        crash=launch(create([1],'parent-exit',auto_attack=args.check_interrupted_replay),'parent-exit',listen_address='0.0.0.0')
         if args.check_interrupted_replay:
             crash_client = player(crash, 1)
             roster = [crash_client['player']['id']]

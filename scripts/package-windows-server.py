@@ -6,7 +6,7 @@ ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('server_player_package',ROOT/'scripts/package-windows-player.py');player=importlib.util.module_from_spec(spec);spec.loader.exec_module(player)
 digest=player.digest;plain=player.plain
 TOP='VRCommand-GameServer'
-README='''VR Command Windows 遊戲伺服器啟動器 1.2／Windows 遊戲程式
+README='''VR Command Windows 遊戲伺服器啟動器 1.3／Windows 遊戲程式
 
 完整解壓後開啟Launch-Server.exe。先啟動獨立的管理服務，在網頁控制台建立Preparing VR場次。
 按「選擇檔案」選control-instance.json，或在路徑欄直接貼上完整檔案路徑，再按「載入／更新」。只使用既有GameServer角色金鑰。
@@ -14,6 +14,7 @@ README='''VR Command Windows 遊戲伺服器啟動器 1.2／Windows 遊戲程式
 更新只保留同一路徑／實例／API／GameServer金鑰中仍可啟動的原選取；消失或載入失敗不改選其他房間。路徑編輯後必須重新載入。
 獨立房間各開一個啟動器、各選場次與不同UDP埠；五房Linked場次只開一個。
 有新場次時按載入／更新。已綁定來源／Running／MR場次不由此工具接管；啟動前仍重新向原API核對，不拿清單當保留或就緒。
+啟動器在公告前會核對 Windows 的 UDP 綁定，確認本次遊戲程序已綁定所設定的本機位址與埠。就緒檔的 udpBinding 是啟動時的觀察，遠端能否加入仍需實測。
 伺服器就緒後，從控制台下載各玩家自己的連線檔，交給玩家包；再由控制台開始任務。
 操作員由控制台End後，等戰鬥與世界雙封存，再保留36秒供玩家戰績傳送，啟動器才終止自己的Unity程序。
 「中止」會保留本次journal但不算正常完成；不自動End、不重新開舊戰場、不修復或重送舊journal。
@@ -68,7 +69,7 @@ def main():
     with (stage/'compile.log').open('xb') as log:subprocess.run([str(compiler),'/nologo','/warnaserror','/codepage:65001','/target:winexe','/platform:x64','/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Web.Extensions.dll','/out:'+str(folder/'Launch-Server.exe'),str(frozen)],stdout=log,stderr=subprocess.STDOUT,check=True)
     if digest(source)!=source_hash:raise ValueError('Launcher source changed during compilation')
     (folder/'README.txt').write_text(README,encoding='utf-8')
-    manifest={'schemaVersion':1,'target':'win-x64','launcherVersion':'1.2.0','createdAtUtc':datetime.now(timezone.utc).isoformat(),'build':receipt,'launcherSourceSha256':source_hash,'scope':'Standalone server launcher; no keys, tickets or databases; manifest is not a signature.',
+    manifest={'schemaVersion':1,'target':'win-x64','launcherVersion':'1.3.0','createdAtUtc':datetime.now(timezone.utc).isoformat(),'build':receipt,'launcherSourceSha256':source_hash,'scope':'Standalone server launcher; no keys, tickets or databases; manifest is not a signature.',
         'files':[{'path':p.relative_to(folder).as_posix(),'bytes':p.stat().st_size,'sha256':digest(p)} for p in sorted(folder.rglob('*')) if p.is_file()]}
     (folder/'server-package.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8');verify(folder)
     output=plain(args.output);output.parent.mkdir(parents=True,exist_ok=True)
