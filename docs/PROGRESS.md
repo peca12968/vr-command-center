@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-06 遊戲伺服器本機網卡驗證
+
+外部玩家測試新增 `--local-game-address=<本機IPv4>`，要求位址已指派給本機且屬私有 IPv4。工具核對指定的公告與監聽位址、控制台欄位、伺服器 PID 的 UDP socket 和兩份下載檔。原 loopback 流程繼續作為預設。變更來源為 `3f243c39e394ac3fc7dc4aafbc7e6fdab787db61`。 [外部玩家與雙機驗收步驟](EXTERNAL_CLIENTS.md)
+
+- 乙太網路 IPv4 場 `20261106-020816-f3207f89` 通過 13 項，兩位玩家入場並收到各自的戰績，世界封存序號 637。實際 UDP socket 綁在指定 IPv4 與埠。包啟動器的入場、拒絕、無伺服器及斷線後戰績狀態均已驗證。
+- Loopback 場 `20261106-021033-fbf94c7f` 通過 9 項，兩份戰績與世界封存序號 198 一致。兩場測試工具均 exit 0，程序清理後各 14 檔 C／F SHA256 相符。證據涵蓋同機 Simulation，第二台電腦的實體網路、頭盔與真人容量待驗。
+- Node 語法、6 項 Python 與 3 個命令列拒絕案例通過。GitHub Actions 42081624524／job 127435870115 因付款或支出上限條件未啟動，沒有執行步驟。上一輪成功 CI 的測試來源為 `e963e48`。 [本輪 GitHub 工作](https://github.com/peca12968/vr-command-center/actions/runs/42081624524/job/127435870115)
+
 ## 2026-11-06 玩家連線檔視窗驗證
 
 玩家啟動器 1.1 交付包 `windows-player-0.41.1-v2.zip` 為 82,652,952 bytes，SHA256 `925a8ac16451ae2c423da1b0cb9c9867af17b8fb5b08ab5824f7ea1b1bca8402`。解壓包通過 19 項檢查，Framework 核對類別 24 項與連線狀態 17 項通過。封裝核對確認 311 項清單內容及同源 Unity 0.41.1 執行檔。 [玩家連線檔載入與核對](PLAYER_CONFIG_REVIEW.md)
