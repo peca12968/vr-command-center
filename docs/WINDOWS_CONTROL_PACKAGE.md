@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-06 交付 `control-server-api0.31.0-ui0.31.5-win-x64.zip`，52,490,290 bytes，SHA256 `1984acf7b29aaace53054f306036625a7a38a041116e9e1be4491dd3b1b8e243`。控制台會保留命令的原場次，原場次離開清單後需重新選取。解壓包通過 105 項 Windows 檢查。 [場次切換與操作](SESSION_CLOSURE.md#場次切換與操作)
+
 2026-11-06 交付包 `control-server-api0.31.0-ui0.31.4-win-x64.zip`，52,489,449 bytes，SHA256 `158e4d10e5bde2e347f3661cbbfeefbe57231668e5ee5f7b7b1aba3a6198d18b`。控制台新增整房配票 ZIP。解壓包通過 105 項 Windows 檢查，實際 ZIP 也通過同機雙玩家入場與封存。 [開發進度](PROGRESS.md)
 
 2026-11-06 交付包 `control-server-api0.31.0-ui0.31.3-win-x64.zip`，52,484,295 bytes，SHA256 `0bc73d3452638f83363ac663eee8f767c114449bd7b58e6789712b8512c682dc`。控制台 0.31.3 在配票前核對 IPv4 與埠號。解壓包通過 105 項 Windows 檢查，另有 89 項 Node 與 301 項瀏覽器回歸通過。 [開發進度](PROGRESS.md)
