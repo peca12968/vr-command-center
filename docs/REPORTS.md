@@ -4,6 +4,14 @@ API／控制台 **0.27.0** 新增 `GET /api/sessions/{id}/report.csv`。在「�
 
 檔案為 UTF-8 BOM、逗號分隔、CRLF 換行，所有欄位加雙引號，內部雙引號重複。固定名稱 `vr-command-report-v1-{sessionId}.csv`，可供試算表或標準 CSV reader 讀取。HTTP 使用 `text/csv; charset=utf-8`、attachment、`Cache-Control: no-store`。
 
+## 五房分房匯出
+
+控制台 0.31.8 在五房連線場次的任務統計中提供報表範圍。主控預設下載全場，也可選定其中一房。房控畫面固定為自己的房間。下載期間會鎖定範圍，切換場次或登出會取消該次下載。
+
+分房端點為 `GET /api/sessions/{id}/rooms/{roomId}/report.csv`。主控可選場次內的任一房，房控只能在此端點指定自己的房間，跨房回應 403。主控指定場次外的房間時回應 400。兩個端點使用相同的最終戰鬥封存條件。全場端點沿用原場次讀取權限及 CSV 欄位。
+
+分房檔名為 `vr-command-report-v1-{sessionId}-room-NN.csv`。原 `roomIds` 記錄整場房間組成，新增末欄 `reportRoomId` 標示本檔的房號。只有該房的玩家戰績會列入，包括已離場玩家。若該房無玩家戰績，輸出一列帶有房號的場次資料。場次 ID、事件序號及戰鬥封存序號沿用同一份全場資料。 [Windows 三包整合驗證](WINDOWS_SERVER_PACKAGE.md#三個可攜包整合驗證)
+
 ## 最終性與權限
 
 SessionManager 在同一把鎖內檢查身分／房間、Ended 與戰鬥封存，再擷取場次及 ledger。已綁 combat stream 必須接受精確 seal，只有 End 不足以匯出；尾端補送完成但尚未 seal 仍回 409。未綁 stream 的歷史場次 End 後不能接受新戰鬥，故可匯出。報表不新增事件、不更動歷史，也不寫入伺服器的匯出檔案。
@@ -37,7 +45,7 @@ Master 可讀全部；RoomController 依既有場次讀取政策，只能匯出�
 
 ## 瀏覽器下載生命週期
 
-下載以 Bearer fetch 進行，憑證只在頁面記憶體，不寫網址、CSV 或瀏覽器儲存區。只將正確 CSV MIME 的成功回應轉為 Blob；檔名只用場次 UUID。產生的 ObjectURL 於點擊後釋放。
+下載以 Bearer fetch 進行，憑證只在頁面記憶體，不寫網址、CSV 或瀏覽器儲存區。只將正確 CSV MIME 的成功回應轉為 Blob。檔名使用場次 UUID，分房檔再加入房號。產生的 ObjectURL 於點擊後釋放。
 
 下載中抑制重複點擊，仍可切換場次或登出；selection generation 與登入 epoch 阻擋晚回應，切離後再選回同場也不能觸發舊下載。重設會中止 fetch，讀 header／blob 後再次核對身分與場次。一般更新不清掉下載結果／錯誤；只有可用狀態改變才換回提示。409／錯誤 MIME 不下載並可重試；當前 401 登出，過期登入的 401 不影響新登入。
 

@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-06 目前主包為 `artifacts/control-packages/control-server-api0.31.0-ui0.31.8-win-x64.zip`，52,502,728 bytes，SHA256 `51d4cf3fd476d0b6f300b44d13b7ae3a64fc2b6b8a882a9b1a93343ca3f10005`。檔案清單有 504 筆，管理服務執行檔與相依檔共 484 份。五房連線場次可分房匯出最終戰績，解壓包通過 105 項 Windows 檢查。 [分房匯出](REPORTS.md#五房分房匯出)
+
 2026-11-06 交付 `control-server-api0.31.0-ui0.31.7-win-x64.zip`，52,500,466 bytes，SHA256 `5bc8bdd6cbdcc9713337caab6d62556c97cc0848aad41e992fa04792c76f6d0e`。任務配置新增五個出生位到中線的取樣通路，解壓包通過 105 項 Windows 檢查。 [出生位通路預覽](LAYOUT.md#出生位通路預覽)
 
 2026-11-06 交付 `control-server-api0.31.0-ui0.31.6-win-x64.zip`，52,494,879 bytes，SHA256 `aa37499ea550d7cce90f0bfd23d42162b4360bb3a5677e6e62bde5761b37b92e`。五房總覽新增有效姿態與兩種來源的人數，解壓包通過 105 項 Windows 檢查。 [五房總覽](PLAYER_READINESS.md#五房總覽)
@@ -10,9 +12,9 @@
 
 2026-11-06 交付包 `control-server-api0.31.0-ui0.31.3-win-x64.zip`，52,484,295 bytes，SHA256 `0bc73d3452638f83363ac663eee8f767c114449bd7b58e6789712b8512c682dc`。控制台 0.31.3 在配票前核對 IPv4 與埠號。解壓包通過 105 項 Windows 檢查，另有 89 項 Node 與 301 項瀏覽器回歸通過。 [開發進度](PROGRESS.md)
 
-API **0.31.0**／控制台 **0.31.2**，管理服務可以獨立解壓執行。`Start-Control.exe`提供繁中介面，API隨包附帶.NET／ASP.NET Core **10.0.14 win-x64**，使用者電腦需要Windows x64及.NET Framework 4.8，管理服務不依賴Python或.NET SDK。遊戲伺服器可使用[獨立伺服器包](WINDOWS_SERVER_PACKAGE.md)，玩家另外啟動，參見[外部玩家流程](EXTERNAL_CLIENTS.md)與[Windows玩家包](WINDOWS_PLAYER_PACKAGE.md)。
+API **0.31.0**／控制台 **0.31.8**，管理服務可以獨立解壓執行。`Start-Control.exe`提供繁中介面，API隨包附帶.NET／ASP.NET Core **10.0.14 win-x64**，使用者電腦需要Windows x64及.NET Framework 4.8，管理服務不依賴Python或.NET SDK。遊戲伺服器可使用[獨立伺服器包](WINDOWS_SERVER_PACKAGE.md)，玩家另外啟動，參見[外部玩家流程](EXTERNAL_CLIENTS.md)與[Windows玩家包](WINDOWS_PLAYER_PACKAGE.md)。
 
-目前主包為`artifacts/control-packages/control-server-api0.31.0-ui0.31.2-placement-win-x64.zip`，**52,472,096 bytes／SHA256 `1eac2676113b47c58b5649ce444201e612603167a16d1e5bccb0599fc1dcf9a2`**、504 manifest／484 runtime。新增[場景物件復原／重做](PLACEMENT_HISTORY.md)，新Windows CLI105與實際解壓包29項瀏覽器操作成功；完整89 Node／296 Chromium。沿用原管理啟動器C#來源，沒有新WinForms GUI啟停或native遊戲／Unity建置驗收。
+0.31.2 交付包為`artifacts/control-packages/control-server-api0.31.0-ui0.31.2-placement-win-x64.zip`，**52,472,096 bytes／SHA256 `1eac2676113b47c58b5649ce444201e612603167a16d1e5bccb0599fc1dcf9a2`**、504 manifest／484 runtime。新增[場景物件復原／重做](PLACEMENT_HISTORY.md)，新Windows CLI105與實際解壓包29項瀏覽器操作成功；完整89 Node／296 Chromium。沿用原管理啟動器C#來源，沒有新WinForms GUI啟停或native遊戲／Unity建置驗收。
 
 前版0.31.1主包`artifacts/control-packages/control-server-api0.31.0-ui0.31.1-closure-final-win-x64.zip`保持，**52,466,368 bytes／SHA256 `7d87669d0f8478feb328697c3d9d58005aa8f0e3331726080374fa6ab5a254e5`**、501 manifest／481 runtime檔案。新增[任務收尾與End重試](SESSION_CLOSURE.md)，新CLI105／真正browser UI End＋原生106通過；Windows啟動器C#來源保持，沒有新GUI啟停操作驗收。相同大小、SHA684f1f4d...的closure初候選保留，其舊End篩選反例未通過。以下初版0.31.0證據亦保留。
 
