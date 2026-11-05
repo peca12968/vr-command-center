@@ -11,14 +11,15 @@ const shortId = id => id && id !== '00000000-0000-0000-0000-000000000000' ? id.s
 
 export function mountWorld(getKey, unauthorized) {
   let active = false, scene, controller, epoch = 0, listEpoch = 0, info, frame, geometry = '', mode = '', connected = false, received = 0;
-  let connecting = false, stepping = false;
+  let connecting = false, stepping = false, savedLimit = null, savedFinished = false;
   const cameras = mountCameras(getKey, unauthorized, () => scene, () => { $('world-camera').value = 'free'; $('world-room').value = 'all'; });
   const cameraForm = mountWorldCameraForm(() => scene, () => { $('world-camera').value = 'free'; $('world-room').value = 'all'; });
   function message(text, error = false) { $('world-message').textContent = text; $('world-message').classList.toggle('replay-error', error); }
   function stop() { epoch++; controller?.abort(); controller = null; connected = connecting = stepping = false; scene?.weather.pause(); scene?.draw(); $('world-pause').textContent = '繼續回放'; }
   function reset() {
-    stop(); listEpoch++; info = frame = null; geometry = ''; mode = ''; cameras.reset(); cameraForm.reset(); reviewControls();
+    stop(); listEpoch++; info = frame = savedLimit = null; savedFinished = false; geometry = ''; mode = ''; cameras.reset(); cameraForm.reset(); reviewControls();
     $('world-recording').replaceChildren(); $('world-player').hidden = true; message('選取已錄製的場次，開始觀戰或回放。');
+    recordingControls();
     scene?.reset(); $('world-sound').textContent = '音效：關閉'; $('world-sound').disabled = true;
   }
   async function response(url, signal) {
@@ -36,14 +37,25 @@ export function mountWorld(getKey, unauthorized) {
       const selected = $('world-recording').value;
       $('world-recording').replaceChildren(...rows.map(row => {
         const option = document.createElement('option'); option.value = row.header.sessionId;
+        option.dataset.complete = String(row.complete); option.dataset.accepted = String(row.acceptedSequence);
         option.textContent = `${row.missionName} · 房間 ${row.header.roomIds.join('、')} · ${row.header.origin} · ${row.complete ? '完整' : '錄製未封存'} · ${row.header.sessionId.slice(0, 8)}`;
         return option;
       }));
       if (rows.some(row => row.header.sessionId === selected)) $('world-recording').value = selected;
-      reviewControls();
-      for (const id of ['world-live', 'world-replay']) $(id).disabled = !rows.length;
+      else if (selected) resetRecording();
+      recordingControls(); reviewControls();
       if (!rows.length) message('目前沒有可讀取的世界錄製；等待遊戲伺服器開始發送。');
     } catch (error) { if (request === listEpoch && active) message(error.message, true); }
+  }
+  function recordingControls() {
+    const selected = $('world-recording').selectedOptions[0];
+    $('world-live').disabled = !selected;
+    $('world-replay').disabled = !(Number(selected?.dataset.accepted) > 0);
+    $('world-replay').textContent = selected?.dataset.complete === 'false' ? '回放已保存片段' : '從頭回放';
+  }
+  function resetRecording() {
+    stop(); cameras.bind(null); cameraForm.reset(); info = frame = savedLimit = null; savedFinished = false; mode = '';
+    recordingControls(); reviewControls(); $('world-player').hidden = true; message('已切換場次，請開始觀戰或回放。');
   }
   function reviewControls() {
     const showing = active && mode === 'replay' && info?.header.sessionId === $('world-recording').value && Boolean(frame);
@@ -67,9 +79,15 @@ export function mountWorld(getKey, unauthorized) {
     $('world-event-table').hidden = !rows.length;
     $('world-no-events').hidden = Boolean(rows.length);
   }
+  function replayAt(milliseconds, sequence) {
+    const sameRecording = info?.header.sessionId === $('world-recording').value;
+    if (mode === 'live' && sameRecording && !info.complete) savedLimit = 'latest';
+    return connect('replay', milliseconds, sequence);
+  }
   function replayFromCurrent() {
-    const sequence = info?.header.sessionId === $('world-recording').value ? frame?.packet.sequence : undefined;
-    return connect('replay', 0, sequence);
+    const sameRecording = info?.header.sessionId === $('world-recording').value;
+    const sequence = sameRecording ? frame?.packet.sequence : undefined;
+    return replayAt(0, sequence);
   }
   function status() {
     reviewControls();
@@ -80,7 +98,8 @@ export function mountWorld(getKey, unauthorized) {
     $('world-sound').setAttribute('aria-pressed', String(audio === 'on'));
     const phase = frame ? phases[frame.packet.frame.phase] : '等待第一份快照';
     const clock = recordedClock(info.header, frame?.packet.frame.tick);
-    $('world-status').textContent = `${info.header.origin} · ${info.complete ? '錄製已核對封存' : '錄製未封存'} · ${phase}${clock ? ' · ' + clock : ''}`;
+    const saved = mode === 'replay' && typeof savedLimit === 'number';
+    $('world-status').textContent = `${info.header.origin} · ${info.complete ? '錄製已核對封存' : '錄製未封存'}${saved ? ` · 已保存片段至第 ${savedLimit} 格 · 快照階段 ${phase}` : ' · ' + phase}${clock ? ' · ' + clock : ''}`;
     if (mode === 'live') {
       const captured = info.header.captureStartedAtUtc ? Date.parse(info.header.captureStartedAtUtc) + (frame?.packet.elapsedMilliseconds ?? 0) : NaN;
       const age = Date.now() - captured, unknown = !Number.isFinite(age), clockInvalid = age < -1000;
@@ -88,7 +107,12 @@ export function mountWorld(getKey, unauthorized) {
       if (stale || unknown || clockInvalid) { scene?.weather.pause(); scene?.draw(); }
       $('world-freshness').textContent = info.complete ? '場次已封存' : unknown ? '擷取時間未知' : clockInvalid ? '來源時鐘未同步' : stale ? '快照已中斷或過期' : '正在接收快照';
       $('world-freshness').classList.toggle('replay-error', (stale || unknown || clockInvalid) && !info.complete);
-    } else { $('world-freshness').textContent = connected ? '回放中' : '回放已暫停／結束'; $('world-pause').textContent = connected ? '暫停回放' : '繼續回放'; }
+    } else {
+      const atSavedEnd = saved && savedFinished && frame?.packet.sequence === savedLimit;
+      $('world-freshness').textContent = atSavedEnd ? '已到已保存片段尾端' : connected ? '回放中' : '回放已暫停／結束';
+      $('world-freshness').classList.remove('replay-error');
+      $('world-pause').textContent = connected ? '暫停回放' : '繼續回放';
+    }
     if (!connected) { scene?.weather.pause(); scene?.draw(); }
   }
   function selectActor(key) { $('world-actor').value = key; scene?.select(key); actorInfo(); }
@@ -145,11 +169,13 @@ export function mountWorld(getKey, unauthorized) {
   async function connect(nextMode, milliseconds = 0, sequence = null) {
     const id = $('world-recording').value; if (!active || !id) return;
     stop(); mode = nextMode; controller = new AbortController(); const request = epoch, signal = controller.signal;
+    if (nextMode === 'live') savedLimit = null;
+    const limit = savedLimit; savedFinished = false;
     connecting = true; reviewControls(); $('world-frame-message').textContent = '';
     message(nextMode === 'live' ? '正在連接即時觀戰…' : '正在讀取已保存快照…');
     try {
       const position = sequence === null ? `fromMs=${Math.round(milliseconds)}` : `fromFrame=${sequence}`;
-      const url = `/api/sessions/${id}/world/watch?mode=${nextMode}&${position}&rate=${$('world-speed').value}`;
+      const url = `/api/sessions/${id}/world/watch?mode=${nextMode}&${position}&rate=${$('world-speed').value}${limit === null ? '' : `&throughFrame=${limit}`}`;
       const stream = await response(url, signal);
       if (request !== epoch || !active) return;
       if (!stream.body || !stream.headers.get('content-type')?.startsWith('text/event-stream')) throw new Error('缺少觀戰串流。');
@@ -167,6 +193,11 @@ export function mountWorld(getKey, unauthorized) {
             const lines = event.split('\n'), type = lines.find(line => line.startsWith('event: '))?.slice(7), raw = lines.find(line => line.startsWith('data: '))?.slice(6);
             if (!raw) continue; const data = JSON.parse(raw);
             if (type === 'header') {
+              if (limit !== null) {
+                if (!Number.isSafeInteger(data.acceptedSequence) || data.acceptedSequence < 1 || (limit !== 'latest' && limit !== data.acceptedSequence))
+                  throw new Error('已保存片段的尾端不符。');
+                savedLimit = data.acceptedSequence;
+              }
               info = data;
               scene ??= new ReplayScene($('world-canvas'), selectActor, () => { $('world-camera').value = 'free'; });
               const key = JSON.stringify(info.header);
@@ -182,21 +213,31 @@ export function mountWorld(getKey, unauthorized) {
               status();
             } else if (type === 'frame') show(data);
             else if (type === 'status' || type === 'complete') { info = data; status(); }
+            else if (type === 'saved-end' && limit !== null) {
+              if (data.acceptedSequence !== savedLimit || frame?.packet.sequence !== savedLimit) throw new Error('已保存片段未完整讀取。');
+              info = data; savedFinished = true;
+            }
           }
         }
       } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
-      if (request === epoch) { connected = false; status(); }
+      if (request === epoch) {
+        if (limit !== null && !savedFinished) throw new Error('尚未讀到已保存片段尾端。');
+        connected = false; status();
+      }
     } catch (error) { if (request === epoch && !signal.aborted) { connected = connecting = false; message('觀戰已中斷：' + error.message + '；可重新連接。', true); status(); } }
   }
   $('world-refresh').addEventListener('click', refresh);
   $('world-sound').addEventListener('click', async () => { if (scene?.weather.version === 1 || scene?.weather.audio.combat.version === 1) { const pending = scene.weather.audio.toggle(); status(); await pending; if (active && getKey()) status(); } });
-  $('world-recording').addEventListener('change', () => { stop(); cameras.bind(null); cameraForm.reset(); info = frame = null; reviewControls(); $('world-player').hidden = true; message('已切換場次，請開始觀戰或回放。'); });
+  $('world-recording').addEventListener('change', resetRecording);
   $('world-live').addEventListener('click', () => connect('live'));
-  $('world-replay').addEventListener('click', () => connect('replay'));
+  $('world-replay').addEventListener('click', () => {
+    savedLimit = $('world-recording').selectedOptions[0]?.dataset.complete === 'false' ? 'latest' : null;
+    connect('replay', 0, 1);
+  });
   $('world-pause').addEventListener('click', () => { if (mode === 'replay' && connected) { stop(); status(); } else replayFromCurrent(); });
   $('world-frame-back').addEventListener('click', () => step(-1));
   $('world-frame-next').addEventListener('click', () => step(1));
-  $('world-timeline').addEventListener('change', () => connect('replay', Number($('world-timeline').value)));
+  $('world-timeline').addEventListener('change', () => replayAt(Number($('world-timeline').value)));
   $('world-speed').addEventListener('change', () => { if (mode === 'replay') replayFromCurrent(); });
   $('world-actor').addEventListener('change', () => selectActor($('world-actor').value));
   $('world-room').addEventListener('change', () => { scene?.focus($('world-room').value); $('world-camera').value = 'free'; });

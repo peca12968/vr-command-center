@@ -34,3 +34,13 @@ test('Legacy mission-clock zero remains readable, while unsupported source and n
   for (const sequence of ['20', -1, Number.MAX_SAFE_INTEGER + 1]) assert.equal(view({ ...session, sequence }).complete, false);
   for (const change of [{ origin: 'Unknown' }, { acceptedSequence: -1 }, { sealed: 'true' }]) assert.equal(view({ ...session, combatStream: { ...session.combatStream, ...change } }).complete, false);
 });
+test('Saved counts are independent of sealing and disappear when their own source is unconfirmed', () => {
+  const pending = { ...session, combatStream: { ...session.combatStream, acceptedSequence: 6, sealed: false } };
+  const partial = { ...world, complete: false };
+  const current = view(pending, { ...stats, pendingTelemetry: true }, partial);
+  assert.equal(current.complete, false); assert.equal(current.combatCount, 6); assert.equal(current.worldCount, 2);
+  assert.match(current.text, /已保存的錄製可在/);
+  assert.equal(view(pending, { ...stats, throughSequence: 19 }, partial).combatCount, null);
+  assert.equal(view(pending, stats, partial, 'Unavailable').worldCount, null);
+  assert.equal(view(pending, stats, { ...partial, header: { ...world.header, streamId: 'other' } }).worldCount, null);
+});

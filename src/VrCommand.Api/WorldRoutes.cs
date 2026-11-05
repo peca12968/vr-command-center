@@ -105,13 +105,35 @@ public static class WorldRoutes
         {
             if (!replay || from.Length > 0 || !long.TryParse(fromFrame, out exact) || exact < 1)
                 throw new ArgumentException("Use a positive frame sequence by itself in replay mode.");
-            if (exact > info.AcceptedSequence) throw new KeyNotFoundException("No saved world frame with this sequence.");
         }
         var speed = context.Request.Query["rate"].ToString();
         if (speed.Length > 0 && speed is not ("0.25" or "0.5" or "1" or "2" or "4")) throw new ArgumentException("Invalid replay speed.");
         var rate = speed.Length == 0 ? 1 : double.Parse(speed, System.Globalization.CultureInfo.InvariantCulture);
+        var through = context.Request.Query["throughFrame"].ToString();
+        var saved = through.Length > 0;
+        if (saved)
+        {
+            var limit = info.AcceptedSequence;
+            if (!replay || (through != "latest" && (!long.TryParse(through, out limit) || limit < 1)))
+                throw new ArgumentException("Use latest or a positive saved frame sequence in replay mode.");
+            if (limit == 0) throw new InvalidOperationException("This recording has no saved frames yet.");
+            if (limit > info.AcceptedSequence) throw new KeyNotFoundException("No saved world frame with this sequence.");
+            if (limit < info.AcceptedSequence)
+            {
+                var end = store.Frame(id, limit, actor) ?? throw new KeyNotFoundException("No saved world frame with this sequence.");
+                var duration = end.Packet.elapsedMilliseconds;
+                info = info with { AcceptedSequence = limit, DurationMilliseconds = duration, Complete = false,
+                    CapturedAtUtc = info.CapturedAtUtc?.AddMilliseconds(duration - info.DurationMilliseconds) };
+            }
+        }
+        if (exact > info.AcceptedSequence) throw new KeyNotFoundException("No saved world frame with this sequence in the requested replay.");
         long sequence = Math.Max(1, info.AcceptedSequence);
-        if (replay) sequence = exact > 0 ? exact : store.Seek(id, milliseconds, actor);
+        if (replay)
+        {
+            if (exact > 0) sequence = exact;
+            else sequence = saved && from.Length == 0 ? 1 : store.Seek(id, milliseconds, actor);
+        }
+        if (saved) sequence = Math.Min(sequence, info.AcceptedSequence);
         long sent = 0; var clock = Stopwatch.StartNew(); long? startMilliseconds = null;
         var heartbeat = Stopwatch.StartNew(); var cancellation = context.RequestAborted;
         context.Response.ContentType = "text/event-stream"; context.Response.Headers.CacheControl = "no-store";
@@ -127,7 +149,7 @@ public static class WorldRoutes
             while (!cancellation.IsCancellationRequested)
             {
                 var delay = 50;
-                info = store.Info(id, actor);
+                if (!saved) info = store.Info(id, actor);
                 if (!replay) sequence = Math.Max(1, info.AcceptedSequence);
                 var frame = sequence <= info.AcceptedSequence && sequence != sent ? store.Frame(id, sequence, actor) : null;
                 if (frame is not null)
@@ -142,7 +164,8 @@ public static class WorldRoutes
                 }
                 if (heartbeat.ElapsedMilliseconds >= 1000)
                 { await Send("status", info); heartbeat.Restart(); }
-                if (replay && info.Complete && sequence > info.AcceptedSequence) { await Send("complete", info); return; }
+                if (replay && (saved || info.Complete) && sequence > info.AcceptedSequence)
+                { await Send(saved ? "saved-end" : "complete", info); return; }
                 await Task.Delay(delay, cancellation);
             }
         }

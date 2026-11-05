@@ -18,6 +18,7 @@ def main():
     p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
     p.add_argument('--check-layout-preview',action='store_true',help='Load a saved barricade opening and compare its preview with native world geometry')
     p.add_argument('--check-room-reports',action='store_true',help='Verify scoped Linked CSVs against the full sealed native report')
+    p.add_argument('--check-interrupted-replay', action='store_true', help='Play the saved native prefix after the owned launcher is killed')
     args=p.parse_args()
     if os.name!='nt':p.error('Actual Windows processes required')
     if bool(args.player_package)!=bool(args.game_address):p.error('Provide --player-package and --game-address together')
@@ -77,10 +78,10 @@ def main():
     def rejected(label,value,**options):
         file=runtime/(label+'.json');file.write_text(json.dumps(value),encoding='utf-8');work=runtime/(label+'-work');ready=out/(label+'-ready.json')
         call(label,['--run',file,'--work',work,'--seconds',options.get('seconds',60),'--ready-report',ready,*options.get('extra',())]);check(not work.exists() and not ready.exists(),label+' creates no native world')
-    def create(rooms,label):
+    def create(rooms,label, *, auto_attack=False):
         props=[{'assetId':'sandbag','position':{'x':x,'y':0,'z':-1},'yawDegrees':0}
                for x in (-5,-3,-1,3,5)] if args.check_layout_preview else []
-        mission=request('/api/missions',{'name':'Portable '+label,'briefing':'Owned PC package fixture, Simulation only','durationSeconds':600,'environment':{'mode':'VR','weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':1,'behavior':'Hold','autoAttack':False},'props':props},expected=201)
+        mission=request('/api/missions',{'name':'Portable '+label,'briefing':'Owned PC package fixture, Simulation only','durationSeconds':600,'environment':{'mode':'VR','weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':1,'behavior':'Hold','autoAttack':auto_attack},'props':props},expected=201)
         state=request('/api/sessions',{'missionId':mission['id'],'mode':'Linked' if len(rooms)==5 else 'Independent','roomIds':rooms},expected=201);sessions.append(state['id']);return state
     def launch(state,label):
         value=config(state['id']);file=runtime/(label+'.json');file.write_text(json.dumps(value),encoding='utf-8');ready=out/(label+'-ready.json');report=out/(label+'-final.json');work=runtime/(label+'-work')
@@ -96,7 +97,7 @@ def main():
         return entry
     def player(entry,room):
         state=request('/api/sessions/'+entry['sessionId']+'/players',{'playerId':str(uuid.uuid4()),'roomId':room,'name':'Portable server room '+str(room),'headset':'Quest3'},role='Room'+str(room));person=next(x for x in state['players'] if x['roomId']==room)
-        invitation=request('/api/sessions/'+state['id']+'/players/'+person['id']+'/join-ticket',{},role='Room'+str(room),admission=person['admissionId']);file=runtime/(entry['label']+'-client-'+str(room)+'.json');file.write_text(json.dumps({'role':'Client','address':'127.0.0.1','port':entry['ready']['port'],'joinTicket':invitation['ticket']}),encoding='utf-8');log=runtime/(file.stem+'.log')
+        invitation=request('/api/sessions/'+state['id']+'/players/'+person['id']+'/join-ticket',{},role='Room'+str(room),admission=person['admissionId']);file=runtime/(entry['label']+'-client-'+str(room)+'.json');file.write_text(json.dumps({'role':'Client','address':address,'port':entry['ready']['port'],'joinTicket':invitation['ticket']}),encoding='utf-8');log=runtime/(file.stem+'.log')
         child=subprocess.Popen([str(folder/'Runtime/VrCommand.exe'),'-batchmode','-nographics','-job-worker-count','2','-logFile',str(log),'--vr-config',str(file)],cwd=runtime,env=env,creationflags=subprocess.CREATE_NO_WINDOW);client={'process':child,'log':log,'player':person,'sessionId':state['id']};clients.append(client);return client
     def room_players(entry,room):
         path='/api/sessions/'+entry['sessionId']
@@ -264,6 +265,37 @@ def main():
                     if kind=='complete':break
         check(len(frames)==report['finalWorld']['acceptedSequence'] and [x['packet']['sequence'] for x in frames]==list(range(1,len(frames)+1)) and frames[-1]['packet']['frame']['phase']=='Ended',entry['label']+' full API replay through terminal frame')
         save(entry['label']+'-replay.json',frames);rounds.append({'name':entry['label'],'ready':entry['ready'],'report':report,'journal':closed,'replayFrames':len(frames)})
+    def verify_interrupted_replay(entry, client):
+        session = '/api/sessions/' + entry['sessionId']
+        path = session + '/world'
+        saved = request(path)
+        state = request(session)
+        stats = request(session + '/statistics')
+        check(state['state'] == 'Ended' and not state['combatStream']['sealed'] and stats['pendingTelemetry']
+              and not saved['complete'] and saved['acceptedSequence'] > 1,
+              'interrupted source leaves accepted frames and pending combat after End')
+        raw, headers = request(path + '/watch?mode=replay&fromFrame=1&throughFrame=latest&rate=4', role='Room1', raw_response=True)
+        messages = []
+        for block in raw.decode('utf-8').strip().split('\n\n'):
+            kind, data = block.split('\n', maxsplit=1)
+            messages.append((kind.removeprefix('event: '), json.loads(data.removeprefix('data: '))))
+        frames = [value for kind, value in messages if kind == 'frame']
+        tail = saved['acceptedSequence']
+        check(headers.get_content_type() == 'text/event-stream' and messages[0] == ('header', saved)
+              and messages[-1] == ('saved-end', saved) and all(kind != 'complete' for kind, _ in messages)
+              and [frame['packet']['sequence'] for frame in frames] == list(range(1, tail + 1)),
+              'interrupted native replay closes at the exact saved boundary without a seal')
+        exact = request(path + f'/frames/{tail}', role='Room1')
+        check(frames[-1] == exact and exact['packet']['frame']['phase'] == 'Running'
+              and any(row['damageTaken'] > 0 for row in exact['statistics']) and request(path) == saved,
+              'saved native tail retains exact original damage and statistics')
+        request(session + '/report.csv', expected=409)
+        request(session + '/rooms/1/report.csv', role='Room1', expected=409)
+        stop_player(client)
+        check('VR_CLIENT_DEBRIEF_FINAL ' not in client['log'].read_text(encoding='utf-8', errors='replace'),
+              'interrupted run gives neither a final operator CSV nor a player final result')
+        save('parent-exit-saved-replay.json', {'world': saved, 'combatAcceptedSequence': state['combatStream']['acceptedSequence'],
+             'terminalEvent': messages[-1][0], 'frames': frames, 'finalCsvAvailable': False, 'playerFinalReceived': False})
     def verify_room_readiness(round_clients,linked):
         expected={client['player']['roomId']:client['sessionId'] for client in round_clients}
         def all_ready():
@@ -349,7 +381,20 @@ def main():
             if player_folder:
                 for entry in entries:verify_delivery(entry,[c for c in round_clients if c['sessionId']==entry['sessionId']])
         # A killed launcher must close its already-assigned Job and stop the exact owned native handle.
-        crash=launch(create([1],'parent-exit'),'parent-exit');crash['process'].kill();crash['process'].wait(timeout=10);w=crash['witness'];check(w.kernel.WaitForSingleObject(w.handle,15000)==0,'parent death stops original job child');w.close();crash['witness']=None;check(not crash['reportPath'].exists(),'killed parent cannot publish success');command(crash['sessionId'],'End')
+        crash=launch(create([1],'parent-exit',auto_attack=args.check_interrupted_replay),'parent-exit')
+        if args.check_interrupted_replay:
+            crash_client = player(crash, 1)
+            roster = [crash_client['player']['id']]
+            wait(lambda: observe(crash, roster), 60, 'interrupted round original player')
+            begun = command(crash['sessionId'], 'Begin')['session']['sequence']
+            def damaged():
+                frame = observe(crash, roster, begun)
+                return frame and any(row['damageTaken'] > 0 for row in frame['statistics'])
+            wait(damaged, 20, 'original player damaged before the owned server exits')
+            check(True, 'interrupted native round records original player damage before the crash')
+        crash['process'].kill();crash['process'].wait(timeout=10);w=crash['witness'];check(w.kernel.WaitForSingleObject(w.handle,15000)==0,'parent death stops original job child');w.close();crash['witness']=None;check(not crash['reportPath'].exists(),'killed parent cannot publish success');command(crash['sessionId'],'End')
+        if args.check_interrupted_replay:
+            verify_interrupted_replay(crash, crash_client)
         check(all(x['state']=='Ended' for x in request('/api/sessions?includeEnded=true')),'no active management sessions')
         save('evidence.json',{'rounds':rounds,'scope':(
             'Three portable packages, five Independent rooms then Linked, 25 simultaneous same-PC Simulation clients per topology.'

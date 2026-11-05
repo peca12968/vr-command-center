@@ -23,19 +23,22 @@ export function closureView(session, statistics, world, result = 'Waiting') {
     && sequence(world.acceptedSequence) && typeof world.complete === 'boolean';
   const worldSealed = result === 'Received' && valid && world.complete === true && world.acceptedSequence > 0;
   const complete = combatSealed && worldSealed;
-  let worldText = worldSealed ? '已封存' : result === 'Unavailable' ? '暫時無法確認' : result === 'Missing' ? '尚無世界錄製紀錄'
+  const worldText = worldSealed ? '已封存' : result === 'Unavailable' ? '暫時無法確認' : result === 'Missing' ? '尚無世界錄製紀錄'
     : result === 'Received' && !valid ? '來源尚未對上' : result === 'Received' ? '等待封存' : '正在確認';
   return { complete, combat: combatSealed ? '已封存' : combat ? '等待封存' : '等待統計同步', world: worldText,
+    combatCount: combat ? stream.acceptedSequence : null, worldCount: result === 'Received' && valid ? world.acceptedSequence : null,
     text: complete ? '戰鬥統計與世界回放已封存。請繼續等待遊戲伺服器完成玩家戰績傳送與收尾；此頁不確認送達。'
       : result === 'Unavailable' ? '暫時無法確認世界回放，正在重試；請先保留遊戲伺服器。'
       : result === 'Missing' ? '尚未取得世界錄製紀錄；請先保留遊戲伺服器並確認來源。'
       : result === 'Received' && !valid ? '世界回放尚未對上本場遊戲來源，等待更新。'
+      : result === 'Received' && world.acceptedSequence > 0 && !worldSealed ? '已保存的錄製可在「觀戰與任務回放」中查看。封存仍在等待確認。'
       : '場次已結束，仍在等待同一場次的戰鬥統計與世界回放封存。',
     warning: result === 'Unavailable' || result === 'Missing' || result === 'Received' && !valid };
 }
 
 export function mountClosure(getState, unauthorized) {
   const panel = document.getElementById('closure-status'), combat = document.getElementById('closure-combat'), worldLabel = document.getElementById('closure-world'), summary = document.getElementById('closure-summary');
+  const retained = document.getElementById('closure-retained');
   let active = false, generation = 0, identity = '', controller = null, attempted = -Infinity, world = null, result = 'Waiting', refreshFailed = false;
   const context = () => {
     const state = getState(), session = state.session;
@@ -50,6 +53,10 @@ export function mountClosure(getState, unauthorized) {
       : refreshFailed ? { complete: false, combat: '未確認', world: '未確認', text: '場次更新失敗，封存狀態未確認；等待重新取得場次資料。', warning: true }
       : closureView(state.session, state.statistics, world, result);
     combat.textContent = '戰鬥統計：' + view.combat; worldLabel.textContent = '世界回放：' + view.world; summary.textContent = view.text;
+    const counts = [];
+    if (sequence(view.combatCount)) counts.push(`已接受 ${view.combatCount} 筆戰鬥資料`);
+    if (sequence(view.worldCount)) counts.push(`已保存 ${view.worldCount} 格錄製`);
+    retained.textContent = counts.join(' · '); retained.hidden = counts.length === 0;
     panel.classList.toggle('closure-complete', view.complete); panel.classList.toggle('warning', view.warning);
   }
   function reset() { clear(); identity = ''; refreshFailed = false; render(); }

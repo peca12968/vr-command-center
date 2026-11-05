@@ -298,6 +298,39 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     check((await page.locator('#world-status').innerText()).includes('未封存'), 'Stopped source becomes visibly stale while its archive remains incomplete');
     await page.screenshot({ path: path.join(screenshots, 'world-stale.png'), fullPage: true });
     await api('/sessions/' + live.header.sessionId + '/commands', 'POST', { commandId: randomUUID(), action: 'End' });
+    const interrupted = await api(`/sessions/${live.header.sessionId}/world`);
+    const combat = (await api(`/sessions/${live.header.sessionId}`)).combatStream;
+    await api(`/sessions/${live.header.sessionId}/report.csv`, 'GET', undefined, 'Master', 409);
+    await page.locator('#world-speed').selectOption('4');
+    await page.locator('#tab-operations').click();
+    await page.locator('#include-ended').check();
+    await page.locator('#session-select').selectOption(live.header.sessionId);
+    await page.waitForFunction(({ shots, frames }) => document.querySelector('#closure-retained').textContent === `已接受 ${shots} 筆戰鬥資料 · 已保存 ${frames} 格錄製`,
+      { shots: combat.acceptedSequence, frames: interrupted.acceptedSequence }, { polling: 100 });
+    check(!(await page.locator('#closure-status').evaluate(panel => panel.classList.contains('closure-complete'))) && await page.locator('#export-report').isDisabled(),
+      'Actual interrupted session reports accepted counts without declaring seals or enabling the final CSV');
+    await page.locator('#tab-world').click();
+    await page.locator('#world-recording').selectOption(live.header.sessionId);
+    check(await page.locator('#world-replay').innerText() === '回放已保存片段', 'An incomplete recording offers a bounded saved replay');
+    const savedStart = page.waitForRequest(request => {
+      const query = new URL(request.url()).searchParams;
+      return query.get('throughFrame') === 'latest' && query.get('fromFrame') === '1';
+    });
+    await page.locator('#world-replay').click();
+    await savedStart;
+    const waitSavedEnd = () => page.waitForFunction(() => document.querySelector('#world-freshness').textContent === '已到已保存片段尾端', null, { polling: 100 });
+    await waitSavedEnd();
+    check((await page.locator('#world-status').innerText()).includes('錄製未封存') && Number(await canvas.getAttribute('data-sequence')) === interrupted.acceptedSequence &&
+      await page.locator('#world-frame-next').isDisabled(), 'Saved replay stops at the real interrupted tail and keeps the archive unsealed');
+    await page.screenshot({ path: path.join(screenshots, 'world-saved-tail.png'), fullPage: true });
+    await page.locator('#world-frame-back').click();
+    await page.waitForFunction(sequence => Number(document.querySelector('#world-canvas').dataset.sequence) === sequence, interrupted.acceptedSequence - 1, { polling: 50 });
+    const savedResume = page.waitForRequest(request => {
+      const query = new URL(request.url()).searchParams;
+      return query.get('throughFrame') === String(interrupted.acceptedSequence) && query.get('fromFrame') === String(interrupted.acceptedSequence - 1);
+    });
+    await page.locator('#world-pause').click(); await savedResume; await waitSavedEnd();
+    check(true, 'Resuming after stepping back preserves the original saved replay boundary');
     const completeSource = demo('complete-world', 1), result = await completeSource.finished;
     check(result.code === 0, 'Native simulation produces a second complete persisted world: ' + result.error.slice(-300));
     const completed = JSON.parse(result.output);

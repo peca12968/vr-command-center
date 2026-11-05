@@ -205,6 +205,26 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         request(route + "/watch?mode=replay&fromFrame=0", expected=400)
         request(route + f"/watch?mode=replay&fromFrame={info['acceptedSequence'] + 1}", expected=404)
         check(True, "Exact replay refuses invalid or ambiguous seek parameters")
+        limit = combat_packet["sequence"]
+        with request(route + f"/watch?mode=replay&throughFrame={limit}&rate=4", "Room5") as stream:
+            check(event(stream)[0] == "header" and event(stream)[1]["packet"] == packets[0],
+                  "Saved replay without a seek starts from sequence one")
+        with request(route + f"/watch?mode=replay&fromMs=86400000&throughFrame={limit}&rate=4", "Room5") as stream:
+            kind, prefix = event(stream)
+            check(kind == "header" and not prefix["complete"] and prefix["acceptedSequence"] == limit
+                  and prefix["durationMilliseconds"] == combat_packet["elapsedMilliseconds"],
+                  "Saved replay caps sequence and time even when a later sealed archive exists")
+            check(event(stream) == ("frame", exact) and event(stream) == ("saved-end", prefix) and stream.read() == b"",
+                  "A seek beyond the saved range stops on the exact saved tail and closes without a seal event")
+        with request(route + f"/watch?mode=replay&fromFrame={info['acceptedSequence']}&throughFrame=latest", "Room5") as stream:
+            check(event(stream) == ("header", info) and event(stream)[1]["packet"]["sequence"] == info["acceptedSequence"]
+                  and event(stream) == ("saved-end", info), "A saved range covering a sealed archive retains its actual seal")
+        request(route + "/watch?mode=live&throughFrame=latest", expected=400)
+        request(route + "/watch?mode=replay&throughFrame=0", expected=400)
+        request(route + f"/watch?mode=replay&throughFrame={info['acceptedSequence'] + 1}", expected=404)
+        request(route + f"/watch?mode=replay&throughFrame={limit}&fromFrame={limit + 1}", expected=404)
+        request(route + "/watch?mode=replay&throughFrame=latest", "Room1", 403)
+        check(True, "Saved replay rejects invalid bounds, unsupported modes and foreign-room access")
         seek_ms = packets[5]["elapsedMilliseconds"]
         expected_seek = [packet for packet in packets if packet["elapsedMilliseconds"] <= seek_ms][-1]
         with request(route + f"/watch?mode=replay&fromMs={seek_ms}&rate=4") as stream:
