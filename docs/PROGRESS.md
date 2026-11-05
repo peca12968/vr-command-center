@@ -1,5 +1,14 @@
 # 開發進度
 
+## 2026-11-06 整房配票 ZIP
+
+控制台 0.31.4 新增整房配票。選擇房間後一次下載最多五份 JSON，檔名標示房間與席位。主控可逐房下載，房控限自己的房間，Linked 場次也採相同權限。API 對照一次名冊快照的完整玩家與 admission，若選取過期或場次已結束，回應 409。遊戲端以當前 admission 驗票。 [操作與 API](EXTERNAL_CLIENTS.md)
+
+- 來源 `bba38f0872f5735a941b4f16b9d0fbe35e826c86` 的本機 HTTP 回歸通過，逐一驗證五房 ZIP 共 25 份連線檔的場次、房間、席位與 admission。另通過 89 Node、304 Chromium、7 Python 與 105 項解壓管理包檢查。保留 51 份瀏覽器證據，管理包測試的 C／F 共 27 檔 SHA256 相符。
+- 管理包 `control-server-api0.31.0-ui0.31.4-win-x64.zip` 為 52,489,449 bytes，SHA256 `158e4d10e5bde2e347f3661cbbfeefbe57231668e5ee5f7b7b1aba3a6198d18b`，504 項清單、ZIP 505 項，包含 484 項執行環境檔案。 [Windows 管理包](WINDOWS_CONTROL_PACKAGE.md)
+- `0a1b0a6` 的原生測試工具在 `20261106-023142-bf225ec0` 從實際瀏覽器下載房間 ZIP，兩位玩家以解出的席位檔入場。9 項通過，兩份戰績與世界封存序號 180 一致。兩個工具均 exit 0，清理後 C／F 共 14 檔 SHA256 相符。此場為同機乙太網路 IPv4 Simulation。跨機、頭盔及真人容量待驗。
+- CI 42084911404／job 127447285124 因付款或支出上限條件未啟動，GitHub 回報無執行步驟。 [GitHub 工作](https://github.com/peca12968/vr-command-center/actions/runs/42084911404/job/127447285124)
+
 ## 2026-11-06 玩家連線檔配票前驗證
 
 控制台 0.31.3 共用場次公告的 IPv4／埠號規則，在送出配票請求前檢查手動輸入。舊版以 `127.1` 實際產生連線檔，新增瀏覽器斷言失敗，原兩份證據保存在 `artifacts/console-ticket-destination-before`。新版驗證縮寫、綁定位址、群播及越界埠皆送出零筆配票請求，改正後只送出一筆，票券對應原玩家及本次 admission。 [外部玩家連線](EXTERNAL_CLIENTS.md)
