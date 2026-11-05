@@ -69,6 +69,39 @@ internal static class MissionLayoutChecks
         var defensiveSession = manager.Create(SessionMode.Independent, [3], defensive, actor);
         check(defensiveSession.Mission.Id == defensive.Id && defensiveSession.State == SessionState.Preparing,
             "A sampled route warning remains advisory and does not change the new-session gate");
+
+        (ArenaSession Bridge, Guid Player) StartTrial(SessionView session)
+        {
+            var player = Guid.NewGuid();
+            var roster = manager.Join(session.Id, player, "Walkway trial", 3, HeadsetKind.Quest3, actor);
+            var bridge = new ArenaSession();
+            void Apply(SessionView view) => bridge.Apply(JsonSerializer.Deserialize<ManagementSnapshot>(
+                JsonSerializer.Serialize(view, JsonFormat.Options), new JsonSerializerOptions(JsonFormat.Options) { IncludeFields = true })!);
+            Apply(roster);
+            if (!bridge.Connect(1, player, 3, 0, roster.Players.Single().AdmissionId))
+                throw new InvalidOperationException("Walkway trial did not bind its original admission.");
+            Apply(manager.Execute(session.Id, new(Guid.NewGuid(), ControlAction.Begin), actor).Session);
+            return (bridge, player);
+        }
+        static bool Pose(ArenaSession bridge, float z, double time)
+        {
+            var head = new Vec3(-3, 1.65f, z);
+            return bridge.Pose(1, head, head, new(0, 0, 1), time);
+        }
+        var (wallTrial, wallPlayer) = StartTrial(defensiveSession);
+        check(Pose(wallTrial, -3, 0) && Pose(wallTrial, -2.5f, .25) && Pose(wallTrial, -2, .5) && Pose(wallTrial, -1.7f, .75)
+            && !Pose(wallTrial, -1.6f, 1) && !Pose(wallTrial, -.25f, 1.25)
+            && wallTrial.World.PlayerSnapshot(wallPlayer).Head.Z == -1.7f,
+            "The admitted authority rejects both an occupied endpoint and a clear endpoint across the solid wall");
+        manager.End(defensiveSession.Id, actor);
+        var opened = store.Create(defensive.Definition with { Name = "Walkway opening", Props = wall.Where(prop => prop.Position.X != -3).ToArray() });
+        var openedSession = manager.Create(SessionMode.Independent, [3], opened, actor);
+        var (openingTrial, openingPlayer) = StartTrial(openedSession);
+        var sampled = MissionLayout.Inspect(opened.Definition, SessionMode.Independent).RoutePreview!.Seats[0].Path;
+        check(sampled.Length == 7 && sampled.Select((point, index) => point.X == -3 && Pose(openingTrial, point.Z, index * .25)).All(accepted => accepted)
+            && openingTrial.World.PlayerSnapshot(openingPlayer).Head.Z == 0,
+            "The same admitted authority accepts every midpoint route sample through the saved opening");
+        manager.End(openedSession.Id, actor);
         var memory = new MemorySessionEventStore(); var id = Guid.NewGuid(); var request = Guid.NewGuid();
         memory.Seed(id, [new(6, Guid.NewGuid(), id, 1, DateTimeOffset.UtcNow, SessionEventKind.Created,
             JsonSerializer.SerializeToElement(new SessionCreated(SessionMode.Independent, [3], invalid), JsonFormat.Options), actor, request)]);
