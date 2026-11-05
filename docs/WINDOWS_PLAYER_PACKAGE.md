@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-06 新版 `windows-player-0.41.2.zip` 為 82,653,510 bytes，SHA256 `95c2a63a9d5d48b844af0bff47da263e7fbb46edf6d5d1c1e210589fcbaab897`。啟動器沿用 1.1，實際解壓後通過 19 項檢查。與遊戲伺服器包 0.41.2 的 Unity 建置來源一致。 [伺服器來源診斷](WINDOWS_SERVER_PACKAGE.md#跨機來源診斷)
+
 2026-11-06 採用 `windows-player-0.41.1-v2.zip`，82,652,952 bytes，SHA256 `925a8ac16451ae2c423da1b0cb9c9867af17b8fb5b08ab5824f7ea1b1bca8402`。啟動器 1.1 支援貼上完整路徑與「載入／更新」。已驗證檔案變更時拒絕啟動，重新載入後成功加入同機雙玩家場次。 [玩家連線檔流程](PLAYER_CONFIG_REVIEW.md)
 
 2026-11-02 舊包 `windows-player-0.41.1.zip`，**82,651,927 bytes／SHA256 `dcc46c80c68d0a2861957c7d534b1abacd15964fb22f310ecdd1e60dddf7d2df`**，311 manifest／ZIP312，原launcher來源a65846da...；19項實際包檢查通過。Unity0.41.1／code52／NGO29、242真正Editor與同源4ebd雙平台／原ID保持。900秒兩模式18／51601／50原結果6CSV與普通入場8／354見[DESKTOP_ENDURANCE](DESKTOP_ENDURANCE.md)；長場只在明確Development batch旗標啟用生成輸入。APK60361942／SHA766d8018...、ARM64／min32／target35／v2 debug已驗，未裝頭盔。伺服器新包106與WinForms流程另見[WINDOWS_SERVER_PACKAGE](WINDOWS_SERVER_PACKAGE.md)；不是玩家完整GUI、25真人／LAN或頭盔驗收。以下較舊「最新」是當時歷史，原ZIP保持。

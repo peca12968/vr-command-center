@@ -1,5 +1,7 @@
 # Quest 3 接入與工具鏈
 
+2026-11-06 建置 0.41.2、版本 53 的 ARM64 APK，minSDK 32、targetSDK 35，通過 v2 開發簽章驗證。與 Windows 建置來源及場景、玩家網路識別一致，242 項 Unity EditMode 測試通過。新來源診斷只在 Windows 專用伺服器明確開啟時運作。頭盔安裝及操作仍待實機。 [建置與校驗資料](PROGRESS.md)
+
 2026-11-01 最新Unity0.36.1／code44、179真正Editor與e0594513...同源Windows／ARM64 APK建置成功，NGO29／API UI0.30及原ID保持。[結果尾界](DEBRIEF_BOUNDARY.md)修正背景End寫入尚未完成時的context競態，final另須精確durable seal；PC證據與原失敗場見PROGRESS，頭盔操作仍待設備。
 
 2026-11-01 Unity0.36／code43、NGO29／API UI0.30，177真正Editor與7194dc98...同源Windows／ARM64 IL2CPP APK成功，原ID保持。新增[背景世界writer](ASYNC_WORLD_WRITER.md)用純DTO、bounded queue及durable State，不在背景讀Unity場景／輸入；Quest client沒有server journal。PC及F反例範圍見PROGRESS，APK成功不是頭盔／MR／25台驗收。

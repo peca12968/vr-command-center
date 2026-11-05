@@ -1,5 +1,14 @@
 # 開發進度
 
+## 2026-11-06 Windows 遊戲伺服器來源診斷
+
+遊戲 0.41.2 與 Windows 伺服器啟動器 1.2 新增 `--peer-diagnostics on`。核准玩家入場後，專用伺服器從 Unity Transport 取得實際來源位址與 UDP 埠，依原連線編號記錄。每次啟動上限 256 筆。預設關閉，含來源位址的日誌留在私人工作資料夾。 [部署與跨機核對方式](WINDOWS_SERVER_PACKAGE.md#跨機來源診斷)
+
+- 來源 `7f0d98decb2b0e125799d037d1b5b011eb0542d7` 的 `run-3951b15ccdd441aca65bd8a63acf8c61` exit 0。使用實際解壓的三包，兩種模式各 25 個同機模擬玩家，335 項、778 幀回放、50 份戰績及 6 份 CSV。Linked 的 25 筆來源端點都有不同 UDP 來源埠，全部對應原入場編號與伺服器戰績確認回條。五個獨立房間預設無來源列，無效診斷參數被拒絕且未啟動戰場。
+- 清理後無活動場次及本輪程序，C／F 的 219 份原始檔 SHA256 相符。新版兩個 Windows ZIP 各有 311 筆檔案清單，玩家包的 19 項解壓測試通過。原 0.41.1 Windows、APK 及 Unity 日誌共 321 份已在 C／F 核對保存。 [伺服器包](WINDOWS_SERVER_PACKAGE.md) · [玩家包](WINDOWS_PLAYER_PACKAGE.md)
+- 242 項真正 Unity EditMode 測試全數通過。Windows 與 Quest ARM64 的指紋同為 `bf9299c57e1afd0b3531abf6b0891aee01e55d0b68360ce74531973b55aff379`，場景與玩家網路識別沿用原值。APK 60,362,730 bytes，SHA256 `a9abe4fa6ed41a9afb088dcd6cec72d2e139c3dd8c88630ee4e3234a6ef114e3`，版本 53，minSDK 32、targetSDK 35、v2 開發簽章。 [Quest 3 工具鏈](QUEST3.md)
+- 本輪來源紀錄由同一台 Windows 電腦的乙太網路 IPv4 驗證。實際跨機、頭盔、廠商硬體及 25 位真人仍待驗。精確來源的 GitHub Actions 工作 42091327531／127469817419 因帳務條件未啟動，沒有執行步驟。 [GitHub 工作](https://github.com/peca12968/vr-command-center/actions/runs/42091327531/job/127469817419)
+
 ## 2026-11-06 Windows 三個可攜包整合
 
 使用現有管理包 0.31.4、遊戲伺服器與玩家包 0.41.1，在同一台 Windows 電腦以乙太網路 IPv4 驗證整房配票。五個獨立房間各開一個伺服器，五房連線模式共用一個伺服器。兩種模式各有 25 個模擬玩家同時入場。10 份房間 ZIP 由各房控向實際管理包下載，玩家啟動器直接使用 ZIP 內的席位 JSON。 [部署與重現方式](WINDOWS_SERVER_PACKAGE.md#三個可攜包整合驗證)
