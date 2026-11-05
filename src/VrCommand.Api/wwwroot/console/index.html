@@ -82,6 +82,23 @@
           <div class="layout-report"><label>預覽開場模式<select id="layout-session-mode"><option value="Independent">單房獨立</option><option value="Linked">五房全連線</option></select></label><p id="draft-layout-summary" class="hint" role="status" aria-live="polite">修改配置後自動檢查。</p><ul id="draft-layout-issues"></ul><p id="draft-layout-route-summary" class="hint" hidden></p><button id="layout-recheck-draft" type="button" class="quiet small">重新檢查配置</button><p class="hint">圓圈為固定出生位。虛線標示到中線的取樣路徑，橘色出生位表示未找到路徑。</p></div>
           <div class="save-row"><button type="submit">儲存為新任務</button><button id="save-revision" type="button" class="secondary" disabled>保存為下一版</button><span id="draft-status" class="hint" role="status">尚未儲存的草稿</span></div>
         </fieldset></form>
+        <form id="alignment-form" class="panel" hidden aria-labelledby="alignment-heading">
+          <h3 id="alignment-heading">MR 場地水平校正試算</h3>
+          <p class="hint">填入同三個地面標記的遊戲房間座標及追蹤座標，單位為公尺。A、B 用來對齊，C 應離開 A、B 的連線，以獨立核對誤差。</p>
+          <label>校正房間<select id="alignment-room"><option value="1">房間 1</option><option value="2">房間 2</option><option value="3">房間 3</option><option value="4">房間 4</option><option value="5">房間 5</option></select></label>
+          <div class="table-scroll"><table><caption class="sr-only">三個地面標記的座標</caption><thead><tr><th>標記</th><th>房間 X</th><th>房間 Z</th><th>追蹤 X</th><th>追蹤 Z</th></tr></thead><tbody>
+            <tr><th scope="row">A</th><td><input id="alignment-a-room-x" aria-label="A 房間 X" type="number" min="-6" max="6" step="any" value="-2" required></td><td><input id="alignment-a-room-z" aria-label="A 房間 Z" type="number" min="-6" max="6" step="any" value="-2" required></td><td><input id="alignment-a-tracking-x" aria-label="A 追蹤 X" type="number" min="-100" max="100" step="any" required></td><td><input id="alignment-a-tracking-z" aria-label="A 追蹤 Z" type="number" min="-100" max="100" step="any" required></td></tr>
+            <tr><th scope="row">B</th><td><input id="alignment-b-room-x" aria-label="B 房間 X" type="number" min="-6" max="6" step="any" value="2" required></td><td><input id="alignment-b-room-z" aria-label="B 房間 Z" type="number" min="-6" max="6" step="any" value="-2" required></td><td><input id="alignment-b-tracking-x" aria-label="B 追蹤 X" type="number" min="-100" max="100" step="any" required></td><td><input id="alignment-b-tracking-z" aria-label="B 追蹤 Z" type="number" min="-100" max="100" step="any" required></td></tr>
+            <tr><th scope="row">C</th><td><input id="alignment-c-room-x" aria-label="C 房間 X" type="number" min="-6" max="6" step="any" value="-2" required></td><td><input id="alignment-c-room-z" aria-label="C 房間 Z" type="number" min="-6" max="6" step="any" value="2" required></td><td><input id="alignment-c-tracking-x" aria-label="C 追蹤 X" type="number" min="-100" max="100" step="any" required></td><td><input id="alignment-c-tracking-z" aria-label="C 追蹤 Z" type="number" min="-100" max="100" step="any" required></td></tr>
+          </tbody></table></div>
+          <div class="button-row"><button id="alignment-run" type="submit" class="secondary">核對校正</button><button id="alignment-download" type="button" class="quiet" disabled>下載校正資料 JSON</button></div>
+          <p id="alignment-summary" class="hint" role="status">輸入三個標記的量測值後開始核對。</p>
+          <div id="alignment-details" hidden>
+            <p id="alignment-transform" class="hint"></p>
+            <div class="table-scroll"><table><caption class="sr-only">各標記的校正誤差</caption><thead><tr><th>標記</th><th>房間座標 (X, Z)</th><th>對齊後 (X, Z)</th><th>誤差</th></tr></thead><tbody id="alignment-results"></tbody></table></div>
+          </div>
+          <p class="hint">下載資料供場館部署使用。頭盔追蹤、透視及實體場地仍需實測。</p>
+        </form>
       </section>
       <section id="world-view" hidden>
         <div class="section-heading"><div><p class="eyebrow">WORLD RECORDINGS</p><h2>觀戰與任務回放</h2></div><span class="badge">觀察不占玩家席位</span></div>
@@ -130,7 +147,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.10 · 已有任務封存進度、場次連線設定、任務版本、玩家參戰快照與觀戰回放；頭盔實機、MR、25 台與硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.11 · 已有任務封存進度、場次連線設定、任務版本、玩家參戰快照與觀戰回放；頭盔實機、MR、25 台與硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

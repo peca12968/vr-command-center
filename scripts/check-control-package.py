@@ -86,8 +86,14 @@ def main():
         for name,value in [('duration-low','0'),('duration-high','3601'),('duration-bool','true')]:call(name,['--run',data,'--seconds',value,'--ready-report',out/(name+'-ready.json')],False)
         alias=out/'alias-report.json';call('report-alias',['--run',data,'--seconds','1','--ready-report',str(alias).upper()],False,report=alias)
         entry=start(data,'first');check(request(entry,keys,'/')['version']=='0.31.0','actual portable API version');request(entry,keys,'/api/rooms',role=None,expected=401);check(True,'anonymous management requests rejected')
-        html,headers=request(entry,keys,'/console/',role=None);check(manifest.get('consoleVersion')=='0.31.10' and 'v0.31.10' in html and "script-src 'self'" in headers['Content-Security-Policy'],'published current console served with original CSP and explicit UI version')
+        html,headers=request(entry,keys,'/console/',role=None);check(manifest.get('consoleVersion')=='0.31.11' and 'v0.31.11' in html and "script-src 'self'" in headers['Content-Security-Policy'],'published current console served with original CSP and explicit UI version')
         for role in package_roles:check(request(entry,keys,'/api/me',role=role)['role']==('RoomController' if role.startswith('Room') else role),'actual isolated role identity: '+role)
+        markers = [{'room': {'x': x, 'z': z}, 'tracking': {'x': -z - 3, 'z': x - 1}} for x, z in [(-2, -2), (2, -2), (-2, 2)]]
+        alignment_input = {'roomId': 5, 'markers': markers}
+        alignment = request(entry, keys, '/api/room-alignment', alignment_input)
+        request(entry, keys, '/api/room-alignment', alignment_input, role='Room5', expected=403)
+        check(alignment['withinTolerance'] and alignment['yawDegrees'] == 90 and alignment['roomOrigin'] == {'x': 28, 'z': 0},
+              'packaged API solves the original room coordinates and keeps Master alignment permission')
         call('concurrent',['--run',data,'--seconds','1','--ready-report',out/'concurrent-ready.json'],False);check(not (out/'concurrent-ready.json').exists() and entry['process'].poll() is None,'second instance runner rejected without displacing the original API')
         mission=request(entry,keys,'/api/missions',{'name':'Portable control persistence','briefing':'Fresh management-only fixture','durationSeconds':600,'environment':{'mode':'VR','weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':0,'behavior':'Hold','autoAttack':False},'props':[]},expected=201)
         request(entry,keys,'/api/missions',mission['definition'],role='Room1',expected=403);check(True,'room controller cannot author missions')

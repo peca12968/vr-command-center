@@ -101,6 +101,12 @@ app.MapPost("/api/mission-layout", (MissionLayoutRequest request, HttpContext co
     AccessPolicy.AuthorMission(Actor(context));
     return MissionLayout.Inspect(request);
 });
+app.MapPost("/api/room-alignment", (RoomAlignmentRequest request, HttpContext context) =>
+{
+    AccessPolicy.AuthorMission(Actor(context));
+    context.Response.Headers.CacheControl = "no-store";
+    return RoomAlignment.Solve(request);
+});
 app.MapGet("/api/missions/{id:guid}/version", (Guid id, SqliteMissionLibrary store, HttpContext context) => store.Version(id, Actor(context)));
 app.MapGet("/api/missions/{id:guid}/history", (Guid id, int? before, int? limit, SqliteMissionLibrary store, HttpContext context) => store.History(id, before, limit ?? 20, Actor(context)));
 app.MapPost("/api/missions", (MissionDraft draft, SqliteMissionLibrary store, HttpContext context) =>

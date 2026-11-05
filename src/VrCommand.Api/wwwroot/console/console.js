@@ -1,6 +1,7 @@
 import { mountWorld } from './world-ui.js';
 import { mountReplay } from './replay-ui.js';
 import { mountLayout } from './layout-ui.js';
+import { mountAlignment } from './alignment-ui.js';
 import { mountReport } from './report-ui.js';
 import { mountReadiness, mountRoomReadiness } from './readiness-ui.js';
 import { mountConnections, validDestination } from './connection-ui.js';
@@ -19,6 +20,7 @@ const readiness = mountReadiness(() => state, logout);
 const roomReadiness = mountRoomReadiness(() => state, logout);
 const connections = mountConnections(() => state, logout);
 const closure = mountClosure(() => state, logout);
+const alignment = mountAlignment(api, download);
 const placement = mountLayout({ api, epoch: () => state.epoch, active: () => !!state.actor, editable: master,
   draft: () => ({ experienceMode: $('draft-mode').value, mode: $('layout-session-mode').value, enemyCount: Number($('draft-count').value), props: structuredClone(state.props) }),
   selection: () => ({ id: $('launch-mission').value, mode: $('launch-mode').value }), changed: applyPermissions,
@@ -110,6 +112,7 @@ function logout() {
   selectionEpoch++;
   report.reset(); state.statistics = null;
   closure.active(false); closure.reset();
+  alignment.reset();
   replay.active(false); replay.reset(); world.active(false); world.reset(); readiness.active(false); readiness.reset(); roomReadiness.active(false); connections.active(false); connections.reset();
   state.epoch++; state.key = ''; state.actor = null; state.selected = null; state.session = null; state.pending = null;
   state.rooms = []; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
@@ -561,6 +564,7 @@ function tab(name) {
   replay.active(name === 'replay'); world.active(name === 'world'); readiness.active(name === 'operations'); connections.active(name === 'operations');
   roomReadiness.active(name === 'operations');
   closure.active(name === 'operations');
+  alignment.active(name === 'missions' && master());
 }
 function submit(id, action, execute = run) { $(id).addEventListener('submit', event => { event.preventDefault(); execute(action); }); }
 $('login-form').addEventListener('submit', login);

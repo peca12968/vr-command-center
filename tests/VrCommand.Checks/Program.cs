@@ -91,6 +91,7 @@ try
     ArenaSessionChecks.Run(Check, directory);
     TelemetryChecks.Run(Check, directory, mission);
     MissionLayoutChecks.Run(Check, directory);
+    RoomAlignmentChecks.Run(Check);
     WorldChecks.Run(Check, directory);
     ReadinessChecks.Run(Check, directory);
     ConnectionEndpointChecks.Run(Check, directory);

@@ -82,6 +82,7 @@ async function main() {
     check(await page.locator('#identity').innerText() === '全館主控', 'Master sees all five rooms');
     check(await page.locator('#login-key').inputValue() === '', 'Credential input is cleared after authentication');
     await page.locator('#tab-missions').click();
+    await require('./alignment-browser.cjs')({ page, api, base, tokens, screenshots, check });
     await page.locator('#draft-name').fill('夜間防衛・瀏覽器驗證');
     await page.locator('#draft-briefing').fill('守住據點，確認場次控制與配置儲存。');
     await page.locator('#draft-duration').fill('1200');
