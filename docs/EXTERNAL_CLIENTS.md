@@ -69,7 +69,7 @@ node tests/browser/check-external-native.cjs <本次ready.json> <解壓玩家包
 
 ## 第二台電腦的驗收步驟
 
-1. 在伺服器電腦啟動管理服務和遊戲伺服器，選定本機 LAN IPv4 與 UDP 埠。先查該程序的 UDP socket，再核對控制台的場次公告。Independent 每個場次使用不同的 UDP 埠，Linked 使用該場的單一 UDP 埠。
+1. 在伺服器電腦啟動管理服務和遊戲伺服器，選定本機 LAN IPv4 與 UDP 埠。先查該程序的 UDP socket，再核對控制台的場次公告。Independent 每個場次使用不同的 UDP 埠，Linked 使用該場的單一 UDP 埠。伺服器啟動器 1.2 可在 CLI 另加 `--peer-diagnostics on`，讓遊戲伺服器記錄各已入場玩家的實際來源位址。 [伺服器啟動方式](WINDOWS_SERVER_PACKAGE.md#跨機來源診斷)
 2. 從控制台分別下載兩份連線檔，其中一份在第二台 Windows 電腦使用同源玩家包開啟。將檔案個別交給對應玩家，並在五分鐘票券期限內加入。保存測試機角色、包版本、公告位址及埠，將連線檔與金鑰留在私有資料夾。
-3. 在控制台核對兩位玩家均可參戰後，執行 Begin、Pause、Resume 和 End。保存兩端玩家的入場與最終戰績，核對玩家身分、本次 admission、場次與世界封存序號，並確認戰鬥及世界均封存。
+3. 在控制台核對兩位玩家均可參戰後，執行 Begin、Pause、Resume 和 End。保存兩端玩家的入場與最終戰績，核對玩家身分、本次 admission、場次與世界封存序號，並確認戰鬥及世界均封存。以第二台玩家日誌的 `VR_CLIENT_CONNECTED id=` 核對伺服器的 `VR_SERVER_PEER id=` 和 `VR_SERVER_DEBRIEF_ACK id=`。在直連 LAN，應觀察到第二台電腦本次使用的網卡位址與伺服器端來源位址相符。來源無法取得或曾跨 NAT 時，記錄實際觀察的值及網路拓撲。含來源位址的原始日誌留在私有資料夾。
 4. 將結果標記為雙機測試，記錄使用的有線或無線網路。分開保存雙機、五房與實機的證據，以便後續擴至 5／10／25 人。

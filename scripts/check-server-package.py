@@ -14,9 +14,11 @@ def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('package',type=Path);p.add_argument('--control-package',type=Path,required=True);p.add_argument('--runtime-root',type=Path,required=True);p.add_argument('--observe-closure-ui',action='store_true')
     p.add_argument('--player-package',type=Path,help='Launch five players per room from the API room ZIP, using this extracted player package')
     p.add_argument('--game-address',type=ipaddress.IPv4Address,help='Local private IPv4 for the three-package check')
+    p.add_argument('--peer-diagnostics',action='store_true',help='Verify observed UDP peers in Linked and absence in default Independent runs')
     args=p.parse_args()
     if os.name!='nt':p.error('Actual Windows processes required')
     if bool(args.player_package)!=bool(args.game_address):p.error('Provide --player-package and --game-address together')
+    if args.peer_diagnostics and not args.player_package:p.error('--peer-diagnostics requires the three-package check')
     address='127.0.0.1'
     if args.game_address:
         if not any(args.game_address in ipaddress.IPv4Network(net) for net in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16')):
@@ -69,13 +71,15 @@ def main():
         return result
     def rejected(label,value,**options):
         file=runtime/(label+'.json');file.write_text(json.dumps(value),encoding='utf-8');work=runtime/(label+'-work');ready=out/(label+'-ready.json')
-        call(label,['--run',file,'--work',work,'--seconds',options.get('seconds',60),'--ready-report',ready]);check(not work.exists() and not ready.exists(),label+' creates no native world')
+        call(label,['--run',file,'--work',work,'--seconds',options.get('seconds',60),'--ready-report',ready,*options.get('extra',())]);check(not work.exists() and not ready.exists(),label+' creates no native world')
     def create(rooms,label):
         mission=request('/api/missions',{'name':'Portable '+label,'briefing':'Owned PC package fixture, Simulation only','durationSeconds':600,'environment':{'mode':'VR','weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':1,'behavior':'Hold','autoAttack':False},'props':[]},expected=201)
         state=request('/api/sessions',{'missionId':mission['id'],'mode':'Linked' if len(rooms)==5 else 'Independent','roomIds':rooms},expected=201);sessions.append(state['id']);return state
     def launch(state,label):
         value=config(state['id']);file=runtime/(label+'.json');file.write_text(json.dumps(value),encoding='utf-8');ready=out/(label+'-ready.json');report=out/(label+'-final.json');work=runtime/(label+'-work')
-        child=subprocess.Popen([str(exe),'--run',str(file),'--work',str(work),'--seconds','600','--ready-report',str(ready),'--report',str(report)],cwd=out,env=env);entry={'process':child,'readyPath':ready,'reportPath':report,'work':work,'config':value,'label':label,'sessionId':state['id'],'witness':None};runners.append(entry)
+        diagnostics=args.peer_diagnostics and label=='linked'
+        options=['--peer-diagnostics','on'] if diagnostics else []
+        child=subprocess.Popen([str(exe),'--run',str(file),'--work',str(work),'--seconds','600','--ready-report',str(ready),'--report',str(report),*options],cwd=out,env=env);entry={'process':child,'readyPath':ready,'reportPath':report,'work':work,'config':value,'label':label,'sessionId':state['id'],'witness':None,'peerDiagnostics':diagnostics};runners.append(entry)
         def is_ready():
             if child.poll() is not None:raise RuntimeError('Server launcher exited before ready '+label)
             return read(ready) if ready.exists() else None
@@ -162,6 +166,22 @@ def main():
         acks=[int(value) for value in re.findall(r'VR_SERVER_DEBRIEF_ACK id=(\d+)',server)]
         check(len(acks)==len(owners) and set(acks)=={c['connection'] for c in owners}
             and 'VR_SERVER_DEBRIEF_TIMEOUT ' not in server,entry['label']+' exact original server ACKs')
+        if args.peer_diagnostics:
+            peers=re.findall(r'^VR_SERVER_PEER id=(\d+) endpoint=(\S+)$',server,re.M)
+            check('VR_SERVER_PEER_LIMIT' not in server,entry['label']+' no peer log overflow')
+            if entry['peerDiagnostics']:
+                check(len(peers)==len(acks) and {int(connection) for connection,_ in peers}==set(acks),
+                    entry['label']+' exactly one UDP endpoint for every original acknowledged connection')
+                endpoints=set()
+                for _,endpoint in peers:
+                    host,_,port=endpoint.rpartition(':')
+                    ip=ipaddress.ip_address(host.strip('[]'))
+                    ip=getattr(ip,'ipv4_mapped',None) or ip
+                    if not 0<int(port)<=65535 or str(ip)!=address:raise ValueError('Observed UDP peer does not match the local test interface')
+                    endpoints.add((ip,int(port)))
+                check(len(endpoints)==len(acks),entry['label']+' distinct UDP source ports on the expected same-PC interface')
+            else:
+                check('VR_SERVER_PEER' not in server,entry['label']+' default does not record UDP peers')
         raw,headers=request('/api/sessions/'+entry['sessionId']+'/report.csv',raw_response=True)
         rows=list(csv.DictReader(io.StringIO(raw.decode('utf-8-sig'),newline='')))
         results={c['player']['id']:c['final'] for c in owners}
@@ -219,6 +239,7 @@ def main():
         seed=create([1],'preflight');base=config(seed['id'])
         for name,change in [('master',{'gameServerKey':keys['Master']}),('room-key',{'gameServerKey':keys['Room1']}),('client-role',{'role':'Client'}),('host-role',{'role':'Host'}),('ambiguous-ip',{'address':'127.1'}),('wildcard-advertise',{'address':'0.0.0.0'}),('multicast',{'address':'224.0.0.1'}),('overflow-port',{'port':4294975073}),('extra-key',{'masterKey':'never-pass-to-unity'}),('url-userinfo',{'managementApiUrl':uri.replace('http://','http://user@')})]:rejected(name,dict(base,**change))
         rejected('short-timeout',base,seconds=59)
+        if args.peer_diagnostics:rejected('invalid-peer-diagnostics',base,extra=['--peer-diagnostics','off'])
         with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as occupied:
             occupied.bind((address,0));rejected('occupied-udp',dict(base,port=occupied.getsockname()[1]))
         command(seed['id'],'End');rejected('ended-session',base)

@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Text;
 using Unity.Netcode;
 using Unity.Netcode.Transports.UTP;
+using Unity.Networking.Transport;
 using UnityEngine;
 using UnityEngine.Networking;
 using SessionSnapshot = VrCommand.Simulation.ManagementSnapshot;
@@ -22,6 +23,9 @@ namespace VrCommand.Unity
         private bool managementReady;
         private float nextReconnect;
         private ClientReconnectInput reconnectInput;
+        private const int MaximumPeerObservations = 256;
+        private bool peerDiagnostics;
+        private int peerObservations;
         public bool CanReconnect => networkManager != null && ClientReconnectInput.CanOffer(configuration?.role,
             networkManager.IsListening, networkManager.ShutdownInProgress, Time.unscaledTime, nextReconnect);
         public string ReconnectHint => reconnectInput != null && CanReconnect ? "\nRELEASE THEN PRESS RIGHT B TO RELOAD PLAYER TICKET" : "";
@@ -65,6 +69,8 @@ namespace VrCommand.Unity
             try { configuration = LaunchConfiguration.Load(); }
             catch (Exception) { status = "PLEASE CONTACT THE CONTROL DESK"; }
             if (configuration == null) yield break;
+            peerDiagnostics = configuration.role == "Server" && Application.platform == RuntimePlatform.WindowsPlayer
+                && Application.isBatchMode && Array.Exists(Environment.GetCommandLineArgs(), argument => argument == "--vr-peer-diagnostics");
             if (!DesktopClientExercise.Install(gameObject, configuration.role)) { status = "DESKTOP EXERCISE REJECTED"; if (Application.isBatchMode && !Application.isEditor) Application.Quit(2); yield break; }
             if (configuration.role == "Client" && (Application.platform == RuntimePlatform.Android || UnityEngine.XR.XRSettings.isDeviceActive))
                 reconnectInput = new ClientReconnectInput();
@@ -391,6 +397,21 @@ namespace VrCommand.Unity
         private void Connected(ulong clientId)
         {
             if (clientId == networkManager.LocalClientId) { status = "CONNECTED"; Debug.Log("VR_CLIENT_CONNECTED id=" + clientId); }
+            if (peerDiagnostics && clientId != NetworkManager.ServerClientId && admitted.ContainsKey(clientId))
+                ObservePeer(clientId);
+        }
+        private void ObservePeer(ulong clientId)
+        {
+            if (peerObservations > MaximumPeerObservations) return;
+            if (peerObservations++ == MaximumPeerObservations)
+            {
+                Debug.Log("VR_SERVER_PEER_LIMIT");
+                return;
+            }
+            var transport = (UnityTransport)networkManager.NetworkConfig.NetworkTransport;
+            var endpoint = transport.GetEndpoint(clientId);
+            var available = (endpoint.Family == NetworkFamily.Ipv4 || endpoint.Family == NetworkFamily.Ipv6) && endpoint.Port != 0;
+            Debug.Log("VR_SERVER_PEER id=" + clientId + " endpoint=" + (available ? endpoint.ToString() : "unavailable"));
         }
         private void Disconnected(ulong clientId)
         {

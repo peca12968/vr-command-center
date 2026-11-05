@@ -192,12 +192,13 @@ internal static class ServerLauncher
         [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
         IntPtr job, process; internal int Pid; internal bool Exited { get { return process != IntPtr.Zero && WaitForSingleObject(process, 0) == 0; } }
         internal uint ExitCode { get { uint code; Need(Exited && GetExitCodeProcess(process, out code), "無法確認原始遊戲程序已停止。"); GetExitCodeProcess(process, out code); return code; } }
-        internal Native(string config, string log)
+        internal Native(string config, string log, bool peerDiagnostics)
         {
             var exe = Path.Combine(Root, "Runtime/VrCommand.exe"); job = CreateJobObject(IntPtr.Zero, null); Need(job != IntPtr.Zero, "無法建立程序群組。");
             var limits = new Limits(); limits.basic.flags = 0x2000; if (!SetInformationJobObject(job, 9, ref limits, Marshal.SizeOf(limits))) { Dispose(); throw new IOException("無法設定程序群組。"); }
             var startup = new Startup(); startup.size = Marshal.SizeOf(startup); Info info;
             var command = new StringBuilder(Quote(exe) + " -batchmode -nographics -job-worker-count 2 -logFile " + Quote(log) + " --vr-config " + Quote(config));
+            if (peerDiagnostics) command.Append(" --vr-peer-diagnostics");
             if (!CreateProcess(exe, command, IntPtr.Zero, IntPtr.Zero, false, 0x08000004, IntPtr.Zero, Path.GetDirectoryName(config), ref startup, out info)) { Dispose(); throw new IOException("無法啟動遊戲程序。"); }
             process = info.process; Pid = info.pid;
             try { Need(AssignProcessToJobObject(job, process), "無法接管新遊戲程序。"); Need(ResumeThread(info.thread) != UInt32.MaxValue, "無法執行新遊戲程序。"); }
@@ -215,7 +216,7 @@ internal static class ServerLauncher
         {
             Config = config; Work = Full(work); Plain(Work); Need(!Inside(Work, Root) && !Inside(Root, Work) && !Directory.Exists(Work) && !File.Exists(Work), "請使用程式包之外的新資料夾。");
         }
-        internal void Start(Func<bool> cancelled = null)
+        internal void Start(Func<bool> cancelled = null, bool peerDiagnostics = false)
         {
             Config.Validate(); Verify(); Config.Identity(); var state = Config.Request("/api/sessions/" + Config.Session);
             Need(Text(state, "id") == Config.Session && Text(state, "state") == "Preparing" && Child(state, "combatStream") == null && Text(Child(state, "environment"), "mode") == "VR", "只接受沒有綁定來源的Preparing VR場次；不重啟既有戰場。");
@@ -223,7 +224,7 @@ internal static class ServerLauncher
             bool created; lease = new Mutex(true, "Local\\VRCommand.Server." + name, out created); ownsLease = created; Need(created, "此場次已有本機啟動器。");
             using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)) { socket.ExclusiveAddressUse = true; socket.Bind(new IPEndPoint(IPAddress.Parse(Config.Bind), Config.Port)); }
             Directory.CreateDirectory(Work); Save(Path.Combine(Work, "server-config.json"), Config.Config(Path.Combine(Work, "telemetry")));
-            Process = new Native(Path.Combine(Work, "server-config.json"), Path.Combine(Work, "server.log"));
+            Process = new Native(Path.Combine(Work, "server-config.json"), Path.Combine(Work, "server.log"), peerDiagnostics);
             var timer = Stopwatch.StartNew(); Status = "等待遊戲來源與UDP啟動";
             while (timer.Elapsed.TotalSeconds < 90)
             {
@@ -346,11 +347,14 @@ internal static class ServerLauncher
             Need(options.ContainsKey("--report"), "需要結果路徑。"); report = options["--report"]; Output(report, options.ContainsKey("--catalog") ? Path.GetDirectoryName(Full(options["--catalog"])) : options.ContainsKey("--work") ? options["--work"] : null); outputValid = true;
             if (options.Count == 2 && options.ContainsKey("--verify")) { Need(options["--verify"] == "package", "驗證參數錯誤。"); Verify(); Save(report, new { schemaVersion = 1, complete = true, status = "verified" }); return 0; }
             if (options.Count == 2 && options.ContainsKey("--catalog")) { Verify(); Save(report, Catalog.Load(options["--catalog"]).Public()); return 0; }
-            Need(options.Count == 5 && options.ContainsKey("--run") && options.ContainsKey("--work") && options.ContainsKey("--seconds") && options.ContainsKey("--ready-report"), "需要run/work/seconds/ready-report/report五個參數。");
+            string diagnostics;
+            var peerDiagnostics = options.TryGetValue("--peer-diagnostics", out diagnostics);
+            Need(!peerDiagnostics || diagnostics == "on", "來源診斷只接受 on。");
+            Need(options.Count == (peerDiagnostics ? 6 : 5) && options.ContainsKey("--run") && options.ContainsKey("--work") && options.ContainsKey("--seconds") && options.ContainsKey("--ready-report"), "需要run/work/seconds/ready-report/report五個參數。");
             int seconds; Need(Int32.TryParse(options["--seconds"], out seconds) && seconds >= 60 && seconds <= 86400, "執行期限須為60至86400秒。");
             var configPath = Full(options["--run"]); var work = Full(options["--work"]); Need(!Inside(configPath, Root) && !Inside(configPath, work) && !Inside(work, configPath), "設定必須在程式包與新資料夾之外。");
             Output(report, work); Output(options["--ready-report"], work); Need(!String.Equals(Full(report), Full(options["--ready-report"]), StringComparison.OrdinalIgnoreCase), "結果路徑不能重複。");
-            run = new Run(Settings.From(Read(configPath, 8192)), work); run.Start(); Save(options["--ready-report"], new { schemaVersion = 1, status = "ready", sessionId = run.Config.Session, streamId = run.Stream, childPid = run.Process.Pid, address = run.Config.Address, port = run.Config.Port, workDirectory = run.Work }); run.Wait(seconds, () => false);
+            run = new Run(Settings.From(Read(configPath, 8192)), work); run.Start(peerDiagnostics: peerDiagnostics); Save(options["--ready-report"], new { schemaVersion = 1, status = "ready", sessionId = run.Config.Session, streamId = run.Stream, childPid = run.Process.Pid, address = run.Config.Address, port = run.Config.Port, workDirectory = run.Work }); run.Wait(seconds, () => false);
         }
         catch (Exception e) { error = Safe(e); }
         finally { if (run != null) try { run.Dispose(); } catch (Exception e) { error = Safe(e); } }
