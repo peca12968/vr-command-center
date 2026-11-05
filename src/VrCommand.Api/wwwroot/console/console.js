@@ -53,13 +53,13 @@ function manages(session = state.session) { return !!session && (master() || (st
 function ownsRoom(room) { return master() || (state.actor?.role === 'RoomController' && state.actor.roomId === room); }
 function time(value) { return new Date(value).toLocaleTimeString('zh-TW', { hour12: false }); }
 
-async function api(path, method = 'GET', body, requestId, admissionId) {
+async function api(path, method = 'GET', body, requestId, admissionId, responseType = 'json') {
   const controller = new AbortController(), epoch = state.epoch;
   const timeout = setTimeout(() => controller.abort(), 8000);
   try {
     const response = await fetch('/api' + path, { method, headers: { Authorization: 'Bearer ' + state.key, 'Content-Type': 'application/json', ...(requestId ? { 'Idempotency-Key': requestId } : {}), ...(admissionId ? { 'If-Match-Admission': admissionId } : {}) }, body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal, cache: 'no-store' });
     if (epoch !== state.epoch) throw new Error('登入狀態已變更，已忽略舊回應。');
-    const content = await response.text();
+    const content = responseType === 'blob' && response.ok ? await response.blob() : await response.text();
     if (epoch !== state.epoch) throw new Error('登入狀態已變更，已忽略舊回應。');
     if (!response.ok) {
       let message = '操作未完成，請重新整理後確認。', layout;
@@ -70,6 +70,7 @@ async function api(path, method = 'GET', body, requestId, admissionId) {
       if (layout) message = '場地配置未通過檢查，請修正並保存新版本後再開場。';
       const error = new Error(message); error.status = response.status; error.layout = layout; throw error;
     }
+    if (responseType === 'blob') return content;
     return content ? JSON.parse(content) : null;
   } finally { clearTimeout(timeout); }
 }
@@ -107,6 +108,7 @@ function logout() {
   $('workspace').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true;
   $('identity').textContent = '尚未登入'; $('login-key').value = '';
   $('rooms').replaceChildren(); $('roster').replaceChildren(); $('statistics').replaceChildren(); $('event-list').replaceChildren();
+  $('ticket-room').replaceChildren(); delete $('ticket-room').dataset.session;
   $('mission-form').reset(); $('launch-mission').replaceChildren(); $('edit-mission').replaceChildren(); renderHistory(); renderProps(); $('draft-status').textContent = '尚未儲存的草稿'; $('session-panel').hidden = true; notify('');
 }
 async function login(event) {
@@ -206,6 +208,7 @@ function applyPermissions() {
   $('clock-fields').disabled = locked || !manages() || session?.state !== 'Preparing' || session?.combatStream?.missionClockVersion !== 1;
   $('join-fields').disabled = locked || session?.state !== 'Preparing';
   $('ticket-fields').disabled = locked || ended || !session;
+  $('download-room-tickets').disabled = locked || ended || !session || !$('ticket-room').value;
   connections.update();
   for (const button of document.querySelectorAll('[data-command]')) {
     const action = button.dataset.command, phase = session?.state;
@@ -235,6 +238,13 @@ function renderSession(statistics, events) {
   $('live-environment').textContent = `${env.mode} · ${weatherNames[env.weather]} · ${env.timeOfDay === 'Night' ? '夜晚' : '白天'} · ${env.lightning ? '閃電開啟' : '無閃電'}`;
   $('live-enemies').textContent = `${enemies.count} 名 · ${behaviorNames[enemies.behavior]} · ${enemies.autoAttack ? '自動攻擊' : '手動設定'}`;
   fillOptions('player-room', session.roomIds.filter(ownsRoom).map(id => [String(id), `房間 ${id}`]));
+  const ticketRooms = session.roomIds.filter(ownsRoom).flatMap(id => {
+    const count = session.players.filter(player => player.roomId === id).length;
+    return count ? [[String(id), `房間 ${id}（${count} 人）`]] : [];
+  });
+  fillOptions('ticket-room', [['', ticketRooms.length ? '請選擇房間' : '尚無可配票的房間'], ...ticketRooms],
+    $('ticket-room').dataset.session === session.id ? undefined : '');
+  $('ticket-room').dataset.session = session.id;
   $('player-count').textContent = `${session.players.length} / ${session.roomIds.length * 5} 人（名冊）`;
   $('roster').replaceChildren(...session.players.map(player => {
     const actions = element('div', undefined, 'button-row');
@@ -323,20 +333,44 @@ async function removePlayer(player) {
   state.pending = { kind: 'leave', path: `/sessions/${state.selected}/players/${player.id}`, method: 'DELETE', requestId: uuid(), admissionId: player.admissionId };
   await sendPending();
 }
-function download(filename, value) {
-  const url = URL.createObjectURL(new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' }));
+function download(filename, blob) {
+  const url = URL.createObjectURL(blob);
   const anchor = element('a'); anchor.href = url; anchor.download = filename; document.body.append(anchor); anchor.click(); anchor.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-async function downloadTicket(player) {
-  if (!player.admissionId) throw new Error('控制台與 API 版本不一致，請更新服務並重新整理。');
+function ticketDestination() {
   const address = $('game-address').value.trim(), port = Number($('game-port').value);
   if (!validDestination(address, port)) {
     notify('請輸入完整 IPv4 位址（例如 192.168.1.100）及 1024–65535 的連線埠。', true);
-    return;
+    return null;
   }
+  return { address, port };
+}
+async function downloadTicket(player) {
+  if (!player.admissionId) throw new Error('控制台與 API 版本不一致，請更新服務並重新整理。');
+  const destination = ticketDestination();
+  if (!destination) return;
   const ticket = await api(`/sessions/${state.selected}/players/${player.id}/join-ticket`, 'POST', undefined, undefined, player.admissionId);
-  download(`quest-player-${player.id}.json`, { role: 'Client', address, port, joinTicket: ticket.ticket });
+  const config = { role: 'Client', ...destination, joinTicket: ticket.ticket };
+  download(`quest-player-${player.id}.json`, new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' }));
   notify(`玩家連線檔已產生，有效至 ${time(ticket.expiresAtUtc)}。請將各自檔案配置到對應玩家端。`);
+}
+function downloadRoomTickets() {
+  const session = state.session, roomId = Number($('ticket-room').value);
+  if (!session || session.state === 'Ended' || !ownsRoom(roomId) || !session.roomIds.includes(roomId)) return;
+  const destination = ticketDestination();
+  if (!destination) return;
+  const players = session.players.filter(player => player.roomId === roomId)
+    .map(player => ({ playerId: player.id, admissionId: player.admissionId }));
+  if (!players.length) return;
+  void run(async () => {
+    if (state.session?.id !== session.id || state.selected !== session.id || !ownsRoom(roomId)) return;
+    const bundle = await api(`/sessions/${session.id}/rooms/${roomId}/join-ticket-bundle`, 'POST',
+      { ...destination, players }, undefined, undefined, 'blob');
+    if (state.session?.id !== session.id || state.selected !== session.id || state.session.state === 'Ended') return;
+    if (bundle.type !== 'application/zip') throw new Error('Expected a ZIP download.');
+    download(`room-${String(roomId).padStart(2, '0')}-connections.zip`, bundle);
+    notify(`房間 ${roomId} 的 ${players.length} 份連線檔已產生。請按檔名席位個別交付，票券有效五分鐘。`);
+  });
 }
 
 function resetDraft() {
@@ -511,6 +545,8 @@ $('launch-room').addEventListener('change', applyPermissions);
 $('reload-environment').addEventListener('click', loadEnvironment);
 $('reload-enemies').addEventListener('click', loadEnemies);
 $('retry-command').addEventListener('click', () => run(sendPending));
+$('download-room-tickets').addEventListener('click', downloadRoomTickets);
+$('ticket-room').addEventListener('change', applyPermissions);
 document.querySelectorAll('[data-command]').forEach(button => button.addEventListener('click', () => run(() => command(button.dataset.command))));
 submit('create-session-form', createSession);
 submit('join-form', joinPlayer);

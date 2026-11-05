@@ -15,6 +15,7 @@ import sys
 import sqlite3
 import csv
 import io
+import zipfile
 from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
 
@@ -308,6 +309,9 @@ try:
             request("POST", own_path + "/players/" + room_player["playerId"] + "/join-ticket", expected=400, identity="Room1")
             request("POST", own_path + "/players/" + room_player["playerId"] + "/join-ticket", expected=400, identity="Room1", admission_id="not-a-uuid")
             request("POST", own_path + "/players/" + room_player["playerId"] + "/join-ticket", expected=409, identity="Room1", admission_id=room_admission)
+            stale_bundle = {"address": "192.168.1.100", "port": 7777, "players": [
+                {"playerId": p["id"], "admissionId": p["admissionId"]} for p in joins[0]["players"]]}
+            request("POST", own_path + "/rooms/1/join-ticket-bundle", stale_bundle, 409, identity="Room1")
             fresh = request("POST", own_path + "/players/" + room_player["playerId"] + "/join-ticket", identity="Room1", admission_id=replacement["admissionId"])
             current_claims = request("POST", "/api/player-tickets/validate", {**validate, "ticket": fresh["ticket"]}, identity="GameServer")
             require(fresh["ticket"].startswith("v2.") and current_claims["admissionId"] == replacement["admissionId"]
@@ -342,6 +346,38 @@ try:
                     })
             current = request("GET", session_path)
             require(len(current["players"]) == 25, "Linked session contains 25 mixed-device player records")
+            for room in range(1, 6):
+                roster = sorted((p for p in current["players"] if p["roomId"] == room), key=lambda p: p["seat"])
+                route = f"{session_path}/rooms/{room}/join-ticket-bundle"
+                bundle = {"address": "192.168.1.100", "port": 7777, "players": [
+                    {"playerId": p["id"], "admissionId": p["admissionId"]} for p in roster]}
+                if room == 1:
+                    request("POST", route, bundle, 401, identity=None)
+                    request("POST", route, bundle, 403, identity="Room2")
+                    request("POST", route, bundle, 403, identity="GameServer")
+                    request("POST", route, {**bundle, "address": "127.1"}, 400)
+                    request("POST", route, {**bundle, "port": 65536}, 400)
+                    request("POST", route, {**bundle, "players": []}, 400)
+                    request("POST", route, {**bundle, "players": [bundle["players"][0]] * 2}, 400)
+                    request("POST", route, {**bundle, "players": bundle["players"][:-1]}, 409)
+                payload, headers = request("POST", route, bundle, identity=f"Room{room}" if room != 5 else "Master", raw=True)
+                require(headers.get("Cache-Control") == "no-store" and headers.get("Content-Type") == "application/zip"
+                        and f"room-{room:02}-connections.zip" in headers.get("Content-Disposition", ""),
+                        "Room bundle is a private ZIP download")
+                with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+                    names = [f"room-{room:02}-seat-{p['seat'] + 1:02}.json" for p in roster]
+                    require(archive.namelist() == names and len(names) == 5, "Each ZIP has only its five seat files")
+                    for name, participant in zip(names, roster):
+                        config = json.loads(archive.read(name))
+                        require(set(config) == {"role", "address", "port", "joinTicket"} and config["role"] == "Client"
+                                and config["address"] == bundle["address"] and config["port"] == bundle["port"],
+                                "Seat file retains the four-field player connection contract")
+                        claims = request("POST", "/api/player-tickets/validate", {"sessionId": session["id"],
+                            "ticket": config["joinTicket"], "protocolVersion": 2}, identity="GameServer")
+                        require(claims["playerId"] == participant["id"] and claims["admissionId"] == participant["admissionId"]
+                                and claims["roomId"] == room and claims["seat"] == participant["seat"],
+                                "Seat file admits the exact current player in its own room")
+            require(request("GET", session_path) == current, "Room bundles leave the roster and session sequence unchanged")
             require(current["state"] == "Preparing" and current["startedAtUtc"] is None,
                     "Creating a session does not start the mission")
             request("POST", session_path + "/players/" + player["playerId"] + "/join-ticket", expected=404)
@@ -499,6 +535,7 @@ try:
                     "End archives the session and timestamps completion")
             request("DELETE", session_path, expected=409)
             require(request("GET", session_path)["state"] == "Ended", "Ended history remains readable")
+            request("POST", session_path + "/rooms/5/join-ticket-bundle", bundle, 409, identity="Room5")
             request("POST", "/api/player-tickets/validate", live_validation, 403, identity="GameServer")
             require(request("GET", session_path + "/statistics")["players"] == statistics["players"], "Ended session preserves combat statistics")
             final_csv, final_headers = request("GET", session_path + "/report.csv", raw=True)

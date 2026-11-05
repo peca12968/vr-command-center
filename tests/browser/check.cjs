@@ -264,9 +264,19 @@ async function main() {
     check(await roomPage.locator('.room-card').count() === 1 && await roomPage.locator('[data-command=End]').isDisabled() && await roomPage.locator('#player-room option').count() === 1, 'Room controller sees its own room, cannot command a linked session and can select only its player room');
     check(await roomPage.locator('#roster img').count() === 0 && !(await roomPage.evaluate(() => window.injected)), 'Untrusted player names render as text rather than executable markup');
     check(await roomPage.locator('#roster button').first().isDisabled(), 'Room controller cannot remove or issue tickets to another room player');
+    check(await roomPage.locator('#download-room-tickets').isDisabled() && await roomPage.locator('#ticket-room option').count() === 1,
+      'A room controller cannot select a populated foreign room for bundle download');
     await roomPage.locator('#player-name').fill('Room 1 Alpha'); await roomPage.locator('#join-form button').click();
     await roomPage.waitForFunction(() => document.querySelectorAll('#roster tr').length === 2);
     check((await api('/sessions/' + linked.id)).players.some(player => player.name === 'Room 1 Alpha' && player.roomId === 1), 'Room controller can add its own player to the linked roster');
+    check(await roomPage.locator('#ticket-room option').allTextContents().then(options => JSON.stringify(options) === JSON.stringify(['請選擇房間', '房間 1（1 人）']))
+      && await roomPage.locator('#download-room-tickets').isDisabled(), 'Room bundle requires an explicit authorized room selection');
+    await roomPage.locator('#ticket-room').selectOption('1');
+    await roomPage.locator('#game-address').fill('192.168.1.100');
+    const [bundleDownload] = await Promise.all([roomPage.waitForEvent('download'), roomPage.locator('#download-room-tickets').click()]);
+    const zipPath = path.join(directory, 'room-connections.zip'); await bundleDownload.saveAs(zipPath);
+    check(bundleDownload.suggestedFilename() === 'room-01-connections.zip' && (await fs.readFile(zipPath)).subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04])),
+      'Room controller downloads an actual ZIP from its own room');
     await roomPage.locator('#tab-missions').click();
     check(await roomPage.locator('#draft-name').isDisabled() && await roomPage.locator('#mission-form button[type=submit]').isDisabled() && await roomPage.locator('#save-revision').isDisabled(), 'Room controller mission editing and revision saving remain read-only');
     check(await roomPage.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'Console layout fits a 390-pixel viewport without page overflow');

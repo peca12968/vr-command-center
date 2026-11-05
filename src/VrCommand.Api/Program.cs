@@ -164,6 +164,13 @@ app.MapPost("/api/player-tickets/validate", (ValidatePlayerTicket request, Sessi
     var claims = ticketSigner.Validate(request.Ticket, request.SessionId);
     return manager.ResolveAdmission(claims, Actor(context));
 });
+app.MapPost("/api/sessions/{id:guid}/rooms/{roomId:int}/join-ticket-bundle", (Guid id, int roomId, RoomTicketRequest request, SessionManager manager, HttpContext context) =>
+{
+    var actor = Actor(context);
+    var bundle = RoomTicketBundles.Create(manager.Get(id, actor), roomId, request, actor, ticketSigner);
+    context.Response.Headers.CacheControl = "no-store";
+    return Results.File(bundle, "application/zip", FormattableString.Invariant($"room-{roomId:00}-connections.zip"));
+});
 app.MapDelete("/api/sessions/{id:guid}/players/{playerId:guid}", (Guid id, Guid playerId, SessionManager manager, HttpContext context) =>
 {
     manager.Leave(id, playerId, Actor(context), RequestId(context), AdmissionMatch(context), requireAdmissionMatch: true);

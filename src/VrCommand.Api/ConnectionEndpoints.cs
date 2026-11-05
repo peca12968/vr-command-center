@@ -8,13 +8,18 @@ namespace VrCommand.Api;
 public record ConnectionEndpointDraft(int Version, Guid StreamId, string Address, int Port);
 public record ConnectionEndpoint(int Version, Guid SessionId, Guid StreamId, string Address, int Port, DateTimeOffset CreatedAtUtc, bool SessionEnded);
 
+internal static class ConnectionDestination
+{
+    public static bool IsValid(string? value, int port) => IPAddress.TryParse(value, out var address)
+        && address.AddressFamily == AddressFamily.InterNetwork && address.ToString() == value
+        && address.GetAddressBytes()[0] is > 0 and < 224 && port is >= 1024 and <= 65535;
+}
+
 public sealed partial class WorldRecordings
 {
     private static void ValidateEndpoint(ConnectionEndpointDraft draft)
     {
-        if (draft is null || draft.Version != 1 || draft.StreamId == Guid.Empty || string.IsNullOrEmpty(draft.Address)
-            || !IPAddress.TryParse(draft.Address, out var address) || address.AddressFamily != AddressFamily.InterNetwork
-            || address.ToString() != draft.Address || address.GetAddressBytes()[0] is 0 or >= 224 || draft.Port is < 1024 or > 65535)
+        if (draft is null || draft.Version != 1 || draft.StreamId == Guid.Empty || !ConnectionDestination.IsValid(draft.Address, draft.Port))
             throw new ArgumentException("Endpoint v1 requires its stream, a canonical unicast IPv4 address and port 1024–65535.");
     }
     private ConnectionEndpoint? EndpointRow(SessionView session)
