@@ -1,10 +1,15 @@
+export function validDestination(address, port) {
+  if (typeof address !== 'string' || !/^(?:\d{1,3}\.){3}\d{1,3}$/.test(address)) return false;
+  const octets = address.split('.');
+  return octets.every(part => String(Number(part)) === part && Number(part) <= 255)
+    && Number(octets[0]) > 0 && Number(octets[0]) < 224
+    && Number.isInteger(port) && port >= 1024 && port <= 65535;
+}
+
 export function validEndpoint(value, session) {
   return !!session && value?.version === 1 && value.sessionId === session.id && typeof value.streamId === 'string' && value.streamId.length > 0
     && value.streamId === session.combatStream?.streamId
-    && typeof value.address === 'string' && /^(?:\d{1,3}\.){3}\d{1,3}$/.test(value.address)
-    && value.address.split('.').every(part => String(Number(part)) === part && Number(part) <= 255)
-    && Number(value.address.split('.')[0]) > 0 && Number(value.address.split('.')[0]) < 224
-    && Number.isInteger(value.port) && value.port >= 1024 && value.port <= 65535 && typeof value.sessionEnded === 'boolean';
+    && validDestination(value.address, value.port) && typeof value.sessionEnded === 'boolean';
 }
 
 export function mountConnections(getState, unauthorized) {

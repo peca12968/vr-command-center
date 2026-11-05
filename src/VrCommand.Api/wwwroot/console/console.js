@@ -3,7 +3,7 @@ import { mountReplay } from './replay-ui.js';
 import { mountLayout } from './layout-ui.js';
 import { mountReport } from './report-ui.js';
 import { mountReadiness } from './readiness-ui.js';
-import { mountConnections } from './connection-ui.js';
+import { mountConnections, validDestination } from './connection-ui.js';
 import { mountClosure } from './closure-ui.js';
 import { placementHistory } from './placement-history.js';
 const replay = mountReplay();
@@ -330,7 +330,10 @@ function download(filename, value) {
 async function downloadTicket(player) {
   if (!player.admissionId) throw new Error('控制台與 API 版本不一致，請更新服務並重新整理。');
   const address = $('game-address').value.trim(), port = Number($('game-port').value);
-  if (!address || /[\s/\\?#@]/.test(address) || !Number.isInteger(port) || port < 1024 || port > 65535) { notify('請先輸入遊戲伺服器地址及 1024–65535 的連線埠。', true); return; }
+  if (!validDestination(address, port)) {
+    notify('請輸入完整 IPv4 位址（例如 192.168.1.100）及 1024–65535 的連線埠。', true);
+    return;
+  }
   const ticket = await api(`/sessions/${state.selected}/players/${player.id}/join-ticket`, 'POST', undefined, undefined, player.admissionId);
   download(`quest-player-${player.id}.json`, { role: 'Client', address, port, joinTicket: ticket.ticket });
   notify(`玩家連線檔已產生，有效至 ${time(ticket.expiresAtUtc)}。請將各自檔案配置到對應玩家端。`);

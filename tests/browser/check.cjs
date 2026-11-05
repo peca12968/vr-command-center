@@ -163,8 +163,21 @@ async function main() {
     lifecycleKind = null;
     await api('/sessions/' + session.id + '/players/' + temporaryPlayer.playerId, 'DELETE', undefined, 'Master', 204, replacement.admissionId);
     await page.locator('#refresh').click(); await page.waitForFunction(() => document.querySelectorAll('#roster tr').length === 1);
+    const ticketButton = page.locator('#roster button').filter({ hasText: '下載連線檔' });
+    const ticketRoute = '**/join-ticket'; let ticketRequests = 0;
+    const observeTicket = async route => { ticketRequests++; await route.continue(); };
+    await page.route(ticketRoute, observeTicket);
+    for (const [address, port] of [['127.1', '7777'], ['0.0.0.0', '7777'], ['224.0.0.1', '7777'], ['127.0.0.1', '65536']]) {
+      await page.locator('#game-address').fill(address); await page.locator('#game-port').fill(port);
+      await ticketButton.click();
+      await page.waitForFunction(() => !document.querySelector('#session-select').disabled);
+      check(ticketRequests === 0 && (await page.locator('#notice').innerText()).includes('完整 IPv4'), `Invalid player destination ${address}:${port} is rejected before requesting a ticket`);
+    }
     await page.locator('#game-address').fill('127.0.0.1');
-    const [download] = await Promise.all([page.waitForEvent('download'), page.locator('#roster button').filter({ hasText: '下載連線檔' }).click()]);
+    await page.locator('#game-port').fill('7777');
+    const [download] = await Promise.all([page.waitForEvent('download'), ticketButton.click()]);
+    await page.unroute(ticketRoute, observeTicket);
+    check(ticketRequests === 1, 'A corrected player destination sends one ticket request');
     const configPath = path.join(directory, 'player.json'); await download.saveAs(configPath);
     const config = JSON.parse(await fs.readFile(configPath, 'utf8'));
     check(JSON.stringify(Object.keys(config).sort()) === JSON.stringify(['address', 'joinTicket', 'port', 'role']) && !Object.values(tokens).some(key => JSON.stringify(config).includes(key)), 'Downloaded headset configuration contains only player connection fields');
