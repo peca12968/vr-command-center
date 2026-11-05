@@ -24,6 +24,13 @@ public static class WorldRoutes
         app.MapPut("/api/sessions/{id:guid}/connection-endpoint", (Guid id, ConnectionEndpointDraft draft, WorldRecordings store, HttpContext context) => store.PublishEndpoint(id, draft, Actor(context)));
         app.MapGet("/api/sessions/{id:guid}/world/publish", Publish);
         app.MapGet("/api/sessions/{id:guid}/world/watch", Watch);
+        app.MapGet("/api/sessions/{id:guid}/world/frames/{sequence:long}", (Guid id, long sequence, WorldRecordings store, HttpContext context) =>
+        {
+            if (sequence < 1) throw new ArgumentException("Frame sequence must be positive.");
+            var frame = store.Frame(id, sequence, Actor(context)) ?? throw new KeyNotFoundException("No saved world frame with this sequence.");
+            context.Response.Headers.CacheControl = "no-store";
+            return Results.Json(frame, WorldJson.Options);
+        });
         app.MapGet("/api/sessions/{id:guid}/world/cameras", (Guid id, WorldRecordings store, HttpContext context) => store.Bookmarks(id, Actor(context)));
         app.MapPut("/api/sessions/{id:guid}/world/cameras/{camera:guid}", (Guid id, Guid camera, CameraBookmarkDraft draft, WorldRecordings store, HttpContext context) => store.SaveBookmark(id, camera, draft, Actor(context)));
         app.MapDelete("/api/sessions/{id:guid}/world/cameras/{camera:guid}", (Guid id, Guid camera, WorldRecordings store, HttpContext context) =>
@@ -90,11 +97,21 @@ public static class WorldRoutes
         if (mode is not ("" or "live" or "replay")) throw new ArgumentException("Use live or replay observation mode.");
         var replay = mode == "replay";
         var from = context.Request.Query["fromMs"].ToString();
-        if (from.Length > 0 && (!long.TryParse(from, out _) || long.Parse(from) < 0)) throw new ArgumentException("Invalid replay seek time.");
+        long milliseconds = 0;
+        if (from.Length > 0 && (!long.TryParse(from, out milliseconds) || milliseconds < 0)) throw new ArgumentException("Invalid replay seek time.");
+        var fromFrame = context.Request.Query["fromFrame"].ToString();
+        long exact = 0;
+        if (fromFrame.Length > 0)
+        {
+            if (!replay || from.Length > 0 || !long.TryParse(fromFrame, out exact) || exact < 1)
+                throw new ArgumentException("Use a positive frame sequence by itself in replay mode.");
+            if (exact > info.AcceptedSequence) throw new KeyNotFoundException("No saved world frame with this sequence.");
+        }
         var speed = context.Request.Query["rate"].ToString();
         if (speed.Length > 0 && speed is not ("0.25" or "0.5" or "1" or "2" or "4")) throw new ArgumentException("Invalid replay speed.");
         var rate = speed.Length == 0 ? 1 : double.Parse(speed, System.Globalization.CultureInfo.InvariantCulture);
-        long sequence = replay ? store.Seek(id, from.Length == 0 ? 0 : long.Parse(from), actor) : Math.Max(1, info.AcceptedSequence);
+        long sequence = Math.Max(1, info.AcceptedSequence);
+        if (replay) sequence = exact > 0 ? exact : store.Seek(id, milliseconds, actor);
         long sent = 0; var clock = Stopwatch.StartNew(); long? startMilliseconds = null;
         var heartbeat = Stopwatch.StartNew(); var cancellation = context.RequestAborted;
         context.Response.ContentType = "text/event-stream"; context.Response.Headers.CacheControl = "no-store";

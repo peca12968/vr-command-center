@@ -185,6 +185,26 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         check(len(info["header"]["props"]) == 2, "World archive uses actual canonical mission geometry")
         check(any(player["rig"]["kind"] == "Simulated" for row in frames if row["type"] == "frame" for player in row["payload"]["frame"]["players"]), "Head and both hands retain explicit synthetic rig provenance")
         packets = [row["payload"] for row in frames if row["type"] == "frame"]
+        combat_packet = next(packet for packet in packets if any(entry["kind"] == "PlayerDamaged" for entry in packet["events"]))
+        exact_route = route + f"/frames/{combat_packet['sequence']}"
+        exact = request(exact_route, "Room5")
+        check(exact["packet"] == combat_packet and exact["statistics"][0]["health"] == 80,
+              "Exact saved frame returns original events and statistics at the same boundary")
+        request(exact_route, "Room1", 403)
+        request(exact_route, "invalid", 401)
+        request(route + "/frames/0", expected=400)
+        request(route + f"/frames/{info['acceptedSequence'] + 1}", expected=404)
+        check(True, "Exact frame reads retain authorization and reject invalid or missing frames")
+        with request(route + f"/watch?mode=replay&fromFrame={combat_packet['sequence']}&rate=4", "Room5") as stream:
+            check(event(stream)[0] == "header" and event(stream) == ("frame", exact),
+                  "Resuming by frame starts on the same exact packet as a single-frame read")
+            check(event(stream)[1]["packet"]["sequence"] == combat_packet["sequence"] + 1,
+                  "Exact replay continues in stored sequence order")
+        request(route + "/watch?mode=replay&fromFrame=1&fromMs=0", expected=400)
+        request(route + "/watch?mode=live&fromFrame=1", expected=400)
+        request(route + "/watch?mode=replay&fromFrame=0", expected=400)
+        request(route + f"/watch?mode=replay&fromFrame={info['acceptedSequence'] + 1}", expected=404)
+        check(True, "Exact replay refuses invalid or ambiguous seek parameters")
         seek_ms = packets[5]["elapsedMilliseconds"]
         expected_seek = [packet for packet in packets if packet["elapsedMilliseconds"] <= seek_ms][-1]
         with request(route + f"/watch?mode=replay&fromMs={seek_ms}&rate=4") as stream:
@@ -268,6 +288,7 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         info["header"]["environmentVersion"] = 0
         process = start()
         check(request(route) == info, "SQLite restart restores recording identity, cursor, time and completion")
+        check(request(exact_route, "Room5") == exact, "The exact event frame and its statistics remain identical after restart")
         check(request(route)["header"]["environmentVersion"] == 0, "Pre-versioned stored headers remain explicitly legacy instead of acquiring invented effects")
         check(request(cameras) == [] and request(cameras, "Room5") == [room_camera]
               and request(camera_route, method="PUT", body=camera)["deleted"], "SQLite restart preserves saved camera positions and removal history without changing world metadata")

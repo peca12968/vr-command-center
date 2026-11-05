@@ -91,6 +91,25 @@ class ExerciseVenue(vm.Venue):
             extra_args=(*extra_args,'--vr-desktop-endurance' if self.args.endurance else '--vr-desktop-exercise',str(directory))
         super().launch(name,config,visible,extra_args=extra_args)
 
+def check_frame_review(v, entry, frames):
+    route = f'/api/sessions/{entry["id"]}/world'
+    first = next((index for index, frame in enumerate(frames[:-1])
+                  if any(event['kind'] == 'ShotFired' for event in frame['packet']['events'])), None)
+    if first is None:
+        raise RuntimeError('No accepted native shot frame to inspect')
+    sequence = first + 1
+    exact = v.request(f'{route}/frames/{sequence}')
+    request = urllib.request.Request(v.base + f'{route}/watch?mode=replay&fromFrame={sequence}&rate=4',
+                                     headers={'Authorization': 'Bearer ' + v.tokens['Master']})
+    with urllib.request.urlopen(request, timeout=10) as response:
+        stream = capacity.sse_frames(response)
+        resumed = [next(stream), next(stream)]
+    if exact != frames[first] or resumed != frames[first:first + 2]:
+        raise RuntimeError('Native shot frame or exact resume differed from the accepted full replay')
+    v.save(entry['name'] + '-frame-review.json', {'complete': True, 'sequence': sequence,
+           'resumedSequences': [frame['packet']['sequence'] for frame in resumed], 'frame': exact})
+
+
 def replay(v,entry,pause):
     request=urllib.request.Request(v.base+f'/api/sessions/{entry["id"]}/world/watch?mode=replay&fromMs=0&rate=4',headers={'Authorization':'Bearer '+v.tokens['Master']})
     rows=[];faults=[];previous=0;last=None;ranges={p['id']:{'min':None,'max':None,'reload':False,'cycles':{}} for p in entry['players']};last_running=None;running=0
@@ -126,7 +145,10 @@ def replay(v,entry,pause):
             try:validate_endurance_cycles(span['cycles'],entry['expectedCycles'])
             except ValueError as error:faults.append({'playerId':identity,'reason':str(error)})
     result={'complete':not faults,'frames':previous,'runningFrames':running,'faults':faults,'ranges':ranges,'operatorReferences':len(matched),'scope':'Full accepted native replay, generated input only; original continuity policies retained'}
-    v.save(entry['name']+'-full-replay.json',rows);v.save(entry['name']+'-replay-checks.json',result);return result
+    v.save(entry['name']+'-full-replay.json',rows);v.save(entry['name']+'-replay-checks.json',result)
+    if v.args.check_frame_review and result['complete']:
+        check_frame_review(v, entry, rows)
+    return result
 
 def run(v):
     v.start();modes=[]
@@ -219,6 +241,8 @@ def run(v):
             v.stop_round(e)
             if not v.args.endurance:
                 playback=replay(v,e,pause if e is entries[0] else None);check(playback['complete'],e['name']+': all replay frames retain original bodies, movement/reload, seals and results')
+                if v.args.check_frame_review:
+                    check(True, e['name'] + ': exact shot frame and first two resumed frames match the native archive')
         if v.args.endurance:
             # All native sources are stopped first. Each independent reader still
             # consumes every frame at the original rate4 and its original deadline.
@@ -235,9 +259,11 @@ def main():
     p.add_argument('--endurance',action='store_true',help='Explicit separate bounded native profile: --seconds 60 (smoke) or 900 (long); never combined with operator-controls')
     p.add_argument('--replay-workers',type=int,choices=(1,5),default=1,help='Endurance only: independent closed-source replay readers; every stream retains rate4 and all original gates')
     p.add_argument('--operator-controls',action='store_true',help='After the base motion window, apply Storm Night Patrol then Fog Day Advance through normal management commands; no console UI or physical operator input')
+    p.add_argument('--check-frame-review', action='store_true', help='Verify an exact native shot frame and resume during the short exercise')
     p.add_argument('--api-dll',type=Path,default=Path(os.environ.get('VR_COMMAND_API_DLL',ROOT/'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')));p.add_argument('--player-exe',type=Path,default=ROOT/'artifacts/desktop/VrCommand.exe');args=p.parse_args();args.duration=600;args.visible_room=0;args.job_workers=2;args.check=False
     if args.endurance and (args.seconds not in (60,900) or args.operator_controls) or not args.endurance and args.seconds not in range(12,41):p.error('Short seconds must be 12..40; endurance requires 60 or 900 and no operator-controls')
     if args.replay_workers!=1 and not args.endurance:p.error('Parallel replay readers require the explicit endurance profile')
+    if args.check_frame_review and args.endurance:p.error('Frame review uses the short exercise')
     vm.verify_player(args);v=ExerciseVenue(args)
     try:run(v)
     except BaseException as error:

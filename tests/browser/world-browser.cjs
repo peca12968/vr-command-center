@@ -37,6 +37,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       && Number(await canvas.getAttribute('data-prop-triangles')) === live.header.props.length * 12,
       'A legacy streamed world retains its recorded primitive cover rather than receiving new field-prop art');
     check((await page.locator('#world-freshness').innerText()) === '正在接收快照' && (await page.locator('#world-actor-info').innerText()).includes('Simulated'), 'Live viewer distinguishes fresh snapshots and synthetic head/hand data');
+    check(!await page.locator('#world-review').isVisible(), 'Live observation keeps frame review out of the playback controls');
     const before = Number(await canvas.getAttribute('data-sequence'));
     await page.waitForFunction(sequence => Number(document.querySelector('#world-canvas').dataset.sequence) > sequence, before);
     check((await page.locator('#world-statistics tr td').allTextContents()).join('|') === 'World Simulation|2|1|20|1|100%|80', 'Streamed per-frame combat statistics match the authoritative report prefix');
@@ -317,6 +318,38 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     check(await canvas.getAttribute('data-sequence') === paused, 'Replay seek reads indexed early state and pause holds the current frame');
     await page.locator('#world-timeline').evaluate(input => { input.value = input.max; input.dispatchEvent(new Event('change', { bubbles: true })); });
     await page.waitForFunction(() => document.querySelector('#world-status').textContent.includes('已結束'));
+    const archiveRoute = `/sessions/${completed.sessionId}/world`;
+    const finalFrame = (await api(archiveRoute)).acceptedSequence;
+    const back = page.locator('#world-frame-back'), next = page.locator('#world-frame-next');
+    await page.waitForFunction(() => !document.querySelector('#world-frame-back').disabled);
+    check(await next.isDisabled() && Number(await canvas.getAttribute('data-sequence')) === finalFrame,
+      'Paused review stays at the final saved frame and disables advancing beyond it');
+    let eventFrame;
+    for (let sequence = finalFrame - 1; sequence >= 1; sequence--) {
+      const saved = await api(`${archiveRoute}/frames/${sequence}`);
+      if (saved.packet.events.some(value => value.kind === 'PlayerDamaged')) { eventFrame = saved; break; }
+    }
+    if (!eventFrame) throw new Error('The completed combat fixture had no saved player damage');
+    const eventSequence = eventFrame.packet.sequence;
+    await page.locator('#world-review').scrollIntoViewIfNeeded();
+    for (let sequence = finalFrame - 1; sequence >= eventSequence; sequence--) {
+      await back.click();
+      await page.waitForFunction(value => Number(document.querySelector('#world-canvas').dataset.sequence) === value, sequence, { polling: 50 });
+    }
+    const rows = await page.locator('#world-events tr').allTextContents();
+    check(rows.length === eventFrame.packet.events.length && rows.some(row => /玩家受傷.*World Simulation · 房間 2.*20$/.test(row)) &&
+      (await page.locator('#world-frame-message').innerText()) === `已停在第 ${eventSequence} 格。`,
+      'Real Previous clicks render the exact saved damage event, room, and amount');
+    await page.screenshot({ path: path.join(screenshots, 'world-frame-review.png'), fullPage: true });
+    await next.click();
+    await page.waitForFunction(value => Number(document.querySelector('#world-canvas').dataset.sequence) === value, eventSequence + 1, { polling: 50 });
+    check(await back.isEnabled(), 'Next moves one exact frame forward and allows stepping back');
+    const resumedRequest = page.waitForRequest(request => new URL(request.url()).pathname.endsWith('/world/watch') && new URL(request.url()).searchParams.get('fromFrame') === String(eventSequence + 1));
+    await page.locator('#world-pause').click();
+    await resumedRequest;
+    check(true, 'Resume requests the selected frame by original sequence');
+    await page.locator('#world-timeline').evaluate(input => { input.value = input.max; input.dispatchEvent(new Event('change', { bubbles: true })); });
+    await page.waitForFunction(value => Number(document.querySelector('#world-canvas').dataset.sequence) === value, finalFrame, { polling: 50 });
     await page.locator('#world-camera').selectOption('overview');
     await page.setViewportSize({ width: 390, height: 844 }); await page.waitForTimeout(100);
     check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1) && (await canvas.boundingBox()).width > 280, 'Streamed world controls and canvas fit a mobile viewport');
