@@ -17,11 +17,13 @@ def main():
     p.add_argument('--peer-diagnostics',action='store_true',help='Verify observed UDP peers in Linked and absence in default Independent runs')
     p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
     p.add_argument('--check-layout-preview',action='store_true',help='Load a saved barricade opening and compare its preview with native world geometry')
+    p.add_argument('--check-room-reports',action='store_true',help='Verify scoped Linked CSVs against the full sealed native report')
     args=p.parse_args()
     if os.name!='nt':p.error('Actual Windows processes required')
     if bool(args.player_package)!=bool(args.game_address):p.error('Provide --player-package and --game-address together')
     if args.peer_diagnostics and not args.player_package:p.error('--peer-diagnostics requires the three-package check')
     if args.check_room_readiness and not args.player_package:p.error('--check-room-readiness requires five players per room')
+    if args.check_room_reports and not args.player_package:p.error('--check-room-reports requires the three-package check')
     address='127.0.0.1'
     if args.game_address:
         if not any(args.game_address in ipaddress.IPv4Network(net) for net in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16')):
@@ -203,6 +205,17 @@ def main():
                 or any(row[k]!=final[k] for k in fields) or any(Decimal(row[k])!=Decimal(str(final[k])) for k in numbers):
                 raise ValueError('CSV row differs from the original sealed player result')
         (out/(entry['label']+'-report.csv')).write_bytes(raw)
+        if args.check_room_reports and entry['label']=='linked':
+            for room in range(1,6):
+                scoped,scoped_headers=request('/api/sessions/'+entry['sessionId']+f'/rooms/{room}/report.csv',
+                    role=f'Room{room}',raw_response=True)
+                scoped_rows=list(csv.DictReader(io.StringIO(scoped.decode('utf-8-sig'),newline='')))
+                expected=[dict(row,reportRoomId=str(room)) for row in rows if row['playerRoomId']==str(room)]
+                check(len(expected)==5 and scoped_rows==expected and scoped_headers['Cache-Control']=='no-store'
+                    and f'-room-{room:02}.csv' in scoped_headers['Content-Disposition'],
+                    f'room {room} CSV matches its five original sealed Linked player rows')
+                (out/f'linked-scoped-room-{room:02}.csv').write_bytes(scoped)
+            request('/api/sessions/'+entry['sessionId']+'/rooms/2/report.csv',role='Room1',expected=403)
         save(entry['label']+'-delivery.json',{'serverAcknowledgedConnections':acks,
             'players':[{'playerId':c['player']['id'],'admissionId':c['player']['admissionId'],
                 'roomId':c['player']['roomId'],'seat':c['player']['seat'],'connectionId':c['connection'],

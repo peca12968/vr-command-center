@@ -129,11 +129,15 @@ app.MapPost("/api/sessions/{id:guid}/commands", (Guid id, ControlCommand command
 app.MapGet("/api/sessions/{id:guid}/statistics", (Guid id, SessionManager manager, HttpContext context) =>
     manager.Statistics(id, Actor(context)));
 app.MapGet("/api/sessions/{id:guid}/report.csv", (Guid id, SessionManager manager, HttpContext context) =>
+    ExportReport(id, null, manager, context));
+app.MapGet("/api/sessions/{id:guid}/rooms/{roomId:int}/report.csv", (Guid id, int roomId, SessionManager manager, HttpContext context) =>
+    ExportReport(id, roomId, manager, context));
+static IResult ExportReport(Guid id, int? roomId, SessionManager manager, HttpContext context)
 {
     context.Response.Headers.CacheControl = "no-store";
-    var report = manager.FinalReport(id, Actor(context));
-    return Results.File(FinalReportCsv.Encode(report), "text/csv; charset=utf-8", FinalReportCsv.FileName(id));
-});
+    var report = manager.FinalReport(id, Actor(context), roomId);
+    return Results.File(FinalReportCsv.Encode(report), "text/csv; charset=utf-8", FinalReportCsv.FileName(id, roomId));
+}
 app.MapPost("/api/sessions/{id:guid}/combat", (Guid id, CombatReport report, SessionManager manager, HttpContext context) =>
     manager.ReportCombat(id, report, Actor(context)));
 app.MapPost("/api/sessions/{id:guid}/combat-stream", (Guid id, OpenCombatStream request, SessionManager manager, HttpContext context) =>

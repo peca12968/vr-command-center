@@ -4,11 +4,16 @@ namespace VrCommand.Core;
 public record FinalSessionReport(int ReportVersion, Guid SessionId, Guid MissionId, string MissionName,
     SessionMode Mode, int[] RoomIds, DateTimeOffset CreatedAtUtc, DateTimeOffset? StartedAtUtc,
     DateTimeOffset EndedAtUtc, int PlannedDurationSeconds, long ThroughSequence, CombatOrigin? Origin,
-    Guid? StreamId, long? FinalStreamSequence, PlayerStatistics[] Players);
+    Guid? StreamId, long? FinalStreamSequence, PlayerStatistics[] Players)
+{
+    public int? ReportRoomId { get; init; }
+}
 
 public sealed partial class SessionManager
 {
-    public FinalSessionReport FinalReport(Guid id, OperatorIdentity actor)
+    public FinalSessionReport FinalReport(Guid id, OperatorIdentity actor) => FinalReport(id, actor, null);
+
+    public FinalSessionReport FinalReport(Guid id, OperatorIdentity actor, int? roomId)
     {
         ArgumentNullException.ThrowIfNull(actor);
         lock (gate)
@@ -18,6 +23,12 @@ public sealed partial class SessionManager
             if (actor.Role == OperatorRole.GameServer)
                 throw new AccessDeniedException("Final report export requires an operator identity.");
             var session = history.View;
+            if (roomId is int room)
+            {
+                if (room is < 1 or > RoomCount) throw new ArgumentException("Invalid report room.");
+                AccessPolicy.Read(actor, [room]);
+                if (!session.RoomIds.Contains(room)) throw new ArgumentException("Report room is outside the session.");
+            }
             var statistics = Statistics(history);
             if (session.State != SessionState.Ended || session.EndedAtUtc is null || statistics.PendingTelemetry)
                 throw new InvalidOperationException("End the session and seal all combat reports before exporting a final report.");
@@ -25,7 +36,9 @@ public sealed partial class SessionManager
                 [.. session.RoomIds], session.CreatedAtUtc, session.StartedAtUtc, session.EndedAtUtc.Value,
                 session.Mission.Definition.DurationSeconds, statistics.ThroughSequence,
                 statistics.Origin ?? session.CombatStream?.Origin, session.CombatStream?.StreamId,
-                session.CombatStream?.AcceptedSequence, statistics.Players);
+                session.CombatStream?.AcceptedSequence,
+                roomId.HasValue ? statistics.Players.Where(player => player.RoomId == roomId.Value).ToArray() : statistics.Players)
+            { ReportRoomId = roomId };
         }
     }
 }

@@ -575,6 +575,18 @@ try:
                         "Parsed final CSV agrees with every accepted player statistic")
             require(request("GET", session_path + "/report.csv", identity="Room1", raw=True)[0] == final_csv,
                     "Linked room controller exports the same report under existing full-session read policy")
+            scoped_url = session_path + "/rooms/1/report.csv"
+            scoped, scoped_headers = request("GET", scoped_url, identity="Room1", raw=True)
+            scoped_rows = list(csv.DictReader(io.StringIO(scoped.decode("utf-8-sig"))))
+            require(scoped_rows == [dict(row, reportRoomId="1") for row in final_rows if row["playerRoomId"] == "1"]
+                    and scoped_headers.get("Cache-Control") == "no-store"
+                    and "-room-01.csv" in scoped_headers.get("Content-Disposition", ""),
+                    "Room report exports only its final ledger rows with the original metadata and a marked scope")
+            require(request("GET", scoped_url, raw=True)[0] == scoped, "Master downloads the same exact room report bytes")
+            request("GET", scoped_url, identity="Room2", expected=403)
+            request("GET", scoped_url, identity="GameServer", expected=403)
+            request("GET", scoped_url, identity=None, expected=401)
+            request("GET", session_path + "/rooms/6/report.csv", expected=400)
             request("GET", session_path + "/report.csv", expected=401, identity=None)
             request("GET", session_path + "/report.csv", expected=403, identity="GameServer")
             require(report(fired)["duplicate"], "Combat report retry is available after session end")
@@ -597,6 +609,8 @@ try:
             require(request("GET", session_path + "/statistics")["players"] == statistics["players"], "Archived statistics also survive a second restart")
             require(request("GET", session_path + "/report.csv", raw=True)[0] == final_csv,
                     "Real HTTP CSV bytes survive API restart and operator-key rotation")
+            require(request("GET", scoped_url, identity="Room1", raw=True)[0] == scoped,
+                    "Scoped CSV bytes survive API restart and operator-key rotation")
             demo = subprocess.run([sys.executable, str(ROOT / "scripts/demo_combat.py"), "--base-url", base_url,
                                    "--key-file", str(key_file), "--room", "1"], capture_output=True, text=True, encoding="utf-8", timeout=30)
             if demo.returncode != 0:

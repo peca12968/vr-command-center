@@ -102,9 +102,34 @@ internal static class FinalReportChecks
             && Encoding.UTF8.GetString(FinalReportCsv.Encode(emptyReport)).Contains("\"Session\""),
             "Never-started empty session exports explicit metadata without inventing a participant or source");
         var linked = empty.Create(SessionMode.Linked, [1, 2, 3, 4, 5], mission, master).Id;
+        var visitor = Guid.NewGuid();
+        empty.Join(linked, departed, "=room1", 1, HeadsetKind.Quest3, room);
+        empty.Leave(linked, departed, room);
+        empty.Join(linked, visitor, "Room two", 2, HeadsetKind.Quest3, other);
+        Reject<AccessDeniedException>(() => empty.FinalReport(linked, room, 2), "Linked room report checks the requested room before finality");
         empty.OpenStream(linked, new(Guid.NewGuid(), CombatOrigin.GameServer), server); empty.End(linked, master);
+        Reject<InvalidOperationException>(() => empty.FinalReport(linked, room, 1), "Room report also requires the original combat seal");
         var attached = empty.Get(linked).CombatStream!; empty.SealStream(linked, new(attached.StreamId, 0), server);
-        check(empty.FinalReport(linked, room).Origin == CombatOrigin.GameServer && empty.FinalReport(linked, room).RoomIds.Length == 5,
+        var venueReport = empty.FinalReport(linked, room);
+        check(venueReport.Origin == CombatOrigin.GameServer && venueReport.RoomIds.Length == 5 && venueReport.Players.Length == 2
+            && !Encoding.UTF8.GetString(FinalReportCsv.Encode(venueReport)).Contains("reportRoomId"),
             "Linked room controller follows existing read scope and zero-event stream retains its declared source");
+        var own = empty.FinalReport(linked, room, 1);
+        check(own.ReportRoomId == 1 && own.RoomIds.SequenceEqual(venueReport.RoomIds) && own.StreamId == venueReport.StreamId
+            && own.ThroughSequence == venueReport.ThroughSequence && own.FinalStreamSequence == venueReport.FinalStreamSequence
+            && own.Players.Single().PlayerId == departed && empty.FinalReport(linked, master, 2).Players.Single().PlayerId == visitor,
+            "Scoped reports preserve the sealed session boundary and include only that room's ledger, including departed players");
+        var ownCsv = FinalReportCsv.Encode(own);
+        check(ownCsv.SequenceEqual(FinalReportCsv.Encode(empty.FinalReport(linked, master, 1)))
+            && Encoding.UTF8.GetString(ownCsv).Contains("\"reportRoomId\"\r\n")
+            && Encoding.UTF8.GetString(ownCsv).Contains("\"'=room1\"")
+            && FinalReportCsv.FileName(linked, 1).EndsWith("-room-01.csv", StringComparison.Ordinal),
+            "Master and room controller get identical scoped bytes with formula protection and a distinct filename");
+        var unoccupied = empty.FinalReport(linked, master, 5);
+        check(unoccupied.ReportRoomId == 5 && unoccupied.Players.Length == 0
+            && Encoding.UTF8.GetString(FinalReportCsv.Encode(unoccupied)).Contains("\"Session\""),
+            "Empty room scope exports one metadata row without leaking players from other rooms");
+        Reject<ArgumentException>(() => empty.FinalReport(emptyId, master, 2), "An independent session cannot export a room outside its topology");
+        Reject<ArgumentException>(() => empty.FinalReport(linked, master, 6), "Out-of-range report rooms are rejected");
     }
 }

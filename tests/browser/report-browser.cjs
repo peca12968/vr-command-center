@@ -1,15 +1,16 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const readCsv = require('./csv.cjs');
 
 module.exports = async function reportBrowser({ context, tokens, base, api, session, linked, screenshots, check }) {
   const page = await context.newPage(), errors = [], downloads = [];
   page.on('pageerror', error => errors.push(error.message)); page.on('download', download => downloads.push(download));
   const button = page.locator('#export-report');
-  async function login() {
-    await page.locator('#login-key').fill(tokens.Master); await page.locator('#login-form button').click();
+  async function login(role = 'Master', initialId = session.id) {
+    await page.locator('#login-key').fill(tokens[role]); await page.locator('#login-form button').click();
     await page.waitForFunction(() => !document.querySelector('#workspace').hidden && !document.querySelector('#session-select').disabled);
     await page.locator('#include-ended').check(); await page.locator('#refresh').click();
-    await page.locator(`#session-select option[value="${session.id}"]`).waitFor({ state: 'attached' });
+    await page.locator(`#session-select option[value="${initialId}"]`).waitFor({ state: 'attached' });
   }
   async function select(id) {
     await page.locator('#session-select').selectOption(id);
@@ -91,6 +92,28 @@ module.exports = async function reportBrowser({ context, tokens, base, api, sess
     await page.route('**/api/sessions/*/report.csv', route => route.fulfill({ status: 401, contentType: 'application/json', body: '{}' }));
     await button.click(); await page.locator('#login-panel').waitFor({ state: 'visible' });
     check(await page.locator('#workspace').isHidden() && downloads.length === expectedCount + 1, 'Current unauthorized report response logs out without downloading a file');
+    await page.unroute('**/api/sessions/*/report.csv');
+    await login(); await select(linked.id);
+    const scope = page.locator('#report-room');
+    check(await scope.inputValue() === '' && await scope.locator('option').count() === 6, 'Master may choose the full linked report or any of five rooms');
+    async function scopedDownload(roomId, role) {
+      const pending = page.waitForEvent('download'); await button.click(); const download = await pending;
+      const bytes = await fs.readFile(await download.path());
+      const response = await fetch(`${base}/api/sessions/${linked.id}/rooms/${roomId}/report.csv`, { headers: { Authorization: 'Bearer ' + tokens[role] } });
+      const rows = readCsv(bytes);
+      check(response.ok && bytes.equals(Buffer.from(await response.arrayBuffer())) &&
+        download.suggestedFilename() === `vr-command-report-v1-${linked.id}-room-0${roomId}.csv`
+        && rows.length === 1 && rows[0].reportRoomId === String(roomId) && rows[0].playerRoomId === String(roomId)
+        && rows[0].roomIds === '1|2|3|4|5' && rows[0].sessionId === linked.id,
+        `${role} downloads its exact single-room rows, preserving linked session metadata`);
+      await fs.writeFile(path.join(screenshots, `scoped-report-${role}.csv`), bytes);
+    }
+    await scope.selectOption('2'); await scopedDownload(2, 'Master');
+    await page.screenshot({ path: path.join(screenshots, 'scoped-report-master.png'), fullPage: true });
+    await page.locator('#logout').click(); await login('Room1', linked.id); await select(linked.id);
+    check(await scope.inputValue() === '1' && await scope.isDisabled() && await scope.locator('option').count() === 1,
+      'Room controller sees only its own report scope, with no stale master choice after logout');
+    await scopedDownload(1, 'Room1');
     check(errors.length === 0, 'Report workflow has no uncaught browser errors');
   } finally { await page.close(); }
 };
