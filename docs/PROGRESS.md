@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-06 玩家連線檔視窗驗證
+
+玩家啟動器 1.1 交付包 `windows-player-0.41.1-v2.zip` 為 82,652,952 bytes，SHA256 `925a8ac16451ae2c423da1b0cb9c9867af17b8fb5b08ab5824f7ea1b1bca8402`。解壓包通過 19 項檢查，Framework 核對類別 24 項與連線狀態 17 項通過。封裝核對確認 311 項清單內容及同源 Unity 0.41.1 執行檔。 [玩家連線檔載入與核對](PLAYER_CONFIG_REVIEW.md)
+
+`20261106-020135-fbe6ceb7` 的實際 WinForms 流程從貼上路徑開始。載入後顯示檔名與目的地，附加 JSON 空白後拒絕啟動，重新載入後開始遊戲。第一位從 GUI、第二位從 CLI 入場。兩個測試工具均 exit 0，9 項檢查、2 份戰績與世界封存序號 828，程序清理後 C／F 共 14 檔逐一比對 SHA256。另保留 2026-11-02 背景雙玩家 13 項、世界封存序號 387 及 14 檔 C／F 核對。原 GUI 逾時仍保留失敗，當時停在載入前。兩場屬同機 Simulation，LAN、實機及 25 位真人驗收待完成。
+
+CI 41368791791／job 125034572205 測試 `e963e488411927f73bc296e500ea6ae4ee18c7be`。Linux 772 核心、459 HTTP、47 world、6 pipe、38 硬體 CLI、Python、89 Node 與 296 Chromium 通過，另有 3 項 Windows 限定跳過。保存 console 51 檔、control 13 檔、hardware 26 檔及原始 ZIP 和日誌。累計 1870 份瀏覽器 CI 證據，本輪兩張原生流程瀏覽器截圖另計。 [CI 結果](https://github.com/peca12968/vr-command-center/actions/runs/41368791791)
+
 ## 2026-11-02：最終GUI fixture來源65b072d完整雲端成功
 
 [CI41367545805](https://github.com/peca12968/vr-command-center/actions/runs/41367545805)／job125030805195，精確 **65b072d31f32afcc5e9da85713caa8b6451a3cd8**完整 **success**：Linux772核心／459 HTTP／47 world、6pipe／38硬體CLI、全部Python含14exercise／4server package及素材、89Node／296Chromium，2Windows限定skip非Editor/native/GUI/頭盔。此提交只補GUI fixture roster；本機實際GUI64853另驗，不由CI替代。
