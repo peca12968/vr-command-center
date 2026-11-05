@@ -6,16 +6,42 @@ public record PlayerReadiness(Guid PlayerId, Guid AdmissionId, int RoomId, int S
 public record SessionReadiness(int Version, Guid SessionId, long SessionSequence, DateTimeOffset SampledAtUtc,
     string SourceState, string? Origin, long WorldSequence, long ObservedSequence, DateTimeOffset? CapturedAtUtc,
     double? SourceAgeMilliseconds, PlayerReadiness[] Players);
+public record RoomReadiness(int RoomId, Guid? SessionId, long SessionSequence, int Registered, int SimulatedReady,
+    int TrackedReady, string SourceState, double? SourceAgeMilliseconds);
 
 public sealed partial class WorldRecordings
 {
-    // A scoped, read-only view of accepted snapshots. This is not transport presence,
-    // device attestation, a new Begin policy, or a replacement for the pose channel.
-    public SessionReadiness Readiness(Guid id, OperatorIdentity actor)
+    private static void RequireReadinessActor(OperatorIdentity actor)
     {
         AccessPolicy.Validate(actor);
         if (actor.Role is not (OperatorRole.Master or OperatorRole.RoomController))
             throw new AccessDeniedException("Player readiness is for control desks only.");
+    }
+
+    public RoomReadiness[] ReadinessByRoom(OperatorIdentity actor)
+    {
+        RequireReadinessActor(actor);
+        var rooms = manager.Rooms(actor);
+        // A linked game uses the same accepted snapshot for all of its visible rooms.
+        var sessions = rooms.Select(room => room.SessionId).OfType<Guid>().Distinct()
+            .ToDictionary(id => id, id => Readiness(id, actor));
+        return rooms.Select(room =>
+        {
+            if (room.SessionId is not { } id) return new RoomReadiness(room.Id, null, 0, 0, 0, 0, "Idle", null);
+            var report = sessions[id];
+            var players = report.Players.Where(player => player.RoomId == room.Id).ToArray();
+            return new RoomReadiness(room.Id, id, report.SessionSequence, players.Length,
+                players.Count(player => player.CanParticipate && player.RigKind == "Simulated"),
+                players.Count(player => player.CanParticipate && player.RigKind == "Tracked"),
+                report.SourceState, report.SourceAgeMilliseconds);
+        }).ToArray();
+    }
+
+    // A scoped, read-only view of accepted snapshots. This is not transport presence,
+    // device attestation, a new Begin policy, or a replacement for the pose channel.
+    public SessionReadiness Readiness(Guid id, OperatorIdentity actor)
+    {
+        RequireReadinessActor(actor);
         lock (gate)
         {
             var current = manager.Get(id, actor);

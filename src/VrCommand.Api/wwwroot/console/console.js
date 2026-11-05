@@ -2,7 +2,7 @@ import { mountWorld } from './world-ui.js';
 import { mountReplay } from './replay-ui.js';
 import { mountLayout } from './layout-ui.js';
 import { mountReport } from './report-ui.js';
-import { mountReadiness } from './readiness-ui.js';
+import { mountReadiness, mountRoomReadiness } from './readiness-ui.js';
 import { mountConnections, validDestination } from './connection-ui.js';
 import { mountClosure } from './closure-ui.js';
 import { placementHistory } from './placement-history.js';
@@ -16,6 +16,7 @@ const objectHistory = placementHistory();
 const world = mountWorld(() => state.key, logout);
 const report = mountReport(() => state, logout);
 const readiness = mountReadiness(() => state, logout);
+const roomReadiness = mountRoomReadiness(() => state, logout);
 const connections = mountConnections(() => state, logout);
 const closure = mountClosure(() => state, logout);
 const placement = mountLayout({ api, epoch: () => state.epoch, active: () => !!state.actor, editable: master,
@@ -109,7 +110,7 @@ function logout() {
   selectionEpoch++;
   report.reset(); state.statistics = null;
   closure.active(false); closure.reset();
-  replay.active(false); replay.reset(); world.active(false); world.reset(); readiness.active(false); readiness.reset(); connections.active(false); connections.reset();
+  replay.active(false); replay.reset(); world.active(false); world.reset(); readiness.active(false); readiness.reset(); roomReadiness.active(false); connections.active(false); connections.reset();
   state.epoch++; state.key = ''; state.actor = null; state.selected = null; state.session = null; state.pending = null;
   state.rooms = []; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
   state.props = []; state.prop = -1; clearPropHistory();
@@ -191,11 +192,17 @@ function renderRooms() {
   $('rooms').replaceChildren(...state.rooms.map(room => {
     const card = element('article', undefined, 'room-card'), session = state.sessions.find(s => s.id === room.sessionId);
     card.append(element('p', `ROOM 0${room.id}`, 'eyebrow'), element('h3', `房間 ${room.id}`), element('div', `${room.playerCount} / ${room.capacity}`, 'occupancy'), element('p', session ? `${phases[session.state]} · ${session.mission.definition.name}` : room.sessionId ? '場次使用中' : '房間空閒', 'room-mission'));
+    if (room.sessionId) {
+      const status = element('p', '正在更新入場狀態', 'hint room-readiness');
+      status.dataset.roomReadiness = room.id;
+      card.append(status);
+    }
     const button = element('button', room.sessionId ? '查看場次' : '選擇此房間', 'quiet small');
     button.type = 'button'; button.disabled = state.busy || !!state.pending;
     button.addEventListener('click', () => { if (room.sessionId) selectSession(room.sessionId); else { $('launch-room').value = String(room.id); $('launch-mode').value = 'Independent'; placement.scheduleLaunch(); applyPermissions(); $('launch-mission').focus(); } });
     card.append(button); return card;
   }));
+  roomReadiness.update();
 }
 function resetSelection(id) {
   report.reset(); readiness.reset(); connections.reset(); state.statistics = null; state.selected = id; state.session = null;
@@ -552,6 +559,7 @@ function tab(name) {
   finishPropGesture();
   for (const candidate of ['operations', 'missions', 'replay', 'world']) { const active = candidate === name; $(candidate + '-view').hidden = !active; $('tab-' + candidate).classList.toggle('active', active); $('tab-' + candidate).setAttribute('aria-pressed', String(active)); }
   replay.active(name === 'replay'); world.active(name === 'world'); readiness.active(name === 'operations'); connections.active(name === 'operations');
+  roomReadiness.active(name === 'operations');
   closure.active(name === 'operations');
 }
 function submit(id, action, execute = run) { $(id).addEventListener('submit', event => { event.preventDefault(); execute(action); }); }

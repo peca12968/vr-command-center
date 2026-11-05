@@ -25,6 +25,12 @@ internal static class ReadinessChecks
         Denied(other, "Readiness rejects a foreign room before looking for its recording");
         Denied(server, "GameServer credentials cannot use the operator readiness endpoint");
         Denied(OperatorIdentity.Internal, "Readiness requires an explicit control-desk identity");
+        var venue = store.ReadinessByRoom(master);
+        check(venue.Length == 5 && venue[0] is { RoomId: 1, SessionId: var active, Registered: 1, SourceState: "NoRecording" } && active == id
+            && venue.Skip(1).All(value => value is { SessionId: null, Registered: 0, SourceState: "Idle" }),
+            "Master room readiness retains roster occupancy and distinguishes unused rooms from waiting for a world");
+        check(store.ReadinessByRoom(other).Single() is { RoomId: 2, SessionId: null, SourceState: "Idle" },
+            "A room controller receives only its own room even when another room has a player");
         var stream = Guid.NewGuid(); manager.OpenStream(id, new(stream, CombatOrigin.Simulation), server);
         var bridge = new ArenaSession();
         void Refresh() => bridge.Apply(JsonSerializer.Deserialize<ManagementSnapshot>(JsonSerializer.Serialize(manager.Get(id), JsonFormat.Options),
@@ -51,9 +57,13 @@ internal static class ReadinessChecks
         var ready = store.Readiness(id, room);
         check(ready.SourceState == "Fresh" && ready.Origin == "Simulation" && ready.Players.Single() is { CanParticipate: true, RigKind: "Simulated", AdmissionId: var epoch } && epoch == admission,
             "Fresh accepted pose names the exact current admission and synthetic provenance");
+        check(store.ReadinessByRoom(room).Single() is { RoomId: 1, SimulatedReady: 1, TrackedReady: 0, Registered: 1, SourceState: "Fresh" },
+            "Room readiness separates accepted simulated poses from tracked poses");
         var captured = clock.Now;
         clock.Now = captured.AddMilliseconds(1500); check(store.Readiness(id, room).Players.Single().CanParticipate, "Readiness includes the 1.5-second source-age boundary");
         clock.Now = captured.AddMilliseconds(1500.01); check(store.Readiness(id, room).Players.Single() is { State: "Stale", CanParticipate: false }, "Source age expires without needing another world write");
+        check(store.ReadinessByRoom(room).Single() is { SimulatedReady: 0, TrackedReady: 0, Registered: 1, SourceState: "Stale" },
+            "A stale room summary never counts a formerly valid pose");
         clock.Now = captured.AddMilliseconds(-1000); check(store.Readiness(id, room).SourceState == "Fresh", "Source clock tolerance matches the existing observer boundary");
         clock.Now = captured.AddMilliseconds(-1000.01); check(store.Readiness(id, room).SourceState == "ClockSkew", "Future source time is not marked fresh beyond clock tolerance");
         clock.Now = captured;
@@ -61,6 +71,8 @@ internal static class ReadinessChecks
         var replacement = manager.Get(id).Players.Single().AdmissionId;
         check(replacement != admission && store.Readiness(id, room).Players.Single() is { State: "AwaitingAdmission", RigKind: "None", CanParticipate: false },
             "A fresh old body cannot make a replacement admission look connected");
+        check(store.ReadinessByRoom(room).Single() is { Registered: 1, SimulatedReady: 0, TrackedReady: 0 },
+            "Room summary cannot count the old body for a replacement admission with the same roster size");
         manager.Execute(id, new(Guid.NewGuid(), ControlAction.Begin), master);
         check(store.Readiness(id, room).SourceState == "PhasePending", "Current Begin does not relabel an older Preparing snapshot");
         Refresh(); bridge.Connect(2, player, 1, 0, replacement); bridge.Pose(2, head, head, new(0, 0, 1), .1); Save();
@@ -69,6 +81,8 @@ internal static class ReadinessChecks
         check(store.Readiness(id, room).Players.Single() is { State: "Suspended", CanParticipate: false }, "Management-loss suspension cannot report ready players");
         manager.End(id, master);
         check(store.Readiness(id, room).SourceState == "Ended" && store.Readiness(id, room).Players.All(value => !value.CanParticipate), "End overrides a formerly fresh body before final recording arrives");
+        check(store.ReadinessByRoom(room).Single() is { SessionId: null, SourceState: "Idle", Registered: 0 },
+            "Ended worlds disappear from the active room summary");
         check(store.Info(id, master).AcceptedSequence == sequence, "Reading participation status never appends, seals or alters archived frames");
 
         var oldId = manager.Create(SessionMode.Independent, [1], mission, master).Id;

@@ -15,6 +15,37 @@ module.exports = async ({ context, api, tokens, base, mission, screenshots, chec
     await page.locator('#session-select').selectOption(sessions[0].id);
     await page.waitForFunction(() => document.querySelector('#readiness-summary').textContent.includes('等待遊戲來源'));
     check((await page.locator('#roster [data-readiness-player]').innerText()).includes('等待遊戲來源'), 'Registered headset category alone never appears as a connected pose');
+    const roomCell = room => page.locator(`[data-room-readiness="${room}"]`);
+    const roomIds = sessions.map(session => session.roomIds[0]);
+    const [roomA, roomB] = roomIds;
+    await roomCell(roomA).filter({ hasText: '等待遊戲來源' }).waitFor();
+    await roomCell(roomB).filter({ hasText: '等待遊戲來源' }).waitFor();
+    check(await page.locator('[data-room-readiness].ready-player').count() === 0,
+      'Actual room overview distinguishes registered players from valid poses before sources attach');
+    const actualRooms = await api('/rooms/readiness');
+    const roomFixture = { ...actualRooms, rooms: actualRooms.rooms.map(row => !roomIds.includes(row.roomId) ? row : {
+      ...row, sourceState: 'Fresh', sourceAgeMilliseconds: 0, simulatedReady: Number(row.roomId === roomA), trackedReady: Number(row.roomId === roomB)
+    }) };
+    let roomMode = 'fresh';
+    const roomRoute = route => roomMode === 'failed' ? route.fulfill({ status: 503, json: { error: 'fixture' } }) :
+      route.fulfill({ json: roomMode === 'old' ? { ...roomFixture, rooms: roomFixture.rooms.map(row =>
+        row.roomId === roomA ? { ...row, sessionId: randomUUID() } : row) } : roomFixture });
+    await page.route('**/api/rooms/readiness', roomRoute);
+    await roomCell(roomA).filter({ hasText: '1 / 1 姿態有效 · 合成 1 · 追蹤 0' }).waitFor();
+    await roomCell(roomB).filter({ hasText: '1 / 1 姿態有效 · 合成 0 · 追蹤 1' }).waitFor();
+    check(await roomCell(roomA).evaluate(cell => cell.classList.contains('ready-player'))
+      && (await page.locator('#readiness-summary').innerText()).includes('等待遊戲來源'),
+      'Room overview labels synthetic and tracked fixture counts independently from the selected real roster');
+    await page.screenshot({ path: path.join(screenshots, 'room-readiness-overview.png'), fullPage: true });
+    roomMode = 'old';
+    await roomCell(roomA).filter({ hasText: '正在更新入場狀態' }).waitFor();
+    check(await roomCell(roomB).evaluate(cell => cell.classList.contains('ready-player')),
+      'A room overview response for the wrong session clears only the affected room');
+    roomMode = 'failed';
+    await roomCell(roomB).filter({ hasText: '參戰狀態未確認' }).waitFor();
+    check(await page.locator('[data-room-readiness].ready-player').count() === 0, 'Room readiness request failure clears all positive room counts');
+    await page.unroute('**/api/rooms/readiness', roomRoute);
+    await roomCell(roomA).filter({ hasText: '等待遊戲來源' }).waitFor();
     const first = sessions[0], player = first.players[0];
     const ready = { version: 1, sessionId: first.id, sessionSequence: first.sequence, sourceState: 'Fresh', origin: 'Simulation', sourceAgeMilliseconds: 0,
       players: [{ playerId: player.id, admissionId: player.admissionId, roomId: player.roomId, seat: player.seat, state: 'Participating', rigKind: 'Simulated', canParticipate: true }] };
@@ -43,6 +74,7 @@ module.exports = async ({ context, api, tokens, base, mission, screenshots, chec
     await page.locator('#logout').click(); release();
     await page.waitForFunction(() => document.querySelector('#workspace').hidden);
     check(await page.locator('#roster tr').count() === 0 && !await page.locator('#readiness-summary').innerText().then(text => text.includes('1 / 1')), 'Logout clears readiness and ignores delayed responses from the previous identity');
+    check(await page.locator('[data-room-readiness]').count() === 0, 'Logout removes all prior room readiness cards');
   } finally {
     await page.close();
     for (const session of sessions) await api(`/sessions/${session.id}/commands`, 'POST', { commandId: randomUUID(), action: 'End' });

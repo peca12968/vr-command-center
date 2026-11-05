@@ -270,6 +270,17 @@ try:
                     "Readiness requires an actual accepted world and preserves the current admission")
             require(not {"head", "left", "right", "ticket", "gameServerKey"}.intersection(readiness["players"][0]),
                     "Control readiness contains no pose coordinates, player ticket or server credential")
+            request("GET", "/api/rooms/readiness", expected=401, identity=None)
+            request("GET", "/api/rooms/readiness", expected=403, identity="GameServer")
+            room_overview = request("GET", "/api/rooms/readiness", identity="Room1")
+            require(room_overview == {"version": 1, "rooms": [{"roomId": 1, "sessionId": independent[0]["id"],
+                    "sessionSequence": readiness["sessionSequence"], "registered": 1, "simulatedReady": 0,
+                    "trackedReady": 0, "sourceState": "NoRecording", "sourceAgeMilliseconds": None}]},
+                    "Room controller gets only its room's bounded aggregate without player identities")
+            master_overview = request("GET", "/api/rooms/readiness")
+            require([row["roomId"] for row in master_overview["rooms"]] == [1, 2, 3, 4, 5]
+                    and [row["sessionId"] for row in master_overview["rooms"]] == [s["id"] for s in independent],
+                    "Master room readiness identifies all five independent active sessions")
             join_key = str(uuid.uuid4())
             with ThreadPoolExecutor(max_workers=8) as pool:
                 joins = list(pool.map(lambda _: request("POST", own_path + "/players", room_player, identity="Room1", request_id=join_key), range(8)))

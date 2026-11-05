@@ -15,10 +15,12 @@ def main():
     p.add_argument('--player-package',type=Path,help='Launch five players per room from the API room ZIP, using this extracted player package')
     p.add_argument('--game-address',type=ipaddress.IPv4Address,help='Local private IPv4 for the three-package check')
     p.add_argument('--peer-diagnostics',action='store_true',help='Verify observed UDP peers in Linked and absence in default Independent runs')
+    p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
     args=p.parse_args()
     if os.name!='nt':p.error('Actual Windows processes required')
     if bool(args.player_package)!=bool(args.game_address):p.error('Provide --player-package and --game-address together')
     if args.peer_diagnostics and not args.player_package:p.error('--peer-diagnostics requires the three-package check')
+    if args.check_room_readiness and not args.player_package:p.error('--check-room-readiness requires five players per room')
     address='127.0.0.1'
     if args.game_address:
         if not any(args.game_address in ipaddress.IPv4Network(net) for net in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16')):
@@ -232,10 +234,25 @@ def main():
                     if kind=='complete':break
         check(len(frames)==report['finalWorld']['acceptedSequence'] and [x['packet']['sequence'] for x in frames]==list(range(1,len(frames)+1)) and frames[-1]['packet']['frame']['phase']=='Ended',entry['label']+' full API replay through terminal frame')
         save(entry['label']+'-replay.json',frames);rounds.append({'name':entry['label'],'ready':entry['ready'],'report':report,'journal':closed,'replayFrames':len(frames)})
+    def verify_room_readiness(round_clients,linked):
+        expected={client['player']['roomId']:client['sessionId'] for client in round_clients}
+        def all_ready():
+            summary=request('/api/rooms/readiness')
+            rows=summary['rooms']
+            if summary['version']!=1 or len(rows)!=5 or {row['roomId']:row['sessionId'] for row in rows}!=expected:
+                return None
+            return summary if all(row['sourceState']=='Fresh' and row['registered']==5 and
+                row['simulatedReady']==5 and row['trackedReady']==0 for row in rows) else None
+        save(('linked' if linked else 'independent')+'-room-readiness.json',wait(all_ready,20,'five fresh room aggregates'))
+        check(True,('Linked' if linked else 'Independent')+' has five real 5/5 synthetic room counts')
+        room=request('/api/rooms/readiness',role='Room1')
+        check(room['version']==1 and len(room['rooms'])==1 and room['rooms'][0]['roomId']==1
+            and room['rooms'][0]['sessionId']==expected[1],'room operator only receives its own active room aggregate')
     try:
         subprocess.run([str(control_exe),'--init',str(data),'--port',str(free()),'--report',str(out/'control-init.json')],env=env,check=True,timeout=30);keys=read(data/'operator-keys.json')['OperatorKeys'];marker=read(data/'control-instance.json');uri='http://127.0.0.1:'+str(marker['port'])
         api_ready=out/'control-ready.json';api_stop=out/'control-stop.request';api=subprocess.Popen([str(control_exe),'--run',str(data),'--seconds','1800','--ready-report',str(api_ready),'--stop-file',str(api_stop),'--report',str(out/'control-final.json')],env=env,cwd=out)
         info=wait(lambda:read(api_ready) if api_ready.exists() else None,40,'control startup');api_witness=control.ChildWitness(info['childPid']);check(info['status']=='ready','packaged control API without SDK on PATH');call('verify',['--verify','package'],True)
+        if args.check_room_readiness:request('/api/rooms/readiness',role='GameServer',expected=403)
         seed=create([1],'preflight');base=config(seed['id'])
         for name,change in [('master',{'gameServerKey':keys['Master']}),('room-key',{'gameServerKey':keys['Room1']}),('client-role',{'role':'Client'}),('host-role',{'role':'Host'}),('ambiguous-ip',{'address':'127.1'}),('wildcard-advertise',{'address':'0.0.0.0'}),('multicast',{'address':'224.0.0.1'}),('overflow-port',{'port':4294975073}),('extra-key',{'masterKey':'never-pass-to-unity'}),('url-userinfo',{'managementApiUrl':uri.replace('http://','http://user@')})]:rejected(name,dict(base,**change))
         rejected('short-timeout',base,seconds=59)
@@ -254,7 +271,7 @@ def main():
             for entry in entries:
                 ids=[c['player']['id'] for c in round_clients if c['sessionId']==entry['sessionId']];wait(lambda:observe(entry,ids),60,entry['label']+' simulated bodies');begin=command(entry['sessionId'],'Begin');wait(lambda:observe(entry,ids,begin['session']['sequence']),20,entry['label']+' original Begin applied')
             if args.observe_closure_ui and not linked:
-                observer_entry=entries[0];descriptor=runtime/'closure-ui-private.json';descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'sessionId':observer_entry['sessionId'],'streamId':observer_entry['ready']['streamId'],'endRequestFile':str(out/'closure-end.request')}),encoding='utf-8');observer_log=(runtime/'closure-ui.log').open('xb')
+                observer_entry=entries[0];descriptor=runtime/'closure-ui-private.json';descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'sessionId':observer_entry['sessionId'],'streamId':observer_entry['ready']['streamId'],'endRequestFile':str(out/'closure-end.request'),'roomReadiness':args.check_room_readiness}),encoding='utf-8');observer_log=(runtime/'closure-ui.log').open('xb')
                 node=shutil.which('node')
                 if not node:raise RuntimeError('Test observer requires installed Node; shipped launchers do not')
                 observer=subprocess.Popen([node,str(ROOT/'tests/browser/check-closure-native.cjs'),'--descriptor',str(descriptor),'--output',str(observer_out),'--stop-file',str(observer_stop)],stdout=observer_log,stderr=subprocess.STDOUT,cwd=ROOT/'tests/browser')
@@ -262,6 +279,8 @@ def main():
                     if observer.poll() is not None:raise RuntimeError('Archive UI observer exited before watching')
                     return read(observer_out/'ready.json') if (observer_out/'ready.json').exists() else None
                 ready_ui=wait(watching,45,'actual Running console observer');check(ready_ui['selectedSessionId']==observer_entry['sessionId'],'shipped console watches original native Running session')
+                if args.check_room_readiness:
+                    check(ready_ui['roomReadiness']==[1,2,3,4,5],'shipped console shows all five actual native room counts')
             stage('running-linked' if linked else 'running-five-independent')
             time.sleep(3)
             if player_folder:
@@ -276,6 +295,7 @@ def main():
                 check(len({c['nativePid'] for c in round_clients})==25 and all(
                     c['process'].poll() is None and c['witness'].kernel.WaitForSingleObject(c['witness'].handle,0)==258
                     for c in round_clients),'25 simultaneous owned native players '+('Linked' if linked else 'Independent'))
+            if args.check_room_readiness:verify_room_readiness(round_clients,linked)
             for entry in entries:
                 if args.observe_closure_ui and not linked and entry is observer_entry:(out/'closure-end.request').write_text('request one normal UI End',encoding='utf-8')
                 else:command(entry['sessionId'],'End')

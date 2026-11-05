@@ -26,8 +26,18 @@ async function main() {
       await page.goto(config.base + '/console/'); await page.locator('#login-key').fill(config.masterKey); await page.locator('#login-form button').click();
       await page.locator('#session-select').selectOption(config.sessionId); await page.waitForFunction(() => document.querySelector('#session-phase').textContent === '執行中');
       assert.equal(await page.locator('#closure-status.closure-complete').count(), 0);
+      let roomReadiness;
+      if (config.roomReadiness) {
+        const rooms = await page.waitForFunction(() => {
+          const cells = [...document.querySelectorAll('[data-room-readiness]')];
+          return cells.length === 5 && cells.every(cell => cell.textContent === '5 / 5 姿態有效 · 合成 5 · 追蹤 0')
+            ? cells.map(cell => Number(cell.dataset.roomReadiness)) : null;
+        }, null, { polling: 100 });
+        roomReadiness = await rooms.jsonValue();
+        assert.deepEqual(roomReadiness, [1, 2, 3, 4, 5]);
+      }
       await page.screenshot({ path: path.join(out, 'running.png'), fullPage: true });
-      await save('ready.json', { ready: true, selectedSessionId: await page.locator('#session-select').inputValue(), browserPid: server.process().pid, scope: 'Real native Running session visible in shipped console; no game input, fixture routes or delivery claim.' });
+      await save('ready.json', { ready: true, selectedSessionId: await page.locator('#session-select').inputValue(), browserPid: server.process().pid, roomReadiness, scope: 'Real native Running session visible in shipped console; no game input, fixture routes or delivery claim.' });
       for (;;) { try { await fs.stat(config.endRequestFile); break; } catch { await sleep(100); } }
       const endResponse = page.waitForResponse(response => response.url() === config.base + '/api/sessions/' + config.sessionId + '/commands' && response.request().method() === 'POST', { timeout: 30000 });
       page.once('dialog', dialog => dialog.accept()); await page.locator('[data-command=End]').click();
