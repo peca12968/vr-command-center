@@ -10,6 +10,8 @@ VR 草稿與已儲存配置報告可回傳 `routePreview`。其中有 `step`、`
 
 Windows 三包測試可加 `--check-layout-preview`，使用有缺口的已儲存配置，核對預覽和封存世界中的沙包位置。 [三包測試方式](WINDOWS_SERVER_PACKAGE.md#三個可攜包整合驗證)
 
+另一組核心對照在已入場的共用遊戲權威端核對移動。完整沙包牆會拒絕掩體內及跨牆姿態；移除正前方沙包後，原席位的七個預覽取樣點都能依序接受。Windows 鍵盤對照工具 `scripts/check-desktop-walkway.py` 會啟動兩個保存版本各自的場次，核對實際姿態、完整回放和封存戰績。這次 Windows 安全提示遮住遊戲，鍵盤驗收待重跑。 [執行紀錄](PROGRESS.md#2026-11-06-通路預覽的移動判定與鍵盤驗收準備)
+
 此配置契約由v0.18導入，v0.19新增步槍素材後維持version1／vr-room-v1。最新API／UI須一起部署，配置檢查不依裝飾武器模型改變。
 
 API／控制台 v0.18，檢查契約 version 1、profile `vr-room-v1`、rules `0.8.0`。供現有每房 12 × 12 公尺的 VR 原型使用，MR 回傳 `applies=false`、`canStart=null`；沒有實體場地、錨點或校正證據。
