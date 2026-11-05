@@ -10,18 +10,24 @@ def sha(path):
     with path.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
 class ChildWitness:
     """Hold the real started API's OS process handle; no PID-only liveness inference."""
-    def __init__(self,pid):
+    def __init__(self,pid,*,allow_terminate=False):
         self.kernel=ctypes.WinDLL('kernel32',use_last_error=True)
         self.kernel.OpenProcess.argtypes=[ctypes.c_uint32,ctypes.c_int,ctypes.c_uint32];self.kernel.OpenProcess.restype=ctypes.c_void_p
         self.kernel.WaitForSingleObject.argtypes=[ctypes.c_void_p,ctypes.c_uint32];self.kernel.WaitForSingleObject.restype=ctypes.c_uint32
         self.kernel.GetExitCodeProcess.argtypes=[ctypes.c_void_p,ctypes.POINTER(ctypes.c_uint32)];self.kernel.GetExitCodeProcess.restype=ctypes.c_int
         self.kernel.CloseHandle.argtypes=[ctypes.c_void_p];self.kernel.CloseHandle.restype=ctypes.c_int
-        self.handle=self.kernel.OpenProcess(0x00100000|0x1000,False,pid)
+        access=0x00100000|0x1000
+        if allow_terminate:access|=0x0001
+        self.handle=self.kernel.OpenProcess(access,False,pid)
         if not self.handle:raise ctypes.WinError(ctypes.get_last_error())
         if self.kernel.WaitForSingleObject(self.handle,0)!=258:raise RuntimeError('Expected the newly started child to be live')
     def wait(self):
         if self.kernel.WaitForSingleObject(self.handle,15000)!=0:raise RuntimeError('Original API child has not stopped')
         code=ctypes.c_uint32();assert self.kernel.GetExitCodeProcess(self.handle,ctypes.byref(code));assert code.value==0,('API exit',code.value)
+    def terminate(self):
+        self.kernel.TerminateProcess.argtypes=[ctypes.c_void_p,ctypes.c_uint32];self.kernel.TerminateProcess.restype=ctypes.c_int
+        if self.kernel.WaitForSingleObject(self.handle,0)==258 and not self.kernel.TerminateProcess(self.handle,0):
+            if self.kernel.WaitForSingleObject(self.handle,0)!=0:raise ctypes.WinError(ctypes.get_last_error())
     def close(self):
         if self.handle:self.kernel.CloseHandle(self.handle);self.handle=None
 def main():

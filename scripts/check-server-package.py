@@ -1,18 +1,37 @@
-"""Exercise real portable control/server packages, five rooms, Linked and owned-job cleanup. No UI input."""
-import argparse,ctypes,importlib.util,json,os,shutil,socket,subprocess,time,urllib.error,urllib.request,uuid
+"""Exercise portable Windows packages, five rooms, Linked and owned process cleanup."""
+import argparse,csv,importlib.util,io,ipaddress,json,os,re,shutil,socket,subprocess,time,urllib.error,urllib.request,uuid,zipfile
 from datetime import datetime,timedelta,timezone
+from decimal import Decimal
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 def module(name,file):
     s=importlib.util.spec_from_file_location(name,ROOT/'scripts'/file);m=importlib.util.module_from_spec(s);s.loader.exec_module(m);return m
 package=module('server_package','package-windows-server.py');control=module('server_control_checks','check-control-package.py');venue=module('server_venue','start-desktop-venue.py');world=module('server_world','analyze-world-journal.py');debrief=module('server_debrief','check-desktop-debrief.py')
 def read(p):return json.loads(p.read_text(encoding='utf-8'))
-def free(kind=socket.SOCK_STREAM):
-    with socket.socket(socket.AF_INET,kind) as s:s.bind(('127.0.0.1',0));return s.getsockname()[1]
+def free(kind=socket.SOCK_STREAM,address='127.0.0.1'):
+    with socket.socket(socket.AF_INET,kind) as s:s.bind((address,0));return s.getsockname()[1]
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('package',type=Path);p.add_argument('--control-package',type=Path,required=True);p.add_argument('--runtime-root',type=Path,required=True);p.add_argument('--observe-closure-ui',action='store_true');args=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('package',type=Path);p.add_argument('--control-package',type=Path,required=True);p.add_argument('--runtime-root',type=Path,required=True);p.add_argument('--observe-closure-ui',action='store_true')
+    p.add_argument('--player-package',type=Path,help='Launch five players per room from the API room ZIP, using this extracted player package')
+    p.add_argument('--game-address',type=ipaddress.IPv4Address,help='Local private IPv4 for the three-package check')
+    args=p.parse_args()
     if os.name!='nt':p.error('Actual Windows processes required')
+    if bool(args.player_package)!=bool(args.game_address):p.error('Provide --player-package and --game-address together')
+    address='127.0.0.1'
+    if args.game_address:
+        if not any(args.game_address in ipaddress.IPv4Network(net) for net in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16')):
+            p.error('--game-address must be a local private IPv4 address')
+        address=str(args.game_address)
+        try:free(socket.SOCK_DGRAM,address)
+        except OSError:p.error('--game-address must be assigned to this PC')
     folder=args.package.resolve();manifest=package.verify(folder);assert manifest['launcherSourceSha256']==package.digest(ROOT/'tools/WindowsServerLauncher/ServerLauncher.cs')
+    player_folder=None
+    if args.player_package:
+        player_folder=args.player_package.resolve()
+        player_package=module('portable_player_package','package-windows-player.py')
+        player_manifest=player_package.verify(player_folder)
+        if player_manifest['build']['sourceFingerprint']!=manifest['build']['sourceFingerprint']:
+            p.error('Player and server packages must share the Unity build source')
     control.package.verify(args.control_package);out=ROOT/'artifacts/server-package-checks'/('run-'+uuid.uuid4().hex);out.mkdir(parents=True,exist_ok=False);runtime=args.runtime_root.resolve()/out.name;runtime.mkdir(parents=True,exist_ok=False)
     (ROOT/'artifacts/server-package-checks-latest-path.txt').write_text(str(out),encoding='utf-8');print(json.dumps({'stage':'starting','directory':str(out)}),flush=True)
     env=dict(os.environ);env.update(PATH=str(Path(os.environ['WINDIR'])/'System32'),DOTNET_ROOT=str(runtime/'absent-dotnet'),DOTNET_MULTILEVEL_LOOKUP='0');exe=folder/'Launch-Server.exe';control_exe=args.control_package.resolve()/'Start-Control.exe';data=runtime/'control';checks=[];runners=[];clients=[];cleanup=[];witnesses=[];api=None;api_witness=None;keys=None;sessions=[];rounds=[];observer=None;observer_log=None;observer_out=out/'closure-ui';observer_stop=out/'closure-ui-stop.request';observer_entry=None
@@ -28,18 +47,19 @@ def main():
             if value:return value
             time.sleep(.1)
         raise RuntimeError('Timeout: '+label)
-    def request(path,body=None,role='Master',method=None,expected=200,admission=None):
+    def request(path,body=None,role='Master',method=None,expected=200,admission=None,raw_response=False):
         h={'Authorization':'Bearer '+keys[role]};h.update({'Content-Type':'application/json'} if body is not None else {})
         if admission:h['If-Match-Admission']=admission
         req=urllib.request.Request(uri+path,data=None if body is None else json.dumps(body).encode(),headers=h,method=method)
         try:
-            with urllib.request.urlopen(req,timeout=5) as r:code=r.status;raw=r.read()
-        except urllib.error.HTTPError as e:code=e.code;raw=e.read()
+            with urllib.request.urlopen(req,timeout=5) as r:code=r.status;raw=r.read();headers=r.headers
+        except urllib.error.HTTPError as e:code=e.code;raw=e.read();headers=e.headers
         if code!=expected:raise RuntimeError(path+' HTTP '+str(code))
+        if raw_response:return raw,headers
         if path.endswith('/report.csv'):return raw.decode('utf-8-sig')
         return json.loads(raw) if raw else None
     def command(session,action):return request('/api/sessions/'+session+'/commands',{'commandId':str(uuid.uuid4()),'action':action})
-    def config(session,port=None,**extra):return dict({'role':'Server','managementApiUrl':uri,'gameServerKey':keys['GameServer'],'sessionId':session,'address':'127.0.0.1','listenAddress':'127.0.0.1','port':port or free(socket.SOCK_DGRAM)},**extra)
+    def config(session,port=None,**extra):return dict({'role':'Server','managementApiUrl':uri,'gameServerKey':keys['GameServer'],'sessionId':session,'address':address,'listenAddress':address,'port':port or free(socket.SOCK_DGRAM,address)},**extra)
     def call(label,options,good=False,report=None):
         result=out/(label+'.json') if report is None else report
         child=subprocess.run([str(exe),*map(str,options),'--report',str(result)],env=env,cwd=out,timeout=45)
@@ -60,12 +80,108 @@ def main():
             if child.poll() is not None:raise RuntimeError('Server launcher exited before ready '+label)
             return read(ready) if ready.exists() else None
         info=wait(is_ready,100,label+' ready');w=control.ChildWitness(info['childPid']);entry['witness']=w;witnesses.append(w);entry['ready']=info
-        endpoint=request('/api/sessions/'+state['id']+'/connection-endpoint');check(info['streamId']==endpoint['streamId'] and info['port']==endpoint['port'] and endpoint['address']=='127.0.0.1',label+' original endpoint / child')
+        endpoint=request('/api/sessions/'+state['id']+'/connection-endpoint');check(info['streamId']==endpoint['streamId'] and info['port']==endpoint['port'] and endpoint['address']==address,label+' original endpoint / child')
         return entry
     def player(entry,room):
         state=request('/api/sessions/'+entry['sessionId']+'/players',{'playerId':str(uuid.uuid4()),'roomId':room,'name':'Portable server room '+str(room),'headset':'Quest3'},role='Room'+str(room));person=next(x for x in state['players'] if x['roomId']==room)
         invitation=request('/api/sessions/'+state['id']+'/players/'+person['id']+'/join-ticket',{},role='Room'+str(room),admission=person['admissionId']);file=runtime/(entry['label']+'-client-'+str(room)+'.json');file.write_text(json.dumps({'role':'Client','address':'127.0.0.1','port':entry['ready']['port'],'joinTicket':invitation['ticket']}),encoding='utf-8');log=runtime/(file.stem+'.log')
         child=subprocess.Popen([str(folder/'Runtime/VrCommand.exe'),'-batchmode','-nographics','-job-worker-count','2','-logFile',str(log),'--vr-config',str(file)],cwd=runtime,env=env,creationflags=subprocess.CREATE_NO_WINDOW);client={'process':child,'log':log,'player':person,'sessionId':state['id']};clients.append(client);return client
+    def room_players(entry,room):
+        path='/api/sessions/'+entry['sessionId']
+        role='Room'+str(room)
+        for seat in range(1,6):
+            state=request(path+'/players',{'playerId':str(uuid.uuid4()),'roomId':room,
+                'name':f'Portable room {room} seat {seat}','headset':'Quest3'},role=role)
+        people=sorted((p for p in state['players'] if p['roomId']==room),key=lambda p:p['seat'])
+        names=[f'room-{room:02}-seat-{seat:02}.json' for seat in range(1,6)]
+        destination={'address':address,'port':entry['ready']['port']}
+        raw,headers=request(path+f'/rooms/{room}/join-ticket-bundle',
+            dict(destination,players=[{'playerId':p['id'],'admissionId':p['admissionId']} for p in people]),
+            role=role,raw_response=True)
+        check(headers.get_content_type()=='application/zip' and headers['Cache-Control']=='no-store',
+            entry['label']+f' room {room} no-store ticket download')
+        directory=runtime/(entry['label']+f'-bundle-{room}')
+        directory.mkdir()
+        (directory/'download.zip').write_bytes(raw)
+        prepared=[]
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            check(archive.namelist()==names and [p['seat'] for p in people]==list(range(5)),
+                entry['label']+f' room {room} exact five seats')
+            for name,person in zip(names,people,strict=True):
+                content=archive.read(name)
+                value=json.loads(content)
+                if value!={'role':'Client',**destination,'joinTicket':value.get('joinTicket')} or not value['joinTicket']:
+                    raise ValueError('Player connection file differs from the advertised endpoint')
+                file=directory/name
+                file.write_bytes(content)
+                prepared.append((person,file))
+        return [packaged_player(entry,person,file) for person,file in prepared]
+    def packaged_player(entry,person,file):
+        log=file.with_suffix('.log')
+        report=file.with_suffix('.launcher.json')
+        child=subprocess.Popen([str(player_folder/'Launch-Player.exe'),'--config',str(file),'--launch',
+            '--headless','--wait','--log',str(log),'--report',str(report)],cwd=runtime,env=env)
+        client={'process':child,'log':log,'player':person,'sessionId':entry['sessionId'],
+            'launcherReport':report,'witness':None}
+        clients.append(client)
+        def started():
+            if child.poll() is not None:raise RuntimeError('Player launcher exited before admission')
+            return read(report) if report.exists() else None
+        info=wait(started,30,'owned player launcher')
+        if info['status']!='started':raise RuntimeError('Player launcher did not report a live child')
+        client['witness']=control.ChildWitness(info['processId'],allow_terminate=True)
+        client['nativePid']=info['processId']
+        return client
+    def stop_player(client):
+        child=client['process']
+        report=client.get('launcherReport')
+        if report:
+            witness=client['witness']
+            if witness is None and child.poll() is None:
+                info=wait(lambda:read(report) if report.exists() else None,10,'player cleanup ownership')
+                if info['status']=='started':
+                    witness=control.ChildWitness(info['processId'],allow_terminate=True)
+                    client['witness']=witness
+                    client['nativePid']=info['processId']
+            if witness:
+                witness.terminate()
+                witness.wait()
+                child.wait(timeout=15)
+                status=read(report)
+                if child.returncode!=0 or status!={'status':'exited','processId':client['nativePid'],'exitCode':0}:
+                    raise RuntimeError('Launcher did not confirm original player exit')
+                witness.close()
+                client['witness']=None
+            elif not report.exists() or read(report)['status'] not in ('exited','rejected'):
+                raise RuntimeError('Native player cleanup unknown')
+        elif child.poll() is None:
+            child.terminate()
+        child.wait(timeout=15)
+    def verify_delivery(entry,owners):
+        server=(entry['work']/'server.log').read_text(encoding='utf-8',errors='replace')
+        acks=[int(value) for value in re.findall(r'VR_SERVER_DEBRIEF_ACK id=(\d+)',server)]
+        check(len(acks)==len(owners) and set(acks)=={c['connection'] for c in owners}
+            and 'VR_SERVER_DEBRIEF_TIMEOUT ' not in server,entry['label']+' exact original server ACKs')
+        raw,headers=request('/api/sessions/'+entry['sessionId']+'/report.csv',raw_response=True)
+        rows=list(csv.DictReader(io.StringIO(raw.decode('utf-8-sig'),newline='')))
+        results={c['player']['id']:c['final'] for c in owners}
+        check(headers.get_content_type()=='text/csv' and raw.startswith(b'\xef\xbb\xbf')
+            and len(rows)==len(owners) and {r['playerId'] for r in rows}==set(results),
+            entry['label']+' exact CSV roster')
+        fields=('playerId','origin','sessionId','streamId')
+        numbers=('throughSequence','finalStreamSequence','ammoUsed','shotsHit','kills',
+            'damageTaken','hitsReceived','accuracyPercent','health')
+        for row in rows:
+            final=results[row['playerId']]
+            if row['rowType']!='Player' or row['reportVersion']!='1' or int(row['playerRoomId'])!=final['roomId'] \
+                or any(row[k]!=final[k] for k in fields) or any(Decimal(row[k])!=Decimal(str(final[k])) for k in numbers):
+                raise ValueError('CSV row differs from the original sealed player result')
+        (out/(entry['label']+'-report.csv')).write_bytes(raw)
+        save(entry['label']+'-delivery.json',{'serverAcknowledgedConnections':acks,
+            'players':[{'playerId':c['player']['id'],'admissionId':c['player']['admissionId'],
+                'roomId':c['player']['roomId'],'seat':c['player']['seat'],'connectionId':c['connection'],
+                'nativePid':c['nativePid'],'launcherPid':c['process'].pid} for c in owners]})
+        check(True,entry['label']+' CSV rows match sealed player results')
     def observe(entry,expected,begin=None):
         metadata=request('/api/sessions/'+entry['sessionId']+'/world');path='/api/sessions/'+entry['sessionId']+'/world/watch?mode=live';req=urllib.request.Request(uri+path,headers={'Authorization':'Bearer '+keys['Master']})
         with urllib.request.urlopen(req,timeout=5) as response:
@@ -104,15 +220,16 @@ def main():
         for name,change in [('master',{'gameServerKey':keys['Master']}),('room-key',{'gameServerKey':keys['Room1']}),('client-role',{'role':'Client'}),('host-role',{'role':'Host'}),('ambiguous-ip',{'address':'127.1'}),('wildcard-advertise',{'address':'0.0.0.0'}),('multicast',{'address':'224.0.0.1'}),('overflow-port',{'port':4294975073}),('extra-key',{'masterKey':'never-pass-to-unity'}),('url-userinfo',{'managementApiUrl':uri.replace('http://','http://user@')})]:rejected(name,dict(base,**change))
         rejected('short-timeout',base,seconds=59)
         with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as occupied:
-            occupied.bind(('127.0.0.1',0));rejected('occupied-udp',dict(base,port=occupied.getsockname()[1]))
+            occupied.bind((address,0));rejected('occupied-udp',dict(base,port=occupied.getsockname()[1]))
         command(seed['id'],'End');rejected('ended-session',base)
-        # Five real independent sources / five actual receiving players, then one Linked source / five receiving players.
+        # Run both topologies with separate native processes and fresh admissions.
         for linked in [False,True]:
             entries=[];round_clients=[]
             for rooms in ([[1,2,3,4,5]] if linked else [[r] for r in range(1,6)]):
                 state=create(rooms,'linked' if linked else 'independent');entry=launch(state,('linked' if linked else 'room-'+str(rooms[0])));entries.append(entry)
                 if not linked and rooms==[1]:rejected('bound-preparing',config(state['id']))
-                for room in rooms:round_clients.append(player(entry,room))
+                for room in rooms:
+                    round_clients.extend(room_players(entry,room) if player_folder else [player(entry,room)])
             for entry in entries:
                 ids=[c['player']['id'] for c in round_clients if c['sessionId']==entry['sessionId']];wait(lambda:observe(entry,ids),60,entry['label']+' simulated bodies');begin=command(entry['sessionId'],'Begin');wait(lambda:observe(entry,ids,begin['session']['sequence']),20,entry['label']+' original Begin applied')
             if args.observe_closure_ui and not linked:
@@ -126,6 +243,18 @@ def main():
                 ready_ui=wait(watching,45,'actual Running console observer');check(ready_ui['selectedSessionId']==observer_entry['sessionId'],'shipped console watches original native Running session')
             stage('running-linked' if linked else 'running-five-independent')
             time.sleep(3)
+            if player_folder:
+                for entry in entries:
+                    owners=[c for c in round_clients if c['sessionId']==entry['sessionId']]
+                    rooms_by_player={c['player']['id']:c['player']['roomId'] for c in owners}
+                    accepted=read(out/(entry['label']+'-running.json'))['acceptedBeginSequence']
+                    frame=wait(lambda:observe(entry,rooms_by_player,accepted),20,entry['label']+' live room roster')
+                    players=frame['packet']['frame']['players']
+                    check(len(players)==len(owners) and {p['id']:p['roomId'] for p in players}==rooms_by_player,
+                        entry['label']+' exact connected room roster')
+                check(len({c['nativePid'] for c in round_clients})==25 and all(
+                    c['process'].poll() is None and c['witness'].kernel.WaitForSingleObject(c['witness'].handle,0)==258
+                    for c in round_clients),'25 simultaneous owned native players '+('Linked' if linked else 'Independent'))
             for entry in entries:
                 if args.observe_closure_ui and not linked and entry is observer_entry:(out/'closure-end.request').write_text('request one normal UI End',encoding='utf-8')
                 else:command(entry['sessionId'],'End')
@@ -136,13 +265,25 @@ def main():
                 check(ui['sessionId']==observer_entry['sessionId'] and ui['streamId']==native['streamId'] and ui['acceptedWorldSequence']==native['finalWorld']['acceptedSequence'],'shipped UI archive matches exact original native final world boundary')
             for client in round_clients:
                 text=client['log'].read_text(encoding='utf-8',errors='replace');check(venue.player_result_phase(text)=='acknowledged','original player result / disconnect '+client['player']['id']);finals=[json.loads(line.split('VR_CLIENT_DEBRIEF_FINAL ',1)[1]) for line in text.splitlines() if 'VR_CLIENT_DEBRIEF_FINAL ' in line];check(len(finals)==1,'one original final result '+client['player']['id']);final=finals[0];entry=next(e for e in entries if e['sessionId']==client['sessionId']);debrief.validate_result(final,{'id':entry['sessionId']},client['player'],entry['sealed']);check(True,'original admission / exact final seals / stats '+client['player']['id']);save(client['player']['id']+'-result.json',final)
-                csv=request('/api/sessions/'+client['sessionId']+'/report.csv');(out/(client['player']['id']+'.csv')).write_text(csv,encoding='utf-8')
-                if client['process'].poll() is None:client['process'].terminate()
-                client['process'].wait(timeout=15)
+                if player_folder:
+                    connections=set(re.findall(r'VR_CLIENT_CONNECTED id=(\d+)',text))
+                    if len(connections)!=1:raise RuntimeError('Player did not have one original native connection')
+                    client['connection']=int(connections.pop())
+                    client['final']=final
+                else:
+                    report_csv=request('/api/sessions/'+client['sessionId']+'/report.csv')
+                    (out/(client['player']['id']+'.csv')).write_text(report_csv,encoding='utf-8')
+                stop_player(client)
+                if player_folder:check(True,'player launcher confirmed original child exit '+client['player']['id'])
+            if player_folder:
+                for entry in entries:verify_delivery(entry,[c for c in round_clients if c['sessionId']==entry['sessionId']])
         # A killed launcher must close its already-assigned Job and stop the exact owned native handle.
         crash=launch(create([1],'parent-exit'),'parent-exit');crash['process'].kill();crash['process'].wait(timeout=10);w=crash['witness'];check(w.kernel.WaitForSingleObject(w.handle,15000)==0,'parent death stops original job child');w.close();crash['witness']=None;check(not crash['reportPath'].exists(),'killed parent cannot publish success');command(crash['sessionId'],'End')
         check(all(x['state']=='Ended' for x in request('/api/sessions?includeEnded=true')),'no active management sessions')
-        save('evidence.json',{'rounds':rounds,'scope':'Five same-machine independent servers / five receiving clients, then one Linked server / five receiving clients; all Simulation, not 25 simultaneous operators or LAN.'})
+        save('evidence.json',{'rounds':rounds,'scope':(
+            'Three portable packages, five Independent rooms then Linked, 25 simultaneous same-PC Simulation clients per topology.'
+            if player_folder else 'Two portable packages, five Independent rooms then Linked, five same-PC Simulation clients per topology.'),
+            'sourceFingerprint':manifest['build']['sourceFingerprint'],'gameAddress':address})
     except BaseException as error:stage('failed',errorType=type(error).__name__);raise
     finally:
         if observer:
@@ -154,8 +295,7 @@ def main():
             except Exception as e:cleanup.append({'kind':'observer','errorType':type(e).__name__})
         for client in clients:
             try:
-                if client['process'].poll() is None:client['process'].terminate()
-                client['process'].wait(timeout=15)
+                stop_player(client)
             except Exception as e:cleanup.append({'kind':'client','errorType':type(e).__name__})
         for entry in runners:
             try:
@@ -176,5 +316,8 @@ def main():
     for file in out.glob('*.json'):
         text=file.read_text(encoding='utf-8')
         if keys and any(k in text for k in keys.values()):raise RuntimeError('Public metadata contains a key')
-    save('checks.json',{'complete':True,'checks':len(checks),'findings':checks,'runtimeDirectory':str(runtime),'packageDirectory':str(folder),'scope':'Actual Windows server and control packages; same-machine Simulation only; parent-death case intentionally unsealed and not a normal finished round.'});print(json.dumps({'complete':True,'checks':len(checks),'directory':str(out)}))
+    save('checks.json',{'complete':True,'checks':len(checks),'findings':checks,'runtimeDirectory':str(runtime),
+        'packageDirectory':str(folder),'playerPackageDirectory':str(player_folder) if player_folder else None,
+        'scope':'Same-machine Simulation only. The separate parent-death case intentionally leaves the world unsealed.'})
+    print(json.dumps({'complete':True,'checks':len(checks),'directory':str(out)}))
 if __name__=='__main__':main()
