@@ -1,5 +1,15 @@
 # Windows 遊戲伺服器包
 
+## 本機 UDP 綁定確認
+
+2026-11-06 主包為 `artifacts/server-packages/windows-server-0.41.2-launcher1.3-win-x64.zip`，82,676,182 bytes，SHA256 `0f5448df34c5857286d8e29d4feb497fd72961685359033e65b926747fb3555c`。清單有 311 筆，內含 304 份與啟動器 1.2 相同的遊戲執行檔及相依檔。
+
+啟動器 1.3 在公告場次連線設定之前，向 Windows 核對本次遊戲子程序的 PID、本機 IPv4 與 UDP 埠。明確綁定時必須完全相符，設定 `0.0.0.0` 時則核對萬用位址。等待綁定仍受原 90 秒就緒期限限制。
+
+CLI 的就緒及結果檔新增 `udpBinding`，含 `processId`、`address`、`port` 及 `observedAtUtc`。原就緒檔的 `address` 仍表示玩家要連到的公告地址。WinForms 運行狀態會顯示啟動時已核對的本機 UDP 位址。Windows 的紀錄用於確認啟動時的綁定，跨機可達性另以第二台電腦入場驗證。 [Microsoft Windows UDP 端點表](https://learn.microsoft.com/en-us/windows/win32/api/udpmib/ns-udpmib-mib_udprow_owner_pid)
+
+私有乙太網路位址與預設 loopback 的解壓包分別通過 374 及 124 項整合檢查。兩次都另有一場核對 `0.0.0.0`，並保留不同的玩家公告位址。 [驗證紀錄](PROGRESS.md#2026-11-06-遊戲伺服器公告前的-udp-綁定核對)
+
 ## 跨機來源診斷
 
 2026-11-06 新版 `windows-server-0.41.2-win-x64.zip` 為 82,674,494 bytes，SHA256 `a8e4a529adbe744cdc11450dae209795adbfe52be0581e0ed652169220a86646`，包含 311 筆檔案清單及清單本身。
