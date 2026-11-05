@@ -121,9 +121,10 @@ class Venue:
         (ROOT / 'artifacts' / ('latest-' + self.artifact_family + '-path.txt')).write_text(str(self.directory), encoding='utf-8')
         print(json.dumps({'stage': stage, 'directory': str(self.directory), **extra}), flush=True)
 
-    def request(self, route, body=None, *, role='Master', expected=200, admission=None, optional=False, method=None):
+    def request(self, route, body=None, *, role='Master', expected=200, admission=None, optional=False, method=None, request_id=None):
         headers = {'Authorization': 'Bearer ' + self.tokens[role], 'Content-Type': 'application/json'}
         if admission: headers['If-Match-Admission'] = admission
+        if request_id: headers['Idempotency-Key'] = request_id
         message = urllib.request.Request(self.base + route, data=None if body is None else json.dumps(body).encode(), headers=headers, method=method)
         try:
             with urllib.request.urlopen(message, timeout=5) as response:

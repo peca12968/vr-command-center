@@ -5,6 +5,7 @@ import re
 import sys
 import time
 import urllib.request
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -155,7 +156,8 @@ def main():
                       'enemies': {'count': 0, 'behavior': 'Hold', 'autoAttack': False}, 'props': props}
         first = v.request('/api/missions', definition, expected=201)
         second = v.request(f'/api/missions/{first["id"]}/revisions',
-            {**definition, 'props': [p for p in props if p['position']['x'] != -3]}, expected=201)
+            {**definition, 'props': [p for p in props if p['position']['x'] != -3]},
+            expected=201, request_id=str(uuid.uuid4()))
         runs = [exercise(v, first, 'wall'), exercise(v, second, 'opening')]
         evidence = {}
         for entry, begin, references, receipts in runs:
