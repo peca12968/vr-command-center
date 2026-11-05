@@ -1,5 +1,20 @@
 # Windows 遊戲伺服器包
 
+## 三個可攜包整合驗證
+
+2026-11-06 使用既有管理包 0.31.4、遊戲伺服器包 0.41.1 v2 與玩家包 0.41.1 v2 完成同機測試。五個獨立房間先各以一個伺服器運行，之後改用一個伺服器執行 Linked。每種模式各有 25 個背景玩家同時入場，每房五席。遊戲 UDP 綁定同一台電腦的乙太網路 IPv4，管理服務保留在 loopback。10 份整房 ZIP 直接取自管理包，由 `Launch-Player.exe` 使用對應席位檔。 [整房配票操作](EXTERNAL_CLIENTS.md#按房間下載連線檔)
+
+319 項通過，六個正常場次共 812 幀完整回放、50 份玩家戰績及 6 份 CSV。測試核對戰績的原 admission、戰鬥與世界封存，以及伺服器對每條原連線的確認回條。這是同機 Simulation 的 CLI 流程，跨機、WinForms 多人操作、頭盔與 25 位真人待驗。
+
+在測試機將下列三個資料夾與 IPv4 換成實際解壓路徑及本機私有位址。省略最後兩個選項會執行原 loopback 驗證，每種模式共五個玩家。
+
+```powershell
+python scripts/check-server-package.py <VRCommand-GameServer> `
+  --control-package <VRCommand-ControlServer> `
+  --runtime-root "$env:LOCALAPPDATA/VrCommand/RuntimeEvidence" `
+  --player-package <VRCommand-Player> --game-address 192.168.1.100
+```
+
 2026-11-02 本輪同源Unity0.41.1／code52／NGO29／242真正Editor、4ebd雙平台：新server主包 `windows-server-0.41.1-v2-win-x64.zip`，**82,673,732 bytes／SHA256 `ca285a42e0c22bdde17f62eb6dd8a65523c9d3a5cae19a33cad41636899fb368`**、311 manifest／ZIP312。啟動器1.1來源fb57807d...不變但重新編譯binary不同，runtime逐byte同v1；v1與所有舊包保持。包說明改引用Runtime/build-receipt.json，不再寫死Unity0.39。
 
 實際F解壓包106項／623全回放、五房後Linked／10原結果與CSV／雙seal／原server ACK／無active成功，parent-death是另留的未封存反例；closure UI新增Running與Archived兩PNG、精確原session/stream/final world，nativeUI9＋2＝11，非雲端CI檔。
