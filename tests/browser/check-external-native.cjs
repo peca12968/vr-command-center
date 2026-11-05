@@ -3,7 +3,7 @@ const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { execFileSync, spawn } = require('node:child_process');
 const { createHash } = require('node:crypto');
 const { networkInterfaces } = require('node:os');
 const root = path.resolve(__dirname, '../..');
@@ -21,7 +21,7 @@ async function main() {
   const options = process.argv.slice(3);
   const packageRoot = options[0] && !options[0].startsWith('--') ? path.resolve(options.shift()) : null;
   const addressOptions = options.filter(option => option.startsWith('--local-game-address='));
-  const knownOptions = ['--package-interactive', '--package-path-input', '--launcher-status'];
+  const knownOptions = ['--package-interactive', '--package-path-input', '--launcher-status', '--room-ticket-bundle'];
   assert.ok(options.every(option => knownOptions.includes(option) || addressOptions.includes(option)), 'Unknown external workflow option');
   assert.ok(addressOptions.length <= 1, 'Specify one local game address');
   const gameAddress = addressOptions[0]?.slice('--local-game-address='.length) ?? '127.0.0.1';
@@ -40,6 +40,7 @@ async function main() {
   const packagePathInput = options.includes('--package-path-input');
   assert.ok(!packagePathInput || interactivePackage, 'Path entry requires the actual interactive player launcher');
   const launcherStatus = options.includes('--launcher-status');
+  const roomTicketBundle = options.includes('--room-ticket-bundle');
   assert.ok(!launcherStatus || packageRoot && !interactivePackage, 'Status CLI checks require a package and no GUI mode');
   const packageManifest = packageRoot ? JSON.parse(await fs.readFile(path.join(packageRoot, 'player-package.json'), 'utf8')) : null;
   if (packageRoot) {
@@ -96,16 +97,38 @@ async function main() {
     const before = await api(`/sessions/${id}/readiness`);
     const owned = (await fs.readdir(directory)).filter(name => name.startsWith('operator-' + id + '-client-'));
     check(owned.length === 0 && before.players.length === 2 && before.players.every(player => !player.canParticipate), 'Server-only mode leaves both admissions unclaimed until external clients start');
+    let bundlePath;
+    if (roomTicketBundle) {
+      await page.locator('#ticket-room').selectOption('3');
+      const [download] = await Promise.all([page.waitForEvent('download'), page.locator('#download-room-tickets').click()]);
+      assert.equal(download.suggestedFilename(), 'room-03-connections.zip');
+      bundlePath = path.join(evidence, download.suggestedFilename());
+      await download.saveAs(bundlePath);
+    }
     const configs = [];
     for (let index = 0; index < 2; index++) {
       const name = 'External PC ' + (index + 1), row = page.locator('#roster tr').filter({ hasText: name });
-      const [download] = await Promise.all([page.waitForEvent('download'), row.getByRole('button', { name: '下載連線檔' }).click()]);
-      const file = path.join(evidence, packageRoot ? 'player ' + (index + 1) + ' 玩家 &.json' : 'player-' + (index + 1) + '.json'); await download.saveAs(file);
+      const player = session.players.find(player => player.name === name);
+      const file = path.join(evidence, packageRoot ? 'player ' + (index + 1) + ' 玩家 &.json' : 'player-' + (index + 1) + '.json');
+      if (bundlePath) {
+        const seatFile = `room-03-seat-${String(player.seat + 1).padStart(2, '0')}.json`;
+        const bytes = execFileSync('python', ['-c', `import sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    assert len(archive.namelist()) == 2
+    entry = archive.getinfo(sys.argv[2])
+    assert entry.file_size <= 32768
+    sys.stdout.buffer.write(archive.read(entry))`, bundlePath, seatFile],
+          { windowsHide: true, timeout: 5000, maxBuffer: 32768 });
+        await fs.writeFile(file, bytes, { flag: 'wx' });
+      } else {
+        const [download] = await Promise.all([page.waitForEvent('download'), row.getByRole('button', { name: '下載連線檔' }).click()]);
+        await download.saveAs(file);
+      }
       const config = JSON.parse(await fs.readFile(file, 'utf8'));
       assert.deepEqual(Object.keys(config).sort(), ['address', 'joinTicket', 'port', 'role']);
       assert.ok(!Object.values(tokens).some(token => JSON.stringify(config).includes(token))); assert.equal(config.port, endpoint.port); assert.equal(config.address, endpoint.address);
       const claims = await api('/player-tickets/validate', 'GameServer', 'POST', { sessionId: id, ticket: config.joinTicket, protocolVersion: 2 });
-      const player = session.players.find(player => player.name === name); assert.equal(claims.playerId, player.id); assert.equal(claims.admissionId, player.admissionId);
+      assert.equal(claims.playerId, player.id); assert.equal(claims.admissionId, player.admissionId);
       const log = path.join(evidence, 'player ' + (index + 1) + ' native.log'), report = path.join(evidence, 'launcher-' + (index + 1) + '.json');
       const executable = packageRoot ? path.join(packageRoot, 'Launch-Player.exe') : ready.playerBuildReceipt.outputPath;
       const gui = interactivePackage && index === 0;
@@ -181,7 +204,7 @@ async function main() {
     assert.equal(await fingerprint(), originalTool);
     if (packageRoot) check(children.every(row => row.nativeId) && packageManifest.build.sourceFingerprint === ready.playerBuildReceipt.sourceFingerprint, 'Both players run from the extracted portable package via its real launcher, with Unicode / spaces / ampersand config paths');
     const networkScope = addressOptions.length ? 'same-host private IPv4' : 'same-host loopback';
-    outcome = { complete: true, toolFingerprint: originalTool, checks, findings, configs, results, world, stats, packageRoot, packageManifest, networkScope, gameAddress, scope: `Two separately launched PC clients / ${networkScope} / Chromium SwiftShader / zero headsets` };
+    outcome = { complete: true, toolFingerprint: originalTool, checks, findings, configs, results, world, stats, packageRoot, packageManifest, roomTicketBundle, networkScope, gameAddress, scope: `Two separately launched PC clients / ${networkScope} / Chromium SwiftShader / zero headsets` };
     await fs.writeFile(path.join(evidence, 'workflow-checks.json'), JSON.stringify({ ...outcome, complete: false, workflowComplete: true, cleanupPending: true }, null, 2));
   } catch (error) {
     if (page && !page.isClosed()) await page.screenshot({ path: path.join(evidence, 'failure.png'), fullPage: true }).catch(() => {});
