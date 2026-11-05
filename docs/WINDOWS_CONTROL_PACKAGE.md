@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-06 交付 `control-server-api0.31.0-ui0.31.7-win-x64.zip`，52,500,466 bytes，SHA256 `5bc8bdd6cbdcc9713337caab6d62556c97cc0848aad41e992fa04792c76f6d0e`。任務配置新增五個出生位到中線的取樣通路，解壓包通過 105 項 Windows 檢查。 [出生位通路預覽](LAYOUT.md#出生位通路預覽)
+
 2026-11-06 交付 `control-server-api0.31.0-ui0.31.6-win-x64.zip`，52,494,879 bytes，SHA256 `aa37499ea550d7cce90f0bfd23d42162b4360bb3a5677e6e62bde5761b37b92e`。五房總覽新增有效姿態與兩種來源的人數，解壓包通過 105 項 Windows 檢查。 [五房總覽](PLAYER_READINESS.md#五房總覽)
 
 2026-11-06 交付 `control-server-api0.31.0-ui0.31.5-win-x64.zip`，52,490,290 bytes，SHA256 `1984acf7b29aaace53054f306036625a7a38a041116e9e1be4491dd3b1b8e243`。控制台會保留命令的原場次，原場次離開清單後需重新選取。解壓包通過 105 項 Windows 檢查。 [場次切換與操作](SESSION_CLOSURE.md#場次切換與操作)
