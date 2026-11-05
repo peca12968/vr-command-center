@@ -24,7 +24,7 @@ python scripts/start-desktop-control.py --api-dll <本次API.dll> --runtime-root
 
 名冊下方會顯示「來源公布」的地址／port，與本次stream吻合後填入空白欄位。手動編輯不被背景更新覆蓋，可按「套用場次連線設定」重新採用公告；切場／登出清空草稿及隔離晚回應。公告是設定，不是連線成功或設備就緒；有效姿態另見[PLAYER_READINESS](PLAYER_READINESS.md)。
 
-按各玩家「下載連線檔」後，將檔案配置到對應玩家端；票券只有五分鐘，依原admission／room／seat驗票。檔案仍只有role／address／port／joinTicket，沒有Master或GameServer key。Windows玩家可執行：
+控制台 0.31.3 會在配票前核對連線目的地。請輸入四段十進位 IPv4，例如 `192.168.1.100`，每段使用標準數字格式，第一段介於 1–223，埠號介於 1024–65535。確認後按各玩家的「下載連線檔」，將檔案交給對應玩家。每張票券有效五分鐘，依本次 admission、房間與席位驗票。檔案包含 `role`、`address`、`port` 與 `joinTicket`。Windows 玩家也可執行下列命令。
 
 ```powershell
 & <同版VrCommand.exe> --vr-config <自己的玩家連線檔.json>
