@@ -33,6 +33,14 @@ v0.16 新增 `environmentVersion:1`，依保存的 tick／環境重現雨、日�
 
 切頁、換場或登出會取消當前串流，舊回應不能恢復場景。所有文字採 textContent，不執行任務／玩家名稱內的標記。憑證只在頁面記憶體及 Authorization 標頭，不放 URL、localStorage、sessionStorage 或 cookie。
 
+### 暫停逐格檢視
+
+控制台 0.31.9 可在回放暫停後按「上一格」或「下一格」，讀取相鄰的保存快照。逐格區顯示該格保存的射擊、命中、擊殺、受傷及換彈事件，也保留原序號、相關玩家、房間與當格統計。沒有事件的快照會明確顯示空白原因。續播會從目前的快照序號開始，同一毫秒有多份快照時也可依序檢視。
+
+單格使用 `GET /api/sessions/{id}/world/frames/{sequence}`，依原場次讀取權限回傳該快照及統計。回放串流可用 `mode=replay&fromFrame={sequence}` 明確指定第一格，此參數與 `fromMs` 擇一。第一格與已接受的最後一格限制逐格範圍。換場、離開頁籤或登出會取消逐格請求。 [驗證紀錄](PROGRESS.md#2026-11-06-任務回放逐格檢視)
+
+原生 Windows 短場可用 `scripts/check-desktop-exercise.py --check-frame-review`，把單格射擊事件和續播前兩格與同場完整保存回放逐欄比對。 [自動操作驗證](DESKTOP_EXERCISE.md)
+
 ## 可重現示範與補送
 
 從專案根目錄執行，房間 5 必須空閒，輸出檔必須不存在。工具只建立及控制自己的 Simulation 任務，其他場次不變。
