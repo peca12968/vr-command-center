@@ -371,7 +371,7 @@ internal static class ServerLauncher
             Add(new Label { Text = "每個獨立房間一個伺服器；五房合併場次只需一個。", AutoSize = true }, 24, 24, 860, 30);
             Add(new Label { Text = "管理實例檔案完整路徑", AutoSize = true }, 24, 56, 600, 28); Add(selected, 24, 86, 594, 32); Add(open, 630, 84, 120, 36); Add(refresh, 766, 84, 124, 36);
             Add(new Label { Text = "可選檔，也可直接貼上control-instance.json路徑，再按載入／更新。", AutoSize = true }, 24, 127, 866, 30);
-            Add(new Label { Text = "尚未綁定來源的VR場次", AutoSize = true }, 24, 164, 400, 28); Add(session, 24, 194, 866, 34); Add(detail, 24, 240, 866, 48);
+            Add(new Label { Text = "尚未綁定來源的 VR 或 MR 場次", AutoSize = true }, 24, 164, 400, 28); Add(session, 24, 194, 866, 34); Add(detail, 24, 240, 866, 48);
             Add(new Label { Text = "公告IPv4", AutoSize = true }, 24, 299, 210, 28); Add(address, 24, 330, 230, 32); Add(new Label { Text = "本機綁定IPv4", AutoSize = true }, 284, 299, 230, 28); Add(bind, 284, 330, 230, 32); Add(new Label { Text = "UDP埠", AutoSize = true }, 544, 299, 130, 28); Add(port, 544, 330, 130, 32);
             Add(start, 24, 382, 260, 40); Add(abort, 310, 382, 260, 40); Add(state, 24, 440, 866, 64);
             selected.TextChanged += delegate { catalog.Edit(selected.Text); start.Enabled = session.Enabled = false; detail.Text = "路徑已變更，請重新載入；未沿用舊場次。"; };
