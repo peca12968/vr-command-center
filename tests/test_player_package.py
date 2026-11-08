@@ -59,6 +59,27 @@ class PlayerPackageTests(unittest.TestCase):
             with patch.object(package, 'source_fingerprint', return_value='a' * 64), self.assertRaises(ValueError): package.collect(self.folder)
             file.unlink()
 
+    def test_collect_checks_exact_meta_subsystem_manifest(self):
+        self.fixture()
+        manifest = self.folder / package.META_SUBSYSTEM_JSON
+        manifest.parent.mkdir(parents=True)
+        meta = b'''{
+    "name": "libUnityARFoundationMeta",
+    "version": "1.0.0",
+    "libraryName": "libUnityARFoundationMeta",
+    "meshings": [
+    {
+        "id": "MetaOpenXR-Meshing"
+    }]
+}
+'''
+        with patch.object(package, 'source_fingerprint', return_value='a' * 64):
+            manifest.write_bytes(meta)
+            self.assertIn((manifest, package.META_SUBSYSTEM_JSON), package.collect(self.folder)[1])
+            manifest.write_bytes(meta.replace(b'MetaOpenXR-Meshing', b'fixture-privatekey'))
+            with self.assertRaisesRegex(ValueError, 'Unexpected Unity Meta subsystem manifest'):
+                package.collect(self.folder)
+
     def test_hash_and_size_check_detect_changed_or_missing_runtime_files(self):
         self.manifest(); package.verify(self.folder)
         (self.folder / 'UnityPlayer.dll').write_bytes(b'changed')

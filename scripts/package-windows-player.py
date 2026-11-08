@@ -21,8 +21,11 @@ ROOT = Path(__file__).resolve().parents[1]
 TOP = 'VRCommand-Player'
 RUNTIME = ('VrCommand.exe', 'UnityPlayer.dll', 'UnityCrashHandler64.exe', 'WinPixEventRuntime.dll',
            'D3D12', 'MonoBleedingEdge', 'VrCommand_Data')
-RUNTIME_JSON = {'build-receipt.json', 'VrCommand_Data/RuntimeInitializeOnLoads.json',
-                'VrCommand_Data/ScriptingAssemblies.json', 'VrCommand_Data/UnitySubsystems/UnityOpenXR/UnitySubsystemsManifest.json'}
+META_SUBSYSTEM_JSON = 'VrCommand_Data/UnitySubsystems/libUnityARFoundationMeta/UnitySubsystemsManifest.json'
+# Byte-for-byte copy emitted by Unity from com.unity.xr.meta-openxr 2.3.2.
+META_SUBSYSTEM_SHA256 = '1b948c6cf83c2b90b1e8f217d83ed17d8f4761702f6204e75dbeca698572aed2'
+RUNTIME_JSON = {'build-receipt.json', 'VrCommand_Data/RuntimeInitializeOnLoads.json', 'VrCommand_Data/ScriptingAssemblies.json',
+                'VrCommand_Data/UnitySubsystems/UnityOpenXR/UnitySubsystemsManifest.json', META_SUBSYSTEM_JSON}
 NOTICES = {
     'clients/unity/Packages/com.unity.transport/LICENSE.md': 'Notices/Unity-Transport-LICENSE.md',
     'clients/unity/Packages/com.unity.transport/UPSTREAM.json': 'Notices/Unity-Transport-UPSTREAM.json',
@@ -95,6 +98,8 @@ def collect(player):
                 # Unexpected credentials / runtime state inside a runtime tree fail closed.
                 if file.suffix.lower() in ('.key', '.journal', '.worldlog', '.db', '.sqlite', '.log') or (file.suffix.lower() == '.json' and relative not in RUNTIME_JSON):
                     raise ValueError('Runtime input contains private state; rebuild a clean player')
+                if relative == META_SUBSYSTEM_JSON and (file.stat().st_size != 181 or digest(file) != META_SUBSYSTEM_SHA256):
+                    raise ValueError('Unexpected Unity Meta subsystem manifest')
                 files.append((file, relative))
     return receipt, files
 
