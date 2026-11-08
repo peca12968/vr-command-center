@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.IO.Compression;
 using System.Text;
 using VrCommand.Core;
 
@@ -11,6 +12,26 @@ public static class FinalReportCsv
     public static string FileName(Guid sessionId, int? roomId) =>
         roomId is int room ? FormattableString.Invariant($"vr-command-report-v1-{sessionId:D}-room-{room:00}.csv")
             : FileName(sessionId);
+
+    internal static byte[] EncodeBundle(FinalSessionReport report)
+    {
+        using var output = new MemoryStream();
+        using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
+        {
+            Write(report);
+            foreach (var room in report.RoomIds) Write(report.ForRoom(room));
+
+            void Write(FinalSessionReport scoped)
+            {
+                var entry = archive.CreateEntry(FileName(scoped.SessionId, scoped.ReportRoomId));
+                // CSV records the source timestamps. The ZIP adds no export timestamp.
+                entry.LastWriteTime = new DateTimeOffset(1980, 1, 1, 0, 0, 0, TimeSpan.Zero);
+                using var stream = entry.Open();
+                stream.Write(Encode(scoped));
+            }
+        }
+        return output.ToArray();
+    }
 
     public static byte[] Encode(FinalSessionReport report)
     {

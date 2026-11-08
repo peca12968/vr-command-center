@@ -12,6 +12,12 @@ API／控制台 **0.27.0** 新增 `GET /api/sessions/{id}/report.csv`。在「�
 
 分房檔名為 `vr-command-report-v1-{sessionId}-room-NN.csv`。原 `roomIds` 記錄整場房間組成，新增末欄 `reportRoomId` 標示本檔的房號。只有該房的玩家戰績會列入，包括已離場玩家。若該房無玩家戰績，輸出一列帶有房號的場次資料。場次 ID、事件序號及戰鬥封存序號沿用同一份全場資料。 [Windows 三包整合驗證](WINDOWS_SERVER_PACKAGE.md#三個可攜包整合驗證)
 
+### 一次下載五房戰績
+
+控制台 0.31.18 的「下載五房戰績 ZIP」供全館主控使用。五房連線場次結束且可下載最終戰鬥 CSV 後，一次下載全場與五份分房 CSV。ZIP 涵蓋全部房間，個別 CSV 的範圍選單可繼續用於下載單一檔案。
+
+端點為 `GET /api/sessions/{id}/reports.zip`，檔名為 `vr-command-reports-v1-{sessionId}.zip`，使用 `application/zip` 與 `Cache-Control: no-store`。服務先擷取一份最終報表，再產出全場及分房檔案。六份 CSV 的內容與逐一下載相同，包含空房與已離場玩家的既有表示。已結束且沒有戰鬥串流的歷史場次沿用原報表條件。此下載使用戰鬥封存條件，場館驗收 ZIP 則另行核對世界封存、端點與名冊。
+
 ## 最終性與權限
 
 SessionManager 在同一把鎖內檢查身分／房間、Ended 與戰鬥封存，再擷取場次及 ledger。已綁 combat stream 必須接受精確 seal，只有 End 不足以匯出；尾端補送完成但尚未 seal 仍回 409。未綁 stream 的歷史場次 End 後不能接受新戰鬥，故可匯出。報表不新增事件、不更動歷史，也不寫入伺服器的匯出檔案。

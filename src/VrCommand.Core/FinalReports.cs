@@ -7,6 +7,12 @@ public record FinalSessionReport(int ReportVersion, Guid SessionId, Guid Mission
     Guid? StreamId, long? FinalStreamSequence, PlayerStatistics[] Players)
 {
     public int? ReportRoomId { get; init; }
+
+    public FinalSessionReport ForRoom(int roomId)
+    {
+        if (!RoomIds.Contains(roomId)) throw new ArgumentException("Report room is outside the session.");
+        return this with { ReportRoomId = roomId, Players = Players.Where(player => player.RoomId == roomId).ToArray() };
+    }
 }
 
 public sealed partial class SessionManager
@@ -32,13 +38,12 @@ public sealed partial class SessionManager
             var statistics = Statistics(history);
             if (session.State != SessionState.Ended || session.EndedAtUtc is null || statistics.PendingTelemetry)
                 throw new InvalidOperationException("End the session and seal all combat reports before exporting a final report.");
-            return new(1, id, session.Mission.Id, session.Mission.Definition.Name, session.Mode,
+            var report = new FinalSessionReport(1, id, session.Mission.Id, session.Mission.Definition.Name, session.Mode,
                 [.. session.RoomIds], session.CreatedAtUtc, session.StartedAtUtc, session.EndedAtUtc.Value,
                 session.Mission.Definition.DurationSeconds, statistics.ThroughSequence,
                 statistics.Origin ?? session.CombatStream?.Origin, session.CombatStream?.StreamId,
-                session.CombatStream?.AcceptedSequence,
-                roomId.HasValue ? statistics.Players.Where(player => player.RoomId == roomId.Value).ToArray() : statistics.Players)
-            { ReportRoomId = roomId };
+                session.CombatStream?.AcceptedSequence, statistics.Players);
+            return roomId is int reportRoom ? report.ForRoom(reportRoom) : report;
         }
     }
 }

@@ -452,6 +452,7 @@ try:
 
             baseline = request("GET", session_path + "/statistics")
             request("GET", session_path + "/report.csv", expected=409)
+            request("GET", session_path + "/reports.zip", expected=409)
             request("GET", session_path + "/report.csv", expected=403, identity="GameServer")
             require(baseline["origin"] is None and all(p["ammoUsed"] == 0 and p["health"] == 100 for p in baseline["players"]),
                     "Statistics start empty and include previously departed players")
@@ -591,6 +592,24 @@ try:
             request("GET", session_path + "/rooms/6/report.csv", expected=400)
             request("GET", session_path + "/report.csv", expected=401, identity=None)
             request("GET", session_path + "/report.csv", expected=403, identity="GameServer")
+            reports_url = session_path + "/reports.zip"
+            reports, report_headers = request("GET", reports_url, raw=True)
+            prefix = f'vr-command-report-v1-{final_view["id"]}'
+            expected_files = {prefix + ".csv": final_csv}
+            for room in range(1, 6):
+                expected_files[f"{prefix}-room-{room:02}.csv"] = request("GET", session_path + f"/rooms/{room}/report.csv", raw=True)[0]
+            with zipfile.ZipFile(io.BytesIO(reports)) as archive:
+                require(archive.namelist() == list(expected_files) and archive.testzip() is None
+                        and all(archive.read(name) == content for name, content in expected_files.items()),
+                        "Linked report ZIP contains precisely the same full and five scoped CSVs")
+            require(report_headers.get_content_type() == "application/zip" and report_headers["Cache-Control"] == "no-store"
+                    and f'vr-command-reports-v1-{final_view["id"]}.zip' in report_headers["Content-Disposition"],
+                    "Linked report ZIP is a no-store attachment named for the exact session")
+            request("GET", reports_url, expected=401, identity=None)
+            request("GET", reports_url, expected=403, identity="Room1")
+            request("GET", reports_url, expected=403, identity="GameServer")
+            request("GET", own_path + "/reports.zip", expected=400)
+            require(request("GET", session_path) == final_view, "ZIP export leaves the original session intact")
             require(report(fired)["duplicate"], "Combat report retry is available after session end")
             report({**fired, "reportId": str(uuid.uuid4()), "shotId": str(uuid.uuid4())}, 409)
             require(request("GET", "/api/sessions") == [], "Active list excludes archived sessions")
@@ -613,6 +632,8 @@ try:
                     "Real HTTP CSV bytes survive API restart and operator-key rotation")
             require(request("GET", scoped_url, identity="Room1", raw=True)[0] == scoped,
                     "Scoped CSV bytes survive API restart and operator-key rotation")
+            require(request("GET", reports_url, raw=True)[0] == reports,
+                    "Linked ZIP bytes survive API restart and operator-key rotation")
             demo = subprocess.run([sys.executable, str(ROOT / "scripts/demo_combat.py"), "--base-url", base_url,
                                    "--key-file", str(key_file), "--room", "1"], capture_output=True, text=True, encoding="utf-8", timeout=30)
             if demo.returncode != 0:
@@ -670,6 +691,7 @@ try:
             require(queued["origin"] == "Simulation" and queued["queuedReports"] == 6 and queued["pendingTelemetry"],
                     "Real simulation persists six causal reports, ends the session and exits before delivering them")
             request("GET", stream_path + "/report.csv", expected=409)
+            request("GET", stream_path + "/reports.zip", expected=409)
             request("GET", stream_path + "/report.csv", expected=403, identity="Room2")
             first = queued["firstReport"]
             request("POST", stream_path + "/combat-stream/reports", first, 403)

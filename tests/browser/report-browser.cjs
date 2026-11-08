@@ -6,6 +6,7 @@ module.exports = async function reportBrowser({ context, tokens, base, api, sess
   const page = await context.newPage(), errors = [], downloads = [];
   page.on('pageerror', error => errors.push(error.message)); page.on('download', download => downloads.push(download));
   const button = page.locator('#export-report');
+  const bundleButton = page.locator('#export-report-bundle');
   async function login(role = 'Master', initialId = session.id) {
     await page.locator('#login-key').fill(tokens[role]); await page.locator('#login-form button').click();
     await page.waitForFunction(() => !document.querySelector('#workspace').hidden && !document.querySelector('#session-select').disabled);
@@ -110,10 +111,26 @@ module.exports = async function reportBrowser({ context, tokens, base, api, sess
     }
     await scope.selectOption('2'); await scopedDownload(2, 'Master');
     await page.screenshot({ path: path.join(screenshots, 'scoped-report-master.png'), fullPage: true });
+    const bundleEndpoint = `${base}/api/sessions/${linked.id}/reports.zip`;
+    const zipReady = page.waitForEvent('download');
+    await bundleButton.click();
+    const zip = await zipReady, archive = await fs.readFile(await zip.path());
+    const authoritative = await fetch(bundleEndpoint, { headers: { Authorization: 'Bearer ' + tokens.Master } });
+    check(authoritative.ok && archive.equals(Buffer.from(await authoritative.arrayBuffer()))
+      && zip.suggestedFilename() === `vr-command-reports-v1-${linked.id}.zip` && await scope.inputValue() === '2',
+      'Master downloads the exact linked ZIP from any CSV scope without changing that selection');
+    await fs.writeFile(path.join(screenshots, 'linked-reports.zip'), archive);
+    const beforeWrongMime = downloads.length;
+    await page.route(bundleEndpoint, route => route.fulfill({ status: 200, contentType: 'application/zip-fake', body: 'fixture' }));
+    await bundleButton.click();
+    await page.waitForFunction(() => document.querySelector('#report-status').textContent.includes('格式不符'));
+    check(downloads.length === beforeWrongMime && await bundleButton.isEnabled(), 'ZIP export rejects an incorrect MIME and permits retry');
+    await page.unroute(bundleEndpoint);
     await page.locator('#logout').click(); await login('Room1', linked.id); await select(linked.id);
     check(await scope.inputValue() === '1' && await scope.isDisabled() && await scope.locator('option').count() === 1,
       'Room controller sees only its own report scope, with no stale master choice after logout');
     await scopedDownload(1, 'Room1');
+    check(!await bundleButton.isVisible(), 'Room controller never sees the all-room ZIP action');
     check(errors.length === 0, 'Report workflow has no uncaught browser errors');
   } finally { await page.close(); }
 };

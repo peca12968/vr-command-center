@@ -19,7 +19,7 @@ def main():
     p.add_argument('--field-evidence',action='store_true',help='Verify the management ZIP with the original Linked player and server logs')
     p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
     p.add_argument('--check-layout-preview',action='store_true',help='Load a saved barricade opening and compare its preview with native world geometry')
-    p.add_argument('--check-room-reports',action='store_true',help='Verify scoped Linked CSVs against the full sealed native report')
+    p.add_argument('--check-room-reports',action='store_true',help='Verify scoped Linked CSVs and the ZIP against the full sealed native report')
     p.add_argument('--check-interrupted-replay', action='store_true', help='Play the saved native prefix after the owned launcher is killed')
     p.add_argument('--check-managed-mr', action='store_true', help='Verify a real Preparing MR server rejects desktop admission and seals without starting combat')
     p.add_argument('--check-live-reinforcement', action='store_true', help='Verify a native server accepts only supported live enemy targets and records the result')
@@ -242,8 +242,11 @@ def main():
                 raise ValueError('CSV row differs from the original sealed player result')
         (out/(entry['label']+'-report.csv')).write_bytes(raw)
         if args.check_room_reports and entry['label']=='linked':
+            session_path='/api/sessions/'+entry['sessionId']
+            prefix='vr-command-report-v1-'+entry['sessionId']
+            expected_files={prefix+'.csv':raw}
             for room in range(1,6):
-                scoped,scoped_headers=request('/api/sessions/'+entry['sessionId']+f'/rooms/{room}/report.csv',
+                scoped,scoped_headers=request(session_path+f'/rooms/{room}/report.csv',
                     role=f'Room{room}',raw_response=True)
                 scoped_rows=list(csv.DictReader(io.StringIO(scoped.decode('utf-8-sig'),newline='')))
                 expected=[dict(row,reportRoomId=str(room)) for row in rows if row['playerRoomId']==str(room)]
@@ -251,7 +254,18 @@ def main():
                     and f'-room-{room:02}.csv' in scoped_headers['Content-Disposition'],
                     f'room {room} CSV matches its five original sealed Linked player rows')
                 (out/f'linked-scoped-room-{room:02}.csv').write_bytes(scoped)
-            request('/api/sessions/'+entry['sessionId']+'/rooms/2/report.csv',role='Room1',expected=403)
+                expected_files[f'{prefix}-room-{room:02}.csv']=scoped
+            request(session_path+'/rooms/2/report.csv',role='Room1',expected=403)
+            reports,headers=request(session_path+'/reports.zip',raw_response=True)
+            check(headers.get_content_type()=='application/zip' and headers['Cache-Control']=='no-store'
+                  and f'vr-command-reports-v1-{entry["sessionId"]}.zip' in headers['Content-Disposition'],
+                  'Linked battle ZIP headers and original session filename')
+            with zipfile.ZipFile(io.BytesIO(reports)) as archive:
+                check(archive.namelist()==list(expected_files) and archive.testzip() is None
+                      and all(archive.read(name)==content for name,content in expected_files.items()),
+                      'Linked battle ZIP matches the exact six CSVs from the original 25 player results')
+            request(session_path+'/reports.zip',role='Room1',expected=403)
+            (out/'linked-reports.zip').write_bytes(reports)
         save(entry['label']+'-delivery.json',{'serverAcknowledgedConnections':acks,
             'players':[{'playerId':c['player']['id'],'admissionId':c['player']['admissionId'],
                 'roomId':c['player']['roomId'],'seat':c['player']['seat'],'connectionId':c['connection'],

@@ -148,6 +148,15 @@ app.MapGet("/api/sessions/{id:guid}/report.csv", (Guid id, SessionManager manage
     ExportReport(id, null, manager, context));
 app.MapGet("/api/sessions/{id:guid}/rooms/{roomId:int}/report.csv", (Guid id, int roomId, SessionManager manager, HttpContext context) =>
     ExportReport(id, roomId, manager, context));
+app.MapGet("/api/sessions/{id:guid}/reports.zip", (Guid id, SessionManager manager, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var actor = Actor(context);
+    if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Only the master may export the linked report bundle.");
+    var report = manager.FinalReport(id, actor);
+    if (report.Mode != SessionMode.Linked) throw new ArgumentException("The report bundle requires a linked session.");
+    return Results.File(FinalReportCsv.EncodeBundle(report), "application/zip", $"vr-command-reports-v1-{id:D}.zip");
+});
 static IResult ExportReport(Guid id, int? roomId, SessionManager manager, HttpContext context)
 {
     context.Response.Headers.CacheControl = "no-store";
