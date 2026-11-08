@@ -19,6 +19,8 @@ namespace VrCommand.Unity
         public string gameServerKey = "";
         public string telemetryOrigin = "Simulation";
         public string telemetryDirectory = "";
+        public string roomAlignmentSha256 = "";
+        [NonSerialized] internal RoomFloorPlan AlignmentPlan;
 
         public bool IsServer => role == "Server" || role == "Host";
         public string ServerListenAddress
@@ -57,6 +59,12 @@ namespace VrCommand.Unity
                 throw new InvalidOperationException("Telemetry origin must be explicit.");
             if (config.role != "Server" && string.IsNullOrWhiteSpace(config.joinTicket))
                 throw new InvalidOperationException("Player admission ticket is missing.");
+            if (!string.IsNullOrEmpty(config.roomAlignmentSha256))
+            {
+                if (config.role != "Client" || (Application.platform != RuntimePlatform.Android && !UnityEngine.XR.XRSettings.isDeviceActive))
+                    throw new InvalidOperationException("Room alignment requires a tracked XR client.");
+                config.AlignmentPlan = RoomFloorPlan.Load(Path.GetDirectoryName(path), config.roomAlignmentSha256);
+            }
             return config;
         }
     }

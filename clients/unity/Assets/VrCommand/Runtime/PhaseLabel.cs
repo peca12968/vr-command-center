@@ -21,6 +21,11 @@ namespace VrCommand.Unity
                 message += "\n" + (status == "ACTIVE" ? "XR INPUT / TRIGGER FIRE / A RELOAD" : status);
                 GetComponent<UnityEngine.UI.Text>().color = status == "ACTIVE" ? new Color(.72f, .88f, .53f) : new Color(1, .6f, .3f);
             }
+            if (avatar != null && !string.IsNullOrEmpty(avatar.AlignmentHint))
+            {
+                message = avatar.AlignmentHint;
+                GetComponent<UnityEngine.UI.Text>().color = new Color(1, .6f, .3f);
+            }
             GetComponent<UnityEngine.UI.Text>().text = message;
         }
     }

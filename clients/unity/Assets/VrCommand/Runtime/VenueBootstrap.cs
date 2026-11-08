@@ -19,6 +19,7 @@ namespace VrCommand.Unity
         public CombatAuthority combatAuthority;
         private readonly Dictionary<ulong, TicketApproval> admitted = new Dictionary<ulong, TicketApproval>();
         private LaunchConfiguration configuration;
+        internal RoomFloorPlan AlignmentPlan => configuration?.AlignmentPlan;
         private string status = "WAITING FOR CONTROL DESK";
         private bool managementReady;
         private float nextReconnect;

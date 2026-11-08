@@ -55,7 +55,24 @@ namespace VrCommand.Unity
         public int BriefingSuppressedInputs => briefingPanel.Weapons.SuppressedPresses;
         private InputAction headTracking, leftTracking, rightTracking;
         private InputAction headTracked, leftTracked, rightTracked;
-        public bool TrackingReady => !tracked || HasTracking(headTracking, headTracked) && HasTracking(leftTracking, leftTracked) && HasTracking(rightTracking, rightTracked);
+        private bool JointTrackingReady => !tracked || HasTracking(headTracking, headTracked) && HasTracking(leftTracking, leftTracked) && HasTracking(rightTracking, rightTracked);
+        public bool TrackingReady => JointTrackingReady && (floorCalibration == null || floorCalibration.Ready);
+        internal string AlignmentHint
+        {
+            get
+            {
+                if (floorCalibration == null || !floorCalibration.Ready) return floorCalibration?.Hint;
+                if (!JointTrackingReady || PoseAccepted.Value) return null;
+                var previous = transform.TransformPoint(Pose.Value.head);
+                var origin = ArenaWorld.RoomOrigin(floorCalibration.RoomId);
+                return FormattableString.Invariant($"RETURN TO LAST VALID POSITION\nROOM X {previous.x - origin.X:F2} / Z {previous.z - origin.Z:F2} M");
+            }
+        }
+        private RoomFloorCalibration floorCalibration;
+        private XRInputSubsystem floorInput;
+        private InputAction captureFloorMarker;
+        private float nextFloorSearch;
+        private bool releaseAfterAlignment;
         private static bool HasTracking(InputAction state, InputAction tracked) => state != null && tracked != null && tracked.ReadValue<float>() > .5f && (state.ReadValue<int>() & 3) == 3;
         private Camera localCamera;
         private float nextSend;
@@ -112,7 +129,14 @@ namespace VrCommand.Unity
             tracked = XRSettings.isDeviceActive || Application.platform == RuntimePlatform.Android;
             if (tracked)
             {
-                CreateTrackingSpace(transform, head, leftHand, rightHand);
+                var trackingSpace = CreateTrackingSpace(transform, head, leftHand, rightHand);
+                var plan = VenueBootstrap.Instance?.AlignmentPlan;
+                if (plan != null)
+                {
+                    trackingSpace.localPosition = Vector3.zero;
+                    floorCalibration = new RoomFloorCalibration(plan, transform.position, trackingSpace);
+                    captureFloorMarker = Action("Capture Floor Marker", "<XRController>{LeftHand}/triggerPressed");
+                }
                 var driver = head.gameObject.AddComponent<TrackedPoseDriver>();
                 driver.positionInput = new InputActionProperty(new InputAction("Head Position", InputActionType.Value, "<XRHMD>/centerEyePosition"));
                 driver.rotationInput = new InputActionProperty(new InputAction("Head Rotation", InputActionType.Value, "<XRHMD>/centerEyeRotation"));
@@ -192,7 +216,10 @@ namespace VrCommand.Unity
                     if (tracked ? briefLicense?.WasPressedThisFrame() == true : desktopBriefLicense || Keyboard.current?.lKey.wasPressedThisFrame == true) briefingPanel.License();
                 }
                 desktopBriefNext = desktopBriefClose = desktopBriefLicense = false;
-                if (!TrackingReady) {NativePoseTrace.OwnerUnavailable("TrackingUnavailable",OwnerClientId);return;}
+                var jointsTracked = JointTrackingReady;
+                if (floorCalibration != null && !UpdateFloorCalibration(mission, jointsTracked))
+                { releaseAfterAlignment = true; NativePoseTrace.OwnerUnavailable("FloorAlignmentUnavailable", OwnerClientId); return; }
+                if (!jointsTracked) {NativePoseTrace.OwnerUnavailable("TrackingUnavailable",OwnerClientId);return;}
                 if (DesktopClientExercise.Enabled && tracked) { DesktopClientExercise.RejectTracked(); return; }
                 if (!tracked && !InitializeDesktopPose()) {NativePoseTrace.OwnerUnavailable("DesktopInitializing",OwnerClientId);return;}
                 var exercising = DesktopClientExercise.Enabled;
@@ -221,8 +248,9 @@ namespace VrCommand.Unity
                 var pressed = exercising ? exercise.Fire || exercise.Reload : tracked ? trigger.WasPressedThisFrame() || reload.WasPressedThisFrame()
                     : desktopFire || desktopReload || Mouse.current?.leftButton.wasPressedThisFrame == true || Keyboard.current?.spaceKey.wasPressedThisFrame == true || Keyboard.current?.rKey.wasPressedThisFrame == true;
                 var allowWeapon = briefingPanel.Weapons.Allows(briefingPanel.Open, held, pressed);
+                if (!held) releaseAfterAlignment = false;
                 if (authority != null && authority.Ready.Value && VenueBootstrap.Instance.State == "Running"
-                    && allowWeapon && !ending && (tracked || Application.isFocused || Application.isBatchMode))
+                    && allowWeapon && !releaseAfterAlignment && !ending && (tracked || Application.isFocused || Application.isBatchMode))
                 {
                     var wantsReload = exercising ? exercise.Reload : tracked ? reload.WasPressedThisFrame() : desktopReload || Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame;
                     var wantsFire = exercising ? exercise.Fire : tracked ? trigger.ReadValue<float>() > .5f
@@ -287,7 +315,7 @@ namespace VrCommand.Unity
         private AvatarPose CurrentPose() => new AvatarPose { source = (byte)(tracked ? 2 : 1), head = transform.InverseTransformPoint(head.position), left = transform.InverseTransformPoint(leftHand.position), right = transform.InverseTransformPoint(rightHand.position),
             headRotation = Quaternion.Inverse(transform.rotation) * head.rotation, leftRotation = Quaternion.Inverse(transform.rotation) * leftHand.rotation, rightRotation = Quaternion.Inverse(transform.rotation) * rightHand.rotation };
 
-        public static void CreateTrackingSpace(Transform root, params Transform[] joints)
+        public static Transform CreateTrackingSpace(Transform root, params Transform[] joints)
         {
             var space = new GameObject("XR Tracking Origin").transform; space.SetParent(root, false);
             var inputs = new List<XRInputSubsystem>(); SubsystemManager.GetSubsystems(inputs);
@@ -296,7 +324,35 @@ namespace VrCommand.Unity
                 if (input.running && input.TrySetTrackingOriginMode(TrackingOriginModeFlags.Floor)) floor = true;
             space.localPosition = floor ? Vector3.zero : new Vector3(0, 1.65f, 0);
             foreach (var joint in joints) joint.SetParent(space, false);
+            return space;
         }
+
+        private bool UpdateFloorCalibration(SceneAuthority mission, bool jointsTracked)
+        {
+            if ((floorInput == null || !floorInput.running || floorInput.GetTrackingOriginMode() != TrackingOriginModeFlags.Floor)
+                && Time.unscaledTime >= nextFloorSearch)
+            {
+                nextFloorSearch = Time.unscaledTime + 1;
+                var inputs = new List<XRInputSubsystem>();
+                SubsystemManager.GetSubsystems(inputs);
+                var candidate = inputs.Find(input => input.running && (input.GetSupportedTrackingOriginModes() & TrackingOriginModeFlags.Floor) != 0);
+                if (candidate != floorInput)
+                {
+                    if (floorInput != null) floorInput.trackingOriginUpdated -= FloorOriginChanged;
+                    floorInput = candidate;
+                    floorCalibration.Invalidate();
+                    if (floorInput != null) floorInput.trackingOriginUpdated += FloorOriginChanged;
+                }
+                if (floorInput != null && floorInput.GetTrackingOriginMode() != TrackingOriginModeFlags.Floor)
+                    floorInput.TrySetTrackingOriginMode(TrackingOriginModeFlags.Floor);
+            }
+            var floorReady = floorInput != null && floorInput.running && floorInput.GetTrackingOriginMode() == TrackingOriginModeFlags.Floor;
+            var phase = mission != null && mission.IsSpawned ? mission.Phase.Value.ToString() : "";
+            var allowed = phase == "Preparing" || phase == "Paused";
+            return floorCalibration.Update(allowed, floorReady, jointsTracked, captureFloorMarker.WasPressedThisFrame(), leftPosition.ReadValue<Vector3>());
+        }
+
+        private void FloorOriginChanged(XRInputSubsystem input) { floorCalibration?.Invalidate(); }
 
         [Rpc(SendTo.Server, InvokePermission = RpcInvokePermission.Owner)]
         private void SubmitWeaponRpc(ulong input, bool reloadWeapon, AvatarPose pose)
@@ -348,8 +404,12 @@ namespace VrCommand.Unity
             if (leftHand != null && rightHand != null) UpdateDesktopHands();
         }
         private void OnApplicationFocus(bool focused) { if (!focused) ResetDesktopStance(); }
-        private void OnApplicationPause(bool paused) { ResetDesktopStance(); }
-        private void OnDisable() { ResetDesktopStance(); }
+        private void OnApplicationPause(bool paused)
+        {
+            ResetDesktopStance();
+            if (paused) floorCalibration?.Invalidate();
+        }
+        private void OnDisable() { ResetDesktopStance(); floorCalibration?.Invalidate(); }
         private static bool Pressed(ButtonControl button) => button.isPressed || button.wasPressedThisFrame;
         private static float Turn(ButtonControl button) => button.wasPressedThisFrame ? 3 : button.isPressed ? 60 * Time.unscaledDeltaTime : 0;
         private void MoveDesktop(Vector2 movement, float seconds)
@@ -426,6 +486,9 @@ namespace VrCommand.Unity
 
         public override void OnNetworkDespawn()
         {
+            if (floorInput != null) floorInput.trackingOriginUpdated -= FloorOriginChanged;
+            floorInput = null; floorCalibration = null;
+            captureFloorMarker?.Dispose(); captureFloorMarker = null;
             head.GetComponent<CombatAudioView>()?.Dispose();
             if (IsOwner) tacticalHud.Reset();
             PoseAccepted.OnValueChanged -= AcceptanceChanged;
