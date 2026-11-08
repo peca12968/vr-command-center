@@ -49,17 +49,61 @@ internal static class ArenaSessionChecks
             "A preparing MR arena accepts bound tracked poses, rejects desktop poses and blocks weapons");
         var original = ArenaConnectionProfile.Encode("v2.opaque", 0);
         check(original.SequenceEqual(System.Text.Encoding.UTF8.GetBytes("v2.opaque"))
-            && ArenaConnectionProfile.TryDecode(original, out var normalTicket, out var normalRoom) && normalTicket == "v2.opaque" && normalRoom == 0,
+            && ArenaConnectionProfile.TryDecode(original, out var normalTicket, out var normalRoom, out var normalHash)
+            && normalTicket == "v2.opaque" && normalRoom == 0 && normalHash is null,
             "VR preserves the original opaque admission payload");
-        check(ArenaConnectionProfile.TryDecode(ArenaConnectionProfile.Encode("v2.opaque", 3), out var mrTicket, out var mrRoom)
-            && mrTicket == "v2.opaque" && ArenaConnectionProfile.Matches(true, mrRoom, 3, "Quest3")
-            && !ArenaConnectionProfile.Matches(true, mrRoom, 4, "Quest3") && !ArenaConnectionProfile.Matches(true, mrRoom, 3, "ViveXr")
-            && !ArenaConnectionProfile.Matches(true, 0, 3, "Quest3") && !ArenaConnectionProfile.Matches(false, mrRoom, 3, "Quest3"),
-            "MR admission requires the declared calibration room and Quest 3 roster for the exact MR arena");
-        check(!ArenaConnectionProfile.TryDecode(ArenaConnectionProfile.Encode("v2.opaque", 6), out _, out _)
-            && !ArenaConnectionProfile.TryDecode([255, 254], out _, out _)
-            && !ArenaConnectionProfile.TryDecode(ArenaConnectionProfile.Encode("v2." + new string('a', 254), 3), out _, out _),
+        var hash = new string('a', 64);
+        var otherHash = new string('b', 64);
+        check(ArenaConnectionProfile.TryDecode(ArenaConnectionProfile.Encode("v2.opaque", 3, hash), out var mrTicket, out var mrRoom, out var mrHash)
+            && mrTicket == "v2.opaque" && ArenaConnectionProfile.Matches(true, mrRoom, 3, "Quest3", mrHash, hash)
+            && !ArenaConnectionProfile.Matches(true, mrRoom, 3, "Quest3", mrHash, otherHash)
+            && !ArenaConnectionProfile.Matches(true, mrRoom, 3, "Quest3", mrHash, null)
+            && !ArenaConnectionProfile.Matches(true, mrRoom, 4, "Quest3", mrHash, hash)
+            && !ArenaConnectionProfile.Matches(true, mrRoom, 3, "ViveXr", mrHash, hash)
+            && !ArenaConnectionProfile.Matches(true, 0, 3, "Quest3", null, hash)
+            && !ArenaConnectionProfile.Matches(false, mrRoom, 3, "Quest3", mrHash, hash),
+            "MR admission requires the exact pinned hash, room and Quest 3 roster");
+        check(!ArenaConnectionProfile.TryDecode(System.Text.Encoding.UTF8.GetBytes($"mr2.6.{hash}.v2.opaque"), out _, out _, out _)
+            && !ArenaConnectionProfile.TryDecode(System.Text.Encoding.UTF8.GetBytes($"mr2.3.{hash.ToUpperInvariant()}.v2.opaque"), out _, out _, out _)
+            && !ArenaConnectionProfile.TryDecode(System.Text.Encoding.UTF8.GetBytes("mr1.3.v2.opaque"), out _, out _, out _)
+            && !ArenaConnectionProfile.TryDecode([255, 254], out _, out _, out _)
+            && !ArenaConnectionProfile.TryDecode(ArenaConnectionProfile.Encode("v2." + new string('a', 254), 3, hash), out _, out _, out _),
             "Malformed, oversized and out-of-range admission profiles fail closed");
+        Reject<ArgumentException>(() => ArenaConnectionProfile.Encode("v2.opaque", 3), "MR client cannot encode a room without a checked hash");
+
+        var history = new MemorySessionEventStore();
+        var pinsManager = new SessionManager(history);
+        var master = new OperatorIdentity("master", OperatorRole.Master);
+        var roomController = new OperatorIdentity("room-3", OperatorRole.RoomController, 3);
+        var gameServer = new OperatorIdentity("game-server", OperatorRole.GameServer);
+        var mrMission = mission with { Definition = mission.Definition with { Environment = mission.Definition.Environment with { Mode = ExperienceMode.MR } } };
+        var independentMr = pinsManager.Create(SessionMode.Independent, [3], mrMission);
+        var pin = new ControlCommand(Guid.NewGuid(), ControlAction.SetRoomAlignment, ExpectedSequence: independentMr.Sequence,
+            RoomAlignment: new(Room3: hash));
+        Reject<AccessDeniedException>(() => pinsManager.Execute(independentMr.Id, pin, roomController), "Room controller cannot pin MR files");
+        Reject<ArgumentException>(() => pinsManager.Execute(independentMr.Id, pin with { RoomAlignment = new(Room3: hash, Room4: otherHash) }, master), "Independent MR pin rejects another room");
+        Reject<ArgumentException>(() => pinsManager.Execute(independentMr.Id, pin with { RoomAlignment = new(Room3: "ABC") }, master), "Invalid SHA-256 cannot be pinned");
+        var appliedPin = pinsManager.Execute(independentMr.Id, pin, master);
+        var reopenedPins = new SessionManager(history);
+        check(appliedPin.Session.RoomAlignment?.Room3 == hash && reopenedPins.Execute(independentMr.Id, pin, master).Duplicate,
+            "The original MR pin survives event replay and exact command retry");
+        Reject<InvalidOperationException>(() => reopenedPins.Execute(independentMr.Id, pin with { CommandId = Guid.NewGuid(), ExpectedSequence = null,
+            RoomAlignment = new(Room3: otherHash) }, master), "An MR session cannot switch to another calibration after pinning");
+        reopenedPins.End(independentMr.Id);
+        var linkedMr = reopenedPins.Create(SessionMode.Linked, [1,2,3,4,5], mrMission);
+        Reject<ArgumentException>(() => reopenedPins.Execute(linkedMr.Id, pin with { CommandId = Guid.NewGuid(), ExpectedSequence = null }, master), "Linked MR requires every room pin");
+        var linkedPin = reopenedPins.Execute(linkedMr.Id, pin with { CommandId = Guid.NewGuid(), ExpectedSequence = null,
+            RoomAlignment = new(hash, otherHash, hash, otherHash, hash) }, master);
+        var linkedSnapshot = JsonSerializer.Deserialize<ManagementSnapshot>(JsonSerializer.Serialize(linkedPin.Session, JsonFormat.Options),
+            new JsonSerializerOptions(JsonFormat.Options) { IncludeFields = true })!;
+        check(linkedSnapshot.roomAlignment?.Covers(linkedSnapshot.roomIds) == true && linkedSnapshot.roomAlignment.ForRoom(4) == otherHash,
+            "The real management JSON passes the exact five-room pins to the game DTO");
+        reopenedPins.End(linkedMr.Id);
+        var bound = reopenedPins.Create(SessionMode.Independent, [3], mrMission);
+        reopenedPins.OpenStream(bound.Id, new(Guid.NewGuid(), CombatOrigin.GameServer), gameServer);
+        Reject<InvalidOperationException>(() => reopenedPins.Execute(bound.Id, pin with { CommandId = Guid.NewGuid(), ExpectedSequence = null }, master),
+            "An already attached game source cannot have alignment pinned underneath it");
+        Reject<InvalidOperationException>(() => manager.Execute(managed.Id, pin with { ExpectedSequence = null }, master), "VR sessions cannot acquire MR alignment pins");
         check(!adapter.Pose(99, head, head, forward, 0) && adapter.Pose(17, head, head, forward, 0),
             "Pose cannot select a player ID and requires a bound transport identity");
         check(!adapter.Weapon(17, 1, false, 0), "Preparing cannot fire even with a valid tracked pose");

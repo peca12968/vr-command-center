@@ -773,6 +773,19 @@ try:
                     "MR Begin names its readiness conflict without changing generic conflict handling")
             request("POST", mr_path + "/combat-stream", {"streamId": str(uuid.uuid4()), "origin": "Simulation"}, 409, identity="GameServer")
             require(request("GET", mr_path) == joined_mr, "Rejected MR Begin and simulation attachment leave the exact Preparing roster untouched")
+            alignment = {f"room{room}": "a" * 64}
+            pin = {"commandId": str(uuid.uuid4()), "action": "SetRoomAlignment", "expectedSequence": joined_mr["sequence"],
+                   "roomAlignment": alignment}
+            request("POST", mr_path + "/commands", pin, 403, identity=f"Room{room}")
+            request("POST", mr_path + "/commands", {**pin, "roomAlignment": {f"room{room}": "invalid"}}, 400)
+            pinned = request("POST", mr_path + "/commands", pin)
+            duplicate_pin = request("POST", mr_path + "/commands", pin)
+            require(pinned["session"]["roomAlignment"][f"room{room}"] == alignment[f"room{room}"]
+                    and duplicate_pin["duplicate"] and duplicate_pin["appliedAtSequence"] == pinned["appliedAtSequence"],
+                    "Only the master pins MR alignment, and an exact retry returns its original sequence")
+            request("POST", mr_path + "/commands", {**pin, "commandId": str(uuid.uuid4()),
+                    "expectedSequence": pinned["session"]["sequence"], "roomAlignment": {f"room{room}": "b" * 64}}, 409)
+            require(request("GET", mr_path) == pinned["session"], "Rejected MR pin replacement leaves the original Preparing session intact")
             change = {"commandId": str(uuid.uuid4()), "action": "SetEnvironment"}
             request("POST", mr_path + "/commands", {**change, "environment": {**mr_environment, "mode": "VR"}}, 409)
             receipt = request("POST", mr_path + "/commands", {**change, "environment": {**mr_environment, "weather": "Storm", "lightning": True}})

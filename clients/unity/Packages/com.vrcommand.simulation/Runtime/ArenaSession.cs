@@ -17,6 +17,23 @@ namespace VrCommand.Simulation
         public ManagedEnemies enemies = null!;
         public ManagedPlayer[] players = null!;
         public ManagedMissionClock? missionClock;
+        public ManagedRoomAlignment? roomAlignment;
+    }
+    [Serializable] public sealed class ManagedRoomAlignment
+    {
+        public string? room1, room2, room3, room4, room5;
+        public string? ForRoom(int room) => room switch { 1 => room1, 2 => room2, 3 => room3, 4 => room4, 5 => room5, _ => null };
+        public bool Covers(int[] rooms)
+        {
+            if (rooms is null || rooms.Length is not (1 or 5) || rooms.Any(room => room < 1 || room > 5)
+                || rooms.Distinct().Count() != rooms.Length) return false;
+            for (var room = 1; room <= 5; room++)
+            {
+                var hash = ForRoom(room);
+                if (rooms.Contains(room) ? !ArenaConnectionProfile.IsAlignmentHash(hash) : !string.IsNullOrEmpty(hash)) return false;
+            }
+            return true;
+        }
     }
     [Serializable] public sealed class ManagedMission { public string id = null!; public ManagedDefinition definition = null!; }
     [Serializable] public sealed class ManagedDefinition { public string name = null!, briefing = null!; public ManagedProp[] props = null!; public int durationSeconds; }

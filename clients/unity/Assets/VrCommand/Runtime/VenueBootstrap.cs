@@ -95,7 +95,11 @@ namespace VrCommand.Unity
             {
                 networkManager.ConnectionApprovalCallback = ApproveConnection;
                 yield return RefreshManagement();
-                if (!managementReady) { status = "CONTROL DESK CONNECTION FAILED"; yield break; }
+                if (!managementReady)
+                {
+                    if (status == "WAITING FOR CONTROL DESK") status = "CONTROL DESK CONNECTION FAILED";
+                    yield break;
+                }
                 var telemetryReady = true;
                 try
                 {
@@ -227,6 +231,12 @@ namespace VrCommand.Unity
                     status = "MR REQUIRES A DEDICATED GAME SERVER";
                     yield break;
                 }
+                if (snapshot.environment.mode == "MR" && snapshot.roomAlignment?.Covers(snapshot.roomIds) != true)
+                {
+                    status = "MR REQUIRES PINNED ROOM ALIGNMENT FILES";
+                    Debug.LogError(status);
+                    yield break;
+                }
                 var valid = true;
                 try { combatAuthority.ApplyManagement(snapshot); }
                 catch (Exception exception) when (exception is ArgumentException || exception is InvalidOperationException || exception is System.IO.IOException)
@@ -346,7 +356,7 @@ namespace VrCommand.Unity
 
         private IEnumerator ValidateAdmission(ulong clientId, byte[] payload, NetworkManager.ConnectionApprovalResponse response, bool preflight = false)
         {
-            if (!managementReady || !ArenaConnectionProfile.TryDecode(payload, out var ticket, out var requestedRoom))
+            if (!managementReady || !ArenaConnectionProfile.TryDecode(payload, out var ticket, out var requestedRoom, out var requestedHash))
             {
                 Reject(response);
                 yield break;
@@ -378,7 +388,8 @@ namespace VrCommand.Unity
                     || (!preflight && (!networkManager.IsListening || !networkManager.PendingClients.ContainsKey(clientId)))
                     || !Array.Exists(latestSnapshot.players, player => player.id == approval.playerId && player.admissionId == approval.admissionId
                         && player.roomId == approval.roomId && player.seat == approval.seat
-                        && ArenaConnectionProfile.Matches(latestSnapshot.environment.mode == "MR", requestedRoom, approval.roomId, player.headset))
+                        && ArenaConnectionProfile.Matches(latestSnapshot.environment.mode == "MR", requestedRoom, approval.roomId,
+                            player.headset, requestedHash, latestSnapshot.roomAlignment?.ForRoom(approval.roomId)))
                     || admitted.Count >= 25)
                 { Reject(response); yield break; }
                 foreach (var existing in admitted.Values)

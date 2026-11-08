@@ -1,20 +1,28 @@
+using System.Text.Json.Serialization;
+
 namespace VrCommand.Core;
 
 public enum SessionMode { Independent, Linked }
 public enum HeadsetKind { ViveXr, Quest3 }
 public enum SessionState { Preparing, Running, Paused, Ended }
-public enum ControlAction { Unspecified, Begin, Pause, Resume, End, SetEnvironment, SetEnemies, SetMissionClock }
+public enum ControlAction { Unspecified, Begin, Pause, Resume, End, SetEnvironment, SetEnemies, SetMissionClock, SetRoomAlignment }
 public record MissionClockSettings(bool AutoEnd);
 public record MissionClockStatus(int Version, bool AutoEnd, long ConfiguredAtSequence);
 public record MissionClockExpiration(Guid StreamId, long ObservedSequence, long Tick);
+public sealed record RoomAlignmentPins(string? Room1 = null, string? Room2 = null, string? Room3 = null, string? Room4 = null, string? Room5 = null)
+{
+    internal string? ForRoom(int room) => room switch { 1 => Room1, 2 => Room2, 3 => Room3, 4 => Room4, 5 => Room5, _ => null };
+}
 public record Player(Guid Id, string Name, int RoomId, HeadsetKind Headset, int Seat = -1, Guid AdmissionId = default);
 public record SessionView(Guid Id, SessionMode Mode, int[] RoomIds, Mission Mission,
     DateTimeOffset CreatedAtUtc, DateTimeOffset? StartedAtUtc, DateTimeOffset? EndedAtUtc,
     SessionState State, Player[] Players, EnvironmentSettings Environment, EnemySettings Enemies, long Sequence,
-    CombatStreamView? CombatStream = null, MissionClockStatus? MissionClock = null);
+    CombatStreamView? CombatStream = null, MissionClockStatus? MissionClock = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomAlignmentPins? RoomAlignment = null);
 public record RoomView(int Id, int Capacity, Guid? SessionId, int PlayerCount);
 public record ControlCommand(Guid CommandId, ControlAction Action, EnvironmentSettings? Environment = null,
-    EnemySettings? Enemies = null, long? ExpectedSequence = null, MissionClockSettings? MissionClock = null, MissionClockExpiration? ClockExpiration = null);
+    EnemySettings? Enemies = null, long? ExpectedSequence = null, MissionClockSettings? MissionClock = null, MissionClockExpiration? ClockExpiration = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomAlignmentPins? RoomAlignment = null);
 public record CommandReceipt(Guid CommandId, long AppliedAtSequence, bool Duplicate, SessionView Session);
 public sealed class MixedRealityNotReadyException(ControlAction action) : InvalidOperationException(action == ControlAction.Resume
     ? "MR resume requires a fresh paused snapshot with tracked Quest 3 poses for living players."

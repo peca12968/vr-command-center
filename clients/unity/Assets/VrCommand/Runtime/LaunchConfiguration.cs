@@ -26,7 +26,9 @@ namespace VrCommand.Unity
         [NonSerialized] internal RoomFloorPlan AlignmentPlan;
 
         public bool IsServer => role == "Server" || role == "Host";
-        internal byte[] AdmissionPayload() => ArenaConnectionProfile.Encode(joinTicket, requestMixedReality ? AlignmentPlan.RoomId : 0);
+        internal byte[] AdmissionPayload() => requestMixedReality
+            ? ArenaConnectionProfile.Encode(joinTicket, AlignmentPlan.RoomId, roomAlignmentSha256)
+            : ArenaConnectionProfile.Encode(joinTicket, 0);
         public string ServerListenAddress
         {
             get

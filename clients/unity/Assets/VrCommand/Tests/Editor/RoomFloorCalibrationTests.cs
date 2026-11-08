@@ -1,6 +1,7 @@
 using System.IO;
 using NUnit.Framework;
 using UnityEngine;
+using VrCommand.Simulation;
 
 namespace VrCommand.Unity.Tests
 {
@@ -59,6 +60,18 @@ namespace VrCommand.Unity.Tests
             Capture(A); Capture(B); Capture(C);
             Assert.That(calibration.Ready, Is.False);
             Assert.That(calibration.Hint, Does.Contain("ANOTHER ROOM"));
+        }
+
+        [Test]
+        public void MrConnectionDeclaresTheRoomAndTheLocallyCheckedFileHash()
+        {
+            var hash = new string('a', 64);
+            var configuration = new LaunchConfiguration { joinTicket = "v2.opaque", requestMixedReality = true,
+                roomAlignmentSha256 = hash, AlignmentPlan = RoomFloorPlan.Parse(Export) };
+            Assert.IsTrue(ArenaConnectionProfile.TryDecode(configuration.AdmissionPayload(), out var ticket, out var room, out var declaredHash));
+            Assert.AreEqual("v2.opaque", ticket);
+            Assert.IsTrue(ArenaConnectionProfile.Matches(true, room, 5, "Quest3", declaredHash, hash));
+            Assert.IsFalse(ArenaConnectionProfile.Matches(true, room, 5, "Quest3", declaredHash, new string('b', 64)));
         }
 
         [Test]

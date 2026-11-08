@@ -1,4 +1,5 @@
 using System.Text.Json;
+using VrCommand.Simulation;
 
 namespace VrCommand.Core;
 
@@ -53,6 +54,8 @@ internal static class SessionProjection
             throw new ArgumentException("Enemies is only allowed for SetEnemies.");
         if ((command.Action == ControlAction.SetMissionClock) != (command.MissionClock is not null))
             throw new ArgumentException("Mission clock settings are required only for SetMissionClock.");
+        if ((command.Action == ControlAction.SetRoomAlignment) != (command.RoomAlignment is not null))
+            throw new ArgumentException("Room alignment pins are required only for SetRoomAlignment.");
         if (command.ClockExpiration is { } expiration && (command.Action != ControlAction.End || expiration.StreamId == Guid.Empty
             || expiration.ObservedSequence < 1 || expiration.Tick < 0))
             throw new ArgumentException("Clock expiration requires an End and valid source evidence.");
@@ -111,10 +114,16 @@ internal static class SessionProjection
                 break;
             case SessionEventKind.ControlApplied:
                 AccessPolicy.Manage(actor, current.Mode, current.RoomIds);
-                var clockCommand = entry.Read<ControlCommand>();
-                if ((clockCommand.MissionClock is not null || clockCommand.ClockExpiration is not null) && entry.SchemaVersion < 7)
+                var command = entry.Read<ControlCommand>();
+                if ((command.MissionClock is not null || command.ClockExpiration is not null) && entry.SchemaVersion < 7)
                     throw new InvalidDataException("Mission clocks require event schema 7.");
-                if (clockCommand.ClockExpiration is { } expiration)
+                if (command.Action == ControlAction.SetRoomAlignment)
+                {
+                    if (entry.SchemaVersion < 7) throw new InvalidDataException("Room alignment pins require event schema 7.");
+                    if (actor.Role is not (OperatorRole.Master or OperatorRole.Internal))
+                        throw new AccessDeniedException("Only the master may pin room alignment files.");
+                }
+                if (command.ClockExpiration is { } expiration)
                 {
                     if (actor != SessionManager.ClockIdentity) throw new AccessDeniedException("Only the internal mission clock may expire a session.");
                     SessionManager.ValidateClockExpiration(current, expiration);
@@ -178,7 +187,22 @@ internal static class SessionProjection
             ControlAction.SetMissionClock when session.State == SessionState.Preparing
                 && (!command.MissionClock!.AutoEnd || session.CombatStream?.MissionClockVersion == 1)
                 => session with { MissionClock = new(1, command.MissionClock!.AutoEnd, sequence) },
+            ControlAction.SetRoomAlignment => PinAlignment(session, command.RoomAlignment!),
             _ => throw new InvalidOperationException($"Cannot apply {command.Action} while {session.State} or without players.")
         };
+    }
+
+    private static SessionView PinAlignment(SessionView session, RoomAlignmentPins pins)
+    {
+        if (session.Environment.Mode != ExperienceMode.MR || session.State != SessionState.Preparing
+            || session.CombatStream is not null || session.RoomAlignment is not null)
+            throw new InvalidOperationException("Room alignment files can be pinned once while an MR session is Preparing and has no game source.");
+        foreach (var room in Enumerable.Range(1, SessionManager.RoomCount))
+        {
+            var hash = pins.ForRoom(room);
+            if (session.RoomIds.Contains(room) ? !ArenaConnectionProfile.IsAlignmentHash(hash) : hash is not null)
+                throw new ArgumentException("Provide one lowercase SHA-256 for each room in the session, and omit other rooms.");
+        }
+        return session with { RoomAlignment = pins };
     }
 }

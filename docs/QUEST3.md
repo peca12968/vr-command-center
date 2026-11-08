@@ -197,6 +197,29 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueManifest .\venue.json
 
 此指令只讀取檔案。票券效期依本機 UTC 判斷，簽章和當前名冊仍由遊戲伺服器核對。預檢後，請解出各席位的 JSON，照原單機指令部署，並為同一房使用預檢清單指定的校正檔。裝置安裝、實體校正、MR 透視與 UDP 可達性需在現場驗收。
 
+### 啟動 MR 伺服器前鎖定校正檔
+
+遊戲 0.48.0 要求主控在場次為 Preparing、尚未啟動遊戲伺服器時，鎖定該場所有房間的校正檔 SHA-256。使用原本下載的校正 JSON 計算雜湊，也可從五房預檢結果取出對應值。玩家部署須使用相同檔案。即使 JSON 欄位值相同，重新排版或改寫檔案也會改變雜湊。
+
+以下示範單房 3。`$api` 填管理服務網址，`$sessionId` 填實際場次 ID，`$headers` 使用該實例主控憑證的 `Authorization` 標頭。
+
+```powershell
+$session = Invoke-RestMethod "$api/api/sessions/$sessionId" -Headers $headers
+$hash = (Get-FileHash -LiteralPath .\room-3-floor-alignment.json -Algorithm SHA256).Hash.ToLowerInvariant()
+$command = @{
+  commandId = [guid]::NewGuid().ToString()
+  action = 'SetRoomAlignment'
+  expectedSequence = $session.sequence
+  roomAlignment = @{ room3 = $hash }
+}
+Invoke-RestMethod "$api/api/sessions/$sessionId/commands" -Method Post -Headers $headers `
+  -ContentType 'application/json' -Body ($command | ConvertTo-Json)
+```
+
+五房全連線須在同一次命令填齊 `room1` 至 `room5`；獨立模式則對每場只填它自己的房間。收到回條後核對 `session.roomAlignment`，再啟動伺服器。相同命令可重送取得原回條。若鎖定錯檔，結束該場並以正確檔案建立新場。
+
+頭盔載入時會核對校正檔雜湊，入場時伺服器比對主控鎖定值及原票券席位。遊戲使用 NGO 協定 31，升級需配套更新管理服務、遊戲伺服器及玩家端。場地標記實際位置、OpenXR 追蹤與透視仍需現場核對。 [版本相容性](EXTERNAL_CLIENTS.md#遊戲版本相容性)
+
 ### Quest 3 透視呈現
 
 Unity 0.43.0 的 Quest 開發版可用 `-Passthrough` 在已開啟的 VR 場次中使用 Meta 的透視合成層。部署須附同一房間的校正檔。玩家進入 Preparing 或 Paused 後量測 A、B、C，並依提示回到遊戲起點。

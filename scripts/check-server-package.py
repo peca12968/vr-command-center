@@ -61,7 +61,7 @@ def main():
     p.add_argument('--check-room-reports',action='store_true',help='Verify scoped Linked CSVs and the ZIP against the full sealed native report')
     p.add_argument('--check-room-combat',action='store_true',help='Require actual enemy damage on every original admission and reconcile each replay frame and final report')
     p.add_argument('--check-interrupted-replay', action='store_true', help='Play the saved native prefix after the owned launcher is killed')
-    p.add_argument('--check-managed-mr', action='store_true', help='Verify a real Preparing MR server rejects desktop admission and seals without starting combat')
+    p.add_argument('--check-managed-mr', action='store_true', help='Verify the MR alignment startup gate, desktop rejection and Preparing seal')
     p.add_argument('--check-live-reinforcement', action='store_true', help='Verify a native server accepts only supported live enemy targets and records the result')
     args=p.parse_args()
     if os.name!='nt':p.error('Actual Windows processes required')
@@ -523,7 +523,29 @@ def main():
             if player_folder:
                 for entry in entries:verify_delivery(entry,[c for c in round_clients if c['sessionId']==entry['sessionId']])
         if args.check_managed_mr:
-            mr=launch(create([1],'managed-mr',experience='MR'),'managed-mr')
+            state=create([1],'managed-mr',experience='MR')
+            session='/api/sessions/'+state['id']
+            unpinned_file=runtime/'mr-unpinned.json';unpinned_log=runtime/'mr-unpinned.log'
+            telemetry=runtime/'mr-unpinned-telemetry'
+            unpinned_file.write_text(json.dumps(config(state['id'],telemetryOrigin='GameServer',telemetryDirectory=str(telemetry))),encoding='utf-8')
+            child=subprocess.Popen([str(folder/'Runtime/VrCommand.exe'),'-batchmode','-nographics','-job-worker-count','2',
+                '-logFile',str(unpinned_log),'--vr-config',str(unpinned_file)],cwd=runtime,env=env,creationflags=subprocess.CREATE_NO_WINDOW)
+            try:
+                wait(lambda: unpinned_log.exists() and 'MR REQUIRES PINNED ROOM ALIGNMENT FILES' in unpinned_log.read_text(encoding='utf-8',errors='replace'),30,'MR startup refuses missing pins')
+                check('VR_NETWORK_STARTED' not in unpinned_log.read_text(encoding='utf-8',errors='replace')
+                      and not telemetry.exists() and request(session)==state,'unpinned MR server does not start networking, attach, or write telemetry')
+            finally:
+                if child.poll() is None: child.terminate()
+                child.wait(timeout=15)
+            markers=[{'room':{'x':x,'z':z},'tracking':{'x':x,'z':z}} for x,z in [(-2,-2),(2,-2),(-2,2)]]
+            alignment=request('/api/room-alignment',{'roomId':1,'markers':markers})
+            alignment_file=out/'managed-mr-room-1-alignment.json';alignment_file.write_text(json.dumps(alignment)+'\n',encoding='utf-8')
+            pin={'commandId':str(uuid.uuid4()),'action':'SetRoomAlignment','expectedSequence':state['sequence'],
+                 'roomAlignment':{'room1':package.digest(alignment_file)}}
+            pinned=request(session+'/commands',pin)
+            check(pinned['session']['roomAlignment']['room1']==pin['roomAlignment']['room1']
+                  and request(session+'/commands',pin)['duplicate'],'real control service pins the original checked room export before launch')
+            mr=launch(pinned['session'],'managed-mr')
             check(read(mr['work']/'server-config.json')['telemetryOrigin']=='GameServer','actual launcher selects GameServer telemetry for MR')
             session='/api/sessions/'+mr['sessionId'];client=player(mr,1)
             server_log=mr['work']/'server.log'

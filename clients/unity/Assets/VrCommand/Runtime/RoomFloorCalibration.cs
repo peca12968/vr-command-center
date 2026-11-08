@@ -59,10 +59,7 @@ namespace VrCommand.Unity
 
         internal static RoomFloorPlan Load(string directory, string expectedHash)
         {
-            if (expectedHash.Length != 64) throw new InvalidDataException("Invalid room alignment hash.");
-            foreach (var character in expectedHash)
-                if ((character < '0' || character > '9') && (character < 'a' || character > 'f'))
-                    throw new InvalidDataException("Invalid room alignment hash.");
+            if (!ArenaConnectionProfile.IsAlignmentHash(expectedHash)) throw new InvalidDataException("Invalid room alignment hash.");
             byte[] bytes;
             using (var input = new BinaryReader(File.OpenRead(Path.Combine(directory, "vr-room-alignment-" + expectedHash + ".json"))))
             {
