@@ -26,6 +26,7 @@ namespace VrCommand.Unity.Editor
     {
         private const string Generated = "Assets/VrCommand/Generated";
         private const string ScenePath = Generated + "/Arena.unity";
+        private const ushort ProtocolVersion = 31;
 
         [MenuItem("VR Command/Prepare Quest 3 Project")]
         public static void Prepare() => PrepareAssets(false);
@@ -54,10 +55,10 @@ namespace VrCommand.Unity.Editor
             var bootstrap = network == null ? null : network.GetComponent<VenueBootstrap>();
             var manager = network == null ? null : network.GetComponent<NetworkManager>();
             if (state == null || state.GetComponent<UnityWeatherView>() == null || bootstrap == null || manager == null
-                || bootstrap.sceneAuthority != state.GetComponent<SceneAuthority>() || (manager.NetworkConfig.ProtocolVersion < 16 || manager.NetworkConfig.ProtocolVersion > 30)
+                || bootstrap.sceneAuthority != state.GetComponent<SceneAuthority>() || (manager.NetworkConfig.ProtocolVersion < 16 || manager.NetworkConfig.ProtocolVersion > ProtocolVersion)
                 || manager.NetworkConfig.PlayerPrefab == null)
                 throw new BuildFailedException("Generated arena is incompatible. Rebuild Arena, then rebuild ALL player targets together.");
-            manager.NetworkConfig.ProtocolVersion = 31;
+            manager.NetworkConfig.ProtocolVersion = ProtocolVersion;
             RequireNetworkIdentity(state.GetComponent<NetworkObject>());
             RequireNetworkIdentity(manager.NetworkConfig.PlayerPrefab.GetComponent<NetworkObject>());
             if (PrefabUtility.SavePrefabAsset(manager.NetworkConfig.PlayerPrefab) == null)
@@ -189,7 +190,7 @@ namespace VrCommand.Unity.Editor
             var manager = network.GetComponent<NetworkManager>();
             var bootstrap = network.GetComponent<VenueBootstrap>();
             manager.NetworkConfig = new NetworkConfig { NetworkTransport = network.GetComponent<UnityTransport>(), TickRate = 30,
-                ConnectionApproval = true, EnableSceneManagement = true, ForceSamePrefabs = true, ProtocolVersion = 31 };
+                ConnectionApproval = true, EnableSceneManagement = true, ForceSamePrefabs = true, ProtocolVersion = ProtocolVersion };
             manager.NetworkConfig.PlayerPrefab = CreateAvatar(avatarMaterial, steel);
             var list = AssetDatabase.LoadAssetAtPath<NetworkPrefabsList>(Generated + "/NetworkPrefabs.asset");
             if (list == null)
