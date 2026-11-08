@@ -115,12 +115,12 @@ namespace VrCommand.Unity
                 {
                     // NGO 2.7 ignores asynchronous host approval; validate before StartHost and answer it synchronously.
                     var hostApproval = new NetworkManager.ConnectionApprovalResponse();
-                    yield return ValidateAdmission(NetworkManager.ServerClientId, Encoding.UTF8.GetBytes(configuration.joinTicket), hostApproval, true);
+                    yield return ValidateAdmission(NetworkManager.ServerClientId, configuration.AdmissionPayload(), hostApproval, true);
                     if (!hostApproval.Approved) { status = "HOST ADMISSION FAILED"; yield break; }
                 }
             }
             if (configuration.role != "Server")
-                networkManager.NetworkConfig.ConnectionData = Encoding.UTF8.GetBytes(configuration.joinTicket);
+                networkManager.NetworkConfig.ConnectionData = configuration.AdmissionPayload();
             status = "CONNECTING";
             var started = configuration.role == "Server" ? networkManager.StartServer()
                 : configuration.role == "Host" ? networkManager.StartHost() : networkManager.StartClient();
@@ -219,6 +219,11 @@ namespace VrCommand.Unity
                 try { snapshot = JsonUtility.FromJson<SessionSnapshot>(request.downloadHandler.text); }
                 catch (Exception) { }
                 if (snapshot == null || snapshot.id != configuration.sessionId || snapshot.environment == null) yield break;
+                if (snapshot.environment.mode == "MR" && (configuration.role != "Server" || configuration.telemetryOrigin != "GameServer"))
+                {
+                    status = "MR REQUIRES A DEDICATED GAME SERVER";
+                    yield break;
+                }
                 var valid = true;
                 try { combatAuthority.ApplyManagement(snapshot); }
                 catch (Exception exception) when (exception is ArgumentException || exception is InvalidOperationException || exception is System.IO.IOException)
@@ -338,12 +343,12 @@ namespace VrCommand.Unity
 
         private IEnumerator ValidateAdmission(ulong clientId, byte[] payload, NetworkManager.ConnectionApprovalResponse response, bool preflight = false)
         {
-            if (!managementReady || payload == null || payload.Length == 0 || payload.Length > 256)
+            if (!managementReady || !ArenaConnectionProfile.TryDecode(payload, out var ticket, out var requestedRoom))
             {
                 Reject(response);
                 yield break;
             }
-            var body = JsonUtility.ToJson(new TicketValidationRequest { sessionId = configuration.sessionId, ticket = Encoding.UTF8.GetString(payload) });
+            var body = JsonUtility.ToJson(new TicketValidationRequest { sessionId = configuration.sessionId, ticket = ticket });
             using (var request = new UnityWebRequest(configuration.managementApiUrl.TrimEnd('/') + "/api/player-tickets/validate", "POST"))
             {
                 request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(body));
@@ -369,7 +374,9 @@ namespace VrCommand.Unity
                     || expires <= DateTimeOffset.UtcNow
                     || (!preflight && (!networkManager.IsListening || !networkManager.PendingClients.ContainsKey(clientId)))
                     || !Array.Exists(latestSnapshot.players, player => player.id == approval.playerId && player.admissionId == approval.admissionId
-                        && player.roomId == approval.roomId && player.seat == approval.seat) || admitted.Count >= 25)
+                        && player.roomId == approval.roomId && player.seat == approval.seat
+                        && ArenaConnectionProfile.Matches(latestSnapshot.environment.mode == "MR", requestedRoom, approval.roomId, player.headset))
+                    || admitted.Count >= 25)
                 { Reject(response); yield break; }
                 foreach (var existing in admitted.Values)
                     if (existing.playerId == approval.playerId) { Reject(response); yield break; }
@@ -441,7 +448,7 @@ namespace VrCommand.Unity
                 if (fresh.role != "Client") throw new InvalidOperationException("A client reconnect cannot change server roles.");
                 var transport = (UnityTransport)networkManager.NetworkConfig.NetworkTransport;
                 transport.SetConnectionData(fresh.address, fresh.port);
-                networkManager.NetworkConfig.ConnectionData = Encoding.UTF8.GetBytes(fresh.joinTicket);
+                networkManager.NetworkConfig.ConnectionData = fresh.AdmissionPayload();
                 configuration = fresh; status = "CONNECTING"; Debrief.Clear();
                 if (!networkManager.StartClient()) status = "RECONNECT FAILED - CONTACT CONTROL DESK";
             }

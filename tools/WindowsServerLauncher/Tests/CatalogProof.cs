@@ -59,7 +59,9 @@ internal static class ServerCatalogProof
             bad = Row(1); bad.Remove("combatStream"); Reject(new object[] { bad }, "missing source field");
             bad = Row(1); bad["state"] = "future-state"; Reject(new object[] { bad }, "unknown state");
             var running = Row(1); running["state"] = "Running"; var bound = Row(2); bound["combatStream"] = new Dictionary<string, object>(); var mr = Row(3); ServerLauncher.Child(mr, "environment")["mode"] = "MR";
-            Check(ServerLauncher.Catalog.Parse(new object[] { running, bound, mr }).Count == 0, "running / bound / MR are not available choices");
+            var mrChoices = ServerLauncher.Catalog.Parse(new object[] { running, bound, mr });
+            Check(mrChoices.Count == 1 && mrChoices[0].Experience == "MR" && mrChoices[0].ToString().Contains(" · MR · "),
+                "Preparing MR appears with its own experience label while running and bound sessions stay excluded");
             var linked = Row(1); linked["mode"] = "Linked"; linked["roomIds"] = new object[] { 5, 4, 3, 2, 1 }; var all = ServerLauncher.Catalog.Parse(new object[] { linked });
             Check(all.Count == 1 && all[0].Rooms[0] == 1 && all[0].Rooms[4] == 5 && all[0].ToString().Contains("五房全連線"), "linked identity covers all five rooms");
             Check(ServerLauncher.Choice.Label("甲\n乙\u202e丙") == "甲 乙丙", "display removes control / bidi formatting only");

@@ -141,6 +141,8 @@ public sealed partial class SessionManager
             }
             if (Active().Any(s => s.Players.Any(p => p.Id == playerId)))
                 throw new InvalidOperationException("Player already belongs to a session.");
+            if (history.View.Environment.Mode == ExperienceMode.MR && headset != HeadsetKind.Quest3)
+                throw new InvalidOperationException("MR sessions currently require Quest 3 players.");
             var seat = Enumerable.Range(0, PlayersPerRoom)
                 .FirstOrDefault(candidate => !history.View.Players.Any(p => p.RoomId == roomId && p.Seat == candidate), -1);
             return Commit(history, SessionEvent.Create(sessionId, history.View.Sequence + 1,
@@ -178,7 +180,7 @@ public sealed partial class SessionManager
         }
     }
 
-    public CommandReceipt Execute(Guid id, ControlCommand command, OperatorIdentity? actor = null)
+    public CommandReceipt Execute(Guid id, ControlCommand command, OperatorIdentity? actor = null, long? readyMrSequence = null)
     {
         ArgumentNullException.ThrowIfNull(command);
         SessionProjection.ValidateCommand(command);
@@ -195,6 +197,13 @@ public sealed partial class SessionManager
             }
             if (command.ExpectedSequence.HasValue && command.ExpectedSequence != history.View.Sequence)
                 throw new InvalidOperationException("Session changed; refresh before issuing this command.");
+            if (command.Environment is { } environment && environment.Mode != history.View.Environment.Mode)
+                throw new InvalidOperationException("Experience mode is fixed when a session is created.");
+            if (command.Action == ControlAction.Begin && history.View.State == SessionState.Preparing
+                && history.View.Environment.Mode == ExperienceMode.MR
+                && (readyMrSequence != history.View.Sequence || history.View.CombatStream?.Origin != CombatOrigin.GameServer
+                    || history.View.Players.Any(player => player.Headset != HeadsetKind.Quest3)))
+                throw new InvalidOperationException("MR start requires fresh tracked Quest 3 poses for the current roster.");
             var entry = SessionEvent.Create(id, history.View.Sequence + 1, SessionEventKind.ControlApplied, command, actor);
             var updated = Commit(history, entry);
             return new(command.CommandId, entry.Sequence, false, updated);

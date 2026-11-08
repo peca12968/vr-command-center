@@ -91,5 +91,78 @@ internal static class ReadinessChecks
         store.Open(oldId, WorldRecordingHeader.Create(oldId, oldStream, "Simulation", [1], old.Props), server);
         store.Append(oldId, WorldRecordingPacket.Capture(old.World, 1, 0, manager.Get(oldId).Sequence, 0, 0, _ => new()), server);
         check(store.Readiness(oldId, room).SourceState == "UnknownCaptureTime", "Legacy capture time remains unknown rather than using API receive time");
+        CheckMixedReality(check, directory, mission, master, server);
+    }
+
+    private static void CheckMixedReality(Action<bool, string> check, string directory, Mission template, OperatorIdentity master, OperatorIdentity server)
+    {
+        var clock = new Clock { Now = DateTimeOffset.Parse("2026-10-31T08:00:00Z") };
+        var start = clock.Now;
+        var manager = new SessionManager();
+        var environment = template.Definition.Environment with { Mode = ExperienceMode.MR };
+        var mission = template with { Definition = template.Definition with { Environment = environment } };
+        var id = manager.Create(SessionMode.Linked, [1, 2, 3, 4, 5], mission, master).Id;
+        var directoryPath = Path.Combine(directory, "mr-start-world");
+        Directory.CreateDirectory(directoryPath);
+        using var store = new WorldRecordings(directoryPath, manager, clock);
+        void Reject<T>(Action action, string message) where T : Exception
+        {
+            try { action(); } catch (T) { check(true, message); return; }
+            throw new Exception(message);
+        }
+        var begin = new ControlCommand(Guid.NewGuid(), ControlAction.Begin);
+        Reject<InvalidOperationException>(() => store.ExecuteCommand(id, begin, master), "MR cannot begin before a server and live roster exist");
+        Reject<InvalidOperationException>(() => manager.Join(id, Guid.NewGuid(), "VIVE", 1, HeadsetKind.ViveXr, master), "Current MR roster requires Quest 3 support");
+        Reject<InvalidOperationException>(() => manager.OpenStream(id, new(Guid.NewGuid(), CombatOrigin.Simulation), server), "MR cannot be bound to a simulation source");
+        Reject<InvalidOperationException>(() => manager.Execute(id, new(Guid.NewGuid(), ControlAction.SetEnvironment,
+            environment with { Mode = ExperienceMode.VR }), master), "MR experience cannot be switched after reservation");
+
+        var alpha = Guid.NewGuid(); var bravo = Guid.NewGuid();
+        manager.Join(id, alpha, "Alpha", 1, HeadsetKind.Quest3, master);
+        manager.Join(id, bravo, "Bravo", 5, HeadsetKind.Quest3, master);
+        var stream = Guid.NewGuid(); manager.OpenStream(id, new(stream, CombatOrigin.GameServer), server);
+        var bridge = new ArenaSession();
+        void Refresh() => bridge.Apply(JsonSerializer.Deserialize<ManagementSnapshot>(JsonSerializer.Serialize(manager.Get(id), JsonFormat.Options),
+            new JsonSerializerOptions(JsonFormat.Options) { IncludeFields = true })!);
+        Refresh();
+        var header = WorldRecordingHeader.Create(id, stream, "GameServer", [1, 2, 3, 4, 5], bridge.Props, start.ToString("O"));
+        Reject<InvalidOperationException>(() => store.Open(id, header, server), "An MR recording cannot publish a VR header");
+        header.calibration = WorldRecordingHeader.QuestMixedRealityProfile;
+        store.Open(id, header, server);
+        WorldRecordingPacket Frame(long sequence, string rigKind = "Tracked") =>
+            WorldRecordingPacket.Capture(bridge.World, sequence, (sequence - 1) * 50, manager.Get(id).Sequence, 0, 0, player =>
+            {
+                var body = bridge.World.PlayerSnapshot(player);
+                return body.Connected ? new() { kind = rigKind, left = new(body.Head), right = new(body.Muzzle) } : new();
+            }, manager.Get(id).Environment.Weather.ToString(), manager.Get(id).Environment.Lightning);
+        store.Append(id, Frame(1), server);
+        void Track(ulong connection, Guid player, int room, double time)
+        {
+            var admission = manager.Get(id).Players.Single(value => value.Id == player).AdmissionId;
+            var head = ArenaSession.Spawn(room, 0);
+            if (!bridge.Connect(connection, player, room, 0, admission)
+                || !bridge.Pose(connection, head, head, new(0, 0, 1), time, tracked: true))
+                throw new Exception("Fixture could not supply a tracked pose.");
+        }
+        Track(1, alpha, 1, .05);
+        Reject<InvalidOperationException>(() => store.Append(id, Frame(2, "Simulated"), server), "MR recording rejects connected simulated bodies");
+        store.Append(id, Frame(2), server);
+        Reject<InvalidOperationException>(() => store.ExecuteCommand(id, begin, master), "One room's tracked pose cannot stand in for the other roster player");
+        Track(2, bravo, 5, .1);
+        store.Append(id, Frame(3), server);
+        clock.Now = start.AddMilliseconds(1601);
+        Reject<InvalidOperationException>(() => store.ExecuteCommand(id, begin, master), "Stale tracked snapshots cannot open MR");
+        clock.Now = start.AddMilliseconds(100);
+        manager.Execute(id, new(Guid.NewGuid(), ControlAction.SetEnvironment,
+            environment with { Weather = Weather.Storm, Lightning = true }), master);
+        Reject<InvalidOperationException>(() => store.ExecuteCommand(id, begin, master), "A snapshot must observe the latest MR management revision");
+        Refresh(); store.Append(id, Frame(4), server);
+        Reject<AccessDeniedException>(() => store.ExecuteCommand(id, begin, new("room1", OperatorRole.RoomController, 1)),
+            "Linked MR start remains under master control");
+        var accepted = store.ExecuteCommand(id, begin, master);
+        check(accepted.Session.State == SessionState.Running && accepted.Session.Environment is { Mode: ExperienceMode.MR, Weather: Weather.Storm, Lightning: true },
+            "Fresh tracked poses for both admitted rooms open the MR mission with the current environment");
+        clock.Now = start.AddSeconds(5);
+        check(store.ExecuteCommand(id, begin, master).Duplicate, "An accepted MR Begin retains its original idempotent receipt");
     }
 }

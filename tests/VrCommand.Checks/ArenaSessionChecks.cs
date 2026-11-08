@@ -29,7 +29,9 @@ internal static class ArenaSessionChecks
             "Mission placements use the exact shared collision geometry and rotation");
         Reject<ArgumentException>(() => adapter.Apply(new()), "Incomplete management snapshot cannot create a playable world");
         var invalid = Snapshot(); invalid.environment.mode = "MR";
-        Reject<ArgumentException>(() => adapter.Apply(invalid), "Unsupported MR mode is rejected instead of pretending to calibrate a venue");
+        Reject<InvalidOperationException>(() => adapter.Apply(invalid), "A live VR server cannot be switched into MR by a management snapshot");
+        invalid.environment.mode = "Unsupported";
+        Reject<ArgumentException>(() => adapter.Apply(invalid), "Unknown experience modes cannot initialize an arena");
         invalid = Snapshot(); invalid.mission.definition.props[0].assetId = "unknown";
         Reject<ArgumentException>(() => adapter.Apply(invalid), "Unknown assets cannot silently acquire arbitrary collision shapes");
         check(adapter.Connect(17, player, 3, 0, admission), "Validated ticket identity binds its exact room and seat to a transport connection");
@@ -38,6 +40,26 @@ internal static class ArenaSessionChecks
         var head = ArenaSession.Spawn(3, 0);
         var target = adapter.World.Snapshot().Enemies[0].Feet + new Vec3(0, .9f, 0);
         var forward = (target - head).Normalized();
+        var mixedSnapshot = Snapshot(); mixedSnapshot.environment.mode = "MR";
+        var mixed = new ArenaSession(); mixed.Apply(mixedSnapshot);
+        check(mixed.IsMixedReality && mixed.Connect(17, player, 3, 0, admission)
+            && !mixed.Pose(17, head, head, forward, 0)
+            && mixed.Pose(17, head, head, forward, 0, tracked: true)
+            && !mixed.Weapon(17, 1, false, 0),
+            "A preparing MR arena accepts bound tracked poses, rejects desktop poses and blocks weapons");
+        var original = ArenaConnectionProfile.Encode("v2.opaque", 0);
+        check(original.SequenceEqual(System.Text.Encoding.UTF8.GetBytes("v2.opaque"))
+            && ArenaConnectionProfile.TryDecode(original, out var normalTicket, out var normalRoom) && normalTicket == "v2.opaque" && normalRoom == 0,
+            "VR preserves the original opaque admission payload");
+        check(ArenaConnectionProfile.TryDecode(ArenaConnectionProfile.Encode("v2.opaque", 3), out var mrTicket, out var mrRoom)
+            && mrTicket == "v2.opaque" && ArenaConnectionProfile.Matches(true, mrRoom, 3, "Quest3")
+            && !ArenaConnectionProfile.Matches(true, mrRoom, 4, "Quest3") && !ArenaConnectionProfile.Matches(true, mrRoom, 3, "ViveXr")
+            && !ArenaConnectionProfile.Matches(true, 0, 3, "Quest3") && !ArenaConnectionProfile.Matches(false, mrRoom, 3, "Quest3"),
+            "MR admission requires the declared calibration room and Quest 3 roster for the exact MR arena");
+        check(!ArenaConnectionProfile.TryDecode(ArenaConnectionProfile.Encode("v2.opaque", 6), out _, out _)
+            && !ArenaConnectionProfile.TryDecode([255, 254], out _, out _)
+            && !ArenaConnectionProfile.TryDecode(ArenaConnectionProfile.Encode("v2." + new string('a', 254), 3), out _, out _),
+            "Malformed, oversized and out-of-range admission profiles fail closed");
         check(!adapter.Pose(99, head, head, forward, 0) && adapter.Pose(17, head, head, forward, 0),
             "Pose cannot select a player ID and requires a bound transport identity");
         check(!adapter.Weapon(17, 1, false, 0), "Preparing cannot fire even with a valid tracked pose");

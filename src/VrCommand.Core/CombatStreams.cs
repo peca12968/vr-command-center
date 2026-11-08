@@ -98,6 +98,8 @@ public sealed partial class SessionManager
                     throw new InvalidOperationException("A different stream or owner is already attached.");
                 return existing;
             }
+            if (history.View.Environment.Mode == ExperienceMode.MR && request.Origin != CombatOrigin.GameServer)
+                throw new InvalidOperationException("MR sessions require a GameServer combat stream.");
             return Commit(history, SessionEvent.Create(id, history.View.Sequence + 1, SessionEventKind.CombatStreamOpened, request, actor)).CombatStream!;
         }
     }

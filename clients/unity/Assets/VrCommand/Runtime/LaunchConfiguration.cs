@@ -3,6 +3,7 @@ using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using UnityEngine;
+using VrCommand.Simulation;
 
 namespace VrCommand.Unity
 {
@@ -21,9 +22,11 @@ namespace VrCommand.Unity
         public string telemetryDirectory = "";
         public string roomAlignmentSha256 = "";
         public bool questPassthrough;
+        public bool requestMixedReality;
         [NonSerialized] internal RoomFloorPlan AlignmentPlan;
 
         public bool IsServer => role == "Server" || role == "Host";
+        internal byte[] AdmissionPayload() => ArenaConnectionProfile.Encode(joinTicket, requestMixedReality ? AlignmentPlan.RoomId : 0);
         public string ServerListenAddress
         {
             get
@@ -68,6 +71,8 @@ namespace VrCommand.Unity
             }
             if (config.questPassthrough && (Application.platform != RuntimePlatform.Android || config.AlignmentPlan == null))
                 throw new InvalidOperationException("Quest passthrough requires a checked room alignment file on an Android client.");
+            if (config.requestMixedReality && !config.questPassthrough)
+                throw new InvalidOperationException("MR admission requires the Quest passthrough profile.");
             return config;
         }
     }

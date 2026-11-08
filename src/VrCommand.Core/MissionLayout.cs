@@ -8,7 +8,7 @@ public record MissionLayoutReport(int Version, string Profile, string RulesVersi
     float RoomHalfSize, float PlayerRadius, LayoutSpawn[] Spawns, int? EnemyCapacityPerRoom, int RequestedEnemiesPerRoom,
     int TotalIssueCount, bool Truncated, ArenaLayoutIssue[] Issues, int[] InvalidProps, LayoutRoutePreview? RoutePreview = null);
 
-public sealed class MissionLayoutRejectedException(MissionLayoutReport report) : ArgumentException("VR layout is not startable; inspect the layout report and save a corrected mission revision.")
+public sealed class MissionLayoutRejectedException(MissionLayoutReport report) : ArgumentException("Arena layout is not startable; inspect the layout report and save a corrected mission revision.")
 { public MissionLayoutReport Report { get; } = report; }
 
 public static class MissionLayout
@@ -23,14 +23,12 @@ public static class MissionLayout
         if (!Enum.IsDefined(request.ExperienceMode) || !Enum.IsDefined(request.Mode) || request.EnemyCount is < 0 or > 100
             || request.Props is null || request.Props.Length > 500) throw new ArgumentException("Invalid layout request.");
         var spawns = Enumerable.Range(0, 5).Select(seat => { var point = ArenaSession.Spawn(3, seat); return new LayoutSpawn(seat, point.X, point.Z); }).ToArray();
-        if (request.ExperienceMode != ExperienceMode.VR)
-            return new(ArenaLayout.Version, "vr-room-v1", "0.8.0", request.Mode, false, null, ArenaLayout.RoomHalfSize, ArenaWalkSurface.Radius,
-                spawns, null, 0, 0, false, [], []);
         var props = request.Props.Select(prop => prop is null ? null! : new ManagedProp { assetId = prop.AssetId,
             position = prop.Position is null ? null! : new ManagedPosition { x = prop.Position.X, y = prop.Position.Y, z = prop.Position.Z }, yawDegrees = prop.YawDegrees }).ToArray();
         var result = ArenaLayout.Inspect(props, request.EnemyCount, request.Mode == SessionMode.Linked ? 5 : 1);
         var routes = includeRoutes && result.Valid ? LayoutWalkways.Preview(props, spawns) : null;
-        return new(ArenaLayout.Version, "vr-room-v1", "0.8.0", request.Mode, true, result.Valid, ArenaLayout.RoomHalfSize, ArenaWalkSurface.Radius,
+        return new(ArenaLayout.Version, request.ExperienceMode == ExperienceMode.MR ? "mr-room-v1" : "vr-room-v1",
+            "0.8.0", request.Mode, true, result.Valid, ArenaLayout.RoomHalfSize, ArenaWalkSurface.Radius,
             spawns, result.EnemyCapacityPerRoom, result.RequestedEnemiesPerRoom, result.IssueCount, result.Truncated, result.Issues, result.InvalidProps, routes);
     }
     internal static void RequireNewStart(MissionDraft definition, SessionMode mode)

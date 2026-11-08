@@ -1,6 +1,6 @@
 const $ = id => document.getElementById(id);
 const labels = {
-  InvalidProp: '座標或角度不是有效數字', UnsupportedAsset: '目前 VR 場地只支援沙包與油桶',
+  InvalidProp: '座標或角度不是有效數字', UnsupportedAsset: '目前場地只支援沙包與油桶',
   NotFloorLevel: '物件必須放在地面（Y=0）', OutsideRoom: '旋轉後的包圍盒超出 12 × 12 公尺場地',
   YawOutOfRange: '旋轉角度須在 -360° 至 360°，請輸入等價的單圈角度',
   Overlap: '兩個物件的平面包圍盒重疊', SpawnBlocked: '物件堵住出生位的預留空間',
@@ -8,7 +8,7 @@ const labels = {
 };
 function text(node, value) { node.textContent = value; }
 function accept(report, mode) {
-  if (report?.version !== 1 || report.profile !== 'vr-room-v1' || report.rulesVersion !== '0.8.0' || report.mode !== mode
+  if (report?.version !== 1 || !['vr-room-v1', 'mr-room-v1'].includes(report.profile) || report.rulesVersion !== '0.8.0' || report.mode !== mode
     || !Array.isArray(report.issues) || !Array.isArray(report.invalidProps) || !Array.isArray(report.spawns)) throw new Error('不支援的場地檢查版本或模式。');
   return report;
 }
@@ -52,8 +52,8 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
     }
     if (!report) { text(summary, message); summary.dataset.status = 'unknown'; return; }
     summary.dataset.status = !report.applies ? 'not-applicable' : report.canStart ? 'valid' : 'invalid';
-    text(summary, !report.applies ? '此檢查只適用目前 VR 場地；MR 場地與硬體校正尚未驗證。'
-      : report.canStart ? `場地檢查通過 · 每房初始敵軍候選容量 ${report.enemyCapacityPerRoom} · 需求 ${report.requestedEnemiesPerRoom}`
+    text(summary, !report.applies ? '此場次沒有可用的場地檢查。'
+      : report.canStart ? `${report.profile === 'mr-room-v1' ? 'MR 虛擬配置檢查通過，實體場地另行對位' : '場地檢查通過'} · 每房初始敵軍候選容量 ${report.enemyCapacityPerRoom} · 需求 ${report.requestedEnemiesPerRoom}`
         : `場地有 ${report.totalIssueCount} 個問題，新開 VR 場次前須修正。`);
     for (const issue of report.issues) {
       const item = document.createElement('li');

@@ -1,5 +1,7 @@
 using VrCommand.Core;
 
+using VrCommand.Simulation;
+
 namespace VrCommand.Api;
 
 public record PlayerReadiness(Guid PlayerId, Guid AdmissionId, int RoomId, int Seat, string State, string RigKind, bool CanParticipate);
@@ -11,6 +13,25 @@ public record RoomReadiness(int RoomId, Guid? SessionId, long SessionSequence, i
 
 public sealed partial class WorldRecordings
 {
+    public CommandReceipt ExecuteCommand(Guid id, ControlCommand command, OperatorIdentity actor)
+    {
+        if (command.Action != ControlAction.Begin) return manager.Execute(id, command, actor);
+        lock (gate)
+        {
+            var current = manager.Get(id, actor);
+            AccessPolicy.Manage(actor, current.Mode, current.RoomIds);
+            if (current.Environment.Mode != ExperienceMode.MR || current.State != SessionState.Preparing)
+                return manager.Execute(id, command, actor);
+
+            var report = Readiness(id, actor);
+            var ready = report.SourceState == "Fresh" && report.Origin == "GameServer"
+                && report.ObservedSequence == current.Sequence && report.SessionSequence == current.Sequence
+                && report.Players.Length > 0 && report.Players.All(player => player.CanParticipate && player.RigKind == "Tracked")
+                && Info(id, actor).Header.calibration == WorldRecordingHeader.QuestMixedRealityProfile;
+            return manager.Execute(id, command, actor, ready ? current.Sequence : null);
+        }
+    }
+
     private static void RequireReadinessActor(OperatorIdentity actor)
     {
         AccessPolicy.Validate(actor);
@@ -37,8 +58,7 @@ public sealed partial class WorldRecordings
         }).ToArray();
     }
 
-    // A scoped, read-only view of accepted snapshots. This is not transport presence,
-    // device attestation, a new Begin policy, or a replacement for the pose channel.
+    // A scoped view of accepted snapshots. The MR start policy requires the exact current roster revision.
     public SessionReadiness Readiness(Guid id, OperatorIdentity actor)
     {
         RequireReadinessActor(actor);

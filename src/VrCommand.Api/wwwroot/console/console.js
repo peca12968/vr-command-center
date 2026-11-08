@@ -238,6 +238,10 @@ function applyPermissions() {
   for (const id of ['environment-fields', 'enemies-fields']) $(id).disabled = locked || !manages() || ended || !session;
   $('clock-fields').disabled = locked || !manages() || session?.state !== 'Preparing' || session?.combatStream?.missionClockVersion !== 1;
   $('join-fields').disabled = locked || session?.state !== 'Preparing';
+  const mixedReality = session?.environment.mode === 'MR';
+  $('player-headset').querySelector('option[value="ViveXr"]').disabled = mixedReality;
+  if (mixedReality) $('player-headset').value = 'Quest3';
+  $('mr-start-requirement').hidden = !mixedReality || session?.state !== 'Preparing';
   $('ticket-fields').disabled = locked || ended || !session;
   $('download-room-tickets').disabled = locked || ended || !session || !$('ticket-room').value;
   connections.update();
@@ -301,7 +305,7 @@ function renderSession(statistics, events) {
     const item = element('li'); item.append(element('span', time(event.recordedAtUtc), 'event-time'), element('span', `#${event.sequence} ${eventNames[event.kind] || event.kind}`), element('span', event.actor?.id || '舊版紀錄', 'event-actor')); return item;
   }));
 }
-function environment(prefix) { return { mode: $(prefix + '-mode').value, weather: $(prefix + '-weather').value, timeOfDay: $(prefix + '-time').value, lightning: $(prefix + '-lightning').checked }; }
+function environment(prefix) { return { mode: prefix === 'live' ? state.session.environment.mode : $('draft-mode').value, weather: $(prefix + '-weather').value, timeOfDay: $(prefix + '-time').value, lightning: $(prefix + '-lightning').checked }; }
 function enemies(prefix) { return { count: Number($(prefix + '-count').value), behavior: $(prefix + '-behavior').value, autoAttack: $(prefix + '-auto-attack').checked }; }
 function setEnvironment(prefix, value) { $(prefix + '-mode').value = value.mode; $(prefix + '-weather').value = value.weather; $(prefix + '-time').value = value.timeOfDay; $(prefix + '-lightning').checked = value.lightning; }
 function setEnemies(prefix, value) { $(prefix + '-count').value = value.count; $(prefix + '-behavior').value = value.behavior; $(prefix + '-auto-attack').checked = value.autoAttack; }

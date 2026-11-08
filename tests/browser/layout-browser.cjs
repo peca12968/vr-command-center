@@ -10,6 +10,8 @@ module.exports = async function layoutBrowser({ context, api, tokens, base, miss
     props: [prop('barrel', 0, -3), prop('sandbag', 5.5, 2, 45), prop('barrel', 2, 2), prop('barrel', 2, 2)] }, 'Master', 201);
   const barricade = await api('/missions', 'POST', { ...mission.definition, name: '場地通路・連續沙包',
     props: [-5, -3, -1, 1, 3, 5].map(x => prop('sandbag', x, -1)) }, 'Master', 201);
+  const mr = await api('/missions', 'POST', { ...mission.definition, name: 'MR 開場檢查',
+    environment: { ...mission.definition.environment, mode: 'MR' }, props: [] }, 'Master', 201);
   const status = (prefix, value) => editor.waitForFunction(({ prefix, value }) => document.querySelector(`#${prefix}-layout-summary`).dataset.status === value, { prefix, value });
   async function set(id, value) { await editor.locator('#' + id).fill(String(value)); await editor.locator('#' + id).blur(); }
   async function launch(id) { await editor.locator('#launch-mission').selectOption(id); }
@@ -100,6 +102,39 @@ module.exports = async function layoutBrowser({ context, api, tokens, base, miss
     await editor.locator('#launch-layout-route-summary').filter({ hasText: '五個出生位皆有' }).waitFor();
     check(await editor.locator('#launch-mission').inputValue() === openedId && (await api(`/missions/${barricade.id}/layout`)).routePreview.seats.every(seat => !seat.path.length),
       'Saving an opening updates only the new revision and its matching launch preview');
+    await editor.locator('#tab-operations').click();
+    const vacant = (await api('/rooms')).find(room => !room.sessionId);
+    await editor.locator('#launch-mode').selectOption('Independent');
+    await editor.locator('#launch-room').selectOption(String(vacant.id));
+    await launch(mr.id);
+    await editor.locator('#launch-layout-summary').filter({ hasText: 'MR 虛擬配置檢查通過' }).waitFor();
+    const created = editor.waitForResponse(response => response.url().endsWith('/api/sessions')
+      && response.request().method() === 'POST' && response.status() === 201);
+    await editor.locator('#create-session-form button').click();
+    const mixed = await (await created).json();
+    try {
+      await editor.locator('#mr-start-requirement').waitFor();
+      const controls = await editor.evaluate(() => ({
+        modeLocked: document.querySelector('#live-mode').disabled,
+        viveLocked: document.querySelector('#player-headset option[value=ViveXr]').disabled,
+        headset: document.querySelector('#player-headset').value
+      }));
+      check(mixed.environment.mode === 'MR' && controls.modeLocked && controls.viveLocked && controls.headset === 'Quest3',
+        'Operator creates the saved MR mode and sees the locked mode, Quest roster and tracking requirement ' + JSON.stringify(controls));
+      await editor.locator('#player-name').fill('Quest readiness fixture');
+      await editor.locator('#join-form button').click();
+      await editor.waitForFunction(() => !document.querySelector('[data-command=Begin]').disabled);
+      const rejected = editor.waitForResponse(response => response.url().endsWith(`/api/sessions/${mixed.id}/commands`)
+        && response.request().method() === 'POST' && response.status() === 409);
+      await editor.locator('[data-command=Begin]').click(); await rejected;
+      const state = await api(`/sessions/${mixed.id}`);
+      check(state.state === 'Preparing' && state.players.length === 1 && state.players[0].headset === 'Quest3',
+        'MR Begin without a fresh tracked pose leaves the original roster and Preparing phase intact');
+      await editor.screenshot({ path: path.join(screenshots, 'layout-mr-start-gate.png'), fullPage: true });
+    } finally {
+      await api(`/sessions/${mixed.id}/commands`, 'POST', { action: 'End', commandId: randomUUID() });
+    }
+    await launch(openedId);
     let releaseLogout, observedLogout;
     const logoutGate = new Promise(resolve => { releaseLogout = resolve; }), logoutRequested = new Promise(resolve => { observedLogout = resolve; });
     await editor.route(`**/api/missions/${openedId}/layout?*`, async route => { const response = await route.fetch(); observedLogout(); await logoutGate; await route.fulfill({ response }); });

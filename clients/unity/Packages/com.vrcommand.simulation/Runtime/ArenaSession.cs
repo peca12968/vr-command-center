@@ -25,7 +25,7 @@ namespace VrCommand.Simulation
     [Serializable] public sealed class ManagedPosition { public float x, y, z; public Vec3 Vector => new Vec3(x, y, z); }
     [Serializable] public sealed class ManagedEnvironment { public string mode = null!, weather = null!, timeOfDay = null!; public bool lightning; }
     [Serializable] public sealed class ManagedEnemies { public int count; public string behavior = null!; public bool autoAttack; }
-    [Serializable] public sealed class ManagedPlayer { public string id = null!, admissionId = null!; public int roomId, seat; }
+    [Serializable] public sealed class ManagedPlayer { public string id = null!, admissionId = null!, headset = null!; public int roomId, seat; }
 
     // Single-threaded server adapter. Transport authenticates a ticket before binding its connection here.
     public sealed class ArenaSession
@@ -48,6 +48,7 @@ namespace VrCommand.Simulation
         private int[] roomIds = null!;
         private WorldProp[] props = null!;
         public ArenaWorld World { get; private set; } = null!;
+        public bool IsMixedReality { get; private set; }
         public WorldProp[] Props => props == null ? new WorldProp[0] : (WorldProp[])props.Clone();
         public bool ClockDue => World != null && clockAutoEnd && MissionClock.Due(World.TickNumber, missionDuration);
 
@@ -66,7 +67,7 @@ namespace VrCommand.Simulation
             if (snapshot == null || !Guid.TryParse(snapshot.id, out var id) || id == Guid.Empty || snapshot.sequence < 1
                 || snapshot.mission == null || !Guid.TryParse(snapshot.mission.id, out var mission) || mission == Guid.Empty
                 || snapshot.mission.definition == null || snapshot.mission.definition.props == null
-                || snapshot.mission.definition.props.Length > 500 || snapshot.environment == null || snapshot.environment.mode != "VR"
+                || snapshot.mission.definition.props.Length > 500 || snapshot.environment == null || snapshot.environment.mode is not ("VR" or "MR")
                 || snapshot.enemies == null || snapshot.enemies.count < 0 || snapshot.enemies.count > 100
                 || !Enum.TryParse<AiBehavior>(snapshot.enemies.behavior, out var behavior) || !Enum.IsDefined(typeof(AiBehavior), behavior)
                 || !Enum.TryParse<WorldPhase>(snapshot.state, out var phase) || !Enum.IsDefined(typeof(WorldPhase), phase)
@@ -75,10 +76,11 @@ namespace VrCommand.Simulation
                 || snapshot.roomIds.Any(room => room < 1 || room > 5)
                 || !new[] { "Clear", "Rain", "Fog", "Storm" }.Contains(snapshot.environment.weather)
                 || !new[] { "Day", "Night" }.Contains(snapshot.environment.timeOfDay))
-                throw new ArgumentException("Unsupported or incomplete VR mission snapshot.");
+                throw new ArgumentException("Unsupported or incomplete arena mission snapshot.");
+            var mixedReality = snapshot.environment.mode == "MR";
             if (World != null && (id != sessionId || mission != missionId || snapshot.sequence < sequence
-                || !snapshot.roomIds.OrderBy(room => room).SequenceEqual(roomIds)))
-                throw new InvalidOperationException("The running server cannot switch session, mission or rewind management state.");
+                || mixedReality != IsMixedReality || !snapshot.roomIds.OrderBy(room => room).SequenceEqual(roomIds)))
+                throw new InvalidOperationException("The running server cannot switch session, mission, experience mode or rewind management state.");
             if ((World == null && phase != WorldPhase.Preparing) || (World != null && World.Phase == WorldPhase.Ended && phase != WorldPhase.Ended))
                 throw new InvalidOperationException("Start the game server during Preparing; ended worlds cannot restart.");
             var clock = snapshot.missionClock; var autoEnd = clock?.autoEnd == true;
@@ -151,7 +153,7 @@ namespace VrCommand.Simulation
                 if (rebuilt) connections.Remove(connection); // The replacement world already omits this body.
                 else Disconnect(connection);
             }
-            roster = nextRoster; sessionId = id; missionId = mission; sequence = snapshot.sequence;
+            roster = nextRoster; sessionId = id; missionId = mission; sequence = snapshot.sequence; IsMixedReality = mixedReality;
             clockAutoEnd = autoEnd; missionDuration = duration;
             if (World.Phase == WorldPhase.Ended)
             { if (phase != WorldPhase.Ended) throw new InvalidOperationException("World is already ended."); return; }
@@ -194,8 +196,9 @@ namespace VrCommand.Simulation
             if (World.Phase != WorldPhase.Ended) World.SetPlayerConnected(binding.Player, false);
             connections.Remove(connection);
         }
-        public bool Pose(ulong connection, Vec3 head, Vec3 muzzle, Vec3 forward, double now)
+        public bool Pose(ulong connection, Vec3 head, Vec3 muzzle, Vec3 forward, double now, bool tracked = false)
         {
+            if (IsMixedReality && !tracked) return false;
             if (!connections.TryGetValue(connection, out var binding) || !ValidTime(now) || now < binding.LastPose || World.Phase == WorldPhase.Ended) return false;
             var previous = World.PlayerSnapshot(binding.Player);
             if (Vec3.Distance(Vec3.Flat(previous.Head), Vec3.Flat(head)) > .5 + 4 * Math.Min(.5, double.IsNegativeInfinity(binding.LastPose) ? 0 : now - binding.LastPose)) return false;

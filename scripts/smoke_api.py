@@ -173,7 +173,9 @@ try:
             unknown = request("POST", "/api/mission-layout", {**layout_body, "props": [{**blocked_prop, "assetId": "unknown"}]})
             require(unknown["issues"][0]["code"] == "UnsupportedAsset", "Unsupported VR content is reported rather than launched")
             mr_layout = request("POST", "/api/mission-layout", {**layout_body, "experienceMode": "MR", "props": [blocked_prop]})
-            require(not mr_layout["applies"] and mr_layout.get("canStart") is None, "MR preflight is explicitly not applicable instead of claiming calibration")
+            require(mr_layout["applies"] and mr_layout["profile"] == "mr-room-v1" and not mr_layout["canStart"]
+                    and any(issue["code"] == "SpawnBlocked" for issue in mr_layout["issues"]),
+                    "MR preflight checks virtual spawn space without using device calibration")
             request("POST", "/api/mission-layout", {**layout_body, "props": [blocked_prop] * 501}, 400)
             require(request("GET", "/api/missions") == [], "Draft validation creates no library rows")
             draft = json.loads((ROOT / "examples/mission.json").read_text(encoding="utf-8"))
@@ -720,6 +722,23 @@ try:
             accepted = request("POST", "/api/sessions", {"missionId": fixed["id"], "mode": "Independent", "roomIds": [room]}, 201, request_id=failed_key)
             require(accepted["mission"]["id"] == fixed["id"], "An unaccepted validation failure does not consume the lifecycle idempotency key")
             request("POST", f"/api/sessions/{accepted['id']}/commands", {"commandId": str(uuid.uuid4()), "action": "End"})
+            mr_environment = {**draft["environment"], "mode": "MR"}
+            mr_mission = request("POST", "/api/missions", {**draft, "name": "Operator MR start", "environment": mr_environment, "props": []}, 201)
+            mr = request("POST", "/api/sessions", {"missionId": mr_mission["id"], "mode": "Independent", "roomIds": [room]}, 201)
+            mr_path = f"/api/sessions/{mr['id']}"
+            player = {"playerId": str(uuid.uuid4()), "name": "Mixed reality player", "roomId": room}
+            request("POST", mr_path + "/players", {**player, "headset": "ViveXr"}, 409)
+            joined_mr = request("POST", mr_path + "/players", {**player, "headset": "Quest3"})
+            begin_mr = {"commandId": str(uuid.uuid4()), "action": "Begin"}
+            request("POST", mr_path + "/commands", begin_mr, 409)
+            request("POST", mr_path + "/combat-stream", {"streamId": str(uuid.uuid4()), "origin": "Simulation"}, 409, identity="GameServer")
+            require(request("GET", mr_path) == joined_mr, "Rejected MR Begin and simulation attachment leave the exact Preparing roster untouched")
+            change = {"commandId": str(uuid.uuid4()), "action": "SetEnvironment"}
+            request("POST", mr_path + "/commands", {**change, "environment": {**mr_environment, "mode": "VR"}}, 409)
+            receipt = request("POST", mr_path + "/commands", {**change, "environment": {**mr_environment, "weather": "Storm", "lightning": True}})
+            require(receipt["session"]["environment"]["mode"] == "MR" and receipt["session"]["environment"]["weather"] == "Storm",
+                    "MR retains the selected mode and accepts environment controls through the same command entry point")
+            request("POST", mr_path + "/commands", {"commandId": str(uuid.uuid4()), "action": "End"})
         except BaseException:
             log.flush()
             diagnostic = (test_directory / "server.log").read_text(encoding="utf-8", errors="replace")

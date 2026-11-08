@@ -99,8 +99,8 @@ public sealed partial class WorldRecordings : IDisposable
         var management = JsonSerializer.Deserialize<ManagementSnapshot>(source, new JsonSerializerOptions(JsonFormat.Options) { IncludeFields = true })!;
         bridge.Apply(management);
         var expected = WorldRecordingHeader.Create(id, view.CombatStream.StreamId, header.origin, view.RoomIds, bridge.Props, header.captureStartedAtUtc, header.environmentVersion, header.assetSet, header.enemyPresentationVersion, header.weaponPresentationVersion, header.enemyFireVersion, header.playerFireVersion, header.combatAudioVersion, header.playerPresentationVersion, header.missionClockVersion, header.missionDurationSeconds);
+        if (bridge.IsMixedReality) expected.calibration = WorldRecordingHeader.QuestMixedRealityProfile;
         var json = WorldJson.Write(header);
-        if (json != WorldJson.Write(expected)) throw new InvalidOperationException("Recording geometry must match the session's canonical VR mission.");
         lock (gate)
         {
             using var existing = Command("SELECT header FROM recordings WHERE session=$id", ("$id", id.ToString("D")));
@@ -109,6 +109,7 @@ public sealed partial class WorldRecordings : IDisposable
                 if (WorldJson.Write(WorldJson.Read<WorldRecordingHeader>(saved)) != json) throw new InvalidOperationException("Recording header is immutable.");
                 return Info(id, actor);
             }
+            if (json != WorldJson.Write(expected)) throw new InvalidOperationException("Recording profile and geometry must match the session's canonical mission.");
             using var insert = Command("INSERT INTO recordings(session,header,updated) VALUES($id,$header,$updated)",
                 ("$id", id.ToString("D")), ("$header", json), ("$updated", DateTimeOffset.UtcNow.ToString("O")));
             insert.ExecuteNonQuery(); return Info(id, actor);
@@ -227,6 +228,8 @@ public sealed partial class WorldRecordings : IDisposable
             if (through != packet.throughCombatSequence) throw new InvalidOperationException("Combat boundary mismatch.");
             foreach (var player in packet.frame.players)
             {
+                if (info.Header.calibration == WorldRecordingHeader.QuestMixedRealityProfile && player.connected && player.rig.kind != "Tracked")
+                    throw new InvalidOperationException("Connected MR player bodies require tracked rigs.");
                 var playerId = Guid.Parse(player.id);
                 if (!stats.TryGetValue(playerId, out var statistic) || statistic.RoomId != player.roomId || statistic.Health != player.health
                     || (player.connected && !observed.Players.Any(admitted => admitted.Id == playerId && admitted.RoomId == player.roomId)))

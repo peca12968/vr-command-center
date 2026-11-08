@@ -99,6 +99,7 @@ namespace VrCommand.Unity
             recordingStart = Time.realtimeSinceStartupAsDouble;
             var header = WorldRecordingHeader.Create(Guid.Parse(management.id), Outbox.StreamId, Outbox.Origin, management.roomIds, session.Props,
                 DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), assetSet: WorldAssetSets.PlayerBody, enemyPresentationVersion: EnemyPresentation.Version, weaponPresentationVersion: WeaponPresentation.Version, enemyFireVersion: EnemyFirePresentation.Version, playerFireVersion: PlayerFirePresentation.Version, combatAudioVersion: CombatAudioPresentation.Version, playerPresentationVersion:PlayerPresentation.Version, missionClockVersion: MissionClock.Version, missionDurationSeconds: management.mission.definition.durationSeconds);
+            if (session.IsMixedReality) header.calibration = WorldRecordingHeader.QuestMixedRealityProfile;
             Recording = WorldOutbox.Create(path, header, new UnityWorldCodec(), NativeWorldJournalTrace.Current);
             RecordingWriter = new QueuedWorldRecorder(Recording, new UnityWorldCodec());
             navigationProbe = NativeNavigationProbe.Install(gameObject, header.sessionId, header.streamId);
@@ -212,7 +213,8 @@ namespace VrCommand.Unity
             var admission = VenueBootstrap.Instance?.Admission(client);
             if (admission == null || !Guid.TryParse(admission.playerId, out var player)) return false;
             var forward = rotation * pose.rightRotation * Vector3.forward;
-            if (!session.Pose(client, Vector(root + rotation * pose.head), Vector(root + rotation * pose.right + forward * AvatarPose.MuzzleOffset), Vector(forward.normalized), Time.realtimeSinceStartupAsDouble)) return false;
+            if (!session.Pose(client, Vector(root + rotation * pose.head), Vector(root + rotation * pose.right + forward * AvatarPose.MuzzleOffset),
+                Vector(forward.normalized), Time.realtimeSinceStartupAsDouble, tracked: pose.source == 2)) return false;
             desktopResume.Remember(player, Guid.Parse(admission.admissionId), pose);
             rigs[player] = new AcceptedRig { Connection = client, Rig = new RecordedRig { kind = pose.source == 2 ? "Tracked" : "Simulated",
                 left = new RecordedVector(Vector(root + rotation * pose.left)), right = new RecordedVector(Vector(root + rotation * pose.right)),

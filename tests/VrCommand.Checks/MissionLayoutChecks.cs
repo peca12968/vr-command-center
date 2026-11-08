@@ -55,8 +55,10 @@ internal static class MissionLayoutChecks
         var full = Inspect(Enumerable.Repeat(Prop("barrel", 0, 2), 500).ToArray());
         check(full.Truncated && full.Issues.Length == 128 && full.TotalIssueCount == 124750 && full.InvalidProps.Length == 500, "Large overlap reports are bounded while keeping all invalid prop indexes and the true count");
         var mr = Inspect([Prop("unsupported", 100, 100)], experience: ExperienceMode.MR);
-        check(!mr.Applies && mr.CanStart is null, "MR is explicitly outside VR preflight rather than falsely passing calibration");
-        check(mr.RoutePreview is null && collision.RoutePreview is null, "Unsupported mode and invalid geometry do not emit route previews");
+        check(mr.Applies && mr.Profile == "mr-room-v1" && mr.CanStart == false, "MR checks the same virtual geometry under its own profile");
+        check(mr.RoutePreview is null && collision.RoutePreview is null, "Invalid virtual geometry does not emit route previews in either experience");
+        check(Inspect([], experience: ExperienceMode.MR) is { CanStart: true, Profile: "mr-room-v1", RoutePreview: not null },
+            "A valid MR virtual floor exposes the five spawn routes");
         var store = new MissionStore(Path.Combine(directory, "layout-missions"));
         var invalid = store.Create(new("Fixable layout", "Draft can be saved before layout corrections", 900,
             new(ExperienceMode.VR, Weather.Clear, TimeOfDay.Day, false), new(1, EnemyBehavior.Hold, false), [Prop("barrel", -3, -3)]));

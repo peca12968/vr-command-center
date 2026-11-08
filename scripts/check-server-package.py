@@ -19,6 +19,7 @@ def main():
     p.add_argument('--check-layout-preview',action='store_true',help='Load a saved barricade opening and compare its preview with native world geometry')
     p.add_argument('--check-room-reports',action='store_true',help='Verify scoped Linked CSVs against the full sealed native report')
     p.add_argument('--check-interrupted-replay', action='store_true', help='Play the saved native prefix after the owned launcher is killed')
+    p.add_argument('--check-managed-mr', action='store_true', help='Verify a real Preparing MR server rejects desktop admission and seals without starting combat')
     args=p.parse_args()
     if os.name!='nt':p.error('Actual Windows processes required')
     if bool(args.player_package)!=bool(args.game_address):p.error('Provide --player-package and --game-address together')
@@ -78,10 +79,10 @@ def main():
     def rejected(label,value,**options):
         file=runtime/(label+'.json');file.write_text(json.dumps(value),encoding='utf-8');work=runtime/(label+'-work');ready=out/(label+'-ready.json')
         call(label,['--run',file,'--work',work,'--seconds',options.get('seconds',60),'--ready-report',ready,*options.get('extra',())]);check(not work.exists() and not ready.exists(),label+' creates no native world')
-    def create(rooms,label, *, auto_attack=False):
+    def create(rooms,label, *, auto_attack=False, experience='VR'):
         props=[{'assetId':'sandbag','position':{'x':x,'y':0,'z':-1},'yawDegrees':0}
                for x in (-5,-3,-1,3,5)] if args.check_layout_preview else []
-        mission=request('/api/missions',{'name':'Portable '+label,'briefing':'Owned PC package fixture, Simulation only','durationSeconds':600,'environment':{'mode':'VR','weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':1,'behavior':'Hold','autoAttack':auto_attack},'props':props},expected=201)
+        mission=request('/api/missions',{'name':'Portable '+label,'briefing':'Owned PC package fixture','durationSeconds':600,'environment':{'mode':experience,'weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':1,'behavior':'Hold','autoAttack':auto_attack},'props':props},expected=201)
         state=request('/api/sessions',{'missionId':mission['id'],'mode':'Linked' if len(rooms)==5 else 'Independent','roomIds':rooms},expected=201);sessions.append(state['id']);return state
     def launch(state,label, *, listen_address=None):
         value=config(state['id'], listenAddress=listen_address or address);file=runtime/(label+'.json');file.write_text(json.dumps(value),encoding='utf-8');ready=out/(label+'-ready.json');report=out/(label+'-final.json');work=runtime/(label+'-work')
@@ -394,6 +395,28 @@ def main():
                 if player_folder:check(True,'player launcher confirmed original child exit '+client['player']['id'])
             if player_folder:
                 for entry in entries:verify_delivery(entry,[c for c in round_clients if c['sessionId']==entry['sessionId']])
+        if args.check_managed_mr:
+            mr=launch(create([1],'managed-mr',experience='MR'),'managed-mr')
+            session='/api/sessions/'+mr['sessionId'];client=player(mr,1)
+            server_log=mr['work']/'server.log'
+            wait(lambda: 'VR_SERVER_ADMISSION_REJECTED' in server_log.read_text(encoding='utf-8',errors='replace'),30,'MR desktop admission rejection')
+            check('VR_SERVER_ADMISSION_APPROVED' not in server_log.read_text(encoding='utf-8',errors='replace'),'ordinary desktop ticket was rejected by the original MR game server')
+            stop_player(client)
+            request(session+'/commands',{'commandId':str(uuid.uuid4()),'action':'Begin'},expected=409)
+            check(request(session)['state']=='Preparing','MR Begin remains Preparing after the missing tracked roster rejection')
+            receipt=request(session+'/commands',{'commandId':str(uuid.uuid4()),'action':'SetEnvironment',
+                'environment':{'mode':'MR','weather':'Storm','timeOfDay':'Night','lightning':True}})
+            def mr_weather():
+                metadata=request(session+'/world')
+                if metadata['acceptedSequence']==0:return None
+                frame=request(session+'/world/frames/'+str(metadata['acceptedSequence']))['packet']
+                if frame['observedSequence']>=receipt['session']['sequence']:
+                    return metadata,frame
+            metadata,frame=wait(mr_weather,20,'original MR environment applied')
+            check(metadata['header']['origin']=='GameServer' and metadata['header']['calibration']=='quest-room-mr-v1'
+                  and frame['weather']=='Storm' and frame['frame']['night'] and frame['lightning'] and frame['frame']['phase']=='Preparing'
+                  and not any(p['connected'] for p in frame['frame']['players']),'real MR source records its profile and operator weather without a connected desktop')
+            command(mr['sessionId'],'End');finish(mr)
         # A killed launcher must close its already-assigned Job and stop the exact owned native handle.
         crash=launch(create([1],'parent-exit',auto_attack=args.check_interrupted_replay),'parent-exit',listen_address='0.0.0.0')
         if args.check_interrupted_replay:
@@ -413,6 +436,7 @@ def main():
         save('evidence.json',{'rounds':rounds,'scope':(
             'Three portable packages, five Independent rooms then Linked, 25 simultaneous same-PC Simulation clients per topology.'
             if player_folder else 'Two portable packages, five Independent rooms then Linked, five same-PC Simulation clients per topology.'),
+            'managedMrPreparing':args.check_managed_mr,
             'sourceFingerprint':manifest['build']['sourceFingerprint'],'gameAddress':address})
     except BaseException as error:stage('failed',errorType=type(error).__name__);raise
     finally:
@@ -448,6 +472,8 @@ def main():
         if keys and any(k in text for k in keys.values()):raise RuntimeError('Public metadata contains a key')
     save('checks.json',{'complete':True,'checks':len(checks),'findings':checks,'runtimeDirectory':str(runtime),
         'packageDirectory':str(folder),'playerPackageDirectory':str(player_folder) if player_folder else None,
-        'scope':'Same-machine Simulation only. The separate parent-death case intentionally leaves the world unsealed.'})
+        'scope':('Same-machine VR simulation and a separate MR Preparing admission and seal check.'
+                 if args.check_managed_mr else 'Same-machine Simulation only.')
+                +' The separate parent-death case intentionally leaves the world unsealed.'})
     print(json.dumps({'complete':True,'checks':len(checks),'directory':str(out)}))
 if __name__=='__main__':main()

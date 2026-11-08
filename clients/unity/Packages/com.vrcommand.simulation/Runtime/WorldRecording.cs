@@ -32,6 +32,7 @@ namespace VrCommand.Simulation
     }
     [Serializable] public sealed class WorldRecordingHeader
     {
+        public const string QuestMixedRealityProfile = "quest-room-mr-v1";
         public int schemaVersion = 1;
         public int environmentVersion;
         public int enemyPresentationVersion;
@@ -149,7 +150,8 @@ namespace VrCommand.Simulation
                 || ((header.assetSet == WorldAssetSets.WeaponActions || header.assetSet == WorldAssetSets.ArmedCombatants) && (header.weaponPresentationVersion != 1 || header.enemyPresentationVersion != 1))
                 || (header.assetSet == WorldAssetSets.Combatants && header.enemyPresentationVersion != 1) || !Id(header.sessionId) || !Id(header.streamId)
                 || !new[] { "Simulation", "GameServer" }.Contains(header.origin) || header.rulesVersion != "0.8.0" || !WorldAssetSets.Supported(header.assetSet)
-                || header.calibration != "uncalibrated-vr" || header.roomIds == null || (header.roomIds.Length != 1 && header.roomIds.Length != 5)
+                || (header.calibration != "uncalibrated-vr" && (header.calibration != WorldRecordingHeader.QuestMixedRealityProfile || header.origin != "GameServer"))
+                || header.roomIds == null || (header.roomIds.Length != 1 && header.roomIds.Length != 5)
                 || header.roomIds.Distinct().Count() != header.roomIds.Length || header.roomIds.Any(room => room < 1 || room > 5)
                 || header.props == null || header.props.Length > 2500) throw new ArgumentException("Unsupported recording identity, profile or geometry.");
             if (header.captureStartedAtUtc != "" && (!DateTimeOffset.TryParseExact(header.captureStartedAtUtc, "O", System.Globalization.CultureInfo.InvariantCulture,

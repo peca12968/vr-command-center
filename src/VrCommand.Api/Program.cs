@@ -130,8 +130,8 @@ app.MapGet("/api/sessions/{id:guid}", (Guid id, SessionManager manager, HttpCont
 app.MapGet("/api/sessions", (bool? includeEnded, SessionManager manager, HttpContext context) => manager.List(includeEnded ?? false, Actor(context)));
 app.MapGet("/api/sessions/{id:guid}/events", (Guid id, long? after, int? limit, SessionManager manager, HttpContext context) =>
     manager.Events(id, after ?? 0, limit ?? 100, Actor(context)));
-app.MapPost("/api/sessions/{id:guid}/commands", (Guid id, ControlCommand command, SessionManager manager, HttpContext context) =>
-    manager.Execute(id, command, Actor(context)));
+app.MapPost("/api/sessions/{id:guid}/commands", (Guid id, ControlCommand command, WorldRecordings worlds, HttpContext context) =>
+    worlds.ExecuteCommand(id, command, Actor(context)));
 app.MapGet("/api/sessions/{id:guid}/statistics", (Guid id, SessionManager manager, HttpContext context) =>
     manager.Statistics(id, Actor(context)));
 app.MapGet("/api/sessions/{id:guid}/report.csv", (Guid id, SessionManager manager, HttpContext context) =>

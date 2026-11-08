@@ -166,7 +166,7 @@ internal static class ServerLauncher
     }
     internal sealed class Choice
     {
-        internal string Id, MissionId, MissionName, Mode; internal int[] Rooms;
+        internal string Id, MissionId, MissionName, Mode, Experience; internal int[] Rooms;
         internal static string GuidValue(string value) { Guid id; Need(Guid.TryParseExact(value, "D", out id) && id != Guid.Empty && id.ToString("D") == value, "場次或任務識別格式錯誤。"); return value; }
         internal static Choice Parse(Dictionary<string, object> value)
         {
@@ -174,15 +174,16 @@ internal static class ServerLauncher
             Need(!String.IsNullOrWhiteSpace(name) && name.Length <= 100, "任務名稱格式錯誤。"); object raw; Need(value.TryGetValue("roomIds", out raw) && raw is object[], "場次房間缺失。"); var rows = (object[])raw;
             var mode = Text(value, "mode"); Need(mode == "Independent" && rows.Length == 1 || mode == "Linked" && rows.Length == 5, "場次房間或連線模式錯誤。");
             var seen = new HashSet<int>(); var rooms = new List<int>(); foreach (var row in rows) { Need(row is int && (int)row >= 1 && (int)row <= 5 && seen.Add((int)row), "場次房間重複或越界。"); rooms.Add((int)row); } rooms.Sort();
-            return new Choice { Id = GuidValue(Text(value, "id")), MissionId = GuidValue(Text(mission, "id")), MissionName = name, Mode = mode, Rooms = rooms.ToArray() };
+            return new Choice { Id = GuidValue(Text(value, "id")), MissionId = GuidValue(Text(mission, "id")), MissionName = name,
+                Mode = mode, Experience = Text(Child(value, "environment"), "mode"), Rooms = rooms.ToArray() };
         }
         internal static string Label(string value)
         {
             var text = new StringBuilder(); foreach (var c in value) { if (Char.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.Format) continue; text.Append(Char.IsControl(c) || Char.IsWhiteSpace(c) ? ' ' : c); }
             var result = text.ToString().Trim(); if (result.Length > 32) { var length = Char.IsHighSurrogate(result[31]) ? 31 : 32; result = result.Substring(0, length) + "…"; } return result;
         }
-        public override string ToString() { var rooms = Array.ConvertAll(Rooms, room => room.ToString(System.Globalization.CultureInfo.InvariantCulture)); return "房間 " + String.Join("、", rooms) + " · " + (Mode == "Linked" ? "五房全連線" : "單房獨立") + " · " + Label(MissionName) + " · " + Id.Substring(0, 8); }
-        internal object Public() { return new { id = Id, missionId = MissionId, missionName = MissionName, mode = Mode, roomIds = Rooms, display = ToString() }; }
+        public override string ToString() { var rooms = Array.ConvertAll(Rooms, room => room.ToString(System.Globalization.CultureInfo.InvariantCulture)); return "房間 " + String.Join("、", rooms) + " · " + (Mode == "Linked" ? "五房全連線" : "單房獨立") + " · " + Experience + " · " + Label(MissionName) + " · " + Id.Substring(0, 8); }
+        internal object Public() { return new { id = Id, missionId = MissionId, missionName = MissionName, mode = Mode, experienceMode = Experience, roomIds = Rooms, display = ToString() }; }
     }
     internal sealed class Catalog
     {
@@ -204,13 +205,13 @@ internal static class ServerLauncher
                 var value = Map(item); Need(value != null, "場次列表內容錯誤。");
                 object bound; Need(value.TryGetValue("combatStream", out bound) && (bound == null || Map(bound) != null), "場次來源格式錯誤。");
                 var phase = Text(value, "state"); var experience = Text(Child(value, "environment"), "mode"); Need(phase == "Preparing" || phase == "Running" || phase == "Paused" || phase == "Ended", "場次階段格式錯誤。"); Need(experience == "VR" || experience == "MR", "場次環境格式錯誤。");
-                if (phase != "Preparing" || bound != null || experience != "VR") continue;
+                if (phase != "Preparing" || bound != null) continue;
                 var choice = Choice.Parse(value); Need(ids.Add(choice.Id), "場次識別重複。"); foreach (var room in choice.Rooms) Need(occupied.Add(room), "待開場次房間重疊。"); choices.Add(choice);
             }
             choices.Sort((a, b) => a.Rooms[0] != b.Rooms[0] ? a.Rooms[0].CompareTo(b.Rooms[0]) : String.CompareOrdinal(a.Id, b.Id)); return choices;
         }
         internal bool Same(Catalog other) { return other != null && String.Equals(PathName, other.PathName, StringComparison.OrdinalIgnoreCase) && InstanceId == other.InstanceId && Target.Api == other.Target.Api && Target.Key == other.Target.Key; }
-        internal object Public() { return new { schemaVersion = 1, status = "catalogued", complete = true, instanceId = InstanceId, sessions = Choices.ConvertAll(choice => choice.Public()), scope = "Read-only Preparing VR choices; not reservation, server readiness or gameplay completion. No key in report." }; }
+        internal object Public() { return new { schemaVersion = 1, status = "catalogued", complete = true, instanceId = InstanceId, sessions = Choices.ConvertAll(choice => choice.Public()), scope = "Read-only Preparing VR and MR choices. No key in report." }; }
     }
     internal sealed class CatalogState
     {
@@ -272,7 +273,9 @@ internal static class ServerLauncher
         internal void Start(Func<bool> cancelled = null, bool peerDiagnostics = false)
         {
             Config.Validate(); Verify(); Config.Identity(); var state = Config.Request("/api/sessions/" + Config.Session);
-            Need(Text(state, "id") == Config.Session && Text(state, "state") == "Preparing" && Child(state, "combatStream") == null && Text(Child(state, "environment"), "mode") == "VR", "只接受沒有綁定來源的Preparing VR場次；不重啟既有戰場。");
+            var experience = Text(Child(state, "environment"), "mode");
+            Need(Text(state, "id") == Config.Session && Text(state, "state") == "Preparing" && Child(state, "combatStream") == null
+                && (experience == "VR" || experience == "MR"), "只接受尚未綁定來源的 Preparing VR 或 MR 場次。");
             string name; using (var sha = SHA256.Create()) name = Hex(sha.ComputeHash(Encoding.UTF8.GetBytes(Config.Api + "/" + Config.Session)));
             bool created; lease = new Mutex(true, "Local\\VRCommand.Server." + name, out created); ownsLease = created; Need(created, "此場次已有本機啟動器。");
             using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)) { socket.ExclusiveAddressUse = true; socket.Bind(new IPEndPoint(IPAddress.Parse(Config.Bind), Config.Port)); }
@@ -386,7 +389,7 @@ internal static class ServerLauncher
             var retained = catalog.Selected; session.Items.Clear(); foreach (var choice in catalog.Current.Choices) session.Items.Add(choice);
             session.Enabled = true; if (retained != null) session.SelectedItem = retained;
             start.Enabled = catalog.CanStart; detail.Text = retained == null ? "請明確選擇要啟動的房間與任務。" : "場次ID：" + retained.Id + "\r\n任務版本ID：" + retained.MissionId;
-            state.Text = session.Items.Count > 0 ? "清單已更新；只保留同一管理實例中仍可啟動的原選取。" : "沒有可啟動的Preparing VR場次，請先在控制台建立。";
+            state.Text = session.Items.Count > 0 ? "清單已更新；只保留同一管理實例中仍可啟動的原選取。" : "沒有可啟動的 VR 或 MR 場次，請先在控制台建立。";
         }
         void Begin()
         {

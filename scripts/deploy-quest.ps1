@@ -3,7 +3,8 @@ param(
     [string]$Serial,
     [string]$AdbPath = 'F:\Tools\UnityEditors\6000.3.27f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe',
     [string]$AlignmentFile,
-    [switch]$Passthrough
+    [switch]$Passthrough,
+    [switch]$MixedReality
 )
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -15,7 +16,7 @@ $unknown = @($config.PSObject.Properties.Name | Where-Object { $_ -notin @('role
 if ($config.role -ne 'Client' -or -not $config.joinTicket -or $config.gameServerKey -or $unknown.Count -gt 0) {
     throw 'Use a player configuration from prepare-vr-session.py; server credentials must not be deployed to a headset.'
 }
-if ($Passthrough -and -not $AlignmentFile) { throw 'Quest passthrough requires a checked room alignment JSON export.' }
+if (($Passthrough -or $MixedReality) -and -not $AlignmentFile) { throw 'Quest passthrough requires a checked room alignment JSON export.' }
 if ($AlignmentFile) {
     $AlignmentFile = (Resolve-Path -LiteralPath $AlignmentFile).Path
     $size = (Get-Item -LiteralPath $AlignmentFile).Length
@@ -49,7 +50,8 @@ if ($AlignmentFile) {
     if ($LASTEXITCODE -ne 0) { throw 'Room alignment file could not be activated.' }
     $config | Add-Member -NotePropertyName 'roomAlignmentSha256' -NotePropertyValue $alignmentHash
 }
-if ($Passthrough) { $config | Add-Member -NotePropertyName 'questPassthrough' -NotePropertyValue $true }
+if ($Passthrough -or $MixedReality) { $config | Add-Member -NotePropertyName 'questPassthrough' -NotePropertyValue $true }
+if ($MixedReality) { $config | Add-Member -NotePropertyName 'requestMixedReality' -NotePropertyValue $true }
 $stagedConfig = [IO.Path]::GetTempFileName()
 try {
     [IO.File]::WriteAllText($stagedConfig, ($config | ConvertTo-Json -Depth 4 -Compress))
