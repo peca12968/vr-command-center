@@ -7,6 +7,7 @@ ROOT=Path(__file__).resolve().parents[1]
 def module(name,file):
     s=importlib.util.spec_from_file_location(name,ROOT/'scripts'/file);m=importlib.util.module_from_spec(s);s.loader.exec_module(m);return m
 package=module('server_package','package-windows-server.py');control=module('server_control_checks','check-control-package.py');venue=module('server_venue','start-desktop-venue.py');world=module('server_world','analyze-world-journal.py');debrief=module('server_debrief','check-desktop-debrief.py')
+field=module('server_field_results','verify-field-results.py')
 def read(p):return json.loads(p.read_text(encoding='utf-8'))
 def free(kind=socket.SOCK_STREAM,address='127.0.0.1'):
     with socket.socket(socket.AF_INET,kind) as s:s.bind((address,0));return s.getsockname()[1]
@@ -194,14 +195,15 @@ def main():
             if entry['peerDiagnostics']:
                 check(len(peers)==len(acks) and {int(connection) for connection,_ in peers}==set(acks),
                     entry['label']+' exactly one UDP endpoint for every original acknowledged connection')
-                endpoints=set()
-                for _,endpoint in peers:
-                    host,_,port=endpoint.rpartition(':')
-                    ip=ipaddress.ip_address(host.strip('[]'))
-                    ip=getattr(ip,'ipv4_mapped',None) or ip
-                    if not 0<int(port)<=65535 or str(ip)!=address:raise ValueError('Observed UDP peer does not match the local test interface')
-                    endpoints.add((ip,int(port)))
-                check(len(endpoints)==len(acks),entry['label']+' distinct UDP source ports on the expected same-PC interface')
+                session_path='/api/sessions/'+entry['sessionId']
+                session=request(session_path);endpoint=request(session_path+'/connection-endpoint')
+                save(entry['label']+'-session.json',session);save(entry['label']+'-endpoint.json',endpoint)
+                ip=ipaddress.IPv4Address(address)
+                result=field.verify('same-host',{ip},read(entry['reportPath']),session,
+                    field.read_json(field.content(out/(entry['label']+'-statistics.json'))),endpoint,server,
+                    [(ip,field.content(c['log'])) for c in owners])
+                save(entry['label']+'-field-results.json',result)
+                check(result['serverAcknowledgements']==len(acks),entry['label']+' field report matches same-PC endpoints and sealed player results')
             else:
                 check('VR_SERVER_PEER' not in server,entry['label']+' default does not record UDP peers')
         raw,headers=request('/api/sessions/'+entry['sessionId']+'/report.csv',raw_response=True)

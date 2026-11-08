@@ -84,6 +84,32 @@ node tests/browser/check-external-native.cjs <本次ready.json> <解壓玩家包
 3. 在控制台核對兩位玩家均可參戰後，執行 Begin、Pause、Resume 和 End。保存兩端玩家的入場與最終戰績，核對玩家身分、本次 admission、場次與世界封存序號，並確認戰鬥及世界均封存。以第二台玩家日誌的 `VR_CLIENT_CONNECTED id=` 核對伺服器的 `VR_SERVER_PEER id=` 和 `VR_SERVER_DEBRIEF_ACK id=`。在直連 LAN，應觀察到第二台電腦本次使用的網卡位址與伺服器端來源位址相符。來源無法取得或曾跨 NAT 時，記錄實際觀察的值及網路拓撲。含來源位址的原始日誌留在私有資料夾。
 4. 將結果標記為雙機測試，記錄使用的有線或無線網路。分開保存雙機、五房與實機的證據，以便後續擴至 5／10／25 人。
 
+### 核對封存戰績與 UDP 來源
+
+離線核對工具使用已完成的一場 Windows 伺服器任務。以 `--peer-diagnostics on` 啟動伺服器，將公告及本機綁定都設為這台電腦實際使用的 IPv4。選擇名冊固定的場次。結束後等待原啟動器寫出 `sealed-stopped` 報告，並等玩家寫完戰績與斷線日誌。
+
+將伺服器 `--report`、該次工作目錄的 `server.log`、各玩家的原始 Unity 日誌放在私人資料夾。從同一管理實例保存以下三個 GET 回應，使用具有該場完整名冊權限的操作員帳號。連線票券和金鑰應留在各自的私人位置。
+
+| 路徑 | 保存檔案 |
+| --- | --- |
+| `/api/sessions/{id}` | `session.json` |
+| `/api/sessions/{id}/statistics` | `statistics.json` |
+| `/api/sessions/{id}/connection-endpoint` | `endpoint.json` |
+
+以 `Get-NetIPAddress -AddressFamily IPv4` 記錄當次伺服器的所有 IPv4，逐一傳入 `--server-ip`。每位玩家各傳一組 `--player`，其中的 IPv4 由該玩家所在電腦獨立確認。下列命令的兩個私有位址是範例，操作時依實際介面填寫。
+
+```powershell
+python scripts/verify-field-results.py --topology direct-lan `
+  --server-ip 192.168.1.10 --server-ip 127.0.0.1 `
+  --launcher-report .\server-final.json --server-log .\server.log `
+  --session .\session.json --statistics .\statistics.json --endpoint .\endpoint.json `
+  --player 192.168.1.10 '.\player 1.log' --player 192.168.1.20 '.\player 2.log'
+```
+
+每場最多 25 位玩家。檢查器逐位比對結束名冊的入場 ID、房間、個人戰績、三種封存序號，以及最終連線的 UDP 來源與伺服器確認。玩家曾重連時使用收到戰績的最後一條連線。名冊異動造成最終統計包含已離場玩家時，這套固定名冊驗收會拒絕。每份輸入最多 16 MiB。成功輸出可另存 JSON，摘要只含計數、房間、序號及範圍。失敗以退出碼 1 表示，診斷文字省略原始位址、票券和檔案路徑。
+
+`same-host` 要求全部觀察到的來源都在宣告的伺服器位址清單。`direct-lan` 要求至少有一個清單外的私有 IPv4，且所有玩家的實際來源均符合各自填入的位址。實體主機數與網路容量仍須現場確認，工具摘要分別保留 `physicalHostsVerified` 與 `networkCapacityAccepted` 為 `false`。NAT 或中繼環境需另記拓撲與轉譯結果。
+
 ## Windows 玩家連線量測
 
 自 0.46.0 起，Windows 開發版玩家程式可選用本機量測。以正常玩家票券入場，指定一個尚未存在的 JSON 完整路徑，其上層目錄須已存在。
