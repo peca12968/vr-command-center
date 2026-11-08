@@ -82,6 +82,10 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     }
     await panel.locator('#mr-start-status').filter({ hasText: '等待遊戲來源' }).waitFor();
     check(await panel.locator('[data-mr-room]').count() === 0, 'An MR roster does not show tracked room counts before the world source attaches');
+    const blockedStart = await command('Begin');
+    await page.locator('#notice').filter({ hasText: 'MR 場次尚未就緒' }).waitFor();
+    check(blockedStart.status === 409 && blockedStart.body.code === 'mr-readiness-required' && (await api(route)).sequence === admitted.sequence,
+      'The original Begin conflict retains its own operator message and leaves the session preparing');
     await publishUntil(panel, 'WaitingPlayers', admitted, [2, 5]);
     const waitingRoom = panel.locator('[data-mr-room="4"]');
     check(await waitingRoom.innerText() === '房間 4 · 3 / 5 追蹤就緒 · 等候席位 2、5'
