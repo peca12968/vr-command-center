@@ -1,5 +1,15 @@
 # 分開啟動玩家與遊戲伺服器
 
+## 遊戲版本相容性
+
+遊戲 0.47.0 使用 NGO 協定 30。Windows 遊戲伺服器、Windows 玩家與 Quest APK 請使用同版。從 0.46.0 或更舊的遊戲升級時，請先結束現有場次，再一併更新遊戲伺服器及玩家端。管理服務使用 API 0.31.0 供應玩家票券及世界回放。
+
+新版以二進位 UUID、打包整數與欄位旗標傳送角色狀態。連線房間同步完整角色清單，以完整浮點精度傳送位置、面向與射擊向量。
+
+在原生 Windows 驗證中，0.46.0 玩家攜有效票券會在入場核准前遭 0.47.0 伺服器拒絕。同一張票券由 0.47.0 使用時成功入場並取得戰績。 [版本與流量驗證](PROGRESS.md#2026-11-09-壓縮即時角色同步)
+
+## 分開啟動程式
+
 Windows 遊戲伺服器包可獨立啟動既有 Preparing VR 場次。CLI 已通過同機五房獨立與 Linked，WinForms 已驗證載入場次、啟動和封存後停止。 [Windows 遊戲伺服器包](WINDOWS_SERVER_PACKAGE.md)
 
 API／控制台0.31.0可另用[Windows可攜管理服務](WINDOWS_CONTROL_PACKAGE.md)部署管理網站，含自己的.NET執行環境與繁中啟動器。已用真正GUI／封裝API驗證啟停、資料與角色重開，原Unity0.39／NGO29保持；管理服務、遊戲伺服器和玩家仍分開運行。以下0.30工具段落保留原功能範圍，實際LAN／頭盔仍待。
@@ -76,7 +86,7 @@ node tests/browser/check-external-native.cjs <本次ready.json> <解壓玩家包
 
 ## Windows 玩家連線量測
 
-0.46.0 的 Windows 開發版玩家程式可選用本機量測。以正常玩家票券入場，指定一個尚未存在的 JSON 完整路徑，其上層目錄須已存在。
+自 0.46.0 起，Windows 開發版玩家程式可選用本機量測。以正常玩家票券入場，指定一個尚未存在的 JSON 完整路徑，其上層目錄須已存在。
 
 ```powershell
 & "<Windows玩家包路徑>/VrCommand.exe" --vr-config "<玩家連線檔.json>" --vr-link-metrics "<新量測檔的絕對路徑.json>"
