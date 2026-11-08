@@ -47,6 +47,44 @@ namespace VrCommand.Unity.Tests
             Assert.IsFalse(ArenaLayout.Inspect(new[] { Prop("unsupported", 0, 0) }, 0, 1).Valid);
             Assert.IsFalse(ArenaLayout.Inspect(new[] { Prop("barrel", 0, 0, 720) }, 0, 1).Valid);
         }
+        [Test] public void LiveReinforcementsWaitForClearSpawnWithoutStallingOtherCommands()
+        {
+            var props = (from z in Enumerable.Range(0, 9)
+                         from x in Enumerable.Range(0, 13)
+                         where z != 0 || x < 6 || x > 8
+                         select Prop("barrel", -4.5f + x * .75f, -1 + z * .75f)).ToArray();
+            Assert.AreEqual(3, ArenaLayout.Inspect(props, 3, 1).EnemyCapacityPerRoom);
+            var source = new ArenaSession();
+            var snapshot = Snapshot(props, 2);
+            snapshot.enemies.behavior = "Patrol";
+            source.Apply(snapshot);
+            snapshot.state = "Running"; snapshot.sequence++;
+            source.Apply(snapshot);
+            source.Tick(.05);
+            var before = source.World.Snapshot().Enemies;
+            Assert.That(before.All(enemy => enemy.Walking), "Both original enemies must cover the remaining spawn point.");
+            snapshot.enemies.count = 3; snapshot.enemies.behavior = "Hold"; snapshot.sequence++;
+            source.Apply(snapshot);
+            Assert.AreEqual(2, source.World.Snapshot().Enemies.Length);
+            snapshot.state = "Paused"; snapshot.environment.weather = "Storm"; snapshot.sequence++;
+            source.Apply(snapshot);
+            source.Tick(.10);
+            Assert.AreEqual(WorldPhase.Paused, source.World.Phase);
+            Assert.AreEqual(Visibility.Storm, source.World.Visibility);
+            Assert.AreEqual(1, source.World.TickNumber);
+            snapshot.state = "Running"; snapshot.enemies.behavior = "Patrol"; snapshot.sequence++;
+            source.Apply(snapshot);
+            for (var tick = 2; tick <= 121 && source.World.Snapshot().Enemies.Length < 3; tick++)
+                source.Tick(tick * .05);
+            var reinforced = source.World.Snapshot().Enemies;
+            Assert.AreEqual(3, reinforced.Length);
+            Assert.That(before.Select(enemy => enemy.Id), Is.SubsetOf(reinforced.Select(enemy => enemy.Id)));
+            Assert.That(reinforced.Take(2).All(enemy => Vec3.Distance(enemy.Feet, reinforced[2].Feet) > .7f));
+            snapshot.state = "Ended"; snapshot.enemies.count = 1; snapshot.sequence += 2;
+            source.Apply(snapshot);
+            Assert.AreEqual(WorldPhase.Ended, source.World.Phase);
+            Assert.AreEqual(before[0].Id, source.World.Snapshot().Enemies.Single().Id);
+        }
         [Test] public void PreflightDoesNotRewriteTheInterpretationOfHistoricalOverlappingWorlds()
         {
             var props = new[] { Prop("sandbag", 0, 2), Prop("barrel", 0, 2) };

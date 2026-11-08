@@ -33,6 +33,7 @@ namespace VrCommand.Simulation
     [Serializable] public sealed class WorldRecordingHeader
     {
         public const string QuestMixedRealityProfile = "quest-room-mr-v1";
+        public const int ReinforcementVersion = 1;
         public int schemaVersion = 1;
         public int environmentVersion;
         public int enemyPresentationVersion;
@@ -42,6 +43,7 @@ namespace VrCommand.Simulation
         public int combatAudioVersion;
         public int playerPresentationVersion;
         public int missionClockVersion, missionDurationSeconds;
+        public int reinforcementVersion;
         public string sessionId = "", streamId = "", origin = "Simulation", rulesVersion = "0.8.0", assetSet = "primitives-v1", calibration = "uncalibrated-vr";
         public string captureStartedAtUtc = "";
         public int[] roomIds = new int[0];
@@ -135,6 +137,7 @@ namespace VrCommand.Simulation
         public static void Header(WorldRecordingHeader header)
         {
             if (header == null || header.schemaVersion != 1 || header.missionClockVersion < 0 || header.missionClockVersion > MissionClock.Version
+                || header.reinforcementVersion < 0 || header.reinforcementVersion > WorldRecordingHeader.ReinforcementVersion
                 || (header.missionClockVersion == 0 ? header.missionDurationSeconds != 0 : !MissionClock.ValidDuration(header.missionDurationSeconds))
                 || header.environmentVersion < 0 || header.environmentVersion > EnvironmentPresentation.Version
                 || header.enemyPresentationVersion < 0 || header.enemyPresentationVersion > EnemyPresentation.Version

@@ -78,20 +78,20 @@ namespace VrCommand.Simulation
                 if (!Separates(a.Right) && !Separates(a.Forward) && !Separates(b.Right) && !Separates(b.Forward)) Add("Overlap", i, j);
             }
             var requested = (enemyCount + roomCount - 1) / roomCount;
-            int? capacity = canPlan ? EnemyCandidates(3, boxes.Where(box => box != null).Select(box => box!.Prop).ToArray()).Count : (int?)null;
+            int? capacity = canPlan
+                ? EnemyCandidates(new Vec3(), new GridNavigation(new Vec3(), boxes.Where(box => box != null).Select(box => box!.Prop).ToArray())).Count
+                : (int?)null;
             if (capacity.HasValue && requested > capacity.Value) Add("EnemySpawnCapacity");
             return new ArenaLayoutResult(issues.ToArray(), invalid.OrderBy(i => i).ToArray(), total, capacity, requested);
         }
         // The same ordered 0.75m candidate grid is used by actual enemy planning.
         // Grid spacing exceeds the planner's 0.7m separation for an empty world.
-        internal static List<Vec3> EnemyCandidates(int room, WorldProp[] geometry, Func<Vec3, bool>? available = null)
+        internal static List<Vec3> EnemyCandidates(Vec3 origin, GridNavigation navigation)
         {
-            var origin = ArenaWorld.RoomOrigin(room);
-            var navigation = new GridNavigation(origin, geometry.Where(prop => prop.RoomId == room).ToArray());
             var result = new List<Vec3>();
             for (var z = -1f; z <= 5; z += .75f) for (var x = -4.5f; x <= 4.5f; x += .75f)
             {
-                var point = origin + new Vec3(x, 0, z); if (navigation.Walkable(point) && (available == null || available(point))) result.Add(point);
+                var point = origin + new Vec3(x, 0, z); if (navigation.Walkable(point)) result.Add(point);
             }
             return result;
         }

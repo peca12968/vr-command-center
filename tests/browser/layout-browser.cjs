@@ -135,6 +135,29 @@ module.exports = async function layoutBrowser({ context, api, tokens, base, miss
     } finally {
       await api(`/sessions/${mixed.id}/commands`, 'POST', { action: 'End', commandId: randomUUID() });
     }
+    const compact = await api('/missions', 'POST', { ...dense.definition, name: '場中敵軍容量',
+      enemies: { ...dense.definition.enemies, count: 2 } }, 'Master', 201);
+    const active = await api('/sessions', 'POST', { missionId: compact.id, mode: 'Independent', roomIds: [vacant.id] }, 'Master', 201);
+    try {
+      await editor.locator('#refresh').click();
+      await editor.locator('#session-select').selectOption(active.id);
+      await editor.locator('#live-enemies').filter({ hasText: '目標 2 名' }).waitFor();
+      await editor.locator('#live-count').fill('85');
+      const refused = editor.waitForResponse(response => response.url().endsWith(`/api/sessions/${active.id}/commands`)
+        && response.request().method() === 'POST' && response.status() === 400);
+      await editor.locator('#enemies-form button[type=submit]').click(); await refused;
+      await editor.locator('#notice').filter({ hasText: '此場地最多可設定 84 名敵軍' }).waitFor();
+      const unchanged = await api(`/sessions/${active.id}`);
+      check(unchanged.sequence === active.sequence && unchanged.enemies.count === 2 && await editor.locator('#live-count').inputValue() === '85',
+        'An excessive reinforcement preserves the operator draft and existing target and explains the actual limit');
+      await editor.screenshot({ path: path.join(screenshots, 'layout-enemy-capacity.png'), fullPage: true });
+      await editor.locator('#live-count').fill('84');
+      await editor.locator('#enemies-form button[type=submit]').click();
+      await editor.locator('#live-enemies').filter({ hasText: '目標 84 名' }).waitFor();
+      check((await api(`/sessions/${active.id}`)).enemies.count === 84, 'The exact capacity can be submitted from the same operator form');
+    } finally {
+      await api(`/sessions/${active.id}/commands`, 'POST', { action: 'End', commandId: randomUUID() });
+    }
     await launch(openedId);
     let releaseLogout, observedLogout;
     const logoutGate = new Promise(resolve => { releaseLogout = resolve; }), logoutRequested = new Promise(resolve => { observedLogout = resolve; });

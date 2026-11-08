@@ -11,6 +11,9 @@ public record MissionLayoutReport(int Version, string Profile, string RulesVersi
 public sealed class MissionLayoutRejectedException(MissionLayoutReport report) : ArgumentException("Arena layout is not startable; inspect the layout report and save a corrected mission revision.")
 { public MissionLayoutReport Report { get; } = report; }
 
+public sealed class EnemyCapacityExceededException(int maxCount) : ArgumentException("Enemy count exceeds the saved arena's spawn capacity.")
+{ public int MaxCount { get; } = maxCount; }
+
 public static class MissionLayout
 {
     private static MissionLayoutRequest Request(MissionDraft definition, SessionMode mode) =>
@@ -35,5 +38,12 @@ public static class MissionLayout
     {
         var report = Inspect(Request(definition, mode), includeRoutes: false);
         if (report.CanStart == false) throw new MissionLayoutRejectedException(report);
+    }
+
+    internal static void RequireEnemyCapacity(SessionView session, int count)
+    {
+        var report = Inspect(Request(session.Mission.Definition, session.Mode) with { EnemyCount = count }, includeRoutes: false);
+        if (report.EnemyCapacityPerRoom is int capacity && report.RequestedEnemiesPerRoom > capacity)
+            throw new EnemyCapacityExceededException(capacity * session.RoomIds.Length);
     }
 }

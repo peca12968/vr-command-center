@@ -65,8 +65,8 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
     const content = responseType === 'blob' && response.ok ? await response.blob() : await response.text();
     if (epoch !== state.epoch) throw new Error('登入狀態已變更，已忽略舊回應。');
     if (!response.ok) {
-      let message = '操作未完成，請重新整理後確認。', layout, code;
-      try { const data = JSON.parse(content); message = data.error || message; layout = data.layout; code = data.code; } catch { /* Non-domain errors have no stable JSON contract. */ }
+      let message = '操作未完成，請重新整理後確認。', layout, code, maxCount;
+      try { const data = JSON.parse(content); message = data.error || message; layout = data.layout; code = data.code; maxCount = data.maxCount; } catch { /* Non-domain errors have no stable JSON contract. */ }
       if (response.status === 401) { logout(); message = '憑證無效或已更換，請重新登入。'; }
       if (response.status === 403) message = '目前身分沒有此操作權限。';
       if (response.status === 409) {
@@ -74,6 +74,7 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
         else message = path.startsWith('/missions') ? '任務版本已變更或原請求內容不一致；草稿仍保留，可載入最新版或另存新任務。' : '場次狀態或名額已變更，請重新整理並確認後再操作。';
       }
       if (layout) message = '場地配置未通過檢查，請修正並保存新版本後再開場。';
+      if (code === 'enemy-capacity-exceeded' && Number.isInteger(maxCount)) message = `此場地最多可設定 ${maxCount} 名敵軍。請調低目標數量後再套用。`;
       const error = new Error(message); error.status = response.status; error.layout = layout; throw error;
     }
     if (responseType === 'blob') return content;
@@ -275,7 +276,7 @@ function renderSession(statistics, events) {
   $('clock-status').textContent = `計畫 ${session.mission.definition.durationSeconds} 秒 · ${session.missionClock?.autoEnd ? '已啟用到時自動結束' : '手動結束'}${session.combatStream?.missionClockVersion !== 1 ? ' · 等待支援計時的遊戲伺服器就緒' : ''}`;
   const env = session.environment, enemies = session.enemies;
   $('live-environment').textContent = `${env.mode} · ${weatherNames[env.weather]} · ${env.timeOfDay === 'Night' ? '夜晚' : '白天'} · ${env.lightning ? '閃電開啟' : '無閃電'}`;
-  $('live-enemies').textContent = `${enemies.count} 名 · ${behaviorNames[enemies.behavior]} · ${enemies.autoAttack ? '自動攻擊' : '手動設定'}`;
+  $('live-enemies').textContent = `目標 ${enemies.count} 名 · ${behaviorNames[enemies.behavior]} · ${enemies.autoAttack ? '自動攻擊' : '手動設定'}`;
   fillOptions('player-room', session.roomIds.filter(ownsRoom).map(id => [String(id), `房間 ${id}`]));
   const ticketRooms = session.roomIds.filter(ownsRoom).flatMap(id => {
     const count = session.players.filter(player => player.roomId === id).length;

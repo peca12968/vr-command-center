@@ -99,6 +99,7 @@ public sealed partial class WorldRecordings : IDisposable
         var management = JsonSerializer.Deserialize<ManagementSnapshot>(source, new JsonSerializerOptions(JsonFormat.Options) { IncludeFields = true })!;
         bridge.Apply(management);
         var expected = WorldRecordingHeader.Create(id, view.CombatStream.StreamId, header.origin, view.RoomIds, bridge.Props, header.captureStartedAtUtc, header.environmentVersion, header.assetSet, header.enemyPresentationVersion, header.weaponPresentationVersion, header.enemyFireVersion, header.playerFireVersion, header.combatAudioVersion, header.playerPresentationVersion, header.missionClockVersion, header.missionDurationSeconds);
+        expected.reinforcementVersion = header.reinforcementVersion;
         if (bridge.IsMixedReality) expected.calibration = WorldRecordingHeader.QuestMixedRealityProfile;
         var json = WorldJson.Write(header);
         lock (gate)
@@ -194,7 +195,7 @@ public sealed partial class WorldRecordings : IDisposable
                 throw new InvalidOperationException("Recorded policy disagrees with its management observation.");
             if (observed.Players.Any(player => !packet.frame.players.Any(body => body.id == player.Id.ToString("D") && body.roomId == player.RoomId)))
                 throw new InvalidOperationException("Recording must include every admitted player body.");
-            if (packet.frame.enemies.Length != observed.Enemies.Count) throw new InvalidOperationException("Recorded enemy roster disagrees with management.");
+            RequireEnemyRoster(info.Header, observed.Enemies.Count, packet.frame);
             var stats = (previous?.Statistics ?? []).ToDictionary(player => player.PlayerId);
             foreach (var player in observed.Players)
                 stats[player.Id] = stats.TryGetValue(player.Id, out var existingPlayer)
@@ -250,6 +251,21 @@ public sealed partial class WorldRecordings : IDisposable
             using var update = Command("UPDATE recordings SET accepted=$seq,duration=$elapsed,updated=$updated WHERE session=$id",
                 ("$seq", packet.sequence), ("$elapsed", packet.elapsedMilliseconds), ("$updated", DateTimeOffset.UtcNow.ToString("O")), ("$id", id.ToString("D")));
             update.Transaction = transaction; update.ExecuteNonQuery(); transaction.Commit(); return Info(id, actor);
+        }
+    }
+
+    private static void RequireEnemyRoster(WorldRecordingHeader header, int target, RecordedFrame frame)
+    {
+        if ((header.reinforcementVersion == 0 || frame.phase == "Preparing") && frame.enemies.Length != target)
+            throw new InvalidOperationException("Recorded enemy roster disagrees with management.");
+        if (header.reinforcementVersion == 0) return;
+        var rooms = header.roomIds.Order().ToArray();
+        for (var index = 0; index < rooms.Length; index++)
+        {
+            var room = rooms[index];
+            var limit = target / rooms.Length + (index < target % rooms.Length ? 1 : 0);
+            if (frame.enemies.Count(enemy => enemy.roomId == room) > limit)
+                throw new InvalidOperationException("Recorded enemy roster exceeds its room's reinforcement target.");
         }
     }
 

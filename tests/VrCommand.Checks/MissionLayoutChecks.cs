@@ -104,6 +104,21 @@ internal static class MissionLayoutChecks
             && openingTrial.World.PlayerSnapshot(openingPlayer).Head.Z == 0,
             "The same admitted authority accepts every midpoint route sample through the saved opening");
         manager.End(openedSession.Id, actor);
+        var compact = store.Create(defensive.Definition with { Name = "Reinforcement limits", Props = rows });
+        var compactSession = manager.Create(SessionMode.Independent, [3], compact, actor);
+        _ = StartTrial(compactSession);
+        var running = manager.Get(compactSession.Id, actor);
+        var overCapacity = new ControlCommand(Guid.NewGuid(), ControlAction.SetEnemies, ExpectedSequence: running.Sequence,
+            Enemies: new(85, EnemyBehavior.Patrol, true));
+        Reject<ArgumentException>(() => manager.Execute(running.Id, overCapacity, actor),
+            "Live increases beyond the saved layout capacity are rejected before reaching the authority");
+        check(manager.Get(running.Id, actor).Sequence == running.Sequence && manager.Get(running.Id, actor).Enemies == running.Enemies,
+            "An invalid reinforcement does not consume a sequence or change AI behavior");
+        var accepted = manager.Execute(running.Id, overCapacity with { Enemies = new(84, EnemyBehavior.Patrol, true) }, actor);
+        check(accepted.Session.Enemies == new EnemySettings(84, EnemyBehavior.Patrol, true)
+            && manager.Execute(running.Id, overCapacity with { Enemies = accepted.Session.Enemies }, actor).Duplicate,
+            "An increase to the exact limit accepts the original command ID and keeps successful retries idempotent");
+        manager.End(compactSession.Id, actor);
         var memory = new MemorySessionEventStore(); var id = Guid.NewGuid(); var request = Guid.NewGuid();
         memory.Seed(id, [new(6, Guid.NewGuid(), id, 1, DateTimeOffset.UtcNow, SessionEventKind.Created,
             JsonSerializer.SerializeToElement(new SessionCreated(SessionMode.Independent, [3], invalid), JsonFormat.Options), actor, request)]);

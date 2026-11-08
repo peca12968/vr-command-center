@@ -722,6 +722,23 @@ try:
             accepted = request("POST", "/api/sessions", {"missionId": fixed["id"], "mode": "Independent", "roomIds": [room]}, 201, request_id=failed_key)
             require(accepted["mission"]["id"] == fixed["id"], "An unaccepted validation failure does not consume the lifecycle idempotency key")
             request("POST", f"/api/sessions/{accepted['id']}/commands", {"commandId": str(uuid.uuid4()), "action": "End"})
+            compact_props = [{"assetId": "sandbag", "position": {"x": x, "y": 0, "z": z}, "yawDegrees": 0}
+                             for z in (2, 4) for x in (-3, -1, 1, 3)]
+            compact_mission = request("POST", "/api/missions", {**draft, "name": "Live enemy capacity", "props": compact_props}, 201)
+            compact = request("POST", "/api/sessions", {"missionId": compact_mission["id"], "mode": "Independent", "roomIds": [room]}, 201)
+            compact_path = f"/api/sessions/{compact['id']}"
+            update = {"commandId": str(uuid.uuid4()), "action": "SetEnemies", "expectedSequence": compact["sequence"],
+                      "enemies": {"count": 85, "behavior": "Patrol", "autoAttack": False}}
+            rejected = request("POST", compact_path + "/commands", update, 400)
+            require(rejected["code"] == "enemy-capacity-exceeded" and rejected["maxCount"] == 84
+                    and request("GET", compact_path) == compact,
+                    "A rejected reinforcement names its saved layout capacity and leaves management untouched")
+            update["enemies"]["count"] = 84
+            result = request("POST", compact_path + "/commands", update)
+            require(result["session"]["enemies"] == update["enemies"] and not result["duplicate"]
+                    and request("POST", compact_path + "/commands", update)["duplicate"],
+                    "Exact capacity is accepted and the same command can safely confirm its receipt")
+            request("POST", compact_path + "/commands", {"commandId": str(uuid.uuid4()), "action": "End"})
             mr_environment = {**draft["environment"], "mode": "MR"}
             mr_mission = request("POST", "/api/missions", {**draft, "name": "Operator MR start", "environment": mr_environment, "props": []}, 201)
             mr = request("POST", "/api/sessions", {"missionId": mr_mission["id"], "mode": "Independent", "roomIds": [room]}, 201)

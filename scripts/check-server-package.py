@@ -20,6 +20,7 @@ def main():
     p.add_argument('--check-room-reports',action='store_true',help='Verify scoped Linked CSVs against the full sealed native report')
     p.add_argument('--check-interrupted-replay', action='store_true', help='Play the saved native prefix after the owned launcher is killed')
     p.add_argument('--check-managed-mr', action='store_true', help='Verify a real Preparing MR server rejects desktop admission and seals without starting combat')
+    p.add_argument('--check-live-reinforcement', action='store_true', help='Verify a native server accepts only supported live enemy targets and records the result')
     args=p.parse_args()
     if os.name!='nt':p.error('Actual Windows processes required')
     if bool(args.player_package)!=bool(args.game_address):p.error('Provide --player-package and --game-address together')
@@ -79,12 +80,13 @@ def main():
     def rejected(label,value,**options):
         file=runtime/(label+'.json');file.write_text(json.dumps(value),encoding='utf-8');work=runtime/(label+'-work');ready=out/(label+'-ready.json')
         call(label,['--run',file,'--work',work,'--seconds',options.get('seconds',60),'--ready-report',ready,*options.get('extra',())]);check(not work.exists() and not ready.exists(),label+' creates no native world')
-    def create(rooms,label, *, auto_attack=False, experience='VR'):
-        props=[{'assetId':'sandbag','position':{'x':x,'y':0,'z':-1},'yawDegrees':0}
-               for x in (-5,-3,-1,3,5)] if args.check_layout_preview else []
+    def create(rooms,label, *, auto_attack=False, experience='VR', props=None):
+        if props is None:
+            props=[{'assetId':'sandbag','position':{'x':x,'y':0,'z':-1},'yawDegrees':0}
+                   for x in (-5,-3,-1,3,5)] if args.check_layout_preview else []
         mission=request('/api/missions',{'name':'Portable '+label,'briefing':'Owned PC package fixture','durationSeconds':600,'environment':{'mode':experience,'weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':1,'behavior':'Hold','autoAttack':auto_attack},'props':props},expected=201)
         state=request('/api/sessions',{'missionId':mission['id'],'mode':'Linked' if len(rooms)==5 else 'Independent','roomIds':rooms},expected=201);sessions.append(state['id']);return state
-    def launch(state,label, *, listen_address=None):
+    def launch(state,label, *, listen_address=None, verify_layout=True):
         value=config(state['id'], listenAddress=listen_address or address);file=runtime/(label+'.json');file.write_text(json.dumps(value),encoding='utf-8');ready=out/(label+'-ready.json');report=out/(label+'-final.json');work=runtime/(label+'-work')
         diagnostics=args.peer_diagnostics and label=='linked'
         options=['--peer-diagnostics','on'] if diagnostics else []
@@ -93,7 +95,7 @@ def main():
             if child.poll() is not None:raise RuntimeError('Server launcher exited before ready '+label)
             return read(ready) if ready.exists() else None
         info=wait(is_ready,100,label+' ready');w=control.ChildWitness(info['childPid']);entry['witness']=w;witnesses.append(w);entry['ready']=info
-        if args.check_layout_preview:entry['layoutSession']=state
+        if args.check_layout_preview and verify_layout:entry['layoutSession']=state
         endpoint=request('/api/sessions/'+state['id']+'/connection-endpoint');check(info['streamId']==endpoint['streamId'] and info['port']==endpoint['port'] and endpoint['address']==address,label+' original endpoint / child')
         binding = info['udpBinding']
         observed = datetime.fromisoformat(binding['observedAtUtc'])
@@ -249,7 +251,7 @@ def main():
         entry['process'].wait(timeout=80);w=entry['witness'];w.wait();w.close();entry['witness']=None
         report=read(entry['reportPath']);check(entry['process'].returncode==0 and report['complete'] and report['cleanupCompleted'] and report['childExited'] and report['playerResultsAcknowledged'] is None,entry['label']+' dual seal / retained36 / original process terminal')
         check(report['udpBinding'] == entry['ready']['udpBinding'], entry['label'] + ' terminal report preserves the startup UDP observation')
-        if args.check_layout_preview:
+        if 'layoutSession' in entry:
             state=entry['layoutSession'];mission=state['mission']
             preview=request('/api/missions/'+mission['id']+'/layout?mode='+state['mode'])
             routes=preview['routePreview']['seats']
@@ -418,6 +420,46 @@ def main():
                   and frame['weather']=='Storm' and frame['frame']['night'] and frame['lightning'] and frame['frame']['phase']=='Preparing'
                   and not any(p['connected'] for p in frame['frame']['players']),'real MR source records its profile and operator weather without a connected desktop')
             command(mr['sessionId'],'End');finish(mr)
+        if args.check_live_reinforcement:
+            props=[{'assetId':'sandbag','position':{'x':x,'y':0,'z':z},'yawDegrees':0} for z in (2,4) for x in (-3,-1,1,3)]
+            entry=launch(create([1],'live-reinforcement',props=props),'live-reinforcement',verify_layout=False)
+            session='/api/sessions/'+entry['sessionId']
+            client=player(entry,1); roster=[client['player']['id']]
+            wait(lambda: observe(entry,roster),60,'reinforcement original player')
+            begun=command(entry['sessionId'],'Begin')
+            original=wait(lambda: observe(entry,roster,begun['appliedAtSequence']),20,'reinforcement Running source')['packet']
+            body={'commandId':str(uuid.uuid4()),'action':'SetEnemies','expectedSequence':begun['appliedAtSequence'],
+                  'enemies':{'count':85,'behavior':'Hold','autoAttack':False}}
+            denied=request(session+'/commands',body,expected=400)
+            check(denied['code']=='enemy-capacity-exceeded' and denied['maxCount']==84
+                  and request(session)['sequence']==begun['appliedAtSequence'],'Running reinforcement beyond the layout capacity is rejected before mutation')
+            body['enemies']['count']=84
+            added=request(session+'/commands',body)
+            def applied(receipt,phase,count):
+                meta=request(session+'/world')
+                packet=request(session+'/world/frames/'+str(meta['acceptedSequence']))['packet']
+                if (packet['observedSequence']>=receipt['appliedAtSequence'] and packet['frame']['phase']==phase
+                        and len(packet['frame']['enemies'])==count):
+                    return meta,packet
+            metadata,reinforced=wait(lambda: applied(added,'Running',84),20,'original server spawns the accepted count')
+            original_id=original['frame']['enemies'][0]['id']
+            check(metadata['header']['reinforcementVersion']==1 and reinforced['frame']['enemies'][0]['id']==original_id
+                  and all(enemy['roomId']==1 for enemy in reinforced['frame']['enemies']),'recorded native reinforcement preserves the existing enemy and room allocation')
+            reduced=request(session+'/commands',{'commandId':str(uuid.uuid4()),'action':'SetEnemies',
+                            'enemies':{'count':1,'behavior':'Hold','autoAttack':False}})
+            paused=command(entry['sessionId'],'Pause')
+            _,after=wait(lambda: applied(paused,'Paused',1),20,'reduced target and Pause apply together')
+            check(after['observedSequence']>=reduced['appliedAtSequence'] and after['frame']['enemies'][0]['id']==original_id,
+                  'operator can remove the new enemies and pause with the original enemy retained')
+            save('live-reinforcement-controls.json',{'denied':denied,'added':added,'reinforced':reinforced,'reduced':reduced,'paused':paused,'after':after})
+            command(entry['sessionId'],'End');finish(entry)
+            text=client['log'].read_text(encoding='utf-8',errors='replace')
+            check(venue.player_result_phase(text)=='acknowledged','reinforcement player confirms its sealed result')
+            finals=[json.loads(line.split('VR_CLIENT_DEBRIEF_FINAL ',1)[1]) for line in text.splitlines() if 'VR_CLIENT_DEBRIEF_FINAL ' in line]
+            check(len(finals)==1,'reinforcement player receives one original final result')
+            debrief.validate_result(finals[0],{'id':entry['sessionId']},client['player'],entry['sealed'])
+            save(client['player']['id']+'-result.json',finals[0])
+            stop_player(client)
         # A killed launcher must close its already-assigned Job and stop the exact owned native handle.
         crash=launch(create([1],'parent-exit',auto_attack=args.check_interrupted_replay),'parent-exit',listen_address='0.0.0.0')
         if args.check_interrupted_replay:

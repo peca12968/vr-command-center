@@ -200,6 +200,8 @@ public sealed partial class SessionManager
                 throw new InvalidOperationException("Session changed; refresh before issuing this command.");
             if (command.Environment is { } environment && environment.Mode != history.View.Environment.Mode)
                 throw new InvalidOperationException("Experience mode is fixed when a session is created.");
+            if (command.Enemies is { } enemies && enemies.Count > history.View.Enemies.Count)
+                MissionLayout.RequireEnemyCapacity(history.View, enemies.Count);
             if (command.Action == ControlAction.Begin && history.View.State == SessionState.Preparing
                 && history.View.Environment.Mode == ExperienceMode.MR
                 && (readyMrSequence != history.View.Sequence || history.View.CombatStream?.Origin != CombatOrigin.GameServer

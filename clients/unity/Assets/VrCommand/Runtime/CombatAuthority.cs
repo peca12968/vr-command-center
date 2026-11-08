@@ -100,6 +100,7 @@ namespace VrCommand.Unity
             var header = WorldRecordingHeader.Create(Guid.Parse(management.id), Outbox.StreamId, Outbox.Origin, management.roomIds, session.Props,
                 DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture), assetSet: WorldAssetSets.PlayerBody, enemyPresentationVersion: EnemyPresentation.Version, weaponPresentationVersion: WeaponPresentation.Version, enemyFireVersion: EnemyFirePresentation.Version, playerFireVersion: PlayerFirePresentation.Version, combatAudioVersion: CombatAudioPresentation.Version, playerPresentationVersion:PlayerPresentation.Version, missionClockVersion: MissionClock.Version, missionDurationSeconds: management.mission.definition.durationSeconds);
             if (session.IsMixedReality) header.calibration = WorldRecordingHeader.QuestMixedRealityProfile;
+            header.reinforcementVersion = WorldRecordingHeader.ReinforcementVersion;
             Recording = WorldOutbox.Create(path, header, new UnityWorldCodec(), NativeWorldJournalTrace.Current);
             RecordingWriter = new QueuedWorldRecorder(Recording, new UnityWorldCodec());
             navigationProbe = NativeNavigationProbe.Install(gameObject, header.sessionId, header.streamId);

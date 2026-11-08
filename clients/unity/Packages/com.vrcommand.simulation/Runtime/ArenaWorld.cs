@@ -94,6 +94,7 @@ namespace VrCommand.Simulation
             Active(); var enemy = enemies.SingleOrDefault(e => e.Id == id) ?? throw new KeyNotFoundException("Enemy not found.");
             enemies.Remove(enemy);
         }
+        internal List<Vec3> EnemySpawnCandidates(int room) => ArenaLayout.EnemyCandidates(RoomOrigin(room), rooms[room]);
         public void SetPhase(WorldPhase next) => SetPhase(next, false);
         // Management may already have accepted Begin and the last player left before its next poll.
         internal void SetManagedPhase(WorldPhase next) => SetPhase(next, true);

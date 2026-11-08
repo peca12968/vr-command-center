@@ -39,9 +39,11 @@ namespace VrCommand.Simulation
         }
         private readonly Dictionary<ulong, Binding> connections = new Dictionary<ulong, Binding>();
         private Dictionary<Guid, ManagedPlayer> roster = new Dictionary<Guid, ManagedPlayer>();
-        private readonly List<Guid> enemySlots = new List<Guid>();
+        private SortedDictionary<int, Guid> enemySlots = new SortedDictionary<int, Guid>();
+        private const int ReinforcementIntervalTicks = 20;
         private Guid sessionId, missionId;
-        private int enemyGeneration;
+        private int enemyGeneration, enemyTarget;
+        private long nextReinforcementTick;
         private int missionDuration;
         private bool clockAutoEnd;
         private long sequence;
@@ -127,25 +129,28 @@ namespace VrCommand.Simulation
             if (rebuilt)
             {
                 // Build and validate a replacement before publishing any state; Preparing has no combat to preserve.
-                var candidate = new ArenaWorld(snapshot.roomIds, nextProps.ToArray());
+                var orderedRooms = snapshot.roomIds.OrderBy(room => room).ToArray();
+                var geometry = nextProps.ToArray();
+                var candidate = new ArenaWorld(orderedRooms, geometry);
                 foreach (var pair in nextRoster)
                 {
                     candidate.AddPlayer(pair.Key, pair.Value.roomId, Spawn(pair.Value.roomId, pair.Value.seat));
                     candidate.SetPlayerConnected(pair.Key, false);
                 }
-                var initialEnemies = PlanEnemies(candidate, snapshot.roomIds, nextProps.ToArray(), snapshot.enemies.count, id, enemyGeneration);
-                foreach (var enemy in initialEnemies) candidate.AddEnemy(enemy.Id, enemy.Room, enemy.Feet, enemy.Patrol);
-                World = candidate; props = nextProps.ToArray(); roomIds = snapshot.roomIds.OrderBy(room => room).ToArray();
-                enemySlots.Clear(); enemySlots.AddRange(initialEnemies.Select(enemy => enemy.Id)); enemyGeneration += initialEnemies.Length;
+                var slots = new SortedDictionary<int, Guid>();
+                var generation = SpawnAvailable(candidate, orderedRooms, slots, snapshot.enemies.count, id, enemyGeneration);
+                if (slots.Count != snapshot.enemies.count) throw new ArgumentException("Mission has no free enemy spawn area.");
+                World = candidate; props = geometry; roomIds = orderedRooms; enemySlots = slots;
+                enemyGeneration = generation;
+                enemyTarget = snapshot.enemies.count; nextReinforcementTick = ReinforcementIntervalTicks;
                 foreach (var binding in connections.Values) binding.LastPose = double.NegativeInfinity;
             }
-            else if (World!.Phase != WorldPhase.Ended)
+            else if (World!.Phase != WorldPhase.Ended && snapshot.enemies.count != enemyTarget)
             {
-                var extra = PlanEnemies(World, roomIds, props, Math.Max(0, snapshot.enemies.count - enemySlots.Count), id, enemyGeneration);
-                while (enemySlots.Count > snapshot.enemies.count)
-                { World.RemoveEnemy(enemySlots[enemySlots.Count - 1]); enemySlots.RemoveAt(enemySlots.Count - 1); }
-                foreach (var enemy in extra) { World.AddEnemy(enemy.Id, enemy.Room, enemy.Feet, enemy.Patrol); enemySlots.Add(enemy.Id); }
-                enemyGeneration += extra.Length;
+                enemyTarget = snapshot.enemies.count;
+                foreach (var slot in enemySlots.Keys.Reverse().TakeWhile(slot => slot >= enemyTarget).ToArray())
+                { World.RemoveEnemy(enemySlots[slot]); enemySlots.Remove(slot); }
+                if (phase != WorldPhase.Ended) TryReinforce();
             }
             foreach (var connection in connections.Where(pair => !nextRoster.TryGetValue(pair.Value.Player, out var entry)
                 || entry.admissionId != pair.Value.Admission.ToString("D")).Select(pair => pair.Key).ToArray())
@@ -164,21 +169,38 @@ namespace VrCommand.Simulation
             if (World.Phase != phase) World.SetManagedPhase(phase);
         }
 
-        private sealed class EnemySpawn { internal Guid Id; internal int Room; internal Vec3 Feet, Patrol; }
-        private static EnemySpawn[] PlanEnemies(ArenaWorld world, int[] rooms, WorldProp[] geometry, int count, Guid session, int generation)
+        private void TryReinforce()
         {
-            var plan = new List<EnemySpawn>();
+            enemyGeneration = SpawnAvailable(World, roomIds, enemySlots, enemyTarget, sessionId, enemyGeneration);
+            nextReinforcementTick = World.TickNumber + ReinforcementIntervalTicks;
+        }
+
+        private static int SpawnAvailable(ArenaWorld world, int[] rooms, SortedDictionary<int, Guid> slots,
+            int target, Guid session, int generation)
+        {
+            if (slots.Count >= target) return generation;
             var existing = world.Snapshot().Enemies;
-            for (var index = 0; index < count; index++)
+            var available = new Dictionary<int, List<Vec3>>();
+            for (var slot = 0; slot < target; slot++)
             {
-                var room = rooms[(existing.Length + index) % rooms.Length];
-                var candidates = ArenaLayout.EnemyCandidates(room, geometry, position => existing.All(enemy => Vec3.Distance(enemy.Feet, position) > .7f)
-                    && plan.All(enemy => Vec3.Distance(enemy.Feet, position) > .7f));
-                if (candidates.Count == 0) throw new ArgumentException("Mission has no free enemy spawn area.");
-                var feet = candidates[0]; var patrol = candidates[candidates.Count - 1];
-                plan.Add(new EnemySpawn { Id = StableId(session, "enemy:" + (generation + index)), Room = room, Feet = feet, Patrol = patrol });
+                if (slots.ContainsKey(slot)) continue;
+                var room = rooms[slot % rooms.Length];
+                if (!available.TryGetValue(room, out var candidates))
+                {
+                    candidates = world.EnemySpawnCandidates(room);
+                    var occupants = existing.Where(enemy => enemy.RoomId == room).ToArray();
+                    candidates.RemoveAll(point => occupants.Any(enemy => Vec3.Distance(enemy.Feet, point) <= .7f));
+                    available.Add(room, candidates);
+                }
+                if (candidates.Count == 0) continue;
+                // Candidate spacing is .75m, so selecting one leaves every other candidate clear.
+                var id = StableId(session, "enemy:" + generation);
+                world.AddEnemy(id, room, candidates[0], candidates[candidates.Count - 1]);
+                slots.Add(slot, id);
+                candidates.RemoveAt(0);
+                generation++;
             }
-            return plan.ToArray();
+            return generation;
         }
         private static bool SameProps(WorldProp[] left, WorldProp[] right) => left.Length == right.Length && left.Zip(right, (a, b) =>
             a.Id == b.Id && a.RoomId == b.RoomId && a.Kind == b.Kind && a.Feet.Equals(b.Feet) && a.Yaw.Equals(b.Yaw)).All(value => value);
@@ -221,6 +243,8 @@ namespace VrCommand.Simulation
             if (World.Phase != WorldPhase.Ended)
                 foreach (var binding in connections.Values) World.SetPlayerConnected(binding.Player, now >= binding.LastPose && now - binding.LastPose <= .5);
             World.Tick();
+            if (World.Phase == WorldPhase.Running && enemySlots.Count < enemyTarget && World.TickNumber >= nextReinforcementTick)
+                TryReinforce();
         }
         public void Suspend() { if (World != null && World.Phase == WorldPhase.Running) World.SetPhase(WorldPhase.Paused); }
         private static bool ValidTime(double now) => !double.IsNaN(now) && !double.IsInfinity(now) && now >= 0;

@@ -198,12 +198,12 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('#notice').textContent.includes('場次狀態或名額已變更'));
     check((await api('/sessions/' + session.id)).enemies.count === 9, 'Stale editor sequence cannot overwrite another operator command');
     await page.locator('#refresh').click();
-    await page.waitForFunction(() => document.querySelector('#live-enemies').textContent.startsWith('9 名'));
+    await page.waitForFunction(() => document.querySelector('#live-enemies').textContent.startsWith('目標 9 名'));
     check(await page.locator('#live-count').inputValue() === '5', 'Background refresh does not silently replace an operator draft');
     await page.locator('#reload-enemies').click();
     await page.locator('#live-count').fill('5'); await page.locator('#live-behavior').selectOption('Advance'); await page.locator('#live-auto-attack').uncheck();
     await page.locator('#enemies-form button[type=submit]').click();
-    await page.waitForFunction(() => document.querySelector('#live-enemies').textContent.startsWith('5 名'));
+    await page.waitForFunction(() => document.querySelector('#live-enemies').textContent.startsWith('目標 5 名'));
     const enemySettings = (await api('/sessions/' + session.id)).enemies;
     check(enemySettings.count === 5 && enemySettings.behavior === 'Advance' && !enemySettings.autoAttack, 'Enemy count, behavior and automatic attack controls update the session settings');
     const commands = []; let loseResponse = true, lossAction = 'Pause';

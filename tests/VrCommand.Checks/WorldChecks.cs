@@ -120,5 +120,37 @@ internal static class WorldChecks
         check(restarted.Info(id,master).Header.playerFireVersion==1 && savedPlayer.hasFireState && savedPlayer.fireSequence>0 && savedPlayer.fireSequence==originalPlayer.fireSequence
             && savedPlayer.fireOrigin.ToVector().Equals(originalPlayer.fireOrigin.ToVector()) && savedPlayer.fireDirection.ToVector().Equals(originalPlayer.fireDirection.ToVector()),"Reopened SQLite preserves the accepted player fire sequence and exact historical ray");
         check(restarted.Append(id, running, owner).Complete, "Reopened archive accepts an exact historical retry");
+
+        var rooms = new[] { 1, 2, 3, 4, 5 };
+        var linked = manager.Create(SessionMode.Linked, rooms, mission with { Definition = mission.Definition with { Enemies = new(2, EnemyBehavior.Hold, true) } }, master);
+        manager.Join(linked.Id, Guid.NewGuid(), "Reinforcement player", 1, HeadsetKind.Quest3, master);
+        var reinforcementStream = Guid.NewGuid();
+        manager.OpenStream(linked.Id, new(reinforcementStream, CombatOrigin.Simulation), owner);
+        var linkedBridge = new ArenaSession();
+        ManagementSnapshot LinkedView() => JsonSerializer.Deserialize<ManagementSnapshot>(
+            JsonSerializer.Serialize(manager.Get(linked.Id, owner), JsonFormat.Options),
+            new JsonSerializerOptions(JsonFormat.Options) { IncludeFields = true })!;
+        linkedBridge.Apply(LinkedView());
+        var reinforcementHeader = WorldRecordingHeader.Create(linked.Id, reinforcementStream, "Simulation", rooms, linkedBridge.Props);
+        reinforcementHeader.reinforcementVersion = 2;
+        Reject<ArgumentException>(() => store.Open(linked.Id, reinforcementHeader, owner), "Unknown reinforcement recording version fails closed");
+        reinforcementHeader.reinforcementVersion = WorldRecordingHeader.ReinforcementVersion;
+        store.Open(linked.Id, reinforcementHeader, owner);
+        var linkedInitial = WorldRecordingPacket.Capture(linkedBridge.World, 1, 0, manager.Get(linked.Id).Sequence, 0, 0, _ => new());
+        var missingInitial = Copy(linkedInitial); missingInitial.frame.enemies = [missingInitial.frame.enemies[0]];
+        Reject<InvalidOperationException>(() => store.Append(linked.Id, missingInitial, owner), "Reinforcement recordings still require the full initial enemy roster");
+        store.Append(linked.Id, linkedInitial, owner);
+        manager.Execute(linked.Id, new(Guid.NewGuid(), ControlAction.Begin), master);
+        linkedBridge.Apply(LinkedView());
+        var partial = WorldRecordingPacket.Capture(linkedBridge.World, 2, 100, manager.Get(linked.Id).Sequence, 0, 0, _ => new());
+        var wrongRoom = Copy(partial);
+        wrongRoom.frame.enemies[1].roomId = 1;
+        wrongRoom.frame.enemies[1].feet = wrongRoom.frame.enemies[0].feet;
+        Reject<InvalidOperationException>(() => store.Append(linked.Id, wrongRoom, owner), "Reinforcements cannot exceed the target allocation in a single room");
+        partial.frame.enemies = [partial.frame.enemies[0]];
+        check(store.Append(linked.Id, partial, owner).AcceptedSequence == 2
+            && store.Frame(linked.Id, 2, master)!.Packet.frame.enemies.Length == 1,
+            "A blocked reinforcement remains absent from the saved and replayed world");
+        manager.End(linked.Id, master);
     }
 }
