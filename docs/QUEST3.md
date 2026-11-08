@@ -146,6 +146,16 @@ embedded package `com.vrcommand.simulation` 現為 0.11.0。Runtime asmdef 已�
 5. 先在 Preparing 啟動伺服器與玩家，再發 Begin；核對頭手互見、射擊／換彈、掩體與 AI／健康同步，再試 Pause、Resume、SetEnvironment 及 SetEnemies。管理資料超過 1.5 秒未更新時應停止戰鬥；所有路徑尚待實際執行。另核對 journal、批次補送與 End 封存；同一管道已有 .NET／HTTP 證據，Unity 路徑仍須實際執行。
 6. 測試後以 End 結束自己建立的場次，保留歷史並釋放房間。票券過期時由有權控制台對同一玩家重新配發；不用刪除其他場次。已結束場次不能再配發或驗證。
 
+### Quest 3 場地對位部署
+
+先從管理台下載通過檢查的房間校正檔，再用同一房的玩家設定部署。一般部署可省略 `-AlignmentFile`。
+
+```powershell
+.\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connections\<場次ID>\player-1.json -AlignmentFile .\room-1-alignment.json
+```
+
+腳本會在玩家設定記錄匯出檔的 SHA-256。頭盔讀入時核對檔案、房間和標記，再以當次 OpenXR 追蹤重新量測。量測、回到出生位與原點失效的流程見 [場地配置](LAYOUT.md#quest-3-場地對位)。ADB 實機安裝、頭盔取樣與 MR 透視列入設備驗收。
+
 ## 連線與仍待實作事項
 
 一個桌面伺服器程序綁定一個管理場次；五房 Independent 使用各自程序／UDP 埠，全連線則使用一份 Linked 場次與共同伺服器。助手目前只產生單房 Independent 設定；Linked 名冊與票券可透過 API 建立。場景用房間原點平移安排五區，尚無實體場館對位或共用錨點。

@@ -1,5 +1,16 @@
 # 開發進度
 
+## 2026-11-09 Unity 場地對位
+
+Unity 0.42.0 可讀取入場房間的校正檔。在 Preparing 或 Paused 以左扳機依序記錄 A、B、C，通過 5 公分門檻後，將同一個追蹤空間套用到頭部、雙手及瞄準方向。地板原點更新或程式暫停會要求重新量測。伺服器仍以最後接受的位置檢查姿態，初次從指定出生位起算。 [操作說明](LAYOUT.md#quest-3-場地對位)
+
+- 來源 `d50419de6db7234bdceb06c93ae01624599fe99c` 通過 800 項核心、581 項 HTTP、58 項世界串流及 254 項 Unity Editor 測試。12 項新增 Editor 測試以 Unity Transform 核對頭手平移、旋轉、錯房、鏡像、誤差邊界和追蹤失效。以管理台實際匯出的第五房 JSON 驗證三個模擬 ADB 案例，包括一般部署、校正檔先於玩家設定啟用，以及校正檔複製失敗時停止。
+- Windows 測試 `20261109-002658-1ca14efd` exit 0，18 項通過。五房連線與五房獨立各有五名同機模擬玩家以原遊戲輸入移動、射擊及換彈。六場共 2,022 幀完整回放、10 份原玩家戰績、10 筆伺服器確認及 6 份場次 CSV。測試程序清理完成，C／F 的 54 份原始檔相符。
+- F 槽的 Windows 0.42.0 玩家包 `artifacts/player-packages/windows-player-0.42.0.zip` 為 82,659,739 bytes，SHA-256 `ad52280f49bc9e423a901b7da85fac2aad3eb8fc979b73fb89418f57f02edf7f`。伺服器包 `artifacts/server-packages/windows-server-0.42.0-launcher1.3-win-x64.zip` 為 82,682,413 bytes，SHA-256 `1b0551a427c9403c42ca41892b66456849e4fe636f7e24861e1a53d4c76c18f5`。兩包解壓後各核對 311 筆清單，實際玩家啟動器另通過 19 項離線檢查。首次額外核對以系統預設編碼讀取 UTF-8 清單中止，改用 UTF-8 後完成。先以 SHA-256 封存 321 份前版二進位、收據及 Unity 日誌。
+- Windows 及 Quest 0.42.0 均由 Unity 6000.3.27f1 成功建置，來源指紋 `31a66d41e61219075ade72e95f3b52df0551d151d0873f9eecfda2dc1f0cf5de` 相符，兩端場景和玩家 Prefab 的網路識別均與 0.41.2 相同。Quest Development APK `artifacts/quest/VrCommand.apk` 為 60,378,130 bytes，SHA-256 `b834e0d0662371edadc22d28f568ae7c7a100d1d8de046de83f8608c172f20a1`。Android 工具核對 ARM64、版本碼 54、min SDK 32、target SDK 35 和有效 v2 Debug 簽章。收據、日誌及核對結果存於 `artifacts/unity-floor-alignment-0.42.0`。
+- GitHub Actions 42499467687／128788839838 因帳務條件未啟動，共 0 個執行步驟。 [GitHub 工作](https://github.com/peca12968/vr-command-center/actions/runs/42499467687/job/128788839838)
+- Quest 3 實機取樣、地板高度、MR 透視、VIVE 相容、廠商硬體及 25 位真人仍待驗。
+
 ## 2026-11-08 MR 場地水平校正試算
 
 控制台 0.31.11 可在任務編輯頁選房，輸入三組遊戲與追蹤的地面座標。A、B 用來計算旋轉與位移，C 獨立核對。三點的平面誤差均在 5 公分內才可下載 JSON。 [操作與座標契約](LAYOUT.md#mr-場地水平校正試算)

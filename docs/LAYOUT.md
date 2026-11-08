@@ -8,7 +8,15 @@ A 定位原點偏移，A 到 B 定出方向。A、B 在兩套座標中都須相�
 
 `POST /api/room-alignment` 接受 `roomId` 及三個依 A、B、C 排列的 `markers`，每組含 `room`、`tracking`，各有 `x` 和 `z`。房間座標在 ±6 公尺內，追蹤座標在 ±100 公尺內。回應 `room-floor-alignment-v1` 包含原量測值、各標記的對齊座標與誤差、`yawDegrees`、房間本地 `translation` 和全館 `roomOrigin`。JSON 以遊戲 Y 軸旋轉方向計算，正 90° 會把追蹤 +Z 轉到房間 +X。換算全館座標時，先將追蹤點旋轉並加上本地位移，再加全館房間原點。
 
-試算與下載獨立於任務版本及開場。頭盔取樣、地板高度、透視及實際套用校正列入後續整合驗收。 [驗證紀錄](PROGRESS.md#2026-11-08-mr-場地水平校正試算)
+試算與下載獨立於任務版本及開場。 [驗證紀錄](PROGRESS.md#2026-11-08-mr-場地水平校正試算)
+
+### Quest 3 場地對位
+
+Unity 0.42.0 可讀取對應入場房間的校正檔。用 `deploy-quest.ps1 -AlignmentFile` 隨玩家設定部署。匯出的檔案提供房間 A、B、C 的位置。每台頭盔在進入 Preparing 或 Paused 後，依畫面提示把左控制器的追蹤點放到 A、B、C 正上方，逐點按左扳機。使用同一控制器握法與朝向，並維持頭部及雙手追蹤。程式使用 OpenXR 的地板原點及控制器 X、Z，三點都通過原 5 公分門檻後才將頭部、雙手和瞄準方向轉換到全館座標。
+
+首次量完請回到頭盔顯示的房間本地 X、Z。伺服器沿用原有規則，第一筆姿態須在指定出生位 0.5 公尺內。已送過有效姿態時，提示會顯示最後一筆有效姿態的 X、Z。追蹤原點更新或應用程式暫停後，需在 Preparing 或 Paused 重新量測。錯房、三點不符或地板追蹤不可用時，頭盔會暫停送出姿態與武器輸入。 [Unity 追蹤原點事件](https://docs.unity3d.com/6000.0/Documentation/ScriptReference/XR.XRInputSubsystem-trackingOriginUpdated.html)
+
+目前驗證使用 Unity Editor 模擬的追蹤座標。Quest 3 實機量測、房間地板高度、MR 透視和跨頭盔共用定位仍待驗。 [Quest 3 部署](QUEST3.md#quest-3-場地對位部署)
 
 ## 出生位通路預覽
 
