@@ -127,6 +127,7 @@ module.exports = async function layoutBrowser({ context, api, tokens, base, miss
       const rejected = editor.waitForResponse(response => response.url().endsWith(`/api/sessions/${mixed.id}/commands`)
         && response.request().method() === 'POST' && response.status() === 409);
       await editor.locator('[data-command=Begin]').click(); await rejected;
+      await editor.locator('#notice').filter({ hasText: 'MR 場次尚未就緒' }).waitFor();
       const state = await api(`/sessions/${mixed.id}`);
       check(state.state === 'Preparing' && state.players.length === 1 && state.players[0].headset === 'Quest3',
         'MR Begin without a fresh tracked pose leaves the original roster and Preparing phase intact');

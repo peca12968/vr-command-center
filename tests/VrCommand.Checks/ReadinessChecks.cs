@@ -111,7 +111,7 @@ internal static class ReadinessChecks
             throw new Exception(message);
         }
         var begin = new ControlCommand(Guid.NewGuid(), ControlAction.Begin);
-        Reject<InvalidOperationException>(() => store.ExecuteCommand(id, begin, master), "MR cannot begin before a server and live roster exist");
+        Reject<MixedRealityNotReadyException>(() => store.ExecuteCommand(id, begin, master), "MR cannot begin before a server and live roster exist");
         Reject<InvalidOperationException>(() => manager.Join(id, Guid.NewGuid(), "VIVE", 1, HeadsetKind.ViveXr, master), "Current MR roster requires Quest 3 support");
         Reject<InvalidOperationException>(() => manager.OpenStream(id, new(Guid.NewGuid(), CombatOrigin.Simulation), server), "MR cannot be bound to a simulation source");
         Reject<InvalidOperationException>(() => manager.Execute(id, new(Guid.NewGuid(), ControlAction.SetEnvironment,

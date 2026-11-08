@@ -16,6 +16,7 @@ public record RoomView(int Id, int Capacity, Guid? SessionId, int PlayerCount);
 public record ControlCommand(Guid CommandId, ControlAction Action, EnvironmentSettings? Environment = null,
     EnemySettings? Enemies = null, long? ExpectedSequence = null, MissionClockSettings? MissionClock = null, MissionClockExpiration? ClockExpiration = null);
 public record CommandReceipt(Guid CommandId, long AppliedAtSequence, bool Duplicate, SessionView Session);
+public sealed class MixedRealityNotReadyException() : InvalidOperationException("MR start requires fresh tracked Quest 3 poses for the current roster.");
 
 // Management and combat telemetry; this does not simulate a 3D world or determine physical collisions.
 public sealed partial class SessionManager
@@ -203,7 +204,7 @@ public sealed partial class SessionManager
                 && history.View.Environment.Mode == ExperienceMode.MR
                 && (readyMrSequence != history.View.Sequence || history.View.CombatStream?.Origin != CombatOrigin.GameServer
                     || history.View.Players.Any(player => player.Headset != HeadsetKind.Quest3)))
-                throw new InvalidOperationException("MR start requires fresh tracked Quest 3 poses for the current roster.");
+                throw new MixedRealityNotReadyException();
             var entry = SessionEvent.Create(id, history.View.Sequence + 1, SessionEventKind.ControlApplied, command, actor);
             var updated = Commit(history, entry);
             return new(command.CommandId, entry.Sequence, false, updated);

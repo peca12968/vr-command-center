@@ -82,6 +82,8 @@ app.Use(async (context, next) =>
         };
         if (ex is MissionLayoutRejectedException layout)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, layout = layout.Report });
+        else if (ex is MixedRealityNotReadyException)
+            await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "mr-readiness-required" });
         else await context.Response.WriteAsJsonAsync(new { error = ex.Message });
     }
 });

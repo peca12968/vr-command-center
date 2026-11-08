@@ -730,7 +730,8 @@ try:
             request("POST", mr_path + "/players", {**player, "headset": "ViveXr"}, 409)
             joined_mr = request("POST", mr_path + "/players", {**player, "headset": "Quest3"})
             begin_mr = {"commandId": str(uuid.uuid4()), "action": "Begin"}
-            request("POST", mr_path + "/commands", begin_mr, 409)
+            require(request("POST", mr_path + "/commands", begin_mr, 409)["code"] == "mr-readiness-required",
+                    "MR Begin names its readiness conflict without changing generic conflict handling")
             request("POST", mr_path + "/combat-stream", {"streamId": str(uuid.uuid4()), "origin": "Simulation"}, 409, identity="GameServer")
             require(request("GET", mr_path) == joined_mr, "Rejected MR Begin and simulation attachment leave the exact Preparing roster untouched")
             change = {"commandId": str(uuid.uuid4()), "action": "SetEnvironment"}
