@@ -1,5 +1,14 @@
 # 開發進度
 
+## 2026-11-09 主控下載場館驗收資料
+
+控制台 0.31.14 在「任務收尾」新增「下載場館驗收資料 ZIP」。只有全館主控可以下載。API 核對任務曾開始、世界與戰鬥同源封存、端點公告及結束名冊與統計一致，再輸出 `session.json`、`statistics.json` 和 `endpoint.json`。檔名使用場次 UUID，回應為 `application/zip` 和 `Cache-Control: no-store`。切換場次、頁籤或登出會取消待送達的下載。ZIP 資料供既有離線工具與原始日誌合併核對。 [操作流程](EXTERNAL_CLIENTS.md#核對封存戰績與-udp-來源)
+
+- 功能來源 `ef9e5a659091ceb838596e00fdb0458feed0f0b9`。Windows Release 建置、825 項核心、603 項 HTTP、58 項世界串流、92 項 Node 和 352 項 Chromium 通過。另有 10 項專項瀏覽器檢查，透過實際 API、WorldRelay 與 Chromium 下載，核對三個 ZIP 檔案逐一等於 API 資料、只讀序號與身分切換。首兩次瀏覽器啟動在缺少指定執行檔時退出，F 槽下載快取另有鎖更新逾時，改用全新的 C 槽快取取得版本相符的 Chromium 後通過。原紀錄保留。
+- Windows 管理 ZIP 為 52,531,647 bytes，SHA-256 `fb2df7651f01d1cbd1990083bf89d4730beef34918601f3b30a514d5af5addea`。自含 .NET／ASP.NET Core 10.0.14，487 份執行內容，解壓後逐檔核對 507 筆及 106 項 Windows 管理包檢查，停止後 C／F 核對 27 份。 [管理服務包](WINDOWS_CONTROL_PACKAGE.md)
+- 三包場次 `run-3f30c4e40fc14a8285021330616347b0` 使用新版管理包和 Windows 0.47.0 遊戲包。五房獨立與全連線各 25 個同機模擬玩家，360 項原生檢查、913 幀完整回放、50 份戰績確認及 6 份 CSV 通過。全連線 ZIP 為 3,415 bytes，SHA-256 `4883582ffa26ac667c968142696f29ac62fed43e2cfd14687915c2318db63f88`，最終世界序號 149。解壓後獨立執行既有 CLI，25 份原戰績與伺服器 UDP 來源及確認相符。活動場次歸零，清理後 C／F 核對 219 份。實際雙機與場館容量待驗。
+- [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42518470088) 的 job `128846550929` 因帳務或支出上限未啟動，零步驟。
+
 ## 2026-11-09 場館連線與戰績核對
 
 新增 `scripts/verify-field-results.py`。工具讀取 Windows 啟動器的終止報告、管理服務的封存快照、公告端點，以及伺服器和玩家原始日誌。它將每位玩家的最後一條連線對到伺服器觀察的 UDP 來源及戰績確認，再比對結束名冊、房間、入場 ID、世界與戰鬥封存序號、統計。摘要只輸出計數、房間、序號與範圍。 [驗收操作](EXTERNAL_CLIENTS.md#核對封存戰績與-udp-來源)
