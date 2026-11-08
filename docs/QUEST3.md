@@ -139,7 +139,7 @@ embedded package `com.vrcommand.simulation` 現為 0.11.0。Runtime asmdef 已�
 4. Quest 3 須開啟開發者模式，USB 連接並在頭盔內授權 ADB。部署每台不同玩家設定：
 
    ```powershell
-   .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connections\<場次ID>\player-1.json
+   pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connections\<場次ID>\player-1.json
    ```
 
    多台裝置須用 `-Serial` 指定；腳本核對裝置型號、只接受玩家欄位、安裝本專案 APK 並複製設定後啟動。此腳本尚未實機執行。
@@ -150,18 +150,27 @@ embedded package `com.vrcommand.simulation` 現為 0.11.0。Runtime asmdef 已�
 
 先從管理台下載通過檢查的房間校正檔，再用同一房的玩家設定部署。一般部署可省略 `-AlignmentFile`。
 
+`-CheckOnly` 可在 PowerShell 7 預檢部署檔，適合在接頭盔之前核對。以下以 MR 為例。
+
 ```powershell
-.\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connections\<場次ID>\player-1.json -AlignmentFile .\room-1-alignment.json
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -CheckOnly -MixedReality `
+  -ClientConfig .\player.json -AlignmentFile .\room-1-alignment.json
 ```
 
-腳本會在玩家設定記錄匯出檔的 SHA-256。頭盔讀入時核對檔案、房間和標記，再以當次 OpenXR 追蹤重新量測。量測、回到出生位與原點失效的流程見 [場地配置](LAYOUT.md#quest-3-場地對位)。ADB 實機安裝、頭盔取樣與 MR 透視列入設備驗收。
+預檢回報房間、從 1 開始計算的席位、票券到期時間、選用模式及校正檔 SHA-256。以本機 UTC 檢查票券效期，並比對票券房號與校正檔，核對 A、B、C 欄位和座標範圍。預檢只讀本機檔案，輸出不含票券。遊戲伺服器仍負責驗簽及核對目前名冊，頭盔會重新計算校正並量測追蹤。票券效期為五分鐘，正式部署時請使用當場新配發的檔案。
+
+```powershell
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connections\<場次ID>\player-1.json -AlignmentFile .\room-1-alignment.json
+```
+
+正式部署會先執行相同檢查，再把當次核對的校正檔內容複製到頭盔。玩家設定記錄該份內容的 SHA-256。頭盔讀入時核對檔案、房間和標記，再以當次 OpenXR 追蹤重新量測。量測、回到出生位與原點失效的流程見 [場地配置](LAYOUT.md#quest-3-場地對位)。ADB 實機安裝、頭盔取樣與 MR 透視列入設備驗收。
 
 ### Quest 3 透視呈現
 
 Unity 0.43.0 的 Quest 開發版可用 `-Passthrough` 在已開啟的 VR 場次中使用 Meta 的透視合成層。部署須附同一房間的校正檔。玩家進入 Preparing 或 Paused 後量測 A、B、C，並依提示回到遊戲起點。
 
 ```powershell
-.\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connections\<場次ID>\player-1.json -AlignmentFile .\room-1-alignment.json -Passthrough
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connections\<場次ID>\player-1.json -AlignmentFile .\room-1-alignment.json -Passthrough
 ```
 
 透視啟用後，實景位於虛擬敵軍、擺設、雨線和 HUD 後方。遊戲的日夜與閃電影響虛擬物件照明，雷聲沿用原任務設定。遊戲仍保留地板與擺設的碰撞。合成層或校正未就緒時，頭盔暫停送出姿態與武器輸入。 [Unity 透視設定](https://docs.unity3d.com/Packages/com.unity.xr.meta-openxr@2.3/manual/features/camera.html)
@@ -175,7 +184,7 @@ Unity 0.43.0 的 Quest 開發版可用 `-Passthrough` 在已開啟的 VR 場次�
 加入 Quest 3 玩家，為各席發票券，並準備對應房間的校正檔。同房玩家共用同一份標記配置，各自部署自己的玩家設定。
 
 ```powershell
-.\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connections\<場次ID>\player-1.json -AlignmentFile .\room-1-alignment.json -MixedReality
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connections\<場次ID>\player-1.json -AlignmentFile .\room-1-alignment.json -MixedReality
 ```
 
 玩家在準備中完成 A、B、C 三點量測，再回到頭盔提示的起點。主控可在名冊確認每位玩家的追蹤姿態。遊戲伺服器會核對票券房間和所選校正房間。全名冊的有效追蹤快照對上目前場次序號後，即可按開始。場中可調整天氣、時段及閃電。 [參戰快照](PLAYER_READINESS.md#mr-開場條件)
