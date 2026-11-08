@@ -64,7 +64,8 @@ export function mountAlignmentPins({ state, checkFile, pin }) {
       row.digest.hidden = !row.digest.textContent;
     }
     text(summary, editing ? `已核對 ${checked}／${rows.size} 房。鎖定後請用這些原始檔案部署頭盔。`
-      : session.roomAlignment ? '校正檔已鎖定，可依場次設定啟動伺服器。'
+      : session.roomAlignment ? (session.state === 'Preparing' && !session.combatStream
+        ? '校正檔已鎖定，可依場次設定啟動伺服器。' : '下方為本場各房已鎖定的校正檔。')
       : '此場次已綁定遊戲來源或離開準備階段。請建立新場次以鎖定校正檔。');
     submit.hidden = !editing;
     submit.disabled = !editing || locked || checked !== rows.size || !rows.size;

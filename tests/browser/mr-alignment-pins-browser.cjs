@@ -150,6 +150,12 @@ module.exports = async function mrAlignmentPinsBrowser({ context, api, base, tok
     check(await panel.locator('code:visible').count() === 5 && await submit.isHidden(), 'Reload reads back the saved room hashes with no upload controls');
     await open('Room1'); await select(linked);
     check(await panel.isHidden(), 'Room control can see its session while the master calibration controls stay hidden');
+    await open('Master'); await select(linked);
+    await end(linked.id);
+    await page.locator('#include-ended').check(); await select(linked);
+    await page.locator('#session-phase').filter({ hasText: '已結束' }).waitFor();
+    check(await panel.locator('code:visible').count() === 5 && await submit.isHidden()
+      && (await summary.innerText()) === '下方為本場各房已鎖定的校正檔。', 'Ended sessions display the historical pins without suggesting another start');
   } catch (error) {
     await page.screenshot({ path: path.join(screenshots, 'mr-alignment-pins-failure.png'), timeout: 5000 }).catch(() => {});
     throw error;
