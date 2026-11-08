@@ -234,7 +234,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connect
 
 ### 主控建立 MR 場次
 
-以控制台 0.31.12 將任務的初始模式選為 MR 並保存版本。建立單房或五房全連線場次後，在 Windows 伺服器啟動器 1.4 的清單選擇該 MR 場次。MR 由專用遊戲伺服器建立 GameServer 來源，模式在建立時固定。
+在控制台將任務的初始模式選為 MR 並保存版本。建立單房或五房全連線場次後，先鎖定各房校正檔，再從 Windows 伺服器啟動器選擇該場。MR 由專用遊戲伺服器建立 GameServer 來源，模式在建立時固定。 [鎖定校正檔](#啟動-mr-伺服器前鎖定校正檔)
 
 加入 Quest 3 玩家，為各席發票券，並準備對應房間的校正檔。同房玩家共用同一份標記配置，各自部署自己的玩家設定。
 
@@ -242,7 +242,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connect
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connections\<場次ID>\player-1.json -AlignmentFile .\room-1-alignment.json -MixedReality
 ```
 
-玩家在準備中完成 A、B、C 三點量測，再回到頭盔提示的起點。主控可在「MR 開場檢查」查看各房就緒人數與等候席位。遊戲伺服器會核對票券房間和所選校正房間。全名冊的有效追蹤快照對上目前場次序號後，即可按開始。場中可調整天氣、時段及閃電。 [參戰快照](PLAYER_READINESS.md#mr-開場條件)
+玩家在準備中完成 A、B、C 三點量測，再回到頭盔提示的起點。主控可在「MR 開場檢查」查看各房就緒人數與等候席位。遊戲伺服器會核對票券房間、所選校正房間與鎖定的校正檔雜湊。全名冊的有效追蹤快照對上目前場次序號後，即可按開始。場中可調整天氣、時段及閃電。 [參戰快照](PLAYER_READINESS.md#mr-開場條件)
 
 場次暫停時，頭盔需要重新對位的玩家可完成量測。請在「MR 繼續檢查」確認存活席位已就緒，再按繼續。 [暫停後繼續](PLAYER_READINESS.md#暫停後繼續)
 
