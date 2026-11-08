@@ -32,13 +32,16 @@ dotnet tools/VrCommand.WorldRelay/bin/Release/net10.0/VrCommand.WorldRelay.dll -
 dotnet tools/VrCommand.WorldRelay/bin/Release/net10.0/VrCommand.WorldRelay.dll --world-journal F:/Projects/vr-command-center/artifacts/world-source/demo.worldlog
 ```
 
-Unity 在 telemetryDirectory 保存 `<sessionId>.worldlog` 與 `<sessionId>.journal`，可明確指定兩份原始來源：
+Unity 在 telemetryDirectory 保存 `<sessionId>.worldlog` 與 `<sessionId>.journal`。遊戲程序中斷後，確認原程序已退出，保留兩份原件。從儲存庫根目錄建置工具，再對副本執行補送：
 
 ```powershell
-dotnet tools/VrCommand.WorldRelay/bin/Release/net10.0/VrCommand.WorldRelay.dll --world-journal F:/Projects/vr-command-center/data/telemetry/SESSION.worldlog --combat-journal F:/Projects/vr-command-center/data/telemetry/SESSION.journal
+dotnet build tools/VrCommand.WorldRelay -c Release
+dotnet tools/VrCommand.WorldRelay/bin/Release/net10.0/VrCommand.WorldRelay.dll --world-journal F:/Projects/vr-command-center/artifacts/recovery/SESSION.worldlog --combat-journal F:/Projects/vr-command-center/artifacts/recovery/SESSION.journal --base-url $managementUrl --key-file $operatorKeyFile
 ```
 
-用實際 UUID 取代 SESSION。兩份檔案的 session、streamId、origin 必須一致，否則在補送前拒絕。恢復可接受原始 Simulation 或 GameServer；所有 demo 仍強制 Simulation。可加 --base-url／--key-file，預設讀忽略的本機密鑰，永不寫入來源檔或輸出密鑰。只在桌面伺服器配置 GameServer 憑證，頭盔仍只有玩家短效票券。
+用實際 UUID 取代 SESSION，並指定原管理實例的網址及 GameServer 密鑰設定。兩份檔案的 session、streamId、origin 必須一致。工具以世界 journal header 中的任務時鐘版本重新附接戰鬥串流，支援舊版 0 與目前 Unity 的版本 1。先確認戰鬥事件，再補送其後的世界影格。補送會在副本追加確認。工具支援原始 Simulation 或 GameServer，demo 一律使用 Simulation。
+
+若中斷時缺少完成意圖，原場次仍由操作員在管理端結束。已保存回放可播放至補送後的最後一幀，保留未封存狀態及待確認戰績。
 
 舊 --recording 模式繼續處理 v0.12 NDJSON，不把它當成 binary journal。CLI 遇到網路失敗退出並保留來源供重送；自動重連在 Unity 接入程式碼內，尚待運行驗證。Native demo 的 tick／錄製頻率及等待網路的節奏不等同 Unity 的 10 Hz 來源或實機吞吐量。
 

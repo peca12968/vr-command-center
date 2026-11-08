@@ -28,21 +28,27 @@ async Task<T> Post<T>(HttpClient client, string route, object body)
     using var response = await client.PostAsJsonAsync(route, body, JsonFormat.Options); response.EnsureSuccessStatusCode();
     return (await response.Content.ReadFromJsonAsync<T>(JsonFormat.Options))!;
 }
-async Task Deliver(TelemetryOutbox queue)
+async Task Deliver(TelemetryOutbox queue, int missionClockVersion = 0)
 {
     var route = "/api/sessions/" + queue.SessionId + "/combat-stream";
-    await Post<CombatStreamView>(http, route, new OpenCombatStream(queue.StreamId, Enum.Parse<CombatOrigin>(queue.Origin)));
+    var origin = Enum.Parse<CombatOrigin>(queue.Origin);
+    var attached = await Post<CombatStreamView>(http, route, new OpenCombatStream(queue.StreamId, origin, missionClockVersion));
+    if (attached.StreamId != queue.StreamId || attached.Origin != origin || attached.MissionClockVersion != missionClockVersion
+        || attached.AcceptedSequence < queue.AcknowledgedSequence || attached.AcceptedSequence > queue.LastSequence
+        || (attached.Sealed && (!queue.Complete || attached.AcceptedSequence != queue.LastSequence))
+        || (queue.Sealed && !attached.Sealed)) throw new InvalidDataException("Combat attachment disagrees with the saved journal.");
     while (queue.Pending is not null)
     {
         var batch = queue.PendingBatch(); using var response = await http.PostAsync(route + "/batch", new StringContent(TelemetryOutbox.BatchJson(batch), Encoding.UTF8, "application/json"));
         response.EnsureSuccessStatusCode(); var receipt = (await response.Content.ReadFromJsonAsync<StreamReceipt>(JsonFormat.Options))!;
-        if (receipt.StreamId != queue.StreamId || receipt.AcceptedSequence < batch[^1].StreamSequence) throw new InvalidDataException("Invalid combat acknowledgment.");
+        if (receipt.StreamId != queue.StreamId || receipt.AcceptedSequence < batch[^1].StreamSequence || receipt.AcceptedSequence > queue.LastSequence)
+            throw new InvalidDataException("Invalid combat acknowledgment.");
         queue.AcknowledgeThrough(batch[^1].StreamSequence, batch[^1].ReportId);
     }
     if (queue.Complete && !queue.Sealed)
     {
         var receipt = await Post<CombatStreamView>(http, route + "/seal", new SealCombatStream(queue.StreamId, queue.LastSequence));
-        if (!receipt.Sealed || receipt.AcceptedSequence != queue.LastSequence) throw new InvalidDataException("Invalid combat seal.");
+        if (!receipt.Sealed || receipt.StreamId != queue.StreamId || receipt.AcceptedSequence != queue.LastSequence) throw new InvalidDataException("Invalid combat seal.");
         queue.MarkSealed();
     }
 }
@@ -82,7 +88,7 @@ if (!values.TryGetValue("--demo-room", out var roomValue))
     {
         using var saved = WorldOutbox.Recover(path, codec); var header = saved.Header;
         if (header.sessionId != queue.SessionId.ToString("D") || header.streamId != queue.StreamId.ToString("D") || header.origin != queue.Origin) throw new InvalidDataException("World and combat source identities disagree.");
-        await Deliver(queue);
+        await Deliver(queue, header.missionClockVersion);
         using var publisher = new WorldPublisher(saved, codec, new WorldWebSocket(http.BaseAddress!.ToString(), queue.SessionId, http.DefaultRequestHeaders.Authorization!.Parameter!));
         while (saved.Pending != null || (saved.Complete && !saved.Sealed))
         {

@@ -57,13 +57,14 @@ Unity 在伺服器建立檔案及綁定來源後才開放戰鬥。每次核心�
 
 ## 中斷後補送
 
-先停止原遊戲伺服器，從儲存庫根目錄執行（請替換場次 UUID）：
+確認原遊戲伺服器已退出並保留原件。若同時持有世界 journal，使用 [WorldRelay](WORLD_SOURCE.md#工具操作) 依序補送兩份紀錄。只有戰鬥 journal 時，從儲存庫根目錄建置工具，再對副本執行。請替換場次 UUID，並指定原管理實例與 GameServer 密鑰設定。
 
 ```powershell
-dotnet artifacts/build-v011/bin/VrCommand.TelemetryRelay/release/VrCommand.TelemetryRelay.dll --journal F:/Projects/vr-command-center/data/telemetry/<場次UUID>.journal
+dotnet build tools/VrCommand.TelemetryRelay -c Release
+dotnet tools/VrCommand.TelemetryRelay/bin/Release/net10.0/VrCommand.TelemetryRelay.dll --journal F:/Projects/vr-command-center/artifacts/recovery/SESSION.journal --base-url $managementUrl --key-file $operatorKeyFile
 ```
 
-可另指定 --base-url／--key-file；工具只讀 GameServer 密鑰，不輸出密鑰，補送該檔案所綁定場次。已有 completion 才會嘗試精確封存；沒有 completion 只補送已保存資料，保持未封存，不猜測遊戲尾端。沒有管理員強制宣告完整、換手來源或自動修復損壞檔功能。
+戰鬥 journal 本身沒有任務時鐘版本。工具先查原場次，僅採用串流 ID 及來源吻合的版本，再由 API 驗證原擁有者。尚未附接且本機無確認的舊 journal 可依版本 0 附接。有 completion 才會嘗試精確封存。其他情況只補送已保存資料，保持未封存。
 
 可用 --demo-room 5 配合**新** --journal 路徑建立獨立合成示範：核心實際射擊兩次、命中兩次、擊殺一次，AI 命中一次；保存六份報告後 End 並退出，尚不送報告。再以同一 journal 執行恢復命令，會得到彈藥 2、擊殺 1、中彈 1、耗損 20、血量 80、命中率 100%。示範只操作自己新建的空閒房，明確標記 Simulation。
 

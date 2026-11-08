@@ -58,13 +58,27 @@ if (options.TryGetValue("--demo-room", out var value))
 using (var queue = TelemetryOutbox.OpenExisting(journalPath))
 {
     var path = "/api/sessions/" + queue.SessionId;
-    var attached = await Post<CombatStreamView>(http, path + "/combat-stream", new OpenCombatStream(queue.StreamId, Enum.Parse<CombatOrigin>(queue.Origin)));
-    if (attached.StreamId != queue.StreamId || attached.Origin.ToString() != queue.Origin) throw new InvalidDataException("Server stream identity mismatch.");
+    var origin = Enum.Parse<CombatOrigin>(queue.Origin);
+    var session = await http.GetFromJsonAsync<SessionView>(path, JsonFormat.Options);
+    if (session?.Id != queue.SessionId) throw new InvalidDataException("Server session identity mismatch.");
+    // The combat journal predates the clock field. Only an exact attached stream can supply its version.
+    var existing = session.CombatStream;
+    if (existing is not null && (existing.StreamId != queue.StreamId || existing.Origin != origin))
+        throw new InvalidDataException("Server stream identity mismatch.");
+    if (existing is null && queue.AcknowledgedSequence > 0)
+        throw new InvalidDataException("The server is missing the previously acknowledged stream.");
+    var missionClockVersion = existing?.MissionClockVersion ?? 0;
+    var attached = await Post<CombatStreamView>(http, path + "/combat-stream", new OpenCombatStream(queue.StreamId, origin, missionClockVersion));
+    if (attached.StreamId != queue.StreamId || attached.Origin != origin || attached.MissionClockVersion != missionClockVersion
+        || attached.AcceptedSequence < queue.AcknowledgedSequence || attached.AcceptedSequence > queue.LastSequence
+        || (attached.Sealed && (!queue.Complete || attached.AcceptedSequence != queue.LastSequence))
+        || (queue.Sealed && !attached.Sealed)) throw new InvalidDataException("Combat attachment disagrees with the saved journal.");
     while (queue.Pending is not null)
     {
         var batch = queue.PendingBatch();
         var receipt = await PostJson<StreamReceipt>(http, path + "/combat-stream/batch", TelemetryOutbox.BatchJson(batch));
-        if (receipt.StreamId != queue.StreamId || receipt.AcceptedSequence < batch[^1].StreamSequence) throw new InvalidDataException("Invalid stream receipt.");
+        if (receipt.StreamId != queue.StreamId || receipt.AcceptedSequence < batch[^1].StreamSequence || receipt.AcceptedSequence > queue.LastSequence)
+            throw new InvalidDataException("Invalid stream receipt.");
         queue.AcknowledgeThrough(batch[^1].StreamSequence, batch[^1].ReportId);
     }
     if (queue.Complete && !queue.Sealed)

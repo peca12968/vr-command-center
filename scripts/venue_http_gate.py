@@ -32,6 +32,9 @@ class _Server(http.server.ThreadingHTTPServer):
         self.owner.bump('handlerErrors')  # Never log request / auth / body.
 
 
+PUBLICATION_BLOCKS = ('publication', 'publication-combat')
+
+
 class VenueHttpGate:
     def __init__(self, upstream, session, *, max_block_seconds=20, maximum_seconds=240):
         target = urlsplit(upstream)
@@ -43,7 +46,7 @@ class VenueHttpGate:
         self.upstream = ('127.0.0.1', target.port); self.max_block_seconds = max_block_seconds
         self.maximum_seconds = maximum_seconds; self.lock = threading.RLock(); self.slots = threading.BoundedSemaphore(8)
         self.mode = None; self.block_started = None; self.block_history = []; self.tunnels = set(); self.stop = threading.Event()
-        self.counts = dict.fromkeys(['managementBlocked', 'publicationBlocked', 'combatSealBlocked', 'statisticsBlocked', 'tunnelsClosed', 'httpForwarded', 'webSockets', 'capacityRejected', 'handlerErrors', 'routeRejected'], 0)
+        self.counts = dict.fromkeys(['managementBlocked', 'publicationBlocked', 'combatBatchBlocked', 'combatSealBlocked', 'statisticsBlocked', 'tunnelsClosed', 'httpForwarded', 'webSockets', 'capacityRejected', 'handlerErrors', 'routeRejected'], 0)
         self.limits_triggered = []; self.server = _Server(('127.0.0.1', 0), _Handler); self.server.owner = self
         self.base = 'http://127.0.0.1:' + str(self.server.server_port)
         self.thread = threading.Thread(target=self.server.serve_forever, kwargs={'poll_interval': .05}, daemon=True)
@@ -56,11 +59,11 @@ class VenueHttpGate:
         self.started = time.monotonic(); self.thread.start(); self.watchdog.start(); return self
 
     def block(self, mode):
-        if mode not in ('management', 'publication', 'combat-seal', 'statistics'): raise ValueError('Unknown fault mode')
+        if mode not in (*PUBLICATION_BLOCKS, 'management', 'combat-seal', 'statistics'): raise ValueError('Unknown fault mode')
         with self.lock:
             if self.mode is not None: raise ValueError('Release the current fault first')
             self.mode = mode; self.block_started = time.monotonic()
-            tunnels = list(self.tunnels) if mode == 'publication' else []
+            tunnels = list(self.tunnels) if mode in PUBLICATION_BLOCKS else []
         for pair in tunnels:
             self.bump('tunnelsClosed')
             for stream in pair:
@@ -76,12 +79,16 @@ class VenueHttpGate:
     def blocked(self, mode):
         with self.lock: return self.mode == mode
 
+    def publication_blocked(self):
+        with self.lock: return self.mode in PUBLICATION_BLOCKS
+
     def allowed(self, method, path):
         return (method == 'GET' and path in (self.prefix, self.prefix + '/statistics')) or (method == 'POST' and path in (
             '/api/player-tickets/validate', self.prefix + '/combat-stream', self.prefix + '/combat-stream/batch', self.prefix + '/combat-stream/seal'))
 
     def blocked_http(self, method, path):
         if method == 'GET' and path == self.prefix and self.blocked('management'): return 'managementBlocked'
+        if method == 'POST' and path == self.prefix + '/combat-stream/batch' and self.blocked('publication-combat'): return 'combatBatchBlocked'
         if method == 'POST' and path == self.prefix + '/combat-stream/seal' and self.blocked('combat-seal'): return 'combatSealBlocked'
         if method == 'GET' and path == self.prefix + '/statistics' and self.blocked('statistics'): return 'statisticsBlocked'
         return None
@@ -122,7 +129,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
         gate = self.server.owner
         self.connection.settimeout(6)
         if self.path == gate.prefix + '/world/publish' and self.command == 'GET' and self.headers.get('Upgrade', '').lower() == 'websocket':
-            if gate.blocked('publication'):
+            if gate.publication_blocked():
                 gate.bump('publicationBlocked'); return self.reject(503)
             return self.tunnel()
         if not gate.allowed(self.command, self.path):
@@ -157,13 +164,13 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             with socket.create_connection(gate.upstream, timeout=5) as upstream:
                 pair = (self.connection, upstream)
                 with gate.lock:
-                    if gate.mode == 'publication': gate.bump('publicationBlocked'); return self.reject(503)
+                    if gate.publication_blocked(): gate.bump('publicationBlocked'); return self.reject(503)
                     gate.tunnels.add(pair)
                 try:
                     header = self.command + ' ' + self.path + ' HTTP/1.1\r\n' + ''.join(key + ': ' + value + '\r\n' for key, value in self.headers.items()) + '\r\n'
                     upstream.sendall(header.encode('latin-1')); gate.bump('webSockets')
                     deadline = gate.started + gate.maximum_seconds
-                    while not gate.stop.is_set() and not gate.blocked('publication') and time.monotonic() < deadline:
+                    while not gate.stop.is_set() and not gate.publication_blocked() and time.monotonic() < deadline:
                         ready, _, _ = select.select(pair, [], [], .05)
                         for source in ready:
                             data = source.recv(65536)
