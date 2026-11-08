@@ -11,7 +11,7 @@ Windows伺服器啟動器 **1.1.0** 可直接輸入管理實例的`control-insta
 3. 重新整理只保留同一路徑、instance ID、API及GameServer key中，仍在新清單裡的原選取。原場次被綁定或結束而消失時，不改選別的房間。
 4. 編輯路徑後停用啟動／選單，必須重新載入；載入失敗清除原目標與選取。變更實例身分或憑證後也需重新選擇。此輪伺服器停止後，下一次啟動前需更新清單。
 
-清單只接受沒有來源的Preparing VR；Running、已綁來源及MR不供此工具啟動。最多5筆active場次，識別須canonical非空GUID，Independent須一房、Linked須完整五房；拒絕重複ID／重疊房間／越界或錯型別。名稱顯示移除控制與bidi格式字元、適度截短，不截斷surrogate pair；原名稱／ID保持。清單不是預約、就緒或頭盔在線證明，啟動前仍走原API身分與Preparing／無來源檢查，不重啟舊world。
+啟動器 1.4 的清單接受尚未綁定來源的 Preparing VR 或 MR，並顯示任務的體驗模式。最多五筆場次。Independent 須一房，Linked 須完整五房。啟動前仍會核對 API 身分、Preparing 階段及來源狀態。 [MR 開場](QUEST3.md#主控建立-mr-場次)
 
 目標以本次載入的API與憑證為準；外部修改實例檔案後請更新。載入仍為有界同步讀取，API root／身分／清單各5秒，清單最多256Ki個字元，未聲稱完整LAN故障恢復。只使用既有GameServer角色，不使用Master啟動Unity、不新增key／配票或下Begin／End。原session mutex、私有log來源核對、endpoint、雙seal／36秒保留／原child收尾保持。
 

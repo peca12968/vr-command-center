@@ -69,15 +69,15 @@ python scripts/check-server-package.py <VRCommand-GameServer> `
 
 **本輪103項Windows CLI／原生整合通過；新GUI完整選檔／啟動流程未完成驗證。** native視窗可見且欄位／標籤正確，但兩次點擊均被非目標`PickerHost.exe`攔住；activate並重新觀察後的一次重試仍回報`point ... is over PickerHost.exe, not target window Launch-Server.exe`，因此停止UI輸入。自己GUI與API已終止，failed、原snapshot及有限觀察保留。這不是產品選檔成功、Windows安全性或PickerHost根因證明。管理服務包原先已成功的GUI95151不替代本輪伺服器GUI。
 
-目前只接受沒有combatStream的Preparing VR場次；不接管Running、MR或舊journal，不做崩潰後重建世界。管理請求失敗、來源改變、就緒90秒逾時或End後30秒未雙封存，均停止自己的子程序並保留不完整結果，不能當正常完成。GUI「中止」也不自動End管理場次。資料預設`%LOCALAPPDATA%/VrCommand/GameServers`，結果在`GameServerReports`；資料內含GameServer私鑰，不能放回共用ZIP。僅在所有writer真正終止後備份。
+啟動器 1.4 接受尚未綁定戰鬥來源的 Preparing VR 或 MR 場次。管理請求失敗、來源改變、就緒 90 秒逾時，或 End 後 30 秒未雙封存時，啟動器停止自己的子程序並保留不完整結果。GUI「中止」只停止子程序。資料預設在 `%LOCALAPPDATA%/VrCommand/GameServers`，結果在 `GameServerReports`。伺服器私鑰保留在包外資料夾。所有寫入程序停止後再備份。 [MR 開場方式](QUEST3.md#主控建立-mr-場次)
 
 ## 啟動、來源與停止界線
 
 啟動器核對manifest逐檔大小／SHA與完整檔案集合、拒絕連結／越界／額外檔案；清單不是數位簽章。只接受GameServer角色，Unity設定只帶這個key，不帶Master。GUI讀既有管理實例的JSON，不新增或複製角色金鑰。遠端管理可由CLI的私人七欄JSON明確指定；尚無LAN、TLS或乾淨新機驗證。
 
-每輪使用新的包外資料夾／log，核對Preparing、VR與無既有stream，並取得以API地址／場次命名的本機mutex。UDP探查只做啟動前衝突拒絕，不拿埠可開當成就緒；釋放探查與Unity綁定之間仍有競爭，後續必須有真正遊戲啟動紀錄。
+每輪使用新的包外資料夾與日誌，核對 Preparing、VR／MR 模式及來源未綁定，再取得以 API 地址及場次命名的本機 mutex。UDP 探查會拒絕啟動前衝突，正式就緒另由原 Unity 程序的綁定與錄製來源確認。
 
-Unity原bootstrap會先核對自己combat stream的UUID／origin／接受序號／未seal，再StartServer並寫`VR_NETWORK_STARTED ... started=True ... port=...`。啟動器只讀自己新log的這個紀錄，再核對API的同場次GameServer來源／Simulation／world header，才以原GameServer owner PUT不可變connection-endpoint，核對回條場次／stream／IPv4／port。這條既有程式順序是來源的證據鏈，沒有讀取被原writer獨佔的live journal，也不等於玩家即時pose健康或LAN可達。
+Unity 先核對自己的戰鬥串流識別、來源、接受序號與封存狀態，再啟動伺服器並記下 `VR_NETWORK_STARTED ... started=True ... port=...`。啟動器讀取本次啟動日誌，並透過 API 核對同場次的戰鬥串流和世界錄製來源。VR 使用 Simulation，MR 使用 GameServer。核對後以原 GameServer 角色公告連線端點，並比對回條的場次、串流、IPv4 與埠。
 
 Windows子程序以suspended建立，先加入私人kill-on-close Job，再Resume，原生OS handle保留至實際退出。只設定KILL_ON_JOB_CLOSE，沒有改優先序、CPU／記憶體限制或系統設定。已加入Job的父程序被終止後，原Unity handle實際退出；這不是斷電恢復、未落盤queue保障，或建立程序到指派Job之間所有崩潰時點的證明。API雙seal＋36秒留存＋原child終止後，報告才complete；玩家送達欄位明確null。參考[Microsoft Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)與[AssignProcessToJobObject](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-assignprocesstojobobject)。
 

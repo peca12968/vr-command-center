@@ -1,5 +1,20 @@
 # 開發進度
 
+## 2026-11-09 主控建立 MR 場次
+
+控制台 0.31.12 可從已保存的 MR 任務建立單房或五房全連線場次。虛擬配置沿用共用場地規則，Windows 伺服器啟動器 1.4 提供 MR 選項。遊戲伺服器核對 Quest 3 名冊、票券及入場校正房間。開始命令要求最新 GameServer 錄製幀對上場次管理序號與全名冊的有效追蹤姿態。場次模式固定，主控仍可調整天氣、時段和雷電。 [部署與開場](QUEST3.md#主控建立-mr-場次)
+
+- 遊戲來源 `06924fab1d9093651a5d11ee92e72e28a4754375` 通過 257 項 Unity Editor 測試及五項模擬 ADB 部署案例。API 與提示來源 `3247b57bebae1c936a81ff006c895ccf164b49c8` 通過 818 項核心、594 項 HTTP、58 項世界串流、92 項 Node 與 342 項 Chromium 檢查。核心測試以兩房測試追蹤資料驗證少人、過期、管理序號更新、跨權限和重試。瀏覽器實際建立 MR 場次，確認尚無有效追蹤時拒絕開始、保留名冊並顯示等待追蹤的提示。首輪檢查停用選項時中止，第二輪以原生 DOM 驗證後通過，第三輪核對新版提示。三輪日誌與截圖分別保留。
+- 最終控制台管理包 `artifacts/control-packages/control-server-api0.31.0-ui0.31.12-mr-ready-win-x64.zip` 為 52,524,955 bytes，SHA-256 `a854f243d97d04122e380fe1cc6e1689e5106c2dfc1bca7b61ecfe81622e3c16`。解壓核對 507 筆檔案，自含 .NET 10.0.14，`run-54ca2655ff904ef78ee054f8964665c6` 通過 106 項檢查。最初管理包的 106 項結果另行保存，兩次清理後各核對 C／F 的 27 份檔案。建置前已依 SHA-256 封存前版 338 份執行檔、收據與 Unity 日誌。
+- Windows 玩家包 `artifacts/player-packages/windows-player-0.44.0.zip` 為 83,437,123 bytes，SHA-256 `c64f61a38dd30c4e674672f5c0d029b5f0c3187f65d37a5e089d385e52e55a45`，解壓核對 328 筆，實際啟動器通過 19 項離線檢查。首輪伺服器包在 VR 場次通過後，因寫入 Simulation 而無法啟動 MR。原 `run-f0a9ee77f0d94617b2d1e9ec998953f8` 退出失敗，清理後保留 C／F 相符的 76 份檔案。啟動器修正來源 `87a579af2a0bcd72c8274090179e45676832aac9`，依管理模式選擇 GameServer 或 Simulation，並核對就緒與封存的來源。新版包 `artifacts/server-packages/windows-server-0.44.0-launcher1.4-mr-ready-win-x64.zip` 為 83,460,355 bytes，SHA-256 `5405d1e309d002d56be3dbc3abc060330499b6844e671c58858d49eff4a31e47`。
+- 修正來源的伺服器包通過 135 項，五房獨立與全館連線六場共有 554 幀 VR 回放、10 份原玩家戰績及 10 份 CSV。另有一場實際 MR 伺服器共 27 幀回放，拒絕桌面票券，缺追蹤的 Begin 維持 Preparing，成功套用雷雨夜、完成雙封存並保留 36 秒後收尾。原生程序和管理服務清理完成，C／F 的 85 份檔案相符。清單測試另通過 38 項 CLI 與 33 項實際 Framework 檢查，C／F 的 14 份檔案相符。
+- Unity 6000.3.27f1 成功建置 Windows 與 Quest 0.44.0，兩端來源指紋均為 `92ff455649f16bdf686e62a1da705e686f3d79d6659c2c09d3cd88a49d0068bc`，原場景和玩家 Prefab 網路識別相同。Quest APK `artifacts/quest/VrCommand.apk` 為 60,911,034 bytes，SHA-256 `713af54b0052423af72295a40e6bb3ada9edbbdddda04f840b8489fb09afc614`。已核對 ARM64／IL2CPP、版本碼 56、min SDK 32、target SDK 35、透視功能為必要、Meta 原生函式庫及有效的 v2 Debug 簽章。
+- 觀察實際 Windows 視窗時發現清單標籤仍只寫 VR，`ba756db68871bcdd647da858f2629f069e4e04ed` 改為「尚未綁定來源的 VR 或 MR 場次」。最終伺服器包 `artifacts/server-packages/windows-server-0.44.0-launcher1.4-win-x64-final.zip` 為 83,460,353 bytes，SHA-256 `05e763eb4b449c55fe438a7dadecf93a9375007ca09cc82b28a2a5a7f463be0d`，解壓後逐一核對 328 筆清單。
+- 最終伺服器包重跑 `run-630f229dfc28420b9d7e31bf704ebeba` 通過 135 項，六場 VR 共 511 幀回放、10 份原玩家戰績與 10 份 CSV，另有 22 幀 MR 準備與封存回放。清單 `run-aea316a28543414e8a419d5f704d76a4` 重跑通過 38 項 CLI 與 33 項 Framework 檢查。清理後各有 85 與 14 份 C／F 相符檔案。
+- WinForms 重驗 `run-858894feba4142f4bf3eb8cb02494b58` 已輸入測試管理實例路徑。Windows 防火牆提示遮住啟動器，桌面操作停在載入前。測試在 360 秒後逾時，測試程序清理完成，C／F 的 9 份檔案相符。此輪完整視窗流程待驗。
+- GitHub Actions 的四個工作因帳務條件未啟動，各為 0 個執行步驟。 [遊戲與管理工作](https://github.com/peca12968/vr-command-center/actions/runs/42505158151/job/128806100237) · [主控提示工作](https://github.com/peca12968/vr-command-center/actions/runs/42505963940/job/128808548490) · [啟動器工作](https://github.com/peca12968/vr-command-center/actions/runs/42506218411/job/128809319448) · [啟動器標籤工作](https://github.com/peca12968/vr-command-center/actions/runs/42506810174/job/128811100682)
+- Quest 3 實機入場、透視與遮擋、跨裝置定位、VIVE 相容、跨機 25 位真人及廠商硬體仍待驗。
+
 ## 2026-11-09 Quest 3 透視呈現
 
 Unity 0.43.0 為既有 VR 場次加入 Quest 3 的選用透視呈現。玩家部署時附經檢查的房間校正檔，以 Meta OpenXR 合成層呈現實景，再套用當次 A、B、C 量測。虛擬擺設、敵軍、HUD、雨線和聲光沿用場次，地板保留碰撞。合成層或校正未就緒時暫停姿態及武器輸入。 [操作說明](QUEST3.md#quest-3-透視呈現)
