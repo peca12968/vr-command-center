@@ -1,5 +1,11 @@
 # Quest 3 接入與工具鏈
 
+## 追蹤恢復後的武器輸入
+
+遊戲 0.47.1 在頭盔追蹤中斷、場地校正失效、姿態遭拒或暫停時撤下武器輸入。恢復參戰後，請在追蹤有效時先放開右手扳機與換彈鍵，再重新按下。狀態板會提示 `RELEASE TRIGGER AND RELOAD TO ARM`。連續按住扳機的射擊節奏從下一次主動按下起算。
+
+MR 玩家需要重新對位時，可由操作員暫停場次，完成量測並在主控台確認存活席位的追蹤後繼續。 [暫停後繼續](PLAYER_READINESS.md#暫停後繼續)
+
 2026-11-06 建置 0.41.2、版本 53 的 ARM64 APK，minSDK 32、targetSDK 35，通過 v2 開發簽章驗證。與 Windows 建置來源及場景、玩家網路識別一致，242 項 Unity EditMode 測試通過。新來源診斷只在 Windows 專用伺服器明確開啟時運作。頭盔安裝及操作仍待實機。 [建置與校驗資料](PROGRESS.md)
 
 2026-11-01 最新Unity0.36.1／code44、179真正Editor與e0594513...同源Windows／ARM64 APK建置成功，NGO29／API UI0.30及原ID保持。[結果尾界](DEBRIEF_BOUNDARY.md)修正背景End寫入尚未完成時的context競態，final另須精確durable seal；PC證據與原失敗場見PROGRESS，頭盔操作仍待設備。

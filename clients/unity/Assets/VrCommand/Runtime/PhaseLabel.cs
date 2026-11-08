@@ -17,9 +17,11 @@ namespace VrCommand.Unity
             {
                 var status = TacticalHudRules.Status(VenueBootstrap.Instance.State, player.health, combat.Ready.Value,
                     avatar.PoseAccepted.Value, player.connected, avatar.TrackingReady, true);
+                var armed = status == "ACTIVE" && !avatar.TrackedWeaponReleasePending;
                 message += " / ROOM " + player.room.ToString("00") + "\nVITALS " + player.health + "  /  AMMO " + player.magazine.ToString("00") + " / " + player.reserve.ToString("000");
-                message += "\n" + (status == "ACTIVE" ? "XR INPUT / TRIGGER FIRE / A RELOAD" : status);
-                GetComponent<UnityEngine.UI.Text>().color = status == "ACTIVE" ? new Color(.72f, .88f, .53f) : new Color(1, .6f, .3f);
+                message += "\n" + (armed ? "XR INPUT / TRIGGER FIRE / A RELOAD"
+                    : status == "ACTIVE" ? "RELEASE TRIGGER AND RELOAD TO ARM" : status);
+                GetComponent<UnityEngine.UI.Text>().color = armed ? new Color(.72f, .88f, .53f) : new Color(1, .6f, .3f);
             }
             if (avatar != null && !string.IsNullOrEmpty(avatar.AlignmentHint))
             {
