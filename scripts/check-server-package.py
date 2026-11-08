@@ -397,6 +397,7 @@ def main():
                 for entry in entries:verify_delivery(entry,[c for c in round_clients if c['sessionId']==entry['sessionId']])
         if args.check_managed_mr:
             mr=launch(create([1],'managed-mr',experience='MR'),'managed-mr')
+            check(read(mr['work']/'server-config.json')['telemetryOrigin']=='GameServer','actual launcher selects GameServer telemetry for MR')
             session='/api/sessions/'+mr['sessionId'];client=player(mr,1)
             server_log=mr['work']/'server.log'
             wait(lambda: 'VR_SERVER_ADMISSION_REJECTED' in server_log.read_text(encoding='utf-8',errors='replace'),30,'MR desktop admission rejection')

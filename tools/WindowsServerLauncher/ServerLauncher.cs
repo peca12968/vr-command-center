@@ -143,7 +143,7 @@ internal static class ServerLauncher
             IPv4(uri.Host, false); Need(Api == "http://" + uri.Host + ":" + uri.Port, "管理地址須為http://IPv4:埠，不含結尾斜線。");
             Need(Key != null && Key.Length >= 32 && Key.Length <= 512, "GameServer金鑰格式錯誤。"); foreach (var c in Key) Need(c > 32 && c < 127, "GameServer金鑰格式錯誤。");
         }
-        internal object Config(string telemetry) { return new { role = "Server", address = Address, listenAddress = Bind, port = Port, sessionId = Session, managementApiUrl = Api, gameServerKey = Key, telemetryOrigin = "Simulation", telemetryDirectory = telemetry }; }
+        internal object Config(string telemetry, string origin) { return new { role = "Server", address = Address, listenAddress = Bind, port = Port, sessionId = Session, managementApiUrl = Api, gameServerKey = Key, telemetryOrigin = origin, telemetryDirectory = telemetry }; }
         internal Dictionary<string, object> Request(string path, object body = null, bool missing = false)
         {
             var request = (HttpWebRequest)WebRequest.Create(Api + path); request.Proxy = null; request.AllowAutoRedirect = false; request.Timeout = 5000; request.ReadWriteTimeout = 5000;
@@ -266,6 +266,7 @@ internal static class ServerLauncher
     {
         internal Settings Config; internal string Work, Stream; internal Native Process; internal volatile string Status = "準備中"; internal bool Complete, Cleanup; internal uint? Code; internal Dictionary<string, object> FinalWorld, FinalStream; Mutex lease; bool ownsLease;
         internal UdpBinding VerifiedUdp;
+        private string Origin;
         internal Run(Settings config, string work)
         {
             Config = config; Work = Full(work); Plain(Work); Need(!Inside(Work, Root) && !Inside(Root, Work) && !Directory.Exists(Work) && !File.Exists(Work), "請使用程式包之外的新資料夾。");
@@ -276,10 +277,11 @@ internal static class ServerLauncher
             var experience = Text(Child(state, "environment"), "mode");
             Need(Text(state, "id") == Config.Session && Text(state, "state") == "Preparing" && Child(state, "combatStream") == null
                 && (experience == "VR" || experience == "MR"), "只接受尚未綁定來源的 Preparing VR 或 MR 場次。");
+            Origin = experience == "MR" ? "GameServer" : "Simulation";
             string name; using (var sha = SHA256.Create()) name = Hex(sha.ComputeHash(Encoding.UTF8.GetBytes(Config.Api + "/" + Config.Session)));
             bool created; lease = new Mutex(true, "Local\\VRCommand.Server." + name, out created); ownsLease = created; Need(created, "此場次已有本機啟動器。");
             using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)) { socket.ExclusiveAddressUse = true; socket.Bind(new IPEndPoint(IPAddress.Parse(Config.Bind), Config.Port)); }
-            Directory.CreateDirectory(Work); Save(Path.Combine(Work, "server-config.json"), Config.Config(Path.Combine(Work, "telemetry")));
+            Directory.CreateDirectory(Work); Save(Path.Combine(Work, "server-config.json"), Config.Config(Path.Combine(Work, "telemetry"), Origin));
             Process = new Native(Path.Combine(Work, "server-config.json"), Path.Combine(Work, "server.log"), peerDiagnostics);
             var timer = Stopwatch.StartNew(); Status = "等待遊戲來源與UDP啟動";
             var awaitingUdp = false;
@@ -293,11 +295,11 @@ internal static class ServerLauncher
                 {
                     state = Config.Request("/api/sessions/" + Config.Session); var stream = Child(state, "combatStream"); Guid id;
                     Stream = Text(stream, "streamId");
-                    Need(Guid.TryParseExact(Stream, "D", out id) && id != Guid.Empty && Text(stream, "origin") == "Simulation" && Text(Child(stream, "owner"), "id") == "game-server", "遊戲來源身分不符。");
+                    Need(Guid.TryParseExact(Stream, "D", out id) && id != Guid.Empty && Text(stream, "origin") == Origin && Text(Child(stream, "owner"), "id") == "game-server", "遊戲來源身分不符。");
                     var world = Config.Request("/api/sessions/" + Config.Session + "/world", missing: true);
                     if (world != null)
                     {
-                        Need(Text(Child(world, "header"), "sessionId") == Config.Session && Text(Child(world, "header"), "streamId") == Stream && Text(Child(world, "header"), "origin") == "Simulation", "世界來源身分不符。");
+                        Need(Text(Child(world, "header"), "sessionId") == Config.Session && Text(Child(world, "header"), "streamId") == Stream && Text(Child(world, "header"), "origin") == Origin, "世界來源身分不符。");
                         Need(Text(state, "state") == "Preparing", "公告前場次已離開Preparing。");
                         var binding = UdpBinding.Find(Process.Pid, Config.Bind, Config.Port);
                         if (binding == null)
@@ -330,11 +332,12 @@ internal static class ServerLauncher
             while (deadline.Elapsed.TotalSeconds < seconds && !cancel())
             {
                 Need(!Process.Exited, "遊戲程序意外結束，保留journal供檢查。"); var state = Config.Request("/api/sessions/" + Config.Session); var stream = Child(state, "combatStream");
-                Need(Text(stream, "streamId") == Stream && Text(stream, "origin") == "Simulation", "場次來源已改變。");
+                Need(Text(stream, "streamId") == Stream && Text(stream, "origin") == Origin, "場次來源已改變。");
                 if (Text(state, "state") == "Ended")
                 {
                     if (ended == null) ended = Stopwatch.StartNew(); var world = Config.Request("/api/sessions/" + Config.Session + "/world");
-                    Need(Text(Child(world, "header"), "sessionId") == Config.Session && Text(Child(world, "header"), "streamId") == Stream, "封存來源不符。");
+                    Need(Text(Child(world, "header"), "sessionId") == Config.Session && Text(Child(world, "header"), "streamId") == Stream
+                        && Text(Child(world, "header"), "origin") == Origin, "封存來源不符。");
                     if (Yes(stream, "sealed") && Yes(world, "complete"))
                     {
                         if (retention == null) { retention = Stopwatch.StartNew(); FinalWorld = world; FinalStream = stream; }
