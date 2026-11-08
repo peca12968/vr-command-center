@@ -1,5 +1,19 @@
 # 開發進度
 
+## 2026-11-09 Quest 3 透視呈現
+
+Unity 0.43.0 為既有 VR 場次加入 Quest 3 的選用透視呈現。玩家部署時附經檢查的房間校正檔，以 Meta OpenXR 合成層呈現實景，再套用當次 A、B、C 量測。虛擬擺設、敵軍、HUD、雨線和聲光沿用場次，地板保留碰撞。合成層或校正未就緒時暫停姿態及武器輸入。 [操作說明](QUEST3.md#quest-3-透視呈現)
+
+- 遊戲來源 `55c52924fd6b3266840c6d09c54734d38b69b2a1` 通過 800 項核心、581 項 HTTP、58 項世界串流與 257 項 Unity Editor 測試。新增測試核對透明背景、地板與擺設、日夜與閃電，以及暫停或離場後復原混色。四個模擬 ADB 案例核對透視部署與校正檔門檻。
+- Unity 套件解析為 Meta OpenXR 2.3.2、AR Foundation 6.3.5、Composition Layers 2.6.0。首輪 Windows 編譯因 Meta 原生相機型別未提供給 Windows 玩家而中止，已限制 Android 才編譯該段。保存首輪日誌、初次 256 項 Editor 結果及新版結果。
+- Windows `20261109-005746-df4eee80` 通過 18 項同機檢查。五房連線與五房獨立各五名模擬玩家，六場共 2,013 幀完整回放、10 份原玩家戰績、10 筆伺服器確認及 6 份 CSV。清理後 C／F 的 54 份檔案相符。
+- 打包來源 `be219c9c16fae4e0a6dea612255ec7362ee3b9ff` 只接受官方 Meta OpenXR 2.3.2 的原始子系統清單路徑與 SHA-256。兩個打包器首輪拒絕均保留，7 項玩家打包及 4 項伺服器打包測試通過，1 項 Windows 符號連結測試因權限跳過。
+- Windows 玩家包 `artifacts/player-packages/windows-player-0.43.0.zip` 為 83,435,594 bytes，SHA-256 `92d92feb5e6c5662febece326843666344ec0363178787357b92d1917b528fa0`。伺服器包 `artifacts/server-packages/windows-server-0.43.0-launcher1.3-win-x64.zip` 為 83,458,671 bytes，SHA-256 `241c265916c255bd831eb85e4fe4d30380420e05b6ecfe9fdd500455c5149406`。解壓後各核對 328 筆清單，實際玩家啟動器通過 19 項離線檢查。建置前以 SHA-256 封存前版的 321 份執行檔、收據及 Unity 日誌。
+- 解壓伺服器包搭配管理包 0.31.11 的 `run-63bf6d7a062649c687e5ad4ba18f1790` 通過 124 項。五房獨立與全館連線各有五名同機模擬玩家，六場共 729 幀完整回放、10 份原玩家戰績及 10 份 CSV。另驗證終止啟動器後，Windows 結束原來的遊戲子程序。清理後 C／F 的 78 份檔案相符。
+- Windows 與 Quest 均由 Unity 6000.3.27f1 建置，來源指紋 `adb23d4c4ffc676b13e1ffa9ebdf64500246eca6a42eadb332e9bd49790e849e` 相符，場景及玩家 Prefab 的網路識別均與 0.42.0 相同。Quest APK 為 60,904,794 bytes，SHA-256 `50274106959cac356af56a144166c7e4f6042d3901ea980f0510f3d323f66211`。已核對 ARM64／IL2CPP、版本碼 55、min SDK 32、target SDK 35、v2 Debug 簽章、Meta 原生函式庫及 `com.oculus.feature.PASSTHROUGH`。首輪核對漏比對 aapt 的縮排行，重新檢查同一個 APK 確認透視功能標記為必要。證據存於 `artifacts/quest-passthrough-0.43.0`。
+- GitHub Actions 的功能與打包工作均因帳務條件未啟動，各為 0 個執行步驟。 [功能工作](https://github.com/peca12968/vr-command-center/actions/runs/42502509011/job/128798109302) · [打包工作](https://github.com/peca12968/vr-command-center/actions/runs/42502843815/job/128799110749)
+- Quest 3 實景、物件遮擋、場控建立 MR 場次、VIVE 相容、跨機 25 位真人及廠商硬體仍待驗。
+
 ## 2026-11-09 Unity 場地對位
 
 Unity 0.42.0 可讀取入場房間的校正檔。在 Preparing 或 Paused 以左扳機依序記錄 A、B、C，通過 5 公分門檻後，將同一個追蹤空間套用到頭部、雙手及瞄準方向。地板原點更新或程式暫停會要求重新量測。伺服器仍以最後接受的位置檢查姿態，初次從指定出生位起算。 [操作說明](LAYOUT.md#quest-3-場地對位)

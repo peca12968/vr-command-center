@@ -156,6 +156,18 @@ embedded package `com.vrcommand.simulation` 現為 0.11.0。Runtime asmdef 已�
 
 腳本會在玩家設定記錄匯出檔的 SHA-256。頭盔讀入時核對檔案、房間和標記，再以當次 OpenXR 追蹤重新量測。量測、回到出生位與原點失效的流程見 [場地配置](LAYOUT.md#quest-3-場地對位)。ADB 實機安裝、頭盔取樣與 MR 透視列入設備驗收。
 
+### Quest 3 透視呈現
+
+Unity 0.43.0 的 Quest 開發版可用 `-Passthrough` 在已開啟的 VR 場次中使用 Meta 的透視合成層。部署須附同一房間的校正檔。玩家進入 Preparing 或 Paused 後量測 A、B、C，並依提示回到遊戲起點。
+
+```powershell
+.\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connections\<場次ID>\player-1.json -AlignmentFile .\room-1-alignment.json -Passthrough
+```
+
+透視啟用後，實景位於虛擬敵軍、擺設、雨線和 HUD 後方。遊戲的日夜與閃電影響虛擬物件照明，雷聲沿用原任務設定。遊戲仍保留地板與擺設的碰撞。合成層或校正未就緒時，頭盔暫停送出姿態與武器輸入。 [Unity 透視設定](https://docs.unity3d.com/Packages/com.unity.xr.meta-openxr@2.3/manual/features/camera.html)
+
+透視畫面由 Meta 合成器處理。場次回放保存原虛擬世界資料。頭盔實景、實體遮擋、跨裝置定位及由主控建立 MR 場次另行驗收。
+
 ## 連線與仍待實作事項
 
 一個桌面伺服器程序綁定一個管理場次；五房 Independent 使用各自程序／UDP 埠，全連線則使用一份 Linked 場次與共同伺服器。助手目前只產生單房 Independent 設定；Linked 名冊與票券可透過 API 建立。場景用房間原點平移安排五區，尚無實體場館對位或共用錨點。
