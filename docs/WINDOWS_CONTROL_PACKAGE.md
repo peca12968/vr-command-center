@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-09 `windows-control-0.31.23-final-win-x64.zip` 加入主控台 MR 校正檔鎖定，搭配 Windows 遊戲 0.48.0。ZIP 為 52,562,191 bytes，SHA-256 `5f5d78549e699a1fd629a3509e2a1df451d213689698b93cf0705463b0bd2737`，解壓核對 510 個清單檔案及 106 項管理包檢查。 [主控操作](QUEST3.md#啟動-mr-伺服器前鎖定校正檔)
+
 2026-11-09 `windows-control-0.31.22-mr-pins-win-x64.zip` 搭配遊戲 0.48.0，支援主控鎖定場次的 MR 校正檔。ZIP 為 52,551,678 bytes，SHA-256 `bf8f22a6101232e4decdd3f6a7cb77711012645d793587e51bf8823f6c0e8480`，解壓後核對 507 個清單檔案，106 項可攜管理包檢查通過。 [主控操作](QUEST3.md#啟動-mr-伺服器前鎖定校正檔)
 
 2026-11-09 主包 `artifacts/control-packages/windows-control-0.31.22-win-x64.zip`，52,548,970 bytes，SHA-256 `aca1704db2c25852152f4bf0d0a0451adb2c688912b2a50efb6ee034971c3cf0`。檔案清單 507 筆，API 執行內容 487 份。解壓後通過 106 項管理包檢查及 22 項 MR 開場、執行中追蹤與繼續的瀏覽器檢查。 [執行中追蹤](PLAYER_READINESS.md#執行中追蹤)
