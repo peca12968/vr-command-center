@@ -1,6 +1,8 @@
 # Windows 可攜管理服務
 
-2026-11-09 主包 `artifacts/control-packages/windows-control-0.31.21-final-win-x64.zip`，52,547,151 bytes，SHA-256 `c7b74ae46619102a01d5031e27e314cef1ab6ed7ba38de09737fd8c36e9a658f`。檔案清單 507 筆，API 執行內容 487 份。解壓後通過 106 項管理包檢查及 19 項 MR 開場與繼續瀏覽器檢查。 [MR 繼續檢查](PLAYER_READINESS.md#暫停後繼續)
+2026-11-09 主包 `artifacts/control-packages/windows-control-0.31.22-win-x64.zip`，52,548,970 bytes，SHA-256 `aca1704db2c25852152f4bf0d0a0451adb2c688912b2a50efb6ee034971c3cf0`。檔案清單 507 筆，API 執行內容 487 份。解壓後通過 106 項管理包檢查及 22 項 MR 開場、執行中追蹤與繼續的瀏覽器檢查。 [執行中追蹤](PLAYER_READINESS.md#執行中追蹤)
+
+0.31.21 的 `artifacts/control-packages/windows-control-0.31.21-final-win-x64.zip` 已保留，52,547,151 bytes，SHA-256 `c7b74ae46619102a01d5031e27e314cef1ab6ed7ba38de09737fd8c36e9a658f`。解壓後通過 106 項管理包檢查及 19 項 MR 開場與繼續瀏覽器檢查。 [MR 繼續檢查](PLAYER_READINESS.md#暫停後繼續)
 
 0.31.20 的 `artifacts/control-packages/windows-control-0.31.20-win-x64.zip` 已保留，52,545,587 bytes，SHA-256 `19cb55b3cb9da52eac2041c8ddb6f3dac2be0a67508de389f853a15bb3f7836f`。解壓後通過 106 項管理包檢查及 12 項 MR 開場瀏覽器專項檢查。 [MR 開場檢查](PLAYER_READINESS.md#mr-開場條件)
 
