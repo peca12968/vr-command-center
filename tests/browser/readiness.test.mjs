@@ -62,11 +62,11 @@ const mrReport = { ...report, observedSequence: 10, origin: 'GameServer', mrStar
 test('MR start shows the exact waiting seat and scopes the detailed list to the room controller', () => {
   const view = mrReadinessView(mrReport, mr, 0, master);
   assert.equal(view.state, 'WaitingPlayers');
-  assert.deepEqual(view.rooms, [{ room: 1, text: '房間 1 · 1 / 1 追蹤就緒' },
-    { room: 2, text: '房間 2 · 0 / 1 追蹤就緒 · 等候席位 4' }]);
+  assert.deepEqual(view.rooms, [{ room: 1, text: '房間 1 · 1 / 1 追蹤就緒', attention: false },
+    { room: 2, text: '房間 2 · 0 / 1 追蹤就緒 · 等候席位 4', attention: false }]);
   assert.deepEqual(mrReadinessView(mrReport, mr, 0, room1).rooms, view.rooms.slice(0, 1));
   assert.equal(mrReadinessView(mrReport, { ...mr, players: [] }, 0, master).state, 'EmptyRoster');
-  assert.equal(mrReadinessView(mrReport, { ...mr, state: 'Running' }, 0, master), null);
+  assert.equal(mrReadinessView(mrReport, { ...mr, state: 'Running' }, 0, master).state, 'Updating');
   assert.equal(mrReadinessView(mrReport, { ...mr, environment: { mode: 'VR' } }, 0, master), null);
 });
 
@@ -101,4 +101,30 @@ test('Paused MR readiness requires its own fresh report and excludes only confir
   }
   assert.equal(mrReadinessView({ ...ready, mrStartState: 'Ready', mrResumeState: null }, paused, 0, master).state, 'Updating');
   assert.equal(mrReadinessView(ready, paused, 1501, master).state, 'WaitingSource');
+});
+
+test('Running MR shows the missing living seat while preserving known roster and scope', () => {
+  const running = { ...mr, state: 'Running' };
+  const live = { ...mrReport, mrStartState: null, mrTrackingState: 'WaitingPlayers', observedSequence: 9 };
+  const view = mrReadinessView(live, running, 0, master);
+  assert.equal(view.action, 'Monitor');
+  assert.deepEqual(view.rooms.filter(row => row.attention).map(row => row.room), [2]);
+  assert.equal(mrReadinessView(live, running, 0, room1).rooms.length, 1);
+  assert.equal(mrReadinessView({ ...live, sessionSequence: 11 }, running, 0, master).state, 'WaitingPlayers');
+  assert.deepEqual(mrReadinessView(live, running, 1501, master).rooms, []);
+  assert.equal(mrReadinessView({ ...live, players: [oneTracked, { ...peer, admissionId: 'different' }] },
+    running, 0, master).state, 'Updating');
+  const recovered = { ...live, mrTrackingState: 'Ready', players: [oneTracked, { ...peer, state: 'Eliminated' }] };
+  assert.equal(mrReadinessView(recovered, running, 0, master).state, 'Ready');
+});
+
+test('Running room cards warn only when their fresh, scoped MR report has a missing live seat', () => {
+  const running = { ...mr, state: 'Running' };
+  const live = { ...overview, rooms: [{ ...roomRow, simulatedReady: 0, trackedReady: 1, mrLiving: 2 }] };
+  assert.equal(roomReadinessView(live, room, running, 0).attention, true);
+  assert.match(roomReadinessView(live, room, running, 0).text, /1 \/ 2.*等候 1 席/);
+  assert.equal(roomReadinessView(live, room, running, 1501).attention, undefined);
+  for (const change of [{ mrLiving: null }, { mrLiving: 0 }, { mrLiving: 4 }, { simulatedReady: 1 }]) {
+    assert.equal(roomReadinessView({ ...live, rooms: [{ ...live.rooms[0], ...change }] }, room, running, 0).source, 'Unavailable');
+  }
 });

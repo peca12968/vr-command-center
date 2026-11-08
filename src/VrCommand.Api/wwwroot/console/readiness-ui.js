@@ -20,7 +20,7 @@ export function readinessView(report, session, elapsed) {
     const kind = ['Simulated', 'Tracked'].includes(row?.rigKind) ? row.rigKind : 'None';
     let status = source !== 'Fresh' ? source : !row ? 'AwaitingAdmission' : Object.hasOwn(labels, row.state) ? row.state : 'Unavailable';
     if (status === 'Participating' && (row?.canParticipate !== true || kind === 'None')) status = 'Unavailable';
-    return { id: player.id, admissionId: player.admissionId, ready: status === 'Participating', kind, state: status,
+    return { id: player.id, admissionId: player.admissionId, ready: status === 'Participating', kind, state: status, matched: !!row,
       text: labels[status] + (kind === 'Simulated' ? ' · 合成姿態' : kind === 'Tracked' ? ' · 追蹤姿態' : '') };
   });
   const origin = matches && ['Simulation', 'GameServer'].includes(report.origin) ? report.origin + ' · ' : '';
@@ -28,27 +28,31 @@ export function readinessView(report, session, elapsed) {
 }
 
 export function mrReadinessView(report, session, elapsed, actor) {
-  if (session?.environment?.mode !== 'MR' || !['Preparing', 'Paused'].includes(session.state)) return null;
+  if (session?.environment?.mode !== 'MR' || !['Preparing', 'Paused', 'Running'].includes(session.state)) return null;
   const resuming = session.state === 'Paused';
-  const action = resuming ? 'Resume' : 'Begin';
+  const monitoring = session.state === 'Running';
+  const action = monitoring ? 'Monitor' : resuming ? 'Resume' : 'Begin';
   const status = (state, text, rooms = []) => ({ action, state, text, rooms });
   const pending = () => status('Updating', '等待核對目前場次與名冊。');
-  if (!resuming && !session.players.length) return status('EmptyRoster', '請先將 Quest 3 玩家加入名冊。');
-  if (report?.version !== 1 || report.sessionId !== session.id || report.sessionSequence !== session.sequence) return pending();
+  if (action === 'Begin' && !session.players.length) return status('EmptyRoster', '請先將 Quest 3 玩家加入名冊。');
+  if (report?.version !== 1 || report.sessionId !== session.id || !Number.isSafeInteger(report.sessionSequence)
+    || (monitoring ? report.sessionSequence < session.sequence : report.sessionSequence !== session.sequence)) return pending();
   const source = sourceAt(report, elapsed);
-  if (source !== 'Fresh') return status('WaitingSource', `等待有效的 MR ${resuming ? '暫停' : '準備'}快照 · ${labels[source]}`);
-  const readiness = resuming ? report.mrResumeState : report.mrStartState;
+  const phase = monitoring ? '執行中' : resuming ? '暫停' : '準備';
+  if (source !== 'Fresh') return status('WaitingSource', `等待有效的 MR ${phase}快照 · ${labels[source]}`);
+  const readiness = monitoring ? report.mrTrackingState : resuming ? report.mrResumeState : report.mrStartState;
   if (readiness === 'WaitingProfile')
     return status('WaitingProfile', '等待遊戲伺服器的 MR 錄製來源。');
   if (readiness === 'WaitingRevision')
     return status('WaitingRevision', '等待遊戲伺服器同步最新場次設定與名冊。');
   if (!['Ready', 'WaitingPlayers'].includes(readiness) || report.origin !== 'GameServer'
-    || report.observedSequence !== session.sequence || !Array.isArray(report.players)
+    || (!monitoring && report.observedSequence !== session.sequence) || !Array.isArray(report.players)
     || report.players.length !== session.players.length) return pending();
 
   const { rows } = readinessView(report, session, elapsed);
+  if (monitoring && rows.some(row => !row.matched)) return pending();
   const tracked = new Set(rows.filter(row => row.ready && row.kind === 'Tracked').map(row => row.id));
-  const eliminated = new Set(resuming ? rows.filter(row => row.state === 'Eliminated').map(row => row.id) : []);
+  const eliminated = new Set(action !== 'Begin' ? rows.filter(row => row.state === 'Eliminated').map(row => row.id) : []);
   if (readiness === 'Ready' && tracked.size + eliminated.size !== session.players.length) return pending();
   const rooms = session.roomIds.filter(room => actor?.role === 'Master' || actor?.roomId === room).map(room => {
     const players = session.players.filter(player => player.roomId === room);
@@ -57,8 +61,10 @@ export function mrReadinessView(report, session, elapsed, actor) {
     const casualties = players.length - living.length;
     const text = players.length === 0 ? '尚無玩家' : `${living.length - waiting.length} / ${living.length} 追蹤就緒`
       + (waiting.length ? ` · 等候席位 ${waiting.join('、')}` : '') + (casualties ? ` · 已淘汰 ${casualties}` : '');
-    return { room, text: `房間 ${room} · ${text}` };
+    return { room, text: `房間 ${room} · ${text}`, attention: monitoring && waiting.length > 0 };
   });
+  if (monitoring) return readiness === 'Ready' ? status('Ready', '目前快照中的存活席位都有有效追蹤。', rooms)
+    : status('WaitingPlayers', '有存活席位尚無有效追蹤，請查看房間與席位。', rooms);
   return readiness === 'Ready' ? status('Ready', resuming ? '目前快照顯示已符合繼續條件。' : '目前快照顯示全場名冊已就緒。', rooms)
     : status('WaitingPlayers', resuming ? '等待存活玩家重新取得有效追蹤姿態。' : '等待全場名冊的有效追蹤姿態。', rooms);
 }
@@ -77,6 +83,14 @@ export function roomReadinessView(report, room, session, elapsed) {
   const { simulatedReady, trackedReady } = row;
   if (![simulatedReady, trackedReady].every(count => Number.isInteger(count) && count >= 0) || simulatedReady + trackedReady > row.registered)
     return { source: 'Unavailable', text: labels.Unavailable };
+  if (session.environment?.mode === 'MR' && session.state === 'Running') {
+    const living = row.mrLiving;
+    if (!Number.isInteger(living) || living < trackedReady || living > row.registered || simulatedReady !== 0)
+      return { source: 'Unavailable', text: labels.Unavailable };
+    const missing = living - trackedReady;
+    return { source, ready: missing ? 0 : trackedReady, attention: missing > 0,
+      text: `MR · ${trackedReady} / ${living} 追蹤就緒` + (missing ? ` · 等候 ${missing} 席` : '') };
+  }
   return { source, ready: simulatedReady + trackedReady, text: `${simulatedReady + trackedReady} / ${row.registered} 姿態有效 · 合成 ${simulatedReady} · 追蹤 ${trackedReady}` };
 }
 
@@ -93,6 +107,7 @@ export function mountRoomReadiness(getState, unauthorized) {
       cell.textContent = view.text;
       cell.dataset.sourceState = view.source;
       cell.classList.toggle('ready-player', view.ready > 0);
+      cell.classList.toggle('tracking-attention', !!view.attention);
     }
   }
   async function poll() {
@@ -144,15 +159,19 @@ export function mountReadiness(getState, unauthorized) {
     mrPanel.hidden = !view;
     mrPanel.dataset.state = view?.state || '';
     const resuming = view?.action === 'Resume';
-    mrTitle.textContent = resuming ? 'MR 繼續檢查' : 'MR 開場檢查';
-    mrHint.textContent = resuming ? '需要重新對位的玩家可在暫停中完成三點量測。按繼續時，伺服器會再核對當時的快照。'
+    const monitoring = view?.action === 'Monitor';
+    mrTitle.textContent = monitoring ? 'MR 執行中追蹤' : resuming ? 'MR 繼續檢查' : 'MR 開場檢查';
+    mrHint.textContent = monitoring ? '需要重新對位時，操作員可先暫停，再用「MR 繼續檢查」確認追蹤。'
+      : resuming ? '需要重新對位的玩家可在暫停中完成三點量測。按繼續時，伺服器會再核對當時的快照。'
       : '請讓名冊上的 Quest 3 玩家完成三點對位。按開始時，伺服器會再核對當時的快照。';
     mrStatus.textContent = view?.text || '';
     mrStatus.classList.toggle('ready-player', view?.state === 'Ready');
-    mrRooms.replaceChildren(...(view?.rooms || []).map(({ room, text }) => {
+    mrStatus.classList.toggle('tracking-attention', monitoring && view?.state === 'WaitingPlayers');
+    mrRooms.replaceChildren(...(view?.rooms || []).map(({ room, text, attention }) => {
       const item = document.createElement('li');
       item.dataset.mrRoom = room;
       item.textContent = text;
+      item.classList.toggle('tracking-attention', !!attention);
       return item;
     }));
   }

@@ -178,6 +178,13 @@ internal static class ReadinessChecks
         Refresh();
         store.Append(id, Frame(5), server);
         clock.Now = start.AddMilliseconds(200);
+        check(store.Readiness(id, master) is { MrTrackingState: "Ready", MrResumeState: null },
+            "A fresh Running MR frame confirms live tracking without advertising Resume");
+        manager.Execute(id, new(Guid.NewGuid(), ControlAction.SetEnvironment,
+            environment with { Weather = Weather.Rain }), master);
+        check(store.Readiness(id, master) is { MrTrackingState: "Ready" } currentRunning
+            && currentRunning.ObservedSequence < currentRunning.SessionSequence,
+            "Running MR tracking remains readable while a newer command is being observed by the source");
         var paused = store.ExecuteCommand(id, new(Guid.NewGuid(), ControlAction.Pause), master).Session;
         var resume = new ControlCommand(Guid.NewGuid(), ControlAction.Resume);
         check(store.Readiness(id, master) is { MrStartState: null, MrResumeState: "WaitingSource", SourceState: "PhasePending" },
@@ -219,6 +226,20 @@ internal static class ReadinessChecks
         var continued = store.ExecuteCommand(id, resume, master);
         check(continued.Session.State == SessionState.Running && !continued.Duplicate && continued.Session.StartedAtUtc == accepted.Session.StartedAtUtc,
             "The same previously rejected MR Resume succeeds on fresh tracking without resetting the mission start");
+        Refresh();
+        bridge.Tick(1.5);
+        check(bridge.Pose(1, alphaHead, alphaHead, new(0, 0, 1), 1.5, tracked: true)
+            && !bridge.Weapon(2, 1, false, 1.5), "An expired MR pose cannot fire while other seats remain in the running match");
+        store.Append(id, Frame(8), server);
+        clock.Now = start.AddMilliseconds(350);
+        var rooms = store.ReadinessByRoom(master);
+        check(store.Readiness(id, master).MrTrackingState == "WaitingPlayers"
+            && rooms[0] is { MrLiving: 1, TrackedReady: 1 } && rooms[4] is { MrLiving: 1, TrackedReady: 0 }
+            && manager.Get(id).State == SessionState.Running,
+            "A tracked seat loss is scoped to its room while the operator retains control of Pause");
+        clock.Now = start.AddMilliseconds(1850.01);
+        check(store.ReadinessByRoom(master).All(room => room.MrLiving is null),
+            "An expired MR frame clears its running room counts instead of keeping the previous alert");
         store.ExecuteCommand(id, new(Guid.NewGuid(), ControlAction.Pause), master);
         check(store.ExecuteCommand(id, resume, master) is { Duplicate: true } retry && retry.AppliedAtSequence == continued.AppliedAtSequence
             && retry.Session.State == SessionState.Paused, "An accepted Resume retry returns the original receipt without overriding a later Pause");

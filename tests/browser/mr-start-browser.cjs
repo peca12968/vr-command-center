@@ -71,11 +71,11 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       if (send({ type: 'frame', payload: packet }).acceptedSequence !== sequence) throw new Error('Tracked fixture frame was not accepted');
       if (damage) damagePublished = true;
     }
-    async function publishUntil(target, state, snapshot, missing = []) {
+    async function publishUntil(target, state, snapshot, missing = [], matches = async () => true) {
       const deadline = performance.now() + 10000;
       while (performance.now() < deadline) {
         publish(snapshot, missing);
-        if (await target.getAttribute('data-state') === state) return;
+        if (await target.getAttribute('data-state') === state && await matches()) return;
         await delay(150);
       }
       throw new Error(`MR start did not show ${state}; last state ${await target.getAttribute('data-state')}`);
@@ -126,7 +126,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const started = await command('Begin');
     if (started.status !== 200) throw new Error('MR Begin returned ' + started.status);
     const result = started.body;
-    await panel.waitFor({ state: 'hidden' });
+    await panel.locator('#mr-start-title').filter({ hasText: 'MR 執行中追蹤' }).waitFor();
     check(result.session.state === 'Running' && result.session.players.length === 25 && result.session.environment.timeOfDay === 'Night',
       'The real Begin starts the original 25-seat MR roster after a fresh observation of the exact revision');
     publish(result.session);
@@ -141,6 +141,24 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const damaged = await api(route);
     publish(damaged);
     await page.locator('#session-meta').filter({ hasText: `序號 ${damaged.sequence}` }).waitFor();
+    const alertCard = page.locator('[data-room-readiness="4"]');
+    const alerts = page.locator('[data-room-readiness].tracking-attention');
+    const currentAlert = () => alertCard.evaluate(card => card.classList.contains('tracking-attention'));
+    await publishUntil(panel, 'WaitingPlayers', damaged, [2], currentAlert);
+    check(await waitingRoom.innerText() === '房間 4 · 3 / 4 追蹤就緒 · 等候席位 2 · 已淘汰 1'
+      && await alertCard.innerText() === 'MR · 3 / 4 追蹤就緒 · 等候 1 席' && await alerts.count() === 1
+      && (await api(route)).state === 'Running' && (await api(route)).sequence === damaged.sequence,
+      'A real Running MR frame flags the one living lost seat in its room without changing the mission phase');
+    await panel.screenshot({ path: path.join(screenshots, 'mr-running-waiting-seats.png') });
+    await panel.locator('#mr-start-status').filter({ hasText: '快照已過期' }).waitFor();
+    await alerts.waitFor({ state: 'hidden' });
+    check(await panel.locator('[data-mr-room]').count() === 0 && !await currentAlert(),
+      'A stale Running frame clears the previously known missing seats and room alert');
+    await publishUntil(panel, 'Ready', damaged, [], async () => await alertCard.innerText() === 'MR · 4 / 4 追蹤就緒');
+    check(await alerts.count() === 0 && await panel.locator('li.tracking-attention').count() === 0
+      && await waitingRoom.innerText() === '房間 4 · 4 / 4 追蹤就緒 · 已淘汰 1',
+      'A new tracked frame clears both Running alerts while preserving the eliminated seat');
+    await publishUntil(panel, 'WaitingPlayers', damaged, [2], currentAlert);
     const paused = await command('Pause');
     if (paused.status !== 200) throw new Error(`MR Pause returned ${paused.status}: ${paused.body.error}`);
     await panel.locator('#mr-start-title').filter({ hasText: 'MR 繼續檢查' }).waitFor();
@@ -169,7 +187,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     publish(paused.body.session);
     const resumed = await command('Resume');
     if (resumed.status !== 200) throw new Error('Recovered MR Resume returned ' + resumed.status);
-    await panel.waitFor({ state: 'hidden' });
+    await panel.locator('#mr-start-title').filter({ hasText: 'MR 執行中追蹤' }).waitFor();
     check(resumed.body.session.state === 'Running' && resumed.body.session.startedAtUtc === result.session.startedAtUtc
       && resumed.body.session.players.length === 25 && resumed.body.duplicate === false,
       'The original MR session continues with the same 25 seats and original mission start');

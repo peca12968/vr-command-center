@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using VrCommand.Core;
 
 using VrCommand.Simulation;
@@ -7,9 +8,11 @@ namespace VrCommand.Api;
 public record PlayerReadiness(Guid PlayerId, Guid AdmissionId, int RoomId, int Seat, string State, string RigKind, bool CanParticipate);
 public record SessionReadiness(int Version, Guid SessionId, long SessionSequence, DateTimeOffset SampledAtUtc,
     string SourceState, string? Origin, long WorldSequence, long ObservedSequence, DateTimeOffset? CapturedAtUtc,
-    double? SourceAgeMilliseconds, PlayerReadiness[] Players, string? MrStartState, string? MrResumeState);
+    double? SourceAgeMilliseconds, PlayerReadiness[] Players, string? MrStartState, string? MrResumeState,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? MrTrackingState);
 public record RoomReadiness(int RoomId, Guid? SessionId, long SessionSequence, int Registered, int SimulatedReady,
-    int TrackedReady, string SourceState, double? SourceAgeMilliseconds);
+    int TrackedReady, string SourceState, double? SourceAgeMilliseconds,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MrLiving = null);
 
 public sealed partial class WorldRecordings
 {
@@ -52,7 +55,9 @@ public sealed partial class WorldRecordings
             return new RoomReadiness(room.Id, id, report.SessionSequence, players.Length,
                 players.Count(player => player.CanParticipate && player.RigKind == "Simulated"),
                 players.Count(player => player.CanParticipate && player.RigKind == "Tracked"),
-                report.SourceState, report.SourceAgeMilliseconds);
+                report.SourceState, report.SourceAgeMilliseconds,
+                report.MrTrackingState is "Ready" or "WaitingPlayers"
+                    ? players.Count(player => player.State != "Eliminated") : null);
         }).ToArray();
     }
 
@@ -89,15 +94,17 @@ public sealed partial class WorldRecordings
             var observedSequence = frame?.Packet.observedSequence ?? 0;
             var starting = SessionManager.RequiresMrReadiness(current, ControlAction.Begin);
             var resuming = SessionManager.RequiresMrReadiness(current, ControlAction.Resume);
-            var mrState = !starting && !resuming ? null
+            var tracking = current.Environment.Mode == ExperienceMode.MR && current.State == SessionState.Running;
+            var mrState = !starting && !resuming && !tracking ? null
                 : starting && players.Length == 0 ? "EmptyRoster"
                 : source != "Fresh" ? "WaitingSource"
                 : info?.Header is not { origin: "GameServer", calibration: WorldRecordingHeader.QuestMixedRealityProfile } ? "WaitingProfile"
-                : observedSequence != current.Sequence ? "WaitingRevision"
-                : players.All(player => (resuming && player.State == "Eliminated") || (player.CanParticipate && player.RigKind == "Tracked"))
+                : !tracking && observedSequence != current.Sequence ? "WaitingRevision"
+                : players.All(player => (!starting && player.State == "Eliminated") || (player.CanParticipate && player.RigKind == "Tracked"))
                     ? "Ready" : "WaitingPlayers";
             return new(1, id, current.Sequence, now, source, info?.Header.origin, info?.AcceptedSequence ?? 0,
-                observedSequence, info?.CapturedAtUtc, age, players, starting ? mrState : null, resuming ? mrState : null);
+                observedSequence, info?.CapturedAtUtc, age, players, starting ? mrState : null, resuming ? mrState : null,
+                tracking ? mrState : null);
         }
     }
 }
