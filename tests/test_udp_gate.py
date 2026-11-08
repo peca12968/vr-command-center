@@ -102,6 +102,35 @@ class UdpGateTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             m.LoopbackGate(self.server.getsockname()[1],None,mode='drop',traffic=meter,peer='one')
 
+    def test_periodic_loss_is_armed_after_admission_and_counts_directions_independently(self):
+        meter = m.UdpTrafficMeter(periodic_loss=True)
+        gate = self.gate_for(None, mode='periodic-loss', traffic=meter, peer='one')
+        self.assertEqual(0, meter.snapshot()['periodicLoss']['one']['upstreamOffered'])
+        meter.start_loss()
+        with self.assertRaises(ValueError):
+            meter.register('late')
+        with self.assertRaises(ValueError):
+            meter.start_loss()
+        for sender, receiver, target, direction in (
+                (self.client, self.server, ('127.0.0.1', gate.port), 'upstream'),
+                (self.server, self.client, self.reply, 'downstream')):
+            for index in range(1, 22):
+                payload = bytes([index])
+                sender.sendto(payload, target)
+                if index != 20:
+                    self.assertEqual(payload, receiver.recvfrom(65536)[0])
+            self.assertEqual(21, meter.snapshot()['periodicLoss']['one'][direction + 'Offered'])
+            self.assertEqual(1, meter.snapshot()['periodicLoss']['one'][direction + 'Dropped'])
+        self.assertEqual(2, gate.report()['dropped'])
+
+    def test_periodic_loss_gate_requires_matching_meter_configuration(self):
+        with self.assertRaises(ValueError):
+            m.LoopbackGate(self.server.getsockname()[1], None, mode='periodic-loss',
+                           traffic=m.UdpTrafficMeter(), peer='one')
+        with self.assertRaises(ValueError):
+            m.LoopbackGate(self.server.getsockname()[1], None, mode='measure',
+                           traffic=m.UdpTrafficMeter(periodic_loss=True), peer='one')
+
 
 class TrafficAccountingTests(unittest.TestCase):
     def setUp(self):
@@ -135,6 +164,29 @@ class TrafficAccountingTests(unittest.TestCase):
         for peer in range(25):meter.register(str(peer))
         with self.assertRaises(ValueError):meter.register('0')
         with self.assertRaises(ValueError):meter.register('26')
+
+    def test_periodic_loss_requires_drops_in_both_directions_during_the_original_window(self):
+        def boundary(offered):
+            return {'periodicLoss': {owner['name']: {
+                direction + suffix: count
+                for direction in m.DIRECTIONS
+                for suffix, count in (('Offered', offered), ('Dropped', offered // m.LOSS_EVERY))}
+                for owner in self.owners}}
+        start, last, terminal = map(boundary, (9, 59, 71))
+        report = m.summarize_periodic_loss([start, last], terminal, self.owners)
+        self.assertEqual(2, report['clients'][0]['commonRunning']['upstreamDropped'])
+        self.assertEqual(3, report['clients'][0]['throughResults']['downstreamDropped'])
+        for bad in (boundary(19), boundary(90)):
+            with self.assertRaises(ValueError):
+                m.summarize_periodic_loss([start, bad], terminal, self.owners)
+        bad = copy.deepcopy(last)
+        bad['periodicLoss']['b']['downstreamDropped'] = 1
+        with self.assertRaises(ValueError):
+            m.summarize_periodic_loss([start, bad], terminal, self.owners)
+        bad = copy.deepcopy(last)
+        bad['periodicLoss']['other'] = bad['periodicLoss'].pop('b')
+        with self.assertRaises(ValueError):
+            m.summarize_periodic_loss([start, bad], terminal, self.owners)
 
 
 if __name__=='__main__':unittest.main()

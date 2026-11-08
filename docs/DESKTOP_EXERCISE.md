@@ -1,5 +1,17 @@
 # 原生多客戶端自動化動態驗證
 
+## 五房 UDP 丟包驗證
+
+```powershell
+python scripts/check-desktop-exercise.py --api-dll <API-DLL> --player-exe <Windows-Player-EXE> `
+  --runtime-root <本機測試目錄> --mode both --players-per-room 5 --seconds 40 `
+  --udp-periodic-loss --link-metrics
+```
+
+`--udp-periodic-loss` 使用同機 UDP 轉送器。所有原玩家入場後、發出 Begin 前開始丟包。每位玩家的上行、下行各自計數，每遇第 20 個 UDP 封包就丟棄，持續至個人戰績交付。啟用時會一併量測轉送流量。可加 `--link-metrics` 記錄應用層往返探測，並以 `--udp-traffic --link-metrics` 重跑相同條件的零注入對照。
+
+各模式保存原生客戶端、共通 Running 區間的流量和丟包邊界。檢查器要求每一條原連線在該區間的兩個方向都有實際注入丟包，並逐場核對原射擊、換彈、完整回放、雙封存及原連線的個人戰績確認。報表只保存封包計數和負載長度。週期性丟包代表本機受控網路條件，與無線突發丟包、跨機環境和實際場館容量分開驗收。
+
 ## 五房射擊與戰績驗證
 
 `--marksmanship` 沿用 Windows Development batch Client 的短場輸入。任務每房放置六個正常油桶，讓敵軍出生候選只在第一列保留五席正前方的位置。五名玩家各對應一個由遊戲伺服器實際配置的原始目標，開場前逐一核對其房號與座標。敵軍守備，關閉自動攻擊。

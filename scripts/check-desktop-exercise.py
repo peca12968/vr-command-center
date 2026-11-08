@@ -133,7 +133,8 @@ class ExerciseVenue(vm.Venue):
                 extra_args=(*extra_args,'--vr-link-metrics',str(report))
             if self.udp_meter is not None:
                 if config['address']!='127.0.0.1':raise ValueError('Only the owned loopback server can be measured')
-                relay=udp.LoopbackGate(config['port'],None,mode='measure',traffic=self.udp_meter,peer=name).start()
+                mode = 'periodic-loss' if self.args.udp_periodic_loss else 'measure'
+                relay=udp.LoopbackGate(config['port'],None,mode=mode,traffic=self.udp_meter,peer=name).start()
                 self.udp_relays[name]=relay
                 config={**config,'port':relay.port}
         try:
@@ -318,7 +319,8 @@ def run(v):
         v.evidence.append(label);v.stage('checking',check=label)
     for mode in (['linked','independent'] if v.args.mode=='both' else [v.args.mode]):
         entries=[];native=[];pause=None
-        if v.args.udp_traffic:v.udp_meter=udp.UdpTrafficMeter()
+        if v.args.udp_traffic:
+            v.udp_meter = udp.UdpTrafficMeter(periodic_loss=v.args.udp_periodic_loss)
         for rooms in ([list(range(1,6))] if mode=='linked' else [[r] for r in range(1,6)]):
             definition={'name':'Generated native input '+mode,'briefing':'Automated Simulation exercise; no physical operators or headsets','durationSeconds':1800 if v.args.endurance else 600,'environment':{'mode':'VR','weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':len(rooms) if v.args.operator_controls else 0,'behavior':'Hold','autoAttack':False},'props':[]}
             if v.args.marksmanship:
@@ -348,6 +350,8 @@ def run(v):
             if len({r['nativeConnectionId'] for r in owners})!=len(owners):raise RuntimeError('Native connection IDs are not unique within this server')
         if len({r['pid'] for r in native})!=len(native):raise RuntimeError('Native players did not retain distinct original processes')
         v.save(mode+'-native-clients.json',native);check(len(native)==5*v.args.players_per_room,mode+': original native clients admitted before generated input')
+        if v.args.udp_periodic_loss:
+            v.udp_meter.start_loss()
         for e in entries:
             validate_roster(v.state(e),e['players']);receipt=v.command(e,'Begin')
             if receipt['duplicate'] is not False or receipt['session']['id']!=e['id']:raise RuntimeError('Begin receipt belongs to another intent/session')
@@ -443,6 +447,10 @@ def run(v):
             if len(acknowledgments)!=len(owners) or set(acknowledgments)!={r['nativeConnectionId'] for r in owners} or 'VR_SERVER_DEBRIEF_TIMEOUT ' in debrief.log_text(v,e['name']+'-server'):raise RuntimeError('Server ACK differs from original native connections')
             if any(debrief.log_text(v,r['name']).count('VR_CLIENT_CONNECTED id=')!=1 for r in owners):raise RuntimeError('A client changed connection before its final result')
             v.save(e['name']+'-results.json',{'delivery':delivery,'results':results,'serverAcknowledgments':acknowledgments,'csv':csv})
+            if v.args.udp_periodic_loss and e is entries[-1]:
+                loss = udp.summarize_periodic_loss(traffic_boundaries, v.udp_meter.snapshot(), native)
+                v.save(mode+'-udp-periodic-loss.json', loss)
+                check(True, mode+': every original connection experienced verified bidirectional periodic loss and delivered its original result')
             v.stop_round(e)
             if not v.args.endurance:
                 playback=replay(v,e,pause if e is entries[0] else None);check(playback['complete'],e['name']+': all replay frames retain original bodies, movement/reload, seals and results')
@@ -456,7 +464,7 @@ def run(v):
                 for future in concurrent.futures.as_completed(pending):
                     e=pending[future];playback=future.result();check(playback['complete'],e['name']+': complete endurance replay retains every original body and every movement/reload/two-shot cycle')
         findings=capacity.native_log_findings(v.directory);check(not findings,mode+': no native send queue errors')
-        modes.append({'mode':mode,'clients':len(native),'automatedInputs':True,'operatorControls':v.args.operator_controls,'endurance':v.args.endurance,'marksmanship':v.args.marksmanship,'linkMetrics':v.args.link_metrics,'udpTraffic':v.args.udp_traffic,'requestedSeconds':v.args.seconds,'maximumReplayWorkers':v.args.replay_workers,'replayRate':4,'physicalOperators':0,'networkCapacityAccepted':False})
+        modes.append({'mode':mode,'clients':len(native),'automatedInputs':True,'operatorControls':v.args.operator_controls,'endurance':v.args.endurance,'marksmanship':v.args.marksmanship,'linkMetrics':v.args.link_metrics,'udpTraffic':v.args.udp_traffic,'udpPeriodicLoss':v.args.udp_periodic_loss,'requestedSeconds':v.args.seconds,'maximumReplayWorkers':v.args.replay_workers,'replayRate':4,'physicalOperators':0,'networkCapacityAccepted':False})
     v.summary();v.save('exercise-result.json',{'complete':False,'modes':modes,'headsets':0,'hosts':1,'renderedClients':0,'posesWrittenDirectly':False,'newTestRpc':False,'automatedInput':True,'physicalOperators':0,'networkCapacityAccepted':False,'scope':'Actual Windows native clients using generated desktop movement/weapon intents through original RPCs; not humans, XR, LAN or capacity acceptance'})
 
 def main():
@@ -468,12 +476,15 @@ def main():
     p.add_argument('--marksmanship', action='store_true', help='Verify two accepted hits and one elimination per seat using saved layout and normal desktop weapon input')
     p.add_argument('--link-metrics', action='store_true', help='Collect 30 opt-in native link measurements per client during the 40-second short exercise')
     p.add_argument('--udp-traffic', action='store_true', help='Measure forwarded UDP payload bytes per original client in the 40-second short exercise')
+    p.add_argument('--udp-periodic-loss', action='store_true', help='Measure and drop every twentieth datagram per player and direction after admission in the 40-second short exercise')
     p.add_argument('--api-dll',type=Path,default=Path(os.environ.get('VR_COMMAND_API_DLL',ROOT/'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')));p.add_argument('--player-exe',type=Path,default=ROOT/'artifacts/desktop/VrCommand.exe');args=p.parse_args();args.duration=600;args.visible_room=0;args.job_workers=2;args.check=False
     if args.endurance and (args.seconds not in (60,900) or args.operator_controls) or not args.endurance and args.seconds not in range(12,41):p.error('Short seconds must be 12..40; endurance requires 60 or 900 and no operator-controls')
     if args.replay_workers!=1 and not args.endurance:p.error('Parallel replay readers require the explicit endurance profile')
     if args.check_frame_review and args.endurance:p.error('Frame review uses the short exercise')
     if args.marksmanship and (args.endurance or args.operator_controls or args.players_per_room!=5):p.error('Marksmanship requires five players per room and the short input profile without operator policy changes')
     if args.link_metrics and (args.endurance or args.seconds!=40):p.error('Link measurement requires the 40-second short exercise')
+    if args.udp_periodic_loss:
+        args.udp_traffic = True
     if args.udp_traffic and (args.endurance or args.seconds!=40):p.error('UDP traffic measurement requires the 40-second short exercise')
     vm.verify_player(args);v=ExerciseVenue(args)
     try:run(v)

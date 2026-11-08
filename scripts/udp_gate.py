@@ -6,20 +6,47 @@ import time
 
 
 TRAFFIC_FIELDS = ('upstreamDatagrams', 'upstreamPayloadBytes', 'downstreamDatagrams', 'downstreamPayloadBytes')
+DIRECTIONS = ('upstream', 'downstream')
+LOSS_EVERY = 20
 
 
 class UdpTrafficMeter:
     """One monotonic accounting boundary for all the relays in a test round."""
 
-    def __init__(self):
+    def __init__(self, *, periodic_loss=False):
         self._lock = threading.Lock()
         self._peers = {}
+        self.periodic_loss = periodic_loss
+        self._loss = {}
+        self._loss_started = False
 
     def register(self, peer):
         with self._lock:
             if not peer or peer in self._peers or len(self._peers) >= 25:
                 raise ValueError('Expected a distinct owned relay for each player')
+            if self._loss_started:
+                raise ValueError('Cannot register a relay after loss has started')
             self._peers[peer] = dict.fromkeys(TRAFFIC_FIELDS, 0)
+            if self.periodic_loss:
+                self._loss[peer] = dict.fromkeys((d + suffix for d in DIRECTIONS for suffix in ('Offered', 'Dropped')), 0)
+
+    def start_loss(self):
+        with self._lock:
+            if not self.periodic_loss or not self._loss or self._loss_started:
+                raise ValueError('Expected an unarmed periodic loss test with owned relays')
+            self._loss_started = True
+
+    def drop(self, peer, direction):
+        with self._lock:
+            if not self._loss_started:
+                return False
+            row = self._loss[peer]
+            offered, dropped = direction + 'Offered', direction + 'Dropped'
+            row[offered] += 1
+            if row[offered] % LOSS_EVERY == 0:
+                row[dropped] += 1
+                return True
+            return False
 
     def forwarded(self, peer, direction, size):
         with self._lock:
@@ -29,7 +56,36 @@ class UdpTrafficMeter:
 
     def snapshot(self):
         with self._lock:
-            return {'monotonicNs': time.perf_counter_ns(), 'peers': {peer: row.copy() for peer, row in self._peers.items()}}
+            result = {'monotonicNs': time.perf_counter_ns(), 'peers': {peer: row.copy() for peer, row in self._peers.items()}}
+            if self.periodic_loss:
+                result['periodicLoss'] = {peer: row.copy() for peer, row in self._loss.items()}
+            return result
+
+
+def summarize_periodic_loss(boundaries, terminal, owners):
+    names = {owner['name'] for owner in owners}
+    if not names or len(names) != len(owners) or len(boundaries) < 2:
+        raise ValueError('Periodic loss requires a common window and distinct original players')
+    snapshots = [*boundaries, terminal]
+    if any(set(snapshot['periodicLoss']) != names for snapshot in snapshots):
+        raise ValueError('Periodic loss accounting must cover every original player')
+    clients = []
+    for owner in owners:
+        rows = [snapshot['periodicLoss'][owner['name']] for snapshot in snapshots]
+        running = {}
+        for direction in DIRECTIONS:
+            offered, dropped = direction + 'Offered', direction + 'Dropped'
+            if any(row[offered] < 0 or row[dropped] != row[offered] // LOSS_EVERY for row in rows):
+                raise ValueError('UDP loss counters must reflect every twentieth offered datagram')
+            if any(after[offered] < before[offered] for before, after in zip(rows, rows[1:])):
+                raise ValueError('UDP loss accounting rewound')
+            running[offered] = rows[-2][offered] - rows[0][offered]
+            running[dropped] = rows[-2][dropped] - rows[0][dropped]
+            if running[dropped] <= 0:
+                raise ValueError('Both loss directions must be exercised for every player while Running')
+        clients.append({**owner, 'commonRunning': running, 'throughResults': rows[-1]})
+    return {'version': 1, 'sameHost': True, 'payloadsRecorded': False, 'dropEvery': LOSS_EVERY,
+            'clients': clients}
 
 
 def summarize_traffic(boundaries, owners):
@@ -80,11 +136,11 @@ def summarize_traffic(boundaries, owners):
 
 class LoopbackGate:
     def __init__(self, server_port, should_hold, *, mode='delay', pass_small_bytes=0, max_hold_seconds=8, max_packets=1024, max_bytes=2 * 1024 * 1024, traffic=None, peer=None):
-        if mode not in ('delay', 'drop', 'measure') or not 0 <= pass_small_bytes <= 64 or not 0 < server_port < 65536 or not 0 < max_hold_seconds <= 40 or not 0 < max_packets <= 1024 or not 0 < max_bytes <= 2 * 1024 * 1024:
+        if mode not in ('delay', 'drop', 'measure', 'periodic-loss') or not 0 <= pass_small_bytes <= 64 or not 0 < server_port < 65536 or not 0 < max_hold_seconds <= 40 or not 0 < max_packets <= 1024 or not 0 < max_bytes <= 2 * 1024 * 1024:
             raise ValueError('Gate bounds are invalid')
-        if mode == 'measure':
-            if traffic is None or not peer or pass_small_bytes or should_hold is not None:
-                raise ValueError('Traffic measurement requires an owned peer and transparent forwarding')
+        if mode in ('measure', 'periodic-loss'):
+            if traffic is None or not peer or pass_small_bytes or should_hold is not None or traffic.periodic_loss != (mode == 'periodic-loss'):
+                raise ValueError('Traffic measurement requires an owned peer and matching loss configuration')
             traffic.register(peer)
         elif traffic is not None or peer is not None:
             raise ValueError('Use the transparent mode to measure forwarded traffic')
@@ -107,6 +163,9 @@ class LoopbackGate:
             self.socket.sendto(data, self.client); self.counts['released'] += 1
 
     def _forward(self, data, target, direction):
+        if self.mode == 'periodic-loss' and self.traffic.drop(self.peer, direction):
+            self.counts['dropped'] += 1
+            return
         sent = self.socket.sendto(data, target)
         if self.traffic is not None:
             if sent != len(data): raise OSError('Incomplete UDP forwarding')
@@ -114,7 +173,7 @@ class LoopbackGate:
         self.counts[direction] += 1
 
     def _run(self):
-        deadline = time.monotonic() + (300 if self.mode == 'measure' else 90)
+        deadline = time.monotonic() + (300 if self.traffic is not None else 90)
         try:
             while not self.stop_event.is_set() and time.monotonic() < deadline:
                 if self.started is not None and self.release_reason is None:
@@ -128,7 +187,7 @@ class LoopbackGate:
                         self.counts['foreignDropped'] += 1; continue
                     self.client = sender; self._forward(data, self.server, 'upstream'); continue
                 if self.client is None: self.counts['foreignDropped'] += 1; continue
-                if self.mode == 'measure':
+                if self.traffic is not None:
                     self._forward(data, self.client, 'downstream'); continue
                 if self.started is None and not self.release_event.is_set() and self.should_hold():
                     self.started = time.monotonic(); self.held.set()
@@ -144,7 +203,7 @@ class LoopbackGate:
                         self.counts['peakPackets'] = max(self.counts['peakPackets'], len(self.queue))
                         self.counts['peakBytes'] = max(self.counts['peakBytes'], self.queued_bytes); continue
                 self._forward(data, self.client, 'downstream')
-            if self.mode == 'measure' and not self.stop_event.is_set():
+            if self.traffic is not None and not self.stop_event.is_set():
                 self.error = 'Measurement relay lifetime expired'
         except OSError as error:
             if not self.stop_event.is_set(): self.error = repr(error)
