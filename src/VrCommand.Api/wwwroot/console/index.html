@@ -36,6 +36,14 @@
           <section class="panel"><h3>準備新場次</h3><form id="create-session-form">
             <fieldset id="create-fields"><label>任務<select id="launch-mission" required></select></label>
               <div class="form-row"><label>連線模式<select id="launch-mode"><option value="Independent">單房獨立</option><option value="Linked">五房全連線</option></select></label><label>房間<select id="launch-room"></select></label></div>
+              <section id="launch-preview" class="layout-report launch-preview" aria-labelledby="launch-preview-heading" hidden>
+                <h4 id="launch-preview-heading">開場條件預覽</h4>
+                <p id="launch-preview-version"></p>
+                <dl><dt>房間</dt><dd id="launch-preview-rooms"></dd><dt>任務時間</dt><dd id="launch-preview-duration"></dd>
+                  <dt>初始環境</dt><dd id="launch-preview-environment"></dd><dt>初始敵軍</dt><dd id="launch-preview-enemies"></dd>
+                  <dt>場地物件</dt><dd id="launch-preview-props"></dd></dl>
+                <details id="launch-preview-briefing"><summary>任務簡報</summary><p id="launch-preview-briefing-text" class="briefing"></p></details>
+              </section>
               <button type="submit">建立準備場次</button>
             </fieldset>
           </form><div class="layout-report"><p id="launch-layout-summary" class="hint" role="status" aria-live="polite">選取保存的任務版本後檢查場地。</p><ul id="launch-layout-issues"></ul><p id="launch-layout-route-summary" class="hint" hidden></p><button id="layout-recheck-launch" type="button" class="quiet small">重新檢查場地</button></div><p class="hint">建立後加入玩家，再開始任務。玩家名冊旁會顯示已接受的姿態快照狀態；頭盔實機驗收仍待。</p></section>
@@ -150,7 +158,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.15 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.16 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

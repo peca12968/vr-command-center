@@ -259,10 +259,15 @@ async function main() {
     await page.locator('#retry-command').click();
     await page.locator('#pending-command').waitFor({ state: 'hidden' });
     check(commands.length === 2 && JSON.stringify(commands[0]) === JSON.stringify(commands[1]) && (await api('/sessions/' + session.id + '/events?limit=500')).filter(event => event.kind === 'ControlApplied' && event.payload.action === 'End').length === 1, 'End can be confirmed by retry without ending twice or stranding the workspace');
-    await page.locator('#launch-mode').selectOption('Linked'); await page.locator('#create-session-form button').click();
+    await page.locator('#launch-mode').selectOption('Linked');
+    check(await page.locator('#launch-preview-rooms').innerText() === '房間 1、房間 2、房間 3、房間 4、房間 5'
+      && await page.locator('#launch-room').isDisabled(), 'Linked preparation previews the exact five target rooms');
+    await page.locator('#create-session-form button').click();
     await page.waitForFunction(() => document.querySelector('#session-phase').textContent === '準備中' && document.querySelector('#session-meta').textContent.startsWith('五房全連線'));
     const linked = (await api('/sessions'))[0];
     check(linked.mode === 'Linked' && linked.roomIds.length === 5 && (await api('/rooms')).every(room => room.sessionId === linked.id), 'Master can prepare one linked session reserving all five rooms from the console');
+    check((await page.locator('#launch-preview-rooms').innerText()).match(/使用中/g)?.length === 5
+      && await page.locator('#create-session-form button').isDisabled(), 'Occupied targets remain visible and block another launch');
     await api('/sessions/' + linked.id + '/players', 'POST', { playerId: randomUUID(), name: xssName, roomId: 2, headset: 'Quest3' });
     const roomContext = await browser.newContext({ viewport: { width: 390, height: 844 } }), roomPage = await roomContext.newPage(); captureErrors(roomPage);
     await roomPage.goto(base + '/console/'); await roomPage.locator('#login-key').fill(tokens.Room1); await roomPage.locator('#login-form button').click();

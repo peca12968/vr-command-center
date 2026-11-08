@@ -28,3 +28,4 @@
   max-height: 16rem;
   overflow: auto;
 }
+.launch-preview h4,.launch-preview p{margin:0 0 8px;overflow-wrap:anywhere}.launch-preview dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:5px 12px;margin:8px 0;font-size:.87rem}.launch-preview dt{color:var(--muted)}.launch-preview dd{margin:0;overflow-wrap:anywhere}.launch-preview summary{cursor:pointer}.launch-preview .briefing{margin:8px 0 0;max-height:14rem;overflow:auto}

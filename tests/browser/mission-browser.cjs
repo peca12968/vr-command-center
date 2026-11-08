@@ -82,9 +82,18 @@ module.exports = async function missionBrowser({ page, context, api, tokens, bas
     check(await editor.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'Version history and both save actions fit a mobile viewport');
     await editor.screenshot({ path: path.join(screenshots, 'mission-versions-mobile.png'), fullPage: true });
     await editor.setViewportSize({ width: 1440, height: 1080 });
+    await editor.locator('#draft-briefing').fill('尚未儲存的預覽反例');
     await editor.locator('#launch-version').click();
     check(await editor.locator('#launch-mission').inputValue() === mission.id, 'Historical draft explicitly selects its saved original version for launch');
-    await editor.locator('#launch-room').selectOption('3'); await editor.locator('#create-session-form button').click();
+    await editor.locator('#launch-room').selectOption('3');
+    await editor.locator('#launch-preview-briefing summary').click();
+    check(await editor.locator('#launch-preview').getAttribute('data-mission-id') === mission.id
+      && (await editor.locator('#launch-preview-version').innerText()).includes('第 1 版（歷史）')
+      && await editor.locator('#launch-preview-rooms').innerText() === '房間 3'
+      && await editor.locator('#launch-preview-duration').innerText() === `${mission.definition.durationSeconds} 秒`
+      && await editor.locator('#launch-preview-briefing-text').innerText() === mission.definition.briefing,
+      'The launch preview uses the saved historical snapshot and room even while the draft contains a different briefing');
+    await editor.locator('#create-session-form button').click();
     await waitForDom(() => !document.querySelector('#session-panel').hidden && document.querySelector('#session-phase').textContent.includes('準備'));
     let created = (await api('/sessions')).find(row => row.roomIds.length === 1 && row.roomIds[0] === 3);
     check(created?.mission.id === mission.id && JSON.stringify(created.mission.definition) === JSON.stringify(mission.definition), 'Launching a historical version uses its full original immutable definition');

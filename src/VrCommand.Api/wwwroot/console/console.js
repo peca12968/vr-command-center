@@ -127,7 +127,7 @@ function logout() {
   $('identity').textContent = '尚未登入'; $('login-key').value = '';
   $('rooms').replaceChildren(); $('roster').replaceChildren(); $('statistics').replaceChildren(); $('event-list').replaceChildren();
   $('ticket-room').replaceChildren(); delete $('ticket-room').dataset.session;
-  $('mission-form').reset(); $('launch-mission').replaceChildren(); $('edit-mission').replaceChildren(); renderHistory(); renderProps(); $('draft-status').textContent = '尚未儲存的草稿'; $('session-panel').hidden = true; notify('');
+  $('mission-form').reset(); $('launch-mission').replaceChildren(); $('edit-mission').replaceChildren(); renderLaunchPreview(launchPlan()); renderHistory(); renderProps(); $('draft-status').textContent = '尚未儲存的草稿'; $('session-panel').hidden = true; notify('');
 }
 async function login(event) {
   event.preventDefault();
@@ -224,12 +224,48 @@ async function selectSession(id) {
   if (selection !== selectionEpoch || epoch !== state.epoch) return;
   try { await refresh(); } catch (error) { showRefreshError(error); }
 }
+function launchPlan() {
+  const missionId = $('launch-mission').value, mode = $('launch-mode').value;
+  const revision = state.catalog.find(row => row.mission.id === missionId)
+    ?? (state.launchPinned?.mission.id === missionId ? state.launchPinned : null);
+  const roomIds = mode === 'Linked' ? [1, 2, 3, 4, 5] : [Number($('launch-room').value)];
+  const rooms = roomIds.map(id => state.rooms.find(room => room.id === id && ownsRoom(id)));
+  const authorized = mode === 'Linked' ? master() : state.actor?.role === 'RoomController' || master();
+  return { revision, rooms, available: authorized && rooms.every(room => room && !room.sessionId),
+    body: { missionId, mode, roomIds } };
+}
+function renderLaunchPreview(plan) {
+  const { revision, rooms, body } = plan, preview = $('launch-preview');
+  preview.hidden = !revision;
+  if (preview.dataset.missionId !== body.missionId) $('launch-preview-briefing').open = false;
+  if (!revision) {
+    delete preview.dataset.missionId;
+    for (const part of ['version', 'rooms', 'duration', 'environment', 'enemies', 'props', 'briefing-text'])
+      $('launch-preview-' + part).textContent = '';
+    return;
+  }
+  preview.dataset.missionId = body.missionId;
+  const { name, briefing, durationSeconds, environment: env, enemies: enemy, props } = revision.mission.definition;
+  const historical = state.catalog.some(row => row.seriesId === revision.seriesId && row.number > revision.number);
+  $('launch-preview-version').textContent = `${name} · 第 ${revision.number} 版${historical ? '（歷史）' : ''}`;
+  $('launch-preview-rooms').textContent = rooms.every(Boolean)
+    ? rooms.map(room => `房間 ${room.id}${room.sessionId ? '（使用中）' : ''}`).join('、') : '尚無可用的房間資訊';
+  $('launch-preview-duration').textContent = `${durationSeconds} 秒`;
+  $('launch-preview-environment').textContent = `${env.mode} · ${weatherNames[env.weather]} · ${env.timeOfDay === 'Night' ? '夜晚' : '白天'} · ${env.lightning ? '閃電開啟' : '閃電關閉'}`;
+  $('launch-preview-enemies').textContent = `全場 ${enemy.count} 名 · ${behaviorNames[enemy.behavior]} · ${enemy.autoAttack ? '自動攻擊開啟' : '自動攻擊關閉'}`;
+  const sandbags = props.filter(prop => prop.assetId === 'sandbag').length;
+  const barrels = props.filter(prop => prop.assetId === 'barrel').length;
+  $('launch-preview-props').textContent = `每房 ${props.length} 件 · 沙包 ${sandbags} · 油桶 ${barrels}`;
+  $('launch-preview-briefing-text').textContent = briefing || '此任務未填寫簡報。';
+}
 function applyPermissions() {
   if (!state.actor) return;
   const session = state.session, ended = session?.state === 'Ended', locked = state.busy || !!state.pending;
   $('create-fields').disabled = locked || state.actor.role === 'GameServer';
   $('launch-room').disabled = $('launch-mode').value === 'Linked';
-  $('create-session-form').querySelector('button').disabled = locked || !state.missions.length || !placement.canLaunch() || ($('launch-mode').value === 'Linked' ? !master() || state.rooms.some(r => r.sessionId) : !!state.rooms.find(r => r.id === Number($('launch-room').value))?.sessionId);
+  const plan = launchPlan();
+  renderLaunchPreview(plan);
+  $('create-session-form').querySelector('button').disabled = locked || !plan.revision || !plan.available || !placement.canLaunch();
   $('mission-fields').disabled = locked || !master();
   renderPropHistory();
   $('load-mission').disabled = locked || !state.missions.length; $('new-mission').disabled = locked || !master();
@@ -319,8 +355,9 @@ function loadClock() { if (state.session) { $('clock-auto-end').checked = state.
 async function createSession() {
   if (state.pending) return;
   if (!placement.canLaunch()) { placement.scheduleLaunch(); notify('請先完成保存版本的場地檢查，再建立新場次。', true); return; }
-  const mode = $('launch-mode').value;
-  state.pending = { kind: 'create', path: '/sessions', method: 'POST', requestId: uuid(), body: { missionId: $('launch-mission').value, mode, roomIds: mode === 'Linked' ? [1, 2, 3, 4, 5] : [Number($('launch-room').value)] } };
+  const plan = launchPlan();
+  if (!plan.revision || !plan.available) { notify('請選取已保存的任務及空閒房間。', true); return; }
+  state.pending = { kind: 'create', path: '/sessions', method: 'POST', requestId: uuid(), body: plan.body };
   await sendPending();
 }
 async function command(action, extra = {}, expectedSequence = state.session.sequence) {
