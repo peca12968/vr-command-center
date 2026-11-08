@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-09 `windows-player-0.47.1.zip` 為 83,442,173 bytes，SHA-256 `ac0c39822bb819466c39519e5c0d14b9bb59e6f9e09268f007768edbc411c843`。解壓後核對 328 個清單檔案，啟動器通過 19 項檢查。 [版本相容性](EXTERNAL_CLIENTS.md#遊戲版本相容性)
+
 2026-11-06 新版 `windows-player-0.41.2.zip` 為 82,653,510 bytes，SHA256 `95c2a63a9d5d48b844af0bff47da263e7fbb46edf6d5d1c1e210589fcbaab897`。啟動器沿用 1.1，實際解壓後通過 19 項檢查。與遊戲伺服器包 0.41.2 的 Unity 建置來源一致。 [伺服器來源診斷](WINDOWS_SERVER_PACKAGE.md#跨機來源診斷)
 
 2026-11-06 採用 `windows-player-0.41.1-v2.zip`，82,652,952 bytes，SHA256 `925a8ac16451ae2c423da1b0cb9c9867af17b8fb5b08ab5824f7ea1b1bca8402`。啟動器 1.1 支援貼上完整路徑與「載入／更新」。已驗證檔案變更時拒絕啟動，重新載入後成功加入同機雙玩家場次。 [玩家連線檔流程](PLAYER_CONFIG_REVIEW.md)
