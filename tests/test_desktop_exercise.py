@@ -107,4 +107,52 @@ class OperatorCombinationTests(unittest.TestCase):
         m.match_control_reference({'packet':{'sequence':21},'statistics':[]},{20:reference},seen)
         self.assertEqual(seen,set())
 
+class MarksmanshipEvidenceTests(unittest.TestCase):
+    def setUp(self):
+        self.targets = {'player': 'target'}
+        event_specs = [
+            ('ShotFired', {'shotId': 'a', 'hasRay': True, 'hit': 'Enemy', 'targetId': 'target'}),
+            ('ShotHit', {'shotId': 'a', 'enemyId': 'target'}),
+            ('ReloadStarted', {}),
+            ('ReloadCompleted', {}),
+            ('ShotFired', {'shotId': 'b', 'hasRay': True, 'hit': 'Enemy', 'targetId': 'target'}),
+            ('ShotHit', {'shotId': 'b', 'enemyId': 'target'}),
+            ('EnemyEliminated', {'shotId': 'b', 'enemyId': 'target'}),
+        ]
+        events = [dict(data, kind=kind, playerId='player', eventId=str(i), sequence=i)
+                  for i, (kind, data) in enumerate(event_specs, 1)]
+        self.replay = [{'packet': {'events': events, 'throughCombatSequence': 5,
+                                   'frame': {'enemies': [{'id': 'target', 'health': 0}]}},
+                        'statistics': [{'playerId': 'player', 'ammoUsed': 2, 'shotsHit': 2, 'kills': 1, 'accuracyPercent': 100}]}]
+
+    def test_saved_native_targets_are_bound_to_original_room_and_seat(self):
+        player = {'id': 'player', 'roomId': 2, 'seat': 0}
+        target = {'id': 'target', 'roomId': 2, 'health': 100, 'feet': {'x': -17, 'y': 0, 'z': -1}}
+        value = {'packet': {'frame': {'enemies': [target]}}}
+        self.assertEqual(m.marksmanship_targets(value, [player]), self.targets)
+        with self.assertRaisesRegex(ValueError, 'one native target'):
+            m.marksmanship_targets(value, [{**player, 'roomId': 3}])
+
+    def test_two_hits_reload_and_elimination_reconcile(self):
+        self.assertEqual(m.reconcile_marksmanship(self.replay, self.targets),
+                         {'players': 1, 'shots': 2, 'hits': 2, 'eliminations': 1, 'combatEvents': 5})
+
+    def test_another_target_or_reused_shot_is_rejected(self):
+        for field, wrong in [('targetId', 'foreign'), ('shotId', 'a')]:
+            bad = copy.deepcopy(self.replay)
+            bad[0]['packet']['events'][4][field] = wrong
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, 'original seat target'):
+                m.reconcile_marksmanship(bad, self.targets)
+
+    def test_final_kill_must_match_the_second_accepted_ray(self):
+        self.replay[0]['packet']['events'][-1]['shotId'] = 'a'
+        with self.assertRaisesRegex(ValueError, 'accepted ray'):
+            m.reconcile_marksmanship(self.replay, self.targets)
+
+    def test_report_accuracy_cannot_disagree_with_the_event_prefix(self):
+        self.replay[0]['statistics'][0]['accuracyPercent'] = 50
+        with self.assertRaisesRegex(ValueError, 'event prefix'):
+            m.reconcile_marksmanship(self.replay, self.targets)
+
+
 if __name__=='__main__':unittest.main()

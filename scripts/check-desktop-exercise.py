@@ -2,7 +2,7 @@
 
 Automated Simulation input, not physical operators, XR tracking, LAN or capacity acceptance.
 """
-import argparse,concurrent.futures,importlib.util,json,math,os,re,sys,time,urllib.request,uuid
+import argparse,concurrent.futures,hashlib,importlib.util,io,json,math,os,re,sys,time,urllib.request,uuid,zipfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 def module(name,file):
@@ -174,6 +174,97 @@ def check_frame_review(v, entry, frames):
     v.save(entry['name'] + '-frame-review.json', {'complete': True, 'sequence': sequence,
            'resumedSequences': [frame['packet']['sequence'] for frame in resumed], 'frame': exact})
 
+def marksmanship_props():
+    # Standard floor placement excludes the other candidates in the first enemy row.
+    return [{'assetId': 'barrel', 'position': {'x': x, 'y': 0, 'z': -1}, 'yawDegrees': 0}
+            for x in (-4.125, -2.25, -.75, .75, 2.25, 4.125)]
+
+
+def marksmanship_targets(value, players):
+    enemies = value['packet']['frame']['enemies']
+    targets = {}
+    for player in players:
+        room = player['roomId']
+        x = (room - 3) * 14 + (player['seat'] - 2) * 1.5
+        candidates = [enemy for enemy in enemies if enemy['roomId'] == room and enemy['health'] == 100
+                      and enemy['feet'] == {'x': x, 'y': 0, 'z': -1}]
+        if len(candidates) != 1:
+            raise ValueError('Each original seat must face exactly one native target')
+        targets[player['id']] = candidates[0]['id']
+    if len(targets) != len(enemies) or len(set(targets.values())) != len(enemies):
+        raise ValueError('Unexpected or reused marksmanship target')
+    return targets
+
+
+def reconcile_marksmanship(frames, targets):
+    pattern = ['ShotFired', 'ShotHit', 'ReloadStarted', 'ReloadCompleted',
+               'ShotFired', 'ShotHit', 'EnemyEliminated']
+    progress = {player: [] for player in targets}
+    active_shots = {}
+    event_ids, shot_ids = set(), set()
+    last_event = combat_count = 0
+    for value in frames:
+        packet = value['packet']
+        for event in packet['events']:
+            player, kind = event['playerId'], event['kind']
+            actions = progress.get(player)
+            if actions is None or len(actions) == len(pattern) or kind != pattern[len(actions)]:
+                raise ValueError('Unexpected native fire, hit, reload or elimination order')
+            if event['sequence'] != last_event + 1 or event['eventId'] in event_ids:
+                raise ValueError('Duplicate or out-of-order native weapon event')
+            if kind == 'ShotFired':
+                shot = event['shotId']
+                if not shot or shot in shot_ids or not event['hasRay'] or event['hit'] != 'Enemy' or event['targetId'] != targets[player]:
+                    raise ValueError('Native shot ray did not hit its original seat target')
+                active_shots[player] = shot
+                shot_ids.add(shot)
+            elif kind in ('ShotHit', 'EnemyEliminated'):
+                if event['shotId'] != active_shots[player] or event['enemyId'] != targets[player]:
+                    raise ValueError('Native hit or elimination did not match its accepted ray')
+            actions.append(kind)
+            last_event = event['sequence']
+            event_ids.add(event['eventId'])
+            combat_count += int(kind not in ('ReloadStarted', 'ReloadCompleted'))
+        if packet['throughCombatSequence'] != combat_count:
+            raise ValueError('Weapon replay differs from the combat ledger boundary')
+        for statistics in value['statistics']:
+            actions = progress[statistics['playerId']]
+            shots, hits, kills = (actions.count(kind) for kind in ('ShotFired', 'ShotHit', 'EnemyEliminated'))
+            if (statistics['ammoUsed'], statistics['shotsHit'], statistics['kills'], statistics['accuracyPercent']) != (
+                    shots, hits, kills, (100 * hits / shots if shots else 0)):
+                raise ValueError('Saved statistics do not match the weapon event prefix')
+    if not progress or any(actions != pattern for actions in progress.values()):
+        raise ValueError('Each original player must hit twice, reload once and eliminate its target')
+    final = frames[-1]
+    if {enemy['id']: enemy['health'] for enemy in final['packet']['frame']['enemies']} != dict.fromkeys(targets.values(), 0):
+        raise ValueError('Sealed target roster or health differs')
+    if {row['playerId'] for row in final['statistics']} != set(targets):
+        raise ValueError('Sealed marksmanship statistics omit original players')
+    return {'players': len(progress), 'shots': len(shot_ids), 'hits': 2 * len(progress),
+            'eliminations': len(progress), 'combatEvents': combat_count}
+
+
+def verify_marksmanship_bundle(v, entry, csv_report):
+    route = f'/api/sessions/{entry["id"]}'
+    def download(suffix, mime):
+        request = urllib.request.Request(v.base + route + suffix, headers={'Authorization': 'Bearer ' + v.tokens['Master']})
+        with urllib.request.urlopen(request, timeout=8) as response:
+            if response.headers.get_content_type() != mime or response.headers['Cache-Control'] != 'no-store':
+                raise ValueError('Invalid linked marksmanship export response')
+            return response.read()
+
+    prefix = f'vr-command-report-v1-{entry["id"]}'
+    expected = {prefix + '.csv': Path(csv_report['path']).read_bytes()}
+    for room in entry['roomIds']:
+        expected[f'{prefix}-room-{room:02}.csv'] = download(f'/rooms/{room}/report.csv', 'text/csv')
+    raw = download('/reports.zip', 'application/zip')
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        if archive.namelist() != list(expected) or archive.testzip() is not None or any(
+                archive.read(name) != content for name, content in expected.items()):
+            raise ValueError('Linked marksmanship ZIP does not contain the exact full and five scoped CSVs')
+    (v.directory / 'linked-marksmanship-reports.zip').write_bytes(raw)
+    return {'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest(), 'files': len(expected)}
+
 
 def replay(v,entry,pause):
     request=urllib.request.Request(v.base+f'/api/sessions/{entry["id"]}/world/watch?mode=replay&fromMs=0&rate=4',headers={'Authorization':'Bearer '+v.tokens['Master']})
@@ -211,6 +302,11 @@ def replay(v,entry,pause):
             except ValueError as error:faults.append({'playerId':identity,'reason':str(error)})
     result={'complete':not faults,'frames':previous,'runningFrames':running,'faults':faults,'ranges':ranges,'operatorReferences':len(matched),'scope':'Full accepted native replay, generated input only; original continuity policies retained'}
     v.save(entry['name']+'-full-replay.json',rows);v.save(entry['name']+'-replay-checks.json',result)
+    if entry.get('marksmanshipTargets') and result['complete']:
+        proof=reconcile_marksmanship(rows,entry['marksmanshipTargets'])
+        if proof['combatEvents']!=v.state(entry)['combatStream']['acceptedSequence'] or last['statistics']!=entry['sealed']['statistics']['players']:
+            raise ValueError('Marksmanship replay differs from the final sealed ledger')
+        v.save(entry['name']+'-marksmanship-replay.json',proof)
     if v.args.check_frame_review and result['complete']:
         check_frame_review(v, entry, rows)
     return result
@@ -225,6 +321,9 @@ def run(v):
         if v.args.udp_traffic:v.udp_meter=udp.UdpTrafficMeter()
         for rooms in ([list(range(1,6))] if mode=='linked' else [[r] for r in range(1,6)]):
             definition={'name':'Generated native input '+mode,'briefing':'Automated Simulation exercise; no physical operators or headsets','durationSeconds':1800 if v.args.endurance else 600,'environment':{'mode':'VR','weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':len(rooms) if v.args.operator_controls else 0,'behavior':'Hold','autoAttack':False},'props':[]}
+            if v.args.marksmanship:
+                definition['enemies']['count']=5*len(rooms)
+                definition['props']=marksmanship_props()
             mission=v.request('/api/missions',definition,expected=201);entry=v.create(mission,rooms,mode+'-'+str(rooms[0]))
             for room in rooms:
                 for seat in range(1,v.args.players_per_room):
@@ -234,7 +333,12 @@ def run(v):
         for e,p in [(e,p) for e in entries for p in sorted(e['players'],key=lambda p:(p['seat'],p['roomId']))]:
             capacity.require_memory(capacity.memory_status());name=e['name']+'-client-'+p['admissionId'];v.launch(name,v.client_config(e,v.ticket(e,p)))
             native.append({'name':name,'sessionId':e['id'],'playerId':p['id'],'admissionId':p['admissionId'],'roomId':p['roomId'],'seat':p['seat'],'pid':v.processes[name].pid})
-        for e in entries:capacity.validate_frame(v.wait(lambda e=e:v.connected(e),100,'all exercise admissions'),e['players'])
+        for e in entries:
+            admitted=v.wait(lambda e=e:v.connected(e),100,'all exercise admissions')
+            capacity.validate_frame(admitted,e['players'])
+            if v.args.marksmanship:
+                e['marksmanshipTargets']=marksmanship_targets(admitted,e['players'])
+                v.save(e['name']+'-marksmanship-layout.json',{'targets':e['marksmanshipTargets'],'source':admitted})
         for row in native:
             ids=set(re.findall(r'VR_CLIENT_CONNECTED id=(\d+)',debrief.log_text(v,row['name'])))
             if len(ids)!=1:raise RuntimeError('Client connection not uniquely witnessed')
@@ -322,8 +426,14 @@ def run(v):
         v.save(mode+'-exercise-reports.json',reports);check(True,mode+': every original client submitted its exact generated fire/reload schedule and explicitly finished')
         for e in entries:
             validate_roster(v.state(e),e['players']);sealed=v.seal(e);players=sealed['statistics']['players']
-            check(all(p['ammoUsed']==fires and p['shotsHit']==0 and p['kills']==0 and p['health']==100 and p['damageTaken']==0 and p['hitsReceived']==0 for p in players),e['name']+': accepted statistics reflect the exact generated shot count for every player')
+            hits,kills,accuracy=(2,1,100) if v.args.marksmanship else (0,0,0)
+            check(all(p['ammoUsed']==fires and p['shotsHit']==hits and p['kills']==kills and p['accuracyPercent']==accuracy
+                      and p['health']==100 and p['damageTaken']==0 and p['hitsReceived']==0 for p in players),
+                  e['name']+': accepted statistics reflect the exact generated shots, hits and eliminations')
             csv=capacity.practice.save_report(v,e,sealed['statistics'],filename=e['name']+'-report.csv');delivery=v.wait_for_player_results(e);owners=[r for r in native if r['sessionId']==e['id']];results=[]
+            if v.args.marksmanship and mode=='linked':
+                v.save('linked-marksmanship-bundle.json',verify_marksmanship_bundle(v,e,csv))
+                check(True,'Linked marksmanship ZIP matches the full and five scoped CSVs')
             if delivery['allAcknowledged'] is not True or delivery['timedOut'] or set(delivery['phases'])!={r['name'] for r in owners}:raise RuntimeError('Original player results not all acknowledged')
             for row in owners:
                 result=debrief.final_result(v,row['name']);player=next(p for p in e['players'] if p['id']==row['playerId']);debrief.validate_result(result,e,player,sealed)
@@ -346,7 +456,7 @@ def run(v):
                 for future in concurrent.futures.as_completed(pending):
                     e=pending[future];playback=future.result();check(playback['complete'],e['name']+': complete endurance replay retains every original body and every movement/reload/two-shot cycle')
         findings=capacity.native_log_findings(v.directory);check(not findings,mode+': no native send queue errors')
-        modes.append({'mode':mode,'clients':len(native),'automatedInputs':True,'operatorControls':v.args.operator_controls,'endurance':v.args.endurance,'linkMetrics':v.args.link_metrics,'udpTraffic':v.args.udp_traffic,'requestedSeconds':v.args.seconds,'maximumReplayWorkers':v.args.replay_workers,'replayRate':4,'physicalOperators':0,'networkCapacityAccepted':False})
+        modes.append({'mode':mode,'clients':len(native),'automatedInputs':True,'operatorControls':v.args.operator_controls,'endurance':v.args.endurance,'marksmanship':v.args.marksmanship,'linkMetrics':v.args.link_metrics,'udpTraffic':v.args.udp_traffic,'requestedSeconds':v.args.seconds,'maximumReplayWorkers':v.args.replay_workers,'replayRate':4,'physicalOperators':0,'networkCapacityAccepted':False})
     v.summary();v.save('exercise-result.json',{'complete':False,'modes':modes,'headsets':0,'hosts':1,'renderedClients':0,'posesWrittenDirectly':False,'newTestRpc':False,'automatedInput':True,'physicalOperators':0,'networkCapacityAccepted':False,'scope':'Actual Windows native clients using generated desktop movement/weapon intents through original RPCs; not humans, XR, LAN or capacity acceptance'})
 
 def main():
@@ -355,12 +465,14 @@ def main():
     p.add_argument('--replay-workers',type=int,choices=(1,5),default=1,help='Endurance only: independent closed-source replay readers; every stream retains rate4 and all original gates')
     p.add_argument('--operator-controls',action='store_true',help='After the base motion window, apply Storm Night Patrol then Fog Day Advance through normal management commands; no console UI or physical operator input')
     p.add_argument('--check-frame-review', action='store_true', help='Verify an exact native shot frame and resume during the short exercise')
+    p.add_argument('--marksmanship', action='store_true', help='Verify two accepted hits and one elimination per seat using saved layout and normal desktop weapon input')
     p.add_argument('--link-metrics', action='store_true', help='Collect 30 opt-in native link measurements per client during the 40-second short exercise')
     p.add_argument('--udp-traffic', action='store_true', help='Measure forwarded UDP payload bytes per original client in the 40-second short exercise')
     p.add_argument('--api-dll',type=Path,default=Path(os.environ.get('VR_COMMAND_API_DLL',ROOT/'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')));p.add_argument('--player-exe',type=Path,default=ROOT/'artifacts/desktop/VrCommand.exe');args=p.parse_args();args.duration=600;args.visible_room=0;args.job_workers=2;args.check=False
     if args.endurance and (args.seconds not in (60,900) or args.operator_controls) or not args.endurance and args.seconds not in range(12,41):p.error('Short seconds must be 12..40; endurance requires 60 or 900 and no operator-controls')
     if args.replay_workers!=1 and not args.endurance:p.error('Parallel replay readers require the explicit endurance profile')
     if args.check_frame_review and args.endurance:p.error('Frame review uses the short exercise')
+    if args.marksmanship and (args.endurance or args.operator_controls or args.players_per_room!=5):p.error('Marksmanship requires five players per room and the short input profile without operator policy changes')
     if args.link_metrics and (args.endurance or args.seconds!=40):p.error('Link measurement requires the 40-second short exercise')
     if args.udp_traffic and (args.endurance or args.seconds!=40):p.error('UDP traffic measurement requires the 40-second short exercise')
     vm.verify_player(args);v=ExerciseVenue(args)
