@@ -25,6 +25,7 @@ namespace VrCommand.Unity
         private bool managementReady;
         private float nextReconnect;
         private ClientReconnectInput reconnectInput;
+        private VenueLinkDiagnostics linkDiagnostics;
         private const int MaximumPeerObservations = 256;
         private bool peerDiagnostics;
         private int peerObservations;
@@ -80,6 +81,7 @@ namespace VrCommand.Unity
             NativePoseTrace.Install(gameObject,configuration.role);
             NativeWorldJournalTrace.Install(gameObject,configuration.role);
             NativeReplicationProbe.Install(this,configuration.role);
+            linkDiagnostics = VenueLinkDiagnostics.Create(this, configuration.role);
             var transport = (UnityTransport)networkManager.NetworkConfig.NetworkTransport;
             VenueTransportProfile.Apply(transport,configuration.IsServer);
             transport.SetConnectionData(configuration.address, configuration.port, configuration.IsServer ? configuration.ServerListenAddress : null);
@@ -126,6 +128,7 @@ namespace VrCommand.Unity
                 : configuration.role == "Host" ? networkManager.StartHost() : networkManager.StartClient();
             Debug.Log("VR_NETWORK_STARTED role=" + configuration.role + " started=" + started + " background=" + Application.runInBackground + " port=" + transport.ConnectionData.Port);
             if (!started) { status = "CONNECTION FAILED"; yield break; }
+            linkDiagnostics?.Attach();
             if (configuration.IsServer)
             {
                 while (networkManager.IsListening)
@@ -424,6 +427,7 @@ namespace VrCommand.Unity
         }
         private void Disconnected(ulong clientId)
         {
+            linkDiagnostics?.Disconnected(clientId);
             if (configuration != null && configuration.IsServer) Debug.Log("VR_SERVER_CLIENT_LEFT id=" + clientId);
             combatAuthority?.Unbind(clientId);
             admitted.Remove(clientId);
@@ -451,11 +455,13 @@ namespace VrCommand.Unity
                 networkManager.NetworkConfig.ConnectionData = fresh.AdmissionPayload();
                 configuration = fresh; status = "CONNECTING"; Debrief.Clear();
                 if (!networkManager.StartClient()) status = "RECONNECT FAILED - CONTACT CONTROL DESK";
+                else linkDiagnostics?.Attach();
             }
             catch (Exception) { status = "CONNECTION FILE INVALID - CONTACT CONTROL DESK"; }
         }
         private void Update()
         {
+            linkDiagnostics?.Update();
             if (reconnectInput?.Poll(CanReconnect, Application.isFocused) == true) ReconnectClient();
         }
         private void OnApplicationFocus(bool focused) { if (!focused) reconnectInput?.Reset(); }
@@ -463,6 +469,7 @@ namespace VrCommand.Unity
         private void OnDisable() { reconnectInput?.Reset(); }
         private void OnDestroy()
         {
+            linkDiagnostics?.Finish("Shutdown");
             reconnectInput?.Dispose(); reconnectInput = null;
             if (worldDelivery != null) worldDelivery.StopAndDispose();
             else if (combatAuthority?.RecordingWriter != null)

@@ -35,6 +35,34 @@ class ExerciseEvidenceTests(unittest.TestCase):
         for field,value in [('pid',101),('connection',2),('mode','Physical'),('headsets',False),('reason','Timeout'),('complete',False),('reloadSubmissions',0)]:
             with self.assertRaises(ValueError):m.validate_report({**report,field:value},owner)
 
+class LinkEvidenceTests(unittest.TestCase):
+    def setUp(self):
+        self.owner={'pid':100,'nativeConnectionId':1}
+        self.rows=[{'sequence':index+1,'tick':index*20,'playerLoopFrames':90,'windowSeconds':1,
+                    'roundTripMilliseconds':8,'result':'Reply'} for index in range(30)]
+        self.report={'version':1,'complete':True,'reason':'Limit','processId':100,'connection':1,
+                     'batchMode':True,'graphicsDeviceActive':False,'samples':self.rows}
+
+    def test_replies_timeouts_and_player_loop_have_separate_denominators(self):
+        self.rows[0].update(result='Timeout',roundTripMilliseconds=0)
+        self.rows[1].update(result='Interrupted',roundTripMilliseconds=0)
+        summary=m.summarize_link_report(self.report,self.owner)
+        self.assertEqual((summary['attempts'],summary['replies'],summary['timeouts'],summary['interruptions']), (30,28,1,1))
+        self.assertEqual((summary['p50RoundTripMilliseconds'],summary['p95RoundTripMilliseconds'],summary['playerLoopHz']), (8,8,90))
+
+    def test_invalid_or_foreign_link_evidence_is_rejected(self):
+        for field,value in [('sequence',0),('tick',-1),('roundTripMilliseconds',float('nan')),
+                            ('windowSeconds',.1),('result','Timeout')]:
+            report=copy.deepcopy(self.report);report['samples'][0][field]=value
+            with self.subTest(field=field),self.assertRaises(ValueError):m.summarize_link_report(report,self.owner)
+        for field,value in [('connection',2),('complete',False),('graphicsDeviceActive',True)]:
+            with self.subTest(field=field),self.assertRaises(ValueError):m.summarize_link_report({**self.report,field:value},self.owner)
+
+    def test_no_measured_reply_cannot_be_interpreted_as_zero_latency(self):
+        for row in self.rows:row.update(result='Timeout',roundTripMilliseconds=0)
+        with self.assertRaises(ValueError):m.summarize_link_report(self.report,self.owner)
+
+
 class EnduranceEvidenceTests(unittest.TestCase):
     def samples(self):return {i:{'min':-3,'max':-2.3,'reload':True,'ammoMax':2*(i+1),'frames':190,'walkingFrames':180} for i in range(3)}
     def test_every_cycle_needs_its_own_accepted_movement_reload_and_shots(self):

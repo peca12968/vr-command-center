@@ -83,12 +83,47 @@ def validate_endurance_cycles(cycles,expected):
         if not all(type(sample[k]) in (int,float) and math.isfinite(sample[k]) for k in ('min','max')) or sample['max']-sample['min']<.1 or sample['reload'] is not True or sample['ammoMax']!=2*(index+1) or sample['frames']<1 or sample['walkingFrames']<1:
             raise ValueError('Endurance cycle lacks accepted movement, reload or exact cumulative shots')
 
+def summarize_link_report(report, owner):
+    if (report['version'] != 1 or report['complete'] is not True or report['reason'] != 'Limit'
+            or report['processId'] != owner['pid'] or report['connection'] != owner['nativeConnectionId']
+            or report['batchMode'] is not True or report['graphicsDeviceActive'] is not False):
+        raise ValueError('Link report does not belong to the original headless client')
+    samples = report['samples']
+    if len(samples) != 30 or [row['sequence'] for row in samples] != list(range(1, 31)):
+        raise ValueError('Link report lost part of its bounded sample window')
+    rtts = []
+    previous_tick = 0
+    for row in samples:
+        tick, frames, window, rtt = (row[key] for key in ('tick', 'playerLoopFrames', 'windowSeconds', 'roundTripMilliseconds'))
+        if (type(tick) is not int or tick < previous_tick or type(frames) is not int or frames < 1
+                or type(window) not in (int, float) or not math.isfinite(window) or window < 1
+                or type(rtt) not in (int, float) or not math.isfinite(rtt) or rtt < 0):
+            raise ValueError('Invalid link sample timing or player loop count')
+        previous_tick = tick
+        if row['result'] == 'Reply' and rtt < 900:
+            rtts.append(rtt)
+        elif row['result'] not in ('Timeout', 'Interrupted') or rtt != 0:
+            raise ValueError('Link outcome cannot be counted as a measured reply')
+    if not rtts:
+        raise ValueError('No original probe replies were observed')
+    rtts.sort()
+    return {**owner, 'attempts': len(samples), 'replies': len(rtts),
+            'timeouts': sum(row['result'] == 'Timeout' for row in samples),
+            'interruptions': sum(row['result'] == 'Interrupted' for row in samples),
+            'p50RoundTripMilliseconds': rtts[math.ceil(len(rtts) * .5) - 1],
+            'p95RoundTripMilliseconds': rtts[math.ceil(len(rtts) * .95) - 1],
+            'playerLoopHz': sum(row['playerLoopFrames'] for row in samples) / sum(row['windowSeconds'] for row in samples)}
+
+
 class ExerciseVenue(vm.Venue):
-    def __init__(self,args):super().__init__(args,artifact_family='desktop-exercise');self.exercise={};self.receipts=[];self.pauses={}
+    def __init__(self,args):super().__init__(args,artifact_family='desktop-exercise');self.exercise={};self.receipts=[];self.pauses={};self.link_reports={}
     def launch(self,name,config,visible=False,*,extra_args=()):
         if config['role']=='Client':
             directory=self.runtime_directory/(name+'-exercise');self.exercise[name]=directory
             extra_args=(*extra_args,'--vr-desktop-endurance' if self.args.endurance else '--vr-desktop-exercise',str(directory))
+            if self.args.link_metrics:
+                report=self.runtime_directory/(name+'-link-metrics.json');self.link_reports[name]=report
+                extra_args=(*extra_args,'--vr-link-metrics',str(report))
         super().launch(name,config,visible,extra_args=extra_args)
 
 def check_frame_review(v, entry, frames):
@@ -210,6 +245,12 @@ def run(v):
                 v.stage('running',mode=mode,elapsedSeconds=round(time.monotonic()-started,2),requestedSeconds=v.args.seconds,lastSources=live[-len(entries):]);next_progress=time.monotonic()+30
             time.sleep(.05)
         v.save(mode+'-live.json',live)
+        if v.args.link_metrics:
+            v.wait(lambda:all(v.link_reports[row['name']].is_file() for row in native),8,'bounded native link reports')
+            links=[summarize_link_report(vm.read_json(v.link_reports[row['name']]),row) for row in native]
+            v.save(mode+'-link-metrics.json',{'clients':links,'sameHost':True,'rendered':False,
+                   'roundTrip':'Optional NGO unreliable echo, local monotonic clock, includes game and network scheduling'})
+            check(len(links)==len(native),mode+': all original clients provide 30 link attempts and player loop windows')
         if v.args.operator_controls:
             for e in entries:
                 v.wait(lambda e=e:all(p['ammoUsed']==2 for p in v.request(f'/api/sessions/{e["id"]}/statistics')['players']),10,'all original generated shots accepted before operator controls')
@@ -251,7 +292,7 @@ def run(v):
                 for future in concurrent.futures.as_completed(pending):
                     e=pending[future];playback=future.result();check(playback['complete'],e['name']+': complete endurance replay retains every original body and every movement/reload/two-shot cycle')
         findings=capacity.native_log_findings(v.directory);check(not findings,mode+': no native send queue errors')
-        modes.append({'mode':mode,'clients':len(native),'automatedInputs':True,'operatorControls':v.args.operator_controls,'endurance':v.args.endurance,'requestedSeconds':v.args.seconds,'maximumReplayWorkers':v.args.replay_workers,'replayRate':4,'physicalOperators':0,'networkCapacityAccepted':False})
+        modes.append({'mode':mode,'clients':len(native),'automatedInputs':True,'operatorControls':v.args.operator_controls,'endurance':v.args.endurance,'linkMetrics':v.args.link_metrics,'requestedSeconds':v.args.seconds,'maximumReplayWorkers':v.args.replay_workers,'replayRate':4,'physicalOperators':0,'networkCapacityAccepted':False})
     v.summary();v.save('exercise-result.json',{'complete':False,'modes':modes,'headsets':0,'hosts':1,'renderedClients':0,'posesWrittenDirectly':False,'newTestRpc':False,'automatedInput':True,'physicalOperators':0,'networkCapacityAccepted':False,'scope':'Actual Windows native clients using generated desktop movement/weapon intents through original RPCs; not humans, XR, LAN or capacity acceptance'})
 
 def main():
@@ -260,10 +301,12 @@ def main():
     p.add_argument('--replay-workers',type=int,choices=(1,5),default=1,help='Endurance only: independent closed-source replay readers; every stream retains rate4 and all original gates')
     p.add_argument('--operator-controls',action='store_true',help='After the base motion window, apply Storm Night Patrol then Fog Day Advance through normal management commands; no console UI or physical operator input')
     p.add_argument('--check-frame-review', action='store_true', help='Verify an exact native shot frame and resume during the short exercise')
+    p.add_argument('--link-metrics', action='store_true', help='Collect 30 opt-in native link measurements per client during the 40-second short exercise')
     p.add_argument('--api-dll',type=Path,default=Path(os.environ.get('VR_COMMAND_API_DLL',ROOT/'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')));p.add_argument('--player-exe',type=Path,default=ROOT/'artifacts/desktop/VrCommand.exe');args=p.parse_args();args.duration=600;args.visible_room=0;args.job_workers=2;args.check=False
     if args.endurance and (args.seconds not in (60,900) or args.operator_controls) or not args.endurance and args.seconds not in range(12,41):p.error('Short seconds must be 12..40; endurance requires 60 or 900 and no operator-controls')
     if args.replay_workers!=1 and not args.endurance:p.error('Parallel replay readers require the explicit endurance profile')
     if args.check_frame_review and args.endurance:p.error('Frame review uses the short exercise')
+    if args.link_metrics and (args.endurance or args.seconds!=40):p.error('Link measurement requires the 40-second short exercise')
     vm.verify_player(args);v=ExerciseVenue(args)
     try:run(v)
     except BaseException as error:
