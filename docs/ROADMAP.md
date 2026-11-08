@@ -1,5 +1,7 @@
 # 長期開發目標
 
+2026-11-09 Windows 五房全連線及獨立模式各 25 個同機客戶端完成約 5% 雙向週期性 UDP 丟包驗證。六場核對原輸入、完整回放、雙封存與 50 份戰績確認。 [驗證紀錄](PROGRESS.md#2026-11-09-五房-udp-丟包驗證)
+
 2026-11-09 控制台 0.31.19 可先試算單件掩體移除後新開通的出生位路徑。Windows 原生五房獨立與全連線場次已核對保存配置的掩體與缺口。 [通路試算](LAYOUT.md#出生位通路預覽)
 
 2026-11-09 Windows 五房原生射擊驗證核對 100 發、100 中及 50 次擊殺。五房獨立和連線的個人戰績與完整回放一致，連線 ZIP 也對上六份 CSV。 [重跑命令](DESKTOP_EXERCISE.md#五房射擊與戰績驗證)
@@ -185,7 +187,7 @@
 1. 使用者目前無頭盔，玩家／敵軍射擊音效與PC DSP已完成，接續完整第一人稱／追蹤人物、動畫／聲學、複雜通路／地形、自由鏡頭／長任務操作及跨機部署；原生GPU閃電及DSP已有證據，聽感／實體輸出仍待驗。控制台自訂任務、保存重載配置到真正 PC、天氣／AI／名冊／觀戰及回放已接通，見 DESKTOP_CONTROL；五房與跨機範圍仍分開。
 2. 擴大跨機網路、異常中斷及補送驗收，維持 admission fence、防瞬移與 Simulation。避免分平台重建場景，Prepare、231 Tests、Desktop／Quest 已有真正成功結果；嵌入 Transport 修正須保留來源雜湊與原生回歸。
 3. 取得 Quest 後驗證控制器／追蹤中斷、雙玩家互見、聲光／效能與封存；之後進行 MR、VIVE、廠商硬體及 5／10／25 人分階段驗收。合成姿態維持 Simulation。
-4. GitHub 完整 CI 已恢復，精確來源的成功與失敗見 PROGRESS；每次讀取當前執行狀態，保留 log／artifact 及失敗證據，不以 Linux 雲端取代 Windows、Unity 或實機驗收。
+4. GitHub Actions 近期因帳務或支出上限未啟動。各提交的執行狀態、雲端證據及本機驗證範圍分開記錄於 [PROGRESS](PROGRESS.md)。Windows、Unity 及實機各自驗收。
 
 管理介面在 `/console/`；完整結果見 [DESKTOP_CONTROL.md](DESKTOP_CONTROL.md)、[DESKTOP_VENUE.md](DESKTOP_VENUE.md)、[DESKTOP.md](DESKTOP.md)、[RECONNECT.md](RECONNECT.md)、[TRANSPORT_PATCH.md](TRANSPORT_PATCH.md) 及 PROGRESS。五房新工具完成七場獨立／重用／Linked 驗證；一般視窗關閉後五場共 4037 幀封存。程式碼與 binary 仍在 F，成功配置明確使用 SSD runtime；F USB 全資料未達 1.5 秒門檻。上一輪 29 項真正 EditMode、無圖形／視窗各八項 admission 檢查、獨立／Linked 回歸及 Windows／Quest 同源建置成功。視窗場強制離線後保留走離出生點 0.65 公尺的位置與健康／彈藥，1648 幀封存且回放一致。API 0.16／場次 envelope 6／世界 schema 1 保持；Unity v0.18／NGO 18 需全體遊戲程序同版。本輪控制台自訂任務新增 15 項 UI／native 與 17 Node＋122 Chromium，並回歸五房；未混算歷史 .NET 規則／29 EditMode，頭盔／25 台待驗，編譯並行曾超過快照門檻，不宣稱所有負載達標。
 
