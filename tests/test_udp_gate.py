@@ -1,4 +1,5 @@
 import importlib.util
+import copy
 from pathlib import Path
 import socket
 import time
@@ -74,6 +75,66 @@ class UdpGateTests(unittest.TestCase):
     def test_invalid_bounds_are_rejected_before_opening_a_socket(self):
         for kwargs in [{'mode':'unknown'},{'pass_small_bytes':65},{'max_hold_seconds':41},{'max_hold_seconds':0},{'max_packets':1025},{'max_bytes':2097153}]:
             with self.subTest(kwargs=kwargs),self.assertRaises(ValueError):m.LoopbackGate(self.server.getsockname()[1],lambda:False,**kwargs)
+
+    def test_measurement_counts_forwarded_datagrams_and_exact_payload_bytes(self):
+        meter=m.UdpTrafficMeter()
+        g=self.gate_for(None,mode='measure',traffic=meter,peer='one')
+        self.until(lambda:meter.snapshot()['peers']['one']['upstreamDatagrams']==1)
+        before=meter.snapshot()
+        for payload in (b'a'*29,b''):
+            self.client.sendto(payload,('127.0.0.1',g.port))
+            self.assertEqual(payload,self.server.recvfrom(65536)[0])
+        self.server.sendto(b'b'*73,self.reply)
+        self.assertEqual(b'b'*73,self.client.recvfrom(65536)[0])
+        self.until(lambda:meter.snapshot()['peers']['one']['downstreamDatagrams']==1)
+        with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as foreign:
+            foreign.sendto(b'foreign',('127.0.0.1',g.port))
+        self.until(lambda:g.counts['foreignDropped']==1)
+        report=m.summarize_traffic([before,meter.snapshot()],[{'name':'one','roomId':4}])
+        self.assertEqual((2,29,1,73),tuple(report['totals'][field] for field in m.TRAFFIC_FIELDS))
+        self.assertFalse(report['payloadsRecorded'])
+        self.assertEqual(4,report['rooms'][0]['roomId'])
+
+    def test_measurement_rejects_fault_settings_before_starting(self):
+        meter=m.UdpTrafficMeter()
+        with self.assertRaises(ValueError):
+            m.LoopbackGate(self.server.getsockname()[1],lambda:True,mode='measure',traffic=meter,peer='one')
+        with self.assertRaises(ValueError):
+            m.LoopbackGate(self.server.getsockname()[1],None,mode='drop',traffic=meter,peer='one')
+
+
+class TrafficAccountingTests(unittest.TestCase):
+    def setUp(self):
+        self.owners=[{'name':'a','roomId':1},{'name':'b','roomId':5}]
+        self.boundaries=[{'monotonicNs':1_000_000_000,'peers':{'a':self.row(4,40,6,60),'b':self.row(6,70,6,70)}},
+                         {'monotonicNs':3_000_000_000,'peers':{'a':self.row(8,80,9,90),'b':self.row(9,100,13,170)}}]
+
+    @staticmethod
+    def row(*counts):return dict(zip(m.TRAFFIC_FIELDS,counts))
+
+    def test_rates_use_shared_elapsed_time_and_remove_pre_window_bytes(self):
+        report=m.summarize_traffic(self.boundaries,self.owners)
+        self.assertEqual(2,report['seconds'])
+        self.assertEqual(280,report['totals']['upstreamMeanPayloadBitsPerSecond'])
+        self.assertEqual(520,report['totals']['downstreamMeanPayloadBitsPerSecond'])
+        self.assertEqual([30,100],[room['downstreamPayloadBytes'] for room in report['rooms']])
+
+    def test_rejects_foreign_rewound_or_impossible_boundaries(self):
+        for change in ('peer','clock','rewind','oversized'):
+            boundaries=copy.deepcopy(self.boundaries)
+            last=boundaries[-1]
+            if change=='peer':last['peers']['foreign']=last['peers'].pop('a')
+            if change=='clock':last['monotonicNs']=boundaries[0]['monotonicNs']
+            if change=='rewind':last['peers']['a']['upstreamDatagrams']=1
+            if change=='oversized':last['peers']['a']['upstreamPayloadBytes']=999999
+            with self.subTest(change=change),self.assertRaises(ValueError):
+                m.summarize_traffic(boundaries,self.owners)
+
+    def test_meter_is_bounded_to_the_25_original_peers(self):
+        meter=m.UdpTrafficMeter()
+        for peer in range(25):meter.register(str(peer))
+        with self.assertRaises(ValueError):meter.register('0')
+        with self.assertRaises(ValueError):meter.register('26')
 
 
 if __name__=='__main__':unittest.main()

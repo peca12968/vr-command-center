@@ -9,6 +9,7 @@ def module(name,file):
     spec=importlib.util.spec_from_file_location(name,ROOT/'scripts'/file);m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);return m
 capacity=module('exercise_capacity','check-desktop-capacity.py');vm=capacity.venue_module;debrief=module('exercise_debrief','check-desktop-debrief.py')
 active=module('exercise_active','check-desktop-active.py')
+udp=module('exercise_udp','udp_gate.py')
 
 def validate_control_receipts(responses,session_id,command_ids,previous_sequence):
     if len(responses)!=2 or len(set(command_ids))!=2:raise ValueError('Expected two distinct operator intents')
@@ -116,15 +117,44 @@ def summarize_link_report(report, owner):
 
 
 class ExerciseVenue(vm.Venue):
-    def __init__(self,args):super().__init__(args,artifact_family='desktop-exercise');self.exercise={};self.receipts=[];self.pauses={};self.link_reports={}
+    def __init__(self,args):
+        super().__init__(args,artifact_family='desktop-exercise')
+        self.exercise={};self.receipts=[];self.pauses={};self.link_reports={}
+        self.udp_meter=None
+        self.udp_relays={}
+
     def launch(self,name,config,visible=False,*,extra_args=()):
+        relay=None
         if config['role']=='Client':
             directory=self.runtime_directory/(name+'-exercise');self.exercise[name]=directory
             extra_args=(*extra_args,'--vr-desktop-endurance' if self.args.endurance else '--vr-desktop-exercise',str(directory))
             if self.args.link_metrics:
                 report=self.runtime_directory/(name+'-link-metrics.json');self.link_reports[name]=report
                 extra_args=(*extra_args,'--vr-link-metrics',str(report))
-        super().launch(name,config,visible,extra_args=extra_args)
+            if self.udp_meter is not None:
+                if config['address']!='127.0.0.1':raise ValueError('Only the owned loopback server can be measured')
+                relay=udp.LoopbackGate(config['port'],None,mode='measure',traffic=self.udp_meter,peer=name).start()
+                self.udp_relays[name]=relay
+                config={**config,'port':relay.port}
+        try:
+            super().launch(name,config,visible,extra_args=extra_args)
+        except BaseException:
+            if relay is not None:relay.close()
+            raise
+
+    def stop(self,name):
+        try:
+            super().stop(name)
+        finally:
+            if name in self.udp_relays:self.udp_relays[name].close()
+
+    def cleanup(self):
+        clean=super().cleanup()
+        if self.args.udp_traffic:
+            relays={name:relay.report() for name,relay in self.udp_relays.items()}
+            self.save('udp-relay-cleanup.json',relays)
+            clean=clean and all(row['threadStopped'] and row['error'] is None and row['foreignDropped']==0 for row in relays.values())
+        return clean
 
 def check_frame_review(v, entry, frames):
     route = f'/api/sessions/{entry["id"]}/world'
@@ -192,6 +222,7 @@ def run(v):
         v.evidence.append(label);v.stage('checking',check=label)
     for mode in (['linked','independent'] if v.args.mode=='both' else [v.args.mode]):
         entries=[];native=[];pause=None
+        if v.args.udp_traffic:v.udp_meter=udp.UdpTrafficMeter()
         for rooms in ([list(range(1,6))] if mode=='linked' else [[r] for r in range(1,6)]):
             definition={'name':'Generated native input '+mode,'briefing':'Automated Simulation exercise; no physical operators or headsets','durationSeconds':1800 if v.args.endurance else 600,'environment':{'mode':'VR','weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':len(rooms) if v.args.operator_controls else 0,'behavior':'Hold','autoAttack':False},'props':[]}
             mission=v.request('/api/missions',definition,expected=201);entry=v.create(mission,rooms,mode+'-'+str(rooms[0]))
@@ -219,6 +250,7 @@ def run(v):
             e['beginSequence']=receipt['appliedAtSequence'];v.receipts.append(receipt)
         v.save(mode+'-begin-receipts.json',v.receipts);v.stage('running',mode=mode,automatedClients=len(native),seconds=v.args.seconds)
         started=time.monotonic();deadline=started+v.args.seconds;pause_at=started+2;resume_at=None;live=[];next_progress=started+30
+        traffic_boundaries=[]
         while time.monotonic()<deadline:
             if mode=='independent' and pause is None and time.monotonic()>=pause_at:
                 others={e['id']:v.frame(e)['packet']['frame']['tick'] for e in entries[1:]}
@@ -234,17 +266,39 @@ def run(v):
                 pause['otherEndTicks']={e['id']:v.frame(e)['packet']['frame']['tick'] for e in entries[1:]}
                 if any(pause['otherEndTicks'][sid]<=tick for sid,tick in pause['otherStartTicks'].items()):raise RuntimeError('Other rooms did not continue while one room paused')
                 receipt=v.command(entries[0],'Resume');pause['resumed']=receipt['appliedAtSequence'];pause['resumeReceipt']=receipt;resume_at=None;v.save(mode+'-pause.json',pause)
+            traffic_worlds=[]
             for e in entries:
                 value=v.frame(e,measure=True)
                 if value['packet']['frame']['phase']=='Preparing':continue
                 try:validate_frame(value,e['players'],pause if e is entries[0] else None,e['beginSequence'])
                 except ValueError:
                     v.save('exercise-live-failure.json',{'round':e['id'],'value':value});raise
-                live.append({'sessionId':e['id'],'sequence':value['packet']['sequence'],'tick':value['packet']['frame']['tick'],'phase':value['packet']['frame']['phase']})
+                observation={'sessionId':e['id'],'sequence':value['packet']['sequence'],'tick':value['packet']['frame']['tick'],'phase':value['packet']['frame']['phase']}
+                live.append(observation)
+                if v.udp_meter is not None and observation['phase']=='Running' and not value['packet']['suspended']:
+                    fence=e['beginSequence']
+                    if mode=='independent' and e is entries[0]:
+                        fence=pause['resumed'] if pause else None
+                    if fence is not None and value['packet']['observedSequence']>=fence:
+                        traffic_worlds.append({**observation,'observedSequence':value['packet']['observedSequence'],'fence':fence})
+            if v.udp_meter is not None:
+                if traffic_boundaries and len(traffic_worlds)!=len(entries):
+                    raise RuntimeError('Traffic measurement lost the common Running window')
+                if len(traffic_worlds)==len(entries) and (not traffic_boundaries or
+                        time.perf_counter_ns()-traffic_boundaries[-1]['monotonicNs']>=1_000_000_000):
+                    if any(not v.udp_relays[row['name']].thread.is_alive() for row in native):
+                        raise RuntimeError('An original UDP relay stopped before the traffic boundary')
+                    traffic_boundaries.append({**v.udp_meter.snapshot(),'worlds':traffic_worlds})
             if time.monotonic()>=next_progress:
                 v.stage('running',mode=mode,elapsedSeconds=round(time.monotonic()-started,2),requestedSeconds=v.args.seconds,lastSources=live[-len(entries):]);next_progress=time.monotonic()+30
             time.sleep(.05)
         v.save(mode+'-live.json',live)
+        if v.udp_meter is not None:
+            v.save(mode+'-udp-boundaries.json',traffic_boundaries)
+            traffic=udp.summarize_traffic(traffic_boundaries,native)
+            traffic['linkProbesEnabled']=v.args.link_metrics
+            v.save(mode+'-udp-traffic.json',traffic)
+            check(traffic['seconds']>=20,mode+': every original player forwarded bidirectional UDP payloads in a common Running window')
         if v.args.link_metrics:
             v.wait(lambda:all(v.link_reports[row['name']].is_file() for row in native),8,'bounded native link reports')
             links=[summarize_link_report(vm.read_json(v.link_reports[row['name']]),row) for row in native]
@@ -292,7 +346,7 @@ def run(v):
                 for future in concurrent.futures.as_completed(pending):
                     e=pending[future];playback=future.result();check(playback['complete'],e['name']+': complete endurance replay retains every original body and every movement/reload/two-shot cycle')
         findings=capacity.native_log_findings(v.directory);check(not findings,mode+': no native send queue errors')
-        modes.append({'mode':mode,'clients':len(native),'automatedInputs':True,'operatorControls':v.args.operator_controls,'endurance':v.args.endurance,'linkMetrics':v.args.link_metrics,'requestedSeconds':v.args.seconds,'maximumReplayWorkers':v.args.replay_workers,'replayRate':4,'physicalOperators':0,'networkCapacityAccepted':False})
+        modes.append({'mode':mode,'clients':len(native),'automatedInputs':True,'operatorControls':v.args.operator_controls,'endurance':v.args.endurance,'linkMetrics':v.args.link_metrics,'udpTraffic':v.args.udp_traffic,'requestedSeconds':v.args.seconds,'maximumReplayWorkers':v.args.replay_workers,'replayRate':4,'physicalOperators':0,'networkCapacityAccepted':False})
     v.summary();v.save('exercise-result.json',{'complete':False,'modes':modes,'headsets':0,'hosts':1,'renderedClients':0,'posesWrittenDirectly':False,'newTestRpc':False,'automatedInput':True,'physicalOperators':0,'networkCapacityAccepted':False,'scope':'Actual Windows native clients using generated desktop movement/weapon intents through original RPCs; not humans, XR, LAN or capacity acceptance'})
 
 def main():
@@ -302,11 +356,13 @@ def main():
     p.add_argument('--operator-controls',action='store_true',help='After the base motion window, apply Storm Night Patrol then Fog Day Advance through normal management commands; no console UI or physical operator input')
     p.add_argument('--check-frame-review', action='store_true', help='Verify an exact native shot frame and resume during the short exercise')
     p.add_argument('--link-metrics', action='store_true', help='Collect 30 opt-in native link measurements per client during the 40-second short exercise')
+    p.add_argument('--udp-traffic', action='store_true', help='Measure forwarded UDP payload bytes per original client in the 40-second short exercise')
     p.add_argument('--api-dll',type=Path,default=Path(os.environ.get('VR_COMMAND_API_DLL',ROOT/'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')));p.add_argument('--player-exe',type=Path,default=ROOT/'artifacts/desktop/VrCommand.exe');args=p.parse_args();args.duration=600;args.visible_room=0;args.job_workers=2;args.check=False
     if args.endurance and (args.seconds not in (60,900) or args.operator_controls) or not args.endurance and args.seconds not in range(12,41):p.error('Short seconds must be 12..40; endurance requires 60 or 900 and no operator-controls')
     if args.replay_workers!=1 and not args.endurance:p.error('Parallel replay readers require the explicit endurance profile')
     if args.check_frame_review and args.endurance:p.error('Frame review uses the short exercise')
     if args.link_metrics and (args.endurance or args.seconds!=40):p.error('Link measurement requires the 40-second short exercise')
+    if args.udp_traffic and (args.endurance or args.seconds!=40):p.error('UDP traffic measurement requires the 40-second short exercise')
     vm.verify_player(args);v=ExerciseVenue(args)
     try:run(v)
     except BaseException as error:
