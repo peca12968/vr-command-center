@@ -84,6 +84,12 @@ async function main() {
       await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), result: 'passed', scope: 'MR start and resume with a real API and synthetic tracked world publisher' }, null, 2));
       console.log(`PASS: ${checks} focused MR lifecycle checks. Screenshots: ${screenshots}`); return;
     }
+    if (process.argv.includes('--mr-pins-only')) {
+      await require('./mr-alignment-pins-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
+      check(browserErrors.length === 0, 'MR pin checks have no uncaught browser or policy errors');
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), result: 'passed', scope: 'MR file upload and pinning against a real API and Chromium' }, null, 2));
+      console.log(`PASS: ${checks} focused MR pin checks. Screenshots: ${screenshots}`); return;
+    }
     await page.goto(base + '/console/');
     await page.locator('#login-key').fill('wrong-key'); await page.locator('#login-form button').click();
     await page.locator('#notice.error').waitFor();
@@ -409,6 +415,7 @@ async function main() {
     await page.reload();
     check(await page.locator('#login-panel').isVisible(), 'Reload requires authentication again');
     await require('./mr-start-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
+    await require('./mr-alignment-pins-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
     check(browserErrors.length === 0, 'Browser has no uncaught script errors or CSP violations');
     await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), playwright: require('playwright/package.json').version, result: 'passed', scope: 'isolated real API and browser console; no Unity or headset test' }, null, 2));
     console.log(`PASS: ${checks} real-browser checks. Screenshots: ${screenshots}`);

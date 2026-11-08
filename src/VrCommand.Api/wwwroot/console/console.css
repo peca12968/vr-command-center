@@ -19,6 +19,10 @@
 .closure-status, .mr-start-check { margin: 1rem 0; padding: .8rem 1rem; border: 1px solid var(--line, #31413e); border-radius: 8px; }
 .closure-status h3, .mr-start-check h3 { margin-top: 0; }
 .mr-start-check ul:empty { display: none; }
+#mr-alignment-rooms { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr)); gap:10px; padding:0; list-style:none; }
+#mr-alignment-rooms li { min-width:0; padding:10px; border:1px solid var(--line); border-radius:5px; }
+#mr-alignment-rooms label { margin-bottom:0; }
+#mr-alignment-rooms code { display:block; overflow-wrap:anywhere; font-size:.78rem; color:var(--accent); }
 .closure-status.warning { display: block; }
 .closure-status .button-row > span { font-size: .9rem; }
 .closure-status.closure-complete { border-color: #81a878; }

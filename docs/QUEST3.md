@@ -199,9 +199,13 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueManifest .\venue.json
 
 ### 啟動 MR 伺服器前鎖定校正檔
 
-遊戲 0.48.0 要求主控在場次為 Preparing、尚未啟動遊戲伺服器時，鎖定該場所有房間的校正檔 SHA-256。使用原本下載的校正 JSON 計算雜湊，也可從五房預檢結果取出對應值。玩家部署須使用相同檔案。即使 JSON 欄位值相同，重新排版或改寫檔案也會改變雜湊。
+遊戲 0.48.0 要求主控在場次為 Preparing、尚未啟動遊戲伺服器時，鎖定該場所有房間的校正檔 SHA-256。玩家部署須使用相同檔案。即使 JSON 欄位值相同，重新排版或改寫檔案也會改變雜湊。
 
-以下示範單房 3。`$api` 填管理服務網址，`$sessionId` 填實際場次 ID，`$headers` 使用該實例主控憑證的 `Authorization` 標頭。
+在控制台 0.31.23 的場次面板，開啟「MR 校正檔鎖定」，為每房選取原始校正 JSON。管理服務核對檔案房號、原點和 A、B、C 量測，再依原始位元組計算雜湊。全數顯示「已核對，可鎖定」後，按「鎖定本場校正檔」並確認。等畫面顯示「已鎖定」後再啟動伺服器。若命令回應遺失，可用頁面上方的「重試確認結果」。切換場次或離開操作頁會清除尚未鎖定的選檔。
+
+核對原檔的 API 只回傳房號與雜湊，保存的場次事件包含雜湊。原始校正 JSON 請保留作頭盔部署。使用命令列自動化時，也可從五房預檢結果取出雜湊後直接發送管理命令。
+
+以下示範單房 3 的管理 API。`$api` 填管理服務網址，`$sessionId` 填實際場次 ID，`$headers` 使用該實例主控憑證的 `Authorization` 標頭。
 
 ```powershell
 $session = Invoke-RestMethod "$api/api/sessions/$sessionId" -Headers $headers

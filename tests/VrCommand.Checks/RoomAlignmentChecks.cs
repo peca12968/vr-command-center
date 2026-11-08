@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using VrCommand.Core;
 
 internal static class RoomAlignmentChecks
@@ -43,6 +46,22 @@ internal static class RoomAlignmentChecks
             && Reject(() => Solve(pairs[0] with { Room = new(6.01, 0) }, pairs[1], pairs[2]))
             && Reject(() => Solve(pairs[0] with { Tracking = new(double.NaN, 0) }, pairs[1], pairs[2])),
             "Room range, exact marker count, room footprint and finite coordinates are enforced");
+
+        byte[] Export(RoomAlignmentReport report) => Encoding.UTF8.GetBytes(JsonSerializer.Serialize(report, JsonFormat.Options));
+        var raw = Export(exact);
+        byte[] bom = [0xef, 0xbb, 0xbf, .. raw, (byte)'\n'];
+        var fingerprint = RoomAlignment.CheckFile(bom);
+        check(fingerprint.RoomId == 5 && fingerprint.Sha256 == Convert.ToHexStringLower(SHA256.HashData(bom))
+            && fingerprint.Sha256 != RoomAlignment.CheckFile(raw).Sha256,
+            "Alignment file check hashes exact original UTF-8 bytes including optional BOM and final newline");
+        check(Reject(() => RoomAlignment.CheckFile(Export(reflected with { WithinTolerance = true })))
+            && Reject(() => RoomAlignment.CheckFile(Export(exact with { RoomOrigin = new(14, 0) }))),
+            "Alignment file check recomputes the real fit and canonical origin instead of trusting the report flag");
+        check(Reject(() => RoomAlignment.CheckFile(Export(exact with { Markers = [exact.Markers[1], exact.Markers[0], exact.Markers[2]] })))
+            && Reject(() => RoomAlignment.CheckFile(Encoding.UTF8.GetBytes("{\"roomId\":4," + Encoding.UTF8.GetString(raw)[1..]))),
+            "Alignment file check rejects reordered marker names and duplicate JSON members");
+        check(Reject(() => RoomAlignment.CheckFile([])) && Reject(() => RoomAlignment.CheckFile(new byte[RoomAlignment.MaxFileBytes + 1])),
+            "Alignment file check bounds the original file size");
     }
 
     private static bool Near(double left, double right) => Math.Abs(left - right) < 1e-8;

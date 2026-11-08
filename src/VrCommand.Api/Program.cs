@@ -112,6 +112,16 @@ app.MapPost("/api/room-alignment", (RoomAlignmentRequest request, HttpContext co
     context.Response.Headers.CacheControl = "no-store";
     return RoomAlignment.Solve(request);
 });
+app.MapPost("/api/room-alignment/check-file", async (HttpContext context) =>
+{
+    AccessPolicy.AuthorMission(Actor(context));
+    context.Response.Headers.CacheControl = "no-store";
+    if (context.Request.ContentLength is 0 or > RoomAlignment.MaxFileBytes)
+        throw new ArgumentException("Use a room alignment export up to 16 KiB.");
+    var bytes = new byte[RoomAlignment.MaxFileBytes + 1];
+    var count = await context.Request.Body.ReadAtLeastAsync(bytes, bytes.Length, throwOnEndOfStream: false, context.RequestAborted);
+    return RoomAlignment.CheckFile(bytes.AsSpan(0, count));
+});
 app.MapGet("/api/missions/{id:guid}/version", (Guid id, SqliteMissionLibrary store, HttpContext context) => store.Version(id, Actor(context)));
 app.MapGet("/api/missions/{id:guid}/history", (Guid id, int? before, int? limit, SqliteMissionLibrary store, HttpContext context) => store.History(id, before, limit ?? 20, Actor(context)));
 app.MapPost("/api/missions", (MissionDraft draft, SqliteMissionLibrary store, HttpContext context) =>

@@ -2,6 +2,7 @@ import { mountWorld } from './world-ui.js';
 import { mountReplay } from './replay-ui.js';
 import { mountLayout } from './layout-ui.js';
 import { mountAlignment } from './alignment-ui.js';
+import { mountAlignmentPins } from './alignment-pins-ui.js';
 import { mountReport } from './report-ui.js';
 import { mountReadiness, mountRoomReadiness } from './readiness-ui.js';
 import { mountConnections, validDestination } from './connection-ui.js';
@@ -21,6 +22,16 @@ const roomReadiness = mountRoomReadiness(() => state, logout);
 const connections = mountConnections(() => state, logout);
 const closure = mountClosure(() => state, logout);
 const alignment = mountAlignment(api, download);
+const alignmentPins = mountAlignmentPins({ state: () => state,
+  checkFile: file => api('/room-alignment/check-file', 'POST', file),
+  pin: (id, roomAlignment, sequence) => runSession(() => {
+    const session = state.session;
+    if (!master() || session.id !== id || session.environment.mode !== 'MR' || session.state !== 'Preparing' || session.combatStream || session.roomAlignment) {
+      notify('場次已變更。請重新確認 MR 校正檔。', true);
+      return;
+    }
+    return command('SetRoomAlignment', { roomAlignment }, sequence);
+  }) });
 const placement = mountLayout({ api, epoch: () => state.epoch, active: () => !!state.actor, editable: master,
   draft: () => ({ experienceMode: $('draft-mode').value, mode: $('layout-session-mode').value, enemyCount: Number($('draft-count').value), props: structuredClone(state.props) }),
   selectedProp: () => state.prop,
@@ -61,7 +72,8 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
   const controller = new AbortController(), epoch = state.epoch;
   const timeout = setTimeout(() => controller.abort(), 8000);
   try {
-    const response = await fetch('/api' + path, { method, headers: { Authorization: 'Bearer ' + state.key, 'Content-Type': 'application/json', ...(requestId ? { 'Idempotency-Key': requestId } : {}), ...(admissionId ? { 'If-Match-Admission': admissionId } : {}) }, body: body === undefined ? undefined : JSON.stringify(body), signal: controller.signal, cache: 'no-store' });
+    const binary = body instanceof Blob;
+    const response = await fetch('/api' + path, { method, headers: { Authorization: 'Bearer ' + state.key, 'Content-Type': binary ? 'application/octet-stream' : 'application/json', ...(requestId ? { 'Idempotency-Key': requestId } : {}), ...(admissionId ? { 'If-Match-Admission': admissionId } : {}) }, body: binary || body === undefined ? body : JSON.stringify(body), signal: controller.signal, cache: 'no-store' });
     if (epoch !== state.epoch) throw new Error('登入狀態已變更，已忽略舊回應。');
     const content = responseType === 'blob' && response.ok ? await response.blob() : await response.text();
     if (epoch !== state.epoch) throw new Error('登入狀態已變更，已忽略舊回應。');
@@ -119,6 +131,7 @@ function logout() {
   report.reset(); state.statistics = null;
   closure.active(false); closure.reset();
   alignment.reset();
+  alignmentPins.active(false);
   replay.active(false); replay.reset(); world.active(false); world.reset(); readiness.active(false); readiness.reset(); roomReadiness.active(false); connections.active(false); connections.reset();
   state.epoch++; state.key = ''; state.actor = null; state.selected = null; state.session = null; state.pending = null;
   state.rooms = []; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
@@ -217,6 +230,7 @@ function renderRooms() {
 function resetSelection(id) {
   report.reset(); readiness.reset(); connections.reset(); state.statistics = null; state.selected = id; state.session = null;
   closure.reset();
+  alignmentPins.reset();
   $('session-panel').hidden = true;
 }
 async function selectSession(id) {
@@ -299,6 +313,7 @@ function applyPermissions() {
   $('refresh').disabled = !!state.pending;
   document.querySelectorAll('.room-card button').forEach(button => { button.disabled = locked; });
   document.querySelectorAll('[data-player-room]').forEach(button => { button.disabled = locked || ended || !ownsRoom(Number(button.dataset.playerRoom)); });
+  alignmentPins.update();
 }
 function row(cells) { const tr = element('tr'); for (const value of cells) { const td = element('td'); if (value instanceof Node) td.append(value); else td.textContent = value; tr.append(td); } return tr; }
 function emptyTable(id, columns, message) { const tr = element('tr'), td = element('td', message, 'empty-cell'); td.colSpan = columns; tr.append(td); $(id).replaceChildren(tr); }
@@ -615,6 +630,7 @@ function tab(name) {
   roomReadiness.active(name === 'operations');
   closure.active(name === 'operations');
   alignment.active(name === 'missions' && master());
+  alignmentPins.active(name === 'operations');
 }
 function submit(id, action, execute = run) { $(id).addEventListener('submit', event => { event.preventDefault(); execute(action); }); }
 $('login-form').addEventListener('submit', login);
