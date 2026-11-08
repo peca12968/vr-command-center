@@ -16,7 +16,12 @@ public record RoomView(int Id, int Capacity, Guid? SessionId, int PlayerCount);
 public record ControlCommand(Guid CommandId, ControlAction Action, EnvironmentSettings? Environment = null,
     EnemySettings? Enemies = null, long? ExpectedSequence = null, MissionClockSettings? MissionClock = null, MissionClockExpiration? ClockExpiration = null);
 public record CommandReceipt(Guid CommandId, long AppliedAtSequence, bool Duplicate, SessionView Session);
-public sealed class MixedRealityNotReadyException() : InvalidOperationException("MR start requires fresh tracked Quest 3 poses for the current roster.");
+public sealed class MixedRealityNotReadyException(ControlAction action) : InvalidOperationException(action == ControlAction.Resume
+    ? "MR resume requires a fresh paused snapshot with tracked Quest 3 poses for living players."
+    : "MR start requires fresh tracked Quest 3 poses for the current roster.")
+{
+    public ControlAction Action { get; } = action;
+}
 
 // Management and combat telemetry; this does not simulate a 3D world or determine physical collisions.
 public sealed partial class SessionManager
@@ -202,16 +207,19 @@ public sealed partial class SessionManager
                 throw new InvalidOperationException("Experience mode is fixed when a session is created.");
             if (command.Enemies is { } enemies && enemies.Count > history.View.Enemies.Count)
                 MissionLayout.RequireEnemyCapacity(history.View, enemies.Count);
-            if (command.Action == ControlAction.Begin && history.View.State == SessionState.Preparing
-                && history.View.Environment.Mode == ExperienceMode.MR
+            if (RequiresMrReadiness(history.View, command.Action)
                 && (readyMrSequence != history.View.Sequence || history.View.CombatStream?.Origin != CombatOrigin.GameServer
                     || history.View.Players.Any(player => player.Headset != HeadsetKind.Quest3)))
-                throw new MixedRealityNotReadyException();
+                throw new MixedRealityNotReadyException(command.Action);
             var entry = SessionEvent.Create(id, history.View.Sequence + 1, SessionEventKind.ControlApplied, command, actor);
             var updated = Commit(history, entry);
             return new(command.CommandId, entry.Sequence, false, updated);
         }
     }
+
+    public static bool RequiresMrReadiness(SessionView session, ControlAction action) =>
+        session.Environment.Mode == ExperienceMode.MR && (action, session.State) is
+            (ControlAction.Begin, SessionState.Preparing) or (ControlAction.Resume, SessionState.Paused);
 
     public void End(Guid id, OperatorIdentity? actor = null) => Execute(id, new(Guid.NewGuid(), ControlAction.End), actor);
 

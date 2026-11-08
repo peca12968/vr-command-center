@@ -174,5 +174,53 @@ internal static class ReadinessChecks
             "Fresh tracked poses for both admitted rooms open the MR mission with the current environment");
         clock.Now = start.AddSeconds(5);
         check(store.ExecuteCommand(id, begin, master).Duplicate, "An accepted MR Begin retains its original idempotent receipt");
+
+        Refresh();
+        store.Append(id, Frame(5), server);
+        clock.Now = start.AddMilliseconds(200);
+        var paused = store.ExecuteCommand(id, new(Guid.NewGuid(), ControlAction.Pause), master).Session;
+        var resume = new ControlCommand(Guid.NewGuid(), ControlAction.Resume);
+        check(store.Readiness(id, master) is { MrStartState: null, MrResumeState: "WaitingSource", SourceState: "PhasePending" },
+            "Fresh Running poses cannot count as a paused MR snapshot");
+        Reject<MixedRealityNotReadyException>(() => manager.Execute(id, resume, master),
+            "Direct MR Resume cannot bypass the paused tracking gate");
+        Reject<MixedRealityNotReadyException>(() => store.ExecuteCommand(id, resume, master),
+            "MR Resume waits until the source applies Pause");
+        Refresh();
+        bridge.Tick(.8);
+        var alphaHead = ArenaSession.Spawn(1, 0);
+        check(bridge.Pose(1, alphaHead, alphaHead, new(0, 0, 1), .8, tracked: true)
+            && !bridge.Weapon(1, 1, false, .8) && bridge.World.TickNumber == 0,
+            "A paused MR arena can refresh tracked poses while weapons and mission ticks stay stopped");
+        store.Append(id, Frame(6), server);
+        clock.Now = start.AddMilliseconds(250);
+        check(store.Readiness(id, master) is { MrResumeState: "WaitingPlayers" } pausedPartial
+            && pausedPartial.Players.Single(p => !p.CanParticipate).PlayerId == bravo,
+            "A tracked pose that expired while paused is identified as waiting");
+        Reject<MixedRealityNotReadyException>(() => store.ExecuteCommand(id, resume, master),
+            "MR Resume rejects a fresh paused snapshot with a missing live pose");
+        check(manager.Get(id).Sequence == paused.Sequence, "Rejected MR Resume leaves the original paused sequence and intent untouched");
+
+        manager.Execute(id, new(Guid.NewGuid(), ControlAction.SetEnvironment,
+            environment with { Weather = Weather.Fog }), master);
+        check(store.Readiness(id, master).MrResumeState == "WaitingRevision", "A paused MR snapshot cannot authorize a newer management revision");
+        Reject<MixedRealityNotReadyException>(() => manager.Execute(id, resume, master, paused.Sequence),
+            "The core rejects a resume witness for a superseded paused revision");
+        Refresh();
+        var bravoHead = ArenaSession.Spawn(5, 0);
+        check(bridge.Pose(2, bravoHead, bravoHead, new(0, 0, 1), .9, tracked: true), "The original admission can recover tracking while paused");
+        store.Append(id, Frame(7), server);
+        clock.Now = start.AddMilliseconds(1800.01);
+        check(store.Readiness(id, master) is { MrResumeState: "WaitingSource", SourceState: "Stale" },
+            "The paused MR diagnostic expires beyond the original freshness boundary");
+        Reject<MixedRealityNotReadyException>(() => store.ExecuteCommand(id, resume, master), "MR Resume rejects an expired paused snapshot");
+        clock.Now = start.AddMilliseconds(300);
+        check(store.Readiness(id, master).MrResumeState == "Ready", "All living MR seats on the exact paused revision satisfy Resume");
+        var continued = store.ExecuteCommand(id, resume, master);
+        check(continued.Session.State == SessionState.Running && !continued.Duplicate && continued.Session.StartedAtUtc == accepted.Session.StartedAtUtc,
+            "The same previously rejected MR Resume succeeds on fresh tracking without resetting the mission start");
+        store.ExecuteCommand(id, new(Guid.NewGuid(), ControlAction.Pause), master);
+        check(store.ExecuteCommand(id, resume, master) is { Duplicate: true } retry && retry.AppliedAtSequence == continued.AppliedAtSequence
+            && retry.Session.State == SessionState.Paused, "An accepted Resume retry returns the original receipt without overriding a later Pause");
     }
 }

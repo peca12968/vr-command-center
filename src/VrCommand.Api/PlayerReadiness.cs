@@ -7,7 +7,7 @@ namespace VrCommand.Api;
 public record PlayerReadiness(Guid PlayerId, Guid AdmissionId, int RoomId, int Seat, string State, string RigKind, bool CanParticipate);
 public record SessionReadiness(int Version, Guid SessionId, long SessionSequence, DateTimeOffset SampledAtUtc,
     string SourceState, string? Origin, long WorldSequence, long ObservedSequence, DateTimeOffset? CapturedAtUtc,
-    double? SourceAgeMilliseconds, PlayerReadiness[] Players, string? MrStartState);
+    double? SourceAgeMilliseconds, PlayerReadiness[] Players, string? MrStartState, string? MrResumeState);
 public record RoomReadiness(int RoomId, Guid? SessionId, long SessionSequence, int Registered, int SimulatedReady,
     int TrackedReady, string SourceState, double? SourceAgeMilliseconds);
 
@@ -15,16 +15,17 @@ public sealed partial class WorldRecordings
 {
     public CommandReceipt ExecuteCommand(Guid id, ControlCommand command, OperatorIdentity actor)
     {
-        if (command.Action != ControlAction.Begin) return manager.Execute(id, command, actor);
+        if (command.Action is not (ControlAction.Begin or ControlAction.Resume)) return manager.Execute(id, command, actor);
         lock (gate)
         {
             var current = manager.Get(id, actor);
             AccessPolicy.Manage(actor, current.Mode, current.RoomIds);
-            if (current.Environment.Mode != ExperienceMode.MR || current.State != SessionState.Preparing)
+            if (!SessionManager.RequiresMrReadiness(current, command.Action))
                 return manager.Execute(id, command, actor);
 
             var report = Readiness(id, actor);
-            var ready = report.SessionSequence == current.Sequence && report.MrStartState == "Ready";
+            var readiness = command.Action == ControlAction.Resume ? report.MrResumeState : report.MrStartState;
+            var ready = report.SessionSequence == current.Sequence && readiness == "Ready";
             return manager.Execute(id, command, actor, ready ? current.Sequence : null);
         }
     }
@@ -55,7 +56,7 @@ public sealed partial class WorldRecordings
         }).ToArray();
     }
 
-    // A scoped view of accepted snapshots. The MR start policy requires the exact current roster revision.
+    // A scoped view of accepted snapshots. Both MR transitions require the exact current roster revision.
     public SessionReadiness Readiness(Guid id, OperatorIdentity actor)
     {
         RequireReadinessActor(actor);
@@ -86,14 +87,17 @@ public sealed partial class WorldRecordings
                 return new PlayerReadiness(player.Id, player.AdmissionId, player.RoomId, player.Seat, state, kind, state == "Participating");
             }).ToArray();
             var observedSequence = frame?.Packet.observedSequence ?? 0;
-            var mrStart = current.Environment.Mode != ExperienceMode.MR || current.State != SessionState.Preparing ? null
-                : players.Length == 0 ? "EmptyRoster"
+            var starting = SessionManager.RequiresMrReadiness(current, ControlAction.Begin);
+            var resuming = SessionManager.RequiresMrReadiness(current, ControlAction.Resume);
+            var mrState = !starting && !resuming ? null
+                : starting && players.Length == 0 ? "EmptyRoster"
                 : source != "Fresh" ? "WaitingSource"
                 : info?.Header is not { origin: "GameServer", calibration: WorldRecordingHeader.QuestMixedRealityProfile } ? "WaitingProfile"
                 : observedSequence != current.Sequence ? "WaitingRevision"
-                : players.All(player => player.CanParticipate && player.RigKind == "Tracked") ? "Ready" : "WaitingPlayers";
+                : players.All(player => (resuming && player.State == "Eliminated") || (player.CanParticipate && player.RigKind == "Tracked"))
+                    ? "Ready" : "WaitingPlayers";
             return new(1, id, current.Sequence, now, source, info?.Header.origin, info?.AcceptedSequence ?? 0,
-                observedSequence, info?.CapturedAtUtc, age, players, mrStart);
+                observedSequence, info?.CapturedAtUtc, age, players, starting ? mrState : null, resuming ? mrState : null);
         }
     }
 }

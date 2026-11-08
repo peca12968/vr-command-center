@@ -80,9 +80,9 @@ async function main() {
     }
     if (process.argv.includes('--mr-start-only')) {
       await require('./mr-start-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
-      check(browserErrors.length === 0, 'MR start check has no uncaught browser or policy errors');
-      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), result: 'passed', scope: 'MR start with a real API and synthetic tracked world publisher' }, null, 2));
-      console.log(`PASS: ${checks} focused MR start checks. Screenshots: ${screenshots}`); return;
+      check(browserErrors.length === 0, 'MR lifecycle check has no uncaught browser or policy errors');
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), result: 'passed', scope: 'MR start and resume with a real API and synthetic tracked world publisher' }, null, 2));
+      console.log(`PASS: ${checks} focused MR lifecycle checks. Screenshots: ${screenshots}`); return;
     }
     await page.goto(base + '/console/');
     await page.locator('#login-key').fill('wrong-key'); await page.locator('#login-form button').click();

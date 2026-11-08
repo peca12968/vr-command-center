@@ -72,6 +72,7 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
       if (response.status === 403) message = '目前身分沒有此操作權限。';
       if (response.status === 409) {
         if (code === 'mr-readiness-required') message = 'MR 場次尚未就緒。請查看「MR 開場檢查」，並確認等候中的 Quest 3 玩家已完成場地對位。';
+        if (code === 'mr-resume-readiness-required') message = 'MR 場次尚未符合繼續條件。請查看「MR 繼續檢查」。';
         else message = path.startsWith('/missions') ? '任務版本已變更或原請求內容不一致；草稿仍保留，可載入最新版或另存新任務。' : '場次狀態或名額已變更，請重新整理並確認後再操作。';
       }
       if (layout) message = '場地配置未通過檢查，請修正並保存新版本後再開場。';

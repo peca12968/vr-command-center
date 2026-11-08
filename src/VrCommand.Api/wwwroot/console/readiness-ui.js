@@ -20,41 +20,47 @@ export function readinessView(report, session, elapsed) {
     const kind = ['Simulated', 'Tracked'].includes(row?.rigKind) ? row.rigKind : 'None';
     let status = source !== 'Fresh' ? source : !row ? 'AwaitingAdmission' : Object.hasOwn(labels, row.state) ? row.state : 'Unavailable';
     if (status === 'Participating' && (row?.canParticipate !== true || kind === 'None')) status = 'Unavailable';
-    return { id: player.id, admissionId: player.admissionId, ready: status === 'Participating', kind,
+    return { id: player.id, admissionId: player.admissionId, ready: status === 'Participating', kind, state: status,
       text: labels[status] + (kind === 'Simulated' ? ' · 合成姿態' : kind === 'Tracked' ? ' · 追蹤姿態' : '') };
   });
   const origin = matches && ['Simulation', 'GameServer'].includes(report.origin) ? report.origin + ' · ' : '';
   return { source, rows, text: `${origin}${rows.filter(row => row.ready).length} / ${rows.length} 姿態有效 · ${labels[source]}` };
 }
 
-export function mrStartView(report, session, elapsed, actor) {
-  if (session?.environment?.mode !== 'MR' || session.state !== 'Preparing') return null;
-  const status = (state, text, rooms = []) => ({ state, text, rooms });
+export function mrReadinessView(report, session, elapsed, actor) {
+  if (session?.environment?.mode !== 'MR' || !['Preparing', 'Paused'].includes(session.state)) return null;
+  const resuming = session.state === 'Paused';
+  const action = resuming ? 'Resume' : 'Begin';
+  const status = (state, text, rooms = []) => ({ action, state, text, rooms });
   const pending = () => status('Updating', '等待核對目前場次與名冊。');
-  if (!session.players.length) return status('EmptyRoster', '請先將 Quest 3 玩家加入名冊。');
+  if (!resuming && !session.players.length) return status('EmptyRoster', '請先將 Quest 3 玩家加入名冊。');
   if (report?.version !== 1 || report.sessionId !== session.id || report.sessionSequence !== session.sequence) return pending();
   const source = sourceAt(report, elapsed);
-  if (source !== 'Fresh') return status('WaitingSource', '等待有效的 MR 準備快照 · ' + labels[source]);
-  if (report.mrStartState === 'WaitingProfile')
+  if (source !== 'Fresh') return status('WaitingSource', `等待有效的 MR ${resuming ? '暫停' : '準備'}快照 · ${labels[source]}`);
+  const readiness = resuming ? report.mrResumeState : report.mrStartState;
+  if (readiness === 'WaitingProfile')
     return status('WaitingProfile', '等待遊戲伺服器的 MR 錄製來源。');
-  if (report.mrStartState === 'WaitingRevision')
+  if (readiness === 'WaitingRevision')
     return status('WaitingRevision', '等待遊戲伺服器同步最新場次設定與名冊。');
-  if (!['Ready', 'WaitingPlayers'].includes(report.mrStartState) || report.origin !== 'GameServer'
+  if (!['Ready', 'WaitingPlayers'].includes(readiness) || report.origin !== 'GameServer'
     || report.observedSequence !== session.sequence || !Array.isArray(report.players)
     || report.players.length !== session.players.length) return pending();
 
   const { rows } = readinessView(report, session, elapsed);
   const tracked = new Set(rows.filter(row => row.ready && row.kind === 'Tracked').map(row => row.id));
-  if (report.mrStartState === 'Ready' && tracked.size !== session.players.length) return pending();
+  const eliminated = new Set(resuming ? rows.filter(row => row.state === 'Eliminated').map(row => row.id) : []);
+  if (readiness === 'Ready' && tracked.size + eliminated.size !== session.players.length) return pending();
   const rooms = session.roomIds.filter(room => actor?.role === 'Master' || actor?.roomId === room).map(room => {
     const players = session.players.filter(player => player.roomId === room);
-    const waiting = players.filter(player => !tracked.has(player.id)).map(player => player.seat + 1).sort((a, b) => a - b);
-    const text = players.length === 0 ? '尚無玩家' : `${players.length - waiting.length} / ${players.length} 追蹤就緒`
-      + (waiting.length ? ` · 等候席位 ${waiting.join('、')}` : '');
+    const living = players.filter(player => !eliminated.has(player.id));
+    const waiting = living.filter(player => !tracked.has(player.id)).map(player => player.seat + 1).sort((a, b) => a - b);
+    const casualties = players.length - living.length;
+    const text = players.length === 0 ? '尚無玩家' : `${living.length - waiting.length} / ${living.length} 追蹤就緒`
+      + (waiting.length ? ` · 等候席位 ${waiting.join('、')}` : '') + (casualties ? ` · 已淘汰 ${casualties}` : '');
     return { room, text: `房間 ${room} · ${text}` };
   });
-  return report.mrStartState === 'Ready' ? status('Ready', '目前快照顯示全場名冊已就緒。', rooms)
-    : status('WaitingPlayers', '等待全場名冊的有效追蹤姿態。', rooms);
+  return readiness === 'Ready' ? status('Ready', resuming ? '目前快照顯示已符合繼續條件。' : '目前快照顯示全場名冊已就緒。', rooms)
+    : status('WaitingPlayers', resuming ? '等待存活玩家重新取得有效追蹤姿態。' : '等待全場名冊的有效追蹤姿態。', rooms);
 }
 
 export function roomReadinessView(report, room, session, elapsed) {
@@ -129,6 +135,7 @@ export function mountReadiness(getState, unauthorized) {
   const summary = document.getElementById('readiness-summary');
   const mrPanel = document.getElementById('mr-start-requirement'), mrStatus = document.getElementById('mr-start-status');
   const mrRooms = document.getElementById('mr-start-rooms');
+  const mrTitle = document.getElementById('mr-start-title'), mrHint = document.getElementById('mr-start-hint');
   let lastMrView;
   function renderMr(view) {
     const key = JSON.stringify(view);
@@ -136,6 +143,10 @@ export function mountReadiness(getState, unauthorized) {
     lastMrView = key;
     mrPanel.hidden = !view;
     mrPanel.dataset.state = view?.state || '';
+    const resuming = view?.action === 'Resume';
+    mrTitle.textContent = resuming ? 'MR 繼續檢查' : 'MR 開場檢查';
+    mrHint.textContent = resuming ? '需要重新對位的玩家可在暫停中完成三點量測。按繼續時，伺服器會再核對當時的快照。'
+      : '請讓名冊上的 Quest 3 玩家完成三點對位。按開始時，伺服器會再核對當時的快照。';
     mrStatus.textContent = view?.text || '';
     mrStatus.classList.toggle('ready-player', view?.state === 'Ready');
     mrRooms.replaceChildren(...(view?.rooms || []).map(({ room, text }) => {
@@ -154,8 +165,8 @@ export function mountReadiness(getState, unauthorized) {
     const state = getState(); if (!state.actor || !state.session || state.session.id !== state.selected) return;
     const elapsed = performance.now() - started;
     const view = readinessView(report, state.session, elapsed);
-    const mr = mrStartView(report, state.session, elapsed, state.actor);
-    renderMr(failed && mr ? { state: 'Unavailable', text: '開場狀態未確認，正在重試。', rooms: [] } : mr);
+    const mr = mrReadinessView(report, state.session, elapsed, state.actor);
+    renderMr(failed && mr ? { ...mr, state: 'Unavailable', text: 'MR 就緒狀態未確認，正在重試。', rooms: [] } : mr);
     summary.textContent = failed ? '參戰狀態未確認，正在重試。' : view.text;
     summary.classList.toggle('warning', failed || ['Stale', 'ClockSkew', 'Suspended', 'Unavailable'].includes(view.source));
     for (const cell of document.querySelectorAll('[data-readiness-player]')) {
