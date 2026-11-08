@@ -62,7 +62,7 @@ namespace VrCommand.Unity.Tests
         }
         [Test] public void EnemyPoseAndTickTravelAtomicallyInTheNetworkActorRow()
         {
-            var expected=new CombatActorState{id="6bcd2409-6172-43af-8307-88255c0959f8",enemy=true,room=3,health=100,
+            var expected=new CombatActorState{id=System.Guid.Parse("6bcd2409-6172-43af-8307-88255c0959f8"),enemy=true,room=3,health=100,
                 position=new Vector3(2,0,3),facing=new Vector3(0,0,-1),walking=true,presentationTick=9};
             using(var writer=new FastBufferWriter(512,Allocator.Temp))
             {

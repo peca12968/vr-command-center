@@ -82,7 +82,7 @@ namespace VrCommand.Unity.Tests
         }
         [Test] public void PlayerShotUsesTheAtomicActorRayFieldsAndTheirEqualityFence()
         {
-            var expected=new CombatActorState{id="6bcd2409-6172-43af-8307-88255c0959f8",enemy=false,connected=true,health=100,room=3,fireSequence=1,fireTickPlusOne=1,presentationTick=0,
+            var expected=new CombatActorState{id=System.Guid.Parse("6bcd2409-6172-43af-8307-88255c0959f8"),enemy=false,connected=true,health=100,room=3,fireSequence=1,fireTickPlusOne=1,presentationTick=0,
                 fireOrigin=new Vector3(0,1.5f,-3),fireDirection=Vector3.forward};
             using(var writer=new FastBufferWriter(1024,Allocator.Temp))
             {

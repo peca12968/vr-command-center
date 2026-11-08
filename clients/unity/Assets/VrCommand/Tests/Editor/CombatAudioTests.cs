@@ -39,7 +39,7 @@ namespace VrCommand.Unity.Tests
         }
         [Test] public void AtomicActorRunningFlagSurvivesNgoAndItsEqualityFence()
         {
-            var value=new CombatActorState{id="8b5d920d-65ee-4df8-adf8-bdb7be537cfe",presentationTick=1,presentationRunning=true,fireSequence=2,fireTickPlusOne=2,fireDirection=Vector3.forward};
+            var value=new CombatActorState{id=System.Guid.Parse("8b5d920d-65ee-4df8-adf8-bdb7be537cfe"),presentationTick=1,presentationRunning=true,fireSequence=2,fireTickPlusOne=2,fireDirection=Vector3.forward};
             using(var writer=new FastBufferWriter(1024,Allocator.Temp))
             {writer.WriteValueSafe(value);using(var reader=new FastBufferReader(writer.ToArray(),Allocator.Temp)){reader.ReadValueSafe(out CombatActorState read);Assert.IsTrue(read.Equals(value));read.presentationRunning=false;Assert.IsFalse(read.Equals(value));}}
         }

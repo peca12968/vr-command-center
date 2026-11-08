@@ -38,7 +38,7 @@ namespace VrCommand.Unity.Tests
         }
         [Test] public void PlayerWalkingSharesItsAtomicNgoClockAndEquality()
         {
-            var state=State();state.id="7cb9976a-9bda-4dce-8e57-be203e0ca849";using(var w=new FastBufferWriter(1024,Allocator.Temp)){w.WriteValueSafe(state);using(var r=new FastBufferReader(w.ToArray(),Allocator.Temp)){r.ReadValueSafe(out CombatActorState copy);Assert.IsTrue(copy.walking);Assert.IsTrue(copy.Equals(state));copy.walking=false;Assert.IsFalse(copy.Equals(state));}}
+            var state=State();state.id=System.Guid.Parse("7cb9976a-9bda-4dce-8e57-be203e0ca849");using(var w=new FastBufferWriter(1024,Allocator.Temp)){w.WriteValueSafe(state);using(var r=new FastBufferReader(w.ToArray(),Allocator.Temp)){r.ReadValueSafe(out CombatActorState copy);Assert.IsTrue(copy.walking);Assert.IsTrue(copy.Equals(state));copy.walking=false;Assert.IsFalse(copy.Equals(state));}}
         }
         [Test] public void JsonUtilityKeepsNewPlayerContractAndLegacyDefaults()
         {

@@ -45,7 +45,7 @@ WASD移動；方向鍵或按住右鍵拖曳瞄準；Space／左鍵射擊；R換�
 任務由控制人員開始、暫停與結束。結束後等待最終戰績，勿立即關窗。
 同次入場斷線可在遊戲的Reconnect按鈕重新讀取原路徑的最新票券。
 
-Windows 0.46.0 開發版可用 VrCommand.exe --vr-config 玩家連線檔 --vr-link-metrics 新JSON絕對路徑 選用連線量測。上層目錄須已存在。結果含往返時間、逾時與 Unity 更新次數。
+Windows 開發版自 0.46.0 起可用 VrCommand.exe --vr-config 玩家連線檔 --vr-link-metrics 新JSON絕對路徑 選用連線量測。上層目錄須已存在。結果含往返時間、逾時與 Unity 更新次數。
 
 環境：Windows x64、適用的圖形驅動及 .NET Framework 4.8；不需要Unity Editor、Python或.NET 10 SDK。
 來源、場景與伺服器須同版。這是桌面合成頭手，實際Simulation／GameServer來源以場次為準。

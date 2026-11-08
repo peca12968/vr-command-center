@@ -35,6 +35,7 @@ seconds為60..86400，期限結束仍未完成封存與36秒保留則失敗；�
 本機記錄：%LOCALAPPDATA%/VrCommand/GameServers（含私人金鑰）與GameServerReports。
 Windows x64與.NET Framework4.8；操作人員不需Python、Unity Editor或.NET SDK。
 VR 使用 Simulation 來源，MR 使用 GameServer 來源。遊戲建置來源見 Runtime/build-receipt.json。頭盔、實體場地和廠商硬體須另行驗收。
+Windows 玩家包與 Quest APK 須使用與伺服器相同的遊戲版本。升級時先結束既有場次，再一併更新伺服器及玩家端。
 未修改防火牆、未提供NAT/中繼；跨機網路與25位同時操作須另外驗收。
 server-package.json是SHA256完整性清單，不是數位簽章。Runtime/build-receipt.json保留原實際Unity建置紀錄。
 Notices保留玩家包相同的素材／Transport授權。Microsoft Job文件：https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects

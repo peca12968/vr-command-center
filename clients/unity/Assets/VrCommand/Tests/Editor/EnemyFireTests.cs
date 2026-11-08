@@ -78,7 +78,7 @@ namespace VrCommand.Unity.Tests
         }
         [Test] public void SavedShotClockAndRayTravelAtomicallyInTheNetworkActor()
         {
-            var expected=new CombatActorState{id="6bcd2409-6172-43af-8307-88255c0959f8",enemy=true,health=80,room=3,fireSequence=5,fireTickPlusOne=11,
+            var expected=new CombatActorState{id=System.Guid.Parse("6bcd2409-6172-43af-8307-88255c0959f8"),enemy=true,health=80,room=3,fireSequence=5,fireTickPlusOne=11,
                 presentationTick=10,fireOrigin=new Vector3(0,1.4f,3),fireDirection=new Vector3(0,0,-1)};
             using(var writer=new FastBufferWriter(1024,Allocator.Temp))
             {

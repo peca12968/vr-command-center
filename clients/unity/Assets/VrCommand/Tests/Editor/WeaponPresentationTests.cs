@@ -57,7 +57,7 @@ namespace VrCommand.Unity.Tests
         }
         [Test] public void ReloadClockIsAtomicWithThePlayerNetworkStateAndJsonCapture()
         {
-            var expected=new CombatActorState{id="6bcd2409-6172-43af-8307-88255c0959f8",health=100,magazine=29,reserve=90,reloading=true,presentationTick=8,reloadUntilTick=30};
+            var expected=new CombatActorState{id=System.Guid.Parse("6bcd2409-6172-43af-8307-88255c0959f8"),health=100,magazine=29,reserve=90,reloading=true,presentationTick=8,reloadUntilTick=30};
             using(var writer=new FastBufferWriter(512,Allocator.Temp))
             {writer.WriteValueSafe(expected);using(var reader=new FastBufferReader(writer.ToArray(),Allocator.Temp)){reader.ReadValueSafe(out CombatActorState actual);Assert.IsTrue(expected.Equals(actual));actual.reloadUntilTick++;Assert.IsFalse(expected.Equals(actual));}}
             var world=new ArenaWorld(new[]{3},new WorldProp[0]);var id=Guid.NewGuid();world.AddPlayer(id,3,new Vec3(0,1.65f,-3));world.SetPhase(WorldPhase.Running);world.Fire(id,Guid.NewGuid());world.Reload(id,Guid.NewGuid());

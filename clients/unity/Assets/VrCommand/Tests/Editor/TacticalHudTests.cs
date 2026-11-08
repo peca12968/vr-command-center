@@ -7,7 +7,7 @@ namespace VrCommand.Unity.Tests
     {
         private const string Self = "00000000-0000-0000-0000-000000000001", Enemy = "00000000-0000-0000-0000-000000000002";
         private static CombatActorState Subject(float x = 0, float z = 3) => new CombatActorState
-        { id = Enemy, position = new Vector3(x, 0, z), room = 3, health = 100, enemy = true, connected = true };
+        { id = System.Guid.Parse(Enemy), position = new Vector3(x, 0, z), room = 3, health = 100, enemy = true, connected = true };
         private static bool Visible(CombatActorState subject, CombatPropState[] props = null, CombatActorState[] others = null)
             => TacticalHudRules.Visible(new Vector3(0, 1.65f, -3), 3, Self, subject, others ?? new CombatActorState[0], props ?? new CombatPropState[0]);
 
@@ -68,13 +68,13 @@ namespace VrCommand.Unity.Tests
         }
         [Test] public void PeerOcclusionAndRoomHealthAdmissionFiltersPreventHiddenLabels()
         {
-            var peer = new CombatActorState { id = "00000000-0000-0000-0000-000000000003", room = 3, position = new Vector3(0, 1.65f, 0), connected = true, health = 100 };
+            var peer = new CombatActorState { id = System.Guid.Parse("00000000-0000-0000-0000-000000000003"), room = 3, position = new Vector3(0, 1.65f, 0), connected = true, health = 100 };
             Assert.IsFalse(Visible(Subject(), others: new[] { peer }));
             peer.health = 0; Assert.IsTrue(Visible(Subject(), others: new[] { peer }));
             var subject = Subject(); subject.room = 4; Assert.IsFalse(Visible(subject));
             subject = Subject(); subject.health = 0; Assert.IsFalse(Visible(subject));
             subject = Subject(); subject.connected = false; Assert.IsFalse(Visible(subject));
-            subject = Subject(); subject.id = Self; Assert.IsFalse(Visible(subject));
+            subject = Subject(); subject.id = System.Guid.Parse(Self); Assert.IsFalse(Visible(subject));
         }
         [Test] public void NewlyOccludedPositionsAndInvalidOrDistantObserversDoNotKeepLabels()
         {

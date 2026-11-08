@@ -27,7 +27,7 @@ namespace VrCommand.Unity.Tests
         }
         [Test] public void NetcodeActorSerializationPreservesHealthWeaponAndConnectionState()
         {
-            var expected = new CombatActorState { id = "6bcd2409-6172-43af-8307-88255c0959f8", position = new Vector3(2, 1.65f, -3),
+            var expected = new CombatActorState { id = System.Guid.Parse("6bcd2409-6172-43af-8307-88255c0959f8"), position = new Vector3(2, 1.65f, -3),
                 room = 3, health = 80, magazine = 27, reserve = 90, connected = true, reloading = true };
             using (var writer = new FastBufferWriter(512, Allocator.Temp))
             {

@@ -208,7 +208,7 @@ namespace VrCommand.Unity
                 foreach (var current in frameActors) if (current.id.Equals(cached.id)) { actor = current; found = true; break; }
                 // Refresh visibility on every rendered frame, even between the
                 // bounded candidate searches. A newly occluded actor loses its tag.
-                if (!found || actor.id.Length < 4 || !OnScreen(camera, actor, out var point)
+                if (!found || actor.id == System.Guid.Empty || !OnScreen(camera, actor, out var point)
                     || !TacticalHudRules.Visible(camera.transform.position, player.room, avatar.PlayerId.Value.ToString(), actor, frameActors, frameProps)) continue;
                 var width = Screen.width / scale; var x = Mathf.Clamp(point.x * width - 72, 12, width - 156);
                 var y = (1 - point.y) * Screen.height / scale - 34;

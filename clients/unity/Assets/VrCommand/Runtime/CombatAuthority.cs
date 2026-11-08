@@ -9,7 +9,7 @@ namespace VrCommand.Unity
 {
     public struct CombatActorState : INetworkSerializable, IEquatable<CombatActorState>
     {
-        public FixedString64Bytes id;
+        public Guid id;
         public Vector3 position;
         public Vector3 facing,fireOrigin,fireDirection;
         public long fireSequence,fireTickPlusOne;
@@ -17,14 +17,87 @@ namespace VrCommand.Unity
         public long presentationTick, reloadUntilTick;
         public int room, health, magazine, reserve;
         public bool enemy, connected, reloading, presentationRunning;
+
+        [Flags]
+        private enum Fields : byte
+        {
+            Enemy = 1, Connected = 2, Reloading = 4, Walking = 8, Running = 16,
+            Facing = 32, ReloadClock = 64, Fire = 128
+        }
+
+        private struct BinaryId : INetworkSerializeByMemcpy { public Guid Value; }
+
         public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
         {
-            serializer.SerializeValue(ref id); serializer.SerializeValue(ref position); serializer.SerializeValue(ref room);
-            serializer.SerializeValue(ref health); serializer.SerializeValue(ref magazine); serializer.SerializeValue(ref reserve);
-            serializer.SerializeValue(ref enemy); serializer.SerializeValue(ref connected); serializer.SerializeValue(ref reloading);
-            serializer.SerializeValue(ref facing); serializer.SerializeValue(ref walking); serializer.SerializeValue(ref presentationTick); serializer.SerializeValue(ref reloadUntilTick); serializer.SerializeValue(ref presentationRunning);
-            serializer.SerializeValue(ref fireSequence);serializer.SerializeValue(ref fireTickPlusOne);serializer.SerializeValue(ref fireOrigin);serializer.SerializeValue(ref fireDirection);
+            var fields = serializer.IsReader ? default : GetFields();
+            serializer.SerializeValue(ref fields);
+            var binaryId = new BinaryId { Value = id };
+            serializer.SerializeValue(ref binaryId);
+            serializer.SerializeValue(ref position);
+
+            if (serializer.IsReader)
+            {
+                var reader = serializer.GetFastBufferReader();
+                id = binaryId.Value;
+                enemy = (fields & Fields.Enemy) != 0;
+                connected = (fields & Fields.Connected) != 0;
+                reloading = (fields & Fields.Reloading) != 0;
+                walking = (fields & Fields.Walking) != 0;
+                presentationRunning = (fields & Fields.Running) != 0;
+                ByteUnpacker.ReadValueBitPacked(reader, out room);
+                ByteUnpacker.ReadValueBitPacked(reader, out health);
+                ByteUnpacker.ReadValueBitPacked(reader, out magazine);
+                ByteUnpacker.ReadValueBitPacked(reader, out reserve);
+            }
+            else
+            {
+                var writer = serializer.GetFastBufferWriter();
+                BytePacker.WriteValueBitPacked(writer, room);
+                BytePacker.WriteValueBitPacked(writer, health);
+                BytePacker.WriteValueBitPacked(writer, magazine);
+                BytePacker.WriteValueBitPacked(writer, reserve);
+            }
+            PackedLong(serializer, ref presentationTick);
+
+            if ((fields & Fields.Facing) != 0) serializer.SerializeValue(ref facing);
+            else if (serializer.IsReader) facing = default;
+            if ((fields & Fields.ReloadClock) != 0) PackedLong(serializer, ref reloadUntilTick);
+            else if (serializer.IsReader) reloadUntilTick = 0;
+            if ((fields & Fields.Fire) != 0)
+            {
+                PackedLong(serializer, ref fireSequence);
+                PackedLong(serializer, ref fireTickPlusOne);
+                serializer.SerializeValue(ref fireOrigin);
+                serializer.SerializeValue(ref fireDirection);
+            }
+            else if (serializer.IsReader)
+            {
+                fireSequence = fireTickPlusOne = 0;
+                fireOrigin = fireDirection = default;
+            }
         }
+
+        private Fields GetFields()
+        {
+            var fields = (enemy ? Fields.Enemy : 0) | (connected ? Fields.Connected : 0)
+                | (reloading ? Fields.Reloading : 0) | (walking ? Fields.Walking : 0)
+                | (presentationRunning ? Fields.Running : 0);
+            if (!DefaultVector(facing)) fields |= Fields.Facing;
+            if (reloadUntilTick != 0) fields |= Fields.ReloadClock;
+            if (fireSequence != 0 || fireTickPlusOne != 0 || !DefaultVector(fireOrigin) || !DefaultVector(fireDirection))
+                fields |= Fields.Fire;
+            return fields;
+        }
+
+        private static bool DefaultVector(Vector3 value) => BitConverter.SingleToInt32Bits(value.x) == 0
+            && BitConverter.SingleToInt32Bits(value.y) == 0 && BitConverter.SingleToInt32Bits(value.z) == 0;
+
+        private static void PackedLong<T>(BufferSerializer<T> serializer, ref long value) where T : IReaderWriter
+        {
+            if (serializer.IsReader) ByteUnpacker.ReadValueBitPacked(serializer.GetFastBufferReader(), out value);
+            else BytePacker.WriteValueBitPacked(serializer.GetFastBufferWriter(), value);
+        }
+
         public bool Equals(CombatActorState other) => id.Equals(other.id) && position == other.position && room == other.room
             && health == other.health && magazine == other.magazine && reserve == other.reserve && enemy == other.enemy
             && connected == other.connected && reloading == other.reloading && facing == other.facing && walking == other.walking && presentationTick == other.presentationTick && reloadUntilTick == other.reloadUntilTick && presentationRunning==other.presentationRunning && fireSequence==other.fireSequence && fireTickPlusOne==other.fireTickPlusOne && fireOrigin==other.fireOrigin && fireDirection==other.fireDirection;
@@ -231,8 +304,9 @@ namespace VrCommand.Unity
         }
         public bool Player(string id, out CombatActorState state)
         {
-            if (Actors != null) for (var index = 0; index < Actors.Count; index++)
-                if (!Actors[index].enemy && Actors[index].id.ToString() == id) { state = Actors[index]; return true; }
+            if (Actors != null && Guid.TryParseExact(id, "D", out var identity))
+                for (var index = 0; index < Actors.Count; index++)
+                    if (!Actors[index].enemy && Actors[index].id == identity) { state = Actors[index]; return true; }
             state = default; return false;
         }
         public bool ConstrainDesktop(int room, Vector3 from, Vector3 desired, out Vector3 result)
@@ -317,9 +391,9 @@ namespace VrCommand.Unity
                 if(rigs.TryGetValue(player.Id,out var rig))NativePoseTrace.Body(rig.Connection,player.Connected);
             GetComponent<SceneAuthority>()?.PublishTick(frame.Tick, frame.Phase.ToString());
             var actors = new List<CombatActorState>();
-            foreach (var player in frame.Players) actors.Add(new CombatActorState { id = player.Id.ToString("D"), room = player.RoomId, position = Vector(player.Head),
+            foreach (var player in frame.Players) actors.Add(new CombatActorState { id = player.Id, room = player.RoomId, position = Vector(player.Head),
                 health = player.Health, magazine = player.Magazine, reserve = player.Reserve, connected = player.Connected, reloading = player.Reloading, presentationTick = frame.Tick, presentationRunning=frame.Phase==WorldPhase.Running, reloadUntilTick = player.ReloadUntilTick, walking=player.Walking, fireSequence=player.Fire.Sequence,fireTickPlusOne=player.Fire.TickPlusOne,fireOrigin=Vector(player.Fire.Origin),fireDirection=Vector(player.Fire.Direction) });
-            foreach (var npc in frame.Enemies) actors.Add(new CombatActorState { id = npc.Id.ToString("D"), room = npc.RoomId, position = Vector(npc.Feet), health = npc.Health, enemy = true, connected = true,
+            foreach (var npc in frame.Enemies) actors.Add(new CombatActorState { id = npc.Id, room = npc.RoomId, position = Vector(npc.Feet), health = npc.Health, enemy = true, connected = true,
                 facing = Vector(npc.Forward), walking = npc.Walking, presentationTick = frame.Tick,presentationRunning=frame.Phase==WorldPhase.Running,fireSequence=npc.Fire.Sequence,fireTickPlusOne=npc.Fire.TickPlusOne,fireOrigin=Vector(npc.Fire.Origin),fireDirection=Vector(npc.Fire.Direction) });
             for (var index = 0; index < actors.Count; index++)
                 if (index >= Actors.Count) Actors.Add(actors[index]); else if (!Actors[index].Equals(actors[index])) Actors[index] = actors[index];
