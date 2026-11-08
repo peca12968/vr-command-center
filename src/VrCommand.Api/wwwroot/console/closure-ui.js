@@ -39,14 +39,20 @@ export function closureView(session, statistics, world, result = 'Waiting') {
 export function mountClosure(getState, unauthorized) {
   const panel = document.getElementById('closure-status'), combat = document.getElementById('closure-combat'), worldLabel = document.getElementById('closure-world'), summary = document.getElementById('closure-summary');
   const retained = document.getElementById('closure-retained');
+  const fieldPanel = document.getElementById('field-evidence'), fieldButton = document.getElementById('download-field-evidence');
+  const fieldStatus = document.getElementById('field-evidence-status');
   let active = false, generation = 0, identity = '', controller = null, attempted = -Infinity, world = null, result = 'Waiting', refreshFailed = false;
+  let fieldRequest = null;
   const context = () => {
     const state = getState(), session = state.session;
     return state.actor && state.key && !state.pending && session?.id === state.selected && sequence(session.sequence)
       ? [state.epoch, state.selected, session.sequence, session.combatStream?.streamId || '', state.actor.id, state.actor.role, state.actor.roomId ?? ''].join('/') : '';
   };
   function stop() { generation++; controller?.abort(); controller = null; }
-  function clear() { stop(); world = null; result = 'Waiting'; attempted = -Infinity; }
+  function clear() {
+    stop(); world = null; result = 'Waiting'; attempted = -Infinity;
+    fieldRequest?.abort(); fieldRequest = null; fieldStatus.textContent = '';
+  }
   function render() {
     const state = getState();
     const view = !active || !context() || document.visibilityState !== 'visible' ? { complete: false, combat: '未確認', world: '未確認', text: '選取場次後可確認資料封存狀態。', warning: false }
@@ -58,6 +64,8 @@ export function mountClosure(getState, unauthorized) {
     if (sequence(view.worldCount)) counts.push(`已保存 ${view.worldCount} 格錄製`);
     retained.textContent = counts.join(' · '); retained.hidden = counts.length === 0;
     panel.classList.toggle('closure-complete', view.complete); panel.classList.toggle('warning', view.warning);
+    fieldPanel.hidden = state.actor?.role !== 'Master' || state.session?.state !== 'Ended';
+    fieldButton.disabled = fieldPanel.hidden || !!fieldRequest || !view.complete || !state.session?.startedAtUtc || !state.session?.players?.length;
   }
   function reset() { clear(); identity = ''; refreshFailed = false; render(); }
   async function poll() {
@@ -83,6 +91,37 @@ export function mountClosure(getState, unauthorized) {
     if (refreshed) refreshFailed = false;
     render(); if (active && performance.now() - attempted >= 2000) void poll();
   }
+  fieldButton.addEventListener('click', async () => {
+    if (fieldButton.disabled || fieldRequest) return;
+    const { selected: id, key } = getState(), startContext = context(), request = new AbortController();
+    const current = () => fieldRequest === request && active && !refreshFailed && context() === startContext
+      && getState().key === key && document.visibilityState === 'visible';
+    fieldRequest = request; render(); fieldStatus.textContent = '正在下載場館驗收資料…';
+    const timeout = setTimeout(() => request.abort(), 8000);
+    try {
+      const response = await fetch(`/api/sessions/${id}/field-evidence.zip`, {
+        headers: { Authorization: 'Bearer ' + key }, signal: request.signal, cache: 'no-store'
+      });
+      if (!current()) return;
+      if (response.status === 401) { unauthorized(); return; }
+      if (!response.ok) throw new Error(response.status === 404 || response.status === 409
+        ? '尚缺封存資料、端點公告或完整名冊，請確認後重試。' : '場館驗收資料下載失敗。');
+      if (response.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase() !== 'application/zip')
+        throw new Error('場館驗收資料格式不符。');
+      const blob = await response.blob();
+      if (!current()) return;
+      const url = URL.createObjectURL(blob), link = document.createElement('a');
+      try {
+        link.href = url; link.download = `vr-command-field-v1-${id}.zip`; document.body.append(link); link.click();
+      } finally { link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
+      fieldStatus.textContent = '驗收資料已下載，請與同場的原始日誌一併保管。';
+    } catch (error) {
+      if (current()) fieldStatus.textContent = request.signal.aborted ? '下載逾時，可重新下載。' : error.message;
+    } finally {
+      clearTimeout(timeout);
+      if (fieldRequest === request) { fieldRequest = null; render(); }
+    }
+  });
   setInterval(() => { if (active) update(); }, 500);
   document.addEventListener('visibilitychange', () => { clear(); render(); if (document.visibilityState === 'visible') update(); });
   return { reset, update, invalidate() { clear(); refreshFailed = true; render(); }, active(on) { active = on; clear(); render(); if (on) update(); } };

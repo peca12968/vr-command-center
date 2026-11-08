@@ -138,6 +138,12 @@ app.MapPost("/api/sessions/{id:guid}/commands", (Guid id, ControlCommand command
     worlds.ExecuteCommand(id, command, Actor(context)));
 app.MapGet("/api/sessions/{id:guid}/statistics", (Guid id, SessionManager manager, HttpContext context) =>
     manager.Statistics(id, Actor(context)));
+app.MapGet("/api/sessions/{id:guid}/field-evidence.zip", (Guid id, WorldRecordings worlds, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var evidence = worlds.ReadFieldEvidence(id, Actor(context));
+    return Results.File(evidence.Encode(), "application/zip", $"vr-command-field-v1-{id:D}.zip");
+});
 app.MapGet("/api/sessions/{id:guid}/report.csv", (Guid id, SessionManager manager, HttpContext context) =>
     ExportReport(id, null, manager, context));
 app.MapGet("/api/sessions/{id:guid}/rooms/{roomId:int}/report.csv", (Guid id, int roomId, SessionManager manager, HttpContext context) =>

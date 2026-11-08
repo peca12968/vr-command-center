@@ -16,6 +16,7 @@ def main():
     p.add_argument('--player-package',type=Path,help='Launch five players per room from the API room ZIP, using this extracted player package')
     p.add_argument('--game-address',type=ipaddress.IPv4Address,help='Local private IPv4 for the three-package check')
     p.add_argument('--peer-diagnostics',action='store_true',help='Verify observed UDP peers in Linked and absence in default Independent runs')
+    p.add_argument('--field-evidence',action='store_true',help='Verify the management ZIP with the original Linked player and server logs')
     p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
     p.add_argument('--check-layout-preview',action='store_true',help='Load a saved barricade opening and compare its preview with native world geometry')
     p.add_argument('--check-room-reports',action='store_true',help='Verify scoped Linked CSVs against the full sealed native report')
@@ -26,6 +27,7 @@ def main():
     if os.name!='nt':p.error('Actual Windows processes required')
     if bool(args.player_package)!=bool(args.game_address):p.error('Provide --player-package and --game-address together')
     if args.peer_diagnostics and not args.player_package:p.error('--peer-diagnostics requires the three-package check')
+    if args.field_evidence and not args.peer_diagnostics:p.error('--field-evidence requires --peer-diagnostics')
     if args.check_room_readiness and not args.player_package:p.error('--check-room-readiness requires five players per room')
     if args.check_room_reports and not args.player_package:p.error('--check-room-reports requires the three-package check')
     address='127.0.0.1'
@@ -196,11 +198,29 @@ def main():
                 check(len(peers)==len(acks) and {int(connection) for connection,_ in peers}==set(acks),
                     entry['label']+' exactly one UDP endpoint for every original acknowledged connection')
                 session_path='/api/sessions/'+entry['sessionId']
-                session=request(session_path);endpoint=request(session_path+'/connection-endpoint')
-                save(entry['label']+'-session.json',session);save(entry['label']+'-endpoint.json',endpoint)
+                session_raw,_=request(session_path,raw_response=True)
+                endpoint_raw,_=request(session_path+'/connection-endpoint',raw_response=True)
+                (out/(entry['label']+'-session.json')).write_bytes(session_raw)
+                (out/(entry['label']+'-endpoint.json')).write_bytes(endpoint_raw)
+                session,endpoint=field.read_json(session_raw),field.read_json(endpoint_raw)
+                statistics=field.read_json(field.content(out/(entry['label']+'-statistics.json')))
+                if args.field_evidence:
+                    route=session_path+'/field-evidence.zip'
+                    raw,headers=request(route,raw_response=True)
+                    check(headers.get_content_type()=='application/zip' and headers['Cache-Control']=='no-store'
+                          and f'vr-command-field-v1-{entry["sessionId"]}.zip' in headers['Content-Disposition'],
+                          entry['label']+' management ZIP headers and original session filename')
+                    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                        check(archive.namelist()==['session.json','statistics.json','endpoint.json'] and archive.testzip() is None,
+                              entry['label']+' management ZIP contains exactly three JSON records')
+                        exported=[field.read_json(archive.read(name)) for name in archive.namelist()]
+                    check(exported==[session,statistics,endpoint],entry['label']+' management ZIP matches the original sealed API data')
+                    request(route,role='Room1',expected=403)
+                    check(True,entry['label']+' room controller denied the full Linked evidence ZIP')
+                    (out/(entry['label']+'-field-evidence.zip')).write_bytes(raw)
+                    session,statistics,endpoint=exported
                 ip=ipaddress.IPv4Address(address)
-                result=field.verify('same-host',{ip},read(entry['reportPath']),session,
-                    field.read_json(field.content(out/(entry['label']+'-statistics.json'))),endpoint,server,
+                result=field.verify('same-host',{ip},read(entry['reportPath']),session,statistics,endpoint,server,
                     [(ip,field.content(c['log'])) for c in owners])
                 save(entry['label']+'-field-results.json',result)
                 check(result['serverAcknowledgements']==len(acks),entry['label']+' field report matches same-PC endpoints and sealed player results')

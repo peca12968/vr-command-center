@@ -68,6 +68,11 @@ async function main() {
       await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), result: 'passed', scope: 'focused archive UI, real End retry and room command isolation; no Unity or headset' }, null, 2));
       console.log(`PASS: ${checks} focused closure checks. Screenshots: ${screenshots}`); return;
     }
+    if (process.argv.includes('--field-evidence-only')) {
+      await require('./field-evidence-browser.cjs')({ context, api, tokens, directory, root, base, screenshots, check });
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), result: 'passed', scope: 'sealed field data ZIP using real API, WorldRelay and Chromium' }, null, 2));
+      console.log(`PASS: ${checks} focused field evidence checks. Screenshots: ${screenshots}`); return;
+    }
     if (process.argv.includes('--mission-read-only')) {
       await require('./mission-read-recovery.cjs')({ context, api, tokens, base, screenshots, check });
       await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), playwright: require('playwright/package.json').version, result: 'passed', scope: 'focused mission read recovery only; isolated API and Chromium, no Unity or headset' }, null, 2));
@@ -378,6 +383,7 @@ async function main() {
     await require('./readiness-browser.cjs')({ context, api, tokens, base, mission, screenshots, check });
     await require('./connection-browser.cjs')({ context, api, tokens, base, mission, screenshots, check });
     await require('./closure-browser.cjs')({ context, api, tokens, base, mission, screenshots, check });
+    await require('./field-evidence-browser.cjs')({ context, api, tokens, directory, root, base, screenshots, check });
     await require('./mission-read-recovery.cjs')({ context, api, tokens, base, screenshots, check });
     await page.bringToFront();
     let releaseReplay, requestedReplay;
