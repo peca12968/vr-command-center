@@ -57,12 +57,19 @@ export function mountWorld(getKey, unauthorized) {
     stop(); cameras.bind(null); cameraForm.reset(); info = frame = savedLimit = null; savedFinished = false; mode = '';
     recordingControls(); reviewControls(); $('world-player').hidden = true; message('已切換場次，請開始觀戰或回放。');
   }
+  function canExtendSaved() {
+    return active && mode === 'replay' && info?.header.sessionId === $('world-recording').value
+      && !info.complete && savedFinished && frame?.packet.sequence === savedLimit;
+  }
   function reviewControls() {
     const showing = active && mode === 'replay' && info?.header.sessionId === $('world-recording').value && Boolean(frame);
     const idle = showing && !connected && !connecting && !stepping;
     $('world-review').hidden = !showing;
     $('world-frame-back').disabled = !idle || frame.packet.sequence <= 1;
     $('world-frame-next').disabled = !idle || frame.packet.sequence >= info.acceptedSequence;
+    const extend = $('world-frame-extend');
+    extend.hidden = !canExtendSaved();
+    extend.disabled = extend.hidden || !idle;
   }
   function showEvents(value) {
     const players = new Map(value.statistics.map(player => [player.playerId, player]));
@@ -168,11 +175,39 @@ export function mountWorld(getKey, unauthorized) {
       if (request === epoch) { stepping = false; controller = null; reviewControls(); }
     }
   }
-  async function connect(nextMode, milliseconds = 0, sequence = null) {
+  async function extendSaved() {
+    if (!canExtendSaved() || connecting || connected || stepping) return;
+    const { sessionId: id, streamId, origin } = info.header, previous = savedLimit;
+    controller = new AbortController();
+    const request = ++epoch, signal = AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]);
+    const note = $('world-frame-message');
+    connecting = true; reviewControls(); note.textContent = '正在檢查新保存的快照…';
+    try {
+      const latest = await (await response(`/api/sessions/${id}/world`, signal)).json();
+      if (request !== epoch || !canExtendSaved()) return;
+      const tail = latest.acceptedSequence;
+      if (latest.header?.sessionId !== id || latest.header.streamId !== streamId || latest.header.origin !== origin
+        || !Number.isSafeInteger(tail) || tail < previous || typeof latest.complete !== 'boolean') throw new Error('保存尾端或錄製來源不符。');
+      const selected = $('world-recording').selectedOptions[0];
+      selected.dataset.accepted = String(tail); selected.dataset.complete = String(latest.complete); recordingControls();
+      if (tail > previous) {
+        connect('replay', 0, previous + 1, tail);
+      } else {
+        info = latest; status();
+        note.textContent = latest.complete ? '此錄製已封存，最後一格維持不變。' : '目前沒有新的保存快照。';
+      }
+    } catch (error) {
+      if (request === epoch) note.textContent = '檢查保存尾端失敗，請再試一次。';
+    } finally {
+      if (request === epoch) { connecting = false; controller = null; reviewControls(); }
+    }
+  }
+  async function connect(nextMode, milliseconds = 0, sequence = null, replayLimit = savedLimit) {
     const id = $('world-recording').value; if (!active || !id) return;
     stop(); mode = nextMode; controller = new AbortController(); const request = epoch, signal = controller.signal;
-    if (nextMode === 'live') savedLimit = null;
-    const limit = savedLimit; savedFinished = false;
+    if (nextMode === 'live') { savedLimit = null; savedFinished = false; }
+    const limit = nextMode === 'live' ? null : replayLimit;
+    let hasHeader = false, reachedSavedEnd = false, lastSequence = sequence === null ? null : sequence - 1;
     connecting = true; reviewControls(); $('world-frame-message').textContent = '';
     message(nextMode === 'live' ? '正在連接即時觀戰…' : '正在讀取已保存快照…');
     try {
@@ -195,11 +230,13 @@ export function mountWorld(getKey, unauthorized) {
             const lines = event.split('\n'), type = lines.find(line => line.startsWith('event: '))?.slice(7), raw = lines.find(line => line.startsWith('data: '))?.slice(6);
             if (!raw) continue; const data = JSON.parse(raw);
             if (type === 'header') {
+              if (hasHeader || data.header?.sessionId !== id) throw new Error('回應的錄製場次不同。');
               if (limit !== null) {
                 if (!Number.isSafeInteger(data.acceptedSequence) || data.acceptedSequence < 1 || (limit !== 'latest' && limit !== data.acceptedSequence))
                   throw new Error('已保存片段的尾端不符。');
                 savedLimit = data.acceptedSequence;
               }
+              hasHeader = true; savedFinished = false;
               info = data;
               scene ??= new ReplayScene($('world-canvas'), selectActor, () => { $('world-camera').value = 'free'; });
               const key = JSON.stringify(info.header);
@@ -213,17 +250,25 @@ export function mountWorld(getKey, unauthorized) {
               cameraForm.bind(info.header.sessionId);
               message(`${info.header.origin} · ${info.header.rulesVersion} · ${info.header.assetSet === 'player-fire-v1' ? '軍事掩體／玩家及敵軍射擊效果 v1（依保存射線）' : info.header.assetSet === 'combat-effects-v1' ? '軍事掩體／敵軍射擊閃光及後座 v1（依保存射線）' : info.header.assetSet === 'armed-combatants-v1' ? '軍事掩體／敵軍雙手持槍／換彈 v1（合成姿勢）' : info.header.assetSet === 'weapon-actions-v1' ? '軍事掩體／人形敵軍／換彈動作 v1（合成手套非追蹤）' : info.header.assetSet === 'combatants-v1' ? '軍事掩體／步槍／人形敵軍 v1（命中採粗略包圍盒）' : info.header.assetSet === 'service-rifle-v1' ? '軍事掩體／玩家步槍 v1（命中／碰撞採包圍盒）' : info.header.assetSet === 'field-props-v1' ? '軍事掩體 v1（命中／碰撞採包圍盒）' : '基本幾何素材'} · VR 未校正。${info.header.origin === 'Simulation' ? '此場次使用合成頭手資料，無頭盔連接。' : '頭手來源請見角色資訊。'}${info.header.environmentVersion === 1 ? '環境聲光 v1 依保存的模擬時間重建，非原始音軌。' : '舊錄製沒有聲光效果版本，僅保留原有光霧顯示。'}`);
               status();
-            } else if (type === 'frame') show(data);
+            } else if (type === 'frame') {
+              if (limit !== null) {
+                const current = data.packet.sequence;
+                if (!hasHeader || reachedSavedEnd || !Number.isSafeInteger(current) || current < 1 || current > savedLimit
+                  || (lastSequence !== null && current !== lastSequence + 1)) throw new Error('已保存片段的快照序號不符。');
+                lastSequence = current;
+              }
+              show(data);
+            }
             else if (type === 'status' || type === 'complete') { info = data; status(); }
             else if (type === 'saved-end' && limit !== null) {
-              if (data.acceptedSequence !== savedLimit || frame?.packet.sequence !== savedLimit) throw new Error('已保存片段未完整讀取。');
-              info = data; savedFinished = true;
+              if (!hasHeader || data.acceptedSequence !== savedLimit || lastSequence !== savedLimit) throw new Error('已保存片段未完整讀取。');
+              info = data; reachedSavedEnd = savedFinished = true;
             }
           }
         }
       } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
       if (request === epoch) {
-        if (limit !== null && !savedFinished) throw new Error('尚未讀到已保存片段尾端。');
+        if (limit !== null && !reachedSavedEnd) throw new Error('尚未讀到已保存片段尾端。');
         connected = false; status();
       }
     } catch (error) { if (request === epoch && !signal.aborted) { connected = connecting = false; message('觀戰已中斷：' + error.message + '；可重新連接。', true); status(); } }
@@ -239,6 +284,7 @@ export function mountWorld(getKey, unauthorized) {
   $('world-pause').addEventListener('click', () => { if (mode === 'replay' && connected) { stop(); status(); } else replayFromCurrent(); });
   $('world-frame-back').addEventListener('click', () => step(-1));
   $('world-frame-next').addEventListener('click', () => step(1));
+  $('world-frame-extend').addEventListener('click', extendSaved);
   $('world-timeline').addEventListener('change', () => replayAt(Number($('world-timeline').value)));
   $('world-speed').addEventListener('change', () => { if (mode === 'replay') replayFromCurrent(); });
   $('world-actor').addEventListener('change', () => selectActor($('world-actor').value));

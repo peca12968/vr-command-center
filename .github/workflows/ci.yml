@@ -101,6 +101,7 @@ jobs:
         with:
           node-version: '24'
       - run: node --check tests/browser/check-closure-native.cjs
+      - run: node --check tests/browser/check-saved-replay-native.cjs
       - run: node --check tests/browser/check-external-native.cjs
       - run: npm install --global pnpm@11.25.0
       - run: pnpm --dir tests/browser install --frozen-lockfile

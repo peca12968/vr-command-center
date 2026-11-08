@@ -73,11 +73,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('runtime-root', 'player-exe', 'api-dll', 'before-build', 'after-build'):
         parser.add_argument('--' + name, required=True, type=Path)
+    parser.add_argument('--browser', action='store_true', help='Also observe the real recovery in Chromium')
     args = parser.parse_args()
     args.job_workers, args.visible_room = 2, 0
     fixture.vm.verify_player(args)
     venue = fixture.SealVenue(args, artifact_family='desktop-journal-recovery')
     report = {}
+    browser = browser_log = None
     try:
         venue.start()
         mission = venue.request('/api/missions', {
@@ -145,6 +147,18 @@ def main():
         relay(args.before_build, 'TelemetryRelay', 'old-combat', rejection=True)
         assert venue.request(route) == before_world and venue.state(entry) == before_session
         assert venue.request(session + '/statistics') == before_stats
+        if args.browser:
+            venue.save('browser-review.json', {'base': venue.base, 'sessionId': entry['id'], 'tail': before_world['acceptedSequence']})
+            browser_log = (venue.directory / 'browser.log').open('xb')
+            browser = subprocess.Popen(['node', str(ROOT / 'tests/browser/check-saved-replay-native.cjs'), str(venue.directory)],
+                                       cwd=ROOT, stdout=browser_log, stderr=subprocess.STDOUT)
+
+            def browser_ready():
+                if browser.poll() is not None:
+                    raise RuntimeError('Browser observer exited before reading the original saved tail')
+                return (venue.directory / 'browser-ready').is_file()
+
+            venue.wait(browser_ready, 50, 'browser initial replay')
 
         outcome = relay(args.after_build, 'WorldRelay', 'recovered-world')
         recovered = venue.request(route)
@@ -166,6 +180,10 @@ def main():
         assert relay(args.after_build, 'TelemetryRelay', 'recovered-combat', again=True) == combat
         assert venue.request(route) == recovered and venue.state(entry) == state
         assert all(digest(path) == sha for path, sha in originals.items())
+        if browser:
+            exact = venue.request(route + f'/frames/{tail}')
+            venue.save('browser-relay.json', {'tail': tail, 'damage': exact['statistics'][0]['damageTaken']})
+            assert browser.wait(timeout=50) == 0
 
         venue.command(entry, 'End')
         assert venue.state(entry)['state'] == 'Ended' and venue.request(route) == recovered
@@ -193,6 +211,15 @@ def main():
                   'terminalEvent': 'saved-end', 'gameplayRestarted': False, 'worldSealed': False,
                   'combatSealed': False, 'finalCsvAvailable': False, 'fieldEvidenceAvailable': False, 'playerFinalReceived': False}
     finally:
+        if browser and browser.poll() is None:
+            (venue.directory / 'browser-stop').touch(exist_ok=False)
+            try:
+                browser.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                browser.kill()
+                browser.wait(timeout=5)
+        if browser_log:
+            browser_log.close()
         if venue.proxy:
             venue.proxy.close()
             gate = venue.proxy.snapshot()

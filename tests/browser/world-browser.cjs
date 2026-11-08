@@ -331,6 +331,10 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     });
     await page.locator('#world-pause').click(); await savedResume; await waitSavedEnd();
     check(true, 'Resuming after stepping back preserves the original saved replay boundary');
+    await page.locator('#world-frame-extend').click();
+    await page.waitForFunction(() => document.querySelector('#world-frame-message').textContent === '目前沒有新的保存快照。');
+    check(Number(await canvas.getAttribute('data-sequence')) === interrupted.acceptedSequence
+      && await page.locator('#world-frame-extend').isEnabled(), 'Checking an unchanged saved tail retains the paused frame and permits another check');
     const completeSource = demo('complete-world', 1), result = await completeSource.finished;
     check(result.code === 0, 'Native simulation produces a second complete persisted world: ' + result.error.slice(-300));
     const completed = JSON.parse(result.output);
@@ -357,6 +361,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await page.waitForFunction(() => !document.querySelector('#world-frame-back').disabled);
     check(await next.isDisabled() && Number(await canvas.getAttribute('data-sequence')) === finalFrame,
       'Paused review stays at the final saved frame and disables advancing beyond it');
+    check(!await page.locator('#world-frame-extend').isVisible(), 'The sealed replay does not offer to check for another saved tail');
     let eventFrame;
     for (let sequence = finalFrame - 1; sequence >= 1; sequence--) {
       const saved = await api(`${archiveRoute}/frames/${sequence}`);
