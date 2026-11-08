@@ -20,6 +20,7 @@ namespace VrCommand.Unity
         public string telemetryOrigin = "Simulation";
         public string telemetryDirectory = "";
         public string roomAlignmentSha256 = "";
+        public bool questPassthrough;
         [NonSerialized] internal RoomFloorPlan AlignmentPlan;
 
         public bool IsServer => role == "Server" || role == "Host";
@@ -65,6 +66,8 @@ namespace VrCommand.Unity
                     throw new InvalidOperationException("Room alignment requires a tracked XR client.");
                 config.AlignmentPlan = RoomFloorPlan.Load(Path.GetDirectoryName(path), config.roomAlignmentSha256);
             }
+            if (config.questPassthrough && (Application.platform != RuntimePlatform.Android || config.AlignmentPlan == null))
+                throw new InvalidOperationException("Quest passthrough requires a checked room alignment file on an Android client.");
             return config;
         }
     }

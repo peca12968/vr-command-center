@@ -15,7 +15,9 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.XR.Management;
 using UnityEngine.XR.OpenXR;
+using UnityEngine.XR.OpenXR.Features.CompositionLayers;
 using UnityEngine.XR.OpenXR.Features.Interactions;
+using UnityEngine.XR.OpenXR.Features.Meta;
 using UnityEngine.XR.OpenXR.Features.MetaQuestSupport;
 
 namespace VrCommand.Unity.Editor
@@ -96,8 +98,8 @@ namespace VrCommand.Unity.Editor
         {
             PlayerSettings.companyName = "VR Command";
             PlayerSettings.productName = "VR Command Quest";
-            PlayerSettings.bundleVersion = "0.42.0";
-            PlayerSettings.Android.bundleVersionCode = 54;
+            PlayerSettings.bundleVersion = "0.43.0";
+            PlayerSettings.Android.bundleVersionCode = 55;
             PlayerSettings.insecureHttpOption = InsecureHttpOption.DevelopmentOnly;
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, "com.vrcommand.quest");
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
@@ -131,14 +133,24 @@ namespace VrCommand.Unity.Editor
             if (openXR == null) throw new BuildFailedException("Android OpenXR settings are unavailable.");
             var quest = openXR.GetFeature<MetaQuestFeature>();
             var controllers = openXR.GetFeature<OculusTouchControllerProfile>();
-            if (quest == null || controllers == null) throw new BuildFailedException("Quest OpenXR feature profiles are missing.");
+            var arSession = openXR.GetFeature<ARSessionFeature>();
+            var passthrough = openXR.GetFeature<ARCameraFeature>();
+            var composition = openXR.GetFeature<OpenXRCompositionLayersFeature>();
+            if (quest == null || controllers == null || arSession == null || passthrough == null || composition == null)
+                throw new BuildFailedException("Quest OpenXR feature profiles are missing.");
             quest.enabled = true;
             quest.ForceRemoveInternetPermission = false;
             controllers.enabled = true;
+            arSession.enabled = true;
+            passthrough.enabled = true;
+            composition.enabled = true;
             openXR.renderMode = OpenXRSettings.RenderMode.SinglePassInstanced;
             EditorUtility.SetDirty(openXR);
             EditorUtility.SetDirty(quest);
             EditorUtility.SetDirty(controllers);
+            EditorUtility.SetDirty(arSession);
+            EditorUtility.SetDirty(passthrough);
+            EditorUtility.SetDirty(composition);
             EditorUtility.SetDirty(settings);
             EditorUtility.SetDirty(settings.AssignedSettings);
             EditorUtility.SetDirty(xr);
@@ -283,6 +295,7 @@ namespace VrCommand.Unity.Editor
                 .Concat(Directory.GetFiles(Path.Combine(project,"Assets/VrCommand/Audio"),"*",SearchOption.AllDirectories)
                     .Where(file=>file.EndsWith(".wav",StringComparison.Ordinal)||file.EndsWith(".wav.meta",StringComparison.Ordinal)))
                 .Concat(new[] { Path.Combine(project, "Packages/manifest.json"), Path.Combine(project, "Packages/packages-lock.json"), Path.Combine(project, "Packages/com.unity.transport/UPSTREAM.json"), Path.Combine(project, "ProjectSettings/ProjectVersion.txt") })
+                .Concat(new[] { Path.Combine(project, "Assets/Settings/Mobile_RPAsset.asset"), Path.Combine(project, "Assets/Settings/Mobile_Renderer.asset") })
                 .OrderBy(file => Path.GetRelativePath(project, file).Replace('\\', '/'), StringComparer.Ordinal);
             using (var memory = new MemoryStream())
             using (var writer = new BinaryWriter(memory))

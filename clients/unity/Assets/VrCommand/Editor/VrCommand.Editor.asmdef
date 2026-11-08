@@ -1,7 +1,7 @@
 {
   "name": "VrCommand.Editor",
   "rootNamespace": "VrCommand.Unity.Editor",
-  "references": ["VrCommand.Runtime", "Unity.Netcode.Runtime", "Unity.Networking.Transport", "Unity.XR.Management", "Unity.XR.Management.Editor", "Unity.XR.OpenXR", "Unity.XR.OpenXR.Editor", "Unity.XR.OpenXR.Features.MetaQuestSupport"],
+  "references": ["VrCommand.Runtime", "Unity.Netcode.Runtime", "Unity.Networking.Transport", "Unity.XR.Management", "Unity.XR.Management.Editor", "Unity.XR.OpenXR", "Unity.XR.OpenXR.Editor", "Unity.XR.OpenXR.Features.MetaQuestSupport", "Unity.XR.MetaOpenXR"],
   "includePlatforms": ["Editor"],
   "autoReferenced": true
 }

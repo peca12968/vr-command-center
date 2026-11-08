@@ -56,11 +56,13 @@ namespace VrCommand.Unity
         private InputAction headTracking, leftTracking, rightTracking;
         private InputAction headTracked, leftTracked, rightTracked;
         private bool JointTrackingReady => !tracked || HasTracking(headTracking, headTracked) && HasTracking(leftTracking, leftTracked) && HasTracking(rightTracking, rightTracked);
-        public bool TrackingReady => JointTrackingReady && (floorCalibration == null || floorCalibration.Ready);
+        public bool TrackingReady => JointTrackingReady && (floorCalibration == null || floorCalibration.Ready)
+            && (questPassthrough == null || questPassthrough.Visible);
         internal string AlignmentHint
         {
             get
             {
+                if (questPassthrough != null && !questPassthrough.Visible) return "WAITING FOR QUEST PASSTHROUGH";
                 if (floorCalibration == null || !floorCalibration.Ready) return floorCalibration?.Hint;
                 if (!JointTrackingReady || PoseAccepted.Value) return null;
                 var previous = transform.TransformPoint(Pose.Value.head);
@@ -69,6 +71,7 @@ namespace VrCommand.Unity
             }
         }
         private RoomFloorCalibration floorCalibration;
+        private QuestPassthroughView questPassthrough;
         private XRInputSubsystem floorInput;
         private InputAction captureFloorMarker;
         private float nextFloorSearch;
@@ -136,6 +139,8 @@ namespace VrCommand.Unity
                     trackingSpace.localPosition = Vector3.zero;
                     floorCalibration = new RoomFloorCalibration(plan, transform.position, trackingSpace);
                     captureFloorMarker = Action("Capture Floor Marker", "<XRController>{LeftHand}/triggerPressed");
+                    if (plan.MatchesSpawn(transform.position) && VenueBootstrap.Instance.QuestPassthrough)
+                        questPassthrough = QuestPassthroughView.Attach(localCamera);
                 }
                 var driver = head.gameObject.AddComponent<TrackedPoseDriver>();
                 driver.positionInput = new InputActionProperty(new InputAction("Head Position", InputActionType.Value, "<XRHMD>/centerEyePosition"));
@@ -217,6 +222,13 @@ namespace VrCommand.Unity
                 }
                 desktopBriefNext = desktopBriefClose = desktopBriefLicense = false;
                 var jointsTracked = JointTrackingReady;
+                if (questPassthrough != null && !questPassthrough.UpdateAvailability())
+                {
+                    floorCalibration.Invalidate();
+                    releaseAfterAlignment = true;
+                    NativePoseTrace.OwnerUnavailable("QuestPassthroughUnavailable", OwnerClientId);
+                    return;
+                }
                 if (floorCalibration != null && !UpdateFloorCalibration(mission, jointsTracked))
                 { releaseAfterAlignment = true; NativePoseTrace.OwnerUnavailable("FloorAlignmentUnavailable", OwnerClientId); return; }
                 if (!jointsTracked) {NativePoseTrace.OwnerUnavailable("TrackingUnavailable",OwnerClientId);return;}
@@ -409,7 +421,7 @@ namespace VrCommand.Unity
             ResetDesktopStance();
             if (paused) floorCalibration?.Invalidate();
         }
-        private void OnDisable() { ResetDesktopStance(); floorCalibration?.Invalidate(); }
+        private void OnDisable() { ResetDesktopStance(); floorCalibration?.Invalidate(); questPassthrough?.Stop(); }
         private static bool Pressed(ButtonControl button) => button.isPressed || button.wasPressedThisFrame;
         private static float Turn(ButtonControl button) => button.wasPressedThisFrame ? 3 : button.isPressed ? 60 * Time.unscaledDeltaTime : 0;
         private void MoveDesktop(Vector2 movement, float seconds)
@@ -486,6 +498,12 @@ namespace VrCommand.Unity
 
         public override void OnNetworkDespawn()
         {
+            if (questPassthrough != null)
+            {
+                questPassthrough.enabled = false;
+                Destroy(questPassthrough);
+                questPassthrough = null;
+            }
             if (floorInput != null) floorInput.trackingOriginUpdated -= FloorOriginChanged;
             floorInput = null; floorCalibration = null;
             captureFloorMarker?.Dispose(); captureFloorMarker = null;

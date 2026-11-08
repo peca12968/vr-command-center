@@ -49,7 +49,8 @@ namespace VrCommand.Unity
                 sun.transform.rotation = Quaternion.Euler(night ? 30 : 48, night ? 145 : -35, 0);
             }
             var camera = Camera.main;
-            if (camera != null) { camera.clearFlags = CameraClearFlags.SolidColor; camera.backgroundColor = sky; }
+            if (camera != null)
+                QuestPassthroughSurface.ApplySky(camera, sky, camera.TryGetComponent<QuestPassthroughView>(out var view) && view.Visible);
             var count = 0; var perRoom = style.Rain > .75f ? 128 : style.Rain > 0 ? 64 : 0;
             for (var room = 1; room <= 5; room++)
             {

@@ -20,6 +20,7 @@ namespace VrCommand.Unity
         private readonly Dictionary<ulong, TicketApproval> admitted = new Dictionary<ulong, TicketApproval>();
         private LaunchConfiguration configuration;
         internal RoomFloorPlan AlignmentPlan => configuration?.AlignmentPlan;
+        internal bool QuestPassthrough => configuration?.questPassthrough == true;
         private string status = "WAITING FOR CONTROL DESK";
         private bool managementReady;
         private float nextReconnect;

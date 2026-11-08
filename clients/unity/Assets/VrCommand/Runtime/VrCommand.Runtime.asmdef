@@ -1,6 +1,6 @@
 {
   "name": "VrCommand.Runtime",
   "rootNamespace": "VrCommand.Unity",
-  "references": ["Unity.Netcode.Runtime", "Unity.Networking.Transport", "Unity.InputSystem", "Unity.Collections", "UnityEngine.UI", "VrCommand.Simulation"],
+  "references": ["Unity.Netcode.Runtime", "Unity.Networking.Transport", "Unity.InputSystem", "Unity.Collections", "UnityEngine.UI", "VrCommand.Simulation", "Unity.XR.ARFoundation", "Unity.XR.ARSubsystems", "Unity.XR.CompositionLayers", "Unity.XR.Management", "Unity.XR.MetaOpenXR", "Unity.XR.OpenXR"],
   "autoReferenced": true
 }
