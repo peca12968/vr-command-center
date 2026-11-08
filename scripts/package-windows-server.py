@@ -6,16 +6,16 @@ ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('server_player_package',ROOT/'scripts/package-windows-player.py');player=importlib.util.module_from_spec(spec);spec.loader.exec_module(player)
 digest=player.digest;plain=player.plain
 TOP='VRCommand-GameServer'
-README='''VR Command Windows 遊戲伺服器啟動器 1.3／Windows 遊戲程式
+README='''VR Command Windows 遊戲伺服器啟動器 1.4／Windows 遊戲程式
 
-完整解壓後開啟Launch-Server.exe。先啟動獨立的管理服務，在網頁控制台建立Preparing VR場次。
+完整解壓後開啟 Launch-Server.exe。先啟動配套的管理服務，在網頁控制台建立 Preparing VR 或 MR 場次。
 按「選擇檔案」選control-instance.json，或在路徑欄直接貼上完整檔案路徑，再按「載入／更新」。只使用既有GameServer角色金鑰。
 清單顯示房間、獨立／五房模式及任務名稱；明確選取後可核對完整場次與任務版本ID，再填IPv4與UDP埠、按啟動。預設127.0.0.1只供同機。
 更新只保留同一路徑／實例／API／GameServer金鑰中仍可啟動的原選取；消失或載入失敗不改選其他房間。路徑編輯後必須重新載入。
 獨立房間各開一個啟動器、各選場次與不同UDP埠；五房Linked場次只開一個。
-有新場次時按載入／更新。已綁定來源／Running／MR場次不由此工具接管；啟動前仍重新向原API核對，不拿清單當保留或就緒。
+有新場次時按載入／更新。清單只列尚未綁定來源的 Preparing 場次。啟動前會向原管理服務重新核對場次與來源。
 啟動器在公告前會核對 Windows 的 UDP 綁定，確認本次遊戲程序已綁定所設定的本機位址與埠。就緒檔的 udpBinding 是啟動時的觀察，遠端能否加入仍需實測。
-伺服器就緒後，從控制台下載各玩家自己的連線檔，交給玩家包；再由控制台開始任務。
+伺服器就緒後，從控制台下載各玩家自己的連線檔。VR 使用玩家包或頭盔部署流程。MR 使用 Quest 3 校正及 MR 部署流程，等全名冊追蹤就緒再從控制台開始。
 操作員由控制台End後，等戰鬥與世界雙封存，再保留36秒供玩家戰績傳送，啟動器才終止自己的Unity程序。
 「中止」會保留本次journal但不算正常完成；不自動End、不重新開舊戰場、不修復或重送舊journal。
 此停止方式為封存後的OS程序終止，不宣稱Unity正常退出／本地最後回條落盤或玩家全部收到戰績。
@@ -34,7 +34,7 @@ seconds為60..86400，期限結束仍未完成封存與36秒保留則失敗；�
 
 本機記錄：%LOCALAPPDATA%/VrCommand/GameServers（含私人金鑰）與GameServerReports。
 Windows x64與.NET Framework4.8；操作人員不需Python、Unity Editor或.NET SDK。
-使用隨包Unity Windows遊戲程式、原規則與Simulation來源；來源識別見Runtime/build-receipt.json。沒有在本包新增頭盔、MR或廠商硬體整合。
+VR 使用 Simulation 來源，MR 使用 GameServer 來源。遊戲建置來源見 Runtime/build-receipt.json。頭盔、實體場地和廠商硬體須另行驗收。
 未修改防火牆、未提供NAT/中繼；跨機網路與25位同時操作須另外驗收。
 server-package.json是SHA256完整性清單，不是數位簽章。Runtime/build-receipt.json保留原實際Unity建置紀錄。
 Notices保留玩家包相同的素材／Transport授權。Microsoft Job文件：https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects

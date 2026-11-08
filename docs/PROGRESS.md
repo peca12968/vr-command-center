@@ -1,5 +1,17 @@
 # 開發進度
 
+## 2026-11-09 場中敵軍增援
+
+控制台 0.31.13 在管理服務寫入前檢查場地的敵軍上限。暫時沒有安全空位時，遊戲伺服器保留待補名額，場次與其他控制指令繼續運行。觀戰及回放顯示快照內的實際敵軍與存活數。 [操作與錄製規則](LAYOUT.md#場中敵軍增援)
+
+- 舊核心實際接受上限 84 的場地設為 85 名，新增斷言在第 462 項後失敗，原日誌保留。功能來源 `ae6135b05941546e791f949e551e6f615a0c1c3e` 通過 825 項核心、603 項 HTTP、58 項世界串流和 258 項 Unity Editor 檢查。實際巡邏占住三個候選點時，新增 Editor 案例驗證缺額、原敵軍身分、雷雨、暫停、恢復後補入，以及減量後結束。錄製案例驗證舊版精確總數、新版準備幀精確總數，以及進行中按各房目標核對。
+- 最終 92 項 Node 與 344 項 Chromium 通過。實際控制台把 85 名保留在表單並顯示 84 名上限，修正後可從同一表單提交。首輪使用相對證據路徑未開始 Chromium，第二輪舊文字斷言逾時，兩輪原件保留。管理包 `artifacts/control-packages/control-server-api0.31.0-ui0.31.13-win-x64.zip` 為 52,527,269 bytes，SHA-256 `f8bcf3400e521e43c2cf56c719ecc6e7a09ba5a6a0d734e5cb29daa5748dd3cb`，解壓核對 507 筆，`run-54b898f1ab804945a38d972a19ecfe05` 通過 106 項檢查。
+- Windows 玩家包 `artifacts/player-packages/windows-player-0.45.0.zip` 為 83,437,249 bytes，SHA-256 `eb67ce40ec09196efa8a1bf83b9d5b4d84eb958b36862561cf54744f30924170`，實際啟動器通過 19 項檢查。伺服器包 `artifacts/server-packages/windows-server-0.45.0-launcher1.4-win-x64.zip` 為 83,460,502 bytes，SHA-256 `62a19a434465d6802369801a6cc6292f6b6be31b322821fb85d77f8fecf0881e`。兩包均解壓核對 328 筆。伺服器內附說明已更新至啟動器 1.4 與 VR／MR 部署。
+- 實際 Windows 伺服器 `run-d3907229d7ff4c068542611c07f2a1ab` 通過 147 項，包含五房獨立、全館連線、MR 準備與增援。八場共 670 幀完整回放、11 份原玩家戰績與 10 份 CSV。增援場拒絕 85 名設定後，44 幀回放保存補到 84 名及減至 1 名並暫停的原快照，保留原敵軍識別。該場完成雙封存，遊戲伺服器確認一筆原玩家戰績。清理後伺服器 C／F 的 92 份檔案及管理包的 27 份檔案相符。
+- Unity 6000.3.27f1 同源建置 Windows 與 Quest 0.45.0，來源指紋 `5fcc0b34cc747cab4b24fccae00dfe08f0c9110f6bfe77cbb88f7d3a370351e8`，場景與玩家 Prefab 網路識別沿用 0.44.0。APK `artifacts/quest/VrCommand.apk` 為 60,954,218 bytes，SHA-256 `d01af1575643b7e414b60000bf1cf0c4d8ae1484913d150b98b41c0e12f1a0c5`，已核對 ARM64／IL2CPP、版本碼 57、min SDK 32、target SDK 35、透視功能及 v2 Debug 簽章。首輪 Windows 快取存取失敗日誌保留，重跑成功。上一版 338 份檔案已逐一核對並封存。
+- GitHub Actions 因帳務條件未啟動，工作共 0 個執行步驟。 [功能工作](https://github.com/peca12968/vr-command-center/actions/runs/42508501461/job/128816255866)
+- Quest 3 實機、VIVE、跨機 25 位真人和廠商硬體仍待驗。
+
 ## 2026-11-09 主控建立 MR 場次
 
 控制台 0.31.12 可從已保存的 MR 任務建立單房或五房全連線場次。虛擬配置沿用共用場地規則，Windows 伺服器啟動器 1.4 提供 MR 選項。遊戲伺服器核對 Quest 3 名冊、票券及入場校正房間。開始命令要求最新 GameServer 錄製幀對上場次管理序號與全名冊的有效追蹤姿態。場次模式固定，主控仍可調整天氣、時段和雷電。 [部署與開場](QUEST3.md#主控建立-mr-場次)
