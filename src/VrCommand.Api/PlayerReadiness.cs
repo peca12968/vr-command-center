@@ -7,7 +7,7 @@ namespace VrCommand.Api;
 public record PlayerReadiness(Guid PlayerId, Guid AdmissionId, int RoomId, int Seat, string State, string RigKind, bool CanParticipate);
 public record SessionReadiness(int Version, Guid SessionId, long SessionSequence, DateTimeOffset SampledAtUtc,
     string SourceState, string? Origin, long WorldSequence, long ObservedSequence, DateTimeOffset? CapturedAtUtc,
-    double? SourceAgeMilliseconds, PlayerReadiness[] Players);
+    double? SourceAgeMilliseconds, PlayerReadiness[] Players, string? MrStartState);
 public record RoomReadiness(int RoomId, Guid? SessionId, long SessionSequence, int Registered, int SimulatedReady,
     int TrackedReady, string SourceState, double? SourceAgeMilliseconds);
 
@@ -24,10 +24,7 @@ public sealed partial class WorldRecordings
                 return manager.Execute(id, command, actor);
 
             var report = Readiness(id, actor);
-            var ready = report.SourceState == "Fresh" && report.Origin == "GameServer"
-                && report.ObservedSequence == current.Sequence && report.SessionSequence == current.Sequence
-                && report.Players.Length > 0 && report.Players.All(player => player.CanParticipate && player.RigKind == "Tracked")
-                && Info(id, actor).Header.calibration == WorldRecordingHeader.QuestMixedRealityProfile;
+            var ready = report.SessionSequence == current.Sequence && report.MrStartState == "Ready";
             return manager.Execute(id, command, actor, ready ? current.Sequence : null);
         }
     }
@@ -88,8 +85,15 @@ public sealed partial class WorldRecordings
                     : !body.connected || kind is not ("Simulated" or "Tracked") ? "PoseUnavailable" : "Participating";
                 return new PlayerReadiness(player.Id, player.AdmissionId, player.RoomId, player.Seat, state, kind, state == "Participating");
             }).ToArray();
+            var observedSequence = frame?.Packet.observedSequence ?? 0;
+            var mrStart = current.Environment.Mode != ExperienceMode.MR || current.State != SessionState.Preparing ? null
+                : players.Length == 0 ? "EmptyRoster"
+                : source != "Fresh" ? "WaitingSource"
+                : info?.Header is not { origin: "GameServer", calibration: WorldRecordingHeader.QuestMixedRealityProfile } ? "WaitingProfile"
+                : observedSequence != current.Sequence ? "WaitingRevision"
+                : players.All(player => player.CanParticipate && player.RigKind == "Tracked") ? "Ready" : "WaitingPlayers";
             return new(1, id, current.Sequence, now, source, info?.Header.origin, info?.AcceptedSequence ?? 0,
-                frame?.Packet.observedSequence ?? 0, info?.CapturedAtUtc, age, players);
+                observedSequence, info?.CapturedAtUtc, age, players, mrStart);
         }
     }
 }

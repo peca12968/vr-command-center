@@ -187,7 +187,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connect
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connections\<場次ID>\player-1.json -AlignmentFile .\room-1-alignment.json -MixedReality
 ```
 
-玩家在準備中完成 A、B、C 三點量測，再回到頭盔提示的起點。主控可在名冊確認每位玩家的追蹤姿態。遊戲伺服器會核對票券房間和所選校正房間。全名冊的有效追蹤快照對上目前場次序號後，即可按開始。場中可調整天氣、時段及閃電。 [參戰快照](PLAYER_READINESS.md#mr-開場條件)
+玩家在準備中完成 A、B、C 三點量測，再回到頭盔提示的起點。主控可在「MR 開場檢查」查看各房就緒人數與等候席位。遊戲伺服器會核對票券房間和所選校正房間。全名冊的有效追蹤快照對上目前場次序號後，即可按開始。場中可調整天氣、時段及閃電。 [參戰快照](PLAYER_READINESS.md#mr-開場條件)
 
 ## 連線與仍待實作事項
 

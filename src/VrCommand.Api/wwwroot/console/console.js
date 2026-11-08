@@ -71,7 +71,7 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
       if (response.status === 401) { logout(); message = '憑證無效或已更換，請重新登入。'; }
       if (response.status === 403) message = '目前身分沒有此操作權限。';
       if (response.status === 409) {
-        if (code === 'mr-readiness-required') message = 'MR 場次尚未就緒。請確認全名冊的 Quest 3 玩家都已完成場地對位，並在名冊顯示有效追蹤姿態後再開始。';
+        if (code === 'mr-readiness-required') message = 'MR 場次尚未就緒。請查看「MR 開場檢查」，並確認等候中的 Quest 3 玩家已完成場地對位。';
         else message = path.startsWith('/missions') ? '任務版本已變更或原請求內容不一致；草稿仍保留，可載入最新版或另存新任務。' : '場次狀態或名額已變更，請重新整理並確認後再操作。';
       }
       if (layout) message = '場地配置未通過檢查，請修正並保存新版本後再開場。';
@@ -199,7 +199,8 @@ async function refreshData(epoch) {
 function renderRooms() {
   $('rooms').replaceChildren(...state.rooms.map(room => {
     const card = element('article', undefined, 'room-card'), session = state.sessions.find(s => s.id === room.sessionId);
-    card.append(element('p', `ROOM 0${room.id}`, 'eyebrow'), element('h3', `房間 ${room.id}`), element('div', `${room.playerCount} / ${room.capacity}`, 'occupancy'), element('p', session ? `${phases[session.state]} · ${session.mission.definition.name}` : room.sessionId ? '場次使用中' : '房間空閒', 'room-mission'));
+    const mode = session?.environment.mode === 'MR' ? 'MR · ' : '';
+    card.append(element('p', `ROOM 0${room.id}`, 'eyebrow'), element('h3', `房間 ${room.id}`), element('div', `${room.playerCount} / ${room.capacity}`, 'occupancy'), element('p', session ? `${phases[session.state]} · ${mode}${session.mission.definition.name}` : room.sessionId ? '場次使用中' : '房間空閒', 'room-mission'));
     if (room.sessionId) {
       const status = element('p', '正在更新入場狀態', 'hint room-readiness');
       status.dataset.roomReadiness = room.id;
@@ -282,7 +283,6 @@ function applyPermissions() {
   const mixedReality = session?.environment.mode === 'MR';
   $('player-headset').querySelector('option[value="ViveXr"]').disabled = mixedReality;
   if (mixedReality) $('player-headset').value = 'Quest3';
-  $('mr-start-requirement').hidden = !mixedReality || session?.state !== 'Preparing';
   $('ticket-fields').disabled = locked || ended || !session;
   $('download-room-tickets').disabled = locked || ended || !session || !$('ticket-room').value;
   connections.update();

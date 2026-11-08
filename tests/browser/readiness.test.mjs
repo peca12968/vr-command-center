@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 const code = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/readiness-ui.js', import.meta.url), 'utf8');
-const { readinessView, roomReadinessView } = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
+const { readinessView, roomReadinessView, mrStartView } = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
 const player = { id: 'player', admissionId: 'first', roomId: 1, seat: 0 };
 const session = { id: 'session', sequence: 10, state: 'Preparing', players: [player] };
 const report = { version: 1, sessionId: 'session', sessionSequence: 10, sourceState: 'Fresh', sourceAgeMilliseconds: 10, origin: 'Simulation',
@@ -50,4 +50,37 @@ test('Room readiness expires from request start and never renders invalid totals
     assert.equal(roomReadinessView({ ...overview, rooms: [{ ...roomRow, ...changes }] }, room, session, 0).source, 'Unavailable');
   for (const sourceState of ['Suspended', 'PhasePending', 'NoRecording', 'ClockSkew'])
     assert.equal(roomReadinessView({ ...overview, rooms: [{ ...roomRow, sourceState }] }, room, session, 0).ready, undefined);
+});
+
+const mr = { ...session, roomIds: [1, 2], environment: { mode: 'MR' },
+  players: [player, { id: 'peer', admissionId: 'second', roomId: 2, seat: 3 }] };
+const master = { role: 'Master' }, room1 = { role: 'RoomController', roomId: 1 };
+const oneTracked = { ...report.players[0], rigKind: 'Tracked' };
+const peer = { playerId: 'peer', admissionId: 'second', roomId: 2, seat: 3, state: 'PoseUnavailable', rigKind: 'None', canParticipate: false };
+const mrReport = { ...report, observedSequence: 10, origin: 'GameServer', mrStartState: 'WaitingPlayers',
+  players: [oneTracked, peer] };
+test('MR start shows the exact waiting seat and scopes the detailed list to the room controller', () => {
+  const view = mrStartView(mrReport, mr, 0, master);
+  assert.equal(view.state, 'WaitingPlayers');
+  assert.deepEqual(view.rooms, [{ room: 1, text: '房間 1 · 1 / 1 追蹤就緒' },
+    { room: 2, text: '房間 2 · 0 / 1 追蹤就緒 · 等候席位 4' }]);
+  assert.deepEqual(mrStartView(mrReport, mr, 0, room1).rooms, view.rooms.slice(0, 1));
+  assert.equal(mrStartView(mrReport, { ...mr, players: [] }, 0, master).state, 'EmptyRoster');
+  assert.equal(mrStartView(mrReport, { ...mr, state: 'Running' }, 0, master), null);
+  assert.equal(mrStartView(mrReport, { ...mr, environment: { mode: 'VR' } }, 0, master), null);
+});
+
+test('MR ready requires a fresh current revision and every original admission to be tracked', () => {
+  const complete = { ...mrReport, mrStartState: 'Ready', players: [oneTracked,
+    { ...peer, state: 'Participating', rigKind: 'Tracked', canParticipate: true }] };
+  assert.equal(mrStartView(complete, mr, 1490, master).state, 'Ready');
+  assert.equal(mrStartView(complete, mr, 1490.1, master).state, 'WaitingSource');
+  for (const invalid of [{ sessionSequence: 11 }, { observedSequence: 9 }, { origin: 'Simulation' },
+    { players: [oneTracked, { ...complete.players[1], admissionId: 'other' }] }, { players: [oneTracked, oneTracked] },
+    { players: [{ ...oneTracked, rigKind: 'Simulated' }, complete.players[1]] }]) {
+    const blocked = mrStartView({ ...complete, ...invalid }, mr, 0, master);
+    assert.equal(blocked.state, 'Updating');
+    assert.deepEqual(blocked.rooms, []);
+  }
+  assert.equal(mrStartView({ ...complete, mrStartState: 'WaitingRevision', observedSequence: 9 }, mr, 0, master).state, 'WaitingRevision');
 });

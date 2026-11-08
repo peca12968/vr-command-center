@@ -111,6 +111,7 @@ internal static class ReadinessChecks
             throw new Exception(message);
         }
         var begin = new ControlCommand(Guid.NewGuid(), ControlAction.Begin);
+        check(store.Readiness(id, master).MrStartState == "EmptyRoster", "MR start diagnostics identify an empty roster");
         Reject<MixedRealityNotReadyException>(() => store.ExecuteCommand(id, begin, master), "MR cannot begin before a server and live roster exist");
         Reject<InvalidOperationException>(() => manager.Join(id, Guid.NewGuid(), "VIVE", 1, HeadsetKind.ViveXr, master), "Current MR roster requires Quest 3 support");
         Reject<InvalidOperationException>(() => manager.OpenStream(id, new(Guid.NewGuid(), CombatOrigin.Simulation), server), "MR cannot be bound to a simulation source");
@@ -120,6 +121,8 @@ internal static class ReadinessChecks
         var alpha = Guid.NewGuid(); var bravo = Guid.NewGuid();
         manager.Join(id, alpha, "Alpha", 1, HeadsetKind.Quest3, master);
         manager.Join(id, bravo, "Bravo", 5, HeadsetKind.Quest3, master);
+        check(store.Readiness(id, master) is { MrStartState: "WaitingSource", SourceState: "NoRecording" },
+            "A populated MR roster waits for its world source");
         var stream = Guid.NewGuid(); manager.OpenStream(id, new(stream, CombatOrigin.GameServer), server);
         var bridge = new ArenaSession();
         void Refresh() => bridge.Apply(JsonSerializer.Deserialize<ManagementSnapshot>(JsonSerializer.Serialize(manager.Get(id), JsonFormat.Options),
@@ -147,19 +150,26 @@ internal static class ReadinessChecks
         Track(1, alpha, 1, .05);
         Reject<InvalidOperationException>(() => store.Append(id, Frame(2, "Simulated"), server), "MR recording rejects connected simulated bodies");
         store.Append(id, Frame(2), server);
+        check(store.Readiness(id, master) is { MrStartState: "WaitingPlayers" } partial
+            && partial.Players.Single(p => !p.CanParticipate).PlayerId == bravo,
+            "MR start diagnostics identify the same missing player as the Begin gate");
         Reject<InvalidOperationException>(() => store.ExecuteCommand(id, begin, master), "One room's tracked pose cannot stand in for the other roster player");
         Track(2, bravo, 5, .1);
         store.Append(id, Frame(3), server);
         clock.Now = start.AddMilliseconds(1601);
+        check(store.Readiness(id, master) is { MrStartState: "WaitingSource", SourceState: "Stale" }, "MR diagnostics expire at the Begin source-age gate");
         Reject<InvalidOperationException>(() => store.ExecuteCommand(id, begin, master), "Stale tracked snapshots cannot open MR");
         clock.Now = start.AddMilliseconds(100);
         manager.Execute(id, new(Guid.NewGuid(), ControlAction.SetEnvironment,
             environment with { Weather = Weather.Storm, Lightning = true }), master);
+        check(store.Readiness(id, master).MrStartState == "WaitingRevision", "Fresh MR bodies still wait for the exact management revision");
         Reject<InvalidOperationException>(() => store.ExecuteCommand(id, begin, master), "A snapshot must observe the latest MR management revision");
         Refresh(); store.Append(id, Frame(4), server);
+        check(store.Readiness(id, master).MrStartState == "Ready", "Only the exact ready MR roster satisfies the shared diagnostic and Begin gate");
         Reject<AccessDeniedException>(() => store.ExecuteCommand(id, begin, new("room1", OperatorRole.RoomController, 1)),
             "Linked MR start remains under master control");
         var accepted = store.ExecuteCommand(id, begin, master);
+        check(store.Readiness(id, master).MrStartState is null, "The MR start diagnostic applies only while preparing");
         check(accepted.Session.State == SessionState.Running && accepted.Session.Environment is { Mode: ExperienceMode.MR, Weather: Weather.Storm, Lightning: true },
             "Fresh tracked poses for both admitted rooms open the MR mission with the current environment");
         clock.Now = start.AddSeconds(5);

@@ -78,6 +78,12 @@ async function main() {
       await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), playwright: require('playwright/package.json').version, result: 'passed', scope: 'focused mission read recovery only; isolated API and Chromium, no Unity or headset' }, null, 2));
       console.log(`PASS: ${checks} focused mission-read checks. Screenshots: ${screenshots}`); return;
     }
+    if (process.argv.includes('--mr-start-only')) {
+      await require('./mr-start-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
+      check(browserErrors.length === 0, 'MR start check has no uncaught browser or policy errors');
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), result: 'passed', scope: 'MR start with a real API and synthetic tracked world publisher' }, null, 2));
+      console.log(`PASS: ${checks} focused MR start checks. Screenshots: ${screenshots}`); return;
+    }
     await page.goto(base + '/console/');
     await page.locator('#login-key').fill('wrong-key'); await page.locator('#login-form button').click();
     await page.locator('#notice.error').waitFor();
@@ -402,6 +408,7 @@ async function main() {
     check(await page.locator('#login-panel').isVisible() && await page.locator('#workspace').isHidden(), 'Logout clears access to the console workspace');
     await page.reload();
     check(await page.locator('#login-panel').isVisible(), 'Reload requires authentication again');
+    await require('./mr-start-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
     check(browserErrors.length === 0, 'Browser has no uncaught script errors or CSP violations');
     await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), playwright: require('playwright/package.json').version, result: 'passed', scope: 'isolated real API and browser console; no Unity or headset test' }, null, 2));
     console.log(`PASS: ${checks} real-browser checks. Screenshots: ${screenshots}`);

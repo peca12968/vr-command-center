@@ -52,7 +52,12 @@
         <section id="session-panel" class="panel" hidden>
           <div class="section-heading"><div><p id="session-meta" class="eyebrow"></p><h2 id="session-name"></h2></div><span id="session-phase" class="badge"></span></div>
           <p id="session-briefing" class="briefing"></p>
-          <p id="mr-start-requirement" class="hint" hidden>MR 場次須讓名冊上的所有 Quest 3 玩家完成三點對位並送出有效追蹤姿態，才能開始。</p>
+          <section id="mr-start-requirement" class="mr-start-check" aria-labelledby="mr-start-title" hidden>
+            <h3 id="mr-start-title">MR 開場檢查</h3>
+            <p id="mr-start-status" class="hint" role="status" aria-live="polite"></p>
+            <ul id="mr-start-rooms" class="hint"></ul>
+            <p class="hint">請讓名冊上的 Quest 3 玩家完成三點對位。按開始時，伺服器會再核對當時的快照。</p>
+          </section>
           <div id="session-controls" class="button-row"><button data-command="Begin">開始任務</button><button data-command="Pause" class="secondary">暫停</button><button data-command="Resume" class="secondary">繼續</button><button data-command="End" class="danger">結束場次</button></div>
           <section id="closure-status" class="closure-status" aria-label="任務資料封存狀態"><h3>任務收尾</h3><div class="button-row"><span id="closure-combat">戰鬥統計：未確認</span><span id="closure-world">世界回放：未確認</span></div><p id="closure-retained" class="hint" hidden></p><p id="closure-summary" class="hint" role="status" aria-live="polite">選取場次後可確認資料封存狀態。</p>
             <div id="field-evidence" hidden><button id="download-field-evidence" type="button" class="secondary" disabled>下載場館驗收資料 ZIP</button><p class="hint">包含本場名冊、統計與公布端點，請私下保管。另備原始伺服器與玩家日誌供核對。</p><p id="field-evidence-status" class="hint" role="status" aria-live="polite"></p></div>
@@ -159,7 +164,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.19 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.20 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>
