@@ -47,7 +47,7 @@ python scripts/check-server-package.py <VRCommand-GameServer> `
   --player-package <VRCommand-Player> --game-address 192.168.1.100
 ```
 
-搭配控制台 0.31.8 時，可在三包整合命令加上 `--check-room-reports`。測試會對照同一個五房連線場次的封存全場 CSV，逐房驗證每列戰績、房號、場次與封存序號，並確認房控指定別房時收到 403。 [分房匯出](REPORTS.md#五房分房匯出)
+搭配控制台 0.31.18，可加上 `--check-room-reports`。測試會對照同一個五房連線場次的封存全場 CSV、五份分房 CSV 和戰績 ZIP，並確認房控指定別房時收到 403。再加 `--check-room-combat` 可讓兩種模式的每位原玩家都實際收到敵軍傷害，核對敵軍射線、同房傷害事件、逐格統計與最終戰績。 [分房匯出](REPORTS.md#五房分房匯出)
 
 搭配控制台 0.31.10，可加上 `--check-interrupted-replay`。測試在另一個獨立場次錄到敵軍實際傷害後終止該次啟動器，核對原遊戲程序退出，再檢查保存片段的尾端、戰績及未封存狀態。 [中斷場次回放](WORLD_RECORDING.md#回放未封存的已保存片段)
 

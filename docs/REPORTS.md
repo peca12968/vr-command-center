@@ -18,6 +18,10 @@ API／控制台 **0.27.0** 新增 `GET /api/sessions/{id}/report.csv`。在「�
 
 端點為 `GET /api/sessions/{id}/reports.zip`，檔名為 `vr-command-reports-v1-{sessionId}.zip`，使用 `application/zip` 與 `Cache-Control: no-store`。服務先擷取一份最終報表，再產出全場及分房檔案。六份 CSV 的內容與逐一下載相同，包含空房與已離場玩家的既有表示。已結束且沒有戰鬥串流的歷史場次沿用原報表條件。此下載使用戰鬥封存條件，場館驗收 ZIP 則另行核對世界封存、端點與名冊。
 
+三包驗證可加上 `--check-room-reports --check-room-combat`。先在五個獨立房間、再在五房連線，以五名原生模擬玩家及五名敵軍配置每房。所有玩家連線及原 Begin 生效後，使用正常管理命令開啟攻擊。等每位原玩家受傷後關閉攻擊，確認遊戲來源已套用，再執行 End。
+
+驗證會比對每筆原生敵軍射線、同房受傷事件、逐格統計和最終戰鬥封存序號。最後再核對個人戰績、伺服器確認及匯出 CSV。此模式檢查敵軍造成的耗損與中彈，玩家保持原生桌面合成姿態且未操作武器。
+
 ## 最終性與權限
 
 SessionManager 在同一把鎖內檢查身分／房間、Ended 與戰鬥封存，再擷取場次及 ledger。已綁 combat stream 必須接受精確 seal，只有 End 不足以匯出；尾端補送完成但尚未 seal 仍回 409。未綁 stream 的歷史場次 End 後不能接受新戰鬥，故可匯出。報表不新增事件、不更動歷史，也不寫入伺服器的匯出檔案。

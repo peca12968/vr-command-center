@@ -11,6 +11,45 @@ field=module('server_field_results','verify-field-results.py')
 def read(p):return json.loads(p.read_text(encoding='utf-8'))
 def free(kind=socket.SOCK_STREAM,address='127.0.0.1'):
     with socket.socket(socket.AF_INET,kind) as s:s.bind((address,0));return s.getsockname()[1]
+
+def reconcile_ai_damage(frames, owners, enabled_sequence, disabled_sequence):
+    totals={player:{'roomId':room,'hitsReceived':0,'damageTaken':0} for player,room in owners.items()}
+    events=set(); pending=None; last_sequence=0; damage_events=0
+    for value in frames:
+        packet=value['packet'];frame=packet['frame']
+        enemies={enemy['id']:enemy['roomId'] for enemy in frame['enemies']}
+        for event in packet['events']:
+            victim=event['playerId']
+            if event['sequence']!=last_sequence+1 or event['eventId'] in events or owners.get(victim) is None \
+                or enemies.get(event['enemyId'])!=owners[victim] or frame['phase']!='Running' or packet['suspended'] \
+                or not enabled_sequence<=packet['observedSequence']<disabled_sequence or not frame['autoAttack']:
+                raise ValueError('Combat replay event violates its original room, order or enabled window')
+            events.add(event['eventId']);last_sequence=event['sequence']
+            attack=(event['tick'],event['enemyId'],victim)
+            if event['kind']=='EnemyShot' and pending is None and event['hasRay'] and event['hit']=='Friendly' and event['targetId']==victim:
+                pending=attack
+            elif event['kind']=='PlayerDamaged' and pending==attack:
+                row=totals[victim]
+                if event['damage']!=min(20,100-row['damageTaken']) or event['damage']<=0:
+                    raise ValueError('Combat replay damage does not match the remaining health')
+                row['hitsReceived']+=1;row['damageTaken']+=event['damage'];damage_events+=1;pending=None
+            else:
+                raise ValueError('Combat replay damage must follow its original enemy shot')
+        if packet['throughCombatSequence']!=damage_events:
+            raise ValueError('Combat replay ledger boundary differs from its original damage events')
+        seen=set()
+        for row in value['statistics']:
+            player=row['playerId'];total=totals.get(player)
+            if player in seen or total is None or any(row[key]!=count for key,count in total.items()) \
+                or row['health']!=100-total['damageTaken'] or any(row[key]!=0 for key in ('ammoUsed','shotsHit','kills','accuracyPercent')):
+                raise ValueError('Combat replay statistics differ from the original event prefix')
+            seen.add(player)
+        if packet['observedSequence']>=enabled_sequence and seen!=owners.keys():
+            raise ValueError('Combat replay statistics omit an original admission')
+    if pending or not totals or any(not row['hitsReceived'] for row in totals.values()):
+        raise ValueError('Combat replay must include a complete attack and damage for every original player')
+    return {'damageEvents':damage_events,'players':totals}
+
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('package',type=Path);p.add_argument('--control-package',type=Path,required=True);p.add_argument('--runtime-root',type=Path,required=True);p.add_argument('--observe-closure-ui',action='store_true')
     p.add_argument('--player-package',type=Path,help='Launch five players per room from the API room ZIP, using this extracted player package')
@@ -20,6 +59,7 @@ def main():
     p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
     p.add_argument('--check-layout-preview',action='store_true',help='Load a saved barricade opening and compare its preview with native world geometry')
     p.add_argument('--check-room-reports',action='store_true',help='Verify scoped Linked CSVs and the ZIP against the full sealed native report')
+    p.add_argument('--check-room-combat',action='store_true',help='Require actual enemy damage on every original admission and reconcile each replay frame and final report')
     p.add_argument('--check-interrupted-replay', action='store_true', help='Play the saved native prefix after the owned launcher is killed')
     p.add_argument('--check-managed-mr', action='store_true', help='Verify a real Preparing MR server rejects desktop admission and seals without starting combat')
     p.add_argument('--check-live-reinforcement', action='store_true', help='Verify a native server accepts only supported live enemy targets and records the result')
@@ -30,6 +70,7 @@ def main():
     if args.field_evidence and not args.peer_diagnostics:p.error('--field-evidence requires --peer-diagnostics')
     if args.check_room_readiness and not args.player_package:p.error('--check-room-readiness requires five players per room')
     if args.check_room_reports and not args.player_package:p.error('--check-room-reports requires the three-package check')
+    if args.check_room_combat and not args.check_room_reports:p.error('--check-room-combat requires --check-room-reports')
     address='127.0.0.1'
     if args.game_address:
         if not any(args.game_address in ipaddress.IPv4Network(net) for net in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16')):
@@ -83,11 +124,11 @@ def main():
     def rejected(label,value,**options):
         file=runtime/(label+'.json');file.write_text(json.dumps(value),encoding='utf-8');work=runtime/(label+'-work');ready=out/(label+'-ready.json')
         call(label,['--run',file,'--work',work,'--seconds',options.get('seconds',60),'--ready-report',ready,*options.get('extra',())]);check(not work.exists() and not ready.exists(),label+' creates no native world')
-    def create(rooms,label, *, auto_attack=False, experience='VR', props=None):
+    def create(rooms,label, *, auto_attack=False, enemy_count=1, experience='VR', props=None):
         if props is None:
             props=[{'assetId':'sandbag','position':{'x':x,'y':0,'z':-1},'yawDegrees':0}
                    for x in (-5,-3,-1,3,5)] if args.check_layout_preview else []
-        mission=request('/api/missions',{'name':'Portable '+label,'briefing':'Owned PC package fixture','durationSeconds':600,'environment':{'mode':experience,'weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':1,'behavior':'Hold','autoAttack':auto_attack},'props':props},expected=201)
+        mission=request('/api/missions',{'name':'Portable '+label,'briefing':'Owned PC package fixture','durationSeconds':600,'environment':{'mode':experience,'weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':enemy_count,'behavior':'Hold','autoAttack':auto_attack},'props':props},expected=201)
         state=request('/api/sessions',{'missionId':mission['id'],'mode':'Linked' if len(rooms)==5 else 'Independent','roomIds':rooms},expected=201);sessions.append(state['id']);return state
     def launch(state,label, *, listen_address=None, verify_layout=True):
         value=config(state['id'], listenAddress=listen_address or address);file=runtime/(label+'.json');file.write_text(json.dumps(value),encoding='utf-8');ready=out/(label+'-ready.json');report=out/(label+'-final.json');work=runtime/(label+'-work')
@@ -271,7 +312,7 @@ def main():
                 'roomId':c['player']['roomId'],'seat':c['player']['seat'],'connectionId':c['connection'],
                 'nativePid':c['nativePid'],'launcherPid':c['process'].pid} for c in owners]})
         check(True,entry['label']+' CSV rows match sealed player results')
-    def observe(entry,expected,begin=None):
+    def observe(entry,expected,begin=None, *, record=True):
         metadata=request('/api/sessions/'+entry['sessionId']+'/world');path='/api/sessions/'+entry['sessionId']+'/world/watch?mode=live';req=urllib.request.Request(uri+path,headers={'Authorization':'Bearer '+keys['Master']})
         with urllib.request.urlopen(req,timeout=5) as response:
             kind=''
@@ -281,8 +322,39 @@ def main():
                 if kind=='frame' and line.startswith('data: '):
                     frame=json.loads(line[6:]);rows=frame['packet']['frame']['players'];connected={p['id'] for p in rows if p['connected'] and p['rig']['kind']=='Simulated'}
                     packet=frame['packet'];source=datetime.fromisoformat(metadata['header']['captureStartedAtUtc'])+timedelta(milliseconds=packet['elapsedMilliseconds']);age=(datetime.now(timezone.utc)-source).total_seconds()
-                    if connected==set(expected) and (begin is None or packet['frame']['phase']=='Running' and packet['frame']['tick']>0 and not packet['suspended'] and packet['observedSequence']>=begin and -1<=age<1.5):save(entry['label']+('-running.json' if begin is not None else '-live.json'),{'metadata':metadata,'frame':frame,'sourceAgeSeconds':age,'acceptedBeginSequence':begin});return frame
+                    if connected==set(expected) and (begin is None or packet['frame']['phase']=='Running' and packet['frame']['tick']>0 and not packet['suspended'] and packet['observedSequence']>=begin and -1<=age<1.5):
+                        if record:save(entry['label']+('-running.json' if begin is not None else '-live.json'),{'metadata':metadata,'frame':frame,'sourceAgeSeconds':age,'acceptedBeginSequence':begin})
+                        return frame
                     return None
+    def exercise_room_combat(entries,clients):
+        def attack(entry,enabled):
+            identity=str(uuid.uuid4());session=entry['sessionId']
+            response=request('/api/sessions/'+session+'/commands',{'commandId':identity,'action':'SetEnemies',
+                'enemies':{'count':entry['combatEnemyCount'],'behavior':'Hold','autoAttack':enabled}})
+            check(response['commandId']==identity and not response['duplicate'] and response['session']['id']==session
+                  and response['session']['enemies']['autoAttack'] is enabled,entry['label']+' original AI '+('enable' if enabled else 'disable')+' accepted')
+            return response['appliedAtSequence']
+
+        windows=[]
+        for entry in entries:
+            owners={c['player']['id']:c['player']['roomId'] for c in clients if c['sessionId']==entry['sessionId']}
+            enabled=attack(entry,True)
+            windows.append((entry,owners,enabled))
+        for entry,owners,enabled in windows:
+            def damaged():
+                value=observe(entry,owners,enabled,record=False)
+                if value and value['packet']['frame']['autoAttack'] and {p['playerId'] for p in value['statistics'] if p['damageTaken']>0}==set(owners):
+                    return value
+            live=wait(damaged,35,entry['label']+' damage to every original admission')
+            disabled=attack(entry,False)
+            def stopped():
+                value=observe(entry,owners,disabled,record=False)
+                return value if value and not value['packet']['frame']['autoAttack'] else None
+            quiet=wait(stopped,12,entry['label']+' original source disables attack')
+            entry['combatWindow']={'owners':owners,'enabledSequence':enabled,'disabledSequence':disabled,
+                'allDamaged':live,'disabled':quiet}
+            save(entry['label']+'-combat-window.json',entry['combatWindow'])
+            check(True,entry['label']+' live damage to every original player and observed attack disabled')
     def finish(entry):
         entry['process'].wait(timeout=80);w=entry['witness'];w.wait();w.close();entry['witness']=None
         report=read(entry['reportPath']);check(entry['process'].returncode==0 and report['complete'] and report['cleanupCompleted'] and report['childExited'] and report['playerResultsAcknowledged'] is None,entry['label']+' dual seal / retained36 / original process terminal')
@@ -314,7 +386,18 @@ def main():
                     if kind=='frame':frames.append(value)
                     if kind=='complete':break
         check(len(frames)==report['finalWorld']['acceptedSequence'] and [x['packet']['sequence'] for x in frames]==list(range(1,len(frames)+1)) and frames[-1]['packet']['frame']['phase']=='Ended',entry['label']+' full API replay through terminal frame')
-        save(entry['label']+'-replay.json',frames);rounds.append({'name':entry['label'],'ready':entry['ready'],'report':report,'journal':closed,'replayFrames':len(frames)})
+        save(entry['label']+'-replay.json',frames)
+        if 'combatWindow' in entry:
+            window=entry['combatWindow']
+            actual={value['packet']['sequence']:value for value in frames}
+            check(all(actual.get(window[key]['packet']['sequence'])==window[key] for key in ('allDamaged','disabled')),
+                  entry['label']+' exact live damage and attack-disabled checkpoints survive replay')
+            proof=reconcile_ai_damage(frames,window['owners'],window['enabledSequence'],window['disabledSequence'])
+            stream=request('/api/sessions/'+entry['sessionId'])['combatStream']
+            check(frames[-1]['statistics']==stats['players'] and stream['sealed'] and stream['acceptedSequence']==proof['damageEvents'],
+                  entry['label']+' every same-room attack, damage event and per-frame statistic agrees with the sealed ledger')
+            save(entry['label']+'-combat-reconciliation.json',proof)
+        rounds.append({'name':entry['label'],'ready':entry['ready'],'report':report,'journal':closed,'replayFrames':len(frames)})
     def verify_interrupted_replay(entry, client):
         session = '/api/sessions/' + entry['sessionId']
         path = session + '/world'
@@ -379,7 +462,10 @@ def main():
         for linked in [False,True]:
             entries=[];round_clients=[]
             for rooms in ([[1,2,3,4,5]] if linked else [[r] for r in range(1,6)]):
-                state=create(rooms,'linked' if linked else 'independent');entry=launch(state,('linked' if linked else 'room-'+str(rooms[0])));entries.append(entry)
+                enemy_count=5*len(rooms) if args.check_room_combat else 1
+                state=create(rooms,'linked' if linked else 'independent',enemy_count=enemy_count)
+                entry=launch(state,('linked' if linked else 'room-'+str(rooms[0])));entries.append(entry)
+                entry['combatEnemyCount']=enemy_count
                 if not linked and rooms==[1]:rejected('bound-preparing',config(state['id']))
                 for room in rooms:
                     round_clients.extend(room_players(entry,room) if player_folder else [player(entry,room)])
@@ -411,6 +497,9 @@ def main():
                     c['process'].poll() is None and c['witness'].kernel.WaitForSingleObject(c['witness'].handle,0)==258
                     for c in round_clients),'25 simultaneous owned native players '+('Linked' if linked else 'Independent'))
             if args.check_room_readiness:verify_room_readiness(round_clients,linked)
+            if args.check_room_combat:
+                stage('running-native-ai-combat',mode='Linked' if linked else 'Independent')
+                exercise_room_combat(entries,round_clients)
             for entry in entries:
                 if args.observe_closure_ui and not linked and entry is observer_entry:(out/'closure-end.request').write_text('request one normal UI End',encoding='utf-8')
                 else:command(entry['sessionId'],'End')
@@ -516,6 +605,7 @@ def main():
             'Three portable packages, five Independent rooms then Linked, 25 simultaneous same-PC Simulation clients per topology.'
             if player_folder else 'Two portable packages, five Independent rooms then Linked, five same-PC Simulation clients per topology.'),
             'managedMrPreparing':args.check_managed_mr,
+            'roomCombat':args.check_room_combat,
             'sourceFingerprint':manifest['build']['sourceFingerprint'],'gameAddress':address})
     except BaseException as error:stage('failed',errorType=type(error).__name__);raise
     finally:
