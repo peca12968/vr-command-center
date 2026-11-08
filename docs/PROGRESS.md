@@ -1,5 +1,14 @@
 # 開發進度
 
+## 2026-11-09 Quest 3 部署檔離線預檢
+
+`deploy-quest.ps1 -CheckOnly` 可在接頭盔前核對玩家票券房號與席位、UTC 到期時間、校正檔房號與 A／B／C 欄位。預檢輸出只含房間、席位、到期時間、模式與校正檔雜湊。正式部署先執行相同檢查，並以當次讀取的校正檔內容計算雜湊及複製。 [PowerShell 7 操作](QUEST3.md#quest-3-場地對位部署)
+
+- 隔離 API 0.31.0 建立五房連線 MR 場次，實際簽發五包共 25 份玩家設定，輸出五房各自的校正檔。25 份同房配對的席位、效期及 SHA-256 均對上原始 API 資料，五組錯房配對在離線預檢拒絕。名冊未變，測試結束後活動場次歸零。摘要 `artifacts/quest-deploy-preflight/api-preflight-summary.json` 未保存票券。
+- PowerShell 7 的 9 項檢查與 621 項 HTTP 回歸通過。模擬 ADB 驗證一般 VR、MR 與複製失敗的處理，包含原檔在安裝階段變動時仍複製已核對的內容，以及啟用新玩家設定失敗時保留舊檔並清除暫存。Windows PowerShell 5.1 入口受本機腳本執行政策限制，本輪以 PowerShell 7 驗證。
+- 現有 Quest 0.47.0／版本碼 59 APK 靜態複驗為 ARM64、min SDK 32、target SDK 35，有效 v2 開發簽章，SHA-256 `18d23e591223754c7d03af3e8bbb79b48491bfe168547db5e01c091b00bfbc14`。實機 USB 安裝、追蹤及 MR 透視仍待驗收。
+- 功能來源 `020d47d948741e6a2d4ca28ce96f587135484050`。[GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42527893009) job `128875467419` 因帳務或支出上限未啟動，零步驟。
+
 ## 2026-11-09 五房 UDP 丟包驗證
 
 新增 `--udp-periodic-loss`。所有原玩家入場後、開始前啟用。每條原遊戲連線的上行、下行各自計數，每 20 個封包丟棄 1 個，持續至個人戰績交付。使用 Windows 0.47.0 及 API 0.31.0，丟包只在本機測試轉送器注入。 [重跑命令](DESKTOP_EXERCISE.md#五房-udp-丟包驗證)
