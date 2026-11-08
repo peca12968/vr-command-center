@@ -8,18 +8,19 @@ const time = milliseconds => (milliseconds / 1000).toFixed(2) + ' 秒';
 const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫停', Ended: '已結束' };
 const eventNames = { ShotFired: '玩家射擊', ShotHit: '命中敵軍', EnemyEliminated: '擊殺敵軍', EnemyShot: '敵軍射擊', PlayerDamaged: '玩家受傷', ReloadStarted: '開始換彈', ReloadCompleted: '完成換彈' };
 const shortId = id => id && id !== '00000000-0000-0000-0000-000000000000' ? id.slice(0, 8) : '—';
+const roomName = room => room === 'all' ? '全部房間' : '房間 ' + room;
 
 export function mountWorld(getKey, unauthorized) {
   let active = false, scene, controller, epoch = 0, listEpoch = 0, info, frame, geometry = '', mode = '', connected = false, received = 0;
   let connecting = false, stepping = false, savedLimit = null, savedFinished = false;
-  const cameras = mountCameras(getKey, unauthorized, () => scene, () => { $('world-camera').value = 'free'; $('world-room').value = 'all'; });
-  const cameraForm = mountWorldCameraForm(() => scene, () => { $('world-camera').value = 'free'; $('world-room').value = 'all'; });
+  const cameras = mountCameras(getKey, unauthorized, () => scene, freeView);
+  const cameraForm = mountWorldCameraForm(() => scene, freeView);
   function message(text, error = false) { $('world-message').textContent = text; $('world-message').classList.toggle('replay-error', error); }
   function stop() { epoch++; controller?.abort(); controller = null; connected = connecting = stepping = false; scene?.weather.pause(); scene?.draw(); $('world-pause').textContent = '繼續回放'; }
   function reset() {
     stop(); listEpoch++; info = frame = savedLimit = null; savedFinished = false; geometry = ''; mode = ''; cameras.reset(); cameraForm.reset(); reviewControls();
     $('world-recording').replaceChildren(); $('world-player').hidden = true; message('選取已錄製的場次，開始觀戰或回放。');
-    recordingControls();
+    recordingControls(); bindRooms([]);
     scene?.reset(); $('world-sound').textContent = '音效：關閉'; $('world-sound').disabled = true;
   }
   async function response(url, signal) {
@@ -54,8 +55,65 @@ export function mountWorld(getKey, unauthorized) {
     $('world-replay').textContent = selected?.dataset.complete === 'false' ? '回放已保存片段' : '從頭回放';
   }
   function resetRecording() {
-    stop(); cameras.bind(null); cameraForm.reset(); info = frame = savedLimit = null; savedFinished = false; mode = '';
+    stop(); cameras.bind(null); cameraForm.reset(); info = frame = savedLimit = null; savedFinished = false; geometry = ''; mode = '';
+    bindRooms([]);
     recordingControls(); reviewControls(); $('world-player').hidden = true; message('已切換場次，請開始觀戰或回放。');
+  }
+  function bindRooms(ids) {
+    const rooms = ids.length ? ['all', ...ids.map(String)] : [];
+    $('world-room').replaceChildren(...rooms.map(room => {
+      const option = document.createElement('option'); option.value = room; option.textContent = roomName(room); return option;
+    }));
+    const quick = $('world-room-quick');
+    quick.hidden = ids.length < 2;
+    quick.replaceChildren(...(quick.hidden ? [] : rooms.map(room => {
+      const button = document.createElement('button'), title = document.createElement('strong'), count = document.createElement('span');
+      button.type = 'button'; button.className = 'quiet'; button.dataset.worldRoom = room;
+      button.setAttribute('aria-pressed', String(room === 'all'));
+      title.textContent = roomName(room); count.textContent = '等待快照'; button.append(title, count);
+      button.addEventListener('click', () => selectRoom(room));
+      return button;
+    })));
+    showStatistics();
+  }
+  function selectRoom(room, center = true) {
+    if (room !== 'all' && !info?.header.roomIds.includes(Number(room))) return;
+    $('world-room').value = room;
+    const camera = $('world-camera');
+    scene?.setAudioRoom(room);
+    if (center && scene) {
+      if (camera.value === 'overview' || camera.value === 'top') scene.preset(camera.value, room);
+      else { scene.focus(room); camera.value = 'free'; }
+    }
+    for (const button of $('world-room-quick').children)
+      button.setAttribute('aria-pressed', String(button.dataset.worldRoom === room));
+    showStatistics();
+  }
+  function freeView() {
+    $('world-camera').value = 'free'; selectRoom('all', false);
+  }
+  function showRoomCounts(packet) {
+    for (const button of $('world-room-quick').children) {
+      const room = button.dataset.worldRoom;
+      const players = packet.frame.players.filter(player => room === 'all' || player.roomId === Number(room));
+      const enemies = packet.frame.enemies.filter(enemy => room === 'all' || enemy.roomId === Number(room));
+      const count = button.lastElementChild;
+      const text = `連線玩家 ${players.filter(player => player.connected).length}/${players.length} · 存活敵軍 ${enemies.filter(enemy => enemy.health > 0).length}/${enemies.length}`;
+      if (count.textContent !== text) count.textContent = text;
+    }
+  }
+  function showStatistics() {
+    const room = $('world-room').value;
+    const players = frame?.statistics.filter(player => room === 'all' || player.roomId === Number(room)) ?? [];
+    $('world-statistics-heading').textContent = room && room !== 'all' ? `${roomName(room)} · 此快照已核對的統計` : '此快照已核對的統計';
+    $('world-statistics-empty').hidden = !frame || players.length > 0;
+    $('world-statistics').replaceChildren(...players.map(player => {
+      const row = document.createElement('tr');
+      for (const text of [player.name, player.ammoUsed, player.kills, player.damageTaken, player.hitsReceived, player.accuracyPercent + '%', player.health]) {
+        const cell = document.createElement('td'); cell.textContent = text; row.append(cell);
+      }
+      return row;
+    }));
   }
   function canExtendSaved() {
     return active && mode === 'replay' && info?.header.sessionId === $('world-recording').value
@@ -148,11 +206,7 @@ export function mountWorld(getKey, unauthorized) {
     $('world-time').textContent = `${time(packet.elapsedMilliseconds)} / ${time(info.durationMilliseconds)} · 幀 ${packet.sequence}`;
     $('world-environment').textContent = `${packet.weather} · ${packet.frame.night ? '夜間' : '日間'} · ${packet.lightning ? '雷電啟用' : '無雷電'}${packet.suspended ? ' · 管理中斷暫停' : ''}`;
     $('world-timeline').max = String(Math.max(info.durationMilliseconds, packet.elapsedMilliseconds, 1)); $('world-timeline').value = String(packet.elapsedMilliseconds);
-    $('world-statistics').replaceChildren(...value.statistics.map(player => {
-      const row = document.createElement('tr');
-      for (const text of [player.name, player.ammoUsed, player.kills, player.damageTaken, player.hitsReceived, player.accuracyPercent + '%', player.health]) { const cell = document.createElement('td'); cell.textContent = text; row.append(cell); }
-      return row;
-    }));
+    showRoomCounts(packet); showStatistics();
     if (mode === 'replay') showEvents(value);
     received = performance.now(); $('world-canvas').dataset.sequence = String(packet.sequence); status();
   }
@@ -242,7 +296,7 @@ export function mountWorld(getKey, unauthorized) {
               const key = JSON.stringify(info.header);
               if (key !== geometry) {
                 scene.load(info.header); geometry = key; frame = null;
-                $('world-room').replaceChildren(...['all', ...info.header.roomIds].map(room => { const option = document.createElement('option'); option.value = room; option.textContent = room === 'all' ? '全部房間' : '房間 ' + room; return option; }));
+                bindRooms(info.header.roomIds);
                 $('world-camera').value = 'overview';
               }
               $('world-player').hidden = false; scene.resize(); $('world-name').textContent = info.missionName;
@@ -288,8 +342,8 @@ export function mountWorld(getKey, unauthorized) {
   $('world-timeline').addEventListener('change', () => replayAt(Number($('world-timeline').value)));
   $('world-speed').addEventListener('change', () => { if (mode === 'replay') replayFromCurrent(); });
   $('world-actor').addEventListener('change', () => selectActor($('world-actor').value));
-  $('world-room').addEventListener('change', () => { scene?.focus($('world-room').value); $('world-camera').value = 'free'; });
-  $('world-camera').addEventListener('change', () => { const view = $('world-camera').value; if (!scene) return; if (view === 'follow') { scene.follow = true; scene.draw(); } else if (view === 'free') scene.follow = false; else scene.preset(view); });
+  $('world-room').addEventListener('change', () => selectRoom($('world-room').value));
+  $('world-camera').addEventListener('change', () => { const view = $('world-camera').value; if (!scene) return; if (view === 'follow') { scene.follow = true; scene.draw(); } else if (view === 'free') scene.follow = false; else scene.preset(view, $('world-room').value); });
   setInterval(() => { if (active) status(); }, 500);
   return { reset, active(value) { active = value; if (value) refresh(); else { stop(); listEpoch++; status(); } } };
 }

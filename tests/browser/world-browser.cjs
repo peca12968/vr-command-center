@@ -38,12 +38,16 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       'A legacy streamed world retains its recorded primitive cover rather than receiving new field-prop art');
     check((await page.locator('#world-freshness').innerText()) === '正在接收快照' && (await page.locator('#world-actor-info').innerText()).includes('Simulated'), 'Live viewer distinguishes fresh snapshots and synthetic head/hand data');
     check(!await page.locator('#world-review').isVisible(), 'Live observation keeps frame review out of the playback controls');
+    check(!await page.locator('#world-room-quick').isVisible(), 'Single-room observation keeps the existing compact controls');
     const before = Number(await canvas.getAttribute('data-sequence'));
     await page.waitForFunction(sequence => Number(document.querySelector('#world-canvas').dataset.sequence) > sequence, before);
     check((await page.locator('#world-statistics tr td').allTextContents()).join('|') === 'World Simulation|2|1|20|1|100%|80', 'Streamed per-frame combat statistics match the authoritative report prefix');
     const camera = await canvas.getAttribute('data-camera'); await page.locator('#world-camera').selectOption('top');
     check(await canvas.getAttribute('data-camera') !== camera, 'Streamed world supports the god-view camera preset');
-    await page.locator('#world-room').selectOption('2'); await page.locator('#world-room').selectOption('all');
+    await page.locator('#world-room').selectOption('2');
+    check((await page.locator('#world-statistics-heading').innerText()).startsWith('房間 2') && await page.locator('#world-camera').inputValue() === 'top',
+      'The room selector scopes frame statistics and preserves the overhead preset');
+    await page.locator('#world-room').selectOption('all');
     check((await canvas.getAttribute('data-camera')).split(',').every(value => Number.isFinite(Number(value))), 'All-room focus restores a finite camera instead of using an invalid room coordinate');
     await require('./camera-controls.cjs')({ page, check, screenshots });
     await require('./camera-ground-controls.cjs')({ page, check, screenshots });

@@ -174,8 +174,11 @@ export class ReplayScene {
   }
   select(key) { this.selected = key; this.draw(); }
   fitRadius(radius) { const aspect = this.canvas.parentElement.clientWidth / Math.max(1, this.canvas.parentElement.clientHeight); return radius * Math.max(1, 1.5 / Math.max(.4, aspect)); }
+  setAudioRoom(room) {
+    if (this.audioRoom === room) return;
+    this.audioRoom = room; this.weather.audio.combat.pause();
+  }
   focus(room) {
-    this.audioRoom=String(room);this.weather.audio.combat.pause();
     if (room === 'all') { this.preset('overview'); return; }
     const id = Number(room); if (!this.roomIds?.includes(id)) return;
     this.follow = false; this.target.set(roomX(id), .8, 0); this.radius = Math.min(240, this.fitRadius(15)); this.draw();
@@ -187,8 +190,11 @@ export class ReplayScene {
   restoreView(view) {
     this.follow = false; this.target.fromArray(view.target); this.theta = view.theta; this.phi = view.phi; this.radius = view.radius; this.draw();
   }
-  preset(mode) {
-    this.follow = false; this.target.copy(this.defaultTarget || new THREE.Vector3(0, .8, 0)); this.radius = Math.min(240, this.fitRadius(this.defaultRadius || 15));
+  preset(mode, room = 'all') {
+    const id = Number(room), focused = this.roomIds?.includes(id);
+    if (focused) this.target.set(roomX(id), .8, 0);
+    else this.target.copy(this.defaultTarget || new THREE.Vector3(0, .8, 0));
+    this.follow = false; this.radius = Math.min(240, this.fitRadius(focused ? 15 : this.defaultRadius || 15));
     this.theta = mode === 'top' ? 0 : .6; this.phi = mode === 'top' ? .08 : .9; this.draw();
   }
   resize() {

@@ -18,6 +18,27 @@ async function until(description, predicate, seconds = 30) {
   throw new Error('Timed out: ' + description);
 }
 
+async function verifyRoomView(page, api, route, room) {
+  const snapshot = await page.evaluate(() => ({
+    sequence: Number(document.querySelector('#world-canvas').dataset.sequence),
+    scope: document.querySelector('#world-room').value,
+    counts: [...document.querySelectorAll('[data-world-room]')].map(button => [button.dataset.worldRoom,
+      button.lastElementChild.textContent, button.getAttribute('aria-pressed')]),
+    statistics: [...document.querySelectorAll('#world-statistics tr')].map(row => [...row.cells].map(cell => cell.textContent))
+  }));
+  assert.equal(snapshot.scope, String(room));
+  const exact = await api(`${route}/world/frames/${snapshot.sequence}`);
+  const { players, enemies } = exact.packet.frame;
+  assert.deepEqual(snapshot.counts, ['all', ...rooms.map(String)].map(id => {
+    const localPlayers = players.filter(player => id === 'all' || player.roomId === Number(id));
+    const localEnemies = enemies.filter(enemy => id === 'all' || enemy.roomId === Number(id));
+    return [id, `連線玩家 ${localPlayers.filter(player => player.connected).length}/${localPlayers.length} · 存活敵軍 ${localEnemies.filter(enemy => enemy.health > 0).length}/${localEnemies.length}`, String(id === String(room))];
+  }));
+  const statistics = exact.statistics.filter(player => room === 'all' || player.roomId === room);
+  assert.deepEqual(snapshot.statistics, statistics.map(p => [p.name, p.ammoUsed, p.kills, p.damageTaken, p.hitsReceived, p.accuracyPercent + '%', p.health].map(String)));
+  return { sequence: snapshot.sequence, room, counts: snapshot.counts, statistics };
+}
+
 async function main() {
   const readyPath = path.resolve(process.argv[2]);
   const directory = path.dirname(readyPath);
@@ -115,7 +136,43 @@ async function main() {
     for (const room of rooms) {
       assert.deepEqual(source.props.filter(prop => prop.roomId === room).map(prop => [prop.kind, prop.yaw]), [['Sandbag', 15], ['Barrel', 90]]);
     }
+    await page.locator('#live-auto-attack').check();
+    await page.locator('#enemies-form button[type=submit]').click();
+    const victim = await until('native AI damages a connected player', async () =>
+      (await native())?.statistics.find(player => player.damageTaken > 0));
+    await page.locator('#tab-world').click();
+    await page.locator('#world-recording').selectOption(session.id);
+    await page.locator('#world-live').click();
+    await page.waitForFunction(() => document.querySelector('[data-world-room="all"] span')?.textContent.includes('5/5'));
+    const full = await verifyRoomView(page, api, route, 'all');
+    await page.locator('#world-camera').selectOption('top');
+    await page.locator(`[data-world-room="${victim.roomId}"]`).click();
+    await page.locator('#world-camera-read').click();
+    assert.equal(await page.locator('#world-camera').inputValue(), 'top');
+    assert.equal(Number(await page.locator('#world-camera-x').inputValue()), (victim.roomId - 3) * 14);
+    assert.ok(Number(await page.locator('#world-camera-elevation').inputValue()) > 80);
+    const focused = await verifyRoomView(page, api, route, victim.roomId);
+    assert.ok(focused.statistics.some(player => player.damageTaken > 0));
+    await page.screenshot({ path: path.join(directory, 'world-room-live.png'), fullPage: true });
+    const otherRoom = rooms.find(room => room !== victim.roomId);
+    await page.locator('#world-room').selectOption(String(otherRoom));
+    const other = await verifyRoomView(page, api, route, otherRoom);
+    await page.locator('[data-world-room="all"]').click();
+    const restored = await verifyRoomView(page, api, route, 'all');
+    assert.equal(restored.statistics.length, 5);
+    await page.locator('#tab-operations').click();
+    // Let active AI reports settle, then refresh the sequence used by the UI End.
+    await until('AI reporting becomes idle', async () => {
+      const players = (await native())?.statistics;
+      return players?.length === 5 && players.every(player => player.health === 0);
+    });
+    await page.locator('#refresh').click();
+    await page.waitForFunction(() => document.querySelector('#notice').textContent === '已更新。');
+    const endResponse = page.waitForResponse(response => response.url() === ready.baseUrl + '/api' + route + '/commands'
+      && response.request().method() === 'POST' && response.request().postDataJSON().action === 'End');
     await page.locator('[data-command=End]').click();
+    const end = await endResponse;
+    assert.equal(end.status(), 200, JSON.stringify(await end.json()));
     const sealed = await until('exact world seal', async () => {
       const world = await api(route + '/world');
       return world.complete && world;
@@ -125,13 +182,27 @@ async function main() {
     assert.equal(final.combatStream.sealed, true);
     assert.deepEqual(final.mission, original);
     assert.equal((await api('/sessions')).length, 0);
+    await page.locator('#tab-world').click();
+    const replayRequest = page.waitForRequest(request => {
+      const url = new URL(request.url());
+      return url.pathname === '/api' + route + '/world/watch' && url.searchParams.get('mode') === 'replay';
+    });
+    await page.locator('#world-replay').click();
+    await replayRequest;
+    await page.locator('#world-speed').selectOption('4');
+    await page.locator('[data-world-room="5"]').click();
+    await page.waitForFunction(sequence => Number(document.querySelector('#world-canvas').dataset.sequence) === sequence, sealed.acceptedSequence);
+    const replay = await verifyRoomView(page, api, route, 5);
+    assert.equal(replay.sequence, sealed.acceptedSequence);
+    await page.screenshot({ path: path.join(directory, 'world-room-replay.png'), fullPage: true });
     assert.deepEqual(errors, []);
     await fs.writeFile(path.join(directory, 'launch-preview-checks.json'), JSON.stringify({
       sessionId: session.id, originalId: original.id, revisedId: revised.id, shown, rooms, enemyCounts,
-      runningSequence: running.packet.sequence, sealedSequence: sealed.acceptedSequence, pageErrors: errors, headsets: 0
+      runningSequence: running.packet.sequence, sealedSequence: sealed.acceptedSequence,
+      roomViews: { full, focused, other, restored, replay }, pageErrors: errors, headsets: 0
     }, null, 2), { flag: 'wx' });
     await fs.writeFile(path.join(directory, 'end.request'), '', { flag: 'wx' });
-    console.log('PASS: saved historical preview, Linked admission, native initial conditions and dual seal');
+    console.log('PASS: Linked room focus and per-frame statistics match native live and replay snapshots');
   } finally {
     await browser.close();
   }

@@ -116,6 +116,7 @@
         <section class="panel"><label>可讀取的錄製場次<select id="world-recording"></select></label><div class="button-row"><button id="world-refresh" class="quiet">更新錄製列表</button><button id="world-live" disabled>即時觀戰</button><button id="world-replay" class="secondary" disabled>從頭回放</button></div><p id="world-message" class="hint" role="status" aria-live="polite">選取已錄製的場次，開始觀戰或回放。</p></section>
         <section id="world-player" class="panel" hidden>
           <div class="section-heading"><h3 id="world-name"></h3><span id="world-status" class="badge"></span></div>
+          <div id="world-room-quick" class="world-room-quick" role="group" aria-label="房間鏡頭與快照戰況" hidden></div>
           <div id="world-viewport"><canvas id="world-canvas" tabindex="0" aria-label="世界錄製 3D 觀察場景，可拖曳及點選角色"></canvas><div class="replay-overlay"><span id="world-environment"></span><span id="world-freshness"></span></div></div>
           <p class="hint">拖曳旋轉 · Shift／右鍵拖曳平移 · 滾輪縮放 · 雙擊場地定位鏡頭 · 點選角色。綠色為玩家，紅色為敵軍；雙手依錄製來源顯示。</p>
           <div class="replay-transport"><button id="world-pause" class="quiet">暫停回放</button><button id="world-sound" class="quiet" aria-pressed="false" disabled>音效：關閉</button><label>速度<select id="world-speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select></label><output id="world-time"></output></div>
@@ -128,7 +129,7 @@
             <p id="world-no-events" class="hint">此格沒有戰鬥事件。</p>
             <div id="world-event-table" class="table-scroll" hidden><table><caption class="sr-only">此格戰鬥事件</caption><thead><tr><th>事件</th><th>類型</th><th>玩家</th><th>敵軍</th><th>玩家耗損</th></tr></thead><tbody id="world-events"></tbody></table></div>
           </section>
-          <div class="form-row"><label>鏡頭<select id="world-camera"><option value="overview">斜角全景</option><option value="top">上帝俯視</option><option value="follow">跟隨選取角色</option><option value="free">自由調整</option></select></label><label>房間<select id="world-room"></select></label><label>選取角色<select id="world-actor"></select></label></div>
+          <div class="form-row"><label>鏡頭<select id="world-camera"><option value="overview">斜角全景</option><option value="top">上帝俯視</option><option value="follow">跟隨選取角色</option><option value="free">自由調整</option></select></label><label>鏡頭與統計房間<select id="world-room"></select></label><label>選取角色<select id="world-actor"></select></label></div>
           <fieldset id="world-camera-editor" class="camera-positions" disabled><legend>精確調整觀看位置與角度</legend>
             <div class="form-row"><label>看向 X（公尺）<input id="world-camera-x" type="number" min="-120" max="120" step="any"></label><label>看向 Y（公尺）<input id="world-camera-y" type="number" min="-120" max="120" step="any"></label><label>看向 Z（公尺）<input id="world-camera-z" type="number" min="-120" max="120" step="any"></label></div>
             <div class="form-row"><label>水平角（度）<input id="world-camera-azimuth" type="number" min="-180" max="180" step="any"></label><label>俯視角（度）<input id="world-camera-elevation" type="number" min="0" max="90" step="any"></label><label>距離（公尺）<input id="world-camera-distance" type="number" min="2" max="240" step="any"></label></div>
@@ -140,7 +141,7 @@
             <div class="button-row"><button id="camera-recall" class="quiet">切換位置</button><button id="camera-remove" class="quiet">移除位置</button><button id="camera-refresh" class="quiet">重新讀取位置</button><button id="camera-retry" hidden>重試確認結果</button></div>
             <p class="hint">位置依目前控制台身分與場次保存，可於觀戰或回放使用。跟隨時保存的是當下固定位置；每場最多保存 24 個。</p><p id="camera-message" class="hint" role="status" aria-live="polite"></p>
           </fieldset>
-          <p id="world-actor-info" class="replay-actor-info"></p><h3>此快照已核對的統計</h3><div class="table-scroll"><table><caption class="sr-only">世界快照統計</caption><thead><tr><th>玩家</th><th>彈藥</th><th>擊殺</th><th>耗損</th><th>中彈</th><th>命中率</th><th>血量</th></tr></thead><tbody id="world-statistics"></tbody></table></div>
+          <p id="world-actor-info" class="replay-actor-info"></p><h3 id="world-statistics-heading">此快照已核對的統計</h3><p id="world-statistics-empty" class="hint" hidden>此快照在選定範圍內沒有玩家統計。</p><div class="table-scroll"><table aria-labelledby="world-statistics-heading"><thead><tr><th>玩家</th><th>彈藥</th><th>擊殺</th><th>耗損</th><th>中彈</th><th>命中率</th><th>血量</th></tr></thead><tbody id="world-statistics"></tbody></table></div>
         </section>
       </section>
       <section id="replay-view" hidden>
@@ -158,7 +159,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.16 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.17 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

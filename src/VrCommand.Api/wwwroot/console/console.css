@@ -29,3 +29,4 @@
   overflow: auto;
 }
 .launch-preview h4,.launch-preview p{margin:0 0 8px;overflow-wrap:anywhere}.launch-preview dl{display:grid;grid-template-columns:auto minmax(0,1fr);gap:5px 12px;margin:8px 0;font-size:.87rem}.launch-preview dt{color:var(--muted)}.launch-preview dd{margin:0;overflow-wrap:anywhere}.launch-preview summary{cursor:pointer}.launch-preview .briefing{margin:8px 0 0;max-height:14rem;overflow:auto}
+.world-room-quick{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,170px),1fr));gap:8px;margin:0 0 12px}.world-room-quick button{min-width:0;text-align:left}.world-room-quick strong,.world-room-quick span{display:block}.world-room-quick span{margin-top:3px;color:var(--muted);font-size:.77rem}.world-room-quick [aria-pressed=true]{border-color:var(--accent);color:var(--accent);background:#283524}
