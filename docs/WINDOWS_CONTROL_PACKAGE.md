@@ -1,6 +1,8 @@
 # Windows 可攜管理服務
 
-2026-11-09 主包 `artifacts/control-packages/windows-control-0.31.19-final-win-x64.zip`，52,542,323 bytes，SHA-256 `28c590b5e3a4480e45fdaa501385dd18cdaf31af49175a5a520f2c2a3abbaa95`。檔案清單 507 筆，API 執行內容 487 份，解壓後通過 106 項管理包檢查。任務編輯器可預覽移除選取掩體後新開通的路徑。 [通路試算](LAYOUT.md#出生位通路預覽)
+2026-11-09 主包 `artifacts/control-packages/windows-control-0.31.20-win-x64.zip`，52,545,587 bytes，SHA-256 `19cb55b3cb9da52eac2041c8ddb6f3dac2be0a67508de389f853a15bb3f7836f`。檔案清單 507 筆，API 執行內容 487 份。解壓後通過 106 項管理包檢查及 12 項 MR 開場瀏覽器專項檢查。 [MR 開場檢查](PLAYER_READINESS.md#mr-開場條件)
+
+0.31.19 的 `artifacts/control-packages/windows-control-0.31.19-final-win-x64.zip` 已保留，52,542,323 bytes，SHA-256 `28c590b5e3a4480e45fdaa501385dd18cdaf31af49175a5a520f2c2a3abbaa95`。解壓後通過 106 項管理包檢查。任務編輯器可預覽移除選取掩體後新開通的路徑。 [通路試算](LAYOUT.md#出生位通路預覽)
 
 0.31.18 的 `artifacts/control-packages/windows-control-0.31.18-win-x64.zip` 已保留，52,539,720 bytes，SHA-256 `1d8f6f912f8e01d5ca888705437876ebe5873d051572c263c564daa418f04108`。主控可一次下載全場及五份分房戰績 CSV。 [五房戰績下載](REPORTS.md#一次下載五房戰績)
 
