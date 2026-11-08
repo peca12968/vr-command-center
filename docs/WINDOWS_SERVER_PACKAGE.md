@@ -1,6 +1,14 @@
 # Windows 遊戲伺服器包
 
-Unity 0.45.0 伺服器與控制台 0.31.13 配套部署。啟動器 1.4 可選擇待開的 VR 或 MR 場次。場中增援由配套管理服務核對場地容量與錄製版本。 [場中敵軍增援](LAYOUT.md#場中敵軍增援)
+Unity 0.47.0 伺服器可搭配控制台 0.31.14。啟動器 1.5 可選擇待開的 VR 或 MR 場次，並在就緒後容許短暫管理服務中斷。場中增援由配套管理服務核對場地容量與錄製版本。 [場中敵軍增援](LAYOUT.md#場中敵軍增援)
+
+## 管理服務短暫中斷
+
+就緒後，遊戲伺服器啟動器遇到暫時性 HTTP 讀取錯誤時，會保留自己已啟動的遊戲程序。請以相同 IPv4 與埠號重新啟動原管理實例。啟動器給予 15 秒恢復窗口，自首筆失敗的讀取開始計算，回應到達後重新核對原場次、戰鬥來源與單調增加的序號。既有的每次 HTTP 讀取期限也適用於進行中的讀取。
+
+恢復只適用於可判定的暫時性連線錯誤或 HTTP 502、503、504。認證或權限錯誤、找不到原場次、資料不符與期限到達時，啟動器會停止自己的遊戲程序並留下未完成報告。遊戲引擎依管理可用狀態處理暫停與續行。End 後的雙封存檢查、原玩家戰績與 36 秒保留仍由各自的既有流程處理。
+
+結果報告的 `managementRecovery` 提供 `outages`、`recoveries` 及 `longestMilliseconds`，可核對啟動器觀察到的讀取中斷。玩家戰績送達應另對原伺服器和玩家日誌。 [封存戰績核對](EXTERNAL_CLIENTS.md#核對封存戰績與-udp-來源)
 
 ## 本機 UDP 綁定確認
 
@@ -71,7 +79,7 @@ python scripts/check-server-package.py <VRCommand-GameServer> `
 
 **本輪103項Windows CLI／原生整合通過；新GUI完整選檔／啟動流程未完成驗證。** native視窗可見且欄位／標籤正確，但兩次點擊均被非目標`PickerHost.exe`攔住；activate並重新觀察後的一次重試仍回報`point ... is over PickerHost.exe, not target window Launch-Server.exe`，因此停止UI輸入。自己GUI與API已終止，failed、原snapshot及有限觀察保留。這不是產品選檔成功、Windows安全性或PickerHost根因證明。管理服務包原先已成功的GUI95151不替代本輪伺服器GUI。
 
-啟動器 1.4 接受尚未綁定戰鬥來源的 Preparing VR 或 MR 場次。管理請求失敗、來源改變、就緒 90 秒逾時，或 End 後 30 秒未雙封存時，啟動器停止自己的子程序並保留不完整結果。GUI「中止」只停止子程序。資料預設在 `%LOCALAPPDATA%/VrCommand/GameServers`，結果在 `GameServerReports`。伺服器私鑰保留在包外資料夾。所有寫入程序停止後再備份。 [MR 開場方式](QUEST3.md#主控建立-mr-場次)
+啟動器接受尚未綁定戰鬥來源的 Preparing VR 或 MR 場次。就緒前的管理讀取失敗、來源改變、就緒 90 秒逾時，或觀察到 End 後 30 秒仍未雙封存時，啟動器停止自己的子程序並保留不完整結果。GUI「中止」會停止本次子程序。資料預設在 `%LOCALAPPDATA%/VrCommand/GameServers`，結果在 `GameServerReports`。伺服器私鑰保留在包外資料夾。所有寫入程序停止後再備份。 [MR 開場方式](QUEST3.md#主控建立-mr-場次)
 
 ## 啟動、來源與停止界線
 

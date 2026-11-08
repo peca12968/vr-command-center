@@ -46,6 +46,14 @@ internal static class ServerCatalogProof
         try
         {
             CheckUdpBindings();
+            foreach (var code in new[] { 502, 503, 504 })
+                Check(ServerLauncher.ManagementUnavailable.IsTemporary(code, WebExceptionStatus.ProtocolError), "Temporary management gateway status " + code);
+            foreach (var code in new[] { 401, 403, 404, 500 })
+                Check(!ServerLauncher.ManagementUnavailable.IsTemporary(code, WebExceptionStatus.ProtocolError), "Terminal management HTTP status " + code);
+            Check(ServerLauncher.ManagementUnavailable.IsTemporary(0, WebExceptionStatus.ConnectFailure)
+                && ServerLauncher.ManagementUnavailable.IsTemporary(0, WebExceptionStatus.Timeout), "A disconnected or timed-out management read permits bounded recovery");
+            Check(!ServerLauncher.ManagementUnavailable.IsTemporary(0, WebExceptionStatus.RequestCanceled)
+                && !ServerLauncher.ManagementUnavailable.IsTemporary(0, WebExceptionStatus.ServerProtocolViolation), "Cancellation and malformed HTTP are terminal");
             var first = Row(1); var second = Row(2); var parsed = ServerLauncher.Catalog.Parse(new object[] { second, first });
             Check(parsed.Count == 2 && parsed[0].Id == (string)first["id"] && parsed[0].ToString().Contains("房間 1") && parsed[0].ToString().Contains("軍事任務"), "room/name display sorts without replacing original id");
             Check(parsed[0].MissionId != parsed[1].MissionId && parsed[0].MissionName == parsed[1].MissionName && parsed[0].Id != parsed[1].Id, "duplicate names retain distinct session / version identities");

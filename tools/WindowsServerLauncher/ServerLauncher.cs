@@ -123,6 +123,17 @@ internal static class ServerLauncher
             throw new IOException("Windows UDP 端點表持續變動，無法核對本次綁定。");
         }
     }
+    internal sealed class ManagementUnavailable : IOException
+    {
+        internal ManagementUnavailable(int code) : base("管理服務請求失敗，HTTP " + code + "。") { }
+        internal static bool IsTemporary(int code, WebExceptionStatus status)
+        {
+            if (code != 0) return code == 502 || code == 503 || code == 504;
+            return status == WebExceptionStatus.ConnectFailure || status == WebExceptionStatus.ConnectionClosed
+                || status == WebExceptionStatus.KeepAliveFailure || status == WebExceptionStatus.ReceiveFailure
+                || status == WebExceptionStatus.SendFailure || status == WebExceptionStatus.Timeout;
+        }
+    }
     internal sealed class Settings
     {
         internal string Api, Key, Session, Address, Bind; internal int Port;
@@ -150,7 +161,19 @@ internal static class ServerLauncher
             request.Headers[HttpRequestHeader.Authorization] = "Bearer " + Key;
             if (body != null) { request.Method = "PUT"; request.ContentType = "application/json"; var bytes = Encoding.UTF8.GetBytes(Json.Serialize(body)); request.ContentLength = bytes.Length; using (var stream = request.GetRequestStream()) stream.Write(bytes, 0, bytes.Length); }
             try { using (var response = (HttpWebResponse)request.GetResponse()) using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8)) { Need(response.StatusCode == HttpStatusCode.OK, "管理服務回應不正確。"); var bytes = new char[256 * 1024 + 1]; var count = 0; int read; while ((read = reader.Read(bytes, count, bytes.Length - count)) > 0 && count < bytes.Length) count += read; Need(count <= 256 * 1024, "管理回應過大。"); var result = Map(Json.DeserializeObject(new string(bytes, 0, count))); Need(result != null, "管理回應格式錯誤。"); return result; } }
-            catch (WebException error) { var response = error.Response as HttpWebResponse; var code = response == null ? 0 : (int)response.StatusCode; if (response != null) response.Dispose(); if (missing && code == 404) return null; throw new IOException("管理服務請求失敗，HTTP " + code + "。"); }
+            catch (WebException error)
+            {
+                var response = error.Response as HttpWebResponse; var code = response == null ? 0 : (int)response.StatusCode;
+                if (response != null) response.Dispose();
+                if (missing && code == 404) return null;
+                if (body == null && ManagementUnavailable.IsTemporary(code, error.Status)) throw new ManagementUnavailable(code);
+                throw new IOException("管理服務請求失敗，HTTP " + code + "。");
+            }
+            catch (IOException error)
+            {
+                if (body == null && error.InnerException is SocketException) throw new ManagementUnavailable(0);
+                throw;
+            }
         }
         internal void Identity() { ValidateTarget(); Need(Text(Request("/"), "version") == "0.31.0", "需要管理服務0.31.0。"); Need(Text(Request("/api/me"), "role") == "GameServer", "請使用GameServer角色金鑰。"); }
         internal object[] Sessions()
@@ -267,6 +290,9 @@ internal static class ServerLauncher
         internal Settings Config; internal string Work, Stream; internal Native Process; internal volatile string Status = "準備中"; internal bool Complete, Cleanup; internal uint? Code; internal Dictionary<string, object> FinalWorld, FinalStream; Mutex lease; bool ownsLease;
         internal UdpBinding VerifiedUdp;
         private string Origin;
+        const int ManagementRecoverySeconds = 15;
+        int managementOutages, managementRecoveries;
+        long longestManagementOutageMilliseconds;
         internal Run(Settings config, string work)
         {
             Config = config; Work = Full(work); Plain(Work); Need(!Inside(Work, Root) && !Inside(Root, Work) && !Directory.Exists(Work) && !File.Exists(Work), "請使用程式包之外的新資料夾。");
@@ -329,15 +355,58 @@ internal static class ServerLauncher
         internal void Wait(int seconds, Func<bool> cancel)
         {
             var deadline = Stopwatch.StartNew(); Stopwatch ended = null, retention = null;
+            TimeSpan? unavailableSince = null;
+            long lastSequence = 0, lastCombatSequence = 0;
             while (deadline.Elapsed.TotalSeconds < seconds && !cancel())
             {
-                Need(!Process.Exited, "遊戲程序意外結束，保留journal供檢查。"); var state = Config.Request("/api/sessions/" + Config.Session); var stream = Child(state, "combatStream");
-                Need(Text(stream, "streamId") == Stream && Text(stream, "origin") == Origin, "場次來源已改變。");
-                if (Text(state, "state") == "Ended")
+                Need(!Process.Exited, "遊戲程序意外結束，保留journal供檢查。");
+                var pollStarted = deadline.Elapsed;
+                if (unavailableSince.HasValue) CheckRecoveryTime(pollStarted - unavailableSince.Value);
+                Dictionary<string, object> stream, world = null;
+                string phase;
+                try
                 {
-                    if (ended == null) ended = Stopwatch.StartNew(); var world = Config.Request("/api/sessions/" + Config.Session + "/world");
-                    Need(Text(Child(world, "header"), "sessionId") == Config.Session && Text(Child(world, "header"), "streamId") == Stream
-                        && Text(Child(world, "header"), "origin") == Origin, "封存來源不符。");
+                    var state = Config.Request("/api/sessions/" + Config.Session);
+                    stream = Child(state, "combatStream"); phase = Text(state, "state");
+                    Need(Text(state, "id") == Config.Session && Text(stream, "streamId") == Stream && Text(stream, "origin") == Origin
+                        && Text(Child(stream, "owner"), "id") == "game-server", "場次來源已改變。");
+                    var sequence = Num(state, "sequence"); var combatSequence = Num(stream, "acceptedSequence");
+                    Need(sequence > 0 && sequence >= lastSequence && combatSequence >= lastCombatSequence
+                        && (phase == "Ended" || (ended == null && (phase == "Preparing" || phase == "Running" || phase == "Paused"))),
+                        "場次階段或接受序號不符。");
+                    lastSequence = sequence; lastCombatSequence = combatSequence;
+                    if (phase == "Ended")
+                    {
+                        if (ended == null) ended = Stopwatch.StartNew();
+                        world = Config.Request("/api/sessions/" + Config.Session + "/world");
+                        var header = Child(world, "header");
+                        Need(Text(header, "sessionId") == Config.Session && Text(header, "streamId") == Stream && Text(header, "origin") == Origin,
+                            "封存來源不符。");
+                    }
+                }
+                catch (ManagementUnavailable)
+                {
+                    if (!unavailableSince.HasValue) { unavailableSince = pollStarted; managementOutages++; }
+                    var elapsed = deadline.Elapsed - unavailableSince.Value;
+                    CheckRecoveryTime(elapsed);
+                    Need(ended == null || retention != null || ended.Elapsed.TotalSeconds < 30, "結束後30秒仍未完成雙封存。");
+                    Status = "管理服務暫時無法連線，等待原服務恢復 " + (ManagementRecoverySeconds - (int)elapsed.TotalSeconds) + " 秒";
+                    Thread.Sleep(250);
+                    continue;
+                }
+                if (unavailableSince.HasValue)
+                {
+                    CheckRecoveryTime(deadline.Elapsed - unavailableSince.Value);
+                    managementRecoveries++;
+                    unavailableSince = null;
+                }
+                if (deadline.Elapsed.TotalSeconds >= seconds || cancel()) break;
+                Need(!Process.Exited, "遊戲程序意外結束，保留journal供檢查。");
+                if (phase == "Ended")
+                {
+                    if (retention != null)
+                        Need(Yes(stream, "sealed") && Yes(world, "complete") && Num(stream, "acceptedSequence") == Num(FinalStream, "acceptedSequence")
+                            && Num(world, "acceptedSequence") == Num(FinalWorld, "acceptedSequence"), "已確認的封存界線不符。");
                     if (Yes(stream, "sealed") && Yes(world, "complete"))
                     {
                         if (retention == null) { retention = Stopwatch.StartNew(); FinalWorld = world; FinalStream = stream; }
@@ -346,12 +415,17 @@ internal static class ServerLauncher
                     }
                     else { Need(ended.Elapsed.TotalSeconds < 30, "結束後30秒仍未完成雙封存。"); Status = "等待戰鬥與世界封存"; }
                 }
-                else Status = "伺服器運行中 " + Text(state, "state") + " · 啟動時已核對 UDP " + Config.Bind + ":" + Config.Port;
+                else Status = "伺服器運行中 " + phase + " · 啟動時已核對 UDP " + Config.Bind + ":" + Config.Port;
                 Thread.Sleep(250);
             }
             throw new IOException("已中止或超過保留期限；此輪不算正常封存完成。");
         }
-        internal object Report(string status, string error) { return new { schemaVersion = 1, status = status, complete = Complete && Cleanup, sessionId = Config.Session, streamId = Stream, childPid = Process == null ? (int?)null : Process.Pid, childExited = Process == null ? (bool?)null : Cleanup, cleanupCompleted = Cleanup, exitCode = Code, workDirectory = Work, udpBinding = VerifiedUdp == null ? null : VerifiedUdp.Public(), finalWorld = FinalWorld, finalCombatStream = FinalStream, playerResultsAcknowledged = (bool?)null, error = error, scope = "Owned server lifecycle and API dual seals; 36s retention, intentional OS process termination after seals, no graceful Unity shutdown / client delivery / gameplay / LAN capacity claim." }; }
+        void CheckRecoveryTime(TimeSpan elapsed)
+        {
+            longestManagementOutageMilliseconds = Math.Max(longestManagementOutageMilliseconds, (long)elapsed.TotalMilliseconds);
+            Need(elapsed.TotalSeconds < ManagementRecoverySeconds, "管理服務等待恢復逾時，保留journal供檢查。");
+        }
+        internal object Report(string status, string error) { return new { schemaVersion = 1, status = status, complete = Complete && Cleanup, sessionId = Config.Session, streamId = Stream, childPid = Process == null ? (int?)null : Process.Pid, childExited = Process == null ? (bool?)null : Cleanup, cleanupCompleted = Cleanup, exitCode = Code, workDirectory = Work, udpBinding = VerifiedUdp == null ? null : VerifiedUdp.Public(), finalWorld = FinalWorld, finalCombatStream = FinalStream, playerResultsAcknowledged = (bool?)null, managementRecovery = new { outages = managementOutages, recoveries = managementRecoveries, longestMilliseconds = longestManagementOutageMilliseconds }, error = error, scope = "Owned server lifecycle and API dual seals; 36s retention, intentional OS process termination after seals, no graceful Unity shutdown / client delivery / gameplay / LAN capacity claim." }; }
         public void Dispose()
         {
             try { if (Process != null) { Process.Stop(); Code = Process.ExitCode; Process.Dispose(); } Cleanup = true; }
