@@ -29,11 +29,55 @@ function routePreview(report) {
   }
   return preview.seats;
 }
-export function mountLayout({ api, epoch, active, editable, draft, selection, changed, selectProp }) {
+export function mountLayout({ api, epoch, active, editable, draft, selection, changed, selectProp, selectedProp }) {
   let generation = 0, draftSerial = 0, launchSerial = 0, draftTimer, launchTimer;
   let draftKey = '', draftReport = null, launchKey = '', launchReport = null;
+  let trial = null;
   const cache = new Map();
   function clearMarks() { for (const prop of $('prop-layer').children) delete prop.dataset.layoutInvalid; }
+  function drawRoutes(id, routes) {
+    $(id).replaceChildren(...routes.map(route => {
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
+      line.setAttribute('points', route.path.map(point => `${point.x},${-point.z}`).join(' '));
+      return line;
+    }));
+  }
+  function paintTrial() {
+    const index = selectedProp();
+    const visible = active() && editable() && index >= 0 && routePreview(draftReport)?.some(route => !route.path.length);
+    if (!visible || (trial && (trial.key !== draftKey || trial.index !== index))) trial = null;
+    $('draft-layout-trial').hidden = !visible;
+    $('layout-try-removal').disabled = !visible || !!trial?.pending;
+    $('layout-clear-trial').disabled = !trial;
+    const routes = trial?.opened ?? [];
+    drawRoutes('layout-trial-routes', routes);
+    for (const prop of $('prop-layer').children)
+      prop.toggleAttribute('data-layout-trial', !!trial?.opened && Number(prop.dataset.index) === index);
+    text($('layout-trial-status'), trial?.message ?? (visible ? `可試算移除物件 ${index + 1} 後的通路。` : ''));
+  }
+  function clearTrial() { trial = null; paintTrial(); }
+  async function tryRemoval() {
+    if ($('layout-try-removal').disabled) return;
+    const index = selectedProp(), body = draft(), baseline = routePreview(draftReport);
+    if (!body.props[index] || JSON.stringify(body) !== draftKey || !baseline) return;
+    const identity = epoch(), attempt = { key: draftKey, index, pending: true, message: '正在試算移除後的通路…' };
+    trial = attempt;
+    paintTrial();
+    try {
+      const report = accept(await api('/mission-layout', 'POST', { ...body, props: body.props.filter((_, position) => position !== index) }), body.mode);
+      if (trial !== attempt || identity !== epoch()) return;
+      const routes = routePreview(report);
+      if (!routes || routes.some(route => !route.path.length && baseline[route.seat].path.length)) throw new Error('Invalid trial routes.');
+      attempt.opened = routes.filter(route => route.path.length && !baseline[route.seat].path.length);
+      attempt.message = attempt.opened.length
+        ? `試算移除物件 ${index + 1} 後，出生位 ${attempt.opened.map(route => route.seat + 1).join('、')} 可走到中線。`
+        : `試算移除物件 ${index + 1} 後，沒有新增通往中線的路徑。`;
+    } catch {
+      if (trial === attempt) attempt.message = '通路試算未完成，可重新試算。';
+    } finally {
+      if (trial === attempt) { attempt.pending = false; paintTrial(); }
+    }
+  }
   function paint(prefix, report, message) {
     const summary = $(prefix + '-layout-summary'), list = $(prefix + '-layout-issues'); list.replaceChildren();
     const routes = routePreview(report), routeSummary = $(prefix + '-layout-route-summary');
@@ -44,11 +88,8 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
       ? `未找到通往中線的取樣路徑 · 出生位 ${missing.join('、')}`
       : '五個出生位皆有到中線的取樣路徑。');
     if (prefix === 'draft') {
-      $('layout-routes').replaceChildren(...(routes ?? []).filter(route => route.path.length).map(route => {
-        const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-        line.setAttribute('points', route.path.map(point => `${point.x},${-point.z}`).join(' '));
-        return line;
-      }));
+      drawRoutes('layout-routes', (routes ?? []).filter(route => route.path.length));
+      paintTrial();
     }
     if (!report) { text(summary, message); summary.dataset.status = 'unknown'; return; }
     summary.dataset.status = !report.applies ? 'not-applicable' : report.canStart ? 'valid' : 'invalid';
@@ -82,7 +123,7 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
   }
   function reset() {
     generation++; draftSerial++; launchSerial++; clearTimeout(draftTimer); clearTimeout(launchTimer);
-    draftKey = launchKey = ''; draftReport = launchReport = null; cache.clear(); clearMarks(); $('layout-spawns').replaceChildren();
+    draftKey = launchKey = ''; draftReport = launchReport = trial = null; cache.clear(); clearMarks(); $('layout-spawns').replaceChildren();
     paint('draft', null, '修改配置後自動檢查。草稿仍可保存，開場前須修正問題。');
     paint('launch', null, '選取保存的任務版本後檢查場地。');
   }
@@ -138,5 +179,7 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
   }
   function recheckDraft() { draftKey = ''; scheduleDraft(); }
   function recheckLaunch() { const current = selection(); cache.delete(current.id + '/' + current.mode); launchKey = ''; scheduleLaunch(); }
-  reset(); return { reset, scheduleDraft, scheduleLaunch, canLaunch, rejected, recheckDraft, recheckLaunch };
+  $('layout-try-removal').addEventListener('click', tryRemoval);
+  $('layout-clear-trial').addEventListener('click', clearTrial);
+  reset(); return { reset, scheduleDraft, scheduleLaunch, canLaunch, rejected, recheckDraft, recheckLaunch, clearTrial };
 }

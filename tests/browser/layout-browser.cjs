@@ -9,7 +9,7 @@ module.exports = async function layoutBrowser({ context, api, tokens, base, miss
     enemies: { ...mission.definition.enemies, count: 0 },
     props: [prop('barrel', 0, -3), prop('sandbag', 5.5, 2, 45), prop('barrel', 2, 2), prop('barrel', 2, 2)] }, 'Master', 201);
   const barricade = await api('/missions', 'POST', { ...mission.definition, name: '場地通路・連續沙包',
-    props: [-5, -3, -1, 1, 3, 5].map(x => prop('sandbag', x, -1)) }, 'Master', 201);
+    props: [...[-5, -3, -1, 1, 3, 5].map(x => prop('sandbag', x, -1)), prop('barrel', 4, 3)] }, 'Master', 201);
   const mr = await api('/missions', 'POST', { ...mission.definition, name: 'MR 開場檢查',
     environment: { ...mission.definition.environment, mode: 'MR' }, props: [] }, 'Master', 201);
   const status = (prefix, value) => editor.waitForFunction(({ prefix, value }) => document.querySelector(`#${prefix}-layout-summary`).dataset.status === value, { prefix, value });
@@ -89,6 +89,58 @@ module.exports = async function layoutBrowser({ context, api, tokens, base, miss
     await editor.locator('#launch-layout-route-summary').filter({ hasText: '未找到通往中線' }).waitFor();
     check(await editor.locator('#create-session-form button').isEnabled(), 'A sampled route warning on a saved mission leaves its intentional barricade startable');
     await editor.locator('#tab-missions').click();
+    const trial = editor.locator('#layout-try-removal'), trialStatus = editor.locator('#layout-trial-status');
+    const original = await editor.locator('#draft-status').innerText();
+    await editor.locator('#prop-select').selectOption('6');
+    await trial.click();
+    await trialStatus.filter({ hasText: '沒有新增通往中線' }).waitFor();
+    check(await editor.locator('#layout-trial-routes polyline').count() === 0,
+      'Trying an unrelated barrel leaves the five barricaded routes closed');
+    await editor.locator('#prop-select').selectOption('3');
+    await trial.click();
+    await trialStatus.filter({ hasText: '出生位 1、2、3、4、5 可走到中線' }).waitFor();
+    const trialView = await editor.evaluate(() => ({
+      paths: document.querySelectorAll('#layout-trial-routes polyline').length,
+      blocked: document.querySelectorAll('#layout-spawns [data-route-missing]').length,
+      props: document.querySelectorAll('#prop-layer [data-index]').length,
+      ghost: document.querySelector('#prop-layer [data-layout-trial]')?.dataset.index,
+      draft: document.querySelector('#draft-status').textContent
+    }));
+    check(trialView.paths === 5 && trialView.blocked === 5 && trialView.props === 7
+      && trialView.ghost === '3' && trialView.draft === original,
+      'Removing a wall segment in the trial draws five separate paths while keeping the actual draft unchanged');
+    await editor.screenshot({ path: path.join(screenshots, 'layout-removal-trial.png'), fullPage: true });
+    await editor.locator('#layout-clear-trial').click();
+    check(await editor.locator('#layout-trial-routes polyline').count() === 0
+      && await editor.locator('#prop-layer [data-layout-trial]').count() === 0,
+      'Clearing the trial restores the original view without editing an object');
+    let releaseTrial, requestedTrial;
+    const trialGate = new Promise(resolve => { releaseTrial = resolve; });
+    const trialRequested = new Promise(resolve => { requestedTrial = resolve; });
+    let deliverTrial;
+    const trialDelivered = new Promise(resolve => { deliverTrial = resolve; });
+    const holdTrial = async route => {
+      try {
+        const response = await route.fetch();
+        requestedTrial();
+        await trialGate;
+        await route.fulfill({ response });
+        deliverTrial(true);
+      } catch { requestedTrial(); deliverTrial(false); }
+    };
+    await editor.route('**/api/mission-layout', holdTrial);
+    try {
+      await trial.click();
+      await trialRequested;
+      await editor.locator('#prop-select').selectOption('6');
+    } finally {
+      releaseTrial();
+      await trialDelivered;
+      await editor.unroute('**/api/mission-layout', holdTrial);
+    }
+    check(await trialDelivered && await trialStatus.innerText() === '可試算移除物件 7 後的通路。'
+      && await editor.locator('#layout-trial-routes polyline').count() === 0,
+      'A delivered trial for an older object selection cannot draw paths for the new selection');
     await editor.locator('#prop-select').selectOption('3');
     await editor.locator('#remove-prop').click();
     await editor.locator('#draft-layout-route-summary').filter({ hasText: '五個出生位皆有' }).waitFor();

@@ -23,6 +23,7 @@ const closure = mountClosure(() => state, logout);
 const alignment = mountAlignment(api, download);
 const placement = mountLayout({ api, epoch: () => state.epoch, active: () => !!state.actor, editable: master,
   draft: () => ({ experienceMode: $('draft-mode').value, mode: $('layout-session-mode').value, enemyCount: Number($('draft-count').value), props: structuredClone(state.props) }),
+  selectedProp: () => state.prop,
   selection: () => ({ id: $('launch-mission').value, mode: $('launch-mode').value }), changed: applyPermissions,
   selectProp: index => { if (!state.props[index]) return; finishPropGesture(); state.prop = index; renderProps(); $('prop-select').focus(); } });
 let timer;
@@ -450,6 +451,7 @@ function downloadRoomTickets() {
 }
 
 function resetDraft() {
+  placement.clearTrial();
   $('mission-form').reset(); state.props = []; state.prop = -1; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.history = null;
   clearPropHistory();
   renderProps(); renderHistory(); draftStatus(); applyPermissions();
@@ -500,6 +502,7 @@ async function loadDraft(id = $('edit-mission').value, older = false) {
   const revision = await api(`/missions/${older ? id : history.headId}/version`), mission = revision.mission;
   if (epoch !== state.epoch) return;
   if (!await rememberHead(history, epoch)) return;
+  placement.clearTrial();
   const draft = mission.definition;
   $('draft-name').value = draft.name; $('draft-briefing').value = draft.briefing; $('draft-duration').value = draft.durationSeconds;
   setEnvironment('draft', draft.environment); setEnemies('draft', draft.enemies);
@@ -604,6 +607,7 @@ for (const id of ['prop-asset', 'prop-x', 'prop-y', 'prop-z', 'prop-yaw']) $(id)
 });
 
 function tab(name) {
+  if (name !== 'missions') placement.clearTrial();
   finishPropGesture();
   for (const candidate of ['operations', 'missions', 'replay', 'world']) { const active = candidate === name; $(candidate + '-view').hidden = !active; $('tab-' + candidate).classList.toggle('active', active); $('tab-' + candidate).setAttribute('aria-pressed', String(active)); }
   replay.active(name === 'replay'); world.active(name === 'world'); readiness.active(name === 'operations'); connections.active(name === 'operations');
@@ -659,8 +663,9 @@ $('add-sandbag').addEventListener('click', () => addProp('sandbag'));
 $('add-barrel').addEventListener('click', () => addProp('barrel'));
 $('rotate-prop').addEventListener('click', () => { if (state.props[state.prop]) editProp(() => { state.props[state.prop].yawDegrees = (state.props[state.prop].yawDegrees + 15) % 360; }); });
 $('remove-prop').addEventListener('click', () => { if (state.prop >= 0) editProp(() => { state.props.splice(state.prop, 1); state.prop = Math.min(state.prop, state.props.length - 1); }); });
-$('mission-form').addEventListener('input', event => { if (event.target.id !== 'layout-session-mode') dirtyDraft(); });
-$('mission-form').addEventListener('change', event => { if (event.target.id !== 'layout-session-mode') dirtyDraft(); });
+for (const type of ['input', 'change']) $('mission-form').addEventListener(type, event => {
+  if (!['layout-session-mode', 'prop-select'].includes(event.target.id)) dirtyDraft();
+});
 $('layout-session-mode').addEventListener('change', () => placement.scheduleDraft());
 $('layout-recheck-draft').addEventListener('click', () => placement.recheckDraft());
 $('layout-recheck-launch').addEventListener('click', () => placement.recheckLaunch());

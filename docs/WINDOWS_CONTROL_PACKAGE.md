@@ -1,6 +1,8 @@
 # Windows 可攜管理服務
 
-2026-11-09 主包 `artifacts/control-packages/windows-control-0.31.18-win-x64.zip`，52,539,720 bytes，SHA-256 `1d8f6f912f8e01d5ca888705437876ebe5873d051572c263c564daa418f04108`。檔案清單 507 筆，API 執行內容 487 份。解壓後通過 106 項檢查。主控可一次下載全場及五份分房戰績 CSV。 [五房戰績下載](REPORTS.md#一次下載五房戰績)
+2026-11-09 主包 `artifacts/control-packages/windows-control-0.31.19-final-win-x64.zip`，52,542,323 bytes，SHA-256 `28c590b5e3a4480e45fdaa501385dd18cdaf31af49175a5a520f2c2a3abbaa95`。檔案清單 507 筆，API 執行內容 487 份。任務編輯器可預覽移除選取掩體後新開通的路徑。 [通路試算](LAYOUT.md#出生位通路預覽)
+
+0.31.18 的 `artifacts/control-packages/windows-control-0.31.18-win-x64.zip` 已保留，52,539,720 bytes，SHA-256 `1d8f6f912f8e01d5ca888705437876ebe5873d051572c263c564daa418f04108`。主控可一次下載全場及五份分房戰績 CSV。 [五房戰績下載](REPORTS.md#一次下載五房戰績)
 
 0.31.17 的 `artifacts/control-packages/windows-control-0.31.17-win-x64.zip` 已保留，52,538,304 bytes，SHA-256 `ee35a0e627b4993f5b4f50240ccd96e3b6502c49ca5bf970cdc51a5ff84cfeb4`。多房觀戰及回放可快速選房，同時聚焦鏡頭與篩選快照統計。 [觀戰操作](WORLD_RECORDING.md)
 
@@ -28,7 +30,7 @@
 
 2026-11-06 交付包 `control-server-api0.31.0-ui0.31.3-win-x64.zip`，52,484,295 bytes，SHA256 `0bc73d3452638f83363ac663eee8f767c114449bd7b58e6789712b8512c682dc`。控制台 0.31.3 在配票前核對 IPv4 與埠號。解壓包通過 105 項 Windows 檢查，另有 89 項 Node 與 301 項瀏覽器回歸通過。 [開發進度](PROGRESS.md)
 
-API **0.31.0**／控制台 **0.31.18**，管理服務可以獨立解壓執行。`Start-Control.exe`提供繁中介面，API隨包附帶.NET／ASP.NET Core **10.0.14 win-x64**，使用者電腦需要Windows x64及.NET Framework 4.8，管理服務不依賴Python或.NET SDK。遊戲伺服器可使用[獨立伺服器包](WINDOWS_SERVER_PACKAGE.md)，玩家另外啟動，參見[外部玩家流程](EXTERNAL_CLIENTS.md)與[Windows玩家包](WINDOWS_PLAYER_PACKAGE.md)。
+API **0.31.0**／控制台 **0.31.19**，管理服務可以獨立解壓執行。`Start-Control.exe`提供繁中介面，API隨包附帶.NET／ASP.NET Core **10.0.14 win-x64**，使用者電腦需要Windows x64及.NET Framework 4.8，管理服務不依賴Python或.NET SDK。遊戲伺服器可使用[獨立伺服器包](WINDOWS_SERVER_PACKAGE.md)，玩家另外啟動，參見[外部玩家流程](EXTERNAL_CLIENTS.md)與[Windows玩家包](WINDOWS_PLAYER_PACKAGE.md)。
 
 0.31.2 交付包為`artifacts/control-packages/control-server-api0.31.0-ui0.31.2-placement-win-x64.zip`，**52,472,096 bytes／SHA256 `1eac2676113b47c58b5649ce444201e612603167a16d1e5bccb0599fc1dcf9a2`**、504 manifest／484 runtime。新增[場景物件復原／重做](PLACEMENT_HISTORY.md)，新Windows CLI105與實際解壓包29項瀏覽器操作成功；完整89 Node／296 Chromium。沿用原管理啟動器C#來源，沒有新WinForms GUI啟停或native遊戲／Unity建置驗收。
 
