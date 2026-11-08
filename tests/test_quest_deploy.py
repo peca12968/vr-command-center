@@ -10,6 +10,8 @@ import subprocess
 import tempfile
 import time
 import unittest
+import uuid
+import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -59,9 +61,12 @@ exit 98
 """
 
 
-def make_ticket(room, seat, expiry):
+def make_ticket(room, seat, expiry, session=None, player=None, admission=None):
     payload = bytearray(75)
     payload[0], payload[49], payload[50] = 2, room, seat
+    for offset, identity in ((1, session), (17, player), (33, admission)):
+        if identity is not None:
+            payload[offset:offset+16] = identity.bytes_le
     struct.pack_into('>q', payload, 51, expiry)
     def encode(value):
         return base64.urlsafe_b64encode(value).decode('ascii').rstrip('=')
@@ -208,6 +213,138 @@ class QuestDeployTests(unittest.TestCase):
             with self.subTest(failure=failure):
                 self.assert_rejected(self.run_mr('-Serial','fixture',failure=failure), message)
         self.assertNotIn(' install ', self.commands.read_text(encoding='utf-8'))
+
+
+class QuestVenueTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='vr-quest-venue-')
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.path = self.root / 'venue.json'
+        self.expiry = int(time.time()) + 240
+        self.session_ids = [uuid.uuid4() for _ in range(5)]
+        self.players = [uuid.uuid4() for _ in range(25)]
+        self.admissions = [uuid.uuid4() for _ in range(25)]
+
+    def config(self, room, seat, session, port, **changes):
+        index = (room - 1) * 5 + seat
+        claims = {'session':session, 'player':self.players[index], 'admission':self.admissions[index],
+                  'expiry':self.expiry}
+        claims.update(changes)
+        return {'role':'Client', 'address':'192.168.1.10', 'port':port,
+                'joinTicket':make_ticket(room, seat, **claims)}
+
+    def prepare(self, topology):
+        manifest = {'version':1, 'topology':topology, 'rooms':[]}
+        rooms = {}
+        for room in range(1, 6):
+            session, port = (self.session_ids[0], 7777) if topology == 'Linked' else (self.session_ids[room-1], 7776 + room)
+            plan = self.root / f'calibration {room}.json'
+            markers = [{'x':-2,'z':-2}, {'x':2,'z':-2}, {'x':0,'z':2}]
+            plan.write_text(json.dumps({'version':1, 'profile':'room-floor-alignment-v1', 'roomId':room,
+                'withinTolerance':True, 'roomOrigin':{'x':(room-3)*14,'z':0}, 'markers':[
+                    {'name':name,'room':point,'tracking':point} for name, point in zip('ABC', markers)]}), encoding='utf-8')
+            manifest['rooms'].append({'roomId':room, 'sessionId':str(session), 'ticketsZip':f'room {room}.zip',
+                                      'alignmentFile':plan.name})
+            rooms[room] = {f'room-{room:02}-seat-{seat+1:02}.json':self.config(room, seat, session, port) for seat in range(5)}
+        return manifest, rooms
+
+    def run_venue(self, manifest, rooms, *flags):
+        self.path.write_text(json.dumps(manifest), encoding='utf-8')
+        for room, entries in rooms.items():
+            with zipfile.ZipFile(self.root / f'room {room}.zip', 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+                for name, data in entries.items():
+                    archive.writestr(name, data if isinstance(data, str) else json.dumps(data))
+        return subprocess.run(['pwsh','-NoProfile','-NonInteractive','-File',str(ROOT / 'scripts/deploy-quest.ps1'),
+                               '-VenueManifest',str(self.path),*flags], capture_output=True, encoding='utf-8', timeout=20)
+
+    def assert_rejected(self, result, message):
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn(message, result.stderr)
+        self.assertEqual('', result.stdout)
+        self.assertNotIn('v2.', result.stderr)
+
+    def test_both_topologies_check_all_twenty_five_seats_without_printing_tickets(self):
+        for topology, endpoint_count in (('Linked',1), ('Independent',5)):
+            with self.subTest(topology=topology):
+                manifest, rooms = self.prepare(topology)
+                manifest['rooms'].reverse()
+                rooms[5]['room-05-seat-05.json'] = self.config(5, 4, uuid.UUID(manifest['rooms'][0]['sessionId']),
+                                                              7777 if endpoint_count == 1 else 7781, expiry=self.expiry-30)
+                result = self.run_venue(manifest, rooms)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertNotIn('v2.', result.stdout)
+                self.assertNotIn(str(self.players[0]), result.stdout)
+                self.assertNotIn(str(self.session_ids[0]), result.stdout)
+                self.assertNotIn(str(self.admissions[0]), result.stdout)
+                report = json.loads(result.stdout)
+                self.assertEqual((topology,25), (report['topology'],report['seats']))
+                self.assertEqual(5, len(report['rooms']))
+                self.assertEqual(endpoint_count, len({room['endpoint'] for room in report['rooms']}))
+                self.assertEqual(time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(self.expiry-30)), report['earliestExpiryUtc'][:19])
+                for index, room in enumerate(report['rooms'], 1):
+                    self.assertEqual({'roomId','seats','endpoint','alignmentSha256'}, set(room))
+                    self.assertEqual((index,5), (room['roomId'],room['seats']))
+                    self.assertEqual(hashlib.sha256((self.root / f'calibration {index}.json').read_bytes()).hexdigest(), room['alignmentSha256'])
+
+    def test_wrong_session_wrong_seat_and_expiry_are_located(self):
+        manifest, rooms = self.prepare('Linked')
+        name = 'room-02-seat-04.json'
+        for config, message in (
+                (self.config(2, 3, self.session_ids[1], 7777), 'does not match the expected session or seat'),
+                (self.config(2, 2, self.session_ids[0], 7777), 'does not match the expected session or seat'),
+                (self.config(2, 3, self.session_ids[0], 7777, expiry=self.expiry-300), 'Player ticket has expired')):
+            with self.subTest(message=message):
+                rooms[2][name] = config
+                self.assert_rejected(self.run_venue(manifest, rooms), 'Room 2 seat 4: ' + message if 'expired' in message else 'Room 2 seat 4 ticket ' + message)
+
+    def test_distinct_player_and_admission_are_required_across_rooms(self):
+        manifest, rooms = self.prepare('Independent')
+        for claim, value in (('player', self.players[0]), ('admission', self.admissions[0])):
+            with self.subTest(claim=claim):
+                rooms[4]['room-04-seat-01.json'] = self.config(4, 0, self.session_ids[3], 7780, **{claim:value})
+                self.assert_rejected(self.run_venue(manifest, rooms), 'Room 4 seat 1 repeats a player or admission')
+
+    def test_topology_checks_session_and_endpoint_counts(self):
+        manifest, rooms = self.prepare('Linked')
+        manifest['topology'] = 'Independent'
+        self.assert_rejected(self.run_venue(manifest, rooms), 'Independent requires 5 distinct session(s)')
+        manifest, rooms = self.prepare('Linked')
+        for config in rooms[5].values():
+            config['port'] = 7778
+        self.assert_rejected(self.run_venue(manifest, rooms), 'Linked requires 1 distinct session(s) and 1 distinct game-server endpoint(s)')
+        manifest, rooms = self.prepare('Independent')
+        for config in rooms[5].values():
+            config['port'] = 7777
+        self.assert_rejected(self.run_venue(manifest, rooms), 'Independent requires 5 distinct session(s) and 5 distinct game-server endpoint(s)')
+
+    def test_endpoint_must_be_canonical_and_consistent_in_a_room(self):
+        manifest, rooms = self.prepare('Linked')
+        config = rooms[3]['room-03-seat-01.json']
+        config['address'] = '127.1'
+        self.assert_rejected(self.run_venue(manifest, rooms), 'Room 3 seat 1 needs a canonical unicast IPv4 address')
+        config.update(address='192.168.1.10', port=7778)
+        self.assert_rejected(self.run_venue(manifest, rooms), 'Room 3 contains different game-server endpoints')
+
+    def test_room_manifest_and_archive_reject_mixed_alignment_and_unexpected_files(self):
+        manifest, rooms = self.prepare('Linked')
+        manifest['rooms'][3]['alignmentFile'] = manifest['rooms'][1]['alignmentFile']
+        self.assert_rejected(self.run_venue(manifest, rooms), 'ticket is for room 4; the alignment export is for room 2')
+        manifest, rooms = self.prepare('Linked')
+        rooms[2]['../room-02-seat-05.json'] = rooms[2].pop('room-02-seat-05.json')
+        self.assert_rejected(self.run_venue(manifest, rooms), 'Room 2 is missing the expected seat 5 connection file')
+        manifest, rooms = self.prepare('Linked')
+        rooms[2].pop('room-02-seat-05.json')
+        self.assert_rejected(self.run_venue(manifest, rooms), 'Room 2 must contain exactly five seat connection files')
+        manifest, rooms = self.prepare('Linked')
+        rooms[2]['room-02-seat-05.json'] = '{"joinTicket":"PRIVATE_CANARY"}' + ' '*4096
+        rejected = self.run_venue(manifest, rooms)
+        self.assert_rejected(rejected, 'Room 2 seat 5 contains an invalid connection JSON file')
+        self.assertNotIn('PRIVATE_CANARY', rejected.stderr)
+
+    def test_venue_parameters_cannot_invoke_adb(self):
+        manifest, rooms = self.prepare('Linked')
+        self.assert_rejected(self.run_venue(manifest, rooms, '-Serial', 'device'), 'Parameter set cannot be resolved')
 
 
 if __name__ == '__main__':

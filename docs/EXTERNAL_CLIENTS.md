@@ -48,6 +48,8 @@ Quest仍使用[QUEST3](QUEST3.md)的部署方式，實機未驗。工具整場�
 
 例如 `room-03-connections.zip` 裡的 `room-03-seat-01.json` 對應房間 3 的席位 1。按控制台名冊核對席位，個別交付 JSON。ZIP 最多含五份原四欄格式的連線檔，皆使用五分鐘票券。整份 ZIP 由負責配票的操作員保管。
 
+Quest MR 滿席部署可先用清單一次核對五房 ZIP、場次 ID、端點及各房校正檔，再逐席部署。 [五房 25 席部署預檢](QUEST3.md#五房-25-席部署預檢)
+
 `POST /api/sessions/{id}/rooms/{roomId}/join-ticket-bundle` 接受 IPv4、埠與該房間完整的玩家 ID 及 admission ID。服務以一次名冊快照核對整組後才產生 ZIP，成功回應帶 `Cache-Control: no-store`。名冊已變更時回應 409，重新整理後核對席位再下載。遊戲伺服器仍依當前 admission 驗票，名冊異動會使相應的舊票券失效。
 
 ## 結束與保存

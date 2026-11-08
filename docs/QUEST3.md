@@ -171,6 +171,32 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connect
 
 正式部署會先執行相同檢查，再把當次核對的校正檔內容複製到頭盔。玩家設定記錄該份內容的 SHA-256。頭盔讀入時核對檔案、房間和標記，再以當次 OpenXR 追蹤重新量測。量測、回到出生位與原點失效的流程見 [場地配置](LAYOUT.md#quest-3-場地對位)。ADB 實機安裝、頭盔取樣與 MR 透視列入設備驗收。
 
+### 五房 25 席部署預檢
+
+在五房各有五位玩家後，從控制台逐房下載「房間連線檔 ZIP」和校正 JSON。保留原 ZIP，將下列清單存成 `venue.json`，用控制台顯示的場次 ID 替換範例。相對路徑以 `venue.json` 所在資料夾為基準。 [按房間下載連線檔](EXTERNAL_CLIENTS.md#按房間下載連線檔)
+
+```json
+{
+  "version": 1,
+  "topology": "Linked",
+  "rooms": [
+    {"roomId": 1, "sessionId": "12345678-1234-1234-1234-123456789abc", "ticketsZip": "room-01-connections.zip", "alignmentFile": "room-1-alignment.json"},
+    {"roomId": 2, "sessionId": "12345678-1234-1234-1234-123456789abc", "ticketsZip": "room-02-connections.zip", "alignmentFile": "room-2-alignment.json"},
+    {"roomId": 3, "sessionId": "12345678-1234-1234-1234-123456789abc", "ticketsZip": "room-03-connections.zip", "alignmentFile": "room-3-alignment.json"},
+    {"roomId": 4, "sessionId": "12345678-1234-1234-1234-123456789abc", "ticketsZip": "room-04-connections.zip", "alignmentFile": "room-4-alignment.json"},
+    {"roomId": 5, "sessionId": "12345678-1234-1234-1234-123456789abc", "ticketsZip": "room-05-connections.zip", "alignmentFile": "room-5-alignment.json"}
+  ]
+}
+```
+
+```powershell
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueManifest .\venue.json
+```
+
+`Linked` 要求五房共用場次 ID 與 UDP 端點。五個獨立房請改用 `Independent`，填入各房自己的場次 ID，並使用五個不同端點。同一 IP 使用不同 UDP 埠也符合獨立模式。檢查會比對每個 ZIP 內的五個席位、票券場次及房號、25 個不重複的玩家與入場識別，以及各房校正檔。成功時輸出各房端點、校正檔 SHA-256 與最早到期 UTC，無票券內容。失敗時回傳非零結束碼。
+
+此指令只讀取檔案。票券效期依本機 UTC 判斷，簽章和當前名冊仍由遊戲伺服器核對。預檢後，請解出各席位的 JSON，照原單機指令部署，並為同一房使用預檢清單指定的校正檔。裝置安裝、實體校正、MR 透視與 UDP 可達性需在現場驗收。
+
 ### Quest 3 透視呈現
 
 Unity 0.43.0 的 Quest 開發版可用 `-Passthrough` 在已開啟的 VR 場次中使用 Meta 的透視合成層。部署須附同一房間的校正檔。玩家進入 Preparing 或 Paused 後量測 A、B、C，並依提示回到遊戲起點。
