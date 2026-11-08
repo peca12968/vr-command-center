@@ -173,7 +173,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connect
 
 ### 五房 25 席部署預檢
 
-在五房各有五位玩家後，從控制台逐房下載「房間連線檔 ZIP」和校正 JSON。保留原 ZIP，將下列清單存成 `venue.json`，用控制台顯示的場次 ID 替換範例。相對路徑以 `venue.json` 所在資料夾為基準。 [按房間下載連線檔](EXTERNAL_CLIENTS.md#按房間下載連線檔)
+在五房各有五位玩家後，從控制台逐房下載「房間連線檔 ZIP」和校正 JSON。保留原 ZIP，將下列清單存成 `venue.json`。用 Windows 遊戲伺服器啟動器選場時顯示的「場次ID」替換範例，也可從管理 API `GET /api/sessions` 取得場次的 `id`。相對路徑以 `venue.json` 所在資料夾為基準。 [按房間下載連線檔](EXTERNAL_CLIENTS.md#按房間下載連線檔)
 
 ```json
 {
