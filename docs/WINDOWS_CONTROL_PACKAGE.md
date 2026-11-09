@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-09 `windows-control-0.31.34-win-x64.zip` 加入全館批次結束與原場次的封存總覽。ZIP 為 52,638,294 bytes，SHA-256 `d2e0a13b0f7d9b35708f1c75b9cc5e1527422b55d2d5215080685a6d070c68d8`。解壓核對 516 個清單檔案，含 496 個執行環境檔案，通過 106 項管理包及 25 項 Chromium 專項。 [全館收尾](SESSION_CLOSURE.md#全館批次結束)
+
 2026-11-09 `windows-control-0.31.33-win-x64.zip` 加入全館批次開始，並由各房執行中快照確認套用。ZIP 為 52,631,401 bytes，SHA-256 `3169d74682ec46e6a2d4cc249a36821e9960c4ac22d85d9b61b2bc9bf5ef43b3`。解壓核對 516 個清單檔案，含 496 個執行環境檔案，通過 106 項管理包及 18 項 Chromium 專項。 [全館開始](MISSION_CLOCK.md#全館開始)
 
 2026-11-09 `windows-control-0.31.32-win-x64.zip` 在房卡顯示全館暫停與繼續的遊戲端確認，並要求各目標場次確認暫停後才能批次繼續。ZIP 為 52,628,544 bytes，SHA-256 `29f5379275ebb5f15c1aae4f51a0e02641ab92f52b6b2559a10f8f3751aa261e`。解壓核對 516 個清單檔案，含 496 個執行環境檔案，通過 106 項管理包及 14 項 Chromium 專項檢查。 [全館操作](MISSION_CLOCK.md#全館暫停與繼續)
