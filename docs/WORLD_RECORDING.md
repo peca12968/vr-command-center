@@ -1,5 +1,13 @@
 # 持久世界錄製與觀察 v0.16
 
+## 從房卡或全館收尾開啟
+
+Windows 管理包 0.31.38 起，使用中的房卡提供「即時觀戰」。控制台直接連到該房當前場次，從該房俯視開始。合併場仍可用原有的房間切換與自由鏡頭查看其他角度。
+
+主控在「最近一次全館收尾」可直接按「回放原場次」。控制台核對原場次、錄製來源及封存尾端，從第一格播放。獨立場從原房俯視開始，合併場從全場總覽開始。若原錄製仍未封存但已有保存資料，可按「回放已保存片段」，從第一格播放到收尾表確認的最後一格；之後可使用原有的「檢查新保存快照」。
+
+房間重用後，收尾仍開啟原場次。若原錄製暫時無法取得，畫面會保留未選取狀態並提示重試。`GET /api/venue/closure` 在有可讀取資料時提供 `replay.streamId` 與 `replay.throughSequence`，供控制台核對播放來源與界線。
+
 API0.30新增[來源連線公告](EXTERNAL_CLIENTS.md)：worlds.db的connection_endpoints保存session／stream／owner綁定的不可變地址／port，GET供控制台、PUT限GameServer owner且world header已存在。原header／世界schema1不變，公告不是連通性或戰鬥授權。
 
 API0.29新增唯讀[玩家參戰快照](PLAYER_READINESS.md)，以最後接受幀的Observed入場核對當前名冊，回報擷取年齡與狀態、不傳頭手座標。世界schema／歷史及原始header不變；GameServer不能使用此控制台診斷。

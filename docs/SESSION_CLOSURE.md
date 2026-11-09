@@ -8,6 +8,8 @@ Windows 管理包 0.31.34 起，主控可在「全館場次控制」按「結束
 
 管理包 0.31.37 起，戰鬥資料全部完成後可從同一區下載本批戰績 ZIP。 [戰績匯出](REPORTS.md#下載全館結束批次)
 
+管理包 0.31.38 起，可從同一表直接開啟原場次回放或已保存片段。 [觀戰與回放](WORLD_RECORDING.md#從房卡或全館收尾開啟)
+
 若送出後回覆遺失，可重試確認原批次。管理端 `GET /api/venue/phase` 提供 `end` 預覽，`POST /api/venue/phase` 使用 `action: "End"`、原 `sessionId` 與 `phaseSinceSequence` 及同一個 `Idempotency-Key`。`GET /api/venue/closure` 提供主控最近一次依保存時間排序的批次，含各原場次的房號、結束序號、戰鬥及世界封存狀態。個別場次結束時仍可從本場的收尾面板追蹤。
 
 保存全館批次結束紀錄的管理資料庫須由 0.31.34 或更新的管理包開啟。
