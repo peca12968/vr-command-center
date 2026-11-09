@@ -200,6 +200,8 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `sessions[].roomAlignments` | 選用。核對 MR 校正時，每個 MR 場次按房號填原校正檔，例如 `{"2":"room-02-alignment.json"}` |
 | `sessions[].players` | 每房五筆。每筆填玩家裝置實際使用的 IPv4 字串 `address` 及原日誌路徑 `log`。Quest 3 原 logcat 另填數字 `logcatPid`，例如 `7342` |
 
+若使用 Quest 整批擷取，從 `capture-report.json` 依 `sessionId` 和 `roomId` 取用 `complete` 為 `true` 的席位，將 `log` 路徑依清單位置調整，再填入 `logcatPid` 和原 IPv4。 [整批擷取](QUEST3.md#一次擷取五房-quest-日誌)
+
 路徑可以是絕對路徑，或相對於 `venue.json` 所在資料夾。同一檔案只能使用一次。例如獨立模式下，第 1 房的清單項目可由下列 PowerShell 建立。請依實際驗收配置填入各席地址與檔名。
 
 ```powershell

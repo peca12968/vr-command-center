@@ -435,6 +435,20 @@ python .\scripts\capture-quest-field-log.py --adb $adb --serial $serial `
 
 MR 場次可一併提供原部署 ZIP 中的房間校正 JSON 與關閉後的 `.worldlog`，對照當次鎖定值。 [核對 MR 校正封存](EXTERNAL_CLIENTS.md#核對-mr-校正封存)
 
+### 一次擷取五房 Quest 日誌
+
+使用 Python 3.12 和 PowerShell 7。各席完成部署並啟動遊戲後，提供同一份原五房 VR、MR 或混合部署 ZIP，以及部署時使用的版本 1 裝置清單。輸出資料夾須尚未建立，且其上層須已存在。
+
+```powershell
+python .\scripts\capture-quest-field-log.py --adb $adb `
+    --venue-bundle .\vr-venue-connections.zip --device-map .\device-map.json `
+    --output-directory .\quest-capture --seconds 1800
+```
+
+預設要求完整 25 席。若名冊混有 VIVE，使用只列 Quest 席位的部署清單並加上 `--allow-partial-map`。擷取並行執行。看到 `venue-capture-ready` 代表清單各席都已讀到對應程序的啟動記錄，再依管理台確認入場及追蹤後開場。已入場玩家可沿用原部署包的票券資料核對日誌，包含擷取時已過期的原票券。需要重新入場時仍依遊戲伺服器的票券規則。
+
+場次結束後，`capture-report.json` 依房號、席位及場次列出完整日誌、`logcatPid` 和 SHA-256。任一席失敗時，整批回傳退出碼 1，已完成的日誌與可用的 `.partial` 各自保留。依報告取用完整日誌，再加入各頭盔實際使用的 IPv4，交給場館驗收工具比對伺服器端紀錄。 [五房驗收清單](EXTERNAL_CLIENTS.md#一次核對五房-25-席)
+
 ## 連線與仍待實作事項
 
 一個桌面伺服器程序綁定一個管理場次；五房 Independent 使用各自程序／UDP 埠，全連線則使用一份 Linked 場次與共同伺服器。助手目前只產生單房 Independent 設定；Linked 名冊與票券可透過 API 建立。場景用房間原點平移安排五區，尚無實體場館對位或共用錨點。

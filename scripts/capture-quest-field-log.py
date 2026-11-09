@@ -1,4 +1,4 @@
-"""Preserve one Quest game's original logcat from startup to its final disconnect."""
+"""Preserve original Quest logcat for one player or the mapped venue seats."""
 
 import argparse
 import asyncio
@@ -52,7 +52,11 @@ def quest_pid(adb, timeout):
     return int(pid)
 
 
-async def read_capture(child, adb, pid, port, admission, log, deadline):
+def report_ready(pid, **seat):
+    print(json.dumps({'stage': 'capture-ready', 'logcatPid': pid, **seat}), file=sys.stderr, flush=True)
+
+
+async def read_capture(child, adb, pid, port, admission, log, deadline, on_ready):
     startup_deadline = min(deadline, time.monotonic() + STARTUP_SECONDS)
     next_pid_check = time.monotonic() + PID_CHECK_SECONDS
     started = final_seen = False
@@ -83,7 +87,7 @@ async def read_capture(child, adb, pid, port, admission, log, deadline):
             field.require(process == str(pid) and not started and field.quest_startup_on_port(message, port),
                           'Quest startup differs from the original process or game port')
             started = True
-            print(json.dumps({'stage': 'capture-ready', 'logcatPid': pid}), file=sys.stderr, flush=True)
+            on_ready(pid)
         elif message.startswith(field.PLAYER_MARKERS):
             field.require(process == str(pid) and started, 'Player marker is outside the original Quest startup or process')
             if message.startswith('VR_CLIENT_DEBRIEF_FINAL '):
@@ -104,7 +108,7 @@ async def read_capture(child, adb, pid, port, admission, log, deadline):
                         'sha256': hashlib.sha256(captured).hexdigest(), 'scope': 'quest-logcat-only'}
 
 
-async def capture(adb, port, admission, output, seconds):
+async def capture(adb, port, admission, output, seconds, on_ready=report_ready):
     partial = output.with_name(output.name + '.partial')
     field.require(not os.path.lexists(output) and not os.path.lexists(partial), 'Choose a new capture output path')
     deadline = time.monotonic() + seconds
@@ -114,7 +118,7 @@ async def capture(adb, port, admission, output, seconds):
                                                     '-v', 'threadtime', '-s', 'Unity:I',
                                                     stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
         try:
-            report = await read_capture(child, adb, pid, port, admission, log, deadline)
+            report = await read_capture(child, adb, pid, port, admission, log, deadline, on_ready)
         finally:
             if child.returncode is None:
                 try:
@@ -135,25 +139,95 @@ async def capture(adb, port, admission, output, seconds):
     return report
 
 
+def venue_plan(bundle, device_map, partial):
+    pwsh = shutil.which('pwsh')
+    field.require(pwsh is not None, 'Install PowerShell 7 to read the original deployment ZIP')
+    command = [pwsh, '-NoProfile', '-NonInteractive', '-File', str(Path(__file__).with_name('deploy-quest.ps1')),
+               '-ReadCapturePlan', '-VenueBundle', str(bundle.resolve()), '-DeviceMap', str(device_map.resolve())]
+    if partial:
+        command.append('-AllowPartialMap')
+    try:
+        result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=20)
+    except subprocess.TimeoutExpired:
+        raise field.EvidenceError('Deployment ZIP and device map validation timed out') from None
+    field.require(result.returncode == 0, 'Check the original deployment ZIP and version 1 device map')
+    return field.read_json(result.stdout.decode('utf-8-sig'))
+
+
+async def capture_venue(adb, plan, directory, seconds):
+    directory.mkdir()
+    ready = 0
+    failed = False
+
+    async def capture_seat(row):
+        nonlocal ready, failed
+        seat = {'roomId': row['roomId'], 'seat': row['seat']}
+        source = dict(seat, sessionId=row['sessionId'], port=row['port'])
+        admission = {key: row[key] for key in ('sessionId', 'playerId', 'admissionId', 'roomId')}
+        log = directory / f"room-{seat['roomId']:02}-seat-{seat['seat']:02}-logcat.txt"
+
+        def on_ready(pid):
+            nonlocal ready
+            report_ready(pid, **seat)
+            ready += 1
+            if ready == len(plan['seats']) and not failed:
+                print(json.dumps({'stage': 'venue-capture-ready', 'seats': ready}), file=sys.stderr, flush=True)
+
+        try:
+            report = await capture([*adb, '-s', row['serial']], source['port'], admission, log, seconds, on_ready)
+        except (field.EvidenceError, OSError, UnicodeError, ValueError, TimeoutError, RecursionError) as error:
+            failed = True
+            reason = str(error) if isinstance(error, field.EvidenceError) else 'Check ADB and the capture directory'
+            print(json.dumps({'stage': 'capture-failed', **seat, 'reason': reason}), file=sys.stderr, flush=True)
+            partial = log.with_name(log.name + '.partial')
+            return {**source, 'complete': False, 'reason': reason, **({'partial': partial.name} if partial.is_file() else {})}
+        return {**source, 'complete': True, 'log': log.name, 'logcatPid': report['logcatPid'],
+                'bytes': report['bytes'], 'sha256': report['sha256']}
+
+    seats = await asyncio.gather(*(capture_seat(row) for row in plan['seats']))
+    captured = sum(row['complete'] for row in seats)
+    summary = {'version': 1, 'complete': captured == len(seats), 'topology': plan['topology'],
+               'expectedSeats': len(seats), 'capturedSeats': captured, 'scope': 'quest-logcat-only'}
+    with (directory / 'capture-report.json').open('x', encoding='utf-8') as report:
+        json.dump(dict(summary, seats=seats), report, indent=2)
+        report.write('\n')
+    return summary
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--adb', required=True, type=Path, help='Path to the installed ADB executable')
-    parser.add_argument('--serial', required=True, help='ADB serial of the already launched Quest')
-    parser.add_argument('--connection-file', required=True, type=Path, help='Original player connection JSON for this admission')
-    parser.add_argument('--output', required=True, type=Path, help='New output log path in a private directory')
+    parser.add_argument('--serial', help='ADB serial of the already launched Quest')
+    parser.add_argument('--connection-file', type=Path, help='Original player connection JSON for this admission')
+    parser.add_argument('--output', type=Path, help='New output log path in a private directory')
+    parser.add_argument('--venue-bundle', type=Path, help='Original five-room deployment ZIP for concurrent capture')
+    parser.add_argument('--device-map', type=Path, help='Version 1 Quest device map used for deployment')
+    parser.add_argument('--allow-partial-map', action='store_true', help='Capture only the explicitly mapped Quest seats')
+    parser.add_argument('--output-directory', type=Path, help='New private directory for venue captures and the report')
     parser.add_argument('--seconds', type=int, default=1800, help='Total capture deadline, 1 through 7200 seconds')
     args = parser.parse_args()
     try:
         field.integer(args.seconds, 1, 7200)
-        field.require(re.fullmatch(r'[A-Za-z0-9\[][A-Za-z0-9._:%\[\]-]{0,127}', args.serial), 'Use a valid explicit ADB serial')
         field.require(args.adb.is_file(), 'Provide the installed ADB executable')
-        port, admission = read_connection(args.connection_file)
-        report = asyncio.run(capture([str(args.adb.resolve()), '-s', args.serial], port, admission, args.output, args.seconds))
+        adb = [str(args.adb.resolve())]
+        single = (args.serial, args.connection_file, args.output)
+        venue = (args.venue_bundle, args.device_map, args.output_directory)
+        if any(venue) or args.allow_partial_map:
+            field.require(all(venue) and not any(single), 'Use a venue ZIP, device map and output directory together')
+            plan = venue_plan(args.venue_bundle, args.device_map, args.allow_partial_map)
+            report = asyncio.run(capture_venue(adb, plan, args.output_directory, args.seconds))
+        else:
+            field.require(all(single), 'Use a serial, connection file and output log together')
+            field.require(re.fullmatch(r'[A-Za-z0-9\[][A-Za-z0-9._:%\[\]-]{0,127}', args.serial), 'Use a valid explicit ADB serial')
+            port, admission = read_connection(args.connection_file)
+            report = asyncio.run(capture([*adb, '-s', args.serial], port, admission, args.output, args.seconds))
     except field.EvidenceError as error:
         parser.exit(1, f'Quest capture incomplete. {error}.\n')
     except (OSError, UnicodeError, ValueError, TimeoutError, RecursionError, KeyboardInterrupt):
         parser.exit(1, 'Quest capture incomplete. Check ADB and use a new output path.\n')
     print(json.dumps(report))
+    if not report['complete']:
+        sys.exit(1)
 
 
 if __name__ == '__main__':

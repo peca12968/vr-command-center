@@ -9,8 +9,9 @@ from pathlib import Path
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
-from threading import Thread
+from threading import Event, Thread
 import time
 import unittest
 import uuid
@@ -329,15 +330,19 @@ class QuestVenueTests(unittest.TestCase):
         files['venue.json'] = json.dumps(manifest).encode()
         return files, seats
 
-    def run_bundle(self, files, *flags, environment=None, script=ROOT / 'scripts/deploy-quest.ps1'):
+    def write_bundle(self, files):
         bundle = self.root / 'quest-mr-venue.zip'
         with zipfile.ZipFile(bundle, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
             for name, data in files.items():
                 archive.writestr(name, data)
+        return bundle
+
+    def run_bundle(self, files, *flags, environment=None, script=ROOT / 'scripts/deploy-quest.ps1'):
+        bundle = self.write_bundle(files)
         return subprocess.run(['pwsh','-NoProfile','-NonInteractive','-File',str(script),
                                '-VenueBundle',str(bundle),*flags], capture_output=True, encoding='utf-8', timeout=20, env=environment)
 
-    def test_mixed_bundle_requires_mode_specific_files_and_independent_rooms(self):
+    def mixed_bundle(self):
         files, _ = self.vr_bundle('Independent')
         mr, _ = self.bundle('Independent')
         manifest = json.loads(files['venue.json'])
@@ -351,6 +356,10 @@ class QuestVenueTests(unittest.TestCase):
                 for name in (room['alignmentFile'], room['ticketsZip']):
                     files[name] = mr[name]
         files['venue.json'] = json.dumps(manifest)
+        return files, manifest
+
+    def test_mixed_bundle_requires_mode_specific_files_and_independent_rooms(self):
+        files, manifest = self.mixed_bundle()
         preview = self.run_bundle(files)
         self.assertEqual(0, preview.returncode, preview.stderr)
         result = json.loads(preview.stdout)
@@ -371,6 +380,112 @@ class QuestVenueTests(unittest.TestCase):
         document['seats'].reverse()
         path.write_text(json.dumps(document), encoding='utf-8')
         return path, document
+
+    def mock_capture_devices(self, rows, topology, *, held=False, wrong_seat=None):
+        expected = {}
+        for row in rows:
+            room, seat, serial = row['roomId'], row['seat'], row['serial']
+            index = (room - 1) * 5 + seat - 1
+            session = self.session_ids[0] if topology == 'Linked' else self.session_ids[room - 1]
+            port = 7777 if topology == 'Linked' else 7776 + room
+            result = {'version': 1, 'roomId': room, 'sessionId': str(session), 'playerId': str(self.players[index]),
+                      'admissionId': str(uuid.uuid4() if (room, seat) == wrong_seat else self.admissions[index])}
+            def line(message):
+                return f'11-09 14:30:00.000 7342 14325 I Unity   : {message}\r\n'.encode()
+            startup = line(f'VR_NETWORK_STARTED role=Client started=True background=False port={port}')
+            ending = line(f'VR_CLIENT_CONNECTED id={index+1}') + line('VR_CLIENT_DEBRIEF_FINAL ' + json.dumps(result)) + line('VR_CLIENT_DISCONNECTED')
+            # Python's -s flag makes this relative filename stand in for the ADB serial.
+            (self.root / serial).write_text(f'''import sys, time
+from pathlib import Path
+if sys.argv[1:] == ['shell', 'pidof', 'com.vrcommand.quest']:
+    print(7342)
+else:
+    assert sys.argv[1:] == ['logcat', '-b', 'main', '--pid=7342', '-v', 'threadtime', '-s', 'Unity:I']
+    sys.stdout.buffer.write({startup!r})
+    sys.stdout.buffer.flush()
+    until = time.monotonic() + 25
+    while {held!r} and not Path('release').exists() and time.monotonic() < until:
+        time.sleep(.05)
+    sys.stdout.buffer.write({ending!r})
+    sys.stdout.buffer.flush()
+    time.sleep(60)
+''', encoding='utf-8')
+            expected[room, seat] = (str(session), port, startup + ending)
+        return expected
+
+    def capture_command(self, files, mapping, output, *flags):
+        return [sys.executable, str(ROOT/'scripts/capture-quest-field-log.py'), '--adb', sys.executable,
+                '--venue-bundle', str(self.write_bundle(files)), '--device-map', str(mapping),
+                '--output-directory', str(output), '--seconds', '35', *flags]
+
+    def test_venue_capture_starts_all_25_before_end_and_preserves_original_logs(self):
+        self.expiry = int(time.time()) - 1
+        files, configs = self.vr_bundle('Linked')
+        mapping, document = self.device_map()
+        expected = self.mock_capture_devices(document['seats'], 'Linked', held=True)
+        output = self.root / 'capture all'
+        command = self.capture_command(files, mapping, output)
+        lines, ready = [], Event()
+        with subprocess.Popen(command, cwd=self.root, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding='utf-8') as process:
+            def collect():
+                for line in process.stderr:
+                    lines.append(line)
+                    if 'venue-capture-ready' in line:
+                        ready.set()
+            collector = Thread(target=collect)
+            collector.start()
+            try:
+                self.assertTrue(ready.wait(20), lines)
+                self.assertFalse((output/'capture-report.json').exists())
+                self.assertEqual(25, len(list(output.glob('*.partial'))))
+                self.assertEqual(25, sum(json.loads(line)['stage']=='capture-ready' for line in lines))
+            finally:
+                (self.root/'release').touch()
+                process.wait(timeout=25)
+                collector.join(timeout=5)
+            stdout = process.stdout.read()
+            self.assertEqual(0, process.returncode, lines)
+        report = json.loads((output/'capture-report.json').read_text(encoding='utf-8'))
+        self.assertEqual((True, 'Linked', 25, 25), (report['complete'], report['topology'], report['expectedSeats'], report['capturedSeats']))
+        self.assertEqual(sorted(expected), [(row['roomId'], row['seat']) for row in report['seats']])
+        for row in report['seats']:
+            session, port, original = expected[row['roomId'], row['seat']]
+            self.assertEqual((session, port, 7342, len(original), hashlib.sha256(original).hexdigest()),
+                             (row['sessionId'], row['port'], row['logcatPid'], row['bytes'], row['sha256']))
+            self.assertEqual(original, (output/row['log']).read_bytes())
+        self.assertFalse(list(output.glob('*.partial')))
+        self.assertEqual(25, json.loads(stdout)['capturedSeats'])
+        for private in (configs[1]['room-01-seat-01.json']['joinTicket'], 'fixture-01', str(self.root)):
+            self.assertNotIn(private, stdout + ''.join(lines) + json.dumps(report))
+
+    def test_partial_mixed_capture_keeps_success_and_rejects_wrong_admission(self):
+        files, _ = self.mixed_bundle()
+        mapping, document = self.device_map()
+        document['seats'] = [row for row in document['seats'] if (row['roomId'], row['seat']) in {(2, 3), (5, 4)}]
+        mapping.write_text(json.dumps(document), encoding='utf-8')
+        self.mock_capture_devices(document['seats'], 'Independent', wrong_seat=(2, 3))
+        output = self.root/'partial capture'
+        command = self.capture_command(files, mapping, output)
+        missing_flag = subprocess.run(command, cwd=self.root, capture_output=True, encoding='utf-8', timeout=15)
+        self.assertEqual(1, missing_flag.returncode)
+        self.assertFalse(output.exists())
+        result = subprocess.run([*command, '--allow-partial-map'], cwd=self.root, capture_output=True, encoding='utf-8', timeout=20)
+        self.assertEqual(1, result.returncode, result.stderr)
+        report = json.loads((output/'capture-report.json').read_text(encoding='utf-8'))
+        self.assertEqual((False, 'Independent', 2, 1), (report['complete'], report['topology'], report['expectedSeats'], report['capturedSeats']))
+        failed, completed = report['seats']
+        self.assertEqual((2, 3, False), (failed['roomId'], failed['seat'], failed['complete']))
+        self.assertIn('differs from the original player admission', failed['reason'])
+        self.assertTrue((output/failed['partial']).is_file())
+        self.assertEqual((5, 4, True), (completed['roomId'], completed['seat'], completed['complete']))
+        self.assertTrue((output/completed['log']).is_file())
+        self.assertFalse((output/'room-02-seat-03-logcat.txt').exists())
+        self.assertEqual(1, json.loads(result.stdout)['capturedSeats'])
+        before = {path.name: path.read_bytes() for path in output.iterdir()}
+        repeat = subprocess.run([*command, '--allow-partial-map'], cwd=self.root, capture_output=True, encoding='utf-8', timeout=20)
+        self.assertEqual(1, repeat.returncode)
+        self.assertNotIn('capture-ready', repeat.stderr)
+        self.assertEqual(before, {path.name: path.read_bytes() for path in output.iterdir()})
 
     def run_fleet(self, files, mapping, *flags, faults=None, environment=None):
         env = {**os.environ, **(environment or {}), 'VR_QUEST_FLEET_FIXTURE': str(self.root), 'VR_QUEST_FLEET_FAULTS': json.dumps(faults or {})}

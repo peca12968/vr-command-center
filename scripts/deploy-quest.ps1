@@ -8,11 +8,12 @@ param(
     [Parameter(ParameterSetName='Player')][switch]$MixedReality,
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][switch]$CheckOnly,
     [Parameter(Mandatory, ParameterSetName='Venue')][string]$VenueManifest,
-    [Parameter(Mandatory, ParameterSetName='Bundle')][string]$VenueBundle,
+    [Parameter(Mandatory, ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='CapturePlan')][string]$VenueBundle,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,5)][int]$RoomId,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,5)][int]$Seat,
-    [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$DeviceMap,
-    [Parameter(ParameterSetName='Bundle')][switch]$AllowPartialMap,
+    [Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='CapturePlan')][ValidateNotNullOrEmpty()][string]$DeviceMap,
+    [Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='CapturePlan')][switch]$AllowPartialMap,
+    [Parameter(Mandatory, ParameterSetName='CapturePlan')][switch]$ReadCapturePlan,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,2147483647)][int]$ExpectedVersionCode,
     [Parameter(ParameterSetName='Bundle')][switch]$DeployMappedSeats,
     [Parameter(ParameterSetName='Bundle')][switch]$VerifyTrackedSeats,
@@ -49,7 +50,7 @@ function Read-DeploymentJson([string]$Path, [int]$Limit, [string]$Description) {
     }
 }
 
-function Get-PlayerTicketDetails([string]$Ticket) {
+function Get-PlayerTicketDetails([string]$Ticket, [switch]$AllowExpired) {
     if ($Ticket -cnotmatch '\Av2\.([A-Za-z0-9_-]{100})\.[A-Za-z0-9_-]{43}\z') {
         throw 'Use a current v2 player ticket from the management service.'
     }
@@ -60,10 +61,10 @@ function Get-PlayerTicketDetails([string]$Ticket) {
     $expiryBytes = [byte[]]$payload[51..58]
     if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($expiryBytes) }
     $expiry = [BitConverter]::ToInt64($expiryBytes, 0)
-    if ($payload[0] -ne 2 -or $room -notin 1..5 -or $seat -notin 0..4 -or $expiry -gt 253402300799L) {
+    if ($payload[0] -ne 2 -or $room -notin 1..5 -or $seat -notin 0..4 -or $expiry -le 0 -or $expiry -gt 253402300799L) {
         throw 'Use a current v2 player ticket from the management service.'
     }
-    if ($expiry -le [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) {
+    if (-not $AllowExpired -and $expiry -le [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()) {
         throw 'Player ticket has expired. Download a fresh connection file.'
     }
     return @{
@@ -91,7 +92,7 @@ function Read-PlayerConfig($Config) {
         -not (Test-JsonInteger $Config.port) -or $Config.port -lt 1 -or $Config.port -gt 65535 -or $unknown.Count -gt 0) {
         throw 'Use a player-only connection file from the management console or prepare-vr-session.py.'
     }
-    $ticket = Get-PlayerTicketDetails $Config.joinTicket
+    $ticket = Get-PlayerTicketDetails $Config.joinTicket -AllowExpired:$ReadCapturePlan
     if ($null -ne $Config.PSObject.Properties['roomAlignmentSha256']) {
         $hash = $Config.roomAlignmentSha256
         if ($hash -isnot [string] -or $hash -cnotmatch '\A[a-f0-9]{64}\z') { throw 'Use a valid locked MR alignment SHA-256 in the player connection file.' }
@@ -659,6 +660,22 @@ if ($PSCmdlet.ParameterSetName -eq 'Venue') {
     $venue = Read-Venue $manifest $directory
     Confirm-VenueReadback $venue
     $venue.Report | ConvertTo-Json -Depth 4 -Compress
+    return
+}
+
+if ($PSCmdlet.ParameterSetName -eq 'CapturePlan') {
+    if (-not $ReadCapturePlan) { throw 'Specify -ReadCapturePlan for offline log capture planning.' }
+    $map = @(Read-QuestDeviceMap $DeviceMap -Partial:$AllowPartialMap)
+    $venue = Read-VenueBundle $VenueBundle 0 0
+    $seats = foreach ($row in $map) {
+        $ticket = $venue.Connections["$($row.roomId)/$($row.seat)"].Ticket
+        [ordered]@{
+            roomId = $row.roomId; seat = $row.seat; serial = $row.serial; port = $ticket.Config.port
+            sessionId = $ticket.SessionId.ToString('D'); playerId = $ticket.PlayerId.ToString('D')
+            admissionId = $ticket.AdmissionId.ToString('D')
+        }
+    }
+    [ordered]@{ version = 1; topology = $venue.Report.topology; seats = @($seats) } | ConvertTo-Json -Depth 4 -Compress
     return
 }
 
