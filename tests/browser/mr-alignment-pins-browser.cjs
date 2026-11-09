@@ -58,10 +58,16 @@ module.exports = async function mrAlignmentPinsBrowser({ context, api, base, tok
     check(byteCheck.cache === 'no-store' && byteCheck.body.roomId === 1 && byteCheck.body.sha256 === sha(exports.get(1)),
       'Master checks original binary bytes, including BOM and CRLF, without storing or returning a report');
 
-    const a = await create(mission, [1]), b = await create(mission, [2]);
+    let a = await create(mission, [1]);
+    const b = await create(mission, [2]);
+    a = await api(`/sessions/${a.id}/players`, 'POST', { playerId: randomUUID(), name: 'Quest handoff seat', roomId: 1, headset: 'Quest3' }, 'Room1');
     await open('Master'); await select(a);
     check(await panel.isVisible() && await file(1).isVisible() && await file(2).count() === 0 && await submit.isDisabled(),
       'Independent MR exposes only its own room and starts with no lockable file');
+    await page.locator('#ticket-room').selectOption('1');
+    check(await page.locator('[data-player-action=ticket]').isDisabled() && await page.locator('#download-room-tickets').isDisabled()
+      && (await page.locator('#mr-ticket-pin-hint').innerText()).includes('鎖定 MR 校正檔'),
+    'The desk explains why both MR ticket downloads wait for the calibration lock');
     await put(1, exports.get(2));
     await status(1).filter({ hasText: '此檔案屬於房間 2' }).waitFor();
     check(await submit.isDisabled() && (await api(`/sessions/${a.id}`)).sequence === a.sequence,
@@ -104,10 +110,25 @@ module.exports = async function mrAlignmentPinsBrowser({ context, api, base, tok
     const pinned = await api(`/sessions/${a.id}`);
     check(pinned.roomAlignment.room1 === sha(exports.get(1)) && pinned.sequence === a.sequence + 1 && await file(1).isHidden(),
       'Independent lock persists the exact original byte hash and becomes read-only');
+    await open('Room1'); await select(a);
+    await page.locator('#game-address').fill('192.168.1.100');
+    const [single] = await Promise.all([page.waitForEvent('download'), page.locator('[data-player-action=ticket]').click()]);
+    const singleBytes = [];
+    for await (const chunk of await single.createReadStream()) singleBytes.push(chunk);
+    const config = JSON.parse(Buffer.concat(singleBytes));
+    const { joinTicket, ...fields } = config;
+    assert.deepEqual(fields, { role: 'Client', address: '192.168.1.100', port: 7777, roomAlignmentSha256: pinned.roomAlignment.room1 });
+    check(joinTicket.startsWith('v2.') && await panel.isHidden(), 'The room controller downloads the exact pinned MR hash and original ticket without access to pinning');
+    await page.locator('#ticket-room').selectOption('1');
+    const [zip] = await Promise.all([page.waitForEvent('download'), page.locator('#download-room-tickets').click()]);
+    const zipBytes = [];
+    for await (const chunk of await zip.createReadStream()) zipBytes.push(chunk);
+    check(zip.suggestedFilename() === 'room-01-connections.zip' && Buffer.concat(zipBytes).subarray(0,4).equals(Buffer.from([0x50,0x4b,3,4])),
+      'The same room controller can download its MR bundle after the calibration lock');
     await end(a.id); await end(b.id);
 
     const linked = await create(mission, [1,2,3,4,5]);
-    await page.locator('#refresh').click(); await select(linked); await file(5).waitFor();
+    await open('Master'); await select(linked); await file(5).waitFor();
     for (const room of [1,2,3,4]) { await put(room); await checked(room); }
     check(await submit.isDisabled() && (await summary.innerText()).includes('4／5'), 'Linked lock requires all five room files');
     await put(5); await checked(5);

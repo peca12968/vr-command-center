@@ -66,6 +66,10 @@ function uuid() {
 function master() { return state.actor?.role === 'Master'; }
 function manages(session = state.session) { return !!session && (master() || (state.actor?.role === 'RoomController' && session.mode === 'Independent' && session.roomIds[0] === state.actor.roomId)); }
 function ownsRoom(room) { return master() || (state.actor?.role === 'RoomController' && state.actor.roomId === room); }
+function canIssueTicket(session, room) {
+  return !!session && session.state !== 'Ended' && (session.environment.mode !== 'MR'
+    || /^[a-f0-9]{64}$/.test(session.roomAlignment?.[`room${room}`] ?? ''));
+}
 function time(value) { return new Date(value).toLocaleTimeString('zh-TW', { hour12: false }); }
 
 async function api(path, method = 'GET', body, requestId, admissionId, responseType = 'json') {
@@ -85,6 +89,7 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
       if (response.status === 409) {
         if (code === 'mr-readiness-required') message = 'MR 場次尚未就緒。請查看「MR 開場檢查」，並確認等候中的 Quest 3 玩家已完成場地對位。';
         else if (code === 'mr-resume-readiness-required') message = 'MR 場次尚未符合繼續條件。請查看「MR 繼續檢查」。';
+        else if (code === 'mr-alignment-required') message = '請由主控鎖定 MR 校正檔後再配票。';
         else message = path.startsWith('/missions') ? '任務版本已變更或原請求內容不一致；草稿仍保留，可載入最新版或另存新任務。' : '場次狀態或名額已變更，請重新整理並確認後再操作。';
       }
       if (layout) message = '場地配置未通過檢查，請修正並保存新版本後再開場。';
@@ -299,7 +304,13 @@ function applyPermissions() {
   $('player-headset').querySelector('option[value="ViveXr"]').disabled = mixedReality;
   if (mixedReality) $('player-headset').value = 'Quest3';
   $('ticket-fields').disabled = locked || ended || !session;
-  $('download-room-tickets').disabled = locked || ended || !session || !$('ticket-room').value;
+  $('download-room-tickets').disabled = locked || !$('ticket-room').value || !canIssueTicket(session, Number($('ticket-room').value));
+  const pinHint = $('mr-ticket-pin-hint');
+  pinHint.hidden = !mixedReality || ended;
+  const pinMessage = session?.roomAlignment
+    ? 'MR 連線檔帶有主控鎖定的雜湊。部署時請使用對應房間的原始校正檔。'
+    : '請由主控鎖定 MR 校正檔後再配票。';
+  if (pinHint.textContent !== pinMessage) pinHint.textContent = pinMessage;
   connections.update();
   for (const button of document.querySelectorAll('[data-command]')) {
     const action = button.dataset.command, phase = session?.state;
@@ -312,7 +323,10 @@ function applyPermissions() {
   $('include-ended').disabled = locked;
   $('refresh').disabled = !!state.pending;
   document.querySelectorAll('.room-card button').forEach(button => { button.disabled = locked; });
-  document.querySelectorAll('[data-player-room]').forEach(button => { button.disabled = locked || ended || !ownsRoom(Number(button.dataset.playerRoom)); });
+  document.querySelectorAll('[data-player-room]').forEach(button => {
+    const room = Number(button.dataset.playerRoom);
+    button.disabled = locked || ended || !ownsRoom(room) || (button.dataset.playerAction === 'ticket' && !canIssueTicket(session, room));
+  });
   alignmentPins.update();
 }
 function row(cells) { const tr = element('tr'); for (const value of cells) { const td = element('td'); if (value instanceof Node) td.append(value); else td.textContent = value; tr.append(td); } return tr; }
@@ -341,8 +355,9 @@ function renderSession(statistics, events) {
   $('player-count').textContent = `${session.players.length} / ${session.roomIds.length * 5} 人（名冊）`;
   $('roster').replaceChildren(...session.players.map(player => {
     const actions = element('div', undefined, 'button-row');
-    for (const [label, action, cls] of [['下載連線檔', () => downloadTicket(player), 'secondary'], ['移除', () => removePlayer(player), 'danger']]) {
+    for (const [kind, label, action, cls] of [['ticket', '下載連線檔', () => downloadTicket(player), 'secondary'], ['remove', '移除', () => removePlayer(player), 'danger']]) {
       const button = element('button', label, cls + ' small'); button.type = 'button'; button.dataset.playerRoom = player.roomId;
+      button.dataset.playerAction = kind;
       button.addEventListener('click', () => runSession(action)); actions.append(button);
     }
     const participation = element('span', '等待本次入場同步'); participation.dataset.readinessPlayer = player.id; participation.dataset.admission = player.admissionId;
@@ -440,17 +455,24 @@ function ticketDestination() {
   return { address, port };
 }
 async function downloadTicket(player) {
+  const session = state.session;
+  if (!canIssueTicket(session, player.roomId)) return;
   if (!player.admissionId) throw new Error('控制台與 API 版本不一致，請更新服務並重新整理。');
   const destination = ticketDestination();
   if (!destination) return;
-  const ticket = await api(`/sessions/${state.selected}/players/${player.id}/join-ticket`, 'POST', undefined, undefined, player.admissionId);
+  const ticket = await api(`/sessions/${session.id}/players/${player.id}/join-ticket`, 'POST', undefined, undefined, player.admissionId);
   const config = { role: 'Client', ...destination, joinTicket: ticket.ticket };
+  if (session.environment.mode === 'MR') {
+    if (ticket.roomAlignmentSha256 !== session.roomAlignment[`room${player.roomId}`])
+      throw new Error('MR 連線檔的校正雜湊與目前場次不符。');
+    config.roomAlignmentSha256 = ticket.roomAlignmentSha256;
+  }
   download(`quest-player-${player.id}.json`, new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' }));
   notify(`玩家連線檔已產生，有效至 ${time(ticket.expiresAtUtc)}。請將各自檔案配置到對應玩家端。`);
 }
 function downloadRoomTickets() {
   const session = state.session, roomId = Number($('ticket-room').value);
-  if (!session || session.state === 'Ended' || !ownsRoom(roomId) || !session.roomIds.includes(roomId)) return;
+  if (!canIssueTicket(session, roomId) || !ownsRoom(roomId) || !session.roomIds.includes(roomId)) return;
   const destination = ticketDestination();
   if (!destination) return;
   const players = session.players.filter(player => player.roomId === roomId)

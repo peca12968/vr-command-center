@@ -156,14 +156,14 @@ embedded package `com.vrcommand.simulation` 現為 0.11.0。Runtime asmdef 已�
 
 先從管理台下載通過檢查的房間校正檔，再用同一房的玩家設定部署。一般部署可省略 `-AlignmentFile`。
 
-`-CheckOnly` 可在 PowerShell 7 預檢部署檔，適合在接頭盔之前核對。以下以 MR 為例。
+控制台 0.31.24 的 MR 連線檔包含該房鎖定的 `roomAlignmentSha256`。部署工具會自動使用 MR，並在呼叫 ADB 前核對提供的原始校正檔。以下以新下載的 MR 連線檔示範 PowerShell 7 離線預檢。
 
 ```powershell
-pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -CheckOnly -MixedReality `
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -CheckOnly `
   -ClientConfig .\player.json -AlignmentFile .\room-1-alignment.json
 ```
 
-預檢回報房間、從 1 開始計算的席位、票券到期時間、選用模式及校正檔 SHA-256。以本機 UTC 檢查票券效期，並比對票券房號與校正檔，核對 A、B、C 欄位和座標範圍。預檢只讀本機檔案，輸出不含票券。遊戲伺服器仍負責驗簽及核對目前名冊，頭盔會重新計算校正並量測追蹤。票券效期為五分鐘，正式部署時請使用當場新配發的檔案。
+預檢回報房間、從 1 開始計算的席位、票券到期時間、選用模式及校正檔 SHA-256。`alignmentPinsVerified: true` 表示原檔符合連線檔內的鎖定值。預檢只讀本機檔案，輸出不含票券。遊戲伺服器負責驗簽及核對目前名冊，頭盔會重新計算校正並量測追蹤。票券效期為五分鐘，正式部署時請使用當場新配發的檔案。舊四欄 MR 連線檔仍可明確指定 `-MixedReality`，校正檔由伺服器在入場時核對。
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connections\<場次ID>\player-1.json -AlignmentFile .\room-1-alignment.json
@@ -173,7 +173,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connect
 
 ### 五房 25 席部署預檢
 
-在五房各有五位玩家後，從控制台逐房下載「房間連線檔 ZIP」和校正 JSON。保留原 ZIP，將下列清單存成 `venue.json`。用 Windows 遊戲伺服器啟動器選場時顯示的「場次ID」替換範例，也可從管理 API `GET /api/sessions` 取得場次的 `id`。相對路徑以 `venue.json` 所在資料夾為基準。 [按房間下載連線檔](EXTERNAL_CLIENTS.md#按房間下載連線檔)
+主控鎖定校正檔且五房各有五位玩家後，從控制台逐房下載「房間連線檔 ZIP」，並取得各房鎖定的原始校正 JSON。保留原 ZIP，將下列清單存成 `venue.json`。用 Windows 遊戲伺服器啟動器選場時顯示的「場次ID」替換範例，也可從管理 API `GET /api/sessions` 取得場次的 `id`。相對路徑以 `venue.json` 所在資料夾為基準。 [按房間下載連線檔](EXTERNAL_CLIENTS.md#按房間下載連線檔)
 
 ```json
 {
@@ -195,7 +195,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueManifest .\venue.json
 
 `Linked` 要求五房共用場次 ID 與 UDP 端點。五個獨立房請改用 `Independent`，填入各房自己的場次 ID，並使用五個不同端點。同一 IP 使用不同 UDP 埠也符合獨立模式。檢查會比對每個 ZIP 內的五個席位、票券場次及房號、25 個不重複的玩家與入場識別，以及各房校正檔。成功時輸出各房端點、校正檔 SHA-256 與最早到期 UTC，無票券內容。失敗時回傳非零結束碼。
 
-此指令只讀取檔案。票券效期依本機 UTC 判斷，簽章和當前名冊仍由遊戲伺服器核對。預檢後，請解出各席位的 JSON，照原單機指令部署，並為同一房使用預檢清單指定的校正檔。裝置安裝、實體校正、MR 透視與 UDP 可達性需在現場驗收。
+此指令只讀取檔案。若連線檔有鎖定值，須全數使用同一種格式，並逐席核對該房原檔。票券效期依本機 UTC 判斷，簽章和當前名冊由遊戲伺服器核對。預檢後，請解出各席位的 JSON，照單機指令部署。裝置安裝、實體校正、MR 透視與 UDP 可達性需在現場驗收。
 
 ### 啟動 MR 伺服器前鎖定校正檔
 
@@ -203,7 +203,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueManifest .\venue.json
 
 在控制台 0.31.23 的場次面板，開啟「MR 校正檔鎖定」，為每房選取原始校正 JSON。管理服務核對檔案房號、原點和 A、B、C 量測，再依原始位元組計算雜湊。全數顯示「已核對，可鎖定」後，按「鎖定本場校正檔」並確認。等畫面顯示「已鎖定」後再啟動伺服器。若命令回應遺失，可用頁面上方的「重試確認結果」。切換場次或離開操作頁會清除尚未鎖定的選檔。
 
-核對原檔的 `POST /api/room-alignment/check-file` 僅供主控使用。每次讀取最多 16 KiB 的原始校正 JSON，回傳房號與雜湊。原始校正 JSON 請保留作頭盔部署，保存的場次事件包含雜湊。使用命令列自動化時，也可從五房預檢結果取出雜湊後直接發送管理命令。
+核對原檔的 `POST /api/room-alignment/check-file` 僅供主控使用。每次讀取最多 16 KiB 的原始校正 JSON，回傳房號與雜湊。原始校正 JSON 請保留作頭盔部署，保存的場次事件包含雜湊。
 
 以下示範單房 3 的管理 API。`$api` 填管理服務網址，`$sessionId` 填實際場次 ID，`$headers` 使用該實例主控憑證的 `Authorization` 標頭。
 
@@ -243,7 +243,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connect
 加入 Quest 3 玩家，為各席發票券，並準備對應房間的校正檔。同房玩家共用同一份標記配置，各自部署自己的玩家設定。
 
 ```powershell
-pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connections\<場次ID>\player-1.json -AlignmentFile .\room-1-alignment.json -MixedReality
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connections\<場次ID>\player-1.json -AlignmentFile .\room-1-alignment.json
 ```
 
 玩家在準備中完成 A、B、C 三點量測，再回到頭盔提示的起點。主控可在「MR 開場檢查」查看各房就緒人數與等候席位。遊戲伺服器會核對票券房間、所選校正房間與鎖定的校正檔雜湊。全名冊的有效追蹤快照對上目前場次序號後，即可按開始。場中可調整天氣、時段及閃電。 [參戰快照](PLAYER_READINESS.md#mr-開場條件)

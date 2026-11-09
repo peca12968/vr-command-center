@@ -71,13 +71,19 @@ function Test-FloorPoint($Point, [double]$Limit) {
 function Test-JsonInteger($Value) { return $Value -is [int] -or $Value -is [long] }
 
 function Read-PlayerConfig($Config) {
-    $unknown = @($Config.PSObject.Properties.Name | Where-Object { $_ -cnotin @('role','address','port','joinTicket') })
+    $unknown = @($Config.PSObject.Properties.Name | Where-Object { $_ -cnotin @('role','address','port','joinTicket','roomAlignmentSha256') })
     if ($Config.role -isnot [string] -or $Config.role -cne 'Client' -or $Config.joinTicket -isnot [string] -or
         $Config.address -isnot [string] -or $Config.address -notmatch '\A[^\s]+\z' -or
         -not (Test-JsonInteger $Config.port) -or $Config.port -lt 1 -or $Config.port -gt 65535 -or $unknown.Count -gt 0) {
         throw 'Use a player-only connection file from the management console or prepare-vr-session.py.'
     }
-    return Get-PlayerTicketDetails $Config.joinTicket
+    $ticket = Get-PlayerTicketDetails $Config.joinTicket
+    if ($null -ne $Config.PSObject.Properties['roomAlignmentSha256']) {
+        $hash = $Config.roomAlignmentSha256
+        if ($hash -isnot [string] -or $hash -cnotmatch '\A[a-f0-9]{64}\z') { throw 'Use a valid locked MR alignment SHA-256 in the player connection file.' }
+        $ticket.AlignmentHash = $hash
+    }
+    return $ticket
 }
 
 function Read-RoomAlignment([string]$Path, [int]$RoomId) {
@@ -163,6 +169,7 @@ function Test-VenueManifest([string]$Path) {
     $sessions = [Collections.Generic.HashSet[Guid]]::new()
     $endpoints = [Collections.Generic.HashSet[string]]::new()
     $earliest = [DateTimeOffset]::MaxValue
+    $usesPins = $null
     $rooms = foreach ($room in $manifest.rooms) {
         $session = [Guid]::Empty
         if (-not (Test-JsonInteger $room.roomId) -or $room.roomId -notin 1..5 -or -not $seenRooms.Add($room.roomId) -or
@@ -177,6 +184,12 @@ function Test-VenueManifest([string]$Path) {
         $tickets = @(Read-VenueRoomTickets (Get-VenueInputPath $directory $room.ticketsZip) $id $session)
         $endpoint = $tickets[0].Endpoint
         foreach ($ticket in $tickets) {
+            $hasPin = $null -ne $ticket.AlignmentHash
+            if ($null -eq $usesPins) { $usesPins = $hasPin }
+            if ($usesPins -ne $hasPin) { throw 'Do not mix locked MR and legacy connection files in the same venue preflight.' }
+            if ($hasPin -and $ticket.AlignmentHash -cne $alignment.Hash) {
+                throw "Room $id seat $($ticket.Seat + 1) does not match the locked MR alignment file."
+            }
             if ($ticket.Endpoint -cne $endpoint) { throw "Room $id contains different game-server endpoints." }
             if (-not $players.Add($ticket.PlayerId) -or -not $admissions.Add($ticket.AdmissionId)) {
                 throw "Room $id seat $($ticket.Seat + 1) repeats a player or admission."
@@ -192,12 +205,14 @@ function Test-VenueManifest([string]$Path) {
         throw "$($manifest.topology) requires $expected distinct session(s) and $expected distinct game-server endpoint(s)."
     }
     if ($earliest -le [DateTimeOffset]::UtcNow) { throw 'A player ticket expired during venue preflight. Download fresh room connection ZIPs.' }
-    [pscustomobject]@{
+    $report = [ordered]@{
         topology = $manifest.topology
         seats = $players.Count
         earliestExpiryUtc = $earliest.ToString('o')
         rooms = @($rooms | Sort-Object roomId)
-    } | ConvertTo-Json -Depth 4 -Compress
+    }
+    if ($usesPins) { $report.alignmentPinsVerified = $true }
+    $report | ConvertTo-Json -Depth 4 -Compress
 }
 
 function Publish-QuestFile([string]$Local, [string]$Staging, [string]$Destination, [string]$Description) {
@@ -225,20 +240,26 @@ if ($PSCmdlet.ParameterSetName -eq 'Venue') {
 
 $config = (Read-DeploymentJson $ClientConfig 4096 'player connection').Document
 $ticket = Read-PlayerConfig $config
-if (($Passthrough -or $MixedReality) -and -not $AlignmentFile) { throw 'Quest passthrough requires a checked room alignment JSON export.' }
+$isMixedReality = $MixedReality -or $null -ne $ticket.AlignmentHash
+if (($Passthrough -or $isMixedReality) -and -not $AlignmentFile) { throw 'Quest passthrough requires a checked room alignment JSON export.' }
 $alignmentHash = $null
 if ($AlignmentFile) {
     $alignment = Read-RoomAlignment $AlignmentFile $ticket.RoomId
     $alignmentHash = $alignment.Hash
+    if ($ticket.AlignmentHash -and $ticket.AlignmentHash -cne $alignmentHash) {
+        throw "The supplied file does not match the locked MR alignment for room $($ticket.RoomId)."
+    }
 }
 if ($CheckOnly) {
-    [pscustomobject]@{
+    $report = [ordered]@{
         roomId = $ticket.RoomId
         seat = $ticket.Seat + 1
         expiresAtUtc = $ticket.ExpiresAtUtc.ToString('o')
-        mode = if ($MixedReality) { 'MR' } elseif ($Passthrough) { 'VR with passthrough' } else { 'VR' }
+        mode = if ($isMixedReality) { 'MR' } elseif ($Passthrough) { 'VR with passthrough' } else { 'VR' }
         alignmentSha256 = $alignmentHash
-    } | ConvertTo-Json -Compress
+    }
+    if ($ticket.AlignmentHash) { $report.alignmentPinsVerified = $true }
+    $report | ConvertTo-Json -Compress
     return
 }
 
@@ -273,10 +294,10 @@ if ($AlignmentFile) {
     } finally {
         Remove-Item -LiteralPath $stagedAlignment
     }
-    $config | Add-Member -NotePropertyName 'roomAlignmentSha256' -NotePropertyValue $alignmentHash
+    if (-not $ticket.AlignmentHash) { $config | Add-Member -NotePropertyName 'roomAlignmentSha256' -NotePropertyValue $alignmentHash }
 }
-if ($Passthrough -or $MixedReality) { $config | Add-Member -NotePropertyName 'questPassthrough' -NotePropertyValue $true }
-if ($MixedReality) { $config | Add-Member -NotePropertyName 'requestMixedReality' -NotePropertyValue $true }
+if ($Passthrough -or $isMixedReality) { $config | Add-Member -NotePropertyName 'questPassthrough' -NotePropertyValue $true }
+if ($isMixedReality) { $config | Add-Member -NotePropertyName 'requestMixedReality' -NotePropertyValue $true }
 $stagedConfig = [IO.Path]::GetTempFileName()
 try {
     if ($ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired during deployment. Download a fresh connection file.' }

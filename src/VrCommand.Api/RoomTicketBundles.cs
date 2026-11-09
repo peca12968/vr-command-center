@@ -36,9 +36,12 @@ internal static class RoomTicketBundles
         {
             foreach (var player in players)
             {
-                var ticket = signer.Issue(session.Id, player);
+                var ticket = signer.Issue(session, player);
                 using var file = archive.CreateEntry(FormattableString.Invariant($"room-{roomId:00}-seat-{player.Seat + 1:00}.json")).Open();
-                JsonSerializer.Serialize(file, new { role = "Client", address = request.Address, port = request.Port, joinTicket = ticket.Ticket });
+                var config = new Dictionary<string, object?> { ["role"] = "Client", ["address"] = request.Address,
+                    ["port"] = request.Port, ["joinTicket"] = ticket.Ticket };
+                if (ticket.RoomAlignmentSha256 is { } hash) config["roomAlignmentSha256"] = hash;
+                JsonSerializer.Serialize(file, config);
             }
         }
         return output.ToArray();

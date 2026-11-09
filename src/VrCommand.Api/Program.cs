@@ -87,6 +87,8 @@ app.Use(async (context, next) =>
         else if (ex is MixedRealityNotReadyException mr)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message,
                 code = mr.Action == ControlAction.Resume ? "mr-resume-readiness-required" : "mr-readiness-required" });
+        else if (ex is MixedRealityAlignmentRequiredException)
+            await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "mr-alignment-required" });
         else await context.Response.WriteAsJsonAsync(new { error = ex.Message });
     }
 });
@@ -194,7 +196,8 @@ app.MapPost("/api/sessions/{id:guid}/players/{playerId:guid}/join-ticket", (Guid
     if (session.State == SessionState.Ended) throw new InvalidOperationException("Session has ended.");
     var expected = AdmissionMatch(context) ?? throw new ArgumentException("If-Match-Admission is required; reload the current player roster.");
     if (expected != player.AdmissionId) throw new InvalidOperationException("Player admission changed; reload the current roster.");
-    return ticketSigner.Issue(id, player);
+    context.Response.Headers.CacheControl = "no-store";
+    return ticketSigner.Issue(session, player);
 });
 app.MapPost("/api/player-tickets/validate", (ValidatePlayerTicket request, SessionManager manager, HttpContext context) =>
 {

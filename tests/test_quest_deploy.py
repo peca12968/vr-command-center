@@ -196,6 +196,36 @@ class QuestDeployTests(unittest.TestCase):
         self.assertEqual(['vr-connection.json'], [path.name for path in self.remote.iterdir()])
         self.assertEqual(self.player, json.loads((self.remote / 'vr-connection.json').read_bytes()))
 
+    def test_locked_mr_checks_exact_bytes_before_adb_and_infers_mr_for_deploy(self):
+        self.provision_apk()
+        original = self.plan.read_bytes()
+        digest = hashlib.sha256(original).hexdigest()
+        config = {**self.player, 'roomAlignmentSha256':digest}
+        self.write(self.config, config)
+        self.assert_rejected(self.run_script(), 'requires a checked room alignment')
+        self.plan.write_bytes(original + b'\n')
+        self.assert_rejected(self.run_script('-AlignmentFile',str(self.plan)), 'does not match the locked MR alignment for room 5')
+        self.assertFalse(self.commands.exists())
+        self.plan.write_bytes(original)
+        checked = self.run_script('-CheckOnly','-AlignmentFile',str(self.plan))
+        self.assertEqual(0, checked.returncode, checked.stderr)
+        report = json.loads(checked.stdout)
+        self.assertEqual(('MR',digest,True), (report['mode'],report['alignmentSha256'],report['alignmentPinsVerified']))
+        self.assertFalse(self.commands.exists())
+        result = self.run_script('-AlignmentFile',str(self.plan),alter=True)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(original, (self.remote / f'vr-room-alignment-{digest}.json').read_bytes())
+        self.assertEqual({**config,'questPassthrough':True,'requestMixedReality':True},
+                         json.loads((self.remote / 'vr-connection.json').read_bytes()))
+
+    def test_invalid_locked_hash_is_rejected_before_adb(self):
+        self.provision_apk()
+        for value in (None, 'a' * 63, 'A' * 64):
+            with self.subTest(value=value):
+                self.write(self.config, {**self.player, 'roomAlignmentSha256':value})
+                self.assert_rejected(self.run_script('-AlignmentFile',str(self.plan)), 'Use a valid locked MR alignment SHA-256')
+        self.assertFalse(self.commands.exists())
+
     def test_failed_connection_activation_cleans_staging_and_keeps_existing_file(self):
         self.provision_apk()
         active = self.remote / 'vr-connection.json'
@@ -345,6 +375,26 @@ class QuestVenueTests(unittest.TestCase):
     def test_venue_parameters_cannot_invoke_adb(self):
         manifest, rooms = self.prepare('Linked')
         self.assert_rejected(self.run_venue(manifest, rooms, '-Serial', 'device'), 'Parameter set cannot be resolved')
+
+    def test_venue_checks_pinned_files_for_both_topologies_and_rejects_a_changed_room(self):
+        for topology in ('Linked','Independent'):
+            with self.subTest(topology=topology):
+                manifest, rooms = self.prepare(topology)
+                for room, entries in rooms.items():
+                    plan = self.root / manifest['rooms'][room-1]['alignmentFile']
+                    digest = hashlib.sha256(plan.read_bytes()).hexdigest()
+                    for config in entries.values():
+                        config['roomAlignmentSha256'] = digest
+                result = self.run_venue(manifest, rooms)
+                self.assertEqual(0, result.returncode, result.stderr)
+                report = json.loads(result.stdout)
+                self.assertEqual((topology,25,True), (report['topology'],report['seats'],report['alignmentPinsVerified']))
+                wrong_plan = self.root / manifest['rooms'][3]['alignmentFile']
+                wrong_plan.write_bytes(wrong_plan.read_bytes() + b'\n')
+                self.assert_rejected(self.run_venue(manifest, rooms), 'Room 4 seat 1 does not match the locked MR alignment file')
+                wrong_plan.write_bytes(wrong_plan.read_bytes()[:-1])
+                rooms[4]['room-04-seat-05.json'].pop('roomAlignmentSha256')
+                self.assert_rejected(self.run_venue(manifest, rooms), 'Do not mix locked MR and legacy connection files')
 
 
 if __name__ == '__main__':

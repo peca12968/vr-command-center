@@ -1,11 +1,14 @@
 using System.Buffers.Binary;
 using System.Security.Cryptography;
+using System.Text.Json.Serialization;
 
 namespace VrCommand.Core;
 
-public record PlayerJoinTicket(string Ticket, DateTimeOffset ExpiresAtUtc);
+public record PlayerJoinTicket(string Ticket, DateTimeOffset ExpiresAtUtc,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RoomAlignmentSha256 = null);
 public record PlayerJoinClaims(Guid SessionId, Guid PlayerId, int RoomId, DateTimeOffset ExpiresAtUtc, Guid AdmissionId, int Seat);
 public record PlayerAdmission(Guid SessionId, Guid PlayerId, int RoomId, int Seat, Guid AdmissionId, long ThroughSequence, DateTimeOffset ExpiresAtUtc);
+public sealed class MixedRealityAlignmentRequiredException() : InvalidOperationException("The master must pin the room alignment files before issuing MR tickets.");
 
 public sealed partial class SessionManager
 {
@@ -35,6 +38,13 @@ public sealed class PlayerJoinTicketSigner
         if (key is null || key.Length < 32) throw new ArgumentException("Ticket signing key requires at least 32 bytes.");
         this.key = [.. key];
         this.clock = clock ?? TimeProvider.System;
+    }
+
+    public PlayerJoinTicket Issue(SessionView session, Player player)
+    {
+        if (session.Environment.Mode != ExperienceMode.MR) return Issue(session.Id, player);
+        var hash = session.RoomAlignment?.ForRoom(player.RoomId) ?? throw new MixedRealityAlignmentRequiredException();
+        return Issue(session.Id, player) with { RoomAlignmentSha256 = hash };
     }
 
     public PlayerJoinTicket Issue(Guid sessionId, Player player)

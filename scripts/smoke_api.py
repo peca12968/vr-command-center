@@ -773,6 +773,15 @@ try:
                     "MR Begin names its readiness conflict without changing generic conflict handling")
             request("POST", mr_path + "/combat-stream", {"streamId": str(uuid.uuid4()), "origin": "Simulation"}, 409, identity="GameServer")
             require(request("GET", mr_path) == joined_mr, "Rejected MR Begin and simulation attachment leave the exact Preparing roster untouched")
+            mr_player = joined_mr["players"][0]
+            ticket_route = f"{mr_path}/players/{mr_player['id']}/join-ticket"
+            bundle_route = f"{mr_path}/rooms/{room}/join-ticket-bundle"
+            bundle_request = {"address": "192.168.1.100", "port": 7777,
+                              "players": [{"playerId": mr_player["id"], "admissionId": mr_player["admissionId"]}]}
+            unpinned = request("POST", ticket_route, expected=409, identity=f"Room{room}", admission_id=mr_player["admissionId"])
+            unpinned_bundle = request("POST", bundle_route, bundle_request, 409, identity=f"Room{room}")
+            require(unpinned["code"] == unpinned_bundle["code"] == "mr-alignment-required",
+                    "MR single and room-bundle ticket issuance require a locked alignment")
             alignment = {f"room{room}": "a" * 64}
             pin = {"commandId": str(uuid.uuid4()), "action": "SetRoomAlignment", "expectedSequence": joined_mr["sequence"],
                    "roomAlignment": alignment}
@@ -786,6 +795,18 @@ try:
             request("POST", mr_path + "/commands", {**pin, "commandId": str(uuid.uuid4()),
                     "expectedSequence": pinned["session"]["sequence"], "roomAlignment": {f"room{room}": "b" * 64}}, 409)
             require(request("GET", mr_path) == pinned["session"], "Rejected MR pin replacement leaves the original Preparing session intact")
+            raw_ticket, ticket_headers = request("POST", ticket_route, identity=f"Room{room}", admission_id=mr_player["admissionId"], raw=True)
+            invitation = json.loads(raw_ticket)
+            raw_bundle, bundle_headers = request("POST", bundle_route, bundle_request, identity=f"Room{room}", raw=True)
+            with zipfile.ZipFile(io.BytesIO(raw_bundle)) as archive:
+                config = json.loads(archive.read(f"room-{room:02}-seat-01.json"))
+            require(set(config) == {"role", "address", "port", "joinTicket", "roomAlignmentSha256"}
+                    and config["roomAlignmentSha256"] == invitation["roomAlignmentSha256"] == alignment[f"room{room}"]
+                    and ticket_headers["Cache-Control"] == bundle_headers["Cache-Control"] == "no-store",
+                    "Both MR download paths carry exactly the locked room hash and no cacheable response")
+            admission = request("POST", "/api/player-tickets/validate", {"sessionId": mr["id"],
+                                "ticket": config["joinTicket"], "protocolVersion": 2}, identity="GameServer")
+            require(admission["admissionId"] == mr_player["admissionId"], "The MR connection file retains the original signed admission and ticket protocol")
             change = {"commandId": str(uuid.uuid4()), "action": "SetEnvironment"}
             request("POST", mr_path + "/commands", {**change, "environment": {**mr_environment, "mode": "VR"}}, 409)
             receipt = request("POST", mr_path + "/commands", {**change, "environment": {**mr_environment, "weather": "Storm", "lightning": True}})
