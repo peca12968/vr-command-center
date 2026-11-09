@@ -21,7 +21,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       const streamId = randomUUID(), origin = 'Simulation', started = Date.now();
       await api(`/sessions/${id}/combat-stream`, 'POST', { streamId, origin }, 'GameServer');
       snapshot = await api(`/sessions/${id}`);
-      const header = { sessionId: id, streamId, origin, roomIds: [room], captureStartedAtUtc: new Date(started).toISOString().replace('Z', '0000+00:00') };
+      const header = { sessionId: id, streamId, origin, roomIds: snapshot.roomIds, captureStartedAtUtc: new Date(started).toISOString().replace('Z', '0000+00:00') };
       let sequence = 0;
       const send = message => {
         const result = spawnSync('python', [path.join(root, 'scripts/world_test_socket.py')], { encoding: 'utf8', timeout: 6000, windowsHide: true,
@@ -31,12 +31,14 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         return JSON.parse(result.stdout);
       };
       publish = current => {
-        const head = { x: (room - 3) * 14, y: 1.65, z: -3 };
-        const rotation = { x: 0, y: 0, z: 0, w: 1 };
-        const rig = connected ? { kind: 'Simulated', headRotation: rotation, rightRotation: rotation, leftRotation: rotation,
-          right: head, left: head } : { kind: 'None' };
-        const players = current.players.map(player => ({ id: player.id, roomId: room, head, muzzle: head,
-          connected, forward: { x: 0, y: 0, z: 1 }, health: 100, magazine: 30, reserve: 90, rig }));
+        const players = current.players.map(player => {
+          const head = { x: (player.roomId - 3) * 14 + player.seat, y: 1.65, z: -3 };
+          const rotation = { x: 0, y: 0, z: 0, w: 1 };
+          const rig = connected ? { kind: 'Simulated', headRotation: rotation, rightRotation: rotation, leftRotation: rotation,
+            right: head, left: head } : { kind: 'None' };
+          return { id: player.id, roomId: player.roomId, head, muzzle: head,
+            connected, forward: { x: 0, y: 0, z: 1 }, health: 100, magazine: 30, reserve: 90, rig };
+        });
         const { weather, timeOfDay, lightning } = current.environment;
         const { behavior, autoAttack } = current.enemies;
         const visibility = ['Fog', 'Storm'].includes(weather) ? weather : 'Clear';
@@ -162,7 +164,40 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     for (const id of ids.slice(0, 4)) await end(id);
 
     const linked = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Linked', roomIds: [1, 2, 3, 4, 5] }, 'Master', 201);
-    active.add(linked.id); await start(linked.id, 1);
+    active.add(linked.id);
+    const subject = randomUUID(), roomPeer = randomUUID(), subjectName = '觀戰 <img> 玩家';
+    await api(`/sessions/${linked.id}/players`, 'POST', { playerId: subject, roomId: 2, name: subjectName, headset: 'Quest3' });
+    await api(`/sessions/${linked.id}/players`, 'POST', { playerId: roomPeer, roomId: 2, name: '同房玩家', headset: 'Quest3' });
+    const linkedPublish = await prepare(linked.id, 1, true, true);
+    await run(linked.id, 'Begin');
+    let linkedState = await api(`/sessions/${linked.id}`);
+    linkedPublish(linkedState);
+    await page.locator('#refresh').click();
+    await page.locator('[data-watch-room="2"]').click();
+    const actorPicker = page.locator('#world-actor'), view = page.locator('#world-camera'), linkedCanvas = page.locator('#world-canvas');
+    const choices = () => actorPicker.locator('option').evaluateAll(options => options.map(option => option.value));
+    await actorPicker.locator(`option[value="p:${subject}"]`).waitFor({ state: 'attached' });
+    check(await page.locator('#world-room').inputValue() === '2' && (await choices()).length === 3
+      && (await actorPicker.locator(`option[value="p:${subject}"]`).textContent()).includes(subjectName)
+      && await actorPicker.locator('img').count() === 0, 'Linked room observation lists only its actors and renders recorded player names as text');
+    await actorPicker.selectOption('p:' + subject);
+    await view.selectOption('follow');
+    const lastTarget = await linkedCanvas.getAttribute('data-camera');
+    await api(`/sessions/${linked.id}/players/${subject}`, 'DELETE', undefined, 'Master', 204,
+      linkedState.players.find(player => player.id === subject).admissionId);
+    linkedState = await api(`/sessions/${linked.id}`);
+    linkedPublish(linkedState);
+    await view.locator('option[value="follow"]:disabled').waitFor({ state: 'attached' });
+    check(await actorPicker.inputValue() === '' && (await choices()).includes('p:' + roomPeer)
+      && await view.inputValue() === 'free' && await linkedCanvas.getAttribute('data-camera') === lastTarget,
+      'A removed follow target leaves the last camera position and never selects the remaining teammate');
+    await page.locator('[data-world-room="all"]').click();
+    check((await choices()).length === 3 && await actorPicker.inputValue() === '',
+      'All-room observation restores other actors without silently resuming follow');
+    await page.locator('[data-world-room="2"]').click();
+    await actorPicker.selectOption('p:' + roomPeer);
+    await page.locator('#world-canvas').screenshot({ path: path.join(screenshots, 'world-room-actor-scope.png') });
+    await page.locator('#tab-operations').click();
     await page.locator('#refresh').click(); await summary.filter({ hasText: '可暫停 房間 1、2、3、4、5' }).waitFor();
     await click('pause', '1、2、3、4、5 的 1 個場次'); await notice.filter({ hasText: '全館管理命令已確認' }).waitFor();
     check((await api(`/sessions/${linked.id}/events`)).filter(event => event.venue).length === 1,

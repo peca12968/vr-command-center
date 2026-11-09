@@ -63,6 +63,7 @@ def main():
     p.add_argument('--venue-field-evidence',action='store_true',help='Verify full sealed admission evidence for both original venue End batches')
     p.add_argument('--check-venue-field-ui',action='store_true',help='Download the original current and earlier field bundles from the shipped console')
     p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
+    p.add_argument('--check-room-observer',action='store_true',help='Verify the shipped room-scoped actor picker on the original Linked source')
     p.add_argument('--check-room-participation',action='store_true',help='Disconnect and restore one original VR admission in each five-room mode')
     p.add_argument('--check-room-endpoints',action='store_true',help='Verify real published UDP endpoints in the room cards and scoped API')
     p.add_argument('--check-room-clocks', action='store_true', help='Verify room clocks and the original pause/resume boundaries in both modes')
@@ -112,6 +113,7 @@ def main():
     if args.check_venue_field_ui and not args.venue_field_evidence:
         p.error('--check-venue-field-ui requires --venue-field-evidence')
     if args.check_room_readiness and not args.player_package:p.error('--check-room-readiness requires five players per room')
+    if args.check_room_observer and not args.player_package:p.error('--check-room-observer requires the three-package check')
     if args.check_room_participation and (not args.check_room_readiness or args.peer_diagnostics):
         p.error('--check-room-participation requires --check-room-readiness without the one-connection peer diagnostics check')
     if args.check_room_clocks and not args.player_package:p.error('--check-room-clocks requires five players per room')
@@ -1544,6 +1546,18 @@ def main():
                       mode + ' Quest tracking check rejects all 25 connected native Simulation rigs')
                 save(mode+'-vr-venue-tracked-readiness.json', tracked)
             if args.check_room_readiness:verify_room_readiness(round_clients,linked)
+            if args.check_room_observer and linked:
+                node = shutil.which('node')
+                if not node: raise RuntimeError('Node is required to observe the shipped console')
+                descriptor = runtime/'room-observer-private.json'
+                descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'sessionId':entries[0]['sessionId'],
+                    'players':[{key:client['player'][key] for key in ('id','roomId','name')} for client in round_clients]}), encoding='utf-8')
+                browser_out = out/'room-observer'
+                subprocess.run([node, str(ROOT/'tests/browser/check-room-observer-native.cjs'), str(descriptor), str(browser_out)],
+                               cwd=ROOT/'tests/browser', check=True, timeout=70)
+                observed = read(browser_out/'checks.json')
+                check(observed['complete'] and observed['players']==25 and observed['sessionId']==entries[0]['sessionId']
+                      and len(observed['checks'])==3, 'shipped console scopes actors and follows the original Linked source with 25 named players')
             if args.check_room_participation:verify_room_participation(entries,round_clients,linked)
             if args.check_room_clocks:verify_room_clocks(entries,linked)
             if args.check_venue_environment:verify_venue_environment(entries,linked)
@@ -1736,6 +1750,7 @@ def main():
             'managedMrPreparing':args.check_managed_mr,
             'roomCombat':args.check_room_combat,
             'roomParticipation':args.check_room_participation,
+            'roomObserver':args.check_room_observer,
             'roomClocks':args.check_room_clocks,
             'venuePhase':args.check_venue_phase,
             'venueBegin':args.check_venue_begin,

@@ -16,8 +16,8 @@ import { PLAYER_FIRE_ASSETS, firingRifleFactory, applyPlayerFire } from './playe
 const point = value => new THREE.Vector3(value.x, value.y, value.z);
 const roomX = id => (id - 3) * 14;
 export class ReplayScene {
-  constructor(canvas, onPick, onFreeMove) {
-    this.canvas = canvas; this.onPick = onPick; this.onFreeMove = onFreeMove;
+  constructor(canvas, onPick, onFreeMove, canPick = () => true) {
+    this.canvas = canvas; this.onPick = onPick; this.onFreeMove = onFreeMove; this.canPick = canPick;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, preserveDrawingBuffer: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5));
     this.renderer.setClearColor(0x101a17); this.scene = new THREE.Scene();
@@ -253,7 +253,7 @@ export class ReplayScene {
   pick(event) {
     const bounds = this.canvas.getBoundingClientRect(), cursor = new THREE.Vector2((event.clientX - bounds.left) / bounds.width * 2 - 1, 1 - (event.clientY - bounds.top) / bounds.height * 2);
     const ray = new THREE.Raycaster(); ray.setFromCamera(cursor, this.camera);
-    const hit = ray.intersectObjects([...this.actors.values()].filter(actor => actor.group.visible).map(actor => actor.group), true)[0];
+    const hit = ray.intersectObjects([...this.actors.values()].filter(actor => actor.group.visible && this.canPick(actor.group.userData.key)).map(actor => actor.group), true)[0];
     if (hit) { let object = hit.object; while (object && !object.userData.key) object = object.parent; if (object) this.onPick(object.userData.key); }
   }
   reset() { this.playerBodies?.dispose();this.playerBodies=null;this.canvas.dataset.playerBodyPoses='[]';this.canvas.dataset.playerBodyTriangles='0';this.weather.reset(); this.frame = null; this.follow = false; this.selected = ''; this.clear(this.stage); this.clear(this.traces); this.rifles?.dispose(); this.rifles = null; this.opponents?.dispose(); this.opponents = null; this.actors.clear(); this.canvas.dataset.rifleCount = '0'; this.canvas.dataset.rifleTriangles = '0'; this.canvas.dataset.enemyTriangles = '0'; this.canvas.dataset.enemyPoses = '[]'; this.canvas.dataset.weaponPoses = '[]'; this.canvas.dataset.enemyFirePoses='[]'; this.canvas.dataset.playerFirePoses='[]'; this.marker.visible = false; this.draw(); }

@@ -14,7 +14,7 @@ const roomName = room => room === 'all' ? '全部房間' : '房間 ' + room;
 export function mountWorld(getKey, unauthorized) {
   let active = false, scene, controller, epoch = 0, listEpoch = 0, listController, info, frame, geometry = '', mode = '', connected = false, received = 0;
   let connecting = false, stepping = false, savedLimit = null, savedFinished = false;
-  let reviewPlayer = null;
+  let reviewPlayer = null, actors = new Map(), actorInitialized = false;
   const cameras = mountCameras(getKey, unauthorized, () => scene, freeView);
   const cameraForm = mountWorldCameraForm(() => scene, freeView);
   const eventSearch = mountWorldEventSearch(response, readFrame, eventNames, () => { if (frame) showEvents(frame); });
@@ -26,7 +26,7 @@ export function mountWorld(getKey, unauthorized) {
     stop(); stopList(); info = frame = savedLimit = null; savedFinished = false; geometry = ''; mode = ''; cameras.reset(); cameraForm.reset(); reviewControls();
     $('world-recording').replaceChildren(); $('world-player').hidden = true; message('選取已錄製的場次，開始觀戰或回放。');
     recordingControls(); bindRooms([]);
-    scene?.reset(); $('world-sound').textContent = '音效：關閉'; $('world-sound').disabled = true;
+    resetActors(); scene?.reset(); $('world-sound').textContent = '音效：關閉'; $('world-sound').disabled = true;
   }
   async function response(url, signal) {
     const key = getKey(); if (!key) throw new Error('請先登入。');
@@ -93,7 +93,7 @@ export function mountWorld(getKey, unauthorized) {
   function resetRecording() {
     reviewPlayer = null;
     stop(); cameras.bind(null); cameraForm.reset(); info = frame = savedLimit = null; savedFinished = false; geometry = ''; mode = '';
-    bindRooms([]); delete $('world-canvas').dataset.sequence;
+    bindRooms([]); resetActors(); delete $('world-canvas').dataset.sequence;
     recordingControls(); reviewControls(); $('world-player').hidden = true; message('已切換場次，請開始觀戰或回放。');
   }
   function bindRooms(ids) {
@@ -124,6 +124,7 @@ export function mountWorld(getKey, unauthorized) {
     }
     for (const button of $('world-room-quick').children)
       button.setAttribute('aria-pressed', String(button.dataset.worldRoom === room));
+    if (frame) showActors();
     showStatistics();
     if (mode === 'replay' && frame) showEvents(frame);
     reviewControls();
@@ -230,12 +231,44 @@ export function mountWorld(getKey, unauthorized) {
     }
     if (!connected) { scene?.weather.pause(); scene?.draw(); }
   }
-  function selectActor(key) { $('world-actor').value = key; scene?.select(key); actorInfo(); }
-  function actorInfo() {
-    if (!frame) return;
-    const key = $('world-actor').value, [type, id] = key.split(':');
-    const actor = (type === 'p' ? frame.packet.frame.players : frame.packet.frame.enemies).find(value => value.id === id);
-    $('world-actor-info').textContent = actor ? `房間 ${actor.roomId} · 血量 ${actor.health}${type === 'p' ? ` · 彈匣 ${actor.magazine}／備彈 ${actor.reserve} · ${actor.connected ? '參戰中' : '未參戰'} · 頭手來源 ${actor.rig.kind}` : ' · 敵軍'} · ${id}` : '可點選場景中的角色，或從選單選取。';
+  function resetActors() {
+    actors.clear(); actorInitialized = false;
+    $('world-actor').replaceChildren(new Option('未選取角色', ''));
+    selectActor('');
+  }
+  function selectActor(key) {
+    const choice = actors.get(key);
+    if (key && !choice) return;
+    const camera = $('world-camera');
+    $('world-actor').value = key;
+    camera.querySelector('[value=follow]').disabled = !choice;
+    if (!choice && camera.value === 'follow') { camera.value = 'free'; if (scene) scene.follow = false; }
+    if (scene && scene.selected !== key) scene.select(key);
+    const actor = choice?.actor;
+    const text = actor ? `${choice.name} · 房間 ${actor.roomId} · 血量 ${actor.health}`
+      + (key.startsWith('p:') ? ` · 彈匣 ${actor.magazine}／備彈 ${actor.reserve} · ${actor.connected ? '參戰中' : '未參戰'} · 頭手來源 ${actor.rig.kind}` : '')
+      + ` · ${actor.id}` : '可點選目前房間的角色，或從選單選取。';
+    const details = $('world-actor-info');
+    if (details.textContent !== text) details.textContent = text;
+  }
+  function showActors() {
+    const picker = $('world-actor'), room = $('world-room').value;
+    const visible = actor => room === 'all' || actor.roomId === Number(room);
+    const { players, enemies } = frame.packet.frame;
+    const stats = new Map(frame.statistics.map(player => [player.playerId, player]));
+    actors = new Map();
+    for (const actor of players.filter(visible)) {
+      const player = stats.get(actor.id);
+      actors.set('p:' + actor.id, { actor, name: player?.roomId === actor.roomId ? player.name : '玩家' });
+    }
+    for (const actor of enemies.filter(visible)) actors.set('e:' + actor.id, { actor, name: '敵軍' });
+    const selected = actors.has(picker.value) ? picker.value : actorInitialized ? '' : actors.keys().next().value ?? '';
+    actorInitialized ||= actors.size > 0;
+    const labels = [...actors].map(([key, { actor, name }]) => [key, `${name} · 房間 ${actor.roomId} · ${shortId(actor.id)}`]);
+    if (picker.options.length !== labels.length + 1 || labels.some(([key, label], i) =>
+      picker.options[i + 1].value !== key || picker.options[i + 1].textContent !== label))
+      picker.replaceChildren(new Option('未選取角色', ''), ...labels.map(([key, label]) => new Option(label, key)));
+    selectActor(selected);
   }
   function show(value, single = false) {
     const previous = single ? null : frame?.packet.frame;
@@ -244,12 +277,8 @@ export function mountWorld(getKey, unauthorized) {
     info.acceptedSequence = Math.max(info.acceptedSequence, value.packet.sequence);
     const age = info.header.captureStartedAtUtc ? Date.now() - Date.parse(info.header.captureStartedAtUtc) - value.packet.elapsedMilliseconds : NaN;
     const continuous = connected && (mode === 'replay' || (Number.isFinite(age) && age >= -1000 && age <= 1500));
+    showActors();
     scene.show(value.packet.frame, previous, value.packet.events.filter(event => event.hasRay), { weather: value.packet.weather, lightning: value.packet.lightning }, continuous);
-    const selected = $('world-actor').value;
-    const actors = [...value.packet.frame.players.map(player => ['p:' + player.id, `玩家 · 房間 ${player.roomId} · ${player.id.slice(0, 8)}`]), ...value.packet.frame.enemies.map(enemy => ['e:' + enemy.id, `敵軍 · 房間 ${enemy.roomId} · ${enemy.id.slice(0, 8)}`])];
-    $('world-actor').replaceChildren(...actors.map(([id, name]) => { const option = document.createElement('option'); option.value = id; option.textContent = name; return option; }));
-    if (actors.some(([id]) => id === selected)) $('world-actor').value = selected;
-    scene.select($('world-actor').value); actorInfo();
     const packet = value.packet;
     $('world-time').textContent = `${time(packet.elapsedMilliseconds)} / ${time(info.durationMilliseconds)} · 幀 ${packet.sequence}`;
     $('world-environment').textContent = `${packet.weather} · ${packet.frame.night ? '夜間' : '日間'} · ${packet.lightning ? '雷電啟用' : '無雷電'}${packet.suspended ? ' · 管理中斷暫停' : ''}`;
@@ -345,11 +374,11 @@ export function mountWorld(getKey, unauthorized) {
               }
               hasHeader = true; savedFinished = false;
               info = data;
-              scene ??= new ReplayScene($('world-canvas'), selectActor, () => { $('world-camera').value = 'free'; });
+              scene ??= new ReplayScene($('world-canvas'), selectActor, () => { $('world-camera').value = 'free'; }, key => actors.has(key));
               const key = JSON.stringify(info.header);
               if (key !== geometry) {
                 scene.load(info.header); geometry = key; frame = null;
-                bindRooms(info.header.roomIds);
+                bindRooms(info.header.roomIds); resetActors();
                 $('world-camera').value = 'overview';
               }
               if (target?.roomId != null) {
