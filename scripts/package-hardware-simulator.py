@@ -3,7 +3,7 @@ import argparse,hashlib,json,shutil,uuid,zipfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 FILES=['VrCommand.HardwareSimulator.dll','VrCommand.HardwareSimulator.deps.json','VrCommand.HardwareSimulator.runtimeconfig.json','VrCommand.Core.dll','VrCommand.Simulation.dll']
-README='''VR Command 硬體回饋模擬器 0.2.0
+README='''VR Command 硬體回饋模擬器 0.2.1
 
 需要 .NET 10 runtime，本機使用10.0.14驗證。這不是Unity玩家程式或廠商SDK。
 在解壓目錄執行（請把輸出放在包外的新檔案）：
@@ -15,6 +15,7 @@ python mock-device.py --port 19101
 dotnet VrCommand.HardwareSimulator.dll --live <包外room-config.json> --output <新的包外report.json>
 配置範例、模擬協議和操作方式見專案 docs/HARDWARE.md。憑證放在程序環境，設定與報告放在包外。
 即時模式以唯讀 HTTP 取事件，模擬連線僅使用 127.0.0.1 TCP。回覆只確認模擬批次，physicalDeliveryConfirmed 固定為 false。
+閘道等待確認時會繼續檢查管理狀態。已暫停、結束或失效的批次會中止，模擬設備可用 --manual 的 observe-close 觀察該連線關閉。
 
 example.json是隔離API／ArenaSession產生的模擬資料，不含操作憑證。
 只接受一場Ended且戰鬥已精確seal的schema6/7事件；會依既有規則重建。
@@ -34,9 +35,9 @@ def sha(p):
 def verify(folder):
     folder=folder.resolve();manifest=read(folder/'hardware-package.json')
     version=(manifest.get('toolVersion'),manifest.get('mode'))
-    if manifest.get('schemaVersion')!=1 or version not in {('0.1.0','OfflineSimulationOnly'),('0.2.0','OfflineAndLiveSimulation')}:raise ValueError('Unsupported simulator package')
+    if manifest.get('schemaVersion')!=1 or version not in {('0.1.0','OfflineSimulationOnly'),('0.2.0','OfflineAndLiveSimulation'),('0.2.1','OfflineAndLiveSimulation')}:raise ValueError('Unsupported simulator package')
     expected=set(FILES)|{'example.json','README.txt'}
-    if version[0]=='0.2.0':expected.add('mock-device.py')
+    if version[1]=='OfflineAndLiveSimulation':expected.add('mock-device.py')
     if set(manifest['files'])!=expected:raise ValueError('Unexpected simulator package payload')
     actual={p.relative_to(folder).as_posix() for p in folder.rglob('*') if p.is_file()}
     if actual!=set(manifest['files'])|{'hardware-package.json'}:raise ValueError('Missing or additional package file')
@@ -54,7 +55,7 @@ def main():
     if not checks.get('complete') or checks.get('checks',0)<38 or cleanup!={'errors':[],'apiRemaining':False}:raise ValueError('Require completed simulator / API proof and original cleanup')
     if checks['helperSha256']!=sha(ROOT/'scripts/check-hardware-simulator.py'):raise ValueError('Proof helper changed')
     live=args.live_evidence.resolve();witness=read(live/'checks.json');peer=ROOT/'scripts/hardware-mock-peer.py'
-    if not witness.get('complete') or witness.get('checks',0)<14 or read(live/'cleanup.json')!={'allStopped':True,'apiExitCode':0}:
+    if not witness.get('complete') or witness.get('checks',0)<16 or read(live/'cleanup.json')!={'allStopped':True,'apiExitCode':0}:
         raise ValueError('Require the completed live rehearsal and process cleanup')
     if witness['helperSha256']!=sha(ROOT/'scripts/check-live-hardware-gateway.py') or witness['peerSha256']!=sha(peer):
         raise ValueError('Live proof helper or tested mock changed')
@@ -67,7 +68,7 @@ def main():
     sample=evidence/'simulation-input.json';expected=read(evidence/'simulation-report.json')
     if not expected['simulatedHardwareOnly'] or expected['physicalDeliveryConfirmed']:raise ValueError('Not an offline simulation report')
     shutil.copyfile(sample,folder/'example.json');shutil.copyfile(peer,folder/'mock-device.py');(folder/'README.txt').write_text(README,encoding='utf-8')
-    manifest={'schemaVersion':1,'toolVersion':'0.2.0','mode':'OfflineAndLiveSimulation','requires':'.NET 10 runtime; Python 3.12 for the optional mock device',
+    manifest={'schemaVersion':1,'toolVersion':'0.2.1','mode':'OfflineAndLiveSimulation','requires':'.NET 10 runtime; Python 3.12 for the optional mock device',
         'testEvidence':str(evidence),'liveTestEvidence':str(live),'inputSteps':expected['inputSteps'],
         'scope':'No physical device, vendor wire format, authentication attestation, Unity / headset / network capacity acceptance. File hashes are not signatures.',
         'files':{p.name:{'bytes':p.stat().st_size,'sha256':sha(p)} for p in sorted(folder.iterdir()) if p.is_file()}}

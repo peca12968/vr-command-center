@@ -1,5 +1,5 @@
 """Exercise portable Windows packages, five rooms, Linked and owned process cleanup."""
-import argparse,csv,importlib.util,io,ipaddress,json,os,re,shutil,socket,subprocess,time,urllib.error,urllib.request,uuid,zipfile
+import argparse,csv,importlib.util,io,ipaddress,json,os,re,shutil,socket,subprocess,sys,threading,time,urllib.error,urllib.request,uuid,zipfile
 from datetime import datetime,timedelta,timezone
 from decimal import Decimal
 from pathlib import Path
@@ -61,6 +61,7 @@ def main():
     p.add_argument('--check-room-reports',action='store_true',help='Verify scoped Linked CSVs and the ZIP against the full sealed native report')
     p.add_argument('--check-room-combat',action='store_true',help='Require actual enemy damage on every original admission and reconcile each replay frame and final report')
     p.add_argument('--check-hardware-feedback',action='store_true',help='Match live room feedback to the native combat reports')
+    p.add_argument('--hardware-simulator-package',type=Path,help='Pass native live feedback through this extracted mock gateway package')
     p.add_argument('--check-interrupted-replay', action='store_true', help='Play the saved native prefix after the owned launcher is killed')
     p.add_argument('--check-managed-mr', action='store_true', help='Verify the MR alignment startup gate, desktop rejection and Preparing seal')
     p.add_argument('--check-live-reinforcement', action='store_true', help='Verify a native server accepts only supported live enemy targets and records the result')
@@ -73,6 +74,7 @@ def main():
     if args.check_room_reports and not args.player_package:p.error('--check-room-reports requires the three-package check')
     if args.check_room_combat and not args.check_room_reports:p.error('--check-room-combat requires --check-room-reports')
     if args.check_hardware_feedback and not args.check_room_combat:p.error('--check-hardware-feedback requires --check-room-combat')
+    if args.hardware_simulator_package and not args.check_hardware_feedback:p.error('--hardware-simulator-package requires --check-hardware-feedback')
     address='127.0.0.1'
     if args.game_address:
         if not any(args.game_address in ipaddress.IPv4Network(net) for net in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16')):
@@ -91,6 +93,15 @@ def main():
     control.package.verify(args.control_package);out=ROOT/'artifacts/server-package-checks'/('run-'+uuid.uuid4().hex);out.mkdir(parents=True,exist_ok=False);runtime=args.runtime_root.resolve()/out.name;runtime.mkdir(parents=True,exist_ok=False)
     (ROOT/'artifacts/server-package-checks-latest-path.txt').write_text(str(out),encoding='utf-8');print(json.dumps({'stage':'starting','directory':str(out)}),flush=True)
     env=dict(os.environ);env.update(PATH=str(Path(os.environ['WINDIR'])/'System32'),DOTNET_ROOT=str(runtime/'absent-dotnet'),DOTNET_MULTILEVEL_LOOKUP='0');exe=folder/'Launch-Server.exe';control_exe=args.control_package.resolve()/'Start-Control.exe';data=runtime/'control';checks=[];runners=[];clients=[];cleanup=[];witnesses=[];api=None;api_witness=None;keys=None;sessions=[];rounds=[];observer=None;observer_log=None;observer_out=out/'closure-ui';observer_stop=out/'closure-ui-stop.request';observer_entry=None
+    hardware_processes=[]
+    if args.hardware_simulator_package:
+        hardware=args.hardware_simulator_package.resolve()
+        hardware_manifest=module('native_hardware_package','package-hardware-simulator.py').verify(hardware)
+        if hardware_manifest['mode']!='OfflineAndLiveSimulation':p.error('Use a live hardware simulator package')
+        dotnet=shutil.which('dotnet')
+        if not dotnet:p.error('The hardware simulator requires .NET 10')
+        mock_env={key:value for key,value in os.environ.items() if not key.lower().startswith('operatorkeys__') and key.lower() not in
+            ('operatorkeyfile','playerticketsigningkey','controlpipetoken','vr_command_room_key')}
     def save(name,value):(out/name).write_text(json.dumps(value,indent=2)+'\n',encoding='utf-8')
     def stage(name,**extra):save('stage.json',{'stage':name,**extra});print(json.dumps({'stage':name,**extra}),flush=True)
     def check(ok,label):
@@ -328,6 +339,30 @@ def main():
                         if record:save(entry['label']+('-running.json' if begin is not None else '-live.json'),{'metadata':metadata,'frame':frame,'sourceAgeSeconds':age,'acceptedBeginSequence':begin})
                         return frame
                     return None
+    def start_hardware_mock(feed):
+        frames=[]
+        room=feed['room']; sid=feed['session']; label=f'{sid}-room-{room}'
+        mock=subprocess.Popen([sys.executable,str(hardware/'mock-device.py')],env=mock_env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
+                              text=True,encoding='utf-8',creationflags=subprocess.CREATE_NO_WINDOW)
+        hardware_processes.append(mock)
+        def collect():
+            for line in mock.stdout:
+                try:frames.append(json.loads(line))
+                except ValueError:frames.append({'kind':'invalid'})
+        reader=threading.Thread(target=collect,daemon=True);reader.start()
+        listening=wait(lambda:next((f for f in frames if f['kind']=='listening'),None),8,'mock '+label+' listening')
+        bindings=[{'deviceId':str(uuid.uuid4()),'playerId':player,'admissionId':admission,'seat':seat}
+                  for player,(admission,seat) in feed['players'].items()]
+        setup={'version':1,'managementUrl':uri,'sessionId':sid,'roomId':room,'mockPort':listening['port'],'seconds':120,'bindings':bindings}
+        config=runtime/(label+'-hardware.json');config.write_text(json.dumps(setup),encoding='utf-8')
+        report=out/(label+'-hardware-mock.json')
+        gateway=subprocess.Popen([dotnet,str(hardware/'VrCommand.HardwareSimulator.dll'),'--live',str(config),'--output',str(report)],
+            env={**mock_env,'VR_COMMAND_ROOM_KEY':keys[f'Room{room}']},stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
+            text=True,encoding='utf-8',creationflags=subprocess.CREATE_NO_WINDOW)
+        hardware_processes.append(gateway)
+        return {'frames':frames,'mock':mock,'reader':reader,'gateway':gateway,'report':report,
+                'devices':{b['playerId']:b['deviceId'] for b in bindings}}
+
     def exercise_room_combat(entries,clients):
         feeds={}
         if args.check_hardware_feedback:
@@ -341,6 +376,10 @@ def main():
                     feed={'cursor':initial['throughSequence'],'room':room,'session':sid,'stream':initial['streamId'],'players':{},'signals':[]}
                     feeds[path]=feed
                 feed['players'][player['id']]=(player['admissionId'],player['seat'])
+        if args.hardware_simulator_package:
+            for feed in feeds.values():feed['mock']=start_hardware_mock(feed)
+            for feed in feeds.values():
+                wait(lambda:any(f['kind']=='hello' and f['roomId']==feed['room'] for f in feed['mock']['frames']),8,'mock handshake')
 
         def read_feedback():
             for path,feed in feeds.items():
@@ -373,6 +412,9 @@ def main():
                 read_feedback()
                 value=observe(entry,owners,enabled,record=False)
                 complete=all({signal['playerId'] for signal in feed['signals']}==set(feed['players']) for feed in entry_feeds)
+                if args.hardware_simulator_package:
+                    complete=complete and all({item['signal']['playerId'] for frame in feed['mock']['frames'] if frame['kind']=='feedback'
+                                               for item in frame['signals']}==set(feed['players']) for feed in entry_feeds)
                 if complete and value and value['packet']['frame']['autoAttack'] and {p['playerId'] for p in value['statistics'] if p['damageTaken']>0}==set(owners):
                     return value
             live=wait(damaged,35,entry['label']+' damage to every original admission')
@@ -445,6 +487,22 @@ def main():
                     assert record['observedSequence']==signal['observedSequence'] and record['streamId']==entry['ready']['streamId']
                     assert (combat['reportId'],combat['playerId'],combat['kind'],combat['damage'])==(signal['reportId'],signal['playerId'],signal['kind'],signal['damage'])
                 check(len({s['eventId'] for s in feed['signals']})==len(feed['signals']),entry['label']+f' room {room} live hardware signals match original accepted damage and stop at End')
+                if 'mock' in feed:
+                    owned=feed.pop('mock'); log,_=owned['gateway'].communicate(timeout=12)
+                    assert owned['gateway'].returncode==0 and not any(key in log for key in keys.values())
+                    result=read(owned['report'])
+                    assert result['complete'] and result['termination']=='ended' and result['physicalDeliveryConfirmed'] is False
+                    assert (result['roomId'],result['sessionId'])==(room,sid)
+                    acknowledged=[item for attempt in result['attempts'] if attempt['status']=='simulated-acknowledged' for item in attempt['deliveries']]
+                    check(len(acknowledged)==result['acknowledged'] and {item['signal']['playerId'] for item in acknowledged}==set(feed['players']),
+                          entry['label']+f' room {room} mock confirmed all original admissions')
+                    for item in acknowledged:
+                        signal=item['signal'];player=signal['playerId'];original=events[signal['eventId']]
+                        assert (signal['admissionId'],signal['seat'])==feed['players'][player] and item['deviceId']==owned['devices'][player]
+                        assert original['sequence']==signal['eventSequence'] and original['payload']['streamId']==feed['stream']
+                        assert original['payload']['report']['reportId']==signal['reportId'] and original['payload']['report']['damage']==signal['damage']
+                    owned['mock'].terminate();owned['mock'].wait(timeout=5);owned['reader'].join(timeout=5)
+                    check(not owned['reader'].is_alive(),entry['label']+f' room {room} mock and original gateway are terminal')
             save(entry['label']+'-hardware-feedback.json',entry['hardwareFeedback'])
         rounds.append({'name':entry['label'],'ready':entry['ready'],'report':report,'journal':closed,'replayFrames':len(frames)})
     def verify_interrupted_replay(entry, client):
@@ -678,6 +736,7 @@ def main():
             'managedMrPreparing':args.check_managed_mr,
             'roomCombat':args.check_room_combat,
             'hardwareFeedback':args.check_hardware_feedback,
+            'hardwareMockPackage':hardware_manifest['toolVersion'] if args.hardware_simulator_package else None,
             'sourceFingerprint':manifest['build']['sourceFingerprint'],'gameAddress':address})
     except BaseException as error:stage('failed',errorType=type(error).__name__);raise
     finally:
@@ -701,11 +760,19 @@ def main():
                     if w.kernel.WaitForSingleObject(w.handle,15000)!=0:raise RuntimeError('Native child still live')
                     w.close();entry['witness']=None
             except Exception as e:cleanup.append({'kind':entry['label'],'errorType':type(e).__name__})
+        for process in hardware_processes:
+            try:
+                if process.poll() is None:process.terminate()
+                process.wait(timeout=10)
+            except Exception as e:cleanup.append({'kind':'hardware-mock','errorType':type(e).__name__})
         try:
             if api and api.poll() is None:api_stop.write_text('stop own API',encoding='utf-8');api.wait(timeout=50)
             if api_witness:api_witness.wait();api_witness.close()
         except Exception as e:cleanup.append({'kind':'api','errorType':type(e).__name__})
-        save('cleanup.json',{'errors':cleanup,'remainingRunners':[e['label'] for e in runners if e['process'].poll() is None],'remainingClients':[c['player']['id'] for c in clients if c['process'].poll() is None],'apiRemaining':api is not None and api.poll() is None})
+        remaining={'errors':cleanup,'remainingRunners':[e['label'] for e in runners if e['process'].poll() is None],
+                   'remainingClients':[c['player']['id'] for c in clients if c['process'].poll() is None],'apiRemaining':api is not None and api.poll() is None}
+        if args.hardware_simulator_package:remaining['remainingHardware']=[process.pid for process in hardware_processes if process.poll() is None]
+        save('cleanup.json',remaining)
         if cleanup:raise RuntimeError('Cleanup not confirmed; do not snapshot live runtime')
         venue.snapshot_runtime(runtime,out/'runtime-snapshot')
     for file in out.glob('*.json'):

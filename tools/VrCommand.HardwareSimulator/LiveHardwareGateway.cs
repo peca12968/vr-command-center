@@ -102,14 +102,9 @@ internal static class LiveHardwareGateway
                         var status = "cancelled";
                         try
                         {
-                            await Exchange(wire, new { version = 1, kind = "feedback", mode = "simulation", connectionId = connection,
-                                batchId = batch, config.RoomId, page.StreamId, page.RunningSinceSequence, signals = deliveries }, "ack", connection, batch, run.Token);
-                            var verified = await Read(client, route, config, after, run.Token);
-                            if (verified.Page.State == SessionState.Running && verified.Page.ResetReason is null
-                                && verified.Page.StreamId == page.StreamId && verified.Page.RunningSinceSequence == page.RunningSinceSequence
-                                && deliveries.All(item => verified.IsFresh(item.Signal) && verified.Page.Signals.Contains(item.Signal)))
-                                status = "simulated-acknowledged";
-                            else if (verified.Page.State == SessionState.Ended) page = verified.Page;
+                            var invalid = await ExchangeFeedback(wire, client, route, config, after, page, deliveries, connection, batch, run.Token);
+                            if (invalid is null) status = "simulated-acknowledged";
+                            else if (invalid.State == SessionState.Ended) page = invalid;
                             else reattach = true;
                         }
                         catch (MockFailure failure) { status = failure.Message; throw; }
@@ -135,6 +130,38 @@ internal static class LiveHardwareGateway
         destination.Flush(true);
         Console.WriteLine(JsonSerializer.Serialize(new { complete, simulatedHardwareOnly = true, physicalDeliveryConfirmed = false, acknowledged }, Wire));
         return complete ? 0 : 1;
+    }
+
+    // Monitor the authority while the peer holds the batch, and read it again after an ACK.
+    // Cancelling the exchange joins its socket read before the caller closes and replaces the connection.
+    private static async Task<RoomHardwareFeedback?> ExchangeFeedback(NetworkStream wire, HttpClient client, string route, Configuration config,
+        long after, RoomHardwareFeedback page, Delivery[] deliveries, Guid connection, Guid batch, CancellationToken run)
+    {
+        using var pending = CancellationTokenSource.CreateLinkedTokenSource(run);
+        var receipt = Exchange(wire, new { version = 1, kind = "feedback", mode = "simulation", connectionId = connection,
+            batchId = batch, config.RoomId, page.StreamId, page.RunningSinceSequence, signals = deliveries }, "ack", connection, batch, pending.Token);
+
+        bool StillEligible(Observation observed) => observed.Page.State == SessionState.Running && observed.Page.ResetReason is null
+            && observed.Page.StreamId == page.StreamId && observed.Page.RunningSinceSequence == page.RunningSinceSequence
+            && deliveries.All(item => observed.IsFresh(item.Signal) && observed.Page.Signals.Contains(item.Signal));
+        try
+        {
+            while (await Task.WhenAny(receipt, Task.Delay(PollInterval, pending.Token)) != receipt)
+            {
+                var observation = await Read(client, route, config, after, pending.Token);
+                if (receipt.IsFaulted || receipt.IsCanceled) await receipt;
+                if (!StillEligible(observation)) return observation.Page;
+            }
+            await receipt;
+            var confirmed = await Read(client, route, config, after, pending.Token);
+            return StillEligible(confirmed) ? null : confirmed.Page;
+        }
+        finally
+        {
+            pending.Cancel();
+            try { await receipt; }
+            catch (Exception error) when (error is OperationCanceledException or MockFailure) { /* A terminal path already owns the outcome. */ }
+        }
     }
 
     private static async Task<T> Get<T>(HttpClient client, string path, CancellationToken run) where T : class

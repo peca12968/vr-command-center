@@ -211,16 +211,24 @@ def run(args):
                 feedback(1,ids); peers[1].reply()
                 check(True, 'Fresh cursor after '+fault+' skips the feedback generated while disconnected')
 
-            ids = publish([(alpha,'ShotFired')]); feedback(1,ids)
-            action('Pause'); peers[1].reply()
+            ids = publish([(alpha,'ShotFired')]); paused_batch = feedback(1,ids)
+            action('Pause'); peers[1].reply('observe-close')
+            closed_batch = peers[1].read('closed')
+            save('pause-close.json',closed_batch)
+            check(closed_batch['connectionId']==paused_batch['connectionId'] and closed_batch['batchId']==paused_batch['batchId'],
+                  'Pause closes the exact pending connection without an ACK')
             connections[1] = accept(peers[1],1,connections[1])
             old_epoch = epoch; epoch = action('Resume')
             publish([(alpha,'ShotFired')], observed=old_epoch)
             ids = publish([(alpha,'ShotFired')]); feedback(1,ids); peers[1].reply()
             check(True, 'Resume emits only the new Running epoch after a paused in-flight batch')
 
-            ids = publish([(charlie,'ShotFired')]); feedback(2,ids)
-            action('End'); peers[2].reply()
+            ids = publish([(charlie,'ShotFired')]); ended_batch = feedback(2,ids)
+            action('End'); peers[2].reply('observe-close')
+            closed_batch = peers[2].read('closed')
+            save('end-close.json',closed_batch)
+            check(closed_batch['connectionId']==ended_batch['connectionId'] and closed_batch['batchId']==ended_batch['batchId'],
+                  'End closes the exact pending connection without an ACK')
             request(path+'/combat-stream/seal',{'streamId':stream,'finalSequence':sequence},'GameServer')
             reports = {}
             for room, gateway in gateways.items():
@@ -238,7 +246,7 @@ def run(args):
                   and reports[1]['acknowledged']==6 and reports[1]['mockFaults']==3,
                   'Wrong ACK, timeout, disconnect and Pause remain non-acknowledged attempts')
             check([a['status'] for a in reports[2]['attempts']]==['simulated-acknowledged','cancelled'] and reports[2]['acknowledged']==1,
-                  'Matching ACK after End cannot confirm simulated delivery')
+                  'End cancels the withheld batch without waiting for the mock timeout')
             history = {e['eventId']:e for e in request(path+'/events')}
             for report in reports.values():
                 for attempt in report['attempts']:

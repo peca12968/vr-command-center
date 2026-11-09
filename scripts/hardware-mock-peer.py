@@ -33,6 +33,7 @@ def exchange(sock, manual):
         while frame := receive(stream):
             if frame['version'] != 1 or frame['mode'] != 'simulation' or frame['kind'] != ('hello' if first else 'feedback'):
                 raise ValueError('Invalid mock frame')
+            received = time.monotonic()
             emit(frame)
             action = sys.stdin.readline().strip() if manual else 'ack'
             if action == 'timeout':
@@ -40,8 +41,15 @@ def exchange(sock, manual):
                 return
             if action == 'drop':
                 return
+            if action == 'observe-close':
+                sock.settimeout(2)
+                if stream.read(1) != b'':
+                    raise ValueError('Expected the gateway to close its pending connection')
+                emit({'kind':'closed','connectionId':frame['connectionId'],'batchId':frame.get('batchId'),
+                      'elapsedMilliseconds':round((time.monotonic()-received)*1000, 2)})
+                return
             if action not in ('ack', 'wrong'):
-                raise ValueError('Use ack, wrong, drop or timeout')
+                raise ValueError('Use ack, wrong, drop, timeout or observe-close')
             reply = {'version':1, 'kind':'ready' if first else 'ack', 'connectionId':frame['connectionId']}
             if not first:
                 reply['batchId'] = str(uuid.uuid4()) if action == 'wrong' else frame['batchId']
