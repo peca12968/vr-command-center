@@ -1,5 +1,7 @@
 # 硬體回饋離線模擬器
 
+模擬器 0.2.1 會在等待設備回覆期間檢查管理狀態，失效時關閉原模擬連線。`artifacts/hardware-packages/hardware-simulator-0.2.1-net10.zip` 為 160,744 bytes，SHA-256 `2f35bae86ef5a2e711419891417ce73f81dbbee3e835eb3572434f3c272bc7be`，含 8 個清單檔案。 [即時操作](HARDWARE.md#即時模擬閘道)
+
 模擬器 0.2.0 同時提供本頁的離線重建和[即時房間排演](HARDWARE.md#即時模擬閘道)。打包 0.2.0 需另外以 `--live-evidence` 指定即時驗證目錄，離線與即時證據需來自同一編譯輸出。以下保留 0.1.0 的離線契約與歷史證據。
 
 0.2.0 的 `artifacts/hardware-packages/hardware-simulator-0.2.0-net10.zip` 為 159,240 bytes，SHA-256 `be909c1422f9e857c6c19db810f44ae1353fcb2a34a317a973173169ec6a22b4`。清單含 8 個檔案，包括本機 `mock-device.py`。 [驗證紀錄](PROGRESS.md#2026-11-09-即時硬體模擬閘道)
