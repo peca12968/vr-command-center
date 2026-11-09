@@ -20,6 +20,7 @@ const weatherNames = { Clear: '晴朗', Rain: '下雨', Fog: '濃霧', Storm: '�
 const behaviorNames = { Hold: '守備', Patrol: '巡邏', Advance: '推進' };
 const archiveNames = { NoSource: '沒有遊戲來源', Missing: '尚無錄製紀錄', Waiting: '等待封存', SourceMismatch: '來源尚未對上', Sealed: '已封存' };
 const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: null, rooms: [], venue: null, missions: [], catalog: [], launchPinned: null, history: null, draftBase: null, draftChanged: false, draftSavedAt: '', sessions: [], session: null, selected: null, pending: null, props: [], prop: -1, environmentSequence: null, enemiesSequence: null };
+let comparedVersion = null;
 const objectHistory = placementHistory();
 const world = mountWorld(() => state.key, logout);
 const report = mountReport(() => state, logout);
@@ -166,6 +167,7 @@ function logout() {
   report.reset(); state.statistics = null;
   closure.active(false); closure.reset();
   alignment.reset();
+  clearMissionComparison();
   alignmentPins.active(false);
   mrDeployment.active(false);
   mrVenue.active(false);
@@ -376,6 +378,8 @@ function applyPermissions() {
   $('edit-mission').disabled = locked;
   $('mission-version').disabled = locked || !state.history;
   $('load-version').disabled = locked || !state.history;
+  $('compare-version').disabled = locked || !state.history || !$('mission-version').value;
+  $('launch-compared-version').disabled = locked || !comparedVersion;
   $('more-versions').disabled = locked || !state.history?.nextBefore;
   $('launch-version').disabled = locked || !state.draftBase;
   $('save-revision').disabled = locked || !master() || !state.draftBase || state.draftBase.number !== knownHeadNumber(state.draftBase.seriesId);
@@ -619,6 +623,7 @@ async function sendPending() {
     if (state.pending !== pending) return;
     if (pending.kind === 'mission-create' || pending.kind === 'mission-revise') {
       pending.accepted = response.id;
+      const selectedLaunch = commonLaunchRevision();
       await refreshData(epoch);
       if (epoch !== state.epoch) return;
       const revision = await api(`/missions/${response.id}/version`);
@@ -627,7 +632,9 @@ async function sendPending() {
       if (epoch !== state.epoch) return;
       if (!await rememberHead(history, epoch)) return;
       state.draftBase = revision; state.draftChanged = false; state.draftSavedAt = response.createdAtUtc; state.history = history;
-      state.launchPinned = revision; renderHistory(response.id); missionOptions(response.id, history.headId); draftStatus();
+      clearMissionComparison();
+      state.launchPinned = selectedLaunch ?? revision;
+      renderHistory(response.id); missionOptions(state.launchPinned.mission.id, history.headId); draftStatus();
       state.pending = null;
       notify('任務保存已確認，原版本與既有場次保持不變。可選擇此版本開場。'); return;
     }
@@ -732,6 +739,7 @@ function downloadRoomTickets() {
 
 function resetDraft() {
   placement.clearTrial();
+  clearMissionComparison();
   $('mission-form').reset(); state.props = []; state.prop = -1; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.history = null;
   clearPropHistory();
   renderProps(); renderHistory(); draftStatus(); applyPermissions();
@@ -775,6 +783,7 @@ function renderHistory(selected) {
   const history = state.history;
   $('mission-history').hidden = !history;
   fillOptions('mission-version', history ? [...history.versions].sort((a, b) => b.number - a.number).map(row => [row.id, `第 ${row.number} 版 · ${row.name} · ${new Date(row.createdAtUtc).toLocaleString('zh-TW')}`]) : [], selected);
+  if (comparedVersion && comparedVersion.mission.id !== $('mission-version').value) clearMissionComparison();
   $('history-status').textContent = history ? `已讀取 ${history.versions.length} 版 · 本次查詢最新第 ${history.headNumber} 版` : '';
 }
 async function loadDraft(id, older = false) {
@@ -786,6 +795,7 @@ async function loadDraft(id, older = false) {
   if (epoch !== state.epoch) return;
   if (!await rememberHead(history, epoch)) return;
   placement.clearTrial();
+  clearMissionComparison();
   const draft = mission.definition;
   $('draft-name').value = draft.name; $('draft-briefing').value = draft.briefing; $('draft-duration').value = draft.durationSeconds;
   setEnvironment('draft', draft.environment); setEnemies('draft', draft.enemies);
@@ -794,10 +804,55 @@ async function loadDraft(id, older = false) {
   if (!history.versions.some(row => row.id === mission.id)) history.versions.push({ id: mission.id, number: revision.number, name: draft.name, createdAtUtc: mission.createdAtUtc });
   renderProps(); renderHistory(mission.id); missionOptions(undefined, history.headId); draftStatus();
 }
+function draftDefinition() {
+  return { name: $('draft-name').value.trim(), briefing: $('draft-briefing').value, durationSeconds: Number($('draft-duration').value),
+    environment: environment('draft'), enemies: enemies('draft'), props: structuredClone(state.props) };
+}
+function clearMissionComparison() {
+  if (!comparedVersion) return;
+  comparedVersion = null;
+  $('mission-comparison').hidden = true;
+  $('mission-comparison-summary').textContent = '';
+  $('mission-comparison-rows').replaceChildren();
+  $('launch-compared-version').disabled = true;
+}
+async function compareMissionVersion(id) {
+  const epoch = state.epoch, series = state.history?.seriesId;
+  const selected = state.history?.versions.find(row => row.id === id);
+  if (!selected) return;
+  const revision = await api(`/missions/${id}/version`);
+  if (epoch !== state.epoch || series !== state.history?.seriesId || id !== $('mission-version').value) return;
+  if (revision?.mission?.id !== id || revision.seriesId !== series || revision.number !== selected.number) throw new Error('Mission version mismatch');
+  const saved = revision.mission.definition, draft = draftDefinition(), rows = [];
+  function add(label, before, after) {
+    if (before === after) return;
+    const row = element('tr'), title = element('th', label);
+    title.scope = 'row'; row.append(title);
+    for (const value of [before, after]) {
+      const cell = element('td'); cell.append(element('div', value === '' ? '（空白）' : value, 'briefing')); row.append(cell);
+    }
+    rows.push(row);
+  }
+  add('任務名稱', saved.name, draft.name);
+  add('任務內容', saved.briefing, draft.briefing);
+  add('任務時間', `${saved.durationSeconds} 秒`, `${draft.durationSeconds} 秒`);
+  add('環境模式', saved.environment.mode, draft.environment.mode);
+  add('天氣、時段、閃電', venueClimateText(saved.environment), venueClimateText(draft.environment));
+  const enemyText = value => `${value.count} 名 · ${behaviorNames[value.behavior]} · 自動攻擊${value.autoAttack ? '開啟' : '關閉'}`;
+  add('敵軍設定', enemyText(saved.enemies), enemyText(draft.enemies));
+  const propText = prop => prop ? `${prop.assetId} · (${prop.position.x}, ${prop.position.y}, ${prop.position.z}) m · ${prop.yawDegrees}°` : '（無物件）';
+  for (let index = 0; index < Math.max(saved.props.length, draft.props.length); index++)
+    add(`物件 ${index + 1}`, propText(saved.props[index]), propText(draft.props[index]));
+  comparedVersion = revision;
+  $('mission-comparison-summary').textContent = `「${saved.name}」第 ${revision.number} 版 · ${rows.length ? `${rows.length} 項差異` : '與目前草稿相同'}`;
+  $('mission-comparison-rows').replaceChildren(...rows);
+  $('mission-comparison-table').hidden = rows.length === 0;
+  $('mission-comparison').hidden = false;
+}
 async function saveMission(revise = false) {
   if (state.pending || (revise && !state.draftBase)) return;
   state.pending = { kind: revise ? 'mission-revise' : 'mission-create', path: revise ? `/missions/${state.draftBase.mission.id}/revisions` : '/missions', method: 'POST', requestId: uuid(),
-    body: { name: $('draft-name').value.trim(), briefing: $('draft-briefing').value, durationSeconds: Number($('draft-duration').value), environment: environment('draft'), enemies: enemies('draft'), props: structuredClone(state.props) } };
+    body: draftDefinition() };
   await sendPending();
 }
 function renderProps(updateInspector = true) {
@@ -811,7 +866,7 @@ function renderProps(updateInspector = true) {
   if (prop) { $('prop-asset').value = prop.assetId; for (const axis of ['x', 'y', 'z']) $('prop-' + axis).value = prop.position[axis]; $('prop-yaw').value = prop.yawDegrees; }
 }
 function editable() { return master() && !state.busy && !state.pending; }
-function dirtyDraft() { state.draftChanged = true; draftStatus(); placement.scheduleDraft(); }
+function dirtyDraft() { state.draftChanged = true; clearMissionComparison(); draftStatus(); placement.scheduleDraft(); }
 let propGesture = null;
 function propSnapshot() { return { props: structuredClone(state.props), prop: state.prop }; }
 function renderPropHistory() {
@@ -942,6 +997,11 @@ $('load-version').addEventListener('click', () => {
   const id = $('mission-version').value;
   if (id && confirmDraftDiscard('載入選取版本')) run(() => loadDraft(id, true), true);
 });
+$('mission-version').addEventListener('change', clearMissionComparison);
+$('compare-version').addEventListener('click', () => {
+  const id = $('mission-version').value;
+  if (id) run(() => compareMissionVersion(id), true);
+});
 $('more-versions').addEventListener('click', () => run(async () => {
   if (!state.history?.nextBefore) return;
   const previous = state.history, epoch = state.epoch;
@@ -951,14 +1011,16 @@ $('more-versions').addEventListener('click', () => run(async () => {
   state.history = history; renderHistory(); draftStatus();
 }, true));
 $('save-revision').addEventListener('click', () => { if ($('mission-form').reportValidity()) run(() => saveMission(true)); });
-$('launch-version').addEventListener('click', () => {
-  if (!state.draftBase || state.pending || state.busy) return;
-  state.launchPinned = state.draftBase; missionOptions(state.draftBase.mission.id); tab('operations');
+function pinLaunchVersion(revision) {
+  if (!revision || state.pending || state.busy) return;
+  state.launchPinned = revision; missionOptions(revision.mission.id); tab('operations');
   const room = roomPlan.enabled() ? roomPlan.preview().roomId : null;
-  if (room) roomPlan.setRevision(state.draftBase);
-  notify(room ? `已為房間 ${room} 選取保存的第 ${state.draftBase.number} 版；未儲存的草稿修改不會套用。`
-    : `已選取保存的第 ${state.draftBase.number} 版開場；未儲存的草稿修改不會套用。`);
-});
+  if (room) roomPlan.setRevision(revision);
+  notify(room ? `已為房間 ${room} 選取保存的第 ${revision.number} 版；未儲存的草稿修改不會套用。`
+    : `已選取保存的第 ${revision.number} 版開場；未儲存的草稿修改不會套用。`);
+}
+$('launch-version').addEventListener('click', () => pinLaunchVersion(state.draftBase));
+$('launch-compared-version').addEventListener('click', () => pinLaunchVersion(comparedVersion));
 $('new-mission').addEventListener('click', () => { if (confirmDraftDiscard('建立新草稿')) resetDraft(); });
 $('add-sandbag').addEventListener('click', () => addProp('sandbag'));
 $('add-barrel').addEventListener('click', () => addProp('barrel'));

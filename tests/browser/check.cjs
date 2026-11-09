@@ -56,6 +56,19 @@ async function main() {
     diagnosticPage = page;
     function captureErrors(target) { target.on('pageerror', error => browserErrors.push(error.message)); target.on('console', message => { if (/Content Security Policy|violates.*directive/i.test(message.text())) browserErrors.push(message.text()); }); }
     captureErrors(page);
+    if (process.argv.includes('--mission-versions-only')) {
+      const mission = await api('/missions', 'POST', { name: '任務版本核對', briefing: '原始開場簡報', durationSeconds: 900,
+        environment: { mode: 'VR', weather: 'Storm', timeOfDay: 'Night', lightning: true }, enemies: { count: 1, behavior: 'Hold', autoAttack: false },
+        props: [{ assetId: 'sandbag', position: { x: 3.5, y: 0, z: 2 }, yawDegrees: 45 }] }, 'Master', 201);
+      const session = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [1] }, 'Master', 201);
+      await page.goto(base + '/console/'); await page.locator('#login-key').fill(tokens.Master); await page.locator('#login-form button').click();
+      await page.locator('#tab-missions').click(); await page.locator(`#edit-mission option[value="${mission.id}"]`).waitFor({ state: 'attached' });
+      await page.locator('#load-mission').click(); await page.waitForFunction(name => document.querySelector('#draft-name').value === name, mission.definition.name);
+      await require('./mission-browser.cjs')({ page, context, api, tokens, base, mission, session, screenshots, check });
+      check(browserErrors.length === 0, 'Mission versions have no uncaught browser or policy errors');
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed', scope: 'mission version comparison and exact launch with real API and Chromium' }, null, 2));
+      console.log(`PASS: ${checks} focused mission version checks. Screenshots: ${screenshots}`); return;
+    }
     if (process.argv.includes('--vr-venue-tickets-only')) {
       await require('./vr-venue-tickets-browser.cjs')({ context, api, tokens, base, root, directory, screenshots, check, captureErrors });
       check(browserErrors.length === 0, 'VR venue ticketing has no uncaught browser or policy errors');

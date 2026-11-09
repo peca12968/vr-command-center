@@ -50,6 +50,8 @@ module.exports = async function missionBrowser({ page, context, api, tokens, bas
       'Revision retry preserves its exact parent, definition and durable request ID');
     check(await editor.locator('#draft-name').inputValue() === second.definition.name && (await editor.locator('#draft-status').innerText()).includes('已有第 3 版') && await editor.locator('#save-revision').isDisabled(),
       'Accepted revision retry retains its saved second version even after another operator saves version three');
+    check(await editor.locator('#launch-mission').inputValue() === mission.id,
+      'Saving and confirming a different revision does not replace the original selected launch version');
     await editor.unroute('**/api/missions/*/revisions');
     await page.locator('#refresh').click(); await page.locator(`#edit-mission option[value="${third.id}"]`).waitFor({ state: 'attached' });
     check(await page.locator('#launch-mission').inputValue() === mission.id && (await page.locator('#launch-mission option:checked').innerText()).includes('歷史'),
@@ -74,18 +76,34 @@ module.exports = async function missionBrowser({ page, context, api, tokens, bas
       'Fresh version history advances the known head and a late stale catalog cannot regress it');
     await editor.unroute('**/api/mission-library'); await editor.locator('#refresh').click();
     await editor.locator(`#edit-mission option[value="${fourth.id}"]`).waitFor({ state: 'attached' });
-    await editor.locator('#mission-version').selectOption(mission.id); await editor.locator('#load-version').click(); await ready();
-    await waitForDom(name => document.querySelector('#draft-name').value === name, mission.definition.name);
-    check(await editor.locator('#prop-x').inputValue() === '3.5' && await editor.locator('#save-revision').isDisabled() && await editor.locator('#mission-version option').count() === 4,
-      'History loads exact old geometry and conditions without enabling a conflicting revision branch');
-    await editor.screenshot({ path: path.join(screenshots, 'mission-versions-desktop.png'), fullPage: true });
+    const compared = editor.locator('#mission-comparison');
+    await editor.locator('#mission-version').selectOption(fourth.id); await editor.locator('#compare-version').click(); await compared.waitFor(); await ready();
+    check(await editor.locator('#mission-comparison-table').isHidden() && (await editor.locator('#mission-comparison-summary').innerText()).includes('相同'),
+      'Comparing the currently loaded saved version reports no changes');
+    await editor.locator('#mission-version').selectOption(mission.id);
+    check(await compared.isHidden(), 'Selecting a different saved version clears the old comparison');
+    await editor.locator('#draft-briefing').fill('未儲存的簡報 <img src=x onerror=alert(1)>');
+    await editor.locator('#add-barrel').click();
+    await editor.locator('#compare-version').click(); await compared.waitFor(); await ready();
+    const differences = await editor.locator('#mission-comparison-rows tr').evaluateAll(rows => rows.map(row => [...row.cells].map(cell => cell.textContent)));
+    check(differences.some(([label, saved, draft]) => label === '任務時間' && saved === `${mission.definition.durationSeconds} 秒` && draft === '1500 秒')
+      && differences.some(([label, saved, draft]) => label === '物件 1' && saved.includes('(3.5,') && draft.includes('(4.5,'))
+      && differences.some(([label, saved, draft]) => label === `物件 ${mission.definition.props.length + 1}` && saved === '（無物件）' && draft.startsWith('barrel'))
+      && differences.some(([label, saved, draft]) => label === '天氣、時段、閃電' && saved.includes('暴風雨') && draft.includes('晴朗'))
+      && differences.some(([label, saved, draft]) => label === '任務內容' && saved === mission.definition.briefing && draft.includes('<img src=x'))
+      && await compared.locator('img').count() === 0 && await editor.locator('#draft-name').inputValue() === fourth.definition.name,
+      'Comparison shows the exact historical duration, layout and literal briefing beside the dirty draft');
+    await editor.locator('#draft-briefing').fill('修改草稿後應重做比較');
+    check(await compared.isHidden(), 'Editing the draft clears the comparison instead of leaving stale differences');
+    await editor.locator('#compare-version').click(); await compared.waitFor(); await ready();
     await editor.setViewportSize({ width: 390, height: 844 });
-    check(await editor.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'Version history and both save actions fit a mobile viewport');
-    await editor.screenshot({ path: path.join(screenshots, 'mission-versions-mobile.png'), fullPage: true });
+    check(await editor.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'The comparison fits a mobile viewport');
+    await editor.screenshot({ path: path.join(screenshots, 'mission-comparison-mobile.png'), fullPage: true });
     await editor.setViewportSize({ width: 1440, height: 1080 });
-    await editor.locator('#draft-briefing').fill('尚未儲存的預覽反例');
-    await editor.locator('#launch-version').click();
-    check(await editor.locator('#launch-mission').inputValue() === mission.id, 'Historical draft explicitly selects its saved original version for launch');
+    await editor.locator('#launch-compared-version').click();
+    check(await editor.locator('#launch-mission').inputValue() === mission.id && await editor.locator('#draft-name').inputValue() === fourth.definition.name
+      && await editor.locator('#draft-briefing').inputValue() === '修改草稿後應重做比較',
+      'Choosing a compared version for launch retains the different unsaved draft and pins only the exact saved version');
     await editor.locator('#launch-room').selectOption('3');
     await editor.locator('#launch-preview-briefing summary').click();
     check(await editor.locator('#launch-preview').getAttribute('data-mission-id') === mission.id
@@ -99,6 +117,19 @@ module.exports = async function missionBrowser({ page, context, api, tokens, bas
     let created = (await api('/sessions')).find(row => row.roomIds.length === 1 && row.roomIds[0] === 3);
     check(created?.mission.id === mission.id && JSON.stringify(created.mission.definition) === JSON.stringify(mission.definition), 'Launching a historical version uses its full original immutable definition');
     await api('/sessions/' + created.id + '/commands', 'POST', { commandId: randomUUID(), action: 'End' });
+    await editor.locator('#tab-missions').click();
+    editor.once('dialog', dialog => dialog.accept());
+    await editor.locator('#mission-version').selectOption(mission.id); await editor.locator('#load-version').click(); await ready();
+    await waitForDom(name => document.querySelector('#draft-name').value === name, mission.definition.name);
+    check(await editor.locator('#prop-x').inputValue() === '3.5' && await editor.locator('#save-revision').isDisabled() && await editor.locator('#mission-version option').count() === 4 && await compared.isHidden(),
+      'History loads exact old geometry, clears the comparison and prevents a conflicting revision branch');
+    await editor.screenshot({ path: path.join(screenshots, 'mission-versions-desktop.png'), fullPage: true });
+    await editor.setViewportSize({ width: 390, height: 844 });
+    check(await editor.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'Version history and both save actions fit a mobile viewport');
+    await editor.screenshot({ path: path.join(screenshots, 'mission-versions-mobile.png'), fullPage: true });
+    await editor.setViewportSize({ width: 1440, height: 1080 });
+    await editor.locator('#launch-version').click();
+    check(await editor.locator('#launch-mission').inputValue() === mission.id, 'Historical draft explicitly selects its saved original version for launch');
     await editor.locator('#tab-missions').click(); await editor.locator('#draft-name').fill('從舊版另存的獨立任務');
     let loseCreate = true; const creates = [];
     await editor.route('**/api/missions', async route => {
@@ -136,6 +167,26 @@ module.exports = async function missionBrowser({ page, context, api, tokens, bas
     await editor.waitForTimeout(100);
     check(await editor.locator('#mission-history').isHidden() && await editor.locator('#mission-version option').count() === 0 && await editor.locator('#edit-mission option').count() === 0 && await editor.locator('#draft-name').inputValue() === '',
       'Logout clears mission history and a delayed old history response cannot restore the draft');
+    await editor.unroute('**/api/missions/*/history');
+    await editor.locator('#login-key').fill(tokens.Master); await editor.locator('#login-form button').click();
+    await editor.locator('#tab-missions').click(); await editor.locator('#edit-mission').selectOption(fourth.id);
+    await editor.locator('#load-mission').click(); await waitForDom(() => document.querySelector('#draft-status').textContent.includes('第 4 版')); await ready();
+    await editor.locator('#mission-version').selectOption(mission.id);
+    let releaseComparison, comparisonRequested;
+    const comparisonGate = new Promise(resolve => { releaseComparison = resolve; });
+    const comparisonObserved = new Promise(resolve => { comparisonRequested = resolve; });
+    await editor.route(`**/api/missions/${mission.id}/version`, async route => {
+      const response = await route.fetch(); comparisonRequested(); await comparisonGate; await route.fulfill({ response });
+    });
+    try {
+      await editor.locator('#compare-version').click(); await comparisonObserved;
+      await editor.locator('#logout').click();
+      const delivered = editor.waitForResponse(`**/api/missions/${mission.id}/version`);
+      releaseComparison(); await delivered;
+      await waitForDom(() => document.querySelector('#workspace').hidden && !document.querySelector('#login-form button').disabled);
+      check(await compared.evaluate(node => node.hidden) && await editor.locator('#mission-comparison-rows tr').count() === 0,
+        'A delayed comparison response from a prior login cannot reopen the comparison or restore private draft data');
+    } finally { releaseComparison(); await editor.unroute(`**/api/missions/${mission.id}/version`); }
     check(errors.length === 0, 'Mission revision workflow has no uncaught browser script errors');
   } catch (error) {
     const diagnostic = await editor.evaluate(() => ({ visibility: document.visibilityState,
