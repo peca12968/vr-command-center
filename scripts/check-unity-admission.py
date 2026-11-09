@@ -30,6 +30,10 @@ def source_fingerprint():
     files += [p for p in (project / 'Assets/VrCommand/Audio').rglob('*') if p.suffix == '.wav' or p.name.endswith('.wav.meta')]
     files += [project / p for p in ['Packages/manifest.json', 'Packages/packages-lock.json', 'Packages/com.unity.transport/UPSTREAM.json', 'ProjectSettings/ProjectVersion.txt']]
     files += [project / 'Assets/Settings' / name for name in ('Mobile_RPAsset.asset', 'Mobile_Renderer.asset')]
+    files += [project / (name + suffix)
+              for name in ('Assets/VrCommand/Generated/XRSettings.asset', 'Assets/XR/Loaders/OpenXRLoader.asset',
+                           'Assets/XR/Settings/OpenXR Package Settings.asset')
+              for suffix in ('', '.meta')]
     digest = hashlib.sha256()
     for path in sorted(files, key=lambda p: p.relative_to(project).as_posix()):
         name = path.relative_to(project).as_posix().encode()

@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-10 `windows-player-0.49.0-launcher-1.3.zip` 為 84,763,077 bytes，SHA-256 `20144d9ec2184923e4b4d165db3a857b9ed81af63377740722e054500426c707`。解壓核對 330 個清單檔案，23 項實際啟動器檢查通過，含缺少 OpenXR 執行環境時於入場前退出。 [Windows OpenXR 啟動](#windows-openxr-啟動)
+
 2026-11-09 `windows-player-0.48.1-launcher-1.2.zip` 為 83,445,374 bytes，SHA-256 `ba90488aa06ed3b7154f71600b58bb974968a92db99a962571967005afd95f8c`。解壓核對 328 個清單檔案，19 項 Windows 啟動器檢查通過。遊戲端 0.48.1 使用同源的 Windows 與 Quest 建置。 [版本相容性](EXTERNAL_CLIENTS.md#遊戲版本相容性)
 
 2026-11-09 `windows-player-0.48.0-launcher-1.2.zip` 為 83,444,831 bytes，SHA-256 `e02e98a60c14de1993715b888c0dd6cbf21f01393fe43f5195179bb2429914ce`。解壓後核對 328 個清單檔案及 19 項封裝檢查。啟動器顯示房間、席位和到期倒數，遊戲執行環境沿用 0.48.0。 [連線檔席位與效期](PLAYER_CONFIG_REVIEW.md#連線檔席位與效期)
@@ -62,6 +64,18 @@ runtime只收VrCommand.exe／UnityPlayer／CrashHandler／WinPix及D3D12、MonoB
 4. 用WASD移動、Ctrl按住或C切換蹲姿、方向鍵或右鍵拖曳瞄準、Space／左鍵射擊、R換彈、B任務簡報。完整操作見[DESKTOP](DESKTOP.md)。結束時等待最終戰績。
 
 關閉啟動器不會終止已開啟的遊戲或替操作員End。遊戲結束後啟動器可再次使用，但仍須有效短票券；重新配票後，將新檔存回相同路徑可使用遊戲原Reconnect流程。連線檔的角色／四欄結構、IPv4及port先離線檢查；票券簽章、效期、admission、room／seat仍由遊戲伺服器驗證，格式正確不代表可入場。
+
+### Windows OpenXR 啟動
+
+Windows 玩家包 0.49.0 的圖形玩家端可以選用 OpenXR。先讓相容的頭盔連上 Windows OpenXR 執行環境，再由解壓後的玩家包資料夾執行。使用主控簽發的四欄 VR 玩家連線檔。
+
+```powershell
+.\Launch-Player.exe --config 'C:\Venue\player.json' --launch --openxr --wait
+```
+
+啟動器使用 Direct3D 11。OpenXR 顯示和輸入子系統開始運作後，遊戲才送出入場請求。OpenXR 無法啟動時，玩家程序退出碼為 2。可加上 `--log` 和 `--status-report` 指定包外兩個新檔，檢查 `OpenXRUnavailable`。平常雙擊啟動器仍使用桌面模式。
+
+Windows 建置啟用 Touch 與 Unity 的 HTC Vive Controller 兩個 OpenXR 互動設定。Touch 沿用右扳機射擊、A 換彈、B 重讀票券，左手 X／Y 翻頁及關閉簡報。HTC Vive Controller 使用右扳機射擊、右握把換彈、右 Menu 重讀票券，左觸控板按下翻頁、左 Menu 關閉、左握把查看字型授權。實際控制器由 Windows OpenXR 執行環境回報，VIVE XR 的確切型號及相符設定仍待頭盔到場驗收。MR 透視與房間對位沿用 Quest 3 Android 路徑。 [Unity XR 手動啟動](https://docs.unity3d.com/Packages/com.unity.xr.management@4.6/manual/EndUser.html#load-xr-plug-ins) · [HTC Vive 控制器設定](https://docs.unity3d.com/Packages/com.unity.xr.openxr@1.19/manual/features/htcvivecontrollerprofile.html)
 
 127.*僅供同機；不同電腦必須能連到公告的伺服器IPv4及UDP埠。此工具不修改安全性／防火牆、不安裝驅動，也不提供NAT／中繼或網路可達性探測。若Windows出現安全性提示，由使用者自行決定。包內沒有伺服器啟動器、管理API或控制台金鑰。
 

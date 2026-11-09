@@ -5,6 +5,7 @@ using UnityEngine.InputSystem;
 using UnityEngine.InputSystem.LowLevel;
 using UnityEngine.XR.OpenXR.Features.Interactions;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.TestTools;
 using UnityEditor.SceneManagement;
 
@@ -20,6 +21,15 @@ namespace VrCommand.Unity.Tests
             Assert.IsFalse(ClientReconnectInput.CanOffer("Client", false, true, 2, 2));
             Assert.IsFalse(ClientReconnectInput.CanOffer("Client", false, false, 1.99f, 2));
             Assert.IsFalse(ClientReconnectInput.CanOffer("Client", false, false, float.NaN, 2));
+        }
+        [Test] public void DesktopOpenXrOnlyStartsForGraphicalWindowsClients()
+        {
+            Assert.IsTrue(VenueBootstrap.CanStartDesktopOpenXR("Client", RuntimePlatform.WindowsPlayer, false, GraphicsDeviceType.Direct3D11));
+            foreach (var role in new[] { "Host", "Server", null })
+                Assert.IsFalse(VenueBootstrap.CanStartDesktopOpenXR(role, RuntimePlatform.WindowsPlayer, false, GraphicsDeviceType.Direct3D11));
+            Assert.IsFalse(VenueBootstrap.CanStartDesktopOpenXR("Client", RuntimePlatform.Android, false, GraphicsDeviceType.Vulkan));
+            Assert.IsFalse(VenueBootstrap.CanStartDesktopOpenXR("Client", RuntimePlatform.WindowsPlayer, true, GraphicsDeviceType.Direct3D11));
+            Assert.IsFalse(VenueBootstrap.CanStartDesktopOpenXR("Client", RuntimePlatform.WindowsPlayer, false, GraphicsDeviceType.Null));
         }
         [Test] public void HeldButtonOnFirstEligibleFrameDoesNotReconnect()
         { var gate = new ReleasePressGate(); Assert.IsFalse(gate.Poll(true, true, true, true)); Assert.IsFalse(gate.Poll(true, true, true, true)); }
@@ -133,6 +143,65 @@ namespace VrCommand.Unity.Tests
             EmptyScene(); yield return new EnterPlayMode();
             yield return Device(true, new Step(3, false, false, false), new Step(3, true, true, false), new Step(1, true, false, false),
                 new Step(3, true, true, false), new Step(3, true, false, false), new Step(3, true, true, true));
+        }
+
+        [UnityTest] public IEnumerator OfficialViveLayoutUsesGripForReloadAndRightMenuForReconnect()
+        {
+            EmptyScene(); yield return new EnterPlayMode();
+            const string layout = "ViveController";
+            var background = InputSystem.settings.backgroundBehavior;
+            InputSystem.settings.backgroundBehavior = InputSettings.BackgroundBehavior.IgnoreFocus;
+            InputSystem.RegisterLayout<HTCViveControllerProfile.ViveController>(layout);
+            var device = InputSystem.AddDevice(layout) as HTCViveControllerProfile.ViveController;
+            try
+            {
+                InputSystem.SetDeviceUsage(device, CommonUsages.RightHand);
+                using (var pc = new ClientReconnectInput(true))
+                using (var quest = new ClientReconnectInput())
+                using (var reload = new InputAction("Reload", InputActionType.Value, NetworkAvatar.ViveReloadBinding))
+                {
+                    reload.Enable();
+                    foreach (var step in new (bool Held, bool Reconnect)[] { (true, false), (false, false), (true, true), (true, false) })
+                    {
+                        var observed = false;
+                        var accepted = false;
+                        var questAccepted = false;
+                        var grip = 0f;
+                        Action sample = () =>
+                        {
+                            if (observed || InputState.currentUpdateType != InputUpdateType.Dynamic) return;
+                            accepted = pc.Poll(true, true);
+                            questAccepted = quest.Poll(true, true);
+                            grip = reload.ReadValue<float>();
+                            observed = true;
+                        };
+                        InputSystem.onAfterUpdate += sample;
+                        try
+                        {
+                            using (StateEvent.From(device, out var state))
+                            {
+                                device.trackingState.WriteValueIntoEvent(3, state);
+                                device.isTracked.WriteValueIntoEvent(1f, state);
+                                device.menu.WriteValueIntoEvent(step.Held ? 1f : 0f, state);
+                                device.gripPressed.WriteValueIntoEvent(1f, state);
+                                InputSystem.QueueEvent(state);
+                            }
+                            for (var frame = 0; !observed && frame < 120; frame++) yield return null;
+                        }
+                        finally { InputSystem.onAfterUpdate -= sample; }
+                        Assert.IsTrue(observed);
+                        Assert.AreEqual(1f, grip);
+                        Assert.IsFalse(questAccepted);
+                        Assert.AreEqual(step.Reconnect, accepted);
+                    }
+                }
+            }
+            finally
+            {
+                if (device != null) InputSystem.RemoveDevice(device);
+                InputSystem.RemoveLayout(layout);
+                InputSystem.settings.backgroundBehavior = background;
+            }
         }
     }
 }

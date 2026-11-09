@@ -29,11 +29,15 @@ namespace VrCommand.Unity
     public sealed class ClientReconnectInput : IDisposable
     {
         public const string Binding = "<XRController>{RightHand}/secondaryButton";
+        internal const string ViveBinding = "<ViveController>{RightHand}/menu";
         private readonly InputAction button, tracking, isTracked;
         private readonly ReleasePressGate gate = new ReleasePressGate();
-        public ClientReconnectInput()
+        public ClientReconnectInput() : this(false) { }
+
+        internal ClientReconnectInput(bool desktopOpenXR)
         {
             button = new InputAction("Reconnect player", InputActionType.Value, Binding);
+            if (desktopOpenXR) button.AddBinding(ViveBinding);
             tracking = new InputAction("Reconnect controller tracking", InputActionType.Value, "<XRController>{RightHand}/trackingState");
             isTracked = new InputAction("Reconnect controller valid", InputActionType.Value, "<XRController>{RightHand}/isTracked");
             button.Enable(); tracking.Enable(); isTracked.Enable();

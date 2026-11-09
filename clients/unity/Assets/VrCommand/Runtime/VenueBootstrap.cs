@@ -7,6 +7,10 @@ using Unity.Netcode.Transports.UTP;
 using Unity.Networking.Transport;
 using UnityEngine;
 using UnityEngine.Networking;
+using UnityEngine.Rendering;
+using UnityEngine.XR;
+using UnityEngine.XR.Management;
+using UnityEngine.XR.OpenXR;
 using SessionSnapshot = VrCommand.Simulation.ManagementSnapshot;
 using VrCommand.Simulation;
 
@@ -25,14 +29,20 @@ namespace VrCommand.Unity
         private bool managementReady;
         private float nextReconnect;
         private ClientReconnectInput reconnectInput;
+        private XRManagerSettings desktopXrManager;
+        private bool clientConnectionReady;
+        internal bool DesktopOpenXRActive { get; private set; }
         private bool applicationPaused;
         private VenueLinkDiagnostics linkDiagnostics;
         private const int MaximumPeerObservations = 256;
         private bool peerDiagnostics;
         private int peerObservations;
-        public bool CanReconnect => networkManager != null && ClientReconnectInput.CanOffer(configuration?.role,
+        public bool CanReconnect => clientConnectionReady && networkManager != null && ClientReconnectInput.CanOffer(configuration?.role,
             networkManager.IsListening, networkManager.ShutdownInProgress, Time.unscaledTime, nextReconnect);
-        public string ReconnectHint => reconnectInput != null && CanReconnect ? "\nRELEASE THEN PRESS RIGHT B TO RELOAD PLAYER TICKET" : "";
+        public string ReconnectHint => reconnectInput != null && CanReconnect
+            ? DesktopOpenXRActive ? "\nRELEASE THEN PRESS RIGHT B / VIVE MENU TO RELOAD PLAYER TICKET"
+                : "\nRELEASE THEN PRESS RIGHT B TO RELOAD PLAYER TICKET"
+            : "";
         private TelemetryOutbox outbox;
         private WorldRecordingDelivery worldDelivery;
         private sealed class EndingClient
@@ -55,29 +65,29 @@ namespace VrCommand.Unity
         {
             Instance = this;
             var spectator = GameObject.Find("Desktop Spectator");
-            if (Application.platform == RuntimePlatform.Android && spectator != null)
-            {
-                NetworkAvatar.CreateTrackingSpace(null, spectator.transform);
-                spectator.transform.localPosition = Vector3.zero;
-                spectator.transform.rotation = Quaternion.identity;
-                var driver = spectator.AddComponent<UnityEngine.InputSystem.XR.TrackedPoseDriver>();
-                driver.positionInput = new UnityEngine.InputSystem.InputActionProperty(new UnityEngine.InputSystem.InputAction(
-                    "Waiting Head Position", UnityEngine.InputSystem.InputActionType.Value, "<XRHMD>/centerEyePosition"));
-                driver.rotationInput = new UnityEngine.InputSystem.InputActionProperty(new UnityEngine.InputSystem.InputAction(
-                    "Waiting Head Rotation", UnityEngine.InputSystem.InputActionType.Value, "<XRHMD>/centerEyeRotation"));
-                driver.ignoreTrackingState = true;
-                WaitingStatusPanel.Create(spectator.transform);
-            }
+            if (Application.platform == RuntimePlatform.Android) ConfigureWaitingHead(spectator);
             Application.targetFrameRate = Application.platform == RuntimePlatform.Android ? 72 : 90;
             if (Application.platform != RuntimePlatform.Android) Application.runInBackground = true;
+            var desktopOpenXR = Array.IndexOf(Environment.GetCommandLineArgs(), "--vr-openxr") >= 0;
             try { configuration = LaunchConfiguration.Load(); }
             catch (Exception) { status = "PLEASE CONTACT THE CONTROL DESK"; }
+            if (desktopOpenXR)
+            {
+                if (!CanStartDesktopOpenXR(configuration?.role, Application.platform, Application.isBatchMode, SystemInfo.graphicsDeviceType))
+                {
+                    EndDesktopOpenXRStartup("rejected");
+                    yield break;
+                }
+                yield return StartDesktopOpenXR();
+                if (!DesktopOpenXRActive) yield break;
+                ConfigureWaitingHead(spectator);
+            }
             if (configuration == null) yield break;
             peerDiagnostics = configuration.role == "Server" && Application.platform == RuntimePlatform.WindowsPlayer
                 && Application.isBatchMode && Array.Exists(Environment.GetCommandLineArgs(), argument => argument == "--vr-peer-diagnostics");
             if (!DesktopClientExercise.Install(gameObject, configuration.role)) { status = "DESKTOP EXERCISE REJECTED"; if (Application.isBatchMode && !Application.isEditor) Application.Quit(2); yield break; }
-            if (configuration.role == "Client" && (Application.platform == RuntimePlatform.Android || UnityEngine.XR.XRSettings.isDeviceActive))
-                reconnectInput = new ClientReconnectInput();
+            if (configuration.role == "Client" && (Application.platform == RuntimePlatform.Android || DesktopOpenXRActive || XRSettings.isDeviceActive))
+                reconnectInput = new ClientReconnectInput(DesktopOpenXRActive);
             NativePoseContinuity.Install(gameObject,configuration.role);
             NativePoseTrace.Install(gameObject,configuration.role);
             NativeWorldJournalTrace.Install(gameObject,configuration.role);
@@ -128,6 +138,7 @@ namespace VrCommand.Unity
             }
             if (configuration.role != "Server")
                 networkManager.NetworkConfig.ConnectionData = configuration.AdmissionPayload();
+            clientConnectionReady = configuration.role == "Client";
             status = "CONNECTING";
             var started = configuration.role == "Server" ? networkManager.StartServer()
                 : configuration.role == "Host" ? networkManager.StartHost() : networkManager.StartClient();
@@ -145,6 +156,63 @@ namespace VrCommand.Unity
                     if (!managementReady) { sceneAuthority.SuspendForManagementLoss(); combatAuthority.Suspend(); }
                 }
             }
+        }
+
+        internal static bool CanStartDesktopOpenXR(string role, RuntimePlatform platform, bool batchMode, GraphicsDeviceType graphics)
+            => role == "Client" && platform == RuntimePlatform.WindowsPlayer && !batchMode && graphics != GraphicsDeviceType.Null;
+
+        private IEnumerator StartDesktopOpenXR()
+        {
+            status = "STARTING OPENXR";
+            Debug.Log("VR_OPENXR_STARTUP status=requested");
+            // Manual initialization runs after the first Start callback and graphics setup.
+            yield return null;
+            var manager = XRGeneralSettings.Instance?.Manager;
+            if (manager != null && manager.activeLoader == null)
+            {
+                yield return manager.InitializeLoader();
+                if (manager.activeLoader is OpenXRLoader loader)
+                {
+                    desktopXrManager = manager;
+                    manager.StartSubsystems();
+                    var deadline = Time.realtimeSinceStartupAsDouble + 12;
+                    var display = loader.GetLoadedSubsystem<XRDisplaySubsystem>();
+                    var input = loader.GetLoadedSubsystem<XRInputSubsystem>();
+                    while (display != null && input != null && Time.realtimeSinceStartupAsDouble < deadline)
+                    {
+                        if (display.running && input.running)
+                        {
+                            DesktopOpenXRActive = true;
+                            Debug.Log("VR_OPENXR_STARTUP status=active");
+                            yield break;
+                        }
+                        yield return null;
+                    }
+                }
+            }
+            EndDesktopOpenXRStartup("unavailable");
+        }
+
+        private void EndDesktopOpenXRStartup(string reason)
+        {
+            status = "OPENXR STARTUP FAILED - CONTACT CONTROL DESK";
+            Debug.Log("VR_OPENXR_STARTUP status=" + reason);
+            if (!Application.isEditor) Application.Quit(2);
+        }
+
+        private static void ConfigureWaitingHead(GameObject spectator)
+        {
+            if (spectator == null) return;
+            NetworkAvatar.CreateTrackingSpace(null, spectator.transform);
+            spectator.transform.localPosition = Vector3.zero;
+            spectator.transform.rotation = Quaternion.identity;
+            var driver = spectator.AddComponent<UnityEngine.InputSystem.XR.TrackedPoseDriver>();
+            driver.positionInput = new UnityEngine.InputSystem.InputActionProperty(new UnityEngine.InputSystem.InputAction(
+                "Waiting Head Position", UnityEngine.InputSystem.InputActionType.Value, "<XRHMD>/centerEyePosition"));
+            driver.rotationInput = new UnityEngine.InputSystem.InputActionProperty(new UnityEngine.InputSystem.InputAction(
+                "Waiting Head Rotation", UnityEngine.InputSystem.InputActionType.Value, "<XRHMD>/centerEyeRotation"));
+            driver.ignoreTrackingState = true;
+            WaitingStatusPanel.Create(spectator.transform);
         }
 
         private SessionSnapshot latestSnapshot;
@@ -487,6 +555,7 @@ namespace VrCommand.Unity
         {
             linkDiagnostics?.Finish("Shutdown");
             reconnectInput?.Dispose(); reconnectInput = null;
+            if (desktopXrManager != null && desktopXrManager.isInitializationComplete) desktopXrManager.DeinitializeLoader();
             if (worldDelivery != null) worldDelivery.StopAndDispose();
             else if (combatAuthority?.RecordingWriter != null)
             {
@@ -506,7 +575,7 @@ namespace VrCommand.Unity
         }
         private void OnGUI()
         {
-            if (Application.platform == RuntimePlatform.Android) return;
+            if (Application.platform == RuntimePlatform.Android || DesktopOpenXRActive) return;
             if (Debrief.Active)
             {
                 var width = Mathf.Min(820, Screen.width - 32); var height = 280;

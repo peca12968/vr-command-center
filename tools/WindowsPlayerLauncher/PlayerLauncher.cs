@@ -114,12 +114,13 @@ internal static class PlayerLauncher
         File.Move(temporary, statusReport);
         lastStatusReport = value;
     }
-    private static Process Launch(string config, bool headless, string log, string reviewedHash = null)
+    private static Process Launch(string config, bool headless, string log, string reviewedHash = null, bool openXR = false)
     {
         Verify(); Config(config);
         Require(reviewedHash == null || Hash(config) == reviewedHash, "連線檔已變更，請重新載入後核對。");
         var args = "--vr-config " + Quote(config) + " -job-worker-count 2";
         if (headless) args += " -batchmode -nographics";
+        if (openXR) args += " -force-d3d11 --vr-openxr";
         if (log != null) args += " -logFile " + Quote(log);
         var child = Process.Start(new ProcessStartInfo(Path.Combine(Root, "VrCommand.exe"), args)
         { UseShellExecute = false, WorkingDirectory = Root, CreateNoWindow = headless });
@@ -130,7 +131,7 @@ internal static class PlayerLauncher
     [STAThread]
     private static int Main(string[] args)
     {
-        string config = null, log = null; bool launch = false, wait = false, headless = false, verify = false;
+        string config = null, log = null; bool launch = false, wait = false, headless = false, verify = false, openXR = false;
         try
         {
             for (var i = 0; i < args.Length; i++)
@@ -138,6 +139,7 @@ internal static class PlayerLauncher
                 if (args[i] == "--launch") launch = true;
                 else if (args[i] == "--wait") wait = true;
                 else if (args[i] == "--headless") headless = true;
+                else if (args[i] == "--openxr") openXR = true;
                 else if (args[i] == "--verify") verify = true;
                 else if ((args[i] == "--config" || args[i] == "--log" || args[i] == "--report" || args[i] == "--status-report") && i + 1 < args.Length)
                 {
@@ -153,10 +155,11 @@ internal static class PlayerLauncher
             Require(statusReport == null || (!verify && launch && wait && log != null && !File.Exists(statusReport) && !statusReport.StartsWith(Root, StringComparison.OrdinalIgnoreCase)
                 && !SamePath(statusReport, config) && !SamePath(statusReport, log) && !SamePath(statusReport, report)), "連線狀態報告須搭配等待啟動及獨立的新記錄路徑。");
             Require((!headless && !wait || launch) && (!launch || config != null), "請提供玩家連線檔。");
+            Require(!openXR || (launch && !headless && !verify), "OpenXR 需要直接啟動有圖形的玩家端。");
             if (verify) { Verify(); Report(new { status = "verified" }); return 0; }
             if (launch)
             {
-                using (var child = Launch(config, headless, log))
+                using (var child = Launch(config, headless, log, openXR: openXR))
                 {
                     if (!wait) return 0;
                     if (statusReport == null) child.WaitForExit();
@@ -367,6 +370,8 @@ internal sealed class PlayerConnectionMonitor
         // Exact markers only. Never serialize or display arbitrary log text / IDs.
         if (Regex.IsMatch(value, "^VR_CLIENT_CONNECTED id=[0-9]+$")) Change("Connected");
         else if (State == "Final") return;
+        else if ((value == "VR_OPENXR_STARTUP status=rejected" || value == "VR_OPENXR_STARTUP status=unavailable")
+                 && (State == "Waiting" || State == "Unconfirmed")) Change("OpenXRUnavailable");
         else if (value == "VR_CLIENT_ADMISSION_REJECTED") Change("Rejected");
         else if (value == "VR_CLIENT_DISCONNECTED" && State != "Final") Change("Disconnected");
         else if (value.StartsWith("VR_CLIENT_DEBRIEF_FINAL {", StringComparison.Ordinal) && State == "Connected") Change("Final");
@@ -407,6 +412,7 @@ internal sealed class PlayerConnectionMonitor
         get
         {
             if (State == "Final") return "遊戲回報已收到最終戰績。結束斷線不會清除戰績。";
+            if (State == "OpenXRUnavailable") return "OpenXR 未能啟動。請確認頭盔與 Windows OpenXR 執行環境。";
             if (State == "Rejected") return "遊戲回報入場遭拒。請向控制人員重新取得自己的連線檔。";
             if (State == "Disconnected") return "遊戲回報連線中斷。可在遊戲內重新讀取控制人員更新的票券。";
             if (State == "Connected") return LogAvailable ? "遊戲已回報入場。請切換到遊戲視窗；可關閉此啟動器。" : "先前已回報入場，目前無法讀取連線記錄。請查看遊戲視窗。";

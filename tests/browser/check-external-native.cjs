@@ -147,7 +147,7 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
       if (packageRoot) {
         if (gui) console.log('PACKAGED_LAUNCHER_UI_READY ' + JSON.stringify({ processId: child.pid, configPath: file }));
         if (gui && packageTicketPreview) {
-          assert.equal(packageManifest.launcherVersion, '1.2.0');
+          assert.ok(['1.2.0', '1.3.0'].includes(packageManifest.launcherVersion));
           assert.equal(claims.roomId, player.roomId); assert.equal(claims.seat, player.seat);
           const parts = config.joinTicket.split('.');
           const payload = Buffer.from(parts[1], 'base64url');

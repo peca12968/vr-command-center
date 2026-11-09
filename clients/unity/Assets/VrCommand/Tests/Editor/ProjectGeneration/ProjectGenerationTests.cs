@@ -61,5 +61,18 @@ namespace VrCommand.Unity.Tests
             Assert.IsNotNull(UnityEngine.Rendering.GraphicsSettings.defaultRenderPipeline);
             Assert.AreEqual(AndroidArchitecture.ARM64, PlayerSettings.Android.targetArchitectures);
         }
+
+        [Test] public void PreparedWindowsProfileUsesManualOpenXRWithoutAndroidFeatures()
+        {
+            Assert.IsTrue(EditorBuildSettings.TryGetConfigObject(XRGeneralSettings.k_SettingsKey, out UnityEditor.XR.Management.XRGeneralSettingsPerBuildTarget settings));
+            var desktop = settings.SettingsForBuildTarget(BuildTargetGroup.Standalone);
+            Assert.IsFalse(desktop.InitManagerOnStart);
+            Assert.AreEqual(1, desktop.AssignedSettings.activeLoaders.Count);
+            Assert.IsInstanceOf<OpenXRLoader>(desktop.AssignedSettings.activeLoaders[0]);
+            var openXR = OpenXRSettings.GetSettingsForBuildTargetGroup(BuildTargetGroup.Standalone);
+            Assert.IsTrue(openXR.GetFeature<OculusTouchControllerProfile>().enabled);
+            Assert.IsTrue(openXR.GetFeature<HTCViveControllerProfile>().enabled);
+            Assert.IsFalse(openXR.GetFeature<MetaQuestFeature>()?.enabled ?? false);
+        }
     }
 }

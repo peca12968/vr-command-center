@@ -38,7 +38,7 @@ namespace VrCommand.Unity.Editor
         {
             Directory.CreateDirectory(Generated);
             AssetDatabase.Refresh();
-            ConfigureQuest();
+            ConfigurePlayers();
             PrepareCombatAudio();
             using (var fieldProps = new FieldPropModels()) { }
             using (var rifle = new ServiceRifleModels()) { }
@@ -95,12 +95,12 @@ namespace VrCommand.Unity.Editor
                 throw new BuildFailedException("Generated network object has no persistent NGO identity. Reopen/import the generated assets before building.");
         }
 
-        private static void ConfigureQuest()
+        private static void ConfigurePlayers()
         {
             PlayerSettings.companyName = "VR Command";
             PlayerSettings.productName = "VR Command Quest";
-            PlayerSettings.bundleVersion = "0.48.1";
-            PlayerSettings.Android.bundleVersionCode = 62;
+            PlayerSettings.bundleVersion = "0.49.0";
+            PlayerSettings.Android.bundleVersionCode = 63;
             PlayerSettings.insecureHttpOption = InsecureHttpOption.DevelopmentOnly;
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, "com.vrcommand.quest");
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
@@ -123,15 +123,7 @@ namespace VrCommand.Unity.Editor
                 AssetDatabase.CreateAsset(xr, Generated + "/XRSettings.asset");
                 EditorBuildSettings.AddConfigObject(XRGeneralSettings.k_SettingsKey, xr, true);
             }
-            if (!xr.HasSettingsForBuildTarget(BuildTargetGroup.Android)) xr.CreateDefaultSettingsForBuildTarget(BuildTargetGroup.Android);
-            if (!xr.HasManagerSettingsForBuildTarget(BuildTargetGroup.Android)) xr.CreateDefaultManagerSettingsForBuildTarget(BuildTargetGroup.Android);
-            var settings = xr.SettingsForBuildTarget(BuildTargetGroup.Android);
-            settings.InitManagerOnStart = true;
-            if (!XRPackageMetadataStore.AssignLoader(settings.AssignedSettings, "UnityEngine.XR.OpenXR.OpenXRLoader", BuildTargetGroup.Android))
-                throw new BuildFailedException("OpenXR loader could not be assigned.");
-            FeatureHelpers.RefreshFeatures(BuildTargetGroup.Android);
-            var openXR = OpenXRSettings.GetSettingsForBuildTargetGroup(BuildTargetGroup.Android);
-            if (openXR == null) throw new BuildFailedException("Android OpenXR settings are unavailable.");
+            var openXR = ConfigureOpenXR(xr, BuildTargetGroup.Android, initializeOnStart: true);
             var quest = openXR.GetFeature<MetaQuestFeature>();
             var controllers = openXR.GetFeature<OculusTouchControllerProfile>();
             var arSession = openXR.GetFeature<ARSessionFeature>();
@@ -146,15 +138,38 @@ namespace VrCommand.Unity.Editor
             passthrough.enabled = true;
             composition.enabled = true;
             openXR.renderMode = OpenXRSettings.RenderMode.SinglePassInstanced;
-            EditorUtility.SetDirty(openXR);
             EditorUtility.SetDirty(quest);
             EditorUtility.SetDirty(controllers);
             EditorUtility.SetDirty(arSession);
             EditorUtility.SetDirty(passthrough);
             EditorUtility.SetDirty(composition);
+            var desktop = ConfigureOpenXR(xr, BuildTargetGroup.Standalone, initializeOnStart: false);
+            var touch = desktop.GetFeature<OculusTouchControllerProfile>();
+            var vive = desktop.GetFeature<HTCViveControllerProfile>();
+            if (touch == null || vive == null) throw new BuildFailedException("Windows OpenXR controller profiles are missing.");
+            touch.enabled = true;
+            vive.enabled = true;
+            desktop.renderMode = OpenXRSettings.RenderMode.SinglePassInstanced;
+            EditorUtility.SetDirty(touch);
+            EditorUtility.SetDirty(vive);
+            EditorUtility.SetDirty(xr);
+        }
+
+        private static OpenXRSettings ConfigureOpenXR(XRGeneralSettingsPerBuildTarget xr, BuildTargetGroup target, bool initializeOnStart)
+        {
+            if (!xr.HasSettingsForBuildTarget(target)) xr.CreateDefaultSettingsForBuildTarget(target);
+            if (!xr.HasManagerSettingsForBuildTarget(target)) xr.CreateDefaultManagerSettingsForBuildTarget(target);
+            var settings = xr.SettingsForBuildTarget(target);
+            settings.InitManagerOnStart = initializeOnStart;
+            if (!XRPackageMetadataStore.AssignLoader(settings.AssignedSettings, "UnityEngine.XR.OpenXR.OpenXRLoader", target))
+                throw new BuildFailedException(target + " OpenXR loader could not be assigned.");
+            FeatureHelpers.RefreshFeatures(target);
+            var openXR = OpenXRSettings.GetSettingsForBuildTargetGroup(target);
+            if (openXR == null) throw new BuildFailedException(target + " OpenXR settings are unavailable.");
+            EditorUtility.SetDirty(openXR);
             EditorUtility.SetDirty(settings);
             EditorUtility.SetDirty(settings.AssignedSettings);
-            EditorUtility.SetDirty(xr);
+            return openXR;
         }
 
         private static void CreateScene()
@@ -297,6 +312,9 @@ namespace VrCommand.Unity.Editor
                     .Where(file=>file.EndsWith(".wav",StringComparison.Ordinal)||file.EndsWith(".wav.meta",StringComparison.Ordinal)))
                 .Concat(new[] { Path.Combine(project, "Packages/manifest.json"), Path.Combine(project, "Packages/packages-lock.json"), Path.Combine(project, "Packages/com.unity.transport/UPSTREAM.json"), Path.Combine(project, "ProjectSettings/ProjectVersion.txt") })
                 .Concat(new[] { Path.Combine(project, "Assets/Settings/Mobile_RPAsset.asset"), Path.Combine(project, "Assets/Settings/Mobile_Renderer.asset") })
+                .Concat(new[] { "Assets/VrCommand/Generated/XRSettings.asset", "Assets/XR/Loaders/OpenXRLoader.asset",
+                    "Assets/XR/Settings/OpenXR Package Settings.asset" }.SelectMany(file => new[]
+                    { Path.Combine(project, file), Path.Combine(project, file + ".meta") }))
                 .OrderBy(file => Path.GetRelativePath(project, file).Replace('\\', '/'), StringComparer.Ordinal);
             using (var memory = new MemoryStream())
             using (var writer = new BinaryWriter(memory))

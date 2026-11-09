@@ -94,6 +94,7 @@ namespace VrCommand.Unity
         private float nextFloorSearch;
         internal const string TrackedFireBinding = "<XRController>{RightHand}/triggerPressed";
         internal const string TrackedReloadBinding = "<XRController>{RightHand}/primaryButton";
+        internal const string ViveReloadBinding = "<ViveController>{RightHand}/gripPressed";
         private TrackedWeaponReleaseGate trackedWeaponRelease;
         internal bool TrackedWeaponReleasePending => tracked && !trackedWeaponRelease.Armed;
         internal static bool HasTracking(InputAction state, InputAction tracked) => state != null && tracked != null && tracked.ReadValue<float>() > .5f && (state.ReadValue<int>() & 3) == 3;
@@ -150,7 +151,8 @@ namespace VrCommand.Unity
             localCamera.tag = "MainCamera";
             head.gameObject.AddComponent<AudioListener>();
             CombatAudioView.Install(head.gameObject,this);
-            tracked = XRSettings.isDeviceActive || Application.platform == RuntimePlatform.Android;
+            var desktopOpenXR = VenueBootstrap.Instance?.DesktopOpenXRActive == true;
+            tracked = desktopOpenXR || XRSettings.isDeviceActive || Application.platform == RuntimePlatform.Android;
             if (tracked)
             {
                 var trackingSpace = CreateTrackingSpace(transform, head, leftHand, rightHand);
@@ -178,9 +180,9 @@ namespace VrCommand.Unity
                 leftRotation = Action("Left Rotation", "<XRController>{LeftHand}/deviceRotation");
                 rightRotation = Action("Right Aim Rotation", "<XRController>{RightHand}/pointerRotation");
                 trigger = Action("Fire", TrackedFireBinding);
-                reload = Action("Reload", TrackedReloadBinding);
-                briefNext = Action("Briefing Next", "<XRController>{LeftHand}/primaryButton");
-                briefClose = Action("Briefing Close", "<XRController>{LeftHand}/secondaryButton");
+                reload = Action("Reload", TrackedReloadBinding, desktopOpenXR ? ViveReloadBinding : null);
+                briefNext = Action("Briefing Next", "<XRController>{LeftHand}/primaryButton", desktopOpenXR ? "<ViveController>{LeftHand}/trackpadClicked" : null);
+                briefClose = Action("Briefing Close", "<XRController>{LeftHand}/secondaryButton", desktopOpenXR ? "<ViveController>{LeftHand}/menu" : null);
                 briefLicense = Action("Briefing Font License", "<XRController>{LeftHand}/gripPressed");
                 briefingPanel.CreateTracked(head);
             }
@@ -218,9 +220,10 @@ namespace VrCommand.Unity
             if (IsOwner && !tracked && desktopInitialized && !after && Pose.Value.source == 1 && Pose.Value.Valid()) ApplyDesktopPose(Pose.Value);
         }
 
-        private static InputAction Action(string name, string binding)
+        private static InputAction Action(string name, string binding, string additionalBinding = null)
         {
             var action = new InputAction(name, InputActionType.Value, binding);
+            if (additionalBinding != null) action.AddBinding(additionalBinding);
             action.Enable();
             return action;
         }
