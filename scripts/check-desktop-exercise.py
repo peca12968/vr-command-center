@@ -172,8 +172,39 @@ def check_frame_review(v, entry, frames):
         resumed = [next(stream), next(stream)]
     if exact != frames[first] or resumed != frames[first:first + 2]:
         raise RuntimeError('Native shot frame or exact resume differed from the accepted full replay')
+    searches = []
+    through = len(frames)
+    stream_id = entry['sealed']['world']['header']['streamId']
+    for room in entry['roomIds']:
+        expected = []
+        for frame in frames:
+            players = {player['playerId'] for player in frame['statistics'] if player['roomId'] == room}
+            packet = frame['packet']
+            count = sum(event['kind'] == 'ShotFired' and event['playerId'] in players for event in packet['events'])
+            if count:
+                expected.append({'frameSequence': packet['sequence'], 'elapsedMilliseconds': packet['elapsedMilliseconds'],
+                                 'matchCount': count})
+        if not expected:
+            raise RuntimeError('No saved shot event attributed to an original room')
+        after, hits, pages = 0, [], []
+        while after < through:
+            page = v.request(f'{route}/event-frames?throughFrame={through}&afterFrame={after}&roomId={room}&kind=ShotFired')
+            scanned = page['scannedThroughFrame']
+            if (page['sessionId'] != entry['id'] or page['streamId'] != stream_id or page['throughFrame'] != through
+                    or page['afterFrame'] != after or not after < scanned <= min(after + 128, through)
+                    or page['nextAfterFrame'] != (scanned if scanned < through else None)
+                    or page['frames'] != [hit for hit in expected if after < hit['frameSequence'] <= scanned]
+                    or len(page['frames']) > 24):
+                raise RuntimeError('Native event search did not match the room-scoped accepted replay or cursor')
+            hits.extend(page['frames'])
+            pages.append(page)
+            after = scanned
+        if hits != expected:
+            raise RuntimeError('Native event search omitted or repeated saved shot frames')
+        searches.append({'roomId': room, 'matchingEvents': sum(hit['matchCount'] for hit in hits), 'pages': pages})
     v.save(entry['name'] + '-frame-review.json', {'complete': True, 'sequence': sequence,
-           'resumedSequences': [frame['packet']['sequence'] for frame in resumed], 'frame': exact})
+           'resumedSequences': [frame['packet']['sequence'] for frame in resumed], 'frame': exact,
+           'searches': searches})
 
 def marksmanship_props():
     # Standard floor placement excludes the other candidates in the first enemy row.
@@ -455,7 +486,7 @@ def run(v):
             if not v.args.endurance:
                 playback=replay(v,e,pause if e is entries[0] else None);check(playback['complete'],e['name']+': all replay frames retain original bodies, movement/reload, seals and results')
                 if v.args.check_frame_review:
-                    check(True, e['name'] + ': exact shot frame and first two resumed frames match the native archive')
+                    check(True, e['name'] + ': exact shot frame, resumed frames and room search pages match the native archive')
         if v.args.endurance:
             # All native sources are stopped first. Each independent reader still
             # consumes every frame at the original rate4 and its original deadline.

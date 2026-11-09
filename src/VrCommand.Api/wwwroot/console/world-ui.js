@@ -1,6 +1,7 @@
 import { ReplayScene } from './replay-scene.js';
 import { mountCameras } from './camera-ui.js';
 import { mountWorldCameraForm } from './world-camera-form.js';
+import { mountWorldEventSearch } from './world-event-search.js';
 import { recordedClock } from './mission-clock.js';
 
 const $ = id => document.getElementById(id);
@@ -15,6 +16,7 @@ export function mountWorld(getKey, unauthorized) {
   let connecting = false, stepping = false, savedLimit = null, savedFinished = false;
   const cameras = mountCameras(getKey, unauthorized, () => scene, freeView);
   const cameraForm = mountWorldCameraForm(() => scene, freeView);
+  const eventSearch = mountWorldEventSearch(response, readFrame, eventNames, () => { if (frame) showEvents(frame); });
   function message(text, error = false) { $('world-message').textContent = text; $('world-message').classList.toggle('replay-error', error); }
   function stop() { epoch++; controller?.abort(); controller = null; connected = connecting = stepping = false; scene?.weather.pause(); scene?.draw(); $('world-pause').textContent = '繼續回放'; }
   function stopList() { listEpoch++; listController?.abort(); listController = null; }
@@ -119,6 +121,8 @@ export function mountWorld(getKey, unauthorized) {
     for (const button of $('world-room-quick').children)
       button.setAttribute('aria-pressed', String(button.dataset.worldRoom === room));
     showStatistics();
+    if (mode === 'replay' && frame) showEvents(frame);
+    reviewControls();
   }
   function freeView() {
     $('world-camera').value = 'free'; selectRoom('all', false);
@@ -155,16 +159,21 @@ export function mountWorld(getKey, unauthorized) {
     const idle = showing && !connected && !connecting && !stepping;
     $('world-review').hidden = !showing;
     $('world-frame-back').disabled = !idle || frame.packet.sequence <= 1;
-    $('world-frame-next').disabled = !idle || frame.packet.sequence >= info.acceptedSequence;
+    const throughFrame = info && Number.isInteger(savedLimit) ? Math.min(savedLimit, info.acceptedSequence) : info?.acceptedSequence;
+    $('world-frame-next').disabled = !idle || frame.packet.sequence >= throughFrame;
     const extend = $('world-frame-extend');
     extend.hidden = !canExtendSaved();
     extend.disabled = extend.hidden || !idle;
+    eventSearch.update(showing ? { sessionId: info.header.sessionId, streamId: info.header.streamId,
+      throughFrame, room: $('world-room').value, frameSequence: frame.packet.sequence, idle } : null);
   }
   function showEvents(value) {
-    const players = new Map(value.statistics.map(player => [player.playerId, player]));
-    const rows = value.packet.events.map(event => {
+    const players = new Map(value.statistics.map(player => [player.playerId.toLowerCase(), player]));
+    const room = $('world-room').value, kind = eventSearch.kind();
+    const rows = value.packet.events.filter(event => (!kind || event.kind === kind)
+      && (room === 'all' || players.get(event.playerId.toLowerCase())?.roomId === Number(room))).map(event => {
       const row = document.createElement('tr');
-      const player = players.get(event.playerId);
+      const player = players.get(event.playerId.toLowerCase());
       for (const text of [event.sequence, eventNames[event.kind] ?? event.kind, player ? `${player.name} · 房間 ${player.roomId}` : shortId(event.playerId),
         shortId(event.enemyId), event.kind === 'PlayerDamaged' ? event.damage : '—']) {
         const cell = document.createElement('td'); cell.textContent = text; row.append(cell);
@@ -241,11 +250,11 @@ export function mountWorld(getKey, unauthorized) {
     if (mode === 'replay') showEvents(value);
     received = performance.now(); $('world-canvas').dataset.sequence = String(packet.sequence); status();
   }
-  async function step(offset) {
+  function step(offset) { if (frame) return readFrame(frame.packet.sequence + offset); }
+  async function readFrame(sequence) {
     const id = $('world-recording').value;
     if (!active || mode !== 'replay' || connected || connecting || stepping || !frame || info.header.sessionId !== id) return;
-    const sequence = frame.packet.sequence + offset;
-    if (sequence < 1 || sequence > info.acceptedSequence) return;
+    if (sequence < 1 || sequence > info.acceptedSequence || (Number.isInteger(savedLimit) && sequence > savedLimit)) return;
     controller?.abort(); controller = new AbortController();
     const request = ++epoch, signal = AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]);
     stepping = true; reviewControls(); $('world-frame-message').textContent = '正在讀取保存快照…';

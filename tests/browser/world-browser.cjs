@@ -327,6 +327,12 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     check((await page.locator('#world-status').innerText()).includes('錄製未封存') && Number(await canvas.getAttribute('data-sequence')) === interrupted.acceptedSequence &&
       await page.locator('#world-frame-next').isDisabled(), 'Saved replay stops at the real interrupted tail and keeps the archive unsealed');
     await page.screenshot({ path: path.join(screenshots, 'world-saved-tail.png'), fullPage: true });
+    const savedSearch = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/world/event-frames'));
+    await page.locator('#world-event-search-here').click();
+    const savedHits = await (await savedSearch).json();
+    check(savedHits.throughFrame === interrupted.acceptedSequence && savedHits.afterFrame === interrupted.acceptedSequence - 1 &&
+      savedHits.scannedThroughFrame === interrupted.acceptedSequence && savedHits.nextAfterFrame === null,
+      'Current-frame search includes the original paused frame and preserves the fixed unsealed tail');
     await page.locator('#world-frame-back').click();
     await page.waitForFunction(sequence => Number(document.querySelector('#world-canvas').dataset.sequence) === sequence, interrupted.acceptedSequence - 1, { polling: 50 });
     const savedResume = page.waitForRequest(request => {
@@ -386,6 +392,25 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await next.click();
     await page.waitForFunction(value => Number(document.querySelector('#world-canvas').dataset.sequence) === value, eventSequence + 1, { polling: 50 });
     check(await back.isEnabled(), 'Next moves one exact frame forward and allows stepping back');
+    await page.locator('#world-room').selectOption('2');
+    await page.locator('#world-event-kind').selectOption('PlayerDamaged');
+    await page.locator('#world-event-search-start').click();
+    const hit = page.locator(`#world-event-search-results button[data-frame-sequence="${eventSequence}"]`);
+    await hit.waitFor();
+    const exactJump = page.waitForRequest(request => new URL(request.url()).pathname.endsWith(`/world/frames/${eventSequence}`));
+    await hit.click(); await exactJump;
+    await page.waitForFunction(value => Number(document.querySelector('#world-canvas').dataset.sequence) === value, eventSequence, { polling: 50 });
+    check(await page.locator('#world-room').inputValue() === '2' && (await page.locator('#world-events tr').allTextContents()).every(row => /玩家受傷.*房間 2/.test(row)) &&
+      await page.locator('#world-events tr').count() === eventFrame.packet.events.filter(event => event.kind === 'PlayerDamaged').length,
+      'Room-scoped search jumps to the exact original damage frame and filters its event rows');
+    await page.screenshot({ path: path.join(screenshots, 'world-event-search.png'), fullPage: true });
+    await page.locator('#world-event-kind').selectOption('ReloadCompleted');
+    check(await page.locator('#world-event-search-results button').count() === 0 && await page.locator('#world-no-events').isVisible(),
+      'Changing the kind clears obsolete search results and refreshes the paused frame');
+    await page.locator('#world-event-kind').selectOption('');
+    await page.locator('#world-room').selectOption('all');
+    await next.click();
+    await page.waitForFunction(value => Number(document.querySelector('#world-canvas').dataset.sequence) === value, eventSequence + 1, { polling: 50 });
     const resumedRequest = page.waitForRequest(request => new URL(request.url()).pathname.endsWith('/world/watch') && new URL(request.url()).searchParams.get('fromFrame') === String(eventSequence + 1));
     await page.locator('#world-pause').click();
     await resumedRequest;

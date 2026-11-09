@@ -151,6 +151,26 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         request(route + "/frames/0", expected=400)
         request(route + f"/frames/{info['acceptedSequence'] + 1}", expected=404)
         check(True, "Exact frame reads retain authorization and reject invalid or missing frames")
+        search = route + "/event-frames"
+        boundary = combat_packet["sequence"]
+        page = request(f"{search}?throughFrame={boundary}&roomId=5&kind=PlayerDamaged", "Room5")
+        check(page == {"sessionId": session, "streamId": info["header"]["streamId"], "throughFrame": boundary,
+                       "afterFrame": 0, "scannedThroughFrame": boundary, "nextAfterFrame": None,
+                       "frames": [{"frameSequence": boundary, "elapsedMilliseconds": combat_packet["elapsedMilliseconds"],
+                                   "matchCount": sum(e["kind"] == "PlayerDamaged" for e in combat_packet["events"])}]},
+              "Room and kind search returns the exact saved damage frame at an inclusive prefix limit")
+        earlier = request(f"{search}?throughFrame={boundary - 1}&kind=PlayerDamaged")
+        exhausted = request(f"{search}?throughFrame={boundary}&afterFrame={boundary}")
+        check(not earlier["frames"] and earlier["scannedThroughFrame"] == boundary - 1 and not exhausted["frames"]
+              and exhausted["scannedThroughFrame"] == boundary and exhausted["nextAfterFrame"] is None,
+              "An earlier fixed prefix cannot see later saved damage and an exhausted cursor stays at the tail")
+        for suffix, status in [("", 400), ("&roomId=1", 400), ("&kind=0", 400), ("&afterFrame=-1", 400),
+                               (f"&afterFrame={boundary + 1}", 400), (f"&afterFrame={boundary}&kind=", 400)]:
+            request(search + (f"?throughFrame={boundary}{suffix}" if suffix else ""), expected=status)
+        request(f"{search}?throughFrame={info['acceptedSequence'] + 1}", expected=404)
+        request(f"{search}?throughFrame={boundary}", "Room1", 403)
+        request(f"{search}?throughFrame={boundary}", "invalid", 401)
+        check(True, "Event search rejects invalid filters, missing frames and unauthorized readers")
         with request(route + f"/watch?mode=replay&fromFrame={combat_packet['sequence']}&rate=4", "Room5") as stream:
             check(event(stream)[0] == "header" and event(stream) == ("frame", exact),
                   "Resuming by frame starts on the same exact packet as a single-frame read")
@@ -265,6 +285,8 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         process = start()
         check(request(route) == info, "SQLite restart restores recording identity, cursor, time and completion")
         check(request(exact_route, "Room5") == exact, "The exact event frame and its statistics remain identical after restart")
+        check(request(f"{search}?throughFrame={boundary}&roomId=5&kind=PlayerDamaged", "Room5") == page,
+              "Search reconstructs the same result after restart using the existing archive")
         check(request(route)["header"]["environmentVersion"] == 0, "Pre-versioned stored headers remain explicitly legacy instead of acquiring invented effects")
         check(request(cameras) == [] and request(cameras, "Room5") == [room_camera]
               and request(camera_route, method="PUT", body=camera)["deleted"], "SQLite restart preserves saved camera positions and removal history without changing world metadata")
