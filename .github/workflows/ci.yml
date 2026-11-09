@@ -145,4 +145,6 @@ jobs:
             artifacts/live-hardware-gateway/*/checks.json
             artifacts/live-hardware-gateway/*/cleanup.json
             artifacts/live-hardware-gateway/*/room-*-report.json
+            artifacts/live-hardware-gateway/*/*-stop-report.json
+            artifacts/live-hardware-gateway/*/*-stop-close.json
           if-no-files-found: ignore

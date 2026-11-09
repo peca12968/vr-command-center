@@ -31,7 +31,7 @@ internal static class LiveHardwareGateway
     }
     private sealed class MockFailure(string reason) : IOException(reason);
 
-    internal static async Task<int> Run(string input, string output)
+    internal static async Task<int> Run(string input, string output, string? stopFile)
     {
         using var file = File.OpenRead(input);
         if (file.Length is < 1 or > 8192) throw new ArgumentException("Use a bounded live rehearsal configuration.");
@@ -64,7 +64,10 @@ internal static class LiveHardwareGateway
         var attempts = new List<Attempt>();
         int connections = 0, attachments = 0, managementFaults = 0, mockFaults = 0, dropped = 0;
         var termination = "duration";
-        using var run = new CancellationTokenSource(TimeSpan.FromSeconds(config.Seconds));
+        using var duration = new CancellationTokenSource(TimeSpan.FromSeconds(config.Seconds));
+        using var operatorStop = new CancellationTokenSource();
+        using var run = CancellationTokenSource.CreateLinkedTokenSource(duration.Token, operatorStop.Token);
+        var watch = stopFile is null ? Task.CompletedTask : WatchForStop(stopFile, operatorStop, run.Token);
         try
         {
             while (!run.IsCancellationRequested)
@@ -121,6 +124,13 @@ internal static class LiveHardwareGateway
             }
         }
         catch (OperationCanceledException) when (run.IsCancellationRequested) { }
+        finally
+        {
+            run.Cancel();
+            await watch;
+        }
+
+        if (termination == "duration" && operatorStop.IsCancellationRequested) termination = "operator-stop";
 
         var complete = attachments > 0 && termination != "attempt-limit";
         var acknowledged = attempts.Where(item => item.Status == "simulated-acknowledged").Sum(item => item.Deliveries.Length);
@@ -130,6 +140,23 @@ internal static class LiveHardwareGateway
         destination.Flush(true);
         Console.WriteLine(JsonSerializer.Serialize(new { complete, simulatedHardwareOnly = true, physicalDeliveryConfirmed = false, acknowledged }, Wire));
         return complete ? 0 : 1;
+    }
+
+    private static async Task WatchForStop(string path, CancellationTokenSource operatorStop, CancellationToken run)
+    {
+        try
+        {
+            while (!run.IsCancellationRequested)
+            {
+                if (File.Exists(path))
+                {
+                    operatorStop.Cancel();
+                    return;
+                }
+                await Task.Delay(PollInterval, run);
+            }
+        }
+        catch (OperationCanceledException) when (run.IsCancellationRequested) { }
     }
 
     // Monitor the authority while the peer holds the batch, and read it again after an ACK.
@@ -154,6 +181,7 @@ internal static class LiveHardwareGateway
             }
             await receipt;
             var confirmed = await Read(client, route, config, after, pending.Token);
+            run.ThrowIfCancellationRequested();
             return StillEligible(confirmed) ? null : confirmed.Page;
         }
         finally

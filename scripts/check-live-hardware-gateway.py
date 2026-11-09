@@ -173,13 +173,63 @@ def run(args):
                 configs[room] = runtime/f'room-{room}.json'
                 configs[room].write_text(json.dumps(config),encoding='utf-8')
 
-            def invoke(room, key_role, report):
-                return start(['dotnet',str(binary),'--live',str(configs[room]),'--output',str(report)], {**env,'VR_COMMAND_ROOM_KEY':keys[key_role]})
+            def invoke(room, key_role, report, *, config=None, stop=None):
+                command = ['dotnet',str(binary),'--live',str(config or configs[room]),'--output',str(report)]
+                if stop is not None:
+                    command += ['--stop-file',str(stop)]
+                return start(command, {**env,'VR_COMMAND_ROOM_KEY':keys[key_role]})
+
+            def stopped(gateway, report, *, attached_once):
+                output, _ = gateway.communicate(timeout=8)
+                raw = report.read_text(encoding='utf-8')
+                assert not any(secret in output or secret in raw for secret in private)
+                result = json.loads(raw)
+                assert gateway.returncode==(0 if attached_once else 1), output
+                assert result['termination']=='operator-stop' and result['complete'] is attached_once
+                assert result['simulatedHardwareOnly'] is True and result['physicalDeliveryConfirmed'] is False
+                assert result['attachments']==int(attached_once) and result['acknowledged']==0
+                assert result['managementFaults']==result['mockFaults']==0
+                return result
 
             denied = invoke(1,'Room2',out/'denied.json')
             denied_log, _ = denied.communicate(timeout=8)
             check(denied.returncode==1 and 'AccessDeniedException' in denied_log and not (out/'denied.json').exists()
                   and not any(secret in denied_log for secret in private), 'Wrong room identity is refused before creating a report')
+
+            stale_stop = runtime/'previous.stop'
+            stale_stop.touch()
+            for marker in (stale_stop, out/'invalid-stop.json'):
+                denied = invoke(1,'Room1',out/'invalid-stop.json',stop=marker)
+                denied_log, _ = denied.communicate(timeout=8)
+                assert denied.returncode==1 and 'ArgumentException' in denied_log and not (out/'invalid-stop.json').exists()
+                assert not any(secret in denied_log for secret in private)
+            check(stale_stop.is_file(), 'Stale and report-alias stop markers are refused without replacing either file')
+
+            stop_peer = Peer()
+            stop_config = runtime/'room-1-stop.json'
+            stop_config.write_text(json.dumps({**json.loads(configs[1].read_text(encoding='utf-8')), 'mockPort':stop_peer.port}),encoding='utf-8')
+            early_stop = runtime/'handshake.stop'
+            early_report = out/'handshake-stop-report.json'
+            early = invoke(1,'Room1',early_report,config=stop_config,stop=early_stop)
+            hello = stop_peer.read('hello')
+            stop_peer.reply('observe-close')
+            early_stop.touch()
+            early_close = stop_peer.read('closed')
+            save('handshake-stop-close.json',early_close)
+            check(early_close['connectionId']==hello['connectionId'] and early_close['batchId'] is None
+                  and stopped(early,early_report,attached_once=False)['attempts']==[],
+                  'Operator stop closes the original handshake and reports an incomplete attachment')
+
+            idle_stop = runtime/'idle.stop'
+            idle_report = out/'idle-stop-report.json'
+            idle = invoke(1,'Room1',idle_report,config=stop_config,stop=idle_stop)
+            idle_connection = accept(stop_peer,1,hello['connectionId'])
+            wait(lambda:any('Request finished' in line and f'{base}{path}/rooms/1/hardware-feedback?after=' in line
+                            and ' - 200 ' in line for line in api_log), 'idle gateway begins cursor polling')
+            idle_stop.touch()
+            check(stopped(idle,idle_report,attached_once=True)['attempts']==[] and idle_stop.is_file(),
+                  'Operator stop finishes an idle attached gateway and preserves the marker')
+
             gateways = {room:invoke(room,f'Room{room}',out/f'room-{room}-report.json') for room in peers}
             connections = {room:accept(peer,room) for room,peer in peers.items()}
 
@@ -223,6 +273,24 @@ def run(args):
             ids = publish([(alpha,'ShotFired')]); feedback(1,ids); peers[1].reply()
             check(True, 'Resume emits only the new Running epoch after a paused in-flight batch')
 
+            inflight_stop = runtime/'inflight.stop'
+            inflight_report = out/'inflight-stop-report.json'
+            inflight = invoke(1,'Room1',inflight_report,config=stop_config,stop=inflight_stop)
+            stop_connection = accept(stop_peer,1,idle_connection)
+            ids = publish([(alpha,'ShotFired')]); feedback(1,ids); peers[1].reply()
+            stopped_batch = stop_peer.read('feedback')
+            stop_peer.reply('observe-close')
+            inflight_stop.touch()
+            stop_close = stop_peer.read('closed')
+            save('inflight-stop-close.json',stop_close)
+            stop_result = stopped(inflight,inflight_report,attached_once=True)
+            attempt, = stop_result['attempts']
+            check(stop_close['connectionId']==stopped_batch['connectionId']==attempt['connectionId']==stop_connection
+                  and stop_close['batchId']==stopped_batch['batchId']==attempt['batchId']
+                  and attempt['status']=='cancelled' and [d['signal']['reportId'] for d in attempt['deliveries']]==ids,
+                  'Operator stop closes the exact pending batch with no simulated acknowledgement')
+
+            ids = publish([(charlie,'PlayerDamaged')]); feedback(2,ids); peers[2].reply()
             ids = publish([(charlie,'ShotFired')]); ended_batch = feedback(2,ids)
             action('End'); peers[2].reply('observe-close')
             closed_batch = peers[2].read('closed')
@@ -242,13 +310,14 @@ def run(args):
                       f'Room {room} completes the mock rehearsal at End')
                 reports[room] = report
             check([a['status'] for a in reports[1]['attempts']]==['simulated-acknowledged','mock-invalid-reply','simulated-acknowledged',
-                  'mock-timeout','simulated-acknowledged','mock-disconnected','simulated-acknowledged','cancelled','simulated-acknowledged']
-                  and reports[1]['acknowledged']==6 and reports[1]['mockFaults']==3,
+                  'mock-timeout','simulated-acknowledged','mock-disconnected','simulated-acknowledged','cancelled','simulated-acknowledged',
+                  'simulated-acknowledged'] and reports[1]['acknowledged']==7 and reports[1]['mockFaults']==3,
                   'Wrong ACK, timeout, disconnect and Pause remain non-acknowledged attempts')
-            check([a['status'] for a in reports[2]['attempts']]==['simulated-acknowledged','cancelled'] and reports[2]['acknowledged']==1,
-                  'End cancels the withheld batch without waiting for the mock timeout')
+            check([a['status'] for a in reports[2]['attempts']]==['simulated-acknowledged','simulated-acknowledged','cancelled']
+                  and reports[2]['acknowledged']==2 and reports[2]['connections']==1,
+                  'The other room acknowledges on its original connection after the operator stop and still cancels at End')
             history = {e['eventId']:e for e in request(path+'/events')}
-            for report in reports.values():
+            for report in [*reports.values(),stop_result]:
                 for attempt in report['attempts']:
                     for delivery in attempt['deliveries']:
                         signal = delivery['signal']; original = history[signal['eventId']]
@@ -276,7 +345,7 @@ def run(args):
     check(sha(peer_script)==peer_hash, 'The exact mock peer remains byte-identical')
     save('checks.json', {'complete':True,'checks':len(findings),'findings':findings,'simulatorDll':str(binary),
                          'binaryFiles':files,'helperSha256':sha(Path(__file__)),'peerSha256':peer_hash,
-                         'scope':'Actual API and two loopback mock devices, no physical device I/O'})
+                         'scope':'Actual API and loopback mock devices, no physical device I/O'})
     print(json.dumps({'complete':True,'checks':len(findings),'directory':str(out)}))
 
 
