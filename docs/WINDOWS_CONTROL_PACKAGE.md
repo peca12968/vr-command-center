@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-09 `windows-control-0.31.40-win-x64.zip` 加入全館收尾的批次場館驗收 ZIP。ZIP 為 52,669,871 bytes，SHA-256 `0dd5f090842866875de22dc0e2c9b2700976ae7d3e0534789305b6e38c0b9c7e`。解壓核對 519 個清單檔案，含 499 個執行環境檔案，通過 106 項管理包及 54 項 Chromium 專項。 [操作方式](SESSION_CLOSURE.md#下載本批場館驗收)
+
 2026-11-09 `windows-control-0.31.39-win-x64.zip` 加入全館收尾歷史分頁與批次選取。ZIP 為 52,666,279 bytes，SHA-256 `e04a246feec0cfd1eb9447605cfedd42b771f4547498ddd66edaf7a37cbeda57`。解壓核對 519 個清單檔案，含 499 個執行環境檔案，通過 106 項管理包及 49 項 Chromium 專項。 [操作方式](SESSION_CLOSURE.md#歷史批次)
 
 2026-11-09 `windows-control-0.31.38-win-x64.zip` 加入房卡即時俯視與全館收尾直接回放。ZIP 為 52,657,530 bytes，SHA-256 `fdc8f6dea454a2a96529ea93c9b517532af75110a03dd22d608f13ba6cd62161`。解壓核對 516 個清單檔案，含 496 個執行環境檔案，通過 106 項管理包及 43 項 Chromium 專項。 [操作方式](WORLD_RECORDING.md#從房卡或全館收尾開啟)

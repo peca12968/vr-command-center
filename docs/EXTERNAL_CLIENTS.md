@@ -116,9 +116,11 @@ python scripts/verify-field-results.py --topology direct-lan `
 
 ### 一次核對五房 25 席
 
-兩種模式各準備一份私人 `venue.json`。使用 `--peer-diagnostics on` 啟動參與驗收的每個遊戲伺服器，並由主控一次結束全館。等待各場雙封存、原伺服器終止及玩家寫完戰績。將各場「下載場館驗收資料 ZIP」的原始 ZIP 留在私人資料夾，並保留同場啟動器 `--report`、原始 `server.log` 及每位玩家的完整日誌。
+兩種模式各準備一份私人 `venue.json`。使用 `--peer-diagnostics on` 啟動參與驗收的每個遊戲伺服器，並由主控一次結束全館。等待各場雙封存、原伺服器終止及玩家寫完戰績，保留同場啟動器 `--report`、原始 `server.log` 及每位玩家的完整日誌。
 
-用主控身分將 `GET /api/venue/closure/{id}` 的回應原樣保存為 `closure.json`。`{id}` 是該次全館結束回條的 `requestId`。可從瀏覽器開發者工具取得選定歷史批次時的此 GET 回應。保存回應本文即可，請勿匯出帶有憑證的請求資料。 [選取原批次](SESSION_CLOSURE.md#歷史批次)
+Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，按「下載本批場館驗收 ZIP」，再解壓到私人資料夾。解壓後的 `closure.json` 及各場原 ZIP 可直接填入清單。合併場用 `linked.zip`，獨立場依房號使用 `room-01.zip` 至 `room-05.zip`。請保留內層 ZIP 檔案供核對工具讀取。 [選取及下載原批次](SESSION_CLOSURE.md#下載本批場館驗收)
+
+舊版管理包可逐場下載「場館驗收資料 ZIP」，並以主控身分將 `GET /api/venue/closure/{id}` 的回應本文原樣保存為 `closure.json`。`{id}` 是該次全館結束回條的 `requestId`。
 
 | 清單欄位 | 填寫內容 |
 | --- | --- |
@@ -135,7 +137,7 @@ python scripts/verify-field-results.py --topology direct-lan `
 
 ```powershell
 $room1 = @{
-    evidenceZip = 'Room 1/field.zip'
+    evidenceZip = 'room-01.zip'
     launcherReport = 'Room 1/server-final.json'
     serverLog = 'Room 1/server.log'
     players = 1..5 | ForEach-Object {
