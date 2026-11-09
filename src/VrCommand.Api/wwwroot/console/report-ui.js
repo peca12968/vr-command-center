@@ -82,19 +82,41 @@ export function mountReport(current, unauthorized) {
 }
 
 export function mountVenueReport(current, unauthorized, save) {
-  const actions = document.getElementById('venue-report-actions');
-  const button = document.getElementById('export-venue-reports'), status = document.getElementById('venue-report-status');
+  const reports = mountVenueDownload(current, unauthorized, save, {
+    actions: 'venue-report-actions', button: 'export-venue-reports', status: 'venue-report-status',
+    route: 'reports', filename: 'reports',
+    ready: session => ['Sealed', 'NoSource'].includes(session.combat),
+    waiting: rooms => `等待房間 ${rooms} 的戰鬥資料封存。`,
+    available: '本批戰績已可匯出。', loading: '正在下載本批戰績 ZIP…',
+    conflict: '本批仍在等待戰鬥資料封存。', invalid: '報表格式不符，可重新下載。',
+    failed: '本批戰績下載失敗，可重新整理後再試。', saved: '已下載本批戰績與原場次清單。'
+  });
+  const field = mountVenueDownload(current, unauthorized, save, {
+    actions: 'venue-field-actions', button: 'export-venue-field', status: 'venue-field-status',
+    route: 'field-evidence', filename: 'field',
+    ready: session => session.fieldEvidenceReady === true,
+    waiting: rooms => `房間 ${rooms} 缺少開場紀錄、雙封存、公告端點或完整名冊。`,
+    available: '本批場館驗收資料已可匯出。', loading: '正在下載本批場館驗收 ZIP…',
+    conflict: '本批場館驗收資料尚未齊備。', invalid: '場館驗收 ZIP 格式不符，可重新下載。',
+    failed: '本批場館驗收 ZIP 下載失敗，可重新整理後再試。', saved: '已下載原批次與各場驗收資料，請私下保管。'
+  });
+  return { update(batch) { reports(batch); field(batch); } };
+}
+
+function mountVenueDownload(current, unauthorized, save, options) {
+  const actions = document.getElementById(options.actions);
+  const button = document.getElementById(options.button), status = document.getElementById(options.status);
   let id = null, waiting = '', controller = null;
   const updateButton = () => { button.disabled = !id || !!waiting || !!controller; };
   function update(batch) {
     const nextId = current().actor?.role === 'Master' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(batch?.requestId ?? '')
       ? batch.requestId : null;
-    const nextWaiting = nextId ? batch.sessions.filter(session => !['Sealed', 'NoSource'].includes(session.combat))
+    const nextWaiting = nextId ? batch.sessions.filter(session => !options.ready(session))
       .flatMap(session => session.roomIds).sort((a, b) => a - b).join('、') : '';
     if (id !== nextId || waiting !== nextWaiting) {
       controller?.abort(); controller = null;
       id = nextId; waiting = nextWaiting;
-      status.textContent = !id ? '' : waiting ? `等待房間 ${waiting} 的戰鬥資料封存。` : '本批戰績已可匯出。';
+      status.textContent = !id ? '' : waiting ? options.waiting(waiting) : options.available;
     }
     actions.hidden = !id;
     updateButton();
@@ -105,20 +127,20 @@ export function mountVenueReport(current, unauthorized, save) {
     const request = new AbortController(); controller = request;
     const active = () => controller === request && id === batchId && current().epoch === epoch;
     const timeout = setTimeout(() => request.abort(), 8000);
-    updateButton(); status.textContent = '正在下載本批戰績 ZIP…';
+    updateButton(); status.textContent = options.loading;
     try {
-      const response = await fetch(`/api/venue/closure/${batchId}/reports.zip`, {
+      const response = await fetch(`/api/venue/closure/${batchId}/${options.route}.zip`, {
         headers: { Authorization: 'Bearer ' + key }, signal: request.signal, cache: 'no-store'
       });
       if (!active()) return;
       if (response.status === 401) { unauthorized(); return; }
-      if (!response.ok) throw new Error(response.status === 409 ? '本批仍在等待戰鬥資料封存。' : '本批戰績下載失敗，可重新整理後再試。');
+      if (!response.ok) throw new Error(response.status === 409 ? options.conflict : options.failed);
       if (response.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase() !== 'application/zip')
-        throw new Error('報表格式不符，可重新下載。');
+        throw new Error(options.invalid);
       const blob = await response.blob();
       if (!active()) return;
-      save(`vr-command-venue-reports-v1-${batchId}.zip`, blob);
-      status.textContent = '已下載本批戰績與原場次清單。';
+      save(`vr-command-venue-${options.filename}-v1-${batchId}.zip`, blob);
+      status.textContent = options.saved;
     } catch (error) {
       if (active()) status.textContent = request.signal.aborted ? '下載逾時，可重新下載。' : error.message;
     } finally {
@@ -126,5 +148,5 @@ export function mountVenueReport(current, unauthorized, save) {
       if (controller === request) { controller = null; updateButton(); }
     }
   });
-  return { update };
+  return update;
 }

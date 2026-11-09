@@ -8,7 +8,7 @@ async function main() {
   const config = JSON.parse(await fs.readFile(descriptor, 'utf8'));
   assert.match(config.base, /^http:\/\/127\.0\.0\.1:\d+$/);
   const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
-  const results = [];
+  const results = [], fieldEvidence = [];
   let history;
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1080 }, acceptDownloads: true });
@@ -41,6 +41,21 @@ async function main() {
       if (results.length === 1) await page.screenshot({ path: path.join(path.dirname(output), config.mode + '-venue-replay.png') });
       await page.locator('#tab-operations').click();
     }
+    for (const { batchId, zip, archived } of config.fieldEvidence ?? []) {
+      if (archived) {
+        await page.locator('#venue-closure-load').click();
+        await page.locator('#venue-closure-batch').selectOption(batchId);
+      }
+      const route = `/api/venue/closure/${batchId}/field-evidence.zip`;
+      const response = page.waitForResponse(reply => new URL(reply.url()).pathname === route);
+      const started = page.waitForEvent('download');
+      await page.locator('#export-venue-field').click();
+      const download = await started;
+      assert.equal((await response).status(), 200);
+      assert.equal(download.suggestedFilename(), `vr-command-venue-field-v1-${batchId}.zip`);
+      assert((await fs.readFile(await download.path())).equals(await fs.readFile(zip)));
+      fieldEvidence.push(batchId);
+    }
     if (config.history) {
       const { batch, zip } = config.history;
       const picker = page.locator('#venue-closure-batch');
@@ -61,6 +76,6 @@ async function main() {
   } finally {
     await browser.close();
   }
-  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history }, null, 2), { flag: 'wx' });
+  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence }, null, 2), { flag: 'wx' });
 }
 main().catch(error => { console.error(error.name + ': native venue replay UI failed'); process.exitCode = 1; });

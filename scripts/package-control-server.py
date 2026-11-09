@@ -5,7 +5,7 @@ from pathlib import Path,PurePosixPath
 ROOT=Path(__file__).resolve().parents[1];TOP='VRCommand-ControlServer'
 SECRET_KEYS={'operatorkeys','operatorkeyfile','gameserverkey','jointicket','playerticketsigningkey','controlpipetoken'}
 FORBIDDEN_PARTS={'data','missions','sessions','telemetry','journals'}
-README='''VR Command Windows 管理服務包 API 0.31.0／控制台 0.31.39
+README='''VR Command Windows 管理服務包 API 0.31.0／控制台 0.31.40
 
 完整解壓後開啟 Start-Control.exe。
 1. 首次選擇監聽IPv4與埠號（預設127.0.0.1:5081），按「新增資料實例」。
@@ -33,6 +33,7 @@ GameServer角色供遊戲伺服器使用，不能拿到玩家端；玩家使用�
 本包沒有自動修改防火牆、部署TLS/NAT或證明LAN可達；實際跨機與頭盔仍待驗證。
 控制台可管理任務、五房名冊與觀戰資料；Unity GameServer與玩家包仍須另外啟動。
 主控可在已完成雙封存的場次「任務收尾」下載場館驗收資料ZIP。ZIP含名冊、統計與公告端點，請與原始遊戲日誌私下保管。
+主控可在「全館收尾」一次下載選定批次的驗收 ZIP，含原批次明細與每場的驗收資料。
 
 control-package.json是檔案SHA256與建置紀錄，不是數位簽章或可信發行者證明。
 Notices/保留實際執行環境與NuGet metadata、授權及上游參考NOTICE；參考NOTICE可能提及未隨包附帶的元件。
@@ -64,7 +65,7 @@ def payload(name,content=None):
 def publication(build):
     build=plain(build);receipt=read(build/'publish-receipt.json');folder=plain(build/'publication')
     if receipt.get('schemaVersion')!=1 or receipt.get('target')!='win-x64' or receipt.get('apiVersion')!='0.31.0':raise ValueError('Use an actual supported Windows publication')
-    if receipt.get('consoleVersion')!='0.31.39':raise ValueError('Publish the current console 0.31.39 before packaging')
+    if receipt.get('consoleVersion')!='0.31.40':raise ValueError('Publish the current console 0.31.40 before packaging')
     expected=receipt['files'];actual={p.relative_to(folder).as_posix() for p in folder.rglob('*') if p.is_file()}
     if actual!=set(expected):raise ValueError('Publication contains missing or additional files')
     for name,value in expected.items():

@@ -103,6 +103,8 @@ app.Use(async (context, next) =>
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "venue-begin-not-ready", roomIds = beginNotReady.RoomIds });
         else if (ex is VenueReportsNotReadyException reportsNotReady)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "venue-reports-not-ready", roomIds = reportsNotReady.RoomIds });
+        else if (ex is VenueFieldEvidenceNotReadyException fieldNotReady)
+            await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "venue-field-evidence-not-ready", roomIds = fieldNotReady.RoomIds });
         else await context.Response.WriteAsJsonAsync(new { error = ex.Message });
     }
 });
@@ -202,6 +204,12 @@ app.MapGet("/api/venue/closure/{id:guid}/reports.zip", (Guid id, SessionManager 
     context.Response.Headers.CacheControl = "no-store";
     var report = manager.FinalVenueReports(id, Actor(context));
     return Results.File(FinalReportCsv.EncodeVenueBundle(report), "application/zip", $"vr-command-venue-reports-v1-{id:D}.zip");
+});
+app.MapGet("/api/venue/closure/{id:guid}/field-evidence.zip", (Guid id, WorldRecordings worlds, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var evidence = worlds.ReadVenueFieldEvidence(id, Actor(context));
+    return Results.File(evidence.Encode(), "application/zip", $"vr-command-venue-field-v1-{id:D}.zip");
 });
 app.MapPost("/api/venue/phase", (VenuePhaseRequest request, WorldRecordings worlds, HttpContext context) =>
 {

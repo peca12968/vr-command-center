@@ -57,6 +57,7 @@ def main():
     p.add_argument('--peer-diagnostics',action='store_true',help='Verify observed UDP peers in Linked and absence in default Independent runs')
     p.add_argument('--field-evidence',action='store_true',help='Verify the management ZIP with the original Linked player and server logs')
     p.add_argument('--venue-field-evidence',action='store_true',help='Verify full sealed admission evidence for both original venue End batches')
+    p.add_argument('--check-venue-field-ui',action='store_true',help='Download the original current and earlier field bundles from the shipped console')
     p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
     p.add_argument('--check-room-clocks', action='store_true', help='Verify room clocks and the original pause/resume boundaries in both modes')
     p.add_argument('--check-venue-phase', action='store_true', help='Verify whole-venue pause and resume against both native topologies')
@@ -88,6 +89,8 @@ def main():
     if args.field_evidence and not args.peer_diagnostics:p.error('--field-evidence requires --peer-diagnostics')
     if args.venue_field_evidence and not (args.field_evidence and args.check_venue_end):
         p.error('--venue-field-evidence requires --field-evidence and --check-venue-end')
+    if args.check_venue_field_ui and not args.venue_field_evidence:
+        p.error('--check-venue-field-ui requires --venue-field-evidence')
     if args.check_room_readiness and not args.player_package:p.error('--check-room-readiness requires five players per room')
     if args.check_room_clocks and not args.player_package:p.error('--check-room-clocks requires five players per room')
     if args.check_venue_phase and not args.check_room_clocks:p.error('--check-venue-phase requires --check-room-clocks')
@@ -371,14 +374,34 @@ def main():
 
     def verify_venue_field_evidence(mode, closed, entries):
         label = mode.lower()
-        raw, headers = request('/api/venue/closure/' + closed['requestId'], raw_response=True)
+        route = '/api/venue/closure/' + closed['requestId']
+        raw, headers = request(route, raw_response=True)
         check(field.read_json(raw)['batch'] == closed and headers['Cache-Control'] == 'no-store',
               label + ' field evidence reads the exact sealed closure by original batch ID')
         closure_file = out / (label + '-field-closure.json')
         closure_file.write_bytes(raw)
+        bundle_route = route + '/field-evidence.zip'
+        bundle, headers = request(bundle_route, raw_response=True)
+        request(bundle_route, role='Room1', expected=403)
+        check(headers['Cache-Control'] == 'no-store' and headers.get_content_type() == 'application/zip'
+              and f'vr-command-venue-field-v1-{closed["requestId"]}.zip' in headers['Content-Disposition'],
+              label + ' field bundle uses the original batch filename and Master scope')
+        names = ['linked.zip'] if mode == 'Linked' else [f'room-{room:02}.zip' for room in range(1, 6)]
+        extracted = runtime / (label + '-field-bundle')
+        extracted.mkdir()
+        with zipfile.ZipFile(io.BytesIO(bundle)) as archive:
+            check(archive.namelist() == ['closure.json', *names] and archive.testzip() is None
+                  and field.read_json(archive.read('closure.json')) == field.read_json(raw)
+                  and all(archive.read(name) == Path(entry['evidenceZip']).read_bytes() for name, entry in zip(names, entries)),
+                  label + ' field bundle contains the original closure and exact individual ZIP bytes')
+            for name in ['closure.json', *names]:
+                (extracted / name).write_bytes(archive.read(name))
+        bundle_file = out / (label + '-venue-field-evidence.zip')
+        bundle_file.write_bytes(bundle)
         manifest_path = runtime / (label + '-field-manifest.json')
         evidence = {'version': 1, 'mode': mode, 'topology': 'same-host', 'serverIps': [address],
-                    'closure': str(closure_file), 'sessions': entries}
+                    'closure': str(extracted / 'closure.json'),
+                    'sessions': [dict(entry, evidenceZip=str(extracted / name)) for name, entry in zip(names, entries)]}
 
         def run(topology):
             manifest_path.write_text(json.dumps(dict(evidence, topology=topology)), encoding='utf-8')
@@ -398,6 +421,23 @@ def main():
         check(rejected.returncode == 1 and not rejected.stdout and 'outside the declared server addresses' in rejected.stderr,
               label + ' field evidence rejects relabeling the same-PC peers as direct LAN')
         manifest_path.write_text(json.dumps(evidence), encoding='utf-8')
+        return {'batchId': closed['requestId'], 'zip': str(bundle_file), 'route': bundle_route}
+
+    def verify_venue_field_ui(mode, current, earlier):
+        node = shutil.which('node')
+        if not node: raise RuntimeError('Node is required for the shipped field bundle check')
+        cases = [dict(current, archived=False)]
+        if earlier: cases.append(dict(earlier, archived=True))
+        descriptor = runtime / (mode + '-field-browser-private.json')
+        output = out / (mode + '-venue-field-ui.json')
+        descriptor.write_text(json.dumps({'base': uri, 'masterKey': keys['Master'], 'mode': mode,
+                                          'sessions': [], 'fieldEvidence': cases}), encoding='utf-8')
+        with (out / (mode + '-venue-field-ui.log')).open('xb') as log:
+            subprocess.run([node, str(ROOT/'tests/browser/check-venue-replay-native.cjs'), str(descriptor), str(output)],
+                           stdout=log, stderr=subprocess.STDOUT, check=True, timeout=75)
+        result = read(output)
+        check(result['complete'] and result['fieldEvidence'] == [case['batchId'] for case in cases],
+              mode + ' shipped console downloads exact field bundles for the selected original batches')
     def verify_venue_reports(entries, receipt, linked):
         mode = 'linked' if linked else 'independent'
         key = receipt['requestId']
@@ -958,6 +998,7 @@ def main():
         command(seed['id'],'End');rejected('ended-session',base)
         # Run both topologies with separate native processes and fresh admissions.
         archived_batch_report = None
+        earlier_field_archive = None
         earlier_closure = None
         for linked in ([] if args.mr_venue_bundle_only else [False,True]):
             entries=[];round_clients=[]
@@ -1111,7 +1152,14 @@ def main():
                 evidence_entries = [verify_delivery(entry,[c for c in round_clients if c['sessionId']==entry['sessionId']])
                                     for entry in entries]
                 if args.venue_field_evidence:
-                    verify_venue_field_evidence('Linked' if linked else 'Independent', closed, evidence_entries)
+                    mode = 'Linked' if linked else 'Independent'
+                    field_archive = verify_venue_field_evidence(mode, closed, evidence_entries)
+                    if earlier_field_archive:
+                        check(request(earlier_field_archive['route'], raw_response=True)[0] == Path(earlier_field_archive['zip']).read_bytes(),
+                              'The original independent field bundle is byte-identical after the newer Linked batch')
+                    if args.check_venue_field_ui:
+                        verify_venue_field_ui(mode.lower(), field_archive, earlier_field_archive)
+                    earlier_field_archive = field_archive
             if args.check_venue_reports:
                 current_batch_report = verify_venue_reports(entries, receipt, linked)
                 if archived_batch_report:
@@ -1234,6 +1282,7 @@ def main():
             'venueReplayUi':args.check_venue_replay_ui,
             'venueHistoryUi':args.check_venue_history_ui,
             'venueFieldEvidence':args.venue_field_evidence,
+            'venueFieldUi':args.check_venue_field_ui,
             'venueEnvironment':args.check_venue_environment,
             'venueEnemies':args.check_venue_enemies,
             'hardwareFeedback':args.check_hardware_feedback,

@@ -347,6 +347,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const reportsPath = `/venue/closure/${closure.requestId}/reports.zip`;
     const reportButton = page.locator('#export-venue-reports');
     const reportStatus = page.locator('#venue-report-status');
+    const fieldPath = id => `/venue/closure/${id}/field-evidence.zip`;
+    const fieldButton = page.locator('#export-venue-field'), fieldStatus = page.locator('#venue-field-status');
     const waitingReport = await api(reportsPath, 'GET', undefined, 'Master', 409);
     await api(reportsPath, 'GET', undefined, 'Room2', 403);
     check(waitingReport.code === 'venue-reports-not-ready' && waitingReport.roomIds.join() === '2'
@@ -357,6 +359,11 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await archive(pausedEnding.id).nth(2).filter({ hasText: '已封存' }).waitFor();
     check(await archive(pausedEnding.id).nth(3).textContent() === '等待封存' && await reportButton.isEnabled(),
       'Batch combat export is available while a world replay remains unsealed');
+    const waitingField = await api(fieldPath(closure.requestId), 'GET', undefined, 'Master', 409);
+    await api(fieldPath(closure.requestId), 'GET', undefined, 'Room2', 403);
+    await api(fieldPath(randomUUID()), 'GET', undefined, 'Master', 404);
+    check(waitingField.code === 'venue-field-evidence-not-ready' && waitingField.roomIds.join() === '1,2,3'
+      && await fieldButton.isDisabled(), 'The private batch field export rejects unready rooms even when the combat ZIP is available');
     await page.locator('#venue-closure').screenshot({ path: path.join(screenshots, 'venue-closure.png') });
     const replacement = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [1] }, 'Master', 201);
     active.add(replacement.id);
@@ -441,12 +448,26 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const older = await api(`/venue/closure/history?limit=1&before=${one.nextBefore}`);
     check(one.batches[0].requestId === nextBatch.requestId && older.batches[0].requestId === closure.requestId && older.nextBefore === null,
       'Venue history returns an exclusive cursor from the newest original batch');
+    let evidenceBatch;
     for (let i = 0; i < 19; i++) {
       const synthetic = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [4] }, 'Master', 201);
       active.add(synthetic.id);
+      const publish = i === 0 ? await start(synthetic.id, 4, true) : null;
       const preview = (await api('/venue/phase')).end;
-      await api('/venue/phase', 'POST', { action: 'End', targets: preview }, 'Master', 200, undefined, randomUUID());
+      const batch = await api('/venue/phase', 'POST', { action: 'End', targets: preview }, 'Master', 200, undefined, randomUUID());
       active.delete(synthetic.id);
+      if (publish) {
+        const final = await api(`/sessions/${synthetic.id}`);
+        const streamId = final.combatStream.streamId;
+        publish(final);
+        await api(`/sessions/${synthetic.id}/combat-stream/seal`, 'POST', { streamId, finalSequence: 0 }, 'GameServer');
+        publish.seal();
+        const unavailable = await api(fieldPath(batch.requestId), 'GET', undefined, 'Master', 409);
+        check(unavailable.roomIds.join() === '4', 'Double-sealed batch evidence still waits for the original endpoint');
+        await api(`/sessions/${synthetic.id}/connection-endpoint`, 'PUT',
+          { version: 1, streamId, address: '192.168.50.40', port: 7777 }, 'GameServer');
+        evidenceBatch = { requestId: batch.requestId, sessionId: synthetic.id };
+      }
     }
     const picker = page.locator('#venue-closure-batch'), moreBatches = page.locator('#venue-closure-more');
     await page.locator('#venue-closure-load').click();
@@ -470,8 +491,64 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await replayRequest(ending.id);
     await page.locator('#tab-operations').click();
     check(await picker.inputValue() === closure.requestId, 'Returning from the older replay preserves its history selection');
+
+    const { requestId: evidenceId, sessionId: originalSession } = evidenceBatch;
+    await picker.selectOption(evidenceId);
+    await fieldStatus.filter({ hasText: '已可匯出' }).waitFor();
+    const auth = { headers: { Authorization: 'Bearer ' + tokens.Master } };
+    const privatePath = fieldPath(evidenceId), fieldUrl = base + '/api' + privatePath;
+    const batchZip = await fetch(fieldUrl, auth), directZip = await fetch(base + `/api/sessions/${originalSession}/field-evidence.zip`, auth);
+    const batchBytes = Buffer.from(await batchZip.arrayBuffer());
+    const fieldDownload = page.waitForEvent('download');
+    await fieldButton.click();
+    const downloadedField = await fieldDownload;
+    const fieldFile = path.join(screenshots, 'venue-field-evidence.zip');
+    await downloadedField.saveAs(fieldFile);
+    assert.equal((await fetch(fieldUrl)).status, 401);
+    check(batchZip.ok && directZip.ok && batchZip.headers.get('cache-control') === 'no-store'
+      && batchZip.headers.get('content-type') === 'application/zip'
+      && batchZip.headers.get('content-disposition').includes(`vr-command-venue-field-v1-${evidenceId}.zip`)
+      && downloadedField.suggestedFilename() === `vr-command-venue-field-v1-${evidenceId}.zip`
+      && batchBytes.equals(await fs.readFile(fieldFile)), 'The Master downloads the selected archived batch as the exact private API ZIP');
+    const unpacked = spawnSync('python', ['-c', `import base64, json, sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as archive:
+    assert archive.namelist() == ['closure.json', 'room-04.zip'] and archive.testzip() is None
+    print(json.dumps([json.loads(archive.read('closure.json')), base64.b64encode(archive.read('room-04.zip')).decode()], ensure_ascii=True))`,
+    fieldFile], { encoding: 'utf8', windowsHide: true, timeout: 6000 });
+    assert.equal(unpacked.status, 0, unpacked.stderr);
+    const [closureRecord, inner] = JSON.parse(unpacked.stdout);
+    assert.deepEqual(closureRecord, await api(`/venue/closure/${evidenceId}`));
+    check(Buffer.from(inner, 'base64').equals(Buffer.from(await directZip.arrayBuffer())),
+      'Batch evidence contains the exact original closure and the byte-identical individual field ZIP');
+
+    const heldRoute = '**/api' + privatePath;
+    let notify, release, finished, lateDownload = false;
+    const requested = new Promise(resolve => { notify = resolve; });
+    const gate = new Promise(resolve => { release = resolve; });
+    const done = new Promise(resolve => { finished = resolve; });
+    const late = () => { lateDownload = true; };
+    const hold = async route => {
+      try {
+        const response = await route.fetch();
+        assert.equal(response.status(), 200); notify(null);
+        await gate;
+        try { await route.fulfill({ response }); } catch { /* Changing batch aborts this download. */ }
+      } catch (error) { notify(error); } finally { finished(); }
+    };
+    page.on('download', late);
+    await page.route(heldRoute, hold);
+    try {
+      await fieldButton.click();
+      const failure = await requested;
+      if (failure) throw failure;
+      await picker.selectOption('');
+      await fieldStatus.filter({ hasText: '缺少開場紀錄' }).waitFor();
+    } finally {
+      release(); await done; await page.unroute(heldRoute, hold); page.off('download', late);
+    }
+    check(!lateDownload && await fieldButton.isDisabled(), 'A held field ZIP cannot download after changing to a different batch');
     await login('Room2');
-    check(await page.locator('#venue-closure').isHidden() && await picker.locator('option').count() === 1,
+    check(await page.locator('#venue-closure').isHidden() && await fieldButton.isHidden() && await picker.locator('option').count() === 1,
       'Switching to room control clears the Master history');
   } finally {
     await page.unroute(route); await page.close();
