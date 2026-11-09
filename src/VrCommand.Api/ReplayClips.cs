@@ -1,5 +1,7 @@
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using VrCommand.Core;
+using VrCommand.Simulation;
 
 namespace VrCommand.Api;
 
@@ -81,6 +83,53 @@ public sealed partial class WorldRecordings
                 ("$session", id.ToString("D")), ("$id", clipId.ToString("D")));
             if (remove.ExecuteNonQuery() == 0) throw new KeyNotFoundException("No shared clip for this recording.");
         }
+    }
+
+    public byte[] ExportPlayerReplay(Guid id, Guid clipId, OperatorIdentity actor, CancellationToken cancellation)
+    {
+        const int maxFrames = 300;
+        const int maxBytes = 8 * 1024 * 1024;
+        var recording = ReplayClipRecording(id, actor, write: true);
+        if (!recording.Complete) throw new InvalidOperationException("Seal the recording before exporting a player replay.");
+        var session = id.ToString("D");
+        using var output = new MemoryStream();
+        using var json = new Utf8JsonWriter(output);
+        lock (gate)
+        {
+            var clip = FindClip(session, clipId.ToString("D"), Guid.Parse(recording.Header.streamId));
+            if (clip is null || clip.Deleted) throw new KeyNotFoundException("No shared clip for this recording.");
+            if (clip.EndFrame - clip.StartFrame >= maxFrames)
+                throw new InvalidOperationException("Player replay is limited to 300 saved frames.");
+
+            json.WriteStartObject();
+            json.WriteNumber("playerReplayVersion", 1);
+            json.WriteString("missionName", recording.MissionName);
+            json.WriteString("clipName", clip.Name);
+            json.WriteNumber("startFrame", clip.StartFrame);
+            json.WriteNumber("endFrame", clip.EndFrame);
+            json.WritePropertyName("header");
+            JsonSerializer.Serialize(json, recording.Header, WorldJson.Options);
+            json.WriteStartArray("packets");
+            using var command = Command("""
+                SELECT packet FROM world_frames WHERE session=$session AND sequence BETWEEN $first AND $last ORDER BY sequence
+                """, ("$session", session), ("$first", clip.StartFrame), ("$last", clip.EndFrame));
+            using var rows = command.ExecuteReader();
+            var expected = clip.StartFrame;
+            while (rows.Read())
+            {
+                cancellation.ThrowIfCancellationRequested();
+                var packet = WorldJson.Read<WorldRecordingPacket>(rows.GetString(0));
+                if (packet.sequence != expected++) throw new InvalidOperationException("Replay clip has a missing saved frame.");
+                JsonSerializer.Serialize(json, packet, WorldJson.Options);
+                json.Flush();
+                if (output.Length > maxBytes - 2) throw new InvalidOperationException("Player replay exceeds 8 MiB.");
+            }
+            if (expected - 1 != clip.EndFrame) throw new InvalidOperationException("Replay clip has a missing saved frame.");
+        }
+        json.WriteEndArray();
+        json.WriteEndObject();
+        json.Flush();
+        return output.ToArray();
     }
 
     private ReplayClip? FindClip(string session, string id, Guid stream)

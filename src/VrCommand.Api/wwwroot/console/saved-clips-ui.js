@@ -1,3 +1,5 @@
+import { MAX_REPLAY_BYTES, MAX_REPLAY_FRAMES, readPlayerReplay } from './player-replay-model.js';
+
 const $ = id => document.getElementById('saved-clip-' + id);
 const isId = value => typeof value === 'string' && /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/.test(value);
 
@@ -29,6 +31,8 @@ export function mountSavedClips(request, canWrite, load) {
     $('refresh').disabled = !scope || !!work || !!pending;
     $('save').disabled = !idle || !draft || !!work || !!pending;
     $('remove').disabled = !idle || !row || !!work || !!pending;
+    $('export').disabled = !idle || !row || !!work || !!pending || !scope.complete
+      || row.endFrame > scope.throughFrame || row.endFrame - row.startFrame >= MAX_REPLAY_FRAMES;
     $('retry').hidden = !pending || !!work;
   }
   function options(preferred = select.value) {
@@ -85,6 +89,36 @@ export function mountSavedClips(request, canWrite, load) {
     const clip = selected();
     load(clip);
     message(`已載入「${clip.name}」的起訖標記。`);
+  });
+  $('export').addEventListener('click', async () => {
+    if ($('export').disabled || !canWrite()) return;
+    const clip = selected(), { sessionId, streamId } = scope;
+    const path = `${route()}/${clip.id}/player-replay.json`;
+    const own = work = new AbortController();
+    controls();
+    try {
+      const response = await request(path, AbortSignal.any([own.signal, AbortSignal.timeout(15000)]));
+      if (response.status !== 200 || !response.headers.get('content-type')?.startsWith('application/json'))
+        throw new Error('無法讀取片段檔案。');
+      const file = await response.blob();
+      if (!file.size || file.size > MAX_REPLAY_BYTES) throw new Error('回放檔案大小不符。');
+      const replay = readPlayerReplay(JSON.parse(await file.text()));
+      if (work !== own) return;
+      if (replay.header.sessionId !== sessionId || replay.header.streamId !== streamId
+        || replay.clipName !== clip.name || replay.startFrame !== clip.startFrame || replay.endFrame !== clip.endFrame)
+        throw new Error('下載回覆的錄製來源或範圍不符。');
+      const url = URL.createObjectURL(file);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `vr-command-replay-${clip.id}.json`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      message(`已下載「${clip.name}」的玩家回放檔。`);
+    } catch (error) {
+      if (work === own) message(error.message, true);
+    } finally {
+      if (work === own) { work = null; controls(); }
+    }
   });
   $('save').addEventListener('click', () => {
     if ($('save').disabled || !canWrite()) return;

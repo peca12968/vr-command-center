@@ -2,6 +2,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
+const { isDeepStrictEqual } = require('node:util');
 
 module.exports = async function worldBrowser({ page, context, api, tokens, directory, root, base, screenshots, check }) {
   const keys = path.join(directory, 'world-keys.json'); await fs.writeFile(keys, JSON.stringify({ OperatorKeys: tokens }));
@@ -483,7 +484,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await clipPlay.click(); await repeatedClip; await waitClipEnd();
     check(Number(await canvas.getAttribute('data-sequence')) === clipTail, 'Retrying the interval repeats from the original start and finishes at the original end');
     const savedRoute = archiveRoute + '/clips', savedPicker = page.locator('#saved-clip-select');
-    const clipName = '掩體 <東側> 複盤';
+    const clipName = '掩體 <東側> 複盤 ' + 'W'.repeat(45);
     const putRequests = [];
     const captureClipWrite = request => {
       if (request.method() === 'PUT' && new URL(request.url()).pathname.startsWith('/api' + savedRoute + '/'))
@@ -507,6 +508,61 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     check(putRequests.length === 2 && JSON.stringify(putRequests[0]) === JSON.stringify(putRequests[1])
       && (await api(savedRoute)).clips.length === 1 && (await savedPicker.locator('option').innerText()).includes(clipName),
       'Retry uses the same ID and body, keeps one clip, and renders its name as text');
+    const exportClip = page.locator('#saved-clip-export');
+    await page.route('**/player-replay.json', async route => {
+      const response = await route.fetch();
+      const file = await response.json();
+      file.header.streamId = randomUUID();
+      await route.fulfill({ response, json: file });
+    }, { times: 1 });
+    await exportClip.click();
+    await page.locator('#saved-clip-message').filter({ hasText: '下載回覆的錄製來源或範圍不符。' }).waitFor();
+    check(await exportClip.isEnabled(), 'A replaced recording identity is rejected before downloading and remains retryable');
+    const downloadStarted = page.waitForEvent('download');
+    await exportClip.click();
+    const download = await downloadStarted;
+    const bytes = await fs.readFile(await download.path());
+    const exported = JSON.parse(bytes);
+    const originals = await Promise.all(Array.from({ length: clipTail - eventSequence + 1 },
+      (_, offset) => api(`${archiveRoute}/frames/${eventSequence + offset}`)));
+    check(download.suggestedFilename() === `vr-command-replay-${originalClip.id}.json`
+      && isDeepStrictEqual(exported.packets, originals.map(frame => frame.packet))
+      && !JSON.stringify(exported).includes('"statistics"'), 'Master downloads exactly the accepted saved interval without roster statistics');
+    const playerContext = await context.browser().newContext({ viewport: { width: 390, height: 844 } });
+    try {
+      const player = await playerContext.newPage(), requests = [];
+      player.on('request', request => {
+        if (new URL(request.url()).pathname.startsWith('/api') || request.headers().authorization) requests.push(request.url());
+      });
+      await player.goto(base + '/console/player-replay.html');
+      const input = player.locator('#player-replay-file'), note = player.locator('#player-replay-message');
+      await input.setInputFiles({ name: download.suggestedFilename(), mimeType: 'application/json', buffer: bytes });
+      await note.filter({ hasText: `已載入 ${exported.packets.length} 格。` }).waitFor();
+      const position = player.locator('#player-replay-frame');
+      const replayCanvas = player.locator('#replay-canvas');
+      check((await player.locator('#player-replay-title').innerText()) === clipName
+        && (await position.innerText()).startsWith(`第 ${eventSequence} 格`) && await player.locator('#player-replay-back').isDisabled()
+        && await player.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
+        'Player opens the exact first frame on a small viewport without operator login');
+      check(Number((await replayCanvas.getAttribute('data-camera')).split(',')[1]) < 40
+        && Number(await replayCanvas.getAttribute('data-triangles')) > 0, 'The first room is framed using the visible canvas dimensions');
+      await player.locator('#player-replay-next').click();
+      check((await position.innerText()).startsWith(`第 ${eventSequence + 1} 格`), 'Player can step to the next saved frame');
+      await player.locator('#player-replay-play').click();
+      await position.filter({ hasText: `第 ${clipTail} 格` }).waitFor();
+      check(await player.locator('#player-replay-next').isDisabled()
+        && await player.locator('#player-replay-play').innerText() === '播放' && requests.length === 0,
+        'Player stops at the exact exported boundary and sends no API requests');
+      await player.screenshot({ path: path.join(screenshots, 'player-replay-mobile.png'), fullPage: true });
+      const damaged = { ...exported, packets: exported.packets.slice(1) };
+      await input.setInputFiles({ name: 'damaged.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(damaged)) });
+      await note.filter({ hasText: '無法辨識回放檔' }).waitFor();
+      check(await player.locator('#player-replay-view').isHidden() && requests.length === 0,
+        'A truncated local file clears the old display without making a request');
+    } finally {
+      await playerContext.close();
+      await page.bringToFront();
+    }
     const roomClip = await context.newPage();
     try {
       await roomClip.goto(base + '/console/');
@@ -517,7 +573,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       await roomClip.locator('#world-replay').click();
       const roomLoad = roomClip.locator('#saved-clip-load');
       await roomLoad.click();
-      check(await roomClip.locator('#saved-clip-edit').isHidden()
+      check(await roomClip.locator('#saved-clip-edit').isHidden() && await roomClip.locator('#saved-clip-export').isHidden()
         && (await roomClip.locator('#world-clip-status').innerText()).includes(`起點 第 ${eventSequence} 格`),
         'A new authorized room console loads the shared marks without editing controls');
       await roomClip.locator('#world-clip-play').click();

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>VR COMMAND｜玩家任務回放</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="./console.css">
+  <script type="module" src="./player-replay.js"></script>
+</head>
+<body>
+  <header class="masthead"><div><p class="eyebrow">VR COMMAND / REPLAY</p><h1>玩家任務回放</h1></div></header>
+  <main>
+    <section class="panel" aria-label="載入回放">
+      <label>場館提供的回放檔<input id="player-replay-file" type="file" accept=".json,application/json"></label>
+      <p class="hint">檔案只在此瀏覽器開啟，不會上傳至管理服務。</p>
+      <p id="player-replay-message" role="status">請選擇回放檔。</p>
+    </section>
+    <section id="player-replay-view" class="panel" aria-label="回放畫面" hidden>
+      <h2 id="player-replay-title"></h2>
+      <p id="player-replay-source" class="muted"></p>
+      <div id="replay-viewport">
+        <canvas id="replay-canvas" aria-label="回放 3D 場景，可拖曳旋轉及滾輪縮放"></canvas>
+        <div class="replay-overlay"><span id="player-replay-weather"></span><span id="player-replay-frame"></span></div>
+      </div>
+      <div class="replay-transport">
+        <button id="player-replay-play" type="button">播放</button>
+        <button id="player-replay-back" class="quiet" type="button">上一格</button>
+        <button id="player-replay-next" class="quiet" type="button">下一格</button>
+        <label>速度<select id="player-replay-speed"><option value=".5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select></label>
+        <label>視角<select id="player-replay-room"></select></label>
+        <output id="player-replay-time"></output>
+      </div>
+      <label>時間軸<input id="replay-timeline" type="range" min="0" value="0" step="1"></label>
+    </section>
+  </main>
+</body>
+</html>

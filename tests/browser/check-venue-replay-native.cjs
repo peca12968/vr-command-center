@@ -76,8 +76,40 @@ async function main() {
       await page.locator('#world-clip-play').click();
       await page.locator('#world-clip-status').filter({ hasText: '已到片段終點' }).waitFor();
       assert.equal(Number(await canvas.getAttribute('data-sequence')), end);
+      const started = page.waitForEvent('download');
+      await page.locator('#saved-clip-export').click();
+      const download = await started;
+      const bytes = await fs.readFile(await download.path());
+      const exported = JSON.parse(bytes);
+      assert.equal(exported.header.sessionId, replay.sessionId);
+      assert.deepEqual(exported.packets[1], packet);
+      const first = await fetch(`${config.base}/api/sessions/${replay.sessionId}/world/frames/${start}`,
+        { headers: { Authorization: 'Bearer ' + config.masterKey } });
+      assert.equal(first.status, 200);
+      assert.deepEqual(exported.packets, [(await first.json()).packet, packet]);
+      const player = await browser.newPage({ viewport: { width: 390, height: 844 } });
+      const apiRequests = [];
+      player.on('request', request => {
+        if (new URL(request.url()).pathname.startsWith('/api')) apiRequests.push(request.url());
+      });
+      try {
+        await player.goto(config.base + '/console/player-replay.html');
+        await player.locator('#player-replay-file').setInputFiles({
+          name: download.suggestedFilename(), mimeType: 'application/json', buffer: bytes
+        });
+        const position = player.locator('#player-replay-frame');
+        await position.filter({ hasText: `第 ${start} 格` }).waitFor();
+        await player.locator('#player-replay-play').click();
+        await position.filter({ hasText: `第 ${end} 格` }).waitFor();
+        assert.equal(await player.locator('#player-replay-next').isDisabled(), true);
+        assert.deepEqual(apiRequests, []);
+        await player.screenshot({ path: path.join(path.dirname(output), config.mode + '-player-replay.png') });
+      } finally {
+        await player.close();
+        await page.bringToFront();
+      }
       return { start, end, reached: Number(await canvas.getAttribute('data-sequence')), elapsedMilliseconds: packet.elapsedMilliseconds,
-        clipId: await savedOption.getAttribute('value') };
+        clipId: await savedOption.getAttribute('value'), playerReplay: { start, end, originalPackets: exported.packets.length, apiRequests: apiRequests.length } };
     }
     for (const session of config.sessions) {
       const replay = await openReplay(session);

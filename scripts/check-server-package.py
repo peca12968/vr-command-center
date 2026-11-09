@@ -761,6 +761,9 @@ def main():
               and (clip['id'], clip['startFrame'], clip['endFrame'], clip['endMilliseconds'])
               == (interval['clipId'], interval['start'], interval['end'], interval['elapsedMilliseconds']),
               f'{mode} original native replay clip is shared with the authorized room')
+        check(interval['playerReplay'] == {'start': interval['start'], 'end': interval['end'],
+              'originalPackets': interval['end'] - interval['start'] + 1, 'apiRequests': 0},
+              f'{mode} unauthenticated player plays the exact exported native frames locally')
         if earlier:
             older = earlier['sessions'][2]
             history = result['history']

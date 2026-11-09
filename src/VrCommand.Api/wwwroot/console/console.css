@@ -55,3 +55,4 @@
 .layout-trial{border-top:1px solid var(--line);margin:12px 0;padding-top:12px}
 #layout-trial-routes polyline{fill:none;stroke:#ffd477;stroke-width:.11;stroke-dasharray:.18 .09;stroke-linecap:round;pointer-events:none}
 #prop-layer [data-layout-trial]{opacity:.28}
+#player-replay-title,#player-replay-source{overflow-wrap:anywhere}

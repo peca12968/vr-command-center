@@ -104,6 +104,12 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         session = info["header"]["sessionId"]
         route = "/api/sessions/" + session + "/world"
         check(info["header"]["origin"] == "Simulation" and not info["complete"], "Live source explicitly identifies synthetic, incomplete data")
+        live_clip = route + "/clips/" + str(uuid4())
+        live_draft = {"streamId": info["header"]["streamId"], "name": "Live review", "startFrame": 1, "endFrame": 2}
+        request(live_clip, method="PUT", body=live_draft)
+        request(live_clip + "/player-replay.json", expected=409)
+        request(live_clip, expected=204, method="DELETE")
+        check(True, "An existing live clip cannot be exported before sealing")
         with request(route + "/watch", "Room5") as stream:
             kind, metadata = event(stream)
             kind2, live = event(stream)
@@ -306,6 +312,7 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         clips = route + "/clips"
         clip_id = str(uuid4())
         clip_route = clips + "/" + clip_id
+        player_replay_route = clip_route + "/player-replay.json"
         clip = {"streamId": info["header"]["streamId"], "name": "Cover review", "startFrame": 2, "endFrame": 6}
         request(clips, "invalid", 401)
         request(clips, "Room1", 403)
@@ -327,6 +334,16 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
               and request(clip_route, method="PUT", body=clip) == saved_clip
               and request(clips) == request(clips, "Room5") == clip_list,
               "Both operators read the same stored interval with exact frame times and idempotent identity")
+        for role, status in (("invalid", 401), ("Room5", 403), ("Room1", 403), ("GameServer", 403)):
+            request(player_replay_route, role, status)
+        player_replay = request(player_replay_route)
+        check(set(player_replay) == {"playerReplayVersion", "header", "missionName", "clipName", "startFrame", "endFrame", "packets"}
+              and player_replay["playerReplayVersion"] == 1 and player_replay["header"] == info["header"]
+              and player_replay["clipName"] == clip["name"] and player_replay["missionName"] == info["missionName"]
+              and [player_replay["startFrame"], player_replay["endFrame"]] == [2, 6]
+              and player_replay["packets"] == [request(f"{route}/frames/{sequence}")["packet"] for sequence in range(2, 7)],
+              "Master exports exact original inclusive frames without the private statistics")
+        request(clips + "/" + str(uuid4()) + "/player-replay.json", expected=404)
         request(clip_route, expected=409, method="PUT", body={**clip, "endFrame": 7})
         other_clips = [clips + "/" + str(uuid4()) for _ in range(23)]
         for other in other_clips:
@@ -336,6 +353,7 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
               "The 24-clip limit still permits exact retries")
         for other in other_clips:
             request(other, expected=204, method="DELETE")
+        request(other_clips[0] + "/player-replay.json", expected=404)
         request(other_clips[0], expected=204, method="DELETE")
         check(request(other_clips[0], method="PUT", body=clip)["deleted"] and request(clips) == clip_list,
               "Removing clips leaves the original frames readable and late retries cannot recreate a removed clip")
