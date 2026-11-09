@@ -20,6 +20,7 @@ jobs:
       - run: python scripts/smoke_world.py
       - run: python scripts/smoke_control_pipe.py
       - run: python scripts/check-hardware-simulator.py
+      - run: python scripts/check-live-hardware-gateway.py
       - run: python -m py_compile scripts/package-hardware-simulator.py
       - run: python -m unittest discover -s tests -p test_control_package.py
       - run: python -m unittest discover -s tests -p test_server_package.py
@@ -140,4 +141,7 @@ jobs:
             artifacts/hardware-simulator/*/source-events.json
             artifacts/hardware-simulator/*/source-session.json
             artifacts/hardware-simulator/*/source-statistics.json
+            artifacts/live-hardware-gateway/*/checks.json
+            artifacts/live-hardware-gateway/*/cleanup.json
+            artifacts/live-hardware-gateway/*/room-*-report.json
           if-no-files-found: ignore
