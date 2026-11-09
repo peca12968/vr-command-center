@@ -171,7 +171,9 @@ python scripts/verify-field-results.py --topology direct-lan `
   --player 192.168.1.10 '.\player 1.log' --player 192.168.1.20 '.\player 2.log'
 ```
 
-每場最多 25 位玩家。檢查器逐位比對結束名冊的入場 ID、房間、個人戰績、三種封存序號，以及最終連線的 UDP 來源與伺服器確認。玩家曾重連時使用收到戰績的最後一條連線。名冊異動造成最終統計包含已離場玩家時，這套固定名冊驗收會拒絕。每份輸入最多 16 MiB。成功輸出可另存 JSON，摘要只含計數、房間、序號及範圍。失敗以退出碼 1 表示，診斷文字省略原始位址、票券和檔案路徑。
+每場最多 25 位玩家。檢查器逐位比對結束名冊的入場 ID、房間、個人戰績、三種封存序號，以及最終連線的 UDP 來源與伺服器確認。玩家曾重連時使用收到戰績的最後一條連線。名冊異動造成最終統計包含已離場玩家時，這套固定名冊驗收會拒絕。文字日誌、JSON 與 ZIP 每份最多 16 MiB。成功輸出可另存 JSON，摘要只含計數、房間、序號及範圍。失敗以退出碼 1 表示，診斷文字省略原始位址、票券和檔案路徑。
+
+如要一併驗收原生回放檔，等啟動器回報 `sealed-stopped` 後，從其 `workDirectory` 下的 `telemetry` 保留 `<sessionId>.worldlog`。在單場命令加入 `--world-journal .\room-01.worldlog`。工具唯讀檢查每筆記錄的校驗碼與連續影格，核對場次、來源、房間、校正設定和最後封存。它確認原檔含活動中影格及兩種封存的尾界，再輸出檔案 SHA-256、總影格數及活動中影格數。活動中影格須為 `Running`、tick 大於零且未中止來源。原生回放檔逐筆讀取，可超過文字日誌的 16 MiB 上限。 [原生世界紀錄](WORLD_SOURCE.md)
 
 `same-host` 要求全部觀察到的來源都在宣告的伺服器位址清單。`direct-lan` 要求至少有一個清單外的私有 IPv4，且所有玩家的實際來源均符合各自填入的位址。實體主機數與網路容量仍須現場確認，工具摘要分別保留 `physicalHostsVerified` 與 `networkCapacityAccepted` 為 `false`。NAT 或中繼環境需另記拓撲與轉譯結果。
 
@@ -194,6 +196,7 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `closure` | 原批次的 `closure.json` 路徑 |
 | `sessions` | 獨立模式填五場，合併模式填一場 |
 | `sessions[].evidenceZip`、`launcherReport`、`serverLog` | 各場原 ZIP、啟動器終止報告及伺服器日誌的路徑 |
+| `sessions[].worldJournal` | 選用。若驗收回放檔，每個場次都填自己關閉後的原始 `.worldlog` 路徑 |
 | `sessions[].players` | 每房五筆。每筆填玩家裝置實際使用的 IPv4 字串 `address` 及原日誌路徑 `log`。Quest 3 原 logcat 另填數字 `logcatPid`，例如 `7342` |
 
 路徑可以是絕對路徑，或相對於 `venue.json` 所在資料夾。同一檔案只能使用一次。例如獨立模式下，第 1 房的清單項目可由下列 PowerShell 建立。請依實際驗收配置填入各席地址與檔名。
@@ -220,6 +223,8 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json
 ```
 
 摘要核對五房各五個席位、原封存來源、每位玩家的原入場與 UDP 來源，以及 25 筆伺服器戰績確認。它逐房列出在伺服器位址清單以外的玩家數。`direct-lan` 至少須觀察到一筆這類連線，仍須依實際設備及網路拓撲核對主機數、同時遊玩與容量。
+
+提供回放檔的整批驗收會檢查每場最後影格已觀察到該批結束指令，並輸出 `worldJournalsVerified` 與逐場摘要。回放畫面及遊戲事件內容可用原回放介面另行檢視。
 
 ## Windows 玩家連線量測
 

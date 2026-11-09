@@ -6,6 +6,7 @@ import importlib.util
 import ipaddress
 import json
 from pathlib import Path
+import struct
 import subprocess
 import sys
 import tempfile
@@ -69,7 +70,28 @@ def fixture(*, remote=True):
     return ['direct-lan' if remote else 'same-host', {server_ip}, launcher, session, stats, endpoint, server, clients]
 
 
-def venue_fixture(root, mode, *, remote=False, quest_per_room=0):
+def world_journal(path, world, *, header_changes=None, combat=0, active=True, sealed=True, end_sequence=8):
+    def record(tag, body):
+        payload = bytes([tag]) + body
+        return struct.pack('<i', len(payload)) + payload + hashlib.sha256(payload).digest()
+
+    count = world['acceptedSequence']
+    world.update(durationMilliseconds=count * 100, capturedAtUtc='2026-11-09T00:00:08+00:00')
+    world['header'].update(schemaVersion=1, calibration='uncalibrated-vr', captureStartedAtUtc='2026-11-09T00:00:00+00:00')
+    header = dict(world['header'], **(header_changes or {}))
+    raw = [b'VRWORLD1', record(0, json.dumps(header).encode())]
+    for number in range(1, count + 1):
+        phase = 'Ended' if number == count else 'Running' if active and number > 1 else 'Preparing'
+        packet = {'sequence': number, 'observedSequence': end_sequence if phase == 'Ended' else 7,
+                  'elapsedMilliseconds': number * 100, 'suspended': False, 'throughCombatSequence': combat,
+                  'frame': {'phase': phase, 'tick': number if phase == 'Running' else 0}}
+        raw += [record(1, json.dumps(packet).encode()), record(2, struct.pack('<q', number))]
+    if sealed:
+        raw += [record(3, struct.pack('<q', count)), record(4, struct.pack('<q', count))]
+    path.write_bytes(b''.join(raw))
+
+
+def venue_fixture(root, mode, *, remote=False, quest_per_room=0, with_journals=False):
     def write_json(path, value):
         path.write_text(json.dumps(value), encoding='utf-8')
 
@@ -96,6 +118,9 @@ def venue_fixture(root, mode, *, remote=False, quest_per_room=0):
                                   'replay': {'streamId': stream, 'throughSequence': 80}})
         entry = {'evidenceZip': prefix + '.zip', 'launcherReport': prefix + ' launcher.json',
                  'serverLog': prefix + ' server.log', 'players': []}
+        if with_journals:
+            entry['worldJournal'] = prefix + '.worldlog'
+            world_journal(root / entry['worldJournal'], launcher['finalWorld'])
         manifest['sessions'].append(entry)
         server = f'VR_NETWORK_STARTED role=Server started=True background=True port={port}\n'
         for room in rooms:
@@ -272,6 +297,57 @@ if settings.get('keepRunning', True):
 
 
 class FieldResultsTests(unittest.TestCase):
+    def test_original_world_journal_matches_the_sealed_evidence(self):
+        data = fixture()
+        world = data[2]['finalWorld']
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'session.worldlog'
+            world_journal(path, world)
+            result = field.verify(*data, world_journal=path)
+            self.assertEqual({'sha256': hashlib.sha256(path.read_bytes()).hexdigest(), 'frames': 80, 'runningFrames': 78},
+                             result['worldJournal'])
+            self.assertNotIn('worldJournal', field.verify(*data))
+            for changes, message in (
+                ({'header_changes': {'streamId': id_for(3)}}, 'source or record integrity'),
+                ({'header_changes': {'calibration': 'quest-room-mr-v1'}}, 'source or record integrity'),
+                ({'active': False}, 'active play'),
+                ({'sealed': False}, 'durable world and combat seals'),
+                ({'combat': 1}, 'durable world and combat seals'),
+                ({'end_sequence': 10}, 'Invalid numeric evidence'),
+            ):
+                with self.subTest(changes=changes):
+                    world_journal(path, world, **changes)
+                    with self.assertRaisesRegex(field.EvidenceError, message):
+                        field.verify(*data, world_journal=path)
+            world_journal(path, world)
+            world['capturedAtUtc'] = '2026-11-09T00:00:09+00:00'
+            with self.assertRaisesRegex(field.EvidenceError, 'terminal capture'):
+                field.verify(*data, world_journal=path)
+            corrupted = bytearray(path.read_bytes())
+            corrupted[-1] ^= 1
+            path.write_bytes(corrupted)
+            with self.assertRaisesRegex(field.EvidenceError, 'source or record integrity'):
+                field.verify(*data, world_journal=path)
+
+    def test_venue_requires_all_original_journals_when_supplied(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, _ = venue_fixture(root, mode, with_journals=True)
+                report = field.verify_venue(path)
+                self.assertEqual(5 if mode == 'Independent' else 1, report['worldJournalsVerified'])
+                self.assertTrue(all(row['worldJournal']['frames'] == row['worldSequence'] for row in report['sessions']))
+                source = root / manifest['sessions'][0]['worldJournal']
+                launcher = json.loads((root / manifest['sessions'][0]['launcherReport']).read_text())
+                world_journal(source, launcher['finalWorld'], end_sequence=7)
+                with self.assertRaisesRegex(field.EvidenceError, 'management boundary'):
+                    field.verify_venue(path)
+                if mode == 'Independent':
+                    manifest['sessions'][0].pop('worldJournal')
+                    path.write_text(json.dumps(manifest), encoding='utf-8')
+                    with self.assertRaisesRegex(field.EvidenceError, 'journal for every session'):
+                        field.verify_venue(path)
+
     def test_quest_logcat_reconnect_uses_the_server_acknowledged_connection(self):
         data = fixture()
         data[3]['players'][1]['headset'] = 'Quest3'
@@ -441,6 +517,8 @@ class FieldResultsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='field-check-') as directory:
             root = Path(directory)
             command = [sys.executable, str(SCRIPT), '--topology', topology, '--server-ip', str(next(iter(ips)))]
+            journal = root / 'original.worldlog'
+            world_journal(journal, launcher['finalWorld'])
             for option, value in [('launcher-report', launcher), ('session', session), ('statistics', stats), ('endpoint', endpoint), ('server-log', server)]:
                 path = root / option
                 path.write_text(value if type(value) is str else json.dumps(value), encoding='utf-8')
@@ -450,7 +528,11 @@ class FieldResultsTests(unittest.TestCase):
                 path.write_text(log, encoding='utf-8')
                 command += ['--player', str(address), str(path)]
             success = subprocess.run(command, capture_output=True, text=True, check=True)
-            self.assertTrue(json.loads(success.stdout)['consistent'])
+            legacy = json.loads(success.stdout)
+            self.assertTrue(legacy['consistent'])
+            self.assertNotIn('worldJournal', legacy)
+            archived = subprocess.run([*command, '--world-journal', str(journal)], capture_output=True, text=True, check=True)
+            self.assertEqual(80, json.loads(archived.stdout)['worldJournal']['frames'])
             (root / 'server-log').write_text(server.replace('192.168.5.20', '192.168.5.50'), encoding='utf-8')
             failure = subprocess.run(command, capture_output=True, text=True)
             self.assertEqual(failure.returncode, 1)

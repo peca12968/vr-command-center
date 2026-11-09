@@ -427,6 +427,7 @@ def main():
         child.wait(timeout=15)
     def verify_delivery(entry,owners):
         manifest_entry = None
+        world_journal = None
         server=(entry['work']/'server.log').read_text(encoding='utf-8',errors='replace')
         acks=[int(value) for value in re.findall(r'VR_SERVER_DEBRIEF_ACK id=(\d+)',server)]
         check(len(acks)==len(owners) and set(acks)=={c['connection'] for c in owners}
@@ -460,14 +461,18 @@ def main():
                     evidence_zip=out/(entry['label']+'-field-evidence.zip')
                     evidence_zip.write_bytes(raw)
                     session,statistics,endpoint=exported
+                    world_journal = entry['work']/'telemetry'/(entry['sessionId']+'.worldlog')
                     manifest_entry={'evidenceZip':str(evidence_zip),'launcherReport':str(entry['reportPath']),
-                        'serverLog':str(entry['work']/'server.log'),
+                        'serverLog':str(entry['work']/'server.log'),'worldJournal':str(world_journal),
                         'players':[{'address':address,'log':str(c['log'])} for c in owners]}
                 ip=ipaddress.IPv4Address(address)
                 result=field.verify('same-host',{ip},read(entry['reportPath']),session,statistics,endpoint,server,
-                    [(ip,field.content(c['log'])) for c in owners])
+                    [(ip,field.content(c['log'])) for c in owners], world_journal=world_journal)
                 save(entry['label']+'-field-results.json',result)
                 check(result['serverAcknowledgements']==len(acks),entry['label']+' field report matches same-PC endpoints and sealed player results')
+                if world_journal is not None:
+                    check(result['worldJournal']['frames']==result['worldSequence'] and result['worldJournal']['runningFrames']>0,
+                          entry['label']+' field report verifies the original closed world journal')
             else:
                 check('VR_SERVER_PEER' not in server,entry['label']+' default does not record UDP peers')
         raw,headers=request('/api/sessions/'+entry['sessionId']+'/report.csv',raw_response=True)
@@ -561,6 +566,9 @@ def main():
               and summary['rooms'] == [{'roomId': room, 'players': 5, 'playersOutsideDeclaredServer': 0} for room in range(1, 6)]
               and not summary['physicalHostsVerified'] and not summary['networkCapacityAccepted'],
               label + ' field evidence matches all 25 original sealed admissions and UDP peers')
+        check(summary['worldJournalsVerified'] == len(entries)
+              and all(row['worldJournal']['frames'] == row['worldSequence'] and row['worldJournal']['runningFrames'] > 0
+                      for row in summary['sessions']), label + ' field evidence verifies every original closed world journal')
         save(label + '-venue-field-results.json', summary)
         rejected = run('direct-lan')
         check(rejected.returncode == 1 and not rejected.stdout and 'outside the declared server addresses' in rejected.stderr,

@@ -2,6 +2,7 @@
 import argparse
 from datetime import datetime
 from decimal import Decimal
+import importlib.util
 import ipaddress
 import io
 from itertools import chain
@@ -170,14 +171,40 @@ def scores(row):
     return values + (accuracy,)
 
 
-def verify(topology, server_ips, launcher, session, statistics, endpoint, server_log, player_logs, *, quest_player_logs=()):
+def verify_world_journal(path, world, combat_sequence, through, applied_end):
+    spec = importlib.util.spec_from_file_location('field_world_journal', Path(__file__).with_name('analyze-world-journal.py'))
+    analyzer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(analyzer)
+    fields = ('schemaVersion', 'sessionId', 'streamId', 'origin', 'roomIds', 'calibration', 'captureStartedAtUtc')
+    expected = {key: world['header'].get(key) for key in fields}
+    try:
+        journal = analyzer.analyze(path, expected_header=expected)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, ArithmeticError, RecursionError) as error:
+        raise EvidenceError('World journal failed source or record integrity verification') from error
+    tail = journal['lastFrame']
+    sequence = world['acceptedSequence']
+    require(journal['complete'] is journal['sealed'] is True and journal['unacknowledgedFrames'] == 0
+            and journal['acknowledgedSequence'] == sequence and journal['runningFrames'] > 0
+            and tail['phase'] == 'Ended' and tail['suspended'] is False and tail['worldSequence'] == sequence
+            and integer(journal['lastCombatSequence']) == combat_sequence,
+            'World journal must contain active play and the exact durable world and combat seals')
+    require(integer(tail['elapsedMilliseconds']) == integer(world['durationMilliseconds'])
+            and integer(tail['observedSequence'], 1, through) >= (applied_end or 1)
+            and datetime.fromisoformat(tail['capturedAtUtc']) == datetime.fromisoformat(world['capturedAtUtc']),
+            'World journal terminal capture or management boundary differs from the sealed session')
+    return {'sha256': journal['sha256'], 'frames': sequence, 'runningFrames': journal['runningFrames']}
+
+
+def verify(topology, server_ips, launcher, session, statistics, endpoint, server_log, player_logs, *, quest_player_logs=(),
+           world_journal=None):
     report, _ = verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log,
-                               len(player_logs) + len(quest_player_logs), player_logs, quest_player_logs=quest_player_logs)
+                               len(player_logs) + len(quest_player_logs), player_logs, quest_player_logs=quest_player_logs,
+                               world_journal=world_journal)
     return report
 
 
 def verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log, size, player_logs, *,
-                   require_remote=True, quest_player_logs=()):
+                   require_remote=True, quest_player_logs=(), world_journal=None, applied_end=None):
     integer(size, 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(integer(launcher['schemaVersion'], 1, 1) and launcher['status'] == 'sealed-stopped'
@@ -261,12 +288,14 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
                 'Direct LAN needs private addresses and a peer outside the declared server addresses')
     else:
         require(not remote, 'A peer is outside the declared same-host addresses')
+    journal = verify_world_journal(world_journal, world, combat_sequence, through, applied_end) if world_journal is not None else None
     return {'version': 1, 'consistent': True, 'declaredTopology': topology, 'mode': mode,
             'players': size, 'playersPerRoom': {room: len(room_sources[room]) for room in sorted(room_sources)}, 'distinctPeerAddresses': len(peer_ips),
             'distinctAddressesOutsideDeclaredServer': len(remote), 'serverAcknowledgements': len(acknowledged),
             'worldSequence': world_sequence, 'combatSequence': combat_sequence, 'physicalHostsVerified': False,
             'networkCapacityAccepted': False,
-            **({'questLogcatPlayers': quest_players} if quest_players else {})}, room_sources
+            **({'questLogcatPlayers': quest_players} if quest_players else {}),
+            **({'worldJournal': journal} if journal else {})}, room_sources
 
 
 def management_zip(path):
@@ -312,6 +341,8 @@ def verify_venue(manifest_path):
     rows = closure['sessions']
     require(type(entries) is list and type(rows) is list and len(entries) == len(rows) == len(expected_rooms),
             'Venue must contain the original five independent sessions or one linked session')
+    journals = any('worldJournal' in entry for entry in entries)
+    require(not journals or all('worldJournal' in entry for entry in entries), 'Provide a world journal for every session in this batch')
     expected = {identity(row['sessionId']): row for row in rows}
     require(len(expected) == len(rows) and all(type(row['roomIds']) is list and row['roomIds']
             and all(integer(room, 1, 5) for room in row['roomIds']) for row in rows)
@@ -351,7 +382,9 @@ def verify_venue(manifest_path):
         report, sources = verify_session(topology, server_ips, launcher, session, statistics, endpoint,
                                          server_log, len(players), ((address, content(path)) for address, path in logs),
                                          require_remote=False,
-                                         quest_player_logs=((address, content(path), pid) for address, path, pid in quest_logs))
+                                         quest_player_logs=((address, content(path), pid) for address, path, pid in quest_logs),
+                                         world_journal=evidence_path(entry['worldJournal']) if journals else None,
+                                         applied_end=row['appliedAtSequence'])
         quest_players += len(quest_logs)
         seats = {(player['roomId'], integer(player['seat'], 0, 4)) for player in session['players']}
         require(seats == {(room, seat) for room in row['roomIds'] for seat in range(5)}, 'Final roster must cover every room seat exactly once')
@@ -362,7 +395,8 @@ def verify_venue(manifest_path):
             admission_ids.add(admission)
         rooms.update(sources)
         summaries.append({'roomIds': row['roomIds'], 'serverAcknowledgements': report['serverAcknowledgements'],
-                          'worldSequence': report['worldSequence'], 'combatSequence': report['combatSequence']})
+                          'worldSequence': report['worldSequence'], 'combatSequence': report['combatSequence'],
+                          **({'worldJournal': report['worldJournal']} if journals else {})})
 
     require(recorded_at in end_times and not expected, 'Closure time or session set differs from the terminal evidence')
     peer_ips = {address for sources in rooms.values() for address in sources}
@@ -375,7 +409,8 @@ def verify_venue(manifest_path):
             'distinctPeerAddresses': len(peer_ips), 'distinctAddressesOutsideDeclaredServer': len(remote),
             'serverAcknowledgements': sum(item['serverAcknowledgements'] for item in summaries),
             'physicalHostsVerified': False, 'networkCapacityAccepted': False,
-            **({'questLogcatPlayers': quest_players} if quest_players else {})}
+            **({'questLogcatPlayers': quest_players} if quest_players else {}),
+            **({'worldJournalsVerified': len(summaries)} if journals else {})}
 
 
 def main():
@@ -383,6 +418,7 @@ def main():
     parser.add_argument('--venue-manifest', type=Path, help='Check one full five-room End batch from a private manifest')
     parser.add_argument('--topology', choices=('same-host', 'direct-lan'))
     parser.add_argument('--server-ip', action='append', help='Repeat for each assigned server IPv4')
+    parser.add_argument('--world-journal', type=Path, help='Original closed .worldlog for a single session')
     for name in ('launcher-report', 'session', 'statistics', 'endpoint', 'server-log'):
         parser.add_argument('--' + name, type=Path)
     parser.add_argument('--player', action='append', nargs=2, metavar=('EXPECTED_IPV4', 'LOG'))
@@ -390,7 +426,7 @@ def main():
     args = parser.parse_args()
     json_paths = [args.launcher_report, args.session, args.statistics, args.endpoint]
     single_args = [args.topology, args.server_ip, *json_paths, args.server_log, args.player or args.quest_player]
-    if (args.venue_manifest and any(single_args)) or (not args.venue_manifest and not all(single_args)):
+    if (args.venue_manifest and (any(single_args) or args.world_journal)) or (not args.venue_manifest and not all(single_args)):
         parser.error('Provide --venue-manifest alone or all single-session options.')
     try:
         if args.venue_manifest:
@@ -400,6 +436,8 @@ def main():
             quest = args.quest_player or []
             integer(len(windows) + len(quest), 1, 25)
             inputs = [*json_paths, args.server_log, *(Path(row[1]) for row in chain(windows, quest))]
+            if args.world_journal is not None:
+                inputs.append(args.world_journal)
             require(len({path.resolve(strict=True) for path in inputs}) == len(inputs), 'Evidence paths must be distinct')
             players = [(ipv4(address), content(Path(path))) for address, path in windows]
             quest_players = []
@@ -408,7 +446,7 @@ def main():
                 quest_players.append((ipv4(address), content(Path(path)), integer(int(pid), 1, 2**31 - 1)))
             report = verify(args.topology, {ipv4(address) for address in args.server_ip},
                             *(read_json(content(path)) for path in json_paths), content(args.server_log), players,
-                            quest_player_logs=quest_players)
+                            quest_player_logs=quest_players, world_journal=args.world_journal)
     except EvidenceError as error:
         parser.exit(1, f'Field evidence rejected. {error}.\n')
     except (OSError, UnicodeError, ArithmeticError, AttributeError, KeyError, TypeError, ValueError, RecursionError,

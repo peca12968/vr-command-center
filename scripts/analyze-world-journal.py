@@ -18,12 +18,13 @@ def utc(value):
     return result
 
 
-def analyze(path, accepted_sequence=None, response_utc=None, *, expected_session=None):
+def analyze(path, accepted_sequence=None, response_utc=None, *, expected_session=None, expected_header=None):
     if accepted_sequence is not None and (type(accepted_sequence) is not int or accepted_sequence < 1): raise ValueError('Positive accepted Begin sequence required')
     if response_utc and accepted_sequence is None: raise ValueError('Response timing requires a known accepted Begin boundary')
     response = utc(response_utc) if response_utc else None
     digest = hashlib.sha256(); counts = {}; header = None; capture_start = None
     last = None; first = None; acknowledged = 0; complete = sealed = False
+    last_combat = None; running_frames = 0
     transitions = []; transition_count = 0; previous_state = None
     peak_unacknowledged = 0; peak_boundary = None
     with Path(path).open('rb') as source:
@@ -45,6 +46,10 @@ def analyze(path, accepted_sequence=None, response_utc=None, *, expected_session
                 if header is not None: raise ValueError('Duplicate world header')
                 header = json.loads(payload[1:]); capture_start = utc(header['captureStartedAtUtc']) if header.get('captureStartedAtUtc') else None
                 if expected_session is not None and header.get('sessionId') != expected_session: raise ValueError('Journal belongs to a different session')
+                if expected_header is not None:
+                    observed_header = {key: header.get(key) for key in expected_header}
+                    if json.dumps(observed_header, sort_keys=True) != json.dumps(expected_header, sort_keys=True):
+                        raise ValueError('Journal header differs from the expected source')
             elif tag == 1:
                 packet = json.loads(payload[1:]); frame = packet['frame']
                 if complete or last and last['phase'] == 'Ended': raise ValueError('Frame after terminal boundary')
@@ -62,7 +67,9 @@ def analyze(path, accepted_sequence=None, response_utc=None, *, expected_session
                     previous_state = state
                 if accepted_sequence is not None and first is None and row['observedSequence'] >= accepted_sequence and row['phase'] == 'Running' and row['tick'] > 0 and not row['suspended']:
                     first = row
+                if row['phase'] == 'Running' and row['tick'] > 0 and row['suspended'] is False: running_frames += 1
                 last = row
+                last_combat = packet.get('throughCombatSequence')
             elif tag in (2, 3, 4):
                 if len(payload) != 9 or last is None: raise ValueError('Invalid receipt size / boundary')
                 sequence, = struct.unpack('<q', payload[1:])
@@ -88,6 +95,7 @@ def analyze(path, accepted_sequence=None, response_utc=None, *, expected_session
         'acceptedSequence': accepted_sequence, 'applicationBoundaryKnown': accepted_sequence is not None,
         'captureStartedAtUtc': capture_start.isoformat() if capture_start else None,
         'responseObservedAtUtc': response_utc, 'firstApplied': first, 'lastFrame': last, 'acknowledgedSequence': acknowledged,
+        'lastCombatSequence': last_combat, 'runningFrames': running_frames,
         'unacknowledgedFrames': (last['worldSequence'] if last else 0) - acknowledged, 'complete': complete, 'sealed': sealed,
         'peakUnacknowledgedFrames': peak_unacknowledged, 'firstPeakBoundary': peak_boundary,
         'firstAppliedCaptureSecondsAfterResponse': (utc(first['capturedAtUtc']) - response).total_seconds() if first and first['capturedAtUtc'] and response else None,
