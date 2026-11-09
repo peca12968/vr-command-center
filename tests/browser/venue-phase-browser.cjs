@@ -37,10 +37,11 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         const players = current.players.map(player => ({ id: player.id, roomId: room, head, muzzle: head,
           connected, forward: { x: 0, y: 0, z: 1 }, health: 100, magazine: 30, reserve: 90, rig }));
         const { weather, timeOfDay, lightning } = current.environment;
+        const { behavior, autoAttack } = current.enemies;
         const visibility = ['Fog', 'Storm'].includes(weather) ? weather : 'Clear';
         const packet = { sequence: ++sequence, observedSequence: current.sequence, elapsedMilliseconds: sequence === 1 ? 0 : Date.now() - started,
           weather, lightning, throughCombatSequence: 0, events: [],
-          frame: { phase: current.state, tick: 0, night: timeOfDay === 'Night', visibility, throughSequence: 0, players } };
+          frame: { phase: current.state, tick: 0, night: timeOfDay === 'Night', visibility, behavior, autoAttack, throughSequence: 0, players } };
         assert.equal(send({ type: 'frame', payload: packet }).acceptedSequence, sequence);
       };
       publish.seal = () => assert.equal(send({ type: 'seal', finalSequence: sequence }).complete, true);
@@ -248,6 +249,47 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await roomEnvironment(1).filter({ hasText: '快照已過期' }).waitFor();
     check(await roomEnvironment(1).filter({ hasText: '全館環境待確認' }).isVisible(),
       'A room-specific override clears its marker and the other room expires independently');
+
+    const policy = { behavior: 'Patrol', autoAttack: true };
+    const enemyTargets = (await api('/venue/phase')).enemies;
+    const changeEnemies = enemies => api(`/sessions/${preparing[1]}/commands`, 'POST',
+      { commandId: randomUUID(), action: 'SetEnemies', enemies }, 'Room2');
+    await api('/venue/phase', 'POST', { action: 'SetEnemies', targets: enemyTargets, enemyPolicy: policy }, 'Room2', 403, undefined, randomUUID());
+    const unsupportedCount = await fetch(base + '/api/venue/phase', { method: 'POST',
+      headers: { Authorization: 'Bearer ' + tokens.Master, 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() },
+      body: JSON.stringify({ action: 'SetEnemies', targets: enemyTargets, enemyPolicy: { ...policy, count: 5 } }) });
+    assert.equal(unsupportedCount.status, 400);
+    await changeEnemies(changedClimate[1].enemies);
+    const staleEnemies = await api('/venue/phase', 'POST', { action: 'SetEnemies', targets: enemyTargets, enemyPolicy: policy },
+      'Master', 409, undefined, randomUUID());
+    check(staleEnemies.code === 'venue-phase-changed' && !(await api(`/sessions/${preparing[0]}`)).enemies.autoAttack,
+      'The batch enemy policy rejects a stale room preview and leaves the other room untouched');
+    await page.locator('#refresh').click();
+    await page.locator('#venue-enemies-targets').filter({ hasText: '房間 1、2' }).waitFor();
+    await page.locator('#venue-behavior').selectOption('Patrol');
+    await page.locator('#venue-auto-attack').check();
+    let enemyDialog;
+    const enemyConfirmed = page.waitForEvent('dialog').then(async dialog => { enemyDialog = dialog.message(); await dialog.accept(); });
+    const acceptedEnemies = page.waitForResponse(response => response.url().endsWith('/api/venue/phase') && response.request().method() === 'POST');
+    await page.locator('#venue-apply-enemies').click();
+    await enemyConfirmed;
+    assert.equal((await acceptedEnemies).status(), 200);
+    const changedEnemies = await Promise.all(preparing.map(id => api(`/sessions/${id}`)));
+    check(enemyDialog.includes('房間 1、2') && enemyDialog.includes('巡邏 · 自動攻擊開啟')
+      && changedEnemies.every(session => session.enemies.count === 0 && session.enemies.behavior === 'Patrol' && session.enemies.autoAttack),
+      'The console applies behavior and attack across rooms while preserving the original counts');
+    const roomEnemies = room => page.locator(`[data-room-venue-enemies="${room}"]`);
+    await roomEnemies(1).filter({ hasText: '全館敵軍策略待確認' }).waitFor();
+    await publishUntil(first, changedEnemies[0], () => {
+      second(changedEnemies[1]);
+      return Promise.all([1, 2].map(room => roomEnemies(room).filter({ hasText: '全館敵軍策略已套用' }).isVisible())).then(rows => rows.every(Boolean));
+    });
+    await page.locator('#venue-enemies').screenshot({ path: path.join(screenshots, 'venue-enemies.png') });
+    check(true, 'Enemy policy is confirmed only by both original game sources');
+    await changeEnemies({ count: 0, behavior: 'Hold', autoAttack: false });
+    await page.locator('#refresh').click();
+    await roomEnemies(2).waitFor({ state: 'hidden' });
+    check(await roomEnemies(1).isVisible(), 'The single-room enemy policy override clears only its own venue marker');
 
     const extra = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [3] }, 'Master', 201);
     active.add(extra.id);

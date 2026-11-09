@@ -44,7 +44,7 @@ public sealed partial class SessionManager
     // A lifecycle request key is global across creation and roster mutations, including archived sessions.
     private readonly Dictionary<Guid, SessionEvent> requests = [];
     private sealed record History(SessionView View, List<SessionEvent> Events, Dictionary<Guid, SessionEvent> Commands, CombatLedger Combat,
-        List<SessionView> Authority, long PhaseSinceSequence, long EnvironmentSinceSequence);
+        List<SessionView> Authority, long PhaseSinceSequence, long EnvironmentSinceSequence, long EnemiesSinceSequence);
 
     public SessionManager(ISessionEventStore? eventStore = null) : this(eventStore, TimeProvider.System) { }
 
@@ -61,6 +61,7 @@ public sealed partial class SessionManager
             var authority = new List<SessionView>();
             long phaseSince = 0;
             long environmentSince = 1;
+            long enemiesSince = 1;
             foreach (var entry in events)
             {
                 if (!ids.Add(entry.EventId)) throw new InvalidDataException("Duplicate event ID in session history.");
@@ -68,8 +69,9 @@ public sealed partial class SessionManager
                 if (command is not null && !commands.TryAdd(command.CommandId, entry))
                     throw new InvalidDataException("Duplicate command ID in session history.");
                 var next = SessionProjection.Apply(view, entry);
-                if (entry.Venue is not null) RestoreVenueEvent(events, entry, phaseSince, environmentSince, command!);
+                if (entry.Venue is not null) RestoreVenueEvent(events, entry, phaseSince, environmentSince, enemiesSince, command!);
                 if (command?.Action == ControlAction.SetEnvironment) environmentSince = entry.Sequence;
+                if (command?.Action == ControlAction.SetEnemies) enemiesSince = entry.Sequence;
                 combat.Prepare(CombatBefore(view, entry, authority), entry)();
                 phaseSince = PhaseSince(view, next, phaseSince);
                 view = next;
@@ -77,7 +79,7 @@ public sealed partial class SessionManager
                 if (entry.RequestId.HasValue && !requests.TryAdd(entry.RequestId.Value, entry))
                     throw new InvalidDataException("Duplicate lifecycle request ID in persisted histories.");
             }
-            if (view is null || !sessions.TryAdd(view.Id, new(view, [.. events], commands, combat, authority, phaseSince, environmentSince)))
+            if (view is null || !sessions.TryAdd(view.Id, new(view, [.. events], commands, combat, authority, phaseSince, environmentSince, enemiesSince)))
                 throw new InvalidDataException("Empty or duplicate session history.");
         }
         var active = Active().ToArray();
@@ -120,7 +122,8 @@ public sealed partial class SessionManager
 
     public SessionView Get(Guid id, OperatorIdentity? actor = null) => GetWithPhase(id, actor).View;
 
-    public (SessionView View, long PhaseSinceSequence, ControlAction? VenueAction, long? VenueEnvironmentSequence) GetWithPhase(Guid id, OperatorIdentity? actor = null)
+    public (SessionView View, long PhaseSinceSequence, ControlAction? VenueAction, long? VenueEnvironmentSequence, long? VenueEnemiesSequence)
+        GetWithPhase(Guid id, OperatorIdentity? actor = null)
     {
         lock (gate)
         {
@@ -129,7 +132,8 @@ public sealed partial class SessionManager
             var venue = history.Events[(int)history.PhaseSinceSequence - 1];
             return (Snapshot(history.View), history.PhaseSinceSequence,
                 venue.Venue is null ? null : venue.Read<ControlCommand>().Action,
-                history.Events[(int)history.EnvironmentSinceSequence - 1].Venue is null ? null : history.EnvironmentSinceSequence);
+                history.Events[(int)history.EnvironmentSinceSequence - 1].Venue is null ? null : history.EnvironmentSinceSequence,
+                history.Events[(int)history.EnemiesSinceSequence - 1].Venue is null ? null : history.EnemiesSinceSequence);
         }
     }
 
@@ -312,7 +316,8 @@ public sealed partial class SessionManager
         if (IsAuthority(entry)) authority.Add(view);
         sessions[entry.SessionId] = new(view, events, commands, combat, authority,
             PhaseSince(previous?.View, view, previous?.PhaseSinceSequence ?? 0),
-            command?.Action == ControlAction.SetEnvironment ? entry.Sequence : previous?.EnvironmentSinceSequence ?? 1);
+            command?.Action == ControlAction.SetEnvironment ? entry.Sequence : previous?.EnvironmentSinceSequence ?? 1,
+            command?.Action == ControlAction.SetEnemies ? entry.Sequence : previous?.EnemiesSinceSequence ?? 1);
         if (entry.RequestId.HasValue) requests.Add(entry.RequestId.Value, entry);
     }
 

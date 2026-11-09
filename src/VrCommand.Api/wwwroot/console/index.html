@@ -53,6 +53,16 @@
             <button id="venue-apply-environment" type="submit" class="secondary">套用到執行中場次</button>
           </fieldset></form>
         </section>
+        <section id="venue-enemies" class="panel" aria-labelledby="venue-enemies-title" hidden>
+          <h3 id="venue-enemies-title">全館敵軍策略</h3>
+          <p id="venue-enemies-targets" class="hint">等待執行中場次。</p>
+          <p class="hint">調整攻擊方式與自動攻擊。各場保留原有的敵軍目標數。</p>
+          <form id="venue-enemies-form"><fieldset id="venue-enemies-fields" disabled>
+            <label>攻擊方式<select id="venue-behavior"><option value="Hold">守備</option><option value="Patrol">巡邏</option><option value="Advance">推進</option></select></label>
+            <label class="check"><input id="venue-auto-attack" type="checkbox">自動攻擊</label>
+            <button id="venue-apply-enemies" type="submit" class="secondary">套用到執行中場次</button>
+          </fieldset></form>
+        </section>
         <section id="venue-closure" class="panel" aria-labelledby="venue-closure-title" hidden>
           <h3 id="venue-closure-title">最近一次全館收尾</h3>
           <p id="venue-closure-summary" class="hint" role="status"></p>
@@ -222,7 +232,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.35 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.36 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

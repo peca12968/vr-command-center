@@ -191,7 +191,7 @@ app.MapPost("/api/venue/phase", (VenuePhaseRequest request, WorldRecordings worl
     var actor = Actor(context);
     if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue phase operations require the master operator.");
     var key = RequestId(context) ?? throw new ArgumentException("Idempotency-Key is required for venue phase changes.");
-    return worlds.ExecuteVenuePhase(request.Action, request.Targets, key, actor, request.Environment);
+    return worlds.ExecuteVenuePhase(request.Action, request.Targets, key, actor, request.Environment, request.EnemyPolicy);
 });
 app.MapGet("/api/sessions/{id:guid}/statistics", (Guid id, SessionManager manager, HttpContext context) =>
     manager.Statistics(id, Actor(context)));
@@ -319,6 +319,6 @@ static Guid? AdmissionMatch(HttpContext context)
 
 record CreateSession(Guid MissionId, SessionMode Mode, int[] RoomIds);
 record CreateIndependentSet(Guid MissionId);
-record VenuePhaseRequest(ControlAction Action, VenuePhaseFence?[]? Targets, VenueClimate? Environment);
+record VenuePhaseRequest(ControlAction Action, VenuePhaseFence?[]? Targets, VenueClimate? Environment, VenueEnemyPolicy? EnemyPolicy);
 record JoinPlayer(Guid PlayerId, string Name, int RoomId, HeadsetKind Headset);
 record ValidatePlayerTicket(Guid SessionId, string Ticket, int ProtocolVersion = 0);

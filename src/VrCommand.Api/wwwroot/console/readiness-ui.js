@@ -96,16 +96,13 @@ export function roomVenuePhaseView(report, room, session, elapsed, unavailable =
   return { applied, ready, action: phase.action, sequence: phase.appliedAtSequence, text };
 }
 
-function roomVenueEnvironmentView(report, room, session, elapsed, unavailable, describe) {
-  const row = roomReadinessRow(report, room, session), environment = row?.venueEnvironment;
-  if (!environment || !Number.isSafeInteger(environment.appliedAtSequence) || environment.appliedAtSequence < 1
-    || environment.appliedAtSequence > row.sessionSequence || !['Running', 'Paused'].includes(session.state)
-    || !['Clear', 'Rain', 'Fog', 'Storm'].includes(environment.weather) || !['Day', 'Night'].includes(environment.timeOfDay)
-    || typeof environment.lightning !== 'boolean') return null;
+function roomVenueSettingView(row, setting, elapsed, unavailable, label, details) {
+  if (!Number.isSafeInteger(setting.appliedAtSequence) || setting.appliedAtSequence < 1
+    || setting.appliedAtSequence > row.sessionSequence) return null;
   const source = unavailable ? 'Unavailable' : sourceAt(row, elapsed);
-  const applied = source === 'Fresh' && Number.isSafeInteger(environment.worldSequence) && environment.worldSequence > 0;
-  const status = applied ? '全館環境已套用' : `全館環境待確認 · ${source === 'Fresh' ? '等待環境同步' : labels[source]}`;
-  return { applied, text: `${status} · ${describe(environment)}` };
+  const applied = source === 'Fresh' && Number.isSafeInteger(setting.worldSequence) && setting.worldSequence > 0;
+  const status = applied ? `${label}已套用` : `${label}待確認 · ${source === 'Fresh' ? '等待同步' : labels[source]}`;
+  return { applied, text: `${status} · ${details}` };
 }
 
 export function roomMissionTimeView(report, room, session, elapsed) {
@@ -146,7 +143,7 @@ export function roomReadinessView(report, room, session, elapsed) {
   return { source, ready: simulatedReady + trackedReady, text: `${simulatedReady + trackedReady} / ${row.registered} 姿態有效 · 合成 ${simulatedReady} · 追蹤 ${trackedReady}` };
 }
 
-export function mountRoomReadiness(getState, unauthorized, venueUpdated, describeClimate) {
+export function mountRoomReadiness(getState, unauthorized, venueUpdated, describeClimate, describeEnemies) {
   let active = false, controller, report, started = 0, attempted = -Infinity, failed = false;
   function venueReady(target, action) {
     if (!active || failed) return false;
@@ -185,11 +182,19 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
       phaseCell.hidden = !phase;
       phaseCell.textContent = phase?.text ?? '';
       phaseCell.classList.toggle('tracking-attention', !!phase && (!phase.applied || (phase.action === 'Pause' && !phase.ready)));
-      const environment = roomVenueEnvironmentView(report, room, session, elapsed, failed, describeClimate);
-      const environmentCell = cell.parentElement.querySelector('[data-room-venue-environment]');
-      environmentCell.hidden = !environment;
-      environmentCell.textContent = environment?.text ?? '';
-      environmentCell.classList.toggle('tracking-attention', !!environment && !environment.applied);
+      const row = ['Running', 'Paused'].includes(session?.state) ? roomReadinessRow(report, room, session) : null;
+      const environment = row?.venueEnvironment, enemies = row?.venueEnemies;
+      const climateView = environment && ['Clear', 'Rain', 'Fog', 'Storm'].includes(environment.weather)
+        && ['Day', 'Night'].includes(environment.timeOfDay) && typeof environment.lightning === 'boolean'
+        ? roomVenueSettingView(row, environment, elapsed, failed, '全館環境', describeClimate(environment)) : null;
+      const enemiesView = enemies && ['Hold', 'Patrol', 'Advance'].includes(enemies.behavior) && typeof enemies.autoAttack === 'boolean'
+        ? roomVenueSettingView(row, enemies, elapsed, failed, '全館敵軍策略', describeEnemies(enemies)) : null;
+      for (const [selector, setting] of [['[data-room-venue-environment]', climateView], ['[data-room-venue-enemies]', enemiesView]]) {
+        const settingCell = cell.parentElement.querySelector(selector);
+        settingCell.hidden = !setting;
+        settingCell.textContent = setting?.text ?? '';
+        settingCell.classList.toggle('tracking-attention', !!setting && !setting.applied);
+      }
     }
     venueUpdated();
   }

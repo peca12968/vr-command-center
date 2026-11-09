@@ -203,8 +203,10 @@ internal static class VenuePhaseChecks
         using (var store = new SqliteSessionEventStore(environmentData))
         {
             var manager = new SessionManager(store);
-            vrId = manager.Create(SessionMode.Independent, [1], mission, master).Id;
-            mrId = manager.Create(SessionMode.Independent, [2], mrMission, master).Id;
+            var small = mission with { Definition = mission.Definition with { Enemies = mission.Definition.Enemies with { Count = 1 } } };
+            var larger = mrMission with { Definition = mrMission.Definition with { Enemies = mrMission.Definition.Enemies with { Count = 2 } } };
+            vrId = manager.Create(SessionMode.Independent, [1], small, master).Id;
+            mrId = manager.Create(SessionMode.Independent, [2], larger, master).Id;
             manager.Create(SessionMode.Independent, [3], mission, master);
             manager.Join(vrId, Guid.NewGuid(), "VR seat", 1, HeadsetKind.Quest3, master);
             manager.Join(mrId, Guid.NewGuid(), "MR seat", 2, HeadsetKind.Quest3, master);
@@ -234,6 +236,10 @@ internal static class VenuePhaseChecks
                 climate: storm with { Weather = Weather.Rain }), "A climate request ID cannot change the selected weather");
             manager.Execute(mrId, new(Guid.NewGuid(), ControlAction.SetEnvironment, mrView.Environment with { Lightning = false }), room2);
         }
+        var enemyKey = Guid.NewGuid();
+        var policy = new VenueEnemyPolicy(EnemyBehavior.Patrol, true);
+        VenuePhaseFence[] enemyTargets;
+        VenuePhaseApplied[] changedEnemies;
         using (var store = new SqliteSessionEventStore(environmentData))
         {
             var manager = new SessionManager(store);
@@ -241,6 +247,35 @@ internal static class VenuePhaseChecks
             check(retry.Duplicate && retry.Sessions.SequenceEqual(changed) && manager.GetWithPhase(vrId).VenueEnvironmentSequence
                 == changed.Single(row => row.SessionId == vrId).AppliedAtSequence && manager.GetWithPhase(mrId).VenueEnvironmentSequence is null
                 && !manager.Get(mrId).Environment.Lightning, "Climate receipt survives restart and leaves a later room override intact");
+
+            VenuePhaseFence[] EnemyFences() => manager.ReadVenuePhase(master).Enemies.Select(target =>
+                new VenuePhaseFence(target.SessionId, target.PhaseSinceSequence, EnemiesSinceSequence: target.EnemiesSinceSequence)).ToArray();
+            var stale = EnemyFences();
+            var current = manager.Get(mrId);
+            manager.Execute(mrId, new(Guid.NewGuid(), ControlAction.SetEnemies, Enemies: current.Enemies), room2);
+            Reject<VenuePhaseChangedException>(() => manager.ExecuteVenuePhase(ControlAction.SetEnemies, stale, enemyKey, master, enemyPolicy: policy),
+                "An intervening enemy command rejects the entire strategy preview");
+            enemyTargets = EnemyFences();
+            Reject<ArgumentException>(() => manager.ExecuteVenuePhase(ControlAction.SetEnemies, enemyTargets, enemyKey, master,
+                enemyPolicy: policy with { AutoAttack = null }), "Batch enemy policy requires an explicit attack setting");
+            manager.Execute(mrId, new(Guid.NewGuid(), ControlAction.SetEnvironment, current.Environment), room2);
+            changedEnemies = manager.ExecuteVenuePhase(ControlAction.SetEnemies, enemyTargets, enemyKey, master, enemyPolicy: policy).Sessions;
+            check(changedEnemies.Length == 2 && manager.Get(vrId).Enemies == new EnemySettings(1, EnemyBehavior.Patrol, true)
+                && manager.Get(mrId).Enemies == new EnemySettings(2, EnemyBehavior.Patrol, true)
+                && manager.GetWithPhase(vrId).VenueEnvironmentSequence is not null,
+                "Enemy policy preserves different counts and can commit across a separate climate update");
+            Reject<InvalidOperationException>(() => manager.ExecuteVenuePhase(ControlAction.SetEnemies, enemyTargets, enemyKey, master,
+                enemyPolicy: policy with { AutoAttack = false }), "The enemy policy key cannot be reused with a different attack setting");
+            manager.Execute(mrId, new(Guid.NewGuid(), ControlAction.SetEnemies, Enemies: new(2, EnemyBehavior.Hold, false)), room2);
+        }
+        using (var store = new SqliteSessionEventStore(environmentData))
+        {
+            var manager = new SessionManager(store);
+            var retry = manager.ExecuteVenuePhase(ControlAction.SetEnemies, enemyTargets, enemyKey, master, enemyPolicy: policy);
+            check(retry.Duplicate && retry.Sessions.SequenceEqual(changedEnemies)
+                && manager.GetWithPhase(vrId).VenueEnemiesSequence == changedEnemies.Single(row => row.SessionId == vrId).AppliedAtSequence
+                && manager.GetWithPhase(mrId).VenueEnemiesSequence is null && manager.Get(mrId).Enemies == new EnemySettings(2, EnemyBehavior.Hold, false),
+                "Restart preserves the enemy policy receipt and the later room override");
         }
     }
 }

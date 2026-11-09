@@ -62,6 +62,7 @@ def main():
     p.add_argument('--check-venue-begin', action='store_true', help='Start both native topologies with one witnessed Begin per topology')
     p.add_argument('--check-venue-end', action='store_true', help='End each native topology in one batch and read its original archives')
     p.add_argument('--check-venue-environment', action='store_true', help='Confirm two batch environment changes in each native topology')
+    p.add_argument('--check-venue-enemies', action='store_true', help='Use venue enemy policy to enable and stop native attacks')
     p.add_argument('--check-layout-preview',action='store_true',help='Load a saved barricade opening and compare its preview with native world geometry')
     p.add_argument('--check-room-reports',action='store_true',help='Verify scoped Linked CSVs and the ZIP against the full sealed native report')
     p.add_argument('--check-room-combat',action='store_true',help='Require actual enemy damage on every original admission and reconcile each replay frame and final report')
@@ -89,6 +90,8 @@ def main():
         p.error('--check-venue-end requires the three-package check and its own End path')
     if args.check_venue_environment and not args.player_package:
         p.error('--check-venue-environment requires the three-package check')
+    if args.check_venue_enemies and not args.check_room_combat:
+        p.error('--check-venue-enemies requires --check-room-combat')
     if args.check_room_reports and not args.player_package:p.error('--check-room-reports requires the three-package check')
     if args.check_room_combat and not args.check_room_reports:p.error('--check-room-combat requires --check-room-reports')
     if args.check_hardware_feedback and not args.check_room_combat:p.error('--check-hardware-feedback requires --check-room-combat')
@@ -423,11 +426,51 @@ def main():
                   and response['session']['enemies']['autoAttack'] is enabled,entry['label']+' original AI '+('enable' if enabled else 'disable')+' accepted')
             return response['appliedAtSequence']
 
+        venue_changes = []
+        def venue_attack(behavior, enabled):
+            route = '/api/venue/phase'
+            expected = {entry['sessionId']: entry['combatEnemyCount'] for entry in entries}
+            preview = request(route)['enemies']
+            targets = [{field: row[field] for field in ('sessionId', 'phaseSinceSequence', 'enemiesSinceSequence')} for row in preview]
+            check({row['sessionId'] for row in targets} == set(expected)
+                  and sorted(room for row in preview for room in row['roomIds']) == list(range(1, 6)),
+                  'native enemy policy preview covers the original five rooms')
+            policy = {'behavior': behavior, 'autoAttack': enabled}
+            key = str(uuid.uuid4())
+            body = {'action': 'SetEnemies', 'targets': targets, 'enemyPolicy': policy}
+            receipt = request(route, body, request_id=key)
+            applied = {row['sessionId']: row['appliedAtSequence'] for row in receipt['sessions']}
+            def confirmed():
+                rows = request('/api/rooms/readiness')['rooms']
+                if len(rows) == 5 and all((status := row.get('venueEnemies')) and status['worldSequence']
+                    and status['appliedAtSequence'] == applied.get(row['sessionId'])
+                    and all(status[field] == value for field, value in policy.items()) for row in rows):
+                    return rows
+            observed = wait(confirmed, 20, f'{behavior} native enemy policy confirmations')
+            check(not receipt['duplicate'] and receipt['requestId'] == key and set(applied) == set(expected)
+                  and all(request('/api/sessions/'+sid)['enemies'] == {'count': count, **policy} for sid, count in expected.items()),
+                  f'native {behavior} enemy policy confirms all sources and preserves their original targets')
+            venue_changes.append({'policy': policy, 'receipt': receipt, 'rooms': observed})
+            return applied
+
+        def stopped_attack(entry, owners, enabled, live, entry_feeds, disabled, behavior):
+            def stopped():
+                value=observe(entry,owners,disabled,record=False)
+                return value if value and not value['packet']['frame']['autoAttack'] and value['packet']['frame']['behavior']==behavior else None
+            quiet=wait(stopped,12,entry['label']+' original source disables attack')
+            entry['combatWindow']={'owners':owners,'enabledSequence':enabled,'disabledSequence':disabled,
+                'allDamaged':live,'disabled':quiet}
+            save(entry['label']+'-combat-window.json',entry['combatWindow'])
+            check(True,entry['label']+' live damage to every original player and observed attack disabled')
+            if entry_feeds:entry['hardwareFeedback']=entry_feeds
+
+        started = venue_attack('Hold', True) if args.check_venue_enemies else None
         windows=[]
         for entry in entries:
             owners={c['player']['id']:c['player']['roomId'] for c in clients if c['sessionId']==entry['sessionId']}
-            enabled=attack(entry,True)
+            enabled=started[entry['sessionId']] if started is not None else attack(entry,True)
             windows.append((entry,owners,enabled))
+        observations = []
         for entry,owners,enabled in windows:
             entry_feeds=[feed for feed in feeds.values() if feed['session']==entry['sessionId']]
             def damaged():
@@ -440,16 +483,16 @@ def main():
                 if complete and value and value['packet']['frame']['autoAttack'] and {p['playerId'] for p in value['statistics'] if p['damageTaken']>0}==set(owners):
                     return value
             live=wait(damaged,35,entry['label']+' damage to every original admission')
-            disabled=attack(entry,False)
-            def stopped():
-                value=observe(entry,owners,disabled,record=False)
-                return value if value and not value['packet']['frame']['autoAttack'] else None
-            quiet=wait(stopped,12,entry['label']+' original source disables attack')
-            entry['combatWindow']={'owners':owners,'enabledSequence':enabled,'disabledSequence':disabled,
-                'allDamaged':live,'disabled':quiet}
-            save(entry['label']+'-combat-window.json',entry['combatWindow'])
-            check(True,entry['label']+' live damage to every original player and observed attack disabled')
-            if entry_feeds:entry['hardwareFeedback']=entry_feeds
+            if args.check_venue_enemies:
+                observations.append((entry, owners, enabled, live, entry_feeds))
+            else:
+                stopped_attack(entry, owners, enabled, live, entry_feeds, attack(entry,False), 'Hold')
+        if args.check_venue_enemies:
+            disabled = venue_attack('Advance', False)
+            for entry, owners, enabled, live, entry_feeds in observations:
+                stopped_attack(entry, owners, enabled, live, entry_feeds, disabled[entry['sessionId']], 'Advance')
+            mode = 'linked' if len(entries) == 1 else 'independent'
+            save(mode+'-venue-enemies.json', venue_changes)
     def finish(entry):
         entry['process'].wait(timeout=80);w=entry['witness'];w.wait();w.close();entry['witness']=None
         report=read(entry['reportPath']);check(entry['process'].returncode==0 and report['complete'] and report['cleanupCompleted'] and report['childExited'] and report['playerResultsAcknowledged'] is None,entry['label']+' dual seal / retained36 / original process terminal')
@@ -885,10 +928,10 @@ def main():
             if args.check_room_readiness:verify_room_readiness(round_clients,linked)
             if args.check_room_clocks:verify_room_clocks(entries,linked)
             if args.check_venue_environment:verify_venue_environment(entries,linked)
-            if args.check_venue_phase:verify_venue_phase(entries,linked)
             if args.check_room_combat:
                 stage('running-native-ai-combat',mode='Linked' if linked else 'Independent')
                 exercise_room_combat(entries,round_clients)
+            if args.check_venue_phase:verify_venue_phase(entries,linked)
             if args.check_venue_end:
                 route = '/api/venue/phase'
                 preview = request(route)['end']
@@ -1052,6 +1095,7 @@ def main():
             'venueBegin':args.check_venue_begin,
             'venueEnd':args.check_venue_end,
             'venueEnvironment':args.check_venue_environment,
+            'venueEnemies':args.check_venue_enemies,
             'hardwareFeedback':args.check_hardware_feedback,
             'hardwareMockPackage':hardware_manifest['toolVersion'] if args.hardware_simulator_package else None,
             'preparedIndependentSet':args.prepare_independent_set,
