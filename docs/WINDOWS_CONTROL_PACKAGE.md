@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-09 `windows-control-0.31.42-win-x64.zip` 加入 VR 五房原始連線檔的線上驗票與端點核對，供 Quest 部署工具使用。ZIP 為 52,691,458 bytes，SHA-256 `c0221ebcae33a688d630f1b495fe984f3013144983ba01f3fa0a5a4fd42cfdb4`。解壓核對 522 個清單檔案，含 502 個執行環境檔案，通過 106 項管理包及 20 項 Chromium 專項。 [部署操作](QUEST3.md#直接使用-vr-五房連線-zip)
+
 2026-11-09 `windows-control-0.31.41-win-x64.zip` 加入 VR 五房配票。ZIP 為 52,685,935 bytes，SHA-256 `e0271a060aaf2574779edcf64fea82673fb3ef9c92d4c9eb51b352b135549198`。解壓核對 522 個清單檔案，含 502 個執行環境檔案，通過 106 項管理包及 16 項 Chromium 專項。 [操作方式](EXTERNAL_CLIENTS.md#vr-五房配票)
 
 2026-11-09 `windows-control-0.31.40-win-x64.zip` 加入全館收尾的批次場館驗收 ZIP。ZIP 為 52,669,871 bytes，SHA-256 `0dd5f090842866875de22dc0e2c9b2700976ae7d3e0534789305b6e38c0b9c7e`。解壓核對 519 個清單檔案，含 499 個執行環境檔案，通過 106 項管理包及 54 項 Chromium 專項。 [操作方式](SESSION_CLOSURE.md#下載本批場館驗收)

@@ -181,6 +181,28 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connect
 
 正式部署會先執行相同檢查，再把當次核對的校正檔內容複製到頭盔。玩家設定記錄該份內容的 SHA-256。頭盔讀入時核對檔案、房間和標記，再以當次 OpenXR 追蹤重新量測。量測、回到出生位與原點失效的流程見 [場地配置](LAYOUT.md#quest-3-場地對位)。ADB 實機安裝、頭盔取樣與 MR 透視列入設備驗收。
 
+### 直接使用 VR 五房連線 ZIP
+
+管理包 0.31.42 可核對從「VR 五房配票」下載的原始 `vr-venue-connections.zip`。部署工具讀取 ZIP 裡的 25 份原連線檔，核對房間、席位、場次、端點及本機效期。先在 PowerShell 7 離線預檢，或用 `-RoomId`、`-Seat` 查看指定席位。
+
+```powershell
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip -RoomId 4 -Seat 2 -CheckOnly
+```
+
+正式寫入 VR 設定前須提供 `-ManagementApi` 與主控環境變數 `VR_COMMAND_MASTER_KEY`。工具把原檔送給管理服務，逐席驗簽並核對現行名冊及公告端點。指定單席時，該席須登記為 Quest 3。整批部署時，25 席均須登記為 Quest 3，並對上各自已授權且已安裝指定 APK 版本的裝置。混合 VIVE 與 Quest 的名冊可依席位選擇要部署的 Quest。
+
+```powershell
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
+  -RoomId 4 -Seat 2 -Serial YOUR_ADB_SERIAL -ManagementApi http://127.0.0.1:5080
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
+  -DeviceMap .\quest-devices.json -ExpectedVersionCode 61 -ManagementApi http://127.0.0.1:5080 -CheckOnly
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
+  -DeviceMap .\quest-devices.json -ExpectedVersionCode 61 -ManagementApi http://127.0.0.1:5080 -DeployMappedSeats
+```
+
+裝置清單格式與 MR 相同。整批 VR 部署把各席的四欄連線設定寫到對應裝置並請求啟動，現場頭盔的入場與追蹤仍須另外觀察。連線檔與主控金鑰請私下保管。 [VR 五房配票](EXTERNAL_CLIENTS.md#vr-五房配票) · [裝置清單格式](#用裝置清單部署-25-席)
+
 ### 五房 25 席部署預檢
 
 #### 從主控台下載五房部署包
