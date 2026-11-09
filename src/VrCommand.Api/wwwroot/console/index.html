@@ -259,6 +259,11 @@
             <div class="button-row"><button id="world-frame-back" class="quiet" disabled>上一格</button><button id="world-frame-next" class="quiet" disabled>下一格</button><button id="world-frame-extend" class="quiet" hidden disabled>接續新保存片段</button></div>
             <p class="hint">暫停回放後可逐格檢視。每列是此快照保存的一筆事件。</p>
             <p id="world-frame-message" class="hint" role="status"></p>
+            <fieldset id="world-clip" class="camera-positions">
+              <legend>指定回放片段</legend>
+              <div class="button-row"><button id="world-clip-start" type="button" class="quiet" disabled>將此格標為起點</button><button id="world-clip-end" type="button" class="quiet" disabled>將此格標為終點</button><button id="world-clip-play" type="button" class="quiet" disabled>播放指定片段</button><button id="world-clip-clear" type="button" class="quiet" disabled>清除標記</button></div>
+              <p id="world-clip-status" class="hint" role="status"></p>
+            </fieldset>
             <p id="world-no-events" class="hint">此格沒有符合篩選的戰鬥事件。</p>
             <div id="world-event-table" class="table-scroll" hidden><table><caption class="sr-only">此格戰鬥事件</caption><thead><tr><th>事件</th><th>類型</th><th>玩家</th><th>敵軍</th><th>玩家耗損</th></tr></thead><tbody id="world-events"></tbody></table></div>
             <fieldset class="camera-positions">
@@ -301,7 +306,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.58 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.59 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

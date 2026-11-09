@@ -325,6 +325,10 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await page.locator('#world-replay').click();
     await savedStart;
     const waitSavedEnd = () => page.waitForFunction(() => document.querySelector('#world-freshness').textContent === '已到已保存片段尾端', null, { polling: 100 });
+    const waitFrame = sequence => page.waitForFunction(value => Number(document.querySelector('#world-canvas').dataset.sequence) === value, sequence, { polling: 50 });
+    const clipStart = page.locator('#world-clip-start'), clipEnd = page.locator('#world-clip-end'), clipPlay = page.locator('#world-clip-play');
+    const clipStatus = page.locator('#world-clip-status');
+    const waitClipEnd = () => clipStatus.filter({ hasText: '已到片段終點' }).waitFor();
     await waitSavedEnd();
     check((await page.locator('#world-status').innerText()).includes('錄製未封存') && Number(await canvas.getAttribute('data-sequence')) === interrupted.acceptedSequence &&
       await page.locator('#world-frame-next').isDisabled(), 'Saved replay stops at the real interrupted tail and keeps the archive unsealed');
@@ -347,6 +351,18 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await page.waitForFunction(() => document.querySelector('#world-frame-message').textContent === '目前沒有新的保存快照。');
     check(Number(await canvas.getAttribute('data-sequence')) === interrupted.acceptedSequence
       && await page.locator('#world-frame-extend').isEnabled(), 'Checking an unchanged saved tail retains the paused frame and permits another check');
+    await page.locator('#world-frame-back').click(); await waitFrame(interrupted.acceptedSequence - 1);
+    await page.locator('#world-frame-back').click(); await waitFrame(interrupted.acceptedSequence - 2);
+    await clipStart.click();
+    check(await clipEnd.isDisabled() && await clipPlay.isDisabled(), 'A saved replay interval needs an end after its start');
+    await page.locator('#world-frame-next').click(); await waitFrame(interrupted.acceptedSequence - 1);
+    await clipEnd.click(); await clipPlay.click(); await waitClipEnd();
+    check(Number(await canvas.getAttribute('data-sequence')) === interrupted.acceptedSequence - 1
+      && (await page.locator('#world-status').innerText()).includes(`已保存片段至第 ${interrupted.acceptedSequence} 格`)
+      && await page.locator('#world-frame-next').isEnabled(),
+      'A marked interval stops before the unsealed boundary without replacing the original fixed tail');
+    await page.locator('#world-frame-next').click(); await waitFrame(interrupted.acceptedSequence);
+    check(await page.locator('#world-frame-extend').isEnabled(), 'Review can still reach and extend the original saved tail after interval playback');
     const completeSource = demo('complete-world', 1), result = await completeSource.finished;
     check(result.code === 0, 'Native simulation produces a second complete persisted world: ' + result.error.slice(-300));
     const completed = JSON.parse(result.output);
@@ -371,6 +387,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await page.waitForFunction(() => document.querySelector('#world-status').textContent.includes('已結束'));
     const back = page.locator('#world-frame-back'), next = page.locator('#world-frame-next');
     await page.waitForFunction(() => !document.querySelector('#world-frame-back').disabled);
+    check(await clipPlay.isDisabled() && !(await clipStatus.innerText()).includes('起點 第'), 'Changing recordings clears the previous interval markers');
     check(await next.isDisabled() && Number(await canvas.getAttribute('data-sequence')) === finalFrame,
       'Paused review stays at the final saved frame and disables advancing beyond it');
     check(!await page.locator('#world-frame-extend').isVisible(), 'The sealed replay does not offer to check for another saved tail');
@@ -421,6 +438,54 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       && query.get('throughFrame') === String(finalFrame) && Number(await canvas.getAttribute('data-sequence')) === eventSequence,
       'Previous event preserves the room and event kind and jumps to the original saved frame');
     await page.screenshot({ path: path.join(screenshots, 'world-event-neighbor.png'), fullPage: true });
+    await clipStart.click();
+    for (let sequence = eventSequence + 1; sequence <= finalFrame - 1; sequence++) {
+      await next.click(); await waitFrame(sequence);
+    }
+    const clipTail = finalFrame - 1;
+    await clipEnd.click();
+    const clipWatch = (start, rate) => page.waitForRequest(request => {
+      const query = new URL(request.url()).searchParams;
+      return query.get('fromFrame') === String(start) && query.get('throughFrame') === String(clipTail) && query.get('rate') === rate;
+    });
+    await page.evaluate(() => {
+      document.querySelector('#world-clip-play').click();
+      document.querySelector('#world-pause').click();
+    });
+    check(Number(await canvas.getAttribute('data-sequence')) === clipTail && (await clipStatus.innerText()).includes('片段已暫停'),
+      'Pausing before the first streamed frame keeps the visible frame and the requested interval start');
+    await page.locator('#world-speed').selectOption('0.5');
+    const startedClip = clipWatch(eventSequence, '0.5');
+    await page.locator('#world-pause').click(); await startedClip;
+    await waitFrame(eventSequence);
+    await page.locator('#world-pause').click();
+    await clipStatus.filter({ hasText: '片段已暫停' }).waitFor();
+    const pausedClip = Number(await canvas.getAttribute('data-sequence'));
+    check(pausedClip >= eventSequence && pausedClip < clipTail && await clipPlay.isEnabled(), 'Pausing an interval holds a frame inside its original range');
+    await page.locator('#world-speed').selectOption('4');
+    check(Number(await canvas.getAttribute('data-sequence')) === pausedClip, 'Changing speed while paused keeps the original frame');
+    const resumedClip = clipWatch(pausedClip, '4');
+    await page.locator('#world-pause').click(); await resumedClip; await waitClipEnd();
+    check(Number(await canvas.getAttribute('data-sequence')) === clipTail && await next.isEnabled()
+      && (await page.locator('#world-status').innerText()).includes('錄製已核對封存') && await page.locator('#world-room').inputValue() === '2',
+      'Interval ends at the exact frame while preserving the full sealed archive, selected room and access to later frames');
+    await page.screenshot({ path: path.join(screenshots, 'world-replay-interval.png'), fullPage: true });
+    await page.route('**/world/watch?**', async route => {
+      const original = await route.fetch();
+      const body = (await original.text()).split('event: saved-end\n')[0];
+      await route.fulfill({ response: original, body });
+    }, { times: 1 });
+    await clipPlay.click();
+    await page.waitForFunction(() => document.querySelector('#world-message').textContent.includes('尚未讀到已保存片段尾端'), null, { polling: 100 });
+    check(!(await clipStatus.innerText()).includes('已到片段終點') && await clipPlay.isEnabled(),
+      'A stream missing the terminal acknowledgement does not mark the interval finished and remains retryable');
+    const repeatedClip = clipWatch(eventSequence, '4');
+    await clipPlay.click(); await repeatedClip; await waitClipEnd();
+    check(Number(await canvas.getAttribute('data-sequence')) === clipTail, 'Retrying the interval repeats from the original start and finishes at the original end');
+    await page.locator('#world-clip-clear').click();
+    check(await clipPlay.isDisabled() && Number(await canvas.getAttribute('data-sequence')) === clipTail, 'Clearing interval markers leaves the current saved frame visible');
+    await previousEvent.click();
+    await eventStatus.filter({ hasText: `已跳到第 ${eventSequence} 格` }).waitFor();
     await page.locator('#world-event-kind').selectOption('ReloadCompleted');
     check(await page.locator('#world-event-search-results button').count() === 0 && await page.locator('#world-no-events').isVisible(),
       'Changing the kind clears obsolete search results and refreshes the paused frame');
