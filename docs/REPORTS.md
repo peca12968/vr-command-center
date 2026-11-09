@@ -24,6 +24,14 @@ API／控制台 **0.27.0** 新增 `GET /api/sessions/{id}/report.csv`。在「�
 
 玩家開火可另用 [五房射擊驗證](DESKTOP_EXERCISE.md#五房射擊與戰績驗證)，逐筆核對彈藥、命中、擊殺與命中率，並比對連線場次的六份 CSV。
 
+## 下載全館結束批次
+
+Windows 管理包 0.31.37 起，主控可在「最近一次全館收尾」按「下載本批戰績 ZIP」。批次內所有場次的戰鬥報表可匯出後，按鈕才會開放。等待時會顯示房號。未連接戰鬥串流的已結束場次可按既有規則匯出，空場保留場次列。
+
+獨立場次每房一份 CSV。五房合併場次包含全場與五份分房 CSV。每份 CSV 與原端點逐一下載的內容相同。ZIP 另含 `manifest.json`，記錄批次 ID、原場次 ID、房號、結束命令序號、最終統計序號與 CSV 檔名。世界回放有獨立封存流程。
+
+`GET /api/venue/closure/{batchId}/reports.zip` 限主控，回傳 `vr-command-venue-reports-v1-{batchId}.zip` 與 `Cache-Control: no-store`。若任一場的戰鬥報表尚未完成，回傳 `409`、`venue-reports-not-ready` 與待封存房號。即使房間重用或已有新批次，原批次網址仍指向原場次和報表。
+
 ## 最終性與權限
 
 SessionManager 在同一把鎖內檢查身分／房間、Ended 與戰鬥封存，再擷取場次及 ledger。已綁 combat stream 必須接受精確 seal，只有 End 不足以匯出；尾端補送完成但尚未 seal 仍回 409。未綁 stream 的歷史場次 End 後不能接受新戰鬥，故可匯出。報表不新增事件、不更動歷史，也不寫入伺服器的匯出檔案。
