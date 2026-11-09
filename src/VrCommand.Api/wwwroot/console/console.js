@@ -231,7 +231,9 @@ function renderRooms() {
     if (room.sessionId) {
       const status = element('p', '正在更新入場狀態', 'hint room-readiness');
       status.dataset.roomReadiness = room.id;
-      card.append(status);
+      const clock = element('p', '活動時間未確認', 'hint room-clock');
+      clock.dataset.roomClock = room.id;
+      card.append(status, clock);
     }
     const button = element('button', room.sessionId ? '查看場次' : '選擇此房間', 'quiet small');
     button.type = 'button'; button.disabled = state.busy || !!state.pending;

@@ -57,6 +57,7 @@ def main():
     p.add_argument('--peer-diagnostics',action='store_true',help='Verify observed UDP peers in Linked and absence in default Independent runs')
     p.add_argument('--field-evidence',action='store_true',help='Verify the management ZIP with the original Linked player and server logs')
     p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
+    p.add_argument('--check-room-clocks', action='store_true', help='Verify room clocks and the original pause/resume boundaries in both modes')
     p.add_argument('--check-layout-preview',action='store_true',help='Load a saved barricade opening and compare its preview with native world geometry')
     p.add_argument('--check-room-reports',action='store_true',help='Verify scoped Linked CSVs and the ZIP against the full sealed native report')
     p.add_argument('--check-room-combat',action='store_true',help='Require actual enemy damage on every original admission and reconcile each replay frame and final report')
@@ -77,6 +78,7 @@ def main():
     if args.peer_diagnostics and not args.player_package:p.error('--peer-diagnostics requires the three-package check')
     if args.field_evidence and not args.peer_diagnostics:p.error('--field-evidence requires --peer-diagnostics')
     if args.check_room_readiness and not args.player_package:p.error('--check-room-readiness requires five players per room')
+    if args.check_room_clocks and not args.player_package:p.error('--check-room-clocks requires five players per room')
     if args.check_room_reports and not args.player_package:p.error('--check-room-reports requires the three-package check')
     if args.check_room_combat and not args.check_room_reports:p.error('--check-room-combat requires --check-room-reports')
     if args.check_hardware_feedback and not args.check_room_combat:p.error('--check-hardware-feedback requires --check-room-combat')
@@ -560,6 +562,38 @@ def main():
         room=request('/api/rooms/readiness',role='Room1')
         check(room['version']==1 and len(room['rooms'])==1 and room['rooms'][0]['roomId']==1
             and room['rooms'][0]['sessionId']==expected[1],'room operator only receives its own active room aggregate')
+    def verify_room_clocks(entries, linked):
+        mode = 'linked' if linked else 'independent'
+        expected = {room: entries[0 if linked else room-1]['sessionId'] for room in range(1, 6)}
+        def snapshot(phase, after=None, minimum=None):
+            response = request('/api/rooms/readiness')
+            rows = response['rooms']
+            if [(row['roomId'], row['sessionId']) for row in rows] != list(expected.items()): return None
+            for row in rows:
+                room = row['roomId']; clock = row.get('clock')
+                if not clock or row['sourceState'] != 'Fresh' or clock['phase'] != (phase if linked or room == 1 else 'Running') \
+                    or clock['durationSeconds'] != 600 or clock['remainingSeconds'] != max(0, 600-clock['elapsedSeconds']) \
+                    or clock['autoEnd'] != (linked or room == 1): return None
+                if after and (linked or room == 1) and row['sessionSequence'] < after: return None
+            if linked and any(row['clock'] != rows[0]['clock'] for row in rows): return None
+            if minimum and rows[minimum[0]-1]['clock']['elapsedSeconds'] <= minimum[1]: return None
+            return rows
+        running = wait(lambda: snapshot('Running'), 15, mode+' five native room clocks')
+        check(True, mode+' original active clocks publish per-room policy and one identical value for a linked source')
+        own = request('/api/rooms/readiness', role='Room2')['rooms']
+        check(len(own) == 1 and own[0]['roomId'] == 2 and own[0]['sessionId'] == expected[2], mode+' Room2 receives only its scoped clock row')
+        pause = command(expected[1], 'Pause')['appliedAtSequence']
+        first = wait(lambda: snapshot('Paused', pause), 15, mode+' accepted native paused clock')
+        if linked:
+            time.sleep(1.1)
+            frozen = wait(lambda: snapshot('Paused', pause), 15, mode+' linked clock remains paused')
+        else:
+            frozen = wait(lambda: snapshot('Paused', pause, (2, first[1]['clock']['elapsedSeconds'])), 15, 'another independent room advances')
+        check(frozen[0]['clock'] == first[0]['clock'], mode+' original pause retains exactly the accepted activity time')
+        resume = command(expected[1], 'Resume')['appliedAtSequence']
+        resumed = wait(lambda: snapshot('Running', resume, (1, first[0]['clock']['elapsedSeconds'])), 15, mode+' resume advances original clock')
+        check(True, mode+' accepts a new running clock after the original Resume')
+        save(mode+'-room-clocks.json', {'running':running, 'paused':first, 'frozen':frozen, 'resumed':resumed})
     def check_mr_venue_bundle():
         pwsh = shutil.which('pwsh')
         if not pwsh: raise RuntimeError('PowerShell is required for Quest venue preflight')
@@ -688,6 +722,8 @@ def main():
                 enemy_count=5*len(rooms) if args.check_room_combat else 1
                 state=batch[rooms[0]-1] if batch is not None else create(rooms,'linked' if linked else 'independent',enemy_count=enemy_count)
                 entry=launch(state,('linked' if linked else 'room-'+str(rooms[0])));entries.append(entry)
+                if args.check_room_clocks and (linked or rooms == [1]):
+                    request('/api/sessions/'+state['id']+'/commands', {'commandId':str(uuid.uuid4()),'action':'SetMissionClock','missionClock':{'autoEnd':True}})
                 entry['combatEnemyCount']=enemy_count
                 if not linked and rooms==[1]:rejected('bound-preparing',config(state['id']))
                 for room in rooms:
@@ -720,6 +756,7 @@ def main():
                     c['process'].poll() is None and c['witness'].kernel.WaitForSingleObject(c['witness'].handle,0)==258
                     for c in round_clients),'25 simultaneous owned native players '+('Linked' if linked else 'Independent'))
             if args.check_room_readiness:verify_room_readiness(round_clients,linked)
+            if args.check_room_clocks:verify_room_clocks(entries,linked)
             if args.check_room_combat:
                 stage('running-native-ai-combat',mode='Linked' if linked else 'Independent')
                 exercise_room_combat(entries,round_clients)
@@ -852,6 +889,7 @@ def main():
             if player_folder else 'Two portable packages, five Independent rooms then Linked, five same-PC Simulation clients per topology.'),
             'managedMrPreparing':args.check_managed_mr,
             'roomCombat':args.check_room_combat,
+            'roomClocks':args.check_room_clocks,
             'hardwareFeedback':args.check_hardware_feedback,
             'hardwareMockPackage':hardware_manifest['toolVersion'] if args.hardware_simulator_package else None,
             'preparedIndependentSet':args.prepare_independent_set,

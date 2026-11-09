@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 const code = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/readiness-ui.js', import.meta.url), 'utf8');
-const { readinessView, roomReadinessView, mrReadinessView } = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
+const missionClock = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/mission-clock.js', import.meta.url), 'utf8');
+const dataModule = source => 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
+const { readinessView, roomReadinessView, mrReadinessView, roomMissionTimeView } = await import(dataModule(code.replace('./mission-clock.js', dataModule(missionClock))));
 const player = { id: 'player', admissionId: 'first', roomId: 1, seat: 0 };
 const session = { id: 'session', sequence: 10, state: 'Preparing', players: [player] };
 const report = { version: 1, sessionId: 'session', sessionSequence: 10, sourceState: 'Fresh', sourceAgeMilliseconds: 10, origin: 'Simulation',
@@ -34,6 +36,25 @@ const room = { id: 1, sessionId: 'session', playerCount: 3, capacity: 5 };
 const roomRow = { roomId: 1, sessionId: 'session', sessionSequence: 10, registered: 3, sourceState: 'Fresh',
   sourceAgeMilliseconds: 10, simulatedReady: 1, trackedReady: 1 };
 const overview = { version: 1, rooms: [roomRow] };
+const timed = { ...session, state: 'Running', combatStream: { missionClockVersion: 1 }, mission: { definition: { durationSeconds: 60 } },
+  missionClock: { version: 1, autoEnd: true } };
+const timer = { phase: 'Running', elapsedSeconds: 20, remainingSeconds: 40, durationSeconds: 60, autoEnd: true };
+const timeReport = (clock, fields = {}) => ({ ...overview, rooms: [{ ...roomRow, clock, ...fields }] });
+test('Room countdown freezes on accepted seconds and respects manual, paused and due modes', () => {
+  assert.deepEqual(roomMissionTimeView(timeReport(timer), room, timed, 1490), { state: 'Running', text: '剩餘 00:40 · 自動結束' });
+  assert.equal(roomMissionTimeView(timeReport({ ...timer, phase: 'Paused' }), room, { ...timed, state: 'Paused' }, 0).text, '暫停 · 剩餘 00:40 · 自動結束');
+  assert.equal(roomMissionTimeView(timeReport({ ...timer, autoEnd: false }), room, { ...timed, missionClock: null }, 0).text, '活動 00:20 / 01:00');
+  assert.equal(roomMissionTimeView(timeReport({ ...timer, elapsedSeconds: 60, remainingSeconds: 0 }), room, timed, 0).state, 'Due');
+  assert.equal(roomMissionTimeView(null, room, { ...timed, state: 'Preparing' }, 0).text, '尚未開始 · 計畫 01:00');
+  assert.equal(roomMissionTimeView(null, room, { ...timed, combatStream: { missionClockVersion: 0 } }, 0).state, 'Unsupported');
+});
+test('Room time clears for stale responses, mismatched phase, policy or session and invalid seconds', () => {
+  assert.equal(roomMissionTimeView(timeReport(timer), room, timed, 1490.01).state, 'Waiting');
+  for (const change of [{ phase: 'Paused' }, { autoEnd: false }, { elapsedSeconds: -1 }, { remainingSeconds: 39 }, { durationSeconds: 61 }])
+    assert.equal(roomMissionTimeView(timeReport({ ...timer, ...change }), room, timed, 0).state, 'Waiting');
+  for (const fields of [{ sessionId: 'other' }, { sessionSequence: 9 }, { registered: 4 }, { sourceState: 'Suspended' }])
+    assert.equal(roomMissionTimeView(timeReport(timer, fields), room, timed, 0).state, 'Waiting');
+});
 test('Room totals are scoped to the current room and session and retain both rig kinds', () => {
   const foreign = { ...roomRow, roomId: 2, simulatedReady: 3, trackedReady: 0 };
   assert.deepEqual(roomReadinessView({ ...overview, rooms: [foreign, roomRow] }, room, session, 0),

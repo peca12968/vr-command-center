@@ -42,7 +42,7 @@ public sealed partial class SessionManager
             for (var index = 0; index < entries.Length; index++)
             {
                 var view = views[index];
-                sessions.Add(view.Id, new(view, [entries[index]], [], new CombatLedger(), [view], 0));
+                sessions.Add(view.Id, new(view, [entries[index]], [], new CombatLedger(), [view], view.Sequence));
             }
             requests.Add(requestId, entries[0]);
             independentSets.Add(requestId, ids);

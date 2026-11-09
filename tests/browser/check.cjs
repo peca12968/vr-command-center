@@ -108,6 +108,13 @@ async function main() {
       await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), result: 'passed', scope: 'five-room MR deployment ZIP from a real API and Chromium, with synthetic endpoint publishers', powerShell: process.env.VR_COMMAND_VENUE_DEPLOY_CHECK === '1' }, null, 2));
       console.log(`PASS: ${checks} focused MR venue bundle checks. Screenshots: ${screenshots}`); return;
     }
+    if (process.argv.includes('--room-clock-only')) {
+      await require('./room-clock-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
+      check(browserErrors.length === 0, 'Room clocks have no uncaught browser or policy errors');
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks,
+        browser: await browser.version(), result: 'passed', scope: 'room clocks with real API, accepted synthetic WebSocket frames and Chromium' }, null, 2));
+      console.log(`PASS: ${checks} focused room clock checks. Screenshots: ${screenshots}`); return;
+    }
     await page.goto(base + '/console/');
     await page.locator('#login-key').fill('wrong-key'); await page.locator('#login-form button').click();
     await page.locator('#notice.error').waitFor();
@@ -437,6 +444,7 @@ async function main() {
     await require('./mr-deployment-browser.cjs')({ context, api, tokens, base, directory, screenshots, check, captureErrors });
     await require('./independent-set-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
     await require('./mr-venue-bundle-browser.cjs')({ context, api, tokens, base, root, directory, screenshots, check, captureErrors });
+    await require('./room-clock-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
     check(browserErrors.length === 0, 'Browser has no uncaught script errors or CSP violations');
     await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), playwright: require('playwright/package.json').version, result: 'passed', scope: 'isolated real API and browser console; no Unity or headset test' }, null, 2));
     console.log(`PASS: ${checks} real-browser checks. Screenshots: ${screenshots}`);

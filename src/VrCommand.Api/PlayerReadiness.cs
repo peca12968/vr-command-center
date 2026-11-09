@@ -12,7 +12,9 @@ public record SessionReadiness(int Version, Guid SessionId, long SessionSequence
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? MrTrackingState);
 public record RoomReadiness(int RoomId, Guid? SessionId, long SessionSequence, int Registered, int SimulatedReady,
     int TrackedReady, string SourceState, double? SourceAgeMilliseconds,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MrLiving = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MrLiving = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomMissionTime? Clock = null);
+public record RoomMissionTime(string Phase, long ElapsedSeconds, long RemainingSeconds, int DurationSeconds, bool AutoEnd);
 
 public sealed partial class WorldRecordings
 {
@@ -46,28 +48,30 @@ public sealed partial class WorldRecordings
         var rooms = manager.Rooms(actor);
         // A linked game uses the same accepted snapshot for all of its visible rooms.
         var sessions = rooms.Select(room => room.SessionId).OfType<Guid>().Distinct()
-            .ToDictionary(id => id, id => Readiness(id, actor));
+            .ToDictionary(id => id, id => ReadReadinessSnapshot(id, actor));
         return rooms.Select(room =>
         {
             if (room.SessionId is not { } id) return new RoomReadiness(room.Id, null, 0, 0, 0, 0, "Idle", null);
-            var report = sessions[id];
+            var (report, clock) = sessions[id];
             var players = report.Players.Where(player => player.RoomId == room.Id).ToArray();
             return new RoomReadiness(room.Id, id, report.SessionSequence, players.Length,
                 players.Count(player => player.CanParticipate && player.RigKind == "Simulated"),
                 players.Count(player => player.CanParticipate && player.RigKind == "Tracked"),
                 report.SourceState, report.SourceAgeMilliseconds,
                 report.MrTrackingState is "Ready" or "WaitingPlayers"
-                    ? players.Count(player => player.State != "Eliminated") : null);
+                    ? players.Count(player => player.State != "Eliminated") : null, clock);
         }).ToArray();
     }
 
     // A scoped view of accepted snapshots. Both MR transitions require the exact current roster revision.
-    public SessionReadiness Readiness(Guid id, OperatorIdentity actor)
+    public SessionReadiness Readiness(Guid id, OperatorIdentity actor) => ReadReadinessSnapshot(id, actor).Report;
+
+    private (SessionReadiness Report, RoomMissionTime? Clock) ReadReadinessSnapshot(Guid id, OperatorIdentity actor)
     {
         RequireReadinessActor(actor);
         lock (gate)
         {
-            var current = manager.Get(id, actor);
+            var (current, phaseSince) = manager.GetWithPhase(id, actor);
             using var exists = Command("SELECT 1 FROM recordings WHERE session=$id", ("$id", id.ToString("D")));
             var info = exists.ExecuteScalar() is null ? null : Info(id, actor);
             var frame = info is null || info.AcceptedSequence == 0 ? null : Frame(id, info.AcceptedSequence, actor);
@@ -102,9 +106,20 @@ public sealed partial class WorldRecordings
                 : !tracking && observedSequence != current.Sequence ? "WaitingRevision"
                 : players.All(player => (!starting && player.State == "Eliminated") || (player.CanParticipate && player.RigKind == "Tracked"))
                     ? "Ready" : "WaitingPlayers";
-            return new(1, id, current.Sequence, now, source, info?.Header.origin, info?.AcceptedSequence ?? 0,
+            var report = new SessionReadiness(1, id, current.Sequence, now, source, info?.Header.origin, info?.AcceptedSequence ?? 0,
                 observedSequence, info?.CapturedAtUtc, age, players, starting ? mrState : null, resuming ? mrState : null,
                 tracking ? mrState : null);
+            var duration = current.Mission.Definition.DurationSeconds;
+            RoomMissionTime? clock = null;
+            if (source == "Fresh" && current.State is SessionState.Running or SessionState.Paused
+                && current.CombatStream is { MissionClockVersion: 1 } && info?.Header is { missionClockVersion: 1 } header
+                && header.missionDurationSeconds == duration && frame is not null && observedSequence >= phaseSince)
+            {
+                var tick = frame.Packet.frame.tick;
+                clock = new(frame.Packet.frame.phase, tick / MissionClock.TicksPerSecond, MissionClock.RemainingSeconds(tick, duration),
+                    duration, current.MissionClock is { Version: 1, AutoEnd: true });
+            }
+            return (report, clock);
         }
     }
 }

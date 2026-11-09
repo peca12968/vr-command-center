@@ -1,3 +1,5 @@
+import { formatClock } from './mission-clock.js';
+
 const labels = { NoRecording: '等待遊戲來源', WaitingFrame: '等待第一份快照', UnknownCaptureTime: '擷取時間未知', ClockSkew: '來源時鐘未同步',
   Stale: '快照已過期', Suspended: '管理連線中斷', PhasePending: '等待階段同步', Ended: '場次已結束', Fresh: '正在接收',
   AwaitingAdmission: '等待本次入場同步', AwaitingPose: '等待姿態', PoseUnavailable: '姿態未就緒／中斷', Eliminated: '已淘汰',
@@ -69,15 +71,39 @@ export function mrReadinessView(report, session, elapsed, actor) {
     : status('WaitingPlayers', resuming ? '等待存活玩家重新取得有效追蹤姿態。' : '等待全場名冊的有效追蹤姿態。', rooms);
 }
 
-export function roomReadinessView(report, room, session, elapsed) {
-  const waiting = { source: 'Updating', text: labels.Updating };
+function roomReadinessRow(report, room, session) {
   if (!room.sessionId || session?.id !== room.sessionId || session.state === 'Ended'
-    || report?.version !== 1 || !Array.isArray(report.rooms) || report.rooms.length > 5) return waiting;
+    || report?.version !== 1 || !Array.isArray(report.rooms) || report.rooms.length > 5) return null;
   const matches = report.rooms.filter(row => row?.roomId === room.id);
-  if (matches.length !== 1) return waiting;
+  if (matches.length !== 1) return null;
   const row = matches[0];
   if (row.sessionId !== room.sessionId || !Number.isSafeInteger(row.sessionSequence) || row.sessionSequence < session.sequence
-    || !Number.isInteger(row.registered) || row.registered < 0 || row.registered > room.capacity || row.registered !== room.playerCount) return waiting;
+    || !Number.isInteger(row.registered) || row.registered < 0 || row.registered > room.capacity || row.registered !== room.playerCount) return null;
+  return row;
+}
+
+export function roomMissionTimeView(report, room, session, elapsed) {
+  const waiting = { state: 'Waiting', text: '活動時間未確認' };
+  const duration = session?.mission?.definition?.durationSeconds;
+  if (!room.sessionId || room.sessionId !== session?.id || !Number.isInteger(duration) || duration < 60 || duration > 14400) return waiting;
+  if (session.state === 'Preparing') return { state: 'Preparing', text: `尚未開始 · 計畫 ${formatClock(duration)}` };
+  if (!['Running', 'Paused'].includes(session.state)) return waiting;
+  if (session.combatStream?.missionClockVersion === 0) return { state: 'Unsupported', text: '來源未提供活動時間' };
+  const row = roomReadinessRow(report, room, session), clock = row?.clock;
+  if (!row || sourceAt(row, elapsed) !== 'Fresh' || clock?.phase !== session.state || clock.durationSeconds !== duration
+    || clock.autoEnd !== (session.missionClock?.version === 1 && session.missionClock.autoEnd === true)
+    || !Number.isSafeInteger(clock.elapsedSeconds) || clock.elapsedSeconds < 0
+    || clock.remainingSeconds !== Math.max(0, duration - clock.elapsedSeconds)) return waiting;
+  if (clock.autoEnd && clock.remainingSeconds === 0) return { state: 'Due', text: '活動時間已到期 · 等待結束確認' };
+  const prefix = session.state === 'Paused' ? '暫停 · ' : '';
+  const time = clock.autoEnd ? `剩餘 ${formatClock(clock.remainingSeconds)} · 自動結束`
+    : `活動 ${formatClock(clock.elapsedSeconds)} / ${formatClock(duration)}`;
+  return { state: session.state, text: prefix + time };
+}
+
+export function roomReadinessView(report, room, session, elapsed) {
+  const row = roomReadinessRow(report, room, session);
+  if (!row) return { source: 'Updating', text: labels.Updating };
   const source = sourceAt(row, elapsed);
   if (source !== 'Fresh') return { source, text: labels[source] };
   const { simulatedReady, trackedReady } = row;
@@ -108,6 +134,11 @@ export function mountRoomReadiness(getState, unauthorized) {
       cell.dataset.sourceState = view.source;
       cell.classList.toggle('ready-player', view.ready > 0);
       cell.classList.toggle('tracking-attention', !!view.attention);
+      const clock = roomMissionTimeView(failed ? null : report, room, session, elapsed);
+      const clockCell = cell.parentElement.querySelector('[data-room-clock]');
+      clockCell.textContent = clock.text;
+      clockCell.dataset.clockState = clock.state;
+      clockCell.classList.toggle('tracking-attention', clock.state === 'Due');
     }
   }
   async function poll() {

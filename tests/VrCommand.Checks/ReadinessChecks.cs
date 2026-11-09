@@ -92,6 +92,92 @@ internal static class ReadinessChecks
         store.Append(oldId, WorldRecordingPacket.Capture(old.World, 1, 0, manager.Get(oldId).Sequence, 0, 0, _ => new()), server);
         check(store.Readiness(oldId, room).SourceState == "UnknownCaptureTime", "Legacy capture time remains unknown rather than using API receive time");
         CheckMixedReality(check, directory, mission, master, server);
+        CheckRoomMissionTimes(check, directory, mission, master, server);
+    }
+
+    private static void CheckRoomMissionTimes(Action<bool, string> check, string directory, Mission mission, OperatorIdentity master, OperatorIdentity server)
+    {
+        var origin = DateTimeOffset.Parse("2026-11-09T08:00:00Z");
+        var clock = new Clock { Now = origin };
+        var events = new MemorySessionEventStore();
+        var manager = new SessionManager(events);
+        var path = Path.Combine(directory, "room-clock-worlds"); Directory.CreateDirectory(path);
+        using var store = new WorldRecordings(path, manager, clock);
+        var sources = new Dictionary<Guid, (ArenaSession Arena, long Frames, DateTimeOffset Started)>();
+        var options = new JsonSerializerOptions(JsonFormat.Options) { IncludeFields = true };
+        var roomOne = new OperatorIdentity("room-clock-1", OperatorRole.RoomController, 1);
+        var duration = mission.Definition.DurationSeconds;
+        SessionView Create(SessionMode mode, int[] rooms, bool automatic, int version = 1)
+        {
+            var session = manager.Create(mode, rooms, mission, master);
+            foreach (var room in rooms) manager.Join(session.Id, Guid.NewGuid(), $"Clock {room}", room, HeadsetKind.Quest3, master);
+            var stream = Guid.NewGuid();
+            manager.OpenStream(session.Id, new(stream, CombatOrigin.Simulation, version), server);
+            if (automatic) manager.Execute(session.Id, new(Guid.NewGuid(), ControlAction.SetMissionClock, MissionClock: new(true)), master);
+            var arena = new ArenaSession();
+            var current = manager.Get(session.Id);
+            arena.Apply(JsonSerializer.Deserialize<ManagementSnapshot>(JsonSerializer.Serialize(current, JsonFormat.Options), options)!);
+            store.Open(session.Id, WorldRecordingHeader.Create(session.Id, stream, "Simulation", rooms, arena.Props, clock.Now.ToString("O"),
+                missionClockVersion: version, missionDurationSeconds: version == 1 ? duration : 0), server);
+            sources[session.Id] = (arena, 0, clock.Now);
+            return current;
+        }
+        SessionView Command(SessionView session, ControlAction action) => manager.Execute(session.Id, new(Guid.NewGuid(), action), master).Session;
+        void Publish(SessionView current, int activeTicks = 0, bool suspended = false)
+        {
+            var (arena, frames, started) = sources[current.Id];
+            arena.Apply(JsonSerializer.Deserialize<ManagementSnapshot>(JsonSerializer.Serialize(current, JsonFormat.Options), options)!);
+            for (var i = 0; i < activeTicks; i++) arena.Tick(i * .05);
+            if (frames > 0) clock.Now = clock.Now.AddMilliseconds(50);
+            var packet = WorldRecordingPacket.Capture(arena.World, frames + 1, frames == 0 ? 0 : (long)(clock.Now - started).TotalMilliseconds,
+                current.Sequence, 0, 0, _ => new());
+            packet.suspended = suspended;
+            store.Append(current.Id, packet, server);
+            sources[current.Id] = (arena, frames + 1, started);
+        }
+        RoomMissionTime? ClockFor(int room) => store.ReadinessByRoom(master).Single(value => value.RoomId == room).Clock;
+
+        var automatic = Create(SessionMode.Independent, [1], true);
+        var manual = Create(SessionMode.Independent, [2], false);
+        var legacy = Create(SessionMode.Independent, [3], false, 0);
+        Publish(automatic); Publish(manual); Publish(legacy);
+        check(ClockFor(1) is null, "Preparing room clocks do not publish a started countdown");
+        automatic = Command(automatic, ControlAction.Begin); manual = Command(manual, ControlAction.Begin); legacy = Command(legacy, ControlAction.Begin);
+        Publish(automatic, 401); Publish(manual, 60); Publish(legacy, 20);
+        check(ClockFor(1) is { Phase: "Running", ElapsedSeconds: 20, RemainingSeconds: 40, AutoEnd: true }
+            && ClockFor(2) is { Phase: "Running", ElapsedSeconds: 3, RemainingSeconds: 57, AutoEnd: false } && ClockFor(3) is null,
+            "Independent room clocks retain separate authoritative elapsed time and policies, with no legacy clock inferred");
+        automatic = Command(automatic, ControlAction.Pause);
+        check(ClockFor(1) is null && ClockFor(2) is not null, "An unobserved Pause suppresses only its own room clock");
+        automatic = Command(automatic, ControlAction.Resume);
+        check(ClockFor(1) is null && store.Readiness(automatic.Id, master).SourceState == "Fresh",
+            "A fast Pause and Resume fences an older Running clock even while general readiness is fresh");
+        check(new SessionManager(events).GetWithPhase(automatic.Id, master).PhaseSinceSequence == automatic.Sequence,
+            "Reloading session history reconstructs the original phase sequence");
+        Publish(automatic, 19);
+        automatic = Command(automatic, ControlAction.Pause);
+        Publish(automatic, 20);
+        check(ClockFor(1) is { Phase: "Paused", ElapsedSeconds: 21, RemainingSeconds: 39 },
+            "A published paused room retains its authoritative activity and remaining time");
+        var sample = clock.Now;
+        clock.Now = sample.AddMilliseconds(1500);
+        check(ClockFor(1)?.ElapsedSeconds == 21, "The paused clock does not extrapolate within the original freshness window");
+        clock.Now = sample.AddMilliseconds(1501);
+        check(ClockFor(1) is null, "The room clock expires at the existing source freshness boundary");
+        clock.Now = sample;
+        Publish(automatic, suspended: true);
+        check(ClockFor(1) is null, "Suspended sources cannot expose a room clock");
+        Command(automatic, ControlAction.End); Command(manual, ControlAction.End); Command(legacy, ControlAction.End);
+        var linked = Create(SessionMode.Linked, [1, 2, 3, 4, 5], false);
+        Publish(linked);
+        linked = Command(linked, ControlAction.Begin); Publish(linked, 100);
+        var all = store.ReadinessByRoom(master);
+        var own = store.ReadinessByRoom(roomOne);
+        check(all.Length == 5 && all.All(row => row.SessionId == linked.Id && row.Clock == new RoomMissionTime("Running", 5, 55, 60, false))
+            && own.Length == 1 && own[0].RoomId == 1 && own[0].Clock == all[0].Clock,
+            "Linked rooms share one accepted activity clock and room controllers receive only their room");
+        Command(linked, ControlAction.End);
+        check(store.ReadinessByRoom(master).All(row => row is { SessionId: null, Clock: null }), "Ending a session clears its active room clocks");
     }
 
     private static void CheckMixedReality(Action<bool, string> check, string directory, Mission template, OperatorIdentity master, OperatorIdentity server)

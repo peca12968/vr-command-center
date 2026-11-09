@@ -25,7 +25,7 @@ public sealed partial class SessionManager
 
             var now = clock.GetUtcNow();
             var stream = session.CombatStream;
-            var running = history.RunningSinceSequence == 0 ? (long?)null : history.RunningSinceSequence;
+            var running = session.State == SessionState.Running ? history.PhaseSinceSequence : (long?)null;
             RoomHardwareFeedback Page(string? reset, RoomHardwareSignal[] signals) => new(1, id, roomId, stream?.StreamId,
                 stream?.Origin, session.State, session.Sequence, running, now, reset, signals);
             // New readers and slow readers take a fresh cursor instead of replaying a backlog as live feedback.

@@ -44,7 +44,7 @@ public sealed partial class SessionManager
     // A lifecycle request key is global across creation and roster mutations, including archived sessions.
     private readonly Dictionary<Guid, SessionEvent> requests = [];
     private sealed record History(SessionView View, List<SessionEvent> Events, Dictionary<Guid, SessionEvent> Commands, CombatLedger Combat,
-        List<SessionView> Authority, long RunningSinceSequence);
+        List<SessionView> Authority, long PhaseSinceSequence);
 
     public SessionManager(ISessionEventStore? eventStore = null) : this(eventStore, TimeProvider.System) { }
 
@@ -59,7 +59,7 @@ public sealed partial class SessionManager
             var commands = new Dictionary<Guid, SessionEvent>();
             var combat = new CombatLedger();
             var authority = new List<SessionView>();
-            long runningSince = 0;
+            long phaseSince = 0;
             foreach (var entry in events)
             {
                 if (!ids.Add(entry.EventId)) throw new InvalidDataException("Duplicate event ID in session history.");
@@ -67,13 +67,13 @@ public sealed partial class SessionManager
                     throw new InvalidDataException("Duplicate command ID in session history.");
                 var next = SessionProjection.Apply(view, entry);
                 combat.Prepare(CombatBefore(view, entry, authority), entry)();
-                runningSince = RunningSince(view, next, runningSince);
+                phaseSince = PhaseSince(view, next, phaseSince);
                 view = next;
                 if (IsAuthority(entry)) authority.Add(view);
                 if (entry.RequestId.HasValue && !requests.TryAdd(entry.RequestId.Value, entry))
                     throw new InvalidDataException("Duplicate lifecycle request ID in persisted histories.");
             }
-            if (view is null || !sessions.TryAdd(view.Id, new(view, [.. events], commands, combat, authority, runningSince)))
+            if (view is null || !sessions.TryAdd(view.Id, new(view, [.. events], commands, combat, authority, phaseSince)))
                 throw new InvalidDataException("Empty or duplicate session history.");
         }
         var active = Active().ToArray();
@@ -113,13 +113,15 @@ public sealed partial class SessionManager
         }
     }
 
-    public SessionView Get(Guid id, OperatorIdentity? actor = null)
+    public SessionView Get(Guid id, OperatorIdentity? actor = null) => GetWithPhase(id, actor).View;
+
+    public (SessionView View, long PhaseSinceSequence) GetWithPhase(Guid id, OperatorIdentity? actor = null)
     {
         lock (gate)
         {
-            var view = Find(id).View;
-            AccessPolicy.Read(actor ?? OperatorIdentity.Internal, view.RoomIds);
-            return Snapshot(view);
+            var history = Find(id);
+            AccessPolicy.Read(actor ?? OperatorIdentity.Internal, history.View.RoomIds);
+            return (Snapshot(history.View), history.PhaseSinceSequence);
         }
     }
 
@@ -294,13 +296,13 @@ public sealed partial class SessionManager
         if (entry.Kind == SessionEventKind.ControlApplied) commands.Add(entry.Read<ControlCommand>().CommandId, entry);
         if (IsAuthority(entry)) authority.Add(view);
         sessions[entry.SessionId] = new(view, events, commands, combat, authority,
-            RunningSince(previous?.View, view, previous?.RunningSinceSequence ?? 0));
+            PhaseSince(previous?.View, view, previous?.PhaseSinceSequence ?? 0));
         if (entry.RequestId.HasValue) requests.Add(entry.RequestId.Value, entry);
         return Snapshot(view);
     }
 
-    private static long RunningSince(SessionView? previous, SessionView current, long runningSince) => current.State != SessionState.Running
-        ? 0 : previous?.State == SessionState.Running ? runningSince : current.Sequence;
+    private static long PhaseSince(SessionView? previous, SessionView current, long phaseSince) =>
+        previous?.State == current.State ? phaseSince : current.Sequence;
 
     private static void ValidateRequestId(Guid? requestId)
     {
