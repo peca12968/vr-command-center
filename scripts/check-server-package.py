@@ -60,6 +60,7 @@ def main():
     p.add_argument('--check-room-clocks', action='store_true', help='Verify room clocks and the original pause/resume boundaries in both modes')
     p.add_argument('--check-venue-phase', action='store_true', help='Verify whole-venue pause and resume against both native topologies')
     p.add_argument('--check-venue-begin', action='store_true', help='Start both native topologies with one witnessed Begin per topology')
+    p.add_argument('--check-venue-end', action='store_true', help='End each native topology in one batch and read its original archives')
     p.add_argument('--check-layout-preview',action='store_true',help='Load a saved barricade opening and compare its preview with native world geometry')
     p.add_argument('--check-room-reports',action='store_true',help='Verify scoped Linked CSVs and the ZIP against the full sealed native report')
     p.add_argument('--check-room-combat',action='store_true',help='Require actual enemy damage on every original admission and reconcile each replay frame and final report')
@@ -83,6 +84,8 @@ def main():
     if args.check_room_clocks and not args.player_package:p.error('--check-room-clocks requires five players per room')
     if args.check_venue_phase and not args.check_room_clocks:p.error('--check-venue-phase requires --check-room-clocks')
     if args.check_venue_begin and not args.player_package:p.error('--check-venue-begin requires the three-package check')
+    if args.check_venue_end and (not args.player_package or args.observe_closure_ui):
+        p.error('--check-venue-end requires the three-package check and its own End path')
     if args.check_room_reports and not args.player_package:p.error('--check-room-reports requires the three-package check')
     if args.check_room_combat and not args.check_room_reports:p.error('--check-room-combat requires --check-room-reports')
     if args.check_hardware_feedback and not args.check_room_combat:p.error('--check-hardware-feedback requires --check-room-combat')
@@ -844,10 +847,39 @@ def main():
             if args.check_room_combat:
                 stage('running-native-ai-combat',mode='Linked' if linked else 'Independent')
                 exercise_room_combat(entries,round_clients)
-            for entry in entries:
-                if args.observe_closure_ui and not linked and entry is observer_entry:(out/'closure-end.request').write_text('request one normal UI End',encoding='utf-8')
-                else:command(entry['sessionId'],'End')
+            if args.check_venue_end:
+                route = '/api/venue/phase'
+                preview = request(route)['end']
+                targets = [{field: row[field] for field in ('sessionId', 'phaseSinceSequence')} for row in preview]
+                check({row['sessionId'] for row in targets} == set(owner_ids)
+                      and sorted(room for row in preview for room in row['roomIds']) == list(range(1, 6)),
+                      'native End preview covers exactly the original five rooms')
+                body = {'action': 'End', 'targets': targets}
+                key = str(uuid.uuid4())
+                receipt = request(route, body, request_id=key)
+                applied = {row['sessionId']: row['appliedAtSequence'] for row in receipt['sessions']}
+                initial = request('/api/venue/closure')['batch']
+                check(not receipt['duplicate'] and receipt['requestId'] == key and set(applied) == set(owner_ids)
+                      and initial['requestId'] == key
+                      and {row['sessionId']: row['appliedAtSequence'] for row in initial['sessions']} == applied,
+                      'the native End receipt and closure overview identify the same original sessions')
+            else:
+                for entry in entries:
+                    if args.observe_closure_ui and not linked and entry is observer_entry:(out/'closure-end.request').write_text('request one normal UI End',encoding='utf-8')
+                    else:command(entry['sessionId'],'End')
             for entry in entries:finish(entry)
+            if args.check_venue_end:
+                closed = request('/api/venue/closure')['batch']
+                retry = request(route, body, request_id=key)
+                check(closed['requestId'] == key
+                      and {row['sessionId']: row['appliedAtSequence'] for row in closed['sessions']} == applied
+                      and sorted(room for row in closed['sessions'] for room in row['roomIds']) == list(range(1, 6))
+                      and all(row['combat'] == row['world'] == 'Sealed' for row in closed['sessions']),
+                      'the native closure overview confirms both original archive seals for every room')
+                check(retry['duplicate'] and retry['sessions'] == receipt['sessions'],
+                      'the late native End retry preserves the original batch after sealing')
+                save(('linked' if linked else 'independent')+'-venue-end.json',
+                     {'preview': preview, 'receipt': receipt, 'initial': initial, 'closed': closed, 'retry': retry})
             if args.observe_closure_ui and not linked:
                 observer.wait(timeout=70);observer_log.close();observer_log=None;ui=read(observer_out/'checks.json');native=read(observer_entry['reportPath'])
                 check(observer.returncode==0 and ui['complete'] and ui['browserClosed'],'actual archive UI observer and browser completed / terminal')
@@ -976,6 +1008,7 @@ def main():
             'roomClocks':args.check_room_clocks,
             'venuePhase':args.check_venue_phase,
             'venueBegin':args.check_venue_begin,
+            'venueEnd':args.check_venue_end,
             'hardwareFeedback':args.check_hardware_feedback,
             'hardwareMockPackage':hardware_manifest['toolVersion'] if args.hardware_simulator_package else None,
             'preparedIndependentSet':args.prepare_independent_set,

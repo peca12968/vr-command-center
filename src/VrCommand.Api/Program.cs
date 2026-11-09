@@ -180,6 +180,11 @@ app.MapGet("/api/venue/phase", (SessionManager manager, HttpContext context) =>
     context.Response.Headers.CacheControl = "no-store";
     return manager.ReadVenuePhase(Actor(context));
 });
+app.MapGet("/api/venue/closure", (WorldRecordings worlds, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    return new { batch = worlds.ReadVenueClosure(Actor(context)) };
+});
 app.MapPost("/api/venue/phase", (VenuePhaseRequest request, WorldRecordings worlds, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";

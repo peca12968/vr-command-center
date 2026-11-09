@@ -162,7 +162,7 @@ internal static class SessionProjection
     private static bool ValidVenueCommand(ControlCommand command, long sequence) => command.Action switch
     {
         ControlAction.Begin => command.ExpectedSequence == sequence - 1,
-        ControlAction.Pause or ControlAction.Resume => command.ExpectedSequence is null,
+        ControlAction.Pause or ControlAction.Resume or ControlAction.End => command.ExpectedSequence is null && command.ClockExpiration is null,
         _ => false
     };
 

@@ -141,6 +141,10 @@ internal static class VenuePhaseChecks
                 "Batch Begin saves each witnessed revision and its exact resulting sequence");
             manager.End(first.Id, master);
         }
+        var endId = Guid.NewGuid();
+        VenuePhaseFence[] endTargets;
+        VenuePhaseApplied[] ended;
+        Guid replacement;
         using (var store = new SqliteSessionEventStore(beginData))
         {
             var manager = new SessionManager(store);
@@ -148,6 +152,45 @@ internal static class VenuePhaseChecks
             check(retry.Duplicate && retry.Sessions.SequenceEqual(started)
                 && manager.List(includeEnded: true).Count(session => session.State == SessionState.Ended) == 1,
                 "Restart preserves the original batch Begin receipt after a room ends");
+            check(manager.ReadLatestVenueEnd(master) is null, "Individual End does not create a venue closure batch");
+            Reject<AccessDeniedException>(() => manager.ReadLatestVenueEnd(room2), "Venue closure is scoped to Master");
+            var preparing = manager.Create(SessionMode.Independent, [1], mission, master);
+            var running = manager.List().Single(session => session.State == SessionState.Running);
+            var staleEnd = Fences(manager.ReadVenuePhase(master).End);
+            manager.Execute(running.Id, new(Guid.NewGuid(), ControlAction.Pause), room2);
+            Reject<VenuePhaseChangedException>(() => manager.ExecuteVenuePhase(ControlAction.End, staleEnd, endId, master),
+                "An intervening phase change rejects the whole End preview");
+            endTargets = Fences(manager.ReadVenuePhase(master).End);
+            using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = store.DatabasePath, Pooling = false }.ToString()))
+            {
+                connection.Open();
+                using var trigger = connection.CreateCommand();
+                trigger.CommandText = $"""
+                    CREATE TRIGGER fail_venue_end BEFORE INSERT ON session_events
+                    WHEN NEW.session_id='{endTargets[1].SessionId:D}' AND json_extract(NEW.envelope,'$.venue.targetCount')=2
+                    BEGIN SELECT RAISE(ABORT,'venue End second insert failure'); END;
+                    """;
+                trigger.ExecuteNonQuery();
+                Reject<SqliteException>(() => manager.ExecuteVenuePhase(ControlAction.End, endTargets, endId, master),
+                    "An End failure on the second write rolls back the SQLite batch");
+                check(manager.Get(preparing.Id).State == SessionState.Preparing && manager.Get(running.Id).State == SessionState.Paused
+                    && manager.ReadLatestVenueEnd(master) is null, "Failed End leaves the original phases and has no closure receipt");
+                trigger.CommandText = "DROP TRIGGER fail_venue_end";
+                trigger.ExecuteNonQuery();
+            }
+            ended = manager.ExecuteVenuePhase(ControlAction.End, endTargets, endId, master).Sessions;
+            check(ended.Length == 2 && manager.List().Length == 0 && manager.Get(preparing.Id).StartedAtUtc is null,
+                "The whole venue can end a preparing and paused room without a game source");
+            replacement = manager.Create(SessionMode.Independent, [1], mission, master).Id;
+        }
+        using (var store = new SqliteSessionEventStore(beginData))
+        {
+            var manager = new SessionManager(store);
+            var batch = manager.ReadLatestVenueEnd(master);
+            var retry = manager.ExecuteVenuePhase(ControlAction.End, endTargets, endId, master);
+            check(batch?.RequestId == endId && batch.Sessions.SequenceEqual(ended) && retry.Duplicate
+                && retry.Sessions.SequenceEqual(ended) && manager.List().Single().Id == replacement,
+                "After restart and room reuse, closure and End retry identify the original batch without touching its replacement");
         }
     }
 }

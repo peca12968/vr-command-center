@@ -22,6 +22,13 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       snapshot = await api(`/sessions/${id}`);
       const header = { sessionId: id, streamId, origin, roomIds: [room], captureStartedAtUtc: new Date(started).toISOString().replace('Z', '0000+00:00') };
       let sequence = 0;
+      const send = message => {
+        const result = spawnSync('python', [path.join(root, 'scripts/world_test_socket.py')], { encoding: 'utf8', timeout: 6000, windowsHide: true,
+          input: JSON.stringify({ port: Number(new URL(base).port), route: `/api/sessions/${id}/world/publish`, token: tokens.GameServer,
+            messages: [{ type: 'header', payload: header }, message] }) });
+        if (result.status !== 0) throw new Error('Venue fixture publication failed: ' + (result.stderr || result.error?.message));
+        return JSON.parse(result.stdout);
+      };
       publish = current => {
         const head = { x: (room - 3) * 14, y: 1.65, z: -3 };
         const rotation = { x: 0, y: 0, z: 0, w: 1 };
@@ -31,12 +38,9 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
           connected, forward: { x: 0, y: 0, z: 1 }, health: 100, magazine: 30, reserve: 90, rig }));
         const packet = { sequence: ++sequence, observedSequence: current.sequence, elapsedMilliseconds: sequence === 1 ? 0 : Date.now() - started,
           weather: 'Clear', throughCombatSequence: 0, events: [], frame: { phase: current.state, tick: 0, night: false, throughSequence: 0, players } };
-        const result = spawnSync('python', [path.join(root, 'scripts/world_test_socket.py')], { encoding: 'utf8', timeout: 6000, windowsHide: true,
-          input: JSON.stringify({ port: Number(new URL(base).port), route: `/api/sessions/${id}/world/publish`, token: tokens.GameServer,
-            messages: [{ type: 'header', payload: header }, { type: 'frame', payload: packet }] }) });
-        if (result.status !== 0) throw new Error('Venue fixture publication failed: ' + (result.stderr || result.error?.message));
-        assert.equal(JSON.parse(result.stdout).acceptedSequence, sequence);
+        assert.equal(send({ type: 'frame', payload: packet }).acceptedSequence, sequence);
       };
+      publish.seal = () => assert.equal(send({ type: 'seal', finalSequence: sequence }).complete, true);
       publish(snapshot);
     }
     return publish;
@@ -197,6 +201,64 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       return Promise.all([1, 2].map(room => roomPhase(room).filter({ hasText: '全館開始已套用' }).isVisible())).then(rows => rows.every(Boolean));
     });
     check(true, 'Both room cards confirm Begin from their accepted Running frames');
+
+    const extra = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [3] }, 'Master', 201);
+    active.add(extra.id);
+    await run(preparing[1], 'Pause');
+    const endPlan = (await api('/venue/phase')).end;
+    await api('/venue/closure', 'GET', undefined, 'Room2', 403);
+    await api('/venue/phase', 'POST', { action: 'End', targets: endPlan }, 'Room2', 403, undefined, randomUUID());
+    await page.locator('#refresh').click();
+    await page.locator('#venue-end-targets').filter({ hasText: '房間 1、2、3' }).waitFor();
+    let warning;
+    const canceled = page.waitForEvent('dialog').then(async dialog => { warning = dialog.message(); await dialog.dismiss(); });
+    await page.locator('#venue-end').click();
+    await canceled;
+    check(warning.includes('尚未開始的準備場次') && (await api('/sessions')).length === 3
+      && (await api('/venue/closure')).batch === null, 'Canceling the explicit End confirmation leaves every original room active');
+
+    requests.length = 0;
+    await page.route(route, lost);
+    await click('end', '房間 1、2、3 的 3 個場次');
+    await notice.filter({ hasText: '結果未確認' }).waitFor();
+    check((await api('/sessions')).length === 0 && await page.locator('#pending-command').isVisible(),
+      'One durable End releases the running, paused and preparing rooms while the lost response remains pending');
+    for (const id of [...preparing, extra.id]) active.delete(id);
+    await page.locator('#retry-command').click();
+    await notice.filter({ hasText: '全館結束已記錄' }).waitFor();
+    await page.unroute(route, lost);
+    const table = page.locator('#venue-closure-table');
+    const archive = id => page.locator(`[data-venue-closure-session="${id}"] td`);
+    const closure = (await api('/venue/closure')).batch;
+    check(closure.requestId === requests[0].id && requests.length === 2 && JSON.stringify(requests[0]) === JSON.stringify(requests[1])
+      && closure.sessions.every((session, index) => session.roomIds.join() === String(index + 1)),
+      'Retry preserves the original End request and the closure table keeps the original room order');
+    await table.waitFor();
+    check((await archive(preparing[0]).allTextContents()).slice(2, 4).join() === '等待封存,等待封存'
+      && (await archive(extra.id).allTextContents()).slice(2, 4).join() === '沒有遊戲來源,沒有遊戲來源',
+      'The archive distinguishes an unsealed source from a preparing room that never had a source');
+    const ending = await api(`/sessions/${preparing[0]}`);
+    first(ending);
+    await api(`/sessions/${ending.id}/combat-stream/seal`, 'POST', { streamId: ending.combatStream.streamId, finalSequence: 0 }, 'GameServer');
+    await archive(ending.id).nth(2).filter({ hasText: '已封存' }).waitFor();
+    check(await archive(ending.id).nth(3).textContent() === '等待封存', 'A combat seal alone does not mark the world replay sealed');
+    first.seal();
+    await archive(ending.id).nth(3).filter({ hasText: '已封存' }).waitFor();
+    await page.locator('#venue-closure').screenshot({ path: path.join(screenshots, 'venue-closure.png') });
+    const replacement = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [1] }, 'Master', 201);
+    active.add(replacement.id);
+    await login('Master');
+    await archive(ending.id).nth(3).filter({ hasText: '已封存' }).waitFor();
+    await archive(ending.id).last().getByRole('button').click();
+    await page.waitForFunction(id => document.getElementById('session-select').value === id, ending.id);
+    check(await page.locator('#include-ended').isChecked() && (await api(`/sessions/${replacement.id}`)).state === 'Preparing',
+      'Reload restores the original archived batch and the table opens that session after the room is reused');
+    const archiveRoute = '**/api/venue/closure';
+    await page.route(archiveRoute, request => request.fulfill({ status: 503 }));
+    await page.locator('#refresh').click();
+    await page.locator('#venue-closure-summary').filter({ hasText: '暫時無法確認' }).waitFor();
+    check(await table.isHidden(), 'A failed closure read removes the previous seal display');
+    await page.unroute(archiveRoute);
   } finally {
     await page.unroute(route); await page.close();
     for (const id of active) await end(id);

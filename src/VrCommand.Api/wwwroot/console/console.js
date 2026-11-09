@@ -15,6 +15,7 @@ const $ = id => document.getElementById(id);
 const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫停', Ended: '已結束' };
 const weatherNames = { Clear: '晴朗', Rain: '下雨', Fog: '濃霧', Storm: '暴風雨' };
 const behaviorNames = { Hold: '守備', Patrol: '巡邏', Advance: '推進' };
+const archiveNames = { NoSource: '沒有遊戲來源', Missing: '尚無錄製紀錄', Waiting: '等待封存', SourceMismatch: '來源尚未對上', Sealed: '已封存' };
 const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: null, rooms: [], venue: null, missions: [], catalog: [], launchPinned: null, history: null, draftBase: null, draftChanged: false, draftSavedAt: '', sessions: [], session: null, selected: null, pending: null, props: [], prop: -1, environmentSequence: null, enemiesSequence: null };
 const objectHistory = placementHistory();
 const world = mountWorld(() => state.key, logout);
@@ -152,6 +153,7 @@ function logout() {
   replay.active(false); replay.reset(); world.active(false); world.reset(); readiness.active(false); readiness.reset(); roomReadiness.active(false); connections.active(false); connections.reset();
   state.epoch++; state.key = ''; state.actor = null; state.selected = null; state.session = null; state.pending = null;
   state.rooms = []; state.venue = null; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
+  renderVenueClosure(null);
   state.props = []; state.prop = -1; clearPropHistory();
   placement.reset();
   clearInterval(timer);
@@ -187,7 +189,7 @@ function refresh() {
   if (state.refreshPromise) return state.refreshPromise;
   const epoch = state.epoch;
   const pending = refreshData(epoch).catch(error => {
-    if (epoch === state.epoch) { closure.invalidate(); state.venue = null; applyVenuePermissions(); }
+    if (epoch === state.epoch) { closure.invalidate(); state.venue = null; applyVenuePermissions(); renderVenueClosure(null); }
     throw error;
   }).finally(() => { if (state.refreshPromise === pending) state.refreshPromise = null; });
   state.refreshPromise = pending;
@@ -197,7 +199,10 @@ async function refreshData(epoch) {
   const selection = selectionEpoch, includeEnded = $('include-ended').checked;
   const current = () => epoch === state.epoch && selection === selectionEpoch && includeEnded === $('include-ended').checked;
   const venueRead = master() ? api('/venue/phase').catch(error => { if (error.status === 401) throw error; return null; }) : null;
-  const [rooms, catalog, sessions, venue] = await Promise.all([api('/rooms'), api('/mission-library'), api('/sessions?includeEnded=' + includeEnded), venueRead]);
+  const venueClosureRead = master() ? api('/venue/closure').catch(error => { if (error.status === 401) throw error; return null; }) : null;
+  const [rooms, catalog, sessions, venue, venueClosure] = await Promise.all([
+    api('/rooms'), api('/mission-library'), api('/sessions?includeEnded=' + includeEnded), venueRead, venueClosureRead
+  ]);
   if (!current()) return;
   const merged = new Map(state.catalog.map(row => [row.seriesId, row]));
   for (const row of catalog) if (!merged.has(row.seriesId) || merged.get(row.seriesId).number < row.number) merged.set(row.seriesId, row);
@@ -207,6 +212,7 @@ async function refreshData(epoch) {
   const editedSeries = state.catalog.find(row => row.mission.id === edit)?.seriesId;
   state.launchPinned = prior && !heads.some(row => row.mission.id === launch) ? prior : null;
   state.rooms = rooms; state.venue = venue; state.catalog = heads; state.missions = heads.map(row => row.mission); state.sessions = sessions;
+  renderVenueClosure(venueClosure);
   if (state.selected === null && sessions.length) state.selected = sessions[0].id;
   else if (state.selected && !sessions.some(s => s.id === state.selected)) resetSelection('');
   missionOptions(launch, heads.find(row => row.seriesId === editedSeries)?.mission.id || edit);
@@ -366,14 +372,17 @@ function venueTargets(action) {
 function venueRoomText(targets) { return targets.flatMap(row => row.roomIds).sort((a, b) => a - b).join('、'); }
 function applyVenuePermissions() {
   $('venue-phase').hidden = !master();
-  const begin = venueTargets('Begin'), pause = venueTargets('Pause'), resume = venueTargets('Resume');
+  const begin = venueTargets('Begin'), pause = venueTargets('Pause'), resume = venueTargets('Resume'), end = venueTargets('End');
   const locked = state.busy || !!state.pending || !master();
   const starting = begin.filter(target => !roomReadiness.venueReady(target, 'Begin'));
   const waiting = resume.filter(target => !roomReadiness.venueReady(target));
   $('venue-begin').disabled = locked || !begin.length || !!starting.length;
   $('venue-pause').disabled = locked || !pause.length;
   $('venue-resume').disabled = locked || !resume.length || !!waiting.length;
+  $('venue-end').disabled = locked || !end.length;
   const describe = targets => targets.length ? '房間 ' + venueRoomText(targets) : '無';
+  $('venue-end-targets').hidden = !end.length;
+  $('venue-end-targets').textContent = end.length ? `可結束 ${describe(end)} · 包含準備、執行與暫停的場次。` : '';
   const beginStatus = $('venue-begin-evidence');
   beginStatus.hidden = !begin.length;
   const beginMessage = starting.length ? `準備開始 ${describe(begin)} · 等候房間 ${venueRoomText(starting)} 的名冊或遊戲快照。`
@@ -388,12 +397,47 @@ function applyVenuePermissions() {
 async function venuePhase(action) {
   if (!master() || state.pending) return;
   const targets = venueTargets(action);
-  if (!targets.length || (action !== 'Pause' && targets.some(target => !roomReadiness.venueReady(target, action)))) return;
-  const verb = { Begin: '開始', Pause: '暫停', Resume: '繼續' }[action];
-  if (!confirm(`${verb}房間 ${venueRoomText(targets)} 的 ${targets.length} 個場次？`)) return;
+  if (!targets.length || (['Begin', 'Resume'].includes(action) && targets.some(target => !roomReadiness.venueReady(target, action)))) return;
+  const verb = { Begin: '開始', Pause: '暫停', Resume: '繼續', End: '結束' }[action];
+  const message = `${verb}房間 ${venueRoomText(targets)} 的 ${targets.length} 個場次？`;
+  if (!confirm(action === 'End' ? message + '\n包含尚未開始的準備場次。結束後無法繼續原場次。' : message)) return;
   state.pending = { kind: 'venue-phase', path: '/venue/phase', method: 'POST', requestId: uuid(),
     body: { action, targets: targets.map(({ sessionId, phaseSinceSequence, sessionSequence }) => ({ sessionId, phaseSinceSequence, sessionSequence })) } };
   await sendPending();
+}
+function renderVenueClosure(report) {
+  const panel = $('venue-closure'), batch = report?.batch;
+  const signature = master() ? JSON.stringify(report) : '';
+  if (panel.dataset.report === signature) return;
+  panel.dataset.report = signature;
+  panel.hidden = !master() || batch === null;
+  const rows = $('venue-closure-rows');
+  rows.replaceChildren();
+  $('venue-closure-table').hidden = true;
+  if (panel.hidden) { $('venue-closure-summary').textContent = ''; return; }
+  if (!Array.isArray(batch?.sessions) || !batch.sessions.length || batch.sessions.length > 5
+    || !Number.isFinite(Date.parse(batch.recordedAtUtc))
+    || batch.sessions.some(session => typeof session?.sessionId !== 'string' || typeof session.missionName !== 'string'
+      || !Array.isArray(session.roomIds) || !session.roomIds.length || session.roomIds.length > 5
+      || !session.roomIds.every(id => Number.isInteger(id) && id >= 1 && id <= 5)
+      || !Object.hasOwn(archiveNames, session.combat) || !Object.hasOwn(archiveNames, session.world))) {
+    $('venue-closure-summary').textContent = '暫時無法確認全館封存狀態。';
+    return;
+  }
+  $('venue-closure-summary').textContent = `${new Date(batch.recordedAtUtc).toLocaleString('zh-TW')} · 請等遊戲伺服器完成玩家戰績傳送與收尾。`;
+  for (const session of batch.sessions) {
+    const button = element('button', '查看場次', 'quiet small');
+    button.type = 'button';
+    button.addEventListener('click', () => {
+      if (!master() || state.busy || state.pending) return;
+      $('include-ended').checked = true;
+      void selectSession(session.sessionId);
+    });
+    const result = row([`房間 ${session.roomIds.join('、')}`, session.missionName, archiveNames[session.combat], archiveNames[session.world], button]);
+    result.dataset.venueClosureSession = session.sessionId;
+    rows.append(result);
+  }
+  $('venue-closure-table').hidden = false;
 }
 function row(cells) { const tr = element('tr'); for (const value of cells) { const td = element('td'); if (value instanceof Node) td.append(value); else td.textContent = value; tr.append(td); } return tr; }
 function emptyTable(id, columns, message) { const tr = element('tr'), td = element('td', message, 'empty-cell'); td.colSpan = columns; tr.append(td); $(id).replaceChildren(tr); }
@@ -507,9 +551,12 @@ async function sendPending() {
     state.pending = null;
     if (pending.kind === 'create') { $('include-ended').checked = response.state === 'Ended'; resetSelection(response.id); }
     if (pending.kind === 'command' && pending.body.action === 'End' && response.session.state === 'Ended') $('include-ended').checked = true;
+    const venueEnded = pending.kind === 'venue-phase' && pending.body.action === 'End';
+    if (venueEnded) $('include-ended').checked = true;
     if (pending.kind === 'join') $('player-name').value = '';
     await refresh(); loadEnvironment(); loadEnemies(); loadClock();
-    notify({ create: '場次建立結果已確認。請核對目前狀態，再加入玩家及開始任務。', 'create-set': '五個獨立場次已確認。請由各房核對名冊及準備狀態。', join: '玩家加入操作已確認，請核對目前名冊；尚不代表頭盔在線。', leave: '玩家移出操作已確認，請核對目前名冊。', command: '控制命令已確認。', 'venue-phase': '全館管理命令已確認。可從各房快照核對遊戲端套用狀態。' }[pending.kind]);
+    notify(venueEnded ? '全館結束已記錄。可查看各場的資料封存狀態。'
+      : { create: '場次建立結果已確認。請核對目前狀態，再加入玩家及開始任務。', 'create-set': '五個獨立場次已確認。請由各房核對名冊及準備狀態。', join: '玩家加入操作已確認，請核對目前名冊；尚不代表頭盔在線。', leave: '玩家移出操作已確認，請核對目前名冊。', command: '控制命令已確認。', 'venue-phase': '全館管理命令已確認。可從各房快照核對遊戲端套用狀態。' }[pending.kind]);
   } catch (error) {
     if (pending.kind === 'create' && error.layout) placement.rejected(pending.body.missionId, pending.body.mode, error.layout);
     if (pending.kind === 'create-set' && error.layout) placement.rejected(pending.body.missionId, 'Independent', error.layout);
@@ -765,6 +812,7 @@ $('retry-command').addEventListener('click', () => run(sendPending));
 $('venue-begin').addEventListener('click', () => run(() => venuePhase('Begin')));
 $('venue-pause').addEventListener('click', () => run(() => venuePhase('Pause')));
 $('venue-resume').addEventListener('click', () => run(() => venuePhase('Resume')));
+$('venue-end').addEventListener('click', () => run(() => venuePhase('End')));
 $('download-room-tickets').addEventListener('click', downloadRoomTickets);
 $('ticket-room').addEventListener('change', applyPermissions);
 document.querySelectorAll('[data-command]').forEach(button => button.addEventListener('click', () => runSession(() => command(button.dataset.command))));
