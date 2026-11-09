@@ -928,8 +928,12 @@ def main():
         fixture_manifest.write_text(json.dumps({'file_format_version':'1.0.0','runtime':
             {'api_version':'1.0','name':'VR Command pose fixture','library_path':str(pose_dll)}}),encoding='utf-8')
         tracking_loss=runtime/'openxr-tracking-loss.request'
+        trigger_command=runtime/'openxr-trigger.request'
+        trigger_ack=runtime/'openxr-trigger-ack.txt'
+        trigger_command.write_text('0',encoding='ascii')
         mock_environment={'XR_RUNTIME_JSON':str(fixture_manifest),'VR_COMMAND_OPENXR_MOCK_DLL':str(runtime_file),
-                          'VR_COMMAND_OPENXR_TRACKING_LOSS_FILE':str(tracking_loss)}
+                          'VR_COMMAND_OPENXR_TRACKING_LOSS_FILE':str(tracking_loss),
+                          'VR_COMMAND_OPENXR_TRIGGER_COMMAND':str(trigger_command),'VR_COMMAND_OPENXR_TRIGGER_ACK':str(trigger_ack)}
         entry=launch(create([1],label),label)
         sid=entry['sessionId']
         session='/api/sessions/'+sid
@@ -981,12 +985,12 @@ def main():
             save(label+'-readiness.json',latest)
         check(True,'management recognizes mock head and hands as tracked, and the separate desktop peer as simulated')
         begin=command(sid,'Begin')['appliedAtSequence']
-        def running():
+        def running(minimum_tick=1):
             metadata=request(session+'/world')
             packet=request(session+'/world/frames/'+str(metadata['acceptedSequence']))['packet']
             frame=packet['frame']
             rigs={row['id']:row['rig']['kind'] for row in frame['players'] if row['connected']}
-            return packet if packet['observedSequence']>=begin and frame['phase']=='Running' and frame['tick']>0 and rigs=={key:value[1] for key,value in expected.items()} else None
+            return packet if packet['observedSequence']>=begin and frame['phase']=='Running' and frame['tick']>=minimum_tick and rigs=={key:value[1] for key,value in expected.items()} else None
         packet=wait(running,15,'original Running replay frame with both rig types')
         save(label+'-running-pose.json',packet)
         tracked_pose=next(row for row in packet['frame']['players'] if row['id']==tracked['player']['id'])
@@ -997,8 +1001,26 @@ def main():
             for hand in hands),'accepted head and both hands match the fixture coordinates in the live world')
         tracked_id=tracked['player']['id']
         desktop_id=desktop['player']['id']
+        magazine=tracked_pose['magazine']
         original_config_hash=package.digest(tracked['configPath'])
         expected_admissions={(p['id'],p['admissionId'],p['roomId'],p['seat']) for p in owners}
+        acknowledged=[]
+
+        def expect_trigger(*states):
+            acknowledged.extend(states)
+            def synced():
+                return trigger_ack.is_file() and trigger_ack.read_text(encoding='ascii').splitlines()==acknowledged
+            wait(synced,12,'original OpenXR trigger sync '+states[-1])
+
+        def set_trigger(value,*states):
+            pending=trigger_command.with_suffix('.new')
+            with pending.open('x',encoding='ascii') as output:
+                output.write(value)
+            os.replace(pending,trigger_command)
+            expect_trigger(*states)
+
+        def magazine_at(frame):
+            return next(row['magazine'] for row in frame['frame']['players'] if row['id']==tracked_id)
         if args.observe_closure_ui:
             node=shutil.which('node')
             if not node:
@@ -1007,7 +1029,9 @@ def main():
             end_request=runtime/'openxr-console-end.request'
             descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'sessionId':sid,
                 'streamId':entry['ready']['streamId'],'endRequestFile':str(end_request),
-                'trackedParticipation':{'roomId':1,'seat':tracked['player']['seat']+1}}),encoding='utf-8')
+                'trackedParticipation':{'roomId':1,'seat':tracked['player']['seat']+1},
+                'weaponAmmunition':[{'name':c['player']['name'],'ammoUsed':int(c is tracked)} for c in clients_for_room]}),
+                encoding='utf-8')
             observer_log=(out/'openxr-console.log').open('xb')
             observer=subprocess.Popen([node,str(ROOT/'tests/browser/check-closure-native.cjs'),
                 '--descriptor',str(descriptor),'--output',str(observer_out),'--stop-file',str(observer_stop)],
@@ -1025,6 +1049,7 @@ def main():
 
         if args.observe_closure_ui:
             check(console_observation('ready.json')['selectedSessionId']==sid,'shipped console observes the original Running room')
+        expect_trigger('0 0')
 
         def tracking_checkpoint(available, minimum_tick):
             report=request(session+'/readiness')
@@ -1062,6 +1087,7 @@ def main():
         try:
             lost=wait(lambda:tracking_checkpoint(False,packet['frame']['tick']+1),12,'tracked seat loses readiness')
             save(label+'-tracking-lost.json',lost)
+            set_trigger('1','1 1')
             held=wait(lambda:tracking_checkpoint(False,lost['packet']['frame']['tick']+14),12,'tracked seat stays unavailable during Running')
             save(label+'-tracking-held.json',held)
             if args.observe_closure_ui:
@@ -1080,6 +1106,29 @@ def main():
         if args.observe_closure_ui:
             restored=console_observation('participation-recovered.json')
             check(restored['roomId']==1 and restored['seat']==tracked['player']['seat']+1,'shipped console clears the OpenXR tracking alert')
+        held_recovered=wait(lambda:running(recovered['packet']['frame']['tick']+14),12,'original rig remains ready with the trigger held')
+        check(magazine_at(held_recovered)==magazine,'trigger held through tracking recovery cannot fire')
+        set_trigger('0','0 0')
+        released=wait(lambda:running(held_recovered['frame']['tick']+14),12,'original ready rig after trigger release')
+        check(magazine_at(released)==magazine,'trigger release leaves the original magazine unchanged')
+        set_trigger('2','2 1','2 0')
+
+        def shot():
+            frame=running(released['frame']['tick']+1)
+            if frame and magazine_at(frame)<magazine-1:
+                raise RuntimeError('One test tap consumed more than one round')
+            return frame if frame and magazine_at(frame)==magazine-1 else None
+
+        fired=wait(shot,12,'one accepted shot from the new OpenXR trigger press')
+        after_tap=wait(lambda:running(fired['frame']['tick']+14),12,'original world after the single trigger tap')
+        check(magazine_at(after_tap)==magazine-1,'one new OpenXR trigger press consumes exactly one round')
+        save(label+'-trigger.json',{'acknowledged':acknowledged,'heldAfterRecovery':held_recovered,
+                                    'released':released,'fired':fired,'afterTap':after_tap})
+        if args.observe_closure_ui:
+            ammunition=console_observation('weapon-ammunition.json')
+            check({row['name']:row['ammoUsed'] for row in ammunition}
+                  == {c['player']['name']:str(int(c is tracked)) for c in clients_for_room},
+                  'shipped console shows the exact OpenXR and desktop ammunition counts before End')
             end_request.touch(exist_ok=False)
             check(console_observation('end-receipt.json')['sessionId']==sid,'shipped console ends the original OpenXR room')
         else:
@@ -1095,19 +1144,27 @@ def main():
             observer_log=None
             observer=None
         replay=read(out/(label+'-replay.json'))
-        checkpoints=[packet,lost['packet'],held['packet'],recovered['packet']]
+        checkpoints=[packet,lost['packet'],held['packet'],recovered['packet'],held_recovered,released,fired,after_tap]
         check(all(replay[frame['sequence']-1]['packet']==frame for frame in checkpoints),
               'exact tracked, lost and recovered Running checkpoints survive in the sealed replay')
         held_frames=replay[lost['packet']['sequence']-1:held['packet']['sequence']]
         check(len(held_frames)>1 and all({row['id']:row['connected'] for row in frame['packet']['frame']['players']}
               == {desktop_id:True,tracked_id:False} for frame in held_frames),
               'every saved frame during the held loss preserves desktop participation and OpenXR unavailability')
+        check(all(magazine_at(frame['packet'])==magazine for frame in replay[packet['sequence']-1:released['sequence']]),
+              'sealed playback confirms no firing throughout tracking loss, held recovery and release')
+        shots=[(frame['packet']['sequence'],event) for frame in replay
+               for event in frame['packet']['events'] if event['kind']=='ShotFired']
+        check(len(shots)==1 and released['sequence']<shots[0][0]<=fired['sequence']
+              and shots[0][1]['playerId']==tracked_id and shots[0][1]['hasRay'],
+              'sealed playback contains one ray-bearing shot by the original OpenXR player after the new press')
         for client in clients_for_room:
             log=client_log(client)
             finals=[json.loads(line.removeprefix('VR_CLIENT_DEBRIEF_FINAL ')) for line in log.splitlines() if line.startswith('VR_CLIENT_DEBRIEF_FINAL ')]
             connections=re.findall(r'^VR_CLIENT_CONNECTED id=(\d+)$',log,re.M)
             check(venue.player_result_phase(log)=='acknowledged' and len(finals)==len(connections)==1,'original result and terminal disconnect')
             debrief.validate_result(finals[0],{'id':sid},client['player'],entry['sealed'])
+            check(finals[0]['ammoUsed']==int(client is tracked),'sealed ammunition matches the original player input')
             client.update(final=finals[0],connection=int(connections[0]))
             save(client['player']['id']+'-result.json',client['final'])
             stop_player(client)

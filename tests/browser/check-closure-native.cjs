@@ -78,6 +78,19 @@ async function main() {
         await page.screenshot({ path: path.join(out, 'participation-recovered.png'), fullPage: true });
         await save('participation-recovered.json', await recovered.jsonValue());
       }
+      if (config.weaponAmmunition) {
+        const observed = await page.waitForFunction(expected => {
+          const rows = [...document.querySelectorAll('#statistics tr')].map(row => ({
+            name: row.cells[0]?.textContent, ammoUsed: row.cells[1]?.textContent
+          }));
+          return document.querySelector('#session-phase')?.textContent === '執行中'
+            && rows.length === expected.length
+            && expected.every(player => rows.some(row => row.name === player.name && row.ammoUsed === String(player.ammoUsed)))
+            ? rows : null;
+        }, config.weaponAmmunition, { polling: 100 });
+        await page.screenshot({ path: path.join(out, 'weapon-ammunition.png'), fullPage: true });
+        await save('weapon-ammunition.json', await observed.jsonValue());
+      }
       for (;;) { try { await fs.stat(config.endRequestFile); break; } catch { await sleep(100); } }
       const endResponse = page.waitForResponse(response => response.url() === config.base + '/api/sessions/' + config.sessionId + '/commands' && response.request().method() === 'POST', { timeout: 30000 });
       page.once('dialog', dialog => dialog.accept()); await page.locator('[data-command=End]').click();
