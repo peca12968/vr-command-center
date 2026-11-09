@@ -6,13 +6,13 @@ namespace VrCommand.Api;
 
 public record WorldEventFrame(long FrameSequence, long ElapsedMilliseconds, int MatchCount);
 public record WorldEventFramePage(string SessionId, string StreamId, long ThroughFrame, long AfterFrame,
-    long ScannedThroughFrame, long? NextAfterFrame, IReadOnlyList<WorldEventFrame> Frames);
+    long ScannedThroughFrame, long? NextAfterFrame, Guid? PlayerId, IReadOnlyList<WorldEventFrame> Frames);
 
 public sealed partial class WorldRecordings
 {
     private static readonly HashSet<string> EventKinds = new(Enum.GetNames<WorldEventKind>(), StringComparer.Ordinal);
 
-    public WorldEventFramePage EventFrames(Guid id, long after, long through, int? room, string? kind,
+    public WorldEventFramePage EventFrames(Guid id, long after, long through, int? room, string? kind, Guid? playerId,
         OperatorIdentity actor, CancellationToken cancellation)
     {
         var info = Info(id, actor);
@@ -23,6 +23,7 @@ public sealed partial class WorldRecordings
             throw new ArgumentException("Select a room within this recording.");
         if (kind is not null && !EventKinds.Contains(kind))
             throw new ArgumentException("Select a recorded combat event kind.");
+        if (playerId == Guid.Empty) throw new ArgumentException("Select a nonempty player ID.");
 
         // Read an immutable prefix while holding the SQLite gate. Parse it after releasing the publisher.
         var candidates = new List<(long Sequence, long Elapsed, string Packet, string? Statistics)>();
@@ -63,7 +64,10 @@ public sealed partial class WorldRecordings
             foreach (var entry in events.EnumerateArray())
             {
                 if (kind is not null && !entry.GetProperty("kind").ValueEquals(kind)) continue;
-                if (players is not null && (!entry.GetProperty("playerId").TryGetGuid(out var player) || !players.Contains(player))) continue;
+                if ((players is not null || playerId.HasValue)
+                    && (!entry.GetProperty("playerId").TryGetGuid(out var player)
+                        || (playerId.HasValue && player != playerId.Value)
+                        || (players is not null && !players.Contains(player)))) continue;
                 count++;
             }
             if (count == 0) continue;
@@ -71,6 +75,6 @@ public sealed partial class WorldRecordings
             if (frames.Count == 24) break;
         }
         if (scanned == after && after < through) throw new InvalidDataException("Saved world frame sequence has a gap.");
-        return new(info.Header.sessionId, info.Header.streamId, through, after, scanned, scanned < through ? scanned : null, frames);
+        return new(info.Header.sessionId, info.Header.streamId, through, after, scanned, scanned < through ? scanned : null, playerId, frames);
     }
 }

@@ -57,7 +57,7 @@ v0.16 新增 `environmentVersion:1`，依保存的 tick／環境重現雨、日�
 
 每頁顯示已查過的快照範圍及相符格數。同一格有多筆相符事件時，結果會列出筆數。即使這一頁沒有符合事件，只要還有保存格就可按「繼續搜尋」。搜尋未封存片段時沿用目前固定的保存尾端。換房間或事件種類會清除前一組搜尋結果。
 
-API 使用 `GET /api/sessions/{id}/world/event-frames`。必填 `throughFrame` 為已接受的保存尾端，選填 `afterFrame` 為不含在本頁的起始游標，預設為 0。可再加 `roomId` 與 `kind`，例如 `ShotFired` 或 `PlayerDamaged`。每次讀取最多 128 格及 24 個相符格，`nextAfterFrame` 非空時可用同一組條件接續。服務沿用場次讀取權限，從既有保存快照讀取事件與玩家房間。
+API 使用 `GET /api/sessions/{id}/world/event-frames`。必填 `throughFrame` 為已接受的保存尾端，選填 `afterFrame` 為不含在本頁的起始游標，預設為 0。可再加 `roomId` 與 `kind`，例如 `ShotFired` 或 `PlayerDamaged`。0.31.44 可加 `playerId`（玩家 UUID）與其他篩選同時使用，回應會帶回指定的 ID。每次讀取最多 128 格及 24 個相符格，`nextAfterFrame` 非空時可用同一組條件接續。服務沿用場次讀取權限，從既有保存快照讀取事件與玩家房間。 [從戰績開啟個人回放](REPORTS.md#從戰績開啟個人回放)
 
 ### 回放未封存的已保存片段
 

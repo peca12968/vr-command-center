@@ -22,7 +22,7 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged)
   }
   function update(value) {
     if (!value) kind.value = '';
-    const key = value ? JSON.stringify([value.sessionId, value.streamId, value.throughFrame, value.room, kind.value]) : '';
+    const key = value ? JSON.stringify([value.sessionId, value.streamId, value.throughFrame, value.room, value.playerId, kind.value]) : '';
     scope = value;
     if (key !== scopeKey) {
       cancel();
@@ -39,9 +39,10 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged)
 
   async function search(afterFrame) {
     if (!scope?.idle || pending) return;
-    const { sessionId, streamId, throughFrame, room } = scope;
+    const { sessionId, streamId, throughFrame, room, playerId } = scope;
     const query = new URLSearchParams({ afterFrame, throughFrame });
     if (room !== 'all') query.set('roomId', room);
+    if (playerId) query.set('playerId', playerId);
     if (kind.value) query.set('kind', kind.value);
     const request = new AbortController();
     pending = request;
@@ -52,7 +53,7 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged)
       const value = await (await response(`/api/sessions/${sessionId}/world/event-frames?${query}`, signal)).json();
       if (pending !== request) return;
       if (value.sessionId !== sessionId || value.streamId !== streamId || value.throughFrame !== throughFrame
-          || value.afterFrame !== afterFrame) throw new Error('回應的錄製範圍不同。');
+          || value.afterFrame !== afterFrame || (value.playerId ?? null) !== playerId) throw new Error('回應的錄製範圍不同。');
       page = value;
       results.replaceChildren(...page.frames.map(hit => {
         const row = document.createElement('li');
@@ -78,5 +79,5 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged)
   start.addEventListener('click', () => search(0));
   here.addEventListener('click', () => search(scope.frameSequence - 1));
   next.addEventListener('click', () => search(page.nextAfterFrame));
-  return { update, kind: () => kind.value };
+  return { update, fromStart: () => search(0), kind: () => kind.value };
 }

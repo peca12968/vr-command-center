@@ -25,9 +25,9 @@ public static class WorldRoutes
         app.MapGet("/api/sessions/{id:guid}/world/publish", Publish);
         app.MapGet("/api/sessions/{id:guid}/world/watch", Watch);
         app.MapGet("/api/sessions/{id:guid}/world/event-frames", (Guid id, long throughFrame, long? afterFrame, int? roomId,
-            string? kind, WorldRecordings store, HttpContext context) =>
+            string? kind, Guid? playerId, WorldRecordings store, HttpContext context) =>
         {
-            var page = store.EventFrames(id, afterFrame ?? 0, throughFrame, roomId, kind, Actor(context), context.RequestAborted);
+            var page = store.EventFrames(id, afterFrame ?? 0, throughFrame, roomId, kind, playerId, Actor(context), context.RequestAborted);
             context.Response.Headers.CacheControl = "no-store";
             return Results.Json(page, WorldJson.Options);
         });

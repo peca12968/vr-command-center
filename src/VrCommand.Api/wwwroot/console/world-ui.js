@@ -14,6 +14,7 @@ const roomName = room => room === 'all' ? '全部房間' : '房間 ' + room;
 export function mountWorld(getKey, unauthorized) {
   let active = false, scene, controller, epoch = 0, listEpoch = 0, listController, info, frame, geometry = '', mode = '', connected = false, received = 0;
   let connecting = false, stepping = false, savedLimit = null, savedFinished = false;
+  let reviewPlayer = null;
   const cameras = mountCameras(getKey, unauthorized, () => scene, freeView);
   const cameraForm = mountWorldCameraForm(() => scene, freeView);
   const eventSearch = mountWorldEventSearch(response, readFrame, eventNames, () => { if (frame) showEvents(frame); });
@@ -21,6 +22,7 @@ export function mountWorld(getKey, unauthorized) {
   function stop() { epoch++; controller?.abort(); controller = null; connected = connecting = stepping = false; scene?.weather.pause(); scene?.draw(); $('world-pause').textContent = '繼續回放'; }
   function stopList() { listEpoch++; listController?.abort(); listController = null; }
   function reset() {
+    reviewPlayer = null;
     stop(); stopList(); info = frame = savedLimit = null; savedFinished = false; geometry = ''; mode = ''; cameras.reset(); cameraForm.reset(); reviewControls();
     $('world-recording').replaceChildren(); $('world-player').hidden = true; message('選取已錄製的場次，開始觀戰或回放。');
     recordingControls(); bindRooms([]);
@@ -60,7 +62,8 @@ export function mountWorld(getKey, unauthorized) {
         picker.value = target.sessionId;
         resetRecording();
         const limit = target.mode === 'replay' && !target.complete ? target.throughSequence : null;
-        void connect(target.mode, 0, target.mode === 'replay' ? 1 : null, limit, target);
+        const sequence = target.playerId ? target.throughSequence : target.mode === 'replay' ? 1 : null;
+        void connect(target.mode, 0, sequence, limit, target);
         return;
       }
       if (rows.some(row => row.header.sessionId === selected)) picker.value = selected;
@@ -88,6 +91,7 @@ export function mountWorld(getKey, unauthorized) {
     $('world-replay').textContent = selected?.dataset.complete === 'false' ? '回放已保存片段' : '從頭回放';
   }
   function resetRecording() {
+    reviewPlayer = null;
     stop(); cameras.bind(null); cameraForm.reset(); info = frame = savedLimit = null; savedFinished = false; geometry = ''; mode = '';
     bindRooms([]); delete $('world-canvas').dataset.sequence;
     recordingControls(); reviewControls(); $('world-player').hidden = true; message('已切換場次，請開始觀戰或回放。');
@@ -139,7 +143,8 @@ export function mountWorld(getKey, unauthorized) {
   }
   function showStatistics() {
     const room = $('world-room').value;
-    const players = frame?.statistics.filter(player => room === 'all' || player.roomId === Number(room)) ?? [];
+    const players = frame?.statistics.filter(player => (!reviewPlayer || player.playerId === reviewPlayer.id)
+      && (room === 'all' || player.roomId === Number(room))) ?? [];
     $('world-statistics-heading').textContent = room && room !== 'all' ? `${roomName(room)} · 此快照已核對的統計` : '此快照已核對的統計';
     $('world-statistics-empty').hidden = !frame || players.length > 0;
     $('world-statistics').replaceChildren(...players.map(player => {
@@ -164,13 +169,16 @@ export function mountWorld(getKey, unauthorized) {
     const extend = $('world-frame-extend');
     extend.hidden = !canExtendSaved();
     extend.disabled = extend.hidden || !idle;
+    $('world-review-player-scope').hidden = !showing || !reviewPlayer;
+    $('world-review-player-name').textContent = reviewPlayer ? `檢討玩家 ${reviewPlayer.name} · ${shortId(reviewPlayer.id)}` : '';
     eventSearch.update(showing ? { sessionId: info.header.sessionId, streamId: info.header.streamId,
-      throughFrame, room: $('world-room').value, frameSequence: frame.packet.sequence, idle } : null);
+      throughFrame, room: $('world-room').value, playerId: reviewPlayer?.id ?? null, frameSequence: frame.packet.sequence, idle } : null);
   }
   function showEvents(value) {
     const players = new Map(value.statistics.map(player => [player.playerId.toLowerCase(), player]));
     const room = $('world-room').value, kind = eventSearch.kind();
     const rows = value.packet.events.filter(event => (!kind || event.kind === kind)
+      && (!reviewPlayer || event.playerId.toLowerCase() === reviewPlayer.id)
       && (room === 'all' || players.get(event.playerId.toLowerCase())?.roomId === Number(room))).map(event => {
       const row = document.createElement('tr');
       const player = players.get(event.playerId.toLowerCase());
@@ -298,10 +306,14 @@ export function mountWorld(getKey, unauthorized) {
   }
   async function connect(nextMode, milliseconds = 0, sequence = null, replayLimit = savedLimit, target = null) {
     const id = $('world-recording').value; if (!active || !id) return;
-    stop(); mode = nextMode; controller = new AbortController(); const request = epoch, signal = controller.signal;
-    if (nextMode === 'live') { savedLimit = null; savedFinished = false; }
+    stop(); mode = nextMode;
+    const own = controller = new AbortController(), request = epoch;
+    const playerReview = Boolean(target?.playerId);
+    const signal = playerReview ? AbortSignal.any([own.signal, AbortSignal.timeout(8000)]) : own.signal;
+    if (nextMode === 'live') { savedLimit = null; savedFinished = false; reviewPlayer = null; }
     const limit = nextMode === 'live' ? null : replayLimit;
     let hasHeader = false, reachedSavedEnd = false, lastSequence = sequence === null ? null : sequence - 1;
+    let playerFrame = null, playerComplete = false;
     connecting = true; reviewControls(); $('world-frame-message').textContent = '';
     message(nextMode === 'live' ? '正在連接即時觀戰…' : '正在讀取已保存快照…');
     try {
@@ -350,6 +362,13 @@ export function mountWorld(getKey, unauthorized) {
               message(`${info.header.origin} · ${info.header.rulesVersion} · ${info.header.assetSet === 'player-fire-v1' ? '軍事掩體／玩家及敵軍射擊效果 v1（依保存射線）' : info.header.assetSet === 'combat-effects-v1' ? '軍事掩體／敵軍射擊閃光及後座 v1（依保存射線）' : info.header.assetSet === 'armed-combatants-v1' ? '軍事掩體／敵軍雙手持槍／換彈 v1（合成姿勢）' : info.header.assetSet === 'weapon-actions-v1' ? '軍事掩體／人形敵軍／換彈動作 v1（合成手套非追蹤）' : info.header.assetSet === 'combatants-v1' ? '軍事掩體／步槍／人形敵軍 v1（命中採粗略包圍盒）' : info.header.assetSet === 'service-rifle-v1' ? '軍事掩體／玩家步槍 v1（命中／碰撞採包圍盒）' : info.header.assetSet === 'field-props-v1' ? '軍事掩體 v1（命中／碰撞採包圍盒）' : '基本幾何素材'} · VR 未校正。${info.header.origin === 'Simulation' ? '此場次使用合成頭手資料，無頭盔連接。' : '頭手來源請見角色資訊。'}${info.header.environmentVersion === 1 ? '環境聲光 v1 依保存的模擬時間重建，非原始音軌。' : '舊錄製沒有聲光效果版本，僅保留原有光霧顯示。'}`);
               status();
             } else if (type === 'frame') {
+              if (playerReview) {
+                if (!hasHeader || playerFrame || data.packet.sequence !== target.throughSequence
+                  || data.packet.frame.phase !== 'Ended' || data.packet.throughCombatSequence !== target.throughCombatSequence)
+                  throw new Error('回應的最終快照或戰鬥封存序號不同。');
+                playerFrame = data;
+                continue;
+              }
               if (limit !== null) {
                 const current = data.packet.sequence;
                 if (!hasHeader || reachedSavedEnd || !Number.isSafeInteger(current) || current < 1 || current > savedLimit
@@ -357,6 +376,10 @@ export function mountWorld(getKey, unauthorized) {
                 lastSequence = current;
               }
               show(data);
+            }
+            else if (type === 'complete' && playerReview) {
+              if (!playerFrame || playerComplete || !matchesTarget(data, target)) throw new Error('回應的世界封存範圍不同。');
+              info = data; playerComplete = true;
             }
             else if (type === 'status' || type === 'complete') { info = data; status(); }
             else if (type === 'saved-end' && limit !== null) {
@@ -368,9 +391,20 @@ export function mountWorld(getKey, unauthorized) {
       } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
       if (request === epoch) {
         if (limit !== null && !reachedSavedEnd) throw new Error('尚未讀到已保存片段尾端。');
+        if (playerReview && !playerComplete) throw new Error('尚未讀到原場次的封存結尾。');
         connected = false; status();
+        if (playerReview) {
+          reviewPlayer = { id: target.playerId, name: target.playerName };
+          show(playerFrame, true);
+          void eventSearch.fromStart();
+        }
       }
-    } catch (error) { if (request === epoch && !signal.aborted) { connected = connecting = false; message('觀戰已中斷：' + error.message + '；可重新連接。', true); status(); } }
+    } catch (error) {
+      if (request === epoch && !own.signal.aborted) {
+        if (playerReview) resetRecording();
+        connected = connecting = false; message('觀戰已中斷：' + error.message + '；可重新連接。', true); status();
+      }
+    }
   }
   $('world-refresh').addEventListener('click', () => refresh());
   $('world-sound').addEventListener('click', async () => { if (scene?.weather.version === 1 || scene?.weather.audio.combat.version === 1) { const pending = scene.weather.audio.toggle(); status(); await pending; if (active && getKey()) status(); } });
@@ -384,6 +418,11 @@ export function mountWorld(getKey, unauthorized) {
   $('world-frame-back').addEventListener('click', () => step(-1));
   $('world-frame-next').addEventListener('click', () => step(1));
   $('world-frame-extend').addEventListener('click', extendSaved);
+  $('world-review-clear-player').addEventListener('click', () => {
+    reviewPlayer = null;
+    if (frame) { showStatistics(); showEvents(frame); }
+    reviewControls();
+  });
   $('world-timeline').addEventListener('change', () => replayAt(Number($('world-timeline').value)));
   $('world-speed').addEventListener('change', () => { if (mode === 'replay') replayFromCurrent(); });
   $('world-actor').addEventListener('change', () => selectActor($('world-actor').value));

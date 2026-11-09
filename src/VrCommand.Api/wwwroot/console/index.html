@@ -169,6 +169,10 @@
           <div class="table-scroll"><table><caption class="sr-only">玩家戰鬥統計，含已離開玩家</caption><thead><tr><th>玩家</th><th>彈藥</th><th>擊殺</th><th>耗損</th><th>中彈</th><th>命中率</th><th>剩餘血量</th></tr></thead><tbody id="statistics"></tbody></table></div>
           <p class="hint">含曾離開的玩家。未收到戰鬥事件時數值為零；名冊與統計不代表裝置在線。</p>
           <div class="button-row"><label id="report-room-field" class="report-room-field" hidden>匯出範圍<select id="report-room" disabled></select></label><button id="export-report" type="button" class="secondary" disabled>下載最終報表 CSV</button><button id="export-report-bundle" type="button" class="quiet" hidden disabled>下載五房戰績 ZIP</button><span id="report-status" class="hint" role="status" aria-live="polite"></span></div>
+          <div id="player-review" hidden>
+            <div class="form-row"><label>戰後檢討玩家<select id="player-review-select" disabled></select></label><button id="open-player-review" type="button" class="quiet" disabled>開啟個人事件回放</button></div>
+            <p class="hint">戰鬥統計與世界回放都已封存後，可從個人戰績開啟原錄製。可選擇已離場的玩家。</p>
+          </div>
           <div class="subheading"><h3>最近操作紀錄</h3><span class="hint">最多 20 筆，非 3D 回放</span></div>
           <ol id="event-list" class="event-list"></ol>
         </section>
@@ -226,6 +230,7 @@
             <div id="world-event-table" class="table-scroll" hidden><table><caption class="sr-only">此格戰鬥事件</caption><thead><tr><th>事件</th><th>類型</th><th>玩家</th><th>敵軍</th><th>玩家耗損</th></tr></thead><tbody id="world-events"></tbody></table></div>
             <fieldset class="camera-positions">
               <legend>搜尋戰鬥事件</legend>
+              <div id="world-review-player-scope" class="button-row" hidden><span id="world-review-player-name"></span><button id="world-review-clear-player" type="button" class="quiet">顯示所有玩家</button></div>
               <label>事件種類<select id="world-event-kind" disabled><option value="">全部事件</option></select></label>
               <p class="hint">事件依下方選定的房間篩選。暫停後可搜尋已保存的快照，選取結果可停在該格。</p>
               <div class="button-row"><button id="world-event-search-start" type="button" class="quiet" disabled>從第一格搜尋</button><button id="world-event-search-here" type="button" class="quiet" disabled>從目前格搜尋</button><button id="world-event-search-next" type="button" class="quiet" disabled>繼續搜尋</button></div>
@@ -263,7 +268,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.43 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.44 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

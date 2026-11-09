@@ -313,6 +313,8 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       { shots: combat.acceptedSequence, frames: interrupted.acceptedSequence }, { polling: 100 });
     check(!(await page.locator('#closure-status').evaluate(panel => panel.classList.contains('closure-complete'))) && await page.locator('#export-report').isDisabled(),
       'Actual interrupted session reports accepted counts without declaring seals or enabling the final CSV');
+    check(await page.locator('#player-review-select').isDisabled() && await page.locator('#open-player-review').isDisabled(),
+      'An interrupted archive does not offer a sealed player review');
     await page.locator('#tab-world').click();
     await page.locator('#world-recording').selectOption(live.header.sessionId);
     check(await page.locator('#world-replay').innerText() === '回放已保存片段', 'An incomplete recording offers a bounded saved replay');
@@ -348,6 +350,8 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     const completeSource = demo('complete-world', 1), result = await completeSource.finished;
     check(result.code === 0, 'Native simulation produces a second complete persisted world: ' + result.error.slice(-300));
     const completed = JSON.parse(result.output);
+    const archiveRoute = `/sessions/${completed.sessionId}/world`;
+    const finalFrame = (await api(archiveRoute)).acceptedSequence;
     await page.locator('#world-refresh').click(); await page.locator(`#world-recording option[value="${completed.sessionId}"]`).waitFor({ state: 'attached' });
     await page.locator('#world-recording').selectOption(completed.sessionId);
     check(await page.locator('#world-camera-x').inputValue() === '' && await page.locator('#world-camera-apply').isDisabled(), 'Switching recordings clears the precise camera draft before reading a new world');
@@ -365,8 +369,6 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     check(await canvas.getAttribute('data-sequence') === paused, 'Replay seek reads indexed early state and pause holds the current frame');
     await page.locator('#world-timeline').evaluate(input => { input.value = input.max; input.dispatchEvent(new Event('change', { bubbles: true })); });
     await page.waitForFunction(() => document.querySelector('#world-status').textContent.includes('已結束'));
-    const archiveRoute = `/sessions/${completed.sessionId}/world`;
-    const finalFrame = (await api(archiveRoute)).acceptedSequence;
     const back = page.locator('#world-frame-back'), next = page.locator('#world-frame-next');
     await page.waitForFunction(() => !document.querySelector('#world-frame-back').disabled);
     check(await next.isDisabled() && Number(await canvas.getAttribute('data-sequence')) === finalFrame,
@@ -422,6 +424,45 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1) && (await canvas.boundingBox()).width > 280, 'Streamed world controls and canvas fit a mobile viewport');
     await page.screenshot({ path: path.join(screenshots, 'world-replay-mobile.png'), fullPage: true });
     await page.setViewportSize({ width: 1440, height: 1080 });
+    const finalPlayer = (await api(`/sessions/${completed.sessionId}/statistics`)).players[0];
+    await page.locator('#tab-operations').click();
+    await page.locator('#refresh').click();
+    await page.locator(`#session-select option[value="${completed.sessionId}"]`).waitFor({ state: 'attached' });
+    await page.locator('#session-select').selectOption(completed.sessionId);
+    await page.locator('#player-review-select').selectOption(finalPlayer.playerId);
+    const reviewRoute = '/api' + archiveRoute;
+    const watchPattern = `**${reviewRoute}/watch?**`;
+    await page.route(watchPattern, async route => {
+      const original = await route.fetch();
+      const body = (await original.text()).replace(/"throughCombatSequence":(\d+)/,
+        (_, sequence) => '"throughCombatSequence":' + (Number(sequence) + 1));
+      await route.fulfill({ response: original, body });
+    }, { times: 1 });
+    await page.locator('#open-player-review').click();
+    await page.waitForFunction(() => document.querySelector('#world-message').textContent.includes('戰鬥封存序號不同'));
+    check(!await page.locator('#world-player').isVisible() && !await page.locator('#world-review-player-scope').isVisible(),
+      'A substituted combat boundary does not open the sealed player review');
+    await page.locator('#tab-operations').click();
+    await page.locator('#player-review-select').selectOption(finalPlayer.playerId);
+    const reviewWatch = page.waitForRequest(request => new URL(request.url()).pathname === reviewRoute + '/watch');
+    const reviewSearch = page.waitForResponse(response => new URL(response.url()).pathname === reviewRoute + '/event-frames');
+    await page.locator('#open-player-review').click();
+    const watchQuery = new URL((await reviewWatch).url()).searchParams;
+    const personal = await (await reviewSearch).json();
+    await page.locator('#world-event-search-results button').first().waitFor();
+    check(watchQuery.get('mode') === 'replay' && watchQuery.get('fromFrame') === String(finalFrame)
+      && personal.playerId === finalPlayer.playerId && personal.throughFrame === finalFrame && personal.afterFrame === 0
+      && Number(await canvas.getAttribute('data-sequence')) === finalFrame && await page.locator('#world-review-player-scope').isVisible()
+      && (await page.locator('#world-statistics tr td').allTextContents()).join('|') === 'World Simulation|2|1|20|1|100%|80',
+      'Final player statistics open the exact sealed tail and start a player-ID search of the original archive');
+    await page.locator('#world-event-search-results button').first().click();
+    await page.waitForFunction(value => Number(document.querySelector('#world-canvas').dataset.sequence) === value, personal.frames[0].frameSequence, { polling: 50 });
+    check((await page.locator('#world-events tr').count()) === personal.frames[0].matchCount
+      && await page.locator('#world-review-player-scope').isVisible(), 'Jumping from personal results retains the selected player and original event count');
+    await page.screenshot({ path: path.join(screenshots, 'world-player-debrief.png'), fullPage: true });
+    await page.locator('#world-review-clear-player').click();
+    check(!await page.locator('#world-review-player-scope').isVisible() && await page.locator('#world-event-search-results button').count() === 0,
+      'Showing all players clears the prior personal results');
     const other = await context.newPage(); await other.goto(base + '/console/'); await other.locator('#login-key').fill(tokens.Room1); await other.locator('#login-form button').click();
     await other.locator('#tab-world').click(); await other.waitForFunction(() => document.querySelector('#world-message').textContent.includes('目前沒有'));
     check(await other.locator('#world-recording option').count() === 0, 'Room-scoped observer list reveals no foreign world'); await other.close();

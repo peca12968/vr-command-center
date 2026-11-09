@@ -156,6 +156,7 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         page = request(f"{search}?throughFrame={boundary}&roomId=5&kind=PlayerDamaged", "Room5")
         check(page == {"sessionId": session, "streamId": info["header"]["streamId"], "throughFrame": boundary,
                        "afterFrame": 0, "scannedThroughFrame": boundary, "nextAfterFrame": None,
+                       "playerId": None,
                        "frames": [{"frameSequence": boundary, "elapsedMilliseconds": combat_packet["elapsedMilliseconds"],
                                    "matchCount": sum(e["kind"] == "PlayerDamaged" for e in combat_packet["events"])}]},
               "Room and kind search returns the exact saved damage frame at an inclusive prefix limit")
@@ -171,6 +172,15 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         request(f"{search}?throughFrame={boundary}", "Room1", 403)
         request(f"{search}?throughFrame={boundary}", "invalid", 401)
         check(True, "Event search rejects invalid filters, missing frames and unauthorized readers")
+        player_id = exact["statistics"][0]["playerId"]
+        player_search = f"{search}?throughFrame={boundary}&roomId=5&kind=PlayerDamaged&playerId="
+        check(request(player_search + player_id, "Room5") == dict(page, playerId=player_id)
+              and request(player_search + str(uuid4()), "Room5")["frames"] == [],
+              "Player search intersects room and kind by stable saved player ID")
+        request(player_search + "00000000-0000-0000-0000-000000000000", "Room5", 400)
+        request(player_search + "not-an-id", "Room5", 400)
+        request(player_search + player_id, "Room1", 403)
+        check(True, "Player search rejects malformed IDs and retains original recording permissions")
         with request(route + f"/watch?mode=replay&fromFrame={combat_packet['sequence']}&rate=4", "Room5") as stream:
             check(event(stream)[0] == "header" and event(stream) == ("frame", exact),
                   "Resuming by frame starts on the same exact packet as a single-frame read")

@@ -27,7 +27,7 @@ const venueHistory = mountVenueHistory(api, selectVenueClosure);
 const readiness = mountReadiness(() => state, logout);
 const roomReadiness = mountRoomReadiness(() => state, logout, applyVenuePermissions, venueClimateText, venueEnemyText);
 const connections = mountConnections(() => state, logout);
-const closure = mountClosure(() => state, logout);
+const closure = mountClosure(() => state, logout, target => tab('world', target));
 const alignment = mountAlignment(api, download);
 const mrDeployment = mountMrDeployment(() => state, api);
 const mrVenue = mountMrVenueBundle(() => state, api, download);

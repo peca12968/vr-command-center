@@ -36,13 +36,16 @@ export function closureView(session, statistics, world, result = 'Waiting') {
     warning: result === 'Unavailable' || result === 'Missing' || result === 'Received' && !valid };
 }
 
-export function mountClosure(getState, unauthorized) {
+export function mountClosure(getState, unauthorized, openReview) {
   const panel = document.getElementById('closure-status'), combat = document.getElementById('closure-combat'), worldLabel = document.getElementById('closure-world'), summary = document.getElementById('closure-summary');
   const retained = document.getElementById('closure-retained');
   const fieldPanel = document.getElementById('field-evidence'), fieldButton = document.getElementById('download-field-evidence');
   const fieldStatus = document.getElementById('field-evidence-status');
+  const reviewPanel = document.getElementById('player-review'), reviewPlayer = document.getElementById('player-review-select');
+  const reviewButton = document.getElementById('open-player-review');
   let active = false, generation = 0, identity = '', controller = null, attempted = -Infinity, world = null, result = 'Waiting', refreshFailed = false;
   let fieldRequest = null;
+  let reviewTarget = null, reviewOptions = '';
   const context = () => {
     const state = getState(), session = state.session;
     return state.actor && state.key && !state.pending && session?.id === state.selected && sequence(session.sequence)
@@ -66,7 +69,32 @@ export function mountClosure(getState, unauthorized) {
     panel.classList.toggle('closure-complete', view.complete); panel.classList.toggle('warning', view.warning);
     fieldPanel.hidden = state.actor?.role !== 'Master' || state.session?.state !== 'Ended';
     fieldButton.disabled = fieldPanel.hidden || !!fieldRequest || !view.complete || !state.session?.startedAtUtc || !state.session?.players?.length;
+    renderReview(state, view.complete);
   }
+  function renderReview(state, complete) {
+    const { session, statistics } = state;
+    const shown = active && session?.state === 'Ended' && !!session.combatStream
+      && statistics?.sessionId === session.id && statistics.players.length > 0;
+    const players = shown ? statistics.players : [];
+    const options = JSON.stringify([shown ? session.id : null, players.map(player => [player.playerId, player.name, player.roomId])]);
+    if (options !== reviewOptions) {
+      const previous = reviewPlayer.dataset.session === session?.id ? reviewPlayer.value : '';
+      reviewPlayer.replaceChildren(new Option('請選擇玩家', ''), ...players.map(player =>
+        new Option(`${player.name} · 房間 ${player.roomId} · ${player.playerId.slice(0, 8)}`, player.playerId)));
+      reviewPlayer.value = players.some(player => player.playerId === previous) ? previous : '';
+      reviewPlayer.dataset.session = shown ? session.id : '';
+      reviewOptions = options;
+    }
+    const player = players.find(player => player.playerId === reviewPlayer.value);
+    reviewTarget = complete && player ? { mode: 'replay', sessionId: session.id, streamId: session.combatStream.streamId,
+      throughSequence: world.acceptedSequence, throughCombatSequence: session.combatStream.acceptedSequence, complete: true,
+      playerId: player.playerId, playerName: player.name } : null;
+    reviewPanel.hidden = !shown;
+    reviewPlayer.disabled = !complete;
+    reviewButton.disabled = !reviewTarget;
+  }
+  reviewPlayer.addEventListener('change', render);
+  reviewButton.addEventListener('click', () => { render(); if (reviewTarget) openReview(reviewTarget); });
   function reset() { clear(); identity = ''; refreshFailed = false; render(); }
   async function poll() {
     const state = getState(), id = identity, epoch = state.epoch, key = state.key, request = generation;

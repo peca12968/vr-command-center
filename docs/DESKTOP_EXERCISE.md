@@ -24,7 +24,7 @@ python scripts/check-desktop-exercise.py --api-dll <API-DLL> --player-exe <Windo
 
 每位玩家經既有武器 RPC 提交兩次射擊及一次換彈。驗證逐筆比對原射線的目標、命中、換彈、擊殺、各格統計和封存事件序號，並要求各席兩發兩中、一擊殺、命中率 100%。連線場次的 ZIP 亦與六份個別 CSV 比對。測試由程式產生輸入，玩家傷害與命中由遊戲伺服器判定。
 
-`--check-frame-review` 也逐房搜尋 `ShotFired` 並走到保存尾端。每頁的結果、命中筆數及游標皆與完整回放比較，逐格房間歸屬取自該格保存的玩家統計。結果保存於各場的 `*-frame-review.json`。
+`--check-frame-review` 也逐房與逐玩家搜尋 `ShotFired` 並走到保存尾端。每頁的結果、相符筆數及游標皆與完整回放比較，逐格房間歸屬取自該格保存的玩家統計。每位玩家的相符筆數也和其最終封存的彈藥用量核對。結果保存於各場的 `*-frame-review.json`。
 
 ## 多人動態與正常管理命令組合
 

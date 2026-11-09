@@ -175,33 +175,41 @@ def check_frame_review(v, entry, frames):
     searches = []
     through = len(frames)
     stream_id = entry['sealed']['world']['header']['streamId']
-    for room in entry['roomIds']:
+    scopes = [(room, None) for room in entry['roomIds']]
+    scopes.extend((None, player['id']) for player in entry['players'])
+    for room, player_id in scopes:
         expected = []
         for frame in frames:
-            players = {player['playerId'] for player in frame['statistics'] if player['roomId'] == room}
+            players = ({player_id} if player_id else
+                       {player['playerId'] for player in frame['statistics'] if player['roomId'] == room})
             packet = frame['packet']
             count = sum(event['kind'] == 'ShotFired' and event['playerId'] in players for event in packet['events'])
             if count:
                 expected.append({'frameSequence': packet['sequence'], 'elapsedMilliseconds': packet['elapsedMilliseconds'],
                                  'matchCount': count})
         if not expected:
-            raise RuntimeError('No saved shot event attributed to an original room')
+            raise RuntimeError('No saved shot event attributed to an original room or player')
+        filters = f'playerId={player_id}' if player_id else f'roomId={room}'
         after, hits, pages = 0, [], []
         while after < through:
-            page = v.request(f'{route}/event-frames?throughFrame={through}&afterFrame={after}&roomId={room}&kind=ShotFired')
+            page = v.request(f'{route}/event-frames?throughFrame={through}&afterFrame={after}&{filters}&kind=ShotFired')
             scanned = page['scannedThroughFrame']
             if (page['sessionId'] != entry['id'] or page['streamId'] != stream_id or page['throughFrame'] != through
-                    or page['afterFrame'] != after or not after < scanned <= min(after + 128, through)
+                    or page['afterFrame'] != after or page['playerId'] != player_id or not after < scanned <= min(after + 128, through)
                     or page['nextAfterFrame'] != (scanned if scanned < through else None)
                     or page['frames'] != [hit for hit in expected if after < hit['frameSequence'] <= scanned]
                     or len(page['frames']) > 24):
-                raise RuntimeError('Native event search did not match the room-scoped accepted replay or cursor')
+                raise RuntimeError('Native event search did not match the scoped accepted replay or cursor')
             hits.extend(page['frames'])
             pages.append(page)
             after = scanned
         if hits != expected:
             raise RuntimeError('Native event search omitted or repeated saved shot frames')
-        searches.append({'roomId': room, 'matchingEvents': sum(hit['matchCount'] for hit in hits), 'pages': pages})
+        count = sum(hit['matchCount'] for hit in hits)
+        if player_id and count != next(player['ammoUsed'] for player in entry['sealed']['statistics']['players']
+                                       if player['playerId'] == player_id):
+            raise RuntimeError('Player event search does not reconcile with final ammunition')
+        searches.append({'roomId': room, 'playerId': player_id, 'matchingEvents': count, 'pages': pages})
     v.save(entry['name'] + '-frame-review.json', {'complete': True, 'sequence': sequence,
            'resumedSequences': [frame['packet']['sequence'] for frame in resumed], 'frame': exact,
            'searches': searches})
@@ -486,7 +494,7 @@ def run(v):
             if not v.args.endurance:
                 playback=replay(v,e,pause if e is entries[0] else None);check(playback['complete'],e['name']+': all replay frames retain original bodies, movement/reload, seals and results')
                 if v.args.check_frame_review:
-                    check(True, e['name'] + ': exact shot frame, resumed frames and room search pages match the native archive')
+                    check(True, e['name'] + ': exact shot frame, resumed frames and room/player search pages match the native archive')
         if v.args.endurance:
             # All native sources are stopped first. Each independent reader still
             # consumes every frame at the original rate4 and its original deadline.
