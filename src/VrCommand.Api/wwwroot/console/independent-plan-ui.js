@@ -42,8 +42,10 @@ export function mountIndependentPlan({ available, catalog, pinned, common, inspe
       row.select.title = row.select.selectedOptions[0]?.textContent ?? '';
       const state = row.current?.state ?? 'empty';
       row.status.dataset.status = state;
-      row.status.textContent = { empty: '尚未選取', pending: '正在檢查場地…', valid: '場地檢查通過',
+      const definition = row.current?.revision.mission.definition;
+      const layoutStatus = { empty: '尚未選取', pending: '正在檢查場地…', valid: '場地檢查通過',
         invalid: '場地配置未通過，請查看本房預覽', error: '場地檢查未完成，可重新檢查' }[state];
+      row.status.textContent = definition ? `${definition.environment.mode} · ${definition.durationSeconds} 秒 · ${layoutStatus}` : layoutStatus;
     }
     optionKey = key;
   }
@@ -70,7 +72,7 @@ export function mountIndependentPlan({ available, catalog, pinned, common, inspe
     render, enabled, setRevision,
     preview: () => ({ roomId: previewRow().roomId, revision: previewRow().current?.revision }),
     ready: () => rows.every(row => row.current?.state === 'valid'),
-    assignments: () => rows.map(row => ({ roomId: row.roomId, missionId: row.current?.revision.mission.id })),
+    revisions: () => rows.map(row => row.current?.revision),
     reject(roomId) {
       const row = roomId ? rows[roomId - 1] : previewRow();
       if (!enabled() || !row?.current) return;

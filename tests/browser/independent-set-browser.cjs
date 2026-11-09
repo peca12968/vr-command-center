@@ -8,6 +8,18 @@ module.exports = async function independentSetBrowser({ context, api, tokens, ba
   const endpoint = '**/api/sessions/independent-set';
   const mode = page.locator('#launch-mode'), missionList = page.locator('#launch-mission');
   const submit = page.locator('#create-session-form button'), notice = page.locator('#notice');
+  const receipt = page.locator('#launch-independent-receipt');
+  const receiptRows = () => page.locator('#launch-independent-receipt-rows tr').evaluateAll(rows => rows.map(row => ({
+    missionId: row.dataset.missionId, cells: [...row.cells].map(cell => cell.textContent) })));
+  async function confirmPlan(accept) {
+    const pending = page.waitForEvent('dialog', { timeout: 5000 }).then(async dialog => {
+      const message = dialog.message();
+      if (accept) await dialog.accept(); else await dialog.dismiss();
+      return message;
+    });
+    const [message] = await Promise.all([pending, submit.click()]);
+    return message;
+  }
   const owned = new Set();
   async function open(target, role) {
     await target.goto(base + '/console/');
@@ -83,6 +95,10 @@ module.exports = async function independentSetBrowser({ context, api, tokens, ba
     check((await api('/rooms')).map(room => room.sessionId).join() === original.join() && await page.locator('#session-select').inputValue() === original[0]
       && committed.sessions.every(session => session.mission.id === mission.id && session.mission.definition.briefing === draft.briefing
         && session.mode === 'Independent' && session.state === 'Preparing'), 'Retry restores exactly the five original IDs and saved revision even after the mission head changes');
+    const originalReceipt = await receiptRows();
+    check(await receipt.isVisible() && originalReceipt.length === 5 && originalReceipt.every((row, index) => row.missionId === mission.id
+      && row.cells.join('|') === `房間 ${index + 1}|${draft.name} · 第 1 版|VR · 600 秒|${original[index]}`),
+      'The confirmed uniform batch shows all five original session IDs and saved versions');
     await page.unroute(endpoint, intercept);
     await page.locator('#rooms').screenshot({ path: path.join(screenshots, 'independent-set-prepared.png') });
 
@@ -96,7 +112,7 @@ module.exports = async function independentSetBrowser({ context, api, tokens, ba
       'Ending one room leaves the other four prepared sessions intact');
     for (const session of active) await end(session.id);
     const head = (await api(`/missions/${mission.id}/history`)).headId;
-    const alternateDraft = { ...draft, name: '房間各自的夜戰版本', durationSeconds: 420, environment: { ...draft.environment, weather: 'Storm', lightning: true },
+    const alternateDraft = { ...draft, name: '房間各自的夜戰版本', durationSeconds: 420, environment: { ...draft.environment, mode: 'MR', weather: 'Storm', lightning: true },
       props: [{ assetId: 'barrel', position: { x: 2, y: 0, z: 1 }, yawDegrees: 45 }] };
     const alternate = await api('/missions', 'POST', alternateDraft, 'Master', 201);
     await page.locator('#refresh').click();
@@ -126,9 +142,20 @@ module.exports = async function independentSetBrowser({ context, api, tokens, ba
     check(await roomMission(5).isVisible() && await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
       'All five assignment controls fit the mobile console without horizontal overflow');
     await page.setViewportSize({ width: 1440, height: 1080 });
+    const alternateHead = await api(`/missions/${alternate.id}/revisions`, 'POST', { ...alternateDraft, durationSeconds: 450 }, 'Master', 201, undefined, randomUUID());
+    await page.locator('#refresh').click(); await roomMission(4).selectOption(alternateHead.id); await enabled();
+    await page.locator('#tab-missions').click(); await page.locator('#edit-mission').selectOption(alternateHead.id); await page.locator('#load-mission').click();
+    await page.waitForFunction(() => document.querySelector('#draft-duration').value === '450' && !document.querySelector('#mission-fields').disabled);
+    await page.locator('#mission-version').selectOption(alternate.id); await page.locator('#compare-version').click();
+    await page.locator('#launch-compared-version').click(); await enabled();
+    check(await previewRoom.inputValue() === '4' && await roomMission(4).inputValue() === alternate.id && await roomMission(2).inputValue() === alternate.id
+      && await roomMission(1).inputValue() === head && await page.locator('#draft-duration').inputValue() === '450'
+      && (await roomLayout(4).innerText()).includes('MR · 420 秒'),
+      'A compared historical version applies only to the previewed room and keeps the newer editor draft');
     const plan = [head, alternate.id, head, alternate.id, alternate.id].map((missionId, index) => ({ roomId: index + 1, missionId }));
-    let mixed, sent;
+    let mixed, sent, attempts = 0;
     await page.route(endpoint, async route => {
+      attempts++;
       const current = { key: route.request().headers()['idempotency-key'], body: route.request().postDataJSON() };
       assert.deepEqual(current.body, { rooms: plan });
       if (!sent) {
@@ -137,24 +164,49 @@ module.exports = async function independentSetBrowser({ context, api, tokens, ba
         assert.equal(actual.status(), 201);
         mixed = await actual.json();
         for (const session of mixed.sessions) owned.add(session.id);
-        await api(`/missions/${alternate.id}/revisions`, 'POST', { ...alternateDraft, durationSeconds: 480 }, 'Master', 201, undefined, randomUUID());
+        await api(`/missions/${alternateHead.id}/revisions`, 'POST', { ...alternateDraft, durationSeconds: 480 }, 'Master', 201, undefined, randomUUID());
         await route.abort('failed');
       } else {
         assert.deepEqual(current, sent);
         const actual = await route.fetch();
         assert.equal(actual.status(), 200);
-        assert.equal((await actual.json()).duplicate, true);
-        await route.fulfill({ response: actual });
+        const result = await actual.json();
+        assert.equal(result.duplicate, true);
+        if (attempts === 2) {
+          result.sessions[3].mission.definition.durationSeconds = 480;
+          await route.fulfill({ status: 200, json: result });
+        } else await route.fulfill({ response: actual });
       }
     });
-    await submit.click(); await notice.filter({ hasText: '結果未確認' }).waitFor();
-    check(await roomMission(4).isDisabled() && await previewRoom.isDisabled(), 'An unresolved mixed request locks its room assignments');
+    const cancelled = await confirmPlan(false);
+    check(plan.every(({ roomId, missionId }) => cancelled.includes(`房間 ${roomId}　${missionId === head
+      ? `${draft.name} · 第 2 版 · VR · 600 秒` : `${alternateDraft.name} · 第 1 版 · MR · 420 秒`}`))
+      && attempts === 0 && (await api('/sessions')).length === 0 && await roomMission(4).inputValue() === alternate.id,
+      'Cancelling confirmation for the exact five saved versions leaves rooms free and sends no write');
+    check(await confirmPlan(true) === cancelled, 'Confirmation submits the same five assignments that the operator reviewed');
+    await notice.filter({ hasText: '結果未確認' }).waitFor();
+    check(await roomMission(4).isDisabled() && await previewRoom.isDisabled() && JSON.stringify(await receiptRows()) === JSON.stringify(originalReceipt),
+      'An unresolved mixed request locks its room assignments and retains only the last confirmed receipt');
+    await page.locator('#retry-command').click();
+    await page.waitForFunction(() => !document.querySelector('#retry-command').disabled && !document.querySelector('#pending-command').hidden, null, { polling: 100 });
+    check(attempts === 2 && JSON.stringify(await receiptRows()) === JSON.stringify(originalReceipt),
+      'A retry receipt with a different duration cannot replace the last confirmed batch');
     await page.locator('#retry-command').click(); await notice.filter({ hasText: '五個獨立場次已確認' }).waitFor();
     check(mixed.sessions.every((session, index) => session.roomIds[0] === index + 1 && session.mission.id === plan[index].missionId)
       && mixed.sessions[3].mission.definition.durationSeconds === 420
       && await roomMission(4).inputValue() === alternate.id && (await roomMission(4).locator('option:checked').innerText()).includes('歷史')
       && (await api('/rooms')).every((room, index) => room.sessionId === mixed.sessions[index].id),
       'A mixed retry keeps all original sessions and the assigned historical version after a library revision');
+    const rows = await receiptRows();
+    check(rows.length === 5 && rows.every((row, index) => row.missionId === plan[index].missionId
+      && row.cells.join('|') === (row.missionId === head ? `房間 ${index + 1}|${draft.name} · 第 2 版|VR · 600 秒|${mixed.sessions[index].id}`
+        : `房間 ${index + 1}|${alternateDraft.name} · 第 1 版|MR · 420 秒|${mixed.sessions[index].id}`)),
+      'The confirmed mixed receipt identifies the exact accepted VR and MR versions and session IDs');
+    await page.setViewportSize({ width: 390, height: 844 });
+    check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'The receipt keeps its table scroll inside the mobile viewport');
+    await receipt.screenshot({ path: path.join(screenshots, 'independent-mixed-receipt.png') });
+    await page.locator('#logout').click();
+    check(await receipt.evaluate(node => node.hidden) && (await receiptRows()).length === 0, 'Logout clears the confirmed five-room receipt');
   } finally {
     await page.unroute(endpoint);
     for (const id of owned) if ((await api(`/sessions/${id}`)).state !== 'Ended') await end(id);

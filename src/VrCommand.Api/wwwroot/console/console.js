@@ -178,6 +178,7 @@ function logout() {
   venueHistory.reset(); renderVenueClosure(null);
   state.props = []; state.prop = -1; clearPropHistory();
   roomPlan.reset(); placement.reset();
+  renderIndependentReceipt();
   clearInterval(timer);
   $('workspace').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true;
   $('identity').textContent = '尚未登入'; $('login-key').value = '';
@@ -597,6 +598,17 @@ function setEnemies(prefix, value) { $(prefix + '-count').value = value.count; $
 function loadEnvironment() { if (state.session) { setEnvironment('live', state.session.environment); state.environmentSequence = state.session.sequence; } }
 function loadEnemies() { if (state.session) { setEnemies('live', state.session.enemies); state.enemiesSequence = state.session.sequence; } }
 function loadClock() { if (state.session) { $('clock-auto-end').checked = state.session.missionClock?.autoEnd === true; state.clockSequence = state.session.sequence; } }
+function renderIndependentReceipt(sessions = [], versions = []) {
+  const rows = sessions.map((session, index) => {
+    const row = element('tr'), title = element('th', `房間 ${index + 1}`);
+    const { name, durationSeconds, environment } = session.mission.definition;
+    title.scope = 'row'; row.dataset.missionId = session.mission.id;
+    row.append(title, element('td', `${name} · 第 ${versions[index].number} 版`), element('td', `${environment.mode} · ${durationSeconds} 秒`), element('td', session.id));
+    return row;
+  });
+  $('launch-independent-receipt-rows').replaceChildren(...rows);
+  $('launch-independent-receipt').hidden = rows.length === 0;
+}
 async function createSession() {
   if (state.pending) return;
   const plan = launchPlan();
@@ -604,8 +616,15 @@ async function createSession() {
   if (!placement.canLaunch()) { placement.scheduleLaunch(); notify('請先完成保存版本的場地檢查，再建立新場次。', true); return; }
   if (!plan.revision || !plan.available) { notify('請選取已保存的任務及空閒房間。', true); return; }
   const independentSet = plan.body.mode === 'IndependentSet';
+  const revisions = plan.mixed ? roomPlan.revisions() : independentSet ? plan.body.roomIds.map(() => plan.revision) : [];
+  const versions = revisions.map(({ mission, number }) => ({ id: mission.id, number, name: mission.definition.name,
+    durationSeconds: mission.definition.durationSeconds, mode: mission.definition.environment.mode }));
+  if (plan.mixed) {
+    const summary = versions.map(({ name, number, mode, durationSeconds }, index) => `房間 ${index + 1}　${name} · 第 ${number} 版 · ${mode} · ${durationSeconds} 秒`);
+    if (!confirm(`依下列保存版本建立五個獨立準備場次？\n\n${summary.join('\n')}`)) return;
+  }
   state.pending = { kind: independentSet ? 'create-set' : 'create', path: independentSet ? '/sessions/independent-set' : '/sessions',
-    method: 'POST', requestId: uuid(), body: plan.mixed ? { rooms: roomPlan.assignments() }
+    method: 'POST', requestId: uuid(), versions, body: plan.mixed ? { rooms: versions.map(({ id }, index) => ({ roomId: index + 1, missionId: id })) }
       : independentSet ? { missionId: plan.body.missionId } : plan.body };
   await sendPending();
 }
@@ -641,9 +660,14 @@ async function sendPending() {
     if (pending.kind === 'create-set') {
       const sessions = response?.sessions;
       if (!Array.isArray(sessions) || sessions.length !== 5 || new Set(sessions.map(session => session?.id)).size !== 5
-          || sessions.some((session, index) => !session?.id || session.mode !== 'Independent' || session.roomIds?.length !== 1
-            || session.roomIds[0] !== index + 1 || session.mission?.id !== (pending.body.rooms?.[index]?.missionId ?? pending.body.missionId)))
+          || sessions.some((session, index) => {
+            const version = pending.versions[index], definition = session?.mission?.definition;
+            return !session?.id || session.mode !== 'Independent' || session.roomIds?.length !== 1 || session.roomIds[0] !== index + 1
+              || session.mission?.id !== version.id || definition?.name !== version.name || definition?.durationSeconds !== version.durationSeconds
+              || definition?.environment?.mode !== version.mode;
+          }))
         throw new Error('Incomplete five-room preparation receipt');
+      renderIndependentReceipt(sessions, pending.versions);
       $('include-ended').checked = sessions.some(session => session.state === 'Ended');
       resetSelection((sessions.find(session => session.state !== 'Ended') ?? sessions[0]).id);
     }
