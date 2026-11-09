@@ -3,6 +3,7 @@ import { mountReplay } from './replay-ui.js';
 import { mountLayout } from './layout-ui.js';
 import { mountAlignment } from './alignment-ui.js';
 import { mountAlignmentPins } from './alignment-pins-ui.js';
+import { mountMrDeployment } from './mr-deployment-ui.js';
 import { mountReport } from './report-ui.js';
 import { mountReadiness, mountRoomReadiness } from './readiness-ui.js';
 import { mountConnections, validDestination } from './connection-ui.js';
@@ -22,6 +23,7 @@ const roomReadiness = mountRoomReadiness(() => state, logout);
 const connections = mountConnections(() => state, logout);
 const closure = mountClosure(() => state, logout);
 const alignment = mountAlignment(api, download);
+const mrDeployment = mountMrDeployment(() => state, api);
 const alignmentPins = mountAlignmentPins({ state: () => state,
   checkFile: file => api('/room-alignment/check-file', 'POST', file),
   pin: (id, roomAlignment, sequence) => runSession(() => {
@@ -137,6 +139,7 @@ function logout() {
   closure.active(false); closure.reset();
   alignment.reset();
   alignmentPins.active(false);
+  mrDeployment.active(false);
   replay.active(false); replay.reset(); world.active(false); world.reset(); readiness.active(false); readiness.reset(); roomReadiness.active(false); connections.active(false); connections.reset();
   state.epoch++; state.key = ''; state.actor = null; state.selected = null; state.session = null; state.pending = null;
   state.rooms = []; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
@@ -236,6 +239,7 @@ function resetSelection(id) {
   report.reset(); readiness.reset(); connections.reset(); state.statistics = null; state.selected = id; state.session = null;
   closure.reset();
   alignmentPins.reset();
+  mrDeployment.reset();
   $('session-panel').hidden = true;
 }
 async function selectSession(id) {
@@ -328,6 +332,7 @@ function applyPermissions() {
     button.disabled = locked || ended || !ownsRoom(room) || (button.dataset.playerAction === 'ticket' && !canIssueTicket(session, room));
   });
   alignmentPins.update();
+  mrDeployment.update();
 }
 function row(cells) { const tr = element('tr'); for (const value of cells) { const td = element('td'); if (value instanceof Node) td.append(value); else td.textContent = value; tr.append(td); } return tr; }
 function emptyTable(id, columns, message) { const tr = element('tr'), td = element('td', message, 'empty-cell'); td.colSpan = columns; tr.append(td); $(id).replaceChildren(tr); }
@@ -653,6 +658,7 @@ function tab(name) {
   closure.active(name === 'operations');
   alignment.active(name === 'missions' && master());
   alignmentPins.active(name === 'operations');
+  mrDeployment.active(name === 'operations');
 }
 function submit(id, action, execute = run) { $(id).addEventListener('submit', event => { event.preventDefault(); execute(action); }); }
 $('login-form').addEventListener('submit', login);

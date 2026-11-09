@@ -5,7 +5,7 @@ from pathlib import Path,PurePosixPath
 ROOT=Path(__file__).resolve().parents[1];TOP='VRCommand-ControlServer'
 SECRET_KEYS={'operatorkeys','operatorkeyfile','gameserverkey','jointicket','playerticketsigningkey','controlpipetoken'}
 FORBIDDEN_PARTS={'data','missions','sessions','telemetry','journals'}
-README='''VR Command Windows 管理服務包 API 0.31.0／控制台 0.31.24
+README='''VR Command Windows 管理服務包 API 0.31.0／控制台 0.31.25
 
 完整解壓後開啟 Start-Control.exe。
 1. 首次選擇監聽IPv4與埠號（預設127.0.0.1:5081），按「新增資料實例」。
@@ -18,6 +18,7 @@ README='''VR Command Windows 管理服務包 API 0.31.0／控制台 0.31.24
 每實例有自己的七角色金鑰、玩家票券簽章金鑰及SQLite資料；不要交付或公開這些資料。
 本包本身沒有登入金鑰、票券、任務資料庫、遊戲伺服器設定或Unity遊戲。
 GameServer角色供遊戲伺服器使用，不能拿到玩家端；玩家使用控制台下載的短票券。
+主控與各房可在「Quest 3 MR 席位部署核對」選擇同一席的連線檔與房間原始校正檔。
 停止管理API不會假造任務End、世界seal或玩家結果；遊戲伺服器與任務收尾分開處理。
 
 執行環境：Windows x64及.NET Framework 4.8。API已自含.NET/ASP.NET Core，不需安裝Python或.NET SDK。
@@ -56,7 +57,7 @@ def payload(name,content=None):
 def publication(build):
     build=plain(build);receipt=read(build/'publish-receipt.json');folder=plain(build/'publication')
     if receipt.get('schemaVersion')!=1 or receipt.get('target')!='win-x64' or receipt.get('apiVersion')!='0.31.0':raise ValueError('Use an actual supported Windows publication')
-    if receipt.get('consoleVersion')!='0.31.24':raise ValueError('Publish the current console 0.31.24 before packaging')
+    if receipt.get('consoleVersion')!='0.31.25':raise ValueError('Publish the current console 0.31.25 before packaging')
     expected=receipt['files'];actual={p.relative_to(folder).as_posix() for p in folder.rglob('*') if p.is_file()}
     if actual!=set(expected):raise ValueError('Publication contains missing or additional files')
     for name,value in expected.items():

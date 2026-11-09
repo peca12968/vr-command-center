@@ -214,6 +214,18 @@ app.MapPost("/api/sessions/{id:guid}/rooms/{roomId:int}/join-ticket-bundle", (Gu
     context.Response.Headers.CacheControl = "no-store";
     return Results.File(bundle, "application/zip", FormattableString.Invariant($"room-{roomId:00}-connections.zip"));
 });
+app.MapPost("/api/sessions/{id:guid}/rooms/{roomId:int}/players/{playerId:guid}/deployment-check", async (Guid id, int roomId, Guid playerId, SessionManager manager, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var actor = Actor(context);
+    if (actor.Role != OperatorRole.Master && (actor.Role != OperatorRole.RoomController || actor.RoomId != roomId))
+        throw new AccessDeniedException("Deployment checks are limited to the controller's room.");
+    var files = await MrDeploymentCheck.ReadFiles(context.Request, context.RequestAborted);
+    var session = manager.Get(id, actor);
+    var player = session.Players.SingleOrDefault(p => p.Id == playerId && p.RoomId == roomId)
+        ?? throw new KeyNotFoundException("Player does not exist in this room.");
+    return MrDeploymentCheck.Check(session, player, files, ticketSigner);
+});
 app.MapDelete("/api/sessions/{id:guid}/players/{playerId:guid}", (Guid id, Guid playerId, SessionManager manager, HttpContext context) =>
 {
     manager.Leave(id, playerId, Actor(context), RequestId(context), AdmissionMatch(context), requireAdmissionMatch: true);

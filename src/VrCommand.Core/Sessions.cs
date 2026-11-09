@@ -11,7 +11,7 @@ public record MissionClockStatus(int Version, bool AutoEnd, long ConfiguredAtSeq
 public record MissionClockExpiration(Guid StreamId, long ObservedSequence, long Tick);
 public sealed record RoomAlignmentPins(string? Room1 = null, string? Room2 = null, string? Room3 = null, string? Room4 = null, string? Room5 = null)
 {
-    internal string? ForRoom(int room) => room switch { 1 => Room1, 2 => Room2, 3 => Room3, 4 => Room4, 5 => Room5, _ => null };
+    public string? ForRoom(int room) => room switch { 1 => Room1, 2 => Room2, 3 => Room3, 4 => Room4, 5 => Room5, _ => null };
 }
 public record Player(Guid Id, string Name, int RoomId, HeadsetKind Headset, int Seat = -1, Guid AdmissionId = default);
 public record SessionView(Guid Id, SessionMode Mode, int[] RoomIds, Mission Mission,
