@@ -225,15 +225,14 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `closure` | 原批次的 `closure.json` 路徑 |
 | `verifyPlayerSources` | 選用。填布林值 `true` 核對所有原席位的日誌與姿態。每場均須提供 `worldJournal` |
 | `udpPreflightBatch` 或 `udpPreflightBatches` | 選用。單份原 Quest 批次報告路徑，或 1 至 25 份原報告路徑的陣列。可搭配逐場 `udpSourcePreflights` |
+| `questCaptures` | 選用。填原 Quest 網路計畫及 1 至 25 份完整日誌擷取報告。可與 UDP 預檢報告一併使用 |
 | `sessions` | 獨立模式填五場，合併模式填一場 |
 | `sessions[].evidenceZip`、`launcherReport`、`serverLog` | 各場原 ZIP、啟動器終止報告及伺服器日誌的路徑 |
 | `sessions[].worldJournal` | 選用。若驗收回放檔，每個場次都填自己關閉後的原始 `.worldlog` 路徑 |
 | `sessions[].roomAlignments` | 選用。核對 MR 校正時，每個 MR 場次按房號填原校正檔，例如 `{"2":"room-02-alignment.json"}` |
 | `sessions[].udpPreflight` | 選用。每場提供原 UDP 預檢報告的 `listener` 與 `probe` 路徑 |
 | `sessions[].udpSourcePreflights` | 選用。每場按實際來源 IPv4 填一組 `listener` 與 `probe`。可補上 Quest 批次以外的來源 |
-| `sessions[].players` | 每房五筆。每筆填玩家裝置實際使用的 IPv4 字串 `address` 及原日誌路徑 `log`。Quest 3 原 logcat 另填數字 `logcatPid`，例如 `7342` |
-
-若使用 Quest 整批擷取，從 `capture-report.json` 依 `sessionId` 和 `roomId` 取用 `complete` 為 `true` 的席位，將 `log` 路徑依清單位置調整，再填入 `logcatPid` 和原 IPv4。 [整批擷取](QUEST3.md#一次擷取五房-quest-日誌)
+| `sessions[].players` | 每房五席。使用 `questCaptures` 時只填該場其餘的 Windows 席位，若該場所有席位均由 Quest 報告提供，可省略此欄。每筆填玩家裝置實際使用的 IPv4 字串 `address` 及原日誌路徑 `log`。手動填入 Quest 3 原 logcat 時另填數字 `logcatPid`，例如 `7342` |
 
 路徑可以是絕對路徑，或相對於 `venue.json` 所在資料夾。同一檔案只能使用一次。例如獨立模式下，第 1 房的清單項目可由下列 PowerShell 建立。請依實際驗收配置填入各席地址與檔名。
 
@@ -261,6 +260,24 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json
 摘要核對五房各五個席位、原封存來源、每位玩家的原入場與 UDP 來源，以及 25 筆伺服器戰績確認。它逐房列出在伺服器位址清單以外的玩家數。`direct-lan` 至少須觀察到一筆這類連線，仍須依實際設備及網路拓撲核對主機數、同時遊玩與容量。
 
 提供回放檔的整批驗收會檢查每場最後影格已觀察到該批結束指令，並輸出 `worldJournalsVerified` 與逐場摘要。回放畫面及遊戲事件內容可用原回放介面另行檢視。
+
+### 直接使用 Quest 批次擷取報告
+
+在 `direct-lan` 場館清單加入下列欄位。保留每份原 `capture-report.json` 與同一資料夾內的原日誌。網路計畫使用 Quest UDP 預檢的版本 1 格式，列出這次五房所有遊戲端點，以及各 Quest 席位實際使用的 IPv4。 [網路計畫格式](QUEST3.md#批次預檢五房-quest-席位) · [整批擷取](QUEST3.md#一次擷取五房-quest-日誌)
+
+```json
+{
+  "questCaptures": {
+    "networkPlan": "network-plan.json",
+    "reports": [
+      "quest-capture-a/capture-report.json",
+      "quest-capture-b/capture-report.json"
+    ]
+  }
+}
+```
+
+每份報告須完整，合起來必須剛好涵蓋計畫列出的 Quest 席位。工具重讀日誌核對位元組數和 SHA-256，再核對原程序、房號席位、伺服器觀察到的 IPv4、遊戲端點和戰績確認。成功摘要會列出 `questCaptureBatchesVerified` 及 `questCaptureSeatsVerified`。混合場可在 `sessions[].players` 補上 Windows 日誌。若需要手動提交已完成的 Quest 日誌，沿用上方 `players` 及 `logcatPid` 格式。
 
 ### 核對 MR 校正封存
 

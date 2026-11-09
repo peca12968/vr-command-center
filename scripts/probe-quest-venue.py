@@ -17,8 +17,10 @@ ROOT = Path(__file__).resolve().parent
 SPEC = importlib.util.spec_from_file_location('quest_udp', ROOT / 'probe-quest-udp.py')
 quest_udp = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(quest_udp)
+FIELD_SPEC = importlib.util.spec_from_file_location('field_results', ROOT / 'verify-field-results.py')
+field = importlib.util.module_from_spec(FIELD_SPEC)
+FIELD_SPEC.loader.exec_module(field)
 CREATE_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
-ROOMS = tuple(range(1, 6))
 
 
 def require(condition, message):
@@ -35,58 +37,21 @@ def read_json(raw):
     return json.loads(raw.decode('utf-8-sig'), object_pairs_hook=unique_fields)
 
 
-def read_plan_file(path):
-    with path.open('rb') as source:
-        raw = source.read(32769)
-    require(len(raw) <= 32768, 'Network plan or device map is too large.')
-    value = read_json(raw)
-    require(type(value) is dict and type(value.get('version')) is int and value['version'] == 1, 'Expected a version 1 JSON file.')
-    return value
-
-
-def seat_rows(rows, field):
-    require(type(rows) is list and 1 <= len(rows) <= 25, 'Expected 1 to 25 mapped Quest seats.')
-    seats = {}
-    for row in rows:
-        require(type(row) is dict and row.keys() == {'roomId', 'seat', field}, 'Unexpected seat mapping fields.')
-        room, seat, value = row['roomId'], row['seat'], row[field]
-        require(type(room) is int and room in ROOMS and type(seat) is int and seat in ROOMS and type(value) is str,
-                'Invalid Quest seat mapping.')
-        require((room, seat) not in seats, 'Quest seat is listed more than once.')
-        seats[room, seat] = value
-    return seats
-
-
 def load_plan(device_map_path, network_plan_path):
-    device_map = read_plan_file(device_map_path)
-    network = read_plan_file(network_plan_path)
-    require(device_map.keys() == {'version', 'seats'} and network.keys() == {'version', 'mode', 'endpoints', 'sources'},
-            'Unexpected device map or network plan fields.')
-    serials = seat_rows(device_map['seats'], 'serial')
-    sources = seat_rows(network['sources'], 'address')
+    device_map = field.read_quest_plan_file(device_map_path)
+    require(device_map.keys() == {'version', 'seats'}, 'Unexpected Quest device map fields.')
+    serials = field.quest_seats(device_map['seats'], 'serial')
+    mode, endpoints, sources = field.read_quest_network_plan(network_plan_path)
     require(serials.keys() == sources.keys(), 'Network sources must match the mapped Quest seats exactly.')
     require(len(set(serials.values())) == len(serials) and all(re.fullmatch(r'[A-Za-z0-9\[][A-Za-z0-9._:%\[\]-]{0,127}', value)
             for value in serials.values()), 'Use distinct explicit ADB serials.')
-    require(len({quest_udp.address(value) for value in sources.values()}) == len(sources), 'Use a distinct IPv4 for each mapped Quest.')
-    mode = network['mode']
-    require(mode in ('Independent', 'Linked'), 'Expected Independent or Linked venue mode.')
-    expected = {ROOMS} if mode == 'Linked' else {(room,) for room in ROOMS}
-    endpoints = network['endpoints']
-    require(type(endpoints) is list and len(endpoints) == len(expected), 'Provide every game endpoint for the venue mode.')
-    groups, used_bindings = {}, set()
-    for row in endpoints:
-        require(type(row) is dict and row.keys() == {'roomIds', 'address', 'port'}, 'Unexpected game endpoint fields.')
-        rooms, address, port = row['roomIds'], row['address'], row['port']
-        require(type(rooms) is list and all(type(room) is int for room in rooms) and tuple(rooms) in expected
-                and tuple(rooms) not in groups and type(address) is str and type(port) is int and 1024 <= port <= 65535,
-                'Invalid or repeated game endpoint.')
-        binding = quest_udp.address(address), port
-        require(binding not in used_bindings, 'A game binding is used by more than one endpoint.')
-        used_bindings.add(binding)
+    groups = []
+    for rooms, (address, port) in sorted(endpoints.items()):
         devices = [{'roomId': room, 'seat': seat, 'serial': serials[room, seat], 'address': sources[room, seat]}
                    for room, seat in sorted(serials) if room in rooms]
-        groups[tuple(rooms)] = {'roomIds': rooms, 'address': address, 'port': port, 'devices': devices}
-    return mode, [groups[rooms] for rooms in sorted(groups) if groups[rooms]['devices']]
+        if devices:
+            groups.append({'roomIds': list(rooms), 'address': address, 'port': port, 'devices': devices})
+    return mode, groups
 
 
 def device_ready(adb, serial):

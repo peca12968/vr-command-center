@@ -1,9 +1,11 @@
 import asyncio
 import base64
+from contextlib import redirect_stderr
 from copy import deepcopy
 import hashlib
 import importlib.util
 import ipaddress
+import io
 import json
 from pathlib import Path
 import shutil
@@ -230,6 +232,69 @@ def venue_fixture(root, mode, *, remote=False, quest_per_room=0, with_journals=F
     return path, manifest, batch
 
 
+def quest_capture_venue_fixture(root, mode, *, quest_per_room=2, batches=2, use_capture_tool=False):
+    path, manifest, _ = venue_fixture(root, mode, remote=True, quest_per_room=quest_per_room)
+    network = {'version': 1, 'mode': mode, 'endpoints': [], 'sources': []}
+    mapped, inputs = [], {}
+    for entry in manifest['sessions']:
+        session, _, endpoint = field.management_zip(root / entry['evidenceZip'])
+        network['endpoints'].append({'roomIds': session['roomIds'], 'address': endpoint['address'], 'port': endpoint['port']})
+        for owner, player in zip(session['players'], entry['players']):
+            if 'logcatPid' not in player:
+                continue
+            room, seat = owner['roomId'], owner['seat'] + 1
+            serial = f'mock-{room}-{seat}'
+            network['sources'].append({'roomId': room, 'seat': seat, 'address': player['address']})
+            mapped.append({'roomId': room, 'seat': seat, 'serial': serial, 'port': endpoint['port'],
+                           'sessionId': session['id'], 'playerId': owner['id'], 'admissionId': owner['admissionId']})
+            # Keep CRLF bytes so the capture and verifier check the original encoding.
+            inputs[serial] = (root / player['log']).read_bytes().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
+        entry['players'] = [player for player in entry['players'] if 'logcatPid' not in player]
+        if not entry['players']:
+            del entry['players']
+    if use_capture_tool:
+        adb = root / 'mock-adb.py'
+        adb.write_text("""from pathlib import Path
+import sys
+assert sys.argv[1] == '-s'
+serial = sys.argv[2]
+if sys.argv[3:] == ['shell', 'pidof', 'com.vrcommand.quest']:
+    print(7342)
+else:
+    assert sys.argv[3:] == ['logcat', '-b', 'main', '--pid=7342', '-v', 'threadtime', '-s', 'Unity:I']
+    sys.stdout.buffer.write((Path(__file__).parent / (serial + '.log')).read_bytes())
+""", encoding='utf-8')
+        for serial, raw in inputs.items():
+            (root / (serial + '.log')).write_bytes(raw)
+    reports = []
+    for index in range(batches):
+        directory = root / f'capture batch {index + 1}'
+        seats = mapped[index::batches]
+        if use_capture_tool:
+            plan = {'version': 1, 'topology': mode, 'seats': seats}
+            with redirect_stderr(io.StringIO()):
+                result = asyncio.run(capture_tool.capture_venue([sys.executable, str(adb)], plan, directory, 25))
+            assert result['complete'] and result['capturedSeats'] == len(seats)
+        else:
+            directory.mkdir()
+            captured = []
+            for row in seats:
+                log = f"room-{row['roomId']:02}-seat-{row['seat']:02}-logcat.txt"
+                raw = inputs[row['serial']]
+                (directory / log).write_bytes(raw)
+                captured.append({key: row[key] for key in ('roomId', 'seat', 'sessionId', 'port')} |
+                                {'complete': True, 'log': log, 'logcatPid': 7342, 'bytes': len(raw),
+                                 'sha256': hashlib.sha256(raw).hexdigest()})
+            (directory / 'capture-report.json').write_text(json.dumps(
+                {'version': 1, 'complete': True, 'topology': mode, 'expectedSeats': len(seats),
+                 'capturedSeats': len(seats), 'scope': 'quest-logcat-only', 'seats': captured}), encoding='utf-8')
+        reports.append(str((directory / 'capture-report.json').relative_to(root)))
+    (root / 'network-plan.json').write_text(json.dumps(network), encoding='utf-8')
+    manifest['questCaptures'] = {'networkPlan': 'network-plan.json', 'reports': reports}
+    path.write_text(json.dumps(manifest), encoding='utf-8')
+    return path, manifest
+
+
 class QuestCaptureTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix='quest-live-capture-')
@@ -388,6 +453,123 @@ def preflight_fixture(root, label, *, server, peer, port, exchange=None):
 
 
 class FieldResultsTests(unittest.TestCase):
+    def test_venue_verifies_mixed_windows_and_original_capture_batches_for_both_modes(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, _ = quest_capture_venue_fixture(root, mode, use_capture_tool=True)
+                report = field.verify_venue(path)
+                self.assertEqual(25, report['serverAcknowledgements'])
+                self.assertEqual(10, report['questLogcatPlayers'])
+                self.assertEqual(10, report['questCaptureSeatsVerified'])
+                self.assertEqual(2, report['questCaptureBatchesVerified'])
+                self.assertFalse(report['physicalHostsVerified'])
+                self.assertFalse(report['networkCapacityAccepted'])
+                self.assertNotIn('192.168.', json.dumps(report))
+                self.assertNotIn('logcat.txt', json.dumps(report))
+
+    def test_venue_accepts_all_quest_seats_without_a_manual_player_list(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                path, _ = quest_capture_venue_fixture(Path(directory), mode, quest_per_room=5, batches=1)
+                report = field.verify_venue(path)
+                self.assertEqual(25, report['questCaptureSeatsVerified'])
+                self.assertEqual(25, report['serverAcknowledgements'])
+                self.assertEqual(1, report['questCaptureBatchesVerified'])
+
+    def test_venue_rejects_incomplete_wrong_and_tampered_capture_evidence(self):
+        cases = {
+            'incomplete report': 'incomplete or has the wrong topology',
+            'wrong topology': 'incomplete or has the wrong topology',
+            'wrong session': 'original session and room',
+            'wrong port': 'capture port differs',
+            'wrong pid': 'Quest',
+            'wrong hash': 'size or digest differs',
+            'wrong size': 'size or digest differs',
+            'changed log': 'size or digest differs',
+            'missing batch': 'cover the planned Quest seats',
+            'duplicate batch': 'distinct across the venue',
+            'wrong endpoint': 'plan endpoint differs',
+            'wrong address': 'UDP peer differs',
+            'manual logcat': 'or manual Quest logs',
+        }
+        for case, error in cases.items():
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest = quest_capture_venue_fixture(root, 'Independent')
+                reports = manifest['questCaptures']['reports']
+                report_path = root / reports[0]
+                report = json.loads(report_path.read_text(encoding='utf-8'))
+                seat = report['seats'][0]
+                network_path = root / manifest['questCaptures']['networkPlan']
+                network = json.loads(network_path.read_text(encoding='utf-8'))
+                if case == 'incomplete report': report['complete'] = False
+                if case == 'wrong topology': report['topology'] = 'Linked'
+                if case == 'wrong session': seat['sessionId'] = id_for(999)
+                if case == 'wrong port': seat['port'] += 1
+                if case == 'wrong pid': seat['logcatPid'] += 1
+                if case == 'wrong hash': seat['sha256'] = '0' * 64
+                if case == 'wrong size': seat['bytes'] += 1
+                if case == 'changed log':
+                    with (report_path.parent / seat['log']).open('ab') as log:
+                        log.write(b'changed')
+                if case == 'missing batch': reports.pop()
+                if case == 'duplicate batch': reports.append(reports[0])
+                if case == 'wrong endpoint': network['endpoints'][0]['address'] = '192.168.5.99'
+                if case == 'wrong address': network['sources'][0]['address'] = '192.168.5.99'
+                if case == 'manual logcat': manifest['sessions'][0]['players'][0]['logcatPid'] = 7342
+                report_path.write_text(json.dumps(report), encoding='utf-8')
+                network_path.write_text(json.dumps(network), encoding='utf-8')
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, error):
+                    field.verify_venue(path)
+
+    @unittest.skipUnless(HAS_POWERSHELL, 'UDP evidence requires PowerShell')
+    def test_venue_combines_all_quest_capture_seats_with_all_source_preflight(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest = quest_capture_venue_fixture(root, 'Linked', quest_per_room=5, batches=2)
+            entry, = manifest['sessions']
+            launcher_path = root / entry['launcherReport']
+            launcher = json.loads(launcher_path.read_text(encoding='utf-8'))
+            binding = launcher['udpBinding']
+            binding['observedAtUtc'] = '2026-11-08T23:59:59Z'
+            launcher_path.write_text(json.dumps(launcher), encoding='utf-8')
+            network = json.loads((root / 'network-plan.json').read_text(encoding='utf-8'))
+            entry['udpSourcePreflights'] = []
+            for index, source in enumerate(network['sources']):
+                listener, probe = preflight_fixture(root, f'quest-{index}', server=binding['address'],
+                                                    peer=source['address'], port=binding['port'])
+                entry['udpSourcePreflights'].append({'listener': listener.name, 'probe': probe.name})
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            report = field.verify_venue(path)
+            self.assertEqual(25, report['questCaptureSeatsVerified'])
+            self.assertEqual(25, report['udpSourcePreflightsVerified'])
+            self.assertEqual(25, report['serverAcknowledgements'])
+
+    def test_venue_checks_capture_seat_even_when_swapped_logs_and_addresses_agree(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest = quest_capture_venue_fixture(root, 'Linked', batches=1)
+            report_path = root / manifest['questCaptures']['reports'][0]
+            report = json.loads(report_path.read_text(encoding='utf-8'))
+            left, right = report['seats'][:2]
+            self.assertEqual(left['roomId'], right['roomId'])
+            a, b = [report_path.parent / seat['log'] for seat in (left, right)]
+            raw_a, raw_b = a.read_bytes(), b.read_bytes()
+            a.write_bytes(raw_b)
+            b.write_bytes(raw_a)
+            for key in ('bytes', 'sha256', 'logcatPid'):
+                left[key], right[key] = right[key], left[key]
+            report_path.write_text(json.dumps(report), encoding='utf-8')
+            network_path = root / manifest['questCaptures']['networkPlan']
+            network = json.loads(network_path.read_text(encoding='utf-8'))
+            first, second = network['sources'][:2]
+            first['address'], second['address'] = second['address'], first['address']
+            network_path.write_text(json.dumps(network), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'capture room or seat differs'):
+                field.verify_venue(path)
+
     @unittest.skipUnless(HAS_POWERSHELL, 'UDP evidence requires PowerShell')
     def test_all_source_preflight_requires_exact_acknowledged_addresses(self):
         with tempfile.TemporaryDirectory() as directory:

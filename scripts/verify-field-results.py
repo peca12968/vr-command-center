@@ -28,6 +28,8 @@ OPENXR_RUNTIME = re.compile(r'\[XR\] .* Runtime Name: (\S.{0,127})')
 PLAYER_MARKERS = ('VR_CLIENT_CONNECTED', 'VR_CLIENT_DISCONNECTED', 'VR_CLIENT_DEBRIEF_FINAL')
 MAX_FILE_BYTES = 16 * 1024 * 1024
 MAX_ALIGNMENT_BYTES = 16 * 1024
+QUEST_ROOMS = (1, 2, 3, 4, 5)
+MAX_QUEST_PLAN_BYTES = 32768
 
 
 class EvidenceError(ValueError):
@@ -74,6 +76,56 @@ def ipv4(value):
     address = ipaddress.IPv4Address(value)
     require(not (address.is_unspecified or address.is_multicast or address.is_reserved), 'Invalid IPv4 evidence address')
     return address
+
+
+def read_quest_plan_file(path):
+    with path.open('rb') as source:
+        raw = source.read(MAX_QUEST_PLAN_BYTES + 1)
+    require(len(raw) <= MAX_QUEST_PLAN_BYTES, 'Quest plan or report is too large')
+    value = read_json(raw.decode('utf-8-sig'))
+    require(type(value) is dict and type(value.get('version')) is int and value['version'] == 1,
+            'Expected a version 1 Quest plan or report')
+    return value
+
+
+def quest_seats(rows, field):
+    require(type(rows) is list and 1 <= len(rows) <= 25, 'Expected 1 to 25 mapped Quest seats')
+    seats = {}
+    for row in rows:
+        require(type(row) is dict and set(row) == {'roomId', 'seat', field}, 'Unexpected Quest seat mapping fields')
+        room, seat = integer(row['roomId'], 1, 5), integer(row['seat'], 1, 5)
+        require(type(row[field]) is str and (room, seat) not in seats, 'Invalid or repeated Quest seat mapping')
+        seats[room, seat] = row[field]
+    return seats
+
+
+def quest_network_address(value):
+    require(type(value) is str, 'Expected a Quest plan IPv4 address')
+    parsed = ipv4(value)
+    require(str(parsed) == value and (parsed.is_loopback or any(parsed in network for network in LAN)),
+            'Use a canonical private or loopback IPv4 address')
+    return value
+
+
+def read_quest_network_plan(path):
+    plan = read_quest_plan_file(path)
+    require(set(plan) == {'version', 'mode', 'endpoints', 'sources'}, 'Unexpected Quest network plan fields')
+    sources = {seat: quest_network_address(value) for seat, value in quest_seats(plan['sources'], 'address').items()}
+    require(len(set(sources.values())) == len(sources), 'Use a distinct IPv4 for each mapped Quest')
+    mode = plan['mode']
+    require(mode in ('Independent', 'Linked'), 'Expected Independent or Linked venue mode')
+    expected = {QUEST_ROOMS} if mode == 'Linked' else {(room,) for room in QUEST_ROOMS}
+    endpoints = plan['endpoints']
+    require(type(endpoints) is list and len(endpoints) == len(expected), 'Provide every game endpoint for the venue mode')
+    groups = {}
+    for row in endpoints:
+        require(type(row) is dict and set(row) == {'roomIds', 'address', 'port'}, 'Unexpected game endpoint fields')
+        rooms = row['roomIds']
+        require(type(rooms) is list and all(type(room) is int for room in rooms)
+                and tuple(rooms) in expected and tuple(rooms) not in groups, 'Invalid or repeated game endpoint')
+        groups[tuple(rooms)] = quest_network_address(row['address']), integer(row['port'], 1024, 65535)
+    require(len(set(groups.values())) == len(groups), 'A game binding is used by more than one endpoint')
+    return mode, groups, sources
 
 
 def peer_address(endpoint):
@@ -329,7 +381,7 @@ def verify(topology, server_ips, launcher, session, statistics, endpoint, server
 
 def verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log, size, player_logs, *,
                    require_remote=True, quest_player_logs=(), world_journal=None, applied_end=None, room_alignments=None,
-                   udp_preflight=None, udp_source_preflights=None, verify_player_sources=False):
+                   udp_preflight=None, udp_source_preflights=None, verify_player_sources=False, quest_capture_logs=()):
     integer(size, 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(not verify_player_sources or world_journal is not None, 'Player source verification requires the original closed world journal')
@@ -382,8 +434,9 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
     player_sources = {} if verify_player_sources else None
     source_seats = set()
     quest_players = 0
-    windows_logs = ((address, log, None) for address, log in player_logs)
-    for expected_ip, log, pid in chain(windows_logs, quest_player_logs):
+    windows_logs = ((address, log, None, None) for address, log in player_logs)
+    quest_logs = ((address, log, pid, None) for address, log, pid in quest_player_logs)
+    for expected_ip, log, pid, capture_seat in chain(windows_logs, quest_logs, quest_capture_logs):
         connection, result = client_result(log) if pid is None else quest_client_result(log, pid, port)
         require(connection in acknowledged and connection not in used_connections, 'Missing or reused server acknowledgement')
         observed = peer_address(peers[connection])
@@ -398,6 +451,9 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
         room = integer(owner['roomId'], 1, 5)
         require(room in rooms and integer(result['roomId'], 1, 5) == integer(stats['roomId'], 1, 5) == room
                 and result['admissionId'] == owner['admissionId'], 'Player result admission or room differs')
+        if capture_seat is not None:
+            require((room, integer(owner['seat'], 0, 4) + 1) == capture_seat,
+                    'Quest capture room or seat differs from the original admission')
         require(integer(result['version'], 1, 1) and result['sessionId'] == session_id
                 and result['streamId'] == stream_id and result['origin'] == origin
                 and integer(result['worldSequence'], 1) == world_sequence and integer(result['throughSequence'], 1) == through
@@ -477,6 +533,52 @@ def read_udp_preflight_batch(path, mode, expected_rooms):
     return sources
 
 
+def read_quest_capture_batches(spec, mode, expected, evidence_path):
+    require(type(spec) is dict and set(spec) == {'networkPlan', 'reports'},
+            'Provide a Quest network plan and capture reports')
+    plan_mode, endpoints, sources = read_quest_network_plan(evidence_path(spec['networkPlan']))
+    require(plan_mode == mode, 'Quest network plan differs from the venue mode')
+    reports = spec['reports']
+    require(type(reports) is list and 1 <= len(reports) <= 25, 'Provide 1 to 25 Quest capture reports')
+    captures, used_seats = {}, set()
+    for name in reports:
+        path = evidence_path(name)
+        report = read_quest_plan_file(path)
+        require(set(report) == {'version', 'complete', 'topology', 'expectedSeats', 'capturedSeats', 'scope', 'seats'}
+                and report['complete'] is True and report['topology'] == mode and report['scope'] == 'quest-logcat-only',
+                'Quest capture report is incomplete or has the wrong topology')
+        count = integer(report['expectedSeats'], 1, 25)
+        require(integer(report['capturedSeats'], 1, 25) == count and type(report['seats']) is list
+                and len(report['seats']) == count, 'Quest capture report seat totals differ')
+        for row in report['seats']:
+            require(type(row) is dict and set(row) == {'roomId', 'seat', 'sessionId', 'port', 'complete', 'log',
+                    'logcatPid', 'bytes', 'sha256'} and row['complete'] is True, 'Quest capture seat is incomplete')
+            seat = integer(row['roomId'], 1, 5), integer(row['seat'], 1, 5)
+            require(seat in sources and seat not in used_seats, 'Quest capture repeats or names an unplanned seat')
+            session_id = identity(row['sessionId'])
+            session = expected.get(session_id)
+            require(session is not None and seat[0] in session['roomIds'], 'Quest capture does not match an original session and room')
+            require(integer(row['port'], 1024, 65535) == endpoints[tuple(session['roomIds'])][1],
+                    'Quest capture port differs from the network plan')
+            require(row['log'] == f'room-{seat[0]:02}-seat-{seat[1]:02}-logcat.txt', 'Expected the original Quest capture log name')
+            log = evidence_path(row['log'], path.parent)
+            require(log.parent == path.parent and log.name == row['log'], 'Quest capture log must be next to its report')
+            require(type(row['sha256']) is str and re.fullmatch(r'[0-9a-f]{64}', row['sha256']),
+                    'Invalid original Quest capture digest')
+            captures.setdefault(session_id, []).append((ipv4(sources[seat]), log, integer(row['logcatPid'], 1, 2**31 - 1),
+                                                        seat, integer(row['bytes'], 1, MAX_FILE_BYTES), row['sha256']))
+            used_seats.add(seat)
+    require(used_seats == sources.keys(), 'Quest capture reports must cover the planned Quest seats exactly')
+    return captures, endpoints, len(reports)
+
+
+def quest_capture_log(address, path, pid, seat, size, digest):
+    with path.open('rb') as source:
+        raw = limited_read(source)
+    require(len(raw) == size and hashlib.sha256(raw).hexdigest() == digest, 'Original Quest capture log size or digest differs')
+    return address, raw.decode('utf-8-sig'), pid, seat
+
+
 def verify_venue(manifest_path):
     manifest_path = manifest_path.resolve(strict=True)
     manifest = read_json(content(manifest_path))
@@ -546,6 +648,12 @@ def verify_venue(manifest_path):
             and all(integer(room, 1, 5) for room in row['roomIds']) for row in rows)
             and sorted(row['roomIds'] for row in rows) == expected_rooms, 'Closure does not cover exactly the five original rooms')
 
+    capture_supplied = 'questCaptures' in manifest
+    captures, capture_endpoints, capture_batches = {}, {}, 0
+    if capture_supplied:
+        require(topology == 'direct-lan', 'Quest capture batches require direct LAN evidence')
+        captures, capture_endpoints, capture_batches = read_quest_capture_batches(manifest['questCaptures'], mode, expected, evidence_path)
+
     rooms, summaries = {}, []
     quest_players = 0
     stream_ids, bindings, player_ids, admission_ids, end_times, exchanges = set(), set(), set(), set(), set(), set()
@@ -578,12 +686,19 @@ def verify_venue(manifest_path):
         require(stream not in stream_ids and binding not in bindings, 'Venue reused a world stream or server UDP binding')
         stream_ids.add(stream)
         bindings.add(binding)
-        players = entry['players']
-        require(type(players) is list and len(players) == len(row['roomIds']) * 5, 'Each original room must include five player logs')
+        captured = captures.get(session['id'], [])
+        if capture_supplied:
+            require((str(binding[0]), binding[1]) == capture_endpoints[tuple(row['roomIds'])],
+                    'Quest network plan endpoint differs from the original game binding')
+        players = entry.get('players', []) if capture_supplied else entry['players']
+        require(type(players) is list and len(players) + len(captured) == len(row['roomIds']) * 5,
+                'Each original room must include five player logs')
+        size = len(players) + len(captured)
         logs, quest_logs = [], []
         for player in players:
             address, path = ipv4(player['address']), evidence_path(player['log'])
             if 'logcatPid' in player:
+                require(not capture_supplied, 'Use the Quest capture batches or manual Quest logs, not both')
                 quest_logs.append((address, path, integer(player['logcatPid'], 1, 2**31 - 1)))
             else:
                 logs.append((address, path))
@@ -591,24 +706,25 @@ def verify_venue(manifest_path):
         source_paths = None
         if source_preflights:
             supplemental = entry.get('udpSourcePreflights', [])
-            require(type(supplemental) is list and len(supplemental) <= len(players)
+            require(type(supplemental) is list and len(supplemental) <= size
                     and ('udpSourcePreflights' not in entry or supplemental), 'Invalid supplemental UDP preflight list')
             pairs = batch_pairs.get(tuple(row['roomIds']), []) + [(pair, manifest_path.parent) for pair in supplemental]
-            require(1 <= len(pairs) <= len(players), 'Provide all-source UDP preflight reports for every original endpoint')
+            require(1 <= len(pairs) <= size, 'Provide all-source UDP preflight reports for every original endpoint')
             source_paths = [preflight_pair(pair, base) for pair, base in pairs]
         report, sources = verify_session(topology, server_ips, launcher, session, statistics, endpoint,
-                                         server_log, len(players), ((address, content(path)) for address, path in logs),
+                                         server_log, size, ((address, content(path)) for address, path in logs),
                                          require_remote=False,
                                          quest_player_logs=((address, content(path), pid) for address, path, pid in quest_logs),
                                          world_journal=evidence_path(entry['worldJournal']) if journals else None,
                                          applied_end=row['appliedAtSequence'], room_alignments=alignments, udp_preflight=preflight_paths,
-                                         udp_source_preflights=source_paths, verify_player_sources=verify_player_sources)
+                                         udp_source_preflights=source_paths, verify_player_sources=verify_player_sources,
+                                         quest_capture_logs=(quest_capture_log(*evidence) for evidence in captured))
         verified_pairs = ([report['udpPreflight']] if preflights else report['udpSourcePreflight']['pairs'] if source_preflights else [])
         for pair in verified_pairs:
             exchange = pair['exchangeSha256']
             require(exchange not in exchanges, 'Venue reused a UDP preflight exchange')
             exchanges.add(exchange)
-        quest_players += len(quest_logs)
+        quest_players += len(quest_logs) + len(captured)
         seats = {(player['roomId'], integer(player['seat'], 0, 4)) for player in session['players']}
         require(seats == {(room, seat) for room in row['roomIds'] for seat in range(5)}, 'Final roster must cover every room seat exactly once')
         for player in session['players']:
@@ -638,6 +754,7 @@ def verify_venue(manifest_path):
             'serverAcknowledgements': sum(item['serverAcknowledgements'] for item in summaries),
             'physicalHostsVerified': False, 'networkCapacityAccepted': False,
             **({'questLogcatPlayers': quest_players} if quest_players else {}),
+            **({'questCaptureBatchesVerified': capture_batches, 'questCaptureSeatsVerified': quest_players} if capture_supplied else {}),
             **({'udpPreflightsVerified': len(exchanges)} if preflights else {}),
             **({'udpSourcePreflightsVerified': len(exchanges)} if source_preflights else {}),
             **({'worldJournalsVerified': len(summaries)} if journals else {}),
