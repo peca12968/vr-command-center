@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-09 `windows-control-0.31.46-final-win-x64.zip` 加入五房逐房指定任務版本。ZIP 為 52,720,812 bytes，SHA-256 `8e02b23ad367fcfd8b5aa0c33b5c1beb0733094e330a690cd248ebbf6c2e7a8d`。解壓核對 528 個清單檔案，含 508 個執行環境檔案，通過 106 項管理包及 527 項 Chromium 檢查。早期同版候選保留，交付版的任務選單改為較寬的欄位。 [逐房操作](MISSION_VERSIONS.md#逐房指定任務版本)
+
 2026-11-09 `windows-control-0.31.45-win-x64.zip` 加入保存版本的開場平面圖。ZIP 為 52,707,989 bytes，SHA-256 `0bb155a0c0a972db1a696a4fce02c41c1111be3e0439623336d4c87193ff2849`。解壓核對 525 個清單檔案，含 505 個執行環境檔案，通過 106 項管理包及 521 項 Chromium 檢查。 [開場平面圖](LAYOUT.md#開場前查看保存版本平面圖)
 
 2026-11-09 `windows-control-0.31.44-win-x64.zip` 加入個人事件回放。ZIP 為 52,705,739 bytes，SHA-256 `973a31e68d7e3ac6849d22b03068f0ad52b8505fa598d8c2129dc10dcd6532c9`。解壓核對 525 個清單檔案，含 505 個執行環境檔案，通過 106 項管理包及 514 項 Chromium 檢查。 [戰後檢討](REPORTS.md#從戰績開啟個人回放)

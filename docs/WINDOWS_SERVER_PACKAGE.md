@@ -57,6 +57,8 @@ python scripts/check-server-package.py <VRCommand-GameServer> `
 
 搭配控制台 0.31.18，可加上 `--check-room-reports`。測試會對照同一個五房連線場次的封存全場 CSV、五份分房 CSV 和戰績 ZIP，並確認房控指定別房時收到 403。再加 `--check-room-combat` 可讓兩種模式的每位原玩家都實際收到敵軍傷害，核對敵軍射線、同房傷害事件、逐格統計與最終戰績。 [分房匯出](REPORTS.md#五房分房匯出)
 
+搭配管理包 0.31.46，可加上 `--prepare-independent-set --check-independent-room-missions`。測試用一筆 API 請求為五個獨立房指定不同的 VR 任務。逐房核對已進入 Running 的原遊戲快照及標頭，包括任務時間、天氣、日夜、雷電、敵軍策略與數量，以及掩體座標與角度。接著按原流程核對回放、雙封存及原玩家戰績。 [逐房操作](MISSION_VERSIONS.md#逐房指定任務版本)
+
 搭配控制台 0.31.10，可加上 `--check-interrupted-replay`。測試在另一個獨立場次錄到敵軍實際傷害後終止該次啟動器，核對原遊戲程序退出，再檢查保存片段的尾端、戰績及未封存狀態。 [中斷場次回放](WORLD_RECORDING.md#回放未封存的已保存片段)
 
 2026-11-02 本輪同源Unity0.41.1／code52／NGO29／242真正Editor、4ebd雙平台：新server主包 `windows-server-0.41.1-v2-win-x64.zip`，**82,673,732 bytes／SHA256 `ca285a42e0c22bdde17f62eb6dd8a65523c9d3a5cae19a33cad41636899fb368`**、311 manifest／ZIP312。啟動器1.1來源fb57807d...不變但重新編譯binary不同，runtime逐byte同v1；v1與所有舊包保持。包說明改引用Runtime/build-receipt.json，不再寫死Unity0.39。
