@@ -12,6 +12,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.error
 import urllib.request
 import uuid
 
@@ -29,7 +30,7 @@ def run(args):
     out = ROOT/'artifacts/live-hardware-gateway'/('run-'+uuid.uuid4().hex)
     out.mkdir(parents=True)
     print(json.dumps({'stage':'starting','directory':str(out)}), flush=True)
-    keys = {role:secrets.token_hex(32) for role in ('Master','GameServer','Room1','Room2')}
+    keys = {role:secrets.token_hex(32) for role in ('Master','GameServer',*(f'Room{room}' for room in range(1,6)))}
     token = secrets.token_hex(32)
     private = [*keys.values(), token]
     env = {k:v for k,v in os.environ.items() if not k.lower().startswith('operatorkeys__') and k.lower() not in
@@ -106,11 +107,13 @@ def run(args):
         api_reader.start()
         opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
-        def request(path, body=None, role='Master'):
+        def request(path, body=None, role='Master', *, method=None, admission=None):
             headers = {'Authorization':'Bearer '+keys[role], 'Content-Type':'application/json'}
-            req = urllib.request.Request(base+path, headers=headers, data=json.dumps(body).encode() if body is not None else None)
+            if admission:
+                headers['If-Match-Admission'] = admission
+            req = urllib.request.Request(base+path, method=method, headers=headers, data=json.dumps(body).encode() if body is not None else None)
             with opener.open(req, timeout=4) as reply:
-                return json.load(reply)
+                return json.load(reply) if reply.status != 204 else None
 
         def health():
             try:
@@ -149,16 +152,17 @@ def run(args):
                 request(path+'/combat-stream/batch', rows, 'GameServer')
                 return [item['report']['reportId'] for item in rows]
 
-            def attached(room):
-                target = f'{base}{path}/rooms/{room}/hardware-feedback - 200'
+            def attached(room, bound=False):
+                query = '?includeBindings=true' if bound else ''
+                target = f'{base}{path}/rooms/{room}/hardware-feedback{query} - 200'
                 return sum('Request finished' in line and target in line for line in api_log)
 
-            def accept(peer, room, previous=None):
-                previous_count = attached(room)
+            def accept(peer, room, previous=None, *, bound=False):
                 hello = peer.read('hello')
                 assert hello['roomId']==room and (not previous or hello['connectionId']!=previous)
+                previous_count = attached(room, bound)
                 peer.reply()
-                wait(lambda:attached(room)>previous_count,f'room {room} fresh cursor attachment')
+                wait(lambda:attached(room,bound)>previous_count,f'room {room} fresh cursor attachment')
                 return hello['connectionId']
 
             peers = {1:Peer(), 2:Peer()}
@@ -324,6 +328,121 @@ def run(args):
                         assert original['sequence']==signal['eventSequence'] and original['payload']['report']['reportId']==signal['reportId']
             check(request('/api/sessions')==[] and request(path)['combatStream']['acceptedSequence']==sequence,
                   'Every attempted event preserves the accepted witness and the gateway never writes session events')
+
+            rooms = list(range(1,6))
+            session = request('/api/sessions', {'missionId':mission['id'],'mode':'Linked','roomIds':rooms})
+            sid = session['id']; path = '/api/sessions/'+sid
+            for room in rooms:
+                session = request(path+'/players', {'playerId':str(uuid.uuid4()),'roomId':room,
+                    'name':f'Bound fixture {room}','headset':'Quest3'}, f'Room{room}')
+            players = {player['roomId']:player for player in session['players']}
+            original = players[1]
+            bound_peers = {room:Peer() for room in rooms}
+            maps = {room:{'version':1,'managementUrl':base,'sessionId':sid,'roomId':room,
+                'mockPort':peer.port,'seconds':35,'devices':[{'seat':0,'deviceId':str(uuid.uuid4())}]}
+                for room,peer in bound_peers.items()}
+            feed = path+'/rooms/1/hardware-feedback'
+            old_page = request(feed, role='Room1')
+            new_page = request(feed+'?includeBindings=true', role='Room1')
+            assert old_page['version']==1 and 'bindings' not in old_page
+            assert new_page['version']==2 and new_page['bindings']==[{k:original[v] for k,v in
+                (('playerId','id'),('admissionId','admissionId'),('seat','seat'))}]
+            for role in ('Room2','GameServer'):
+                try:
+                    request(feed+'?includeBindings=true', role=role)
+                except urllib.error.HTTPError as denied:
+                    assert denied.code==403
+                    denied.close()
+                else:
+                    raise AssertionError('Foreign feedback roster was readable')
+            check(True, 'Opt-in roster is exact and room scoped while legacy feedback keeps its original shape')
+
+            def bind(label, seat_map, role, expected_type=None):
+                input_path = runtime/(label+'-map.json')
+                result_path = runtime/(label+'-binding.json')
+                input_path.write_text(json.dumps(seat_map),encoding='utf-8')
+                process = start(['dotnet',str(binary),'--bind-room',str(input_path),'--output',str(result_path)],
+                                {**env,'VR_COMMAND_ROOM_KEY':keys[role]})
+                output, _ = process.communicate(timeout=8)
+                assert not any(secret in output for secret in private)
+                if expected_type:
+                    assert process.returncode==1 and expected_type in output and not result_path.exists(), output
+                    return None
+                assert process.returncode==0 and json.loads(output)['boundSeats']==len(seat_map['devices']), output
+                raw = result_path.read_text(encoding='utf-8')
+                assert not any(secret in raw for secret in private)
+                return result_path
+
+            before_bind = request(path)
+            original_config = bind('original', maps[1], 'Room1')
+            assert all(peer.lines.empty() for peer in bound_peers.values())
+            bind('wrong-room', maps[1], 'Room2', 'AccessDeniedException')
+            bind('vacant', {**maps[1],'devices':[{'seat':4,'deviceId':str(uuid.uuid4())}]}, 'Room1', 'InvalidOperationException')
+            bind('missing-seat', {**maps[1],'devices':[{'deviceId':str(uuid.uuid4())}]}, 'Room1', 'JsonException')
+            check(request(path)==before_bind and all(peer.lines.empty() for peer in bound_peers.values()),
+                  'Binding generation is read-only, opens no mock connection and refuses wrong, vacant and incomplete maps')
+            request(path+'/players/'+original['id'], role='Room1', method='DELETE', admission=original['admissionId'])
+            session = request(path+'/players',{'playerId':original['id'],'roomId':1,'name':'Same ID, new admission','headset':'Quest3'},'Room1')
+            replacement = next(p for p in session['players'] if p['id']==original['id'])
+            assert replacement['seat']==original['seat'] and replacement['admissionId']!=original['admissionId']
+
+            def mismatch(gateway, report, connections):
+                output, _ = gateway.communicate(timeout=8)
+                assert gateway.returncode==1 and not any(secret in output for secret in private), output
+                result = json.loads(report.read_text(encoding='utf-8'))
+                assert result['termination']=='binding-mismatch' and not result['complete'] and result['acknowledged']==0
+                assert result['attachments']==result['connections']==connections and result['physicalDeliveryConfirmed'] is False
+                return result
+
+            stale_report = out/'stale-binding-report.json'
+            stale = invoke(1,'Room1',stale_report,config=original_config)
+            check(mismatch(stale,stale_report,0)['attempts']==[] and bound_peers[1].lines.empty(),
+                  'A replaced admission with the same player and seat is refused before any mock handshake')
+            players[1] = replacement
+            updated = {room:bind(f'updated-{room}',maps[room],f'Room{room}') for room in rooms}
+            for room,player in players.items():
+                value = json.loads(updated[room].read_text(encoding='utf-8'))
+                assert value['version']==2 and value['bindings']==[{'deviceId':maps[room]['devices'][0]['deviceId'],
+                    'playerId':player['id'],'admissionId':player['admissionId'],'seat':player['seat']}]
+                save(f'bound-room-{room}-config.json',value)
+            check(True, 'Explicit regeneration preserves each of the five device maps and binds the new admission')
+            stream = str(uuid.uuid4())
+            request(path+'/combat-stream', {'streamId':stream,'origin':'Simulation'}, 'GameServer')
+            epoch = action('Begin'); sequence = 0
+            peers = bound_peers
+            expected = {player['id']:json.loads(updated[room].read_text(encoding='utf-8'))['bindings'][0] for room,player in players.items()}
+            bound_reports = {room:out/f'bound-room-{room}-report.json' for room in peers}
+            gateways = {room:invoke(room,f'Room{room}',bound_reports[room],config=updated[room]) for room in peers}
+            connections = {room:accept(peer,room,bound=True) for room,peer in peers.items()}
+            ids = publish([(replacement,'ShotFired')]); revoked_batch = feedback(1,ids)
+            peers[1].reply('observe-close')
+            request(path+'/players/'+replacement['id'], role='Room1', method='DELETE', admission=replacement['admissionId'])
+            removed = peers[1].read('closed')
+            attempt, = mismatch(gateways[1],bound_reports[1],1)['attempts']
+            check(attempt['status']=='cancelled' and attempt['batchId']==removed['batchId']==revoked_batch['batchId']
+                  and attempt['connectionId']==removed['connectionId']==revoked_batch['connectionId'],
+                  'Removing an admission cancels the exact in-flight batch and closes its mock connection')
+            save('binding-mismatch-close.json',removed)
+            first_reports = {}
+            for room in rooms[1:]:
+                first_reports[room] = publish([(players[room],'ShotFired')])[0]
+                feedback(room,[first_reports[room]]); peers[room].reply()
+            # Receipt of the second batch proves the first round has cleared its ACK and eligibility check.
+            for room in rooms[1:]:
+                ids = publish([(players[room],'PlayerDamaged')]); feedback(room,ids); peers[room].reply()
+            action('End')
+            for room in rooms[1:]:
+                stdout,_ = gateways[room].communicate(timeout=8)
+                result = json.loads(bound_reports[room].read_text(encoding='utf-8'))
+                confirmed = [delivery['signal']['reportId'] for batch in result['attempts'] if batch['status']=='simulated-acknowledged'
+                             for delivery in batch['deliveries']]
+                assert gateways[room].returncode==0 and not any(secret in stdout for secret in private)
+                assert first_reports[room] in confirmed and result['connections']==result['attachments']==1
+                assert result['termination']=='ended' and result['complete'] and result['physicalDeliveryConfirmed'] is False
+            check(peers[1].lines.empty(), 'All four other rooms keep their original connections after a binding mismatch and end normally')
+            request(path+'/combat-stream/seal',{'streamId':stream,'finalSequence':sequence},'GameServer')
+            bind('ended',maps[2],'Room2','InvalidOperationException')
+            check(request('/api/sessions')==[], 'Room binding rehearsal leaves no active session')
         finally:
             for process in reversed(processes):
                 if process is api:

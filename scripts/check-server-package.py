@@ -778,10 +778,25 @@ def main():
         bindings=[{'deviceId':str(uuid.uuid4()),'playerId':player,'admissionId':admission,'seat':seat}
                   for player,(admission,seat) in feed['players'].items()]
         setup={'version':1,'managementUrl':uri,'sessionId':sid,'roomId':room,'mockPort':listening['port'],'seconds':120,'bindings':bindings}
-        config=runtime/(label+'-hardware.json');config.write_text(json.dumps(setup),encoding='utf-8')
+        config=runtime/(label+'-hardware.json')
+        gateway_env={**mock_env,'VR_COMMAND_ROOM_KEY':keys[f'Room{room}']}
+        simulator=str(hardware/'VrCommand.HardwareSimulator.dll')
+        if hardware_manifest['toolVersion']=='0.2.3':
+            seat_map=runtime/(label+'-seat-map.json')
+            map_value={key:value for key,value in setup.items() if key!='bindings'}
+            map_value['devices']=[{'deviceId':b['deviceId'],'seat':b['seat']} for b in bindings]
+            seat_map.write_text(json.dumps(map_value),encoding='utf-8')
+            result=subprocess.run([dotnet,simulator,'--bind-room',str(seat_map),'--output',str(config)],
+                env=gateway_env,capture_output=True,timeout=8,creationflags=subprocess.CREATE_NO_WINDOW)
+            bound=read(config) if result.returncode==0 else None
+            check(bound=={**setup,'version':2,'bindings':sorted(bindings,key=lambda item:item['seat'])},
+                  'room '+str(room)+' packaged binding matches the exact original device, seat and admission')
+            save(label+'-hardware-binding.json',bound)
+        else:
+            config.write_text(json.dumps(setup),encoding='utf-8')
         report=out/(label+'-hardware-mock.json')
-        gateway=subprocess.Popen([dotnet,str(hardware/'VrCommand.HardwareSimulator.dll'),'--live',str(config),'--output',str(report)],
-            env={**mock_env,'VR_COMMAND_ROOM_KEY':keys[f'Room{room}']},stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
+        gateway=subprocess.Popen([dotnet,simulator,'--live',str(config),'--output',str(report)],
+            env=gateway_env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
             text=True,encoding='utf-8',creationflags=subprocess.CREATE_NO_WINDOW)
         hardware_processes.append(gateway)
         return {'frames':frames,'mock':mock,'reader':reader,'gateway':gateway,'report':report,

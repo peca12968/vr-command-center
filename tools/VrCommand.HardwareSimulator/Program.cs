@@ -3,11 +3,12 @@ using System.Text.Json.Serialization;
 using VrCommand.Core;
 
 var live = args.Length != 0 && args[0] == "--live";
+var bind = args.Length != 0 && args[0] == "--bind-room";
 try
 {
     var withStopFile = live && args.Length == 6 && args[4] == "--stop-file";
-    if ((args.Length != 4 && !withStopFile) || args[0] is not ("--input" or "--live") || args[2] != "--output")
-        throw new ArgumentException("Use --input or --live <configuration.json> --output <new-report.json> [--stop-file <new-marker> for --live]");
+    if ((args.Length != 4 && !withStopFile) || args[0] is not ("--input" or "--live" or "--bind-room") || args[2] != "--output")
+        throw new ArgumentException("Use --input, --live or --bind-room <input.json> --output <new-output.json> [--stop-file <new-marker> for --live]");
     var input = Path.GetFullPath(args[1]); var output = Path.GetFullPath(args[3]);
     if (!input.EndsWith(".json", StringComparison.OrdinalIgnoreCase) || !output.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
         || string.Equals(input, output, StringComparison.OrdinalIgnoreCase) || File.Exists(output)) throw new ArgumentException("Use separate JSON input and a new output file.");
@@ -17,6 +18,7 @@ try
         || Directory.Exists(stopFile) || !Directory.Exists(Path.GetDirectoryName(stopFile))))
         throw new ArgumentException("Use a separate, absent stop marker in an existing directory.");
     if (live) return await LiveHardwareGateway.Run(input, output, stopFile);
+    if (bind) return await LiveHardwareGateway.BindRoom(input, output);
     using var source = new FileStream(input, FileMode.Open, FileAccess.Read, FileShare.Read);
     if (source.Length is < 1 or > 8 * 1024 * 1024) throw new ArgumentException("Input exceeds the offline simulation limit.");
     var bytes = new byte[source.Length]; source.ReadExactly(bytes);
@@ -31,6 +33,6 @@ try
 catch (Exception error) when (error is ArgumentException or InvalidDataException or InvalidOperationException or JsonException or IOException or UnauthorizedAccessException or AccessDeniedException or KeyNotFoundException or HttpRequestException or TimeoutException)
 {
     // Never echo untrusted input, payloads or credentials into diagnostics.
-    Console.Error.WriteLine((live ? "Live hardware rehearsal rejected: " : "Offline hardware simulation rejected: ") + error.GetType().Name);
+    Console.Error.WriteLine((live ? "Live hardware rehearsal rejected: " : bind ? "Room hardware binding rejected: " : "Offline hardware simulation rejected: ") + error.GetType().Name);
     return 1;
 }

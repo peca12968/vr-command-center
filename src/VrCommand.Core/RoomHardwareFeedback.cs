@@ -1,18 +1,26 @@
+using System.Text.Json.Serialization;
+
 namespace VrCommand.Core;
 
 public record RoomHardwareSignal(Guid EventId, long EventSequence, long StreamSequence, long ObservedSequence,
     Guid ReportId, CombatKind Kind, Guid PlayerId, Guid AdmissionId, int Seat, int Damage, DateTimeOffset AcceptedAtUtc);
 
+public record RoomHardwareSeat(Guid PlayerId, Guid AdmissionId, [property: JsonRequired] int Seat);
+
 public record RoomHardwareFeedback(int Version, Guid SessionId, int RoomId, Guid? StreamId, CombatOrigin? CombatOrigin,
     SessionState State, long ThroughSequence, long? RunningSinceSequence, DateTimeOffset CheckedAtUtc,
-    string? ResetReason, RoomHardwareSignal[] Signals);
+    string? ResetReason, RoomHardwareSignal[] Signals)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public RoomHardwareSeat[]? Bindings { get; init; }
+}
 
 public sealed partial class SessionManager
 {
     private const int MaxHardwareFeedbackEvents = 256;
     private static readonly TimeSpan HardwareFeedbackAcceptedAge = TimeSpan.FromSeconds(2);
 
-    public RoomHardwareFeedback ReadHardwareFeedback(Guid id, int roomId, long? after, OperatorIdentity actor)
+    public RoomHardwareFeedback ReadHardwareFeedback(Guid id, int roomId, long? after, OperatorIdentity actor, bool includeBindings = false)
     {
         if (after < 0) throw new ArgumentException("Use a non-negative hardware feedback cursor.");
         lock (gate)
@@ -26,8 +34,10 @@ public sealed partial class SessionManager
             var now = clock.GetUtcNow();
             var stream = session.CombatStream;
             var running = session.State == SessionState.Running ? history.PhaseSinceSequence : (long?)null;
-            RoomHardwareFeedback Page(string? reset, RoomHardwareSignal[] signals) => new(1, id, roomId, stream?.StreamId,
-                stream?.Origin, session.State, session.Sequence, running, now, reset, signals);
+            var bindings = includeBindings ? session.Players.Where(player => player.RoomId == roomId)
+                .OrderBy(player => player.Seat).Select(player => new RoomHardwareSeat(player.Id, player.AdmissionId, player.Seat)).ToArray() : null;
+            RoomHardwareFeedback Page(string? reset, RoomHardwareSignal[] signals) => new(includeBindings ? 2 : 1, id, roomId, stream?.StreamId,
+                stream?.Origin, session.State, session.Sequence, running, now, reset, signals) { Bindings = bindings };
             // New readers and slow readers take a fresh cursor instead of replaying a backlog as live feedback.
             if (!after.HasValue) return Page("attached", []);
             if (running is null || stream is null || stream.Sealed) return Page("inactive", []);
