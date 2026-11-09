@@ -1,4 +1,5 @@
 const path = require('node:path');
+const fs = require('node:fs/promises');
 
 module.exports = async ({ context, api, tokens, base, mission, screenshots, check }) => {
   const page = await context.newPage(), errors = [];
@@ -6,6 +7,9 @@ module.exports = async ({ context, api, tokens, base, mission, screenshots, chec
   const props = [{ assetId: 'sandbag', position: { x: 1, y: 0, z: 3 }, yawDegrees: 45 },
     { assetId: 'barrel', position: { x: -2, y: 0, z: 1 }, yawDegrees: 0 }];
   const saved = await api('/missions', 'POST', { ...mission.definition, name: '配置復原・原版本', props }, 'Master', 201);
+  const rowProp = { assetId: 'sandbag', position: { x: -3.5, y: 0, z: 2.125 }, yawDegrees: 12.5 };
+  const rowSaved = await api('/missions', 'POST', { ...mission.definition, name: '成列配置・原版本',
+    enemies: { count: 1, behavior: 'Hold', autoAttack: false }, props: [rowProp] }, 'Master', 201);
   const wait = fn => page.waitForFunction(fn, null, { polling: 100 });
   const status = () => page.locator('#prop-history-status').innerText();
   async function field(id, value) { await page.locator('#' + id).fill(String(value)); await page.locator('#' + id).blur(); }
@@ -62,6 +66,8 @@ module.exports = async ({ context, api, tokens, base, mission, screenshots, chec
     const beforeTyping = await status(); await page.locator('#draft-briefing').fill('文字編輯獨立於物件復原'); await page.locator('#draft-briefing').press('Control+z');
     check(await status() === beforeTyping && await page.locator('#prop-x').inputValue() === '4.5', 'Text-field undo never invokes object history');
     await page.locator('#layout-map').focus(); await page.keyboard.press('Control+z'); // x3
+    await field('prop-x', 3.125); await field('prop-yaw', 47.5);
+    check(await page.locator('#mission-form').evaluate(form => form.checkValidity()), 'Exact finite coordinates and angles can be submitted without rounding to the map increments');
     // Save the restored geometry as a new immutable version through the normal UI.
     const requested = page.waitForRequest(request => request.method() === 'POST' && request.url() === `${base}/api/missions/${saved.id}/revisions`);
     const gate = new Promise(resolve => { releaseSave = resolve; });
@@ -77,18 +83,67 @@ module.exports = async ({ context, api, tokens, base, mission, screenshots, chec
     check(await pendingLogout && await page.locator('#workspace').isVisible() && await page.locator('#draft-name').isDisabled(),
       'Cancelling logout during an in-flight save keeps the authenticated draft locked until its response');
     await page.locator('#layout-map').focus(); await page.keyboard.press('Control+z');
-    check(await page.locator('#prop-x').inputValue() === '3', 'Map shortcut cannot mutate a draft during its pending save');
+    check(await page.locator('#prop-x').inputValue() === '3.125', 'Map shortcut cannot mutate a draft during its pending save');
     releaseSave(); await wait(() => document.querySelector('#draft-status').textContent.startsWith('已儲存') && !document.querySelector('#mission-fields').disabled);
     const history = await api(`/missions/${saved.id}/history`), revised = await api(`/missions/${history.headId}`);
-    check(revised.definition.props[0].position.x === 3 && revised.definition.props[0].position.z === 2 && JSON.stringify((await api(`/missions/${saved.id}`)).definition.props) === JSON.stringify(props), 'Normal revision save persists the restored placement and leaves the original mission immutable');
+    check(revised.definition.props[0].position.x === 3.125 && revised.definition.props[0].position.z === 2
+      && revised.definition.props[0].yawDegrees === 47.5 && JSON.stringify((await api(`/missions/${saved.id}`)).definition.props) === JSON.stringify(props),
+      'Normal revision save preserves exact position and yaw while leaving the original mission immutable');
     await undo();
-    check((await page.locator('#draft-status').innerText()).startsWith('尚未儲存的修改') && (await api(`/missions/${history.headId}`)).definition.props[0].position.x === 3, 'Undo after a confirmed save only changes the dirty local draft, never the saved version');
+    check((await page.locator('#draft-status').innerText()).startsWith('尚未儲存的修改') && (await api(`/missions/${history.headId}`)).definition.props[0].yawDegrees === 47.5, 'Undo after a confirmed save only changes the dirty local draft, never the saved version');
     await page.screenshot({ path: path.join(screenshots, 'placement-history-desktop.png'), fullPage: true });
     await page.setViewportSize({ width: 390, height: 844 });
     check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'History controls remain inside the mobile editor viewport');
     await page.screenshot({ path: path.join(screenshots, 'placement-history-mobile.png'), fullPage: true });
     await page.setViewportSize({ width: 1440, height: 1080 }); await load(history.headId, true);
-    check(await page.locator('#undo-prop').isDisabled() && await page.locator('#redo-prop').isDisabled() && await page.locator('#prop-x').inputValue() === '3', 'Reloading the current mission clears both previous branches and uses its actual latest version');
+    check(await page.locator('#undo-prop').isDisabled() && await page.locator('#redo-prop').isDisabled() && await page.locator('#prop-x').inputValue() === '3.125'
+      && await page.locator('#prop-yaw').inputValue() === '47.5', 'Reloading the current mission clears both previous branches and restores its saved precision');
+    await load(rowSaved.id);
+    await page.locator('#prop-select').selectOption('0');
+    const loadedRowStatus = await page.locator('#draft-status').innerText();
+    await page.locator('#prop-copy-panel summary').click();
+    const preview = () => page.locator('#preview-prop-copy').click();
+    const ghosts = page.locator('#prop-copy-preview [data-index]');
+    const objects = page.locator('#prop-layer [data-index]');
+    const apply = page.locator('#apply-prop-copy');
+    await field('prop-copy-count', 21); await preview();
+    check(await apply.isDisabled() && await ghosts.count() === 0 && (await page.locator('#prop-copy-status').innerText()).includes('1 至 20'),
+      'Row preview rejects a count beyond twenty without placing any copies');
+    await field('prop-copy-count', 2); await field('prop-copy-x', 0); await preview();
+    check(await apply.isDisabled() && await ghosts.count() === 0, 'A zero displacement cannot preview stacked copies');
+    await field('prop-copy-x', 10); await preview();
+    check(await apply.isDisabled() && (await page.locator('#prop-copy-status').innerText()).includes('超出配置圖'), 'An out-of-map row is rejected as a whole');
+    await field('prop-copy-x', 2.375); await field('prop-copy-z', 0.125); await preview();
+    check(await ghosts.count() === 2 && await objects.count() === 1 && await page.locator('#undo-prop').isDisabled()
+      && (await page.locator('#draft-status').innerText()) === loadedRowStatus && !(await apply.isDisabled()),
+      'Two translucent copies preview without changing the saved draft, selection history, or actual objects');
+    await page.screenshot({ path: path.join(screenshots, 'placement-row-preview.png'), fullPage: true });
+    await field('prop-copy-z', '');
+    check(await ghosts.count() === 0 && await apply.isDisabled() && await page.locator('#mission-form').evaluate(form => form.checkValidity()),
+      'Editing a preview parameter discards its ghosts and a blank offset does not invalidate the mission form');
+    await field('prop-copy-z', 0.125); await preview(); await apply.click();
+    check(await ghosts.count() === 0 && await objects.count() === 3 && await page.locator('#prop-select').inputValue() === '2'
+      && (await status()).includes('可復原 1'), 'Applying a preview adds the full row and selects its last object in one history step');
+    await undo();
+    check(await objects.count() === 1 && await page.locator('#prop-select').inputValue() === '0', 'One undo removes all copies and restores the source selection');
+    await redo();
+    check(await objects.count() === 3 && await page.locator('#prop-x').inputValue() === '1.25' && await page.locator('#prop-z').inputValue() === '2.375'
+      && await page.locator('#prop-yaw').inputValue() === '12.5', 'One redo restores the full row with its original angle and unsnapped offsets');
+    await page.locator('#save-revision').click();
+    await wait(() => document.querySelector('#draft-status').textContent.startsWith('已儲存') && !document.querySelector('#mission-fields').disabled);
+    const rowHistory = await api(`/missions/${rowSaved.id}/history`);
+    const expectedRow = [rowProp, { ...rowProp, position: { x: -1.125, y: 0, z: 2.25 } }, { ...rowProp, position: { x: 1.25, y: 0, z: 2.375 } }];
+    const rowMatches = props => JSON.stringify(props) === JSON.stringify(expectedRow);
+    check(rowHistory.headId !== rowSaved.id && rowMatches((await api(`/missions/${rowHistory.headId}`)).definition.props)
+      && (await api(`/missions/${rowSaved.id}`)).definition.props.length === 1, 'The immutable row revision stores the exact geometry and the original retains one object');
+    await load(rowHistory.headId);
+    check(await objects.count() === 3 && await page.locator('#undo-prop').isDisabled(), 'Reload shows all saved row objects in a fresh local history');
+    await page.locator('#mission-version').selectOption(rowHistory.headId);
+    const templateDownload = page.waitForEvent('download');
+    await page.locator('#export-mission-template').click();
+    const rowTemplate = path.join(screenshots, 'placement-row-template.json');
+    await (await templateDownload).saveAs(rowTemplate);
+    check(rowMatches(JSON.parse(await fs.readFile(rowTemplate, 'utf8')).definition.props), 'Actual saved-version template download retains every row position and angle');
     await page.locator('#rotate-prop').click(); page.once('dialog', dialog => dialog.accept()); await page.locator('#new-mission').click();
     check(await page.locator('#prop-layer [data-index]').count() === 0 && await page.locator('#undo-prop').isDisabled(), 'A new mission cannot undo into a different mission document');
     await page.locator('#add-barrel').click(); page.once('dialog', dialog => dialog.accept()); await page.locator('#logout').click();

@@ -1078,11 +1078,13 @@ async function compareMissionVersion(id) {
 }
 async function saveMission(revise = false) {
   if (state.pending || (revise && !state.draftBase)) return;
+  clearPropCopies();
   state.pending = { kind: revise ? 'mission-revise' : 'mission-create', path: revise ? `/missions/${state.draftBase.mission.id}/revisions` : '/missions', method: 'POST', requestId: uuid(),
     body: draftDefinition() };
   await sendPending();
 }
 function renderProps(updateInspector = true) {
+  clearPropCopies();
   renderPropHistory();
   drawLayoutProps($('prop-layer'), state.props, state.prop);
   placement.scheduleDraft();
@@ -1095,6 +1097,42 @@ function renderProps(updateInspector = true) {
 function editable() { return master() && !state.busy && !state.pending; }
 function dirtyDraft() { state.draftChanged = true; clearMissionComparison(); draftStatus(); placement.scheduleDraft(); }
 let propGesture = null;
+let propCopies = [];
+const maxProps = 500;
+function clearPropCopies() {
+  propCopies = [];
+  $('prop-copy-preview').replaceChildren();
+  $('prop-copy-status').textContent = '';
+  $('apply-prop-copy').disabled = true;
+}
+function previewPropCopies() {
+  const prop = state.props[state.prop];
+  if (!editable() || !prop) return;
+  clearPropCopies();
+  const values = ['prop-copy-count', 'prop-copy-x', 'prop-copy-z'].map(id => $(id).value.trim());
+  const [count, dx, dz] = values.map(Number), status = $('prop-copy-status');
+  if (values.some(value => value === '') || !Number.isInteger(count) || count < 1 || count > 20
+    || !Number.isFinite(dx) || !Number.isFinite(dz) || (dx === 0 && dz === 0)) {
+    status.textContent = '請填 1 至 20 份及有效位移，X 和 Z 至少一項須非零。';
+    return;
+  }
+  if (state.props.length + count > maxProps) { status.textContent = '最多可放置 500 個物件。'; return; }
+  const copies = Array.from({ length: count }, (_, index) => ({ ...prop, position: {
+    x: prop.position.x + dx * (index + 1), y: prop.position.y, z: prop.position.z + dz * (index + 1)
+  } }));
+  if (copies.some(({ position }) => Math.abs(position.x) > 10 || Math.abs(position.z) > 10)) {
+    status.textContent = '預覽中心超出配置圖的 ±10 公尺範圍。';
+    return;
+  }
+  propCopies = copies;
+  drawLayoutProps($('prop-copy-preview'), copies);
+  status.textContent = `已預覽 ${copies.length} 份。`;
+  $('apply-prop-copy').disabled = false;
+}
+function applyPropCopies() {
+  if (!editable() || !propCopies.length) return;
+  editProp(() => { state.props.push(...propCopies); state.prop = state.props.length - 1; });
+}
 function propSnapshot() { return { props: structuredClone(state.props), prop: state.prop }; }
 function renderPropHistory() {
   const status = objectHistory.status();
@@ -1120,7 +1158,7 @@ function travelProps(undo) {
 }
 function addProp(assetId) {
   if (!editable()) return;
-  if (state.props.length >= 500) { notify('最多可放置 500 個物件。', true); return; }
+  if (state.props.length >= maxProps) { notify('最多可放置 500 個物件。', true); return; }
   editProp(() => { state.props.push({ assetId, position: { x: 0, y: 0, z: 0 }, yawDegrees: 0 }); state.prop = state.props.length - 1; });
 }
 function moveProp(x, z) { const prop = state.props[state.prop]; if (prop && editable()) { prop.position.x = Math.round(Math.max(-10, Math.min(10, x)) * 2) / 2; prop.position.z = Math.round(Math.max(-10, Math.min(10, z)) * 2) / 2; renderProps(false); $('prop-x').value = prop.position.x; $('prop-z').value = prop.position.z; dirtyDraft(); } }
@@ -1164,7 +1202,7 @@ for (const id of ['prop-asset', 'prop-x', 'prop-y', 'prop-z', 'prop-yaw']) $(id)
 });
 
 function tab(name, worldTarget = null) {
-  if (name !== 'missions') { placement.clearTrial(); clearMissionTemplate(); }
+  if (name !== 'missions') { placement.clearTrial(); clearMissionTemplate(); clearPropCopies(); }
   finishPropGesture();
   for (const candidate of ['operations', 'missions', 'replay', 'world']) { const active = candidate === name; $(candidate + '-view').hidden = !active; $('tab-' + candidate).classList.toggle('active', active); $('tab-' + candidate).setAttribute('aria-pressed', String(active)); }
   replay.active(name === 'replay'); world.active(name === 'world', worldTarget); readiness.active(name === 'operations'); connections.active(name === 'operations');
@@ -1273,12 +1311,18 @@ $('launch-compared-version').addEventListener('click', () => pinLaunchVersion(co
 $('new-mission').addEventListener('click', () => { if (confirmDraftDiscard('建立新草稿')) resetDraft(); });
 $('add-sandbag').addEventListener('click', () => addProp('sandbag'));
 $('add-barrel').addEventListener('click', () => addProp('barrel'));
+$('preview-prop-copy').addEventListener('click', previewPropCopies);
+$('apply-prop-copy').addEventListener('click', applyPropCopies);
+for (const event of ['input', 'change']) $('prop-copy-panel').addEventListener(event, clearPropCopies);
+$('prop-copy-panel').addEventListener('toggle', () => {
+  if (!$('prop-copy-panel').open) clearPropCopies();
+});
 $('rotate-prop').addEventListener('click', () => { if (state.props[state.prop]) editProp(() => { state.props[state.prop].yawDegrees = (state.props[state.prop].yawDegrees + 15) % 360; }); });
 $('remove-prop').addEventListener('click', () => { if (state.prop >= 0) editProp(() => { state.props.splice(state.prop, 1); state.prop = Math.min(state.prop, state.props.length - 1); }); });
 for (const type of ['input', 'change']) $('mission-form').addEventListener(type, event => {
   if (importedText && event.target.id === 'draft-name') importedText.name = null;
   if (importedText && event.target.id === 'draft-briefing') importedText.briefing = null;
-  if (!['layout-session-mode', 'prop-select'].includes(event.target.id)) dirtyDraft();
+  if (!['layout-session-mode', 'prop-select'].includes(event.target.id) && !event.target.closest('#prop-copy-panel')) dirtyDraft();
 });
 $('layout-session-mode').addEventListener('change', () => placement.scheduleDraft());
 $('layout-recheck-draft').addEventListener('click', () => placement.recheckDraft());

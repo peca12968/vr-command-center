@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `windows-control-console-0.31.70-placement-row-win-x64.zip` 加入成列複製及小數座標與角度儲存。ZIP 為 52,820,861 bytes，SHA-256 `612da6dea5dad1381f59c473ceddb5d8fb4a9c4dbf8c95e09f54de0f5d413cc2`。解壓核對 540 個清單檔案，含 520 個執行檔案，通過 106 項管理包檢查。 [成列操作](LAYOUT.md#複製物件成列)
+
 2026-11-10 `windows-control-console-0.31.69-enemy-batch-win-x64.zip` 加入最近一批全館敵軍策略的逐房核對。ZIP 為 52,818,502 bytes，SHA-256 `c11e0ae8199fc2778032b0b970b33f3f732133c0b3e7f982b1f5617c7b4e1ce9`。解壓核對 540 個清單檔案，含 520 個執行檔案，通過 106 項管理包檢查。 [敵軍策略核對](LAYOUT.md#核對最近一批敵軍策略)
 
 2026-11-10 `windows-control-console-0.31.68-instant-replay-win-x64.zip` 加入即時觀戰回看。ZIP 為 52,813,246 bytes，SHA-256 `a8b5c15480155eebf2ef38315bcc4de1a1451d9f9e92197be1ac16af73428943`。解壓核對 540 個清單檔案，含 520 個執行環境檔案，通過 106 項管理包檢查。 [觀戰操作](WORLD_RECORDING.md#從即時觀戰回看最近-10-秒)
