@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-09 `windows-control-0.31.29-win-x64.zip` 加入 Quest 3 MR 五房部署包。ZIP 為 52,609,639 bytes，SHA-256 `49c5062eef233fa37dee0bf248fd0e4dc14727d43e3543337c9e911888a891f7`。解壓核對 516 個清單檔案，含 496 個執行環境檔案，通過 106 項管理包檢查。 [操作方式](QUEST3.md#從主控台下載五房部署包)
+
 2026-11-09 `windows-control-0.31.28-win-x64.zip` 加入「五房各自獨立」準備模式。ZIP 為 52,593,371 bytes，SHA-256 `bf81456b4f6ce7de901a6163290f89aed551017b2d50847e02d32451bca6d307`。解壓核對 513 個清單檔案，含 493 個執行環境檔案，通過 106 項管理包檢查。 [操作方式](MISSION_VERSIONS.md#五房各自獨立)
 
 2026-11-09 `windows-control-0.31.27-win-x64.zip` 加入按房間讀取即時戰鬥回饋。ZIP 為 52,586,583 bytes，SHA-256 `ab72ea260e8cfe404d51490f70285eb1b56e758cf722a70aad600622dade760f`。解壓核對 513 個清單檔案，通過 106 項管理包檢查。 [介面操作](HARDWARE.md#即時戰鬥回饋介面)

@@ -183,7 +183,17 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connect
 
 ### 五房 25 席部署預檢
 
-主控鎖定校正檔且五房各有五位玩家後，從控制台逐房下載「房間連線檔 ZIP」，並取得各房鎖定的原始校正 JSON。保留原 ZIP，將下列清單存成 `venue.json`。用 Windows 遊戲伺服器啟動器選場時顯示的「場次ID」替換範例，也可從管理 API `GET /api/sessions` 取得場次的 `id`。相對路徑以 `venue.json` 所在資料夾為基準。 [按房間下載連線檔](EXTERNAL_CLIENTS.md#按房間下載連線檔)
+#### 從主控台下載五房部署包
+
+1. 使用管理包 0.31.29 或更新版。在五房各登記五個 Quest 3 席位、鎖定各房校正檔，並啟動遊戲伺服器，等它公布場館 IPv4 與 UDP 埠。合併模式用一個端點，五房獨立各用不同端點。
+2. 以主控登入「房間與場次」，選取合併 MR 場次或任一獨立 MR 場次。在「Quest 3 MR 五房部署包」依房號選取五份鎖定的原始校正 JSON，按「下載五房部署包 ZIP」。畫面會提示場次、端點、名冊或校正檔有問題的房間。
+3. 解壓 `quest-mr-venue.zip`，直接使用其中的 `venue.json` 執行下方預檢。外層 ZIP 包含五個房間連線 ZIP 和五份校正原檔。只把對應的席位連線 JSON 與該房校正檔交給玩家，入場票券自簽發起有效五分鐘。
+
+管理 API `POST /api/mr-deployment/venue-bundle` 限主控。請求包含 `topology`，以及五筆 `rooms`，各有 `roomId`、`sessionId`、五個 `players`（`playerId`、`admissionId`）及 Base64 的 `alignmentFile`。服務按同一次讀取的場次和端點驗證五房，完整通過後以 `Cache-Control: no-store` 回傳 ZIP。場次、校正原檔、端點或當前名冊不符時回傳 `409` 及房號，無法取得部分部署包。裝置安裝和場館 UDP 可達性仍需實測。
+
+#### 使用逐房下載的檔案建立清單
+
+若已有逐房下載的「房間連線檔 ZIP」，請將各房原 ZIP 與鎖定的原始校正 JSON 放在同一資料夾，再將下列清單存成 `venue.json`。用 Windows 遊戲伺服器啟動器選場時顯示的「場次ID」替換範例，也可從管理 API `GET /api/sessions` 取得場次的 `id`。相對路徑以 `venue.json` 所在資料夾為基準。 [按房間下載連線檔](EXTERNAL_CLIENTS.md#按房間下載連線檔)
 
 ```json
 {
