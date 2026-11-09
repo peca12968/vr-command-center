@@ -119,6 +119,7 @@ internal static class VenuePhaseChecks
         var beginData = Path.Combine(directory, "venue-begin");
         var trackingData = Path.Combine(directory, "venue-full-tracking");
         var trackingKey = Guid.NewGuid();
+        var trackingFrame = new VenueTrackingFrame(Guid.NewGuid(), 20, 2000);
         VenuePhaseFence[] trackingTargets;
         VenuePhaseReceipt trackedBegin;
         using (var store = new SqliteSessionEventStore(trackingData))
@@ -126,16 +127,23 @@ internal static class VenuePhaseChecks
             var manager = new SessionManager(store);
             var roomIds = Enumerable.Range(1, SessionManager.RoomCount).ToArray();
             var session = manager.Create(SessionMode.Linked, roomIds, mission, master);
+            manager.OpenStream(session.Id, new(trackingFrame.StreamId, CombatOrigin.Simulation),
+                new OperatorIdentity("venue-tracking-source", OperatorRole.GameServer));
             foreach (var room in roomIds)
                 for (var seat = 0; seat < SessionManager.PlayersPerRoom; seat++)
                     manager.Join(session.Id, Guid.NewGuid(), $"Seat {room}/{seat}", room, HeadsetKind.Quest3, master);
             trackingTargets = Fences(manager.ReadVenuePhase(master).Begin);
             var target = trackingTargets.Single();
-            var evidence = new Dictionary<Guid, VenuePhaseWitness> { [session.Id] = new(target.PhaseSinceSequence, target.SessionSequence!.Value, true, [1, 2, 3, 4]) };
+            var evidence = new Dictionary<Guid, VenuePhaseWitness> { [session.Id] = new(target.PhaseSinceSequence, target.SessionSequence!.Value,
+                true, [1, 2, 3, 4], trackingFrame) };
             Reject<VenueBeginNotReadyException>(() => manager.ExecuteVenuePhase(ControlAction.Begin, trackingTargets, trackingKey, master, evidence, requireFullTracking: true),
                 "A linked venue with one room missing tracked evidence cannot start under the full tracking policy");
             check(manager.Get(session.Id).State == SessionState.Preparing, "A rejected full-tracking Begin appends no phase event");
             evidence[session.Id] = evidence[session.Id] with { FullyTrackedRooms = roomIds };
+            var wrongSource = new Dictionary<Guid, VenuePhaseWitness> { [session.Id] = evidence[session.Id] with
+                { TrackingFrame = trackingFrame with { StreamId = Guid.NewGuid() } } };
+            Reject<VenueBeginNotReadyException>(() => manager.ExecuteVenuePhase(ControlAction.Begin, trackingTargets, trackingKey, master, wrongSource,
+                requireFullTracking: true), "Guarded Begin rejects a frame from a different game source");
             trackedBegin = manager.ExecuteVenuePhase(ControlAction.Begin, trackingTargets, trackingKey, master, evidence, requireFullTracking: true);
             check(trackedBegin.RequireFullTracking && manager.Get(session.Id).State == SessionState.Running,
                 "The original full-tracking request starts only after all five rooms are witnessed");
@@ -146,8 +154,24 @@ internal static class VenuePhaseChecks
             var retry = manager.ExecuteVenuePhase(ControlAction.Begin, trackingTargets, trackingKey, master, requireFullTracking: true);
             check(retry.Duplicate && retry.RequireFullTracking && retry.Sessions.SequenceEqual(trackedBegin.Sessions),
                 "Full-tracking Begin retry preserves the durable policy and receipt after reopening SQLite");
+            var trackedApplied = retry.Sessions.Single();
+            check(manager.ReadVenueTrackingBegin(trackedApplied.SessionId, master) == new VenueTrackingBegin(trackingKey, trackedApplied.AppliedAtSequence, trackingFrame),
+                "The exact guarded Begin frame survives reopening the management store");
+            Reject<AccessDeniedException>(() => manager.ReadVenueTrackingBegin(trackedApplied.SessionId, room2), "Only Master can read a venue tracking witness");
             Reject<InvalidOperationException>(() => manager.ExecuteVenuePhase(ControlAction.Begin, trackingTargets, trackingKey, master),
                 "A retry cannot weaken the original tracking policy after reopening SQLite");
+            using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = store.DatabasePath, Pooling = false }.ToString());
+            connection.Open();
+            using var removeWitness = connection.CreateCommand();
+            removeWitness.CommandText = "UPDATE session_events SET envelope=json_remove(envelope, '$.venue.trackingFrame') WHERE json_type(envelope, '$.venue.trackingFrame')='object'";
+            check(removeWitness.ExecuteNonQuery() == 1, "Compatibility fixture reproduces a previously stored policy without a frame pointer");
+        }
+        using (var store = new SqliteSessionEventStore(trackingData))
+        {
+            var manager = new SessionManager(store);
+            var legacy = manager.ExecuteVenuePhase(ControlAction.Begin, trackingTargets, trackingKey, master, requireFullTracking: true);
+            check(legacy.Duplicate && legacy.RequireFullTracking && manager.ReadVenueTrackingBegin(legacy.Sessions.Single().SessionId, master) is null,
+                "Existing guarded Begin events retain their policy without inventing a witness frame");
         }
         var beginId = Guid.NewGuid();
         var reportSource = new OperatorIdentity("venue-report-source", OperatorRole.GameServer);

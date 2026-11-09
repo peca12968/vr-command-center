@@ -74,7 +74,8 @@ def fixture(*, remote=True):
     return ['direct-lan' if remote else 'same-host', {server_ip}, launcher, session, stats, endpoint, server, clients]
 
 
-def world_journal(path, world, *, header_changes=None, combat=0, active=True, sealed=True, end_sequence=8, players=None):
+def world_journal(path, world, *, header_changes=None, combat=0, active=True, sealed=True, end_sequence=8, players=None,
+                  preparing_sequence=7, running_sequence=7):
     def record(tag, body):
         payload = bytes([tag]) + body
         return struct.pack('<i', len(payload)) + payload + hashlib.sha256(payload).digest()
@@ -87,7 +88,7 @@ def world_journal(path, world, *, header_changes=None, combat=0, active=True, se
     raw = [b'VRWORLD1', record(0, json.dumps(header).encode())]
     for number in range(1, count + 1):
         phase = 'Ended' if number == count else 'Running' if active and number > 1 else 'Preparing'
-        packet = {'sequence': number, 'observedSequence': end_sequence if phase == 'Ended' else 7,
+        packet = {'sequence': number, 'observedSequence': {'Preparing': preparing_sequence, 'Running': running_sequence, 'Ended': end_sequence}[phase],
                   'elapsedMilliseconds': number * 100, 'suspended': False, 'throughCombatSequence': combat,
                   'frame': {'phase': phase, 'tick': number if phase == 'Running' else 0}}
         if players is not None:
@@ -1170,6 +1171,61 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertFalse(report['physicalHostsVerified'])
                 self.assertFalse(report['networkCapacityAccepted'])
                 self.assertNotIn('192.168', json.dumps(report))
+
+    def test_venue_verifies_the_original_guarded_begin_for_both_topologies(self):
+        request = id_for(999)
+        for mode in ('Linked', 'Independent'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, batch = venue_fixture(root, mode, remote=True, with_journals=True,
+                    mr_rooms=(2, 4) if mode == 'Independent' else ())
+                manifest['verifyTrackingBegin'] = True
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'missing an original guarded Begin witness'):
+                    field.verify_venue(path)
+
+                first_source = None
+                for entry, row in zip(manifest['sessions'], batch['sessions'], strict=True):
+                    session, _, _ = field.management_zip(root / entry['evidenceZip'])
+                    world = json.loads((root / entry['launcherReport']).read_text())['finalWorld']
+                    players = [{'id': player['id'], 'roomId': player['roomId'], 'connected': True,
+                                'health': 100, 'rig': {'kind': 'Tracked'}} for player in session['players']]
+                    journal = root / entry['worldJournal']
+                    world_journal(journal, world, players=lambda _, phase: players if phase == 'Preparing' else [], preparing_sequence=6)
+                    row['trackingBegin'] = {'requestId': request, 'appliedAtSequence': 7, 'frame': {
+                        'streamId': world['header']['streamId'], 'worldSequence': 1, 'elapsedMilliseconds': 100}}
+                    if first_source is None:
+                        first_source = journal, world, players
+
+                closure = root / manifest['closure']
+                closure.write_text(json.dumps({'batch': batch}), encoding='utf-8')
+                report = field.verify_venue(path)
+                self.assertEqual({'requestId': request, 'sessions': len(batch['sessions']), 'trackedPlayers': 25}, report['trackingBegin'])
+                self.assertTrue(all(item['worldJournal']['trackingBegin']['firstRunningFrame'] == 2 for item in report['sessions']))
+                witness = batch['sessions'][-1]['trackingBegin']
+                original_frame = witness['frame'].copy()
+                witness['frame']['streamId'] = id_for(888)
+                closure.write_text(json.dumps({'batch': batch}), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'another world source'):
+                    field.verify_venue(path)
+                witness['frame'] = original_frame
+                if mode == 'Independent':
+                    witness['requestId'] = id_for(997)
+                    closure.write_text(json.dumps({'batch': batch}), encoding='utf-8')
+                    with self.assertRaisesRegex(field.EvidenceError, 'one original guarded Begin request'):
+                        field.verify_venue(path)
+                    witness['requestId'] = request
+                closure.write_text(json.dumps({'batch': batch}), encoding='utf-8')
+
+                journal, world, players = first_source
+                for sequence, rig, message in ((7, 'Tracked', 'original Preparing boundary'), (6, 'Simulated', 'original tracked roster')):
+                    players[0]['rig']['kind'] = rig
+                    world_journal(journal, world, players=lambda _, phase: players if phase == 'Preparing' else [], preparing_sequence=sequence)
+                    with self.assertRaisesRegex(field.EvidenceError, message):
+                        field.verify_venue(path)
+                manifest.pop('verifyTrackingBegin')
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                self.assertNotIn('trackingBegin', field.verify_venue(path))
 
     def test_venue_accepts_quest_logcat_in_both_topologies(self):
         for mode, quest_per_room in (('Linked', 5), ('Independent', 1)):

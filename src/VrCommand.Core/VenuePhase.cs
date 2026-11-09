@@ -19,7 +19,10 @@ public record VenuePhaseReceipt(Guid RequestId, ControlAction Action, VenuePhase
 public record VenueEndBatch(Guid RequestId, DateTimeOffset RecordedAtUtc, VenuePhaseApplied[] Sessions);
 public record VenueEndSummary(Guid RequestId, DateTimeOffset RecordedAtUtc, int[] RoomIds, string[] MissionNames, int SessionCount);
 public record VenueEndHistory(VenueEndSummary[] Batches, Guid? NextBefore);
-public record VenuePhaseWitness(long PhaseSinceSequence, long SessionSequence, bool Ready, int[]? FullyTrackedRooms = null);
+public record VenueTrackingFrame(Guid StreamId, long WorldSequence, long ElapsedMilliseconds);
+public record VenueTrackingBegin(Guid RequestId, long AppliedAtSequence, VenueTrackingFrame Frame);
+public record VenuePhaseWitness(long PhaseSinceSequence, long SessionSequence, bool Ready, int[]? FullyTrackedRooms = null,
+    VenueTrackingFrame? TrackingFrame = null);
 public sealed class VenuePhaseChangedException() : InvalidOperationException("The venue phase targets changed; review the current rooms.");
 public sealed class VenuePauseNotObservedException(int[] roomIds) : InvalidOperationException("A game source has not confirmed its current pause.")
 {
@@ -60,6 +63,20 @@ public sealed partial class SessionManager
     {
         RequireVenueMaster(actor);
         lock (gate) return ToEndBatch(id);
+    }
+
+    public VenueTrackingBegin? ReadVenueTrackingBegin(Guid id, OperatorIdentity actor)
+    {
+        RequireVenueMaster(actor);
+        lock (gate)
+        {
+            var history = Find(id);
+            if (history.View.StartedAtUtc is not { } started) return null;
+            var entry = history.Events.FirstOrDefault(entry => entry.RecordedAtUtc == started
+                && entry.Kind == SessionEventKind.ControlApplied && entry.Read<ControlCommand>().Action == ControlAction.Begin);
+            return entry?.Venue?.TrackingFrame is { } frame
+                ? new(entry.Read<ControlCommand>().CommandId, entry.Sequence, frame) : null;
+        }
     }
 
     public VenueEndHistory ReadVenueEndHistory(Guid? before, int limit, OperatorIdentity actor)
@@ -152,7 +169,8 @@ public sealed partial class SessionManager
                 var command = new ControlCommand(requestId, action, settings, enemySettings, ExpectedSequence: begin ? history.View.Sequence : null);
                 return SessionEvent.Create(history.View.Id, history.View.Sequence + 1, SessionEventKind.ControlApplied, command, actor,
                     venue: new(history.PhaseSinceSequence, targets.Length, environment ? history.EnvironmentSinceSequence : null,
-                        enemies ? history.EnemiesSinceSequence : null, requireFullTracking));
+                        enemies ? history.EnemiesSinceSequence : null, requireFullTracking,
+                        requireFullTracking ? witnesses![history.View.Id].TrackingFrame : null));
             }).ToArray();
             var views = entries.Select((entry, index) => SessionProjection.Apply(targets[index].View, entry)).ToArray();
             store.AppendBatch(entries);
@@ -182,9 +200,15 @@ public sealed partial class SessionManager
             .SelectMany(history => history.View.RoomIds).ToHashSet();
         if (requireFullTracking)
         {
-            var fullyTracked = targets.SelectMany(history => history.View.RoomIds.Where(room =>
-                history.View.Players.Count(player => player.RoomId == room) == PlayersPerRoom
-                && witnesses?.GetValueOrDefault(history.View.Id)?.FullyTrackedRooms?.Contains(room) == true));
+            var fullyTracked = targets.SelectMany(history =>
+            {
+                var witness = witnesses?.GetValueOrDefault(history.View.Id);
+                return witness?.TrackingFrame is { WorldSequence: > 0, ElapsedMilliseconds: >= 0 } frame
+                    && history.View.CombatStream?.StreamId == frame.StreamId
+                    ? history.View.RoomIds.Where(room => history.View.Players.Count(player => player.RoomId == room) == PlayersPerRoom
+                        && witness.FullyTrackedRooms?.Contains(room) == true)
+                    : Enumerable.Empty<int>();
+            });
             waiting.UnionWith(Enumerable.Range(1, RoomCount).Except(fullyTracked));
         }
         if (waiting.Count > 0) throw new VenueBeginNotReadyException(waiting.Order().ToArray());
@@ -261,6 +285,7 @@ public sealed partial class SessionManager
                     var other = entry.Read<ControlCommand>();
                     return entry.Actor != first.Actor || entry.Venue!.TargetCount != entries.Count || other.Action != action
                         || entry.Venue.RequireFullTracking != first.Venue.RequireFullTracking
+                        || (entry.Venue.TrackingFrame is null) != (first.Venue.TrackingFrame is null)
                         || ClimateOf(other) != climate || EnemyPolicyOf(other) != enemyPolicy;
                 }))
                 throw new InvalidDataException("Incomplete or inconsistent venue transition batch.");

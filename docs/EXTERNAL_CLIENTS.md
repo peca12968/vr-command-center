@@ -244,6 +244,7 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `serverIps` | 所有本次伺服器電腦已指派的 IPv4，使用字串陣列 |
 | `closure` | 原批次的 `closure.json` 路徑 |
 | `verifyPlayerSources` | 選用。填布林值 `true` 核對所有原席位的日誌與姿態。每場均須提供 `worldJournal` |
+| `verifyTrackingBegin` | 選用。填布林值 `true` 核對同一批追蹤開場採用的原始準備中畫格及後續執行畫格。每場均須提供 `worldJournal` |
 | `udpPreflightBatch` 或 `udpPreflightBatches` | 選用。單份原 Quest 批次報告路徑，或 1 至 25 份原報告路徑的陣列。可搭配逐場 `udpSourcePreflights` |
 | `questCaptures` | 選用。填原 Quest 網路計畫及 1 至 25 份完整日誌擷取報告。可與 UDP 預檢報告一併使用 |
 | `sessions` | 獨立模式填五場，合併模式填一場 |
@@ -280,6 +281,12 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json
 摘要核對五房各五個席位、原封存來源、每位玩家的原入場與 UDP 來源，以及 25 筆伺服器戰績確認。它逐房列出在伺服器位址清單以外的玩家數。`direct-lan` 至少須觀察到一筆這類連線，仍須依實際設備及網路拓撲核對主機數、同時遊玩與容量。
 
 提供回放檔的整批驗收會檢查每場最後影格已觀察到該批結束指令，並輸出 `worldJournalsVerified` 與逐場摘要。回放畫面及遊戲事件內容可用原回放介面另行檢視。
+
+### 核對五房追蹤開場錄製
+
+使用管理包 0.31.66 以「五房開場須各有 5 席追蹤就緒」開始，再由主控批次結束並下載原場館驗收 ZIP。在 `venue.json` 設定 `"verifyTrackingBegin": true`，並逐場提供原生 `worldJournal`。工具會核對 `closure.json` 中每場的 `trackingBegin` 指向同一開始批次，逐場查驗原來源、開始前管理序號、該格擷取時間偏移及 25 席的原始追蹤姿態。每場也要有觀察到開始序號的後續有效執行格。
+
+結果中的 `trackingBegin` 列出原開始批次、場次數及通過核對的追蹤席位數。逐場 `worldJournal.trackingBegin` 列出原準備畫格、開始序號和第一格符合條件的執行畫格。管理包 0.31.65 或更早的開場仍可走一般封存核對。追蹤姿態、裝置來源與實體容量分別驗收。 [開場操作](PLAYER_READINESS.md#五房追蹤驗收開場)
 
 ### 直接使用 Quest 批次擷取報告
 

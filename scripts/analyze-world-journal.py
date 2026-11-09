@@ -18,7 +18,8 @@ def utc(value):
     return result
 
 
-def analyze(path, accepted_sequence=None, response_utc=None, *, expected_session=None, expected_header=None, on_running_frame=None):
+def analyze(path, accepted_sequence=None, response_utc=None, *, expected_session=None, expected_header=None, on_running_frame=None,
+            on_packet=None):
     if accepted_sequence is not None and (type(accepted_sequence) is not int or accepted_sequence < 1): raise ValueError('Positive accepted Begin sequence required')
     if response_utc and accepted_sequence is None: raise ValueError('Response timing requires a known accepted Begin boundary')
     response = utc(response_utc) if response_utc else None
@@ -67,6 +68,8 @@ def analyze(path, accepted_sequence=None, response_utc=None, *, expected_session
                     previous_state = state
                 if accepted_sequence is not None and first is None and row['observedSequence'] >= accepted_sequence and row['phase'] == 'Running' and row['tick'] > 0 and not row['suspended']:
                     first = row
+                if on_packet is not None:
+                    on_packet(packet)
                 if row['phase'] == 'Running' and row['tick'] > 0 and row['suspended'] is False:
                     running_frames += 1
                     if on_running_frame is not None:

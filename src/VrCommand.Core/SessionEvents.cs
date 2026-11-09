@@ -12,7 +12,8 @@ public record PlayerLeft(Guid PlayerId, int? RoomId = null, Guid AdmissionId = d
 public record VenueTransition(long PhaseSinceSequence, int TargetCount,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? EnvironmentSinceSequence = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? EnemiesSinceSequence = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool RequireFullTracking = false);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool RequireFullTracking = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTrackingFrame? TrackingFrame = null);
 public record SessionEvent(int SchemaVersion, Guid EventId, Guid SessionId, long Sequence,
     DateTimeOffset RecordedAtUtc, SessionEventKind Kind, JsonElement Payload, OperatorIdentity? Actor = null,
     Guid? RequestId = null, [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTransition? Venue = null)
@@ -177,7 +178,9 @@ internal static class SessionProjection
     {
         if (command.Action != ControlAction.SetEnvironment && venue.EnvironmentSinceSequence is not null
             || command.Action != ControlAction.SetEnemies && venue.EnemiesSinceSequence is not null
-            || venue.RequireFullTracking && command.Action != ControlAction.Begin) return false;
+            || venue.RequireFullTracking && command.Action != ControlAction.Begin
+            || venue.TrackingFrame is { } frame && (!venue.RequireFullTracking || frame.WorldSequence < 1
+                || frame.ElapsedMilliseconds < 0 || frame.StreamId == Guid.Empty || session?.CombatStream?.StreamId != frame.StreamId)) return false;
         return command.Action switch
         {
             ControlAction.Begin => command.ExpectedSequence == sequence - 1 && (!venue.RequireFullTracking || session is not null

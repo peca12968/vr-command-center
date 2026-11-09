@@ -83,14 +83,16 @@ public sealed partial class WorldRecordings
             foreach (var target in (begin ? plan.Begin : plan.Resume)
                 .Where(target => expected.Contains(new(target.SessionId, target.PhaseSinceSequence, target.SessionSequence))))
             {
-                var (report, _, phase, beginState, _, _, _, _) = ReadReadinessSnapshot(target.SessionId, actor);
+                var (report, _, phase, beginState, _, _, _, _, trackingFrame) = ReadReadinessSnapshot(target.SessionId, actor,
+                    includeTrackingFrame: requireFullTracking);
                 if (begin ? beginState == "Ready" : phase is { Action: ControlAction.Pause, WorldSequence: not null }
                     && phase.AppliedAtSequence == target.PhaseSinceSequence)
                 {
                     var trackedRooms = requireFullTracking ? report.Players.GroupBy(player => player.RoomId)
                         .Where(room => room.Count() == SessionManager.PlayersPerRoom && room.All(player => ReadyToBegin(player, trackedRequired: true)))
                         .Select(room => room.Key).ToArray() : null;
-                    reports.Add((report, new(target.PhaseSinceSequence, report.SessionSequence, begin || report.MrResumeState == "Ready", trackedRooms)));
+                    reports.Add((report, new(target.PhaseSinceSequence, report.SessionSequence, begin || report.MrResumeState == "Ready",
+                        trackedRooms, trackingFrame)));
                 }
             }
             var now = readinessClock.GetUtcNow();
@@ -118,7 +120,7 @@ public sealed partial class WorldRecordings
         return rooms.Select(room =>
         {
             if (room.SessionId is not { } id) return new RoomReadiness(room.Id, null, 0, 0, 0, 0, "Idle", null);
-            var (report, clock, venuePhase, beginState, environment, enemyRooms, endpoint, vrParticipationObserved) = sessions[id];
+            var (report, clock, venuePhase, beginState, environment, enemyRooms, endpoint, vrParticipationObserved, _) = sessions[id];
             var enemies = enemyRooms?.GetValueOrDefault(room.Id);
             var players = report.Players.Where(player => player.RoomId == room.Id).ToArray();
             var participation = vrParticipationObserved ? new RoomVrParticipation(
@@ -150,8 +152,9 @@ public sealed partial class WorldRecordings
         player.CanParticipate && (!trackedRequired || player.RigKind == "Tracked");
 
     private (SessionReadiness Report, RoomMissionTime? Clock, RoomVenuePhase? VenuePhase, string? BeginState,
-        RoomEnvironmentEvidence? Environment, Dictionary<int, RoomEnemiesEvidence>? EnemyRooms, ConnectionEndpoint? Endpoint, bool VrParticipationObserved)
-        ReadReadinessSnapshot(Guid id, OperatorIdentity actor, bool includeRoomDetails = false)
+        RoomEnvironmentEvidence? Environment, Dictionary<int, RoomEnemiesEvidence>? EnemyRooms, ConnectionEndpoint? Endpoint,
+        bool VrParticipationObserved, VenueTrackingFrame? TrackingFrame)
+        ReadReadinessSnapshot(Guid id, OperatorIdentity actor, bool includeRoomDetails = false, bool includeTrackingFrame = false)
     {
         RequireReadinessActor(actor);
         lock (gate)
@@ -248,7 +251,10 @@ public sealed partial class WorldRecordings
             var endpoint = includeRoomDetails && current.State != SessionState.Ended ? EndpointRow(current) : null;
             var vrParticipationObserved = confirmed && current.State is SessionState.Preparing or SessionState.Running
                 && current.Environment.Mode == ExperienceMode.VR;
-            return (report, clock, venuePhase, beginState, environmentEvidence, enemyRooms, endpoint, vrParticipationObserved);
+            var trackingFrame = includeTrackingFrame && beginState == "Ready" && frame is not null
+                && Guid.TryParseExact(info?.Header.streamId, "D", out var sourceId)
+                ? new VenueTrackingFrame(sourceId, frame.Packet.sequence, frame.Packet.elapsedMilliseconds) : null;
+            return (report, clock, venuePhase, beginState, environmentEvidence, enemyRooms, endpoint, vrParticipationObserved, trackingFrame);
         }
     }
 }
