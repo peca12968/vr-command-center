@@ -21,6 +21,18 @@ def id_for(number):
     return str(uuid.UUID(int=number))
 
 
+def logcat_line(message, pid=7342, tag='Unity'):
+    return f'11-09 14:30:00.000 {pid:5} 14325 I {tag:8}: {message}\n'
+
+
+def quest_logcat(log, port=7777, pid=7342):
+    return ('--------- beginning of main\n'
+            + logcat_line('VR_CLIENT_CONNECTED id=99', pid, tag='Other')
+            + logcat_line(f'VR_NETWORK_STARTED role=Client started=True background=False port={port}', pid)
+            + logcat_line('UnityEngine.DebugLogHandler:Internal_Log(LogType, LogOption, String, Object)', pid)
+            + ''.join(logcat_line(line, pid) for line in log.splitlines()))
+
+
 def fixture(*, remote=True):
     server_ip = ipaddress.IPv4Address('192.168.5.10')
     peer = ipaddress.IPv4Address('192.168.5.20') if remote else server_ip
@@ -50,7 +62,7 @@ def fixture(*, remote=True):
     return ['direct-lan' if remote else 'same-host', {server_ip}, launcher, session, stats, endpoint, server, clients]
 
 
-def venue_fixture(root, mode, *, remote=False):
+def venue_fixture(root, mode, *, remote=False, quest_per_room=0):
     def write_json(path, value):
         path.write_text(json.dumps(value), encoding='utf-8')
 
@@ -83,16 +95,17 @@ def venue_fixture(root, mode, *, remote=False):
             for seat in range(5):
                 connection = room * 5 + seat
                 player, admission = id_for(300 + connection), id_for(400 + connection)
-                peer = remote_ip if remote and room == 5 and seat == 4 else server_ip
-                session['players'].append({'id': player, 'admissionId': admission, 'roomId': room, 'seat': seat})
+                is_quest = seat >= 5 - quest_per_room
+                peer = f'192.168.5.{30 + connection}' if is_quest else remote_ip if remote and room == 5 and seat == 4 else server_ip
+                session['players'].append({'id': player, 'admissionId': admission, 'roomId': room, 'seat': seat, 'headset': 'Quest3'})
                 row = {field_name: 0 for field_name in field.COMBAT} | {'playerId': player, 'roomId': room, 'health': 100, 'accuracyPercent': 0}
                 stats['players'].append(row)
                 result = dict(row, version=1, admissionId=admission, sessionId=session_id, origin='Simulation',
                               streamId=stream, throughSequence=9, finalStreamSequence=0, worldSequence=80)
                 log = f'Player {connection}.log'
-                entry['players'].append({'address': peer, 'log': log})
-                (root / log).write_text(f'VR_CLIENT_CONNECTED id={connection}\nVR_CLIENT_DEBRIEF_FINAL {json.dumps(result)}\nVR_CLIENT_DISCONNECTED\n',
-                                        encoding='utf-8')
+                entry['players'].append({'address': peer, 'log': log, **({'logcatPid': 7342} if is_quest else {})})
+                player_log = f'VR_CLIENT_CONNECTED id={connection}\nVR_CLIENT_DEBRIEF_FINAL {json.dumps(result)}\nVR_CLIENT_DISCONNECTED\n'
+                (root / log).write_text(quest_logcat(player_log, port) if is_quest else player_log, encoding='utf-8')
                 server += (f'VR_SERVER_ADMISSION_APPROVED id={connection}\nVR_SERVER_PEER id={connection} endpoint={peer}:{5000 + connection}\n'
                            f'VR_SERVER_DEBRIEF_ACK id={connection}\n')
         write_json(root / entry['launcherReport'], launcher)
@@ -107,6 +120,79 @@ def venue_fixture(root, mode, *, remote=False):
 
 
 class FieldResultsTests(unittest.TestCase):
+    def test_quest_logcat_reconnect_uses_the_server_acknowledged_connection(self):
+        data = fixture()
+        data[3]['players'][1]['headset'] = 'Quest3'
+        address, log = data[7].pop()
+        earlier = 'VR_CLIENT_CONNECTED id=8\nVR_CLIENT_DISCONNECTED\n'
+        startup, rest = data[6].split('\n', 1)
+        data[6] = startup + '\nVR_SERVER_ADMISSION_APPROVED id=8\nVR_SERVER_PEER id=8 endpoint=unavailable\n' + rest
+        report = field.verify(*data, quest_player_logs=[(address, quest_logcat(earlier + log), 7342)])
+        self.assertEqual((2, 1), (report['serverAcknowledgements'], report['questLogcatPlayers']))
+        self.assertFalse(report['physicalHostsVerified'])
+        self.assertFalse(report['networkCapacityAccepted'])
+
+    def test_quest_logcat_rejects_wrong_source_or_missing_original_records(self):
+        for case, error in (
+            ('wrong pid', 'original client startup'),
+            ('foreign marker', 'outside the original client process'),
+            ('wrong port', 'original client startup'),
+            ('duplicate startup', 'original client startup'),
+            ('missing startup', 'outside the original client process'),
+            ('missing disconnect', 'terminal disconnect'),
+            ('wrong headset', 'Quest 3 admission'),
+            ('local quest', 'own direct LAN address'),
+            ('wrong admission', 'admission or room'),
+            ('wrong udp source', 'UDP peer differs'),
+            ('wrong sealed world', 'final seals'),
+        ):
+            with self.subTest(case=case):
+                data = fixture(remote=case != 'local quest')
+                data[3]['players'][1]['headset'] = 'ViveXr' if case == 'wrong headset' else 'Quest3'
+                address, log = data[7].pop()
+                log = quest_logcat(log, port=7778 if case == 'wrong port' else 7777)
+                if case == 'foreign marker':
+                    log = log.replace(logcat_line('VR_CLIENT_DISCONNECTED'), logcat_line('VR_CLIENT_DISCONNECTED', 7343))
+                elif case == 'duplicate startup':
+                    log += logcat_line('VR_NETWORK_STARTED role=Client started=True background=False port=7777')
+                elif case == 'missing startup':
+                    log = ''.join(line for line in log.splitlines(keepends=True) if 'VR_NETWORK_STARTED' not in line)
+                elif case == 'missing disconnect':
+                    log = log.replace(logcat_line('VR_CLIENT_DISCONNECTED'), '')
+                elif case == 'wrong admission':
+                    log = log.replace(id_for(14), id_for(500))
+                elif case == 'wrong udp source':
+                    address = ipaddress.IPv4Address('192.168.5.22')
+                elif case == 'wrong sealed world':
+                    log = log.replace('"worldSequence": 80', '"worldSequence": 79')
+                with self.assertRaisesRegex(field.EvidenceError, error):
+                    field.verify(*data, quest_player_logs=[(address, log, 7343 if case == 'wrong pid' else 7342)])
+
+    def test_quest_logcat_and_windows_cli_reports_remain_private(self):
+        topology, ips, launcher, session, stats, endpoint, server, clients = fixture()
+        session['players'][1]['headset'] = 'Quest3'
+        with tempfile.TemporaryDirectory(prefix='quest-field-check-') as directory:
+            root = Path(directory)
+            command = [sys.executable, str(SCRIPT), '--topology', topology, '--server-ip', str(next(iter(ips)))]
+            for option, value in [('launcher-report', launcher), ('session', session), ('statistics', stats), ('endpoint', endpoint), ('server-log', server)]:
+                path = root / option
+                path.write_text(value if type(value) is str else json.dumps(value), encoding='utf-8')
+                command += ['--' + option, str(path)]
+            windows, quest = root / 'Player.log', root / 'Quest logcat.txt'
+            windows.write_text(clients[0][1], encoding='utf-8')
+            quest.write_text(quest_logcat(clients[1][1]), encoding='utf-8')
+            command += ['--player', str(clients[0][0]), str(windows), '--quest-player', str(clients[1][0]), str(quest)]
+            success = subprocess.run([*command, '7342'], capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(success.stdout)['questLogcatPlayers'], 1)
+            self.assertNotIn('7342', success.stdout)
+            self.assertNotIn('192.168', success.stdout)
+            for suffix in (['7343'], ['-1'], ['7342', '--player', str(clients[1][0]), str(quest)]):
+                failure = subprocess.run([*command, *suffix], capture_output=True, text=True)
+                self.assertEqual(failure.returncode, 1)
+                self.assertEqual(failure.stdout, '')
+                self.assertNotIn(directory, failure.stderr)
+                self.assertNotIn('192.168', failure.stderr)
+
     def test_direct_consistency_does_not_certify_physical_hosts(self):
         data = fixture()
         report = field.verify(*data)
@@ -232,6 +318,18 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertFalse(report['physicalHostsVerified'])
                 self.assertFalse(report['networkCapacityAccepted'])
                 self.assertNotIn('192.168', json.dumps(report))
+
+    def test_venue_accepts_quest_logcat_in_both_topologies(self):
+        for mode, quest_per_room in (('Linked', 5), ('Independent', 1)):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                path, manifest, _ = venue_fixture(Path(directory), mode, remote=True, quest_per_room=quest_per_room)
+                report = field.verify_venue(path)
+                self.assertEqual((25, 5 * quest_per_room), (report['serverAcknowledgements'], report['questLogcatPlayers']))
+                self.assertEqual([row['playersOutsideDeclaredServer'] for row in report['rooms']], [quest_per_room] * 5)
+                manifest['sessions'][0]['players'][4]['logcatPid'] = '7342'
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'Invalid numeric evidence'):
+                    field.verify_venue(path)
 
     def test_venue_rejects_changed_batch_source_or_missing_room(self):
         with tempfile.TemporaryDirectory() as directory:

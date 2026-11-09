@@ -1,9 +1,10 @@
-"""Check closed Windows field sessions' endpoints, admissions and sealed results."""
+"""Check sealed Windows server results against Windows player logs or Quest logcat."""
 import argparse
 from datetime import datetime
 from decimal import Decimal
 import ipaddress
 import io
+from itertools import chain
 import json
 from pathlib import Path
 import re
@@ -16,6 +17,9 @@ COMBAT = ('ammoUsed', 'shotsHit', 'kills', 'hitsReceived', 'damageTaken')
 LAN = tuple(map(ipaddress.IPv4Network, ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16')))
 SERVER_MARKER = re.compile(r'VR_SERVER_(ADMISSION_APPROVED|PEER|DEBRIEF_ACK|DEBRIEF_TIMEOUT) id=(0|[1-9][0-9]{0,19})(?: endpoint=(\S+))?')
 CONNECT = re.compile(r'VR_CLIENT_CONNECTED id=(0|[1-9][0-9]{0,19})')
+LOGCAT_UNITY = re.compile(r'[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3} +'
+                          r'([1-9][0-9]{0,9}) +[1-9][0-9]{0,9} I Unity *: (.*)')
+PLAYER_MARKERS = ('VR_CLIENT_CONNECTED', 'VR_CLIENT_DISCONNECTED', 'VR_CLIENT_DEBRIEF_FINAL')
 MAX_FILE_BYTES = 16 * 1024 * 1024
 
 
@@ -128,6 +132,27 @@ def client_result(log):
     return final
 
 
+def quest_client_result(log, pid, port):
+    pid = str(integer(pid, 1, 2**31 - 1))
+    started = False
+    markers = []
+    for line in log.splitlines():
+        entry = LOGCAT_UNITY.fullmatch(line)
+        if entry is None:
+            continue
+        process, message = entry.groups()
+        if message.startswith('VR_NETWORK_STARTED '):
+            require(process == pid and not started and re.fullmatch(
+                rf'VR_NETWORK_STARTED role=Client started=True background=(True|False) port={port}', message),
+                'Quest logcat does not contain one original client startup on the game port')
+            started = True
+        elif message.startswith(PLAYER_MARKERS):
+            require(process == pid and started, 'Quest logcat player marker is outside the original client process or startup')
+            markers.append(message)
+    require(started, 'Missing original Quest client startup in logcat')
+    return client_result('\n'.join(markers))
+
+
 def roster(rows, key, size):
     require(type(rows) is list and len(rows) == size, 'Player count differs from the final roster')
     indexed = {identity(row[key]): row for row in rows}
@@ -142,12 +167,14 @@ def scores(row):
     return values + (accuracy,)
 
 
-def verify(topology, server_ips, launcher, session, statistics, endpoint, server_log, player_logs):
-    report, _ = verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log, len(player_logs), player_logs)
+def verify(topology, server_ips, launcher, session, statistics, endpoint, server_log, player_logs, *, quest_player_logs=()):
+    report, _ = verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log,
+                               len(player_logs) + len(quest_player_logs), player_logs, quest_player_logs=quest_player_logs)
     return report
 
 
-def verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log, size, player_logs, *, require_remote=True):
+def verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log, size, player_logs, *,
+                   require_remote=True, quest_player_logs=()):
     integer(size, 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(integer(launcher['schemaVersion'], 1, 1) and launcher['status'] == 'sealed-stopped'
@@ -195,14 +222,20 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
     peers, acknowledged = server_connections(server_log, port)
     used_players, used_connections, endpoints = set(), set(), set()
     room_sources = {}
-    for expected_ip, log in player_logs:
-        connection, result = client_result(log)
+    quest_players = 0
+    windows_logs = ((address, log, None) for address, log in player_logs)
+    for expected_ip, log, pid in chain(windows_logs, quest_player_logs):
+        connection, result = client_result(log) if pid is None else quest_client_result(log, pid, port)
         require(connection in acknowledged and connection not in used_connections, 'Missing or reused server acknowledgement')
         observed = peer_address(peers[connection])
         require(observed[0] == expected_ip and observed not in endpoints, 'UDP peer differs from the declared source or is reused')
         player_id = identity(result['playerId'])
         require(player_id in players and player_id not in used_players, 'Unexpected or duplicated result player')
         owner, stats = players[player_id], ledger[player_id]
+        if pid is not None:
+            require(owner.get('headset') == 'Quest3' and topology == 'direct-lan' and expected_ip not in server_ips,
+                    'Quest logcat requires a Quest 3 admission and its own direct LAN address')
+            quest_players += 1
         room = integer(owner['roomId'], 1, 5)
         require(room in rooms and integer(result['roomId'], 1, 5) == integer(stats['roomId'], 1, 5) == room
                 and result['admissionId'] == owner['admissionId'], 'Player result admission or room differs')
@@ -229,7 +262,8 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
             'players': size, 'playersPerRoom': {room: len(room_sources[room]) for room in sorted(room_sources)}, 'distinctPeerAddresses': len(peer_ips),
             'distinctAddressesOutsideDeclaredServer': len(remote), 'serverAcknowledgements': len(acknowledged),
             'worldSequence': world_sequence, 'combatSequence': combat_sequence, 'physicalHostsVerified': False,
-            'networkCapacityAccepted': False}, room_sources
+            'networkCapacityAccepted': False,
+            **({'questLogcatPlayers': quest_players} if quest_players else {})}, room_sources
 
 
 def management_zip(path):
@@ -281,6 +315,7 @@ def verify_venue(manifest_path):
             and sorted(row['roomIds'] for row in rows) == expected_rooms, 'Closure does not cover exactly the five original rooms')
 
     rooms, summaries = {}, []
+    quest_players = 0
     stream_ids, bindings, player_ids, admission_ids, end_times = set(), set(), set(), set(), set()
     for entry in entries:
         session, statistics, endpoint = management_zip(evidence_path(entry['evidenceZip']))
@@ -303,9 +338,18 @@ def verify_venue(manifest_path):
         bindings.add(binding)
         players = entry['players']
         require(type(players) is list and len(players) == len(row['roomIds']) * 5, 'Each original room must include five player logs')
-        logs = ((ipv4(player['address']), content(evidence_path(player['log']))) for player in players)
+        logs, quest_logs = [], []
+        for player in players:
+            address, path = ipv4(player['address']), evidence_path(player['log'])
+            if 'logcatPid' in player:
+                quest_logs.append((address, path, integer(player['logcatPid'], 1, 2**31 - 1)))
+            else:
+                logs.append((address, path))
         report, sources = verify_session(topology, server_ips, launcher, session, statistics, endpoint,
-                                         server_log, len(players), logs, require_remote=False)
+                                         server_log, len(players), ((address, content(path)) for address, path in logs),
+                                         require_remote=False,
+                                         quest_player_logs=((address, content(path), pid) for address, path, pid in quest_logs))
+        quest_players += len(quest_logs)
         seats = {(player['roomId'], integer(player['seat'], 0, 4)) for player in session['players']}
         require(seats == {(room, seat) for room in row['roomIds'] for seat in range(5)}, 'Final roster must cover every room seat exactly once')
         for player in session['players']:
@@ -327,7 +371,8 @@ def verify_venue(manifest_path):
             'sessions': sorted(summaries, key=lambda item: item['roomIds']),
             'distinctPeerAddresses': len(peer_ips), 'distinctAddressesOutsideDeclaredServer': len(remote),
             'serverAcknowledgements': sum(item['serverAcknowledgements'] for item in summaries),
-            'physicalHostsVerified': False, 'networkCapacityAccepted': False}
+            'physicalHostsVerified': False, 'networkCapacityAccepted': False,
+            **({'questLogcatPlayers': quest_players} if quest_players else {})}
 
 
 def main():
@@ -338,22 +383,29 @@ def main():
     for name in ('launcher-report', 'session', 'statistics', 'endpoint', 'server-log'):
         parser.add_argument('--' + name, type=Path)
     parser.add_argument('--player', action='append', nargs=2, metavar=('EXPECTED_IPV4', 'LOG'))
+    parser.add_argument('--quest-player', action='append', nargs=3, metavar=('EXPECTED_IPV4', 'LOGCAT', 'PID'))
     args = parser.parse_args()
     json_paths = [args.launcher_report, args.session, args.statistics, args.endpoint]
-    single_args = [args.topology, args.server_ip, *json_paths, args.server_log, args.player]
+    single_args = [args.topology, args.server_ip, *json_paths, args.server_log, args.player or args.quest_player]
     if (args.venue_manifest and any(single_args)) or (not args.venue_manifest and not all(single_args)):
         parser.error('Provide --venue-manifest alone or all single-session options.')
     try:
         if args.venue_manifest:
             report = verify_venue(args.venue_manifest)
         else:
-            integer(len(args.player), 1, 25)
-            paths = [Path(path).resolve(strict=True) for _, path in args.player]
-            inputs = [*json_paths, args.server_log, *paths]
+            windows = args.player or []
+            quest = args.quest_player or []
+            integer(len(windows) + len(quest), 1, 25)
+            inputs = [*json_paths, args.server_log, *(Path(row[1]) for row in chain(windows, quest))]
             require(len({path.resolve(strict=True) for path in inputs}) == len(inputs), 'Evidence paths must be distinct')
-            players = [(ipv4(address), content(path)) for (address, _), path in zip(args.player, paths)]
+            players = [(ipv4(address), content(Path(path))) for address, path in windows]
+            quest_players = []
+            for address, path, pid in quest:
+                require(re.fullmatch(r'[1-9][0-9]{0,9}', pid), 'Provide the original Quest process ID')
+                quest_players.append((ipv4(address), content(Path(path)), integer(int(pid), 1, 2**31 - 1)))
             report = verify(args.topology, {ipv4(address) for address in args.server_ip},
-                            *(read_json(content(path)) for path in json_paths), content(args.server_log), players)
+                            *(read_json(content(path)) for path in json_paths), content(args.server_log), players,
+                            quest_player_logs=quest_players)
     except EvidenceError as error:
         parser.exit(1, f'Field evidence rejected. {error}.\n')
     except (OSError, UnicodeError, ArithmeticError, AttributeError, KeyError, TypeError, ValueError, RecursionError,

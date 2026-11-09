@@ -392,6 +392,31 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connect
 
 場次暫停時，頭盔需要重新對位的玩家可完成量測。請在「MR 繼續檢查」確認存活席位已就緒，再按繼續。 [暫停後繼續](PLAYER_READINESS.md#暫停後繼續)
 
+## 收集 Quest 場館驗收日誌
+
+用 Windows 遊戲伺服器啟動器的 `--peer-diagnostics on` 保留 UDP 來源和戰績確認。驗收前先關閉頭盔上次場次的遊戲，再部署本場票券並重新啟動。先把頭盔接上 USB 偵錯，在 PowerShell 7 指定裝置序號。遊戲啟動後、場次結束前，記錄原遊戲程序 PID，並從頭盔 Wi-Fi 設定記下該次實際使用的 IPv4。
+
+```powershell
+$adb = 'F:\Tools\UnityEditors\6000.3.27f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe'
+$serial = 'REPLACE-WITH-ADB-SERIAL'
+$questPid = ([string](& $adb -s $serial shell pidof com.vrcommand.quest)).Trim()
+if ($LASTEXITCODE -or $questPid -notmatch '^[1-9][0-9]{0,9}$') { throw '需要一個原遊戲程序 PID' }
+```
+
+主控結束場次後，等原伺服器確認戰績送達、玩家斷線。先保持頭盔上的遊戲程式開啟，立刻擷取該程序的原日誌到私人資料夾。每席使用不同的新檔名，保留其 IPv4 與 PID 供核對。
+
+```powershell
+$logPath = '.\room-01-seat-01-logcat.txt'
+if (Test-Path -LiteralPath $logPath) { throw '請指定新的日誌檔名' }
+$activeQuestPid = ([string](& $adb -s $serial shell pidof com.vrcommand.quest)).Trim()
+if ($LASTEXITCODE -or $activeQuestPid -cne $questPid) { throw '原遊戲程序已更換' }
+& $adb -s $serial logcat -d -b main "--pid=$questPid" -v threadtime -s 'Unity:I' |
+    Set-Content -LiteralPath $logPath -Encoding utf8
+if ($LASTEXITCODE) { throw 'ADB 擷取失敗，這份日誌無法驗收' }
+```
+
+使用原始 `threadtime` 輸出。核對工具會讀取原程序的啟動、連線、戰績及斷線。若日誌環形緩衝區已覆蓋原啟動，須用下一次驗收保留完整日誌。場次、入場 ID、UDP 來源、伺服器確認和封存序號仍需逐席符合。 [Android logcat 文件](https://developer.android.com/tools/logcat) · [PID 篩選](https://android.googlesource.com/platform/system/logging/+/f3568188d89e74f1202d4266c587ecb4cf027df4/logcat/logcat.cpp) · [單場及五房驗收](EXTERNAL_CLIENTS.md#核對封存戰績與-udp-來源)
+
 ## 連線與仍待實作事項
 
 一個桌面伺服器程序綁定一個管理場次；五房 Independent 使用各自程序／UDP 埠，全連線則使用一份 Linked 場次與共同伺服器。助手目前只產生單房 Independent 設定；Linked 名冊與票券可透過 API 建立。場景用房間原點平移安排五區，尚無實體場館對位或共用錨點。
