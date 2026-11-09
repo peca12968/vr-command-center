@@ -12,6 +12,22 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
   const option = page.locator('#venue-full-tracking');
   const start = page.locator('#venue-begin');
   const status = room => page.locator(`[data-begin-room="${room}"]`);
+  const tracking = id => page.locator(`[data-venue-tracking-begin="${id}"]`);
+  const canvas = page.locator('#world-canvas');
+  async function openTracking(row) {
+    const expected = row.trackingBegin.frame.worldSequence;
+    const request = page.waitForRequest(request => new URL(request.url()).pathname === `/api/sessions/${row.sessionId}/world/watch`);
+    await tracking(row.sessionId).click();
+    const query = new URL((await request).url()).searchParams;
+    assert.equal(query.get('mode'), 'replay');
+    assert.equal(query.get('fromFrame'), String(expected));
+    assert.equal(query.get('throughFrame'), String(expected));
+    await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${expected} 格的追蹤開場快照` }).waitFor();
+    assert.equal(await canvas.getAttribute('data-sequence'), String(expected));
+    assert.equal(await page.locator('#world-recording').inputValue(), row.sessionId);
+    assert.equal(await page.locator('#world-room').inputValue(), row.roomIds.length === 1 ? String(row.roomIds[0]) : 'all');
+    await page.locator('#world-status').filter({ hasText: '準備中' }).waitFor();
+  }
   async function mission(mode) {
     return api('/missions', 'POST', { name: `Full tracking ${mode}`, briefing: '', durationSeconds: 180,
       environment: { mode, weather: 'Clear', timeOfDay: 'Day', lightning: false },
@@ -69,6 +85,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
   }
   try {
     const vr = await mission('VR'), mr = await mission('MR');
+    let originalLinked;
     for (const mode of ['Linked', 'Mixed']) {
       const sessions = mode === 'Linked' ? [await api('/sessions', 'POST',
         { missionId: vr.id, mode: 'Linked', roomIds: rooms }, 'Master', 201)]
@@ -120,6 +137,16 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       for (const source of sources) source.publish(await api(source.route), true);
       const endTargets = (await api('/venue/phase')).end.map(({ sessionId, phaseSinceSequence }) => ({ sessionId, phaseSinceSequence }));
       const ended = await api('/venue/phase', 'POST', { action: 'End', targets: endTargets }, 'Master', 200, undefined, randomUUID());
+      const closurePath = `/venue/closure/${ended.requestId}`;
+      if (mode === 'Linked') {
+        const partial = (await api(closurePath)).batch.sessions[0];
+        assert.equal(partial.world, 'Waiting');
+        await page.locator('#refresh').click();
+        await openTracking(partial);
+        check((await page.locator('#world-status').innerText()).includes('錄製未封存') && await page.locator('#world-frame-next').isEnabled(),
+          'An accepted guarded frame can open in a partial recording with its already saved next frame');
+        await page.locator('#tab-operations').click();
+      }
       for (const source of sources) {
         source.publish(await api(source.route), true);
         await api(source.route + '/combat-stream/seal', 'POST', { streamId: source.streamId, finalSequence: 0 }, 'GameServer');
@@ -128,7 +155,6 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
           { version: 1, streamId: source.streamId, address: '192.168.50.40', port: source.port }, 'GameServer');
       }
       for (const session of sessions) active.delete(session.id);
-      const closurePath = `/venue/closure/${ended.requestId}`;
       const closure = await api(closurePath);
       for (const row of closure.batch.sessions) {
         const { requestId: original, appliedAtSequence, frame } = row.trackingBegin;
@@ -157,9 +183,63 @@ with zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())) as archive:
       await fs.writeFile(path.join(screenshots, `tracking-begin-${mode.toLowerCase()}-venue.zip`), bytes);
       check((await fetch(zipUrl, { headers: { Authorization: 'Bearer ' + tokens.Room2 } })).status === 403,
         `${mode} includes the original frame witnesses in the Master-only venue ZIP`);
+
+      const row = closure.batch.sessions.find(row => row.roomIds.includes(mode === 'Linked' ? 1 : 2));
+      await page.locator('#refresh').click();
+      if (mode === 'Linked') {
+        originalLinked = { row, batch: ended.requestId };
+        const list = '**/api/world-recordings';
+        await page.route(list, async route => {
+          const response = await route.fetch(), rows = await response.json();
+          rows.find(item => item.header.sessionId === row.sessionId).header.streamId = randomUUID();
+          await route.fulfill({ response, json: rows });
+        }, { times: 1 });
+        await tracking(row.sessionId).click();
+        await page.locator('#world-message').filter({ hasText: '目前無法讀取原場次的錄製' }).waitFor();
+        check(await page.locator('#world-player').isHidden() && await page.locator('#world-recording').inputValue() === '',
+          'The tracking shortcut refuses a substituted archive source without selecting another recording');
+      } else {
+        const watch = `**/api/sessions/${row.sessionId}/world/watch?**`;
+        await page.route(watch, async route => {
+          const response = await route.fetch();
+          const body = (await response.text()).replace(/event: frame\ndata: (.+)/, (_, raw) => {
+            const value = JSON.parse(raw);
+            value.packet.frame.players[0].rig.kind = 'Simulated';
+            return 'event: frame\ndata: ' + JSON.stringify(value);
+          });
+          await route.fulfill({ response, body });
+        }, { times: 1 });
+        await tracking(row.sessionId).click();
+        await page.locator('#world-message').filter({ hasText: '回應快照的追蹤開場或指令序號不同' }).waitFor();
+        check(await page.locator('#world-player').isHidden() && await canvas.getAttribute('data-sequence') === null,
+          'The tracking shortcut refuses a frame with substituted pose provenance');
+      }
+      await page.locator('#tab-operations').click();
+      await openTracking(row);
+      assert.match(await page.locator('#world-message').innerText(), mode === 'Linked' ? /VR 未校正/ : /Quest 3 MR 錄製設定/);
+      assert.match(await page.locator('#world-actor-info').innerText(), /頭手來源 Tracked/);
+      if (mode === 'Mixed') assert.ok(Number((await canvas.getAttribute('data-camera')).split(',')[1]) < 30,
+        'The original room preset fits the visible replay canvas');
+      await page.locator('#world-player').screenshot({ path: path.join(screenshots, `tracking-begin-${mode.toLowerCase()}-replay.png`) });
+      const next = page.locator('#world-frame-next');
+      assert.ok(await next.isEnabled());
+      await next.click();
+      await page.locator(`#world-canvas[data-sequence="${row.trackingBegin.frame.worldSequence + 1}"]`).waitFor();
+      check((await page.locator('#world-status').innerText()).includes('錄製已核對封存')
+        && (mode === 'Linked' || await page.locator('#world-camera').inputValue() === 'top'),
+        `${mode} opens the verified frame with the original room scope and retains adjacent-frame review`);
+      await page.locator('#tab-operations').click();
     }
+    const replacement = await api('/sessions', 'POST', { missionId: vr.id, mode: 'Independent', roomIds: [1] }, 'Master', 201);
+    active.add(replacement.id);
+    await page.locator('#venue-closure-load').click();
+    await page.locator(`#venue-closure-batch option[value="${originalLinked.batch}"]`).waitFor({ state: 'attached' });
+    await page.locator('#venue-closure-batch').selectOption(originalLinked.batch);
+    await openTracking(originalLinked.row);
+    check((await api(`/sessions/${replacement.id}`)).state === 'Preparing', 'Selecting the older tracking closure keeps its original replay after room reuse');
     await login('Room2');
-    check(await option.isHidden(), 'The room console cannot activate the master tracking policy');
+    check(await option.isHidden() && await page.locator('[data-venue-tracking-begin]').count() === 0,
+      'The room console cannot activate the master tracking policy or see its closure shortcut');
   } finally {
     await page.close();
     for (const id of active) await api(`/sessions/${id}/commands`, 'POST', { commandId: randomUUID(), action: 'End' });

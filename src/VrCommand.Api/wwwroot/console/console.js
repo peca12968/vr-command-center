@@ -594,6 +594,24 @@ function renderVenueClosure(report, loading = false) {
           throughSequence: replay.throughSequence, roomId: session.roomIds.length === 1 ? session.roomIds[0] : null });
       });
       actions.append(open);
+      const begin = session.trackingBegin, anchor = begin?.frame;
+      if (typeof begin?.requestId === 'string' && begin.requestId !== batch.requestId
+        && Number.isSafeInteger(begin.appliedAtSequence) && begin.appliedAtSequence > 1 && begin.appliedAtSequence < session.appliedAtSequence
+        && anchor?.streamId === replay.streamId && Number.isSafeInteger(anchor.worldSequence)
+        && anchor.worldSequence > 0 && anchor.worldSequence <= replay.throughSequence
+        && Number.isSafeInteger(anchor.elapsedMilliseconds) && anchor.elapsedMilliseconds >= 0) {
+        const witness = element('button', '回看追蹤開場', 'quiet small');
+        witness.type = 'button'; witness.dataset.venueTrackingBegin = session.sessionId;
+        witness.title = `原開場畫格 ${anchor.worldSequence}`;
+        witness.addEventListener('click', () => {
+          if (!master() || state.busy || state.pending) return;
+          tab('world', { mode: 'replay', sessionId: session.sessionId, streamId: replay.streamId, complete: false,
+            throughSequence: anchor.worldSequence, roomId: session.roomIds.length === 1 ? session.roomIds[0] : null,
+            witness: { kind: 'tracking-begin', appliedAtSequence: begin.appliedAtSequence, elapsedMilliseconds: anchor.elapsedMilliseconds,
+              roomIds: session.roomIds, archiveComplete: complete, archiveThroughSequence: replay.throughSequence } });
+        });
+        actions.append(witness);
+      }
     }
     const result = row([`房間 ${session.roomIds.join('、')}`, session.missionName, archiveNames[session.combat], archiveNames[session.world], actions]);
     result.dataset.venueClosureSession = session.sessionId;

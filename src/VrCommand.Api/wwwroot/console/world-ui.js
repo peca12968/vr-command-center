@@ -60,7 +60,9 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
       }));
       if (target) {
         const row = rows.find(item => item.header.sessionId === target.sessionId);
-        if (!row || !matchesTarget(row, target)) {
+        const tracking = target.witness?.kind === 'tracking-begin' ? target.witness : null;
+        const archiveTarget = tracking ? { ...target, complete: tracking.archiveComplete, throughSequence: tracking.archiveThroughSequence } : target;
+        if (!row || !matchesTarget(row, archiveTarget)) {
           picker.prepend(new Option('原場次錄製目前無法讀取', ''));
           picker.value = '';
           recordingControls(); reviewControls();
@@ -71,7 +73,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
         resetRecording();
         const limit = target.mode === 'replay' && !target.complete ? target.throughSequence : null;
         const sequence = target.playerId || target.witness ? target.throughSequence : target.mode === 'replay' ? 1 : null;
-        void connect(target.mode, 0, sequence, limit, target);
+        void connect(target.mode, 0, sequence, limit, tracking ? { ...target, archive: row } : target);
         return;
       }
       if (rows.some(row => row.header.sessionId === selected)) picker.value = selected;
@@ -87,6 +89,13 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   function matchesTarget(recording, target) {
     if (recording.header?.sessionId !== target.sessionId
       || (target.roomId != null && !recording.header.roomIds?.includes(target.roomId))) return false;
+    if (target.witness?.kind === 'tracking-begin') {
+      const { roomIds } = target.witness;
+      if (!Number.isSafeInteger(recording.acceptedSequence) || typeof recording.complete !== 'boolean'
+        || recording.header.roomIds?.length !== roomIds.length || !roomIds.every((room, index) => recording.header.roomIds[index] === room)
+        || (target.archive && ['origin', 'calibration', 'captureStartedAtUtc'].some(key => recording.header[key] !== target.archive.header[key])))
+        return false;
+    }
     if (target.mode === 'live') return true;
     return recording.header.streamId === target.streamId && (target.complete
       ? recording.complete === true && recording.acceptedSequence === target.throughSequence
@@ -387,7 +396,23 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     }
   }
   function matchesWitness(packet, target) {
-    const { kind, setting, population } = target.witness;
+    const { kind, setting, population, appliedAtSequence, elapsedMilliseconds, roomIds } = target.witness;
+    if (kind === 'tracking-begin') {
+      const frame = packet.frame;
+      if (packet.observedSequence !== appliedAtSequence - 1 || packet.elapsedMilliseconds !== elapsedMilliseconds
+        || packet.suspended !== false || frame?.phase !== 'Preparing' || frame.tick !== 0
+        || !Array.isArray(frame.players) || frame.players.length !== roomIds.length * 5) return false;
+      const players = new Set(), counts = new Map(roomIds.map(room => [room, 0]));
+      for (const player of frame.players) {
+        const id = typeof player?.id === 'string' ? player.id.toLowerCase() : '';
+        if (!id || players.has(id) || !counts.has(player.roomId)
+          || player.connected !== true || player.rig?.kind !== 'Tracked' || !Number.isInteger(player.health)
+          || player.health < 1 || player.health > 100) return false;
+        players.add(id);
+        counts.set(player.roomId, counts.get(player.roomId) + 1);
+      }
+      return roomIds.every(room => counts.get(room) === 5);
+    }
     if (!Number.isSafeInteger(packet.observedSequence) || packet.observedSequence < setting.appliedAtSequence) return false;
     if (kind === 'environment') return packet.weather === setting.weather && packet.frame.night === (setting.timeOfDay === 'Night')
       && packet.lightning === setting.lightning;
@@ -403,7 +428,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     clipPosition = clip ? sequence : null;
     const own = controller = new AbortController(), request = epoch;
     const playerReview = Boolean(target?.playerId), witness = target?.witness;
-    const witnessLabel = witness?.kind === 'enemies' ? '敵軍' : '環境';
+    const witnessLabel = witness?.kind === 'enemies' ? '敵軍' : witness?.kind === 'tracking-begin' ? '追蹤開場' : '環境';
     const signal = playerReview || witness ? AbortSignal.any([own.signal, AbortSignal.timeout(8000)]) : own.signal;
     if (nextMode === 'live') { savedLimit = null; savedFinished = false; reviewPlayer = null; clearClip(); }
     const limit = nextMode === 'live' ? null : replayLimit;
@@ -443,6 +468,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
               hasHeader = true;
               if (!clip) { info = data; savedFinished = false; }
               scene ??= new ReplayScene($('world-canvas'), selectActor, () => { $('world-camera').value = 'free'; }, key => actors.has(key));
+              $('world-player').hidden = false;
               if (key !== geometry) {
                 clearClip();
                 scene.load(info.header); geometry = key; frame = null;
@@ -453,10 +479,10 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
                 $('world-camera').value = 'top';
                 selectRoom(String(target.roomId));
               }
-              $('world-player').hidden = false; scene.resize(); $('world-name').textContent = info.missionName;
+              scene.resize(); $('world-name').textContent = info.missionName;
               cameras.bind(info.header.sessionId);
               cameraForm.bind(info.header.sessionId);
-              message(`${info.header.origin} · ${info.header.rulesVersion} · ${info.header.assetSet === 'player-fire-v1' ? '軍事掩體／玩家及敵軍射擊效果 v1（依保存射線）' : info.header.assetSet === 'combat-effects-v1' ? '軍事掩體／敵軍射擊閃光及後座 v1（依保存射線）' : info.header.assetSet === 'armed-combatants-v1' ? '軍事掩體／敵軍雙手持槍／換彈 v1（合成姿勢）' : info.header.assetSet === 'weapon-actions-v1' ? '軍事掩體／人形敵軍／換彈動作 v1（合成手套非追蹤）' : info.header.assetSet === 'combatants-v1' ? '軍事掩體／步槍／人形敵軍 v1（命中採粗略包圍盒）' : info.header.assetSet === 'service-rifle-v1' ? '軍事掩體／玩家步槍 v1（命中／碰撞採包圍盒）' : info.header.assetSet === 'field-props-v1' ? '軍事掩體 v1（命中／碰撞採包圍盒）' : '基本幾何素材'} · VR 未校正。${info.header.origin === 'Simulation' ? '此場次使用合成頭手資料，無頭盔連接。' : '頭手來源請見角色資訊。'}${info.header.environmentVersion === 1 ? '環境聲光 v1 依保存的模擬時間重建，非原始音軌。' : '舊錄製沒有聲光效果版本，僅保留原有光霧顯示。'}`);
+              message(`${info.header.origin} · ${info.header.rulesVersion} · ${info.header.assetSet === 'player-fire-v1' ? '軍事掩體／玩家及敵軍射擊效果 v1（依保存射線）' : info.header.assetSet === 'combat-effects-v1' ? '軍事掩體／敵軍射擊閃光及後座 v1（依保存射線）' : info.header.assetSet === 'armed-combatants-v1' ? '軍事掩體／敵軍雙手持槍／換彈 v1（合成姿勢）' : info.header.assetSet === 'weapon-actions-v1' ? '軍事掩體／人形敵軍／換彈動作 v1（合成手套非追蹤）' : info.header.assetSet === 'combatants-v1' ? '軍事掩體／步槍／人形敵軍 v1（命中採粗略包圍盒）' : info.header.assetSet === 'service-rifle-v1' ? '軍事掩體／玩家步槍 v1（命中／碰撞採包圍盒）' : info.header.assetSet === 'field-props-v1' ? '軍事掩體 v1（命中／碰撞採包圍盒）' : '基本幾何素材'} · ${info.header.calibration === 'quest-room-mr-v1' ? 'Quest 3 MR 錄製設定。' : 'VR 未校正。'}頭手來源請見角色資訊。${info.header.environmentVersion === 1 ? '環境聲光 v1 依保存的模擬時間重建，非原始音軌。' : '舊錄製沒有聲光效果版本，僅保留原有光霧顯示。'}`);
               status();
             } else if (type === 'frame') {
               if (playerReview) {
@@ -502,6 +528,11 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
         if (clip) clipPlayback = 'finished';
         status();
         if (witness) {
+          if (target.archive) {
+            info = target.archive;
+            savedLimit = info.complete ? null : info.acceptedSequence;
+            savedFinished = savedLimit === sequence;
+          }
           show(witnessFrame, true);
           $('world-frame-message').textContent = `已停在第 ${target.throughSequence} 格的${witnessLabel}快照。`;
         }

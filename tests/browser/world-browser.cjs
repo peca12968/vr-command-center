@@ -33,7 +33,9 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await page.locator('#world-recording').selectOption(live.header.sessionId); await page.locator('#world-live').click();
     const canvas = page.locator('#world-canvas');
     await page.waitForFunction(() => Number(document.querySelector('#world-canvas').dataset.sequence) > 5 && Number(document.querySelector('#world-canvas').dataset.triangles) > 0);
-    check((await page.locator('#world-status').innerText()).includes('Simulation') && (await page.locator('#world-message').innerText()).includes('無頭盔連接'), 'Real streamed world displays its simulation provenance and asset limits');
+    check((await page.locator('#world-status').innerText()).includes('Simulation')
+      && (await page.locator('#world-message').innerText()).includes('頭手來源請見角色資訊'),
+      'The live viewer keeps simulation authority separate from the recorded pose provenance');
     check(await canvas.getAttribute('data-asset-set') === 'primitives-v1'
       && Number(await canvas.getAttribute('data-prop-triangles')) === live.header.props.length * 12,
       'A legacy streamed world retains its recorded primitive cover rather than receiving new field-prop art');

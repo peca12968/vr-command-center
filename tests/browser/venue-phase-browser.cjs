@@ -549,6 +549,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const originalReplay = readyReplay.find(row => row.sessionId === ending.id).replay;
     const partialReplay = readyReplay.find(row => row.sessionId === pausedEnding.id).replay;
     const openReplay = id => page.locator(`[data-venue-replay="${id}"]`);
+    check(await page.locator('[data-venue-tracking-begin]').count() === 0, 'Ordinary archived sessions retain their replay without a tracking shortcut');
     check(await openReplay(extra.id).count() === 0 && originalReplay.streamId === ending.combatStream.streamId,
       'A no-source room has no replay shortcut and the original closure identifies its actual stream');
     const archiveListRoute = '**/api/world-recordings';
