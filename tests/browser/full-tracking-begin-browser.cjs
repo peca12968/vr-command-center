@@ -11,6 +11,9 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
   const active = new Set();
   const option = page.locator('#venue-full-tracking');
   const start = page.locator('#venue-begin');
+  const liveTracking = page.locator('#venue-live-tracking');
+  const liveSummary = page.locator('#venue-live-tracking-summary');
+  const liveRoom = room => page.locator(`[data-live-tracking-room="${room}"]`);
   const status = room => page.locator(`[data-begin-room="${room}"]`);
   const tracking = id => page.locator(`[data-venue-tracking-begin="${id}"]`);
   const canvas = page.locator('#world-canvas');
@@ -54,11 +57,12 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     }
     return { route, streamId, port: 7776 + session.roomIds[0], snapshot: await api(route), seal() {
       assert.equal(send({ type: 'seal', finalSequence: sequence }).complete, true);
-    }, publish(snapshot, allTracked) {
+    }, publish(snapshot, allTracked, loseTracking = false) {
       const players = snapshot.players.map(({ id, roomId, seat }) => {
         const head = { x: (roomId - 3) * 14 + (seat - 2) * 1.5, y: 1.65, z: -3 };
-        const rig = { kind: !allTracked && roomId === 1 && seat === 4 ? 'Simulated' : 'Tracked', left: head, right: head };
-        return { id, roomId, head, muzzle: head, connected: true, forward: { x: 0, y: 0, z: 1 }, health: 100, magazine: 30, reserve: 90, rig };
+        const connected = !(loseTracking && roomId === 5 && seat === 1);
+        const rig = { kind: !connected ? 'None' : !allTracked && roomId === 1 && seat === 4 ? 'Simulated' : 'Tracked', left: head, right: head };
+        return { id, roomId, head, muzzle: head, connected, forward: { x: 0, y: 0, z: 1 }, health: 100, magazine: 30, reserve: 90, rig };
       });
       const packet = { sequence: ++sequence, observedSequence: snapshot.sequence, elapsedMilliseconds: sequence === 1 ? 0 : Date.now() - started,
         weather: 'Clear', lightning: false, throughCombatSequence: 0, events: [],
@@ -66,10 +70,10 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       assert.equal(send({ type: 'frame', payload: packet }).acceptedSequence, sequence);
     } };
   }
-  async function publishUntil(sources, tracked, condition) {
+  async function publishUntil(sources, tracked, condition, loseTracking = false) {
     const deadline = Date.now() + 10000;
     while (Date.now() < deadline) {
-      for (const source of sources) source.publish(source.snapshot, tracked);
+      for (const source of sources) source.publish(source.snapshot, tracked, loseTracking);
       if (await condition()) return;
       await new Promise(resolve => setTimeout(resolve, 100));
     }
@@ -134,7 +138,36 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       await api('/venue/phase', 'POST', { ...body, action: 'End' }, 'Master', 400, undefined, randomUUID());
       check(retry.duplicate && retry.requireFullTracking && JSON.stringify(retry.sessions) === JSON.stringify(receipt.sessions),
         `${mode} retry keeps the original policy and rejects changing it`);
-      for (const source of sources) source.publish(await api(source.route), true);
+      for (const source of sources) source.snapshot = await api(source.route);
+      const waitSummary = text => () => liveSummary.filter({ hasText: text }).isVisible();
+      check(await liveTracking.count() === 1, `${mode} provides a live tracking overview after Begin`);
+      await publishUntil(sources, true, waitSummary('追蹤 25 / 25 席'));
+      const overview = (await api('/rooms/readiness')).rooms;
+      const scoped = (await api('/rooms/readiness', 'GET', undefined, 'Room2')).rooms;
+      check(overview.every(room => room.venueTracking.trackedSeats.join() === '1,2,3,4,5')
+        && scoped.length === 1 && !Object.hasOwn(scoped[0], 'venueTracking'), `${mode} verifies five original seats per room and keeps the venue breakdown Master-only`);
+      await publishUntil(sources, false, waitSummary('追蹤 23 / 25 席'), true);
+      check((await liveRoom(1).innerText()).includes('合成席位 5') && (await liveRoom(5).innerText()).includes('待確認席位 2'),
+        `${mode} separates one simulated seat and a different seat that lost tracking`);
+      await liveTracking.screenshot({ path: path.join(screenshots, `live-tracking-${mode.toLowerCase()}-loss.png`) });
+      const first = sources.find(source => source.route === `/sessions/${forRoom(1).id}`);
+      const changed = await api(first.route + '/commands', 'POST', { commandId: randomUUID(), action: 'SetEnvironment',
+        environment: first.snapshot.environment });
+      first.publish(first.snapshot, true);
+      const readback = await api(first.route + '/readiness');
+      check(readback.observedSequence < changed.appliedAtSequence
+        && (await api('/rooms/readiness')).rooms.find(room => room.roomId === 1).venueTracking.trackedSeats.length === 5,
+        `${mode} preserves current tracking through an unrelated environment revision`);
+      await api(first.route + '/commands', 'POST', { commandId: randomUUID(), action: 'Pause' });
+      const resumed = await api(first.route + '/commands', 'POST', { commandId: randomUUID(), action: 'Resume' });
+      await page.locator('#refresh').click();
+      await publishUntil(sources, true, async () => (await liveRoom(1).getAttribute('data-live-tracking-state')) === 'WaitingRevision');
+      check(!(await waitSummary('追蹤 25 / 25 席')()), `${mode} withholds the old tracking count until the game observes the new Resume`);
+      first.snapshot = resumed.session;
+      await publishUntil(sources, true, waitSummary('追蹤 25 / 25 席'));
+      await liveRoom(1).filter({ hasText: '快照已過期' }).waitFor();
+      check(!(await waitSummary('追蹤 25 / 25 席')()), `${mode} withdraws confirmed counts when the original snapshots expire`);
+      await publishUntil(sources, true, waitSummary('追蹤 25 / 25 席'));
       const endTargets = (await api('/venue/phase')).end.map(({ sessionId, phaseSinceSequence }) => ({ sessionId, phaseSinceSequence }));
       const ended = await api('/venue/phase', 'POST', { action: 'End', targets: endTargets }, 'Master', 200, undefined, randomUUID());
       const closurePath = `/venue/closure/${ended.requestId}`;

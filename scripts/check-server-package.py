@@ -60,6 +60,7 @@ def main():
     p.add_argument('--check-quest-vr-partial-map',action='store_true',help='Use a mixed headset roster and deploy five selected Quest seats from each original VR venue ZIP')
     p.add_argument('--check-windows-venue-staging',action='store_true',help='Stage VIVE XR seats from the original VR or mixed venue ZIP')
     p.add_argument('--check-venue-openxr',action='store_true',help='Use one graphical mock OpenXR seat alongside 24 desktop peers per topology')
+    p.add_argument('--check-venue-live-tracking',action='store_true',help='Verify the Master-only running tracking overview during native OpenXR loss')
     p.add_argument('--peer-diagnostics',action='store_true',help='Verify observed UDP peers in Linked and absence in default Independent runs')
     p.add_argument('--field-evidence',action='store_true',help='Verify the management ZIP with the original Linked player and server logs')
     p.add_argument('--venue-field-evidence',action='store_true',help='Verify full sealed admission evidence for both original venue End batches')
@@ -114,6 +115,8 @@ def main():
         p.error('--check-openxr-revocation requires --openxr-mock-only without --check-openxr-reconnect')
     if args.check_venue_openxr and (venue_only or args.openxr_mock_only or not args.check_quest_vr_partial_map or args.check_room_participation):
         p.error('--check-venue-openxr requires --check-quest-vr-partial-map and its own venue participation check')
+    if args.check_venue_live_tracking and not args.check_venue_openxr:
+        p.error('--check-venue-live-tracking requires --check-venue-openxr')
     if (args.openxr_mock_only or args.check_venue_openxr) != bool(args.openxr_mock_pose_dll):
         p.error('Supply --openxr-mock-pose-dll with --openxr-mock-only or --check-venue-openxr')
     if venue_only:
@@ -1690,6 +1693,12 @@ def main():
                    or row['trackedReady']!=int(row['roomId']==5 and available)
                    or row['vrParticipation']['awaitingPose']!=([2] if row['roomId']==5 and not available else []) for row in rooms):
                 return None
+            if args.check_venue_live_tracking and any(row.get('venueTracking')!={
+                'trackedSeats':[2] if row['roomId']==5 and available else [],
+                'simulatedSeats':[1,3,4,5] if row['roomId']==5 else [1,2,3,4,5],
+                'waitingSeats':[2] if row['roomId']==5 and not available else [], 'eliminatedSeats':[]
+            } for row in rooms):
+                return None
             report=request(session+'/readiness')
             if report['sourceState']!='Fresh' or report['observedSequence']!=begin or report['sessionSequence']!=begin:
                 return None
@@ -1717,6 +1726,10 @@ def main():
             marker.unlink()
         recovered=wait(lambda:checkpoint(True,held['packet']['frame']['tick']+1),15,mode+' original OpenXR recovery')
         verify_quest_tracking(linked,'tracked-ready','recovered')
+        if args.check_venue_live_tracking:
+            scoped_rooms=request('/api/rooms/readiness',role='Room5')['rooms']
+            check(len(scoped_rooms)==1 and scoped_rooms[0]['roomId']==5 and 'venueTracking' not in scoped_rooms[0],
+                  mode+' native tracking overview identifies the original lost and recovered seat only for Master')
         packets=[value['packet'] for value in (ready,lost,held,recovered)]
         first,last=(next(row for row in packet['frame']['players'] if row['id']==tracked) for packet in (packets[0],packets[-1]))
         x_offsets=[last['head']['x']-first['head']['x'],*[last['rig'][hand]['x']-first['rig'][hand]['x'] for hand in ('left','right')]]

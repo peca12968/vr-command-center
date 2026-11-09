@@ -195,6 +195,37 @@ export function roomMrPauseView(report, room, session, elapsed, unavailable = fa
     ? 'MR 暫停已套用' : `MR 暫停待確認 · ${source === 'Fresh' ? '等待階段同步' : labels[source]}`;
 }
 
+export function venueTrackingRow(report, room, session, elapsed) {
+  if (!room.sessionId) return { state: 'Idle', text: '空房' };
+  if (session?.id !== room.sessionId) return { state: 'Updating', text: labels.Updating };
+  if (session?.state === 'Preparing') return { state: 'Preparing', text: '尚未開場' };
+  if (session?.state === 'Paused') return { state: 'Paused', text: '場次暫停' };
+  const row = roomReadinessRow(report, room, session);
+  if (!row || session.state !== 'Running')
+    return { state: 'Updating', text: labels.Updating };
+  const source = sourceAt(row, elapsed);
+  if (source !== 'Fresh') return { state: source, text: labels[source] };
+  const tracking = row.venueTracking;
+  if (!tracking) return { state: 'WaitingRevision', text: '等待遊戲端確認最新場次狀態' };
+  const { trackedSeats, simulatedSeats, waitingSeats, eliminatedSeats } = tracking;
+  const lists = [trackedSeats, simulatedSeats, waitingSeats, eliminatedSeats];
+  if (lists.some(seats => !Array.isArray(seats) || seats.length > room.capacity)
+    || !Array.isArray(session.players)) return { state: 'Unavailable', text: labels.Unavailable };
+  const expected = new Set(session.players.filter(player => player.roomId === room.id).map(player => player.seat + 1));
+  const seats = lists.flat();
+  if (seats.length !== row.registered || seats.length !== expected.size || new Set(seats).size !== seats.length
+    || seats.some(seat => !Number.isInteger(seat) || seat < 1 || seat > room.capacity || !expected.has(seat))
+    || trackedSeats.length !== row.trackedReady || simulatedSeats.length !== row.simulatedReady)
+    return { state: 'Unavailable', text: labels.Unavailable };
+  const vacant = Array.from({ length: room.capacity }, (_, index) => index + 1).filter(seat => !expected.has(seat));
+  const details = [
+    [simulatedSeats, '合成席位'], [waitingSeats, '待確認席位'], [eliminatedSeats, '已淘汰席位'], [vacant, '未編列席位']
+  ].filter(([items]) => items.length).map(([items, label]) => `${label} ${items.join('、')}`);
+  const tracked = trackedSeats.length;
+  return { state: tracked === room.capacity ? 'Ready' : 'Incomplete', tracked,
+    text: [`追蹤 ${tracked} / ${room.capacity} 席`, ...details].join(' · ') };
+}
+
 export function mountRoomReadiness(getState, unauthorized, venueUpdated, describeClimate, describeEnemies) {
   let active = false, controller, report, started = 0, attempted = -Infinity, failed = false;
   function settingView(room, session, elapsed, kind) {
@@ -278,6 +309,32 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     const venue = roomVenuePhaseView(report, room, session, elapsed);
     return venue?.ready === true && venue.sequence === target.phaseSinceSequence;
   }
+  function renderVenueTracking(rooms, sessions, actor, elapsed) {
+    const panel = document.getElementById('venue-live-tracking');
+    const summary = document.getElementById('venue-live-tracking-summary');
+    const list = document.getElementById('venue-live-tracking-rooms');
+    const scoped = rooms.map(room => ({ room, session: sessions.find(session => session.id === room.sessionId) }));
+    panel.hidden = !active || document.visibilityState !== 'visible' || actor?.role !== 'Master'
+      || !scoped.some(row => row.session?.state === 'Running');
+    const rows = panel.hidden ? [] : scoped.map(({ room, session }) => ({ room: room.id,
+      ...venueTrackingRow(failed ? null : report, room, session, elapsed) }));
+    const tracked = rows.reduce((total, row) => total + (row.tracked ?? 0), 0);
+    const confirmed = rows.filter(row => row.tracked !== undefined).length;
+    const text = panel.hidden ? '' : confirmed === 0 ? '等待各房可確認的執行中快照。'
+      : `各房最新快照 · 追蹤 ${tracked} / 25 席 · ${confirmed} / 5 房有確認資料`;
+    if (summary.textContent !== text) summary.textContent = text;
+    const signature = JSON.stringify(rows);
+    if (list.dataset.rows === signature) return;
+    list.dataset.rows = signature;
+    list.replaceChildren(...rows.map(row => {
+      const item = document.createElement('li');
+      item.dataset.liveTrackingRoom = row.room;
+      item.dataset.liveTrackingState = row.state;
+      item.textContent = `房間 ${row.room} · ${row.text}`;
+      if (row.state === 'Incomplete') item.classList.add('tracking-attention');
+      return item;
+    }));
+  }
   function render() {
     const { rooms, sessions, actor, busy, pending } = getState();
     const elapsed = performance.now() - started;
@@ -321,6 +378,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
         settingCell.classList.toggle('tracking-attention', !!setting && !setting.applied);
       }
     }
+    renderVenueTracking(rooms, sessions, actor, elapsed);
     venueUpdated();
   }
   async function poll() {

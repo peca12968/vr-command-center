@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `windows-control-console-0.31.72-live-tracking-win-x64.zip` 提供執行中五房追蹤總覽。ZIP 為 52,827,383 bytes，SHA-256 `51d69438ecb3b8565d92a0cae98926ddb52d048fdef9a24b00e0af0b40afc737`，解壓核對 540 筆清單與 520 個執行檔案。 [操作方式](PLAYER_READINESS.md#執行中五房追蹤總覽)
+
 2026-11-10 `windows-control-console-0.31.71-environment-batch-win-x64.zip` 提供最近一批全館環境指令的逐房核對及快照入口。ZIP 為 52,823,437 bytes，SHA-256 `daad337381f86a80dd65889a5405d2ec846d40d0fed9c45f9bb3c07d162fcb43`。解壓核對 540 筆清單，含 520 個執行檔案，通過 106 項管理包檢查。 [環境核對](ENVIRONMENT.md#核對最近一批環境指令)
 
 2026-11-10 `windows-control-console-0.31.70-placement-row-win-x64.zip` 加入成列複製及小數座標與角度儲存。ZIP 為 52,820,861 bytes，SHA-256 `612da6dea5dad1381f59c473ceddb5d8fb4a9c4dbf8c95e09f54de0f5d413cc2`。解壓核對 540 個清單檔案，含 520 個執行檔案，通過 106 項管理包檢查。 [成列操作](LAYOUT.md#複製物件成列)

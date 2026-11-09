@@ -6,7 +6,7 @@ const missionClock = await readFile(new URL('../../src/VrCommand.Api/wwwroot/con
 const connection = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/connection-ui.js', import.meta.url), 'utf8');
 const dataModule = source => 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
 const { readinessView, roomReadinessView, roomEndpointText, mrReadinessView, roomMissionTimeView, roomVenuePhaseView,
-  roomMrTrackingPauseTarget, roomMrPauseView } =
+  roomMrTrackingPauseTarget, roomMrPauseView, venueTrackingRow } =
   await import(dataModule(code.replace('./mission-clock.js', dataModule(missionClock)).replace('./connection-ui.js', dataModule(connection))));
 const player = { id: 'player', admissionId: 'first', roomId: 1, seat: 0 };
 const session = { id: 'session', sequence: 10, state: 'Preparing', players: [player] };
@@ -39,6 +39,19 @@ const room = { id: 1, sessionId: 'session', playerCount: 3, capacity: 5 };
 const roomRow = { roomId: 1, sessionId: 'session', sessionSequence: 10, registered: 3, sourceState: 'Fresh',
   sourceAgeMilliseconds: 10, simulatedReady: 1, trackedReady: 1 };
 const overview = { version: 1, rooms: [roomRow] };
+test('Live venue tracking counts only exact current seats and clears stale or malformed evidence', () => {
+  const current = { ...session, state: 'Running', players: [0, 1, 2].map(seat => ({ ...player, seat })) };
+  const venueTracking = { trackedSeats: [1], simulatedSeats: [2], waitingSeats: [], eliminatedSeats: [3] };
+  const live = fields => ({ ...overview, rooms: [{ ...roomRow, venueTracking, ...fields }] });
+  assert.deepEqual(venueTrackingRow(live(), room, current, 1490), { state: 'Incomplete', tracked: 1,
+    text: '追蹤 1 / 5 席 · 合成席位 2 · 已淘汰席位 3 · 未編列席位 4、5' });
+  assert.equal(venueTrackingRow(live(), room, current, 1490.01).state, 'Stale');
+  assert.equal(venueTrackingRow(live({ sessionSequence: 9 }), room, current, 0).state, 'Updating');
+  assert.equal(venueTrackingRow(live({ venueTracking: undefined }), room, current, 0).state, 'WaitingRevision');
+  for (const invalid of [{ eliminatedSeats: [2] }, { eliminatedSeats: [4] }, { trackedSeats: [], waitingSeats: [1] }])
+    assert.equal(venueTrackingRow(live({ venueTracking: { ...venueTracking, ...invalid } }), room, current, 0).state, 'Unavailable');
+  assert.equal(venueTrackingRow(live(), room, { ...current, state: 'Paused' }, 0).tracked, undefined);
+});
 test('Quick MR pause requires a fresh loss in the original room and the correct operator scope', () => {
   const mr = { ...session, mode: 'Independent', state: 'Running', roomIds: [1], environment: { mode: 'MR' },
     combatStream: { origin: 'GameServer' } };
