@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-09 Quest 五房整批日誌擷取
+
+用原五房 VR、MR 或混合部署 ZIP 和版本 1 裝置清單並行擷取。預設完整 25 席，可選用 `--allow-partial-map` 擷取指定的 Quest 席位。逐席保存原 logcat、PID 和校驗值，失敗席位保留可用的 `.partial`，其他席位繼續擷取。 [整批操作](QUEST3.md#一次擷取五房-quest-日誌)
+
+- Windows Python 3.12.10／PowerShell 7.6.9 通過 Quest 部署 37 項和場館驗收 30 項。25 個模擬 ADB 連線全部讀到原啟動記錄後才釋放終止戰績。另核對已過期原票券、混合五房的指定席位、錯誤入場只影響該席，以及拒絕重用原輸出路徑。
+- 使用 Windows 原生場 `run-07f1951bf8e74fbeaf6e90c6832f153c` 保存的兩份 VR 部署 ZIP 與 50 份原玩家日誌。模擬 ADB 以生成的 logcat 格式讀入原 Windows 戰績標記，獨立和合併各 25 席，原入場、程序標記、戰績及輸出雜湊相符。兩份 ZIP 及 50 份原日誌校驗值維持一致。複驗摘要在 `artifacts/quest-venue-capture/windows-archive-07f1951/readback.json`。
+- 功能來源 `4ffc02c8dc493b3a23256d550d18d9637fac4add`。GitHub Actions job `129063923230` 因帳務或支出上限未啟動。Quest 3／VIVE 真正裝置擷取、MR 實地、跨機 25 人與廠商設備仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42588469791)
+
 ## 2026-11-09 單房硬體模擬停止
 
 Windows 硬體模擬器 0.2.2 加入 `--stop-file`。每個房間閘道可用自己的本機標記檔停止，等待確認的批次保留 `cancelled`，報告終止原因為 `operator-stop`。 [停止操作](HARDWARE.md#停止單房模擬閘道)
