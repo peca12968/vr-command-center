@@ -61,6 +61,7 @@ def main():
     p.add_argument('--check-venue-phase', action='store_true', help='Verify whole-venue pause and resume against both native topologies')
     p.add_argument('--check-venue-begin', action='store_true', help='Start both native topologies with one witnessed Begin per topology')
     p.add_argument('--check-venue-end', action='store_true', help='End each native topology in one batch and read its original archives')
+    p.add_argument('--check-venue-environment', action='store_true', help='Confirm two batch environment changes in each native topology')
     p.add_argument('--check-layout-preview',action='store_true',help='Load a saved barricade opening and compare its preview with native world geometry')
     p.add_argument('--check-room-reports',action='store_true',help='Verify scoped Linked CSVs and the ZIP against the full sealed native report')
     p.add_argument('--check-room-combat',action='store_true',help='Require actual enemy damage on every original admission and reconcile each replay frame and final report')
@@ -86,6 +87,8 @@ def main():
     if args.check_venue_begin and not args.player_package:p.error('--check-venue-begin requires the three-package check')
     if args.check_venue_end and (not args.player_package or args.observe_closure_ui):
         p.error('--check-venue-end requires the three-package check and its own End path')
+    if args.check_venue_environment and not args.player_package:
+        p.error('--check-venue-environment requires the three-package check')
     if args.check_room_reports and not args.player_package:p.error('--check-room-reports requires the three-package check')
     if args.check_room_combat and not args.check_room_reports:p.error('--check-room-combat requires --check-room-reports')
     if args.check_hardware_feedback and not args.check_room_combat:p.error('--check-hardware-feedback requires --check-room-combat')
@@ -569,6 +572,44 @@ def main():
         room=request('/api/rooms/readiness',role='Room1')
         check(room['version']==1 and len(room['rooms'])==1 and room['rooms'][0]['roomId']==1
             and room['rooms'][0]['sessionId']==expected[1],'room operator only receives its own active room aggregate')
+    def verify_venue_environment(entries, linked):
+        route = '/api/venue/phase'
+        mode = 'linked' if linked else 'independent'
+        sessions = {entry['sessionId'] for entry in entries}
+        evidence = []
+        for weather, time_of_day, lightning in [('Storm', 'Night', True), ('Clear', 'Day', False)]:
+            preview = request(route)['environment']
+            targets = [{key: row[key] for key in ('sessionId', 'phaseSinceSequence', 'environmentSinceSequence')} for row in preview]
+            check({row['sessionId'] for row in targets} == sessions
+                  and sorted(room for row in preview for room in row['roomIds']) == list(range(1, 6)),
+                  f'{mode} {weather} environment preview covers the original five rooms')
+            climate = {'weather': weather, 'timeOfDay': time_of_day, 'lightning': lightning}
+            body = {'action': 'SetEnvironment', 'targets': targets, 'environment': climate}
+            key = str(uuid.uuid4())
+            receipt = request(route, body, request_id=key)
+            applied = {row['sessionId']: row['appliedAtSequence'] for row in receipt['sessions']}
+            def observed():
+                rows = request('/api/rooms/readiness')['rooms']
+                if len(rows) == 5 and all((status := row.get('venueEnvironment')) and status['worldSequence']
+                   and status['appliedAtSequence'] == applied.get(row['sessionId'])
+                   and all(status[field] == value for field, value in climate.items()) for row in rows):
+                    return rows
+            confirmed = wait(observed, 20, f'{mode} {weather} native environment confirmations')
+            frames = {}
+            for row in confirmed:
+                sid = row['sessionId']
+                if sid in frames:
+                    continue
+                sequence = row['venueEnvironment']['worldSequence']
+                frames[sid] = request(f'/api/sessions/{sid}/world/frames/{sequence}')['packet']
+            check(not receipt['duplicate'] and receipt['requestId'] == key and set(frames) == sessions
+                  and all(packet['observedSequence'] >= applied[sid] and packet['weather'] == weather and packet['lightning'] == lightning
+                          and packet['frame']['night'] == (time_of_day == 'Night') and packet['frame']['phase'] == 'Running'
+                          for sid, packet in frames.items()),
+                  f'{mode} {weather} original accepted frames record all three values and their receipt sequence')
+            evidence.append({'receipt': receipt, 'rooms': confirmed, 'frames': frames})
+        save(mode+'-venue-environment.json', evidence)
+
     def verify_room_clocks(entries, linked):
         mode = 'linked' if linked else 'independent'
         expected = {room: entries[0 if linked else room-1]['sessionId'] for room in range(1, 6)}
@@ -843,6 +884,7 @@ def main():
                     for c in round_clients),'25 simultaneous owned native players '+('Linked' if linked else 'Independent'))
             if args.check_room_readiness:verify_room_readiness(round_clients,linked)
             if args.check_room_clocks:verify_room_clocks(entries,linked)
+            if args.check_venue_environment:verify_venue_environment(entries,linked)
             if args.check_venue_phase:verify_venue_phase(entries,linked)
             if args.check_room_combat:
                 stage('running-native-ai-combat',mode='Linked' if linked else 'Independent')
@@ -1009,6 +1051,7 @@ def main():
             'venuePhase':args.check_venue_phase,
             'venueBegin':args.check_venue_begin,
             'venueEnd':args.check_venue_end,
+            'venueEnvironment':args.check_venue_environment,
             'hardwareFeedback':args.check_hardware_feedback,
             'hardwareMockPackage':hardware_manifest['toolVersion'] if args.hardware_simulator_package else None,
             'preparedIndependentSet':args.prepare_independent_set,

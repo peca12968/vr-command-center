@@ -96,6 +96,18 @@ export function roomVenuePhaseView(report, room, session, elapsed, unavailable =
   return { applied, ready, action: phase.action, sequence: phase.appliedAtSequence, text };
 }
 
+function roomVenueEnvironmentView(report, room, session, elapsed, unavailable, describe) {
+  const row = roomReadinessRow(report, room, session), environment = row?.venueEnvironment;
+  if (!environment || !Number.isSafeInteger(environment.appliedAtSequence) || environment.appliedAtSequence < 1
+    || environment.appliedAtSequence > row.sessionSequence || !['Running', 'Paused'].includes(session.state)
+    || !['Clear', 'Rain', 'Fog', 'Storm'].includes(environment.weather) || !['Day', 'Night'].includes(environment.timeOfDay)
+    || typeof environment.lightning !== 'boolean') return null;
+  const source = unavailable ? 'Unavailable' : sourceAt(row, elapsed);
+  const applied = source === 'Fresh' && Number.isSafeInteger(environment.worldSequence) && environment.worldSequence > 0;
+  const status = applied ? '全館環境已套用' : `全館環境待確認 · ${source === 'Fresh' ? '等待環境同步' : labels[source]}`;
+  return { applied, text: `${status} · ${describe(environment)}` };
+}
+
 export function roomMissionTimeView(report, room, session, elapsed) {
   const waiting = { state: 'Waiting', text: '活動時間未確認' };
   const duration = session?.mission?.definition?.durationSeconds;
@@ -134,7 +146,7 @@ export function roomReadinessView(report, room, session, elapsed) {
   return { source, ready: simulatedReady + trackedReady, text: `${simulatedReady + trackedReady} / ${row.registered} 姿態有效 · 合成 ${simulatedReady} · 追蹤 ${trackedReady}` };
 }
 
-export function mountRoomReadiness(getState, unauthorized, venueUpdated) {
+export function mountRoomReadiness(getState, unauthorized, venueUpdated, describeClimate) {
   let active = false, controller, report, started = 0, attempted = -Infinity, failed = false;
   function venueReady(target, action) {
     if (!active || failed) return false;
@@ -173,6 +185,11 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated) {
       phaseCell.hidden = !phase;
       phaseCell.textContent = phase?.text ?? '';
       phaseCell.classList.toggle('tracking-attention', !!phase && (!phase.applied || (phase.action === 'Pause' && !phase.ready)));
+      const environment = roomVenueEnvironmentView(report, room, session, elapsed, failed, describeClimate);
+      const environmentCell = cell.parentElement.querySelector('[data-room-venue-environment]');
+      environmentCell.hidden = !environment;
+      environmentCell.textContent = environment?.text ?? '';
+      environmentCell.classList.toggle('tracking-attention', !!environment && !environment.applied);
     }
     venueUpdated();
   }

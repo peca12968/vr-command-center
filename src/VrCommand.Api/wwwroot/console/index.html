@@ -43,6 +43,16 @@
             <button id="venue-resume" type="button" class="quiet" disabled>繼續全館暫停的場次</button>
             <button id="venue-end" type="button" class="danger" disabled>結束全部未結束場次</button></div>
         </section>
+        <section id="venue-environment" class="panel" aria-labelledby="venue-environment-title" hidden>
+          <h3 id="venue-environment-title">全館即時環境</h3>
+          <p id="venue-environment-targets" class="hint">等待執行中場次。</p>
+          <form id="venue-environment-form"><fieldset id="venue-environment-fields" disabled>
+            <div class="form-row"><label>天氣<select id="venue-weather"><option value="Clear">晴朗</option><option value="Rain">下雨</option><option value="Fog">濃霧</option><option value="Storm">暴風雨</option></select></label>
+            <label>時段<select id="venue-time"><option value="Day">白天</option><option value="Night">夜晚</option></select></label></div>
+            <label class="check"><input id="venue-lightning" type="checkbox">閃電</label>
+            <button id="venue-apply-environment" type="submit" class="secondary">套用到執行中場次</button>
+          </fieldset></form>
+        </section>
         <section id="venue-closure" class="panel" aria-labelledby="venue-closure-title" hidden>
           <h3 id="venue-closure-title">最近一次全館收尾</h3>
           <p id="venue-closure-summary" class="hint" role="status"></p>
@@ -212,7 +222,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.34 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.35 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

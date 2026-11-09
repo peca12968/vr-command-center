@@ -21,7 +21,7 @@ const objectHistory = placementHistory();
 const world = mountWorld(() => state.key, logout);
 const report = mountReport(() => state, logout);
 const readiness = mountReadiness(() => state, logout);
-const roomReadiness = mountRoomReadiness(() => state, logout, applyVenuePermissions);
+const roomReadiness = mountRoomReadiness(() => state, logout, applyVenuePermissions, venueClimateText);
 const connections = mountConnections(() => state, logout);
 const closure = mountClosure(() => state, logout);
 const alignment = mountAlignment(api, download);
@@ -161,6 +161,7 @@ function logout() {
   $('identity').textContent = '尚未登入'; $('login-key').value = '';
   $('rooms').replaceChildren(); $('roster').replaceChildren(); $('statistics').replaceChildren(); $('event-list').replaceChildren();
   $('ticket-room').replaceChildren(); delete $('ticket-room').dataset.session;
+  $('venue-environment-form').reset();
   $('mission-form').reset(); $('launch-mission').replaceChildren(); $('edit-mission').replaceChildren(); renderLaunchPreview(launchPlan()); renderHistory(); renderProps(); $('draft-status').textContent = '尚未儲存的草稿'; $('session-panel').hidden = true; notify('');
 }
 async function login(event) {
@@ -250,7 +251,10 @@ function renderRooms() {
       const phase = element('p', '', 'hint room-venue-phase');
       phase.dataset.roomVenuePhase = room.id;
       phase.hidden = true;
-      card.append(status, clock, phase);
+      const environment = element('p', '', 'hint');
+      environment.dataset.roomVenueEnvironment = room.id;
+      environment.hidden = true;
+      card.append(status, clock, phase, environment);
     }
     const button = element('button', room.sessionId ? '查看場次' : '選擇此房間', 'quiet small');
     button.type = 'button'; button.disabled = state.busy || !!state.pending;
@@ -363,16 +367,22 @@ function applyPermissions() {
   mrVenue.update();
 }
 function venueTargets(action) {
-  const rows = state.venue?.[action.toLowerCase()];
+  const rows = state.venue?.[action === 'SetEnvironment' ? 'environment' : action.toLowerCase()];
   return Array.isArray(rows) && rows.length <= 5 && rows.every(row => typeof row?.sessionId === 'string'
     && Number.isSafeInteger(row.phaseSinceSequence) && row.phaseSinceSequence > 0 && Array.isArray(row.roomIds)
     && (action !== 'Begin' || (Number.isSafeInteger(row.sessionSequence) && row.sessionSequence >= row.phaseSinceSequence))
+    && (action !== 'SetEnvironment' || (Number.isSafeInteger(row.environmentSinceSequence) && row.environmentSinceSequence > 0))
     && row.roomIds.length > 0 && row.roomIds.every(id => Number.isInteger(id) && id >= 1 && id <= 5)) ? rows : [];
 }
 function venueRoomText(targets) { return targets.flatMap(row => row.roomIds).sort((a, b) => a - b).join('、'); }
+function venueClimateText({ weather, timeOfDay, lightning }) {
+  return `${weatherNames[weather]} · ${timeOfDay === 'Night' ? '夜晚' : '白天'} · ${lightning ? '閃電開啟' : '閃電關閉'}`;
+}
 function applyVenuePermissions() {
   $('venue-phase').hidden = !master();
+  $('venue-environment').hidden = !master();
   const begin = venueTargets('Begin'), pause = venueTargets('Pause'), resume = venueTargets('Resume'), end = venueTargets('End');
+  const environment = venueTargets('SetEnvironment');
   const locked = state.busy || !!state.pending || !master();
   const starting = begin.filter(target => !roomReadiness.venueReady(target, 'Begin'));
   const waiting = resume.filter(target => !roomReadiness.venueReady(target));
@@ -380,6 +390,9 @@ function applyVenuePermissions() {
   $('venue-pause').disabled = locked || !pause.length;
   $('venue-resume').disabled = locked || !resume.length || !!waiting.length;
   $('venue-end').disabled = locked || !end.length;
+  $('venue-environment-fields').disabled = locked || !environment.length;
+  const targetText = environment.length ? `適用房間 ${venueRoomText(environment)} · ${environment.length} 個執行中場次。` : '等待執行中場次。';
+  if ($('venue-environment-targets').textContent !== targetText) $('venue-environment-targets').textContent = targetText;
   const describe = targets => targets.length ? '房間 ' + venueRoomText(targets) : '無';
   $('venue-end-targets').hidden = !end.length;
   $('venue-end-targets').textContent = end.length ? `可結束 ${describe(end)} · 包含準備、執行與暫停的場次。` : '';
@@ -394,15 +407,16 @@ function applyVenuePermissions() {
   const message = waiting.length ? `等候房間 ${venueRoomText(waiting)} 的遊戲端確認或 MR 追蹤。` : '目標房間的暫停快照已確認。';
   if (evidence.textContent !== message) evidence.textContent = message;
 }
-async function venuePhase(action) {
+async function venuePhase(action, climate) {
   if (!master() || state.pending) return;
   const targets = venueTargets(action);
   if (!targets.length || (['Begin', 'Resume'].includes(action) && targets.some(target => !roomReadiness.venueReady(target, action)))) return;
-  const verb = { Begin: '開始', Pause: '暫停', Resume: '繼續', End: '結束' }[action];
-  const message = `${verb}房間 ${venueRoomText(targets)} 的 ${targets.length} 個場次？`;
+  const verb = { Begin: '開始', Pause: '暫停', Resume: '繼續', End: '結束', SetEnvironment: '設定環境給' }[action];
+  const message = `${verb}房間 ${venueRoomText(targets)} 的 ${targets.length} 個場次？` + (climate ? '\n' + venueClimateText(climate) : '');
   if (!confirm(action === 'End' ? message + '\n包含尚未開始的準備場次。結束後無法繼續原場次。' : message)) return;
   state.pending = { kind: 'venue-phase', path: '/venue/phase', method: 'POST', requestId: uuid(),
-    body: { action, targets: targets.map(({ sessionId, phaseSinceSequence, sessionSequence }) => ({ sessionId, phaseSinceSequence, sessionSequence })) } };
+    body: { action, targets: targets.map(({ sessionId, phaseSinceSequence, sessionSequence, environmentSinceSequence }) =>
+      ({ sessionId, phaseSinceSequence, sessionSequence, environmentSinceSequence })), environment: climate } };
   await sendPending();
 }
 function renderVenueClosure(report) {
@@ -545,7 +559,8 @@ async function sendPending() {
           || !Array.isArray(response.sessions) || response.sessions.length !== targets.length
           || targets.some(target => !response.sessions.some(row => row?.sessionId === target.sessionId
             && Number.isSafeInteger(row.appliedAtSequence) && (pending.body.action === 'Begin'
-              ? row.appliedAtSequence === target.sessionSequence + 1 : row.appliedAtSequence > target.phaseSinceSequence))))
+              ? row.appliedAtSequence === target.sessionSequence + 1
+              : row.appliedAtSequence > Math.max(target.phaseSinceSequence, target.environmentSinceSequence ?? 0)))))
         throw new Error('Incomplete venue phase receipt');
     }
     state.pending = null;
@@ -813,6 +828,9 @@ $('venue-begin').addEventListener('click', () => run(() => venuePhase('Begin')))
 $('venue-pause').addEventListener('click', () => run(() => venuePhase('Pause')));
 $('venue-resume').addEventListener('click', () => run(() => venuePhase('Resume')));
 $('venue-end').addEventListener('click', () => run(() => venuePhase('End')));
+submit('venue-environment-form', () => venuePhase('SetEnvironment', {
+  weather: $('venue-weather').value, timeOfDay: $('venue-time').value, lightning: $('venue-lightning').checked
+}));
 $('download-room-tickets').addEventListener('click', downloadRoomTickets);
 $('ticket-room').addEventListener('change', applyPermissions);
 document.querySelectorAll('[data-command]').forEach(button => button.addEventListener('click', () => runSession(() => command(button.dataset.command))));

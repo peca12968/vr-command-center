@@ -192,5 +192,55 @@ internal static class VenuePhaseChecks
                 && retry.Sessions.SequenceEqual(ended) && manager.List().Single().Id == replacement,
                 "After restart and room reuse, closure and End retry identify the original batch without touching its replacement");
         }
+
+        var environmentData = Path.Combine(directory, "venue-environment");
+        var climateKey = Guid.NewGuid();
+        var storm = new VenueClimate(Weather.Storm, TimeOfDay.Night, true);
+        VenuePhaseFence[] climateTargets;
+        VenuePhaseApplied[] changed;
+        Guid vrId;
+        Guid mrId;
+        using (var store = new SqliteSessionEventStore(environmentData))
+        {
+            var manager = new SessionManager(store);
+            vrId = manager.Create(SessionMode.Independent, [1], mission, master).Id;
+            mrId = manager.Create(SessionMode.Independent, [2], mrMission, master).Id;
+            manager.Create(SessionMode.Independent, [3], mission, master);
+            manager.Join(vrId, Guid.NewGuid(), "VR seat", 1, HeadsetKind.Quest3, master);
+            manager.Join(mrId, Guid.NewGuid(), "MR seat", 2, HeadsetKind.Quest3, master);
+            manager.OpenStream(mrId, new(Guid.NewGuid(), CombatOrigin.GameServer), new("venue-climate-source", OperatorRole.GameServer));
+            manager.Execute(vrId, new(Guid.NewGuid(), ControlAction.Begin), master);
+            manager.Execute(mrId, new(Guid.NewGuid(), ControlAction.Begin), master, manager.Get(mrId).Sequence);
+            VenuePhaseFence[] ClimateFences() => manager.ReadVenuePhase(master).Environment.Select(target =>
+                new VenuePhaseFence(target.SessionId, target.PhaseSinceSequence, EnvironmentSinceSequence: target.EnvironmentSinceSequence)).ToArray();
+            var stale = ClimateFences();
+            check(stale.Length == 2, "Venue environment targets only the running rooms");
+            var current = manager.Get(mrId);
+            manager.Execute(mrId, new(Guid.NewGuid(), ControlAction.SetEnvironment, current.Environment), room2);
+            Reject<VenuePhaseChangedException>(() => manager.ExecuteVenuePhase(ControlAction.SetEnvironment, stale, climateKey, master, climate: storm),
+                "An intervening room environment command rejects the whole climate preview");
+            climateTargets = ClimateFences();
+            Reject<ArgumentException>(() => manager.ExecuteVenuePhase(ControlAction.SetEnvironment, climateTargets, climateKey, master,
+                climate: storm with { Lightning = null }), "Venue climate requires an explicit lightning setting");
+            manager.Execute(vrId, new(Guid.NewGuid(), ControlAction.SetEnemies, Enemies: manager.Get(vrId).Enemies), master);
+            changed = manager.ExecuteVenuePhase(ControlAction.SetEnvironment, climateTargets, climateKey, master, climate: storm).Sessions;
+            var vrView = manager.Get(vrId);
+            var mrView = manager.Get(mrId);
+            check(changed.Length == 2 && vrView.Environment == new EnvironmentSettings(ExperienceMode.VR, Weather.Storm, TimeOfDay.Night, true)
+                && mrView.Environment == (vrView.Environment with { Mode = ExperienceMode.MR })
+                && vrView.Mission.Definition.Environment == mission.Definition.Environment,
+                "One climate transaction retains each experience mode and the saved mission across unrelated commands");
+            Reject<InvalidOperationException>(() => manager.ExecuteVenuePhase(ControlAction.SetEnvironment, climateTargets, climateKey, master,
+                climate: storm with { Weather = Weather.Rain }), "A climate request ID cannot change the selected weather");
+            manager.Execute(mrId, new(Guid.NewGuid(), ControlAction.SetEnvironment, mrView.Environment with { Lightning = false }), room2);
+        }
+        using (var store = new SqliteSessionEventStore(environmentData))
+        {
+            var manager = new SessionManager(store);
+            var retry = manager.ExecuteVenuePhase(ControlAction.SetEnvironment, climateTargets, climateKey, master, climate: storm);
+            check(retry.Duplicate && retry.Sessions.SequenceEqual(changed) && manager.GetWithPhase(vrId).VenueEnvironmentSequence
+                == changed.Single(row => row.SessionId == vrId).AppliedAtSequence && manager.GetWithPhase(mrId).VenueEnvironmentSequence is null
+                && !manager.Get(mrId).Environment.Lightning, "Climate receipt survives restart and leaves a later room override intact");
+        }
     }
 }

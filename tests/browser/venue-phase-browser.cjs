@@ -36,8 +36,11 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
           right: head, left: head } : { kind: 'None' };
         const players = current.players.map(player => ({ id: player.id, roomId: room, head, muzzle: head,
           connected, forward: { x: 0, y: 0, z: 1 }, health: 100, magazine: 30, reserve: 90, rig }));
+        const { weather, timeOfDay, lightning } = current.environment;
+        const visibility = ['Fog', 'Storm'].includes(weather) ? weather : 'Clear';
         const packet = { sequence: ++sequence, observedSequence: current.sequence, elapsedMilliseconds: sequence === 1 ? 0 : Date.now() - started,
-          weather: 'Clear', throughCombatSequence: 0, events: [], frame: { phase: current.state, tick: 0, night: false, throughSequence: 0, players } };
+          weather, lightning, throughCombatSequence: 0, events: [],
+          frame: { phase: current.state, tick: 0, night: timeOfDay === 'Night', visibility, throughSequence: 0, players } };
         assert.equal(send({ type: 'frame', payload: packet }).acceptedSequence, sequence);
       };
       publish.seal = () => assert.equal(send({ type: 'seal', finalSequence: sequence }).complete, true);
@@ -201,6 +204,50 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       return Promise.all([1, 2].map(room => roomPhase(room).filter({ hasText: '全館開始已套用' }).isVisible())).then(rows => rows.every(Boolean));
     });
     check(true, 'Both room cards confirm Begin from their accepted Running frames');
+
+    const climate = { weather: 'Storm', timeOfDay: 'Night', lightning: true };
+    const climateTargets = async () => (await api('/venue/phase')).environment.map(({ sessionId, phaseSinceSequence, environmentSinceSequence }) =>
+      ({ sessionId, phaseSinceSequence, environmentSinceSequence }));
+    const oldEnvironment = await climateTargets();
+    const updateRoom2 = environment => api(`/sessions/${preparing[1]}/commands`, 'POST',
+      { commandId: randomUUID(), action: 'SetEnvironment', environment }, 'Room2');
+    await api('/venue/phase', 'POST', { action: 'SetEnvironment', targets: oldEnvironment, environment: climate }, 'Room2', 403, undefined, randomUUID());
+    await api('/venue/phase', 'POST', { action: 'SetEnvironment', targets: oldEnvironment, environment: { weather: 'Storm' } },
+      'Master', 400, undefined, randomUUID());
+    await updateRoom2(running[1].environment);
+    const staleClimate = await api('/venue/phase', 'POST', { action: 'SetEnvironment', targets: oldEnvironment, environment: climate },
+      'Master', 409, undefined, randomUUID());
+    check(staleClimate.code === 'venue-phase-changed' && (await api(`/sessions/${preparing[0]}`)).environment.weather === 'Clear',
+      'A room environment write invalidates the whole preview even when it repeats the same weather');
+    await page.locator('#refresh').click();
+    await page.locator('#venue-environment-targets').filter({ hasText: '房間 1、2' }).waitFor();
+    await page.locator('#venue-weather').selectOption('Storm');
+    await page.locator('#venue-time').selectOption('Night');
+    await page.locator('#venue-lightning').check();
+    let climateDialog;
+    const climateConfirmed = page.waitForEvent('dialog').then(async dialog => { climateDialog = dialog.message(); await dialog.accept(); });
+    const acceptedClimate = page.waitForResponse(response => response.url().endsWith('/api/venue/phase') && response.request().method() === 'POST');
+    await page.locator('#venue-apply-environment').click();
+    await climateConfirmed;
+    assert.equal((await acceptedClimate).status(), 200);
+    const changedClimate = await Promise.all(preparing.map(id => api(`/sessions/${id}`)));
+    check(climateDialog.includes('房間 1、2') && climateDialog.includes('暴風雨 · 夜晚 · 閃電開啟')
+      && changedClimate.every(session => session.environment.weather === 'Storm' && session.environment.timeOfDay === 'Night' && session.environment.lightning),
+      'The console confirms the target rooms and applies the three climate values in one request');
+    const roomEnvironment = room => page.locator(`[data-room-venue-environment="${room}"]`);
+    await roomEnvironment(1).filter({ hasText: '全館環境待確認' }).waitFor();
+    await publishUntil(first, changedClimate[0], () => {
+      second(changedClimate[1]);
+      return Promise.all([1, 2].map(room => roomEnvironment(room).filter({ hasText: '全館環境已套用' }).isVisible())).then(rows => rows.every(Boolean));
+    });
+    await page.locator('#venue-environment').screenshot({ path: path.join(screenshots, 'venue-environment.png') });
+    check(true, 'Both rooms confirm their own matching environment frames');
+    await updateRoom2({ ...changedClimate[1].environment, weather: 'Rain', lightning: false });
+    await page.locator('#refresh').click();
+    await roomEnvironment(2).waitFor({ state: 'hidden' });
+    await roomEnvironment(1).filter({ hasText: '快照已過期' }).waitFor();
+    check(await roomEnvironment(1).filter({ hasText: '全館環境待確認' }).isVisible(),
+      'A room-specific override clears its marker and the other room expires independently');
 
     const extra = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [3] }, 'Master', 201);
     active.add(extra.id);

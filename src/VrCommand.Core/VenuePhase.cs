@@ -2,10 +2,12 @@ using System.Text.Json.Serialization;
 
 namespace VrCommand.Core;
 
-public record VenuePhaseFence(Guid SessionId, long PhaseSinceSequence, long? SessionSequence = null);
+public record VenuePhaseFence(Guid SessionId, long PhaseSinceSequence, long? SessionSequence = null, long? EnvironmentSinceSequence = null);
 public record VenuePhaseTarget(Guid SessionId, long PhaseSinceSequence, int[] RoomIds,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? SessionSequence = null);
-public record VenuePhasePlan(VenuePhaseTarget[] Pause, VenuePhaseTarget[] Resume, VenuePhaseTarget[] Begin, VenuePhaseTarget[] End);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? SessionSequence = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? EnvironmentSinceSequence = null);
+public record VenuePhasePlan(VenuePhaseTarget[] Pause, VenuePhaseTarget[] Resume, VenuePhaseTarget[] Begin, VenuePhaseTarget[] End, VenuePhaseTarget[] Environment);
+public record VenueClimate(Weather? Weather, TimeOfDay? TimeOfDay, bool? Lightning);
 public record VenuePhaseApplied(Guid SessionId, long AppliedAtSequence);
 public record VenuePhaseReceipt(Guid RequestId, ControlAction Action, VenuePhaseApplied[] Sessions, bool Duplicate);
 public record VenueEndBatch(Guid RequestId, DateTimeOffset RecordedAtUtc, VenuePhaseApplied[] Sessions);
@@ -35,7 +37,8 @@ public sealed partial class SessionManager
         lock (gate) return new(Targets(ControlAction.Pause).Select(history => ToTarget(history)).ToArray(),
             Targets(ControlAction.Resume).Select(history => ToTarget(history)).ToArray(),
             Targets(ControlAction.Begin).Select(history => ToTarget(history, history.View.Sequence)).ToArray(),
-            Targets(ControlAction.End).Select(history => ToTarget(history)).ToArray());
+            Targets(ControlAction.End).Select(history => ToTarget(history)).ToArray(),
+            Targets(ControlAction.SetEnvironment).Select(history => ToTarget(history, environmentSinceSequence: history.EnvironmentSinceSequence)).ToArray());
     }
 
     public VenueEndBatch? ReadLatestVenueEnd(OperatorIdentity actor)
@@ -47,28 +50,37 @@ public sealed partial class SessionManager
     }
 
     public VenuePhaseReceipt ExecuteVenuePhase(ControlAction action, VenuePhaseFence?[]? fences, Guid requestId,
-        OperatorIdentity actor, IReadOnlyDictionary<Guid, VenuePhaseWitness>? witnesses = null)
+        OperatorIdentity actor, IReadOnlyDictionary<Guid, VenuePhaseWitness>? witnesses = null, VenueClimate? climate = null)
     {
         RequireVenueMaster(actor);
         ValidateRequestId(requestId);
         var begin = action == ControlAction.Begin;
-        if (action is not (ControlAction.Begin or ControlAction.Pause or ControlAction.Resume or ControlAction.End) || fences is not { Length: >= 1 and <= RoomCount }
+        var environment = action == ControlAction.SetEnvironment;
+        if (environment ? climate is not { Weather: { } weather, TimeOfDay: { } time, Lightning: not null }
+            || !Enum.IsDefined(weather) || !Enum.IsDefined(time) : climate is not null)
+            throw new ArgumentException("Provide weather, time of day and lightning for a venue environment change.");
+        if (action is not (ControlAction.Begin or ControlAction.Pause or ControlAction.Resume or ControlAction.End or ControlAction.SetEnvironment)
+            || fences is not { Length: >= 1 and <= RoomCount }
             || fences.Any(fence => fence is not { PhaseSinceSequence: > 0 } || fence.SessionId == Guid.Empty
-                || (begin ? fence.SessionSequence is null || fence.SessionSequence < fence.PhaseSinceSequence : fence.SessionSequence is not null))
+                || (begin ? fence.SessionSequence is null || fence.SessionSequence < fence.PhaseSinceSequence : fence.SessionSequence is not null)
+                || (environment ? fence.EnvironmentSinceSequence is not > 0 : fence.EnvironmentSinceSequence is not null))
             || fences.Select(fence => fence!.SessionId).Distinct().Count() != fences.Length)
-            throw new ArgumentException("Provide a Begin, Pause, Resume or End with distinct phase fences and the current revision for Begin.");
+            throw new ArgumentException("Provide distinct phase fences with the current revision for Begin or the environment revision for SetEnvironment.");
         var expected = fences.OrderBy(fence => fence!.SessionId).ToArray();
         lock (gate)
         {
             if (venueTransitions.TryGetValue(requestId, out var existing))
             {
-                if (existing[0].Actor != actor || existing[0].Read<ControlCommand>().Action != action
-                    || !existing.Select(entry => new VenuePhaseFence(entry.SessionId, entry.Venue!.PhaseSinceSequence, begin ? entry.Sequence - 1 : null)).SequenceEqual(expected))
+                var original = existing[0].Read<ControlCommand>();
+                if (existing[0].Actor != actor || original.Action != action || ClimateOf(original) != climate
+                    || !existing.Select(entry => new VenuePhaseFence(entry.SessionId, entry.Venue!.PhaseSinceSequence,
+                        begin ? entry.Sequence - 1 : null, entry.Venue.EnvironmentSinceSequence)).SequenceEqual(expected))
                     throw new InvalidOperationException("Venue request ID already used with different content.");
                 return Receipt(requestId, action, existing, true);
             }
             var targets = Targets(action);
-            if (!targets.Select(history => new VenuePhaseFence(history.View.Id, history.PhaseSinceSequence, begin ? history.View.Sequence : null)).SequenceEqual(expected))
+            if (!targets.Select(history => new VenuePhaseFence(history.View.Id, history.PhaseSinceSequence,
+                begin ? history.View.Sequence : null, environment ? history.EnvironmentSinceSequence : null)).SequenceEqual(expected))
                 throw new VenuePhaseChangedException();
             if (begin) VerifyVenueBegin(targets, witnesses);
             if (action == ControlAction.Resume) VerifyVenueResume(targets, witnesses);
@@ -77,9 +89,14 @@ public sealed partial class SessionManager
             if (eventStore is not IAtomicSessionEventStore store)
                 throw new InvalidOperationException("Venue transitions require a transactional session store.");
 
-            var entries = targets.Select(history => SessionEvent.Create(history.View.Id, history.View.Sequence + 1,
-                SessionEventKind.ControlApplied, new ControlCommand(requestId, action, ExpectedSequence: begin ? history.View.Sequence : null), actor,
-                venue: new(history.PhaseSinceSequence, targets.Length))).ToArray();
+            var entries = targets.Select(history =>
+            {
+                var settings = climate is null ? null : new EnvironmentSettings(history.View.Environment.Mode,
+                    climate.Weather!.Value, climate.TimeOfDay!.Value, climate.Lightning!.Value);
+                var command = new ControlCommand(requestId, action, settings, ExpectedSequence: begin ? history.View.Sequence : null);
+                return SessionEvent.Create(history.View.Id, history.View.Sequence + 1, SessionEventKind.ControlApplied, command, actor,
+                    venue: new(history.PhaseSinceSequence, targets.Length, environment ? history.EnvironmentSinceSequence : null));
+            }).ToArray();
             var views = entries.Select((entry, index) => SessionProjection.Apply(targets[index].View, entry)).ToArray();
             store.AppendBatch(entries);
             for (var index = 0; index < targets.Length; index++)
@@ -129,15 +146,18 @@ public sealed partial class SessionManager
     private History[] Targets(ControlAction action) => sessions.Values.Where(history => action switch
         {
             ControlAction.Begin => history.View.State == SessionState.Preparing,
-            ControlAction.Pause => history.View.State == SessionState.Running,
+            ControlAction.Pause or ControlAction.SetEnvironment => history.View.State == SessionState.Running,
             ControlAction.Resume => history.View.State == SessionState.Paused && IsVenuePhase(history),
             ControlAction.End => history.View.State != SessionState.Ended,
             _ => false
         })
         .OrderBy(history => history.View.Id).ToArray();
 
-    private static VenuePhaseTarget ToTarget(History history, long? sessionSequence = null) =>
-        new(history.View.Id, history.PhaseSinceSequence, [.. history.View.RoomIds], sessionSequence);
+    private static VenuePhaseTarget ToTarget(History history, long? sessionSequence = null, long? environmentSinceSequence = null) =>
+        new(history.View.Id, history.PhaseSinceSequence, [.. history.View.RoomIds], sessionSequence, environmentSinceSequence);
+
+    private static VenueClimate? ClimateOf(ControlCommand command) => command.Environment is { } settings
+        ? new(settings.Weather, settings.TimeOfDay, settings.Lightning) : null;
 
     private static VenuePhaseReceipt Receipt(Guid requestId, ControlAction action, IEnumerable<SessionEvent> entries, bool duplicate) =>
         new(requestId, action, Applied(entries), duplicate);
@@ -151,10 +171,11 @@ public sealed partial class SessionManager
             latestVenueEnd = (id, recordedAtUtc);
     }
 
-    private void RestoreVenueEvent(SessionEvent[] events, SessionEvent entry, long phaseSince)
+    private void RestoreVenueEvent(SessionEvent[] events, SessionEvent entry, long phaseSince, long environmentSince, ControlCommand command)
     {
-        var command = entry.Read<ControlCommand>();
-        if (entry.Venue!.PhaseSinceSequence != phaseSince || (command.Action == ControlAction.Resume && events[(int)phaseSince - 1].Venue is null))
+        if (entry.Venue!.PhaseSinceSequence != phaseSince
+            || (command.Action == ControlAction.SetEnvironment && entry.Venue.EnvironmentSinceSequence != environmentSince)
+            || (command.Action == ControlAction.Resume && events[(int)phaseSince - 1].Venue is null))
             throw new InvalidDataException("Venue transition does not follow its original phase.");
         if (!venueTransitions.TryGetValue(command.CommandId, out var group)) venueTransitions.Add(command.CommandId, group = []);
         group.Add(entry);
@@ -165,9 +186,15 @@ public sealed partial class SessionManager
         foreach (var (id, entries) in venueTransitions)
         {
             var first = entries[0];
-            var action = first.Read<ControlCommand>().Action;
+            var command = first.Read<ControlCommand>();
+            var action = command.Action;
+            var climate = ClimateOf(command);
             if (entries.Count != first.Venue!.TargetCount || entries.Select(entry => entry.SessionId).Distinct().Count() != entries.Count
-                || entries.Any(entry => entry.Actor != first.Actor || entry.Venue!.TargetCount != entries.Count || entry.Read<ControlCommand>().Action != action))
+                || entries.Any(entry =>
+                {
+                    var other = entry.Read<ControlCommand>();
+                    return entry.Actor != first.Actor || entry.Venue!.TargetCount != entries.Count || other.Action != action || ClimateOf(other) != climate;
+                }))
                 throw new InvalidDataException("Incomplete or inconsistent venue transition batch.");
             entries.Sort((a, b) => a.SessionId.CompareTo(b.SessionId));
             if (action == ControlAction.End) RememberVenueEnd(id, entries[0].RecordedAtUtc);

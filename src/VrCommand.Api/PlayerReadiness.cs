@@ -15,9 +15,11 @@ public record RoomReadiness(int RoomId, Guid? SessionId, long SessionSequence, i
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MrLiving = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomMissionTime? Clock = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomVenuePhase? VenuePhase = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? VenueBeginReady = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? VenueBeginReady = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomVenueEnvironment? VenueEnvironment = null);
 public record RoomMissionTime(string Phase, long ElapsedSeconds, long RemainingSeconds, int DurationSeconds, bool AutoEnd);
 public record RoomVenuePhase(ControlAction Action, long AppliedAtSequence, long? WorldSequence, bool ReadyToResume);
+public record RoomVenueEnvironment(Weather Weather, TimeOfDay TimeOfDay, bool Lightning, long AppliedAtSequence, long? WorldSequence);
 
 public sealed partial class WorldRecordings
 {
@@ -41,9 +43,11 @@ public sealed partial class WorldRecordings
         }
     }
 
-    public VenuePhaseReceipt ExecuteVenuePhase(ControlAction action, VenuePhaseFence?[]? fences, Guid requestId, OperatorIdentity actor)
+    public VenuePhaseReceipt ExecuteVenuePhase(ControlAction action, VenuePhaseFence?[]? fences, Guid requestId, OperatorIdentity actor,
+        VenueClimate? climate = null)
     {
-        if (action is not (ControlAction.Begin or ControlAction.Resume)) return manager.ExecuteVenuePhase(action, fences, requestId, actor);
+        if (action is not (ControlAction.Begin or ControlAction.Resume))
+            return manager.ExecuteVenuePhase(action, fences, requestId, actor, climate: climate);
         lock (gate)
         {
             var plan = manager.ReadVenuePhase(actor);
@@ -53,7 +57,7 @@ public sealed partial class WorldRecordings
             foreach (var target in (begin ? plan.Begin : plan.Resume)
                 .Where(target => expected.Contains(new(target.SessionId, target.PhaseSinceSequence, target.SessionSequence))))
             {
-                var (report, _, phase, beginReady) = ReadReadinessSnapshot(target.SessionId, actor);
+                var (report, _, phase, beginReady, _) = ReadReadinessSnapshot(target.SessionId, actor);
                 if (begin ? beginReady == true : phase is { Action: ControlAction.Pause, WorldSequence: not null }
                     && phase.AppliedAtSequence == target.PhaseSinceSequence)
                     reports.Add((report, new(target.PhaseSinceSequence, report.SessionSequence, begin || report.MrResumeState == "Ready")));
@@ -62,7 +66,7 @@ public sealed partial class WorldRecordings
             var ready = reports.Where(row => row.Report.CapturedAtUtc is { } captured
                 && (now - captured).TotalMilliseconds is >= -FutureSourceToleranceMilliseconds and <= MaxSourceAgeMilliseconds)
                 .ToDictionary(row => row.Report.SessionId, row => row.Witness);
-            return manager.ExecuteVenuePhase(action, fences, requestId, actor, ready);
+            return manager.ExecuteVenuePhase(action, fences, requestId, actor, ready, climate);
         }
     }
 
@@ -83,26 +87,27 @@ public sealed partial class WorldRecordings
         return rooms.Select(room =>
         {
             if (room.SessionId is not { } id) return new RoomReadiness(room.Id, null, 0, 0, 0, 0, "Idle", null);
-            var (report, clock, venuePhase, beginReady) = sessions[id];
+            var (report, clock, venuePhase, beginReady, venueEnvironment) = sessions[id];
             var players = report.Players.Where(player => player.RoomId == room.Id).ToArray();
             return new RoomReadiness(room.Id, id, report.SessionSequence, players.Length,
                 players.Count(player => player.CanParticipate && player.RigKind == "Simulated"),
                 players.Count(player => player.CanParticipate && player.RigKind == "Tracked"),
                 report.SourceState, report.SourceAgeMilliseconds,
                 report.MrTrackingState is "Ready" or "WaitingPlayers"
-                    ? players.Count(player => player.State != "Eliminated") : null, clock, venuePhase, beginReady);
+                    ? players.Count(player => player.State != "Eliminated") : null, clock, venuePhase, beginReady, venueEnvironment);
         }).ToArray();
     }
 
     // A scoped view of accepted snapshots. Both MR transitions require the exact current roster revision.
     public SessionReadiness Readiness(Guid id, OperatorIdentity actor) => ReadReadinessSnapshot(id, actor).Report;
 
-    private (SessionReadiness Report, RoomMissionTime? Clock, RoomVenuePhase? VenuePhase, bool? BeginReady) ReadReadinessSnapshot(Guid id, OperatorIdentity actor)
+    private (SessionReadiness Report, RoomMissionTime? Clock, RoomVenuePhase? VenuePhase, bool? BeginReady, RoomVenueEnvironment? VenueEnvironment)
+        ReadReadinessSnapshot(Guid id, OperatorIdentity actor)
     {
         RequireReadinessActor(actor);
         lock (gate)
         {
-            var (current, phaseSince, venueAction) = manager.GetWithPhase(id, actor);
+            var (current, phaseSince, venueAction, environmentSince) = manager.GetWithPhase(id, actor);
             using var exists = Command("SELECT 1 FROM recordings WHERE session=$id", ("$id", id.ToString("D")));
             var info = exists.ExecuteScalar() is null ? null : Info(id, actor);
             var frame = info is null || info.AcceptedSequence == 0 ? null : Frame(id, info.AcceptedSequence, actor);
@@ -159,7 +164,17 @@ public sealed partial class WorldRecordings
                 ? source == "Fresh" && observedSequence == current.Sequence && players.Length > 0
                     && (starting ? mrState == "Ready" : players.All(player => player.CanParticipate))
                 : null;
-            return (report, clock, venuePhase, beginReady);
+            RoomVenueEnvironment? venueEnvironment = null;
+            if (environmentSince is { } sequence && current.State is SessionState.Running or SessionState.Paused)
+            {
+                var environment = current.Environment;
+                var applied = confirmed && observedSequence >= sequence && frame is not null
+                    && frame.Packet.weather == environment.Weather.ToString() && frame.Packet.lightning == environment.Lightning
+                    && frame.Packet.frame.night == (environment.TimeOfDay == TimeOfDay.Night);
+                venueEnvironment = new(environment.Weather, environment.TimeOfDay, environment.Lightning, sequence,
+                    applied ? report.WorldSequence : null);
+            }
+            return (report, clock, venuePhase, beginReady, venueEnvironment);
         }
     }
 }

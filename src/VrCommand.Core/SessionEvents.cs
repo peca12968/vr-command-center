@@ -8,7 +8,8 @@ public enum SessionEventKind { Created, PlayerJoined, PlayerLeft, ControlApplied
 public record SessionCreated(SessionMode Mode, int[] RoomIds, Mission Mission,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? IndependentSetId = null);
 public record PlayerLeft(Guid PlayerId, int? RoomId = null, Guid AdmissionId = default, Guid? ExpectedAdmissionId = null);
-public record VenueTransition(long PhaseSinceSequence, int TargetCount);
+public record VenueTransition(long PhaseSinceSequence, int TargetCount,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? EnvironmentSinceSequence = null);
 public record SessionEvent(int SchemaVersion, Guid EventId, Guid SessionId, long Sequence,
     DateTimeOffset RecordedAtUtc, SessionEventKind Kind, JsonElement Payload, OperatorIdentity? Actor = null,
     Guid? RequestId = null, [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTransition? Venue = null)
@@ -88,7 +89,7 @@ internal static class SessionProjection
         if (entry.Venue is { } venue && (entry.SchemaVersion < 7 || actor.Role != OperatorRole.Master
             || entry.Kind != SessionEventKind.ControlApplied || venue.TargetCount is < 1 or > SessionManager.RoomCount
             || venue.PhaseSinceSequence < 1 || venue.PhaseSinceSequence >= entry.Sequence
-            || !ValidVenueCommand(entry.Read<ControlCommand>(), entry.Sequence)))
+            || !ValidVenueCommand(entry.Read<ControlCommand>(), entry.Sequence, venue, current)))
             throw new InvalidDataException("Invalid venue phase transition envelope.");
         if (current is null)
         {
@@ -159,10 +160,13 @@ internal static class SessionProjection
         return updated with { Sequence = entry.Sequence };
     }
 
-    private static bool ValidVenueCommand(ControlCommand command, long sequence) => command.Action switch
+    private static bool ValidVenueCommand(ControlCommand command, long sequence, VenueTransition venue, SessionView? session) => command.Action switch
     {
-        ControlAction.Begin => command.ExpectedSequence == sequence - 1,
-        ControlAction.Pause or ControlAction.Resume or ControlAction.End => command.ExpectedSequence is null && command.ClockExpiration is null,
+        ControlAction.Begin => command.ExpectedSequence == sequence - 1 && venue.EnvironmentSinceSequence is null,
+        ControlAction.Pause or ControlAction.Resume or ControlAction.End => command.ExpectedSequence is null && command.ClockExpiration is null
+            && venue.EnvironmentSinceSequence is null,
+        ControlAction.SetEnvironment => command.ExpectedSequence is null && venue.EnvironmentSinceSequence is > 0
+            && venue.EnvironmentSinceSequence < sequence && session?.State == SessionState.Running && command.Environment?.Mode == session.Environment.Mode,
         _ => false
     };
 
