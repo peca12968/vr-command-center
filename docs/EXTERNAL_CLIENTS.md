@@ -168,7 +168,7 @@ node tests/browser/check-external-native.cjs <本次ready.json> <解壓玩家包
 }
 ```
 
-每個遊戲綁定的實際來源 IPv4 必須恰有一組有效報告。驗收會拒絕缺少、來源重複、未確認來源、重複交換摘要或過期的報告。單場摘要的 `udpSourcePreflight` 列出觀察到及驗證成功的來源數，和各組樣本數與交換摘要。全館另有 `udpSourcePreflightsVerified`。多席共用同一個來源 IPv4 時，在該遊戲埠只算一組。兩端 PowerShell 探測目前用於 Windows 部署，實體設備數及跨機容量仍須現場核對。Quest 席位的實機入場與戰績可沿用原始 logcat 驗收。 [Quest 擷取](QUEST3.md#收集-quest-場館驗收日誌)
+每個遊戲綁定的實際來源 IPv4 必須恰有一組有效報告。驗收會拒絕缺少、來源重複、未確認來源、重複交換摘要或過期的報告。單場摘要的 `udpSourcePreflight` 列出觀察到及驗證成功的來源數，和各組樣本數與交換摘要。全館另有 `udpSourcePreflightsVerified`。多席共用同一個來源 IPv4 時，在該遊戲埠只算一組。Windows 玩家用 PowerShell 探測，Quest 可使用獨立診斷 APK 產生同格式報告，遊戲入場和戰績仍另留原始 logcat。實體設備數及跨機容量須現場核對。 [Quest UDP 預檢](QUEST3.md#開場前從頭盔執行-udp-預檢) · [Quest 日誌](QUEST3.md#收集-quest-場館驗收日誌)
 
 ### 核對封存戰績與 UDP 來源
 

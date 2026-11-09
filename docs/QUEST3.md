@@ -2,6 +2,26 @@
 
 2026-11-10 Quest 3 開發 APK 為 0.49.0／63，與同版 Windows 玩家和遊戲伺服器使用相同的遊戲來源及場景網路識別。已核對 ARM64、OpenXR、最低 SDK 32、目標 SDK 35 及 APK v2 開發簽章。 [建置紀錄](PROGRESS.md#2026-11-10-windows-openxr-玩家啟動)
 
+## 開場前從頭盔執行 UDP 預檢
+
+使用獨立的 `vr-command-quest-udp-probe-0.1.0.apk`（套件 `com.vrcommand.udpprobe`）做場館診斷。它透過已授權的 ADB 裝置執行，從頭盔指定的 IPv4 傳送與 Windows 監聽端相同的 UDP 挑戰。報告可以納入逐來源封存驗收。 [Windows 監聽與封存操作](EXTERNAL_CLIENTS.md#核對每個玩家來源的-udp-預檢) · [Android Debug Bridge](https://developer.android.com/tools/adb)
+
+在 Windows 伺服器開場前，先用 `check-lan-udp.ps1 -NewKey` 產生本次探測金鑰，再使用正式遊戲埠啟動監聽，指定頭盔實際的 Wi-Fi IPv4 及樣本數。保存監聽端的原始報告。監聽出現 `listening` 後，在連接頭盔的電腦執行以下指令。例子以頭盔 `192.168.1.20`、伺服器 `192.168.1.10` 和遊戲埠 `7777` 為例。
+
+```powershell
+$adb = 'F:\Tools\UnityEditors\6000.3.27f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe'
+$serial = '<原 ADB 裝置序號>'
+$key = '<本次探測金鑰檔>'
+& $adb -s $serial install .\artifacts\quest-udp-probe\vr-command-quest-udp-probe-0.1.0.apk
+python .\scripts\probe-quest-udp.py --adb $adb --serial $serial --key-file $key `
+  --local-address 192.168.1.20 --peer-address 192.168.1.10 --port 7777 --count 5 `
+  --report .\quest-probe-room-01.json
+```
+
+每次用新報告檔，樣本數須與監聽端一致。同一頭盔一次執行一組。工具從 ADB 標準輸入將金鑰暫存於診斷套件的私有目錄，讀取後即清除。完成報告含實際來源和交換摘要，請與原監聽報告一併保存在私人位置。逾時樣本以空值保存，整次未完成會以退出碼 1 結束。兩端退出後用原綁定位址與埠開場，再保留遊戲原始 logcat 與封存。 [逐來源驗收](EXTERNAL_CLIENTS.md#核對每個玩家來源的-udp-預檢)
+
+建置可使用 `scripts/build-quest-udp-probe.py --sdk <SDK> --jdk <JDK> --keystore <診斷用開發金鑰庫> --output <新APK>`。需要 Android 35 平台、Build Tools 36.0.0 及 JDK 17。診斷金鑰庫使用別名 `androiddebugkey` 和標準開發密碼 `android`，獨立保存以供同一診斷套件更新。APK 的最低 Android API 為 32，目標 API 為 35。 [APK 簽章工具](https://developer.android.com/tools/apksigner)
+
 ## 追蹤恢復後的武器輸入
 
 遊戲自 0.48.1 起，在應用程式及 OpenXR 工作階段均有輸入焦點時才處理頭盔操作。系統選單或應用程式暫停期間會停止發布本機追蹤姿態。返回遊戲後，右手扳機、換彈鍵及 B 重連鍵各自需要先放開，再按下。 [Unity OpenXR 焦點介面](https://docs.unity3d.com/Packages/com.unity.xr.openxr@1.19/api/UnityEngine.XR.OpenXR.OpenXRUtility.html#UnityEngine_XR_OpenXR_OpenXRUtility_IsSessionFocused)

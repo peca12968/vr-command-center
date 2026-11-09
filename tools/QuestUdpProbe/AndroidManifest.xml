@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.vrcommand.udpprobe" android:versionCode="1" android:versionName="0.1.0">
+    <uses-sdk android:minSdkVersion="32" android:targetSdkVersion="35" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-feature android:name="android.hardware.faketouch" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <application android:label="VR Command UDP Probe" android:debuggable="true" android:allowBackup="false" />
+    <instrumentation android:name=".ProbeInstrumentation" android:targetPackage="com.vrcommand.udpprobe" />
+</manifest>
