@@ -1,5 +1,14 @@
 # 開發進度
 
+## 2026-11-10 從 MR 追蹤警示暫停
+
+控制台 0.31.64 在房卡提供重新對位暫停。獨立房由房控或主控操作，合併場由主控確認五房一起暫停。服務受理前重新核對原房號、場次序號及最新有效的追蹤中斷。管理端接受後先顯示待確認，同一來源回傳套用原暫停序號的快照才顯示已套用。 [操作說明](PLAYER_READINESS.md#從追蹤警示暫停)
+
+- `artifacts/windows-control-console-0.31.64-win-x64.zip` 共 52,804,843 bytes，SHA-256 `a16b0633630986f7f77fd6ce01e22889e7802879a7996a9843fd0d484ecf39bd`。核對 172 份來源、520 份執行環境檔案與 540 筆封裝清單。通過 106 項解壓啟動器、986 項領域、747 項 HTTP、81 項世界串流及 104 項 Node 檢查。
+- 最終解壓包的 39 項 MR 專項檢查使用真實 API、SQLite 與合成的追蹤資料。合併場 25 席核對只有主控可暫停、取消確認、確認期間恢復追蹤、遺失回應的原命令重試，以及五房共用的暫停套用快照。獨立場核對房控只暫停本房、其他房序號保持不變。證據 `console-mr-tracking-pause-package-focus-fb40b30778a3457799d6b554f8eb985a`。首輪缺少 Room4 測試憑證，HTTP 回應 401，保留原結果 `console-mr-tracking-pause-focus-1daf3a424e5f4d588021fa08d7d61ecb`。
+- 最終解壓包通過 637 項 Chromium 檢查，證據 `console-mr-tracking-pause-package-6ff0f106ba6e486ba7c19c2c906edcf4`。同包搭配 Windows 0.49.0 原生遊戲的 `run-ab31b73881e24ee0bb74d95db86d0fe4` 通過 408 項。獨立五房及合併場各有 25 個同機 VR 模擬玩家程序，均確認原生全館暫停、繼續與活動時鐘。六場共核對 1,229 格完整回放、50 份原戰績及六份場次 CSV，雙封存後無活躍場次、遺留程序或清理錯誤。
+- 發布來源 `e0628a26e28af1ae45f3ec15a7e5126347ea73d8`。GitHub Actions job `129440890892` 因帳務或支出上限未啟動。Quest 3、VIVE XR、實體 MR、廠商硬體與跨機 25 人仍待現地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42699717398)
+
 ## 2026-11-10 Windows 遊戲錄製補送工具
 
 Windows 錄製補送工具 0.1.0 讀取原伺服器的設定，先以唯讀獨占方式開啟兩份原日誌，再用工作副本補送至原管理場次。須由操作員先結束場次。結果分列戰鬥及世界的接受序號與封存狀態，未保存完整結尾的場次仍可查看已保存片段。 [操作方式](WINDOWS_SERVER_PACKAGE.md#遊戲程序退出後補送錄製)
