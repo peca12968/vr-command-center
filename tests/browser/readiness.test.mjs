@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 const code = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/readiness-ui.js', import.meta.url), 'utf8');
 const missionClock = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/mission-clock.js', import.meta.url), 'utf8');
+const connection = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/connection-ui.js', import.meta.url), 'utf8');
 const dataModule = source => 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
-const { readinessView, roomReadinessView, mrReadinessView, roomMissionTimeView, roomVenuePhaseView } = await import(dataModule(code.replace('./mission-clock.js', dataModule(missionClock))));
+const { readinessView, roomReadinessView, roomEndpointText, mrReadinessView, roomMissionTimeView, roomVenuePhaseView } =
+  await import(dataModule(code.replace('./mission-clock.js', dataModule(missionClock)).replace('./connection-ui.js', dataModule(connection))));
 const player = { id: 'player', admissionId: 'first', roomId: 1, seat: 0 };
 const session = { id: 'session', sequence: 10, state: 'Preparing', players: [player] };
 const report = { version: 1, sessionId: 'session', sessionSequence: 10, sourceState: 'Fresh', sourceAgeMilliseconds: 10, origin: 'Simulation',
@@ -36,6 +38,18 @@ const room = { id: 1, sessionId: 'session', playerCount: 3, capacity: 5 };
 const roomRow = { roomId: 1, sessionId: 'session', sessionSequence: 10, registered: 3, sourceState: 'Fresh',
   sourceAgeMilliseconds: 10, simulatedReady: 1, trackedReady: 1 };
 const overview = { version: 1, rooms: [roomRow] };
+test('Room endpoints distinguish publication, loopback and shared connections independently of pose freshness', () => {
+  const current = { ...session, combatStream: { streamId: 'stream' } };
+  const endpoint = { version: 1, sessionId: current.id, streamId: 'stream', address: '127.0.0.1', port: 7777, sessionEnded: false };
+  const withEndpoint = value => ({ ...overview, rooms: [{ ...roomRow, sourceState: 'Stale', endpoint: value }] });
+  assert.equal(roomEndpointText(overview, room, current), '等待伺服器公布連線端點');
+  assert.equal(roomEndpointText(withEndpoint(endpoint), room, { ...current, mode: 'Linked' }), 'UDP 127.0.0.1:7777 · 五房共用 · 僅同機');
+  assert.equal(roomEndpointText(withEndpoint({ ...endpoint, address: '192.168.1.10' }), room, current), 'UDP 192.168.1.10:7777');
+  for (const invalid of [{ streamId: 'previous' }, { sessionId: 'old' }, { sessionEnded: true }, { address: '0.0.0.0' }])
+    assert.equal(roomEndpointText(withEndpoint({ ...endpoint, ...invalid }), room, current), '連線端點未確認');
+  assert.equal(roomEndpointText(withEndpoint(endpoint), room, { ...current, state: 'Ended' }), '連線端點未確認');
+  assert.equal(roomEndpointText(withEndpoint(endpoint), { ...room, sessionId: 'replacement' }, current), '連線端點未確認');
+});
 test('Venue confirmation requires its exact room, phase and fresh accepted world evidence', () => {
   const paused = { ...session, state: 'Paused' };
   const phase = { action: 'Pause', appliedAtSequence: 9, worldSequence: 12, readyToResume: true };

@@ -63,6 +63,7 @@ def main():
     p.add_argument('--venue-field-evidence',action='store_true',help='Verify full sealed admission evidence for both original venue End batches')
     p.add_argument('--check-venue-field-ui',action='store_true',help='Download the original current and earlier field bundles from the shipped console')
     p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
+    p.add_argument('--check-room-endpoints',action='store_true',help='Verify real published UDP endpoints in the room cards and scoped API')
     p.add_argument('--check-room-clocks', action='store_true', help='Verify room clocks and the original pause/resume boundaries in both modes')
     p.add_argument('--check-venue-phase', action='store_true', help='Verify whole-venue pause and resume against both native topologies')
     p.add_argument('--check-venue-begin', action='store_true', help='Start both native topologies with one witnessed Begin per topology')
@@ -88,6 +89,8 @@ def main():
     args=p.parse_args()
     if os.name!='nt':p.error('Actual Windows processes required')
     if args.check_mapped_quest and not args.mr_venue_bundle_only:p.error('--check-mapped-quest requires --mr-venue-bundle-only')
+    if args.check_room_endpoints and not (args.check_vr_venue_tickets or args.mixed_venue_bundle_only):
+        p.error('--check-room-endpoints requires --check-vr-venue-tickets or --mixed-venue-bundle-only')
     venue_only = args.mr_venue_bundle_only or args.mixed_venue_bundle_only
     if args.mr_venue_bundle_only and args.mixed_venue_bundle_only:p.error('Choose a single venue bundle check')
     if venue_only:
@@ -308,6 +311,17 @@ def main():
                 prepared.append((person,file))
         return [packaged_player(entry,person,file) for person,file in prepared]
 
+    def room_endpoint_descriptor(preview):
+        if not args.check_room_endpoints: return {}
+        rows = request('/api/rooms/readiness')['rooms']
+        endpoints = {row['roomId']: row['endpoint'] for row in preview['rooms']}
+        check({row['roomId']: row['endpoint'] for row in rows} == endpoints
+              and all([(row['roomId'], row['endpoint']) for row in request('/api/rooms/readiness', role=f'Room{room}')['rooms']]
+                      == [(room, endpoint)] for room, endpoint in endpoints.items()),
+              'master and room desks receive only their original published UDP endpoints')
+        return {'expectedEndpoints': [{'roomId': room, 'address': endpoint['address'], 'port': endpoint['port']}
+                                      for room, endpoint in endpoints.items()]}
+
     def venue_ticket_players(staged, linked):
         mode = 'Linked' if linked else 'Independent'
         label = mode.lower()
@@ -324,10 +338,12 @@ def main():
         descriptor = runtime / (label+'-venue-tickets-private.json')
         archive_path = runtime / (label+'-vr-venue-connections.zip')
         output = out / (label+'-vr-venue-tickets-ui.json')
-        descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'mode':mode}),encoding='utf-8')
+        descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'mode':mode,**room_endpoint_descriptor(preview)}),encoding='utf-8')
         with (out/(label+'-vr-venue-tickets-ui.log')).open('xb') as log:
             subprocess.run([node, str(ROOT/'tests/browser/check-vr-venue-tickets-native.cjs'), str(descriptor),
                             str(archive_path), str(output)], stdout=log, stderr=subprocess.STDOUT, check=True, timeout=65)
+        if args.check_room_endpoints:
+            check(read(output)['verifiedRoomEndpoints'] == 5, mode+' shipped room cards show five original UDP endpoints')
         files = []
         with zipfile.ZipFile(archive_path) as archive:
             manifest = json.loads(archive.read('venue.json'))
@@ -1129,11 +1145,14 @@ def main():
                 path.write_bytes(original)
                 paths[room] = str(path)
             descriptor, bundle = destination/'descriptor.json', destination/'vr-mr-venue-deployment.zip'
-            descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'mode':'Mixed','alignments':paths}),encoding='utf-8')
+            descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'mode':'Mixed','alignments':paths,
+                                              **room_endpoint_descriptor(preview)}),encoding='utf-8')
             with (out/'mixed-venue-browser.log').open('xb') as log:
                 subprocess.run([node, str(ROOT/'tests/browser/check-vr-venue-tickets-native.cjs'), str(descriptor), str(bundle),
                                 str(out/'mixed-venue-browser.json')], stdout=log, stderr=subprocess.STDOUT, check=True, timeout=65)
             check(read(out/'mixed-venue-browser.json')['complete'], 'shipped browser uploads only the two MR files and downloads the mixed ZIP')
+            if args.check_room_endpoints:
+                check(read(out/'mixed-venue-browser.json')['verifiedRoomEndpoints'] == 5, 'mixed shipped room cards show five original UDP endpoints')
             raw = bundle.read_bytes()
             live = {'topology': 'Independent', 'rooms': []}
             expected = {'venue.json'}
@@ -1577,6 +1596,10 @@ def main():
         if args.check_interrupted_replay:
             verify_interrupted_replay(crash, crash_client)
         check(all(x['state']=='Ended' for x in request('/api/sessions?includeEnded=true')),'no active management sessions')
+        if args.check_room_endpoints:
+            room_rows=request('/api/rooms/readiness')['rooms']
+            check(len(room_rows) == 5 and all(row['sessionId'] is None and 'endpoint' not in row for row in room_rows),
+                  'ended native sources leave no endpoint in the five current room rows')
         save('evidence.json',{'rounds':rounds,'scope':('Five Windows VR/MR Preparing endpoints and 25 signed files from the console mixed ZIP.' if args.mixed_venue_bundle_only else
             'Real Windows MR Preparing endpoints and 25 signed files per topology.' if args.mr_venue_bundle_only else
             'Three portable packages, five Independent rooms then Linked, 25 simultaneous same-PC Simulation clients per topology.'

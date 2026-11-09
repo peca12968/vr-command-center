@@ -135,6 +135,9 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         endpoint = request(endpoint_route, "GameServer", method="PUT", body=endpoint_draft)
         check(endpoint["version"] == 1 and endpoint["address"] == "127.0.0.1" and endpoint["port"] == 17777 and endpoint["sessionEnded"], "Owning source may preserve its declared endpoint as ended metadata without reopening gameplay")
         check(request(endpoint_route, "Room5") == endpoint and request(endpoint_route, "GameServer", method="PUT", body=endpoint_draft) == endpoint, "Endpoint reads and exact retries retain the source identity and original creation time")
+        rooms_after_end = request("/api/rooms/readiness", "Room5")["rooms"]
+        check(len(rooms_after_end) == 1 and rooms_after_end[0]["roomId"] == 5 and rooms_after_end[0]["sessionId"] is None
+              and "endpoint" not in rooms_after_end[0], "A historical endpoint never returns to the scoped room overview")
         request(endpoint_route, "GameServer", 409, "PUT", {**endpoint_draft, "port": 17778})
         request(endpoint_route, "GameServer", 400, "PUT", {**endpoint_draft, "address": "0.0.0.0"})
         check(request(endpoint_route, "Room5") == endpoint, "Conflicting redirect and invalid wildcard leave the accepted endpoint unchanged")

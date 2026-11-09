@@ -6,6 +6,7 @@ async function main() {
   const [descriptor, zip, output] = process.argv.slice(2);
   const config = JSON.parse(await fs.readFile(descriptor, 'utf8'));
   const mixed = config.mode === 'Mixed';
+  let verifiedRoomEndpoints;
   assert.match(config.base, /^http:\/\/127\.0\.0\.1:\d+$/);
   const browser = await chromium.launch({ headless: true });
   try {
@@ -15,6 +16,21 @@ async function main() {
     await page.goto(config.base + '/console/');
     await page.locator('#login-key').fill(config.masterKey);
     await page.locator('#login-form button').click();
+    if (config.expectedEndpoints) {
+      await page.setViewportSize({ width: 390, height: 844 });
+      for (const { roomId, address, port } of config.expectedEndpoints) {
+        const label = `UDP ${address}:${port}` + (config.mode === 'Linked' ? ' · 五房共用' : '')
+          + (address.startsWith('127.') ? ' · 僅同機' : '');
+        const card = page.locator(`[data-room-endpoint="${roomId}"]`);
+        await card.filter({ hasText: label }).waitFor();
+        assert.equal(await card.textContent(), label);
+        assert.ok(await card.evaluate(cell => cell.scrollWidth <= cell.clientWidth + 1));
+      }
+      verifiedRoomEndpoints = await page.locator('[data-room-endpoint]').count();
+      assert.equal(verifiedRoomEndpoints, 5);
+      await page.locator('#rooms').screenshot({ path: output.replace(/\.json$/, '-room-endpoints.png') });
+      await page.setViewportSize({ width: 1280, height: 900 });
+    }
     await page.locator('#vr-venue-read').click();
     const status = page.locator('#vr-venue-status');
     await status.filter({ hasText: mixed ? 'VR／MR 混合獨立場' : config.mode === 'Linked' ? '五房合併' : '五房獨立' }).waitFor();
@@ -47,6 +63,6 @@ async function main() {
   } finally {
     await browser.close();
   }
-  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode }, null, 2), { flag: 'wx' });
+  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, verifiedRoomEndpoints }, null, 2), { flag: 'wx' });
 }
 main().catch(error => { console.error(error.name + ': native VR venue tickets failed'); process.exitCode = 1; });

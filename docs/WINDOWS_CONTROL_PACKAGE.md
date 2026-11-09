@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-09 `windows-control-0.31.48-win-x64.zip` 在房卡顯示原遊戲伺服器公布的 UDP 端點。ZIP 為 52,735,775 bytes，SHA-256 `7bcbbb8e03cbe4735133567a1164bdea548872f37cae528ab3777b8cd9b1ff6f`。解壓核對 528 個清單檔案，含 508 個執行環境檔案，通過 106 項管理包檢查。 [房卡操作](EXTERNAL_CLIENTS.md#五房房卡的連線端點)
+
 2026-11-09 `windows-control-0.31.47-win-x64.zip` 加入混合 VR／MR 五房獨立部署。ZIP 為 52,734,795 bytes，SHA-256 `e44221aeaade39748aa9f53097dacb3c882e0c7e83bdf4a116744f9d83331f90`。解壓核對 528 個清單檔案，含 508 個執行環境檔案，通過 106 項管理包及 98 項原生伺服器混合部署檢查。 [混合配票](QUEST3.md#混合-vr-與-mr-五房部署包)
 
 2026-11-09 `windows-control-0.31.46-final-win-x64.zip` 加入五房逐房指定任務版本。ZIP 為 52,720,812 bytes，SHA-256 `8e02b23ad367fcfd8b5aa0c33b5c1beb0733094e330a690cd248ebbf6c2e7a8d`。解壓核對 528 個清單檔案，含 508 個執行環境檔案，通過 106 項管理包及 527 項 Chromium 檢查。早期同版候選保留，交付版的任務選單改為較寬的欄位。 [逐房操作](MISSION_VERSIONS.md#逐房指定任務版本)

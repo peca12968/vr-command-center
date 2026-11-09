@@ -100,7 +100,7 @@ with zipfile.ZipFile(sys.argv[1]) as outer:
     const mission = await api('/missions', 'POST', { name: 'VR 25 seats', briefing: '', durationSeconds: 600,
       environment: { mode: 'VR', weather: 'Clear', timeOfDay: 'Day', lightning: false },
       enemies: { count: 0, behavior: 'Hold', autoAttack: false }, props: [] }, 'Master', 201);
-    let previous;
+    let previous, previousOverview;
     for (const topology of ['Linked', 'Independent']) {
       const sessions = topology === 'Linked'
         ? [await api('/sessions', 'POST', { missionId: mission.id, mode: topology, roomIds }, 'Master', 201)]
@@ -121,6 +121,19 @@ with zipfile.ZipFile(sys.argv[1]) as outer:
         await publish(session, topology === 'Linked' ? '127.0.0.1' : '192.0.2.51', 7770 + session.roomIds[0]);
       }
       await login('Master');
+      const roomOverview = await api('/rooms/readiness');
+      const deskOverview = await api('/rooms/readiness', 'GET', undefined, 'Room1');
+      assert.deepEqual(deskOverview.rooms.map(row => row.roomId), [1]);
+      assert.deepEqual(deskOverview.rooms[0].endpoint, roomOverview.rooms[0].endpoint);
+      for (const row of roomOverview.rooms) {
+        const source = sessions.find(session => session.id === row.sessionId);
+        assert.deepEqual(row.endpoint, await api(`/sessions/${source.id}/connection-endpoint`));
+        const label = `UDP ${row.endpoint.address}:${row.endpoint.port}`
+          + (topology === 'Linked' ? ' · 五房共用 · 僅同機' : '');
+        await page.locator(`[data-room-endpoint="${row.roomId}"]`).filter({ hasText: label }).waitFor();
+      }
+      check(await page.locator('[data-room-endpoint]').count() === 5,
+        topology + ' room cards show the original published UDP settings with room-scoped API access');
       await load.click();
       await page.locator('#vr-venue-rooms li').last().filter({ hasText: '4/5 席' }).waitFor();
       check(await issue.isDisabled() && await status.textContent() === '請確認各房列出的條件，再重新讀取。',
@@ -198,11 +211,24 @@ with zipfile.ZipFile(sys.argv[1]) as outer:
         && after.seats.filter(seat => seat.status === 'matched').length === 24,
         topology + ' VR live check rejects the superseded original ticket after reassigning one seat');
       previous = ready;
+      previousOverview = roomOverview;
       for (const session of sessions) await end(session.id);
     }
     const one = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [1] }, 'Master', 201);
     const two = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [2] }, 'Master', 201);
     active.add(one.id); active.add(two.id);
+    const staleRoomRoute = route => route.fulfill({ json: previousOverview });
+    await page.route('**/api/rooms/readiness', staleRoomRoute);
+    try {
+      const received = page.waitForResponse('**/api/rooms/readiness');
+      await page.locator('#refresh').click();
+      await received;
+      await page.waitForFunction(() => {
+        const cells = [...document.querySelectorAll('[data-room-endpoint]')];
+        return cells.length === 2 && cells.every(cell => cell.textContent === '連線端點未確認');
+      });
+      check(true, 'Old endpoint responses cannot restore addresses to a replacement room');
+    } finally { await page.unroute('**/api/rooms/readiness', staleRoomRoute); }
     await publish(one, '192.0.2.51', 7777); await publish(two, '192.0.2.51', 7777);
     const repeated = await api(preview);
     check(!repeated.ready && repeated.rooms[1].problem === 'vr-venue-endpoint-reused'

@@ -1,4 +1,5 @@
 import { formatClock } from './mission-clock.js';
+import { validEndpoint } from './connection-ui.js';
 
 const labels = { NoRecording: '等待遊戲來源', WaitingFrame: '等待第一份快照', UnknownCaptureTime: '擷取時間未知', ClockSkew: '來源時鐘未同步',
   Stale: '快照已過期', Suspended: '管理連線中斷', PhasePending: '等待階段同步', Ended: '場次已結束', Fresh: '正在接收',
@@ -80,6 +81,17 @@ function roomReadinessRow(report, room, session) {
   if (row.sessionId !== room.sessionId || !Number.isSafeInteger(row.sessionSequence) || row.sessionSequence < session.sequence
     || !Number.isInteger(row.registered) || row.registered < 0 || row.registered > room.capacity || row.registered !== room.playerCount) return null;
   return row;
+}
+
+export function roomEndpointText(report, room, session) {
+  const row = roomReadinessRow(report, room, session);
+  if (!row) return '連線端點未確認';
+  const endpoint = row.endpoint;
+  if (endpoint == null) return '等待伺服器公布連線端點';
+  if (!validEndpoint(endpoint, session) || endpoint.sessionEnded) return '連線端點未確認';
+  return `UDP ${endpoint.address}:${endpoint.port}`
+    + (session.mode === 'Linked' ? ' · 五房共用' : '')
+    + (endpoint.address.startsWith('127.') ? ' · 僅同機' : '');
 }
 
 export function roomVenuePhaseView(report, room, session, elapsed, unavailable = false) {
@@ -172,6 +184,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
       cell.dataset.sourceState = view.source;
       cell.classList.toggle('ready-player', view.ready > 0);
       cell.classList.toggle('tracking-attention', !!view.attention);
+      cell.parentElement.querySelector('[data-room-endpoint]').textContent = roomEndpointText(failed ? null : report, room, session);
       const clock = roomMissionTimeView(failed ? null : report, room, session, elapsed);
       const clockCell = cell.parentElement.querySelector('[data-room-clock]');
       clockCell.textContent = clock.text;

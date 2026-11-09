@@ -270,6 +270,8 @@ function renderRooms() {
     if (room.sessionId) {
       const status = element('p', '正在更新入場狀態', 'hint room-readiness');
       status.dataset.roomReadiness = room.id;
+      const endpoint = element('p', '連線端點未確認', 'hint');
+      endpoint.dataset.roomEndpoint = room.id;
       const clock = element('p', '活動時間未確認', 'hint room-clock');
       clock.dataset.roomClock = room.id;
       const phase = element('p', '', 'hint room-venue-phase');
@@ -281,7 +283,7 @@ function renderRooms() {
       const enemies = element('p', '', 'hint');
       enemies.dataset.roomVenueEnemies = room.id;
       enemies.hidden = true;
-      card.append(status, clock, phase, environment, enemies);
+      card.append(status, endpoint, clock, phase, environment, enemies);
     }
     const button = element('button', room.sessionId ? '查看場次' : '選擇此房間', 'quiet small');
     button.type = 'button'; button.disabled = state.busy || !!state.pending;

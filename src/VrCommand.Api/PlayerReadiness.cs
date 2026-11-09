@@ -17,7 +17,8 @@ public record RoomReadiness(int RoomId, Guid? SessionId, long SessionSequence, i
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomVenuePhase? VenuePhase = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? VenueBeginReady = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomVenueEnvironment? VenueEnvironment = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomVenueEnemies? VenueEnemies = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomVenueEnemies? VenueEnemies = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ConnectionEndpoint? Endpoint = null);
 public record RoomMissionTime(string Phase, long ElapsedSeconds, long RemainingSeconds, int DurationSeconds, bool AutoEnd);
 public record RoomVenuePhase(ControlAction Action, long AppliedAtSequence, long? WorldSequence, bool ReadyToResume);
 public record RoomVenueEnvironment(Weather Weather, TimeOfDay TimeOfDay, bool Lightning, long AppliedAtSequence, long? WorldSequence);
@@ -59,7 +60,7 @@ public sealed partial class WorldRecordings
             foreach (var target in (begin ? plan.Begin : plan.Resume)
                 .Where(target => expected.Contains(new(target.SessionId, target.PhaseSinceSequence, target.SessionSequence))))
             {
-                var (report, _, phase, beginReady, _, _) = ReadReadinessSnapshot(target.SessionId, actor);
+                var (report, _, phase, beginReady, _, _, _) = ReadReadinessSnapshot(target.SessionId, actor);
                 if (begin ? beginReady == true : phase is { Action: ControlAction.Pause, WorldSequence: not null }
                     && phase.AppliedAtSequence == target.PhaseSinceSequence)
                     reports.Add((report, new(target.PhaseSinceSequence, report.SessionSequence, begin || report.MrResumeState == "Ready")));
@@ -85,18 +86,18 @@ public sealed partial class WorldRecordings
         var rooms = manager.Rooms(actor);
         // A linked game uses the same accepted snapshot for all of its visible rooms.
         var sessions = rooms.Select(room => room.SessionId).OfType<Guid>().Distinct()
-            .ToDictionary(id => id, id => ReadReadinessSnapshot(id, actor));
+            .ToDictionary(id => id, id => ReadReadinessSnapshot(id, actor, includeEndpoint: true));
         return rooms.Select(room =>
         {
             if (room.SessionId is not { } id) return new RoomReadiness(room.Id, null, 0, 0, 0, 0, "Idle", null);
-            var (report, clock, venuePhase, beginReady, venueEnvironment, venueEnemies) = sessions[id];
+            var (report, clock, venuePhase, beginReady, venueEnvironment, venueEnemies, endpoint) = sessions[id];
             var players = report.Players.Where(player => player.RoomId == room.Id).ToArray();
             return new RoomReadiness(room.Id, id, report.SessionSequence, players.Length,
                 players.Count(player => player.CanParticipate && player.RigKind == "Simulated"),
                 players.Count(player => player.CanParticipate && player.RigKind == "Tracked"),
                 report.SourceState, report.SourceAgeMilliseconds,
                 report.MrTrackingState is "Ready" or "WaitingPlayers"
-                    ? players.Count(player => player.State != "Eliminated") : null, clock, venuePhase, beginReady, venueEnvironment, venueEnemies);
+                    ? players.Count(player => player.State != "Eliminated") : null, clock, venuePhase, beginReady, venueEnvironment, venueEnemies, endpoint);
         }).ToArray();
     }
 
@@ -104,8 +105,8 @@ public sealed partial class WorldRecordings
     public SessionReadiness Readiness(Guid id, OperatorIdentity actor) => ReadReadinessSnapshot(id, actor).Report;
 
     private (SessionReadiness Report, RoomMissionTime? Clock, RoomVenuePhase? VenuePhase, bool? BeginReady,
-        RoomVenueEnvironment? VenueEnvironment, RoomVenueEnemies? VenueEnemies)
-        ReadReadinessSnapshot(Guid id, OperatorIdentity actor)
+        RoomVenueEnvironment? VenueEnvironment, RoomVenueEnemies? VenueEnemies, ConnectionEndpoint? Endpoint)
+        ReadReadinessSnapshot(Guid id, OperatorIdentity actor, bool includeEndpoint = false)
     {
         RequireReadinessActor(actor);
         lock (gate)
@@ -185,7 +186,8 @@ public sealed partial class WorldRecordings
                     && frame.Packet.frame.behavior == enemies.Behavior.ToString() && frame.Packet.frame.autoAttack == enemies.AutoAttack;
                 venueEnemies = new(enemies.Behavior, enemies.AutoAttack, enemySequence, applied ? report.WorldSequence : null);
             }
-            return (report, clock, venuePhase, beginReady, venueEnvironment, venueEnemies);
+            var endpoint = includeEndpoint && current.State != SessionState.Ended ? EndpointRow(current) : null;
+            return (report, clock, venuePhase, beginReady, venueEnvironment, venueEnemies, endpoint);
         }
     }
 }

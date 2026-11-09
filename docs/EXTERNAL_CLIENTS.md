@@ -78,6 +78,14 @@ GET `/api/sessions/{id}/connection-endpoint`僅Master／可讀此場的RoomContr
 
 Unity新增server-only `listenAddress`，真正傳給UnityTransport的第三個參數。省略／空值仍是原0.0.0.0，保留舊設定語意；新managed工具明確寫127.0.0.1或選定地址。此前程式硬寫0.0.0.0，不可用忽略新欄位的舊server冒充loopback綁定。NGO wire不變，但本輪Windows／Quest需使用同源新版，Prepare重用Scene／prefab ID。
 
+### 五房房卡的連線端點
+
+控制台 0.31.48 在「房間與場次」的房卡顯示該場伺服器公布的 IPv4 與 UDP 埠。合併場的五個房卡使用同一端點並標為「五房共用」。位址在 `127.0.0.0/8` 時會標明「僅同機」。獨立房間各顯示自己的端點，尚未公布時顯示等待。開場前可直接在總覽核對各房，並按「查看場次」進入原連線檔與配票流程。
+
+房卡核對目前房間、場次與遊戲來源。場次更換、舊來源回覆或讀取失敗會移除原端點。已公告的地址仍可能遇到防火牆或路由限制。跨機可達性以兩端 UDP 探測與正式玩家入場確認。 [兩端探測操作](#開場前核對兩端-udp)
+
+`GET /api/rooms/readiness` 的各房資料在已公告時附上 `endpoint`，內容與原場次的 `connection-endpoint` 一致。主控可讀五房，房控僅收到本房，已結束場次的端點仍留在歷史場次。
+
 ## 驗證範圍
 
 144真正EditMode、同源Windows／Quest、717規則、459 HTTP／47串流、67 Node／234 Chromium及6新Python檢查通過，完整結果見[PROGRESS](PROGRESS.md)。普通UI fixture只驗顯示，不能當可達性證明。
