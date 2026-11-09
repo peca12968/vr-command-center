@@ -335,6 +335,13 @@ internal static class VenuePhaseChecks
             check(retry.Duplicate && retry.Sessions.SequenceEqual(changed) && manager.GetWithPhase(vrId).VenueEnvironmentSequence
                 == changed.Single(row => row.SessionId == vrId).AppliedAtSequence && manager.GetWithPhase(mrId).VenueEnvironmentSequence is null
                 && !manager.Get(mrId).Environment.Lightning, "Climate receipt survives restart and leaves a later room override intact");
+            var climate = manager.ReadVenuePhase(master).LatestEnvironment!;
+            check(climate.RequestId == climateKey && climate.RecordedAtUtc != default && climate.Weather == Weather.Storm
+                && climate.TimeOfDay == TimeOfDay.Night && climate.Lightning && climate.Sessions.Length == 2
+                && climate.Sessions[0].RoomIds.SequenceEqual([1]) && climate.Sessions[1].RoomIds.SequenceEqual([2])
+                && climate.Sessions[0].State == VenueEnvironmentApplicationState.Current && climate.Sessions[1].State == VenueEnvironmentApplicationState.Superseded
+                && climate.Sessions.All(row => row.AppliedAtSequence == changed.Single(entry => entry.SessionId == row.SessionId).AppliedAtSequence),
+                "Restart restores the original climate batch, exact commands, settings, rooms and current override status");
 
             VenuePhaseFence[] EnemyFences() => manager.ReadVenuePhase(master).Enemies.Select(target =>
                 new VenuePhaseFence(target.SessionId, target.PhaseSinceSequence, EnemiesSinceSequence: target.EnemiesSinceSequence)).ToArray();
@@ -376,6 +383,19 @@ internal static class VenuePhaseChecks
                 && latest.Sessions[1].State == VenueEnemyApplicationState.Superseded && latest.Sessions[1].TargetCount == 2,
                 "Latest enemy batch is restored from the original ledger with the current override status");
             manager.Execute(mrId, new(Guid.NewGuid(), ControlAction.End), master);
+            var endedClimate = manager.ReadVenuePhase(master).LatestEnvironment!;
+            check(endedClimate.RequestId == climateKey && endedClimate.Sessions[1].SessionId == mrId
+                && endedClimate.Sessions[1].State == VenueEnvironmentApplicationState.Ended
+                && endedClimate.Sessions[1].AppliedAtSequence == changed.Single(row => row.SessionId == mrId).AppliedAtSequence,
+                "Ending an overridden room preserves the original climate target and sequence with terminal status");
+            var laterClimateKey = Guid.NewGuid();
+            var laterClimateTargets = manager.ReadVenuePhase(master).Environment.Select(row =>
+                new VenuePhaseFence(row.SessionId, row.PhaseSinceSequence, EnvironmentSinceSequence: row.EnvironmentSinceSequence)).ToArray();
+            manager.ExecuteVenuePhase(ControlAction.SetEnvironment, laterClimateTargets, laterClimateKey, master, climate: storm);
+            manager.ExecuteVenuePhase(ControlAction.SetEnvironment, climateTargets, climateKey, master, climate: storm);
+            check(manager.ReadVenuePhase(master).LatestEnvironment is { } laterClimate && laterClimate.RequestId == laterClimateKey
+                && laterClimate.Sessions.Single().SessionId == vrId && laterClimate.Sessions[0].AppliedAtSequence > endedClimate.Sessions[0].AppliedAtSequence,
+                "A new climate batch with identical settings replaces the previous batch even after an older request is retried");
             var endedEnemyBatch = manager.ReadVenuePhase(master).LatestEnemies!;
             check(endedEnemyBatch.RequestId == enemyKey && endedEnemyBatch.Sessions[1].State == VenueEnemyApplicationState.Ended
                 && endedEnemyBatch.Sessions[1].SessionId == mrId && endedEnemyBatch.Sessions[1].AppliedAtSequence == latest.Sessions[1].AppliedAtSequence,

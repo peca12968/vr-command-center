@@ -78,6 +78,7 @@ def main():
     p.add_argument('--check-venue-replay-ui', action='store_true', help='Open the original native archives through the shipped console')
     p.add_argument('--check-venue-history-ui', action='store_true', help='Reopen and download the earlier batch after the newer native round')
     p.add_argument('--check-venue-environment', action='store_true', help='Confirm two batch environment changes in each native topology')
+    p.add_argument('--check-venue-environment-ui', action='store_true', help='Open the original environment batch witness in the packaged console')
     p.add_argument('--check-venue-enemies', action='store_true', help='Use venue enemy policy to enable and stop native attacks')
     p.add_argument('--check-venue-enemy-ui', action='store_true', help='Verify the original enemy batch and open its live witness in the packaged console')
     p.add_argument('--check-layout-preview',action='store_true',help='Load a saved barricade opening and compare its preview with native world geometry')
@@ -154,6 +155,8 @@ def main():
         p.error('--check-venue-history-ui requires --check-venue-replay-ui and --check-venue-reports')
     if args.check_venue_environment and not args.player_package:
         p.error('--check-venue-environment requires the three-package check')
+    if args.check_venue_environment_ui and not args.check_venue_environment:
+        p.error('--check-venue-environment-ui requires --check-venue-environment')
     if args.check_venue_enemies and not args.check_room_combat:
         p.error('--check-venue-enemies requires --check-room-combat')
     if args.check_venue_enemy_ui and not args.check_venue_enemies:
@@ -983,20 +986,26 @@ def main():
             mode = 'linked' if len(entries) == 1 else 'independent'
             save(mode+'-venue-enemies.json', venue_changes)
             if args.check_venue_enemy_ui:
-                batch = request('/api/venue/phase')['latestEnemies']
-                check(batch['requestId']==venue_changes[-1]['receipt']['requestId']
-                      and {row['sessionId']:row['appliedAtSequence'] for row in batch['sessions']}==disabled,
-                      mode+' latest enemy batch keeps the original accepted revisions')
-                node = shutil.which('node')
-                if not node: raise RuntimeError('Node is required for the packaged enemy batch check')
-                destination = out/(mode+'-venue-enemy-ui'); destination.mkdir()
-                descriptor = runtime/(mode+'-venue-enemy-private.json')
-                descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'batch':batch}),encoding='utf-8')
-                subprocess.run([node,str(ROOT/'tests/browser/check-venue-enemy-native.cjs'),str(descriptor),str(destination)],
-                               cwd=ROOT/'tests/browser',check=True,timeout=65)
-                observed = read(destination/'checks.json')
-                check(observed['complete'] and observed['requestId']==batch['requestId'] and len(observed['rooms'])==5,
-                      mode+' packaged console confirms every original room and opens the native room 4 witness')
+                verify_setting_batch_ui(mode, 'enemy', 'latestEnemies', venue_changes[-1]['receipt'])
+
+    def verify_setting_batch_ui(mode, kind, key, receipt):
+        batch = request('/api/venue/phase')[key]
+        revisions = {row['sessionId']: row['appliedAtSequence'] for row in receipt['sessions']}
+        check(batch['requestId']==receipt['requestId']
+              and {row['sessionId']:row['appliedAtSequence'] for row in batch['sessions']}==revisions,
+              f'{mode} latest {kind} batch keeps the original accepted revisions')
+        node = shutil.which('node')
+        if not node: raise RuntimeError(f'Node is required for the packaged {kind} batch check')
+        destination = out/f'{mode}-venue-{kind}-ui'; destination.mkdir()
+        with tempfile.TemporaryDirectory(prefix='setting-ui-', dir=runtime) as directory:
+            descriptor = Path(directory)/'fixture.json'
+            descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'kind':kind,'batch':batch}),encoding='utf-8')
+            subprocess.run([node,str(ROOT/'tests/browser/check-venue-setting-native.cjs'),str(descriptor),str(destination)],
+                           cwd=ROOT/'tests/browser',check=True,timeout=65)
+        observed = read(destination/'checks.json')
+        check(observed['complete'] and observed['requestId']==batch['requestId'] and len(observed['rooms'])==5,
+              f'{mode} packaged console confirms every original {kind} room and opens the native room 4 witness')
+
     def finish(entry):
         entry['process'].wait(timeout=80);w=entry['witness'];w.wait();w.close();entry['witness']=None
         report=read(entry['reportPath']);check(entry['process'].returncode==0 and report['complete'] and report['cleanupCompleted'] and report['childExited'] and report['playerResultsAcknowledged'] is None,entry['label']+' dual seal / retained36 / original process terminal')
@@ -1818,6 +1827,8 @@ def main():
                   f'{mode} {weather} original accepted frames record all three values and their receipt sequence')
             evidence.append({'receipt': receipt, 'rooms': confirmed, 'frames': frames})
         save(mode+'-venue-environment.json', evidence)
+        if args.check_venue_environment_ui:
+            verify_setting_batch_ui(mode, 'environment', 'latestEnvironment', evidence[-1]['receipt'])
 
     def verify_room_clocks(entries, linked):
         mode = 'linked' if linked else 'independent'
@@ -2616,6 +2627,7 @@ def main():
             'openxrReconnect':args.check_openxr_reconnect,
             'openxrRevocation':args.check_openxr_revocation,
             'venueEnvironment':args.check_venue_environment,
+            'venueEnvironmentUi':args.check_venue_environment_ui,
             'venueEnemies':args.check_venue_enemies,
             'hardwareFeedback':args.check_hardware_feedback or openxr_hardware,
             'hardwareMockPackage':hardware_manifest['toolVersion'] if args.hardware_simulator_package else None,

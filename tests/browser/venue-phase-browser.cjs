@@ -312,8 +312,23 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       'The console confirms the target rooms and applies the three climate values in one request');
     const roomEnvironment = room => page.locator(`[data-room-venue-environment="${room}"]`);
     const environmentFrame = room => page.locator(`[data-room-environment-frame="${room}"]`);
+    const environmentBatch = page.locator('#venue-environment-batch');
+    const climateRoom = (room, state) => environmentBatch.locator(`[data-environment-batch-room="${room}"][data-environment-batch-state="${state}"]`);
+    const climateReplay = (room, state) => climateRoom(room, state).getByRole('button', { name: '檢視環境快照' });
+    const durableBatch = (await api('/venue/phase')).latestEnvironment;
+    check(durableBatch?.requestId === climateReceipt.requestId && durableBatch.weather === 'Storm'
+      && durableBatch.timeOfDay === 'Night' && durableBatch.lightning === true
+      && durableBatch.sessions.every((row, index) => row.sessionId === preparing[index] && row.roomIds.join() === String(index + 1)
+        && row.state === 'Current' && row.appliedAtSequence === climateReceipt.sessions.find(target => target.sessionId === row.sessionId).appliedAtSequence),
+      'The phase plan exposes the original accepted environment batch, command sequences and room scopes');
     await roomEnvironment(1).filter({ hasText: '全館環境待確認' }).waitFor();
     check(await environmentFrame(1).isHidden(), 'An accepted venue command does not offer a replay before its matching game frame');
+    await climateRoom(1, 'Waiting').waitFor();
+    check(await climateReplay(1, 'Waiting').count() === 0 && await environmentBatch.getByText('0 / 2 房已確認', { exact: false }).isVisible(),
+      'Accepted environment commands are visible before any matching native frame without approving a replay');
+    await publishUntil(first, changedClimate[0], () => climateReplay(1, 'Applied').isVisible());
+    check(await climateRoom(2, 'Waiting').isVisible() && await environmentBatch.getByText('1 / 2 房已確認', { exact: false }).isVisible(),
+      'The environment batch confirms each room only after its own source applies the command');
     await publishUntil(first, changedClimate[0], () => {
       second(changedClimate[1]);
       return Promise.all([1, 2].map(room => roomEnvironment(room).filter({ hasText: '全館環境已套用' }).isVisible())).then(rows => rows.every(Boolean));
@@ -331,7 +346,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       assert(frame > 0);
       return frame;
     }
-    const original = await openSetting('environment', 1, preparing[0]);
+    const original = await openSetting('environment', 1, preparing[0], climateReplay(1, 'Applied'));
     await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${original} 格的環境快照` }).waitFor();
     const durableClimate = await api(`/sessions/${preparing[0]}/world/frames/${original}`);
     check(durableClimate.packet.observedSequence >= climateReceipt.sessions.find(row => row.sessionId === preparing[0]).appliedAtSequence
@@ -343,6 +358,9 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const override = await updateRoom2({ ...changedClimate[1].environment, weather: 'Rain', lightning: false });
     await page.locator('#refresh').click();
     await roomEnvironment(2).waitFor({ state: 'hidden' });
+    await climateRoom(2, 'Superseded').waitFor();
+    check(await climateRoom(2, 'Superseded').getByText(`原命令 ${durableBatch.sessions[1].appliedAtSequence}`, { exact: false }).isVisible()
+      && await climateReplay(2, 'Superseded').count() === 0, 'A later local environment change preserves the original batch row without its live shortcut');
     const localEnvironment = page.locator('[data-room-environment="2"]');
     await localEnvironment.filter({ hasText: '場次環境待確認' }).waitFor();
     second(changedClimate[1]);
@@ -375,6 +393,9 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await roomEnvironment(1).filter({ hasText: '快照已過期' }).waitFor();
     check(await roomEnvironment(1).filter({ hasText: '全館環境待確認' }).isVisible() && await environmentFrame(1).isHidden(),
       'A room-specific override clears its marker and the other room expires independently');
+    await climateRoom(1, 'Waiting').waitFor();
+    check(await climateRoom(2, 'Superseded').isVisible() && await environmentBatch.getByRole('button').count() === 0,
+      'Expired environment evidence removes its shortcut while the original superseded room remains visible');
 
     const policy = { behavior: 'Patrol', autoAttack: true };
     const enemyTargets = (await api('/venue/phase')).enemies;
@@ -568,6 +589,10 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     check(await enemyBatch.getByRole('button').count() === 0
       && await batchRoom(1, 'Ended').filter({ hasText: `原命令 ${batch.sessions[0].appliedAtSequence}` }).isVisible(),
       'Relogin restores the original ended enemy batch even after the room is reused');
+    await climateRoom(1, 'Ended').waitFor(); await climateRoom(2, 'Ended').waitFor();
+    check(await environmentBatch.getByRole('button').count() === 0
+      && await climateRoom(1, 'Ended').filter({ hasText: `原命令 ${durableBatch.sessions[0].appliedAtSequence}` }).isVisible(),
+      'After relogin and room reuse the environment batch still refers only to its original ended sessions');
     await archive(ending.id).last().getByRole('button', { name: '查看場次' }).click();
     await page.waitForFunction(id => document.getElementById('session-select').value === id, ending.id);
     check(await page.locator('#include-ended').isChecked() && (await api(`/sessions/${replacement.id}`)).state === 'Preparing',
@@ -749,7 +774,7 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
     check(!lateDownload && await fieldButton.isDisabled(), 'A held field ZIP cannot download after changing to a different batch');
     await login('Room2');
     check(await page.locator('#venue-closure').isHidden() && await fieldButton.isHidden() && await picker.locator('option').count() === 1
-      && await enemyBatch.isHidden(), 'Switching to room control clears Master-only history and enemy batches');
+      && await enemyBatch.isHidden() && await environmentBatch.isHidden(), 'Switching to room control clears Master-only history and setting batches');
   } finally {
     await page.unroute(route); await page.close();
     for (const id of active) await end(id);

@@ -466,31 +466,38 @@ function venueClimateText({ weather, timeOfDay, lightning }) {
 function venueEnemyText({ behavior, autoAttack }) {
   return `${behaviorNames[behavior]} · ${autoAttack ? '自動攻擊開啟' : '自動攻擊關閉'}`;
 }
-function enemyBatchRoom(batch, session, room) {
+function settingBatchRoom(kind, batch, session, room) {
   if (session.state === 'Ended') return { status: 'Ended', text: '原場次已結束' };
-  const current = roomReadiness.settingStatus(room, 'enemies', session.sessionId);
+  const enemy = kind === 'enemies', current = roomReadiness.settingStatus(room, kind, session.sessionId);
   if (session.state === 'Superseded' || current?.setting.appliedAtSequence > session.appliedAtSequence)
-    return { status: 'Superseded', text: '已被較新的敵軍設定覆寫' };
+    return { status: 'Superseded', text: enemy ? '已被較新的敵軍設定覆寫' : '已被較新的環境設定覆寫' };
   if (!current?.target || !current.venue || current.setting.appliedAtSequence !== session.appliedAtSequence
-    || current.setting.behavior !== batch.behavior || current.setting.autoAttack !== batch.autoAttack
-    || current.targetCount !== session.targetCount) return { status: 'Waiting', text: '遊戲端待確認' };
-  return { status: 'Applied', text: `遊戲端已套用 · 在場 ${current.population.present} 名、存活 ${current.population.alive} 名`,
+    || (enemy ? current.setting.behavior !== batch.behavior || current.setting.autoAttack !== batch.autoAttack
+      || current.targetCount !== session.targetCount : current.setting.weather !== batch.weather
+      || current.setting.timeOfDay !== batch.timeOfDay || current.setting.lightning !== batch.lightning))
+    return { status: 'Waiting', text: '遊戲端待確認' };
+  const text = enemy ? `遊戲端已套用 · 在場 ${current.population.present} 名、存活 ${current.population.alive} 名` : '遊戲端已套用';
+  return { status: 'Applied', text,
     target: current.target };
 }
-function renderVenueEnemyBatch(locked) {
-  const panel = $('venue-enemy-batch'), list = $('venue-enemy-batch-rooms'), summary = $('venue-enemy-batch-summary');
-  const batch = master() ? state.venue?.latestEnemies : null;
-  const valid = typeof batch?.requestId === 'string' && Object.hasOwn(behaviorNames, batch.behavior)
-    && typeof batch.autoAttack === 'boolean' && Number.isFinite(Date.parse(batch.recordedAtUtc))
+function renderVenueSettingBatch(locked, kind) {
+  const enemy = kind === 'enemies', name = enemy ? 'enemy' : 'environment';
+  const id = 'venue-' + name + '-batch', key = enemy ? 'latestEnemies' : 'latestEnvironment';
+  const panel = $(id), list = $(id + '-rooms'), summary = $(id + '-summary');
+  const batch = master() ? state.venue?.[key] : null;
+  const valid = typeof batch?.requestId === 'string' && Number.isFinite(Date.parse(batch.recordedAtUtc))
+    && (enemy ? Object.hasOwn(behaviorNames, batch.behavior) && typeof batch.autoAttack === 'boolean'
+      : Object.hasOwn(weatherNames, batch.weather) && ['Day', 'Night'].includes(batch.timeOfDay) && typeof batch.lightning === 'boolean')
     && Array.isArray(batch.sessions) && batch.sessions.length > 0 && batch.sessions.length <= 5
     && batch.sessions.every(session => typeof session?.sessionId === 'string' && ['Current', 'Superseded', 'Ended'].includes(session.state)
-      && Number.isSafeInteger(session.appliedAtSequence) && session.appliedAtSequence > 0 && Number.isInteger(session.targetCount)
-      && session.targetCount >= 0 && session.targetCount <= 100 && Array.isArray(session.roomIds) && session.roomIds.length > 0
+      && Number.isSafeInteger(session.appliedAtSequence) && session.appliedAtSequence > 0
+      && (!enemy || (Number.isInteger(session.targetCount) && session.targetCount >= 0 && session.targetCount <= 100))
+      && Array.isArray(session.roomIds) && session.roomIds.length > 0
       && session.roomIds.length <= 5 && session.roomIds.every(room => Number.isInteger(room) && room >= 1 && room <= 5));
-  const rows = valid ? batch.sessions.flatMap(session => session.roomIds.map(room => ({ room, session, ...enemyBatchRoom(batch, session, room) })))
+  const rows = valid ? batch.sessions.flatMap(session => session.roomIds.map(room => ({ room, session, ...settingBatchRoom(kind, batch, session, room) })))
     .sort((a, b) => a.room - b.room) : [];
   panel.hidden = !rows.length || new Set(rows.map(row => row.room)).size !== rows.length;
-  const text = panel.hidden ? '' : `${venueEnemyText(batch)} · ${rows.filter(row => row.status === 'Applied').length} / ${rows.length} 房已確認`;
+  const text = panel.hidden ? '' : `${enemy ? venueEnemyText(batch) : venueClimateText(batch)} · ${rows.filter(row => row.status === 'Applied').length} / ${rows.length} 房已確認`;
   if (summary.textContent !== text) summary.textContent = text;
   const signature = panel.hidden ? '' : JSON.stringify([batch.requestId, locked, rows.map(({ room, session, status, text }) =>
     [room, session.sessionId, session.appliedAtSequence, session.targetCount, status, text])]);
@@ -498,18 +505,19 @@ function renderVenueEnemyBatch(locked) {
   list.dataset.rows = signature;
   list.replaceChildren(...(panel.hidden ? [] : rows.map(({ room, session, status, text, target }) => {
     const item = element('li');
-    item.dataset.enemyBatchRoom = room;
-    item.dataset.enemyBatchState = status;
-    item.append(element('span', `房間 ${room} · 原命令 ${session.appliedAtSequence} · 全場目標 ${session.targetCount} 名 · ${text}`));
+    item.setAttribute(`data-${name}-batch-room`, room);
+    item.setAttribute(`data-${name}-batch-state`, status);
+    const count = enemy ? ` · 全場目標 ${session.targetCount} 名` : '';
+    item.append(element('span', `房間 ${room} · 原命令 ${session.appliedAtSequence}${count} · ${text}`));
     if (target) {
-      const button = element('button', '檢視敵軍快照', 'quiet small');
+      const button = element('button', enemy ? '檢視敵軍快照' : '檢視環境快照', 'quiet small');
       button.type = 'button'; button.disabled = locked;
       button.addEventListener('click', () => {
-        const current = state.venue?.latestEnemies;
+        const current = state.venue?.[key];
         if (!master() || state.busy || state.pending || current?.requestId !== batch.requestId) return;
         const latest = current.sessions?.find(row => row.sessionId === session.sessionId && row.roomIds?.includes(room));
         if (latest?.appliedAtSequence !== session.appliedAtSequence) return;
-        const original = enemyBatchRoom(current, latest, room).target;
+        const original = settingBatchRoom(kind, current, latest, room).target;
         if (original) tab('world', original);
       });
       item.append(button);
@@ -563,7 +571,8 @@ function applyVenuePermissions() {
     const targetText = targets.length ? `適用房間 ${venueRoomText(targets)} · ${targets.length} 個執行中場次。` : '等待執行中場次。';
     if ($(panel + '-targets').textContent !== targetText) $(panel + '-targets').textContent = targetText;
   }
-  renderVenueEnemyBatch(locked);
+  renderVenueSettingBatch(locked, 'environment');
+  renderVenueSettingBatch(locked, 'enemies');
   const describe = targets => targets.length ? '房間 ' + venueRoomText(targets) : '無';
   $('venue-end-targets').hidden = !end.length;
   $('venue-end-targets').textContent = end.length ? `可結束 ${describe(end)} · 包含準備、執行與暫停的場次。` : '';

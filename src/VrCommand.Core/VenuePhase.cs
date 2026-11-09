@@ -10,10 +10,15 @@ public record VenuePhaseTarget(Guid SessionId, long PhaseSinceSequence, int[] Ro
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? EnemiesSinceSequence = null);
 public record VenuePhasePlan(VenuePhaseTarget[] Pause, VenuePhaseTarget[] Resume, VenuePhaseTarget[] Begin, VenuePhaseTarget[] End,
     VenuePhaseTarget[] Environment, VenuePhaseTarget[] Enemies,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueEnemyBatch? LatestEnemies = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueEnemyBatch? LatestEnemies = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueEnvironmentBatch? LatestEnvironment = null);
 public enum VenueEnemyApplicationState { Current, Superseded, Ended }
 public record VenueEnemyBatchSession(Guid SessionId, int[] RoomIds, long AppliedAtSequence, int TargetCount, VenueEnemyApplicationState State);
 public record VenueEnemyBatch(Guid RequestId, DateTimeOffset RecordedAtUtc, EnemyBehavior Behavior, bool AutoAttack, VenueEnemyBatchSession[] Sessions);
+public enum VenueEnvironmentApplicationState { Current, Superseded, Ended }
+public record VenueEnvironmentBatchSession(Guid SessionId, int[] RoomIds, long AppliedAtSequence, VenueEnvironmentApplicationState State);
+public record VenueEnvironmentBatch(Guid RequestId, DateTimeOffset RecordedAtUtc, Weather Weather, TimeOfDay TimeOfDay, bool Lightning,
+    VenueEnvironmentBatchSession[] Sessions);
 public record VenueClimate(Weather? Weather, TimeOfDay? TimeOfDay, bool? Lightning);
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public record VenueEnemyPolicy(EnemyBehavior? Behavior, bool? AutoAttack);
@@ -46,6 +51,7 @@ public sealed partial class SessionManager
     private readonly Dictionary<Guid, List<SessionEvent>> venueTransitions = [];
     private readonly SortedSet<(DateTimeOffset RecordedAtUtc, Guid Id)> venueEnds = [];
     private (DateTimeOffset RecordedAtUtc, Guid Id)? latestVenueEnemies;
+    private (DateTimeOffset RecordedAtUtc, Guid Id)? latestVenueEnvironment;
 
     public VenuePhasePlan ReadVenuePhase(OperatorIdentity actor)
     {
@@ -56,7 +62,22 @@ public sealed partial class SessionManager
             Targets(ControlAction.End).Select(history => ToTarget(history)).ToArray(),
             Targets(ControlAction.SetEnvironment).Select(history => ToTarget(history, environmentSinceSequence: history.EnvironmentSinceSequence)).ToArray(),
             Targets(ControlAction.SetEnemies).Select(history => ToTarget(history, enemiesSinceSequence: history.EnemiesSinceSequence)).ToArray(),
-            LatestVenueEnemyBatch());
+            LatestVenueEnemyBatch(), LatestVenueEnvironmentBatch());
+    }
+
+    private VenueEnvironmentBatch? LatestVenueEnvironmentBatch()
+    {
+        if (latestVenueEnvironment is not { } batch) return null;
+        var entries = venueTransitions[batch.Id];
+        var climate = entries[0].Read<ControlCommand>().Environment!;
+        var targets = entries.Select(entry =>
+        {
+            var history = Find(entry.SessionId);
+            var state = history.View.State == SessionState.Ended ? VenueEnvironmentApplicationState.Ended
+                : history.EnvironmentSinceSequence == entry.Sequence ? VenueEnvironmentApplicationState.Current : VenueEnvironmentApplicationState.Superseded;
+            return new VenueEnvironmentBatchSession(entry.SessionId, [.. history.View.RoomIds], entry.Sequence, state);
+        }).OrderBy(target => target.RoomIds[0]).ToArray();
+        return new(batch.Id, batch.RecordedAtUtc, climate.Weather, climate.TimeOfDay, climate.Lightning, targets);
     }
 
     private VenueEnemyBatch? LatestVenueEnemyBatch()
@@ -285,6 +306,8 @@ public sealed partial class SessionManager
         if (action == ControlAction.End) venueEnds.Add(key);
         if (action == ControlAction.SetEnemies && (latestVenueEnemies is not { } current || key.CompareTo(current) > 0))
             latestVenueEnemies = key;
+        if (action == ControlAction.SetEnvironment && (latestVenueEnvironment is not { } climate || key.CompareTo(climate) > 0))
+            latestVenueEnvironment = key;
     }
 
     private void RestoreVenueEvent(SessionEvent[] events, SessionEvent entry, long phaseSince, long environmentSince, long enemiesSince, ControlCommand command)
