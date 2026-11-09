@@ -79,6 +79,7 @@ def main():
     p.add_argument('--check-venue-history-ui', action='store_true', help='Reopen and download the earlier batch after the newer native round')
     p.add_argument('--check-venue-environment', action='store_true', help='Confirm two batch environment changes in each native topology')
     p.add_argument('--check-venue-enemies', action='store_true', help='Use venue enemy policy to enable and stop native attacks')
+    p.add_argument('--check-venue-enemy-ui', action='store_true', help='Verify the original enemy batch and open its live witness in the packaged console')
     p.add_argument('--check-layout-preview',action='store_true',help='Load a saved barricade opening and compare its preview with native world geometry')
     p.add_argument('--check-room-reports',action='store_true',help='Verify scoped Linked CSVs and the ZIP against the full sealed native report')
     p.add_argument('--check-room-combat',action='store_true',help='Require actual enemy damage on every original admission and reconcile each replay frame and final report')
@@ -155,6 +156,8 @@ def main():
         p.error('--check-venue-environment requires the three-package check')
     if args.check_venue_enemies and not args.check_room_combat:
         p.error('--check-venue-enemies requires --check-room-combat')
+    if args.check_venue_enemy_ui and not args.check_venue_enemies:
+        p.error('--check-venue-enemy-ui requires --check-venue-enemies')
     if args.check_room_reports and not args.player_package:p.error('--check-room-reports requires the three-package check')
     if args.check_room_combat and not args.check_room_reports:p.error('--check-room-combat requires --check-room-reports')
     if args.check_hardware_feedback and not args.check_room_combat:p.error('--check-hardware-feedback requires --check-room-combat')
@@ -979,6 +982,21 @@ def main():
                 stopped_attack(entry, owners, enabled, live, entry_feeds, disabled[entry['sessionId']], 'Advance')
             mode = 'linked' if len(entries) == 1 else 'independent'
             save(mode+'-venue-enemies.json', venue_changes)
+            if args.check_venue_enemy_ui:
+                batch = request('/api/venue/phase')['latestEnemies']
+                check(batch['requestId']==venue_changes[-1]['receipt']['requestId']
+                      and {row['sessionId']:row['appliedAtSequence'] for row in batch['sessions']}==disabled,
+                      mode+' latest enemy batch keeps the original accepted revisions')
+                node = shutil.which('node')
+                if not node: raise RuntimeError('Node is required for the packaged enemy batch check')
+                destination = out/(mode+'-venue-enemy-ui'); destination.mkdir()
+                descriptor = runtime/(mode+'-venue-enemy-private.json')
+                descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'batch':batch}),encoding='utf-8')
+                subprocess.run([node,str(ROOT/'tests/browser/check-venue-enemy-native.cjs'),str(descriptor),str(destination)],
+                               cwd=ROOT/'tests/browser',check=True,timeout=65)
+                observed = read(destination/'checks.json')
+                check(observed['complete'] and observed['requestId']==batch['requestId'] and len(observed['rooms'])==5,
+                      mode+' packaged console confirms every original room and opens the native room 4 witness')
     def finish(entry):
         entry['process'].wait(timeout=80);w=entry['witness'];w.wait();w.close();entry['witness']=None
         report=read(entry['reportPath']);check(entry['process'].returncode==0 and report['complete'] and report['cleanupCompleted'] and report['childExited'] and report['playerResultsAcknowledged'] is None,entry['label']+' dual seal / retained36 / original process terminal')

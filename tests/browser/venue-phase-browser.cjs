@@ -319,9 +319,9 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       return Promise.all([1, 2].map(room => roomEnvironment(room).filter({ hasText: '全館環境已套用' }).isVisible())).then(rows => rows.every(Boolean));
     });
     check(true, 'Both rooms confirm their own matching environment frames');
-    async function openSetting(kind, room, id) {
+    async function openSetting(kind, room, id, button = page.locator(`[data-room-${kind}-frame="${room}"]`)) {
       const watched = page.waitForResponse(response => new URL(response.url()).pathname === `/api/sessions/${id}/world/watch`);
-      await page.locator(`[data-room-${kind}-frame="${room}"]`).click();
+      await button.click();
       const response = await watched;
       assert.equal(response.status(), 200);
       const query = new URL(response.url()).searchParams;
@@ -408,15 +408,32 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       'The console applies behavior and attack across rooms while preserving the original counts');
     const roomEnemies = room => page.locator(`[data-room-venue-enemies="${room}"]`);
     const enemyFrame = room => page.locator(`[data-room-enemies-frame="${room}"]`);
+    const enemyBatch = page.locator('#venue-enemy-batch');
+    const batchRoom = (room, status) => page.locator(`[data-enemy-batch-room="${room}"][data-enemy-batch-state="${status}"]`);
+    const batchReplay = (room, status) => batchRoom(room, status).getByRole('button', { name: '檢視敵軍快照' });
+    const batch = (await api('/venue/phase')).latestEnemies;
+    assert.equal(batch.requestId, enemyReceipt.requestId);
+    assert.deepEqual(batch.sessions.map(row => [row.sessionId, row.roomIds, row.appliedAtSequence, row.targetCount]),
+      preparing.map((id, index) => [id, [index + 1], enemyReceipt.sessions.find(row => row.sessionId === id).appliedAtSequence, 0]));
     await roomEnemies(1).filter({ hasText: '全館敵軍策略待確認' }).waitFor();
+    await batchRoom(1, 'Waiting').waitFor(); await batchRoom(2, 'Waiting').waitFor();
+    check(await batchReplay(1, 'Waiting').count() === 0 && await enemyBatch.locator('p').filter({ hasText: '0 / 2 房已確認' }).isVisible(),
+      'Latest strategy receipt retains its original targets and waits for game evidence');
+    const enemyViewport = page.viewportSize();
+    await page.setViewportSize({ width: 390, height: 900 });
+    check(await enemyBatch.evaluate(panel => panel.scrollWidth <= panel.clientWidth), 'The latest enemy batch fits a narrow console');
+    await page.setViewportSize(enemyViewport);
     check(await enemyFrame(1).isHidden() && !(await roomEnemies(1).innerText()).includes('本房在場'),
       'A strategy receipt shows the configured target but withholds the population and replay until a fresh game frame');
+    await publishUntil(first, changedEnemies[0], () => batchRoom(1, 'Applied').isVisible());
+    check(await batchRoom(2, 'Waiting').isVisible() && await enemyBatch.locator('p').filter({ hasText: '1 / 2 房已確認' }).isVisible(),
+      'Latest enemy batch counts only the room whose original source has confirmed');
     await publishUntil(first, changedEnemies[0], () => {
       second(changedEnemies[1]);
       return Promise.all([1, 2].map(room => roomEnemies(room).filter({ hasText: '全館敵軍策略已套用' }).isVisible())).then(rows => rows.every(Boolean));
     });
     check(true, 'Enemy policy is confirmed only by both original game sources');
-    const patrol = await openSetting('enemies', 1, preparing[0]);
+    const patrol = await openSetting('enemies', 1, preparing[0], batchReplay(1, 'Applied'));
     await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${patrol} 格的敵軍快照` }).waitFor();
     const patrolFrame = await api(`/sessions/${preparing[0]}/world/frames/${patrol}`);
     check(patrolFrame.packet.observedSequence >= enemyReceipt.sessions.find(row => row.sessionId === preparing[0]).appliedAtSequence
@@ -439,6 +456,9 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const localEnemies = page.locator('[data-room-enemies="2"]');
     await localEnemies.filter({ hasText: '場次敵軍策略待確認' }).waitFor();
     await roomEnemies(1).waitFor();
+    await batchRoom(2, 'Superseded').waitFor();
+    check(await batchReplay(2, 'Superseded').count() === 0 && await batchRoom(2, 'Superseded').filter({ hasText: '全場目標 0 名' }).isVisible(),
+      'A room override retains its old command and count while removing the batch replay shortcut');
     check(await roomEnemies(2).isHidden() && await enemyFrame(2).isHidden(),
       'The single-room override clears only its own venue marker and withholds its old frame');
     const npc = { id: randomUUID(), roomId: 2, health: 100, feet: { x: -14, y: 0, z: 3 } };
@@ -473,6 +493,9 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await localEnemies.filter({ hasText: '快照已過期' }).waitFor();
     check(await enemyFrame(2).isHidden() && !(await localEnemies.innerText()).includes('本房在場'),
       'Expired enemy snapshots clear the actual population and shortcut together');
+    await batchRoom(1, 'Waiting').waitFor();
+    check(await batchReplay(1, 'Waiting').count() === 0 && await batchRoom(2, 'Superseded').isVisible(),
+      'A stale source loses batch confirmation without changing the other room override');
 
     const extra = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [3] }, 'Master', 201);
     active.add(extra.id);
@@ -541,6 +564,10 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     active.add(replacement.id);
     await login('Master');
     await archive(ending.id).nth(3).filter({ hasText: '已封存' }).waitFor();
+    await batchRoom(1, 'Ended').waitFor(); await batchRoom(2, 'Ended').waitFor();
+    check(await enemyBatch.getByRole('button').count() === 0
+      && await batchRoom(1, 'Ended').filter({ hasText: `原命令 ${batch.sessions[0].appliedAtSequence}` }).isVisible(),
+      'Relogin restores the original ended enemy batch even after the room is reused');
     await archive(ending.id).last().getByRole('button', { name: '查看場次' }).click();
     await page.waitForFunction(id => document.getElementById('session-select').value === id, ending.id);
     check(await page.locator('#include-ended').isChecked() && (await api(`/sessions/${replacement.id}`)).state === 'Preparing',
@@ -721,8 +748,8 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
     }
     check(!lateDownload && await fieldButton.isDisabled(), 'A held field ZIP cannot download after changing to a different batch');
     await login('Room2');
-    check(await page.locator('#venue-closure').isHidden() && await fieldButton.isHidden() && await picker.locator('option').count() === 1,
-      'Switching to room control clears the Master history');
+    check(await page.locator('#venue-closure').isHidden() && await fieldButton.isHidden() && await picker.locator('option').count() === 1
+      && await enemyBatch.isHidden(), 'Switching to room control clears Master-only history and enemy batches');
   } finally {
     await page.unroute(route); await page.close();
     for (const id of active) await end(id);

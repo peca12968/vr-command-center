@@ -9,7 +9,11 @@ public record VenuePhaseTarget(Guid SessionId, long PhaseSinceSequence, int[] Ro
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? EnvironmentSinceSequence = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? EnemiesSinceSequence = null);
 public record VenuePhasePlan(VenuePhaseTarget[] Pause, VenuePhaseTarget[] Resume, VenuePhaseTarget[] Begin, VenuePhaseTarget[] End,
-    VenuePhaseTarget[] Environment, VenuePhaseTarget[] Enemies);
+    VenuePhaseTarget[] Environment, VenuePhaseTarget[] Enemies,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueEnemyBatch? LatestEnemies = null);
+public enum VenueEnemyApplicationState { Current, Superseded, Ended }
+public record VenueEnemyBatchSession(Guid SessionId, int[] RoomIds, long AppliedAtSequence, int TargetCount, VenueEnemyApplicationState State);
+public record VenueEnemyBatch(Guid RequestId, DateTimeOffset RecordedAtUtc, EnemyBehavior Behavior, bool AutoAttack, VenueEnemyBatchSession[] Sessions);
 public record VenueClimate(Weather? Weather, TimeOfDay? TimeOfDay, bool? Lightning);
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public record VenueEnemyPolicy(EnemyBehavior? Behavior, bool? AutoAttack);
@@ -41,6 +45,7 @@ public sealed partial class SessionManager
 {
     private readonly Dictionary<Guid, List<SessionEvent>> venueTransitions = [];
     private readonly SortedSet<(DateTimeOffset RecordedAtUtc, Guid Id)> venueEnds = [];
+    private (DateTimeOffset RecordedAtUtc, Guid Id)? latestVenueEnemies;
 
     public VenuePhasePlan ReadVenuePhase(OperatorIdentity actor)
     {
@@ -50,7 +55,24 @@ public sealed partial class SessionManager
             Targets(ControlAction.Begin).Select(history => ToTarget(history, history.View.Sequence)).ToArray(),
             Targets(ControlAction.End).Select(history => ToTarget(history)).ToArray(),
             Targets(ControlAction.SetEnvironment).Select(history => ToTarget(history, environmentSinceSequence: history.EnvironmentSinceSequence)).ToArray(),
-            Targets(ControlAction.SetEnemies).Select(history => ToTarget(history, enemiesSinceSequence: history.EnemiesSinceSequence)).ToArray());
+            Targets(ControlAction.SetEnemies).Select(history => ToTarget(history, enemiesSinceSequence: history.EnemiesSinceSequence)).ToArray(),
+            LatestVenueEnemyBatch());
+    }
+
+    private VenueEnemyBatch? LatestVenueEnemyBatch()
+    {
+        if (latestVenueEnemies is not { } batch) return null;
+        var entries = venueTransitions[batch.Id];
+        var policy = entries[0].Read<ControlCommand>().Enemies!;
+        var targets = entries.Select(entry =>
+        {
+            var history = Find(entry.SessionId);
+            var state = history.View.State == SessionState.Ended ? VenueEnemyApplicationState.Ended
+                : history.EnemiesSinceSequence == entry.Sequence ? VenueEnemyApplicationState.Current : VenueEnemyApplicationState.Superseded;
+            return new VenueEnemyBatchSession(entry.SessionId, [.. history.View.RoomIds], entry.Sequence,
+                entry.Read<ControlCommand>().Enemies!.Count, state);
+        }).OrderBy(target => target.RoomIds[0]).ToArray();
+        return new(batch.Id, batch.RecordedAtUtc, policy.Behavior, policy.AutoAttack, targets);
     }
 
     public VenueEndBatch? ReadLatestVenueEnd(OperatorIdentity actor)
@@ -180,7 +202,7 @@ public sealed partial class SessionManager
                 RememberCommitted(history, entries[index], views[index], history.Combat, history.Authority);
             }
             venueTransitions.Add(requestId, [.. entries]);
-            if (action == ControlAction.End) venueEnds.Add((entries[0].RecordedAtUtc, requestId));
+            IndexVenueBatch(action, requestId, entries[0]);
             return Receipt(requestId, action, entries, false);
         }
     }
@@ -257,6 +279,14 @@ public sealed partial class SessionManager
     private static VenuePhaseApplied[] Applied(IEnumerable<SessionEvent> entries) =>
         entries.Select(entry => new VenuePhaseApplied(entry.SessionId, entry.Sequence)).ToArray();
 
+    private void IndexVenueBatch(ControlAction action, Guid id, SessionEvent first)
+    {
+        var key = (first.RecordedAtUtc, id);
+        if (action == ControlAction.End) venueEnds.Add(key);
+        if (action == ControlAction.SetEnemies && (latestVenueEnemies is not { } current || key.CompareTo(current) > 0))
+            latestVenueEnemies = key;
+    }
+
     private void RestoreVenueEvent(SessionEvent[] events, SessionEvent entry, long phaseSince, long environmentSince, long enemiesSince, ControlCommand command)
     {
         if (entry.Venue!.PhaseSinceSequence != phaseSince
@@ -290,7 +320,7 @@ public sealed partial class SessionManager
                 }))
                 throw new InvalidDataException("Incomplete or inconsistent venue transition batch.");
             entries.Sort((a, b) => a.SessionId.CompareTo(b.SessionId));
-            if (action == ControlAction.End) venueEnds.Add((entries[0].RecordedAtUtc, id));
+            IndexVenueBatch(action, id, entries[0]);
         }
     }
 }

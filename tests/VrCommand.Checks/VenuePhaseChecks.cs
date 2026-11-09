@@ -352,6 +352,13 @@ internal static class VenuePhaseChecks
                 && manager.Get(mrId).Enemies == new EnemySettings(2, EnemyBehavior.Patrol, true)
                 && manager.GetWithPhase(vrId).VenueEnvironmentSequence is not null,
                 "Enemy policy preserves different counts and can commit across a separate climate update");
+            var batch = manager.ReadVenuePhase(master).LatestEnemies!;
+            check(batch.RequestId == enemyKey && batch.RecordedAtUtc != default && batch.Behavior == EnemyBehavior.Patrol && batch.AutoAttack
+                && batch.Sessions.Length == 2 && batch.Sessions[0].RoomIds.SequenceEqual([1]) && batch.Sessions[1].RoomIds.SequenceEqual([2])
+                && batch.Sessions.All(row => row.State == VenueEnemyApplicationState.Current
+                    && row.AppliedAtSequence == changedEnemies.Single(entry => entry.SessionId == row.SessionId).AppliedAtSequence)
+                && batch.Sessions.Select(row => row.TargetCount).SequenceEqual([1, 2]),
+                "Latest enemy batch reads original room scopes, command sequences and different saved counts");
             Reject<InvalidOperationException>(() => manager.ExecuteVenuePhase(ControlAction.SetEnemies, enemyTargets, enemyKey, master,
                 enemyPolicy: policy with { AutoAttack = false }), "The enemy policy key cannot be reused with a different attack setting");
             manager.Execute(mrId, new(Guid.NewGuid(), ControlAction.SetEnemies, Enemies: new(2, EnemyBehavior.Hold, false)), room2);
@@ -364,6 +371,23 @@ internal static class VenuePhaseChecks
                 && manager.GetWithPhase(vrId).VenueEnemiesSequence == changedEnemies.Single(row => row.SessionId == vrId).AppliedAtSequence
                 && manager.GetWithPhase(mrId).VenueEnemiesSequence is null && manager.Get(mrId).Enemies == new EnemySettings(2, EnemyBehavior.Hold, false),
                 "Restart preserves the enemy policy receipt and the later room override");
+            var latest = manager.ReadVenuePhase(master).LatestEnemies!;
+            check(latest.RequestId == enemyKey && latest.Sessions[0].State == VenueEnemyApplicationState.Current
+                && latest.Sessions[1].State == VenueEnemyApplicationState.Superseded && latest.Sessions[1].TargetCount == 2,
+                "Latest enemy batch is restored from the original ledger with the current override status");
+            manager.Execute(mrId, new(Guid.NewGuid(), ControlAction.End), master);
+            var endedEnemyBatch = manager.ReadVenuePhase(master).LatestEnemies!;
+            check(endedEnemyBatch.RequestId == enemyKey && endedEnemyBatch.Sessions[1].State == VenueEnemyApplicationState.Ended
+                && endedEnemyBatch.Sessions[1].SessionId == mrId && endedEnemyBatch.Sessions[1].AppliedAtSequence == latest.Sessions[1].AppliedAtSequence,
+                "Ending a room keeps its original enemy batch identity and command sequence");
+            var nextKey = Guid.NewGuid();
+            var nextTargets = manager.ReadVenuePhase(master).Enemies.Select(row =>
+                new VenuePhaseFence(row.SessionId, row.PhaseSinceSequence, EnemiesSinceSequence: row.EnemiesSinceSequence)).ToArray();
+            manager.ExecuteVenuePhase(ControlAction.SetEnemies, nextTargets, nextKey, master, enemyPolicy: policy with { Behavior = EnemyBehavior.Advance });
+            manager.ExecuteVenuePhase(ControlAction.SetEnemies, enemyTargets, enemyKey, master, enemyPolicy: policy);
+            var next = manager.ReadVenuePhase(master).LatestEnemies!;
+            check(next.RequestId == nextKey && next.Behavior == EnemyBehavior.Advance && next.Sessions.Single().SessionId == vrId,
+                "An old batch retry cannot replace the latest accepted enemy batch");
         }
     }
 }

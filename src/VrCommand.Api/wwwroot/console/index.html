@@ -64,6 +64,11 @@
             <label class="check"><input id="venue-auto-attack" type="checkbox">自動攻擊</label>
             <button id="venue-apply-enemies" type="submit" class="secondary">套用到執行中場次</button>
           </fieldset></form>
+          <section id="venue-enemy-batch" aria-labelledby="venue-enemy-batch-title" hidden>
+            <h4 id="venue-enemy-batch-title">最近一批敵軍策略</h4>
+            <p id="venue-enemy-batch-summary" class="hint" role="status"></p>
+            <ul id="venue-enemy-batch-rooms" class="event-list" aria-label="各房的原命令與確認狀態"></ul>
+          </section>
         </section>
         <section id="vr-venue-panel" class="panel" aria-labelledby="vr-venue-title" hidden>
           <h3 id="vr-venue-title">VR 五房配票</h3>
@@ -327,7 +332,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.68 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.69 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

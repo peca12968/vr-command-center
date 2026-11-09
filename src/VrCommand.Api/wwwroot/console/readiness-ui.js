@@ -219,11 +219,15 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
         throughSequence: setting.worldSequence, witness: { kind, setting, population } }
       : null;
     const text = population ? view.text + ` · 本房在場 ${population.present} 名、存活 ${population.alive} 名` : view.text;
-    return { ...view, text, venue: evidence.venue, target };
+    return { ...view, text, venue: evidence.venue, target, setting, population, targetCount: evidence.targetCount };
+  }
+  function settingStatus(roomId, kind, sessionId = null) {
+    const { rooms, sessions } = getState(), room = rooms.find(row => row.id === roomId);
+    if (sessionId !== null && room?.sessionId !== sessionId) return null;
+    return settingView(room, sessions.find(row => row.id === room?.sessionId), performance.now() - started, kind);
   }
   function settingFrame(roomId, kind) {
-    const { rooms, sessions } = getState(), room = rooms.find(row => row.id === roomId);
-    return settingView(room, sessions.find(row => row.id === room?.sessionId), performance.now() - started, kind)?.target;
+    return settingStatus(roomId, kind)?.target;
   }
   function trackingPause(roomId) {
     const { rooms, sessions, actor } = getState();
@@ -351,7 +355,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') update(); else reset(); });
   setInterval(update, 250);
-  return { update, venueReady, venueBegin, settingFrame, trackingPause, active(value) { active = value; if (value) update(); else reset(); } };
+  return { update, venueReady, venueBegin, settingFrame, settingStatus, trackingPause, active(value) { active = value; if (value) update(); else reset(); } };
 }
 
 export function mountReadiness(getState, unauthorized) {

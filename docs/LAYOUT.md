@@ -28,6 +28,16 @@ Windows 管理包 0.31.36 起，主控可在「全館敵軍策略」選擇守備
 
 管理包 0.31.58 的房卡也會確認個別場次的敵軍設定。房卡分列全場目標、本房快照中的在場數及存活數。遊戲端尚未確認或快照已過期時，只顯示管理端目標。按「檢視敵軍快照」可在原房俯視圖停在確認該策略的一格。觀戰與回放會顯示各格實際保存的行為及自動攻擊開關。
 
+### 核對最近一批敵軍策略
+
+管理包 0.31.69 在「全館敵軍策略」下方顯示最近一筆全館命令。各房列出原命令序號、當時的全場目標及目前確認狀態。合併場的五房共用一筆命令序號，個別房仍顯示各自的在場與存活數。重新登入後，主控可從原命令紀錄讀回這一批。
+
+- **遊戲端待確認**表示管理端已受理，仍在等候相同場次及命令序號的有效快照。快照過期也會回到此狀態。
+- **遊戲端已套用**時可按「檢視敵軍快照」，在該房俯視圖停在符合原策略的保存格。
+- **已被較新的敵軍設定覆寫**或**原場次已結束**會保留原房號、命令與目標數。房間重用後仍顯示原場次的結果。後續戰後回放可由全館收尾開啟。
+
+主控的 `GET /api/venue/phase` 有紀錄時會提供 `latestEnemies`，包含原 `requestId`、記錄時間、策略與各場的 `sessionId`、`appliedAtSequence`、`targetCount` 和 `state`。`Current` 代表管理端仍使用該命令。控制台會再以同房即時快照核對遊戲端套用。
+
 `GET /api/venue/phase` 的 `enemies` 預覽提供各場的 `sessionId`、`phaseSinceSequence`、`enemiesSinceSequence` 與房號。`POST /api/venue/phase` 用 `SetEnemies`、原目標序號與 `enemyPolicy` 的 `behavior`、`autoAttack` 送出，使用同一 `Idempotency-Key` 可取回原回條。`GET /api/rooms/readiness` 的 `venueEnemies` 會回傳策略與有效快照序號。
 
 同一回應的 `enemies` 同時涵蓋全館和個別指令，包含 `setting`、`venue`、`targetCount`，以及確認後的原 `streamId` 和本房 `population`。房卡開啟回放時會核對原指令序號、策略和本房人數。場中加兵仍依原增援條件處理。
