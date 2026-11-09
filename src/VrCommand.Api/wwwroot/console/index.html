@@ -64,7 +64,13 @@
           </fieldset></form>
         </section>
         <section id="venue-closure" class="panel" aria-labelledby="venue-closure-title" hidden>
-          <h3 id="venue-closure-title">最近一次全館收尾</h3>
+          <h3 id="venue-closure-title">全館收尾</h3>
+          <div class="button-row">
+            <label>結束批次<select id="venue-closure-batch" disabled><option value="">自動顯示最新批次</option></select></label>
+            <button id="venue-closure-load" type="button" class="quiet" disabled>載入批次清單</button>
+            <button id="venue-closure-more" type="button" class="quiet" hidden disabled>載入更早批次</button>
+            <span id="venue-history-status" class="hint" role="status"></span>
+          </div>
           <p id="venue-closure-summary" class="hint" role="status"></p>
           <div id="venue-report-actions" class="button-row" hidden>
             <button id="export-venue-reports" type="button" class="secondary" disabled>下載本批戰績 ZIP</button>
@@ -236,7 +242,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.38 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.39 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

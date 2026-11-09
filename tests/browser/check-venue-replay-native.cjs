@@ -9,14 +9,15 @@ async function main() {
   assert.match(config.base, /^http:\/\/127\.0\.0\.1:\d+$/);
   const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const results = [];
+  let history;
   try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 1080 } });
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1080 }, acceptDownloads: true });
     const errors = [];
     page.on('pageerror', error => errors.push(error.name));
     await page.goto(config.base + '/console/');
     await page.locator('#login-key').fill(config.masterKey);
     await page.locator('#login-form button').click();
-    for (const session of config.sessions) {
+    async function openReplay(session) {
       const original = page.waitForResponse(response =>
         new URL(response.url()).pathname === `/api/sessions/${session.sessionId}/world/watch`);
       await page.locator(`[data-venue-replay="${session.sessionId}"]`).click();
@@ -33,14 +34,33 @@ async function main() {
       assert.equal(await page.locator('#world-camera').inputValue(), room === 'all' ? 'overview' : 'top');
       const sequence = Number(await canvas.getAttribute('data-sequence'));
       assert(sequence > 0 && sequence <= session.replay.throughSequence);
-      results.push({ sessionId: session.sessionId, room, sequence, throughSequence: session.replay.throughSequence });
+      return { sessionId: session.sessionId, room, sequence, throughSequence: session.replay.throughSequence };
+    }
+    for (const session of config.sessions) {
+      results.push(await openReplay(session));
       if (results.length === 1) await page.screenshot({ path: path.join(path.dirname(output), config.mode + '-venue-replay.png') });
       await page.locator('#tab-operations').click();
+    }
+    if (config.history) {
+      const { batch, zip } = config.history;
+      const picker = page.locator('#venue-closure-batch');
+      await page.locator('#venue-closure-load').click();
+      await picker.selectOption(batch.requestId);
+      const older = batch.sessions[2];
+      await page.locator(`[data-venue-replay="${older.sessionId}"]`).waitFor();
+      const started = page.waitForEvent('download');
+      await page.locator('#export-venue-reports').click();
+      const download = await started;
+      assert.equal(download.suggestedFilename(), `vr-command-venue-reports-v1-${batch.requestId}.zip`);
+      assert((await fs.readFile(await download.path())).equals(await fs.readFile(zip)));
+      history = { requestId: batch.requestId, zipMatched: true, ...await openReplay(older) };
+      await page.locator('#tab-operations').click();
+      assert.equal(await picker.inputValue(), batch.requestId);
     }
     assert.deepEqual(errors, []);
   } finally {
     await browser.close();
   }
-  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results }, null, 2), { flag: 'wx' });
+  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history }, null, 2), { flag: 'wx' });
 }
 main().catch(error => { console.error(error.name + ': native venue replay UI failed'); process.exitCode = 1; });

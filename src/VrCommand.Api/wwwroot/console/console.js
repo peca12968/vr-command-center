@@ -6,6 +6,7 @@ import { mountAlignmentPins } from './alignment-pins-ui.js';
 import { mountMrDeployment } from './mr-deployment-ui.js';
 import { mountMrVenueBundle } from './mr-venue-bundle-ui.js';
 import { mountReport, mountVenueReport } from './report-ui.js';
+import { mountVenueHistory } from './venue-history-ui.js';
 import { mountReadiness, mountRoomReadiness } from './readiness-ui.js';
 import { mountConnections, validDestination } from './connection-ui.js';
 import { mountClosure } from './closure-ui.js';
@@ -21,6 +22,7 @@ const objectHistory = placementHistory();
 const world = mountWorld(() => state.key, logout);
 const report = mountReport(() => state, logout);
 const venueReport = mountVenueReport(() => state, logout, download);
+const venueHistory = mountVenueHistory(api, selectVenueClosure);
 const readiness = mountReadiness(() => state, logout);
 const roomReadiness = mountRoomReadiness(() => state, logout, applyVenuePermissions, venueClimateText, venueEnemyText);
 const connections = mountConnections(() => state, logout);
@@ -44,7 +46,7 @@ const placement = mountLayout({ api, epoch: () => state.epoch, active: () => !!s
   selection: () => ({ id: $('launch-mission').value, mode: launchLayoutMode() }), changed: applyPermissions,
   selectProp: index => { if (!state.props[index]) return; finishPropGesture(); state.prop = index; renderProps(); $('prop-select').focus(); } });
 let timer;
-let selectionEpoch = 0;
+let selectionEpoch = 0, venueClosureEpoch = 0;
 
 function notify(message, error = false) {
   $('notice').textContent = message;
@@ -145,6 +147,7 @@ function runSession(action) {
 }
 function logout() {
   selectionEpoch++;
+  venueClosureEpoch++;
   report.reset(); state.statistics = null;
   closure.active(false); closure.reset();
   alignment.reset();
@@ -154,7 +157,7 @@ function logout() {
   replay.active(false); replay.reset(); world.active(false); world.reset(); readiness.active(false); readiness.reset(); roomReadiness.active(false); connections.active(false); connections.reset();
   state.epoch++; state.key = ''; state.actor = null; state.selected = null; state.session = null; state.pending = null;
   state.rooms = []; state.venue = null; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
-  renderVenueClosure(null);
+  venueHistory.reset(); renderVenueClosure(null);
   state.props = []; state.prop = -1; clearPropHistory();
   placement.reset();
   clearInterval(timer);
@@ -200,9 +203,11 @@ function refresh() {
 }
 async function refreshData(epoch) {
   const selection = selectionEpoch, includeEnded = $('include-ended').checked;
+  const closureSelection = venueClosureEpoch, batchId = venueHistory.selected();
   const current = () => epoch === state.epoch && selection === selectionEpoch && includeEnded === $('include-ended').checked;
   const venueRead = master() ? api('/venue/phase').catch(error => { if (error.status === 401) throw error; return null; }) : null;
-  const venueClosureRead = master() ? api('/venue/closure').catch(error => { if (error.status === 401) throw error; return null; }) : null;
+  const venueClosureRead = master() ? api(batchId ? '/venue/closure/' + batchId : '/venue/closure')
+    .catch(error => { if (error.status === 401) throw error; return null; }) : null;
   const [rooms, catalog, sessions, venue, venueClosure] = await Promise.all([
     api('/rooms'), api('/mission-library'), api('/sessions?includeEnded=' + includeEnded), venueRead, venueClosureRead
   ]);
@@ -215,7 +220,8 @@ async function refreshData(epoch) {
   const editedSeries = state.catalog.find(row => row.mission.id === edit)?.seriesId;
   state.launchPinned = prior && !heads.some(row => row.mission.id === launch) ? prior : null;
   state.rooms = rooms; state.venue = venue; state.catalog = heads; state.missions = heads.map(row => row.mission); state.sessions = sessions;
-  renderVenueClosure(venueClosure);
+  if (closureSelection === venueClosureEpoch)
+    renderVenueClosure(batchId && venueClosure?.batch?.requestId !== batchId ? null : venueClosure);
   if (state.selected === null && sessions.length) state.selected = sessions[0].id;
   else if (state.selected && !sessions.some(s => s.id === state.selected)) resetSelection('');
   missionOptions(launch, heads.find(row => row.seriesId === editedSeries)?.mission.id || edit);
@@ -402,6 +408,7 @@ function applyVenuePermissions() {
   $('venue-phase').hidden = !master();
   const begin = venueTargets('Begin'), pause = venueTargets('Pause'), resume = venueTargets('Resume'), end = venueTargets('End');
   const locked = state.busy || !!state.pending || !master();
+  venueHistory.update(!locked);
   const starting = begin.filter(target => !roomReadiness.venueReady(target, 'Begin'));
   const waiting = resume.filter(target => !roomReadiness.venueReady(target));
   $('venue-begin').disabled = locked || !begin.length || !!starting.length;
@@ -442,16 +449,28 @@ async function venuePhase(action, { environment, enemyPolicy } = {}) {
       ({ sessionId, phaseSinceSequence, sessionSequence, environmentSinceSequence, enemiesSinceSequence })), environment, enemyPolicy } };
   await sendPending();
 }
-function renderVenueClosure(report) {
+async function selectVenueClosure() {
+  const request = ++venueClosureEpoch, epoch = state.epoch;
+  renderVenueClosure(null, true);
+  if (state.refreshPromise) { try { await state.refreshPromise; } catch { /* The selected batch is read below. */ } }
+  if (request === venueClosureEpoch && epoch === state.epoch) await refresh().catch(showRefreshError);
+}
+
+function renderVenueClosure(report, loading = false) {
   const panel = $('venue-closure'), batch = report?.batch;
-  const signature = master() ? JSON.stringify(report) : '';
+  const signature = master() ? JSON.stringify([venueHistory.selected(), report, loading]) : '';
   if (panel.dataset.report === signature) return;
   panel.dataset.report = signature;
-  panel.hidden = !master() || batch === null;
+  panel.hidden = !master();
   const rows = $('venue-closure-rows');
   rows.replaceChildren();
   $('venue-closure-table').hidden = true;
   if (panel.hidden) { venueReport.update(null); $('venue-closure-summary').textContent = ''; return; }
+  if (loading || batch === null) {
+    venueReport.update(null);
+    $('venue-closure-summary').textContent = loading ? '正在讀取選定的結束批次…' : '目前沒有已結束的全館批次。';
+    return;
+  }
   if (!Array.isArray(batch?.sessions) || !batch.sessions.length || batch.sessions.length > 5
     || !Number.isFinite(Date.parse(batch.recordedAtUtc))
     || batch.sessions.some(session => typeof session?.sessionId !== 'string' || typeof session.missionName !== 'string'

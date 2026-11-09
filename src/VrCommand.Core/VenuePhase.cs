@@ -16,6 +16,8 @@ public record VenueEnemyPolicy(EnemyBehavior? Behavior, bool? AutoAttack);
 public record VenuePhaseApplied(Guid SessionId, long AppliedAtSequence);
 public record VenuePhaseReceipt(Guid RequestId, ControlAction Action, VenuePhaseApplied[] Sessions, bool Duplicate);
 public record VenueEndBatch(Guid RequestId, DateTimeOffset RecordedAtUtc, VenuePhaseApplied[] Sessions);
+public record VenueEndSummary(Guid RequestId, DateTimeOffset RecordedAtUtc, int[] RoomIds, string[] MissionNames, int SessionCount);
+public record VenueEndHistory(VenueEndSummary[] Batches, Guid? NextBefore);
 public record VenuePhaseWitness(long PhaseSinceSequence, long SessionSequence, bool Ready);
 public sealed class VenuePhaseChangedException() : InvalidOperationException("The venue phase targets changed; review the current rooms.");
 public sealed class VenuePauseNotObservedException(int[] roomIds) : InvalidOperationException("A game source has not confirmed its current pause.")
@@ -34,7 +36,7 @@ public sealed class VenueBeginNotReadyException(int[] roomIds) : InvalidOperatio
 public sealed partial class SessionManager
 {
     private readonly Dictionary<Guid, List<SessionEvent>> venueTransitions = [];
-    private (Guid Id, DateTimeOffset RecordedAtUtc)? latestVenueEnd;
+    private readonly SortedSet<(DateTimeOffset RecordedAtUtc, Guid Id)> venueEnds = [];
 
     public VenuePhasePlan ReadVenuePhase(OperatorIdentity actor)
     {
@@ -50,9 +52,46 @@ public sealed partial class SessionManager
     public VenueEndBatch? ReadLatestVenueEnd(OperatorIdentity actor)
     {
         RequireVenueMaster(actor);
-        lock (gate) return latestVenueEnd is { } batch
-            ? new(batch.Id, batch.RecordedAtUtc, Applied(venueTransitions[batch.Id]))
-            : null;
+        lock (gate) return venueEnds.Count == 0 ? null : ToEndBatch(venueEnds.Max.Id);
+    }
+
+    public VenueEndBatch ReadVenueEnd(Guid id, OperatorIdentity actor)
+    {
+        RequireVenueMaster(actor);
+        lock (gate) return ToEndBatch(id);
+    }
+
+    public VenueEndHistory ReadVenueEndHistory(Guid? before, int limit, OperatorIdentity actor)
+    {
+        RequireVenueMaster(actor);
+        if (limit is < 1 or > 50) throw new ArgumentException("Venue history page size must be between 1 and 50.");
+        lock (gate)
+        {
+            var ordered = before is { } id
+                ? venueEnds.GetViewBetween((DateTimeOffset.MinValue, Guid.Empty), (EndEntries(id)[0].RecordedAtUtc, id)).Reverse().Skip(1)
+                : venueEnds.Reverse();
+            var page = ordered.Take(limit + 1).ToArray();
+            var batches = page.Take(limit).Select(batch =>
+            {
+                var sessions = venueTransitions[batch.Id].Select(entry => Find(entry.SessionId).View).ToArray();
+                return new VenueEndSummary(batch.Id, batch.RecordedAtUtc, sessions.SelectMany(session => session.RoomIds).Order().ToArray(),
+                    sessions.OrderBy(session => session.RoomIds[0]).Select(session => session.Mission.Definition.Name).Distinct().ToArray(), sessions.Length);
+            }).ToArray();
+            return new(batches, page.Length > limit ? batches[^1].RequestId : null);
+        }
+    }
+
+    private VenueEndBatch ToEndBatch(Guid id)
+    {
+        var entries = EndEntries(id);
+        return new(id, entries[0].RecordedAtUtc, Applied(entries));
+    }
+
+    private List<SessionEvent> EndEntries(Guid id)
+    {
+        if (!venueTransitions.TryGetValue(id, out var entries) || !venueEnds.Contains((entries[0].RecordedAtUtc, id)))
+            throw new KeyNotFoundException("No venue End batch with that ID.");
+        return entries;
     }
 
     public VenuePhaseReceipt ExecuteVenuePhase(ControlAction action, VenuePhaseFence?[]? fences, Guid requestId,
@@ -119,7 +158,7 @@ public sealed partial class SessionManager
                 RememberCommitted(history, entries[index], views[index], history.Combat, history.Authority);
             }
             venueTransitions.Add(requestId, [.. entries]);
-            if (action == ControlAction.End) RememberVenueEnd(requestId, entries[0].RecordedAtUtc);
+            if (action == ControlAction.End) venueEnds.Add((entries[0].RecordedAtUtc, requestId));
             return Receipt(requestId, action, entries, false);
         }
     }
@@ -183,12 +222,6 @@ public sealed partial class SessionManager
     private static VenuePhaseApplied[] Applied(IEnumerable<SessionEvent> entries) =>
         entries.Select(entry => new VenuePhaseApplied(entry.SessionId, entry.Sequence)).ToArray();
 
-    private void RememberVenueEnd(Guid id, DateTimeOffset recordedAtUtc)
-    {
-        if (latestVenueEnd is not { } previous || (recordedAtUtc, id).CompareTo((previous.RecordedAtUtc, previous.Id)) > 0)
-            latestVenueEnd = (id, recordedAtUtc);
-    }
-
     private void RestoreVenueEvent(SessionEvent[] events, SessionEvent entry, long phaseSince, long environmentSince, long enemiesSince, ControlCommand command)
     {
         if (entry.Venue!.PhaseSinceSequence != phaseSince
@@ -218,7 +251,7 @@ public sealed partial class SessionManager
                 }))
                 throw new InvalidDataException("Incomplete or inconsistent venue transition batch.");
             entries.Sort((a, b) => a.SessionId.CompareTo(b.SessionId));
-            if (action == ControlAction.End) RememberVenueEnd(id, entries[0].RecordedAtUtc);
+            if (action == ControlAction.End) venueEnds.Add((entries[0].RecordedAtUtc, id));
         }
     }
 }

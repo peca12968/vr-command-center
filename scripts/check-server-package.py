@@ -63,6 +63,7 @@ def main():
     p.add_argument('--check-venue-end', action='store_true', help='End each native topology in one batch and read its original archives')
     p.add_argument('--check-venue-reports', action='store_true', help='Verify the original reports ZIP for each native End batch')
     p.add_argument('--check-venue-replay-ui', action='store_true', help='Open the original native archives through the shipped console')
+    p.add_argument('--check-venue-history-ui', action='store_true', help='Reopen and download the earlier batch after the newer native round')
     p.add_argument('--check-venue-environment', action='store_true', help='Confirm two batch environment changes in each native topology')
     p.add_argument('--check-venue-enemies', action='store_true', help='Use venue enemy policy to enable and stop native attacks')
     p.add_argument('--check-layout-preview',action='store_true',help='Load a saved barricade opening and compare its preview with native world geometry')
@@ -94,6 +95,8 @@ def main():
         p.error('--check-venue-reports requires --check-venue-end and --check-room-reports')
     if args.check_venue_replay_ui and not args.check_venue_end:
         p.error('--check-venue-replay-ui requires --check-venue-end')
+    if args.check_venue_history_ui and not (args.check_venue_replay_ui and args.check_venue_reports):
+        p.error('--check-venue-history-ui requires --check-venue-replay-ui and --check-venue-reports')
     if args.check_venue_environment and not args.player_package:
         p.error('--check-venue-environment requires the three-package check')
     if args.check_venue_enemies and not args.check_room_combat:
@@ -398,7 +401,7 @@ def main():
         (out/f'{mode}-venue-reports.zip').write_bytes(raw)
         return route, raw
 
-    def verify_venue_replay_ui(entries, closed, linked):
+    def verify_venue_replay_ui(entries, closed, linked, earlier=None):
         mode = 'linked' if linked else 'independent'
         sources = {entry['sessionId']: entry['sealed']['world'] for entry in entries}
         rows = closed['sessions']
@@ -410,7 +413,10 @@ def main():
             raise RuntimeError('Node is required for the shipped replay console check')
         descriptor = runtime / f'{mode}-venue-replay-private.json'
         output = out / f'{mode}-venue-replay-ui.json'
-        descriptor.write_text(json.dumps({'base': uri, 'masterKey': keys['Master'], 'mode': mode, 'sessions': rows}), encoding='utf-8')
+        config = {'base': uri, 'masterKey': keys['Master'], 'mode': mode, 'sessions': rows}
+        if earlier:
+            config['history'] = {'batch': earlier, 'zip': str(out/'independent-venue-reports.zip')}
+        descriptor.write_text(json.dumps(config), encoding='utf-8')
         with (out/f'{mode}-venue-replay-ui.log').open('xb') as log:
             subprocess.run([node, str(ROOT/'tests/browser/check-venue-replay-native.cjs'), str(descriptor), str(output)],
                            stdout=log, stderr=subprocess.STDOUT, check=True, timeout=75)
@@ -418,6 +424,13 @@ def main():
         check(result['complete'] and [item['sessionId'] for item in result['results']] == [row['sessionId'] for row in rows]
               and all(item['throughSequence'] == sources[item['sessionId']]['acceptedSequence'] for item in result['results']),
               f'{mode} shipped console opens every original sealed native replay')
+        if earlier:
+            older = earlier['sessions'][2]
+            history = result['history']
+            check(history['requestId'] == earlier['requestId'] and history['zipMatched']
+                  and history['sessionId'] == older['sessionId'] and history['room'] == '3'
+                  and history['throughSequence'] == older['replay']['throughSequence'],
+                  'shipped history reopens the older original native replay and byte-identical ZIP after the Linked batch')
 
     def observe(entry,expected,begin=None, *, record=True):
         metadata=request('/api/sessions/'+entry['sessionId']+'/world');path='/api/sessions/'+entry['sessionId']+'/world/watch?mode=live';req=urllib.request.Request(uri+path,headers={'Authorization':'Bearer '+keys['Master']})
@@ -906,6 +919,7 @@ def main():
         command(seed['id'],'End');rejected('ended-session',base)
         # Run both topologies with separate native processes and fresh admissions.
         archived_batch_report = None
+        earlier_closure = None
         for linked in ([] if args.mr_venue_bundle_only else [False,True]):
             entries=[];round_clients=[]
             batch=None
@@ -1036,7 +1050,8 @@ def main():
                 save(('linked' if linked else 'independent')+'-venue-end.json',
                      {'preview': preview, 'receipt': receipt, 'initial': initial, 'closed': closed, 'retry': retry})
                 if args.check_venue_replay_ui:
-                    verify_venue_replay_ui(entries, closed, linked)
+                    verify_venue_replay_ui(entries, closed, linked, earlier_closure if args.check_venue_history_ui else None)
+                    earlier_closure = closed
             if args.observe_closure_ui and not linked:
                 observer.wait(timeout=70);observer_log.close();observer_log=None;ui=read(observer_out/'checks.json');native=read(observer_entry['reportPath'])
                 check(observer.returncode==0 and ui['complete'] and ui['browserClosed'],'actual archive UI observer and browser completed / terminal')
@@ -1175,6 +1190,7 @@ def main():
             'venueEnd':args.check_venue_end,
             'venueReports':args.check_venue_reports,
             'venueReplayUi':args.check_venue_replay_ui,
+            'venueHistoryUi':args.check_venue_history_ui,
             'venueEnvironment':args.check_venue_environment,
             'venueEnemies':args.check_venue_enemies,
             'hardwareFeedback':args.check_hardware_feedback,

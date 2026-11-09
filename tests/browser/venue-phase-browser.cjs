@@ -434,6 +434,45 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     check(oldResponse.ok && reportZip.equals(Buffer.from(await oldResponse.arrayBuffer()))
       && (await nextDownload).suggestedFilename() === `vr-command-venue-reports-v1-${nextBatch.requestId}.zip`,
       'A new closure changes the browser download while the original batch URL stays byte-identical');
+
+    await api('/venue/closure/history', 'GET', undefined, 'Room2', 403);
+    await api(`/venue/closure/${closure.requestId}`, 'GET', undefined, 'Room2', 403);
+    const one = await api('/venue/closure/history?limit=1');
+    const older = await api(`/venue/closure/history?limit=1&before=${one.nextBefore}`);
+    check(one.batches[0].requestId === nextBatch.requestId && older.batches[0].requestId === closure.requestId && older.nextBefore === null,
+      'Venue history returns an exclusive cursor from the newest original batch');
+    for (let i = 0; i < 19; i++) {
+      const synthetic = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [4] }, 'Master', 201);
+      active.add(synthetic.id);
+      const preview = (await api('/venue/phase')).end;
+      await api('/venue/phase', 'POST', { action: 'End', targets: preview }, 'Master', 200, undefined, randomUUID());
+      active.delete(synthetic.id);
+    }
+    const picker = page.locator('#venue-closure-batch'), moreBatches = page.locator('#venue-closure-more');
+    await page.locator('#venue-closure-load').click();
+    await moreBatches.waitFor();
+    check(await picker.locator('option').count() === 21 && !await picker.locator(`option[value="${closure.requestId}"]`).count(),
+      'The first page stays bounded while the oldest batch remains available through pagination');
+    await moreBatches.click();
+    await picker.locator(`option[value="${closure.requestId}"]`).waitFor({ state: 'attached' });
+    await picker.selectOption(closure.requestId);
+    await openReplay(ending.id).waitFor();
+    await page.locator('#venue-closure-load').click();
+    await page.locator('#venue-history-status').filter({ hasText: '已載入 20 個批次' }).waitFor();
+    await page.locator('#refresh').click();
+    check(await picker.inputValue() === closure.requestId && await openReplay(ending.id).isVisible()
+      && !await archive(replacement.id).first().count(), 'Refreshing the list and session state preserves the selected original batch');
+    const historyDownload = page.waitForEvent('download');
+    await reportButton.click();
+    const historyZip = await historyDownload;
+    check(historyZip.suggestedFilename() === `vr-command-venue-reports-v1-${closure.requestId}.zip`
+      && reportZip.equals(await fs.readFile(await historyZip.path())), 'The older selection downloads the exact original ZIP');
+    await replayRequest(ending.id);
+    await page.locator('#tab-operations').click();
+    check(await picker.inputValue() === closure.requestId, 'Returning from the older replay preserves its history selection');
+    await login('Room2');
+    check(await page.locator('#venue-closure').isHidden() && await picker.locator('option').count() === 1,
+      'Switching to room control clears the Master history');
   } finally {
     await page.unroute(route); await page.close();
     for (const id of active) await end(id);

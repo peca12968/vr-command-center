@@ -12,11 +12,11 @@ internal sealed record VenueClosureBatch(Guid RequestId, DateTimeOffset Recorded
 
 public sealed partial class WorldRecordings
 {
-    internal VenueClosureBatch? ReadVenueClosure(OperatorIdentity actor)
+    internal VenueClosureBatch? ReadVenueClosure(OperatorIdentity actor, Guid? batchId = null)
     {
         lock (gate)
         {
-            var batch = manager.ReadLatestVenueEnd(actor);
+            var batch = batchId is { } id ? manager.ReadVenueEnd(id, actor) : manager.ReadLatestVenueEnd(actor);
             if (batch is null) return null;
             var sessions = batch.Sessions.Select(applied => ReadVenueClosureSession(applied, actor))
                 .OrderBy(session => session.RoomIds[0]).ToArray();

@@ -29,8 +29,7 @@ public sealed partial class SessionManager
         RequireVenueMaster(actor);
         lock (gate)
         {
-            if (!venueTransitions.TryGetValue(requestId, out var entries) || entries[0].Read<ControlCommand>().Action != ControlAction.End)
-                throw new KeyNotFoundException("No venue End batch with that ID.");
+            var entries = EndEntries(requestId);
             var sessions = entries.Select(entry => (Entry: entry, Session: Find(entry.SessionId).View))
                 .OrderBy(item => item.Session.RoomIds[0]).ToArray();
             var waiting = sessions.Where(item => !CanExportFinalReport(item.Session)).SelectMany(item => item.Session.RoomIds).ToArray();

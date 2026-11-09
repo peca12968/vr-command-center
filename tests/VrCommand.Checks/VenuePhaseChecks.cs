@@ -145,6 +145,7 @@ internal static class VenuePhaseChecks
             manager.End(first.Id, master);
         }
         var endId = Guid.NewGuid();
+        var newerEndId = Guid.NewGuid();
         VenuePhaseFence[] endTargets;
         VenuePhaseApplied[] ended;
         Guid replacement;
@@ -205,6 +206,23 @@ internal static class VenuePhaseChecks
                 && report.Sessions[0].Report.Players.Length == 0 && report.Sessions[1].Report.FinalStreamSequence == 0
                 && report.Sessions.All(item => item.Report.SessionId != replacement),
                 "After restart the batch report identifies the original no-source room and sealed room in room order");
+            manager.ExecuteVenuePhase(ControlAction.End, Fences(manager.ReadVenuePhase(master).End), newerEndId, master);
+            var firstPage = manager.ReadVenueEndHistory(null, 1, master);
+            check(firstPage.Batches.Single().RequestId == newerEndId && firstPage.NextBefore == newerEndId,
+                "Venue history returns the newest End and an exclusive cursor");
+            Reject<AccessDeniedException>(() => manager.ReadVenueEndHistory(null, 1, room2), "Venue history is scoped to Master");
+            Reject<KeyNotFoundException>(() => manager.ReadVenueEndHistory(beginId, 1, master), "A non-End request ID is not a history cursor");
+            Reject<ArgumentException>(() => manager.ReadVenueEndHistory(null, 51, master), "Venue history caps the page size");
+        }
+        using (var store = new SqliteSessionEventStore(beginData))
+        {
+            var manager = new SessionManager(store);
+            var earlier = manager.ReadVenueEndHistory(newerEndId, 1, master);
+            var old = earlier.Batches.Single();
+            check(manager.ReadLatestVenueEnd(master)?.RequestId == newerEndId && earlier.NextBefore is null
+                && old.RequestId == endId && old.RoomIds.SequenceEqual(new[] { 1, 2 }) && old.SessionCount == 2
+                && manager.ReadVenueEnd(endId, master).Sessions.SequenceEqual(ended),
+                "Restart restores the exclusive history cursor and the exact older batch behind it");
         }
 
         var environmentData = Path.Combine(directory, "venue-environment");
