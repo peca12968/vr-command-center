@@ -72,7 +72,7 @@ def fixture(*, remote=True):
     return ['direct-lan' if remote else 'same-host', {server_ip}, launcher, session, stats, endpoint, server, clients]
 
 
-def world_journal(path, world, *, header_changes=None, combat=0, active=True, sealed=True, end_sequence=8):
+def world_journal(path, world, *, header_changes=None, combat=0, active=True, sealed=True, end_sequence=8, players=None):
     def record(tag, body):
         payload = bytes([tag]) + body
         return struct.pack('<i', len(payload)) + payload + hashlib.sha256(payload).digest()
@@ -88,10 +88,73 @@ def world_journal(path, world, *, header_changes=None, combat=0, active=True, se
         packet = {'sequence': number, 'observedSequence': end_sequence if phase == 'Ended' else 7,
                   'elapsedMilliseconds': number * 100, 'suspended': False, 'throughCombatSequence': combat,
                   'frame': {'phase': phase, 'tick': number if phase == 'Running' else 0}}
+        if players is not None:
+            packet['frame']['players'] = players(number, phase)
         raw += [record(1, json.dumps(packet).encode()), record(2, struct.pack('<q', number))]
     if sealed:
         raw += [record(3, struct.pack('<q', count)), record(4, struct.pack('<q', count))]
     path.write_bytes(b''.join(raw))
+
+
+class PlayerSourceEvidenceTests(unittest.TestCase):
+    desktop_startup = 'VR_NETWORK_STARTED role=Client started=True background=True port=7777\n'
+
+    @classmethod
+    def openxr_startup(cls, runtime):
+        return ('VR_OPENXR_STARTUP status=requested\n'
+                f'[XR] [123] [01:09:33.229][Info   ] Runtime Name: {runtime}\n'
+                'VR_OPENXR_STARTUP status=active\n' + cls.desktop_startup)
+
+    def test_windows_mock_and_other_runtime_are_distinct_from_desktop_and_quest(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory) / 'original.worldlog'
+            data = fixture()
+            owners = data[3]['players']
+            for index, owner in enumerate(owners):
+                owner.update(seat=index, headset='Quest3')
+            (desktop_ip, desktop_log), (peer_ip, peer_log) = data[-1]
+            rows = [{'id': owner['id'], 'roomId': 1, 'connected': True, 'rig': {'kind': kind}}
+                    for owner, kind in zip(owners, ('Simulated', 'Tracked'), strict=True)]
+            world_journal(journal, data[2]['finalWorld'], players=lambda _, phase: rows if phase == 'Running' else [])
+            cases = [('windows-openxr-mock-tracked', [(peer_ip, self.openxr_startup('Unity Mock Runtime') + peer_log)], []),
+                     ('windows-openxr-tracked', [(peer_ip, self.openxr_startup('Example private runtime') + peer_log)], []),
+                     ('quest-logcat-tracked', [], [(peer_ip, quest_logcat(peer_log), 7342)])]
+            for expected, windows, quest in cases:
+                with self.subTest(expected=expected):
+                    data[-1] = [(desktop_ip, self.desktop_startup + desktop_log), *windows]
+                    report = field.verify(*data, quest_player_logs=quest, world_journal=journal, verify_player_sources=True)
+                    self.assertEqual([{'roomId': 1, 'seat': 1, 'source': 'windows-desktop-simulated', 'rigKind': 'Simulated', 'runningFrames': 78},
+                                      {'roomId': 1, 'seat': 2, 'source': expected, 'rigKind': 'Tracked', 'runningFrames': 78}], report['playerSources'])
+                    self.assertFalse(report['physicalHostsVerified'])
+                    self.assertNotIn('Example private runtime', json.dumps(report))
+                    self.assertNotIn(owners[1]['id'], json.dumps(report))
+
+    def test_tracked_claim_requires_matching_active_frames_and_original_startup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory) / 'original.worldlog'
+            data = fixture()
+            owners = data[3]['players']
+            for index, owner in enumerate(owners):
+                owner['seat'] = index
+            (desktop_ip, desktop_log), (peer_ip, peer_log) = data[-1]
+            windows = self.openxr_startup('Unity Mock Runtime')
+            rows = [{'id': owner['id'], 'roomId': 1, 'connected': True, 'rig': {'kind': kind}}
+                    for owner, kind in zip(owners, ('Simulated', 'Tracked'), strict=True)]
+            for startup, second, error in (
+                (windows.replace('port=7777', 'port=7778'), rows[1], 'original desktop or OpenXR startup'),
+                (self.desktop_startup, rows[1], 'rig differs'),
+                (windows, dict(rows[1], rig={'kind': 'Simulated'}), 'rig differs'),
+                (windows, dict(rows[1], connected=False), 'lacks an active accepted pose'),
+                (windows, dict(rows[1], roomId=2), 'room or rig differs'),
+            ):
+                with self.subTest(error=error, startup=startup, second=second):
+                    data[-1] = [(desktop_ip, self.desktop_startup + desktop_log), (peer_ip, startup + peer_log)]
+                    world_journal(journal, data[2]['finalWorld'], players=lambda _, phase: [rows[0], second] if phase == 'Running' else rows)
+                    with self.assertRaisesRegex(field.EvidenceError, error):
+                        field.verify(*data, world_journal=journal, verify_player_sources=True)
+                    self.assertNotIn('playerSources', field.verify(*data, world_journal=journal))
+            with self.assertRaisesRegex(field.EvidenceError, 'requires the original closed world journal'):
+                field.verify(*data, verify_player_sources=True)
 
 
 def venue_fixture(root, mode, *, remote=False, quest_per_room=0, with_journals=False, mr_rooms=()):

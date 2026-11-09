@@ -510,7 +510,8 @@ def main():
                     manifest_entry['udpPreflight'] = dict(zip(('listener', 'probe'), map(str, preflight), strict=True))
                 ip=ipaddress.IPv4Address(address)
                 result=field.verify('same-host',{ip},read(entry['reportPath']),session,statistics,endpoint,server,
-                    [(ip,field.content(c['log'])) for c in owners], world_journal=world_journal, udp_preflight=preflight)
+                    [(ip,field.content(c['log'])) for c in owners], world_journal=world_journal, udp_preflight=preflight,
+                    verify_player_sources=args.check_venue_openxr and world_journal is not None)
                 save(entry['label']+'-field-results.json',result)
                 check(result['serverAcknowledgements']==len(acks),entry['label']+' field report matches same-PC endpoints and sealed player results')
                 if world_journal is not None:
@@ -597,7 +598,8 @@ def main():
         manifest_path = runtime / (label + '-field-manifest.json')
         evidence = {'version': 1, 'mode': mode, 'topology': 'same-host', 'serverIps': [address],
                     'closure': str(extracted / 'closure.json'),
-                    'sessions': [dict(entry, evidenceZip=str(extracted / name)) for name, entry in zip(names, entries)]}
+                    'sessions': [dict(entry, evidenceZip=str(extracted / name)) for name, entry in zip(names, entries)],
+                    **({'verifyPlayerSources':True} if args.check_venue_openxr else {})}
 
         def run(topology):
             manifest_path.write_text(json.dumps(dict(evidence, topology=topology)), encoding='utf-8')
@@ -615,6 +617,11 @@ def main():
         check(summary['worldJournalsVerified'] == len(entries)
               and all(row['worldJournal']['frames'] == row['worldSequence'] and row['worldJournal']['runningFrames'] > 0
                       for row in summary['sessions']), label + ' field evidence verifies every original closed world journal')
+        if args.check_venue_openxr:
+            sources={(row['roomId'],row['seat']):row['source'] for session in summary['sessions'] for row in session['playerSources']}
+            check(sources=={(room,seat):'windows-openxr-mock-tracked' if (room,seat)==(5,2) else 'windows-desktop-simulated'
+                           for room in range(1,6) for seat in range(1,6)},
+                  label+' closed field evidence identifies the exact mock OpenXR seat and all 24 desktop peers')
         if args.check_lan_preflight:
             check(summary['udpPreflightsVerified'] == len(entries), label + ' original paired UDP reports match every sealed game endpoint')
         save(label + '-venue-field-results.json', summary)

@@ -24,6 +24,7 @@ SERVER_MARKER = re.compile(r'VR_SERVER_(ADMISSION_APPROVED|PEER|DEBRIEF_ACK|DEBR
 CONNECT = re.compile(r'VR_CLIENT_CONNECTED id=(0|[1-9][0-9]{0,19})')
 LOGCAT_UNITY = re.compile(r'[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3} +'
                           r'([1-9][0-9]{0,9}) +[1-9][0-9]{0,9} I Unity *: (.*)')
+OPENXR_RUNTIME = re.compile(r'\[XR\] .* Runtime Name: (\S.{0,127})')
 PLAYER_MARKERS = ('VR_CLIENT_CONNECTED', 'VR_CLIENT_DISCONNECTED', 'VR_CLIENT_DEBRIEF_FINAL')
 MAX_FILE_BYTES = 16 * 1024 * 1024
 MAX_ALIGNMENT_BYTES = 16 * 1024
@@ -138,7 +139,7 @@ def client_result(log):
     return final
 
 
-def quest_startup_on_port(message, port):
+def client_startup_on_port(message, port):
     return re.fullmatch(rf'VR_NETWORK_STARTED role=Client started=True background=(True|False) port={port}', message) is not None
 
 
@@ -152,7 +153,7 @@ def quest_client_result(log, pid, port):
             continue
         process, message = entry.groups()
         if message.startswith('VR_NETWORK_STARTED '):
-            require(process == pid and not started and quest_startup_on_port(message, port),
+            require(process == pid and not started and client_startup_on_port(message, port),
                 'Quest logcat does not contain one original client startup on the game port')
             started = True
         elif message.startswith(PLAYER_MARKERS):
@@ -160,6 +161,29 @@ def quest_client_result(log, pid, port):
             markers.append(message)
     require(started, 'Missing original Quest client startup in logcat')
     return client_result('\n'.join(markers))
+
+
+def windows_player_source(log, port):
+    startup = []
+    for line in log.splitlines():
+        if line.startswith(('VR_OPENXR_STARTUP ', 'VR_NETWORK_STARTED ', 'VR_CLIENT_CONNECTED ')):
+            if line.startswith('VR_CLIENT_CONNECTED '):
+                startup.append(('connected', None))
+                break
+            startup.append((line, None))
+        elif line.startswith('[XR] ') and ' Runtime Name:' in line:
+            runtime = OPENXR_RUNTIME.fullmatch(line)
+            require(runtime is not None, 'Windows OpenXR runtime record is malformed')
+            startup.append(('runtime', runtime.group(1).strip()))
+    if len(startup) == 2 and client_startup_on_port(startup[0][0], port):
+        return 'windows-desktop-simulated', 'Simulated'
+    require(len(startup) == 5 and startup[0][0] == 'VR_OPENXR_STARTUP status=requested'
+            and startup[1][0] == 'runtime' and startup[2][0] == 'VR_OPENXR_STARTUP status=active'
+            and client_startup_on_port(startup[3][0], port),
+            'Windows player lacks an original desktop or OpenXR startup on the game port')
+    if startup[1][1].casefold() == 'unity mock runtime':
+        return 'windows-openxr-mock-tracked', 'Tracked'
+    return 'windows-openxr-tracked', 'Tracked'
 
 
 def roster(rows, key, size):
@@ -176,14 +200,34 @@ def scores(row):
     return values + (accuracy,)
 
 
-def verify_world_journal(path, world, combat_sequence, through, applied_end):
+def verify_world_journal(path, world, combat_sequence, through, applied_end, *, player_sources=None):
     spec = importlib.util.spec_from_file_location('field_world_journal', Path(__file__).with_name('analyze-world-journal.py'))
     analyzer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(analyzer)
     fields = ('schemaVersion', 'sessionId', 'streamId', 'origin', 'roomIds', 'calibration', 'captureStartedAtUtc')
     expected = {key: world['header'].get(key) for key in fields}
+
+    def count_player_rigs(frame):
+        rows = frame['players']
+        require(type(rows) is list and len(rows) <= 25, 'Invalid player rows in the world journal')
+        seen = set()
+        for row in rows:
+            require(type(row['connected']) is bool, 'Invalid player connection state in the world journal')
+            if not row['connected']:
+                continue
+            pid = row['id']
+            require(pid in player_sources and pid not in seen, 'World journal contains an unexpected connected player')
+            source = player_sources[pid]
+            require(integer(row['roomId'], 1, 5) == source['roomId'] and row['rig']['kind'] == source['rigKind'],
+                    'World journal player room or rig differs from the original player log')
+            source['runningFrames'] += 1
+            seen.add(pid)
+
     try:
-        journal = analyzer.analyze(path, expected_header=expected)
+        journal = analyzer.analyze(path, expected_header=expected,
+                                   on_running_frame=count_player_rigs if player_sources is not None else None)
+    except EvidenceError:
+        raise
     except (OSError, ValueError, TypeError, KeyError, AttributeError, ArithmeticError, RecursionError) as error:
         raise EvidenceError('World journal failed source or record integrity verification') from error
     tail = journal['lastFrame']
@@ -197,6 +241,9 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end):
             and integer(tail['observedSequence'], 1, through) >= (applied_end or 1)
             and datetime.fromisoformat(tail['capturedAtUtc']) == datetime.fromisoformat(world['capturedAtUtc']),
             'World journal terminal capture or management boundary differs from the sealed session')
+    if player_sources is not None:
+        require(all(source['runningFrames'] > 0 for source in player_sources.values()),
+                'World journal lacks an active accepted pose for an original seat')
     return {'sha256': journal['sha256'], 'frames': sequence, 'runningFrames': journal['runningFrames']}
 
 
@@ -254,17 +301,20 @@ def verify_udp_preflight(paths, binding, addresses):
 
 
 def verify(topology, server_ips, launcher, session, statistics, endpoint, server_log, player_logs, *, quest_player_logs=(),
-           world_journal=None, room_alignments=None, udp_preflight=None):
+           world_journal=None, room_alignments=None, udp_preflight=None, verify_player_sources=False):
     report, _ = verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log,
                                len(player_logs) + len(quest_player_logs), player_logs, quest_player_logs=quest_player_logs,
-                               world_journal=world_journal, room_alignments=room_alignments, udp_preflight=udp_preflight)
+                               world_journal=world_journal, room_alignments=room_alignments, udp_preflight=udp_preflight,
+                               verify_player_sources=verify_player_sources)
     return report
 
 
 def verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log, size, player_logs, *,
-                   require_remote=True, quest_player_logs=(), world_journal=None, applied_end=None, room_alignments=None, udp_preflight=None):
+                   require_remote=True, quest_player_logs=(), world_journal=None, applied_end=None, room_alignments=None,
+                   udp_preflight=None, verify_player_sources=False):
     integer(size, 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
+    require(not verify_player_sources or world_journal is not None, 'Player source verification requires the original closed world journal')
     require(integer(launcher['schemaVersion'], 1, 1) and launcher['status'] == 'sealed-stopped'
             and launcher['complete'] is launcher['childExited'] is launcher['cleanupCompleted'] is True
             and integer(launcher['exitCode'], 0, 0) == 0, 'Launcher lacks terminal evidence')
@@ -310,6 +360,8 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
     peers, acknowledged = server_connections(server_log, port)
     used_players, used_connections, endpoints = set(), set(), set()
     room_sources = {}
+    player_sources = {} if verify_player_sources else None
+    source_seats = set()
     quest_players = 0
     windows_logs = ((address, log, None) for address, log in player_logs)
     for expected_ip, log, pid in chain(windows_logs, quest_player_logs):
@@ -332,6 +384,12 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
                 and integer(result['worldSequence'], 1) == world_sequence and integer(result['throughSequence'], 1) == through
                 and integer(result['finalStreamSequence']) == combat_sequence and scores(result) == scores(stats),
                 'Player result differs from the final seals or statistics')
+        if player_sources is not None:
+            seat = integer(owner['seat'], 0, 4) + 1
+            require((room, seat) not in source_seats, 'Duplicate seat in the player source evidence')
+            source_seats.add((room, seat))
+            source, rig = windows_player_source(log, port) if pid is None else ('quest-logcat-tracked', 'Tracked')
+            player_sources[player_id] = {'roomId': room, 'seat': seat, 'source': source, 'rigKind': rig, 'runningFrames': 0}
         used_players.add(player_id)
         used_connections.add(connection)
         endpoints.add(observed)
@@ -347,7 +405,8 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
     else:
         require(not remote, 'A peer is outside the declared same-host addresses')
     preflight = verify_udp_preflight(udp_preflight, binding, peer_ips) if udp_preflight else None
-    journal = verify_world_journal(world_journal, world, combat_sequence, through, applied_end) if world_journal is not None else None
+    journal = verify_world_journal(world_journal, world, combat_sequence, through, applied_end,
+                                   player_sources=player_sources) if world_journal is not None else None
     alignments = None
     if room_alignments is not None:
         require(journal is not None and quest_players == size, 'MR alignment evidence requires the closed world journal and all original Quest logs')
@@ -360,6 +419,8 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
             **({'questLogcatPlayers': quest_players} if quest_players else {}),
             **({'udpPreflight': preflight} if preflight is not None else {}),
             **({'worldJournal': journal} if journal else {}),
+            **({'playerSources': sorted(player_sources.values(), key=lambda row: (row['roomId'], row['seat']))}
+               if player_sources is not None else {}),
             **({'roomAlignments': alignments} if alignments is not None else {})}, room_sources
 
 
@@ -408,6 +469,9 @@ def verify_venue(manifest_path):
             'Venue must contain the original five independent sessions or one linked session')
     journals = any('worldJournal' in entry for entry in entries)
     require(not journals or all('worldJournal' in entry for entry in entries), 'Provide a world journal for every session in this batch')
+    verify_player_sources = manifest.get('verifyPlayerSources', False)
+    require(type(verify_player_sources) is bool and (not verify_player_sources or journals),
+            'Player source verification requires a boolean option and the original world journals for the full batch')
     check_alignments = any('roomAlignments' in entry for entry in entries)
     require(not check_alignments or journals, 'MR alignment evidence requires the original world journals for the full batch')
     preflights = any('udpPreflight' in entry for entry in entries)
@@ -468,7 +532,8 @@ def verify_venue(manifest_path):
                                          require_remote=False,
                                          quest_player_logs=((address, content(path), pid) for address, path, pid in quest_logs),
                                          world_journal=evidence_path(entry['worldJournal']) if journals else None,
-                                         applied_end=row['appliedAtSequence'], room_alignments=alignments, udp_preflight=preflight_paths)
+                                         applied_end=row['appliedAtSequence'], room_alignments=alignments, udp_preflight=preflight_paths,
+                                         verify_player_sources=verify_player_sources)
         if preflights:
             exchange = report['udpPreflight']['exchangeSha256']
             require(exchange not in exchanges, 'Venue reused a UDP preflight exchange')
@@ -486,6 +551,7 @@ def verify_venue(manifest_path):
                           'worldSequence': report['worldSequence'], 'combatSequence': report['combatSequence'],
                           **({'udpPreflight': report['udpPreflight']} if preflights else {}),
                           **({'worldJournal': report['worldJournal']} if journals else {}),
+                          **({'playerSources': report['playerSources']} if verify_player_sources else {}),
                           **({'experienceMode': experience} if check_alignments else {}),
                           **({'roomAlignments': report['roomAlignments']} if alignments is not None else {})})
 
@@ -512,6 +578,7 @@ def main():
     parser.add_argument('--topology', choices=('same-host', 'direct-lan'))
     parser.add_argument('--server-ip', action='append', help='Repeat for each assigned server IPv4')
     parser.add_argument('--world-journal', type=Path, help='Original closed .worldlog for a single session')
+    parser.add_argument('--verify-player-sources', action='store_true', help='Match each player log startup with accepted rigs in the closed journal')
     parser.add_argument('--udp-preflight', nargs=2, type=Path, metavar=('LISTENER', 'PROBE'), help='Original UDP preflight reports for this session')
     parser.add_argument('--room-alignment', action='append', nargs=2, metavar=('ROOM', 'JSON'),
                         help='Repeat for each locked MR room in a single session')
@@ -522,7 +589,8 @@ def main():
     args = parser.parse_args()
     json_paths = [args.launcher_report, args.session, args.statistics, args.endpoint]
     single_args = [args.topology, args.server_ip, *json_paths, args.server_log, args.player or args.quest_player]
-    if (args.venue_manifest and (any(single_args) or args.world_journal or args.room_alignment or args.udp_preflight)) or (not args.venue_manifest and not all(single_args)):
+    if (args.venue_manifest and (any(single_args) or args.world_journal or args.room_alignment or args.udp_preflight
+                                 or args.verify_player_sources)) or (not args.venue_manifest and not all(single_args)):
         parser.error('Provide --venue-manifest alone or all single-session options.')
     try:
         if args.venue_manifest:
@@ -552,7 +620,7 @@ def main():
             report = verify(args.topology, {ipv4(address) for address in args.server_ip},
                             *(read_json(content(path)) for path in json_paths), content(args.server_log), players,
                             quest_player_logs=quest_players, world_journal=args.world_journal, room_alignments=alignments,
-                            udp_preflight=args.udp_preflight)
+                            udp_preflight=args.udp_preflight, verify_player_sources=args.verify_player_sources)
     except EvidenceError as error:
         parser.exit(1, f'Field evidence rejected. {error}.\n')
     except (OSError, UnicodeError, ArithmeticError, AttributeError, KeyError, TypeError, ValueError, RecursionError,

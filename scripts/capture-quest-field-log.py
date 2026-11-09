@@ -84,7 +84,7 @@ async def read_capture(child, adb, pid, port, admission, log, deadline, on_ready
             continue
         process, message = entry.groups()
         if message.startswith('VR_NETWORK_STARTED '):
-            field.require(process == str(pid) and not started and field.quest_startup_on_port(message, port),
+            field.require(process == str(pid) and not started and field.client_startup_on_port(message, port),
                           'Quest startup differs from the original process or game port')
             started = True
             on_ready(pid)

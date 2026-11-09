@@ -181,6 +181,8 @@ python scripts/verify-field-results.py --topology direct-lan `
 
 如要一併驗收原生回放檔，等啟動器回報 `sealed-stopped` 後，從其 `workDirectory` 下的 `telemetry` 保留 `<sessionId>.worldlog`。在單場命令加入 `--world-journal .\room-01.worldlog`。工具唯讀檢查每筆記錄的校驗碼與連續影格，核對場次、來源、房間、校正設定和最後封存。它確認原檔含活動中影格及兩種封存的尾界，再輸出檔案 SHA-256、總影格數及活動中影格數。活動中影格須為 `Running`、tick 大於零且未中止來源。原生回放檔逐筆讀取，可超過文字日誌的 16 MiB 上限。 [原生世界紀錄](WORLD_SOURCE.md)
 
+加入 `--verify-player-sources` 後，工具也會以原入場連結玩家日誌與封存回放，逐席列出房號、席次、來源、姿態種類及符合條件的活動影格數。Windows OpenXR 日誌須含原啟動順序、執行環境及同一 UDP 埠，回放須有對應的 `Tracked` 姿態。Unity Mock Runtime 會獨立標記為 `windows-openxr-mock-tracked`。一般 Windows OpenXR 回報 `windows-openxr-tracked`，桌面模擬回報 `windows-desktop-simulated`。Quest logcat 須核對原 PID、入場及 `Tracked` 姿態，回報 `quest-logcat-tracked`。名冊上的 VIVE XR 或 Quest 3 分類與實體裝置型號仍由現場核對。姿態與日誌來源不一致，或原席位在活動影格中從未接受連線姿態時，工具會拒絕本次核對。
+
 `same-host` 要求全部觀察到的來源都在宣告的伺服器位址清單。`direct-lan` 要求至少有一個清單外的私有 IPv4，且所有玩家的實際來源均符合各自填入的位址。實體主機數與網路容量仍須現場確認，工具摘要分別保留 `physicalHostsVerified` 與 `networkCapacityAccepted` 為 `false`。NAT 或中繼環境需另記拓撲與轉譯結果。
 
 Quest 3 席位使用 `--quest-player 192.168.1.21 '.\quest logcat.txt' 7342`，依序填頭盔本次使用的 IPv4、原始 logcat 路徑和遊戲程序 PID。可與 Windows 的 `--player` 混用。Quest 3 須登記在原名冊，且其 UDP 來源須在伺服器位址清單外。摘要的 `questLogcatPlayers` 只計算通過原入場及戰績核對的 logcat 檔案數。 [Quest 擷取方式](QUEST3.md#收集-quest-場館驗收日誌)
@@ -200,6 +202,7 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `topology` | `same-host` 或 `direct-lan` |
 | `serverIps` | 所有本次伺服器電腦已指派的 IPv4，使用字串陣列 |
 | `closure` | 原批次的 `closure.json` 路徑 |
+| `verifyPlayerSources` | 選用。填布林值 `true` 核對所有原席位的日誌與姿態。每場均須提供 `worldJournal` |
 | `sessions` | 獨立模式填五場，合併模式填一場 |
 | `sessions[].evidenceZip`、`launcherReport`、`serverLog` | 各場原 ZIP、啟動器終止報告及伺服器日誌的路徑 |
 | `sessions[].worldJournal` | 選用。若驗收回放檔，每個場次都填自己關閉後的原始 `.worldlog` 路徑 |
