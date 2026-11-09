@@ -702,6 +702,9 @@ def main():
             coverage = summary['concurrentRoster']
             check(coverage['players'] == 25 and coverage['longestMilliseconds'] >= concurrent_seconds * 1000,
                   label + ' original closed world journals verify the continuous concurrent 25-seat window')
+            tracked = run(dict(evidence, requireTrackedRoster=True))
+            check(tracked.returncode == 1 and not tracked.stdout and 'original Quest or non-mock Windows OpenXR' in tracked.stderr,
+                  label + ' continuous desktop roster cannot satisfy the tracked-only evidence gate')
         if args.check_venue_openxr:
             sources={(row['roomId'],row['seat']):row['source'] for session in summary['sessions'] for row in session['playerSources']}
             check(sources=={(room,seat):'windows-openxr-mock-tracked' if (room,seat)==(5,2) else 'windows-desktop-simulated'

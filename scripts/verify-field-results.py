@@ -253,7 +253,7 @@ def scores(row):
     return values + (accuracy,)
 
 
-def roster_periods(players, minimum_ms, applied_end):
+def roster_periods(players, minimum_ms, applied_end, *, require_tracked=False):
     expected = {pid: player['roomId'] for pid, player in players.items()}
     periods = []
     start = previous = previous_tick = None
@@ -266,7 +266,8 @@ def roster_periods(players, minimum_ms, applied_end):
             return
         rows = frame['players']
         require(type(rows) is list and len(rows) <= 25, 'Invalid player rows in the concurrent roster evidence')
-        connected = {row['id']: integer(row['roomId'], 1, 5) for row in rows if row['connected'] is True}
+        connected = {row['id']: integer(row['roomId'], 1, 5) for row in rows
+                     if row['connected'] is True and (not require_tracked or row['rig']['kind'] == 'Tracked')}
         tick = integer(frame['tick'])
         if len(rows) != len(expected) or connected != expected or not tick:
             previous = None
@@ -285,9 +286,10 @@ def roster_periods(players, minimum_ms, applied_end):
 
 
 class VenueRosterOverlap:
-    def __init__(self, minimum_ms):
+    def __init__(self, minimum_ms, *, require_tracked=False):
         self.minimum_ms = minimum_ms
         self.minimum = timedelta(milliseconds=minimum_ms)
+        self.require_tracked = require_tracked
         self.intervals = None
 
     def add(self, capture_started_at, periods):
@@ -316,7 +318,8 @@ class VenueRosterOverlap:
         return {'players': players, 'minimumMilliseconds': self.minimum_ms,
                 'longestMilliseconds': (end - start) // timedelta(milliseconds=1),
                 'maxFrameGapMilliseconds': MAX_CONCURRENT_FRAME_GAP_MS,
-                'fromUtc': start.isoformat(), 'throughUtc': end.isoformat()}
+                'fromUtc': start.isoformat(), 'throughUtc': end.isoformat(),
+                **({'rigKind': 'Tracked'} if self.require_tracked else {})}
 
 
 def verify_world_journal(path, world, combat_sequence, through, applied_end, *, player_sources=None, tracking_begin=None,
@@ -328,7 +331,8 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
     expected = {key: world['header'].get(key) for key in fields}
     tracked = None
     if concurrency is not None:
-        observe_roster, periods = roster_periods(players, concurrency.minimum_ms, applied_end)
+        observe_roster, periods = roster_periods(players, concurrency.minimum_ms, applied_end,
+                                                require_tracked=concurrency.require_tracked)
 
     def observe_packet(packet):
         if tracking_begin is not None:
@@ -569,6 +573,10 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
             require((room, seat) not in source_seats, 'Duplicate seat in the player source evidence')
             source_seats.add((room, seat))
             source, rig = windows_player_source(log, port) if pid is None else ('quest-logcat-tracked', 'Tracked')
+            if concurrency is not None and concurrency.require_tracked:
+                require(source in ('quest-logcat-tracked', 'windows-openxr-tracked'),
+                        f'Concurrent tracked roster requires original Quest or non-mock Windows OpenXR player logs; '
+                        f'room {room} seat {seat} uses {source}')
             player_sources[player_id] = {'roomId': room, 'seat': seat, 'source': source, 'rigKind': rig, 'runningFrames': 0}
         used_players.add(player_id)
         used_connections.add(connection)
@@ -753,13 +761,19 @@ def verify_venue(manifest_path):
             'Venue must contain the original five independent sessions or one linked session')
     journals = any('worldJournal' in entry for entry in entries)
     require(not journals or all('worldJournal' in entry for entry in entries), 'Provide a world journal for every session in this batch')
+    require_tracked = manifest.get('requireTrackedRoster', False)
+    require(type(require_tracked) is bool, 'requireTrackedRoster must be a boolean')
+    require(not require_tracked or 'minimumConcurrentMilliseconds' in manifest,
+            'requireTrackedRoster requires minimumConcurrentMilliseconds')
     concurrency = None
     if 'minimumConcurrentMilliseconds' in manifest:
         require(journals, 'Concurrent roster verification requires the original world journals for the full batch')
-        concurrency = VenueRosterOverlap(integer(manifest['minimumConcurrentMilliseconds'], 1000, 900000))
+        concurrency = VenueRosterOverlap(integer(manifest['minimumConcurrentMilliseconds'], 1000, 900000),
+                                         require_tracked=require_tracked)
     verify_player_sources = manifest.get('verifyPlayerSources', False)
     require(type(verify_player_sources) is bool and (not verify_player_sources or journals),
             'Player source verification requires a boolean option and the original world journals for the full batch')
+    verify_player_sources = verify_player_sources or require_tracked
     verify_tracking_begin = manifest.get('verifyTrackingBegin', False)
     require(type(verify_tracking_begin) is bool and (not verify_tracking_begin or journals),
             'Guarded Begin verification requires a boolean option and the original world journals for the full batch')

@@ -458,10 +458,13 @@ def preflight_fixture(root, label, *, server, peer, port, exchange=None):
 
 
 class FieldResultsTests(unittest.TestCase):
-    def concurrent_journals(self, root, manifest, offsets, edit_packet=None):
+    def concurrent_journals(self, root, manifest, offsets, edit_packet=None, *, tracked=False):
         for entry, offset in zip(manifest['sessions'], offsets, strict=True):
             session, _, _ = field.management_zip(root / entry['evidenceZip'])
             members = [{'id': player['id'], 'roomId': player['roomId'], 'connected': True} for player in session['players']]
+            if tracked:
+                for member in members:
+                    member['rig'] = {'kind': 'Tracked'}
             launch = root / entry['launcherReport']
             launcher = json.loads(launch.read_text(encoding='utf-8'))
             start = datetime.fromisoformat('2026-11-09T08:00:00+08:00') + timedelta(milliseconds=offset)
@@ -547,6 +550,75 @@ class FieldResultsTests(unittest.TestCase):
                     manifest['minimumConcurrentMilliseconds'] = value
                     path.write_text(json.dumps(manifest), encoding='utf-8')
                     with self.assertRaises(field.EvidenceError):
+                        field.verify_venue(path)
+
+    def test_venue_tracked_roster_checks_original_logs_and_continuous_overlap(self):
+        for mode, offsets, duration in (('Linked', [0], 7700), ('Independent', [0, 150, 300, 450, 600], 7100)):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, _ = venue_fixture(root, mode, remote=True, quest_per_room=5, with_journals=True)
+                self.concurrent_journals(root, manifest, offsets, tracked=True)
+                packed = self.pack_venue(root, manifest)
+                packed.pop('windowsPlayers')
+                packed.update(minimumConcurrentMilliseconds=duration, requireTrackedRoster=True)
+                path.write_text(json.dumps(packed), encoding='utf-8')
+                result = field.verify_venue(path)
+                self.assertEqual('Tracked', result['concurrentRoster']['rigKind'])
+                self.assertEqual(duration, result['concurrentRoster']['longestMilliseconds'])
+                sources = [row for session in result['sessions'] for row in session['playerSources']]
+                self.assertEqual(25, len(sources))
+                self.assertTrue(all(row['source'] == 'quest-logcat-tracked' for row in sources))
+                self.assertFalse(result['physicalHostsVerified'])
+                self.assertFalse(result['networkCapacityAccepted'])
+
+                def lose_tracking(packet):
+                    if packet['sequence'] == 40:
+                        packet['frame']['players'][-1].update(connected=False, rig={'kind': 'None'})
+
+                self.concurrent_journals(root, manifest, offsets, lose_tracking, tracked=True)
+                with self.assertRaisesRegex(field.EvidenceError, 'continuous concurrent roster'):
+                    field.verify_venue(path)
+
+                def replace_rig(packet):
+                    if packet['sequence'] == 40:
+                        packet['frame']['players'][-1]['rig']['kind'] = 'Simulated'
+
+                self.concurrent_journals(root, manifest, offsets, replace_rig, tracked=True)
+                with self.assertRaisesRegex(field.EvidenceError, 'room or rig differs from the original player log'):
+                    field.verify_venue(path)
+
+    def test_venue_tracked_roster_rejects_simulated_and_mock_sources(self):
+        for runtime in (None, 'Unity Mock Runtime', 'Example private runtime'):
+            with self.subTest(runtime=runtime), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, _ = venue_fixture(root, 'Linked', remote=True, quest_per_room=4, with_journals=True)
+                startup = PlayerSourceEvidenceTests.openxr_startup(runtime) if runtime else PlayerSourceEvidenceTests.desktop_startup
+                for row in manifest['sessions'][0]['players']:
+                    if 'logcatPid' not in row:
+                        log = root / row['log']
+                        log.write_text(startup + log.read_text(encoding='utf-8'), encoding='utf-8')
+                self.concurrent_journals(root, manifest, [0], tracked=True)
+                manifest['minimumConcurrentMilliseconds'] = 1000
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                self.assertTrue(field.verify_venue(path)['consistent'])
+                manifest['requireTrackedRoster'] = True
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                if runtime == 'Example private runtime':
+                    result = field.verify_venue(path)
+                    sources = result['sessions'][0]['playerSources']
+                    self.assertEqual(5, sum(row['source'] == 'windows-openxr-tracked' for row in sources))
+                else:
+                    with self.assertRaisesRegex(field.EvidenceError, 'original Quest or non-mock Windows OpenXR'):
+                        field.verify_venue(path)
+
+    def test_venue_tracked_roster_requires_a_boolean_and_concurrent_threshold(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path, manifest, _ = venue_fixture(Path(directory), 'Linked')
+            for value, message in (('true', 'boolean'), (None, 'boolean'), (True, 'minimumConcurrentMilliseconds')):
+                with self.subTest(value=value):
+                    manifest['requireTrackedRoster'] = value
+                    path.write_text(json.dumps(manifest), encoding='utf-8')
+                    with self.assertRaisesRegex(field.EvidenceError, message):
                         field.verify_venue(path)
 
     def pack_venue(self, root, manifest):
