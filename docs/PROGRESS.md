@@ -1,5 +1,14 @@
 # 開發進度
 
+## 2026-11-10 直接核對 Quest 原批次擷取報告
+
+五房驗收清單可引用 Quest 網路計畫和一份或多份完整的擷取報告。工具逐席核對日誌原始位元組、SHA-256、PID、房號、席位、IPv4、遊戲端點及伺服器戰績確認。Windows 席位可在同一清單補入。 [驗收操作](EXTERNAL_CLIENTS.md#直接使用-quest-批次擷取報告)
+
+- 本機通過 98 項 Python 測試，包含 43 項戰績驗收及擷取、40 項 Quest 部署、9 項 Quest UDP 預檢、6 項 LAN 預檢。其中一項以同一清單核對 25 席 Quest 日誌、25 份逐來源 UDP 配對及 25 筆戰績確認。
+- 以模擬 ADB 執行擷取工具及驗收命令。獨立五房使用兩份報告，核對 10 席 Quest、15 席 Windows 與 25 筆模擬戰績確認。合併場使用兩份報告，核對 25 席 Quest 與 25 筆模擬戰績確認。證據在 `artifacts/quest-capture-acceptance/run-efa2433fcf354f2997fbb7b6dac2f455`。
+- 重讀先前 Windows 同機測試 `run-91564904c33346809effddd207da53a3` 的原清單與封存。兩種模式各核對 25 筆原伺服器戰績確認及共六份原回放，摘要與前次完全相同。Quest 3、VIVE XR、MR 場地、廠商硬體及跨機 25 人仍待現地驗收。
+- 發布來源 `45090eaff9246b8ab6891a960790d9bd3288f578`。GitHub Actions job `129420022445` 因帳務或支出上限未啟動。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42693755827)
+
 ## 2026-11-10 在管理實例間交接任務範本
 
 控制台 0.31.62 可下載指定保存版本的 JSON 範本，再於另一個管理實例檢查及載入為新草稿。匯出包含原任務定義，目的端明確儲存後建立自己的版本。 [操作說明](MISSION_VERSIONS.md#在管理實例間交接任務範本)
