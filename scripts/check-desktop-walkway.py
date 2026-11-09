@@ -55,6 +55,24 @@ def exercise(v, mission, label):
     if (len(geometry) != len(expected) or {(p['feet']['x'], p['feet']['y'], p['feet']['z']) for p in geometry} != expected
             or any(p['kind'] != 'Sandbag' or p['roomId'] != 3 or p['yaw'] != 0 for p in geometry)):
         raise RuntimeError('Actual world cover differs from the saved mission')
+
+    def review_stage(stage, taps=None):
+        pid = v.processes[client].pid
+        filename = stage + '.review.json'
+        # Publish the current player and the precise input to acknowledge before accepting a review.
+        stage_details = {'playerPid': pid, 'review': filename}
+        expected_review = {'version': 1, 'stage': stage, 'pid': pid}
+        if taps is not None:
+            stage_details.update(key='w', targetTaps=taps)
+            expected_review.update(key='w', taps=taps)
+        v.stage(stage, **stage_details)
+        path = v.directory / filename
+        review = v.wait(lambda: venue.read_json(path) if path.exists() else None, 180, stage + ' keyboard review')
+        if review != expected_review:
+            raise RuntimeError('Keyboard review does not match the original player stage')
+
+    # Focus the original window and dismiss any game overlay while the mission is still Preparing.
+    review_stage('prepare-' + label)
     begin = v.command(entry, 'Begin')['appliedAtSequence']
     references = {}
 
@@ -71,11 +89,7 @@ def exercise(v, mission, label):
     references['before'] = v.wait(lambda: sample(lambda z: abs(z + 3) < .001), 20, label + ' original spawn')
 
     def input_stage(stage, predicate, taps):
-        v.stage(stage, playerPid=v.processes[client].pid, key='w', targetTaps=taps, review=stage + '.review.json')
-        path = v.directory / (stage + '.review.json')
-        review = v.wait(lambda: venue.read_json(path) if path.exists() else None, 180, stage + ' keyboard review')
-        if review != {'version': 1, 'stage': stage, 'key': 'w', 'taps': taps, 'pid': v.processes[client].pid}:
-            raise RuntimeError('Keyboard review does not match the original input stage')
+        review_stage(stage, taps)
         references[stage] = v.wait(lambda: sample(predicate), 8, stage + ' accepted position')
         v.save(label + '-references.json', references)
 
