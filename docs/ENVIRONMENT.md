@@ -1,5 +1,17 @@
 # 天氣聲光與版本化重現 v0.16
 
+## 全館即時環境
+
+Windows 管理包 0.31.35 起，主控可在五房總覽的「全館即時環境」選擇天氣、白天或夜晚，以及閃電開關。確認視窗顯示本次房號與設定。獨立模式會在同一筆管理交易保存各場命令，合併模式只會保存一筆。各遊戲來源收到命令後依自己的活動時間套用。
+
+這個操作只涵蓋執行中的場次，原場的 VR 或 MR 模式與保存的任務版本會保留。若送出前有房間改變階段或更新環境，整批會拒絕，主控可重新整理並確認。回覆遺失時可重送原請求。房卡先顯示「全館環境待確認」，收到對上原環境命令序號和三項設定的有效快照後顯示「已套用」。快照超過原 1.5 秒有效窗會回到待確認。單房後續覆蓋環境時，該房的全館標記會清除。
+
+`GET /api/venue/phase` 的 `environment` 預覽提供房號、場次 ID、階段與環境序號。`POST /api/venue/phase` 使用 `SetEnvironment`、原本的 `sessionId`、`phaseSinceSequence`、`environmentSinceSequence`，以及含 `weather`、`timeOfDay` 和 `lightning` 的 `environment`。同一原請求用同一 `Idempotency-Key` 取回回條。`GET /api/rooms/readiness` 的 `venueEnvironment` 附環境值、原命令序號及有效的世界快照序號。
+
+保存全館環境紀錄的管理資料庫須由 0.31.35 或更新的管理包開啟。
+
+## 聲光與回放
+
 需求 5 的顯示來源為同一份 C# 9／.NET Standard 2.1 `EnvironmentPresentation`。Unity 有雨線網格、霧、日夜光照、閃電及兩個 AudioSource 的接入來源；瀏覽器觀戰／持久世界回放已有實際 Chromium／Web Audio 驗證。後續真正 Unity 已通過整個工程匯入／編譯、Shader／AudioImporter、NGO、34 項 EditMode、Windows 及 Quest APK；五房 PC 已執行各自環境，完整 GPU／聲音聽感與頭盔仍待驗。下方保留初版 v0.16 診斷歷史，最新範圍以 PROGRESS／DESKTOP_VENUE 為準。
 
 已新增 [原生Windows聲光量測](NATIVE_WEATHER.md)：實際GPU閃電截圖、玩家AudioListener雨雷混音與暫停／晴天靜音；沒有錄麥克風或其他應用程式。DSP非零與GPU亮度證據不等同人員聽感、實體裝置／聲壓或頭盔。

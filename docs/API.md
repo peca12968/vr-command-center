@@ -1,5 +1,7 @@
 # 管理、統計與玩家接入 API
 
+管理包 0.31.35 支援主控使用 `POST /api/venue/phase` 批次更新執行中場次的環境。預覽及送出需對上原場次的階段與環境序號，各房的遊戲端確認由 `GET /api/rooms/readiness` 提供。 [全館環境契約](ENVIRONMENT.md#全館即時環境)
+
 API／UI0.27新增唯讀 `GET /api/sessions/{id}/report.csv`，Ended且戰鬥精確seal完成才產生reportVersion1最終CSV；未完成回409，僅操作員依現有房間讀取範圍可匯出，GameServer回403。Bearer認證、UTF-8 BOM及no-store；欄位／重試／範圍見 [REPORTS](REPORTS.md)。不新增持久schema或Unity wire，遊戲端維持0.28／NGO26，原降版限制仍適用。
 
 最新API／UI0.26新增player-body-v1及playerPresentationVersion1、每玩家hasPlayerPresentation／walking；舊缺失保持0，來源／API／UI／全部NGO26遊戲端一起更新。新profile需原enemy／weapon／雙方fire版本1，漏標記與無版本姿態由伺服器拒絕；envelope6／world schema1／驗票2保持，不代表可降reader。規範見 [PLAYER_BODY](PLAYER_BODY.md)。
