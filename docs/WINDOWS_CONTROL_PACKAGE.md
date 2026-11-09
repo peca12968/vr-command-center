@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-09 `windows-control-0.31.44-win-x64.zip` 加入個人事件回放。ZIP 為 52,705,739 bytes，SHA-256 `973a31e68d7e3ac6849d22b03068f0ad52b8505fa598d8c2129dc10dcd6532c9`。解壓核對 525 個清單檔案，含 505 個執行環境檔案，通過 106 項管理包及 514 項 Chromium 檢查。 [戰後檢討](REPORTS.md#從戰績開啟個人回放)
+
 2026-11-09 `windows-control-0.31.43-win-x64.zip` 加入任務回放戰鬥事件搜尋。ZIP 為 52,702,213 bytes，SHA-256 `f10eefebbfdd050d6bba691007c6abae79ba3b0ba03c37b7c39e4c0d53af2827`。解壓核對 525 個清單檔案，含 505 個執行環境檔案，通過 106 項管理包及 509 項 Chromium 檢查。 [回放操作](WORLD_RECORDING.md#依房間與種類搜尋戰鬥事件)
 
 2026-11-09 `windows-control-0.31.42-win-x64.zip` 加入 VR 五房原始連線檔的線上驗票與端點核對，供 Quest 部署工具使用。ZIP 為 52,691,458 bytes，SHA-256 `c0221ebcae33a688d630f1b495fe984f3013144983ba01f3fa0a5a4fd42cfdb4`。解壓核對 522 個清單檔案，含 502 個執行環境檔案，通過 106 項管理包及 20 項 Chromium 專項。 [部署操作](QUEST3.md#直接使用-vr-五房連線-zip)
