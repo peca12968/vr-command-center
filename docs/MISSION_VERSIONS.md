@@ -27,6 +27,8 @@
 
 API 可用 `GET /api/missions/{id}/template` 下載精確版本，檔案格式為 UTF-8 JSON，包含 `format: "vr-command-mission-template"`、`version: 1` 及 `definition`。用 `POST /api/mission-templates/check-file` 傳送原始檔案，大小上限 512 KiB，可含 UTF-8 BOM。檢查只讀取資料並回傳已驗證的範本。兩個操作都要求主控憑證。
 
+Windows 三包原生測試可加 `--prepare-independent-set --mission-template <匯出的 VR 範本>`，在隔離管理實例匯入同一份檔案，再核對五房獨立及合併模式的原生世界。 [三包測試方式](WINDOWS_SERVER_PACKAGE.md#三個可攜包整合驗證)
+
 ## 五房各自獨立
 
 1. 使用主控憑證登入，在「房間與場次」選擇已保存的 VR 或 MR 任務版本。
