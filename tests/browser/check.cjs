@@ -142,6 +142,13 @@ async function main() {
         browser: await browser.version(), result: 'passed', scope: 'whole-venue phase transitions with real API, SQLite and Chromium' }, null, 2));
       console.log(`PASS: ${checks} focused venue phase checks. Screenshots: ${screenshots}`); return;
     }
+    if (process.argv.includes('--full-tracking-only')) {
+      await require('./full-tracking-begin-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
+      check(browserErrors.length === 0, 'Full tracking Begin has no uncaught browser or policy errors');
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks,
+        browser: await browser.version(), result: 'passed', scope: 'guarded venue Begin with accepted synthetic poses, real API and Chromium' }, null, 2));
+      console.log(`PASS: ${checks} focused full tracking checks. Screenshots: ${screenshots}`); return;
+    }
     await page.goto(base + '/console/');
     await page.locator('#login-key').fill('wrong-key'); await page.locator('#login-form button').click();
     await page.locator('#notice.error').waitFor();
@@ -478,6 +485,7 @@ async function main() {
     await require('./vr-venue-tickets-browser.cjs')({ context, api, tokens, base, root, directory, screenshots, check, captureErrors });
     await require('./room-clock-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
     await require('./venue-phase-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
+    await require('./full-tracking-begin-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
     await require('./mission-template-browser.cjs')({ context, api, tokens, directory, root, base, screenshots, check, captureErrors, availablePort });
     check(browserErrors.length === 0, 'Browser has no uncaught script errors or CSP violations');
     await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), playwright: require('playwright/package.json').version, result: 'passed', scope: 'isolated real API and browser console; no Unity or headset test' }, null, 2));

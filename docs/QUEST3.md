@@ -264,6 +264,8 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 
 以主控登入「房間與場次」，在「VR／MR 混合五房配票」按「讀取五房名冊」。核對各房的模式、名冊及端點，只為 MR 房選擇已鎖定的原始校正 JSON，然後下載 `vr-mr-venue-deployment.zip`。包內有 `venue.json`（版本 2、`Mixed`、`Independent`）、五個房間的連線 ZIP，以及各 MR 房的原始校正檔。票券自簽發起有效五分鐘，整包由主控保管。
 
+25 席完成入場後，可在全館場次控制啟用五房追蹤開場條件。管理服務會在受理時重新核對每房原席位及最新遊戲快照。 [五房追蹤驗收開場](PLAYER_READINESS.md#五房追蹤驗收開場)
+
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-mr-venue-deployment.zip
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-mr-venue-deployment.zip `

@@ -231,7 +231,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     if (!active || failed || !room || document.visibilityState !== 'visible') return null;
     return roomMrTrackingPauseTarget(report, room, sessions.find(row => row.id === room.sessionId), performance.now() - started, actor);
   }
-  function venueBegin(target, roomId) {
+  function venueBegin(target, roomId, requireFullTracking = false) {
     const waiting = (state, text) => ({ state, text, ready: false });
     if (failed) return waiting('Unavailable', '無法確認，正在重試');
     const { rooms, sessions } = getState();
@@ -245,8 +245,11 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     if (source !== 'Fresh') return waiting(source, labels[source]);
     const mr = session.environment.mode === 'MR';
     const empty = '本房未編列席位';
+    if (requireFullTracking && details?.state !== 'WaitingRevision' && details?.state !== 'WaitingProfile'
+      && (row.registered !== room.capacity || row.trackedReady !== room.capacity))
+      return waiting('WaitingFullTracking', `名冊 ${row.registered}/${room.capacity} 席 · 追蹤 ${row.trackedReady}/${room.capacity} 席`);
     if (row.venueBeginReady === true)
-      return { state: 'Ready', text: row.registered ? `${row.registered} 席${mr ? '追蹤' : '姿態'}就緒` : empty, ready: true };
+      return { state: 'Ready', text: row.registered ? `${row.registered} 席${mr || requireFullTracking ? '追蹤' : '姿態'}就緒` : empty, ready: true };
     if (details?.state === 'WaitingRevision') return waiting('WaitingRevision', '等待遊戲端同步最新設定與名冊');
     if (details?.state === 'WaitingProfile') return waiting('WaitingProfile', '等待支援 Quest 3 MR 的遊戲來源');
     if (details?.state === 'WaitingPlayers' && Array.isArray(details.waitingSeats) && details.waitingSeats.length <= row.registered
@@ -258,8 +261,10 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     }
     return waiting('Unavailable', '開場條件尚未確認');
   }
-  function venueReady(target, action) {
-    if (action === 'Begin') return venueBegin(target, target.roomIds[0]).ready;
+  function venueReady(target, action, requireFullTracking = false) {
+    if (action === 'Begin') return requireFullTracking
+      ? target.roomIds.every(room => venueBegin(target, room, true).ready)
+      : venueBegin(target, target.roomIds[0]).ready;
     if (!active || failed) return false;
     const { rooms, sessions } = getState();
     const room = rooms.find(row => row.id === target.roomIds[0] && row.sessionId === target.sessionId);

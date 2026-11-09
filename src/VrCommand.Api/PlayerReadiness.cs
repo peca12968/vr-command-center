@@ -69,10 +69,11 @@ public sealed partial class WorldRecordings
     }
 
     public VenuePhaseReceipt ExecuteVenuePhase(ControlAction action, VenuePhaseFence?[]? fences, Guid requestId, OperatorIdentity actor,
-        VenueClimate? climate = null, VenueEnemyPolicy? enemyPolicy = null)
+        VenueClimate? climate = null, VenueEnemyPolicy? enemyPolicy = null, bool requireFullTracking = false)
     {
         if (action is not (ControlAction.Begin or ControlAction.Resume))
-            return manager.ExecuteVenuePhase(action, fences, requestId, actor, climate: climate, enemyPolicy: enemyPolicy);
+            return manager.ExecuteVenuePhase(action, fences, requestId, actor, climate: climate, enemyPolicy: enemyPolicy,
+                requireFullTracking: requireFullTracking);
         lock (gate)
         {
             var plan = manager.ReadVenuePhase(actor);
@@ -85,13 +86,18 @@ public sealed partial class WorldRecordings
                 var (report, _, phase, beginState, _, _, _, _) = ReadReadinessSnapshot(target.SessionId, actor);
                 if (begin ? beginState == "Ready" : phase is { Action: ControlAction.Pause, WorldSequence: not null }
                     && phase.AppliedAtSequence == target.PhaseSinceSequence)
-                    reports.Add((report, new(target.PhaseSinceSequence, report.SessionSequence, begin || report.MrResumeState == "Ready")));
+                {
+                    var trackedRooms = requireFullTracking ? report.Players.GroupBy(player => player.RoomId)
+                        .Where(room => room.Count() == SessionManager.PlayersPerRoom && room.All(player => ReadyToBegin(player, trackedRequired: true)))
+                        .Select(room => room.Key).ToArray() : null;
+                    reports.Add((report, new(target.PhaseSinceSequence, report.SessionSequence, begin || report.MrResumeState == "Ready", trackedRooms)));
+                }
             }
             var now = readinessClock.GetUtcNow();
             var ready = reports.Where(row => row.Report.CapturedAtUtc is { } captured
                 && (now - captured).TotalMilliseconds is >= -FutureSourceToleranceMilliseconds and <= MaxSourceAgeMilliseconds)
                 .ToDictionary(row => row.Report.SessionId, row => row.Witness);
-            return manager.ExecuteVenuePhase(action, fences, requestId, actor, ready, climate, enemyPolicy);
+            return manager.ExecuteVenuePhase(action, fences, requestId, actor, ready, climate, enemyPolicy, requireFullTracking);
         }
     }
 

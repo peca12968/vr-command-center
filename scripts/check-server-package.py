@@ -71,6 +71,7 @@ def main():
     p.add_argument('--check-room-clocks', action='store_true', help='Verify room clocks and the original pause/resume boundaries in both modes')
     p.add_argument('--check-venue-phase', action='store_true', help='Verify whole-venue pause and resume against both native topologies')
     p.add_argument('--check-venue-begin', action='store_true', help='Start both native topologies with one witnessed Begin per topology')
+    p.add_argument('--check-venue-tracking-gate', action='store_true', help='Reject full tracking Begin while the same native roster is otherwise ready')
     p.add_argument('--check-venue-end', action='store_true', help='End each native topology in one batch and read its original archives')
     p.add_argument('--check-venue-reports', action='store_true', help='Verify the original reports ZIP for each native End batch')
     p.add_argument('--check-venue-replay-ui', action='store_true', help='Open the original native archives through the shipped console')
@@ -138,6 +139,7 @@ def main():
     if args.check_room_clocks and not args.player_package:p.error('--check-room-clocks requires five players per room')
     if args.check_venue_phase and not args.check_room_clocks:p.error('--check-venue-phase requires --check-room-clocks')
     if args.check_venue_begin and not args.player_package:p.error('--check-venue-begin requires the three-package check')
+    if args.check_venue_tracking_gate and not args.check_venue_begin:p.error('--check-venue-tracking-gate requires --check-venue-begin')
     if args.check_venue_end and (not args.player_package or args.observe_closure_ui):
         p.error('--check-venue-end requires the three-package check and its own End path')
     if args.check_venue_reports and (not args.check_venue_end or not args.check_room_reports):
@@ -2278,6 +2280,13 @@ def main():
                         return rows
                 preparing=wait(begin_when_ready,60,'five fresh original Preparing room aggregates')
                 body={'action':'Begin','targets':targets};key=str(uuid.uuid4())
+                if args.check_venue_tracking_gate:
+                    denied=request(route,{**body,'requireFullTracking':True},request_id=str(uuid.uuid4()),expected=409)
+                    unchanged=request(route)['begin']
+                    check(all(row['registered']==5 and row['trackedReady']<5 for row in preparing)
+                          and denied['code']=='venue-begin-not-ready' and denied['roomIds']==list(range(1,6))
+                          and unchanged==preview, 'full tracking Begin refuses the native simulated roster without advancing any room')
+                    save(('linked' if linked else 'independent')+'-full-tracking-denied.json',denied)
                 receipt=request(route,body,request_id=key)
                 applied={row['sessionId']:row['appliedAtSequence'] for row in receipt['sessions']}
                 check(not receipt['duplicate'] and applied=={sid:sequence+1 for sid,sequence in expected.items()},

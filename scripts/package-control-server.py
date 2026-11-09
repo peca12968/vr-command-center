@@ -5,7 +5,7 @@ from pathlib import Path,PurePosixPath
 ROOT=Path(__file__).resolve().parents[1];TOP='VRCommand-ControlServer'
 SECRET_KEYS={'operatorkeys','operatorkeyfile','gameserverkey','jointicket','playerticketsigningkey','controlpipetoken'}
 FORBIDDEN_PARTS={'data','missions','sessions','telemetry','journals'}
-README='''VR Command Windows 管理服務包 API 0.31.0／控制台 0.31.64
+README='''VR Command Windows 管理服務包 API 0.31.0／控制台 0.31.65
 
 完整解壓後開啟 Start-Control.exe。
 1. 首次選擇監聽IPv4與埠號（預設127.0.0.1:5081），按「新增資料實例」。
@@ -31,6 +31,7 @@ GameServer角色供遊戲伺服器使用，不能拿到玩家端；玩家使用�
 房間總覽以最近接受的有效快照顯示活動時間或自動結束倒數。
 主控可一次暫停執行中場次，再繼續仍停在全館暫停階段的場次。
 房卡顯示全館命令是否已由遊戲端套用，批次繼續須等所有目標確認暫停。
+全館開始可選擇要求五房各有五席有效追蹤，管理服務會在受理前再核對原遊戲快照。
 停止管理API不會假造任務End、世界seal或玩家結果；遊戲伺服器與任務收尾分開處理。
 
 執行環境：Windows x64及.NET Framework 4.8。API已自含.NET/ASP.NET Core，不需安裝Python或.NET SDK。
@@ -72,7 +73,7 @@ def payload(name,content=None):
 def publication(build):
     build=plain(build);receipt=read(build/'publish-receipt.json');folder=plain(build/'publication')
     if receipt.get('schemaVersion')!=1 or receipt.get('target')!='win-x64' or receipt.get('apiVersion')!='0.31.0':raise ValueError('Use an actual supported Windows publication')
-    if receipt.get('consoleVersion')!='0.31.64':raise ValueError('Publish the current console 0.31.64 before packaging')
+    if receipt.get('consoleVersion')!='0.31.65':raise ValueError('Publish the current console 0.31.65 before packaging')
     expected=receipt['files'];actual={p.relative_to(folder).as_posix() for p in folder.rglob('*') if p.is_file()}
     if actual!=set(expected):raise ValueError('Publication contains missing or additional files')
     for name,value in expected.items():

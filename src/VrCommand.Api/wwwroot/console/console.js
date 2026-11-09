@@ -178,7 +178,8 @@ function logout() {
   replay.active(false); replay.reset(); world.active(false); world.reset(); readiness.active(false); readiness.reset(); roomReadiness.active(false); connections.active(false); connections.reset();
   state.epoch++; state.key = ''; state.actor = null; state.selected = null; state.session = null; state.pending = null;
   state.rooms = []; state.venue = null; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
-  renderVenueBegin([], []);
+  $('venue-full-tracking').checked = false;
+  renderVenueBegin([], false);
   venueHistory.reset(); renderVenueClosure(null);
   state.props = []; state.prop = -1; clearPropHistory();
   roomPlan.reset(); placement.reset();
@@ -465,14 +466,19 @@ function venueClimateText({ weather, timeOfDay, lightning }) {
 function venueEnemyText({ behavior, autoAttack }) {
   return `${behaviorNames[behavior]} · ${autoAttack ? '自動攻擊開啟' : '自動攻擊關閉'}`;
 }
-function renderVenueBegin(targets, waiting) {
+function renderVenueBegin(targets, waiting, requireFullTracking = false) {
   const summary = $('venue-begin-evidence'), list = $('venue-begin-rooms');
   const rows = targets.flatMap(target => target.roomIds.map(roomId => ({
-    roomId, ...roomReadiness.venueBegin(target, roomId)
-  }))).sort((a, b) => a.roomId - b.roomId);
+    roomId, ...roomReadiness.venueBegin(target, roomId, requireFullTracking)
+  })));
+  if (requireFullTracking && rows.length) {
+    for (const roomId of [1, 2, 3, 4, 5])
+      if (!rows.some(row => row.roomId === roomId)) rows.push({ roomId, state: 'NotPreparing', text: '尚無準備中的目標場次' });
+  }
+  rows.sort((a, b) => a.roomId - b.roomId);
   summary.hidden = list.hidden = !rows.length;
   const message = !rows.length ? '' : `準備開始房間 ${venueRoomText(targets)} · `
-    + (waiting.length ? '仍有開場條件待確認，請查看各房狀態。' : '目標場次已就緒。');
+    + (waiting ? '仍有開場條件待確認，請查看各房狀態。' : '目標場次已就緒。');
   if (summary.textContent !== message) summary.textContent = message;
   const signature = JSON.stringify(rows);
   if (list.dataset.rows === signature) return;
@@ -490,9 +496,12 @@ function applyVenuePermissions() {
   const locked = state.busy || !!state.pending || !master();
   venueHistory.update(!locked);
   vrVenue.update();
-  const starting = begin.filter(target => !roomReadiness.venueReady(target, 'Begin'));
+  const requireFullTracking = $('venue-full-tracking').checked;
+  const starting = (requireFullTracking && begin.flatMap(target => target.roomIds).length !== 5)
+    || begin.some(target => !roomReadiness.venueReady(target, 'Begin', requireFullTracking));
   const waiting = resume.filter(target => !roomReadiness.venueReady(target));
-  $('venue-begin').disabled = locked || !begin.length || !!starting.length;
+  $('venue-full-tracking').disabled = locked || !begin.length;
+  $('venue-begin').disabled = locked || !begin.length || starting;
   $('venue-pause').disabled = locked || !pause.length;
   $('venue-resume').disabled = locked || !resume.length || !!waiting.length;
   $('venue-end').disabled = locked || !end.length;
@@ -506,7 +515,7 @@ function applyVenuePermissions() {
   const describe = targets => targets.length ? '房間 ' + venueRoomText(targets) : '無';
   $('venue-end-targets').hidden = !end.length;
   $('venue-end-targets').textContent = end.length ? `可結束 ${describe(end)} · 包含準備、執行與暫停的場次。` : '';
-  renderVenueBegin(begin, starting);
+  renderVenueBegin(begin, starting, requireFullTracking);
   $('venue-phase-targets').textContent = state.venue ? `可暫停 ${describe(pause)} · 可繼續 ${describe(resume)}` : '等待房間狀態。';
   const evidence = $('venue-phase-evidence');
   evidence.hidden = !resume.length;
@@ -516,14 +525,18 @@ function applyVenuePermissions() {
 async function venuePhase(action, { environment, enemyPolicy } = {}) {
   if (!master() || state.pending) return;
   const targets = venueTargets(action);
-  if (!targets.length || (['Begin', 'Resume'].includes(action) && targets.some(target => !roomReadiness.venueReady(target, action)))) return;
+  const requireFullTracking = action === 'Begin' && $('venue-full-tracking').checked;
+  if (!targets.length || (requireFullTracking && targets.flatMap(target => target.roomIds).length !== 5)
+    || (['Begin', 'Resume'].includes(action) && targets.some(target => !roomReadiness.venueReady(target, action, requireFullTracking)))) return;
   const verb = { Begin: '開始', Pause: '暫停', Resume: '繼續', End: '結束', SetEnvironment: '設定環境給', SetEnemies: '設定敵軍策略給' }[action];
   const details = environment ? venueClimateText(environment) : enemyPolicy ? venueEnemyText(enemyPolicy) : '';
-  const message = `${verb}房間 ${venueRoomText(targets)} 的 ${targets.length} 個場次？` + (details ? '\n' + details : '');
+  const message = `${verb}房間 ${venueRoomText(targets)} 的 ${targets.length} 個場次？`
+    + (requireFullTracking ? '\n須全館 25 席追蹤就緒。' : '') + (details ? '\n' + details : '');
   if (!confirm(action === 'End' ? message + '\n包含尚未開始的準備場次。結束後無法繼續原場次。' : message)) return;
   state.pending = { kind: 'venue-phase', path: '/venue/phase', method: 'POST', requestId: uuid(),
     body: { action, targets: targets.map(({ sessionId, phaseSinceSequence, sessionSequence, environmentSinceSequence, enemiesSinceSequence }) =>
-      ({ sessionId, phaseSinceSequence, sessionSequence, environmentSinceSequence, enemiesSinceSequence })), environment, enemyPolicy } };
+      ({ sessionId, phaseSinceSequence, sessionSequence, environmentSinceSequence, enemiesSinceSequence })), environment, enemyPolicy,
+      ...(requireFullTracking ? { requireFullTracking } : {}) } };
   await sendPending();
 }
 async function selectVenueClosure() {
@@ -1113,6 +1126,7 @@ $('reload-environment').addEventListener('click', loadEnvironment);
 $('reload-enemies').addEventListener('click', loadEnemies);
 $('retry-command').addEventListener('click', () => run(sendPending));
 $('venue-begin').addEventListener('click', () => run(() => venuePhase('Begin')));
+$('venue-full-tracking').addEventListener('change', applyVenuePermissions);
 $('venue-pause').addEventListener('click', () => run(() => venuePhase('Pause')));
 $('venue-resume').addEventListener('click', () => run(() => venuePhase('Resume')));
 $('venue-end').addEventListener('click', () => run(() => venuePhase('End')));
