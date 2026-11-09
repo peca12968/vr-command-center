@@ -6,7 +6,11 @@ Windows 管理包 0.31.35 起，主控可在五房總覽的「全館即時環境
 
 這個操作只涵蓋執行中的場次，原場的 VR 或 MR 模式與保存的任務版本會保留。若送出前有房間改變階段或更新環境，整批會拒絕，主控可重新整理並確認。回覆遺失時可重送原請求。房卡先顯示「全館環境待確認」，收到對上原環境命令序號和三項設定的有效快照後顯示「已套用」。快照超過原 1.5 秒有效窗會回到待確認。單房後續覆蓋環境時，該房的全館標記會清除。
 
+管理包 0.31.57 的房卡也會確認單一場次的環境指令。全館或單一場次的指令套用後，按「檢視環境快照」可在該房的俯視圖停在原錄製中確認該設定的一格。它是當時保存的畫面。來源過期、場次變更或新指令尚未確認時，入口會隱藏。合併場次的房卡共用原錄製及快照，點選時依房號定位視角。
+
 `GET /api/venue/phase` 的 `environment` 預覽提供房號、場次 ID、階段與環境序號。`POST /api/venue/phase` 使用 `SetEnvironment`、原本的 `sessionId`、`phaseSinceSequence`、`environmentSinceSequence`，以及含 `weather`、`timeOfDay` 和 `lightning` 的 `environment`。同一原請求用同一 `Idempotency-Key` 取回回條。`GET /api/rooms/readiness` 的 `venueEnvironment` 附環境值、原命令序號及有效的世界快照序號。
+
+同一房間回應的 `environment` 同時涵蓋全館和單一場次指令，包含 `setting`、`venue` 與已確認時的 `streamId`。檢視時用同一格的 `fromFrame` 和 `throughFrame` 讀原場次錄製，核對來源、原環境指令序號及三項環境設定。
 
 保存全館環境紀錄的管理資料庫須由 0.31.35 或更新的管理包開啟。
 

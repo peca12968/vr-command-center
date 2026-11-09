@@ -302,24 +302,77 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const acceptedClimate = page.waitForResponse(response => response.url().endsWith('/api/venue/phase') && response.request().method() === 'POST');
     await page.locator('#venue-apply-environment').click();
     await climateConfirmed;
-    assert.equal((await acceptedClimate).status(), 200);
+    const climateResponse = await acceptedClimate;
+    assert.equal(climateResponse.status(), 200);
+    const climateReceipt = await climateResponse.json();
     const changedClimate = await Promise.all(preparing.map(id => api(`/sessions/${id}`)));
     check(climateDialog.includes('房間 1、2') && climateDialog.includes('暴風雨 · 夜晚 · 閃電開啟')
       && changedClimate.every(session => session.environment.weather === 'Storm' && session.environment.timeOfDay === 'Night' && session.environment.lightning),
       'The console confirms the target rooms and applies the three climate values in one request');
     const roomEnvironment = room => page.locator(`[data-room-venue-environment="${room}"]`);
+    const environmentFrame = room => page.locator(`[data-room-environment-frame="${room}"]`);
     await roomEnvironment(1).filter({ hasText: '全館環境待確認' }).waitFor();
+    check(await environmentFrame(1).isHidden(), 'An accepted venue command does not offer a replay before its matching game frame');
     await publishUntil(first, changedClimate[0], () => {
       second(changedClimate[1]);
       return Promise.all([1, 2].map(room => roomEnvironment(room).filter({ hasText: '全館環境已套用' }).isVisible())).then(rows => rows.every(Boolean));
     });
-    await page.locator('#venue-environment').screenshot({ path: path.join(screenshots, 'venue-environment.png') });
     check(true, 'Both rooms confirm their own matching environment frames');
-    await updateRoom2({ ...changedClimate[1].environment, weather: 'Rain', lightning: false });
+    async function openEnvironment(room, id) {
+      const watched = page.waitForResponse(response => new URL(response.url()).pathname === `/api/sessions/${id}/world/watch`);
+      await environmentFrame(room).click();
+      const response = await watched;
+      assert.equal(response.status(), 200);
+      const query = new URL(response.url()).searchParams;
+      assert.equal(query.get('mode'), 'replay');
+      assert.equal(query.get('fromFrame'), query.get('throughFrame'));
+      const frame = Number(query.get('fromFrame'));
+      assert(frame > 0);
+      return frame;
+    }
+    const original = await openEnvironment(1, preparing[0]);
+    await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${original} 格的環境快照` }).waitFor();
+    const durableClimate = await api(`/sessions/${preparing[0]}/world/frames/${original}`);
+    check(durableClimate.packet.observedSequence >= climateReceipt.sessions.find(row => row.sessionId === preparing[0]).appliedAtSequence
+      && await page.locator('#world-room').inputValue() === '1' && await page.locator('#world-camera').inputValue() === 'top'
+      && await page.locator('#world-environment').innerText() === 'Storm · 夜間 · 雷電啟用',
+      'The venue weather shortcut pauses on a saved frame at or after its original command, with the exact room and environment');
+    await page.locator('#world-viewport').screenshot({ path: path.join(screenshots, 'venue-environment-frame.png') });
+    await page.locator('#tab-operations').click();
+    const override = await updateRoom2({ ...changedClimate[1].environment, weather: 'Rain', lightning: false });
     await page.locator('#refresh').click();
     await roomEnvironment(2).waitFor({ state: 'hidden' });
+    const localEnvironment = page.locator('[data-room-environment="2"]');
+    await localEnvironment.filter({ hasText: '場次環境待確認' }).waitFor();
+    second(changedClimate[1]);
+    check(await environmentFrame(2).isHidden(), 'A single-room override clears the venue marker and cannot reuse the previous command frame');
+    await publishUntil(second, override.session, () => environmentFrame(2).isVisible());
+    const scoped = (await api('/rooms/readiness', 'GET', undefined, 'Room2')).rooms;
+    check(scoped.length === 1 && scoped[0].roomId === 2 && scoped[0].environment.venue === false
+      && scoped[0].environment.setting.appliedAtSequence === override.appliedAtSequence && !scoped[0].venueEnvironment,
+      'The scoped readiness response confirms the single-room command without leaking another room');
+    const weatherRoute = `**/api/sessions/${preparing[1]}/world/watch?**`;
+    await page.route(weatherRoute, async route => {
+      const original = await route.fetch();
+      const body = (await original.text()).replace(/event: frame\ndata: (.+)/, (_, raw) => {
+        const value = JSON.parse(raw); value.packet.lightning = true;
+        return 'event: frame\ndata: ' + JSON.stringify(value);
+      });
+      await route.fulfill({ response: original, body });
+    }, { times: 1 });
+    await publishUntil(second, override.session, () => environmentFrame(2).isVisible());
+    await openEnvironment(2, preparing[1]);
+    await page.locator('#world-message').filter({ hasText: '回應快照的環境或指令序號不同' }).waitFor();
+    check(await page.locator('#world-player').isHidden(), 'A substituted lightning value cannot open the anchored frame');
+    await page.locator('#tab-operations').click();
+    await publishUntil(second, override.session, () => environmentFrame(2).isVisible());
+    const localFrame = await openEnvironment(2, preparing[1]);
+    await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${localFrame} 格的環境快照` }).waitFor();
+    check(await page.locator('#world-room').inputValue() === '2' && await page.locator('#world-environment').innerText() === 'Rain · 夜間 · 無雷電',
+      'The single-room shortcut opens the new rain setting without the previous lightning flag');
+    await page.locator('#tab-operations').click();
     await roomEnvironment(1).filter({ hasText: '快照已過期' }).waitFor();
-    check(await roomEnvironment(1).filter({ hasText: '全館環境待確認' }).isVisible(),
+    check(await roomEnvironment(1).filter({ hasText: '全館環境待確認' }).isVisible() && await environmentFrame(1).isHidden(),
       'A room-specific override clears its marker and the other room expires independently');
 
     const policy = { behavior: 'Patrol', autoAttack: true };

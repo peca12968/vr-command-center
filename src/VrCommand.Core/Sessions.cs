@@ -122,7 +122,8 @@ public sealed partial class SessionManager
 
     public SessionView Get(Guid id, OperatorIdentity? actor = null) => GetWithPhase(id, actor).View;
 
-    public (SessionView View, long PhaseSinceSequence, ControlAction? VenueAction, long? VenueEnvironmentSequence, long? VenueEnemiesSequence)
+    public (SessionView View, long PhaseSinceSequence, ControlAction? VenueAction, long? VenueEnvironmentSequence, long? VenueEnemiesSequence,
+        long EnvironmentSinceSequence)
         GetWithPhase(Guid id, OperatorIdentity? actor = null)
     {
         lock (gate)
@@ -133,7 +134,8 @@ public sealed partial class SessionManager
             return (Snapshot(history.View), history.PhaseSinceSequence,
                 venue.Venue is null ? null : venue.Read<ControlCommand>().Action,
                 history.Events[(int)history.EnvironmentSinceSequence - 1].Venue is null ? null : history.EnvironmentSinceSequence,
-                history.Events[(int)history.EnemiesSinceSequence - 1].Venue is null ? null : history.EnemiesSinceSequence);
+                history.Events[(int)history.EnemiesSinceSequence - 1].Venue is null ? null : history.EnemiesSinceSequence,
+                history.EnvironmentSinceSequence);
         }
     }
 

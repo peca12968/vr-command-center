@@ -283,7 +283,7 @@ function renderRooms() {
       phase.dataset.roomVenuePhase = room.id;
       phase.hidden = true;
       const environment = element('p', '', 'hint');
-      environment.dataset.roomVenueEnvironment = room.id;
+      environment.dataset.roomEnvironment = room.id;
       environment.hidden = true;
       const enemies = element('p', '', 'hint');
       enemies.dataset.roomVenueEnemies = room.id;
@@ -302,7 +302,15 @@ function renderRooms() {
         if (state.busy || state.pending || !state.rooms.some(row => row.id === room.id && row.sessionId === room.sessionId)) return;
         tab('world', { mode: 'live', sessionId: room.sessionId, roomId: room.id });
       });
-      actions.append(watch);
+      const environment = element('button', '檢視環境快照', 'quiet small');
+      environment.type = 'button'; environment.disabled = button.disabled; environment.hidden = true;
+      environment.dataset.roomEnvironmentFrame = room.id;
+      environment.addEventListener('click', () => {
+        if (state.busy || state.pending) return;
+        const target = roomReadiness.environmentFrame(room.id);
+        if (target?.sessionId === room.sessionId) tab('world', target);
+      });
+      actions.append(watch, environment);
     }
     card.append(actions); return card;
   }));

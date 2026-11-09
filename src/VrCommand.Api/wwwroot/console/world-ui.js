@@ -62,7 +62,7 @@ export function mountWorld(getKey, unauthorized) {
         picker.value = target.sessionId;
         resetRecording();
         const limit = target.mode === 'replay' && !target.complete ? target.throughSequence : null;
-        const sequence = target.playerId ? target.throughSequence : target.mode === 'replay' ? 1 : null;
+        const sequence = target.playerId || target.environment ? target.throughSequence : target.mode === 'replay' ? 1 : null;
         void connect(target.mode, 0, sequence, limit, target);
         return;
       }
@@ -339,12 +339,12 @@ export function mountWorld(getKey, unauthorized) {
     const id = $('world-recording').value; if (!active || !id) return;
     stop(); mode = nextMode;
     const own = controller = new AbortController(), request = epoch;
-    const playerReview = Boolean(target?.playerId);
-    const signal = playerReview ? AbortSignal.any([own.signal, AbortSignal.timeout(8000)]) : own.signal;
+    const playerReview = Boolean(target?.playerId), environment = target?.environment;
+    const signal = playerReview || environment ? AbortSignal.any([own.signal, AbortSignal.timeout(8000)]) : own.signal;
     if (nextMode === 'live') { savedLimit = null; savedFinished = false; reviewPlayer = null; }
     const limit = nextMode === 'live' ? null : replayLimit;
     let hasHeader = false, reachedSavedEnd = false, lastSequence = sequence === null ? null : sequence - 1;
-    let playerFrame = null, playerComplete = false;
+    let playerFrame = null, playerComplete = false, environmentFrame = null;
     connecting = true; reviewControls(); $('world-frame-message').textContent = '';
     message(nextMode === 'live' ? '正在連接即時觀戰…' : '正在讀取已保存快照…');
     try {
@@ -406,7 +406,13 @@ export function mountWorld(getKey, unauthorized) {
                   || (lastSequence !== null && current !== lastSequence + 1)) throw new Error('已保存片段的快照序號不符。');
                 lastSequence = current;
               }
-              show(data);
+              if (environment) {
+                if (environmentFrame || !Number.isSafeInteger(data.packet.observedSequence) || data.packet.observedSequence < environment.appliedAtSequence
+                  || data.packet.weather !== environment.weather || data.packet.frame.night !== (environment.timeOfDay === 'Night')
+                  || data.packet.lightning !== environment.lightning)
+                  throw new Error('回應快照的環境或指令序號不同。');
+                environmentFrame = data;
+              } else show(data);
             }
             else if (type === 'complete' && playerReview) {
               if (!playerFrame || playerComplete || !matchesTarget(data, target)) throw new Error('回應的世界封存範圍不同。');
@@ -414,7 +420,8 @@ export function mountWorld(getKey, unauthorized) {
             }
             else if (type === 'status' || type === 'complete') { info = data; status(); }
             else if (type === 'saved-end' && limit !== null) {
-              if (!hasHeader || data.acceptedSequence !== savedLimit || lastSequence !== savedLimit) throw new Error('已保存片段未完整讀取。');
+              if (!hasHeader || data.acceptedSequence !== savedLimit || lastSequence !== savedLimit || (environment && !matchesTarget(data, target)))
+                throw new Error('已保存片段未完整讀取。');
               info = data; reachedSavedEnd = savedFinished = true;
             }
           }
@@ -424,6 +431,10 @@ export function mountWorld(getKey, unauthorized) {
         if (limit !== null && !reachedSavedEnd) throw new Error('尚未讀到已保存片段尾端。');
         if (playerReview && !playerComplete) throw new Error('尚未讀到原場次的封存結尾。');
         connected = false; status();
+        if (environment) {
+          show(environmentFrame, true);
+          $('world-frame-message').textContent = `已停在第 ${target.throughSequence} 格的環境快照。`;
+        }
         if (playerReview) {
           reviewPlayer = { id: target.playerId, name: target.playerName };
           show(playerFrame, true);
@@ -432,7 +443,7 @@ export function mountWorld(getKey, unauthorized) {
       }
     } catch (error) {
       if (request === epoch && !own.signal.aborted) {
-        if (playerReview) resetRecording();
+        if (playerReview || environment) resetRecording();
         connected = connecting = false; message('觀戰已中斷：' + error.message + '；可重新連接。', true); status();
       }
     }

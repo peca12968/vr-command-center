@@ -176,6 +176,24 @@ export function roomReadinessView(report, room, session, elapsed) {
 
 export function mountRoomReadiness(getState, unauthorized, venueUpdated, describeClimate, describeEnemies) {
   let active = false, controller, report, started = 0, attempted = -Infinity, failed = false;
+  function environmentView(room, session, elapsed) {
+    if (!active || !room || !['Running', 'Paused'].includes(session?.state)) return null;
+    const row = roomReadinessRow(report, room, session), evidence = row?.environment;
+    const setting = evidence?.setting;
+    if (!setting || typeof evidence.venue !== 'boolean' || !['Clear', 'Rain', 'Fog', 'Storm'].includes(setting.weather)
+      || !['Day', 'Night'].includes(setting.timeOfDay) || typeof setting.lightning !== 'boolean') return null;
+    const view = roomVenueSettingView(row, setting, elapsed, failed, evidence.venue ? '全館環境' : '場次環境', describeClimate(setting));
+    if (!view) return null;
+    const target = view.applied && typeof evidence.streamId === 'string' && evidence.streamId === session.combatStream?.streamId
+      ? { mode: 'replay', sessionId: session.id, roomId: room.id, streamId: evidence.streamId, complete: false,
+        throughSequence: setting.worldSequence, environment: setting }
+      : null;
+    return { ...view, venue: evidence.venue, target };
+  }
+  function environmentFrame(roomId) {
+    const { rooms, sessions } = getState(), room = rooms.find(row => row.id === roomId);
+    return environmentView(room, sessions.find(row => row.id === room?.sessionId), performance.now() - started)?.target;
+  }
   function venueBegin(target, roomId) {
     const waiting = (state, text) => ({ state, text, ready: false });
     if (failed) return waiting('Unavailable', '無法確認，正在重試');
@@ -238,14 +256,14 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
       phaseCell.textContent = phase?.text ?? '';
       phaseCell.classList.toggle('tracking-attention', !!phase && (!phase.applied || (phase.action === 'Pause' && !phase.ready)));
       const row = ['Running', 'Paused'].includes(session?.state) ? roomReadinessRow(report, room, session) : null;
-      const environment = row?.venueEnvironment, enemies = row?.venueEnemies;
-      const climateView = environment && ['Clear', 'Rain', 'Fog', 'Storm'].includes(environment.weather)
-        && ['Day', 'Night'].includes(environment.timeOfDay) && typeof environment.lightning === 'boolean'
-        ? roomVenueSettingView(row, environment, elapsed, failed, '全館環境', describeClimate(environment)) : null;
+      const enemies = row?.venueEnemies, climate = environmentView(room, session, elapsed);
+      const climateCell = cell.parentElement.querySelector('[data-room-environment]');
+      if (climate?.venue) climateCell.dataset.roomVenueEnvironment = room.id;
+      else delete climateCell.dataset.roomVenueEnvironment;
+      cell.parentElement.querySelector('[data-room-environment-frame]').hidden = !climate?.target;
       const enemiesView = enemies && ['Hold', 'Patrol', 'Advance'].includes(enemies.behavior) && typeof enemies.autoAttack === 'boolean'
         ? roomVenueSettingView(row, enemies, elapsed, failed, '全館敵軍策略', describeEnemies(enemies)) : null;
-      for (const [selector, setting] of [['[data-room-venue-environment]', climateView], ['[data-room-venue-enemies]', enemiesView]]) {
-        const settingCell = cell.parentElement.querySelector(selector);
+      for (const [settingCell, setting] of [[climateCell, climate], [cell.parentElement.querySelector('[data-room-venue-enemies]'), enemiesView]]) {
         settingCell.hidden = !setting;
         settingCell.textContent = setting?.text ?? '';
         settingCell.classList.toggle('tracking-attention', !!setting && !setting.applied);
@@ -285,7 +303,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') update(); else reset(); });
   setInterval(update, 250);
-  return { update, venueReady, venueBegin, active(value) { active = value; if (value) update(); else reset(); } };
+  return { update, venueReady, venueBegin, environmentFrame, active(value) { active = value; if (value) update(); else reset(); } };
 }
 
 export function mountReadiness(getState, unauthorized) {
