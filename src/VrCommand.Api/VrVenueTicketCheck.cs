@@ -52,7 +52,7 @@ internal static partial class VrVenueTickets
         return new(input.Topology, seats.All(seat => seat.Status == "matched"), [.. seats]);
     }
 
-    private static SeatResult CheckConnection(Guid sessionId, Player player, byte[] json, ConnectionEndpoint endpoint, PlayerJoinTicketSigner signer)
+    internal static SeatResult CheckConnection(Guid sessionId, Player player, byte[] json, ConnectionEndpoint endpoint, PlayerJoinTicketSigner signer)
     {
         SeatResult Status(string value) => new(player.RoomId, player.Seat, value);
         var config = DeploymentJson.Connection<Connection>(json);

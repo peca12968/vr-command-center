@@ -68,19 +68,21 @@ internal static class MrDeploymentCheck
         return new(files.Topology, results.All(result => result.Status == "matched"), [.. results]);
     }
 
-    private static CheckedRoomAlignmentFile? ReadAlignment(byte[] file)
+    internal static CheckedRoomAlignmentFile? ReadAlignment(byte[] file)
     {
         try { return RoomAlignment.CheckFile(file); }
         catch (ArgumentException) { return null; }
     }
 
-    private static Result CheckFiles(Guid sessionId, Player player, ReadOnlySpan<byte> json, CheckedRoomAlignmentFile? alignment, string hash, PlayerJoinTicketSigner signer)
+    internal static Result CheckFiles(Guid sessionId, Player player, ReadOnlySpan<byte> json, CheckedRoomAlignmentFile? alignment, string hash,
+        PlayerJoinTicketSigner signer, ConnectionEndpoint? endpoint = null)
     {
         Result Status(string value, DateTimeOffset? expires = null) => new(value, player.RoomId, player.Seat, expires);
 
         var config = DeploymentJson.Connection<Connection>(json);
         if (config is not { Role: "Client", JoinTicket.Length: > 0 } || !ConnectionDestination.IsValid(config.Address, config.Port))
             return Status("connection-invalid");
+        if (endpoint is not null && (config.Address != endpoint.Address || config.Port != endpoint.Port)) return Status("endpoint-mismatch");
 
         PlayerJoinClaims claims;
         try { claims = signer.Validate(config.JoinTicket, sessionId); }

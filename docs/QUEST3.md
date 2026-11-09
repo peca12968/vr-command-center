@@ -203,6 +203,23 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 
 裝置清單格式與 MR 相同。整批 VR 部署把各席的四欄連線設定寫到對應裝置並請求啟動，現場頭盔的入場與追蹤仍須另外觀察。連線檔與主控金鑰請私下保管。 [VR 五房配票](EXTERNAL_CLIENTS.md#vr-五房配票) · [裝置清單格式](#用裝置清單部署-25-席)
 
+### 混合 VR 與 MR 五房部署包
+
+管理包 0.31.47 可從五個獨立場次一次下載混合部署包。各房先登記五席並啟動自己的遊戲伺服器，五房使用不同的場館 IPv4／UDP 端點。MR 房的五席皆登記為 Quest 3，並在啟動伺服器前鎖定該房校正檔。
+
+以主控登入「房間與場次」，在「VR／MR 混合五房配票」按「讀取五房名冊」。核對各房的模式、名冊及端點，只為 MR 房選擇已鎖定的原始校正 JSON，然後下載 `vr-mr-venue-deployment.zip`。包內有 `venue.json`（版本 2、`Mixed`、`Independent`）、五個房間的連線 ZIP，以及各 MR 房的原始校正檔。票券自簽發起有效五分鐘，整包由主控保管。
+
+```powershell
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-mr-venue-deployment.zip
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-mr-venue-deployment.zip `
+    -DeviceMap .\quest-batch.json -ExpectedVersionCode 61 -AllowPartialMap `
+    -ManagementApi http://127.0.0.1:5081 -CheckOnly
+```
+
+完成預檢後可改用 `-DeployMappedSeats` 套用，或指定 `-RoomId`、`-Seat` 及 `-Serial` 部署一席。正式部署須提供主控金鑰與管理服務網址，先核對 25 席的簽章、名冊、端點及 MR 校正檔。VR 席使用原始四欄連線設定。MR 席另寫入原校正檔並啟用透視。Quest 裝置清單只列當次要部署的 Quest 3 席位。 [指定席位操作](#部署指定的-quest-席位)
+
+主控 API 使用 `GET /api/mixed-deployment/venue` 預覽、`POST /api/mixed-deployment/venue-bundle` 配票、`POST /api/mixed-deployment/venue-check` 驗票。各次請求使用當時同一次讀取的場次與端點。全 VR 或全 MR 場館仍使用各自的部署入口。
+
 ### 五房 25 席部署預檢
 
 #### 從主控台下載五房部署包
@@ -265,7 +282,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.z
 
 #### 部署指定的 Quest 席位
 
-使用原五房 VR 或 MR 部署 ZIP。版本 1 的 `device-map.json` 只列這次要部署的 1 至 25 席，房號、席位和 ADB 序號的格式維持相同。加上 `-AllowPartialMap` 即可接受少於 25 席的清單。未指定此選項時，清單仍須有完整 25 席。
+使用原五房 VR、MR 或混合部署 ZIP。版本 1 的 `device-map.json` 只列這次要部署的 1 至 25 席，房號、席位和 ADB 序號的格式維持相同。加上 `-AllowPartialMap` 即可接受少於 25 席的清單。未指定此選項時，清單仍須有完整 25 席。
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `

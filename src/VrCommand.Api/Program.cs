@@ -347,6 +347,27 @@ app.MapPost("/api/vr-deployment/venue-check", async (WorldRecordings worlds, Htt
     var request = await VrVenueTickets.ReadCheck(context.Request, context.RequestAborted);
     return VrVenueTickets.Check(request, worlds, actor, ticketSigner);
 });
+app.MapGet("/api/mixed-deployment/venue", (WorldRecordings worlds, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    return MixedVenueDeployment.Read(worlds, Actor(context));
+});
+app.MapPost("/api/mixed-deployment/venue-bundle", async (WorldRecordings worlds, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var actor = Actor(context);
+    if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue exports require the master operator.");
+    var request = await MixedVenueDeployment.ReadBundle(context.Request, context.RequestAborted);
+    return Results.File(MixedVenueDeployment.Create(request, worlds, actor, ticketSigner), "application/zip", "vr-mr-venue-deployment.zip");
+});
+app.MapPost("/api/mixed-deployment/venue-check", async (WorldRecordings worlds, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var actor = Actor(context);
+    if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue checks require the master operator.");
+    var request = await MixedVenueDeployment.ReadCheck(context.Request, context.RequestAborted);
+    return MixedVenueDeployment.Check(request, worlds, actor, ticketSigner);
+});
 app.MapDelete("/api/sessions/{id:guid}/players/{playerId:guid}", (Guid id, Guid playerId, SessionManager manager, HttpContext context) =>
 {
     manager.Leave(id, playerId, Actor(context), RequestId(context), AdmissionMatch(context), requireAdmissionMatch: true);

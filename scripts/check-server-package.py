@@ -82,13 +82,16 @@ def main():
     p.add_argument('--check-interrupted-replay', action='store_true', help='Play the saved native prefix after the owned launcher is killed')
     p.add_argument('--check-managed-mr', action='store_true', help='Verify the MR alignment startup gate, desktop rejection and Preparing seal')
     p.add_argument('--mr-venue-bundle-only', action='store_true', help='Verify both MR venue exports from native publishers, without starting desktop players')
+    p.add_argument('--mixed-venue-bundle-only', action='store_true', help='Verify a mixed five-room console ZIP and mapped mock Quest deployment from native publishers')
     p.add_argument('--check-mapped-quest', action='store_true', help='Use full and five-seat mock ADB maps with each native MR venue export')
     p.add_argument('--check-live-reinforcement', action='store_true', help='Verify a native server accepts only supported live enemy targets and records the result')
     args=p.parse_args()
     if os.name!='nt':p.error('Actual Windows processes required')
     if args.check_mapped_quest and not args.mr_venue_bundle_only:p.error('--check-mapped-quest requires --mr-venue-bundle-only')
-    if args.mr_venue_bundle_only:
-        if not args.game_address or args.player_package:p.error('--mr-venue-bundle-only needs --game-address and no player package')
+    venue_only = args.mr_venue_bundle_only or args.mixed_venue_bundle_only
+    if args.mr_venue_bundle_only and args.mixed_venue_bundle_only:p.error('Choose a single venue bundle check')
+    if venue_only:
+        if not args.game_address or args.player_package:p.error('The venue bundle check needs --game-address and no player package')
     elif bool(args.player_package)!=bool(args.game_address):p.error('Provide --player-package and --game-address together')
     if args.check_lan_preflight and not args.player_package:
         p.error('--check-lan-preflight requires the three-package check')
@@ -1070,7 +1073,123 @@ def main():
             save(f'mr-venue-{mode.lower()}-seat.json', seat)
             for entry in entries: command(entry['sessionId'], 'End')
             for entry in entries: finish(entry)
-    def verify_mapped_quest(deploy, destination, environment, raw, mode, files=None, hashes=None, *, partial=False):
+    def check_mixed_venue_bundle():
+        stage('native-mixed-venue-bundle')
+        markers = [{'room': {'x': x, 'z': z}, 'tracking': {'x': x, 'z': z}} for x, z in [(-2, -2), (2, -2), (-2, 2)]]
+        files = {room: b'\xef\xbb\xbf' + json.dumps(request('/api/room-alignment', {'roomId': room, 'markers': markers})).encode() + b'\r\n'
+                 for room in (2, 4)}
+        hashes = {room: hashlib.sha256(raw).hexdigest() for room, raw in files.items()}
+        endpoint = '/api/mixed-deployment/venue'
+        staged = []
+        for room in range(1, 6):
+            mode = 'MR' if room in files else 'VR'
+            state = create([room], f'Mixed venue {room}', experience=mode)
+            route = '/api/sessions/' + state['id']
+            if room in files:
+                request(route + '/commands', {'commandId': str(uuid.uuid4()), 'action': 'SetRoomAlignment',
+                                              'roomAlignment': {f'room{room}': hashes[room]}})
+            for seat in range(1, 6):
+                headset = 'ViveXr' if room == 1 and seat == 2 else 'Quest3'
+                state = request(route + '/players', {'playerId': str(uuid.uuid4()), 'roomId': room,
+                                'name': f'Mixed venue {room}/{seat}', 'headset': headset})
+            staged.append((state, launch(state, f'mixed-room-{room}')))
+        before = request('/api/sessions')
+        preview_raw, headers = request(endpoint, raw_response=True)
+        preview = json.loads(preview_raw)
+        check(preview['ready'] and headers['Cache-Control'] == 'no-store'
+              and all((row['roomId'], row['sessionId'], row['mode'], row.get('alignmentSha256')) ==
+                      (room, state['id'], state['environment']['mode'], hashes.get(room))
+                      and (row['endpoint']['address'], row['endpoint']['port'], row['endpoint']['streamId']) ==
+                      (address, entry['ready']['port'], entry['ready']['streamId'])
+                      and [(seat['number'], seat['playerId'], seat['admissionId']) for seat in row['seats']] ==
+                      [(seat['seat']+1, seat['id'], seat['admissionId']) for seat in state['players']]
+                      for room, (row, (state, entry)) in enumerate(zip(preview['rooms'], staged, strict=True), 1)),
+              'mixed preview binds all 25 current admissions, modes, original streams and locked MR hashes')
+        bundle_rooms = [{'roomId': row['roomId'], 'sessionId': row['sessionId'], 'mode': row['mode'],
+                         'streamId': row['endpoint']['streamId'],
+                         'players': [{key: seat[key] for key in ('playerId', 'admissionId')} for seat in row['seats']],
+                         **({'alignmentFile': base64.b64encode(files[row['roomId']]).decode()} if row['roomId'] in files else {})}
+                        for row in preview['rooms']]
+        request(endpoint, role='Room1', expected=403)
+        request(endpoint+'-bundle', {'rooms': bundle_rooms}, role='Room1', expected=403)
+        wrong_hash = [dict(row, alignmentFile=base64.b64encode(files[2] + b'\n').decode()) if row['roomId'] == 2 else row for row in bundle_rooms]
+        wrong_stream = [dict(row, streamId=str(uuid.uuid4())) if row['roomId'] == 5 else row for row in bundle_rooms]
+        check(request(endpoint+'-bundle', {'rooms': wrong_hash}, expected=409)['code'] == 'venue-alignment-mismatch'
+              and request(endpoint+'-bundle', {'rooms': wrong_stream}, expected=409)['code'] == 'venue-source-changed',
+              'mixed issuance rejects changed alignment bytes or a stale native stream')
+        node, pwsh = shutil.which('node'), shutil.which('pwsh')
+        if not node or not pwsh: raise RuntimeError('Node and PowerShell are required for the mixed ZIP check')
+        with tempfile.TemporaryDirectory(prefix='mixed-', dir=runtime) as scratch:
+            destination = Path(scratch).resolve()
+            paths = {}
+            for room, original in files.items():
+                path = destination/f'original-{room}.json'
+                path.write_bytes(original)
+                paths[room] = str(path)
+            descriptor, bundle = destination/'descriptor.json', destination/'vr-mr-venue-deployment.zip'
+            descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'mode':'Mixed','alignments':paths}),encoding='utf-8')
+            with (out/'mixed-venue-browser.log').open('xb') as log:
+                subprocess.run([node, str(ROOT/'tests/browser/check-vr-venue-tickets-native.cjs'), str(descriptor), str(bundle),
+                                str(out/'mixed-venue-browser.json')], stdout=log, stderr=subprocess.STDOUT, check=True, timeout=65)
+            check(read(out/'mixed-venue-browser.json')['complete'], 'shipped browser uploads only the two MR files and downloads the mixed ZIP')
+            raw = bundle.read_bytes()
+            live = {'topology': 'Independent', 'rooms': []}
+            expected = {'venue.json'}
+            with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                manifest = json.loads(archive.read('venue.json'))
+                assert (manifest['version'], manifest['mode'], manifest['topology']) == (2, 'Mixed', 'Independent')
+                for row, source in zip(manifest['rooms'], preview['rooms'], strict=True):
+                    room = row['roomId']
+                    assert row == {'roomId': source['roomId'], 'sessionId': source['sessionId'], 'mode': source['mode'],
+                                   'address': address, 'port': source['endpoint']['port'], 'ticketsZip': f'room-{room:02}-connections.zip',
+                                   **({'alignmentFile': f'room-{room:02}-alignment.json'} if room in files else {})}
+                    expected.add(row['ticketsZip'])
+                    wanted = {key: row[key] for key in ('roomId', 'sessionId', 'mode')}
+                    if room in files:
+                        expected.add(row['alignmentFile'])
+                        assert archive.read(row['alignmentFile']) == files[room]
+                        wanted['alignmentFile'] = base64.b64encode(files[room]).decode()
+                    with zipfile.ZipFile(io.BytesIO(archive.read(row['ticketsZip']))) as inner:
+                        names = [f'room-{room:02}-seat-{seat:02}.json' for seat in range(1, 6)]
+                        assert sorted(inner.namelist()) == names
+                        wanted['connectionFiles'] = [base64.b64encode(inner.read(name)).decode() for name in names]
+                    live['rooms'].append(wanted)
+                assert sorted(archive.namelist()) == sorted(expected)
+            check(True, 'mixed ZIP contains five original room ticket bundles and exactly two unchanged MR alignment files')
+            request(endpoint+'-check', live, role='Room1', expected=403)
+            accepted = request(endpoint+'-check', live)
+            check(accepted['allMatched'] and [(row['roomId'], row['seat'], row['status'], row['headset']) for row in accepted['seats']] ==
+                  [(room, seat, 'matched', 'ViveXr' if (room, seat) == (1, 1) else 'Quest3')
+                   for room in range(1, 6) for seat in range(5)], 'mixed live check validates all 25 signatures and current headset assignments')
+            for room_id in (1, 2):
+                room = live['rooms'][room_id-1]
+                first = room['connectionFiles'][0]
+                changed = json.loads(base64.b64decode(first))
+                changed['port'] = 7777 if changed['port'] != 7777 else 7778
+                room['connectionFiles'][0] = base64.b64encode(json.dumps(changed).encode()).decode()
+                rejected_check = request(endpoint+'-check', live)
+                room['connectionFiles'][0] = first
+                check(not rejected_check['allMatched'] and [(row['roomId'], row['seat'], row['status']) for row in rejected_check['seats']
+                      if row['status'] != 'matched'] == [(room_id, 0, 'endpoint-mismatch')],
+                      f'mixed live check rejects a changed {room["mode"]} destination')
+            deploy = [pwsh, '-NoProfile', '-File', str(ROOT/'scripts/deploy-quest.ps1'), '-VenueBundle', str(bundle), '-ManagementApi', uri]
+            environment = {**os.environ, 'VR_COMMAND_MASTER_KEY': keys['Master']}
+            report = json.loads(subprocess.check_output(deploy, env=environment, timeout=25, encoding='utf-8', cwd=destination))
+            check(report['mode'] == 'Mixed' and report['managementVerified'] and report['alignmentPinsVerified']
+                  and report['seats'] == 25 and [row['mode'] for row in report['rooms']] == ['VR','MR','VR','MR','VR'],
+                  'Quest CLI confirms the whole mixed ZIP against the packaged API before selecting seats')
+            save('mixed-venue-deployment.json', report)
+            for room_id, mode in ((1, 'VR'), (2, 'MR')):
+                seat = json.loads(subprocess.check_output([*deploy, '-RoomId', str(room_id), '-Seat', '1', '-CheckOnly'],
+                                  env=environment, timeout=25, encoding='utf-8', cwd=destination))
+                check(seat['roomId'] == room_id and seat['seat'] == 1 and seat['mode'] == mode and seat['managementVerified']
+                      and seat.get('alignmentSha256') == hashes.get(room_id), f'single-seat mixed preflight uses the {mode} room settings')
+                save(f'mixed-venue-seat-{room_id}.json', seat)
+            verify_mapped_quest(deploy, destination, environment, raw, 'Independent', files, hashes, partial=True, mixed=True)
+        check(request('/api/sessions') == before, 'mixed issuance, online verification and mock ADB leave management sessions unchanged')
+        for state, _ in staged: command(state['id'], 'End')
+        for _, entry in staged: finish(entry)
+    def verify_mapped_quest(deploy, destination, environment, raw, mode, files=None, hashes=None, *, partial=False, mixed=False):
         is_vr = files is None
         rows = [{'roomId': room, 'seat': seat, 'serial': f'fixture-{(room-1)*5+seat:02}'} for room in range(1, 6) for seat in range(1, 6)]
         if partial:
@@ -1102,6 +1221,7 @@ def main():
         preview = invoke('-CheckOnly')
         check(preview['complete'] and preview['managementVerified'] and preview['phase'] == 'preflight'
               and (preview.get('mode') == 'VR' if is_vr else preview.get('alignmentPinsVerified') is True)
+              and (not mixed or preview.get('mode') == 'Mixed')
               and [row['status'] for row in preview['devices']] == ['ready']*count
               and (not partial or (preview['mappedSeats'], preview['unmappedSeats']) == (count, 25-count))
               and not any(destination.glob('fixture-*')), mode + f' mapped preflight confirms {count} mocked devices with no configuration writes')
@@ -1109,6 +1229,7 @@ def main():
         applied = invoke('-DeployMappedSeats')
         check(applied['complete'] and applied['managementVerified'] and applied['phase'] == 'deployment'
               and (applied.get('mode') == 'VR' if is_vr else applied.get('alignmentPinsVerified') is True)
+              and (not mixed or applied.get('mode') == 'Mixed')
               and (not partial or (applied['mappedSeats'], applied['unmappedSeats']) == (count, 25-count))
               and applied['devices'] == [{'roomId': row['roomId'], 'seat': row['seat'], 'status': 'launch-requested', 'versionCode': 61} for row in rows],
               mode + f' mapped deployment submits launch for exactly the {count} requested mock devices')
@@ -1118,7 +1239,7 @@ def main():
                 with zipfile.ZipFile(io.BytesIO(bundle.read(f'room-{room:02}-connections.zip'))) as tickets:
                     config = json.loads(tickets.read(f'room-{room:02}-seat-{seat:02}.json'))
                 names = {'vr-connection.json'}
-                if not is_vr:
+                if files is not None and room in files:
                     config.update(questPassthrough=True, requestMixedReality=True)
                     alignment = f'vr-room-alignment-{hashes[room]}.json'
                     assert (remote/alignment).read_bytes() == files[room]
@@ -1127,11 +1248,12 @@ def main():
                 assert {item.name for item in remote.iterdir()} == names
         commands = (destination/'adb.log').read_text(encoding='utf-8').splitlines()
         targeted = {line.split()[1] for line in commands if line.startswith('-s ')}
-        check(len(commands) == 1 + count * (7 if is_vr else 9) and sum(' shell monkey ' in line for line in commands) == count
+        mr_count = sum(files is not None and row['roomId'] in files for row in rows)
+        check(len(commands) == 1 + count * 7 + mr_count * 2 and sum(' shell monkey ' in line for line in commands) == count
               and targeted == {row['serial'] for row in rows}
               and all(' install ' not in line and 'unmapped-device' not in line for line in commands),
               mode + f' all {count} mapped original signed configs are isolated by serial with the expected mode files and no APK installs')
-        prefix = 'vr' if is_vr else 'mr'
+        prefix = 'mixed' if mixed else 'vr' if is_vr else 'mr'
         kind = 'partial' if partial else 'mapped'
         save(f'{prefix}-venue-{mode.lower()}-{kind}-preflight.json', preview)
         save(f'{prefix}-venue-{mode.lower()}-{kind}-deployment.json', applied)
@@ -1154,7 +1276,7 @@ def main():
         archived_batch_report = None
         earlier_field_archive = None
         earlier_closure = None
-        for linked in ([] if args.mr_venue_bundle_only else [False,True]):
+        for linked in ([] if venue_only else [False,True]):
             entries=[];round_clients=[];staged=[]
             batch=None
             if args.prepare_independent_set and not linked:
@@ -1351,6 +1473,7 @@ def main():
                           'The original independent ZIP is byte-identical after the newer Linked batch')
                 archived_batch_report = current_batch_report
         if args.mr_venue_bundle_only: check_mr_venue_bundle()
+        if args.mixed_venue_bundle_only: check_mixed_venue_bundle()
         if args.check_managed_mr:
             state=create([1],'managed-mr',experience='MR')
             session='/api/sessions/'+state['id']
@@ -1452,7 +1575,8 @@ def main():
         if args.check_interrupted_replay:
             verify_interrupted_replay(crash, crash_client)
         check(all(x['state']=='Ended' for x in request('/api/sessions?includeEnded=true')),'no active management sessions')
-        save('evidence.json',{'rounds':rounds,'scope':('Real Windows MR Preparing endpoints and 25 signed files per topology.' if args.mr_venue_bundle_only else
+        save('evidence.json',{'rounds':rounds,'scope':('Five Windows VR/MR Preparing endpoints and 25 signed files from the console mixed ZIP.' if args.mixed_venue_bundle_only else
+            'Real Windows MR Preparing endpoints and 25 signed files per topology.' if args.mr_venue_bundle_only else
             'Three portable packages, five Independent rooms then Linked, 25 simultaneous same-PC Simulation clients per topology.'
             if player_folder else 'Two portable packages, five Independent rooms then Linked, five same-PC Simulation clients per topology.'),
             'managedMrPreparing':args.check_managed_mr,
@@ -1519,7 +1643,8 @@ def main():
         if keys and any(k in text for k in keys.values()):raise RuntimeError('Public metadata contains a key')
     save('checks.json',{'complete':True,'checks':len(checks),'findings':checks,'runtimeDirectory':str(runtime),
         'packageDirectory':str(folder),'playerPackageDirectory':str(player_folder) if player_folder else None,
-        'scope':('Same-machine native MR servers in Preparing with no headset client.' if args.mr_venue_bundle_only else
+        'scope':('Same-machine VR/MR servers in Preparing and mock ADB with no headset client.' if args.mixed_venue_bundle_only else
+                 'Same-machine native MR servers in Preparing with no headset client.' if args.mr_venue_bundle_only else
                  'Same-machine VR simulation and a separate MR Preparing admission and seal check.' if args.check_managed_mr else 'Same-machine Simulation only.')
                 +' The separate parent-death case intentionally leaves the world unsealed.'})
     print(json.dumps({'complete':True,'checks':len(checks),'directory':str(out)}))

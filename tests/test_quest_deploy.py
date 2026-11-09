@@ -337,6 +337,33 @@ class QuestVenueTests(unittest.TestCase):
         return subprocess.run(['pwsh','-NoProfile','-NonInteractive','-File',str(script),
                                '-VenueBundle',str(bundle),*flags], capture_output=True, encoding='utf-8', timeout=20, env=environment)
 
+    def test_mixed_bundle_requires_mode_specific_files_and_independent_rooms(self):
+        files, _ = self.vr_bundle('Independent')
+        mr, _ = self.bundle('Independent')
+        manifest = json.loads(files['venue.json'])
+        manifest.update(version=2, mode='Mixed')
+        for room in manifest['rooms']:
+            room.pop('seats')
+            room_id = room['roomId']
+            room['mode'] = 'MR' if room_id in (2, 4) else 'VR'
+            if room['mode'] == 'MR':
+                room['alignmentFile'] = f'room-{room_id:02}-alignment.json'
+                for name in (room['alignmentFile'], room['ticketsZip']):
+                    files[name] = mr[name]
+        files['venue.json'] = json.dumps(manifest)
+        preview = self.run_bundle(files)
+        self.assertEqual(0, preview.returncode, preview.stderr)
+        result = json.loads(preview.stdout)
+        self.assertEqual(('Mixed', 'Independent', 25, True),
+                         (result['mode'], result['topology'], result['seats'], result['alignmentPinsVerified']))
+        self.assertEqual(['VR', 'MR', 'VR', 'MR', 'VR'], [room['mode'] for room in result['rooms']])
+        self.assert_rejected(self.run_bundle(dict(files, **{'extra.json': '{}'})), 'exactly one alignment')
+        changed = dict(files)
+        changed['room-02-alignment.json'] += b'\r\n'
+        self.assert_rejected(self.run_bundle(changed), 'alignment')
+        manifest['topology'] = 'Linked'
+        self.assert_rejected(self.run_bundle(dict(files, **{'venue.json': json.dumps(manifest)})), 'original topology')
+
     def device_map(self):
         path = self.root / 'device-map.json'
         document = {'version': 1, 'seats': [{'roomId': room, 'seat': seat, 'serial': f'fixture-{(room-1)*5+seat:02}'}
