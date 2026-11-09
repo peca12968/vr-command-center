@@ -61,6 +61,10 @@ v0.16 新增 `environmentVersion:1`，依保存的 tick／環境重現雨、日�
 
 API 使用 `GET /api/sessions/{id}/world/event-frames`。必填 `throughFrame` 為已接受的保存尾端，選填 `afterFrame` 為不含在本頁的起始游標，預設為 0。可再加 `roomId` 與 `kind`，例如 `ShotFired` 或 `PlayerDamaged`。0.31.44 可加 `playerId`（玩家 UUID）與其他篩選同時使用，回應會帶回指定的 ID。每次讀取最多 128 格及 24 個相符格，`nextAfterFrame` 非空時可用同一組條件接續。服務沿用場次讀取權限，從既有保存快照讀取事件與玩家房間。 [從戰績開啟個人回放](REPORTS.md#從戰績開啟個人回放)
 
+控制台 0.31.51 在暫停回放時提供「上一筆事件」與「下一筆事件」。跳轉會略過目前格，沿用所選房間、事件種類及個人戰績篩選，停在最近的相符原始快照。若保存範圍沒有相符事件，保留目前位置。切換範圍或繼續播放時會取消這次搜尋。
+
+跳轉使用 `GET /api/sessions/{id}/world/event-neighbor`，以 `fromFrame`、`throughFrame` 和 `direction=previous|next` 設定範圍。每次最多讀取 2,048 格。若回應帶有 `nextFromFrame`，控制台以原保存尾端接續搜尋。此操作搜尋的總期限為 30 秒。兩種搜尋均讀取既有保存資料的事件陣列，分房時再核對該格統計。 [SQLite JSON 函式](https://www.sqlite.org/json1.html#the_json_extract_function)
+
 ### 回放未封存的已保存片段
 
 未封存錄製提供「回放已保存片段」。按下時，服務以當下已接受的最後一格固定本次範圍，播完會顯示「已到已保存片段尾端」。逐格、拖曳時間軸、倍速和續播都使用同一範圍。畫面以「快照階段」標示保存當時的場次階段。

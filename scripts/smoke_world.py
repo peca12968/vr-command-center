@@ -184,6 +184,27 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         request(player_search + "not-an-id", "Room5", 400)
         request(player_search + player_id, "Room1", 403)
         check(True, "Player search rejects malformed IDs and retains original recording permissions")
+        neighbor = route + "/event-neighbor"
+        filters = f"&roomId=5&kind=PlayerDamaged&playerId={player_id}"
+        tail = info['acceptedSequence']
+        previous = request(f"{neighbor}?throughFrame={tail}&fromFrame={tail}&direction=previous{filters}", "Room5")
+        following = request(f"{neighbor}?throughFrame={tail}&fromFrame=1&direction=next{filters}", "Room5")
+        check(previous["frame"] == following["frame"] == page["frames"][0]
+              and previous["scannedToFrame"] == following["scannedToFrame"] == boundary
+              and all(value["nextFromFrame"] is None and value["playerId"] == player_id and value["roomId"] == 5
+                      and value["streamId"] == info["header"]["streamId"] for value in (previous, following)),
+              "Directional navigation finds the exact same saved frame in either direction")
+        missing = request(f"{neighbor}?throughFrame={boundary}&fromFrame={boundary}&direction=previous{filters}")
+        capped = request(f"{neighbor}?throughFrame={boundary - 1}&fromFrame=1&direction=next{filters}")
+        check(missing["frame"] is None and missing["scannedToFrame"] == 1 and missing["nextFromFrame"] is None
+              and capped["frame"] is None and capped["scannedToFrame"] == boundary - 1 and capped["nextFromFrame"] is None,
+              "Directional navigation excludes the current frame and respects a fixed saved prefix")
+        for params in (f"fromFrame=0&throughFrame={tail}&direction=previous", f"fromFrame=1&throughFrame={tail}&direction=back",
+                       f"fromFrame={tail}&throughFrame=1&direction=next", f"fromFrame=1&throughFrame={tail}&direction=next&roomId=1"):
+            request(f"{neighbor}?{params}", expected=400)
+        request(f"{neighbor}?fromFrame=1&throughFrame={tail + 1}&direction=next", expected=404)
+        request(f"{neighbor}?fromFrame=1&throughFrame={tail}&direction=next", "Room1", 403)
+        check(True, "Directional navigation rejects invalid bounds, direction and foreign recording access")
         with request(route + f"/watch?mode=replay&fromFrame={combat_packet['sequence']}&rate=4", "Room5") as stream:
             check(event(stream)[0] == "header" and event(stream) == ("frame", exact),
                   "Resuming by frame starts on the same exact packet as a single-frame read")

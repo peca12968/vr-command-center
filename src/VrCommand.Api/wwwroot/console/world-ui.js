@@ -288,20 +288,22 @@ export function mountWorld(getKey, unauthorized) {
     received = performance.now(); $('world-canvas').dataset.sequence = String(packet.sequence); status();
   }
   function step(offset) { if (frame) return readFrame(frame.packet.sequence + offset); }
-  async function readFrame(sequence) {
+  async function readFrame(sequence, stillCurrent = () => true) {
     const id = $('world-recording').value;
-    if (!active || mode !== 'replay' || connected || connecting || stepping || !frame || info.header.sessionId !== id) return;
-    if (sequence < 1 || sequence > info.acceptedSequence || (Number.isInteger(savedLimit) && sequence > savedLimit)) return;
+    if (!active || mode !== 'replay' || connected || connecting || stepping || !frame || info.header.sessionId !== id) return false;
+    if (sequence < 1 || sequence > info.acceptedSequence || (Number.isInteger(savedLimit) && sequence > savedLimit)) return false;
     controller?.abort(); controller = new AbortController();
     const request = ++epoch, signal = AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]);
     stepping = true; reviewControls(); $('world-frame-message').textContent = '正在讀取保存快照…';
     try {
       const value = await (await response(`/api/sessions/${id}/world/frames/${sequence}`, signal)).json();
-      if (request !== epoch || !active || id !== $('world-recording').value) return;
+      if (request !== epoch || !active || id !== $('world-recording').value || !stillCurrent()) return false;
       if (value.packet.sequence !== sequence) throw new Error('回應的快照序號不同。');
       show(value, true); $('world-frame-message').textContent = `已停在第 ${sequence} 格。`;
+      return true;
     } catch (error) {
       if (request === epoch) $('world-frame-message').textContent = '讀取快照失敗，請再試一次。';
+      return false;
     } finally {
       if (request === epoch) { stepping = false; controller = null; reviewControls(); }
     }

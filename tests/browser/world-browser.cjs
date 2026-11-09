@@ -406,6 +406,21 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       await page.locator('#world-events tr').count() === eventFrame.packet.events.filter(event => event.kind === 'PlayerDamaged').length,
       'Room-scoped search jumps to the exact original damage frame and filters its event rows');
     await page.screenshot({ path: path.join(screenshots, 'world-event-search.png'), fullPage: true });
+    const eventStatus = page.locator('#world-event-search-status');
+    const previousEvent = page.locator('#world-event-previous'), nextEvent = page.locator('#world-event-next');
+    await nextEvent.click();
+    await eventStatus.filter({ hasText: '保存範圍內沒有下一筆符合條件的事件' }).waitFor();
+    check(Number(await canvas.getAttribute('data-sequence')) === eventSequence, 'Next event never repeats the current event or exceeds the saved tail');
+    await next.click();
+    await page.waitForFunction(value => Number(document.querySelector('#world-canvas').dataset.sequence) === value, eventSequence + 1, { polling: 50 });
+    const neighbor = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/world/event-neighbor'));
+    await previousEvent.click();
+    await eventStatus.filter({ hasText: `已跳到第 ${eventSequence} 格` }).waitFor();
+    const query = new URL((await neighbor).url()).searchParams;
+    check(query.get('direction') === 'previous' && query.get('roomId') === '2' && query.get('kind') === 'PlayerDamaged'
+      && query.get('throughFrame') === String(finalFrame) && Number(await canvas.getAttribute('data-sequence')) === eventSequence,
+      'Previous event preserves the room and event kind and jumps to the original saved frame');
+    await page.screenshot({ path: path.join(screenshots, 'world-event-neighbor.png'), fullPage: true });
     await page.locator('#world-event-kind').selectOption('ReloadCompleted');
     check(await page.locator('#world-event-search-results button').count() === 0 && await page.locator('#world-no-events').isVisible(),
       'Changing the kind clears obsolete search results and refreshes the paused frame');
@@ -459,6 +474,13 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await page.waitForFunction(value => Number(document.querySelector('#world-canvas').dataset.sequence) === value, personal.frames[0].frameSequence, { polling: 50 });
     check((await page.locator('#world-events tr').count()) === personal.frames[0].matchCount
       && await page.locator('#world-review-player-scope').isVisible(), 'Jumping from personal results retains the selected player and original event count');
+    const personalNext = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/world/event-neighbor'));
+    await nextEvent.click();
+    const personalHit = await (await personalNext).json();
+    await eventStatus.filter({ hasText: `已跳到第 ${personalHit.frame.frameSequence} 格` }).waitFor();
+    check(personalHit.playerId === finalPlayer.playerId && personalHit.frame.frameSequence > personal.frames[0].frameSequence
+      && Number(await canvas.getAttribute('data-sequence')) === personalHit.frame.frameSequence,
+      'Next event follows the original selected player beyond the current frame');
     await page.screenshot({ path: path.join(screenshots, 'world-player-debrief.png'), fullPage: true });
     await page.locator('#world-review-clear-player').click();
     check(!await page.locator('#world-review-player-scope').isVisible() && await page.locator('#world-event-search-results button').count() === 0,

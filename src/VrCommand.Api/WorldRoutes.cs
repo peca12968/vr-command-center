@@ -31,6 +31,13 @@ public static class WorldRoutes
             context.Response.Headers.CacheControl = "no-store";
             return Results.Json(page, WorldJson.Options);
         });
+        app.MapGet("/api/sessions/{id:guid}/world/event-neighbor", (Guid id, long throughFrame, long fromFrame, string direction,
+            int? roomId, string? kind, Guid? playerId, WorldRecordings store, HttpContext context) =>
+        {
+            var neighbor = store.EventNeighbor(id, fromFrame, throughFrame, direction, roomId, kind, playerId, Actor(context), context.RequestAborted);
+            context.Response.Headers.CacheControl = "no-store";
+            return Results.Json(neighbor, WorldJson.Options);
+        });
         app.MapGet("/api/sessions/{id:guid}/world/frames/{sequence:long}", (Guid id, long sequence, WorldRecordings store, HttpContext context) =>
         {
             if (sequence < 1) throw new ArgumentException("Frame sequence must be positive.");
