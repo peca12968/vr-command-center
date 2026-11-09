@@ -38,3 +38,5 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -RefreshPlayerTicket `
 ## Windows OpenXR 重連複驗
 
 以支援 Vive 控制器右手 Menu 的測試 DLL 執行 Windows 玩家包整合命令，並加上 `--check-openxr-reconnect`。OpenXR 席先透過同機 UDP 轉送入場，桌面席維持原直連。測試關閉轉送，等原客戶端與伺服器都記錄斷線，再把同一入場的新票券和原伺服器端點寫入測試用連線檔。確認 Menu 按住及放開時都維持離線，重新按下後才由原程序讀檔建立新連線。封存核對原席位、姿態、健康、彈藥及新連線的戰績確認。測試 DLL 會讀回 Unity Mock Runtime 的右手 Vive 設定再確認按鍵。Quest 右手 B、USB 更新流程與頭盔輸入仍待實機驗收。 [測試 DLL 與命令](WINDOWS_PLAYER_PACKAGE.md#本機追蹤整合驗證) · [OpenXR 測試按鍵](https://registry.khronos.org/OpenXR/specs/1.1/man/html/xrSetInputDeviceStateBoolEXT.html)
+
+準備中的撤銷測試使用 `--check-openxr-revocation`。主控撤銷原入場後，房控把同一玩家加回同一席，服務會分配新的入場識別碼。測試保留原連線檔，放開再按 Menu，確認遊戲伺服器拒絕舊票券。換成新票券並重新操作後，原玩家程序才恢復追蹤。桌面席維持原連線，封存回放保留撤銷和拒絕期間的狀態。任務結束後另由管理 API 核對新票券已失效。此選項與 UDP 中斷重連測試分開執行。
