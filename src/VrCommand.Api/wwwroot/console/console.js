@@ -264,7 +264,18 @@ function renderRooms() {
     const button = element('button', room.sessionId ? '查看場次' : '選擇此房間', 'quiet small');
     button.type = 'button'; button.disabled = state.busy || !!state.pending;
     button.addEventListener('click', () => { if (room.sessionId) selectSession(room.sessionId); else { $('launch-room').value = String(room.id); $('launch-mode').value = 'Independent'; placement.scheduleLaunch(); applyPermissions(); $('launch-mission').focus(); } });
-    card.append(button); return card;
+    const actions = element('div', undefined, 'button-row');
+    actions.append(button);
+    if (room.sessionId) {
+      const watch = element('button', '即時觀戰', 'quiet small');
+      watch.type = 'button'; watch.disabled = button.disabled; watch.dataset.watchRoom = room.id;
+      watch.addEventListener('click', () => {
+        if (state.busy || state.pending || !state.rooms.some(row => row.id === room.id && row.sessionId === room.sessionId)) return;
+        tab('world', { mode: 'live', sessionId: room.sessionId, roomId: room.id });
+      });
+      actions.append(watch);
+    }
+    card.append(actions); return card;
   }));
   roomReadiness.update();
 }
@@ -460,7 +471,22 @@ function renderVenueClosure(report) {
       $('include-ended').checked = true;
       void selectSession(session.sessionId);
     });
-    const result = row([`房間 ${session.roomIds.join('、')}`, session.missionName, archiveNames[session.combat], archiveNames[session.world], button]);
+    const actions = element('div', undefined, 'button-row');
+    actions.append(button);
+    const replay = session.replay;
+    if (['Waiting', 'Sealed'].includes(session.world) && typeof replay?.streamId === 'string'
+      && Number.isSafeInteger(replay.throughSequence) && replay.throughSequence > 0) {
+      const complete = session.world === 'Sealed';
+      const open = element('button', complete ? '回放原場次' : '回放已保存片段', 'quiet small');
+      open.type = 'button'; open.dataset.venueReplay = session.sessionId;
+      open.addEventListener('click', () => {
+        if (!master() || state.busy || state.pending) return;
+        tab('world', { mode: 'replay', sessionId: session.sessionId, streamId: replay.streamId, complete,
+          throughSequence: replay.throughSequence, roomId: session.roomIds.length === 1 ? session.roomIds[0] : null });
+      });
+      actions.append(open);
+    }
+    const result = row([`房間 ${session.roomIds.join('、')}`, session.missionName, archiveNames[session.combat], archiveNames[session.world], actions]);
     result.dataset.venueClosureSession = session.sessionId;
     rows.append(result);
   }
@@ -810,11 +836,11 @@ for (const id of ['prop-asset', 'prop-x', 'prop-y', 'prop-z', 'prop-yaw']) $(id)
   });
 });
 
-function tab(name) {
+function tab(name, worldTarget = null) {
   if (name !== 'missions') placement.clearTrial();
   finishPropGesture();
   for (const candidate of ['operations', 'missions', 'replay', 'world']) { const active = candidate === name; $(candidate + '-view').hidden = !active; $('tab-' + candidate).classList.toggle('active', active); $('tab-' + candidate).setAttribute('aria-pressed', String(active)); }
-  replay.active(name === 'replay'); world.active(name === 'world'); readiness.active(name === 'operations'); connections.active(name === 'operations');
+  replay.active(name === 'replay'); world.active(name === 'world', worldTarget); readiness.active(name === 'operations'); connections.active(name === 'operations');
   roomReadiness.active(name === 'operations');
   closure.active(name === 'operations');
   alignment.active(name === 'missions' && master());

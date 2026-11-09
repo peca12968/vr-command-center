@@ -287,6 +287,16 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     });
     await page.locator('#venue-enemies').screenshot({ path: path.join(screenshots, 'venue-enemies.png') });
     check(true, 'Enemy policy is confirmed only by both original game sources');
+    const worldView = page.locator('#world-view'), recording = page.locator('#world-recording');
+    const playerCanvas = page.locator('#world-canvas');
+    const openedLive = page.waitForRequest(request => new URL(request.url()).pathname === `/api/sessions/${preparing[1]}/world/watch`);
+    await page.locator('[data-watch-room="2"]').click();
+    assert.equal(new URL((await openedLive).url()).searchParams.get('mode'), 'live');
+    await page.locator('#world-canvas[data-sequence]').waitFor();
+    check(await worldView.isVisible() && await recording.inputValue() === preparing[1]
+      && await page.locator('#world-room').inputValue() === '2' && await page.locator('#world-camera').inputValue() === 'top',
+      'The room card opens its original live source and focuses the room in the top view');
+    await page.locator('#tab-operations').click();
     await changeEnemies({ count: 0, behavior: 'Hold', autoAttack: false });
     await page.locator('#refresh').click();
     await roomEnemies(2).waitFor({ state: 'hidden' });
@@ -352,10 +362,46 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     active.add(replacement.id);
     await login('Master');
     await archive(ending.id).nth(3).filter({ hasText: '已封存' }).waitFor();
-    await archive(ending.id).last().getByRole('button').click();
+    await archive(ending.id).last().getByRole('button', { name: '查看場次' }).click();
     await page.waitForFunction(id => document.getElementById('session-select').value === id, ending.id);
     check(await page.locator('#include-ended').isChecked() && (await api(`/sessions/${replacement.id}`)).state === 'Preparing',
       'Reload restores the original archived batch and the table opens that session after the room is reused');
+    const readyReplay = (await api('/venue/closure')).batch.sessions;
+    const originalReplay = readyReplay.find(row => row.sessionId === ending.id).replay;
+    const partialReplay = readyReplay.find(row => row.sessionId === pausedEnding.id).replay;
+    const openReplay = id => page.locator(`[data-venue-replay="${id}"]`);
+    check(await openReplay(extra.id).count() === 0 && originalReplay.streamId === ending.combatStream.streamId,
+      'A no-source room has no replay shortcut and the original closure identifies its actual stream');
+    const archiveListRoute = '**/api/world-recordings';
+    await page.route(archiveListRoute, async route => {
+      const original = await route.fetch();
+      const recordings = await original.json();
+      await route.fulfill({ response: original, json: recordings.filter(item => item.header.sessionId !== ending.id) });
+    });
+    await openReplay(ending.id).click();
+    await page.locator('#world-message').filter({ hasText: '目前無法讀取原場次的錄製' }).waitFor();
+    check(await recording.inputValue() === '' && await page.locator('#world-replay').isDisabled() && !await playerCanvas.isVisible(),
+      'When the original recording is missing, the shortcut leaves other available recordings unselected');
+    await page.unroute(archiveListRoute);
+    await page.locator('#tab-operations').click();
+    async function replayRequest(id) {
+      const started = page.waitForRequest(request => new URL(request.url()).pathname === `/api/sessions/${id}/world/watch`);
+      await openReplay(id).click();
+      const query = new URL((await started).url()).searchParams;
+      assert.equal(query.get('mode'), 'replay'); assert.equal(query.get('fromFrame'), '1');
+      await page.locator('#world-canvas[data-sequence]').waitFor();
+      assert.equal(await recording.inputValue(), id);
+      return query;
+    }
+    const partial = await replayRequest(pausedEnding.id);
+    check(Number(partial.get('throughFrame')) === partialReplay.throughSequence,
+      'A partial shortcut uses the exact original saved boundary from the closure');
+    await page.locator('#tab-operations').click();
+    const sealed = await replayRequest(ending.id);
+    check(!sealed.has('throughFrame') && await page.locator('#world-room').inputValue() === '1'
+      && await page.locator('#world-camera').inputValue() === 'top',
+      'A sealed shortcut opens the original room in top view after a new session occupies the room');
+    await page.locator('#tab-operations').click();
     const reportsUrl = base + '/api' + reportsPath;
     const fetchReports = () => fetch(reportsUrl, { headers: { Authorization: 'Bearer ' + tokens.Master } });
     const downloadEvent = page.waitForEvent('download');
