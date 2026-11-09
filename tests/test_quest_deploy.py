@@ -37,11 +37,27 @@ switch ($args[2]) {
         exit 0
     }
     'push' {
-        Copy-Item -LiteralPath $args[3] -Destination (Join-Path $remote ($args[4].Split('/')[-1]))
+        $staging = Join-Path $remote ($args[4].Split('/')[-1])
+        Copy-Item -LiteralPath $args[3] -Destination $staging
+        if ($env:QUEST_TEST_FAIL -eq 'refresh-source-changed') {
+            [IO.File]::AppendAllText((Join-Path $remote 'vr-connection.json'), "`n")
+        }
+        if ($env:QUEST_TEST_FAIL -eq 'refresh-stage-changed') { [IO.File]::AppendAllText($staging, "`n") }
+        exit 0
+    }
+    'pull' {
+        if ($args[3] -cne '/sdcard/Android/data/com.vrcommand.quest/files/vr-connection.json') { exit 97 }
+        Copy-Item -LiteralPath (Join-Path $remote 'vr-connection.json') -Destination $args[4]
         exit 0
     }
     'shell' {
         switch ($args[3]) {
+            { $_.StartsWith('current=$(sha256sum ') } {
+                if ($args.Count -ne 4) { exit 96 }
+                Set-Location -LiteralPath $env:QUEST_TEST_ROOT
+                & $env:QUEST_TEST_SH -c $args[3].Replace('/sdcard/Android/data/com.vrcommand.quest/files/', 'remote/')
+                exit $LASTEXITCODE
+            }
             'getprop' {
                 if ($env:QUEST_TEST_FAIL -eq 'getprop') { exit 1 }
                 if ($env:QUEST_TEST_FAIL -eq 'model') { 'Quest 2' } else { 'Quest 3' }
@@ -127,6 +143,84 @@ class QuestDeployTests(unittest.TestCase):
         apk = self.root / 'artifacts/quest/VrCommand.apk'
         apk.parent.mkdir(parents=True)
         apk.write_bytes(b'mock APK')
+
+    def ticket_refresh(self, installed_expiry, *, mode='MR'):
+        identities = [uuid.uuid4() for _ in range(3)]
+        pin = hashlib.sha256(self.plan.read_bytes()).hexdigest()
+        installed = {**self.player, 'joinTicket': make_ticket(5, 1, installed_expiry, *identities),
+                     'roomAlignmentSha256': pin, 'questPassthrough': True, 'requestMixedReality': mode=='MR'}
+        current = self.remote/'vr-connection.json'
+        self.write(current, installed)
+        fresh = {**self.player, 'joinTicket': make_ticket(5, 1, self.expiry, *identities)}
+        if mode == 'MR':
+            fresh['roomAlignmentSha256'] = pin
+        self.write(self.config, fresh)
+        alignment = self.remote/f'vr-room-alignment-{pin}.json'
+        alignment.write_bytes(self.plan.read_bytes())
+        return current, installed, fresh, identities, alignment
+
+    def run_refresh(self, failure=''):
+        shell = shutil.which('sh')
+        if shell is None and os.name == 'nt':
+            git = Path(shutil.which('git')).resolve()
+            shell = str(git.parent.parent/'bin/sh.exe')
+        env = {**os.environ, 'QUEST_TEST_ROOT': str(self.root), 'QUEST_TEST_FAIL': failure, 'QUEST_TEST_SH': shell}
+        return subprocess.run(['pwsh', '-NoProfile', '-NonInteractive', '-File', str(self.script), '-RefreshPlayerTicket',
+                               '-ClientConfig', str(self.config), '-AdbPath', str(self.adb), '-Serial', 'fixture'],
+                              env=env, capture_output=True, encoding='utf-8', timeout=20)
+
+    def test_ticket_refresh_updates_only_original_ticket_and_is_idempotent(self):
+        for mode in ('MR', 'VR'):
+            with self.subTest(mode=mode):
+                current, installed, fresh, _, alignment = self.ticket_refresh(self.expiry-300, mode=mode)
+                self.commands.unlink(missing_ok=True)
+                result = self.run_refresh()
+                self.assertEqual(0, result.returncode, result.stderr)
+                report = json.loads(result.stdout)
+                self.assertEqual((5, 2, 'ticket-file-refreshed'), (report['roomId'], report['seat'], report['status']))
+                self.assertEqual(dict(installed, joinTicket=fresh['joinTicket']), json.loads(current.read_bytes()))
+                self.assertEqual(self.plan.read_bytes(), alignment.read_bytes())
+                commands = self.commands.read_text(encoding='utf-8').splitlines()
+                self.assertEqual(4, len(commands))
+                for phrase in ('getprop', 'pull', 'push', 'sha256sum'):
+                    self.assertTrue(any(phrase in command for command in commands), commands)
+                self.assertNotIn(fresh['joinTicket'], result.stdout + result.stderr + '\n'.join(commands))
+                self.assertNotIn(installed['joinTicket'], result.stdout + result.stderr + '\n'.join(commands))
+                raw = current.read_bytes()
+                self.commands.unlink()
+                repeat = self.run_refresh()
+                self.assertEqual(0, repeat.returncode, repeat.stderr)
+                self.assertEqual('ticket-file-current', json.loads(repeat.stdout)['status'])
+                self.assertEqual(2, len(self.commands.read_text(encoding='utf-8').splitlines()))
+                self.assertEqual(raw, current.read_bytes())
+                self.assertFalse(list(self.remote.glob('*.tmp')))
+
+    def test_ticket_refresh_rejects_changed_seat_endpoint_pin_or_older_ticket(self):
+        current, _, fresh, identities, _ = self.ticket_refresh(self.expiry-100)
+        original = current.read_bytes()
+        for changes, message in (
+                ({'joinTicket': make_ticket(5, 1, self.expiry, *identities[:2], uuid.uuid4())}, 'same original admission'),
+                ({'joinTicket': make_ticket(5, 0, self.expiry, *identities)}, 'same original admission'),
+                ({'port': 7778}, 'same original admission'),
+                ({'roomAlignmentSha256': 'a'*64}, 'original locked MR alignment'),
+                ({'joinTicket': make_ticket(5, 1, self.expiry-150, *identities)}, 'later expiry')):
+            with self.subTest(changes=changes.keys(), message=message):
+                self.write(self.config, {**fresh, **changes})
+                self.commands.unlink(missing_ok=True)
+                self.assert_rejected(self.run_refresh(), message)
+                self.assertEqual(original, current.read_bytes())
+                self.assertNotIn(' push ', self.commands.read_text(encoding='utf-8'))
+        self.assert_rejected(self.run_refresh('model'), 'authorized Meta Quest 3')
+
+    def test_ticket_refresh_checks_remote_files_before_replacing_and_cleans_owned_staging(self):
+        for fault in ('refresh-source-changed', 'refresh-stage-changed'):
+            with self.subTest(fault=fault):
+                current, _, _, _, _ = self.ticket_refresh(self.expiry-300)
+                original = current.read_bytes()
+                result = self.run_refresh(fault)
+                self.assert_rejected(result, 'Could not confirm ticket replacement')
+                self.assertEqual(original + (b'\n' if fault=='refresh-source-changed' else b''), current.read_bytes())
+                self.assertFalse(list(self.remote.glob('*.tmp')))
 
     def test_preflight_is_offline_and_does_not_print_ticket(self):
         result = self.run_mr('-CheckOnly')

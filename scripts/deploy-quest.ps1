@@ -1,8 +1,9 @@
 [CmdletBinding(DefaultParameterSetName='Player')]
 param(
-    [Parameter(Mandatory, ParameterSetName='Player')][string]$ClientConfig,
-    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][string]$Serial,
-    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][string]$AdbPath = 'F:\Tools\UnityEditors\6000.3.27f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe',
+    [Parameter(Mandatory, ParameterSetName='Player')][Parameter(Mandatory, ParameterSetName='Refresh')][string]$ClientConfig,
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Refresh')][string]$Serial,
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='Refresh')][string]$AdbPath = 'F:\Tools\UnityEditors\6000.3.27f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe',
+    [Parameter(Mandatory, ParameterSetName='Refresh')][switch]$RefreshPlayerTicket,
     [Parameter(ParameterSetName='Player')][string]$AlignmentFile,
     [Parameter(ParameterSetName='Player')][switch]$Passthrough,
     [Parameter(ParameterSetName='Player')][switch]$MixedReality,
@@ -85,18 +86,31 @@ function Test-FloorPoint($Point, [double]$Limit) {
 
 function Test-JsonInteger($Value) { return $Value -is [int] -or $Value -is [long] }
 
-function Read-PlayerConfig($Config) {
-    $unknown = @($Config.PSObject.Properties.Name | Where-Object { $_ -cnotin @('role','address','port','joinTicket','roomAlignmentSha256') })
+function Read-PlayerConfig($Config, [switch]$Installed) {
+    $fields = @('role','address','port','joinTicket','roomAlignmentSha256')
+    if ($Installed) { $fields += 'questPassthrough','requestMixedReality' }
+    $unknown = @($Config.PSObject.Properties.Name | Where-Object { $_ -cnotin $fields })
     if ($Config.role -isnot [string] -or $Config.role -cne 'Client' -or $Config.joinTicket -isnot [string] -or
         $Config.address -isnot [string] -or $Config.address -notmatch '\A[^\s]+\z' -or
         -not (Test-JsonInteger $Config.port) -or $Config.port -lt 1 -or $Config.port -gt 65535 -or $unknown.Count -gt 0) {
         throw 'Use a player-only connection file from the management console or prepare-vr-session.py.'
     }
-    $ticket = Get-PlayerTicketDetails $Config.joinTicket -AllowExpired:$ReadCapturePlan
+    $ticket = Get-PlayerTicketDetails $Config.joinTicket -AllowExpired:($ReadCapturePlan -or $Installed)
     if ($null -ne $Config.PSObject.Properties['roomAlignmentSha256']) {
         $hash = $Config.roomAlignmentSha256
         if ($hash -isnot [string] -or $hash -cnotmatch '\A[a-f0-9]{64}\z') { throw 'Use a valid locked MR alignment SHA-256 in the player connection file.' }
         $ticket.AlignmentHash = $hash
+    }
+    if ($Installed) {
+        foreach ($flag in 'questPassthrough','requestMixedReality') {
+            if ($null -ne $Config.PSObject.Properties[$flag] -and $Config.$flag -isnot [bool]) {
+                throw 'Installed Quest flags must be boolean.'
+            }
+        }
+        if (($Config.questPassthrough -and -not $ticket.AlignmentHash) -or
+            ($Config.requestMixedReality -and -not $Config.questPassthrough)) {
+            throw 'Installed Quest profile requires its original alignment and passthrough settings.'
+        }
     }
     return $ticket
 }
@@ -606,12 +620,21 @@ function Enter-QuestDeployment {
     return $lock
 }
 
-function Publish-QuestFile([string]$TargetSerial, [string]$Local, [string]$Staging, [string]$Destination, [string]$Description) {
+function Publish-QuestFile([string]$TargetSerial, [string]$Local, [string]$Staging, [string]$Destination, [string]$Description,
+    [string]$ExpectedHash) {
     try {
         & $AdbPath -s $TargetSerial push $Local $Staging | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "$Description could not be copied." }
-        & $AdbPath -s $TargetSerial shell mv $Staging $Destination | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "$Description could not be activated." }
+        if ($ExpectedHash) {
+            $stagedHash = (Get-FileHash -LiteralPath $Local -Algorithm SHA256).Hash.ToLowerInvariant()
+            $command = 'current=$(sha256sum ''{0}'') && staged=$(sha256sum ''{1}'') && [ "${{current%% *}}" = ''{2}'' ] && [ "${{staged%% *}}" = ''{3}'' ] && mv -f ''{1}'' ''{0}''' `
+                -f $Destination, $Staging, $ExpectedHash, $stagedHash
+            & $AdbPath -s $TargetSerial shell $command *> $null
+            if ($LASTEXITCODE -ne 0) { throw 'Could not confirm ticket replacement. Check the selected device and read its current configuration before retrying.' }
+        } else {
+            & $AdbPath -s $TargetSerial shell mv $Staging $Destination | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "$Description could not be activated." }
+        }
     } catch {
         $publishError = $_
         try {
@@ -622,6 +645,46 @@ function Publish-QuestFile([string]$TargetSerial, [string]$Local, [string]$Stagi
         }
         throw $publishError
     }
+}
+
+function Update-QuestPlayerTicket($Fresh, $Ticket) {
+    if ($Serial -cnotmatch '\A[A-Za-z0-9\[][A-Za-z0-9._:%\[\]-]{0,127}\z') { throw 'Use an explicit ADB serial for the Quest 3.' }
+    if (-not (Test-Path -LiteralPath $AdbPath -PathType Leaf)) { throw 'Provide the installed ADB executable.' }
+    if ([Guid]::Empty -in @($Ticket.SessionId, $Ticket.PlayerId, $Ticket.AdmissionId)) { throw 'Use a player file for an original admission.' }
+    $model = & $AdbPath -s $Serial shell getprop ro.product.model 2>$null
+    if ($LASTEXITCODE -ne 0 -or ($model -join "`n").Trim() -cne 'Quest 3') { throw 'Select an authorized Meta Quest 3.' }
+
+    $remote = '/sdcard/Android/data/com.vrcommand.quest/files'
+    $destination = "$remote/vr-connection.json"
+    $local = [IO.Path]::GetTempFileName()
+    try {
+        & $AdbPath -s $Serial pull $destination $local *> $null
+        if ($LASTEXITCODE -ne 0) { throw 'Could not read the original player configuration on the selected Quest.' }
+        $original = Read-DeploymentJson $local 4096 'installed Quest configuration'
+        $current = $original.Document
+        $installed = Read-PlayerConfig $current -Installed
+        if ($Ticket.SessionId -ne $installed.SessionId -or $Ticket.PlayerId -ne $installed.PlayerId -or
+            $Ticket.AdmissionId -ne $installed.AdmissionId -or $Ticket.RoomId -ne $installed.RoomId -or
+            $Ticket.Seat -ne $installed.Seat -or $Fresh.address -cne $current.address -or $Fresh.port -ne $current.port) {
+            throw 'Refresh requires the same original admission, seat and game endpoint.'
+        }
+        if (($Ticket.AlignmentHash -and $Ticket.AlignmentHash -cne $installed.AlignmentHash) -or
+            ($current.requestMixedReality -and -not $Ticket.AlignmentHash)) {
+            throw 'Refresh requires the original locked MR alignment.'
+        }
+        $sameTicket = $Fresh.joinTicket -ceq $current.joinTicket
+        if ($Ticket.ExpiresAtUtc -lt $installed.ExpiresAtUtc) { throw 'Use a ticket with the same or a later expiry for this admission.' }
+        if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'The replacement ticket expired before refresh.' }
+        if (-not $sameTicket) {
+            $expectedHash = (Get-FileHash -LiteralPath $local -Algorithm SHA256).Hash.ToLowerInvariant()
+            $current.joinTicket = $Fresh.joinTicket
+            [IO.File]::WriteAllText($local, ($current | ConvertTo-Json -Depth 4 -Compress))
+            $staging = "$remote/vr-connection-$([Guid]::NewGuid().ToString('N')).tmp"
+            Publish-QuestFile $Serial $local $staging $destination 'Player ticket file' $expectedHash
+        }
+    } finally { Remove-Item -LiteralPath $local }
+    [ordered]@{ roomId = $Ticket.RoomId; seat = $Ticket.Seat + 1; expiresAtUtc = $Ticket.ExpiresAtUtc.ToString('o')
+        status = if ($sameTicket) { 'ticket-file-current' } else { 'ticket-file-refreshed' } } | ConvertTo-Json -Compress
 }
 
 function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment, [switch]$UsePassthrough, [switch]$RequestMixedReality) {
@@ -676,6 +739,16 @@ if ($PSCmdlet.ParameterSetName -eq 'CapturePlan') {
         }
     }
     [ordered]@{ version = 1; topology = $venue.Report.topology; seats = @($seats) } | ConvertTo-Json -Depth 4 -Compress
+    return
+}
+
+if ($PSCmdlet.ParameterSetName -eq 'Refresh') {
+    if (-not $RefreshPlayerTicket) { throw 'Specify -RefreshPlayerTicket for the live ticket update.' }
+    $fresh = (Read-DeploymentJson $ClientConfig 4096 'new player connection').Document
+    $ticket = Read-PlayerConfig $fresh
+    $deploymentLock = Enter-QuestDeployment
+    try { Update-QuestPlayerTicket $fresh $ticket }
+    finally { $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose() }
     return
 }
 

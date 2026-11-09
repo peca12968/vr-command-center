@@ -15,17 +15,19 @@ Unity0.34.0／Android code41加入右手B鍵重連入口，NGO29、API/UI0.30與
 
 焦點失去、程式暫停及bootstrap停用的Unity回呼也會明確解除準備；不依賴暫停期間仍有Update執行。
 
-首次安裝仍使用[QUEST3](QUEST3.md)的deploy工具。要在**不關閉現有程式**時更新票券，可將控制台下載的四欄Client檔推送到同一app目錄的暫存檔，確認push成功後才改成正式檔；下列步驟尚待Quest實機驗證，不執行install或force-stop：
+## 保留遊戲程序並更新票券
+
+從控制台重新下載同一場次、同一席位的玩家連線檔。透過 USB 偵錯選定 Quest 3，使用原部署工具的 `-RefreshPlayerTicket` 模式。
 
 ```powershell
 $adb = 'F:/Tools/UnityEditors/6000.3.27f1/Editor/Data/PlaybackEngines/AndroidPlayer/SDK/platform-tools/adb.exe'
-& $adb -s '<已授權Quest3序號>' push '<自己的新玩家檔.json>' /sdcard/Android/data/com.vrcommand.quest/files/vr-connection.next.json
-if ($LASTEXITCODE -ne 0) { throw 'Player file push failed; keep the current file.' }
-& $adb -s '<已授權Quest3序號>' shell mv -f /sdcard/Android/data/com.vrcommand.quest/files/vr-connection.next.json /sdcard/Android/data/com.vrcommand.quest/files/vr-connection.json
-if ($LASTEXITCODE -ne 0) { throw 'Player file replacement failed; inspect the device.' }
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -RefreshPlayerTicket `
+    -AdbPath $adb -Serial '<已授權 Quest 3 序號>' -ClientConfig .\new-player-ticket.json
 ```
 
-只配置role／address／port／joinTicket；不得將主控或GameServer key送到頭盔。不在票券更新工具中讀出或回傳票券內容；實際簽章、效期、room／seat、撤銷及本次admission仍由原伺服器處理。修改檔案不表示已入場，確認有效姿態仍用控制台readiness。
+工具私下讀取頭盔原設定，核對場次、玩家、入場識別、席位、伺服器位址與埠，並保留原透視和校正設定。MR 要使用同一鎖定校正值。工具只把票券更新到同資料夾的暫存檔，確認原檔及暫存檔的 SHA-256 後再替換。已經是同一票券時會回報 `ticket-file-current`。成功替換會回報 `ticket-file-refreshed`，原遊戲程序可接著處理 B 鍵重連。[Android ADB](https://developer.android.com/tools/adb) · [Android SHA-256 實作](https://android.googlesource.com/platform/external/toybox/+/40d21c59f76a9388b0ebb5c4c706732c2d034a67/toys/lsb/md5sum.c)
+
+若控制台已撤銷原席或重新建立入場，請走新的部署流程。重連時由遊戲伺服器驗證簽章、票券效期及當前入場，回到控制台確認有效參戰快照。USB 更新與頭盔按鍵仍需實機驗收。 [首次部署](QUEST3.md#區域網路原型操作)
 
 新輸入不改頭手追蹤、原點、模型對位、槍口、Simulated恢復快取、命中或0.5／1.5秒政策。Client按鍵不持有控制台憑證；重新讀檔不能變成Host／Server，錯檔不發動StartClient。入場、結束戰績與桌面重連契約見[RECONNECT](RECONNECT.md)。
 

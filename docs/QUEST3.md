@@ -418,6 +418,8 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connect
 
 ## 收集 Quest 場館驗收日誌
 
+原程序斷線且票券過期時，可先更新同一入場的票券，再由玩家按 B 重連。 [票券更新](QUEST_RECONNECT.md#保留遊戲程序並更新票券)
+
 在 Windows 遊戲伺服器啟動器 1.7 勾選「記錄本次玩家連線來源（場館驗收）」，或用 CLI 的 `--peer-diagnostics on` 保留 UDP 來源和戰績確認。驗收前先關閉上次場次的遊戲，再部署本場票券並重新啟動。頭盔經 USB 偵錯授權後，從 Wi-Fi 設定記下本次使用的 IPv4。每席遊戲啟動後立即用 Python 3.12 開始擷取。看到 `capture-ready` 後，依主控台原開場條件確認玩家入場和追蹤狀態。
 
 ```powershell
