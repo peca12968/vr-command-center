@@ -11,7 +11,7 @@ async function main() {
   assert.equal(players.length, 25);
   await fs.mkdir(out);
   const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
-  const errors = [], writes = [], watches = [];
+  const errors = [], requests = [], watches = [];
   const checks = [];
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1080 } });
@@ -19,12 +19,20 @@ async function main() {
     page.on('request', request => {
       const url = new URL(request.url());
       if (url.origin !== base) return;
-      if (request.method() !== 'GET' && url.pathname.startsWith('/api/')) writes.push(request.method());
+      if (request.method() !== 'GET' && url.pathname.startsWith('/api/')) requests.push(`${request.method()} ${url.pathname}`);
       if (url.pathname.endsWith('/world/watch')) watches.push(url.pathname);
     });
     await page.goto(base + '/console/');
     await page.locator('#login-key').fill(masterKey);
     await page.locator('#login-form button').click();
+    async function sessionRevision() {
+      const response = await page.request.get(`${base}/api/sessions/${sessionId}`, { headers: { Authorization: 'Bearer ' + masterKey } });
+      assert.equal(response.status(), 200);
+      const session = await response.json();
+      assert.equal(session.players.length, 25);
+      return session.sequence;
+    }
+    const revision = await sessionRevision();
     await page.locator('[data-watch-room="4"]').click();
     const picker = page.locator('#world-actor'), canvas = page.locator('#world-canvas'), camera = page.locator('#world-camera');
     const forRoom = room => players.filter(player => player.roomId === room);
@@ -63,10 +71,12 @@ async function main() {
     assert.ok(await enemies.count() > 0);
     assert.equal(await picker.inputValue(), '');
     assert.deepEqual(watches, [`/api/sessions/${sessionId}/world/watch`]);
-    assert.deepEqual(writes, []);
+    // The operations tab may calculate a read-only draft layout while the browser logs in.
+    assert.deepEqual(requests.filter(request => request !== 'POST /api/mission-layout'), []);
+    assert.equal(await sessionRevision(), revision);
     assert.deepEqual(errors, []);
     checks.push('All-room list restores 25 names through the original read-only stream');
   } finally { await browser.close(); }
-  await fs.writeFile(path.join(out, 'checks.json'), JSON.stringify({ complete: true, checks, sessionId, players: 25 }, null, 2), { flag: 'wx' });
+  await fs.writeFile(path.join(out, 'checks.json'), JSON.stringify({ complete: true, checks, sessionId, players: 25, nonGetRequests: requests }, null, 2), { flag: 'wx' });
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });
