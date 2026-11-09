@@ -176,23 +176,33 @@ export function roomReadinessView(report, room, session, elapsed) {
 
 export function mountRoomReadiness(getState, unauthorized, venueUpdated, describeClimate, describeEnemies) {
   let active = false, controller, report, started = 0, attempted = -Infinity, failed = false;
-  function environmentView(room, session, elapsed) {
+  function settingView(room, session, elapsed, kind) {
     if (!active || !room || !['Running', 'Paused'].includes(session?.state)) return null;
-    const row = roomReadinessRow(report, room, session), evidence = row?.environment;
+    const row = roomReadinessRow(report, room, session), evidence = row?.[kind];
     const setting = evidence?.setting;
-    if (!setting || typeof evidence.venue !== 'boolean' || !['Clear', 'Rain', 'Fog', 'Storm'].includes(setting.weather)
-      || !['Day', 'Night'].includes(setting.timeOfDay) || typeof setting.lightning !== 'boolean') return null;
-    const view = roomVenueSettingView(row, setting, elapsed, failed, evidence.venue ? '全館環境' : '場次環境', describeClimate(setting));
+    if (!setting || typeof evidence.venue !== 'boolean') return null;
+    const enemy = kind === 'enemies';
+    if (enemy ? !['Hold', 'Patrol', 'Advance'].includes(setting.behavior) || typeof setting.autoAttack !== 'boolean'
+        || !Number.isInteger(evidence.targetCount) || evidence.targetCount < 0 || evidence.targetCount > 100
+      : !['Clear', 'Rain', 'Fog', 'Storm'].includes(setting.weather) || !['Day', 'Night'].includes(setting.timeOfDay)
+        || typeof setting.lightning !== 'boolean') return null;
+    const label = (evidence.venue ? '全館' : '場次') + (enemy ? '敵軍策略' : '環境');
+    const details = enemy ? describeEnemies(setting) + ` · 全場目標 ${evidence.targetCount} 名` : describeClimate(setting);
+    const view = roomVenueSettingView(row, setting, elapsed, failed, label, details);
     if (!view) return null;
-    const target = view.applied && typeof evidence.streamId === 'string' && evidence.streamId === session.combatStream?.streamId
+    const counts = evidence.population;
+    const population = enemy && view.applied && Number.isInteger(counts?.present) && counts.present >= 0 && counts.present <= 100
+      && Number.isInteger(counts.alive) && counts.alive >= 0 && counts.alive <= counts.present ? counts : null;
+    const target = view.applied && (!enemy || population) && typeof evidence.streamId === 'string' && evidence.streamId === session.combatStream?.streamId
       ? { mode: 'replay', sessionId: session.id, roomId: room.id, streamId: evidence.streamId, complete: false,
-        throughSequence: setting.worldSequence, environment: setting }
+        throughSequence: setting.worldSequence, witness: { kind, setting, population } }
       : null;
-    return { ...view, venue: evidence.venue, target };
+    const text = population ? view.text + ` · 本房在場 ${population.present} 名、存活 ${population.alive} 名` : view.text;
+    return { ...view, text, venue: evidence.venue, target };
   }
-  function environmentFrame(roomId) {
+  function settingFrame(roomId, kind) {
     const { rooms, sessions } = getState(), room = rooms.find(row => row.id === roomId);
-    return environmentView(room, sessions.find(row => row.id === room?.sessionId), performance.now() - started)?.target;
+    return settingView(room, sessions.find(row => row.id === room?.sessionId), performance.now() - started, kind)?.target;
   }
   function venueBegin(target, roomId) {
     const waiting = (state, text) => ({ state, text, ready: false });
@@ -255,15 +265,12 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
       phaseCell.hidden = !phase;
       phaseCell.textContent = phase?.text ?? '';
       phaseCell.classList.toggle('tracking-attention', !!phase && (!phase.applied || (phase.action === 'Pause' && !phase.ready)));
-      const row = ['Running', 'Paused'].includes(session?.state) ? roomReadinessRow(report, room, session) : null;
-      const enemies = row?.venueEnemies, climate = environmentView(room, session, elapsed);
-      const climateCell = cell.parentElement.querySelector('[data-room-environment]');
-      if (climate?.venue) climateCell.dataset.roomVenueEnvironment = room.id;
-      else delete climateCell.dataset.roomVenueEnvironment;
-      cell.parentElement.querySelector('[data-room-environment-frame]').hidden = !climate?.target;
-      const enemiesView = enemies && ['Hold', 'Patrol', 'Advance'].includes(enemies.behavior) && typeof enemies.autoAttack === 'boolean'
-        ? roomVenueSettingView(row, enemies, elapsed, failed, '全館敵軍策略', describeEnemies(enemies)) : null;
-      for (const [settingCell, setting] of [[climateCell, climate], [cell.parentElement.querySelector('[data-room-venue-enemies]'), enemiesView]]) {
+      for (const [kind, venueAttribute] of [['environment', 'roomVenueEnvironment'], ['enemies', 'roomVenueEnemies']]) {
+        const setting = settingView(room, session, elapsed, kind);
+        const settingCell = cell.parentElement.querySelector(`[data-room-${kind}]`);
+        if (setting?.venue) settingCell.dataset[venueAttribute] = room.id;
+        else delete settingCell.dataset[venueAttribute];
+        cell.parentElement.querySelector(`[data-room-${kind}-frame]`).hidden = !setting?.target;
         settingCell.hidden = !setting;
         settingCell.textContent = setting?.text ?? '';
         settingCell.classList.toggle('tracking-attention', !!setting && !setting.applied);
@@ -303,7 +310,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') update(); else reset(); });
   setInterval(update, 250);
-  return { update, venueReady, venueBegin, environmentFrame, active(value) { active = value; if (value) update(); else reset(); } };
+  return { update, venueReady, venueBegin, settingFrame, active(value) { active = value; if (value) update(); else reset(); } };
 }
 
 export function mountReadiness(getState, unauthorized) {

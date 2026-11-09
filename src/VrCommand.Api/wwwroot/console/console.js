@@ -22,7 +22,7 @@ const archiveNames = { NoSource: '沒有遊戲來源', Missing: '尚無錄製紀
 const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: null, rooms: [], venue: null, missions: [], catalog: [], launchPinned: null, history: null, draftBase: null, draftChanged: false, draftSavedAt: '', sessions: [], session: null, selected: null, pending: null, props: [], prop: -1, environmentSequence: null, enemiesSequence: null };
 let comparedVersion = null;
 const objectHistory = placementHistory();
-const world = mountWorld(() => state.key, logout);
+const world = mountWorld(() => state.key, logout, venueEnemyText);
 const report = mountReport(() => state, logout, () => { renderStatistics(); closure.update(); });
 const venueReport = mountVenueReport(() => state, logout, download);
 const venueHistory = mountVenueHistory(api, selectVenueClosure);
@@ -286,7 +286,7 @@ function renderRooms() {
       environment.dataset.roomEnvironment = room.id;
       environment.hidden = true;
       const enemies = element('p', '', 'hint');
-      enemies.dataset.roomVenueEnemies = room.id;
+      enemies.dataset.roomEnemies = room.id;
       enemies.hidden = true;
       card.append(status, endpoint, clock, phase, environment, enemies);
     }
@@ -302,15 +302,18 @@ function renderRooms() {
         if (state.busy || state.pending || !state.rooms.some(row => row.id === room.id && row.sessionId === room.sessionId)) return;
         tab('world', { mode: 'live', sessionId: room.sessionId, roomId: room.id });
       });
-      const environment = element('button', '檢視環境快照', 'quiet small');
-      environment.type = 'button'; environment.disabled = button.disabled; environment.hidden = true;
-      environment.dataset.roomEnvironmentFrame = room.id;
-      environment.addEventListener('click', () => {
-        if (state.busy || state.pending) return;
-        const target = roomReadiness.environmentFrame(room.id);
-        if (target?.sessionId === room.sessionId) tab('world', target);
-      });
-      actions.append(watch, environment);
+      actions.append(watch);
+      for (const [kind, label] of [['environment', '檢視環境快照'], ['enemies', '檢視敵軍快照']]) {
+        const snapshot = element('button', label, 'quiet small');
+        snapshot.type = 'button'; snapshot.disabled = button.disabled; snapshot.hidden = true;
+        snapshot.setAttribute(`data-room-${kind}-frame`, room.id);
+        snapshot.addEventListener('click', () => {
+          if (state.busy || state.pending) return;
+          const target = roomReadiness.settingFrame(room.id, kind);
+          if (target?.sessionId === room.sessionId) tab('world', target);
+        });
+        actions.append(snapshot);
+      }
     }
     card.append(actions); return card;
   }));

@@ -26,7 +26,11 @@ Windows 管理包 0.31.36 起，主控可在「全館敵軍策略」選擇守備
 
 各場保留原有的敵軍目標數，房控可用個別場次的敵軍設定調整增援。若任一目標的場次階段或敵軍設定已變更，管理端會拒絕整批。遺失回覆可重送原請求。房卡收到對應原命令序號與策略的有效快照後才顯示「已套用」。快照過期會回到待確認，個別場次改寫會清除本場的全館標記。
 
+管理包 0.31.58 的房卡也會確認個別場次的敵軍設定。房卡分列全場目標、本房快照中的在場數及存活數。遊戲端尚未確認或快照已過期時，只顯示管理端目標。按「檢視敵軍快照」可在原房俯視圖停在確認該策略的一格。觀戰與回放會顯示各格實際保存的行為及自動攻擊開關。
+
 `GET /api/venue/phase` 的 `enemies` 預覽提供各場的 `sessionId`、`phaseSinceSequence`、`enemiesSinceSequence` 與房號。`POST /api/venue/phase` 用 `SetEnemies`、原目標序號與 `enemyPolicy` 的 `behavior`、`autoAttack` 送出，使用同一 `Idempotency-Key` 可取回原回條。`GET /api/rooms/readiness` 的 `venueEnemies` 會回傳策略與有效快照序號。
+
+同一回應的 `enemies` 同時涵蓋全館和個別指令，包含 `setting`、`venue`、`targetCount`，以及確認後的原 `streamId` 和本房 `population`。房卡開啟回放時會核對原指令序號、策略和本房人數。場中加兵仍依原增援條件處理。
 
 保存全館敵軍策略紀錄的管理資料庫須由 0.31.36 或更新的管理包開啟。
 

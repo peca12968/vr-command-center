@@ -11,7 +11,7 @@ const eventNames = { ShotFired: '玩家射擊', ShotHit: '命中敵軍', EnemyEl
 const shortId = id => id && id !== '00000000-0000-0000-0000-000000000000' ? id.slice(0, 8) : '—';
 const roomName = room => room === 'all' ? '全部房間' : '房間 ' + room;
 
-export function mountWorld(getKey, unauthorized) {
+export function mountWorld(getKey, unauthorized, describeEnemies) {
   let active = false, scene, controller, epoch = 0, listEpoch = 0, listController, info, frame, geometry = '', mode = '', connected = false, received = 0;
   let connecting = false, stepping = false, savedLimit = null, savedFinished = false;
   let reviewPlayer = null, actors = new Map(), actorInitialized = false;
@@ -62,7 +62,7 @@ export function mountWorld(getKey, unauthorized) {
         picker.value = target.sessionId;
         resetRecording();
         const limit = target.mode === 'replay' && !target.complete ? target.throughSequence : null;
-        const sequence = target.playerId || target.environment ? target.throughSequence : target.mode === 'replay' ? 1 : null;
+        const sequence = target.playerId || target.witness ? target.throughSequence : target.mode === 'replay' ? 1 : null;
         void connect(target.mode, 0, sequence, limit, target);
         return;
       }
@@ -282,6 +282,9 @@ export function mountWorld(getKey, unauthorized) {
     const packet = value.packet;
     $('world-time').textContent = `${time(packet.elapsedMilliseconds)} / ${time(info.durationMilliseconds)} · 幀 ${packet.sequence}`;
     $('world-environment').textContent = `${packet.weather} · ${packet.frame.night ? '夜間' : '日間'} · ${packet.lightning ? '雷電啟用' : '無雷電'}${packet.suspended ? ' · 管理中斷暫停' : ''}`;
+    const { behavior, autoAttack } = packet.frame;
+    $('world-enemy-policy').textContent = ['Hold', 'Patrol', 'Advance'].includes(behavior) && typeof autoAttack === 'boolean'
+      ? '此快照的敵軍策略 · ' + describeEnemies({ behavior, autoAttack }) : '';
     $('world-timeline').max = String(Math.max(info.durationMilliseconds, packet.elapsedMilliseconds, 1)); $('world-timeline').value = String(packet.elapsedMilliseconds);
     showRoomCounts(packet); showStatistics();
     if (mode === 'replay') showEvents(value);
@@ -335,16 +338,26 @@ export function mountWorld(getKey, unauthorized) {
       if (request === epoch) { connecting = false; controller = null; reviewControls(); }
     }
   }
+  function matchesWitness(packet, target) {
+    const { kind, setting, population } = target.witness;
+    if (!Number.isSafeInteger(packet.observedSequence) || packet.observedSequence < setting.appliedAtSequence) return false;
+    if (kind === 'environment') return packet.weather === setting.weather && packet.frame.night === (setting.timeOfDay === 'Night')
+      && packet.lightning === setting.lightning;
+    const enemies = packet.frame.enemies.filter(enemy => enemy.roomId === target.roomId);
+    return packet.frame.behavior === setting.behavior && packet.frame.autoAttack === setting.autoAttack
+      && enemies.length === population.present && enemies.filter(enemy => enemy.health > 0).length === population.alive;
+  }
   async function connect(nextMode, milliseconds = 0, sequence = null, replayLimit = savedLimit, target = null) {
     const id = $('world-recording').value; if (!active || !id) return;
     stop(); mode = nextMode;
     const own = controller = new AbortController(), request = epoch;
-    const playerReview = Boolean(target?.playerId), environment = target?.environment;
-    const signal = playerReview || environment ? AbortSignal.any([own.signal, AbortSignal.timeout(8000)]) : own.signal;
+    const playerReview = Boolean(target?.playerId), witness = target?.witness;
+    const witnessLabel = witness?.kind === 'enemies' ? '敵軍' : '環境';
+    const signal = playerReview || witness ? AbortSignal.any([own.signal, AbortSignal.timeout(8000)]) : own.signal;
     if (nextMode === 'live') { savedLimit = null; savedFinished = false; reviewPlayer = null; }
     const limit = nextMode === 'live' ? null : replayLimit;
     let hasHeader = false, reachedSavedEnd = false, lastSequence = sequence === null ? null : sequence - 1;
-    let playerFrame = null, playerComplete = false, environmentFrame = null;
+    let playerFrame = null, playerComplete = false, witnessFrame = null;
     connecting = true; reviewControls(); $('world-frame-message').textContent = '';
     message(nextMode === 'live' ? '正在連接即時觀戰…' : '正在讀取已保存快照…');
     try {
@@ -406,12 +419,10 @@ export function mountWorld(getKey, unauthorized) {
                   || (lastSequence !== null && current !== lastSequence + 1)) throw new Error('已保存片段的快照序號不符。');
                 lastSequence = current;
               }
-              if (environment) {
-                if (environmentFrame || !Number.isSafeInteger(data.packet.observedSequence) || data.packet.observedSequence < environment.appliedAtSequence
-                  || data.packet.weather !== environment.weather || data.packet.frame.night !== (environment.timeOfDay === 'Night')
-                  || data.packet.lightning !== environment.lightning)
-                  throw new Error('回應快照的環境或指令序號不同。');
-                environmentFrame = data;
+              if (witness) {
+                if (witnessFrame || !matchesWitness(data.packet, target))
+                  throw new Error(`回應快照的${witnessLabel}或指令序號不同。`);
+                witnessFrame = data;
               } else show(data);
             }
             else if (type === 'complete' && playerReview) {
@@ -420,7 +431,7 @@ export function mountWorld(getKey, unauthorized) {
             }
             else if (type === 'status' || type === 'complete') { info = data; status(); }
             else if (type === 'saved-end' && limit !== null) {
-              if (!hasHeader || data.acceptedSequence !== savedLimit || lastSequence !== savedLimit || (environment && !matchesTarget(data, target)))
+              if (!hasHeader || data.acceptedSequence !== savedLimit || lastSequence !== savedLimit || (witness && !matchesTarget(data, target)))
                 throw new Error('已保存片段未完整讀取。');
               info = data; reachedSavedEnd = savedFinished = true;
             }
@@ -431,9 +442,9 @@ export function mountWorld(getKey, unauthorized) {
         if (limit !== null && !reachedSavedEnd) throw new Error('尚未讀到已保存片段尾端。');
         if (playerReview && !playerComplete) throw new Error('尚未讀到原場次的封存結尾。');
         connected = false; status();
-        if (environment) {
-          show(environmentFrame, true);
-          $('world-frame-message').textContent = `已停在第 ${target.throughSequence} 格的環境快照。`;
+        if (witness) {
+          show(witnessFrame, true);
+          $('world-frame-message').textContent = `已停在第 ${target.throughSequence} 格的${witnessLabel}快照。`;
         }
         if (playerReview) {
           reviewPlayer = { id: target.playerId, name: target.playerName };
@@ -443,7 +454,7 @@ export function mountWorld(getKey, unauthorized) {
       }
     } catch (error) {
       if (request === epoch && !own.signal.aborted) {
-        if (playerReview || environment) resetRecording();
+        if (playerReview || witness) resetRecording();
         connected = connecting = false; message('觀戰已中斷：' + error.message + '；可重新連接。', true); status();
       }
     }

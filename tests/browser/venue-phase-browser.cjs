@@ -14,14 +14,15 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
   const evidence = page.locator('#venue-phase-evidence');
   const roomPhase = room => page.locator(`[data-room-venue-phase="${room}"]`);
   const run = (id, action) => api(`/sessions/${id}/commands`, 'POST', { commandId: randomUUID(), action });
-  async function prepare(id, room, withSource, connected = false) {
+  async function prepare(id, room, withSource, connected = false, reinforcementVersion = 0) {
     let snapshot = await api(`/sessions/${id}/players`, 'POST', { playerId: randomUUID(), roomId: room, name: 'Venue seat', headset: 'Quest3' });
     let publish;
     if (withSource) {
       const streamId = randomUUID(), origin = 'Simulation', started = Date.now();
       await api(`/sessions/${id}/combat-stream`, 'POST', { streamId, origin }, 'GameServer');
       snapshot = await api(`/sessions/${id}`);
-      const header = { sessionId: id, streamId, origin, roomIds: snapshot.roomIds, captureStartedAtUtc: new Date(started).toISOString().replace('Z', '0000+00:00') };
+      const header = { sessionId: id, streamId, origin, roomIds: snapshot.roomIds, reinforcementVersion,
+        captureStartedAtUtc: new Date(started).toISOString().replace('Z', '0000+00:00') };
       let sequence = 0;
       const send = message => {
         const result = spawnSync('python', [path.join(root, 'scripts/world_test_socket.py')], { encoding: 'utf8', timeout: 6000, windowsHide: true,
@@ -30,7 +31,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         if (result.status !== 0) throw new Error('Venue fixture publication failed: ' + (result.stderr || result.error?.message));
         return JSON.parse(result.stdout);
       };
-      publish = current => {
+      publish = (current, enemies = []) => {
         const players = current.players.map(player => {
           const head = { x: (player.roomId - 3) * 14 + player.seat, y: 1.65, z: -3 };
           const rotation = { x: 0, y: 0, z: 0, w: 1 };
@@ -44,7 +45,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         const visibility = ['Fog', 'Storm'].includes(weather) ? weather : 'Clear';
         const packet = { sequence: ++sequence, observedSequence: current.sequence, elapsedMilliseconds: sequence === 1 ? 0 : Date.now() - started,
           weather, lightning, throughCombatSequence: 0, events: [],
-          frame: { phase: current.state, tick: 0, night: timeOfDay === 'Night', visibility, behavior, autoAttack, throughSequence: 0, players } };
+          frame: { phase: current.state, tick: 0, night: timeOfDay === 'Night', visibility, behavior, autoAttack, throughSequence: 0, players, enemies } };
         assert.equal(send({ type: 'frame', payload: packet }).acceptedSequence, sequence);
       };
       publish.seal = () => assert.equal(send({ type: 'seal', finalSequence: sequence }).complete, true);
@@ -255,7 +256,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     check(await beginButton.isDisabled() && await beginRoom(2).getAttribute('data-begin-state') === 'EmptyRoster',
       'Expired VR evidence clears the ready label while the independent empty-room reason remains');
     await panel.screenshot({ path: path.join(screenshots, 'venue-phase-begin-blockers.png') });
-    const second = await prepare(preparing[1], 2, true, true);
+    const second = await prepare(preparing[1], 2, true, true, 1);
     const staleBegin = await api('/venue/phase', 'POST', { action: 'Begin', targets: preview }, 'Master', 409, undefined, randomUUID());
     check(staleBegin.code === 'venue-phase-changed' && (await api('/sessions')).every(session => session.state === 'Preparing'),
       'Preparing roster and source changes invalidate the previous Begin preview without starting either room');
@@ -318,9 +319,9 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       return Promise.all([1, 2].map(room => roomEnvironment(room).filter({ hasText: '全館環境已套用' }).isVisible())).then(rows => rows.every(Boolean));
     });
     check(true, 'Both rooms confirm their own matching environment frames');
-    async function openEnvironment(room, id) {
+    async function openSetting(kind, room, id) {
       const watched = page.waitForResponse(response => new URL(response.url()).pathname === `/api/sessions/${id}/world/watch`);
-      await environmentFrame(room).click();
+      await page.locator(`[data-room-${kind}-frame="${room}"]`).click();
       const response = await watched;
       assert.equal(response.status(), 200);
       const query = new URL(response.url()).searchParams;
@@ -330,7 +331,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       assert(frame > 0);
       return frame;
     }
-    const original = await openEnvironment(1, preparing[0]);
+    const original = await openSetting('environment', 1, preparing[0]);
     await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${original} 格的環境快照` }).waitFor();
     const durableClimate = await api(`/sessions/${preparing[0]}/world/frames/${original}`);
     check(durableClimate.packet.observedSequence >= climateReceipt.sessions.find(row => row.sessionId === preparing[0]).appliedAtSequence
@@ -361,12 +362,12 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       await route.fulfill({ response: original, body });
     }, { times: 1 });
     await publishUntil(second, override.session, () => environmentFrame(2).isVisible());
-    await openEnvironment(2, preparing[1]);
+    await openSetting('environment', 2, preparing[1]);
     await page.locator('#world-message').filter({ hasText: '回應快照的環境或指令序號不同' }).waitFor();
     check(await page.locator('#world-player').isHidden(), 'A substituted lightning value cannot open the anchored frame');
     await page.locator('#tab-operations').click();
     await publishUntil(second, override.session, () => environmentFrame(2).isVisible());
-    const localFrame = await openEnvironment(2, preparing[1]);
+    const localFrame = await openSetting('environment', 2, preparing[1]);
     await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${localFrame} 格的環境快照` }).waitFor();
     check(await page.locator('#world-room').inputValue() === '2' && await page.locator('#world-environment').innerText() === 'Rain · 夜間 · 無雷電',
       'The single-room shortcut opens the new rain setting without the previous lightning flag');
@@ -398,19 +399,31 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const acceptedEnemies = page.waitForResponse(response => response.url().endsWith('/api/venue/phase') && response.request().method() === 'POST');
     await page.locator('#venue-apply-enemies').click();
     await enemyConfirmed;
-    assert.equal((await acceptedEnemies).status(), 200);
+    const enemyResponse = await acceptedEnemies;
+    assert.equal(enemyResponse.status(), 200);
+    const enemyReceipt = await enemyResponse.json();
     const changedEnemies = await Promise.all(preparing.map(id => api(`/sessions/${id}`)));
     check(enemyDialog.includes('房間 1、2') && enemyDialog.includes('巡邏 · 自動攻擊開啟')
       && changedEnemies.every(session => session.enemies.count === 0 && session.enemies.behavior === 'Patrol' && session.enemies.autoAttack),
       'The console applies behavior and attack across rooms while preserving the original counts');
     const roomEnemies = room => page.locator(`[data-room-venue-enemies="${room}"]`);
+    const enemyFrame = room => page.locator(`[data-room-enemies-frame="${room}"]`);
     await roomEnemies(1).filter({ hasText: '全館敵軍策略待確認' }).waitFor();
+    check(await enemyFrame(1).isHidden() && !(await roomEnemies(1).innerText()).includes('本房在場'),
+      'A strategy receipt shows the configured target but withholds the population and replay until a fresh game frame');
     await publishUntil(first, changedEnemies[0], () => {
       second(changedEnemies[1]);
       return Promise.all([1, 2].map(room => roomEnemies(room).filter({ hasText: '全館敵軍策略已套用' }).isVisible())).then(rows => rows.every(Boolean));
     });
-    await page.locator('#venue-enemies').screenshot({ path: path.join(screenshots, 'venue-enemies.png') });
     check(true, 'Enemy policy is confirmed only by both original game sources');
+    const patrol = await openSetting('enemies', 1, preparing[0]);
+    await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${patrol} 格的敵軍快照` }).waitFor();
+    const patrolFrame = await api(`/sessions/${preparing[0]}/world/frames/${patrol}`);
+    check(patrolFrame.packet.observedSequence >= enemyReceipt.sessions.find(row => row.sessionId === preparing[0]).appliedAtSequence
+      && await page.locator('#world-room').inputValue() === '1' && await page.locator('#world-camera').inputValue() === 'top'
+      && (await page.locator('#world-enemy-policy').innerText()).endsWith('巡邏 · 自動攻擊開啟'),
+      'The enemy shortcut opens the exact venue strategy frame in the original room');
+    await page.locator('#tab-operations').click();
     const worldView = page.locator('#world-view'), recording = page.locator('#world-recording');
     const playerCanvas = page.locator('#world-canvas');
     const openedLive = page.waitForRequest(request => new URL(request.url()).pathname === `/api/sessions/${preparing[1]}/world/watch`);
@@ -421,10 +434,45 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       && await page.locator('#world-room').inputValue() === '2' && await page.locator('#world-camera').inputValue() === 'top',
       'The room card opens its original live source and focuses the room in the top view');
     await page.locator('#tab-operations').click();
-    await changeEnemies({ count: 0, behavior: 'Hold', autoAttack: false });
+    const localPolicy = await changeEnemies({ count: 2, behavior: 'Advance', autoAttack: false });
     await page.locator('#refresh').click();
-    await roomEnemies(2).waitFor({ state: 'hidden' });
-    check(await roomEnemies(1).isVisible(), 'The single-room enemy policy override clears only its own venue marker');
+    const localEnemies = page.locator('[data-room-enemies="2"]');
+    await localEnemies.filter({ hasText: '場次敵軍策略待確認' }).waitFor();
+    await roomEnemies(1).waitFor();
+    check(await roomEnemies(2).isHidden() && await enemyFrame(2).isHidden(),
+      'The single-room override clears only its own venue marker and withholds its old frame');
+    const npc = { id: randomUUID(), roomId: 2, health: 100, feet: { x: -14, y: 0, z: 3 } };
+    const publishAdvance = snapshot => second(snapshot, [npc]);
+    await publishUntil(publishAdvance, localPolicy.session, () => enemyFrame(2).isVisible());
+    const localStatus = (await api('/rooms/readiness', 'GET', undefined, 'Room2')).rooms;
+    check(localStatus.length === 1 && localStatus[0].roomId === 2 && localStatus[0].enemies.venue === false
+      && localStatus[0].enemies.targetCount === 2 && localStatus[0].enemies.population.present === 1 && localStatus[0].enemies.population.alive === 1
+      && (await localEnemies.innerText()).includes('全場目標 2 名 · 本房在場 1 名、存活 1 名'),
+      'A valid partial reinforcement separates the configured target from the recorded and living counts');
+    await page.route(`**/api/sessions/${preparing[1]}/world/watch?**`, async route => {
+      const original = await route.fetch();
+      const body = (await original.text()).replace(/event: frame\ndata: (.+)/, (_, raw) => {
+        const value = JSON.parse(raw); value.packet.frame.enemies = [];
+        return 'event: frame\ndata: ' + JSON.stringify(value);
+      });
+      await route.fulfill({ response: original, body });
+    }, { times: 1 });
+    await publishUntil(publishAdvance, localPolicy.session, () => enemyFrame(2).isVisible());
+    await openSetting('enemies', 2, preparing[1]);
+    await page.locator('#world-message').filter({ hasText: '回應快照的敵軍或指令序號不同' }).waitFor();
+    check(await page.locator('#world-player').isHidden(), 'A frame with a substituted enemy population cannot open the replay');
+    await page.locator('#tab-operations').click();
+    await publishUntil(publishAdvance, localPolicy.session, () => enemyFrame(2).isVisible());
+    const advance = await openSetting('enemies', 2, preparing[1]);
+    await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${advance} 格的敵軍快照` }).waitFor();
+    check(await page.locator('#world-room').inputValue() === '2'
+      && (await page.locator('#world-enemy-policy').innerText()).endsWith('推進 · 自動攻擊關閉'),
+      'The corrected shortcut opens the original single-room advance policy with auto-attack disabled');
+    await page.locator('#world-enemy-policy').screenshot({ path: path.join(screenshots, 'venue-enemy-frame-policy.png') });
+    await page.locator('#tab-operations').click();
+    await localEnemies.filter({ hasText: '快照已過期' }).waitFor();
+    check(await enemyFrame(2).isHidden() && !(await localEnemies.innerText()).includes('本房在場'),
+      'Expired enemy snapshots clear the actual population and shortcut together');
 
     const extra = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [3] }, 'Master', 201);
     active.add(extra.id);

@@ -125,11 +125,17 @@ public sealed partial class SessionManager
     public (SessionView View, long PhaseSinceSequence, ControlAction? VenueAction, long? VenueEnvironmentSequence, long? VenueEnemiesSequence,
         long EnvironmentSinceSequence)
         GetWithPhase(Guid id, OperatorIdentity? actor = null)
+        => GetWithPhase(id, actor, out _);
+
+    public (SessionView View, long PhaseSinceSequence, ControlAction? VenueAction, long? VenueEnvironmentSequence, long? VenueEnemiesSequence,
+        long EnvironmentSinceSequence)
+        GetWithPhase(Guid id, OperatorIdentity? actor, out long enemiesSinceSequence)
     {
         lock (gate)
         {
             var history = Find(id);
             AccessPolicy.Read(actor ?? OperatorIdentity.Internal, history.View.RoomIds);
+            enemiesSinceSequence = history.EnemiesSinceSequence;
             var venue = history.Events[(int)history.PhaseSinceSequence - 1];
             return (Snapshot(history.View), history.PhaseSinceSequence,
                 venue.Venue is null ? null : venue.Read<ControlCommand>().Action,
