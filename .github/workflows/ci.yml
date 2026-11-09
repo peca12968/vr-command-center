@@ -150,6 +150,8 @@ jobs:
             artifacts/live-hardware-gateway/*/bound-room-*-report.json
             artifacts/live-hardware-gateway/*/stale-binding-report.json
             artifacts/live-hardware-gateway/*/binding-mismatch-close.json
+            artifacts/live-hardware-gateway/*/duplicate-room-witness.json
+            artifacts/live-hardware-gateway/*/interrupted-room-3-close.json
             artifacts/live-hardware-gateway/*/*-stop-report.json
             artifacts/live-hardware-gateway/*/*-stop-close.json
           if-no-files-found: ignore

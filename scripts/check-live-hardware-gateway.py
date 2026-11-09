@@ -129,9 +129,9 @@ def run(args):
                 'enemies':{'count':0,'behavior':'Hold','autoAttack':False},'props':[]})
             session = request('/api/sessions',{'missionId':mission['id'],'mode':'Linked','roomIds':[1,2,3,4,5]})
             sid = session['id']; path = '/api/sessions/'+sid
-            for i, room in enumerate([1,1,1,2], 1):
+            for i, room in enumerate([1,1,1,2,3], 1):
                 session = request(path+'/players', {'playerId':str(uuid.uuid4()),'roomId':room,'name':f'Fixture {i}','headset':'Quest3'}, f'Room{room}')
-            alpha, bravo, unbound, charlie = session['players']
+            alpha, bravo, unbound, charlie, delta = session['players']
             stream = str(uuid.uuid4())
             request(path+'/combat-stream',{'streamId':stream,'origin':'Simulation'},'GameServer')
 
@@ -246,6 +246,22 @@ def run(args):
                     assert (item['deviceId'],signal['admissionId'],signal['seat'])==(binding['deviceId'],binding['admissionId'],binding['seat'])
                 return frame
 
+            duplicate_report = out/'duplicate-room-report.json'
+            duplicate = invoke(1,'Room1',duplicate_report,config=stop_config)
+            wait(lambda:duplicate.poll() is not None or not stop_peer.lines.empty(), 'duplicate room decision')
+            if not stop_peer.lines.empty():
+                other_connection = accept(stop_peer,1)
+                ids = publish([(alpha,'ShotFired')]); original_feedback = feedback(1,ids)
+                copied_feedback = stop_peer.read('feedback')
+                assert copied_feedback['connectionId']==other_connection
+                assert copied_feedback['signals']==original_feedback['signals']
+                save('duplicate-room-witness.json', {'original':original_feedback,'duplicate':copied_feedback})
+                raise AssertionError('A second gateway in the same room received the same accepted signal')
+            denial, _ = duplicate.communicate(timeout=8)
+            check(duplicate.returncode==1 and 'GatewayLeaseUnavailable' in denial and not duplicate_report.exists()
+                  and not any(secret in denial for secret in private),
+                  'A different configuration, peer port and report cannot open a second gateway for the same room and session')
+
             ids = publish([(alpha,'ShotFired'),(bravo,'PlayerDamaged'),(unbound,'ShotFired'),(charlie,'PlayerDamaged')])
             feedback(1,ids[:2]); feedback(2,ids[3:]); peers[1].reply(); peers[2].reply()
             check(True, 'Two mock processes receive only their room and exact admission; a stale admission binding is excluded')
@@ -279,9 +295,13 @@ def run(args):
 
             inflight_stop = runtime/'inflight.stop'
             inflight_report = out/'inflight-stop-report.json'
-            inflight = invoke(1,'Room1',inflight_report,config=stop_config,stop=inflight_stop)
-            stop_connection = accept(stop_peer,1,idle_connection)
-            ids = publish([(alpha,'ShotFired')]); feedback(1,ids); peers[1].reply()
+            room_three = runtime/'room-3-stop.json'
+            room_three.write_text(json.dumps({'version':1,'managementUrl':base,'sessionId':sid,'roomId':3,'mockPort':stop_peer.port,
+                'seconds':35,'bindings':[{'deviceId':str(uuid.uuid4()),'playerId':delta['id'],'admissionId':delta['admissionId'],
+                                          'seat':delta['seat']}]}),encoding='utf-8')
+            inflight = invoke(3,'Room3',inflight_report,config=room_three,stop=inflight_stop)
+            stop_connection = accept(stop_peer,3,idle_connection)
+            ids = publish([(alpha,'ShotFired'),(delta,'ShotFired')]); feedback(1,ids[:1]); peers[1].reply()
             stopped_batch = stop_peer.read('feedback')
             stop_peer.reply('observe-close')
             inflight_stop.touch()
@@ -291,8 +311,28 @@ def run(args):
             attempt, = stop_result['attempts']
             check(stop_close['connectionId']==stopped_batch['connectionId']==attempt['connectionId']==stop_connection
                   and stop_close['batchId']==stopped_batch['batchId']==attempt['batchId']
-                  and attempt['status']=='cancelled' and [d['signal']['reportId'] for d in attempt['deliveries']]==ids,
+                  and attempt['status']=='cancelled' and [d['signal']['reportId'] for d in attempt['deliveries']]==ids[1:],
                   'Operator stop closes the exact pending batch with no simulated acknowledgement')
+
+            interrupted_report = out/'interrupted-room-3-report.json'
+            interrupted = invoke(3,'Room3',interrupted_report,config=room_three)
+            dead_connection = accept(stop_peer,3,stop_connection)
+            held, = publish([(delta,'ShotFired')])
+            pending = stop_peer.read('feedback'); stop_peer.reply('observe-close')
+            interrupted.kill(); interrupted.wait(timeout=8)
+            disconnected = stop_peer.read('closed')
+            check(interrupted.returncode!=0 and not interrupted_report.exists()
+                  and disconnected['connectionId']==pending['connectionId']==dead_connection
+                  and disconnected['batchId']==pending['batchId'] and disconnected['transport'] in ('eof','reset')
+                  and pending['signals'][0]['signal']['reportId']==held,
+                  'An abruptly killed owner closes its held batch and cannot publish a successful report')
+            save('interrupted-room-3-close.json',disconnected)
+            skipped, = publish([(delta,'ShotFired')])
+            recovered_report = out/'room-3-recovered-report.json'
+            recovered = invoke(3,'Room3',recovered_report,config=room_three)
+            recovered_connection = accept(stop_peer,3,dead_connection)
+            delivered, = publish([(delta,'PlayerDamaged')]); resumed = stop_peer.read('feedback'); stop_peer.reply()
+            assert resumed['connectionId']==recovered_connection and resumed['signals'][0]['signal']['reportId']==delivered
 
             ids = publish([(charlie,'PlayerDamaged')]); feedback(2,ids); peers[2].reply()
             ids = publish([(charlie,'ShotFired')]); ended_batch = feedback(2,ids)
@@ -302,6 +342,15 @@ def run(args):
             check(closed_batch['connectionId']==ended_batch['connectionId'] and closed_batch['batchId']==ended_batch['batchId'],
                   'End closes the exact pending connection without an ACK')
             request(path+'/combat-stream/seal',{'streamId':stream,'finalSequence':sequence},'GameServer')
+            recovered_log, _ = recovered.communicate(timeout=8)
+            recovered_result = json.loads(recovered_report.read_text(encoding='utf-8'))
+            resumed_attempt, = recovered_result['attempts']
+            check(recovered.returncode==0 and not any(secret in recovered_log for secret in private)
+                  and recovered_result['termination']=='ended' and recovered_result['acknowledged']==1
+                  and recovered_result['physicalDeliveryConfirmed'] is False and resumed_attempt['connectionId']==recovered_connection
+                  and [item['signal']['reportId'] for item in resumed_attempt['deliveries']]==[delivered]
+                  and delivered not in (held,skipped),
+                  'Replacement acquires the room after process death and skips the held and offline signals')
             reports = {}
             for room, gateway in gateways.items():
                 output, _ = gateway.communicate(timeout=8)
@@ -321,7 +370,7 @@ def run(args):
                   and reports[2]['acknowledged']==2 and reports[2]['connections']==1,
                   'The other room acknowledges on its original connection after the operator stop and still cancels at End')
             history = {e['eventId']:e for e in request(path+'/events')}
-            for report in [*reports.values(),stop_result]:
+            for report in [*reports.values(),stop_result,recovered_result]:
                 for attempt in report['attempts']:
                     for delivery in attempt['deliveries']:
                         signal = delivery['signal']; original = history[signal['eventId']]

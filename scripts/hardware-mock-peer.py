@@ -43,10 +43,14 @@ def exchange(sock, manual):
                 return
             if action == 'observe-close':
                 sock.settimeout(2)
-                if stream.read(1) != b'':
-                    raise ValueError('Expected the gateway to close its pending connection')
+                transport = 'eof'
+                try:
+                    if stream.read(1) != b'':
+                        raise ValueError('Expected the gateway to close its pending connection')
+                except (ConnectionResetError, ConnectionAbortedError):
+                    transport = 'reset'
                 emit({'kind':'closed','connectionId':frame['connectionId'],'batchId':frame.get('batchId'),
-                      'elapsedMilliseconds':round((time.monotonic()-received)*1000, 2)})
+                      'transport':transport,'elapsedMilliseconds':round((time.monotonic()-received)*1000, 2)})
                 return
             if action not in ('ack', 'wrong'):
                 raise ValueError('Use ack, wrong, drop, timeout or observe-close')

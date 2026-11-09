@@ -33,6 +33,7 @@ internal static class LiveHardwareGateway
     }
     private sealed class MockFailure(string reason) : IOException(reason);
     private sealed class BindingMismatch : Exception { }
+    private sealed class GatewayLeaseUnavailable : IOException { }
 
     private static T ReadInput<T>(string path) where T : class
     {
@@ -98,6 +99,22 @@ internal static class LiveHardwareGateway
 
     private static string FeedbackRoute(Configuration config) => $"/api/sessions/{config.SessionId:D}/rooms/{config.RoomId}/hardware-feedback";
 
+    private static FileStream AcquireGatewayLease(Guid sessionId, int roomId)
+    {
+        var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify);
+        if (!Path.IsPathFullyQualified(local)) throw new GatewayLeaseUnavailable();
+        var directory = Path.Combine(local, "VrCommand", "HardwareGatewayLeases");
+        try
+        {
+            Directory.CreateDirectory(directory);
+            // Keep the file in place. Only the live OS handle owns the lease,
+            // and process exit releases it without racing a replacement opener.
+            var name = FormattableString.Invariant($"{sessionId:N}-{roomId}.lock");
+            return new FileStream(Path.Combine(directory, name), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        }
+        catch (IOException) { throw new GatewayLeaseUnavailable(); }
+    }
+
     internal static async Task<int> Run(string input, string output, string? stopFile)
     {
         var config = ReadInput<Configuration>(input);
@@ -112,6 +129,7 @@ internal static class LiveHardwareGateway
             throw new ArgumentException("Use one room and unique seat, device, player and admission bindings.");
         using var client = CreateManagementClient(config.ManagementUrl);
         await VerifyIdentity(client, config.RoomId);
+        using var lease = AcquireGatewayLease(config.SessionId, config.RoomId);
 
         var bindings = config.Bindings.ToDictionary(b => (b.PlayerId, b.AdmissionId, b.Seat));
         var route = FeedbackRoute(config);

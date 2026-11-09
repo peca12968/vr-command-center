@@ -843,7 +843,7 @@ def main():
         config=runtime/(label+'-hardware.json')
         gateway_env={**mock_env,'VR_COMMAND_ROOM_KEY':keys[f'Room{room}']}
         simulator=str(hardware/'VrCommand.HardwareSimulator.dll')
-        if hardware_manifest['toolVersion']=='0.2.3':
+        if hardware_manifest['toolVersion'] in ('0.2.3','0.2.4'):
             seat_map=runtime/(label+'-seat-map.json')
             map_value={key:value for key,value in setup.items() if key!='bindings'}
             map_value['devices']=[{'deviceId':b['deviceId'],'seat':b['seat']} for b in bindings]
