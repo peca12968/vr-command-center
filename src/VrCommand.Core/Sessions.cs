@@ -81,6 +81,7 @@ public sealed partial class SessionManager
         var players = active.SelectMany(s => s.Players).Select(p => p.Id).ToArray();
         if (rooms.Distinct().Count() != rooms.Length || players.Distinct().Count() != players.Length)
             throw new InvalidDataException("Restored active sessions contain conflicting reservations.");
+        RestoreIndependentSets();
     }
 
     public SessionView Create(SessionMode mode, int[] roomIds, Mission mission, OperatorIdentity? actor = null, Guid? requestId = null)

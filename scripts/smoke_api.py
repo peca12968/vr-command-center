@@ -136,6 +136,41 @@ def check_venue_deployment(mission_id):
     require({s["status"] for s in request("POST", route, bundle)["seats"]} == {"session-unavailable"}, "Ended venues fail verification even with formerly valid signed files")
 
 
+def check_independent_set(mission_id, other_mission_id):
+    path = "/api/sessions/independent-set"
+    body = {"missionId": mission_id}
+    request("POST", path, body, 400)
+    request("POST", path, body, 403, identity="Room1", request_id=str(uuid.uuid4()))
+    request("POST", path, body, 403, identity="GameServer", request_id=str(uuid.uuid4()))
+    assert request("GET", "/api/sessions") == []
+    keys = [str(uuid.uuid4()), str(uuid.uuid4())]
+    with ThreadPoolExecutor(max_workers=2) as tasks:
+        results = list(tasks.map(lambda key: request("POST", path, body, (201,409), request_id=key), keys))
+    success = next(index for index, value in enumerate(results) if "sessions" in value)
+    original = results[success]["sessions"]
+    ids = [session["id"] for session in original]
+    require(len(ids) == len(set(ids)) == 5 and [s["roomIds"] for s in original] == [[room] for room in range(1,6)]
+            and all(s["state"] == "Preparing" and s["mode"] == "Independent" and s["mission"]["id"] == mission_id
+                    and s["environment"]["mode"] == "MR" for s in original)
+            and results[1-success]["code"] == "independent-rooms-occupied" and results[1-success]["roomIds"] == list(range(1,6)),
+            "Two distinct requests reserve at most one complete five-room set using the saved MR mission")
+    retry_key = keys[success]
+    request("POST", path, {"missionId":other_mission_id}, 409, request_id=retry_key)
+    request("POST", "/api/sessions", {"missionId":mission_id,"mode":"Independent","roomIds":[1]}, 409, request_id=retry_key)
+    room_events, _ = request("GET", f"/api/sessions/{ids[0]}/events", identity="Room1", raw=True)
+    require(all(other.encode() not in room_events for other in ids[1:]), "A room's creation event carries no other room's session ID")
+    def end(sid):
+        request("POST", f"/api/sessions/{sid}/commands", {"commandId":str(uuid.uuid4()),"action":"End"})
+    end(ids[0])
+    replacement = request("POST", "/api/sessions", {"missionId":other_mission_id,"mode":"Independent","roomIds":[1]}, 201)
+    retry = request("POST", path, body, request_id=retry_key)
+    require(retry["duplicate"] and [s["id"] for s in retry["sessions"]] == ids and retry["sessions"][0]["state"] == "Ended"
+            and request("GET", "/api/rooms")[0]["sessionId"] == replacement["id"],
+            "An archived set receipt returns all original IDs while a replacement room stays reserved")
+    for sid in [replacement["id"], *ids[1:]]:
+        end(sid)
+
+
 temporary = tempfile.TemporaryDirectory(prefix="vr-command-http-")
 test_directory = Path(temporary.name).resolve()
 temp_root = Path(tempfile.gettempdir()).resolve()
@@ -894,6 +929,7 @@ try:
                     "MR retains the selected mode and accepts environment controls through the same command entry point")
             request("POST", mr_path + "/commands", {"commandId": str(uuid.uuid4()), "action": "End"})
             check_venue_deployment(mr_mission["id"])
+            check_independent_set(mr_mission["id"], compact_mission["id"])
         except BaseException:
             log.flush()
             diagnostic = (test_directory / "server.log").read_text(encoding="utf-8", errors="replace")

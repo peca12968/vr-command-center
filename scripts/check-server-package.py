@@ -62,6 +62,7 @@ def main():
     p.add_argument('--check-room-combat',action='store_true',help='Require actual enemy damage on every original admission and reconcile each replay frame and final report')
     p.add_argument('--check-hardware-feedback',action='store_true',help='Match live room feedback to the native combat reports')
     p.add_argument('--hardware-simulator-package',type=Path,help='Pass native live feedback through this extracted mock gateway package')
+    p.add_argument('--prepare-independent-set',action='store_true',help='Prepare the five independent native sessions in one management request')
     p.add_argument('--check-interrupted-replay', action='store_true', help='Play the saved native prefix after the owned launcher is killed')
     p.add_argument('--check-managed-mr', action='store_true', help='Verify the MR alignment startup gate, desktop rejection and Preparing seal')
     p.add_argument('--check-live-reinforcement', action='store_true', help='Verify a native server accepts only supported live enemy targets and records the result')
@@ -75,6 +76,7 @@ def main():
     if args.check_room_combat and not args.check_room_reports:p.error('--check-room-combat requires --check-room-reports')
     if args.check_hardware_feedback and not args.check_room_combat:p.error('--check-hardware-feedback requires --check-room-combat')
     if args.hardware_simulator_package and not args.check_hardware_feedback:p.error('--hardware-simulator-package requires --check-hardware-feedback')
+    if args.prepare_independent_set and not args.player_package:p.error('--prepare-independent-set requires the player package')
     address='127.0.0.1'
     if args.game_address:
         if not any(args.game_address in ipaddress.IPv4Network(net) for net in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16')):
@@ -114,9 +116,10 @@ def main():
             if value:return value
             time.sleep(.1)
         raise RuntimeError('Timeout: '+label)
-    def request(path,body=None,role='Master',method=None,expected=200,admission=None,raw_response=False):
+    def request(path,body=None,role='Master',method=None,expected=200,admission=None,raw_response=False,request_id=None):
         h={'Authorization':'Bearer '+keys[role]};h.update({'Content-Type':'application/json'} if body is not None else {})
         if admission:h['If-Match-Admission']=admission
+        if request_id:h['Idempotency-Key']=request_id
         req=urllib.request.Request(uri+path,data=None if body is None else json.dumps(body).encode(),headers=h,method=method)
         try:
             with urllib.request.urlopen(req,timeout=5) as r:code=r.status;raw=r.read();headers=r.headers
@@ -137,11 +140,13 @@ def main():
     def rejected(label,value,**options):
         file=runtime/(label+'.json');file.write_text(json.dumps(value),encoding='utf-8');work=runtime/(label+'-work');ready=out/(label+'-ready.json')
         call(label,['--run',file,'--work',work,'--seconds',options.get('seconds',60),'--ready-report',ready,*options.get('extra',())]);check(not work.exists() and not ready.exists(),label+' creates no native world')
-    def create(rooms,label, *, auto_attack=False, enemy_count=1, experience='VR', props=None):
+    def save_mission(label, *, auto_attack=False, enemy_count=1, experience='VR', props=None):
         if props is None:
             props=[{'assetId':'sandbag','position':{'x':x,'y':0,'z':-1},'yawDegrees':0}
                    for x in (-5,-3,-1,3,5)] if args.check_layout_preview else []
-        mission=request('/api/missions',{'name':'Portable '+label,'briefing':'Owned PC package fixture','durationSeconds':600,'environment':{'mode':experience,'weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':enemy_count,'behavior':'Hold','autoAttack':auto_attack},'props':props},expected=201)
+        return request('/api/missions',{'name':'Portable '+label,'briefing':'Owned PC package fixture','durationSeconds':600,'environment':{'mode':experience,'weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':enemy_count,'behavior':'Hold','autoAttack':auto_attack},'props':props},expected=201)
+    def create(rooms,label, **options):
+        mission=save_mission(label,**options)
         state=request('/api/sessions',{'missionId':mission['id'],'mode':'Linked' if len(rooms)==5 else 'Independent','roomIds':rooms},expected=201);sessions.append(state['id']);return state
     def launch(state,label, *, listen_address=None, verify_layout=True):
         value=config(state['id'], listenAddress=listen_address or address);file=runtime/(label+'.json');file.write_text(json.dumps(value),encoding='utf-8');ready=out/(label+'-ready.json');report=out/(label+'-final.json');work=runtime/(label+'-work')
@@ -568,9 +573,22 @@ def main():
         # Run both topologies with separate native processes and fresh admissions.
         for linked in [False,True]:
             entries=[];round_clients=[]
+            batch=None
+            if args.prepare_independent_set and not linked:
+                mission=save_mission('five independently prepared rooms',enemy_count=5 if args.check_room_combat else 1)
+                body={'missionId':mission['id']}; key=str(uuid.uuid4()); route='/api/sessions/independent-set'
+                prepared=request(route,body,expected=201,request_id=key)
+                batch=prepared['sessions']
+                sessions.extend(state['id'] for state in batch)
+                retry=request(route,body,request_id=key)
+                check(not prepared['duplicate'] and retry['duplicate'] and retry['sessions']==batch
+                      and [state['roomIds'] for state in batch]==[[room] for room in range(1,6)]
+                      and all(state['mission']['id']==mission['id'] and state['mode']=='Independent' and state['state']=='Preparing' for state in batch),
+                      'one real management request prepares all five native independent sessions and its retry returns the same IDs')
+                save('independent-preparation-receipt.json',prepared)
             for rooms in ([[1,2,3,4,5]] if linked else [[r] for r in range(1,6)]):
                 enemy_count=5*len(rooms) if args.check_room_combat else 1
-                state=create(rooms,'linked' if linked else 'independent',enemy_count=enemy_count)
+                state=batch[rooms[0]-1] if batch is not None else create(rooms,'linked' if linked else 'independent',enemy_count=enemy_count)
                 entry=launch(state,('linked' if linked else 'room-'+str(rooms[0])));entries.append(entry)
                 entry['combatEnemyCount']=enemy_count
                 if not linked and rooms==[1]:rejected('bound-preparing',config(state['id']))
@@ -737,6 +755,7 @@ def main():
             'roomCombat':args.check_room_combat,
             'hardwareFeedback':args.check_hardware_feedback,
             'hardwareMockPackage':hardware_manifest['toolVersion'] if args.hardware_simulator_package else None,
+            'preparedIndependentSet':args.prepare_independent_set,
             'sourceFingerprint':manifest['build']['sourceFingerprint'],'gameAddress':address})
     except BaseException as error:stage('failed',errorType=type(error).__name__);raise
     finally:

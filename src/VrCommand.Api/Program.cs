@@ -89,6 +89,8 @@ app.Use(async (context, next) =>
                 code = mr.Action == ControlAction.Resume ? "mr-resume-readiness-required" : "mr-readiness-required" });
         else if (ex is MixedRealityAlignmentRequiredException)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "mr-alignment-required" });
+        else if (ex is IndependentRoomsOccupiedException occupied)
+            await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "independent-rooms-occupied", roomIds = occupied.RoomIds });
         else await context.Response.WriteAsJsonAsync(new { error = ex.Message });
     }
 });
@@ -142,6 +144,15 @@ app.MapPost("/api/sessions", (CreateSession request, SqliteMissionLibrary store,
 {
     var session = manager.Create(request.Mode, request.RoomIds, store.Get(request.MissionId, Actor(context)), Actor(context), RequestId(context));
     return Results.Created($"/api/sessions/{session.Id}", session);
+});
+app.MapPost("/api/sessions/independent-set", (CreateIndependentSet request, SqliteMissionLibrary store, SessionManager manager, HttpContext context) =>
+{
+    var actor = Actor(context);
+    AccessPolicy.AuthorMission(actor);
+    var key = RequestId(context) ?? throw new ArgumentException("Idempotency-Key is required for five independent sessions.");
+    var receipt = manager.CreateIndependentSet(store.Get(request.MissionId, actor), actor, key);
+    context.Response.Headers.CacheControl = "no-store";
+    return Results.Json(receipt, statusCode: receipt.Duplicate ? StatusCodes.Status200OK : StatusCodes.Status201Created);
 });
 app.MapGet("/api/sessions/{id:guid}", (Guid id, SessionManager manager, HttpContext context) => manager.Get(id, Actor(context)));
 app.MapGet("/api/sessions", (bool? includeEnded, SessionManager manager, HttpContext context) => manager.List(includeEnded ?? false, Actor(context)));
@@ -271,5 +282,6 @@ static Guid? AdmissionMatch(HttpContext context)
 }
 
 record CreateSession(Guid MissionId, SessionMode Mode, int[] RoomIds);
+record CreateIndependentSet(Guid MissionId);
 record JoinPlayer(Guid PlayerId, string Name, int RoomId, HeadsetKind Headset);
 record ValidatePlayerTicket(Guid SessionId, string Ticket, int ProtocolVersion = 0);

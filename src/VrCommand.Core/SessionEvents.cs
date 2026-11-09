@@ -1,10 +1,12 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using VrCommand.Simulation;
 
 namespace VrCommand.Core;
 
 public enum SessionEventKind { Created, PlayerJoined, PlayerLeft, ControlApplied, CombatRecorded, CombatStreamOpened, StreamCombatRecorded, CombatStreamSealed }
-public record SessionCreated(SessionMode Mode, int[] RoomIds, Mission Mission);
+public record SessionCreated(SessionMode Mode, int[] RoomIds, Mission Mission,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? IndependentSetId = null);
 public record PlayerLeft(Guid PlayerId, int? RoomId = null, Guid AdmissionId = default, Guid? ExpectedAdmissionId = null);
 public record SessionEvent(int SchemaVersion, Guid EventId, Guid SessionId, long Sequence,
     DateTimeOffset RecordedAtUtc, SessionEventKind Kind, JsonElement Payload, OperatorIdentity? Actor = null,
@@ -87,6 +89,10 @@ internal static class SessionProjection
             var created = entry.Read<SessionCreated>();
             ValidateCreation(created);
             AccessPolicy.Manage(actor, created.Mode, created.RoomIds);
+            if (created.IndependentSetId is { } set && (entry.SchemaVersion < 7 || set == Guid.Empty
+                || actor.Role != OperatorRole.Master || created.Mode != SessionMode.Independent
+                || entry.RequestId != (created.RoomIds[0] == 1 ? set : (Guid?)null)))
+                throw new InvalidDataException("Invalid five-room creation receipt.");
             return new(entry.SessionId, created.Mode, created.RoomIds, created.Mission,
                 entry.RecordedAtUtc, null, null, SessionState.Preparing, [],
                 created.Mission.Definition.Environment, created.Mission.Definition.Enemies, entry.Sequence);

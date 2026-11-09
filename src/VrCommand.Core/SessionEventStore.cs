@@ -8,7 +8,12 @@ public interface ISessionEventStore
     void Append(SessionEvent entry);
 }
 
-public sealed class MemorySessionEventStore : ISessionEventStore
+public interface IAtomicSessionCreationStore : ISessionEventStore
+{
+    void AppendInitialBatch(SessionEvent[] entries);
+}
+
+public sealed class MemorySessionEventStore : IAtomicSessionCreationStore
 {
     private readonly Dictionary<Guid, List<SessionEvent>> streams = [];
     public SessionEvent[][] Load() => streams.Values.Select(events => events.ToArray()).ToArray();
@@ -21,6 +26,14 @@ public sealed class MemorySessionEventStore : ISessionEventStore
         events.Add(entry);
     }
     public void Seed(Guid sessionId, SessionEvent[] events) => streams[sessionId] = [.. events];
+
+    public void AppendInitialBatch(SessionEvent[] entries)
+    {
+        if (entries.Length == 0 || entries.Select(entry => entry.SessionId).Distinct().Count() != entries.Length
+            || entries.Any(entry => entry.Sequence != 1 || entry.Kind != SessionEventKind.Created || streams.ContainsKey(entry.SessionId)))
+            throw new InvalidOperationException("The batch requires distinct new session histories.");
+        foreach (var entry in entries) streams.Add(entry.SessionId, [entry]);
+    }
 }
 
 // Legacy JSON compatibility adapter. The HTTP service uses the transactional SQLite store.

@@ -4,7 +4,7 @@ using VrCommand.Core;
 
 namespace VrCommand.Persistence;
 
-public sealed class SqliteSessionEventStore : ISessionEventStore, IDisposable
+public sealed class SqliteSessionEventStore : IAtomicSessionCreationStore, IDisposable
 {
     private readonly FileStream lease;
     private readonly SqliteConnection connection;
@@ -111,6 +111,16 @@ public sealed class SqliteSessionEventStore : ISessionEventStore, IDisposable
         if (entry.Sequence != (long)last.ExecuteScalar()! + 1)
             throw new InvalidOperationException("Unexpected storage sequence; reload the session.");
         Insert(transaction, entry);
+        transaction.Commit();
+    }
+
+    public void AppendInitialBatch(SessionEvent[] entries)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (entries.Length == 0 || entries.Any(entry => entry.Sequence != 1 || entry.Kind != SessionEventKind.Created))
+            throw new InvalidOperationException("The batch requires new session histories.");
+        using var transaction = connection.BeginTransaction();
+        foreach (var entry in entries) Insert(transaction, entry);
         transaction.Commit();
     }
 

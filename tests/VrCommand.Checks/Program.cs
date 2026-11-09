@@ -84,6 +84,7 @@ try
     PlayerTicketChecks.Run(Check, mission);
     AdmissionChecks.Run(Check, directory, mission);
     RequestRetryChecks.Run(Check, directory, mission);
+    IndependentSetChecks.Run(Check, directory, mission);
     SimulationChecks.Run(Check);
     NavigationChecks.Run(Check);
     for (var targetingCase = 0; targetingCase < VrCommand.Unity.Tests.AiTargetingCases.Names.Length; targetingCase++)
