@@ -13,6 +13,18 @@ static PFN_xrLocateViews mockLocateViews;
 static XrSpace headSpace;
 static XrSpace actionSpaces[64];
 static unsigned actionSpaceCount;
+static wchar_t trackingLossFile[32768];
+static volatile LONG observedTrackingLoss;
+
+static BOOL handsUntracked(void)
+{
+    return trackingLossFile[0] && GetFileAttributesW(trackingLossFile) != INVALID_FILE_ATTRIBUTES;
+}
+
+static float recoveredOffset(void)
+{
+    return InterlockedCompareExchange(&observedTrackingLoss, 0, 0) && !handsUntracked() ? 0.2f : 0.0f;
+}
 
 static XrResult XRAPI_CALL createReferenceSpace(XrSession session, const XrReferenceSpaceCreateInfo *info, XrSpace *space)
 {
@@ -35,12 +47,20 @@ static XrResult XRAPI_CALL locateSpace(XrSpace space, XrSpace base, XrTime time,
     XrResult result = mockLocateSpace(space, base, time, location);
     if (XR_FAILED(result) || !(location->locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT))
         return result;
-    if (space == headSpace)
+    if (space == headSpace) {
+        location->pose.position.x += recoveredOffset();
         location->pose.position.y = 1.65f;
+    }
     for (unsigned index = 0; index < actionSpaceCount; index++) {
         if (space == actionSpaces[index]) {
             location->pose.position.y = 1.25f;
             location->pose.position.z = -0.4f;
+            if (handsUntracked()) {
+                InterlockedExchange(&observedTrackingLoss, 1);
+                location->locationFlags &= ~(XR_SPACE_LOCATION_POSITION_TRACKED_BIT | XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT);
+            } else {
+                location->pose.position.x += recoveredOffset();
+            }
             break;
         }
     }
@@ -51,9 +71,13 @@ static XrResult XRAPI_CALL locateViews(XrSession session, const XrViewLocateInfo
                                      uint32_t capacity, uint32_t *count, XrView *views)
 {
     XrResult result = mockLocateViews(session, info, state, capacity, count, views);
-    if (XR_SUCCEEDED(result) && (state->viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT))
-        for (uint32_t index = 0; index < *count && index < capacity; index++)
+    if (XR_SUCCEEDED(result) && (state->viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT)) {
+        float offset = recoveredOffset();
+        for (uint32_t index = 0; index < *count && index < capacity; index++) {
+            views[index].pose.position.x += offset;
             views[index].pose.position.y = 1.65f;
+        }
+    }
     return result;
 }
 
@@ -84,6 +108,9 @@ __declspec(dllexport) XrResult XRAPI_CALL xrNegotiateLoaderRuntimeInterface(
     wchar_t path[32768];
     DWORD length = GetEnvironmentVariableW(L"VR_COMMAND_OPENXR_MOCK_DLL", path, ARRAYSIZE(path));
     if (length == 0 || length >= ARRAYSIZE(path))
+        return XR_ERROR_RUNTIME_UNAVAILABLE;
+    length = GetEnvironmentVariableW(L"VR_COMMAND_OPENXR_TRACKING_LOSS_FILE", trackingLossFile, ARRAYSIZE(trackingLossFile));
+    if (length >= ARRAYSIZE(trackingLossFile))
         return XR_ERROR_RUNTIME_UNAVAILABLE;
     HMODULE runtime = LoadLibraryExW(path, NULL, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!runtime)

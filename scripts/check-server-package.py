@@ -920,13 +920,16 @@ def main():
             save(entry['label']+'-hardware-feedback.json',entry['hardwareFeedback'])
         rounds.append({'name':entry['label'],'ready':entry['ready'],'report':report,'journal':closed,'replayFrames':len(frames)})
     def check_openxr_mock():
+        nonlocal observer,observer_log
         stage('native-openxr-mock')
         label='openxr-mock'
         pose_dll=args.openxr_mock_pose_dll.resolve(strict=True)
         fixture_manifest=runtime/'openxr-pose-runtime.json'
         fixture_manifest.write_text(json.dumps({'file_format_version':'1.0.0','runtime':
             {'api_version':'1.0','name':'VR Command pose fixture','library_path':str(pose_dll)}}),encoding='utf-8')
-        mock_environment={'XR_RUNTIME_JSON':str(fixture_manifest),'VR_COMMAND_OPENXR_MOCK_DLL':str(runtime_file)}
+        tracking_loss=runtime/'openxr-tracking-loss.request'
+        mock_environment={'XR_RUNTIME_JSON':str(fixture_manifest),'VR_COMMAND_OPENXR_MOCK_DLL':str(runtime_file),
+                          'VR_COMMAND_OPENXR_TRACKING_LOSS_FILE':str(tracking_loss)}
         entry=launch(create([1],label),label)
         sid=entry['sessionId']
         session='/api/sessions/'+sid
@@ -992,10 +995,113 @@ def main():
         check(abs(head['y']-1.65)<.001 and all(
             abs(hand['y']-1.25)<.001 and abs(hand['x']-head['x'])<.001 and abs(hand['z']-head['z']-.4)<.001
             for hand in hands),'accepted head and both hands match the fixture coordinates in the live world')
-        command(sid,'End')
+        tracked_id=tracked['player']['id']
+        desktop_id=desktop['player']['id']
+        original_config_hash=package.digest(tracked['configPath'])
+        expected_admissions={(p['id'],p['admissionId'],p['roomId'],p['seat']) for p in owners}
+        if args.observe_closure_ui:
+            node=shutil.which('node')
+            if not node:
+                raise RuntimeError('The optional console observation requires Node')
+            descriptor=runtime/'openxr-console-private.json'
+            end_request=runtime/'openxr-console-end.request'
+            descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'sessionId':sid,
+                'streamId':entry['ready']['streamId'],'endRequestFile':str(end_request),
+                'trackedParticipation':{'roomId':1,'seat':tracked['player']['seat']+1}}),encoding='utf-8')
+            observer_log=(out/'openxr-console.log').open('xb')
+            observer=subprocess.Popen([node,str(ROOT/'tests/browser/check-closure-native.cjs'),
+                '--descriptor',str(descriptor),'--output',str(observer_out),'--stop-file',str(observer_stop)],
+                stdout=observer_log,stderr=subprocess.STDOUT,cwd=ROOT/'tests/browser')
+
+        def console_observation(name):
+            def observed():
+                path=observer_out/name
+                if path.is_file():
+                    return read(path)
+                if observer.poll() is not None:
+                    raise RuntimeError('OpenXR console observer exited before '+name)
+                return None
+            return wait(observed,25,'OpenXR console '+name)
+
+        if args.observe_closure_ui:
+            check(console_observation('ready.json')['selectedSessionId']==sid,'shipped console observes the original Running room')
+
+        def tracking_checkpoint(available, minimum_tick):
+            report=request(session+'/readiness')
+            rows={row['playerId']:row for row in report['players']}
+            if (report['sourceState']!='Fresh' or report['observedSequence']!=begin or report['sessionSequence']!=begin
+                    or {(row['playerId'],row['admissionId'],row['roomId'],row['seat']) for row in rows.values()}!=expected_admissions):
+                return None
+            owner=rows[tracked_id]
+            if (owner['canParticipate'] is not available or owner['state']!=('Participating' if available else 'PoseUnavailable')
+                    or (available and owner['rigKind']!='Tracked')
+                    or rows[desktop_id]['rigKind']!='Simulated' or not rows[desktop_id]['canParticipate']):
+                return None
+            frame=request(session+'/world/frames/'+str(report['worldSequence']))['packet']
+            players={row['id']:row for row in frame['frame']['players']}
+            if (frame['frame']['phase']!='Running' or frame['frame']['tick']<minimum_tick
+                    or players[tracked_id]['connected'] is not available or not players[desktop_id]['connected']):
+                return None
+            if available:
+                pose=players[tracked_id]
+                joints=[pose['head'],pose['rig']['left'],pose['rig']['right']]
+                if pose['rig']['kind']!='Tracked' or any(abs(new['x']-old['x']-.2)>=.001
+                    for new,old in zip(joints,[head,*hands],strict=True)):
+                    return None
+            rooms=request('/api/rooms/readiness',role='Room1')['rooms']
+            if len(rooms)!=1:
+                return None
+            room=rooms[0]
+            if (room['sessionId']!=sid or room['sessionSequence']!=begin or room['sourceState']!='Fresh'
+                    or room['simulatedReady']!=1 or room['trackedReady']!=int(available)
+                    or room['vrParticipation']['awaitingPose']!=([] if available else [tracked['player']['seat']+1])):
+                return None
+            return {'packet':frame,'readiness':report,'room':room}
+
+        tracking_loss.touch(exist_ok=False)
+        try:
+            lost=wait(lambda:tracking_checkpoint(False,packet['frame']['tick']+1),12,'tracked seat loses readiness')
+            save(label+'-tracking-lost.json',lost)
+            held=wait(lambda:tracking_checkpoint(False,lost['packet']['frame']['tick']+14),12,'tracked seat stays unavailable during Running')
+            save(label+'-tracking-held.json',held)
+            if args.observe_closure_ui:
+                alert=console_observation('participation-alert.json')
+                check(alert['roomId']==1 and alert['seat']==tracked['player']['seat']+1,'shipped console flags only the original OpenXR seat')
+        finally:
+            tracking_loss.unlink()
+        check(True,'same Running room marks only the original OpenXR seat unavailable during controller tracking loss')
+        recovered=wait(lambda:tracking_checkpoint(True,held['packet']['frame']['tick']+1),12,'same tracked seat accepts a new pose after recovery')
+        save(label+'-tracking-recovered.json',recovered)
+        check(package.digest(tracked['configPath'])==original_config_hash
+              and client_log(tracked).count('VR_CLIENT_CONNECTED id=')==1
+              and 'VR_CLIENT_DISCONNECTED' not in client_log(tracked)
+              and tracked['witness'].kernel.WaitForSingleObject(tracked['witness'].handle,0)==258,
+              'original OpenXR process and connection recover with the same ticket and newly accepted head and hand positions')
+        if args.observe_closure_ui:
+            restored=console_observation('participation-recovered.json')
+            check(restored['roomId']==1 and restored['seat']==tracked['player']['seat']+1,'shipped console clears the OpenXR tracking alert')
+            end_request.touch(exist_ok=False)
+            check(console_observation('end-receipt.json')['sessionId']==sid,'shipped console ends the original OpenXR room')
+        else:
+            command(sid,'End')
         finish(entry)
+        if args.observe_closure_ui:
+            observer.wait(timeout=45)
+            ui=read(observer_out/'checks.json')
+            check(observer.returncode==0 and ui['complete'] and ui['browserClosed']
+                  and ui['acceptedWorldSequence']==entry['sealed']['world']['acceptedSequence'],
+                  'shipped console observes the exact OpenXR world seal and closes')
+            observer_log.close()
+            observer_log=None
+            observer=None
         replay=read(out/(label+'-replay.json'))
-        check(replay[packet['sequence']-1]['packet']==packet,'exact tracked Running pose survives in the sealed replay')
+        checkpoints=[packet,lost['packet'],held['packet'],recovered['packet']]
+        check(all(replay[frame['sequence']-1]['packet']==frame for frame in checkpoints),
+              'exact tracked, lost and recovered Running checkpoints survive in the sealed replay')
+        held_frames=replay[lost['packet']['sequence']-1:held['packet']['sequence']]
+        check(len(held_frames)>1 and all({row['id']:row['connected'] for row in frame['packet']['frame']['players']}
+              == {desktop_id:True,tracked_id:False} for frame in held_frames),
+              'every saved frame during the held loss preserves desktop participation and OpenXR unavailability')
         for client in clients_for_room:
             log=client_log(client)
             finals=[json.loads(line.removeprefix('VR_CLIENT_DEBRIEF_FINAL ')) for line in log.splitlines() if line.startswith('VR_CLIENT_DEBRIEF_FINAL ')]

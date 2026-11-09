@@ -81,6 +81,8 @@ Windows 建置啟用 Touch 與 Unity 的 HTC Vive Controller 兩個 OpenXR 互�
 
 測試使用 Unity OpenXR 套件附的 Windows Mock Runtime，另外由測試 DLL 提供固定頭手座標。只有測試玩家程序的 `XR_RUNTIME_JSON` 會指向測試環境。遊戲由解壓玩家包的啟動器執行，用主控簽發的原票券入場，走正常追蹤、回放和戰績流程。另一席使用桌面玩家作對照。這項驗證使用模擬裝置。 [Khronos 載入器規格](https://registry.khronos.org/OpenXR/specs/1.1/loader.html#overriding-the-default-runtime-usage)
 
+任務執行中，測試 DLL 保留控制器最後座標並撤下追蹤旗標。測試核對受影響的席位維持「姿態待確認」、桌面席持續就緒。恢復時使用移動 0.2 公尺的新頭手座標，核對原程序、連線、票券、房號及席位。封存後逐格比對追蹤、失效及恢復。 [OpenXR 空間追蹤規格](https://registry.khronos.org/OpenXR/specs/1.1/man/html/xrLocateSpace.html)
+
 先用 Unity Editor 還原專案套件，再取 Khronos OpenXR SDK 1.1.53 的 `openxr.h`、`openxr_platform_defines.h` 和 `openxr_loader_negotiation.h` 放在同一標頭目錄。從 x64 Visual Studio 開發終端在專案根目錄編譯測試 DLL，輸出放在 `artifacts`。 [Khronos SDK 標頭](https://github.com/KhronosGroup/OpenXR-SDK/tree/release-1.1.53/include/openxr)
 
 ```powershell
@@ -92,6 +94,8 @@ python scripts/check-server-package.py '<解壓遊戲伺服器包>' `
     --runtime-root '<新隔離執行目錄>' --openxr-mock-only `
     --openxr-mock-pose-dll artifacts/openxr-mock-pose.dll
 ```
+
+可加上 `--observe-closure-ui`，用專案的 Playwright Chromium 驗證房卡顯示與清除待確認席位，並由實際控制台結束和核對封存。
 
 127.*僅供同機；不同電腦必須能連到公告的伺服器IPv4及UDP埠。此工具不修改安全性／防火牆、不安裝驅動，也不提供NAT／中繼或網路可達性探測。若Windows出現安全性提示，由使用者自行決定。包內沒有伺服器啟動器、管理API或控制台金鑰。
 

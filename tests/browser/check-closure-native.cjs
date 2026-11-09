@@ -12,6 +12,17 @@ function readyRooms() {
   return cells.length === 5 && cells.every(cell => cell.textContent === '5 / 5 姿態有效 · 合成 5 · 追蹤 0')
     ? cells.map(cell => Number(cell.dataset.roomReadiness)) : null;
 }
+function trackedRoomParticipation({ roomId, seat, available }) {
+  const cells = [...document.querySelectorAll('[data-room-readiness]')];
+  const cell = cells.find(item => item.dataset.roomReadiness === String(roomId));
+  const alerts = cells.filter(item => item.classList.contains('tracking-attention'));
+  const text = available ? '2 / 2 姿態有效 · 合成 1 · 追蹤 1'
+    : `1 / 2 姿態有效 · 合成 1 · 追蹤 0 · 姿態待確認席位 ${seat}`;
+  if (document.querySelectorAll('#rooms .room-card').length !== 5 || cells.length !== 1
+      || cell?.dataset.sourceState !== 'Fresh' || cell.textContent !== text) return null;
+  if (available ? alerts.length !== 0 : alerts.length !== 1 || alerts[0] !== cell) return null;
+  return { roomId, seat, text };
+}
 async function main() {
   assert.equal(options.size, 3); const config = await read(options.get('--descriptor')), out = path.resolve(options.get('--output')), stop = path.resolve(options.get('--stop-file'));
   assert.match(config.base, /^http:\/\/127\.0\.0\.1:\d+$/); assert.equal(typeof config.masterKey, 'string');
@@ -37,6 +48,11 @@ async function main() {
         roomReadiness = await rooms.jsonValue();
         assert.deepEqual(roomReadiness, [1, 2, 3, 4, 5]);
       }
+      if (config.trackedParticipation) {
+        assert.ok(!config.roomReadiness && !config.roomParticipation);
+        await page.waitForFunction(trackedRoomParticipation,
+          { ...config.trackedParticipation, available: true }, { polling: 100 });
+      }
       await page.screenshot({ path: path.join(out, 'running.png'), fullPage: true });
       await save('ready.json', { ready: true, selectedSessionId: await page.locator('#session-select').inputValue(), browserPid: server.process().pid, roomReadiness, scope: 'Real native Running session visible in shipped console; no game input, fixture routes or delivery claim.' });
       if (config.roomParticipation) {
@@ -52,6 +68,15 @@ async function main() {
         await page.screenshot({ path: path.join(out, 'participation-alert.png'), fullPage: true });
         const restored = await page.waitForFunction(readyRooms, null, { polling: 100, timeout: 60000 });
         await save('participation-recovered.json', { rooms: await restored.jsonValue() });
+      }
+      if (config.trackedParticipation) {
+        const target = config.trackedParticipation;
+        const alert = await page.waitForFunction(trackedRoomParticipation, { ...target, available: false }, { polling: 100 });
+        await page.screenshot({ path: path.join(out, 'participation-alert.png'), fullPage: true });
+        await save('participation-alert.json', await alert.jsonValue());
+        const recovered = await page.waitForFunction(trackedRoomParticipation, { ...target, available: true }, { polling: 100 });
+        await page.screenshot({ path: path.join(out, 'participation-recovered.png'), fullPage: true });
+        await save('participation-recovered.json', await recovered.jsonValue());
       }
       for (;;) { try { await fs.stat(config.endRequestFile); break; } catch { await sleep(100); } }
       const endResponse = page.waitForResponse(response => response.url() === config.base + '/api/sessions/' + config.sessionId + '/commands' && response.request().method() === 'POST', { timeout: 30000 });
@@ -73,7 +98,10 @@ async function main() {
     if (page && !page.isClosed()) {
       await save('failure-state.json', await page.evaluate(() => ({ selected: document.querySelector('#session-select')?.value, includeEnded: document.querySelector('#include-ended')?.checked,
         phase: document.querySelector('#session-phase')?.textContent?.slice(0, 100), summary: document.querySelector('#closure-summary')?.textContent?.slice(0, 800), combat: document.querySelector('#closure-combat')?.textContent?.slice(0, 100), world: document.querySelector('#closure-world')?.textContent?.slice(0, 100),
-        notice: document.querySelector('#notice')?.textContent?.slice(0, 500), workspaceHidden: document.querySelector('#workspace')?.hidden }))).catch(() => {});
+        notice: document.querySelector('#notice')?.textContent?.slice(0, 500), workspaceHidden: document.querySelector('#workspace')?.hidden,
+        roomReadiness: [...document.querySelectorAll('[data-room-readiness]')].slice(0, 5).map(cell => ({
+          roomId: cell.dataset.roomReadiness, source: cell.dataset.sourceState, text: cell.textContent.slice(0, 160)
+        })) }))).catch(() => {});
       await page.screenshot({ path: path.join(out, 'failure.png'), fullPage: true, timeout: 5000 }).catch(() => {});
     }
   }
