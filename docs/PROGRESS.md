@@ -1,5 +1,14 @@
 # 開發進度
 
+## 2026-11-10 Windows OpenXR 用 Vive Menu 重連
+
+沿用 Windows 0.49.0 玩家與伺服器包及 0.31.51 管理包。OpenXR 席先經本機 UDP 轉送入場，在原任務射擊一發後關閉轉送，等伺服器與客戶端均記錄斷線。更新原連線檔為同一入場的新票券及原伺服器端點。Unity Mock Runtime 回報右手使用 Vive 設定。按住 Menu 或放開都沒有建立連線，重新按下才由原玩家程序讀檔，在同一場次恢復追蹤。 [複驗方式](QUEST_RECONNECT.md#windows-openxr-重連複驗)
+
+- `run-4e9a7cffedf14fdfb8c594f4dcea3eb4` 退出碼 0，87 項、423 格回放。原 OpenXR 連線 2 斷線後，同一入場改由連線 3 恢復。回放第 383、407、414、416 格逐格核對斷線、持續按住、放開及重連。健康維持 100，彈匣 29 發、備彈 90 發，原桌面席持續參與。雙封存、兩份戰績、CSV 及伺服器對連線 1、3 的確認相符。活動場次、剩餘程序及轉送均為零，C／F 隔離副本 44 檔一致。
+- 四次未通過的原證據保留。`run-2907b72411c94d8da5528d805acc7811` 使用了開場序號 5，原回放顯示射擊後已到 6。`run-0a2ea54b94094c9fa8e012b252e0002e` 的模擬 B 同步後未建立新連線，`run-3cdca755e7c94a7f9a013de0a59f4a87` 未讀到預期的 Oculus Touch 設定。`run-f4f748625ca74f778558588dde7464a5` 的 Vive Menu 已重連且原伺服器確認新連線，但檢查器誤比對斷線前的編號。最終按射擊後序號及最後接受的連線核對，沿用遊戲原有重連及封存流程。
+- 使用同一測試 DLL、未啟用重連選項的射擊及硬體模擬複驗 `run-517cdfc3f961489ca6991b6dd8872053` 退出碼 0，91 項、106 格回放及 43 檔 C／F 副本一致。另有伺服器封裝 10 項及 CLI 選項拒絕 2 項通過。
+- 來源 `b0c498e031ea8d6f2c6844ffd0da621136da4e54`，最終測試 DLL SHA-256 `19db8f79819444793bf026a6a23d6d6bb5eae4d99fc12239b727a93d811692b1`。GitHub Actions job `129327230350` 因帳務或支出上限未啟動。Quest 右手 B、VIVE XR 與 Quest 3 實機、MR 場地、跨機 25 人及廠商硬體仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42665295878)
+
 ## 2026-11-10 場館封存逐席核對玩家來源
 
 單場驗收可加 `--verify-player-sources`，五房清單可填 `verifyPlayerSources: true`。核對原玩家日誌、入場戰績、UDP 來源及封存回放中的活動姿態。報告區分桌面模擬、Windows OpenXR、Unity Mock Runtime 和 Quest logcat，逐席輸出通過核對的活動影格數。日誌與姿態不一致，或席位從未在活動影格送達有效姿態時，驗收會失敗。 [操作方式](EXTERNAL_CLIENTS.md#核對封存戰績與-udp-來源)
