@@ -63,6 +63,7 @@ def main():
     p.add_argument('--peer-diagnostics',action='store_true',help='Verify observed UDP peers in Linked and absence in default Independent runs')
     p.add_argument('--field-evidence',action='store_true',help='Verify the management ZIP with the original Linked player and server logs')
     p.add_argument('--venue-field-evidence',action='store_true',help='Verify full sealed admission evidence for both original venue End batches')
+    p.add_argument('--venue-concurrent-roster-seconds', type=int, help='Require this many recorded seconds of concurrent 25-seat play in both sealed batches')
     p.add_argument('--check-venue-field-ui',action='store_true',help='Download the original current and earlier field bundles from the shipped console')
     p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
     p.add_argument('--check-room-observer',action='store_true',help='Verify room-scoped observation and instant replay on the original Linked source')
@@ -130,6 +131,8 @@ def main():
     if args.field_evidence and not args.peer_diagnostics:p.error('--field-evidence requires --peer-diagnostics')
     if args.venue_field_evidence and not (args.field_evidence and args.check_venue_end):
         p.error('--venue-field-evidence requires --field-evidence and --check-venue-end')
+    if args.venue_concurrent_roster_seconds is not None and (not args.venue_field_evidence or not 1 <= args.venue_concurrent_roster_seconds <= 90):
+        p.error('--venue-concurrent-roster-seconds requires --venue-field-evidence and 1..90 seconds')
     if args.check_venue_field_ui and not args.venue_field_evidence:
         p.error('--check-venue-field-ui requires --venue-field-evidence')
     if args.check_room_readiness and not args.player_package:p.error('--check-room-readiness requires five players per room')
@@ -661,6 +664,9 @@ def main():
         manifest_path = runtime / (label + '-field-manifest.json')
         common = {'version': 1, 'mode': mode, 'topology': 'same-host', 'serverIps': [address],
                   **({'verifyPlayerSources': True} if args.check_venue_openxr else {})}
+        concurrent_seconds = args.venue_concurrent_roster_seconds
+        if concurrent_seconds is not None:
+            common['minimumConcurrentMilliseconds'] = concurrent_seconds * 1000
         evidence = dict(common, venueBundle=str(bundle_file),
                         sessions=[{key: value for key, value in entry.items() if key not in ('evidenceZip', 'players')}
                                   for entry in reversed(entries)],
@@ -686,6 +692,10 @@ def main():
         check(summary['worldJournalsVerified'] == len(entries)
               and all(row['worldJournal']['frames'] == row['worldSequence'] and row['worldJournal']['runningFrames'] > 0
                       for row in summary['sessions']), label + ' field evidence verifies every original closed world journal')
+        if concurrent_seconds is not None:
+            coverage = summary['concurrentRoster']
+            check(coverage['players'] == 25 and coverage['longestMilliseconds'] >= concurrent_seconds * 1000,
+                  label + ' original closed world journals verify the continuous concurrent 25-seat window')
         if args.check_venue_openxr:
             sources={(row['roomId'],row['seat']):row['source'] for session in summary['sessions'] for row in session['playerSources']}
             check(sources=={(room,seat):'windows-openxr-mock-tracked' if (room,seat)==(5,2) else 'windows-desktop-simulated'
@@ -2379,6 +2389,10 @@ def main():
                 stage('running-native-ai-combat',mode='Linked' if linked else 'Independent')
                 exercise_room_combat(entries,round_clients)
             if args.check_venue_phase:verify_venue_phase(entries,linked)
+            if args.venue_concurrent_roster_seconds is not None:
+                stage('observing-concurrent-roster', mode='Linked' if linked else 'Independent',
+                      requiredSeconds=args.venue_concurrent_roster_seconds)
+                time.sleep(args.venue_concurrent_roster_seconds + 3)
             if args.check_venue_end:
                 route = '/api/venue/phase'
                 preview = request(route)['end']

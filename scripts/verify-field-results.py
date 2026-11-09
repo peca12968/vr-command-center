@@ -1,6 +1,6 @@
 """Check sealed Windows server results against Windows player logs or Quest logcat."""
 import argparse
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import hashlib
 import importlib.util
@@ -30,6 +30,7 @@ MAX_FILE_BYTES = 16 * 1024 * 1024
 MAX_ALIGNMENT_BYTES = 16 * 1024
 QUEST_ROOMS = (1, 2, 3, 4, 5)
 MAX_QUEST_PLAN_BYTES = 32768
+MAX_CONCURRENT_FRAME_GAP_MS = 500
 
 
 class EvidenceError(ValueError):
@@ -252,13 +253,88 @@ def scores(row):
     return values + (accuracy,)
 
 
-def verify_world_journal(path, world, combat_sequence, through, applied_end, *, player_sources=None, tracking_begin=None, players=None):
+def roster_periods(players, minimum_ms, applied_end):
+    expected = {pid: player['roomId'] for pid, player in players.items()}
+    periods = []
+    start = previous = previous_tick = None
+
+    def observe(packet):
+        nonlocal start, previous, previous_tick
+        frame = packet['frame']
+        if frame['phase'] != 'Running' or packet['suspended'] is not False or packet['observedSequence'] >= applied_end:
+            previous = None
+            return
+        rows = frame['players']
+        require(type(rows) is list and len(rows) <= 25, 'Invalid player rows in the concurrent roster evidence')
+        connected = {row['id']: integer(row['roomId'], 1, 5) for row in rows if row['connected'] is True}
+        tick = integer(frame['tick'])
+        if len(rows) != len(expected) or connected != expected or not tick:
+            previous = None
+            return
+        elapsed = integer(packet['elapsedMilliseconds'])
+        if previous is None or elapsed - previous > MAX_CONCURRENT_FRAME_GAP_MS or tick <= previous_tick:
+            start = elapsed
+        previous, previous_tick = elapsed, tick
+        if elapsed - start >= minimum_ms:
+            if periods and periods[-1][0] == start:
+                periods[-1] = (start, elapsed)
+            else:
+                periods.append((start, elapsed))
+
+    return observe, periods
+
+
+class VenueRosterOverlap:
+    def __init__(self, minimum_ms):
+        self.minimum_ms = minimum_ms
+        self.minimum = timedelta(milliseconds=minimum_ms)
+        self.intervals = None
+
+    def add(self, capture_started_at, periods):
+        require(capture_started_at is not None, 'Concurrent roster verification requires an original UTC capture clock')
+        capture = datetime.fromisoformat(capture_started_at).astimezone(timezone.utc)
+        right = [(capture + timedelta(milliseconds=start), capture + timedelta(milliseconds=end)) for start, end in periods]
+        if self.intervals is None:
+            self.intervals = right
+            return
+        left, intersection = self.intervals, []
+        i = j = 0
+        while i < len(left) and j < len(right):
+            a, b = left[i], right[j]
+            start, end = max(a[0], b[0]), min(a[1], b[1])
+            if end - start >= self.minimum:
+                intersection.append((start, end))
+            if a[1] <= b[1]:
+                i += 1
+            if b[1] <= a[1]:
+                j += 1
+        self.intervals = intersection
+
+    def summary(self, players):
+        require(self.intervals, 'Original recordings do not show the required continuous concurrent roster')
+        start, end = max(self.intervals, key=lambda pair: pair[1] - pair[0])
+        return {'players': players, 'minimumMilliseconds': self.minimum_ms,
+                'longestMilliseconds': (end - start) // timedelta(milliseconds=1),
+                'maxFrameGapMilliseconds': MAX_CONCURRENT_FRAME_GAP_MS,
+                'fromUtc': start.isoformat(), 'throughUtc': end.isoformat()}
+
+
+def verify_world_journal(path, world, combat_sequence, through, applied_end, *, player_sources=None, tracking_begin=None,
+                         players=None, concurrency=None):
     spec = importlib.util.spec_from_file_location('field_world_journal', Path(__file__).with_name('analyze-world-journal.py'))
     analyzer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(analyzer)
     fields = ('schemaVersion', 'sessionId', 'streamId', 'origin', 'roomIds', 'calibration', 'captureStartedAtUtc')
     expected = {key: world['header'].get(key) for key in fields}
     tracked = None
+    if concurrency is not None:
+        observe_roster, periods = roster_periods(players, concurrency.minimum_ms, applied_end)
+
+    def observe_packet(packet):
+        if tracking_begin is not None:
+            check_tracking_frame(packet)
+        if concurrency is not None:
+            observe_roster(packet)
 
     def check_tracking_frame(packet):
         nonlocal tracked
@@ -294,7 +370,7 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
     try:
         journal = analyzer.analyze(path, accepted_sequence=tracking_begin['appliedAtSequence'] if tracking_begin is not None else None,
                                    expected_header=expected, on_running_frame=count_player_rigs if player_sources is not None else None,
-                                   on_packet=check_tracking_frame if tracking_begin is not None else None)
+                                   on_packet=observe_packet if tracking_begin is not None or concurrency is not None else None)
     except EvidenceError:
         raise
     except (OSError, ValueError, TypeError, KeyError, AttributeError, ArithmeticError, RecursionError) as error:
@@ -313,6 +389,8 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
     if player_sources is not None:
         require(all(source['runningFrames'] > 0 for source in player_sources.values()),
                 'World journal lacks an active accepted pose for an original seat')
+    if concurrency is not None:
+        concurrency.add(journal['captureStartedAtUtc'], periods)
     result = {'sha256': journal['sha256'], 'frames': sequence, 'runningFrames': journal['runningFrames']}
     if tracking_begin is not None:
         first = journal['firstApplied']
@@ -407,7 +485,8 @@ def verify(topology, server_ips, launcher, session, statistics, endpoint, server
 
 def verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log, size, player_logs, *,
                    require_remote=True, quest_player_logs=(), world_journal=None, applied_end=None, room_alignments=None,
-                   udp_preflight=None, udp_source_preflights=None, verify_player_sources=False, quest_capture_logs=(), tracking_begin=None):
+                   udp_preflight=None, udp_source_preflights=None, verify_player_sources=False, quest_capture_logs=(),
+                   tracking_begin=None, concurrency=None):
     integer(size, 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(not verify_player_sources or world_journal is not None, 'Player source verification requires the original closed world journal')
@@ -508,7 +587,8 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
     preflight = verify_udp_preflight(udp_preflight, binding, peer_ips)[0] if udp_preflight else None
     source_preflight = verify_udp_source_preflights(udp_source_preflights, binding, peer_ips) if udp_source_preflights is not None else None
     journal = verify_world_journal(world_journal, world, combat_sequence, through, applied_end,
-                                   player_sources=player_sources, tracking_begin=tracking_begin, players=players) if world_journal is not None else None
+                                   player_sources=player_sources, tracking_begin=tracking_begin, players=players,
+                                   concurrency=concurrency) if world_journal is not None else None
     alignments = None
     if room_alignments is not None:
         require(journal is not None and quest_players == size, 'MR alignment evidence requires the closed world journal and all original Quest logs')
@@ -673,6 +753,10 @@ def verify_venue(manifest_path):
             'Venue must contain the original five independent sessions or one linked session')
     journals = any('worldJournal' in entry for entry in entries)
     require(not journals or all('worldJournal' in entry for entry in entries), 'Provide a world journal for every session in this batch')
+    concurrency = None
+    if 'minimumConcurrentMilliseconds' in manifest:
+        require(journals, 'Concurrent roster verification requires the original world journals for the full batch')
+        concurrency = VenueRosterOverlap(integer(manifest['minimumConcurrentMilliseconds'], 1000, 900000))
     verify_player_sources = manifest.get('verifyPlayerSources', False)
     require(type(verify_player_sources) is bool and (not verify_player_sources or journals),
             'Player source verification requires a boolean option and the original world journals for the full batch')
@@ -817,7 +901,8 @@ def verify_venue(manifest_path):
                                          world_journal=evidence_path(entry['worldJournal']) if journals else None,
                                          applied_end=row['appliedAtSequence'], room_alignments=alignments, udp_preflight=preflight_paths,
                                          udp_source_preflights=source_paths, verify_player_sources=verify_player_sources,
-                                         quest_capture_logs=(quest_capture_log(*evidence) for evidence in captured), tracking_begin=tracking_begin)
+                                         quest_capture_logs=(quest_capture_log(*evidence) for evidence in captured),
+                                         tracking_begin=tracking_begin, concurrency=concurrency)
         verified_pairs = ([report['udpPreflight']] if preflights else report['udpSourcePreflight']['pairs'] if source_preflights else [])
         for pair in verified_pairs:
             exchange = pair['exchangeSha256']
@@ -857,6 +942,7 @@ def verify_venue(manifest_path):
             **({'udpPreflightsVerified': len(exchanges)} if preflights else {}),
             **({'udpSourcePreflightsVerified': len(exchanges)} if source_preflights else {}),
             **({'worldJournalsVerified': len(summaries)} if journals else {}),
+            **({'concurrentRoster': concurrency.summary(len(player_ids))} if concurrency is not None else {}),
             **({'trackingBegin': {'requestId': begin_request, 'sessions': len(summaries),
                                   'trackedPlayers': sum(item['worldJournal']['trackingBegin']['trackedPlayers'] for item in summaries)}}
                if verify_tracking_begin else {}),

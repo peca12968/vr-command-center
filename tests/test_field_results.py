@@ -2,6 +2,7 @@ import asyncio
 import base64
 from contextlib import redirect_stderr
 from copy import deepcopy
+from datetime import datetime, timedelta
 import hashlib
 import importlib.util
 import ipaddress
@@ -75,14 +76,13 @@ def fixture(*, remote=True):
 
 
 def world_journal(path, world, *, header_changes=None, combat=0, active=True, sealed=True, end_sequence=8, players=None,
-                  preparing_sequence=7, running_sequence=7):
+                  preparing_sequence=7, running_sequence=7, capture_start='2026-11-09T00:00:00+00:00', edit_packet=None):
     def record(tag, body):
         payload = bytes([tag]) + body
         return struct.pack('<i', len(payload)) + payload + hashlib.sha256(payload).digest()
 
     count = world['acceptedSequence']
-    world.update(durationMilliseconds=count * 100, capturedAtUtc='2026-11-09T00:00:08+00:00')
-    world['header'].update(schemaVersion=1, captureStartedAtUtc='2026-11-09T00:00:00+00:00')
+    world['header'].update(schemaVersion=1, captureStartedAtUtc=capture_start)
     world['header'].setdefault('calibration', 'uncalibrated-vr')
     header = dict(world['header'], **(header_changes or {}))
     raw = [b'VRWORLD1', record(0, json.dumps(header).encode())]
@@ -93,7 +93,11 @@ def world_journal(path, world, *, header_changes=None, combat=0, active=True, se
                   'frame': {'phase': phase, 'tick': number if phase == 'Running' else 0}}
         if players is not None:
             packet['frame']['players'] = players(number, phase)
+        if edit_packet is not None:
+            edit_packet(packet)
         raw += [record(1, json.dumps(packet).encode()), record(2, struct.pack('<q', number))]
+    duration = packet['elapsedMilliseconds']
+    world.update(durationMilliseconds=duration, capturedAtUtc=(datetime.fromisoformat(capture_start) + timedelta(milliseconds=duration)).isoformat())
     if sealed:
         raw += [record(3, struct.pack('<q', count)), record(4, struct.pack('<q', count))]
     path.write_bytes(b''.join(raw))
@@ -454,6 +458,97 @@ def preflight_fixture(root, label, *, server, peer, port, exchange=None):
 
 
 class FieldResultsTests(unittest.TestCase):
+    def concurrent_journals(self, root, manifest, offsets, edit_packet=None):
+        for entry, offset in zip(manifest['sessions'], offsets, strict=True):
+            session, _, _ = field.management_zip(root / entry['evidenceZip'])
+            members = [{'id': player['id'], 'roomId': player['roomId'], 'connected': True} for player in session['players']]
+            launch = root / entry['launcherReport']
+            launcher = json.loads(launch.read_text(encoding='utf-8'))
+            start = datetime.fromisoformat('2026-11-09T08:00:00+08:00') + timedelta(milliseconds=offset)
+            world_journal(root / entry['worldJournal'], launcher['finalWorld'], capture_start=start.isoformat(),
+                          players=lambda _, phase: deepcopy(members) if phase == 'Running' else [], edit_packet=edit_packet)
+            launch.write_text(json.dumps(launcher), encoding='utf-8')
+
+    def test_venue_concurrent_roster_uses_the_longest_common_capture_interval(self):
+        for mode, offsets, duration in (('Linked', [0], 7700), ('Independent', [0, 150, 300, 450, 600], 7100)):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, _ = venue_fixture(root, mode, with_journals=True)
+                self.concurrent_journals(root, manifest, offsets)
+                packed = self.pack_venue(root, manifest)
+                packed['minimumConcurrentMilliseconds'] = duration
+                path.write_text(json.dumps(packed), encoding='utf-8')
+                report = field.verify_venue(path)
+                self.assertEqual(report['concurrentRoster'], {'players': 25, 'minimumMilliseconds': duration,
+                    'longestMilliseconds': duration, 'maxFrameGapMilliseconds': 500,
+                    'fromUtc': '2026-11-09T00:00:00.200000+00:00' if mode == 'Linked' else '2026-11-09T00:00:00.800000+00:00',
+                    'throughUtc': '2026-11-09T00:00:07.900000+00:00'})
+                self.assertFalse(report['networkCapacityAccepted'])
+                packed['minimumConcurrentMilliseconds'] += 1
+                path.write_text(json.dumps(packed), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'continuous concurrent roster'):
+                    field.verify_venue(path)
+
+    def test_venue_concurrent_roster_rejects_full_rooms_at_different_times(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, _ = venue_fixture(root, 'Independent', with_journals=True)
+            self.concurrent_journals(root, manifest, [0, 0, 0, 0, 20000])
+            self.assertTrue(field.verify_venue(path)['consistent'])
+            manifest['minimumConcurrentMilliseconds'] = 1000
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'continuous concurrent roster'):
+                field.verify_venue(path)
+
+    def test_venue_concurrent_roster_does_not_bridge_interruptions(self):
+        def interrupt(packet):
+            number = packet['sequence']
+            frame = packet['frame']
+            if cause in ('gap', 'at-gap-limit') and number >= 40:
+                packet['elapsedMilliseconds'] += 401 if cause == 'gap' else 400
+            if number != 40:
+                return
+            if cause == 'paused':
+                frame['phase'] = 'Paused'
+            if cause == 'suspended':
+                packet['suspended'] = True
+            if cause == 'stalled-tick':
+                frame['tick'] -= 1
+            if cause == 'missing-player':
+                frame['players'][-1]['connected'] = False
+            if cause == 'wrong-room':
+                frame['players'][-1]['roomId'] = 1
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, _ = venue_fixture(root, 'Linked', with_journals=True)
+            manifest['minimumConcurrentMilliseconds'] = 6000
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            for cause in ('paused', 'suspended', 'stalled-tick', 'missing-player', 'wrong-room', 'gap', 'at-gap-limit'):
+                with self.subTest(cause=cause):
+                    self.concurrent_journals(root, manifest, [0], interrupt)
+                    if cause == 'at-gap-limit':
+                        self.assertEqual(field.verify_venue(path)['concurrentRoster']['longestMilliseconds'], 8100)
+                    else:
+                        with self.assertRaisesRegex(field.EvidenceError, 'continuous concurrent roster'):
+                            field.verify_venue(path)
+
+    def test_venue_concurrent_roster_requires_original_journals_and_bounded_integer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, _ = venue_fixture(root, 'Linked')
+            manifest['minimumConcurrentMilliseconds'] = 1000
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'original world journals'):
+                field.verify_venue(path)
+            path, manifest, _ = venue_fixture(root, 'Linked', with_journals=True)
+            for value in (None, True, 999, 900001):
+                with self.subTest(value=value):
+                    manifest['minimumConcurrentMilliseconds'] = value
+                    path.write_text(json.dumps(manifest), encoding='utf-8')
+                    with self.assertRaises(field.EvidenceError):
+                        field.verify_venue(path)
+
     def pack_venue(self, root, manifest):
         packed = deepcopy(manifest)
         packed['venueBundle'] = 'venue download.zip'
