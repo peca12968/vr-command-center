@@ -1,5 +1,14 @@
 # 開發進度
 
+## 2026-11-10 混合 Windows 與 Quest 的 UDP 封存驗收
+
+場館清單可引用多份 Quest 批次報告，並逐場補上 Windows 原始報告。批次內路徑以各批次報告所在資料夾為準，逐場補充路徑以場館清單為準。驗收逐遊戲端點核對收到戰績確認的來源，要求每個來源只對應一組原始交換。 [操作說明](EXTERNAL_CLIENTS.md#核對每個玩家來源的-udp-預檢)
+
+- 本機通過 38 項封存、9 項 Quest 探測及 6 項 Windows UDP 測試，涵蓋獨立與合併模式、同名原檔分目錄、缺漏來源與重複證據。
+- `artifacts/quest-udp-probe/mixed-readback-01d705824eef4edea00d2105657c3026` 保存 26 份報告及索引。每種模式把兩批各 10 組既有 Java 探測與 5 組新增的 Windows PowerShell 探測合併核對，共 50 組實際同機 UDP 交換及 150 個樣本。這輪的封存玩家資料是測試資料。
+- 另以新清單格式唯讀核對 Windows 原生場次 `run-91564904c33346809effddd207da53a3`，兩種模式的 50 筆戰績確認、六個原預檢端點及驗收摘要均與原封存一致。Quest 3、VIVE XR、實體 MR、廠商硬體與跨機 25 人仍待現地驗收。
+- 來源 `d31b89f33dd7bbd9b09a55fb012a9c9455138008`。GitHub Actions job `129383576549` 因帳務或支出上限未啟動。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42683373836)
+
 ## 2026-11-10 五房 Quest 批次 UDP 預檢
 
 批次工具沿用原 Quest 席位清單和開場前網路配置，依序在每個正式遊戲埠核對原始 UDP 報告。失敗席保留診斷階段，其他席繼續。端點內安排的席位全數通過後才提供逐來源清單。封存驗收可用 `udpPreflightBatch` 直接引用整批報告，再核對原實際端點、時間窗及已確認玩家來源。 [操作說明](QUEST3.md#批次預檢五房-quest-席位)
