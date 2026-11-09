@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-09 五房 MR 部署線上核對
+
+管理包 0.31.26 新增主控專用五房線上部署核對。PowerShell 讀取既有 `venue.json` 及原始檔案，完成離線檢查後送出一次請求。管理服務用同一次讀取的場次與名冊驗證 25 份票券簽章、入場名額及五房校正原檔。API 報告只提供房號、席位、結果及有效票券到期時間，成功的 CLI 輸出增加 `managementVerified: true`。 [操作方式](QUEST3.md#向管理服務核對五房名冊)
+
+- 用解壓後的管理服務及實際配發的房間 ZIP，五房合併與五房獨立均通過 25 席。兩種模式都拒絕一張格式有效的偽造票券及一張名額重配前的票券，重下載受影響房間的 ZIP 後恢復 25 席。房控金鑰遭拒。六個測試場次結束，活動場次為零，原管理程序正常退出。
+- 866 項核心、697 項 HTTP、58 項世界串流、21 項 PowerShell、97 項 Node、417 項 Chromium、16 項解壓包 Chromium 專項及 106 項 Windows 管理包檢查通過。此輪驗證管理及部署資料，Quest 3 實機、VIVE、場館跨機與廠商硬體另驗。 [Windows 管理包](WINDOWS_CONTROL_PACKAGE.md)
+- 功能來源 `4bbc2e7d46d919e180e50830dad4a19eabf75db3`。GitHub Actions job `128915182679` 因帳務或支出上限未啟動，零步驟。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42540847623)
+
 ## 2026-11-09 MR 伺服器啟動前核對
 
 Windows 伺服器啟動器 1.6 將未鎖定的 MR 場次保留在清單，列出待鎖定的房間。WinForms 與 CLI 共用房間鎖定判斷，實際啟動前會向原管理服務重新讀取。 [操作方式](SERVER_CATALOG.md#mr-校正鎖定與啟動資格)

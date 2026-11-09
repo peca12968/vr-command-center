@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-09 `windows-control-0.31.26-win-x64.zip` 加入五房 MR 部署線上核對。ZIP 為 52,581,968 bytes，SHA-256 `a57a620c8dec978e991ced2a77ec49d0fa1573f19a5364e1fac4ae03b0c88f68`。解壓核對 513 個清單檔案，含 493 個執行環境檔案，通過 106 項管理包檢查。 [五房部署核對](QUEST3.md#向管理服務核對五房名冊)
+
 2026-11-09 `windows-control-0.31.25-win-x64.zip` 加入 Quest 3 MR 席位部署核對，搭配遊戲 0.48.0。ZIP 為 52,577,088 bytes，SHA-256 `5a288322c250fed7d5c0436d4b93ce8ecae6bcc959ef5ce3b41b9039ca3f28a3`。解壓核對 513 個清單檔案，包含 493 個執行環境檔案，通過 106 項管理包檢查。 [席位核對](QUEST3.md#在管理台核對席位部署檔)
 
 2026-11-09 `windows-control-0.31.24-win-x64.zip` 加入 MR 配票時的校正檔雜湊，搭配遊戲 0.48.0 和專案的 PowerShell 部署工具。ZIP 為 52,563,263 bytes，SHA-256 `cb37b880f03a070567685f4d03a6bea4c9e4f6a6c64f7c2cb2ff16d5b51fe066`，解壓核對 510 個清單檔案並通過 106 項檢查。 [部署操作](QUEST3.md#quest-3-場地對位部署)

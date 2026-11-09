@@ -207,6 +207,22 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueManifest .\venue.json
 
 此指令只讀取檔案。若連線檔有鎖定值，須全數使用同一種格式，並逐席核對該房原檔。票券效期依本機 UTC 判斷，簽章和當前名冊由遊戲伺服器核對。預檢後，請解出各席位的 JSON，照單機指令部署。裝置安裝、實體校正、MR 透視與 UDP 可達性需在現場驗收。
 
+#### 向管理服務核對五房名冊
+
+管理包 0.31.26 起，主控可在同一份 `venue.json` 加用 `-ManagementApi`，一次驗證五房的票券簽章、當前入場名額與各房鎖定的原始校正檔。需要五房各五席、全部採用含校正雜湊的 MR 連線檔。從管理服務所在的電腦執行，下例使用預設本機埠號。
+
+```powershell
+$env:VR_COMMAND_MASTER_KEY = Read-Host '輸入主控金鑰' -MaskInput
+try {
+    pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueManifest .\venue.json `
+        -ManagementApi http://127.0.0.1:5081
+} finally {
+    Remove-Item Env:VR_COMMAND_MASTER_KEY
+}
+```
+
+管理服務用同一次讀取的名冊核對單一合併場或五個獨立場。成功時保留原預檢輸出並增加 `managementVerified: true`。簽章或票券失效時會標示 `ticket-invalid`，名額重配時會標示 `admission-changed`，兩者均附房號與席位。重新下載受影響房間的 ZIP 後可再執行。異地管理服務須使用 HTTPS。每份報告對應核對當下的名冊，設備安裝、實體定位及場館 UDP 可達性須另驗。
+
 ### 啟動 MR 伺服器前鎖定校正檔
 
 遊戲 0.48.0 要求主控在場次為 Preparing、尚未啟動遊戲伺服器時，鎖定該場所有房間的校正檔 SHA-256。玩家部署須使用相同檔案。即使 JSON 欄位值相同，重新排版或改寫檔案也會改變雜湊。
