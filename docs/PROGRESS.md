@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-09 開場前 UDP 報告配對
+
+UDP 探測工具可讀取兩端原始報告，核對互為對端的 IPv4、同一 UDP 埠、完整樣本與同次交換摘要。配對成功回報 `pair-verified`。核對時只需兩份已關閉的原始報告。 [兩端操作](EXTERNAL_CLIENTS.md#開場前核對兩端-udp)
+
+- Windows PowerShell 5.1 與 PowerShell 7 各 6 項通過，涵蓋兩個不同 loopback 位址、BOM 報告、錯誤簽章與重送、同一埠的不同探測、逾時與埠重新綁定。首次正向測試發現測試仍持有監聽輸出檔，改在關閉後核對。另修正 5.1 將小數往返時間解析成 `Decimal` 的相容性。伺服器封裝工具另 10 項通過。
+- `artifacts/lan-pair-native-a12fc24f` 以本機私有 IPv4 執行同一封裝驗證函式，五個獨立埠及一個合併埠各完成三筆往返。六份交換摘要各自不同，兩端原始報告逐組相符，六個原埠均可重新綁定。本次六埠只量測 PowerShell UDP，實際跨機與 Unity 入場另驗。
+- 功能來源 `55739448b159f4e9e53a1f8c2cec59e9ebeed58b`。GitHub Actions job `129034386539` 因帳務或支出上限未啟動。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42579426094)
+
 ## 2026-11-09 Quest 部署後逐席追蹤核對
 
 Quest 部署工具的 `-VerifyTrackedSeats` 可從主控電腦用原五房 VR、MR 或混合 ZIP 核對追蹤。先由管理服務驗證原連線檔，再讀同一場次的一份就緒快照，逐席比對玩家、入場、場次版本與 `Tracked` 姿態。可用裝置清單選取部分席位，核對不呼叫 ADB。 [部署後核對](QUEST3.md#核對頭盔追蹤席位)
