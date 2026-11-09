@@ -454,6 +454,106 @@ def preflight_fixture(root, label, *, server, peer, port, exchange=None):
 
 
 class FieldResultsTests(unittest.TestCase):
+    def pack_venue(self, root, manifest):
+        packed = deepcopy(manifest)
+        packed['venueBundle'] = 'venue download.zip'
+        with zipfile.ZipFile(root / packed['venueBundle'], 'w', zipfile.ZIP_DEFLATED) as archive:
+            archive.write(root / packed.pop('closure'), 'closure.json')
+            for room, entry in enumerate(packed['sessions'], 1):
+                name = 'linked.zip' if packed['mode'] == 'Linked' else f'room-{room:02}.zip'
+                archive.write(root / entry.pop('evidenceZip'), name)
+        packed['windowsPlayers'] = []
+        for entry in reversed(packed['sessions']):
+            players = entry.pop('players', [])
+            packed['windowsPlayers'].extend(player for player in reversed(players) if 'logcatPid' not in player)
+            quest = [player for player in players if 'logcatPid' in player]
+            if quest:
+                entry['players'] = quest
+        packed['sessions'].reverse()
+        return packed
+
+    def test_packed_venue_and_unsorted_windows_match_original_split_summary(self):
+        for mode in ('Linked', 'Independent'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, split, _ = venue_fixture(root, mode, remote=True, quest_per_room=1,
+                                                with_journals=True, mr_rooms=(2, 4))
+                original = field.verify_venue(path)
+                packed = self.pack_venue(root, split)
+                path.write_text(json.dumps(packed), encoding='utf-8')
+                for name in [split['closure'], *(entry['evidenceZip'] for entry in split['sessions'])]:
+                    (root / name).unlink()
+                original_files = {file: file.read_bytes() for file in root.iterdir()}
+                self.assertEqual(field.verify_venue(path), original)
+                self.assertEqual({file: file.read_bytes() for file in root.iterdir()}, original_files)
+
+    def test_packed_venue_combines_windows_with_original_quest_capture_batches(self):
+        for mode in ('Linked', 'Independent'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, split = quest_capture_venue_fixture(root, mode)
+                original = field.verify_venue(path)
+                packed = self.pack_venue(root, split)
+                path.write_text(json.dumps(packed), encoding='utf-8')
+                self.assertEqual(field.verify_venue(path), original)
+                packed['closure'] = split['closure']
+                del packed['venueBundle']
+                for entry, source in zip(packed['sessions'], reversed(split['sessions'])):
+                    entry['evidenceZip'] = source['evidenceZip']
+                path.write_text(json.dumps(packed), encoding='utf-8')
+                self.assertEqual(field.verify_venue(path), original)
+
+    def test_packed_venue_rejects_ambiguous_and_incorrect_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, split, _ = venue_fixture(root, 'Independent')
+            packed = self.pack_venue(root, split)
+
+            def rejected(manifest, message):
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, message):
+                    field.verify_venue(path)
+
+            rejected(dict(packed, closure=split['closure']), 'either venueBundle')
+            changed = deepcopy(packed)
+            changed['sessions'][0]['evidenceZip'] = split['sessions'][-1]['evidenceZip']
+            rejected(changed, 'Omit per-session evidenceZip')
+            changed = deepcopy(packed)
+            changed['sessions'][0]['players'] = [changed['windowsPlayers'].pop(0)]
+            rejected(changed, 'per-session Windows logs')
+            changed = deepcopy(packed)
+            changed['windowsPlayers'][1] = changed['windowsPlayers'][0]
+            rejected(changed, 'Evidence paths must be distinct')
+            changed = deepcopy(packed)
+            changed['windowsPlayers'][0]['address'] = '192.168.5.250'
+            rejected(changed, 'UDP peer differs')
+            changed = deepcopy(packed)
+            foreign = root / 'foreign.log'
+            source = root / changed['windowsPlayers'][0]['log']
+            foreign.write_bytes(source.read_bytes().replace(id_for(105).encode(), id_for(9000).encode()))
+            changed['windowsPlayers'][0]['log'] = foreign.name
+            rejected(changed, 'different venue session')
+
+            bundle = root / packed['venueBundle']
+            with zipfile.ZipFile(bundle) as archive:
+                members = {name: archive.read(name) for name in archive.namelist()}
+            for name in ('unexpected.json', '../room-01.zip', None):
+                with self.subTest(extra=name), zipfile.ZipFile(bundle, 'w') as archive:
+                    for entry, data in members.items():
+                        if name is not None or entry != 'room-01.zip':
+                            archive.writestr(entry, data)
+                    if name is not None:
+                        archive.writestr(name, b'')
+                rejected(packed, 'exact session ZIPs')
+            with zipfile.ZipFile(bundle, 'w') as archive:
+                for name, data in members.items():
+                    archive.writestr(name, members['room-02.zip'] if name == 'room-01.zip' else data)
+            rejected(packed, 'differs from its original launcher session')
+            with zipfile.ZipFile(bundle, 'w', zipfile.ZIP_DEFLATED) as archive:
+                for name, data in members.items():
+                    archive.writestr(name, b'0' * field.MAX_FILE_BYTES if name == 'room-01.zip' else data)
+            rejected(packed, 'expanded size limit')
+
     def test_venue_verifies_mixed_windows_and_original_capture_batches_for_both_modes(self):
         for mode in ('Independent', 'Linked'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:

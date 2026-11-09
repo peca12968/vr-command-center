@@ -527,18 +527,50 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
             **({'roomAlignments': alignments} if alignments is not None else {})}, room_sources
 
 
-def management_zip(path):
+def evidence_zip_entry(archive, name):
+    info = archive.getinfo(name)
+    require(info.orig_filename == name and info.file_size <= MAX_FILE_BYTES
+            and info.compress_type in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED) and not (info.flag_bits & 1),
+            'Unsupported or oversized evidence ZIP entry')
+    with archive.open(info) as entry:
+        return limited_read(entry)
+
+
+def management_zip_records(data):
     names = ('session.json', 'statistics.json', 'endpoint.json')
-    with path.open('rb') as source, zipfile.ZipFile(io.BytesIO(limited_read(source))) as archive:
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
         require(sorted(archive.namelist()) == sorted(names), 'Management ZIP must contain exactly the three original JSON records')
-        records = []
-        for name in names:
-            info = archive.getinfo(name)
-            require(info.file_size <= MAX_FILE_BYTES and info.compress_type in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
-                    and not (info.flag_bits & 1), 'Unsupported or oversized management ZIP entry')
-            with archive.open(info) as entry:
-                records.append(read_json(limited_read(entry)))
-    return records
+        return [read_json(evidence_zip_entry(archive, name)) for name in names]
+
+
+def management_zip(path):
+    with path.open('rb') as source:
+        return management_zip_records(limited_read(source))
+
+
+def venue_bundle(path, mode):
+    names = ['linked.zip'] if mode == 'Linked' else [f'room-{room:02}.zip' for room in QUEST_ROOMS]
+    with path.open('rb') as source, zipfile.ZipFile(io.BytesIO(limited_read(source))) as archive:
+        require(sorted(archive.namelist()) == sorted(['closure.json', *names]),
+                'Venue ZIP must contain only the original closure and exact session ZIPs for this mode')
+        require(sum(info.file_size for info in archive.infolist()) <= MAX_FILE_BYTES, 'Venue ZIP exceeds the expanded size limit')
+        closure = read_json(evidence_zip_entry(archive, 'closure.json'))['batch']
+        return closure, {name: evidence_zip_entry(archive, name) for name in names}
+
+
+def venue_windows_logs(rows, expected, evidence_path):
+    require(type(rows) is list and 1 <= len(rows) <= 25, 'Provide one to 25 original Windows logs in windowsPlayers')
+    groups = {}
+    for row in rows:
+        require(type(row) is dict and set(row) == {'address', 'log'}, 'A venue Windows log needs an address and log path')
+        address, path = ipv4(row['address']), evidence_path(row['log'])
+        _, result = client_result(content(path))
+        session_id = identity(result['sessionId'])
+        require(session_id in expected, 'Windows log belongs to a different venue session')
+        group = groups.setdefault(session_id, [])
+        group.append((address, path))
+        require(len(group) <= len(expected[session_id]['roomIds']) * 5, 'Too many Windows logs for an original venue session')
+    return groups
 
 
 def read_udp_preflight_batch(path, mode, expected_rooms):
@@ -624,7 +656,12 @@ def verify_venue(manifest_path):
         seen_paths.add(path)
         return path
 
-    closure = read_json(content(evidence_path(manifest['closure'])))['batch']
+    packed = 'venueBundle' in manifest
+    require(packed != ('closure' in manifest), 'Provide either venueBundle or the original closure and per-session ZIPs')
+    if packed:
+        closure, archives = venue_bundle(evidence_path(manifest['venueBundle']), mode)
+    else:
+        closure = read_json(content(evidence_path(manifest['closure'])))['batch']
     identity(closure['requestId'])
     recorded_at = datetime.fromisoformat(closure['recordedAtUtc'])
     require(recorded_at.utcoffset() is not None, 'Closure time must specify a time zone')
@@ -677,6 +714,9 @@ def verify_venue(manifest_path):
             and all(integer(room, 1, 5) for room in row['roomIds']) for row in rows)
             and sorted(row['roomIds'] for row in rows) == expected_rooms, 'Closure does not cover exactly the five original rooms')
 
+    windows_supplied = 'windowsPlayers' in manifest
+    windows_by_session = venue_windows_logs(manifest['windowsPlayers'], expected, evidence_path) if windows_supplied else {}
+
     capture_supplied = 'questCaptures' in manifest
     captures, capture_endpoints, capture_batches = {}, {}, 0
     if capture_supplied:
@@ -688,8 +728,17 @@ def verify_venue(manifest_path):
     stream_ids, bindings, player_ids, admission_ids, end_times, exchanges = set(), set(), set(), set(), set(), set()
     begin_request = None
     for entry in entries:
-        session, statistics, endpoint = management_zip(evidence_path(entry['evidenceZip']))
         launcher = read_json(content(evidence_path(entry['launcherReport'])))
+        if packed:
+            require('evidenceZip' not in entry, 'Omit per-session evidenceZip when using venueBundle')
+            launch_id = identity(launcher['sessionId'])
+            original = expected.get(launch_id)
+            require(original is not None, 'Launcher report belongs to a different or repeated venue session')
+            name = 'linked.zip' if mode == 'Linked' else f"room-{original['roomIds'][0]:02}.zip"
+            session, statistics, endpoint = management_zip_records(archives[name])
+            require(session['id'] == launch_id, 'Venue ZIP member differs from its original launcher session')
+        else:
+            session, statistics, endpoint = management_zip(evidence_path(entry['evidenceZip']))
         server_log = content(evidence_path(entry['serverLog']))
         alignments = None
         if check_alignments:
@@ -736,11 +785,15 @@ def verify_venue(manifest_path):
         if capture_supplied:
             require((str(binding[0]), binding[1]) == capture_endpoints[tuple(row['roomIds'])],
                     'Quest network plan endpoint differs from the original game binding')
-        players = entry.get('players', []) if capture_supplied else entry['players']
-        require(type(players) is list and len(players) + len(captured) == len(row['roomIds']) * 5,
+        logs = list(windows_by_session.get(session['id'], []))
+        players = entry.get('players', []) if capture_supplied or windows_supplied else entry['players']
+        require(type(players) is list and all(type(player) is dict for player in players), 'Invalid player log list')
+        if windows_supplied:
+            require(all('logcatPid' in player for player in players), 'Use windowsPlayers or per-session Windows logs, not both')
+        size = len(players) + len(captured) + len(logs)
+        require(size == len(row['roomIds']) * 5,
                 'Each original room must include five player logs')
-        size = len(players) + len(captured)
-        logs, quest_logs = [], []
+        quest_logs = []
         for player in players:
             address, path = ipv4(player['address']), evidence_path(player['log'])
             if 'logcatPid' in player:

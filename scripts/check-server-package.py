@@ -651,32 +651,34 @@ def main():
               and f'vr-command-venue-field-v1-{closed["requestId"]}.zip' in headers['Content-Disposition'],
               label + ' field bundle uses the original batch filename and Master scope')
         names = ['linked.zip'] if mode == 'Linked' else [f'room-{room:02}.zip' for room in range(1, 6)]
-        extracted = runtime / (label + '-field-bundle')
-        extracted.mkdir()
         with zipfile.ZipFile(io.BytesIO(bundle)) as archive:
             check(archive.namelist() == ['closure.json', *names] and archive.testzip() is None
                   and field.read_json(archive.read('closure.json')) == field.read_json(raw)
                   and all(archive.read(name) == Path(entry['evidenceZip']).read_bytes() for name, entry in zip(names, entries)),
                   label + ' field bundle contains the original closure and exact individual ZIP bytes')
-            for name in ['closure.json', *names]:
-                (extracted / name).write_bytes(archive.read(name))
         bundle_file = out / (label + '-venue-field-evidence.zip')
         bundle_file.write_bytes(bundle)
         manifest_path = runtime / (label + '-field-manifest.json')
-        evidence = {'version': 1, 'mode': mode, 'topology': 'same-host', 'serverIps': [address],
-                    'closure': str(extracted / 'closure.json'),
-                    'sessions': [dict(entry, evidenceZip=str(extracted / name)) for name, entry in zip(names, entries)],
-                    **({'verifyPlayerSources':True} if args.check_venue_openxr else {})}
+        common = {'version': 1, 'mode': mode, 'topology': 'same-host', 'serverIps': [address],
+                  **({'verifyPlayerSources': True} if args.check_venue_openxr else {})}
+        evidence = dict(common, venueBundle=str(bundle_file),
+                        sessions=[{key: value for key, value in entry.items() if key not in ('evidenceZip', 'players')}
+                                  for entry in reversed(entries)],
+                        windowsPlayers=[player for entry in reversed(entries) for player in reversed(entry['players'])])
+        split = dict(common, closure=str(closure_file), sessions=entries)
 
-        def run(topology):
-            manifest_path.write_text(json.dumps(dict(evidence, topology=topology)), encoding='utf-8')
+        def run(manifest):
+            manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
             return subprocess.run([sys.executable, str(ROOT / 'scripts/verify-field-results.py'),
                                    '--venue-manifest', str(manifest_path)], capture_output=True, encoding='utf-8', timeout=45)
 
-        result = run('same-host')
+        result = run(evidence)
         if result.returncode:
             raise RuntimeError('Native venue field evidence rejected: ' + result.stderr.strip())
         summary = json.loads(result.stdout)
+        original = run(split)
+        check(original.returncode == 0 and json.loads(original.stdout) == summary,
+              label + ' untouched venue ZIP and unordered Windows logs match the original split field summary')
         check(summary['consistent'] and summary['mode'] == mode and summary['players'] == summary['serverAcknowledgements'] == 25
               and summary['rooms'] == [{'roomId': room, 'players': 5, 'playersOutsideDeclaredServer': 0} for room in range(1, 6)]
               and not summary['physicalHostsVerified'] and not summary['networkCapacityAccepted'],
@@ -694,7 +696,7 @@ def main():
                   and all(row['udpSourcePreflight']['verifiedSourceAddresses'] == 1 for row in summary['sessions']),
                   label + ' original paired UDP reports cover all acknowledged source addresses at every sealed game endpoint')
         save(label + '-venue-field-results.json', summary)
-        rejected = run('direct-lan')
+        rejected = run(dict(evidence, topology='direct-lan'))
         check(rejected.returncode == 1 and not rejected.stdout and 'outside the declared server addresses' in rejected.stderr,
               label + ' field evidence rejects relabeling the same-PC peers as direct LAN')
         manifest_path.write_text(json.dumps(evidence), encoding='utf-8')

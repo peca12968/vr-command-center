@@ -232,9 +232,9 @@ Quest 3 席位使用 `--quest-player 192.168.1.21 '.\quest logcat.txt' 7342`，�
 
 兩種模式各準備一份私人 `venue.json`。使用 `--peer-diagnostics on` 啟動參與驗收的每個遊戲伺服器，並由主控一次結束全館。等待各場雙封存、原伺服器終止及玩家寫完戰績，保留同場啟動器 `--report`、原始 `server.log` 及每位玩家的完整日誌。
 
-Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，按「下載本批場館驗收 ZIP」，再解壓到私人資料夾。解壓後的 `closure.json` 及各場原 ZIP 可直接填入清單。合併場用 `linked.zip`，獨立場依房號使用 `room-01.zip` 至 `room-05.zip`。請保留內層 ZIP 檔案供核對工具讀取。 [選取及下載原批次](SESSION_CLOSURE.md#下載本批場館驗收)
+Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，按「下載本批場館驗收 ZIP」，將原 ZIP 路徑填入 `venueBundle`。工具在記憶體內讀取原 `closure.json` 和各場 ZIP，以啟動器報告的原場次識別配對。所有 Windows 玩家日誌可集中填入 `windowsPlayers`，工具會以每份日誌的最終戰績識別配回原場次。兩份清單的順序都可自由排列。 [選取及下載原批次](SESSION_CLOSURE.md#下載本批場館驗收)
 
-舊版管理包可逐場下載「場館驗收資料 ZIP」，並以主控身分將 `GET /api/venue/closure/{id}` 的回應本文原樣保存為 `closure.json`。`{id}` 是該次全館結束回條的 `requestId`。
+逐場保存的資料可沿用 `closure` 及各場 `evidenceZip` 欄位。以主控身分將 `GET /api/venue/closure/{id}` 的回應本文原樣保存為 `closure.json`。`{id}` 是該次全館結束回條的 `requestId`。
 
 | 清單欄位 | 填寫內容 |
 | --- | --- |
@@ -242,41 +242,46 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `mode` | `Independent` 或 `Linked` |
 | `topology` | `same-host` 或 `direct-lan` |
 | `serverIps` | 所有本次伺服器電腦已指派的 IPv4，使用字串陣列 |
-| `closure` | 原批次的 `closure.json` 路徑 |
+| `venueBundle` 或 `closure` | 原批次的場館驗收 ZIP 路徑，或原 `closure.json` 路徑。選一種 |
 | `verifyPlayerSources` | 選用。填布林值 `true` 核對所有原席位的日誌與姿態。每場均須提供 `worldJournal` |
 | `verifyTrackingBegin` | 選用。填布林值 `true` 核對同一批追蹤開場採用的原始準備中畫格及後續執行畫格。每場均須提供 `worldJournal` |
 | `udpPreflightBatch` 或 `udpPreflightBatches` | 選用。單份原 Quest 批次報告路徑，或 1 至 25 份原報告路徑的陣列。可搭配逐場 `udpSourcePreflights` |
 | `questCaptures` | 選用。填原 Quest 網路計畫及 1 至 25 份完整日誌擷取報告。可與 UDP 預檢報告一併使用 |
 | `sessions` | 獨立模式填五場，合併模式填一場 |
-| `sessions[].evidenceZip`、`launcherReport`、`serverLog` | 各場原 ZIP、啟動器終止報告及伺服器日誌的路徑 |
+| `sessions[].launcherReport`、`serverLog` | 各場啟動器終止報告及伺服器日誌的路徑 |
+| `sessions[].evidenceZip` | 使用 `closure` 時填各場原 ZIP。使用 `venueBundle` 時省略 |
 | `sessions[].worldJournal` | 選用。若驗收回放檔，每個場次都填自己關閉後的原始 `.worldlog` 路徑 |
 | `sessions[].roomAlignments` | 選用。核對 MR 校正時，每個 MR 場次按房號填原校正檔，例如 `{"2":"room-02-alignment.json"}` |
 | `sessions[].udpPreflight` | 選用。每場提供原 UDP 預檢報告的 `listener` 與 `probe` 路徑 |
 | `sessions[].udpSourcePreflights` | 選用。每場按實際來源 IPv4 填一組 `listener` 與 `probe`。可補上 Quest 批次以外的來源 |
-| `sessions[].players` | 每房五席。使用 `questCaptures` 時只填該場其餘的 Windows 席位，若該場所有席位均由 Quest 報告提供，可省略此欄。每筆填玩家裝置實際使用的 IPv4 字串 `address` 及原日誌路徑 `log`。手動填入 Quest 3 原 logcat 時另填數字 `logcatPid`，例如 `7342` |
+| `windowsPlayers` | 選用。集中填入所有 Windows 席位，每筆提供玩家裝置實際使用的 IPv4 `address` 及原日誌路徑 `log` |
+| `sessions[].players` | 逐場填寫尚未由 `windowsPlayers` 或 `questCaptures` 提供的席位，每筆填實際 IPv4 `address` 及原日誌路徑 `log`。手動填入 Quest 3 原 logcat 時另填數字 `logcatPid`，例如 `7342`。該場席位已全部由前兩欄提供時可省略 |
 
-路徑可以是絕對路徑，或相對於 `venue.json` 所在資料夾。同一檔案只能使用一次。例如獨立模式下，第 1 房的清單項目可由下列 PowerShell 建立。請依實際驗收配置填入各席地址與檔名。
+路徑可以是絕對路徑，或相對於 `venue.json` 所在資料夾。同一檔案只能使用一次。以下是五房獨立模式的 Windows 範例，請依現場配置填入實際地址與檔名。混合場可改用 `questCaptures` 或逐場補上 Quest 原 logcat。兩種方式合計每房須有五席。
 
 ```powershell
-$room1 = @{
-    evidenceZip = 'room-01.zip'
-    launcherReport = 'Room 1/server-final.json'
-    serverLog = 'Room 1/server.log'
-    players = 1..5 | ForEach-Object {
-        @{ address = '192.168.1.20'; log = "Room 1/seat-$_.log" }
+$sessions = 1..5 | ForEach-Object {
+    @{
+        launcherReport = "Room $_/server-final.json"
+        serverLog = "Room $_/server.log"
+        worldJournal = "Room $_/original.worldlog"
     }
 }
-# 準備 $room2 到 $room5 後，與第 1 房一起寫入私人清單。
+$windowsPlayers = Import-Csv .\windows-logs.csv -Header address,log |
+    ForEach-Object { @{ address = $_.address; log = $_.log } }
 @{
     version = 1
     mode = 'Independent'
     topology = 'direct-lan'
     serverIps = @('192.168.1.10', '127.0.0.1')
-    closure = 'closure.json'
-    sessions = @($room1, $room2, $room3, $room4, $room5)
+    venueBundle = 'vr-command-venue-field-v1-<批次 ID>.zip'
+    sessions = @($sessions)
+    windowsPlayers = @($windowsPlayers)
 } | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 .\venue.json
 python scripts/verify-field-results.py --venue-manifest .\venue.json
 ```
+
+`windows-logs.csv` 的每列依序填 IPv4、日誌路徑，不加標題列。五房合併模式將 `mode` 設為 `Linked` 並在 `sessions` 填一場，仍提供 25 席的日誌。
 
 摘要核對五房各五個席位、原封存來源、每位玩家的原入場與 UDP 來源，以及 25 筆伺服器戰績確認。它逐房列出在伺服器位址清單以外的玩家數。`direct-lan` 至少須觀察到一筆這類連線，仍須依實際設備及網路拓撲核對主機數、同時遊玩與容量。
 
@@ -304,7 +309,7 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json
 }
 ```
 
-每份報告須完整，合起來必須剛好涵蓋計畫列出的 Quest 席位。工具重讀日誌核對位元組數和 SHA-256，再核對原程序、房號席位、伺服器觀察到的 IPv4、遊戲端點和戰績確認。成功摘要會列出 `questCaptureBatchesVerified` 及 `questCaptureSeatsVerified`。混合場可在 `sessions[].players` 補上 Windows 日誌。若需要手動提交已完成的 Quest 日誌，沿用上方 `players` 及 `logcatPid` 格式。
+每份報告須完整，合起來必須剛好涵蓋計畫列出的 Quest 席位。工具重讀日誌核對位元組數和 SHA-256，再核對原程序、房號席位、伺服器觀察到的 IPv4、遊戲端點和戰績確認。成功摘要會列出 `questCaptureBatchesVerified` 及 `questCaptureSeatsVerified`。混合場可用 `windowsPlayers` 集中補上 Windows 日誌，或逐場填在 `sessions[].players`。若需要手動提交已完成的 Quest 日誌，沿用上方 `players` 及 `logcatPid` 格式。
 
 ### 核對 MR 校正封存
 
