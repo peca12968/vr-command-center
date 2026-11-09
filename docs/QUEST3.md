@@ -187,9 +187,28 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connect
 
 1. 使用管理包 0.31.29 或更新版。在五房各登記五個 Quest 3 席位、鎖定各房校正檔，並啟動遊戲伺服器，等它公布場館 IPv4 與 UDP 埠。合併模式用一個端點，五房獨立各用不同端點。
 2. 以主控登入「房間與場次」，選取合併 MR 場次或任一獨立 MR 場次。在「Quest 3 MR 五房部署包」依房號選取五份鎖定的原始校正 JSON，按「下載五房部署包 ZIP」。畫面會提示場次、端點、名冊或校正檔有問題的房間。
-3. 解壓 `quest-mr-venue.zip`，直接使用其中的 `venue.json` 執行下方預檢。外層 ZIP 包含五個房間連線 ZIP 和五份校正原檔。只把對應的席位連線 JSON 與該房校正檔交給玩家，入場票券自簽發起有效五分鐘。
+3. 保留 `quest-mr-venue.zip`，可直接預檢或為指定席位部署。外層 ZIP 包含五個房間連線 ZIP、五份校正原檔及 `venue.json`。由主控保管整包，入場票券自簽發起有效五分鐘。
 
 管理 API `POST /api/mr-deployment/venue-bundle` 限主控。請求包含 `topology`，以及五筆 `rooms`，各有 `roomId`、`sessionId`、五個 `players`（`playerId`、`admissionId`）及 Base64 的 `alignmentFile`。服務按同一次讀取的場次和端點驗證五房，完整通過後以 `Cache-Control: no-store` 回傳 ZIP。場次、校正原檔、端點或當前名冊不符時回傳 `409` 及房號，無法取得部分部署包。裝置安裝和場館 UDP 可達性仍需實測。
+
+#### 直接用 ZIP 預檢或部署單席
+
+直接使用管理台下載的原始 ZIP。省略房號與席位會讀取全部 25 席並輸出預檢結果。指定房號與席位並加上 `-CheckOnly`，會輸出該席的到期時間與校正雜湊。兩種預檢皆只讀檔，不呼叫 ADB。
+
+```powershell
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.zip
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.zip `
+    -RoomId 4 -Seat 2 -CheckOnly
+```
+
+接好已授權 USB 偵錯的 Quest 3，核對實體標籤與 ADB 裝置序號。房號和席位從 1 開始。正式部署須指定 `-Serial`，只會對該裝置安裝專案 APK、複製對應席位設定與該房原始校正檔，再啟動應用程式。以下用實際序號替換 `YOUR_ADB_SERIAL`。
+
+```powershell
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.zip `
+    -RoomId 4 -Seat 2 -Serial YOUR_ADB_SERIAL
+```
+
+任一席位過期、場次或校正檔不符時，整份 ZIP 預檢失敗，應從主控下載當前部署包。也可沿用下方 `-ManagementApi` 與 `VR_COMMAND_MASTER_KEY`，把範例的 `-VenueManifest .\venue.json` 換成 `-VenueBundle .\quest-mr-venue.zip`。ZIP 線上模式另會比對每個場次目前公布的 UDP 端點，裝置操作前須全數核對成功。
 
 #### 使用逐房下載的檔案建立清單
 
@@ -215,7 +234,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueManifest .\venue.json
 
 `Linked` 要求五房共用場次 ID 與 UDP 端點。五個獨立房請改用 `Independent`，填入各房自己的場次 ID，並使用五個不同端點。同一 IP 使用不同 UDP 埠也符合獨立模式。檢查會比對每個 ZIP 內的五個席位、票券場次及房號、25 個不重複的玩家與入場識別，以及各房校正檔。成功時輸出各房端點、校正檔 SHA-256 與最早到期 UTC，無票券內容。失敗時回傳非零結束碼。
 
-此指令只讀取檔案。若連線檔有鎖定值，須全數使用同一種格式，並逐席核對該房原檔。票券效期依本機 UTC 判斷，簽章和當前名冊由遊戲伺服器核對。預檢後，請解出各席位的 JSON，照單機指令部署。裝置安裝、實體校正、MR 透視與 UDP 可達性需在現場驗收。
+此指令只讀取檔案。若連線檔有鎖定值，須全數使用同一種格式，並逐席核對該房原檔。票券效期依本機 UTC 判斷，簽章和當前名冊由遊戲伺服器核對。若使用逐房檔案，預檢後可解出各席位 JSON 照單機指令部署。裝置安裝、實體校正、MR 透視與 UDP 可達性需在現場驗收。
 
 #### 向管理服務核對五房名冊
 
