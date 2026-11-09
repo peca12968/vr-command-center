@@ -9,7 +9,7 @@ param(
     [Parameter(ParameterSetName='Player')][switch]$MixedReality,
     [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][switch]$CheckOnly,
     [Parameter(Mandatory, ParameterSetName='Venue')][string]$VenueManifest,
-    [Parameter(Mandatory, ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='CapturePlan')][string]$VenueBundle,
+    [Parameter(Mandatory, ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='CapturePlan')][Parameter(Mandatory, ParameterSetName='Windows')][string]$VenueBundle,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,5)][int]$RoomId,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,5)][int]$Seat,
     [Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='CapturePlan')][ValidateNotNullOrEmpty()][string]$DeviceMap,
@@ -19,7 +19,9 @@ param(
     [Parameter(ParameterSetName='Bundle')][switch]$DeployMappedSeats,
     [Parameter(ParameterSetName='Bundle')][switch]$VerifyTrackedSeats,
     [Parameter(ParameterSetName='Bundle')][switch]$AllHeadsets,
-    [Parameter(ParameterSetName='Venue')][Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$ManagementApi
+    [Parameter(ParameterSetName='Venue')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Windows')][ValidateNotNullOrEmpty()][string]$ManagementApi,
+    [Parameter(Mandatory, ParameterSetName='Windows')][ValidateNotNullOrEmpty()][string]$WindowsSeatMap,
+    [Parameter(Mandatory, ParameterSetName='Windows')][ValidateNotNullOrEmpty()][string]$WindowsOutputDirectory
 )
 $ErrorActionPreference = 'Stop'
 # Handle ADB exit codes here so both Windows PowerShell and PowerShell report the failing step.
@@ -442,6 +444,74 @@ function Confirm-VenueReadback($Venue) {
     }
 }
 
+function Export-WindowsVenueSeats {
+    $map = (Read-DeploymentJson $WindowsSeatMap 16384 'Windows seat map').Document
+    if (-not (Test-JsonInteger $map.version) -or $map.version -ne 1 -or $map.seats -isnot [array] -or
+        $map.seats.Count -lt 1 -or $map.seats.Count -gt 25 -or
+        @($map.PSObject.Properties.Name | Where-Object { $_ -cnotin @('version','seats') }).Count) {
+        throw 'Use a version 1 Windows seat map with 1 to 25 seats.'
+    }
+    $seats = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $stations = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($row in $map.seats) {
+        if (-not (Test-JsonInteger $row.roomId) -or $row.roomId -notin 1..5 -or
+            -not (Test-JsonInteger $row.seat) -or $row.seat -notin 1..5 -or
+            $row.station -isnot [string] -or $row.station -cnotmatch '\A[A-Za-z0-9][A-Za-z0-9-]{0,31}\z' -or
+            @($row.PSObject.Properties.Name | Where-Object { $_ -cnotin @('roomId','seat','station') }).Count) {
+            throw 'Each Windows seat needs roomId, seat and a station label of up to 32 ASCII letters, digits or hyphens.'
+        }
+        if (-not $seats.Add("$($row.roomId)/$($row.seat)") -or -not $stations.Add($row.station)) {
+            throw 'Each Windows seat and station must appear only once.'
+        }
+    }
+
+    $provider = $null
+    $drive = $null
+    $output = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($WindowsOutputDirectory, [ref]$provider, [ref]$drive)
+    if ($provider.Name -ne 'FileSystem') { throw 'Use a filesystem path for the Windows output directory.' }
+    $output = [IO.Path]::TrimEndingDirectorySeparator($output)
+    $parent = [IO.Path]::GetDirectoryName($output)
+    if (-not $parent -or -not [IO.Directory]::Exists($parent) -or (Test-Path -LiteralPath $output)) {
+        throw 'Use a new Windows output directory inside an existing private directory.'
+    }
+    $venue = Read-VenueBundle $VenueBundle 0 0
+    if ($venue.Report.mode -cnotin @('VR','Mixed')) { throw 'Windows staging requires an original VR or mixed venue bundle.' }
+    foreach ($row in $map.seats) {
+        if ($venue.Connections["$($row.roomId)/$($row.seat)"].Alignment) {
+            throw "Room $($row.roomId) seat $($row.seat) belongs to an MR room."
+        }
+    }
+    Confirm-VenueReadback $venue
+    $selected = foreach ($row in ($map.seats | Sort-Object roomId, seat)) {
+        $key = "$($row.roomId)/$($row.seat)"
+        if ($venue.SeatHeadsets[$key] -cne 'ViveXr') { throw "Room $($row.roomId) seat $($row.seat) is not assigned to VIVE XR." }
+        $ticket = $venue.Connections[$key].Ticket
+        [pscustomobject]@{ RoomId = $row.roomId; Seat = $row.seat; Station = $row.station; Ticket = $ticket
+            File = 'pc-{0}-room-{1:00}-seat-{2:00}.json' -f $row.station,$row.roomId,$row.seat }
+    }
+
+    $staging = Join-Path $parent ('.vr-windows-' + [Guid]::NewGuid().ToString('N'))
+    $null = [IO.Directory]::CreateDirectory($staging)
+    try {
+        foreach ($row in $selected) {
+            [IO.File]::WriteAllBytes((Join-Path $staging $row.File), $row.Ticket.Bytes)
+        }
+        if ($venue.EarliestExpiry -le [DateTimeOffset]::UtcNow) { throw 'A player ticket expired while staging. Download a fresh bundle.' }
+        [IO.Directory]::Move($staging, $output)
+    } finally {
+        if ([IO.Directory]::Exists($staging)) {
+            foreach ($row in $selected) { [IO.File]::Delete((Join-Path $staging $row.File)) }
+            [IO.Directory]::Delete($staging)
+        }
+    }
+    [ordered]@{ version = 1; topology = $venue.Report.topology; managementVerified = $true; seats = @(
+        foreach ($row in $selected) {
+            [ordered]@{ roomId = $row.RoomId; seat = $row.Seat; station = $row.Station; file = $row.File
+                endpoint = $row.Ticket.Endpoint; expiresAtUtc = $row.Ticket.ExpiresAtUtc.ToString('o') }
+        }
+    ) } | ConvertTo-Json -Depth 4 -Compress
+}
+
 function Read-QuestDeviceMap([string]$Path, [switch]$Partial) {
     $map = (Read-DeploymentJson $Path 16384 'device map').Document
     $minimum = if ($Partial) { 1 } else { 25 }
@@ -757,6 +827,8 @@ if ($PSCmdlet.ParameterSetName -eq 'Refresh') {
     finally { $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose() }
     return
 }
+
+if ($PSCmdlet.ParameterSetName -eq 'Windows') { Export-WindowsVenueSeats; return }
 
 $alignment = $null
 $alignmentHash = $null

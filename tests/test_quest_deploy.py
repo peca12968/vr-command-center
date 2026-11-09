@@ -475,6 +475,86 @@ class QuestVenueTests(unittest.TestCase):
         path.write_text(json.dumps(document), encoding='utf-8')
         return path, document
 
+    def test_windows_staging_copies_only_live_verified_original_vr_seats(self):
+        requests = []
+        state = {'topology': 'Linked', 'quest': None, 'stale': False}
+        key = 'PRIVATE_WINDOWS_TEST_MASTER'
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                requests.append((self.path, self.headers.get('Authorization'), body))
+                rows = [{'roomId': room, 'seat': seat, 'headset': 'Quest3' if (room, seat) == state['quest'] else 'ViveXr',
+                         'status': 'admission-changed' if state['stale'] and (room, seat) == (5, 4) else 'matched'}
+                        for room in range(1, 6) for seat in range(5)]
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'topology': state['topology'], 'allMatched': not state['stale'], 'seats': rows}).encode())
+
+            def log_message(self, *args):
+                pass
+
+        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                mapping = self.root / 'Windows seat map.json'
+                env = {**os.environ, 'VR_COMMAND_MASTER_KEY': key}
+
+                def stage(files, rows, output):
+                    mapping.write_text(json.dumps({'version': 1, 'seats': rows}), encoding='utf-8')
+                    return self.run_bundle(files, '-WindowsSeatMap', str(mapping), '-WindowsOutputDirectory', str(output),
+                                           '-ManagementApi', f'http://127.0.0.1:{server.server_port}', environment=env)
+
+                files, _ = self.vr_bundle('Linked')
+                all_seats = [{'roomId': room, 'seat': seat, 'station': f'R{room}-S{seat}'}
+                             for room in range(1, 6) for seat in range(1, 6)]
+                output = self.root / 'Windows delivery'
+                result = stage(files, all_seats[::-1], output)
+                self.assertEqual(0, result.returncode, result.stderr)
+                report = json.loads(result.stdout)
+                self.assertEqual(('Linked', True, 25), (report['topology'], report['managementVerified'], len(report['seats'])))
+                self.assertEqual(all_seats, [{key: row[key] for key in ('roomId', 'seat', 'station')} for row in report['seats']])
+                path, auth, body = requests[0]
+                self.assertEqual(('/api/vr-deployment/venue-check', f'Bearer {key}'), (path, auth))
+                before = {p.name: p.read_bytes() for p in output.iterdir()}
+                self.assertEqual(25, len(before))
+                for row in report['seats']:
+                    room, seat = row['roomId'], row['seat']
+                    with zipfile.ZipFile(io.BytesIO(files[f'room-{room:02}-connections.zip'])) as original:
+                        raw = original.read(f'room-{room:02}-seat-{seat:02}.json')
+                    self.assertEqual(raw, before[row['file']])
+                    self.assertEqual(raw, base64.b64decode(body['rooms'][room-1]['connectionFiles'][seat-1]))
+                self.assertNotIn(key, result.stdout + result.stderr)
+                self.assertNotIn('joinTicket', result.stdout)
+                self.assert_rejected(stage(files, all_seats, output), 'new Windows output directory')
+                self.assertEqual(before, {p.name: p.read_bytes() for p in output.iterdir()})
+
+                fresh = self.root / 'Rejected'
+                one = all_seats[0]
+                self.assert_rejected(stage(files, [one, {**all_seats[1], 'station': 'r1-s1'}], fresh), 'only once')
+                self.assert_rejected(stage(files, [{**one, 'station': '../outside'}], fresh), 'station label')
+                self.assertEqual(1, len(requests))
+                state['quest'] = (1, 0)
+                self.assert_rejected(stage(files, [one], fresh), 'not assigned to VIVE XR')
+                state['stale'] = True
+                self.assert_rejected(stage(files, [all_seats[1]], fresh), 'Room 5 seat 5: admission-changed')
+                self.assertFalse(fresh.exists())
+
+                mixed, _ = self.mixed_bundle()
+                state.update(topology='Independent', quest=None, stale=False)
+                self.assert_rejected(stage(mixed, [all_seats[5]], fresh), 'belongs to an MR room')
+                self.assertEqual(3, len(requests))
+                result = stage(mixed, [one], fresh)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertEqual('/api/mixed-deployment/venue-check', requests[-1][0])
+                self.assertEqual(1, len(list(fresh.iterdir())))
+                self.assertEqual([], list(self.root.glob('.vr-windows-*')))
+            finally:
+                server.shutdown()
+                thread.join(timeout=5)
+
     def mock_capture_devices(self, rows, topology, *, held=False, wrong_seat=None):
         expected = {}
         for row in rows:

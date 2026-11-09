@@ -58,6 +58,26 @@ Quest MR 滿席部署可先用清單一次核對五房 ZIP、場次 ID、端點�
 
 `vr-venue-connections.zip` 內含 `venue.json`、五個原格式的分房 ZIP 及共 25 份四欄玩家連線檔。分房 ZIP 依房號命名，每個 JSON 依房號與席位命名。票券自簽發起有效五分鐘，請將對應的 JSON 個別交給玩家，整份 ZIP 由主控私下保管。Windows 玩家啟動器可再次核對檔內標示的房間與席位。 [玩家端核對](PLAYER_CONFIG_REVIEW.md#連線檔席位與效期)
 
+### 依電腦分發 Windows VR 連線檔
+
+主控可用 PowerShell 7 及原始 `vr-venue-connections.zip` 或 `vr-mr-venue-deployment.zip` 匯出指定 Windows 席位。先準備一份版本 1 的對照表，房號與席位均為 1 到 5。`station` 是電腦標籤，開頭須為英文字母或數字，全長至多 32 字元，可用英文字母、數字與連字號。每台電腦與每個席位只填一次。
+
+```json
+{"version":1,"seats":[{"roomId":1,"seat":2,"station":"PC-A"},{"roomId":5,"seat":4,"station":"PC-B"}]}
+```
+
+簽發後在主控電腦執行。`-ManagementApi` 使用管理服務的本機 HTTP 或 HTTPS 原點，並在目前程序提供既有的 `VR_COMMAND_MASTER_KEY` 環境變數。輸出目錄須是私人資料夾下的新路徑。
+
+```powershell
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 `
+  -VenueBundle .\vr-venue-connections.zip -ManagementApi http://127.0.0.1:5080 `
+  -WindowsSeatMap .\windows-seat-map.json -WindowsOutputDirectory 'F:\private\windows-seats'
+```
+
+工具先向管理服務核對全館 25 份原票券、現行入場及遊戲端點，然後原樣寫出對照表中的 VR 連線檔，例如 `pc-PC-A-room-01-seat-02.json`。選到 Quest 3、MR 房間、重複席位、過期票券或過時名冊時，整批拒絕。成功摘要列出每台電腦的檔名、端點與效期，使用原票券剩餘的有效時間。
+
+把每份 JSON 私下交給對應電腦。玩家在該電腦用解壓後的 `Launch-Player.exe --config <該台連線檔> --launch --openxr --wait` 加入。Quest 席位可從同一份原場館 ZIP 使用 Quest 的批次部署流程。 [Windows OpenXR 啟動](WINDOWS_PLAYER_PACKAGE.md#windows-openxr-啟動) · [Quest 席位部署](QUEST3.md#部署指定的-quest-席位)
+
 下載使用各來源已公布的位址和埠。五房獨立須使用各自的端點，合併場共用同一端點。若名冊、場次或來源已變更，請重新讀取五房名冊。尚未填滿的場館可沿用單席或整房配票。
 
 主控可用 `GET /api/vr-deployment/venue` 讀取預覽。向 `POST /api/vr-deployment/venue-bundle` 送出同一預覽的 `topology` 以及五個 `rooms`，每房提供 `roomId`、`sessionId`、公布的 `streamId` 和五筆 `players` 的 `playerId`、`admissionId`。服務以同一份現行場館快照核對所有房間。任何一房不符時回應 409，附對應房號，整批無 ZIP。

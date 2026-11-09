@@ -67,6 +67,8 @@ runtime只收VrCommand.exe／UnityPlayer／CrashHandler／WinPix及D3D12、MonoB
 
 ### Windows OpenXR 啟動
 
+五房場館的主控可先用原 ZIP 和電腦對照表匯出各 Windows 席位的連線檔。 [分發連線檔](EXTERNAL_CLIENTS.md#依電腦分發-windows-vr-連線檔)
+
 Windows 玩家包 0.49.0 的圖形玩家端可以選用 OpenXR。先讓相容的頭盔連上 Windows OpenXR 執行環境，再由解壓後的玩家包資料夾執行。使用主控簽發的四欄 VR 玩家連線檔。
 
 ```powershell

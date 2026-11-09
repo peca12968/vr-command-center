@@ -58,6 +58,7 @@ def main():
     p.add_argument('--check-vr-venue-tickets',action='store_true',help='Launch all 25 players in each mode from the shipped console venue ZIP')
     p.add_argument('--check-quest-vr-deploy',action='store_true',help='Run Quest preflight and mapped mock deployment from each original VR venue ZIP')
     p.add_argument('--check-quest-vr-partial-map',action='store_true',help='Use a mixed headset roster and deploy five selected Quest seats from each original VR venue ZIP')
+    p.add_argument('--check-windows-venue-staging',action='store_true',help='Stage VIVE XR seats from the original VR or mixed venue ZIP')
     p.add_argument('--check-venue-openxr',action='store_true',help='Use one graphical mock OpenXR seat alongside 24 desktop peers per topology')
     p.add_argument('--peer-diagnostics',action='store_true',help='Verify observed UDP peers in Linked and absence in default Independent runs')
     p.add_argument('--field-evidence',action='store_true',help='Verify the management ZIP with the original Linked player and server logs')
@@ -122,6 +123,8 @@ def main():
         p.error('--check-quest-vr-deploy requires --check-vr-venue-tickets')
     if args.check_quest_vr_partial_map and (not args.check_vr_venue_tickets or args.check_quest_vr_deploy):
         p.error('--check-quest-vr-partial-map requires --check-vr-venue-tickets without the full Quest fleet check')
+    if args.check_windows_venue_staging and not (args.check_quest_vr_partial_map or args.mixed_venue_bundle_only):
+        p.error('--check-windows-venue-staging requires --check-quest-vr-partial-map or --mixed-venue-bundle-only')
     if args.peer_diagnostics and not args.player_package:p.error('--peer-diagnostics requires the three-package check')
     if args.field_evidence and not args.peer_diagnostics:p.error('--field-evidence requires --peer-diagnostics')
     if args.venue_field_evidence and not (args.field_evidence and args.check_venue_end):
@@ -351,7 +354,7 @@ def main():
             state=request(path+'/players',{'playerId':str(uuid.uuid4()),'roomId':room,
                 'name':f'Portable room {room} seat {seat}','headset':headset},role=role)
         return sorted((p for p in state['players'] if p['roomId']==room),key=lambda p:p['seat'])
-    def room_players(entry,room,people=None,raw=None):
+    def room_players(entry,room,people=None,raw=None,*,windows_files=None):
         path='/api/sessions/'+entry['sessionId']
         role='Room'+str(room)
         if people is None: people=prepare_room_roster(entry,room)
@@ -375,8 +378,12 @@ def main():
                 value=json.loads(content)
                 if value!={'role':'Client',**destination,'joinTicket':value.get('joinTicket')} or not value['joinTicket']:
                     raise ValueError('Player connection file differs from the advertised endpoint')
-                file=directory/name
-                file.write_bytes(content)
+                file = (windows_files or {}).get((room, person['seat'] + 1))
+                if file is None:
+                    file = directory/name
+                    file.write_bytes(content)
+                elif file.read_bytes() != content:
+                    raise ValueError('Windows staging changed the original connection file')
                 prepared.append((person,file))
         launched=[]
         for person,file in prepared:
@@ -433,6 +440,7 @@ def main():
                   and archive.namelist() == ['venue.json', *[row['ticketsZip'] for row in expected]]
                   and archive.testzip() is None, mode+' shipped browser ZIP includes the five original rooms and no other files')
             files = [archive.read(row['ticketsZip']) for row in expected]
+        windows_files = {}
         if args.check_quest_vr_deploy or args.check_quest_vr_partial_map:
             before = request('/api/sessions')
             pwsh = shutil.which('pwsh')
@@ -451,9 +459,30 @@ def main():
                       mode+' Quest tool checks the original VR seat using the live game endpoint without ADB')
                 save(f'vr-venue-{label}-quest-seat.json', seat)
                 verify_mapped_quest(deploy, destination, environment, archive_path.read_bytes(), mode, partial=args.check_quest_vr_partial_map)
-            check(request('/api/sessions') == before, mode+' Quest deployment checks do not change the original venue roster')
-        return [client for (entry, room, people), raw in zip(staged, files, strict=True)
-                for client in room_players(entry, room, people, raw)]
+            if args.check_windows_venue_staging:
+                mapped = [{'roomId': room, 'seat': person['seat'] + 1,
+                           'station': f"R{room}-S{person['seat'] + 1}"}
+                          for _, room, people in staged for person in people if person['headset'] == 'ViveXr']
+                seat_map = runtime / f'{label}-windows-map.json'
+                seat_map.write_text(json.dumps({'version': 1, 'seats': mapped[::-1]}), encoding='utf-8')
+                staged_path = runtime / f'{label}-windows'
+                command = [*deploy, '-WindowsSeatMap', str(seat_map), '-WindowsOutputDirectory', str(staged_path)]
+                report = json.loads(subprocess.check_output(command, env=environment, timeout=25, encoding='utf-8'))
+                expected_rows = [{**row, 'file': f"pc-{row['station']}-room-{row['roomId']:02}-seat-{row['seat']:02}.json",
+                                  'endpoint': f"{address}:{staged[row['roomId'] - 1][0]['ready']['port']}"} for row in mapped]
+                check(report['topology'] == mode and report['managementVerified'] and len(mapped) == 10
+                      and [{k: v for k, v in row.items() if k != 'expiresAtUtc'} for row in report['seats']] == expected_rows
+                      and {file.name for file in staged_path.iterdir()} == {row['file'] for row in expected_rows},
+                      mode+' stages exactly the ten live-verified VIVE XR seats')
+                windows_files = {(row['roomId'], row['seat']): staged_path / row['file'] for row in expected_rows}
+                save(f'vr-venue-{label}-windows-staging.json', report)
+            check(request('/api/sessions') == before, mode+' deployment checks do not change the original venue roster')
+        launched = [client for (entry, room, people), raw in zip(staged, files, strict=True)
+                    for client in room_players(entry, room, people, raw, windows_files=windows_files)]
+        if windows_files:
+            check({Path(client['configPath']) for client in launched if client['player']['headset'] == 'ViveXr'}
+                  == set(windows_files.values()), mode+' Windows launchers consumed the original staged files')
+        return launched
 
     def packaged_player(entry,person,file, *, mock=None):
         log=file.with_suffix('.log')
@@ -2043,6 +2072,23 @@ def main():
                   and report['seats'] == 25 and [row['mode'] for row in report['rooms']] == ['VR','MR','VR','MR','VR'],
                   'Quest CLI confirms the whole mixed ZIP against the packaged API before selecting seats')
             save('mixed-venue-deployment.json', report)
+            if args.check_windows_venue_staging:
+                seat_map = destination / 'windows-seat-map.json'
+                delivery = destination / 'windows-delivery'
+                stage_windows = [*deploy, '-WindowsSeatMap', str(seat_map), '-WindowsOutputDirectory', str(delivery)]
+                for room, seat, message in ((2, 1, 'belongs to an MR room'), (1, 1, 'not assigned to VIVE XR')):
+                    seat_map.write_text(json.dumps({'version': 1, 'seats': [{'roomId': room, 'seat': seat, 'station': 'PC-A'}]}), encoding='utf-8')
+                    denied = subprocess.run(stage_windows, env=environment, timeout=25, encoding='utf-8', capture_output=True)
+                    check(denied.returncode != 0 and message in denied.stderr and not delivery.exists(),
+                          f'Mixed Windows staging refuses room {room} seat {seat} without publishing files')
+                seat_map.write_text(json.dumps({'version': 1, 'seats': [{'roomId': 1, 'seat': 2, 'station': 'PC-A'}]}), encoding='utf-8')
+                windows = json.loads(subprocess.check_output(stage_windows, env=environment, timeout=25, encoding='utf-8'))
+                file = delivery / 'pc-PC-A-room-01-seat-02.json'
+                check(windows['managementVerified'] and windows['topology'] == 'Independent' and len(windows['seats']) == 1
+                      and windows['seats'][0]['file'] == file.name and list(delivery.iterdir()) == [file]
+                      and file.read_bytes() == base64.b64decode(live['rooms'][0]['connectionFiles'][1]),
+                      'Mixed Windows staging preserves only the original signed VR seat')
+                save('mixed-venue-windows-staging.json', windows)
             tracking = subprocess.run([*deploy, '-VerifyTrackedSeats', '-AdbPath', str(destination/'absent-adb.exe')],
                 env=environment, timeout=25, encoding='utf-8', cwd=destination, capture_output=True)
             tracked = json.loads(tracking.stdout)
