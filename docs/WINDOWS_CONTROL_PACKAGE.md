@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-09 `windows-control-0.31.47-win-x64.zip` 加入混合 VR／MR 五房獨立部署。ZIP 為 52,734,795 bytes，SHA-256 `e44221aeaade39748aa9f53097dacb3c882e0c7e83bdf4a116744f9d83331f90`。解壓核對 528 個清單檔案，含 508 個執行環境檔案，通過 106 項管理包及 98 項原生伺服器混合部署檢查。 [混合配票](QUEST3.md#混合-vr-與-mr-五房部署包)
+
 2026-11-09 `windows-control-0.31.46-final-win-x64.zip` 加入五房逐房指定任務版本。ZIP 為 52,720,812 bytes，SHA-256 `8e02b23ad367fcfd8b5aa0c33b5c1beb0733094e330a690cd248ebbf6c2e7a8d`。解壓核對 528 個清單檔案，含 508 個執行環境檔案，通過 106 項管理包及 527 項 Chromium 檢查。早期同版候選保留，交付版的任務選單改為較寬的欄位。 [逐房操作](MISSION_VERSIONS.md#逐房指定任務版本)
 
 2026-11-09 `windows-control-0.31.45-win-x64.zip` 加入保存版本的開場平面圖。ZIP 為 52,707,989 bytes，SHA-256 `0bb155a0c0a972db1a696a4fce02c41c1111be3e0439623336d4c87193ff2849`。解壓核對 525 個清單檔案，含 505 個執行環境檔案，通過 106 項管理包及 521 項 Chromium 檢查。 [開場平面圖](LAYOUT.md#開場前查看保存版本平面圖)
