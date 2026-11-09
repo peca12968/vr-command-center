@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
+const fs = require('node:fs/promises');
 const path = require('node:path');
 
 module.exports = async ({ context, api, tokens, base, root, screenshots, check, captureErrors }) => {
@@ -333,6 +334,19 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     check(await archive(ending.id).nth(3).textContent() === '等待封存', 'A combat seal alone does not mark the world replay sealed');
     first.seal();
     await archive(ending.id).nth(3).filter({ hasText: '已封存' }).waitFor();
+    const reportsPath = `/venue/closure/${closure.requestId}/reports.zip`;
+    const reportButton = page.locator('#export-venue-reports');
+    const reportStatus = page.locator('#venue-report-status');
+    const waitingReport = await api(reportsPath, 'GET', undefined, 'Master', 409);
+    await api(reportsPath, 'GET', undefined, 'Room2', 403);
+    check(waitingReport.code === 'venue-reports-not-ready' && waitingReport.roomIds.join() === '2'
+      && await reportButton.isDisabled() && (await reportStatus.textContent()).includes('房間 2'),
+      'Batch export waits for the last combat seal and rejects a room controller');
+    const pausedEnding = await api(`/sessions/${preparing[1]}`);
+    await api(`/sessions/${pausedEnding.id}/combat-stream/seal`, 'POST', { streamId: pausedEnding.combatStream.streamId, finalSequence: 0 }, 'GameServer');
+    await archive(pausedEnding.id).nth(2).filter({ hasText: '已封存' }).waitFor();
+    check(await archive(pausedEnding.id).nth(3).textContent() === '等待封存' && await reportButton.isEnabled(),
+      'Batch combat export is available while a world replay remains unsealed');
     await page.locator('#venue-closure').screenshot({ path: path.join(screenshots, 'venue-closure.png') });
     const replacement = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [1] }, 'Master', 201);
     active.add(replacement.id);
@@ -342,12 +356,38 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await page.waitForFunction(id => document.getElementById('session-select').value === id, ending.id);
     check(await page.locator('#include-ended').isChecked() && (await api(`/sessions/${replacement.id}`)).state === 'Preparing',
       'Reload restores the original archived batch and the table opens that session after the room is reused');
+    const reportsUrl = base + '/api' + reportsPath;
+    const fetchReports = () => fetch(reportsUrl, { headers: { Authorization: 'Bearer ' + tokens.Master } });
+    const downloadEvent = page.waitForEvent('download');
+    await reportButton.click();
+    const download = await downloadEvent, reportZip = await fs.readFile(await download.path());
+    const response = await fetchReports();
+    check(response.ok && response.headers.get('cache-control') === 'no-store'
+      && download.suggestedFilename() === `vr-command-venue-reports-v1-${closure.requestId}.zip`
+      && reportZip.equals(Buffer.from(await response.arrayBuffer())), 'Browser downloads the exact original batch ZIP after room reuse');
+    await fs.writeFile(path.join(screenshots, 'venue-reports.zip'), reportZip);
+    await page.route(reportsUrl, route => route.fulfill({ status: 200, contentType: 'application/zip-fake', body: 'fixture' }));
+    await reportButton.click();
+    await reportStatus.filter({ hasText: '報表格式不符' }).waitFor();
+    check(await reportButton.isEnabled(), 'An invalid ZIP media type reports an error and releases the download button');
+    await page.unroute(reportsUrl);
     const archiveRoute = '**/api/venue/closure';
     await page.route(archiveRoute, request => request.fulfill({ status: 503 }));
     await page.locator('#refresh').click();
     await page.locator('#venue-closure-summary').filter({ hasText: '暫時無法確認' }).waitFor();
-    check(await table.isHidden(), 'A failed closure read removes the previous seal display');
+    check(await table.isHidden() && !await reportButton.isVisible(), 'A failed closure read removes the previous seal and download display');
     await page.unroute(archiveRoute);
+    const replacementEnd = (await api('/venue/phase')).end;
+    const nextBatch = await api('/venue/phase', 'POST', { action: 'End', targets: replacementEnd }, 'Master', 200, undefined, randomUUID());
+    active.delete(replacement.id);
+    await page.locator('#refresh').click();
+    await archive(replacement.id).first().waitFor();
+    const oldResponse = await fetchReports();
+    const nextDownload = page.waitForEvent('download');
+    await reportButton.click();
+    check(oldResponse.ok && reportZip.equals(Buffer.from(await oldResponse.arrayBuffer()))
+      && (await nextDownload).suggestedFilename() === `vr-command-venue-reports-v1-${nextBatch.requestId}.zip`,
+      'A new closure changes the browser download while the original batch URL stays byte-identical');
   } finally {
     await page.unroute(route); await page.close();
     for (const id of active) await end(id);

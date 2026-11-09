@@ -15,8 +15,31 @@ public record FinalSessionReport(int ReportVersion, Guid SessionId, Guid Mission
     }
 }
 
+public record FinalVenueSessionReport(long AppliedAtSequence, FinalSessionReport Report);
+public record FinalVenueReport(Guid RequestId, DateTimeOffset RecordedAtUtc, FinalVenueSessionReport[] Sessions);
+public sealed class VenueReportsNotReadyException(int[] roomIds) : InvalidOperationException("Some sessions still await their final combat reports.")
+{
+    public int[] RoomIds { get; } = roomIds;
+}
+
 public sealed partial class SessionManager
 {
+    public FinalVenueReport FinalVenueReports(Guid requestId, OperatorIdentity actor)
+    {
+        RequireVenueMaster(actor);
+        lock (gate)
+        {
+            if (!venueTransitions.TryGetValue(requestId, out var entries) || entries[0].Read<ControlCommand>().Action != ControlAction.End)
+                throw new KeyNotFoundException("No venue End batch with that ID.");
+            var sessions = entries.Select(entry => (Entry: entry, Session: Find(entry.SessionId).View))
+                .OrderBy(item => item.Session.RoomIds[0]).ToArray();
+            var waiting = sessions.Where(item => !CanExportFinalReport(item.Session)).SelectMany(item => item.Session.RoomIds).ToArray();
+            if (waiting.Length > 0) throw new VenueReportsNotReadyException(waiting);
+            return new(requestId, entries[0].RecordedAtUtc,
+                sessions.Select(item => new FinalVenueSessionReport(item.Entry.Sequence, FinalReport(item.Session.Id, actor))).ToArray());
+        }
+    }
+
     public FinalSessionReport FinalReport(Guid id, OperatorIdentity actor) => FinalReport(id, actor, null);
 
     public FinalSessionReport FinalReport(Guid id, OperatorIdentity actor, int? roomId)
@@ -35,15 +58,18 @@ public sealed partial class SessionManager
                 AccessPolicy.Read(actor, [room]);
                 if (!session.RoomIds.Contains(room)) throw new ArgumentException("Report room is outside the session.");
             }
-            var statistics = Statistics(history);
-            if (session.State != SessionState.Ended || session.EndedAtUtc is null || statistics.PendingTelemetry)
+            if (!CanExportFinalReport(session) || session.EndedAtUtc is not { } endedAt)
                 throw new InvalidOperationException("End the session and seal all combat reports before exporting a final report.");
+            var statistics = Statistics(history);
             var report = new FinalSessionReport(1, id, session.Mission.Id, session.Mission.Definition.Name, session.Mode,
-                [.. session.RoomIds], session.CreatedAtUtc, session.StartedAtUtc, session.EndedAtUtc.Value,
+                [.. session.RoomIds], session.CreatedAtUtc, session.StartedAtUtc, endedAt,
                 session.Mission.Definition.DurationSeconds, statistics.ThroughSequence,
                 statistics.Origin ?? session.CombatStream?.Origin, session.CombatStream?.StreamId,
                 session.CombatStream?.AcceptedSequence, statistics.Players);
             return roomId is int reportRoom ? report.ForRoom(reportRoom) : report;
         }
     }
+
+    private static bool CanExportFinalReport(SessionView session) => session.State == SessionState.Ended && session.EndedAtUtc is not null
+        && session.CombatStream is not { Sealed: false };
 }

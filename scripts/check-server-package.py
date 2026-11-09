@@ -61,6 +61,7 @@ def main():
     p.add_argument('--check-venue-phase', action='store_true', help='Verify whole-venue pause and resume against both native topologies')
     p.add_argument('--check-venue-begin', action='store_true', help='Start both native topologies with one witnessed Begin per topology')
     p.add_argument('--check-venue-end', action='store_true', help='End each native topology in one batch and read its original archives')
+    p.add_argument('--check-venue-reports', action='store_true', help='Verify the original reports ZIP for each native End batch')
     p.add_argument('--check-venue-environment', action='store_true', help='Confirm two batch environment changes in each native topology')
     p.add_argument('--check-venue-enemies', action='store_true', help='Use venue enemy policy to enable and stop native attacks')
     p.add_argument('--check-layout-preview',action='store_true',help='Load a saved barricade opening and compare its preview with native world geometry')
@@ -88,6 +89,8 @@ def main():
     if args.check_venue_begin and not args.player_package:p.error('--check-venue-begin requires the three-package check')
     if args.check_venue_end and (not args.player_package or args.observe_closure_ui):
         p.error('--check-venue-end requires the three-package check and its own End path')
+    if args.check_venue_reports and (not args.check_venue_end or not args.check_room_reports):
+        p.error('--check-venue-reports requires --check-venue-end and --check-room-reports')
     if args.check_venue_environment and not args.player_package:
         p.error('--check-venue-environment requires the three-package check')
     if args.check_venue_enemies and not args.check_room_combat:
@@ -350,6 +353,48 @@ def main():
                 'roomId':c['player']['roomId'],'seat':c['player']['seat'],'connectionId':c['connection'],
                 'nativePid':c['nativePid'],'launcherPid':c['process'].pid} for c in owners]})
         check(True,entry['label']+' CSV rows match sealed player results')
+    def verify_venue_reports(entries, receipt, linked):
+        mode = 'linked' if linked else 'independent'
+        key = receipt['requestId']
+        route = f'/api/venue/closure/{key}/reports.zip'
+        raw, headers = request(route, raw_response=True)
+        check(headers.get_content_type() == 'application/zip' and headers['Cache-Control'] == 'no-store'
+              and f'vr-command-venue-reports-v1-{key}.zip' in headers['Content-Disposition'],
+              f'{mode} batch ZIP uses the original End request and no-store')
+        request(route, role='Room1', expected=403)
+        expected = {}
+        manifest_sessions = []
+        sequences = {item['sessionId']: item['appliedAtSequence'] for item in receipt['sessions']}
+        for entry in entries:
+            sid = entry['sessionId']
+            session_path = '/api/sessions/' + sid
+            rooms = request(session_path)['roomIds']
+            prefix = f'vr-command-report-v1-{sid}'
+            files = []
+            if linked:
+                name = prefix + '.csv'
+                expected[name] = (out/(entry['label']+'-report.csv')).read_bytes()
+                files.append({'roomId': None, 'name': name})
+            for room in rooms:
+                name = f'{prefix}-room-{room:02}.csv'
+                expected[name], _ = request(session_path+f'/rooms/{room}/report.csv', raw_response=True)
+                files.append({'roomId': room, 'name': name})
+                scoped = list(csv.DictReader(io.StringIO(expected[name].decode('utf-8-sig'), newline='')))
+                original = (out/(entry['label']+'-report.csv')).read_text(encoding='utf-8-sig')
+                original_rows = list(csv.DictReader(io.StringIO(original)))
+                check(scoped == [dict(row, reportRoomId=str(room)) for row in original_rows if row['playerRoomId'] == str(room)]
+                      and len(scoped) == 5, f'{mode} batch room {room} preserves its five sealed native rows')
+            manifest_sessions.append({'sessionId': sid, 'roomIds': rooms, 'appliedAtSequence': sequences[sid],
+                'throughSequence': entry['sealed']['statistics']['throughSequence'], 'files': files})
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            manifest = json.loads(archive.read('manifest.json'))
+            check(archive.namelist() == ['manifest.json', *expected] and archive.testzip() is None
+                  and all(archive.read(name) == value for name, value in expected.items())
+                  and manifest['schemaVersion'] == 1 and manifest['requestId'] == key and manifest['sessions'] == manifest_sessions,
+                  f'{mode} batch ZIP matches the original session manifest and exact scoped CSV bytes')
+        (out/f'{mode}-venue-reports.zip').write_bytes(raw)
+        return route, raw
+
     def observe(entry,expected,begin=None, *, record=True):
         metadata=request('/api/sessions/'+entry['sessionId']+'/world');path='/api/sessions/'+entry['sessionId']+'/world/watch?mode=live';req=urllib.request.Request(uri+path,headers={'Authorization':'Bearer '+keys['Master']})
         with urllib.request.urlopen(req,timeout=5) as response:
@@ -836,6 +881,7 @@ def main():
                   'occupied UDP preflight leaves the management session and endpoint unbound')
         command(seed['id'],'End');rejected('ended-session',base)
         # Run both topologies with separate native processes and fresh admissions.
+        archived_batch_report = None
         for linked in ([] if args.mr_venue_bundle_only else [False,True]):
             entries=[];round_clients=[]
             batch=None
@@ -983,6 +1029,13 @@ def main():
                 if player_folder:check(True,'player launcher confirmed original child exit '+client['player']['id'])
             if player_folder:
                 for entry in entries:verify_delivery(entry,[c for c in round_clients if c['sessionId']==entry['sessionId']])
+            if args.check_venue_reports:
+                current_batch_report = verify_venue_reports(entries, receipt, linked)
+                if archived_batch_report:
+                    old_route, old_zip = archived_batch_report
+                    check(request(old_route, raw_response=True)[0] == old_zip,
+                          'The original independent ZIP is byte-identical after the newer Linked batch')
+                archived_batch_report = current_batch_report
         if args.mr_venue_bundle_only: check_mr_venue_bundle()
         if args.check_managed_mr:
             state=create([1],'managed-mr',experience='MR')
@@ -1094,6 +1147,7 @@ def main():
             'venuePhase':args.check_venue_phase,
             'venueBegin':args.check_venue_begin,
             'venueEnd':args.check_venue_end,
+            'venueReports':args.check_venue_reports,
             'venueEnvironment':args.check_venue_environment,
             'venueEnemies':args.check_venue_enemies,
             'hardwareFeedback':args.check_hardware_feedback,

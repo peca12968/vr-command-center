@@ -5,7 +5,7 @@ import { mountAlignment } from './alignment-ui.js';
 import { mountAlignmentPins } from './alignment-pins-ui.js';
 import { mountMrDeployment } from './mr-deployment-ui.js';
 import { mountMrVenueBundle } from './mr-venue-bundle-ui.js';
-import { mountReport } from './report-ui.js';
+import { mountReport, mountVenueReport } from './report-ui.js';
 import { mountReadiness, mountRoomReadiness } from './readiness-ui.js';
 import { mountConnections, validDestination } from './connection-ui.js';
 import { mountClosure } from './closure-ui.js';
@@ -20,6 +20,7 @@ const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: nul
 const objectHistory = placementHistory();
 const world = mountWorld(() => state.key, logout);
 const report = mountReport(() => state, logout);
+const venueReport = mountVenueReport(() => state, logout, download);
 const readiness = mountReadiness(() => state, logout);
 const roomReadiness = mountRoomReadiness(() => state, logout, applyVenuePermissions, venueClimateText, venueEnemyText);
 const connections = mountConnections(() => state, logout);
@@ -439,13 +440,14 @@ function renderVenueClosure(report) {
   const rows = $('venue-closure-rows');
   rows.replaceChildren();
   $('venue-closure-table').hidden = true;
-  if (panel.hidden) { $('venue-closure-summary').textContent = ''; return; }
+  if (panel.hidden) { venueReport.update(null); $('venue-closure-summary').textContent = ''; return; }
   if (!Array.isArray(batch?.sessions) || !batch.sessions.length || batch.sessions.length > 5
     || !Number.isFinite(Date.parse(batch.recordedAtUtc))
     || batch.sessions.some(session => typeof session?.sessionId !== 'string' || typeof session.missionName !== 'string'
       || !Array.isArray(session.roomIds) || !session.roomIds.length || session.roomIds.length > 5
       || !session.roomIds.every(id => Number.isInteger(id) && id >= 1 && id <= 5)
       || !Object.hasOwn(archiveNames, session.combat) || !Object.hasOwn(archiveNames, session.world))) {
+    venueReport.update(null);
     $('venue-closure-summary').textContent = '暫時無法確認全館封存狀態。';
     return;
   }
@@ -463,6 +465,7 @@ function renderVenueClosure(report) {
     rows.append(result);
   }
   $('venue-closure-table').hidden = false;
+  venueReport.update(batch);
 }
 function row(cells) { const tr = element('tr'); for (const value of cells) { const td = element('td'); if (value instanceof Node) td.append(value); else td.textContent = value; tr.append(td); } return tr; }
 function emptyTable(id, columns, message) { const tr = element('tr'), td = element('td', message, 'empty-cell'); td.colSpan = columns; tr.append(td); $(id).replaceChildren(tr); }

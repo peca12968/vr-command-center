@@ -118,6 +118,8 @@ internal static class VenuePhaseChecks
 
         var beginData = Path.Combine(directory, "venue-begin");
         var beginId = Guid.NewGuid();
+        var reportSource = new OperatorIdentity("venue-report-source", OperatorRole.GameServer);
+        var reportStream = Guid.NewGuid();
         VenuePhaseFence[] start;
         VenuePhaseApplied[] started;
         using (var store = new SqliteSessionEventStore(beginData))
@@ -125,6 +127,7 @@ internal static class VenuePhaseChecks
             var manager = new SessionManager(store);
             var first = manager.Create(SessionMode.Independent, [1], mission, master);
             var second = manager.Create(SessionMode.Independent, [2], mission, master);
+            manager.OpenStream(second.Id, new(reportStream, CombatOrigin.Simulation), reportSource);
             manager.Join(first.Id, Guid.NewGuid(), "First", 1, HeadsetKind.Quest3, master);
             var stale = Fences(manager.ReadVenuePhase(master).Begin);
             manager.Join(second.Id, Guid.NewGuid(), "Second", 2, HeadsetKind.Quest3, master);
@@ -180,7 +183,12 @@ internal static class VenuePhaseChecks
             }
             ended = manager.ExecuteVenuePhase(ControlAction.End, endTargets, endId, master).Sessions;
             check(ended.Length == 2 && manager.List().Length == 0 && manager.Get(preparing.Id).StartedAtUtc is null,
-                "The whole venue can end a preparing and paused room without a game source");
+                "The whole venue can end a preparing room without a source alongside a paused room");
+            Reject<AccessDeniedException>(() => manager.FinalVenueReports(endId, room2), "Batch final reports require Master before looking up the ID");
+            Reject<KeyNotFoundException>(() => manager.FinalVenueReports(beginId, master), "A venue Begin ID cannot export a final report bundle");
+            Reject<VenueReportsNotReadyException>(() => manager.FinalVenueReports(endId, master),
+                "One unsealed source prevents export of the entire venue report bundle");
+            manager.SealStream(running.Id, new(reportStream, 0), reportSource);
             replacement = manager.Create(SessionMode.Independent, [1], mission, master).Id;
         }
         using (var store = new SqliteSessionEventStore(beginData))
@@ -191,6 +199,12 @@ internal static class VenuePhaseChecks
             check(batch?.RequestId == endId && batch.Sessions.SequenceEqual(ended) && retry.Duplicate
                 && retry.Sessions.SequenceEqual(ended) && manager.List().Single().Id == replacement,
                 "After restart and room reuse, closure and End retry identify the original batch without touching its replacement");
+            var report = manager.FinalVenueReports(endId, master);
+            check(report.Sessions.Select(item => item.Report.RoomIds.Single()).SequenceEqual(new[] { 1, 2 })
+                && report.Sessions.All(item => item.AppliedAtSequence == ended.Single(row => row.SessionId == item.Report.SessionId).AppliedAtSequence)
+                && report.Sessions[0].Report.Players.Length == 0 && report.Sessions[1].Report.FinalStreamSequence == 0
+                && report.Sessions.All(item => item.Report.SessionId != replacement),
+                "After restart the batch report identifies the original no-source room and sealed room in room order");
         }
 
         var environmentData = Path.Combine(directory, "venue-environment");

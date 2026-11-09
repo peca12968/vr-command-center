@@ -80,3 +80,51 @@ export function mountReport(current, unauthorized) {
   bundle.addEventListener('click', () => download(true));
   return { update, reset };
 }
+
+export function mountVenueReport(current, unauthorized, save) {
+  const actions = document.getElementById('venue-report-actions');
+  const button = document.getElementById('export-venue-reports'), status = document.getElementById('venue-report-status');
+  let id = null, waiting = '', controller = null;
+  const updateButton = () => { button.disabled = !id || !!waiting || !!controller; };
+  function update(batch) {
+    const nextId = current().actor?.role === 'Master' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(batch?.requestId ?? '')
+      ? batch.requestId : null;
+    const nextWaiting = nextId ? batch.sessions.filter(session => !['Sealed', 'NoSource'].includes(session.combat))
+      .flatMap(session => session.roomIds).sort((a, b) => a - b).join('、') : '';
+    if (id !== nextId || waiting !== nextWaiting) {
+      controller?.abort(); controller = null;
+      id = nextId; waiting = nextWaiting;
+      status.textContent = !id ? '' : waiting ? `等待房間 ${waiting} 的戰鬥資料封存。` : '本批戰績已可匯出。';
+    }
+    actions.hidden = !id;
+    updateButton();
+  }
+  button.addEventListener('click', async () => {
+    const { actor, epoch, key } = current(), batchId = id;
+    if (!batchId || waiting || controller || actor?.role !== 'Master') return;
+    const request = new AbortController(); controller = request;
+    const active = () => controller === request && id === batchId && current().epoch === epoch;
+    const timeout = setTimeout(() => request.abort(), 8000);
+    updateButton(); status.textContent = '正在下載本批戰績 ZIP…';
+    try {
+      const response = await fetch(`/api/venue/closure/${batchId}/reports.zip`, {
+        headers: { Authorization: 'Bearer ' + key }, signal: request.signal, cache: 'no-store'
+      });
+      if (!active()) return;
+      if (response.status === 401) { unauthorized(); return; }
+      if (!response.ok) throw new Error(response.status === 409 ? '本批仍在等待戰鬥資料封存。' : '本批戰績下載失敗，可重新整理後再試。');
+      if (response.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase() !== 'application/zip')
+        throw new Error('報表格式不符，可重新下載。');
+      const blob = await response.blob();
+      if (!active()) return;
+      save(`vr-command-venue-reports-v1-${batchId}.zip`, blob);
+      status.textContent = '已下載本批戰績與原場次清單。';
+    } catch (error) {
+      if (active()) status.textContent = request.signal.aborted ? '下載逾時，可重新下載。' : error.message;
+    } finally {
+      clearTimeout(timeout);
+      if (controller === request) { controller = null; updateButton(); }
+    }
+  });
+  return { update };
+}
