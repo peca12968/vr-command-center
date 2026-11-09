@@ -63,6 +63,7 @@ def main():
     p.add_argument('--venue-field-evidence',action='store_true',help='Verify full sealed admission evidence for both original venue End batches')
     p.add_argument('--check-venue-field-ui',action='store_true',help='Download the original current and earlier field bundles from the shipped console')
     p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
+    p.add_argument('--check-room-participation',action='store_true',help='Disconnect and restore one original VR admission in each five-room mode')
     p.add_argument('--check-room-endpoints',action='store_true',help='Verify real published UDP endpoints in the room cards and scoped API')
     p.add_argument('--check-room-clocks', action='store_true', help='Verify room clocks and the original pause/resume boundaries in both modes')
     p.add_argument('--check-venue-phase', action='store_true', help='Verify whole-venue pause and resume against both native topologies')
@@ -111,6 +112,8 @@ def main():
     if args.check_venue_field_ui and not args.venue_field_evidence:
         p.error('--check-venue-field-ui requires --venue-field-evidence')
     if args.check_room_readiness and not args.player_package:p.error('--check-room-readiness requires five players per room')
+    if args.check_room_participation and (not args.check_room_readiness or args.peer_diagnostics):
+        p.error('--check-room-participation requires --check-room-readiness without the one-connection peer diagnostics check')
     if args.check_room_clocks and not args.player_package:p.error('--check-room-clocks requires five players per room')
     if args.check_venue_phase and not args.check_room_clocks:p.error('--check-venue-phase requires --check-room-clocks')
     if args.check_venue_begin and not args.player_package:p.error('--check-venue-begin requires the three-package check')
@@ -390,7 +393,7 @@ def main():
         child=subprocess.Popen([str(player_folder/'Launch-Player.exe'),'--config',str(file),'--launch',
             '--headless','--wait','--log',str(log),'--report',str(report)],cwd=runtime,env=env)
         client={'process':child,'log':log,'player':person,'sessionId':entry['sessionId'],
-            'launcherReport':report,'witness':None}
+            'launcherReport':report,'witness':None,'configPath':file}
         clients.append(client)
         def started():
             if child.poll() is not None:raise RuntimeError('Player launcher exited before admission')
@@ -930,6 +933,54 @@ def main():
         room=request('/api/rooms/readiness',role='Room1')
         check(room['version']==1 and len(room['rooms'])==1 and room['rooms'][0]['roomId']==1
             and room['rooms'][0]['sessionId']==expected[1],'room operator only receives its own active room aggregate')
+    def verify_room_participation(entries, round_clients, linked):
+        mode = 'Linked' if linked else 'Independent'
+        room, seat = 4, 3
+        index = next(i for i, client in enumerate(round_clients)
+                     if (client['player']['roomId'], client['player']['seat'] + 1) == (room, seat))
+        original = round_clients[index]
+        entry = next(item for item in entries if item['sessionId'] == original['sessionId'])
+        connections = re.findall(r'^VR_CLIENT_CONNECTED id=(\d+)$', original['log'].read_text(encoding='utf-8'), re.M)
+        if len(connections) != 1: raise RuntimeError('Expected one original connection for the target seat')
+        initial = original['configPath'].read_bytes()
+        expected = {client['player']['roomId']:client['sessionId'] for client in round_clients}
+
+        def snapshot(missing):
+            rows = request('/api/rooms/readiness')['rooms']
+            if {row['roomId']:row['sessionId'] for row in rows} != expected: return None
+            return rows if all(row['sourceState'] == 'Fresh' and row['registered'] == 5 and row['trackedReady'] == 0
+                and row['simulatedReady'] == (4 if missing and row['roomId'] == room else 5)
+                and row.get('vrParticipation') == {'awaitingAdmission': [], 'awaitingPose': [seat] if missing and row['roomId'] == room else [], 'eliminated': []}
+                for row in rows) else None
+
+        before = wait(lambda:snapshot(False), 15, mode+' original 25 VR seats')
+        stop_player(original)
+        missing = wait(lambda:snapshot(True), 20, mode+' only room 4 seat 3 missing its pose')
+        check(True, mode+' loss identifies the exact original VR seat while the other 24 remain participating')
+        scoped = request('/api/rooms/readiness', role='Room4')['rooms']
+        check(len(scoped) == 1 and scoped[0]['roomId'] == room and scoped[0]['vrParticipation']['awaitingPose'] == [seat],
+              mode+' only the affected room details are visible to its room controller')
+        if args.observe_closure_ui and not linked:
+            alert = wait(lambda:read(observer_out/'participation-alert.json') if (observer_out/'participation-alert.json').is_file() else None,
+                         10, 'actual console highlights only the missing VR seat')
+            check(alert['roomId'] == room and alert['seat'] == seat, 'shipped console identifies the affected native VR seat')
+        server_log = entry['work']/'server.log'
+        wait(lambda:f'VR_SERVER_CLIENT_LEFT id={connections[0]}\n' in server_log.read_text(encoding='utf-8'), 50,
+             mode+' original UDP transport release')
+        config = original['configPath'].with_stem(original['configPath'].stem+'-reconnected')
+        with config.open('xb') as stream: stream.write(initial)
+        recovered = packaged_player(entry, original['player'], config)
+        round_clients[index] = recovered
+        after = wait(lambda:snapshot(False), 30, mode+' original admission restores all five room counts')
+        new_connections = re.findall(r'^VR_CLIENT_CONNECTED id=(\d+)$', recovered['log'].read_text(encoding='utf-8'), re.M)
+        check(len(new_connections) == 1 and new_connections != connections and recovered['nativePid'] != original['nativePid']
+              and original['configPath'].read_bytes() == initial, mode+' replacement process uses the same original admission and clears the alert')
+        if args.observe_closure_ui and not linked:
+            recovered_ui = wait(lambda:read(observer_out/'participation-recovered.json') if (observer_out/'participation-recovered.json').is_file() else None,
+                                10, 'actual console clears the original VR alert')
+            check(recovered_ui['rooms'] == [1,2,3,4,5], 'shipped console clears the seat warning and restores all five actual room counts')
+        save(mode.lower()+'-room-participation.json', {'before':before,'missing':missing,'after':after,
+             'roomId':room,'seat':seat,'oldConnectionId':connections[0],'newConnectionId':new_connections[0]})
     def verify_venue_environment(entries, linked):
         route = '/api/venue/phase'
         mode = 'linked' if linked else 'independent'
@@ -1456,7 +1507,7 @@ def main():
                 save(('linked' if linked else 'independent')+'-venue-begin.json',
                      {'preview':preview,'preparing':preparing,'receipt':receipt,'observed':observed,'retry':retry})
             if args.observe_closure_ui and not linked:
-                observer_entry=entries[0];descriptor=runtime/'closure-ui-private.json';descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'sessionId':observer_entry['sessionId'],'streamId':observer_entry['ready']['streamId'],'endRequestFile':str(out/'closure-end.request'),'roomReadiness':args.check_room_readiness}),encoding='utf-8');observer_log=(runtime/'closure-ui.log').open('xb')
+                observer_entry=entries[0];descriptor=runtime/'closure-ui-private.json';descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'sessionId':observer_entry['sessionId'],'streamId':observer_entry['ready']['streamId'],'endRequestFile':str(out/'closure-end.request'),'roomReadiness':args.check_room_readiness,'roomParticipation':args.check_room_participation}),encoding='utf-8');observer_log=(runtime/'closure-ui.log').open('xb')
                 node=shutil.which('node')
                 if not node:raise RuntimeError('Test observer requires installed Node; shipped launchers do not')
                 observer=subprocess.Popen([node,str(ROOT/'tests/browser/check-closure-native.cjs'),'--descriptor',str(descriptor),'--output',str(observer_out),'--stop-file',str(observer_stop)],stdout=observer_log,stderr=subprocess.STDOUT,cwd=ROOT/'tests/browser')
@@ -1493,6 +1544,7 @@ def main():
                       mode + ' Quest tracking check rejects all 25 connected native Simulation rigs')
                 save(mode+'-vr-venue-tracked-readiness.json', tracked)
             if args.check_room_readiness:verify_room_readiness(round_clients,linked)
+            if args.check_room_participation:verify_room_participation(entries,round_clients,linked)
             if args.check_room_clocks:verify_room_clocks(entries,linked)
             if args.check_venue_environment:verify_venue_environment(entries,linked)
             if args.check_room_combat:
@@ -1683,6 +1735,7 @@ def main():
             if player_folder else 'Two portable packages, five Independent rooms then Linked, five same-PC Simulation clients per topology.'),
             'managedMrPreparing':args.check_managed_mr,
             'roomCombat':args.check_room_combat,
+            'roomParticipation':args.check_room_participation,
             'roomClocks':args.check_room_clocks,
             'venuePhase':args.check_venue_phase,
             'venueBegin':args.check_venue_begin,

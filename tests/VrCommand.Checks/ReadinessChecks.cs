@@ -38,15 +38,26 @@ internal static class ReadinessChecks
         Refresh(); var start = clock.Now;
         store.Open(id, WorldRecordingHeader.Create(id, stream, "Simulation", [1], bridge.Props, start.ToString("O")), server);
         check(store.Readiness(id, master).SourceState == "WaitingFrame", "Header registration is not a received world frame");
-        long sequence = 0, after = 0;
-        void Save(bool suspended = false)
+        long sequence = 0, after = 0, combatSequence = 0;
+        void Save(bool suspended = false, bool eliminated = false)
         {
             RecordedRig Rig(Guid value)
             {
                 var body = bridge.World.PlayerSnapshot(value);
                 return body.Connected ? new() { kind = "Simulated", left = new(body.Head + new Vec3(-.2f, -.3f, .2f)), right = new(body.Muzzle) } : new();
             }
-            var packet = WorldRecordingPacket.Capture(bridge.World, ++sequence, (sequence - 1) * 50, manager.Get(id).Sequence, 0, after, Rig);
+            var observed = manager.Get(id).Sequence;
+            var eventId = eliminated ? Guid.NewGuid() : Guid.Empty;
+            if (eliminated) manager.ReportStream(id, new(stream, ++combatSequence, observed,
+                new(eventId, CombatKind.PlayerDamaged, CombatOrigin.Simulation, player, Damage: 100)), server);
+            var packet = WorldRecordingPacket.Capture(bridge.World, ++sequence, (sequence - 1) * 50, observed, combatSequence, after, Rig);
+            if (combatSequence > 0)
+            {
+                packet.frame.players.Single().health = 0;
+                packet.frame.throughSequence = 1;
+                if (eliminated) packet.events = [new() { sequence = 1, tick = packet.frame.tick, kind = "PlayerDamaged",
+                    eventId = eventId.ToString("D"), playerId = player.ToString("D"), enemyId = Guid.NewGuid().ToString("D"), damage = 100 }];
+            }
             packet.suspended = suspended; after = bridge.World.EventSequence; store.Append(id, packet, server);
             clock.Now = start.AddMilliseconds(packet.elapsedMilliseconds);
         }
@@ -59,6 +70,8 @@ internal static class ReadinessChecks
             "Fresh accepted pose names the exact current admission and synthetic provenance");
         check(store.ReadinessByRoom(room).Single() is { RoomId: 1, SimulatedReady: 1, TrackedReady: 0, Registered: 1, SourceState: "Fresh" },
             "Room readiness separates accepted simulated poses from tracked poses");
+        check(store.ReadinessByRoom(room).Single().VrParticipation is { AwaitingAdmission.Length: 0, AwaitingPose.Length: 0, Eliminated.Length: 0 },
+            "A current Preparing VR frame reports no exceptions for a participating seat");
         var captured = clock.Now;
         clock.Now = captured.AddMilliseconds(1500); check(store.Readiness(id, room).Players.Single().CanParticipate, "Readiness includes the 1.5-second source-age boundary");
         clock.Now = captured.AddMilliseconds(1500.01); check(store.Readiness(id, room).Players.Single() is { State: "Stale", CanParticipate: false }, "Source age expires without needing another world write");
@@ -73,10 +86,26 @@ internal static class ReadinessChecks
             "A fresh old body cannot make a replacement admission look connected");
         check(store.ReadinessByRoom(room).Single() is { Registered: 1, SimulatedReady: 0, TrackedReady: 0 },
             "Room summary cannot count the old body for a replacement admission with the same roster size");
+        check(store.ReadinessByRoom(room).Single().VrParticipation is { AwaitingAdmission: [1], AwaitingPose.Length: 0, Eliminated.Length: 0 },
+            "A Preparing replacement waits for its own admission snapshot instead of inheriting the previous pose");
         manager.Execute(id, new(Guid.NewGuid(), ControlAction.Begin), master);
         check(store.Readiness(id, room).SourceState == "PhasePending", "Current Begin does not relabel an older Preparing snapshot");
         Refresh(); bridge.Connect(2, player, 1, 0, replacement); bridge.Pose(2, head, head, new(0, 0, 1), .1); Save();
         check(store.Readiness(id, room).Players.Single().CanParticipate, "The replacement becomes participating only in its own accepted management epoch");
+        check(store.ReadinessByRoom(room).Single().VrParticipation is { AwaitingAdmission.Length: 0, AwaitingPose.Length: 0, Eliminated.Length: 0 },
+            "A current Running VR frame reports no exceptions for a participating seat");
+        manager.Execute(id, new(Guid.NewGuid(), ControlAction.Pause), master);
+        manager.Execute(id, new(Guid.NewGuid(), ControlAction.Resume), master);
+        check(store.ReadinessByRoom(room).Single().VrParticipation is null, "Running VR details wait for the source to observe the current Resume boundary");
+        Refresh(); bridge.Disconnect(2); Save();
+        check(store.ReadinessByRoom(room).Single().VrParticipation is { AwaitingPose: [1], AwaitingAdmission.Length: 0, Eliminated.Length: 0 }
+            && store.ReadinessByRoom(other).Single().VrParticipation is null, "A missing VR pose identifies only the original room and numbered seat");
+        Save(eliminated: true);
+        check(store.ReadinessByRoom(room).Single().VrParticipation is { AwaitingPose.Length: 0, Eliminated: [1] },
+            "An eliminated VR seat is not an operational pose warning");
+        clock.Now = clock.Now.AddMilliseconds(1500.01);
+        check(store.ReadinessByRoom(room).Single().VrParticipation is null, "An expired VR frame withdraws every seat exception");
+        Refresh();
         bridge.Suspend(); Save(true);
         check(store.Readiness(id, room).Players.Single() is { State: "Suspended", CanParticipate: false }, "Management-loss suspension cannot report ready players");
         manager.End(id, master);

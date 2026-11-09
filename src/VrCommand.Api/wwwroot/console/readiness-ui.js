@@ -152,7 +152,26 @@ export function roomReadinessView(report, room, session, elapsed) {
     return { source, ready: missing ? 0 : trackedReady, attention: missing > 0,
       text: `MR · ${trackedReady} / ${living} 追蹤就緒` + (missing ? ` · 等候 ${missing} 席` : '') };
   }
-  return { source, ready: simulatedReady + trackedReady, text: `${simulatedReady + trackedReady} / ${row.registered} 姿態有效 · 合成 ${simulatedReady} · 追蹤 ${trackedReady}` };
+  const ready = simulatedReady + trackedReady;
+  const counts = living => `${ready} / ${living} 姿態有效 · 合成 ${simulatedReady} · 追蹤 ${trackedReady}`;
+  if (session.environment?.mode !== 'VR' || !['Preparing', 'Running'].includes(session.state))
+    return { source, ready, text: counts(row.registered) };
+  if (!row.vrParticipation) return session.state === 'Preparing' ? { source, ready, text: counts(row.registered) }
+    : { source: 'PhasePending', text: labels.PhasePending };
+  const { awaitingAdmission, awaitingPose, eliminated } = row.vrParticipation;
+  const lists = [awaitingAdmission, awaitingPose, eliminated];
+  if (lists.some(seats => !Array.isArray(seats) || seats.length > room.capacity))
+    return { source: 'Unavailable', text: labels.Unavailable };
+  const seats = lists.flat();
+  if (seats.some(seat => !Number.isInteger(seat) || seat < 1 || seat > room.capacity)
+    || new Set(seats).size !== seats.length || seats.length + ready !== row.registered)
+    return { source: 'Unavailable', text: labels.Unavailable };
+  const attention = awaitingAdmission.length + awaitingPose.length > 0;
+  const text = [counts(row.registered - eliminated.length),
+    awaitingAdmission.length ? `入場待同步席位 ${awaitingAdmission.join('、')}` : '',
+    awaitingPose.length ? `姿態待確認席位 ${awaitingPose.join('、')}` : '',
+    eliminated.length ? `已淘汰席位 ${eliminated.join('、')}` : ''].filter(Boolean).join(' · ');
+  return { source, ready: attention ? 0 : ready, attention, text };
 }
 
 export function mountRoomReadiness(getState, unauthorized, venueUpdated, describeClimate, describeEnemies) {

@@ -7,6 +7,11 @@ const options = new Map();
 for (let i = 2; i < process.argv.length; i += 2) options.set(process.argv[i], process.argv[i + 1]);
 const read = file => fs.readFile(file, 'utf8').then(JSON.parse);
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+function readyRooms() {
+  const cells = [...document.querySelectorAll('[data-room-readiness]')];
+  return cells.length === 5 && cells.every(cell => cell.textContent === '5 / 5 姿態有效 · 合成 5 · 追蹤 0')
+    ? cells.map(cell => Number(cell.dataset.roomReadiness)) : null;
+}
 async function main() {
   assert.equal(options.size, 3); const config = await read(options.get('--descriptor')), out = path.resolve(options.get('--output')), stop = path.resolve(options.get('--stop-file'));
   assert.match(config.base, /^http:\/\/127\.0\.0\.1:\d+$/); assert.equal(typeof config.masterKey, 'string');
@@ -28,16 +33,26 @@ async function main() {
       assert.equal(await page.locator('#closure-status.closure-complete').count(), 0);
       let roomReadiness;
       if (config.roomReadiness) {
-        const rooms = await page.waitForFunction(() => {
-          const cells = [...document.querySelectorAll('[data-room-readiness]')];
-          return cells.length === 5 && cells.every(cell => cell.textContent === '5 / 5 姿態有效 · 合成 5 · 追蹤 0')
-            ? cells.map(cell => Number(cell.dataset.roomReadiness)) : null;
-        }, null, { polling: 100 });
+        const rooms = await page.waitForFunction(readyRooms, null, { polling: 100 });
         roomReadiness = await rooms.jsonValue();
         assert.deepEqual(roomReadiness, [1, 2, 3, 4, 5]);
       }
       await page.screenshot({ path: path.join(out, 'running.png'), fullPage: true });
       await save('ready.json', { ready: true, selectedSessionId: await page.locator('#session-select').inputValue(), browserPid: server.process().pid, roomReadiness, scope: 'Real native Running session visible in shipped console; no game input, fixture routes or delivery claim.' });
+      if (config.roomParticipation) {
+        const alert = await page.waitForFunction(() => {
+          const cells = [...document.querySelectorAll('[data-room-readiness]')];
+          const alerts = cells.filter(cell => cell.classList.contains('tracking-attention'));
+          const cell = alerts[0];
+          return cells.length === 5 && alerts.length === 1 && cell.dataset.roomReadiness === '4' && cell.dataset.sourceState === 'Fresh'
+            && cell.textContent === '4 / 5 姿態有效 · 合成 4 · 追蹤 0 · 姿態待確認席位 3'
+            ? { roomId: 4, seat: 3, text: cell.textContent } : null;
+        }, null, { polling: 100 });
+        await save('participation-alert.json', await alert.jsonValue());
+        await page.screenshot({ path: path.join(out, 'participation-alert.png'), fullPage: true });
+        const restored = await page.waitForFunction(readyRooms, null, { polling: 100, timeout: 60000 });
+        await save('participation-recovered.json', { rooms: await restored.jsonValue() });
+      }
       for (;;) { try { await fs.stat(config.endRequestFile); break; } catch { await sleep(100); } }
       const endResponse = page.waitForResponse(response => response.url() === config.base + '/api/sessions/' + config.sessionId + '/commands' && response.request().method() === 'POST', { timeout: 30000 });
       page.once('dialog', dialog => dialog.accept()); await page.locator('[data-command=End]').click();

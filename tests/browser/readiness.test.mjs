@@ -100,6 +100,23 @@ test('Room readiness expires from request start and never renders invalid totals
     assert.equal(roomReadinessView({ ...overview, rooms: [{ ...roomRow, sourceState }] }, room, session, 0).ready, undefined);
 });
 
+test('Running VR room alerts identify unavailable seats and distinguish eliminated players', () => {
+  const running = { ...session, state: 'Running', environment: { mode: 'VR' } };
+  const participation = { awaitingAdmission: [1], awaitingPose: [3], eliminated: [5] };
+  const overviewFor = (seats, changes = {}) => ({ ...overview, rooms: [{ ...roomRow, simulatedReady: 0, trackedReady: 0,
+    vrParticipation: seats, ...changes }] });
+  const result = roomReadinessView(overviewFor(participation), room, running, 0);
+  assert.equal(result.text, '0 / 2 姿態有效 · 合成 0 · 追蹤 0 · 入場待同步席位 1 · 姿態待確認席位 3 · 已淘汰席位 5');
+  assert.equal(result.attention, true);
+  const ready = roomReadinessView(overviewFor({ awaitingAdmission: [], awaitingPose: [], eliminated: [5] }, { simulatedReady: 2 }), room, running, 0);
+  assert.equal(ready.attention, false);
+  assert.equal(ready.ready, 2);
+  assert.equal(roomReadinessView(overview, room, running, 0).source, 'PhasePending');
+  assert.equal(roomReadinessView(overviewFor(participation), room, running, 1500).source, 'Stale');
+  for (const change of [{ awaitingAdmission: [3] }, { awaitingPose: [0] }, { eliminated: [] }, { eliminated: '5' }])
+    assert.equal(roomReadinessView(overviewFor({ ...participation, ...change }), room, running, 0).source, 'Unavailable');
+});
+
 const mr = { ...session, roomIds: [1, 2], environment: { mode: 'MR' },
   players: [player, { id: 'peer', admissionId: 'second', roomId: 2, seat: 3 }] };
 const master = { role: 'Master' }, room1 = { role: 'RoomController', roomId: 1 };

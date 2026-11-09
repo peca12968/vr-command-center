@@ -18,7 +18,9 @@ public record RoomReadiness(int RoomId, Guid? SessionId, long SessionSequence, i
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? VenueBeginReady = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomVenueEnvironment? VenueEnvironment = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomVenueEnemies? VenueEnemies = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ConnectionEndpoint? Endpoint = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] ConnectionEndpoint? Endpoint = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomVrParticipation? VrParticipation = null);
+public record RoomVrParticipation(int[] AwaitingAdmission, int[] AwaitingPose, int[] Eliminated);
 public record RoomMissionTime(string Phase, long ElapsedSeconds, long RemainingSeconds, int DurationSeconds, bool AutoEnd);
 public record RoomVenuePhase(ControlAction Action, long AppliedAtSequence, long? WorldSequence, bool ReadyToResume);
 public record RoomVenueEnvironment(Weather Weather, TimeOfDay TimeOfDay, bool Lightning, long AppliedAtSequence, long? WorldSequence);
@@ -60,7 +62,7 @@ public sealed partial class WorldRecordings
             foreach (var target in (begin ? plan.Begin : plan.Resume)
                 .Where(target => expected.Contains(new(target.SessionId, target.PhaseSinceSequence, target.SessionSequence))))
             {
-                var (report, _, phase, beginReady, _, _, _) = ReadReadinessSnapshot(target.SessionId, actor);
+                var (report, _, phase, beginReady, _, _, _, _) = ReadReadinessSnapshot(target.SessionId, actor);
                 if (begin ? beginReady == true : phase is { Action: ControlAction.Pause, WorldSequence: not null }
                     && phase.AppliedAtSequence == target.PhaseSinceSequence)
                     reports.Add((report, new(target.PhaseSinceSequence, report.SessionSequence, begin || report.MrResumeState == "Ready")));
@@ -90,14 +92,18 @@ public sealed partial class WorldRecordings
         return rooms.Select(room =>
         {
             if (room.SessionId is not { } id) return new RoomReadiness(room.Id, null, 0, 0, 0, 0, "Idle", null);
-            var (report, clock, venuePhase, beginReady, venueEnvironment, venueEnemies, endpoint) = sessions[id];
+            var (report, clock, venuePhase, beginReady, venueEnvironment, venueEnemies, endpoint, vrParticipationObserved) = sessions[id];
             var players = report.Players.Where(player => player.RoomId == room.Id).ToArray();
+            var participation = vrParticipationObserved ? new RoomVrParticipation(
+                players.Where(player => player.State == "AwaitingAdmission").Select(player => player.Seat + 1).Order().ToArray(),
+                players.Where(player => player.State is "AwaitingPose" or "PoseUnavailable").Select(player => player.Seat + 1).Order().ToArray(),
+                players.Where(player => player.State == "Eliminated").Select(player => player.Seat + 1).Order().ToArray()) : null;
             return new RoomReadiness(room.Id, id, report.SessionSequence, players.Length,
                 players.Count(player => player.CanParticipate && player.RigKind == "Simulated"),
                 players.Count(player => player.CanParticipate && player.RigKind == "Tracked"),
                 report.SourceState, report.SourceAgeMilliseconds,
                 report.MrTrackingState is "Ready" or "WaitingPlayers"
-                    ? players.Count(player => player.State != "Eliminated") : null, clock, venuePhase, beginReady, venueEnvironment, venueEnemies, endpoint);
+                    ? players.Count(player => player.State != "Eliminated") : null, clock, venuePhase, beginReady, venueEnvironment, venueEnemies, endpoint, participation);
         }).ToArray();
     }
 
@@ -105,7 +111,7 @@ public sealed partial class WorldRecordings
     public SessionReadiness Readiness(Guid id, OperatorIdentity actor) => ReadReadinessSnapshot(id, actor).Report;
 
     private (SessionReadiness Report, RoomMissionTime? Clock, RoomVenuePhase? VenuePhase, bool? BeginReady,
-        RoomVenueEnvironment? VenueEnvironment, RoomVenueEnemies? VenueEnemies, ConnectionEndpoint? Endpoint)
+        RoomVenueEnvironment? VenueEnvironment, RoomVenueEnemies? VenueEnemies, ConnectionEndpoint? Endpoint, bool VrParticipationObserved)
         ReadReadinessSnapshot(Guid id, OperatorIdentity actor, bool includeEndpoint = false)
     {
         RequireReadinessActor(actor);
@@ -187,7 +193,9 @@ public sealed partial class WorldRecordings
                 venueEnemies = new(enemies.Behavior, enemies.AutoAttack, enemySequence, applied ? report.WorldSequence : null);
             }
             var endpoint = includeEndpoint && current.State != SessionState.Ended ? EndpointRow(current) : null;
-            return (report, clock, venuePhase, beginReady, venueEnvironment, venueEnemies, endpoint);
+            var vrParticipationObserved = confirmed && current.State is SessionState.Preparing or SessionState.Running
+                && current.Environment.Mode == ExperienceMode.VR;
+            return (report, clock, venuePhase, beginReady, venueEnvironment, venueEnemies, endpoint, vrParticipationObserved);
         }
     }
 }
