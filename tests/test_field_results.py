@@ -6,6 +6,7 @@ import importlib.util
 import ipaddress
 import json
 from pathlib import Path
+import shutil
 import struct
 import subprocess
 import sys
@@ -23,6 +24,7 @@ spec.loader.exec_module(field)
 capture_spec = importlib.util.spec_from_file_location('quest_capture', SCRIPT.with_name('capture-quest-field-log.py'))
 capture_tool = importlib.util.module_from_spec(capture_spec)
 capture_spec.loader.exec_module(capture_tool)
+HAS_POWERSHELL = shutil.which('powershell.exe') or shutil.which('pwsh')
 
 
 def id_for(number):
@@ -310,7 +312,77 @@ if settings.get('keepRunning', True):
         self.assertFalse(self.partial.exists())
 
 
+def preflight_fixture(root, label, *, server, peer, port, exchange=None):
+    common = {'version': 1, 'stage': 'finished', 'port': port, 'requested': 1, 'matched': 1,
+              'complete': True, 'scope': 'authenticated-udp-only', 'completedAtUtc': '2026-11-08T23:59:58Z',
+              'exchangeSha256': exchange or hashlib.sha256(label.encode()).hexdigest()}
+    listener = root / (label + '-listener.ndjson')
+    probe = root / (label + '-probe.json')
+    listener.write_text(json.dumps(dict(common, mode='listen', localAddress=server, peerAddress=peer, samples=[]))+'\n', encoding='utf-16')
+    probe.write_text(json.dumps(dict(common, mode='probe', localAddress=peer, peerAddress=server,
+                                     samples=[{'sample': 1, 'roundTripMs': 2.0}])), encoding='utf-8-sig')
+    return listener, probe
+
+
 class FieldResultsTests(unittest.TestCase):
+    @unittest.skipUnless(HAS_POWERSHELL, 'UDP evidence requires PowerShell')
+    def test_preflight_uses_the_observed_server_and_a_peer_with_a_final_ack(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            data = fixture()
+            binding = data[2]['udpBinding']
+            binding['observedAtUtc'] = '2026-11-08T23:59:59.5000000+00:00'
+            for name, peer, port, matches in (('original', '192.168.5.20', 7777, True),
+                                               ('wrong-port', '192.168.5.20', 7778, False),
+                                               ('unknown-peer', '192.168.5.21', 7777, False)):
+                with self.subTest(case=name):
+                    pair = preflight_fixture(root, name, server=binding['address'], peer=peer, port=port)
+                    if matches:
+                        report = field.verify(*data, udp_preflight=pair)
+                        self.assertEqual(1, report['udpPreflight']['samples'])
+                        self.assertNotIn(peer, json.dumps(report))
+                        self.assertFalse(report['physicalHostsVerified'])
+                    else:
+                        with self.assertRaisesRegex(field.EvidenceError, 'game binding, accepted peer or preflight window'):
+                            field.verify(*data, udp_preflight=pair)
+
+    @unittest.skipUnless(HAS_POWERSHELL, 'UDP evidence requires PowerShell')
+    def test_venue_requires_a_distinct_original_preflight_pair_for_each_binding(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, _ = venue_fixture(root, mode)
+                for index, entry in enumerate(manifest['sessions']):
+                    launch = root / entry['launcherReport']
+                    launcher = json.loads(launch.read_text(encoding='utf-8'))
+                    binding = launcher['udpBinding']
+                    binding['observedAtUtc'] = '2026-11-08T23:59:59Z'
+                    launch.write_text(json.dumps(launcher), encoding='utf-8')
+                    listener, probe = preflight_fixture(root, f'udp-{index}', server=binding['address'],
+                                                        peer=entry['players'][0]['address'], port=binding['port'])
+                    entry['udpPreflight'] = {'listener': listener.name, 'probe': probe.name}
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                result = field.verify_venue(path)
+                self.assertEqual(len(manifest['sessions']), result['udpPreflightsVerified'])
+                self.assertEqual(25, result['serverAcknowledgements'])
+                self.assertNotIn('192.168', json.dumps(result))
+                if mode == 'Independent':
+                    absent = deepcopy(manifest)
+                    absent['sessions'][-1].pop('udpPreflight')
+                    path.write_text(json.dumps(absent), encoding='utf-8')
+                    with self.assertRaisesRegex(field.EvidenceError, 'for every session'):
+                        field.verify_venue(path)
+                    path.write_text(json.dumps(manifest), encoding='utf-8')
+                    duplicate = result['sessions'][0]['udpPreflight']['exchangeSha256']
+                    files = manifest['sessions'][1]['udpPreflight']
+                    for filename, encoding in ((files['listener'], 'utf-16'), (files['probe'], 'utf-8-sig')):
+                        report_path = root / filename
+                        report = json.loads(report_path.read_text(encoding=encoding))
+                        report['exchangeSha256'] = duplicate
+                        report_path.write_text(json.dumps(report), encoding=encoding)
+                    with self.assertRaisesRegex(field.EvidenceError, 'reused a UDP preflight exchange'):
+                        field.verify_venue(path)
+
     def test_alignment_evidence_binds_mixed_and_linked_mr_to_locked_bytes(self):
         for mode, mr_rooms in (('Independent', (2, 4)), ('Linked', (1, 2, 3, 4, 5))):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:

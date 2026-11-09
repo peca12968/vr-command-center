@@ -5,6 +5,10 @@ param(
     [Parameter(Mandatory, ParameterSetName = 'Key')][Parameter(Mandatory, ParameterSetName = 'Network')][string]$KeyFile,
     [Parameter(Mandatory, ParameterSetName = 'Pair')][string]$ListenerReport,
     [Parameter(Mandatory, ParameterSetName = 'Pair')][string]$ProbeReport,
+    [Parameter(ParameterSetName = 'Pair')][string]$ExpectedServerAddress,
+    [Parameter(ParameterSetName = 'Pair')][ValidateRange(1024, 65535)][int]$ExpectedGamePort,
+    [Parameter(ParameterSetName = 'Pair')][string]$ExpectedPeerAddresses,
+    [Parameter(ParameterSetName = 'Pair')][string]$BindingObservedAtUtc,
     [Parameter(Mandatory, ParameterSetName = 'Network')][string]$LocalAddress,
     [Parameter(Mandatory, ParameterSetName = 'Network')][string]$PeerAddress,
     [Parameter(Mandatory, ParameterSetName = 'Network')][ValidateRange(1024, 65535)][int]$Port,
@@ -53,6 +57,14 @@ function Get-ExchangeHash([string]$Listener, [string]$Probe, [string[]]$Nonces) 
 }
 
 function Test-ReportInteger($Value) { return $Value -is [int] -or $Value -is [long] }
+
+function Read-UtcTime($Value) {
+    if ($Value -is [DateTime] -and $Value.Kind -eq [DateTimeKind]::Utc) { return [DateTimeOffset]$Value }
+    if ($Value -isnot [string] -or $Value -cnotmatch '\A\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,7})?(?:Z|\+00:00)\z') {
+        throw 'Use an explicit UTC timestamp.'
+    }
+    return [DateTimeOffset]::Parse($Value, [Globalization.CultureInfo]::InvariantCulture)
+}
 
 function Read-CompleteReport([string]$Path, [string]$Role) {
     $file = [IO.File]::OpenRead((Resolve-Path -LiteralPath $Path).ProviderPath)
@@ -134,8 +146,26 @@ try {
         if ($listener.port -ne $probe.port -or $listener.matched -ne $probe.matched -or
             $listener.localAddress -cne $probe.peerAddress -or $listener.peerAddress -cne $probe.localAddress -or
             $listener.exchangeSha256 -cne $probe.exchangeSha256) { throw 'The reports describe different UDP exchanges.' }
-        Write-Result @{ version = 1; stage = 'pair-verified'; port = $listener.port; matched = $listener.matched
+        $result = @{ version = 1; stage = 'pair-verified'; port = $listener.port; matched = $listener.matched
             exchangeSha256 = $listener.exchangeSha256; complete = $true; scope = 'authenticated-udp-only' }
+        if ($ExpectedServerAddress -or $ExpectedGamePort -or $ExpectedPeerAddresses -or $BindingObservedAtUtc) {
+            $step = 'binding'
+            if (!$ExpectedServerAddress -or !$ExpectedGamePort -or !$ExpectedPeerAddresses -or !$BindingObservedAtUtc) {
+                throw 'Provide all game binding and accepted peer fields.'
+            }
+            [void](Read-Address $ExpectedServerAddress)
+            $peers = $ExpectedPeerAddresses.Split(',')
+            if ($peers.Count -gt 25) { throw 'Too many expected peers.' }
+            foreach ($peerAddress in $peers) { [void](Read-Address $peerAddress) }
+            $binding = Read-UtcTime $BindingObservedAtUtc
+            $finished = Read-UtcTime $listener.completedAtUtc
+            if ($listener.localAddress -cne $ExpectedServerAddress -or $listener.port -ne $ExpectedGamePort -or
+                $probe.localAddress -cnotin $peers -or $finished -ge $binding -or $binding - $finished -gt [TimeSpan]::FromMinutes(30)) {
+                throw 'The UDP exchange differs from the original binding, accepted peers or preflight window.'
+            }
+            $result.endpointVerified = $true
+        }
+        Write-Result $result
         exit 0
     }
     $key = [byte[]]::new(32)
@@ -215,11 +245,12 @@ try {
     }
     $udp.Dispose()
     $udp = $null
+    $completed = [DateTime]::UtcNow.ToString('O')
     $exchangeSha256 = if ($Mode -eq 'Listen') { Get-ExchangeHash $LocalAddress $PeerAddress @($seen) }
         else { Get-ExchangeHash $PeerAddress $LocalAddress @($seen) }
     Write-Result @{ version = 1; stage = 'finished'; mode = $Mode.ToLowerInvariant(); localAddress = $LocalAddress
         peerAddress = $PeerAddress; port = $Port; requested = $Count; matched = $received; samples = $samples
-        exchangeSha256 = $exchangeSha256; complete = ($received -eq $Count); scope = 'authenticated-udp-only' }
+        exchangeSha256 = $exchangeSha256; complete = ($received -eq $Count); scope = 'authenticated-udp-only'; completedAtUtc = $completed }
     if ($received -eq $Count) { exit 0 }
     exit 1
 } catch {

@@ -1,5 +1,6 @@
 import base64
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 import hashlib
 import hmac
 import json
@@ -110,6 +111,22 @@ class LanPreflightTests(unittest.TestCase):
         self.assertEqual(paired.returncode, 0, paired.stderr or paired.stdout)
         self.assertEqual(json.loads(paired.stdout), {'version': 1, 'stage': 'pair-verified', 'complete': True,
             'port': port, 'matched': 3, 'scope': 'authenticated-udp-only', 'exchangeSha256': probe['exchangeSha256']})
+        finished = datetime.fromisoformat(final['completedAtUtc'])
+        bind = (finished + timedelta(seconds=2)).isoformat()
+        expected = ['-ExpectedServerAddress', LOOPBACK, '-ExpectedGamePort', str(port),
+                    '-ExpectedPeerAddresses', f'{LOOPBACK},{probe_address}', '-BindingObservedAtUtc', bind]
+        options = ['-ListenerReport', listener_report, '-ProbeReport', report]
+        matched = self.run_script(*options, *expected)
+        self.assertEqual(matched.returncode, 0, matched.stdout or matched.stderr)
+        self.assertIs(json.loads(matched.stdout)['endpointVerified'], True)
+        for index, wrong in ((1, '127.0.0.3'), (3, str(port-1)), (5, LOOPBACK),
+                             (7, (finished - timedelta(seconds=1)).isoformat()),
+                             (7, (finished + timedelta(minutes=31)).isoformat())):
+            with self.subTest(index=index):
+                mismatch = expected.copy(); mismatch[index] = wrong
+                rejected = self.run_script(*options, *mismatch)
+                self.assertEqual(rejected.returncode, 1, rejected.stdout or rejected.stderr)
+                self.assertEqual(json.loads(rejected.stdout)['step'], 'binding')
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as next_owner:
             next_owner.bind((LOOPBACK, port))
 

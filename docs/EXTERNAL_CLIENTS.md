@@ -147,6 +147,12 @@ node tests/browser/check-external-native.cjs <本次ready.json> <解壓玩家包
 
 這項結果表示兩端的 PowerShell UDP 封包往返。遊戲程式的防火牆規則、票券、Unity 同步及容量，仍要用正式遊戲入場確認。上述執行政策參數只作用於該次 PowerShell 程序。
 
+### 將 UDP 預檢納入封存驗收
+
+保留兩端的原始報告。單場驗收可在原指令加上 `--udp-preflight .\listener-room-01.ndjson .\probe-room-01.json`。全館清單可在各 `sessions[]` 加入 `"udpPreflight": {"listener":"listener-room-01.ndjson","probe":"probe-room-01.json"}`。獨立場五房各用自己的原始報告，合併場使用共用端點的一組報告。
+
+驗收工具使用 PowerShell 重新配對兩端報告，核對遊戲伺服器原綁定位址及埠，以及至少一位已收到伺服器戰績確認的玩家 UDP 來源。預檢須使用含 UTC 完成時間的報告，監聽端完成時間須在啟動器觀察綁定前 30 分鐘內。同一場館批次提供預檢時須涵蓋所有場次。摘要只列樣本數與交換摘要。實體主機身分與容量仍需現地驗收。
+
 ### 核對封存戰績與 UDP 來源
 
 離線核對工具使用已完成的一場 Windows 伺服器任務。啟動器 1.7 可勾選「記錄本次玩家連線來源（場館驗收）」，CLI 可加 `--peer-diagnostics on`。將公告及本機綁定都設為這台電腦實際使用的 IPv4，選擇名冊固定的場次。結束後等待原啟動器寫出 `sealed-stopped` 報告，並等玩家寫完戰績與斷線日誌。 [伺服器操作](WINDOWS_SERVER_PACKAGE.md#跨機來源診斷)
@@ -198,6 +204,7 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `sessions[].evidenceZip`、`launcherReport`、`serverLog` | 各場原 ZIP、啟動器終止報告及伺服器日誌的路徑 |
 | `sessions[].worldJournal` | 選用。若驗收回放檔，每個場次都填自己關閉後的原始 `.worldlog` 路徑 |
 | `sessions[].roomAlignments` | 選用。核對 MR 校正時，每個 MR 場次按房號填原校正檔，例如 `{"2":"room-02-alignment.json"}` |
+| `sessions[].udpPreflight` | 選用。每場提供原 UDP 預檢報告的 `listener` 與 `probe` 路徑 |
 | `sessions[].players` | 每房五筆。每筆填玩家裝置實際使用的 IPv4 字串 `address` 及原日誌路徑 `log`。Quest 3 原 logcat 另填數字 `logcatPid`，例如 `7342` |
 
 若使用 Quest 整批擷取，從 `capture-report.json` 依 `sessionId` 和 `roomId` 取用 `complete` 為 `true` 的席位，將 `log` 路徑依清單位置調整，再填入 `logcatPid` 和原 IPv4。 [整批擷取](QUEST3.md#一次擷取五房-quest-日誌)
