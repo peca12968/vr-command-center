@@ -1,0 +1,171 @@
+import base64
+from contextlib import contextmanager
+import hashlib
+import hmac
+import json
+import os
+from pathlib import Path
+import shutil
+import socket
+import subprocess
+import tempfile
+import time
+import unittest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+SHELL = shutil.which(os.environ.get('VR_COMMAND_POWERSHELL', 'powershell.exe' if os.name == 'nt' else 'pwsh'))
+LOOPBACK = '127.0.0.1'
+
+
+def packet(key, kind, nonce):
+    prefix = f'VRLAN1{kind}:{nonce}'.encode('ascii')
+    return prefix + b':' + hmac.new(key, prefix, hashlib.sha256).hexdigest().encode('ascii')
+
+
+@unittest.skipUnless(SHELL, 'PowerShell is required for native UDP preflight checks')
+class LanPreflightTests(unittest.TestCase):
+    def setUp(self):
+        scratch = tempfile.TemporaryDirectory(prefix='lan-preflight-')
+        self.addCleanup(scratch.cleanup)
+        self.root = Path(scratch.name)
+        self.key = self.root / 'probe.key'
+        self.shell = [SHELL, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned',
+                      '-File', str(ROOT / 'scripts/check-lan-udp.ps1')]
+        result = self.run_script('-NewKey', '-KeyFile', self.key)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {'version': 1, 'stage': 'key-created'})
+
+    def run_script(self, *args):
+        return subprocess.run([*self.shell, *map(str, args)], capture_output=True, text=True, timeout=15)
+
+    def options(self, port, count, *, key=None, peer=LOOPBACK):
+        return ['-LocalAddress', LOOPBACK, '-PeerAddress', peer, '-Port', str(port), '-Count', str(count),
+                '-KeyFile', str(key or self.key)]
+
+    @contextmanager
+    def listener(self, port, count, *, peer=LOOPBACK, seconds=10):
+        path = self.root / 'listener.ndjson'
+        with path.open('xb') as output:
+            with subprocess.Popen(self.shell + ['-Mode', 'Listen', '-Seconds', str(seconds), *self.options(port, count, peer=peer)],
+                                  stdout=output, stderr=subprocess.STDOUT) as process:
+                try:
+                    end = time.monotonic() + 8
+                    while time.monotonic() < end:
+                        log = path.read_text(encoding='utf-8')
+                        if '\n' in log:
+                            ready = json.loads(log.splitlines()[0])
+                            self.assertEqual(ready, {'version': 1, 'stage': 'listening', 'localAddress': LOOPBACK,
+                                                     'peerAddress': peer, 'port': port})
+                            break
+                        if process.poll() is not None:
+                            self.fail(log)
+                        time.sleep(.04)
+                    else:
+                        self.fail('Listener did not report its bound socket')
+                    yield process, path
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+
+    def test_key_is_created_once_and_errors_hide_private_values(self):
+        original = self.key.read_bytes()
+        self.assertEqual(len(base64.b64decode(original, validate=True)), 32)
+        duplicate = self.run_script('-NewKey', '-KeyFile', self.key)
+        self.assertEqual(duplicate.returncode, 1)
+        self.assertEqual(json.loads(duplicate.stdout)['step'], 'key')
+        self.assertEqual(self.key.read_bytes(), original)
+        self.assertNotIn(original.decode('ascii'), duplicate.stdout)
+        self.assertNotIn(str(self.key), duplicate.stdout)
+        invalid = self.run_script('-Mode', 'Probe', *self.options(7777, 1, peer='192.168.050.2'))
+        self.assertEqual(invalid.returncode, 1)
+        self.assertEqual(json.loads(invalid.stdout)['step'], 'address')
+
+    def test_both_processes_finish_and_the_port_can_be_reused(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reserved:
+            reserved.bind((LOOPBACK, 0))
+            port = reserved.getsockname()[1]
+        with self.listener(port, 3) as (listener, path):
+            occupied = self.run_script('-Mode', 'Listen', *self.options(port, 1))
+            self.assertEqual(occupied.returncode, 1)
+            self.assertEqual(json.loads(occupied.stdout)['step'], 'bind')
+            result = self.run_script('-Mode', 'Probe', *self.options(port, 3))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            probe = json.loads(result.stdout)
+            self.assertTrue(probe['complete'])
+            self.assertEqual(probe['scope'], 'authenticated-udp-only')
+            self.assertEqual([item['sample'] for item in probe['samples']], [1, 2, 3])
+            self.assertTrue(all(0 <= item['roundTripMs'] <= 900 for item in probe['samples']))
+            self.assertEqual(listener.wait(timeout=5), 0)
+            self.assertEqual(json.loads(path.read_text(encoding='utf-8').splitlines()[-1])['matched'], 3)
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as next_owner:
+            next_owner.bind((LOOPBACK, port))
+
+    def test_wrong_authentication_and_replay_are_not_echoed(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
+            sender.bind((LOOPBACK, 0))
+            sender.settimeout(.35)
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reserved:
+                reserved.bind((LOOPBACK, 0))
+                port = reserved.getsockname()[1]
+            key = base64.b64decode(self.key.read_bytes())
+            with self.listener(port, 2) as (listener, path):
+                target = (LOOPBACK, port)
+                nonce = 'a' * 32
+                sender.sendto(packet(bytes(byte ^ 255 for byte in key), 'Q', nonce), target)
+                with self.assertRaises(socket.timeout):
+                    sender.recvfrom(256)
+                original = packet(key, 'Q', nonce)
+                sender.sendto(original, target)
+                self.assertEqual(sender.recvfrom(256), (packet(key, 'R', nonce), target))
+                sender.sendto(original, target)
+                with self.assertRaises(socket.timeout):
+                    sender.recvfrom(256)
+                fresh = 'b' * 32
+                sender.sendto(packet(key, 'Q', fresh), target)
+                self.assertEqual(sender.recvfrom(256), (packet(key, 'R', fresh), target))
+                self.assertEqual(listener.wait(timeout=5), 0)
+                self.assertEqual(json.loads(path.read_text(encoding='utf-8').splitlines()[-1])['matched'], 2)
+
+    def test_probe_rejects_a_signed_reply_from_another_port(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as other:
+            server.bind((LOOPBACK, 0))
+            other.bind((LOOPBACK, 0))
+            server.settimeout(6)
+            options = self.options(server.getsockname()[1], 1)
+            with subprocess.Popen(self.shell + ['-Mode', 'Probe', '-TimeoutMs', '600', *options],
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as probe:
+                try:
+                    incoming, source = server.recvfrom(256)
+                    nonce = incoming.decode('ascii').split(':')[1]
+                    key = base64.b64decode(self.key.read_bytes())
+                    other.sendto(packet(key, 'R', nonce), source)
+                    stdout, stderr = probe.communicate(timeout=5)
+                    self.assertEqual(probe.returncode, 1, stderr)
+                    result = json.loads(stdout)
+                    self.assertEqual(result['matched'], 0)
+                    self.assertEqual(result['samples'], [{'sample': 1, 'roundTripMs': None}])
+                finally:
+                    if probe.poll() is None:
+                        probe.kill()
+
+    def test_listener_expires_with_no_packets_from_the_expected_peer(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
+            sender.bind((LOOPBACK, 0))
+            sender.settimeout(.4)
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reserved:
+                reserved.bind((LOOPBACK, 0))
+                port = reserved.getsockname()[1]
+            with self.listener(port, 1, peer='127.0.0.2', seconds=5) as (listener, path):
+                key = base64.b64decode(self.key.read_bytes())
+                sender.sendto(packet(key, 'Q', 'c' * 32), (LOOPBACK, port))
+                with self.assertRaises(socket.timeout):
+                    sender.recvfrom(256)
+                self.assertEqual(listener.wait(timeout=8), 1)
+                result = json.loads(path.read_text(encoding='utf-8').splitlines()[-1])
+                self.assertEqual(result['matched'], 0)
+                self.assertFalse(result['complete'])
+
+
+if __name__ == '__main__':
+    unittest.main()

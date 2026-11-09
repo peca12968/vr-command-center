@@ -54,6 +54,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('package',type=Path);p.add_argument('--control-package',type=Path,required=True);p.add_argument('--runtime-root',type=Path,required=True);p.add_argument('--observe-closure-ui',action='store_true')
     p.add_argument('--player-package',type=Path,help='Launch five players per room from the API room ZIP, using this extracted player package')
     p.add_argument('--game-address',type=ipaddress.IPv4Address,help='Local private IPv4 for the three-package check')
+    p.add_argument('--check-lan-preflight',action='store_true',help='Release a same-PC UDP preflight before Unity binds each original game port')
     p.add_argument('--peer-diagnostics',action='store_true',help='Verify observed UDP peers in Linked and absence in default Independent runs')
     p.add_argument('--field-evidence',action='store_true',help='Verify the management ZIP with the original Linked player and server logs')
     p.add_argument('--venue-field-evidence',action='store_true',help='Verify full sealed admission evidence for both original venue End batches')
@@ -85,6 +86,8 @@ def main():
     if args.mr_venue_bundle_only:
         if not args.game_address or args.player_package:p.error('--mr-venue-bundle-only needs --game-address and no player package')
     elif bool(args.player_package)!=bool(args.game_address):p.error('Provide --player-package and --game-address together')
+    if args.check_lan_preflight and not args.player_package:
+        p.error('--check-lan-preflight requires the three-package check')
     if args.peer_diagnostics and not args.player_package:p.error('--peer-diagnostics requires the three-package check')
     if args.field_evidence and not args.peer_diagnostics:p.error('--field-evidence requires --peer-diagnostics')
     if args.venue_field_evidence and not (args.field_evidence and args.check_venue_end):
@@ -183,8 +186,47 @@ def main():
     def create(rooms,label, **options):
         mission=save_mission(label,**options)
         state=request('/api/sessions',{'missionId':mission['id'],'mode':'Linked' if len(rooms)==5 else 'Independent','roomIds':rooms},expected=201);sessions.append(state['id']);return state
+
+    def verify_lan_preflight(value, label):
+        powershell = Path(os.environ['WINDIR']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+        script = [str(powershell), '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned',
+                  '-File', str(ROOT/'scripts/check-lan-udp.ps1')]
+        options = {'cwd': out, 'creationflags': subprocess.CREATE_NO_WINDOW}
+        with tempfile.TemporaryDirectory(prefix='udp-key-', dir=runtime) as directory:
+            key = str(Path(directory)/'probe.key')
+            subprocess.run(script + ['-NewKey', '-KeyFile', key], capture_output=True, check=True, timeout=10, **options)
+            common = ['-KeyFile', key, '-LocalAddress', value['address'], '-PeerAddress', value['address'],
+                      '-Port', str(value['port']), '-Count', '3']
+            log_path = out/(label+'-lan-listener.ndjson')
+            with log_path.open('xb') as log:
+                listener = subprocess.Popen(script + ['-Mode', 'Listen', '-Seconds', '15', *common],
+                                            stdout=log, stderr=subprocess.STDOUT, **options)
+                try:
+                    def listening():
+                        if listener.poll() is not None: raise RuntimeError('UDP preflight listener exited before its bind')
+                        text = log_path.read_text(encoding='utf-8')
+                        return json.loads(text.splitlines()[0]) if '\n' in text else None
+                    ready = wait(listening, 10, label+' UDP preflight bind')
+                    if ready != {'version': 1, 'stage': 'listening', 'localAddress': value['address'],
+                                 'peerAddress': value['address'], 'port': value['port']}:
+                        raise RuntimeError('UDP preflight reported another endpoint')
+                    probe = subprocess.run(script + ['-Mode', 'Probe', *common], capture_output=True, check=True,
+                                           encoding='utf-8', timeout=10, **options)
+                    if listener.wait(timeout=17) != 0: raise RuntimeError('UDP preflight listener did not finish')
+                finally:
+                    if listener.poll() is None: listener.kill(); listener.wait(timeout=10)
+            reply = json.loads(probe.stdout)
+            final = json.loads(log_path.read_text(encoding='utf-8').splitlines()[-1])
+        check(all(item['complete'] and item['port'] == value['port'] and item['matched'] == item['requested'] == 3
+                  and item['scope'] == 'authenticated-udp-only' for item in (reply, final))
+              and [sample['sample'] for sample in reply['samples']] == [1, 2, 3]
+              and all(sample['roundTripMs'] >= 0 for sample in reply['samples']),
+              label+' Windows PowerShell UDP preflight exchanged all three authenticated samples and exited')
+        return {'listener': final, 'probe': reply}
+
     def launch(state,label, *, listen_address=None, verify_layout=True):
         value=config(state['id'], listenAddress=listen_address or address);file=runtime/(label+'.json');file.write_text(json.dumps(value),encoding='utf-8');ready=out/(label+'-ready.json');report=out/(label+'-final.json');work=runtime/(label+'-work')
+        preflight = verify_lan_preflight(value, label) if args.check_lan_preflight and label in ('room-1', 'room-2', 'room-3', 'room-4', 'room-5', 'linked') else None
         diagnostics=args.peer_diagnostics and (label=='linked' or (args.venue_field_evidence and label in {f'room-{i}' for i in range(1,6)}))
         options=['--peer-diagnostics','on'] if diagnostics else []
         child=subprocess.Popen([str(exe),'--run',str(file),'--work',str(work),'--seconds','600','--ready-report',str(ready),'--report',str(report),*options],cwd=out,env=env);entry={'process':child,'readyPath':ready,'reportPath':report,'work':work,'config':value,'label':label,'sessionId':state['id'],'witness':None,'peerDiagnostics':diagnostics};runners.append(entry)
@@ -204,6 +246,10 @@ def main():
         pid = str(binding['processId'])
         check(any(len(parts) >= 4 and parts[0] == 'UDP' and parts[1] == local and parts[-1] == pid
                   for parts in map(str.split, rows)), label + ' independent Windows UDP owner check')
+        if preflight:
+            check((binding['address'], binding['port']) == (preflight['listener']['localAddress'], preflight['listener']['port']),
+                  label+' original Unity child owns the exact endpoint released by the UDP preflight')
+            save(label+'-lan-preflight.json', dict(preflight, gameBinding=binding, scope='same-host'))
         return entry
     def player(entry,room):
         state=request('/api/sessions/'+entry['sessionId']+'/players',{'playerId':str(uuid.uuid4()),'roomId':room,'name':'Portable server room '+str(room),'headset':'Quest3'},role='Room'+str(room));person=next(x for x in state['players'] if x['roomId']==room)
@@ -1283,6 +1329,7 @@ def main():
             'venueHistoryUi':args.check_venue_history_ui,
             'venueFieldEvidence':args.venue_field_evidence,
             'venueFieldUi':args.check_venue_field_ui,
+            'lanPreflight':args.check_lan_preflight,
             'venueEnvironment':args.check_venue_environment,
             'venueEnemies':args.check_venue_enemies,
             'hardwareFeedback':args.check_hardware_feedback,

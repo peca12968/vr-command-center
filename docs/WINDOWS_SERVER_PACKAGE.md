@@ -26,6 +26,8 @@ Unity 0.47.0 伺服器可搭配控制台 0.31.14。啟動器 1.5 可選擇待開
 
 CLI 的就緒及結果檔新增 `udpBinding`，含 `processId`、`address`、`port` 及 `observedAtUtc`。原就緒檔的 `address` 仍表示玩家要連到的公告地址。WinForms 運行狀態會顯示啟動時已核對的本機 UDP 位址。Windows 的紀錄用於確認啟動時的綁定，跨機可達性另以第二台電腦入場驗證。 [Microsoft Windows UDP 端點表](https://learn.microsoft.com/en-us/windows/win32/api/udpmib/ns-udpmib-mib_udprow_owner_pid)
 
+遊戲啟動前可先用 PowerShell 在規劃的同一個位址與埠測試 UDP 往返。探測程序退出後再交由遊戲伺服器綁定。 [兩端探測操作](EXTERNAL_CLIENTS.md#開場前核對兩端-udp)
+
 私有乙太網路位址與預設 loopback 的解壓包分別通過 374 及 124 項整合檢查。兩次都另有一場核對 `0.0.0.0`，並保留不同的玩家公告位址。 [驗證紀錄](PROGRESS.md#2026-11-06-遊戲伺服器公告前的-udp-綁定核對)
 
 ## 跨機來源診斷

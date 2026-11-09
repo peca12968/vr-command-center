@@ -86,6 +86,38 @@ node tests/browser/check-external-native.cjs <本次ready.json> <解壓玩家包
 3. 在控制台核對兩位玩家均可參戰後，執行 Begin、Pause、Resume 和 End。保存兩端玩家的入場與最終戰績，核對玩家身分、本次 admission、場次與世界封存序號，並確認戰鬥及世界均封存。以第二台玩家日誌的 `VR_CLIENT_CONNECTED id=` 核對伺服器的 `VR_SERVER_PEER id=` 和 `VR_SERVER_DEBRIEF_ACK id=`。在直連 LAN，應觀察到第二台電腦本次使用的網卡位址與伺服器端來源位址相符。來源無法取得或曾跨 NAT 時，記錄實際觀察的值及網路拓撲。含來源位址的原始日誌留在私有資料夾。
 4. 將結果標記為雙機測試，記錄使用的有線或無線網路。分開保存雙機、五房與實機的證據，以便後續擴至 5／10／25 人。
 
+### 開場前核對兩端 UDP
+
+在啟動遊戲伺服器之前，可在兩台 Windows 電腦執行 `scripts/check-lan-udp.ps1`。工具使用 Windows PowerShell 5.1 或 PowerShell 7，先以指定的 IPv4 和遊戲 UDP 埠往返，再釋放該埠交給 Unity。請選擇兩台電腦實際使用的網卡位址。以下 `192.168.1.10` 為伺服器，`192.168.1.20` 為玩家。
+
+1. 在伺服器電腦產生一次性探測金鑰，將金鑰檔和腳本交給本次測試的玩家電腦。兩端的金鑰檔路徑可各自指定，請放在私人位置。
+
+   ```powershell
+   $tool = (Resolve-Path .\scripts\check-lan-udp.ps1).Path
+   $probeKey = Join-Path $env:LOCALAPPDATA ('vr-lan-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.key')
+   powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File $tool -NewKey -KeyFile $probeKey
+   ```
+
+2. 在伺服器電腦使用本次規劃的遊戲埠啟動監聽。出現 `listening` 後，玩家端即可送出探測。
+
+   ```powershell
+   powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File $tool -Mode Listen `
+     -KeyFile $probeKey -LocalAddress 192.168.1.10 -PeerAddress 192.168.1.20 -Port 7777 -Count 5 -Seconds 60
+   ```
+
+3. 在玩家電腦設定自己的 `$tool` 與 `$probeKey`，交換兩端位址後執行。
+
+   ```powershell
+   powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File $tool -Mode Probe `
+     -KeyFile $probeKey -LocalAddress 192.168.1.20 -PeerAddress 192.168.1.10 -Port 7777 -Count 5
+   ```
+
+4. 兩端最後一筆 JSON 的 `complete` 應為 `true`，且 `matched` 等於 `requested`。監聽程式已退出後，再以相同位址和埠啟動遊戲伺服器。五房獨立可逐一探測各房埠，合併場只需使用該場的共同埠。
+
+工具接受三段常用私有 IPv4 網段及 loopback，並只回覆指定來源位址、正確金鑰和新挑戰碼的固定長度封包。逾時樣本的 `roundTripMs` 為空值，整次有任一樣本未完成時以退出碼 1 結束。若出現 `failed`，`step` 可定位到金鑰、位址、綁定或封包交換階段。結果含現場位址，請和原日誌分開私下保存。
+
+這項結果表示兩端的 PowerShell UDP 封包往返。遊戲程式的防火牆規則、票券、Unity 同步及容量，仍要用正式遊戲入場確認。上述執行政策參數只作用於該次 PowerShell 程序。
+
 ### 核對封存戰績與 UDP 來源
 
 離線核對工具使用已完成的一場 Windows 伺服器任務。以 `--peer-diagnostics on` 啟動伺服器，將公告及本機綁定都設為這台電腦實際使用的 IPv4。選擇名冊固定的場次。結束後等待原啟動器寫出 `sealed-stopped` 報告，並等玩家寫完戰績與斷線日誌。

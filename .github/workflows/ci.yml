@@ -25,6 +25,7 @@ jobs:
       - run: python -m unittest discover -s tests -p test_control_package.py
       - run: python -m unittest discover -s tests -p test_server_package.py
       - run: python -m unittest discover -s tests -p test_field_results.py
+      - run: python -m unittest discover -s tests -p test_lan_preflight.py
       - run: python -m py_compile scripts/package-windows-server.py scripts/check-server-package.py scripts/check-server-gui.py scripts/check-server-catalog.py scripts/check-packaged-management-restart.py scripts/check-desktop-journal-recovery.py
       - run: python -m py_compile scripts/publish-control-server.py scripts/package-control-server.py scripts/check-control-package.py scripts/check-control-report.py scripts/check-control-gui.py
       - run: python -m unittest discover -s tests -p test_pose_trace_analysis.py
