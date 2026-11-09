@@ -1,5 +1,8 @@
 """Exercise the real HTTP API using an isolated process and temporary mission data."""
 
+import base64
+import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -66,6 +69,71 @@ def require(condition, message):
         raise AssertionError(message)
     checks += 1
     print("PASS:", message)
+
+
+def check_venue_deployment(mission_id):
+    rooms = list(range(1, 6))
+    route = "/api/mr-deployment/venue-check"
+    session = request("POST", "/api/sessions", {"missionId": mission_id, "mode": "Linked", "roomIds": rooms}, 201)
+    session_path = "/api/sessions/" + session["id"]
+    markers = [{"room": {"x": x, "z": z}, "tracking": {"x": x + 1, "z": z}} for x, z in [(-2,-2),(2,-2),(-2,2)]]
+    plans = {room: json.dumps(request("POST", "/api/room-alignment", {"roomId": room, "markers": markers})).encode() for room in rooms}
+    pins = {f"room{room}": hashlib.sha256(plan).hexdigest() for room, plan in plans.items()}
+    pin = {"commandId": str(uuid.uuid4()), "action": "SetRoomAlignment", "roomAlignment": pins}
+    encode = lambda data: base64.b64encode(data).decode()
+    bundle = {"topology": "Linked", "rooms": [{"roomId": room, "sessionId": session["id"],
+        "alignmentFile": encode(plans[room]), "connectionFiles": [encode(b"{}")]*5} for room in rooms]}
+    for actor, code in [(None,401),("Room1",403),("GameServer",403)]:
+        request("POST", route, bundle, code, identity=actor)
+    request("POST", route, {**bundle, "rooms": bundle["rooms"][:-1]}, 400)
+    request("POST", route, {**bundle, "rooms": [*bundle["rooms"][:-1], bundle["rooms"][0]]}, 400)
+    request("POST", route, {**bundle, "topology": "Independent"}, 400)
+    oversized = copy.deepcopy(bundle)
+    oversized["rooms"][0]["connectionFiles"][0] = encode(b"x" * 2049)
+    request("POST", route, oversized, 400)
+    oversized["rooms"][0]["alignmentFile"] = encode(b"x" * (180 * 1024))
+    request("POST", route, oversized, 400)
+    require({seat["status"] for seat in request("POST", route, bundle)["seats"]} == {"alignment-not-locked"},
+            "Master-only venue check bounds its inputs and identifies the unlocked rooms")
+    for room in rooms:
+        for seat in range(5):
+            session = request("POST", session_path+"/players", {"roomId": room, "playerId": str(uuid.uuid4()),
+                "name": f"Venue {room}/{seat+1}", "headset": "Quest3"}, identity=f"Room{room}")
+    session = request("POST", session_path+"/commands", pin)["session"]
+    for item in bundle["rooms"]:
+        room = item["roomId"]
+        players = [p for p in session["players"] if p["roomId"] == room]
+        zipped, _ = request("POST", session_path+f"/rooms/{room}/join-ticket-bundle", {"address": "192.0.2.10", "port": 7777,
+            "players": [{"playerId": p["id"], "admissionId": p["admissionId"]} for p in players]}, raw=True, identity=f"Room{room}")
+        with zipfile.ZipFile(io.BytesIO(zipped)) as archive:
+            item["connectionFiles"] = [encode(archive.read(f"room-{room:02}-seat-{seat:02}.json")) for seat in range(1,6)]
+    raw, headers = request("POST", route, {**bundle, "rooms": bundle["rooms"][::-1]}, raw=True)
+    result = json.loads(raw)
+    require(headers["Cache-Control"] == "no-store" and result["allMatched"] and result["topology"] == "Linked"
+            and [(s["roomId"], s["seat"]) for s in result["seats"]] == [(room, seat) for room in rooms for seat in range(5)]
+            and all(s["status"] == "matched" and s["expiresAtUtc"] and set(s) == {"status","roomId","seat","expiresAtUtc"} for s in result["seats"])
+            and request("GET", session_path) == session,
+            "A real 25-seat venue verifies current signed files, returns only scoped statuses, and writes no session event")
+    invalid = copy.deepcopy(bundle)
+    invalid["rooms"][0]["alignmentFile"] = encode(plans[1]+b"\n")
+    config = json.loads(base64.b64decode(invalid["rooms"][1]["connectionFiles"][1]))
+    original = config["joinTicket"].split(".")
+    original[2] = ("B" if original[2][0] == "A" else "A") + original[2][1:]
+    config["joinTicket"] = ".".join(original)
+    invalid["rooms"][1]["connectionFiles"][1] = encode(json.dumps(config).encode())
+    player = next(p for p in session["players"] if p["roomId"] == 3 and p["seat"] == 2)
+    request("DELETE", session_path+"/players/"+player["id"], expected=204, admission_id=player["admissionId"])
+    missing = request("POST", route, invalid)
+    require(not missing["allMatched"] and missing["seats"][12]["status"] == "seat-unavailable", "A vacant current roster seat cannot pass using a previously signed connection file")
+    current = request("POST", session_path+"/players", {"roomId": 3, "playerId": player["id"], "name": "Renewed", "headset": "Quest3"})
+    rejected = request("POST", route, invalid)
+    require(not rejected["allMatched"] and rejected["seats"][6]["status"] == "ticket-invalid"
+            and rejected["seats"][12]["status"] == "admission-changed"
+            and all(s["status"] == "alignment-hash-mismatch" for s in rejected["seats"][:5])
+            and request("GET", session_path) == current,
+            "One venue check diagnoses forged signatures, changed admissions and changed original alignment bytes together")
+    request("POST", session_path+"/commands", {"commandId": str(uuid.uuid4()), "action": "End"})
+    require({s["status"] for s in request("POST", route, bundle)["seats"]} == {"session-unavailable"}, "Ended venues fail verification even with formerly valid signed files")
 
 
 temporary = tempfile.TemporaryDirectory(prefix="vr-command-http-")
@@ -813,6 +881,7 @@ try:
             require(receipt["session"]["environment"]["mode"] == "MR" and receipt["session"]["environment"]["weather"] == "Storm",
                     "MR retains the selected mode and accepts environment controls through the same command entry point")
             request("POST", mr_path + "/commands", {"commandId": str(uuid.uuid4()), "action": "End"})
+            check_venue_deployment(mr_mission["id"])
         except BaseException:
             log.flush()
             diagnostic = (test_directory / "server.log").read_text(encoding="utf-8", errors="replace")

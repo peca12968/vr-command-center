@@ -7,7 +7,8 @@ param(
     [Parameter(ParameterSetName='Player')][switch]$Passthrough,
     [Parameter(ParameterSetName='Player')][switch]$MixedReality,
     [Parameter(ParameterSetName='Player')][switch]$CheckOnly,
-    [Parameter(Mandatory, ParameterSetName='Venue')][string]$VenueManifest
+    [Parameter(Mandatory, ParameterSetName='Venue')][string]$VenueManifest,
+    [Parameter(ParameterSetName='Venue')][ValidateNotNullOrEmpty()][string]$ManagementApi
 )
 $ErrorActionPreference = 'Stop'
 # Handle ADB exit codes here so both Windows PowerShell and PowerShell report the failing step.
@@ -131,9 +132,10 @@ function Read-VenueRoomTickets([string]$Path, [int]$RoomId, [Guid]$SessionId) {
                 if ($null -eq $entry) { throw "Room $RoomId is missing the expected seat $seat connection file." }
                 try {
                     $stream = $entry.Open()
-                    try { $config = (Read-DeploymentStream $stream $entry.Length 4096).Document }
+                    try { $fileContent = Read-DeploymentStream $stream $entry.Length 4096 }
                     finally { $stream.Dispose() }
                 } catch { throw "Room $RoomId seat $seat contains an invalid connection JSON file." }
+                $config = $fileContent.Document
                 try { $ticket = Read-PlayerConfig $config }
                 catch { throw ('Room {0} seat {1}: {2}' -f $RoomId, $seat, $_.Exception.Message) }
                 if ($ticket.SessionId -ne $SessionId -or $ticket.RoomId -ne $RoomId -or $ticket.Seat -ne ($seat - 1) -or
@@ -148,10 +150,49 @@ function Read-VenueRoomTickets([string]$Path, [int]$RoomId, [Guid]$SessionId) {
                     throw "Room $RoomId seat $seat needs a canonical unicast IPv4 address and UDP port 1024–65535."
                 }
                 $ticket.Endpoint = [string]$config.address + ':' + $config.port
+                $ticket.Bytes = $fileContent.Bytes
                 $ticket
             }
         } finally { $archive.Dispose() }
     } finally { $file.Dispose() }
+}
+
+function Confirm-VenueWithManagement([string]$Address, [string]$Topology, [object[]]$Rooms) {
+    $uri = $null
+    if (-not [Uri]::TryCreate($Address, [UriKind]::Absolute, [ref]$uri) -or
+        ($uri.Scheme -ne 'https' -and -not ($uri.Scheme -eq 'http' -and $uri.IsLoopback)) -or
+        $uri.AbsolutePath -ne '/' -or $uri.UserInfo -or $uri.Query -or $uri.Fragment) {
+        throw 'ManagementApi must be an HTTPS origin or a local loopback HTTP origin, without credentials, path, query or fragment.'
+    }
+    $masterKey = [Environment]::GetEnvironmentVariable('VR_COMMAND_MASTER_KEY')
+    if ([string]::IsNullOrWhiteSpace($masterKey)) { throw 'Set VR_COMMAND_MASTER_KEY for the live venue check.' }
+    $endpoint = [Uri]::new($uri, '/api/mr-deployment/venue-check')
+    $body = @{ topology = $Topology; rooms = $Rooms } | ConvertTo-Json -Compress -Depth 6
+    try {
+        $response = Invoke-WebRequest -Uri $endpoint -Method Post -ContentType 'application/json' `
+            -Headers @{ Authorization = 'Bearer ' + $masterKey } -Body $body -NoProxy -MaximumRedirection 0 -TimeoutSec 10 -SkipHttpErrorCheck
+    } catch { throw 'The live venue check could not reach the management service.' }
+    if ($response.StatusCode -in 401,403) { throw 'The management service requires the current Master key for the live venue check.' }
+    if ($response.StatusCode -ne 200) { throw 'The management service did not accept the live venue check. Verify the management version and service status.' }
+    try { $result = ConvertFrom-Json -InputObject $response.Content }
+    catch { throw 'The management service returned an invalid venue check receipt.' }
+    if ($result.topology -cne $Topology -or $result.allMatched -isnot [bool] -or $result.seats -isnot [array] -or $result.seats.Count -ne 25) {
+        throw 'The management service returned an invalid venue check receipt.'
+    }
+    $failures = for ($i = 0; $i -lt 25; $i++) {
+        $room = [int][Math]::Floor($i / 5) + 1
+        $seat = $i % 5
+        $row = $result.seats[$i]
+        if (-not (Test-JsonInteger $row.roomId) -or -not (Test-JsonInteger $row.seat) -or
+            $row.roomId -ne $room -or $row.seat -ne $seat -or $row.status -cnotin @('matched', 'session-unavailable',
+            'alignment-not-locked', 'seat-unavailable', 'connection-invalid', 'ticket-invalid', 'wrong-seat',
+            'admission-changed', 'connection-hash-mismatch', 'alignment-invalid', 'alignment-wrong-room', 'alignment-hash-mismatch')) {
+            throw 'The management service returned an invalid venue check receipt.'
+        }
+        if ($row.status -cne 'matched') { 'Room {0} seat {1}: {2}' -f $room, ($seat + 1), $row.status }
+    }
+    if ($result.allMatched -ne (-not $failures)) { throw 'The management service returned an inconsistent venue check receipt.' }
+    if ($failures) { throw ('Live venue check failed. ' + ($failures -join '; ')) }
 }
 
 function Test-VenueManifest([string]$Path) {
@@ -170,6 +211,7 @@ function Test-VenueManifest([string]$Path) {
     $endpoints = [Collections.Generic.HashSet[string]]::new()
     $earliest = [DateTimeOffset]::MaxValue
     $usesPins = $null
+    $liveRooms = [Collections.Generic.List[object]]::new()
     $rooms = foreach ($room in $manifest.rooms) {
         $session = [Guid]::Empty
         if (-not (Test-JsonInteger $room.roomId) -or $room.roomId -notin 1..5 -or -not $seenRooms.Add($room.roomId) -or
@@ -198,11 +240,20 @@ function Test-VenueManifest([string]$Path) {
         }
         $null = $sessions.Add($session)
         $null = $endpoints.Add($endpoint)
+        if ($ManagementApi) {
+            if ($tickets | Where-Object { $_.Bytes.Length -gt 2048 }) { throw "Room $id connection JSON exceeds the live check's 2 KiB per-seat limit." }
+            $liveRooms.Add(@{ roomId = $id; sessionId = $session; alignmentFile = [Convert]::ToBase64String($alignment.Bytes)
+                connectionFiles = @($tickets | ForEach-Object { [Convert]::ToBase64String($_.Bytes) }) })
+        }
         [pscustomobject]@{ roomId = $id; seats = $tickets.Count; endpoint = $endpoint; alignmentSha256 = $alignment.Hash }
     }
     $expected = if ($manifest.topology -ceq 'Linked') { 1 } else { 5 }
     if ($sessions.Count -ne $expected -or $endpoints.Count -ne $expected) {
         throw "$($manifest.topology) requires $expected distinct session(s) and $expected distinct game-server endpoint(s)."
+    }
+    if ($ManagementApi) {
+        if (-not $usesPins) { throw 'The live venue check requires all 25 connection files to carry locked MR alignment hashes.' }
+        Confirm-VenueWithManagement $ManagementApi $manifest.topology $liveRooms.ToArray()
     }
     if ($earliest -le [DateTimeOffset]::UtcNow) { throw 'A player ticket expired during venue preflight. Download fresh room connection ZIPs.' }
     $report = [ordered]@{
@@ -212,6 +263,7 @@ function Test-VenueManifest([string]$Path) {
         rooms = @($rooms | Sort-Object roomId)
     }
     if ($usesPins) { $report.alignmentPinsVerified = $true }
+    if ($ManagementApi) { $report.managementVerified = $true }
     $report | ConvertTo-Json -Depth 4 -Compress
 }
 

@@ -1,6 +1,7 @@
 import base64
 import copy
 import hashlib
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
@@ -8,6 +9,7 @@ import shutil
 import struct
 import subprocess
 import tempfile
+from threading import Thread
 import time
 import unittest
 import uuid
@@ -279,14 +281,14 @@ class QuestVenueTests(unittest.TestCase):
             rooms[room] = {f'room-{room:02}-seat-{seat+1:02}.json':self.config(room, seat, session, port) for seat in range(5)}
         return manifest, rooms
 
-    def run_venue(self, manifest, rooms, *flags):
+    def run_venue(self, manifest, rooms, *flags, environment=None):
         self.path.write_text(json.dumps(manifest), encoding='utf-8')
         for room, entries in rooms.items():
             with zipfile.ZipFile(self.root / f'room {room}.zip', 'w', compression=zipfile.ZIP_DEFLATED) as archive:
                 for name, data in entries.items():
                     archive.writestr(name, data if isinstance(data, str) else json.dumps(data))
         return subprocess.run(['pwsh','-NoProfile','-NonInteractive','-File',str(ROOT / 'scripts/deploy-quest.ps1'),
-                               '-VenueManifest',str(self.path),*flags], capture_output=True, encoding='utf-8', timeout=20)
+                               '-VenueManifest',str(self.path),*flags], capture_output=True, encoding='utf-8', timeout=20, env=environment)
 
     def assert_rejected(self, result, message):
         self.assertNotEqual(0, result.returncode)
@@ -395,6 +397,75 @@ class QuestVenueTests(unittest.TestCase):
                 wrong_plan.write_bytes(wrong_plan.read_bytes()[:-1])
                 rooms[4]['room-04-seat-05.json'].pop('roomAlignmentSha256')
                 self.assert_rejected(self.run_venue(manifest, rooms), 'Do not mix locked MR and legacy connection files')
+
+    def test_live_venue_sends_original_bytes_once_and_fails_closed(self):
+        manifest, rooms = self.prepare('Linked')
+        for room, entries in rooms.items():
+            plan = self.root / manifest['rooms'][room-1]['alignmentFile']
+            plan.write_bytes(b'\xef\xbb\xbf'+plan.read_bytes()+b'\r\n')
+            for config in entries.values():
+                config['roomAlignmentSha256'] = hashlib.sha256(plan.read_bytes()).hexdigest()
+        name = 'room-01-seat-01.json'
+        original = '\ufeff'+json.dumps(rooms[1][name], indent=2)+'\r\n'
+        rooms[1][name] = original
+        requests = []
+        seats = [{'roomId':room,'seat':seat,'status':'matched'} for room in range(1,6) for seat in range(5)]
+        receipt = {'topology':'Linked','allMatched':True,'seats':seats}
+        responses = [(200,receipt), (200,{**receipt,'allMatched':False,'seats':[dict(s,status='admission-changed') if i==11 else s for i,s in enumerate(seats)]}),
+                     (200,{**receipt,'seats':seats[:-1]}), (403,{'error':'PRIVATE_RESPONSE_CANARY'})]
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                requests.append((self.path,self.headers.get('Authorization'),json.loads(self.rfile.read(int(self.headers['Content-Length'])))))
+                status, result = responses[len(requests)-1]
+                self.send_response(status)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(result).encode())
+
+            def log_message(self, *args):
+                pass
+
+        environment = {**os.environ, 'VR_COMMAND_MASTER_KEY':'PRIVATE_MASTER_CANARY'}
+        with ThreadingHTTPServer(('127.0.0.1',0), Handler) as server:
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                args = ('-ManagementApi',f'http://127.0.0.1:{server.server_port}')
+                result = self.run_venue(manifest, rooms, *args, environment=environment)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertTrue(json.loads(result.stdout)['managementVerified'])
+                self.assertNotIn('PRIVATE_MASTER_CANARY',result.stdout+result.stderr)
+                self.assertEqual(1,len(requests))
+                path, bearer, body = requests[0]
+                self.assertEqual(('/api/mr-deployment/venue-check','Bearer PRIVATE_MASTER_CANARY'),(path,bearer))
+                self.assertEqual([5]*5,[len(room['connectionFiles']) for room in body['rooms']])
+                self.assertEqual(original.encode(),base64.b64decode(body['rooms'][0]['connectionFiles'][0]))
+                self.assertEqual((self.root / manifest['rooms'][0]['alignmentFile']).read_bytes(),base64.b64decode(body['rooms'][0]['alignmentFile']))
+                for message in ('Room 3 seat 2: admission-changed','invalid venue check receipt','current Master key'):
+                    result = self.run_venue(manifest, rooms, *args, environment=environment)
+                    self.assert_rejected(result,message)
+                    self.assertNotIn('PRIVATE_',result.stdout+result.stderr)
+                self.assertEqual(4,len(requests))
+                offline = self.run_venue(manifest, rooms, environment=environment)
+                self.assertEqual(0,offline.returncode,offline.stderr)
+                self.assertNotIn('managementVerified',json.loads(offline.stdout))
+                self.assertEqual(4,len(requests))
+            finally:
+                server.shutdown()
+                thread.join(timeout=5)
+
+    def test_live_venue_requires_pins_and_does_not_send_to_cleartext_lan(self):
+        manifest, rooms = self.prepare('Independent')
+        self.assert_rejected(self.run_venue(manifest, rooms, '-ManagementApi','http://127.0.0.1:5081'), 'all 25 connection files')
+        for room, entries in rooms.items():
+            digest = hashlib.sha256((self.root / manifest['rooms'][room-1]['alignmentFile']).read_bytes()).hexdigest()
+            for config in entries.values():
+                config['roomAlignmentSha256'] = digest
+        environment = {**os.environ, 'VR_COMMAND_MASTER_KEY':'PRIVATE_MASTER_CANARY'}
+        result = self.run_venue(manifest, rooms, '-ManagementApi','http://192.0.2.10:5081', environment=environment)
+        self.assert_rejected(result,'an HTTPS origin or a local loopback HTTP origin')
+        self.assertNotIn('PRIVATE_MASTER_CANARY',result.stdout+result.stderr)
 
 
 if __name__ == '__main__':
