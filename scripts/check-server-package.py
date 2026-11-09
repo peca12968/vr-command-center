@@ -723,6 +723,10 @@ def main():
         check(result['complete'] and [item['sessionId'] for item in result['results']] == [row['sessionId'] for row in rows]
               and all(item['throughSequence'] == sources[item['sessionId']]['acceptedSequence'] for item in result['results']),
               f'{mode} shipped console opens every original sealed native replay')
+        first = result['results'][0]
+        interval = first['interval']
+        check(0 < interval['start'] < interval['end'] == interval['reached'] < first['throughSequence'],
+              f'{mode} shipped console stops at the exact marked interval in the original sealed native replay')
         if earlier:
             older = earlier['sessions'][2]
             history = result['history']

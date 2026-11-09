@@ -36,9 +36,45 @@ async function main() {
       assert(sequence > 0 && sequence <= session.replay.throughSequence);
       return { sessionId: session.sessionId, room, sequence, throughSequence: session.replay.throughSequence };
     }
+    async function reviewInterval(replay) {
+      const canvas = page.locator('#world-canvas');
+      await page.waitForFunction(() => document.querySelector('#world-status').textContent.includes('執行中'), null, { polling: 50 });
+      await page.locator('#world-pause').click();
+      const start = Number(await canvas.getAttribute('data-sequence')), end = start + 1;
+      assert(start > 0 && end < replay.throughSequence);
+      await page.locator('#world-clip-start').click();
+      await page.locator('#world-frame-next').click();
+      await page.waitForFunction(sequence => document.querySelector('#world-canvas').dataset.sequence === String(sequence), end, { polling: 50 });
+      await page.locator('#world-clip-end').click();
+      const bounded = page.waitForResponse(response => {
+        const url = new URL(response.url());
+        return url.pathname === `/api/sessions/${replay.sessionId}/world/watch`
+          && url.searchParams.get('fromFrame') === String(start) && url.searchParams.get('throughFrame') === String(end);
+      });
+      await page.locator('#world-clip-play').click();
+      assert.equal((await bounded).status(), 200);
+      await page.locator('#world-clip-status').filter({ hasText: '已到片段終點' }).waitFor();
+      assert.equal(Number(await canvas.getAttribute('data-sequence')), end);
+      assert.equal(await page.locator('#world-room').inputValue(), replay.room);
+      assert.equal(await page.locator('#world-frame-next').isEnabled(), true);
+      assert.match(await page.locator('#world-status').innerText(), /錄製已核對封存/);
+      const original = await fetch(`${config.base}/api/sessions/${replay.sessionId}/world/frames/${end}`,
+        { headers: { Authorization: 'Bearer ' + config.masterKey } });
+      assert.equal(original.status, 200);
+      const { packet } = await original.json();
+      assert.equal(packet.sequence, end);
+      assert.equal(packet.frame.phase, 'Running');
+      assert((await page.locator('#world-time').innerText()).startsWith((packet.elapsedMilliseconds / 1000).toFixed(2) + ' 秒'));
+      await page.locator('#world-clip').screenshot({ path: path.join(path.dirname(output), config.mode + '-venue-interval.png') });
+      return { start, end, reached: Number(await canvas.getAttribute('data-sequence')), elapsedMilliseconds: packet.elapsedMilliseconds };
+    }
     for (const session of config.sessions) {
-      results.push(await openReplay(session));
-      if (results.length === 1) await page.screenshot({ path: path.join(path.dirname(output), config.mode + '-venue-replay.png') });
+      const replay = await openReplay(session);
+      if (!results.length) {
+        await page.screenshot({ path: path.join(path.dirname(output), config.mode + '-venue-replay.png') });
+        replay.interval = await reviewInterval(replay);
+      }
+      results.push(replay);
       await page.locator('#tab-operations').click();
     }
     for (const { batchId, zip, archived } of config.fieldEvidence ?? []) {
