@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-09 Quest 原入場票券更新
+
+新增 `deploy-quest.ps1 -RefreshPlayerTicket`，供同一入場用新票券按 B 重連。比對原場次、玩家、席位、端點及鎖定 MR 校正，只更新 `joinTicket`。在頭盔端核對原檔與暫存檔雜湊後替換。 [票券更新](QUEST_RECONNECT.md#保留遊戲程序並更新票券)
+
+- Windows 的 Quest 部署套件 40 項通過。以模擬 ADB 和實際 POSIX 檔案命令核對逾期原票券、MR 與 VR 透視設定、同票券重試、錯席位、端點、校正及較早效期。原設定或暫存檔在替換前變動時會拒絕並清理自己的暫存檔。
+- Windows 原生場 `20261109-165122-925d0c74` 退出碼 0，8 項入場與重連檢查、354 幀回放。待舊連線釋放後，新桌面玩家程序以同一入場恢復原位置及健康 60、彈匣 30、備彈 90。原回放與封存統計相符，活動場次和剩餘程序皆為零。另用該場實際簽發的原票券通過模擬 ADB 更新並拒絕撤銷的舊入場，原始設定檔雜湊相符。證據見同目錄 `quest-ticket-refresh-readback.json`。
+- 功能來源 `743edaede5ac269b1173cdee3e67769b294a08e9`。GitHub Actions job `129066324133` 因帳務或支出上限未啟動。Quest 3 USB 更新與原程序 B 鍵重連、VIVE、MR 實地、跨機 25 人及廠商設備仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42589186598)
+
 ## 2026-11-09 Quest 五房整批日誌擷取
 
 用原五房 VR、MR 或混合部署 ZIP 和版本 1 裝置清單並行擷取。預設完整 25 席，可選用 `--allow-partial-map` 擷取指定的 Quest 席位。逐席保存原 logcat、PID 和校驗值，失敗席位保留可用的 `.partial`，其他席位繼續擷取。 [整批操作](QUEST3.md#一次擷取五房-quest-日誌)
