@@ -1,4 +1,7 @@
+import asyncio
+import base64
 from copy import deepcopy
+import hashlib
 import importlib.util
 import ipaddress
 import json
@@ -9,12 +12,16 @@ import tempfile
 import unittest
 import uuid
 import zipfile
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/verify-field-results.py'
 spec = importlib.util.spec_from_file_location('field_results', SCRIPT)
 field = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(field)
+capture_spec = importlib.util.spec_from_file_location('quest_capture', SCRIPT.with_name('capture-quest-field-log.py'))
+capture_tool = importlib.util.module_from_spec(capture_spec)
+capture_spec.loader.exec_module(capture_tool)
 
 
 def id_for(number):
@@ -117,6 +124,151 @@ def venue_fixture(root, mode, *, remote=False, quest_per_room=0):
     path = root / 'venue.json'
     write_json(path, manifest)
     return path, manifest, batch
+
+
+class QuestCaptureTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='quest-live-capture-')
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.output = self.root / 'original logcat.txt'
+        self.partial = self.root / 'original logcat.txt.partial'
+        self.original = self.root / 'original-player.json'
+        fake = self.root / 'fake-adb.py'
+        fake.write_text('''import json, os, sys, time
+from pathlib import Path
+root = Path(__file__).parent
+args = sys.argv[1:]
+settings = json.loads((root/'settings.json').read_text())
+assert args[:2] == ['-s', 'fixture-device']
+if args[2:] == ['shell', 'pidof', 'com.vrcommand.quest']:
+    count = root/'pid-count'
+    calls = int(count.read_text()) if count.exists() else 0
+    count.write_text(str(calls+1))
+    print(settings.get('replacement', '7342') if calls else settings.get('initialPid', '7342'))
+    sys.exit(0)
+assert args[2:] == ['logcat','-b','main','--pid=7342','-v','threadtime','-s','Unity:I']
+(root/'logcat-child').write_text(str(os.getpid()))
+for line in (root/'logcat.bin').read_bytes().splitlines(keepends=True):
+    sys.stdout.buffer.write(line)
+    sys.stdout.buffer.flush()
+    time.sleep(.015)
+if settings.get('keepRunning', True):
+    time.sleep(90)
+''', encoding='utf-8')
+        self.adb = [sys.executable, str(fake), '-s', 'fixture-device']
+        self.records = fixture()
+        self.records[3]['players'][1]['headset'] = 'Quest3'
+        self.address, self.player_log = self.records[7].pop()
+        self.expected = {'sessionId': id_for(1), 'playerId': id_for(4), 'admissionId': id_for(14), 'roomId': 1}
+        payload = bytearray(75)
+        payload[0], payload[49], payload[50] = 2, 1, 1
+        for key, offset in (('sessionId', 1), ('playerId', 17), ('admissionId', 33)):
+            payload[offset:offset+16] = uuid.UUID(self.expected[key]).bytes_le
+        self.ticket = 'v2.' + base64.urlsafe_b64encode(payload).decode('ascii') + '.' + 'a' * 43
+        self.original.write_text(json.dumps({'role': 'Client', 'port': 7777, 'joinTicket': self.ticket}), encoding='utf-8-sig')
+
+    def prepare(self, log, **settings):
+        (self.root/'logcat.bin').write_bytes(log)
+        (self.root/'settings.json').write_text(json.dumps(settings), encoding='utf-8')
+        (self.root/'pid-count').unlink(missing_ok=True)
+
+    def capture(self, seconds=4):
+        port, expected = capture_tool.read_connection(self.original)
+        return asyncio.run(capture_tool.capture(self.adb, port, expected, self.output, seconds))
+
+    def test_live_capture_preserves_bytes_and_existing_verifier_accepts_original_reconnect(self):
+        earlier = 'VR_CLIENT_CONNECTED id=8\nVR_CLIENT_DISCONNECTED\n'
+        startup, rest = self.records[6].split('\n', 1)
+        self.records[6] = startup + '\nVR_SERVER_ADMISSION_APPROVED id=8\nVR_SERVER_PEER id=8 endpoint=unavailable\n' + rest
+        raw = quest_logcat(earlier + self.player_log).replace('\n', '\r\n').encode('utf-8')
+        self.prepare(raw + logcat_line('post-disconnect line').encode('utf-8'))
+        report = self.capture()
+        self.assertEqual(raw, self.output.read_bytes())
+        self.assertFalse(self.partial.exists())
+        self.assertEqual({'version': 1, 'complete': True, 'logcatPid': 7342, 'port': 7777, 'roomId': 1,
+                          'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest(), 'scope': 'quest-logcat-only'}, report)
+        self.assertGreaterEqual(int((self.root/'pid-count').read_text()), 2)
+        readback = field.verify(*self.records, quest_player_logs=[(self.address, field.content(self.output), report['logcatPid'])])
+        self.assertEqual(1, readback['questLogcatPlayers'])
+        self.assertEqual(2, readback['serverAcknowledgements'])
+
+    def test_capture_rejects_stale_admission_on_same_port(self):
+        self.prepare(quest_logcat(self.player_log.replace(id_for(14), id_for(99))).encode('utf-8'))
+        with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'differs from the original player admission'):
+            self.capture()
+        self.assertTrue(self.partial.exists())
+        self.assertFalse(self.output.exists())
+
+    def test_capture_rejects_game_process_replacement_after_terminal_marker(self):
+        self.prepare(quest_logcat(self.player_log).encode('utf-8'), replacement='7450')
+        with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'original Quest process changed'):
+            self.capture()
+        self.assertTrue(self.partial.exists())
+        self.assertFalse(self.output.exists())
+
+    def test_capture_rechecks_pid_while_stream_is_idle(self):
+        self.prepare(quest_logcat('').encode('utf-8'), replacement='7450')
+        with patch.object(capture_tool, 'PID_CHECK_SECONDS', .15):
+            with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'original Quest process changed'):
+                self.capture()
+        self.assertFalse(self.output.exists())
+
+    def test_capture_rejects_multiple_processes_before_opening_a_log(self):
+        self.prepare(b'', initialPid='7342 7450')
+        with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'one running Quest game process'):
+            self.capture()
+        self.assertFalse((self.root/'logcat-child').exists())
+        self.assertFalse(self.partial.exists())
+        self.assertFalse(self.output.exists())
+
+    def test_capture_incomplete_stream_is_bounded_and_keeps_raw_partial(self):
+        raw = quest_logcat('VR_CLIENT_CONNECTED id=2').encode('utf-8')
+        for settings, message in (({'keepRunning': False}, 'logcat ended'), ({}, 'timed out')):
+            with self.subTest(settings=settings):
+                self.prepare(raw, **settings)
+                with self.assertRaisesRegex(capture_tool.field.EvidenceError, message):
+                    self.capture(seconds=2)
+                self.assertEqual(raw, self.partial.read_bytes())
+                self.partial.unlink()
+                self.assertFalse(self.output.exists())
+
+    def test_capture_checks_source_startup_before_publishing(self):
+        for raw, message in (
+            (quest_logcat(self.player_log, port=7778), 'startup differs'),
+            (quest_logcat(self.player_log, pid=7450), 'startup differs'),
+            (logcat_line('VR_CLIENT_CONNECTED id=2'), 'outside the original Quest startup'),
+        ):
+            with self.subTest(message=message):
+                self.prepare(raw.encode('utf-8'))
+                with self.assertRaisesRegex(capture_tool.field.EvidenceError, message):
+                    self.capture()
+                self.assertFalse(self.output.exists())
+                self.partial.unlink()
+
+    def test_capture_keeps_existing_log_and_rejects_size_limit(self):
+        raw = quest_logcat(self.player_log).encode('utf-8')
+        self.prepare(raw)
+        self.output.write_bytes(b'existing')
+        with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'new capture output'):
+            self.capture()
+        self.assertFalse((self.root/'pid-count').exists())
+        self.assertEqual(b'existing', self.output.read_bytes())
+        self.output.unlink()
+        with patch.object(capture_tool.field, 'MAX_FILE_BYTES', len(raw) - 1):
+            with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'capture size limit'):
+                self.capture()
+        self.assertFalse(self.output.exists())
+
+    def test_capture_cli_rejects_bad_ticket_without_echoing_private_inputs(self):
+        self.original.write_text(json.dumps({'role': 'Client', 'port': 7777, 'joinTicket': 'private-test-ticket'}))
+        run = subprocess.run([sys.executable, str(capture_spec.origin), '--adb', sys.executable, '--serial', 'fixture-device',
+            '--connection-file', str(self.original), '--output', str(self.output)], capture_output=True, text=True, timeout=5)
+        self.assertEqual(1, run.returncode)
+        self.assertIn('v2 player connection file', run.stderr)
+        for secret in ('fixture-device', 'private-test-ticket', str(self.root)):
+            self.assertNotIn(secret, run.stderr + run.stdout)
+        self.assertFalse(self.partial.exists())
 
 
 class FieldResultsTests(unittest.TestCase):

@@ -132,6 +132,10 @@ def client_result(log):
     return final
 
 
+def quest_startup_on_port(message, port):
+    return re.fullmatch(rf'VR_NETWORK_STARTED role=Client started=True background=(True|False) port={port}', message) is not None
+
+
 def quest_client_result(log, pid, port):
     pid = str(integer(pid, 1, 2**31 - 1))
     started = False
@@ -142,8 +146,7 @@ def quest_client_result(log, pid, port):
             continue
         process, message = entry.groups()
         if message.startswith('VR_NETWORK_STARTED '):
-            require(process == pid and not started and re.fullmatch(
-                rf'VR_NETWORK_STARTED role=Client started=True background=(True|False) port={port}', message),
+            require(process == pid and not started and quest_startup_on_port(message, port),
                 'Quest logcat does not contain one original client startup on the game port')
             started = True
         elif message.startswith(PLAYER_MARKERS):

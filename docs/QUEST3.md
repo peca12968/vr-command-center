@@ -418,28 +418,20 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connect
 
 ## 收集 Quest 場館驗收日誌
 
-在 Windows 遊戲伺服器啟動器 1.7 勾選「記錄本次玩家連線來源（場館驗收）」，或用 CLI 的 `--peer-diagnostics on` 保留 UDP 來源和戰績確認。驗收前先關閉頭盔上次場次的遊戲，再部署本場票券並重新啟動。先把頭盔接上 USB 偵錯，在 PowerShell 7 指定裝置序號。遊戲啟動後、場次結束前，記錄原遊戲程序 PID，並從頭盔 Wi-Fi 設定記下該次實際使用的 IPv4。
+在 Windows 遊戲伺服器啟動器 1.7 勾選「記錄本次玩家連線來源（場館驗收）」，或用 CLI 的 `--peer-diagnostics on` 保留 UDP 來源和戰績確認。驗收前先關閉上次場次的遊戲，再部署本場票券並重新啟動。頭盔經 USB 偵錯授權後，從 Wi-Fi 設定記下本次使用的 IPv4。每席遊戲啟動後立即用 Python 3.12 開始擷取。看到 `capture-ready` 後，依主控台原開場條件確認玩家入場和追蹤狀態。
 
 ```powershell
 $adb = 'F:\Tools\UnityEditors\6000.3.27f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe'
 $serial = 'REPLACE-WITH-ADB-SERIAL'
-$questPid = ([string](& $adb -s $serial shell pidof com.vrcommand.quest)).Trim()
-if ($LASTEXITCODE -or $questPid -notmatch '^[1-9][0-9]{0,9}$') { throw '需要一個原遊戲程序 PID' }
+python .\scripts\capture-quest-field-log.py --adb $adb --serial $serial `
+    --connection-file .\room-01-seat-01.json --output .\room-01-seat-01-logcat.txt
 ```
 
-主控結束場次後，等原伺服器確認戰績送達、玩家斷線。先保持頭盔上的遊戲程式開啟，立刻擷取該程序的原日誌到私人資料夾。每席使用不同的新檔名，保留其 IPv4 與 PID 供核對。
+連線檔使用該席部署時的原 JSON。每席使用自己的序號和新輸出路徑，可分開開啟擷取程序。工具鎖定遊戲 PID，持續保存原 `threadtime` 行，保留同一程序的重連。主控結束場次後，保持頭盔遊戲開啟，讓工具收完戰績和斷線記錄。工具核對戰績與原場次、玩家、房號及入場名額，確認 PID 一致後，會寫出完整日誌及 `logcatPid` 和 SHA-256 摘要。 [Android Logcat](https://developer.android.com/tools/logcat) · [PID 篩選](https://android.googlesource.com/platform/system/logging/+/f3568188d89e74f1202d4266c587ecb4cf027df4/logcat/logcat.cpp)
 
-```powershell
-$logPath = '.\room-01-seat-01-logcat.txt'
-if (Test-Path -LiteralPath $logPath) { throw '請指定新的日誌檔名' }
-$activeQuestPid = ([string](& $adb -s $serial shell pidof com.vrcommand.quest)).Trim()
-if ($LASTEXITCODE -or $activeQuestPid -cne $questPid) { throw '原遊戲程序已更換' }
-& $adb -s $serial logcat -d -b main "--pid=$questPid" -v threadtime -s 'Unity:I' |
-    Set-Content -LiteralPath $logPath -Encoding utf8
-if ($LASTEXITCODE) { throw 'ADB 擷取失敗，這份日誌無法驗收' }
-```
+擷取預設最多 1,800 秒及 16 MiB，可用 `--seconds` 指定 1 至 7,200 秒。若原啟動記錄已被覆蓋、PID 更換、ADB 中斷或逾時，工具以退出碼 1 結束，保留已寫入的 `.partial` 供診斷。擷取只使用 ADB 讀取遊戲程序與日誌。
 
-使用原始 `threadtime` 輸出。核對工具會讀取原程序的啟動、連線、戰績及斷線。若日誌環形緩衝區已覆蓋原啟動，須用下一次驗收保留完整日誌。場次、入場 ID、UDP 來源、伺服器確認和封存序號仍需逐席符合。 [Android logcat 文件](https://developer.android.com/tools/logcat) · [PID 篩選](https://android.googlesource.com/platform/system/logging/+/f3568188d89e74f1202d4266c587ecb4cf027df4/logcat/logcat.cpp) · [單場及五房驗收](EXTERNAL_CLIENTS.md#核對封存戰績與-udp-來源)
+把成功輸出的日誌與 IPv4、`logcatPid` 交給單場或五房驗收工具，逐席核對原 UDP 來源、伺服器確認與封存序號。票券和原日誌存放在私人資料夾。 [單場及五房驗收](EXTERNAL_CLIENTS.md#核對封存戰績與-udp-來源)
 
 ## 連線與仍待實作事項
 
