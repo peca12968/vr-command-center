@@ -1,5 +1,15 @@
 # 開發進度
 
+## 2026-11-10 執行中五房追蹤總覽
+
+控制台 0.31.72 顯示五房各自最新確認的追蹤席位數，分列合成、待確認、已淘汰及未編列席位。原快照須有有效來源，並對應目前執行階段及原入場名冊。 [操作方式](PLAYER_READINESS.md#執行中五房追蹤總覽)
+
+- 舊 0.31.71 合併場開場後沒有總覽，保留 `console-live-tracking-before-16d2b473769d45f89f693dc4d6f20d25.log`。新版解壓包專項 38 項通過，證據 `console-live-tracking-focused-7a1fb3b039b74dc99e2766d2425a1ed0`。合併與混合獨立均驗證 25／25、合成與中斷後 23／25、天氣更新、繼續指令未套用、快照過期、恢復及房控權限。25 個追蹤姿態為測試發布器資料。
+- 管理包 `artifacts/windows-control-console-0.31.72-live-tracking-win-x64.zip` 為 52,827,383 bytes，SHA-256 `51d69438ecb3b8565d92a0cae98926ddb52d048fdef9a24b00e0af0b40afc737`。172 份來源、520 個執行檔案、540 筆清單核對。解壓管理包檢查 106 項通過，證據 `run-fe8d0e6cf71241bd9f8a30514aef631a`。另有 1,003 項領域、747 項 HTTP、81 項世界串流、10 項伺服器封裝工具檢查通過。
+- 最終解壓包完整回歸通過 105 項 Node 與 701 項 Chromium 檢查。證據 `console-live-tracking-full-098e35f9bca143fd9e8afa6bd027c7a1`。
+- Windows 原生 `run-e4d0f2bfd46d47e994cdf829878abb25` 通過 488 項。獨立及合併各用 24 個桌面玩家及第 5 房第 2 席的 Unity Mock Runtime 玩家。追蹤就緒、中斷、持續中斷及恢復分別核對獨立第 222、238、246、247 格及合併第 213、228、236、239 格，八格均與完整封存回放相符。六場雙封存共 1,722 格、50 份原戰績及伺服器確認。C／F 227 檔雜湊一致，無活躍場次與殘留測試程序。
+- 功能來源 `197d3b3294319bde20c892206725e40bb82d8bb2`。GitHub Actions job `129525642823` 因帳務或支出上限未啟動。跨機 25 人、Quest 3、VIVE XR、實體 MR 與廠商硬體仍待現地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42724238436)
+
 ## 2026-11-10 核對 25 席同時追蹤的封存區間
 
 場館驗收清單可同時設定 `requireTrackedRoster: true` 及 `minimumConcurrentMilliseconds`。逐格核對 25 席同時連線並具有 `Tracked` 姿態，再用原 Quest logcat 或 Windows OpenXR 日誌核對各席來源。桌面模擬或已識別的 Unity Mock Runtime 會回報原房號、席位與來源類別。 [操作方式](EXTERNAL_CLIENTS.md#核對-25-席同時連線的區間)
