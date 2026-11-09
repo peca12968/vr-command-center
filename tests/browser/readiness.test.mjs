@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 const code = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/readiness-ui.js', import.meta.url), 'utf8');
 const missionClock = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/mission-clock.js', import.meta.url), 'utf8');
 const dataModule = source => 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
-const { readinessView, roomReadinessView, mrReadinessView, roomMissionTimeView } = await import(dataModule(code.replace('./mission-clock.js', dataModule(missionClock))));
+const { readinessView, roomReadinessView, mrReadinessView, roomMissionTimeView, roomVenuePhaseView } = await import(dataModule(code.replace('./mission-clock.js', dataModule(missionClock))));
 const player = { id: 'player', admissionId: 'first', roomId: 1, seat: 0 };
 const session = { id: 'session', sequence: 10, state: 'Preparing', players: [player] };
 const report = { version: 1, sessionId: 'session', sessionSequence: 10, sourceState: 'Fresh', sourceAgeMilliseconds: 10, origin: 'Simulation',
@@ -36,6 +36,19 @@ const room = { id: 1, sessionId: 'session', playerCount: 3, capacity: 5 };
 const roomRow = { roomId: 1, sessionId: 'session', sessionSequence: 10, registered: 3, sourceState: 'Fresh',
   sourceAgeMilliseconds: 10, simulatedReady: 1, trackedReady: 1 };
 const overview = { version: 1, rooms: [roomRow] };
+test('Venue confirmation requires its exact room, phase and fresh accepted world evidence', () => {
+  const paused = { ...session, state: 'Paused' };
+  const phase = { action: 'Pause', appliedAtSequence: 9, worldSequence: 12, readyToResume: true };
+  const source = venuePhase => ({ ...overview, rooms: [{ ...roomRow, venuePhase }] });
+  assert.deepEqual(roomVenuePhaseView(source(phase), room, paused, 1490),
+    { applied: true, ready: true, action: 'Pause', sequence: 9, text: '全館暫停已套用' });
+  assert.match(roomVenuePhaseView(source({ ...phase, readyToResume: false }), room, paused, 0).text, /等候 MR/);
+  assert.match(roomVenuePhaseView(source(phase), room, paused, 1490.01).text, /快照已過期/);
+  assert.match(roomVenuePhaseView(source(phase), room, paused, 0, true).text, /未確認/);
+  assert.equal(roomVenuePhaseView(source({ ...phase, worldSequence: null }), room, paused, 0).ready, false);
+  assert.equal(roomVenuePhaseView(source(phase), room, { ...paused, sequence: 11 }, 0), null);
+  assert.equal(roomVenuePhaseView(source(phase), room, { ...paused, state: 'Running' }, 0), null);
+});
 const timed = { ...session, state: 'Running', combatStream: { missionClockVersion: 1 }, mission: { definition: { durationSeconds: 60 } },
   missionClock: { version: 1, autoEnd: true } };
 const timer = { phase: 'Running', elapsedSeconds: 20, remainingSeconds: 40, durationSeconds: 60, autoEnd: true };

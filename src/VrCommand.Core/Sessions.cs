@@ -117,13 +117,13 @@ public sealed partial class SessionManager
 
     public SessionView Get(Guid id, OperatorIdentity? actor = null) => GetWithPhase(id, actor).View;
 
-    public (SessionView View, long PhaseSinceSequence) GetWithPhase(Guid id, OperatorIdentity? actor = null)
+    public (SessionView View, long PhaseSinceSequence, bool VenueTransition) GetWithPhase(Guid id, OperatorIdentity? actor = null)
     {
         lock (gate)
         {
             var history = Find(id);
             AccessPolicy.Read(actor ?? OperatorIdentity.Internal, history.View.RoomIds);
-            return (Snapshot(history.View), history.PhaseSinceSequence);
+            return (Snapshot(history.View), history.PhaseSinceSequence, IsVenuePhase(history));
         }
     }
 

@@ -1,18 +1,43 @@
 const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const path = require('node:path');
 
-module.exports = async ({ context, api, tokens, base, screenshots, check, captureErrors }) => {
+module.exports = async ({ context, api, tokens, base, root, screenshots, check, captureErrors }) => {
   const page = await context.newPage();
   captureErrors(page);
   const route = '**/api/venue/phase';
   const active = new Set();
   const panel = page.locator('#venue-phase'), summary = page.locator('#venue-phase-targets');
   const notice = page.locator('#notice');
+  const evidence = page.locator('#venue-phase-evidence');
+  const roomPhase = room => page.locator(`[data-room-venue-phase="${room}"]`);
   const run = (id, action) => api(`/sessions/${id}/commands`, 'POST', { commandId: randomUUID(), action });
-  async function start(id, room) {
-    await api(`/sessions/${id}/players`, 'POST', { playerId: randomUUID(), roomId: room, name: 'Venue seat', headset: 'Quest3' });
+  async function start(id, room, withSource = false) {
+    let snapshot = await api(`/sessions/${id}/players`, 'POST', { playerId: randomUUID(), roomId: room, name: 'Venue seat', headset: 'Quest3' });
+    let publish;
+    if (withSource) {
+      const streamId = randomUUID(), origin = 'Simulation', started = Date.now();
+      await api(`/sessions/${id}/combat-stream`, 'POST', { streamId, origin }, 'GameServer');
+      snapshot = await api(`/sessions/${id}`);
+      const header = { sessionId: id, streamId, origin, roomIds: [room], captureStartedAtUtc: new Date(started).toISOString().replace('Z', '0000+00:00') };
+      let sequence = 0;
+      publish = current => {
+        const head = { x: (room - 3) * 14, y: 1.65, z: -3 };
+        const players = current.players.map(player => ({ id: player.id, roomId: room, head, muzzle: head,
+          connected: false, forward: { x: 0, y: 0, z: 1 }, health: 100, magazine: 30, reserve: 90, rig: { kind: 'None' } }));
+        const packet = { sequence: ++sequence, observedSequence: current.sequence, elapsedMilliseconds: sequence === 1 ? 0 : Date.now() - started,
+          weather: 'Clear', throughCombatSequence: 0, events: [], frame: { phase: current.state, tick: 0, night: false, throughSequence: 0, players } };
+        const result = spawnSync('python', [path.join(root, 'scripts/world_test_socket.py')], { encoding: 'utf8', timeout: 6000, windowsHide: true,
+          input: JSON.stringify({ port: Number(new URL(base).port), route: `/api/sessions/${id}/world/publish`, token: tokens.GameServer,
+            messages: [{ type: 'header', payload: header }, { type: 'frame', payload: packet }] }) });
+        if (result.status !== 0) throw new Error('Venue fixture publication failed: ' + (result.stderr || result.error?.message));
+        assert.equal(JSON.parse(result.stdout).acceptedSequence, sequence);
+      };
+      publish(snapshot);
+    }
     await run(id, 'Begin');
+    return publish;
   }
   async function end(id) { await run(id, 'End'); active.delete(id); }
   async function login(role) {
@@ -27,6 +52,15 @@ module.exports = async ({ context, api, tokens, base, screenshots, check, captur
     await confirmed;
     assert.match(message, new RegExp(rooms));
   }
+  async function publishUntil(publish, snapshot, ready) {
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      publish(snapshot);
+      if (await ready()) return;
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+    throw new Error('Expected a room confirmation from the accepted frame');
+  }
 
   try {
     assert.deepEqual(await api('/sessions'), []);
@@ -36,7 +70,8 @@ module.exports = async ({ context, api, tokens, base, screenshots, check, captur
     const created = await api('/sessions/independent-set', 'POST', { missionId: mission.id }, 'Master', 201, undefined, randomUUID());
     const ids = created.sessions.map(session => session.id);
     for (const id of ids) active.add(id);
-    for (const [index, id] of ids.slice(0, 3).entries()) await start(id, index + 1);
+    const publish = await start(ids[0], 1, true);
+    await start(ids[1], 2); await start(ids[2], 3);
     await run(ids[2], 'Pause'); await end(ids[4]);
     await api('/venue/phase', 'GET', undefined, 'Room2', 403);
     await api('/venue/phase', 'POST', { action: 'Pause', targets: [] }, 'Room2', 403, undefined, randomUUID());
@@ -82,12 +117,32 @@ module.exports = async ({ context, api, tokens, base, screenshots, check, captur
       && (await api(`/sessions/${ids[0]}/events`)).filter(event => event.venue).length === 1,
       'The retry sends the exact original key and target phases with only one durable event in each original session');
     await summary.filter({ hasText: '可暫停 無 · 可繼續 房間 1、2' }).waitFor();
+    await evidence.filter({ hasText: '等候房間 1、2' }).waitFor();
+    await roomPhase(1).filter({ hasText: '全館暫停待確認' }).waitFor();
+    check(await page.locator('#venue-resume').isDisabled(),
+      'An accepted management pause displays a separate waiting game status and disables whole-venue Resume');
     await run(ids[1], 'Resume'); await run(ids[1], 'Pause');
     await page.locator('#refresh').click(); await summary.filter({ hasText: /^可暫停 無 · 可繼續 房間 1$/ }).waitFor();
+    const paused = await api(`/sessions/${ids[0]}`);
+    const pausePlan = (await api('/venue/phase')).resume.map(({ sessionId, phaseSinceSequence }) => ({ sessionId, phaseSinceSequence }));
+    const allowed = () => page.locator('#venue-resume').isEnabled();
+    await publishUntil(publish, paused, allowed);
+    await roomPhase(2).waitFor({ state: 'hidden' });
+    check(await roomPhase(1).filter({ hasText: '全館暫停已套用' }).isVisible(),
+      'The original source confirms the venue pause while the later manual pause has no venue marker');
     await panel.screenshot({ path: path.join(screenshots, 'venue-phase-resume.png') });
+    await roomPhase(1).filter({ hasText: '快照已過期' }).waitFor();
+    const declined = await api('/venue/phase', 'POST', { action: 'Resume', targets: pausePlan }, 'Master', 409, undefined, randomUUID());
+    check(declined.code === 'venue-pause-not-observed' && declined.roomIds.join() === '1' && await page.locator('#venue-resume').isDisabled(),
+      'Expired pause evidence clears the live confirmation and the HTTP API rejects an early Resume');
+    await publishUntil(publish, paused, allowed);
     await click('resume', '房間 1'); await notice.filter({ hasText: '全館管理命令已確認' }).waitFor();
     const states = await Promise.all(ids.map(id => api(`/sessions/${id}`).then(session => session.state)));
     check(states.join(',') === 'Running,Paused,Paused,Preparing,Ended', 'Resume affects only a room still in its whole-venue paused phase');
+    await roomPhase(1).filter({ hasText: '全館繼續待確認' }).waitFor();
+    const resumed = await api(`/sessions/${ids[0]}`);
+    await publishUntil(publish, resumed, () => roomPhase(1).filter({ hasText: '全館繼續已套用' }).isVisible());
+    check(true, 'A new running frame confirms Resume separately from the management receipt');
     for (const id of ids.slice(0, 4)) await end(id);
 
     const linked = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Linked', roomIds: [1, 2, 3, 4, 5] }, 'Master', 201);

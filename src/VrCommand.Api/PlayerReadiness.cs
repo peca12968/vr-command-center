@@ -13,8 +13,10 @@ public record SessionReadiness(int Version, Guid SessionId, long SessionSequence
 public record RoomReadiness(int RoomId, Guid? SessionId, long SessionSequence, int Registered, int SimulatedReady,
     int TrackedReady, string SourceState, double? SourceAgeMilliseconds,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MrLiving = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomMissionTime? Clock = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomMissionTime? Clock = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomVenuePhase? VenuePhase = null);
 public record RoomMissionTime(string Phase, long ElapsedSeconds, long RemainingSeconds, int DurationSeconds, bool AutoEnd);
+public record RoomVenuePhase(ControlAction Action, long AppliedAtSequence, long? WorldSequence, bool ReadyToResume);
 
 public sealed partial class WorldRecordings
 {
@@ -44,19 +46,17 @@ public sealed partial class WorldRecordings
         lock (gate)
         {
             var expected = (fences ?? []).OfType<VenuePhaseFence>().ToHashSet();
-            var reports = new List<SessionReadiness>();
+            var reports = new List<(SessionReadiness Report, long PhaseSince)>();
             foreach (var target in manager.ReadVenuePhase(actor).Resume.Where(target => expected.Contains(new(target.SessionId, target.PhaseSinceSequence))))
             {
-                var session = manager.Get(target.SessionId, actor);
-                if (!SessionManager.RequiresMrReadiness(session, action)) continue;
-                var report = Readiness(target.SessionId, actor);
-                if (report.MrResumeState == "Ready" && report.SessionSequence == session.Sequence)
-                    reports.Add(report);
+                var (report, _, phase) = ReadReadinessSnapshot(target.SessionId, actor);
+                if (phase is { Action: ControlAction.Pause, WorldSequence: not null } && phase.AppliedAtSequence == target.PhaseSinceSequence)
+                    reports.Add((report, target.PhaseSinceSequence));
             }
             var now = readinessClock.GetUtcNow();
-            var ready = reports.Where(report => report.CapturedAtUtc is { } captured
+            var ready = reports.Where(row => row.Report.CapturedAtUtc is { } captured
                 && (now - captured).TotalMilliseconds is >= -FutureSourceToleranceMilliseconds and <= MaxSourceAgeMilliseconds)
-                .ToDictionary(report => report.SessionId, report => report.SessionSequence);
+                .ToDictionary(row => row.Report.SessionId, row => new VenueResumeWitness(row.PhaseSince, row.Report.SessionSequence, row.Report.MrResumeState == "Ready"));
             return manager.ExecuteVenuePhase(action, fences, requestId, actor, ready);
         }
     }
@@ -78,26 +78,26 @@ public sealed partial class WorldRecordings
         return rooms.Select(room =>
         {
             if (room.SessionId is not { } id) return new RoomReadiness(room.Id, null, 0, 0, 0, 0, "Idle", null);
-            var (report, clock) = sessions[id];
+            var (report, clock, venuePhase) = sessions[id];
             var players = report.Players.Where(player => player.RoomId == room.Id).ToArray();
             return new RoomReadiness(room.Id, id, report.SessionSequence, players.Length,
                 players.Count(player => player.CanParticipate && player.RigKind == "Simulated"),
                 players.Count(player => player.CanParticipate && player.RigKind == "Tracked"),
                 report.SourceState, report.SourceAgeMilliseconds,
                 report.MrTrackingState is "Ready" or "WaitingPlayers"
-                    ? players.Count(player => player.State != "Eliminated") : null, clock);
+                    ? players.Count(player => player.State != "Eliminated") : null, clock, venuePhase);
         }).ToArray();
     }
 
     // A scoped view of accepted snapshots. Both MR transitions require the exact current roster revision.
     public SessionReadiness Readiness(Guid id, OperatorIdentity actor) => ReadReadinessSnapshot(id, actor).Report;
 
-    private (SessionReadiness Report, RoomMissionTime? Clock) ReadReadinessSnapshot(Guid id, OperatorIdentity actor)
+    private (SessionReadiness Report, RoomMissionTime? Clock, RoomVenuePhase? VenuePhase) ReadReadinessSnapshot(Guid id, OperatorIdentity actor)
     {
         RequireReadinessActor(actor);
         lock (gate)
         {
-            var (current, phaseSince) = manager.GetWithPhase(id, actor);
+            var (current, phaseSince, venueTransition) = manager.GetWithPhase(id, actor);
             using var exists = Command("SELECT 1 FROM recordings WHERE session=$id", ("$id", id.ToString("D")));
             var info = exists.ExecuteScalar() is null ? null : Info(id, actor);
             var frame = info is null || info.AcceptedSequence == 0 ? null : Frame(id, info.AcceptedSequence, actor);
@@ -137,15 +137,20 @@ public sealed partial class WorldRecordings
                 tracking ? mrState : null);
             var duration = current.Mission.Definition.DurationSeconds;
             RoomMissionTime? clock = null;
-            if (source == "Fresh" && current.State is SessionState.Running or SessionState.Paused
+            var confirmed = source == "Fresh" && observedSequence >= phaseSince;
+            if (confirmed && current.State is SessionState.Running or SessionState.Paused
                 && current.CombatStream is { MissionClockVersion: 1 } && info?.Header is { missionClockVersion: 1 } header
-                && header.missionDurationSeconds == duration && frame is not null && observedSequence >= phaseSince)
+                && header.missionDurationSeconds == duration && frame is not null)
             {
                 var tick = frame.Packet.frame.tick;
                 clock = new(frame.Packet.frame.phase, tick / MissionClock.TicksPerSecond, MissionClock.RemainingSeconds(tick, duration),
                     duration, current.MissionClock is { Version: 1, AutoEnd: true });
             }
-            return (report, clock);
+            RoomVenuePhase? venuePhase = venueTransition && current.State is SessionState.Paused or SessionState.Running
+                ? new(current.State == SessionState.Paused ? ControlAction.Pause : ControlAction.Resume, phaseSince,
+                    confirmed ? report.WorldSequence : null, confirmed && current.State == SessionState.Paused && (!resuming || mrState == "Ready"))
+                : null;
+            return (report, clock, venuePhase);
         }
     }
 }

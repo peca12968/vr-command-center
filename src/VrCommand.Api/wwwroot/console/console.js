@@ -20,7 +20,7 @@ const objectHistory = placementHistory();
 const world = mountWorld(() => state.key, logout);
 const report = mountReport(() => state, logout);
 const readiness = mountReadiness(() => state, logout);
-const roomReadiness = mountRoomReadiness(() => state, logout);
+const roomReadiness = mountRoomReadiness(() => state, logout, applyVenuePermissions);
 const connections = mountConnections(() => state, logout);
 const closure = mountClosure(() => state, logout);
 const alignment = mountAlignment(api, download);
@@ -97,6 +97,7 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
         else if (code === 'mr-alignment-required') message = '請由主控鎖定 MR 校正檔後再配票。';
         else if (code === 'independent-rooms-occupied' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 使用中，五場都未建立。請確認房間狀態後再試。`;
         else if (code === 'venue-phase-changed') message = '全館場次狀態已變更，本批命令未套用。請重新整理後確認房間。';
+        else if (code === 'venue-pause-not-observed' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 尚未回傳有效的暫停快照，本批場次維持暫停。`;
         else if (code === 'venue-resume-not-ready' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 的 MR 追蹤尚未就緒，本批場次維持暫停。`;
         else message = path.startsWith('/missions') ? '任務版本已變更或原請求內容不一致；草稿仍保留，可載入最新版或另存新任務。' : '場次狀態或名額已變更，請重新整理並確認後再操作。';
       }
@@ -239,7 +240,10 @@ function renderRooms() {
       status.dataset.roomReadiness = room.id;
       const clock = element('p', '活動時間未確認', 'hint room-clock');
       clock.dataset.roomClock = room.id;
-      card.append(status, clock);
+      const phase = element('p', '', 'hint room-venue-phase');
+      phase.dataset.roomVenuePhase = room.id;
+      phase.hidden = true;
+      card.append(status, clock, phase);
     }
     const button = element('button', room.sessionId ? '查看場次' : '選擇此房間', 'quiet small');
     button.type = 'button'; button.disabled = state.busy || !!state.pending;
@@ -361,15 +365,20 @@ function venueRoomText(targets) { return targets.flatMap(row => row.roomIds).sor
 function applyVenuePermissions() {
   $('venue-phase').hidden = !master();
   const pause = venueTargets('Pause'), resume = venueTargets('Resume'), locked = state.busy || !!state.pending || !master();
+  const waiting = resume.filter(target => !roomReadiness.venueReady(target));
   $('venue-pause').disabled = locked || !pause.length;
-  $('venue-resume').disabled = locked || !resume.length;
+  $('venue-resume').disabled = locked || !resume.length || !!waiting.length;
   const describe = targets => targets.length ? '房間 ' + venueRoomText(targets) : '無';
   $('venue-phase-targets').textContent = state.venue ? `可暫停 ${describe(pause)} · 可繼續 ${describe(resume)}` : '等待房間狀態。';
+  const evidence = $('venue-phase-evidence');
+  evidence.hidden = !resume.length;
+  const message = waiting.length ? `等候房間 ${venueRoomText(waiting)} 的遊戲端確認或 MR 追蹤。` : '目標房間的暫停快照已確認。';
+  if (evidence.textContent !== message) evidence.textContent = message;
 }
 async function venuePhase(action) {
   if (!master() || state.pending) return;
   const targets = venueTargets(action);
-  if (!targets.length) return;
+  if (!targets.length || (action === 'Resume' && targets.some(target => !roomReadiness.venueReady(target)))) return;
   const verb = action === 'Pause' ? '暫停' : '繼續';
   if (!confirm(`${verb}房間 ${venueRoomText(targets)} 的 ${targets.length} 個場次？`)) return;
   state.pending = { kind: 'venue-phase', path: '/venue/phase', method: 'POST', requestId: uuid(),

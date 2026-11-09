@@ -619,6 +619,10 @@ def main():
                 clock = row.get('clock'); manual = row['sessionId'] == room_two
                 if not clock or clock['phase'] != ('Paused' if manual else phase): return None
                 if not manual and (row['sessionId'] not in applied or row['sessionSequence'] < applied[row['sessionId']]): return None
+                status = row.get('venuePhase')
+                if manual and status is not None: return None
+                if not manual and (not status or status['action'] != receipt['action'] or status['appliedAtSequence'] != applied[row['sessionId']]
+                    or not status['worldSequence'] or status['readyToResume'] != (phase == 'Paused')): return None
                 if previous:
                     before = previous[row['roomId']-1]['clock']['elapsedSeconds']
                     if manual and clock['elapsedSeconds'] != before or not manual and clock['elapsedSeconds'] <= before: return None

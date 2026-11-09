@@ -176,6 +176,41 @@ internal static class ReadinessChecks
         check(all.Length == 5 && all.All(row => row.SessionId == linked.Id && row.Clock == new RoomMissionTime("Running", 5, 55, 60, false))
             && own.Length == 1 && own[0].RoomId == 1 && own[0].Clock == all[0].Clock,
             "Linked rooms share one accepted activity clock and room controllers receive only their room");
+        VenuePhaseFence[] Fences(VenuePhaseTarget[] targets) => targets.Select(target => new VenuePhaseFence(target.SessionId, target.PhaseSinceSequence)).ToArray();
+        var pause = store.ExecuteVenuePhase(ControlAction.Pause, Fences(manager.ReadVenuePhase(master).Pause), Guid.NewGuid(), master).Sessions.Single();
+        var targets = Fences(manager.ReadVenuePhase(master).Resume);
+        var key = Guid.NewGuid();
+        void RejectUnobservedPause(string message)
+        {
+            try { store.ExecuteVenuePhase(ControlAction.Resume, targets, key, master); }
+            catch (VenuePauseNotObservedException error)
+            {
+                check(error.RoomIds.SequenceEqual(new[] { 1, 2, 3, 4, 5 }) && manager.Get(linked.Id).State == SessionState.Paused, message);
+                return;
+            }
+            throw new Exception("Venue resume unexpectedly accepted an unconfirmed pause");
+        }
+        check(store.ReadinessByRoom(master).All(row => row.VenuePhase == new RoomVenuePhase(ControlAction.Pause, pause.AppliedAtSequence, null, false)),
+            "The management pause receipt precedes a separate accepted game-source confirmation for all linked rooms");
+        RejectUnobservedPause("A VR linked game cannot resume from a world frame predating the venue Pause");
+        Publish(manager.Get(linked.Id));
+        var pausedAt = clock.Now;
+        check(store.ReadinessByRoom(master).All(row => row.VenuePhase == new RoomVenuePhase(ControlAction.Pause, pause.AppliedAtSequence, 3, true))
+            && store.ReadinessByRoom(roomOne).Single().VenuePhase?.WorldSequence == 3,
+            "Five linked rooms share the exact accepted pause frame while room control reads only its own row");
+        clock.Now = pausedAt.AddMilliseconds(1501);
+        RejectUnobservedPause("Expired VR pause evidence cannot authorize the batch Resume");
+        check(store.ReadinessByRoom(master).All(row => row.VenuePhase is { WorldSequence: null, ReadyToResume: false }),
+            "A stale source withdraws its confirmation without losing the original venue pause sequence");
+        Publish(manager.Get(linked.Id));
+        var resumed = store.ExecuteVenuePhase(ControlAction.Resume, targets, key, master).Sessions.Single();
+        check(store.ReadinessByRoom(master).All(row => row.VenuePhase == new RoomVenuePhase(ControlAction.Resume, resumed.AppliedAtSequence, null, false)),
+            "The new Resume receipt is pending until a new running frame actually observes it");
+        Publish(manager.Get(linked.Id), 20);
+        check(store.ReadinessByRoom(master).All(row => row.VenuePhase == new RoomVenuePhase(ControlAction.Resume, resumed.AppliedAtSequence, 5, false)),
+            "A fresh running frame confirms the original venue Resume for each linked room");
+        Command(linked, ControlAction.Pause);
+        check(store.ReadinessByRoom(master).All(row => row.VenuePhase is null), "A later manual transition removes the venue marker from the current rooms");
         Command(linked, ControlAction.End);
         check(store.ReadinessByRoom(master).All(row => row is { SessionId: null, Clock: null }), "Ending a session clears its active room clocks");
     }
@@ -339,10 +374,12 @@ internal static class ReadinessChecks
         store.ExecuteVenuePhase(ControlAction.Pause, Fences(manager.ReadVenuePhase(master).Pause), Guid.NewGuid(), master);
         var venueResume = Fences(manager.ReadVenuePhase(master).Resume);
         var venueKey = Guid.NewGuid();
-        Reject<VenueResumeNotReadyException>(() => store.ExecuteVenuePhase(ControlAction.Resume, venueResume, venueKey, master),
+        Reject<VenuePauseNotObservedException>(() => store.ExecuteVenuePhase(ControlAction.Resume, venueResume, venueKey, master),
             "Whole-venue Resume cannot use a paused frame from before its own phase transition");
         Refresh(); store.Append(id, Frame(10), server);
         clock.Now = start.AddMilliseconds(450);
+        check(store.ReadinessByRoom(master).All(room => room.VenuePhase is { Action: ControlAction.Pause, WorldSequence: 10, ReadyToResume: true }),
+            "One observed MR pause and its tracked admissions confirm readiness for the five linked rooms");
         check(!store.ExecuteVenuePhase(ControlAction.Resume, venueResume, venueKey, master).Duplicate && manager.Get(id).State == SessionState.Running,
             "Whole-venue Resume uses the original MR gate with a fresh paused frame and tracked admissions");
         clock.Now = start.AddSeconds(5);

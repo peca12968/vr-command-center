@@ -70,7 +70,11 @@ internal static class VenuePhaseChecks
             Command(2, ControlAction.Pause, room2);
             Reject<VenuePhaseChangedException>(() => manager.ExecuteVenuePhase(ControlAction.Resume, resumable, Guid.NewGuid(), master),
                 "A room paused individually after a venue pause cannot be resumed by the old batch preview");
-            var resume = manager.ExecuteVenuePhase(ControlAction.Resume, Fences(manager.ReadVenuePhase(master).Resume), Guid.NewGuid(), master);
+            var current = Fences(manager.ReadVenuePhase(master).Resume);
+            Reject<VenuePauseNotObservedException>(() => manager.ExecuteVenuePhase(ControlAction.Resume, current, Guid.NewGuid(), master),
+                "A paused VR target also requires the current source confirmation");
+            var witness = current.ToDictionary(row => row.SessionId, row => new VenueResumeWitness(row.PhaseSinceSequence, manager.Get(row.SessionId).Sequence, false));
+            var resume = manager.ExecuteVenuePhase(ControlAction.Resume, current, Guid.NewGuid(), master, witness);
             check(resume.Sessions.Single().SessionId == ids[0] && manager.Get(ids[0]).State == SessionState.Running
                 && manager.Get(ids[1]).State == SessionState.Paused && manager.Get(ids[2]).State == SessionState.Paused,
                 "Whole-venue Resume leaves both individually paused rooms untouched");
@@ -107,7 +111,8 @@ internal static class VenuePhaseChecks
         mixedManager.Execute(mr.Id, new(Guid.NewGuid(), ControlAction.Begin), master, mixedManager.Get(mr.Id).Sequence);
         mixedManager.ExecuteVenuePhase(ControlAction.Pause, Fences(mixedManager.ReadVenuePhase(master).Pause), Guid.NewGuid(), master);
         var mixedResume = Fences(mixedManager.ReadVenuePhase(master).Resume);
-        Reject<VenueResumeNotReadyException>(() => mixedManager.ExecuteVenuePhase(ControlAction.Resume, mixedResume, Guid.NewGuid(), master),
+        var mixedWitness = mixedResume.ToDictionary(row => row.SessionId, row => new VenueResumeWitness(row.PhaseSinceSequence, mixedManager.Get(row.SessionId).Sequence, false));
+        Reject<VenueResumeNotReadyException>(() => mixedManager.ExecuteVenuePhase(ControlAction.Resume, mixedResume, Guid.NewGuid(), master, mixedWitness),
             "A missing MR readiness witness prevents the entire mixed venue Resume");
         check(mixedManager.List().All(session => session.State == SessionState.Paused), "A blocked MR room leaves the eligible VR room paused too");
     }

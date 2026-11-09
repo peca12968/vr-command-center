@@ -95,6 +95,8 @@ app.Use(async (context, next) =>
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = venue.Code, roomId = venue.RoomId });
         else if (ex is VenuePhaseChangedException)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "venue-phase-changed" });
+        else if (ex is VenuePauseNotObservedException waiting)
+            await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "venue-pause-not-observed", roomIds = waiting.RoomIds });
         else if (ex is VenueResumeNotReadyException notReady)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "venue-resume-not-ready", roomIds = notReady.RoomIds });
         else await context.Response.WriteAsJsonAsync(new { error = ex.Message });

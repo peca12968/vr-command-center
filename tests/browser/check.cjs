@@ -116,7 +116,7 @@ async function main() {
       console.log(`PASS: ${checks} focused room clock checks. Screenshots: ${screenshots}`); return;
     }
     if (process.argv.includes('--venue-phase-only')) {
-      await require('./venue-phase-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
+      await require('./venue-phase-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
       check(browserErrors.length === 0, 'Venue phase controls have no uncaught browser or policy errors');
       await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks,
         browser: await browser.version(), result: 'passed', scope: 'whole-venue phase transitions with real API, SQLite and Chromium' }, null, 2));
@@ -452,7 +452,7 @@ async function main() {
     await require('./independent-set-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
     await require('./mr-venue-bundle-browser.cjs')({ context, api, tokens, base, root, directory, screenshots, check, captureErrors });
     await require('./room-clock-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
-    await require('./venue-phase-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
+    await require('./venue-phase-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
     check(browserErrors.length === 0, 'Browser has no uncaught script errors or CSP violations');
     await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), playwright: require('playwright/package.json').version, result: 'passed', scope: 'isolated real API and browser console; no Unity or headset test' }, null, 2));
     console.log(`PASS: ${checks} real-browser checks. Screenshots: ${screenshots}`);

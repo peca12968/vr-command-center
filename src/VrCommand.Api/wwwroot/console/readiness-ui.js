@@ -82,6 +82,20 @@ function roomReadinessRow(report, room, session) {
   return row;
 }
 
+export function roomVenuePhaseView(report, room, session, elapsed, unavailable = false) {
+  const row = roomReadinessRow(report, room, session), phase = row?.venuePhase;
+  if (!phase || !Number.isSafeInteger(phase.appliedAtSequence) || phase.appliedAtSequence < 1 || phase.appliedAtSequence > row.sessionSequence
+    || !['Pause', 'Resume'].includes(phase.action) || typeof phase.readyToResume !== 'boolean'
+    || session.state !== (phase.action === 'Pause' ? 'Paused' : 'Running')) return null;
+  const verb = phase.action === 'Pause' ? '全館暫停' : '全館繼續';
+  const source = unavailable ? 'Unavailable' : sourceAt(row, elapsed);
+  const applied = source === 'Fresh' && Number.isSafeInteger(phase.worldSequence) && phase.worldSequence > 0;
+  const ready = applied && phase.action === 'Pause' && phase.readyToResume;
+  const text = applied ? `${verb}已套用` + (phase.action === 'Pause' && !ready ? ' · 等候 MR 追蹤' : '')
+    : `${verb}待確認 · ${source === 'Fresh' ? '等待階段同步' : labels[source]}`;
+  return { applied, ready, action: phase.action, sequence: phase.appliedAtSequence, text };
+}
+
 export function roomMissionTimeView(report, room, session, elapsed) {
   const waiting = { state: 'Waiting', text: '活動時間未確認' };
   const duration = session?.mission?.definition?.durationSeconds;
@@ -120,8 +134,16 @@ export function roomReadinessView(report, room, session, elapsed) {
   return { source, ready: simulatedReady + trackedReady, text: `${simulatedReady + trackedReady} / ${row.registered} 姿態有效 · 合成 ${simulatedReady} · 追蹤 ${trackedReady}` };
 }
 
-export function mountRoomReadiness(getState, unauthorized) {
+export function mountRoomReadiness(getState, unauthorized, venueUpdated) {
   let active = false, controller, report, started = 0, attempted = -Infinity, failed = false;
+  function venueReady(target) {
+    if (!active || failed) return false;
+    const { rooms, sessions } = getState();
+    const room = rooms.find(row => row.id === target.roomIds[0] && row.sessionId === target.sessionId);
+    const session = sessions.find(row => row.id === target.sessionId);
+    const venue = room && roomVenuePhaseView(report, room, session, performance.now() - started);
+    return venue?.ready === true && venue.sequence === target.phaseSinceSequence;
+  }
   function render() {
     const { rooms, sessions } = getState();
     const elapsed = performance.now() - started;
@@ -139,7 +161,13 @@ export function mountRoomReadiness(getState, unauthorized) {
       clockCell.textContent = clock.text;
       clockCell.dataset.clockState = clock.state;
       clockCell.classList.toggle('tracking-attention', clock.state === 'Due');
+      const phase = roomVenuePhaseView(report, room, session, elapsed, failed);
+      const phaseCell = cell.parentElement.querySelector('[data-room-venue-phase]');
+      phaseCell.hidden = !phase;
+      phaseCell.textContent = phase?.text ?? '';
+      phaseCell.classList.toggle('tracking-attention', !!phase && (!phase.applied || (phase.action === 'Pause' && !phase.ready)));
     }
+    venueUpdated();
   }
   async function poll() {
     const { epoch, key } = getState();
@@ -155,7 +183,7 @@ export function mountRoomReadiness(getState, unauthorized) {
       if (!response.ok) throw new Error('Room readiness unavailable');
       const value = await response.json();
       if (current()) { report = value; started = began; failed = false; }
-    } catch { if (current()) { report = null; failed = true; } }
+    } catch { if (current()) failed = true; }
     finally {
       clearTimeout(timeout);
       if (current()) { controller = null; render(); }
@@ -173,7 +201,7 @@ export function mountRoomReadiness(getState, unauthorized) {
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') update(); else reset(); });
   setInterval(update, 250);
-  return { update, active(value) { active = value; if (value) update(); else reset(); } };
+  return { update, venueReady, active(value) { active = value; if (value) update(); else reset(); } };
 }
 
 export function mountReadiness(getState, unauthorized) {
