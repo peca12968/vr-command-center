@@ -1,5 +1,15 @@
 # 開發進度
 
+## 2026-11-10 五房追蹤驗收開場
+
+控制台 0.31.65 在全館場次控制新增選項，要求五房都是本次準備中的目標，每房五席皆有當前有效追蹤，才接受同一批 Begin。伺服器重查原場次、名冊序號及快照，並保存選項供原請求重試。一般開場條件可用於模擬操作。 [操作說明](PLAYER_READINESS.md#五房追蹤驗收開場)
+
+- 最終包 `artifacts/windows-control-console-0.31.65-final-win-x64.zip` 為 52,807,645 bytes，SHA-256 `db218f9e26179134052cc1b722c9c3a9e89cab9bec398da1c20f87fab5ef95dd`。核對 172 份來源、540 筆清單及 520 份執行檔案，解壓包 `run-6453ee086ef1464180f7d3ed5da8aa8f` 通過 106 項。另通過 991 項領域檢查、HTTP 回歸與 81 項世界串流檢查。
+- 最終包的 16 項 Chromium 專項檢查使用實際 API、SQLite 與合成追蹤快照。五房合併及三 VR、兩 MR 的獨立場，均驗證房 1 有合成姿態、房 5 少一席時整批拒絕，全部 25 席追蹤後成功。拒絕同一請求變更追蹤條件，並驗證重開 SQLite 後的原回條。證據 `console-full-tracking-final-c4d78876dc80414bac0bd12f30285a55`。
+- 最終包完整 Node 與 Chromium 回歸退出碼 0，含 650 項瀏覽器檢查，證據 `console-full-tracking-suite-5fc04c2df86841e19a288422431806b1`。原生 `run-db26d8ec29d94ad199537a92b26ca1be` 通過 386 項。五房獨立及合併各有 25 個同機桌面玩家，追蹤開場均回傳五房拒絕，原預覽序號未前進。原名冊以一般開場運行及結算，六場共 1,284 格完整回放、50 份原戰績及伺服器確認，清理後 C／F 222 份檔案雜湊相符。
+- 首輪封裝命令誤傳 `publication` 子目錄，在產生 ZIP 前退出。首個成功封裝的候選畫面在按鈕停用時仍顯示「目標場次已就緒」，已修正總覽條件並加入明確斷言。原候選的 `console-full-tracking-regression-e95ac9d82c934eadb0a519dbf6687b80` 在新增的總覽斷言退出碼 1。候選的原生 `run-03440422a73d4437a18985545ae59567` 另通過 386 項，保留其 1,222 格及 222 份 C／F 檔案核對。最終包重新封裝並獨立驗證。
+- 功能來源 `1aadc124aaa467c3899ac372278e1b59bebedc18`。GitHub Actions job `129455791992` 因帳務或支出上限未啟動。跨機 25 人、實體頭盔、MR 場地與廠商硬體仍待現地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42703982682)
+
 ## 2026-11-10 依電腦分發 Windows VR 連線檔
 
 五房場館可由主控依電腦對照表匯出 1 到 25 個 Windows VR 席位。工具先用原 VR 或混合場館 ZIP 向管理服務核對全部 25 份票券、現行入場與端點，只將所選 VIVE XR 的原四欄 JSON 寫入新目錄。混合場的 MR 房間仍沿用 Quest 部署。 [操作說明](EXTERNAL_CLIENTS.md#依電腦分發-windows-vr-連線檔)
