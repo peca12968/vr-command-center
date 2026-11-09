@@ -1,5 +1,7 @@
 # 管理、統計與玩家接入 API
 
+管理包 0.31.36 支援主控使用 `POST /api/venue/phase` 批次更新執行中場次的敵軍策略。預覽與送出需對上各場原階段及敵軍序號，房卡從 `GET /api/rooms/readiness` 讀取遊戲端確認。 [全館敵軍策略契約](LAYOUT.md#全館敵軍策略)
+
 管理包 0.31.35 支援主控使用 `POST /api/venue/phase` 批次更新執行中場次的環境。預覽及送出需對上原場次的階段與環境序號，各房的遊戲端確認由 `GET /api/rooms/readiness` 提供。 [全館環境契約](ENVIRONMENT.md#全館即時環境)
 
 API／UI0.27新增唯讀 `GET /api/sessions/{id}/report.csv`，Ended且戰鬥精確seal完成才產生reportVersion1最終CSV；未完成回409，僅操作員依現有房間讀取範圍可匯出，GameServer回403。Bearer認證、UTF-8 BOM及no-store；欄位／重試／範圍見 [REPORTS](REPORTS.md)。不新增持久schema或Unity wire，遊戲端維持0.28／NGO26，原降版限制仍適用。

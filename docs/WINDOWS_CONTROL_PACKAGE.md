@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-09 `windows-control-0.31.36-win-x64.zip` 加入全館敵軍策略與逐房快照確認。ZIP 為 52,648,048 bytes，SHA-256 `bec21e893db1de7d458bc8b8f11d9ef1680c6ce96517d5f00c20ef963dae8f7a`。解壓核對 516 個清單檔案，含 496 個執行環境檔案，通過 106 項管理包及 33 項 Chromium 專項。 [全館敵軍策略](LAYOUT.md#全館敵軍策略)
+
 2026-11-09 `windows-control-0.31.35-win-x64.zip` 加入全館即時環境與逐房快照確認。ZIP 為 52,643,959 bytes，SHA-256 `15c3c2016e77373bad9b5d228103fa552099c34029139f253e5c61e16634d9dc`。解壓核對 516 個清單檔案，含 496 個執行環境檔案，通過 106 項管理包及 29 項 Chromium 專項。 [全館環境](ENVIRONMENT.md#全館即時環境)
 
 2026-11-09 `windows-control-0.31.34-win-x64.zip` 加入全館批次結束與原場次的封存總覽。ZIP 為 52,638,294 bytes，SHA-256 `d2e0a13b0f7d9b35708f1c75b9cc5e1527422b55d2d5215080685a6d070c68d8`。解壓核對 516 個清單檔案，含 496 個執行環境檔案，通過 106 項管理包及 25 項 Chromium 專項。 [全館收尾](SESSION_CLOSURE.md#全館批次結束)
