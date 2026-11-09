@@ -66,9 +66,11 @@ def main():
     p.add_argument('--check-interrupted-replay', action='store_true', help='Play the saved native prefix after the owned launcher is killed')
     p.add_argument('--check-managed-mr', action='store_true', help='Verify the MR alignment startup gate, desktop rejection and Preparing seal')
     p.add_argument('--mr-venue-bundle-only', action='store_true', help='Verify both MR venue exports from native publishers, without starting desktop players')
+    p.add_argument('--check-mapped-quest', action='store_true', help='Use 25 mock ADB devices with each native MR venue export')
     p.add_argument('--check-live-reinforcement', action='store_true', help='Verify a native server accepts only supported live enemy targets and records the result')
     args=p.parse_args()
     if os.name!='nt':p.error('Actual Windows processes required')
+    if args.check_mapped_quest and not args.mr_venue_bundle_only:p.error('--check-mapped-quest requires --mr-venue-bundle-only')
     if args.mr_venue_bundle_only:
         if not args.game_address or args.player_package:p.error('--mr-venue-bundle-only needs --game-address and no player package')
     elif bool(args.player_package)!=bool(args.game_address):p.error('Provide --player-package and --game-address together')
@@ -604,6 +606,8 @@ def main():
                 seat = json.loads(subprocess.check_output([*deploy, '-RoomId', '4', '-Seat', '2', '-CheckOnly'],
                     env=environment, timeout=25, encoding='utf-8', cwd=destination))
                 assert list(destination.iterdir()) == [bundle]
+                if args.check_mapped_quest:
+                    verify_mapped_quest(deploy, destination, environment, raw, mode, files, hashes)
             endpoints = {entry['sessionId']: f'{address}:{entry["ready"]["port"]}' for entry in entries}
             check(report['managementVerified'] and report['alignmentPinsVerified'] and report['topology'] == mode and report['seats'] == 25
                 and [(row['roomId'], row['seats'], row['endpoint'], row['alignmentSha256']) for row in report['rooms']] == [
@@ -617,6 +621,38 @@ def main():
             save(f'mr-venue-{mode.lower()}-seat.json', seat)
             for entry in entries: command(entry['sessionId'], 'End')
             for entry in entries: finish(entry)
+    def verify_mapped_quest(deploy, destination, environment, raw, mode, files, hashes):
+        rows = [{'roomId': room, 'seat': seat, 'serial': f'fixture-{(room-1)*5+seat:02}'} for room in range(1, 6) for seat in range(1, 6)]
+        mapping = destination / 'device-map.json'
+        mapping.write_text(json.dumps({'version': 1, 'seats': rows[::-1]}), encoding='utf-8')
+        mapped = [*deploy, '-DeviceMap', str(mapping), '-ExpectedVersionCode', '61', '-AdbPath', str(ROOT/'tests/fixtures/mock-quest-fleet.ps1')]
+        environment = {**environment, 'VR_QUEST_FLEET_FIXTURE': str(destination), 'VR_QUEST_FLEET_FAULTS': ''}
+        def invoke(flag):
+            return json.loads(subprocess.check_output([*mapped, flag], env=environment, timeout=45, encoding='utf-8', cwd=destination))
+        preview = invoke('-CheckOnly')
+        check(preview['complete'] and preview['managementVerified'] and preview['phase'] == 'preflight'
+              and [row['status'] for row in preview['devices']] == ['ready']*25
+              and not any(destination.glob('fixture-*')), mode + ' mapped preflight confirms 25 mocked devices with no configuration writes')
+        (destination/'adb.log').unlink()
+        applied = invoke('-DeployMappedSeats')
+        check(applied['complete'] and applied['managementVerified'] and applied['phase'] == 'deployment'
+              and applied['devices'] == [{'roomId': row['roomId'], 'seat': row['seat'], 'status': 'launch-requested', 'versionCode': 61} for row in rows],
+              mode + ' mapped deployment submits launch for exactly the 25 requested mock devices')
+        with zipfile.ZipFile(io.BytesIO(raw)) as bundle:
+            for row in rows:
+                room, seat = row['roomId'], row['seat']; remote = destination / row['serial']
+                with zipfile.ZipFile(io.BytesIO(bundle.read(f'room-{room:02}-connections.zip'))) as tickets:
+                    config = json.loads(tickets.read(f'room-{room:02}-seat-{seat:02}.json'))
+                config.update(questPassthrough=True, requestMixedReality=True)
+                alignment = f'vr-room-alignment-{hashes[room]}.json'
+                assert read(remote/'vr-connection.json') == config and (remote/alignment).read_bytes() == files[room]
+                assert {item.name for item in remote.iterdir()} == {'vr-connection.json', alignment}
+        commands = (destination/'adb.log').read_text(encoding='utf-8').splitlines()
+        check(len(commands) == 226 and sum(' shell monkey ' in line for line in commands) == 25
+              and all(' install ' not in line and 'unmapped-device' not in line for line in commands),
+              mode + ' all 25 original signed configs and calibration files are isolated by serial with no APK installs')
+        save(f'mr-venue-{mode.lower()}-mapped-preflight.json', preview)
+        save(f'mr-venue-{mode.lower()}-mapped-deployment.json', applied)
     try:
         subprocess.run([str(control_exe),'--init',str(data),'--port',str(free()),'--report',str(out/'control-init.json')],env=env,check=True,timeout=30);keys=read(data/'operator-keys.json')['OperatorKeys'];marker=read(data/'control-instance.json');uri='http://127.0.0.1:'+str(marker['port'])
         api_ready=out/'control-ready.json';api_stop=out/'control-stop.request';api=subprocess.Popen([str(control_exe),'--run',str(data),'--seconds','1800','--ready-report',str(api_ready),'--stop-file',str(api_stop),'--report',str(out/'control-final.json')],env=env,cwd=out)

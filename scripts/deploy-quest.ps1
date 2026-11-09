@@ -11,6 +11,9 @@ param(
     [Parameter(Mandatory, ParameterSetName='Bundle')][string]$VenueBundle,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,5)][int]$RoomId,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,5)][int]$Seat,
+    [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$DeviceMap,
+    [Parameter(ParameterSetName='Bundle')][ValidateRange(1,2147483647)][int]$ExpectedVersionCode,
+    [Parameter(ParameterSetName='Bundle')][switch]$DeployMappedSeats,
     [Parameter(ParameterSetName='Venue')][Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$ManagementApi
 )
 $ErrorActionPreference = 'Stop'
@@ -271,7 +274,7 @@ function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$Selecte
     $endpoints = [Collections.Generic.HashSet[string]]::new()
     $earliest = [DateTimeOffset]::MaxValue
     $usesPins = $null
-    $selected = $null
+    $connections = @{}
     $liveRooms = [Collections.Generic.List[object]]::new()
     $publishedEndpoints = @{}
     $rooms = foreach ($room in $manifest.rooms) {
@@ -318,8 +321,8 @@ function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$Selecte
                 throw "Room $id seat $($ticket.Seat + 1) repeats a player or admission."
             }
             if ($ticket.ExpiresAtUtc -lt $earliest) { $earliest = $ticket.ExpiresAtUtc }
-            if ($id -eq $SelectedRoom -and $ticket.Seat -eq ($SelectedSeat - 1)) {
-                $selected = @{ Alignment = $alignment; Ticket = $ticket }
+            if ($BundleEntries) {
+                $connections["$id/$($ticket.Seat + 1)"] = @{ Alignment = $alignment; Ticket = $ticket }
             }
         }
         $null = $sessions.Add($session)
@@ -336,11 +339,6 @@ function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$Selecte
     if ($sessions.Count -ne $expected -or $endpoints.Count -ne $expected) {
         throw "$($manifest.topology) requires $expected distinct session(s) and $expected distinct game-server endpoint(s)."
     }
-    if ($ManagementApi) {
-        if (-not $usesPins) { throw 'The live venue check requires all 25 connection files to carry locked MR alignment hashes.' }
-        Confirm-VenueWithManagement $ManagementApi $manifest.topology $liveRooms.ToArray() $publishedEndpoints
-    }
-    if ($earliest -le [DateTimeOffset]::UtcNow) { throw 'A player ticket expired during venue preflight. Download fresh room connection ZIPs.' }
     $report = [ordered]@{
         topology = $manifest.topology
         seats = $players.Count
@@ -348,20 +346,127 @@ function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$Selecte
         rooms = @($rooms | Sort-Object roomId)
     }
     if ($usesPins) { $report.alignmentPinsVerified = $true }
-    if ($ManagementApi) { $report.managementVerified = $true }
-    return @{ Report = $report; Selected = $selected }
+    return @{ Report = $report; Selected = $connections["$SelectedRoom/$SelectedSeat"]; Connections = $connections;
+        EarliestExpiry = $earliest; LiveRooms = $liveRooms.ToArray(); PublishedEndpoints = $publishedEndpoints }
 }
 
-function Publish-QuestFile([string]$Local, [string]$Staging, [string]$Destination, [string]$Description) {
+function Confirm-VenueReadback($Venue) {
+    if ($ManagementApi) {
+        if (-not $Venue.Report.alignmentPinsVerified) { throw 'The live venue check requires all 25 connection files to carry locked MR alignment hashes.' }
+        Confirm-VenueWithManagement $ManagementApi $Venue.Report.topology $Venue.LiveRooms $Venue.PublishedEndpoints
+        $Venue.Report.managementVerified = $true
+    }
+    if ($Venue.EarliestExpiry -le [DateTimeOffset]::UtcNow) {
+        throw 'A player ticket expired during venue preflight. Download fresh room connection ZIPs.'
+    }
+}
+
+function Read-QuestDeviceMap([string]$Path) {
+    $map = (Read-DeploymentJson $Path 16384 'device map').Document
+    if (-not (Test-JsonInteger $map.version) -or $map.version -ne 1 -or $map.seats -isnot [array] -or $map.seats.Count -ne 25 -or
+        @($map.PSObject.Properties.Name | Where-Object { $_ -cnotin @('version','seats') }).Count) {
+        throw 'Use a version 1 device map with exactly 25 seats.'
+    }
+    $seats = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $serials = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($row in $map.seats) {
+        if (-not (Test-JsonInteger $row.roomId) -or $row.roomId -notin 1..5 -or
+            -not (Test-JsonInteger $row.seat) -or $row.seat -notin 1..5 -or
+            $row.serial -isnot [string] -or $row.serial -cnotmatch '\A[A-Za-z0-9\[][A-Za-z0-9._:%\[\]-]{0,127}\z' -or
+            @($row.PSObject.Properties.Name | Where-Object { $_ -cnotin @('roomId','seat','serial') }).Count) {
+            throw 'Each device map row needs a roomId, seat and exact ADB serial.'
+        }
+        if (-not $seats.Add("$($row.roomId)/$($row.seat)")) { throw "Room $($row.roomId) seat $($row.seat) is mapped more than once." }
+        if (-not $serials.Add($row.serial)) { throw "Room $($row.roomId) seat $($row.seat) repeats an ADB serial." }
+    }
+    $map.seats | Sort-Object roomId, seat
+}
+
+function Get-QuestDeviceInventory {
+    $lines = @(& $AdbPath devices)
+    if ($LASTEXITCODE -ne 0) { throw 'Could not list authorized Android devices.' }
+    $inventory = [Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
+    foreach ($line in $lines) {
+        if ($line -cnotmatch '\A(\S+)\t(\S+)\s*\z') { continue }
+        $key = $Matches[1]; $status = $Matches[2]
+        if ($inventory.ContainsKey($key)) { $status = 'ambiguous' }
+        $inventory[$key] = $status
+    }
+    return ,$inventory
+}
+
+function Get-MappedQuestStatus($Row, $Inventory) {
+    $result = [ordered]@{ roomId = $Row.roomId; seat = $Row.seat; status = 'ready' }
+    $status = $Inventory[$Row.serial]
+    if ($status -cne 'device') {
+        $result.status = if (-not $status) { 'missing' } elseif ($status -cin @('unauthorized','offline','ambiguous')) { $status } else { 'unavailable' }
+        return $result
+    }
+    $model = & $AdbPath -s $Row.serial shell getprop ro.product.model 2>$null
+    if ($LASTEXITCODE -ne 0) { $result.status = 'model-unavailable'; return $result }
+    if (([string]$model).Trim() -cne 'Quest 3') { $result.status = 'wrong-model'; return $result }
+    $packages = @(& $AdbPath -s $Row.serial shell pm list packages -e --show-versioncode --user current com.vrcommand.quest 2>$null)
+    if ($LASTEXITCODE -ne 0) { $result.status = 'package-query-failed'; return $result }
+    $rows = @($packages | Where-Object { $_ -cmatch '\Apackage:com\.vrcommand\.quest versionCode:[0-9]+\s*\z' })
+    $code = 0L
+    if ($rows.Count -ne 1 -or -not [long]::TryParse(($rows[0] -csplit ':')[-1], [ref]$code)) {
+        $result.status = 'package-unavailable'; return $result
+    }
+    $result.versionCode = $code
+    if ($code -ne $ExpectedVersionCode) { $result.status = 'version-mismatch' }
+    return $result
+}
+
+function Invoke-MappedQuestSeats($Venue, [object[]]$Map) {
+    if (-not (Test-Path -LiteralPath $AdbPath -PathType Leaf)) { throw 'Android platform-tools are not installed.' }
+    $inventory = Get-QuestDeviceInventory
+    $devices = @($Map | ForEach-Object { Get-MappedQuestStatus $_ $inventory })
+    $report = [ordered]@{ phase = 'preflight'; topology = $Venue.Report.topology; expectedVersionCode = $ExpectedVersionCode;
+        alignmentPinsVerified = $true; earliestExpiryUtc = $Venue.Report.earliestExpiryUtc; complete = $false; devices = $devices }
+    if ($devices | Where-Object { $_.status -cne 'ready' }) { return $report }
+    Confirm-VenueReadback $Venue
+    if ($Venue.Report.managementVerified) { $report.managementVerified = $true }
+    if (-not $DeployMappedSeats) { $report.complete = $true; return $report }
+
+    $report.phase = 'deployment'
+    $WarningPreference = 'SilentlyContinue'
+    foreach ($device in $devices) { $device.status = 'not-attempted' }
+    for ($index = 0; $index -lt $Map.Count; $index++) {
+        $row = $Map[$index]; $device = $devices[$index]
+        $connection = $Venue.Connections["$($row.roomId)/$($row.seat)"]
+        if ($connection.Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) {
+            $device.status = 'ticket-expired'; return $report
+        }
+        try {
+            Set-QuestConnection $row.serial $connection.Ticket.Config $connection.Ticket $connection.Alignment -RequestMixedReality
+            $device.status = 'launch-requested'
+        } catch {
+            $device.status = 'deployment-failed'
+            return $report
+        }
+    }
+    $report.complete = $true
+    return $report
+}
+
+function Enter-QuestDeployment {
+    $lock = [Threading.Mutex]::new($false, 'VrCommand.QuestDeployment')
+    try { $acquired = $lock.WaitOne(0) }
+    catch [Threading.AbandonedMutexException] { $acquired = $true }
+    if (-not $acquired) { $lock.Dispose(); throw 'Another Quest deployment is running on this computer.' }
+    return $lock
+}
+
+function Publish-QuestFile([string]$TargetSerial, [string]$Local, [string]$Staging, [string]$Destination, [string]$Description) {
     try {
-        & $AdbPath -s $Serial push $Local $Staging | Out-Null
+        & $AdbPath -s $TargetSerial push $Local $Staging | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "$Description could not be copied." }
-        & $AdbPath -s $Serial shell mv $Staging $Destination
+        & $AdbPath -s $TargetSerial shell mv $Staging $Destination | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "$Description could not be activated." }
     } catch {
         $publishError = $_
         try {
-            & $AdbPath -s $Serial shell rm -f $Staging *> $null
+            & $AdbPath -s $TargetSerial shell rm -f $Staging *> $null
             if ($LASTEXITCODE -ne 0) { throw 'ADB cleanup failed.' }
         } catch {
             Write-Warning 'Could not remove the temporary deployment file from the selected device.'
@@ -370,20 +475,72 @@ function Publish-QuestFile([string]$Local, [string]$Staging, [string]$Destinatio
     }
 }
 
+function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment, [switch]$UsePassthrough, [switch]$RequestMixedReality) {
+    & $AdbPath -s $TargetSerial shell am force-stop com.vrcommand.quest | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Quest app could not be stopped before copying configuration.' }
+    $remoteDirectory = '/sdcard/Android/data/com.vrcommand.quest/files'
+    & $AdbPath -s $TargetSerial shell mkdir -p $remoteDirectory | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'App data directory could not be prepared.' }
+    $deploymentId = [Guid]::NewGuid().ToString('N')
+    if ($Alignment) {
+        $alignmentHash = $Alignment.Hash
+        $stagedAlignment = [IO.Path]::GetTempFileName()
+        try {
+            [IO.File]::WriteAllBytes($stagedAlignment, $Alignment.Bytes)
+            Publish-QuestFile $TargetSerial $stagedAlignment "$remoteDirectory/vr-room-alignment-$deploymentId.tmp" `
+                "$remoteDirectory/vr-room-alignment-$alignmentHash.json" 'Room alignment file'
+        } finally { Remove-Item -LiteralPath $stagedAlignment }
+        if (-not $Ticket.AlignmentHash) { $Config | Add-Member -NotePropertyName 'roomAlignmentSha256' -NotePropertyValue $alignmentHash }
+    }
+    if ($UsePassthrough -or $RequestMixedReality) { $Config | Add-Member -NotePropertyName 'questPassthrough' -NotePropertyValue $true }
+    if ($RequestMixedReality) { $Config | Add-Member -NotePropertyName 'requestMixedReality' -NotePropertyValue $true }
+    $stagedConfig = [IO.Path]::GetTempFileName()
+    try {
+        if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired during deployment. Download a fresh connection file.' }
+        [IO.File]::WriteAllText($stagedConfig, ($Config | ConvertTo-Json -Depth 4 -Compress))
+        Publish-QuestFile $TargetSerial $stagedConfig "$remoteDirectory/vr-connection-$deploymentId.tmp" "$remoteDirectory/vr-connection.json" 'Player connection file'
+    } finally { Remove-Item -LiteralPath $stagedConfig }
+    if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired before launch. Download a fresh connection file.' }
+    & $AdbPath -s $TargetSerial shell monkey -p com.vrcommand.quest -c android.intent.category.LAUNCHER 1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Quest app launch failed.' }
+}
+
 if ($PSCmdlet.ParameterSetName -eq 'Venue') {
     $manifest = (Read-DeploymentJson $VenueManifest 16384 'venue manifest').Document
     $directory = [IO.Path]::GetDirectoryName((Resolve-Path -LiteralPath $VenueManifest).ProviderPath)
-    (Read-Venue $manifest $directory).Report | ConvertTo-Json -Depth 4 -Compress
+    $venue = Read-Venue $manifest $directory
+    Confirm-VenueReadback $venue
+    $venue.Report | ConvertTo-Json -Depth 4 -Compress
     return
 }
 
 $alignment = $null
 $alignmentHash = $null
 if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
+    if ($DeviceMap) {
+        if ($RoomId -or $Seat -or $PSBoundParameters.ContainsKey('Serial') -or -not $ExpectedVersionCode) {
+            throw 'Use -DeviceMap with -ExpectedVersionCode and omit -RoomId, -Seat and -Serial.'
+        }
+        if ($DeployMappedSeats -and ($CheckOnly -or -not $ManagementApi)) {
+            throw '-DeployMappedSeats requires -ManagementApi and cannot be combined with -CheckOnly.'
+        }
+        $map = @(Read-QuestDeviceMap $DeviceMap)
+        $venue = Read-VenueBundle $VenueBundle 0 0
+        if ($DeployMappedSeats) {
+            $deploymentLock = Enter-QuestDeployment
+            try { $result = Invoke-MappedQuestSeats $venue $map }
+            finally { $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose() }
+        } else { $result = Invoke-MappedQuestSeats $venue $map }
+        $result | ConvertTo-Json -Depth 4 -Compress
+        if (-not $result.complete) { exit 1 }
+        return
+    }
+    if ($DeployMappedSeats -or $ExpectedVersionCode) { throw 'Specify -DeviceMap for mapped deployment parameters.' }
     if ([bool]$RoomId -ne [bool]$Seat) { throw 'Specify both -RoomId and -Seat, or omit both for five-room preflight.' }
     if (-not $RoomId -and $Serial) { throw 'Specify -RoomId and -Seat when targeting a Quest device.' }
     if ($RoomId -and -not $CheckOnly -and [string]::IsNullOrWhiteSpace($Serial)) { throw 'Specify -Serial to deploy a bundle seat to a Quest 3.' }
     $venue = Read-VenueBundle $VenueBundle $RoomId $Seat
+    Confirm-VenueReadback $venue
     if (-not $RoomId) {
         $venue.Report | ConvertTo-Json -Depth 4 -Compress
         return
@@ -430,39 +587,16 @@ if (-not $Serial) {
     if ($devices.Count -ne 1) { throw 'Connect and authorize one Quest 3, or specify -Serial explicitly.' }
     $Serial = $devices[0]
 }
-$model = & $AdbPath -s $Serial shell getprop ro.product.model
-if ($LASTEXITCODE -ne 0) { throw 'Could not identify the selected Android device.' }
-$model = ([string]$model).Trim()
-if ($model -ne 'Quest 3') { throw 'Selected device is not a Meta Quest 3. No app was installed.' }
-& $AdbPath -s $Serial install -r $apk
-if ($LASTEXITCODE -ne 0) { throw 'APK installation failed.' }
-& $AdbPath -s $Serial shell am force-stop com.vrcommand.quest
-if ($LASTEXITCODE -ne 0) { throw 'Quest app could not be stopped before copying configuration.' }
-$remoteDirectory = '/sdcard/Android/data/com.vrcommand.quest/files'
-& $AdbPath -s $Serial shell mkdir -p $remoteDirectory
-if ($LASTEXITCODE -ne 0) { throw 'App data directory could not be prepared.' }
-$deploymentId = [Guid]::NewGuid().ToString('N')
-if ($alignment) {
-    $stagedAlignment = [IO.Path]::GetTempFileName()
-    try {
-        [IO.File]::WriteAllBytes($stagedAlignment, $alignment.Bytes)
-        Publish-QuestFile $stagedAlignment "$remoteDirectory/vr-room-alignment-$deploymentId.tmp" `
-            "$remoteDirectory/vr-room-alignment-$alignmentHash.json" 'Room alignment file'
-    } finally {
-        Remove-Item -LiteralPath $stagedAlignment
-    }
-    if (-not $ticket.AlignmentHash) { $config | Add-Member -NotePropertyName 'roomAlignmentSha256' -NotePropertyValue $alignmentHash }
-}
-if ($Passthrough -or $isMixedReality) { $config | Add-Member -NotePropertyName 'questPassthrough' -NotePropertyValue $true }
-if ($isMixedReality) { $config | Add-Member -NotePropertyName 'requestMixedReality' -NotePropertyValue $true }
-$stagedConfig = [IO.Path]::GetTempFileName()
+$deploymentLock = Enter-QuestDeployment
 try {
-    if ($ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired during deployment. Download a fresh connection file.' }
-    [IO.File]::WriteAllText($stagedConfig, ($config | ConvertTo-Json -Depth 4 -Compress))
-    Publish-QuestFile $stagedConfig "$remoteDirectory/vr-connection-$deploymentId.tmp" "$remoteDirectory/vr-connection.json" 'Player connection file'
+    $model = & $AdbPath -s $Serial shell getprop ro.product.model
+    if ($LASTEXITCODE -ne 0) { throw 'Could not identify the selected Android device.' }
+    $model = ([string]$model).Trim()
+    if ($model -ne 'Quest 3') { throw 'Selected device is not a Meta Quest 3. No app was installed.' }
+    & $AdbPath -s $Serial install -r $apk
+    if ($LASTEXITCODE -ne 0) { throw 'APK installation failed.' }
+    Set-QuestConnection $Serial $config $ticket $alignment -UsePassthrough:$Passthrough -RequestMixedReality:$isMixedReality
 } finally {
-    Remove-Item -LiteralPath $stagedConfig
+    $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose()
 }
-& $AdbPath -s $Serial shell monkey -p com.vrcommand.quest -c android.intent.category.LAUNCHER 1 | Out-Null
-if ($LASTEXITCODE -ne 0) { throw 'Quest app launch failed.' }
 Write-Host 'Quest client installed and launched. Ticket expiry and server admission still apply.'

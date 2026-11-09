@@ -317,6 +317,19 @@ class QuestVenueTests(unittest.TestCase):
         return subprocess.run(['pwsh','-NoProfile','-NonInteractive','-File',str(script),
                                '-VenueBundle',str(bundle),*flags], capture_output=True, encoding='utf-8', timeout=20, env=environment)
 
+    def device_map(self):
+        path = self.root / 'device-map.json'
+        document = {'version': 1, 'seats': [{'roomId': room, 'seat': seat, 'serial': f'fixture-{(room-1)*5+seat:02}'}
+                                          for room in range(1, 6) for seat in range(1, 6)]}
+        document['seats'].reverse()
+        path.write_text(json.dumps(document), encoding='utf-8')
+        return path, document
+
+    def run_fleet(self, files, mapping, *flags, faults=None, environment=None):
+        env = {**os.environ, **(environment or {}), 'VR_QUEST_FLEET_FIXTURE': str(self.root), 'VR_QUEST_FLEET_FAULTS': json.dumps(faults or {})}
+        return self.run_bundle(files, '-DeviceMap', str(mapping), '-ExpectedVersionCode', '61', '-AdbPath',
+                               str(ROOT / 'tests/fixtures/mock-quest-fleet.ps1'), *flags, environment=env)
+
     def assert_rejected(self, result, message):
         self.assertNotEqual(0, result.returncode)
         self.assertIn(message, result.stderr)
@@ -341,6 +354,101 @@ class QuestVenueTests(unittest.TestCase):
         self.assert_rejected(self.run_bundle(files, '-RoomId', '5'), 'Specify both -RoomId and -Seat')
         self.assert_rejected(self.run_bundle(files, '-Serial', 'fixture'), 'Specify -RoomId and -Seat')
         self.assert_rejected(self.run_bundle(files, '-RoomId', '5', '-Seat', '2'), 'Specify -Serial')
+
+    def test_device_map_rejects_missing_duplicate_or_unsafe_assignments_before_adb(self):
+        files, _ = self.bundle('Linked')
+        path, document = self.device_map()
+        for edit, message in (
+            (lambda rows: rows.pop(), 'exactly 25 seats'),
+            (lambda rows: rows[0].update(roomId=rows[1]['roomId'], seat=rows[1]['seat']), 'mapped more than once'),
+            (lambda rows: rows[0].update(serial=rows[1]['serial']), 'repeats an ADB serial'),
+            (lambda rows: rows[0].update(serial='fixture-25;other'), 'exact ADB serial'),
+        ):
+            with self.subTest(message=message):
+                invalid = copy.deepcopy(document)
+                edit(invalid['seats'])
+                path.write_text(json.dumps(invalid), encoding='utf-8')
+                self.assert_rejected(self.run_fleet(files, path), message)
+        self.assert_rejected(self.run_fleet(files, path, '-DeployMappedSeats'), 'requires -ManagementApi')
+        self.assertFalse((self.root / 'adb.log').exists())
+
+    def test_device_map_reads_all_25_and_reports_faults_without_device_writes(self):
+        files, _ = self.bundle('Independent')
+        path, _ = self.device_map()
+        faults = {'fixture-03': 'missing', 'fixture-07': 'unauthorized', 'fixture-11': 'offline',
+                  'fixture-16': 'wrong-model', 'fixture-22': 'package-missing', 'fixture-25': 'version-mismatch'}
+        result = self.run_fleet(files, path, '-DeployMappedSeats', '-ManagementApi', 'http://127.0.0.1:1', faults=faults)
+        self.assertEqual(1, result.returncode, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(('preflight', False), (report['phase'], report['complete']))
+        self.assertEqual([(r, s) for r in range(1, 6) for s in range(1, 6)], [(row['roomId'], row['seat']) for row in report['devices']])
+        self.assertEqual({2:'missing', 6:'unauthorized', 10:'offline', 15:'wrong-model', 21:'package-unavailable', 24:'version-mismatch'},
+                         {i:row['status'] for i,row in enumerate(report['devices']) if row['status'] != 'ready'})
+        self.assertEqual(60, report['devices'][-1]['versionCode'])
+        result = self.run_fleet(files, path, '-CheckOnly')
+        self.assertEqual(0, result.returncode, result.stderr)
+        ready = json.loads(result.stdout)
+        self.assertTrue(ready['complete'] and all(row['status'] == 'ready' and row['versionCode'] == 61 for row in ready['devices']))
+        commands = (self.root / 'adb.log').read_text(encoding='utf-8').splitlines()
+        self.assertTrue(all(line == 'devices' or ' shell getprop ' in line or ' shell pm list packages ' in line for line in commands))
+        self.assertNotIn('unmapped-device', '\n'.join(commands))
+        self.assertNotIn('fixture-', result.stdout)
+
+    def test_mapped_deployment_stops_after_failure_and_keeps_prior_results(self):
+        files, seats = self.bundle('Linked')
+        path, _ = self.device_map()
+        session = str(self.session_ids[0])
+        calls = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def respond(self, data):
+                calls.append(self.path)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(data).encode())
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers['Content-Length']))
+                self.respond({'topology': 'Linked', 'allMatched': True, 'seats': [
+                    {'roomId': room, 'seat': seat, 'status': 'matched'} for room in range(1, 6) for seat in range(5)]})
+
+            def do_GET(self):
+                self.respond({'version': 1, 'sessionId': session, 'sessionEnded': False, 'address': '192.168.1.10', 'port': 7777})
+
+            def log_message(self, *args):
+                pass
+
+        before = self.root / 'fixture-04'
+        before.mkdir()
+        (before / 'vr-connection.json').write_bytes(b'previous connection')
+        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                result = self.run_fleet(files, path, '-DeployMappedSeats', '-ManagementApi', f'http://127.0.0.1:{server.server_port}',
+                                        faults={'fixture-04': 'config-move'}, environment={'VR_COMMAND_MASTER_KEY': 'PRIVATE_MASTER_CANARY'})
+            finally:
+                server.shutdown()
+                thread.join(timeout=5)
+        self.assertEqual(1, result.returncode, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(('deployment', False, True), (report['phase'], report['complete'], report['managementVerified']))
+        self.assertEqual(['launch-requested'] * 3 + ['deployment-failed'] + ['not-attempted'] * 21,
+                         [row['status'] for row in report['devices']])
+        self.assertEqual(['/api/mr-deployment/venue-check', f'/api/sessions/{session}/connection-endpoint'], calls)
+        self.assertEqual(b'previous connection', (before / 'vr-connection.json').read_bytes())
+        self.assertFalse(list(before.glob('*.tmp')))
+        self.assertEqual(['fixture-01','fixture-02','fixture-03','fixture-04'], sorted(folder.name for folder in self.root.glob('fixture-*')))
+        for seat in range(1, 4):
+            actual = json.loads((self.root / f'fixture-{seat:02}' / 'vr-connection.json').read_bytes())
+            self.assertEqual(seats[1][f'room-01-seat-{seat:02}.json']['joinTicket'], actual['joinTicket'])
+        commands = (self.root / 'adb.log').read_text(encoding='utf-8').splitlines()
+        first_write = next(index for index, line in enumerate(commands) if 'shell am force-stop' in line)
+        self.assertEqual(51, first_write)
+        self.assertEqual(3, sum(' shell monkey ' in line for line in commands))
+        self.assertNotIn('v2.', result.stdout + result.stderr)
+        self.assertNotIn('PRIVATE_MASTER_CANARY', result.stdout + result.stderr)
 
     def test_bundle_rejects_mismatched_files_before_a_selected_deployment(self):
         files, _ = self.bundle('Linked')
