@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-09 `windows-player-0.48.0-launcher-1.2.zip` 為 83,444,831 bytes，SHA-256 `e02e98a60c14de1993715b888c0dd6cbf21f01393fe43f5195179bb2429914ce`。解壓後核對 328 個清單檔案及 19 項封裝檢查。啟動器顯示房間、席位和到期倒數，遊戲執行環境沿用 0.48.0。 [連線檔席位與效期](PLAYER_CONFIG_REVIEW.md#連線檔席位與效期)
+
 2026-11-09 `windows-player-0.48.0.zip` 為 83,443,442 bytes，SHA-256 `7cf02151f7c662130172cc4be5a42fbbf6b73b74394200bff9b45b1994ae25d2`。解壓後核對 328 個清單檔案，玩家啟動器通過 19 項檢查。 [版本相容性](EXTERNAL_CLIENTS.md#遊戲版本相容性)
 
 2026-11-09 `windows-player-0.47.1.zip` 為 83,442,173 bytes，SHA-256 `ac0c39822bb819466c39519e5c0d14b9bb59e6f9e09268f007768edbc411c843`。解壓後核對 328 個清單檔案，啟動器通過 19 項檢查。 [版本相容性](EXTERNAL_CLIENTS.md#遊戲版本相容性)
