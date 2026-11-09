@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-10 場館封存逐席核對玩家來源
+
+單場驗收可加 `--verify-player-sources`，五房清單可填 `verifyPlayerSources: true`。核對原玩家日誌、入場戰績、UDP 來源及封存回放中的活動姿態。報告區分桌面模擬、Windows OpenXR、Unity Mock Runtime 和 Quest logcat，逐席輸出通過核對的活動影格數。日誌與姿態不一致，或席位從未在活動影格送達有效姿態時，驗收會失敗。 [操作方式](EXTERNAL_CLIENTS.md#核對封存戰績與-udp-來源)
+
+- Windows 0.49.0 與管理包 0.31.51 原生場 `run-9f36fa0fb07a4ea0b966dac7d0e7ebab` 退出碼 0，457 項通過。獨立五房與全連線各從原封存 ZIP、UDP 記錄及閉合回放辨識 24 個桌面席與第 5 房第 2 席的 OpenXR 模擬姿態。該席在兩種模式各有 54 格符合條件。六場共 1,573 格回放及 50 筆原戰績與伺服器確認。活動場次與剩餘程序均為零，C／F 副本 235 檔一致。
+- 單場 CLI 可用同一份原始資料重現房 5 的摘要。用副本移除該席的 OpenXR 啟動及執行環境記錄後，以同一回放複驗得到預期的拒絕。場館工具 34 項、回放檔分析 14 項及伺服器封裝 10 項通過。Quest logcat 與其他 Windows 執行環境的分類以測試資料核對，仍需實機確認裝置型號與連線。
+- 來源 `730019d61dd89d26ae9b72c299ec69500d63955c`。GitHub Actions job `129319435861` 因帳務或支出上限未啟動。本次驗收使用 Windows 同機程序，Quest 3、VIVE XR、MR 實體場地、廠商硬體與跨機 25 人仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42663076916)
+
 ## 2026-11-10 五房 VR 追蹤中斷與恢復
 
 沿用 Windows 0.49.0 遊戲及 0.31.51 管理包。從實際控制台下載原五房配票 ZIP，五房獨立及全連線各同時啟動 25 個玩家程序。第 5 房第 2 席以 Unity Mock Runtime 傳送 OpenXR 頭手姿態，其餘 24 席為桌面玩家。每種模式都用部署工具核對 25 席，只有指定席依序回報 `tracked-ready`、`awaiting-tracked-pose`、`tracked-ready`。恢復時原玩家程序、票券及連線保留，接受位移 0.2 公尺的新頭手姿態。 [複驗方式](WINDOWS_SERVER_PACKAGE.md#三個可攜包整合驗證)
