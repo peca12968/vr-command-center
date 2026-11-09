@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-10 Windows OpenXR 追蹤恢復後的扳機
+
+沿用 0.49.0 Windows 遊戲包與 0.31.51 管理包。測試 DLL 用 Unity Mock Runtime 的 OpenXR Conformance Automation 傳送扳機狀態，並保存每次成功同步的回條。中斷追蹤時扣住扳機，恢復後仍維持扣住，伺服器未扣彈。放開再短扣 100 毫秒後接受一發。 [複驗方式](WINDOWS_PLAYER_PACKAGE.md#本機追蹤整合驗證)
+
+- 伺服器封裝工具 10 項通過。原生 API 場 `run-d6bf73437cee4bd28de8e4550a0ddff3` 退出碼 0，80 項、106 格回放。實際控制台場 `run-e1515e92db234578803d0a3e490a7bfe` 退出碼 0，86 項、135 格回放。兩場都核對原玩家、同一 UDP 連線、雙封存、兩份戰績及兩次伺服器確認。活動場次和剩餘程序均為零，兩場各 42／44 檔 C／F 隔離副本雜湊一致。
+- 最終控制台於執行中顯示 OpenXR 席用彈 1 發、桌面席 0 發。回放第 111 格有一筆原射擊事件，附射線且未命中。追蹤失效、恢復後持續扣住及放開的所有保存格都維持原彈匣數。玩家最終戰績與原 CSV 相符。
+- 測試來源 `16a46b351054332992c58b5ccf5baea4cb5ed4ef`，測試 DLL SHA-256 `20a9140c20eb468742abc3596878994f94ecb51b3b9747dfd1b21b5121dbb3ce`。GitHub Actions job `129306543935` 因帳務或支出上限未啟動。Quest 3、VIVE、MR 場地、跨機 25 人及廠商硬體仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42659396193)
+
 ## 2026-11-10 Windows OpenXR 追蹤中斷與恢復
 
 沿用 0.49.0 Windows 遊戲包及 0.31.51 管理包，在同機獨立房模擬雙手控制器暫時失去追蹤。OpenXR 仍提供最後的有效座標，但撤下追蹤旗標。主控只撤下受影響席位的就緒狀態，任務與桌面席持續執行。恢復後用原程序、UDP 連線、票券及名額接受位移 0.2 公尺的新頭手姿態。 [複驗方式](WINDOWS_PLAYER_PACKAGE.md#本機追蹤整合驗證)
