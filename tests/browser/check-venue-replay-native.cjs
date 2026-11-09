@@ -66,7 +66,18 @@ async function main() {
       assert.equal(packet.frame.phase, 'Running');
       assert((await page.locator('#world-time').innerText()).startsWith((packet.elapsedMilliseconds / 1000).toFixed(2) + ' 秒'));
       await page.locator('#world-clip').screenshot({ path: path.join(path.dirname(output), config.mode + '-venue-interval.png') });
-      return { start, end, reached: Number(await canvas.getAttribute('data-sequence')), elapsedMilliseconds: packet.elapsedMilliseconds };
+      await page.locator('#saved-clip-name').fill('原生場次複盤');
+      await page.locator('#saved-clip-save').click();
+      const savedOption = page.locator('#saved-clip-select option').filter({ hasText: '原生場次複盤' });
+      await savedOption.waitFor({ state: 'attached' });
+      await page.locator('#world-clip-clear').click();
+      await page.locator('#saved-clip-load').click();
+      assert((await page.locator('#world-clip-status').innerText()).includes(`起點 第 ${start} 格`));
+      await page.locator('#world-clip-play').click();
+      await page.locator('#world-clip-status').filter({ hasText: '已到片段終點' }).waitFor();
+      assert.equal(Number(await canvas.getAttribute('data-sequence')), end);
+      return { start, end, reached: Number(await canvas.getAttribute('data-sequence')), elapsedMilliseconds: packet.elapsedMilliseconds,
+        clipId: await savedOption.getAttribute('value') };
     }
     for (const session of config.sessions) {
       const replay = await openReplay(session);

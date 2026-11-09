@@ -22,7 +22,7 @@ const archiveNames = { NoSource: '沒有遊戲來源', Missing: '尚無錄製紀
 const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: null, rooms: [], venue: null, missions: [], catalog: [], launchPinned: null, history: null, draftBase: null, draftChanged: false, draftSavedAt: '', sessions: [], session: null, selected: null, pending: null, props: [], prop: -1, environmentSequence: null, enemiesSequence: null };
 let comparedVersion = null;
 const objectHistory = placementHistory();
-const world = mountWorld(() => state.key, logout, venueEnemyText);
+const world = mountWorld(() => state.key, logout, venueEnemyText, master);
 const report = mountReport(() => state, logout, () => { renderStatistics(); closure.update(); });
 const venueReport = mountVenueReport(() => state, logout, download);
 const venueHistory = mountVenueHistory(api, selectVenueClosure);

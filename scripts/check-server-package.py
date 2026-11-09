@@ -727,6 +727,14 @@ def main():
         interval = first['interval']
         check(0 < interval['start'] < interval['end'] == interval['reached'] < first['throughSequence'],
               f'{mode} shipped console stops at the exact marked interval in the original sealed native replay')
+        clips_path = f"/api/sessions/{first['sessionId']}/world/clips"
+        shared = request(clips_path, role=f"Room{rows[0]['roomIds'][0]}")
+        clip = shared['clips'][0]
+        check(shared == request(clips_path) and len(shared['clips']) == 1
+              and shared['sessionId'] == first['sessionId'] and shared['streamId'] == sources[first['sessionId']]['header']['streamId']
+              and (clip['id'], clip['startFrame'], clip['endFrame'], clip['endMilliseconds'])
+              == (interval['clipId'], interval['start'], interval['end'], interval['elapsedMilliseconds']),
+              f'{mode} original native replay clip is shared with the authorized room')
         if earlier:
             older = earlier['sessions'][2]
             history = result['history']

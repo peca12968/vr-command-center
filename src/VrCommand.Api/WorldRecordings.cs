@@ -60,6 +60,13 @@ public sealed partial class WorldRecordings : IDisposable
                   session TEXT NOT NULL REFERENCES recordings(session), owner TEXT NOT NULL, id TEXT NOT NULL,
                   body TEXT NOT NULL, created TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0,
                   PRIMARY KEY(session, owner, id));
+                CREATE TABLE IF NOT EXISTS replay_clips (
+                  session TEXT NOT NULL REFERENCES recordings(session), id TEXT NOT NULL, name TEXT NOT NULL,
+                  first_frame INTEGER NOT NULL, last_frame INTEGER NOT NULL,
+                  created TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0,
+                  PRIMARY KEY(session, id),
+                  FOREIGN KEY(session, first_frame) REFERENCES world_frames(session, sequence),
+                  FOREIGN KEY(session, last_frame) REFERENCES world_frames(session, sequence));
                 CREATE TABLE IF NOT EXISTS connection_endpoints (
                   session TEXT PRIMARY KEY REFERENCES recordings(session), stream TEXT NOT NULL,
                   owner TEXT NOT NULL, body TEXT NOT NULL, created TEXT NOT NULL);

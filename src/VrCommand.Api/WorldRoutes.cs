@@ -49,6 +49,15 @@ public static class WorldRoutes
         app.MapPut("/api/sessions/{id:guid}/world/cameras/{camera:guid}", (Guid id, Guid camera, CameraBookmarkDraft draft, WorldRecordings store, HttpContext context) => store.SaveBookmark(id, camera, draft, Actor(context)));
         app.MapDelete("/api/sessions/{id:guid}/world/cameras/{camera:guid}", (Guid id, Guid camera, WorldRecordings store, HttpContext context) =>
         { store.DeleteBookmark(id, camera, Actor(context)); return Results.NoContent(); });
+        app.MapGet("/api/sessions/{id:guid}/world/clips", (Guid id, WorldRecordings store, HttpContext context) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            return Results.Json(store.ReplayClips(id, Actor(context)), WorldJson.Options);
+        });
+        app.MapPut("/api/sessions/{id:guid}/world/clips/{clip:guid}", (Guid id, Guid clip, ReplayClipDraft draft, WorldRecordings store, HttpContext context) =>
+            Results.Json(store.SaveReplayClip(id, clip, draft, Actor(context)), WorldJson.Options));
+        app.MapDelete("/api/sessions/{id:guid}/world/clips/{clip:guid}", (Guid id, Guid clip, WorldRecordings store, HttpContext context) =>
+        { store.DeleteReplayClip(id, clip, Actor(context)); return Results.NoContent(); });
     }
 
     private static async Task Publish(Guid id, WorldRecordings store, SessionManager manager, HttpContext context)

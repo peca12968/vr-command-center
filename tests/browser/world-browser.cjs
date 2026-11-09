@@ -482,6 +482,58 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     const repeatedClip = clipWatch(eventSequence, '4');
     await clipPlay.click(); await repeatedClip; await waitClipEnd();
     check(Number(await canvas.getAttribute('data-sequence')) === clipTail, 'Retrying the interval repeats from the original start and finishes at the original end');
+    const savedRoute = archiveRoute + '/clips', savedPicker = page.locator('#saved-clip-select');
+    const clipName = '掩體 <東側> 複盤';
+    const putRequests = [];
+    const captureClipWrite = request => {
+      if (request.method() === 'PUT' && new URL(request.url()).pathname.startsWith('/api' + savedRoute + '/'))
+        putRequests.push({ path: new URL(request.url()).pathname, body: request.postData() });
+    };
+    page.on('request', captureClipWrite);
+    await page.route('**/world/clips/*', async route => {
+      const accepted = await route.fetch();
+      if (!accepted.ok()) { await route.fulfill({ response: accepted }); return; }
+      await route.abort('failed');
+    }, { times: 1 });
+    await page.locator('#saved-clip-name').fill(clipName);
+    await page.locator('#saved-clip-save').click();
+    await page.locator('#saved-clip-retry').waitFor();
+    const originalClip = (await api(savedRoute, 'GET', undefined, 'Room2')).clips[0];
+    check(originalClip.name === clipName && originalClip.startFrame === eventSequence && originalClip.endFrame === clipTail,
+      'An accepted save with a lost response is readable in the same room with the exact original boundaries');
+    await page.locator('#saved-clip-retry').click();
+    await savedPicker.locator(`option[value="${originalClip.id}"]`).waitFor({ state: 'attached' });
+    page.off('request', captureClipWrite);
+    check(putRequests.length === 2 && JSON.stringify(putRequests[0]) === JSON.stringify(putRequests[1])
+      && (await api(savedRoute)).clips.length === 1 && (await savedPicker.locator('option').innerText()).includes(clipName),
+      'Retry uses the same ID and body, keeps one clip, and renders its name as text');
+    const roomClip = await context.newPage();
+    try {
+      await roomClip.goto(base + '/console/');
+      await roomClip.locator('#login-key').fill(tokens.Room2);
+      await roomClip.locator('#login-form button').click();
+      await roomClip.locator('#tab-world').click();
+      await roomClip.locator('#world-recording').selectOption(completed.sessionId);
+      await roomClip.locator('#world-replay').click();
+      const roomLoad = roomClip.locator('#saved-clip-load');
+      await roomLoad.click();
+      check(await roomClip.locator('#saved-clip-edit').isHidden()
+        && (await roomClip.locator('#world-clip-status').innerText()).includes(`起點 第 ${eventSequence} 格`),
+        'A new authorized room console loads the shared marks without editing controls');
+      await roomClip.locator('#world-clip-play').click();
+      await roomClip.locator('#world-clip-status').filter({ hasText: '已到片段終點' }).waitFor();
+      check(Number(await roomClip.locator('#world-canvas').getAttribute('data-sequence')) === clipTail,
+        'The room console plays the saved shared range to the original frame');
+      await roomClip.locator('#saved-clip-select').screenshot({ path: path.join(screenshots, 'world-shared-replay-clip.png') });
+    } finally {
+      await roomClip.close();
+      await page.bringToFront();
+    }
+    page.once('dialog', dialog => dialog.accept());
+    await page.locator('#saved-clip-remove').click();
+    await page.locator('#saved-clip-message').filter({ hasText: '已移除片段。' }).waitFor();
+    check(await savedPicker.locator('option').count() === 0 && (await api(savedRoute)).clips.length === 0
+      && Number(await canvas.getAttribute('data-sequence')) === clipTail, 'Removing the shared entry leaves the selected recorded frame intact');
     await page.locator('#world-clip-clear').click();
     check(await clipPlay.isDisabled() && Number(await canvas.getAttribute('data-sequence')) === clipTail, 'Clearing interval markers leaves the current saved frame visible');
     await previousEvent.click();

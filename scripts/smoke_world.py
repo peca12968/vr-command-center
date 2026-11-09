@@ -303,6 +303,42 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         request(camera_route, expected=204, method="DELETE")
         request(camera_route, expected=204, method="DELETE")
         check(request(camera_route, method="PUT", body=camera)["deleted"] and request(cameras) == [], "Late camera save and remove retries do not resurrect a removed position")
+        clips = route + "/clips"
+        clip_id = str(uuid4())
+        clip_route = clips + "/" + clip_id
+        clip = {"streamId": info["header"]["streamId"], "name": "Cover review", "startFrame": 2, "endFrame": 6}
+        request(clips, "invalid", 401)
+        request(clips, "Room1", 403)
+        request(clips, "GameServer", 403)
+        request(clip_route, "Room5", 403, "PUT", clip)
+        request(clip_route, "Room5", 403, "DELETE")
+        request(clip_route, "GameServer", 403, "PUT", clip)
+        check(True, "Shared replay clips require recording scope to read and Master authority to change")
+        request(clip_route, expected=409, method="PUT", body={**clip, "streamId": str(uuid4())})
+        request(clip_route, expected=400, method="PUT", body={**clip, "startFrame": 6})
+        request(clip_route, expected=400, method="PUT", body={**clip, "endFrame": info["acceptedSequence"] + 1})
+        request(clip_route, expected=400, method="PUT", body={**clip, "name": " bad "})
+        check(True, "Shared clips reject another source, reversed or unsaved bounds and invalid names")
+        saved_clip = request(clip_route, method="PUT", body=clip)
+        clip_list = {"sessionId": session, "streamId": clip["streamId"], "clips": [saved_clip]}
+        check(saved_clip["id"] == clip_id and not saved_clip["deleted"]
+              and saved_clip["startMilliseconds"] == packets[1]["elapsedMilliseconds"]
+              and saved_clip["endMilliseconds"] == packets[5]["elapsedMilliseconds"]
+              and request(clip_route, method="PUT", body=clip) == saved_clip
+              and request(clips) == request(clips, "Room5") == clip_list,
+              "Both operators read the same stored interval with exact frame times and idempotent identity")
+        request(clip_route, expected=409, method="PUT", body={**clip, "endFrame": 7})
+        other_clips = [clips + "/" + str(uuid4()) for _ in range(23)]
+        for other in other_clips:
+            request(other, method="PUT", body=clip)
+        request(clips + "/" + str(uuid4()), expected=409, method="PUT", body=clip)
+        check(len(request(clips)["clips"]) == 24 and request(clip_route, method="PUT", body=clip) == saved_clip,
+              "The 24-clip limit still permits exact retries")
+        for other in other_clips:
+            request(other, expected=204, method="DELETE")
+        request(other_clips[0], expected=204, method="DELETE")
+        check(request(other_clips[0], method="PUT", body=clip)["deleted"] and request(clips) == clip_list,
+              "Removing clips leaves the original frames readable and late retries cannot recreate a removed clip")
         process.terminate()
         process.wait(timeout=10)
         # A pre-v0.16 fixture: same known frames and source, header stored before the new optional field existed.
@@ -324,6 +360,8 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         check(request(route)["header"]["environmentVersion"] == 0, "Pre-versioned stored headers remain explicitly legacy instead of acquiring invented effects")
         check(request(cameras) == [] and request(cameras, "Room5") == [room_camera]
               and request(camera_route, method="PUT", body=camera)["deleted"], "SQLite restart preserves saved camera positions and removal history without changing world metadata")
+        check(request(clips, "Room5") == clip_list and request(other_clips[0], method="PUT", body=clip)["deleted"],
+              "SQLite restart preserves the shared clip and its deleted neighbors")
         recovery = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30)
         check(recovery.returncode == 0 and json.loads(recovery.stdout)["complete"], "A second native process replays the full saved source idempotently")
         check(request(route) == info, "Whole-source retry changes no frame or archive metadata")

@@ -2,6 +2,7 @@ import { ReplayScene } from './replay-scene.js';
 import { mountCameras } from './camera-ui.js';
 import { mountWorldCameraForm } from './world-camera-form.js';
 import { mountWorldEventSearch } from './world-event-search.js';
+import { mountSavedClips } from './saved-clips-ui.js';
 import { recordedClock } from './mission-clock.js';
 
 const $ = id => document.getElementById(id);
@@ -11,7 +12,7 @@ const eventNames = { ShotFired: '玩家射擊', ShotHit: '命中敵軍', EnemyEl
 const shortId = id => id && id !== '00000000-0000-0000-0000-000000000000' ? id.slice(0, 8) : '—';
 const roomName = room => room === 'all' ? '全部房間' : '房間 ' + room;
 
-export function mountWorld(getKey, unauthorized, describeEnemies) {
+export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips) {
   let active = false, scene, controller, epoch = 0, listEpoch = 0, listController, info, frame, geometry = '', mode = '', connected = false, received = 0;
   let connecting = false, stepping = false, savedLimit = null, savedFinished = false;
   let reviewPlayer = null, actors = new Map(), actorInitialized = false;
@@ -19,6 +20,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies) {
   const cameras = mountCameras(getKey, unauthorized, () => scene, freeView);
   const cameraForm = mountWorldCameraForm(() => scene, freeView);
   const eventSearch = mountWorldEventSearch(response, readFrame, eventNames, () => { if (frame) showEvents(frame); });
+  const savedClips = mountSavedClips(response, canWriteClips, loadClip);
   function message(text, error = false) { $('world-message').textContent = text; $('world-message').classList.toggle('replay-error', error); }
   function stop() { epoch++; controller?.abort(); controller = null; connected = connecting = stepping = false; scene?.weather.pause(); scene?.draw(); $('world-pause').textContent = '繼續回放'; }
   function stopList() { listEpoch++; listController?.abort(); listController = null; }
@@ -29,11 +31,16 @@ export function mountWorld(getKey, unauthorized, describeEnemies) {
     recordingControls(); bindRooms([]);
     resetActors(); scene?.reset(); $('world-sound').textContent = '音效：關閉'; $('world-sound').disabled = true;
   }
-  async function response(url, signal) {
+  async function response(url, signal, { method = 'GET', body } = {}) {
     const key = getKey(); if (!key) throw new Error('請先登入。');
-    const result = await fetch(url, { headers: { Authorization: 'Bearer ' + key }, signal, cache: 'no-store' });
+    const result = await fetch(url, { method, body, headers: {
+      Authorization: 'Bearer ' + key, ...(body ? { 'Content-Type': 'application/json' } : {})
+    }, signal, cache: 'no-store' });
     if (result.status === 401 && !signal?.aborted && getKey() === key) unauthorized();
-    if (!result.ok) { let error; try { error = await result.json(); } catch { } throw new Error(error?.error || '觀戰服務回應 ' + result.status); }
+    if (!result.ok) {
+      let error; try { error = await result.json(); } catch { }
+      throw Object.assign(new Error(error?.error || '觀戰服務回應 ' + result.status), { status: result.status });
+    }
     return result;
   }
   async function refresh(target = null) {
@@ -191,6 +198,11 @@ export function mountWorld(getKey, unauthorized, describeEnemies) {
   function playClip(from = clipStart.sequence) {
     return connect('replay', 0, from, clipEnd.sequence, null, true);
   }
+  function loadClip(clip) {
+    clipStart = { sequence: clip.startFrame, elapsedMilliseconds: clip.startMilliseconds };
+    clipEnd = { sequence: clip.endFrame, elapsedMilliseconds: clip.endMilliseconds };
+    clipPlayback = ''; reviewControls();
+  }
   function reviewControls() {
     const showing = active && mode === 'replay' && info?.header.sessionId === $('world-recording').value && Boolean(frame);
     const idle = showing && !connected && !connecting && !stepping;
@@ -198,6 +210,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies) {
     $('world-review').hidden = !showing;
     $('world-frame-back').disabled = !idle || frame.packet.sequence <= 1;
     const throughFrame = info && Number.isInteger(savedLimit) ? Math.min(savedLimit, info.acceptedSequence) : info?.acceptedSequence;
+    savedClips.update(showing ? { sessionId: info.header.sessionId, streamId: info.header.streamId, throughFrame } : null,
+      idle, clipEnd ? { startFrame: clipStart.sequence, endFrame: clipEnd.sequence } : null);
     $('world-frame-next').disabled = !idle || frame.packet.sequence >= throughFrame;
     const extend = $('world-frame-extend');
     extend.hidden = !canExtendSaved();
