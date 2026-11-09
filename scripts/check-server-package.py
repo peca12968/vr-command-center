@@ -1203,11 +1203,12 @@ def main():
             tracking = subprocess.run([*deploy, '-VerifyTrackedSeats', '-AdbPath', str(destination/'absent-adb.exe')],
                 env=environment, timeout=25, encoding='utf-8', cwd=destination, capture_output=True)
             tracked = json.loads(tracking.stdout)
+            save('mixed-venue-tracked-readiness.json', tracked)
+            quest_seats = [(row['roomId'], row['seat'] + 1) for row in accepted['seats'] if row['headset'] == 'Quest3']
             check(tracking.returncode == 1 and tracked['complete'] is False and tracked['managementVerified'] is True
                   and [(row['roomId'], row['seat'], row['status'], row['sourceState']) for row in tracked['seats']] ==
-                      [(room, seat, 'awaiting-tracked-pose', 'Fresh') for room in range(1, 6) for seat in range(1, 6)
-                       if (room, seat) != (1, 1)], 'mixed Quest tracking check distinguishes 24 untracked Quest seats from one VIVE seat')
-            save('mixed-venue-tracked-readiness.json', tracked)
+                      [(room, seat, 'awaiting-tracked-pose', 'Fresh') for room, seat in quest_seats],
+                  'mixed Quest tracking check distinguishes 24 untracked Quest seats from one VIVE seat')
             for room_id, mode in ((1, 'VR'), (2, 'MR')):
                 seat = json.loads(subprocess.check_output([*deploy, '-RoomId', str(room_id), '-Seat', '1', '-CheckOnly'],
                                   env=environment, timeout=25, encoding='utf-8', cwd=destination))
