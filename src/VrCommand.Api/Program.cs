@@ -91,6 +91,8 @@ app.Use(async (context, next) =>
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "mr-alignment-required" });
         else if (ex is IndependentRoomsOccupiedException occupied)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "independent-rooms-occupied", roomIds = occupied.RoomIds });
+        else if (ex is MrVenueBundleConflict venue)
+            await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = venue.Code, roomId = venue.RoomId });
         else await context.Response.WriteAsJsonAsync(new { error = ex.Message });
     }
 });
@@ -249,6 +251,14 @@ app.MapPost("/api/mr-deployment/venue-check", async (SessionManager manager, Htt
     if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue deployment checks require the master operator.");
     var files = await MrDeploymentCheck.ReadVenue(context.Request, context.RequestAborted);
     return MrDeploymentCheck.CheckVenue(files, manager.List(false, actor), ticketSigner);
+});
+app.MapPost("/api/mr-deployment/venue-bundle", async (WorldRecordings worlds, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var actor = Actor(context);
+    if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue exports require the master operator.");
+    var request = await MrVenueBundle.Read(context.Request, context.RequestAborted);
+    return Results.File(MrVenueBundle.Create(request, worlds, actor, ticketSigner), "application/zip", "quest-mr-venue.zip");
 });
 app.MapDelete("/api/sessions/{id:guid}/players/{playerId:guid}", (Guid id, Guid playerId, SessionManager manager, HttpContext context) =>
 {

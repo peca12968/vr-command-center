@@ -14,7 +14,7 @@ internal static class MrDeploymentCheck
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         PropertyNameCaseInsensitive = false,
         NumberHandling = JsonNumberHandling.Strict,
-        MaxDepth = 4
+        MaxDepth = 5
     };
 
     internal sealed record Files(byte[] ConnectionFile, byte[] AlignmentFile);
@@ -48,7 +48,7 @@ internal static class MrDeploymentCheck
     private static bool ValidConnection(byte[]? bytes) => bytes is { Length: > 0 and <= MaxConnectionBytes };
     private static bool ValidAlignment(byte[]? bytes) => bytes is { Length: > 0 and <= RoomAlignment.MaxFileBytes };
 
-    private static async Task<T> ReadJson<T>(HttpRequest request, int limit, string message, CancellationToken cancellation) where T : class
+    internal static async Task<T> ReadJson<T>(HttpRequest request, int limit, string message, CancellationToken cancellation) where T : class
     {
         if (request.ContentLength is 0 || request.ContentLength > limit) throw new ArgumentException(message);
         var buffer = new byte[limit + 1];

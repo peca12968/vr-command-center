@@ -16,11 +16,17 @@ internal static class RoomTicketBundles
         if (session.State == SessionState.Ended) throw new InvalidOperationException("Session has ended.");
         if (!ConnectionDestination.IsValid(request.Address, request.Port))
             throw new ArgumentException("Use a canonical unicast IPv4 address and port 1024–65535.");
-        if (request.Players is not { Length: >= 1 and <= SessionManager.PlayersPerRoom })
+        var players = ValidateAdmissions(session, roomId, request.Players);
+        return Encode(session, roomId, players, request.Address!, request.Port, signer);
+    }
+
+    internal static Player[] ValidateAdmissions(SessionView session, int roomId, TicketAdmission?[]? admissions)
+    {
+        if (admissions is not { Length: >= 1 and <= SessionManager.PlayersPerRoom })
             throw new ArgumentException("Provide the current admissions for one occupied room.");
 
         var expected = new Dictionary<Guid, Guid>();
-        foreach (var entry in request.Players)
+        foreach (var entry in admissions)
         {
             if (entry is null || entry.PlayerId == Guid.Empty || entry.AdmissionId == Guid.Empty || !expected.TryAdd(entry.PlayerId, entry.AdmissionId))
                 throw new ArgumentException("Provide a unique player and admission for each occupied seat.");
@@ -30,7 +36,11 @@ internal static class RoomTicketBundles
         var players = session.Players.Where(player => player.RoomId == roomId).OrderBy(player => player.Seat).ToArray();
         if (players.Length != expected.Count || players.Any(player => !expected.TryGetValue(player.Id, out var admission) || admission != player.AdmissionId))
             throw new InvalidOperationException("Room roster changed; reload it before downloading connection files.");
+        return players;
+    }
 
+    internal static byte[] Encode(SessionView session, int roomId, Player[] players, string address, int port, PlayerJoinTicketSigner signer)
+    {
         using var output = new MemoryStream();
         using (var archive = new ZipArchive(output, ZipArchiveMode.Create, leaveOpen: true))
         {
@@ -38,8 +48,8 @@ internal static class RoomTicketBundles
             {
                 var ticket = signer.Issue(session, player);
                 using var file = archive.CreateEntry(FormattableString.Invariant($"room-{roomId:00}-seat-{player.Seat + 1:00}.json")).Open();
-                var config = new Dictionary<string, object?> { ["role"] = "Client", ["address"] = request.Address,
-                    ["port"] = request.Port, ["joinTicket"] = ticket.Ticket };
+                var config = new Dictionary<string, object?> { ["role"] = "Client", ["address"] = address,
+                    ["port"] = port, ["joinTicket"] = ticket.Ticket };
                 if (ticket.RoomAlignmentSha256 is { } hash) config["roomAlignmentSha256"] = hash;
                 JsonSerializer.Serialize(file, config);
             }

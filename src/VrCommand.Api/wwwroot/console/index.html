@@ -93,6 +93,16 @@
             </form>
             <p id="mr-deployment-status" class="hint" role="status" aria-live="polite"></p>
           </section>
+          <section id="mr-venue-panel" class="mr-start-check" aria-labelledby="mr-venue-title" hidden>
+            <h3 id="mr-venue-title">Quest 3 MR 五房部署包</h3>
+            <p id="mr-venue-topology" class="hint"></p>
+            <p class="hint">五房各需五個 Quest 3 席位、鎖定的原始校正 JSON 及遊戲伺服器公布的端點。</p>
+            <form id="mr-venue-form">
+              <div id="mr-venue-files" class="form-row"></div>
+              <button id="mr-venue-submit" type="submit" class="secondary" disabled>下載五房部署包 ZIP</button>
+            </form>
+            <p id="mr-venue-status" class="hint" role="status" aria-live="polite"></p>
+          </section>
           <div class="subheading"><h3>任務統計</h3><span id="statistics-origin" class="badge"></span></div>
           <p id="telemetry-status" class="warning" role="status" hidden></p>
           <div class="table-scroll"><table><caption class="sr-only">玩家戰鬥統計，含已離開玩家</caption><thead><tr><th>玩家</th><th>彈藥</th><th>擊殺</th><th>耗損</th><th>中彈</th><th>命中率</th><th>剩餘血量</th></tr></thead><tbody id="statistics"></tbody></table></div>
@@ -184,7 +194,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.28 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.29 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

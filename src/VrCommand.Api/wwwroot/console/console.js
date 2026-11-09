@@ -4,6 +4,7 @@ import { mountLayout } from './layout-ui.js';
 import { mountAlignment } from './alignment-ui.js';
 import { mountAlignmentPins } from './alignment-pins-ui.js';
 import { mountMrDeployment } from './mr-deployment-ui.js';
+import { mountMrVenueBundle } from './mr-venue-bundle-ui.js';
 import { mountReport } from './report-ui.js';
 import { mountReadiness, mountRoomReadiness } from './readiness-ui.js';
 import { mountConnections, validDestination } from './connection-ui.js';
@@ -24,6 +25,7 @@ const connections = mountConnections(() => state, logout);
 const closure = mountClosure(() => state, logout);
 const alignment = mountAlignment(api, download);
 const mrDeployment = mountMrDeployment(() => state, api);
+const mrVenue = mountMrVenueBundle(() => state, api, download);
 const alignmentPins = mountAlignmentPins({ state: () => state,
   checkFile: file => api('/room-alignment/check-file', 'POST', file),
   pin: (id, roomAlignment, sequence) => runSession(() => {
@@ -85,8 +87,8 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
     const content = responseType === 'blob' && response.ok ? await response.blob() : await response.text();
     if (epoch !== state.epoch) throw new Error('登入狀態已變更，已忽略舊回應。');
     if (!response.ok) {
-      let message = '操作未完成，請重新整理後確認。', layout, code, maxCount, roomIds;
-      try { const data = JSON.parse(content); message = data.error || message; layout = data.layout; code = data.code; maxCount = data.maxCount; roomIds = data.roomIds; } catch { /* Non-domain errors have no stable JSON contract. */ }
+      let message = '操作未完成，請重新整理後確認。', layout, code, maxCount, roomIds, roomId;
+      try { const data = JSON.parse(content); message = data.error || message; layout = data.layout; code = data.code; maxCount = data.maxCount; roomIds = data.roomIds; roomId = data.roomId; } catch { /* Non-domain errors have no stable JSON contract. */ }
       if (response.status === 401) { logout(); message = '憑證無效或已更換，請重新登入。'; }
       if (response.status === 403) message = '目前身分沒有此操作權限。';
       if (response.status === 409) {
@@ -98,7 +100,7 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
       }
       if (layout) message = '場地配置未通過檢查，請修正並保存新版本後再開場。';
       if (code === 'enemy-capacity-exceeded' && Number.isInteger(maxCount)) message = `此場地最多可設定 ${maxCount} 名敵軍。請調低目標數量後再套用。`;
-      const error = new Error(message); error.status = response.status; error.layout = layout; throw error;
+      const error = new Error(message); error.status = response.status; error.layout = layout; error.code = code; error.roomId = roomId; throw error;
     }
     if (responseType === 'blob') return content;
     return content ? JSON.parse(content) : null;
@@ -142,6 +144,7 @@ function logout() {
   alignment.reset();
   alignmentPins.active(false);
   mrDeployment.active(false);
+  mrVenue.active(false);
   replay.active(false); replay.reset(); world.active(false); world.reset(); readiness.active(false); readiness.reset(); roomReadiness.active(false); connections.active(false); connections.reset();
   state.epoch++; state.key = ''; state.actor = null; state.selected = null; state.session = null; state.pending = null;
   state.rooms = []; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
@@ -337,6 +340,7 @@ function applyPermissions() {
   });
   alignmentPins.update();
   mrDeployment.update();
+  mrVenue.update();
 }
 function row(cells) { const tr = element('tr'); for (const value of cells) { const td = element('td'); if (value instanceof Node) td.append(value); else td.textContent = value; tr.append(td); } return tr; }
 function emptyTable(id, columns, message) { const tr = element('tr'), td = element('td', message, 'empty-cell'); td.colSpan = columns; tr.append(td); $(id).replaceChildren(tr); }
@@ -675,6 +679,7 @@ function tab(name) {
   alignment.active(name === 'missions' && master());
   alignmentPins.active(name === 'operations');
   mrDeployment.active(name === 'operations');
+  mrVenue.active(name === 'operations');
 }
 function submit(id, action, execute = run) { $(id).addEventListener('submit', event => { event.preventDefault(); execute(action); }); }
 $('login-form').addEventListener('submit', login);

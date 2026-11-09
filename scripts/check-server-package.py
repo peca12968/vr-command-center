@@ -1,5 +1,5 @@
 """Exercise portable Windows packages, five rooms, Linked and owned process cleanup."""
-import argparse,csv,importlib.util,io,ipaddress,json,os,re,shutil,socket,subprocess,sys,threading,time,urllib.error,urllib.request,uuid,zipfile
+import argparse,base64,csv,hashlib,importlib.util,io,ipaddress,json,os,re,shutil,socket,subprocess,sys,tempfile,threading,time,urllib.error,urllib.request,uuid,zipfile
 from datetime import datetime,timedelta,timezone
 from decimal import Decimal
 from pathlib import Path
@@ -65,10 +65,13 @@ def main():
     p.add_argument('--prepare-independent-set',action='store_true',help='Prepare the five independent native sessions in one management request')
     p.add_argument('--check-interrupted-replay', action='store_true', help='Play the saved native prefix after the owned launcher is killed')
     p.add_argument('--check-managed-mr', action='store_true', help='Verify the MR alignment startup gate, desktop rejection and Preparing seal')
+    p.add_argument('--mr-venue-bundle-only', action='store_true', help='Verify both MR venue exports from native publishers, without starting desktop players')
     p.add_argument('--check-live-reinforcement', action='store_true', help='Verify a native server accepts only supported live enemy targets and records the result')
     args=p.parse_args()
     if os.name!='nt':p.error('Actual Windows processes required')
-    if bool(args.player_package)!=bool(args.game_address):p.error('Provide --player-package and --game-address together')
+    if args.mr_venue_bundle_only:
+        if not args.game_address or args.player_package:p.error('--mr-venue-bundle-only needs --game-address and no player package')
+    elif bool(args.player_package)!=bool(args.game_address):p.error('Provide --player-package and --game-address together')
     if args.peer_diagnostics and not args.player_package:p.error('--peer-diagnostics requires the three-package check')
     if args.field_evidence and not args.peer_diagnostics:p.error('--field-evidence requires --peer-diagnostics')
     if args.check_room_readiness and not args.player_package:p.error('--check-room-readiness requires five players per room')
@@ -555,6 +558,57 @@ def main():
         room=request('/api/rooms/readiness',role='Room1')
         check(room['version']==1 and len(room['rooms'])==1 and room['rooms'][0]['roomId']==1
             and room['rooms'][0]['sessionId']==expected[1],'room operator only receives its own active room aggregate')
+    def check_mr_venue_bundle():
+        pwsh = shutil.which('pwsh')
+        if not pwsh: raise RuntimeError('PowerShell is required for Quest venue preflight')
+        room_ids = list(range(1, 6))
+        markers = [{'room': {'x': x, 'z': z}, 'tracking': {'x': x, 'z': z}} for x, z in [(-2, -2), (2, -2), (-2, 2)]]
+        files = {room: json.dumps(request('/api/room-alignment', {'roomId': room, 'markers': markers})).encode() for room in room_ids}
+        hashes = {room: hashlib.sha256(data).hexdigest() for room, data in files.items()}
+        for mode in ('Linked', 'Independent'):
+            stage('native-mr-venue-bundle', mode=mode)
+            if mode == 'Linked':
+                states = [create(room_ids, 'MR venue linked', experience='MR')]
+            else:
+                mission = save_mission('MR venue independent', experience='MR')
+                states = request('/api/sessions/independent-set', {'missionId': mission['id']}, expected=201, request_id=str(uuid.uuid4()))['sessions']
+                sessions.extend(state['id'] for state in states)
+            entries, rooms = [], []
+            for state in states:
+                sid = state['id']; route = '/api/sessions/' + sid
+                pins = {f'room{room}': hashes[room] for room in state['roomIds']}
+                request(route + '/commands', {'commandId': str(uuid.uuid4()), 'action': 'SetRoomAlignment', 'roomAlignment': pins})
+                for room in state['roomIds']:
+                    for seat in range(1, 6):
+                        state = request(route + '/players', {'playerId': str(uuid.uuid4()), 'roomId': room, 'name': f'MR venue {room}/{seat}', 'headset': 'Quest3'})
+                    rooms.append({'roomId': room, 'sessionId': sid, 'alignmentFile': base64.b64encode(files[room]).decode(),
+                        'players': [{'playerId': row['id'], 'admissionId': row['admissionId']} for row in state['players'] if row['roomId'] == room]})
+                entries.append(launch(state, f'mr-venue-{mode.lower()}-{state["roomIds"][0]}'))
+            before = request('/api/sessions')
+            raw, headers = request('/api/mr-deployment/venue-bundle', {'topology': mode, 'rooms': rooms}, raw_response=True)
+            check(headers['Cache-Control'] == 'no-store' and headers.get_content_type() == 'application/zip', mode + ' native endpoint export is a non-cacheable ZIP')
+            with tempfile.TemporaryDirectory(prefix='deployment-', dir=runtime) as scratch:
+                destination = Path(scratch).resolve()
+                if destination.parent != runtime: raise RuntimeError('Invalid owned deployment scratch directory')
+                expected = {'venue.json', *(f'room-{room:02}-{suffix}' for room in room_ids for suffix in ('alignment.json', 'connections.zip'))}
+                with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                    assert len(archive.namelist()) == len(expected) and set(archive.namelist()) == expected
+                    for name in expected: (destination / name).write_bytes(archive.read(name))
+                report = json.loads(subprocess.check_output([pwsh, '-NoProfile', '-File', str(ROOT/'scripts/deploy-quest.ps1'),
+                    '-VenueManifest', str(destination/'venue.json'), '-ManagementApi', uri], env={**os.environ, 'VR_COMMAND_MASTER_KEY': keys['Master']},
+                    timeout=25, encoding='utf-8', cwd=destination))
+                manifest_rooms = read(destination/'venue.json')['rooms']
+                assert [(row['roomId'], row['sessionId']) for row in manifest_rooms] == [(row['roomId'], row['sessionId']) for row in rooms]
+                assert all((destination / f'room-{room:02}-alignment.json').read_bytes() == files[room] for room in room_ids)
+            endpoints = {entry['sessionId']: f'{address}:{entry["ready"]["port"]}' for entry in entries}
+            check(report['managementVerified'] and report['alignmentPinsVerified'] and report['topology'] == mode and report['seats'] == 25
+                and [(row['roomId'], row['seats'], row['endpoint'], row['alignmentSha256']) for row in report['rooms']] == [
+                    (room['roomId'], 5, endpoints[room['sessionId']], hashes[room['roomId']]) for room in rooms]
+                and request('/api/sessions') == before,
+                mode + ' actual Quest preflight verifies 25 signed files, original calibration and owned UDP endpoints without writing session events')
+            save(f'mr-venue-{mode.lower()}-deployment.json', report)
+            for entry in entries: command(entry['sessionId'], 'End')
+            for entry in entries: finish(entry)
     try:
         subprocess.run([str(control_exe),'--init',str(data),'--port',str(free()),'--report',str(out/'control-init.json')],env=env,check=True,timeout=30);keys=read(data/'operator-keys.json')['OperatorKeys'];marker=read(data/'control-instance.json');uri='http://127.0.0.1:'+str(marker['port'])
         api_ready=out/'control-ready.json';api_stop=out/'control-stop.request';api=subprocess.Popen([str(control_exe),'--run',str(data),'--seconds','1800','--ready-report',str(api_ready),'--stop-file',str(api_stop),'--report',str(out/'control-final.json')],env=env,cwd=out)
@@ -571,7 +625,7 @@ def main():
                   'occupied UDP preflight leaves the management session and endpoint unbound')
         command(seed['id'],'End');rejected('ended-session',base)
         # Run both topologies with separate native processes and fresh admissions.
-        for linked in [False,True]:
+        for linked in ([] if args.mr_venue_bundle_only else [False,True]):
             entries=[];round_clients=[]
             batch=None
             if args.prepare_independent_set and not linked:
@@ -647,6 +701,7 @@ def main():
                 if player_folder:check(True,'player launcher confirmed original child exit '+client['player']['id'])
             if player_folder:
                 for entry in entries:verify_delivery(entry,[c for c in round_clients if c['sessionId']==entry['sessionId']])
+        if args.mr_venue_bundle_only: check_mr_venue_bundle()
         if args.check_managed_mr:
             state=create([1],'managed-mr',experience='MR')
             session='/api/sessions/'+state['id']
@@ -748,7 +803,7 @@ def main():
         if args.check_interrupted_replay:
             verify_interrupted_replay(crash, crash_client)
         check(all(x['state']=='Ended' for x in request('/api/sessions?includeEnded=true')),'no active management sessions')
-        save('evidence.json',{'rounds':rounds,'scope':(
+        save('evidence.json',{'rounds':rounds,'scope':('Real Windows MR Preparing endpoints and 25 signed files per topology.' if args.mr_venue_bundle_only else
             'Three portable packages, five Independent rooms then Linked, 25 simultaneous same-PC Simulation clients per topology.'
             if player_folder else 'Two portable packages, five Independent rooms then Linked, five same-PC Simulation clients per topology.'),
             'managedMrPreparing':args.check_managed_mr,
@@ -799,8 +854,8 @@ def main():
         if keys and any(k in text for k in keys.values()):raise RuntimeError('Public metadata contains a key')
     save('checks.json',{'complete':True,'checks':len(checks),'findings':checks,'runtimeDirectory':str(runtime),
         'packageDirectory':str(folder),'playerPackageDirectory':str(player_folder) if player_folder else None,
-        'scope':('Same-machine VR simulation and a separate MR Preparing admission and seal check.'
-                 if args.check_managed_mr else 'Same-machine Simulation only.')
+        'scope':('Same-machine native MR servers in Preparing with no headset client.' if args.mr_venue_bundle_only else
+                 'Same-machine VR simulation and a separate MR Preparing admission and seal check.' if args.check_managed_mr else 'Same-machine Simulation only.')
                 +' The separate parent-death case intentionally leaves the world unsealed.'})
     print(json.dumps({'complete':True,'checks':len(checks),'directory':str(out)}))
 if __name__=='__main__':main()

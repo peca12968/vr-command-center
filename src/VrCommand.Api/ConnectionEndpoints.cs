@@ -38,6 +38,14 @@ public sealed partial class WorldRecordings
         if (actor.Role is not (OperatorRole.Master or OperatorRole.RoomController)) throw new AccessDeniedException("Connection settings require a control-desk identity.");
         lock (gate) return EndpointRow(manager.Get(id, actor)) ?? throw new KeyNotFoundException("The game source has not published connection settings.");
     }
+
+    internal Dictionary<Guid, (SessionView Session, ConnectionEndpoint? Endpoint)> ReadVenueSources(Guid[] ids, OperatorIdentity actor)
+    {
+        if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue exports require the master operator.");
+        lock (gate)
+            return manager.List(false, actor).Where(session => ids.Contains(session.Id))
+                .ToDictionary(session => session.Id, session => (session, EndpointRow(session)));
+    }
     public ConnectionEndpoint PublishEndpoint(Guid id, ConnectionEndpointDraft draft, OperatorIdentity actor)
     {
         AccessPolicy.Validate(actor);
