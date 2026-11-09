@@ -21,6 +21,7 @@ const behaviorNames = { Hold: '守備', Patrol: '巡邏', Advance: '推進' };
 const archiveNames = { NoSource: '沒有遊戲來源', Missing: '尚無錄製紀錄', Waiting: '等待封存', SourceMismatch: '來源尚未對上', Sealed: '已封存' };
 const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: null, rooms: [], venue: null, missions: [], catalog: [], launchPinned: null, history: null, draftBase: null, draftChanged: false, draftSavedAt: '', sessions: [], session: null, selected: null, pending: null, props: [], prop: -1, environmentSequence: null, enemiesSequence: null };
 let comparedVersion = null;
+let checkedTemplate = null, templateEpoch = 0, importedText = null;
 const objectHistory = placementHistory();
 const world = mountWorld(() => state.key, logout, venueEnemyText, master);
 const report = mountReport(() => state, logout, () => { renderStatistics(); closure.update(); });
@@ -168,6 +169,7 @@ function logout() {
   closure.active(false); closure.reset();
   alignment.reset();
   clearMissionComparison();
+  clearMissionTemplate(); importedText = null;
   alignmentPins.active(false);
   mrDeployment.active(false);
   mrVenue.active(false);
@@ -393,6 +395,12 @@ function applyPermissions() {
   $('edit-mission').disabled = locked;
   $('mission-version').disabled = locked || !state.history;
   $('load-version').disabled = locked || !state.history;
+  $('export-mission-template').hidden = !master();
+  $('export-mission-template').disabled = locked || !master() || !$('mission-version').value;
+  $('mission-template-panel').hidden = !master();
+  $('mission-template-file').disabled = locked || !master();
+  $('check-mission-template').disabled = locked || !master() || !$('mission-template-file').files.length;
+  $('use-mission-template').disabled = locked || !master() || !checkedTemplate;
   $('compare-version').disabled = locked || !state.history || !$('mission-version').value;
   $('launch-compared-version').disabled = locked || !comparedVersion;
   $('more-versions').disabled = locked || !state.history?.nextBefore;
@@ -805,6 +813,7 @@ function downloadRoomTickets() {
 function resetDraft() {
   placement.clearTrial();
   clearMissionComparison();
+  clearMissionTemplate(); importedText = null;
   $('mission-form').reset(); state.props = []; state.prop = -1; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.history = null;
   clearPropHistory();
   renderProps(); renderHistory(); draftStatus(); applyPermissions();
@@ -859,18 +868,57 @@ async function loadDraft(id, older = false) {
   const revision = await api(`/missions/${older ? id : history.headId}/version`), mission = revision.mission;
   if (epoch !== state.epoch) return;
   if (!await rememberHead(history, epoch)) return;
-  placement.clearTrial();
-  clearMissionComparison();
   const draft = mission.definition;
-  $('draft-name').value = draft.name; $('draft-briefing').value = draft.briefing; $('draft-duration').value = draft.durationSeconds;
-  setEnvironment('draft', draft.environment); setEnemies('draft', draft.enemies);
-  state.props = structuredClone(draft.props); state.prop = state.props.length ? 0 : -1; clearPropHistory();
+  fillDraft(draft);
   state.draftBase = revision; state.draftChanged = false; state.draftSavedAt = ''; state.history = history;
   if (!history.versions.some(row => row.id === mission.id)) history.versions.push({ id: mission.id, number: revision.number, name: draft.name, createdAtUtc: mission.createdAtUtc });
   renderProps(); renderHistory(mission.id); missionOptions(undefined, history.headId); draftStatus();
 }
+function fillDraft(draft) {
+  placement.clearTrial(); clearMissionComparison(); importedText = null;
+  $('draft-name').value = draft.name; $('draft-briefing').value = draft.briefing; $('draft-duration').value = draft.durationSeconds;
+  setEnvironment('draft', draft.environment); setEnemies('draft', draft.enemies);
+  state.props = structuredClone(draft.props); state.prop = state.props.length ? 0 : -1; clearPropHistory();
+}
+function clearMissionTemplate(keepFile = false) {
+  templateEpoch++; checkedTemplate = null;
+  if (!keepFile) {
+    $('mission-template-file').value = '';
+    $('check-mission-template').disabled = true;
+  }
+  $('use-mission-template').disabled = true;
+  $('mission-template-status').textContent = '';
+}
+async function checkMissionTemplate(file, epoch) {
+  if (epoch !== templateEpoch) return;
+  const result = await api('/mission-templates/check-file', 'POST', file);
+  if (epoch !== templateEpoch || $('missions-view').hidden) return;
+  const draft = result?.definition;
+  if (result?.format !== 'vr-command-mission-template' || result.version !== 1 || typeof draft?.name !== 'string'
+      || typeof draft.briefing !== 'string' || !Number.isInteger(draft.durationSeconds)
+      || !draft.environment || !draft.enemies || !Array.isArray(draft.props) || draft.props.some(prop => !prop?.position))
+    throw new Error('Unexpected mission template response.');
+  checkedTemplate = draft;
+  $('mission-template-status').textContent = `「${draft.name}」 · ${draft.environment.mode} · ${draft.durationSeconds} 秒 · ${draft.props.length} 件物件。可載入為新草稿。`;
+}
+function useMissionTemplate() {
+  if (!editable() || !checkedTemplate || !confirmDraftDiscard('載入任務範本')) return;
+  const draft = checkedTemplate;
+  fillDraft(draft);
+  // Text controls normalize line endings. Preserve the file's original text until the operator edits it.
+  importedText = {
+    name: { value: draft.name, shown: $('draft-name').value },
+    briefing: { value: draft.briefing, shown: $('draft-briefing').value }
+  };
+  state.draftBase = null; state.draftChanged = true; state.draftSavedAt = ''; state.history = null;
+  clearMissionTemplate(); renderProps(); renderHistory(); draftStatus(); applyPermissions();
+  notify('已載入範本。核對場地及任務內容後，可儲存為新任務。');
+}
 function draftDefinition() {
-  return { name: $('draft-name').value.trim(), briefing: $('draft-briefing').value, durationSeconds: Number($('draft-duration').value),
+  const name = $('draft-name').value, briefing = $('draft-briefing').value;
+  return { name: importedText?.name?.shown === name ? importedText.name.value : name.trim(),
+    briefing: importedText?.briefing?.shown === briefing ? importedText.briefing.value : briefing,
+    durationSeconds: Number($('draft-duration').value),
     environment: environment('draft'), enemies: enemies('draft'), props: structuredClone(state.props) };
 }
 function clearMissionComparison() {
@@ -1002,7 +1050,7 @@ for (const id of ['prop-asset', 'prop-x', 'prop-y', 'prop-z', 'prop-yaw']) $(id)
 });
 
 function tab(name, worldTarget = null) {
-  if (name !== 'missions') placement.clearTrial();
+  if (name !== 'missions') { placement.clearTrial(); clearMissionTemplate(); }
   finishPropGesture();
   for (const candidate of ['operations', 'missions', 'replay', 'world']) { const active = candidate === name; $(candidate + '-view').hidden = !active; $('tab-' + candidate).classList.toggle('active', active); $('tab-' + candidate).setAttribute('aria-pressed', String(active)); }
   replay.active(name === 'replay'); world.active(name === 'world', worldTarget); readiness.active(name === 'operations'); connections.active(name === 'operations');
@@ -1062,6 +1110,27 @@ $('load-version').addEventListener('click', () => {
   const id = $('mission-version').value;
   if (id && confirmDraftDiscard('載入選取版本')) run(() => loadDraft(id, true), true);
 });
+$('export-mission-template').addEventListener('click', () => {
+  const id = $('mission-version').value, epoch = state.epoch, view = templateEpoch;
+  if (!editable() || !id) return;
+  run(async () => {
+    if (view !== templateEpoch) return;
+    const file = await api(`/missions/${id}/template`, 'GET', undefined, undefined, undefined, 'blob');
+    if (epoch !== state.epoch || view !== templateEpoch || id !== $('mission-version').value) return;
+    if (file.type !== 'application/json') throw new Error('Expected a mission template file.');
+    download(`vr-mission-template-${id}.json`, file);
+  }, true);
+});
+$('mission-template-file').addEventListener('change', () => { clearMissionTemplate(true); applyPermissions(); });
+$('check-mission-template').addEventListener('click', () => {
+  const file = $('mission-template-file').files[0];
+  if (!editable() || !file) return;
+  clearMissionTemplate(true);
+  if (!file.size || file.size > 512 * 1024) { notify('請選擇 512 KiB 以內的任務範本 JSON。', true); applyPermissions(); return; }
+  const epoch = templateEpoch;
+  run(() => checkMissionTemplate(file, epoch));
+});
+$('use-mission-template').addEventListener('click', useMissionTemplate);
 $('mission-version').addEventListener('change', clearMissionComparison);
 $('compare-version').addEventListener('click', () => {
   const id = $('mission-version').value;
@@ -1092,6 +1161,8 @@ $('add-barrel').addEventListener('click', () => addProp('barrel'));
 $('rotate-prop').addEventListener('click', () => { if (state.props[state.prop]) editProp(() => { state.props[state.prop].yawDegrees = (state.props[state.prop].yawDegrees + 15) % 360; }); });
 $('remove-prop').addEventListener('click', () => { if (state.prop >= 0) editProp(() => { state.props.splice(state.prop, 1); state.prop = Math.min(state.prop, state.props.length - 1); }); });
 for (const type of ['input', 'change']) $('mission-form').addEventListener(type, event => {
+  if (importedText && event.target.id === 'draft-name') importedText.name = null;
+  if (importedText && event.target.id === 'draft-briefing') importedText.briefing = null;
   if (!['layout-session-mode', 'prop-select'].includes(event.target.id)) dirtyDraft();
 });
 $('layout-session-mode').addEventListener('change', () => placement.scheduleDraft());

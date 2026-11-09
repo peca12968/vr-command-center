@@ -121,6 +121,21 @@ app.MapGet("/api/rooms", (SessionManager manager, HttpContext context) => manage
 app.MapGet("/api/missions", (SqliteMissionLibrary store, HttpContext context) => store.List(Actor(context)));
 app.MapGet("/api/mission-library", (SqliteMissionLibrary store, HttpContext context) => store.Heads(Actor(context)));
 app.MapGet("/api/missions/{id:guid}", (Guid id, SqliteMissionLibrary store, HttpContext context) => store.Get(id, Actor(context)));
+app.MapGet("/api/missions/{id:guid}/template", (Guid id, SqliteMissionLibrary store, HttpContext context) =>
+{
+    var actor = Actor(context);
+    AccessPolicy.AuthorMission(actor);
+    var template = MissionTemplate.Export(store.Get(id, actor));
+    context.Response.Headers.CacheControl = "no-store";
+    return Results.File(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(template, JsonFormat.Options),
+        "application/json", $"vr-mission-template-{id:D}.json");
+});
+app.MapPost("/api/mission-templates/check-file", async (HttpContext context) =>
+{
+    AccessPolicy.AuthorMission(Actor(context));
+    context.Response.Headers.CacheControl = "no-store";
+    return await MissionTemplate.Check(context.Request, context.RequestAborted);
+});
 app.MapGet("/api/missions/{id:guid}/layout", (Guid id, SessionMode? mode, SqliteMissionLibrary store, HttpContext context) =>
     MissionLayout.Inspect(store.Get(id, Actor(context)).Definition, mode ?? SessionMode.Independent));
 app.MapPost("/api/mission-layout", (MissionLayoutRequest request, HttpContext context) =>

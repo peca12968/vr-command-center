@@ -83,6 +83,7 @@ def main():
     p.add_argument('--hardware-simulator-package',type=Path,help='Pass native live feedback through this extracted mock gateway package')
     p.add_argument('--prepare-independent-set',action='store_true',help='Prepare the five independent native sessions in one management request')
     p.add_argument('--check-independent-room-missions',action='store_true',help='Assign a different saved VR mission to every independent room and verify the accepted native world')
+    p.add_argument('--mission-template',type=Path,help='Check and save an exported VR mission template, then run both native topologies with it')
     p.add_argument('--check-interrupted-replay', action='store_true', help='Play the saved native prefix after the owned launcher is killed')
     p.add_argument('--check-managed-mr', action='store_true', help='Verify the MR alignment startup gate, desktop rejection and Preparing seal')
     p.add_argument('--mr-venue-bundle-only', action='store_true', help='Verify both MR venue exports from native publishers, without starting desktop players')
@@ -155,6 +156,9 @@ def main():
     if args.prepare_independent_set and not args.player_package:p.error('--prepare-independent-set requires the player package')
     if args.check_independent_room_missions and (not args.prepare_independent_set or args.check_layout_preview or args.check_room_combat):
         p.error('--check-independent-room-missions requires --prepare-independent-set and its own mission fixtures')
+    if args.mission_template and (not args.prepare_independent_set or venue_only or args.openxr_mock_only
+            or args.check_independent_room_missions or args.check_layout_preview or args.check_room_combat):
+        p.error('--mission-template requires --prepare-independent-set and the ordinary two-topology check')
     address='127.0.0.1'
     if args.game_address:
         if not any(args.game_address in ipaddress.IPv4Network(net) for net in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16')):
@@ -212,7 +216,8 @@ def main():
         h={'Authorization':'Bearer '+keys[role]};h.update({'Content-Type':'application/json'} if body is not None else {})
         if admission:h['If-Match-Admission']=admission
         if request_id:h['Idempotency-Key']=request_id
-        req=urllib.request.Request(uri+path,data=None if body is None else json.dumps(body).encode(),headers=h,method=method)
+        if isinstance(body,bytes):h['Content-Type']='application/octet-stream'
+        req=urllib.request.Request(uri+path,data=body if isinstance(body,bytes) or body is None else json.dumps(body).encode(),headers=h,method=method)
         try:
             with urllib.request.urlopen(req,timeout=5) as r:code=r.status;raw=r.read();headers=r.headers
         except urllib.error.HTTPError as e:code=e.code;raw=e.read();headers=e.headers
@@ -240,6 +245,27 @@ def main():
     def create(rooms,label, **options):
         mission=save_mission(label,**options)
         state=request('/api/sessions',{'missionId':mission['id'],'mode':'Linked' if len(rooms)==5 else 'Independent','roomIds':rooms},expected=201);sessions.append(state['id']);return state
+
+    def verify_template_world(entry, mission, running):
+        info=request(f"/api/sessions/{entry['sessionId']}/world")
+        definition=mission['definition']; environment=definition['environment']; enemies=definition['enemies']
+        header=info['header']; packet=running['packet']; frame=packet['frame']
+        expected=[]
+        for room in header['roomIds']:
+            for prop in definition['props']:
+                feet=prop['position']
+                expected.append((room,prop['assetId'],feet['x']+(room-3)*14,feet['y'],feet['z'],prop['yawDegrees']))
+        actual=[(prop['roomId'],prop['kind'].lower(),prop['feet']['x'],prop['feet']['y'],prop['feet']['z'],prop['yaw'])
+                for prop in header['props']]
+        def matches(left,right):
+            return left[:2]==right[:2] and all(abs(a-b)<.0001 for a,b in zip(left[2:],right[2:]))
+        check(header['missionDurationSeconds']==definition['durationSeconds'] and packet['weather']==environment['weather']
+              and packet['lightning']==environment['lightning'] and frame['night']==(environment['timeOfDay']=='Night')
+              and frame['behavior']==enemies['behavior'] and frame['autoAttack']==enemies['autoAttack']
+              and len(frame['enemies'])==enemies['count'] and len(actual)==len(expected)
+              and all(matches(left,right) for left,right in zip(actual,expected)),
+              entry['label']+' native duration, environment, enemies and cover match the imported template')
+        save(entry['label']+'-template-world.json',{'missionId':mission['id'],'header':header,'runningSequence':packet['sequence']})
 
     def verify_lan_preflight(value, label):
         powershell = Path(os.environ['WINDIR']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
@@ -2131,6 +2157,16 @@ def main():
         archived_batch_report = None
         earlier_field_archive = None
         earlier_closure = None
+        imported_mission = None
+        if args.mission_template:
+            with args.mission_template.open('rb') as source:
+                raw = source.read(512*1024+1)
+            template = request('/api/mission-templates/check-file',raw,method='POST')
+            check(template==json.loads(raw) and template['definition']['environment']['mode']=='VR',
+                  'destination management verifies the exact exported VR template')
+            imported_mission=request('/api/missions',template['definition'],expected=201,request_id=str(uuid.uuid4()))
+            check(imported_mission['definition']==template['definition'],'destination management explicitly saves the template as a new mission')
+            save('imported-mission.json',imported_mission)
         if args.openxr_mock_only:
             check_openxr_mock()
         for linked in ([] if venue_only or args.openxr_mock_only else [False,True]):
@@ -2147,7 +2183,7 @@ def main():
                         missions.append(request('/api/missions',definition,expected=201))
                     body={'rooms':[{'roomId':room,'missionId':mission['id']} for room,mission in enumerate(missions,1)]}
                 else:
-                    mission=save_mission('five independently prepared rooms',enemy_count=5 if args.check_room_combat else 1)
+                    mission=imported_mission or save_mission('five independently prepared rooms',enemy_count=5 if args.check_room_combat else 1)
                     missions=[mission]*5
                     body={'missionId':mission['id']}
                 key=str(uuid.uuid4()); route='/api/sessions/independent-set'
@@ -2162,7 +2198,13 @@ def main():
                 save('independent-preparation-receipt.json',prepared)
             for rooms in ([[1,2,3,4,5]] if linked else [[r] for r in range(1,6)]):
                 enemy_count=5*len(rooms) if args.check_room_combat else 1
-                state=batch[rooms[0]-1] if batch is not None else create(rooms,'linked' if linked else 'independent',enemy_count=enemy_count)
+                if batch is not None:
+                    state=batch[rooms[0]-1]
+                elif imported_mission:
+                    state=request('/api/sessions',{'missionId':imported_mission['id'],'mode':'Linked','roomIds':rooms},expected=201)
+                    sessions.append(state['id'])
+                else:
+                    state=create(rooms,'linked' if linked else 'independent',enemy_count=enemy_count)
                 entry=launch(state,('linked' if linked else 'room-'+str(rooms[0])));entries.append(entry)
                 if args.check_room_clocks and (linked or rooms == [1]):
                     request('/api/sessions/'+state['id']+'/commands', {'commandId':str(uuid.uuid4()),'action':'SetMissionClock','missionClock':{'autoEnd':True}})
@@ -2199,6 +2241,8 @@ def main():
                     wait(lambda:observe(entry,ids),60,entry['label']+' original player rigs')
                     sequence=command(sid,'Begin')['session']['sequence']
                 running=wait(lambda:observe(entry,ids,sequence),20,entry['label']+' original Begin applied')
+                if imported_mission:
+                    verify_template_world(entry,imported_mission,running)
                 if args.check_independent_room_missions and not linked:
                     room=entries.index(entry)+1
                     mission=missions[room-1]
@@ -2483,6 +2527,7 @@ def main():
             'hardwareMockPackage':hardware_manifest['toolVersion'] if args.hardware_simulator_package else None,
             'preparedIndependentSet':args.prepare_independent_set,
             'independentRoomMissions':args.check_independent_room_missions,
+            'importedMissionTemplate':imported_mission['id'] if imported_mission else None,
             'sourceFingerprint':manifest['build']['sourceFingerprint'],'gameAddress':address})
     except BaseException as error:stage('failed',errorType=type(error).__name__);raise
     finally:

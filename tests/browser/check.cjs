@@ -65,6 +65,7 @@ async function main() {
       await page.locator('#tab-missions').click(); await page.locator(`#edit-mission option[value="${mission.id}"]`).waitFor({ state: 'attached' });
       await page.locator('#load-mission').click(); await page.waitForFunction(name => document.querySelector('#draft-name').value === name, mission.definition.name);
       await require('./mission-browser.cjs')({ page, context, api, tokens, base, mission, session, screenshots, check });
+      await require('./mission-template-browser.cjs')({ context, api, tokens, directory, root, base, screenshots, check, captureErrors, availablePort });
       check(browserErrors.length === 0, 'Mission versions have no uncaught browser or policy errors');
       await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed', scope: 'mission version comparison and exact launch with real API and Chromium' }, null, 2));
       console.log(`PASS: ${checks} focused mission version checks. Screenshots: ${screenshots}`); return;
@@ -477,6 +478,7 @@ async function main() {
     await require('./vr-venue-tickets-browser.cjs')({ context, api, tokens, base, root, directory, screenshots, check, captureErrors });
     await require('./room-clock-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
     await require('./venue-phase-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
+    await require('./mission-template-browser.cjs')({ context, api, tokens, directory, root, base, screenshots, check, captureErrors, availablePort });
     check(browserErrors.length === 0, 'Browser has no uncaught script errors or CSP violations');
     await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), playwright: require('playwright/package.json').version, result: 'passed', scope: 'isolated real API and browser console; no Unity or headset test' }, null, 2));
     console.log(`PASS: ${checks} real-browser checks. Screenshots: ${screenshots}`);

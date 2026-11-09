@@ -14,14 +14,18 @@ internal static class DeploymentJson
         NumberHandling = JsonNumberHandling.Strict,
         MaxDepth = 5
     };
+    private static readonly JsonSerializerOptions FileOptions = new(Options) { RespectRequiredConstructorParameters = true };
 
-    internal static async Task<T> Read<T>(HttpRequest request, int limit, string message, CancellationToken cancellation) where T : class
+    internal static async Task<T> Read<T>(HttpRequest request, int limit, string message, CancellationToken cancellation,
+        bool completeFile = false) where T : class
     {
         if (request.ContentLength is 0 || request.ContentLength > limit) throw new ArgumentException(message);
         var buffer = new byte[limit + 1];
         var length = await request.Body.ReadAtLeastAsync(buffer, buffer.Length, throwOnEndOfStream: false, cancellation);
         if (length > limit) throw new ArgumentException(message);
-        try { return JsonSerializer.Deserialize<T>(buffer.AsSpan(0, length), Options) ?? throw new ArgumentException(message); }
+        var json = buffer.AsSpan(0, length);
+        if (completeFile && json.StartsWith("\uFEFF"u8)) json = json[3..];
+        try { return JsonSerializer.Deserialize<T>(json, completeFile ? FileOptions : Options) ?? throw new ArgumentException(message); }
         catch (JsonException) { throw new ArgumentException(message); }
     }
 
