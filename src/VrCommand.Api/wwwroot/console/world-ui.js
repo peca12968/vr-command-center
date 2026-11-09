@@ -17,6 +17,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   let connecting = false, stepping = false, savedLimit = null, savedFinished = false;
   let reviewPlayer = null, actors = new Map(), actorInitialized = false;
   let clipStart = null, clipEnd = null, clipPosition = null, clipPlayback = '';
+  let recentSource = null;
   const cameras = mountCameras(getKey, unauthorized, () => scene, freeView);
   const cameraForm = mountWorldCameraForm(() => scene, freeView);
   const eventSearch = mountWorldEventSearch(response, readFrame, eventNames, () => { if (frame) showEvents(frame); });
@@ -25,7 +26,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   function stop() { epoch++; controller?.abort(); controller = null; connected = connecting = stepping = false; scene?.weather.pause(); scene?.draw(); $('world-pause').textContent = '繼續回放'; }
   function stopList() { listEpoch++; listController?.abort(); listController = null; }
   function reset() {
-    reviewPlayer = null; clearClip();
+    reviewPlayer = recentSource = null; clearClip();
     stop(); stopList(); info = frame = savedLimit = null; savedFinished = false; geometry = ''; mode = ''; cameras.reset(); cameraForm.reset(); reviewControls();
     $('world-recording').replaceChildren(); $('world-player').hidden = true; message('選取已錄製的場次，開始觀戰或回放。');
     recordingControls(); bindRooms([]);
@@ -108,7 +109,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     $('world-replay').textContent = selected?.dataset.complete === 'false' ? '回放已保存片段' : '從頭回放';
   }
   function resetRecording() {
-    reviewPlayer = null; clearClip();
+    reviewPlayer = recentSource = null; clearClip();
     stop(); cameras.bind(null); cameraForm.reset(); info = frame = savedLimit = null; savedFinished = false; geometry = ''; mode = '';
     bindRooms([]); resetActors(); delete $('world-canvas').dataset.sequence;
     recordingControls(); reviewControls(); $('world-player').hidden = true; message('已切換場次，請開始觀戰或回放。');
@@ -175,7 +176,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   }
   function canExtendSaved() {
     return active && mode === 'replay' && info?.header.sessionId === $('world-recording').value
-      && !info.complete && savedFinished && frame?.packet.sequence === savedLimit;
+      && !recentSource && !info.complete && savedFinished && frame?.packet.sequence === savedLimit;
   }
   function clearClip() { clipStart = clipEnd = clipPosition = null; clipPlayback = ''; }
   function clipControls(idle) {
@@ -213,6 +214,12 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     clipPlayback = ''; reviewControls();
   }
   function reviewControls() {
+    const recent = $('world-recent');
+    const canReturn = Boolean(recentSource);
+    recent.hidden = mode !== 'live' && !canReturn;
+    recent.disabled = !active || (!canReturn && (mode !== 'live' || !connected || !received || !(frame?.packet.sequence > 1)));
+    const recentLabel = canReturn ? '返回即時觀戰' : '回看最近 10 秒';
+    if (recent.textContent !== recentLabel) recent.textContent = recentLabel;
     const showing = active && mode === 'replay' && info?.header.sessionId === $('world-recording').value && Boolean(frame);
     const idle = showing && !connected && !connecting && !stepping;
     clipControls(idle);
@@ -259,6 +266,19 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     if (clipPlayback === 'paused' || clipPlayback === 'playing') return playClip(clipPosition);
     return replayAt(0, sequence);
   }
+  function openLive() {
+    const target = recentSource ? { mode: 'live', sessionId: $('world-recording').value, sourceKey: recentSource } : null;
+    recentSource = null;
+    return connect('live', 0, null, null, target);
+  }
+  function toggleRecent() {
+    if ($('world-recent').disabled) return;
+    if (recentSource) return openLive();
+    const { sequence, elapsedMilliseconds } = frame.packet;
+    recentSource = geometry;
+    return elapsedMilliseconds <= 10000 ? connect('replay', 0, 1, sequence)
+      : connect('replay', elapsedMilliseconds - 10000, null, sequence);
+  }
   function status() {
     reviewControls();
     if (!info) return;
@@ -281,7 +301,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
       $('world-freshness').classList.toggle('replay-error', (stale || unknown || clockInvalid) && !info.complete);
     } else {
       const atSavedEnd = saved && savedFinished && frame?.packet.sequence === savedLimit;
-      $('world-freshness').textContent = atSavedEnd ? '已到已保存片段尾端' : connected ? '回放中' : '回放已暫停／結束';
+      $('world-freshness').textContent = atSavedEnd ? (recentSource ? '已到即時回看尾端' : '已到已保存片段尾端')
+        : connected ? '回放中' : '回放已暫停／結束';
       $('world-freshness').classList.remove('replay-error');
       $('world-pause').textContent = connected ? '暫停回放' : '繼續回放';
     }
@@ -423,16 +444,17 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   async function connect(nextMode, milliseconds = 0, sequence = null, replayLimit = savedLimit, target = null, clip = false) {
     const id = $('world-recording').value; if (!active || !id) return;
     stop(); mode = nextMode;
-    const clipGeometry = clip ? geometry : null;
+    const expectedGeometry = target?.sourceKey ?? recentSource ?? (clip ? geometry : null);
     clipPlayback = clip ? 'playing' : '';
     clipPosition = clip ? sequence : null;
     const own = controller = new AbortController(), request = epoch;
     const playerReview = Boolean(target?.playerId), witness = target?.witness;
     const witnessLabel = witness?.kind === 'enemies' ? '敵軍' : witness?.kind === 'tracking-begin' ? '追蹤開場' : '環境';
     const signal = playerReview || witness ? AbortSignal.any([own.signal, AbortSignal.timeout(8000)]) : own.signal;
-    if (nextMode === 'live') { savedLimit = null; savedFinished = false; reviewPlayer = null; clearClip(); }
+    if (nextMode === 'live') { received = 0; savedLimit = null; savedFinished = false; reviewPlayer = null; clearClip(); }
     const limit = nextMode === 'live' ? null : replayLimit;
     let hasHeader = false, reachedSavedEnd = false, lastSequence = sequence === null ? null : sequence - 1;
+    let recentJump = Boolean(target?.sourceKey || recentSource);
     let playerFrame = null, playerComplete = false, witnessFrame = null;
     connecting = true; reviewControls(); $('world-frame-message').textContent = '';
     message(nextMode === 'live' ? '正在連接即時觀戰…' : '正在讀取已保存快照…');
@@ -455,11 +477,13 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
             const event = buffer.slice(0, end); buffer = buffer.slice(end + 2);
             const lines = event.split('\n'), type = lines.find(line => line.startsWith('event: '))?.slice(7), raw = lines.find(line => line.startsWith('data: '))?.slice(6);
             if (!raw) continue; const data = JSON.parse(raw);
+            const sourceRecord = ['header', 'status', 'complete', 'saved-end'].includes(type);
+            if (expectedGeometry && (sourceRecord ? JSON.stringify(data.header) !== expectedGeometry : type === 'frame' && !hasHeader))
+              throw new Error('回應的錄製來源不同。');
             if (type === 'header') {
               if (hasHeader || data.header?.sessionId !== id || (target && !matchesTarget(data, target)))
                 throw new Error('回應的錄製場次或來源不同。');
               const key = JSON.stringify(data.header);
-              if (clip && key !== clipGeometry) throw new Error('片段的錄製來源不同。');
               if (limit !== null) {
                 if (!Number.isSafeInteger(data.acceptedSequence) || data.acceptedSequence < 1 || (limit !== 'latest' && limit !== data.acceptedSequence))
                   throw new Error('已保存片段的尾端不符。');
@@ -503,7 +527,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
                 if (witnessFrame || !matchesWitness(data.packet, target))
                   throw new Error(`回應快照的${witnessLabel}或指令序號不同。`);
                 witnessFrame = data;
-              } else show(data);
+              } else { show(data, recentJump); recentJump = false; }
             }
             else if (type === 'complete' && playerReview) {
               if (!playerFrame || playerComplete || !matchesTarget(data, target)) throw new Error('回應的世界封存範圍不同。');
@@ -513,7 +537,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
             else if (type === 'saved-end' && limit !== null) {
               const tail = clip ? limit : savedLimit;
               if (!hasHeader || reachedSavedEnd || data.acceptedSequence !== tail || lastSequence !== tail
-                || (clip && JSON.stringify(data.header) !== clipGeometry) || (witness && !matchesTarget(data, target)))
+                || (witness && !matchesTarget(data, target)))
                 throw new Error('已保存片段未完整讀取。');
               reachedSavedEnd = true;
               if (!clip) { info = data; savedFinished = true; }
@@ -553,8 +577,10 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   $('world-refresh').addEventListener('click', () => refresh());
   $('world-sound').addEventListener('click', async () => { if (scene?.weather.version === 1 || scene?.weather.audio.combat.version === 1) { const pending = scene.weather.audio.toggle(); status(); await pending; if (active && getKey()) status(); } });
   $('world-recording').addEventListener('change', resetRecording);
-  $('world-live').addEventListener('click', () => connect('live'));
+  $('world-live').addEventListener('click', openLive);
+  $('world-recent').addEventListener('click', toggleRecent);
   $('world-replay').addEventListener('click', () => {
+    recentSource = null;
     savedLimit = $('world-recording').selectedOptions[0]?.dataset.complete === 'false' ? 'latest' : null;
     connect('replay', 0, 1);
   });
@@ -591,6 +617,6 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
         message('正在尋找原場次錄製…');
       }
       void refresh(target);
-    } else { clearClip(); stop(); stopList(); status(); }
+    } else { recentSource = null; clearClip(); stop(); stopList(); status(); }
   } };
 }

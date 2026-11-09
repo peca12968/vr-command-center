@@ -370,7 +370,51 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     check(result.code === 0, 'Native simulation produces a second complete persisted world: ' + result.error.slice(-300));
     const completed = JSON.parse(result.output);
     const archiveRoute = `/sessions/${completed.sessionId}/world`;
-    const finalFrame = (await api(archiveRoute)).acceptedSequence;
+    const archiveInfo = await api(archiveRoute), finalFrame = archiveInfo.acceptedSequence;
+    const quickPage = await context.newPage();
+    try {
+      await quickPage.bringToFront();
+      await quickPage.goto(base + '/console/');
+      await quickPage.locator('#login-key').fill(tokens.Room2);
+      await quickPage.locator('#login-form button').click();
+      await quickPage.locator('#tab-world').click();
+      await quickPage.locator('#world-recording').selectOption(completed.sessionId);
+      await quickPage.locator('#world-live').click();
+      const quick = quickPage.locator('#world-recent'), quickCanvas = quickPage.locator('#world-canvas');
+      const ready = () => quickPage.waitForFunction(() => !document.querySelector('#world-recent').disabled, null, { polling: 100 });
+      const watch = new RegExp(`${archiveRoute}/watch\\?mode=replay&`);
+      await ready();
+      const first = await api(archiveRoute + '/frames/1');
+      await quickPage.route(watch, route => route.fulfill({ status: 200, contentType: 'text/event-stream', body:
+        `event: header\ndata: ${JSON.stringify({ ...archiveInfo, header: { ...archiveInfo.header, streamId: randomUUID() } })}\n\n` +
+        `event: frame\ndata: ${JSON.stringify(first)}\n\n` }));
+      await quick.click();
+      await quickPage.locator('#world-message').filter({ hasText: '回應的錄製來源不同' }).waitFor();
+      check(Number(await quickCanvas.getAttribute('data-sequence')) === finalFrame && await quick.innerText() === '返回即時觀戰',
+        'Room operator instant replay rejects a replaced stream before displaying its frame and can return');
+      await quickPage.unroute(watch);
+      await quick.click();
+      await ready();
+      await quickPage.locator('#world-speed').selectOption('4');
+      const shortWatch = quickPage.waitForRequest(request => watch.test(request.url()));
+      await quick.click();
+      const query = new URL((await shortWatch).url()).searchParams;
+      await quickPage.locator('#world-freshness').filter({ hasText: '已到即時回看尾端' }).waitFor();
+      check(archiveInfo.durationMilliseconds <= 10000 && query.get('fromFrame') === '1' && query.get('throughFrame') === String(finalFrame)
+        && Number(await quickCanvas.getAttribute('data-sequence')) === finalFrame && await quickPage.locator('#world-frame-next').isDisabled()
+        && (await quickPage.locator('#world-statistics tr td').allTextContents()).join('|') === 'World Simulation|2|1|20|1|100%|80',
+      'Instant replay shorter than ten seconds includes the first exact frame and stops at the original tail with its combat totals');
+      await quickPage.locator('#world-frame-back').click();
+      await quickPage.waitForFunction(sequence => Number(document.querySelector('#world-canvas').dataset.sequence) === sequence, finalFrame - 1);
+      await quick.click();
+      await ready();
+      check(Number(await quickCanvas.getAttribute('data-sequence')) === finalFrame && !await quickPage.locator('#world-review').isVisible(),
+        'Return to observation uses the original stream after manually stepping back');
+      await quick.click();
+      await quickPage.locator('#tab-operations').click();
+      await quickPage.locator('#tab-world').click();
+      check(!await quick.isVisible(), 'Leaving observation clears the instant replay return action');
+    } finally { await quickPage.close(); await page.bringToFront(); }
     await page.locator('#world-refresh').click(); await page.locator(`#world-recording option[value="${completed.sessionId}"]`).waitFor({ state: 'attached' });
     await page.locator('#world-recording').selectOption(completed.sessionId);
     check(await page.locator('#world-camera-x').inputValue() === '' && await page.locator('#world-camera-apply').isDisabled(), 'Switching recordings clears the precise camera draft before reading a new world');

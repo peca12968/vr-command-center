@@ -13,6 +13,7 @@ async function main() {
   const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const errors = [], requests = [], watches = [];
   const checks = [];
+  let recent;
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1080 } });
     page.on('pageerror', error => errors.push(error.name));
@@ -71,12 +72,72 @@ async function main() {
     assert.ok(await enemies.count() > 0);
     assert.equal(await picker.inputValue(), '');
     assert.deepEqual(watches, [`/api/sessions/${sessionId}/world/watch`]);
+    checks.push('All-room list restores 25 names through the original read-only stream');
+
+    await camera.selectOption('top');
+    await page.locator('[data-world-room="2"]').click();
+    const fixedCamera = await canvas.getAttribute('data-camera');
+    await page.locator('#world-speed').selectOption('4');
+    await page.waitForFunction(() => !document.querySelector('#world-recent').disabled
+      && parseFloat(document.querySelector('#world-time').textContent) > 11, null, { polling: 100 });
+    const replayResponse = page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return url.pathname === `/api/sessions/${sessionId}/world/watch` && url.searchParams.get('mode') === 'replay';
+    });
+    const tail = await page.evaluate(() => {
+      const sequence = Number(document.querySelector('#world-canvas').dataset.sequence);
+      document.querySelector('#world-recent').click();
+      return sequence;
+    });
+    const replay = await replayResponse;
+    assert.equal(replay.status(), 200);
+    const query = new URL(replay.url()).searchParams;
+    assert.equal(query.get('throughFrame'), String(tail));
+    assert.equal(query.get('rate'), '4');
+    // DevTools need not retain a streamed response body. Read the same fixed
+    // range independently while asserting the browser reaches its exact tail.
+    const [savedReplay] = await Promise.all([
+      page.request.get(replay.url(), { headers: { Authorization: 'Bearer ' + masterKey } }),
+      page.waitForFunction(() => document.querySelector('#world-freshness').textContent === '已到即時回看尾端', null, { polling: 100 })
+    ]);
+    assert.equal(savedReplay.status(), 200);
+    const events = (await savedReplay.text()).trim().split('\n\n').map(record => {
+      const [event, data] = record.split('\n');
+      return [event.slice(7), JSON.parse(data.slice(6))];
+    });
+    const frames = events.filter(([type]) => type === 'frame').map(([, value]) => value.packet);
+    const end = frames.at(-1), start = frames[0];
+    const from = end.elapsedMilliseconds - 10000;
+    assert.equal(query.get('fromMs'), String(from));
+    assert.equal(events[0][1].header.sessionId, sessionId);
+    assert.equal(events.at(-1)[0], 'saved-end');
+    assert.equal(events.at(-1)[1].acceptedSequence, tail);
+    assert.equal(end.sequence, tail);
+    assert.ok(start.elapsedMilliseconds <= from && frames[1].elapsedMilliseconds > from);
+    assert.ok(frames.every((frame, index) => frame.sequence === start.sequence + index));
+    await checkRoom(2);
+    assert.equal(await canvas.getAttribute('data-camera'), fixedCamera);
+    assert.equal(await canvas.getAttribute('data-sequence'), String(tail));
+    assert.equal(await page.locator('#world-frame-extend').isVisible(), false);
+    await page.locator('#world-player').screenshot({ path: path.join(out, 'recent-tail.png') });
+    checks.push('Instant replay seeks the witnessed ten-second window and confirms its exact displayed native tail');
+    await page.getByRole('button', { name: '返回即時觀戰' }).click();
+    await page.waitForFunction(sequence => Number(document.querySelector('#world-canvas').dataset.sequence) > sequence
+      && !document.querySelector('#world-recent').disabled && document.querySelector('#world-review').hidden,
+    tail, { polling: 100 });
+    await checkRoom(2);
+    assert.equal(await canvas.getAttribute('data-camera'), fixedCamera);
+    assert.equal(await camera.inputValue(), 'top');
+    assert.deepEqual(watches, Array(3).fill(`/api/sessions/${sessionId}/world/watch`));
+    recent = { streamId: events[0][1].header.streamId, firstFrame: start.sequence, tail, frames: frames.length,
+      fromMilliseconds: from, firstMilliseconds: start.elapsedMilliseconds, tailMilliseconds: end.elapsedMilliseconds,
+      resumedFrame: Number(await canvas.getAttribute('data-sequence')), roomId: 2 };
+    checks.push('Instant replay returns to newer live frames from the same source with room and overhead camera preserved');
     // The operations tab may calculate a read-only draft layout while the browser logs in.
     assert.deepEqual(requests.filter(request => request !== 'POST /api/mission-layout'), []);
     assert.equal(await sessionRevision(), revision);
     assert.deepEqual(errors, []);
-    checks.push('All-room list restores 25 names through the original read-only stream');
   } finally { await browser.close(); }
-  await fs.writeFile(path.join(out, 'checks.json'), JSON.stringify({ complete: true, checks, sessionId, players: 25, nonGetRequests: requests }, null, 2), { flag: 'wx' });
+  await fs.writeFile(path.join(out, 'checks.json'), JSON.stringify({ complete: true, checks, sessionId, players: 25, recent, nonGetRequests: requests }, null, 2), { flag: 'wx' });
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

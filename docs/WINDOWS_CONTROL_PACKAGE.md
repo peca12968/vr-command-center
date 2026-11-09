@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `windows-control-console-0.31.68-instant-replay-win-x64.zip` 加入即時觀戰回看。ZIP 為 52,813,246 bytes，SHA-256 `a8b5c15480155eebf2ef38315bcc4de1a1451d9f9e92197be1ac16af73428943`。解壓核對 540 個清單檔案，含 520 個執行環境檔案，通過 106 項管理包檢查。 [觀戰操作](WORLD_RECORDING.md#從即時觀戰回看最近-10-秒)
+
 2026-11-09 `windows-control-0.31.48-win-x64.zip` 在房卡顯示原遊戲伺服器公布的 UDP 端點。ZIP 為 52,735,775 bytes，SHA-256 `7bcbbb8e03cbe4735133567a1164bdea548872f37cae528ab3777b8cd9b1ff6f`。解壓核對 528 個清單檔案，含 508 個執行環境檔案，通過 106 項管理包檢查。 [房卡操作](EXTERNAL_CLIENTS.md#五房房卡的連線端點)
 
 2026-11-09 `windows-control-0.31.47-win-x64.zip` 加入混合 VR／MR 五房獨立部署。ZIP 為 52,734,795 bytes，SHA-256 `e44221aeaade39748aa9f53097dacb3c882e0c7e83bdf4a116744f9d83331f90`。解壓核對 528 個清單檔案，含 508 個執行環境檔案，通過 106 項管理包及 98 項原生伺服器混合部署檢查。 [混合配票](QUEST3.md#混合-vr-與-mr-五房部署包)

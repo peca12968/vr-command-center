@@ -65,7 +65,7 @@ def main():
     p.add_argument('--venue-field-evidence',action='store_true',help='Verify full sealed admission evidence for both original venue End batches')
     p.add_argument('--check-venue-field-ui',action='store_true',help='Download the original current and earlier field bundles from the shipped console')
     p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
-    p.add_argument('--check-room-observer',action='store_true',help='Verify the shipped room-scoped actor picker on the original Linked source')
+    p.add_argument('--check-room-observer',action='store_true',help='Verify room-scoped observation and instant replay on the original Linked source')
     p.add_argument('--check-room-participation',action='store_true',help='Disconnect and restore one original VR admission in each five-room mode')
     p.add_argument('--check-room-endpoints',action='store_true',help='Verify real published UDP endpoints in the room cards and scoped API')
     p.add_argument('--check-room-clocks', action='store_true', help='Verify room clocks and the original pause/resume boundaries in both modes')
@@ -2369,7 +2369,9 @@ def main():
                                cwd=ROOT/'tests/browser', check=True, timeout=70)
                 observed = read(browser_out/'checks.json')
                 check(observed['complete'] and observed['players']==25 and observed['sessionId']==entries[0]['sessionId']
-                      and len(observed['checks'])==3, 'shipped console scopes actors and follows the original Linked source with 25 named players')
+                      and len(observed['checks'])==5 and observed['recent']['roomId']==2
+                      and observed['recent']['resumedFrame']>observed['recent']['tail'],
+                      'shipped console scopes actors and returns to the same 25-player Linked source after instant replay')
             if args.check_room_participation:verify_room_participation(entries,round_clients,linked)
             if args.check_room_clocks:verify_room_clocks(entries,linked)
             if args.check_venue_environment:verify_venue_environment(entries,linked)
