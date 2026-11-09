@@ -8,7 +8,8 @@
 static PFN_xrGetInstanceProcAddr mockGetProc;
 static PFN_xrCreateInstance mockCreateInstance;
 static PFN_xrSyncActions mockSyncActions;
-static PFN_xrSetInputDeviceStateBoolEXT mockSetTriggerClick;
+static PFN_xrGetCurrentInteractionProfile mockGetProfile;
+static PFN_xrSetInputDeviceStateBoolEXT mockSetButton;
 static PFN_xrSetInputDeviceStateFloatEXT mockSetTriggerValue;
 static PFN_xrCreateReferenceSpace mockCreateReferenceSpace;
 static PFN_xrCreateActionSpace mockCreateActionSpace;
@@ -20,10 +21,13 @@ static unsigned actionSpaceCount;
 static wchar_t trackingLossFile[32768];
 static wchar_t triggerCommandFile[32768];
 static wchar_t triggerAckFile[32768];
+static wchar_t reconnectCommandFile[32768];
+static wchar_t reconnectAckFile[32768];
 static volatile LONG observedTrackingLoss;
-static XrPath rightHand, triggerClick, triggerValue;
+static XrPath rightHand, triggerClick, triggerValue, reconnectClick, viveProfile;
 static char triggerCommand = '0';
 static char lastAcknowledgedCommand, lastAcknowledgedValue;
+static char reconnectCommand = '0', lastReconnectCommand, lastReconnectValue;
 static ULONGLONG tapDeadline;
 
 static PFN_xrVoidFunction functionFor(XrInstance instance, const char *name)
@@ -34,7 +38,7 @@ static PFN_xrVoidFunction functionFor(XrInstance instance, const char *name)
 
 static XrResult XRAPI_CALL createInstance(const XrInstanceCreateInfo *info, XrInstance *instance)
 {
-    if (!triggerCommandFile[0])
+    if (!triggerCommandFile[0] && !reconnectCommandFile[0])
         return mockCreateInstance(info, instance);
     const char *extensions[64];
     if (info->enabledExtensionCount >= ARRAYSIZE(extensions))
@@ -52,24 +56,24 @@ static XrResult XRAPI_CALL createInstance(const XrInstanceCreateInfo *info, XrIn
     return mockCreateInstance(&fixtureInfo, instance);
 }
 
-static char readTriggerCommand(void)
+static char readCommand(const wchar_t *path, char previous, char maximum)
 {
-    HANDLE file = CreateFileW(triggerCommandFile, GENERIC_READ,
+    HANDLE file = CreateFileW(path, GENERIC_READ,
         FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     if (file == INVALID_HANDLE_VALUE)
-        return triggerCommand;
+        return previous;
     char command = 0;
     DWORD size = 0;
     ReadFile(file, &command, 1, &size, NULL);
     CloseHandle(file);
-    return size == 1 && command >= '0' && command <= '2' ? command : triggerCommand;
+    return size == 1 && command >= '0' && command <= maximum ? command : previous;
 }
 
-static BOOL acknowledgeTrigger(char command, char value)
+static BOOL acknowledge(const wchar_t *path, char command, char value, char *lastCommand, char *lastValue)
 {
-    if (command == lastAcknowledgedCommand && value == lastAcknowledgedValue)
+    if (command == *lastCommand && value == *lastValue)
         return TRUE;
-    HANDLE file = CreateFileW(triggerAckFile, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
+    HANDLE file = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE,
         NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (file == INVALID_HANDLE_VALUE)
         return FALSE;
@@ -78,30 +82,44 @@ static BOOL acknowledgeTrigger(char command, char value)
     BOOL written = WriteFile(file, line, sizeof(line), &size, NULL) && size == sizeof(line);
     CloseHandle(file);
     if (written) {
-        lastAcknowledgedCommand = command;
-        lastAcknowledgedValue = value;
+        *lastCommand = command;
+        *lastValue = value;
     }
     return written;
 }
 
 static XrResult XRAPI_CALL syncActions(XrSession session, const XrActionsSyncInfo *info)
 {
-    if (!triggerCommandFile[0])
-        return mockSyncActions(session, info);
-    if (!rightHand || !triggerClick || !triggerValue || !mockSetTriggerClick || !mockSetTriggerValue)
-        return XR_ERROR_RUNTIME_FAILURE;
-    char command = readTriggerCommand();
-    ULONGLONG now = GetTickCount64();
-    if (command == '2' && triggerCommand != '2')
-        tapDeadline = now + 100;
-    triggerCommand = command;
-    BOOL held = command == '1' || (command == '2' && now < tapDeadline);
-    if (XR_FAILED(mockSetTriggerClick(session, rightHand, triggerClick, held ? XR_TRUE : XR_FALSE)) ||
-        XR_FAILED(mockSetTriggerValue(session, rightHand, triggerValue, held ? 1.0f : 0.0f)))
-        return XR_ERROR_RUNTIME_FAILURE;
+    BOOL held = FALSE;
+    if (triggerCommandFile[0]) {
+        char command = readCommand(triggerCommandFile, triggerCommand, '2');
+        ULONGLONG now = GetTickCount64();
+        if (command == '2' && triggerCommand != '2')
+            tapDeadline = now + 100;
+        triggerCommand = command;
+        held = command == '1' || (command == '2' && now < tapDeadline);
+        if (XR_FAILED(mockSetButton(session, rightHand, triggerClick, held ? XR_TRUE : XR_FALSE)) ||
+            XR_FAILED(mockSetTriggerValue(session, rightHand, triggerValue, held ? 1.0f : 0.0f)))
+            return XR_ERROR_RUNTIME_FAILURE;
+    }
+    if (reconnectCommandFile[0]) {
+        reconnectCommand = readCommand(reconnectCommandFile, reconnectCommand, '1');
+        if (XR_FAILED(mockSetButton(session, rightHand, reconnectClick, reconnectCommand == '1' ? XR_TRUE : XR_FALSE)))
+            return XR_ERROR_RUNTIME_FAILURE;
+    }
     XrResult result = mockSyncActions(session, info);
-    if (result == XR_SUCCESS && !acknowledgeTrigger(command, held ? '1' : '0'))
-        return XR_ERROR_RUNTIME_FAILURE;
+    if (result == XR_SUCCESS) {
+        if (triggerCommandFile[0] && !acknowledge(triggerAckFile, triggerCommand, held ? '1' : '0', &lastAcknowledgedCommand, &lastAcknowledgedValue))
+            return XR_ERROR_RUNTIME_FAILURE;
+        if (reconnectCommandFile[0]) {
+            XrInteractionProfileState profile = { .type = XR_TYPE_INTERACTION_PROFILE_STATE };
+            if (XR_FAILED(mockGetProfile(session, rightHand, &profile)))
+                return XR_ERROR_RUNTIME_FAILURE;
+            if (profile.interactionProfile == viveProfile &&
+                !acknowledge(reconnectAckFile, reconnectCommand, reconnectCommand, &lastReconnectCommand, &lastReconnectValue))
+                return XR_ERROR_RUNTIME_FAILURE;
+        }
+    }
     return result;
 }
 
@@ -180,14 +198,23 @@ static XrResult XRAPI_CALL getProc(XrInstance instance, const char *name, PFN_xr
         *function = (PFN_xrVoidFunction)createInstance;
     } else if (strcmp(name, "xrSyncActions") == 0) {
         mockSyncActions = (PFN_xrSyncActions)*function;
-        if (triggerCommandFile[0]) {
+        if (triggerCommandFile[0] || reconnectCommandFile[0]) {
             PFN_xrStringToPath toPath = (PFN_xrStringToPath)functionFor(instance, "xrStringToPath");
-            mockSetTriggerClick = (PFN_xrSetInputDeviceStateBoolEXT)functionFor(instance, "xrSetInputDeviceStateBoolEXT");
-            mockSetTriggerValue = (PFN_xrSetInputDeviceStateFloatEXT)functionFor(instance, "xrSetInputDeviceStateFloatEXT");
-            if (!toPath || XR_FAILED(toPath(instance, "/user/hand/right", &rightHand)) ||
-                XR_FAILED(toPath(instance, "/user/hand/right/input/trigger/click", &triggerClick)) ||
-                XR_FAILED(toPath(instance, "/user/hand/right/input/trigger/value", &triggerValue)))
+            mockSetButton = (PFN_xrSetInputDeviceStateBoolEXT)functionFor(instance, "xrSetInputDeviceStateBoolEXT");
+            if (!toPath || !mockSetButton || XR_FAILED(toPath(instance, "/user/hand/right", &rightHand)))
                 return XR_ERROR_RUNTIME_FAILURE;
+            if (triggerCommandFile[0]) {
+                mockSetTriggerValue = (PFN_xrSetInputDeviceStateFloatEXT)functionFor(instance, "xrSetInputDeviceStateFloatEXT");
+                if (!mockSetTriggerValue || XR_FAILED(toPath(instance, "/user/hand/right/input/trigger/click", &triggerClick)) ||
+                    XR_FAILED(toPath(instance, "/user/hand/right/input/trigger/value", &triggerValue)))
+                    return XR_ERROR_RUNTIME_FAILURE;
+            }
+            if (reconnectCommandFile[0]) {
+                mockGetProfile = (PFN_xrGetCurrentInteractionProfile)functionFor(instance, "xrGetCurrentInteractionProfile");
+                if (!mockGetProfile || XR_FAILED(toPath(instance, "/interaction_profiles/htc/vive_controller", &viveProfile)) ||
+                    XR_FAILED(toPath(instance, "/user/hand/right/input/menu/click", &reconnectClick)))
+                    return XR_ERROR_RUNTIME_FAILURE;
+            }
         }
         *function = (PFN_xrVoidFunction)syncActions;
     } else if (strcmp(name, "xrCreateReferenceSpace") == 0) {
@@ -221,6 +248,12 @@ __declspec(dllexport) XrResult XRAPI_CALL xrNegotiateLoaderRuntimeInterface(
         return XR_ERROR_RUNTIME_UNAVAILABLE;
     length = GetEnvironmentVariableW(L"VR_COMMAND_OPENXR_TRIGGER_ACK", triggerAckFile, ARRAYSIZE(triggerAckFile));
     if (length >= ARRAYSIZE(triggerAckFile) || (triggerCommandFile[0] && !triggerAckFile[0]))
+        return XR_ERROR_RUNTIME_UNAVAILABLE;
+    length = GetEnvironmentVariableW(L"VR_COMMAND_OPENXR_RECONNECT_COMMAND", reconnectCommandFile, ARRAYSIZE(reconnectCommandFile));
+    if (length >= ARRAYSIZE(reconnectCommandFile))
+        return XR_ERROR_RUNTIME_UNAVAILABLE;
+    length = GetEnvironmentVariableW(L"VR_COMMAND_OPENXR_RECONNECT_ACK", reconnectAckFile, ARRAYSIZE(reconnectAckFile));
+    if (length >= ARRAYSIZE(reconnectAckFile) || (reconnectCommandFile[0] && !reconnectAckFile[0]))
         return XR_ERROR_RUNTIME_UNAVAILABLE;
     HMODULE runtime = LoadLibraryExW(path, NULL, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!runtime)

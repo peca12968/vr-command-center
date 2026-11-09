@@ -34,3 +34,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -RefreshPlayerTicket `
 驗證範圍以[PROGRESS](PROGRESS.md)為準：純按鍵政策涵蓋角色／listening／shutdown／時間、按住／重按、焦點／追蹤中斷；官方Oculus Touch配置與真正InputAction在Editor Play Mode的Dynamic更新中核對右B、左Y與完整追蹤要求。虛擬測試裝置與state event只存在Editor測試，不在正式程式注入裝置、按鍵或姿態；測試臨時輸入設定會還原。這不是Quest控制器、頭盔視覺／舒適度、票券USB更新或實體網路證據。
 
 仍需實機驗：有／無票券更新的斷線恢復、按住B跨失焦／追蹤中斷／冷卻、重複按鍵、被撤銷／Ended拒絕、原健康彈藥及Tracked姿態、等待面板可讀性；另驗跨機、MR與25台。沒有頭盔時不把APK成功或Editor虛擬事件改稱實機通過。
+
+## Windows OpenXR 重連複驗
+
+以支援 Vive 控制器右手 Menu 的測試 DLL 執行 Windows 玩家包整合命令，並加上 `--check-openxr-reconnect`。OpenXR 席先透過同機 UDP 轉送入場，桌面席維持原直連。測試關閉轉送，等原客戶端與伺服器都記錄斷線，再把同一入場的新票券和原伺服器端點寫入測試用連線檔。確認 Menu 按住及放開時都維持離線，重新按下後才由原程序讀檔建立新連線。封存核對原席位、姿態、健康、彈藥及新連線的戰績確認。測試 DLL 會讀回 Unity Mock Runtime 的右手 Vive 設定再確認按鍵。Quest 右手 B、USB 更新流程與頭盔輸入仍待實機驗收。 [測試 DLL 與命令](WINDOWS_PLAYER_PACKAGE.md#本機追蹤整合驗證) · [OpenXR 測試按鍵](https://registry.khronos.org/OpenXR/specs/1.1/man/html/xrSetInputDeviceStateBoolEXT.html)

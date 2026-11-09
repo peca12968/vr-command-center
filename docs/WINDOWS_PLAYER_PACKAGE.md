@@ -99,6 +99,8 @@ python scripts/check-server-package.py '<解壓遊戲伺服器包>' `
 
 可加上 `--observe-closure-ui`，用專案的 Playwright Chromium 驗證房卡顯示與清除待確認席位，核對兩席彈藥數，並由實際控制台結束和核對封存。
 
+加上 `--check-openxr-reconnect` 可用支援 Vive 右手 Menu 的測試 DLL 驗證同機重連。測試只關閉 OpenXR 席的 UDP 轉送，並在原玩家程序內重新讀取同一入場的新票券。 [重連驗證](QUEST_RECONNECT.md#windows-openxr-重連複驗)
+
 可再加上 `--hardware-simulator-package '<解壓目錄>/VRCommand-HardwareSimulator'`，用 .NET 10 執行硬體模擬包，為兩席分別綁定虛擬裝置。測試確認追蹤失效、恢復後扣住及放開時，兩個裝置都沒有收到回饋。重新扣下扳機後，TCP 模擬裝置只為射擊席確認一筆 `ShotFired` 後座力訊號，並與主控接受的原報告及封存射擊逐筆核對。驗證範圍是軟體路由與模擬確認，實際裝置輸出另行驗收。 [硬體模擬器](HARDWARE_SIMULATOR.md)
 
 127.*僅供同機；不同電腦必須能連到公告的伺服器IPv4及UDP埠。此工具不修改安全性／防火牆、不安裝驅動，也不提供NAT／中繼或網路可達性探測。若Windows出現安全性提示，由使用者自行決定。包內沒有伺服器啟動器、管理API或控制台金鑰。
