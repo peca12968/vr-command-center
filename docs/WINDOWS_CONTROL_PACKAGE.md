@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-09 `windows-control-0.31.41-win-x64.zip` 加入 VR 五房配票。ZIP 為 52,685,935 bytes，SHA-256 `e0271a060aaf2574779edcf64fea82673fb3ef9c92d4c9eb51b352b135549198`。解壓核對 522 個清單檔案，含 502 個執行環境檔案，通過 106 項管理包及 16 項 Chromium 專項。 [操作方式](EXTERNAL_CLIENTS.md#vr-五房配票)
+
 2026-11-09 `windows-control-0.31.40-win-x64.zip` 加入全館收尾的批次場館驗收 ZIP。ZIP 為 52,669,871 bytes，SHA-256 `0dd5f090842866875de22dc0e2c9b2700976ae7d3e0534789305b6e38c0b9c7e`。解壓核對 519 個清單檔案，含 499 個執行環境檔案，通過 106 項管理包及 54 項 Chromium 專項。 [操作方式](SESSION_CLOSURE.md#下載本批場館驗收)
 
 2026-11-09 `windows-control-0.31.39-win-x64.zip` 加入全館收尾歷史分頁與批次選取。ZIP 為 52,666,279 bytes，SHA-256 `e04a246feec0cfd1eb9447605cfedd42b771f4547498ddd66edaf7a37cbeda57`。解壓核對 519 個清單檔案，含 499 個執行環境檔案，通過 106 項管理包及 49 項 Chromium 專項。 [操作方式](SESSION_CLOSURE.md#歷史批次)

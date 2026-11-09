@@ -52,6 +52,16 @@ Quest MR 滿席部署可先用清單一次核對五房 ZIP、場次 ID、端點�
 
 `POST /api/sessions/{id}/rooms/{roomId}/join-ticket-bundle` 接受 IPv4、埠與該房間完整的玩家 ID 及 admission ID。服務以一次名冊快照核對整組後才產生 ZIP，成功回應帶 `Cache-Control: no-store`。名冊已變更時回應 409，重新整理後核對席位再下載。MR 的單席與整房配票須先由主控鎖定該房校正檔，否則回應 409 `mr-alignment-required`。遊戲伺服器依當前 admission 驗票，名冊異動會使相應的舊票券失效。
 
+## VR 五房配票
+
+管理包 0.31.41 起，全館主控可在五房總覽點「讀取五房名冊」。先準備五個獨立 VR 場次或一個五房合併 VR 場次，為每房加入五名玩家，並讓各遊戲伺服器公布端點。核對畫面中的任務、端點、房間、席位及玩家姓名，再按「下載五房連線檔 ZIP」。畫面會標示只能同機使用的 loopback 端點。
+
+`vr-venue-connections.zip` 內含 `venue.json`、五個原格式的分房 ZIP 及共 25 份四欄玩家連線檔。分房 ZIP 依房號命名，每個 JSON 依房號與席位命名。票券自簽發起有效五分鐘，請將對應的 JSON 個別交給玩家，整份 ZIP 由主控私下保管。Windows 玩家啟動器可再次核對檔內標示的房間與席位。 [玩家端核對](PLAYER_CONFIG_REVIEW.md#連線檔席位與效期)
+
+下載使用各來源已公布的位址和埠。五房獨立須使用各自的端點，合併場共用同一端點。若名冊、場次或來源已變更，請重新讀取五房名冊。尚未填滿的場館可沿用單席或整房配票。
+
+主控可用 `GET /api/vr-deployment/venue` 讀取預覽。向 `POST /api/vr-deployment/venue-bundle` 送出同一預覽的 `topology` 以及五個 `rooms`，每房提供 `roomId`、`sessionId`、公布的 `streamId` 和五筆 `players` 的 `playerId`、`admissionId`。服務以同一份現行場館快照核對所有房間。任何一房不符時回應 409，附對應房號，整批無 ZIP。
+
 ## 結束與保存
 
 操作員End、end.request、時限或正常退出會沿用原雙journal精確seal。external不持有玩家程序或其結果log，所以`allAcknowledged=null`，不把空集合當全部收到；server非阻塞保留至少36秒，涵蓋原30秒結果期限與進行中最多5秒HTTP，`--results-seconds`較大時採較大值。這是保留時間，不是送達保證；例外／再次中斷仍可能提早結束，不能當崩潰恢復。
