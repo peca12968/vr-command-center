@@ -1,5 +1,15 @@
 # 開發進度
 
+## 2026-11-10 Quest 3 啟動前核對部署檔案
+
+Quest 單席及整批部署會核對裝置上暫存與啟用後的連線檔。MR 另外核對原校正檔及其鎖定雜湊。只有完成核對才送出啟動指令，整批回報逐席區分 `filesVerified` 及 `file-verification-failed`。 [部署操作](QUEST3.md#啟動前核對裝置檔案)
+
+- 舊工具在暫存 MR 校正檔、暫存連線檔及啟用後的連線檔被更動時仍回傳成功，三個原反例保存於 `quest-file-verify-before-54becfc1629b435dbbdd4af091a79051.log`。新版拒絕三個反例。暫存核對失敗時保留原連線檔，已啟用檔案核對失敗時不送啟動。整批測試在第 4 席失敗，保留前三席已核對結果，其餘 21 席未寫入。
+- 42 項 Quest 工具、9 項 Quest UDP 探測及 10 項伺服器封裝測試通過。Quest 紀錄 `quest-file-verify-tests-13d9a4d1e35b4dd3b3b0bf4f8782b2b3.log`。ADB 裝置清單為空，頭盔安裝、入場及實體 MR 校正仍待設備驗收。
+- 沿用 Windows 0.49.0 和管理包 0.31.71。MR 原生 `run-f1724f82e71e46429b4316f663457834` 通過 140 項。獨立及合併各用原簽章部署 ZIP 驗證 25 席及指定 5 席，所有模擬裝置均回報 `filesVerified`，共 614 格準備中錄製。混合 `run-e00c626d7d114b1f9b6216cc7da19aae` 通過 123 項，指定 5 個 Quest 模擬裝置涵蓋 VR 與 MR，另核對 VIVE Windows 原票券交接，封存 627 格。兩組完成清理，C／F 分別 57、52 檔雜湊一致。
+- 純 VR 原生 `run-600fb6833ae3467a805bdf8816c4bb5c` 通過 381 項。獨立與合併各用原瀏覽器 ZIP 對 25 個模擬 ADB 裝置完成檔案核對，另由各 25 個同機 Windows 模擬玩家以原票券入場。六場雙封存共 1,492 格回放及 50 份原戰績。C／F 兩側 222 檔雜湊一致，無活躍場次或殘留測試程序。三組原生工具輸出為 `quest-file-verify-{mr,mixed,vr}-e22fdc.log`。
+- 功能來源 `e9acdeb3cb1114c4bebfd54256b8714f54b01685`。GitHub Actions job `129515747900` 因帳務或支出上限未啟動。跨機 25 人、Quest 3、VIVE XR、實體 MR 與廠商硬體仍待現地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42721332271)
+
 ## 2026-11-10 最近一批全館環境指令逐房確認
 
 控制台 0.31.71 從原命令紀錄還原最近一筆全館天氣、日夜及閃電設定，逐房列出原命令序號與確認、覆寫、結束狀態。有效快照可開啟原場次指定房間的俯視回放。 [環境核對](ENVIRONMENT.md#核對最近一批環境指令)
