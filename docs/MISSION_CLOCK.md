@@ -30,6 +30,12 @@ Windows 管理包 0.31.31 起，主控可在五房總覽使用「全館暫停與
 
 若回覆遺失，使用「重試確認結果」即可取回同一批場次及原序號，包含管理服務重啟後的重送。`GET /api/venue/phase` 提供主控可操作的 `pause` 與 `resume` 預覽，`POST /api/venue/phase` 需要主控憑證、`Idempotency-Key`、`action` 及每場的 `sessionId`、`phaseSinceSequence`。成功回傳原場次與 `appliedAtSequence`。目標改變或 MR 尚未就緒會回傳 `409`。
 
+管理包 0.31.32 起，房卡會分開顯示「全館暫停／繼續待確認」與「已套用」。遊戲來源須回傳符合目前階段及命令序號的有效快照，才會顯示已套用。逾時、管理連線中斷或等待階段同步時，房卡會標示待確認的原因。房控可查看本房；合併場的五張房卡共用同一個遊戲端確認。個別操作改變階段後，該房會退出原全館狀態。
+
+全館繼續現在要求每個目標的有效暫停快照，VR 與 MR 皆適用。MR 另須滿足當前追蹤條件。任何房間仍在等待時，控制台會列出房號並停用批次繼續。`POST /api/venue/phase` 遇到尚未確認暫停的目標會回傳 `409` 與 `venue-pause-not-observed`。個別房間的暫停與繼續仍可由原場次控制操作。
+
+`GET /api/rooms/readiness` 會在目前階段由全館命令建立時附上 `venuePhase`，包含原命令 `action`、`appliedAtSequence`、有效的 `worldSequence` 與 `readyToResume`。快照無效時 `worldSequence` 為 `null`，命令序號仍保留。重送原管理命令會取得原回條，房卡仍依目前快照判斷遊戲端是否已套用。
+
 ## 契約與升級
 
 - `SetMissionClock` 走原 `/api/sessions/{id}/commands`，包含 `missionClock:{autoEnd:true}` 與正常 commandId／expectedSequence。Master／同房 RoomController 維持原權限；Linked 限 Master。

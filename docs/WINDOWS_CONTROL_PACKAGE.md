@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-09 `windows-control-0.31.32-win-x64.zip` 在房卡顯示全館暫停與繼續的遊戲端確認，並要求各目標場次確認暫停後才能批次繼續。ZIP 為 52,628,544 bytes，SHA-256 `29f5379275ebb5f15c1aae4f51a0e02641ab92f52b6b2559a10f8f3751aa261e`。解壓核對 516 個清單檔案，含 496 個執行環境檔案，通過 106 項管理包及 14 項 Chromium 專項檢查。 [全館操作](MISSION_CLOCK.md#全館暫停與繼續)
+
 2026-11-09 `windows-control-0.31.31-win-x64.zip` 新增全館暫停與繼續。ZIP 為 52,623,859 bytes，SHA-256 `50ff83ac6bb8b2e9c872b25c7dfc6fa0892c171463f2d0c67c0f489b5fa8a162`。解壓核對 516 個清單檔案，含 496 個執行環境檔案，通過 106 項管理包檢查。 [全館操作](MISSION_CLOCK.md#全館暫停與繼續)
 
 2026-11-09 `windows-control-0.31.30-win-x64.zip` 在五房總覽顯示最近接受的任務活動時間或自動結束倒數。ZIP 為 52,612,892 bytes，SHA-256 `a9ecdb2857166a31ee5f5e5568782d9ef77f2570a9f32d580338ea6cff8ddc43`。解壓核對 516 個清單檔案，含 496 個執行環境檔案，通過 106 項管理包檢查。 [房卡操作](MISSION_CLOCK.md#五房房卡)
