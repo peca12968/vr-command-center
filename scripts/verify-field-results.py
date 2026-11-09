@@ -459,6 +459,24 @@ def management_zip(path):
     return records
 
 
+def read_udp_preflight_batch(path, mode, expected_rooms):
+    batch = read_json(content(path))
+    require(integer(batch['version'], 1, 1) and batch.get('scope') == 'quest-udp-preflight-only' and batch.get('mode') == mode
+            and batch.get('complete') is True, 'Provide a complete Quest UDP preflight batch for the original mode')
+    groups = batch['groups']
+    require(type(groups) is list and 1 <= len(groups) <= len(expected_rooms), 'Invalid Quest UDP endpoint groups')
+    sources = {}
+    for group in groups:
+        room_ids = group['roomIds']
+        require(type(room_ids) is list and all(type(room) is int for room in room_ids) and room_ids in expected_rooms
+                and tuple(room_ids) not in sources and group.get('complete') is True,
+                'Invalid or repeated Quest UDP endpoint group')
+        pairs = group['udpSourcePreflights']
+        require(type(pairs) is list and 1 <= len(pairs) <= len(room_ids) * 5, 'Invalid all-source UDP preflight list')
+        sources[tuple(room_ids)] = [(pair, path.parent) for pair in pairs]
+    return sources
+
+
 def verify_venue(manifest_path):
     manifest_path = manifest_path.resolve(strict=True)
     manifest = read_json(content(manifest_path))
@@ -497,27 +515,27 @@ def verify_venue(manifest_path):
     require(not check_alignments or journals, 'MR alignment evidence requires the original world journals for the full batch')
     preflights = any('udpPreflight' in entry for entry in entries)
     source_lists = any('udpSourcePreflights' in entry for entry in entries)
-    batch_supplied = 'udpPreflightBatch' in manifest
-    require(sum((preflights, source_lists, batch_supplied)) <= 1, 'Use only one UDP preflight mode for the full batch')
+    single_batch, multiple_batches = 'udpPreflightBatch' in manifest, 'udpPreflightBatches' in manifest
+    require(not (single_batch and multiple_batches), 'Use either one Quest UDP batch field or the batch list')
+    batch_supplied = single_batch or multiple_batches
     source_preflights = source_lists or batch_supplied
+    require(not (preflights and source_preflights), 'Use only one UDP preflight mode for the full batch')
     require(not preflights or all('udpPreflight' in entry for entry in entries), 'Provide UDP preflight reports for every session in this batch')
-    require(not source_lists or all('udpSourcePreflights' in entry for entry in entries),
+    require(not source_lists or batch_supplied or all('udpSourcePreflights' in entry for entry in entries),
             'Provide all-source UDP preflight reports for every session in this batch')
 
-    batch_path, batch_pairs = None, {}
+    batch_pairs = {}
     if batch_supplied:
-        batch_path = evidence_path(manifest['udpPreflightBatch'])
-        batch = read_json(content(batch_path))
-        require(integer(batch['version'], 1, 1) and batch.get('scope') == 'quest-udp-preflight-only' and batch.get('mode') == mode
-                and batch.get('complete') is True, 'Provide a complete Quest UDP preflight batch for the original mode')
-        groups = batch['groups']
-        require(type(groups) is list and len(groups) == len(expected_rooms), 'The Quest UDP preflight batch must cover every original endpoint')
-        for group in groups:
-            group_rooms = group['roomIds']
-            require(type(group_rooms) is list and all(type(room) is int for room in group_rooms) and group_rooms in expected_rooms
-                    and tuple(group_rooms) not in batch_pairs and group.get('complete') is True,
-                    'The Quest UDP preflight batch must cover every original endpoint')
-            batch_pairs[tuple(group_rooms)] = group['udpSourcePreflights']
+        batch_names = [manifest['udpPreflightBatch']] if single_batch else manifest['udpPreflightBatches']
+        require(type(batch_names) is list and 1 <= len(batch_names) <= 25, 'Provide 1 to 25 Quest UDP batch reports')
+        for name in batch_names:
+            batch = read_udp_preflight_batch(evidence_path(name), mode, expected_rooms)
+            for room_ids, sources in batch.items():
+                combined = batch_pairs.setdefault(room_ids, [])
+                combined.extend(sources)
+                require(len(combined) <= len(room_ids) * 5, 'Too many UDP preflight pairs for one original endpoint')
+        require(source_lists or set(batch_pairs) == {tuple(rooms) for rooms in expected_rooms},
+                'The Quest UDP preflight batches must cover every original endpoint')
 
     def preflight_pair(pair, base=manifest_path.parent):
         require(type(pair) is dict and set(pair) == {'listener', 'probe'}, 'Provide the original UDP listener and probe reports')
@@ -572,10 +590,12 @@ def verify_venue(manifest_path):
         preflight_paths = preflight_pair(entry['udpPreflight']) if preflights else None
         source_paths = None
         if source_preflights:
-            pairs = batch_pairs[tuple(row['roomIds'])] if batch_path else entry['udpSourcePreflights']
-            require(type(pairs) is list and 1 <= len(pairs) <= len(players), 'Invalid all-source UDP preflight list')
-            base = batch_path.parent if batch_path else manifest_path.parent
-            source_paths = [preflight_pair(pair, base) for pair in pairs]
+            supplemental = entry.get('udpSourcePreflights', [])
+            require(type(supplemental) is list and len(supplemental) <= len(players)
+                    and ('udpSourcePreflights' not in entry or supplemental), 'Invalid supplemental UDP preflight list')
+            pairs = batch_pairs.get(tuple(row['roomIds']), []) + [(pair, manifest_path.parent) for pair in supplemental]
+            require(1 <= len(pairs) <= len(players), 'Provide all-source UDP preflight reports for every original endpoint')
+            source_paths = [preflight_pair(pair, base) for pair, base in pairs]
         report, sources = verify_session(topology, server_ips, launcher, session, statistics, endpoint,
                                          server_log, len(players), ((address, content(path)) for address, path in logs),
                                          require_remote=False,

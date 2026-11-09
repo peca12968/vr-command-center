@@ -170,7 +170,9 @@ node tests/browser/check-external-native.cjs <本次ready.json> <解壓玩家包
 
 每個遊戲綁定的實際來源 IPv4 必須恰有一組有效報告。驗收會拒絕缺少、來源重複、未確認來源、重複交換摘要或過期的報告。單場摘要的 `udpSourcePreflight` 列出觀察到及驗證成功的來源數，和各組樣本數與交換摘要。全館另有 `udpSourcePreflightsVerified`。多席共用同一個來源 IPv4 時，在該遊戲埠只算一組。Windows 玩家用 PowerShell 探測，Quest 可使用獨立診斷 APK 產生同格式報告，遊戲入場和戰績仍另留原始 logcat。實體設備數及跨機容量須現場核對。 [Quest UDP 預檢](QUEST3.md#開場前從頭盔執行-udp-預檢) · [Quest 日誌](QUEST3.md#收集-quest-場館驗收日誌)
 
-若使用 Quest 批次工具且同一份 `preflight-report.json` 涵蓋全館所有端點與來源，可在封存驗收清單頂層設 `"udpPreflightBatch": "quest-udp-batch/preflight-report.json"`。驗收依原房號與模式讀取對應報告，原始檔的相對路徑以批次報告所在位置為準，再核對原綁定位址、埠、完成時間及已確認來源。混合其他探測來源時，仍可逐場填 `udpSourcePreflights`。 [Quest 批次預檢](QUEST3.md#批次預檢五房-quest-席位)
+Quest 批次工具的原報告可直接加入封存驗收清單。只有一份時在頂層填 `udpPreflightBatch`，分批收集時填 `udpPreflightBatches`，例如 `["quest-a/preflight-report.json","quest-b/preflight-report.json"]`。兩個欄位擇一。若場次另有 Windows 玩家，在該場 `sessions[]` 的 `udpSourcePreflights` 補上 Windows 原報告。
+
+驗收依原房號與模式合併。Quest 原始檔路徑以各批次報告所在目錄為準，逐場補上的路徑以封存驗收清單所在目錄為準。所有報告合起來須覆蓋每個原端點和所有已確認來源。若同一個來源 IPv4 在同一端點已有有效報告，只保留一組。原綁定位址、埠、完成時間及已確認來源仍會逐組核對。 [Quest 批次預檢](QUEST3.md#批次預檢五房-quest-席位)
 
 ### 核對封存戰績與 UDP 來源
 
@@ -222,13 +224,13 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `serverIps` | 所有本次伺服器電腦已指派的 IPv4，使用字串陣列 |
 | `closure` | 原批次的 `closure.json` 路徑 |
 | `verifyPlayerSources` | 選用。填布林值 `true` 核對所有原席位的日誌與姿態。每場均須提供 `worldJournal` |
-| `udpPreflightBatch` | 選用。涵蓋全館的原 Quest 批次 `preflight-report.json`。與逐場 UDP 欄位擇一 |
+| `udpPreflightBatch` 或 `udpPreflightBatches` | 選用。單份原 Quest 批次報告路徑，或 1 至 25 份原報告路徑的陣列。可搭配逐場 `udpSourcePreflights` |
 | `sessions` | 獨立模式填五場，合併模式填一場 |
 | `sessions[].evidenceZip`、`launcherReport`、`serverLog` | 各場原 ZIP、啟動器終止報告及伺服器日誌的路徑 |
 | `sessions[].worldJournal` | 選用。若驗收回放檔，每個場次都填自己關閉後的原始 `.worldlog` 路徑 |
 | `sessions[].roomAlignments` | 選用。核對 MR 校正時，每個 MR 場次按房號填原校正檔，例如 `{"2":"room-02-alignment.json"}` |
 | `sessions[].udpPreflight` | 選用。每場提供原 UDP 預檢報告的 `listener` 與 `probe` 路徑 |
-| `sessions[].udpSourcePreflights` | 選用。每場按實際來源 IPv4 填一組 `listener` 與 `probe`。全館統一使用此欄位或單組模式 |
+| `sessions[].udpSourcePreflights` | 選用。每場按實際來源 IPv4 填一組 `listener` 與 `probe`。可補上 Quest 批次以外的來源 |
 | `sessions[].players` | 每房五筆。每筆填玩家裝置實際使用的 IPv4 字串 `address` 及原日誌路徑 `log`。Quest 3 原 logcat 另填數字 `logcatPid`，例如 `7342` |
 
 若使用 Quest 整批擷取，從 `capture-report.json` 依 `sessionId` 和 `roomId` 取用 `complete` 為 `true` 的席位，將 `log` 路徑依清單位置調整，再填入 `logcatPid` 和原 IPv4。 [整批擷取](QUEST3.md#一次擷取五房-quest-日誌)

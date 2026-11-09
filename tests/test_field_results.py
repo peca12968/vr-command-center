@@ -492,11 +492,11 @@ class FieldResultsTests(unittest.TestCase):
             self.assertEqual(25, report['serverAcknowledgements'])
             self.assertFalse(report['physicalHostsVerified'])
             entry = manifest['sessions'][0]
-            entry['udpSourcePreflights'] = groups[0]['udpSourcePreflights']
+            entry['udpPreflight'] = groups[0]['udpSourcePreflights'][0]
             path.write_text(json.dumps(manifest), encoding='utf-8')
             with self.assertRaisesRegex(field.EvidenceError, 'only one UDP preflight mode'):
                 field.verify_venue(path)
-            entry.pop('udpSourcePreflights')
+            entry.pop('udpPreflight')
             path.write_text(json.dumps(manifest), encoding='utf-8')
             batch['groups'] = groups[1:]
             batch_path.write_text(json.dumps(batch), encoding='utf-8')
@@ -510,6 +510,86 @@ class FieldResultsTests(unittest.TestCase):
             wrong.write_text(json.dumps(wrong_report), encoding='utf-8')
             with self.assertRaisesRegex(field.EvidenceError, 'game binding, accepted peer'):
                 field.verify_venue(path)
+
+    @unittest.skipUnless(HAS_POWERSHELL, 'UDP evidence requires PowerShell')
+    def test_venue_combines_partial_quest_batches_with_windows_original_pairs(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, closure = venue_fixture(root, mode, remote=True, quest_per_room=2)
+                folders = {kind: root / kind for kind in ('quest-a', 'quest-b', 'windows')}
+                for folder in folders.values():
+                    folder.mkdir()
+                groups = {'quest-a': [], 'quest-b': []}
+
+                def pair(kind, label, binding, source):
+                    digest = hashlib.sha256(f'{kind}-{label}-{source}'.encode()).hexdigest()
+                    listener, probe = preflight_fixture(folders[kind], label, server=binding['address'],
+                                                        peer=source, port=binding['port'], exchange=digest)
+                    return {'listener': listener.name, 'probe': probe.name}
+
+                for index, (entry, original) in enumerate(zip(manifest['sessions'], closure['sessions'], strict=True)):
+                    launcher_path = root / entry['launcherReport']
+                    launcher = json.loads(launcher_path.read_text(encoding='utf-8'))
+                    binding = launcher['udpBinding']
+                    binding['observedAtUtc'] = '2026-11-08T23:59:59Z'
+                    launcher_path.write_text(json.dumps(launcher), encoding='utf-8')
+                    quests = [row['address'] for row in entry['players'] if 'logcatPid' in row]
+                    windows = sorted({row['address'] for row in entry['players'] if 'logcatPid' not in row})
+                    self.assertEqual(1, len(windows))
+                    # For the last Independent room, demonstrate a complete supplemental list and no Quest group.
+                    manual = windows + quests if mode == 'Independent' and index == 4 else windows
+                    entry['udpSourcePreflights'] = [
+                        {key: 'windows/' + value for key, value in pair('windows', f'{index}-{i}', binding, source).items()}
+                        for i, source in enumerate(manual)]
+                    if manual == windows:
+                        for kind, sources in (('quest-a', quests[::2]), ('quest-b', quests[1::2])):
+                            groups[kind].append({'roomIds': original['roomIds'], 'complete': True,
+                                                 'udpSourcePreflights': [pair(kind, f'{index}-{i}', binding, source)
+                                                                         for i, source in enumerate(sources)]})
+                for kind, rows in groups.items():
+                    (folders[kind] / 'preflight-report.json').write_text(json.dumps({
+                        'version': 1, 'scope': 'quest-udp-preflight-only', 'mode': mode, 'complete': True, 'groups': rows}),
+                        encoding='utf-8')
+                indexes = ['quest-b/preflight-report.json', 'quest-a/preflight-report.json']
+                manifest['udpPreflightBatches'] = indexes
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                report = field.verify_venue(path)
+                self.assertEqual(25, report['serverAcknowledgements'])
+                self.assertEqual(15 if mode == 'Independent' else 11, report['udpSourcePreflightsVerified'])
+                self.assertEqual([3] * 5 if mode == 'Independent' else [11],
+                                 [row['udpSourcePreflight']['verifiedSourceAddresses'] for row in report['sessions']])
+                self.assertNotIn('192.168', json.dumps(report))
+                self.assertFalse(report['physicalHostsVerified'])
+
+                first = manifest['sessions'][0]
+                if mode == 'Linked':
+                    original_manual = first['udpSourcePreflights']
+                    first['udpSourcePreflights'] = original_manual + [
+                        {key: 'quest-a/' + value for key, value in pair.items()}
+                        for pair in groups['quest-a'][0]['udpSourcePreflights']]
+                    manifest.pop('udpPreflightBatches')
+                    manifest['udpPreflightBatch'] = indexes[0]
+                    path.write_text(json.dumps(manifest), encoding='utf-8')
+                    self.assertEqual(report, field.verify_venue(path))
+                    manifest.pop('udpPreflightBatch')
+                    manifest['udpPreflightBatches'] = indexes
+                    first['udpSourcePreflights'] = original_manual
+                saved = first.pop('udpSourcePreflights')
+                if mode == 'Linked':
+                    path.write_text(json.dumps(manifest), encoding='utf-8')
+                    with self.assertRaisesRegex(field.EvidenceError, 'each acknowledged source address'):
+                        field.verify_venue(path)
+                original_pair = groups['quest-a'][0]['udpSourcePreflights'][0]
+                first['udpSourcePreflights'] = [{key: 'quest-a/' + value for key, value in original_pair.items()}]
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'Evidence paths must be distinct'):
+                    field.verify_venue(path)
+                first['udpSourcePreflights'] = saved
+                manifest['udpPreflightBatches'] = [indexes[0], indexes[0]]
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'Evidence paths must be distinct'):
+                    field.verify_venue(path)
 
     @unittest.skipUnless(HAS_POWERSHELL, 'UDP evidence requires PowerShell')
     def test_preflight_uses_the_observed_server_and_a_peer_with_a_final_ack(self):

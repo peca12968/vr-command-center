@@ -49,7 +49,7 @@ python .\scripts\probe-quest-venue.py --adb $adb --device-map .\device-map.json 
 
 工具依房號和席位順序啟動各次 Windows 監聽，配對該台 Quest 的回覆，等原監聽程序結束再接續。每次用新的輸出資料夾，內有各席原始報告和 `preflight-report.json`。某席失敗仍會繼續，摘要列出階段並以非零結束。每組端點的已安排席位全部通過時，該組才有 `udpSourcePreflights` 清單。批次在 20 分鐘後停止安排新探測，避免用盡封存核對的 30 分鐘啟動前有效窗。
 
-全部探測完成後，按原網路清單啟動遊戲伺服器。若整批報告涵蓋場館所有端點與實際來源，可從封存驗收清單的 `udpPreflightBatch` 直接引用。混合 Windows 和 Quest 時，可用各端點的逐來源清單合併兩種原報告。 [封存核對](EXTERNAL_CLIENTS.md#核對每個玩家來源的-udp-預檢)
+全部探測完成後，按原網路清單啟動遊戲伺服器。封存驗收清單可用 `udpPreflightBatch` 引用一份報告，或用 `udpPreflightBatches` 引用多份。混合 Windows 與 Quest 時，在有 Windows 玩家來源的場次補上該來源的 `udpSourcePreflights`。 [封存核對](EXTERNAL_CLIENTS.md#核對每個玩家來源的-udp-預檢)
 
 ## 追蹤恢復後的武器輸入
 
