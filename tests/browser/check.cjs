@@ -160,7 +160,7 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('#draft-status').textContent.startsWith('已儲存'));
     const mission = (await api('/missions'))[0];
     check(mission.definition.props.length === 2 && mission.definition.props[0].position.x === 3.5 && mission.definition.props[0].yawDegrees === 45 && mission.definition.environment.lightning, 'Mission save persists the edited layout and environment through the real API');
-    page.once('dialog', dialog => dialog.accept()); await page.locator('#new-mission').click();
+    await page.locator('#new-mission').click();
     await page.locator('#load-mission').click();
     await page.waitForFunction(name => document.querySelector('#draft-name').value === name && !document.querySelector('#mission-fields').disabled, mission.definition.name);
     check(await page.locator('#draft-name').inputValue() === mission.definition.name && await page.locator('#prop-layer [data-index]').count() === 2 && await page.locator('#prop-x').inputValue() === '3.5', 'Saved mission can be loaded back into the editor without losing layout coordinates');

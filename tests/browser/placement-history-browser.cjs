@@ -11,8 +11,10 @@ module.exports = async ({ context, api, tokens, base, mission, screenshots, chec
   async function field(id, value) { await page.locator('#' + id).fill(String(value)); await page.locator('#' + id).blur(); }
   async function undo() { await page.locator('#undo-prop').click(); }
   async function redo() { await page.locator('#redo-prop').click(); }
-  async function load(id) {
-    await page.locator('#edit-mission').selectOption(id); await page.locator('#load-mission').click();
+  async function load(id, discard = false) {
+    await page.locator('#edit-mission').selectOption(id);
+    if (discard) page.once('dialog', dialog => dialog.accept());
+    await page.locator('#load-mission').click();
     await wait(() => !document.querySelector('#mission-fields').disabled && document.querySelector('#prop-history-status').textContent.includes('可復原 0'));
   }
   let releaseSave = () => {};
@@ -37,7 +39,7 @@ module.exports = async ({ context, api, tokens, base, mission, screenshots, chec
     check(await page.locator('#prop-layer [data-index]').count() === 2 && await page.locator('#prop-select').inputValue() === '1' && await page.locator('#prop-asset').inputValue() === 'barrel', 'Undo restores deleted object order and selection');
     await page.locator('#add-sandbag').click(); await undo(); await redo();
     check(await page.locator('#prop-layer [data-index]').count() === 3 && await page.locator('#prop-select').inputValue() === '2', 'Add, undo and redo retain the exact new object and selection');
-    await load(saved.id); await page.locator('#prop-select').selectOption('0');
+    await load(saved.id, true); await page.locator('#prop-select').selectOption('0');
     await page.locator('#prop-layer [data-index="0"]').focus(); await page.keyboard.press('ArrowRight');
     check((await status()).includes('可復原 1') && await page.locator('#prop-x').inputValue() === '1.5', 'Arrow movement from a keyboard-focused object retains focus until its history step closes');
     await undo();
@@ -66,6 +68,14 @@ module.exports = async ({ context, api, tokens, base, mission, screenshots, chec
     await page.route(`**/api/missions/${saved.id}/revisions`, async route => { await gate; await route.continue(); });
     await page.locator('#save-revision').click(); await requested;
     check(await page.locator('#undo-prop').isDisabled() && await page.locator('#redo-prop').isDisabled(), 'Saving locks both history controls while the original revision request is pending');
+    const pendingLogout = page.waitForEvent('dialog', { timeout: 5000 }).then(async dialog => {
+      const warned = dialog.type() === 'confirm' && dialog.message().includes('重試資料');
+      await dialog.dismiss();
+      return warned;
+    });
+    await page.locator('#logout').click();
+    check(await pendingLogout && await page.locator('#workspace').isVisible() && await page.locator('#draft-name').isDisabled(),
+      'Cancelling logout during an in-flight save keeps the authenticated draft locked until its response');
     await page.locator('#layout-map').focus(); await page.keyboard.press('Control+z');
     check(await page.locator('#prop-x').inputValue() === '3', 'Map shortcut cannot mutate a draft during its pending save');
     releaseSave(); await wait(() => document.querySelector('#draft-status').textContent.startsWith('已儲存') && !document.querySelector('#mission-fields').disabled);
@@ -77,11 +87,11 @@ module.exports = async ({ context, api, tokens, base, mission, screenshots, chec
     await page.setViewportSize({ width: 390, height: 844 });
     check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'History controls remain inside the mobile editor viewport');
     await page.screenshot({ path: path.join(screenshots, 'placement-history-mobile.png'), fullPage: true });
-    await page.setViewportSize({ width: 1440, height: 1080 }); await load(history.headId);
+    await page.setViewportSize({ width: 1440, height: 1080 }); await load(history.headId, true);
     check(await page.locator('#undo-prop').isDisabled() && await page.locator('#redo-prop').isDisabled() && await page.locator('#prop-x').inputValue() === '3', 'Reloading the current mission clears both previous branches and uses its actual latest version');
     await page.locator('#rotate-prop').click(); page.once('dialog', dialog => dialog.accept()); await page.locator('#new-mission').click();
     check(await page.locator('#prop-layer [data-index]').count() === 0 && await page.locator('#undo-prop').isDisabled(), 'A new mission cannot undo into a different mission document');
-    await page.locator('#add-barrel').click(); await page.locator('#logout').click();
+    await page.locator('#add-barrel').click(); page.once('dialog', dialog => dialog.accept()); await page.locator('#logout').click();
     await page.locator('#login-key').fill(tokens.Room1); await page.locator('#login-form button').click(); await page.locator('#tab-missions').click();
     check(await page.locator('#undo-prop').isDisabled() && await page.locator('#redo-prop').isDisabled() && await page.locator('#prop-layer [data-index]').count() === 0, 'Logout and a room-controller login clear history and preserve the read-only editor');
     check(errors.length === 0, 'Placement history workflow has no uncaught browser errors');

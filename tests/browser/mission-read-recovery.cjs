@@ -21,6 +21,16 @@ module.exports = async function missionReadRecovery({ context, api, tokens, base
   const draft = async name => { await wait(value => document.querySelector('#draft-name').value === value && !document.querySelector('#mission-fields').disabled, name); };
   const mutations = () => requests.filter(row => row.method !== 'GET').length;
   const reads = () => requests.filter(row => /\/(history|version)$/.test(row.path)).length;
+  async function decision(action, accept, type = 'confirm') {
+    const result = page.waitForEvent('dialog', { timeout: 5000 }).then(async dialog => {
+      const actualType = dialog.type();
+      if (accept) await dialog.accept(); else await dialog.dismiss();
+      return actualType;
+    });
+    const [actualType] = await Promise.all([result, action()]);
+    return actualType === type;
+  }
+  const click = id => () => page.locator('#' + id).click();
   async function failRefresh(action, status = 503) {
     let release, observed, timer;
     const gate = new Promise(resolve => { release = resolve; });
@@ -44,6 +54,29 @@ module.exports = async function missionReadRecovery({ context, api, tokens, base
     await page.locator('#tab-missions').click(); await page.locator(`#edit-mission option[value="${second.id}"]`).waitFor({ state: 'attached' });
     await page.locator('#edit-mission').selectOption(second.id); await page.locator('#load-mission').click(); await draft(second.definition.name);
     const initialMutations = mutations();
+    await page.locator('#draft-name').fill('未儲存的開場草稿');
+    await page.locator('#add-barrel').click();
+    await page.locator('#mission-version').selectOption(first.id);
+    const beforeCancel = reads();
+    const dirtyIntact = async () => await page.locator('#draft-name').inputValue() === '未儲存的開場草稿'
+      && await page.locator('#prop-layer [data-index]').count() === 1
+      && await page.locator('#undo-prop').isEnabled();
+    for (const id of ['load-mission', 'load-version', 'new-mission', 'logout']) {
+      check(await decision(click(id), false) && await dirtyIntact() && reads() === beforeCancel && mutations() === initialMutations,
+        `Cancelling ${id} preserves the dirty name, layout and undo history without reading or saving a mission`);
+    }
+    check(await decision(() => page.evaluate(() => { setTimeout(() => location.reload(), 0); }), false, 'beforeunload') && await dirtyIntact(),
+      'Cancelling a real browser reload keeps the unsaved mission in the authenticated editor');
+    await page.route(`**/api/missions/${first.id}/history`, route => route.fulfill({ status: 503, json: { error: 'Dirty draft load temporarily unavailable' } }));
+    await decision(click('load-version'), true);
+    await wait(() => document.querySelector('#notice').textContent === 'Dirty draft load temporarily unavailable' && !document.querySelector('#mission-fields').disabled);
+    check(await dirtyIntact(), 'A confirmed historical load that fails leaves the dirty draft and its undo history available');
+    await page.unrouteAll({ behavior: 'wait' });
+    check(await decision(click('load-version'), true), 'Confirming historical load permits an explicit replacement');
+    await draft(first.definition.name);
+    check(await page.locator('#prop-layer [data-index]').count() === 0 && await page.locator('#undo-prop').isDisabled(),
+      'A successful historical load replaces the draft with the exact saved layout and clears its local undo history');
+    await page.locator('#load-mission').click(); await draft(second.definition.name);
     await failRefresh(async release => {
       await page.locator('#mission-version').selectOption(first.id); await page.locator('#load-version').click();
       check(await page.locator('#draft-name').isDisabled() && await page.locator('#draft-name').inputValue() === second.definition.name,
@@ -79,14 +112,14 @@ module.exports = async function missionReadRecovery({ context, api, tokens, base
         'Mission writes keep their original refresh failure fence and do not silently inherit read recovery');
     });
     await failRefresh(async release => {
-      const before = reads(); await page.locator('#mission-version').selectOption(first.id); await page.locator('#load-version').click(); release();
+      const before = reads(); await page.locator('#mission-version').selectOption(first.id); await decision(click('load-version'), true); release();
       await wait(() => !document.querySelector('#mission-fields').disabled && document.querySelector('#notice').textContent.includes('沒有此操作權限'));
       check(reads() === before && await page.locator('#draft-name').inputValue() === '未提交的新修訂',
         'A forbidden background response cannot authorize an independent read or replace the retained draft');
     }, 403);
     await page.screenshot({ path: path.join(screenshots, 'mission-read-recovery.png'), fullPage: true });
     await failRefresh(async release => {
-      const before = reads(); await page.locator('#load-version').click(); release();
+      const before = reads(); await decision(click('load-version'), true); release();
       await wait(() => document.querySelector('#workspace').hidden && document.querySelector('#mission-version').options.length === 0);
       check(reads() === before && await page.locator('#draft-name').inputValue() === '',
         'An unauthorized background response logs out instead of falling back to an old mission read');
@@ -116,6 +149,8 @@ module.exports = async function missionReadRecovery({ context, api, tokens, base
       check(await page.locator('#draft-name').inputValue() === latest.definition.name && await page.locator(`#mission-version option[value="${first.id}"]`).count() === 1 && mutations() === initialMutations,
         'History pagination independently recovers its exact next page without reloading the draft or mutating missions');
     });
+    await page.reload();
+    check(await page.locator('#login-panel').isVisible(), 'A clean draft allows reload without requiring discard confirmation');
     check(!requestsTruncated && errors.length === 0, 'Mission read recovery retains complete bounded request metadata and has no uncaught browser errors');
   } catch (error) {
     const state = await page.evaluate(() => ({ name: document.querySelector('#draft-name').value, notice: document.querySelector('#notice').textContent,

@@ -736,6 +736,9 @@ function resetDraft() {
   clearPropHistory();
   renderProps(); renderHistory(); draftStatus(); applyPermissions();
 }
+function confirmDraftDiscard(action) {
+  return !state.draftChanged || confirm(`${action}將捨棄尚未儲存的任務修改。確定繼續？`);
+}
 function missionOptions(launch, edit) {
   const entries = state.catalog.map(row => [row.mission.id, `${row.mission.definition.name} · 第 ${row.number} 版`]);
   const pinned = state.launchPinned;
@@ -774,7 +777,7 @@ function renderHistory(selected) {
   fillOptions('mission-version', history ? [...history.versions].sort((a, b) => b.number - a.number).map(row => [row.id, `第 ${row.number} 版 · ${row.name} · ${new Date(row.createdAtUtc).toLocaleString('zh-TW')}`]) : [], selected);
   $('history-status').textContent = history ? `已讀取 ${history.versions.length} 版 · 本次查詢最新第 ${history.headNumber} 版` : '';
 }
-async function loadDraft(id = $('edit-mission').value, older = false) {
+async function loadDraft(id, older = false) {
   if (!id) return;
   const epoch = state.epoch;
   const history = await api(`/missions/${id}/history`);
@@ -893,7 +896,10 @@ function tab(name, worldTarget = null) {
 }
 function submit(id, action, execute = run) { $(id).addEventListener('submit', event => { event.preventDefault(); execute(action); }); }
 $('login-form').addEventListener('submit', login);
-$('logout').addEventListener('click', logout);
+$('logout').addEventListener('click', () => {
+  const pendingMission = state.pending?.kind === 'mission-create' || state.pending?.kind === 'mission-revise';
+  if (pendingMission ? confirm('任務儲存結果尚未確認。登出會清除目前的草稿和重試資料。確定登出？') : confirmDraftDiscard('登出')) logout();
+});
 $('refresh').addEventListener('click', () => refresh().then(() => notify('已更新。')).catch(showRefreshError));
 $('include-ended').addEventListener('change', async () => {
   const epoch = state.epoch;
@@ -928,8 +934,14 @@ submit('clock-form', () => command('SetMissionClock', { missionClock: { autoEnd:
 $('reload-clock').addEventListener('click', loadClock);
 $('clock-auto-end').addEventListener('change', () => { state.clockSequence = state.session?.sequence; });
 submit('mission-form', saveMission);
-$('load-mission').addEventListener('click', () => run(() => loadDraft(), true));
-$('load-version').addEventListener('click', () => run(() => loadDraft($('mission-version').value, true), true));
+$('load-mission').addEventListener('click', () => {
+  const id = $('edit-mission').value;
+  if (id && confirmDraftDiscard('載入最新版')) run(() => loadDraft(id), true);
+});
+$('load-version').addEventListener('click', () => {
+  const id = $('mission-version').value;
+  if (id && confirmDraftDiscard('載入選取版本')) run(() => loadDraft(id, true), true);
+});
 $('more-versions').addEventListener('click', () => run(async () => {
   if (!state.history?.nextBefore) return;
   const previous = state.history, epoch = state.epoch;
@@ -947,7 +959,7 @@ $('launch-version').addEventListener('click', () => {
   notify(room ? `已為房間 ${room} 選取保存的第 ${state.draftBase.number} 版；未儲存的草稿修改不會套用。`
     : `已選取保存的第 ${state.draftBase.number} 版開場；未儲存的草稿修改不會套用。`);
 });
-$('new-mission').addEventListener('click', () => { if (confirm('清除目前未儲存的草稿並建立新任務？')) resetDraft(); });
+$('new-mission').addEventListener('click', () => { if (confirmDraftDiscard('建立新草稿')) resetDraft(); });
 $('add-sandbag').addEventListener('click', () => addProp('sandbag'));
 $('add-barrel').addEventListener('click', () => addProp('barrel'));
 $('rotate-prop').addEventListener('click', () => { if (state.props[state.prop]) editProp(() => { state.props[state.prop].yawDegrees = (state.props[state.prop].yawDegrees + 15) % 360; }); });
@@ -963,4 +975,4 @@ $('layout-recheck-launch').addEventListener('click', () => {
   placement.recheckLaunch(!mixed);
 });
 for (const name of ['operations', 'missions', 'replay', 'world']) $('tab-' + name).addEventListener('click', () => tab(name));
-window.addEventListener('beforeunload', event => { if (state.pending) { event.preventDefault(); event.returnValue = ''; } });
+window.addEventListener('beforeunload', event => { if (state.pending || state.draftChanged) { event.preventDefault(); event.returnValue = ''; } });

@@ -67,6 +67,7 @@ module.exports = async function missionBrowser({ page, context, api, tokens, bas
     await editor.locator('#save-revision').click(); await editor.locator('#notice.error').waitFor(); await ready();
     check(await editor.locator('#draft-name').inputValue() === '保留這份衝突草稿' && (await api(`/missions/${mission.id}/history`)).headId === fourth.id,
       'Stale revision is rejected while retaining the operator draft and authoritative newer head');
+    editor.once('dialog', dialog => dialog.accept());
     await editor.locator('#load-mission').click(); await waitForDom(() => document.querySelector('#draft-status').textContent.includes('第 4 版') && !document.querySelector('#save-revision').disabled);
     await editor.locator('#refresh').click(); await ready();
     check(await editor.locator('#edit-mission').inputValue() === fourth.id && await editor.locator('#save-revision').isEnabled(),

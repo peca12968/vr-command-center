@@ -106,6 +106,7 @@ module.exports = async function layoutBrowser({ context, api, tokens, base, miss
       'A late report for an older draft cannot clear current invalid markings');
     await editor.unroute('**/api/mission-layout');
     await editor.locator('#edit-mission').selectOption(barricade.id);
+    editor.once('dialog', dialog => dialog.accept());
     await editor.locator('#load-mission').click();
     await editor.locator('#draft-layout-route-summary').filter({ hasText: '未找到通往中線' }).waitFor();
     check(await editor.locator('#layout-spawns [data-route-missing]').count() === 5 && await editor.locator('#layout-routes polyline').count() === 0,
