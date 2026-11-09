@@ -1,5 +1,5 @@
 """Prepare an isolated API, then observe real server GUI selection/start/seal/close. No UI input."""
-import argparse,importlib.util,json,os,shutil,socket,subprocess,time,urllib.error,urllib.request,uuid
+import argparse,importlib.util,ipaddress,json,os,shutil,socket,subprocess,time,urllib.error,urllib.request,uuid
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 def module(name,file):
@@ -9,15 +9,18 @@ def read(p):return json.loads(p.read_text(encoding='utf-8'))
 def free(kind=socket.SOCK_STREAM):
     with socket.socket(socket.AF_INET,kind) as s:s.bind(('127.0.0.1',0));return s.getsockname()[1]
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('package',type=Path);p.add_argument('--control-package',type=Path,required=True);p.add_argument('--runtime-root',type=Path,required=True);args=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('package',type=Path);p.add_argument('--control-package',type=Path,required=True);p.add_argument('--runtime-root',type=Path,required=True);p.add_argument('--check-peer-diagnostics',action='store_true',help='Join one native player and reconcile the GUI-enabled UDP evidence');args=p.parse_args()
     folder=args.package.resolve();manifest=package.verify(folder);assert manifest['launcherSourceSha256']==package.digest(ROOT/'tools/WindowsServerLauncher/ServerLauncher.cs')
     out=ROOT/'artifacts/server-gui'/('run-'+uuid.uuid4().hex);out.mkdir(parents=True,exist_ok=False);runtime=args.runtime_root.resolve()/out.name;runtime.mkdir(parents=True,exist_ok=False);data=runtime/'control';port=free(socket.SOCK_DGRAM);api=None;api_witness=None;gui=None;witness=None;errors=[];observed=None;stopped=False;gui_report=None;gui_work=None;session=None;result=None;other_session=None
+    client=None;client_log=runtime/'fixture-client.log'
     reports=Path(os.environ['LOCALAPPDATA'])/'VrCommand/GameServerReports';old=set(reports.glob('*.json')) if reports.exists() else set()
     def save(name,value):(out/name).write_text(json.dumps(value,indent=2)+'\n',encoding='utf-8')
     def stage(value,**extra):save('stage.json',{'stage':value,**extra});print(json.dumps({'stage':value,'directory':str(out),**extra}),flush=True)
     (ROOT/'artifacts/server-gui-latest-path.txt').write_text(str(out),encoding='utf-8');exe=args.control_package.resolve()/'Start-Control.exe';stop=out/'api-stop.request';ready=out/'api-ready.json'
-    def request(path,body=None,optional=False):
-        req=urllib.request.Request(uri+path,data=None if body is None else json.dumps(body).encode(),headers={'Authorization':'Bearer '+keys['Master'],'Content-Type':'application/json'})
+    def request(path,body=None,optional=False,admission=None):
+        headers={'Authorization':'Bearer '+keys['Master'],'Content-Type':'application/json'}
+        if admission:headers['If-Match-Admission']=admission
+        req=urllib.request.Request(uri+path,data=None if body is None else json.dumps(body).encode(),headers=headers)
         try:
             with urllib.request.urlopen(req,timeout=5) as response:return json.load(response)
         except urllib.error.HTTPError as e:
@@ -32,11 +35,11 @@ def main():
         api_witness=checks.ChildWitness(read(ready)['childPid']);original={name:checks.sha(data/name) for name in ['control-instance.json','operator-keys.json','player-ticket-signing.key']}
         mission=request('/api/missions',{'name':'GUI server fixture','briefing':'No GUI credential creation or player input','durationSeconds':600,'environment':{'mode':'VR','weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':1,'behavior':'Hold','autoAttack':False},'props':[]});session=request('/api/sessions',{'missionId':mission['id'],'mode':'Independent','roomIds':[1]})['id']
         other_session=request('/api/sessions',{'missionId':mission['id'],'mode':'Independent','roomIds':[2]})['id']
-        # Begin requires a nonempty roster. This fixture exercises the server GUI,
-        # not a connected player; keep that distinction in its saved evidence.
         roster=request('/api/sessions/'+session+'/players',{'playerId':str(uuid.uuid4()),'roomId':1,'name':'GUI fixture roster only','headset':'Quest3'})
         if len(roster['players'])!=1:raise RuntimeError('Expected one GUI fixture roster entry')
-        save('fixture-roster.json',{'sessionId':session,'players':roster['players'],'scope':'Roster only; no client launched or player connection claimed.'})
+        player=roster['players'][0]
+        save('fixture-roster.json',{'sessionId':session,'players':roster['players'],
+             'scope':'One registered Windows Simulation client for the diagnostics check.' if args.check_peer_diagnostics else 'Roster only; no client launched or player connection claimed.'})
         gui=subprocess.Popen([str(folder/'Launch-Server.exe')],cwd=runtime);stage('select-instance',guiPid=gui.pid,instance=str(data/'control-instance.json'),sessionId=session,udpPort=port)
         powershell=Path(os.environ['WINDIR'])/'System32/WindowsPowerShell/v1.0/powershell.exe'
         def children():
@@ -55,6 +58,16 @@ def main():
             elif not commanded and (out/'gui-started.review.json').exists():
                 review=read(out/'gui-started.review.json')
                 if review!={'selected':True,'started':True}:raise RuntimeError('GUI start was not visually verified')
+                if args.check_peer_diagnostics:
+                    invite=request(f'/api/sessions/{session}/players/{player["id"]}/join-ticket',{},admission=player['admissionId'])
+                    config=runtime/'fixture-client.json'
+                    config.write_text(json.dumps({'role':'Client','address':'127.0.0.1','port':port,'joinTicket':invite['ticket']}),encoding='utf-8')
+                    client=subprocess.Popen([str(folder/'Runtime/VrCommand.exe'),'-batchmode','-nographics','-job-worker-count','2',
+                                             '-logFile',str(client_log),'--vr-config',str(config)],cwd=runtime,creationflags=subprocess.CREATE_NO_WINDOW)
+                    join_deadline=time.monotonic()+40
+                    while not client_log.exists() or 'VR_CLIENT_CONNECTED id=' not in client_log.read_text(encoding='utf-8',errors='replace'):
+                        if client.poll() is not None or time.monotonic()>join_deadline:raise RuntimeError('Original GUI fixture client did not connect')
+                        time.sleep(.1)
                 begin=request('/api/sessions/'+session+'/commands',{'commandId':str(uuid.uuid4()),'action':'Begin'});save('begin.json',begin)
                 sequence=begin['session']['sequence'];deadline_running=time.monotonic()+20;running=None
                 while time.monotonic()<deadline_running and running is None:
@@ -84,13 +97,24 @@ def main():
         if not gui_report['complete'] or not gui_report['childExited'] or not gui_report['cleanupCompleted'] or gui_report['status']!='sealed-stopped':raise RuntimeError('GUI lifecycle did not finish normally')
         gui_work=Path(gui_report['workDirectory']);closed=world.analyze(gui_work/'telemetry'/(session+'.worldlog'),expected_session=session);save('closed-journal.json',closed)
         if not closed['sealed'] or not closed['complete'] or closed['unacknowledgedFrames']!=0 or closed['lastFrame']['worldSequence']!=gui_report['finalWorld']['acceptedSequence']:raise RuntimeError('Original GUI journal tail differs')
+        if args.check_peer_diagnostics:
+            if gui_report.get('peerDiagnosticsEnabled') is not True:raise RuntimeError('GUI run did not enable source diagnostics')
+            field=module('gui_field_results','verify-field-results.py')
+            local=ipaddress.IPv4Address('127.0.0.1')
+            evidence=field.verify('same-host',{local},gui_report,request('/api/sessions/'+session),
+                request('/api/sessions/'+session+'/statistics'),request('/api/sessions/'+session+'/connection-endpoint'),
+                field.content(gui_work/'server.log'),[(local,field.content(client_log))])
+            if evidence['serverAcknowledgements']!=1:raise RuntimeError('Expected one original client acknowledgement')
+            save('field-results.json',evidence)
         if any(checks.sha(data/name)!=sha for name,sha in original.items()):raise RuntimeError('GUI changed existing instance keys or marker')
         review_path=out/'gui-closed.review.json';review_deadline=time.monotonic()+30
         while not review_path.exists():
             if time.monotonic()>review_deadline:raise RuntimeError('GUI close review was not supplied after actual GUI exit')
             time.sleep(.05)
         if read(review_path)!={'stopped':True,'closed':True}:raise RuntimeError('GUI close was not visually verified')
-        result={'complete':True,'guiPid':gui.pid,'guiExitCode':gui.returncode,'native':observed,'guiReport':str(report_path),'originalFileHashes':original,'journal':closed,'scope':'Actual GUI select existing instance / set UDP port / start / API fixture Begin-End / sealed retained36 stop / close. No GUI key creation, player actions, delivery, LAN or headset proof.'}
+        result={'complete':True,'guiPid':gui.pid,'guiExitCode':gui.returncode,'native':observed,'guiReport':str(report_path),'originalFileHashes':original,'journal':closed,
+                'scope':('Actual GUI start with peer diagnostics, one same-host Windows Simulation client, original UDP peer and acknowledged result, API fixture Begin-End and GUI close.'
+                         if args.check_peer_diagnostics else 'Actual GUI select existing instance / set UDP port / start / API fixture Begin-End / sealed retained36 stop / close. Roster only.')}
     except BaseException as e:stage('failed',errorType=type(e).__name__);raise
     finally:
         try:
@@ -98,6 +122,9 @@ def main():
                 for own_session in [session,other_session]:
                     if own_session and request('/api/sessions/'+own_session)['state']!='Ended':request('/api/sessions/'+own_session+'/commands',{'commandId':str(uuid.uuid4()),'action':'End'})
         except Exception as e:errors.append({'kind':'end','errorType':type(e).__name__})
+        try:
+            if client and client.poll() is None:client.terminate();client.wait(timeout=15)
+        except Exception as e:errors.append({'kind':'client','errorType':type(e).__name__})
         try:
             if gui and gui.poll() is None:gui.terminate();gui.wait(timeout=10)
             if witness:
@@ -109,7 +136,8 @@ def main():
             if api and api.poll() is None:stop.write_text('stop own API',encoding='utf-8');api.wait(timeout=50)
             if api_witness:api_witness.wait();api_witness.close()
         except Exception as e:errors.append({'kind':'api','errorType':type(e).__name__})
-        save('cleanup.json',{'errors':errors,'remainingGui':bool(gui and gui.poll() is None),'remainingApiRunner':bool(api and api.poll() is None)})
+        save('cleanup.json',{'errors':errors,'remainingGui':bool(gui and gui.poll() is None),'remainingApiRunner':bool(api and api.poll() is None),
+             'remainingClient':bool(client and client.poll() is None)})
         if errors:raise RuntimeError('Cleanup not confirmed; no snapshot')
         if gui_work:shutil.copytree(gui_work,runtime/'gui-server');shutil.copyfile(report_path,runtime/'gui-report.json')
         venue.snapshot_runtime(runtime,out/'runtime-snapshot')

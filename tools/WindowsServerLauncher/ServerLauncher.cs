@@ -310,6 +310,7 @@ internal static class ServerLauncher
     {
         internal Settings Config; internal string Work, Stream; internal Native Process; internal volatile string Status = "準備中"; internal bool Complete, Cleanup; internal uint? Code; internal Dictionary<string, object> FinalWorld, FinalStream; Mutex lease; bool ownsLease;
         internal UdpBinding VerifiedUdp;
+        internal bool PeerDiagnosticsEnabled { get; private set; }
         private string Origin;
         const int ManagementRecoverySeconds = 15;
         int managementOutages, managementRecoveries;
@@ -336,6 +337,7 @@ internal static class ServerLauncher
             using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)) { socket.ExclusiveAddressUse = true; socket.Bind(new IPEndPoint(IPAddress.Parse(Config.Bind), Config.Port)); }
             Directory.CreateDirectory(Work); Save(Path.Combine(Work, "server-config.json"), Config.Config(Path.Combine(Work, "telemetry"), Origin));
             Process = new Native(Path.Combine(Work, "server-config.json"), Path.Combine(Work, "server.log"), peerDiagnostics);
+            PeerDiagnosticsEnabled = peerDiagnostics;
             var timer = Stopwatch.StartNew(); Status = "等待遊戲來源與UDP啟動";
             var awaitingUdp = false;
             while (timer.Elapsed.TotalSeconds < 90)
@@ -452,7 +454,7 @@ internal static class ServerLauncher
             longestManagementOutageMilliseconds = Math.Max(longestManagementOutageMilliseconds, (long)elapsed.TotalMilliseconds);
             Need(elapsed.TotalSeconds < ManagementRecoverySeconds, "管理服務等待恢復逾時，保留journal供檢查。");
         }
-        internal object Report(string status, string error) { return new { schemaVersion = 1, status = status, complete = Complete && Cleanup, sessionId = Config.Session, streamId = Stream, childPid = Process == null ? (int?)null : Process.Pid, childExited = Process == null ? (bool?)null : Cleanup, cleanupCompleted = Cleanup, exitCode = Code, workDirectory = Work, udpBinding = VerifiedUdp == null ? null : VerifiedUdp.Public(), finalWorld = FinalWorld, finalCombatStream = FinalStream, playerResultsAcknowledged = (bool?)null, managementRecovery = new { outages = managementOutages, recoveries = managementRecoveries, longestMilliseconds = longestManagementOutageMilliseconds }, error = error, scope = "Owned server lifecycle and API dual seals; 36s retention, intentional OS process termination after seals, no graceful Unity shutdown / client delivery / gameplay / LAN capacity claim." }; }
+        internal object Report(string status, string error) { return new { schemaVersion = 1, status = status, complete = Complete && Cleanup, sessionId = Config.Session, streamId = Stream, childPid = Process == null ? (int?)null : Process.Pid, childExited = Process == null ? (bool?)null : Cleanup, cleanupCompleted = Cleanup, exitCode = Code, workDirectory = Work, udpBinding = VerifiedUdp == null ? null : VerifiedUdp.Public(), peerDiagnosticsEnabled = PeerDiagnosticsEnabled, finalWorld = FinalWorld, finalCombatStream = FinalStream, playerResultsAcknowledged = (bool?)null, managementRecovery = new { outages = managementOutages, recoveries = managementRecoveries, longestMilliseconds = longestManagementOutageMilliseconds }, error = error, scope = "Owned server lifecycle and API dual seals; 36s retention, intentional OS process termination after seals, no graceful Unity shutdown / client delivery / gameplay / LAN capacity claim." }; }
         public void Dispose()
         {
             try { if (Process != null) { Process.Stop(); Code = Process.ExitCode; Process.Dispose(); } Cleanup = true; }
@@ -464,17 +466,20 @@ internal static class ServerLauncher
         readonly TextBox selected = new TextBox(), address = new TextBox { Text = "127.0.0.1" }, bind = new TextBox { Text = "127.0.0.1" };
         readonly NumericUpDown port = new NumericUpDown { Minimum = 1024, Maximum = 65535, Value = 7777 }; readonly ComboBox session = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Enabled = false };
         readonly Button open = new Button { Text = "選擇檔案" }, refresh = new Button { Text = "載入／更新" }, start = new Button { Text = "啟動伺服器", Enabled = false }, abort = new Button { Text = "中止伺服器", Enabled = false };
+        readonly CheckBox peerDiagnostics = new CheckBox { Text = "記錄本次玩家連線來源（場館驗收）" };
         readonly Label state = new Label { Text = "先啟動管理服務，再載入其管理實例。", AutoSize = false }, detail = new Label { Text = "請先載入，再明確選擇要啟動的房間與任務。", AutoEllipsis = true };
         readonly CatalogState catalog = new CatalogState(); Run active; volatile bool cancel; Thread worker;
         internal Window()
         {
-            Text = "VR Command 遊戲伺服器"; ClientSize = new Size(920, 538); Font = new Font("Microsoft JhengHei UI", 11); FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false;
+            Text = "VR Command 遊戲伺服器"; ClientSize = new Size(920, 580); Font = new Font("Microsoft JhengHei UI", 11); FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false;
             Add(new Label { Text = "每個獨立房間一個伺服器；五房合併場次只需一個。", AutoSize = true }, 24, 24, 860, 30);
             Add(new Label { Text = "管理實例檔案完整路徑", AutoSize = true }, 24, 56, 600, 28); Add(selected, 24, 86, 594, 32); Add(open, 630, 84, 120, 36); Add(refresh, 766, 84, 124, 36);
             Add(new Label { Text = "可選檔，也可直接貼上control-instance.json路徑，再按載入／更新。", AutoSize = true }, 24, 127, 866, 30);
             Add(new Label { Text = "尚未綁定來源的 VR 或 MR 場次", AutoSize = true }, 24, 164, 400, 28); Add(session, 24, 194, 866, 34); Add(detail, 24, 240, 866, 76);
             Add(new Label { Text = "公告IPv4", AutoSize = true }, 24, 327, 210, 28); Add(address, 24, 358, 230, 32); Add(new Label { Text = "本機綁定IPv4", AutoSize = true }, 284, 327, 230, 28); Add(bind, 284, 358, 230, 32); Add(new Label { Text = "UDP埠", AutoSize = true }, 544, 327, 130, 28); Add(port, 544, 358, 130, 32);
-            Add(start, 24, 410, 260, 40); Add(abort, 310, 410, 260, 40); Add(state, 24, 468, 866, 64);
+            Add(peerDiagnostics, 24, 400, 430, 30);
+            Add(new Label { Text = "開啟後，來源 IP 與埠會寫入本機私有 server.log。", AutoSize = true }, 463, 404, 427, 28);
+            Add(start, 24, 452, 260, 40); Add(abort, 310, 452, 260, 40); Add(state, 24, 510, 866, 64);
             selected.TextChanged += delegate { catalog.Edit(selected.Text); start.Enabled = session.Enabled = false; detail.Text = "路徑已變更，請重新載入；未沿用舊場次。"; };
             open.Click += delegate { using (var dialog = new OpenFileDialog { Filter = "管理實例|control-instance.json", CheckFileExists = true }) if (dialog.ShowDialog(this) == DialogResult.OK) { selected.Text = dialog.FileName; Guard(LoadInstance); } };
             refresh.Click += delegate { Guard(LoadInstance); };
@@ -502,10 +507,11 @@ internal static class ServerLauncher
             var config = new Settings { Api = target.Api, Key = target.Key, Session = catalog.Selected.Id, Address = address.Text, Bind = bind.Text, Port = (int)port.Value }; config.Validate();
             var work = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrCommand", "GameServers", DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N"));
             var reports = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrCommand", "GameServerReports"); Directory.CreateDirectory(reports); var report = Path.Combine(reports, Guid.NewGuid().ToString("N") + ".json");
-            active = new Run(config, work); cancel = false; open.Enabled = refresh.Enabled = start.Enabled = selected.Enabled = address.Enabled = bind.Enabled = port.Enabled = session.Enabled = false; abort.Enabled = true;
-            worker = new Thread(delegate() { string error = null; try { active.Start(() => cancel); active.Wait(86400, () => cancel); } catch (Exception e) { error = Safe(e); } finally { try { active.Dispose(); } catch (Exception e) { error = Safe(e); } }
+            var capturePeers = peerDiagnostics.Checked;
+            active = new Run(config, work); cancel = false; open.Enabled = refresh.Enabled = start.Enabled = selected.Enabled = address.Enabled = bind.Enabled = port.Enabled = session.Enabled = peerDiagnostics.Enabled = false; abort.Enabled = true;
+            worker = new Thread(delegate() { string error = null; try { active.Start(() => cancel, capturePeers); active.Wait(86400, () => cancel); } catch (Exception e) { error = Safe(e); } finally { try { active.Dispose(); } catch (Exception e) { error = Safe(e); } }
                 try { Save(report, active.Report(active.Complete && active.Cleanup ? "sealed-stopped" : "incomplete", error)); } catch (Exception e) { error = Safe(e); }
-                var final = error == null && active.Complete && active.Cleanup ? "任務已封存並停止。" : "未完成：" + (error ?? "封存未確認。"); BeginInvoke((Action)delegate { active = null; catalog.Edit(selected.Text); session.Enabled = false; detail.Text = "此輪已收尾；再次啟動前請重新載入場次。"; state.Text = final + " 結果：" + report; open.Enabled = refresh.Enabled = selected.Enabled = address.Enabled = bind.Enabled = port.Enabled = true; abort.Enabled = false; }); }); worker.IsBackground = false; worker.Start();
+                var final = error == null && active.Complete && active.Cleanup ? "任務已封存並停止。" : "未完成：" + (error ?? "封存未確認。"); BeginInvoke((Action)delegate { active = null; catalog.Edit(selected.Text); session.Enabled = false; detail.Text = "此輪已收尾；再次啟動前請重新載入場次。"; state.Text = final + " 結果：" + report; peerDiagnostics.Checked = false; open.Enabled = refresh.Enabled = selected.Enabled = address.Enabled = bind.Enabled = port.Enabled = peerDiagnostics.Enabled = true; abort.Enabled = false; }); }); worker.IsBackground = false; worker.Start();
         }
     }
     [STAThread] static int Main(string[] args)
@@ -525,7 +531,7 @@ internal static class ServerLauncher
             int seconds; Need(Int32.TryParse(options["--seconds"], out seconds) && seconds >= 60 && seconds <= 86400, "執行期限須為60至86400秒。");
             var configPath = Full(options["--run"]); var work = Full(options["--work"]); Need(!Inside(configPath, Root) && !Inside(configPath, work) && !Inside(work, configPath), "設定必須在程式包與新資料夾之外。");
             Output(report, work); Output(options["--ready-report"], work); Need(!String.Equals(Full(report), Full(options["--ready-report"]), StringComparison.OrdinalIgnoreCase), "結果路徑不能重複。");
-            run = new Run(Settings.From(Read(configPath, 8192)), work); run.Start(peerDiagnostics: peerDiagnostics); Save(options["--ready-report"], new { schemaVersion = 1, status = "ready", sessionId = run.Config.Session, streamId = run.Stream, childPid = run.Process.Pid, address = run.Config.Address, port = run.Config.Port, workDirectory = run.Work, udpBinding = run.VerifiedUdp.Public() }); run.Wait(seconds, () => false);
+            run = new Run(Settings.From(Read(configPath, 8192)), work); run.Start(peerDiagnostics: peerDiagnostics); Save(options["--ready-report"], new { schemaVersion = 1, status = "ready", sessionId = run.Config.Session, streamId = run.Stream, childPid = run.Process.Pid, address = run.Config.Address, port = run.Config.Port, workDirectory = run.Work, udpBinding = run.VerifiedUdp.Public(), peerDiagnosticsEnabled = run.PeerDiagnosticsEnabled }); run.Wait(seconds, () => false);
         }
         catch (Exception e) { error = Safe(e); }
         finally { if (run != null) try { run.Dispose(); } catch (Exception e) { error = Safe(e); } }

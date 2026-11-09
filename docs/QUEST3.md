@@ -394,7 +394,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connect
 
 ## 收集 Quest 場館驗收日誌
 
-用 Windows 遊戲伺服器啟動器的 `--peer-diagnostics on` 保留 UDP 來源和戰績確認。驗收前先關閉頭盔上次場次的遊戲，再部署本場票券並重新啟動。先把頭盔接上 USB 偵錯，在 PowerShell 7 指定裝置序號。遊戲啟動後、場次結束前，記錄原遊戲程序 PID，並從頭盔 Wi-Fi 設定記下該次實際使用的 IPv4。
+在 Windows 遊戲伺服器啟動器 1.7 勾選「記錄本次玩家連線來源（場館驗收）」，或用 CLI 的 `--peer-diagnostics on` 保留 UDP 來源和戰績確認。驗收前先關閉頭盔上次場次的遊戲，再部署本場票券並重新啟動。先把頭盔接上 USB 偵錯，在 PowerShell 7 指定裝置序號。遊戲啟動後、場次結束前，記錄原遊戲程序 PID，並從頭盔 Wi-Fi 設定記下該次實際使用的 IPv4。
 
 ```powershell
 $adb = 'F:\Tools\UnityEditors\6000.3.27f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe'

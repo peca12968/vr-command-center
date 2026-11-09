@@ -1,5 +1,7 @@
 # Windows 遊戲伺服器包
 
+2026-11-09 `windows-server-0.48.0-launcher1.7-win-x64.zip` 為 83,469,619 bytes，SHA-256 `dce833f49f6a94e630666a6d36d152e80ae5fa693d8a7ad5ffd6f744798a03ef`。解壓核對 328 個清單檔案，321 個 Unity 0.48.0 執行檔案與 1.6 逐檔一致。Windows 啟動器新增場館驗收的來源紀錄開關。 [操作方式](#跨機來源診斷)
+
 2026-11-09 `windows-server-0.48.0-launcher1.6-win-x64.zip` 為 83,468,953 bytes，SHA-256 `aeb7b59c58a43f86918ec6135227658596d58afab5a397cfeaf2badda777fb92`。解壓後核對 328 個清單檔案，321 個 `Runtime/` 檔案逐檔符合 1.5 的 Unity 0.48.0 執行內容。新版會在啟動前核對 MR 場次的房間校正鎖定。 [操作方式](SERVER_CATALOG.md#mr-校正鎖定與啟動資格)
 
 2026-11-09 `windows-server-0.48.0-launcher1.5-win-x64.zip` 為 83,468,072 bytes，SHA-256 `fa6baef98f2d52a5fff9e0d0a3a09cff9dbc2aab3c2111b18b86b88fd8335e82`。解壓後核對 328 個清單檔案。MR 場次須在啟動前鎖定全部房間的校正檔。 [主控操作](QUEST3.md#啟動-mr-伺服器前鎖定校正檔)
@@ -31,6 +33,8 @@ CLI 的就緒及結果檔新增 `udpBinding`，含 `processId`、`address`、`po
 私有乙太網路位址與預設 loopback 的解壓包分別通過 374 及 124 項整合檢查。兩次都另有一場核對 `0.0.0.0`，並保留不同的玩家公告位址。 [驗證紀錄](PROGRESS.md#2026-11-06-遊戲伺服器公告前的-udp-綁定核對)
 
 ## 跨機來源診斷
+
+啟動器 1.7 可在 WinForms 選定場次並填好 UDP 位址與埠後，勾選「記錄本次玩家連線來源（場館驗收）」，再啟動伺服器。選項預設關閉，運行期間鎖定，收尾後會取消勾選。CLI 仍使用 `--peer-diagnostics on`。就緒及結果檔的 `peerDiagnosticsEnabled` 會顯示原遊戲子程序啟動時的選擇。結果檔的 `workDirectory` 可定位本次的 `server.log`。 [戰績與來源核對](EXTERNAL_CLIENTS.md#核對封存戰績與-udp-來源)
 
 2026-11-06 新版 `windows-server-0.41.2-win-x64.zip` 為 82,674,494 bytes，SHA256 `a8e4a529adbe744cdc11450dae209795adbfe52be0581e0ed652169220a86646`，包含 311 筆檔案清單及清單本身。
 

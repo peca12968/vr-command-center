@@ -249,6 +249,7 @@ def main():
             if child.poll() is not None:raise RuntimeError('Server launcher exited before ready '+label)
             return read(ready) if ready.exists() else None
         info=wait(is_ready,100,label+' ready');w=control.ChildWitness(info['childPid']);entry['witness']=w;witnesses.append(w);entry['ready']=info
+        check(info['peerDiagnosticsEnabled'] is diagnostics, label+' ready report records the explicit diagnostics choice')
         if args.check_layout_preview and verify_layout:entry['layoutSession']=state
         endpoint=request('/api/sessions/'+state['id']+'/connection-endpoint');check(info['streamId']==endpoint['streamId'] and info['port']==endpoint['port'] and endpoint['address']==address,label+' original endpoint / child')
         binding = info['udpBinding']
@@ -779,6 +780,7 @@ def main():
         entry['process'].wait(timeout=80);w=entry['witness'];w.wait();w.close();entry['witness']=None
         report=read(entry['reportPath']);check(entry['process'].returncode==0 and report['complete'] and report['cleanupCompleted'] and report['childExited'] and report['playerResultsAcknowledged'] is None,entry['label']+' dual seal / retained36 / original process terminal')
         check(report['udpBinding'] == entry['ready']['udpBinding'], entry['label'] + ' terminal report preserves the startup UDP observation')
+        check(report['peerDiagnosticsEnabled'] is entry['peerDiagnostics'], entry['label']+' terminal report preserves the startup diagnostics choice')
         if 'layoutSession' in entry:
             state=entry['layoutSession'];mission=state['mission']
             preview=request('/api/missions/'+mission['id']+'/layout?mode='+state['mode'])
