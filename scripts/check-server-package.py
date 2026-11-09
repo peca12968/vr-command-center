@@ -1042,6 +1042,40 @@ def main():
               mode+' late venue Pause retry keeps the original receipt without pausing again')
         save(mode+'-venue-phase.json', {'pause': pause, 'paused': paused, 'resume': resume, 'resumed': resumed, 'pauseRetry': retry})
         if room_two: command(room_two, 'Resume')
+    def verify_mr_alignment_archive(entry, files):
+        sid = entry['sessionId']
+        terminal = request('/api/sessions/'+sid)
+        report = read(entry['reportPath'])
+        header = report['finalWorld']['header']
+        supplied = {room: files[room] for room in terminal['roomIds']}
+        proofs = field.verify_room_alignments(terminal, header, supplied)
+        check(terminal['state'] == 'Ended' and proofs == [{'roomId': room, 'sha256': package.digest(path)}
+              for room, path in sorted(supplied.items())], entry['label']+' sealed MR source matches the exact locked room exports')
+        room = terminal['roomIds'][0]
+        other = next(path for number, path in files.items() if number != room)
+        try:
+            field.verify_room_alignments(terminal, header, dict(supplied) | {room: other})
+        except field.EvidenceError as error:
+            check('bytes differ' in str(error), entry['label']+' archive rejects an original export from another room')
+        else:
+            raise RuntimeError('MR archive unexpectedly accepted another room export')
+        journal = entry['work']/'telemetry'/(sid+'.worldlog')
+        try:
+            field.verify_world_journal(journal, report['finalWorld'], report['finalCombatStream']['acceptedSequence'], terminal['sequence'], None)
+        except field.EvidenceError as error:
+            check('active play' in str(error) and read(out/(entry['label']+'-journal.json'))['runningFrames'] == 0,
+                  entry['label']+' Preparing-only archive still cannot satisfy played field evidence')
+        else:
+            raise RuntimeError('MR Preparing-only archive unexpectedly satisfied the played-session gate')
+        save(entry['label']+'-alignment-archive.json', {'rooms': proofs, 'scope': 'Native MR Preparing seal and original export locks',
+              'playedFieldEvidenceAccepted': False})
+
+    def save_room_alignment_exports(files):
+        paths = {room: out/f'room-{room:02}-locked-alignment.json' for room in files}
+        for room, path in paths.items():
+            path.write_bytes(files[room])
+        return paths
+
     def check_mr_venue_bundle():
         pwsh = shutil.which('pwsh')
         if not pwsh: raise RuntimeError('PowerShell is required for Quest venue preflight')
@@ -1049,6 +1083,7 @@ def main():
         markers = [{'room': {'x': x, 'z': z}, 'tracking': {'x': x, 'z': z}} for x, z in [(-2, -2), (2, -2), (-2, 2)]]
         files = {room: json.dumps(request('/api/room-alignment', {'roomId': room, 'markers': markers})).encode() for room in room_ids}
         hashes = {room: hashlib.sha256(data).hexdigest() for room, data in files.items()}
+        alignment_exports = save_room_alignment_exports(files)
         for mode in ('Linked', 'Independent'):
             stage('native-mr-venue-bundle', mode=mode)
             if mode == 'Linked':
@@ -1105,13 +1140,16 @@ def main():
                 mode + ' direct ZIP preflight selects the original room 4 seat 2 without extraction or ADB')
             save(f'mr-venue-{mode.lower()}-seat.json', seat)
             for entry in entries: command(entry['sessionId'], 'End')
-            for entry in entries: finish(entry)
+            for entry in entries:
+                finish(entry)
+                verify_mr_alignment_archive(entry, alignment_exports)
     def check_mixed_venue_bundle():
         stage('native-mixed-venue-bundle')
         markers = [{'room': {'x': x, 'z': z}, 'tracking': {'x': x, 'z': z}} for x, z in [(-2, -2), (2, -2), (-2, 2)]]
         files = {room: b'\xef\xbb\xbf' + json.dumps(request('/api/room-alignment', {'roomId': room, 'markers': markers})).encode() + b'\r\n'
                  for room in (2, 4)}
         hashes = {room: hashlib.sha256(raw).hexdigest() for room, raw in files.items()}
+        alignment_exports = save_room_alignment_exports(files)
         endpoint = '/api/mixed-deployment/venue'
         staged = []
         for room in range(1, 6):
@@ -1233,7 +1271,10 @@ def main():
             verify_mapped_quest(deploy, destination, environment, raw, 'Independent', files, hashes, partial=True, mixed=True)
         check(request('/api/sessions') == before, 'mixed issuance, online verification and mock ADB leave management sessions unchanged')
         for state, _ in staged: command(state['id'], 'End')
-        for _, entry in staged: finish(entry)
+        for state, entry in staged:
+            finish(entry)
+            if state['environment']['mode'] == 'MR':
+                verify_mr_alignment_archive(entry, alignment_exports)
     def verify_mapped_quest(deploy, destination, environment, raw, mode, files=None, hashes=None, *, partial=False, mixed=False):
         is_vr = files is None
         rows = [{'roomId': room, 'seat': seat, 'serial': f'fixture-{(room-1)*5+seat:02}'} for room in range(1, 6) for seat in range(1, 6)]

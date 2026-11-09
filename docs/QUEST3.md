@@ -433,6 +433,8 @@ python .\scripts\capture-quest-field-log.py --adb $adb --serial $serial `
 
 把成功輸出的日誌與 IPv4、`logcatPid` 交給單場或五房驗收工具，逐席核對原 UDP 來源、伺服器確認與封存序號。票券和原日誌存放在私人資料夾。 [單場及五房驗收](EXTERNAL_CLIENTS.md#核對封存戰績與-udp-來源)
 
+MR 場次可一併提供原部署 ZIP 中的房間校正 JSON 與關閉後的 `.worldlog`，對照當次鎖定值。 [核對 MR 校正封存](EXTERNAL_CLIENTS.md#核對-mr-校正封存)
+
 ## 連線與仍待實作事項
 
 一個桌面伺服器程序綁定一個管理場次；五房 Independent 使用各自程序／UDP 埠，全連線則使用一份 Linked 場次與共同伺服器。助手目前只產生單房 Independent 設定；Linked 名冊與票券可透過 API 建立。場景用房間原點平移安排五區，尚無實體場館對位或共用錨點。

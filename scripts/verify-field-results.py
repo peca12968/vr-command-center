@@ -2,6 +2,7 @@
 import argparse
 from datetime import datetime
 from decimal import Decimal
+import hashlib
 import importlib.util
 import ipaddress
 import io
@@ -22,6 +23,7 @@ LOGCAT_UNITY = re.compile(r'[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{
                           r'([1-9][0-9]{0,9}) +[1-9][0-9]{0,9} I Unity *: (.*)')
 PLAYER_MARKERS = ('VR_CLIENT_CONNECTED', 'VR_CLIENT_DISCONNECTED', 'VR_CLIENT_DEBRIEF_FINAL')
 MAX_FILE_BYTES = 16 * 1024 * 1024
+MAX_ALIGNMENT_BYTES = 16 * 1024
 
 
 class EvidenceError(ValueError):
@@ -195,16 +197,49 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end):
     return {'sha256': journal['sha256'], 'frames': sequence, 'runningFrames': journal['runningFrames']}
 
 
+def verify_experience(session, header):
+    mode = session['environment']['mode']
+    require(mode in ('VR', 'MR') and session['mission']['definition']['environment']['mode'] == mode,
+            'Experience mode differs from the original mission')
+    if mode == 'MR':
+        require(header['origin'] == 'GameServer' and header.get('calibration') == 'quest-room-mr-v1',
+                'MR alignment evidence requires the original calibrated game source')
+    else:
+        require(header.get('calibration') == 'uncalibrated-vr', 'VR world profile differs from the session mode')
+    return mode
+
+
+def verify_room_alignments(session, header, alignments):
+    require(verify_experience(session, header) == 'MR', 'Room alignment evidence is only for MR sessions')
+    rooms = session['roomIds']
+    pins = session.get('roomAlignment')
+    require(type(pins) is dict and {key for key, value in pins.items() if value is not None} == {f'room{room}' for room in rooms}
+            and set(alignments) == set(rooms), 'Provide the locked alignment file for every original MR room')
+    evidence = []
+    for room in sorted(rooms):
+        with alignments[room].open('rb') as source:
+            raw = source.read(MAX_ALIGNMENT_BYTES + 1)
+        require(0 < len(raw) <= MAX_ALIGNMENT_BYTES, 'Invalid room alignment file size')
+        digest = hashlib.sha256(raw).hexdigest()
+        require(pins[f'room{room}'] == digest, 'Room alignment bytes differ from the sealed session lock')
+        exported = read_json(raw.decode('utf-8-sig'))
+        require(integer(exported['version'], 1, 1) and exported['profile'] == 'room-floor-alignment-v1'
+                and integer(exported['roomId'], 1, 5) == room and exported['withinTolerance'] is True,
+                'Locked alignment export does not identify the original MR room')
+        evidence.append({'roomId': room, 'sha256': digest})
+    return evidence
+
+
 def verify(topology, server_ips, launcher, session, statistics, endpoint, server_log, player_logs, *, quest_player_logs=(),
-           world_journal=None):
+           world_journal=None, room_alignments=None):
     report, _ = verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log,
                                len(player_logs) + len(quest_player_logs), player_logs, quest_player_logs=quest_player_logs,
-                               world_journal=world_journal)
+                               world_journal=world_journal, room_alignments=room_alignments)
     return report
 
 
 def verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log, size, player_logs, *,
-                   require_remote=True, quest_player_logs=(), world_journal=None, applied_end=None):
+                   require_remote=True, quest_player_logs=(), world_journal=None, applied_end=None, room_alignments=None):
     integer(size, 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(integer(launcher['schemaVersion'], 1, 1) and launcher['status'] == 'sealed-stopped'
@@ -289,13 +324,18 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
     else:
         require(not remote, 'A peer is outside the declared same-host addresses')
     journal = verify_world_journal(world_journal, world, combat_sequence, through, applied_end) if world_journal is not None else None
+    alignments = None
+    if room_alignments is not None:
+        require(journal is not None and quest_players == size, 'MR alignment evidence requires the closed world journal and all original Quest logs')
+        alignments = verify_room_alignments(session, header, room_alignments)
     return {'version': 1, 'consistent': True, 'declaredTopology': topology, 'mode': mode,
             'players': size, 'playersPerRoom': {room: len(room_sources[room]) for room in sorted(room_sources)}, 'distinctPeerAddresses': len(peer_ips),
             'distinctAddressesOutsideDeclaredServer': len(remote), 'serverAcknowledgements': len(acknowledged),
             'worldSequence': world_sequence, 'combatSequence': combat_sequence, 'physicalHostsVerified': False,
             'networkCapacityAccepted': False,
             **({'questLogcatPlayers': quest_players} if quest_players else {}),
-            **({'worldJournal': journal} if journal else {})}, room_sources
+            **({'worldJournal': journal} if journal else {}),
+            **({'roomAlignments': alignments} if alignments is not None else {})}, room_sources
 
 
 def management_zip(path):
@@ -343,6 +383,8 @@ def verify_venue(manifest_path):
             'Venue must contain the original five independent sessions or one linked session')
     journals = any('worldJournal' in entry for entry in entries)
     require(not journals or all('worldJournal' in entry for entry in entries), 'Provide a world journal for every session in this batch')
+    check_alignments = any('roomAlignments' in entry for entry in entries)
+    require(not check_alignments or journals, 'MR alignment evidence requires the original world journals for the full batch')
     expected = {identity(row['sessionId']): row for row in rows}
     require(len(expected) == len(rows) and all(type(row['roomIds']) is list and row['roomIds']
             and all(integer(room, 1, 5) for room in row['roomIds']) for row in rows)
@@ -355,6 +397,16 @@ def verify_venue(manifest_path):
         session, statistics, endpoint = management_zip(evidence_path(entry['evidenceZip']))
         launcher = read_json(content(evidence_path(entry['launcherReport'])))
         server_log = content(evidence_path(entry['serverLog']))
+        alignments = None
+        if check_alignments:
+            experience = verify_experience(session, launcher['finalWorld']['header'])
+            if experience == 'MR':
+                files = entry.get('roomAlignments')
+                require(type(files) is dict and set(files) == {str(room) for room in session['roomIds']},
+                        'Provide a locked alignment file for every original MR room in this batch')
+                alignments = {int(room): evidence_path(path) for room, path in files.items()}
+            else:
+                require('roomAlignments' not in entry, 'Room alignment evidence is only for MR sessions')
         row = expected.pop(identity(session['id']), None)
         require(row is not None and session['mode'] == mode and session['roomIds'] == row['roomIds'],
                 'Session evidence differs from the original closure')
@@ -384,7 +436,7 @@ def verify_venue(manifest_path):
                                          require_remote=False,
                                          quest_player_logs=((address, content(path), pid) for address, path, pid in quest_logs),
                                          world_journal=evidence_path(entry['worldJournal']) if journals else None,
-                                         applied_end=row['appliedAtSequence'])
+                                         applied_end=row['appliedAtSequence'], room_alignments=alignments)
         quest_players += len(quest_logs)
         seats = {(player['roomId'], integer(player['seat'], 0, 4)) for player in session['players']}
         require(seats == {(room, seat) for room in row['roomIds'] for seat in range(5)}, 'Final roster must cover every room seat exactly once')
@@ -396,7 +448,9 @@ def verify_venue(manifest_path):
         rooms.update(sources)
         summaries.append({'roomIds': row['roomIds'], 'serverAcknowledgements': report['serverAcknowledgements'],
                           'worldSequence': report['worldSequence'], 'combatSequence': report['combatSequence'],
-                          **({'worldJournal': report['worldJournal']} if journals else {})})
+                          **({'worldJournal': report['worldJournal']} if journals else {}),
+                          **({'experienceMode': experience} if check_alignments else {}),
+                          **({'roomAlignments': report['roomAlignments']} if alignments is not None else {})})
 
     require(recorded_at in end_times and not expected, 'Closure time or session set differs from the terminal evidence')
     peer_ips = {address for sources in rooms.values() for address in sources}
@@ -410,7 +464,8 @@ def verify_venue(manifest_path):
             'serverAcknowledgements': sum(item['serverAcknowledgements'] for item in summaries),
             'physicalHostsVerified': False, 'networkCapacityAccepted': False,
             **({'questLogcatPlayers': quest_players} if quest_players else {}),
-            **({'worldJournalsVerified': len(summaries)} if journals else {})}
+            **({'worldJournalsVerified': len(summaries)} if journals else {}),
+            **({'roomAlignmentsVerified': sum(len(row.get('roomAlignments', [])) for row in summaries)} if check_alignments else {})}
 
 
 def main():
@@ -419,6 +474,8 @@ def main():
     parser.add_argument('--topology', choices=('same-host', 'direct-lan'))
     parser.add_argument('--server-ip', action='append', help='Repeat for each assigned server IPv4')
     parser.add_argument('--world-journal', type=Path, help='Original closed .worldlog for a single session')
+    parser.add_argument('--room-alignment', action='append', nargs=2, metavar=('ROOM', 'JSON'),
+                        help='Repeat for each locked MR room in a single session')
     for name in ('launcher-report', 'session', 'statistics', 'endpoint', 'server-log'):
         parser.add_argument('--' + name, type=Path)
     parser.add_argument('--player', action='append', nargs=2, metavar=('EXPECTED_IPV4', 'LOG'))
@@ -426,7 +483,7 @@ def main():
     args = parser.parse_args()
     json_paths = [args.launcher_report, args.session, args.statistics, args.endpoint]
     single_args = [args.topology, args.server_ip, *json_paths, args.server_log, args.player or args.quest_player]
-    if (args.venue_manifest and (any(single_args) or args.world_journal)) or (not args.venue_manifest and not all(single_args)):
+    if (args.venue_manifest and (any(single_args) or args.world_journal or args.room_alignment)) or (not args.venue_manifest and not all(single_args)):
         parser.error('Provide --venue-manifest alone or all single-session options.')
     try:
         if args.venue_manifest:
@@ -438,6 +495,13 @@ def main():
             inputs = [*json_paths, args.server_log, *(Path(row[1]) for row in chain(windows, quest))]
             if args.world_journal is not None:
                 inputs.append(args.world_journal)
+            alignments = None
+            if args.room_alignment:
+                alignments = {}
+                for room, path in args.room_alignment:
+                    require(room in ('1', '2', '3', '4', '5') and int(room) not in alignments, 'Provide each MR room number once')
+                    alignments[int(room)] = Path(path)
+                inputs.extend(alignments.values())
             require(len({path.resolve(strict=True) for path in inputs}) == len(inputs), 'Evidence paths must be distinct')
             players = [(ipv4(address), content(Path(path))) for address, path in windows]
             quest_players = []
@@ -446,7 +510,7 @@ def main():
                 quest_players.append((ipv4(address), content(Path(path)), integer(int(pid), 1, 2**31 - 1)))
             report = verify(args.topology, {ipv4(address) for address in args.server_ip},
                             *(read_json(content(path)) for path in json_paths), content(args.server_log), players,
-                            quest_player_logs=quest_players, world_journal=args.world_journal)
+                            quest_player_logs=quest_players, world_journal=args.world_journal, room_alignments=alignments)
     except EvidenceError as error:
         parser.exit(1, f'Field evidence rejected. {error}.\n')
     except (OSError, UnicodeError, ArithmeticError, AttributeError, KeyError, TypeError, ValueError, RecursionError,

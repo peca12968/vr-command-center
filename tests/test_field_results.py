@@ -77,7 +77,8 @@ def world_journal(path, world, *, header_changes=None, combat=0, active=True, se
 
     count = world['acceptedSequence']
     world.update(durationMilliseconds=count * 100, capturedAtUtc='2026-11-09T00:00:08+00:00')
-    world['header'].update(schemaVersion=1, calibration='uncalibrated-vr', captureStartedAtUtc='2026-11-09T00:00:00+00:00')
+    world['header'].update(schemaVersion=1, captureStartedAtUtc='2026-11-09T00:00:00+00:00')
+    world['header'].setdefault('calibration', 'uncalibrated-vr')
     header = dict(world['header'], **(header_changes or {}))
     raw = [b'VRWORLD1', record(0, json.dumps(header).encode())]
     for number in range(1, count + 1):
@@ -91,7 +92,7 @@ def world_journal(path, world, *, header_changes=None, combat=0, active=True, se
     path.write_bytes(b''.join(raw))
 
 
-def venue_fixture(root, mode, *, remote=False, quest_per_room=0, with_journals=False):
+def venue_fixture(root, mode, *, remote=False, quest_per_room=0, with_journals=False, mr_rooms=()):
     def write_json(path, value):
         path.write_text(json.dumps(value), encoding='utf-8')
 
@@ -102,15 +103,18 @@ def venue_fixture(root, mode, *, remote=False, quest_per_room=0, with_journals=F
                 'serverIps': [server_ip], 'closure': 'closure.json', 'sessions': []}
     for rooms in groups:
         prefix = f'Room {rooms[0]}'
+        experience = 'MR' if rooms[0] in mr_rooms else 'VR'
+        origin = 'GameServer' if experience == 'MR' else 'Simulation'
         _, _, launcher, session, stats, endpoint, _, _ = fixture(remote=False)
         session_id, stream = id_for(100 + rooms[0]), id_for(200 + rooms[0])
         port = 7776 + rooms[0]
         launcher.update(sessionId=session_id, streamId=stream)
         launcher['udpBinding']['port'] = port
-        launcher['finalWorld']['header'].update(sessionId=session_id, streamId=stream, roomIds=rooms)
-        launcher['finalCombatStream']['streamId'] = stream
+        launcher['finalWorld']['header'].update(sessionId=session_id, streamId=stream, roomIds=rooms, origin=origin,
+            calibration='quest-room-mr-v1' if experience == 'MR' else 'uncalibrated-vr')
+        launcher['finalCombatStream'].update(streamId=stream, origin=origin)
         session.update(id=session_id, mode=mode, roomIds=rooms, players=[], combatStream=launcher['finalCombatStream'],
-                       mission={'definition': {'name': prefix}})
+                       environment={'mode': experience}, mission={'definition': {'name': prefix, 'environment': {'mode': experience}}})
         stats.update(sessionId=session_id, players=[])
         endpoint.update(sessionId=session_id, streamId=stream, port=port)
         batch['sessions'].append({'sessionId': session_id, 'roomIds': rooms, 'missionName': prefix,
@@ -121,18 +125,28 @@ def venue_fixture(root, mode, *, remote=False, quest_per_room=0, with_journals=F
         if with_journals:
             entry['worldJournal'] = prefix + '.worldlog'
             world_journal(root / entry['worldJournal'], launcher['finalWorld'])
+        if experience == 'MR':
+            entry['roomAlignments'] = {}
+            session['roomAlignment'] = {}
+            for room in rooms:
+                name = f'Room {room} alignment.json'
+                raw = b'\xef\xbb\xbf' + json.dumps({'version': 1, 'profile': 'room-floor-alignment-v1',
+                    'roomId': room, 'withinTolerance': True}).encode() + b'\r\n'
+                (root / name).write_bytes(raw)
+                entry['roomAlignments'][str(room)] = name
+                session['roomAlignment'][f'room{room}'] = hashlib.sha256(raw).hexdigest()
         manifest['sessions'].append(entry)
         server = f'VR_NETWORK_STARTED role=Server started=True background=True port={port}\n'
         for room in rooms:
             for seat in range(5):
                 connection = room * 5 + seat
                 player, admission = id_for(300 + connection), id_for(400 + connection)
-                is_quest = seat >= 5 - quest_per_room
+                is_quest = experience == 'MR' or seat >= 5 - quest_per_room
                 peer = f'192.168.5.{30 + connection}' if is_quest else remote_ip if remote and room == 5 and seat == 4 else server_ip
                 session['players'].append({'id': player, 'admissionId': admission, 'roomId': room, 'seat': seat, 'headset': 'Quest3'})
                 row = {field_name: 0 for field_name in field.COMBAT} | {'playerId': player, 'roomId': room, 'health': 100, 'accuracyPercent': 0}
                 stats['players'].append(row)
-                result = dict(row, version=1, admissionId=admission, sessionId=session_id, origin='Simulation',
+                result = dict(row, version=1, admissionId=admission, sessionId=session_id, origin=origin,
                               streamId=stream, throughSequence=9, finalStreamSequence=0, worldSequence=80)
                 log = f'Player {connection}.log'
                 entry['players'].append({'address': peer, 'log': log, **({'logcatPid': 7342} if is_quest else {})})
@@ -297,6 +311,90 @@ if settings.get('keepRunning', True):
 
 
 class FieldResultsTests(unittest.TestCase):
+    def test_alignment_evidence_binds_mixed_and_linked_mr_to_locked_bytes(self):
+        for mode, mr_rooms in (('Independent', (2, 4)), ('Linked', (1, 2, 3, 4, 5))):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, _ = venue_fixture(root, mode, remote=True, with_journals=True, mr_rooms=mr_rooms)
+                report = field.verify_venue(path)
+                self.assertEqual(len(mr_rooms), report['roomAlignmentsVerified'])
+                self.assertEqual(len(mr_rooms) * 5, report['questLogcatPlayers'])
+                self.assertEqual(25, report['serverAcknowledgements'])
+                self.assertFalse(report['physicalHostsVerified'])
+                self.assertFalse(report['networkCapacityAccepted'])
+                rooms = [row['roomId'] for entry in report['sessions'] for row in entry.get('roomAlignments', [])]
+                self.assertEqual(list(mr_rooms), rooms)
+                mr = next(entry for entry in manifest['sessions'] if 'roomAlignments' in entry)
+                locked = root / next(iter(mr['roomAlignments'].values()))
+                saved = locked.read_bytes()
+                locked.write_bytes(saved.rstrip())
+                with self.assertRaisesRegex(field.EvidenceError, 'bytes differ from the sealed session lock'):
+                    field.verify_venue(path)
+                locked.write_bytes(saved)
+                lost = deepcopy(manifest)
+                original = next(entry for entry in lost['sessions'] if 'roomAlignments' in entry)
+                original.pop('roomAlignments')
+                if mode == 'Linked':
+                    original['roomAlignments'] = {}
+                path.write_text(json.dumps(lost), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'for every original MR room'):
+                    field.verify_venue(path)
+
+    def test_mr_alignment_requires_original_game_profile_room_and_quest_logs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, _ = venue_fixture(root, 'Independent', remote=True, with_journals=True, mr_rooms=(2, 4))
+            mr = manifest['sessions'][1]
+            session, _, _ = field.management_zip(root / mr['evidenceZip'])
+            launcher = json.loads((root / mr['launcherReport']).read_text())
+            header = launcher['finalWorld']['header']
+            alignment = root / mr['roomAlignments']['2']
+            wrong_room = root / manifest['sessions'][3]['roomAlignments']['4']
+            with self.assertRaisesRegex(field.EvidenceError, 'calibrated game source'):
+                field.verify_room_alignments(session, dict(header, origin='Simulation'), {2: alignment})
+            session['roomAlignment']['room2'] = hashlib.sha256(wrong_room.read_bytes()).hexdigest()
+            with self.assertRaisesRegex(field.EvidenceError, 'does not identify the original MR room'):
+                field.verify_room_alignments(session, header, {2: wrong_room})
+            no_journals = deepcopy(manifest)
+            for entry in no_journals['sessions']:
+                entry.pop('worldJournal')
+            path.write_text(json.dumps(no_journals), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'journals for the full batch'):
+                field.verify_venue(path)
+            player = mr['players'][0]
+            player.pop('logcatPid')
+            log = root / player['log']
+            markers = [match[2] for line in log.read_text().splitlines() if (match := field.LOGCAT_UNITY.fullmatch(line))
+                       and match[2].startswith(field.PLAYER_MARKERS)]
+            log.write_text('\n'.join(markers), encoding='utf-8')
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'all original Quest logs'):
+                field.verify_venue(path)
+
+    def test_single_session_cli_accepts_original_mr_alignment(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, manifest, _ = venue_fixture(root, 'Independent', remote=True, with_journals=True, mr_rooms=(2,))
+            mr = manifest['sessions'][1]
+            command = [sys.executable, str(SCRIPT), '--topology', 'direct-lan', '--server-ip', manifest['serverIps'][0],
+                       '--world-journal', str(root / mr['worldJournal']), '--room-alignment', '2', str(root / mr['roomAlignments']['2']),
+                       '--launcher-report', str(root / mr['launcherReport']), '--server-log', str(root / mr['serverLog'])]
+            session, stats, endpoint = field.management_zip(root / mr['evidenceZip'])
+            for option, data in [('session', session), ('statistics', stats), ('endpoint', endpoint)]:
+                path = root / f'{option}.json'
+                path.write_text(json.dumps(data), encoding='utf-8')
+                command += ['--' + option, str(path)]
+            for player in mr['players']:
+                command += ['--quest-player', player['address'], str(root / player['log']), str(player['logcatPid'])]
+            result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+            self.assertEqual(0, result.returncode, result.stderr)
+            self.assertEqual(2, json.loads(result.stdout)['roomAlignments'][0]['roomId'])
+            self.assertNotIn(directory, result.stdout)
+            duplicate = subprocess.run(command + ['--room-alignment', '2', str(root / mr['roomAlignments']['2'])],
+                                       capture_output=True, text=True, timeout=10)
+            self.assertEqual(1, duplicate.returncode)
+            self.assertNotIn(directory, duplicate.stderr)
+
     def test_original_world_journal_matches_the_sealed_evidence(self):
         data = fixture()
         world = data[2]['finalWorld']

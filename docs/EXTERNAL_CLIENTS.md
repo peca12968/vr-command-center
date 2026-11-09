@@ -197,6 +197,7 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `sessions` | 獨立模式填五場，合併模式填一場 |
 | `sessions[].evidenceZip`、`launcherReport`、`serverLog` | 各場原 ZIP、啟動器終止報告及伺服器日誌的路徑 |
 | `sessions[].worldJournal` | 選用。若驗收回放檔，每個場次都填自己關閉後的原始 `.worldlog` 路徑 |
+| `sessions[].roomAlignments` | 選用。核對 MR 校正時，每個 MR 場次按房號填原校正檔，例如 `{"2":"room-02-alignment.json"}` |
 | `sessions[].players` | 每房五筆。每筆填玩家裝置實際使用的 IPv4 字串 `address` 及原日誌路徑 `log`。Quest 3 原 logcat 另填數字 `logcatPid`，例如 `7342` |
 
 路徑可以是絕對路徑，或相對於 `venue.json` 所在資料夾。同一檔案只能使用一次。例如獨立模式下，第 1 房的清單項目可由下列 PowerShell 建立。請依實際驗收配置填入各席地址與檔名。
@@ -225,6 +226,14 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json
 摘要核對五房各五個席位、原封存來源、每位玩家的原入場與 UDP 來源，以及 25 筆伺服器戰績確認。它逐房列出在伺服器位址清單以外的玩家數。`direct-lan` 至少須觀察到一筆這類連線，仍須依實際設備及網路拓撲核對主機數、同時遊玩與容量。
 
 提供回放檔的整批驗收會檢查每場最後影格已觀察到該批結束指令，並輸出 `worldJournalsVerified` 與逐場摘要。回放畫面及遊戲事件內容可用原回放介面另行檢視。
+
+### 核對 MR 校正封存
+
+保留原 MR 或混合部署 ZIP 內的各房校正 JSON。從 ZIP 取出原檔供驗收，維持檔案位元不變。單場驗收加入 `--world-journal .\room-02.worldlog --room-alignment 2 .\room-02-alignment.json`。合併 MR 場次每房各加一次 `--room-alignment`。
+
+若使用整批清單，在每個 MR 場次填入 `roomAlignments`，每一場都填 `worldJournal`。混合批次的 VR 場次只填自己的回放檔。選用校正核對後，任一 MR 房間缺檔即拒絕整批。工具核對原任務的 MR 模式、遊戲伺服器回放的 `quest-room-mr-v1` 設定，以及校正 JSON 的房號和 SHA-256。原檔重新序列化後，即使量測數值相同，仍須改用原部署 ZIP 的位元。
+
+當前 MR 規格要求原 Quest 3 席位使用原始 logcat，並通過實際 UDP 來源、原入場、戰績確認及封存檢查。摘要列出已核對房號和原檔 SHA-256。場地量測精度、實際透視、跨機容量與設備仍須現場驗收。 [Quest 擷取](QUEST3.md#收集-quest-場館驗收日誌)
 
 ## Windows 玩家連線量測
 
