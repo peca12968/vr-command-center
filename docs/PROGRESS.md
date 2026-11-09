@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-09 Quest 場館戰績驗收日誌
+
+場館驗收工具可把 Quest 3 的原始 logcat 與 Windows 玩家日誌一起核對。單場用 `--quest-player`，全館清單為 Quest 席位加上 `logcatPid`。核對同一程序的啟動、最終連線及戰績，再對照原 Quest 3 入場名額、伺服器觀察到的 UDP 來源、戰績確認及雙封存。 [擷取與核對](QUEST3.md#收集-quest-場館驗收日誌)
+
+- 16 項場館驗收、10 項伺服器工具及 5 項 LAN 預檢測試通過。測試日誌涵蓋全連線 25 席 Quest 格式、獨立五房各一席 Quest 和四席 Windows，以及重連後使用最後一條有戰績確認的連線。其他 PID、錯誤埠、錯誤入場、來源地址及封存序號不符皆拒絕。
+- 唯讀重驗 Windows 原生封存 `run-564cff2a85b14aa2b1a68a82d4ec6234`。獨立與合併各 25 席，兩份摘要均與原結果相同。50 份原 Windows 玩家標記另用合成 logcat 外框測試，保留原連線及戰績，錯 PID 全數拒絕。本機驗證摘要存於 `artifacts/quest-field-logcat-20261109/readback.json`。Quest 真機擷取、實際場館網路容量、VIVE 及廠商硬體仍待驗證。
+- 功能來源 `87ea9b911dbfef7278e3bb0539a2371038a5878b`。GitHub Actions job `129011660453` 因帳務或支出上限未啟動，零步驟。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42572132563)
+
 ## 2026-11-09 混合 VR／MR 五房部署
 
 Windows 管理包 0.31.47 可為含 VR 與 MR 的五個獨立房間一次下載部署 ZIP。主控依原場次、UDP 端點、來源及名冊配票，只有 MR 房需上傳原始校正檔。部署腳本整包核對 25 席，再依房間模式部署單席或清單。 [操作方式](QUEST3.md#混合-vr-與-mr-五房部署包)
