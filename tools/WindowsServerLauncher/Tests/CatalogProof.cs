@@ -70,8 +70,21 @@ internal static class ServerCatalogProof
             var mrChoices = ServerLauncher.Catalog.Parse(new object[] { running, bound, mr });
             Check(mrChoices.Count == 1 && mrChoices[0].Experience == "MR" && mrChoices[0].ToString().Contains(" · MR · "),
                 "Preparing MR appears with its own experience label while running and bound sessions stay excluded");
+            Check(!mrChoices[0].CanStart && mrChoices[0].MissingAlignmentRooms.Length == 1 && mrChoices[0].MissingAlignmentRooms[0] == 3
+                && mrChoices[0].Detail().Contains("房間 3") && mrChoices[0].Detail().Contains("重新載入"), "unlocked Independent MR identifies the affected room and operator action");
             var linked = Row(1); linked["mode"] = "Linked"; linked["roomIds"] = new object[] { 5, 4, 3, 2, 1 }; var all = ServerLauncher.Catalog.Parse(new object[] { linked });
-            Check(all.Count == 1 && all[0].Rooms[0] == 1 && all[0].Rooms[4] == 5 && all[0].ToString().Contains("五房全連線"), "linked identity covers all five rooms");
+            Check(all.Count == 1 && all[0].Rooms[0] == 1 && all[0].Rooms[4] == 5 && all[0].CanStart && all[0].ToString().Contains("五房全連線"), "linked VR identity covers all five rooms without requiring MR pins");
+            ServerLauncher.Child(linked, "environment")["mode"] = "MR";
+            var hash = new String('a', 64);
+            linked["roomAlignment"] = new Dictionary<string, object> { { "room1", hash }, { "room2", new String('A', 64) }, { "room3", null }, { "room4", hash }, { "room5", 5 } };
+            var incomplete = ServerLauncher.Catalog.Parse(new object[] { linked })[0];
+            Check(!incomplete.CanStart && String.Join(",", incomplete.MissingAlignmentRooms) == "2,3,5" && incomplete.ToString().Contains("待鎖定校正"), "Linked MR reports only missing or invalid pins in sorted room order");
+            var pins = ServerLauncher.Child(linked, "roomAlignment");
+            for (int room = 1; room <= 5; room++) pins["room" + room] = hash;
+            var ready = ServerLauncher.Catalog.Parse(new object[] { linked })[0];
+            Check(ready.CanStart && ready.MissingAlignmentRooms.Length == 0 && ready.Id == incomplete.Id && !ready.Detail().Contains("重新載入"), "all five locked pins enable the same Linked choice without advertising a digest");
+            linked["roomAlignment"] = "malformed";
+            Check(!ServerLauncher.Catalog.Parse(new object[] { linked })[0].CanStart, "malformed lock data fails closed without dropping the choice");
             Check(ServerLauncher.Choice.Label("甲\n乙\u202e丙") == "甲 乙丙", "display removes control / bidi formatting only");
             Check(!Char.IsHighSurrogate(ServerLauncher.Choice.Label(new String('甲', 31) + "\ud83d\ude80尾")[31]), "truncation preserves a surrogate boundary");
             var descriptor = ServerLauncher.Read(args[0], 8192); var instance = ServerLauncher.Text(descriptor, "instance");

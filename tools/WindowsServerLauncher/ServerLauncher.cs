@@ -189,24 +189,45 @@ internal static class ServerLauncher
     }
     internal sealed class Choice
     {
-        internal string Id, MissionId, MissionName, Mode, Experience; internal int[] Rooms;
+        internal string Id, MissionId, MissionName, Mode, Experience; internal int[] Rooms, MissingAlignmentRooms;
+        internal bool CanStart { get { return MissingAlignmentRooms.Length == 0; } }
         internal static string GuidValue(string value) { Guid id; Need(Guid.TryParseExact(value, "D", out id) && id != Guid.Empty && id.ToString("D") == value, "場次或任務識別格式錯誤。"); return value; }
+        internal static int[] ReadRooms(Dictionary<string, object> value, string mode)
+        {
+            object raw; Need(value.TryGetValue("roomIds", out raw) && raw is object[], "場次房間缺失。"); var rows = (object[])raw;
+            Need(mode == "Independent" && rows.Length == 1 || mode == "Linked" && rows.Length == 5, "場次房間或連線模式錯誤。");
+            var seen = new HashSet<int>(); var rooms = new List<int>(); foreach (var row in rows) { Need(row is int && (int)row >= 1 && (int)row <= 5 && seen.Add((int)row), "場次房間重複或越界。"); rooms.Add((int)row); } rooms.Sort();
+            return rooms.ToArray();
+        }
+        internal static int[] MissingAlignment(Dictionary<string, object> session, int[] rooms)
+        {
+            var pins = Child(session, "roomAlignment");
+            return Array.FindAll(rooms, room => !ValidPin(Text(pins, "room" + room.ToString(System.Globalization.CultureInfo.InvariantCulture))));
+        }
+        static bool ValidPin(string value)
+        {
+            if (value == null || value.Length != 64) return false;
+            foreach (var c in value) if (!(c >= '0' && c <= '9' || c >= 'a' && c <= 'f')) return false;
+            return true;
+        }
+        static string RoomLabels(int[] rooms) { return String.Join("、", Array.ConvertAll(rooms, room => room.ToString(System.Globalization.CultureInfo.InvariantCulture))); }
+        internal static string AlignmentPrompt(int[] rooms) { return "MR 房間 " + RoomLabels(rooms) + " 尚無有效的校正鎖定。請由主控鎖定後重新載入。"; }
         internal static Choice Parse(Dictionary<string, object> value)
         {
             Need(value != null, "場次列表內容錯誤。"); var mission = Child(value, "mission"); var name = Text(Child(mission, "definition"), "name");
-            Need(!String.IsNullOrWhiteSpace(name) && name.Length <= 100, "任務名稱格式錯誤。"); object raw; Need(value.TryGetValue("roomIds", out raw) && raw is object[], "場次房間缺失。"); var rows = (object[])raw;
-            var mode = Text(value, "mode"); Need(mode == "Independent" && rows.Length == 1 || mode == "Linked" && rows.Length == 5, "場次房間或連線模式錯誤。");
-            var seen = new HashSet<int>(); var rooms = new List<int>(); foreach (var row in rows) { Need(row is int && (int)row >= 1 && (int)row <= 5 && seen.Add((int)row), "場次房間重複或越界。"); rooms.Add((int)row); } rooms.Sort();
+            Need(!String.IsNullOrWhiteSpace(name) && name.Length <= 100, "任務名稱格式錯誤。");
+            var mode = Text(value, "mode"); var rooms = ReadRooms(value, mode); var experience = Text(Child(value, "environment"), "mode");
             return new Choice { Id = GuidValue(Text(value, "id")), MissionId = GuidValue(Text(mission, "id")), MissionName = name,
-                Mode = mode, Experience = Text(Child(value, "environment"), "mode"), Rooms = rooms.ToArray() };
+                Mode = mode, Experience = experience, Rooms = rooms, MissingAlignmentRooms = experience == "MR" ? MissingAlignment(value, rooms) : new int[0] };
         }
         internal static string Label(string value)
         {
             var text = new StringBuilder(); foreach (var c in value) { if (Char.GetUnicodeCategory(c) == System.Globalization.UnicodeCategory.Format) continue; text.Append(Char.IsControl(c) || Char.IsWhiteSpace(c) ? ' ' : c); }
             var result = text.ToString().Trim(); if (result.Length > 32) { var length = Char.IsHighSurrogate(result[31]) ? 31 : 32; result = result.Substring(0, length) + "…"; } return result;
         }
-        public override string ToString() { var rooms = Array.ConvertAll(Rooms, room => room.ToString(System.Globalization.CultureInfo.InvariantCulture)); return "房間 " + String.Join("、", rooms) + " · " + (Mode == "Linked" ? "五房全連線" : "單房獨立") + " · " + Experience + " · " + Label(MissionName) + " · " + Id.Substring(0, 8); }
-        internal object Public() { return new { id = Id, missionId = MissionId, missionName = MissionName, mode = Mode, experienceMode = Experience, roomIds = Rooms, display = ToString() }; }
+        public override string ToString() { return "房間 " + RoomLabels(Rooms) + " · " + (Mode == "Linked" ? "五房全連線" : "單房獨立") + " · " + Experience + " · " + (CanStart ? "" : "待鎖定校正 · ") + Label(MissionName) + " · " + Id.Substring(0, 8); }
+        internal string Detail() { return "場次ID：" + Id + "\r\n任務版本ID：" + MissionId + (CanStart ? "" : "\r\n" + AlignmentPrompt(MissingAlignmentRooms)); }
+        internal object Public() { return new { id = Id, missionId = MissionId, missionName = MissionName, mode = Mode, experienceMode = Experience, roomIds = Rooms, canStart = CanStart, missingAlignmentRoomIds = MissingAlignmentRooms, display = ToString() }; }
     }
     internal sealed class Catalog
     {
@@ -239,7 +260,7 @@ internal static class ServerLauncher
     internal sealed class CatalogState
     {
         internal string Draft = ""; internal Catalog Current; internal Choice Selected; internal bool Loaded;
-        internal bool CanStart { get { return Loaded && Current != null && Selected != null && String.Equals(Full(Draft.Trim()), Current.PathName, StringComparison.OrdinalIgnoreCase); } }
+        internal bool CanStart { get { return Loaded && Current != null && Selected != null && Selected.CanStart && String.Equals(Full(Draft.Trim()), Current.PathName, StringComparison.OrdinalIgnoreCase); } }
         internal void Edit(string path) { Draft = path; Loaded = false; }
         internal void Load()
         {
@@ -301,8 +322,14 @@ internal static class ServerLauncher
         {
             Config.Validate(); Verify(); Config.Identity(); var state = Config.Request("/api/sessions/" + Config.Session);
             var experience = Text(Child(state, "environment"), "mode");
-            Need(Text(state, "id") == Config.Session && Text(state, "state") == "Preparing" && Child(state, "combatStream") == null
+            object streamValue;
+            Need(Text(state, "id") == Config.Session && Text(state, "state") == "Preparing" && state.TryGetValue("combatStream", out streamValue) && streamValue == null
                 && (experience == "VR" || experience == "MR"), "只接受尚未綁定來源的 Preparing VR 或 MR 場次。");
+            if (experience == "MR")
+            {
+                var missing = Choice.MissingAlignment(state, Choice.ReadRooms(state, Text(state, "mode")));
+                if (missing.Length > 0) throw new InvalidDataException(Choice.AlignmentPrompt(missing));
+            }
             Origin = experience == "MR" ? "GameServer" : "Simulation";
             string name; using (var sha = SHA256.Create()) name = Hex(sha.ComputeHash(Encoding.UTF8.GetBytes(Config.Api + "/" + Config.Session)));
             bool created; lease = new Mutex(true, "Local\\VRCommand.Server." + name, out created); ownsLease = created; Need(created, "此場次已有本機啟動器。");
@@ -441,23 +468,24 @@ internal static class ServerLauncher
         readonly CatalogState catalog = new CatalogState(); Run active; volatile bool cancel; Thread worker;
         internal Window()
         {
-            Text = "VR Command 遊戲伺服器"; ClientSize = new Size(920, 510); Font = new Font("Microsoft JhengHei UI", 11); FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false;
+            Text = "VR Command 遊戲伺服器"; ClientSize = new Size(920, 538); Font = new Font("Microsoft JhengHei UI", 11); FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false;
             Add(new Label { Text = "每個獨立房間一個伺服器；五房合併場次只需一個。", AutoSize = true }, 24, 24, 860, 30);
             Add(new Label { Text = "管理實例檔案完整路徑", AutoSize = true }, 24, 56, 600, 28); Add(selected, 24, 86, 594, 32); Add(open, 630, 84, 120, 36); Add(refresh, 766, 84, 124, 36);
             Add(new Label { Text = "可選檔，也可直接貼上control-instance.json路徑，再按載入／更新。", AutoSize = true }, 24, 127, 866, 30);
-            Add(new Label { Text = "尚未綁定來源的 VR 或 MR 場次", AutoSize = true }, 24, 164, 400, 28); Add(session, 24, 194, 866, 34); Add(detail, 24, 240, 866, 48);
-            Add(new Label { Text = "公告IPv4", AutoSize = true }, 24, 299, 210, 28); Add(address, 24, 330, 230, 32); Add(new Label { Text = "本機綁定IPv4", AutoSize = true }, 284, 299, 230, 28); Add(bind, 284, 330, 230, 32); Add(new Label { Text = "UDP埠", AutoSize = true }, 544, 299, 130, 28); Add(port, 544, 330, 130, 32);
-            Add(start, 24, 382, 260, 40); Add(abort, 310, 382, 260, 40); Add(state, 24, 440, 866, 64);
+            Add(new Label { Text = "尚未綁定來源的 VR 或 MR 場次", AutoSize = true }, 24, 164, 400, 28); Add(session, 24, 194, 866, 34); Add(detail, 24, 240, 866, 76);
+            Add(new Label { Text = "公告IPv4", AutoSize = true }, 24, 327, 210, 28); Add(address, 24, 358, 230, 32); Add(new Label { Text = "本機綁定IPv4", AutoSize = true }, 284, 327, 230, 28); Add(bind, 284, 358, 230, 32); Add(new Label { Text = "UDP埠", AutoSize = true }, 544, 327, 130, 28); Add(port, 544, 358, 130, 32);
+            Add(start, 24, 410, 260, 40); Add(abort, 310, 410, 260, 40); Add(state, 24, 468, 866, 64);
             selected.TextChanged += delegate { catalog.Edit(selected.Text); start.Enabled = session.Enabled = false; detail.Text = "路徑已變更，請重新載入；未沿用舊場次。"; };
             open.Click += delegate { using (var dialog = new OpenFileDialog { Filter = "管理實例|control-instance.json", CheckFileExists = true }) if (dialog.ShowDialog(this) == DialogResult.OK) { selected.Text = dialog.FileName; Guard(LoadInstance); } };
             refresh.Click += delegate { Guard(LoadInstance); };
-            session.SelectedIndexChanged += delegate { if (catalog.Loaded) { var choice = session.SelectedItem as Choice; catalog.Select(choice == null ? null : choice.Id); start.Enabled = catalog.CanStart; detail.Text = choice == null ? "請明確選擇要啟動的房間與任務。" : "場次ID：" + choice.Id + "\r\n任務版本ID：" + choice.MissionId; } };
+            session.SelectedIndexChanged += delegate { if (catalog.Loaded) { var choice = session.SelectedItem as Choice; catalog.Select(choice == null ? null : choice.Id); ShowSelection(); } };
             start.Click += delegate { Guard(Begin); }; abort.Click += delegate { cancel = true; abort.Enabled = false; state.Text = "中止中；此輪不算正常封存完成。"; };
             FormClosing += delegate(object sender, FormClosingEventArgs e) { if (worker != null && worker.IsAlive) { e.Cancel = true; state.Text = "伺服器仍在執行；請由控制台結束任務，或按中止。"; } };
             var timer = new System.Windows.Forms.Timer { Interval = 500 }; timer.Tick += delegate { if (active != null && !cancel) state.Text = active.Status; }; timer.Start();
         }
         void Add(Control control, int x, int y, int w, int h) { control.SetBounds(x, y, w, h); Controls.Add(control); }
         void Guard(Action action) { try { action(); } catch (Exception e) { state.Text = "未完成：" + Safe(e); } }
+        void ShowSelection() { start.Enabled = catalog.CanStart; detail.Text = catalog.Selected == null ? "請明確選擇要啟動的房間與任務。" : catalog.Selected.Detail(); }
         void LoadInstance()
         {
             start.Enabled = session.Enabled = false; detail.Text = "正在重新讀取管理服務；不保留未確認的啟動選取。";
@@ -465,8 +493,8 @@ internal static class ServerLauncher
             catch { session.Items.Clear(); detail.Text = "載入未完成，已清除舊場次。請確認管理服務與路徑後重新載入。"; throw; }
             var retained = catalog.Selected; session.Items.Clear(); foreach (var choice in catalog.Current.Choices) session.Items.Add(choice);
             session.Enabled = true; if (retained != null) session.SelectedItem = retained;
-            start.Enabled = catalog.CanStart; detail.Text = retained == null ? "請明確選擇要啟動的房間與任務。" : "場次ID：" + retained.Id + "\r\n任務版本ID：" + retained.MissionId;
-            state.Text = session.Items.Count > 0 ? "清單已更新；只保留同一管理實例中仍可啟動的原選取。" : "沒有可啟動的 VR 或 MR 場次，請先在控制台建立。";
+            ShowSelection();
+            state.Text = session.Items.Count > 0 ? "清單已更新；只保留同一管理實例中仍在清單內的原選取。" : "沒有待開的 VR 或 MR 場次，請先在控制台建立。";
         }
         void Begin()
         {

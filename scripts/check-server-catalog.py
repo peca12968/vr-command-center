@@ -51,17 +51,38 @@ def main():
         stream=str(uuid.uuid4());request('/api/sessions/'+linked['id']+'/combat-stream',{'streamId':stream,'origin':'Simulation'},role='GameServer');check(catalog('bound-source')['sessions']==[],'bound actual source is not offered again')
         request('/api/sessions/'+linked['id']+'/commands',{'commandId':str(uuid.uuid4()),'action':'End'});request('/api/sessions/'+linked['id']+'/combat-stream/seal',{'streamId':stream,'finalSequence':0},role='GameServer')
         mr_mission=request('/api/missions',{'name':'MR catalog test','briefing':'Owned catalog fixture','durationSeconds':600,'environment':{'mode':'MR','weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':0,'behavior':'Hold','autoAttack':False},'props':[]})
-        mr=request('/api/sessions',{'missionId':mr_mission['id'],'mode':'Independent','roomIds':[1]});sessions.append(mr['id'])
-        choices=catalog('mr-source')['sessions']
-        check(len(choices)==1 and choices[0]['id']==mr['id'] and choices[0]['experienceMode']=='MR' and ' · MR · ' in choices[0]['display'],
-              'actual Preparing MR session retains its exact ID and label')
-        request('/api/sessions/'+mr['id']+'/commands',{'commandId':str(uuid.uuid4()),'action':'End'})
+        for mode,rooms in [('Independent',[1]),('Linked',[1,2,3,4,5])]:
+            label='mr-'+mode.lower()
+            mr=request('/api/sessions',{'missionId':mr_mission['id'],'mode':mode,'roomIds':rooms});sessions.append(mr['id'])
+            route='/api/sessions/'+mr['id'];choices=catalog(label+'-unlocked')['sessions']
+            check(len(choices)==1 and choices[0]['id']==mr['id'] and choices[0]['experienceMode']=='MR'
+                  and choices[0]['canStart'] is False and choices[0]['missingAlignmentRoomIds']==rooms and '待鎖定校正' in choices[0]['display'],
+                  mode+' retains the exact MR choice and lists all missing locks')
+            with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as udp:udp.bind(('127.0.0.1',0));game_port=udp.getsockname()[1]
+            work=runtime/(label+'-work');config=runtime/(label+'-private.json');ready_report=out/(label+'-ready.json');run_report=out/(label+'-run.json')
+            config.write_text(json.dumps({'role':'Server','managementApiUrl':uri,'gameServerKey':keys['GameServer'],
+                'sessionId':mr['id'],'address':'127.0.0.1','listenAddress':'127.0.0.1','port':game_port}),encoding='utf-8')
+            rejected=subprocess.run([str(exe),'--run',str(config),'--work',str(work),'--seconds','60',
+                '--ready-report',str(ready_report),'--report',str(run_report)],cwd=out,timeout=45)
+            failure=read(run_report)
+            check(rejected.returncode==1 and failure['complete'] is False and failure['childPid'] is None and failure['streamId'] is None
+                  and '尚無有效的校正鎖定' in failure['error'] and not work.exists() and not ready_report.exists() and request(route)==mr,
+                  mode+' direct CLI refuses before child, work, readiness or source changes')
+            markers=[{'room':{'x':x,'z':z},'tracking':{'x':x,'z':z}} for x,z in [(-2,-2),(2,-2),(-2,2)]]
+            pins={f'room{room}':hashlib.sha256(json.dumps(request('/api/room-alignment',{'roomId':room,'markers':markers})).encode()).hexdigest() for room in rooms}
+            locked=request(route+'/commands',{'commandId':str(uuid.uuid4()),'action':'SetRoomAlignment','roomAlignment':pins})['session']
+            after=catalog(label+'-locked')['sessions']
+            check(len(after)==1 and after[0]['id']==mr['id'] and after[0]['missionId']==choices[0]['missionId']
+                  and after[0]['canStart'] is True and after[0]['missingAlignmentRoomIds']==[] and '待鎖定校正' not in after[0]['display']
+                  and all(value not in json.dumps(after) for value in pins.values()) and request(route)==locked,
+                  mode+' refresh exposes the same locked session without returning hashes or altering state')
+            request(route+'/commands',{'commandId':str(uuid.uuid4()),'action':'End'})
         bad=catalog('wrong-file',runtime/'not-an-instance.json',False);check(not bad['complete'],'invalid source cannot create a completed catalog')
         illegal=data/'forbidden-report.json';catalog('inside-data',success=False,report=illegal);check(not illegal.exists(),'catalog output cannot write into instance data')
         catalog('mixed-options',success=False,extra=['--unknown','value']);existing=out/'existing.json';existing.write_text('preserve',encoding='utf-8');catalog('existing-report',success=False,report=existing);check(existing.read_text(encoding='utf-8')=='preserve','existing report never overwritten')
         for file in out.glob('*.json'):
             check(not any(key in file.read_text(encoding='utf-8') for key in keys.values()),'public metadata excludes generated keys: '+file.name)
-        save('evidence.json',{'frameworkChecks':values['checks'],'initial':listing,'afterEnd':remaining,'fiveIndependent':five,'linked':whole,'scope':'Real readonly catalog and compiled production state / parser. Bound / MR are metadata-only fixtures; proof End is a test-only management action, not a production catalog write.'})
+        save('evidence.json',{'frameworkChecks':values['checks'],'initial':listing,'afterEnd':remaining,'fiveIndependent':five,'linked':whole,'scope':'Real readonly catalog, pre-child CLI rejection, and compiled production state / parser. Test fixtures pin and end their own sessions.'})
     finally:
         for sid in sessions:
             try:
