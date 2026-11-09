@@ -1,5 +1,16 @@
 # 開發進度
 
+## 2026-11-10 最近一批全館環境指令逐房確認
+
+控制台 0.31.71 從原命令紀錄還原最近一筆全館天氣、日夜及閃電設定，逐房列出原命令序號與確認、覆寫、結束狀態。有效快照可開啟原場次指定房間的俯視回放。 [環境核對](ENVIRONMENT.md#核對最近一批環境指令)
+
+- 舊 0.31.70 解壓包專項在核對 `latestEnvironment` 時失敗，保留 `console-environment-batch-before-b16d828bf0054be4a2727465fde4f874`。新版解壓包專項通過 88 項，證據 `console-environment-batch-focused-effd3cff25604c028fe90471bb687b6e`。包含僅一房有確認、快照過期、覆寫、替換畫格、房間重用、重新登入及房控權限。
+- Windows 管理包 `artifacts/windows-control-console-0.31.71-environment-batch-win-x64.zip` 為 52,823,437 bytes，SHA-256 `daad337381f86a80dd65889a5405d2ec846d40d0fed9c45f9bb3c07d162fcb43`。核對 172 份來源、520 個執行檔案及 540 筆清單。解壓包通過 106 項管理檢查，證據 `run-be163a4d92bd40b887fb9bfcb8c0e731`。
+- 通過 1,003 項領域、747 項 HTTP、81 項世界串流及 10 項伺服器封裝工具檢查。SQLite 重啟後保留原環境與覆寫狀態，重送舊指令不會蓋掉設定相同但序號較新的批次。
+- 最終解壓包完整回歸通過 104 項 Node 與 689 項 Chromium 檢查，證據 `console-environment-batch-full-482ef6461c9b4ec780d71593cc089a66`。首輪完整回歸因執行命令預先建立應由測試建立的目錄，未開始 Chromium，原 `console-environment-batch-full-9af46d310d6a4b76a7fa18ef257fe9e4/test-output.log` 保留。重跑以獨立日誌檔收集輸出。
+- Windows 原生 `run-916fc4ad016b429f94d2b45c71688450` 通過 483 項。兩模式各有 25 個同機 Windows 模擬席，核對暴風雨夜間和晴朗白天。第 4 房捷徑在獨立場開啟第 125 格、合併場開啟第 181 格，原命令序號 10 與 30，兩格均與完整封存回放相符。共享的驗收流程也通過兩模式的敵軍策略回歸。六場雙封存共 1,837 格回放、50 份原戰績及伺服器確認。C／F 兩側 221 檔雜湊一致，無活躍場次與殘留測試程序。
+- 功能來源 `1ff782c71c97077c26ab2fcfd560a64ddc753829`。GitHub Actions job `129512077150` 因帳務或支出上限未啟動。跨機 25 人、Quest 3、VIVE XR、實體 MR 與廠商硬體仍待現地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42720249695)
+
 ## 2026-11-10 保存版本的 Windows 鍵盤通路驗收
 
 沿用 Windows 0.49.0 與控制台 0.31.70。用第 3 房首席的兩個保存版本對照完整沙包牆與缺口。兩場均從 `(X=-3, Z=-3)` 出生。完整牆按 W 72 次抵達 `Z=-1.6500013`，再按 36 次仍在同一座標。缺口版按 W 120 次通過牆帶及中線，抵達 `Z=3.0000038`。 [複驗操作](LAYOUT.md#複驗保存版本的鍵盤通路)
