@@ -58,6 +58,7 @@ def main():
     p.add_argument('--check-vr-venue-tickets',action='store_true',help='Launch all 25 players in each mode from the shipped console venue ZIP')
     p.add_argument('--check-quest-vr-deploy',action='store_true',help='Run Quest preflight and mapped mock deployment from each original VR venue ZIP')
     p.add_argument('--check-quest-vr-partial-map',action='store_true',help='Use a mixed headset roster and deploy five selected Quest seats from each original VR venue ZIP')
+    p.add_argument('--check-venue-openxr',action='store_true',help='Use one graphical mock OpenXR seat alongside 24 desktop peers per topology')
     p.add_argument('--peer-diagnostics',action='store_true',help='Verify observed UDP peers in Linked and absence in default Independent runs')
     p.add_argument('--field-evidence',action='store_true',help='Verify the management ZIP with the original Linked player and server logs')
     p.add_argument('--venue-field-evidence',action='store_true',help='Verify full sealed admission evidence for both original venue End batches')
@@ -99,8 +100,10 @@ def main():
     if args.mr_venue_bundle_only and args.mixed_venue_bundle_only:p.error('Choose a single venue bundle check')
     if args.openxr_mock_only and (venue_only or not args.player_package):
         p.error('--openxr-mock-only requires a player package and its own native room')
-    if args.openxr_mock_only != bool(args.openxr_mock_pose_dll):
-        p.error('--openxr-mock-only and --openxr-mock-pose-dll must be supplied together')
+    if args.check_venue_openxr and (venue_only or args.openxr_mock_only or not args.check_quest_vr_partial_map or args.check_room_participation):
+        p.error('--check-venue-openxr requires --check-quest-vr-partial-map and its own venue participation check')
+    if (args.openxr_mock_only or args.check_venue_openxr) != bool(args.openxr_mock_pose_dll):
+        p.error('Supply --openxr-mock-pose-dll with --openxr-mock-only or --check-venue-openxr')
     if venue_only:
         if not args.game_address or args.player_package:p.error('The venue bundle check needs --game-address and no player package')
     elif not args.openxr_mock_only and bool(args.player_package)!=bool(args.game_address):p.error('Provide --player-package and --game-address together')
@@ -162,7 +165,7 @@ def main():
         player_manifest=player_package.verify(player_folder)
         if player_manifest['build']['sourceFingerprint']!=manifest['build']['sourceFingerprint']:
             p.error('Player and server packages must share the Unity build source')
-    if args.openxr_mock_only:
+    if args.openxr_mock_only or args.check_venue_openxr:
         unity=ROOT/'clients/unity'
         mock_package_version=read(unity/'Packages/manifest.json')['dependencies']['com.unity.xr.openxr']
         candidates=[path for path in (unity/'Library/PackageCache').glob('com.unity.xr.openxr@*')
@@ -342,7 +345,16 @@ def main():
                 file=directory/name
                 file.write_bytes(content)
                 prepared.append((person,file))
-        return [packaged_player(entry,person,file) for person,file in prepared]
+        launched=[]
+        for person,file in prepared:
+            mock=None
+            if args.check_venue_openxr and (room,person['seat'])==(5,1):
+                tracking_loss=runtime/(entry['label']+'-openxr-loss.request')
+                mock=openxr_environment(entry['label']+'-openxr-runtime.json',tracking_loss)
+                entry['openxrLossMarker']=tracking_loss
+                entry['openxrPlayerId']=person['id']
+            launched.append(packaged_player(entry,person,file,mock=mock))
+        return launched
 
     def room_endpoint_descriptor(preview):
         if not args.check_room_endpoints: return {}
@@ -710,7 +722,13 @@ def main():
                 if kind=='frame' and line.startswith('data: '):
                     frame=json.loads(line[6:]);rows=frame['packet']['frame']['players'];connected={p['id'] for p in rows if p['connected'] and p['rig']['kind']=='Simulated'}
                     packet=frame['packet'];source=datetime.fromisoformat(metadata['header']['captureStartedAtUtc'])+timedelta(milliseconds=packet['elapsedMilliseconds']);age=(datetime.now(timezone.utc)-source).total_seconds()
-                    if connected==set(expected) and (begin is None or packet['frame']['phase']=='Running' and packet['frame']['tick']>0 and not packet['suspended'] and packet['observedSequence']>=begin and -1<=age<1.5):
+                    expected_rigs=set(expected)
+                    rigs_match=connected==expected_rigs
+                    if 'openxrPlayerId' in entry:
+                        tracked=entry['openxrPlayerId']
+                        rigs_match=connected==expected_rigs-{tracked} and {p['id'] for p in rows
+                            if p['connected'] and p['rig']['kind']=='Tracked'}=={tracked}
+                    if rigs_match and (begin is None or packet['frame']['phase']=='Running' and packet['frame']['tick']>0 and not packet['suspended'] and packet['observedSequence']>=begin and -1<=age<1.5):
                         if record:save(entry['label']+('-running.json' if begin is not None else '-live.json'),{'metadata':metadata,'frame':frame,'sourceAgeSeconds':age,'acceptedBeginSequence':begin})
                         return frame
                     return None
@@ -876,6 +894,15 @@ def main():
                     if kind=='complete':break
         check(len(frames)==report['finalWorld']['acceptedSequence'] and [x['packet']['sequence'] for x in frames]==list(range(1,len(frames)+1)) and frames[-1]['packet']['frame']['phase']=='Ended',entry['label']+' full API replay through terminal frame')
         save(entry['label']+'-replay.json',frames)
+        if 'venueOpenxr' in entry:
+            window=entry['venueOpenxr']
+            check(all(frames[packet['sequence']-1]['packet']==packet for packet in window['packets']),
+                  entry['label']+' sealed replay preserves all four OpenXR participation checkpoints')
+            _,lost,held,_=window['packets']
+            expected=set(window['players'])-{entry['openxrPlayerId']}
+            check(all({row['id'] for row in value['packet']['frame']['players'] if row['connected']}==expected
+                      and value['packet']['frame']['phase']=='Running' for value in frames[lost['sequence']-1:held['sequence']]),
+                  entry['label']+' every replay frame of held tracking loss preserves the other admissions')
         if 'combatWindow' in entry:
             window=entry['combatWindow']
             actual={value['packet']['sequence']:value for value in frames}
@@ -929,20 +956,23 @@ def main():
                     check(not owned['reader'].is_alive(),entry['label']+f' room {room} mock and original gateway are terminal')
             save(entry['label']+'-hardware-feedback.json',entry['hardwareFeedback'])
         rounds.append({'name':entry['label'],'ready':entry['ready'],'report':report,'journal':closed,'replayFrames':len(frames)})
+    def openxr_environment(manifest_name, tracking_loss):
+        fixture_manifest=runtime/manifest_name
+        fixture_manifest.write_text(json.dumps({'file_format_version':'1.0.0','runtime':
+            {'api_version':'1.0','name':'VR Command pose fixture','library_path':str(args.openxr_mock_pose_dll.resolve(strict=True))}}),encoding='utf-8')
+        return {'XR_RUNTIME_JSON':str(fixture_manifest),'VR_COMMAND_OPENXR_MOCK_DLL':str(runtime_file),
+                'VR_COMMAND_OPENXR_TRACKING_LOSS_FILE':str(tracking_loss)}
+
     def check_openxr_mock():
         nonlocal observer,observer_log
         stage('native-openxr-mock')
         label='openxr-mock'
         pose_dll=args.openxr_mock_pose_dll.resolve(strict=True)
-        fixture_manifest=runtime/'openxr-pose-runtime.json'
-        fixture_manifest.write_text(json.dumps({'file_format_version':'1.0.0','runtime':
-            {'api_version':'1.0','name':'VR Command pose fixture','library_path':str(pose_dll)}}),encoding='utf-8')
         tracking_loss=runtime/'openxr-tracking-loss.request'
         trigger_command=runtime/'openxr-trigger.request'
         trigger_ack=runtime/'openxr-trigger-ack.txt'
         trigger_command.write_text('0',encoding='ascii')
-        mock_environment={'XR_RUNTIME_JSON':str(fixture_manifest),'VR_COMMAND_OPENXR_MOCK_DLL':str(runtime_file),
-                          'VR_COMMAND_OPENXR_TRACKING_LOSS_FILE':str(tracking_loss),
+        mock_environment={**openxr_environment('openxr-pose-runtime.json',tracking_loss),
                           'VR_COMMAND_OPENXR_TRIGGER_COMMAND':str(trigger_command),'VR_COMMAND_OPENXR_TRIGGER_ACK':str(trigger_ack)}
         entry=launch(create([1],label),label)
         sid=entry['sessionId']
@@ -1270,6 +1300,84 @@ def main():
               'interrupted run gives neither a final operator CSV nor a player final result')
         save('parent-exit-saved-replay.json', {'world': saved, 'combatAcceptedSequence': state['combatStream']['acceptedSequence'],
              'terminalEvent': messages[-1][0], 'frames': frames, 'finalCsvAvailable': False, 'playerFinalReceived': False})
+    def verify_quest_tracking(linked, target_status='not-tracked', checkpoint=None):
+        mode='linked' if linked else 'independent'
+        bundle=runtime/(mode+'-vr-venue-connections.zip')
+        full_venue=['-AllHeadsets'] if args.check_quest_vr_partial_map else []
+        tracking=subprocess.run([shutil.which('pwsh'),'-NoProfile','-File',str(ROOT/'scripts/deploy-quest.ps1'),
+            '-VenueBundle',str(bundle),'-ManagementApi',uri,'-VerifyTrackedSeats','-AdbPath',str(runtime/'absent-adb.exe'),
+            *full_venue],env={**os.environ,'VR_COMMAND_MASTER_KEY':keys['Master']},timeout=25,encoding='utf-8',capture_output=True)
+        report=json.loads(tracking.stdout)
+        suffix='-'+checkpoint if checkpoint else ''
+        save(mode+'-vr-venue-tracked-readiness'+suffix+'.json',report)
+        check(tracking.returncode==1 and report['complete'] is False and report['managementVerified'] is True
+              and [(row['roomId'],row['seat'],row['status'],row['sourceState']) for row in report['seats']]==
+                  [(room,seat,target_status if (room,seat)==(5,2) else 'not-tracked','Fresh')
+                   for room in range(1,6) for seat in range(1,6)],
+              mode+' original venue ZIP reports room 5 seat 2 '+target_status+' and the remaining seats not-tracked')
+        if full_venue:
+            check(report['scope']=='venue' and [(row['roomId'],row['seat'],row['registeredHeadset']) for row in report['seats']]==
+                  [(room,seat,'ViveXr' if seat in (2,4) else 'Quest3') for room in range(1,6) for seat in range(1,6)],
+                  mode+' venue tracking includes all original Quest and VIVE admissions')
+
+    def verify_venue_openxr(entries,round_clients,linked):
+        mode='linked' if linked else 'independent'
+        entry=next(item for item in entries if 'openxrPlayerId' in item)
+        tracked=entry['openxrPlayerId'];sid=entry['sessionId'];session='/api/sessions/'+sid
+        original=next(c for c in round_clients if c['player']['id']==tracked)
+        scoped={c['player']['id']:c['player'] for c in round_clients if c['sessionId']==sid}
+        sessions_by_room={c['player']['roomId']:c['sessionId'] for c in round_clients}
+        begin=read(out/(entry['label']+'-running.json'))['acceptedBeginSequence']
+        config_hash=package.digest(original['configPath'])
+
+        def checkpoint(available, minimum_tick):
+            rooms=request('/api/rooms/readiness')['rooms']
+            if {row['roomId']:row['sessionId'] for row in rooms}!=sessions_by_room or len(rooms)!=5:
+                return None
+            if any(row['sourceState']!='Fresh' or row['registered']!=5 or row['simulatedReady']!=(4 if row['roomId']==5 else 5)
+                   or row['trackedReady']!=int(row['roomId']==5 and available)
+                   or row['vrParticipation']['awaitingPose']!=([2] if row['roomId']==5 and not available else []) for row in rooms):
+                return None
+            report=request(session+'/readiness')
+            if report['sourceState']!='Fresh' or report['observedSequence']!=begin or report['sessionSequence']!=begin:
+                return None
+            expected={(pid,row['admissionId'],row['roomId'],row['seat'],pid!=tracked or available) for pid,row in scoped.items()}
+            if {(row['playerId'],row['admissionId'],row['roomId'],row['seat'],row['canParticipate']) for row in report['players']}!=expected:
+                return None
+            packet=request(session+'/world/frames/'+str(report['worldSequence']))['packet']
+            frame=packet['frame']
+            rigs={row['id']:row['rig']['kind'] for row in frame['players'] if row['connected']}
+            expected_rigs={pid:'Tracked' if pid==tracked else 'Simulated' for pid in scoped if pid!=tracked or available}
+            if packet['observedSequence']==begin and frame['phase']=='Running' and frame['tick']>=minimum_tick and rigs==expected_rigs:
+                return {'packet':packet,'rooms':rooms,'readiness':report}
+            return None
+
+        stage('running-venue-openxr',mode=mode)
+        ready=wait(lambda:checkpoint(True,1),20,mode+' original OpenXR venue seat')
+        verify_quest_tracking(linked,'tracked-ready','initial')
+        marker=entry['openxrLossMarker']
+        marker.touch(exist_ok=False)
+        try:
+            lost=wait(lambda:checkpoint(False,ready['packet']['frame']['tick']+1),15,mode+' original OpenXR loss')
+            verify_quest_tracking(linked,'awaiting-tracked-pose','lost')
+            held=wait(lambda:checkpoint(False,lost['packet']['frame']['tick']+14),15,mode+' isolated held tracking loss')
+        finally:
+            marker.unlink()
+        recovered=wait(lambda:checkpoint(True,held['packet']['frame']['tick']+1),15,mode+' original OpenXR recovery')
+        verify_quest_tracking(linked,'tracked-ready','recovered')
+        packets=[value['packet'] for value in (ready,lost,held,recovered)]
+        first,last=(next(row for row in packet['frame']['players'] if row['id']==tracked) for packet in (packets[0],packets[-1]))
+        x_offsets=[last['head']['x']-first['head']['x'],*[last['rig'][hand]['x']-first['rig'][hand]['x'] for hand in ('left','right')]]
+        log=original['log'].read_text(encoding='utf-8',errors='replace')
+        check(all(abs(offset-.2)<.001 for offset in x_offsets) and package.digest(original['configPath'])==config_hash
+              and log.count('VR_CLIENT_CONNECTED id=')==1 and 'VR_CLIENT_DISCONNECTED' not in log
+              and 'VR_OPENXR_STARTUP status=active' in log and 'Runtime Name: Unity Mock Runtime' in log
+              and original['witness'].kernel.WaitForSingleObject(original['witness'].handle,0)==258,
+              mode+' only room 5 seat 2 loses tracked readiness and recovers new poses on the original OpenXR connection')
+        entry['venueOpenxr']={'packets':packets,'players':list(scoped)}
+        save(mode+'-venue-openxr-checkpoints.json',{'ready':ready,'lost':lost,'held':held,'recovered':recovered,
+            'mockRuntimeSha256':package.digest(runtime_file),'fixtureSha256':package.digest(args.openxr_mock_pose_dll)})
+
     def verify_room_readiness(round_clients,linked):
         expected={client['player']['roomId']:client['sessionId'] for client in round_clients}
         def all_ready():
@@ -1278,9 +1386,10 @@ def main():
             if summary['version']!=1 or len(rows)!=5 or {row['roomId']:row['sessionId'] for row in rows}!=expected:
                 return None
             return summary if all(row['sourceState']=='Fresh' and row['registered']==5 and
-                row['simulatedReady']==5 and row['trackedReady']==0 for row in rows) else None
+                row['trackedReady']==int(args.check_venue_openxr and row['roomId']==5)
+                and row['simulatedReady']==5-row['trackedReady'] for row in rows) else None
         save(('linked' if linked else 'independent')+'-room-readiness.json',wait(all_ready,20,'five fresh room aggregates'))
-        check(True,('Linked' if linked else 'Independent')+' has five real 5/5 synthetic room counts')
+        check(True,('Linked' if linked else 'Independent')+' has five fresh 5/5 room counts with expected rig types')
         room=request('/api/rooms/readiness',role='Room1')
         check(room['version']==1 and len(room['rooms'])==1 and room['rooms'][0]['roomId']==1
             and room['rooms'][0]['sessionId']==expected[1],'room operator only receives its own active room aggregate')
@@ -1837,7 +1946,7 @@ def main():
                 if args.check_venue_begin:
                     sequence=applied[sid]
                 else:
-                    wait(lambda:observe(entry,ids),60,entry['label']+' simulated bodies')
+                    wait(lambda:observe(entry,ids),60,entry['label']+' original player rigs')
                     sequence=command(sid,'Begin')['session']['sequence']
                 running=wait(lambda:observe(entry,ids,sequence),20,entry['label']+' original Begin applied')
                 if args.check_independent_room_missions and not linked:
@@ -1892,24 +2001,8 @@ def main():
                 check(len({c['nativePid'] for c in round_clients})==25 and all(
                     c['process'].poll() is None and c['witness'].kernel.WaitForSingleObject(c['witness'].handle,0)==258
                     for c in round_clients),'25 simultaneous owned native players '+('Linked' if linked else 'Independent'))
-            if args.check_quest_vr_deploy or args.check_quest_vr_partial_map:
-                mode = 'linked' if linked else 'independent'
-                bundle = runtime / (mode+'-vr-venue-connections.zip')
-                full_venue = ['-AllHeadsets'] if args.check_quest_vr_partial_map else []
-                tracking = subprocess.run([shutil.which('pwsh'), '-NoProfile', '-File', str(ROOT/'scripts/deploy-quest.ps1'),
-                    '-VenueBundle', str(bundle), '-ManagementApi', uri, '-VerifyTrackedSeats', '-AdbPath', str(runtime/'absent-adb.exe'),
-                    *full_venue],
-                    env={**os.environ, 'VR_COMMAND_MASTER_KEY': keys['Master']}, timeout=25, encoding='utf-8', capture_output=True)
-                tracked = json.loads(tracking.stdout)
-                save(mode+'-vr-venue-tracked-readiness.json', tracked)
-                check(tracking.returncode == 1 and tracked['complete'] is False and tracked['managementVerified'] is True
-                      and [(row['roomId'], row['seat'], row['status'], row['sourceState']) for row in tracked['seats']] ==
-                          [(room, seat, 'not-tracked', 'Fresh') for room in range(1, 6) for seat in range(1, 6)],
-                      mode + ' tracking check rejects all 25 connected native Simulation rigs')
-                if full_venue:
-                    check(tracked['scope'] == 'venue' and [(row['roomId'], row['seat'], row['registeredHeadset']) for row in tracked['seats']] ==
-                          [(room, seat, 'ViveXr' if seat in (2, 4) else 'Quest3') for room in range(1, 6) for seat in range(1, 6)],
-                          mode + ' venue tracking includes all original Quest and VIVE admissions')
+            if args.check_venue_openxr:verify_venue_openxr(entries,round_clients,linked)
+            elif args.check_quest_vr_deploy or args.check_quest_vr_partial_map:verify_quest_tracking(linked)
             if args.check_room_readiness:verify_room_readiness(round_clients,linked)
             if args.check_room_observer and linked:
                 node = shutil.which('node')
@@ -2109,6 +2202,7 @@ def main():
             check(len(room_rows) == 5 and all(row['sessionId'] is None and 'endpoint' not in row for row in room_rows),
                   'ended native sources leave no endpoint in the five current room rows')
         save('evidence.json',{'rounds':rounds,'scope':('One packaged graphical Unity mock OpenXR client and one desktop peer on the same host.' if args.openxr_mock_only else
+            'One graphical Unity mock OpenXR client and 24 desktop peers in each same-host venue topology.' if args.check_venue_openxr else
             'Five Windows VR/MR Preparing endpoints and 25 signed files from the console mixed ZIP.' if args.mixed_venue_bundle_only else
             'Real Windows MR Preparing endpoints and 25 signed files per topology.' if args.mr_venue_bundle_only else
             'Three portable packages, five Independent rooms then Linked, 25 simultaneous same-PC Simulation clients per topology.'
@@ -2130,6 +2224,7 @@ def main():
             'vrVenueTickets':args.check_vr_venue_tickets,
             'questVrDeploy':args.check_quest_vr_deploy,
             'questVrPartialMap':args.check_quest_vr_partial_map,
+            'venueOpenxr':args.check_venue_openxr,
             'venueEnvironment':args.check_venue_environment,
             'venueEnemies':args.check_venue_enemies,
             'hardwareFeedback':args.check_hardware_feedback or openxr_hardware,
@@ -2180,6 +2275,7 @@ def main():
     save('checks.json',{'complete':True,'checks':len(checks),'findings':checks,'runtimeDirectory':str(runtime),
         'packageDirectory':str(folder),'playerPackageDirectory':str(player_folder) if player_folder else None,
         'scope':('Same-machine tracked rig from Unity mock OpenXR and a simulated desktop peer, no physical headset.' if args.openxr_mock_only else
+                 'Five Independent rooms then Linked, one Unity mock OpenXR rig and 24 desktop peers per topology, same host.' if args.check_venue_openxr else
                  'Same-machine VR/MR servers in Preparing and mock ADB with no headset client.' if args.mixed_venue_bundle_only else
                  'Same-machine native MR servers in Preparing with no headset client.' if args.mr_venue_bundle_only else
                  'Same-machine VR simulation and a separate MR Preparing admission and seal check.' if args.check_managed_mr else 'Same-machine Simulation only.')
