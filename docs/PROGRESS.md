@@ -1,5 +1,14 @@
 # 開發進度
 
+## 2026-11-10 核對 25 席同時追蹤的封存區間
+
+場館驗收清單可同時設定 `requireTrackedRoster: true` 及 `minimumConcurrentMilliseconds`。逐格核對 25 席同時連線並具有 `Tracked` 姿態，再用原 Quest logcat 或 Windows OpenXR 日誌核對各席來源。桌面模擬或已識別的 Unity Mock Runtime 會回報原房號、席位與來源類別。 [操作方式](EXTERNAL_CLIENTS.md#核對-25-席同時連線的區間)
+
+- 通過 54 項場館、14 項世界日誌及 10 項伺服器封裝測試。測試錄製測得合併 7,700 毫秒、獨立共同 7,100 毫秒，並覆蓋追蹤中斷、姿態和日誌不符、桌面、Mock 與門檻設定。舊工具忽略新條件的反例保存在 `venue-tracked-window-before-b2387d932ccb479dad7aa363dc75c10c.log`。首輪新測試為全 Quest 場景附上了空的 `windowsPlayers`，因清單格式被拒絕。保留 `venue-tracked-window-tests-c99ce72fe10e4850be33c82c05c1c960.log`，移除測試清單的空欄位後，全套 `venue-tracked-window-tests-1ca96d83177c471982cb519d4dcfc7bc.log` 通過。
+- 重讀 60 秒桌面場 `run-22d2c8aaf04544b6af4937d64d4573bb` 與一席 Unity Mock Runtime 場 `run-9f36fa0fb07a4ea0b966dac7d0e7ebab`。兩組各含獨立及合併原錄製，普通核對與原保存摘要相符，開啟追蹤條件後四組均拒絕。Mock 兩組均定位第 5 房第 2 席。原輸入與摘要前後雜湊一致。證據 `venue-tracked-window-original-readback-a05bf8319c2147f895971ec6ad4ca106.json`。
+- Windows 原生 `run-e71847372f7f48db9d0ebfd90a7bc81f` 通過 445 項。兩種模式各 25 個同機 Windows 模擬席，普通 12 秒門檻皆通過，獨立最長 18,322 毫秒、合併最長 18,401 毫秒，均從完整 API 回放另行重算起訖與時長。改用追蹤條件兩組皆拒絕。六場雙封存共 1,842 格回放與 50 份原戰績及伺服器確認。無活躍場次及殘留測試程序，C／F 221 檔雜湊一致。原生輸出 `venue-tracked-window-native-6553a2.log`。
+- 功能來源 `470393b8d7f4e16529008cbbd95abdb3a7c688da`。GitHub Actions job `129521567327` 因帳務或支出上限未啟動。兩種模式的全追蹤正向測試使用測試錄製，現地仍須驗收 Quest 3、VIVE XR、跨機 25 人、實體 MR 及廠商硬體。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42723050881)
+
 ## 2026-11-10 Quest 3 啟動前核對部署檔案
 
 Quest 單席及整批部署會核對裝置上暫存與啟用後的連線檔。MR 另外核對原校正檔及其鎖定雜湊。只有完成核對才送出啟動指令，整批回報逐席區分 `filesVerified` 及 `file-verification-failed`。 [部署操作](QUEST3.md#啟動前核對裝置檔案)
