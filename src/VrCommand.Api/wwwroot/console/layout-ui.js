@@ -65,7 +65,21 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
   let generation = 0, draftSerial = 0, launchSerial = 0, draftTimer, launchTimer;
   let draftKey = '', draftReport = null, launchKey = '', launchReport = null;
   let trial = null;
-  const cache = new Map();
+  const cache = new Map(), savedRequests = new Map();
+  function inspectSaved(selected) {
+    const key = selected.id + '/' + selected.mode;
+    if (cache.has(key)) return Promise.resolve(cache.get(key));
+    if (savedRequests.has(key)) return savedRequests.get(key);
+    const request = api(`/missions/${selected.id}/layout?mode=${encodeURIComponent(selected.mode)}`)
+      .then(value => {
+        const report = accept(value, selected.mode, selected.experienceMode);
+        if (savedRequests.get(key) === request) cache.set(key, report);
+        return report;
+      }).finally(() => { if (savedRequests.get(key) === request) savedRequests.delete(key); });
+    savedRequests.set(key, request);
+    return request;
+  }
+  function invalidateSaved(id, mode) { const key = id + '/' + mode; cache.delete(key); savedRequests.delete(key); }
   function clearMarks() { for (const prop of $('prop-layer').children) delete prop.dataset.layoutInvalid; }
   function drawRoutes(id, routes) {
     $(id).replaceChildren(...routes.map(route => svg('polyline', { points: route.path.map(point => `${point.x},${-point.z}`).join(' ') })));
@@ -166,7 +180,7 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
   }
   function reset() {
     generation++; draftSerial++; launchSerial++; clearTimeout(draftTimer); clearTimeout(launchTimer);
-    draftKey = launchKey = ''; draftReport = launchReport = trial = null; cache.clear(); clearMarks(); $('layout-spawns').replaceChildren();
+    draftKey = launchKey = ''; draftReport = launchReport = trial = null; cache.clear(); savedRequests.clear(); clearMarks(); $('layout-spawns').replaceChildren();
     $('launch-layout-map-details').open = false;
     paint('draft', null, '修改配置後自動檢查。草稿仍可保存，開場前須修正問題。');
     paint('launch', null, '選取保存的任務版本後檢查場地。');
@@ -200,10 +214,10 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
     paint('launch', null, '檢查選取版本的場地中…'); changed();
     launchTimer = setTimeout(async () => {
       try {
-        const report = accept(await api(`/missions/${selected.id}/layout?mode=${encodeURIComponent(selected.mode)}`), selected.mode, selected.experienceMode);
+        const report = await inspectSaved(selected);
         const now = selection();
         if (identity !== epoch() || token !== generation || serial !== launchSerial || now.id + '/' + now.mode !== key) return;
-        cache.set(key, report); launchReport = report; paint('launch', report); changed();
+        launchReport = report; paint('launch', report); changed();
       } catch {
         if (identity !== epoch() || token !== generation || serial !== launchSerial) return;
         launchKey = ''; launchReport = null; paint('launch', null, '場地檢查未完成。請確認管理服務版本，重新整理後再試。'); changed();
@@ -218,12 +232,16 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
     const key = id + '/' + mode, current = selection();
     if (current.id + '/' + current.mode !== key) return;
     try { accept(report, mode, current.experienceMode); } catch { launchKey = ''; launchReport = null; paint('launch', null, '場地檢查版本已變更，請更新控制台後再開場。'); changed(); return; }
-    cache.set(key, report);
+    savedRequests.delete(key); cache.set(key, report);
     launchSerial++; clearTimeout(launchTimer); launchKey = key; launchReport = report; paint('launch', report); changed();
   }
   function recheckDraft() { draftKey = ''; scheduleDraft(); }
-  function recheckLaunch() { const current = selection(); cache.delete(current.id + '/' + current.mode); launchKey = ''; scheduleLaunch(); }
+  function recheckLaunch(invalidate = true) {
+    const current = selection();
+    if (invalidate) invalidateSaved(current.id, current.mode);
+    launchKey = ''; scheduleLaunch();
+  }
   $('layout-try-removal').addEventListener('click', tryRemoval);
   $('layout-clear-trial').addEventListener('click', clearTrial);
-  reset(); return { reset, scheduleDraft, scheduleLaunch, canLaunch, rejected, recheckDraft, recheckLaunch, clearTrial };
+  reset(); return { reset, scheduleDraft, scheduleLaunch, canLaunch, rejected, recheckDraft, recheckLaunch, clearTrial, inspectSaved, invalidateSaved };
 }

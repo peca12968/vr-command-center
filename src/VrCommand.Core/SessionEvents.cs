@@ -6,7 +6,8 @@ namespace VrCommand.Core;
 
 public enum SessionEventKind { Created, PlayerJoined, PlayerLeft, ControlApplied, CombatRecorded, CombatStreamOpened, StreamCombatRecorded, CombatStreamSealed }
 public record SessionCreated(SessionMode Mode, int[] RoomIds, Mission Mission,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? IndependentSetId = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? IndependentSetId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? IndependentSetPlanSha256 = null);
 public record PlayerLeft(Guid PlayerId, int? RoomId = null, Guid AdmissionId = default, Guid? ExpectedAdmissionId = null);
 public record VenueTransition(long PhaseSinceSequence, int TargetCount,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? EnvironmentSinceSequence = null,
@@ -102,6 +103,8 @@ internal static class SessionProjection
                 || actor.Role != OperatorRole.Master || created.Mode != SessionMode.Independent
                 || entry.RequestId != (created.RoomIds[0] == 1 ? set : (Guid?)null)))
                 throw new InvalidDataException("Invalid five-room creation receipt.");
+            if (created.IndependentSetPlanSha256 is not null && (created.IndependentSetId is null || created.RoomIds[0] != 1))
+                throw new InvalidDataException("A five-room plan digest belongs to the first room's creation receipt.");
             return new(entry.SessionId, created.Mode, created.RoomIds, created.Mission,
                 entry.RecordedAtUtc, null, null, SessionState.Preparing, [],
                 created.Mission.Definition.Environment, created.Mission.Definition.Enemies, entry.Sequence);

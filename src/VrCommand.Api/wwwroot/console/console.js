@@ -1,6 +1,7 @@
 import { mountWorld } from './world-ui.js';
 import { mountReplay } from './replay-ui.js';
 import { drawLayoutProps, mountLayout } from './layout-ui.js';
+import { mountIndependentPlan } from './independent-plan-ui.js';
 import { mountAlignment } from './alignment-ui.js';
 import { mountAlignmentPins } from './alignment-pins-ui.js';
 import { mountMrDeployment } from './mr-deployment-ui.js';
@@ -51,6 +52,13 @@ const placement = mountLayout({ api, epoch: () => state.epoch, active: () => !!s
     return { id: revision?.mission.id ?? '', mode: launchLayoutMode(), experienceMode: definition?.environment.mode, props: definition?.props ?? [] };
   }, changed: applyPermissions,
   selectProp: index => { if (!state.props[index]) return; finishPropGesture(); state.prop = index; renderProps(); $('prop-select').focus(); } });
+const roomPlan = mountIndependentPlan({
+  available: () => master() && $('launch-mode').value === 'IndependentSet',
+  catalog: () => state.catalog, pinned: () => state.launchPinned, common: commonLaunchRevision,
+  inspect: revision => placement.inspectSaved({ id: revision.mission.id, mode: 'Independent', experienceMode: revision.mission.definition.environment.mode }),
+  invalidate: id => placement.invalidateSaved(id, 'Independent'),
+  changed: () => { placement.scheduleLaunch(); applyPermissions(); }
+});
 let timer;
 let selectionEpoch = 0, venueClosureEpoch = 0;
 
@@ -112,7 +120,8 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
         else if (code === 'venue-begin-not-ready' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 的名冊或遊戲快照尚未就緒，本批場次維持準備中。`;
         else message = path.startsWith('/missions') ? '任務版本已變更或原請求內容不一致；草稿仍保留，可載入最新版或另存新任務。' : '場次狀態或名額已變更，請重新整理並確認後再操作。';
       }
-      if (layout) message = '場地配置未通過檢查，請修正並保存新版本後再開場。';
+      if (layout) message = Number.isInteger(roomId) ? `房間 ${roomId} 的場地未通過檢查，五場都未建立。請修正並保存新版本。`
+        : '場地配置未通過檢查，請修正並保存新版本後再開場。';
       if (code === 'enemy-capacity-exceeded' && Number.isInteger(maxCount)) message = `此場地最多可設定 ${maxCount} 名敵軍。請調低目標數量後再套用。`;
       const error = new Error(message); error.status = response.status; error.layout = layout; error.code = code; error.roomId = roomId; throw error;
     }
@@ -166,7 +175,7 @@ function logout() {
   state.rooms = []; state.venue = null; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
   venueHistory.reset(); renderVenueClosure(null);
   state.props = []; state.prop = -1; clearPropHistory();
-  placement.reset();
+  roomPlan.reset(); placement.reset();
   clearInterval(timer);
   $('workspace').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true;
   $('identity').textContent = '尚未登入'; $('login-key').value = '';
@@ -307,18 +316,23 @@ async function selectSession(id) {
   if (selection !== selectionEpoch || epoch !== state.epoch) return;
   try { await refresh(); } catch (error) { showRefreshError(error); }
 }
-function launchPlan() {
-  const missionId = $('launch-mission').value, mode = $('launch-mode').value;
-  const revision = state.catalog.find(row => row.mission.id === missionId)
+function commonLaunchRevision() {
+  const missionId = $('launch-mission').value;
+  return state.catalog.find(row => row.mission.id === missionId)
     ?? (state.launchPinned?.mission.id === missionId ? state.launchPinned : null);
+}
+function launchPlan() {
+  const mode = $('launch-mode').value, mixed = roomPlan.enabled();
+  const preview = mixed ? roomPlan.preview() : null;
+  const revision = mixed ? preview.revision : commonLaunchRevision();
   const roomIds = mode === 'Independent' ? [Number($('launch-room').value)] : [1, 2, 3, 4, 5];
   const rooms = roomIds.map(id => state.rooms.find(room => room.id === id && ownsRoom(id)));
   const authorized = master() || (mode === 'Independent' && state.actor?.role === 'RoomController');
-  return { revision, rooms, available: authorized && rooms.every(room => room && !room.sessionId),
-    body: { missionId, mode, roomIds } };
+  return { revision, rooms, mixed, previewRoom: preview?.roomId, available: authorized && rooms.every(room => room && !room.sessionId),
+    body: { missionId: revision?.mission.id ?? '', mode, roomIds } };
 }
 function renderLaunchPreview(plan) {
-  const { revision, rooms, body } = plan, preview = $('launch-preview');
+  const { revision, rooms, mixed, previewRoom, body } = plan, preview = $('launch-preview');
   preview.hidden = !revision;
   if (preview.dataset.missionId !== body.missionId) $('launch-preview-briefing').open = false;
   if (!revision) {
@@ -331,11 +345,12 @@ function renderLaunchPreview(plan) {
   const { name, briefing, durationSeconds, environment: env, enemies: enemy, props } = revision.mission.definition;
   const historical = state.catalog.some(row => row.seriesId === revision.seriesId && row.number > revision.number);
   $('launch-preview-version').textContent = `${name} · 第 ${revision.number} 版${historical ? '（歷史）' : ''}`;
-  $('launch-preview-rooms').textContent = rooms.every(Boolean)
-    ? rooms.map(room => `房間 ${room.id}${room.sessionId ? '（使用中）' : ''}`).join('、') : '尚無可用的房間資訊';
+  const shownRooms = mixed ? rooms.filter(room => room?.id === previewRoom) : rooms;
+  $('launch-preview-rooms').textContent = shownRooms.length && shownRooms.every(Boolean)
+    ? shownRooms.map(room => `房間 ${room.id}${room.sessionId ? '（使用中）' : ''}`).join('、') : '尚無可用的房間資訊';
   $('launch-preview-duration').textContent = `${durationSeconds} 秒`;
   $('launch-preview-environment').textContent = `${env.mode} · ${weatherNames[env.weather]} · ${env.timeOfDay === 'Night' ? '夜晚' : '白天'} · ${env.lightning ? '閃電開啟' : '閃電關閉'}`;
-  $('launch-preview-enemies').textContent = `${body.mode === 'IndependentSet' ? '各場' : '全場'} ${enemy.count} 名 · ${behaviorNames[enemy.behavior]} · ${enemy.autoAttack ? '自動攻擊開啟' : '自動攻擊關閉'}`;
+  $('launch-preview-enemies').textContent = `${mixed ? '本房' : body.mode === 'IndependentSet' ? '各場' : '全場'} ${enemy.count} 名 · ${behaviorNames[enemy.behavior]} · ${enemy.autoAttack ? '自動攻擊開啟' : '自動攻擊關閉'}`;
   const sandbags = props.filter(prop => prop.assetId === 'sandbag').length;
   const barrels = props.filter(prop => prop.assetId === 'barrel').length;
   $('launch-preview-props').textContent = `每房 ${props.length} 件 · 沙包 ${sandbags} · 油桶 ${barrels}`;
@@ -347,11 +362,12 @@ function applyPermissions() {
   applyVenuePermissions();
   $('create-fields').disabled = locked || state.actor.role === 'GameServer';
   $('launch-room').disabled = $('launch-mode').value !== 'Independent';
+  roomPlan.render();
   const plan = launchPlan();
   renderLaunchPreview(plan);
   const create = $('create-session-form').querySelector('button');
   create.textContent = plan.body.mode === 'IndependentSet' ? '建立五個準備場次' : '建立準備場次';
-  create.disabled = locked || !plan.revision || !plan.available || !placement.canLaunch();
+  create.disabled = locked || !plan.revision || !plan.available || !placement.canLaunch() || (plan.mixed && !roomPlan.ready());
   $('mission-fields').disabled = locked || !master();
   renderPropHistory();
   $('load-mission').disabled = locked || !state.missions.length; $('new-mission').disabled = locked || !master();
@@ -577,12 +593,14 @@ function loadEnemies() { if (state.session) { setEnemies('live', state.session.e
 function loadClock() { if (state.session) { $('clock-auto-end').checked = state.session.missionClock?.autoEnd === true; state.clockSequence = state.session.sequence; } }
 async function createSession() {
   if (state.pending) return;
-  if (!placement.canLaunch()) { placement.scheduleLaunch(); notify('請先完成保存版本的場地檢查，再建立新場次。', true); return; }
   const plan = launchPlan();
+  if (plan.mixed && !roomPlan.ready()) { notify('請先選取五房各自的保存版本並完成場地檢查。', true); return; }
+  if (!placement.canLaunch()) { placement.scheduleLaunch(); notify('請先完成保存版本的場地檢查，再建立新場次。', true); return; }
   if (!plan.revision || !plan.available) { notify('請選取已保存的任務及空閒房間。', true); return; }
   const independentSet = plan.body.mode === 'IndependentSet';
   state.pending = { kind: independentSet ? 'create-set' : 'create', path: independentSet ? '/sessions/independent-set' : '/sessions',
-    method: 'POST', requestId: uuid(), body: independentSet ? { missionId: plan.body.missionId } : plan.body };
+    method: 'POST', requestId: uuid(), body: plan.mixed ? { rooms: roomPlan.assignments() }
+      : independentSet ? { missionId: plan.body.missionId } : plan.body };
   await sendPending();
 }
 async function command(action, extra = {}, expectedSequence = state.session.sequence) {
@@ -615,7 +633,7 @@ async function sendPending() {
       const sessions = response?.sessions;
       if (!Array.isArray(sessions) || sessions.length !== 5 || new Set(sessions.map(session => session?.id)).size !== 5
           || sessions.some((session, index) => !session?.id || session.mode !== 'Independent' || session.roomIds?.length !== 1
-            || session.roomIds[0] !== index + 1 || session.mission?.id !== pending.body.missionId))
+            || session.roomIds[0] !== index + 1 || session.mission?.id !== (pending.body.rooms?.[index]?.missionId ?? pending.body.missionId)))
         throw new Error('Incomplete five-room preparation receipt');
       $('include-ended').checked = sessions.some(session => session.state === 'Ended');
       resetSelection((sessions.find(session => session.state !== 'Ended') ?? sessions[0]).id);
@@ -641,7 +659,10 @@ async function sendPending() {
       : { create: '場次建立結果已確認。請核對目前狀態，再加入玩家及開始任務。', 'create-set': '五個獨立場次已確認。請由各房核對名冊及準備狀態。', join: '玩家加入操作已確認，請核對目前名冊；尚不代表頭盔在線。', leave: '玩家移出操作已確認，請核對目前名冊。', command: '控制命令已確認。', 'venue-phase': '全館管理命令已確認。可從各房快照核對遊戲端套用狀態。' }[pending.kind]);
   } catch (error) {
     if (pending.kind === 'create' && error.layout) placement.rejected(pending.body.missionId, pending.body.mode, error.layout);
-    if (pending.kind === 'create-set' && error.layout) placement.rejected(pending.body.missionId, 'Independent', error.layout);
+    if (pending.kind === 'create-set' && error.layout) {
+      const id = pending.body.rooms ? roomPlan.reject(error.roomId) : pending.body.missionId;
+      if (id) placement.rejected(id, 'Independent', error.layout);
+    }
     if (state.pending === pending && !pending.accepted && error.status >= 400 && error.status < 500) {
       state.pending = null;
       if (pending.kind === 'venue-phase') state.venue = null;
@@ -919,7 +940,10 @@ $('save-revision').addEventListener('click', () => { if ($('mission-form').repor
 $('launch-version').addEventListener('click', () => {
   if (!state.draftBase || state.pending || state.busy) return;
   state.launchPinned = state.draftBase; missionOptions(state.draftBase.mission.id); tab('operations');
-  notify(`已選取保存的第 ${state.draftBase.number} 版開場；未儲存的草稿修改不會套用。`);
+  const room = roomPlan.enabled() ? roomPlan.preview().roomId : null;
+  if (room) roomPlan.setRevision(state.draftBase);
+  notify(room ? `已為房間 ${room} 選取保存的第 ${state.draftBase.number} 版；未儲存的草稿修改不會套用。`
+    : `已選取保存的第 ${state.draftBase.number} 版開場；未儲存的草稿修改不會套用。`);
 });
 $('new-mission').addEventListener('click', () => { if (confirm('清除目前未儲存的草稿並建立新任務？')) resetDraft(); });
 $('add-sandbag').addEventListener('click', () => addProp('sandbag'));
@@ -931,6 +955,10 @@ for (const type of ['input', 'change']) $('mission-form').addEventListener(type,
 });
 $('layout-session-mode').addEventListener('change', () => placement.scheduleDraft());
 $('layout-recheck-draft').addEventListener('click', () => placement.recheckDraft());
-$('layout-recheck-launch').addEventListener('click', () => placement.recheckLaunch());
+$('layout-recheck-launch').addEventListener('click', () => {
+  const mixed = roomPlan.enabled();
+  if (mixed) roomPlan.recheck();
+  placement.recheckLaunch(!mixed);
+});
 for (const name of ['operations', 'missions', 'replay', 'world']) $('tab-' + name).addEventListener('click', () => tab(name));
 window.addEventListener('beforeunload', event => { if (state.pending) { event.preventDefault(); event.returnValue = ''; } });

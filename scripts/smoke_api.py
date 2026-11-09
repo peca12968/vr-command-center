@@ -136,7 +136,7 @@ def check_venue_deployment(mission_id):
     require({s["status"] for s in request("POST", route, bundle)["seats"]} == {"session-unavailable"}, "Ended venues fail verification even with formerly valid signed files")
 
 
-def check_independent_set(mission_id, other_mission_id):
+def check_independent_set(mission_id, other_mission_id, invalid_mission_id):
     path = "/api/sessions/independent-set"
     body = {"missionId": mission_id}
     request("POST", path, body, 400)
@@ -169,6 +169,31 @@ def check_independent_set(mission_id, other_mission_id):
             "An archived set receipt returns all original IDs while a replacement room stays reserved")
     for sid in [replacement["id"], *ids[1:]]:
         end(sid)
+    assignments = [{"roomId": room, "missionId": mission_id if room % 2 else other_mission_id} for room in range(1, 6)]
+    distinct = {"rooms": assignments}
+    mixed_key = str(uuid.uuid4())
+    for invalid in [{"rooms": assignments[:-1]}, {"rooms": [*assignments[:-1], assignments[0]]},
+                    {"rooms": [None, *assignments[1:]]}, {"missionId": mission_id, **distinct}]:
+        request("POST", path, invalid, 400, request_id=mixed_key)
+    request("POST", path, {"rooms": [*assignments[:-1], {"roomId": 5, "missionId": str(uuid.uuid4())}]}, 404, request_id=mixed_key)
+    request("POST", path, distinct, 403, identity="Room1", request_id=mixed_key)
+    invalid_room = [*assignments[:3], {"roomId": 4, "missionId": invalid_mission_id}, assignments[4]]
+    refusal = request("POST", path, {"rooms": invalid_room}, 400, request_id=mixed_key)
+    require(refusal["roomId"] == 4 and refusal["layout"]["canStart"] is False,
+            "Server-side layout refusal identifies the exact invalid assigned room")
+    require(request("GET", "/api/sessions") == [], "Invalid and unauthorized room assignments reserve no rooms")
+    mixed = request("POST", path, {"rooms": list(reversed(assignments))}, 201, request_id=mixed_key)
+    require([s["roomIds"] for s in mixed["sessions"]] == [[room] for room in range(1, 6)]
+            and [s["mission"]["id"] for s in mixed["sessions"]] == [a["missionId"] for a in assignments]
+            and [s["environment"]["mode"] for s in mixed["sessions"]] == ["MR", "VR", "MR", "VR", "MR"],
+            "Explicit room assignments pin different VR and MR mission versions in canonical room order")
+    repeat = request("POST", path, distinct, request_id=mixed_key)
+    require(repeat["duplicate"] and repeat["sessions"] == mixed["sessions"], "Reordering explicit assignment rows returns the same five sessions")
+    changed = {"rooms": [*assignments[:-1], {"roomId": 5, "missionId": other_mission_id}]}
+    request("POST", path, changed, 409, request_id=mixed_key)
+    require(request("POST", path, distinct, request_id=mixed_key) == repeat, "A conflicting retry leaves the original room assignments intact")
+    for session in mixed["sessions"]:
+        end(session["id"])
 
 
 temporary = tempfile.TemporaryDirectory(prefix="vr-command-http-")
@@ -929,7 +954,7 @@ try:
                     "MR retains the selected mode and accepts environment controls through the same command entry point")
             request("POST", mr_path + "/commands", {"commandId": str(uuid.uuid4()), "action": "End"})
             check_venue_deployment(mr_mission["id"])
-            check_independent_set(mr_mission["id"], compact_mission["id"])
+            check_independent_set(mr_mission["id"], compact_mission["id"], bad_mission["id"])
         except BaseException:
             log.flush()
             diagnostic = (test_directory / "server.log").read_text(encoding="utf-8", errors="replace")

@@ -77,6 +77,7 @@ def main():
     p.add_argument('--check-hardware-feedback',action='store_true',help='Match live room feedback to the native combat reports')
     p.add_argument('--hardware-simulator-package',type=Path,help='Pass native live feedback through this extracted mock gateway package')
     p.add_argument('--prepare-independent-set',action='store_true',help='Prepare the five independent native sessions in one management request')
+    p.add_argument('--check-independent-room-missions',action='store_true',help='Assign a different saved VR mission to every independent room and verify the accepted native world')
     p.add_argument('--check-interrupted-replay', action='store_true', help='Play the saved native prefix after the owned launcher is killed')
     p.add_argument('--check-managed-mr', action='store_true', help='Verify the MR alignment startup gate, desktop rejection and Preparing seal')
     p.add_argument('--mr-venue-bundle-only', action='store_true', help='Verify both MR venue exports from native publishers, without starting desktop players')
@@ -121,6 +122,8 @@ def main():
     if args.check_hardware_feedback and not args.check_room_combat:p.error('--check-hardware-feedback requires --check-room-combat')
     if args.hardware_simulator_package and not args.check_hardware_feedback:p.error('--hardware-simulator-package requires --check-hardware-feedback')
     if args.prepare_independent_set and not args.player_package:p.error('--prepare-independent-set requires the player package')
+    if args.check_independent_room_missions and (not args.prepare_independent_set or args.check_layout_preview or args.check_room_combat):
+        p.error('--check-independent-room-missions requires --prepare-independent-set and its own mission fixtures')
     address='127.0.0.1'
     if args.game_address:
         if not any(args.game_address in ipaddress.IPv4Network(net) for net in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16')):
@@ -1122,15 +1125,27 @@ def main():
             entries=[];round_clients=[];staged=[]
             batch=None
             if args.prepare_independent_set and not linked:
-                mission=save_mission('five independently prepared rooms',enemy_count=5 if args.check_room_combat else 1)
-                body={'missionId':mission['id']}; key=str(uuid.uuid4()); route='/api/sessions/independent-set'
+                if args.check_independent_room_missions:
+                    missions=[]
+                    for room, weather in enumerate(('Clear','Rain','Fog','Storm','Rain'),1):
+                        definition={'name':f'Portable distinct room {room}','briefing':f'Only room {room}', 'durationSeconds':180+30*room,
+                            'environment':{'mode':'VR','weather':weather,'timeOfDay':'Night' if room%2 else 'Day','lightning':weather=='Storm'},
+                            'enemies':{'count':room+1,'behavior':('Hold','Patrol','Advance')[(room-1)%3],'autoAttack':False},
+                            'props':[{'assetId':'barrel','position':{'x':2*room-6,'y':0,'z':2},'yawDegrees':15*room}]}
+                        missions.append(request('/api/missions',definition,expected=201))
+                    body={'rooms':[{'roomId':room,'missionId':mission['id']} for room,mission in enumerate(missions,1)]}
+                else:
+                    mission=save_mission('five independently prepared rooms',enemy_count=5 if args.check_room_combat else 1)
+                    missions=[mission]*5
+                    body={'missionId':mission['id']}
+                key=str(uuid.uuid4()); route='/api/sessions/independent-set'
                 prepared=request(route,body,expected=201,request_id=key)
                 batch=prepared['sessions']
                 sessions.extend(state['id'] for state in batch)
                 retry=request(route,body,request_id=key)
                 check(not prepared['duplicate'] and retry['duplicate'] and retry['sessions']==batch
                       and [state['roomIds'] for state in batch]==[[room] for room in range(1,6)]
-                      and all(state['mission']['id']==mission['id'] and state['mode']=='Independent' and state['state']=='Preparing' for state in batch),
+                      and all(state['mission']==mission and state['mode']=='Independent' and state['state']=='Preparing' for state,mission in zip(batch,missions)),
                       'one real management request prepares all five native independent sessions and its retry returns the same IDs')
                 save('independent-preparation-receipt.json',prepared)
             for rooms in ([[1,2,3,4,5]] if linked else [[r] for r in range(1,6)]):
@@ -1171,7 +1186,22 @@ def main():
                 else:
                     wait(lambda:observe(entry,ids),60,entry['label']+' simulated bodies')
                     sequence=command(sid,'Begin')['session']['sequence']
-                wait(lambda:observe(entry,ids,sequence),20,entry['label']+' original Begin applied')
+                running=wait(lambda:observe(entry,ids,sequence),20,entry['label']+' original Begin applied')
+                if args.check_independent_room_missions and not linked:
+                    room=entries.index(entry)+1
+                    mission=missions[room-1]
+                    definition=mission['definition']; environment=definition['environment']; enemies=definition['enemies']
+                    info=request(f'/api/sessions/{sid}/world')
+                    packet=running['packet']; frame=packet['frame']; props=info['header']['props']
+                    check(info['header']['roomIds']==[room] and info['header']['missionDurationSeconds']==definition['durationSeconds']
+                          and packet['weather']==environment['weather'] and packet['lightning']==environment['lightning']
+                          and frame['night']==(environment['timeOfDay']=='Night') and frame['behavior']==enemies['behavior']
+                          and frame['autoAttack']==enemies['autoAttack'] and len(frame['enemies'])==enemies['count']
+                          and all(enemy['roomId']==room for enemy in frame['enemies']) and len(props)==1
+                          and (props[0]['roomId'],props[0]['kind'],props[0]['feet'],props[0]['yaw']) ==
+                              (room,'Barrel',{'x':(room-3)*14+2*room-6,'y':0,'z':2},15*room),
+                          entry['label']+' native duration, environment, enemies and cover match its own saved mission')
+                    save(entry['label']+'-assigned-mission.json',{'mission':mission,'worldHeader':info['header'],'runningSequence':packet['sequence']})
             if args.check_venue_begin:
                 def observed_begin():
                     rows=request('/api/rooms/readiness')['rooms']
@@ -1411,6 +1441,7 @@ def main():
             'hardwareFeedback':args.check_hardware_feedback,
             'hardwareMockPackage':hardware_manifest['toolVersion'] if args.hardware_simulator_package else None,
             'preparedIndependentSet':args.prepare_independent_set,
+            'independentRoomMissions':args.check_independent_room_missions,
             'sourceFingerprint':manifest['build']['sourceFingerprint'],'gameAddress':address})
     except BaseException as error:stage('failed',errorType=type(error).__name__);raise
     finally:

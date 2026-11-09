@@ -29,6 +29,8 @@
 #layout-routes polyline{fill:none;stroke:#9ed3bd;stroke-width:.065;stroke-dasharray:.14 .12;stroke-linejoin:round;pointer-events:none}
 #layout-spawns [data-route-missing] circle{fill:#ffbb6333;stroke:#ffbb63}
 .layout-route-warning{color:#ffcb83}
+#launch-room-missions-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:0 14px;align-items:start}
+#launch-room-missions-fields [data-status=invalid],#launch-room-missions-fields [data-status=error]{color:#ffb9a8}
 #launch-layout-map-details{margin:10px 0 14px}
 #launch-layout-map-details summary{cursor:pointer}
 #launch-layout-map{display:block;width:100%;max-width:440px;aspect-ratio:1;border:1px solid var(--line);border-radius:5px;background:#101913}

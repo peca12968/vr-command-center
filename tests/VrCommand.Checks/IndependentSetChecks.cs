@@ -19,6 +19,13 @@ internal static class IndependentSetChecks
         var data = Path.Combine(directory, "independent-set");
         Guid[] original;
         Guid replacement;
+        var mixedKey = Guid.NewGuid();
+        var mixedMissions = Enumerable.Range(1, SessionManager.RoomCount).Select(number => mission with
+        {
+            Id = Guid.NewGuid(),
+            Definition = mission.Definition with { Name = $"Room {number}", DurationSeconds = 300 + number }
+        }).ToArray();
+        Guid[] mixedIds;
         using (var store = new SqliteSessionEventStore(data))
         {
             var manager = new SessionManager(store);
@@ -32,6 +39,18 @@ internal static class IndependentSetChecks
             var dense = mission with { Definition = mission.Definition with { Enemies = mission.Definition.Enemies with { Count = 100 },
                 Props = [.. from z in new[] { 2, 4 } from x in new[] { -3, -1, 1, 3 } select new PropPlacement("sandbag", new(x, 0, z), 0)] } };
             Reject<MissionLayoutRejectedException>(() => manager.CreateIndependentSet(dense, master, key), "A five-room reservation checks independent layout capacity before creating any session");
+            var invalid = mixedMissions.ToArray();
+            invalid[3] = dense;
+            try
+            {
+                manager.CreateIndependentSet(invalid, master, mixedKey);
+                throw new Exception("Expected room-specific layout rejection.");
+            }
+            catch (MissionLayoutRejectedException error)
+            {
+                check(error.RoomId == 4 && manager.List().Length == 0 && store.Load().Length == 1,
+                    "A fourth room with an invalid layout rejects the complete distinct plan before any writes");
+            }
 
             using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = store.DatabasePath, Pooling = false }.ToString()))
             {
@@ -44,6 +63,7 @@ internal static class IndependentSetChecks
                     """;
                 command.ExecuteNonQuery();
                 Reject<SqliteException>(() => manager.CreateIndependentSet(mission, master, key), "A failing third insert rolls back the real SQLite transaction");
+                Reject<SqliteException>(() => manager.CreateIndependentSet(mixedMissions, master, mixedKey), "A failing third insert also rolls back a distinct mission plan");
                 check(manager.List().Length == 0 && store.Load().Single()[0].SessionId == occupied.Id,
                     "No partial reservations or committed batch key survive a failed transaction");
                 command.CommandText = "DROP TRIGGER fail_third_room";
@@ -74,6 +94,34 @@ internal static class IndependentSetChecks
             var damaged = new MemorySessionEventStore();
             foreach (var stream in store.Load().Where(stream => stream[0].SessionId != original[2])) damaged.Seed(stream[0].SessionId, stream);
             Reject<InvalidDataException>(() => new SessionManager(damaged), "Recovery rejects an incomplete persisted batch");
+            foreach (var session in manager.List()) manager.End(session.Id, master);
+            var mixed = manager.CreateIndependentSet(mixedMissions, master, mixedKey);
+            mixedIds = mixed.Sessions.Select(session => session.Id).ToArray();
+            check(!mixed.Duplicate && mixed.Sessions.Select(session => session.Mission.Id).SequenceEqual(mixedMissions.Select(value => value.Id))
+                && mixed.Sessions.Select(session => session.Mission.Definition.DurationSeconds).SequenceEqual(mixedMissions.Select(value => value.Definition.DurationSeconds)),
+                "Five separate rooms pin their own immutable mission snapshots");
+            var swapped = mixedMissions.ToArray();
+            (swapped[1], swapped[2]) = (swapped[2], swapped[1]);
+            Reject<InvalidOperationException>(() => manager.CreateIndependentSet(swapped, master, mixedKey), "A retry cannot swap two rooms even when all version IDs are the same set");
+        }
+        using (var store = new SqliteSessionEventStore(data))
+        {
+            var manager = new SessionManager(store);
+            var retried = manager.CreateIndependentSet(mixedMissions, master, mixedKey);
+            check(retried.Duplicate && retried.Sessions.Select(session => session.Id).SequenceEqual(mixedIds)
+                && retried.Sessions.Select(session => session.Mission.Id).SequenceEqual(mixedMissions.Select(value => value.Id)),
+                "SQLite restart restores the original room-to-version assignment and request key");
+            var damaged = new MemorySessionEventStore();
+            foreach (var stream in store.Load())
+            {
+                if (stream[0].SessionId == mixedIds[3])
+                {
+                    var creation = stream[0].Read<SessionCreated>() with { Mission = mixedMissions[2] };
+                    stream[0] = stream[0] with { Payload = System.Text.Json.JsonSerializer.SerializeToElement(creation, JsonFormat.Options) };
+                }
+                damaged.Seed(stream[0].SessionId, stream);
+            }
+            Reject<InvalidDataException>(() => new SessionManager(damaged), "Recovery rejects a valid mission assigned to the wrong room in a persisted plan");
         }
     }
 }

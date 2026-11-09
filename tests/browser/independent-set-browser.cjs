@@ -94,6 +94,67 @@ module.exports = async function independentSetBrowser({ context, api, tokens, ba
     const active = await api('/sessions');
     check(active.length === 4 && active.every(session => original.includes(session.id) && session.id !== original[1] && session.state === 'Preparing'),
       'Ending one room leaves the other four prepared sessions intact');
+    for (const session of active) await end(session.id);
+    const head = (await api(`/missions/${mission.id}/history`)).headId;
+    const alternateDraft = { ...draft, name: '房間各自的夜戰版本', durationSeconds: 420, environment: { ...draft.environment, weather: 'Storm', lightning: true },
+      props: [{ assetId: 'barrel', position: { x: 2, y: 0, z: 1 }, yawDegrees: 45 }] };
+    const alternate = await api('/missions', 'POST', alternateDraft, 'Master', 201);
+    await page.locator('#refresh').click();
+    await missionList.selectOption(head);
+    await page.locator('#launch-room-missions-toggle').check();
+    const roomMission = room => page.locator('#launch-room-mission-' + room);
+    const roomLayout = room => page.locator('#launch-room-layout-' + room);
+    const previewRoom = page.locator('#launch-review-room');
+    await enabled();
+    check(await roomMission(1).inputValue() === head && await roomMission(5).inputValue() === head,
+      'Enabling room assignments starts from the explicitly selected shared version');
+    await roomMission(4).selectOption(dense.id);
+    await roomLayout(4).filter({ hasText: '場地配置未通過' }).waitFor();
+    await previewRoom.selectOption('1'); await valid();
+    check(await submit.isDisabled() && (await api('/sessions')).length === 0,
+      'An invalid fourth room blocks creation even while another room’s map is valid');
+    for (const room of [2, 4, 5]) await roomMission(room).selectOption(alternate.id);
+    await enabled();
+    await page.locator('#launch-layout-map-details summary').click();
+    check(await page.locator('#launch-preview-rooms').innerText() === '房間 5'
+      && await page.locator('#launch-preview-duration').innerText() === '420 秒'
+      && (await page.locator('#launch-preview-environment').innerText()).includes('暴風雨')
+      && await page.locator('#launch-layout-props [data-index="0"]').getAttribute('transform') === 'translate(2 -1) rotate(-45)',
+      'Each room preview reflects its exact assigned duration, environment and saved geometry');
+    await page.locator('#launch-room-missions').screenshot({ path: path.join(screenshots, 'independent-room-missions.png') });
+    await page.setViewportSize({ width: 390, height: 844 });
+    check(await roomMission(5).isVisible() && await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
+      'All five assignment controls fit the mobile console without horizontal overflow');
+    await page.setViewportSize({ width: 1440, height: 1080 });
+    const plan = [head, alternate.id, head, alternate.id, alternate.id].map((missionId, index) => ({ roomId: index + 1, missionId }));
+    let mixed, sent;
+    await page.route(endpoint, async route => {
+      const current = { key: route.request().headers()['idempotency-key'], body: route.request().postDataJSON() };
+      assert.deepEqual(current.body, { rooms: plan });
+      if (!sent) {
+        sent = current;
+        const actual = await route.fetch();
+        assert.equal(actual.status(), 201);
+        mixed = await actual.json();
+        for (const session of mixed.sessions) owned.add(session.id);
+        await api(`/missions/${alternate.id}/revisions`, 'POST', { ...alternateDraft, durationSeconds: 480 }, 'Master', 201, undefined, randomUUID());
+        await route.abort('failed');
+      } else {
+        assert.deepEqual(current, sent);
+        const actual = await route.fetch();
+        assert.equal(actual.status(), 200);
+        assert.equal((await actual.json()).duplicate, true);
+        await route.fulfill({ response: actual });
+      }
+    });
+    await submit.click(); await notice.filter({ hasText: '結果未確認' }).waitFor();
+    check(await roomMission(4).isDisabled() && await previewRoom.isDisabled(), 'An unresolved mixed request locks its room assignments');
+    await page.locator('#retry-command').click(); await notice.filter({ hasText: '五個獨立場次已確認' }).waitFor();
+    check(mixed.sessions.every((session, index) => session.roomIds[0] === index + 1 && session.mission.id === plan[index].missionId)
+      && mixed.sessions[3].mission.definition.durationSeconds === 420
+      && await roomMission(4).inputValue() === alternate.id && (await roomMission(4).locator('option:checked').innerText()).includes('歷史')
+      && (await api('/rooms')).every((room, index) => room.sessionId === mixed.sessions[index].id),
+      'A mixed retry keeps all original sessions and the assigned historical version after a library revision');
   } finally {
     await page.unroute(endpoint);
     for (const id of owned) if ((await api(`/sessions/${id}`)).state !== 'Ended') await end(id);

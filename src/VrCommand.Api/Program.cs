@@ -80,7 +80,9 @@ app.Use(async (context, next) =>
             KeyNotFoundException => 404,
             _ => 409
         };
-        if (ex is MissionLayoutRejectedException layout)
+        if (ex is MissionLayoutRejectedException { RoomId: int roomId } roomLayout)
+            await context.Response.WriteAsJsonAsync(new { error = ex.Message, roomId, layout = roomLayout.Report });
+        else if (ex is MissionLayoutRejectedException layout)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, layout = layout.Report });
         else if (ex is EnemyCapacityExceededException capacity)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "enemy-capacity-exceeded", maxCount = capacity.MaxCount });
@@ -166,7 +168,17 @@ app.MapPost("/api/sessions/independent-set", (CreateIndependentSet request, Sqli
     var actor = Actor(context);
     AccessPolicy.AuthorMission(actor);
     var key = RequestId(context) ?? throw new ArgumentException("Idempotency-Key is required for five independent sessions.");
-    var receipt = manager.CreateIndependentSet(store.Get(request.MissionId, actor), actor, key);
+    IndependentSessionSet receipt;
+    if (request.MissionId is Guid missionId && missionId != Guid.Empty && request.Rooms is null)
+        receipt = manager.CreateIndependentSet(store.Get(missionId, actor), actor, key);
+    else if (request.MissionId is null && request.Rooms is { Length: SessionManager.RoomCount } rooms
+        && rooms.All(room => room is not null && room.MissionId != Guid.Empty)
+        && rooms.Select(room => room.RoomId).Order().SequenceEqual(Enumerable.Range(1, SessionManager.RoomCount)))
+    {
+        var missions = rooms.Select(room => room.MissionId).Distinct().ToDictionary(id => id, id => store.Get(id, actor));
+        receipt = manager.CreateIndependentSet(rooms.OrderBy(room => room.RoomId).Select(room => missions[room.MissionId]).ToArray(), actor, key);
+    }
+    else throw new ArgumentException("Use a saved mission ID for all five rooms or assign one saved mission to each room.");
     context.Response.Headers.CacheControl = "no-store";
     return Results.Json(receipt, statusCode: receipt.Duplicate ? StatusCodes.Status200OK : StatusCodes.Status201Created);
 });
@@ -367,7 +379,8 @@ static Guid? AdmissionMatch(HttpContext context)
 }
 
 record CreateSession(Guid MissionId, SessionMode Mode, int[] RoomIds);
-record CreateIndependentSet(Guid MissionId);
+record IndependentRoomMission(int RoomId, Guid MissionId);
+record CreateIndependentSet(Guid? MissionId, IndependentRoomMission[]? Rooms);
 record VenuePhaseRequest(ControlAction Action, VenuePhaseFence?[]? Targets, VenueClimate? Environment, VenueEnemyPolicy? EnemyPolicy);
 record JoinPlayer(Guid PlayerId, string Name, int RoomId, HeadsetKind Headset);
 record ValidatePlayerTicket(Guid SessionId, string Ticket, int ProtocolVersion = 0);

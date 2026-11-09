@@ -95,8 +95,14 @@
         </section>
         <div class="two-columns">
           <section class="panel"><h3>準備新場次</h3><form id="create-session-form">
-            <fieldset id="create-fields"><label>任務<select id="launch-mission" required></select></label>
+            <fieldset id="create-fields"><label id="launch-common-mission">任務<select id="launch-mission" required></select></label>
               <div class="form-row"><label>連線模式<select id="launch-mode"><option value="Independent">單房獨立</option><option value="IndependentSet">五房各自獨立</option><option value="Linked">五房全連線</option></select></label><label>房間<select id="launch-room"></select></label></div>
+              <label id="launch-room-missions-option" class="check" hidden><input id="launch-room-missions-toggle" type="checkbox">逐房指定任務版本</label>
+              <section id="launch-room-missions" class="layout-report" hidden aria-label="五房各自的任務版本">
+                <p class="hint">各房可使用不同保存版本。五個場地均通過檢查後才可建立。</p>
+                <div id="launch-room-missions-fields" class="form-row"></div>
+                <label>預覽房間<select id="launch-review-room"></select></label>
+              </section>
               <section id="launch-preview" class="layout-report launch-preview" aria-labelledby="launch-preview-heading" hidden>
                 <h4 id="launch-preview-heading">開場條件預覽</h4>
                 <p id="launch-preview-version"></p>
@@ -110,7 +116,7 @@
           </form><div class="layout-report"><p id="launch-layout-summary" class="hint" role="status" aria-live="polite">選取保存的任務版本後檢查場地。</p><ul id="launch-layout-issues"></ul><p id="launch-layout-route-summary" class="hint" hidden></p>
             <details id="launch-layout-map-details" hidden>
               <summary>查看保存版本的場地平面圖</summary>
-              <p id="launch-layout-legend" class="hint">以房間本地座標顯示，五房開場時各房使用同一配置。上方是 +Z，右方是 +X。紅色為配置問題，橘色為未找到取樣通路的出生位。</p>
+              <p id="launch-layout-legend" class="hint">顯示預覽版本的房間本地座標。上方是 +Z，右方是 +X。紅色為配置問題，橘色為未找到取樣通路的出生位。</p>
               <svg id="launch-layout-map" viewBox="-11 -11 22 22" role="img" aria-label="保存版本的房間場地、物件及出生位" aria-describedby="launch-layout-legend launch-layout-route-summary">
                 <defs><pattern id="launch-grid" width="1" height="1" patternUnits="userSpaceOnUse"><path d="M 1 0 L 0 0 0 1" fill="none" stroke="#36453b" stroke-width=".025"/></pattern></defs>
                 <rect x="-10" y="-10" width="20" height="20" fill="url(#launch-grid)"/>
@@ -280,7 +286,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.45 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.46 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

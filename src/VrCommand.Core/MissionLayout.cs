@@ -8,8 +8,11 @@ public record MissionLayoutReport(int Version, string Profile, string RulesVersi
     float RoomHalfSize, float PlayerRadius, LayoutSpawn[] Spawns, int? EnemyCapacityPerRoom, int RequestedEnemiesPerRoom,
     int TotalIssueCount, bool Truncated, ArenaLayoutIssue[] Issues, int[] InvalidProps, LayoutRoutePreview? RoutePreview = null);
 
-public sealed class MissionLayoutRejectedException(MissionLayoutReport report) : ArgumentException("Arena layout is not startable; inspect the layout report and save a corrected mission revision.")
-{ public MissionLayoutReport Report { get; } = report; }
+public sealed class MissionLayoutRejectedException(MissionLayoutReport report, int? roomId = null) : ArgumentException("Arena layout is not startable; inspect the layout report and save a corrected mission revision.")
+{
+    public MissionLayoutReport Report { get; } = report;
+    public int? RoomId { get; } = roomId;
+}
 
 public sealed class EnemyCapacityExceededException(int maxCount) : ArgumentException("Enemy count exceeds the saved arena's spawn capacity.")
 { public int MaxCount { get; } = maxCount; }
@@ -34,10 +37,10 @@ public static class MissionLayout
             "0.8.0", request.Mode, true, result.Valid, ArenaLayout.RoomHalfSize, ArenaWalkSurface.Radius,
             spawns, result.EnemyCapacityPerRoom, result.RequestedEnemiesPerRoom, result.IssueCount, result.Truncated, result.Issues, result.InvalidProps, routes);
     }
-    internal static void RequireNewStart(MissionDraft definition, SessionMode mode)
+    internal static void RequireNewStart(MissionDraft definition, SessionMode mode, int? roomId = null)
     {
         var report = Inspect(Request(definition, mode), includeRoutes: false);
-        if (report.CanStart == false) throw new MissionLayoutRejectedException(report);
+        if (report.CanStart == false) throw new MissionLayoutRejectedException(report, roomId);
     }
 
     internal static void RequireEnemyCapacity(SessionView session, int count)
