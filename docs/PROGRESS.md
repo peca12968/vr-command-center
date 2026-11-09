@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-10 Quest UDP 預檢診斷 APK
+
+獨立 Android 診斷 APK 0.1.0 可由指定的 ADB 裝置執行，從指定的頭盔 IPv4 發送與 Windows 監聽端相容的 UDP 挑戰。診斷報告可直接供逐來源封存驗收。Windows 主控可用同一套監聽流程收集 Windows 與 Quest 來源的報告。 [操作說明](QUEST3.md#開場前從頭盔執行-udp-預檢)
+
+- F 槽 `vr-command-quest-udp-probe-0.1.0.apk` 共 16,588 bytes，SHA-256 `478bcd63b9d79aca638d49049388021241245a6f046f3221fd95b0ba6e2f4c1f`。已以 Android SDK 建置、對齊和簽章，獨立核對 v2、最低 API 32、目標 API 35、3 個 APK 項目及 DEX 內的探測與 instrumentation 類別。初始建置檢查被 SDK 欄位名稱與簽章方案擋下，最終依 aapt2 的 `minSdkVersion` 與明確 v2 設定核對通過。
+- 本機通過 5 項探測專項、6 項 UDP 測試與 36 項封存驗收測試。Java 共用核心與真正 Windows PowerShell 監聽完成 3 個 UDP 樣本，原交換摘要相同。錯誤來源埠、驗證碼及過長封包遭拒絕。另在 `interop-04780f974f0a4c3ba525f45c19ed1b2f` 保存 Java 與 PowerShell 先後使用同一埠的 4 份原報告及完整來源摘要，核對 2 個同機 IPv4、各 3 個樣本。ADB 金鑰傳遞、清理及錯誤回應是模擬測試，ADB 未偵測到實機。
+- 來源 `b5de23c49ed42b169035888e74169d20303504b7`。GitHub Actions job `129373652727` 因帳務或支出上限未啟動。Quest 3、VIVE XR、實體 MR、廠商硬體與跨機 25 人仍待現地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42680566365)
+
 ## 2026-11-10 場館 UDP 預檢的完整來源核對
 
 場館驗收工具可按每個原遊戲綁定，要求收到戰績確認的所有來源 IPv4 各有一組原始 UDP 預檢。獨立場逐房使用各自的埠，合併場以共用埠核對全部來源。單組驗收流程仍可用，摘要只列來源數、樣本數及交換摘要。 [操作說明](EXTERNAL_CLIENTS.md#核對每個玩家來源的-udp-預檢)
