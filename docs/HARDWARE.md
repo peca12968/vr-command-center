@@ -27,7 +27,46 @@ $page.signals
 
 ## 現況
 
-硬體由外部公司負責，目前尚未收到技術資料或 SDK；不對未知設備發送命令。已有[硬體回饋離線模擬器](HARDWARE_SIMULATOR.md)0.1.0，以正式事件重建規則驗證room／player／admission綁定、模擬佇列、重送、到期與ACK；不連實體設備，不定義廠商wire，也不提供硬體輸入、強度或實體停止保證。取得文件後再設計廠商轉接器，不能以離線模擬宣稱實機整合完成。
+硬體由外部公司負責，目前尚待技術資料或 SDK。模擬器 0.2.0 支援以下即時排演，以及[離線回饋模擬](HARDWARE_SIMULATOR.md)的事件重建、佇列、重送和到期測試。設備輸入、強度映射、實體停止及廠商協議列入後續實機驗收。
+
+## 即時模擬閘道
+
+解壓模擬器 0.2.0 後，用 Python 3.12 開啟模擬設備。每房使用自己的程序和 TCP 埠，模擬連線固定使用本機 `127.0.0.1`。模擬設備會顯示收到的批次並回傳確認。
+
+```powershell
+python .\mock-device.py --port 19101
+```
+
+將設定存到包外的 `room-1.json`。填入當前場次 UUID，從該房名冊取得玩家 `id`、`admissionId` 及從零起算的 `seat`。`deviceId` 由排演操作者指定，每個綁定各用一個 UUID。管理服務使用本機 HTTP 或遠端 HTTPS。
+
+```json
+{
+  "version": 1,
+  "managementUrl": "http://127.0.0.1:5081",
+  "sessionId": "11111111-1111-4111-8111-111111111111",
+  "roomId": 1,
+  "mockPort": 19101,
+  "seconds": 60,
+  "bindings": [
+    {"deviceId": "22222222-2222-4222-8222-222222222222", "playerId": "33333333-3333-4333-8333-333333333333", "admissionId": "44444444-4444-4444-8444-444444444444", "seat": 0}
+  ]
+}
+```
+
+在另一個 PowerShell 7 終端輸入對應房控金鑰，用 .NET 10 執行。每次使用新的輸出路徑。閘道會在場次結束或設定時間到達後寫出報告。
+
+```powershell
+$env:VR_COMMAND_ROOM_KEY = Read-Host '輸入本房控制金鑰' -MaskInput
+try {
+    dotnet .\VrCommand.HardwareSimulator.dll --live ..\room-1.json --output ..\room-1-report.json
+} finally {
+    Remove-Item Env:VR_COMMAND_ROOM_KEY
+}
+```
+
+閘道每次只處理一批，最多 32 個訊號。模擬設備須回覆同一連線 ID 和批次 ID。確認後會再向管理服務核對原訊號、Running 階段、現行入場及兩秒期限。錯誤、逾時或斷線的批次會記下個別狀態，重新握手後從目前序號開始。成功狀態為 `simulated-acknowledged`。報告的 `acknowledged` 是成功確認的模擬訊號數，`physicalDeliveryConfirmed` 固定為 `false`。
+
+故障排演可在模擬設備加入 `--manual`，收到畫面上的訊息後輸入 `ack`、`wrong`、`timeout` 或 `drop`。本機排演協議以四位元組大端長度加 UTF-8 JSON 傳輸，使用 `hello`／`ready` 和 `feedback`／`ack`。廠商實體設備採用其後續提供的協議。
 
 ## 廠商需提供
 

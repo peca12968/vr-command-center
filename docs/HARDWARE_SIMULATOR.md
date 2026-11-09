@@ -1,5 +1,9 @@
 # 硬體回饋離線模擬器
 
+模擬器 0.2.0 同時提供本頁的離線重建和[即時房間排演](HARDWARE.md#即時模擬閘道)。打包 0.2.0 需另外以 `--live-evidence` 指定即時驗證目錄，離線與即時證據需來自同一編譯輸出。以下保留 0.1.0 的離線契約與歷史證據。
+
+0.2.0 的 `artifacts/hardware-packages/hardware-simulator-0.2.0-net10.zip` 為 159,240 bytes，SHA-256 `be909c1422f9e857c6c19db810f44ae1353fcb2a34a317a973173169ec6a22b4`。清單含 8 個檔案，包括本機 `mock-device.py`。 [驗證紀錄](PROGRESS.md#2026-11-09-即時硬體模擬閘道)
+
 工具 **0.1.0** 提供設備回饋的離線測試台，先驗證事件、房間、玩家入場與模擬連線的對應，等待廠商文件後再設計真正轉接器。它不連USB、Serial、TCP或BLE、不使用廠商SDK、不發實體命令；不是廠商封包格式，也沒有輸入按鈕、追蹤、震動力道或實體停止的整合證據。
 
 主包 `artifacts/hardware-packages/hardware-simulator-0.1.0-v2-net10.zip`，**122,352 bytes／SHA256 `72e73214c03948ac312cac52c246338ae061e498fb7f8aa9f5d4e0bd62d7412b`**，7 manifest檔案／ZIP8含manifest。只含自己專案的5個DLL／deps／runtimeconfig檔、合成example及說明，需.NET 10 runtime，沒有隨包帶runtime、apphost、金鑰、DB或journal。前包122,332／SHAff7b1c68...及原解壓驗證保留；v2補上權限／缺玩家資料的受控拒絕，不能拿前版當最終版。
@@ -47,7 +51,8 @@ v2已真正解壓、執行example，報告與原CLI的結果逐位元相同，�
 
 ```powershell
 python scripts/check-hardware-simulator.py --api-dll <同次Api.dll> --simulator-dll <同次HardwareSimulator.dll> --relay-dll <同次TelemetryRelay.dll> --runtime-root <新的runtime根目錄>
-python scripts/package-hardware-simulator.py --evidence <完成的run目錄> --stage-root <暫存根目錄> --output <新的ZIP>
+python scripts/check-live-hardware-gateway.py --api-dll <同次Api.dll> --simulator-dll <同次HardwareSimulator.dll>
+python scripts/package-hardware-simulator.py --evidence <離線run目錄> --live-evidence <即時run目錄> --stage-root <暫存根目錄> --output <新的ZIP>
 python scripts/package-hardware-simulator.py --verify <解壓的VRCommand-HardwareSimulator目錄>
 ```
 
