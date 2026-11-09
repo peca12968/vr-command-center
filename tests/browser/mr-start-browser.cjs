@@ -11,8 +11,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     enemies: { count: 0, behavior: 'Hold', autoAttack: false }, props: []
   }, 'Master', 201);
   const session = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Linked', roomIds }, 'Master', 201);
-  const route = '/sessions/' + session.id;
-  const streamId = randomUUID();
+  let route = '/sessions/' + session.id;
+  let streamId = randomUUID();
   const page = await context.newPage();
   captureErrors(page);
   const panel = page.locator('#mr-start-requirement');
@@ -46,8 +46,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await api(route + '/combat-stream', 'POST', { streamId, origin: 'GameServer' }, 'GameServer');
     const admitted = await api(route);
     const port = Number(new URL(base).port);
-    const captureStart = Date.now();
-    const header = { sessionId: session.id, streamId, roomIds, origin: 'GameServer', calibration: 'quest-room-mr-v1',
+    let captureStart = Date.now();
+    let header = { sessionId: session.id, streamId, roomIds, origin: 'GameServer', calibration: 'quest-room-mr-v1',
       captureStartedAtUtc: new Date(captureStart).toISOString().replace('Z', '0000+00:00') };
     let sequence = 0, damage, damagePublished = false;
     function send(...messages) {
@@ -163,24 +163,68 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await page.locator('#session-meta').filter({ hasText: `序號 ${damaged.sequence}` }).waitFor();
     const alertCard = page.locator('[data-room-readiness="4"]');
     const alerts = page.locator('[data-room-readiness].tracking-attention');
+    const quickPause = page.locator('[data-room-mr-tracking-pause="4"]');
+    const pauseWitness = page.locator('[data-room-mr-pause="4"]');
+    const quickRequest = request => request.url().endsWith('/api' + route + '/commands') && request.method() === 'POST'
+      && request.postDataJSON()?.mrTrackingRoomId === 4;
     const currentAlert = () => alertCard.evaluate(card => card.classList.contains('tracking-attention'));
     await publishUntil(panel, 'WaitingPlayers', damaged, [2], currentAlert);
     check(await waitingRoom.innerText() === '房間 4 · 3 / 4 追蹤就緒 · 等候席位 2 · 已淘汰 1'
       && await alertCard.innerText() === 'MR · 3 / 4 追蹤就緒 · 等候 1 席' && await alerts.count() === 1
       && (await api(route)).state === 'Running' && (await api(route)).sequence === damaged.sequence,
       'A real Running MR frame flags the one living lost seat in its room without changing the mission phase');
+    check(await quickPause.isEnabled() && await quickPause.isVisible() && await quickPause.innerText() === '暫停五房合併場次'
+      && await page.locator('[data-room-mr-tracking-pause]:visible').count() === 1,
+      'Only the room with a witnessed lost pose offers a clearly scoped linked pause to Master');
+    const deniedRoom = await api(route + '/commands', 'POST',
+      { commandId: randomUUID(), action: 'Pause', expectedSequence: damaged.sequence, mrTrackingRoomId: 4 }, 'Room4', 403);
+    check(Boolean(deniedRoom.error) && (await api(route)).state === 'Running', 'A room key cannot pause a linked MR session');
     await panel.screenshot({ path: path.join(screenshots, 'mr-running-waiting-seats.png') });
     await panel.locator('#mr-start-status').filter({ hasText: '快照已過期' }).waitFor();
     await alerts.waitFor({ state: 'hidden' });
-    check(await panel.locator('[data-mr-room]').count() === 0 && !await currentAlert(),
+    check(await panel.locator('[data-mr-room]').count() === 0 && !await currentAlert() && await quickPause.isHidden(),
       'A stale Running frame clears the previously known missing seats and room alert');
     await publishUntil(panel, 'Ready', damaged, [], async () => await alertCard.innerText() === 'MR · 4 / 4 追蹤就緒');
     check(await alerts.count() === 0 && await panel.locator('li.tracking-attention').count() === 0
       && await waitingRoom.innerText() === '房間 4 · 4 / 4 追蹤就緒 · 已淘汰 1',
       'A new tracked frame clears both Running alerts while preserving the eliminated seat');
-    await publishUntil(panel, 'WaitingPlayers', damaged, [2], currentAlert);
-    const paused = await command('Pause');
+    await publishUntil(panel, 'WaitingPlayers', damaged, [2], () => quickPause.isVisible());
+    let confirmText;
+    page.once('dialog', async dialog => { confirmText = dialog.message(); await dialog.dismiss(); });
+    await quickPause.click();
+    check(confirmText.includes('五房合併場次') && (await api(route)).sequence === damaged.sequence,
+      'Cancelling the explicit five-room confirmation leaves the original phase unchanged');
+    publish(damaged, [2]);
+    page.once('dialog', async dialog => { publish(damaged); await dialog.accept(); });
+    const rejectedPause = page.waitForResponse(response => quickRequest(response.request()));
+    await quickPause.click();
+    const rejected = await rejectedPause;
+    check(rejected.status() === 409 && (await rejected.json()).code === 'mr-tracking-pause-no-witness'
+      && (await api(route)).sequence === damaged.sequence,
+      'Tracking recovered during confirmation, so the API rejects the exact original pause without a command event');
+
+    await publishUntil(panel, 'WaitingPlayers', damaged, [2], () => quickPause.isVisible());
+    const requests = [];
+    const captureRequest = request => { if (quickRequest(request)) requests.push(request.postDataJSON()); };
+    page.on('request', captureRequest);
+    await page.route('**/api' + route + '/commands', async route => {
+      await route.fetch();
+      await route.abort('failed');
+    }, { times: 1 });
+    page.once('dialog', dialog => dialog.accept());
+    await quickPause.click();
+    await page.locator('#retry-command').waitFor();
+    check((await api(route)).state === 'Paused', 'The linked pause commits even when its first response is lost');
+    const retryResponse = page.waitForResponse(response => quickRequest(response.request()));
+    await page.locator('#retry-command').click();
+    const retry = await retryResponse;
+    const paused = { status: retry.status(), body: await retry.json() };
+    page.off('request', captureRequest);
     if (paused.status !== 200) throw new Error(`MR Pause returned ${paused.status}: ${paused.body.error}`);
+    await pauseWitness.filter({ hasText: 'MR 暫停待確認' }).waitFor();
+    check(paused.body.duplicate === true && requests.length === 2 && JSON.stringify(requests[0]) === JSON.stringify(requests[1])
+      && paused.body.appliedAtSequence === damaged.sequence + 1 && await quickPause.isHidden(),
+      'Retry retains the exact room, revision and command ID and reports that game-side pause is pending');
     await panel.locator('#mr-start-title').filter({ hasText: 'MR 繼續檢查' }).waitFor();
     publish(damaged);
     const pendingSource = await api(route + '/readiness');
@@ -190,6 +234,11 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       'Resume cannot use a Running snapshot after Pause and preserves the paused sequence');
 
     await publishUntil(panel, 'WaitingPlayers', paused.body.session, [2]);
+    await pauseWitness.filter({ hasText: 'MR 暫停已套用' }).waitFor();
+    const applied = await api('/rooms/readiness');
+    check(applied.rooms.every(row => row.mrPause.appliedAtSequence === paused.body.appliedAtSequence
+      && row.mrPause.worldSequence === applied.rooms[0].mrPause.worldSequence && row.mrPause.worldSequence > 0),
+      'All five linked cards confirm the original pause only after receiving its paused game frame');
     check(hit.statistics.players.find(player => player.playerId === victim.id).health === 0
       && await waitingRoom.innerText() === '房間 4 · 3 / 4 追蹤就緒 · 等候席位 2 · 已淘汰 1',
       'The paused panel distinguishes a living seat that needs tracking from an eliminated seat');
@@ -219,6 +268,53 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await api(route + '/combat-stream/seal', 'POST', { streamId, finalSequence: 1 }, 'GameServer');
     check(send({ type: 'seal', finalSequence: sequence }).complete === true,
       'The MR tracked fixture closes at its accepted final world and combat boundaries');
+
+    const independent = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [4] }, 'Master', 201);
+    route = '/sessions/' + independent.id;
+    const other = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [5] }, 'Master', 201);
+    const independentPage = await context.newPage();
+    captureErrors(independentPage);
+    try {
+      await api(route + '/players', 'POST', { playerId: randomUUID(), name: 'Independent tracking seat', roomId: 4, headset: 'Quest3' }, 'Room4');
+      streamId = randomUUID();
+      await api(route + '/combat-stream', 'POST', { streamId, origin: 'GameServer' }, 'GameServer');
+      captureStart = Date.now(); sequence = 0; damage = undefined; damagePublished = false;
+      header = { ...header, sessionId: independent.id, streamId, roomIds: [4],
+        captureStartedAtUtc: new Date(captureStart).toISOString().replace('Z', '0000+00:00') };
+      const preparation = await api(route);
+      publish(preparation);
+      const { session: running } = await api(route + '/commands', 'POST',
+        { commandId: randomUUID(), action: 'Begin', expectedSequence: preparation.sequence }, 'Room4');
+      await login(independentPage, 'Room4');
+      const localPanel = independentPage.locator('#mr-start-requirement');
+      const localPause = independentPage.locator('[data-room-mr-tracking-pause="4"]');
+      await publishUntil(localPanel, 'WaitingPlayers', running, [1], () => localPause.isVisible());
+      const wrongRoom = await api(route + '/commands', 'POST',
+        { commandId: randomUUID(), action: 'Pause', expectedSequence: running.sequence, mrTrackingRoomId: 5 }, 'Room4', 409);
+      check(wrongRoom.code === 'mr-tracking-pause-no-witness' && (await api(route)).state === 'Running',
+        'An independent desk cannot apply tracking evidence to another room ID');
+      independentPage.once('dialog', async dialog => { confirmText = dialog.message(); await dialog.accept(); });
+      const localResponse = independentPage.waitForResponse(response => quickRequest(response.request()));
+      await localPause.click();
+      const response = await localResponse;
+      const local = await response.json();
+      check(response.status() === 200 && local.session.state === 'Paused' && confirmText.includes('暫停本房')
+        && (await api('/sessions/' + other.id)).sequence === other.sequence,
+        'The independent room desk pauses only its own MR session and leaves the other room untouched');
+      await publishUntil(localPanel, 'WaitingPlayers', local.session, [1]);
+      await independentPage.locator('[data-room-mr-pause="4"]').filter({ hasText: 'MR 暫停已套用' }).waitFor();
+      check((await api('/rooms/readiness', 'GET', undefined, 'Room4')).rooms.length === 1
+        && await independentPage.locator('[data-room-mr-pause]:visible').count() === 1,
+        'The room desk confirms the original game pause within its room scope');
+      const { session: closed } = await api(route + '/commands', 'POST', { commandId: randomUUID(), action: 'End' }, 'Room4');
+      publish(closed);
+      await api(route + '/combat-stream/seal', 'POST', { streamId, finalSequence: 0 }, 'GameServer');
+      check(send({ type: 'seal', finalSequence: sequence }).complete === true, 'The independently paused MR fixture closes normally');
+    } finally {
+      await independentPage.close();
+      await page.bringToFront();
+      await api('/sessions/' + other.id + '/commands', 'POST', { commandId: randomUUID(), action: 'End' });
+    }
   } catch (error) {
     await page.screenshot({ path: path.join(screenshots, 'mr-start-failure.png'), timeout: 5000 }).catch(() => {});
     throw error;

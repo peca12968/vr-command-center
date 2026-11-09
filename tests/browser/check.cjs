@@ -22,7 +22,7 @@ async function main() {
   const screenshots = process.env.VR_COMMAND_BROWSER_ARTIFACTS ? path.resolve(process.env.VR_COMMAND_BROWSER_ARTIFACTS) : path.join(root, 'artifacts/console');
   if (process.env.VR_COMMAND_BROWSER_ARTIFACTS && (path.dirname(screenshots) !== path.join(root, 'artifacts') || !/^console-[a-zA-Z0-9-]+$/.test(path.basename(screenshots)))) throw new Error('Use a new direct artifacts/console-* output directory');
   await fs.mkdir(screenshots, { recursive: !process.env.VR_COMMAND_BROWSER_ARTIFACTS });
-  const tokens = Object.fromEntries(['Master', 'Room1', 'Room2', 'GameServer'].map(role => [role, randomBytes(32).toString('hex')]));
+  const tokens = Object.fromEntries(['Master', 'Room1', 'Room2', 'Room4', 'GameServer'].map(role => [role, randomBytes(32).toString('hex')]));
   const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toLowerCase().startsWith('operatorkeys__') && !['operatorkeyfile', 'playerticketsigningkey'].includes(key.toLowerCase())));
   Object.assign(environment, { DataDirectory: path.join(directory, 'missions'), SessionDataDirectory: path.join(directory, 'sessions'), ASPNETCORE_ENVIRONMENT: 'Production', Logging__LogLevel__Default: 'Warning' });
   for (const [role, value] of Object.entries(tokens)) environment['OperatorKeys__' + role] = value;

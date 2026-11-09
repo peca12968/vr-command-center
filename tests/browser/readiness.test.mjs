@@ -5,7 +5,8 @@ const code = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/rea
 const missionClock = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/mission-clock.js', import.meta.url), 'utf8');
 const connection = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/connection-ui.js', import.meta.url), 'utf8');
 const dataModule = source => 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
-const { readinessView, roomReadinessView, roomEndpointText, mrReadinessView, roomMissionTimeView, roomVenuePhaseView } =
+const { readinessView, roomReadinessView, roomEndpointText, mrReadinessView, roomMissionTimeView, roomVenuePhaseView,
+  roomMrTrackingPauseTarget, roomMrPauseView } =
   await import(dataModule(code.replace('./mission-clock.js', dataModule(missionClock)).replace('./connection-ui.js', dataModule(connection))));
 const player = { id: 'player', admissionId: 'first', roomId: 1, seat: 0 };
 const session = { id: 'session', sequence: 10, state: 'Preparing', players: [player] };
@@ -38,6 +39,29 @@ const room = { id: 1, sessionId: 'session', playerCount: 3, capacity: 5 };
 const roomRow = { roomId: 1, sessionId: 'session', sessionSequence: 10, registered: 3, sourceState: 'Fresh',
   sourceAgeMilliseconds: 10, simulatedReady: 1, trackedReady: 1 };
 const overview = { version: 1, rooms: [roomRow] };
+test('Quick MR pause requires a fresh loss in the original room and the correct operator scope', () => {
+  const mr = { ...session, mode: 'Independent', state: 'Running', roomIds: [1], environment: { mode: 'MR' },
+    combatStream: { origin: 'GameServer' } };
+  const row = { ...roomRow, simulatedReady: 0, trackedReady: 1, mrLiving: 2, mrTrackingPauseAvailable: true };
+  const report = { ...overview, rooms: [row] };
+  const roomDesk = { role: 'RoomController', roomId: 1 }, master = { role: 'Master' };
+  assert.deepEqual(roomMrTrackingPauseTarget(report, room, mr, 1490, roomDesk), { sessionId: 'session', sequence: 10, linked: false });
+  const linked = { ...mr, mode: 'Linked', roomIds: [1, 2, 3, 4, 5] };
+  assert.equal(roomMrTrackingPauseTarget(report, room, linked, 0, master).linked, true);
+  assert.equal(roomMrTrackingPauseTarget(report, room, linked, 0, roomDesk), null);
+  for (const change of [{ mrTrackingPauseAvailable: false }, { mrLiving: 1 }, { simulatedReady: 1 }, { sessionId: 'old' }, { sessionSequence: 9 }])
+    assert.equal(roomMrTrackingPauseTarget({ ...report, rooms: [{ ...row, ...change }] }, room, mr, 0, master), null);
+  assert.equal(roomMrTrackingPauseTarget(report, room, mr, 1490.01, master), null);
+});
+test('MR pause remains pending until the original source acknowledges a fresh paused frame', () => {
+  const paused = { ...session, state: 'Paused', environment: { mode: 'MR' } };
+  const source = mrPause => ({ ...overview, rooms: [{ ...roomRow, mrPause }] });
+  assert.equal(roomMrPauseView(source({ appliedAtSequence: 10, worldSequence: 22 }), room, paused, 1490), 'MR 暫停已套用');
+  for (const pause of [{ appliedAtSequence: 11, worldSequence: 22 }, { appliedAtSequence: 10, worldSequence: null }])
+    assert.match(roomMrPauseView(source(pause), room, paused, 0), /待確認/);
+  assert.match(roomMrPauseView(source({ appliedAtSequence: 10, worldSequence: 22 }), room, paused, 1490.01), /已過期/);
+  assert.equal(roomMrPauseView(source({ appliedAtSequence: 10, worldSequence: 22 }), room, { ...paused, state: 'Running' }, 0), null);
+});
 test('Room endpoints distinguish publication, loopback and shared connections independently of pose freshness', () => {
   const current = { ...session, combatStream: { streamId: 'stream' } };
   const endpoint = { version: 1, sessionId: current.id, streamId: 'stream', address: '127.0.0.1', port: 7777, sessionEnded: false };

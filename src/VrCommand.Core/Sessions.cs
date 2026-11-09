@@ -22,7 +22,8 @@ public record SessionView(Guid Id, SessionMode Mode, int[] RoomIds, Mission Miss
 public record RoomView(int Id, int Capacity, Guid? SessionId, int PlayerCount);
 public record ControlCommand(Guid CommandId, ControlAction Action, EnvironmentSettings? Environment = null,
     EnemySettings? Enemies = null, long? ExpectedSequence = null, MissionClockSettings? MissionClock = null, MissionClockExpiration? ClockExpiration = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomAlignmentPins? RoomAlignment = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomAlignmentPins? RoomAlignment = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MrTrackingRoomId = null);
 public record CommandReceipt(Guid CommandId, long AppliedAtSequence, bool Duplicate, SessionView Session);
 public sealed class MixedRealityNotReadyException(ControlAction action) : InvalidOperationException(action == ControlAction.Resume
     ? "MR resume requires a fresh paused snapshot with tracked Quest 3 poses for living players."
@@ -30,6 +31,7 @@ public sealed class MixedRealityNotReadyException(ControlAction action) : Invali
 {
     public ControlAction Action { get; } = action;
 }
+public sealed class MixedRealityTrackingPauseException() : InvalidOperationException("No current lost MR tracking in the requested room.");
 
 // Management and combat telemetry; this does not simulate a 3D world or determine physical collisions.
 public sealed partial class SessionManager
@@ -248,6 +250,11 @@ public sealed partial class SessionManager
                 && (readyMrSequence != history.View.Sequence || history.View.CombatStream?.Origin != CombatOrigin.GameServer
                     || history.View.Players.Any(player => player.Headset != HeadsetKind.Quest3)))
                 throw new MixedRealityNotReadyException(command.Action);
+            if (command.MrTrackingRoomId is { } room
+                && (readyMrSequence != history.View.Sequence || history.View.State != SessionState.Running
+                    || history.View.Environment.Mode != ExperienceMode.MR || !history.View.RoomIds.Contains(room)
+                    || history.View.CombatStream?.Origin != CombatOrigin.GameServer))
+                throw new MixedRealityTrackingPauseException();
             var entry = SessionEvent.Create(id, history.View.Sequence + 1, SessionEventKind.ControlApplied, command, actor);
             var updated = Commit(history, entry);
             return new(command.CommandId, entry.Sequence, false, updated);

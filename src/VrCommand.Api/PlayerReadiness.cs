@@ -9,7 +9,8 @@ public record PlayerReadiness(Guid PlayerId, Guid AdmissionId, int RoomId, int S
 public record SessionReadiness(int Version, Guid SessionId, long SessionSequence, DateTimeOffset SampledAtUtc,
     string SourceState, string? Origin, long WorldSequence, long ObservedSequence, DateTimeOffset? CapturedAtUtc,
     double? SourceAgeMilliseconds, PlayerReadiness[] Players, string? MrStartState, string? MrResumeState,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? MrTrackingState);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? MrTrackingState,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomMrPause? MrPause = null);
 public record RoomReadiness(int RoomId, Guid? SessionId, long SessionSequence, int Registered, int SimulatedReady,
     int TrackedReady, string SourceState, double? SourceAgeMilliseconds,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MrLiving = null,
@@ -22,7 +23,10 @@ public record RoomReadiness(int RoomId, Guid? SessionId, long SessionSequence, i
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomVrParticipation? VrParticipation = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomVenueBegin? VenueBegin = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomEnvironmentEvidence? Environment = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomEnemiesEvidence? Enemies = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomEnemiesEvidence? Enemies = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? MrTrackingPauseAvailable = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomMrPause? MrPause = null);
+public record RoomMrPause(long AppliedAtSequence, long? WorldSequence);
 public record RoomEnvironmentEvidence(RoomVenueEnvironment Setting, string? StreamId, bool Venue);
 public record RoomEnemiesEvidence(RoomVenueEnemies Setting, string? StreamId, bool Venue, int TargetCount, RoomEnemyPopulation? Population);
 public record RoomEnemyPopulation(int Present, int Alive);
@@ -40,11 +44,20 @@ public sealed partial class WorldRecordings
 
     public CommandReceipt ExecuteCommand(Guid id, ControlCommand command, OperatorIdentity actor)
     {
-        if (command.Action is not (ControlAction.Begin or ControlAction.Resume)) return manager.Execute(id, command, actor);
+        if (command.MrTrackingRoomId is null && command.Action is not (ControlAction.Begin or ControlAction.Resume))
+            return manager.Execute(id, command, actor);
         lock (gate)
         {
             var current = manager.Get(id, actor);
             AccessPolicy.Manage(actor, current.Mode, current.RoomIds);
+            if (command.MrTrackingRoomId is { } room)
+            {
+                var tracking = current.State == SessionState.Running && current.Environment.Mode == ExperienceMode.MR
+                    ? Readiness(id, actor) : null;
+                var witnessed = tracking?.SessionSequence == current.Sequence && tracking.MrTrackingState == "WaitingPlayers"
+                    && tracking.Players.Any(player => player.RoomId == room && player.State == "PoseUnavailable");
+                return manager.Execute(id, command, actor, witnessed ? current.Sequence : null);
+            }
             if (!SessionManager.RequiresMrReadiness(current, command.Action))
                 return manager.Execute(id, command, actor);
 
@@ -118,7 +131,9 @@ public sealed partial class WorldRecordings
                 report.MrTrackingState is "Ready" or "WaitingPlayers"
                     ? players.Count(player => player.State != "Eliminated") : null, clock, venuePhase,
                 beginState is null ? null : beginState == "Ready", environment is { Venue: true } ? environment.Setting : null,
-                enemies is { Venue: true } ? enemies.Setting : null, endpoint, participation, begin, environment, enemies);
+                enemies is { Venue: true } ? enemies.Setting : null, endpoint, participation, begin, environment, enemies,
+                report.MrTrackingState == "WaitingPlayers" && players.Any(player => player.State == "PoseUnavailable") ? true : null,
+                report.MrPause);
         }).ToArray();
     }
 
@@ -161,6 +176,7 @@ public sealed partial class WorldRecordings
                 return new PlayerReadiness(player.Id, player.AdmissionId, player.RoomId, player.Seat, state, kind, state == "Participating");
             }).ToArray();
             var observedSequence = frame?.Packet.observedSequence ?? 0;
+            var confirmed = source == "Fresh" && observedSequence >= phaseSince;
             var starting = SessionManager.RequiresMrReadiness(current, ControlAction.Begin);
             var resuming = SessionManager.RequiresMrReadiness(current, ControlAction.Resume);
             var tracking = current.Environment.Mode == ExperienceMode.MR && current.State == SessionState.Running;
@@ -173,10 +189,11 @@ public sealed partial class WorldRecordings
                     ? "Ready" : "WaitingPlayers";
             var report = new SessionReadiness(1, id, current.Sequence, now, source, info?.Header.origin, info?.AcceptedSequence ?? 0,
                 observedSequence, info?.CapturedAtUtc, age, players, starting ? mrState : null, resuming ? mrState : null,
-                tracking ? mrState : null);
+                tracking ? mrState : null,
+                resuming ? new(phaseSince, confirmed && info?.Header is { origin: "GameServer", calibration: WorldRecordingHeader.QuestMixedRealityProfile }
+                    ? info.AcceptedSequence : null) : null);
             var duration = current.Mission.Definition.DurationSeconds;
             RoomMissionTime? clock = null;
-            var confirmed = source == "Fresh" && observedSequence >= phaseSince;
             if (confirmed && current.State is SessionState.Running or SessionState.Paused
                 && current.CombatStream is { MissionClockVersion: 1 } && info?.Header is { missionClockVersion: 1 } header
                 && header.missionDurationSeconds == duration && frame is not null)

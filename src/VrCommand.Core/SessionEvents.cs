@@ -66,6 +66,9 @@ internal static class SessionProjection
         if (command.ClockExpiration is { } expiration && (command.Action != ControlAction.End || expiration.StreamId == Guid.Empty
             || expiration.ObservedSequence < 1 || expiration.Tick < 0))
             throw new ArgumentException("Clock expiration requires an End and valid source evidence.");
+        if (command.MrTrackingRoomId is int room && (command.Action != ControlAction.Pause
+            || room is < 1 or > SessionManager.RoomCount || command.ExpectedSequence is null or < 1))
+            throw new ArgumentException("MR tracking pause requires Pause, a room and an expected sequence.");
     }
 
     internal static SessionView Apply(SessionView? current, SessionEvent entry)
@@ -135,6 +138,11 @@ internal static class SessionProjection
                 var command = entry.Read<ControlCommand>();
                 if ((command.MissionClock is not null || command.ClockExpiration is not null) && entry.SchemaVersion < 7)
                     throw new InvalidDataException("Mission clocks require event schema 7.");
+                if (command.MrTrackingRoomId is { } trackingRoom && (entry.SchemaVersion < 7
+                    || current.State != SessionState.Running || current.Environment.Mode != ExperienceMode.MR
+                    || !current.RoomIds.Contains(trackingRoom) || current.CombatStream?.Origin != CombatOrigin.GameServer
+                    || command.ExpectedSequence != current.Sequence))
+                    throw new InvalidDataException("MR tracking pause must retain its original room, mode and revision.");
                 if (command.Action == ControlAction.SetRoomAlignment)
                 {
                     if (entry.SchemaVersion < 7) throw new InvalidDataException("Room alignment pins require event schema 7.");

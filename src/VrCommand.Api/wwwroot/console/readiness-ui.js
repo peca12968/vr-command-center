@@ -174,6 +174,27 @@ export function roomReadinessView(report, room, session, elapsed) {
   return { source, ready: attention ? 0 : ready, attention, text };
 }
 
+export function roomMrTrackingPauseTarget(report, room, session, elapsed, actor) {
+  if (session?.state !== 'Running' || session.environment?.mode !== 'MR'
+    || session.combatStream?.origin !== 'GameServer' || !session.roomIds?.includes(room.id)
+    || (actor?.role !== 'Master' && !(actor?.role === 'RoomController' && actor.roomId === room.id
+      && session.mode === 'Independent' && session.roomIds.length === 1))) return null;
+  const row = roomReadinessRow(report, room, session);
+  if (row?.mrTrackingPauseAvailable !== true || !roomReadinessView(report, room, session, elapsed).attention) return null;
+  return { sessionId: session.id, sequence: row.sessionSequence, linked: session.mode === 'Linked' };
+}
+
+export function roomMrPauseView(report, room, session, elapsed, unavailable = false) {
+  if (session?.state !== 'Paused' || session.environment?.mode !== 'MR') return null;
+  const row = roomReadinessRow(report, room, session);
+  const pause = row?.mrPause;
+  if (!Number.isSafeInteger(pause?.appliedAtSequence) || pause.appliedAtSequence < 1 || pause.appliedAtSequence > row.sessionSequence)
+    return 'MR 暫停待確認';
+  const source = unavailable ? 'Unavailable' : sourceAt(row, elapsed);
+  return source === 'Fresh' && Number.isSafeInteger(pause.worldSequence) && pause.worldSequence > 0
+    ? 'MR 暫停已套用' : `MR 暫停待確認 · ${source === 'Fresh' ? '等待階段同步' : labels[source]}`;
+}
+
 export function mountRoomReadiness(getState, unauthorized, venueUpdated, describeClimate, describeEnemies) {
   let active = false, controller, report, started = 0, attempted = -Infinity, failed = false;
   function settingView(room, session, elapsed, kind) {
@@ -203,6 +224,12 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
   function settingFrame(roomId, kind) {
     const { rooms, sessions } = getState(), room = rooms.find(row => row.id === roomId);
     return settingView(room, sessions.find(row => row.id === room?.sessionId), performance.now() - started, kind)?.target;
+  }
+  function trackingPause(roomId) {
+    const { rooms, sessions, actor } = getState();
+    const room = rooms.find(row => row.id === roomId);
+    if (!active || failed || !room || document.visibilityState !== 'visible') return null;
+    return roomMrTrackingPauseTarget(report, room, sessions.find(row => row.id === room.sessionId), performance.now() - started, actor);
   }
   function venueBegin(target, roomId) {
     const waiting = (state, text) => ({ state, text, ready: false });
@@ -243,7 +270,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     return venue?.ready === true && venue.sequence === target.phaseSinceSequence;
   }
   function render() {
-    const { rooms, sessions } = getState();
+    const { rooms, sessions, actor, busy, pending } = getState();
     const elapsed = performance.now() - started;
     for (const cell of document.querySelectorAll('[data-room-readiness]')) {
       const room = rooms.find(value => value.id === Number(cell.dataset.roomReadiness));
@@ -254,6 +281,15 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
       cell.dataset.sourceState = view.source;
       cell.classList.toggle('ready-player', view.ready > 0);
       cell.classList.toggle('tracking-attention', !!view.attention);
+      const mrPause = cell.parentElement.querySelector('[data-room-mr-pause]');
+      const pause = roomMrPauseView(report, room, session, elapsed, failed);
+      mrPause.hidden = !pause;
+      mrPause.textContent = pause ?? '';
+      mrPause.classList.toggle('tracking-attention', !!pause && pause.startsWith('MR 暫停待確認'));
+      const pauseButton = cell.parentElement.querySelector('[data-room-mr-tracking-pause]');
+      const target = active && !failed && roomMrTrackingPauseTarget(report, room, session, elapsed, actor);
+      pauseButton.hidden = !target;
+      pauseButton.disabled = !target || busy || !!pending;
       cell.parentElement.querySelector('[data-room-endpoint]').textContent = roomEndpointText(failed ? null : report, room, session);
       const clock = roomMissionTimeView(failed ? null : report, room, session, elapsed);
       const clockCell = cell.parentElement.querySelector('[data-room-clock]');
@@ -310,7 +346,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') update(); else reset(); });
   setInterval(update, 250);
-  return { update, venueReady, venueBegin, settingFrame, active(value) { active = value; if (value) update(); else reset(); } };
+  return { update, venueReady, venueBegin, settingFrame, trackingPause, active(value) { active = value; if (value) update(); else reset(); } };
 }
 
 export function mountReadiness(getState, unauthorized) {

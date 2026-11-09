@@ -395,13 +395,25 @@ internal static class ReadinessChecks
         clock.Now = start.AddMilliseconds(350);
         var rooms = store.ReadinessByRoom(master);
         check(store.Readiness(id, master).MrTrackingState == "WaitingPlayers"
-            && rooms[0] is { MrLiving: 1, TrackedReady: 1 } && rooms[4] is { MrLiving: 1, TrackedReady: 0 }
+            && rooms[0] is { MrLiving: 1, TrackedReady: 1, MrTrackingPauseAvailable: null }
+            && rooms[4] is { MrLiving: 1, TrackedReady: 0, MrTrackingPauseAvailable: true }
             && manager.Get(id).State == SessionState.Running,
             "A tracked seat loss is scoped to its room while the operator retains control of Pause");
+        var trackingPause = new ControlCommand(Guid.NewGuid(), ControlAction.Pause,
+            ExpectedSequence: manager.Get(id).Sequence, MrTrackingRoomId: 5);
+        Reject<MixedRealityTrackingPauseException>(() => manager.Execute(id, trackingPause, master),
+            "A tracking pause cannot bypass verification through the core command path");
+        Reject<MixedRealityTrackingPauseException>(() => store.ExecuteCommand(id, trackingPause with { MrTrackingRoomId = 1 }, master),
+            "Another linked room cannot stand in for the original lost tracking");
         clock.Now = start.AddMilliseconds(1850.01);
         check(store.ReadinessByRoom(master).All(room => room.MrLiving is null),
             "An expired MR frame clears its running room counts instead of keeping the previous alert");
-        store.ExecuteCommand(id, new(Guid.NewGuid(), ControlAction.Pause), master);
+        Reject<MixedRealityTrackingPauseException>(() => store.ExecuteCommand(id, trackingPause, master),
+            "An expired lost-tracking snapshot cannot accept the guarded pause");
+        clock.Now = start.AddMilliseconds(350);
+        var trackedPauseReceipt = store.ExecuteCommand(id, trackingPause, master);
+        check(!trackedPauseReceipt.Duplicate && store.ReadinessByRoom(master).All(room => room.MrPause?.AppliedAtSequence == trackedPauseReceipt.AppliedAtSequence
+            && room.MrPause.WorldSequence is null), "Guarded pause persists one command and waits for a matching game frame");
         check(store.ExecuteCommand(id, resume, master) is { Duplicate: true } retry && retry.AppliedAtSequence == continued.AppliedAtSequence
             && retry.Session.State == SessionState.Paused, "An accepted Resume retry returns the original receipt without overriding a later Pause");
 
@@ -410,6 +422,8 @@ internal static class ReadinessChecks
         check(bridge.Pose(2, bravoHead, bravoHead, new(0, 0, 1), 1.6, tracked: true), "MR test recovers the original tracked seat for the venue transition");
         store.Append(id, Frame(9), server);
         clock.Now = start.AddMilliseconds(400);
+        check(store.ReadinessByRoom(master).All(room => room.MrPause?.AppliedAtSequence == trackedPauseReceipt.AppliedAtSequence
+            && room.MrPause.WorldSequence == 9), "A fresh paused frame confirms that exact guarded pause in all five linked rooms");
         store.ExecuteCommand(id, new(Guid.NewGuid(), ControlAction.Resume), master);
         store.ExecuteVenuePhase(ControlAction.Pause, Fences(manager.ReadVenuePhase(master).Pause), Guid.NewGuid(), master);
         var venueResume = Fences(manager.ReadVenuePhase(master).Resume);
