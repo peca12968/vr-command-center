@@ -28,7 +28,8 @@ class SealVenue(vm.Venue):
     proxy = None
     def launch(self, name, config, visible=False, *, extra_args=()):
         if config['role'] == 'Server':
-            self.proxy = VenueHttpGate(self.base, config['sessionId']).start()
+            self.proxy = VenueHttpGate(self.base, config['sessionId'],
+                                      allow_recovery_reads=bool(getattr(self.args, 'recovery_exe', None))).start()
             config = {**config, 'managementApiUrl': self.proxy.base}
         super().launch(name, config, visible, extra_args=extra_args)
 

@@ -3,6 +3,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 import struct
@@ -71,10 +72,17 @@ def replay(venue, route, boundary):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ('runtime-root', 'player-exe', 'api-dll', 'before-build', 'after-build'):
+    for name in ('runtime-root', 'player-exe', 'api-dll'):
         parser.add_argument('--' + name, required=True, type=Path)
+    for name in ('before-build', 'after-build', 'recovery-exe'):
+        parser.add_argument('--' + name, type=Path)
     parser.add_argument('--browser', action='store_true', help='Also observe the real recovery in Chromium')
     args = parser.parse_args()
+    portable = args.recovery_exe is not None
+    if (portable and (args.before_build or args.after_build)) or (not portable and not (args.before_build and args.after_build)):
+        parser.error('Provide either --recovery-exe or both --before-build and --after-build')
+    if portable:
+        args.recovery_exe = args.recovery_exe.resolve(strict=True)
     args.job_workers, args.visible_room = 2, 0
     fixture.vm.verify_player(args)
     venue = fixture.SealVenue(args, artifact_family='desktop-journal-recovery')
@@ -88,6 +96,27 @@ def main():
             'environment': {'mode': 'VR', 'weather': 'Clear', 'timeOfDay': 'Day', 'lightning': False},
             'enemies': {'count': 1, 'behavior': 'Hold', 'autoAttack': True}}, expected=201)
         entry = venue.create(mission, [3], 'recovery')
+        def recover(label, *, reason=None):
+            work = venue.runtime_directory / label
+            env = dict(os.environ, DOTNET_ROOT=str(venue.runtime_directory / 'no-dotnet'),
+                       DOTNET_MULTILEVEL_LOOKUP='0', PATH=str(Path(os.environ['WINDIR']) / 'System32'),
+                       DOTNET_BUNDLE_EXTRACT_BASE_DIR=str(venue.runtime_directory / 'recovery-extract'))
+            run = subprocess.run([str(args.recovery_exe), '--recover-server', str(venue.directory / 'recovery-server.json'),
+                                  '--work', str(work)], cwd=venue.runtime_directory, env=env,
+                                 capture_output=True, encoding='utf-8', timeout=45)
+            assert not any(key in run.stdout + run.stderr for key in venue.tokens.values())
+            venue.save(label + '.json', {'returnCode': run.returncode, 'stdout': run.stdout, 'stderr': run.stderr})
+            if reason:
+                assert run.returncode == 1 and not (work / 'recovery.json').exists()
+                assert json.loads(run.stderr)['reason'] == reason
+                if reason == 'IOException':
+                    assert not work.exists()
+                return None
+            assert run.returncode == 0, run.stderr
+            proof = json.loads((work / 'recovery.json').read_bytes())
+            assert proof == json.loads(run.stdout) and proof['recoverySucceeded'] and not proof['gameplayRestarted']
+            return proof
+
         venue.clients([entry])
         venue.command(entry, 'Begin')
         session = '/api/sessions/' + entry['id']
@@ -99,6 +128,8 @@ def main():
         time.sleep(2)
         server = venue.processes['recovery-server']
         assert server.poll() is None and venue.state(entry)['state'] == 'Running'
+        if portable:
+            recover('original-still-locked', reason='IOException')
         venue.stop('recovery-server')
         assert server.returncode != 0
         venue.proxy.release()
@@ -143,8 +174,11 @@ def main():
                 assert hashes == [digest(path) for path in files]
             return json.loads(run.stdout)
 
-        relay(args.before_build, 'WorldRelay', 'old-world', rejection=True)
-        relay(args.before_build, 'TelemetryRelay', 'old-combat', rejection=True)
+        if portable:
+            recover('not-ended', reason='end-original-session-before-recovery')
+        else:
+            relay(args.before_build, 'WorldRelay', 'old-world', rejection=True)
+            relay(args.before_build, 'TelemetryRelay', 'old-combat', rejection=True)
         assert venue.request(route) == before_world and venue.state(entry) == before_session
         assert venue.request(session + '/statistics') == before_stats
         if args.browser:
@@ -160,24 +194,48 @@ def main():
 
             venue.wait(browser_ready, 50, 'browser initial replay')
 
-        outcome = relay(args.after_build, 'WorldRelay', 'recovered-world')
+        if portable:
+            venue.command(entry, 'End')
+            venue.proxy.block('publication')
+            try:
+                recover('world-still-unreachable', reason='WorldConnectionInterrupted')
+                combat_after_failure = venue.state(entry)['combatStream']['acceptedSequence']
+                assert combat_after_failure > attached['acceptedSequence'] and venue.request(route) == before_world
+            finally:
+                venue.proxy.release()
+            proof = recover('recovered-world')
+            assert proof['worldBefore'] == before_world['acceptedSequence'] and proof['combatBefore'] == combat_after_failure
+            assert proof['sessionId'] == entry['id'] and proof['streamId'] == attached['streamId'] and proof['origin'] == 'Simulation'
+            assert not proof['worldSealed'] and not proof['combatSealed']
+        else:
+            outcome = relay(args.after_build, 'WorldRelay', 'recovered-world')
         recovered = venue.request(route)
         state = venue.state(entry)
         statistics = venue.request(session + '/statistics')
         tail = closed['lastFrame']['worldSequence']
-        assert outcome['frames'] == outcome['acknowledged'] == recovered['acceptedSequence'] == tail
-        assert outcome['sessionId'] == entry['id'] and outcome['origin'] == 'Simulation'
-        assert not outcome['complete'] and not recovered['complete'] and recovered['header'] == before_world['header']
-        assert state['state'] == 'Running' and state['combatStream']['streamId'] == attached['streamId']
+        if portable:
+            assert proof['worldAcknowledged'] == recovered['acceptedSequence'] == tail
+            assert proof['combatAcknowledged'] == state['combatStream']['acceptedSequence']
+        else:
+            assert outcome['frames'] == outcome['acknowledged'] == recovered['acceptedSequence'] == tail
+            assert outcome['sessionId'] == entry['id'] and outcome['origin'] == 'Simulation' and not outcome['complete']
+        assert not recovered['complete'] and recovered['header'] == before_world['header']
+        assert state['state'] == ('Ended' if portable else 'Running') and state['combatStream']['streamId'] == attached['streamId']
         assert state['combatStream']['missionClockVersion'] == 1 and not state['combatStream']['sealed']
         assert state['combatStream']['acceptedSequence'] > attached['acceptedSequence']
         venue.save('recovered.json', {'world': recovered, 'combat': state['combatStream'], 'statistics': statistics})
         assert statistics['players'][0]['damageTaken'] > before_stats['players'][0]['damageTaken']
-        assert relay(args.after_build, 'WorldRelay', 'recovered-world', again=True) == outcome
-        combat = relay(args.after_build, 'TelemetryRelay', 'recovered-combat')
-        assert combat['sessionId'] == entry['id'] and combat['acknowledged'] == state['combatStream']['acceptedSequence']
-        assert not combat['complete'] and not combat['sealedStream'] and combat['statistics'] == statistics
-        assert relay(args.after_build, 'TelemetryRelay', 'recovered-combat', again=True) == combat
+        if portable:
+            again = recover('recovered-repeat')
+            assert again == dict(proof, worldBefore=proof['worldAcknowledged'], combatBefore=proof['combatAcknowledged'])
+            for name in ('world.worldlog', 'combat.journal'):
+                assert digest(venue.runtime_directory / 'recovered-world' / name) == digest(venue.runtime_directory / 'recovered-repeat' / name)
+        else:
+            assert relay(args.after_build, 'WorldRelay', 'recovered-world', again=True) == outcome
+            combat = relay(args.after_build, 'TelemetryRelay', 'recovered-combat')
+            assert combat['sessionId'] == entry['id'] and combat['acknowledged'] == state['combatStream']['acceptedSequence']
+            assert not combat['complete'] and not combat['sealedStream'] and combat['statistics'] == statistics
+            assert relay(args.after_build, 'TelemetryRelay', 'recovered-combat', again=True) == combat
         assert venue.request(route) == recovered and venue.state(entry) == state
         assert all(digest(path) == sha for path, sha in originals.items())
         if browser:
@@ -185,7 +243,8 @@ def main():
             venue.save('browser-relay.json', {'tail': tail, 'damage': exact['statistics'][0]['damageTaken']})
             assert browser.wait(timeout=50) == 0
 
-        venue.command(entry, 'End')
+        if not portable:
+            venue.command(entry, 'End')
         assert venue.state(entry)['state'] == 'Ended' and venue.request(route) == recovered
         assert venue.request(session + '/statistics')['pendingTelemetry']
         frames = replay(venue, route, recovered)
@@ -210,6 +269,9 @@ def main():
                   'damageBefore': before_stats['players'][0]['damageTaken'], 'damageRecovered': statistics['players'][0]['damageTaken'],
                   'terminalEvent': 'saved-end', 'gameplayRestarted': False, 'worldSealed': False,
                   'combatSealed': False, 'finalCsvAvailable': False, 'fieldEvidenceAvailable': False, 'playerFinalReceived': False}
+        if portable:
+            report['recoveryExeSha256'] = digest(args.recovery_exe)
+            report['combatAfterFailedWorldPublish'] = combat_after_failure
     finally:
         if browser and browser.poll() is None:
             (venue.directory / 'browser-stop').touch(exist_ok=False)

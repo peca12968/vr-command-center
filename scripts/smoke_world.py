@@ -17,6 +17,7 @@ from world_test_socket import WebSocket
 ROOT = Path(__file__).resolve().parents[1]
 API = os.environ.get("VR_COMMAND_API_DLL", str(ROOT / "src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll"))
 RELAY = os.environ.get("VR_COMMAND_WORLD_RELAY_DLL", str(ROOT / "tools/VrCommand.WorldRelay/bin/Release/net10.0/VrCommand.WorldRelay.dll"))
+RECOVERY = [os.environ["VR_COMMAND_RECOVERY_EXE"]] if "VR_COMMAND_RECOVERY_EXE" in os.environ else ["dotnet", RELAY]
 count = 0
 
 
@@ -397,6 +398,53 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         native = subprocess.run(shared_command, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30)
         check(native.returncode == 0 and json.loads(native.stdout)["acknowledged"] == 24 and json.loads(native.stdout)["complete"], "Independent process recovers shared durable acknowledgments and final seal")
         check(request(shared_route) == shared_info, "Shared source recovery preserves the exact accepted world archive")
+        recovery_input = directory / "closed-server"
+        recovery_input.mkdir()
+        recovery_config = recovery_input / "server-config.json"
+        original_world = recovery_input / (shared_result["sessionId"] + ".worldlog")
+        original_combat = recovery_input / (shared_result["sessionId"] + ".journal")
+        sealed_world = shared.read_bytes()
+        sealed_combat = Path(str(shared) + ".combat").read_bytes()
+        # Simulate loss of only the final durable receipts, leaving both original completion records.
+        assert sealed_world[-45:-40] == b"\x09\x00\x00\x00\x04" and sealed_combat[-37:-32] == b"\x01\x00\x00\x00\x05"
+        original_world.write_bytes(sealed_world[:-45])
+        original_combat.write_bytes(sealed_combat[:-37])
+        recovery_draft = {"role": "Server", "sessionId": shared_result["sessionId"], "managementApiUrl": base,
+                          "gameServerKey": tokens["GameServer"], "telemetryOrigin": "Simulation", "telemetryDirectory": str(recovery_input)}
+
+        def recover(label, config):
+            recovery_config.write_text(json.dumps(config), encoding="utf-8-sig")
+            work = directory / label
+            result = subprocess.run([*RECOVERY, "--recover-server", str(recovery_config), "--work", str(work)],
+                                    cwd=directory, capture_output=True, encoding="utf-8", timeout=30)
+            assert not any(key in result.stdout + result.stderr for key in tokens.values())
+            return work, result
+
+        old_session = request(shared_route.rsplit("/", 1)[0])
+        work, denied = recover("wrong-role", {**recovery_draft, "gameServerKey": tokens["Master"]})
+        check(denied.returncode == 1 and json.loads(denied.stderr)["reason"] == "require-original-game-server-role"
+              and not (work / "recovery.json").exists() and request(shared_route.rsplit("/", 1)[0]) == old_session,
+              "The operational recovery path rejects a valid credential of the wrong role before writing to management")
+        work, mismatch = recover("wrong-origin", {**recovery_draft, "telemetryOrigin": "GameServer"})
+        check(mismatch.returncode == 1 and json.loads(mismatch.stderr)["reason"] == "journal-identity-or-completion-mismatch"
+              and not (work / "recovery.json").exists() and request(shared_route) == shared_info,
+              "The operational recovery path rejects a mismatched source and preserves the existing archive")
+        work, restored = recover("restored-recording", recovery_draft)
+        proof = json.loads((work / "recovery.json").read_bytes()) if restored.returncode == 0 else {}
+        check(restored.returncode == 0 and proof == json.loads(restored.stdout)
+              and proof["recoverySucceeded"] and proof["worldBefore"] == proof["worldAcknowledged"] == 24
+              and proof["combatBefore"] == proof["combatAcknowledged"] == old_session["combatStream"]["acceptedSequence"]
+              and proof["worldSealed"] and proof["combatSealed"] and not proof["gameplayRestarted"]
+              and (work / "world.worldlog").read_bytes() == sealed_world and (work / "combat.journal").read_bytes() == sealed_combat,
+              "The operational recovery path restores only the original acknowledged seal receipts into its working copies")
+        check(original_world.read_bytes() == sealed_world[:-45] and original_combat.read_bytes() == sealed_combat[:-37]
+              and request(shared_route) == shared_info and request(shared_route.rsplit("/", 1)[0]) == old_session,
+              "Operational recovery leaves both originals and the already accepted management state byte-consistent")
+        original_world.write_bytes(sealed_world[:-1])
+        work, damaged = recover("damaged-recording", recovery_draft)
+        check(damaged.returncode == 1 and not (work / "recovery.json").exists()
+              and original_world.read_bytes() == sealed_world[:-1] and request(shared_route) == shared_info,
+              "Operational recovery rejects a torn original without truncating it or claiming a completed transfer")
         intact = shared.read_bytes()
         shared.write_bytes(intact[:-1])
         native = subprocess.run(shared_command, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30)

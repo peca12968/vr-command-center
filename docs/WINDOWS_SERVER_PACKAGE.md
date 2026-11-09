@@ -24,6 +24,21 @@ Unity 0.47.0 伺服器可搭配控制台 0.31.14。啟動器 1.5 可選擇待開
 
 結果報告的 `managementRecovery` 提供 `outages`、`recoveries` 及 `longestMilliseconds`，可核對啟動器觀察到的讀取中斷。玩家戰績送達應另對原伺服器和玩家日誌。 [封存戰績核對](EXTERNAL_CLIENTS.md#核對封存戰績與-udp-來源)
 
+## 遊戲程序退出後補送錄製
+
+Windows 錄製補送工具 0.1.0 使用原遊戲伺服器工作資料夾中的 `server-config.json`，以及設定指向的 `telemetry` 下同一場次的 `.journal` 與 `.worldlog`。遊戲程序退出後，先在原管理實例結束該場次並釋放房間，再解壓補送工具。原設定檔含該伺服器的 GameServer 金鑰，請與日誌一併私下保管。
+
+```powershell
+.\Recover-Recording.exe --recover-server 'C:\private\server-work\server-config.json' `
+  --work 'C:\private\recovered-room1'
+```
+
+工作資料夾必須是新路徑，上層須已存在。工具在兩份原檔保持唯讀獨占的期間建立工作副本，核對原場次、原錄製來源及原管理端接受序號後補送。獨立五房可分別處理受影響的場次，合併場只需處理其原伺服器一次。
+
+退出碼 0 會在工作資料夾留下 `recovery.json`，列出兩份日誌補送前後的接受序號與各自封存狀態。若原日誌未完成結尾，主控台可播放已保存片段，場次仍顯示未完整封存。只在有原完成紀錄且服務確認精確尾端時封存。補送之後可另行開新場次。 [回放保存片段](WORLD_RECORDING.md#回放未封存的已保存片段)
+
+退出碼 1 會在終端顯示原因，並保留可用的工作副本。若戰鬥已補送、世界暫時失聯，待服務恢復後用同一原設定及原日誌、另開工作資料夾重試。伺服器會核對已接受的原資料，再接續未接受部分。損壞或仍由原程序鎖住的日誌需先排除問題，工具不截斷原檔。
+
 ## 本機 UDP 綁定確認
 
 2026-11-06 主包為 `artifacts/server-packages/windows-server-0.41.2-launcher1.3-win-x64.zip`，82,676,182 bytes，SHA256 `0f5448df34c5857286d8e29d4feb497fd72961685359033e65b926747fb3555c`。清單有 311 筆，內含 304 份與啟動器 1.2 相同的遊戲執行檔及相依檔。

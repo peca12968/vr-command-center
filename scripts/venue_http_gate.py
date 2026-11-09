@@ -36,11 +36,14 @@ PUBLICATION_BLOCKS = ('publication', 'publication-combat')
 
 
 class VenueHttpGate:
-    def __init__(self, upstream, session, *, max_block_seconds=20, maximum_seconds=240):
+    def __init__(self, upstream, session, *, max_block_seconds=20, maximum_seconds=240, allow_recovery_reads=False):
         target = urlsplit(upstream)
         if target.scheme != 'http' or target.hostname != '127.0.0.1' or not target.port or target.port == 5080 or target.path not in ('', '/') or target.query or target.fragment or target.username or target.password:
             raise ValueError('Gate requires its own plain loopback upstream, never preview 5080')
         self.session = str(UUID(session)); self.prefix = '/api/sessions/' + self.session
+        self.reads = (self.prefix, self.prefix + '/statistics')
+        if allow_recovery_reads:
+            self.reads += ('/api/me', self.prefix + '/world')
         if not 0 < max_block_seconds <= 20 or not 0 < maximum_seconds <= 240:
             raise ValueError('Fault duration must be bounded')
         self.upstream = ('127.0.0.1', target.port); self.max_block_seconds = max_block_seconds
@@ -83,7 +86,7 @@ class VenueHttpGate:
         with self.lock: return self.mode in PUBLICATION_BLOCKS
 
     def allowed(self, method, path):
-        return (method == 'GET' and path in (self.prefix, self.prefix + '/statistics')) or (method == 'POST' and path in (
+        return (method == 'GET' and path in self.reads) or (method == 'POST' and path in (
             '/api/player-tickets/validate', self.prefix + '/combat-stream', self.prefix + '/combat-stream/batch', self.prefix + '/combat-stream/seal'))
 
     def blocked_http(self, method, path):

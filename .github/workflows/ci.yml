@@ -22,6 +22,7 @@ jobs:
       - run: python scripts/check-hardware-simulator.py
       - run: python scripts/check-live-hardware-gateway.py
       - run: python -m py_compile scripts/package-hardware-simulator.py
+      - run: python -m py_compile scripts/package-windows-recording-recovery.py
       - run: python -m unittest discover -s tests -p test_control_package.py
       - run: python -m unittest discover -s tests -p test_server_package.py
       - run: python -m unittest discover -s tests -p test_field_results.py

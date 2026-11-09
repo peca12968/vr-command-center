@@ -20,6 +20,8 @@ WorldPublisher 每次只送一份待確認幀，等待該幀 throughCombatSequen
 
 ## 工具操作
 
+Windows 場館操作員可使用獨立的錄製補送套件，從原伺服器設定檔取得日誌與原管理端，並用工作副本補送。 [Windows 補送操作](WINDOWS_SERVER_PACKAGE.md#遊戲程序退出後補送錄製)
+
 房間 5 必須空閒，檔案必須不存在。只建立自己的 Simulation 任務，不變更現有場次。
 
 ```powershell
