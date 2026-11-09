@@ -408,15 +408,17 @@ class QuestVenueTests(unittest.TestCase):
 
     def test_vr_fleet_validates_current_headsets_and_writes_only_original_configs(self):
         files, configs = self.vr_bundle('Linked')
-        mapping, _ = self.device_map()
+        mapping, document = self.device_map()
         calls = []
         headset = ['ViveXr']
+        stale = [False]
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
                 calls.append((self.path, self.headers['Authorization'], json.loads(self.rfile.read(int(self.headers['Content-Length'])))))
-                payload = {'topology': 'Linked', 'allMatched': True, 'seats': [
-                    {'roomId': room, 'seat': seat, 'status': 'matched', 'headset': headset[0] if (room, seat) == (2, 1) else 'Quest3'}
+                payload = {'topology': 'Linked', 'allMatched': not stale[0], 'seats': [
+                    {'roomId': room, 'seat': seat, 'status': 'admission-changed' if stale[0] and (room, seat) == (2, 1) else 'matched',
+                     'headset': headset[0] if (room, seat) == (2, 1) else 'Quest3'}
                     for room in range(1, 6) for seat in range(5)]}
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
@@ -437,6 +439,32 @@ class QuestVenueTests(unittest.TestCase):
                 report = json.loads(rejected.stdout)
                 self.assertEqual('seat-headset-mismatch', report['devices'][6]['status'])
                 self.assertFalse(any(self.root.glob('fixture-*')))
+                selected = [row for row in document['seats'] if row['serial'] in {'fixture-01','fixture-13','fixture-24'}]
+                mapping.write_text(json.dumps({'version': 1, 'seats': selected}), encoding='utf-8')
+                stale[0] = True
+                blocked = self.run_fleet(files, mapping, '-AllowPartialMap', '-DeployMappedSeats', '-ManagementApi', url, environment=env)
+                self.assert_rejected(blocked, 'Room 2 seat 2: admission-changed')
+                self.assertFalse(any(self.root.glob('fixture-*')))
+                stale[0] = False
+                (self.root / 'adb.log').unlink()
+                partial = self.run_fleet(files, mapping, '-AllowPartialMap', '-DeployMappedSeats', '-ManagementApi', url,
+                                         faults={'fixture-07': 'offline', 'fixture-25': 'wrong-model'}, environment=env)
+                self.assertEqual(0, partial.returncode, partial.stderr)
+                report = json.loads(partial.stdout)
+                self.assertEqual((True, True, 3, 22), (report['complete'], report['managementVerified'], report['mappedSeats'], report['unmappedSeats']))
+                self.assertEqual([(1, 1), (3, 3), (5, 4)], [(row['roomId'], row['seat']) for row in report['devices']])
+                self.assertTrue(all(row['status'] == 'launch-requested' for row in report['devices']))
+                self.assertEqual({'fixture-01','fixture-13','fixture-24'}, {file.name for file in self.root.glob('fixture-*')})
+                for row in selected:
+                    room, seat = row['roomId'], row['seat']
+                    self.assertEqual(configs[room][f'room-{room:02}-seat-{seat:02}.json'],
+                                     json.loads((self.root / row['serial'] / 'vr-connection.json').read_bytes()))
+                commands = (self.root / 'adb.log').read_text(encoding='utf-8').splitlines()
+                self.assertEqual({'fixture-01','fixture-13','fixture-24'}, {line.split()[1] for line in commands if line.startswith('-s ')})
+                self.assertEqual(3, sum(' shell monkey ' in line for line in commands))
+                self.assertNotIn('private-fixture-master', partial.stdout)
+                self.assertNotIn('v2.', partial.stdout)
+                mapping.write_text(json.dumps(document), encoding='utf-8')
                 headset[0] = 'Quest3'
                 applied = self.run_fleet(files, mapping, '-DeployMappedSeats', '-ManagementApi', url, environment=env)
                 self.assertEqual(0, applied.returncode, applied.stderr)
@@ -444,7 +472,7 @@ class QuestVenueTests(unittest.TestCase):
             finally:
                 server.shutdown()
                 thread.join()
-        self.assertEqual(2, len(calls))
+        self.assertEqual(4, len(calls))
         for route, key, proof in calls:
             self.assertEqual(('/api/vr-deployment/venue-check', 'Bearer private-fixture-master'), (route, key))
             for room in proof['rooms']:
@@ -474,6 +502,87 @@ class QuestVenueTests(unittest.TestCase):
                 self.assert_rejected(self.run_fleet(files, path), message)
         self.assert_rejected(self.run_fleet(files, path, '-DeployMappedSeats'), 'requires -ManagementApi')
         self.assertFalse((self.root / 'adb.log').exists())
+
+    def test_partial_map_requires_opt_in_and_rejects_invalid_counts_and_duplicates(self):
+        files, _ = self.bundle('Independent')
+        path, document = self.device_map()
+        self.assert_rejected(self.run_bundle(files, '-AllowPartialMap'), 'Specify -DeviceMap')
+        for seats, message in [
+            ([], '1 to 25 seats'),
+            ([*document['seats'], document['seats'][0]], '1 to 25 seats'),
+            ([document['seats'][0]] * 2, 'mapped more than once'),
+            ([document['seats'][0], {**document['seats'][1], 'serial': document['seats'][0]['serial']}], 'repeats an ADB serial'),
+        ]:
+            with self.subTest(message=message):
+                path.write_text(json.dumps({'version': 1, 'seats': seats}), encoding='utf-8')
+                self.assert_rejected(self.run_fleet(files, path, '-AllowPartialMap', '-CheckOnly'), message)
+        path.write_text(json.dumps({'version': 1, 'seats': document['seats'][:1]}), encoding='utf-8')
+        self.assert_rejected(self.run_fleet(files, path, '-CheckOnly'), 'exactly 25 seats')
+        self.assert_rejected(self.run_fleet(files, path, '-AllowPartialMap', '-DeployMappedSeats'), 'requires -ManagementApi')
+        self.assertFalse((self.root / 'adb.log').exists())
+        result = self.run_fleet(files, path, '-AllowPartialMap', '-CheckOnly')
+        self.assertEqual(0, result.returncode, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(('Independent', 'preflight', True, True, 1, 24),
+                         (report['topology'], report['phase'], report['complete'], report['alignmentPinsVerified'],
+                          report['mappedSeats'], report['unmappedSeats']))
+        self.assertNotIn('managementVerified', report)
+        self.assertEqual([{'roomId': 5, 'seat': 5, 'status': 'ready', 'versionCode': 61}], report['devices'])
+        self.assertFalse(any(self.root.glob('fixture-*')))
+
+    def test_partial_mr_deployment_preserves_original_pins_on_selected_devices(self):
+        files, configs = self.bundle('Linked')
+        mapping, document = self.device_map()
+        selected = [row for row in document['seats'] if row['serial'] in {'fixture-03','fixture-22'}]
+        mapping.write_text(json.dumps({'version': 1, 'seats': selected}), encoding='utf-8')
+        session = str(self.session_ids[0])
+        calls = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def respond(self, payload):
+                calls.append(self.path)
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(payload).encode())
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers['Content-Length']))
+                self.respond({'topology': 'Linked', 'allMatched': True, 'seats': [
+                    {'roomId': room, 'seat': seat, 'status': 'matched'} for room in range(1, 6) for seat in range(5)]})
+
+            def do_GET(self):
+                self.respond({'version': 1, 'sessionId': session, 'sessionEnded': False, 'address': '192.168.1.10', 'port': 7777})
+
+            def log_message(self, *args):
+                pass
+
+        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                result = self.run_fleet(files, mapping, '-AllowPartialMap', '-DeployMappedSeats',
+                    '-ManagementApi', f'http://127.0.0.1:{server.server_port}', environment={'VR_COMMAND_MASTER_KEY': 'private-fixture-master'})
+            finally:
+                server.shutdown()
+                thread.join(timeout=5)
+        self.assertEqual(0, result.returncode, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual((True, True, True, 2, 23), (report['complete'], report['managementVerified'],
+                         report['alignmentPinsVerified'], report['mappedSeats'], report['unmappedSeats']))
+        self.assertEqual(['/api/mr-deployment/venue-check', f'/api/sessions/{session}/connection-endpoint'], calls)
+        self.assertEqual({'fixture-03','fixture-22'}, {path.name for path in self.root.glob('fixture-*')})
+        for row in selected:
+            room, seat = row['roomId'], row['seat']
+            directory = self.root / row['serial']
+            config = configs[room][f'room-{room:02}-seat-{seat:02}.json']
+            original = files[f'room-{room:02}-alignment.json']
+            alignment = f"vr-room-alignment-{config['roomAlignmentSha256']}.json"
+            self.assertEqual(original, (directory / alignment).read_bytes())
+            self.assertEqual(dict(config, questPassthrough=True, requestMixedReality=True),
+                             json.loads((directory / 'vr-connection.json').read_bytes()))
+            self.assertEqual({alignment, 'vr-connection.json'}, {file.name for file in directory.iterdir()})
+        self.assertNotIn('v2.', result.stdout)
 
     def test_device_map_reads_all_25_and_reports_faults_without_device_writes(self):
         files, _ = self.bundle('Independent')

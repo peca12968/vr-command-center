@@ -190,7 +190,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip -RoomId 4 -Seat 2 -CheckOnly
 ```
 
-正式寫入 VR 設定前須提供 `-ManagementApi` 與主控環境變數 `VR_COMMAND_MASTER_KEY`。工具把原檔送給管理服務，逐席驗簽並核對現行名冊及公告端點。指定單席時，該席須登記為 Quest 3。整批部署時，25 席均須登記為 Quest 3，並對上各自已授權且已安裝指定 APK 版本的裝置。混合 VIVE 與 Quest 的名冊可依席位選擇要部署的 Quest。
+正式寫入 VR 設定前須提供 `-ManagementApi` 與主控環境變數 `VR_COMMAND_MASTER_KEY`。工具把原檔送給管理服務，逐席驗簽並核對現行名冊及公告端點。指定單席或使用裝置清單時，要寫入的席位須登記為 Quest 3，並對上各自已授權且已安裝指定 APK 版本的裝置。混合 VIVE 與 Quest 的名冊可用小批次部署指定 Quest 席位。 [小批次操作](#部署指定的-quest-席位)
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
@@ -262,6 +262,21 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.z
 ```
 
 中途失敗會停止並以非零結束碼回報。`launch-requested` 表示裝置已收到啟動指令，`deployment-failed` 的席位可能已套用部分檔案，`not-attempted` 表示該席未寫入。已處理席位保留當下結果。可按回報定位故障，必要時重新配發票券，再用單席流程處理尚未成功的裝置。遊戲入場與 MR 就緒另由場次面板核對。
+
+#### 部署指定的 Quest 席位
+
+使用原五房 VR 或 MR 部署 ZIP。版本 1 的 `device-map.json` 只列這次要部署的 1 至 25 席，房號、席位和 ADB 序號的格式維持相同。加上 `-AllowPartialMap` 即可接受少於 25 席的清單。未指定此選項時，清單仍須有完整 25 席。
+
+```powershell
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
+    -DeviceMap .\quest-batch.json -ExpectedVersionCode 61 -AllowPartialMap `
+    -ManagementApi http://127.0.0.1:5081 -CheckOnly
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
+    -DeviceMap .\quest-batch.json -ExpectedVersionCode 61 -AllowPartialMap `
+    -ManagementApi http://127.0.0.1:5081 -DeployMappedSeats
+```
+
+正式套用前仍會核對 ZIP 的全部 25 份連線檔、簽章、現行名冊和公告端點。MR 同時核對原鎖定校正檔。任何票券過期或名額已更換時，請從主控下載新的 ZIP。混合 VR 名冊中，已列入清單的席位都須登記為 Quest 3。工具只查詢清單中的裝置型號與 APK 版本，只寫入及啟動這些裝置。部署報告的 `mappedSeats` 和 `unmappedSeats` 分別表示本次有列入及未列入的席位數。
 
 #### 使用逐房下載的檔案建立清單
 

@@ -12,6 +12,7 @@ param(
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,5)][int]$RoomId,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,5)][int]$Seat,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$DeviceMap,
+    [Parameter(ParameterSetName='Bundle')][switch]$AllowPartialMap,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,2147483647)][int]$ExpectedVersionCode,
     [Parameter(ParameterSetName='Bundle')][switch]$DeployMappedSeats,
     [Parameter(ParameterSetName='Venue')][Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$ManagementApi
@@ -402,10 +403,13 @@ function Confirm-VenueReadback($Venue) {
     }
 }
 
-function Read-QuestDeviceMap([string]$Path) {
+function Read-QuestDeviceMap([string]$Path, [switch]$Partial) {
     $map = (Read-DeploymentJson $Path 16384 'device map').Document
-    if (-not (Test-JsonInteger $map.version) -or $map.version -ne 1 -or $map.seats -isnot [array] -or $map.seats.Count -ne 25 -or
+    $minimum = if ($Partial) { 1 } else { 25 }
+    if (-not (Test-JsonInteger $map.version) -or $map.version -ne 1 -or $map.seats -isnot [array] -or
+        $map.seats.Count -lt $minimum -or $map.seats.Count -gt 25 -or
         @($map.PSObject.Properties.Name | Where-Object { $_ -cnotin @('version','seats') }).Count) {
+        if ($Partial) { throw 'Use a version 1 device map with 1 to 25 seats.' }
         throw 'Use a version 1 device map with exactly 25 seats.'
     }
     $seats = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
@@ -464,6 +468,10 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map) {
     $devices = @($Map | ForEach-Object { Get-MappedQuestStatus $_ $inventory })
     $report = [ordered]@{ phase = 'preflight'; topology = $Venue.Report.topology; expectedVersionCode = $ExpectedVersionCode;
         earliestExpiryUtc = $Venue.Report.earliestExpiryUtc; complete = $false; devices = $devices }
+    if ($AllowPartialMap) {
+        $report.mappedSeats = $Map.Count
+        $report.unmappedSeats = $Venue.Report.seats - $Map.Count
+    }
     $isVr = $Venue.Report.mode -ceq 'VR'
     if ($isVr) { $report.mode = 'VR' } else { $report.alignmentPinsVerified = $true }
     if ($devices | Where-Object { $_.status -cne 'ready' }) { return $report }
@@ -573,7 +581,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
         if ($DeployMappedSeats -and ($CheckOnly -or -not $ManagementApi)) {
             throw '-DeployMappedSeats requires -ManagementApi and cannot be combined with -CheckOnly.'
         }
-        $map = @(Read-QuestDeviceMap $DeviceMap)
+        $map = @(Read-QuestDeviceMap $DeviceMap -Partial:$AllowPartialMap)
         $venue = Read-VenueBundle $VenueBundle 0 0
         if ($DeployMappedSeats) {
             $deploymentLock = Enter-QuestDeployment
@@ -584,7 +592,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
         if (-not $result.complete) { exit 1 }
         return
     }
-    if ($DeployMappedSeats -or $ExpectedVersionCode) { throw 'Specify -DeviceMap for mapped deployment parameters.' }
+    if ($DeployMappedSeats -or $ExpectedVersionCode -or $AllowPartialMap) { throw 'Specify -DeviceMap for mapped deployment parameters.' }
     if ([bool]$RoomId -ne [bool]$Seat) { throw 'Specify both -RoomId and -Seat, or omit both for five-room preflight.' }
     if (-not $RoomId -and $Serial) { throw 'Specify -RoomId and -Seat when targeting a Quest device.' }
     if ($RoomId -and -not $CheckOnly -and [string]::IsNullOrWhiteSpace($Serial)) { throw 'Specify -Serial to deploy a bundle seat to a Quest 3.' }
