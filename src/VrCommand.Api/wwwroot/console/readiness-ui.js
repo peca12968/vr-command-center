@@ -176,18 +176,41 @@ export function roomReadinessView(report, room, session, elapsed) {
 
 export function mountRoomReadiness(getState, unauthorized, venueUpdated, describeClimate, describeEnemies) {
   let active = false, controller, report, started = 0, attempted = -Infinity, failed = false;
+  function venueBegin(target, roomId) {
+    const waiting = (state, text) => ({ state, text, ready: false });
+    if (failed) return waiting('Unavailable', '無法確認，正在重試');
+    const { rooms, sessions } = getState();
+    const room = rooms.find(row => row.id === roomId && row.sessionId === target.sessionId);
+    const session = sessions.find(row => row.id === target.sessionId);
+    const row = active && room && session?.state === 'Preparing' ? roomReadinessRow(report, room, session) : null;
+    if (!row || row.sessionSequence !== target.sessionSequence) return waiting('Updating', '等待核對目前場次與名冊');
+    const details = row.venueBegin;
+    if (details?.state === 'EmptyRoster') return waiting('EmptyRoster', session.mode === 'Linked' ? '五房共用場次尚無玩家' : '名冊尚無玩家');
+    const source = sourceAt(row, performance.now() - started);
+    if (source !== 'Fresh') return waiting(source, labels[source]);
+    const mr = session.environment.mode === 'MR';
+    const empty = '本房未編列席位';
+    if (row.venueBeginReady === true)
+      return { state: 'Ready', text: row.registered ? `${row.registered} 席${mr ? '追蹤' : '姿態'}就緒` : empty, ready: true };
+    if (details?.state === 'WaitingRevision') return waiting('WaitingRevision', '等待遊戲端同步最新設定與名冊');
+    if (details?.state === 'WaitingProfile') return waiting('WaitingProfile', '等待支援 Quest 3 MR 的遊戲來源');
+    if (details?.state === 'WaitingPlayers' && Array.isArray(details.waitingSeats) && details.waitingSeats.length <= row.registered
+      && details.waitingSeats.every((seat, index, seats) => Number.isInteger(seat) && seat >= 1 && seat <= room.capacity
+        && (index === 0 || seats[index - 1] < seat))) {
+      const seats = details.waitingSeats;
+      if (seats.length) return waiting('WaitingPlayers', `等候席位 ${seats.join('、')} 的${mr ? '追蹤' : '姿態'}`);
+      return waiting('WaitingLinkedRooms', (row.registered ? '本房席位就緒' : empty) + ' · 等候同場其他房間');
+    }
+    return waiting('Unavailable', '開場條件尚未確認');
+  }
   function venueReady(target, action) {
+    if (action === 'Begin') return venueBegin(target, target.roomIds[0]).ready;
     if (!active || failed) return false;
     const { rooms, sessions } = getState();
     const room = rooms.find(row => row.id === target.roomIds[0] && row.sessionId === target.sessionId);
     const session = sessions.find(row => row.id === target.sessionId);
     if (!room || !session) return false;
     const elapsed = performance.now() - started;
-    if (action === 'Begin') {
-      const row = roomReadinessRow(report, room, session);
-      return session.state === 'Preparing' && row?.sessionSequence === target.sessionSequence
-        && row.venueBeginReady === true && sourceAt(row, elapsed) === 'Fresh';
-    }
     const venue = roomVenuePhaseView(report, room, session, elapsed);
     return venue?.ready === true && venue.sequence === target.phaseSinceSequence;
   }
@@ -262,7 +285,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') update(); else reset(); });
   setInterval(update, 250);
-  return { update, venueReady, active(value) { active = value; if (value) update(); else reset(); } };
+  return { update, venueReady, venueBegin, active(value) { active = value; if (value) update(); else reset(); } };
 }
 
 export function mountReadiness(getState, unauthorized) {

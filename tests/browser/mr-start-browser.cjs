@@ -16,6 +16,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
   const page = await context.newPage();
   captureErrors(page);
   const panel = page.locator('#mr-start-requirement');
+  const venueButton = page.locator('#venue-begin');
+  const venueRoom = (room, state) => page.locator(`[data-begin-room="${room}"][data-begin-state="${state}"]`);
   async function command(action) {
     const pending = page.waitForResponse(response => response.url().endsWith('/api' + route + '/commands')
       && response.request().method() === 'POST' && response.request().postDataJSON().action === action);
@@ -33,6 +35,9 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
   try {
     await login(page, 'Master');
     check(await panel.getAttribute('data-state') === 'EmptyRoster', 'The MR start panel first identifies an empty roster');
+    await venueRoom(5, 'EmptyRoster').waitFor();
+    check(await page.locator('[data-begin-state="EmptyRoster"]').count() === 5 && await venueButton.isDisabled(),
+      'An empty Linked roster is shown as a shared blocker across the five target rooms');
     for (const roomId of roomIds) {
       for (let seat = 1; seat <= 5; seat++) {
         await api(route + '/players', 'POST', { playerId: randomUUID(), name: `Fixture ${roomId}/${seat}`, roomId, headset: 'Quest3' });
@@ -81,16 +86,22 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       throw new Error(`MR start did not show ${state}; last state ${await target.getAttribute('data-state')}`);
     }
     await panel.locator('#mr-start-status').filter({ hasText: '等待遊戲來源' }).waitFor();
+    await venueRoom(4, 'NoRecording').waitFor();
+    check(await venueButton.isDisabled(), 'The whole-venue preview distinguishes a missing source from an empty roster');
     check(await panel.locator('[data-mr-room]').count() === 0, 'An MR roster does not show tracked room counts before the world source attaches');
     const blockedStart = await command('Begin');
     await page.locator('#notice').filter({ hasText: 'MR 場次尚未就緒' }).waitFor();
     check(blockedStart.status === 409 && blockedStart.body.code === 'mr-readiness-required' && (await api(route)).sequence === admitted.sequence,
       'The original Begin conflict retains its own operator message and leaves the session preparing');
-    await publishUntil(panel, 'WaitingPlayers', admitted, [2, 5]);
+    await publishUntil(panel, 'WaitingPlayers', admitted, [2, 5], () => venueRoom(4, 'WaitingPlayers').isVisible());
     const waitingRoom = panel.locator('[data-mr-room="4"]');
     check(await waitingRoom.innerText() === '房間 4 · 3 / 5 追蹤就緒 · 等候席位 2、5'
       && await panel.getByText('5 / 5 追蹤就緒', { exact: false }).count() === 4,
       'Real accepted MR snapshots identify exactly two waiting seats among five rooms and 25 roster entries');
+    check(await venueRoom(4, 'WaitingPlayers').innerText() === '房間 4 · 等候席位 2、5 的追蹤'
+      && await page.locator('[data-begin-state="WaitingLinkedRooms"]').count() === 4 && await venueButton.isDisabled(),
+      'Only the linked room with missing tracking names waiting seats, and the entire shared session remains blocked');
+    await page.locator('#venue-phase').screenshot({ path: path.join(screenshots, 'venue-phase-begin-mr-blockers.png') });
     await panel.screenshot({ path: path.join(screenshots, 'mr-start-waiting-seats.png') });
 
     const roomPage = await context.newPage();
@@ -103,24 +114,33 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         && await roomPanel.locator('[data-mr-room="1"]').innerText() === '房間 1 · 5 / 5 追蹤就緒'
         && await roomPage.locator('[data-command=Begin]').isDisabled(),
         'A room desk shows its own seats while only the master can start the linked MR session');
+      const readiness = await api('/rooms/readiness', 'GET', undefined, 'Room1');
+      check(readiness.rooms.length === 1 && readiness.rooms[0].roomId === 1 && !Object.hasOwn(readiness.rooms[0], 'venueBegin')
+        && await roomPage.locator('#venue-phase').isHidden() && await roomPage.locator('[data-begin-room]').count() === 0,
+        'Room credentials neither receive the master-only Begin details nor render the whole-venue rows');
     } finally {
       await roomPage.close();
       await page.bringToFront();
     }
 
-    await publishUntil(panel, 'Ready', admitted);
+    await publishUntil(panel, 'Ready', admitted, [], () => venueButton.isEnabled());
     check(await panel.locator('.ready-player').count() === 1 && await panel.locator('[data-mr-room]').count() === 5,
       'The exact current tracked roster can show full readiness across all five rooms');
     await panel.locator('#mr-start-status').filter({ hasText: '快照已過期' }).waitFor();
+    await venueRoom(4, 'Stale').waitFor();
     check(await panel.locator('.ready-player, [data-mr-room]').count() === 0,
       'A previously ready MR snapshot ages out and clears the per-room display');
+    check(await venueButton.isDisabled() && await page.locator('[data-begin-state="Ready"], [data-begin-state="WaitingPlayers"]').count() === 0,
+      'Expired MR evidence disables the batch and removes all old per-room tracked seat claims');
 
     const update = await api(route + '/commands', 'POST', { commandId: randomUUID(), action: 'SetEnvironment',
       environment: { ...admitted.environment, timeOfDay: 'Night' } });
-    await publishUntil(panel, 'WaitingRevision', admitted);
+    await publishUntil(panel, 'WaitingRevision', admitted, [], () => venueRoom(4, 'WaitingRevision').isVisible());
     check(await panel.locator('[data-mr-room]').count() === 0 && update.session.sequence > admitted.sequence,
       'A fresh MR frame for the previous management sequence cannot restore ready seats');
-    await publishUntil(panel, 'Ready', update.session);
+    check(await venueButton.isDisabled() && await page.locator('[data-begin-state="Ready"]').count() === 0,
+      'An older but fresh frame is labeled as awaiting the new revision and cannot enable whole-venue Begin');
+    await publishUntil(panel, 'Ready', update.session, [], () => venueButton.isEnabled());
     await panel.screenshot({ path: path.join(screenshots, 'mr-start-ready.png') });
     publish(update.session);
     const started = await command('Begin');

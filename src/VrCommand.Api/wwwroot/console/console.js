@@ -175,6 +175,7 @@ function logout() {
   replay.active(false); replay.reset(); world.active(false); world.reset(); readiness.active(false); readiness.reset(); roomReadiness.active(false); connections.active(false); connections.reset();
   state.epoch++; state.key = ''; state.actor = null; state.selected = null; state.session = null; state.pending = null;
   state.rooms = []; state.venue = null; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
+  renderVenueBegin([], []);
   venueHistory.reset(); renderVenueClosure(null);
   state.props = []; state.prop = -1; clearPropHistory();
   roomPlan.reset(); placement.reset();
@@ -434,9 +435,28 @@ function venueClimateText({ weather, timeOfDay, lightning }) {
 function venueEnemyText({ behavior, autoAttack }) {
   return `${behaviorNames[behavior]} · ${autoAttack ? '自動攻擊開啟' : '自動攻擊關閉'}`;
 }
+function renderVenueBegin(targets, waiting) {
+  const summary = $('venue-begin-evidence'), list = $('venue-begin-rooms');
+  const rows = targets.flatMap(target => target.roomIds.map(roomId => ({
+    roomId, ...roomReadiness.venueBegin(target, roomId)
+  }))).sort((a, b) => a.roomId - b.roomId);
+  summary.hidden = list.hidden = !rows.length;
+  const message = !rows.length ? '' : `準備開始房間 ${venueRoomText(targets)} · `
+    + (waiting.length ? '仍有開場條件待確認，請查看各房狀態。' : '目標場次已就緒。');
+  if (summary.textContent !== message) summary.textContent = message;
+  const signature = JSON.stringify(rows);
+  if (list.dataset.rows === signature) return;
+  list.dataset.rows = signature;
+  list.replaceChildren(...rows.map(({ roomId, state, text }) => {
+    const item = element('li', `房間 ${roomId} · ${text}`);
+    item.dataset.beginRoom = roomId;
+    item.dataset.beginState = state;
+    return item;
+  }));
+}
 function applyVenuePermissions() {
   $('venue-phase').hidden = !master();
-  const begin = venueTargets('Begin'), pause = venueTargets('Pause'), resume = venueTargets('Resume'), end = venueTargets('End');
+  const begin = master() ? venueTargets('Begin') : [], pause = venueTargets('Pause'), resume = venueTargets('Resume'), end = venueTargets('End');
   const locked = state.busy || !!state.pending || !master();
   venueHistory.update(!locked);
   vrVenue.update();
@@ -456,11 +476,7 @@ function applyVenuePermissions() {
   const describe = targets => targets.length ? '房間 ' + venueRoomText(targets) : '無';
   $('venue-end-targets').hidden = !end.length;
   $('venue-end-targets').textContent = end.length ? `可結束 ${describe(end)} · 包含準備、執行與暫停的場次。` : '';
-  const beginStatus = $('venue-begin-evidence');
-  beginStatus.hidden = !begin.length;
-  const beginMessage = starting.length ? `準備開始 ${describe(begin)} · 等候房間 ${venueRoomText(starting)} 的名冊或遊戲快照。`
-    : `準備開始 ${describe(begin)} · 目標場次已就緒。`;
-  if (beginStatus.textContent !== beginMessage) beginStatus.textContent = beginMessage;
+  renderVenueBegin(begin, starting);
   $('venue-phase-targets').textContent = state.venue ? `可暫停 ${describe(pause)} · 可繼續 ${describe(resume)}` : '等待房間狀態。';
   const evidence = $('venue-phase-evidence');
   evidence.hidden = !resume.length;

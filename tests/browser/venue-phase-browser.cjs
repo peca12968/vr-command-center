@@ -214,13 +214,22 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       ({ sessionId, phaseSinceSequence, sessionSequence }));
     const beginEvidence = page.locator('#venue-begin-evidence');
     const beginButton = page.locator('#venue-begin');
+    const beginRoom = room => page.locator(`[data-begin-room="${room}"]`);
     const preview = await getBegin();
     const firstReady = await api(`/sessions/${preparing[0]}`);
     const declinedBegin = await api('/venue/phase', 'POST', { action: 'Begin', targets: preview }, 'Master', 409, undefined, randomUUID());
     await page.locator('#refresh').click();
-    await publishUntil(first, firstReady, () => beginEvidence.filter({ hasText: '等候房間 2 的名冊或遊戲快照' }).isVisible());
+    await publishUntil(first, firstReady, async () =>
+      await beginRoom(1).getAttribute('data-begin-state') === 'Ready' && await beginRoom(2).getAttribute('data-begin-state') === 'EmptyRoster');
     check(declinedBegin.code === 'venue-begin-not-ready' && declinedBegin.roomIds.join() === '2' && await beginButton.isDisabled(),
       'A missing roster and source in one room blocks the whole Begin batch in both HTTP and Chromium');
+    check(await beginRoom(1).innerText() === '房間 1 · 1 席姿態就緒'
+      && await beginRoom(2).innerText() === '房間 2 · 名冊尚無玩家' && await page.locator('[data-begin-room]').count() === 2,
+      'The master sees only the target rooms and can distinguish a ready VR room from an empty independent roster');
+    await beginRoom(1).filter({ hasText: '快照已過期' }).waitFor();
+    check(await beginButton.isDisabled() && await beginRoom(2).getAttribute('data-begin-state') === 'EmptyRoster',
+      'Expired VR evidence clears the ready label while the independent empty-room reason remains');
+    await panel.screenshot({ path: path.join(screenshots, 'venue-phase-begin-blockers.png') });
     const second = await prepare(preparing[1], 2, true, true);
     const staleBegin = await api('/venue/phase', 'POST', { action: 'Begin', targets: preview }, 'Master', 409, undefined, randomUUID());
     check(staleBegin.code === 'venue-phase-changed' && (await api('/sessions')).every(session => session.state === 'Preparing'),
@@ -235,6 +244,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const running = await Promise.all(preparing.map(id => api(`/sessions/${id}`)));
     check(running.every((session, index) => session.state === 'Running' && session.sequence === [firstReady, secondReady][index].sequence + 1),
       'The browser submits one Begin batch and both durable sessions advance exactly one revision');
+    await beginEvidence.waitFor({ state: 'hidden' });
+    check(await page.locator('[data-begin-room]').count() === 0, 'Accepted Begin removes the preparing room rows');
     await roomPhase(1).filter({ hasText: '全館開始待確認' }).waitFor();
     await publishUntil(first, running[0], () => {
       second(running[1]);
