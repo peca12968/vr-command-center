@@ -79,6 +79,7 @@ try
     PersistenceChecks.Run(Check, directory, mission);
     CombatChecks.Run(Check, mission);
     HardwareFeedbackChecks.Run(Check, mission);
+    HardwareFeedbackChecks.Live(Check, mission);
     FinalReportChecks.Run(Check, directory, mission);
     PlayerTicketChecks.Run(Check, mission);
     AdmissionChecks.Run(Check, directory, mission);

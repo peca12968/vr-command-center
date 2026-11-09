@@ -60,6 +60,7 @@ def main():
     p.add_argument('--check-layout-preview',action='store_true',help='Load a saved barricade opening and compare its preview with native world geometry')
     p.add_argument('--check-room-reports',action='store_true',help='Verify scoped Linked CSVs and the ZIP against the full sealed native report')
     p.add_argument('--check-room-combat',action='store_true',help='Require actual enemy damage on every original admission and reconcile each replay frame and final report')
+    p.add_argument('--check-hardware-feedback',action='store_true',help='Match live room feedback to the native combat reports')
     p.add_argument('--check-interrupted-replay', action='store_true', help='Play the saved native prefix after the owned launcher is killed')
     p.add_argument('--check-managed-mr', action='store_true', help='Verify the MR alignment startup gate, desktop rejection and Preparing seal')
     p.add_argument('--check-live-reinforcement', action='store_true', help='Verify a native server accepts only supported live enemy targets and records the result')
@@ -71,6 +72,7 @@ def main():
     if args.check_room_readiness and not args.player_package:p.error('--check-room-readiness requires five players per room')
     if args.check_room_reports and not args.player_package:p.error('--check-room-reports requires the three-package check')
     if args.check_room_combat and not args.check_room_reports:p.error('--check-room-combat requires --check-room-reports')
+    if args.check_hardware_feedback and not args.check_room_combat:p.error('--check-hardware-feedback requires --check-room-combat')
     address='127.0.0.1'
     if args.game_address:
         if not any(args.game_address in ipaddress.IPv4Network(net) for net in ('10.0.0.0/8','172.16.0.0/12','192.168.0.0/16')):
@@ -327,6 +329,31 @@ def main():
                         return frame
                     return None
     def exercise_room_combat(entries,clients):
+        feeds={}
+        if args.check_hardware_feedback:
+            for client in clients:
+                player=client['player'];room=player['roomId'];sid=client['sessionId']
+                path=f'/api/sessions/{sid}/rooms/{room}/hardware-feedback'
+                feed=feeds.get(path)
+                if feed is None:
+                    initial=request(path,role=f'Room{room}')
+                    assert initial['resetReason']=='attached' and initial['signals']==[] and initial['state']=='Running'
+                    feed={'cursor':initial['throughSequence'],'room':room,'session':sid,'stream':initial['streamId'],'players':{},'signals':[]}
+                    feeds[path]=feed
+                feed['players'][player['id']]=(player['admissionId'],player['seat'])
+
+        def read_feedback():
+            for path,feed in feeds.items():
+                after=feed['cursor']
+                page=request(path+f'?after={after}',role=f"Room{feed['room']}")
+                assert page['state']=='Running' and page['resetReason'] is None and page['throughSequence']>=after
+                assert page['sessionId']==feed['session'] and page['roomId']==feed['room'] and page['streamId']==feed['stream'] and page['combatOrigin']=='Simulation'
+                for signal in page['signals']:
+                    assert signal['kind']=='PlayerDamaged' and signal['damage']>0 and after<signal['eventSequence']<=page['throughSequence']
+                    assert feed['players'][signal['playerId']]==(signal['admissionId'],signal['seat'])
+                    feed['signals'].append(signal)
+                feed['cursor']=page['throughSequence']
+
         def attack(entry,enabled):
             identity=str(uuid.uuid4());session=entry['sessionId']
             response=request('/api/sessions/'+session+'/commands',{'commandId':identity,'action':'SetEnemies',
@@ -341,9 +368,12 @@ def main():
             enabled=attack(entry,True)
             windows.append((entry,owners,enabled))
         for entry,owners,enabled in windows:
+            entry_feeds=[feed for feed in feeds.values() if feed['session']==entry['sessionId']]
             def damaged():
+                read_feedback()
                 value=observe(entry,owners,enabled,record=False)
-                if value and value['packet']['frame']['autoAttack'] and {p['playerId'] for p in value['statistics'] if p['damageTaken']>0}==set(owners):
+                complete=all({signal['playerId'] for signal in feed['signals']}==set(feed['players']) for feed in entry_feeds)
+                if complete and value and value['packet']['frame']['autoAttack'] and {p['playerId'] for p in value['statistics'] if p['damageTaken']>0}==set(owners):
                     return value
             live=wait(damaged,35,entry['label']+' damage to every original admission')
             disabled=attack(entry,False)
@@ -355,6 +385,7 @@ def main():
                 'allDamaged':live,'disabled':quiet}
             save(entry['label']+'-combat-window.json',entry['combatWindow'])
             check(True,entry['label']+' live damage to every original player and observed attack disabled')
+            if entry_feeds:entry['hardwareFeedback']=entry_feeds
     def finish(entry):
         entry['process'].wait(timeout=80);w=entry['witness'];w.wait();w.close();entry['witness']=None
         report=read(entry['reportPath']);check(entry['process'].returncode==0 and report['complete'] and report['cleanupCompleted'] and report['childExited'] and report['playerResultsAcknowledged'] is None,entry['label']+' dual seal / retained36 / original process terminal')
@@ -397,6 +428,24 @@ def main():
             check(frames[-1]['statistics']==stats['players'] and stream['sealed'] and stream['acceptedSequence']==proof['damageEvents'],
                   entry['label']+' every same-room attack, damage event and per-frame statistic agrees with the sealed ledger')
             save(entry['label']+'-combat-reconciliation.json',proof)
+        if 'hardwareFeedback' in entry:
+            sid=entry['sessionId'];events={};after=0
+            while True:
+                rows=request(f'/api/sessions/{sid}/events?after={after}&limit=500')
+                events.update({event['eventId']:event for event in rows})
+                if len(rows)<500:break
+                after=rows[-1]['sequence']
+            for feed in entry['hardwareFeedback']:
+                room=feed['room']
+                ended=request(f'/api/sessions/{sid}/rooms/{room}/hardware-feedback?after={feed["cursor"]}',role=f'Room{room}')
+                assert ended['state']=='Ended' and ended['resetReason']=='inactive' and ended['signals']==[] and feed['stream']==entry['ready']['streamId']
+                for signal in feed['signals']:
+                    source=events[signal['eventId']];record=source['payload'];combat=record['report']
+                    assert source['sequence']==signal['eventSequence'] and record['streamSequence']==signal['streamSequence']
+                    assert record['observedSequence']==signal['observedSequence'] and record['streamId']==entry['ready']['streamId']
+                    assert (combat['reportId'],combat['playerId'],combat['kind'],combat['damage'])==(signal['reportId'],signal['playerId'],signal['kind'],signal['damage'])
+                check(len({s['eventId'] for s in feed['signals']})==len(feed['signals']),entry['label']+f' room {room} live hardware signals match original accepted damage and stop at End')
+            save(entry['label']+'-hardware-feedback.json',entry['hardwareFeedback'])
         rounds.append({'name':entry['label'],'ready':entry['ready'],'report':report,'journal':closed,'replayFrames':len(frames)})
     def verify_interrupted_replay(entry, client):
         session = '/api/sessions/' + entry['sessionId']
@@ -628,6 +677,7 @@ def main():
             if player_folder else 'Two portable packages, five Independent rooms then Linked, five same-PC Simulation clients per topology.'),
             'managedMrPreparing':args.check_managed_mr,
             'roomCombat':args.check_room_combat,
+            'hardwareFeedback':args.check_hardware_feedback,
             'sourceFingerprint':manifest['build']['sourceFingerprint'],'gameAddress':address})
     except BaseException as error:stage('failed',errorType=type(error).__name__);raise
     finally:

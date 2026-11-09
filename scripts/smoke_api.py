@@ -772,6 +772,18 @@ try:
             request("POST", stream_path + "/combat-stream/reports", {**first, "report": {**first["report"], "origin": "GameServer"}}, 409, identity="GameServer")
             accepted = request("POST", stream_path + "/combat-stream/reports", first, identity="GameServer")
             require(accepted["acceptedSequence"] == 1 and accepted["statistics"]["pendingTelemetry"], "Ended stream accepts only its known Running-context tail and stays visibly unsealed")
+            feedback = stream_path + "/rooms/1/hardware-feedback"
+            request("GET", feedback, expected=401, identity=None)
+            request("GET", feedback, expected=403, identity="Room2")
+            request("GET", feedback, expected=403, identity="GameServer")
+            request("GET", feedback + "?after=-1", expected=400, identity="Room1")
+            attached = request("GET", feedback, identity="Room1")
+            payload, headers = request("GET", feedback + f"?after={ended_sequence}", identity="Room1", raw=True)
+            page = json.loads(payload)
+            require(attached["resetReason"] == "attached" and attached["signals"] == [] and headers["Cache-Control"] == "no-store"
+                    and page["state"] == "Ended" and page["resetReason"] == "inactive" and page["signals"] == []
+                    and page["throughSequence"] == attached["throughSequence"] == accepted["statistics"]["throughSequence"],
+                    "Room-scoped hardware reads attach without replay and suppress late accepted reports after End")
             require(request("POST", stream_path + "/combat-stream/reports", first, identity="GameServer")["duplicate"], "Lost response leaves a retryable accepted prefix without another shot")
             request("POST", stream_path + "/combat-stream/seal", {"streamId": first["streamId"], "finalSequence": 6}, 409, identity="GameServer")
             stop(process)

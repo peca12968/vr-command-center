@@ -2,6 +2,68 @@ using VrCommand.Core;
 
 internal static class HardwareFeedbackChecks
 {
+    private sealed class FeedbackClock : TimeProvider
+    {
+        public DateTimeOffset Now;
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
+    internal static void Live(Action<bool, string> check, Mission mission)
+    {
+        var store = new MemorySessionEventStore(); var clock = new FeedbackClock(); var manager = new SessionManager(store, clock);
+        var master = new OperatorIdentity("feedback-master", OperatorRole.Master);
+        var server = new OperatorIdentity("feedback-server", OperatorRole.GameServer);
+        var one = new OperatorIdentity("feedback-room1", OperatorRole.RoomController, 1);
+        var id = manager.Create(SessionMode.Linked, [1, 2, 3, 4, 5], mission, master).Id;
+        var alpha = Guid.NewGuid(); var bravo = Guid.NewGuid();
+        var first = manager.Join(id, alpha, "Alpha", 1, HeadsetKind.Quest3, one).Players.Single();
+        manager.Join(id, bravo, "Bravo", 2, HeadsetKind.Quest3, master);
+        var stream = Guid.NewGuid(); manager.OpenStream(id, new(stream, CombatOrigin.Simulation), server);
+        long sequence = 0;
+        long Command(ControlAction action) => manager.Execute(id, new(Guid.NewGuid(), action), master).AppliedAtSequence;
+        Guid Shot(Guid player, long observed)
+        {
+            var report = Guid.NewGuid();
+            manager.ReportStream(id, new(stream, ++sequence, observed, new(report, CombatKind.ShotFired, CombatOrigin.Simulation, player, Guid.NewGuid())), server);
+            return report;
+        }
+        RoomHardwareFeedback Read(long? after = null) => manager.ReadHardwareFeedback(id, 1, after, one);
+        var preparing = Read(); var begin = Command(ControlAction.Begin);
+        check(preparing is { State: SessionState.Preparing, ResetReason: "attached", Signals.Length: 0 }, "A hardware observer attaches at the head without consuming earlier events");
+        var expected = Shot(alpha, begin); Shot(bravo, begin);
+        var recorded = manager.Events(id, begin);
+        clock.Now = recorded[0].RecordedAtUtc.AddMilliseconds(1999);
+        var observed = Read(begin); var signal = observed.Signals.Single();
+        check(signal.ReportId == expected && signal.EventId == recorded[0].EventId && signal.AdmissionId == first.AdmissionId
+            && signal.Seat == first.Seat && signal.AcceptedAtUtc == recorded[0].RecordedAtUtc && observed.ThroughSequence == recorded[1].Sequence
+            && Read(begin).Signals.Single() == signal, "Fresh room feedback matches its original event and admission and uses stable IDs on retry");
+        clock.Now = recorded[0].RecordedAtUtc.AddSeconds(2);
+        check(Read(begin).Signals.Length == 0 && Read().ThroughSequence == observed.ThroughSequence, "The exact two-second acceptance boundary discards expired events and reattachment starts at the tail");
+        clock.Now = recorded[0].RecordedAtUtc.AddTicks(-1);
+        check(Read(begin).Signals.Length == 0, "Future-dated accepted events are suppressed after a clock change");
+        try { manager.ReadHardwareFeedback(id, 2, begin, one); throw new Exception("Expected room scope rejection"); }
+        catch (AccessDeniedException) { check(true, "A hardware feedback read cannot cross a controller's room"); }
+        try { manager.ReadHardwareFeedback(id, 1, begin, server); throw new Exception("Expected server role rejection"); }
+        catch (AccessDeniedException) { check(true, "GameServer publishers do not receive the room observer feed"); }
+        try { Read(long.MaxValue); throw new Exception("Expected cursor rejection"); }
+        catch (ArgumentException) { check(true, "A cursor ahead of accepted history cannot rebase silently"); }
+        var paused = Command(ControlAction.Pause);
+        Shot(alpha, begin);
+        check(Read(begin) is { State: SessionState.Paused, RunningSinceSequence: null, ResetReason: "inactive", Signals.Length: 0 }, "Pause discards feedback even if late combat was valid for the ledger");
+        var resume = Command(ControlAction.Resume); Shot(alpha, begin); var fresh = Shot(alpha, resume);
+        clock.Now = manager.Events(id, resume)[^1].RecordedAtUtc;
+        var resumed = Read(paused);
+        check(resumed.RunningSinceSequence == resume && resumed.Signals.Single().ReportId == fresh, "Resume excludes a newly accepted report from the earlier Running phase");
+        var restarted = new SessionManager(store, clock).ReadHardwareFeedback(id, 1, paused, one);
+        check(restarted.RunningSinceSequence == resume && restarted.Signals.Single() == resumed.Signals.Single(), "Restart reconstructs the Running fence from durable events");
+        manager.Leave(id, alpha, one, expectedAdmissionId: first.AdmissionId);
+        check(Read(resume).Signals.Length == 0, "Leaving drops feedback for the admission even while the room remains Running");
+        for (var i = 0; i < 257; i++) Shot(bravo, resume);
+        check(Read(resume) is { ResetReason: "backlog", Signals.Length: 0 }, "A bounded observer jumps to the head on backlog instead of replaying it");
+        Command(ControlAction.End); Shot(bravo, resume); manager.SealStream(id, new(stream, sequence), server);
+        check(Read(begin) is { State: SessionState.Ended, ResetReason: "inactive", Signals.Length: 0 }, "Ended feedback remains empty even after late combat is sealed");
+    }
+
     internal static void Run(Action<bool, string> check, Mission mission)
     {
         var store = new MemorySessionEventStore(); var manager = new SessionManager(store);

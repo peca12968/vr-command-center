@@ -147,6 +147,11 @@ app.MapGet("/api/sessions/{id:guid}", (Guid id, SessionManager manager, HttpCont
 app.MapGet("/api/sessions", (bool? includeEnded, SessionManager manager, HttpContext context) => manager.List(includeEnded ?? false, Actor(context)));
 app.MapGet("/api/sessions/{id:guid}/events", (Guid id, long? after, int? limit, SessionManager manager, HttpContext context) =>
     manager.Events(id, after ?? 0, limit ?? 100, Actor(context)));
+app.MapGet("/api/sessions/{id:guid}/rooms/{roomId:int}/hardware-feedback", (Guid id, int roomId, long? after, SessionManager manager, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    return manager.ReadHardwareFeedback(id, roomId, after, Actor(context));
+});
 app.MapPost("/api/sessions/{id:guid}/commands", (Guid id, ControlCommand command, WorldRecordings worlds, HttpContext context) =>
     worlds.ExecuteCommand(id, command, Actor(context)));
 app.MapGet("/api/sessions/{id:guid}/statistics", (Guid id, SessionManager manager, HttpContext context) =>

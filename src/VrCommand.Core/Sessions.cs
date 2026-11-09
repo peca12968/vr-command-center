@@ -39,15 +39,19 @@ public sealed partial class SessionManager
     public const int MaxPlayers = RoomCount * PlayersPerRoom;
     private readonly object gate = new();
     private readonly ISessionEventStore eventStore;
+    private readonly TimeProvider clock;
     private readonly Dictionary<Guid, History> sessions = [];
     // A lifecycle request key is global across creation and roster mutations, including archived sessions.
     private readonly Dictionary<Guid, SessionEvent> requests = [];
     private sealed record History(SessionView View, List<SessionEvent> Events, Dictionary<Guid, SessionEvent> Commands, CombatLedger Combat,
-        List<SessionView> Authority);
+        List<SessionView> Authority, long RunningSinceSequence);
 
-    public SessionManager(ISessionEventStore? eventStore = null)
+    public SessionManager(ISessionEventStore? eventStore = null) : this(eventStore, TimeProvider.System) { }
+
+    public SessionManager(ISessionEventStore? eventStore, TimeProvider clock)
     {
         this.eventStore = eventStore ?? new MemorySessionEventStore();
+        this.clock = clock ?? throw new ArgumentNullException(nameof(clock));
         foreach (var events in this.eventStore.Load())
         {
             SessionView? view = null;
@@ -55,6 +59,7 @@ public sealed partial class SessionManager
             var commands = new Dictionary<Guid, SessionEvent>();
             var combat = new CombatLedger();
             var authority = new List<SessionView>();
+            long runningSince = 0;
             foreach (var entry in events)
             {
                 if (!ids.Add(entry.EventId)) throw new InvalidDataException("Duplicate event ID in session history.");
@@ -62,12 +67,13 @@ public sealed partial class SessionManager
                     throw new InvalidDataException("Duplicate command ID in session history.");
                 var next = SessionProjection.Apply(view, entry);
                 combat.Prepare(CombatBefore(view, entry, authority), entry)();
+                runningSince = RunningSince(view, next, runningSince);
                 view = next;
                 if (IsAuthority(entry)) authority.Add(view);
                 if (entry.RequestId.HasValue && !requests.TryAdd(entry.RequestId.Value, entry))
                     throw new InvalidDataException("Duplicate lifecycle request ID in persisted histories.");
             }
-            if (view is null || !sessions.TryAdd(view.Id, new(view, [.. events], commands, combat, authority)))
+            if (view is null || !sessions.TryAdd(view.Id, new(view, [.. events], commands, combat, authority, runningSince)))
                 throw new InvalidDataException("Empty or duplicate session history.");
         }
         var active = Active().ToArray();
@@ -286,10 +292,14 @@ public sealed partial class SessionManager
         events.Add(entry);
         if (entry.Kind == SessionEventKind.ControlApplied) commands.Add(entry.Read<ControlCommand>().CommandId, entry);
         if (IsAuthority(entry)) authority.Add(view);
-        sessions[entry.SessionId] = new(view, events, commands, combat, authority);
+        sessions[entry.SessionId] = new(view, events, commands, combat, authority,
+            RunningSince(previous?.View, view, previous?.RunningSinceSequence ?? 0));
         if (entry.RequestId.HasValue) requests.Add(entry.RequestId.Value, entry);
         return Snapshot(view);
     }
+
+    private static long RunningSince(SessionView? previous, SessionView current, long runningSince) => current.State != SessionState.Running
+        ? 0 : previous?.State == SessionState.Running ? runningSince : current.Sequence;
 
     private static void ValidateRequestId(Guid? requestId)
     {

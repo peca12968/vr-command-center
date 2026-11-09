@@ -50,14 +50,7 @@ public sealed partial class SessionManager
         {
             var history = Find(id); AccessPolicy.Read(actor, history.View.RoomIds);
             if (sequence < 1 || sequence > history.View.Sequence) throw new ArgumentException("Observation is outside accepted history.");
-            var low = 0; var high = history.Authority.Count - 1; SessionView? observed = null;
-            while (low <= high)
-            {
-                var middle = low + (high - low) / 2;
-                if (history.Authority[middle].Sequence <= sequence) { observed = history.Authority[middle]; low = middle + 1; }
-                else high = middle - 1;
-            }
-            return Snapshot(observed ?? throw new InvalidOperationException("No administrative observation."));
+            return Snapshot(ObserveAuthority(history.Authority, sequence) ?? throw new InvalidOperationException("No administrative observation."));
         }
     }
 
@@ -151,15 +144,21 @@ public sealed partial class SessionManager
         var record = entry.Read<StreamCombatRecord>();
         if (current is null || record.ObservedSequence < 1 || record.ObservedSequence > current.Sequence)
             throw new InvalidOperationException("Observed sequence is not in this session's accepted history.");
+        var observed = ObserveAuthority(authority, record.ObservedSequence);
+        if (observed?.State != SessionState.Running)
+            throw new InvalidOperationException("Combat must reference a management snapshot observed while Running.");
+        return observed;
+    }
+
+    private static SessionView? ObserveAuthority(List<SessionView> authority, long sequence)
+    {
         var low = 0; var high = authority.Count - 1; SessionView? observed = null;
         while (low <= high)
         {
             var middle = low + (high - low) / 2;
-            if (authority[middle].Sequence <= record.ObservedSequence) { observed = authority[middle]; low = middle + 1; }
+            if (authority[middle].Sequence <= sequence) { observed = authority[middle]; low = middle + 1; }
             else high = middle - 1;
         }
-        if (observed?.State != SessionState.Running)
-            throw new InvalidOperationException("Combat must reference a management snapshot observed while Running.");
         return observed;
     }
 }

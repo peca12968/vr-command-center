@@ -1,0 +1,54 @@
+namespace VrCommand.Core;
+
+public record RoomHardwareSignal(Guid EventId, long EventSequence, long StreamSequence, long ObservedSequence,
+    Guid ReportId, CombatKind Kind, Guid PlayerId, Guid AdmissionId, int Seat, int Damage, DateTimeOffset AcceptedAtUtc);
+
+public record RoomHardwareFeedback(int Version, Guid SessionId, int RoomId, Guid? StreamId, CombatOrigin? CombatOrigin,
+    SessionState State, long ThroughSequence, long? RunningSinceSequence, DateTimeOffset CheckedAtUtc,
+    string? ResetReason, RoomHardwareSignal[] Signals);
+
+public sealed partial class SessionManager
+{
+    private const int MaxHardwareFeedbackEvents = 256;
+    private static readonly TimeSpan HardwareFeedbackAcceptedAge = TimeSpan.FromSeconds(2);
+
+    public RoomHardwareFeedback ReadHardwareFeedback(Guid id, int roomId, long? after, OperatorIdentity actor)
+    {
+        if (after < 0) throw new ArgumentException("Use a non-negative hardware feedback cursor.");
+        lock (gate)
+        {
+            var history = Find(id);
+            var session = history.View;
+            AccessPolicy.Player(actor, session, roomId);
+            if (!session.RoomIds.Contains(roomId)) throw new ArgumentException("Room is outside this session.");
+            if (after > session.Sequence) throw new ArgumentException("Hardware feedback cursor is ahead of this session.");
+
+            var now = clock.GetUtcNow();
+            var stream = session.CombatStream;
+            var running = history.RunningSinceSequence == 0 ? (long?)null : history.RunningSinceSequence;
+            RoomHardwareFeedback Page(string? reset, RoomHardwareSignal[] signals) => new(1, id, roomId, stream?.StreamId,
+                stream?.Origin, session.State, session.Sequence, running, now, reset, signals);
+            // New readers and slow readers take a fresh cursor instead of replaying a backlog as live feedback.
+            if (!after.HasValue) return Page("attached", []);
+            if (running is null || stream is null || stream.Sealed) return Page("inactive", []);
+            if (session.Sequence - after.Value > MaxHardwareFeedbackEvents) return Page("backlog", []);
+
+            var signals = new List<RoomHardwareSignal>();
+            for (var index = (int)Math.Max(after.Value, running.Value - 1); index < history.Events.Count; index++)
+            {
+                var entry = history.Events[index];
+                var acceptedAge = now - entry.RecordedAtUtc;
+                if (entry.Kind != SessionEventKind.StreamCombatRecorded || acceptedAge < TimeSpan.Zero || acceptedAge >= HardwareFeedbackAcceptedAge)
+                    continue;
+                var record = entry.Read<StreamCombatRecord>();
+                if (record.ObservedSequence < running || record.Report.Kind is not (CombatKind.ShotFired or CombatKind.PlayerDamaged)) continue;
+                var player = session.Players.SingleOrDefault(p => p.RoomId == roomId && p.Id == record.Report.PlayerId);
+                if (player is null || ObserveAuthority(history.Authority, record.ObservedSequence)?.Players.Any(p =>
+                    p.Id == player.Id && p.AdmissionId == player.AdmissionId && p.RoomId == roomId) != true) continue;
+                signals.Add(new(entry.EventId, entry.Sequence, record.StreamSequence, record.ObservedSequence, record.Report.ReportId,
+                    record.Report.Kind, player.Id, player.AdmissionId, player.Seat, record.Report.Damage, entry.RecordedAtUtc));
+            }
+            return Page(null, [.. signals]);
+        }
+    }
+}
