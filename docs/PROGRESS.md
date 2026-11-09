@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-10 Windows OpenXR 追蹤入場複驗
+
+沿用 0.49.0 Windows 玩家及伺服器包，新增可重跑的 OpenXR 整合驗證。測試 DLL 只為 Unity Mock Runtime 提供固定頭手座標，遊戲沿用原 OpenXR 輸入、簽章票券、UDP 入場、追蹤驗證及結束流程。 [複驗方式](WINDOWS_PLAYER_PACKAGE.md#本機追蹤整合驗證)
+
+- 本機伺服器封裝測試 10 項通過。首個原生房 `run-ceb9c7e6817a49399f499fe0f7adda6d` 使用 Unity 原始模擬執行環境，兩席均入場。桌面席是 `Simulated`，OpenXR 席是 `PoseUnavailable`。等待有效追蹤逾時退出碼 1，原始資料保留，測試程序已清理。
+- 使用固定座標後，原生房 `run-bcfeead236fe45c79306f9ab1a7ceed9` 69 項通過。最終逐座標複驗 `run-4bb05b00bf884848a294022728f0073d` 退出碼 0，70 項通過。OpenXR 在原連線前啟動，主控用原入場識別區分 `Tracked` 與 `Simulated`。頭部與雙手座標符合測試輸入。66 格完整回放包含該筆執行中畫面，兩份戰績、兩次伺服器確認、原 CSV 和雙封存一致。活動場次及剩餘程序均為零，C／F 隔離副本 40 檔雜湊相符。
+- 本次使用 Unity OpenXR 1.19.0 附的 Mock Runtime。測試 DLL SHA-256 `7a9b14696ea33ef8025e7542a4563c3f68144345e32a797945892ceb80d740b2`。測試來源 `c4c44b9231f88ffce01e2559d5915465e238df2d`。GitHub Actions job `129299113845` 因帳務或支出上限未啟動。Quest 3 與 VIVE 實機、MR 場地、跨機 25 人及廠商硬體仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42657300164)
+
 ## 2026-11-10 Windows OpenXR 玩家啟動
 
 Windows 玩家包 0.49.0 新增 `Launch-Player.exe --config <玩家連線檔> --launch --openxr --wait`。顯示與輸入子系統開始運作後才送出 VR 入場請求。支援的互動設定包含 Unity OpenXR Touch 和 HTC Vive Controller。 [玩家操作](WINDOWS_PLAYER_PACKAGE.md#windows-openxr-啟動)
