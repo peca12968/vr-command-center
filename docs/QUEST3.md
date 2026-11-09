@@ -210,6 +210,37 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.z
 
 任一席位過期、場次或校正檔不符時，整份 ZIP 預檢失敗，應從主控下載當前部署包。也可沿用下方 `-ManagementApi` 與 `VR_COMMAND_MASTER_KEY`，把範例的 `-VenueManifest .\venue.json` 換成 `-VenueBundle .\quest-mr-venue.zip`。ZIP 線上模式另會比對每個場次目前公布的 UDP 端點，裝置操作前須全數核對成功。
 
+#### 用裝置清單部署 25 席
+
+先在各台 Quest 3 安裝同一版場館 APK 並授權 USB 偵錯。已驗證的開發 APK `0.48.0` 版本代碼為 `61`。建立 25 席清單後，依實體標籤把每個 `REPLACE-*` 換成對應的 ADB 裝置序號。每組房號與席位須對應一個唯一序號，清單只保存在操作電腦。腳本透過 `adb devices` 及 Android 套件管理器讀取授權狀態與已啟用的應用程式版本。 [Android ADB 文件](https://developer.android.com/tools/adb) · [套件管理器版本輸出](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/pm/PackageManagerShellCommand.java#1130)
+
+```powershell
+$seats = foreach ($room in 1..5) {
+    foreach ($seat in 1..5) {
+        @{ roomId = $room; seat = $seat; serial = "REPLACE-$room-$seat" }
+    }
+}
+@{ version = 1; seats = @($seats) } | ConvertTo-Json -Depth 4 |
+    Set-Content -LiteralPath .\device-map.json -Encoding utf8
+```
+
+用原始部署 ZIP 與清單預檢。每席會回報裝置狀態和已讀到的版本。缺席、離線、未授權、型號或版本不符時，指令回傳非零結束碼。只有 `-DeployMappedSeats` 會寫入裝置。
+
+```powershell
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.zip `
+    -DeviceMap .\device-map.json -ExpectedVersionCode 61 -CheckOnly
+```
+
+正式套用時，先依下方方式設定 `VR_COMMAND_MASTER_KEY`，再加入 `-DeployMappedSeats` 與管理服務網址。所有裝置與票券核對通過後，工具依房號與席位順序寫入設定並請求啟動，使用各台已安裝的 APK。
+
+```powershell
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.zip `
+    -DeviceMap .\device-map.json -ExpectedVersionCode 61 -DeployMappedSeats `
+    -ManagementApi http://127.0.0.1:5081
+```
+
+中途失敗會停止並以非零結束碼回報。`launch-requested` 表示裝置已收到啟動指令，`deployment-failed` 的席位可能已套用部分檔案，`not-attempted` 表示該席未寫入。已處理席位保留當下結果。可按回報定位故障，必要時重新配發票券，再用單席流程處理尚未成功的裝置。遊戲入場與 MR 就緒另由場次面板核對。
+
 #### 使用逐房下載的檔案建立清單
 
 若已有逐房下載的「房間連線檔 ZIP」，請將各房原 ZIP 與鎖定的原始校正 JSON 放在同一資料夾，再將下列清單存成 `venue.json`。用 Windows 遊戲伺服器啟動器選場時顯示的「場次ID」替換範例，也可從管理 API `GET /api/sessions` 取得場次的 `id`。相對路徑以 `venue.json` 所在資料夾為基準。 [按房間下載連線檔](EXTERNAL_CLIENTS.md#按房間下載連線檔)
