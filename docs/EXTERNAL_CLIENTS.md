@@ -170,6 +170,8 @@ node tests/browser/check-external-native.cjs <本次ready.json> <解壓玩家包
 
 每個遊戲綁定的實際來源 IPv4 必須恰有一組有效報告。驗收會拒絕缺少、來源重複、未確認來源、重複交換摘要或過期的報告。單場摘要的 `udpSourcePreflight` 列出觀察到及驗證成功的來源數，和各組樣本數與交換摘要。全館另有 `udpSourcePreflightsVerified`。多席共用同一個來源 IPv4 時，在該遊戲埠只算一組。Windows 玩家用 PowerShell 探測，Quest 可使用獨立診斷 APK 產生同格式報告，遊戲入場和戰績仍另留原始 logcat。實體設備數及跨機容量須現場核對。 [Quest UDP 預檢](QUEST3.md#開場前從頭盔執行-udp-預檢) · [Quest 日誌](QUEST3.md#收集-quest-場館驗收日誌)
 
+若使用 Quest 批次工具且同一份 `preflight-report.json` 涵蓋全館所有端點與來源，可在封存驗收清單頂層設 `"udpPreflightBatch": "quest-udp-batch/preflight-report.json"`。驗收依原房號與模式讀取對應報告，原始檔的相對路徑以批次報告所在位置為準，再核對原綁定位址、埠、完成時間及已確認來源。混合其他探測來源時，仍可逐場填 `udpSourcePreflights`。 [Quest 批次預檢](QUEST3.md#批次預檢五房-quest-席位)
+
 ### 核對封存戰績與 UDP 來源
 
 離線核對工具使用已完成的一場 Windows 伺服器任務。啟動器 1.7 可勾選「記錄本次玩家連線來源（場館驗收）」，CLI 可加 `--peer-diagnostics on`。將公告及本機綁定都設為這台電腦實際使用的 IPv4，選擇名冊固定的場次。結束後等待原啟動器寫出 `sealed-stopped` 報告，並等玩家寫完戰績與斷線日誌。 [伺服器操作](WINDOWS_SERVER_PACKAGE.md#跨機來源診斷)
@@ -220,6 +222,7 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `serverIps` | 所有本次伺服器電腦已指派的 IPv4，使用字串陣列 |
 | `closure` | 原批次的 `closure.json` 路徑 |
 | `verifyPlayerSources` | 選用。填布林值 `true` 核對所有原席位的日誌與姿態。每場均須提供 `worldJournal` |
+| `udpPreflightBatch` | 選用。涵蓋全館的原 Quest 批次 `preflight-report.json`。與逐場 UDP 欄位擇一 |
 | `sessions` | 獨立模式填五場，合併模式填一場 |
 | `sessions[].evidenceZip`、`launcherReport`、`serverLog` | 各場原 ZIP、啟動器終止報告及伺服器日誌的路徑 |
 | `sessions[].worldJournal` | 選用。若驗收回放檔，每個場次都填自己關閉後的原始 `.worldlog` 路徑 |

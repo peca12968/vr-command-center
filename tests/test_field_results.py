@@ -464,6 +464,54 @@ class FieldResultsTests(unittest.TestCase):
             self.assertFalse(report['networkCapacityAccepted'])
 
     @unittest.skipUnless(HAS_POWERSHELL, 'UDP evidence requires PowerShell')
+    def test_venue_rechecks_original_pairs_relative_to_a_quest_batch_report(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, _ = venue_fixture(root, 'Independent')
+            batch_folder = root / 'network-check'
+            batch_folder.mkdir()
+            batch_path = batch_folder / 'preflight-report.json'
+            groups = []
+            for index, entry in enumerate(manifest['sessions'], 1):
+                launcher_path = root / entry['launcherReport']
+                launcher = json.loads(launcher_path.read_text(encoding='utf-8'))
+                binding = launcher['udpBinding']
+                binding['observedAtUtc'] = '2026-11-08T23:59:59Z'
+                launcher_path.write_text(json.dumps(launcher), encoding='utf-8')
+                listener, probe = preflight_fixture(batch_folder, f'room-{index}', server=binding['address'],
+                                                    peer=entry['players'][0]['address'], port=binding['port'])
+                groups.append({'roomIds': [index], 'complete': True,
+                               'udpSourcePreflights': [{'listener': listener.name, 'probe': probe.name}]})
+            batch = {'version': 1, 'scope': 'quest-udp-preflight-only', 'mode': 'Independent', 'complete': True,
+                     'groups': groups[::-1]}
+            batch_path.write_text(json.dumps(batch), encoding='utf-8')
+            manifest['udpPreflightBatch'] = 'network-check/preflight-report.json'
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            report = field.verify_venue(path)
+            self.assertEqual(5, report['udpSourcePreflightsVerified'])
+            self.assertEqual(25, report['serverAcknowledgements'])
+            self.assertFalse(report['physicalHostsVerified'])
+            entry = manifest['sessions'][0]
+            entry['udpSourcePreflights'] = groups[0]['udpSourcePreflights']
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'only one UDP preflight mode'):
+                field.verify_venue(path)
+            entry.pop('udpSourcePreflights')
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            batch['groups'] = groups[1:]
+            batch_path.write_text(json.dumps(batch), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'cover every original endpoint'):
+                field.verify_venue(path)
+            batch['groups'] = groups
+            batch_path.write_text(json.dumps(batch), encoding='utf-8')
+            wrong = batch_folder / groups[0]['udpSourcePreflights'][0]['probe']
+            wrong_report = json.loads(wrong.read_text(encoding='utf-8-sig'))
+            wrong_report['port'] += 1
+            wrong.write_text(json.dumps(wrong_report), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'game binding, accepted peer'):
+                field.verify_venue(path)
+
+    @unittest.skipUnless(HAS_POWERSHELL, 'UDP evidence requires PowerShell')
     def test_preflight_uses_the_observed_server_and_a_peer_with_a_final_ack(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

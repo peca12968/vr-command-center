@@ -22,6 +22,35 @@ python .\scripts\probe-quest-udp.py --adb $adb --serial $serial --key-file $key 
 
 建置可使用 `scripts/build-quest-udp-probe.py --sdk <SDK> --jdk <JDK> --keystore <診斷用開發金鑰庫> --output <新APK>`。需要 Android 35 平台、Build Tools 36.0.0 及 JDK 17。診斷金鑰庫使用別名 `androiddebugkey` 和標準開發密碼 `android`，獨立保存以供同一診斷套件更新。APK 的最低 Android API 為 32，目標 API 為 35。 [APK 簽章工具](https://developer.android.com/tools/apksigner)
 
+### 批次預檢五房 Quest 席位
+
+先在各台要測的 Quest 安裝診斷 APK 並授權 ADB。批次工具在可操作這些 ADB 裝置的遊戲伺服器電腦上執行。它讀取原版本 1 的 `device-map.json`，再用開場前的網路清單取得各房正式綁定位址與埠。網路清單的 `sources` 必須和裝置清單的房號、席位完全相符，每台填自己的實際 IPv4。可只安排部分 Quest 席位。
+
+```json
+{
+  "version": 1,
+  "mode": "Linked",
+  "endpoints": [
+    {"roomIds": [1, 2, 3, 4, 5], "address": "192.168.1.10", "port": 7777}
+  ],
+  "sources": [
+    {"roomId": 1, "seat": 1, "address": "192.168.1.20"},
+    {"roomId": 2, "seat": 1, "address": "192.168.1.21"}
+  ]
+}
+```
+
+獨立五房使用 `"mode": "Independent"`，在 `endpoints` 為房間 1 到 5 各填一筆，例如 `{"roomIds":[1],"address":"192.168.1.10","port":7777}`。各筆須使用不同的綁定位址與埠組合。
+
+```powershell
+python .\scripts\probe-quest-venue.py --adb $adb --device-map .\device-map.json `
+  --network-plan .\quest-network.json --output-directory .\quest-udp-batch --count 5
+```
+
+工具依房號和席位順序啟動各次 Windows 監聽，配對該台 Quest 的回覆，等原監聽程序結束再接續。每次用新的輸出資料夾，內有各席原始報告和 `preflight-report.json`。某席失敗仍會繼續，摘要列出階段並以非零結束。每組端點的已安排席位全部通過時，該組才有 `udpSourcePreflights` 清單。批次在 20 分鐘後停止安排新探測，避免用盡封存核對的 30 分鐘啟動前有效窗。
+
+全部探測完成後，按原網路清單啟動遊戲伺服器。若整批報告涵蓋場館所有端點與實際來源，可從封存驗收清單的 `udpPreflightBatch` 直接引用。混合 Windows 和 Quest 時，可用各端點的逐來源清單合併兩種原報告。 [封存核對](EXTERNAL_CLIENTS.md#核對每個玩家來源的-udp-預檢)
+
 ## 追蹤恢復後的武器輸入
 
 遊戲自 0.48.1 起，在應用程式及 OpenXR 工作階段均有輸入焦點時才處理頭盔操作。系統選單或應用程式暫停期間會停止發布本機追蹤姿態。返回遊戲後，右手扳機、換彈鍵及 B 重連鍵各自需要先放開，再按下。 [Unity OpenXR 焦點介面](https://docs.unity3d.com/Packages/com.unity.xr.openxr@1.19/api/UnityEngine.XR.OpenXR.OpenXRUtility.html#UnityEngine_XR_OpenXR_OpenXRUtility_IsSessionFocused)

@@ -471,9 +471,9 @@ def verify_venue(manifest_path):
     require(len(server_ips) == len(addresses), 'Duplicate server address')
     seen_paths = {manifest_path}
 
-    def evidence_path(value):
+    def evidence_path(value, base=manifest_path.parent):
         require(type(value) is str and bool(value), 'Evidence path is missing')
-        path = (manifest_path.parent / value).resolve(strict=True)
+        path = (base / value).resolve(strict=True)
         require(path not in seen_paths, 'Evidence paths must be distinct across the venue')
         seen_paths.add(path)
         return path
@@ -496,15 +496,32 @@ def verify_venue(manifest_path):
     check_alignments = any('roomAlignments' in entry for entry in entries)
     require(not check_alignments or journals, 'MR alignment evidence requires the original world journals for the full batch')
     preflights = any('udpPreflight' in entry for entry in entries)
-    source_preflights = any('udpSourcePreflights' in entry for entry in entries)
-    require(not (preflights and source_preflights), 'Use either single-pair or all-source UDP preflight verification for the full batch')
+    source_lists = any('udpSourcePreflights' in entry for entry in entries)
+    batch_supplied = 'udpPreflightBatch' in manifest
+    require(sum((preflights, source_lists, batch_supplied)) <= 1, 'Use only one UDP preflight mode for the full batch')
+    source_preflights = source_lists or batch_supplied
     require(not preflights or all('udpPreflight' in entry for entry in entries), 'Provide UDP preflight reports for every session in this batch')
-    require(not source_preflights or all('udpSourcePreflights' in entry for entry in entries),
+    require(not source_lists or all('udpSourcePreflights' in entry for entry in entries),
             'Provide all-source UDP preflight reports for every session in this batch')
 
-    def preflight_pair(pair):
+    batch_path, batch_pairs = None, {}
+    if batch_supplied:
+        batch_path = evidence_path(manifest['udpPreflightBatch'])
+        batch = read_json(content(batch_path))
+        require(integer(batch['version'], 1, 1) and batch.get('scope') == 'quest-udp-preflight-only' and batch.get('mode') == mode
+                and batch.get('complete') is True, 'Provide a complete Quest UDP preflight batch for the original mode')
+        groups = batch['groups']
+        require(type(groups) is list and len(groups) == len(expected_rooms), 'The Quest UDP preflight batch must cover every original endpoint')
+        for group in groups:
+            group_rooms = group['roomIds']
+            require(type(group_rooms) is list and all(type(room) is int for room in group_rooms) and group_rooms in expected_rooms
+                    and tuple(group_rooms) not in batch_pairs and group.get('complete') is True,
+                    'The Quest UDP preflight batch must cover every original endpoint')
+            batch_pairs[tuple(group_rooms)] = group['udpSourcePreflights']
+
+    def preflight_pair(pair, base=manifest_path.parent):
         require(type(pair) is dict and set(pair) == {'listener', 'probe'}, 'Provide the original UDP listener and probe reports')
-        return evidence_path(pair['listener']), evidence_path(pair['probe'])
+        return evidence_path(pair['listener'], base), evidence_path(pair['probe'], base)
 
     expected = {identity(row['sessionId']): row for row in rows}
     require(len(expected) == len(rows) and all(type(row['roomIds']) is list and row['roomIds']
@@ -555,9 +572,10 @@ def verify_venue(manifest_path):
         preflight_paths = preflight_pair(entry['udpPreflight']) if preflights else None
         source_paths = None
         if source_preflights:
-            pairs = entry['udpSourcePreflights']
+            pairs = batch_pairs[tuple(row['roomIds'])] if batch_path else entry['udpSourcePreflights']
             require(type(pairs) is list and 1 <= len(pairs) <= len(players), 'Invalid all-source UDP preflight list')
-            source_paths = [preflight_pair(pair) for pair in pairs]
+            base = batch_path.parent if batch_path else manifest_path.parent
+            source_paths = [preflight_pair(pair, base) for pair in pairs]
         report, sources = verify_session(topology, server_ips, launcher, session, statistics, endpoint,
                                          server_log, len(players), ((address, content(path)) for address, path in logs),
                                          require_remote=False,

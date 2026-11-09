@@ -1,8 +1,10 @@
 import base64
+from contextlib import redirect_stderr
 from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -20,6 +22,9 @@ ROOT = Path(__file__).resolve().parents[1]
 SPEC = importlib.util.spec_from_file_location('quest_udp', ROOT / 'scripts/probe-quest-udp.py')
 quest_udp = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(quest_udp)
+VENUE_SPEC = importlib.util.spec_from_file_location('quest_venue', ROOT / 'scripts/probe-quest-venue.py')
+quest_venue = importlib.util.module_from_spec(VENUE_SPEC)
+VENUE_SPEC.loader.exec_module(quest_venue)
 SERVER = '127.0.0.1'
 PEER = '127.0.0.2'
 POWERSHELL = shutil.which('powershell.exe' if os.name == 'nt' else 'pwsh')
@@ -137,6 +142,122 @@ class QuestUdpProtocolTests(unittest.TestCase):
         self.assertEqual(1, invalid_key.returncode)
         self.assertEqual('key', json.loads(invalid_key.stdout)['step'])
         self.assertNotIn(b'secret-invalid-key', invalid_key.stdout + invalid_key.stderr)
+
+    @unittest.skipUnless(POWERSHELL, 'PowerShell is required for the Quest venue listener')
+    def test_venue_runs_two_java_sources_sequentially_on_original_shared_port(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reservation:
+            reservation.bind((SERVER, 0))
+            port = reservation.getsockname()[1]
+        shell = [POWERSHELL, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned',
+                 '-File', str(ROOT / 'scripts/check-lan-udp.ps1')]
+        devices = [{'roomId': 1, 'seat': 2, 'serial': 'fixture-a', 'address': PEER},
+                   {'roomId': 4, 'seat': 5, 'serial': 'fixture-b', 'address': '127.0.0.3'}]
+        group = {'roomIds': [1, 2, 3, 4, 5], 'address': SERVER, 'port': port, 'devices': devices}
+
+        def java_probe(args):
+            command = [*self.java, str(args.key_file), args.local_address, args.peer_address, str(args.port),
+                       str(args.count), str(args.timeout_ms)]
+            return json.loads(subprocess.run(command, capture_output=True, check=True, timeout=8).stdout)
+
+        output = self.work / 'actual-batch'
+        with patch.object(quest_venue, 'device_ready', return_value=True), patch.object(
+                quest_venue.quest_udp, 'run_probe', side_effect=java_probe) as probes, redirect_stderr(io.StringIO()):
+            report = quest_venue.probe_venue(shell, self.work / 'adb-fixture.exe', 'Linked', [group], output, 2, 900)
+        self.assertTrue(report['complete'])
+        self.assertEqual(2, report['verifiedSeats'])
+        self.assertEqual([PEER, '127.0.0.3'], [call.args[0].local_address for call in probes.call_args_list])
+        self.assertEqual({port}, {call.args[0].port for call in probes.call_args_list})
+        self.assertFalse(any(call.args[0].key_file.exists() for call in probes.call_args_list))
+        for pair in report['groups'][0]['udpSourcePreflights']:
+            self.assertTrue((output / pair['probe']).is_file())
+            self.assertTrue((output / pair['listener']).is_file())
+        self.assertEqual(5, len(list(output.iterdir())))
+        self.assertNotIn('127.0.0.', (output / 'preflight-report.json').read_text(encoding='utf-8'))
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as game:
+            game.bind((SERVER, port))
+            busy_output = self.work / 'busy'
+            with patch.object(quest_venue, 'device_ready', return_value=True), patch.object(
+                    quest_venue.quest_udp, 'run_probe') as probes, redirect_stderr(io.StringIO()):
+                busy = quest_venue.probe_venue(shell, self.work / 'adb-fixture.exe', 'Linked', [group], busy_output, 2, 900)
+            self.assertFalse(busy['complete'])
+            self.assertEqual(['listener', 'listener'], [seat['stage'] for seat in busy['groups'][0]['seats']])
+            probes.assert_not_called()
+            self.assertEqual((SERVER, port), game.getsockname())
+
+
+class QuestUdpVenuePlanTests(unittest.TestCase):
+    def setUp(self):
+        work = tempfile.TemporaryDirectory(prefix='quest-udp-plan-test-')
+        self.addCleanup(work.cleanup)
+        self.root = Path(work.name)
+        self.device_map = self.root / 'devices.json'
+        self.network_plan = self.root / 'network.json'
+        self.devices = {'version': 1, 'seats': [
+            {'roomId': room, 'seat': seat, 'serial': f'device-{room}-{seat}'}
+            for room in range(5, 0, -1) for seat in range(5, 0, -1)]}
+        self.network = {'version': 1, 'mode': 'Independent', 'endpoints': [
+            {'roomIds': [room], 'address': '192.168.10.10', 'port': 7776 + room} for room in range(5, 0, -1)],
+            'sources': [{'roomId': row['roomId'], 'seat': row['seat'], 'address': f"192.168.10.{20 + row['roomId'] * 5 + row['seat']}"}
+                        for row in self.devices['seats']]}
+
+    def plan(self):
+        self.device_map.write_text(json.dumps(self.devices), encoding='utf-8-sig')
+        self.network_plan.write_text(json.dumps(self.network), encoding='utf-8')
+        return quest_venue.load_plan(self.device_map, self.network_plan)
+
+    def test_plan_sorts_all_25_seats_for_both_venue_modes_and_accepts_exact_partial_map(self):
+        mode, groups = self.plan()
+        self.assertEqual('Independent', mode)
+        self.assertEqual([[1], [2], [3], [4], [5]], [group['roomIds'] for group in groups])
+        self.assertEqual(list(range(7777, 7782)), [group['port'] for group in groups])
+        self.assertEqual([5] * 5, [len(group['devices']) for group in groups])
+        self.network.update(mode='Linked', endpoints=[{'roomIds': [1, 2, 3, 4, 5], 'address': '192.168.10.10', 'port': 7777}])
+        mode, groups = self.plan()
+        self.assertEqual('Linked', mode)
+        self.assertEqual([(room, seat) for room in range(1, 6) for seat in range(1, 6)],
+                         [(row['roomId'], row['seat']) for row in groups[0]['devices']])
+        self.devices['seats'] = self.devices['seats'][:1]
+        self.network['sources'] = self.network['sources'][:1]
+        _, groups = self.plan()
+        self.assertEqual([(5, 5)], [(row['roomId'], row['seat']) for row in groups[0]['devices']])
+
+    def test_plan_rejects_missing_source_duplicate_ipv4_and_reused_binding(self):
+        source = self.network['sources'].pop()
+        with self.assertRaisesRegex(ValueError, 'mapped Quest seats exactly'):
+            self.plan()
+        self.network['sources'].append(source)
+        address = source['address']
+        source['address'] = self.network['sources'][0]['address']
+        with self.assertRaisesRegex(ValueError, 'distinct IPv4'):
+            self.plan()
+        source['address'] = address
+        self.network['endpoints'][1]['port'] = self.network['endpoints'][0]['port']
+        with self.assertRaisesRegex(ValueError, 'binding is used'):
+            self.plan()
+
+    def test_failed_seat_and_duplicate_exchange_do_not_claim_complete_group(self):
+        mode, groups = self.plan()
+        output = self.root / 'batch'
+
+        def seat(shell, adb, directory, group, device, count, timeout_ms):
+            room, number = device['roomId'], device['seat']
+            result = {'roomId': room, 'seat': number, 'stage': 'device', 'complete': False}
+            if (room, number) != (1, 2):
+                exchange = 'shared' if (room, number) in ((1, 1), (1, 3)) else f'{room}-{number}'
+                result.update(stage='verified', complete=True, exchangeSha256=exchange, listener='listener.ndjson', probe='probe.json')
+            return result
+
+        with patch.object(quest_venue, 'probe_seat', side_effect=seat) as checked, redirect_stderr(io.StringIO()) as diagnostics:
+            summary = quest_venue.probe_venue([], Path('adb'), mode, groups, output, 3, 900)
+        self.assertEqual(25, checked.call_count)
+        self.assertEqual(23, summary['verifiedSeats'])
+        self.assertFalse(summary['complete'])
+        self.assertEqual(['verified', 'device', 'duplicate'], [row['stage'] for row in summary['groups'][0]['seats'][:3]])
+        self.assertNotIn('udpSourcePreflights', summary['groups'][0])
+        self.assertTrue(all(len(group['udpSourcePreflights']) == 5 for group in summary['groups'][1:]))
+        self.assertNotIn('device-1-2', diagnostics.getvalue())
+        with self.assertRaises(FileExistsError):
+            quest_venue.probe_venue([], Path('adb'), mode, groups, output, 3, 900)
 
 
 class QuestUdpAdbTests(unittest.TestCase):
