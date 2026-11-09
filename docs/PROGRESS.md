@@ -1,5 +1,15 @@
 # 開發進度
 
+## 2026-11-10 Windows OpenXR 玩家啟動
+
+Windows 玩家包 0.49.0 新增 `Launch-Player.exe --config <玩家連線檔> --launch --openxr --wait`。顯示與輸入子系統開始運作後才送出 VR 入場請求。支援的互動設定包含 Unity OpenXR Touch 和 HTC Vive Controller。 [玩家操作](WINDOWS_PLAYER_PACKAGE.md#windows-openxr-啟動)
+
+- Unity Editor 272 項全數通過。驗證 Windows loader 只接受圖形玩家端、兩平台載入設定、官方虛擬 Vive 握把與 Menu 操作。Windows 背景程序帶 OpenXR 旗標時以退出碼 2 在入場前拒絕。實際解壓玩家包 23 項通過，含 Direct3D 11 圖形啟動對單一程序設定無效 OpenXR 執行環境。Unity 原生回報 `XR_ERROR_RUNTIME_UNAVAILABLE`，原遊戲程序退出碼 2，啟動器回報 `OpenXRUnavailable`，未送出遊戲連線。證據在 `artifacts/player-package-checks/20261110-002237-6d9e86d6`。
+- Windows 與 Quest 3 共用來源指紋 `67e22a3bb22771b1b5c0bfa60420db9005015a88b995f15a7d66c104ba3dc7e3`，場景及玩家預製物網路識別一致。兩個 Windows ZIP 分別核對 330 檔。Quest 開發 APK `artifacts/quest-packages/vr-command-quest-0.49.0-arm64-debug.apk` 為 60,963,642 bytes，SHA-256 `ad996caf883c962ed8b2b489c1dbd465b1456abd45f33c2f119da83b87fd0dd2`，已核對 ARM64、OpenXR、min 32、target 35 和 APK v2 開發簽章。前版建置與日誌的 329 檔已逐檔核對 C／F 封存。
+- Windows 三包 `run-a685ea02976d4b80a557a92155abbf23` 退出碼 0，457 項通過。獨立五房與合併場各 25 個同機桌面玩家，兩種模式共 50 份戰績與伺服器確認、6 份原戰績 CSV、六場雙封存及 1,482 格回放。回讀 50 份玩家及 7 份伺服器原日誌，均無 OpenXR 啟動或載入插件的記錄。第七份為終止啟動器的清理反例。活動場次與剩餘測試程序均為零。
+- 功能來源 `e1d956c45398bdf5b491e7348a045ffb5770cc12`。後續提交 `01f128863717cfe32b08379a17bd76fe053b8253` 保留 Unity 結束 Android 建置後還原的專案設定，平台預載資料由建置流程各自套用。Quest 3、VIVE 確切型號與 Windows OpenXR 成功入場、MR 實地、跨機 25 人及廠商設備仍待驗收。
+- GitHub Actions 兩次均因帳務或支出上限未啟動。job `129290488785` 與 `129291719085` 皆為零步驟。 [功能 CI](https://github.com/peca12968/vr-command-center/actions/runs/42654855665) · [專案設定 CI](https://github.com/peca12968/vr-command-center/actions/runs/42655197195)
+
 ## 2026-11-09 五房頭盔追蹤核對
 
 `deploy-quest.ps1 -VerifyTrackedSeats -AllHeadsets` 用原部署 ZIP 驗證全部 25 席。沿用管理服務的入場及快照核對，報告加入每席的名冊頭盔類型。全部 25 席達到 `tracked-ready` 才回傳完成。 [操作方式](QUEST3.md#核對頭盔追蹤席位)
