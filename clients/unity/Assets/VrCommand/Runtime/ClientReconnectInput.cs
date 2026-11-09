@@ -1,11 +1,19 @@
 using System;
+using UnityEngine;
 using UnityEngine.InputSystem;
+using UnityEngine.XR.OpenXR;
 
 namespace VrCommand.Unity
 {
+    internal static class TrackedInputFocus
+    {
+        internal static bool Available(bool paused) => Available(Application.isFocused, OpenXRUtility.IsSessionFocused, paused);
+        internal static bool Available(bool applicationFocused, bool sessionFocused, bool paused)
+            => applicationFocused && sessionFocused && !paused;
+    }
+
     // A fresh release while eligible is required before each explicit press.
-    // A held button cannot survive disconnect, focus loss, tracking loss or cooldown.
-    public sealed class ReconnectPressGate
+    internal sealed class ReleasePressGate
     {
         private bool armed;
         public void Reset() { armed = false; }
@@ -22,7 +30,7 @@ namespace VrCommand.Unity
     {
         public const string Binding = "<XRController>{RightHand}/secondaryButton";
         private readonly InputAction button, tracking, isTracked;
-        private readonly ReconnectPressGate gate = new ReconnectPressGate();
+        private readonly ReleasePressGate gate = new ReleasePressGate();
         public ClientReconnectInput()
         {
             button = new InputAction("Reconnect player", InputActionType.Value, Binding);

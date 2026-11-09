@@ -12,6 +12,15 @@ namespace VrCommand.Unity.Tests
 {
     public sealed class TrackedWeaponReleaseTests
     {
+        [TestCase(false, true, false)]
+        [TestCase(true, false, false)]
+        [TestCase(true, true, true)]
+        public void TrackedInputNeedsApplicationAndSessionFocusWithoutPause(bool application, bool session, bool paused)
+        {
+            Assert.IsFalse(TrackedInputFocus.Available(application, session, paused));
+            Assert.IsTrue(TrackedInputFocus.Available(true, true, false));
+        }
+
         [Test] public void FreshReleaseDoesNotSubmitInputOnTheReleaseFrame()
         {
             var gate = new TrackedWeaponReleaseGate();
@@ -39,7 +48,7 @@ namespace VrCommand.Unity.Tests
         [UnityTearDown] public IEnumerator LeavePlayMode()
         { if (Application.isPlaying) yield return new ExitPlayMode(); }
 
-        [UnityTest] public IEnumerator OfficialTouchBindingsRequireReleaseAfterTrackingOrReadinessLoss()
+        [UnityTest] public IEnumerator OfficialTouchBindingsRequireReleaseAfterTrackingReadinessOrFocusLoss()
         {
             EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
             yield return new EnterPlayMode();
@@ -58,14 +67,17 @@ namespace VrCommand.Unity.Tests
                 using var fire = Bind(NetworkAvatar.TrackedFireBinding);
                 using var reload = Bind(NetworkAvatar.TrackedReloadBinding);
                 var gate = new TrackedWeaponReleaseGate();
-                // Pose/mission readiness is supplied by the fixture. The controller values use actual Dynamic input events.
-                var steps = new (int trackingState, bool ready, bool fire, bool reload, bool allowed)[]
+                // Pose, readiness and focus are fixtures. The controller uses actual Dynamic input events.
+                var steps = new (int trackingState, bool ready, bool xrFocused, bool fire, bool reload, bool allowed)[]
                 {
-                    (3, true, true, false, false), (3, true, false, false, false), (3, true, true, false, true),
-                    (1, true, false, false, false), (3, true, true, false, false),
-                    (3, true, false, true, false), (3, true, false, false, false), (3, true, false, true, true),
-                    (3, false, false, false, false), (3, true, false, true, false),
-                    (3, true, false, false, false), (3, true, true, false, true)
+                    (3, true, true, true, false, false), (3, true, true, false, false, false), (3, true, true, true, false, true),
+                    (1, true, true, false, false, false), (3, true, true, true, false, false),
+                    (3, true, true, false, true, false), (3, true, true, false, false, false), (3, true, true, false, true, true),
+                    (3, false, true, false, false, false), (3, true, true, false, true, false),
+                    (3, true, true, false, false, false), (3, true, true, true, false, true),
+                    (3, true, false, true, false, false), (3, true, false, false, false, false),
+                    (3, true, true, true, false, false), (3, true, true, false, true, false),
+                    (3, true, true, false, false, false), (3, true, true, false, true, true)
                 };
                 foreach (var step in steps)
                 {
@@ -80,7 +92,8 @@ namespace VrCommand.Unity.Tests
                         heldFire = fire.ReadValue<float>() > .5f;
                         heldReload = reload.ReadValue<float>() > .5f;
                         tracked = NetworkAvatar.HasTracking(tracking, isTracked);
-                        allowed = gate.Allows(step.ready && tracked, heldFire || heldReload,
+                        allowed = gate.Allows(step.ready && tracked && TrackedInputFocus.Available(true, step.xrFocused, false),
+                            heldFire || heldReload,
                             fire.WasPressedThisFrame() || reload.WasPressedThisFrame());
                         sampled = true;
                     };

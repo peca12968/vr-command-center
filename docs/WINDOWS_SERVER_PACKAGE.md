@@ -1,5 +1,7 @@
 # Windows 遊戲伺服器包
 
+2026-11-09 `windows-server-0.48.1-launcher1.7-win-x64.zip` 為 83,470,147 bytes，SHA-256 `c3d15a8fc23fec76b5a127c8ffc977719eb538074b0e2bfd693974c6be368bd0`。解壓核對 328 個清單檔案。搭配同源 0.48.1 Windows 玩家及 Quest APK。 [版本相容性](EXTERNAL_CLIENTS.md#遊戲版本相容性)
+
 2026-11-09 `windows-server-0.48.0-launcher1.7-win-x64.zip` 為 83,469,619 bytes，SHA-256 `dce833f49f6a94e630666a6d36d152e80ae5fa693d8a7ad5ffd6f744798a03ef`。解壓核對 328 個清單檔案，321 個 Unity 0.48.0 執行檔案與 1.6 逐檔一致。Windows 啟動器新增場館驗收的來源紀錄開關。 [操作方式](#跨機來源診斷)
 
 2026-11-09 `windows-server-0.48.0-launcher1.6-win-x64.zip` 為 83,468,953 bytes，SHA-256 `aeb7b59c58a43f86918ec6135227658596d58afab5a397cfeaf2badda777fb92`。解壓後核對 328 個清單檔案，321 個 `Runtime/` 檔案逐檔符合 1.5 的 Unity 0.48.0 執行內容。新版會在啟動前核對 MR 場次的房間校正鎖定。 [操作方式](SERVER_CATALOG.md#mr-校正鎖定與啟動資格)

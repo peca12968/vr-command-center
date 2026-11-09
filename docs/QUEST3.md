@@ -2,6 +2,10 @@
 
 ## 追蹤恢復後的武器輸入
 
+遊戲 0.48.1 在應用程式及 OpenXR 工作階段均有輸入焦點時才處理頭盔操作。系統選單或應用程式暫停期間會停止發布本機追蹤姿態。返回遊戲後，右手扳機、換彈鍵及 B 重連鍵各自需要先放開，再按下。 [Unity OpenXR 焦點介面](https://docs.unity3d.com/Packages/com.unity.xr.openxr@1.19/api/UnityEngine.XR.OpenXR.OpenXRUtility.html#UnityEngine_XR_OpenXR_OpenXRUtility_IsSessionFocused)
+
+MR 量測中失去焦點會清除尚未完成的 A／B／C 取樣。返回後從 A 開始，在每個標記先放開再按左扳機。單純失去焦點會保留已完成的校正，應用程式暫停或追蹤原點改變則需重新校正。主控仍可按原流程查看席位追蹤狀態，並決定何時暫停或繼續。
+
 遊戲 0.47.1 在頭盔追蹤中斷、場地校正失效、姿態遭拒或暫停時撤下武器輸入。恢復參戰後，請在追蹤有效時先放開右手扳機與換彈鍵，再重新按下。狀態板會提示 `RELEASE TRIGGER AND RELOAD TO ARM`。連續按住扳機的射擊節奏從下一次主動按下起算。
 
 MR 玩家需要重新對位時，可由操作員暫停場次，完成量測並在主控台確認存活席位的追蹤後繼續。 [暫停後繼續](PLAYER_READINESS.md#暫停後繼續)
@@ -196,9 +200,9 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
   -RoomId 4 -Seat 2 -Serial YOUR_ADB_SERIAL -ManagementApi http://127.0.0.1:5080
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
-  -DeviceMap .\quest-devices.json -ExpectedVersionCode 61 -ManagementApi http://127.0.0.1:5080 -CheckOnly
+  -DeviceMap .\quest-devices.json -ExpectedVersionCode 62 -ManagementApi http://127.0.0.1:5080 -CheckOnly
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
-  -DeviceMap .\quest-devices.json -ExpectedVersionCode 61 -ManagementApi http://127.0.0.1:5080 -DeployMappedSeats
+  -DeviceMap .\quest-devices.json -ExpectedVersionCode 62 -ManagementApi http://127.0.0.1:5080 -DeployMappedSeats
 ```
 
 裝置清單格式與 MR 相同。整批 VR 部署把各席的四欄連線設定寫到對應裝置並請求啟動，現場頭盔的入場與追蹤仍須另外觀察。連線檔與主控金鑰請私下保管。 [VR 五房配票](EXTERNAL_CLIENTS.md#vr-五房配票) · [裝置清單格式](#用裝置清單部署-25-席)
@@ -212,7 +216,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-mr-venue-deployment.zip
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-mr-venue-deployment.zip `
-    -DeviceMap .\quest-batch.json -ExpectedVersionCode 61 -AllowPartialMap `
+    -DeviceMap .\quest-batch.json -ExpectedVersionCode 62 -AllowPartialMap `
     -ManagementApi http://127.0.0.1:5081 -CheckOnly
 ```
 
@@ -251,7 +255,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.z
 
 #### 用裝置清單部署 25 席
 
-先在各台 Quest 3 安裝同一版場館 APK 並授權 USB 偵錯。已驗證的開發 APK `0.48.0` 版本代碼為 `61`。建立 25 席清單後，依實體標籤把每個 `REPLACE-*` 換成對應的 ADB 裝置序號。每組房號與席位須對應一個唯一序號，清單只保存在操作電腦。腳本透過 `adb devices` 及 Android 套件管理器讀取授權狀態與已啟用的應用程式版本。 [Android ADB 文件](https://developer.android.com/tools/adb) · [套件管理器版本輸出](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/pm/PackageManagerShellCommand.java#1130)
+先在各台 Quest 3 安裝同一版場館 APK 並授權 USB 偵錯。已驗證的開發 APK `0.48.1` 版本代碼為 `62`。建立 25 席清單後，依實體標籤把每個 `REPLACE-*` 換成對應的 ADB 裝置序號。每組房號與席位須對應一個唯一序號，清單只保存在操作電腦。腳本透過 `adb devices` 及 Android 套件管理器讀取授權狀態與已啟用的應用程式版本。 [Android ADB 文件](https://developer.android.com/tools/adb) · [套件管理器版本輸出](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/pm/PackageManagerShellCommand.java#1130)
 
 ```powershell
 $seats = foreach ($room in 1..5) {
@@ -267,14 +271,14 @@ $seats = foreach ($room in 1..5) {
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.zip `
-    -DeviceMap .\device-map.json -ExpectedVersionCode 61 -CheckOnly
+    -DeviceMap .\device-map.json -ExpectedVersionCode 62 -CheckOnly
 ```
 
 正式套用時，先依下方方式設定 `VR_COMMAND_MASTER_KEY`，再加入 `-DeployMappedSeats` 與管理服務網址。所有裝置與票券核對通過後，工具依房號與席位順序寫入設定並請求啟動，使用各台已安裝的 APK。
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.zip `
-    -DeviceMap .\device-map.json -ExpectedVersionCode 61 -DeployMappedSeats `
+    -DeviceMap .\device-map.json -ExpectedVersionCode 62 -DeployMappedSeats `
     -ManagementApi http://127.0.0.1:5081
 ```
 
@@ -286,10 +290,10 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.z
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
-    -DeviceMap .\quest-batch.json -ExpectedVersionCode 61 -AllowPartialMap `
+    -DeviceMap .\quest-batch.json -ExpectedVersionCode 62 -AllowPartialMap `
     -ManagementApi http://127.0.0.1:5081 -CheckOnly
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
-    -DeviceMap .\quest-batch.json -ExpectedVersionCode 61 -AllowPartialMap `
+    -DeviceMap .\quest-batch.json -ExpectedVersionCode 62 -AllowPartialMap `
     -ManagementApi http://127.0.0.1:5081 -DeployMappedSeats
 ```
 
@@ -339,7 +343,7 @@ try {
 
 ### 啟動 MR 伺服器前鎖定校正檔
 
-遊戲 0.48.0 要求主控在場次為 Preparing、尚未啟動遊戲伺服器時，鎖定該場所有房間的校正檔 SHA-256。玩家部署須使用相同檔案。即使 JSON 欄位值相同，重新排版或改寫檔案也會改變雜湊。
+遊戲自 0.48.0 起要求主控在場次為 Preparing、尚未啟動遊戲伺服器時，鎖定該場所有房間的校正檔 SHA-256。玩家部署須使用相同檔案。即使 JSON 欄位值相同，重新排版或改寫檔案也會改變雜湊。
 
 在控制台 0.31.23 的場次面板，開啟「MR 校正檔鎖定」，為每房選取原始校正 JSON。管理服務核對檔案房號、原點和 A、B、C 量測，再依原始位元組計算雜湊。全數顯示「已核對，可鎖定」後，按「鎖定本場校正檔」並確認。等畫面顯示「已鎖定」後再啟動伺服器。若命令回應遺失，可用頁面上方的「重試確認結果」。切換場次或離開操作頁會清除尚未鎖定的選檔。
 

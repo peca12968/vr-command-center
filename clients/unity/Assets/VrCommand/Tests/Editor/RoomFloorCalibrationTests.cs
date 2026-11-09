@@ -118,6 +118,26 @@ namespace VrCommand.Unity.Tests
             Assert.That(calibration.Ready, Is.False);
         }
 
+        [Test]
+        public void FloorCaptureRequiresAReleaseAfterFocusLossBeforeTakingTheNextPoint()
+        {
+            var press = new ReleasePressGate();
+            Assert.IsFalse(press.Poll(true, true, true, false));
+            Assert.IsTrue(press.Poll(true, true, true, true));
+            Capture(A);
+            Assert.IsFalse(press.Poll(true, false, true, false));
+            calibration.Invalidate();
+            Assert.IsFalse(press.Poll(true, true, true, true));
+            Assert.IsFalse(calibration.Update(true, true, true, false, B));
+            Assert.That(calibration.Hint, Does.Contain("OVER A"));
+            Assert.IsFalse(press.Poll(true, true, true, false));
+            Assert.IsTrue(press.Poll(true, true, true, true));
+            Capture(A);
+            Assert.IsFalse(press.Poll(true, true, true, true));
+            Assert.IsFalse(calibration.Update(true, true, true, false, B));
+            Assert.That(calibration.Hint, Does.Contain("OVER B"));
+        }
+
         [TestCase(@"""x"":28", @"""x"":14")]
         [TestCase(@"""withinTolerance"":true", @"""withinTolerance"":false")]
         [TestCase(@"""name"":""C""", @"""name"":""B""")]

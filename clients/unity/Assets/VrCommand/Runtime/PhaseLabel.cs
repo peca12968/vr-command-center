@@ -23,7 +23,12 @@ namespace VrCommand.Unity
                     : status == "ACTIVE" ? "RELEASE TRIGGER AND RELOAD TO ARM" : status);
                 GetComponent<UnityEngine.UI.Text>().color = armed ? new Color(.72f, .88f, .53f) : new Color(1, .6f, .3f);
             }
-            if (avatar != null && !string.IsNullOrEmpty(avatar.AlignmentHint))
+            if (avatar != null && !avatar.TrackedInputAvailable)
+            {
+                message = "XR INPUT SUSPENDED\nRETURN TO THE GAME";
+                GetComponent<UnityEngine.UI.Text>().color = new Color(1, .6f, .3f);
+            }
+            else if (avatar != null && !string.IsNullOrEmpty(avatar.AlignmentHint))
             {
                 message = avatar.AlignmentHint;
                 GetComponent<UnityEngine.UI.Text>().color = new Color(1, .6f, .3f);

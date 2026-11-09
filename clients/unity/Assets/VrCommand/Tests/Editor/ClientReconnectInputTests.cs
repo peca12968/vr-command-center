@@ -22,32 +22,32 @@ namespace VrCommand.Unity.Tests
             Assert.IsFalse(ClientReconnectInput.CanOffer("Client", false, false, float.NaN, 2));
         }
         [Test] public void HeldButtonOnFirstEligibleFrameDoesNotReconnect()
-        { var gate = new ReconnectPressGate(); Assert.IsFalse(gate.Poll(true, true, true, true)); Assert.IsFalse(gate.Poll(true, true, true, true)); }
+        { var gate = new ReleasePressGate(); Assert.IsFalse(gate.Poll(true, true, true, true)); Assert.IsFalse(gate.Poll(true, true, true, true)); }
         [Test] public void EachAttemptRequiresAReleaseThenOneNewPress()
         {
-            var gate = new ReconnectPressGate(); Assert.IsFalse(gate.Poll(true, true, true, false)); Assert.IsTrue(gate.Poll(true, true, true, true));
+            var gate = new ReleasePressGate(); Assert.IsFalse(gate.Poll(true, true, true, false)); Assert.IsTrue(gate.Poll(true, true, true, true));
             Assert.IsFalse(gate.Poll(true, true, true, true)); Assert.IsFalse(gate.Poll(true, true, true, false)); Assert.IsTrue(gate.Poll(true, true, true, true));
         }
         [Test] public void DisconnectOrCooldownCannotCarryAnArmedPressAcrossEligibility()
         {
-            var gate = new ReconnectPressGate(); gate.Poll(true, true, true, false); Assert.IsFalse(gate.Poll(false, true, true, true));
+            var gate = new ReleasePressGate(); gate.Poll(true, true, true, false); Assert.IsFalse(gate.Poll(false, true, true, true));
             Assert.IsFalse(gate.Poll(true, true, true, true)); gate.Poll(true, true, true, false); Assert.IsTrue(gate.Poll(true, true, true, true));
         }
         [Test] public void FocusLossRequiresAnotherReleaseInTheForeground()
         {
-            var gate = new ReconnectPressGate(); gate.Poll(true, true, true, false); Assert.IsFalse(gate.Poll(true, false, true, false));
+            var gate = new ReleasePressGate(); gate.Poll(true, true, true, false); Assert.IsFalse(gate.Poll(true, false, true, false));
             Assert.IsFalse(gate.Poll(true, true, true, true)); gate.Poll(true, true, true, false); Assert.IsTrue(gate.Poll(true, true, true, true));
         }
         [Test] public void TrackingLossDoesNotArmAButtonFromMissingInput()
         {
-            var gate = new ReconnectPressGate(); gate.Poll(true, true, true, false); Assert.IsFalse(gate.Poll(true, true, false, false));
+            var gate = new ReleasePressGate(); gate.Poll(true, true, true, false); Assert.IsFalse(gate.Poll(true, true, false, false));
             Assert.IsFalse(gate.Poll(true, true, true, true)); gate.Poll(true, true, true, false); Assert.IsTrue(gate.Poll(true, true, true, true));
         }
         [Test] public void NoDeviceCannotRequestReconnectOrThrow()
         { using (var input = new ClientReconnectInput()) Assert.IsFalse(input.Poll(true, true)); }
         [Test] public void LifecycleResetDisarmsEvenIfNoUpdateRunsDuringSuspension()
         {
-            var gate = new ReconnectPressGate(); gate.Poll(true, true, true, false);
+            var gate = new ReleasePressGate(); gate.Poll(true, true, true, false);
             gate.Reset(); Assert.IsFalse(gate.Poll(true, true, true, true));
             gate.Poll(true, true, true, false); Assert.IsTrue(gate.Poll(true, true, true, true));
         }

@@ -25,6 +25,7 @@ namespace VrCommand.Unity
         private bool managementReady;
         private float nextReconnect;
         private ClientReconnectInput reconnectInput;
+        private bool applicationPaused;
         private VenueLinkDiagnostics linkDiagnostics;
         private const int MaximumPeerObservations = 256;
         private bool peerDiagnostics;
@@ -473,10 +474,14 @@ namespace VrCommand.Unity
         private void Update()
         {
             linkDiagnostics?.Update();
-            if (reconnectInput?.Poll(CanReconnect, Application.isFocused) == true) ReconnectClient();
+            if (reconnectInput?.Poll(CanReconnect, TrackedInputFocus.Available(applicationPaused)) == true) ReconnectClient();
         }
         private void OnApplicationFocus(bool focused) { if (!focused) reconnectInput?.Reset(); }
-        private void OnApplicationPause(bool paused) { if (paused) reconnectInput?.Reset(); }
+        private void OnApplicationPause(bool paused)
+        {
+            applicationPaused = paused;
+            if (paused) reconnectInput?.Reset();
+        }
         private void OnDisable() { reconnectInput?.Reset(); }
         private void OnDestroy()
         {

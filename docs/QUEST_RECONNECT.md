@@ -1,5 +1,7 @@
 # Quest控制器重連
 
+遊戲 0.48.1 會同時核對應用程式與 OpenXR 工作階段的焦點。系統選單關閉或程式恢復後，回到遊戲並放開右手 B，再按一次才能重連。 [頭盔焦點與輸入](QUEST3.md#追蹤恢復後的武器輸入)
+
 Unity0.34.0／Android code41加入右手B鍵重連入口，NGO29、API/UI0.30與原驗票protocol2保持。它使用與桌面Reconnect按鈕相同的`ReconnectClient`，重新讀取原玩家檔案，再由GameServer驗票；不是自動配票、名冊變更、世界恢復或繞過舊admission fence。
 
 原Android略過桌面OnGUI，所以斷線後沒有該按鈕。現在Client在OpenXR／Android啟動時保留獨立的右手secondaryButton輸入，即使玩家avatar已移除，等待畫面仍可處理。Quest對應右手B，不使用系統Menu按鈕；左手Y不是此綁定。VIVE型號及對應按鍵仍待確認。
