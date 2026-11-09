@@ -593,13 +593,17 @@ def main():
                 expected = {'venue.json', *(f'room-{room:02}-{suffix}' for room in room_ids for suffix in ('alignment.json', 'connections.zip'))}
                 with zipfile.ZipFile(io.BytesIO(raw)) as archive:
                     assert len(archive.namelist()) == len(expected) and set(archive.namelist()) == expected
-                    for name in expected: (destination / name).write_bytes(archive.read(name))
-                report = json.loads(subprocess.check_output([pwsh, '-NoProfile', '-File', str(ROOT/'scripts/deploy-quest.ps1'),
-                    '-VenueManifest', str(destination/'venue.json'), '-ManagementApi', uri], env={**os.environ, 'VR_COMMAND_MASTER_KEY': keys['Master']},
-                    timeout=25, encoding='utf-8', cwd=destination))
-                manifest_rooms = read(destination/'venue.json')['rooms']
-                assert [(row['roomId'], row['sessionId']) for row in manifest_rooms] == [(row['roomId'], row['sessionId']) for row in rooms]
-                assert all((destination / f'room-{room:02}-alignment.json').read_bytes() == files[room] for room in room_ids)
+                    manifest_rooms = json.loads(archive.read('venue.json'))['rooms']
+                    assert [(row['roomId'], row['sessionId']) for row in manifest_rooms] == [(row['roomId'], row['sessionId']) for row in rooms]
+                    assert all(archive.read(f'room-{room:02}-alignment.json') == files[room] for room in room_ids)
+                bundle = destination / 'quest-mr-venue.zip'
+                bundle.write_bytes(raw)
+                deploy = [pwsh, '-NoProfile', '-File', str(ROOT/'scripts/deploy-quest.ps1'), '-VenueBundle', str(bundle), '-ManagementApi', uri]
+                environment = {**os.environ, 'VR_COMMAND_MASTER_KEY': keys['Master']}
+                report = json.loads(subprocess.check_output(deploy, env=environment, timeout=25, encoding='utf-8', cwd=destination))
+                seat = json.loads(subprocess.check_output([*deploy, '-RoomId', '4', '-Seat', '2', '-CheckOnly'],
+                    env=environment, timeout=25, encoding='utf-8', cwd=destination))
+                assert list(destination.iterdir()) == [bundle]
             endpoints = {entry['sessionId']: f'{address}:{entry["ready"]["port"]}' for entry in entries}
             check(report['managementVerified'] and report['alignmentPinsVerified'] and report['topology'] == mode and report['seats'] == 25
                 and [(row['roomId'], row['seats'], row['endpoint'], row['alignmentSha256']) for row in report['rooms']] == [
@@ -607,6 +611,10 @@ def main():
                 and request('/api/sessions') == before,
                 mode + ' actual Quest preflight verifies 25 signed files, original calibration and owned UDP endpoints without writing session events')
             save(f'mr-venue-{mode.lower()}-deployment.json', report)
+            check(seat['roomId'] == 4 and seat['seat'] == 2 and seat['mode'] == 'MR' and seat['managementVerified']
+                and seat['alignmentPinsVerified'] and seat['alignmentSha256'] == hashes[4],
+                mode + ' direct ZIP preflight selects the original room 4 seat 2 without extraction or ADB')
+            save(f'mr-venue-{mode.lower()}-seat.json', seat)
             for entry in entries: command(entry['sessionId'], 'End')
             for entry in entries: finish(entry)
     try:

@@ -1,26 +1,34 @@
 [CmdletBinding(DefaultParameterSetName='Player')]
 param(
     [Parameter(Mandatory, ParameterSetName='Player')][string]$ClientConfig,
-    [Parameter(ParameterSetName='Player')][string]$Serial,
-    [Parameter(ParameterSetName='Player')][string]$AdbPath = 'F:\Tools\UnityEditors\6000.3.27f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe',
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][string]$Serial,
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][string]$AdbPath = 'F:\Tools\UnityEditors\6000.3.27f1\Editor\Data\PlaybackEngines\AndroidPlayer\SDK\platform-tools\adb.exe',
     [Parameter(ParameterSetName='Player')][string]$AlignmentFile,
     [Parameter(ParameterSetName='Player')][switch]$Passthrough,
     [Parameter(ParameterSetName='Player')][switch]$MixedReality,
-    [Parameter(ParameterSetName='Player')][switch]$CheckOnly,
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][switch]$CheckOnly,
     [Parameter(Mandatory, ParameterSetName='Venue')][string]$VenueManifest,
-    [Parameter(ParameterSetName='Venue')][ValidateNotNullOrEmpty()][string]$ManagementApi
+    [Parameter(Mandatory, ParameterSetName='Bundle')][string]$VenueBundle,
+    [Parameter(ParameterSetName='Bundle')][ValidateRange(1,5)][int]$RoomId,
+    [Parameter(ParameterSetName='Bundle')][ValidateRange(1,5)][int]$Seat,
+    [Parameter(ParameterSetName='Venue')][Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$ManagementApi
 )
 $ErrorActionPreference = 'Stop'
 # Handle ADB exit codes here so both Windows PowerShell and PowerShell report the failing step.
 $PSNativeCommandUseErrorActionPreference = $false
 
-function Read-DeploymentStream([IO.Stream]$Stream, [long]$Size, [int]$Limit) {
+function Read-DeploymentBytes([IO.Stream]$Stream, [long]$Size, [int]$Limit) {
     if ($Size -lt 1 -or $Size -gt $Limit) { throw 'Invalid file size.' }
     $reader = [IO.BinaryReader]::new($Stream, [Text.Encoding]::UTF8, $true)
     try {
         $bytes = $reader.ReadBytes([int]$Size)
         if ($bytes.Length -ne $Size -or $Stream.ReadByte() -ne -1) { throw 'Unexpected file length.' }
     } finally { $reader.Dispose() }
+    return ,$bytes
+}
+
+function Read-DeploymentStream([IO.Stream]$Stream, [long]$Size, [int]$Limit) {
+    $bytes = Read-DeploymentBytes $Stream $Size $Limit
     $json = [Text.UTF8Encoding]::new($false, $true).GetString($bytes).TrimStart([char]0xFEFF)
     if (-not $json.TrimStart().StartsWith('{')) { throw 'Expected a JSON object.' }
     return @{ Bytes = $bytes; Document = ConvertFrom-Json -InputObject $json }
@@ -87,8 +95,7 @@ function Read-PlayerConfig($Config) {
     return $ticket
 }
 
-function Read-RoomAlignment([string]$Path, [int]$RoomId) {
-    $alignment = Read-DeploymentJson $Path 16384 'checked room alignment'
+function Confirm-RoomAlignment($Alignment, [int]$RoomId) {
     $plan = $alignment.Document
     if (-not (Test-JsonInteger $plan.version) -or $plan.version -ne 1 -or
         $plan.profile -isnot [string] -or $plan.profile -cne 'room-floor-alignment-v1' -or
@@ -113,6 +120,10 @@ function Read-RoomAlignment([string]$Path, [int]$RoomId) {
     return $alignment
 }
 
+function Read-RoomAlignment([string]$Path, [int]$RoomId) {
+    Confirm-RoomAlignment (Read-DeploymentJson $Path 16384 'checked room alignment') $RoomId
+}
+
 function Get-VenueInputPath([string]$Directory, [string]$Path) {
     if ([IO.Path]::IsPathRooted($Path)) { return $Path }
     return [IO.Path]::Combine($Directory, $Path)
@@ -123,41 +134,49 @@ function Read-VenueRoomTickets([string]$Path, [int]$RoomId, [Guid]$SessionId) {
     catch { throw "Room $RoomId needs a readable room connection ZIP." }
     try {
         if ($file.Length -lt 1 -or $file.Length -gt 65536) { throw "Room $RoomId connection ZIP has an invalid size." }
-        try { $archive = [IO.Compression.ZipArchive]::new($file, [IO.Compression.ZipArchiveMode]::Read, $true) }
-        catch { throw "Room $RoomId needs a valid room connection ZIP." }
-        try {
-            if ($archive.Entries.Count -ne 5) { throw "Room $RoomId must contain exactly five seat connection files." }
-            foreach ($seat in 1..5) {
-                $entry = $archive.GetEntry(('room-{0:00}-seat-{1:00}.json' -f $RoomId, $seat))
-                if ($null -eq $entry) { throw "Room $RoomId is missing the expected seat $seat connection file." }
-                try {
-                    $stream = $entry.Open()
-                    try { $fileContent = Read-DeploymentStream $stream $entry.Length 4096 }
-                    finally { $stream.Dispose() }
-                } catch { throw "Room $RoomId seat $seat contains an invalid connection JSON file." }
-                $config = $fileContent.Document
-                try { $ticket = Read-PlayerConfig $config }
-                catch { throw ('Room {0} seat {1}: {2}' -f $RoomId, $seat, $_.Exception.Message) }
-                if ($ticket.SessionId -ne $SessionId -or $ticket.RoomId -ne $RoomId -or $ticket.Seat -ne ($seat - 1) -or
-                    $ticket.PlayerId -eq [Guid]::Empty -or $ticket.AdmissionId -eq [Guid]::Empty) {
-                    throw "Room $RoomId seat $seat ticket does not match the expected session or seat."
-                }
-                $address = $null
-                if (-not [Net.IPAddress]::TryParse($config.address, [ref]$address) -or
-                    $address.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or
-                    $address.ToString() -cne $config.address -or $address.GetAddressBytes()[0] -eq 0 -or
-                    $address.GetAddressBytes()[0] -ge 224 -or $config.port -lt 1024) {
-                    throw "Room $RoomId seat $seat needs a canonical unicast IPv4 address and UDP port 1024–65535."
-                }
-                $ticket.Endpoint = [string]$config.address + ':' + $config.port
-                $ticket.Bytes = $fileContent.Bytes
-                $ticket
-            }
-        } finally { $archive.Dispose() }
+        Read-VenueTicketStream $file $RoomId $SessionId
     } finally { $file.Dispose() }
 }
 
-function Confirm-VenueWithManagement([string]$Address, [string]$Topology, [object[]]$Rooms) {
+function Read-VenueTicketStream([IO.Stream]$InputStream, [int]$RoomId, [Guid]$SessionId, [switch]$ForBundle) {
+    try { $archive = [IO.Compression.ZipArchive]::new($InputStream, [IO.Compression.ZipArchiveMode]::Read, $true) }
+    catch { throw "Room $RoomId needs a valid room connection ZIP." }
+    try {
+        if ($archive.Entries.Count -ne 5) { throw "Room $RoomId must contain exactly five seat connection files." }
+        foreach ($seat in 1..5) {
+            $entry = $archive.GetEntry(('room-{0:00}-seat-{1:00}.json' -f $RoomId, $seat))
+            if ($null -eq $entry) { throw "Room $RoomId is missing the expected seat $seat connection file." }
+            try {
+                $stream = $entry.Open()
+                try { $fileContent = Read-DeploymentStream $stream $entry.Length 4096 }
+                finally { $stream.Dispose() }
+            } catch { throw "Room $RoomId seat $seat contains an invalid connection JSON file." }
+            $config = $fileContent.Document
+            try { $ticket = Read-PlayerConfig $config }
+            catch { throw ('Room {0} seat {1}: {2}' -f $RoomId, $seat, $_.Exception.Message) }
+            if ($ticket.SessionId -ne $SessionId -or $ticket.RoomId -ne $RoomId -or $ticket.Seat -ne ($seat - 1) -or
+                $ticket.PlayerId -eq [Guid]::Empty -or $ticket.AdmissionId -eq [Guid]::Empty) {
+                throw "Room $RoomId seat $seat ticket does not match the expected session or seat."
+            }
+            $address = $null
+            if (-not [Net.IPAddress]::TryParse($config.address, [ref]$address) -or
+                $address.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or
+                $address.ToString() -cne $config.address -or $address.GetAddressBytes()[0] -eq 0 -or
+                $address.GetAddressBytes()[0] -ge 224 -or $config.port -lt 1024) {
+                throw "Room $RoomId seat $seat needs a canonical unicast IPv4 address and UDP port 1024–65535."
+            }
+            if ($ForBundle -and [Net.IPAddress]::IsLoopback($address)) {
+                throw "Room $RoomId seat $seat needs a venue endpoint usable outside the server computer."
+            }
+            $ticket.Endpoint = [string]$config.address + ':' + $config.port
+            $ticket.Bytes = $fileContent.Bytes
+            $ticket.Config = $config
+            $ticket
+        }
+    } finally { $archive.Dispose() }
+}
+
+function Confirm-VenueWithManagement([string]$Address, [string]$Topology, [object[]]$Rooms, $PublishedEndpoints) {
     $uri = $null
     if (-not [Uri]::TryCreate($Address, [UriKind]::Absolute, [ref]$uri) -or
         ($uri.Scheme -ne 'https' -and -not ($uri.Scheme -eq 'http' -and $uri.IsLoopback)) -or
@@ -193,17 +212,58 @@ function Confirm-VenueWithManagement([string]$Address, [string]$Topology, [objec
     }
     if ($result.allMatched -ne (-not $failures)) { throw 'The management service returned an inconsistent venue check receipt.' }
     if ($failures) { throw ('Live venue check failed. ' + ($failures -join '; ')) }
+    foreach ($sessionId in $PublishedEndpoints.Keys) {
+        $source = [Uri]::new($uri, "/api/sessions/$sessionId/connection-endpoint")
+        try {
+            $metadata = Invoke-WebRequest -Uri $source -Method Get -Headers @{ Authorization = 'Bearer ' + $masterKey } `
+                -NoProxy -MaximumRedirection 0 -TimeoutSec 10 -SkipHttpErrorCheck
+            if ($metadata.StatusCode -ne 200) { throw 'Published endpoint unavailable.' }
+            $published = ConvertFrom-Json -InputObject $metadata.Content
+        } catch { throw 'The live bundle check could not read the current published game endpoint.' }
+        if (-not (Test-JsonInteger $published.version) -or $published.version -ne 1 -or
+            $published.sessionId -cne $sessionId -or $published.sessionEnded -isnot [bool] -or $published.sessionEnded -or
+            $published.address -isnot [string] -or -not (Test-JsonInteger $published.port) -or
+            ($published.address + ':' + $published.port) -cne $PublishedEndpoints[$sessionId]) {
+            throw 'The bundle connection endpoint does not match the current published game endpoint.'
+        }
+    }
 }
 
-function Test-VenueManifest([string]$Path) {
-    $manifest = (Read-DeploymentJson $Path 16384 'venue manifest').Document
+function Read-VenueJsonEntry($Entry, [string]$Description) {
+    try {
+        $stream = $Entry.Open()
+        try { Read-DeploymentStream $stream $Entry.Length 16384 }
+        finally { $stream.Dispose() }
+    } catch { throw "Use a valid $Description JSON in the deployment ZIP." }
+}
+
+function Read-VenueBundle([string]$Path, [int]$SelectedRoom, [int]$SelectedSeat) {
+    try { $file = [IO.File]::OpenRead((Resolve-Path -LiteralPath $Path).ProviderPath) }
+    catch { throw 'Use a readable five-room MR deployment ZIP from the management console.' }
+    try {
+        if ($file.Length -lt 1 -or $file.Length -gt 512KB) { throw 'The five-room MR deployment ZIP has an invalid size.' }
+        try { $archive = [IO.Compression.ZipArchive]::new($file, [IO.Compression.ZipArchiveMode]::Read, $true) }
+        catch { throw 'Use a valid five-room MR deployment ZIP from the management console.' }
+        try {
+            if ($archive.Entries.Count -ne 11) { throw 'The deployment ZIP must contain exactly one manifest and ten room files.' }
+            $entries = [Collections.Generic.Dictionary[string,IO.Compression.ZipArchiveEntry]]::new([StringComparer]::Ordinal)
+            foreach ($entry in $archive.Entries) {
+                if ($entries.ContainsKey($entry.FullName)) { throw 'The deployment ZIP contains a duplicate entry.' }
+                $entries.Add($entry.FullName, $entry)
+            }
+            $manifest = (Read-VenueJsonEntry $entries['venue.json'] 'venue manifest').Document
+            Read-Venue $manifest '' $entries $SelectedRoom $SelectedSeat
+        } finally { $archive.Dispose() }
+    } finally { $file.Dispose() }
+}
+
+function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$SelectedRoom, [int]$SelectedSeat) {
     if (-not (Test-JsonInteger $manifest.version) -or $manifest.version -ne 1 -or
         $manifest.topology -isnot [string] -or $manifest.topology -cnotin @('Linked','Independent') -or
         $manifest.rooms -isnot [array] -or $manifest.rooms.Count -ne 5 -or
         @($manifest.PSObject.Properties.Name | Where-Object { $_ -cnotin @('version','topology','rooms') }).Count -gt 0) {
         throw 'Use a version 1 venue manifest with Linked or Independent topology and five rooms.'
     }
-    $directory = [IO.Path]::GetDirectoryName((Resolve-Path -LiteralPath $Path).ProviderPath)
     $seenRooms = [Collections.Generic.HashSet[int]]::new()
     $players = [Collections.Generic.HashSet[Guid]]::new()
     $admissions = [Collections.Generic.HashSet[Guid]]::new()
@@ -211,7 +271,9 @@ function Test-VenueManifest([string]$Path) {
     $endpoints = [Collections.Generic.HashSet[string]]::new()
     $earliest = [DateTimeOffset]::MaxValue
     $usesPins = $null
+    $selected = $null
     $liveRooms = [Collections.Generic.List[object]]::new()
+    $publishedEndpoints = @{}
     $rooms = foreach ($room in $manifest.rooms) {
         $session = [Guid]::Empty
         if (-not (Test-JsonInteger $room.roomId) -or $room.roomId -notin 1..5 -or -not $seenRooms.Add($room.roomId) -or
@@ -222,11 +284,30 @@ function Test-VenueManifest([string]$Path) {
             throw 'Provide one entry per room with roomId, sessionId, ticketsZip and alignmentFile.'
         }
         $id = $room.roomId
-        $alignment = Read-RoomAlignment (Get-VenueInputPath $directory $room.alignmentFile) $id
-        $tickets = @(Read-VenueRoomTickets (Get-VenueInputPath $directory $room.ticketsZip) $id $session)
+        if ($BundleEntries) {
+            $expectedZip = 'room-{0:00}-connections.zip' -f $id
+            $expectedAlignment = 'room-{0:00}-alignment.json' -f $id
+            if ($room.ticketsZip -cne $expectedZip -or $room.alignmentFile -cne $expectedAlignment -or
+                -not $BundleEntries.ContainsKey($expectedZip) -or -not $BundleEntries.ContainsKey($expectedAlignment)) {
+                throw "Room $id must use the original room filenames inside the deployment ZIP."
+            }
+            $alignment = Confirm-RoomAlignment (Read-VenueJsonEntry $BundleEntries[$expectedAlignment] "room $id alignment") $id
+            $entry = $BundleEntries[$expectedZip]
+            $stream = $entry.Open()
+            try { $bytes = Read-DeploymentBytes $stream $entry.Length 65536 }
+            catch { throw "Room $id connection ZIP has an invalid size or length." }
+            finally { $stream.Dispose() }
+            $inner = [IO.MemoryStream]::new($bytes, $false)
+            try { $tickets = @(Read-VenueTicketStream $inner $id $session -ForBundle) }
+            finally { $inner.Dispose() }
+        } else {
+            $alignment = Read-RoomAlignment (Get-VenueInputPath $directory $room.alignmentFile) $id
+            $tickets = @(Read-VenueRoomTickets (Get-VenueInputPath $directory $room.ticketsZip) $id $session)
+        }
         $endpoint = $tickets[0].Endpoint
         foreach ($ticket in $tickets) {
             $hasPin = $null -ne $ticket.AlignmentHash
+            if ($BundleEntries -and -not $hasPin) { throw "Room $id seat $($ticket.Seat + 1) needs a locked MR connection file." }
             if ($null -eq $usesPins) { $usesPins = $hasPin }
             if ($usesPins -ne $hasPin) { throw 'Do not mix locked MR and legacy connection files in the same venue preflight.' }
             if ($hasPin -and $ticket.AlignmentHash -cne $alignment.Hash) {
@@ -237,6 +318,9 @@ function Test-VenueManifest([string]$Path) {
                 throw "Room $id seat $($ticket.Seat + 1) repeats a player or admission."
             }
             if ($ticket.ExpiresAtUtc -lt $earliest) { $earliest = $ticket.ExpiresAtUtc }
+            if ($id -eq $SelectedRoom -and $ticket.Seat -eq ($SelectedSeat - 1)) {
+                $selected = @{ Alignment = $alignment; Ticket = $ticket }
+            }
         }
         $null = $sessions.Add($session)
         $null = $endpoints.Add($endpoint)
@@ -244,6 +328,7 @@ function Test-VenueManifest([string]$Path) {
             if ($tickets | Where-Object { $_.Bytes.Length -gt 2048 }) { throw "Room $id connection JSON exceeds the live check's 2 KiB per-seat limit." }
             $liveRooms.Add(@{ roomId = $id; sessionId = $session; alignmentFile = [Convert]::ToBase64String($alignment.Bytes)
                 connectionFiles = @($tickets | ForEach-Object { [Convert]::ToBase64String($_.Bytes) }) })
+            if ($BundleEntries) { $publishedEndpoints[$session.ToString('D')] = $endpoint }
         }
         [pscustomobject]@{ roomId = $id; seats = $tickets.Count; endpoint = $endpoint; alignmentSha256 = $alignment.Hash }
     }
@@ -253,7 +338,7 @@ function Test-VenueManifest([string]$Path) {
     }
     if ($ManagementApi) {
         if (-not $usesPins) { throw 'The live venue check requires all 25 connection files to carry locked MR alignment hashes.' }
-        Confirm-VenueWithManagement $ManagementApi $manifest.topology $liveRooms.ToArray()
+        Confirm-VenueWithManagement $ManagementApi $manifest.topology $liveRooms.ToArray() $publishedEndpoints
     }
     if ($earliest -le [DateTimeOffset]::UtcNow) { throw 'A player ticket expired during venue preflight. Download fresh room connection ZIPs.' }
     $report = [ordered]@{
@@ -264,7 +349,7 @@ function Test-VenueManifest([string]$Path) {
     }
     if ($usesPins) { $report.alignmentPinsVerified = $true }
     if ($ManagementApi) { $report.managementVerified = $true }
-    $report | ConvertTo-Json -Depth 4 -Compress
+    return @{ Report = $report; Selected = $selected }
 }
 
 function Publish-QuestFile([string]$Local, [string]$Staging, [string]$Destination, [string]$Description) {
@@ -286,20 +371,39 @@ function Publish-QuestFile([string]$Local, [string]$Staging, [string]$Destinatio
 }
 
 if ($PSCmdlet.ParameterSetName -eq 'Venue') {
-    Test-VenueManifest $VenueManifest
+    $manifest = (Read-DeploymentJson $VenueManifest 16384 'venue manifest').Document
+    $directory = [IO.Path]::GetDirectoryName((Resolve-Path -LiteralPath $VenueManifest).ProviderPath)
+    (Read-Venue $manifest $directory).Report | ConvertTo-Json -Depth 4 -Compress
     return
 }
 
-$config = (Read-DeploymentJson $ClientConfig 4096 'player connection').Document
-$ticket = Read-PlayerConfig $config
-$isMixedReality = $MixedReality -or $null -ne $ticket.AlignmentHash
-if (($Passthrough -or $isMixedReality) -and -not $AlignmentFile) { throw 'Quest passthrough requires a checked room alignment JSON export.' }
+$alignment = $null
 $alignmentHash = $null
-if ($AlignmentFile) {
-    $alignment = Read-RoomAlignment $AlignmentFile $ticket.RoomId
+if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
+    if ([bool]$RoomId -ne [bool]$Seat) { throw 'Specify both -RoomId and -Seat, or omit both for five-room preflight.' }
+    if (-not $RoomId -and $Serial) { throw 'Specify -RoomId and -Seat when targeting a Quest device.' }
+    if ($RoomId -and -not $CheckOnly -and [string]::IsNullOrWhiteSpace($Serial)) { throw 'Specify -Serial to deploy a bundle seat to a Quest 3.' }
+    $venue = Read-VenueBundle $VenueBundle $RoomId $Seat
+    if (-not $RoomId) {
+        $venue.Report | ConvertTo-Json -Depth 4 -Compress
+        return
+    }
+    $ticket = $venue.Selected.Ticket
+    $config = $ticket.Config
+    $alignment = $venue.Selected.Alignment
     $alignmentHash = $alignment.Hash
-    if ($ticket.AlignmentHash -and $ticket.AlignmentHash -cne $alignmentHash) {
-        throw "The supplied file does not match the locked MR alignment for room $($ticket.RoomId)."
+    $isMixedReality = $true
+} else {
+    $config = (Read-DeploymentJson $ClientConfig 4096 'player connection').Document
+    $ticket = Read-PlayerConfig $config
+    $isMixedReality = $MixedReality -or $null -ne $ticket.AlignmentHash
+    if (($Passthrough -or $isMixedReality) -and -not $AlignmentFile) { throw 'Quest passthrough requires a checked room alignment JSON export.' }
+    if ($AlignmentFile) {
+        $alignment = Read-RoomAlignment $AlignmentFile $ticket.RoomId
+        $alignmentHash = $alignment.Hash
+        if ($ticket.AlignmentHash -and $ticket.AlignmentHash -cne $alignmentHash) {
+            throw "The supplied file does not match the locked MR alignment for room $($ticket.RoomId)."
+        }
     }
 }
 if ($CheckOnly) {
@@ -311,6 +415,7 @@ if ($CheckOnly) {
         alignmentSha256 = $alignmentHash
     }
     if ($ticket.AlignmentHash) { $report.alignmentPinsVerified = $true }
+    if ($ManagementApi) { $report.managementVerified = $true }
     $report | ConvertTo-Json -Compress
     return
 }
@@ -337,7 +442,7 @@ $remoteDirectory = '/sdcard/Android/data/com.vrcommand.quest/files'
 & $AdbPath -s $Serial shell mkdir -p $remoteDirectory
 if ($LASTEXITCODE -ne 0) { throw 'App data directory could not be prepared.' }
 $deploymentId = [Guid]::NewGuid().ToString('N')
-if ($AlignmentFile) {
+if ($alignment) {
     $stagedAlignment = [IO.Path]::GetTempFileName()
     try {
         [IO.File]::WriteAllBytes($stagedAlignment, $alignment.Bytes)

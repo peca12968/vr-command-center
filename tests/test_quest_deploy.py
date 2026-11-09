@@ -2,6 +2,7 @@ import base64
 import copy
 import hashlib
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import io
 import json
 import os
 from pathlib import Path
@@ -290,11 +291,139 @@ class QuestVenueTests(unittest.TestCase):
         return subprocess.run(['pwsh','-NoProfile','-NonInteractive','-File',str(ROOT / 'scripts/deploy-quest.ps1'),
                                '-VenueManifest',str(self.path),*flags], capture_output=True, encoding='utf-8', timeout=20, env=environment)
 
+    def bundle(self, topology):
+        manifest, seats = self.prepare(topology)
+        files = {}
+        for room in manifest['rooms']:
+            room_id = room['roomId']
+            original = b'\xef\xbb\xbf' + (self.root / room['alignmentFile']).read_bytes() + b'\r\n'
+            room['alignmentFile'] = f'room-{room_id:02}-alignment.json'
+            room['ticketsZip'] = f'room-{room_id:02}-connections.zip'
+            files[room['alignmentFile']] = original
+            tickets = io.BytesIO()
+            with zipfile.ZipFile(tickets, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+                for name, config in seats[room_id].items():
+                    config['roomAlignmentSha256'] = hashlib.sha256(original).hexdigest()
+                    archive.writestr(name, json.dumps(config))
+            files[room['ticketsZip']] = tickets.getvalue()
+        files['venue.json'] = json.dumps(manifest).encode()
+        return files, seats
+
+    def run_bundle(self, files, *flags, environment=None, script=ROOT / 'scripts/deploy-quest.ps1'):
+        bundle = self.root / 'quest-mr-venue.zip'
+        with zipfile.ZipFile(bundle, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+            for name, data in files.items():
+                archive.writestr(name, data)
+        return subprocess.run(['pwsh','-NoProfile','-NonInteractive','-File',str(script),
+                               '-VenueBundle',str(bundle),*flags], capture_output=True, encoding='utf-8', timeout=20, env=environment)
+
     def assert_rejected(self, result, message):
         self.assertNotEqual(0, result.returncode)
         self.assertIn(message, result.stderr)
         self.assertEqual('', result.stdout)
         self.assertNotIn('v2.', result.stderr)
+
+    def test_bundle_preflight_and_seat_selection_need_no_extraction_or_adb(self):
+        for topology in ('Linked', 'Independent'):
+            with self.subTest(topology=topology):
+                files, _ = self.bundle(topology)
+                result = self.run_bundle(files)
+                self.assertEqual(0, result.returncode, result.stderr)
+                venue = json.loads(result.stdout)
+                self.assertEqual((topology, 25, True), (venue['topology'], venue['seats'], venue['alignmentPinsVerified']))
+                result = self.run_bundle(files, '-RoomId', '5', '-Seat', '2', '-CheckOnly')
+                self.assertEqual(0, result.returncode, result.stderr)
+                seat = json.loads(result.stdout)
+                self.assertEqual((5, 2, 'MR'), (seat['roomId'], seat['seat'], seat['mode']))
+                self.assertEqual(hashlib.sha256(files['room-05-alignment.json']).hexdigest(), seat['alignmentSha256'])
+                self.assertNotIn('v2.', result.stdout)
+        self.assertEqual({'quest-mr-venue.zip', *(f'calibration {i}.json' for i in range(1, 6))}, {file.name for file in self.root.iterdir()})
+        self.assert_rejected(self.run_bundle(files, '-RoomId', '5'), 'Specify both -RoomId and -Seat')
+        self.assert_rejected(self.run_bundle(files, '-Serial', 'fixture'), 'Specify -RoomId and -Seat')
+        self.assert_rejected(self.run_bundle(files, '-RoomId', '5', '-Seat', '2'), 'Specify -Serial')
+
+    def test_bundle_rejects_mismatched_files_before_a_selected_deployment(self):
+        files, _ = self.bundle('Linked')
+        flags = ('-RoomId', '5', '-Seat', '2', '-Serial', 'fixture')
+        self.assert_rejected(self.run_bundle({**files, 'unrelated.txt': b'extra'}, *flags), 'exactly one manifest and ten room files')
+        manifest = json.loads(files['venue.json'])
+        manifest['rooms'][1]['alignmentFile'] = '../room-02-alignment.json'
+        self.assert_rejected(self.run_bundle({**files, 'venue.json': json.dumps(manifest)}, *flags), 'Room 2 must use the original room filenames')
+        self.assert_rejected(self.run_bundle({**files, 'room-02-alignment.json': files['room-02-alignment.json'] + b'\n'}, *flags),
+                             'Room 2 seat 1 does not match the locked MR alignment file')
+        self.assert_rejected(self.run_bundle({**files, 'room-02-connections.zip': b'x' * 65537}, *flags), 'Room 2 connection ZIP has an invalid size or length')
+
+    def test_bundle_deploys_only_the_requested_seat_and_pins_the_original_bytes(self):
+        files, seats = self.bundle('Independent')
+        scripts = self.root / 'scripts'
+        scripts.mkdir()
+        script = scripts / 'deploy-quest.ps1'
+        shutil.copyfile(ROOT / 'scripts' / script.name, script)
+        adb = scripts / 'mock-adb.ps1'
+        adb.write_text(ADB_FIXTURE, encoding='utf-8')
+        apk = self.root / 'artifacts/quest/VrCommand.apk'
+        apk.parent.mkdir(parents=True)
+        apk.write_bytes(b'mock APK')
+        remote = self.root / 'remote'
+        remote.mkdir()
+        environment = {**os.environ, 'QUEST_TEST_ROOT':str(self.root),
+                       'QUEST_TEST_ALTER_ALIGNMENT':str(self.root / 'quest-mr-venue.zip')}
+        result = self.run_bundle(files, '-RoomId', '4', '-Seat', '3', '-Serial', 'fixture', '-AdbPath', str(adb),
+                                 environment=environment, script=script)
+        self.assertEqual(0, result.returncode, result.stderr)
+        config = {**seats[4]['room-04-seat-03.json'], 'questPassthrough': True, 'requestMixedReality': True}
+        self.assertEqual(config, json.loads((remote / 'vr-connection.json').read_bytes()))
+        name = f'vr-room-alignment-{config["roomAlignmentSha256"]}.json'
+        self.assertEqual(files['room-04-alignment.json'], (remote / name).read_bytes())
+        self.assertEqual({'vr-connection.json', name}, {file.name for file in remote.iterdir()})
+        commands = (self.root / 'adb.log').read_text(encoding='utf-8').splitlines()
+        self.assertTrue(all(command.startswith('-s fixture ') for command in commands))
+        self.assertEqual(2, sum(' push ' in command for command in commands))
+        self.assertIn('shell monkey', commands[-1])
+        self.assertNotIn(config['joinTicket'], result.stdout + result.stderr + ''.join(commands))
+
+    def test_live_bundle_checks_the_published_endpoint_before_deployment(self):
+        files, _ = self.bundle('Linked')
+        session = str(self.session_ids[0])
+        calls = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def respond(self, data):
+                calls.append((self.command, self.path, self.headers.get('Authorization')))
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(data).encode())
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers['Content-Length']))
+                self.respond({'topology': 'Linked', 'allMatched': True, 'seats': [
+                    {'roomId': room, 'seat': seat, 'status': 'matched'} for room in range(1, 6) for seat in range(5)]})
+
+            def do_GET(self):
+                self.respond({'version': 1, 'sessionId': session, 'sessionEnded': False, 'address': '192.168.1.10',
+                              'port': 7777 if len(calls) == 1 else 17777})
+
+            def log_message(self, *args):
+                pass
+
+        environment = {**os.environ, 'VR_COMMAND_MASTER_KEY': 'PRIVATE_MASTER_CANARY'}
+        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                flags = ('-RoomId', '3', '-Seat', '4', '-ManagementApi', f'http://127.0.0.1:{server.server_port}')
+                accepted = self.run_bundle(files, *flags, '-CheckOnly', environment=environment)
+                self.assertEqual(0, accepted.returncode, accepted.stderr)
+                self.assertTrue(json.loads(accepted.stdout)['managementVerified'])
+                denied = self.run_bundle(files, *flags, '-Serial', 'fixture', environment=environment)
+                self.assert_rejected(denied, 'does not match the current published game endpoint')
+                self.assertNotIn('PRIVATE_MASTER_CANARY', accepted.stdout + accepted.stderr + denied.stderr)
+                self.assertEqual([('POST', '/api/mr-deployment/venue-check', 'Bearer PRIVATE_MASTER_CANARY'),
+                                  ('GET', f'/api/sessions/{session}/connection-endpoint', 'Bearer PRIVATE_MASTER_CANARY')] * 2, calls)
+            finally:
+                server.shutdown()
+                thread.join(timeout=5)
 
     def test_both_topologies_check_all_twenty_five_seats_without_printing_tickets(self):
         for topology, endpoint_count in (('Linked',1), ('Independent',5)):

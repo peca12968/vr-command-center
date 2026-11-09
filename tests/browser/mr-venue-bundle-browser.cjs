@@ -91,9 +91,18 @@ module.exports = async ({ context, api, tokens, base, root, directory, screensho
     const result = await api('/mr-deployment/venue-check', 'POST', verify);
     assert.ok(result.allMatched && result.seats.length === 25);
     if (process.env.VR_COMMAND_VENUE_DEPLOY_CHECK === '1') {
-      const report = JSON.parse(execute('pwsh', ['-NoProfile', '-File', path.join(root, 'scripts/deploy-quest.ps1'),
-        '-VenueManifest', manifestPath, '-ManagementApi', base], { env: { ...process.env, VR_COMMAND_MASTER_KEY: tokens.Master } }));
-      assert.ok(report.managementVerified && report.topology === request.topology);
+      const options = { env: { ...process.env, VR_COMMAND_MASTER_KEY: tokens.Master } };
+      const common = ['-NoProfile', '-File', path.join(root, 'scripts/deploy-quest.ps1'), '-ManagementApi', base];
+      const report = JSON.parse(execute('pwsh', [...common, '-VenueManifest', manifestPath], options));
+      const direct = JSON.parse(execute('pwsh', [...common, '-VenueBundle', outer], options));
+      assert.deepEqual(direct, report);
+      assert.ok(direct.managementVerified && direct.topology === request.topology);
+      const seat = JSON.parse(execute('pwsh', [...common, '-VenueBundle', outer, '-RoomId', '4', '-Seat', '2', '-CheckOnly'], options));
+      assert.equal(seat.roomId, 4);
+      assert.equal(seat.seat, 2);
+      assert.equal(seat.mode, 'MR');
+      assert.equal(seat.alignmentSha256, hash(files[3]));
+      assert.ok(seat.managementVerified && seat.alignmentPinsVerified);
     }
   }
 
