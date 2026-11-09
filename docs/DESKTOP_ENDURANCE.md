@@ -1,10 +1,18 @@
 # 長場原生自動化輸入
 
+## Windows 0.48.1 長場複驗
+
+2026-11-09 用 Windows 遊戲 0.48.1 及既有管理包 0.31.48 重跑兩種拓撲。合併場 25 席，獨立五房各 5 席。兩種模式各持續 900 秒生成移動、射擊及換彈，使用原生玩家程序及正常遊戲輸入路徑。執行命令沿用下方 `--mode both --players-per-room 5 --seconds 900 --endurance --replay-workers 5`。
+
+`artifacts/desktop-exercise/20261109-151952-6c10c16e` 退出碼 0，18 項通過。每席完成 90 發射擊、45 次換彈。六場逐格核對 51,342 格完整回放，其中 51,079 格為執行中。50 份玩家戰績、50 次原伺服器確認、6 份 CSV 與雙封存一致。活動場次和剩餘測試程序均為零，C 與 F 的 174 檔執行資料副本逐檔 SHA-256 相同。此輪為單台 Windows 的自動化桌面測試，跨機、真人操作、頭盔與實體場館容量待實地驗收。 [進度](PROGRESS.md#2026-11-09-windows-0481-雙模式長場複驗)
+
+## 0.41.1 歷史長場
+
 最新[CI41367545805](https://github.com/peca12968/vr-command-center/actions/runs/41367545805)對65b072d完整success：772/459/47/6pipe/38CLI/Python/素材89Node296Chromium，2Windows限定skip。新51browser與control13/hardware26原ZIP逐hash保存，總1819browser/nativeUI11分列；65只GUI fixture roster，native4bdf、包說明c55、242/4ebd雙平台與新900秒長場均另有本機證據。以下659/c55及failed為歷史，最新交付以上述及PROGRESS為準。
 
 [CI41364751791](https://github.com/peca12968/vr-command-center/actions/runs/41364751791)對fixture來源659f026完整success：772／459／47、6pipe／38CLI、全部Python含14 exercise／素材、89 Node／296 Chromium，2 Windows限定skip非原生／Editor證據。console51／control13／hardware26與完整hash見[PROGRESS](PROGRESS.md)；原三次CI失敗保持、1717 browser／nativeUI7＋2另列。原held PUT必須fulfilled=true／只有1請求後隔離斷言才過，原15／30秒／產品期限不變，不證舊逾時根因。659只fixture／文件，242 Editor／4ebd建置與原生helper仍4bdf；新900秒另以真正handle33928完成；CI不代替原生接受。
 
-目前候選 **Unity0.41.1／code52／NGO29**、242真正Editor／0skip，同源Windows／ARM64 fingerprint **4ebdcd12b9cbf1d00f342cb25dbec21d84f60c048284d8333cb8fa01c42a495c**，原Scene／prefab ID保持。兩模式60秒預測試與900秒長場均已通過；舊0.41失敗保留，兩者分開記錄。這是AutomatedSimulation，非真人鍵盤、頭盔、LAN或網路容量驗收。
+當時候選 **Unity0.41.1／code52／NGO29**、242真正Editor／0skip，同源Windows／ARM64 fingerprint **4ebdcd12b9cbf1d00f342cb25dbec21d84f60c048284d8333cb8fa01c42a495c**，原Scene／prefab ID保持。兩模式60秒預測試與900秒長場均已通過；舊0.41失敗保留，兩者分開記錄。這是AutomatedSimulation，非真人鍵盤、頭盔、LAN或網路容量驗收。
 
 ```powershell
 python scripts/check-desktop-exercise.py --api-dll <同次API0.31完整建置DLL> --runtime-root <SSD runtime根目錄> --mode both --players-per-room 5 --seconds 900 --endurance --replay-workers 5
@@ -40,7 +48,7 @@ python scripts/check-desktop-exercise.py --api-dll <同次API0.31完整建置DLL
 
 輔助離線分析首Room-only混到Linked另一組ID而min(empty)失敗，原腳本／錯誤保留；後依該錄影原player IDs重對齊才生成readback，原資料不動。原0.41 binary/log321＋7來源＝328先C/F archive，更早0.40的327亦保持。
 
-## 目前候選證據與交付
+## 0.41.1 候選證據與交付
 
 242真正Editor／0skip（原238＋4），含位置換向、不變tick仍可換向、不均步長舊漂移／新有界、非有限值拒絕。Python14 exercise／27 active／5 artifact與錯模式CLI拒絕成功。新報告必須明確motion=LocalPositionFeedback，舊0.41報告不能冒充新模式。
 
