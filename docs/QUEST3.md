@@ -282,7 +282,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.z
     -ManagementApi http://127.0.0.1:5081
 ```
 
-中途失敗會停止並以非零結束碼回報。`launch-requested` 表示裝置已收到啟動指令，`deployment-failed` 的席位可能已套用部分檔案，`not-attempted` 表示該席未寫入。已處理席位保留當下結果。可按回報定位故障，必要時重新配發票券，再用單席流程處理尚未成功的裝置。遊戲入場與 MR 就緒另由場次面板核對。
+中途失敗會停止並以非零結束碼回報。`launch-requested` 表示裝置已收到啟動指令，`deployment-failed` 的席位可能已套用部分檔案，`not-attempted` 表示該席未寫入。已處理席位保留當下結果。可按回報定位故障，必要時重新配發票券，再用單席流程處理尚未成功的裝置。啟動後可回到場次面板，或執行[核對頭盔追蹤席位](#核對頭盔追蹤席位)。
 
 #### 部署指定的 Quest 席位
 
@@ -298,6 +298,26 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 ```
 
 正式套用前仍會核對 ZIP 的全部 25 份連線檔、簽章、現行名冊和公告端點。MR 同時核對原鎖定校正檔。任何票券過期或名額已更換時，請從主控下載新的 ZIP。混合 VR 名冊中，已列入清單的席位都須登記為 Quest 3。工具只查詢清單中的裝置型號與 APK 版本，只寫入及啟動這些裝置。部署報告的 `mappedSeats` 和 `unmappedSeats` 分別表示本次有列入及未列入的席位數。
+
+#### 核對頭盔追蹤席位
+
+部署並戴上頭盔後，在主控電腦用原五房 ZIP 與既有 `VR_COMMAND_MASTER_KEY` 核對目前追蹤席位。可用 VR、MR 或混合 ZIP。工具先由管理服務核對 25 份原連線檔，再按原場次各讀一次就緒快照。未指定清單時檢查所有 Quest 3 席位。要查看一批指定席位，加入 `-DeviceMap .\quest-batch.json -AllowPartialMap`。此操作用清單選擇房號與席位，不呼叫 ADB。
+
+```powershell
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
+    -ManagementApi http://127.0.0.1:5081 -VerifyTrackedSeats
+```
+
+`tracked-ready` 要求同一場次、玩家及當次入場名額、已套用的場次序號、管理服務判定為 `Fresh` 的快照，以及可參戰的 `Tracked` 姿態。MR 另確認遊戲伺服器使用有效 MR 來源設定。報告含各席房號、席位、狀態與其世界序號，所有已選席位就緒時才回傳 `complete: true` 與退出碼 0。
+
+| 狀態 | 現場核對 |
+| --- | --- |
+| `awaiting-tracked-pose`、`not-tracked` | 檢查頭盔有無進入遊戲、恢復焦點並完成 MR 取點 |
+| `source-not-fresh`、`source-revision-pending`、`mr-profile-pending` | 查看遊戲伺服器及房卡，等有效快照套用目前的場次狀態 |
+| `seat-unavailable`、`admission-changed`、`seat-headset-mismatch` | 核對當前名冊與所選席位，重新下載有變更的部署包 |
+| `readiness-unavailable`、`readiness-invalid` | 核對管理服務連線、版本與場次 |
+
+票券到期後可從主控下載新的 ZIP 供核對。報告反映各場讀取時的狀態，實際裝置序號、網路來源及全館持續容量另由現場驗收確認。 [收集 Quest 場館驗收日誌](#收集-quest-場館驗收日誌)
 
 #### 使用逐房下載的檔案建立清單
 

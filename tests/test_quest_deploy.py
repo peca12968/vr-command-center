@@ -383,6 +383,98 @@ class QuestVenueTests(unittest.TestCase):
         self.assertEqual('', result.stdout)
         self.assertNotIn('v2.', result.stderr)
 
+    def test_tracked_readback_uses_original_admissions_and_one_snapshot_per_session(self):
+        snapshots, seats, calls = {}, [], []
+        topology = 'Independent'
+        fixture_key = 'private-readiness-fixture-key'
+
+        class Handler(BaseHTTPRequestHandler):
+            def reply(self, payload, status=200):
+                calls.append((self.command, self.path, self.headers.get('Authorization')))
+                self.send_response(status)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(payload).encode())
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers['Content-Length']))
+                self.reply({'topology': topology, 'allMatched': True, 'seats': seats})
+
+            def do_GET(self):
+                snapshot = snapshots[self.path.split('/')[3]]
+                self.reply(snapshot, 503 if snapshot is None else 200)
+
+            def log_message(self, *args):
+                pass
+
+        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            args = ('-VerifyTrackedSeats', '-ManagementApi', f'http://127.0.0.1:{server.server_port}',
+                    '-AdbPath', str(self.root / 'absent-adb.exe'))
+            env = {**os.environ, 'VR_COMMAND_MASTER_KEY': fixture_key}
+            try:
+                for topology in ('Independent', 'Linked'):
+                    with self.subTest(topology=topology):
+                        files, _ = self.vr_bundle(topology)
+                        calls.clear()
+                        snapshots.clear()
+                        seats.clear()
+                        for room in range(1, 6):
+                            session = str(self.session_ids[0 if topology == 'Linked' else room - 1])
+                            snapshot = snapshots.setdefault(session, {'version': 1, 'sessionId': session,
+                                'sourceState': 'Fresh', 'origin': 'Simulation', 'worldSequence': 32,
+                                'sessionSequence': 12, 'observedSequence': 12, 'players': []})
+                            for seat in range(5):
+                                index = (room - 1) * 5 + seat
+                                seats.append({'roomId': room, 'seat': seat, 'status': 'matched',
+                                              'headset': 'ViveXr' if index == 1 else 'Quest3'})
+                                snapshot['players'].append({'roomId': room, 'seat': seat,
+                                    'playerId': str(self.players[index]), 'admissionId': str(self.admissions[index]),
+                                    'state': 'Participating', 'canParticipate': True, 'rigKind': 'Tracked'})
+                        result = self.run_bundle(files, *args, environment=env)
+                        self.assertEqual(0, result.returncode, result.stderr)
+                        report = json.loads(result.stdout)
+                        self.assertEqual((topology, 'tracked-readiness', True, 24),
+                                         (report['topology'], report['phase'], report['complete'], len(report['seats'])))
+                        self.assertTrue(all(row['status'] == 'tracked-ready' for row in report['seats']))
+                        self.assertNotIn((1, 2), [(row['roomId'], row['seat']) for row in report['seats']])
+                        self.assertEqual([('POST', '/api/vr-deployment/venue-check', 'Bearer ' + fixture_key)] + [
+                            ('GET', f'/api/sessions/{session}/readiness', 'Bearer ' + fixture_key) for session in snapshots], calls)
+
+                sample = snapshots[str(self.session_ids[0])]
+                sample['players'][0]['rigKind'] = 'Simulated'
+                sample['players'][2]['admissionId'] = str(uuid.uuid4())
+                sample['players'][3].update(state='PoseUnavailable', canParticipate=False)
+                sample['players'][-1] = sample['players'][4]
+                calls.clear()
+                mapping, document = self.device_map()
+                document['seats'] = [row for row in document['seats'] if row['roomId'] == 1]
+                mapping.write_text(json.dumps(document), encoding='utf-8')
+                result = self.run_bundle(files, *args, '-DeviceMap', str(mapping), '-AllowPartialMap', environment=env)
+                self.assertEqual(1, result.returncode, result.stderr)
+                self.assertEqual(['not-tracked', 'seat-headset-mismatch', 'admission-changed', 'awaiting-tracked-pose', 'readiness-invalid'],
+                                 [row['status'] for row in json.loads(result.stdout)['seats']])
+                self.assertEqual(2, len(calls))
+                self.assertFalse((self.root / 'adb.log').exists())
+                for value in (fixture_key, 'fixture-01', str(self.players[0]), str(self.admissions[0]), 'v2.'):
+                    self.assertNotIn(value, result.stdout + result.stderr)
+
+                for changes, status in (({'sourceState': 'Stale'}, 'source-not-fresh'),
+                                        ({'observedSequence': 11}, 'source-revision-pending'),
+                                        ({'sessionId': str(uuid.uuid4())}, 'readiness-invalid'),
+                                        (None, 'readiness-unavailable')):
+                    with self.subTest(status=status):
+                        snapshots[str(self.session_ids[0])] = {**sample, **changes} if changes is not None else None
+                        result = self.run_bundle(files, *args, '-DeviceMap', str(mapping), '-AllowPartialMap', environment=env)
+                        self.assertEqual(1, result.returncode, result.stderr)
+                        self.assertEqual(status, json.loads(result.stdout)['seats'][0]['status'])
+                self.assert_rejected(self.run_bundle(files, *args, '-DeployMappedSeats', environment=env),
+                                     'omit deployment and device-check')
+            finally:
+                server.shutdown()
+                thread.join(timeout=5)
+
     def test_bundle_preflight_and_seat_selection_need_no_extraction_or_adb(self):
         for topology in ('Linked', 'Independent'):
             with self.subTest(topology=topology):
@@ -564,6 +656,13 @@ class QuestVenueTests(unittest.TestCase):
         mapping.write_text(json.dumps({'version': 1, 'seats': selected}), encoding='utf-8')
         session = str(self.session_ids[0])
         calls = []
+        readiness = {'version': 1, 'sessionId': session, 'sessionSequence': 27, 'observedSequence': 27,
+                     'worldSequence': 14, 'sourceState': 'Fresh', 'origin': 'GameServer', 'mrStartState': 'WaitingPlayers',
+                     'players': [{'roomId': row['roomId'], 'seat': row['seat'] - 1, 'state': 'Participating',
+                                  'rigKind': 'Tracked', 'canParticipate': True,
+                                  'playerId': str(self.players[(row['roomId'] - 1) * 5 + row['seat'] - 1]),
+                                  'admissionId': str(self.admissions[(row['roomId'] - 1) * 5 + row['seat'] - 1])}
+                                 for row in selected]}
 
         class Handler(BaseHTTPRequestHandler):
             def respond(self, payload):
@@ -579,7 +678,10 @@ class QuestVenueTests(unittest.TestCase):
                     {'roomId': room, 'seat': seat, 'status': 'matched'} for room in range(1, 6) for seat in range(5)]})
 
             def do_GET(self):
-                self.respond({'version': 1, 'sessionId': session, 'sessionEnded': False, 'address': '192.168.1.10', 'port': 7777})
+                if self.path == f'/api/sessions/{session}/readiness':
+                    self.respond(readiness)
+                else:
+                    self.respond({'version': 1, 'sessionId': session, 'sessionEnded': False, 'address': '192.168.1.10', 'port': 7777})
 
             def log_message(self, *args):
                 pass
@@ -590,6 +692,21 @@ class QuestVenueTests(unittest.TestCase):
             try:
                 result = self.run_fleet(files, mapping, '-AllowPartialMap', '-DeployMappedSeats',
                     '-ManagementApi', f'http://127.0.0.1:{server.server_port}', environment={'VR_COMMAND_MASTER_KEY': 'private-fixture-master'})
+                deploy_calls = calls.copy()
+                before = (self.root / 'adb.log').read_bytes()
+                flags = ('-VerifyTrackedSeats', '-DeviceMap', str(mapping), '-AllowPartialMap',
+                         '-ManagementApi', f'http://127.0.0.1:{server.server_port}')
+                env = {**os.environ, 'VR_COMMAND_MASTER_KEY': 'private-fixture-master'}
+                ready = self.run_bundle(files, *flags, environment=env)
+                self.assertEqual(0, ready.returncode, ready.stderr)
+                self.assertEqual(['tracked-ready'] * 2, [row['status'] for row in json.loads(ready.stdout)['seats']])
+                for changes in ({'mrStartState': 'WaitingProfile'}, {'mrStartState': 'Ready', 'origin': 'Simulation'}):
+                    readiness.update(changes)
+                    pending = self.run_bundle(files, *flags, environment=env)
+                    self.assertEqual(1, pending.returncode, pending.stderr)
+                    self.assertEqual(['mr-profile-pending'] * 2, [row['status'] for row in json.loads(pending.stdout)['seats']])
+                self.assertEqual(before, (self.root / 'adb.log').read_bytes())
+                self.assertEqual(deploy_calls + (deploy_calls + [f'/api/sessions/{session}/readiness']) * 3, calls)
             finally:
                 server.shutdown()
                 thread.join(timeout=5)
@@ -597,7 +714,7 @@ class QuestVenueTests(unittest.TestCase):
         report = json.loads(result.stdout)
         self.assertEqual((True, True, True, 2, 23), (report['complete'], report['managementVerified'],
                          report['alignmentPinsVerified'], report['mappedSeats'], report['unmappedSeats']))
-        self.assertEqual(['/api/mr-deployment/venue-check', f'/api/sessions/{session}/connection-endpoint'], calls)
+        self.assertEqual(['/api/mr-deployment/venue-check', f'/api/sessions/{session}/connection-endpoint'], deploy_calls)
         self.assertEqual({'fixture-03','fixture-22'}, {path.name for path in self.root.glob('fixture-*')})
         for row in selected:
             room, seat = row['roomId'], row['seat']

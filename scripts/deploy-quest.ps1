@@ -15,6 +15,7 @@ param(
     [Parameter(ParameterSetName='Bundle')][switch]$AllowPartialMap,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,2147483647)][int]$ExpectedVersionCode,
     [Parameter(ParameterSetName='Bundle')][switch]$DeployMappedSeats,
+    [Parameter(ParameterSetName='Bundle')][switch]$VerifyTrackedSeats,
     [Parameter(ParameterSetName='Venue')][Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$ManagementApi
 )
 $ErrorActionPreference = 'Stop'
@@ -180,7 +181,7 @@ function Read-VenueTicketStream([IO.Stream]$InputStream, [int]$RoomId, [Guid]$Se
     } finally { $archive.Dispose() }
 }
 
-function Confirm-VenueWithManagement([string]$Address, [string]$Topology, [object[]]$Rooms, $PublishedEndpoints, [string]$Mode = 'MR') {
+function Get-ManagementTarget([string]$Address) {
     $uri = $null
     if (-not [Uri]::TryCreate($Address, [UriKind]::Absolute, [ref]$uri) -or
         ($uri.Scheme -ne 'https' -and -not ($uri.Scheme -eq 'http' -and $uri.IsLoopback)) -or
@@ -189,12 +190,17 @@ function Confirm-VenueWithManagement([string]$Address, [string]$Topology, [objec
     }
     $masterKey = [Environment]::GetEnvironmentVariable('VR_COMMAND_MASTER_KEY')
     if ([string]::IsNullOrWhiteSpace($masterKey)) { throw 'Set VR_COMMAND_MASTER_KEY for the live venue check.' }
-    $endpoint = [Uri]::new($uri, "/api/$($Mode.ToLowerInvariant())-deployment/venue-check")
+    return @{ Origin = $uri; Headers = @{ Authorization = 'Bearer ' + $masterKey } }
+}
+
+function Confirm-VenueWithManagement([string]$Address, [string]$Topology, [object[]]$Rooms, $PublishedEndpoints, [string]$Mode = 'MR') {
+    $target = Get-ManagementTarget $Address
+    $endpoint = [Uri]::new($target.Origin, "/api/$($Mode.ToLowerInvariant())-deployment/venue-check")
     $checksHeadset = $Mode -cin @('VR','Mixed')
     $body = @{ topology = $Topology; rooms = $Rooms } | ConvertTo-Json -Compress -Depth 6
     try {
         $response = Invoke-WebRequest -Uri $endpoint -Method Post -ContentType 'application/json' `
-            -Headers @{ Authorization = 'Bearer ' + $masterKey } -Body $body -NoProxy -MaximumRedirection 0 -TimeoutSec 10 -SkipHttpErrorCheck
+            -Headers $target.Headers -Body $body -NoProxy -MaximumRedirection 0 -TimeoutSec 10 -SkipHttpErrorCheck
     } catch { throw 'The live venue check could not reach the management service.' }
     if ($response.StatusCode -in 401,403) { throw 'The management service requires the current Master key for the live venue check.' }
     if ($response.StatusCode -ne 200) { throw 'The management service did not accept the live venue check. Verify the management version and service status.' }
@@ -221,9 +227,9 @@ function Confirm-VenueWithManagement([string]$Address, [string]$Topology, [objec
     if ($failures) { throw ('Live venue check failed. ' + ($failures -join '; ')) }
     if ($checksHeadset) { return $result.seats }
     foreach ($sessionId in $PublishedEndpoints.Keys) {
-        $source = [Uri]::new($uri, "/api/sessions/$sessionId/connection-endpoint")
+        $source = [Uri]::new($target.Origin, "/api/sessions/$sessionId/connection-endpoint")
         try {
-            $metadata = Invoke-WebRequest -Uri $source -Method Get -Headers @{ Authorization = 'Bearer ' + $masterKey } `
+            $metadata = Invoke-WebRequest -Uri $source -Method Get -Headers $target.Headers `
                 -NoProxy -MaximumRedirection 0 -TimeoutSec 10 -SkipHttpErrorCheck
             if ($metadata.StatusCode -ne 200) { throw 'Published endpoint unavailable.' }
             $published = ConvertFrom-Json -InputObject $metadata.Content
@@ -444,6 +450,72 @@ function Read-QuestDeviceMap([string]$Path, [switch]$Partial) {
     $map.seats | Sort-Object roomId, seat
 }
 
+function Read-TrackedReadiness($Target, [Guid]$SessionId) {
+    $url = [Uri]::new($Target.Origin, "/api/sessions/$SessionId/readiness")
+    try {
+        $response = Invoke-WebRequest -Uri $url -Method Get -Headers $Target.Headers -NoProxy `
+            -MaximumRedirection 0 -TimeoutSec 10 -SkipHttpErrorCheck
+        if ($response.StatusCode -ne 200) { return @{ Status = 'readiness-unavailable' } }
+        $snapshot = ConvertFrom-Json -InputObject $response.Content
+    } catch { return @{ Status = 'readiness-unavailable' } }
+    if (-not (Test-JsonInteger $snapshot.version) -or $snapshot.version -ne 1 -or $snapshot.sessionId -cne $SessionId.ToString('D') -or
+        $snapshot.players -isnot [array] -or $snapshot.players.Count -gt 25 -or
+        $snapshot.sourceState -cnotin @('Fresh','Ended','NoRecording','WaitingFrame','UnknownCaptureTime','ClockSkew','Stale','Suspended','PhasePending') -or
+        -not (Test-JsonInteger $snapshot.worldSequence) -or $snapshot.worldSequence -lt 0 -or
+        -not (Test-JsonInteger $snapshot.sessionSequence) -or $snapshot.sessionSequence -lt 1 -or
+        -not (Test-JsonInteger $snapshot.observedSequence) -or $snapshot.observedSequence -lt 0) {
+        return @{ Status = 'readiness-invalid' }
+    }
+    return @{ Snapshot = $snapshot }
+}
+
+function Get-TrackedSeatStatus($Reading, $Connection) {
+    if ($Reading.Status) { return $Reading.Status }
+    $snapshot = $Reading.Snapshot
+    $ticket = $Connection.Ticket
+    $rows = @($snapshot.players | Where-Object { $_.roomId -eq $ticket.RoomId -and $_.seat -eq $ticket.Seat })
+    if ($rows.Count -eq 0) { return 'seat-unavailable' }
+    if ($rows.Count -ne 1) { return 'readiness-invalid' }
+    $player = $rows[0]
+    if (-not (Test-JsonInteger $player.roomId) -or -not (Test-JsonInteger $player.seat) -or
+        $player.canParticipate -isnot [bool]) { return 'readiness-invalid' }
+    if ($player.playerId -cne $ticket.PlayerId.ToString('D') -or $player.admissionId -cne $ticket.AdmissionId.ToString('D')) {
+        return 'admission-changed'
+    }
+    if ($snapshot.sourceState -cne 'Fresh') { return 'source-not-fresh' }
+    if ($snapshot.origin -cnotin @('Simulation','GameServer') -or $snapshot.worldSequence -eq 0 -or
+        $snapshot.observedSequence -ne $snapshot.sessionSequence) { return 'source-revision-pending' }
+    if ($Connection.Alignment -and ($snapshot.origin -cne 'GameServer' -or
+        @($snapshot.mrStartState, $snapshot.mrResumeState, $snapshot.mrTrackingState).Where({ $_ -cin @('Ready','WaitingPlayers') }).Count -eq 0)) {
+        return 'mr-profile-pending'
+    }
+    if ($player.state -cne 'Participating' -or -not $player.canParticipate) { return 'awaiting-tracked-pose' }
+    if ($player.rigKind -cne 'Tracked') { return 'not-tracked' }
+    return 'tracked-ready'
+}
+
+function Confirm-TrackedSeats($Venue, [object[]]$Map) {
+    Confirm-VenueReadback $Venue
+    $target = Get-ManagementTarget $ManagementApi
+    $readings = @{}
+    $hasHeadsets = $Venue.Report.mode -cin @('VR','Mixed')
+    $seats = @(foreach ($row in $Map) {
+        $key = "$($row.roomId)/$($row.seat)"
+        if ($hasHeadsets -and $Venue.SeatHeadsets[$key] -cne 'Quest3') {
+            if ($DeviceMap) { [ordered]@{ roomId = $row.roomId; seat = $row.seat; status = 'seat-headset-mismatch' } }
+            continue
+        }
+        $connection = $Venue.Connections[$key]
+        $session = $connection.Ticket.SessionId
+        if (-not $readings.ContainsKey($session)) { $readings[$session] = Read-TrackedReadiness $target $session }
+        $reading = $readings[$session]
+        [ordered]@{ roomId = $row.roomId; seat = $row.seat; status = Get-TrackedSeatStatus $reading $connection;
+            sourceState = $reading.Snapshot.sourceState; worldSequence = $reading.Snapshot.worldSequence }
+    })
+    return [ordered]@{ phase = 'tracked-readiness'; topology = $Venue.Report.topology; managementVerified = $true;
+        complete = ($seats.Count -gt 0 -and -not ($seats | Where-Object { $_.status -cne 'tracked-ready' })); seats = $seats }
+}
+
 function Get-QuestDeviceInventory {
     $lines = @(& $AdbPath devices)
     if ($LASTEXITCODE -ne 0) { throw 'Could not list authorized Android devices.' }
@@ -593,6 +665,18 @@ if ($PSCmdlet.ParameterSetName -eq 'Venue') {
 $alignment = $null
 $alignmentHash = $null
 if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
+    if ($VerifyTrackedSeats) {
+        if (-not $ManagementApi -or $RoomId -or $Seat -or $PSBoundParameters.ContainsKey('Serial') -or
+            $ExpectedVersionCode -or $DeployMappedSeats -or $CheckOnly -or ($AllowPartialMap -and -not $DeviceMap)) {
+            throw 'Use -VerifyTrackedSeats with -ManagementApi and an optional -DeviceMap; omit deployment and device-check parameters.'
+        }
+        $map = @(if ($DeviceMap) { Read-QuestDeviceMap $DeviceMap -Partial:$AllowPartialMap }
+            else { foreach ($room in 1..5) { foreach ($seat in 1..5) { @{ roomId = $room; seat = $seat } } } })
+        $result = Confirm-TrackedSeats (Read-VenueBundle $VenueBundle 0 0) $map
+        $result | ConvertTo-Json -Depth 4 -Compress
+        if (-not $result.complete) { exit 1 }
+        return
+    }
     if ($DeviceMap) {
         if ($RoomId -or $Seat -or $PSBoundParameters.ContainsKey('Serial') -or -not $ExpectedVersionCode) {
             throw 'Use -DeviceMap with -ExpectedVersionCode and omit -RoomId, -Seat and -Serial.'

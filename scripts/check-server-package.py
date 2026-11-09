@@ -1200,6 +1200,14 @@ def main():
                   and report['seats'] == 25 and [row['mode'] for row in report['rooms']] == ['VR','MR','VR','MR','VR'],
                   'Quest CLI confirms the whole mixed ZIP against the packaged API before selecting seats')
             save('mixed-venue-deployment.json', report)
+            tracking = subprocess.run([*deploy, '-VerifyTrackedSeats', '-AdbPath', str(destination/'absent-adb.exe')],
+                env=environment, timeout=25, encoding='utf-8', cwd=destination, capture_output=True)
+            tracked = json.loads(tracking.stdout)
+            check(tracking.returncode == 1 and tracked['complete'] is False and tracked['managementVerified'] is True
+                  and [(row['roomId'], row['seat'], row['status'], row['sourceState']) for row in tracked['seats']] ==
+                      [(room, seat, 'awaiting-tracked-pose', 'Fresh') for room in range(1, 6) for seat in range(1, 6)
+                       if (room, seat) != (1, 1)], 'mixed Quest tracking check distinguishes 24 untracked Quest seats from one VIVE seat')
+            save('mixed-venue-tracked-readiness.json', tracked)
             for room_id, mode in ((1, 'VR'), (2, 'MR')):
                 seat = json.loads(subprocess.check_output([*deploy, '-RoomId', str(room_id), '-Seat', '1', '-CheckOnly'],
                                   env=environment, timeout=25, encoding='utf-8', cwd=destination))
@@ -1415,6 +1423,18 @@ def main():
                 check(len({c['nativePid'] for c in round_clients})==25 and all(
                     c['process'].poll() is None and c['witness'].kernel.WaitForSingleObject(c['witness'].handle,0)==258
                     for c in round_clients),'25 simultaneous owned native players '+('Linked' if linked else 'Independent'))
+            if args.check_quest_vr_deploy:
+                mode = 'linked' if linked else 'independent'
+                bundle = runtime / (mode+'-vr-venue-connections.zip')
+                tracking = subprocess.run([shutil.which('pwsh'), '-NoProfile', '-File', str(ROOT/'scripts/deploy-quest.ps1'),
+                    '-VenueBundle', str(bundle), '-ManagementApi', uri, '-VerifyTrackedSeats', '-AdbPath', str(runtime/'absent-adb.exe')],
+                    env={**os.environ, 'VR_COMMAND_MASTER_KEY': keys['Master']}, timeout=25, encoding='utf-8', capture_output=True)
+                tracked = json.loads(tracking.stdout)
+                check(tracking.returncode == 1 and tracked['complete'] is False and tracked['managementVerified'] is True
+                      and [(row['roomId'], row['seat'], row['status'], row['sourceState']) for row in tracked['seats']] ==
+                          [(room, seat, 'not-tracked', 'Fresh') for room in range(1, 6) for seat in range(1, 6)],
+                      mode + ' Quest tracking check rejects all 25 connected native Simulation rigs')
+                save(mode+'-vr-venue-tracked-readiness.json', tracked)
             if args.check_room_readiness:verify_room_readiness(round_clients,linked)
             if args.check_room_clocks:verify_room_clocks(entries,linked)
             if args.check_venue_environment:verify_venue_environment(entries,linked)
