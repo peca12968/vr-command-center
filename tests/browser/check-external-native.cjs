@@ -3,7 +3,8 @@ const { chromium } = require('playwright');
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { execFileSync, spawn } = require('node:child_process');
+const { execFile, execFileSync, spawn } = require('node:child_process');
+const { promisify } = require('node:util');
 const { createHash } = require('node:crypto');
 const { networkInterfaces } = require('node:os');
 const root = path.resolve(__dirname, '../..');
@@ -21,7 +22,7 @@ async function main() {
   const options = process.argv.slice(3);
   const packageRoot = options[0] && !options[0].startsWith('--') ? path.resolve(options.shift()) : null;
   const addressOptions = options.filter(option => option.startsWith('--local-game-address='));
-  const knownOptions = ['--package-interactive', '--package-path-input', '--launcher-status', '--room-ticket-bundle'];
+  const knownOptions = ['--package-interactive', '--package-path-input', '--package-ticket-preview', '--launcher-status', '--room-ticket-bundle'];
   assert.ok(options.every(option => knownOptions.includes(option) || addressOptions.includes(option)), 'Unknown external workflow option');
   assert.ok(addressOptions.length <= 1, 'Specify one local game address');
   const gameAddress = addressOptions[0]?.slice('--local-game-address='.length) ?? '127.0.0.1';
@@ -39,6 +40,8 @@ async function main() {
   assert.ok(!interactivePackage || packageRoot, 'Interactive mode requires a player package');
   const packagePathInput = options.includes('--package-path-input');
   assert.ok(!packagePathInput || interactivePackage, 'Path entry requires the actual interactive player launcher');
+  const packageTicketPreview = options.includes('--package-ticket-preview');
+  assert.ok(!packageTicketPreview || packagePathInput, 'Ticket preview requires the actual launcher path entry');
   const launcherStatus = options.includes('--launcher-status');
   const roomTicketBundle = options.includes('--room-ticket-bundle');
   assert.ok(!launcherStatus || packageRoot && !interactivePackage, 'Status CLI checks require a package and no GUI mode');
@@ -57,7 +60,11 @@ async function main() {
   const evidence = path.join(directory, 'external-ui'); await fs.mkdir(evidence, { recursive: false });
   async function fingerprint() {
     const hash = createHash('sha256');
-    for (const file of ['scripts/start-desktop-control.py', 'scripts/start-desktop-venue.py', 'tests/browser/check-external-native.cjs', ...(packageRoot ? ['scripts/package-windows-player.py', 'tools/WindowsPlayerLauncher/PlayerLauncher.cs'] : [])]) { hash.update(file); hash.update(await fs.readFile(path.join(root, file))); }
+    for (const file of ['scripts/start-desktop-control.py', 'scripts/start-desktop-venue.py', 'tests/browser/check-external-native.cjs',
+      ...(packageRoot ? ['scripts/package-windows-player.py', 'tools/WindowsPlayerLauncher/PlayerLauncher.cs'] : []),
+      ...(packageTicketPreview ? ['tests/browser/check-player-ticket-ui.ps1'] : [])]) {
+      hash.update(file); hash.update(await fs.readFile(path.join(root, file)));
+    }
     return hash.digest('hex');
   }
   const originalTool = await fingerprint();
@@ -136,9 +143,28 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
       const args = packageRoot ? [...gui && packagePathInput ? [] : ['--config', file], ...gui ? [] : ['--launch', '--headless', '--wait'], '--log', log, '--report', report, ...launcherStatus ? ['--status-report', statusPath] : []]
         : ['-batchmode', '-nographics', '-job-worker-count', '2', '-logFile', log, '--vr-config', file];
       const child = spawn(executable, args, { cwd: path.dirname(executable), windowsHide: !gui, stdio: 'ignore' });
-      child.on('error', error => { errors.push(error.message); }); const owned = { child, log, player, gui, statusPath }; children.push(owned);
+      child.on('error', error => { errors.push(error.message); }); const owned = { child, log, player, gui, statusPath, report }; children.push(owned);
       if (packageRoot) {
         if (gui) console.log('PACKAGED_LAUNCHER_UI_READY ' + JSON.stringify({ processId: child.pid, configPath: file }));
+        if (gui && packageTicketPreview) {
+          assert.equal(packageManifest.launcherVersion, '1.2.0');
+          assert.equal(claims.roomId, player.roomId); assert.equal(claims.seat, player.seat);
+          const parts = config.joinTicket.split('.');
+          const payload = Buffer.from(parts[1], 'base64url');
+          assert.equal(Number(payload.readBigInt64BE(51)) * 1000, Date.parse(claims.expiresAtUtc));
+          payload.writeBigInt64BE(BigInt(Math.floor(Date.now() / 1000) - 60), 51);
+          const expired = path.join(evidence, 'expired-preview-fixture.json');
+          await fs.writeFile(expired, JSON.stringify({ ...config, joinTicket: `v2.${payload.toString('base64url')}.${parts[2]}` }), { flag: 'wx' });
+          const run = await promisify(execFile)('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned',
+            '-File', path.join(__dirname, 'check-player-ticket-ui.ps1'), '-LauncherPid', String(child.pid),
+            '-ExpiredConfig', expired, '-CurrentConfig', file, '-LoadLabel', '載入／更新',
+            '-PlayLabel', '開始遊戲', '-SeatText', `房間 ${claims.roomId}／席位 ${claims.seat + 1}`,
+            '-ExpiredText', '依本機時間已過期', '-RemainingText', '依本機時間尚餘'], { windowsHide: true, timeout: 45000 });
+          const preview = JSON.parse(run.stdout);
+          check(preview.expiredWarning && preview.changedFileCleared && preview.currentSeatAndTime && preview.launchKeepsSeat,
+            'Actual WinForms warns about local expiry, clears stale selection and displays the real downloaded ticket seat before launch');
+          await fs.writeFile(path.join(evidence, 'player-ticket-preview.json'), JSON.stringify(preview, null, 2), { flag: 'wx' });
+        }
         const started = await until(async () => { if (child.exitCode !== null) throw Error('Packaged launcher exited before starting a player'); const value = JSON.parse(await fs.readFile(report, 'utf8').catch(() => '{}')); if (value.status === 'rejected') throw Error('Packaged launcher rejected the real downloaded config'); return value.status === 'started' && value; }, 'packaged player child', gui ? 240 : 35);
         assert.ok(Number.isSafeInteger(started.processId) && started.processId > 0 && started.processId !== process.pid && started.processId !== child.pid);
         owned.nativeId = started.processId;
@@ -212,9 +238,18 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
   } finally {
     for (const socket of socketsToClose) socket.close();
     const cleanupErrors = [], stopped = [];
-    for (const { child, nativeId, gui } of children) {
+    for (const owned of children) {
+      const { child, gui, report } = owned;
+      let nativeId = owned.nativeId;
       try {
       const terminal = () => child.exitCode !== null || child.signalCode !== null;
+      if (gui && !nativeId) {
+        if (!terminal()) child.kill();
+        await until(terminal, 'owned launcher exits after UI failure', 15);
+        const state = JSON.parse(await fs.readFile(report, 'utf8').catch(() => '{}'));
+        if (state.status === 'started' && Number.isSafeInteger(state.processId) && state.processId > 0
+          && state.processId !== child.pid && state.processId !== process.pid) nativeId = state.processId;
+      }
       if (nativeId) {
         try { process.kill(nativeId); } catch (error) { if (error.code !== 'ESRCH') throw error; }
         await until(() => { try { process.kill(nativeId, 0); return false; } catch (error) { if (error.code === 'ESRCH') return true; throw error; } }, 'owned packaged native child exits', 15);

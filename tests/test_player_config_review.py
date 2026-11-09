@@ -16,6 +16,6 @@ class PlayerConfigReviewTests(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         report = json.loads(result.stdout)
         self.assertTrue(report['complete'])
-        self.assertEqual(24, report['checks'])
+        self.assertEqual(36, report['checks'])
 
 if __name__ == '__main__': unittest.main()

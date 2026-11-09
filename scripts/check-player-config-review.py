@@ -21,7 +21,7 @@ def main():
     (directory / 'run.log').write_bytes(run.stdout)
     if run.returncode: raise RuntimeError('ConfigReview checks failed; preserve log')
     report = json.loads(run.stdout.decode('utf-8'))
-    assert report['complete'] and report['checks'] == 24
+    assert report['complete'] and report['checks'] == 36
     report['sourceHashes'] = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sources}
     (directory / 'checks.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     print(json.dumps({'complete': True, 'checks': report['checks'], 'directory': str(directory)}))

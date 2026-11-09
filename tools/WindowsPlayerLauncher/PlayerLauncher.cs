@@ -79,7 +79,7 @@ internal static class PlayerLauncher
             "連線地址須為完整 IPv4，請重新下載連線檔。");
         Require(Number(value, "port") >= 1024 && Number(value, "port") <= 65535 && !String.IsNullOrWhiteSpace(ticket) && ticket.Length <= 16384,
             "連線埠號或票券不正確，請重新下載連線檔。");
-        return value; // Ticket validity, expiry and admission are verified by the game server.
+        return value; // The server decides ticket validity, expiry and admission.
     }
     private static string Quote(string value)
     {
@@ -188,8 +188,9 @@ internal static class PlayerLauncher
         public string FilePath { get; private set; }
         public string ContentHash { get; private set; }
         public string Endpoint { get; private set; }
+        public TicketPreview Ticket { get; private set; }
         public bool Loaded { get { return FilePath != null; } }
-        public void Clear() { FilePath = null; ContentHash = null; Endpoint = null; }
+        public void Clear() { FilePath = null; ContentHash = null; Endpoint = null; Ticket = null; }
         public void Load(string file)
         {
             Clear();
@@ -201,6 +202,7 @@ internal static class PlayerLauncher
                 var value = Config(full); var hash = Hash(full);
                 FilePath = full; ContentHash = hash;
                 Endpoint = Text(value, "address") + ":" + Number(value, "port");
+                Ticket = TicketPreview.Read(Text(value, "joinTicket"));
             }
         }
         public void RequireCurrent()
@@ -215,9 +217,42 @@ internal static class PlayerLauncher
             catch { Clear(); throw; }
         }
     }
+    internal sealed class TicketPreview
+    {
+        public int Room { get; private set; }
+        public int Seat { get; private set; }
+        public DateTimeOffset ExpiresAtUtc { get; private set; }
+
+        public static TicketPreview Read(string ticket)
+        {
+            // Only read the public display fields of the current v2 layout. Unknown shapes
+            // still reach the original game path, which checks the signature and admission.
+            if (ticket == null || ticket.Length != 147 ||
+                !Regex.IsMatch(ticket, @"\Av2\.[A-Za-z0-9_-]{100}\.[A-Za-z0-9_-]{43}\z")) return null;
+            var payload = Convert.FromBase64String(ticket.Substring(3, 100).Replace('-', '+').Replace('_', '/'));
+            if (payload[0] != 2 || payload[49] < 1 || payload[49] > 5 || payload[50] > 4) return null;
+            long seconds = 0;
+            for (var offset = 51; offset < 59; offset++) seconds = (seconds << 8) | payload[offset];
+            if (seconds <= 0 || seconds > 253402300799L) return null;
+            return new TicketPreview { Room = payload[49], Seat = payload[50] + 1,
+                ExpiresAtUtc = DateTimeOffset.FromUnixTimeSeconds(seconds) };
+        }
+
+        public string SeatLabel { get { return "連線檔標示　房間 " + Room + "／席位 " + Seat; } }
+        public string Describe(DateTimeOffset now)
+        {
+            var remaining = ExpiresAtUtc - now;
+            var localExpiry = ExpiresAtUtc.ToLocalTime().ToString("HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+            var detail = remaining <= TimeSpan.Zero ? "依本機時間已過期，請向控制人員重取連線檔。"
+                : remaining > TimeSpan.FromMinutes(5) ? "票券時間與本機可能不同，請核對電腦時鐘。"
+                : "依本機時間尚餘 " + TimeSpan.FromSeconds(Math.Ceiling(remaining.TotalSeconds)).ToString(@"mm\:ss") + "。";
+            return SeatLabel + "　到期 " + localExpiry + "\n" + detail;
+        }
+    }
     private sealed class PlayerForm : Form
     {
         private readonly Label selected = new Label { AutoSize = false, Dock = DockStyle.Top, Height = 75, UseMnemonic = false };
+        private readonly Label ticketInfo = new Label { AutoSize = false, Dock = DockStyle.Top, Height = 58, UseMnemonic = false };
         private readonly Label status = new Label { AutoSize = false, Dock = DockStyle.Top, Height = 65 };
         private readonly Button play = new Button { Text = "開始遊戲", AutoSize = true, Enabled = false };
         private readonly TextBox path = new TextBox { Dock = DockStyle.Top, AccessibleName = "玩家連線檔完整路徑" };
@@ -226,7 +261,7 @@ internal static class PlayerLauncher
         private Process child; private PlayerConnectionMonitor monitor;
         public PlayerForm(string initial, string diagnosticLog)
         {
-            Text = "VR Command 玩家"; ClientSize = new Size(660, 380); MinimumSize = new Size(676, 419);
+            Text = "VR Command 玩家"; ClientSize = new Size(660, 438); MinimumSize = new Size(676, 477);
             Font = new Font("Microsoft JhengHei UI", 11); Padding = new Padding(20); StartPosition = FormStartPosition.CenterScreen;
             var title = new Label { Text = "選擇控制台下載的玩家連線檔", Dock = DockStyle.Top, Height = 40 };
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 45 };
@@ -235,11 +270,12 @@ internal static class PlayerLauncher
             buttons.Controls.Add(choose); buttons.Controls.Add(load); buttons.Controls.Add(play);
             var pathHint = new Label { Text = "可選檔或貼上完整路徑，再按「載入／更新」。", Dock = DockStyle.Top, Height = 35 };
             var hint = new Label { Text = "票券過期或入場被拒絕時，請向控制人員重新取得連線檔。", Dock = DockStyle.Top, Height = 50 };
-            Controls.Add(hint); Controls.Add(status); Controls.Add(buttons); Controls.Add(selected); Controls.Add(pathHint); Controls.Add(path); Controls.Add(title);
+            Controls.Add(hint); Controls.Add(status); Controls.Add(buttons); Controls.Add(ticketInfo); Controls.Add(selected); Controls.Add(pathHint); Controls.Add(path); Controls.Add(title);
             path.TextChanged += delegate
             {
                 if (settingPath) return;
                 review.Clear(); play.Enabled = false; selected.Text = "路徑已變更，請重新載入。";
+                RenderTicket();
                 status.Text = "未沿用先前選取的連線檔。";
             };
             load.Click += delegate { SelectConfig(path.Text); };
@@ -262,17 +298,19 @@ internal static class PlayerLauncher
                     }
                     child = Launch(review.FilePath, false, ownLog, review.ContentHash); monitor = new PlayerConnectionMonitor(ownLog);
                     choose.Enabled = false; load.Enabled = false; path.Enabled = false; status.Text = monitor.Message;
+                    RenderTicket();
                 }
-                catch { review.Clear(); selected.Text = "請重新載入並核對連線檔。"; status.Text = "無法啟動或檔案已變更。請確認玩家包完整，再重新載入正確的連線檔。"; play.Enabled = false; }
+                catch { review.Clear(); RenderTicket(); selected.Text = "請重新載入並核對連線檔。"; status.Text = "無法啟動或檔案已變更。請確認玩家包完整，再重新載入正確的連線檔。"; play.Enabled = false; }
             };
             var timer = new Timer { Interval = 500 };
             timer.Tick += delegate
             {
-                if (child == null) return;
+                if (child == null) { RenderTicket(); return; }
                 monitor.Poll(); status.Text = monitor.Message;
                 if (child.HasExited)
                 {
                     var final = monitor.State == "Final"; child.Dispose(); child = null; choose.Enabled = true; load.Enabled = true; path.Enabled = true; play.Enabled = review.Loaded;
+                    RenderTicket();
                     status.Text = final ? "遊戲已關閉；本次已收到最終戰績。" : "遊戲已關閉。" + monitor.Message;
                 }
             };
@@ -287,9 +325,17 @@ internal static class PlayerLauncher
                 review.Load(file); settingPath = true;
                 try { path.Text = review.FilePath; } finally { settingPath = false; }
                 selected.Text = Path.GetFileName(review.FilePath) + "\n伺服器 " + review.Endpoint;
-                play.Enabled = true; status.Text = "連線檔已載入。核對伺服器後按「開始遊戲」。";
+                RenderTicket();
+                play.Enabled = true; status.Text = "連線檔已載入。核對目的地與席位後按「開始遊戲」。";
             }
-            catch { review.Clear(); play.Enabled = false; selected.Text = "未接受此連線檔"; status.Text = "請使用控制台下載的玩家連線檔完整路徑。"; }
+            catch { review.Clear(); RenderTicket(); play.Enabled = false; selected.Text = "未接受此連線檔"; status.Text = "請使用控制台下載的玩家連線檔完整路徑。"; }
+        }
+        private void RenderTicket()
+        {
+            var ticket = review.Ticket;
+            var text = ticket != null ? (child == null ? ticket.Describe(DateTimeOffset.UtcNow) : ticket.SeatLabel)
+                : review.Loaded ? "無法預覽房間、席位與效期。入場由遊戲伺服器確認。" : "";
+            if (ticketInfo.Text != text) ticketInfo.Text = text;
         }
     }
 }

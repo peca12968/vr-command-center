@@ -37,9 +37,10 @@ README = '''VR Command Windows 玩家包
 
 1. 完整解壓 ZIP 至本機資料夾，不要只取出 EXE，也不要直接在 ZIP 中執行。
 2. 開啟 Launch-Player.exe，選擇控制人員從控制台下載的玩家連線檔（JSON）；也可貼上完整路徑，再按「載入／更新」。
-3. 核對伺服器地址，按「開始遊戲」。每位玩家使用自己的連線檔。
+3. 核對伺服器地址及連線檔標示的房間與席位，按「開始遊戲」。每位玩家使用自己的連線檔。
 4. 票券為短效；過期、移除或入場被拒時，向控制人員重新取得連線檔。
 路徑編輯或載入失敗會解除舊選取；開始前若檔案已變更，須重新載入並核對地址。遊戲已啟動後，原路徑更新與Reconnect仍使用原驗票流程。
+啟動前的票券倒數依本機時間顯示，入場由遊戲伺服器驗證。
 
 WASD移動；方向鍵或按住右鍵拖曳瞄準；Space／左鍵射擊；R換彈；B任務簡報；Escape關閉簡報。
 任務由控制人員開始、暫停與結束。結束後等待最終戰績，勿立即關窗。
@@ -146,7 +147,7 @@ def package(player, output, compiler):
         subprocess.run([str(compiler), '/nologo', '/target:winexe', '/platform:x64', '/optimize+', '/warnaserror+',
                         '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', '/reference:System.Web.Extensions.dll',
                         '/out:' + str(folder / 'Launch-Player.exe'), str(source)], check=True)
-        manifest = {'version': 1, 'platform': 'Windows-x64', 'launcherVersion': '1.1.0', 'createdAtUtc': datetime.now(timezone.utc).isoformat(),
+        manifest = {'version': 1, 'platform': 'Windows-x64', 'launcherVersion': '1.2.0', 'createdAtUtc': datetime.now(timezone.utc).isoformat(),
                     'build': receipt, 'launcherSourceSha256': digest(source), 'scope': 'Offline portable PC player; no tickets; not a signature or network/device verification',
                     'files': [{'path': file.relative_to(folder).as_posix(), 'bytes': file.stat().st_size, 'sha256': digest(file)}
                               for file in sorted(folder.rglob('*')) if file.is_file()]}
