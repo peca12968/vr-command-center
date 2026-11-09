@@ -21,7 +21,11 @@ $fault = $faults[$serial]
 $device = Join-Path $root $serial
 if ($args[2] -ceq 'push') {
     $null = [IO.Directory]::CreateDirectory($device)
-    Copy-Item -LiteralPath $args[3] -Destination (Join-Path $device ($args[4].Split('/')[-1]))
+    $file = Join-Path $device ($args[4].Split('/')[-1])
+    Copy-Item -LiteralPath $args[3] -Destination $file
+    if ($fault -ceq 'config-stage-changed' -and $args[4].Contains('/vr-connection-')) {
+        [IO.File]::AppendAllText($file, "`n")
+    }
     exit 0
 }
 if ($args[2] -cne 'shell') { exit 98 }
@@ -42,6 +46,12 @@ switch -CaseSensitive ($args[3]) {
         $name = $args[5].Split('/')[-1]
         if ($name -ceq 'vr-connection.json' -and $fault -ceq 'config-move') { exit 1 }
         Move-Item -Force -LiteralPath (Join-Path $device ($args[4].Split('/')[-1])) -Destination (Join-Path $device $name)
+        exit 0
+    }
+    'sha256sum' {
+        $file = Join-Path $device ($args[4].Split('/')[-1])
+        $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+        "$hash  $($args[4])"
         exit 0
     }
     'rm' {

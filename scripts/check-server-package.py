@@ -2204,7 +2204,8 @@ def main():
               and (applied.get('mode') == 'VR' if is_vr else applied.get('alignmentPinsVerified') is True)
               and (not mixed or applied.get('mode') == 'Mixed')
               and (not partial or (applied['mappedSeats'], applied['unmappedSeats']) == (count, 25-count))
-              and applied['devices'] == [{'roomId': row['roomId'], 'seat': row['seat'], 'status': 'launch-requested', 'versionCode': 61} for row in rows],
+              and applied['devices'] == [{'roomId': row['roomId'], 'seat': row['seat'], 'status': 'launch-requested',
+                                          'versionCode': 61, 'filesVerified': True} for row in rows],
               mode + f' mapped deployment submits launch for exactly the {count} requested mock devices')
         with zipfile.ZipFile(io.BytesIO(raw)) as bundle:
             for row in rows:
@@ -2222,7 +2223,8 @@ def main():
         commands = (destination/'adb.log').read_text(encoding='utf-8').splitlines()
         targeted = {line.split()[1] for line in commands if line.startswith('-s ')}
         mr_count = sum(files is not None and row['roomId'] in files for row in rows)
-        check(len(commands) == 1 + count * 7 + mr_count * 2 and sum(' shell monkey ' in line for line in commands) == count
+        check(len(commands) == 1 + count * 9 + mr_count * 4 and sum(' shell monkey ' in line for line in commands) == count
+              and sum(' shell sha256sum ' in line for line in commands) == 2 * (count + mr_count)
               and targeted == {row['serial'] for row in rows}
               and all(' install ' not in line and 'unmapped-device' not in line for line in commands),
               mode + f' all {count} mapped original signed configs are isolated by serial with the expected mode files and no APK installs')

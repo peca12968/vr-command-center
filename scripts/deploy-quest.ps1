@@ -678,7 +678,11 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map) {
         }
         try {
             Set-QuestConnection $row.serial $connection.Ticket.Config $connection.Ticket $connection.Alignment -RequestMixedReality:($null -ne $connection.Alignment)
+            $device.filesVerified = $true
             $device.status = 'launch-requested'
+        } catch [IO.InvalidDataException] {
+            $device.status = 'file-verification-failed'
+            return $report
         } catch {
             $device.status = 'deployment-failed'
             return $report
@@ -696,20 +700,30 @@ function Enter-QuestDeployment {
     return $lock
 }
 
+function Confirm-QuestFileHash([string]$TargetSerial, [string]$Path, [string]$ExpectedHash, [string]$Description) {
+    $lines = @(& $AdbPath -s $TargetSerial shell sha256sum $Path 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $lines.Count -ne 1 -or $lines[0] -cnotmatch '\A([0-9a-f]{64})[ \t]+(.+)\z' -or
+        $Matches[1] -cne $ExpectedHash -or $Matches[2] -cne $Path) {
+        throw [IO.InvalidDataException]::new("$Description could not be verified on the selected Quest.")
+    }
+}
+
 function Publish-QuestFile([string]$TargetSerial, [string]$Local, [string]$Staging, [string]$Destination, [string]$Description,
-    [string]$ExpectedHash) {
+    [string]$ExpectedHash, [string]$ContentHash) {
+    $stagedHash = if ($ContentHash) { $ContentHash } else { (Get-FileHash -LiteralPath $Local -Algorithm SHA256).Hash.ToLowerInvariant() }
     try {
         & $AdbPath -s $TargetSerial push $Local $Staging | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "$Description could not be copied." }
         if ($ExpectedHash) {
-            $stagedHash = (Get-FileHash -LiteralPath $Local -Algorithm SHA256).Hash.ToLowerInvariant()
             $command = 'current=$(sha256sum ''{0}'') && staged=$(sha256sum ''{1}'') && [ "${{current%% *}}" = ''{2}'' ] && [ "${{staged%% *}}" = ''{3}'' ] && mv -f ''{1}'' ''{0}''' `
                 -f $Destination, $Staging, $ExpectedHash, $stagedHash
             & $AdbPath -s $TargetSerial shell $command *> $null
             if ($LASTEXITCODE -ne 0) { throw 'Could not confirm ticket replacement. Check the selected device and read its current configuration before retrying.' }
         } else {
+            Confirm-QuestFileHash $TargetSerial $Staging $stagedHash $Description
             & $AdbPath -s $TargetSerial shell mv $Staging $Destination | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "$Description could not be activated." }
+            Confirm-QuestFileHash $TargetSerial $Destination $stagedHash $Description
         }
     } catch {
         $publishError = $_
@@ -776,7 +790,7 @@ function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment
         try {
             [IO.File]::WriteAllBytes($stagedAlignment, $Alignment.Bytes)
             Publish-QuestFile $TargetSerial $stagedAlignment "$remoteDirectory/vr-room-alignment-$deploymentId.tmp" `
-                "$remoteDirectory/vr-room-alignment-$alignmentHash.json" 'Room alignment file'
+                "$remoteDirectory/vr-room-alignment-$alignmentHash.json" 'Room alignment file' -ContentHash $alignmentHash
         } finally { Remove-Item -LiteralPath $stagedAlignment }
         if (-not $Ticket.AlignmentHash) { $Config | Add-Member -NotePropertyName 'roomAlignmentSha256' -NotePropertyValue $alignmentHash }
     }

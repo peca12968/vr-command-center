@@ -335,7 +335,13 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.z
     -ManagementApi http://127.0.0.1:5081
 ```
 
-中途失敗會停止並以非零結束碼回報。`launch-requested` 表示裝置已收到啟動指令，`deployment-failed` 的席位可能已套用部分檔案，`not-attempted` 表示該席未寫入。已處理席位保留當下結果。可按回報定位故障，必要時重新配發票券，再用單席流程處理尚未成功的裝置。啟動後可回到場次面板，或執行[核對頭盔追蹤席位](#核對頭盔追蹤席位)。
+中途失敗會停止並以非零結束碼回報。`launch-requested` 表示該席的檔案已核對，並已送出啟動指令。`file-verification-failed` 表示無法確認裝置檔案與預期內容相同，該席未送出啟動。`deployment-failed` 表示其他部署步驟失敗。兩種失敗都可能已停止遊戲或啟用部分檔案。`not-attempted` 表示該席未進入寫入階段。已處理席位保留當下結果。可按回報定位故障，必要時重新配發票券，再用單席流程處理尚未成功的裝置。 [核對頭盔追蹤席位](#核對頭盔追蹤席位)
+
+#### 啟動前核對裝置檔案
+
+單席與整批正式部署都會從指定裝置讀取暫存檔的 SHA-256，比對本次產生的玩家連線檔及 MR 原校正檔。核對通過才啟用檔案，啟用後再讀取最終路徑的 SHA-256，通過才送出啟動指令。暫存檔核對失敗時會嘗試清理該暫存檔，原先同名檔仍保留。若最後路徑核對失敗，裝置可能已寫入新檔，該席須重新部署。
+
+整批回報以 `filesVerified: true` 標示已完成檔案核對並送出啟動的席位。遊戲是否完成入場及追蹤，請用同一部署 ZIP 再核對。 [追蹤操作](#核對頭盔追蹤席位) · [Android 檔案傳輸](https://developer.android.com/tools/adb) · [Android 校驗工具](https://android.googlesource.com/platform/external/toybox/%2B/40d21c59f76a9388b0ebb5c4c706732c2d034a67/toys/lsb/md5sum.c)
 
 #### 部署指定的 Quest 席位
 

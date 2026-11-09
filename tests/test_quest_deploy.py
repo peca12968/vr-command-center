@@ -43,6 +43,10 @@ switch ($args[2]) {
             [IO.File]::AppendAllText((Join-Path $remote 'vr-connection.json'), "`n")
         }
         if ($env:QUEST_TEST_FAIL -eq 'refresh-stage-changed') { [IO.File]::AppendAllText($staging, "`n") }
+        if (($env:QUEST_TEST_FAIL -eq 'config-stage-changed' -and $args[4].Contains('/vr-connection-')) -or
+            ($env:QUEST_TEST_FAIL -eq 'alignment-stage-changed' -and $args[4].Contains('/vr-room-alignment-'))) {
+            [IO.File]::AppendAllText($staging, "`n")
+        }
         exit 0
     }
     'pull' {
@@ -67,6 +71,15 @@ switch ($args[2]) {
                 $name = $args[5].Split('/')[-1]
                 if ($name -eq 'vr-connection.json' -and $env:QUEST_TEST_FAIL -eq 'config-move') { exit 1 }
                 Move-Item -Force -LiteralPath (Join-Path $remote ($args[4].Split('/')[-1])) -Destination (Join-Path $remote $name)
+                if ($name -eq 'vr-connection.json' -and $env:QUEST_TEST_FAIL -eq 'config-active-changed') {
+                    [IO.File]::AppendAllText((Join-Path $remote $name), "`n")
+                }
+                exit 0
+            }
+            'sha256sum' {
+                $file = Join-Path $remote ($args[4].Split('/')[-1])
+                $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+                "$hash  $($args[4])"
                 exit 0
             }
             'rm' {
@@ -341,6 +354,22 @@ class QuestDeployTests(unittest.TestCase):
             with self.subTest(failure=failure):
                 self.assert_rejected(self.run_mr('-Serial','fixture',failure=failure), message)
         self.assertNotIn(' install ', self.commands.read_text(encoding='utf-8'))
+
+    def test_deployment_refuses_altered_staged_or_active_files_before_launch(self):
+        self.provision_apk()
+        active = self.remote / 'vr-connection.json'
+        for fault, description in (('alignment-stage-changed', 'Room alignment file'),
+                                   ('config-stage-changed', 'Player connection file'),
+                                   ('config-active-changed', 'Player connection file')):
+            with self.subTest(fault=fault):
+                self.commands.unlink(missing_ok=True)
+                active.write_bytes(b'previous configuration')
+                result = self.run_mr('-Serial', 'fixture', failure=fault)
+                self.assert_rejected(result, f'{description} could not be verified')
+                if fault.endswith('stage-changed'):
+                    self.assertEqual(b'previous configuration', active.read_bytes())
+                self.assertFalse(list(self.remote.glob('*.tmp')))
+                self.assertNotIn('shell monkey', self.commands.read_text(encoding='utf-8'))
 
 
 class QuestVenueTests(unittest.TestCase):
@@ -1098,15 +1127,16 @@ else:
             thread.start()
             try:
                 result = self.run_fleet(files, path, '-DeployMappedSeats', '-ManagementApi', f'http://127.0.0.1:{server.server_port}',
-                                        faults={'fixture-04': 'config-move'}, environment={'VR_COMMAND_MASTER_KEY': 'PRIVATE_MASTER_CANARY'})
+                                        faults={'fixture-04': 'config-stage-changed'}, environment={'VR_COMMAND_MASTER_KEY': 'PRIVATE_MASTER_CANARY'})
             finally:
                 server.shutdown()
                 thread.join(timeout=5)
         self.assertEqual(1, result.returncode, result.stderr)
         report = json.loads(result.stdout)
         self.assertEqual(('deployment', False, True), (report['phase'], report['complete'], report['managementVerified']))
-        self.assertEqual(['launch-requested'] * 3 + ['deployment-failed'] + ['not-attempted'] * 21,
+        self.assertEqual(['launch-requested'] * 3 + ['file-verification-failed'] + ['not-attempted'] * 21,
                          [row['status'] for row in report['devices']])
+        self.assertEqual([True] * 3 + [None] * 22, [row.get('filesVerified') for row in report['devices']])
         self.assertEqual(['/api/mr-deployment/venue-check', f'/api/sessions/{session}/connection-endpoint'], calls)
         self.assertEqual(b'previous connection', (before / 'vr-connection.json').read_bytes())
         self.assertFalse(list(before.glob('*.tmp')))
