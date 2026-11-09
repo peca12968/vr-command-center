@@ -203,6 +203,31 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     check((await api(`/sessions/${linked.id}/events`)).filter(event => event.venue).length === 1,
       'A linked venue sends one transition for all five rooms');
     await end(linked.id);
+    const archivedLinked = await api(`/sessions/${linked.id}`);
+    await api(`/sessions/${linked.id}/combat-stream/seal`, 'POST', { streamId: archivedLinked.combatStream.streamId, finalSequence: 0 }, 'GameServer');
+    linkedPublish(await api(`/sessions/${linked.id}`));
+    linkedPublish.seal();
+    await page.locator('#include-ended').check();
+    await page.locator(`#session-select option[value="${linked.id}"]`).waitFor({ state: 'attached' });
+    await page.locator('#session-select').selectOption(linked.id);
+    const reportRoom = page.locator('#report-room'), review = page.locator('#player-review-select'), openReview = page.locator('#open-player-review');
+    await reportRoom.selectOption('2');
+    await review.selectOption(subject);
+    check((await review.locator('option').evaluateAll(options => options.map(option => option.value))).sort().join(',')
+      === ['', subject, roomPeer].sort().join(',') && await openReview.isEnabled(),
+      'A sealed linked review offers only the selected room players, including a removed player from the ledger');
+    await reportRoom.selectOption('1');
+    check(await review.inputValue() === '' && await openReview.isDisabled(), 'Switching rooms clears a previous personal review selection outside the scope');
+    await reportRoom.selectOption('2');
+    await review.selectOption(subject);
+    const scopedSearch = page.waitForResponse(response => new URL(response.url()).pathname === `/api/sessions/${linked.id}/world/event-frames`);
+    await openReview.click();
+    const searchQuery = new URL((await scopedSearch).url()).searchParams;
+    check(searchQuery.get('roomId') === '2' && searchQuery.get('playerId') === subject
+      && await page.locator('#world-room').inputValue() === '2' && await page.locator('#world-review-player-scope').isVisible(),
+      'The linked personal review opens the exact sealed source and starts its first search in the selected room');
+    await page.locator('#tab-operations').click();
+    await page.locator('#include-ended').uncheck();
 
     const preparing = [];
     for (const room of [1, 2]) {

@@ -44,6 +44,7 @@
 :is(#layout-spawns,#launch-layout-spawns) [data-spawn-blocked] circle{fill:#ff9f8b33;stroke:#ff9f8b}
 #launch-layout-routes polyline{fill:none;stroke:#9ed3bd;stroke-width:.065;stroke-dasharray:.14 .12;stroke-linejoin:round}
 .report-room-field{margin:0;min-width:8rem}
+#statistics-scope{margin-bottom:12px}
 #world-event-table {
   max-height: 16rem;
   overflow: auto;

@@ -23,13 +23,13 @@ const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: nul
 let comparedVersion = null;
 const objectHistory = placementHistory();
 const world = mountWorld(() => state.key, logout);
-const report = mountReport(() => state, logout);
+const report = mountReport(() => state, logout, () => { renderStatistics(); closure.update(); });
 const venueReport = mountVenueReport(() => state, logout, download);
 const venueHistory = mountVenueHistory(api, selectVenueClosure);
 const readiness = mountReadiness(() => state, logout);
 const roomReadiness = mountRoomReadiness(() => state, logout, applyVenuePermissions, venueClimateText, venueEnemyText);
 const connections = mountConnections(() => state, logout);
-const closure = mountClosure(() => state, logout, target => tab('world', target));
+const closure = mountClosure(() => state, logout, target => tab('world', target), report);
 const alignment = mountAlignment(api, download);
 const mrDeployment = mountMrDeployment(() => state, api);
 const mrVenue = mountMrVenueBundle(() => state, api, download);
@@ -184,6 +184,7 @@ function logout() {
   $('workspace').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true;
   $('identity').textContent = '尚未登入'; $('login-key').value = '';
   $('rooms').replaceChildren(); $('roster').replaceChildren(); $('statistics').replaceChildren(); $('event-list').replaceChildren();
+  $('statistics-scope').hidden = true; $('statistics-scope-status').textContent = '';
   $('ticket-room').replaceChildren(); delete $('ticket-room').dataset.session;
   $('venue-environment-form').reset();
   $('venue-enemies-form').reset();
@@ -312,6 +313,7 @@ function resetSelection(id) {
   closure.reset();
   alignmentPins.reset();
   mrDeployment.reset();
+  $('statistics-scope').hidden = true; $('statistics-scope-status').textContent = '';
   $('session-panel').hidden = true;
 }
 async function selectSession(id) {
@@ -561,6 +563,19 @@ function renderVenueClosure(report, loading = false) {
 }
 function row(cells) { const tr = element('tr'); for (const value of cells) { const td = element('td'); if (value instanceof Node) td.append(value); else td.textContent = value; tr.append(td); } return tr; }
 function emptyTable(id, columns, message) { const tr = element('tr'), td = element('td', message, 'empty-cell'); td.colSpan = columns; tr.append(td); $(id).replaceChildren(tr); }
+function renderStatistics() {
+  const linked = state.session?.mode === 'Linked';
+  const room = report.roomId(), players = report.players();
+  $('statistics-scope').hidden = !linked;
+  $('statistics-room-column').hidden = !linked;
+  const status = $('statistics-scope-status');
+  const text = linked ? `${room === null ? '全場' : '房間 ' + room} · ${players.length} 名玩家戰績` : '';
+  if (status.textContent !== text) status.textContent = text;
+  const rows = players.map(player => row([player.name, player.ammoUsed, player.kills, player.damageTaken,
+    player.hitsReceived, player.accuracyPercent + '%', player.health, ...(linked ? [player.roomId] : [])]));
+  if (rows.length) $('statistics').replaceChildren(...rows);
+  else emptyTable('statistics', linked ? 8 : 7, room === null ? '加入玩家後顯示統計' : '此房尚無玩家戰績');
+}
 function renderSession(statistics, events) {
   state.statistics = statistics; report.update();
   closure.update(true);
@@ -600,8 +615,7 @@ function renderSession(statistics, events) {
   $('telemetry-status').hidden = !session.combatStream;
   $('telemetry-status').textContent = statistics.pendingTelemetry ? '已要求結束；等待遊戲伺服器補送事件並封存，統計尚未確認完整。'
     : session.combatStream?.sealed ? '戰鬥事件已全部確認並封存。' : '戰鬥資料接收中；目前統計將隨資料更新。';
-  $('statistics').replaceChildren(...statistics.players.map(player => row([player.name, player.ammoUsed, player.kills, player.damageTaken, player.hitsReceived, player.accuracyPercent + '%', player.health])));
-  if (!statistics.players.length) emptyTable('statistics', 7, '加入玩家後顯示統計');
+  renderStatistics();
   const eventNames = { Created: '建立場次', PlayerJoined: '玩家加入', PlayerLeft: '玩家離開', ControlApplied: '套用控制命令', CombatRecorded: '戰鬥事件', CombatStreamOpened: '綁定戰鬥來源', StreamCombatRecorded: '接收戰鬥事件', CombatStreamSealed: '戰鬥事件封存' };
   $('event-list').replaceChildren(...events.slice().reverse().map(event => {
     const item = element('li'); item.append(element('span', time(event.recordedAtUtc), 'event-time'), element('span', `#${event.sequence} ${eventNames[event.kind] || event.kind}`), element('span', event.actor?.id || '舊版紀錄', 'event-actor')); return item;

@@ -1,4 +1,4 @@
-export function mountReport(current, unauthorized) {
+export function mountReport(current, unauthorized, scopeChanged) {
   const button = document.getElementById('export-report'), status = document.getElementById('report-status');
   const bundle = document.getElementById('export-report-bundle');
   const roomField = document.getElementById('report-room-field'), room = document.getElementById('report-room');
@@ -9,6 +9,13 @@ export function mountReport(current, unauthorized) {
   const linked = value => value.actor && value.session?.mode === 'Linked';
   const canBundle = value => linked(value) && value.actor.role === 'Master';
   const scope = value => !linked(value) ? null : value.actor.role === 'RoomController' ? value.actor.roomId : Number(room.value) || null;
+  const roomId = () => scope(current());
+  function players() {
+    const value = current();
+    if (!value.session || value.statistics?.sessionId !== value.session.id) return [];
+    const id = scope(value);
+    return id === null ? value.statistics.players : value.statistics.players.filter(player => player.roomId === id);
+  }
   function update() {
     const value = current();
     const identity = linked(value) ? value.epoch + '/' + value.session.id : '';
@@ -25,7 +32,7 @@ export function mountReport(current, unauthorized) {
     button.disabled = !!controller || !ready(value);
     bundle.hidden = !canBundle(value);
     bundle.disabled = bundle.hidden || button.disabled;
-    room.disabled = button.disabled || value.actor?.role !== 'Master';
+    room.disabled = !!controller || !identity || value.actor.role !== 'Master';
     const roomId = scope(value);
     const next = ready(value) ? (roomId ? `房間 ${roomId} 的戰鬥統計已完成，可下載 CSV（含離場玩家）。` : '戰鬥統計已完成，可下載 CSV（含離場玩家）。')
       : value.session?.state === 'Ended' ? '等待戰鬥資料確認封存後才可匯出。' : '結束任務並完成戰鬥封存後可匯出。';
@@ -37,7 +44,7 @@ export function mountReport(current, unauthorized) {
     status.textContent = ''; button.disabled = true; room.disabled = true; roomField.hidden = true; room.replaceChildren();
     bundle.hidden = bundle.disabled = true;
   }
-  room.addEventListener('change', () => { availability = null; update(); });
+  room.addEventListener('change', () => { availability = null; update(); scopeChanged(); });
   async function download(allRooms) {
     const value = current();
     if (controller || !ready(value) || (allRooms && !canBundle(value))) return;
@@ -78,7 +85,7 @@ export function mountReport(current, unauthorized) {
   }
   button.addEventListener('click', () => download(false));
   bundle.addEventListener('click', () => download(true));
-  return { update, reset };
+  return { update, reset, roomId, players };
 }
 
 export function mountVenueReport(current, unauthorized, save) {

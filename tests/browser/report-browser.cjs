@@ -97,6 +97,8 @@ module.exports = async function reportBrowser({ context, tokens, base, api, sess
     await login(); await select(linked.id);
     const scope = page.locator('#report-room');
     check(await scope.inputValue() === '' && await scope.locator('option').count() === 6, 'Master may choose the full linked report or any of five rooms');
+    const displayedRooms = () => page.locator('#statistics tr td:last-child').allTextContents();
+    check((await displayedRooms()).join(',') === '1,2', 'The full statistics table identifies the original room of each linked player');
     async function scopedDownload(roomId, role) {
       const pending = page.waitForEvent('download'); await button.click(); const download = await pending;
       const bytes = await fs.readFile(await download.path());
@@ -105,11 +107,16 @@ module.exports = async function reportBrowser({ context, tokens, base, api, sess
       check(response.ok && bytes.equals(Buffer.from(await response.arrayBuffer())) &&
         download.suggestedFilename() === `vr-command-report-v1-${linked.id}-room-0${roomId}.csv`
         && rows.length === 1 && rows[0].reportRoomId === String(roomId) && rows[0].playerRoomId === String(roomId)
+        && (await displayedRooms()).join() === rows[0].playerRoomId
+        && await page.locator('#statistics tr td:first-child').innerText() === rows[0].playerName
         && rows[0].roomIds === '1|2|3|4|5' && rows[0].sessionId === linked.id,
         `${role} downloads its exact single-room rows, preserving linked session metadata`);
       await fs.writeFile(path.join(screenshots, `scoped-report-${role}.csv`), bytes);
     }
     await scope.selectOption('2'); await scopedDownload(2, 'Master');
+    await page.locator('#refresh').click();
+    check(await scope.inputValue() === '2' && (await displayedRooms()).join() === '2',
+      'A refresh preserves the current linked statistics and CSV room');
     await page.screenshot({ path: path.join(screenshots, 'scoped-report-master.png'), fullPage: true });
     const bundleEndpoint = `${base}/api/sessions/${linked.id}/reports.zip`;
     const zipReady = page.waitForEvent('download');
@@ -126,11 +133,22 @@ module.exports = async function reportBrowser({ context, tokens, base, api, sess
     await page.waitForFunction(() => document.querySelector('#report-status').textContent.includes('格式不符'));
     check(downloads.length === beforeWrongMime && await bundleButton.isEnabled(), 'ZIP export rejects an incorrect MIME and permits retry');
     await page.unroute(bundleEndpoint);
+    await scope.selectOption('5');
+    check(await page.locator('#statistics .empty-cell').innerText() === '此房尚無玩家戰績'
+      && await page.locator('#statistics-scope-status').innerText() === '房間 5 · 0 名玩家戰績',
+      'An empty room has an explicit zero-player view instead of showing the whole linked ledger');
+    await select(session.id); await select(linked.id);
+    check(await scope.inputValue() === '' && (await displayedRooms()).join(',') === '1,2',
+      'Changing sessions resets the previous room filter');
     await page.locator('#logout').click(); await login('Room1', linked.id); await select(linked.id);
     check(await scope.inputValue() === '1' && await scope.isDisabled() && await scope.locator('option').count() === 1,
       'Room controller sees only its own report scope, with no stale master choice after logout');
     await scopedDownload(1, 'Room1');
     check(!await bundleButton.isVisible(), 'Room controller never sees the all-room ZIP action');
+    await page.setViewportSize({ width: 390, height: 844 });
+    check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)
+      && await page.locator('#statistics-scope-status').isVisible(), 'The linked room statistics and selector fit a mobile console');
+    await page.locator('#statistics-scope').screenshot({ path: path.join(screenshots, 'statistics-room-scope-mobile.png') });
     check(errors.length === 0, 'Report workflow has no uncaught browser errors');
   } finally { await page.close(); }
 };

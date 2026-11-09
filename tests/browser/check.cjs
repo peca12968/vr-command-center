@@ -371,6 +371,10 @@ async function main() {
     await page.waitForFunction(() => document.querySelector('#session-phase').textContent === '已結束' && document.querySelector('#telemetry-status').textContent.includes('尚未確認完整'));
     check(await page.locator('#session-panel').isVisible() && await page.locator('#include-ended').isChecked(), 'Ending a bound stream retains its archived session and visibly pending final statistics');
     check(await page.locator('#export-report').isDisabled(), 'Unsealed ended session cannot offer a final report download');
+    await page.locator('#report-room').selectOption('2');
+    check(await page.locator('#statistics tr').count() === 1 && (await page.locator('#statistics').innerText()).includes(xssName)
+      && await page.locator('#export-report').isDisabled(), 'Room statistics can be inspected before seal without enabling final CSV');
+    await page.locator('#report-room').selectOption('');
     await page.screenshot({ path: path.join(screenshots, 'telemetry-pending.png'), fullPage: true });
     await api('/sessions/' + linked.id + '/combat-stream/batch', 'POST', [{ streamId, streamSequence: 1, observedSequence: observed.sequence,
       report: { reportId: randomUUID(), kind: 'ShotFired', origin: 'Simulation', playerId: streamedPlayer.id, shotId: randomUUID() } }], 'GameServer');

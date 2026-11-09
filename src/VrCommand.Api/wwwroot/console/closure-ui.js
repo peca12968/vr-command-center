@@ -36,7 +36,7 @@ export function closureView(session, statistics, world, result = 'Waiting') {
     warning: result === 'Unavailable' || result === 'Missing' || result === 'Received' && !valid };
 }
 
-export function mountClosure(getState, unauthorized, openReview) {
+export function mountClosure(getState, unauthorized, openReview, report) {
   const panel = document.getElementById('closure-status'), combat = document.getElementById('closure-combat'), worldLabel = document.getElementById('closure-world'), summary = document.getElementById('closure-summary');
   const retained = document.getElementById('closure-retained');
   const fieldPanel = document.getElementById('field-evidence'), fieldButton = document.getElementById('download-field-evidence');
@@ -72,23 +72,23 @@ export function mountClosure(getState, unauthorized, openReview) {
     renderReview(state, view.complete);
   }
   function renderReview(state, complete) {
-    const { session, statistics } = state;
+    const { session } = state;
+    const players = report.players(), roomId = report.roomId();
     const shown = active && session?.state === 'Ended' && !!session.combatStream
-      && statistics?.sessionId === session.id && statistics.players.length > 0;
-    const players = shown ? statistics.players : [];
-    const options = JSON.stringify([shown ? session.id : null, players.map(player => [player.playerId, player.name, player.roomId])]);
+      && players.length > 0;
+    const options = JSON.stringify(shown ? [session.id, players.map(player => [player.playerId, player.name, player.roomId])] : null);
     if (options !== reviewOptions) {
       const previous = reviewPlayer.dataset.session === session?.id ? reviewPlayer.value : '';
-      reviewPlayer.replaceChildren(new Option('請選擇玩家', ''), ...players.map(player =>
+      reviewPlayer.replaceChildren(new Option('請選擇玩家', ''), ...(shown ? players : []).map(player =>
         new Option(`${player.name} · 房間 ${player.roomId} · ${player.playerId.slice(0, 8)}`, player.playerId)));
-      reviewPlayer.value = players.some(player => player.playerId === previous) ? previous : '';
+      reviewPlayer.value = shown && players.some(player => player.playerId === previous) ? previous : '';
       reviewPlayer.dataset.session = shown ? session.id : '';
       reviewOptions = options;
     }
     const player = players.find(player => player.playerId === reviewPlayer.value);
     reviewTarget = complete && player ? { mode: 'replay', sessionId: session.id, streamId: session.combatStream.streamId,
       throughSequence: world.acceptedSequence, throughCombatSequence: session.combatStream.acceptedSequence, complete: true,
-      playerId: player.playerId, playerName: player.name } : null;
+      playerId: player.playerId, playerName: player.name, roomId } : null;
     reviewPanel.hidden = !shown;
     reviewPlayer.disabled = !complete;
     reviewButton.disabled = !reviewTarget;
