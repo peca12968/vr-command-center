@@ -77,6 +77,22 @@ Windows 玩家包 0.49.0 的圖形玩家端可以選用 OpenXR。先讓相容的
 
 Windows 建置啟用 Touch 與 Unity 的 HTC Vive Controller 兩個 OpenXR 互動設定。Touch 沿用右扳機射擊、A 換彈、B 重讀票券，左手 X／Y 翻頁及關閉簡報。HTC Vive Controller 使用右扳機射擊、右握把換彈、右 Menu 重讀票券，左觸控板按下翻頁、左 Menu 關閉、左握把查看字型授權。實際控制器由 Windows OpenXR 執行環境回報，VIVE XR 的確切型號及相符設定仍待頭盔到場驗收。MR 透視與房間對位沿用 Quest 3 Android 路徑。 [Unity XR 手動啟動](https://docs.unity3d.com/Packages/com.unity.xr.management@4.6/manual/EndUser.html#load-xr-plug-ins) · [HTC Vive 控制器設定](https://docs.unity3d.com/Packages/com.unity.xr.openxr@1.19/manual/features/htcvivecontrollerprofile.html)
 
+#### 本機追蹤整合驗證
+
+測試使用 Unity OpenXR 套件附的 Windows Mock Runtime，另外由測試 DLL 提供固定頭手座標。只有測試玩家程序的 `XR_RUNTIME_JSON` 會指向測試環境。遊戲由解壓玩家包的啟動器執行，用主控簽發的原票券入場，走正常追蹤、回放和戰績流程。另一席使用桌面玩家作對照。這項驗證使用模擬裝置。 [Khronos 載入器規格](https://registry.khronos.org/OpenXR/specs/1.1/loader.html#overriding-the-default-runtime-usage)
+
+先用 Unity Editor 還原專案套件，再取 Khronos OpenXR SDK 1.1.53 的 `openxr.h`、`openxr_platform_defines.h` 和 `openxr_loader_negotiation.h` 放在同一標頭目錄。從 x64 Visual Studio 開發終端在專案根目錄編譯測試 DLL，輸出放在 `artifacts`。 [Khronos SDK 標頭](https://github.com/KhronosGroup/OpenXR-SDK/tree/release-1.1.53/include/openxr)
+
+```powershell
+cl /nologo /std:c11 /O2 /LD /W4 /WX /wd4191 /I"C:\XR\include\openxr" `
+    /Fo"artifacts\openxr-mock-pose.obj" tests\fixtures\openxr-mock-pose.c `
+    /link /OUT:artifacts\openxr-mock-pose.dll
+python scripts/check-server-package.py '<解壓遊戲伺服器包>' `
+    --control-package '<解壓管理包>' --player-package '<解壓玩家包>' `
+    --runtime-root '<新隔離執行目錄>' --openxr-mock-only `
+    --openxr-mock-pose-dll artifacts/openxr-mock-pose.dll
+```
+
 127.*僅供同機；不同電腦必須能連到公告的伺服器IPv4及UDP埠。此工具不修改安全性／防火牆、不安裝驅動，也不提供NAT／中繼或網路可達性探測。若Windows出現安全性提示，由使用者自行決定。包內沒有伺服器啟動器、管理API或控制台金鑰。
 
 ## 完整性與診斷

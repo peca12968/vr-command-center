@@ -86,6 +86,8 @@ def main():
     p.add_argument('--check-managed-mr', action='store_true', help='Verify the MR alignment startup gate, desktop rejection and Preparing seal')
     p.add_argument('--mr-venue-bundle-only', action='store_true', help='Verify both MR venue exports from native publishers, without starting desktop players')
     p.add_argument('--mixed-venue-bundle-only', action='store_true', help='Verify a mixed five-room console ZIP and mapped mock Quest deployment from native publishers')
+    p.add_argument('--openxr-mock-only', action='store_true', help='Verify a packaged graphical OpenXR client with the installed Unity mock runtime')
+    p.add_argument('--openxr-mock-pose-dll', type=Path, help='Compiled tests/fixtures/openxr-mock-pose.c for the OpenXR mock check')
     p.add_argument('--check-mapped-quest', action='store_true', help='Use full and five-seat mock ADB maps with each native MR venue export')
     p.add_argument('--check-live-reinforcement', action='store_true', help='Verify a native server accepts only supported live enemy targets and records the result')
     args=p.parse_args()
@@ -95,9 +97,13 @@ def main():
         p.error('--check-room-endpoints requires --check-vr-venue-tickets or --mixed-venue-bundle-only')
     venue_only = args.mr_venue_bundle_only or args.mixed_venue_bundle_only
     if args.mr_venue_bundle_only and args.mixed_venue_bundle_only:p.error('Choose a single venue bundle check')
+    if args.openxr_mock_only and (venue_only or not args.player_package):
+        p.error('--openxr-mock-only requires a player package and its own native room')
+    if args.openxr_mock_only != bool(args.openxr_mock_pose_dll):
+        p.error('--openxr-mock-only and --openxr-mock-pose-dll must be supplied together')
     if venue_only:
         if not args.game_address or args.player_package:p.error('The venue bundle check needs --game-address and no player package')
-    elif bool(args.player_package)!=bool(args.game_address):p.error('Provide --player-package and --game-address together')
+    elif not args.openxr_mock_only and bool(args.player_package)!=bool(args.game_address):p.error('Provide --player-package and --game-address together')
     if args.check_lan_preflight and not args.player_package:
         p.error('--check-lan-preflight requires the three-package check')
     if args.check_vr_venue_tickets and not args.player_package:
@@ -147,12 +153,25 @@ def main():
         except OSError:p.error('--game-address must be assigned to this PC')
     folder=args.package.resolve();manifest=package.verify(folder);assert manifest['launcherSourceSha256']==package.digest(ROOT/'tools/WindowsServerLauncher/ServerLauncher.cs')
     player_folder=None
+    openxr_mock=None
     if args.player_package:
         player_folder=args.player_package.resolve()
         player_package=module('portable_player_package','package-windows-player.py')
         player_manifest=player_package.verify(player_folder)
         if player_manifest['build']['sourceFingerprint']!=manifest['build']['sourceFingerprint']:
             p.error('Player and server packages must share the Unity build source')
+    if args.openxr_mock_only:
+        unity=ROOT/'clients/unity'
+        mock_package_version=read(unity/'Packages/manifest.json')['dependencies']['com.unity.xr.openxr']
+        candidates=[path for path in (unity/'Library/PackageCache').glob('com.unity.xr.openxr@*')
+                    if (path/'package.json').is_file() and read(path/'package.json')['version']==mock_package_version]
+        if len(candidates)!=1:
+            p.error('Restore the project-pinned Unity OpenXR package in the Editor first')
+        openxr_mock=candidates[0]/'Runtime/MockRuntime/unity-mock-runtime.json'
+        runtime_file=openxr_mock.parent/'windows/x64/mock_runtime.dll'
+        expected={'api_version':'1.0','name':'Unity Mock Runtime','library_path':r'.\windows\x64\mock_runtime.dll'}
+        if not openxr_mock.is_file() or read(openxr_mock).get('runtime')!=expected or not runtime_file.is_file():
+            p.error('The pinned Unity OpenXR package does not contain the expected Windows mock runtime')
     control.package.verify(args.control_package);out=ROOT/'artifacts/server-package-checks'/('run-'+uuid.uuid4().hex);out.mkdir(parents=True,exist_ok=False);runtime=args.runtime_root.resolve()/out.name;runtime.mkdir(parents=True,exist_ok=False)
     (ROOT/'artifacts/server-package-checks-latest-path.txt').write_text(str(out),encoding='utf-8');print(json.dumps({'stage':'starting','directory':str(out)}),flush=True)
     env=dict(os.environ);env.update(PATH=str(Path(os.environ['WINDIR'])/'System32'),DOTNET_ROOT=str(runtime/'absent-dotnet'),DOTNET_MULTILEVEL_LOOKUP='0');exe=folder/'Launch-Server.exe';control_exe=args.control_package.resolve()/'Start-Control.exe';data=runtime/'control';checks=[];runners=[];clients=[];cleanup=[];witnesses=[];api=None;api_witness=None;keys=None;sessions=[];rounds=[];observer=None;observer_log=None;observer_out=out/'closure-ui';observer_stop=out/'closure-ui-stop.request';observer_entry=None
@@ -389,11 +408,13 @@ def main():
         return [client for (entry, room, people), raw in zip(staged, files, strict=True)
                 for client in room_players(entry, room, people, raw)]
 
-    def packaged_player(entry,person,file):
+    def packaged_player(entry,person,file, *, mock=None):
         log=file.with_suffix('.log')
         report=file.with_suffix('.launcher.json')
+        flags=['--headless'] if mock is None else ['--openxr']
+        environment=env if mock is None else {**env,**mock}
         child=subprocess.Popen([str(player_folder/'Launch-Player.exe'),'--config',str(file),'--launch',
-            '--headless','--wait','--log',str(log),'--report',str(report)],cwd=runtime,env=env)
+            *flags,'--wait','--log',str(log),'--report',str(report)],cwd=runtime,env=environment)
         client={'process':child,'log':log,'player':person,'sessionId':entry['sessionId'],
             'launcherReport':report,'witness':None,'configPath':file}
         clients.append(client)
@@ -898,6 +919,94 @@ def main():
                     check(not owned['reader'].is_alive(),entry['label']+f' room {room} mock and original gateway are terminal')
             save(entry['label']+'-hardware-feedback.json',entry['hardwareFeedback'])
         rounds.append({'name':entry['label'],'ready':entry['ready'],'report':report,'journal':closed,'replayFrames':len(frames)})
+    def check_openxr_mock():
+        stage('native-openxr-mock')
+        label='openxr-mock'
+        pose_dll=args.openxr_mock_pose_dll.resolve(strict=True)
+        fixture_manifest=runtime/'openxr-pose-runtime.json'
+        fixture_manifest.write_text(json.dumps({'file_format_version':'1.0.0','runtime':
+            {'api_version':'1.0','name':'VR Command pose fixture','library_path':str(pose_dll)}}),encoding='utf-8')
+        mock_environment={'XR_RUNTIME_JSON':str(fixture_manifest),'VR_COMMAND_OPENXR_MOCK_DLL':str(runtime_file)}
+        entry=launch(create([1],label),label)
+        sid=entry['sessionId']
+        session='/api/sessions/'+sid
+        owners=[]
+        for name,headset in (('Desktop peer','Quest3'),('OpenXR mock','ViveXr')):
+            identity=str(uuid.uuid4())
+            state=request(session+'/players',{'playerId':identity,'roomId':1,'name':name,'headset':headset},role='Room1')
+            owners.append(next(row for row in state['players'] if row['id']==identity))
+        target={'address':address,'port':entry['ready']['port']}
+        raw,_=request(session+'/rooms/1/join-ticket-bundle',
+            dict(target,players=[{'playerId':p['id'],'admissionId':p['admissionId']} for p in owners]),role='Room1',raw_response=True)
+        (runtime/'openxr-mock-tickets.zip').write_bytes(raw)
+        clients_for_room=[]
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            for index,owner in enumerate(owners):
+                file=runtime/f'openxr-mock-seat-{index+1}.json'
+                file.write_bytes(archive.read(f'room-01-seat-{owner["seat"]+1:02}.json'))
+                content=read(file)
+                check(content=={'role':'Client',**target,'joinTicket':content['joinTicket']} and content['joinTicket'],
+                      'original seat connection file '+str(index+1))
+                clients_for_room.append(packaged_player(entry,owner,file,mock=mock_environment if index==1 else None))
+        desktop,tracked=clients_for_room
+        def client_log(client):
+            if client['process'].poll() is not None:
+                raise RuntimeError('An original player exited before End')
+            return client['log'].read_text(encoding='utf-8',errors='replace') if client['log'].exists() else ''
+        wait(lambda: all('VR_CLIENT_CONNECTED id=' in client_log(c) for c in clients_for_room),35,'both signed OpenXR fixture admissions')
+        lines=client_log(tracked).splitlines()
+        markers=[line for line in lines if line.startswith(('VR_OPENXR_STARTUP ','VR_NETWORK_STARTED ','VR_CLIENT_CONNECTED '))]
+        check(len(markers)==4 and markers[:2]==['VR_OPENXR_STARTUP status=requested','VR_OPENXR_STARTUP status=active']
+              and markers[2].startswith('VR_NETWORK_STARTED role=Client started=True ')
+              and markers[3].startswith('VR_CLIENT_CONNECTED id=')
+              and any('Runtime Name: Unity Mock Runtime' in line for line in lines)
+              and 'VR_OPENXR_STARTUP ' not in client_log(desktop),
+              'actual packaged mock OpenXR starts before transport and original admission')
+        save(label+'-runtime.json',{'packageVersion':mock_package_version,'manifestSha256':package.digest(openxr_mock),
+            'runtimeSha256':package.digest(runtime_file),'poseDllSha256':package.digest(pose_dll),'markers':markers})
+        expected={owners[0]['id']:(owners[0]['admissionId'],'Simulated'),owners[1]['id']:(owners[1]['admissionId'],'Tracked')}
+        latest=None
+        def readiness():
+            nonlocal latest
+            report=request(session+'/readiness')
+            latest=report
+            actual={row['playerId']:(row['admissionId'],row['rigKind']) for row in report['players'] if row['canParticipate']}
+            return report if report['sourceState']=='Fresh' and report['observedSequence']==report['sessionSequence'] and actual==expected else None
+        try:
+            wait(readiness,25,'exact simulated and tracked accepted admissions')
+        finally:
+            save(label+'-readiness.json',latest)
+        check(True,'management recognizes mock head and hands as tracked, and the separate desktop peer as simulated')
+        begin=command(sid,'Begin')['appliedAtSequence']
+        def running():
+            metadata=request(session+'/world')
+            packet=request(session+'/world/frames/'+str(metadata['acceptedSequence']))['packet']
+            frame=packet['frame']
+            rigs={row['id']:row['rig']['kind'] for row in frame['players'] if row['connected']}
+            return packet if packet['observedSequence']>=begin and frame['phase']=='Running' and frame['tick']>0 and rigs=={key:value[1] for key,value in expected.items()} else None
+        packet=wait(running,15,'original Running replay frame with both rig types')
+        save(label+'-running-pose.json',packet)
+        tracked_pose=next(row for row in packet['frame']['players'] if row['id']==tracked['player']['id'])
+        head=tracked_pose['head']
+        hands=[tracked_pose['rig']['left'],tracked_pose['rig']['right']]
+        check(abs(head['y']-1.65)<.001 and all(
+            abs(hand['y']-1.25)<.001 and abs(hand['x']-head['x'])<.001 and abs(hand['z']-head['z']-.4)<.001
+            for hand in hands),'accepted head and both hands match the fixture coordinates in the live world')
+        command(sid,'End')
+        finish(entry)
+        replay=read(out/(label+'-replay.json'))
+        check(replay[packet['sequence']-1]['packet']==packet,'exact tracked Running pose survives in the sealed replay')
+        for client in clients_for_room:
+            log=client_log(client)
+            finals=[json.loads(line.removeprefix('VR_CLIENT_DEBRIEF_FINAL ')) for line in log.splitlines() if line.startswith('VR_CLIENT_DEBRIEF_FINAL ')]
+            connections=re.findall(r'^VR_CLIENT_CONNECTED id=(\d+)$',log,re.M)
+            check(venue.player_result_phase(log)=='acknowledged' and len(finals)==len(connections)==1,'original result and terminal disconnect')
+            debrief.validate_result(finals[0],{'id':sid},client['player'],entry['sealed'])
+            client.update(final=finals[0],connection=int(connections[0]))
+            save(client['player']['id']+'-result.json',client['final'])
+            stop_player(client)
+        verify_delivery(entry,clients_for_room)
+
     def verify_interrupted_replay(entry, client):
         session = '/api/sessions/' + entry['sessionId']
         path = session + '/world'
@@ -1431,7 +1540,9 @@ def main():
         archived_batch_report = None
         earlier_field_archive = None
         earlier_closure = None
-        for linked in ([] if venue_only else [False,True]):
+        if args.openxr_mock_only:
+            check_openxr_mock()
+        for linked in ([] if venue_only or args.openxr_mock_only else [False,True]):
             entries=[];round_clients=[];staged=[]
             batch=None
             if args.prepare_independent_set and not linked:
@@ -1765,7 +1876,8 @@ def main():
             room_rows=request('/api/rooms/readiness')['rooms']
             check(len(room_rows) == 5 and all(row['sessionId'] is None and 'endpoint' not in row for row in room_rows),
                   'ended native sources leave no endpoint in the five current room rows')
-        save('evidence.json',{'rounds':rounds,'scope':('Five Windows VR/MR Preparing endpoints and 25 signed files from the console mixed ZIP.' if args.mixed_venue_bundle_only else
+        save('evidence.json',{'rounds':rounds,'scope':('One packaged graphical Unity mock OpenXR client and one desktop peer on the same host.' if args.openxr_mock_only else
+            'Five Windows VR/MR Preparing endpoints and 25 signed files from the console mixed ZIP.' if args.mixed_venue_bundle_only else
             'Real Windows MR Preparing endpoints and 25 signed files per topology.' if args.mr_venue_bundle_only else
             'Three portable packages, five Independent rooms then Linked, 25 simultaneous same-PC Simulation clients per topology.'
             if player_folder else 'Two portable packages, five Independent rooms then Linked, five same-PC Simulation clients per topology.'),
@@ -1835,7 +1947,8 @@ def main():
         if keys and any(k in text for k in keys.values()):raise RuntimeError('Public metadata contains a key')
     save('checks.json',{'complete':True,'checks':len(checks),'findings':checks,'runtimeDirectory':str(runtime),
         'packageDirectory':str(folder),'playerPackageDirectory':str(player_folder) if player_folder else None,
-        'scope':('Same-machine VR/MR servers in Preparing and mock ADB with no headset client.' if args.mixed_venue_bundle_only else
+        'scope':('Same-machine tracked rig from Unity mock OpenXR and a simulated desktop peer, no physical headset.' if args.openxr_mock_only else
+                 'Same-machine VR/MR servers in Preparing and mock ADB with no headset client.' if args.mixed_venue_bundle_only else
                  'Same-machine native MR servers in Preparing with no headset client.' if args.mr_venue_bundle_only else
                  'Same-machine VR simulation and a separate MR Preparing admission and seal check.' if args.check_managed_mr else 'Same-machine Simulation only.')
                 +' The separate parent-death case intentionally leaves the world unsealed.'})
