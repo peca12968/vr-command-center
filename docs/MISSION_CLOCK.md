@@ -14,6 +14,14 @@ End 仍走原有 combat／world 雙 journal 補送、精確 seal、玩家個別�
 
 PC HUD 顯示 REMAIN，手動模式顯示 ELAPSED／PLAN；數值取自 NGO 複製的權威 tick，不用本機時間自行倒數。Android 標籤接相同來源，未有頭盔顯示證據。觀戰／回放依新錄製 header 的 missionClockVersion=1、missionDurationSeconds 顯示「活動時間／計畫」，不把 header 的支援能力誤認為場次已啟用自動結束。舊 header 缺欄位為0，不補造舊倒數。
 
+## 五房房卡
+
+Windows 管理包 0.31.30 起，「房間與場次」直接顯示各房的任務計時。準備中顯示保存版本的計畫時間。執行中及暫停時，手動結束的房間顯示活動時間及計畫時間，自動結束的房間顯示剩餘時間。合併場的五房使用同一份世界快照，獨立場各自計時。房控只能查看本房。
+
+房卡採用已接受的快照，等待最新階段同步或來源超過原本的 1.5 秒有效窗時顯示「活動時間未確認」。暫停期間保留當前快照的活動時間。收到已到期快照時顯示「等待結束確認」，待原 End 流程完成才釋放房間。
+
+`GET /api/rooms/readiness` 在有可信任計時的房間附加 `clock`，包含 `phase`、`elapsedSeconds`、`remainingSeconds`、`durationSeconds` 和 `autoEnd`。支援計時的來源須觀察到最近一次階段變更後才可提供數值。短時間內暫停又繼續時，舊的執行中快照不會重新成為房卡時間。
+
 ## 契約與升級
 
 - `SetMissionClock` 走原 `/api/sessions/{id}/commands`，包含 `missionClock:{autoEnd:true}` 與正常 commandId／expectedSequence。Master／同房 RoomController 維持原權限；Linked 限 Master。
