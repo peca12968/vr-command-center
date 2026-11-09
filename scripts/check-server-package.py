@@ -140,7 +140,9 @@ def main():
     if args.check_room_reports and not args.player_package:p.error('--check-room-reports requires the three-package check')
     if args.check_room_combat and not args.check_room_reports:p.error('--check-room-combat requires --check-room-reports')
     if args.check_hardware_feedback and not args.check_room_combat:p.error('--check-hardware-feedback requires --check-room-combat')
-    if args.hardware_simulator_package and not args.check_hardware_feedback:p.error('--hardware-simulator-package requires --check-hardware-feedback')
+    openxr_hardware=bool(args.openxr_mock_only and args.hardware_simulator_package)
+    if args.hardware_simulator_package and not (args.check_hardware_feedback or openxr_hardware):
+        p.error('--hardware-simulator-package requires --check-hardware-feedback or --openxr-mock-only')
     if args.prepare_independent_set and not args.player_package:p.error('--prepare-independent-set requires the player package')
     if args.check_independent_room_missions and (not args.prepare_independent_set or args.check_layout_preview or args.check_room_combat):
         p.error('--check-independent-room-missions requires --prepare-independent-set and its own mission fixtures')
@@ -900,7 +902,7 @@ def main():
                     assert source['sequence']==signal['eventSequence'] and record['streamSequence']==signal['streamSequence']
                     assert record['observedSequence']==signal['observedSequence'] and record['streamId']==entry['ready']['streamId']
                     assert (combat['reportId'],combat['playerId'],combat['kind'],combat['damage'])==(signal['reportId'],signal['playerId'],signal['kind'],signal['damage'])
-                check(len({s['eventId'] for s in feed['signals']})==len(feed['signals']),entry['label']+f' room {room} live hardware signals match original accepted damage and stop at End')
+                check(len({s['eventId'] for s in feed['signals']})==len(feed['signals']),entry['label']+f' room {room} live hardware signals match original accepted combat reports and stop at End')
                 if 'mock' in feed:
                     owned=feed.pop('mock'); log,_=owned['gateway'].communicate(timeout=12)
                     assert owned['gateway'].returncode==0 and not any(key in log for key in keys.values())
@@ -908,13 +910,21 @@ def main():
                     assert result['complete'] and result['termination']=='ended' and result['physicalDeliveryConfirmed'] is False
                     assert (result['roomId'],result['sessionId'])==(room,sid)
                     acknowledged=[item for attempt in result['attempts'] if attempt['status']=='simulated-acknowledged' for item in attempt['deliveries']]
-                    check(len(acknowledged)==result['acknowledged'] and {item['signal']['playerId'] for item in acknowledged}==set(feed['players']),
-                          entry['label']+f' room {room} mock confirmed all original admissions')
+                    expected_players=feed.get('expectedAcknowledgedPlayers',feed['players'])
+                    check(len(acknowledged)==result['acknowledged'] and {item['signal']['playerId'] for item in acknowledged}==set(expected_players),
+                          entry['label']+f' room {room} mock confirmed the expected original admissions')
                     for item in acknowledged:
                         signal=item['signal'];player=signal['playerId'];original=events[signal['eventId']]
                         assert (signal['admissionId'],signal['seat'])==feed['players'][player] and item['deviceId']==owned['devices'][player]
                         assert original['sequence']==signal['eventSequence'] and original['payload']['streamId']==feed['stream']
                         assert original['payload']['report']['reportId']==signal['reportId'] and original['payload']['report']['damage']==signal['damage']
+                    if 'mockBatch' in feed:
+                        batch=feed['mockBatch']
+                        check([frame for frame in owned['frames'] if frame['kind']=='feedback']==[batch]
+                              and result['attempts']==[{'connectionId':batch['connectionId'],'batchId':batch['batchId'],
+                                  'status':'simulated-acknowledged','deliveries':batch['signals']}]
+                              and result['acknowledged']==1 and result['dropped']==0,
+                              'the single mock device batch is acknowledged exactly once through End')
                     owned['mock'].terminate();owned['mock'].wait(timeout=5);owned['reader'].join(timeout=5)
                     check(not owned['reader'].is_alive(),entry['label']+f' room {room} mock and original gateway are terminal')
             save(entry['label']+'-hardware-feedback.json',entry['hardwareFeedback'])
@@ -1005,6 +1015,29 @@ def main():
         original_config_hash=package.digest(tracked['configPath'])
         expected_admissions={(p['id'],p['admissionId'],p['roomId'],p['seat']) for p in owners}
         acknowledged=[]
+        feed=None
+        if openxr_hardware:
+            hardware_route=session+'/rooms/1/hardware-feedback'
+            initial=request(hardware_route,role='Room1')
+            check(initial['state']=='Running' and initial['resetReason']=='attached' and initial['signals']==[]
+                  and initial['streamId']==entry['ready']['streamId'] and initial['runningSinceSequence']==begin,
+                  'room hardware reader attaches to the original Running stream with an empty cursor')
+            request(hardware_route,role='Room2',expected=403)
+            check(True,'another room key cannot read the original hardware route')
+            feed={'cursor':initial['throughSequence'],'room':1,'session':sid,'stream':initial['streamId'],
+                  'players':{p['id']:(p['admissionId'],p['seat']) for p in owners},'signals':[],
+                  'expectedAcknowledgedPlayers':[tracked_id]}
+            feed['mock']=start_hardware_mock(feed)
+            wait(lambda:any(f['kind']=='hello' and f['roomId']==1 for f in feed['mock']['frames']),8,'OpenXR hardware mock handshake')
+
+        def feedback_page():
+            page=request(hardware_route+f'?after={feed["cursor"]}',role='Room1')
+            assert page['sessionId']==sid and page['roomId']==1 and page['streamId']==feed['stream']
+            assert page['state']=='Running' and page['resetReason'] is None and page['combatOrigin']=='Simulation'
+            assert page['runningSinceSequence']==begin and page['throughSequence']>=feed['cursor']
+            assert all(feed['cursor']<s['eventSequence']<=page['throughSequence'] for s in page['signals'])
+            feed['cursor']=page['throughSequence']
+            return page
 
         def expect_trigger(*states):
             acknowledged.extend(states)
@@ -1016,7 +1049,16 @@ def main():
             pending=trigger_command.with_suffix('.new')
             with pending.open('x',encoding='ascii') as output:
                 output.write(value)
-            os.replace(pending,trigger_command)
+            deadline=time.monotonic()+1
+            while True:
+                try:
+                    os.replace(pending,trigger_command)
+                    break
+                except PermissionError as error:
+                    # The runtime can be opening the current command at the same instant.
+                    if error.winerror not in (5,32) or time.monotonic()>=deadline:
+                        raise
+                    time.sleep(.02)
             expect_trigger(*states)
 
         def magazine_at(frame):
@@ -1111,7 +1153,28 @@ def main():
         set_trigger('0','0 0')
         released=wait(lambda:running(held_recovered['frame']['tick']+14),12,'original ready rig after trigger release')
         check(magazine_at(released)==magazine,'trigger release leaves the original magazine unchanged')
+        if feed is not None:
+            quiet=feedback_page()
+            check(quiet['signals']==[] and feed['mock']['gateway'].poll() is None
+                  and not any(frame['kind']=='feedback' for frame in feed['mock']['frames']),
+                  'tracking loss, held recovery and trigger release generate no feedback for either bound device')
+            save(label+'-hardware-before-tap.json',quiet)
         set_trigger('2','2 1','2 0')
+        if feed is not None:
+            page=wait(lambda:(value if (value:=feedback_page())['signals'] else None),5,'one original live OpenXR hardware signal')
+            check(len(page['signals'])==1,'one live hardware signal follows the new OpenXR tap')
+            signal=page['signals'][0]
+            check(signal['kind']=='ShotFired' and signal['playerId']==tracked_id and signal['damage']==0
+                  and (signal['admissionId'],signal['seat'])==feed['players'][tracked_id] and signal['observedSequence']==begin,
+                  'live logical recoil signal belongs to the original tracked admission and seat')
+            batch=wait(lambda:next((f for f in feed['mock']['frames'] if f['kind']=='feedback'),None),5,'original mock device feedback batch')
+            check(batch['mode']=='simulation' and batch['roomId']==1 and batch['streamId']==feed['stream']
+                  and batch['runningSinceSequence']==begin
+                  and batch['signals']==[{'deviceId':feed['mock']['devices'][tracked_id],'signal':signal}],
+                  'TCP mock device receives the original shot for the tracked device only')
+            feed['signals']=page['signals']
+            feed['mockBatch']=batch
+            entry['hardwareFeedback']=[feed]
 
         def shot():
             frame=running(released['frame']['tick']+1)
@@ -1158,6 +1221,12 @@ def main():
         check(len(shots)==1 and released['sequence']<shots[0][0]<=fired['sequence']
               and shots[0][1]['playerId']==tracked_id and shots[0][1]['hasRay'],
               'sealed playback contains one ray-bearing shot by the original OpenXR player after the new press')
+        if feed is not None:
+            event=shots[0][1]
+            accepted=next(row for row in request(session+'/events?limit=500') if row['eventId']==signal['eventId'])
+            report=accepted['payload']['report']
+            check(report['reportId']==signal['reportId']==event['eventId'] and report['shotId']==event['shotId'],
+                  'the acknowledged recoil signal matches the original accepted combat report and sealed shot identifiers')
         for client in clients_for_room:
             log=client_log(client)
             finals=[json.loads(line.removeprefix('VR_CLIENT_DEBRIEF_FINAL ')) for line in log.splitlines() if line.startswith('VR_CLIENT_DEBRIEF_FINAL ')]
@@ -2063,7 +2132,7 @@ def main():
             'questVrPartialMap':args.check_quest_vr_partial_map,
             'venueEnvironment':args.check_venue_environment,
             'venueEnemies':args.check_venue_enemies,
-            'hardwareFeedback':args.check_hardware_feedback,
+            'hardwareFeedback':args.check_hardware_feedback or openxr_hardware,
             'hardwareMockPackage':hardware_manifest['toolVersion'] if args.hardware_simulator_package else None,
             'preparedIndependentSet':args.prepare_independent_set,
             'independentRoomMissions':args.check_independent_room_missions,
