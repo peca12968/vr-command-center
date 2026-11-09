@@ -327,6 +327,14 @@ app.MapPost("/api/vr-deployment/venue-bundle", async (WorldRecordings worlds, Ht
     var request = await VrVenueTickets.ReadRequest(context.Request, context.RequestAborted);
     return Results.File(VrVenueTickets.Create(request, worlds, actor, ticketSigner), "application/zip", "vr-venue-connections.zip");
 });
+app.MapPost("/api/vr-deployment/venue-check", async (WorldRecordings worlds, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var actor = Actor(context);
+    if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue checks require the master operator.");
+    var request = await VrVenueTickets.ReadCheck(context.Request, context.RequestAborted);
+    return VrVenueTickets.Check(request, worlds, actor, ticketSigner);
+});
 app.MapDelete("/api/sessions/{id:guid}/players/{playerId:guid}", (Guid id, Guid playerId, SessionManager manager, HttpContext context) =>
 {
     manager.Leave(id, playerId, Actor(context), RequestId(context), AdmissionMatch(context), requireAdmissionMatch: true);

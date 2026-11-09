@@ -56,6 +56,7 @@ def main():
     p.add_argument('--game-address',type=ipaddress.IPv4Address,help='Local private IPv4 for the three-package check')
     p.add_argument('--check-lan-preflight',action='store_true',help='Release a same-PC UDP preflight before Unity binds each original game port')
     p.add_argument('--check-vr-venue-tickets',action='store_true',help='Launch all 25 players in each mode from the shipped console venue ZIP')
+    p.add_argument('--check-quest-vr-deploy',action='store_true',help='Run Quest preflight and mapped mock deployment from each original VR venue ZIP')
     p.add_argument('--peer-diagnostics',action='store_true',help='Verify observed UDP peers in Linked and absence in default Independent runs')
     p.add_argument('--field-evidence',action='store_true',help='Verify the management ZIP with the original Linked player and server logs')
     p.add_argument('--venue-field-evidence',action='store_true',help='Verify full sealed admission evidence for both original venue End batches')
@@ -91,6 +92,8 @@ def main():
         p.error('--check-lan-preflight requires the three-package check')
     if args.check_vr_venue_tickets and not args.player_package:
         p.error('--check-vr-venue-tickets requires the three-package check')
+    if args.check_quest_vr_deploy and not args.check_vr_venue_tickets:
+        p.error('--check-quest-vr-deploy requires --check-vr-venue-tickets')
     if args.peer_diagnostics and not args.player_package:p.error('--peer-diagnostics requires the three-package check')
     if args.field_evidence and not args.peer_diagnostics:p.error('--field-evidence requires --peer-diagnostics')
     if args.venue_field_evidence and not (args.field_evidence and args.check_venue_end):
@@ -325,6 +328,24 @@ def main():
                   and archive.namelist() == ['venue.json', *[row['ticketsZip'] for row in expected]]
                   and archive.testzip() is None, mode+' shipped browser ZIP includes the five original rooms and no other files')
             files = [archive.read(row['ticketsZip']) for row in expected]
+        if args.check_quest_vr_deploy:
+            before = request('/api/sessions')
+            pwsh = shutil.which('pwsh')
+            if not pwsh: raise RuntimeError('PowerShell is required for the Quest deployment check')
+            deploy = [pwsh, '-NoProfile', '-File', str(ROOT/'scripts/deploy-quest.ps1'),
+                      '-VenueBundle', str(archive_path), '-ManagementApi', uri]
+            environment = {**os.environ, 'VR_COMMAND_MASTER_KEY': keys['Master']}
+            with tempfile.TemporaryDirectory(prefix='quest-vr-', dir=runtime) as scratch:
+                destination = Path(scratch).resolve()
+                if destination.parent != runtime: raise RuntimeError('Invalid owned deployment scratch directory')
+                seat = json.loads(subprocess.check_output([*deploy, '-RoomId', '4', '-Seat', '2', '-CheckOnly'],
+                    env=environment, timeout=25, encoding='utf-8', cwd=destination))
+                check(seat['roomId']==4 and seat['seat']==2 and seat['mode']=='VR' and seat['headset']=='Quest3'
+                      and seat['managementVerified'] and seat['alignmentSha256'] is None and not list(destination.iterdir()),
+                      mode+' Quest tool checks the original VR seat using the live game endpoint without ADB')
+                save(f'vr-venue-{label}-quest-seat.json', seat)
+                verify_mapped_quest(deploy, destination, environment, archive_path.read_bytes(), mode)
+            check(request('/api/sessions') == before, mode+' Quest deployment checks do not change the original venue roster')
         return [client for (entry, room, people), raw in zip(staged, files, strict=True)
                 for client in room_players(entry, room, people, raw)]
 
@@ -1038,7 +1059,8 @@ def main():
             save(f'mr-venue-{mode.lower()}-seat.json', seat)
             for entry in entries: command(entry['sessionId'], 'End')
             for entry in entries: finish(entry)
-    def verify_mapped_quest(deploy, destination, environment, raw, mode, files, hashes):
+    def verify_mapped_quest(deploy, destination, environment, raw, mode, files=None, hashes=None):
+        is_vr = files is None
         rows = [{'roomId': room, 'seat': seat, 'serial': f'fixture-{(room-1)*5+seat:02}'} for room in range(1, 6) for seat in range(1, 6)]
         mapping = destination / 'device-map.json'
         mapping.write_text(json.dumps({'version': 1, 'seats': rows[::-1]}), encoding='utf-8')
@@ -1048,11 +1070,13 @@ def main():
             return json.loads(subprocess.check_output([*mapped, flag], env=environment, timeout=45, encoding='utf-8', cwd=destination))
         preview = invoke('-CheckOnly')
         check(preview['complete'] and preview['managementVerified'] and preview['phase'] == 'preflight'
+              and (preview.get('mode') == 'VR' if is_vr else preview.get('alignmentPinsVerified') is True)
               and [row['status'] for row in preview['devices']] == ['ready']*25
               and not any(destination.glob('fixture-*')), mode + ' mapped preflight confirms 25 mocked devices with no configuration writes')
         (destination/'adb.log').unlink()
         applied = invoke('-DeployMappedSeats')
         check(applied['complete'] and applied['managementVerified'] and applied['phase'] == 'deployment'
+              and (applied.get('mode') == 'VR' if is_vr else applied.get('alignmentPinsVerified') is True)
               and applied['devices'] == [{'roomId': row['roomId'], 'seat': row['seat'], 'status': 'launch-requested', 'versionCode': 61} for row in rows],
               mode + ' mapped deployment submits launch for exactly the 25 requested mock devices')
         with zipfile.ZipFile(io.BytesIO(raw)) as bundle:
@@ -1060,16 +1084,21 @@ def main():
                 room, seat = row['roomId'], row['seat']; remote = destination / row['serial']
                 with zipfile.ZipFile(io.BytesIO(bundle.read(f'room-{room:02}-connections.zip'))) as tickets:
                     config = json.loads(tickets.read(f'room-{room:02}-seat-{seat:02}.json'))
-                config.update(questPassthrough=True, requestMixedReality=True)
-                alignment = f'vr-room-alignment-{hashes[room]}.json'
-                assert read(remote/'vr-connection.json') == config and (remote/alignment).read_bytes() == files[room]
-                assert {item.name for item in remote.iterdir()} == {'vr-connection.json', alignment}
+                names = {'vr-connection.json'}
+                if not is_vr:
+                    config.update(questPassthrough=True, requestMixedReality=True)
+                    alignment = f'vr-room-alignment-{hashes[room]}.json'
+                    assert (remote/alignment).read_bytes() == files[room]
+                    names.add(alignment)
+                assert read(remote/'vr-connection.json') == config
+                assert {item.name for item in remote.iterdir()} == names
         commands = (destination/'adb.log').read_text(encoding='utf-8').splitlines()
-        check(len(commands) == 226 and sum(' shell monkey ' in line for line in commands) == 25
+        check(len(commands) == (176 if is_vr else 226) and sum(' shell monkey ' in line for line in commands) == 25
               and all(' install ' not in line and 'unmapped-device' not in line for line in commands),
-              mode + ' all 25 original signed configs and calibration files are isolated by serial with no APK installs')
-        save(f'mr-venue-{mode.lower()}-mapped-preflight.json', preview)
-        save(f'mr-venue-{mode.lower()}-mapped-deployment.json', applied)
+              mode + ' all 25 original signed configs are isolated by serial with the expected mode files and no APK installs')
+        prefix = 'vr' if is_vr else 'mr'
+        save(f'{prefix}-venue-{mode.lower()}-mapped-preflight.json', preview)
+        save(f'{prefix}-venue-{mode.lower()}-mapped-deployment.json', applied)
     try:
         subprocess.run([str(control_exe),'--init',str(data),'--port',str(free()),'--report',str(out/'control-init.json')],env=env,check=True,timeout=30);keys=read(data/'operator-keys.json')['OperatorKeys'];marker=read(data/'control-instance.json');uri='http://127.0.0.1:'+str(marker['port'])
         api_ready=out/'control-ready.json';api_stop=out/'control-stop.request';api=subprocess.Popen([str(control_exe),'--run',str(data),'--seconds','1800','--ready-report',str(api_ready),'--stop-file',str(api_stop),'--report',str(out/'control-final.json')],env=env,cwd=out)
@@ -1376,6 +1405,7 @@ def main():
             'venueFieldUi':args.check_venue_field_ui,
             'lanPreflight':args.check_lan_preflight,
             'vrVenueTickets':args.check_vr_venue_tickets,
+            'questVrDeploy':args.check_quest_vr_deploy,
             'venueEnvironment':args.check_venue_environment,
             'venueEnemies':args.check_venue_enemies,
             'hardwareFeedback':args.check_hardware_feedback,

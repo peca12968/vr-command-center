@@ -179,7 +179,7 @@ function Read-VenueTicketStream([IO.Stream]$InputStream, [int]$RoomId, [Guid]$Se
     } finally { $archive.Dispose() }
 }
 
-function Confirm-VenueWithManagement([string]$Address, [string]$Topology, [object[]]$Rooms, $PublishedEndpoints) {
+function Confirm-VenueWithManagement([string]$Address, [string]$Topology, [object[]]$Rooms, $PublishedEndpoints, [switch]$Vr) {
     $uri = $null
     if (-not [Uri]::TryCreate($Address, [UriKind]::Absolute, [ref]$uri) -or
         ($uri.Scheme -ne 'https' -and -not ($uri.Scheme -eq 'http' -and $uri.IsLoopback)) -or
@@ -188,7 +188,7 @@ function Confirm-VenueWithManagement([string]$Address, [string]$Topology, [objec
     }
     $masterKey = [Environment]::GetEnvironmentVariable('VR_COMMAND_MASTER_KEY')
     if ([string]::IsNullOrWhiteSpace($masterKey)) { throw 'Set VR_COMMAND_MASTER_KEY for the live venue check.' }
-    $endpoint = [Uri]::new($uri, '/api/mr-deployment/venue-check')
+    $endpoint = [Uri]::new($uri, $(if ($Vr) { '/api/vr-deployment/venue-check' } else { '/api/mr-deployment/venue-check' }))
     $body = @{ topology = $Topology; rooms = $Rooms } | ConvertTo-Json -Compress -Depth 6
     try {
         $response = Invoke-WebRequest -Uri $endpoint -Method Post -ContentType 'application/json' `
@@ -201,20 +201,23 @@ function Confirm-VenueWithManagement([string]$Address, [string]$Topology, [objec
     if ($result.topology -cne $Topology -or $result.allMatched -isnot [bool] -or $result.seats -isnot [array] -or $result.seats.Count -ne 25) {
         throw 'The management service returned an invalid venue check receipt.'
     }
+    $validStatuses = @('matched', 'session-unavailable', 'seat-unavailable', 'connection-invalid', 'ticket-invalid', 'wrong-seat', 'admission-changed')
+    if ($Vr) { $validStatuses += @('endpoint-mismatch', 'venue-unavailable') }
+    else { $validStatuses += @('alignment-not-locked', 'connection-hash-mismatch', 'alignment-invalid', 'alignment-wrong-room', 'alignment-hash-mismatch') }
     $failures = for ($i = 0; $i -lt 25; $i++) {
         $room = [int][Math]::Floor($i / 5) + 1
         $seat = $i % 5
         $row = $result.seats[$i]
         if (-not (Test-JsonInteger $row.roomId) -or -not (Test-JsonInteger $row.seat) -or
-            $row.roomId -ne $room -or $row.seat -ne $seat -or $row.status -cnotin @('matched', 'session-unavailable',
-            'alignment-not-locked', 'seat-unavailable', 'connection-invalid', 'ticket-invalid', 'wrong-seat',
-            'admission-changed', 'connection-hash-mismatch', 'alignment-invalid', 'alignment-wrong-room', 'alignment-hash-mismatch')) {
+            $row.roomId -ne $room -or $row.seat -ne $seat -or $row.status -cnotin $validStatuses -or
+            ($Vr -and $row.status -ceq 'matched' -and $row.headset -cnotin @('Quest3', 'ViveXr'))) {
             throw 'The management service returned an invalid venue check receipt.'
         }
         if ($row.status -cne 'matched') { 'Room {0} seat {1}: {2}' -f $room, ($seat + 1), $row.status }
     }
     if ($result.allMatched -ne (-not $failures)) { throw 'The management service returned an inconsistent venue check receipt.' }
     if ($failures) { throw ('Live venue check failed. ' + ($failures -join '; ')) }
+    if ($Vr) { return $result.seats }
     foreach ($sessionId in $PublishedEndpoints.Keys) {
         $source = [Uri]::new($uri, "/api/sessions/$sessionId/connection-endpoint")
         try {
@@ -242,29 +245,35 @@ function Read-VenueJsonEntry($Entry, [string]$Description) {
 
 function Read-VenueBundle([string]$Path, [int]$SelectedRoom, [int]$SelectedSeat) {
     try { $file = [IO.File]::OpenRead((Resolve-Path -LiteralPath $Path).ProviderPath) }
-    catch { throw 'Use a readable five-room MR deployment ZIP from the management console.' }
+    catch { throw 'Use a readable five-room deployment ZIP from the management console.' }
     try {
-        if ($file.Length -lt 1 -or $file.Length -gt 512KB) { throw 'The five-room MR deployment ZIP has an invalid size.' }
+        if ($file.Length -lt 1 -or $file.Length -gt 512KB) { throw 'The five-room deployment ZIP has an invalid size.' }
         try { $archive = [IO.Compression.ZipArchive]::new($file, [IO.Compression.ZipArchiveMode]::Read, $true) }
-        catch { throw 'Use a valid five-room MR deployment ZIP from the management console.' }
+        catch { throw 'Use a valid five-room deployment ZIP from the management console.' }
         try {
-            if ($archive.Entries.Count -ne 11) { throw 'The deployment ZIP must contain exactly one manifest and ten room files.' }
+            if ($archive.Entries.Count -notin 6,11) { throw 'The deployment ZIP must contain exactly one manifest and ten room files for MR or five room files for VR.' }
             $entries = [Collections.Generic.Dictionary[string,IO.Compression.ZipArchiveEntry]]::new([StringComparer]::Ordinal)
             foreach ($entry in $archive.Entries) {
                 if ($entries.ContainsKey($entry.FullName)) { throw 'The deployment ZIP contains a duplicate entry.' }
                 $entries.Add($entry.FullName, $entry)
             }
             $manifest = (Read-VenueJsonEntry $entries['venue.json'] 'venue manifest').Document
+            if ($manifest.mode -ceq 'VR') {
+                if ($entries.Count -ne 6) { throw 'The VR ZIP must contain exactly one manifest and five room files.' }
+            } elseif ($entries.Count -ne 11) { throw 'The deployment ZIP must contain exactly one manifest and ten room files.' }
             Read-Venue $manifest '' $entries $SelectedRoom $SelectedSeat
         } finally { $archive.Dispose() }
     } finally { $file.Dispose() }
 }
 
 function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$SelectedRoom, [int]$SelectedSeat) {
+    $isVr = $BundleEntries -and $manifest.mode -ceq 'VR'
+    $manifestFields = @('version','topology','rooms')
+    if ($isVr) { $manifestFields += 'mode' }
     if (-not (Test-JsonInteger $manifest.version) -or $manifest.version -ne 1 -or
         $manifest.topology -isnot [string] -or $manifest.topology -cnotin @('Linked','Independent') -or
         $manifest.rooms -isnot [array] -or $manifest.rooms.Count -ne 5 -or
-        @($manifest.PSObject.Properties.Name | Where-Object { $_ -cnotin @('version','topology','rooms') }).Count -gt 0) {
+        @($manifest.PSObject.Properties.Name | Where-Object { $_ -cnotin $manifestFields }).Count -gt 0) {
         throw 'Use a version 1 venue manifest with Linked or Independent topology and five rooms.'
     }
     $seenRooms = [Collections.Generic.HashSet[int]]::new()
@@ -281,20 +290,37 @@ function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$Selecte
         $session = [Guid]::Empty
         if (-not (Test-JsonInteger $room.roomId) -or $room.roomId -notin 1..5 -or -not $seenRooms.Add($room.roomId) -or
             $room.sessionId -isnot [string] -or -not [Guid]::TryParseExact($room.sessionId, 'D', [ref]$session) -or $session -eq [Guid]::Empty -or
-            $room.ticketsZip -isnot [string] -or [string]::IsNullOrWhiteSpace($room.ticketsZip) -or
-            $room.alignmentFile -isnot [string] -or [string]::IsNullOrWhiteSpace($room.alignmentFile) -or
+            $room.ticketsZip -isnot [string] -or [string]::IsNullOrWhiteSpace($room.ticketsZip)) {
+            throw 'Provide one entry per room with roomId, sessionId and ticketsZip.'
+        }
+        if ($isVr) {
+            if ($room.address -isnot [string] -or -not (Test-JsonInteger $room.port) -or
+                $room.seats -isnot [array] -or $room.seats.Count -ne 5 -or
+                @($room.PSObject.Properties.Name | Where-Object { $_ -cnotin @('roomId','sessionId','ticketsZip','address','port','seats') }).Count -gt 0) {
+                throw 'Provide the original VR venue room endpoints and seats.'
+            }
+            for ($i = 0; $i -lt 5; $i++) {
+                $listed = $room.seats[$i]
+                if (-not (Test-JsonInteger $listed.seat) -or $listed.seat -ne ($i + 1) -or
+                    $listed.name -isnot [string] -or [string]::IsNullOrWhiteSpace($listed.name) -or
+                    @($listed.PSObject.Properties.Name | Where-Object { $_ -cnotin @('seat','name') }).Count -gt 0) {
+                    throw "Room $($room.roomId) needs the original five named VR seats."
+                }
+            }
+        } elseif ($room.alignmentFile -isnot [string] -or [string]::IsNullOrWhiteSpace($room.alignmentFile) -or
             @($room.PSObject.Properties.Name | Where-Object { $_ -cnotin @('roomId','sessionId','ticketsZip','alignmentFile') }).Count -gt 0) {
             throw 'Provide one entry per room with roomId, sessionId, ticketsZip and alignmentFile.'
         }
         $id = $room.roomId
+        $alignment = $null
         if ($BundleEntries) {
             $expectedZip = 'room-{0:00}-connections.zip' -f $id
             $expectedAlignment = 'room-{0:00}-alignment.json' -f $id
-            if ($room.ticketsZip -cne $expectedZip -or $room.alignmentFile -cne $expectedAlignment -or
-                -not $BundleEntries.ContainsKey($expectedZip) -or -not $BundleEntries.ContainsKey($expectedAlignment)) {
+            if ($room.ticketsZip -cne $expectedZip -or -not $BundleEntries.ContainsKey($expectedZip) -or
+                (-not $isVr -and ($room.alignmentFile -cne $expectedAlignment -or -not $BundleEntries.ContainsKey($expectedAlignment)))) {
                 throw "Room $id must use the original room filenames inside the deployment ZIP."
             }
-            $alignment = Confirm-RoomAlignment (Read-VenueJsonEntry $BundleEntries[$expectedAlignment] "room $id alignment") $id
+            if (-not $isVr) { $alignment = Confirm-RoomAlignment (Read-VenueJsonEntry $BundleEntries[$expectedAlignment] "room $id alignment") $id }
             $entry = $BundleEntries[$expectedZip]
             $stream = $entry.Open()
             try { $bytes = Read-DeploymentBytes $stream $entry.Length 65536 }
@@ -308,9 +334,13 @@ function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$Selecte
             $tickets = @(Read-VenueRoomTickets (Get-VenueInputPath $directory $room.ticketsZip) $id $session)
         }
         $endpoint = $tickets[0].Endpoint
+        if ($isVr -and ($room.address + ':' + $room.port) -cne $endpoint) {
+            throw "Room $id connection files do not match the VR manifest endpoint."
+        }
         foreach ($ticket in $tickets) {
             $hasPin = $null -ne $ticket.AlignmentHash
-            if ($BundleEntries -and -not $hasPin) { throw "Room $id seat $($ticket.Seat + 1) needs a locked MR connection file." }
+            if ($isVr -and $hasPin) { throw "Room $id seat $($ticket.Seat + 1) needs a VR connection file." }
+            if ($BundleEntries -and -not $isVr -and -not $hasPin) { throw "Room $id seat $($ticket.Seat + 1) needs a locked MR connection file." }
             if ($null -eq $usesPins) { $usesPins = $hasPin }
             if ($usesPins -ne $hasPin) { throw 'Do not mix locked MR and legacy connection files in the same venue preflight.' }
             if ($hasPin -and $ticket.AlignmentHash -cne $alignment.Hash) {
@@ -329,11 +359,15 @@ function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$Selecte
         $null = $endpoints.Add($endpoint)
         if ($ManagementApi) {
             if ($tickets | Where-Object { $_.Bytes.Length -gt 2048 }) { throw "Room $id connection JSON exceeds the live check's 2 KiB per-seat limit." }
-            $liveRooms.Add(@{ roomId = $id; sessionId = $session; alignmentFile = [Convert]::ToBase64String($alignment.Bytes)
-                connectionFiles = @($tickets | ForEach-Object { [Convert]::ToBase64String($_.Bytes) }) })
-            if ($BundleEntries) { $publishedEndpoints[$session.ToString('D')] = $endpoint }
+            $live = @{ roomId = $id; sessionId = $session
+                connectionFiles = @($tickets | ForEach-Object { [Convert]::ToBase64String($_.Bytes) }) }
+            if (-not $isVr) { $live.alignmentFile = [Convert]::ToBase64String($alignment.Bytes) }
+            $liveRooms.Add($live)
+            if ($BundleEntries -and -not $isVr) { $publishedEndpoints[$session.ToString('D')] = $endpoint }
         }
-        [pscustomobject]@{ roomId = $id; seats = $tickets.Count; endpoint = $endpoint; alignmentSha256 = $alignment.Hash }
+        $row = [ordered]@{ roomId = $id; seats = $tickets.Count; endpoint = $endpoint }
+        if (-not $isVr) { $row.alignmentSha256 = $alignment.Hash }
+        [pscustomobject]$row
     }
     $expected = if ($manifest.topology -ceq 'Linked') { 1 } else { 5 }
     if ($sessions.Count -ne $expected -or $endpoints.Count -ne $expected) {
@@ -346,14 +380,21 @@ function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$Selecte
         rooms = @($rooms | Sort-Object roomId)
     }
     if ($usesPins) { $report.alignmentPinsVerified = $true }
+    if ($isVr) { $report.mode = 'VR' }
     return @{ Report = $report; Selected = $connections["$SelectedRoom/$SelectedSeat"]; Connections = $connections;
-        EarliestExpiry = $earliest; LiveRooms = $liveRooms.ToArray(); PublishedEndpoints = $publishedEndpoints }
+        EarliestExpiry = $earliest; LiveRooms = $liveRooms.ToArray(); PublishedEndpoints = $publishedEndpoints; SeatHeadsets = @{} }
 }
 
 function Confirm-VenueReadback($Venue) {
     if ($ManagementApi) {
-        if (-not $Venue.Report.alignmentPinsVerified) { throw 'The live venue check requires all 25 connection files to carry locked MR alignment hashes.' }
-        Confirm-VenueWithManagement $ManagementApi $Venue.Report.topology $Venue.LiveRooms $Venue.PublishedEndpoints
+        if ($Venue.Report.mode -ceq 'VR') {
+            $seats = @(Confirm-VenueWithManagement $ManagementApi $Venue.Report.topology $Venue.LiveRooms $Venue.PublishedEndpoints -Vr)
+            foreach ($row in $seats) { $Venue.SeatHeadsets["$($row.roomId)/$($row.seat + 1)"] = $row.headset }
+            $Venue.Report.quest3Seats = @($seats | Where-Object headset -CEQ 'Quest3').Count
+        } else {
+            if (-not $Venue.Report.alignmentPinsVerified) { throw 'The live venue check requires all 25 connection files to carry locked MR alignment hashes.' }
+            Confirm-VenueWithManagement $ManagementApi $Venue.Report.topology $Venue.LiveRooms $Venue.PublishedEndpoints
+        }
         $Venue.Report.managementVerified = $true
     }
     if ($Venue.EarliestExpiry -le [DateTimeOffset]::UtcNow) {
@@ -422,10 +463,18 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map) {
     $inventory = Get-QuestDeviceInventory
     $devices = @($Map | ForEach-Object { Get-MappedQuestStatus $_ $inventory })
     $report = [ordered]@{ phase = 'preflight'; topology = $Venue.Report.topology; expectedVersionCode = $ExpectedVersionCode;
-        alignmentPinsVerified = $true; earliestExpiryUtc = $Venue.Report.earliestExpiryUtc; complete = $false; devices = $devices }
+        earliestExpiryUtc = $Venue.Report.earliestExpiryUtc; complete = $false; devices = $devices }
+    $isVr = $Venue.Report.mode -ceq 'VR'
+    if ($isVr) { $report.mode = 'VR' } else { $report.alignmentPinsVerified = $true }
     if ($devices | Where-Object { $_.status -cne 'ready' }) { return $report }
     Confirm-VenueReadback $Venue
     if ($Venue.Report.managementVerified) { $report.managementVerified = $true }
+    if ($isVr -and $Venue.Report.managementVerified) {
+        foreach ($device in $devices) {
+            if ($Venue.SeatHeadsets["$($device.roomId)/$($device.seat)"] -cne 'Quest3') { $device.status = 'seat-headset-mismatch' }
+        }
+        if ($devices | Where-Object status -CEQ 'seat-headset-mismatch') { return $report }
+    }
     if (-not $DeployMappedSeats) { $report.complete = $true; return $report }
 
     $report.phase = 'deployment'
@@ -438,7 +487,7 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map) {
             $device.status = 'ticket-expired'; return $report
         }
         try {
-            Set-QuestConnection $row.serial $connection.Ticket.Config $connection.Ticket $connection.Alignment -RequestMixedReality
+            Set-QuestConnection $row.serial $connection.Ticket.Config $connection.Ticket $connection.Alignment -RequestMixedReality:(-not $isVr)
             $device.status = 'launch-requested'
         } catch {
             $device.status = 'deployment-failed'
@@ -540,6 +589,10 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
     if (-not $RoomId -and $Serial) { throw 'Specify -RoomId and -Seat when targeting a Quest device.' }
     if ($RoomId -and -not $CheckOnly -and [string]::IsNullOrWhiteSpace($Serial)) { throw 'Specify -Serial to deploy a bundle seat to a Quest 3.' }
     $venue = Read-VenueBundle $VenueBundle $RoomId $Seat
+    $isMixedReality = $venue.Report.mode -cne 'VR'
+    if (-not $isMixedReality -and $RoomId -and -not $CheckOnly -and -not $ManagementApi) {
+        throw 'Deploying a VR bundle seat requires -ManagementApi for a current signed seat and endpoint check.'
+    }
     Confirm-VenueReadback $venue
     if (-not $RoomId) {
         $venue.Report | ConvertTo-Json -Depth 4 -Compress
@@ -549,7 +602,9 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
     $config = $ticket.Config
     $alignment = $venue.Selected.Alignment
     $alignmentHash = $alignment.Hash
-    $isMixedReality = $true
+    if (-not $isMixedReality -and -not $CheckOnly -and $venue.SeatHeadsets["$RoomId/$Seat"] -cne 'Quest3') {
+        throw 'The selected VR seat is not assigned to a Quest 3 player.'
+    }
 } else {
     $config = (Read-DeploymentJson $ClientConfig 4096 'player connection').Document
     $ticket = Read-PlayerConfig $config
@@ -573,6 +628,9 @@ if ($CheckOnly) {
     }
     if ($ticket.AlignmentHash) { $report.alignmentPinsVerified = $true }
     if ($ManagementApi) { $report.managementVerified = $true }
+    if ($PSCmdlet.ParameterSetName -eq 'Bundle' -and -not $isMixedReality -and $ManagementApi) {
+        $report.headset = $venue.SeatHeadsets["$RoomId/$Seat"]
+    }
     $report | ConvertTo-Json -Compress
     return
 }

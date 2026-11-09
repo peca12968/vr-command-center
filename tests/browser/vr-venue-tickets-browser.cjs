@@ -10,6 +10,7 @@ module.exports = async ({ context, api, tokens, base, root, directory, screensho
   const preview = '/vr-deployment/venue', bundle = preview + '-bundle', endpoint = base + '/api' + bundle;
   const panel = page.locator('#vr-venue-panel'), load = page.locator('#vr-venue-read'), issue = page.locator('#vr-venue-issue');
   const status = page.locator('#vr-venue-status');
+  const verify = '/vr-deployment/venue-check';
   const fence = plan => ({ topology: plan.topology, rooms: plan.rooms.map(room => ({
     roomId: room.roomId, sessionId: room.sessionId, streamId: room.endpoint.streamId,
     players: room.seats.map(({ playerId, admissionId }) => ({ playerId, admissionId }))
@@ -51,7 +52,7 @@ module.exports = async ({ context, api, tokens, base, root, directory, screensho
     assert.equal(download.suggestedFilename(), 'vr-venue-connections.zip');
     const file = path.join(directory, `vr-${plan.topology}-seats.zip`);
     await download.saveAs(file);
-    const reader = spawnSync('python', ['-c', `import io,json,sys,zipfile
+    const reader = spawnSync('python', ['-c', `import base64,io,json,sys,zipfile
 with zipfile.ZipFile(sys.argv[1]) as outer:
     assert outer.testzip() is None
     manifest = json.loads(outer.read('venue.json'))
@@ -60,7 +61,7 @@ with zipfile.ZipFile(sys.argv[1]) as outer:
     for room in manifest['rooms']:
         with zipfile.ZipFile(io.BytesIO(outer.read(room['ticketsZip']))) as inner:
             assert inner.testzip() is None
-            rooms.append([[name, json.loads(inner.read(name))] for name in inner.namelist()])
+            rooms.append([[name, base64.b64encode(inner.read(name)).decode()] for name in inner.namelist()])
     print(json.dumps([manifest, rooms], ensure_ascii=True))`, file], { encoding: 'utf8', timeout: 6000, windowsHide: true });
     assert.equal(reader.status, 0, reader.stderr);
     assert.ok(Object.values(tokens).every(token => !reader.stdout.includes(token)));
@@ -72,7 +73,10 @@ with zipfile.ZipFile(sys.argv[1]) as outer:
     for (const [index, files] of rooms.entries()) {
       const room = plan.rooms[index];
       assert.deepEqual(files.map(([name]) => name), roomIds.map(seat => `room-0${room.roomId}-seat-0${seat}.json`));
-      for (const [seatIndex, [, config]] of files.entries()) {
+      for (const [seatIndex, [, encoded]] of files.entries()) {
+        const raw = Buffer.from(encoded, 'base64').toString('utf8');
+        assert.ok(Object.values(tokens).every(token => !raw.includes(token)));
+        const config = JSON.parse(raw);
         const seat = room.seats[seatIndex];
         assert.deepEqual(Object.keys(config).sort(), ['address', 'joinTicket', 'port', 'role']);
         assert.equal(config.address, room.endpoint.address); assert.equal(config.port, room.endpoint.port); assert.equal(config.role, 'Client');
@@ -82,6 +86,9 @@ with zipfile.ZipFile(sys.argv[1]) as outer:
         assert.equal(claims.roomId, room.roomId); assert.equal(claims.seat + 1, seat.number);
       }
     }
+    return { topology: plan.topology, rooms: plan.rooms.map((room, index) => ({
+      roomId: room.roomId, sessionId: room.sessionId, connectionFiles: rooms[index].map(([, encoded]) => encoded)
+    })) };
   }
 
   try {
@@ -133,8 +140,19 @@ with zipfile.ZipFile(sys.argv[1]) as outer:
       if (topology === 'Linked') assert.match(await page.locator('#vr-venue-rooms').textContent(), /僅本機/);
       const downloaded = page.waitForEvent('download');
       await issue.click();
-      await inspect(await downloaded, plan);
+      const proof = await inspect(await downloaded, plan);
       check(true, topology + ' browser ZIP has all 25 original signed admissions, room and seat names, and published endpoints');
+      const readback = await api(verify, 'POST', proof);
+      const wrong = structuredClone(proof), first = JSON.parse(Buffer.from(wrong.rooms[0].connectionFiles[0], 'base64').toString('utf8'));
+      first.port++;
+      wrong.rooms[0].connectionFiles[0] = Buffer.from(JSON.stringify(first)).toString('base64');
+      const denied = await api(verify, 'POST', wrong);
+      await api(verify, 'POST', proof, 'Room1', 403);
+      check(readback.allMatched && readback.seats.length === 25
+        && readback.seats.filter(seat => seat.headset === 'Quest3').length === 15
+        && !denied.allMatched && denied.seats[0].status === 'endpoint-mismatch'
+        && denied.seats.slice(1).every(seat => seat.status === 'matched'),
+        topology + ' VR live check verifies original bytes, current headset assignment and endpoint');
       if (topology === 'Linked') await panel.screenshot({ path: path.join(screenshots, 'vr-venue-tickets.png') });
       if (topology === 'Independent') {
         let notify, release, finish, late = false;
@@ -175,6 +193,10 @@ with zipfile.ZipFile(sys.argv[1]) as outer:
       await add(ready.rooms[4].sessionId, 5, 1, seat.playerId);
       const stale = await post(ready, 409);
       check(stale.roomId === 5 && stale.code === 'vr-venue-roster-changed', topology + ' venue rejects one replaced admission without issuing the other 24');
+      const after = await api(verify, 'POST', proof);
+      check(!after.allMatched && after.seats[20].status === 'admission-changed'
+        && after.seats.filter(seat => seat.status === 'matched').length === 24,
+        topology + ' VR live check rejects the superseded original ticket after reassigning one seat');
       previous = ready;
       for (const session of sessions) await end(session.id);
     }

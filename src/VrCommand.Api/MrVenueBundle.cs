@@ -20,7 +20,7 @@ internal static class MrVenueBundle
     internal static async Task<Request> Read(HttpRequest request, CancellationToken cancellation)
     {
         const string message = "Provide five MR rooms with their current admissions and original alignment files.";
-        var input = await MrDeploymentCheck.ReadJson<Request>(request, 128 * 1024, message, cancellation);
+        var input = await DeploymentJson.Read<Request>(request, 128 * 1024, message, cancellation);
         if (input.Topology is not ("Linked" or "Independent") || input.Rooms is not { Length: SessionManager.RoomCount }
             || input.Rooms.Any(room => room is not { RoomId: >= 1 and <= SessionManager.RoomCount,
                 Players.Length: SessionManager.PlayersPerRoom, AlignmentFile.Length: > 0 and <= RoomAlignment.MaxFileBytes }

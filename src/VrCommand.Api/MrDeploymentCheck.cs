@@ -1,5 +1,3 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using VrCommand.Core;
 
 namespace VrCommand.Api;
@@ -8,14 +6,6 @@ internal static class MrDeploymentCheck
 {
     private const int MaxConnectionBytes = 2048;
     private const int MaxRequestBytes = 25 * 1024;
-    private static readonly JsonSerializerOptions FileOptions = new(JsonFormat.Options)
-    {
-        AllowDuplicateProperties = false,
-        UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
-        PropertyNameCaseInsensitive = false,
-        NumberHandling = JsonNumberHandling.Strict,
-        MaxDepth = 5
-    };
 
     internal sealed record Files(byte[] ConnectionFile, byte[] AlignmentFile);
     internal sealed record Result(string Status, int RoomId, int Seat, DateTimeOffset? ExpiresAtUtc = null);
@@ -27,7 +17,7 @@ internal static class MrDeploymentCheck
     internal static async Task<Files> ReadFiles(HttpRequest request, CancellationToken cancellation)
     {
         const string message = "Provide the original connection and alignment files within their size limits.";
-        var files = await ReadJson<Files>(request, MaxRequestBytes, message, cancellation);
+        var files = await DeploymentJson.Read<Files>(request, MaxRequestBytes, message, cancellation);
         if (!ValidConnection(files.ConnectionFile) || !ValidAlignment(files.AlignmentFile)) throw new ArgumentException(message);
         return files;
     }
@@ -35,7 +25,7 @@ internal static class MrDeploymentCheck
     internal static async Task<VenueFiles> ReadVenue(HttpRequest request, CancellationToken cancellation)
     {
         const string message = "Provide five rooms with five original connection files and one alignment file each, in a Linked or Independent venue.";
-        var files = await ReadJson<VenueFiles>(request, 180 * 1024, message, cancellation);
+        var files = await DeploymentJson.Read<VenueFiles>(request, 180 * 1024, message, cancellation);
         if (files.Topology is not ("Linked" or "Independent") || files.Rooms is not { Length: SessionManager.RoomCount }
             || files.Rooms.Any(room => room is not { RoomId: >= 1 and <= SessionManager.RoomCount, ConnectionFiles.Length: SessionManager.PlayersPerRoom }
                 || room.SessionId == Guid.Empty || !ValidAlignment(room.AlignmentFile) || room.ConnectionFiles.Any(file => !ValidConnection(file)))
@@ -47,16 +37,6 @@ internal static class MrDeploymentCheck
 
     private static bool ValidConnection(byte[]? bytes) => bytes is { Length: > 0 and <= MaxConnectionBytes };
     private static bool ValidAlignment(byte[]? bytes) => bytes is { Length: > 0 and <= RoomAlignment.MaxFileBytes };
-
-    internal static async Task<T> ReadJson<T>(HttpRequest request, int limit, string message, CancellationToken cancellation) where T : class
-    {
-        if (request.ContentLength is 0 || request.ContentLength > limit) throw new ArgumentException(message);
-        var buffer = new byte[limit + 1];
-        var length = await request.Body.ReadAtLeastAsync(buffer, buffer.Length, throwOnEndOfStream: false, cancellation);
-        if (length > limit) throw new ArgumentException(message);
-        try { return JsonSerializer.Deserialize<T>(buffer.AsSpan(0, length), FileOptions) ?? throw new ArgumentException(message); }
-        catch (JsonException) { throw new ArgumentException(message); }
-    }
 
     internal static Result Check(SessionView session, Player player, Files files, PlayerJoinTicketSigner signer)
     {
@@ -98,10 +78,7 @@ internal static class MrDeploymentCheck
     {
         Result Status(string value, DateTimeOffset? expires = null) => new(value, player.RoomId, player.Seat, expires);
 
-        Connection? config;
-        if (json.StartsWith("\uFEFF"u8)) json = json[3..];
-        try { config = JsonSerializer.Deserialize<Connection>(json, FileOptions); }
-        catch (JsonException) { return Status("connection-invalid"); }
+        var config = DeploymentJson.Connection<Connection>(json);
         if (config is not { Role: "Client", JoinTicket.Length: > 0 } || !ConnectionDestination.IsValid(config.Address, config.Port))
             return Status("connection-invalid");
 

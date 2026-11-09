@@ -309,6 +309,26 @@ class QuestVenueTests(unittest.TestCase):
         files['venue.json'] = json.dumps(manifest).encode()
         return files, seats
 
+    def vr_bundle(self, topology):
+        manifest, seats = self.prepare(topology)
+        manifest['mode'] = 'VR'
+        files = {}
+        for room in manifest['rooms']:
+            room_id = room['roomId']
+            room.pop('alignmentFile')
+            room['ticketsZip'] = f'room-{room_id:02}-connections.zip'
+            configs = seats[room_id]
+            first = next(iter(configs.values()))
+            room.update(address=first['address'], port=first['port'],
+                        seats=[{'seat': seat, 'name': f'Player {room_id}/{seat}'} for seat in range(1, 6)])
+            tickets = io.BytesIO()
+            with zipfile.ZipFile(tickets, 'w') as archive:
+                for name, config in configs.items():
+                    archive.writestr(name, json.dumps(config))
+            files[room['ticketsZip']] = tickets.getvalue()
+        files['venue.json'] = json.dumps(manifest).encode()
+        return files, seats
+
     def run_bundle(self, files, *flags, environment=None, script=ROOT / 'scripts/deploy-quest.ps1'):
         bundle = self.root / 'quest-mr-venue.zip'
         with zipfile.ZipFile(bundle, 'w', compression=zipfile.ZIP_DEFLATED) as archive:
@@ -354,6 +374,89 @@ class QuestVenueTests(unittest.TestCase):
         self.assert_rejected(self.run_bundle(files, '-RoomId', '5'), 'Specify both -RoomId and -Seat')
         self.assert_rejected(self.run_bundle(files, '-Serial', 'fixture'), 'Specify -RoomId and -Seat')
         self.assert_rejected(self.run_bundle(files, '-RoomId', '5', '-Seat', '2'), 'Specify -Serial')
+
+    def test_vr_bundle_previews_both_topologies_and_requires_live_check_to_write(self):
+        for topology in ('Linked', 'Independent'):
+            with self.subTest(topology=topology):
+                files, _ = self.vr_bundle(topology)
+                result = self.run_bundle(files)
+                self.assertEqual(0, result.returncode, result.stderr)
+                report = json.loads(result.stdout)
+                self.assertEqual((topology, 'VR', 25), (report['topology'], report['mode'], report['seats']))
+                self.assertNotIn('alignmentPinsVerified', report)
+                selected = self.run_bundle(files, '-RoomId', '5', '-Seat', '2', '-CheckOnly')
+                self.assertEqual(0, selected.returncode, selected.stderr)
+                seat = json.loads(selected.stdout)
+                self.assertEqual((5, 2, 'VR', None), (seat['roomId'], seat['seat'], seat['mode'], seat['alignmentSha256']))
+                self.assertNotIn('v2.', result.stdout + selected.stdout)
+                self.assert_rejected(self.run_bundle(files, '-RoomId', '5', '-Seat', '2', '-Serial', 'fixture-22'),
+                                     'requires -ManagementApi')
+
+    def test_vr_bundle_rejects_mismatched_manifest_and_mr_config(self):
+        files, _ = self.vr_bundle('Independent')
+        manifest = json.loads(files['venue.json'])
+        manifest['rooms'][3]['port'] = 8888
+        self.assert_rejected(self.run_bundle({**files, 'venue.json': json.dumps(manifest)}), 'VR manifest endpoint')
+        with zipfile.ZipFile(io.BytesIO(files['room-04-connections.zip'])) as archive:
+            entries = {name: json.loads(archive.read(name)) for name in archive.namelist()}
+        entries['room-04-seat-02.json']['roomAlignmentSha256'] = 'f' * 64
+        replacement = io.BytesIO()
+        with zipfile.ZipFile(replacement, 'w') as archive:
+            for name, config in entries.items():
+                archive.writestr(name, json.dumps(config))
+        self.assert_rejected(self.run_bundle({**files, 'room-04-connections.zip': replacement.getvalue()}), 'needs a VR connection file')
+
+    def test_vr_fleet_validates_current_headsets_and_writes_only_original_configs(self):
+        files, configs = self.vr_bundle('Linked')
+        mapping, _ = self.device_map()
+        calls = []
+        headset = ['ViveXr']
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                calls.append((self.path, self.headers['Authorization'], json.loads(self.rfile.read(int(self.headers['Content-Length'])))))
+                payload = {'topology': 'Linked', 'allMatched': True, 'seats': [
+                    {'roomId': room, 'seat': seat, 'status': 'matched', 'headset': headset[0] if (room, seat) == (2, 1) else 'Quest3'}
+                    for room in range(1, 6) for seat in range(5)]}
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(payload).encode())
+
+            def log_message(self, *args):
+                pass
+
+        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                url = f'http://127.0.0.1:{server.server_port}'
+                env = {'VR_COMMAND_MASTER_KEY': 'private-fixture-master'}
+                rejected = self.run_fleet(files, mapping, '-DeployMappedSeats', '-ManagementApi', url, environment=env)
+                self.assertEqual(1, rejected.returncode, rejected.stderr)
+                report = json.loads(rejected.stdout)
+                self.assertEqual('seat-headset-mismatch', report['devices'][6]['status'])
+                self.assertFalse(any(self.root.glob('fixture-*')))
+                headset[0] = 'Quest3'
+                applied = self.run_fleet(files, mapping, '-DeployMappedSeats', '-ManagementApi', url, environment=env)
+                self.assertEqual(0, applied.returncode, applied.stderr)
+                self.assertTrue(json.loads(applied.stdout)['complete'])
+            finally:
+                server.shutdown()
+                thread.join()
+        self.assertEqual(2, len(calls))
+        for route, key, proof in calls:
+            self.assertEqual(('/api/vr-deployment/venue-check', 'Bearer private-fixture-master'), (route, key))
+            for room in proof['rooms']:
+                self.assertEqual({'roomId', 'sessionId', 'connectionFiles'}, set(room))
+                self.assertEqual(list(configs[room['roomId']].values()),
+                                 [json.loads(base64.b64decode(raw)) for raw in room['connectionFiles']])
+        for index in range(25):
+            room, seat = index // 5 + 1, index % 5 + 1
+            device = self.root / f'fixture-{index+1:02}'
+            self.assertEqual({'vr-connection.json'}, {file.name for file in device.iterdir()})
+            self.assertEqual(configs[room][f'room-{room:02}-seat-{seat:02}.json'],
+                             json.loads((device / 'vr-connection.json').read_text(encoding='utf-8')))
 
     def test_device_map_rejects_missing_duplicate_or_unsafe_assignments_before_adb(self):
         files, _ = self.bundle('Linked')

@@ -10,7 +10,7 @@ internal sealed class VrVenueTicketConflict(int roomId, string code) : InvalidOp
     public string Code { get; } = code;
 }
 
-internal static class VrVenueTickets
+internal static partial class VrVenueTickets
 {
     internal sealed record Request(SessionMode Topology, RoomFence[] Rooms);
     internal sealed record RoomFence(int RoomId, Guid SessionId, Guid StreamId, TicketAdmission?[] Players);
@@ -52,7 +52,7 @@ internal static class VrVenueTickets
     internal static async Task<Request> ReadRequest(HttpRequest request, CancellationToken cancellation)
     {
         const string error = "Provide the current VR session, source and all five admissions for each of the five rooms.";
-        var input = await MrDeploymentCheck.ReadJson<Request>(request, 8192, error, cancellation);
+        var input = await DeploymentJson.Read<Request>(request, 8192, error, cancellation);
         if (input.Topology is not (SessionMode.Independent or SessionMode.Linked)
             || input.Rooms is not { Length: SessionManager.RoomCount }
             || input.Rooms.Any(room => room is not { RoomId: >= 1 and <= SessionManager.RoomCount, Players.Length: SessionManager.PlayersPerRoom }
