@@ -1,5 +1,14 @@
 # 開發進度
 
+## 2026-11-10 五房 Quest 批次 UDP 預檢
+
+批次工具沿用原 Quest 席位清單和開場前網路配置，依序在每個正式遊戲埠核對原始 UDP 報告。失敗席保留診斷階段，其他席繼續。端點內安排的席位全數通過後才提供逐來源清單。封存驗收可用 `udpPreflightBatch` 直接引用整批報告，再核對原實際端點、時間窗及已確認玩家來源。 [操作說明](QUEST3.md#批次預檢五房-quest-席位)
+
+- 本機通過 9 項 Quest 探測、6 項 Windows UDP 與 37 項封存驗收測試。原端點已占用時，監聽失敗不會執行頭盔探測，也不會停止原 socket。無 ADB 裝置的實際 CLI 檢查留下失敗摘要，未執行 UDP。
+- 在 `venue-interop-0ffce5cd25f4472da01a8a80f7245930` 保留 108 份證據。獨立及合併模式各由 25 個不同同機 IPv4 的 Java 探測端和真正 PowerShell 監聽完成 75 個樣本。50 組交換摘要互異，六個端點都能在監聽退出後重新綁定。ADB 裝置層使用替代測試，頭盔 Wi-Fi 仍待現地驗收。
+- 以新批次索引唯讀核對已封存的 Windows `run-91564904c33346809effddd207da53a3` 原證據。兩種模式的逐來源驗收摘要均與原結果一致，共 50 筆玩家戰績確認、六組原預檢及六份原世界日誌。這次重讀使用原 Windows 證據。Quest 3、VIVE XR、實體 MR、廠商硬體及跨機 25 人仍待驗收。
+- 來源 `ed1e95ebf04003497e6bf063394b9f68e45e7c8d`。GitHub Actions job `129379176826` 因帳務或支出上限未啟動。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42682128644)
+
 ## 2026-11-10 Quest UDP 預檢診斷 APK
 
 獨立 Android 診斷 APK 0.1.0 可由指定的 ADB 裝置執行，從指定的頭盔 IPv4 發送與 Windows 監聽端相容的 UDP 挑戰。診斷報告可直接供逐來源封存驗收。Windows 主控可用同一套監聽流程收集 Windows 與 Quest 來源的報告。 [操作說明](QUEST3.md#開場前從頭盔執行-udp-預檢)
