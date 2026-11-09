@@ -1,5 +1,13 @@
 # 伺服器待開場次清單
 
+## MR 校正鎖定與啟動資格
+
+Windows 伺服器啟動器 1.6 在待開清單標示「待鎖定校正」。選取該場可查看缺少鎖定的房號，啟動按鈕會停用。由主控鎖定校正檔後按「載入／更新」，同一實例會保留仍在清單中的原場次選取。單房獨立核對該房，五房合併核對全部五房。
+
+`--catalog` 的每個場次會回傳 `canStart` 與 `missingAlignmentRoomIds`。此處表示場次符合清單的開場設定，IP、UDP 埠、管理服務可用性及頭盔就緒需分別核對。CLI 與 WinForms 啟動前都會重新讀取實際場次，缺少鎖定時在建立工作目錄和 Unity 程序前停止。 [本機驗證](PROGRESS.md#2026-11-09-mr-伺服器啟動前核對)
+
+## 既有版本與場次清單流程
+
 Windows伺服器啟動器 **1.1.0** 可直接輸入管理實例的`control-instance.json`完整路徑，按「載入／更新」，也保留選檔方式。清單顯示房間、單房／五房模式、任務名稱與場次識別前綴；選取後另列完整場次與任務版本ID。真正啟動使用原UUID，沒有從顯示文字反解或替換任務版本。
 
 本輪主包為`artifacts/server-packages/windows-server-0.39.0-v5-win-x64.zip`，**82,669,350 bytes／SHA256 `3eef78fbe8319e366afa80cdfad31557bf42fb8bc3992402b6f252525e2857a2`**，311 manifest檔案／ZIP312含manifest。v4初候選為82,669,330／SHAf75b27e2...，原件與實際compiler input保存。Launcher版本獨立於Unity **0.39.0／code49／NGO29**與API **0.31.0**；控制台0.31.1、原224真正Editor、e0d60e4e...同源Windows／Quest、原Scene／prefab ID不變，沒有新Unity重建。

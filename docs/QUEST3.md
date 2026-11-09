@@ -232,6 +232,8 @@ Invoke-RestMethod "$api/api/sessions/$sessionId/commands" -Method Post -Headers 
 
 五房全連線須在同一次命令填齊 `room1` 至 `room5`；獨立模式則對每場只填它自己的房間。收到回條後核對 `session.roomAlignment`，再啟動伺服器。相同命令可重送取得原回條。若鎖定錯檔，結束該場並以正確檔案建立新場。
 
+Windows 啟動器 1.6 會在清單標示尚未鎖定的 MR 場次。主控鎖定後按「載入／更新」，再選擇符合開場設定的場次。 [伺服器清單](SERVER_CATALOG.md#mr-校正鎖定與啟動資格)
+
 頭盔載入時會核對校正檔雜湊，入場時伺服器比對主控鎖定值及原票券席位。遊戲使用 NGO 協定 31，升級需配套更新管理服務、遊戲伺服器及玩家端。場地標記實際位置、OpenXR 追蹤與透視仍需現場核對。 [版本相容性](EXTERNAL_CLIENTS.md#遊戲版本相容性)
 
 ### Quest 3 透視呈現

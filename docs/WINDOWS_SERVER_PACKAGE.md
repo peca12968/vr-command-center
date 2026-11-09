@@ -1,5 +1,7 @@
 # Windows 遊戲伺服器包
 
+2026-11-09 `windows-server-0.48.0-launcher1.6-win-x64.zip` 為 83,468,953 bytes，SHA-256 `aeb7b59c58a43f86918ec6135227658596d58afab5a397cfeaf2badda777fb92`。解壓後核對 328 個清單檔案，321 個 `Runtime/` 檔案逐檔符合 1.5 的 Unity 0.48.0 執行內容。新版會在啟動前核對 MR 場次的房間校正鎖定。 [操作方式](SERVER_CATALOG.md#mr-校正鎖定與啟動資格)
+
 2026-11-09 `windows-server-0.48.0-launcher1.5-win-x64.zip` 為 83,468,072 bytes，SHA-256 `fa6baef98f2d52a5fff9e0d0a3a09cff9dbc2aab3c2111b18b86b88fd8335e82`。解壓後核對 328 個清單檔案。MR 場次須在啟動前鎖定全部房間的校正檔。 [主控操作](QUEST3.md#啟動-mr-伺服器前鎖定校正檔)
 
 2026-11-09 `windows-server-0.47.1-launcher1.5-win-x64.zip` 為 83,466,797 bytes，SHA-256 `f885bc1b2fc7c3131dd59498f965d408749e60b00c8b9dbcc98209927907a9a7`。解壓後核對 328 個清單檔案。 [版本相容性](EXTERNAL_CLIENTS.md#遊戲版本相容性)
