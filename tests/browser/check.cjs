@@ -56,6 +56,12 @@ async function main() {
     diagnosticPage = page;
     function captureErrors(target) { target.on('pageerror', error => browserErrors.push(error.message)); target.on('console', message => { if (/Content Security Policy|violates.*directive/i.test(message.text())) browserErrors.push(message.text()); }); }
     captureErrors(page);
+    if (process.argv.includes('--vr-venue-tickets-only')) {
+      await require('./vr-venue-tickets-browser.cjs')({ context, api, tokens, base, root, directory, screenshots, check, captureErrors });
+      check(browserErrors.length === 0, 'VR venue ticketing has no uncaught browser or policy errors');
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed', scope: 'real API and Chromium VR ticketing with synthetic sources' }, null, 2));
+      console.log(`PASS: ${checks} focused VR venue ticket checks. Screenshots: ${screenshots}`); return;
+    }
     if (process.argv.includes('--placement-history-only')) {
       const mission = await api('/missions', 'POST', { name: 'Placement history focused fixture', briefing: 'Local editing with actual immutable revision saves', durationSeconds: 600, environment: { mode: 'VR', weather: 'Clear', timeOfDay: 'Day', lightning: false }, enemies: { count: 1, behavior: 'Hold', autoAttack: false }, props: [] }, 'Master', 201);
       await require('./placement-history-browser.cjs')({ context, api, tokens, base, mission, screenshots, check });
@@ -451,6 +457,7 @@ async function main() {
     await require('./mr-deployment-browser.cjs')({ context, api, tokens, base, directory, screenshots, check, captureErrors });
     await require('./independent-set-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
     await require('./mr-venue-bundle-browser.cjs')({ context, api, tokens, base, root, directory, screenshots, check, captureErrors });
+    await require('./vr-venue-tickets-browser.cjs')({ context, api, tokens, base, root, directory, screenshots, check, captureErrors });
     await require('./room-clock-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
     await require('./venue-phase-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
     check(browserErrors.length === 0, 'Browser has no uncaught script errors or CSP violations');

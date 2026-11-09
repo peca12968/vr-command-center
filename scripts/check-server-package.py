@@ -55,6 +55,7 @@ def main():
     p.add_argument('--player-package',type=Path,help='Launch five players per room from the API room ZIP, using this extracted player package')
     p.add_argument('--game-address',type=ipaddress.IPv4Address,help='Local private IPv4 for the three-package check')
     p.add_argument('--check-lan-preflight',action='store_true',help='Release a same-PC UDP preflight before Unity binds each original game port')
+    p.add_argument('--check-vr-venue-tickets',action='store_true',help='Launch all 25 players in each mode from the shipped console venue ZIP')
     p.add_argument('--peer-diagnostics',action='store_true',help='Verify observed UDP peers in Linked and absence in default Independent runs')
     p.add_argument('--field-evidence',action='store_true',help='Verify the management ZIP with the original Linked player and server logs')
     p.add_argument('--venue-field-evidence',action='store_true',help='Verify full sealed admission evidence for both original venue End batches')
@@ -88,6 +89,8 @@ def main():
     elif bool(args.player_package)!=bool(args.game_address):p.error('Provide --player-package and --game-address together')
     if args.check_lan_preflight and not args.player_package:
         p.error('--check-lan-preflight requires the three-package check')
+    if args.check_vr_venue_tickets and not args.player_package:
+        p.error('--check-vr-venue-tickets requires the three-package check')
     if args.peer_diagnostics and not args.player_package:p.error('--peer-diagnostics requires the three-package check')
     if args.field_evidence and not args.peer_diagnostics:p.error('--field-evidence requires --peer-diagnostics')
     if args.venue_field_evidence and not (args.field_evidence and args.check_venue_end):
@@ -255,20 +258,25 @@ def main():
         state=request('/api/sessions/'+entry['sessionId']+'/players',{'playerId':str(uuid.uuid4()),'roomId':room,'name':'Portable server room '+str(room),'headset':'Quest3'},role='Room'+str(room));person=next(x for x in state['players'] if x['roomId']==room)
         invitation=request('/api/sessions/'+state['id']+'/players/'+person['id']+'/join-ticket',{},role='Room'+str(room),admission=person['admissionId']);file=runtime/(entry['label']+'-client-'+str(room)+'.json');file.write_text(json.dumps({'role':'Client','address':address,'port':entry['ready']['port'],'joinTicket':invitation['ticket']}),encoding='utf-8');log=runtime/(file.stem+'.log')
         child=subprocess.Popen([str(folder/'Runtime/VrCommand.exe'),'-batchmode','-nographics','-job-worker-count','2','-logFile',str(log),'--vr-config',str(file)],cwd=runtime,env=env,creationflags=subprocess.CREATE_NO_WINDOW);client={'process':child,'log':log,'player':person,'sessionId':state['id']};clients.append(client);return client
-    def room_players(entry,room):
+    def prepare_room_roster(entry,room):
         path='/api/sessions/'+entry['sessionId']
         role='Room'+str(room)
         for seat in range(1,6):
             state=request(path+'/players',{'playerId':str(uuid.uuid4()),'roomId':room,
                 'name':f'Portable room {room} seat {seat}','headset':'Quest3'},role=role)
-        people=sorted((p for p in state['players'] if p['roomId']==room),key=lambda p:p['seat'])
+        return sorted((p for p in state['players'] if p['roomId']==room),key=lambda p:p['seat'])
+    def room_players(entry,room,people=None,raw=None):
+        path='/api/sessions/'+entry['sessionId']
+        role='Room'+str(room)
+        if people is None: people=prepare_room_roster(entry,room)
         names=[f'room-{room:02}-seat-{seat:02}.json' for seat in range(1,6)]
         destination={'address':address,'port':entry['ready']['port']}
-        raw,headers=request(path+f'/rooms/{room}/join-ticket-bundle',
-            dict(destination,players=[{'playerId':p['id'],'admissionId':p['admissionId']} for p in people]),
-            role=role,raw_response=True)
-        check(headers.get_content_type()=='application/zip' and headers['Cache-Control']=='no-store',
-            entry['label']+f' room {room} no-store ticket download')
+        if raw is None:
+            raw,headers=request(path+f'/rooms/{room}/join-ticket-bundle',
+                dict(destination,players=[{'playerId':p['id'],'admissionId':p['admissionId']} for p in people]),
+                role=role,raw_response=True)
+            check(headers.get_content_type()=='application/zip' and headers['Cache-Control']=='no-store',
+                entry['label']+f' room {room} no-store ticket download')
         directory=runtime/(entry['label']+f'-bundle-{room}')
         directory.mkdir()
         (directory/'download.zip').write_bytes(raw)
@@ -285,6 +293,41 @@ def main():
                 file.write_bytes(content)
                 prepared.append((person,file))
         return [packaged_player(entry,person,file) for person,file in prepared]
+
+    def venue_ticket_players(staged, linked):
+        mode = 'Linked' if linked else 'Independent'
+        label = mode.lower()
+        preview = request('/api/vr-deployment/venue')
+        check(preview['ready'] and preview['topology'] == mode
+              and all(row['roomId'] == room and row['sessionId'] == entry['sessionId']
+                      and (row['endpoint']['address'], row['endpoint']['port'], row['endpoint']['streamId'])
+                      == (address, entry['ready']['port'], entry['ready']['streamId'])
+                      and [seat['admissionId'] for seat in row['seats']] == [person['admissionId'] for person in people]
+                      for row, (entry, room, people) in zip(preview['rooms'], staged, strict=True)),
+              mode+' venue previews all current admissions on their original native UDP endpoints')
+        node = shutil.which('node')
+        if not node: raise RuntimeError('Node is required for the shipped venue ticket test')
+        descriptor = runtime / (label+'-venue-tickets-private.json')
+        archive_path = runtime / (label+'-vr-venue-connections.zip')
+        output = out / (label+'-vr-venue-tickets-ui.json')
+        descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'mode':mode}),encoding='utf-8')
+        with (out/(label+'-vr-venue-tickets-ui.log')).open('xb') as log:
+            subprocess.run([node, str(ROOT/'tests/browser/check-vr-venue-tickets-native.cjs'), str(descriptor),
+                            str(archive_path), str(output)], stdout=log, stderr=subprocess.STDOUT, check=True, timeout=65)
+        files = []
+        with zipfile.ZipFile(archive_path) as archive:
+            manifest = json.loads(archive.read('venue.json'))
+            expected = [{'roomId':room,'sessionId':entry['sessionId'],'address':address,'port':entry['ready']['port'],
+                         'ticketsZip':f'room-{room:02}-connections.zip',
+                         'seats':[{'seat':person['seat']+1,'name':person['name']} for person in people]}
+                        for entry,room,people in staged]
+            check(read(output)['complete'] and manifest == {'version':1,'mode':'VR','topology':mode,'rooms':expected}
+                  and archive.namelist() == ['venue.json', *[row['ticketsZip'] for row in expected]]
+                  and archive.testzip() is None, mode+' shipped browser ZIP includes the five original rooms and no other files')
+            files = [archive.read(row['ticketsZip']) for row in expected]
+        return [client for (entry, room, people), raw in zip(staged, files, strict=True)
+                for client in room_players(entry, room, people, raw)]
+
     def packaged_player(entry,person,file):
         log=file.with_suffix('.log')
         report=file.with_suffix('.launcher.json')
@@ -1047,7 +1090,7 @@ def main():
         earlier_field_archive = None
         earlier_closure = None
         for linked in ([] if args.mr_venue_bundle_only else [False,True]):
-            entries=[];round_clients=[]
+            entries=[];round_clients=[];staged=[]
             batch=None
             if args.prepare_independent_set and not linked:
                 mission=save_mission('five independently prepared rooms',enemy_count=5 if args.check_room_combat else 1)
@@ -1070,7 +1113,9 @@ def main():
                 entry['combatEnemyCount']=enemy_count
                 if not linked and rooms==[1]:rejected('bound-preparing',config(state['id']))
                 for room in rooms:
-                    round_clients.extend(room_players(entry,room) if player_folder else [player(entry,room)])
+                    if args.check_vr_venue_tickets: staged.append((entry, room, prepare_room_roster(entry, room)))
+                    else: round_clients.extend(room_players(entry,room) if player_folder else [player(entry,room)])
+            if args.check_vr_venue_tickets: round_clients=venue_ticket_players(staged,linked)
             owner_ids={entry['sessionId']:[c['player']['id'] for c in round_clients if c['sessionId']==entry['sessionId']] for entry in entries}
             if args.check_venue_begin:
                 route='/api/venue/phase'
@@ -1330,6 +1375,7 @@ def main():
             'venueFieldEvidence':args.venue_field_evidence,
             'venueFieldUi':args.check_venue_field_ui,
             'lanPreflight':args.check_lan_preflight,
+            'vrVenueTickets':args.check_vr_venue_tickets,
             'venueEnvironment':args.check_venue_environment,
             'venueEnemies':args.check_venue_enemies,
             'hardwareFeedback':args.check_hardware_feedback,

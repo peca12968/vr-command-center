@@ -63,6 +63,15 @@
             <button id="venue-apply-enemies" type="submit" class="secondary">套用到執行中場次</button>
           </fieldset></form>
         </section>
+        <section id="vr-venue-panel" class="panel" aria-labelledby="vr-venue-title" hidden>
+          <h3 id="vr-venue-title">VR 五房配票</h3>
+          <div class="button-row">
+            <button id="vr-venue-read" type="button" class="quiet">讀取五房名冊</button>
+            <button id="vr-venue-issue" type="button" class="secondary" disabled>下載五房連線檔 ZIP</button>
+          </div>
+          <p id="vr-venue-status" class="hint" role="status"></p>
+          <ul id="vr-venue-rooms" class="hint"></ul>
+        </section>
         <section id="venue-closure" class="panel" aria-labelledby="venue-closure-title" hidden>
           <h3 id="venue-closure-title">全館收尾</h3>
           <div class="button-row">
@@ -246,7 +255,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.40 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.41 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

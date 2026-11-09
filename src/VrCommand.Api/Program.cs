@@ -93,6 +93,8 @@ app.Use(async (context, next) =>
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "independent-rooms-occupied", roomIds = occupied.RoomIds });
         else if (ex is MrVenueBundleConflict venue)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = venue.Code, roomId = venue.RoomId });
+        else if (ex is VrVenueTicketConflict vrVenue)
+            await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = vrVenue.Code, roomId = vrVenue.RoomId });
         else if (ex is VenuePhaseChangedException)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "venue-phase-changed" });
         else if (ex is VenuePauseNotObservedException waiting)
@@ -311,6 +313,19 @@ app.MapPost("/api/mr-deployment/venue-bundle", async (WorldRecordings worlds, Ht
     if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue exports require the master operator.");
     var request = await MrVenueBundle.Read(context.Request, context.RequestAborted);
     return Results.File(MrVenueBundle.Create(request, worlds, actor, ticketSigner), "application/zip", "quest-mr-venue.zip");
+});
+app.MapGet("/api/vr-deployment/venue", (WorldRecordings worlds, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    return VrVenueTickets.Read(worlds, Actor(context));
+});
+app.MapPost("/api/vr-deployment/venue-bundle", async (WorldRecordings worlds, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var actor = Actor(context);
+    if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue exports require the master operator.");
+    var request = await VrVenueTickets.ReadRequest(context.Request, context.RequestAborted);
+    return Results.File(VrVenueTickets.Create(request, worlds, actor, ticketSigner), "application/zip", "vr-venue-connections.zip");
 });
 app.MapDelete("/api/sessions/{id:guid}/players/{playerId:guid}", (Guid id, Guid playerId, SessionManager manager, HttpContext context) =>
 {
