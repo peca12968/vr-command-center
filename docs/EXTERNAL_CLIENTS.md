@@ -122,17 +122,26 @@ node tests/browser/check-external-native.cjs <本次ready.json> <解壓玩家包
 
    ```powershell
    powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File $tool -Mode Listen `
-     -KeyFile $probeKey -LocalAddress 192.168.1.10 -PeerAddress 192.168.1.20 -Port 7777 -Count 5 -Seconds 60
+     -KeyFile $probeKey -LocalAddress 192.168.1.10 -PeerAddress 192.168.1.20 -Port 7777 -Count 5 -Seconds 60 |
+     Tee-Object -FilePath .\listener-room-01.ndjson
    ```
 
 3. 在玩家電腦設定自己的 `$tool` 與 `$probeKey`，交換兩端位址後執行。
 
    ```powershell
    powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File $tool -Mode Probe `
-     -KeyFile $probeKey -LocalAddress 192.168.1.20 -PeerAddress 192.168.1.10 -Port 7777 -Count 5
+     -KeyFile $probeKey -LocalAddress 192.168.1.20 -PeerAddress 192.168.1.10 -Port 7777 -Count 5 |
+     Tee-Object -FilePath .\probe-room-01.json
    ```
 
-4. 兩端最後一筆 JSON 的 `complete` 應為 `true`，且 `matched` 等於 `requested`。監聽程式已退出後，再以相同位址和埠啟動遊戲伺服器。五房獨立可逐一探測各房埠，合併場只需使用該場的共同埠。
+4. 等兩端程序退出並關閉輸出檔後，把兩份原始報告放在同一台電腦配對核對。工具比對互為對端的位址、遊戲埠、完整樣本數和 `exchangeSha256`，同一次探測回報 `pair-verified` 並以退出碼 0 結束。核對只讀取報告檔。
+
+   ```powershell
+   powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File $tool `
+     -ListenerReport .\listener-room-01.ndjson -ProbeReport .\probe-room-01.json
+   ```
+
+   核對後用相同位址和埠啟動遊戲伺服器。五房獨立逐房探測各自的埠，每次保存一組新檔。合併場使用該場共同埠。
 
 工具接受三段常用私有 IPv4 網段及 loopback，並只回覆指定來源位址、正確金鑰和新挑戰碼的固定長度封包。逾時樣本的 `roundTripMs` 為空值，整次有任一樣本未完成時以退出碼 1 結束。若出現 `failed`，`step` 可定位到金鑰、位址、綁定或封包交換階段。結果含現場位址，請和原日誌分開私下保存。
 

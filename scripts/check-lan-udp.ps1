@@ -2,7 +2,9 @@
 param(
     [Parameter(Mandatory, ParameterSetName = 'Key')][switch]$NewKey,
     [Parameter(Mandatory, ParameterSetName = 'Network')][ValidateSet('Listen', 'Probe')][string]$Mode,
-    [Parameter(Mandatory)][string]$KeyFile,
+    [Parameter(Mandatory, ParameterSetName = 'Key')][Parameter(Mandatory, ParameterSetName = 'Network')][string]$KeyFile,
+    [Parameter(Mandatory, ParameterSetName = 'Pair')][string]$ListenerReport,
+    [Parameter(Mandatory, ParameterSetName = 'Pair')][string]$ProbeReport,
     [Parameter(Mandatory, ParameterSetName = 'Network')][string]$LocalAddress,
     [Parameter(Mandatory, ParameterSetName = 'Network')][string]$PeerAddress,
     [Parameter(Mandatory, ParameterSetName = 'Network')][ValidateRange(1024, 65535)][int]$Port,
@@ -40,6 +42,58 @@ function Get-Hex([byte[]]$Bytes) {
     return [BitConverter]::ToString($Bytes).Replace('-', '').ToLowerInvariant()
 }
 
+function Get-ExchangeHash([string]$Listener, [string]$Probe, [string[]]$Nonces) {
+    if (!$Nonces.Count) { return }
+    [Array]::Sort($Nonces, [StringComparer]::Ordinal)
+    $portText = $Port.ToString([Globalization.CultureInfo]::InvariantCulture)
+    $text = "VRLAN1`n$Listener`n$Probe`n$portText`n" + ($Nonces -join "`n")
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return Get-Hex ($sha.ComputeHash($ascii.GetBytes($text))) }
+    finally { $sha.Dispose() }
+}
+
+function Test-ReportInteger($Value) { return $Value -is [int] -or $Value -is [long] }
+
+function Read-CompleteReport([string]$Path, [string]$Role) {
+    $file = [IO.File]::OpenRead((Resolve-Path -LiteralPath $Path).ProviderPath)
+    try {
+        if ($file.Length -lt 1 -or $file.Length -gt 32KB) { throw 'Invalid report size.' }
+        $reader = [IO.StreamReader]::new($file)
+        try { $lines = $reader.ReadToEnd().Trim() -split '\r?\n' }
+        finally { $reader.Dispose() }
+    } finally { $file.Dispose() }
+    if ($lines.Count -ne 1 -and !($Role -ceq 'listen' -and $lines.Count -eq 2)) { throw 'Invalid report lines.' }
+    $report = ConvertFrom-Json -InputObject $lines[-1]
+    if (!(Test-ReportInteger $report.version) -or $report.version -ne 1 -or $report.stage -cne 'finished' -or $report.mode -cne $Role -or
+        $report.scope -cne 'authenticated-udp-only' -or $report.complete -isnot [bool] -or !$report.complete -or
+        !(Test-ReportInteger $report.requested) -or $report.requested -notin 1..20 -or
+        !(Test-ReportInteger $report.matched) -or $report.matched -ne $report.requested -or
+        !(Test-ReportInteger $report.port) -or $report.port -lt 1024 -or $report.port -gt 65535 -or
+        $report.exchangeSha256 -isnot [string] -or $report.exchangeSha256 -cnotmatch '\A[0-9a-f]{64}\z') {
+        throw 'Expected a completed UDP report.'
+    }
+    $sampleCount = if ($Role -ceq 'probe') { $report.matched } else { 0 }
+    if ($report.samples -isnot [array] -or $report.samples.Count -ne $sampleCount) { throw 'Unexpected sample count.' }
+    for ($index = 0; $index -lt $sampleCount; $index++) {
+        $sample = $report.samples[$index]
+        $rtt = $sample.roundTripMs
+        if (!(Test-ReportInteger $sample.sample) -or $sample.sample -ne ($index + 1) -or
+            (!(Test-ReportInteger $rtt) -and $rtt -isnot [double] -and $rtt -isnot [decimal]) -or !(0 -le $rtt -and $rtt -le 3000)) {
+            throw 'Invalid completed probe sample.'
+        }
+    }
+    [void](Read-Address $report.localAddress)
+    [void](Read-Address $report.peerAddress)
+    if ($lines.Count -eq 2) {
+        $bound = ConvertFrom-Json -InputObject $lines[0]
+        if ($bound.version -ne 1 -or $bound.stage -cne 'listening' -or $bound.port -ne $report.port -or
+            $bound.localAddress -cne $report.localAddress -or $bound.peerAddress -cne $report.peerAddress) {
+            throw 'The listener bound a different endpoint.'
+        }
+    }
+    return $report
+}
+
 function Get-Packet([string]$Kind, [string]$Nonce) {
     $prefix = "VRLAN1${Kind}:$Nonce"
     $tag = Get-Hex ($hmac.ComputeHash($ascii.GetBytes($prefix)))
@@ -73,6 +127,17 @@ function Test-Packet([string]$Expected, [string]$Received) {
 }
 
 try {
+    if ($PSCmdlet.ParameterSetName -eq 'Pair') {
+        $step = 'reports'
+        $listener = Read-CompleteReport $ListenerReport 'listen'
+        $probe = Read-CompleteReport $ProbeReport 'probe'
+        if ($listener.port -ne $probe.port -or $listener.matched -ne $probe.matched -or
+            $listener.localAddress -cne $probe.peerAddress -or $listener.peerAddress -cne $probe.localAddress -or
+            $listener.exchangeSha256 -cne $probe.exchangeSha256) { throw 'The reports describe different UDP exchanges.' }
+        Write-Result @{ version = 1; stage = 'pair-verified'; port = $listener.port; matched = $listener.matched
+            exchangeSha256 = $listener.exchangeSha256; complete = $true; scope = 'authenticated-udp-only' }
+        exit 0
+    }
     $key = [byte[]]::new(32)
     if ($NewKey) {
         $random.GetBytes($key)
@@ -108,9 +173,9 @@ try {
 
     $received = 0
     $samples = @()
+    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     if ($Mode -eq 'Listen') {
         Write-Result @{ version = 1; stage = 'listening'; localAddress = $LocalAddress; peerAddress = $PeerAddress; port = $Port }
-        $seen = [Collections.Generic.HashSet[string]]::new()
         $clock = [Diagnostics.Stopwatch]::StartNew()
         while ($received -lt $Count -and $clock.ElapsedMilliseconds -lt $Seconds * 1000) {
             $wait = [Math]::Max(1, [Math]::Min(200, $Seconds * 1000 - [int]$clock.ElapsedMilliseconds))
@@ -139,6 +204,7 @@ try {
                 if ($packet -and $packet.Peer.Equals($target) -and (Test-Packet $expected $packet.Text)) {
                     if ($elapsed -le $TimeoutMs) {
                         $roundTrip = [Math]::Round($elapsed, 3)
+                        [void]$seen.Add($nonce)
                         $received++
                     }
                     break
@@ -149,9 +215,11 @@ try {
     }
     $udp.Dispose()
     $udp = $null
+    $exchangeSha256 = if ($Mode -eq 'Listen') { Get-ExchangeHash $LocalAddress $PeerAddress @($seen) }
+        else { Get-ExchangeHash $PeerAddress $LocalAddress @($seen) }
     Write-Result @{ version = 1; stage = 'finished'; mode = $Mode.ToLowerInvariant(); localAddress = $LocalAddress
         peerAddress = $PeerAddress; port = $Port; requested = $Count; matched = $received; samples = $samples
-        complete = ($received -eq $Count); scope = 'authenticated-udp-only' }
+        exchangeSha256 = $exchangeSha256; complete = ($received -eq $Count); scope = 'authenticated-udp-only' }
     if ($received -eq $Count) { exit 0 }
     exit 1
 } catch {

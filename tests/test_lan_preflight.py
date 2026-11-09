@@ -39,13 +39,13 @@ class LanPreflightTests(unittest.TestCase):
     def run_script(self, *args):
         return subprocess.run([*self.shell, *map(str, args)], capture_output=True, text=True, timeout=15)
 
-    def options(self, port, count, *, key=None, peer=LOOPBACK):
-        return ['-LocalAddress', LOOPBACK, '-PeerAddress', peer, '-Port', str(port), '-Count', str(count),
+    def options(self, port, count, *, key=None, peer=LOOPBACK, local=LOOPBACK):
+        return ['-LocalAddress', local, '-PeerAddress', peer, '-Port', str(port), '-Count', str(count),
                 '-KeyFile', str(key or self.key)]
 
     @contextmanager
-    def listener(self, port, count, *, peer=LOOPBACK, seconds=10):
-        path = self.root / 'listener.ndjson'
+    def listener(self, port, count, *, peer=LOOPBACK, seconds=10, filename='listener.ndjson'):
+        path = self.root / filename
         with path.open('xb') as output:
             with subprocess.Popen(self.shell + ['-Mode', 'Listen', '-Seconds', str(seconds), *self.options(port, count, peer=peer)],
                                   stdout=output, stderr=subprocess.STDOUT) as process:
@@ -85,11 +85,12 @@ class LanPreflightTests(unittest.TestCase):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reserved:
             reserved.bind((LOOPBACK, 0))
             port = reserved.getsockname()[1]
-        with self.listener(port, 3) as (listener, path):
+        probe_address = '127.0.0.2'
+        with self.listener(port, 3, peer=probe_address) as (listener, path):
             occupied = self.run_script('-Mode', 'Listen', *self.options(port, 1))
             self.assertEqual(occupied.returncode, 1)
             self.assertEqual(json.loads(occupied.stdout)['step'], 'bind')
-            result = self.run_script('-Mode', 'Probe', *self.options(port, 3))
+            result = self.run_script('-Mode', 'Probe', *self.options(port, 3, local=probe_address))
             self.assertEqual(result.returncode, 0, result.stderr)
             probe = json.loads(result.stdout)
             self.assertTrue(probe['complete'])
@@ -97,7 +98,18 @@ class LanPreflightTests(unittest.TestCase):
             self.assertEqual([item['sample'] for item in probe['samples']], [1, 2, 3])
             self.assertTrue(all(0 <= item['roundTripMs'] <= 900 for item in probe['samples']))
             self.assertEqual(listener.wait(timeout=5), 0)
-            self.assertEqual(json.loads(path.read_text(encoding='utf-8').splitlines()[-1])['matched'], 3)
+            final = json.loads(path.read_text(encoding='utf-8').splitlines()[-1])
+            self.assertEqual(final['matched'], 3)
+            self.assertRegex(probe['exchangeSha256'], r'\A[0-9a-f]{64}\Z')
+            self.assertEqual(probe['exchangeSha256'], final['exchangeSha256'])
+        report = self.root / 'probe.json'
+        report.write_text(result.stdout, encoding='utf-8-sig')
+        listener_report = self.root / 'listener-tee.ndjson'
+        listener_report.write_text(path.read_text(encoding='utf-8'), encoding='utf-16')
+        paired = self.run_script('-ListenerReport', listener_report, '-ProbeReport', report)
+        self.assertEqual(paired.returncode, 0, paired.stderr or paired.stdout)
+        self.assertEqual(json.loads(paired.stdout), {'version': 1, 'stage': 'pair-verified', 'complete': True,
+            'port': port, 'matched': 3, 'scope': 'authenticated-udp-only', 'exchangeSha256': probe['exchangeSha256']})
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as next_owner:
             next_owner.bind((LOOPBACK, port))
 
@@ -111,7 +123,7 @@ class LanPreflightTests(unittest.TestCase):
             key = base64.b64decode(self.key.read_bytes())
             with self.listener(port, 2) as (listener, path):
                 target = (LOOPBACK, port)
-                nonce = 'a' * 32
+                nonce = 'b' * 32
                 sender.sendto(packet(bytes(byte ^ 255 for byte in key), 'Q', nonce), target)
                 with self.assertRaises(socket.timeout):
                     sender.recvfrom(256)
@@ -121,11 +133,38 @@ class LanPreflightTests(unittest.TestCase):
                 sender.sendto(original, target)
                 with self.assertRaises(socket.timeout):
                     sender.recvfrom(256)
-                fresh = 'b' * 32
+                fresh = 'a' * 32
                 sender.sendto(packet(key, 'Q', fresh), target)
                 self.assertEqual(sender.recvfrom(256), (packet(key, 'R', fresh), target))
                 self.assertEqual(listener.wait(timeout=5), 0)
-                self.assertEqual(json.loads(path.read_text(encoding='utf-8').splitlines()[-1])['matched'], 2)
+            final = json.loads(path.read_text(encoding='utf-8').splitlines()[-1])
+            self.assertEqual(final['matched'], 2)
+            text = f'VRLAN1\n{LOOPBACK}\n{LOOPBACK}\n{port}\n{fresh}\n{nonce}'
+            self.assertEqual(final['exchangeSha256'], hashlib.sha256(text.encode('ascii')).hexdigest())
+
+    def test_pair_rejects_reports_from_different_exchanges_on_the_same_port(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reserved:
+            reserved.bind((LOOPBACK, 0))
+            port = reserved.getsockname()[1]
+        reports = []
+        for index in range(2):
+            with self.listener(port, 2, filename=f'listener-{index}.ndjson') as (listener, path):
+                completed = self.run_script('-Mode', 'Probe', *self.options(port, 2))
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                self.assertEqual(listener.wait(timeout=5), 0)
+                reports.append((path, json.loads(completed.stdout)))
+        path, first = reports[0]
+        second = reports[1][1]
+        self.assertNotEqual(first['exchangeSha256'], second['exchangeSha256'])
+        self.assertEqual((first['port'], first['matched']), (second['port'], second['matched']))
+        report = self.root / 'probe.json'
+        for changed in (second, {**first, 'localAddress': '127.0.0.2'}, {**first, 'complete': False},
+                        {**first, 'samples': []}, {**first, 'exchangeSha256': None}):
+            with self.subTest(changed=changed):
+                report.write_text(json.dumps(changed), encoding='utf-16')
+                paired = self.run_script('-ListenerReport', path, '-ProbeReport', report)
+                self.assertEqual(paired.returncode, 1, paired.stderr)
+                self.assertEqual(json.loads(paired.stdout), {'version': 1, 'stage': 'failed', 'step': 'reports', 'complete': False})
 
     def test_probe_rejects_a_signed_reply_from_another_port(self):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server, socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as other:

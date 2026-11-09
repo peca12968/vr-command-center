@@ -235,12 +235,19 @@ def main():
                     if listener.poll() is None: listener.kill(); listener.wait(timeout=10)
             reply = json.loads(probe.stdout)
             final = json.loads(log_path.read_text(encoding='utf-8').splitlines()[-1])
+            probe_path = out/(label+'-lan-probe.json')
+            probe_path.write_text(probe.stdout, encoding='utf-8')
+            pair = json.loads(subprocess.check_output(script + ['-ListenerReport', str(log_path), '-ProbeReport', str(probe_path)],
+                                                      encoding='utf-8', timeout=10, **options))
         check(all(item['complete'] and item['port'] == value['port'] and item['matched'] == item['requested'] == 3
                   and item['scope'] == 'authenticated-udp-only' for item in (reply, final))
               and [sample['sample'] for sample in reply['samples']] == [1, 2, 3]
               and all(sample['roundTripMs'] >= 0 for sample in reply['samples']),
               label+' Windows PowerShell UDP preflight exchanged all three authenticated samples and exited')
-        return {'listener': final, 'probe': reply}
+        check(pair['complete'] is True and pair['stage'] == 'pair-verified' and pair['port'] == value['port'] and pair['matched'] == 3
+              and pair['exchangeSha256'] == reply['exchangeSha256'] == final['exchangeSha256'],
+              label+' original listener and probe reports match the same authenticated exchange')
+        return {'listener': final, 'probe': reply, 'pair': pair}
 
     def launch(state,label, *, listen_address=None, verify_layout=True):
         value=config(state['id'], listenAddress=listen_address or address);file=runtime/(label+'.json');file.write_text(json.dumps(value),encoding='utf-8');ready=out/(label+'-ready.json');report=out/(label+'-final.json');work=runtime/(label+'-work')
