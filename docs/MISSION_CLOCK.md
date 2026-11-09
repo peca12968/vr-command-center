@@ -22,6 +22,14 @@ Windows 管理包 0.31.30 起，「房間與場次」直接顯示各房的任務
 
 `GET /api/rooms/readiness` 在有可信任計時的房間附加 `clock`，包含 `phase`、`elapsedSeconds`、`remainingSeconds`、`durationSeconds` 和 `autoEnd`。支援計時的來源須觀察到最近一次階段變更後才可提供數值。短時間內暫停又繼續時，舊的執行中快照不會重新成為房卡時間。
 
+## 全館暫停與繼續
+
+Windows 管理包 0.31.31 起，主控可在五房總覽使用「全館暫停與繼續」。按「暫停執行中場次」前會列出本次房號與場次數。合併模式的五個房間會共用一個命令，獨立場的命令則在同一筆管理交易保存。各遊戲來源收到自己的新序號後套用，主控可從房卡查看已接受快照的階段。
+
+「繼續全館暫停的場次」只會列出仍處於全館暫停階段的場次。房控或主控在個別場次操作的暫停由原房間流程管理。任何目標自預覽後變更階段，整批命令就會拒絕。要繼續 MR 場次時，每場仍需目前名冊與有效的暫停追蹤快照。若有場次尚未就緒，整批維持暫停並列出該場次涵蓋的房號。
+
+若回覆遺失，使用「重試確認結果」即可取回同一批場次及原序號，包含管理服務重啟後的重送。`GET /api/venue/phase` 提供主控可操作的 `pause` 與 `resume` 預覽，`POST /api/venue/phase` 需要主控憑證、`Idempotency-Key`、`action` 及每場的 `sessionId`、`phaseSinceSequence`。成功回傳原場次與 `appliedAtSequence`。目標改變或 MR 尚未就緒會回傳 `409`。
+
 ## 契約與升級
 
 - `SetMissionClock` 走原 `/api/sessions/{id}/commands`，包含 `missionClock:{autoEnd:true}` 與正常 commandId／expectedSequence。Master／同房 RoomController 維持原權限；Linked 限 Master。
