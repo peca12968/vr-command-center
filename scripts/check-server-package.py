@@ -56,6 +56,7 @@ def main():
     p.add_argument('--game-address',type=ipaddress.IPv4Address,help='Local private IPv4 for the three-package check')
     p.add_argument('--peer-diagnostics',action='store_true',help='Verify observed UDP peers in Linked and absence in default Independent runs')
     p.add_argument('--field-evidence',action='store_true',help='Verify the management ZIP with the original Linked player and server logs')
+    p.add_argument('--venue-field-evidence',action='store_true',help='Verify full sealed admission evidence for both original venue End batches')
     p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
     p.add_argument('--check-room-clocks', action='store_true', help='Verify room clocks and the original pause/resume boundaries in both modes')
     p.add_argument('--check-venue-phase', action='store_true', help='Verify whole-venue pause and resume against both native topologies')
@@ -85,6 +86,8 @@ def main():
     elif bool(args.player_package)!=bool(args.game_address):p.error('Provide --player-package and --game-address together')
     if args.peer_diagnostics and not args.player_package:p.error('--peer-diagnostics requires the three-package check')
     if args.field_evidence and not args.peer_diagnostics:p.error('--field-evidence requires --peer-diagnostics')
+    if args.venue_field_evidence and not (args.field_evidence and args.check_venue_end):
+        p.error('--venue-field-evidence requires --field-evidence and --check-venue-end')
     if args.check_room_readiness and not args.player_package:p.error('--check-room-readiness requires five players per room')
     if args.check_room_clocks and not args.player_package:p.error('--check-room-clocks requires five players per room')
     if args.check_venue_phase and not args.check_room_clocks:p.error('--check-venue-phase requires --check-room-clocks')
@@ -179,7 +182,7 @@ def main():
         state=request('/api/sessions',{'missionId':mission['id'],'mode':'Linked' if len(rooms)==5 else 'Independent','roomIds':rooms},expected=201);sessions.append(state['id']);return state
     def launch(state,label, *, listen_address=None, verify_layout=True):
         value=config(state['id'], listenAddress=listen_address or address);file=runtime/(label+'.json');file.write_text(json.dumps(value),encoding='utf-8');ready=out/(label+'-ready.json');report=out/(label+'-final.json');work=runtime/(label+'-work')
-        diagnostics=args.peer_diagnostics and label=='linked'
+        diagnostics=args.peer_diagnostics and (label=='linked' or (args.venue_field_evidence and label in {f'room-{i}' for i in range(1,6)}))
         options=['--peer-diagnostics','on'] if diagnostics else []
         child=subprocess.Popen([str(exe),'--run',str(file),'--work',str(work),'--seconds','600','--ready-report',str(ready),'--report',str(report),*options],cwd=out,env=env);entry={'process':child,'readyPath':ready,'reportPath':report,'work':work,'config':value,'label':label,'sessionId':state['id'],'witness':None,'peerDiagnostics':diagnostics};runners.append(entry)
         def is_ready():
@@ -275,6 +278,7 @@ def main():
             child.terminate()
         child.wait(timeout=15)
     def verify_delivery(entry,owners):
+        manifest_entry = None
         server=(entry['work']/'server.log').read_text(encoding='utf-8',errors='replace')
         acks=[int(value) for value in re.findall(r'VR_SERVER_DEBRIEF_ACK id=(\d+)',server)]
         check(len(acks)==len(owners) and set(acks)=={c['connection'] for c in owners}
@@ -304,9 +308,13 @@ def main():
                         exported=[field.read_json(archive.read(name)) for name in archive.namelist()]
                     check(exported==[session,statistics,endpoint],entry['label']+' management ZIP matches the original sealed API data')
                     request(route,role='Room1',expected=403)
-                    check(True,entry['label']+' room controller denied the full Linked evidence ZIP')
-                    (out/(entry['label']+'-field-evidence.zip')).write_bytes(raw)
+                    check(True,entry['label']+' room controller denied the full evidence ZIP')
+                    evidence_zip=out/(entry['label']+'-field-evidence.zip')
+                    evidence_zip.write_bytes(raw)
                     session,statistics,endpoint=exported
+                    manifest_entry={'evidenceZip':str(evidence_zip),'launcherReport':str(entry['reportPath']),
+                        'serverLog':str(entry['work']/'server.log'),
+                        'players':[{'address':address,'log':str(c['log'])} for c in owners]}
                 ip=ipaddress.IPv4Address(address)
                 result=field.verify('same-host',{ip},read(entry['reportPath']),session,statistics,endpoint,server,
                     [(ip,field.content(c['log'])) for c in owners])
@@ -359,6 +367,37 @@ def main():
                 'roomId':c['player']['roomId'],'seat':c['player']['seat'],'connectionId':c['connection'],
                 'nativePid':c['nativePid'],'launcherPid':c['process'].pid} for c in owners]})
         check(True,entry['label']+' CSV rows match sealed player results')
+        return manifest_entry
+
+    def verify_venue_field_evidence(mode, closed, entries):
+        label = mode.lower()
+        raw, headers = request('/api/venue/closure/' + closed['requestId'], raw_response=True)
+        check(field.read_json(raw)['batch'] == closed and headers['Cache-Control'] == 'no-store',
+              label + ' field evidence reads the exact sealed closure by original batch ID')
+        closure_file = out / (label + '-field-closure.json')
+        closure_file.write_bytes(raw)
+        manifest_path = runtime / (label + '-field-manifest.json')
+        evidence = {'version': 1, 'mode': mode, 'topology': 'same-host', 'serverIps': [address],
+                    'closure': str(closure_file), 'sessions': entries}
+
+        def run(topology):
+            manifest_path.write_text(json.dumps(dict(evidence, topology=topology)), encoding='utf-8')
+            return subprocess.run([sys.executable, str(ROOT / 'scripts/verify-field-results.py'),
+                                   '--venue-manifest', str(manifest_path)], capture_output=True, encoding='utf-8', timeout=45)
+
+        result = run('same-host')
+        if result.returncode:
+            raise RuntimeError('Native venue field evidence rejected: ' + result.stderr.strip())
+        summary = json.loads(result.stdout)
+        check(summary['consistent'] and summary['mode'] == mode and summary['players'] == summary['serverAcknowledgements'] == 25
+              and summary['rooms'] == [{'roomId': room, 'players': 5, 'playersOutsideDeclaredServer': 0} for room in range(1, 6)]
+              and not summary['physicalHostsVerified'] and not summary['networkCapacityAccepted'],
+              label + ' field evidence matches all 25 original sealed admissions and UDP peers')
+        save(label + '-venue-field-results.json', summary)
+        rejected = run('direct-lan')
+        check(rejected.returncode == 1 and not rejected.stdout and 'outside the declared server addresses' in rejected.stderr,
+              label + ' field evidence rejects relabeling the same-PC peers as direct LAN')
+        manifest_path.write_text(json.dumps(evidence), encoding='utf-8')
     def verify_venue_reports(entries, receipt, linked):
         mode = 'linked' if linked else 'independent'
         key = receipt['requestId']
@@ -1069,7 +1108,10 @@ def main():
                 stop_player(client)
                 if player_folder:check(True,'player launcher confirmed original child exit '+client['player']['id'])
             if player_folder:
-                for entry in entries:verify_delivery(entry,[c for c in round_clients if c['sessionId']==entry['sessionId']])
+                evidence_entries = [verify_delivery(entry,[c for c in round_clients if c['sessionId']==entry['sessionId']])
+                                    for entry in entries]
+                if args.venue_field_evidence:
+                    verify_venue_field_evidence('Linked' if linked else 'Independent', closed, evidence_entries)
             if args.check_venue_reports:
                 current_batch_report = verify_venue_reports(entries, receipt, linked)
                 if archived_batch_report:
@@ -1191,6 +1233,7 @@ def main():
             'venueReports':args.check_venue_reports,
             'venueReplayUi':args.check_venue_replay_ui,
             'venueHistoryUi':args.check_venue_history_ui,
+            'venueFieldEvidence':args.venue_field_evidence,
             'venueEnvironment':args.check_venue_environment,
             'venueEnemies':args.check_venue_enemies,
             'hardwareFeedback':args.check_hardware_feedback,

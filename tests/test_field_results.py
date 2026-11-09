@@ -8,6 +8,7 @@ import sys
 import tempfile
 import unittest
 import uuid
+import zipfile
 
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'scripts/verify-field-results.py'
@@ -47,6 +48,62 @@ def fixture(*, remote=True):
                       origin='Simulation', streamId=stream, throughSequence=9, finalStreamSequence=0, worldSequence=80)
         clients.append((address, f'VR_CLIENT_CONNECTED id={i}\nVR_CLIENT_DEBRIEF_FINAL {json.dumps(result)}\nVR_CLIENT_DISCONNECTED\n'))
     return ['direct-lan' if remote else 'same-host', {server_ip}, launcher, session, stats, endpoint, server, clients]
+
+
+def venue_fixture(root, mode, *, remote=False):
+    def write_json(path, value):
+        path.write_text(json.dumps(value), encoding='utf-8')
+
+    server_ip, remote_ip = '192.168.5.10', '192.168.5.20'
+    groups = [[1, 2, 3, 4, 5]] if mode == 'Linked' else [[room] for room in range(1, 6)]
+    batch = {'requestId': id_for(1000), 'recordedAtUtc': '2026-11-09T00:01:00+00:00', 'sessions': []}
+    manifest = {'version': 1, 'mode': mode, 'topology': 'direct-lan' if remote else 'same-host',
+                'serverIps': [server_ip], 'closure': 'closure.json', 'sessions': []}
+    for rooms in groups:
+        prefix = f'Room {rooms[0]}'
+        _, _, launcher, session, stats, endpoint, _, _ = fixture(remote=False)
+        session_id, stream = id_for(100 + rooms[0]), id_for(200 + rooms[0])
+        port = 7776 + rooms[0]
+        launcher.update(sessionId=session_id, streamId=stream)
+        launcher['udpBinding']['port'] = port
+        launcher['finalWorld']['header'].update(sessionId=session_id, streamId=stream, roomIds=rooms)
+        launcher['finalCombatStream']['streamId'] = stream
+        session.update(id=session_id, mode=mode, roomIds=rooms, players=[], combatStream=launcher['finalCombatStream'],
+                       mission={'definition': {'name': prefix}})
+        stats.update(sessionId=session_id, players=[])
+        endpoint.update(sessionId=session_id, streamId=stream, port=port)
+        batch['sessions'].append({'sessionId': session_id, 'roomIds': rooms, 'missionName': prefix,
+                                  'appliedAtSequence': 8, 'combat': 'Sealed', 'world': 'Sealed',
+                                  'replay': {'streamId': stream, 'throughSequence': 80}})
+        entry = {'evidenceZip': prefix + '.zip', 'launcherReport': prefix + ' launcher.json',
+                 'serverLog': prefix + ' server.log', 'players': []}
+        manifest['sessions'].append(entry)
+        server = f'VR_NETWORK_STARTED role=Server started=True background=True port={port}\n'
+        for room in rooms:
+            for seat in range(5):
+                connection = room * 5 + seat
+                player, admission = id_for(300 + connection), id_for(400 + connection)
+                peer = remote_ip if remote and room == 5 and seat == 4 else server_ip
+                session['players'].append({'id': player, 'admissionId': admission, 'roomId': room, 'seat': seat})
+                row = {field_name: 0 for field_name in field.COMBAT} | {'playerId': player, 'roomId': room, 'health': 100, 'accuracyPercent': 0}
+                stats['players'].append(row)
+                result = dict(row, version=1, admissionId=admission, sessionId=session_id, origin='Simulation',
+                              streamId=stream, throughSequence=9, finalStreamSequence=0, worldSequence=80)
+                log = f'Player {connection}.log'
+                entry['players'].append({'address': peer, 'log': log})
+                (root / log).write_text(f'VR_CLIENT_CONNECTED id={connection}\nVR_CLIENT_DEBRIEF_FINAL {json.dumps(result)}\nVR_CLIENT_DISCONNECTED\n',
+                                        encoding='utf-8')
+                server += (f'VR_SERVER_ADMISSION_APPROVED id={connection}\nVR_SERVER_PEER id={connection} endpoint={peer}:{5000 + connection}\n'
+                           f'VR_SERVER_DEBRIEF_ACK id={connection}\n')
+        write_json(root / entry['launcherReport'], launcher)
+        (root / entry['serverLog']).write_text(server, encoding='utf-8')
+        with zipfile.ZipFile(root / entry['evidenceZip'], 'w') as archive:
+            for name, record in [('session.json', session), ('statistics.json', stats), ('endpoint.json', endpoint)]:
+                archive.writestr(name, json.dumps(record))
+    write_json(root / 'closure.json', {'batch': batch})
+    path = root / 'venue.json'
+    write_json(path, manifest)
+    return path, manifest, batch
 
 
 class FieldResultsTests(unittest.TestCase):
@@ -162,6 +219,74 @@ class FieldResultsTests(unittest.TestCase):
             self.assertEqual(failure.stdout, '')
             self.assertNotIn('192.168', failure.stderr)
             self.assertNotIn(directory, failure.stderr)
+
+    def test_venue_checks_all_original_seats_in_both_modes(self):
+        for mode in ('Linked', 'Independent'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                path, _, _ = venue_fixture(Path(directory), mode, remote=True)
+                report = field.verify_venue(path)
+                self.assertEqual(report['players'], report['serverAcknowledgements'])
+                self.assertEqual(report['players'], 25)
+                self.assertEqual([row['players'] for row in report['rooms']], [5] * 5)
+                self.assertEqual([row['playersOutsideDeclaredServer'] for row in report['rooms']], [0, 0, 0, 0, 1])
+                self.assertFalse(report['physicalHostsVerified'])
+                self.assertFalse(report['networkCapacityAccepted'])
+                self.assertNotIn('192.168', json.dumps(report))
+
+    def test_venue_rejects_changed_batch_source_or_missing_room(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, batch = venue_fixture(root, 'Independent')
+            for patch in ('batch-time', 'seal-tail', 'omitted-room', 'mixed-session', 'reused-log'):
+                with self.subTest(patch=patch):
+                    modified, closure = deepcopy(manifest), deepcopy(batch)
+                    if patch == 'batch-time':
+                        closure['recordedAtUtc'] = '2026-11-09T00:02:00+00:00'
+                    elif patch == 'seal-tail':
+                        closure['sessions'][4]['replay']['throughSequence'] = 81
+                    elif patch == 'omitted-room':
+                        modified['sessions'].pop()
+                    elif patch == 'mixed-session':
+                        closure['sessions'][4]['sessionId'] = id_for(999)
+                    else:
+                        modified['sessions'][4]['players'][0]['log'] = modified['sessions'][0]['players'][0]['log']
+                    path.write_text(json.dumps(modified), encoding='utf-8')
+                    (root / 'closure.json').write_text(json.dumps({'batch': closure}), encoding='utf-8')
+                    with self.assertRaises(field.EvidenceError):
+                        field.verify_venue(path)
+
+    def test_venue_rejects_duplicate_seat_and_archive_entry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, _ = venue_fixture(root, 'Linked')
+            archive_path = root / manifest['sessions'][0]['evidenceZip']
+            with zipfile.ZipFile(archive_path) as archive:
+                records = {name: json.loads(archive.read(name)) for name in archive.namelist()}
+            records['session.json']['players'][1]['seat'] = 0
+            with zipfile.ZipFile(archive_path, 'w') as archive:
+                for name, record in records.items():
+                    archive.writestr(name, json.dumps(record))
+            with self.assertRaisesRegex(field.EvidenceError, 'room seat'):
+                field.verify_venue(path)
+            with zipfile.ZipFile(archive_path, 'a') as archive:
+                archive.writestr('other/session.json', '{}')
+            with self.assertRaisesRegex(field.EvidenceError, 'exactly the three'):
+                field.verify_venue(path)
+
+    def test_venue_cli_does_not_treat_same_host_as_direct_lan(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path, manifest, _ = venue_fixture(Path(directory), 'Independent')
+            command = [sys.executable, str(SCRIPT), '--venue-manifest', str(path)]
+            result = subprocess.run(command, capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(result.stdout)['serverAcknowledgements'], 25)
+            manifest['topology'] = 'direct-lan'
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            result = subprocess.run(command, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stdout, '')
+            self.assertIn('outside the declared server addresses', result.stderr)
+            self.assertNotIn(directory, result.stderr)
+            self.assertNotIn('192.168', result.stderr)
 
 
 if __name__ == '__main__':

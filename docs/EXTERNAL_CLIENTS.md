@@ -114,6 +114,48 @@ python scripts/verify-field-results.py --topology direct-lan `
 
 `same-host` 要求全部觀察到的來源都在宣告的伺服器位址清單。`direct-lan` 要求至少有一個清單外的私有 IPv4，且所有玩家的實際來源均符合各自填入的位址。實體主機數與網路容量仍須現場確認，工具摘要分別保留 `physicalHostsVerified` 與 `networkCapacityAccepted` 為 `false`。NAT 或中繼環境需另記拓撲與轉譯結果。
 
+### 一次核對五房 25 席
+
+兩種模式各準備一份私人 `venue.json`。使用 `--peer-diagnostics on` 啟動參與驗收的每個遊戲伺服器，並由主控一次結束全館。等待各場雙封存、原伺服器終止及玩家寫完戰績。將各場「下載場館驗收資料 ZIP」的原始 ZIP 留在私人資料夾，並保留同場啟動器 `--report`、原始 `server.log` 及每位玩家的完整日誌。
+
+用主控身分將 `GET /api/venue/closure/{id}` 的回應原樣保存為 `closure.json`。`{id}` 是該次全館結束回條的 `requestId`。可從瀏覽器開發者工具取得選定歷史批次時的此 GET 回應。保存回應本文即可，請勿匯出帶有憑證的請求資料。 [選取原批次](SESSION_CLOSURE.md#歷史批次)
+
+| 清單欄位 | 填寫內容 |
+| --- | --- |
+| `version` | 數字 `1` |
+| `mode` | `Independent` 或 `Linked` |
+| `topology` | `same-host` 或 `direct-lan` |
+| `serverIps` | 所有本次伺服器電腦已指派的 IPv4，使用字串陣列 |
+| `closure` | 原批次的 `closure.json` 路徑 |
+| `sessions` | 獨立模式填五場，合併模式填一場 |
+| `sessions[].evidenceZip`、`launcherReport`、`serverLog` | 各場原 ZIP、啟動器終止報告及伺服器日誌的路徑 |
+| `sessions[].players` | 每房五筆。每筆填該玩家電腦實際使用的 IPv4 字串 `address` 及原日誌路徑 `log` |
+
+路徑可以是絕對路徑，或相對於 `venue.json` 所在資料夾。同一檔案只能使用一次。例如獨立模式下，第 1 房的清單項目可由下列 PowerShell 建立。請依實際驗收配置填入各席地址與檔名。
+
+```powershell
+$room1 = @{
+    evidenceZip = 'Room 1/field.zip'
+    launcherReport = 'Room 1/server-final.json'
+    serverLog = 'Room 1/server.log'
+    players = 1..5 | ForEach-Object {
+        @{ address = '192.168.1.20'; log = "Room 1/seat-$_.log" }
+    }
+}
+# 準備 $room2 到 $room5 後，與第 1 房一起寫入私人清單。
+@{
+    version = 1
+    mode = 'Independent'
+    topology = 'direct-lan'
+    serverIps = @('192.168.1.10', '127.0.0.1')
+    closure = 'closure.json'
+    sessions = @($room1, $room2, $room3, $room4, $room5)
+} | ConvertTo-Json -Depth 6 | Set-Content -Encoding utf8 .\venue.json
+python scripts/verify-field-results.py --venue-manifest .\venue.json
+```
+
+摘要核對五房各五個席位、原封存來源、每位玩家的原入場與 UDP 來源，以及 25 筆伺服器戰績確認。它逐房列出在伺服器位址清單以外的玩家數。`direct-lan` 至少須觀察到一筆這類連線，仍須依實際設備及網路拓撲核對主機數、同時遊玩與容量。
+
 ## Windows 玩家連線量測
 
 自 0.46.0 起，Windows 開發版玩家程式可選用本機量測。以正常玩家票券入場，指定一個尚未存在的 JSON 完整路徑，其上層目錄須已存在。
