@@ -275,11 +275,17 @@ internal static class ReadinessChecks
             && partial.Players.Single(p => !p.CanParticipate).PlayerId == bravo,
             "MR start diagnostics identify the same missing player as the Begin gate");
         Reject<InvalidOperationException>(() => store.ExecuteCommand(id, begin, master), "One room's tracked pose cannot stand in for the other roster player");
+        VenuePhaseFence[] BeginFences() => manager.ReadVenuePhase(master).Begin.Select(target =>
+            new VenuePhaseFence(target.SessionId, target.PhaseSinceSequence, target.SessionSequence)).ToArray();
+        Reject<VenueBeginNotReadyException>(() => store.ExecuteVenuePhase(ControlAction.Begin, BeginFences(), begin.CommandId, master),
+            "Batch Begin also waits for missing MR tracked poses");
         Track(2, bravo, 5, .1);
         store.Append(id, Frame(3), server);
         clock.Now = start.AddMilliseconds(1601);
         check(store.Readiness(id, master) is { MrStartState: "WaitingSource", SourceState: "Stale" }, "MR diagnostics expire at the Begin source-age gate");
         Reject<InvalidOperationException>(() => store.ExecuteCommand(id, begin, master), "Stale tracked snapshots cannot open MR");
+        Reject<VenueBeginNotReadyException>(() => store.ExecuteVenuePhase(ControlAction.Begin, BeginFences(), begin.CommandId, master),
+            "Batch Begin rejects an expired MR snapshot");
         clock.Now = start.AddMilliseconds(100);
         manager.Execute(id, new(Guid.NewGuid(), ControlAction.SetEnvironment,
             environment with { Weather = Weather.Storm, Lightning = true }), master);
@@ -289,7 +295,12 @@ internal static class ReadinessChecks
         check(store.Readiness(id, master).MrStartState == "Ready", "Only the exact ready MR roster satisfies the shared diagnostic and Begin gate");
         Reject<AccessDeniedException>(() => store.ExecuteCommand(id, begin, new("room1", OperatorRole.RoomController, 1)),
             "Linked MR start remains under master control");
+        var beginFences = BeginFences();
+        var batchBegin = store.ExecuteVenuePhase(ControlAction.Begin, beginFences, begin.CommandId, master);
+        begin = begin with { ExpectedSequence = beginFences.Single().SessionSequence };
         var accepted = store.ExecuteCommand(id, begin, master);
+        check(!batchBegin.Duplicate && accepted.Duplicate && batchBegin.Sessions.Single().AppliedAtSequence == accepted.AppliedAtSequence,
+            "One current MR source opens the five linked rooms with one durable Begin command");
         check(store.Readiness(id, master).MrStartState is null, "The MR start diagnostic applies only while preparing");
         check(accepted.Session.State == SessionState.Running && accepted.Session.Environment is { Mode: ExperienceMode.MR, Weather: Weather.Storm, Lightning: true },
             "Fresh tracked poses for both admitted rooms open the MR mission with the current environment");

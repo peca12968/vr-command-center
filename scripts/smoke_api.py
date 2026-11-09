@@ -390,7 +390,7 @@ try:
             room_overview = request("GET", "/api/rooms/readiness", identity="Room1")
             require(room_overview == {"version": 1, "rooms": [{"roomId": 1, "sessionId": independent[0]["id"],
                     "sessionSequence": readiness["sessionSequence"], "registered": 1, "simulatedReady": 0,
-                    "trackedReady": 0, "sourceState": "NoRecording", "sourceAgeMilliseconds": None}]},
+                    "trackedReady": 0, "sourceState": "NoRecording", "sourceAgeMilliseconds": None, "venueBeginReady": False}]},
                     "Room controller gets only its room's bounded aggregate without player identities")
             master_overview = request("GET", "/api/rooms/readiness")
             require([row["roomId"] for row in master_overview["rooms"]] == [1, 2, 3, 4, 5]

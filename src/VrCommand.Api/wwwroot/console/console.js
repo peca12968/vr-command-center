@@ -99,6 +99,7 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
         else if (code === 'venue-phase-changed') message = '全館場次狀態已變更，本批命令未套用。請重新整理後確認房間。';
         else if (code === 'venue-pause-not-observed' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 尚未回傳有效的暫停快照，本批場次維持暫停。`;
         else if (code === 'venue-resume-not-ready' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 的 MR 追蹤尚未就緒，本批場次維持暫停。`;
+        else if (code === 'venue-begin-not-ready' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 的名冊或遊戲快照尚未就緒，本批場次維持準備中。`;
         else message = path.startsWith('/missions') ? '任務版本已變更或原請求內容不一致；草稿仍保留，可載入最新版或另存新任務。' : '場次狀態或名額已變更，請重新整理並確認後再操作。';
       }
       if (layout) message = '場地配置未通過檢查，請修正並保存新版本後再開場。';
@@ -356,19 +357,28 @@ function applyPermissions() {
   mrVenue.update();
 }
 function venueTargets(action) {
-  const rows = state.venue?.[action === 'Pause' ? 'pause' : 'resume'];
+  const rows = state.venue?.[action.toLowerCase()];
   return Array.isArray(rows) && rows.length <= 5 && rows.every(row => typeof row?.sessionId === 'string'
     && Number.isSafeInteger(row.phaseSinceSequence) && row.phaseSinceSequence > 0 && Array.isArray(row.roomIds)
+    && (action !== 'Begin' || (Number.isSafeInteger(row.sessionSequence) && row.sessionSequence >= row.phaseSinceSequence))
     && row.roomIds.length > 0 && row.roomIds.every(id => Number.isInteger(id) && id >= 1 && id <= 5)) ? rows : [];
 }
 function venueRoomText(targets) { return targets.flatMap(row => row.roomIds).sort((a, b) => a - b).join('、'); }
 function applyVenuePermissions() {
   $('venue-phase').hidden = !master();
-  const pause = venueTargets('Pause'), resume = venueTargets('Resume'), locked = state.busy || !!state.pending || !master();
+  const begin = venueTargets('Begin'), pause = venueTargets('Pause'), resume = venueTargets('Resume');
+  const locked = state.busy || !!state.pending || !master();
+  const starting = begin.filter(target => !roomReadiness.venueReady(target, 'Begin'));
   const waiting = resume.filter(target => !roomReadiness.venueReady(target));
+  $('venue-begin').disabled = locked || !begin.length || !!starting.length;
   $('venue-pause').disabled = locked || !pause.length;
   $('venue-resume').disabled = locked || !resume.length || !!waiting.length;
   const describe = targets => targets.length ? '房間 ' + venueRoomText(targets) : '無';
+  const beginStatus = $('venue-begin-evidence');
+  beginStatus.hidden = !begin.length;
+  const beginMessage = starting.length ? `準備開始 ${describe(begin)} · 等候房間 ${venueRoomText(starting)} 的名冊或遊戲快照。`
+    : `準備開始 ${describe(begin)} · 目標場次已就緒。`;
+  if (beginStatus.textContent !== beginMessage) beginStatus.textContent = beginMessage;
   $('venue-phase-targets').textContent = state.venue ? `可暫停 ${describe(pause)} · 可繼續 ${describe(resume)}` : '等待房間狀態。';
   const evidence = $('venue-phase-evidence');
   evidence.hidden = !resume.length;
@@ -378,11 +388,11 @@ function applyVenuePermissions() {
 async function venuePhase(action) {
   if (!master() || state.pending) return;
   const targets = venueTargets(action);
-  if (!targets.length || (action === 'Resume' && targets.some(target => !roomReadiness.venueReady(target)))) return;
-  const verb = action === 'Pause' ? '暫停' : '繼續';
+  if (!targets.length || (action !== 'Pause' && targets.some(target => !roomReadiness.venueReady(target, action)))) return;
+  const verb = { Begin: '開始', Pause: '暫停', Resume: '繼續' }[action];
   if (!confirm(`${verb}房間 ${venueRoomText(targets)} 的 ${targets.length} 個場次？`)) return;
   state.pending = { kind: 'venue-phase', path: '/venue/phase', method: 'POST', requestId: uuid(),
-    body: { action, targets: targets.map(({ sessionId, phaseSinceSequence }) => ({ sessionId, phaseSinceSequence })) } };
+    body: { action, targets: targets.map(({ sessionId, phaseSinceSequence, sessionSequence }) => ({ sessionId, phaseSinceSequence, sessionSequence })) } };
   await sendPending();
 }
 function row(cells) { const tr = element('tr'); for (const value of cells) { const td = element('td'); if (value instanceof Node) td.append(value); else td.textContent = value; tr.append(td); } return tr; }
@@ -490,7 +500,8 @@ async function sendPending() {
       if (response?.requestId !== pending.requestId || response.action !== pending.body.action || typeof response.duplicate !== 'boolean'
           || !Array.isArray(response.sessions) || response.sessions.length !== targets.length
           || targets.some(target => !response.sessions.some(row => row?.sessionId === target.sessionId
-            && Number.isSafeInteger(row.appliedAtSequence) && row.appliedAtSequence > target.phaseSinceSequence)))
+            && Number.isSafeInteger(row.appliedAtSequence) && (pending.body.action === 'Begin'
+              ? row.appliedAtSequence === target.sessionSequence + 1 : row.appliedAtSequence > target.phaseSinceSequence))))
         throw new Error('Incomplete venue phase receipt');
     }
     state.pending = null;
@@ -751,6 +762,7 @@ $('launch-room').addEventListener('change', applyPermissions);
 $('reload-environment').addEventListener('click', loadEnvironment);
 $('reload-enemies').addEventListener('click', loadEnemies);
 $('retry-command').addEventListener('click', () => run(sendPending));
+$('venue-begin').addEventListener('click', () => run(() => venuePhase('Begin')));
 $('venue-pause').addEventListener('click', () => run(() => venuePhase('Pause')));
 $('venue-resume').addEventListener('click', () => run(() => venuePhase('Resume')));
 $('download-room-tickets').addEventListener('click', downloadRoomTickets);

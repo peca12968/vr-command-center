@@ -88,7 +88,7 @@ internal static class SessionProjection
         if (entry.Venue is { } venue && (entry.SchemaVersion < 7 || actor.Role != OperatorRole.Master
             || entry.Kind != SessionEventKind.ControlApplied || venue.TargetCount is < 1 or > SessionManager.RoomCount
             || venue.PhaseSinceSequence < 1 || venue.PhaseSinceSequence >= entry.Sequence
-            || entry.Read<ControlCommand>() is not { Action: ControlAction.Pause or ControlAction.Resume, ExpectedSequence: null }))
+            || !ValidVenueCommand(entry.Read<ControlCommand>(), entry.Sequence)))
             throw new InvalidDataException("Invalid venue phase transition envelope.");
         if (current is null)
         {
@@ -158,6 +158,13 @@ internal static class SessionProjection
         };
         return updated with { Sequence = entry.Sequence };
     }
+
+    private static bool ValidVenueCommand(ControlCommand command, long sequence) => command.Action switch
+    {
+        ControlAction.Begin => command.ExpectedSequence == sequence - 1,
+        ControlAction.Pause or ControlAction.Resume => command.ExpectedSequence is null,
+        _ => false
+    };
 
     private static SessionView Join(SessionView session, Player player, Guid admission, int schema)
     {

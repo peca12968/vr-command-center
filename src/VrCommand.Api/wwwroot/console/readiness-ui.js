@@ -85,9 +85,9 @@ function roomReadinessRow(report, room, session) {
 export function roomVenuePhaseView(report, room, session, elapsed, unavailable = false) {
   const row = roomReadinessRow(report, room, session), phase = row?.venuePhase;
   if (!phase || !Number.isSafeInteger(phase.appliedAtSequence) || phase.appliedAtSequence < 1 || phase.appliedAtSequence > row.sessionSequence
-    || !['Pause', 'Resume'].includes(phase.action) || typeof phase.readyToResume !== 'boolean'
+    || !['Begin', 'Pause', 'Resume'].includes(phase.action) || typeof phase.readyToResume !== 'boolean'
     || session.state !== (phase.action === 'Pause' ? 'Paused' : 'Running')) return null;
-  const verb = phase.action === 'Pause' ? '全館暫停' : '全館繼續';
+  const verb = { Begin: '全館開始', Pause: '全館暫停', Resume: '全館繼續' }[phase.action];
   const source = unavailable ? 'Unavailable' : sourceAt(row, elapsed);
   const applied = source === 'Fresh' && Number.isSafeInteger(phase.worldSequence) && phase.worldSequence > 0;
   const ready = applied && phase.action === 'Pause' && phase.readyToResume;
@@ -136,12 +136,19 @@ export function roomReadinessView(report, room, session, elapsed) {
 
 export function mountRoomReadiness(getState, unauthorized, venueUpdated) {
   let active = false, controller, report, started = 0, attempted = -Infinity, failed = false;
-  function venueReady(target) {
+  function venueReady(target, action) {
     if (!active || failed) return false;
     const { rooms, sessions } = getState();
     const room = rooms.find(row => row.id === target.roomIds[0] && row.sessionId === target.sessionId);
     const session = sessions.find(row => row.id === target.sessionId);
-    const venue = room && roomVenuePhaseView(report, room, session, performance.now() - started);
+    if (!room || !session) return false;
+    const elapsed = performance.now() - started;
+    if (action === 'Begin') {
+      const row = roomReadinessRow(report, room, session);
+      return session.state === 'Preparing' && row?.sessionSequence === target.sessionSequence
+        && row.venueBeginReady === true && sourceAt(row, elapsed) === 'Fresh';
+    }
+    const venue = roomVenuePhaseView(report, room, session, elapsed);
     return venue?.ready === true && venue.sequence === target.phaseSinceSequence;
   }
   function render() {

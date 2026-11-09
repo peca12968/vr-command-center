@@ -13,7 +13,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
   const evidence = page.locator('#venue-phase-evidence');
   const roomPhase = room => page.locator(`[data-room-venue-phase="${room}"]`);
   const run = (id, action) => api(`/sessions/${id}/commands`, 'POST', { commandId: randomUUID(), action });
-  async function start(id, room, withSource = false) {
+  async function prepare(id, room, withSource, connected = false) {
     let snapshot = await api(`/sessions/${id}/players`, 'POST', { playerId: randomUUID(), roomId: room, name: 'Venue seat', headset: 'Quest3' });
     let publish;
     if (withSource) {
@@ -24,8 +24,11 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       let sequence = 0;
       publish = current => {
         const head = { x: (room - 3) * 14, y: 1.65, z: -3 };
+        const rotation = { x: 0, y: 0, z: 0, w: 1 };
+        const rig = connected ? { kind: 'Simulated', headRotation: rotation, rightRotation: rotation, leftRotation: rotation,
+          right: head, left: head } : { kind: 'None' };
         const players = current.players.map(player => ({ id: player.id, roomId: room, head, muzzle: head,
-          connected: false, forward: { x: 0, y: 0, z: 1 }, health: 100, magazine: 30, reserve: 90, rig: { kind: 'None' } }));
+          connected, forward: { x: 0, y: 0, z: 1 }, health: 100, magazine: 30, reserve: 90, rig }));
         const packet = { sequence: ++sequence, observedSequence: current.sequence, elapsedMilliseconds: sequence === 1 ? 0 : Date.now() - started,
           weather: 'Clear', throughCombatSequence: 0, events: [], frame: { phase: current.state, tick: 0, night: false, throughSequence: 0, players } };
         const result = spawnSync('python', [path.join(root, 'scripts/world_test_socket.py')], { encoding: 'utf8', timeout: 6000, windowsHide: true,
@@ -36,6 +39,10 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       };
       publish(snapshot);
     }
+    return publish;
+  }
+  async function start(id, room, withSource = false) {
+    const publish = await prepare(id, room, withSource);
     await run(id, 'Begin');
     return publish;
   }
@@ -151,6 +158,45 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await click('pause', '1、2、3、4、5 的 1 個場次'); await notice.filter({ hasText: '全館管理命令已確認' }).waitFor();
     check((await api(`/sessions/${linked.id}/events`)).filter(event => event.venue).length === 1,
       'A linked venue sends one transition for all five rooms');
+    await end(linked.id);
+
+    const preparing = [];
+    for (const room of [1, 2]) {
+      const next = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [room] }, 'Master', 201);
+      active.add(next.id); preparing.push(next.id);
+    }
+    const first = await prepare(preparing[0], 1, true, true);
+    const getBegin = async () => (await api('/venue/phase')).begin.map(({ sessionId, phaseSinceSequence, sessionSequence }) =>
+      ({ sessionId, phaseSinceSequence, sessionSequence }));
+    const beginEvidence = page.locator('#venue-begin-evidence');
+    const beginButton = page.locator('#venue-begin');
+    const preview = await getBegin();
+    const firstReady = await api(`/sessions/${preparing[0]}`);
+    const declinedBegin = await api('/venue/phase', 'POST', { action: 'Begin', targets: preview }, 'Master', 409, undefined, randomUUID());
+    await page.locator('#refresh').click();
+    await publishUntil(first, firstReady, () => beginEvidence.filter({ hasText: '等候房間 2 的名冊或遊戲快照' }).isVisible());
+    check(declinedBegin.code === 'venue-begin-not-ready' && declinedBegin.roomIds.join() === '2' && await beginButton.isDisabled(),
+      'A missing roster and source in one room blocks the whole Begin batch in both HTTP and Chromium');
+    const second = await prepare(preparing[1], 2, true, true);
+    const staleBegin = await api('/venue/phase', 'POST', { action: 'Begin', targets: preview }, 'Master', 409, undefined, randomUUID());
+    check(staleBegin.code === 'venue-phase-changed' && (await api('/sessions')).every(session => session.state === 'Preparing'),
+      'Preparing roster and source changes invalidate the previous Begin preview without starting either room');
+    const secondReady = await api(`/sessions/${preparing[1]}`);
+    await page.locator('#refresh').click();
+    await publishUntil(first, firstReady, () => { second(secondReady); return beginButton.isEnabled(); });
+    await panel.screenshot({ path: path.join(screenshots, 'venue-phase-begin.png') });
+    await publishUntil(first, firstReady, () => { second(secondReady); return beginButton.isEnabled(); });
+    await click('begin', '房間 1、2 的 2 個場次');
+    await notice.filter({ hasText: '全館管理命令已確認' }).waitFor();
+    const running = await Promise.all(preparing.map(id => api(`/sessions/${id}`)));
+    check(running.every((session, index) => session.state === 'Running' && session.sequence === [firstReady, secondReady][index].sequence + 1),
+      'The browser submits one Begin batch and both durable sessions advance exactly one revision');
+    await roomPhase(1).filter({ hasText: '全館開始待確認' }).waitFor();
+    await publishUntil(first, running[0], () => {
+      second(running[1]);
+      return Promise.all([1, 2].map(room => roomPhase(room).filter({ hasText: '全館開始已套用' }).isVisible())).then(rows => rows.every(Boolean));
+    });
+    check(true, 'Both room cards confirm Begin from their accepted Running frames');
   } finally {
     await page.unroute(route); await page.close();
     for (const id of active) await end(id);

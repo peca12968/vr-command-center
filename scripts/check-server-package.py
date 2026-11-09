@@ -59,6 +59,7 @@ def main():
     p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
     p.add_argument('--check-room-clocks', action='store_true', help='Verify room clocks and the original pause/resume boundaries in both modes')
     p.add_argument('--check-venue-phase', action='store_true', help='Verify whole-venue pause and resume against both native topologies')
+    p.add_argument('--check-venue-begin', action='store_true', help='Start both native topologies with one witnessed Begin per topology')
     p.add_argument('--check-layout-preview',action='store_true',help='Load a saved barricade opening and compare its preview with native world geometry')
     p.add_argument('--check-room-reports',action='store_true',help='Verify scoped Linked CSVs and the ZIP against the full sealed native report')
     p.add_argument('--check-room-combat',action='store_true',help='Require actual enemy damage on every original admission and reconcile each replay frame and final report')
@@ -81,6 +82,7 @@ def main():
     if args.check_room_readiness and not args.player_package:p.error('--check-room-readiness requires five players per room')
     if args.check_room_clocks and not args.player_package:p.error('--check-room-clocks requires five players per room')
     if args.check_venue_phase and not args.check_room_clocks:p.error('--check-venue-phase requires --check-room-clocks')
+    if args.check_venue_begin and not args.player_package:p.error('--check-venue-begin requires the three-package check')
     if args.check_room_reports and not args.player_package:p.error('--check-room-reports requires the three-package check')
     if args.check_room_combat and not args.check_room_reports:p.error('--check-room-combat requires --check-room-reports')
     if args.check_hardware_feedback and not args.check_room_combat:p.error('--check-hardware-feedback requires --check-room-combat')
@@ -772,8 +774,45 @@ def main():
                 if not linked and rooms==[1]:rejected('bound-preparing',config(state['id']))
                 for room in rooms:
                     round_clients.extend(room_players(entry,room) if player_folder else [player(entry,room)])
+            owner_ids={entry['sessionId']:[c['player']['id'] for c in round_clients if c['sessionId']==entry['sessionId']] for entry in entries}
+            if args.check_venue_begin:
+                route='/api/venue/phase'
+                preview=request(route)['begin']
+                targets=[{key:row[key] for key in ('sessionId','phaseSinceSequence','sessionSequence')} for row in preview]
+                check({row['sessionId'] for row in targets}==set(owner_ids)
+                      and sorted(room for row in preview for room in row['roomIds'])==list(range(1,6)),
+                      'native Begin preview covers exactly the original five rooms')
+                expected={row['sessionId']:row['sessionSequence'] for row in targets}
+                def begin_when_ready():
+                    rows=request('/api/rooms/readiness')['rooms']
+                    if len(rows)==5 and all(row['venueBeginReady'] and row['sessionSequence']==expected.get(row['sessionId']) for row in rows):
+                        return rows
+                preparing=wait(begin_when_ready,60,'five fresh original Preparing room aggregates')
+                body={'action':'Begin','targets':targets};key=str(uuid.uuid4())
+                receipt=request(route,body,request_id=key)
+                applied={row['sessionId']:row['appliedAtSequence'] for row in receipt['sessions']}
+                check(not receipt['duplicate'] and applied=={sid:sequence+1 for sid,sequence in expected.items()},
+                      'one native Begin reaches exactly the previewed session revisions')
             for entry in entries:
-                ids=[c['player']['id'] for c in round_clients if c['sessionId']==entry['sessionId']];wait(lambda:observe(entry,ids),60,entry['label']+' simulated bodies');begin=command(entry['sessionId'],'Begin');wait(lambda:observe(entry,ids,begin['session']['sequence']),20,entry['label']+' original Begin applied')
+                sid=entry['sessionId'];ids=owner_ids[sid]
+                if args.check_venue_begin:
+                    sequence=applied[sid]
+                else:
+                    wait(lambda:observe(entry,ids),60,entry['label']+' simulated bodies')
+                    sequence=command(sid,'Begin')['session']['sequence']
+                wait(lambda:observe(entry,ids,sequence),20,entry['label']+' original Begin applied')
+            if args.check_venue_begin:
+                def observed_begin():
+                    rows=request('/api/rooms/readiness')['rooms']
+                    if len(rows)==5 and all((phase:=row.get('venuePhase')) and phase['action']=='Begin'
+                       and phase['appliedAtSequence']==applied.get(row['sessionId']) and phase['worldSequence'] for row in rows):
+                        return rows
+                observed=wait(observed_begin,20,'five fresh Running confirmations of original Begin')
+                retry=request(route,body,request_id=key)
+                check(retry['duplicate'] and retry['sessions']==receipt['sessions'],
+                      'the late native Begin retry returns the same original receipt')
+                save(('linked' if linked else 'independent')+'-venue-begin.json',
+                     {'preview':preview,'preparing':preparing,'receipt':receipt,'observed':observed,'retry':retry})
             if args.observe_closure_ui and not linked:
                 observer_entry=entries[0];descriptor=runtime/'closure-ui-private.json';descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'sessionId':observer_entry['sessionId'],'streamId':observer_entry['ready']['streamId'],'endRequestFile':str(out/'closure-end.request'),'roomReadiness':args.check_room_readiness}),encoding='utf-8');observer_log=(runtime/'closure-ui.log').open('xb')
                 node=shutil.which('node')
@@ -936,6 +975,7 @@ def main():
             'roomCombat':args.check_room_combat,
             'roomClocks':args.check_room_clocks,
             'venuePhase':args.check_venue_phase,
+            'venueBegin':args.check_venue_begin,
             'hardwareFeedback':args.check_hardware_feedback,
             'hardwareMockPackage':hardware_manifest['toolVersion'] if args.hardware_simulator_package else None,
             'preparedIndependentSet':args.prepare_independent_set,

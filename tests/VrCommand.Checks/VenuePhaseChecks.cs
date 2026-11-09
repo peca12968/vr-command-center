@@ -12,7 +12,7 @@ internal static class VenuePhaseChecks
             catch (T) { check(true, message); return; }
             throw new Exception($"Expected {typeof(T).Name}: {message}");
         }
-        static VenuePhaseFence[] Fences(VenuePhaseTarget[] targets) => targets.Select(target => new VenuePhaseFence(target.SessionId, target.PhaseSinceSequence)).ToArray();
+        static VenuePhaseFence[] Fences(VenuePhaseTarget[] targets) => targets.Select(target => new VenuePhaseFence(target.SessionId, target.PhaseSinceSequence, target.SessionSequence)).ToArray();
         var master = new OperatorIdentity("venue-master", OperatorRole.Master);
         var room2 = new OperatorIdentity("venue-room-2", OperatorRole.RoomController, 2);
         var data = Path.Combine(directory, "venue-phase");
@@ -73,7 +73,7 @@ internal static class VenuePhaseChecks
             var current = Fences(manager.ReadVenuePhase(master).Resume);
             Reject<VenuePauseNotObservedException>(() => manager.ExecuteVenuePhase(ControlAction.Resume, current, Guid.NewGuid(), master),
                 "A paused VR target also requires the current source confirmation");
-            var witness = current.ToDictionary(row => row.SessionId, row => new VenueResumeWitness(row.PhaseSinceSequence, manager.Get(row.SessionId).Sequence, false));
+            var witness = current.ToDictionary(row => row.SessionId, row => new VenuePhaseWitness(row.PhaseSinceSequence, manager.Get(row.SessionId).Sequence, false));
             var resume = manager.ExecuteVenuePhase(ControlAction.Resume, current, Guid.NewGuid(), master, witness);
             check(resume.Sessions.Single().SessionId == ids[0] && manager.Get(ids[0]).State == SessionState.Running
                 && manager.Get(ids[1]).State == SessionState.Paused && manager.Get(ids[2]).State == SessionState.Paused,
@@ -111,9 +111,43 @@ internal static class VenuePhaseChecks
         mixedManager.Execute(mr.Id, new(Guid.NewGuid(), ControlAction.Begin), master, mixedManager.Get(mr.Id).Sequence);
         mixedManager.ExecuteVenuePhase(ControlAction.Pause, Fences(mixedManager.ReadVenuePhase(master).Pause), Guid.NewGuid(), master);
         var mixedResume = Fences(mixedManager.ReadVenuePhase(master).Resume);
-        var mixedWitness = mixedResume.ToDictionary(row => row.SessionId, row => new VenueResumeWitness(row.PhaseSinceSequence, mixedManager.Get(row.SessionId).Sequence, false));
+        var mixedWitness = mixedResume.ToDictionary(row => row.SessionId, row => new VenuePhaseWitness(row.PhaseSinceSequence, mixedManager.Get(row.SessionId).Sequence, false));
         Reject<VenueResumeNotReadyException>(() => mixedManager.ExecuteVenuePhase(ControlAction.Resume, mixedResume, Guid.NewGuid(), master, mixedWitness),
             "A missing MR readiness witness prevents the entire mixed venue Resume");
         check(mixedManager.List().All(session => session.State == SessionState.Paused), "A blocked MR room leaves the eligible VR room paused too");
+
+        var beginData = Path.Combine(directory, "venue-begin");
+        var beginId = Guid.NewGuid();
+        VenuePhaseFence[] start;
+        VenuePhaseApplied[] started;
+        using (var store = new SqliteSessionEventStore(beginData))
+        {
+            var manager = new SessionManager(store);
+            var first = manager.Create(SessionMode.Independent, [1], mission, master);
+            var second = manager.Create(SessionMode.Independent, [2], mission, master);
+            manager.Join(first.Id, Guid.NewGuid(), "First", 1, HeadsetKind.Quest3, master);
+            var stale = Fences(manager.ReadVenuePhase(master).Begin);
+            manager.Join(second.Id, Guid.NewGuid(), "Second", 2, HeadsetKind.Quest3, master);
+            Reject<VenuePhaseChangedException>(() => manager.ExecuteVenuePhase(ControlAction.Begin, stale, beginId, master),
+                "A new admission makes the original batch Begin revision stale");
+            start = Fences(manager.ReadVenuePhase(master).Begin);
+            var witnesses = start.ToDictionary(row => row.SessionId, row => new VenuePhaseWitness(row.PhaseSinceSequence, row.SessionSequence!.Value, true));
+            var partial = witnesses.Where(row => row.Key == first.Id).ToDictionary();
+            Reject<VenueBeginNotReadyException>(() => manager.ExecuteVenuePhase(ControlAction.Begin, start, beginId, master, partial),
+                "Batch Begin requires a current witness for every preparing session");
+            check(manager.List().All(session => session.State == SessionState.Preparing), "An unready room leaves both rooms preparing");
+            started = manager.ExecuteVenuePhase(ControlAction.Begin, start, beginId, master, witnesses).Sessions;
+            check(started.Length == 2 && started.Zip(start).All(pair => pair.First.AppliedAtSequence == pair.Second.SessionSequence + 1),
+                "Batch Begin saves each witnessed revision and its exact resulting sequence");
+            manager.End(first.Id, master);
+        }
+        using (var store = new SqliteSessionEventStore(beginData))
+        {
+            var manager = new SessionManager(store);
+            var retry = manager.ExecuteVenuePhase(ControlAction.Begin, start, beginId, master);
+            check(retry.Duplicate && retry.Sessions.SequenceEqual(started)
+                && manager.List(includeEnded: true).Count(session => session.State == SessionState.Ended) == 1,
+                "Restart preserves the original batch Begin receipt after a room ends");
+        }
     }
 }
