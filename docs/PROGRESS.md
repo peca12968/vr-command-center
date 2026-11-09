@@ -1,5 +1,14 @@
 # 開發進度
 
+## 2026-11-09 單房硬體模擬停止
+
+Windows 硬體模擬器 0.2.2 加入 `--stop-file`。每個房間閘道可用自己的本機標記檔停止，等待確認的批次保留 `cancelled`，報告終止原因為 `operator-stop`。 [停止操作](HARDWARE.md#停止單房模擬閘道)
+
+- 即時模擬 20 項通過，最終 ZIP 解壓後再通過 20 項。涵蓋既有標記、輸出同路徑、握手中、閒置及待確認批次。待確認測試核對原連線及批次 ID，該閘道確認數為零，另一房在原連線上繼續確認。離線 CLI 38 項、封裝工具 10 項及 .NET 核心 974 項通過。解壓後離線範例與原報告逐位元相同。
+- Windows 原生整合 `run-8342b5268d1e413886ef02c537789e21` 退出碼 0，420 項通過。五房獨立及合併各 25 個同機桌面玩家，分別核對 108 與 105 筆模擬確認，合計 1,692 幀回放及 50 份原戰績與伺服器確認。活動場次為零，原管理、遊戲、玩家及硬體模擬程序均已清理。
+- 最終包 `artifacts/hardware-packages/hardware-simulator-0.2.2-final-net10.zip` 為 182,028 bytes，SHA-256 `15e64996efb8420e89407faa707708755b84d3a75e8b5e04f041e97b1f0e13af`。八個解壓內容檔與原生整合所用初包一致，最終 manifest 指向完成附掛驗證後的測試證據。0.2.1 的 ZIP 校驗值與歷史紀錄相符。
+- 功能來源 `de44f15752f5dc84e00683874bef92a8d06ead7b`。GitHub Actions job `129060167914` 因帳務或支出上限未啟動。廠商協議、實體設備輸入、輸出與停止、Quest 3、VIVE、MR 實體場地與跨機 25 人仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42587330947)
+
 ## 2026-11-09 MR 校正封存驗收
 
 主控可選用 `--room-alignment` 或在整批 `roomAlignments` 提供部署 ZIP 的原校正檔。核對當次任務模式、`quest-room-mr-v1` 回放來源、各房鎖定 SHA-256 與原 Quest 戰績。選用後，整批每個 MR 房間都需原檔，每場都需原回放。 [校正封存](EXTERNAL_CLIENTS.md#核對-mr-校正封存)
