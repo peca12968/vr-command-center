@@ -18,6 +18,7 @@ param(
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,2147483647)][int]$ExpectedVersionCode,
     [Parameter(ParameterSetName='Bundle')][switch]$DeployMappedSeats,
     [Parameter(ParameterSetName='Bundle')][switch]$VerifyTrackedSeats,
+    [Parameter(ParameterSetName='Bundle')][switch]$AllHeadsets,
     [Parameter(ParameterSetName='Venue')][Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$ManagementApi
 )
 $ErrorActionPreference = 'Stop'
@@ -509,14 +510,15 @@ function Get-TrackedSeatStatus($Reading, $Connection) {
     return 'tracked-ready'
 }
 
-function Confirm-TrackedSeats($Venue, [object[]]$Map) {
+function Confirm-TrackedSeats($Venue, [object[]]$Map, [switch]$IncludeAllHeadsets) {
     Confirm-VenueReadback $Venue
     $target = Get-ManagementTarget $ManagementApi
     $readings = @{}
     $hasHeadsets = $Venue.Report.mode -cin @('VR','Mixed')
     $seats = @(foreach ($row in $Map) {
         $key = "$($row.roomId)/$($row.seat)"
-        if ($hasHeadsets -and $Venue.SeatHeadsets[$key] -cne 'Quest3') {
+        $headset = if ($hasHeadsets) { $Venue.SeatHeadsets[$key] } else { 'Quest3' }
+        if (-not $IncludeAllHeadsets -and $headset -cne 'Quest3') {
             if ($DeviceMap) { [ordered]@{ roomId = $row.roomId; seat = $row.seat; status = 'seat-headset-mismatch' } }
             continue
         }
@@ -524,11 +526,15 @@ function Confirm-TrackedSeats($Venue, [object[]]$Map) {
         $session = $connection.Ticket.SessionId
         if (-not $readings.ContainsKey($session)) { $readings[$session] = Read-TrackedReadiness $target $session }
         $reading = $readings[$session]
-        [ordered]@{ roomId = $row.roomId; seat = $row.seat; status = Get-TrackedSeatStatus $reading $connection;
+        $result = [ordered]@{ roomId = $row.roomId; seat = $row.seat; status = Get-TrackedSeatStatus $reading $connection;
             sourceState = $reading.Snapshot.sourceState; worldSequence = $reading.Snapshot.worldSequence }
+        if ($IncludeAllHeadsets) { $result.registeredHeadset = $headset }
+        $result
     })
-    return [ordered]@{ phase = 'tracked-readiness'; topology = $Venue.Report.topology; managementVerified = $true;
+    $report = [ordered]@{ phase = 'tracked-readiness'; topology = $Venue.Report.topology; managementVerified = $true;
         complete = ($seats.Count -gt 0 -and -not ($seats | Where-Object { $_.status -cne 'tracked-ready' })); seats = $seats }
+    if ($IncludeAllHeadsets) { $report.scope = 'venue' }
+    return $report
 }
 
 function Get-QuestDeviceInventory {
@@ -755,6 +761,9 @@ if ($PSCmdlet.ParameterSetName -eq 'Refresh') {
 $alignment = $null
 $alignmentHash = $null
 if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
+    if ($AllHeadsets -and (-not $VerifyTrackedSeats -or $DeviceMap -or $AllowPartialMap)) {
+        throw 'Use -AllHeadsets only with -VerifyTrackedSeats and without a device map or partial selection.'
+    }
     if ($VerifyTrackedSeats) {
         if (-not $ManagementApi -or $RoomId -or $Seat -or $PSBoundParameters.ContainsKey('Serial') -or
             $ExpectedVersionCode -or $DeployMappedSeats -or $CheckOnly -or ($AllowPartialMap -and -not $DeviceMap)) {
@@ -762,7 +771,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
         }
         $map = @(if ($DeviceMap) { Read-QuestDeviceMap $DeviceMap -Partial:$AllowPartialMap }
             else { foreach ($room in 1..5) { foreach ($seat in 1..5) { @{ roomId = $room; seat = $seat } } } })
-        $result = Confirm-TrackedSeats (Read-VenueBundle $VenueBundle 0 0) $map
+        $result = Confirm-TrackedSeats (Read-VenueBundle $VenueBundle 0 0) $map -IncludeAllHeadsets:$AllHeadsets
         $result | ConvertTo-Json -Depth 4 -Compress
         if (-not $result.complete) { exit 1 }
         return

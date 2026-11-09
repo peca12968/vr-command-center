@@ -1323,6 +1323,14 @@ def main():
                   and [(row['roomId'], row['seat'], row['status'], row['sourceState']) for row in tracked['seats']] ==
                       [(room, seat, 'awaiting-tracked-pose', 'Fresh') for room, seat in quest_seats],
                   'mixed Quest tracking check distinguishes 24 untracked Quest seats from one VIVE seat')
+            tracking = subprocess.run([*deploy, '-VerifyTrackedSeats', '-AllHeadsets', '-AdbPath', str(destination/'absent-adb.exe')],
+                env=environment, timeout=25, encoding='utf-8', cwd=destination, capture_output=True)
+            tracked = json.loads(tracking.stdout)
+            save('mixed-all-headset-readiness.json', tracked)
+            check(tracking.returncode == 1 and tracked['complete'] is False and tracked['managementVerified'] is True and tracked['scope'] == 'venue'
+                  and [(row['roomId'], row['seat'], row['registeredHeadset'], row['status'], row['sourceState']) for row in tracked['seats']] ==
+                      [(row['roomId'], row['seat'] + 1, row['headset'], 'awaiting-tracked-pose', 'Fresh') for row in accepted['seats']],
+                  'mixed VR and MR venue tracking checks all 25 original admissions without ADB')
             for room_id, mode in ((1, 'VR'), (2, 'MR')):
                 seat = json.loads(subprocess.check_output([*deploy, '-RoomId', str(room_id), '-Seat', '1', '-CheckOnly'],
                                   env=environment, timeout=25, encoding='utf-8', cwd=destination))
@@ -1541,18 +1549,24 @@ def main():
                 check(len({c['nativePid'] for c in round_clients})==25 and all(
                     c['process'].poll() is None and c['witness'].kernel.WaitForSingleObject(c['witness'].handle,0)==258
                     for c in round_clients),'25 simultaneous owned native players '+('Linked' if linked else 'Independent'))
-            if args.check_quest_vr_deploy:
+            if args.check_quest_vr_deploy or args.check_quest_vr_partial_map:
                 mode = 'linked' if linked else 'independent'
                 bundle = runtime / (mode+'-vr-venue-connections.zip')
+                full_venue = ['-AllHeadsets'] if args.check_quest_vr_partial_map else []
                 tracking = subprocess.run([shutil.which('pwsh'), '-NoProfile', '-File', str(ROOT/'scripts/deploy-quest.ps1'),
-                    '-VenueBundle', str(bundle), '-ManagementApi', uri, '-VerifyTrackedSeats', '-AdbPath', str(runtime/'absent-adb.exe')],
+                    '-VenueBundle', str(bundle), '-ManagementApi', uri, '-VerifyTrackedSeats', '-AdbPath', str(runtime/'absent-adb.exe'),
+                    *full_venue],
                     env={**os.environ, 'VR_COMMAND_MASTER_KEY': keys['Master']}, timeout=25, encoding='utf-8', capture_output=True)
                 tracked = json.loads(tracking.stdout)
+                save(mode+'-vr-venue-tracked-readiness.json', tracked)
                 check(tracking.returncode == 1 and tracked['complete'] is False and tracked['managementVerified'] is True
                       and [(row['roomId'], row['seat'], row['status'], row['sourceState']) for row in tracked['seats']] ==
                           [(room, seat, 'not-tracked', 'Fresh') for room in range(1, 6) for seat in range(1, 6)],
-                      mode + ' Quest tracking check rejects all 25 connected native Simulation rigs')
-                save(mode+'-vr-venue-tracked-readiness.json', tracked)
+                      mode + ' tracking check rejects all 25 connected native Simulation rigs')
+                if full_venue:
+                    check(tracked['scope'] == 'venue' and [(row['roomId'], row['seat'], row['registeredHeadset']) for row in tracked['seats']] ==
+                          [(room, seat, 'ViveXr' if seat in (2, 4) else 'Quest3') for room in range(1, 6) for seat in range(1, 6)],
+                          mode + ' venue tracking includes all original Quest and VIVE admissions')
             if args.check_room_readiness:verify_room_readiness(round_clients,linked)
             if args.check_room_observer and linked:
                 node = shutil.which('node')

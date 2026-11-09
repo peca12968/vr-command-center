@@ -310,6 +310,8 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 
 `tracked-ready` 要求同一場次、玩家及當次入場名額、已套用的場次序號、管理服務判定為 `Fresh` 的快照，以及可參戰的 `Tracked` 姿態。MR 另確認遊戲伺服器使用有效 MR 來源設定。報告含各席房號、席位、狀態與其世界序號，所有已選席位就緒時才回傳 `complete: true` 與退出碼 0。
 
+混合 Quest 3 與 VIVE 名冊的場館可加上 `-AllHeadsets`，用同一份 ZIP 核對全部 25 席。此模式不能搭配裝置清單或部分席位。報告含 `scope: "venue"`，各席的 `registeredHeadset` 取自管理名冊。報告核對伺服器接收的追蹤狀態，實體裝置型號與控制器操作由現場驗收。
+
 | 狀態 | 現場核對 |
 | --- | --- |
 | `awaiting-tracked-pose`、`not-tracked` | 檢查頭盔有無進入遊戲、恢復焦點並完成 MR 取點 |

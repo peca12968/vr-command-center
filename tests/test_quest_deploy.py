@@ -650,6 +650,28 @@ else:
                         self.assertNotIn((1, 2), [(row['roomId'], row['seat']) for row in report['seats']])
                         self.assertEqual([('POST', '/api/vr-deployment/venue-check', 'Bearer ' + fixture_key)] + [
                             ('GET', f'/api/sessions/{session}/readiness', 'Bearer ' + fixture_key) for session in snapshots], calls)
+                        expected_calls = calls.copy()
+                        calls.clear()
+                        combined = self.run_bundle(files, *args, '-AllHeadsets', environment=env)
+                        self.assertEqual(0, combined.returncode, combined.stderr)
+                        report = json.loads(combined.stdout)
+                        self.assertEqual(('venue', True, True), (report['scope'], report['complete'], report['managementVerified']))
+                        self.assertEqual([(seat['roomId'], seat['seat'] + 1, seat['headset'], 'tracked-ready') for seat in seats],
+                            [(row['roomId'], row['seat'], row['registeredHeadset'], row['status']) for row in report['seats']])
+                        self.assertEqual(expected_calls, calls)
+
+                        snapshots[str(self.session_ids[0])]['players'][1]['rigKind'] = 'Simulated'
+                        calls.clear()
+                        incomplete = self.run_bundle(files, *args, '-AllHeadsets', environment=env)
+                        self.assertEqual(1, incomplete.returncode, incomplete.stderr)
+                        report = json.loads(incomplete.stdout)
+                        self.assertFalse(report['complete'])
+                        self.assertEqual([(1, 2, 'ViveXr', 'not-tracked')],
+                            [(row['roomId'], row['seat'], row['registeredHeadset'], row['status'])
+                             for row in report['seats'] if row['status'] != 'tracked-ready'])
+                        self.assertEqual(expected_calls, calls)
+                        for value in (fixture_key, str(self.players[1]), str(self.admissions[1]), 'v2.'):
+                            self.assertNotIn(value, combined.stdout + combined.stderr)
 
                 sample = snapshots[str(self.session_ids[0])]
                 sample['players'][0]['rigKind'] = 'Simulated'
@@ -660,6 +682,10 @@ else:
                 mapping, document = self.device_map()
                 document['seats'] = [row for row in document['seats'] if row['roomId'] == 1]
                 mapping.write_text(json.dumps(document), encoding='utf-8')
+                self.assert_rejected(self.run_bundle(files, *args, '-AllHeadsets', '-DeviceMap', str(mapping),
+                    '-AllowPartialMap', environment=env), 'without a device map or partial selection')
+                self.assert_rejected(self.run_bundle(files, '-AllHeadsets', '-CheckOnly', environment=env),
+                    'only with -VerifyTrackedSeats')
                 result = self.run_bundle(files, *args, '-DeviceMap', str(mapping), '-AllowPartialMap', environment=env)
                 self.assertEqual(1, result.returncode, result.stderr)
                 self.assertEqual(['not-tracked', 'seat-headset-mismatch', 'admission-changed', 'awaiting-tracked-pose', 'readiness-invalid'],
