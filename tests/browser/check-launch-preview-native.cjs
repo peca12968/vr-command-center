@@ -85,6 +85,10 @@ async function main() {
     await page.locator('#load-version').click();
     await page.waitForFunction(() => document.querySelector('#draft-duration').value === '120');
     await page.locator('#draft-briefing').fill('未儲存的替代簡報');
+    await page.locator('#prop-select').selectOption('0');
+    await page.locator('#prop-x').fill('3.5');
+    await page.locator('#prop-x').blur();
+    assert.equal(await page.locator('#prop-layer [data-index="0"]').getAttribute('transform'), 'translate(3.5 0) rotate(-15)');
     await page.locator('#launch-version').click();
     await page.locator('#launch-mode').selectOption('Linked');
     await page.locator('#launch-preview-briefing summary').click();
@@ -95,6 +99,24 @@ async function main() {
     assert.deepEqual(shown, { version: '五房夜戰配置 · 第 1 版（歷史）', rooms: '房間 1、房間 2、房間 3、房間 4、房間 5',
       duration: '120 秒', environment: 'VR · 暴風雨 · 夜晚 · 閃電開啟', enemies: '全場 7 名 · 巡邏 · 自動攻擊關閉',
       props: '每房 2 件 · 沙包 1 · 油桶 1', 'briefing-text': definition.briefing });
+    await page.locator('#launch-layout-map-details summary').click();
+    const map = await page.evaluate(() => ({
+      props: [...document.querySelectorAll('#launch-layout-props [data-index]')].map(group => ({
+        index: Number(group.dataset.index), transform: group.getAttribute('transform'),
+        asset: group.querySelector('[data-envelope]').dataset.envelope
+      })),
+      spawns: [...document.querySelectorAll('#launch-layout-spawns [data-seat]')].map(group => ({
+        seat: Number(group.dataset.seat), transform: group.getAttribute('transform'), radius: Number(group.querySelector('circle').getAttribute('r'))
+      })),
+      routes: [...document.querySelectorAll('#launch-layout-routes polyline')].map(line => line.getAttribute('points'))
+    }));
+    const layout = await api(`/missions/${original.id}/layout?mode=Linked`);
+    assert.deepEqual(map.props, definition.props.map((prop, index) => ({ index, asset: prop.assetId,
+      transform: `translate(${prop.position.x} ${-prop.position.z}) rotate(${-prop.yawDegrees})` })));
+    assert.deepEqual(map.spawns, layout.spawns.map(spawn => ({ seat: spawn.seat, radius: layout.playerRadius,
+      transform: `translate(${spawn.x} ${-spawn.z})` })));
+    assert.equal(map.routes.length, 5);
+    assert.deepEqual(map.routes, layout.routePreview.seats.map(route => route.path.map(point => `${point.x},${-point.z}`).join(' ')));
     await page.screenshot({ path: path.join(directory, 'launch-preview.png'), fullPage: true });
     await page.locator('#create-session-form button').click();
     const session = await until('UI creates the Linked session', async () => (await api('/sessions'))[0]);
@@ -134,7 +156,9 @@ async function main() {
     assert.deepEqual(source.roomIds, rooms);
     assert.equal(source.props.length, 10);
     for (const room of rooms) {
-      assert.deepEqual(source.props.filter(prop => prop.roomId === room).map(prop => [prop.kind, prop.yaw]), [['Sandbag', 15], ['Barrel', 90]]);
+      const originX = (room - 3) * 14;
+      assert.deepEqual(source.props.filter(prop => prop.roomId === room).map(prop => [prop.kind, prop.feet.x - originX, prop.feet.y, prop.feet.z, prop.yaw]),
+        [['Sandbag', -3, 0, 0, 15], ['Barrel', -1, 0, 1.5, 90]]);
     }
     await page.locator('#live-auto-attack').check();
     await page.locator('#enemies-form button[type=submit]').click();
@@ -178,6 +202,7 @@ async function main() {
       return world.complete && world;
     });
     const final = await api(route);
+    assert.deepEqual(sealed.header.props, source.props);
     assert.equal(final.state, 'Ended');
     assert.equal(final.combatStream.sealed, true);
     assert.deepEqual(final.mission, original);
@@ -197,7 +222,7 @@ async function main() {
     await page.screenshot({ path: path.join(directory, 'world-room-replay.png'), fullPage: true });
     assert.deepEqual(errors, []);
     await fs.writeFile(path.join(directory, 'launch-preview-checks.json'), JSON.stringify({
-      sessionId: session.id, originalId: original.id, revisedId: revised.id, shown, rooms, enemyCounts,
+      sessionId: session.id, originalId: original.id, revisedId: revised.id, shown, map, rooms, enemyCounts,
       runningSequence: running.packet.sequence, sealedSequence: sealed.acceptedSequence,
       roomViews: { full, focused, other, restored, replay }, pageErrors: errors, headsets: 0
     }, null, 2), { flag: 'wx' });

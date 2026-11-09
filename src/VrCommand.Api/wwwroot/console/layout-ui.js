@@ -1,4 +1,5 @@
 const $ = id => document.getElementById(id);
+const svgNamespace = 'http://www.w3.org/2000/svg';
 const labels = {
   InvalidProp: '座標或角度不是有效數字', UnsupportedAsset: '目前場地只支援沙包與油桶',
   NotFloorLevel: '物件必須放在地面（Y=0）', OutsideRoom: '旋轉後的包圍盒超出 12 × 12 公尺場地',
@@ -7,8 +8,39 @@ const labels = {
   EnemySpawnCapacity: '初始敵軍數量超過此配置的出生候選容量'
 };
 function text(node, value) { node.textContent = value; }
-function accept(report, mode) {
+function svg(tag, attributes) {
+  const node = document.createElementNS(svgNamespace, tag);
+  for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
+  return node;
+}
+export function drawLayoutProps(layer, props, selected = null) {
+  layer.replaceChildren(...props.map((prop, index) => {
+    const group = svg('g', { transform: `translate(${prop.position.x} ${-prop.position.z}) rotate(${-prop.yawDegrees})`, 'data-index': index });
+    const name = `物件 ${index + 1} ${prop.assetId}`;
+    if (selected !== null) {
+      group.dataset.selected = String(index === selected);
+      group.setAttribute('role', 'button'); group.setAttribute('tabindex', '0'); group.setAttribute('aria-label', name);
+    } else {
+      const title = svg('title', {}); text(title, name); group.append(title);
+    }
+    const barrel = prop.assetId === 'barrel', sandbag = prop.assetId === 'sandbag';
+    if (barrel || sandbag) {
+      const shape = barrel ? svg('circle', { r: '.35', fill: '#658d87' })
+        : svg('rect', { x: '-1', y: '-.35', width: '2', height: '.7', rx: '.08', fill: '#a69b63' });
+      const envelope = svg('rect', { x: barrel ? '-.35' : '-1', y: '-.35', width: barrel ? '.7' : '2', height: '.7',
+        fill: 'none', stroke: '#d2dca2', 'stroke-width': '.04', 'stroke-dasharray': '.1 .06', 'data-envelope': prop.assetId });
+      group.append(shape, envelope);
+    } else {
+      group.append(svg('circle', { r: '.28', fill: '#754a40' }));
+    }
+    const label = svg('text', { y: '.12' }); text(label, index + 1); group.append(label);
+    return group;
+  }));
+}
+function accept(report, mode, experienceMode) {
+  const profile = experienceMode === 'MR' ? 'mr-room-v1' : 'vr-room-v1';
   if (report?.version !== 1 || !['vr-room-v1', 'mr-room-v1'].includes(report.profile) || report.rulesVersion !== '0.8.0' || report.mode !== mode
+    || (experienceMode && report.profile !== profile) || report.roomHalfSize !== 6 || report.playerRadius !== .3
     || !Array.isArray(report.issues) || !Array.isArray(report.invalidProps) || !Array.isArray(report.spawns)) throw new Error('不支援的場地檢查版本或模式。');
   return report;
 }
@@ -36,11 +68,25 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
   const cache = new Map();
   function clearMarks() { for (const prop of $('prop-layer').children) delete prop.dataset.layoutInvalid; }
   function drawRoutes(id, routes) {
-    $(id).replaceChildren(...routes.map(route => {
-      const line = document.createElementNS('http://www.w3.org/2000/svg', 'polyline');
-      line.setAttribute('points', route.path.map(point => `${point.x},${-point.z}`).join(' '));
-      return line;
+    $(id).replaceChildren(...routes.map(route => svg('polyline', { points: route.path.map(point => `${point.x},${-point.z}`).join(' ') })));
+  }
+  function drawSpawns(id, report, missing) {
+    const blocked = new Set(report?.issues.filter(issue => issue.code === 'SpawnBlocked').map(issue => issue.seat));
+    $(id).replaceChildren(...(report?.applies ? report.spawns : []).map(spawn => {
+      const group = svg('g', { transform: `translate(${spawn.x} ${-spawn.z})`, 'data-seat': spawn.seat });
+      if (missing.includes(spawn.seat + 1)) group.dataset.routeMissing = 'true';
+      if (blocked.has(spawn.seat)) group.dataset.spawnBlocked = 'true';
+      const circle = svg('circle', { r: report.playerRadius });
+      const label = svg('text', { y: '.12' }); text(label, spawn.seat + 1);
+      group.append(circle, label); return group;
     }));
+  }
+  function markInvalid(id, report) {
+    const invalid = new Set(report.invalidProps);
+    for (const prop of $(id).children) {
+      if (invalid.has(Number(prop.dataset.index))) prop.dataset.layoutInvalid = 'true';
+      else delete prop.dataset.layoutInvalid;
+    }
   }
   function paintTrial() {
     const index = selectedProp();
@@ -64,7 +110,7 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
     trial = attempt;
     paintTrial();
     try {
-      const report = accept(await api('/mission-layout', 'POST', { ...body, props: body.props.filter((_, position) => position !== index) }), body.mode);
+      const report = accept(await api('/mission-layout', 'POST', { ...body, props: body.props.filter((_, position) => position !== index) }), body.mode, body.experienceMode);
       if (trial !== attempt || identity !== epoch()) return;
       const routes = routePreview(report);
       if (!routes || routes.some(route => !route.path.length && baseline[route.seat].path.length)) throw new Error('Invalid trial routes.');
@@ -90,6 +136,14 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
     if (prefix === 'draft') {
       drawRoutes('layout-routes', (routes ?? []).filter(route => route.path.length));
       paintTrial();
+    } else {
+      const details = $('launch-layout-map-details');
+      details.hidden = !report?.applies;
+      $('launch-layout-map').setAttribute('viewBox', report?.canStart ? '-7 -7 14 14' : '-11 -11 22 22');
+      drawLayoutProps($('launch-layout-props'), details.hidden ? [] : selection().props);
+      drawRoutes('launch-layout-routes', (routes ?? []).filter(route => route.path.length));
+      drawSpawns('launch-layout-spawns', report, missing);
+      if (report) markInvalid('launch-layout-props', report);
     }
     if (!report) { text(summary, message); summary.dataset.status = 'unknown'; return; }
     summary.dataset.status = !report.applies ? 'not-applicable' : report.canStart ? 'valid' : 'invalid';
@@ -106,24 +160,14 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
     }
     if (report.truncated) { const item = document.createElement('li'); text(item, '僅列出前 128 個問題；圖中已標出所有涉及物件。'); list.append(item); }
     if (prefix === 'draft') {
-      clearMarks();
-      for (const index of report.invalidProps) {
-        const prop = [...$('prop-layer').children].find(node => Number(node.dataset.index) === index);
-        if (prop) prop.dataset.layoutInvalid = 'true';
-      }
-      const ns = 'http://www.w3.org/2000/svg';
-      $('layout-spawns').replaceChildren(...(report.applies ? report.spawns : []).map(spawn => {
-        const group = document.createElementNS(ns, 'g'); group.setAttribute('transform', `translate(${spawn.x} ${-spawn.z})`);
-        if (missing.includes(spawn.seat + 1)) group.dataset.routeMissing = 'true';
-        const circle = document.createElementNS(ns, 'circle'); circle.setAttribute('r', String(report.playerRadius));
-        const label = document.createElementNS(ns, 'text'); label.setAttribute('y', '.12'); label.textContent = spawn.seat + 1;
-        group.append(circle, label); return group;
-      }));
+      markInvalid('prop-layer', report);
+      drawSpawns('layout-spawns', report, missing);
     }
   }
   function reset() {
     generation++; draftSerial++; launchSerial++; clearTimeout(draftTimer); clearTimeout(launchTimer);
     draftKey = launchKey = ''; draftReport = launchReport = trial = null; cache.clear(); clearMarks(); $('layout-spawns').replaceChildren();
+    $('launch-layout-map-details').open = false;
     paint('draft', null, '修改配置後自動檢查。草稿仍可保存，開場前須修正問題。');
     paint('launch', null, '選取保存的任務版本後檢查場地。');
   }
@@ -136,7 +180,7 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
     clearTimeout(draftTimer); clearMarks(); $('layout-spawns').replaceChildren(); paint('draft', null, '檢查目前配置中…');
     draftTimer = setTimeout(async () => {
       try {
-        const report = accept(await api('/mission-layout', 'POST', body), body.mode);
+        const report = accept(await api('/mission-layout', 'POST', body), body.mode, body.experienceMode);
         if (identity !== epoch() || token !== generation || serial !== draftSerial || key !== JSON.stringify(draft())) return;
         draftReport = report; paint('draft', report);
       } catch {
@@ -156,7 +200,7 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
     paint('launch', null, '檢查選取版本的場地中…'); changed();
     launchTimer = setTimeout(async () => {
       try {
-        const report = accept(await api(`/missions/${selected.id}/layout?mode=${encodeURIComponent(selected.mode)}`), selected.mode);
+        const report = accept(await api(`/missions/${selected.id}/layout?mode=${encodeURIComponent(selected.mode)}`), selected.mode, selected.experienceMode);
         const now = selection();
         if (identity !== epoch() || token !== generation || serial !== launchSerial || now.id + '/' + now.mode !== key) return;
         cache.set(key, report); launchReport = report; paint('launch', report); changed();
@@ -171,10 +215,10 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
     return launchKey === current.id + '/' + current.mode && !!launchReport && (!launchReport.applies || launchReport.canStart === true);
   }
   function rejected(id, mode, report) {
-    try { accept(report, mode); } catch { launchKey = ''; launchReport = null; paint('launch', null, '場地檢查版本已變更，請更新控制台後再開場。'); changed(); return; }
-    const key = id + '/' + mode; cache.set(key, report);
-    const current = selection();
+    const key = id + '/' + mode, current = selection();
     if (current.id + '/' + current.mode !== key) return;
+    try { accept(report, mode, current.experienceMode); } catch { launchKey = ''; launchReport = null; paint('launch', null, '場地檢查版本已變更，請更新控制台後再開場。'); changed(); return; }
+    cache.set(key, report);
     launchSerial++; clearTimeout(launchTimer); launchKey = key; launchReport = report; paint('launch', report); changed();
   }
   function recheckDraft() { draftKey = ''; scheduleDraft(); }

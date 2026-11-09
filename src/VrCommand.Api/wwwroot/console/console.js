@@ -1,6 +1,6 @@
 import { mountWorld } from './world-ui.js';
 import { mountReplay } from './replay-ui.js';
-import { mountLayout } from './layout-ui.js';
+import { drawLayoutProps, mountLayout } from './layout-ui.js';
 import { mountAlignment } from './alignment-ui.js';
 import { mountAlignmentPins } from './alignment-pins-ui.js';
 import { mountMrDeployment } from './mr-deployment-ui.js';
@@ -45,7 +45,11 @@ const alignmentPins = mountAlignmentPins({ state: () => state,
 const placement = mountLayout({ api, epoch: () => state.epoch, active: () => !!state.actor, editable: master,
   draft: () => ({ experienceMode: $('draft-mode').value, mode: $('layout-session-mode').value, enemyCount: Number($('draft-count').value), props: structuredClone(state.props) }),
   selectedProp: () => state.prop,
-  selection: () => ({ id: $('launch-mission').value, mode: launchLayoutMode() }), changed: applyPermissions,
+  selection: () => {
+    const { revision } = launchPlan();
+    const definition = revision?.mission.definition;
+    return { id: revision?.mission.id ?? '', mode: launchLayoutMode(), experienceMode: definition?.environment.mode, props: definition?.props ?? [] };
+  }, changed: applyPermissions,
   selectProp: index => { if (!state.props[index]) return; finishPropGesture(); state.prop = index; renderProps(); $('prop-select').focus(); } });
 let timer;
 let selectionEpoch = 0, venueClosureEpoch = 0;
@@ -770,17 +774,9 @@ async function saveMission(revise = false) {
     body: { name: $('draft-name').value.trim(), briefing: $('draft-briefing').value, durationSeconds: Number($('draft-duration').value), environment: environment('draft'), enemies: enemies('draft'), props: structuredClone(state.props) } };
   await sendPending();
 }
-function svgNode(tag, attributes) { const node = document.createElementNS('http://www.w3.org/2000/svg', tag); for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value); return node; }
 function renderProps(updateInspector = true) {
   renderPropHistory();
-  const layer = $('prop-layer');
-  layer.replaceChildren(...state.props.map((prop, index) => {
-    const group = svgNode('g', { transform: `translate(${prop.position.x} ${-prop.position.z}) rotate(${-prop.yawDegrees})`, 'data-index': index, 'data-selected': index === state.prop, role: 'button', tabindex: '0', 'aria-label': `物件 ${index + 1} ${prop.assetId}` });
-    const barrel = prop.assetId === 'barrel';
-    const shape = barrel ? svgNode('circle', { r: '.35', fill: '#658d87' }) : svgNode('rect', { x: '-1', y: '-.35', width: '2', height: '.7', rx: '.08', fill: '#a69b63' });
-    const envelope = svgNode('rect', { x: barrel ? '-.35' : '-1', y: '-.35', width: barrel ? '.7' : '2', height: '.7', fill: 'none', stroke: '#d2dca2', 'stroke-width': '.04', 'stroke-dasharray': '.1 .06', 'data-envelope': prop.assetId });
-    const label = svgNode('text', { y: '.12' }); label.textContent = index + 1; group.append(shape, envelope, label); return group;
-  }));
+  drawLayoutProps($('prop-layer'), state.props, state.prop);
   placement.scheduleDraft();
   if (!updateInspector) return;
   fillOptions('prop-select', state.props.length ? state.props.map((p, i) => [String(i), `${i + 1} · ${p.assetId}`]) : [['', '尚無物件']], String(state.prop));

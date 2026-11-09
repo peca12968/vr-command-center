@@ -29,6 +29,17 @@
 #layout-routes polyline{fill:none;stroke:#9ed3bd;stroke-width:.065;stroke-dasharray:.14 .12;stroke-linejoin:round;pointer-events:none}
 #layout-spawns [data-route-missing] circle{fill:#ffbb6333;stroke:#ffbb63}
 .layout-route-warning{color:#ffcb83}
+#launch-layout-map-details{margin:10px 0 14px}
+#launch-layout-map-details summary{cursor:pointer}
+#launch-layout-map{display:block;width:100%;max-width:440px;aspect-ratio:1;border:1px solid var(--line);border-radius:5px;background:#101913}
+#launch-layout-props text{font-size:.38px;fill:#f2f4da;text-anchor:middle;pointer-events:none}
+#launch-layout-props [data-layout-invalid=true]{stroke:#ff9f8b;stroke-width:.12}
+#launch-layout-props [data-layout-invalid=true] [data-envelope]{stroke:#ff9f8b}
+#launch-layout-spawns circle{fill:#4e839433;stroke:#80c4d5;stroke-width:.05;stroke-dasharray:.08 .04}
+#launch-layout-spawns text{fill:#b2dfec;font-size:.3px;text-anchor:middle}
+#launch-layout-spawns [data-route-missing] circle{fill:#ffbb6333;stroke:#ffbb63}
+:is(#layout-spawns,#launch-layout-spawns) [data-spawn-blocked] circle{fill:#ff9f8b33;stroke:#ff9f8b}
+#launch-layout-routes polyline{fill:none;stroke:#9ed3bd;stroke-width:.065;stroke-dasharray:.14 .12;stroke-linejoin:round}
 .report-room-field{margin:0;min-width:8rem}
 #world-event-table {
   max-height: 16rem;

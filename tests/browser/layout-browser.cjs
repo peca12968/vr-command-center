@@ -36,6 +36,12 @@ module.exports = async function layoutBrowser({ context, api, tokens, base, miss
     await editor.locator('#launch-version').click(); await status('launch', 'invalid');
     check(await editor.locator('#create-session-form button').isDisabled() && !(await api('/sessions')).some(row => row.mission.id === saved.id),
       'Saved invalid mission remains selectable but cannot reserve a new VR room');
+    await editor.locator('#launch-layout-map-details summary').click();
+    check(await editor.locator('#launch-layout-props [data-layout-invalid=true]').count() === 4
+      && await editor.locator('#launch-layout-spawns [data-seat="2"][data-spawn-blocked]').isVisible()
+      && await editor.locator('#launch-layout-routes polyline').count() === 0
+      && await editor.locator('#launch-layout-props [role=button]').count() === 0,
+      'Saved invalid map identifies its original props and blocked spawn without edit controls or fabricated paths');
     await editor.locator('#tab-missions').click();
     await editor.locator('#prop-select').selectOption('0'); await set('prop-z', 0);
     await editor.locator('#prop-select').selectOption('1'); await set('prop-x', 4);
@@ -43,11 +49,26 @@ module.exports = async function layoutBrowser({ context, api, tokens, base, miss
     check(await editor.locator('#prop-layer [data-layout-invalid=true]').count() === 0 && await editor.locator('#layout-spawns circle').count() === 5,
       'Correcting the draft clears invalid markings while retaining the authoritative spawn margins');
     check(await editor.locator('#create-session-form button').isDisabled(), 'A corrected unsaved draft cannot approve its invalid saved launch version');
+    check(await editor.locator('#launch-layout-props [data-index="0"]').getAttribute('transform') === 'translate(0 3) rotate(0)'
+      && await editor.locator('#prop-layer [data-index="0"]').getAttribute('transform') === 'translate(0 0) rotate(0)',
+      'The saved map keeps its original prop while an unsaved draft moves the same prop');
     await editor.locator('#save-revision').click(); await editor.waitForFunction(() => document.querySelector('#draft-status').textContent.startsWith('已儲存') && !document.querySelector('#mission-fields').disabled);
     const fixedId = (await api(`/missions/${saved.id}/history`)).headId;
     await editor.locator('#launch-version').click(); await status('launch', 'valid'); await editor.locator('#launch-room').selectOption('3');
     check(await editor.locator('#create-session-form button').isEnabled() && (await api(`/missions/${saved.id}/layout`)).canStart === false,
       'Saving a corrected revision enables that exact version while the immutable old version remains invalid');
+    const fixedLayout = await api(`/missions/${fixedId}/layout`);
+    check(await editor.locator('#launch-layout-props [data-index="0"]').getAttribute('transform') === 'translate(0 0) rotate(0)'
+      && await editor.locator('#launch-layout-props [data-layout-invalid]').count() === 0
+      && await editor.locator('#launch-layout-spawns circle').count() === 5
+      && await editor.locator('#launch-layout-routes polyline').count() === fixedLayout.routePreview.seats.filter(seat => seat.path.length).length,
+      'Selecting the corrected saved revision changes the map, spawns and route overlay together');
+    await editor.setViewportSize({ width: 390, height: 844 });
+    check(await editor.locator('#launch-layout-map').isVisible()
+      && await editor.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
+      'The opened saved map fits a 390-pixel console');
+    await editor.locator('#launch-layout-map-details').screenshot({ path: path.join(screenshots, 'layout-saved-mobile.png') });
+    await editor.setViewportSize({ width: 1440, height: 1080 });
     await editor.screenshot({ path: path.join(screenshots, 'layout-valid-launch.png'), fullPage: true });
     // Hold one valid result, switch selection, then deliver the obsolete result.
     let release, observed; let held = false;
@@ -58,6 +79,9 @@ module.exports = async function layoutBrowser({ context, api, tokens, base, miss
     release(); await editor.waitForTimeout(150);
     check(await editor.locator('#launch-layout-summary').getAttribute('data-status') === 'invalid' && await editor.locator('#create-session-form button').isDisabled(),
       'A delayed valid preflight cannot approve a different selected mission');
+    check(await editor.locator('#launch-layout-props [data-layout-invalid]').count() === 4
+      && await editor.locator('#launch-layout-routes polyline').count() === 0,
+      'A delayed report cannot replace another saved version’s map overlays');
     await editor.unroute(savedPattern);
     const dense = await api('/missions', 'POST', { ...mission.definition, name: '依模式核對初始敵軍', enemies: { ...mission.definition.enemies, count: 100 },
       props: [2, 4].flatMap(z => [-3, -1, 1, 3].map(x => prop('sandbag', x, z))) }, 'Master', 201);
@@ -69,6 +93,8 @@ module.exports = async function layoutBrowser({ context, api, tokens, base, miss
     await editor.route(savedPattern, async route => { const response = await route.fetch(); const report = await response.json(); await route.fulfill({ json: { ...report, version: 999 } }); });
     await editor.locator('#layout-recheck-launch').click(); await editor.waitForFunction(() => document.querySelector('#launch-layout-summary').textContent.includes('未完成'));
     check(await editor.locator('#create-session-form button').isDisabled(), 'Unknown preflight versions fail closed instead of enabling launch');
+    check(!await editor.locator('#launch-layout-map-details').isVisible() && await editor.locator('#launch-layout-props [data-index]').count() === 0,
+      'An unrecognized report clears the saved map');
     await editor.unroute(savedPattern); await editor.locator('#layout-recheck-launch').click(); await status('launch', 'valid');
     // A late valid draft response must not repaint red props as valid.
     await editor.locator('#tab-missions').click(); let releaseDraft, observedDraft; let heldDraft = false;
@@ -88,6 +114,9 @@ module.exports = async function layoutBrowser({ context, api, tokens, base, miss
     await editor.locator('#launch-version').click();
     await editor.locator('#launch-layout-route-summary').filter({ hasText: '未找到通往中線' }).waitFor();
     check(await editor.locator('#create-session-form button').isEnabled(), 'A sampled route warning on a saved mission leaves its intentional barricade startable');
+    check(await editor.locator('#launch-layout-spawns [data-route-missing]').count() === 5
+      && await editor.locator('#launch-layout-routes polyline').count() === 0,
+      'The startable saved barricade marks all five missing sample routes on the launch map');
     await editor.locator('#tab-missions').click();
     const trial = editor.locator('#layout-try-removal'), trialStatus = editor.locator('#layout-trial-status');
     const original = await editor.locator('#draft-status').innerText();
