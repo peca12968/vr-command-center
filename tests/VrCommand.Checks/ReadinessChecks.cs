@@ -329,5 +329,24 @@ internal static class ReadinessChecks
         store.ExecuteCommand(id, new(Guid.NewGuid(), ControlAction.Pause), master);
         check(store.ExecuteCommand(id, resume, master) is { Duplicate: true } retry && retry.AppliedAtSequence == continued.AppliedAtSequence
             && retry.Session.State == SessionState.Paused, "An accepted Resume retry returns the original receipt without overriding a later Pause");
+
+        VenuePhaseFence[] Fences(VenuePhaseTarget[] targets) => targets.Select(target => new VenuePhaseFence(target.SessionId, target.PhaseSinceSequence)).ToArray();
+        Refresh();
+        check(bridge.Pose(2, bravoHead, bravoHead, new(0, 0, 1), 1.6, tracked: true), "MR test recovers the original tracked seat for the venue transition");
+        store.Append(id, Frame(9), server);
+        clock.Now = start.AddMilliseconds(400);
+        store.ExecuteCommand(id, new(Guid.NewGuid(), ControlAction.Resume), master);
+        store.ExecuteVenuePhase(ControlAction.Pause, Fences(manager.ReadVenuePhase(master).Pause), Guid.NewGuid(), master);
+        var venueResume = Fences(manager.ReadVenuePhase(master).Resume);
+        var venueKey = Guid.NewGuid();
+        Reject<VenueResumeNotReadyException>(() => store.ExecuteVenuePhase(ControlAction.Resume, venueResume, venueKey, master),
+            "Whole-venue Resume cannot use a paused frame from before its own phase transition");
+        Refresh(); store.Append(id, Frame(10), server);
+        clock.Now = start.AddMilliseconds(450);
+        check(!store.ExecuteVenuePhase(ControlAction.Resume, venueResume, venueKey, master).Duplicate && manager.Get(id).State == SessionState.Running,
+            "Whole-venue Resume uses the original MR gate with a fresh paused frame and tracked admissions");
+        clock.Now = start.AddSeconds(5);
+        check(store.ExecuteVenuePhase(ControlAction.Resume, venueResume, venueKey, master).Duplicate,
+            "An already committed whole-venue Resume keeps its receipt after tracking data expires");
     }
 }

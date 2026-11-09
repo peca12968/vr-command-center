@@ -18,6 +18,9 @@ public record RoomMissionTime(string Phase, long ElapsedSeconds, long RemainingS
 
 public sealed partial class WorldRecordings
 {
+    private const double MaxSourceAgeMilliseconds = 1500;
+    private const double FutureSourceToleranceMilliseconds = 1000;
+
     public CommandReceipt ExecuteCommand(Guid id, ControlCommand command, OperatorIdentity actor)
     {
         if (command.Action is not (ControlAction.Begin or ControlAction.Resume)) return manager.Execute(id, command, actor);
@@ -32,6 +35,29 @@ public sealed partial class WorldRecordings
             var readiness = command.Action == ControlAction.Resume ? report.MrResumeState : report.MrStartState;
             var ready = report.SessionSequence == current.Sequence && readiness == "Ready";
             return manager.Execute(id, command, actor, ready ? current.Sequence : null);
+        }
+    }
+
+    public VenuePhaseReceipt ExecuteVenuePhase(ControlAction action, VenuePhaseFence?[]? fences, Guid requestId, OperatorIdentity actor)
+    {
+        if (action != ControlAction.Resume) return manager.ExecuteVenuePhase(action, fences, requestId, actor);
+        lock (gate)
+        {
+            var expected = (fences ?? []).OfType<VenuePhaseFence>().ToHashSet();
+            var reports = new List<SessionReadiness>();
+            foreach (var target in manager.ReadVenuePhase(actor).Resume.Where(target => expected.Contains(new(target.SessionId, target.PhaseSinceSequence))))
+            {
+                var session = manager.Get(target.SessionId, actor);
+                if (!SessionManager.RequiresMrReadiness(session, action)) continue;
+                var report = Readiness(target.SessionId, actor);
+                if (report.MrResumeState == "Ready" && report.SessionSequence == session.Sequence)
+                    reports.Add(report);
+            }
+            var now = readinessClock.GetUtcNow();
+            var ready = reports.Where(report => report.CapturedAtUtc is { } captured
+                && (now - captured).TotalMilliseconds is >= -FutureSourceToleranceMilliseconds and <= MaxSourceAgeMilliseconds)
+                .ToDictionary(report => report.SessionId, report => report.SessionSequence);
+            return manager.ExecuteVenuePhase(action, fences, requestId, actor, ready);
         }
     }
 
@@ -80,7 +106,7 @@ public sealed partial class WorldRecordings
             var age = info?.CapturedAtUtc is { } captured ? (double?)(now - captured).TotalMilliseconds : null;
             var source = current.State == SessionState.Ended ? "Ended"
                 : info is null ? "NoRecording" : frame is null ? "WaitingFrame"
-                : age is null ? "UnknownCaptureTime" : age < -1000 ? "ClockSkew" : age > 1500 ? "Stale"
+                : age is null ? "UnknownCaptureTime" : age < -FutureSourceToleranceMilliseconds ? "ClockSkew" : age > MaxSourceAgeMilliseconds ? "Stale"
                 : info.Complete ? "Ended" : frame.Packet.suspended ? "Suspended"
                 : frame.Packet.frame.phase != current.State.ToString() ? "PhasePending" : "Fresh";
             var players = current.Players.Select(player =>

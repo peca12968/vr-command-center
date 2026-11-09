@@ -8,12 +8,12 @@ public interface ISessionEventStore
     void Append(SessionEvent entry);
 }
 
-public interface IAtomicSessionCreationStore : ISessionEventStore
+public interface IAtomicSessionEventStore : ISessionEventStore
 {
-    void AppendInitialBatch(SessionEvent[] entries);
+    void AppendBatch(SessionEvent[] entries);
 }
 
-public sealed class MemorySessionEventStore : IAtomicSessionCreationStore
+public sealed class MemorySessionEventStore : IAtomicSessionEventStore
 {
     private readonly Dictionary<Guid, List<SessionEvent>> streams = [];
     public SessionEvent[][] Load() => streams.Values.Select(events => events.ToArray()).ToArray();
@@ -27,12 +27,12 @@ public sealed class MemorySessionEventStore : IAtomicSessionCreationStore
     }
     public void Seed(Guid sessionId, SessionEvent[] events) => streams[sessionId] = [.. events];
 
-    public void AppendInitialBatch(SessionEvent[] entries)
+    public void AppendBatch(SessionEvent[] entries)
     {
         if (entries.Length == 0 || entries.Select(entry => entry.SessionId).Distinct().Count() != entries.Length
-            || entries.Any(entry => entry.Sequence != 1 || entry.Kind != SessionEventKind.Created || streams.ContainsKey(entry.SessionId)))
-            throw new InvalidOperationException("The batch requires distinct new session histories.");
-        foreach (var entry in entries) streams.Add(entry.SessionId, [entry]);
+            || entries.Any(entry => entry.Sequence != (streams.GetValueOrDefault(entry.SessionId)?.Count ?? 0) + 1))
+            throw new InvalidOperationException("The batch requires the next event of each distinct session.");
+        foreach (var entry in entries) Append(entry);
     }
 }
 

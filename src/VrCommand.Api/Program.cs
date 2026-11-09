@@ -93,6 +93,10 @@ app.Use(async (context, next) =>
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "independent-rooms-occupied", roomIds = occupied.RoomIds });
         else if (ex is MrVenueBundleConflict venue)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = venue.Code, roomId = venue.RoomId });
+        else if (ex is VenuePhaseChangedException)
+            await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "venue-phase-changed" });
+        else if (ex is VenueResumeNotReadyException notReady)
+            await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "venue-resume-not-ready", roomIds = notReady.RoomIds });
         else await context.Response.WriteAsJsonAsync(new { error = ex.Message });
     }
 });
@@ -167,6 +171,19 @@ app.MapGet("/api/sessions/{id:guid}/rooms/{roomId:int}/hardware-feedback", (Guid
 });
 app.MapPost("/api/sessions/{id:guid}/commands", (Guid id, ControlCommand command, WorldRecordings worlds, HttpContext context) =>
     worlds.ExecuteCommand(id, command, Actor(context)));
+app.MapGet("/api/venue/phase", (SessionManager manager, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    return manager.ReadVenuePhase(Actor(context));
+});
+app.MapPost("/api/venue/phase", (VenuePhaseRequest request, WorldRecordings worlds, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var actor = Actor(context);
+    if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue phase operations require the master operator.");
+    var key = RequestId(context) ?? throw new ArgumentException("Idempotency-Key is required for venue phase changes.");
+    return worlds.ExecuteVenuePhase(request.Action, request.Targets, key, actor);
+});
 app.MapGet("/api/sessions/{id:guid}/statistics", (Guid id, SessionManager manager, HttpContext context) =>
     manager.Statistics(id, Actor(context)));
 app.MapGet("/api/sessions/{id:guid}/field-evidence.zip", (Guid id, WorldRecordings worlds, HttpContext context) =>
@@ -293,5 +310,6 @@ static Guid? AdmissionMatch(HttpContext context)
 
 record CreateSession(Guid MissionId, SessionMode Mode, int[] RoomIds);
 record CreateIndependentSet(Guid MissionId);
+record VenuePhaseRequest(ControlAction Action, VenuePhaseFence?[]? Targets);
 record JoinPlayer(Guid PlayerId, string Name, int RoomId, HeadsetKind Headset);
 record ValidatePlayerTicket(Guid SessionId, string Ticket, int ProtocolVersion = 0);

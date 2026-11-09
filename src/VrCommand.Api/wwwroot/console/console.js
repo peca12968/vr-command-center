@@ -15,7 +15,7 @@ const $ = id => document.getElementById(id);
 const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫停', Ended: '已結束' };
 const weatherNames = { Clear: '晴朗', Rain: '下雨', Fog: '濃霧', Storm: '暴風雨' };
 const behaviorNames = { Hold: '守備', Patrol: '巡邏', Advance: '推進' };
-const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: null, rooms: [], missions: [], catalog: [], launchPinned: null, history: null, draftBase: null, draftChanged: false, draftSavedAt: '', sessions: [], session: null, selected: null, pending: null, props: [], prop: -1, environmentSequence: null, enemiesSequence: null };
+const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: null, rooms: [], venue: null, missions: [], catalog: [], launchPinned: null, history: null, draftBase: null, draftChanged: false, draftSavedAt: '', sessions: [], session: null, selected: null, pending: null, props: [], prop: -1, environmentSequence: null, enemiesSequence: null };
 const objectHistory = placementHistory();
 const world = mountWorld(() => state.key, logout);
 const report = mountReport(() => state, logout);
@@ -96,6 +96,8 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
         else if (code === 'mr-resume-readiness-required') message = 'MR 場次尚未符合繼續條件。請查看「MR 繼續檢查」。';
         else if (code === 'mr-alignment-required') message = '請由主控鎖定 MR 校正檔後再配票。';
         else if (code === 'independent-rooms-occupied' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 使用中，五場都未建立。請確認房間狀態後再試。`;
+        else if (code === 'venue-phase-changed') message = '全館場次狀態已變更，本批命令未套用。請重新整理後確認房間。';
+        else if (code === 'venue-resume-not-ready' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 的 MR 追蹤尚未就緒，本批場次維持暫停。`;
         else message = path.startsWith('/missions') ? '任務版本已變更或原請求內容不一致；草稿仍保留，可載入最新版或另存新任務。' : '場次狀態或名額已變更，請重新整理並確認後再操作。';
       }
       if (layout) message = '場地配置未通過檢查，請修正並保存新版本後再開場。';
@@ -147,7 +149,7 @@ function logout() {
   mrVenue.active(false);
   replay.active(false); replay.reset(); world.active(false); world.reset(); readiness.active(false); readiness.reset(); roomReadiness.active(false); connections.active(false); connections.reset();
   state.epoch++; state.key = ''; state.actor = null; state.selected = null; state.session = null; state.pending = null;
-  state.rooms = []; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
+  state.rooms = []; state.venue = null; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
   state.props = []; state.prop = -1; clearPropHistory();
   placement.reset();
   clearInterval(timer);
@@ -182,14 +184,18 @@ function refresh() {
   if (!state.actor || state.pending) return Promise.resolve();
   if (state.refreshPromise) return state.refreshPromise;
   const epoch = state.epoch;
-  const pending = refreshData(epoch).catch(error => { if (epoch === state.epoch) closure.invalidate(); throw error; }).finally(() => { if (state.refreshPromise === pending) state.refreshPromise = null; });
+  const pending = refreshData(epoch).catch(error => {
+    if (epoch === state.epoch) { closure.invalidate(); state.venue = null; applyVenuePermissions(); }
+    throw error;
+  }).finally(() => { if (state.refreshPromise === pending) state.refreshPromise = null; });
   state.refreshPromise = pending;
   return pending;
 }
 async function refreshData(epoch) {
   const selection = selectionEpoch, includeEnded = $('include-ended').checked;
   const current = () => epoch === state.epoch && selection === selectionEpoch && includeEnded === $('include-ended').checked;
-  const [rooms, catalog, sessions] = await Promise.all([api('/rooms'), api('/mission-library'), api('/sessions?includeEnded=' + includeEnded)]);
+  const venueRead = master() ? api('/venue/phase').catch(error => { if (error.status === 401) throw error; return null; }) : null;
+  const [rooms, catalog, sessions, venue] = await Promise.all([api('/rooms'), api('/mission-library'), api('/sessions?includeEnded=' + includeEnded), venueRead]);
   if (!current()) return;
   const merged = new Map(state.catalog.map(row => [row.seriesId, row]));
   for (const row of catalog) if (!merged.has(row.seriesId) || merged.get(row.seriesId).number < row.number) merged.set(row.seriesId, row);
@@ -198,7 +204,7 @@ async function refreshData(epoch) {
   const prior = [...state.catalog, state.launchPinned].find(row => row?.mission.id === launch);
   const editedSeries = state.catalog.find(row => row.mission.id === edit)?.seriesId;
   state.launchPinned = prior && !heads.some(row => row.mission.id === launch) ? prior : null;
-  state.rooms = rooms; state.catalog = heads; state.missions = heads.map(row => row.mission); state.sessions = sessions;
+  state.rooms = rooms; state.venue = venue; state.catalog = heads; state.missions = heads.map(row => row.mission); state.sessions = sessions;
   if (state.selected === null && sessions.length) state.selected = sessions[0].id;
   else if (state.selected && !sessions.some(s => s.id === state.selected)) resetSelection('');
   missionOptions(launch, heads.find(row => row.seriesId === editedSeries)?.mission.id || edit);
@@ -294,6 +300,7 @@ function renderLaunchPreview(plan) {
 function applyPermissions() {
   if (!state.actor) return;
   const session = state.session, ended = session?.state === 'Ended', locked = state.busy || !!state.pending;
+  applyVenuePermissions();
   $('create-fields').disabled = locked || state.actor.role === 'GameServer';
   $('launch-room').disabled = $('launch-mode').value !== 'Independent';
   const plan = launchPlan();
@@ -343,6 +350,31 @@ function applyPermissions() {
   alignmentPins.update();
   mrDeployment.update();
   mrVenue.update();
+}
+function venueTargets(action) {
+  const rows = state.venue?.[action === 'Pause' ? 'pause' : 'resume'];
+  return Array.isArray(rows) && rows.length <= 5 && rows.every(row => typeof row?.sessionId === 'string'
+    && Number.isSafeInteger(row.phaseSinceSequence) && row.phaseSinceSequence > 0 && Array.isArray(row.roomIds)
+    && row.roomIds.length > 0 && row.roomIds.every(id => Number.isInteger(id) && id >= 1 && id <= 5)) ? rows : [];
+}
+function venueRoomText(targets) { return targets.flatMap(row => row.roomIds).sort((a, b) => a - b).join('、'); }
+function applyVenuePermissions() {
+  $('venue-phase').hidden = !master();
+  const pause = venueTargets('Pause'), resume = venueTargets('Resume'), locked = state.busy || !!state.pending || !master();
+  $('venue-pause').disabled = locked || !pause.length;
+  $('venue-resume').disabled = locked || !resume.length;
+  const describe = targets => targets.length ? '房間 ' + venueRoomText(targets) : '無';
+  $('venue-phase-targets').textContent = state.venue ? `可暫停 ${describe(pause)} · 可繼續 ${describe(resume)}` : '等待房間狀態。';
+}
+async function venuePhase(action) {
+  if (!master() || state.pending) return;
+  const targets = venueTargets(action);
+  if (!targets.length) return;
+  const verb = action === 'Pause' ? '暫停' : '繼續';
+  if (!confirm(`${verb}房間 ${venueRoomText(targets)} 的 ${targets.length} 個場次？`)) return;
+  state.pending = { kind: 'venue-phase', path: '/venue/phase', method: 'POST', requestId: uuid(),
+    body: { action, targets: targets.map(({ sessionId, phaseSinceSequence }) => ({ sessionId, phaseSinceSequence })) } };
+  await sendPending();
 }
 function row(cells) { const tr = element('tr'); for (const value of cells) { const td = element('td'); if (value instanceof Node) td.append(value); else td.textContent = value; tr.append(td); } return tr; }
 function emptyTable(id, columns, message) { const tr = element('tr'), td = element('td', message, 'empty-cell'); td.colSpan = columns; tr.append(td); $(id).replaceChildren(tr); }
@@ -444,16 +476,27 @@ async function sendPending() {
       $('include-ended').checked = sessions.some(session => session.state === 'Ended');
       resetSelection((sessions.find(session => session.state !== 'Ended') ?? sessions[0]).id);
     }
+    if (pending.kind === 'venue-phase') {
+      const targets = pending.body.targets;
+      if (response?.requestId !== pending.requestId || response.action !== pending.body.action || typeof response.duplicate !== 'boolean'
+          || !Array.isArray(response.sessions) || response.sessions.length !== targets.length
+          || targets.some(target => !response.sessions.some(row => row?.sessionId === target.sessionId
+            && Number.isSafeInteger(row.appliedAtSequence) && row.appliedAtSequence > target.phaseSinceSequence)))
+        throw new Error('Incomplete venue phase receipt');
+    }
     state.pending = null;
     if (pending.kind === 'create') { $('include-ended').checked = response.state === 'Ended'; resetSelection(response.id); }
     if (pending.kind === 'command' && pending.body.action === 'End' && response.session.state === 'Ended') $('include-ended').checked = true;
     if (pending.kind === 'join') $('player-name').value = '';
     await refresh(); loadEnvironment(); loadEnemies(); loadClock();
-    notify({ create: '場次建立結果已確認。請核對目前狀態，再加入玩家及開始任務。', 'create-set': '五個獨立場次已確認。請由各房核對名冊及準備狀態。', join: '玩家加入操作已確認，請核對目前名冊；尚不代表頭盔在線。', leave: '玩家移出操作已確認，請核對目前名冊。', command: '控制命令已確認。' }[pending.kind]);
+    notify({ create: '場次建立結果已確認。請核對目前狀態，再加入玩家及開始任務。', 'create-set': '五個獨立場次已確認。請由各房核對名冊及準備狀態。', join: '玩家加入操作已確認，請核對目前名冊；尚不代表頭盔在線。', leave: '玩家移出操作已確認，請核對目前名冊。', command: '控制命令已確認。', 'venue-phase': '全館管理命令已確認。可從各房快照核對遊戲端套用狀態。' }[pending.kind]);
   } catch (error) {
     if (pending.kind === 'create' && error.layout) placement.rejected(pending.body.missionId, pending.body.mode, error.layout);
     if (pending.kind === 'create-set' && error.layout) placement.rejected(pending.body.missionId, 'Independent', error.layout);
-    if (state.pending === pending && !pending.accepted && error.status >= 400 && error.status < 500) state.pending = null;
+    if (state.pending === pending && !pending.accepted && error.status >= 400 && error.status < 500) {
+      state.pending = null;
+      if (pending.kind === 'venue-phase') state.venue = null;
+    }
     throw error;
   }
 }
@@ -699,6 +742,8 @@ $('launch-room').addEventListener('change', applyPermissions);
 $('reload-environment').addEventListener('click', loadEnvironment);
 $('reload-enemies').addEventListener('click', loadEnemies);
 $('retry-command').addEventListener('click', () => run(sendPending));
+$('venue-pause').addEventListener('click', () => run(() => venuePhase('Pause')));
+$('venue-resume').addEventListener('click', () => run(() => venuePhase('Resume')));
 $('download-room-tickets').addEventListener('click', downloadRoomTickets);
 $('ticket-room').addEventListener('change', applyPermissions);
 document.querySelectorAll('[data-command]').forEach(button => button.addEventListener('click', () => runSession(() => command(button.dataset.command))));

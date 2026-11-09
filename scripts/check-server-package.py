@@ -58,6 +58,7 @@ def main():
     p.add_argument('--field-evidence',action='store_true',help='Verify the management ZIP with the original Linked player and server logs')
     p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
     p.add_argument('--check-room-clocks', action='store_true', help='Verify room clocks and the original pause/resume boundaries in both modes')
+    p.add_argument('--check-venue-phase', action='store_true', help='Verify whole-venue pause and resume against both native topologies')
     p.add_argument('--check-layout-preview',action='store_true',help='Load a saved barricade opening and compare its preview with native world geometry')
     p.add_argument('--check-room-reports',action='store_true',help='Verify scoped Linked CSVs and the ZIP against the full sealed native report')
     p.add_argument('--check-room-combat',action='store_true',help='Require actual enemy damage on every original admission and reconcile each replay frame and final report')
@@ -79,6 +80,7 @@ def main():
     if args.field_evidence and not args.peer_diagnostics:p.error('--field-evidence requires --peer-diagnostics')
     if args.check_room_readiness and not args.player_package:p.error('--check-room-readiness requires five players per room')
     if args.check_room_clocks and not args.player_package:p.error('--check-room-clocks requires five players per room')
+    if args.check_venue_phase and not args.check_room_clocks:p.error('--check-venue-phase requires --check-room-clocks')
     if args.check_room_reports and not args.player_package:p.error('--check-room-reports requires the three-package check')
     if args.check_room_combat and not args.check_room_reports:p.error('--check-room-combat requires --check-room-reports')
     if args.check_hardware_feedback and not args.check_room_combat:p.error('--check-hardware-feedback requires --check-room-combat')
@@ -594,6 +596,44 @@ def main():
         resumed = wait(lambda: snapshot('Running', resume, (1, first[0]['clock']['elapsedSeconds'])), 15, mode+' resume advances original clock')
         check(True, mode+' accepts a new running clock after the original Resume')
         save(mode+'-room-clocks.json', {'running':running, 'paused':first, 'frozen':frozen, 'resumed':resumed})
+    def verify_venue_phase(entries, linked):
+        mode = 'linked' if linked else 'independent'
+        room_two = None if linked else entries[1]['sessionId']
+        if room_two: command(room_two, 'Pause')
+        route = '/api/venue/phase'
+        def submit(action):
+            targets = request(route)[action.lower()]
+            wanted = {entry['sessionId'] for entry in entries if entry['sessionId'] != room_two}
+            assert {row['sessionId'] for row in targets} == wanted
+            body = {'action': action, 'targets': [{key: row[key] for key in ('sessionId', 'phaseSinceSequence')} for row in targets]}
+            key = str(uuid.uuid4())
+            receipt = request(route, body, request_id=key)
+            assert not receipt['duplicate'] and receipt['requestId'] == key and receipt['action'] == action
+            assert {row['sessionId'] for row in receipt['sessions']} == wanted
+            return body, key, receipt
+        def observe_phase(phase, receipt, previous=None):
+            rows = request('/api/rooms/readiness')['rooms']
+            applied = {row['sessionId']: row['appliedAtSequence'] for row in receipt['sessions']}
+            if len(rows) != 5: return None
+            for row in rows:
+                clock = row.get('clock'); manual = row['sessionId'] == room_two
+                if not clock or clock['phase'] != ('Paused' if manual else phase): return None
+                if not manual and (row['sessionId'] not in applied or row['sessionSequence'] < applied[row['sessionId']]): return None
+                if previous:
+                    before = previous[row['roomId']-1]['clock']['elapsedSeconds']
+                    if manual and clock['elapsedSeconds'] != before or not manual and clock['elapsedSeconds'] <= before: return None
+            return rows
+        body, key, pause = submit('Pause')
+        paused = wait(lambda: observe_phase('Paused', pause), 15, mode+' all original paused sources observe venue command')
+        check(True, mode+' venue Pause reaches all targeted native sources with one management receipt')
+        _, _, resume = submit('Resume')
+        resumed = wait(lambda: observe_phase('Running', resume, paused), 15, mode+' venue Resume advances only targeted native sources')
+        check(True, mode+' venue Resume advances the target clocks and preserves a manual pause when present')
+        retry = request(route, body, request_id=key)
+        check(retry['duplicate'] and retry['sessions'] == pause['sessions'] and request(route)['resume'] == [],
+              mode+' late venue Pause retry keeps the original receipt without pausing again')
+        save(mode+'-venue-phase.json', {'pause': pause, 'paused': paused, 'resume': resume, 'resumed': resumed, 'pauseRetry': retry})
+        if room_two: command(room_two, 'Resume')
     def check_mr_venue_bundle():
         pwsh = shutil.which('pwsh')
         if not pwsh: raise RuntimeError('PowerShell is required for Quest venue preflight')
@@ -757,6 +797,7 @@ def main():
                     for c in round_clients),'25 simultaneous owned native players '+('Linked' if linked else 'Independent'))
             if args.check_room_readiness:verify_room_readiness(round_clients,linked)
             if args.check_room_clocks:verify_room_clocks(entries,linked)
+            if args.check_venue_phase:verify_venue_phase(entries,linked)
             if args.check_room_combat:
                 stage('running-native-ai-combat',mode='Linked' if linked else 'Independent')
                 exercise_room_combat(entries,round_clients)
@@ -890,6 +931,7 @@ def main():
             'managedMrPreparing':args.check_managed_mr,
             'roomCombat':args.check_room_combat,
             'roomClocks':args.check_room_clocks,
+            'venuePhase':args.check_venue_phase,
             'hardwareFeedback':args.check_hardware_feedback,
             'hardwareMockPackage':hardware_manifest['toolVersion'] if args.hardware_simulator_package else None,
             'preparedIndependentSet':args.prepare_independent_set,

@@ -66,6 +66,7 @@ public sealed partial class SessionManager
                 if (entry.Kind == SessionEventKind.ControlApplied && !commands.TryAdd(entry.Read<ControlCommand>().CommandId, entry))
                     throw new InvalidDataException("Duplicate command ID in session history.");
                 var next = SessionProjection.Apply(view, entry);
+                if (entry.Venue is not null) RestoreVenueEvent(events, entry, phaseSince);
                 combat.Prepare(CombatBefore(view, entry, authority), entry)();
                 phaseSince = PhaseSince(view, next, phaseSince);
                 view = next;
@@ -82,6 +83,7 @@ public sealed partial class SessionManager
         if (rooms.Distinct().Count() != rooms.Length || players.Distinct().Count() != players.Length)
             throw new InvalidDataException("Restored active sessions contain conflicting reservations.");
         RestoreIndependentSets();
+        ValidateRestoredVenueTransitions();
     }
 
     public SessionView Create(SessionMode mode, int[] roomIds, Mission mission, OperatorIdentity? actor = null, Guid? requestId = null)
@@ -290,6 +292,12 @@ public sealed partial class SessionManager
         var applyCombat = combat.Prepare(CombatBefore(previous?.View, entry, authority), entry);
         eventStore.Append(entry); // Memory advances only after the durable append succeeds.
         applyCombat();
+        RememberCommitted(previous, entry, view, combat, authority);
+        return Snapshot(view);
+    }
+
+    private void RememberCommitted(History? previous, SessionEvent entry, SessionView view, CombatLedger combat, List<SessionView> authority)
+    {
         var events = previous?.Events ?? [];
         var commands = previous?.Commands ?? [];
         events.Add(entry);
@@ -298,7 +306,6 @@ public sealed partial class SessionManager
         sessions[entry.SessionId] = new(view, events, commands, combat, authority,
             PhaseSince(previous?.View, view, previous?.PhaseSinceSequence ?? 0));
         if (entry.RequestId.HasValue) requests.Add(entry.RequestId.Value, entry);
-        return Snapshot(view);
     }
 
     private static long PhaseSince(SessionView? previous, SessionView current, long phaseSince) =>

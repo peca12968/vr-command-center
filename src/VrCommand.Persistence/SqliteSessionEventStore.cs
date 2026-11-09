@@ -4,7 +4,7 @@ using VrCommand.Core;
 
 namespace VrCommand.Persistence;
 
-public sealed class SqliteSessionEventStore : IAtomicSessionCreationStore, IDisposable
+public sealed class SqliteSessionEventStore : IAtomicSessionEventStore, IDisposable
 {
     private readonly FileStream lease;
     private readonly SqliteConnection connection;
@@ -104,6 +104,12 @@ public sealed class SqliteSessionEventStore : IAtomicSessionCreationStore, IDisp
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         using var transaction = connection.BeginTransaction();
+        AppendNext(transaction, entry);
+        transaction.Commit();
+    }
+
+    private void AppendNext(SqliteTransaction transaction, SessionEvent entry)
+    {
         using var last = connection.CreateCommand();
         last.Transaction = transaction;
         last.CommandText = "SELECT COALESCE(MAX(sequence),0) FROM session_events WHERE session_id=$session";
@@ -111,16 +117,15 @@ public sealed class SqliteSessionEventStore : IAtomicSessionCreationStore, IDisp
         if (entry.Sequence != (long)last.ExecuteScalar()! + 1)
             throw new InvalidOperationException("Unexpected storage sequence; reload the session.");
         Insert(transaction, entry);
-        transaction.Commit();
     }
 
-    public void AppendInitialBatch(SessionEvent[] entries)
+    public void AppendBatch(SessionEvent[] entries)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-        if (entries.Length == 0 || entries.Any(entry => entry.Sequence != 1 || entry.Kind != SessionEventKind.Created))
-            throw new InvalidOperationException("The batch requires new session histories.");
+        if (entries.Length == 0 || entries.Select(entry => entry.SessionId).Distinct().Count() != entries.Length)
+            throw new InvalidOperationException("The batch requires the next event of each distinct session.");
         using var transaction = connection.BeginTransaction();
-        foreach (var entry in entries) Insert(transaction, entry);
+        foreach (var entry in entries) AppendNext(transaction, entry);
         transaction.Commit();
     }
 

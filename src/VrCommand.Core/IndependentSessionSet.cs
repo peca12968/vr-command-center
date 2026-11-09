@@ -30,7 +30,7 @@ public sealed partial class SessionManager
             var occupied = Active().SelectMany(session => session.RoomIds).Order().ToArray();
             if (occupied.Length > 0) throw new IndependentRoomsOccupiedException(occupied);
             MissionLayout.RequireNewStart(mission.Definition, SessionMode.Independent);
-            if (eventStore is not IAtomicSessionCreationStore store)
+            if (eventStore is not IAtomicSessionEventStore store)
                 throw new InvalidOperationException("Five independent sessions require a transactional session store.");
 
             var ids = Enumerable.Range(1, RoomCount).Select(_ => Guid.NewGuid()).ToArray();
@@ -38,7 +38,7 @@ public sealed partial class SessionManager
                 new SessionCreated(SessionMode.Independent, [index + 1], mission, requestId), actor,
                 index == 0 ? requestId : null)).ToArray();
             var views = entries.Select(entry => SessionProjection.Apply(null, entry)).ToArray();
-            store.AppendInitialBatch(entries);
+            store.AppendBatch(entries);
             for (var index = 0; index < entries.Length; index++)
             {
                 var view = views[index];
