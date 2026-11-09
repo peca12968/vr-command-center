@@ -153,6 +153,23 @@ node tests/browser/check-external-native.cjs <本次ready.json> <解壓玩家包
 
 驗收工具使用 PowerShell 重新配對兩端報告，核對遊戲伺服器原綁定位址及埠，以及至少一位已收到伺服器戰績確認的玩家 UDP 來源。預檢須使用含 UTC 完成時間的報告，監聽端完成時間須在啟動器觀察綁定前 30 分鐘內。同一場館批次提供預檢時須涵蓋所有場次。摘要只列樣本數與交換摘要。實體主機身分與容量仍需現地驗收。
 
+### 核對每個玩家來源的 UDP 預檢
+
+若要核對所有玩家來源，在每個遊戲端點啟動前，依玩家預計使用的來源 IPv4 各跑一次雙端探測。同一遊戲埠可等上一組監聽程序退出後再使用。保留每組的原報告，最後仍以原入場及戰績確認所對應的實際 UDP 來源核對。獨立場按各自的埠處理，合併場則按共用的埠逐一核對來源。
+
+單場在原驗收指令中重複加入 `--udp-source-preflight LISTENER PROBE`。全館清單在每個 `sessions[]` 填 `udpSourcePreflights`，例如下列兩組原報告。選用這個模式時，該批每場都需要使用相同模式。
+
+```json
+{
+  "udpSourcePreflights": [
+    {"listener": "probe-a-listener.ndjson", "probe": "probe-a.json"},
+    {"listener": "probe-b-listener.ndjson", "probe": "probe-b.json"}
+  ]
+}
+```
+
+每個遊戲綁定的實際來源 IPv4 必須恰有一組有效報告。驗收會拒絕缺少、來源重複、未確認來源、重複交換摘要或過期的報告。單場摘要的 `udpSourcePreflight` 列出觀察到及驗證成功的來源數，和各組樣本數與交換摘要。全館另有 `udpSourcePreflightsVerified`。多席共用同一個來源 IPv4 時，在該遊戲埠只算一組。兩端 PowerShell 探測目前用於 Windows 部署，實體設備數及跨機容量仍須現場核對。Quest 席位的實機入場與戰績可沿用原始 logcat 驗收。 [Quest 擷取](QUEST3.md#收集-quest-場館驗收日誌)
+
 ### 核對封存戰績與 UDP 來源
 
 離線核對工具使用已完成的一場 Windows 伺服器任務。啟動器 1.7 可勾選「記錄本次玩家連線來源（場館驗收）」，CLI 可加 `--peer-diagnostics on`。將公告及本機綁定都設為這台電腦實際使用的 IPv4，選擇名冊固定的場次。結束後等待原啟動器寫出 `sealed-stopped` 報告，並等玩家寫完戰績與斷線日誌。 [伺服器操作](WINDOWS_SERVER_PACKAGE.md#跨機來源診斷)
@@ -208,6 +225,7 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `sessions[].worldJournal` | 選用。若驗收回放檔，每個場次都填自己關閉後的原始 `.worldlog` 路徑 |
 | `sessions[].roomAlignments` | 選用。核對 MR 校正時，每個 MR 場次按房號填原校正檔，例如 `{"2":"room-02-alignment.json"}` |
 | `sessions[].udpPreflight` | 選用。每場提供原 UDP 預檢報告的 `listener` 與 `probe` 路徑 |
+| `sessions[].udpSourcePreflights` | 選用。每場按實際來源 IPv4 填一組 `listener` 與 `probe`。全館統一使用此欄位或單組模式 |
 | `sessions[].players` | 每房五筆。每筆填玩家裝置實際使用的 IPv4 字串 `address` 及原日誌路徑 `log`。Quest 3 原 logcat 另填數字 `logcatPid`，例如 `7342` |
 
 若使用 Quest 整批擷取，從 `capture-report.json` 依 `sessionId` 和 `roomId` 取用 `complete` 為 `true` 的席位，將 `log` 路徑依清單位置調整，再填入 `logcatPid` 和原 IPv4。 [整批擷取](QUEST3.md#一次擷取五房-quest-日誌)

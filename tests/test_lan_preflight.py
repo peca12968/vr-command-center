@@ -118,7 +118,10 @@ class LanPreflightTests(unittest.TestCase):
         options = ['-ListenerReport', listener_report, '-ProbeReport', report]
         matched = self.run_script(*options, *expected)
         self.assertEqual(matched.returncode, 0, matched.stdout or matched.stderr)
-        self.assertIs(json.loads(matched.stdout)['endpointVerified'], True)
+        receipt = json.loads(matched.stdout)
+        self.assertIs(receipt['endpointVerified'], True)
+        self.assertEqual(1, receipt['verifiedPeerIndex'])
+        self.assertNotIn(probe_address, matched.stdout)
         for index, wrong in ((1, '127.0.0.3'), (3, str(port-1)), (5, LOOPBACK),
                              (7, (finished - timedelta(seconds=1)).isoformat()),
                              (7, (finished + timedelta(minutes=31)).isoformat())):
@@ -129,6 +132,20 @@ class LanPreflightTests(unittest.TestCase):
                 self.assertEqual(json.loads(rejected.stdout)['step'], 'binding')
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as next_owner:
             next_owner.bind((LOOPBACK, port))
+        with self.listener(port, 3, filename='listener-local.ndjson') as (listener, local_path):
+            local_probe = self.run_script('-Mode', 'Probe', *self.options(port, 3))
+            self.assertEqual(0, local_probe.returncode, local_probe.stderr or local_probe.stdout)
+            self.assertEqual(0, listener.wait(timeout=5))
+            local_finished = json.loads(local_path.read_text(encoding='utf-8').splitlines()[-1])
+        local_report = self.root / 'probe-local.json'
+        local_report.write_text(local_probe.stdout, encoding='utf-16')
+        expected[-1] = (datetime.fromisoformat(local_finished['completedAtUtc']) + timedelta(seconds=2)).isoformat()
+        local_pair = self.run_script('-ListenerReport', local_path, '-ProbeReport', local_report, *expected)
+        self.assertEqual(0, local_pair.returncode, local_pair.stderr or local_pair.stdout)
+        local_receipt = json.loads(local_pair.stdout)
+        self.assertEqual(0, local_receipt['verifiedPeerIndex'])
+        self.assertNotEqual(receipt['exchangeSha256'], local_receipt['exchangeSha256'])
+        self.assertNotIn(LOOPBACK, local_pair.stdout)
 
     def test_wrong_authentication_and_replay_are_not_echoed(self):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:

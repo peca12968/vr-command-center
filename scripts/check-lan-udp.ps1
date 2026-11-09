@@ -164,6 +164,7 @@ try {
                 throw 'The UDP exchange differs from the original binding, accepted peers or preflight window.'
             }
             $result.endpointVerified = $true
+            $result.verifiedPeerIndex = [Array]::IndexOf($peers, [string]$probe.localAddress)
         }
         Write-Result $result
         exit 0

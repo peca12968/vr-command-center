@@ -514,10 +514,11 @@ def main():
                         'players':[{'address':address,'log':str(c['log'])} for c in owners]}
                 preflight = (out/(entry['label']+'-lan-listener.ndjson'), out/(entry['label']+'-lan-probe.json')) if args.check_lan_preflight else None
                 if manifest_entry is not None and preflight is not None:
-                    manifest_entry['udpPreflight'] = dict(zip(('listener', 'probe'), map(str, preflight), strict=True))
+                    manifest_entry['udpSourcePreflights'] = [dict(zip(('listener', 'probe'), map(str, preflight), strict=True))]
                 ip=ipaddress.IPv4Address(address)
                 result=field.verify('same-host',{ip},read(entry['reportPath']),session,statistics,endpoint,server,
-                    [(ip,field.content(c['log'])) for c in owners], world_journal=world_journal, udp_preflight=preflight,
+                    [(ip,field.content(c['log'])) for c in owners], world_journal=world_journal,
+                    udp_source_preflights=[preflight] if preflight is not None else None,
                     verify_player_sources=args.check_venue_openxr and world_journal is not None)
                 save(entry['label']+'-field-results.json',result)
                 check(result['serverAcknowledgements']==len(acks),entry['label']+' field report matches same-PC endpoints and sealed player results')
@@ -525,7 +526,9 @@ def main():
                     check(result['worldJournal']['frames']==result['worldSequence'] and result['worldJournal']['runningFrames']>0,
                           entry['label']+' field report verifies the original closed world journal')
                 if preflight is not None:
-                    check(result['udpPreflight']['samples']==3,
+                    coverage = result['udpSourcePreflight']
+                    check(coverage['observedSourceAddresses']==coverage['verifiedSourceAddresses']==1
+                          and [pair['samples'] for pair in coverage['pairs']]==[3],
                           entry['label']+' field report binds the original UDP preflight to the server endpoint and accepted player sources')
             else:
                 check('VR_SERVER_PEER' not in server,entry['label']+' default does not record UDP peers')
@@ -630,7 +633,9 @@ def main():
                            for room in range(1,6) for seat in range(1,6)},
                   label+' closed field evidence identifies the exact mock OpenXR seat and all 24 desktop peers')
         if args.check_lan_preflight:
-            check(summary['udpPreflightsVerified'] == len(entries), label + ' original paired UDP reports match every sealed game endpoint')
+            check(summary['udpSourcePreflightsVerified'] == len(entries)
+                  and all(row['udpSourcePreflight']['verifiedSourceAddresses'] == 1 for row in summary['sessions']),
+                  label + ' original paired UDP reports cover all acknowledged source addresses at every sealed game endpoint')
         save(label + '-venue-field-results.json', summary)
         rejected = run('direct-lan')
         check(rejected.returncode == 1 and not rejected.stdout and 'outside the declared server addresses' in rejected.stderr,

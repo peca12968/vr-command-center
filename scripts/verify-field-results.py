@@ -297,24 +297,43 @@ def verify_udp_preflight(paths, binding, addresses):
     receipt = read_json(response.stdout.decode('utf-8-sig'))
     require(receipt.get('complete') is True and receipt.get('endpointVerified') is True and receipt.get('stage') == 'pair-verified',
             'UDP preflight pair has no binding confirmation')
-    return {'samples': integer(receipt['matched'], 1, 20), 'exchangeSha256': receipt['exchangeSha256']}
+    exchange = receipt['exchangeSha256']
+    require(type(exchange) is str and re.fullmatch(r'[0-9a-f]{64}', exchange), 'Invalid UDP exchange digest')
+    summary = {'samples': integer(receipt['matched'], 1, 20), 'exchangeSha256': exchange}
+    return summary, integer(receipt['verifiedPeerIndex'], 0, len(addresses) - 1)
+
+
+def verify_udp_source_preflights(pairs, binding, addresses):
+    require(1 <= len(pairs) == len(addresses) <= 25, 'Provide one UDP preflight pair for each acknowledged source address at this binding')
+    sources, exchanges, summaries = set(), set(), []
+    for pair in pairs:
+        summary, source = verify_udp_preflight(pair, binding, addresses)
+        exchange = summary['exchangeSha256']
+        require(source not in sources, 'UDP source preflights cover the same source more than once')
+        require(exchange not in exchanges, 'UDP source preflights reused an exchange')
+        sources.add(source)
+        exchanges.add(exchange)
+        summaries.append(summary)
+    return {'observedSourceAddresses': len(addresses), 'verifiedSourceAddresses': len(sources),
+            'pairs': sorted(summaries, key=lambda summary: summary['exchangeSha256'])}
 
 
 def verify(topology, server_ips, launcher, session, statistics, endpoint, server_log, player_logs, *, quest_player_logs=(),
-           world_journal=None, room_alignments=None, udp_preflight=None, verify_player_sources=False):
+           world_journal=None, room_alignments=None, udp_preflight=None, udp_source_preflights=None, verify_player_sources=False):
     report, _ = verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log,
                                len(player_logs) + len(quest_player_logs), player_logs, quest_player_logs=quest_player_logs,
                                world_journal=world_journal, room_alignments=room_alignments, udp_preflight=udp_preflight,
-                               verify_player_sources=verify_player_sources)
+                               udp_source_preflights=udp_source_preflights, verify_player_sources=verify_player_sources)
     return report
 
 
 def verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log, size, player_logs, *,
                    require_remote=True, quest_player_logs=(), world_journal=None, applied_end=None, room_alignments=None,
-                   udp_preflight=None, verify_player_sources=False):
+                   udp_preflight=None, udp_source_preflights=None, verify_player_sources=False):
     integer(size, 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(not verify_player_sources or world_journal is not None, 'Player source verification requires the original closed world journal')
+    require(udp_preflight is None or udp_source_preflights is None, 'Use either single-pair or all-source UDP preflight verification')
     require(integer(launcher['schemaVersion'], 1, 1) and launcher['status'] == 'sealed-stopped'
             and launcher['complete'] is launcher['childExited'] is launcher['cleanupCompleted'] is True
             and integer(launcher['exitCode'], 0, 0) == 0, 'Launcher lacks terminal evidence')
@@ -404,7 +423,8 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
                 'Direct LAN needs private addresses and a peer outside the declared server addresses')
     else:
         require(not remote, 'A peer is outside the declared same-host addresses')
-    preflight = verify_udp_preflight(udp_preflight, binding, peer_ips) if udp_preflight else None
+    preflight = verify_udp_preflight(udp_preflight, binding, peer_ips)[0] if udp_preflight else None
+    source_preflight = verify_udp_source_preflights(udp_source_preflights, binding, peer_ips) if udp_source_preflights is not None else None
     journal = verify_world_journal(world_journal, world, combat_sequence, through, applied_end,
                                    player_sources=player_sources) if world_journal is not None else None
     alignments = None
@@ -418,6 +438,7 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
             'networkCapacityAccepted': False,
             **({'questLogcatPlayers': quest_players} if quest_players else {}),
             **({'udpPreflight': preflight} if preflight is not None else {}),
+            **({'udpSourcePreflight': source_preflight} if source_preflight is not None else {}),
             **({'worldJournal': journal} if journal else {}),
             **({'playerSources': sorted(player_sources.values(), key=lambda row: (row['roomId'], row['seat']))}
                if player_sources is not None else {}),
@@ -475,7 +496,16 @@ def verify_venue(manifest_path):
     check_alignments = any('roomAlignments' in entry for entry in entries)
     require(not check_alignments or journals, 'MR alignment evidence requires the original world journals for the full batch')
     preflights = any('udpPreflight' in entry for entry in entries)
+    source_preflights = any('udpSourcePreflights' in entry for entry in entries)
+    require(not (preflights and source_preflights), 'Use either single-pair or all-source UDP preflight verification for the full batch')
     require(not preflights or all('udpPreflight' in entry for entry in entries), 'Provide UDP preflight reports for every session in this batch')
+    require(not source_preflights or all('udpSourcePreflights' in entry for entry in entries),
+            'Provide all-source UDP preflight reports for every session in this batch')
+
+    def preflight_pair(pair):
+        require(type(pair) is dict and set(pair) == {'listener', 'probe'}, 'Provide the original UDP listener and probe reports')
+        return evidence_path(pair['listener']), evidence_path(pair['probe'])
+
     expected = {identity(row['sessionId']): row for row in rows}
     require(len(expected) == len(rows) and all(type(row['roomIds']) is list and row['roomIds']
             and all(integer(room, 1, 5) for room in row['roomIds']) for row in rows)
@@ -522,20 +552,22 @@ def verify_venue(manifest_path):
                 quest_logs.append((address, path, integer(player['logcatPid'], 1, 2**31 - 1)))
             else:
                 logs.append((address, path))
-        preflight_paths = None
-        if preflights:
-            pair = entry['udpPreflight']
-            require(type(pair) is dict and set(pair) == {'listener', 'probe'}, 'Provide the original UDP listener and probe reports')
-            preflight_paths = (evidence_path(pair['listener']), evidence_path(pair['probe']))
+        preflight_paths = preflight_pair(entry['udpPreflight']) if preflights else None
+        source_paths = None
+        if source_preflights:
+            pairs = entry['udpSourcePreflights']
+            require(type(pairs) is list and 1 <= len(pairs) <= len(players), 'Invalid all-source UDP preflight list')
+            source_paths = [preflight_pair(pair) for pair in pairs]
         report, sources = verify_session(topology, server_ips, launcher, session, statistics, endpoint,
                                          server_log, len(players), ((address, content(path)) for address, path in logs),
                                          require_remote=False,
                                          quest_player_logs=((address, content(path), pid) for address, path, pid in quest_logs),
                                          world_journal=evidence_path(entry['worldJournal']) if journals else None,
                                          applied_end=row['appliedAtSequence'], room_alignments=alignments, udp_preflight=preflight_paths,
-                                         verify_player_sources=verify_player_sources)
-        if preflights:
-            exchange = report['udpPreflight']['exchangeSha256']
+                                         udp_source_preflights=source_paths, verify_player_sources=verify_player_sources)
+        verified_pairs = ([report['udpPreflight']] if preflights else report['udpSourcePreflight']['pairs'] if source_preflights else [])
+        for pair in verified_pairs:
+            exchange = pair['exchangeSha256']
             require(exchange not in exchanges, 'Venue reused a UDP preflight exchange')
             exchanges.add(exchange)
         quest_players += len(quest_logs)
@@ -550,6 +582,7 @@ def verify_venue(manifest_path):
         summaries.append({'roomIds': row['roomIds'], 'serverAcknowledgements': report['serverAcknowledgements'],
                           'worldSequence': report['worldSequence'], 'combatSequence': report['combatSequence'],
                           **({'udpPreflight': report['udpPreflight']} if preflights else {}),
+                          **({'udpSourcePreflight': report['udpSourcePreflight']} if source_preflights else {}),
                           **({'worldJournal': report['worldJournal']} if journals else {}),
                           **({'playerSources': report['playerSources']} if verify_player_sources else {}),
                           **({'experienceMode': experience} if check_alignments else {}),
@@ -568,6 +601,7 @@ def verify_venue(manifest_path):
             'physicalHostsVerified': False, 'networkCapacityAccepted': False,
             **({'questLogcatPlayers': quest_players} if quest_players else {}),
             **({'udpPreflightsVerified': len(exchanges)} if preflights else {}),
+            **({'udpSourcePreflightsVerified': len(exchanges)} if source_preflights else {}),
             **({'worldJournalsVerified': len(summaries)} if journals else {}),
             **({'roomAlignmentsVerified': sum(len(row.get('roomAlignments', [])) for row in summaries)} if check_alignments else {})}
 
@@ -580,6 +614,8 @@ def main():
     parser.add_argument('--world-journal', type=Path, help='Original closed .worldlog for a single session')
     parser.add_argument('--verify-player-sources', action='store_true', help='Match each player log startup with accepted rigs in the closed journal')
     parser.add_argument('--udp-preflight', nargs=2, type=Path, metavar=('LISTENER', 'PROBE'), help='Original UDP preflight reports for this session')
+    parser.add_argument('--udp-source-preflight', action='append', nargs=2, type=Path, metavar=('LISTENER', 'PROBE'),
+                        help='Repeat for every acknowledged UDP source address at this binding')
     parser.add_argument('--room-alignment', action='append', nargs=2, metavar=('ROOM', 'JSON'),
                         help='Repeat for each locked MR room in a single session')
     for name in ('launcher-report', 'session', 'statistics', 'endpoint', 'server-log'):
@@ -590,8 +626,10 @@ def main():
     json_paths = [args.launcher_report, args.session, args.statistics, args.endpoint]
     single_args = [args.topology, args.server_ip, *json_paths, args.server_log, args.player or args.quest_player]
     if (args.venue_manifest and (any(single_args) or args.world_journal or args.room_alignment or args.udp_preflight
-                                 or args.verify_player_sources)) or (not args.venue_manifest and not all(single_args)):
+                                 or args.udp_source_preflight or args.verify_player_sources)) or (not args.venue_manifest and not all(single_args)):
         parser.error('Provide --venue-manifest alone or all single-session options.')
+    if args.udp_preflight and args.udp_source_preflight:
+        parser.error('Use either --udp-preflight or --udp-source-preflight.')
     try:
         if args.venue_manifest:
             report = verify_venue(args.venue_manifest)
@@ -604,6 +642,9 @@ def main():
                 inputs.append(args.world_journal)
             if args.udp_preflight is not None:
                 inputs.extend(args.udp_preflight)
+            if args.udp_source_preflight is not None:
+                integer(len(args.udp_source_preflight), 1, len(windows) + len(quest))
+                inputs.extend(chain.from_iterable(args.udp_source_preflight))
             alignments = None
             if args.room_alignment:
                 alignments = {}
@@ -620,7 +661,8 @@ def main():
             report = verify(args.topology, {ipv4(address) for address in args.server_ip},
                             *(read_json(content(path)) for path in json_paths), content(args.server_log), players,
                             quest_player_logs=quest_players, world_journal=args.world_journal, room_alignments=alignments,
-                            udp_preflight=args.udp_preflight, verify_player_sources=args.verify_player_sources)
+                            udp_preflight=args.udp_preflight, udp_source_preflights=args.udp_source_preflight,
+                            verify_player_sources=args.verify_player_sources)
     except EvidenceError as error:
         parser.exit(1, f'Field evidence rejected. {error}.\n')
     except (OSError, UnicodeError, ArithmeticError, AttributeError, KeyError, TypeError, ValueError, RecursionError,

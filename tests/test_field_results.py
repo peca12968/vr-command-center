@@ -389,6 +389,81 @@ def preflight_fixture(root, label, *, server, peer, port, exchange=None):
 
 class FieldResultsTests(unittest.TestCase):
     @unittest.skipUnless(HAS_POWERSHELL, 'UDP evidence requires PowerShell')
+    def test_all_source_preflight_requires_exact_acknowledged_addresses(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            data = fixture()
+            binding = data[2]['udpBinding']
+            binding['observedAtUtc'] = '2026-11-08T23:59:59.5000000+00:00'
+            server = binding['address']
+            local = preflight_fixture(root, 'local', server=server, peer=server, port=7777)
+            remote = preflight_fixture(root, 'remote', server=server, peer='192.168.5.20', port=7777)
+            summary = field.verify(*data, udp_source_preflights=[remote, local])
+            coverage = summary['udpSourcePreflight']
+            self.assertEqual((2, 2), (coverage['observedSourceAddresses'], coverage['verifiedSourceAddresses']))
+            self.assertEqual([1, 1], [pair['samples'] for pair in coverage['pairs']])
+            self.assertNotIn('192.168', json.dumps(summary))
+            self.assertFalse(summary['physicalHostsVerified'])
+            self.assertFalse(summary['networkCapacityAccepted'])
+            duplicate = preflight_fixture(root, 'duplicate', server=server, peer=server, port=7777)
+            unknown = preflight_fixture(root, 'unknown', server=server, peer='192.168.5.21', port=7777)
+            reused = preflight_fixture(root, 'reused', server=server, peer='192.168.5.20', port=7777,
+                                       exchange=hashlib.sha256(b'local').hexdigest())
+            for pairs, message in (([remote], 'each acknowledged source'), ([local, duplicate], 'same source more than once'),
+                                   ([local, unknown], 'game binding, accepted peer'), ([local, reused], 'reused an exchange')):
+                with self.subTest(message=message), self.assertRaisesRegex(field.EvidenceError, message):
+                    field.verify(*data, udp_source_preflights=pairs)
+
+            topology, ips, launcher, session, statistics, endpoint, server_log, clients = data
+            command = [sys.executable, str(SCRIPT), '--topology', topology, '--server-ip', str(next(iter(ips)))]
+            for option, value in [('launcher-report', launcher), ('session', session), ('statistics', statistics),
+                                  ('endpoint', endpoint), ('server-log', server_log)]:
+                path = root / option
+                path.write_text(value if type(value) is str else json.dumps(value), encoding='utf-8')
+                command += ['--' + option, str(path)]
+            for index, (address, log) in enumerate(clients):
+                path = root / f'player-{index}.log'
+                path.write_text(log, encoding='utf-8')
+                command += ['--player', str(address), str(path)]
+            for pair in (local, remote):
+                command += ['--udp-source-preflight', *map(str, pair)]
+            verified = subprocess.run(command, capture_output=True, text=True, check=True, timeout=15)
+            self.assertEqual(json.loads(json.dumps(summary)), json.loads(verified.stdout))
+            rejected = subprocess.run([*command, '--udp-preflight', *map(str, remote)], capture_output=True, text=True, timeout=15)
+            self.assertEqual(2, rejected.returncode)
+            self.assertNotIn(directory, rejected.stdout + rejected.stderr)
+
+    @unittest.skipUnless(HAS_POWERSHELL, 'UDP evidence requires PowerShell')
+    def test_linked_all_source_preflight_checks_each_of_25_observed_addresses(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, _ = venue_fixture(root, 'Linked', remote=True, quest_per_room=5)
+            entry = manifest['sessions'][0]
+            launcher_path = root / entry['launcherReport']
+            launcher = json.loads(launcher_path.read_text(encoding='utf-8'))
+            binding = launcher['udpBinding']
+            binding['observedAtUtc'] = '2026-11-08T23:59:59Z'
+            launcher_path.write_text(json.dumps(launcher), encoding='utf-8')
+            pairs = []
+            for index, player in enumerate(entry['players']):
+                listener, probe = preflight_fixture(root, f'udp-seat-{index}', server=binding['address'],
+                                                    peer=player['address'], port=binding['port'])
+                pairs.append({'listener': listener.name, 'probe': probe.name})
+            entry['udpSourcePreflights'] = pairs[:-1]
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'each acknowledged source'):
+                field.verify_venue(path)
+            entry['udpSourcePreflights'] = pairs
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            report = field.verify_venue(path)
+            self.assertEqual(25, report['udpSourcePreflightsVerified'])
+            self.assertEqual(25, report['serverAcknowledgements'])
+            self.assertEqual(25, report['sessions'][0]['udpSourcePreflight']['verifiedSourceAddresses'])
+            self.assertNotIn('192.168', json.dumps(report))
+            self.assertFalse(report['physicalHostsVerified'])
+            self.assertFalse(report['networkCapacityAccepted'])
+
+    @unittest.skipUnless(HAS_POWERSHELL, 'UDP evidence requires PowerShell')
     def test_preflight_uses_the_observed_server_and_a_peer_with_a_final_ack(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
