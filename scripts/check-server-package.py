@@ -2389,7 +2389,12 @@ def main():
                 save(('linked' if linked else 'independent')+'-venue-begin.json',
                      {'preview':preview,'preparing':preparing,'receipt':receipt,'observed':observed,'retry':retry})
             if args.observe_closure_ui and not linked:
-                observer_entry=entries[0];descriptor=runtime/'closure-ui-private.json';descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'sessionId':observer_entry['sessionId'],'streamId':observer_entry['ready']['streamId'],'endRequestFile':str(out/'closure-end.request'),'roomReadiness':args.check_room_readiness,'roomParticipation':args.check_room_participation}),encoding='utf-8');observer_log=(runtime/'closure-ui.log').open('xb')
+                observer_entry=entries[0];descriptor=runtime/'closure-ui-private.json'
+                descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'sessionId':observer_entry['sessionId'],
+                    'streamId':observer_entry['ready']['streamId'],'endRequestFile':str(out/'closure-end.request'),
+                    'roomReadiness':args.check_room_readiness,'roomParticipation':args.check_room_participation,
+                    'battleOverview':args.check_room_combat}),encoding='utf-8')
+                observer_log=(runtime/'closure-ui.log').open('xb')
                 node=shutil.which('node')
                 if not node:raise RuntimeError('Test observer requires installed Node; shipped launchers do not')
                 observer=subprocess.Popen([node,str(ROOT/'tests/browser/check-closure-native.cjs'),'--descriptor',str(descriptor),'--output',str(observer_out),'--stop-file',str(observer_stop)],stdout=observer_log,stderr=subprocess.STDOUT,cwd=ROOT/'tests/browser')
@@ -2481,6 +2486,13 @@ def main():
                 observer.wait(timeout=70);observer_log.close();observer_log=None;ui=read(observer_out/'checks.json');native=read(observer_entry['reportPath'])
                 check(observer.returncode==0 and ui['complete'] and ui['browserClosed'],'actual archive UI observer and browser completed / terminal')
                 check(ui['sessionId']==observer_entry['sessionId'] and ui['streamId']==native['streamId'] and ui['acceptedWorldSequence']==native['finalWorld']['acceptedSequence'],'shipped UI archive matches exact original native final world boundary')
+                if args.check_room_combat:
+                    overview=read(observer_out/'archive-battle-overview.json')
+                    stats=observer_entry['sealed']['statistics']
+                    check(overview['sessionId']==observer_entry['sessionId'] and overview['statistics']==stats
+                          and overview['lastEventSequence']==stats['throughSequence'] and len(overview['displayedRows'])==5
+                          and all(row['damageTaken']>0 for row in stats['players']),
+                          'shipped battle table and latest event match the five original sealed native combat rows')
             for client in round_clients:
                 text=client['log'].read_text(encoding='utf-8',errors='replace');check(venue.player_result_phase(text)=='acknowledged','original player result / disconnect '+client['player']['id']);finals=[json.loads(line.split('VR_CLIENT_DEBRIEF_FINAL ',1)[1]) for line in text.splitlines() if 'VR_CLIENT_DEBRIEF_FINAL ' in line];check(len(finals)==1,'one original final result '+client['player']['id']);final=finals[0];entry=next(e for e in entries if e['sessionId']==client['sessionId']);debrief.validate_result(final,{'id':entry['sessionId']},client['player'],entry['sealed']);check(True,'original admission / exact final seals / stats '+client['player']['id']);save(client['player']['id']+'-result.json',final)
                 if player_folder:

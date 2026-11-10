@@ -86,7 +86,7 @@ def main():
         for name,value in [('duration-low','0'),('duration-high','3601'),('duration-bool','true')]:call(name,['--run',data,'--seconds',value,'--ready-report',out/(name+'-ready.json')],False)
         alias=out/'alias-report.json';call('report-alias',['--run',data,'--seconds','1','--ready-report',str(alias).upper()],False,report=alias)
         entry=start(data,'first');check(request(entry,keys,'/')['version']=='0.31.0','actual portable API version');request(entry,keys,'/api/rooms',role=None,expected=401);check(True,'anonymous management requests rejected')
-        html,headers=request(entry,keys,'/console/',role=None);check(manifest.get('consoleVersion')=='0.31.72' and 'v0.31.72' in html and "script-src 'self'" in headers['Content-Security-Policy'],'published current console served with original CSP and explicit UI version')
+        html,headers=request(entry,keys,'/console/',role=None);check(manifest.get('consoleVersion')=='0.31.73' and 'v0.31.73' in html and "script-src 'self'" in headers['Content-Security-Policy'],'published current console served with original CSP and explicit UI version')
         for role in package_roles:check(request(entry,keys,'/api/me',role=role)['role']==('RoomController' if role.startswith('Room') else role),'actual isolated role identity: '+role)
         markers = [{'room': {'x': x, 'z': z}, 'tracking': {'x': -z - 3, 'z': x - 1}} for x, z in [(-2, -2), (2, -2), (-2, 2)]]
         alignment_input = {'roomId': 5, 'markers': markers}
@@ -103,6 +103,11 @@ def main():
             for seat in range(5):session=request(entry,keys,f'/api/sessions/{session["id"]}/players',{'playerId':str(uuid.uuid4()),'roomId':room,'name':'Portable seat '+str(seat),'headset':'Quest3'},role='Room'+str(room))
             sessions.append(session)
         check(sum(len(s['players']) for s in sessions)==25,'five independent API rosters accept 25 distinct admissions (not game connections)')
+        overview=request(entry,keys,'/api/sessions/'+sessions[0]['id']+'/overview',role='Room1')
+        check(overview['session']==sessions[0]
+              and overview['statistics']['throughSequence']==overview['recentEvents'][-1]['sequence']==sessions[0]['sequence']
+              and {row['playerId'] for row in overview['statistics']['players']}=={row['id'] for row in sessions[0]['players']},
+              'packaged room overview matches its original roster and one event revision')
         for room in range(1,6):check([s['id'] for s in request(entry,keys,'/api/sessions',role='Room'+str(room))]==[sessions[room-1]['id']],'room list isolation: '+str(room))
         request(entry,keys,'/api/sessions/'+sessions[1]['id'],role='Room1',expected=403);request(entry,keys,'/api/sessions',{'missionId':mission['id'],'mode':'Linked','roomIds':[1,2,3,4,5]},expected=409);check(True,'foreign room access and overlapping Linked creation rejected')
         signing_hash=sha(data/'player-ticket-signing.key');stop(entry);entry=start(data,'reopened')

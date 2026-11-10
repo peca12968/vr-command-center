@@ -103,6 +103,27 @@ async function main() {
       assert.equal(lastWorld?.header.sessionId, config.sessionId); assert.equal(lastWorld?.header.streamId, config.streamId); assert.equal(lastWorld?.complete, true);
       assert.equal(await page.locator('#closure-combat').innerText(), '戰鬥統計：已封存'); assert.equal(await page.locator('#closure-world').innerText(), '世界回放：已封存');
       const summary = await page.locator('#closure-summary').innerText(); assert.match(summary, /不確認送達/); assert.equal(await page.locator('#export-report').isEnabled(), true); assert.deepEqual(errors, []);
+      if (config.battleOverview) {
+        const reply = page.waitForResponse(response => response.url() === config.base + '/api/sessions/' + config.sessionId + '/overview');
+        await page.locator('#refresh').click();
+        const response = await reply;
+        assert.equal(response.status(), 200);
+        const { session, statistics, recentEvents } = await response.json();
+        assert.equal(session.id, config.sessionId);
+        assert.equal(session.combatStream.streamId, config.streamId);
+        assert.equal(session.combatStream.sealed, true);
+        assert.equal(statistics.pendingTelemetry, false);
+        assert.equal(statistics.sessionId, session.id);
+        assert.equal(statistics.throughSequence, session.sequence);
+        assert.equal(recentEvents.at(-1).sequence, session.sequence);
+        assert.equal(recentEvents.at(-1).kind, 'CombatStreamSealed');
+        assert.ok((await page.locator('#session-meta').innerText()).endsWith('序號 ' + session.sequence));
+        assert.ok((await page.locator('#event-list li').first().innerText()).includes('#' + session.sequence + ' '));
+        const table = await page.locator('#statistics tr').evaluateAll(rows => rows.map(row => Array.from(row.cells, cell => cell.textContent)));
+        assert.deepEqual(table, statistics.players.map(player => [player.name, player.ammoUsed, player.kills, player.damageTaken,
+          player.hitsReceived, player.accuracyPercent + '%', player.health].map(String)));
+        await save('archive-battle-overview.json', { sessionId: session.id, statistics, displayedRows: table, lastEventSequence: recentEvents.at(-1).sequence });
+      }
       await page.screenshot({ path: path.join(out, 'archived.png'), fullPage: true });
       report = { complete: true, sessionId: config.sessionId, streamId: config.streamId, acceptedWorldSequence: lastWorld.acceptedSequence, origin: lastWorld.header.origin, roomIds: lastWorld.header.roomIds, summary, uncaughtErrors: errors, source: 'Actual console GET world response; no route fulfillment or replacement', scope: 'Native Simulation source and archive UI only. Client delivery / original journals / process cleanup separately verified by owning fixture.' }; success = true;
     })(), cancellation]);
