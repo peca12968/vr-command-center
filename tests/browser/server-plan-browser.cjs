@@ -92,7 +92,7 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
     await download(page, path.join(screenshots, 'independent-venue-server-plan.json'), independentPlan);
     check(JSON.stringify(await api('/sessions')) === JSON.stringify(before)
       && requests.length > 0 && requests.every(([method, body]) => method === 'GET' && body === null),
-      'Actual five-room download retains the selected mapping without sending a local path, credential or management write');
+      'Actual download retains the five-room mapping and excludes credentials from the plan and the local path from management requests');
     await page.locator(panel).screenshot({ path: path.join(screenshots, 'venue-server-plan.png') });
 
     await api(state(independent[4].id) + '/combat-stream', 'POST', { streamId: randomUUID(), origin: 'Simulation' }, 'GameServer');

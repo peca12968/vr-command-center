@@ -1,5 +1,14 @@
 # 開發進度
 
+## 2026-11-10 從主控台下載 Windows 五房啟動計畫
+
+控制台 0.31.97 顯示五房的原任務、場次與啟動條件。主控填入本機管理實例路徑、IPv4 與 UDP 埠後，可下載給啟動器 1.8 使用的 JSON。瀏覽器在下載前再查一次場次與序號，若已有新來源或場次改變便停止。管理實例路徑只組入本機檔案，憑證仍由原 Windows 啟動器從管理實例取得。 [下載操作](WINDOWS_SERVER_PACKAGE.md#從主控台下載場館計畫)
+
+- 專項 Chromium 通過 13 項，包含空房、房控與遊戲伺服器權限、獨立 VR／MR 混合房、MR 校正鎖定、重複 UDP 埠、合併場單一端點，以及來源先附掛時拒絕下載。核心 1,030 項、HTTP 768 項、世界串流 92 項及管理包 107 項通過。
+- 解壓管理包的 Node 109 項及 Chromium 831 項完整回歸通過。證據為 `artifacts/console-server-plan97-package`，包含兩種模式的原下載與控制台畫面。
+- 三包原生批次 `run-2b3559d7158e439a8ee39840a57fce16` 通過 400 項。兩種模式均在實際管理包中用 Chromium 下載計畫，直接交給原啟動器 1.8。獨立與合併場各 25 個同機 Windows 玩家程序，六場 850 格完整回放、50 筆原戰績確認及 6 份 CSV。兩份原計畫隨關閉後的快照保存。原程序清理完成，C／F 的 217 個檔案雜湊一致。頭盔、實際跨機與廠商硬體仍待現場驗收。
+- 功能來源及管理包建置為 `d187ba72870e29dfb6f7d3f051a80e3545bcf8e5`。管理包、Windows 啟動器 1.8、Windows 玩家 0.49.1 與 Quest 0.49.1／64 的離線一致性報告為 `artifacts/venue-release-server-plan97.json`。GitHub Actions job `129753420150` 因帳務或支出上限未啟動。 [管理包](WINDOWS_CONTROL_PACKAGE.md) [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42793732969)
+
 ## 2026-11-10 依場館計畫啟動 Windows 遊戲伺服器
 
 啟動器 1.8 的 `--venue-run` 讀取指定管理實例與原場次計畫。五個獨立場各有自己的遊戲程序和 UDP 埠，合併場使用一個程序。通過全館啟動檢查及本機場次鎖後才建立程序，所有原遊戲來源、Windows UDP 綁定及公告就緒後才寫出全館就緒檔。每場分別保留原收尾結果。 [場館操作](WINDOWS_SERVER_PACKAGE.md#依場館計畫批次啟動)

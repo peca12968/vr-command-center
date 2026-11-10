@@ -34,6 +34,8 @@ Unity 0.47.0 伺服器可搭配控制台 0.31.14。啟動器 1.5 可選擇待開
 
 `GET /api/venue/server-plan` 限主控，回應五房的場次、序號、任務識別及啟動條件。Windows 啟動器仍會依本機管理實例、遊戲包與 UDP 綁定重新驗證。
 
+可在三包整合驗證加入 `--prepare-independent-set --check-venue-begin --check-venue-end --check-venue-launcher --check-venue-plan-ui`，使用 Chromium 下載原計畫再交給啟動器。
+
 ### 手動建立及執行場館計畫
 
 ```json
