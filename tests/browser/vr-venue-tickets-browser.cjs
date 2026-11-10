@@ -157,6 +157,21 @@ with zipfile.ZipFile(sys.argv[1]) as outer:
       const proof = await inspect(await downloaded, plan);
       check(true, topology + ' browser ZIP has all 25 original signed admissions, room and seat names, and published endpoints');
       const readback = await api(verify, 'POST', proof);
+      const sampleRoute = '/venue/tracked-readiness';
+      const scope = { topology, rooms: proof.rooms.map(({ roomId, sessionId }) => ({ roomId, sessionId })) };
+      const sample = await api(sampleRoute, 'POST', { ...scope, rooms: [...scope.rooms].reverse() });
+      const originalSessions = [...new Set(scope.rooms.map(room => room.sessionId))];
+      check(sample.version === 1 && sample.maxSourceAgeMilliseconds === 1500 && sample.topology === topology
+        && typeof sample.sampledAtUtc === 'string' && sample.sessions.length === originalSessions.length
+        && sample.sessions.every((row, i) => row.sessionId === originalSessions[i] && row.sampledAtUtc === sample.sampledAtUtc
+          && row.sourceState === 'WaitingFrame' && row.worldSequence === 0 && row.players.every(seat => !seat.canParticipate)),
+      `${topology} tracking sample binds every original session to a common clock and waits for accepted frames`);
+      if (topology === 'Independent') {
+        await api(sampleRoute, 'POST', scope, 'Room1', 403);
+        await api(sampleRoute, 'POST', { ...scope, rooms: scope.rooms.slice(1) }, 'Master', 400);
+        await api(sampleRoute, 'POST', { ...scope, rooms: scope.rooms.map((room, index) => ({ ...room,
+          sessionId: originalSessions[(index + 1) % originalSessions.length] })) }, 'Master', 409);
+      }
       const wrong = structuredClone(proof), first = JSON.parse(Buffer.from(wrong.rooms[0].connectionFiles[0], 'base64').toString('utf8'));
       first.port++;
       wrong.rooms[0].connectionFiles[0] = Buffer.from(JSON.stringify(first)).toString('base64');

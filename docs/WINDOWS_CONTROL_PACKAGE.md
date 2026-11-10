@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `VRCommand-ControlServer-0.31.105-win-x64.zip` 支援 Quest 五房追蹤工具一次取得原場次的共同取樣。ZIP 為 52,930,231 bytes，SHA-256 `8d420e1c7b9ec6a9b4df0d2e450543c93ae4ac78085116a9115e5805d1e204b3`。解壓核對 546 筆清單及 526 個發行檔案。 [追蹤驗收](QUEST3.md#核對頭盔追蹤席位)
+
 2026-11-10 `VRCommand-ControlServer-0.31.104-win-x64.zip` 支援 Quest 逐席寫入前驗證原端點、名冊與遊戲來源。ZIP 為 52,926,956 bytes，SHA-256 `c47651bbb4e6634a0969dc3e12ff48d84d45e8cb18215e893093fce09ea3c783`。解壓核對 546 筆清單及 526 個發行檔案。 [部署操作](QUEST3.md#用裝置清單部署-25-席)
 
 2026-11-10 `VRCommand-ControlServer-0.31.103-win-x64.zip` 會在 Quest 3 MR 五房部署頁顯示各房原端點，並在瀏覽器交付 ZIP 前重新核對來源。ZIP 為 52,925,549 bytes，SHA-256 `27ec4e6f1a50a12fdb31cde4313d8cd7b2e173a68f7795633b43926fba1bf72b`。解壓核對 546 筆清單及 526 個發行檔案。 [部署操作](QUEST3.md#從主控台下載五房部署包)

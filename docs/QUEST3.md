@@ -398,14 +398,14 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 
 #### 核對頭盔追蹤席位
 
-部署並戴上頭盔後，在主控電腦用原五房 ZIP 與既有 `VR_COMMAND_MASTER_KEY` 核對目前追蹤席位。可用 VR、MR 或混合 ZIP。工具先由管理服務核對 25 份原連線檔，再按原場次各讀一次就緒快照。未指定清單時檢查所有 Quest 3 席位。要查看一批指定席位，加入 `-DeviceMap .\quest-batch.json -AllowPartialMap`。此操作用清單選擇房號與席位，不呼叫 ADB。
+部署並戴上頭盔後，在主控電腦用原五房 ZIP、管理包 0.31.105 或更新版，以及既有 `VR_COMMAND_MASTER_KEY` 核對目前追蹤席位。可用 VR、MR 或混合 ZIP。工具先核對 25 份原連線檔，再以一筆 `POST /api/venue/tracked-readiness` 取得同一取樣時間的各場快照。未指定清單時檢查所有 Quest 3 席位。要查看一批指定席位，加入 `-DeviceMap .\quest-batch.json -AllowPartialMap`。此操作用清單選擇房號與席位，不呼叫 ADB。
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
     -ManagementApi http://127.0.0.1:5081 -VerifyTrackedSeats
 ```
 
-`tracked-ready` 要求同一場次、玩家及當次入場名額、已套用的場次序號、管理服務判定為 `Fresh` 的快照，以及可參戰的 `Tracked` 姿態。MR 另確認遊戲伺服器使用有效 MR 來源設定。報告含各席房號、席位、狀態與其世界序號，所有已選席位就緒時才回傳 `complete: true` 與退出碼 0。
+`tracked-ready` 要求同一場次、玩家及當次入場名額、已套用的場次序號、管理服務判定為 `Fresh` 的快照，以及可參戰的 `Tracked` 姿態。工具將請求與接收耗時一併計入 1.5 秒的畫格期限。MR 另確認遊戲伺服器使用有效 MR 來源設定。報告含共用的 `sampledAtUtc` 與各席房號、席位、狀態及世界序號，所有已選席位就緒時才回傳 `complete: true` 與退出碼 0。
 
 混合 Quest 3 與 VIVE 名冊的場館可加上 `-AllHeadsets`，用同一份 ZIP 核對全部 25 席。此模式不能搭配裝置清單或部分席位。報告含 `scope: "venue"`，各席的 `registeredHeadset` 取自管理名冊。報告核對伺服器接收的追蹤狀態，實體裝置型號與控制器操作由現場驗收。
 
@@ -413,10 +413,12 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 | --- | --- |
 | `awaiting-tracked-pose`、`not-tracked` | 檢查頭盔有無進入遊戲、恢復焦點並完成 MR 取點 |
 | `source-not-fresh`、`source-revision-pending`、`mr-profile-pending` | 查看遊戲伺服器及房卡，等有效快照套用目前的場次狀態 |
+| `source-expired-in-transit` | 畫格在管理服務取樣時有效，收到回應時已超過期限，可重新核對 |
+| `venue-changed` | 核對期間原場次、房間或版本已有變更，請核對現場並重新取樣 |
 | `seat-unavailable`、`admission-changed`、`seat-headset-mismatch` | 核對當前名冊與所選席位，重新下載有變更的部署包 |
 | `readiness-unavailable`、`readiness-invalid` | 核對管理服務連線、版本與場次 |
 
-票券到期後可從主控下載新的 ZIP 供核對。報告反映各場讀取時的狀態，實際裝置序號、網路來源及全館持續容量另由現場驗收確認。 [收集 Quest 場館驗收日誌](#收集-quest-場館驗收日誌)
+票券到期後可從主控下載新的 ZIP 供核對。報告反映全館同一取樣點，實際裝置序號、網路來源及全館持續容量另由現場驗收確認。 [收集 Quest 場館驗收日誌](#收集-quest-場館驗收日誌)
 
 #### 使用逐房下載的檔案建立清單
 
