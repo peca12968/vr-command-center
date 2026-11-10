@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `windows-control-console-0.31.75-player-room-replay-win-x64.zip` 提供合併錄製的分房玩家回放。ZIP 為 52,835,923 bytes，SHA-256 `ce937ef5e582d9bf73b63ecac789719e8ab5ef387fb7cfe26947675fe5f7b1ea`，解壓核對 540 筆清單與 520 個執行檔案。 [回放操作](WORLD_RECORDING.md#讓玩家開啟回放)
+
 2026-11-10 `windows-control-console-0.31.74-ticket-download-win-x64.zip` 提供下載前再次核對配票名冊。ZIP 為 52,829,273 bytes，SHA-256 `5d42f2497a03df275644c5a06f71c4c60abe1048089c34da81750d315351fe80`，解壓核對 540 筆清單與 520 個執行檔案。 [配票操作](EXTERNAL_CLIENTS.md#下載前再次核對名冊)
 
 2026-11-10 `windows-control-console-0.31.73-statistics-snapshot-win-x64.zip` 提供同序號的場次、玩家戰績與最近事件。ZIP 為 52,827,832 bytes，SHA-256 `d5e948cacbdda15a9093cd6806ea287a20313e98efaed5c7ea133dde5daac5d6`，解壓核對 540 筆清單與 520 個執行檔案。 [戰績操作](REPORTS.md#場次與戰績同步)
