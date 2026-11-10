@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-10 封存核對 Quest 入場的發行 APK
+
+使用 `-ReleaseReport` 的正式部署報告在成功席位附上原場次、玩家、入場名額及連線埠。五房封存清單可用 `questDeployments` 將原報告、原 Quest logcat、伺服器戰績確認與 APK 雜湊逐席核對。可合併中斷前的成功席位和後續只重試未完成席位的報告。 [封存操作](EXTERNAL_CLIENTS.md#核對封存席位的-quest-發行-apk)
+
+- 整合通過 15 項。以實際管理包 0.31.91 簽發兩種模式各 25 席的票券，原 0.49.1／64 APK 配合模擬 ADB 產生實際部署報告。合併模式在第 13 席遇到 APK 雜湊改變，前 12 席原報告與後 13 席重試報告可合併驗收。封存日誌、網路來源及戰績屬測試資料，實體頭盔、跨機及廠商設備仍待驗收。結果在 `artifacts/quest-sealed-release-binding/acceptance.json`。
+- 封存驗收 70 項、Quest 部署 48 項通過。首次並行部署回歸有三項未產出預期 JSON 或 ADB 日誌，保留原失敗日誌，結束其他部署後重跑通過。功能來源 `985f4e321f934879c78113c17b9103cbc653acae`。GitHub Actions job `129689177737` 因帳務或支出上限未啟動。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42774326768)
+
 ## 2026-11-10 逐席核對 Quest 已安裝的發行 APK
 
 Quest 批次部署可用 `-ReleaseReport` 讀取四件套件的離線驗證報告，逐席核對裝置的版本代碼與原 APK SHA-256。整批先做唯讀預檢，部署逐席寫入前再核對。若 APK 已更換、無法讀取或回傳多個 APK，該席不寫入。 [部署操作](QUEST3.md#核對頭盔內已安裝的發行-apk)
