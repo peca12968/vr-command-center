@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `windows-control-console-0.31.77-live-watch-win-x64.zip` 提供即時觀戰中斷後的同來源重連。ZIP 為 52,839,148 bytes，SHA-256 `43f7dd9454adf46b3bf0aec1441451417aa7568199c50929bcf84c5d445f08f7`，解壓核對 540 筆清單與 520 個執行檔案。 [觀戰操作](WORLD_RECORDING.md#即時觀戰斷線後重新連接)
+
 2026-11-10 `windows-control-console-0.31.76-fine-opening-win-x64.zip` 提供場地通路的細格補查。ZIP 為 52,837,112 bytes，SHA-256 `9296a87ff50338c8a35862dda7d45f36326751ff614def8cacf99a844a0490e5`，解壓核對 540 筆清單與 520 個執行檔案。 [場地操作](LAYOUT.md#出生位通路預覽)
 
 2026-11-10 `windows-control-console-0.31.75-player-room-replay-win-x64.zip` 提供合併錄製的分房玩家回放。ZIP 為 52,835,923 bytes，SHA-256 `ce937ef5e582d9bf73b63ecac789719e8ab5ef387fb7cfe26947675fe5f7b1ea`，解壓核對 540 筆清單與 520 個執行檔案。 [回放操作](WORLD_RECORDING.md#讓玩家開啟回放)

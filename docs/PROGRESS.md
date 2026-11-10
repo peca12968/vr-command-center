@@ -1,5 +1,14 @@
 # 開發進度
 
+## 2026-11-10 即時觀戰斷線重連
+
+控制台 0.31.77 在已確認錄製中斷時重連同一來源，保留房間、鏡頭及最後快照。六秒未收到快照或心跳會關閉舊連線，連續中斷最多重試三次。切換操作會取消等待中的重連。 [觀戰操作](WORLD_RECORDING.md#即時觀戰斷線後重新連接)
+
+- 舊 0.31.76 在真正 SSE 回應已顯示快照後，受控關閉瀏覽器串流仍無法接收新格，原失敗 `live-watch-before-79b60f.log` 及 `console-live-watch-before-79b60f/failure.png` 保留。首次嘗試因預設 Chromium 快取路徑無執行檔而未進入操作，紀錄 `live-watch-before-27aa1e.log`。新版解壓包專測 18 項通過，涵蓋串流關閉、無心跳、異來源、三次暫時錯誤及離開觀戰時取消。截圖 `console-live-watch-focused-f33483/live-watch-stalled.png`。
+- 管理包 `artifacts/windows-control-console-0.31.77-live-watch-win-x64.zip` 為 52,839,148 bytes，SHA-256 `43f7dd9454adf46b3bf0aec1441451417aa7568199c50929bcf84c5d445f08f7`，核對 172 份發布來源、520 個執行檔案及 540 筆清單。管理包 CLI 通過 107 項，`run-12e072bc5dcd419c953e01cbce09b8ba` 的 C／F 兩份 27 檔雜湊相同。另通過 17 項管理及伺服器封裝工具檢查。
+- 解壓包完整回歸通過 108 項 Node 與 709 項 Chromium，紀錄 `live-watch-full-471b21.log`。Windows 0.49.0 的 `run-131156f4bba443909b6f8f451ac48bad` 通過 376 項，五房獨立與合併各有 25 個同機模擬席。合併場第 2 房俯視從第 205 格切斷瀏覽器 SSE，單次自動連接後到第 210 格，鏡頭與房間相同。兩格都與同一份原 Running 回放對上。六場雙封存共 1,002 格回放、50 份原戰績及伺服器確認，清理後 C／F 219 檔雜湊一致。
+- 功能及管理包來源 `b80ba9894251a2454f9eabb74ead680f56284f8a`。GitHub Actions job `129569465176` 因帳務或支出上限未啟動。實體頭盔、跨機 25 人、實體 MR 及廠商硬體仍待現地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42737274613)
+
 ## 2026-11-10 模擬設備隨任務暫停斷線
 
 硬體模擬器 0.2.6 在任務執行且有戰鬥來源時才握手。每條模擬連線對應一段執行期間，暫停時關閉閒置及待確認連線，繼續後以目前游標重新附掛。遲到的握手回覆會再核對來源及執行序號。 [排演操作](HARDWARE.md#暫停與繼續模擬連線)
