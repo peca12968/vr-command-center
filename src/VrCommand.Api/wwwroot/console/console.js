@@ -23,7 +23,7 @@ const behaviorNames = { Hold: '守備', Patrol: '巡邏', Advance: '推進' };
 const archiveNames = { NoSource: '沒有遊戲來源', Missing: '尚無錄製紀錄', Waiting: '等待封存', SourceMismatch: '來源尚未對上', Sealed: '已封存' };
 const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: null, rooms: [], venue: null, missions: [], catalog: [], launchPinned: null, history: null, draftBase: null, draftChanged: false, draftSavedAt: '', sessions: [], session: null, selected: null, pending: null, props: [], prop: -1, environmentSequence: null, enemiesSequence: null };
 let comparedVersion = null;
-let checkedTemplate = null, templateEpoch = 0, importedText = null;
+let checkedTemplate = null, templateEpoch = 0, loadedText = null;
 const objectHistory = placementHistory();
 const world = mountWorld(() => state.key, logout, venueEnemyText, master);
 const report = mountReport(() => state, logout, () => { renderStatistics(); closure.update(); });
@@ -161,7 +161,10 @@ async function run(action, independentRead = false) {
     await action();
     if (refreshFailed && epoch === state.epoch && state.actor) notify('已讀取任務；背景列表更新失敗，請稍後重新整理。', true);
   }
-  catch (error) { notify(error.status ? error.message : '連線或操作結果未確認，請重新整理查看。' + (state.pending ? ' 可使用「重試確認結果」確認原命令。' : ''), true); }
+  catch (error) {
+    const message = error.status || error instanceof MissionVersionMismatch ? error.message : '連線或操作結果未確認，請重新整理查看。';
+    notify(message + (state.pending && !error.status ? ' 可使用「重試確認結果」確認原命令。' : ''), true);
+  }
   finally { state.busy = false; applyPermissions(); }
 }
 function runSession(action) {
@@ -182,7 +185,7 @@ function logout() {
   closure.active(false); closure.reset();
   alignment.reset();
   clearMissionComparison();
-  clearMissionTemplate(); importedText = null;
+  clearMissionTemplate(); loadedText = null;
   alignmentPins.active(false);
   mrDeployment.active(false);
   mrVenue.active(false);
@@ -1051,10 +1054,14 @@ async function sendPending() {
       const selectedLaunch = commonLaunchRevision();
       await refreshData(epoch);
       if (epoch !== state.epoch) return;
+      const parent = pending.kind === 'mission-revise' ? state.draftBase : null;
       const revision = await api(`/missions/${response.id}/version`);
       if (epoch !== state.epoch) return;
+      requireMissionVersion(revision, response.id, parent?.seriesId ?? response.id, (parent?.number ?? 0) + 1);
+      if (revision.previousId !== (parent?.mission.id ?? null)) throw new MissionVersionMismatch();
       const history = await api(`/missions/${response.id}/history`);
       if (epoch !== state.epoch) return;
+      requireMissionHistory(history, revision.seriesId, revision.number);
       if (!await rememberHead(history, epoch)) return;
       state.draftBase = revision; state.draftChanged = false; state.draftSavedAt = response.createdAtUtc; state.history = history;
       clearMissionComparison();
@@ -1204,7 +1211,7 @@ function downloadRoomTickets() {
 function resetDraft() {
   placement.clearTrial();
   clearMissionComparison();
-  clearMissionTemplate(); importedText = null;
+  clearMissionTemplate(); loadedText = null;
   $('mission-form').reset(); state.props = []; state.prop = -1; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.history = null;
   clearPropHistory();
   renderProps(); renderHistory(); draftStatus(); applyPermissions();
@@ -1223,11 +1230,24 @@ function missionOptions(launch, edit) {
 function knownHeadNumber(seriesId) {
   return Math.max(state.catalog.find(row => row.seriesId === seriesId)?.number || 0, state.history?.seriesId === seriesId ? state.history.headNumber : 0);
 }
+class MissionVersionMismatch extends Error {
+  constructor() { super('任務版本核對不符，已保留目前草稿。'); }
+}
+function requireMissionVersion(revision, id, seriesId, number) {
+  if (!revision?.mission || revision.mission.id !== id || revision.seriesId !== seriesId || revision.number !== number)
+    throw new MissionVersionMismatch();
+}
+function requireMissionHistory(history, seriesId, minimum) {
+  if (history?.seriesId !== seriesId || typeof history.headId !== 'string' || !history.headId
+    || !Number.isSafeInteger(history.headNumber) || history.headNumber < minimum || !Array.isArray(history.versions))
+    throw new MissionVersionMismatch();
+}
 async function rememberHead(history, epoch) {
   const index = state.catalog.findIndex(row => row.seriesId === history.seriesId), known = state.catalog[index];
   if (known && known.number >= history.headNumber) return epoch === state.epoch;
-  const revision = await api(`/missions/${history.headId}/version`);
+  const revision = await api(`/missions/${encodeURIComponent(history.headId)}/version`);
   if (epoch !== state.epoch) return false;
+  requireMissionVersion(revision, history.headId, history.seriesId, history.headNumber);
   const currentIndex = state.catalog.findIndex(row => row.seriesId === history.seriesId), current = state.catalog[currentIndex];
   if (current && current.number >= revision.number) return true;
   if (current?.mission.id === $('launch-mission').value) state.launchPinned = current;
@@ -1251,14 +1271,17 @@ function renderHistory(selected) {
   if (comparedVersion && comparedVersion.mission.id !== $('mission-version').value) clearMissionComparison();
   $('history-status').textContent = history ? `已讀取 ${history.versions.length} 版 · 本次查詢最新第 ${history.headNumber} 版` : '';
 }
-async function loadDraft(id, older = false) {
-  if (!id) return;
+async function loadDraft({ id, seriesId, number }, older = false) {
   const epoch = state.epoch;
   const history = await api(`/missions/${id}/history`);
   if (epoch !== state.epoch) return;
-  const revision = await api(`/missions/${older ? id : history.headId}/version`), mission = revision.mission;
+  requireMissionHistory(history, seriesId, number);
+  const targetId = older ? id : history.headId;
+  const revision = await api(`/missions/${encodeURIComponent(targetId)}/version`);
   if (epoch !== state.epoch) return;
+  requireMissionVersion(revision, targetId, seriesId, older ? number : history.headNumber);
   if (!await rememberHead(history, epoch)) return;
+  const mission = revision.mission;
   const draft = mission.definition;
   fillDraft(draft);
   state.draftBase = revision; state.draftChanged = false; state.draftSavedAt = ''; state.history = history;
@@ -1266,8 +1289,13 @@ async function loadDraft(id, older = false) {
   renderProps(); renderHistory(mission.id); missionOptions(undefined, history.headId); draftStatus();
 }
 function fillDraft(draft) {
-  placement.clearTrial(); clearMissionComparison(); importedText = null;
+  placement.clearTrial(); clearMissionComparison();
   $('draft-name').value = draft.name; $('draft-briefing').value = draft.briefing; $('draft-duration').value = draft.durationSeconds;
+  // Text controls normalize line endings. Keep the source text until that field is edited.
+  loadedText = {
+    name: { value: draft.name, shown: $('draft-name').value },
+    briefing: { value: draft.briefing, shown: $('draft-briefing').value }
+  };
   setEnvironment('draft', draft.environment); setEnemies('draft', draft.enemies);
   state.props = structuredClone(draft.props); state.prop = state.props.length ? 0 : -1; clearPropHistory();
 }
@@ -1296,19 +1324,14 @@ function useMissionTemplate() {
   if (!editable() || !checkedTemplate || !confirmDraftDiscard('載入任務範本')) return;
   const draft = checkedTemplate;
   fillDraft(draft);
-  // Text controls normalize line endings. Preserve the file's original text until the operator edits it.
-  importedText = {
-    name: { value: draft.name, shown: $('draft-name').value },
-    briefing: { value: draft.briefing, shown: $('draft-briefing').value }
-  };
   state.draftBase = null; state.draftChanged = true; state.draftSavedAt = ''; state.history = null;
   clearMissionTemplate(); renderProps(); renderHistory(); draftStatus(); applyPermissions();
   notify('已載入範本。核對場地及任務內容後，可儲存為新任務。');
 }
 function draftDefinition() {
   const name = $('draft-name').value, briefing = $('draft-briefing').value;
-  return { name: importedText?.name?.shown === name ? importedText.name.value : name.trim(),
-    briefing: importedText?.briefing?.shown === briefing ? importedText.briefing.value : briefing,
+  return { name: loadedText?.name?.shown === name ? loadedText.name.value : name.trim(),
+    briefing: loadedText?.briefing?.shown === briefing ? loadedText.briefing.value : briefing,
     durationSeconds: Number($('draft-duration').value),
     environment: environment('draft'), enemies: enemies('draft'), props: structuredClone(state.props) };
 }
@@ -1326,7 +1349,7 @@ async function compareMissionVersion(id) {
   if (!selected) return;
   const revision = await api(`/missions/${id}/version`);
   if (epoch !== state.epoch || series !== state.history?.seriesId || id !== $('mission-version').value) return;
-  if (revision?.mission?.id !== id || revision.seriesId !== series || revision.number !== selected.number) throw new Error('Mission version mismatch');
+  requireMissionVersion(revision, id, series, selected.number);
   const saved = revision.mission.definition, draft = draftDefinition(), rows = [];
   function add(label, before, after) {
     if (before === after) return;
@@ -1554,11 +1577,15 @@ $('clock-auto-end').addEventListener('change', () => { state.clockSequence = sta
 submit('mission-form', saveMission);
 $('load-mission').addEventListener('click', () => {
   const id = $('edit-mission').value;
-  if (id && confirmDraftDiscard('載入最新版')) run(() => loadDraft(id), true);
+  const selected = state.catalog.find(row => row.mission.id === id);
+  if (selected && confirmDraftDiscard('載入最新版'))
+    run(() => loadDraft({ id, seriesId: selected.seriesId, number: selected.number }), true);
 });
 $('load-version').addEventListener('click', () => {
   const id = $('mission-version').value;
-  if (id && confirmDraftDiscard('載入選取版本')) run(() => loadDraft(id, true), true);
+  const history = state.history, selected = history?.versions.find(row => row.id === id);
+  if (selected && confirmDraftDiscard('載入選取版本'))
+    run(() => loadDraft({ id, seriesId: history.seriesId, number: selected.number }, true), true);
 });
 $('export-mission-template').addEventListener('click', () => {
   const id = $('mission-version').value, epoch = state.epoch, view = templateEpoch;
@@ -1591,6 +1618,7 @@ $('more-versions').addEventListener('click', () => run(async () => {
   const previous = state.history, epoch = state.epoch;
   const history = await api(`/missions/${previous.seriesId}/history?before=${previous.nextBefore}`);
   if (epoch !== state.epoch || state.history !== previous) return;
+  requireMissionHistory(history, previous.seriesId, previous.headNumber);
   history.versions = [...previous.versions, ...history.versions.filter(row => !previous.versions.some(old => old.id === row.id))];
   state.history = history; renderHistory(); draftStatus();
 }, true));
@@ -1617,8 +1645,8 @@ $('prop-copy-panel').addEventListener('toggle', () => {
 $('rotate-prop').addEventListener('click', () => { if (state.props[state.prop]) editProp(() => { state.props[state.prop].yawDegrees = (state.props[state.prop].yawDegrees + 15) % 360; }); });
 $('remove-prop').addEventListener('click', () => { if (state.prop >= 0) editProp(() => { state.props.splice(state.prop, 1); state.prop = Math.min(state.prop, state.props.length - 1); }); });
 for (const type of ['input', 'change']) $('mission-form').addEventListener(type, event => {
-  if (importedText && event.target.id === 'draft-name') importedText.name = null;
-  if (importedText && event.target.id === 'draft-briefing') importedText.briefing = null;
+  if (loadedText && event.target.id === 'draft-name') loadedText.name = null;
+  if (loadedText && event.target.id === 'draft-briefing') loadedText.briefing = null;
   if (!['layout-session-mode', 'prop-select'].includes(event.target.id) && !event.target.closest('#prop-copy-panel')) dirtyDraft();
 });
 $('layout-session-mode').addEventListener('change', () => placement.scheduleDraft());

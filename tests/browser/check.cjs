@@ -51,7 +51,8 @@ async function main() {
     const shell = await fetch(base + '/console/');
     check(shell.ok && shell.headers.get('content-security-policy').includes("script-src 'self'") && shell.headers.get('cache-control').includes('no-store'), 'Console shell is served with its content and cache policies');
     check((await fetch(base + '/api/rooms')).status === 401, 'Serving the console does not bypass API authentication');
-    browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+    browser = await chromium.launch({ headless: true, executablePath: process.env.VR_CLOSURE_CHROMIUM,
+      args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
     const context = await browser.newContext({ viewport: { width: 1440, height: 1080 }, acceptDownloads: true });
     const page = await context.newPage(), browserErrors = [];
     diagnosticPage = page;

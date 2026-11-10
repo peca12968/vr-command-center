@@ -149,6 +149,90 @@ module.exports = async function missionReadRecovery({ context, api, tokens, base
       check(await page.locator('#draft-name').inputValue() === latest.definition.name && await page.locator(`#mission-version option[value="${first.id}"]`).count() === 1 && mutations() === initialMutations,
         'History pagination independently recovers its exact next page without reloading the draft or mutating missions');
     });
+
+    const originalText = { ...first.definition, name: '  保留原任務名稱  ', briefing: '第一行\r\n第二行\r第三行\n' };
+    const savedText = await api('/missions', 'POST', originalText, 'Master', 201);
+    await page.locator('#refresh').click();
+    await page.locator('#edit-mission').selectOption(savedText.id);
+    await page.locator('#load-mission').click(); await draft(originalText.name);
+    await page.locator('#draft-duration').fill('180');
+    await page.locator('#save-revision').click();
+    await wait(() => document.querySelector('#draft-status').textContent.includes('第 2 版') && !document.querySelector('#mission-fields').disabled);
+    const textHistory = await api(`/missions/${savedText.id}/history`);
+    const textRevision = await api(`/missions/${textHistory.headId}`);
+    check(textRevision.definition.name === originalText.name && textRevision.definition.briefing === originalText.briefing
+      && textRevision.definition.durationSeconds === 180,
+      'Saving only duration preserves the saved name and original briefing line endings');
+
+    const originalOption = page.locator('#mission-version');
+    await originalOption.selectOption(textRevision.id);
+    await page.locator('#compare-version').click();
+    await wait(() => !document.querySelector('#mission-comparison').hidden && !document.querySelector('#mission-fields').disabled);
+    check((await page.locator('#mission-comparison-summary').textContent()).includes('與目前草稿相同'),
+      'Comparing a loaded mission with its saved version preserves exact text equality');
+
+    await page.locator('#draft-briefing').fill('操作員更改的第一行\n操作員更改的第二行');
+    await page.locator('#save-revision').click();
+    await wait(() => document.querySelector('#draft-status').textContent.includes('第 3 版') && !document.querySelector('#mission-fields').disabled);
+    const newHistory = await api(`/missions/${savedText.id}/history`);
+    const revised = await api(`/missions/${newHistory.headId}`);
+    check(revised.definition.name === originalText.name && revised.definition.briefing === '操作員更改的第一行\n操作員更改的第二行',
+      'An explicit briefing edit changes only the briefing and keeps the loaded name');
+
+    const sameSeriesOtherVersion = await api(`/missions/${revised.id}/version`);
+    const foreignHistory = await api(`/missions/${latest.id}/history`);
+    const noticesMismatch = () => wait(() => document.querySelector('#notice').classList.contains('error')
+      && document.querySelector('#notice').textContent.includes('任務版本核對不符') && !document.querySelector('#mission-fields').disabled);
+    await page.locator('#edit-mission').selectOption(revised.id);
+    const previousName = await page.locator('#draft-name').inputValue();
+    const previousBriefing = await page.locator('#draft-briefing').inputValue();
+    const writes = mutations();
+    const wrongHistory = `**/api/missions/${revised.id}/history`;
+    await page.route(wrongHistory, route => route.fulfill({ status: 200, json: foreignHistory }));
+    try {
+      await page.locator('#load-mission').click(); await noticesMismatch();
+      check(await page.locator('#draft-name').inputValue() === previousName
+        && await page.locator('#draft-briefing').inputValue() === previousBriefing && mutations() === writes,
+        'A successful response for another mission series cannot replace the loaded draft');
+    } finally { await page.unroute(wrongHistory); }
+    const wrongVersion = `**/api/missions/${savedText.id}/version`;
+    await originalOption.selectOption(savedText.id);
+    await page.route(wrongVersion, route => route.fulfill({ status: 200, json: sameSeriesOtherVersion }));
+    try {
+      await page.locator('#load-version').click(); await noticesMismatch();
+      check(await page.locator('#draft-name').inputValue() === previousName
+        && await page.locator('#draft-briefing').inputValue() === previousBriefing && mutations() === writes,
+        'A successful response with a different version of the same series cannot change the draft or write a mission');
+    } finally { await page.unroute(wrongVersion); }
+
+    const revisionPath = `/api/missions/${revised.id}/revisions`;
+    const sent = [];
+    const onSave = request => {
+      if (new URL(request.url()).pathname === revisionPath && request.method() === 'POST')
+        sent.push([request.headers()['idempotency-key'], request.postData()]);
+    };
+    const versionRead = '**/api/missions/*/version';
+    page.on('request', onSave);
+    await page.route(versionRead, route => route.fulfill({ status: 200, json: sameSeriesOtherVersion }));
+    let accepted;
+    try {
+      await page.locator('#draft-duration').fill('240');
+      const write = page.waitForResponse(response => new URL(response.url()).pathname === revisionPath && response.request().method() === 'POST');
+      await page.locator('#save-revision').click();
+      accepted = await (await write).json();
+      await wait(() => !document.querySelector('#pending-command').hidden && !document.querySelector('#retry-command').disabled
+        && document.querySelector('#notice').textContent.includes('任務版本核對不符'));
+      check(sent.length === 1 && accepted.id !== revised.id && await page.locator('#draft-duration').inputValue() === '240',
+        'An accepted save remains pending when its version read returns the previous revision');
+    } finally { await page.unroute(versionRead); }
+    try {
+      await page.locator('#retry-command').click();
+      await wait(() => document.querySelector('#pending-command').hidden && document.querySelector('#draft-status').textContent.includes('第 4 版'));
+      const latestText = await api(`/missions/${savedText.id}/history`);
+      check(sent.length === 2 && sent[0][0] && sent[0][0] === sent[1][0] && sent[0][1] === sent[1][1]
+        && latestText.headId === accepted.id && latestText.headNumber === 4,
+        'Confirming the mismatched read retries the exact accepted request and leaves one new immutable revision');
+    } finally { page.off('request', onSave); }
     await page.reload();
     check(await page.locator('#login-panel').isVisible(), 'A clean draft allows reload without requiring discard confirmation');
     check(!requestsTruncated && errors.length === 0, 'Mission read recovery retains complete bounded request metadata and has no uncaught browser errors');
