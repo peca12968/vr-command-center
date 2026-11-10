@@ -1,5 +1,15 @@
 # 開發進度
 
+## 2026-11-10 五房有效姿態開場的封存核對
+
+管理包 0.31.79 會在全館收尾及場館驗收 ZIP 帶出原開場採信畫格。離線工具可使用 `verifyParticipationBegin` 核對原準備中畫格、同批開場序號及後續第一個有效執行格，分列合成與追蹤席位。 [驗收操作](EXTERNAL_CLIENTS.md#核對五房有效姿態開場)
+
+- 舊 0.31.78 的真實收尾回應沒有 `participationBegin`，反例 `participation-closure-api-before-48753a.log`。舊離線工具在兩種模式略過 `verifyParticipationBegin`，反例 `participation-closure-before-06bb4c.log`。新版解壓專測 17 項、離線驗收 57 項及封裝工具 17 項通過。離線測試涵蓋缺失指標、斷線、結束後才觀察到執行格、追蹤政策替換及 MR 合成姿態拒絕。另有 1,010 項領域、758 項 HTTP、83 項世界串流通過。
+- 管理包 `artifacts/windows-control-console-0.31.79-participation-closure-win-x64.zip` 為 52,841,556 bytes，SHA-256 `36f9afd313e021339f17ac06327e90a3111d2c95d84447e4e9d27927de966114`，核對 172 份發布來源、520 個執行檔案及 540 筆清單。管理包 CLI 通過 107 項，`run-7ecfd2bfcf2f4fc5a203c99bd9aaf65d` 的 C／F 副本 27 檔雜湊一致。
+- Windows 0.49.0 原生 `run-c3b7edd5b1e74f91b1ddeb7c2cfdd250` 通過 495 項。獨立與合併各有 25 個同機模擬席，直接使用原 ZIP 及拆分原檔的結果一致。六場的原準備畫格與第一個執行格均對上封存回放，兩批都拒絕改用全追蹤核對。六場共 1,702 格回放、212 筆戰鬥事件、50 份原戰績及伺服器確認，清理後 C／F 221 檔雜湊一致。
+- 解壓包完整回歸通過 108 項 Node 與 723 項 Chromium，紀錄 `participation-closure-full-469f32.log`。
+- 功能與管理包來源 `b476c0fb6b3423e9cf697d36f2d67fe971cd060b`。GitHub Actions job `129578425763` 因帳務或支出上限未啟動。實體頭盔、跨機 25 人、實體 MR 及廠商設備仍待現地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42740004333)
+
 ## 2026-11-10 五房 25 席有效姿態開場
 
 管理包 0.31.78 提供可選的五房開場條件，要求每房五席已連線且姿態有效。VR 可使用合成或追蹤姿態，MR 仍須通過原 Quest 3 追蹤條件。原 Begin 事件保存採信的準備中畫格。 [開場操作](PLAYER_READINESS.md#五房各-5-席有效姿態開場)
