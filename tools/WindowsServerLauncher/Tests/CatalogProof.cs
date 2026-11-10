@@ -2,10 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
+using System.Windows.Forms;
 
 internal static class ServerCatalogProof
 {
@@ -40,6 +43,95 @@ internal static class ServerCatalogProof
             Check(ServerLauncher.UdpBinding.Find(pid, "127.0.0.1", port) == null, "Wildcard cannot satisfy an explicit loopback request");
         }
     }
+    static async Task WaitFor(Func<bool> condition, string description)
+    {
+        var elapsed = Stopwatch.StartNew();
+        while (!condition())
+        {
+            if (elapsed.ElapsedMilliseconds >= 3000) throw new TimeoutException(description);
+            await Task.Delay(15);
+        }
+    }
+
+    static void CheckResponsiveCatalog(string delayedInstance)
+    {
+        var folder = Path.GetDirectoryName(delayedInstance);
+        var mode = Path.Combine(folder, "mode");
+        var entered = Path.Combine(folder, "entered");
+        var release = Path.Combine(folder, "release");
+        Exception failure = null;
+        bool closedWithRequestHeld = false;
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
+        var previousContext = SynchronizationContext.Current;
+        using (var window = new ServerLauncher.Window { ShowInTaskbar = false, Opacity = 0 })
+        {
+            var path = window.Controls.OfType<TextBox>().First();
+            var rooms = window.Controls.OfType<ComboBox>().Single();
+            var refresh = window.Controls.OfType<Button>().Single(button => button.Text == "載入／更新");
+            var start = window.Controls.OfType<Button>().Single(button => button.Text == "啟動伺服器");
+            Action<string> arm = response =>
+            {
+                File.Delete(entered);
+                File.Delete(release);
+                File.WriteAllText(mode, response);
+            };
+            window.Shown += async delegate
+            {
+                try
+                {
+                    path.Text = delayedInstance;
+                    arm("success");
+                    refresh.PerformClick();
+                    await WaitFor(() => File.Exists(entered), "catalog request reaches the relay");
+                    Check(!File.Exists(release) && !refresh.Enabled && !path.Enabled && !start.Enabled && !rooms.Enabled,
+                        "the WinForms message loop runs while the catalog response is held and launch stays disabled");
+                    File.WriteAllText(release, "");
+                    await WaitFor(() => refresh.Enabled, "initial catalog load completes");
+                    Check(path.Enabled && rooms.Enabled && rooms.Items.Count == 2 && rooms.SelectedIndex == -1 && !start.Enabled,
+                        "first background load restores room controls and requires explicit selection");
+                    rooms.SelectedIndex = 0;
+                    var original = ((ServerLauncher.Choice)rooms.SelectedItem).Id;
+                    Check(start.Enabled, "the first explicitly selected original room can start");
+
+                    arm("success");
+                    refresh.PerformClick();
+                    await WaitFor(() => File.Exists(entered), "refresh reaches the relay");
+                    Check(!start.Enabled, "a refresh makes the previously selected room ineligible while the read is pending");
+                    File.WriteAllText(release, "");
+                    await WaitFor(() => refresh.Enabled, "refresh completes");
+                    Check(start.Enabled && ((ServerLauncher.Choice)rooms.SelectedItem).Id == original,
+                        "the same instance refresh restores the exact original selected room");
+
+                    arm("failure");
+                    refresh.PerformClick();
+                    await WaitFor(() => File.Exists(entered), "failed request reaches the relay");
+                    File.WriteAllText(release, "");
+                    await WaitFor(() => refresh.Enabled, "failed refresh restores inputs");
+                    Check(path.Enabled && !rooms.Enabled && !start.Enabled && rooms.Items.Count == 0 && rooms.SelectedItem == null,
+                        "a rejected response clears old rooms and keeps launch disabled");
+
+                    arm("success");
+                    refresh.PerformClick();
+                    await WaitFor(() => File.Exists(entered), "final held request reaches the relay");
+                    window.Close();
+                    closedWithRequestHeld = window.IsDisposed && !File.Exists(release);
+                }
+                catch (Exception error)
+                {
+                    failure = error;
+                    window.Close();
+                }
+                finally { File.WriteAllText(release, ""); }
+            };
+            try { Application.Run(window); }
+            finally { SynchronizationContext.SetSynchronizationContext(previousContext); }
+        }
+        if (failure != null) throw failure;
+        Check(closedWithRequestHeld, "the owned form closes normally before the catalog response is released");
+    }
+
+    [STAThread]
     static int Main(string[] args)
     {
         var output = args[1];
@@ -88,6 +180,7 @@ internal static class ServerCatalogProof
             Check(ServerLauncher.Choice.Label("甲\n乙\u202e丙") == "甲 乙丙", "display removes control / bidi formatting only");
             Check(!Char.IsHighSurrogate(ServerLauncher.Choice.Label(new String('甲', 31) + "\ud83d\ude80尾")[31]), "truncation preserves a surrogate boundary");
             var descriptor = ServerLauncher.Read(args[0], 8192); var instance = ServerLauncher.Text(descriptor, "instance");
+            CheckResponsiveCatalog(ServerLauncher.Text(descriptor, "delayedInstance"));
             var profilePath = Path.Combine(Path.GetDirectoryName(args[0]), "profile-proof", "control-instance.json");
             Directory.CreateDirectory(Path.GetDirectoryName(profilePath));
             var profile = new Dictionary<string, object> { { "schemaVersion", 1 }, { "kind", "VrCommand-RemoteGameServer" },
@@ -107,25 +200,25 @@ internal static class ServerCatalogProof
             try { remoteState.StartSettings("127.0.0.1", "127.0.0.1", 7777); } catch (InvalidDataException) { changedPin = true; }
             Check(changedPin && !remoteState.CanStart && remoteState.Current == null && remoteState.Selected == null,
                 "profile pin changed after preview requires reload and a new selection before GUI launch");
-            var state = new ServerLauncher.CatalogState(); state.Edit(instance); state.Load(); Check(state.Loaded && !state.CanStart && state.Selected == null && state.Current.Choices.Count > 0, "initial load requires an explicit selection");
+            var state = new ServerLauncher.CatalogState(); state.Edit(instance); state.Load().GetAwaiter().GetResult(); Check(state.Loaded && !state.CanStart && state.Selected == null && state.Current.Choices.Count > 0, "initial load requires an explicit selection");
             var original = state.Current.Choices[0].Id; state.Select(original); Check(state.CanStart && state.Selected.Id == original, "select maps the original id");
-            state.Edit(instance); Check(!state.CanStart, "editing invalidates launch even for the same path"); state.Load(); Check(state.CanStart && state.Selected.Id == original, "same identity refresh preserves only its original selection");
+            state.Edit(instance); Check(!state.CanStart, "editing invalidates launch even for the same path"); state.Load().GetAwaiter().GetResult(); Check(state.CanStart && state.Selected.Id == original, "same identity refresh preserves only its original selection");
             var markerText = File.ReadAllText(instance, Encoding.UTF8); var marker = ServerLauncher.Read(instance, 4096);
-            try { marker["instanceId"] = Guid.NewGuid().ToString("D"); File.WriteAllText(instance, ServerLauncher.Json.Serialize(marker), new UTF8Encoding(false)); state.Load(); Check(state.Loaded && !state.CanStart && state.Selected == null, "changed instance identity requires a new selection"); }
+            try { marker["instanceId"] = Guid.NewGuid().ToString("D"); File.WriteAllText(instance, ServerLauncher.Json.Serialize(marker), new UTF8Encoding(false)); state.Load().GetAwaiter().GetResult(); Check(state.Loaded && !state.CanStart && state.Selected == null, "changed instance identity requires a new selection"); }
             finally { File.WriteAllText(instance, markerText, new UTF8Encoding(false)); }
-            state.Load(); state.Select(original); var keysPath = Path.Combine(Path.GetDirectoryName(instance), "operator-keys.json"); var keysText = File.ReadAllText(keysPath, Encoding.UTF8); var keyFile = ServerLauncher.Read(keysPath, 8192);
-            try { ServerLauncher.Child(keyFile, "OperatorKeys")["GameServer"] = ServerLauncher.Text(descriptor, "masterKey"); File.WriteAllText(keysPath, ServerLauncher.Json.Serialize(keyFile), new UTF8Encoding(false)); bool denied = false; try { state.Load(); } catch (InvalidDataException) { denied = true; } Check(denied && !state.CanStart && state.Current == null && state.Selected == null, "changed credential with wrong role cannot restore old target"); }
+            state.Load().GetAwaiter().GetResult(); state.Select(original); var keysPath = Path.Combine(Path.GetDirectoryName(instance), "operator-keys.json"); var keysText = File.ReadAllText(keysPath, Encoding.UTF8); var keyFile = ServerLauncher.Read(keysPath, 8192);
+            try { ServerLauncher.Child(keyFile, "OperatorKeys")["GameServer"] = ServerLauncher.Text(descriptor, "masterKey"); File.WriteAllText(keysPath, ServerLauncher.Json.Serialize(keyFile), new UTF8Encoding(false)); bool denied = false; try { state.Load().GetAwaiter().GetResult(); } catch (InvalidDataException) { denied = true; } Check(denied && !state.CanStart && state.Current == null && state.Selected == null, "changed credential with wrong role cannot restore old target"); }
             finally { File.WriteAllText(keysPath, keysText, new UTF8Encoding(false)); }
-            state.Load(); state.Select(original); state.Edit(Path.Combine(Path.GetDirectoryName(instance), "missing", "control-instance.json")); bool failed = false; try { state.Load(); } catch (IOException) { failed = true; }
+            state.Load().GetAwaiter().GetResult(); state.Select(original); state.Edit(Path.Combine(Path.GetDirectoryName(instance), "missing", "control-instance.json")); bool failed = false; try { state.Load().GetAwaiter().GetResult(); } catch (IOException) { failed = true; }
             Check(failed && state.Current == null && state.Selected == null && !state.CanStart, "failed reload cannot reuse old target or selection");
-            state.Edit(instance); state.Load(); Check(!state.CanStart && state.Selected == null, "recovery after failure does not silently restore a selection");
+            state.Edit(instance); state.Load().GetAwaiter().GetResult(); Check(!state.CanStart && state.Selected == null, "recovery after failure does not silently restore a selection");
             state.Select(original); var api = state.Current.Target.Api; var request = (HttpWebRequest)WebRequest.Create(api + "/api/sessions/" + original + "/commands"); request.Method = "POST"; request.Proxy = null; request.Timeout = 5000; request.ContentType = "application/json"; request.Headers[HttpRequestHeader.Authorization] = "Bearer " + ServerLauncher.Text(descriptor, "masterKey");
             var body = Encoding.UTF8.GetBytes(ServerLauncher.Json.Serialize(new { commandId = Guid.NewGuid().ToString("D"), action = "End" })); request.ContentLength = body.Length; using (var stream = request.GetRequestStream()) stream.Write(body, 0, body.Length); using (var response = request.GetResponse()) { }
-            state.Load(); Check(state.Loaded && state.Current.Choices.Count > 0 && state.Selected == null && !state.CanStart, "removed original choice never selects another room on refresh");
+            state.Load().GetAwaiter().GetResult(); Check(state.Loaded && state.Current.Choices.Count > 0 && state.Selected == null && !state.CanStart, "removed original choice never selects another room on refresh");
             original = state.Current.Choices[0].Id;
-            state.Select(original); state.Edit(""); failed = false; try { state.Load(); } catch (InvalidDataException) { failed = true; }
+            state.Select(original); state.Edit(""); failed = false; try { state.Load().GetAwaiter().GetResult(); } catch (InvalidDataException) { failed = true; }
             Check(failed && !state.CanStart && state.Current == null, "empty path fails closed");
-            ServerLauncher.Save(output, new { complete = true, checks = checks, scope = "Actual Framework catalog/state methods and Windows UDP socket owner/address/port checks. No WinForms UI automation, game readiness or headset proof." }); return 0;
+            ServerLauncher.Save(output, new { complete = true, checks = checks, scope = "Actual Framework catalog state, in-process WinForms message loop with held management responses, and Windows UDP socket owner/address/port checks. No desktop input, game readiness or headset proof." }); return 0;
         }
         catch (Exception e) { ServerLauncher.Save(output, new { complete = false, checks = checks, error = ServerLauncher.Safe(e) }); return 1; }
     }

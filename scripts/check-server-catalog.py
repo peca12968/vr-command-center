@@ -1,6 +1,10 @@
 """Actual compiled Framework catalog/state checks against fresh owned management data; no UI input."""
 import argparse,hashlib,importlib.util,json,os,shutil,socket,subprocess,time,urllib.error,urllib.request,uuid
+from contextlib import contextmanager
+from http.client import HTTPConnection
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
 ROOT=Path(__file__).resolve().parents[1]
 def module(name,file):
     s=importlib.util.spec_from_file_location(name,ROOT/'scripts'/file);m=importlib.util.module_from_spec(s);s.loader.exec_module(m);return m
@@ -8,6 +12,56 @@ control=module('catalog_control','check-control-package.py');package=module('cat
 def read(p):return json.loads(p.read_text(encoding='utf-8'))
 def sha(p):
     with p.open('rb') as f:return hashlib.file_digest(f,'sha256').hexdigest()
+
+@contextmanager
+def held_catalog(port, folder):
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            if self.path not in ('/', '/api/me', '/api/sessions'):
+                self.send_error(404)
+                return
+            if self.path == '/api/sessions':
+                mode = (folder/'mode').read_text()
+                (folder/'entered').touch()
+                until = time.monotonic() + 4
+                while not (folder/'release').exists():
+                    if time.monotonic() >= until:
+                        self.send_error(504)
+                        return
+                    time.sleep(.01)
+                if mode == 'failure':
+                    self.send_error(503)
+                    return
+            connection = HTTPConnection('127.0.0.1', port, timeout=3)
+            try:
+                connection.request('GET', self.path, headers={'Authorization': self.headers['Authorization']})
+                upstream = connection.getresponse()
+                body = upstream.read()
+                self.send_response(upstream.status)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass  # The owned window may close while the last reply is held.
+            finally:
+                connection.close()
+
+    with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+        server.daemon_threads = False
+        worker = Thread(target=server.serve_forever, kwargs={'poll_interval': .05})
+        worker.start()
+        try:
+            yield server.server_port
+        finally:
+            (folder/'release').touch()
+            server.shutdown()
+            worker.join(3)
+            assert not worker.is_alive()
+
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('package',type=Path);p.add_argument('--control-package',type=Path,required=True);p.add_argument('--runtime-root',type=Path,required=True);args=p.parse_args()
     if os.name!='nt':p.error('Actual Framework compiler/process checks require Windows')
@@ -38,10 +92,17 @@ def main():
         check(all(request('/api/sessions/'+sid)==state for sid,state in before.items()),'catalog GETs do not reserve or mutate sessions')
         original={name:sha(data/name) for name in ['operator-keys.json','control-instance.json']};proof=runtime/'proof';proof.mkdir()
         for source in [ROOT/'tools/WindowsServerLauncher/ServerLauncher.cs',ROOT/'tools/WindowsServerLauncher/Tests/CatalogProof.cs']:shutil.copyfile(source,proof/source.name)
-        descriptor=runtime/'proof-private.json';descriptor.write_text(json.dumps({'instance':str(data/'control-instance.json'),'masterKey':keys['Master']}),encoding='utf-8')
+        descriptor=runtime/'proof-private.json';delayed=runtime/'delayed';delayed.mkdir()
+        delayed_instance=delayed/'control-instance.json'
+        shutil.copyfile(data/'operator-keys.json',delayed/'operator-keys.json')
         compiler=Path(os.environ['WINDIR'])/'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
         with (proof/'compile.log').open('xb') as log:subprocess.run([str(compiler),'/nologo','/warnaserror','/codepage:65001','/target:exe','/platform:x64','/main:ServerCatalogProof','/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Web.Extensions.dll','/out:'+str(proof/'CatalogProof.exe'),str(proof/'ServerLauncher.cs'),str(proof/'CatalogProof.cs')],stdout=log,stderr=subprocess.STDOUT,check=True)
-        result=subprocess.run([str(proof/'CatalogProof.exe'),str(descriptor),str(out/'framework-proof.json')],timeout=60);values=read(out/'framework-proof.json');check(result.returncode==0 and values['complete'],'actual production Framework parser and selection-state methods');check(all(sha(data/name)==h for name,h in original.items()),'proof restores its own private test marker / credentials exactly')
+        with held_catalog(port, delayed) as relay_port:
+            delayed_instance.write_text(json.dumps(dict(read(data/'control-instance.json'),port=relay_port)),encoding='utf-8')
+            descriptor.write_text(json.dumps({'instance':str(data/'control-instance.json'),'masterKey':keys['Master'],
+                                              'delayedInstance':str(delayed_instance)}),encoding='utf-8')
+            result=subprocess.run([str(proof/'CatalogProof.exe'),str(descriptor),str(out/'framework-proof.json')],timeout=60)
+        values=read(out/'framework-proof.json');check(result.returncode==0 and values['complete'],'actual Framework parser, selection state and responsive WinForms catalog');check(all(sha(data/name)==h for name,h in original.items()),'proof restores its own private test marker / credentials exactly')
         remaining=catalog('after-end');check([x['id'] for x in remaining['sessions']]==sessions[1:],'Ended original is absent without selecting a replacement')
         for room in [1,3,4,5]:
             state=request('/api/sessions',{'missionId':before[sessions[1]]['mission']['id'],'mode':'Independent','roomIds':[room]});sessions.append(state['id'])
@@ -95,5 +156,5 @@ def main():
         save('cleanup.json',{'errors':errors,'apiRemaining':bool(api and api.poll() is None)})
         if errors:raise RuntimeError('Do not snapshot until actual owned API cleanup is confirmed')
         venue.snapshot_runtime(runtime,out/'runtime-snapshot')
-    save('checks.json',{'complete':True,'checks':len(checks),'frameworkChecks':values['checks'],'findings':checks,'runtimeDirectory':str(runtime),'scope':'Fresh owned API / actual Windows Framework code and catalog CLI; no UI automation, Unity, LAN or headset claim.'});print(json.dumps({'complete':True,'checks':len(checks),'frameworkChecks':values['checks'],'directory':str(out)}))
+    save('checks.json',{'complete':True,'checks':len(checks),'frameworkChecks':values['checks'],'findings':checks,'runtimeDirectory':str(runtime),'scope':'Fresh owned API, WinForms message loop and catalog CLI; no desktop input, Unity, LAN or headset claim.'});print(json.dumps({'complete':True,'checks':len(checks),'frameworkChecks':values['checks'],'directory':str(out)}))
 if __name__=='__main__':main()

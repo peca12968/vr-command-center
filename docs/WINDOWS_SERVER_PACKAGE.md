@@ -1,5 +1,7 @@
 # Windows 遊戲伺服器包
 
+2026-11-11 `VRCommand-GameServer-0.50.4-1.17-catalog-win-x64.zip` 為 84,814,710 bytes，SHA-256 `ea9e997f21a93c51609d0255babb2ad65ee97198953ee65ab216f846c1453d5b`。解壓核對 330 筆清單。啟動器在背景讀取單房視窗的待開清單，遊戲沿用 0.50.4。 [待開清單操作](SERVER_CATALOG.md)
+
 2026-11-11 `VRCommand-GameServer-0.50.4-1.16-venue-receipt-retry-win-x64.zip` 為 84,812,731 bytes，SHA-256 `a033b9936e45cb4fdfc72d1d0af99c83ddbea12a602051c39822e2bd8fd5fc5f`。解壓核對 330 筆清單。遊戲沿用 0.50.4，啟動器可重送原全館來源登記及端點公告。 [操作與報告](#依場館計畫批次啟動)
 
 2026-11-11 `VRCommand-GameServer-0.50.4-1.15-venue-source-batch-win-x64.zip` 為 84,811,892 bytes，SHA-256 `aa4e19c1548e61136a58d7e396a38fa4fc41b98b6031cd32d39215b0a1ad0c19`。解壓核對 330 筆清單。第四版計畫等待全部遊戲程序準備後，再登記整批來源。 [操作方式](#依場館計畫批次啟動)

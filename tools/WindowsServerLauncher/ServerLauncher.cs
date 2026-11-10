@@ -13,6 +13,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
 
@@ -398,10 +399,14 @@ internal static class ServerLauncher
         internal string Draft = ""; internal Catalog Current; internal Choice Selected; internal bool Loaded;
         internal bool CanStart { get { return Loaded && Current != null && Selected != null && Selected.CanStart && String.Equals(Full(Draft.Trim()), Current.PathName, StringComparison.OrdinalIgnoreCase); } }
         internal void Edit(string path) { Draft = path; Loaded = false; }
-        internal void Load()
+        internal async Task Load()
         {
-            var old = Current; var selectedId = Selected == null ? null : Selected.Id; Loaded = false; Current = null; Selected = null;
-            var loaded = Catalog.Load(Draft); Current = loaded; Loaded = true;
+            var old = Current;
+            var selectedId = Selected == null ? null : Selected.Id;
+            var draft = Draft;
+            Loaded = false; Current = null; Selected = null;
+            var loaded = await Task.Run(() => Catalog.Load(draft));
+            Current = loaded; Loaded = true;
             if (loaded.Same(old) && selectedId != null) Selected = loaded.Choices.Find(choice => choice.Id == selectedId);
         }
         internal void Select(string id) { Need(Loaded && Current != null, "請先載入管理實例。"); Selected = id == null ? null : Current.Choices.Find(choice => choice.Id == id); }
@@ -1119,7 +1124,7 @@ internal static class ServerLauncher
             venue = new Button { Text = "五房批次啟動" };
         readonly CheckBox peerDiagnostics = new CheckBox { Text = "記錄本次玩家連線來源（場館驗收）" };
         readonly Label state = new Label { Text = "先啟動管理服務，再載入其管理實例。", AutoSize = false }, detail = new Label { Text = "請先載入，再明確選擇要啟動的房間與任務。", AutoEllipsis = true };
-        readonly CatalogState catalog = new CatalogState(); Run active; volatile bool cancel; Thread worker;
+        readonly CatalogState catalog = new CatalogState(); Run active; volatile bool cancel; Thread worker; bool loading;
         internal Window()
         {
             Text = "VR Command 遊戲伺服器"; ClientSize = new Size(920, 580); Font = new Font("Microsoft JhengHei UI", 11); FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false;
@@ -1132,22 +1137,49 @@ internal static class ServerLauncher
             Add(new Label { Text = "開啟後，來源 IP 與埠會寫入本機私有 server.log。", AutoSize = true }, 463, 404, 427, 28);
             Add(start, 24, 452, 260, 40); Add(abort, 310, 452, 260, 40); Add(venue, 630, 452, 260, 40); Add(state, 24, 510, 866, 64);
             selected.TextChanged += delegate { catalog.Edit(selected.Text); start.Enabled = session.Enabled = false; detail.Text = "路徑已變更，請重新載入；未沿用舊場次。"; };
-            open.Click += delegate { using (var dialog = new OpenFileDialog { Filter = "管理實例|control-instance.json", CheckFileExists = true }) if (dialog.ShowDialog(this) == DialogResult.OK) { selected.Text = dialog.FileName; Guard(LoadInstance); } };
-            refresh.Click += delegate { Guard(LoadInstance); };
+            open.Click += async delegate
+            {
+                string path;
+                using (var dialog = new OpenFileDialog { Filter = "管理實例|control-instance.json", CheckFileExists = true })
+                {
+                    if (dialog.ShowDialog(this) != DialogResult.OK) return;
+                    path = dialog.FileName;
+                }
+                selected.Text = path;
+                await LoadInstance();
+            };
+            refresh.Click += async delegate { await LoadInstance(); };
             venue.Click += delegate { using (var window = new VenueWindow()) window.ShowDialog(this); };
             session.SelectedIndexChanged += delegate { if (catalog.Loaded) { var choice = session.SelectedItem as Choice; catalog.Select(choice == null ? null : choice.Id); ShowSelection(); } };
             start.Click += delegate { Guard(Begin); }; abort.Click += delegate { cancel = true; abort.Enabled = false; state.Text = "中止中；此輪不算正常封存完成。"; };
             FormClosing += delegate(object sender, FormClosingEventArgs e) { if (worker != null && worker.IsAlive) { e.Cancel = true; state.Text = "伺服器仍在執行；請由控制台結束任務，或按中止。"; } };
-            var timer = new System.Windows.Forms.Timer { Interval = 500 }; timer.Tick += delegate { if (active != null && !cancel) state.Text = active.Status; }; timer.Start();
+            var timer = new System.Windows.Forms.Timer { Interval = 500 }; timer.Tick += delegate { if (active != null && !cancel) state.Text = active.Status; };
+            FormClosed += delegate { timer.Dispose(); };
+            timer.Start();
         }
         void Add(Control control, int x, int y, int w, int h) { control.SetBounds(x, y, w, h); Controls.Add(control); }
         void Guard(Action action) { try { action(); } catch (Exception e) { state.Text = "未完成：" + Safe(e); } }
-        void ShowSelection() { start.Enabled = catalog.CanStart; detail.Text = catalog.Selected == null ? "請明確選擇要啟動的房間與任務。" : catalog.Selected.Detail(); }
-        void LoadInstance()
+        void ShowSelection() { start.Enabled = !loading && catalog.CanStart; detail.Text = catalog.Selected == null ? "請明確選擇要啟動的房間與任務。" : catalog.Selected.Detail(); }
+        async Task LoadInstance()
         {
-            start.Enabled = session.Enabled = false; detail.Text = "正在重新讀取管理服務；不保留未確認的啟動選取。";
-            try { catalog.Load(); }
-            catch { session.Items.Clear(); detail.Text = "載入未完成，已清除舊場次。請確認管理服務與路徑後重新載入。"; throw; }
+            if (loading || active != null) return;
+            loading = true;
+            open.Enabled = refresh.Enabled = selected.Enabled = venue.Enabled = start.Enabled = session.Enabled = false;
+            detail.Text = "正在讀取管理服務；請等候清單更新。";
+            Exception failure = null;
+            try { await catalog.Load(); }
+            catch (Exception error) { failure = error; }
+            if (IsDisposed || Disposing) return;
+
+            loading = false;
+            open.Enabled = refresh.Enabled = selected.Enabled = venue.Enabled = true;
+            if (failure != null)
+            {
+                session.Items.Clear();
+                detail.Text = "載入未完成，已清除舊場次。請確認管理服務與路徑後重新載入。";
+                state.Text = "未完成：" + Safe(failure);
+                return;
+            }
             var retained = catalog.Selected; session.Items.Clear(); foreach (var choice in catalog.Current.Choices) session.Items.Add(choice);
             session.Enabled = true; if (retained != null) session.SelectedItem = retained;
             ShowSelection();

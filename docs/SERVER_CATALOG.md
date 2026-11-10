@@ -1,5 +1,7 @@
 # 伺服器待開場次清單
 
+啟動器 1.17 會在背景讀取管理服務。讀取時可以移動或關閉視窗，選房與啟動暫時停用。成功後只會保留同一實例中仍可用的原場次選取。讀取失敗會清空舊場次，重新載入後再選房。 [實測紀錄](PROGRESS.md#2026-11-11-windows-啟動器背景載入待開場次)
+
 啟動器 1.12 可讀取遊戲主機上的私人 HTTPS `control-instance.json`。換了站台原點、金鑰或憑證指紋時，原場次選取會失效。個別啟動前也會重讀設定檔。 [建立 HTTPS 連線設定](WINDOWS_SERVER_PACKAGE.md#建立遊戲主機的-https-連線設定)
 
 ## MR 校正鎖定與啟動資格
@@ -23,7 +25,7 @@ Windows伺服器啟動器 **1.1.0** 可直接輸入管理實例的`control-insta
 
 啟動器 1.4 的清單接受尚未綁定來源的 Preparing VR 或 MR，並顯示任務的體驗模式。最多五筆場次。Independent 須一房，Linked 須完整五房。啟動前仍會核對 API 身分、Preparing 階段及來源狀態。 [MR 開場](QUEST3.md#主控建立-mr-場次)
 
-目標以本次載入的API與憑證為準；外部修改實例檔案後請更新。載入仍為有界同步讀取，API root／身分／清單各5秒，清單最多256Ki個字元，未聲稱完整LAN故障恢復。只使用既有GameServer角色，不使用Master啟動Unity、不新增key／配票或下Begin／End。原session mutex、私有log來源核對、endpoint、雙seal／36秒保留／原child收尾保持。
+目標以本次載入的 API 與憑證為準。外部修改實例檔案後請更新。API 根路由、身分及清單各有 5 秒請求期限，清單最多 256 Ki 個字元。讀取使用既有 GameServer 角色。
 
 ## CLI與驗證
 
