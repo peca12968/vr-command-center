@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `VRCommand-ControlServer-0.31.101-win-x64.zip` 會在原遊戲來源沒有近期有效畫格時暫停新批次端點的配票。ZIP 為 52,922,457 bytes，SHA-256 `5d0c83b19b7bfd39c9a1057ae4874227d79f6cbb95010a76c60ac73014c80793`。解壓核對 546 筆清單及 526 個發行檔案。 [配票操作](EXTERNAL_CLIENTS.md#按房間下載連線檔)
+
 2026-11-10 `VRCommand-ControlServer-0.31.100-win-x64.zip` 支援整批公告場館端點。ZIP 為 52,920,674 bytes，SHA-256 `2a36a4ddf18c9d10efddae31311ce5287e0f10b18d298b0686ffee625190b46e`。解壓核對 546 筆清單及 526 個發行檔案。 [五房啟動](WINDOWS_SERVER_PACKAGE.md#依場館計畫批次啟動)
 
 2026-11-10 `VRCommand-ControlServer-0.31.99-win-x64.zip` 可確認分房恢復沿用全場敵軍策略，並核對全館預覽後是否有更新的分房命令。ZIP 為 52,916,425 bytes，SHA-256 `86a02a8f2c7b6cf04560703315adfed0c1392379519b30c7794e41b4c58ce2ef`。解壓核對 546 筆清單及 526 個發行檔案。 [分房操作](LAYOUT.md#合併場分房敵軍策略)
