@@ -547,28 +547,46 @@ function Read-QuestDeviceMap([string]$Path, [switch]$Partial) {
     $map.seats | Sort-Object roomId, seat
 }
 
-function Read-TrackedReadiness($Target, [Guid]$SessionId) {
-    $url = [Uri]::new($Target.Origin, "/api/sessions/$SessionId/readiness")
+function Read-VenueTrackedReadiness($Target, $Venue) {
+    $url = [Uri]::new($Target.Origin, '/api/venue/tracked-readiness')
+    $rooms = @($Venue.LiveRooms | ForEach-Object { @{ roomId = $_.roomId; sessionId = $_.sessionId } })
+    $ids = @($rooms.sessionId | Sort-Object -Unique)
+    $body = @{ topology = $Venue.Report.topology; rooms = $rooms } | ConvertTo-Json -Compress -Depth 3
+    $timer = [Diagnostics.Stopwatch]::StartNew()
     try {
-        $response = Invoke-WebRequest -Uri $url -Method Get -Headers $Target.Headers -NoProxy `
+        $response = Invoke-WebRequest -Uri $url -Method Post -Headers $Target.Headers -ContentType 'application/json' -Body $body -NoProxy `
             -MaximumRedirection 0 -TimeoutSec 10 -SkipHttpErrorCheck
+        if ($response.StatusCode -eq 409) { return @{ Status = 'venue-changed' } }
         if ($response.StatusCode -ne 200) { return @{ Status = 'readiness-unavailable' } }
-        $snapshot = ConvertFrom-Json -InputObject $response.Content
+        $batch = ConvertFrom-Json -InputObject $response.Content
     } catch { return @{ Status = 'readiness-unavailable' } }
-    if (-not (Test-JsonInteger $snapshot.version) -or $snapshot.version -ne 1 -or $snapshot.sessionId -cne $SessionId.ToString('D') -or
-        $snapshot.players -isnot [array] -or $snapshot.players.Count -gt 25 -or
-        $snapshot.sourceState -cnotin @('Fresh','Ended','NoRecording','WaitingFrame','UnknownCaptureTime','ClockSkew','Stale','Suspended','PhasePending') -or
-        -not (Test-JsonInteger $snapshot.worldSequence) -or $snapshot.worldSequence -lt 0 -or
-        -not (Test-JsonInteger $snapshot.sessionSequence) -or $snapshot.sessionSequence -lt 1 -or
-        -not (Test-JsonInteger $snapshot.observedSequence) -or $snapshot.observedSequence -lt 0) {
+    if (-not (Test-JsonInteger $batch.version) -or $batch.version -ne 1 -or $batch.topology -cne $Venue.Report.topology -or
+        -not $batch.sampledAtUtc -or -not (Test-JsonInteger $batch.maxSourceAgeMilliseconds) -or $batch.maxSourceAgeMilliseconds -ne 1500 -or
+        $batch.sessions -isnot [array] -or $batch.sessions.Count -ne $ids.Count) {
         return @{ Status = 'readiness-invalid' }
     }
-    return @{ Snapshot = $snapshot }
+    $readings = @{}
+    foreach ($snapshot in $batch.sessions) {
+        if (-not (Test-JsonInteger $snapshot.version) -or $snapshot.version -ne 1 -or $snapshot.sessionId -cnotin $ids -or
+            $readings.ContainsKey($snapshot.sessionId) -or $snapshot.sampledAtUtc -cne $batch.sampledAtUtc -or
+            $snapshot.players -isnot [array] -or $snapshot.players.Count -gt 25 -or
+            $snapshot.sourceState -cnotin @('Fresh','Ended','NoRecording','WaitingFrame','UnknownCaptureTime','ClockSkew','Stale','Suspended','PhasePending') -or
+            -not (Test-JsonInteger $snapshot.worldSequence) -or $snapshot.worldSequence -lt 0 -or
+            -not (Test-JsonInteger $snapshot.sessionSequence) -or $snapshot.sessionSequence -lt 1 -or
+            -not (Test-JsonInteger $snapshot.observedSequence) -or $snapshot.observedSequence -lt 0 -or
+            ($snapshot.sourceState -ceq 'Fresh' -and ((-not (Test-JsonInteger $snapshot.sourceAgeMilliseconds) -and
+                $snapshot.sourceAgeMilliseconds -isnot [double]) -or -not [double]::IsFinite($snapshot.sourceAgeMilliseconds) -or
+                $snapshot.sourceAgeMilliseconds -lt -1000 -or $snapshot.sourceAgeMilliseconds -gt $batch.maxSourceAgeMilliseconds))) {
+            return @{ Status = 'readiness-invalid' }
+        }
+        $readings[$snapshot.sessionId] = $snapshot
+    }
+    return @{ Sessions = $readings; SampledAtUtc = $batch.sampledAtUtc; MaxAge = $batch.maxSourceAgeMilliseconds;
+        Elapsed = $timer.Elapsed.TotalMilliseconds }
 }
 
-function Get-TrackedSeatStatus($Reading, $Connection) {
-    if ($Reading.Status) { return $Reading.Status }
-    $snapshot = $Reading.Snapshot
+function Get-TrackedSeatStatus($Batch, $Snapshot, $Connection) {
+    if ($Batch.Status) { return $Batch.Status }
     $ticket = $Connection.Ticket
     $rows = @($snapshot.players | Where-Object { $_.roomId -eq $ticket.RoomId -and $_.seat -eq $ticket.Seat })
     if ($rows.Count -eq 0) { return 'seat-unavailable' }
@@ -580,6 +598,7 @@ function Get-TrackedSeatStatus($Reading, $Connection) {
         return 'admission-changed'
     }
     if ($snapshot.sourceState -cne 'Fresh') { return 'source-not-fresh' }
+    if ($snapshot.sourceAgeMilliseconds + $Batch.Elapsed -gt $Batch.MaxAge) { return 'source-expired-in-transit' }
     if ($snapshot.origin -cnotin @('Simulation','GameServer') -or $snapshot.worldSequence -eq 0 -or
         $snapshot.observedSequence -ne $snapshot.sessionSequence) { return 'source-revision-pending' }
     if ($Connection.Alignment -and ($snapshot.origin -cne 'GameServer' -or
@@ -594,7 +613,7 @@ function Get-TrackedSeatStatus($Reading, $Connection) {
 function Confirm-TrackedSeats($Venue, [object[]]$Map, [switch]$IncludeAllHeadsets) {
     Confirm-VenueReadback $Venue
     $target = Get-ManagementTarget $ManagementApi
-    $readings = @{}
+    $batch = Read-VenueTrackedReadiness $target $Venue
     $hasHeadsets = $Venue.Report.mode -cin @('VR','Mixed')
     $seats = @(foreach ($row in $Map) {
         $key = "$($row.roomId)/$($row.seat)"
@@ -604,16 +623,15 @@ function Confirm-TrackedSeats($Venue, [object[]]$Map, [switch]$IncludeAllHeadset
             continue
         }
         $connection = $Venue.Connections[$key]
-        $session = $connection.Ticket.SessionId
-        if (-not $readings.ContainsKey($session)) { $readings[$session] = Read-TrackedReadiness $target $session }
-        $reading = $readings[$session]
-        $result = [ordered]@{ roomId = $row.roomId; seat = $row.seat; status = Get-TrackedSeatStatus $reading $connection;
-            sourceState = $reading.Snapshot.sourceState; worldSequence = $reading.Snapshot.worldSequence }
+        $snapshot = if ($batch.Sessions) { $batch.Sessions[$connection.Ticket.SessionId.ToString('D')] }
+        $result = [ordered]@{ roomId = $row.roomId; seat = $row.seat; status = Get-TrackedSeatStatus $batch $snapshot $connection;
+            sourceState = $snapshot.sourceState; worldSequence = $snapshot.worldSequence }
         if ($IncludeAllHeadsets) { $result.registeredHeadset = $headset }
         $result
     })
     $report = [ordered]@{ phase = 'tracked-readiness'; topology = $Venue.Report.topology; managementVerified = $true;
         complete = ($seats.Count -gt 0 -and -not ($seats | Where-Object { $_.status -cne 'tracked-ready' })); seats = $seats }
+    if ($batch.SampledAtUtc) { $report.sampledAtUtc = $batch.SampledAtUtc }
     if ($IncludeAllHeadsets) { $report.scope = 'venue' }
     return $report
 }

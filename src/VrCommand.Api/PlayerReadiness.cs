@@ -12,6 +12,10 @@ public record SessionReadiness(int Version, Guid SessionId, long SessionSequence
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? MrTrackingState,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomMrPause? MrPause = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomVrPause? VrPause = null);
+internal sealed record VenueReadinessRequest(string Topology, VenueReadinessRoom?[] Rooms);
+internal sealed record VenueReadinessRoom(int RoomId, Guid SessionId);
+internal sealed record VenueReadiness(int Version, string Topology, DateTimeOffset SampledAtUtc,
+    double MaxSourceAgeMilliseconds, SessionReadiness[] Sessions);
 public record RoomReadiness(int RoomId, Guid? SessionId, long SessionSequence, int Registered, int SimulatedReady,
     int TrackedReady, string SourceState, double? SourceAgeMilliseconds,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MrLiving = null,
@@ -206,6 +210,34 @@ public sealed partial class WorldRecordings
     // A scoped view of accepted snapshots. Both MR transitions require the exact current roster revision.
     public SessionReadiness Readiness(Guid id, OperatorIdentity actor) => ReadReadinessSnapshot(id, actor).Report;
 
+    internal VenueReadiness ReadVenueTracking(VenueReadinessRequest input, OperatorIdentity actor)
+    {
+        if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue tracking requires the master operator.");
+        var roomIds = Enumerable.Range(1, SessionManager.RoomCount);
+        if (input.Topology is not ("Linked" or "Independent") || input.Rooms is not { Length: SessionManager.RoomCount }
+            || input.Rooms.Any(room => room is null || room.SessionId == Guid.Empty))
+            throw new ArgumentException("Provide the five original room sessions and venue topology.");
+        var rooms = input.Rooms.OfType<VenueReadinessRoom>().OrderBy(room => room.RoomId).ToArray();
+        var ids = rooms.Select(room => room.SessionId).Distinct().ToArray();
+        var mode = input.Topology == "Linked" ? SessionMode.Linked : SessionMode.Independent;
+        if (!rooms.Select(room => room.RoomId).SequenceEqual(roomIds) || ids.Length != (mode == SessionMode.Linked ? 1 : SessionManager.RoomCount))
+            throw new ArgumentException("Provide the five original room sessions and venue topology.");
+
+        lock (gate)
+        {
+            var before = manager.List(false, actor).ToDictionary(session => session.Id);
+            if (rooms.Any(room => !before.TryGetValue(room.SessionId, out var session) || session.Mode != mode || !session.RoomIds.Contains(room.RoomId)))
+                throw new InvalidOperationException("The original venue sessions are no longer active in their rooms.");
+            var sampledAt = readinessClock.GetUtcNow();
+            var reports = ids.Select(id => ReadReadinessSnapshot(id, actor, sampledAtUtc: sampledAt).Report).ToArray();
+            var after = manager.List(false, actor).ToDictionary(session => session.Id);
+            if (reports.Any(report => !after.TryGetValue(report.SessionId, out var session)
+                || report.SessionSequence != before[report.SessionId].Sequence || report.SessionSequence != session.Sequence))
+                throw new InvalidOperationException("The venue changed during tracking verification.");
+            return new(1, input.Topology, sampledAt, MaxSourceAgeMilliseconds, reports);
+        }
+    }
+
     private static bool ReadyToBegin(PlayerReadiness player, bool trackedRequired) =>
         player.CanParticipate && (!trackedRequired || player.RigKind == "Tracked");
     private static string BeginSeatState(PlayerReadiness player, string beginState) =>
@@ -221,7 +253,8 @@ public sealed partial class WorldRecordings
     private (SessionReadiness Report, RoomMissionTime? Clock, RoomVenuePhase? VenuePhase, string? BeginState,
         RoomEnvironmentEvidence? Environment, Dictionary<int, RoomEnemiesEvidence>? EnemyRooms, ConnectionEndpoint? Endpoint,
         bool VrParticipationObserved, VenueTrackingFrame? BeginFrame, bool VenueTrackingObserved, string? PoseStream, bool? TicketSourceLive)
-        ReadReadinessSnapshot(Guid id, OperatorIdentity actor, bool includeRoomDetails = false, bool includeBeginFrame = false)
+        ReadReadinessSnapshot(Guid id, OperatorIdentity actor, bool includeRoomDetails = false, bool includeBeginFrame = false,
+            DateTimeOffset? sampledAtUtc = null)
     {
         RequireReadinessActor(actor);
         lock (gate)
@@ -232,7 +265,7 @@ public sealed partial class WorldRecordings
             var info = exists.ExecuteScalar() is null ? null : Info(id, actor);
             var frame = info is null || info.AcceptedSequence == 0 ? null : Frame(id, info.AcceptedSequence, actor);
             var observed = frame is null ? null : manager.Observed(id, frame.Packet.observedSequence, actor);
-            var now = readinessClock.GetUtcNow();
+            var now = sampledAtUtc ?? readinessClock.GetUtcNow();
             var age = info?.CapturedAtUtc is { } captured ? (double?)(now - captured).TotalMilliseconds : null;
             var source = current.State == SessionState.Ended ? "Ended"
                 : info is null ? "NoRecording" : frame is null ? "WaitingFrame"

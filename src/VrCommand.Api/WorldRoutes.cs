@@ -15,6 +15,15 @@ public static class WorldRoutes
         app.MapGet("/api/world-recordings", (WorldRecordings store, HttpContext context) => Results.Json(store.List(Actor(context)), WorldJson.Options));
         app.MapGet("/api/sessions/{id:guid}/world", (Guid id, WorldRecordings store, HttpContext context) => Results.Json(store.Info(id, Actor(context)), WorldJson.Options));
         app.MapGet("/api/sessions/{id:guid}/readiness", (Guid id, WorldRecordings store, HttpContext context) => store.Readiness(id, Actor(context)));
+        app.MapPost("/api/venue/tracked-readiness", async (WorldRecordings store, HttpContext context) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            var actor = Actor(context);
+            if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue tracking requires the master operator.");
+            var input = await DeploymentJson.Read<VenueReadinessRequest>(context.Request, 4096,
+                "Provide the five original room sessions and venue topology.", context.RequestAborted);
+            return store.ReadVenueTracking(input, actor);
+        });
         app.MapGet("/api/rooms/readiness", (WorldRecordings store, HttpContext context) =>
         {
             context.Response.Headers.CacheControl = "no-store";

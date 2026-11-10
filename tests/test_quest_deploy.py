@@ -730,10 +730,12 @@ else:
         self.assertEqual('', result.stdout)
         self.assertNotIn('v2.', result.stderr)
 
-    def test_tracked_readback_uses_original_admissions_and_one_snapshot_per_session(self):
-        snapshots, seats, calls = {}, [], []
+    def test_tracked_readback_uses_original_admissions_and_one_venue_sample(self):
+        snapshots, seats, calls, requests = {}, [], [], []
         topology = 'Independent'
         fixture_key = 'private-readiness-fixture-key'
+        sampled = '2026-11-10T00:00:00Z'
+        delay, status_code = 0, 200
 
         class Handler(BaseHTTPRequestHandler):
             def reply(self, payload, status=200):
@@ -744,12 +746,14 @@ else:
                 self.wfile.write(json.dumps(payload).encode())
 
             def do_POST(self):
-                self.rfile.read(int(self.headers['Content-Length']))
+                body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                if self.path == '/api/venue/tracked-readiness':
+                    requests.append(body)
+                    time.sleep(delay)
+                    self.reply({'version': 1, 'topology': topology, 'sampledAtUtc': sampled, 'maxSourceAgeMilliseconds': 1500,
+                                'sessions': list(snapshots.values())}, status_code)
+                    return
                 self.reply({'topology': topology, 'allMatched': True, 'seats': seats})
-
-            def do_GET(self):
-                snapshot = snapshots[self.path.split('/')[3]]
-                self.reply(snapshot, 503 if snapshot is None else 200)
 
             def log_message(self, *args):
                 pass
@@ -771,7 +775,8 @@ else:
                             session = str(self.session_ids[0 if topology == 'Linked' else room - 1])
                             snapshot = snapshots.setdefault(session, {'version': 1, 'sessionId': session,
                                 'sourceState': 'Fresh', 'origin': 'Simulation', 'worldSequence': 32,
-                                'sessionSequence': 12, 'observedSequence': 12, 'players': []})
+                                'sessionSequence': 12, 'observedSequence': 12, 'players': [],
+                                'sampledAtUtc': sampled, 'sourceAgeMilliseconds': 50})
                             for seat in range(5):
                                 index = (room - 1) * 5 + seat
                                 seats.append({'roomId': room, 'seat': seat, 'status': 'matched',
@@ -786,8 +791,11 @@ else:
                                          (report['topology'], report['phase'], report['complete'], len(report['seats'])))
                         self.assertTrue(all(row['status'] == 'tracked-ready' for row in report['seats']))
                         self.assertNotIn((1, 2), [(row['roomId'], row['seat']) for row in report['seats']])
-                        self.assertEqual([('POST', '/api/vr-deployment/venue-check', 'Bearer ' + fixture_key)] + [
-                            ('GET', f'/api/sessions/{session}/readiness', 'Bearer ' + fixture_key) for session in snapshots], calls)
+                        self.assertEqual([('POST', route, 'Bearer ' + fixture_key) for route in (
+                            '/api/vr-deployment/venue-check', '/api/venue/tracked-readiness')], calls)
+                        self.assertEqual({'topology': topology, 'rooms': [
+                            {'roomId': room, 'sessionId': str(self.session_ids[0 if topology == 'Linked' else room - 1])}
+                            for room in range(1, 6)]}, requests[-1])
                         expected_calls = calls.copy()
                         calls.clear()
                         combined = self.run_bundle(files, *args, '-AllHeadsets', environment=env)
@@ -797,6 +805,22 @@ else:
                         self.assertEqual([(seat['roomId'], seat['seat'] + 1, seat['headset'], 'tracked-ready') for seat in seats],
                             [(row['roomId'], row['seat'], row['registeredHeadset'], row['status']) for row in report['seats']])
                         self.assertEqual(expected_calls, calls)
+
+                        if topology == 'Independent':
+                            first = snapshots[str(self.session_ids[0])]
+                            first['sourceAgeMilliseconds'] = 1490
+                            delay = .15
+                            expired = self.run_bundle(files, *args, '-AllHeadsets', environment=env)
+                            self.assertEqual(1, expired.returncode, expired.stderr)
+                            self.assertEqual(['source-expired-in-transit'] * 5 + ['tracked-ready'] * 20,
+                                             [row['status'] for row in json.loads(expired.stdout)['seats']])
+                            delay = 0
+                            first['sourceAgeMilliseconds'] = 50
+                            first['sampledAtUtc'] = '2026-11-10T00:00:01Z'
+                            mixed_sample = self.run_bundle(files, *args, '-AllHeadsets', environment=env)
+                            self.assertEqual(1, mixed_sample.returncode, mixed_sample.stderr)
+                            self.assertEqual({'readiness-invalid'}, {row['status'] for row in json.loads(mixed_sample.stdout)['seats']})
+                            first['sampledAtUtc'] = sampled
 
                         snapshots[str(self.session_ids[0])]['players'][1]['rigKind'] = 'Simulated'
                         calls.clear()
@@ -836,9 +860,12 @@ else:
                 for changes, status in (({'sourceState': 'Stale'}, 'source-not-fresh'),
                                         ({'observedSequence': 11}, 'source-revision-pending'),
                                         ({'sessionId': str(uuid.uuid4())}, 'readiness-invalid'),
+                                        ({'sourceAgeMilliseconds': True}, 'readiness-invalid'),
+                                        (409, 'venue-changed'),
                                         (None, 'readiness-unavailable')):
                     with self.subTest(status=status):
-                        snapshots[str(self.session_ids[0])] = {**sample, **changes} if changes is not None else None
+                        status_code = changes if isinstance(changes, int) else 503 if changes is None else 200
+                        snapshots[str(self.session_ids[0])] = {**sample, **changes} if isinstance(changes, dict) else sample
                         result = self.run_bundle(files, *args, '-DeviceMap', str(mapping), '-AllowPartialMap', environment=env)
                         self.assertEqual(1, result.returncode, result.stderr)
                         self.assertEqual(status, json.loads(result.stdout)['seats'][0]['status'])
@@ -1035,6 +1062,7 @@ else:
         calls = []
         readiness = {'version': 1, 'sessionId': session, 'sessionSequence': 27, 'observedSequence': 27,
                      'worldSequence': 14, 'sourceState': 'Fresh', 'origin': 'GameServer', 'mrStartState': 'WaitingPlayers',
+                     'sampledAtUtc': '2026-11-10T00:00:00Z', 'sourceAgeMilliseconds': 50,
                      'players': [{'roomId': row['roomId'], 'seat': row['seat'] - 1, 'state': 'Participating',
                                   'rigKind': 'Tracked', 'canParticipate': True,
                                   'playerId': str(self.players[(row['roomId'] - 1) * 5 + row['seat'] - 1]),
@@ -1051,6 +1079,10 @@ else:
 
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                if self.path == '/api/venue/tracked-readiness':
+                    self.respond({'version': 1, 'topology': 'Linked', 'sampledAtUtc': readiness['sampledAtUtc'],
+                                  'maxSourceAgeMilliseconds': 1500, 'sessions': [readiness]})
+                    return
                 receipt = {'topology': 'Linked', 'allMatched': True, 'seats': [
                     {'roomId': room, 'seat': seat, 'status': 'matched'} for room in range(1, 6) for seat in range(5)]}
                 if body.get('requireLiveSource') is True:
@@ -1058,10 +1090,7 @@ else:
                 self.respond(receipt)
 
             def do_GET(self):
-                if self.path == f'/api/sessions/{session}/readiness':
-                    self.respond(readiness)
-                else:
-                    self.respond({'version': 1, 'sessionId': session, 'sessionEnded': False, 'address': '192.168.1.10', 'port': 7777})
+                self.respond({'version': 1, 'sessionId': session, 'sessionEnded': False, 'address': '192.168.1.10', 'port': 7777})
 
             def log_message(self, *args):
                 pass
@@ -1086,7 +1115,7 @@ else:
                     self.assertEqual(1, pending.returncode, pending.stderr)
                     self.assertEqual(['mr-profile-pending'] * 2, [row['status'] for row in json.loads(pending.stdout)['seats']])
                 self.assertEqual(before, (self.root / 'adb.log').read_bytes())
-                self.assertEqual(deploy_calls + (deploy_calls[:2] + [f'/api/sessions/{session}/readiness']) * 3, calls)
+                self.assertEqual(deploy_calls + (deploy_calls[:2] + ['/api/venue/tracked-readiness']) * 3, calls)
             finally:
                 server.shutdown()
                 thread.join(timeout=5)

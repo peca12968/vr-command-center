@@ -2415,7 +2415,7 @@ def main():
         report=json.loads(tracking.stdout)
         suffix='-'+checkpoint if checkpoint else ''
         save(mode+'-vr-venue-tracked-readiness'+suffix+'.json',report)
-        check(tracking.returncode==1 and report['complete'] is False and report['managementVerified'] is True
+        check(tracking.returncode==1 and report['complete'] is False and report['managementVerified'] is True and report.get('sampledAtUtc')
               and [(row['roomId'],row['seat'],row['status'],row['sourceState']) for row in report['seats']]==
                   [(room,seat,target_status if (room,seat)==(5,2) else 'not-tracked','Fresh')
                    for room in range(1,6) for seat in range(1,6)],
@@ -2424,6 +2424,32 @@ def main():
             check(report['scope']=='venue' and [(row['roomId'],row['seat'],row['registeredHeadset']) for row in report['seats']]==
                   [(room,seat,'ViveXr' if seat in (2,4) else 'Quest3') for room in range(1,6) for seat in range(1,6)],
                   mode+' venue tracking includes all original Quest and VIVE admissions')
+        if checkpoint == 'initial':
+            route = '/api/venue/tracked-readiness'
+            rooms = [{'roomId': row['id'], 'sessionId': row['sessionId']} for row in request('/api/rooms')]
+            body = {'topology': 'Linked' if linked else 'Independent', 'rooms': rooms[::-1]}
+            request(route, body, role='Room5', expected=403)
+            request(route, body, role='GameServer', expected=403)
+            request(route, dict(body, rooms=rooms[:-1]), expected=400)
+            wrong = [dict(rooms[0], sessionId=str(uuid.uuid4())), *rooms[1:]] if not linked else [
+                dict(room, sessionId=str(uuid.UUID(int=1))) for room in rooms]
+            request(route, dict(body, rooms=wrong), expected=409)
+            raw, headers = request(route, body, raw_response=True)
+            sample = json.loads(raw)
+            ids = list(dict.fromkeys(room['sessionId'] for room in rooms))
+            check(headers['Cache-Control'] == 'no-store' and sample['topology'] == body['topology']
+                  and sample['maxSourceAgeMilliseconds'] == 1500 and sample['version'] == 1
+                  and [row['sessionId'] for row in sample['sessions']] == ids
+                  and all(row['sampledAtUtc'] == sample['sampledAtUtc'] and row['sourceState'] == 'Fresh'
+                          and row['observedSequence'] == row['sessionSequence'] for row in sample['sessions']),
+                  mode+' venue sample binds the original sessions to one clock and rejects other roles and sessions')
+            for row in sample['sessions']:
+                frame = request(f"/api/sessions/{row['sessionId']}/world/frames/{row['worldSequence']}")['packet']
+                check(frame['observedSequence'] == row['observedSequence']
+                      and {player['id']: player['rig']['kind'] for player in frame['frame']['players']} ==
+                          {player['playerId']: player['rigKind'] for player in row['players']},
+                      mode+' sampled tracking matches the original stored game frame')
+            save(mode+'-venue-tracking-sample.json', sample)
 
     def verify_venue_openxr(entries,round_clients,linked):
         mode='linked' if linked else 'independent'
