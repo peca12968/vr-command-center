@@ -123,7 +123,8 @@ internal static class WorldChecks
 
         var rooms = new[] { 1, 2, 3, 4, 5 };
         var linked = manager.Create(SessionMode.Linked, rooms, mission with { Definition = mission.Definition with { Enemies = new(2, EnemyBehavior.Hold, true) } }, master);
-        manager.Join(linked.Id, Guid.NewGuid(), "Reinforcement player", 1, HeadsetKind.Quest3, master);
+        var linkedPlayer = Guid.NewGuid();
+        manager.Join(linked.Id, linkedPlayer, "Reinforcement player", 1, HeadsetKind.Quest3, master);
         var reinforcementStream = Guid.NewGuid();
         manager.OpenStream(linked.Id, new(reinforcementStream, CombatOrigin.Simulation), owner);
         var linkedBridge = new ArenaSession();
@@ -151,6 +152,38 @@ internal static class WorldChecks
         check(store.Append(linked.Id, partial, owner).AcceptedSequence == 2
             && store.Frame(linked.Id, 2, master)!.Packet.frame.enemies.Length == 1,
             "A blocked reinforcement remains absent from the saved and replayed world");
+        var linkedObserved = manager.Get(linked.Id).Sequence;
+        long combatSequence = 0;
+        var firstShot = Guid.NewGuid(); var secondShot = Guid.NewGuid();
+        var enemy = Guid.Parse(partial.frame.enemies[0].id);
+        RecordedEvent Report(CombatKind kind, Guid? shot = null, Guid? target = null, int damage = 0)
+        {
+            var report = new CombatReport(Guid.NewGuid(), kind, CombatOrigin.Simulation, linkedPlayer, shot,
+                kind == CombatKind.PlayerDamaged ? null : target, damage);
+            manager.ReportStream(linked.Id, new(reinforcementStream, ++combatSequence, linkedObserved, report), owner);
+            return new() { sequence = combatSequence, tick = partial.frame.tick, kind = kind.ToString(), eventId = report.ReportId.ToString("D"),
+                playerId = linkedPlayer.ToString("D"), shotId = shot?.ToString("D") ?? "", enemyId = target?.ToString("D") ?? "", damage = damage,
+                hasRay = kind == CombatKind.ShotFired, direction = new(new Vec3(0, 0, 1)), hit = kind == CombatKind.ShotFired ? "Miss" : "" };
+        }
+        void SaveCombat(long frameNumber, int ammo, int health, params RecordedEvent[] events)
+        {
+            var packet = Copy(partial); packet.sequence = frameNumber; packet.elapsedMilliseconds = frameNumber * 50;
+            packet.events = events; packet.throughCombatSequence = packet.frame.throughSequence = combatSequence;
+            packet.frame.players[0].magazine -= ammo; packet.frame.players[0].health = health;
+            store.Append(linked.Id, packet, owner);
+        }
+        SaveCombat(3, 1, 100, Report(CombatKind.ShotFired, firstShot));
+        SaveCombat(4, 2, 80, Report(CombatKind.ShotHit, firstShot, enemy), Report(CombatKind.ShotFired, secondShot),
+            Report(CombatKind.ShotHit, secondShot, enemy), Report(CombatKind.EnemyEliminated, secondShot, enemy),
+            Report(CombatKind.PlayerDamaged, target: enemy, damage: 20));
+        var interval = store.ClipStatistics(linked.Id, 4, 4, 1, linkedPlayer, master, default);
+        check(interval.Players.Single() is { AmmoUsed: 1, ShotsHit: 2, MatchedShots: 1, AccuracyPercent: 100, Kills: 1, HitsReceived: 1, DamageTaken: 20 }
+            && store.ClipStatistics(linked.Id, 3, 4, 1, linkedPlayer, master, default).Players.Single() is { AmmoUsed: 2, MatchedShots: 2 },
+            "Inclusive clip statistics count durable combat but exclude pre-range shots from clip accuracy");
+        check(store.ClipStatistics(linked.Id, 2, 2, null, null, master, default).Players.Length == 0
+            && store.ClipStatistics(linked.Id, 3, 4, null, null, room2, default) is { RoomId: 2, Players.Length: 0 },
+            "Clip statistics preserve empty frames and limit room operators to their own recorded events");
+        Reject<AccessDeniedException>(() => store.ClipStatistics(linked.Id, 3, 4, 1, null, room2, default), "Clip statistics reject another room scope");
         manager.End(linked.Id, master);
     }
 }

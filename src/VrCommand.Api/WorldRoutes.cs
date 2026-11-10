@@ -58,6 +58,12 @@ public static class WorldRoutes
             context.Response.Headers.CacheControl = "no-store";
             return Results.Json(page, WorldJson.Options);
         });
+        app.MapGet("/api/sessions/{id:guid}/world/clip-statistics", (Guid id, long fromFrame, long throughFrame,
+            int? roomId, Guid? playerId, WorldRecordings store, HttpContext context) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            return store.ClipStatistics(id, fromFrame, throughFrame, roomId, playerId, Actor(context), context.RequestAborted);
+        });
         app.MapGet("/api/sessions/{id:guid}/world/event-neighbor", (Guid id, long throughFrame, long fromFrame, string direction,
             int? roomId, string? kind, Guid? playerId, WorldRecordings store, HttpContext context) =>
         {

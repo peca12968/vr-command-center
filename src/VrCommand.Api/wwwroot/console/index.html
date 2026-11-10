@@ -340,6 +340,10 @@
               <legend>指定回放片段</legend>
               <div class="button-row"><button id="world-clip-start" type="button" class="quiet" disabled>將此格標為起點</button><button id="world-clip-end" type="button" class="quiet" disabled>將此格標為終點</button><button id="world-clip-play" type="button" class="quiet" disabled>播放指定片段</button><button id="world-clip-clear" type="button" class="quiet" disabled>清除標記</button></div>
               <p id="world-clip-status" class="hint" role="status"></p>
+              <button id="world-clip-stats-read" type="button" class="quiet" disabled>讀取片段戰績</button>
+              <p class="hint">包含起訖兩格。片段命中率只計入在片段內發射且確認命中的射擊。</p>
+              <p id="world-clip-stats-status" class="hint" role="status"></p>
+              <div id="world-clip-stats-results" class="table-scroll" hidden><table aria-label="片段戰績"><thead><tr><th>房間</th><th>玩家</th><th>耗彈</th><th>命中</th><th>擊殺</th><th>中彈</th><th>耗損</th><th>片段命中率</th></tr></thead><tbody id="world-clip-stats-rows"></tbody></table></div>
             </fieldset>
             <fieldset class="camera-positions">
               <legend>已保存的共用片段</legend>
@@ -405,7 +409,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.106 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.107 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

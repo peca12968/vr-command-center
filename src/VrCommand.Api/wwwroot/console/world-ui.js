@@ -4,6 +4,7 @@ import { mountWorldCameraForm } from './world-camera-form.js';
 import { mountWorldEventSearch } from './world-event-search.js';
 import { mountWorldPolicyFrames } from './world-policy-frames.js';
 import { mountSavedClips } from './saved-clips-ui.js';
+import { mountWorldClipStatistics } from './world-clip-statistics.js';
 import { recordedClock } from './mission-clock.js';
 
 const $ = id => document.getElementById(id);
@@ -35,10 +36,12 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   });
   const policyFrames = mountWorldPolicyFrames(response, readFrame);
   const savedClips = mountSavedClips(response, canWriteClips, loadClip);
+  const clipStatistics = mountWorldClipStatistics(response);
   function message(text, error = false) { $('world-message').textContent = text; $('world-message').classList.toggle('replay-error', error); }
   function stop() {
     epoch++; clearTimeout(liveRetryTimer); liveRetryTimer = undefined;
     clearEventContext();
+    clipStatistics.update(null, false);
     controller?.abort(); controller = null; connected = connecting = stepping = false;
     scene?.weather.pause(); scene?.draw(); $('world-pause').textContent = '繼續回放';
   }
@@ -328,6 +331,10 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     for (const button of $('world-venue-rooms').children)
       button.disabled = !idle || !venueAvailable || button.dataset.venueSession === info.header.sessionId;
     clipControls(idle);
+    const clipRoom = $('world-room').value;
+    clipStatistics.update(showing && clipEnd ? { sessionId: info.header.sessionId, streamId: info.header.streamId,
+      roomIds: info.header.roomIds, fromFrame: clipStart.sequence, throughFrame: clipEnd.sequence,
+      roomId: clipRoom === 'all' ? null : Number(clipRoom), playerId: reviewPlayer?.id ?? null } : null, idle);
     $('world-review').hidden = !showing;
     $('world-frame-back').disabled = !idle || frame.packet.sequence <= 1;
     const throughFrame = replayThroughFrame();

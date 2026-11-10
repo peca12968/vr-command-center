@@ -1443,6 +1443,13 @@ def main():
                   and 1 <= damage['contextEnd']['sequence'] - damage['contextStart']['sequence'] <= 299
                   and 0 <= damage['contextEnd']['elapsedMilliseconds'] - damage['contextStart']['elapsedMilliseconds'] <= 10000,
                   'linked room 3 controller marks and plays the original saved context around that damage')
+            report = damage['clipStatistics']
+            check(report['sessionId'] == first['sessionId'] and report['streamId'] == sources[first['sessionId']]['header']['streamId']
+                  and (report['fromFrame'], report['throughFrame'], report['roomId']) ==
+                      (damage['contextStart']['sequence'], damage['contextEnd']['sequence'], 3)
+                  and len(report['players']) == 1 and report['players'][0]['hitsReceived'] >= damage['matches']
+                  and report['players'][0]['damageTaken'] > 0 and report['players'][0]['accuracyPercent'] is None,
+                  'linked room 3 clip statistics match the original native hits and damage for one player')
         if earlier:
             older = earlier['sessions'][2]
             history = result['history']

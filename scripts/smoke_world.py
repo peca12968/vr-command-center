@@ -161,6 +161,30 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         request(route + "/frames/0", expected=400)
         request(route + f"/frames/{info['acceptedSequence'] + 1}", expected=404)
         check(True, "Exact frame reads retain authorization and reject invalid or missing frames")
+        clip_route = route + "/clip-statistics"
+        clip = f"{clip_route}?fromFrame={combat_packet['sequence']}&throughFrame={combat_packet['sequence']}"
+        statistics = request(clip, "Room5")
+        damaged = exact["statistics"][0]["playerId"]
+        player_events = [event for event in combat_packet["events"] if event["playerId"] == damaged]
+        fired = {event["shotId"] for event in player_events if event["kind"] == "ShotFired"}
+        hits = [event["shotId"] for event in player_events if event["kind"] == "ShotHit"]
+        damage = [event["damage"] for event in player_events if event["kind"] == "PlayerDamaged"]
+        matched = len(fired.intersection(hits))
+        check(statistics["roomId"] == 5 and statistics["streamId"] == info["header"]["streamId"]
+              and request(clip + f"&playerId={damaged}", "Room5")["players"] == [{"playerId": damaged,
+                  "name": exact["statistics"][0]["name"], "roomId": 5, "ammoUsed": len(fired), "shotsHit": len(hits),
+                  "kills": sum(event["kind"] == "EnemyEliminated" for event in player_events),
+                  "hitsReceived": len(damage), "damageTaken": sum(damage), "matchedShots": matched,
+                  "accuracyPercent": round(100 * matched / len(fired), 2) if fired else None}]
+              and request(f"{clip_route}?fromFrame=1&throughFrame=1")["players"] == [],
+              "Clip statistics count exact original events at the inclusive boundaries and retain an empty clip")
+        request(clip + "&roomId=4", "Room5", 403)
+        request(clip, "GameServer", 403)
+        request(clip, "invalid", 401)
+        request(f"{clip_route}?fromFrame=2&throughFrame=1", expected=400)
+        request(f"{clip_route}?fromFrame=1&throughFrame=301", expected=400)
+        request(f"{clip_route}?fromFrame=1&throughFrame={info['acceptedSequence'] + 1}", expected=404)
+        check(True, "Clip statistics enforce room authorization, ordered bounds and the saved archive tail")
         context_route = route + "/frame-context"
         center = combat_packet["sequence"]
         mark = lambda packet: {"sequence": packet["sequence"], "elapsedMilliseconds": packet["elapsedMilliseconds"]}

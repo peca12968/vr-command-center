@@ -237,6 +237,7 @@ async function main() {
       const contextStart = mark(nearby[0]), contextEnd = mark(nearby.at(-1));
       const review = await browser.newPage({ viewport: { width: 1440, height: 1080 } });
       const writes = [];
+      let clipStatistics;
       review.on('request', request => {
         if (new URL(request.url()).pathname.startsWith('/api/') && request.method() !== 'GET') writes.push(request.method());
       });
@@ -267,6 +268,25 @@ async function main() {
         await review.locator('#world-event-context-status').filter({ hasText: `包含事件第 ${center.sequence} 格` }).waitFor();
         const canvas = review.locator('#world-canvas');
         assert.equal(Number(await canvas.getAttribute('data-sequence')), center.sequence);
+        const statsReply = review.waitForResponse(reply => new URL(reply.url()).pathname === new URL(world).pathname + '/clip-statistics');
+        await review.locator('#world-clip-stats-read').click();
+        const statsResponse = await statsReply;
+        assert.equal(statsResponse.status(), 200);
+        assert.equal(statsResponse.headers()['cache-control'], 'no-store');
+        clipStatistics = await statsResponse.json();
+        const included = originals.filter(row => row.packet.sequence >= contextStart.sequence && row.packet.sequence <= contextEnd.sequence)
+          .flatMap(damageEvents);
+        assert.deepEqual(clipStatistics, { sessionId: replay.sessionId, streamId: header.streamId,
+          fromFrame: contextStart.sequence, throughFrame: contextEnd.sequence, roomId, playerId: damaged.playerId,
+          players: [{ playerId: damaged.playerId, name: damaged.name, roomId, ammoUsed: 0, shotsHit: 0, kills: 0,
+            hitsReceived: included.length, damageTaken: included.reduce((sum, event) => sum + event.damage, 0), matchedShots: 0,
+            accuracyPercent: null }] });
+        const clipTable = review.locator('#world-clip-stats-results');
+        await clipTable.waitFor();
+        assert.deepEqual(await clipTable.locator('tbody td').allTextContents(),
+          [String(roomId), damaged.name, '0', '0', '0', String(included.length), String(clipStatistics.players[0].damageTaken), '—']);
+        assert.equal(Number(await canvas.getAttribute('data-sequence')), center.sequence);
+        await review.locator('#world-clip').screenshot({ path: path.join(path.dirname(output), 'linked-room-03-clip-statistics.png') });
         // Setting the rate on a paused replay can start it. Set the value without changing the current frame.
         await review.locator('#world-speed').evaluate(select => { select.value = '4'; });
         const playback = review.waitForRequest(request => {
@@ -287,7 +307,7 @@ async function main() {
       } finally { await review.close(); await page.bringToFront(); }
       return { roomId, start, end, retainedEvents, omittedEvents, props: props.length, apiRequests: apiRequests.length,
         latestDamage: { frame: latest.packet.sequence, matches: damageEvents(latest).length, managementWrites: writes.length,
-          contextStart, contextEnd } };
+          contextStart, contextEnd, clipStatistics } };
     }
     for (const session of config.sessions) {
       if (session.participationBegin) {

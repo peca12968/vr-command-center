@@ -494,6 +494,20 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     }
     const clipTail = finalFrame - 1;
     await clipEnd.click();
+    const clipStats = page.locator('#world-clip-stats-results');
+    const clipStatsReply = page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/world/clip-statistics'));
+    await page.locator('#world-clip-stats-read').click();
+    const statsResponse = await clipStatsReply;
+    const clipReport = await statsResponse.json();
+    await clipStats.waitFor();
+    check(statsResponse.status() === 200 && clipReport.fromFrame === eventSequence && clipReport.throughFrame === clipTail
+      && clipReport.roomId === 2 && clipReport.players.every(row => row.roomId === 2)
+      && clipReport.players.some(row => row.hitsReceived > 0 && row.damageTaken > 0)
+      && Number(await canvas.getAttribute('data-sequence')) === clipTail,
+    'Clip statistics count original damage on the inclusive boundary without seeking or changing room');
+    await page.locator('#world-room').selectOption('all');
+    check(await clipStats.isHidden(), 'Changing the replay room clears the previous clip statistics');
+    await page.locator('#world-room').selectOption('2');
     const clipWatch = (start, rate) => page.waitForRequest(request => {
       const query = new URL(request.url()).searchParams;
       return query.get('fromFrame') === String(start) && query.get('throughFrame') === String(clipTail) && query.get('rate') === rate;
