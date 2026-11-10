@@ -56,6 +56,12 @@ async function main() {
     diagnosticPage = page;
     function captureErrors(target) { target.on('pageerror', error => browserErrors.push(error.message)); target.on('console', message => { if (/Content Security Policy|violates.*directive/i.test(message.text())) browserErrors.push(message.text()); }); }
     captureErrors(page);
+    if (process.argv.includes('--venue-time-replay-only')) {
+      await require('./venue-time-replay-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
+      check(browserErrors.length === 0, 'Venue time replay has no uncaught browser or policy errors');
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed', scope: 'closed venue recordings and original UTC matches' }, null, 2));
+      console.log(`PASS: ${checks} focused venue time replay checks. Screenshots: ${screenshots}`); return;
+    }
     if (process.argv.includes('--full-participation-only')) {
       await require('./full-tracking-begin-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors, participationOnly: true });
       check(browserErrors.length === 0, 'Participation Begin has no uncaught browser or policy errors');
@@ -562,6 +568,7 @@ async function main() {
     await require('./mission-template-browser.cjs')({ context, api, tokens, directory, root, base, screenshots, check, captureErrors, availablePort });
     await require('./ticket-download-fence.cjs').checkTicketDownloadFence({ context, api, tokens, base, screenshots, check, captureErrors });
     await require('./archived-independent-plan-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
+    await require('./venue-time-replay-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
     check(browserErrors.length === 0, 'Browser has no uncaught script errors or CSP violations');
     await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), playwright: require('playwright/package.json').version, result: 'passed', scope: 'isolated real API and browser console; no Unity or headset test' }, null, 2));
     console.log(`PASS: ${checks} real-browser checks. Screenshots: ${screenshots}`);

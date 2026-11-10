@@ -10,7 +10,7 @@ async function main() {
   assert.match(config.base, /^http:\/\/127\.0\.0\.1:\d+$/);
   const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const results = [], fieldEvidence = [], participation = [];
-  let history, roomReplay, scores;
+  let history, roomReplay, scores, alignment;
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1080 }, acceptDownloads: true });
     const errors = [];
@@ -261,6 +261,46 @@ async function main() {
     for (const session of config.sessions) {
       if (session.participationBegin) {
         participation.push(await openParticipation(session));
+        if (config.alignReplay && !alignment) {
+          if (config.mode === 'linked') {
+            assert.equal(await page.locator('#world-venue-review').isHidden(), true);
+            alignment = { hidden: true };
+          } else {
+            const roomId = 2, target = config.sessions.find(row => row.roomIds.join() === String(roomId));
+            const sourceSequence = participation.at(-1).next;
+            const match = page.waitForResponse(reply => new URL(reply.url()).pathname === `/api/venue/closure/${config.alignReplay}/replay-at`);
+            await page.locator(`[data-venue-align-room="${roomId}"]`).click();
+            const response = await match;
+            assert.equal(response.status(), 200);
+            const body = await response.json();
+            assert.deepEqual([body.requestId, body.fromSessionId, body.fromFrame, body.roomId],
+              [config.alignReplay, session.sessionId, sourceSequence, roomId]);
+            await page.locator('#world-venue-message').filter({ hasText: '已對齊房間 2' }).waitFor();
+            assert.equal(await page.locator('#world-recording').inputValue(), target.sessionId);
+            assert.equal(await page.locator('#world-canvas').getAttribute('data-sequence'), String(body.frame.packet.sequence));
+            const original = async (id, suffix) => {
+              const received = await fetch(`${config.base}/api/sessions/${id}/world${suffix}`, {
+                headers: { Authorization: 'Bearer ' + config.masterKey } });
+              assert.equal(received.status, 200);
+              return received.json();
+            };
+            const [source, sourceFrame, targetFrame, next] = await Promise.all([
+              original(session.sessionId, ''), original(session.sessionId, `/frames/${sourceSequence}`),
+              original(target.sessionId, `/frames/${body.frame.packet.sequence}`),
+              original(target.sessionId, `/frames/${body.frame.packet.sequence + 1}`)
+            ]);
+            assert.deepEqual(body.frame, targetFrame);
+            assert.equal(body.recording.header.streamId, target.replay.streamId);
+            const anchor = Date.parse(source.header.captureStartedAtUtc) + sourceFrame.packet.elapsedMilliseconds;
+            const targetStart = Date.parse(body.recording.header.captureStartedAtUtc);
+            const gap = anchor - targetStart - targetFrame.packet.elapsedMilliseconds;
+            assert.ok(gap >= 0 && gap <= 500 && targetStart + next.packet.elapsedMilliseconds > anchor);
+            assert.equal(Date.parse(body.capturedAtUtc), anchor);
+            await page.locator('#world-venue-review').screenshot({ path: path.join(path.dirname(output), 'independent-venue-replay-alignment.png') });
+            alignment = { requestId: body.requestId, fromSessionId: session.sessionId, toSessionId: target.sessionId,
+              fromFrame: sourceSequence, toFrame: targetFrame.packet.sequence, millisecondsBeforeAnchor: gap };
+          }
+        }
         await page.locator('#tab-operations').click();
       }
       const replay = await openReplay(session);
@@ -312,6 +352,6 @@ async function main() {
   } finally {
     await browser.close();
   }
-  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation, scores }, null, 2), { flag: 'wx' });
+  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation, scores, alignment }, null, 2), { flag: 'wx' });
 }
 main().catch(error => { console.error(error.name + ': native venue replay UI failed'); process.exitCode = 1; });

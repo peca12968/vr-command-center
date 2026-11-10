@@ -24,6 +24,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   let reviewPlayer = null, actors = new Map(), actorInitialized = false;
   let clipStart = null, clipEnd = null, clipPosition = null, clipPlayback = '';
   let returnLiveSource = null, liveRetryTimer;
+  let venueReview = null, venueAnchor = null;
   const cameras = mountCameras(getKey, unauthorized, () => scene, freeView);
   const cameraForm = mountWorldCameraForm(() => scene, freeView);
   const eventSearch = mountWorldEventSearch(response, readFrame, eventNames, () => { if (frame) showEvents(frame); });
@@ -37,7 +38,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   }
   function stopList() { listEpoch++; listController?.abort(); listController = null; }
   function reset() {
-    reviewPlayer = returnLiveSource = null; clearClip();
+    reviewPlayer = returnLiveSource = null; clearClip(); bindVenueReview(null);
     stop(); stopList(); info = frame = savedLimit = null; savedFinished = false; geometry = ''; mode = ''; cameras.reset(); cameraForm.reset(); reviewControls();
     $('world-recording').replaceChildren(); $('world-player').hidden = true; message('選取已錄製的場次，開始觀戰或回放。');
     recordingControls(); bindRooms([]);
@@ -83,6 +84,14 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
         }
         picker.value = target.sessionId;
         resetRecording();
+        if (target.venue) {
+          const rooms = target.venue.rooms.flatMap(room => {
+            const recording = rows.find(row => matchesTarget(row, room) && row.header.roomIds.length === 1
+              && Number.isFinite(Date.parse(row.header.captureStartedAtUtc)));
+            return recording ? [{ ...room, headerKey: JSON.stringify(recording.header) }] : [];
+          });
+          if (rooms.length > 1 && rooms.some(room => room.sessionId === target.sessionId)) bindVenueReview({ requestId: target.venue.requestId, rooms });
+        }
         const limit = target.mode === 'replay' && !target.complete ? target.throughSequence : null;
         const sequence = target.playerId || target.witness ? target.throughSequence : target.mode === 'replay' ? 1 : null;
         const replayTarget = begin ? { ...target, archive: row }
@@ -122,7 +131,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     $('world-replay').textContent = selected?.dataset.complete === 'false' ? '回放已保存片段' : '從頭回放';
   }
   function resetRecording() {
-    reviewPlayer = returnLiveSource = null; clearClip();
+    reviewPlayer = returnLiveSource = null; clearClip(); bindVenueReview(null);
     stop(); cameras.bind(null); cameraForm.reset(); info = frame = savedLimit = null; savedFinished = false; geometry = ''; mode = '';
     bindRooms([]); resetActors(); delete $('world-canvas').dataset.sequence;
     recordingControls(); reviewControls(); $('world-player').hidden = true; message('已切換場次，請開始觀戰或回放。');
@@ -262,6 +271,10 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     if (recent.textContent !== recentLabel) recent.textContent = recentLabel;
     const showing = active && mode === 'replay' && info?.header.sessionId === $('world-recording').value && Boolean(frame);
     const idle = showing && !connected && !connecting && !stepping;
+    const venueAvailable = showing && info.complete && venueReview?.rooms.some(room => room.sessionId === info.header.sessionId && room.headerKey === geometry);
+    $('world-venue-review').hidden = !venueAvailable;
+    for (const button of $('world-venue-rooms').children)
+      button.disabled = !idle || !venueAvailable || button.dataset.venueSession === info.header.sessionId;
     clipControls(idle);
     $('world-review').hidden = !showing;
     $('world-frame-back').disabled = !idle || frame.packet.sequence <= 1;
@@ -314,6 +327,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   function openLive() {
     const target = returnLiveSource ? { mode: 'live', sessionId: $('world-recording').value, sourceKey: returnLiveSource } : null;
     returnLiveSource = null;
+    bindVenueReview(null);
     return connect('live', 0, null, null, target);
   }
   function retryLive(id, key, sourceKey, request, attempt) {
@@ -429,6 +443,64 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     received = performance.now(); $('world-canvas').dataset.sequence = String(packet.sequence); status();
   }
   function step(offset) { if (frame) return readFrame(frame.packet.sequence + offset); }
+  function clearVenueAnchor() {
+    venueAnchor = null;
+    $('world-venue-message').textContent = '';
+  }
+  function bindVenueReview(value) {
+    venueReview = value;
+    clearVenueAnchor();
+    $('world-venue-rooms').replaceChildren(...(value?.rooms ?? []).map(room => {
+      const button = document.createElement('button');
+      button.type = 'button'; button.className = 'quiet'; button.disabled = true;
+      button.dataset.venueSession = room.sessionId; button.dataset.venueAlignRoom = room.roomId;
+      button.textContent = `對齊房間 ${room.roomId}`;
+      button.addEventListener('click', () => switchVenueRoom(room));
+      return button;
+    }));
+  }
+  async function switchVenueRoom(room) {
+    const view = venueReview, picker = $('world-recording'), sessionId = picker.value;
+    if (!view?.rooms.includes(room) || !active || mode !== 'replay' || !info?.complete || !frame
+      || !view.rooms.some(source => source.sessionId === sessionId && source.headerKey === geometry)
+      || sessionId !== info.header.sessionId || room.sessionId === sessionId || connected || connecting || stepping) return;
+    const anchor = venueAnchor ?? { fromSessionId: sessionId, fromFrame: frame.packet.sequence,
+      captured: Date.parse(info.header.captureStartedAtUtc) + frame.packet.elapsedMilliseconds };
+    if (!Number.isFinite(anchor.captured)) return;
+    controller?.abort(); controller = new AbortController();
+    const request = ++epoch, signal = AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]);
+    const note = $('world-venue-message');
+    stepping = true; reviewControls(); note.textContent = '正在核對同批房間的原擷取時間…';
+    try {
+      const query = new URLSearchParams({ fromSessionId: anchor.fromSessionId, fromFrame: anchor.fromFrame, roomId: room.roomId });
+      const result = await (await response(`/api/venue/closure/${encodeURIComponent(view.requestId)}/replay-at?${query}`, signal)).json();
+      if (request !== epoch || !active || venueReview !== view || picker.value !== sessionId) return;
+      const recording = result.recording, value = result.frame, packet = value?.packet;
+      const captured = Date.parse(recording?.header?.captureStartedAtUtc) + packet?.elapsedMilliseconds;
+      const gap = anchor.captured - captured;
+      if (result.requestId !== view.requestId || result.fromSessionId !== anchor.fromSessionId || result.fromFrame !== anchor.fromFrame
+        || result.roomId !== room.roomId || !recording || !matchesTarget(recording, room) || JSON.stringify(recording.header) !== room.headerKey
+        || !Number.isSafeInteger(packet?.sequence) || packet.sequence < 1 || packet.sequence > room.throughSequence
+        || !Number.isSafeInteger(recording.durationMilliseconds) || !Number.isSafeInteger(packet.elapsedMilliseconds)
+        || packet.elapsedMilliseconds < 0 || packet.elapsedMilliseconds > recording.durationMilliseconds
+        || !Array.isArray(packet.frame?.players) || !Array.isArray(packet.frame.enemies) || !Array.isArray(packet.events) || !Array.isArray(value.statistics)
+        || (room.sessionId === anchor.fromSessionId && packet.sequence !== anchor.fromFrame)
+        || Date.parse(result.capturedAtUtc) !== anchor.captured || Date.parse(result.frameCapturedAtUtc) !== captured || !(gap >= 0 && gap <= 500)
+        || ![...picker.options].some(option => option.value === room.sessionId)) throw new Error('Recording or frame differs.');
+      picker.value = room.sessionId;
+      info = recording; frame = savedLimit = null; savedFinished = false; reviewPlayer = returnLiveSource = null;
+      showRecording(room.roomId); recordingControls(); show(value, true);
+      venueAnchor = anchor;
+      $('world-frame-message').textContent = `已停在第 ${packet.sequence} 格。`;
+      note.textContent = `已對齊房間 ${room.roomId} · ${gap ? `畫格早於對照時間 ${gap} 毫秒` : '相同擷取時間'}。`;
+    } catch (error) {
+      if (request === epoch) note.textContent = error.status === 409
+        ? '此房找不到可對齊的封存畫格，已保留目前畫面。'
+        : '無法核對同批房間的原錄製，已保留目前畫面。';
+    } finally {
+      if (request === epoch) { stepping = false; controller = null; reviewControls(); }
+    }
+  }
   async function readFrame(sequence, stillCurrent = () => true, matches = () => true) {
     const id = $('world-recording').value;
     if (!active || mode !== 'replay' || connected || connecting || stepping || !frame || info.header.sessionId !== id) return false;
@@ -441,7 +513,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
       const value = await (await response(`/api/sessions/${id}/world/frames/${sequence}`, signal)).json();
       if (request !== epoch || !active || id !== $('world-recording').value || !stillCurrent()) return false;
       if (value.packet.sequence !== sequence || !matches(value)) throw new Error('回應的快照不同。');
-      show(value, true); $('world-frame-message').textContent = `已停在第 ${sequence} 格。`;
+      clearVenueAnchor(); show(value, true); $('world-frame-message').textContent = `已停在第 ${sequence} 格。`;
       return true;
     } catch (error) {
       if (request === epoch) $('world-frame-message').textContent = '讀取快照失敗，請再試一次。';
@@ -517,9 +589,29 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     return packet.frame.behavior === setting.behavior && packet.frame.autoAttack === setting.autoAttack
       && enemies.length === population.present && enemies.filter(enemy => enemy.health > 0).length === population.alive;
   }
+  function showRecording(roomId) {
+    const key = JSON.stringify(info.header);
+    scene ??= new ReplayScene($('world-canvas'), selectActor, () => { $('world-camera').value = 'free'; }, key => actors.has(key));
+    $('world-player').hidden = false;
+    if (key !== geometry) {
+      clearClip();
+      scene.load(info.header); geometry = key; frame = null;
+      bindRooms(info.header.roomIds); resetActors();
+      $('world-camera').value = 'overview';
+    }
+    if (roomId != null) {
+      $('world-camera').value = 'top';
+      selectRoom(String(roomId));
+    }
+    scene.resize(); $('world-name').textContent = info.missionName;
+    cameras.bind(info.header.sessionId);
+    cameraForm.bind(info.header.sessionId);
+    message(`${info.header.origin} · ${info.header.rulesVersion} · ${info.header.assetSet === 'player-fire-v1' ? '軍事掩體／玩家及敵軍射擊效果 v1（依保存射線）' : info.header.assetSet === 'combat-effects-v1' ? '軍事掩體／敵軍射擊閃光及後座 v1（依保存射線）' : info.header.assetSet === 'armed-combatants-v1' ? '軍事掩體／敵軍雙手持槍／換彈 v1（合成姿勢）' : info.header.assetSet === 'weapon-actions-v1' ? '軍事掩體／人形敵軍／換彈動作 v1（合成手套非追蹤）' : info.header.assetSet === 'combatants-v1' ? '軍事掩體／步槍／人形敵軍 v1（命中採粗略包圍盒）' : info.header.assetSet === 'service-rifle-v1' ? '軍事掩體／玩家步槍 v1（命中／碰撞採包圍盒）' : info.header.assetSet === 'field-props-v1' ? '軍事掩體 v1（命中／碰撞採包圍盒）' : '基本幾何素材'} · ${info.header.calibration === 'quest-room-mr-v1' ? 'Quest 3 MR 錄製設定。' : 'VR 未校正。'}頭手來源請見角色資訊。${info.header.environmentVersion === 1 ? '環境聲光 v1 依保存的模擬時間重建，非原始音軌。' : '舊錄製沒有聲光效果版本，僅保留原有光霧顯示。'}`);
+    status();
+  }
   async function connect(nextMode, milliseconds = 0, sequence = null, replayLimit = savedLimit, target = null, clip = false, liveAttempt = 0) {
     const id = $('world-recording').value, key = getKey(); if (!active || !id || !key) return;
-    stop(); mode = nextMode;
+    stop(); mode = nextMode; clearVenueAnchor();
     const expectedGeometry = target?.sourceKey ?? returnLiveSource ?? (clip ? geometry : null);
     clipPlayback = clip ? 'playing' : '';
     clipPosition = clip ? sequence : null;
@@ -580,7 +672,6 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
             if (type === 'header') {
               if (hasHeader || data.header?.sessionId !== id || (target && !matchesTarget(data, target)))
                 throw new Error('回應的錄製場次或來源不同。');
-              const key = JSON.stringify(data.header);
               if (limit !== null) {
                 if (!Number.isSafeInteger(data.acceptedSequence) || data.acceptedSequence < 1 || (limit !== 'latest' && limit !== data.acceptedSequence))
                   throw new Error('已保存片段的尾端不符。');
@@ -588,23 +679,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
               }
               hasHeader = true;
               if (!clip) { info = data; savedFinished = false; }
-              scene ??= new ReplayScene($('world-canvas'), selectActor, () => { $('world-camera').value = 'free'; }, key => actors.has(key));
-              $('world-player').hidden = false;
-              if (key !== geometry) {
-                clearClip();
-                scene.load(info.header); geometry = key; frame = null;
-                bindRooms(info.header.roomIds); resetActors();
-                $('world-camera').value = 'overview';
-              }
-              if (target?.roomId != null) {
-                $('world-camera').value = 'top';
-                selectRoom(String(target.roomId));
-              }
-              scene.resize(); $('world-name').textContent = info.missionName;
-              cameras.bind(info.header.sessionId);
-              cameraForm.bind(info.header.sessionId);
-              message(`${info.header.origin} · ${info.header.rulesVersion} · ${info.header.assetSet === 'player-fire-v1' ? '軍事掩體／玩家及敵軍射擊效果 v1（依保存射線）' : info.header.assetSet === 'combat-effects-v1' ? '軍事掩體／敵軍射擊閃光及後座 v1（依保存射線）' : info.header.assetSet === 'armed-combatants-v1' ? '軍事掩體／敵軍雙手持槍／換彈 v1（合成姿勢）' : info.header.assetSet === 'weapon-actions-v1' ? '軍事掩體／人形敵軍／換彈動作 v1（合成手套非追蹤）' : info.header.assetSet === 'combatants-v1' ? '軍事掩體／步槍／人形敵軍 v1（命中採粗略包圍盒）' : info.header.assetSet === 'service-rifle-v1' ? '軍事掩體／玩家步槍 v1（命中／碰撞採包圍盒）' : info.header.assetSet === 'field-props-v1' ? '軍事掩體 v1（命中／碰撞採包圍盒）' : '基本幾何素材'} · ${info.header.calibration === 'quest-room-mr-v1' ? 'Quest 3 MR 錄製設定。' : 'VR 未校正。'}頭手來源請見角色資訊。${info.header.environmentVersion === 1 ? '環境聲光 v1 依保存的模擬時間重建，非原始音軌。' : '舊錄製沒有聲光效果版本，僅保留原有光霧顯示。'}`);
-              status();
+              showRecording(target?.roomId);
             } else if (type === 'frame') {
               if (nextMode === 'live') {
                 const current = data.packet.sequence;
@@ -738,6 +813,6 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
         message('正在尋找原場次錄製…');
       }
       void refresh(target);
-    } else { returnLiveSource = null; clearClip(); stop(); stopList(); status(); }
+    } else { returnLiveSource = null; clearClip(); bindVenueReview(null); stop(); stopList(); status(); }
   } };
 }

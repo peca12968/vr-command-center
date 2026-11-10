@@ -733,6 +733,11 @@ function renderVenueClosure(report, loading = false) {
   }
   $('venue-closure-summary').textContent = `${new Date(batch.recordedAtUtc).toLocaleString('zh-TW')} · 請等遊戲伺服器完成玩家戰績傳送與收尾。`;
   const sessions = [...batch.sessions].sort((a, b) => a.roomIds[0] - b.roomIds[0]);
+  const replayRooms = sessions.filter(session => session.roomIds.length === 1 && session.world === 'Sealed'
+    && typeof session.replay?.streamId === 'string' && Number.isSafeInteger(session.replay.throughSequence)
+    && session.replay.throughSequence > 0).map(session => ({ roomId: session.roomIds[0], sessionId: session.sessionId,
+    streamId: session.replay.streamId, throughSequence: session.replay.throughSequence, complete: true, mode: 'replay' }));
+  const venue = replayRooms.length > 1 && typeof batch.requestId === 'string' ? { requestId: batch.requestId, rooms: replayRooms } : null;
   if (typeof batch.requestId === 'string' && sessions.length === 5
     && sessions.every((session, index) => session.roomIds.length === 1 && session.roomIds[0] === index + 1)
     && new Set(sessions.map(session => session.sessionId)).size === 5) {
@@ -759,7 +764,8 @@ function renderVenueClosure(report, loading = false) {
       open.addEventListener('click', () => {
         if (!master() || state.busy || state.pending) return;
         tab('world', { mode: 'replay', sessionId: session.sessionId, streamId: replay.streamId, complete,
-          throughSequence: replay.throughSequence, roomId: session.roomIds.length === 1 ? session.roomIds[0] : null });
+          throughSequence: replay.throughSequence, roomId: session.roomIds.length === 1 ? session.roomIds[0] : null,
+          venue: complete && session.roomIds.length === 1 ? venue : null });
       });
       actions.append(open);
       const { trackingBegin, participationBegin } = session;
@@ -779,6 +785,7 @@ function renderVenueClosure(report, loading = false) {
           if (!master() || state.busy || state.pending) return;
           tab('world', { mode: 'replay', sessionId: session.sessionId, streamId: replay.streamId, complete: false,
             throughSequence: anchor.worldSequence, roomId: session.roomIds.length === 1 ? session.roomIds[0] : null,
+            venue: complete && session.roomIds.length === 1 ? venue : null,
             witness: { kind: participation ? 'participation-begin' : 'tracking-begin',
               appliedAtSequence: begin.appliedAtSequence, elapsedMilliseconds: anchor.elapsedMilliseconds,
               roomIds: session.roomIds, archiveComplete: complete, archiveThroughSequence: replay.throughSequence } });

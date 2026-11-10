@@ -98,6 +98,7 @@ def main():
     p.add_argument('--check-venue-end', action='store_true', help='End each native topology in one batch and read its original archives')
     p.add_argument('--check-venue-reports', action='store_true', help='Verify the original reports ZIP for each native End batch')
     p.add_argument('--check-venue-replay-ui', action='store_true', help='Open the original native archives through the shipped console')
+    p.add_argument('--check-venue-replay-alignment', action='store_true', help='Switch to the original adjacent room at the same recorded UTC time')
     p.add_argument('--check-player-room-replay', action='store_true', help='Export a single room from the original native Linked combat replay')
     p.add_argument('--check-venue-history-ui', action='store_true', help='Reopen and download the earlier batch after the newer native round')
     p.add_argument('--check-venue-environment', action='store_true', help='Confirm two batch environment changes in each native topology')
@@ -188,6 +189,8 @@ def main():
         p.error('--check-venue-reports requires --check-venue-end and --check-room-reports')
     if args.check_venue_replay_ui and not args.check_venue_end:
         p.error('--check-venue-replay-ui requires --check-venue-end')
+    if args.check_venue_replay_alignment and not (args.check_venue_replay_ui and args.check_venue_participation_gate):
+        p.error('--check-venue-replay-alignment requires --check-venue-replay-ui and --check-venue-participation-gate')
     if args.check_player_room_replay and not (args.check_venue_replay_ui and args.check_room_combat):
         p.error('--check-player-room-replay requires --check-venue-replay-ui and --check-room-combat')
     if args.check_venue_history_ui and not (args.check_venue_replay_ui and args.check_venue_reports):
@@ -944,6 +947,8 @@ def main():
             for row in rows for room in row['roomIds']],
             'total': totals([player for roster in players.values() for player in roster])}
         config = {'base': uri, 'masterKey': keys['Master'], 'mode': mode, 'sessions': rows, 'scores': scores}
+        if args.check_venue_replay_alignment:
+            config['alignReplay'] = closed['requestId']
         scoped = linked and args.check_player_room_replay
         if scoped:
             config['roomReplaySource'] = str(out/'linked-replay.json')
@@ -967,6 +972,12 @@ def main():
                   'next':row['participationBegin']['frame']['worldSequence']+1,
                   'simulatedPlayers':5*len(row['roomIds'])} for row in rows],
                   f'{mode} shipped console reopens every original participation Begin frame and its neighbor')
+        if args.check_venue_replay_alignment:
+            alignment = result['alignment']
+            check(alignment == {'hidden': True} if linked else alignment['requestId'] == closed['requestId']
+                  and alignment['fromSessionId'] == rows[0]['sessionId'] and alignment['toSessionId'] == rows[1]['sessionId']
+                  and 0 <= alignment['millisecondsBeforeAnchor'] <= 500,
+                  f'{mode} shipped console scopes UTC replay alignment to separate original room recordings')
         first = result['results'][0]
         interval = first['interval']
         check(0 < interval['start'] < interval['end'] == interval['reached'] < first['throughSequence'],
@@ -3120,6 +3131,7 @@ def main():
             'venueEnd':args.check_venue_end,
             'venueReports':args.check_venue_reports,
             'venueReplayUi':args.check_venue_replay_ui,
+            'venueReplayAlignment':args.check_venue_replay_alignment,
             'venueHistoryUi':args.check_venue_history_ui,
             'venueFieldEvidence':args.venue_field_evidence,
             'venueFieldUi':args.check_venue_field_ui,

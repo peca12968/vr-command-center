@@ -5,6 +5,8 @@ namespace VrCommand.Api;
 
 internal enum VenueArchiveState { NoSource, Missing, Waiting, SourceMismatch, Sealed }
 internal sealed record VenueReplay(Guid StreamId, long ThroughSequence);
+internal sealed record VenueReplayMatch(Guid RequestId, Guid FromSessionId, long FromFrame, int RoomId,
+    DateTimeOffset CapturedAtUtc, DateTimeOffset FrameCapturedAtUtc, WorldRecordingInfo Recording, WorldFrameView Frame);
 internal sealed record VenueClosureSession(Guid SessionId, long AppliedAtSequence, int[] RoomIds, string MissionName,
     VenueArchiveState Combat, VenueArchiveState World, bool FieldEvidenceReady,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueReplay? Replay,
@@ -26,6 +28,48 @@ internal sealed record VenueBattleTotals(int Players, long AmmoUsed, long ShotsH
 
 public sealed partial class WorldRecordings
 {
+    internal VenueReplayMatch ReadVenueReplayAt(Guid batchId, Guid fromSessionId, long fromFrame, int roomId, OperatorIdentity actor)
+    {
+        if (fromFrame < 1 || roomId is < 1 or > SessionManager.RoomCount)
+            throw new ArgumentException("Specify an original frame and a room from 1 to 5.");
+        lock (gate)
+        {
+            var batch = manager.ReadVenueEnd(batchId, actor);
+            var sessions = batch.Sessions.Select(row => manager.Get(row.SessionId, actor))
+                .Where(session => session.Mode == SessionMode.Independent && session.State == SessionState.Ended && session.RoomIds.Length == 1)
+                .ToArray();
+            var source = sessions.SingleOrDefault(session => session.Id == fromSessionId);
+            var destination = sessions.SingleOrDefault(session => session.RoomIds[0] == roomId);
+            if (source is null || destination is null || sessions.Length < 2)
+                throw new KeyNotFoundException("The source and destination must belong to the original independent End batch.");
+
+            var sourceInfo = ReadTimedVenueReplay(source, actor);
+            if (fromFrame > sourceInfo.AcceptedSequence || Frame(source.Id, fromFrame, actor) is not { } original)
+                throw new KeyNotFoundException("No source frame at this sealed sequence.");
+            var captured = sourceInfo.CapturedAtUtc!.Value.AddMilliseconds(original.Packet.elapsedMilliseconds - sourceInfo.DurationMilliseconds);
+            var recording = destination.Id == source.Id ? sourceInfo : ReadTimedVenueReplay(destination, actor);
+            var start = recording.CapturedAtUtc!.Value.AddMilliseconds(-recording.DurationMilliseconds);
+            if (captured < start || captured > recording.CapturedAtUtc.Value)
+                throw new InvalidOperationException("The destination recording does not cover the source capture time.");
+
+            var elapsed = (captured - start).Ticks / TimeSpan.TicksPerMillisecond;
+            var frame = destination.Id == source.Id ? original : Frame(destination.Id, Seek(destination.Id, elapsed, actor), actor);
+            if (frame is null || frame.Packet.elapsedMilliseconds > elapsed
+                || captured - start.AddMilliseconds(frame.Packet.elapsedMilliseconds) > TimeSpan.FromMilliseconds(500))
+                throw new InvalidOperationException("No destination frame within 500 milliseconds at or before the source capture time.");
+            return new(batchId, fromSessionId, fromFrame, roomId, captured, start.AddMilliseconds(frame.Packet.elapsedMilliseconds), recording, frame);
+        }
+    }
+
+    private WorldRecordingInfo ReadTimedVenueReplay(SessionView session, OperatorIdentity actor)
+    {
+        var info = Info(session.Id, actor);
+        if (session.CombatStream is not { Sealed: true } stream || !info.Complete || info.AcceptedSequence < 1
+            || info.CapturedAtUtc is null || !MatchesVenueSource(session, stream, info))
+            throw new InvalidOperationException("Both original recordings need sealed streams and recorded UTC capture clocks.");
+        return info;
+    }
+
     internal VenueClosureResponse ReadVenueClosure(OperatorIdentity actor, bool includeScores, Guid? batchId = null)
     {
         lock (gate)
@@ -78,14 +122,18 @@ public sealed partial class WorldRecordings
         try { world = Info(session.Id, actor); }
         catch (KeyNotFoundException) { return (VenueArchiveState.Missing, null); }
 
-        var header = world.Header;
-        if (header.schemaVersion != 1 || header.sessionId != session.Id.ToString("D")
-            || header.streamId != stream.StreamId.ToString("D") || header.origin != stream.Origin.ToString()
-            || !header.roomIds.SequenceEqual(session.RoomIds) || header.missionClockVersion != stream.MissionClockVersion
-            || (stream.MissionClockVersion == 1 && header.missionDurationSeconds != session.Mission.Definition.DurationSeconds))
-            return (VenueArchiveState.SourceMismatch, null);
+        if (!MatchesVenueSource(session, stream, world)) return (VenueArchiveState.SourceMismatch, null);
         if (world.AcceptedSequence <= 0) return (VenueArchiveState.Waiting, null);
         return (world.Complete && stream.Sealed ? VenueArchiveState.Sealed : VenueArchiveState.Waiting,
             new(stream.StreamId, world.AcceptedSequence));
+    }
+
+    private static bool MatchesVenueSource(SessionView session, CombatStreamView stream, WorldRecordingInfo world)
+    {
+        var header = world.Header;
+        return header.schemaVersion == 1 && header.sessionId == session.Id.ToString("D")
+            && header.streamId == stream.StreamId.ToString("D") && header.origin == stream.Origin.ToString()
+            && header.roomIds.SequenceEqual(session.RoomIds) && header.missionClockVersion == stream.MissionClockVersion
+            && (stream.MissionClockVersion != 1 || header.missionDurationSeconds == session.Mission.Definition.DurationSeconds);
     }
 }
