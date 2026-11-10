@@ -106,7 +106,8 @@ export function roomEndpointText(report, room, session) {
   if (!validEndpoint(endpoint, session) || endpoint.sessionEnded) return '連線端點未確認';
   return `UDP ${endpoint.address}:${endpoint.port}`
     + (session.mode === 'Linked' ? ' · 五房共用' : '')
-    + (endpoint.address.startsWith('127.') ? ' · 僅同機' : '');
+    + (endpoint.address.startsWith('127.') ? ' · 僅同機' : '')
+    + (row.ticketSourceLive === false ? ' · 遊戲來源暫未確認，暫停配票' : '');
 }
 
 export function roomVenuePhaseView(report, room, session, elapsed, unavailable = false) {

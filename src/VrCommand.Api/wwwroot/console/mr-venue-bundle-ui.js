@@ -4,6 +4,7 @@ const guidance = {
   'venue-alignment-unlocked': '請先鎖定本房校正檔。',
   'venue-alignment-mismatch': '校正檔不符，請選擇本房鎖定的原始 JSON。',
   'venue-endpoint-missing': '尚未公布端點，請先啟動本房的遊戲伺服器。',
+  'venue-endpoint-stale': '等待原遊戲來源更新，暫停配票。',
   'venue-endpoint-loopback': '公布的端點僅能同機使用，請確認本房的場館端點。',
   'venue-endpoint-reused': '端點與另一房相同，獨立場次須使用不同端點。',
   'venue-roster-reused': '名冊與另一房重複，請核對各席玩家。',

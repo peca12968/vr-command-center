@@ -55,20 +55,21 @@ internal static class MixedVenueDeployment
 
     internal static Preview Read(WorldRecordings worlds, OperatorIdentity actor) => Plan(worlds.ReadVenueSources(null, actor));
 
-    private static Preview Plan(Dictionary<Guid, (SessionView Session, ConnectionEndpoint? Endpoint)> sources)
+    private static Preview Plan(Dictionary<Guid, (SessionView Session, ConnectionEndpoint? Endpoint, bool? TicketSourceLive)> sources)
     {
         var endpoints = new HashSet<(string, int)>();
         var players = new HashSet<Guid>();
         var admissions = new HashSet<Guid>();
         return new(Enumerable.Range(1, SessionManager.RoomCount).Select(roomId =>
         {
-            var (session, endpoint) = sources.Values.SingleOrDefault(source => source.Session.RoomIds.Contains(roomId));
+            var (session, endpoint, ticketSourceLive) = sources.Values.SingleOrDefault(source => source.Session.RoomIds.Contains(roomId));
             if (session?.Mode != SessionMode.Independent) return new Room(roomId, null, null, null, null, [], null, "venue-session-changed");
             var mode = session.Environment.Mode;
             var alignment = mode == ExperienceMode.MR ? session.RoomAlignment?.ForRoom(roomId) : null;
             var roster = session.Players.Where(player => player.RoomId == roomId).OrderBy(player => player.Seat).ToArray();
             var seats = roster.Select(player => new VrVenueTickets.Seat(player.Seat + 1, player.Id, player.AdmissionId, player.Name)).ToArray();
             var problem = endpoint is null ? "venue-endpoint-missing"
+                : ticketSourceLive == false ? "venue-endpoint-stale"
                 : IPAddress.IsLoopback(IPAddress.Parse(endpoint.Address)) ? "venue-endpoint-loopback"
                 : !endpoints.Add((endpoint.Address, endpoint.Port)) ? "venue-endpoint-reused"
                 : mode == ExperienceMode.MR && alignment is null ? "venue-alignment-unlocked"

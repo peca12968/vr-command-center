@@ -103,6 +103,8 @@ app.Use(async (context, next) =>
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = venue.Code, roomId = venue.RoomId });
         else if (ex is VrVenueTicketConflict vrVenue)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = vrVenue.Code, roomId = vrVenue.RoomId });
+        else if (ex is TicketSourceUnavailableException)
+            await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "ticket-source-unavailable" });
         else if (ex is VenuePhaseChangedException)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "venue-phase-changed" });
         else if (ex is VenuePauseNotObservedException waiting)
@@ -338,7 +340,8 @@ app.MapPost("/api/sessions/{id:guid}/combat-stream/seal", (Guid id, SealCombatSt
     manager.SealStream(id, request, Actor(context)));
 app.MapPost("/api/sessions/{id:guid}/players", (Guid id, JoinPlayer request, SessionManager manager, HttpContext context) =>
     manager.Join(id, request.PlayerId, request.Name, request.RoomId, request.Headset, Actor(context), RequestId(context)));
-app.MapPost("/api/sessions/{id:guid}/players/{playerId:guid}/join-ticket", (Guid id, Guid playerId, SessionManager manager, HttpContext context) =>
+app.MapPost("/api/sessions/{id:guid}/players/{playerId:guid}/join-ticket", (Guid id, Guid playerId, SessionManager manager,
+    WorldRecordings worlds, HttpContext context) =>
 {
     var session = manager.Get(id, Actor(context));
     var player = session.Players.SingleOrDefault(p => p.Id == playerId) ?? throw new KeyNotFoundException("Player does not exist.");
@@ -346,6 +349,7 @@ app.MapPost("/api/sessions/{id:guid}/players/{playerId:guid}/join-ticket", (Guid
     if (session.State == SessionState.Ended) throw new InvalidOperationException("Session has ended.");
     var expected = AdmissionMatch(context) ?? throw new ArgumentException("If-Match-Admission is required; reload the current player roster.");
     if (expected != player.AdmissionId) throw new InvalidOperationException("Player admission changed; reload the current roster.");
+    worlds.RequireTicketSource(session);
     context.Response.Headers.CacheControl = "no-store";
     return ticketSigner.Issue(session, player);
 });
@@ -357,10 +361,11 @@ app.MapPost("/api/player-tickets/validate", (ValidatePlayerTicket request, Sessi
     var claims = ticketSigner.Validate(request.Ticket, request.SessionId);
     return manager.ResolveAdmission(claims, Actor(context));
 });
-app.MapPost("/api/sessions/{id:guid}/rooms/{roomId:int}/join-ticket-bundle", (Guid id, int roomId, RoomTicketRequest request, SessionManager manager, HttpContext context) =>
+app.MapPost("/api/sessions/{id:guid}/rooms/{roomId:int}/join-ticket-bundle", (Guid id, int roomId, RoomTicketRequest request, SessionManager manager,
+    WorldRecordings worlds, HttpContext context) =>
 {
     var actor = Actor(context);
-    var bundle = RoomTicketBundles.Create(manager.Get(id, actor), roomId, request, actor, ticketSigner);
+    var bundle = RoomTicketBundles.Create(manager.Get(id, actor), roomId, request, actor, ticketSigner, worlds);
     context.Response.Headers.CacheControl = "no-store";
     return Results.File(bundle, "application/zip", FormattableString.Invariant($"room-{roomId:00}-connections.zip"));
 });

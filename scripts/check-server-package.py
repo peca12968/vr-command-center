@@ -100,6 +100,7 @@ def main():
     p.add_argument('--check-venue-plan-ui', action='store_true', help='Launch each topology with the exact plan downloaded from Chromium')
     p.add_argument('--check-venue-preview', action='store_true', help='Run the shared Windows venue preview before both topology launches')
     p.add_argument('--check-venue-endpoint-batch', action='store_true', help='Verify endpoint batch retries and force a last-room transaction rollback')
+    p.add_argument('--check-venue-ticket-freshness', action='store_true', help='Verify ticket issuance before and after a managed Linked source stops')
     p.add_argument('--check-linked-room-enemies', action='store_true', help='Change one linked room through Chromium and verify original combat and replay')
     p.add_argument('--check-venue-tracking-gate', action='store_true', help='Reject full tracking Begin while the same native roster is otherwise ready')
     p.add_argument('--check-venue-participation-gate', action='store_true', help='Require all 25 effective native seats and verify their original Preparing frames')
@@ -203,6 +204,8 @@ def main():
         p.error('--check-venue-preview requires --check-venue-launcher')
     if args.check_venue_endpoint_batch and not args.check_venue_launcher:
         p.error('--check-venue-endpoint-batch requires --check-venue-launcher')
+    if args.check_venue_ticket_freshness and (not args.check_venue_launcher or not shutil.which('node')):
+        p.error('--check-venue-ticket-freshness requires --check-venue-launcher and Node.js with Playwright Chromium')
     if args.check_linked_room_enemies and (not args.player_package or args.check_room_combat or not shutil.which('node')):
         p.error('--check-linked-room-enemies requires the player package, Node.js and a separate run from --check-room-combat')
     if args.check_venue_tracking_gate and not args.check_venue_begin:p.error('--check-venue-tracking-gate requires --check-venue-begin')
@@ -437,9 +440,9 @@ def main():
                   label+' original Unity child owns the exact endpoint released by the UDP preflight')
             save(label+'-lan-preflight.json', dict(preflight, gameBinding=binding, scope='same-host'))
         return entry
-    def launch_venue(states, linked, *, unlocked_mr=False):
+    def launch_venue(states, linked, *, unlocked_mr=False, label=None):
         topology='Linked' if linked else 'Independent'
-        label='unlocked-mr-venue' if unlocked_mr else topology.lower()+'-venue'
+        label=label or ('unlocked-mr-venue' if unlocked_mr else topology.lower()+'-venue')
         plan_file=runtime/(label+'.json')
         work=runtime/(label+'-work')
         ready=out/(label+'-ready.json')
@@ -538,7 +541,8 @@ def main():
         entries=[]
         for index,(state,value) in enumerate(zip(states,values,strict=True)):
             name='linked' if linked else f"room-{state['roomIds'][0]:02}"
-            entry={'process':process,'readyPath':ready,'reportPath':report,'work':work/name,'config':value,'label':('linked' if linked else f'room-{index+1}'),
+            entry_label=('linked' if label=='linked-venue' else label) if linked else f'room-{index+1}'
+            entry={'process':process,'readyPath':ready,'reportPath':report,'work':work/name,'config':value,'label':entry_label,
                    'sessionId':state['id'],'witness':None,'peerDiagnostics':args.peer_diagnostics,'venueIndex':index}
             runners.append(entry);entries.append(entry)
         def is_ready():
@@ -629,6 +633,69 @@ def main():
             state=request(path+'/players',{'playerId':str(uuid.uuid4()),'roomId':room,
                 'name':f'Portable room {room} seat {seat}','headset':headset},role=role)
         return sorted((p for p in state['players'] if p['roomId']==room),key=lambda p:p['seat'])
+
+    def verify_stale_ticket_source():
+        state=create(list(range(1,6)), 'managed ticket-source interruption')
+        route='/api/sessions/'+state['id']
+        entry,=launch_venue([state],True,label='stale-ticket-venue')
+        people={room:prepare_room_roster(entry,room) for room in range(1,6)}
+        def live_preview():
+            preview=request('/api/vr-deployment/venue')
+            return preview if preview['ready'] else None
+        live=wait(live_preview,12,'current managed ticket source')
+        endpoint=request(route+'/connection-endpoint')
+        before=request(route+'/world')
+        room_tickets=lambda room:[{'playerId':person['id'],'admissionId':person['admissionId']} for person in people[room]]
+        venue_body={'topology':'Linked','rooms':[{'roomId':room,'sessionId':state['id'],
+                    'streamId':endpoint['streamId'],'players':room_tickets(room)} for room in range(1,6)]}
+        room_body={'address':endpoint['address'],'port':endpoint['port'],'players':room_tickets(1)}
+        first=people[1][0]
+        player_path=route+'/players/'+first['id']+'/join-ticket'
+        bundle_path=route+'/rooms/1/join-ticket-bundle'
+        venue_path='/api/vr-deployment/venue-bundle'
+        original=request(player_path,{},'Room1',admission=first['admissionId'])
+        room_zip,_=request(bundle_path,room_body,'Room1',raw_response=True)
+        venue_zip,_=request(venue_path,venue_body,raw_response=True)
+        with zipfile.ZipFile(io.BytesIO(room_zip)) as archive:
+            assert len(archive.namelist())==5 and archive.testzip() is None
+        with zipfile.ZipFile(io.BytesIO(venue_zip)) as archive:
+            assert len(archive.namelist())==6 and archive.testzip() is None
+        check(all(row['problem'] is None for row in live['rooms'])
+              and all(row['ticketSourceLive'] for row in request('/api/rooms/readiness')['rooms']),
+              'Live managed native source issues one player ticket, one room ZIP and all five rooms')
+        entry['process'].kill();entry['process'].wait(timeout=10)
+        handle=entry['witness']
+        check(handle.kernel.WaitForSingleObject(handle.handle,15000)==0,'Managed source crash stops the exact original Unity process')
+        handle.close();entry['witness']=None
+        def blocked():
+            preview=request('/api/vr-deployment/venue')
+            return preview if not preview['ready'] and all(row['problem']=='vr-venue-endpoint-stale' for row in preview['rooms']) else None
+        stale=wait(blocked,12,'managed capture freshness expires after the original source stops')
+        check(request(player_path,{},'Room1',admission=first['admissionId'],expected=409)['code']=='ticket-source-unavailable'
+              and request(bundle_path,room_body,'Room1',expected=409)['code']=='ticket-source-unavailable'
+              and request(venue_path,venue_body,expected=409)['code']=='vr-venue-endpoint-stale',
+              'Stale managed source rejects fresh individual, room and venue tickets')
+        cards=request('/api/rooms/readiness')['rooms']
+        world_after=request(route+'/world')
+        check(all(row['endpoint']==endpoint and row['ticketSourceLive'] is False for row in cards)
+              and request(route+'/connection-endpoint')==endpoint
+              and world_after['header']==before['header'] and world_after['acceptedSequence']>=before['acceptedSequence']
+              and request('/api/player-tickets/validate',{'ticket':original['ticket'],'sessionId':state['id'],
+                  'protocolVersion':2},'GameServer')['admissionId']==first['admissionId'],
+              'Original endpoint, saved world and already issued admission remain readable while issuance is blocked')
+        descriptor=runtime/'stale-ticket-browser-private.json'
+        output=out/'stale-ticket-browser.json'
+        descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'mode':'Linked','expectStale':True,
+            'expectedEndpoints':[{'roomId':room,'address':endpoint['address'],'port':endpoint['port']} for room in range(1,6)]}),encoding='utf-8')
+        no_zip=runtime/'stale-ticket-must-not-download.zip'
+        driver=ROOT/'tests/browser/check-vr-venue-tickets-native.cjs'
+        with (out/'stale-ticket-browser.log').open('xb') as log:
+            subprocess.run([shutil.which('node'),str(driver),str(descriptor),str(no_zip),str(output)],
+                stdout=log,stderr=subprocess.STDOUT,check=True,timeout=45)
+        check(read(output)['blocked'] and read(output)['verifiedRoomEndpoints']==5 and not no_zip.exists(),
+              'Shipped Chromium shows the stale source on all five cards and disables the venue download')
+        save('stale-ticket-native.json',{'live':live,'stale':stale,'cards':cards,'world':world_after})
+        command(state['id'],'End')
     def room_players(entry,room,people=None,raw=None,*,windows_files=None):
         path='/api/sessions/'+entry['sessionId']
         role='Room'+str(room)
@@ -3516,6 +3583,8 @@ def main():
             stop_player(client)
         if args.check_venue_endpoint_batch:
             reject_last_venue_endpoint()
+        if args.check_venue_ticket_freshness:
+            verify_stale_ticket_source()
         # A killed launcher must close its already-assigned Job and stop the exact owned native handle.
         crash=launch(create([1],'parent-exit',auto_attack=args.check_interrupted_replay),'parent-exit',listen_address='0.0.0.0')
         if args.check_interrupted_replay:

@@ -20,7 +20,8 @@ async function main() {
       await page.setViewportSize({ width: 390, height: 844 });
       for (const { roomId, address, port } of config.expectedEndpoints) {
         const label = `UDP ${address}:${port}` + (config.mode === 'Linked' ? ' · 五房共用' : '')
-          + (address.startsWith('127.') ? ' · 僅同機' : '');
+          + (address.startsWith('127.') ? ' · 僅同機' : '')
+          + (config.expectStale ? ' · 遊戲來源暫未確認，暫停配票' : '');
         const card = page.locator(`[data-room-endpoint="${roomId}"]`);
         await card.filter({ hasText: label }).waitFor();
         assert.equal(await card.textContent(), label);
@@ -33,8 +34,16 @@ async function main() {
     }
     await page.locator('#vr-venue-read').click();
     const status = page.locator('#vr-venue-status');
-    await status.filter({ hasText: mixed ? 'VR／MR 混合獨立場' : config.mode === 'Linked' ? '五房合併' : '五房獨立' }).waitFor();
+    await status.filter({ hasText: config.expectStale ? '請確認各房列出的條件'
+      : mixed ? 'VR／MR 混合獨立場' : config.mode === 'Linked' ? '五房合併' : '五房獨立' }).waitFor();
     assert.equal(await page.locator('#vr-venue-rooms li').count(), 5);
+    if (config.expectStale) {
+      assert.equal(await page.locator('#vr-venue-rooms li').filter({ hasText: '等待原遊戲來源更新，暫停配票' }).count(), 5);
+      assert.equal(await page.locator('#vr-venue-issue').isDisabled(), true);
+      assert.deepEqual(errors, []);
+      await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, verifiedRoomEndpoints, blocked: true }), { flag: 'wx' });
+      return;
+    }
     if (mixed) {
       assert.equal(await page.locator('#vr-venue-title').textContent(), 'VR／MR 混合五房配票');
       assert.equal(await page.locator('#vr-venue-files input').count(), Object.keys(config.alignments).length);

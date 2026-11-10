@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using VrCommand.Core;
 
@@ -11,6 +12,8 @@ public record ConnectionEndpoint(int Version, Guid SessionId, Guid StreamId, str
 public record VenueEndpointTarget(Guid SessionId, ConnectionEndpointDraft Endpoint);
 public record VenueEndpointBatch(int Version, SessionMode Topology, VenueEndpointTarget?[]? Servers);
 public record VenueEndpointReceipt(int Version, SessionMode Topology, ConnectionEndpoint[] Servers);
+internal sealed class TicketSourceUnavailableException()
+    : InvalidOperationException("The published game source has no current frame; wait for it before issuing connection files.");
 
 internal static class ConnectionDestination
 {
@@ -43,12 +46,43 @@ public sealed partial class WorldRecordings
         lock (gate) return EndpointRow(manager.Get(id, actor)) ?? throw new KeyNotFoundException("The game source has not published connection settings.");
     }
 
-    internal Dictionary<Guid, (SessionView Session, ConnectionEndpoint? Endpoint)> ReadVenueSources(Guid[]? ids, OperatorIdentity actor)
+    internal Dictionary<Guid, (SessionView Session, ConnectionEndpoint? Endpoint, bool? TicketSourceLive)> ReadVenueSources(Guid[]? ids, OperatorIdentity actor)
     {
         if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue exports require the master operator.");
         lock (gate)
             return manager.List(false, actor).Where(session => ids is null || ids.Contains(session.Id))
-                .ToDictionary(session => session.Id, session => (session, EndpointRow(session)));
+                .ToDictionary(session => session.Id, session =>
+                {
+                    var endpoint = EndpointRow(session);
+                    return (session, endpoint, endpoint is null ? null : ManagedTicketSourceLive(session));
+                });
+    }
+
+    internal void RequireTicketSource(SessionView session)
+    {
+        lock (gate)
+            if (ManagedTicketSourceLive(session) == false) throw new TicketSourceUnavailableException();
+    }
+
+    // An immutable endpoint remains readable for investigation; only a managed
+    // venue publication requires recent capture evidence before issuing tickets.
+    private bool? ManagedTicketSourceLive(SessionView session)
+    {
+        using var command = Command("""
+            SELECT json_extract(r.header,'$.captureStartedAtUtc'),r.duration,r.complete,r.accepted,
+                json_extract(f.packet,'$.suspended'),json_extract(f.packet,'$.frame.phase')
+            FROM managed_connection_endpoints m JOIN recordings r ON r.session=m.session
+            LEFT JOIN world_frames f ON f.session=r.session AND f.sequence=r.accepted
+            WHERE m.session=$id
+            """, ("$id", session.Id.ToString("D")));
+        using var row = command.ExecuteReader();
+        if (!row.Read()) return null;
+        if (row.GetBoolean(2) || row.GetInt64(3) <= 0 || row.IsDBNull(0) || row.IsDBNull(4) || row.GetBoolean(4) || row.IsDBNull(5)
+            || row.GetString(5) != session.State.ToString()
+            || !DateTimeOffset.TryParseExact(row.GetString(0), "O", CultureInfo.InvariantCulture, DateTimeStyles.None, out var started))
+            return false;
+        var age = (readinessClock.GetUtcNow() - started).TotalMilliseconds - row.GetInt64(1);
+        return age is >= -FutureSourceToleranceMilliseconds and <= 5000;
     }
     public ConnectionEndpoint PublishEndpoint(Guid id, ConnectionEndpointDraft draft, OperatorIdentity actor)
     {
@@ -107,6 +141,12 @@ public sealed partial class WorldRecordings
             using var transaction = db.BeginTransaction();
             var now = DateTimeOffset.UtcNow;
             var published = sources.Select(source => InsertEndpoint(source.Session, source.Endpoint, actor, now, transaction)).ToArray();
+            foreach (var endpoint in published)
+            {
+                using var managed = Command("INSERT INTO managed_connection_endpoints(session) VALUES($id)", ("$id", endpoint.SessionId.ToString("D")));
+                managed.Transaction = transaction;
+                managed.ExecuteNonQuery();
+            }
             transaction.Commit();
             return new(1, batch.Topology, published);
         }

@@ -70,7 +70,8 @@ internal static class MrVenueBundle
         return output.ToArray();
     }
 
-    private static ReadyRoom Validate(Room room, SessionMode mode, Dictionary<Guid, (SessionView Session, ConnectionEndpoint? Endpoint)> sources)
+    private static ReadyRoom Validate(Room room, SessionMode mode,
+        Dictionary<Guid, (SessionView Session, ConnectionEndpoint? Endpoint, bool? TicketSourceLive)> sources)
     {
         MrVenueBundleConflict Conflict(string code, string message) => new(room.RoomId, code, message);
         if (!sources.TryGetValue(room.SessionId, out var source) || source.Session.Mode != mode
@@ -84,6 +85,7 @@ internal static class MrVenueBundle
         if (alignment.RoomId != room.RoomId || alignment.Sha256 != hash)
             throw Conflict("venue-alignment-mismatch", "The original locked alignment file is required.");
         if (source.Endpoint is null) throw Conflict("venue-endpoint-missing", "Start the game server so it can publish its endpoint.");
+        if (source.TicketSourceLive == false) throw Conflict("venue-endpoint-stale", "Wait for the original game source before issuing connection files.");
         if (IPAddress.IsLoopback(IPAddress.Parse(source.Endpoint.Address)))
             throw Conflict("venue-endpoint-loopback", "The published loopback endpoint is only usable on the server computer.");
         Player[] players;

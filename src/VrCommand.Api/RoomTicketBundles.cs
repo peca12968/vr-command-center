@@ -9,7 +9,8 @@ internal sealed record RoomTicketRequest(string? Address, int Port, TicketAdmiss
 
 internal static class RoomTicketBundles
 {
-    public static byte[] Create(SessionView session, int roomId, RoomTicketRequest request, OperatorIdentity actor, PlayerJoinTicketSigner signer)
+    public static byte[] Create(SessionView session, int roomId, RoomTicketRequest request, OperatorIdentity actor,
+        PlayerJoinTicketSigner signer, WorldRecordings worlds)
     {
         AccessPolicy.Player(actor, session, roomId);
         if (!session.RoomIds.Contains(roomId)) throw new ArgumentException("Room is outside the session.");
@@ -17,6 +18,7 @@ internal static class RoomTicketBundles
         if (!ConnectionDestination.IsValid(request.Address, request.Port))
             throw new ArgumentException("Use a canonical unicast IPv4 address and port 1024–65535.");
         var players = ValidateAdmissions(session, roomId, request.Players);
+        worlds.RequireTicketSource(session);
         return Encode(session, roomId, players, request.Address!, request.Port, signer);
     }
 

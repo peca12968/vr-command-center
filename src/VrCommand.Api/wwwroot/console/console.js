@@ -122,6 +122,7 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
         else if (code === 'vr-participation-pause-no-witness') message = '目前未確認本房仍有姿態中斷。請查看最新參戰狀態。';
         else if (code === 'vr-participation-resume-not-ready') message = '暫停中的席位尚未確認恢復。請查看房卡等待的席位。';
         else if (code === 'mr-alignment-required') message = '請由主控鎖定 MR 校正檔後再配票。';
+        else if (code === 'ticket-source-unavailable') message = '原遊戲來源暫未更新，配票已暫停。請查看房卡的連線狀態。';
         else if (code === 'independent-rooms-occupied' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 使用中，五場都未建立。請確認房間狀態後再試。`;
         else if (code === 'venue-phase-changed') message = '全館場次狀態已變更，本批命令未套用。請重新整理後確認房間。';
         else if (code === 'venue-pause-not-observed' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 尚未回傳有效的暫停快照，本批場次維持暫停。`;

@@ -96,10 +96,11 @@ test('MR pause remains pending until the original source acknowledges a fresh pa
 test('Room endpoints distinguish publication, loopback and shared connections independently of pose freshness', () => {
   const current = { ...session, combatStream: { streamId: 'stream' } };
   const endpoint = { version: 1, sessionId: current.id, streamId: 'stream', address: '127.0.0.1', port: 7777, sessionEnded: false };
-  const withEndpoint = value => ({ ...overview, rooms: [{ ...roomRow, sourceState: 'Stale', endpoint: value }] });
+  const withEndpoint = (value, ticketSourceLive) => ({ ...overview, rooms: [{ ...roomRow, sourceState: 'Stale', endpoint: value, ticketSourceLive }] });
   assert.equal(roomEndpointText(overview, room, current), '等待伺服器公布連線端點');
   assert.equal(roomEndpointText(withEndpoint(endpoint), room, { ...current, mode: 'Linked' }), 'UDP 127.0.0.1:7777 · 五房共用 · 僅同機');
   assert.equal(roomEndpointText(withEndpoint({ ...endpoint, address: '192.168.1.10' }), room, current), 'UDP 192.168.1.10:7777');
+  assert.equal(roomEndpointText(withEndpoint(endpoint, false), room, current), 'UDP 127.0.0.1:7777 · 僅同機 · 遊戲來源暫未確認，暫停配票');
   for (const invalid of [{ streamId: 'previous' }, { sessionId: 'old' }, { sessionEnded: true }, { address: '0.0.0.0' }])
     assert.equal(roomEndpointText(withEndpoint({ ...endpoint, ...invalid }), room, current), '連線端點未確認');
   assert.equal(roomEndpointText(withEndpoint(endpoint), room, { ...current, state: 'Ended' }), '連線端點未確認');

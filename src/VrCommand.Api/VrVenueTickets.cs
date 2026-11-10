@@ -23,7 +23,7 @@ internal static partial class VrVenueTickets
 
     internal static Preview Read(WorldRecordings worlds, OperatorIdentity actor) => Plan(worlds.ReadVenueSources(null, actor));
 
-    private static Preview Plan(Dictionary<Guid, (SessionView Session, ConnectionEndpoint? Endpoint)> sources)
+    private static Preview Plan(Dictionary<Guid, (SessionView Session, ConnectionEndpoint? Endpoint, bool? TicketSourceLive)> sources)
     {
         var modes = sources.Values.Where(source => source.Session.Environment.Mode == ExperienceMode.VR)
             .Select(source => source.Session.Mode).Distinct().ToArray();
@@ -33,13 +33,14 @@ internal static partial class VrVenueTickets
         var admissions = new HashSet<Guid>();
         var rooms = Enumerable.Range(1, SessionManager.RoomCount).Select(roomId =>
         {
-            var (session, endpoint) = sources.Values.SingleOrDefault(source => source.Session.RoomIds.Contains(roomId));
+            var (session, endpoint, ticketSourceLive) = sources.Values.SingleOrDefault(source => source.Session.RoomIds.Contains(roomId));
             if (session is null || session.Environment.Mode != ExperienceMode.VR)
                 return new Room(roomId, null, null, null, [], "vr-venue-session-missing");
             var seats = session.Players.Where(player => player.RoomId == roomId).OrderBy(player => player.Seat)
                 .Select(player => new Seat(player.Seat + 1, player.Id, player.AdmissionId, player.Name)).ToArray();
             var problem = topology is null ? "vr-venue-topology-changed"
                 : endpoint is null ? "vr-venue-endpoint-missing"
+                : ticketSourceLive == false ? "vr-venue-endpoint-stale"
                 : topology == SessionMode.Independent && !endpoints.Add((endpoint.Address, endpoint.Port)) ? "vr-venue-endpoint-reused"
                 : seats.Length != SessionManager.PlayersPerRoom ? "vr-venue-roster-incomplete"
                 : seats.Any(seat => !players.Add(seat.PlayerId) || !admissions.Add(seat.AdmissionId)) ? "vr-venue-roster-reused"

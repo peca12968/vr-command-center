@@ -70,6 +70,8 @@ public sealed partial class WorldRecordings : IDisposable
                 CREATE TABLE IF NOT EXISTS connection_endpoints (
                   session TEXT PRIMARY KEY REFERENCES recordings(session), stream TEXT NOT NULL,
                   owner TEXT NOT NULL, body TEXT NOT NULL, created TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS managed_connection_endpoints (
+                  session TEXT PRIMARY KEY REFERENCES connection_endpoints(session));
                 PRAGMA user_version=1;
                 """);
             setup.ExecuteNonQuery();
