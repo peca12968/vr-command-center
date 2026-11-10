@@ -191,8 +191,10 @@ async function main() {
       const bytes = await fs.readFile(await download.path()), result = JSON.parse(bytes);
       const source = originals.slice(start - 1, end).map(row => row.packet);
       const packets = source.map(({ observedSequence, throughCombatSequence, frame, events, ...packet }) => {
-        const { throughSequence, players, enemies, ...scene } = frame;
-        return { ...packet, frame: { ...scene, players: players.filter(player => player.roomId === roomId),
+        const { throughSequence, roomEnemyPolicies, players, enemies, ...scene } = frame;
+        const policy = roomEnemyPolicies?.find(row => row.roomId === roomId);
+        return { ...packet, frame: { ...scene, behavior: policy?.behavior ?? scene.behavior,
+          autoAttack: policy?.autoAttack ?? scene.autoAttack, players: players.filter(player => player.roomId === roomId),
           enemies: enemies.filter(enemy => enemy.roomId === roomId) },
           events: events.filter(local).map(({ sequence, ...event }) => event) };
       });
@@ -405,4 +407,8 @@ async function main() {
   }
   await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation, scores, alignment }, null, 2), { flag: 'wx' });
 }
-main().catch(error => { console.error(error.name + ': native venue replay UI failed'); process.exitCode = 1; });
+main().catch(error => {
+  const location = error.stack?.match(/check-venue-replay-native\.cjs:(\d+):(\d+)\)/);
+  console.error(error.name + ': native venue replay UI failed' + (location ? ` at ${location[1]}:${location[2]}` : ''));
+  process.exitCode = 1;
+});
