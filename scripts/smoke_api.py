@@ -662,8 +662,8 @@ try:
             require(report(fired)["duplicate"], "Combat retry remains valid while paused without new events")
             request("POST", session_path + "/commands", {**pause, "action": "Resume"}, 409)
             environment_override = {"mode": "VR", "weather": "Clear", "timeOfDay": "Day", "lightning": False}
-            control("SetEnvironment", environment=environment_override)
-            control("SetEnemies", enemies={"count": 2, "behavior": "Advance", "autoAttack": False})
+            environment_revision = control("SetEnvironment", environment=environment_override)["appliedAtSequence"]
+            enemy_revision = control("SetEnemies", enemies={"count": 2, "behavior": "Advance", "autoAttack": False})["appliedAtSequence"]
             control("Resume")
             current = request("GET", session_path)
             statistics = request("GET", session_path + "/statistics")
@@ -683,8 +683,9 @@ try:
                     "Ordered event stream covers accepted mutations without gaps")
             payload, headers = request("GET", session_path + "/overview", raw=True)
             require(len(events) > 20 and headers["Cache-Control"] == "no-store"
-                    and json.loads(payload) == {"session": current, "statistics": statistics, "recentEvents": events[-20:]},
-                    "Operator overview returns the same revision, statistics and exact last twenty events")
+                    and json.loads(payload) == {"session": current, "statistics": statistics, "recentEvents": events[-20:],
+                                                "settingRevisions": {"environment": environment_revision, "enemies": enemy_revision}},
+                    "Operator overview returns the same session, exact statistics, last twenty events and accepted setting revisions")
             request("GET", session_path + "/overview", expected=401, identity=None)
             request("GET", f"/api/sessions/{independent[1]['id']}/overview", expected=403, identity="Room1")
             page = request("GET", session_path + "/events?after=1&limit=2")
