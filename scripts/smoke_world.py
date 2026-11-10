@@ -513,18 +513,22 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         # Publish a separate controlled round without session-specific props.
         damage_mission = request("/api/missions", expected=201, method="POST",
                                  body=dict(terminal["mission"]["definition"], props=[]))
+        room_ids = [1, 2, 3, 4, 5]
         overkill = request("/api/sessions", expected=201, method="POST", body={"missionId": damage_mission["id"],
-                           "mode": "Independent", "roomIds": [5]})
+                           "mode": "Linked", "roomIds": room_ids})
         overkill_id = overkill["id"]
         overkill_session = f"/api/sessions/{overkill_id}"
         overkill_world = overkill_session + "/world"
         damage_stream = str(uuid4())
         damage_player = str(uuid4())
+        other_player = str(uuid4())
         request(overkill_session + "/players", method="POST", body={"playerId": damage_player,
                 "name": "Overkill fixture", "roomId": 5, "headset": "Quest3"})
+        request(overkill_session + "/players", method="POST", body={"playerId": other_player,
+                "name": "Other room fixture", "roomId": 1, "headset": "Quest3"})
         request(overkill_session + "/combat-stream", "GameServer", method="POST",
                 body={"streamId": damage_stream, "origin": "Simulation"})
-        damage_header = dict(info["header"], sessionId=overkill_id, streamId=damage_stream, props=[])
+        damage_header = dict(info["header"], sessionId=overkill_id, streamId=damage_stream, roomIds=room_ids, props=[])
         damage_template = next(entry for entry in combat_packet["events"] if entry["kind"] == "PlayerDamaged")
 
         def damage_frame(number, combat_sequence, phase, observed, health, events=()):
@@ -533,6 +537,11 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
                           throughCombatSequence=combat_sequence, events=list(events))
             packet["frame"].update(tick=number - 1, phase=phase, throughSequence=combat_sequence)
             packet["frame"]["players"][0].update(id=damage_player, health=health)
+            other_body = deepcopy(packets[0]["frame"]["players"][0])
+            other_body.update(id=other_player, roomId=1)
+            for point in ("head", "muzzle"):
+                other_body[point]["x"] -= 56
+            packet["frame"]["players"].append(other_body)
             return packet
 
         damage_publisher = WebSocket(port, overkill_world + "/publish", tokens["GameServer"])
@@ -555,6 +564,16 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
                 packet = damage_frame(position + 1, position, "Running", begin, health, [entry])
                 reply = damage_publisher.send({"type": "frame", "payload": packet})
                 assert reply["type"] == "ack", reply
+            request(overkill_world + "/watch?mode=live&observerRoomId=5", "Room1", 403)
+            with request(overkill_world + "/watch?mode=live&observerRoomId=1", "Room1") as live_room:
+                kind, scoped_header = event(live_room)
+                next_kind, scoped_frame = event(live_room)
+                check(kind == "header" and scoped_header.get("observerRoomId") == 1
+                      and next_kind == "frame" and scoped_frame.get("observerRoomId") == 1 and scoped_frame["packet"]["sequence"] == 3
+                      and [body["id"] for body in scoped_frame["packet"]["frame"]["players"]] == [other_player]
+                      and scoped_frame["packet"]["frame"]["enemies"] == [] and scoped_frame["packet"]["events"] == []
+                      and [row["playerId"] for row in scoped_frame["statistics"]] == [other_player],
+                      "Linked live room access omits foreign bodies, enemies, events and statistics")
             end = request(overkill_session + "/commands", method="POST",
                           body={"commandId": str(uuid4()), "action": "End"})["session"]["sequence"]
             request(overkill_session + "/combat-stream/seal", "GameServer", method="POST",
@@ -569,12 +588,34 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         finally:
             damage_publisher.close()
         damage_stats = request(overkill_session + "/statistics")["players"]
-        damage_view = request(overkill_world + "/frames/3", "Room5")
+        damage_stats = [row for row in damage_stats if row["playerId"] == damage_player]
+        damage_view = request(overkill_world + "/frames/3?observerRoomId=5", "Room5")
         damage_clip = request(overkill_world + "/clip-statistics?fromFrame=3&throughFrame=3", "Room5")["players"]
         check(damage_view["packet"]["events"][0]["damage"] == 90 and damage_view["statistics"] == damage_stats
               and damage_stats[0]["damageTaken"] == 100 and damage_stats[0]["health"] == 0
               and damage_clip[0]["damageTaken"] == 50 and damage_clip[0]["hitsReceived"] == 1,
               "The scoped replay retains the original hit but reports the same actual health loss as final statistics")
+        master_frame = request(overkill_world + "/frames/3")
+        other_frame = request(overkill_world + "/frames/3?observerRoomId=1", "Room1")
+        listed = next(record for record in request("/api/world-recordings", "Room5") if record["header"]["sessionId"] == overkill_id)
+        scope_info = request(overkill_world + "?observerRoomId=5", "Room5")
+        request(overkill_world + "/frames/3?observerRoomId=5", "Room1", 403)
+        check({body["id"] for body in master_frame["packet"]["frame"]["players"]} == {damage_player, other_player}
+              and request(overkill_world + "/frames/3", "Room1") == master_frame
+              and damage_view["packet"]["events"] == master_frame["packet"]["events"]
+              and [body["id"] for body in damage_view["packet"]["frame"]["players"]] == [damage_player]
+              and other_frame == scoped_frame and listed == request(overkill_world, "Room5")
+              and scope_info["observerRoomId"] == 5 and scope_info["header"]["roomIds"] == room_ids,
+              "Explicit exact reads are room scoped while the shared observation still returns the full Linked frame")
+        with request(overkill_world + "/watch?mode=replay&fromFrame=3&throughFrame=3&observerRoomId=5", "Room5") as replay_room:
+            kind, replay_info = event(replay_room)
+            check(kind == "header" and replay_info["observerRoomId"] == 5 and event(replay_room) == ("frame", damage_view)
+                  and event(replay_room)[0] == "saved-end", "Room replay uses the same projection through the original saved boundary")
+        policy_roster = overkill_world + "/policy-frames?throughFrame=4&includeEnemyRoster=true"
+        local_roster = request(policy_roster + "&roomId=1", "Room1")
+        check(local_roster["roomId"] == 1 and all(not row["enemyRoster"]["enemyIds"] for row in local_roster["frames"])
+              and any(row["enemyRoster"]["enemyIds"] for row in request(policy_roster)["frames"]),
+              "The room-selected policy timeline returns the local enemy roster while the shared one retains all rooms")
         process.terminate()
         process.wait(timeout=10)
         # A pre-v0.16 fixture: same known frames and source, header stored before the new optional field existed.

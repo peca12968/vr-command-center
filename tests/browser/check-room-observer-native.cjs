@@ -11,10 +11,11 @@ async function main() {
   assert.match(base, /^http:\/\/127\.0\.0\.1:\d+$/);
   assert.equal(players.length, 25);
   await fs.mkdir(out);
-  const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_CLOSURE_CHROMIUM,
+    args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const errors = [], requests = [], watches = [];
   const checks = [];
-  let recent, reconnect, rowFollow;
+  let recent, reconnect, rowFollow, roomOnly;
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1080 } });
     page.on('pageerror', error => errors.push(error.name));
@@ -156,11 +157,62 @@ async function main() {
     assert.deepEqual(watches, Array(4).fill(`/api/sessions/${sessionId}/world/watch`));
     reconnect = { disconnectedFrame, recoveredFrame: Number(await canvas.getAttribute('data-sequence')), roomId: 2 };
     checks.push('An EOF on the real native observation response reconnects once without changing room or camera');
+
+    const scopedWatches = [];
+    page.on('request', request => {
+      const url = new URL(request.url());
+      if (url.origin === base && url.pathname === `/api/sessions/${sessionId}/world/watch`)
+        scopedWatches.push([url.searchParams.get('mode'), url.searchParams.get('observerRoomId')]);
+    });
+    await page.locator('#tab-operations').click();
+    await armLiveWatchFault(page, sessionId, 'eof');
+    await page.locator('[data-watch-room-only="4"]').click();
+    await waitForLiveFrame(page, reconnect.recoveredFrame);
+    await checkRoom(4);
+    assert.deepEqual(await page.locator('#world-room option').evaluateAll(rows => rows.map(row => row.value)), ['4']);
+    assert.match(await page.locator('#world-status').textContent(), /僅接收房間 4/);
+    const roomFrame = await cutLiveWatch(page);
+    await waitForLiveFrame(page, roomFrame);
+    assert.deepEqual(scopedWatches, [['live', '4'], ['live', '4']]);
+    const roomRecovered = Number(await canvas.getAttribute('data-sequence'));
+    const frameUrl = `${base}/api/sessions/${sessionId}/world/frames/${roomRecovered}`;
+    const headers = { Authorization: 'Bearer ' + roomKey };
+    const scoped = await (await page.request.get(frameUrl + '?observerRoomId=4', { headers })).json();
+    const full = await (await page.request.get(frameUrl, { headers })).json();
+    assert.equal(scoped.observerRoomId, 4);
+    assert.equal(scoped.packet.sequence, roomRecovered);
+    assert.equal(full.packet.frame.players.length, 25);
+    assert.deepEqual(scoped.packet.frame.players, full.packet.frame.players.filter(player => player.roomId === 4));
+    assert.deepEqual(scoped.packet.frame.enemies, full.packet.frame.enemies.filter(enemy => enemy.roomId === 4));
+    assert.deepEqual(scoped.statistics, full.statistics.filter(player => player.roomId === 4));
+    assert.equal((await page.request.get(frameUrl + '?observerRoomId=2', { headers })).status(), 403);
+    const world = `${base}/api/sessions/${sessionId}/world`;
+    const fullInfo = await (await page.request.get(world, { headers })).json();
+    const scopedInfo = await (await page.request.get(world + '?observerRoomId=4', { headers })).json();
+    assert.ok(fullInfo.header.props.some(prop => prop.roomId !== 4));
+    assert.deepEqual(scopedInfo.header, { ...fullInfo.header, props: fullInfo.header.props.filter(prop => prop.roomId === 4) });
+    checks.push('The explicit room stream returns only original room 4 geometry, players and statistics and preserves its scope across EOF');
+
+    await page.locator('#world-speed').selectOption('4');
+    await page.locator('#world-recent').click();
+    await page.waitForFunction(() => document.querySelector('#world-freshness').textContent === '已到即時回看尾端', null, { polling: 100 });
+    const previousFrame = Number(await canvas.getAttribute('data-sequence')) - 1;
+    const exactReply = page.waitForResponse(response => new URL(response.url()).pathname.endsWith(`/world/frames/${previousFrame}`));
+    await page.locator('#world-frame-back').click();
+    const exact = await exactReply;
+    assert.equal(new URL(exact.url()).searchParams.get('observerRoomId'), '4');
+    assert.equal((await exact.json()).observerRoomId, 4);
+    await page.waitForFunction(sequence => Number(document.querySelector('#world-canvas').dataset.sequence) === sequence, previousFrame);
+    await checkRoom(4);
+    assert.deepEqual(scopedWatches, [['live', '4'], ['live', '4'], ['replay', '4']]);
+    roomOnly = { roomId: 4, roomFrame, roomRecovered, previousFrame, scopedPlayers: scoped.statistics.length };
+    await page.locator('#world-player').screenshot({ path: path.join(out, 'room-only-replay.png') });
+    checks.push('Instant replay and exact previous-frame reads both request and display only the original room');
     // The operations tab may calculate a read-only draft layout while the browser logs in.
     assert.deepEqual(requests.filter(request => request !== 'POST /api/mission-layout'), []);
     assert.equal(await sessionRevision(), revision);
     assert.deepEqual(errors, []);
   } finally { await browser.close(); }
-  await fs.writeFile(path.join(out, 'checks.json'), JSON.stringify({ complete: true, checks, sessionId, players: 25, rowFollow, recent, reconnect, nonGetRequests: requests }, null, 2), { flag: 'wx' });
+  await fs.writeFile(path.join(out, 'checks.json'), JSON.stringify({ complete: true, checks, sessionId, players: 25, rowFollow, recent, reconnect, roomOnly, nonGetRequests: requests }, null, 2), { flag: 'wx' });
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

@@ -27,6 +27,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   let clipStart = null, clipEnd = null, clipPosition = null, clipPlayback = '';
   let eventContextRequest = null;
   let returnLiveSource = null, liveRetryTimer;
+  let observerRoom = null;
   let venueReview = null, venueAnchor = null;
   const cameras = mountCameras(getKey, unauthorized, () => scene, freeView);
   const cameraForm = mountWorldCameraForm(() => scene, freeView);
@@ -50,6 +51,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   }
   function stopList() { listEpoch++; listController?.abort(); listController = null; }
   function reset() {
+    observerRoom = null;
     reviewPlayer = returnLiveSource = null; clearClip(); bindVenueReview(null);
     stop(); stopList(); info = frame = savedLimit = null; savedFinished = false; geometry = ''; mode = ''; cameras.reset(); cameraForm.reset(); reviewControls();
     $('world-recording').replaceChildren(); $('world-player').hidden = true; message('選取已錄製的場次，開始觀戰或回放。');
@@ -80,7 +82,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
       picker.replaceChildren(...rows.map(row => {
         const option = document.createElement('option'); option.value = row.header.sessionId;
         option.dataset.complete = String(row.complete); option.dataset.accepted = String(row.acceptedSequence);
-        option.textContent = `${row.missionName} · 房間 ${row.header.roomIds.join('、')} · ${row.header.origin} · ${row.complete ? '完整' : '錄製未封存'} · ${row.header.sessionId.slice(0, 8)}`;
+        option.textContent = `${row.missionName} · 房間 ${visibleRooms(row).join('、')} · ${row.header.origin} · ${row.complete ? '完整' : '錄製未封存'} · ${row.header.sessionId.slice(0, 8)}`;
         return option;
       }));
       if (target) {
@@ -96,11 +98,12 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
         }
         picker.value = target.sessionId;
         resetRecording();
+        observerRoom = target.observerRoomId ?? null;
         if (target.venue) {
           const rooms = target.venue.rooms.flatMap(room => {
             const recording = rows.find(row => matchesTarget(row, room) && row.header.roomIds.length === 1
               && Number.isFinite(Date.parse(row.header.captureStartedAtUtc)));
-            return recording ? [{ ...room, headerKey: JSON.stringify(recording.header) }] : [];
+            return recording ? [{ ...room, headerKey: observationKey(recording) }] : [];
           });
           if (rooms.length > 1 && rooms.some(room => room.sessionId === target.sessionId)) bindVenueReview({ requestId: target.venue.requestId, rooms });
         }
@@ -143,13 +146,21 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     $('world-replay').textContent = selected?.dataset.complete === 'false' ? '回放已保存片段' : '從頭回放';
   }
   function resetRecording() {
+    observerRoom = null;
     reviewPlayer = returnLiveSource = null; clearClip(); bindVenueReview(null);
     stop(); cameras.bind(null); cameraForm.reset(); info = frame = savedLimit = null; savedFinished = false; geometry = ''; mode = '';
     bindRooms([]); resetActors(); delete $('world-canvas').dataset.sequence;
     recordingControls(); reviewControls(); $('world-player').hidden = true; message('已切換場次，請開始觀戰或回放。');
   }
-  function bindRooms(ids) {
-    const rooms = ids.length ? ['all', ...ids.map(String)] : [];
+  function visibleRooms(recording) {
+    return recording.observerRoomId == null ? recording.header.roomIds : [recording.observerRoomId];
+  }
+  function observationKey(recording) {
+    return JSON.stringify([recording.observerRoomId ?? null, recording.header]);
+  }
+  function bindRooms(ids, fixed = false) {
+    const rooms = ids.map(String);
+    if (rooms.length && !fixed) rooms.unshift('all');
     $('world-room').replaceChildren(...rooms.map(room => {
       const option = document.createElement('option'); option.value = room; option.textContent = roomName(room); return option;
     }));
@@ -166,7 +177,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     showStatistics();
   }
   function selectRoom(room, center = true) {
-    if (room !== 'all' && !info?.header.roomIds.includes(Number(room))) return;
+    if (!info || (info.observerRoomId != null && room !== String(info.observerRoomId))
+      || (room !== 'all' && !info.header.roomIds.includes(Number(room)))) return;
     clearEventContext();
     $('world-room').value = room;
     const camera = $('world-camera');
@@ -436,7 +448,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     const saved = mode === 'replay' && typeof savedLimit === 'number';
     const enemies = frame?.packet.frame.enemies;
     const enemyCount = enemies ? ` · 敵軍 ${enemies.length} 名（${enemies.filter(enemy => enemy.health > 0).length} 存活）` : '';
-    $('world-status').textContent = `${info.header.origin} · ${info.complete ? '錄製已核對封存' : '錄製未封存'}${saved ? ` · 已保存片段至第 ${savedLimit} 格 · 快照階段 ${phase}` : ' · ' + phase}${clock ? ' · ' + clock : ''}${enemyCount}`;
+    $('world-status').textContent = `${info.header.origin}${observerRoom == null ? '' : ` · 僅接收房間 ${observerRoom}` } · ${info.complete ? '錄製已核對封存' : '錄製未封存'}${saved ? ` · 已保存片段至第 ${savedLimit} 格 · 快照階段 ${phase}` : ' · ' + phase}${clock ? ' · ' + clock : ''}${enemyCount}`;
     if (mode === 'live') {
       const captured = info.header.captureStartedAtUtc ? Date.parse(info.header.captureStartedAtUtc) + (frame?.packet.elapsedMilliseconds ?? 0) : NaN;
       const age = Date.now() - captured, unknown = !Number.isFinite(age), clockInvalid = age < -1000;
@@ -555,7 +567,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
       const captured = Date.parse(recording?.header?.captureStartedAtUtc) + packet?.elapsedMilliseconds;
       const gap = anchor.captured - captured;
       if (result.requestId !== view.requestId || result.fromSessionId !== anchor.fromSessionId || result.fromFrame !== anchor.fromFrame
-        || result.roomId !== room.roomId || !recording || !matchesTarget(recording, room) || JSON.stringify(recording.header) !== room.headerKey
+        || result.roomId !== room.roomId || !recording || !matchesTarget(recording, room) || observationKey(recording) !== room.headerKey
         || !Number.isSafeInteger(packet?.sequence) || packet.sequence < 1 || packet.sequence > room.throughSequence
         || !Number.isSafeInteger(recording.durationMilliseconds) || !Number.isSafeInteger(packet.elapsedMilliseconds)
         || packet.elapsedMilliseconds < 0 || packet.elapsedMilliseconds > recording.durationMilliseconds
@@ -586,9 +598,10 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     const request = ++epoch, signal = AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]);
     stepping = true; reviewControls(); $('world-frame-message').textContent = '正在讀取保存快照…';
     try {
-      const value = await (await response(`/api/sessions/${id}/world/frames/${sequence}`, signal)).json();
+      const suffix = observerRoom === null ? '' : `?observerRoomId=${observerRoom}`;
+      const value = await (await response(`/api/sessions/${id}/world/frames/${sequence}${suffix}`, signal)).json();
       if (request !== epoch || !active || id !== $('world-recording').value || !stillCurrent()) return false;
-      if (value.packet.sequence !== sequence || !matches(value)) throw new Error('回應的快照不同。');
+      if ((value.observerRoomId ?? null) !== observerRoom || value.packet.sequence !== sequence || !matches(value)) throw new Error('回應的快照不同。');
       clearVenueAnchor(); show(value, true); $('world-frame-message').textContent = `已停在第 ${sequence} 格。`;
       return true;
     } catch (error) {
@@ -606,10 +619,11 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     const note = $('world-frame-message');
     connecting = true; reviewControls(); note.textContent = '正在檢查新保存的快照…';
     try {
-      const latest = await (await response(`/api/sessions/${id}/world`, signal)).json();
+      const suffix = observerRoom === null ? '' : `?observerRoomId=${observerRoom}`;
+      const latest = await (await response(`/api/sessions/${id}/world${suffix}`, signal)).json();
       if (request !== epoch || !canExtendSaved()) return;
       const tail = latest.acceptedSequence;
-      if (latest.header?.sessionId !== id || latest.header.streamId !== streamId || latest.header.origin !== origin
+      if ((latest.observerRoomId ?? null) !== observerRoom || latest.header?.sessionId !== id || latest.header.streamId !== streamId || latest.header.origin !== origin
         || !Number.isSafeInteger(tail) || tail < previous || typeof latest.complete !== 'boolean') throw new Error('保存尾端或錄製來源不符。');
       const selected = $('world-recording').selectedOptions[0];
       selected.dataset.accepted = String(tail); selected.dataset.complete = String(latest.complete); recordingControls();
@@ -679,18 +693,19 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
         + (room === 'all' && overrideRooms.length ? ` · 分房策略 ${overrideRooms.join('、')}` : '') : '';
   }
   function showRecording(roomId) {
-    const key = JSON.stringify(info.header);
+    const key = observationKey(info), changed = key !== geometry, observerRoom = info.observerRoomId;
     scene ??= new ReplayScene($('world-canvas'), selectActor, () => { $('world-camera').value = 'free'; }, key => actors.has(key));
     $('world-player').hidden = false;
-    if (key !== geometry) {
+    if (changed) {
       clearClip();
-      scene.load(info.header); geometry = key; frame = null;
-      bindRooms(info.header.roomIds); resetActors();
+      const rooms = visibleRooms(info);
+      scene.load({ ...info.header, roomIds: rooms }); geometry = key; frame = null;
+      bindRooms(rooms, observerRoom != null); resetActors();
       $('world-camera').value = 'overview';
     }
-    if (roomId != null) {
+    if (roomId != null || (observerRoom != null && changed)) {
       $('world-camera').value = 'top';
-      selectRoom(String(roomId));
+      selectRoom(String(observerRoom ?? roomId));
     }
     scene.resize(); $('world-name').textContent = info.missionName;
     cameras.bind(info.header.sessionId);
@@ -729,7 +744,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     watchLive();
     try {
       const position = sequence === null ? `fromMs=${Math.round(milliseconds)}` : `fromFrame=${sequence}`;
-      const url = `/api/sessions/${id}/world/watch?mode=${nextMode}&${position}&rate=${$('world-speed').value}${limit === null ? '' : `&throughFrame=${limit}`}`;
+      const scope = observerRoom === null ? '' : `&observerRoomId=${observerRoom}`;
+      const url = `/api/sessions/${id}/world/watch?mode=${nextMode}&${position}&rate=${$('world-speed').value}${limit === null ? '' : `&throughFrame=${limit}`}${scope}`;
       let stream;
       try { stream = await response(url, signal); }
       catch (error) {
@@ -755,7 +771,9 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
             const lines = event.split('\n'), type = lines.find(line => line.startsWith('event: '))?.slice(7), raw = lines.find(line => line.startsWith('data: '))?.slice(6);
             if (!raw) continue; const data = JSON.parse(raw);
             const sourceRecord = ['header', 'status', 'complete', 'saved-end'].includes(type);
-            if (expectedGeometry && (sourceRecord ? JSON.stringify(data.header) !== expectedGeometry : type === 'frame' && !hasHeader))
+            if ((sourceRecord || type === 'frame') && (data.observerRoomId ?? null) !== observerRoom)
+              throw new Error('回應的觀戰房間不同。');
+            if (expectedGeometry && (sourceRecord ? observationKey(data) !== expectedGeometry : type === 'frame' && !hasHeader))
               throw new Error('回應的錄製來源不同。');
             if (sourceRecord || type === 'frame') watchLive();
             if (type === 'header') {

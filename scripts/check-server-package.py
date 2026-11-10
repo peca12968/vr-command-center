@@ -4040,12 +4040,14 @@ def main():
                                cwd=ROOT/'tests/browser', check=True, timeout=70)
                 observed = read(browser_out/'checks.json')
                 check(observed['complete'] and observed['players']==25 and observed['sessionId']==entries[0]['sessionId']
-                      and len(observed['checks'])==7 and observed['recent']['roomId']==observed['reconnect']['roomId']==2
+                      and len(observed['checks'])==9 and observed['recent']['roomId']==observed['reconnect']['roomId']==2
                       and observed['rowFollow']['roomId']==4 and observed['rowFollow']['withoutNewStream'] is True
                       and observed['rowFollow']['activatedAt']>=observed['rowFollow']['focusedAt']+3
                       and observed['recent']['resumedFrame']>observed['recent']['tail']
-                      and observed['reconnect']['recoveredFrame']>observed['reconnect']['disconnectedFrame'],
-                      'shipped console returns to the same 25-player Linked source after instant replay and a live disconnect')
+                      and observed['reconnect']['recoveredFrame']>observed['reconnect']['disconnectedFrame']
+                      and observed['roomOnly']['roomId']==4 and observed['roomOnly']['scopedPlayers']==5
+                      and observed['roomOnly']['roomRecovered']>observed['roomOnly']['roomFrame'],
+                      'shipped console preserves both shared 25-player observation and the explicit five-player room stream')
             if args.check_room_participation:verify_room_participation(entries,round_clients,linked)
             if args.check_room_clocks:verify_room_clocks(entries,linked)
             if args.check_venue_environment:verify_venue_environment(entries,linked)

@@ -327,6 +327,15 @@ function renderRooms() {
         tab('world', { mode: 'live', sessionId: room.sessionId, roomId: room.id });
       });
       actions.append(watch);
+      if (session?.mode === 'Linked' && state.actor?.role === 'RoomController' && state.actor.roomId === room.id) {
+        const ownWatch = element('button', '僅接收本房資料', 'quiet small');
+        ownWatch.type = 'button'; ownWatch.disabled = button.disabled; ownWatch.dataset.watchRoomOnly = room.id;
+        ownWatch.addEventListener('click', () => {
+          if (state.busy || state.pending || !state.rooms.some(row => row.id === room.id && row.sessionId === room.sessionId)) return;
+          tab('world', { mode: 'live', sessionId: room.sessionId, roomId: room.id, observerRoomId: room.id });
+        });
+        actions.append(ownWatch);
+      }
       const poseFrame = element('button', '檢視姿態中斷快照', 'quiet small');
       poseFrame.type = 'button'; poseFrame.hidden = true; poseFrame.disabled = true;
       poseFrame.dataset.roomPoseFrame = room.id;

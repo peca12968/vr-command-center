@@ -13,12 +13,18 @@ public static class WorldRoutes
     public static void MapWorldRoutes(this WebApplication app)
     {
         app.MapGet("/api/world-recordings", (WorldRecordings store, HttpContext context) => Results.Json(store.List(Actor(context)), WorldJson.Options));
-        app.MapGet("/api/sessions/{id:guid}/world", (Guid id, bool? includeDebriefReceipts, WorldRecordings store, HttpContext context) =>
+        app.MapGet("/api/sessions/{id:guid}/world", (Guid id, bool? includeDebriefReceipts, int? observerRoomId, WorldRecordings store, HttpContext context) =>
         {
             var actor = Actor(context);
-            if (includeDebriefReceipts != true) return Results.Json(store.Info(id, actor), WorldJson.Options);
             context.Response.Headers.CacheControl = "no-store";
-            return Results.Json(store.ReadWorldWithDebriefReceipts(id, actor), WorldJson.Options);
+            var info = includeDebriefReceipts == true ? store.ReadWorldWithDebriefReceipts(id, actor) : store.Info(id, actor);
+            if (observerRoomId is int room)
+            {
+                WorldRecordings.RequireObserverRoom(info, room, actor);
+                if (info.DebriefReceipts is { } receipts)
+                    info = info with { DebriefReceipts = receipts with { Players = receipts.Players.Where(player => player.RoomId == room).ToArray() } };
+            }
+            return Results.Json(WorldRecordings.ObservationInfo(info, observerRoomId), WorldJson.Options);
         });
         app.MapPost("/api/sessions/{id:guid}/debrief-receipts", async (Guid id, WorldRecordings store, HttpContext context) =>
         {
@@ -93,10 +99,15 @@ public static class WorldRoutes
             context.Response.Headers.CacheControl = "no-store";
             return store.ShotTrace(id, fromFrame, throughFrame, eventId, roomId, Actor(context), context.RequestAborted);
         });
-        app.MapGet("/api/sessions/{id:guid}/world/frames/{sequence:long}", (Guid id, long sequence, WorldRecordings store, HttpContext context) =>
+        app.MapGet("/api/sessions/{id:guid}/world/frames/{sequence:long}", (Guid id, long sequence, int? observerRoomId, WorldRecordings store, HttpContext context) =>
         {
             if (sequence < 1) throw new ArgumentException("Frame sequence must be positive.");
-            var frame = store.Frame(id, sequence, Actor(context)) ?? throw new KeyNotFoundException("No saved world frame with this sequence.");
+            var actor = Actor(context);
+            var info = observerRoomId.HasValue ? store.Info(id, actor) : null;
+            if (observerRoomId is int requestedRoom) WorldRecordings.RequireObserverRoom(info!, requestedRoom, actor);
+            var frame = store.Frame(id, sequence, actor) ?? throw new KeyNotFoundException("No saved world frame with this sequence.");
+            if (observerRoomId is int room)
+                frame = store.ObservationFrame(id, frame, room, info!.Header.props.ToDictionary(prop => prop.id, prop => prop.roomId), actor);
             context.Response.Headers.CacheControl = "no-store";
             return Results.Json(frame, WorldJson.Options);
         });
@@ -182,9 +193,11 @@ public static class WorldRoutes
     private static string Payload(JsonDocument message) => message.RootElement.TryGetProperty("payload", out var payload)
         && payload.ValueKind == JsonValueKind.Object ? payload.GetRawText() : throw new ArgumentException("Missing publisher payload.");
 
-    private static async Task Watch(Guid id, WorldRecordings store, HttpContext context)
+    private static async Task Watch(Guid id, int? observerRoomId, WorldRecordings store, HttpContext context)
     {
         var actor = Actor(context); var info = store.Info(id, actor);
+        if (observerRoomId is int requestedRoom) WorldRecordings.RequireObserverRoom(info, requestedRoom, actor);
+        var propRooms = observerRoomId.HasValue ? info.Header.props.ToDictionary(prop => prop.id, prop => prop.roomId) : null;
         var mode = context.Request.Query["mode"].ToString();
         if (mode is not ("" or "live" or "replay")) throw new ArgumentException("Use live or replay observation mode.");
         var replay = mode == "replay";
@@ -237,7 +250,7 @@ public static class WorldRoutes
         }
         try
         {
-            await Send("header", info);
+            await Send("header", WorldRecordings.ObservationInfo(info, observerRoomId));
             while (!cancellation.IsCancellationRequested)
             {
                 var delay = 50;
@@ -250,14 +263,15 @@ public static class WorldRoutes
                     var due = (frame.Packet.elapsedMilliseconds - startMilliseconds.Value) / rate;
                     if (!replay || due <= clock.ElapsedMilliseconds)
                     {
-                        await Send("frame", frame); sent = sequence; if (replay) { sequence++; continue; }
+                        var visible = observerRoomId is int room ? store.ObservationFrame(id, frame, room, propRooms!, actor) : frame;
+                        await Send("frame", visible); sent = sequence; if (replay) { sequence++; continue; }
                     }
                     else delay = (int)Math.Clamp(Math.Ceiling(due - clock.ElapsedMilliseconds), 1, 50);
                 }
                 if (heartbeat.ElapsedMilliseconds >= 1000)
-                { await Send("status", info); heartbeat.Restart(); }
+                { await Send("status", WorldRecordings.ObservationInfo(info, observerRoomId)); heartbeat.Restart(); }
                 if (replay && (saved || info.Complete) && sequence > info.AcceptedSequence)
-                { await Send(saved ? "saved-end" : "complete", info); return; }
+                { await Send(saved ? "saved-end" : "complete", WorldRecordings.ObservationInfo(info, observerRoomId)); return; }
                 await Task.Delay(delay, cancellation);
             }
         }

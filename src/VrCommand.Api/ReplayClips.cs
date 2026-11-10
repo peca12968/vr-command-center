@@ -198,24 +198,7 @@ public sealed partial class WorldRecordings
     private static object ProjectReplayRoom(WorldRecordingPacket packet, PlayerStatistics[] statistics, RecordedEnemy[] previousEnemies,
         Dictionary<string, int> propRooms, int roomId)
     {
-        // Saved player statistics include departures. An enemy removed since the previous frame can still have an event in this packet.
-        var players = statistics.ToDictionary(row => row.PlayerId.ToString("D"), row => row.RoomId, StringComparer.Ordinal);
-        var enemies = previousEnemies.Concat(packet.frame.enemies).GroupBy(enemy => enemy.id, StringComparer.Ordinal)
-            .ToDictionary(group => group.Key, group => group.Last().roomId, StringComparer.Ordinal);
-        var roomX = ArenaWorld.RoomOrigin(roomId).X;
-        bool LocalTarget(string id)
-        {
-            var player = players.GetValueOrDefault(id);
-            var enemy = enemies.GetValueOrDefault(id);
-            var prop = propRooms.GetValueOrDefault(id);
-            return (player == roomId || enemy == roomId || prop == roomId)
-                && (player == 0 || player == roomId) && (enemy == 0 || enemy == roomId) && (prop == 0 || prop == roomId);
-        }
-
-        var events = packet.events.Where(entry => players.GetValueOrDefault(entry.playerId) == roomId
-            && (entry.enemyId.Length == 0 || enemies.GetValueOrDefault(entry.enemyId) == roomId)
-            && (entry.targetId.Length == 0 || LocalTarget(entry.targetId))
-            && (!entry.hasRay || (Math.Abs(entry.origin.x - roomX) <= 6.01f && Math.Abs(entry.origin.z) <= 6.01f)))
+        var events = RoomCombatEvents(packet, statistics, previousEnemies, propRooms, roomId)
             .Select(entry => new { entry.eventId, entry.tick, entry.kind, entry.playerId, entry.shotId, entry.enemyId, entry.damage,
                 entry.hasRay, entry.origin, entry.direction, entry.distance, entry.hit, entry.targetId });
         var frame = packet.frame;
@@ -232,6 +215,30 @@ public sealed partial class WorldRecordings
             },
             events
         };
+    }
+
+    private static RecordedEvent[] RoomCombatEvents(WorldRecordingPacket packet, PlayerStatistics[] statistics,
+        RecordedEnemy[] previousEnemies, IReadOnlyDictionary<string, int> propRooms, int roomId)
+    {
+        if (packet.events.Length == 0) return [];
+        // Saved player statistics include departures. An enemy removed since the previous frame can still have an event in this packet.
+        var players = statistics.ToDictionary(row => row.PlayerId.ToString("D"), row => row.RoomId, StringComparer.Ordinal);
+        var enemies = previousEnemies.Concat(packet.frame.enemies).GroupBy(enemy => enemy.id, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Last().roomId, StringComparer.Ordinal);
+        var roomX = ArenaWorld.RoomOrigin(roomId).X;
+        bool LocalTarget(string id)
+        {
+            var player = players.GetValueOrDefault(id);
+            var enemy = enemies.GetValueOrDefault(id);
+            var prop = propRooms.GetValueOrDefault(id);
+            return (player == roomId || enemy == roomId || prop == roomId)
+                && (player == 0 || player == roomId) && (enemy == 0 || enemy == roomId) && (prop == 0 || prop == roomId);
+        }
+
+        return packet.events.Where(entry => players.GetValueOrDefault(entry.playerId) == roomId
+            && (entry.enemyId.Length == 0 || enemies.GetValueOrDefault(entry.enemyId) == roomId)
+            && (entry.targetId.Length == 0 || LocalTarget(entry.targetId))
+            && (!entry.hasRay || (Math.Abs(entry.origin.x - roomX) <= 6.01f && Math.Abs(entry.origin.z) <= 6.01f))).ToArray();
     }
 
     private ReplayClip? FindClip(string session, string id, Guid stream)

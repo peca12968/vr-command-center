@@ -26,8 +26,14 @@ public record WorldRecordingInfo(WorldRecordingHeader Header, long AcceptedSeque
 {
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DebriefReceiptView? DebriefReceipts { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ObserverRoomId { get; init; }
 }
-public record WorldFrameView(WorldRecordingPacket Packet, PlayerStatistics[] Statistics);
+public record WorldFrameView(WorldRecordingPacket Packet, PlayerStatistics[] Statistics)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? ObserverRoomId { get; init; }
+}
 
 // Indexed, append-only frames are read on demand; startup never loads an entire world recording.
 // This instance shares the session store's process lease and uses its own synchronous SQLite transactions.
