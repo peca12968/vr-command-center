@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-11 任務文字與版本核對
+
+- 管理台 0.31.118 保留已載入名稱的前後空白及任務簡報的原始換行。修改時間或場地設定再儲存時，未編輯的文字沿用原值。載入及比對核對任務系列、識別與版號。保存已受理但讀回舊版時保留原請求，供操作員用同一筆請求確認。 [操作說明](MISSION_VERSIONS.md)
+- 解壓 0.31.117 套件，以實際 Chromium 重現只改時間卻改變原文字的失敗。首輪 0.31.118 來源測試通過文字核對，但通用通知未顯示版本不符，加入明確通知後，來源與解壓套件各通過 31 項任務讀取及 41 項版本、範本測試。錯誤回覆測試以原請求識別及內容重送，核對資料庫只新增一次。 [舊版對照](../artifacts/mission-text-browser-baseline-chrome.log) · [套件讀取](../artifacts/console-mission-text-package/checks.json) · [套件版本](../artifacts/console-mission-versions-text-package/checks.json)
+- Release 零警告，1,093 項核心、825 項套件 HTTP、107 項管理包檢查通過。管理服務依 535 個發行檔及 555 筆解壓清單核對。套件來源 `9872aa36` 的 187 個工作樹檔案雜湊相符，其中 29 個既有檔案與 Git 只差換行。沿用 Windows 與 Quest 0.50.4 的離線發行核對通過。GitHub Actions job `130066602513` 因帳務或支出上限未啟動。 [管理包](WINDOWS_CONTROL_PACKAGE.md) · [發行核對](../artifacts/venue-release-0.50.4-mission-text.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42883769157)
+- 使用者關閉擷取視窗後重驗 WinForms 1.17。路徑已輸入，兩次「載入／更新」點擊均回報被 `PickerHost.exe` 遮擋。停止點擊，清理隔離的啟動器及管理服務。未選房或啟動原生來源，C／F 9 個測試存檔雜湊相符。 [桌面驗收紀錄](../artifacts/server-gui/run-b180f68f62ee4cada039b24eba8c61b7/gui-blocker.json)
+- 0.31.118、啟動器 1.17 及 Windows 遊戲 0.50.4 解壓整合通過 446 項。從 Chromium 下載的場館計畫帶有各場次及任務版本，過期計畫未能啟動來源。五房獨立場逐一套用各自保存的時長、環境、敵軍與掩體。獨立和合併模式各有 25 個同機玩家端同時連線，六場核對 943 格完整回放、50 份原戰績與伺服器確認、11 份 CSV 及雙封存。活動場次歸零，原生 C／F 254 檔及管理包測試 27 檔雜湊相符。跨機、頭盔與廠商設備另待實測。 [Windows 驗收](../artifacts/server-package-checks/run-fb62ddf93fa041768bd45d06780e4248/checks.json) · [驗收統計](../artifacts/mission-text-native-validation.json)
+
 ## 2026-11-11 合併場本房觀戰串流
 
 - 管理包 0.31.117 增加房卡「僅接收本房資料」。從此入口開始，管理服務投影本房的場景物件、玩家、敵軍、事件及戰績，保留原錄製識別與序號。逐格、即時回看及重連沿用選定房間。原「即時觀戰」仍可開啟既有共用檢視。 [操作說明](WORLD_RECORDING.md#從房卡或全館收尾開啟)
