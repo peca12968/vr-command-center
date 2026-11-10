@@ -4,6 +4,6 @@
   "private": true,
   "packageManager": "pnpm@11.25.0",
   "engines": { "node": ">=22" },
-  "scripts": { "test": "node --test placement-history.test.mjs replay-model.test.mjs environment-style.test.mjs field-props.test.mjs service-rifle.test.mjs combatants.test.mjs weapon-actions.test.mjs armed-combatants.test.mjs combat-effects.test.mjs player-fire.test.mjs combat-audio.test.mjs player-body.test.mjs mission-clock.test.mjs camera-ground-target.test.mjs readiness.test.mjs connection.test.mjs closure.test.mjs active-operator.test.cjs && node check.cjs" },
+  "scripts": { "test": "node --test placement-history.test.mjs replay-model.test.mjs player-replay-model.test.mjs environment-style.test.mjs field-props.test.mjs service-rifle.test.mjs combatants.test.mjs weapon-actions.test.mjs armed-combatants.test.mjs combat-effects.test.mjs player-fire.test.mjs combat-audio.test.mjs player-body.test.mjs mission-clock.test.mjs camera-ground-target.test.mjs readiness.test.mjs connection.test.mjs closure.test.mjs active-operator.test.cjs && node check.cjs" },
   "devDependencies": { "playwright": "1.62.1" }
 }

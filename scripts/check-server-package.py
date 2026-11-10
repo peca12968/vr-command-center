@@ -77,6 +77,7 @@ def main():
     p.add_argument('--check-venue-end', action='store_true', help='End each native topology in one batch and read its original archives')
     p.add_argument('--check-venue-reports', action='store_true', help='Verify the original reports ZIP for each native End batch')
     p.add_argument('--check-venue-replay-ui', action='store_true', help='Open the original native archives through the shipped console')
+    p.add_argument('--check-player-room-replay', action='store_true', help='Export a single room from the original native Linked combat replay')
     p.add_argument('--check-venue-history-ui', action='store_true', help='Reopen and download the earlier batch after the newer native round')
     p.add_argument('--check-venue-environment', action='store_true', help='Confirm two batch environment changes in each native topology')
     p.add_argument('--check-venue-environment-ui', action='store_true', help='Open the original environment batch witness in the packaged console')
@@ -154,6 +155,8 @@ def main():
         p.error('--check-venue-reports requires --check-venue-end and --check-room-reports')
     if args.check_venue_replay_ui and not args.check_venue_end:
         p.error('--check-venue-replay-ui requires --check-venue-end')
+    if args.check_player_room_replay and not (args.check_venue_replay_ui and args.check_room_combat):
+        p.error('--check-player-room-replay requires --check-venue-replay-ui and --check-room-combat')
     if args.check_venue_history_ui and not (args.check_venue_replay_ui and args.check_venue_reports):
         p.error('--check-venue-history-ui requires --check-venue-replay-ui and --check-venue-reports')
     if args.check_venue_environment and not args.player_package:
@@ -794,6 +797,9 @@ def main():
         descriptor = runtime / f'{mode}-venue-replay-private.json'
         output = out / f'{mode}-venue-replay-ui.json'
         config = {'base': uri, 'masterKey': keys['Master'], 'mode': mode, 'sessions': rows}
+        scoped = linked and args.check_player_room_replay
+        if scoped:
+            config['roomReplaySource'] = str(out/'linked-replay.json')
         if earlier:
             config['history'] = {'batch': earlier, 'zip': str(out/'independent-venue-reports.zip')}
         descriptor.write_text(json.dumps(config), encoding='utf-8')
@@ -810,8 +816,8 @@ def main():
               f'{mode} shipped console stops at the exact marked interval in the original sealed native replay')
         clips_path = f"/api/sessions/{first['sessionId']}/world/clips"
         shared = request(clips_path, role=f"Room{rows[0]['roomIds'][0]}")
-        clip = shared['clips'][0]
-        check(shared == request(clips_path) and len(shared['clips']) == 1
+        clip = next(clip for clip in shared['clips'] if clip['id'] == interval['clipId'])
+        check(shared == request(clips_path) and len(shared['clips']) == (2 if scoped else 1)
               and shared['sessionId'] == first['sessionId'] and shared['streamId'] == sources[first['sessionId']]['header']['streamId']
               and (clip['id'], clip['startFrame'], clip['endFrame'], clip['endMilliseconds'])
               == (interval['clipId'], interval['start'], interval['end'], interval['elapsedMilliseconds']),
@@ -819,6 +825,11 @@ def main():
         check(interval['playerReplay'] == {'start': interval['start'], 'end': interval['end'],
               'originalPackets': interval['end'] - interval['start'] + 1, 'apiRequests': 0},
               f'{mode} unauthenticated player plays the exact exported native frames locally')
+        if scoped:
+            room = result['roomReplay']
+            check(room['roomId'] == 3 and 0 < room['start'] < room['end'] <= first['throughSequence']
+                  and room['retainedEvents'] > 0 and room['omittedEvents'] > 0 and room['props'] == 1 and room['apiRequests'] == 0,
+                  'linked shipped room export retains original timing and room 3 combat, excluding the other four rooms')
         if earlier:
             older = earlier['sessions'][2]
             history = result['history']
@@ -2315,7 +2326,9 @@ def main():
                     state=request('/api/sessions',{'missionId':imported_mission['id'],'mode':'Linked','roomIds':rooms},expected=201)
                     sessions.append(state['id'])
                 else:
-                    state=create(rooms,'linked' if linked else 'independent',enemy_count=enemy_count)
+                    room_replay_props = [{'assetId':'barrel','position':{'x':4.5,'y':0,'z':4.5},'yawDegrees':0}]
+                    state=create(rooms,'linked' if linked else 'independent',enemy_count=enemy_count,
+                                 props=room_replay_props if linked and args.check_player_room_replay else None)
                 entry=launch(state,('linked' if linked else 'room-'+str(rooms[0])));entries.append(entry)
                 if args.check_room_clocks and (linked or rooms == [1]):
                     request('/api/sessions/'+state['id']+'/commands', {'commandId':str(uuid.uuid4()),'action':'SetMissionClock','missionClock':{'autoEnd':True}})

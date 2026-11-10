@@ -344,6 +344,21 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
               and [player_replay["startFrame"], player_replay["endFrame"]] == [2, 6]
               and player_replay["packets"] == [request(f"{route}/frames/{sequence}")["packet"] for sequence in range(2, 7)],
               "Master exports exact original inclusive frames without the private statistics")
+        scoped_route = player_replay_route + "?roomId=5"
+        scoped = request(scoped_route)
+        check(scoped["playerReplayVersion"] == 2 and scoped["roomId"] == 5 and scoped["header"] == player_replay["header"]
+              and [row["sequence"] for row in scoped["packets"]] == [2, 3, 4, 5, 6]
+              and [row["elapsedMilliseconds"] for row in scoped["packets"]] ==
+              [row["elapsedMilliseconds"] for row in player_replay["packets"]]
+              and all("observedSequence" not in row and "throughCombatSequence" not in row
+                      and "throughSequence" not in row["frame"] and all("sequence" not in event for event in row["events"])
+                      for row in scoped["packets"]),
+              "Room export preserves the inclusive saved frames and time without global counters")
+        request(scoped_route, "Room5", 403)
+        request(player_replay_route + "?roomId=1", expected=400)
+        request(player_replay_route + "?roomId=0", expected=400)
+        check(request(player_replay_route) == player_replay and request(route)["header"] == info["header"],
+              "Room export leaves the original recording and full player file unchanged")
         request(clips + "/" + str(uuid4()) + "/player-replay.json", expected=404)
         request(clip_route, expected=409, method="PUT", body={**clip, "endFrame": 7})
         other_clips = [clips + "/" + str(uuid4()) for _ in range(23)]

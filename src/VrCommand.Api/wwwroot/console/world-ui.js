@@ -226,7 +226,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     $('world-review').hidden = !showing;
     $('world-frame-back').disabled = !idle || frame.packet.sequence <= 1;
     const throughFrame = info && Number.isInteger(savedLimit) ? Math.min(savedLimit, info.acceptedSequence) : info?.acceptedSequence;
-    savedClips.update(showing ? { sessionId: info.header.sessionId, streamId: info.header.streamId, throughFrame, complete: info.complete } : null,
+    savedClips.update(showing ? { sessionId: info.header.sessionId, streamId: info.header.streamId, roomIds: info.header.roomIds, throughFrame, complete: info.complete } : null,
       idle, clipEnd ? { startFrame: clipStart.sequence, endFrame: clipEnd.sequence } : null);
     $('world-frame-next').disabled = !idle || frame.packet.sequence >= throughFrame;
     const extend = $('world-frame-extend');

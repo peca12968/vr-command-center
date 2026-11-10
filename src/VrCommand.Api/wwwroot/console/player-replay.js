@@ -67,7 +67,8 @@ $('file').addEventListener('change', async () => {
     replay = candidate;
     $('title').textContent = candidate.clipName;
     const source = candidate.header.origin === 'GameServer' ? '遊戲伺服器' : '模擬';
-    $('source').textContent = `${candidate.missionName} · ${source} · 原畫格 ${candidate.startFrame}–${candidate.endFrame}`;
+    const scope = candidate.roomId === undefined ? '' : ` · 僅房間 ${candidate.roomId}`;
+    $('source').textContent = `${candidate.missionName} · ${source}${scope} · 原畫格 ${candidate.startFrame}–${candidate.endFrame}`;
     timeline.max = candidate.packets.length - 1;
     $('view').hidden = false;
     scene.resize();

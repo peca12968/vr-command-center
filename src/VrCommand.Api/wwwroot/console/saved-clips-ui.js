@@ -14,7 +14,7 @@ function validClip(clip, streamId) {
 
 export function mountSavedClips(request, canWrite, load) {
   let scope = null, idle = false, draft = null, rows = [], pending = null, work = null;
-  const select = $('select'), name = $('name');
+  const select = $('select'), name = $('name'), exportRoom = $('export-room');
   const selected = () => rows.find(clip => clip.id === select.value);
   const route = () => `/api/sessions/${scope.sessionId}/world/clips`;
   function message(text, error = false) {
@@ -33,6 +33,7 @@ export function mountSavedClips(request, canWrite, load) {
     $('remove').disabled = !idle || !row || !!work || !!pending;
     $('export').disabled = !idle || !row || !!work || !!pending || !scope.complete
       || row.endFrame > scope.throughFrame || row.endFrame - row.startFrame >= MAX_REPLAY_FRAMES;
+    exportRoom.disabled = $('export').disabled;
     $('retry').hidden = !pending || !!work;
   }
   function options(preferred = select.value) {
@@ -92,8 +93,9 @@ export function mountSavedClips(request, canWrite, load) {
   });
   $('export').addEventListener('click', async () => {
     if ($('export').disabled || !canWrite()) return;
-    const clip = selected(), { sessionId, streamId } = scope;
-    const path = `${route()}/${clip.id}/player-replay.json`;
+    const clip = selected(), { sessionId, streamId, roomIds } = scope;
+    const room = Number(exportRoom.value) || null, expectedRooms = room === null ? roomIds : [room];
+    const path = `${route()}/${clip.id}/player-replay.json${room === null ? '' : '?roomId=' + room}`;
     const own = work = new AbortController();
     controls();
     try {
@@ -105,15 +107,19 @@ export function mountSavedClips(request, canWrite, load) {
       const replay = readPlayerReplay(JSON.parse(await file.text()));
       if (work !== own) return;
       if (replay.header.sessionId !== sessionId || replay.header.streamId !== streamId
-        || replay.clipName !== clip.name || replay.startFrame !== clip.startFrame || replay.endFrame !== clip.endFrame)
+        || replay.clipName !== clip.name || replay.startFrame !== clip.startFrame || replay.endFrame !== clip.endFrame
+        || (room === null ? replay.playerReplayVersion !== 1 : replay.roomId !== room)
+        || replay.header.roomIds.length !== expectedRooms.length
+        || expectedRooms.some((id, index) => id !== replay.header.roomIds[index]))
         throw new Error('下載回覆的錄製來源或範圍不符。');
       const url = URL.createObjectURL(file);
       const link = document.createElement('a');
       link.href = url;
-      link.download = `vr-command-replay-${clip.id}.json`;
+      const suffix = room === null ? '' : '-room-' + String(room).padStart(2, '0');
+      link.download = `vr-command-replay-${clip.id}${suffix}.json`;
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
-      message(`已下載「${clip.name}」的玩家回放檔。`);
+      message(`已下載「${clip.name}」的${room === null ? '玩家回放檔' : '房間 ' + room + ' 回放檔'}。`);
     } catch (error) {
       if (work === own) message(error.message, true);
     } finally {
@@ -140,6 +146,8 @@ export function mountSavedClips(request, canWrite, load) {
       scope = next; idle = enabled; draft = range;
       if (changed) {
         work?.abort(); work = pending = null; rows = []; name.value = ''; options(); message('');
+        $('export-room-field').hidden = !(scope?.roomIds.length > 1);
+        exportRoom.replaceChildren(new Option('全場', ''), ...(scope?.roomIds ?? []).map(room => new Option('房間 ' + room, room)));
         if (scope) void sync();
       }
       controls();

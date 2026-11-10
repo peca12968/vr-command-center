@@ -15,8 +15,9 @@ function require(value) {
 }
 
 export function readPlayerReplay(data) {
-  const { header, packets, startFrame, endFrame } = data ?? {};
-  require(data?.playerReplayVersion === 1 && text(data.missionName, 120) && text(data.clipName, 60)
+  const { header, packets, startFrame, endFrame, playerReplayVersion, roomId } = data ?? {};
+  const scoped = playerReplayVersion === 2;
+  require((scoped || playerReplayVersion === 1) && text(data.missionName, 120) && text(data.clipName, 60)
     && integer(startFrame, 1) && integer(endFrame, startFrame + 1)
     && list(packets, MAX_REPLAY_FRAMES) && packets.length === endFrame - startFrame + 1);
   require(header?.schemaVersion === 1 && guid(header.sessionId) && guid(header.streamId)
@@ -26,6 +27,7 @@ export function readPlayerReplay(data) {
     && header.roomIds.every(room => integer(room, 1, 5)) && list(header.props, 2500)
     && header.props.every(prop => prop && header.roomIds.includes(prop.roomId) && point(prop.feet)
       && number(prop.yaw) && ['Sandbag', 'Barrel'].includes(prop.kind)));
+  require(scoped ? header.roomIds.length === 1 && roomId === header.roomIds[0] : roomId === undefined);
 
   let elapsed = 0, tick = 0;
   for (const [index, packet] of packets.entries()) {
@@ -36,6 +38,7 @@ export function readPlayerReplay(data) {
       && phase.includes(frame.phase) && bool(frame.night)
       && ['Clear', 'Fog', 'Storm'].includes(frame.visibility)
       && list(frame.players, 25) && list(frame.enemies, 100));
+    if (scoped) require(!('observedSequence' in packet) && !('throughCombatSequence' in packet) && !('throughSequence' in frame));
     const actors = new Set();
     for (const player of frame.players) {
       const rig = player?.rig;
@@ -52,7 +55,7 @@ export function readPlayerReplay(data) {
         && (!enemy.hasFireState || (point(enemy.fireOrigin) && point(enemy.fireDirection))));
       actors.add(enemy.id);
     }
-    require(packet.events.every(event => event && bool(event.hasRay) && (!event.hasRay
+    require(packet.events.every(event => event && typeof event === 'object' && (!scoped || !('sequence' in event)) && bool(event.hasRay) && (!event.hasRay
       || (point(event.origin) && point(event.direction) && number(event.distance) && event.distance >= 0))));
     elapsed = packet.elapsedMilliseconds;
     tick = frame.tick;

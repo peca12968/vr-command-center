@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { randomUUID } = require('node:crypto');
 const { chromium } = require('playwright');
 
 async function main() {
@@ -9,7 +10,7 @@ async function main() {
   assert.match(config.base, /^http:\/\/127\.0\.0\.1:\d+$/);
   const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const results = [], fieldEvidence = [];
-  let history;
+  let history, roomReplay;
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1080 }, acceptDownloads: true });
     const errors = [];
@@ -111,11 +112,82 @@ async function main() {
       return { start, end, reached: Number(await canvas.getAttribute('data-sequence')), elapsedMilliseconds: packet.elapsedMilliseconds,
         clipId: await savedOption.getAttribute('value'), playerReplay: { start, end, originalPackets: exported.packets.length, apiRequests: apiRequests.length } };
     }
+    async function reviewRoom(replay) {
+      const roomId = 3;
+      const originals = JSON.parse(await fs.readFile(config.roomReplaySource, 'utf8'));
+      const rooms = new Map(originals.at(-1).statistics.map(player => [player.playerId, player.roomId]));
+      const local = event => rooms.get(event.playerId) === roomId;
+      const own = originals.find(row => row.packet.events.some(local));
+      const other = originals.find(row => row.packet.events.some(event => !local(event)));
+      assert.ok(own && other);
+      const start = Math.min(own.packet.sequence, other.packet.sequence) - 1;
+      const end = Math.max(own.packet.sequence, other.packet.sequence);
+      assert.ok(start >= 1 && end > start && end - start < 300);
+      const world = `${config.base}/api/sessions/${replay.sessionId}/world`, headers = { Authorization: 'Bearer ' + config.masterKey };
+      const response = await fetch(world, { headers });
+      assert.equal(response.status, 200);
+      const { header } = await response.json();
+      assert.deepEqual(header.roomIds, [1, 2, 3, 4, 5]);
+      const clipId = randomUUID(), clipName = '原生第三房複盤';
+      const saved = await fetch(`${world}/clips/${clipId}`, { method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ streamId: header.streamId, name: clipName, startFrame: start, endFrame: end }) });
+      assert.equal(saved.status, 200);
+      await page.locator('#saved-clip-refresh').click();
+      await page.locator('#saved-clip-select').selectOption(clipId);
+      const picker = page.locator('#saved-clip-export-room');
+      assert.deepEqual(await picker.locator('option').evaluateAll(rows => rows.map(row => row.value)), ['', '1', '2', '3', '4', '5']);
+      await picker.selectOption(String(roomId));
+      const reply = page.waitForResponse(value => value.url() === `${world}/clips/${clipId}/player-replay.json?roomId=${roomId}`);
+      const pending = page.waitForEvent('download');
+      await page.locator('#saved-clip-export').click();
+      assert.equal((await reply).status(), 200);
+      const download = await pending;
+      assert.equal(download.suggestedFilename(), `vr-command-replay-${clipId}-room-03.json`);
+      const bytes = await fs.readFile(await download.path()), result = JSON.parse(bytes);
+      const source = originals.slice(start - 1, end).map(row => row.packet);
+      const packets = source.map(({ observedSequence, throughCombatSequence, frame, events, ...packet }) => {
+        const { throughSequence, players, enemies, ...scene } = frame;
+        return { ...packet, frame: { ...scene, players: players.filter(player => player.roomId === roomId),
+          enemies: enemies.filter(enemy => enemy.roomId === roomId) },
+          events: events.filter(local).map(({ sequence, ...event }) => event) };
+      });
+      const props = header.props.filter(prop => prop.roomId === roomId);
+      assert.equal(header.props.length, 5);
+      assert.deepEqual(result.header, { ...header, roomIds: [roomId], props });
+      assert.equal(result.playerReplayVersion, 2);
+      assert.equal(result.roomId, roomId);
+      assert.deepEqual([result.startFrame, result.endFrame], [start, end]);
+      assert.deepEqual(result.packets, packets);
+      const retainedEvents = packets.reduce((total, packet) => total + packet.events.length, 0);
+      const omittedEvents = source.reduce((total, packet) => total + packet.events.length, 0) - retainedEvents;
+      assert.ok(retainedEvents > 0 && omittedEvents > 0);
+      for (const room of header.props.filter(prop => prop.roomId !== roomId)) assert.ok(!bytes.includes(room.id));
+      for (const [id, room] of rooms) if (room !== roomId) assert.ok(!bytes.includes(id));
+      const player = await browser.newPage({ viewport: { width: 390, height: 844 } }), apiRequests = [];
+      player.on('request', request => {
+        if (new URL(request.url()).pathname.startsWith('/api') || request.headers().authorization) apiRequests.push(request.url());
+      });
+      try {
+        await player.goto(config.base + '/console/player-replay.html');
+        await player.locator('#player-replay-file').setInputFiles({ name: download.suggestedFilename(), mimeType: 'application/json', buffer: bytes });
+        const position = player.locator('#player-replay-frame');
+        await position.filter({ hasText: `第 ${start} 格` }).waitFor();
+        assert.match(await player.locator('#player-replay-source').textContent(), /僅房間 3/);
+        assert.deepEqual(await player.locator('#player-replay-room option').evaluateAll(rows => rows.map(row => row.value)), ['3']);
+        await player.locator('#player-replay-play').click();
+        await position.filter({ hasText: `第 ${end} 格` }).waitFor();
+        assert.equal(await player.locator('#player-replay-next').isDisabled(), true);
+        assert.deepEqual(apiRequests, []);
+        await player.screenshot({ path: path.join(path.dirname(output), 'linked-player-room-03.png') });
+      } finally { await player.close(); await page.bringToFront(); }
+      return { roomId, start, end, retainedEvents, omittedEvents, props: props.length, apiRequests: apiRequests.length };
+    }
     for (const session of config.sessions) {
       const replay = await openReplay(session);
       if (!results.length) {
         await page.screenshot({ path: path.join(path.dirname(output), config.mode + '-venue-replay.png') });
         replay.interval = await reviewInterval(replay);
+        if (config.roomReplaySource) roomReplay = await reviewRoom(replay);
       }
       results.push(replay);
       await page.locator('#tab-operations').click();
@@ -155,6 +227,6 @@ async function main() {
   } finally {
     await browser.close();
   }
-  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence }, null, 2), { flag: 'wx' });
+  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay }, null, 2), { flag: 'wx' });
 }
 main().catch(error => { console.error(error.name + ': native venue replay UI failed'); process.exitCode = 1; });

@@ -58,11 +58,12 @@ public static class WorldRoutes
             Results.Json(store.SaveReplayClip(id, clip, draft, Actor(context)), WorldJson.Options));
         app.MapDelete("/api/sessions/{id:guid}/world/clips/{clip:guid}", (Guid id, Guid clip, WorldRecordings store, HttpContext context) =>
         { store.DeleteReplayClip(id, clip, Actor(context)); return Results.NoContent(); });
-        app.MapGet("/api/sessions/{id:guid}/world/clips/{clip:guid}/player-replay.json", (Guid id, Guid clip, WorldRecordings store, HttpContext context) =>
+        app.MapGet("/api/sessions/{id:guid}/world/clips/{clip:guid}/player-replay.json", (Guid id, Guid clip, int? roomId, WorldRecordings store, HttpContext context) =>
         {
             context.Response.Headers.CacheControl = "no-store";
-            var replay = store.ExportPlayerReplay(id, clip, Actor(context), context.RequestAborted);
-            return Results.File(replay, "application/json", $"vr-command-replay-{clip:D}.json");
+            var replay = store.ExportPlayerReplay(id, clip, roomId, Actor(context), context.RequestAborted);
+            var name = roomId is int room ? FormattableString.Invariant($"vr-command-replay-{clip:D}-room-{room:00}.json") : $"vr-command-replay-{clip:D}.json";
+            return Results.File(replay, "application/json", name);
         });
     }
 

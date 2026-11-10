@@ -85,12 +85,15 @@ public sealed partial class WorldRecordings
         }
     }
 
-    public byte[] ExportPlayerReplay(Guid id, Guid clipId, OperatorIdentity actor, CancellationToken cancellation)
+    public byte[] ExportPlayerReplay(Guid id, Guid clipId, int? roomId, OperatorIdentity actor, CancellationToken cancellation)
     {
         const int maxFrames = 300;
         const int maxBytes = 8 * 1024 * 1024;
         var recording = ReplayClipRecording(id, actor, write: true);
         if (!recording.Complete) throw new InvalidOperationException("Seal the recording before exporting a player replay.");
+        var header = recording.Header;
+        if (roomId.HasValue && !header.roomIds.Contains(roomId.Value))
+            throw new ArgumentException("Select a room within this recording.");
         var session = id.ToString("D");
         using var output = new MemoryStream();
         using var json = new Utf8JsonWriter(output);
@@ -101,18 +104,29 @@ public sealed partial class WorldRecordings
             if (clip.EndFrame - clip.StartFrame >= maxFrames)
                 throw new InvalidOperationException("Player replay is limited to 300 saved frames.");
 
+            Dictionary<string, int>? propRooms = null;
+            RecordedEnemy[] previousEnemies = [];
+            if (roomId is int room)
+            {
+                propRooms = header.props.ToDictionary(prop => prop.id, prop => prop.roomId, StringComparer.Ordinal);
+                previousEnemies = Frame(id, clip.StartFrame - 1, actor)?.Packet.frame.enemies ?? [];
+                header.roomIds = [room];
+                header.props = header.props.Where(prop => prop.roomId == room).ToArray();
+            }
             json.WriteStartObject();
-            json.WriteNumber("playerReplayVersion", 1);
+            json.WriteNumber("playerReplayVersion", roomId.HasValue ? 2 : 1);
+            if (roomId.HasValue) json.WriteNumber("roomId", roomId.Value);
             json.WriteString("missionName", recording.MissionName);
             json.WriteString("clipName", clip.Name);
             json.WriteNumber("startFrame", clip.StartFrame);
             json.WriteNumber("endFrame", clip.EndFrame);
             json.WritePropertyName("header");
-            JsonSerializer.Serialize(json, recording.Header, WorldJson.Options);
+            JsonSerializer.Serialize(json, header, WorldJson.Options);
             json.WriteStartArray("packets");
             using var command = Command("""
-                SELECT packet FROM world_frames WHERE session=$session AND sequence BETWEEN $first AND $last ORDER BY sequence
-                """, ("$session", session), ("$first", clip.StartFrame), ("$last", clip.EndFrame));
+                SELECT packet, CASE WHEN $scoped THEN statistics END
+                FROM world_frames WHERE session=$session AND sequence BETWEEN $first AND $last ORDER BY sequence
+                """, ("$session", session), ("$first", clip.StartFrame), ("$last", clip.EndFrame), ("$scoped", roomId.HasValue));
             using var rows = command.ExecuteReader();
             var expected = clip.StartFrame;
             while (rows.Read())
@@ -120,7 +134,13 @@ public sealed partial class WorldRecordings
                 cancellation.ThrowIfCancellationRequested();
                 var packet = WorldJson.Read<WorldRecordingPacket>(rows.GetString(0));
                 if (packet.sequence != expected++) throw new InvalidOperationException("Replay clip has a missing saved frame.");
-                JsonSerializer.Serialize(json, packet, WorldJson.Options);
+                if (roomId is int selectedRoom)
+                {
+                    var statistics = WorldJson.Read<PlayerStatistics[]>(rows.GetString(1));
+                    JsonSerializer.Serialize(json, ProjectReplayRoom(packet, statistics, previousEnemies, propRooms!, selectedRoom), WorldJson.Options);
+                    previousEnemies = packet.frame.enemies;
+                }
+                else JsonSerializer.Serialize(json, packet, WorldJson.Options);
                 json.Flush();
                 if (output.Length > maxBytes - 2) throw new InvalidOperationException("Player replay exceeds 8 MiB.");
             }
@@ -130,6 +150,43 @@ public sealed partial class WorldRecordings
         json.WriteEndObject();
         json.Flush();
         return output.ToArray();
+    }
+
+    private static object ProjectReplayRoom(WorldRecordingPacket packet, PlayerStatistics[] statistics, RecordedEnemy[] previousEnemies,
+        Dictionary<string, int> propRooms, int roomId)
+    {
+        // Saved player statistics include departures. An enemy removed since the previous frame can still have an event in this packet.
+        var players = statistics.ToDictionary(row => row.PlayerId.ToString("D"), row => row.RoomId, StringComparer.Ordinal);
+        var enemies = previousEnemies.Concat(packet.frame.enemies).GroupBy(enemy => enemy.id, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.Last().roomId, StringComparer.Ordinal);
+        var roomX = ArenaWorld.RoomOrigin(roomId).X;
+        bool LocalTarget(string id)
+        {
+            var player = players.GetValueOrDefault(id);
+            var enemy = enemies.GetValueOrDefault(id);
+            var prop = propRooms.GetValueOrDefault(id);
+            return (player == roomId || enemy == roomId || prop == roomId)
+                && (player == 0 || player == roomId) && (enemy == 0 || enemy == roomId) && (prop == 0 || prop == roomId);
+        }
+
+        var events = packet.events.Where(entry => players.GetValueOrDefault(entry.playerId) == roomId
+            && (entry.enemyId.Length == 0 || enemies.GetValueOrDefault(entry.enemyId) == roomId)
+            && (entry.targetId.Length == 0 || LocalTarget(entry.targetId))
+            && (!entry.hasRay || (Math.Abs(entry.origin.x - roomX) <= 6.01f && Math.Abs(entry.origin.z) <= 6.01f)))
+            .Select(entry => new { entry.eventId, entry.tick, entry.kind, entry.playerId, entry.shotId, entry.enemyId, entry.damage,
+                entry.hasRay, entry.origin, entry.direction, entry.distance, entry.hit, entry.targetId });
+        var frame = packet.frame;
+        return new
+        {
+            packet.sequence, packet.elapsedMilliseconds, packet.suspended, packet.weather, packet.lightning,
+            frame = new
+            {
+                frame.tick, frame.phase, frame.behavior, frame.autoAttack, frame.night, frame.visibility,
+                players = frame.players.Where(player => player.roomId == roomId),
+                enemies = frame.enemies.Where(enemy => enemy.roomId == roomId)
+            },
+            events
+        };
     }
 
     private ReplayClip? FindClip(string session, string id, Guid stream)
