@@ -15,6 +15,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
   const liveSummary = page.locator('#venue-live-tracking-summary');
   const liveRoom = room => page.locator(`[data-live-tracking-room="${room}"]`);
   const status = room => page.locator(`[data-begin-room="${room}"]`);
+  const seatState = (room, seat) => page.locator(`[data-begin-seat-room="${room}"] [data-begin-seat="${seat}"]`).getAttribute('data-seat-state');
   const tracking = id => page.locator(`[data-venue-tracking-begin="${id}"]`);
   const participation = id => page.locator(`[data-venue-participation-begin="${id}"]`);
   const canvas = page.locator('#world-canvas');
@@ -116,13 +117,21 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       await publishUntil(sources, false, async () => (await status(5).getAttribute('data-begin-state')) === 'WaitingFullParticipation');
       check(await start.isDisabled() && (await status(5).innerText()).includes('名冊 4/5 席 · 有效姿態 4/5 席'),
         `${mode} operator sees the missing seat before sending Begin`);
+      check(await seatState(5, 5) === 'Vacant' && await seatState(1, 5) === 'Simulated',
+        `${mode} seat matrix distinguishes an empty seat from an eligible simulated pose`);
       await page.locator('#venue-phase').screenshot({ path: path.join(screenshots, `full-participation-${mode.toLowerCase()}-waiting.png`) });
       const last = sources.find(source => source.route === `/sessions/${forRoom(5).id}`);
-      last.snapshot = await admit(forRoom(5).id, 5, 5);
+      const newRoster = await admit(forRoom(5).id, 5, 5);
       await page.locator('#refresh').click();
+      await publishUntil(sources, false, async () => (await status(5).getAttribute('data-begin-state')) === 'WaitingRevision');
+      check(await seatState(5, 5) === 'AwaitingAdmission' && await seatState(5, 4) === 'WaitingRevision' && await start.isDisabled(),
+        `${mode} the previous revision cannot mark the new admission or any seat in that room ready`);
+      last.snapshot = newRoster;
       await publishUntil(sources, false, async () => (await status(5).getAttribute('data-begin-state')) === 'WaitingFullParticipation', true);
       check(await start.isDisabled() && (await status(5).innerText()).includes('名冊 5/5 席 · 有效姿態 4/5 席'),
         `${mode} full roster still cannot start when a registered seat has no effective pose`);
+      check(await seatState(5, 2) === 'PoseUnavailable' && await seatState(5, 5) === 'Tracked',
+        `${mode} the live matrix identifies the affected seat and the newly confirmed admission`);
       const readyFences = await getFences();
       for (const source of sources) source.publish(source.snapshot, false, true);
       const disconnected = await api('/venue/phase', 'POST', { ...payload, targets: readyFences }, 'Master', 409, undefined, randomUUID());
@@ -237,6 +246,9 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         && (await status(5).innerText()).includes('名冊 4/5 席 · 追蹤 4/5 席') && await start.isDisabled()
         && (await page.locator('#venue-begin-evidence').innerText()).includes('仍有開場條件待確認'),
       `${mode} shows the simulated seat and the missing seat before opening`);
+      check(await seatState(1, 5) === 'NeedsTracking' && await seatState(5, 5) === 'Vacant'
+        && await page.locator('[data-begin-seat-room] td[data-begin-seat]').count() === 25,
+      `${mode} the tracked-only policy identifies exactly which simulated and vacant seats need attention`);
       await page.locator('#venue-phase').screenshot({ path: path.join(screenshots, `full-tracking-${mode.toLowerCase()}-waiting.png`) });
       const targets = await getFences();
       for (const source of sources) source.publish(source.snapshot, false);
@@ -248,7 +260,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       await page.locator('#refresh').click();
       await publishUntil(sources, true, () => start.isEnabled());
       check(await page.locator('[data-begin-state="Ready"]').count() === 5
-        && (await page.locator('#venue-begin-evidence').innerText()).includes('目標場次已就緒'),
+        && (await page.locator('#venue-begin-evidence').innerText()).includes('目標場次已就緒')
+        && await page.locator('[data-begin-seat][data-seat-state="Tracked"]').count() === 25,
       `${mode} shows all five rooms ready after receiving all 25 tracked poses`);
       const responsePromise = page.waitForResponse(response => response.url().endsWith('/api/venue/phase') && response.request().method() === 'POST');
       const confirmation = page.waitForEvent('dialog').then(async dialog => { assert.match(dialog.message(), /25 席追蹤就緒/); await dialog.accept(); });

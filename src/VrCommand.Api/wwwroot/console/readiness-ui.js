@@ -6,6 +6,21 @@ const labels = { NoRecording: '等待遊戲來源', WaitingFrame: '等待第一�
   AwaitingAdmission: '等待本次入場同步', AwaitingPose: '等待姿態', PoseUnavailable: '姿態未就緒／中斷', Eliminated: '已淘汰',
   Participating: '姿態有效', Updating: '正在更新入場狀態', Unavailable: '參戰狀態未確認' };
 
+const beginSeatStates = new Set(['AwaitingAdmission', 'AwaitingPose', 'PoseUnavailable', 'Eliminated', 'Tracked', 'Simulated']);
+
+function venueBeginSeats(details, registered, capacity, trackedRequired) {
+  const seats = details?.seats;
+  if (!Array.isArray(seats) || seats.length !== registered || !seats.every((row, index) => Number.isInteger(row?.seat)
+    && row.seat >= 1 && row.seat <= capacity && (index === 0 || seats[index - 1].seat < row.seat)
+    && (details.state === 'WaitingRevision' ? ['AwaitingAdmission', 'WaitingRevision'].includes(row.state)
+      : beginSeatStates.has(row.state)))) return null;
+  const occupied = new Map(seats.map(row => [row.seat, row.state]));
+  return Array.from({ length: capacity }, (_, index) => {
+    const state = occupied.get(index + 1) ?? 'Vacant';
+    return state === 'Simulated' && trackedRequired ? 'NeedsTracking' : state;
+  });
+}
+
 function sourceAt(report, elapsed) {
   const source = Object.hasOwn(labels, report.sourceState) ? report.sourceState : 'Unavailable';
   if (source === 'Fresh' && (!Number.isFinite(elapsed) || elapsed < 0 || elapsed > 1500 || !Number.isFinite(report.sourceAgeMilliseconds)
@@ -345,7 +360,8 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
       ? { sessionId: session.id, sequence: recovery.sequence, linked: session.mode === 'Linked' } : null;
   }
   function venueBegin(target, roomId, policy = 'normal') {
-    const waiting = (state, text) => ({ state, text, ready: false });
+    let seats = null;
+    const waiting = (state, text) => ({ state, text, ready: false, seats });
     if (failed) return waiting('Unavailable', '無法確認，正在重試');
     const { rooms, sessions } = getState();
     const room = rooms.find(row => row.id === roomId && row.sessionId === target.sessionId);
@@ -353,12 +369,17 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     const row = active && room && session?.state === 'Preparing' ? roomReadinessRow(report, room, session) : null;
     if (!row || row.sessionSequence !== target.sessionSequence) return waiting('Updating', '等待核對目前場次與名冊');
     const details = row.venueBegin;
-    if (details?.state === 'EmptyRoster') return waiting('EmptyRoster', session.mode === 'Linked' ? '五房共用場次尚無玩家' : '名冊尚無玩家');
+    if (details?.state === 'EmptyRoster') {
+      if (row.registered === 0) seats = venueBeginSeats(details, 0, room.capacity, false);
+      return waiting('EmptyRoster', session.mode === 'Linked' ? '五房共用場次尚無玩家' : '名冊尚無玩家');
+    }
     const source = sourceAt(row, performance.now() - started);
     if (source !== 'Fresh') return waiting(source, labels[source]);
     const mr = session.environment.mode === 'MR';
     const empty = '本房未編列席位';
     const requireTracking = policy === 'tracking';
+    if (['Ready', 'WaitingPlayers', 'WaitingRevision'].includes(details?.state))
+      seats = venueBeginSeats(details, row.registered, room.capacity, mr || requireTracking);
     if (policy !== 'normal' && details?.state !== 'WaitingRevision' && details?.state !== 'WaitingProfile') {
       const ready = mr || requireTracking ? row.trackedReady : row.trackedReady + row.simulatedReady;
       if (row.registered !== room.capacity || ready !== room.capacity)
@@ -366,14 +387,14 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
           `名冊 ${row.registered}/${room.capacity} 席 · ${requireTracking ? '追蹤' : '有效姿態'} ${ready}/${room.capacity} 席`);
     }
     if (row.venueBeginReady === true)
-      return { state: 'Ready', text: row.registered ? `${row.registered} 席${mr || requireTracking ? '追蹤' : '姿態'}就緒` : empty, ready: true };
+      return { state: 'Ready', text: row.registered ? `${row.registered} 席${mr || requireTracking ? '追蹤' : '姿態'}就緒` : empty, ready: true, seats };
     if (details?.state === 'WaitingRevision') return waiting('WaitingRevision', '等待遊戲端同步最新設定與名冊');
     if (details?.state === 'WaitingProfile') return waiting('WaitingProfile', '等待支援 Quest 3 MR 的遊戲來源');
     if (details?.state === 'WaitingPlayers' && Array.isArray(details.waitingSeats) && details.waitingSeats.length <= row.registered
       && details.waitingSeats.every((seat, index, seats) => Number.isInteger(seat) && seat >= 1 && seat <= room.capacity
         && (index === 0 || seats[index - 1] < seat))) {
-      const seats = details.waitingSeats;
-      if (seats.length) return waiting('WaitingPlayers', `等候席位 ${seats.join('、')} 的${mr ? '追蹤' : '姿態'}`);
+      const waitingSeats = details.waitingSeats;
+      if (waitingSeats.length) return waiting('WaitingPlayers', `等候席位 ${waitingSeats.join('、')} 的${mr ? '追蹤' : '姿態'}`);
       return waiting('WaitingLinkedRooms', (row.registered ? '本房席位就緒' : empty) + ' · 等候同場其他房間');
     }
     return waiting('Unavailable', '開場條件尚未確認');

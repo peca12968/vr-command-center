@@ -40,7 +40,9 @@ public record RoomVenueTracking(int[] TrackedSeats, int[] SimulatedSeats, int[] 
 public record RoomEnvironmentEvidence(RoomVenueEnvironment Setting, string? StreamId, bool Venue);
 public record RoomEnemiesEvidence(RoomVenueEnemies Setting, string? StreamId, bool Venue, int TargetCount, RoomEnemyPopulation? Population);
 public record RoomEnemyPopulation(int Present, int Alive);
-public record RoomVenueBegin(string State, int[] WaitingSeats);
+public record RoomVenueBegin(string State, int[] WaitingSeats,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomVenueBeginSeat[]? Seats = null);
+public record RoomVenueBeginSeat(int Seat, string State);
 public record RoomVrParticipation(int[] AwaitingAdmission, int[] AwaitingPose, int[] Eliminated);
 public record RoomMissionTime(string Phase, long ElapsedSeconds, long RemainingSeconds, int DurationSeconds, bool AutoEnd);
 public record RoomVenuePhase(ControlAction Action, long AppliedAtSequence, long? WorldSequence, bool ReadyToResume,
@@ -166,7 +168,10 @@ public sealed partial class WorldRecordings
             var begin = actor.Role == OperatorRole.Master && beginState is not null
                 ? new RoomVenueBegin(beginState, beginState == "WaitingPlayers"
                     ? players.Where(player => !ReadyToBegin(player, report.MrStartState is not null)).Select(player => player.Seat + 1).Order().ToArray()
-                    : [])
+                    : [], beginState is "Ready" or "WaitingPlayers" or "EmptyRoster" or "WaitingRevision"
+                    ? players.OrderBy(player => player.Seat).Select(player => new RoomVenueBeginSeat(player.Seat + 1,
+                        BeginSeatState(player, beginState))).ToArray()
+                    : null)
                 : null;
             RoomVenueTracking? venueTracking = venueTrackingObserved ? new(
                 players.Where(player => player.CanParticipate && player.RigKind == "Tracked").Select(player => player.Seat + 1).Order().ToArray(),
@@ -196,6 +201,9 @@ public sealed partial class WorldRecordings
 
     private static bool ReadyToBegin(PlayerReadiness player, bool trackedRequired) =>
         player.CanParticipate && (!trackedRequired || player.RigKind == "Tracked");
+    private static string BeginSeatState(PlayerReadiness player, string beginState) =>
+        beginState == "WaitingRevision" && player.State != "AwaitingAdmission" ? "WaitingRevision"
+        : player.CanParticipate ? player.RigKind : player.State;
     private static bool ReadyForMrResume(PlayerReadiness player) => player.State == "Eliminated" || ReadyToBegin(player, trackedRequired: true);
 
     private static bool HasUnavailablePose(IEnumerable<PlayerReadiness> players, int room) =>

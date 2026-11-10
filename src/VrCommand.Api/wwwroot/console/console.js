@@ -553,6 +553,10 @@ function venueBeginPolicy() {
   if ($('venue-full-tracking').checked) return 'tracking';
   return $('venue-full-participation').checked ? 'participation' : 'normal';
 }
+const beginSeatLabels = { Vacant: '未編列', AwaitingAdmission: '等待入場同步', WaitingRevision: '等待場次同步',
+  AwaitingPose: '等待姿態', PoseUnavailable: '姿態未就緒', Eliminated: '已淘汰', Tracked: '追蹤就緒',
+  Simulated: '合成姿態就緒', NeedsTracking: '合成姿態 · 需追蹤', Unknown: '待確認', NotPreparing: '尚無準備場次' };
+
 function renderVenueBegin(targets, waiting, policy) {
   const summary = $('venue-begin-evidence'), list = $('venue-begin-rooms');
   const rows = targets.flatMap(target => target.roomIds.map(roomId => ({
@@ -576,6 +580,24 @@ function renderVenueBegin(targets, waiting, policy) {
     item.dataset.beginState = state;
     return item;
   }));
+  const matrix = $('venue-begin-seats');
+  matrix.hidden = !rows.some(row => row.seats);
+  $('venue-begin-seat-rows').replaceChildren(...(matrix.hidden ? [] : rows.map(({ roomId, state, seats }) => {
+    const tr = element('tr');
+    tr.dataset.beginSeatRoom = roomId;
+    const room = element('th', `房間 ${roomId}`);
+    room.scope = 'row';
+    tr.append(room);
+    for (let index = 0; index < 5; index++) {
+      const status = seats?.[index] ?? (state === 'NotPreparing' ? state : 'Unknown');
+      const cell = element('td', beginSeatLabels[status]);
+      cell.dataset.beginSeat = index + 1;
+      cell.dataset.seatState = status;
+      cell.classList.toggle('ready-player', status === 'Tracked' || status === 'Simulated');
+      tr.append(cell);
+    }
+    return tr;
+  })));
 }
 function applyVenuePermissions() {
   $('venue-phase').hidden = !master();

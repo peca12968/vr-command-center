@@ -39,6 +39,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await venueRoom(5, 'EmptyRoster').waitFor();
     check(await page.locator('[data-begin-state="EmptyRoster"]').count() === 5 && await venueButton.isDisabled(),
       'An empty Linked roster is shown as a shared blocker across the five target rooms');
+    check(await page.locator('[data-begin-seat][data-seat-state="Vacant"]').count() === 25,
+      'The exact empty roster shows all 25 vacant seats before a source exists');
     for (const roomId of roomIds) {
       for (let seat = 1; seat <= 5; seat++) {
         await api(route + '/players', 'POST', { playerId: randomUUID(), name: `Fixture ${roomId}/${seat}`, roomId, headset: 'Quest3' });
@@ -89,6 +91,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await panel.locator('#mr-start-status').filter({ hasText: '等待遊戲來源' }).waitFor();
     await venueRoom(4, 'NoRecording').waitFor();
     check(await venueButton.isDisabled(), 'The whole-venue preview distinguishes a missing source from an empty roster');
+    check(await page.locator('#venue-begin-seats').isHidden(), 'A roster alone does not populate the seat readiness matrix');
     check(await panel.locator('[data-mr-room]').count() === 0, 'An MR roster does not show tracked room counts before the world source attaches');
     const blockedStart = await command('Begin');
     await page.locator('#notice').filter({ hasText: 'MR 場次尚未就緒' }).waitFor();
@@ -102,6 +105,9 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     check(await venueRoom(4, 'WaitingPlayers').innerText() === '房間 4 · 等候席位 2、5 的追蹤'
       && await page.locator('[data-begin-state="WaitingLinkedRooms"]').count() === 4 && await venueButton.isDisabled(),
       'Only the linked room with missing tracking names waiting seats, and the entire shared session remains blocked');
+    const fourthSeats = page.locator('[data-begin-seat-room="4"] td');
+    check((await fourthSeats.evaluateAll(cells => cells.map(cell => cell.dataset.seatState))).join() ===
+      'Tracked,PoseUnavailable,Tracked,Tracked,PoseUnavailable', 'The MR matrix matches the exact accepted room and two unavailable poses');
     await page.locator('#venue-phase').screenshot({ path: path.join(screenshots, 'venue-phase-begin-mr-blockers.png') });
     await panel.screenshot({ path: path.join(screenshots, 'mr-start-waiting-seats.png') });
 
@@ -117,7 +123,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         'A room desk shows its own seats while only the master can start the linked MR session');
       const readiness = await api('/rooms/readiness', 'GET', undefined, 'Room1');
       check(readiness.rooms.length === 1 && readiness.rooms[0].roomId === 1 && !Object.hasOwn(readiness.rooms[0], 'venueBegin')
-        && await roomPage.locator('#venue-phase').isHidden() && await roomPage.locator('[data-begin-room]').count() === 0,
+        && await roomPage.locator('#venue-phase').isHidden() && await roomPage.locator('[data-begin-room], [data-begin-seat-room]').count() === 0,
         'Room credentials neither receive the master-only Begin details nor render the whole-venue rows');
     } finally {
       await roomPage.close();
@@ -133,6 +139,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       'A previously ready MR snapshot ages out and clears the per-room display');
     check(await venueButton.isDisabled() && await page.locator('[data-begin-state="Ready"], [data-begin-state="WaitingPlayers"]').count() === 0,
       'Expired MR evidence disables the batch and removes all old per-room tracked seat claims');
+    check(await page.locator('#venue-begin-seats').isHidden() && await page.locator('[data-begin-seat]').count() === 0,
+      'Expired MR frames withdraw the per-seat matrix as well as the Begin action');
 
     const update = await api(route + '/commands', 'POST', { commandId: randomUUID(), action: 'SetEnvironment',
       environment: { ...admitted.environment, timeOfDay: 'Night' } });
