@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-11 全館收尾逐房顯示戰績回條
+
+- 管理包 0.31.110 在全館收尾逐房顯示已確認與未確認的名冊席數。五房合併仍分列各房。等待雙封存、無來源及尚無回條分開顯示。歷史批次依原場次更新，個別玩家可從「查看場次」追查。主控讀取可加 `includeDebriefReceipts=true`，回應只含各房計數。 [操作說明](SESSION_CLOSURE.md#全館批次結束)
+- 實際解壓場 `run-19c2d1f03d584c0ea0a501feb18b7bb2` 退出碼 0，441 項通過。固定指紋的 HTTPS／WSS 五房獨立、五房合併各 25 席同機 Windows 模擬玩家。兩種模式共 50 份回條與原戰績相符，實際 Chrome 都顯示五房各 5／5 席，六場完整回放 961 格、6 份 CSV 及雙封存通過。活動場次和測試程序已清理，C／F 229 檔同雜湊。 [原生驗收](../artifacts/server-package-checks/run-19c2d1f03d584c0ea0a501feb18b7bb2/checks.json) · [合併場畫面](../artifacts/server-package-checks/run-19c2d1f03d584c0ea0a501feb18b7bb2/linked-venue-debrief-receipts.png)
+- 96 項場館操作及 10 項批次統計的 Chrome 測試通過。測試以合成回條確認歷史房間從 0／2 更新成 1／2，原驗收 ZIP 位元一致，錯批回條不顯示，房控無法讀取整批計數。 [歷史批次畫面](../artifacts/console-venue-debrief-phases/venue-debrief-partial.png)
+- Release 零警告，1,074 項核心、102 項世界串流及 107 項解壓管理包檢查通過。Windows 的完整 HTTP 測試兩次都在錯誤憑證案例等待程序退出時逾時，未執行整套 HTTP 斷言。另以同一二進位檢查原程序模式和只套用於測試程序的錯誤回報模式，兩者在 10 秒內都未完成，均輸出預期的憑證拒絕且未開啟測試埠，延遲原因未定。 [管理包測試](../artifacts/control-package-checks/run-3540055edf46451cb9599d3486cc8c12/checks.json) · [程序退出診斷](../artifacts/http-credential-exit-venue-debrief.json) · [Windows 程序錯誤模式](https://learn.microsoft.com/en-us/windows/win32/api/errhandlingapi/nf-errhandlingapi-seterrormode)
+- 管理包來源 `66bb18e0` 與收據中的 183 個檔案雜湊相符。沿用遊戲 0.50.2／Quest 67，發行一致性核對通過。GitHub Actions job `129954057729` 因帳務或支出上限未啟動。跨機玩家、實體頭盔與廠商硬體仍待現場驗收。 [管理包](WINDOWS_CONTROL_PACKAGE.md) · [發行核對](../artifacts/venue-release-0.50.2-venue-debrief.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42851763815)
+
 ## 2026-11-11 控制台查看玩家戰績回條
 
 - 管理包 0.31.109 搭配遊戲 0.50.2。在個別場次的「任務收尾」展開回條，依終止名冊查看確認席數。主控看整場，房控看本房。回條只接受原遊戲來源及原入場，核對場次序號和雙封存尾界。保存後可重送及重啟讀回，原場次、統計和錄製序號保持。 [操作方式](SESSION_CLOSURE.md#玩家戰績回條)
