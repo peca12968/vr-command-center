@@ -2417,6 +2417,21 @@ def main():
               and targeted == {row['serial'] for row in rows}
               and all(' install ' not in line and 'unmapped-device' not in line for line in commands),
               mode + f' all {count} mapped original signed configs verify device identity and the expected mode files without APK installs')
+        for row in rows:
+            seat_commands = [line for line in commands if line.startswith(f'-s {row["serial"]} ')]
+            staged = next(i for i, line in enumerate(seat_commands)
+                          if ' shell sha256sum ' in line and '/vr-connection-' in line and line.endswith('.tmp'))
+            stop = next(i for i, line in enumerate(seat_commands) if ' shell am force-stop ' in line)
+            active = next(i for i, line in enumerate(seat_commands) if ' shell mv ' in line and line.endswith('/vr-connection.json'))
+            verified = next(i for i, line in enumerate(seat_commands)
+                            if ' shell sha256sum ' in line and line.endswith('/vr-connection.json'))
+            launch = next(i for i, line in enumerate(seat_commands) if ' shell monkey ' in line)
+            assert staged < stop < active < verified < launch, f'Unexpected Quest activation order for room {row["roomId"]} seat {row["seat"]}'
+            if files is not None and row['roomId'] in files:
+                pin = f'/vr-room-alignment-{hashes[row["roomId"]]}.json'
+                aligned = next(i for i, line in enumerate(seat_commands) if ' shell sha256sum ' in line and line.endswith(pin))
+                assert aligned < stop, f'Quest MR pin was not verified before stopping room {row["roomId"]} seat {row["seat"]}'
+        check(True, mode + f' all {count} devices verify staged files before stop and verify active config before launch')
         prefix = 'mixed' if mixed else 'vr' if is_vr else 'mr'
         kind = 'partial' if partial else 'mapped'
         save(f'{prefix}-venue-{mode.lower()}-{kind}-preflight.json', preview)

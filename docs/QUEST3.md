@@ -253,9 +253,9 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
   -RoomId 4 -Seat 2 -Serial YOUR_ADB_SERIAL -ManagementApi http://127.0.0.1:5080
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
-  -DeviceMap .\quest-devices.json -ExpectedVersionCode 62 -ManagementApi http://127.0.0.1:5080 -CheckOnly
+  -DeviceMap .\quest-devices.json -ExpectedVersionCode 64 -ManagementApi http://127.0.0.1:5080 -CheckOnly
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
-  -DeviceMap .\quest-devices.json -ExpectedVersionCode 62 -ManagementApi http://127.0.0.1:5080 -DeployMappedSeats
+  -DeviceMap .\quest-devices.json -ExpectedVersionCode 64 -ManagementApi http://127.0.0.1:5080 -DeployMappedSeats
 ```
 
 裝置清單格式與 MR 相同。整批 VR 部署把各席的四欄連線設定寫到對應裝置並請求啟動，現場頭盔的入場與追蹤仍須另外觀察。連線檔與主控金鑰請私下保管。 [VR 五房配票](EXTERNAL_CLIENTS.md#vr-五房配票) · [裝置清單格式](#用裝置清單部署-25-席)
@@ -271,7 +271,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-mr-venue-deployment.zip
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-mr-venue-deployment.zip `
-    -DeviceMap .\quest-batch.json -ExpectedVersionCode 62 -AllowPartialMap `
+    -DeviceMap .\quest-batch.json -ExpectedVersionCode 64 -AllowPartialMap `
     -ManagementApi http://127.0.0.1:5081 -CheckOnly
 ```
 
@@ -310,7 +310,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.z
 
 #### 用裝置清單部署 25 席
 
-先在各台 Quest 3 安裝同一版場館 APK 並授權 USB 偵錯。已驗證的開發 APK `0.48.1` 版本代碼為 `62`。建立 25 席清單後，依實體標籤把每個 `REPLACE-*` 換成對應的 ADB 裝置序號。每組房號與席位須對應一個唯一序號，清單只保存在操作電腦。腳本透過 `adb devices` 及 Android 套件管理器讀取授權狀態與已啟用的應用程式版本。 [Android ADB 文件](https://developer.android.com/tools/adb) · [套件管理器版本輸出](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/pm/PackageManagerShellCommand.java#1130)
+先在各台 Quest 3 安裝同一版場館 APK 並授權 USB 偵錯。開發 APK `0.49.1` 的版本代碼為 `64`。建立 25 席清單後，依實體標籤把每個 `REPLACE-*` 換成對應的 ADB 裝置序號。每組房號與席位須對應一個唯一序號，清單只保存在操作電腦。腳本透過 `adb devices` 及 Android 套件管理器讀取授權狀態與已啟用的應用程式版本。 [Android ADB 文件](https://developer.android.com/tools/adb) · [套件管理器版本輸出](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/pm/PackageManagerShellCommand.java#1130)
 
 ```powershell
 $seats = foreach ($room in 1..5) {
@@ -326,14 +326,14 @@ $seats = foreach ($room in 1..5) {
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.zip `
-    -DeviceMap .\device-map.json -ExpectedVersionCode 62 -CheckOnly
+    -DeviceMap .\device-map.json -ExpectedVersionCode 64 -CheckOnly
 ```
 
 正式套用時，先依下方方式設定 `VR_COMMAND_MASTER_KEY`，再加入 `-DeployMappedSeats` 與管理服務網址。所有裝置與票券核對通過後，工具依房號與席位順序寫入設定並請求啟動，使用各台已安裝的 APK。
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.zip `
-    -DeviceMap .\device-map.json -ExpectedVersionCode 62 -DeployMappedSeats `
+    -DeviceMap .\device-map.json -ExpectedVersionCode 64 -DeployMappedSeats `
     -ManagementApi http://127.0.0.1:5081
 ```
 
@@ -343,7 +343,9 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.z
 
 #### 啟動前核對裝置檔案
 
-單席與整批正式部署都會從指定裝置讀取暫存檔的 SHA-256，比對本次產生的玩家連線檔及 MR 原校正檔。核對通過才啟用檔案，啟用後再讀取最終路徑的 SHA-256，通過才送出啟動指令。暫存檔核對失敗時會嘗試清理該暫存檔，原先同名檔仍保留。若最後路徑核對失敗，裝置可能已寫入新檔，該席須重新部署。
+單席與整批部署都會先傳送並核對 MR 原校正檔，再驗證暫存的玩家連線檔。兩項核對通過且票券仍有效時，才停止遊戲並啟用新的連線檔。啟用後再次核對最終路徑的 SHA-256，通過才送出啟動指令。批次沿用裝置上已安裝的 APK，因此傳輸或暫存核對失敗時，原遊戲程序及原連線檔可以保留。單席流程另含 APK 安裝階段。
+
+暫存檔失敗時工具會嘗試清理該檔。如果停止遊戲失敗，工具保留原連線檔。如果在停止後啟用檔案或核對最終路徑失敗，該席可能已停止或已寫入新檔，請依回報處理該席。
 
 整批回報以 `filesVerified: true` 標示已完成檔案核對並送出啟動的席位。遊戲是否完成入場及追蹤，請用同一部署 ZIP 再核對。 [追蹤操作](#核對頭盔追蹤席位) · [Android 檔案傳輸](https://developer.android.com/tools/adb) · [Android 校驗工具](https://android.googlesource.com/platform/external/toybox/%2B/40d21c59f76a9388b0ebb5c4c706732c2d034a67/toys/lsb/md5sum.c)
 
@@ -353,10 +355,10 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.z
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
-    -DeviceMap .\quest-batch.json -ExpectedVersionCode 62 -AllowPartialMap `
+    -DeviceMap .\quest-batch.json -ExpectedVersionCode 64 -AllowPartialMap `
     -ManagementApi http://127.0.0.1:5081 -CheckOnly
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
-    -DeviceMap .\quest-batch.json -ExpectedVersionCode 62 -AllowPartialMap `
+    -DeviceMap .\quest-batch.json -ExpectedVersionCode 64 -AllowPartialMap `
     -ManagementApi http://127.0.0.1:5081 -DeployMappedSeats
 ```
 

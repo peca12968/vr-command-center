@@ -86,7 +86,8 @@ switch ($args[2]) {
                 Remove-Item -LiteralPath (Join-Path $remote ($args[5].Split('/')[-1])) -ErrorAction SilentlyContinue
                 exit 0
             }
-            { $_ -in @('am', 'mkdir', 'monkey') } { exit 0 }
+            'am' { if ($env:QUEST_TEST_FAIL -eq 'force-stop') { exit 1 }; exit 0 }
+            { $_ -in @('mkdir', 'monkey') } { exit 0 }
         }
     }
 }
@@ -296,6 +297,13 @@ class QuestDeployTests(unittest.TestCase):
         self.assertEqual({**self.player,'roomAlignmentSha256':digest,'questPassthrough':True,'requestMixedReality':True}, configured)
         commands = self.commands.read_text(encoding='utf-8').splitlines()
         self.assertEqual('devices', commands[0])
+        alignment_readback = next(i for i, line in enumerate(commands) if 'shell sha256sum' in line and line.endswith(f'/vr-room-alignment-{digest}.json'))
+        staged_config = next(i for i, line in enumerate(commands) if 'shell sha256sum' in line and '/vr-connection-' in line and line.endswith('.tmp'))
+        stop = next(i for i, line in enumerate(commands) if 'shell am force-stop' in line)
+        activate = next(i for i, line in enumerate(commands) if 'shell mv' in line and line.endswith('/vr-connection.json'))
+        verified = next(i for i, line in enumerate(commands) if 'shell sha256sum' in line and line.endswith('/vr-connection.json'))
+        self.assertEqual(sorted({alignment_readback, staged_config, stop, activate, verified}),
+                         [alignment_readback, staged_config, stop, activate, verified])
         self.assertIn('shell monkey', commands[-1])
         self.assertNotIn(self.player['joinTicket'], result.stdout + result.stderr + ''.join(commands))
         self.assertFalse(list(self.remote.glob('*.tmp')))
@@ -340,13 +348,20 @@ class QuestDeployTests(unittest.TestCase):
     def test_failed_connection_activation_cleans_staging_and_keeps_existing_file(self):
         self.provision_apk()
         active = self.remote / 'vr-connection.json'
-        active.write_bytes(b'previous configuration')
-        self.assert_rejected(self.run_mr(failure='config-move'), 'Player connection file could not be activated')
-        self.assertEqual(b'previous configuration', active.read_bytes())
-        self.assertFalse(list(self.remote.glob('*.tmp')))
-        commands = self.commands.read_text(encoding='utf-8')
-        self.assertIn('shell rm -f', commands)
-        self.assertNotIn('shell monkey', commands)
+        for fault, message in (('config-move', 'Player connection file could not be activated'),
+                               ('force-stop', 'Quest app could not be stopped before activating configuration')):
+            with self.subTest(fault=fault):
+                self.commands.unlink(missing_ok=True)
+                active.write_bytes(b'previous configuration')
+                self.assert_rejected(self.run_mr(failure=fault), message)
+                self.assertEqual(b'previous configuration', active.read_bytes())
+                self.assertFalse(list(self.remote.glob('*.tmp')))
+                commands = self.commands.read_text(encoding='utf-8').splitlines()
+                self.assertTrue(any('shell rm -f' in line for line in commands))
+                self.assertFalse(any('shell monkey' in line for line in commands))
+                if fault == 'force-stop':
+                    self.assertTrue(any('shell sha256sum' in line and '/vr-connection-' in line for line in commands))
+                    self.assertFalse(any('shell mv' in line and line.endswith('/vr-connection.json') for line in commands))
 
     def test_failed_or_wrong_device_identification_never_installs(self):
         self.provision_apk()
@@ -366,10 +381,12 @@ class QuestDeployTests(unittest.TestCase):
                 active.write_bytes(b'previous configuration')
                 result = self.run_mr('-Serial', 'fixture', failure=fault)
                 self.assert_rejected(result, f'{description} could not be verified')
+                commands = self.commands.read_text(encoding='utf-8')
                 if fault.endswith('stage-changed'):
                     self.assertEqual(b'previous configuration', active.read_bytes())
+                    self.assertNotIn('shell am force-stop', commands)
                 self.assertFalse(list(self.remote.glob('*.tmp')))
-                self.assertNotIn('shell monkey', self.commands.read_text(encoding='utf-8'))
+                self.assertNotIn('shell monkey', commands)
 
 
 class QuestVenueTests(unittest.TestCase):
@@ -1168,9 +1185,10 @@ else:
             actual = json.loads((self.root / f'fixture-{seat:02}' / 'vr-connection.json').read_bytes())
             self.assertEqual(seats[1][f'room-01-seat-{seat:02}.json']['joinTicket'], actual['joinTicket'])
         commands = (self.root / 'adb.log').read_text(encoding='utf-8').splitlines()
-        first_write = next(index for index, line in enumerate(commands) if 'shell am force-stop' in line)
+        first_write = next(index for index, line in enumerate(commands) if 'shell mkdir -p' in line)
         self.assertEqual(77, first_write)
         self.assertEqual(29, sum(line.endswith(' shell getprop ro.serialno') for line in commands))
+        self.assertFalse(any(line.startswith('-s fixture-04 shell am force-stop ') for line in commands))
         if fault == 'identity-changed':
             self.assertEqual(['-s fixture-04 shell pm list packages -e --show-versioncode --user current com.vrcommand.quest',
                               '-s fixture-04 shell getprop ro.serialno',

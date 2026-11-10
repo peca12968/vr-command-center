@@ -733,7 +733,7 @@ function Confirm-QuestFileHash([string]$TargetSerial, [string]$Path, [string]$Ex
 }
 
 function Publish-QuestFile([string]$TargetSerial, [string]$Local, [string]$Staging, [string]$Destination, [string]$Description,
-    [string]$ExpectedHash, [string]$ContentHash) {
+    [string]$ExpectedHash, [string]$ContentHash, [scriptblock]$BeforeActivation) {
     $stagedHash = if ($ContentHash) { $ContentHash } else { (Get-FileHash -LiteralPath $Local -Algorithm SHA256).Hash.ToLowerInvariant() }
     try {
         & $AdbPath -s $TargetSerial push $Local $Staging | Out-Null
@@ -745,6 +745,7 @@ function Publish-QuestFile([string]$TargetSerial, [string]$Local, [string]$Stagi
             if ($LASTEXITCODE -ne 0) { throw 'Could not confirm ticket replacement. Check the selected device and read its current configuration before retrying.' }
         } else {
             Confirm-QuestFileHash $TargetSerial $Staging $stagedHash $Description
+            if ($BeforeActivation) { & $BeforeActivation }
             & $AdbPath -s $TargetSerial shell mv $Staging $Destination | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "$Description could not be activated." }
             Confirm-QuestFileHash $TargetSerial $Destination $stagedHash $Description
@@ -802,8 +803,6 @@ function Update-QuestPlayerTicket($Fresh, $Ticket) {
 }
 
 function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment, [switch]$UsePassthrough, [switch]$RequestMixedReality) {
-    & $AdbPath -s $TargetSerial shell am force-stop com.vrcommand.quest | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Quest app could not be stopped before copying configuration.' }
     $remoteDirectory = '/sdcard/Android/data/com.vrcommand.quest/files'
     & $AdbPath -s $TargetSerial shell mkdir -p $remoteDirectory | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'App data directory could not be prepared.' }
@@ -824,7 +823,13 @@ function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment
     try {
         if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired during deployment. Download a fresh connection file.' }
         [IO.File]::WriteAllText($stagedConfig, ($Config | ConvertTo-Json -Depth 4 -Compress))
-        Publish-QuestFile $TargetSerial $stagedConfig "$remoteDirectory/vr-connection-$deploymentId.tmp" "$remoteDirectory/vr-connection.json" 'Player connection file'
+        # The active config is the commit point. Its referenced alignment is already verified by hash.
+        Publish-QuestFile $TargetSerial $stagedConfig "$remoteDirectory/vr-connection-$deploymentId.tmp" `
+            "$remoteDirectory/vr-connection.json" 'Player connection file' -BeforeActivation {
+                if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired before activation. Download a fresh connection file.' }
+                & $AdbPath -s $TargetSerial shell am force-stop com.vrcommand.quest | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw 'Quest app could not be stopped before activating configuration.' }
+            }
     } finally { Remove-Item -LiteralPath $stagedConfig }
     if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired before launch. Download a fresh connection file.' }
     & $AdbPath -s $TargetSerial shell monkey -p com.vrcommand.quest -c android.intent.category.LAUNCHER 1 | Out-Null
