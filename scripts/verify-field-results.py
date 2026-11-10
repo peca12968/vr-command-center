@@ -1149,6 +1149,44 @@ def read_venue_release(path):
     return release, hashlib.sha256(raw).hexdigest()
 
 
+def read_venue_debrief_receipts(path, request_id, session_count):
+    with path.open('rb') as source:
+        raw = source.read(16385)
+    require(len(raw) <= 16384, 'Management debrief receipt export is too large')
+    value = read_json(raw.decode('utf-8-sig'))
+    require(type(value) is dict and set(value) == {'version', 'requestId', 'sessions'}
+            and integer(value['version'], 1, 1) == 1 and identity(value['requestId']) == request_id,
+            'Management debrief receipts identify another End batch or invalid export')
+    require(type(value['sessions']) is list and len(value['sessions']) == session_count,
+            'Management debrief receipts must cover every original venue session')
+    sessions = {}
+    for row in value['sessions']:
+        require(type(row) is dict and set(row) == {'sessionId', 'streamId', 'throughSequence', 'finalStreamSequence',
+                                                  'worldSequence', 'players'}, 'Invalid management debrief receipt session')
+        session_id = identity(row['sessionId'])
+        require(session_id not in sessions, 'Management debrief receipts repeat a venue session')
+        sessions[session_id] = row
+    return sessions, hashlib.sha256(raw).hexdigest()
+
+
+def verify_venue_debrief_session(receipts, session, stream, report):
+    require(receipts is not None and identity(receipts['streamId']) == stream
+            and integer(receipts['throughSequence'], 1) == session['sequence']
+            and integer(receipts['finalStreamSequence']) == report['combatSequence']
+            and integer(receipts['worldSequence'], 1) == report['worldSequence'],
+            'Management debrief receipt boundaries differ from the original sealed session')
+    roster = {(player['id'], player['admissionId'], player['roomId']) for player in session['players']}
+    players = receipts['players']
+    require(type(players) is list and len(players) == len(roster) == report['serverAcknowledgements'],
+            'Management debrief receipts must cover every acknowledged original player')
+    confirmed = set()
+    for row in players:
+        require(type(row) is dict and set(row) == {'playerId', 'admissionId', 'roomId', 'acknowledged'}
+                and row['acknowledged'] is True, 'Management debrief receipt is missing or unconfirmed')
+        confirmed.add((identity(row['playerId']), identity(row['admissionId']), integer(row['roomId'], 1, 5)))
+    require(confirmed == roster, 'Management debrief receipts differ from the original admissions')
+
+
 def verify_venue(manifest_path):
     manifest_path = manifest_path.resolve(strict=True)
     manifest = read_json(content(manifest_path))
@@ -1188,6 +1226,9 @@ def verify_venue(manifest_path):
     rows = closure['sessions']
     require(type(entries) is list and type(rows) is list and len(entries) == len(rows) == len(expected_rooms),
             'Venue must contain the original five independent sessions or one linked session')
+    debrief_receipts, debrief_hash = (read_venue_debrief_receipts(evidence_path(manifest['venueDebriefReceipts']),
+                                                               closure['requestId'], len(rows))
+                                    if 'venueDebriefReceipts' in manifest else (None, None))
     journals = any('worldJournal' in entry for entry in entries)
     require(not journals or all('worldJournal' in entry for entry in entries), 'Provide a world journal for every session in this batch')
     combat_journals = any('combatJournal' in entry for entry in entries)
@@ -1414,6 +1455,8 @@ def verify_venue(manifest_path):
                                          verify_reconnect_history=verify_reconnect_history, reconnect_window=reconnect_window,
                                          quest_deployments=quest_deployments,
                                          require_distinct_remote_roster=require_distinct_remote_roster)
+        if debrief_receipts is not None:
+            verify_venue_debrief_session(debrief_receipts.pop(session['id'], None), session, stream, report)
         verified_pairs = ([report['udpPreflight']] if preflights else report['udpSourcePreflight']['pairs'] if source_preflights else [])
         for pair in verified_pairs:
             exchange = pair['exchangeSha256']
@@ -1472,6 +1515,8 @@ def verify_venue(manifest_path):
             'distinctPeerAddresses': len(peer_ips), 'distinctAddressesOutsideDeclaredServer': len(remote),
             'serverAcknowledgements': sum(item['serverAcknowledgements'] for item in summaries),
             'physicalHostsVerified': False, 'networkCapacityAccepted': False,
+            **({'venueDebriefReceipts': {'sha256': debrief_hash, 'sessions': len(summaries), 'acknowledgedPlayers': len(player_ids)}}
+               if debrief_receipts is not None else {}),
             **({'distinctRemoteRoster': {'seatsVerified': len(player_ids), 'distinctSourceAddresses': len(remote),
                 'connectionsVerified': reconnect_summary['reconnectHistory']['observedConnections']}} if require_distinct_remote_roster else {}),
             **({'questLogcatPlayers': quest_players} if quest_players else {}),

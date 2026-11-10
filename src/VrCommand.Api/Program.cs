@@ -323,6 +323,13 @@ app.MapGet("/api/venue/closure/{id:guid}/field-evidence.zip", (Guid id, WorldRec
     var evidence = worlds.ReadVenueFieldEvidence(id, Actor(context));
     return Results.File(evidence.Encode(), "application/zip", $"vr-command-venue-field-v1-{id:D}.zip");
 });
+app.MapGet("/api/venue/closure/{id:guid}/debrief-receipts.json", (Guid id, WorldRecordings worlds, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var snapshot = worlds.ExportVenueDebriefReceipts(id, Actor(context));
+    return Results.File(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(snapshot, JsonFormat.Options), "application/json",
+        $"vr-command-venue-debrief-receipts-v1-{id:D}.json");
+});
 app.MapPost("/api/venue/phase", (VenuePhaseRequest request, WorldRecordings worlds, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";

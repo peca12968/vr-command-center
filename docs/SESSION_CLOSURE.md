@@ -44,6 +44,12 @@ ZIP 內的 `closure.json` 保存原批次明細。每場另有一份 ZIP，包�
 
 `GET /api/venue/closure/{id}/field-evidence.zip` 依原批次識別讀取，回應為 `no-store`，限主控。任一原場次資料缺件時回應 409，並附待處理的房號。
 
+### 下載本批戰績回條
+
+管理包 0.31.111 起，選取原批次並等每場完成戰鬥與世界封存，再按「下載本批戰績回條 JSON」。檔案保存當下各席的確認狀態、入場識別和原封存序號。若有未確認席位，可以等回條到達再下載。原場館驗收 ZIP 維持原內容。 [離線驗收設定](EXTERNAL_CLIENTS.md#一次核對五房-25-席)
+
+主控也可用 `GET /api/venue/closure/{id}/debrief-receipts.json` 下載同一份資料，回應為 `no-store`。檔案含場次與玩家入場識別，和驗收 ZIP 一併私下保存。
+
 從 0.31.66 開始，符合五房追蹤開場條件的原場次會在 `closure.json` 保留 `trackingBegin`，列出開始批次、管理序號、世界來源及原準備中畫格。可與本次封存的原 `.worldlog` 核對。 [開場錄製核對](EXTERNAL_CLIENTS.md#核對五房追蹤開場錄製)
 
 管理包 0.31.79 也會把「各有 5 席已連線且姿態有效」採信的原畫格列在 `participationBegin`。主控下載的場館驗收 ZIP 會帶上同一欄位。 [25 席有效姿態核對](EXTERNAL_CLIENTS.md#核對五房有效姿態開場)

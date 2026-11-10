@@ -481,6 +481,58 @@ def preflight_fixture(root, label, *, server, peer, port, exchange=None):
 
 
 class FieldResultsTests(unittest.TestCase):
+    def test_venue_receipt_export_matches_original_logs_and_rejects_mismatches(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                manifest_path, manifest, batch = venue_fixture(root, mode)
+                receipt_path = root / 'receipts.json'
+                manifest['venueDebriefReceipts'] = receipt_path.name
+                manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
+                rows = []
+                for entry in manifest['sessions']:
+                    session, _, _ = field.management_zip(root / entry['evidenceZip'])
+                    launcher = field.read_json(field.content(root / entry['launcherReport']))
+                    rows.append({'sessionId': session['id'], 'streamId': launcher['streamId'],
+                                 'throughSequence': session['sequence'], 'finalStreamSequence': 0, 'worldSequence': 80,
+                                 'players': [{'playerId': player['id'], 'admissionId': player['admissionId'],
+                                              'roomId': player['roomId'], 'acknowledged': True} for player in session['players']]})
+                export = {'version': 1, 'requestId': batch['requestId'], 'sessions': rows[::-1]}
+                receipt_path.write_text(json.dumps(export), encoding='utf-8')
+                summary = field.verify_venue(manifest_path)
+                self.assertEqual(summary['venueDebriefReceipts'], {'sessions': len(rows), 'acknowledgedPlayers': 25,
+                                 'sha256': hashlib.sha256(receipt_path.read_bytes()).hexdigest()})
+                self.assertFalse(summary['physicalHostsVerified'])
+                self.assertFalse(summary['networkCapacityAccepted'])
+                for field_name, wrong, message in (
+                    ('sessionId', id_for(1111), 'boundaries differ'),
+                    ('streamId', id_for(1111), 'boundaries differ'),
+                    ('throughSequence', 10, 'boundaries differ'),
+                    ('finalStreamSequence', 1, 'boundaries differ'),
+                    ('worldSequence', 81, 'boundaries differ'),
+                    ('players', [], 'cover every acknowledged original player'),
+                ):
+                    with self.subTest(field=field_name):
+                        modified = deepcopy(export)
+                        modified['sessions'][0][field_name] = wrong
+                        receipt_path.write_text(json.dumps(modified), encoding='utf-8')
+                        with self.assertRaisesRegex(field.EvidenceError, message):
+                            field.verify_venue(manifest_path)
+                for field_name, wrong, message in (
+                    ('admissionId', id_for(1111), 'differ from the original admissions'),
+                    ('roomId', 3, 'differ from the original admissions'),
+                    ('acknowledged', False, 'missing or unconfirmed'),
+                    ('acknowledged', 1, 'missing or unconfirmed'),
+                ):
+                    modified = deepcopy(export)
+                    modified['sessions'][0]['players'][0][field_name] = wrong
+                    receipt_path.write_text(json.dumps(modified), encoding='utf-8')
+                    with self.assertRaisesRegex(field.EvidenceError, message):
+                        field.verify_venue(manifest_path)
+                receipt_path.write_text(json.dumps(dict(export, requestId=id_for(1111))), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'identify another End batch'):
+                    field.verify_venue(manifest_path)
+
     def reconnect_window_fixture(self, root, mode, defect=None):
         path, manifest, _ = venue_fixture(root, mode, with_journals=True)
         manifest['verifyReconnectHistory'] = True

@@ -559,10 +559,15 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const archive = id => page.locator(`[data-venue-closure-session="${id}"] td`);
     const debriefRoom = id => page.locator(`[data-venue-debrief-room="${id}"]`);
     const closure = (await api('/venue/closure')).batch;
+    const debriefExport = id => `/venue/closure/${id}/debrief-receipts.json`;
+    const debriefButton = page.locator('#export-venue-debrief');
+    await api(debriefExport(closure.requestId), 'GET', undefined, 'Master', 409);
     check(closure.requestId === requests[0].id && requests.length === 2 && JSON.stringify(requests[0]) === JSON.stringify(requests[1])
       && closure.sessions.every((session, index) => session.roomIds.join() === String(index + 1)),
       'Retry preserves the original End request and the closure table keeps the original room order');
     await table.waitFor();
+    check(await debriefButton.isVisible() && await debriefButton.isDisabled(),
+      'The full receipt file waits for every original session to seal');
     check((await archive(preparing[0]).allTextContents()).slice(2, 4).join() === '等待封存,等待封存'
       && (await archive(extra.id).allTextContents()).slice(2, 4).join() === '沒有遊戲來源,沒有遊戲來源',
       'The archive distinguishes an unsealed source from a preparing room that never had a source');
@@ -757,6 +762,23 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     assert.equal(Object.hasOwn(await api(closurePath), 'debriefReceipts'), false);
     await api(receiptsPath, 'GET', undefined, 'Room4', 403);
     await debriefRoom(4).filter({ hasText: '已確認 1／2 席 · 1 席未確認' }).waitFor();
+    const receiptUrl = base + '/api' + debriefExport(evidenceId);
+    const receiptResponse = await fetch(receiptUrl, auth);
+    const bytes = Buffer.from(await receiptResponse.arrayBuffer());
+    const snapshot = JSON.parse(bytes);
+    assert.deepEqual(snapshot, { version: 1, requestId: evidenceId, sessions: [{ sessionId: originalSession, streamId,
+      throughSequence, finalStreamSequence, worldSequence, players: originalReceipts.players.map(({ playerId, admissionId, roomId }) =>
+        ({ playerId, admissionId, roomId, acknowledged: admissionId === acknowledged.admissionId })) }] });
+    await api(debriefExport(evidenceId), 'GET', undefined, 'Room4', 403);
+    await api(debriefExport(randomUUID()), 'GET', undefined, 'Master', 404);
+    const receiptDownload = page.waitForEvent('download');
+    await debriefButton.click();
+    const downloadedReceipts = await receiptDownload;
+    check(receiptResponse.ok && receiptResponse.headers.get('cache-control') === 'no-store'
+      && downloadedReceipts.suggestedFilename() === `vr-command-venue-debrief-receipts-v1-${evidenceId}.json`
+      && bytes.equals(await fs.readFile(await downloadedReceipts.path())),
+      'The Master saves the exact selected batch receipt file including an unconfirmed admission');
+    await page.locator('#venue-debrief-actions').screenshot({ path: path.join(screenshots, 'venue-debrief-export.png') });
     check(batchBytes.equals(Buffer.from(await (await fetch(fieldUrl, auth)).arrayBuffer())),
       'A late receipt updates only the original historical room count without changing its private evidence ZIP');
     await table.screenshot({ path: path.join(screenshots, 'venue-debrief-partial.png') });

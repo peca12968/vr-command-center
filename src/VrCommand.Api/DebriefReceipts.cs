@@ -8,6 +8,10 @@ internal sealed record DebriefReceiptBatch(Guid StreamId, long ThroughSequence, 
 public sealed record DebriefReceiptPlayer(Guid PlayerId, Guid AdmissionId, int RoomId, string Name, bool Acknowledged);
 public sealed record DebriefReceiptView(Guid StreamId, long ThroughSequence, long FinalStreamSequence,
     long WorldSequence, DebriefReceiptPlayer[] Players);
+internal sealed record VenueDebriefExport(int Version, Guid RequestId, VenueDebriefExportSession[] Sessions);
+internal sealed record VenueDebriefExportSession(Guid SessionId, Guid StreamId, long ThroughSequence,
+    long FinalStreamSequence, long WorldSequence, VenueDebriefExportPlayer[] Players);
+internal sealed record VenueDebriefExportPlayer(Guid PlayerId, Guid AdmissionId, int RoomId, bool Acknowledged);
 
 public sealed partial class WorldRecordings
 {
@@ -61,6 +65,29 @@ public sealed partial class WorldRecordings
                     acknowledged.Contains(player.AdmissionId))).ToArray();
             return world with { DebriefReceipts = new(session.CombatStream!.StreamId, session.Sequence,
                 session.CombatStream.AcceptedSequence, world.AcceptedSequence, players) };
+        }
+    }
+
+    internal VenueDebriefExport ExportVenueDebriefReceipts(Guid id, OperatorIdentity actor)
+    {
+        lock (gate)
+        {
+            var batch = manager.ReadVenueEnd(id, actor);
+            var sessions = new List<VenueDebriefExportSession>(batch.Sessions.Length);
+            foreach (var original in batch.Sessions)
+            {
+                var session = manager.Get(original.SessionId, actor);
+                if (session.State != SessionState.Ended || session.CombatStream is not { Sealed: true } stream
+                    || VenueWorldArchive(session, stream, actor) is not (VenueArchiveState.Sealed, { } replay))
+                    throw new InvalidOperationException("Every original session needs sealed combat and world data.");
+                var confirmed = ReadDebriefAdmissions(session.Id);
+                var players = session.Players.OrderBy(player => player.RoomId).ThenBy(player => player.Seat)
+                    .Select(player => new VenueDebriefExportPlayer(player.Id, player.AdmissionId, player.RoomId,
+                        confirmed.Contains(player.AdmissionId))).ToArray();
+                sessions.Add(new(session.Id, stream.StreamId, session.Sequence, stream.AcceptedSequence,
+                    replay.ThroughSequence, players));
+            }
+            return new(1, batch.RequestId, sessions.ToArray());
         }
     }
 

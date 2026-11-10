@@ -1224,6 +1224,17 @@ def main():
         common = {'version': 1, 'mode': mode, 'topology': 'same-host', 'serverIps': [address],
                   **({'verifyPlayerSources': True} if args.check_venue_openxr and not args.check_venue_openxr_reconnect else {}),
                   **({'verifyReconnectHistory': True} if args.check_venue_openxr_reconnect else {})}
+        debrief_file = None
+        if args.check_debrief_receipts:
+            debrief_route = route + '/debrief-receipts.json'
+            snapshot, headers = request(debrief_route, raw_response=True)
+            request(debrief_route, role='Room1', expected=403)
+            check(headers['Cache-Control'] == 'no-store' and headers.get_content_type() == 'application/json'
+                  and f'vr-command-venue-debrief-receipts-v1-{closed["requestId"]}.json' in headers['Content-Disposition'],
+                  label + ' receipt export uses the original batch filename and Master scope')
+            debrief_file = out / (label + '-venue-debrief-export.json')
+            debrief_file.write_bytes(snapshot)
+            common['venueDebriefReceipts'] = str(debrief_file)
         if args.windows_release_report:
             common['venueReleaseReport']=str(args.windows_release_report)
         if args.check_venue_participation_gate:
@@ -1255,6 +1266,18 @@ def main():
               and summary['rooms'] == [{'roomId': room, 'players': 5, 'playersOutsideDeclaredServer': 0} for room in range(1, 6)]
               and not summary['physicalHostsVerified'] and not summary['networkCapacityAccepted'],
               label + ' field evidence matches all 25 original sealed admissions and UDP peers')
+        if debrief_file is not None:
+            check(summary['venueDebriefReceipts'] == {'sha256': control.sha(debrief_file), 'sessions': len(entries),
+                                                    'acknowledgedPlayers': 25},
+                  label + ' field evidence matches every stored receipt to original native acknowledgements')
+            modified = field.read_json(debrief_file.read_bytes())
+            modified['sessions'][0]['players'][0]['acknowledged'] = False
+            incomplete = out / (label + '-venue-debrief-unconfirmed.json')
+            save(incomplete.name, modified)
+            rejected_receipts = run(dict(evidence, venueDebriefReceipts=str(incomplete)))
+            check(rejected_receipts.returncode == 1 and not rejected_receipts.stdout
+                  and 'missing or unconfirmed' in rejected_receipts.stderr,
+                  label + ' unconfirmed management receipt fails even with complete original native logs')
         check(summary['worldJournalsVerified'] == len(entries)
               and all(row['worldJournal']['frames'] == row['worldSequence'] and row['worldJournal']['runningFrames'] > 0
                       for row in summary['sessions']), label + ' field evidence verifies every original closed world journal')
@@ -1352,7 +1375,8 @@ def main():
         check(rejected.returncode == 1 and not rejected.stdout and 'outside the declared server addresses' in rejected.stderr,
               label + ' field evidence rejects relabeling the same-PC peers as direct LAN')
         manifest_path.write_text(json.dumps(evidence), encoding='utf-8')
-        return {'batchId': closed['requestId'], 'zip': str(bundle_file), 'route': bundle_route}
+        return {'batchId': closed['requestId'], 'zip': str(bundle_file), 'route': bundle_route,
+                **({'debrief': str(debrief_file)} if debrief_file is not None else {})}
 
     def verify_venue_field_ui(mode, current, earlier):
         node = shutil.which('node')
@@ -1369,6 +1393,9 @@ def main():
         result = read(output)
         check(result['complete'] and result['fieldEvidence'] == [case['batchId'] for case in cases],
               mode + ' shipped console downloads exact field bundles for the selected original batches')
+        if args.check_debrief_receipts:
+            check(result['receiptExports'] == [case['batchId'] for case in cases],
+                  mode + ' shipped console downloads exact receipt exports for the selected original batches')
     def verify_venue_reports(entries, receipt, linked):
         mode = 'linked' if linked else 'independent'
         key = receipt['requestId']

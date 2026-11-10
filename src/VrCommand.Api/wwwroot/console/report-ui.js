@@ -127,10 +127,20 @@ export function mountVenueReport(current, unauthorized, save) {
     conflict: '本批場館驗收資料尚未齊備。', invalid: '場館驗收 ZIP 格式不符，可重新下載。',
     failed: '本批場館驗收 ZIP 下載失敗，可重新整理後再試。', saved: '已下載原批次與各場驗收資料，請私下保管。'
   });
-  return { update(batch) { reports(batch); field(batch); } };
+  const debrief = mountVenueDownload(current, unauthorized, save, {
+    actions: 'venue-debrief-actions', button: 'export-venue-debrief', status: 'venue-debrief-status',
+    route: 'debrief-receipts', filename: 'debrief-receipts', extension: 'json', mediaType: 'application/json',
+    ready: session => session.combat === 'Sealed' && session.world === 'Sealed',
+    waiting: rooms => `等待房間 ${rooms} 的戰鬥與世界封存。`,
+    available: '可保存本批目前的回條狀態。', loading: '正在下載本批戰績回條…',
+    conflict: '本批尚未完成雙封存。', invalid: '戰績回條格式不符，可重新下載。',
+    failed: '本批戰績回條下載失敗，可重新整理後再試。', saved: '已下載本批戰績回條，請私下保管。'
+  });
+  return { update(batch) { reports(batch); field(batch); debrief(batch); } };
 }
 
 function mountVenueDownload(current, unauthorized, save, options) {
+  const { extension = 'zip', mediaType = 'application/zip' } = options;
   const actions = document.getElementById(options.actions);
   const button = document.getElementById(options.button), status = document.getElementById(options.status);
   let id = null, waiting = '', controller = null;
@@ -156,17 +166,17 @@ function mountVenueDownload(current, unauthorized, save, options) {
     const timeout = setTimeout(() => request.abort(), 8000);
     updateButton(); status.textContent = options.loading;
     try {
-      const response = await fetch(`/api/venue/closure/${batchId}/${options.route}.zip`, {
+      const response = await fetch(`/api/venue/closure/${batchId}/${options.route}.${extension}`, {
         headers: { Authorization: 'Bearer ' + key }, signal: request.signal, cache: 'no-store'
       });
       if (!active()) return;
       if (response.status === 401) { unauthorized(); return; }
       if (!response.ok) throw new Error(response.status === 409 ? options.conflict : options.failed);
-      if (response.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase() !== 'application/zip')
+      if (response.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase() !== mediaType)
         throw new Error(options.invalid);
       const blob = await response.blob();
       if (!active()) return;
-      save(`vr-command-venue-${options.filename}-v1-${batchId}.zip`, blob);
+      save(`vr-command-venue-${options.filename}-v1-${batchId}.${extension}`, blob);
       status.textContent = options.saved;
     } catch (error) {
       if (active()) status.textContent = request.signal.aborted ? '下載逾時，可重新下載。' : error.message;

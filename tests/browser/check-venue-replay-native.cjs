@@ -10,7 +10,7 @@ async function main() {
   assert.match(config.base, /^http:\/\/127\.0\.0\.1:\d+$/);
   const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_CLOSURE_CHROMIUM,
     args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
-  const results = [], fieldEvidence = [], participation = [];
+  const results = [], fieldEvidence = [], participation = [], receiptExports = [];
   let history, roomReplay, scores, alignment, debriefReceipts;
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1080 }, acceptDownloads: true });
@@ -378,7 +378,7 @@ async function main() {
       results.push(replay);
       await page.locator('#tab-operations').click();
     }
-    for (const { batchId, zip, archived } of config.fieldEvidence ?? []) {
+    for (const { batchId, zip, archived, debrief } of config.fieldEvidence ?? []) {
       if (archived) {
         await page.locator('#venue-closure-load').click();
         await page.locator('#venue-closure-batch').selectOption(batchId);
@@ -392,6 +392,17 @@ async function main() {
       assert.equal(download.suggestedFilename(), `vr-command-venue-field-v1-${batchId}.zip`);
       assert((await fs.readFile(await download.path())).equals(await fs.readFile(zip)));
       fieldEvidence.push(batchId);
+      if (debrief) {
+        const receiptRoute = `/api/venue/closure/${batchId}/debrief-receipts.json`;
+        const receiptResponse = page.waitForResponse(reply => new URL(reply.url()).pathname === receiptRoute);
+        const startedReceipt = page.waitForEvent('download');
+        await page.locator('#export-venue-debrief').click();
+        const receipt = await startedReceipt;
+        assert.equal((await receiptResponse).status(), 200);
+        assert.equal(receipt.suggestedFilename(), `vr-command-venue-debrief-receipts-v1-${batchId}.json`);
+        assert((await fs.readFile(await receipt.path())).equals(await fs.readFile(debrief)));
+        receiptExports.push(batchId);
+      }
     }
     if (config.history) {
       const { batch, zip } = config.history;
@@ -418,7 +429,7 @@ async function main() {
   } finally {
     await browser.close();
   }
-  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation, scores, alignment, debriefReceipts }, null, 2), { flag: 'wx' });
+  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation, scores, alignment, debriefReceipts, receiptExports }, null, 2), { flag: 'wx' });
 }
 main().catch(error => {
   const location = error.stack?.match(/check-venue-replay-native\.cjs:(\d+):(\d+)\)/);
