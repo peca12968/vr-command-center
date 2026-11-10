@@ -60,14 +60,15 @@ def validate_roster(session,players):
     expected={p['id']:p for p in players};source={p['id']:p for p in session['players']}
     if set(source)!=set(expected) or any(source[k]['admissionId']!=p['admissionId'] or source[k]['roomId']!=p['roomId'] or source[k]['seat']!=p['seat'] for k,p in expected.items()):raise ValueError('Original API roster changed an admission, seat or room')
 
-def validate_frame(value,players,pause=None,begin_sequence=1):
+def validate_frame(value,players,pause=None,begin_sequence=1,*,damage_since=None):
     packet=value['packet'];frame=packet['frame'];expected={p['id']:p for p in players};actual=frame['players'];observed=packet['observedSequence']
     if packet.get('suspended') or frame['phase'] not in ('Running','Paused') or len(actual)!=len(expected) or {p['id'] for p in actual}!=set(expected):raise ValueError('Missing, suspended or unexpected phase/body')
     if type(observed) is not int or observed<begin_sequence:raise ValueError('Source has not applied this original Begin')
     if frame['phase']=='Paused' and (pause is None or observed<pause['accepted'] or pause.get('resumed') is not None and observed>=pause['resumed']):raise ValueError('Unexpected pause cannot be ignored')
     for p in actual:
         owner=expected[p['id']];head=p['head'];x=(owner['roomId']-3)*14+(owner['seat']-2)*1.5
-        if not p['connected'] or p['health']!=100 or p['roomId']!=owner['roomId'] or p['rig']['kind']!='Simulated':raise ValueError('Original native body became inactive or changed identity')
+        healthy = p['health']==100 if damage_since is None or observed<damage_since else 0<p['health']<=100
+        if not p['connected'] or not healthy or p['roomId']!=owner['roomId'] or p['rig']['kind']!='Simulated':raise ValueError('Original native body became inactive or changed identity')
         if not all(type(head[a]) in (int,float) and math.isfinite(head[a]) for a in ('x','y','z')) or abs(head['x']-x)>.1 or not -3.4<=head['z']<=-1.6 or abs(head['y']-1.65)>.02:raise ValueError('Generated motion left its own bounded standing lane')
     return frame
 
@@ -236,22 +237,47 @@ def marksmanship_targets(value, players):
     return targets
 
 
-def reconcile_marksmanship(frames, targets):
+def reconcile_marksmanship(frames, targets, incoming=None):
     pattern = ['ShotFired', 'ShotHit', 'ReloadStarted', 'ReloadCompleted',
                'ShotFired', 'ShotHit', 'EnemyEliminated']
     progress = {player: [] for player in targets}
     active_shots = {}
     event_ids, shot_ids = set(), set()
     last_event = combat_count = 0
+    damage = {player: 0 for player in targets}
+    hits_received = dict.fromkeys(targets, 0)
+    pending = None
     for value in frames:
         packet = value['packet']
+        frame = packet['frame']
         for event in packet['events']:
             player, kind = event['playerId'], event['kind']
-            actions = progress.get(player)
-            if actions is None or len(actions) == len(pattern) or kind != pattern[len(actions)]:
-                raise ValueError('Unexpected native fire, hit, reload or elimination order')
             if event['sequence'] != last_event + 1 or event['eventId'] in event_ids:
                 raise ValueError('Duplicate or out-of-order native weapon event')
+            last_event = event['sequence']
+            event_ids.add(event['eventId'])
+            if incoming and kind in ('EnemyShot', 'PlayerDamaged'):
+                enemy = event['enemyId']
+                attack = (event['tick'], enemy, player)
+                room = incoming['rooms'].get(player)
+                if (room is None or incoming['attackers'].get(enemy) != room or frame['phase'] != 'Running'
+                        or packet['suspended'] or not frame['autoAttack']
+                        or not incoming['enabled'] <= packet['observedSequence'] < incoming['disabled']
+                        or any(actions != pattern for actions in progress.values())):
+                    raise ValueError('Enemy attack left the original room or enabled window')
+                if kind == 'EnemyShot' and pending is None and event['hasRay'] and event['hit'] == 'Friendly' and event['targetId'] == player:
+                    pending = attack
+                elif kind == 'PlayerDamaged' and pending == attack and event['damage'] == 20 and damage[player] + 20 < 100:
+                    damage[player] += 20
+                    hits_received[player] += 1
+                    combat_count += 1
+                    pending = None
+                else:
+                    raise ValueError('Enemy ray and nonlethal player damage do not form one accepted pair')
+                continue
+            actions = progress.get(player)
+            if pending or actions is None or len(actions) == len(pattern) or kind != pattern[len(actions)]:
+                raise ValueError('Unexpected native fire, hit, reload or elimination order')
             if kind == 'ShotFired':
                 shot = event['shotId']
                 if not shot or shot in shot_ids or not event['hasRay'] or event['hit'] != 'Enemy' or event['targetId'] != targets[player]:
@@ -262,26 +288,92 @@ def reconcile_marksmanship(frames, targets):
                 if event['shotId'] != active_shots[player] or event['enemyId'] != targets[player]:
                     raise ValueError('Native hit or elimination did not match its accepted ray')
             actions.append(kind)
-            last_event = event['sequence']
-            event_ids.add(event['eventId'])
             combat_count += int(kind not in ('ReloadStarted', 'ReloadCompleted'))
         if packet['throughCombatSequence'] != combat_count:
             raise ValueError('Weapon replay differs from the combat ledger boundary')
         for statistics in value['statistics']:
-            actions = progress[statistics['playerId']]
+            player = statistics['playerId']
+            actions = progress[player]
             shots, hits, kills = (actions.count(kind) for kind in ('ShotFired', 'ShotHit', 'EnemyEliminated'))
             if (statistics['ammoUsed'], statistics['shotsHit'], statistics['kills'], statistics['accuracyPercent']) != (
                     shots, hits, kills, (100 * hits / shots if shots else 0)):
                 raise ValueError('Saved statistics do not match the weapon event prefix')
+            if incoming and (statistics['roomId'], statistics['hitsReceived'], statistics['damageTaken'], statistics['health']) != (
+                    incoming['rooms'][player], hits_received[player], damage[player], 100 - damage[player]):
+                raise ValueError('Saved statistics do not match the incoming damage prefix')
+        if incoming and packet['observedSequence'] >= incoming['enabled']:
+            rows = {row['playerId']: row['health'] for row in value['statistics']}
+            bodies = {body['id']: body['health'] for body in frame['players']}
+            if (len(rows) != len(value['statistics']) or rows != {player: 100 - lost for player, lost in damage.items()}
+                    or bodies != rows):
+                raise ValueError('Saved bodies or ledger omit an original player or disagree on remaining health')
     if not progress or any(actions != pattern for actions in progress.values()):
         raise ValueError('Each original player must hit twice, reload once and eliminate its target')
     final = frames[-1]
-    if {enemy['id']: enemy['health'] for enemy in final['packet']['frame']['enemies']} != dict.fromkeys(targets.values(), 0):
+    expected_enemies = dict.fromkeys(incoming['attackers'], 100) if incoming else dict.fromkeys(targets.values(), 0)
+    if {enemy['id']: enemy['health'] for enemy in final['packet']['frame']['enemies']} != expected_enemies:
         raise ValueError('Sealed target roster or health differs')
     if {row['playerId'] for row in final['statistics']} != set(targets):
         raise ValueError('Sealed marksmanship statistics omit original players')
-    return {'players': len(progress), 'shots': len(shot_ids), 'hits': 2 * len(progress),
-            'eliminations': len(progress), 'combatEvents': combat_count}
+    proof = {'players': len(progress), 'shots': len(shot_ids), 'hits': 2 * len(progress),
+             'eliminations': len(progress), 'combatEvents': combat_count}
+    if incoming:
+        if pending or not all(hits_received.values()):
+            raise ValueError('Every original player must have a complete incoming damage witness')
+        proof.update(hitsReceived=sum(hits_received.values()), damageTaken=sum(damage.values()))
+    return proof
+
+
+def exercise_incoming_fire(v, entry):
+    rooms = {player['id']: player['roomId'] for player in entry['players']}
+    targets = entry['marksmanshipTargets']
+    evidence = {'commands': [], 'checkpoints': {}}
+    references = entry.setdefault('operatorReferences', {})
+    name = entry['name'] + '-incoming-fire.json'
+
+    def command(count, attack):
+        identity = str(uuid.uuid4())
+        expected = v.state(entry)['sequence']
+        policy = {'count': count, 'behavior': 'Hold', 'autoAttack': attack}
+        receipt = v.command(entry, 'SetEnemies', commandId=identity, expectedSequence=expected, enemies=policy)
+        sequence = receipt['appliedAtSequence']
+        if (receipt['commandId'] != identity or receipt['duplicate'] is not False or receipt['session']['id'] != entry['id']
+                or receipt['session']['enemies'] != policy or sequence <= expected):
+            raise ValueError('Incoming-fire policy receipt does not match the original command')
+        evidence['commands'].append(receipt)
+        v.save(name, evidence)
+        return sequence
+
+    def checkpoint(label, fence, accept):
+        def observe():
+            value = v.frame(entry, measure=True)
+            packet = value['packet']
+            if (packet['observedSequence'] >= fence and not packet['suspended']
+                    and packet['frame']['phase'] == 'Running' and accept(value)):
+                return value
+        value = v.wait(observe, 12, entry['name'] + ' ' + label)
+        references[value['packet']['sequence']] = value
+        evidence['checkpoints'][label] = value
+        v.save(name, evidence)
+        return value
+
+    checkpoint('original targets eliminated', entry['beginSequence'], lambda value:
+               {enemy['id']: enemy['health'] for enemy in value['packet']['frame']['enemies']} == dict.fromkeys(targets.values(), 0))
+    cleared = command(0, False)
+    checkpoint('original enemies cleared', cleared, lambda value: not value['packet']['frame']['enemies'])
+    enabled = command(len(rooms), True)
+    live = checkpoint('original players damaged', enabled, lambda value: value['packet']['frame']['autoAttack']
+                      and {row['playerId'] for row in value['statistics'] if row['hitsReceived'] > 0} == rooms.keys())
+    disabled = command(len(rooms), False)
+    quiet = checkpoint('attack disabled', disabled, lambda value: not value['packet']['frame']['autoAttack'])
+    attackers = {enemy['id']: enemy['roomId'] for enemy in live['packet']['frame']['enemies']}
+    if (attackers.keys() & set(targets.values()) or sorted(attackers.values()) != sorted(rooms.values())
+            or attackers != {enemy['id']: enemy['roomId'] for enemy in quiet['packet']['frame']['enemies']}):
+        raise ValueError('Incoming fire must originate from the new native enemies in the original rooms')
+    validate_roster(v.state(entry), entry['players'])
+    entry['incomingFire'] = {'rooms': rooms, 'attackers': attackers, 'enabled': enabled, 'disabled': disabled}
+    evidence['window'] = entry['incomingFire']
+    v.save(name, evidence)
 
 
 def verify_marksmanship_bundle(v, entry, csv_report):
@@ -353,7 +445,8 @@ def replay(v,entry,pause):
             if number!=previous+1:raise RuntimeError('Replay skipped or repeated an accepted frame')
             previous=number;last=value;rows.append(value);match_control_reference(value,references,matched)
             if value['packet']['frame']['phase'] not in ('Running','Paused'):continue
-            try:frame=validate_frame(value,entry['players'],pause,entry.get('beginSequence',1))
+            try:frame=validate_frame(value,entry['players'],pause,entry.get('beginSequence',1),
+                                     damage_since=entry.get('incomingFire',{}).get('enabled'))
             except ValueError as error:faults.append({'sequence':number,'reason':str(error)});continue
             if frame['phase']=='Running':
                 elapsed=value['packet']['elapsedMilliseconds']
@@ -378,7 +471,7 @@ def replay(v,entry,pause):
     result={'complete':not faults,'frames':previous,'runningFrames':running,'faults':faults,'ranges':ranges,'operatorReferences':len(matched),'scope':'Full accepted native replay, generated input only; original continuity policies retained'}
     v.save(entry['name']+'-full-replay.json',rows);v.save(entry['name']+'-replay-checks.json',result)
     if entry.get('marksmanshipTargets') and result['complete']:
-        proof=reconcile_marksmanship(rows,entry['marksmanshipTargets'])
+        proof=reconcile_marksmanship(rows,entry['marksmanshipTargets'],entry.get('incomingFire'))
         if proof['combatEvents']!=v.state(entry)['combatStream']['acceptedSequence'] or last['statistics']!=entry['sealed']['statistics']['players']:
             raise ValueError('Marksmanship replay differs from the final sealed ledger')
         v.save(entry['name']+'-marksmanship-replay.json',proof)
@@ -504,11 +597,16 @@ def run(v):
         for e in entries:
             e['endurance']=v.args.endurance;e['expectedCycles']=cycles;e['inputReports']={r['playerId']:r for r in reports if r['room'] in e['roomIds']}
         v.save(mode+'-exercise-reports.json',reports);check(True,mode+': every original client submitted its exact generated fire/reload schedule and explicitly finished')
+        if v.args.incoming_fire:
+            for e in entries:
+                exercise_incoming_fire(v,e)
+                check(True,e['name']+': original players took damage after their own weapons exercise and before the observed cease-fire')
         for e in entries:
             validate_roster(v.state(e),e['players']);sealed=v.seal(e);players=sealed['statistics']['players']
             hits,kills,accuracy=(2,1,100) if v.args.marksmanship else (0,0,0)
             check(all(p['ammoUsed']==fires and p['shotsHit']==hits and p['kills']==kills and p['accuracyPercent']==accuracy
-                      and p['health']==100 and p['damageTaken']==0 and p['hitsReceived']==0 for p in players),
+                      and (0<p['health']<100 and p['damageTaken']==100-p['health']==20*p['hitsReceived'] if v.args.incoming_fire
+                           else p['health']==100 and p['damageTaken']==0 and p['hitsReceived']==0) for p in players),
                   e['name']+': accepted statistics reflect the exact generated shots, hits and eliminations')
             csv=capacity.practice.save_report(v,e,sealed['statistics'],filename=e['name']+'-report.csv');delivery=v.wait_for_player_results(e);owners=[r for r in native if r['sessionId']==e['id']];results=[]
             if v.args.marksmanship and mode=='linked':
@@ -530,6 +628,8 @@ def run(v):
             v.stop_round(e)
             if not v.args.endurance:
                 playback=replay(v,e,pause if e is entries[0] else None);check(playback['complete'],e['name']+': all replay frames retain original bodies, movement/reload, seals and results')
+                if v.args.incoming_fire:
+                    check(True,e['name']+': full replay reconciles original player shots and same-room enemy damage with each saved statistics prefix')
                 if v.args.check_frame_review:
                     check(True, e['name'] + ': exact shot frame, resumed frames and room/player search pages match the native archive')
                 if v.args.check_policy_frames:
@@ -543,6 +643,8 @@ def run(v):
                     e=pending[future];playback=future.result();check(playback['complete'],e['name']+': complete endurance replay retains every original body and every movement/reload/two-shot cycle')
         findings=capacity.native_log_findings(v.directory);check(not findings,mode+': no native send queue errors')
         modes.append({'mode':mode,'clients':len(native),'automatedInputs':True,'operatorControls':v.args.operator_controls,'endurance':v.args.endurance,'marksmanship':v.args.marksmanship,'linkMetrics':v.args.link_metrics,'udpTraffic':v.args.udp_traffic,'udpPeriodicLoss':v.args.udp_periodic_loss,'requestedSeconds':v.args.seconds,'maximumReplayWorkers':v.args.replay_workers,'replayRate':4,'physicalOperators':0,'networkCapacityAccepted':False})
+        if v.args.incoming_fire:
+            modes[-1]['incomingFire'] = True
     v.summary();v.save('exercise-result.json',{'complete':False,'modes':modes,'headsets':0,'hosts':1,'renderedClients':0,'posesWrittenDirectly':False,'newTestRpc':False,'automatedInput':True,'physicalOperators':0,'networkCapacityAccepted':False,'scope':'Actual Windows native clients using generated desktop movement/weapon intents through original RPCs; not humans, XR, LAN or capacity acceptance'})
 
 def main():
@@ -553,6 +655,7 @@ def main():
     p.add_argument('--check-frame-review', action='store_true', help='Verify an exact native shot frame and resume during the short exercise')
     p.add_argument('--check-policy-frames', action='store_true', help='Compare recorded policy pages with the full native exercise replay')
     p.add_argument('--marksmanship', action='store_true', help='Verify two accepted hits and one elimination per seat using saved layout and normal desktop weapon input')
+    p.add_argument('--incoming-fire', action='store_true', help='After marksmanship, use normal AI commands to exercise damage on every original player before final results')
     p.add_argument('--link-metrics', action='store_true', help='Collect 30 opt-in native link measurements per client during the 40-second short exercise')
     p.add_argument('--udp-traffic', action='store_true', help='Measure forwarded UDP payload bytes per original client in the 40-second short exercise')
     p.add_argument('--udp-periodic-loss', action='store_true', help='Measure and drop every twentieth datagram per player and direction after admission in the 40-second short exercise')
@@ -562,6 +665,7 @@ def main():
     if args.check_frame_review and args.endurance:p.error('Frame review uses the short exercise')
     if args.check_policy_frames and not args.operator_controls:p.error('Policy frame review requires the operator-controls exercise')
     if args.marksmanship and (args.endurance or args.operator_controls or args.players_per_room!=5):p.error('Marksmanship requires five players per room and the short input profile without operator policy changes')
+    if args.incoming_fire and (not args.marksmanship or args.link_metrics or args.udp_traffic or args.udp_periodic_loss):p.error('Incoming fire requires marksmanship without UDP or link measurement')
     if args.link_metrics and (args.endurance or args.seconds!=40):p.error('Link measurement requires the 40-second short exercise')
     if args.udp_periodic_loss:
         args.udp_traffic = True

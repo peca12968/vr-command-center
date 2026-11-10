@@ -26,6 +26,18 @@ python scripts/check-desktop-exercise.py --api-dll <API-DLL> --player-exe <Windo
 
 `--check-frame-review` 也逐房與逐玩家搜尋 `ShotFired` 並走到保存尾端。每頁的結果、相符筆數及游標皆與完整回放比較，逐格房間歸屬取自該格保存的玩家統計。每位玩家的相符筆數也和其最終封存的彈藥用量核對。結果保存於各場的 `*-frame-review.json`。
 
+### 同場驗證玩家射擊與敵軍傷害
+
+加上 `--incoming-fire`，可在同一場、同一批入場紀錄核對玩家射擊與中彈。先完成原射擊及換彈流程，確認原目標已被擊殺。接著以 `SetEnemies` 清除舊目標，再配置新敵軍並開啟自動攻擊。看到每位原玩家受傷後，下達停火並等遊戲來源確認。
+
+```powershell
+python scripts/check-desktop-exercise.py --api-dll <API-DLL> --player-exe <Windows-Player-EXE> `
+  --runtime-root <本機測試目錄> --mode both --players-per-room 5 --seconds 16 `
+  --marksmanship --incoming-fire --check-frame-review
+```
+
+工具保留管理回條與原生畫格，從完整封存回放逐筆核對敵軍射線及同房受傷。每位原玩家須存活，耗彈、命中、擊殺、中彈、損耗、剩餘健康及命中率須與逐格戰績、最終 CSV 和個人戰績相符。此模式沿用本機 Windows 程式產生的操作輸入，與跨機、頭盔和真人容量分開驗收。
+
 ## 多人動態與正常管理命令組合
 
 功能a58a527的[CI41356457654](https://github.com/peca12968/vr-command-center/actions/runs/41356457654)完整success：772核心／459 HTTP／47 world、6 pipe／38離線硬體CLI、Python含11 exercise／素材、89 Node／296 Chromium。2 Windows限定skip非原生／Editor證據；console49／control13／hardware26及decoded log的完整hash見[PROGRESS](PROGRESS.md)，1513＋49＝1562 browser、nativeUI7＋2保持。後續文件skip ci，測試精確來源a58a527。

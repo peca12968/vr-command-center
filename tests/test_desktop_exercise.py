@@ -28,6 +28,14 @@ class ExerciseEvidenceTests(unittest.TestCase):
         for field,value in [('roomId',4),('health',99),('rig',{'kind':'Tracked'}),('head',{'x':0,'y':1.65,'z':-2.5})]:
             bad=copy.deepcopy(self.value);bad['packet']['frame']['players'][0][field]=value
             with self.assertRaises(ValueError):m.validate_frame(bad,self.players)
+    def test_nonlethal_damage_requires_an_observed_attack_window(self):
+        self.value['packet']['frame']['players'][0]['health'] = 80
+        m.validate_frame(self.value, self.players, damage_since=10)
+        with self.assertRaises(ValueError):
+            m.validate_frame(self.value, self.players, damage_since=11)
+        self.value['packet']['frame']['players'][0]['health'] = 0
+        with self.assertRaises(ValueError):
+            m.validate_frame(self.value, self.players, damage_since=10)
     def test_explicit_original_process_and_input_report_required(self):
         owner={'pid':100,'playerId':'alpha','roomId':3,'nativeConnectionId':1}
         report={'version':1,'mode':'AutomatedSimulation','role':'Client','physicalInput':False,'headsets':0,'complete':True,'truncated':False,'reason':'Requested','fault':'','pid':100,'playerId':'alpha','room':3,'connection':1,'fireSubmissions':2,'reloadSubmissions':1,'movementFrames':1,'activeFrames':2,'firstTick':1,'lastTick':200}
@@ -153,6 +161,54 @@ class MarksmanshipEvidenceTests(unittest.TestCase):
         self.replay[0]['statistics'][0]['accuracyPercent'] = 50
         with self.assertRaisesRegex(ValueError, 'event prefix'):
             m.reconcile_marksmanship(self.replay, self.targets)
+
+    def incoming_replay(self):
+        window = {'rooms': {'player': 2}, 'attackers': {'reinforcement': 2}, 'enabled': 20, 'disabled': 23}
+        original = copy.deepcopy(self.replay[0])
+        original['packet']['observedSequence'] = 10
+        original['statistics'][0].update(roomId=2, health=100, damageTaken=0, hitsReceived=0)
+        shot = {'sequence': 8, 'eventId': '8', 'kind': 'EnemyShot', 'playerId': 'player',
+                'enemyId': 'reinforcement', 'tick': 80, 'hasRay': True, 'hit': 'Friendly', 'targetId': 'player'}
+        damage = {'sequence': 9, 'eventId': '9', 'kind': 'PlayerDamaged', 'playerId': 'player',
+                  'enemyId': 'reinforcement', 'tick': 80, 'damage': 20}
+        after = {'packet': {'events': [shot, damage], 'throughCombatSequence': 6, 'observedSequence': 22, 'suspended': False,
+                            'frame': {'phase': 'Running', 'autoAttack': True,
+                                      'enemies': [{'id': 'reinforcement', 'health': 100}],
+                                      'players': [{'id': 'player', 'health': 80}]}},
+                 'statistics': [{**original['statistics'][0], 'health': 80, 'damageTaken': 20, 'hitsReceived': 1}]}
+        return [original, after], window
+
+    def test_same_seat_can_receive_damage_and_retain_original_shots(self):
+        replay, window = self.incoming_replay()
+        proof = m.reconcile_marksmanship(replay, self.targets, window)
+        self.assertEqual(proof, {'players': 1, 'shots': 2, 'hits': 2, 'eliminations': 1,
+                                 'combatEvents': 6, 'hitsReceived': 1, 'damageTaken': 20})
+
+    def test_incoming_ray_must_come_from_the_same_room_during_attack(self):
+        for field, value in [('observedSequence', 19), ('observedSequence', 23), ('suspended', True)]:
+            replay, window = self.incoming_replay()
+            replay[-1]['packet'][field] = value
+            with self.subTest(field=field, value=value), self.assertRaisesRegex(ValueError, 'room or enabled window'):
+                m.reconcile_marksmanship(replay, self.targets, window)
+        replay, window = self.incoming_replay()
+        window['attackers']['reinforcement'] = 5
+        with self.assertRaisesRegex(ValueError, 'room or enabled window'):
+            m.reconcile_marksmanship(replay, self.targets, window)
+
+    def test_incoming_damage_requires_its_exact_ray_and_exact_saved_health(self):
+        for field, value in [('tick', 81), ('damage', 40)]:
+            replay, window = self.incoming_replay()
+            replay[-1]['packet']['events'][-1][field] = value
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, 'accepted pair'):
+                m.reconcile_marksmanship(replay, self.targets, window)
+        replay, window = self.incoming_replay()
+        replay[-1]['statistics'][0]['hitsReceived'] = 2
+        with self.assertRaisesRegex(ValueError, 'incoming damage prefix'):
+            m.reconcile_marksmanship(replay, self.targets, window)
+        replay, window = self.incoming_replay()
+        replay[-1]['packet']['frame']['players'][0]['health'] = 100
+        with self.assertRaisesRegex(ValueError, 'remaining health'):
+            m.reconcile_marksmanship(replay, self.targets, window)
 
 
 if __name__=='__main__':unittest.main()
