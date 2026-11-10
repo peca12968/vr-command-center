@@ -88,6 +88,25 @@ internal static class ServerCatalogProof
             Check(ServerLauncher.Choice.Label("甲\n乙\u202e丙") == "甲 乙丙", "display removes control / bidi formatting only");
             Check(!Char.IsHighSurrogate(ServerLauncher.Choice.Label(new String('甲', 31) + "\ud83d\ude80尾")[31]), "truncation preserves a surrogate boundary");
             var descriptor = ServerLauncher.Read(args[0], 8192); var instance = ServerLauncher.Text(descriptor, "instance");
+            var profilePath = Path.Combine(Path.GetDirectoryName(args[0]), "profile-proof", "control-instance.json");
+            Directory.CreateDirectory(Path.GetDirectoryName(profilePath));
+            var profile = new Dictionary<string, object> { { "schemaVersion", 1 }, { "kind", "VrCommand-RemoteGameServer" },
+                { "instanceId", Guid.NewGuid().ToString("D") }, { "managementApiUrl", "https://control.venue.example:8443" },
+                { "gameServerKey", new String('g', 64) }, { "managementCertificateSha256", hash } };
+            ServerLauncher.Save(profilePath, profile);
+            var remote = ServerLauncher.Catalog.ReadTarget(profilePath);
+            remote.Choices = parsed;
+            var remoteState = new ServerLauncher.CatalogState { Draft = profilePath, Loaded = true, Current = remote };
+            remoteState.Select(parsed[0].Id);
+            var start = remoteState.StartSettings("127.0.0.1", "127.0.0.1", 7777);
+            Check(start.Api == remote.Target.Api && start.CertificateSha256 == hash && start.Session == parsed[0].Id,
+                "remote GUI selection passes its HTTPS origin and pin to the original session");
+            profile["managementCertificateSha256"] = new String('b', 64);
+            File.WriteAllText(profilePath, ServerLauncher.Json.Serialize(profile), new UTF8Encoding(false));
+            bool changedPin = false;
+            try { remoteState.StartSettings("127.0.0.1", "127.0.0.1", 7777); } catch (InvalidDataException) { changedPin = true; }
+            Check(changedPin && !remoteState.CanStart && remoteState.Current == null && remoteState.Selected == null,
+                "profile pin changed after preview requires reload and a new selection before GUI launch");
             var state = new ServerLauncher.CatalogState(); state.Edit(instance); state.Load(); Check(state.Loaded && !state.CanStart && state.Selected == null && state.Current.Choices.Count > 0, "initial load requires an explicit selection");
             var original = state.Current.Choices[0].Id; state.Select(original); Check(state.CanStart && state.Selected.Id == original, "select maps the original id");
             state.Edit(instance); Check(!state.CanStart, "editing invalidates launch even for the same path"); state.Load(); Check(state.CanStart && state.Selected.Id == original, "same identity refresh preserves only its original selection");

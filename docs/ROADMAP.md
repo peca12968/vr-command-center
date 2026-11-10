@@ -1,5 +1,7 @@
 # 長期開發目標
 
+2026-11-10 Windows 遊戲伺服器啟動器 1.12 可用同一份 HTTPS 設定核對待開場次，並批次啟動五房獨立或合併模式。 [分機設定](WINDOWS_SERVER_PACKAGE.md#建立遊戲主機的-https-連線設定)
+
 2026-11-10 Windows 0.50.1 遊戲主機可由 CLI 使用 HTTPS 管理請求與 WSS 發布世界，並以管理員提供的憑證指紋核對站台。 [遊戲主機設定](WINDOWS_SERVER_PACKAGE.md#遊戲主機連到遠端管理-https)
 
 2026-11-10 Windows 管理包可在指定場館 IPv4 提供 HTTPS，並為同機遊戲伺服器保留獨立的本機 HTTP。 [場館設定](WINDOWS_CONTROL_PACKAGE.md#啟用場館-https)

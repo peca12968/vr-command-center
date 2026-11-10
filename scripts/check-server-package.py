@@ -162,6 +162,7 @@ def main():
     p.add_argument('--check-venue-phase', action='store_true', help='Verify whole-venue pause and resume against both native topologies')
     p.add_argument('--check-venue-begin', action='store_true', help='Start both native topologies with one witnessed Begin per topology')
     p.add_argument('--check-venue-launcher', action='store_true', help='Use one real Windows launcher for the explicitly prepared servers of each topology')
+    p.add_argument('--venue-management-https', action='store_true', help='Use a pinned HTTPS management profile for both venue launch plans')
     p.add_argument('--check-venue-plan-ui', action='store_true', help='Launch each topology with the exact plan downloaded from Chromium')
     p.add_argument('--check-venue-preview', action='store_true', help='Run the shared Windows venue preview before both topology launches')
     p.add_argument('--check-venue-endpoint-batch', action='store_true', help='Verify endpoint batch retries and force a last-room transaction rollback')
@@ -274,6 +275,8 @@ def main():
         p.error('--check-venue-plan-ui requires --check-venue-launcher and Node.js with Playwright Chromium')
     if args.check_venue_preview and not args.check_venue_launcher:
         p.error('--check-venue-preview requires --check-venue-launcher')
+    if args.venue_management_https and not (args.check_venue_launcher and args.game_address and shutil.which('pwsh')):
+        p.error('--venue-management-https requires --check-venue-launcher, a local --game-address and PowerShell 7')
     if args.check_venue_endpoint_batch and not args.check_venue_launcher:
         p.error('--check-venue-endpoint-batch requires --check-venue-launcher')
     if args.check_venue_ticket_freshness and (not args.check_venue_launcher or not shutil.which('node')):
@@ -358,6 +361,8 @@ def main():
     control.package.verify(args.control_package);out=ROOT/'artifacts/server-package-checks'/('run-'+uuid.uuid4().hex);out.mkdir(parents=True,exist_ok=False);runtime=args.runtime_root.resolve()/out.name;runtime.mkdir(parents=True,exist_ok=False)
     (ROOT/'artifacts/server-package-checks-latest-path.txt').write_text(str(out),encoding='utf-8');print(json.dumps({'stage':'starting','directory':str(out)}),flush=True)
     env=dict(os.environ);env.update(PATH=str(Path(os.environ['WINDIR'])/'System32'),DOTNET_ROOT=str(runtime/'absent-dotnet'),DOTNET_MULTILEVEL_LOOKUP='0');exe=folder/'Launch-Server.exe';control_exe=args.control_package.resolve()/'Start-Control.exe';data=runtime/'control';checks=[];runners=[];clients=[];cleanup=[];witnesses=[];api=None;api_witness=None;keys=None;sessions=[];rounds=[];observer=None;observer_log=None;observer_out=out/'closure-ui';observer_stop=out/'closure-ui-stop.request';observer_entry=None
+    venue_target = data / 'control-instance.json'
+    venue_uri = venue_pin = venue_password = None
     hardware_processes=[]
     reconnect_gates=[]
     if args.hardware_simulator_package:
@@ -528,7 +533,7 @@ def main():
             while value['port'] in ports:
                 value=config(state['id'])
             ports.add(value['port']);values.append(value)
-        plan={'version':1,'controlInstance':str(data/'control-instance.json'),'topology':topology,'address':address,'listenAddress':address,
+        plan={'version':1,'controlInstance':str(venue_target),'topology':topology,'address':address,'listenAddress':address,
               'servers':[{'roomIds':state['roomIds'],'sessionId':state['id'],'port':value['port']} for state,value in zip(states,values,strict=True)]}
         def args_for(plan_file,work,ready):
             return ['--venue-run',plan_file,'--work',work,'--seconds','600','--ready-report',ready]
@@ -543,6 +548,23 @@ def main():
                   'unlocked Linked MR venue cannot start or publish a game source')
             return []
         if not linked:
+            if venue_pin:
+                valid_profile = read(venue_target)
+                for label_suffix, changes in [('wrong-pin', {'managementCertificateSha256': '0' * 64}),
+                                              ('plaintext', {'managementApiUrl': uri}),
+                                              ('wrong-role', {'gameServerKey': keys['Room1']})]:
+                    case = 'https-profile-' + label_suffix
+                    private_dir = runtime / case
+                    private_dir.mkdir()
+                    profile = private_dir / 'control-instance.json'
+                    profile.write_text(json.dumps(dict(valid_profile, **changes)), encoding='utf-8')
+                    rejected_plan = runtime / (case + '.json')
+                    rejected_plan.write_text(json.dumps(dict(plan, controlInstance=str(profile))), encoding='utf-8')
+                    empty_work, empty_ready = runtime / (case + '-work'), out / (case + '-ready.json')
+                    call(case, args_for(rejected_plan, empty_work, empty_ready))
+                    check(not empty_work.exists() and not empty_ready.exists()
+                          and all(request('/api/sessions/' + row['id']) == row for row in states),
+                          case + ' leaves all five original sessions untouched before native launch')
             stale=runtime/'venue-wrong-room.json'
             wrong=list(plan['servers']);wrong[0]={**wrong[0],'sessionId':wrong[1]['sessionId']}
             stale.write_text(json.dumps(dict(plan,servers=wrong)),encoding='utf-8')
@@ -569,7 +591,7 @@ def main():
             kernel.CreateMutexW.restype=ctypes.c_void_p
             kernel.CloseHandle.argtypes=(ctypes.c_void_p,)
             kernel.ReleaseMutex.argtypes=(ctypes.c_void_p,)
-            lock_name='Local\\VRCommand.Server.'+hashlib.sha256(f"{uri}/{states[-1]['id']}".encode()).hexdigest()
+            lock_name='Local\\VRCommand.Server.'+hashlib.sha256(f"{venue_uri or uri}/{states[-1]['id']}".encode()).hexdigest()
             ctypes.set_last_error(0)
             lease=kernel.CreateMutexW(None,True,lock_name)
             owns_lease=bool(lease) and ctypes.get_last_error()!=183
@@ -610,6 +632,11 @@ def main():
                   and not work.exists() and not ready.exists()
                   and all(request('/api/sessions/'+row['id'])==row for row in states),
                   label+' shared preview lists exact original rooms, missions and UDP without modifying any session or publishing readiness')
+        if venue_pin:
+            listed = read(call(label + '-https-catalog', ['--catalog', venue_target], good=True))
+            check(listed['instanceId'] == read(venue_target)['instanceId']
+                  and [(row['id'], row['roomIds']) for row in listed['sessions']] == [(row['id'], row['roomIds']) for row in states],
+                  label + ' pinned HTTPS catalog returns the exact original venue rooms')
         extra=['--peer-diagnostics','on'] if args.peer_diagnostics else []
         process=subprocess.Popen([str(exe),*map(str,args_for(plan_file,work,ready)),'--report',str(report),*extra],cwd=out,env=env)
         entries=[]
@@ -631,6 +658,12 @@ def main():
               label+' confirms the exact game processes, sorted original rooms and UDP bindings')
         for entry,state,row in zip(entries,states,witness['servers'],strict=True):
             confirm_launch(entry,state,row['ready'])
+        if venue_pin:
+            generated = [read(entry['work'] / 'server-config.json') for entry in entries]
+            check(all(value['managementApiUrl'] == venue_uri and value['managementCertificateSha256'] == venue_pin
+                      and value['gameServerKey'] == keys['GameServer'] and value['sessionId'] == state['id']
+                      for value, state in zip(generated, states, strict=True)),
+                  label + ' passes the original HTTPS target and pin to each native process')
         if args.check_venue_endpoint_batch:
             endpoint_route='/api/venue/connection-endpoints'
             originals=[request('/api/sessions/'+state['id']+'/connection-endpoint') for state in states]
@@ -657,7 +690,7 @@ def main():
             port=free(socket.SOCK_DGRAM,address)
             if port not in ports:ports.append(port)
         plan=runtime/'venue-endpoint-rollback.json'
-        plan.write_text(json.dumps({'version':1,'controlInstance':str(data/'control-instance.json'),'topology':'Independent',
+        plan.write_text(json.dumps({'version':1,'controlInstance':str(venue_target),'topology':'Independent',
             'address':address,'listenAddress':address,'servers':[{'roomIds':state['roomIds'],'sessionId':state['id'],'port':port}
                 for state,port in zip(states,ports,strict=True)]}),encoding='utf-8')
         work=runtime/'venue-endpoint-rollback-work'
@@ -3420,8 +3453,28 @@ def main():
         save('mixed-venue-retried-deployment.json', retried)
     try:
         subprocess.run([str(control_exe),'--init',str(data),'--port',str(free()),'--report',str(out/'control-init.json')],env=env,check=True,timeout=30);keys=read(data/'operator-keys.json')['OperatorKeys'];marker=read(data/'control-instance.json');uri='http://127.0.0.1:'+str(marker['port'])
-        api_ready=out/'control-ready.json';api_stop=out/'control-stop.request';api=subprocess.Popen([str(control_exe),'--run',str(data),'--seconds','1800','--ready-report',str(api_ready),'--stop-file',str(api_stop),'--report',str(out/'control-final.json')],env=env,cwd=out)
+        control_env = env
+        if args.venue_management_https:
+            port = free(address=address)
+            while port == marker['port']:
+                port = free(address=address)
+            venue_uri = f'https://{address}:{port}'
+            venue_password = uuid.uuid4().hex + uuid.uuid4().hex
+            control_env = dict(env, VR_COMMAND_CONTROL_PFX_PASSWORD=venue_password)
+            (data / 'control-https.json').write_text(json.dumps({'schemaVersion': 1, 'bindAddress': address, 'port': port}), encoding='utf-8')
+            subprocess.run([shutil.which('pwsh'), '-NoProfile', '-NonInteractive', '-File',
+                            str(ROOT / 'tools/WindowsControlLauncher/Tests/New-HttpsFixture.ps1'),
+                            '-Directory', str(data), '-Address', address], env=control_env, timeout=30, check=True)
+            venue_pin = control.sha(data / 'leaf.cer')
+            venue_target = runtime / 'game-host-profile' / 'control-instance.json'
+            venue_target.parent.mkdir()
+            venue_target.write_text(json.dumps({'schemaVersion': 1, 'kind': 'VrCommand-RemoteGameServer',
+                                                'instanceId': marker['instanceId'], 'managementApiUrl': venue_uri,
+                                                'managementCertificateSha256': venue_pin, 'gameServerKey': keys['GameServer']}), encoding='utf-8')
+        api_ready=out/'control-ready.json';api_stop=out/'control-stop.request';api=subprocess.Popen([str(control_exe),'--run',str(data),'--seconds','1800','--ready-report',str(api_ready),'--stop-file',str(api_stop),'--report',str(out/'control-final.json')],env=control_env,cwd=out)
         info=wait(lambda:read(api_ready) if api_ready.exists() else None,40,'control startup');api_witness=control.ChildWitness(info['childPid']);check(info['status']=='ready','packaged control API without SDK on PATH');call('verify',['--verify','package'],True)
+        if venue_pin:
+            check(info['httpsBinding'] == venue_uri and info['uri'] == uri, 'isolated management API publishes separate pinned HTTPS and loopback HTTP bindings')
         if args.check_room_readiness:request('/api/rooms/readiness',role='GameServer',expected=403)
         seed=create([1],'preflight');base=config(seed['id'])
         for name,change in [('master',{'gameServerKey':keys['Master']}),('room-key',{'gameServerKey':keys['Room1']}),('client-role',{'role':'Client'}),('host-role',{'role':'Host'}),('ambiguous-ip',{'address':'127.1'}),('wildcard-advertise',{'address':'0.0.0.0'}),('multicast',{'address':'224.0.0.1'}),('overflow-port',{'port':4294975073}),('extra-key',{'masterKey':'never-pass-to-unity'}),('url-userinfo',{'managementApiUrl':uri.replace('http://','http://user@')})]:rejected(name,dict(base,**change))
@@ -3968,6 +4021,7 @@ def main():
     for file in out.glob('*.json'):
         text=file.read_text(encoding='utf-8')
         if keys and any(k in text for k in keys.values()):raise RuntimeError('Public metadata contains a key')
+        if venue_password and venue_password in text:raise RuntimeError('Public metadata contains the test certificate password')
     save('checks.json',{'complete':True,'checks':len(checks),'findings':checks,'runtimeDirectory':str(runtime),
         'packageDirectory':str(folder),'playerPackageDirectory':str(player_folder) if player_folder else None,
         'scope':('Same-machine tracked rig from Unity mock OpenXR and a simulated desktop peer, no physical headset.' if args.openxr_mock_only else
@@ -3975,6 +4029,7 @@ def main():
                  'Same-machine VR/MR servers in Preparing and mock ADB with no headset client.' if args.mixed_venue_bundle_only else
                  'Same-machine native MR servers in Preparing with no headset client.' if args.mr_venue_bundle_only else
                  'Same-machine VR simulation and a separate MR Preparing admission and seal check.' if args.check_managed_mr else 'Same-machine Simulation only.')
+                + (' Venue game processes use pinned HTTPS and WSS on the same Windows PC.' if venue_pin else '')
                 +' The separate parent-death case intentionally leaves the world unsealed.'})
     print(json.dumps({'complete':True,'checks':len(checks),'directory':str(out)}))
 if __name__=='__main__':main()

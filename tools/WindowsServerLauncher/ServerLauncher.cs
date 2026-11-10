@@ -155,6 +155,13 @@ internal static class ServerLauncher
             ValidateTarget();
             IPv4(Address, false); LocalBind(Bind); Need(Bind == "0.0.0.0" || Bind == Address, "明確綁定地址須與公告地址相同。"); Need(Port >= 1024 && Port <= 65535, "UDP埠須為1024至65535。");
         }
+        internal Settings ForSession(string session, string address, string bind, int port)
+        {
+            var settings = new Settings { Api = Api, Key = Key, CertificateSha256 = CertificateSha256,
+                Session = session, Address = address, Bind = bind, Port = port };
+            settings.Validate();
+            return settings;
+        }
         internal void ValidateTarget()
         {
             Uri uri;
@@ -190,7 +197,7 @@ internal static class ServerLauncher
                     && BitConverter.ToString(hash.ComputeHash(leaf.RawData)).Replace("-", "").ToLowerInvariant() == CertificateSha256;
             }
         }
-        internal Dictionary<string, object> Request(string path, object body = null, bool missing = false)
+        private HttpWebRequest ManagementRequest(string path)
         {
             var request = (HttpWebRequest)WebRequest.Create(Api + path); request.Proxy = null; request.AllowAutoRedirect = false; request.Timeout = 5000; request.ReadWriteTimeout = 5000;
             if (CertificateSha256 != null)
@@ -199,6 +206,11 @@ internal static class ServerLauncher
                 request.ServerCertificateValidationCallback = (sender, certificate, chain, errors) => CheckCertificate(certificate, errors);
             }
             request.Headers[HttpRequestHeader.Authorization] = "Bearer " + Key;
+            return request;
+        }
+        internal Dictionary<string, object> Request(string path, object body = null, bool missing = false)
+        {
+            var request = ManagementRequest(path);
             if (body != null) { request.Method = "PUT"; request.ContentType = "application/json"; var bytes = Encoding.UTF8.GetBytes(Json.Serialize(body)); request.ContentLength = bytes.Length; using (var stream = request.GetRequestStream()) stream.Write(bytes, 0, bytes.Length); }
             try { using (var response = (HttpWebResponse)request.GetResponse()) using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8)) { Need(response.StatusCode == HttpStatusCode.OK, "管理服務回應不正確。"); var bytes = new char[256 * 1024 + 1]; var count = 0; int read; while ((read = reader.Read(bytes, count, bytes.Length - count)) > 0 && count < bytes.Length) count += read; Need(count <= 256 * 1024, "管理回應過大。"); var result = Map(Json.DeserializeObject(new string(bytes, 0, count))); Need(result != null, "管理回應格式錯誤。"); return result; } }
             catch (WebException error)
@@ -226,7 +238,7 @@ internal static class ServerLauncher
         }
         internal object[] Sessions()
         {
-            var request = (HttpWebRequest)WebRequest.Create(Api + "/api/sessions"); request.Proxy = null; request.AllowAutoRedirect = false; request.Timeout = 5000; request.ReadWriteTimeout = 5000; request.Headers[HttpRequestHeader.Authorization] = "Bearer " + Key;
+            var request = ManagementRequest("/api/sessions");
             using (var response = (HttpWebResponse)request.GetResponse()) using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
             {
                 Need(response.StatusCode == HttpStatusCode.OK, "場次列表回應不正確。"); var chars = new char[256 * 1024 + 1]; var count = 0; int n;
@@ -282,12 +294,34 @@ internal static class ServerLauncher
         internal Settings Target; internal string PathName, InstanceId; internal List<Choice> Choices;
         internal static Catalog Load(string path)
         {
+            var catalog = ReadTarget(path);
+            catalog.Target.Identity();
+            catalog.Choices = Parse(catalog.Target.Sessions());
+            return catalog;
+        }
+        internal static Catalog ReadTarget(string path)
+        {
             Need(!String.IsNullOrWhiteSpace(path), "請輸入control-instance.json完整路徑。");
             path = Full(path.Trim()); Need(String.Equals(Path.GetFileName(path), "control-instance.json", StringComparison.OrdinalIgnoreCase) && !Inside(path, Root), "請選取包外的control-instance.json。");
-            var marker = Read(path, 4096); Need(Num(marker, "schemaVersion") == 1 && Text(marker, "kind") == "VrCommand-ControlServer" && Num(marker, "port") >= 1024 && Num(marker, "port") <= 65535, "管理實例格式不符。");
-            var id = Choice.GuidValue(Text(marker, "instanceId")); var keys = Child(Read(System.IO.Path.Combine(System.IO.Path.GetDirectoryName(path), "operator-keys.json"), 8192), "OperatorKeys");
-            var target = new Settings { Api = "http://" + IPv4(Text(marker, "bindAddress"), false) + ":" + Num(marker, "port"), Key = Text(keys, "GameServer") }; target.Identity();
-            return new Catalog { Target = target, PathName = path, InstanceId = id, Choices = Parse(target.Sessions()) };
+            var marker = Read(path, 4096);
+            var kind = Text(marker, "kind");
+            Need(Num(marker, "schemaVersion") == 1, "管理實例格式不符。");
+            var id = Choice.GuidValue(Text(marker, "instanceId"));
+            Settings target;
+            if (kind == "VrCommand-RemoteGameServer")
+            {
+                target = new Settings { Api = Text(marker, "managementApiUrl"), Key = Text(marker, "gameServerKey"),
+                    CertificateSha256 = Text(marker, "managementCertificateSha256") };
+                Need(marker.Count == 6 && target.Api != null && target.Api.StartsWith("https://", StringComparison.Ordinal), "遠端管理設定須使用 HTTPS 與憑證指紋。");
+            }
+            else
+            {
+                Need(kind == "VrCommand-ControlServer" && Num(marker, "port") >= 1024 && Num(marker, "port") <= 65535, "管理實例格式不符。");
+                var keys = Child(Read(Path.Combine(Path.GetDirectoryName(path), "operator-keys.json"), 8192), "OperatorKeys");
+                target = new Settings { Api = "http://" + IPv4(Text(marker, "bindAddress"), false) + ":" + Num(marker, "port"), Key = Text(keys, "GameServer") };
+            }
+            target.ValidateTarget();
+            return new Catalog { Target = target, PathName = path, InstanceId = id };
         }
         internal static List<Choice> Parse(object[] rows)
         {
@@ -302,7 +336,7 @@ internal static class ServerLauncher
             }
             choices.Sort((a, b) => a.Rooms[0] != b.Rooms[0] ? a.Rooms[0].CompareTo(b.Rooms[0]) : String.CompareOrdinal(a.Id, b.Id)); return choices;
         }
-        internal bool Same(Catalog other) { return other != null && String.Equals(PathName, other.PathName, StringComparison.OrdinalIgnoreCase) && InstanceId == other.InstanceId && Target.Api == other.Target.Api && Target.Key == other.Target.Key; }
+        internal bool Same(Catalog other) { return other != null && String.Equals(PathName, other.PathName, StringComparison.OrdinalIgnoreCase) && InstanceId == other.InstanceId && Target.Api == other.Target.Api && Target.Key == other.Target.Key && Target.CertificateSha256 == other.Target.CertificateSha256; }
         internal object Public() { return new { schemaVersion = 1, status = "catalogued", complete = true, instanceId = InstanceId, sessions = Choices.ConvertAll(choice => choice.Public()), scope = "Read-only Preparing VR and MR choices. No key in report." }; }
     }
     internal sealed class CatalogState
@@ -317,6 +351,13 @@ internal static class ServerLauncher
             if (loaded.Same(old) && selectedId != null) Selected = loaded.Choices.Find(choice => choice.Id == selectedId);
         }
         internal void Select(string id) { Need(Loaded && Current != null, "請先載入管理實例。"); Selected = id == null ? null : Current.Choices.Find(choice => choice.Id == id); }
+        internal Settings StartSettings(string address, string bind, int port)
+        {
+            Need(CanStart, "請先載入實例並明確選擇待開場次。");
+            try { Need(Current.Same(Catalog.ReadTarget(Draft)), "管理設定已變更；請重新載入及選擇場次。"); }
+            catch { Loaded = false; Current = null; Selected = null; throw; }
+            return Current.Target.ForSession(Selected.Id, address, bind, port);
+        }
     }
     // Kill-on-close job, assigned before native execution. No CPU, priority or memory limits.
     internal sealed class Native : IDisposable
@@ -626,9 +667,7 @@ internal static class ServerLauncher
                 "原場次與房間不符或已無法啟動。");
             Need(choice.CanStart, Choice.AlignmentPrompt(choice.MissingAlignmentRooms));
             foreach (var room in assigned) Need(rooms.Add(room), "場館房間重複。");
-            var config = new Settings { Api = catalog.Target.Api, Key = catalog.Target.Key, Session = choice.Id, Address = Text(plan, "address"),
-                Bind = Text(plan, "listenAddress"), Port = (int)Num(row, "port") };
-            config.Validate();
+            var config = catalog.Target.ForSession(choice.Id, Text(plan, "address"), Text(plan, "listenAddress"), (int)Num(row, "port"));
             Need(ports.Add(config.Port), "獨立場次須使用不同的 UDP 埠。");
             servers.Add(new VenueServer { Choice = choice, Config = config });
         }
@@ -931,8 +970,9 @@ internal static class ServerLauncher
         }
         void Begin()
         {
-            Need(catalog.CanStart, "請先載入實例並明確選擇待開場次。"); var target = catalog.Current.Target;
-            var config = new Settings { Api = target.Api, Key = target.Key, Session = catalog.Selected.Id, Address = address.Text, Bind = bind.Text, Port = (int)port.Value }; config.Validate();
+            Settings config;
+            try { config = catalog.StartSettings(address.Text, bind.Text, (int)port.Value); }
+            finally { if (!catalog.Loaded) { session.Items.Clear(); session.Enabled = false; ShowSelection(); } }
             var work = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrCommand", "GameServers", DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N"));
             var reports = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrCommand", "GameServerReports"); Directory.CreateDirectory(reports); var report = Path.Combine(reports, Guid.NewGuid().ToString("N") + ".json");
             var capturePeers = peerDiagnostics.Checked;

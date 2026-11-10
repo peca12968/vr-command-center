@@ -1,5 +1,7 @@
 # Windows 遊戲伺服器包
 
+2026-11-10 `VRCommand-GameServer-0.50.1-1.12-https-venue-final-win-x64.zip` 為 84,807,075 bytes，SHA-256 `a8290ac78089d0281177962b01409c4c733c1bb3a371ab4820894de3aca5aa0b`。解壓核對 330 筆清單，沿用原 0.50.1 遊戲。啟動器可用一份私人 HTTPS 設定查詢場次及啟動五房批次。 [設定方式](#建立遊戲主機的-https-連線設定)
+
 2026-11-10 `VRCommand-GameServer-0.50.1-1.11-https-win-x64.zip` 為 84,806,680 bytes，SHA-256 `80b733db21c1351e0701c8630f67b44ae2c45099d06f3a32c5c7983a19cfd984`。解壓核對 330 筆清單。個別場次 CLI 支援指定管理站台的 HTTPS、WSS 及憑證指紋。 [遊戲主機設定](#遊戲主機連到遠端管理-https)
 
 2026-11-10 `windows-server-0.50.0-launcher1.10-win-x64.zip` 為 84,800,547 bytes，SHA-256 `e12a6049410a3d01a3423bf9ff1ddffa7125db627f0c3c1beaabfab196258b1b`。解壓核對 330 筆清單。全館啟動使用管理包 0.31.100 的整批端點公告。 [五房啟動](#依場館計畫批次啟動)
@@ -32,7 +34,7 @@ Unity 0.47.0 伺服器可搭配控制台 0.31.14。啟動器 1.5 可選擇待開
 
 ## 依場館計畫批次啟動
 
-啟動器 1.8 的 `--venue-run` 使用同一份計畫啟動五個獨立遊戲伺服器，或啟動涵蓋五房的一個合併伺服器。先在本機管理服務準備場次，再從控制台下載或手動建立計畫。計畫與工作目錄放在解壓包及管理實例之外。計畫只引用本機 `control-instance.json`，由啟動器讀取該實例的 GameServer 憑證。
+`--venue-run` 使用同一份計畫在一台遊戲主機啟動五個獨立遊戲伺服器，或啟動涵蓋五房的一個合併伺服器。先在管理服務準備場次，再從控制台下載或手動建立計畫。計畫與工作目錄放在解壓包及管理實例之外。啟動器 1.12 的計畫可引用本機管理實例或遊戲主機上獨立保存的 HTTPS 連線設定，兩種檔案名稱皆為 `control-instance.json`。 [分機設定](#建立遊戲主機的-https-連線設定)
 
 ### 從主控台下載場館計畫
 
@@ -89,7 +91,7 @@ Unity 0.47.0 伺服器可搭配控制台 0.31.14。啟動器 1.5 可選擇待開
 
 ## 遊戲主機連到遠端管理 HTTPS
 
-遊戲主機與管理主機分開時，可用啟動器 1.11 的個別場次 CLI。把管理員提供的 HTTPS 原點與葉憑證 SHA-256 指紋填入私人伺服器設定。原點使用小寫 DNS 名稱或正規 IPv4，結尾不加斜線。使用 443 時可省略埠號。指紋為 DER 葉憑證雜湊的小寫 64 位十六進位字串。
+遊戲主機與管理主機分開時，啟動器 1.11 起可用個別場次 CLI。啟動器 1.12 也可用圖形介面與五房批次。個別場次設定將管理員提供的 HTTPS 原點及葉憑證 SHA-256 指紋填入私人檔案。原點使用小寫 DNS 名稱或正規 IPv4，結尾不加斜線。使用 443 時可省略埠號。指紋為 DER 葉憑證雜湊的小寫 64 位十六進位字串。
 
 ```json
 {
@@ -105,6 +107,23 @@ Unity 0.47.0 伺服器可搭配控制台 0.31.14。啟動器 1.5 可選擇待開
 ```
 
 透過既有 `Launch-Server.exe --run` 啟動。遊戲主機只需要 `GameServer` 金鑰。HTTPS 管理請求與 WSS 世界串流核對同一張當前有效的葉憑證，遊戲管理 HTTP 請求遇到轉址會停止。這個部署使用設定中的明確憑證信任，管理員應另外交付指紋。更新站台憑證前先完成場次封存，再更新遊戲主機的設定。房控瀏覽器仍使用一般 HTTPS 信任鏈。 [管理服務設定](WINDOWS_CONTROL_PACKAGE.md#啟用場館-https) · [Unity 憑證驗證](https://docs.unity3d.com/6000.0/Documentation/ScriptReference/Networking.CertificateHandler.ValidateCertificate.html)
+
+### 建立遊戲主機的 HTTPS 連線設定
+
+在遊戲主機的私人資料夾建立 `control-instance.json`。管理員從原管理實例提供 `instanceId`、HTTPS 原點、葉憑證指紋及單一 `GameServer` 金鑰。待開清單及啟動器會用 HTTPS 核對該站台和角色。這份設定只需交付遊戲主機。
+
+```json
+{
+  "schemaVersion": 1,
+  "kind": "VrCommand-RemoteGameServer",
+  "instanceId": "填入原管理實例的UUID",
+  "managementApiUrl": "https://control.venue.example:8443",
+  "managementCertificateSha256": "填入葉憑證SHA-256的小寫十六進位字串",
+  "gameServerKey": "填入GameServer金鑰"
+}
+```
+
+個別房間可直接在啟動器載入此檔、選擇場次，再填遊戲 UDP 位址與埠。五房批次則在控制台的啟動計畫填這份檔案在遊戲主機上的完整路徑，下載後用「五房批次啟動」、`--venue-check` 或 `--venue-run` 開啟。計畫和公開結果只使用路徑與場次資訊。更換 HTTPS 原點、金鑰或指紋後，重新載入場次或重新核對計畫再啟動。 [批次操作](#依場館計畫批次啟動)
 
 ## 管理服務短暫中斷
 

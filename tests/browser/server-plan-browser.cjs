@@ -132,7 +132,7 @@ if (require.main === module) {
     for await (const chunk of process.stdin) input.push(chunk);
     const { base, token, plan, output } = JSON.parse(Buffer.concat(input).toString('utf8'));
     assert.match(base, /^http:\/\/127\.0\.0\.1:\d+$/);
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_SERVER_PLAN_CHROMIUM });
     try {
       const page = await browser.newPage({ acceptDownloads: true });
       await login(page, base, token);
