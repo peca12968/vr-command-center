@@ -16,6 +16,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
   const liveRoom = room => page.locator(`[data-live-tracking-room="${room}"]`);
   const status = room => page.locator(`[data-begin-room="${room}"]`);
   const tracking = id => page.locator(`[data-venue-tracking-begin="${id}"]`);
+  const participation = id => page.locator(`[data-venue-participation-begin="${id}"]`);
   const canvas = page.locator('#world-canvas');
   async function openTracking(row) {
     const expected = row.trackingBegin.frame.worldSequence;
@@ -157,6 +158,10 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       }
       check(retry.duplicate && retry.requireFullParticipation && JSON.stringify(retry.sessions) === JSON.stringify(receipt.sessions),
         `${mode} retry preserves the original policy and the exact accepted Preparing frames`);
+      for (const source of sources) {
+        source.snapshot = await api(source.route);
+        source.publish(source.snapshot, false);
+      }
       const endTargets = (await api('/venue/phase')).end.map(({ sessionId, phaseSinceSequence }) => ({ sessionId, phaseSinceSequence }));
       const ended = await api('/venue/phase', 'POST', { action: 'End', targets: endTargets }, 'Master', 200, undefined, randomUUID());
       for (const { id } of sessions) active.delete(id);
@@ -167,6 +172,44 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         assert.equal(row.trackingBegin, undefined);
       }
       check(true, `${mode} closure carries the same participation proof without a tracking-only claim`);
+      const selected = mode === 'Linked' ? batch.sessions[0] : batch.sessions.find(row => row.roomIds[0] === 2);
+      const originalFrame = selected.participationBegin.frame.worldSequence;
+      await page.locator('#refresh').click();
+      await participation(selected.sessionId).waitFor({ timeout: 5000 });
+      const watch = `**/api/sessions/${selected.sessionId}/world/watch?**`;
+      await page.route(watch, async route => {
+        const response = await route.fetch();
+        const body = (await response.text()).replace(/event: frame\ndata: (.+)/, (_, raw) => {
+          const value = JSON.parse(raw);
+          if (mode === 'Linked') value.packet.frame.players[0].connected = false;
+          else value.packet.frame.players[0].rig.kind = 'Simulated';
+          return `event: frame\ndata: ${JSON.stringify(value)}`;
+        });
+        await route.fulfill({ response, body });
+      }, { times: 1 });
+      await participation(selected.sessionId).click();
+      await page.locator('#world-message').filter({ hasText: '回應快照的有效姿態開場或指令序號不同' }).waitFor();
+      check(await page.locator('#world-player').isHidden() && await canvas.getAttribute('data-sequence') === null,
+        `${mode} rejects the bounded opening frame with an ineligible substituted pose`);
+      await page.locator('#tab-operations').click();
+      const requested = page.waitForRequest(request => new URL(request.url()).pathname === `/api/sessions/${selected.sessionId}/world/watch`);
+      await participation(selected.sessionId).click();
+      const query = new URL((await requested).url()).searchParams;
+      assert.equal(query.get('mode'), 'replay');
+      assert.equal(query.get('fromFrame'), String(originalFrame));
+      assert.equal(query.get('throughFrame'), String(originalFrame));
+      const poseCounts = mode === 'Linked' ? '追蹤 24 席、合成 1 席' : '追蹤 5 席、合成 0 席';
+      await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${originalFrame} 格的有效姿態開場快照。 此格${poseCounts}` }).waitFor();
+      check(await canvas.getAttribute('data-sequence') === String(originalFrame)
+        && await page.locator('#world-room').inputValue() === (mode === 'Linked' ? 'all' : '2')
+        && await page.locator('#world-camera').inputValue() === (mode === 'Linked' ? 'overview' : 'top'),
+      `${mode} reopens the exact original participation frame and room scope`);
+      await page.locator('#world-player').screenshot({ path: path.join(screenshots, `participation-begin-${mode.toLowerCase()}-replay.png`) });
+      await page.locator('#world-frame-next').click();
+      await page.locator(`#world-canvas[data-sequence="${originalFrame + 1}"]`).waitFor();
+      check(!(await page.locator('#world-frame-message').innerText()).includes('有效姿態開場'),
+        `${mode} can step beyond the witnessed frame into the original saved recording`);
+      await page.locator('#tab-operations').click();
     }
   }
   try {

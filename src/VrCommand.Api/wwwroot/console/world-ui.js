@@ -13,6 +13,8 @@ const shortId = id => id && id !== '00000000-0000-0000-0000-000000000000' ? id.s
 const roomName = room => room === 'all' ? '全部房間' : '房間 ' + room;
 const LIVE_RETRY_DELAYS = [500, 1000, 2000];
 const LIVE_IDLE_MILLISECONDS = 6000;
+const isBeginWitness = witness => witness?.kind === 'tracking-begin' || witness?.kind === 'participation-begin';
+const witnessLabels = { enemies: '敵軍', environment: '環境', 'tracking-begin': '追蹤開場', 'participation-begin': '有效姿態開場' };
 
 export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips) {
   let active = false, scene, controller, epoch = 0, listEpoch = 0, listController, info, frame, geometry = '', mode = '', connected = false, received = 0;
@@ -67,8 +69,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
       }));
       if (target) {
         const row = rows.find(item => item.header.sessionId === target.sessionId);
-        const tracking = target.witness?.kind === 'tracking-begin' ? target.witness : null;
-        const archiveTarget = tracking ? { ...target, complete: tracking.archiveComplete, throughSequence: tracking.archiveThroughSequence } : target;
+        const begin = isBeginWitness(target.witness) ? target.witness : null;
+        const archiveTarget = begin ? { ...target, complete: begin.archiveComplete, throughSequence: begin.archiveThroughSequence } : target;
         if (!row || !matchesTarget(row, archiveTarget)) {
           picker.prepend(new Option('原場次錄製目前無法讀取', ''));
           picker.value = '';
@@ -80,7 +82,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
         resetRecording();
         const limit = target.mode === 'replay' && !target.complete ? target.throughSequence : null;
         const sequence = target.playerId || target.witness ? target.throughSequence : target.mode === 'replay' ? 1 : null;
-        void connect(target.mode, 0, sequence, limit, tracking ? { ...target, archive: row } : target);
+        void connect(target.mode, 0, sequence, limit, begin ? { ...target, archive: row } : target);
         return;
       }
       if (rows.some(row => row.header.sessionId === selected)) picker.value = selected;
@@ -96,7 +98,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   function matchesTarget(recording, target) {
     if (recording.header?.sessionId !== target.sessionId
       || (target.roomId != null && !recording.header.roomIds?.includes(target.roomId))) return false;
-    if (target.witness?.kind === 'tracking-begin') {
+    if (isBeginWitness(target.witness)) {
       const { roomIds } = target.witness;
       if (!Number.isSafeInteger(recording.acceptedSequence) || typeof recording.complete !== 'boolean'
         || recording.header.roomIds?.length !== roomIds.length || !roomIds.every((room, index) => recording.header.roomIds[index] === room)
@@ -431,10 +433,13 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
       if (request === epoch) { connecting = false; controller = null; reviewControls(); }
     }
   }
-  function matchesWitness(packet, target) {
+  function matchesWitness(packet, target, header) {
     const { kind, setting, population, appliedAtSequence, elapsedMilliseconds, roomIds } = target.witness;
-    if (kind === 'tracking-begin') {
+    if (isBeginWitness(target.witness)) {
       const frame = packet.frame;
+      const mr = header.calibration === 'quest-room-mr-v1';
+      if (kind === 'participation-begin' && (mr ? header.origin !== 'GameServer' : header.calibration !== 'uncalibrated-vr')) return false;
+      const allowSimulated = kind === 'participation-begin' && !mr;
       if (packet.observedSequence !== appliedAtSequence - 1 || packet.elapsedMilliseconds !== elapsedMilliseconds
         || packet.suspended !== false || frame?.phase !== 'Preparing' || frame.tick !== 0
         || !Array.isArray(frame.players) || frame.players.length !== roomIds.length * 5) return false;
@@ -442,7 +447,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
       for (const player of frame.players) {
         const id = typeof player?.id === 'string' ? player.id.toLowerCase() : '';
         if (!id || players.has(id) || !counts.has(player.roomId)
-          || player.connected !== true || player.rig?.kind !== 'Tracked' || !Number.isInteger(player.health)
+          || player.connected !== true || (player.rig?.kind !== 'Tracked' && !(allowSimulated && player.rig?.kind === 'Simulated'))
+          || !Number.isInteger(player.health)
           || player.health < 1 || player.health > 100) return false;
         players.add(id);
         counts.set(player.roomId, counts.get(player.roomId) + 1);
@@ -464,7 +470,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     clipPosition = clip ? sequence : null;
     const own = controller = new AbortController(), request = epoch;
     const playerReview = Boolean(target?.playerId), witness = target?.witness;
-    const witnessLabel = witness?.kind === 'enemies' ? '敵軍' : witness?.kind === 'tracking-begin' ? '追蹤開場' : '環境';
+    const witnessLabel = witnessLabels[witness?.kind];
     const signal = playerReview || witness ? AbortSignal.any([own.signal, AbortSignal.timeout(8000)]) : own.signal;
     if (nextMode === 'live') { received = 0; savedLimit = null; savedFinished = false; reviewPlayer = null; clearClip(); }
     const limit = nextMode === 'live' ? null : replayLimit;
@@ -567,7 +573,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
                 if (clip) clipPosition = current;
               }
               if (witness) {
-                if (witnessFrame || !matchesWitness(data.packet, target))
+                if (witnessFrame || !matchesWitness(data.packet, target, info.header))
                   throw new Error(`回應快照的${witnessLabel}或指令序號不同。`);
                 witnessFrame = data;
               } else { show(data, recentJump); recentJump = false; }
@@ -605,7 +611,13 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
             savedFinished = savedLimit === sequence;
           }
           show(witnessFrame, true);
-          $('world-frame-message').textContent = `已停在第 ${target.throughSequence} 格的${witnessLabel}快照。`;
+          let text = `已停在第 ${target.throughSequence} 格的${witnessLabel}快照。`;
+          if (witness.kind === 'participation-begin') {
+            const players = witnessFrame.packet.frame.players;
+            const tracked = players.filter(player => player.rig.kind === 'Tracked').length;
+            text += ` 此格追蹤 ${tracked} 席、合成 ${players.length - tracked} 席。`;
+          }
+          $('world-frame-message').textContent = text;
         }
         if (playerReview) {
           reviewPlayer = { id: target.playerId, name: target.playerName };

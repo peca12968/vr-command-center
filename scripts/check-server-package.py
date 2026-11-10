@@ -858,6 +858,13 @@ def main():
         check(result['complete'] and [item['sessionId'] for item in result['results']] == [row['sessionId'] for row in rows]
               and all(item['throughSequence'] == sources[item['sessionId']]['acceptedSequence'] for item in result['results']),
               f'{mode} shipped console opens every original sealed native replay')
+        if args.check_venue_participation_gate:
+            check(result['participation']==[{'sessionId':row['sessionId'],
+                  'room':str(row['roomIds'][0]) if len(row['roomIds'])==1 else 'all',
+                  'sequence':row['participationBegin']['frame']['worldSequence'],
+                  'next':row['participationBegin']['frame']['worldSequence']+1,
+                  'simulatedPlayers':5*len(row['roomIds'])} for row in rows],
+                  f'{mode} shipped console reopens every original participation Begin frame and its neighbor')
         first = result['results'][0]
         interval = first['interval']
         check(0 < interval['start'] < interval['end'] == interval['reached'] < first['throughSequence'],
@@ -885,6 +892,11 @@ def main():
                   and history['sessionId'] == older['sessionId'] and history['room'] == '3'
                   and history['throughSequence'] == older['replay']['throughSequence'],
                   'shipped history reopens the older original native replay and byte-identical ZIP after the Linked batch')
+            if args.check_venue_participation_gate:
+                sequence=older['participationBegin']['frame']['worldSequence']
+                check(history['participation']=={'sessionId':older['sessionId'], 'room':'3', 'sequence':sequence,
+                      'next':sequence+1, 'simulatedPlayers':5},
+                      'shipped history reopens the original room 3 participation frame after room reuse')
 
     def observe(entry,expected,begin=None, *, record=True):
         metadata=request('/api/sessions/'+entry['sessionId']+'/world');path='/api/sessions/'+entry['sessionId']+'/world/watch?mode=live';req=urllib.request.Request(uri+path,headers={'Authorization':'Bearer '+keys['Master']})

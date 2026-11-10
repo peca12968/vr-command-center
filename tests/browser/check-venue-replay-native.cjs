@@ -9,7 +9,7 @@ async function main() {
   const config = JSON.parse(await fs.readFile(descriptor, 'utf8'));
   assert.match(config.base, /^http:\/\/127\.0\.0\.1:\d+$/);
   const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
-  const results = [], fieldEvidence = [];
+  const results = [], fieldEvidence = [], participation = [];
   let history, roomReplay;
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1080 }, acceptDownloads: true });
@@ -36,6 +36,30 @@ async function main() {
       const sequence = Number(await canvas.getAttribute('data-sequence'));
       assert(sequence > 0 && sequence <= session.replay.throughSequence);
       return { sessionId: session.sessionId, room, sequence, throughSequence: session.replay.throughSequence };
+    }
+    async function openParticipation(session) {
+      const { worldSequence: sequence, elapsedMilliseconds } = session.participationBegin.frame;
+      const stream = page.waitForResponse(response => {
+        const url = new URL(response.url());
+        return url.pathname === `/api/sessions/${session.sessionId}/world/watch` && url.searchParams.get('mode') === 'replay'
+          && url.searchParams.get('fromFrame') === String(sequence) && url.searchParams.get('throughFrame') === String(sequence);
+      });
+      await page.locator(`[data-venue-participation-begin="${session.sessionId}"]`).click();
+      assert.equal((await stream).status(), 200);
+      const count = session.roomIds.length * 5;
+      await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${sequence} 格的有效姿態開場快照。 此格追蹤 0 席、合成 ${count} 席` }).waitFor();
+      assert.equal(await page.locator('#world-canvas').getAttribute('data-sequence'), String(sequence));
+      const room = session.roomIds.length === 1 ? String(session.roomIds[0]) : 'all';
+      assert.equal(await page.locator('#world-recording').inputValue(), session.sessionId);
+      assert.equal(await page.locator('#world-room').inputValue(), room);
+      assert.equal(await page.locator('#world-camera').inputValue(), room === 'all' ? 'overview' : 'top');
+      assert.equal(await page.locator('#world-actor option[value^="p:"]').count(), count);
+      assert.match(await page.locator('#world-status').innerText(), /錄製已核對封存 · 準備中/);
+      assert.ok((await page.locator('#world-time').innerText()).startsWith((elapsedMilliseconds / 1000).toFixed(2) + ' 秒'));
+      if (!participation.length) await page.locator('#world-player').screenshot({ path: path.join(path.dirname(output), config.mode + '-participation-begin.png') });
+      await page.locator('#world-frame-next').click();
+      await page.locator(`#world-canvas[data-sequence="${sequence + 1}"]`).waitFor();
+      return { sessionId: session.sessionId, room, sequence, next: sequence + 1, simulatedPlayers: count };
     }
     async function reviewInterval(replay) {
       const canvas = page.locator('#world-canvas');
@@ -183,6 +207,10 @@ async function main() {
       return { roomId, start, end, retainedEvents, omittedEvents, props: props.length, apiRequests: apiRequests.length };
     }
     for (const session of config.sessions) {
+      if (session.participationBegin) {
+        participation.push(await openParticipation(session));
+        await page.locator('#tab-operations').click();
+      }
       const replay = await openReplay(session);
       if (!results.length) {
         await page.screenshot({ path: path.join(path.dirname(output), config.mode + '-venue-replay.png') });
@@ -219,7 +247,12 @@ async function main() {
       const download = await started;
       assert.equal(download.suggestedFilename(), `vr-command-venue-reports-v1-${batch.requestId}.zip`);
       assert((await fs.readFile(await download.path())).equals(await fs.readFile(zip)));
-      history = { requestId: batch.requestId, zipMatched: true, ...await openReplay(older) };
+      let oldParticipation;
+      if (older.participationBegin) {
+        oldParticipation = await openParticipation(older);
+        await page.locator('#tab-operations').click();
+      }
+      history = { requestId: batch.requestId, zipMatched: true, ...await openReplay(older), participation: oldParticipation };
       await page.locator('#tab-operations').click();
       assert.equal(await picker.inputValue(), batch.requestId);
     }
@@ -227,6 +260,6 @@ async function main() {
   } finally {
     await browser.close();
   }
-  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay }, null, 2), { flag: 'wx' });
+  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation }, null, 2), { flag: 'wx' });
 }
 main().catch(error => { console.error(error.name + ': native venue replay UI failed'); process.exitCode = 1; });
