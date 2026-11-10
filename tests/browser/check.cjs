@@ -56,6 +56,14 @@ async function main() {
     diagnosticPage = page;
     function captureErrors(target) { target.on('pageerror', error => browserErrors.push(error.message)); target.on('console', message => { if (/Content Security Policy|violates.*directive/i.test(message.text())) browserErrors.push(message.text()); }); }
     captureErrors(page);
+    if (process.argv.includes('--layout-only')) {
+      const mission = await api('/missions', 'POST', { name: 'Layout test template', briefing: '', durationSeconds: 600,
+        environment: { mode: 'VR', weather: 'Clear', timeOfDay: 'Day', lightning: false },
+        enemies: { count: 1, behavior: 'Hold', autoAttack: false }, props: [] }, 'Master', 201);
+      await require('./layout-browser.cjs')({ context, api, tokens, base, mission, screenshots, check });
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed', scope: 'Placement and walkthrough previews with real API and Chromium' }, null, 2));
+      console.log(`PASS: ${checks} focused layout checks. Screenshots: ${screenshots}`); return;
+    }
     if (process.argv.includes('--ticket-download-fence-only')) {
       await require('./ticket-download-fence.cjs').checkTicketDownloadFence({ context, api, tokens, base, screenshots, check, captureErrors });
       check(browserErrors.length === 0, 'Ticket download fence has no uncaught browser or policy errors');

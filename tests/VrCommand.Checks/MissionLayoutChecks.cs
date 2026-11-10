@@ -28,13 +28,32 @@ internal static class MissionLayoutChecks
         {
             var spawn = gapReport.Spawns[route.Seat];
             var path = route.Path;
-            return path.Length > 1 && path[0] == new LayoutRoutePoint(spawn.X, spawn.Z) && path[^1].Z == 0
+            return route.SampleStep is null && path.Length > 1 && path[0] == new LayoutRoutePoint(spawn.X, spawn.Z) && path[^1].Z == 0
                 && path.Zip(path.Skip(1)).All(edge =>
                     Math.Abs(edge.First.X - edge.Second.X) + Math.Abs(edge.First.Z - edge.Second.Z) == .5f
                     && walk.ClearSegment(origin + new Vec3(edge.First.X, 1.65f, edge.First.Z), origin + new Vec3(edge.Second.X, 1.65f, edge.Second.Z)));
         }), "Removing one bag opens five sampled routes whose individual segments pass the actual walking surface");
         check(JsonSerializer.Serialize(gapReport.RoutePreview) == JsonSerializer.Serialize(Inspect(gap, 8).RoutePreview),
             "Identical room geometry gives deterministic routes independent of session topology");
+        var narrow = new[] { Prop("sandbag", -4.75f, -1), Prop("sandbag", -2.75f, -1), Prop("barrel", -1.4f, -1),
+            Prop("sandbag", .75f, -1), Prop("sandbag", 2.75f, -1), Prop("sandbag", 4.75f, -1) };
+        var narrowReport = Inspect(narrow, 8, SessionMode.Linked);
+        var narrowSurface = new ArenaWalkSurface(origin, narrow.Select(prop => new WorldProp(Guid.NewGuid(), 3,
+            prop.AssetId == "barrel" ? PropKind.Barrel : PropKind.Sandbag,
+            origin + new Vec3(prop.Position.X, prop.Position.Y, prop.Position.Z), prop.YawDegrees)).ToArray());
+        check(narrowReport.CanStart == true && narrowReport.RoutePreview is { } narrowRoutes && narrowRoutes.Seats.All(route =>
+        {
+            var spawn = narrowReport.Spawns[route.Seat];
+            var path = route.Path;
+            return route.SampleStep == .125f && path.Length > 1 && path[0] == new LayoutRoutePoint(spawn.X, spawn.Z) && path[^1].Z == 0
+                && path.Any(point => point.Z == -1 && point.X > -.76f && point.X < -.55f)
+                && path.Zip(path.Skip(1)).All(edge =>
+                    Math.Abs(edge.First.X - edge.Second.X) + Math.Abs(edge.First.Z - edge.Second.Z) == .125f
+                    && narrowSurface.ClearSegment(origin + new Vec3(edge.First.X, 0, edge.First.Z), origin + new Vec3(edge.Second.X, 0, edge.Second.Z)));
+        }), "A narrow offset opening missed by the half-metre grid has five swept-surface routes");
+        var tooTight = narrow.Select((prop, index) => index < 3 ? prop : prop with { Position = prop.Position with { X = prop.Position.X - .22f } }).ToArray();
+        check(Inspect(tooTight).RoutePreview!.Seats.All(route => route.Path.Length == 0),
+            "Finer samples cannot fit a body through an opening below the movement footprint");
         check(Inspect([Prop("sandbag", 5.2f, 1, 45)]).Issues.Any(i => i.Code == "OutsideRoom"), "Rotated cover corners cannot extend beyond the room even when its centre is inside");
         check(Inspect([Prop("barrel", 5.65f, 1)]).CanStart == true, "A cover face may touch the room boundary within the defined float tolerance");
         check(Inspect([Prop("sandbag", 0, 2), Prop("sandbag", 2, 2)]).CanStart == true, "Face-touching cover is allowed for barricades without positive-area overlap");
@@ -104,6 +123,17 @@ internal static class MissionLayoutChecks
             && openingTrial.World.PlayerSnapshot(openingPlayer).Head.Z == 0,
             "The same admitted authority accepts every midpoint route sample through the saved opening");
         manager.End(openedSession.Id, actor);
+        var offsetOpening = store.Create(defensive.Definition with { Name = "Offset walkway opening", Props = narrow });
+        var offsetSession = manager.Create(SessionMode.Independent, [3], offsetOpening, actor);
+        var (offsetTrial, offsetPlayer) = StartTrial(offsetSession);
+        var finePath = MissionLayout.Inspect(offsetOpening.Definition, SessionMode.Independent).RoutePreview!.Seats[0].Path;
+        check(finePath.Length > 1 && finePath.Select((point, index) =>
+        {
+            var head = new Vec3(point.X, 1.65f, point.Z);
+            return offsetTrial.Pose(1, head, head, new(0, 0, 1), index * .25);
+        }).All(accepted => accepted) && offsetTrial.World.PlayerSnapshot(offsetPlayer).Head.Z == 0,
+            "The admitted game authority accepts each fine sample through the saved offset opening");
+        manager.End(offsetSession.Id, actor);
         var compact = store.Create(defensive.Definition with { Name = "Reinforcement limits", Props = rows });
         var compactSession = manager.Create(SessionMode.Independent, [3], compact, actor);
         _ = StartTrial(compactSession);

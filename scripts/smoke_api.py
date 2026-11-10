@@ -292,6 +292,16 @@ try:
                               "props": [prop for prop in wall if prop["position"]["x"] != 1]})
             require(opening["canStart"] and all(row["path"][-1]["z"] == 0 for row in opening["routePreview"]["seats"]),
                     "Removing one bag produces a sampled route from each seat to the midfield")
+            narrow = [{"assetId": "barrel" if x == -1.4 else "sandbag", "position": {"x": x, "y": 0, "z": -1}, "yawDegrees": 0}
+                      for x in (-4.75, -2.75, -1.4, .75, 2.75, 4.75)]
+            refined = request("POST", "/api/mission-layout", {**layout_body, "props": narrow})
+            linked_refined = request("POST", "/api/mission-layout", {**layout_body, "props": narrow, "mode": "Linked"})
+            require(refined["canStart"] and linked_refined["canStart"]
+                    and refined["routePreview"] == linked_refined["routePreview"]
+                    and refined["routePreview"]["step"] == .5
+                    and all(row["sampleStep"] == .125 and row["path"][-1]["z"] == 0
+                            for row in refined["routePreview"]["seats"]),
+                    "Fine offset routes retain the base preview step and use the same room geometry in both topologies")
             require(layout["version"] == 1 and layout["canStart"] and layout["enemyCapacityPerRoom"] == 117 and len(layout["spawns"]) == 5,
                     "Authenticated draft preflight uses actual room and admission geometry")
             blocked_prop = {"assetId": "barrel", "position": {"x": -3, "y": 0, "z": -3}, "yawDegrees": 0}

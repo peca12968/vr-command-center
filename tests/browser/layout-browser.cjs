@@ -184,6 +184,32 @@ module.exports = async function layoutBrowser({ context, api, tokens, base, miss
     await editor.locator('#launch-layout-route-summary').filter({ hasText: '五個出生位皆有' }).waitFor();
     check(await editor.locator('#launch-mission').inputValue() === openedId && (await api(`/missions/${barricade.id}/layout`)).routePreview.seats.every(seat => !seat.path.length),
       'Saving an opening updates only the new revision and its matching launch preview');
+    await editor.locator('#tab-missions').click();
+    await editor.locator('#new-mission').click();
+    const narrowName = '場地通路・偏移窄缺口';
+    await editor.locator('#draft-name').fill(narrowName);
+    const narrow = [-4.75, -2.75, -1.4, .75, 2.75, 4.75].map(x => prop(x === -1.4 ? 'barrel' : 'sandbag', x, -1));
+    for (const { assetId, position } of narrow) {
+      await editor.locator('#add-' + assetId).click();
+      await set('prop-x', position.x); await set('prop-z', position.z);
+    }
+    await editor.locator('#draft-layout-route-summary').filter({ hasText: '0.125 公尺取樣' }).waitFor();
+    const fineDraft = await editor.locator('#layout-routes polyline[data-sample-step="0.125"]').evaluateAll(lines => lines.map(line => line.getAttribute('points')));
+    check(fineDraft.length === 5 && await editor.locator('#layout-spawns [data-route-missing]').count() === 0,
+      'The editable offset gap shows five refined routes and no missing seat markers');
+    await editor.screenshot({ path: path.join(screenshots, 'layout-fine-opening.png'), fullPage: true });
+    await editor.locator('#mission-form button[type=submit]').click();
+    await editor.waitForFunction(() => document.querySelector('#draft-status').textContent.startsWith('已儲存') && !document.querySelector('#mission-fields').disabled);
+    const fine = (await api('/mission-library')).find(row => row.mission.definition.name === narrowName).mission;
+    const fineReport = await api(`/missions/${fine.id}/layout`);
+    await editor.locator('#launch-version').click();
+    await editor.locator('#launch-layout-route-summary').filter({ hasText: '0.125 公尺取樣' }).waitFor();
+    const fineSaved = await editor.locator('#launch-layout-routes polyline[data-sample-step="0.125"]').evaluateAll(lines => lines.map(line => line.getAttribute('points')));
+    check(await editor.locator('#launch-mission').inputValue() === fine.id
+      && JSON.stringify(fine.definition.props) === JSON.stringify(narrow)
+      && JSON.stringify(fineSaved) === JSON.stringify(fineDraft)
+      && fineReport.routePreview.seats.every(route => route.sampleStep === .125 && route.path.at(-1).z === 0),
+      'Saving the decimal geometry yields identical refined paths in the launch map and saved mission report');
     await editor.locator('#tab-operations').click();
     const vacant = (await api('/rooms')).find(room => !room.sessionId);
     await editor.locator('#launch-mode').selectOption('Independent');

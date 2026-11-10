@@ -84,6 +84,7 @@ def main():
     p.add_argument('--check-venue-enemies', action='store_true', help='Use venue enemy policy to enable and stop native attacks')
     p.add_argument('--check-venue-enemy-ui', action='store_true', help='Verify the original enemy batch and open its live witness in the packaged console')
     p.add_argument('--check-layout-preview',action='store_true',help='Load a saved barricade opening and compare its preview with native world geometry')
+    p.add_argument('--check-layout-fine-opening',action='store_true',help='Use a saved offset opening that requires 0.125m layout samples')
     p.add_argument('--check-room-reports',action='store_true',help='Verify scoped Linked CSVs and the ZIP against the full sealed native report')
     p.add_argument('--check-room-combat',action='store_true',help='Require actual enemy damage on every original admission and reconcile each replay frame and final report')
     p.add_argument('--check-hardware-feedback',action='store_true',help='Match live room feedback to the native combat reports')
@@ -174,6 +175,8 @@ def main():
     if args.hardware_simulator_package and not (args.check_hardware_feedback or openxr_hardware):
         p.error('--hardware-simulator-package requires --check-hardware-feedback or --openxr-mock-only')
     if args.prepare_independent_set and not args.player_package:p.error('--prepare-independent-set requires the player package')
+    if args.check_layout_fine_opening and not args.check_layout_preview:
+        p.error('--check-layout-fine-opening requires --check-layout-preview')
     if args.check_independent_room_missions and (not args.prepare_independent_set or args.check_layout_preview or args.check_room_combat):
         p.error('--check-independent-room-missions requires --prepare-independent-set and its own mission fixtures')
     if args.mission_template and (not args.prepare_independent_set or venue_only or args.openxr_mock_only
@@ -261,6 +264,9 @@ def main():
         if props is None:
             props=[{'assetId':'sandbag','position':{'x':x,'y':0,'z':-1},'yawDegrees':0}
                    for x in (-5,-3,-1,3,5)] if args.check_layout_preview else []
+            if args.check_layout_fine_opening:
+                props=[{'assetId':'barrel' if x==-1.4 else 'sandbag','position':{'x':x,'y':0,'z':-1},'yawDegrees':0}
+                       for x in (-4.75,-2.75,-1.4,.75,2.75,4.75)]
         return request('/api/missions',{'name':'Portable '+label,'briefing':'Owned PC package fixture','durationSeconds':600,'environment':{'mode':experience,'weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':enemy_count,'behavior':'Hold','autoAttack':auto_attack},'props':props},expected=201)
     def create(rooms,label, **options):
         mission=save_mission(label,**options)
@@ -1034,11 +1040,14 @@ def main():
             state=entry['layoutSession'];mission=state['mission']
             preview=request('/api/missions/'+mission['id']+'/layout?mode='+state['mode'])
             routes=preview['routePreview']['seats']
+            low, high = (-.76,-.55) if args.check_layout_fine_opening else (0,2)
+            step = .125 if args.check_layout_fine_opening else None
             check(preview['canStart'] and [row['seat'] for row in routes]==list(range(5)) and all(
-                row['path'] and row['path'][-1]['z']==0 and any(point['z']==-1 and 0<point['x']<2 for point in row['path'])
+                row.get('sampleStep')==step and row['path'] and row['path'][-1]['z']==0
+                and any(point['z']==-1 and low<point['x']<high for point in row['path'])
                 for row in routes),entry['label']+' saved preview routes through the known opening')
             header=report['finalWorld']['header']
-            expected={(room,'Sandbag',(room-3)*14+prop['position']['x'],prop['position']['y'],prop['position']['z'],prop['yawDegrees'])
+            expected={(room,prop['assetId'].capitalize(),(room-3)*14+prop['position']['x'],prop['position']['y'],prop['position']['z'],prop['yawDegrees'])
                 for room in state['roomIds'] for prop in mission['definition']['props']}
             actual={(prop['roomId'],prop['kind'],prop['feet']['x'],prop['feet']['y'],prop['feet']['z'],prop['yaw']) for prop in header['props']}
             check(actual==expected and len(header['props'])==len(expected),entry['label']+' native world preserves every saved cover coordinate and opening')

@@ -5,7 +5,7 @@ from pathlib import Path,PurePosixPath
 ROOT=Path(__file__).resolve().parents[1];TOP='VRCommand-ControlServer'
 SECRET_KEYS={'operatorkeys','operatorkeyfile','gameserverkey','jointicket','playerticketsigningkey','controlpipetoken'}
 FORBIDDEN_PARTS={'data','missions','sessions','telemetry','journals'}
-README='''VR Command Windows 管理服務包 API 0.31.0／控制台 0.31.75
+README='''VR Command Windows 管理服務包 API 0.31.0／控制台 0.31.76
 
 完整解壓後開啟 Start-Control.exe。
 1. 首次選擇監聽IPv4與埠號（預設127.0.0.1:5081），按「新增資料實例」。
@@ -45,6 +45,7 @@ GameServer角色供遊戲伺服器使用，不能拿到玩家端；玩家使用�
 VR 五房連線 ZIP 可供 Quest 部署工具直接預檢及線上核對原票券、席位裝置與公告端點。
 單席、整房及五房配票在存檔前重新核對原場次與入場名冊。
 合併場的已封存回放可依指定房間匯出玩家檔，保留原畫格與時間。
+場地通路預覽可在原格點找不到路徑時，使用較細格點核對偏移缺口。
 
 control-package.json是檔案SHA256與建置紀錄，不是數位簽章或可信發行者證明。
 Notices/保留實際執行環境與NuGet metadata、授權及上游參考NOTICE；參考NOTICE可能提及未隨包附帶的元件。
@@ -76,7 +77,7 @@ def payload(name,content=None):
 def publication(build):
     build=plain(build);receipt=read(build/'publish-receipt.json');folder=plain(build/'publication')
     if receipt.get('schemaVersion')!=1 or receipt.get('target')!='win-x64' or receipt.get('apiVersion')!='0.31.0':raise ValueError('Use an actual supported Windows publication')
-    if receipt.get('consoleVersion')!='0.31.75':raise ValueError('Publish the current console 0.31.75 before packaging')
+    if receipt.get('consoleVersion')!='0.31.76':raise ValueError('Publish the current console 0.31.76 before packaging')
     expected=receipt['files'];actual={p.relative_to(folder).as_posix() for p in folder.rglob('*') if p.is_file()}
     if actual!=set(expected):raise ValueError('Publication contains missing or additional files')
     for name,value in expected.items():

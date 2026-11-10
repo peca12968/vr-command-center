@@ -54,10 +54,17 @@ function routePreview(report) {
     || !Array.isArray(preview.seats) || preview.seats.length !== 5) return null;
   for (const [seat, route] of preview.seats.entries()) {
     const spawn = report.spawns.find(value => value.seat === seat);
-    if (!spawn || route?.seat !== seat || !Array.isArray(route.path) || route.path.length > 529
+    const fine = route?.sampleStep === .125;
+    if (!spawn || route?.seat !== seat || (!fine && route.sampleStep !== undefined)
+      || !Array.isArray(route.path) || route.path.length > (fine ? 7921 : 529)
       || route.path.some(point => !point || ![point.x, point.z].every(value => Number.isFinite(value) && Math.abs(value) <= 5.5))) return null;
     const [start] = route.path;
     if (start && (start.x !== spawn.x || start.z !== spawn.z || route.path.at(-1).z !== preview.targetZ)) return null;
+    if (fine && (!start || route.path.some((point, index) => {
+      if (index === 0) return false;
+      const dx = Math.abs(point.x - route.path[index - 1].x), dz = Math.abs(point.z - route.path[index - 1].z);
+      return !((dx === .125 && dz === 0) || (dx === 0 && dz === .125));
+    }))) return null;
   }
   return preview.seats;
 }
@@ -82,7 +89,9 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
   function invalidateSaved(id, mode) { const key = id + '/' + mode; cache.delete(key); savedRequests.delete(key); }
   function clearMarks() { for (const prop of $('prop-layer').children) delete prop.dataset.layoutInvalid; }
   function drawRoutes(id, routes) {
-    $(id).replaceChildren(...routes.map(route => svg('polyline', { points: route.path.map(point => `${point.x},${-point.z}`).join(' ') })));
+    $(id).replaceChildren(...routes.map(route => svg('polyline', {
+      points: route.path.map(point => `${point.x},${-point.z}`).join(' '), 'data-sample-step': route.sampleStep ?? .5
+    })));
   }
   function drawSpawns(id, report, missing) {
     const blocked = new Set(report?.issues.filter(issue => issue.code === 'SpawnBlocked').map(issue => issue.seat));
@@ -142,11 +151,13 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
     const summary = $(prefix + '-layout-summary'), list = $(prefix + '-layout-issues'); list.replaceChildren();
     const routes = routePreview(report), routeSummary = $(prefix + '-layout-route-summary');
     const missing = routes?.filter(route => !route.path.length).map(route => route.seat + 1) ?? [];
+    const fine = routes?.filter(route => route.sampleStep === .125).map(route => route.seat + 1) ?? [];
     routeSummary.hidden = !routes;
     routeSummary.classList.toggle('layout-route-warning', missing.length > 0);
-    text(routeSummary, !routes ? '' : missing.length
+    const coverage = !routes ? '' : missing.length
       ? `未找到通往中線的取樣路徑 · 出生位 ${missing.join('、')}`
-      : '五個出生位皆有到中線的取樣路徑。');
+      : '五個出生位皆有到中線的取樣路徑。';
+    text(routeSummary, fine.length ? coverage + ` · 0.125 公尺取樣 · 出生位 ${fine.join('、')}` : coverage);
     if (prefix === 'draft') {
       drawRoutes('layout-routes', (routes ?? []).filter(route => route.path.length));
       paintTrial();
