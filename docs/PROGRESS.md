@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-10 Windows 啟動器圖形介面重驗
+
+- 使用啟動器 1.12、Windows 遊戲 0.50.1 和管理包 0.31.108 重試。已在啟動器輸入隔離管理實例路徑。「載入／更新」兩次被 `PickerHost.exe` 攔截，第二次已重新啟用並擷取目標視窗。停止桌面輸入後終止本次啟動器，測試以退出碼 1 收尾，未觀察到原生遊戲程序啟動。隔離管理服務正常退出，C／F 的 9 份快照檔案逐檔雜湊一致。 [圖形介面阻擋](../artifacts/server-gui/run-3ed4533cb2b345e1ab43a48193bb6e7c/gui-blocker.json) · [清理結果](../artifacts/server-gui/run-3ed4533cb2b345e1ab43a48193bb6e7c/cleanup.json)
+- 沿用同一套件改走命令列。新隔離場退出碼 0、38 項通過。以測試 CA 和固定憑證指紋走 HTTPS／WSS，一名同機 Windows 模擬玩家由配票進場，取得正式戰績，伺服器收到一份回條。世界封存尾界 26 格，另完成戰鬥封存（0 筆事件），已核對一格原即時畫面與封存回放完全相符。遊戲、玩家與管理程序均已停止。 [命令列報告](../artifacts/control-https-checks/run-d1eef7c82c5c4b4fbb1fbd5c1d6a4ba6/checks.json) · [玩家戰績核對](../artifacts/control-https-checks/run-d1eef7c82c5c4b4fbb1fbd5c1d6a4ba6/native-field-results.json)
+
 ## 2026-11-10 主控與五房控的管理連線回條
 
 - 可攜管理包的直接 HTTPS 監聽會記下原 TCP 連線來源。主控與房控可用同一輪代號取得各自的簽章回條，主控再以獨立配置表核對六個私有 IPv4 位址。回條有效 15 分鐘，由原管理程序驗證。無需保存新場次或工作站資料。 [操作方式](WINDOWS_CONTROL_PACKAGE.md#核對主控與五房控的直連來源)
