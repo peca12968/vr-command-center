@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `windows-control-console-0.31.78-full-participation-win-x64.zip` 提供可選的五房 25 席有效姿態開場。ZIP 為 52,840,795 bytes，SHA-256 `d4cdbbdb51b399596f846853c543f57a9756bb1a5dbe514b678bc005fa513292`，解壓核對 540 筆清單與 520 個執行檔案。 [開場操作](PLAYER_READINESS.md#五房各-5-席有效姿態開場)
+
 2026-11-10 `windows-control-console-0.31.77-live-watch-win-x64.zip` 提供即時觀戰中斷後的同來源重連。ZIP 為 52,839,148 bytes，SHA-256 `43f7dd9454adf46b3bf0aec1441451417aa7568199c50929bcf84c5d445f08f7`，解壓核對 540 筆清單與 520 個執行檔案。 [觀戰操作](WORLD_RECORDING.md#即時觀戰斷線後重新連接)
 
 2026-11-10 `windows-control-console-0.31.76-fine-opening-win-x64.zip` 提供場地通路的細格補查。ZIP 為 52,837,112 bytes，SHA-256 `9296a87ff50338c8a35862dda7d45f36326751ff614def8cacf99a844a0490e5`，解壓核對 540 筆清單與 520 個執行檔案。 [場地操作](LAYOUT.md#出生位通路預覽)
