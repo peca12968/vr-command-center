@@ -52,6 +52,13 @@ public static class WorldRoutes
             context.Response.Headers.CacheControl = "no-store";
             return Results.Json(frame, WorldJson.Options);
         });
+        app.MapGet("/api/sessions/{id:guid}/world/frame-context", (Guid id, long centerFrame, long throughFrame,
+            WorldRecordings store, HttpContext context) =>
+        {
+            var result = store.FrameContext(id, centerFrame, throughFrame, Actor(context), context.RequestAborted);
+            context.Response.Headers.CacheControl = "no-store";
+            return Results.Json(result, WorldJson.Options);
+        });
         app.MapGet("/api/sessions/{id:guid}/world/cameras", (Guid id, WorldRecordings store, HttpContext context) => store.Bookmarks(id, Actor(context)));
         app.MapPut("/api/sessions/{id:guid}/world/cameras/{camera:guid}", (Guid id, Guid camera, CameraBookmarkDraft draft, WorldRecordings store, HttpContext context) => store.SaveBookmark(id, camera, draft, Actor(context)));
         app.MapDelete("/api/sessions/{id:guid}/world/cameras/{camera:guid}", (Guid id, Guid camera, WorldRecordings store, HttpContext context) =>

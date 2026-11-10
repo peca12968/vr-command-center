@@ -230,6 +230,11 @@ async function main() {
       const damageEvents = row => row.packet.events.filter(event => event.kind === 'PlayerDamaged' && event.playerId === damaged.playerId);
       const latest = originals.findLast(row => damageEvents(row).length);
       assert.ok(latest && latest.packet.sequence < replay.throughSequence);
+      const center = latest.packet;
+      const nearby = originals.map(row => row.packet).filter(packet => packet.sequence >= center.sequence - 149
+        && packet.sequence <= center.sequence + 150 && Math.abs(packet.elapsedMilliseconds - center.elapsedMilliseconds) <= 5000);
+      const mark = ({ sequence, elapsedMilliseconds }) => ({ sequence, elapsedMilliseconds });
+      const contextStart = mark(nearby[0]), contextEnd = mark(nearby.at(-1));
       const review = await browser.newPage({ viewport: { width: 1440, height: 1080 } });
       const writes = [];
       review.on('request', request => {
@@ -252,11 +257,37 @@ async function main() {
         await review.locator('#world-event-search-status').filter({ hasText: `已跳到第 ${latest.packet.sequence} 格` }).waitFor();
         assert.equal(await review.locator('#world-room').inputValue(), String(roomId));
         assert.equal(await review.locator('#world-events tr').count(), damageEvents(latest).length);
-        assert.deepEqual(writes, []);
         await review.locator('#world-review').screenshot({ path: path.join(path.dirname(output), 'linked-room-03-latest-damage.png') });
+        const contextReply = review.waitForResponse(reply => new URL(reply.url()).pathname === new URL(world).pathname + '/frame-context');
+        await review.locator('#world-event-context').click();
+        const resolved = await contextReply;
+        assert.equal(resolved.headers()['cache-control'], 'no-store');
+        assert.deepEqual(await resolved.json(), { sessionId: replay.sessionId, streamId: header.streamId, throughFrame: replay.throughSequence,
+          center: mark(center), start: contextStart, end: contextEnd });
+        await review.locator('#world-event-context-status').filter({ hasText: `包含事件第 ${center.sequence} 格` }).waitFor();
+        const canvas = review.locator('#world-canvas');
+        assert.equal(Number(await canvas.getAttribute('data-sequence')), center.sequence);
+        // Setting the rate on a paused replay can start it. Set the value without changing the current frame.
+        await review.locator('#world-speed').evaluate(select => { select.value = '4'; });
+        const playback = review.waitForRequest(request => {
+          const url = new URL(request.url());
+          return url.pathname === new URL(world).pathname + '/watch'
+            && url.searchParams.get('fromFrame') === String(contextStart.sequence)
+            && url.searchParams.get('throughFrame') === String(contextEnd.sequence);
+        });
+        await review.locator('#world-clip-play').click();
+        await playback;
+        await review.locator('#world-clip-status').filter({ hasText: '已到片段終點' }).waitFor();
+        assert.equal(Number(await canvas.getAttribute('data-sequence')), contextEnd.sequence);
+        assert.equal(await review.locator('#world-room').inputValue(), String(roomId));
+        assert.equal(await review.locator('#world-event-kind').inputValue(), 'PlayerDamaged');
+        assert.equal(await review.locator('#world-review-player-scope').isVisible(), true);
+        assert.deepEqual(writes, []);
+        await review.locator('#world-review').screenshot({ path: path.join(path.dirname(output), 'linked-room-03-damage-context.png') });
       } finally { await review.close(); await page.bringToFront(); }
       return { roomId, start, end, retainedEvents, omittedEvents, props: props.length, apiRequests: apiRequests.length,
-        latestDamage: { frame: latest.packet.sequence, matches: damageEvents(latest).length, managementWrites: writes.length } };
+        latestDamage: { frame: latest.packet.sequence, matches: damageEvents(latest).length, managementWrites: writes.length,
+          contextStart, contextEnd } };
     }
     for (const session of config.sessions) {
       if (session.participationBegin) {

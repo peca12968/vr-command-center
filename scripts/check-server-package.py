@@ -1023,6 +1023,10 @@ def main():
             damage = room['latestDamage']
             check(1 <= damage['frame'] < first['throughSequence'] and damage['matches'] > 0 and damage['managementWrites'] == 0,
                   'linked room 3 controller opens its latest original damage frame without management writes')
+            check(damage['contextStart']['sequence'] <= damage['frame'] <= damage['contextEnd']['sequence']
+                  and 1 <= damage['contextEnd']['sequence'] - damage['contextStart']['sequence'] <= 299
+                  and 0 <= damage['contextEnd']['elapsedMilliseconds'] - damage['contextStart']['elapsedMilliseconds'] <= 10000,
+                  'linked room 3 controller marks and plays the original saved context around that damage')
         if earlier:
             older = earlier['sessions'][2]
             history = result['history']

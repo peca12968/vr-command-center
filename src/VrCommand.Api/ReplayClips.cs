@@ -9,6 +9,9 @@ public sealed record ReplayClipDraft(Guid StreamId, string Name, long StartFrame
 public sealed record ReplayClip(Guid Id, Guid StreamId, string Name, long StartFrame, long EndFrame,
     long StartMilliseconds, long EndMilliseconds, DateTimeOffset CreatedAtUtc, bool Deleted);
 public sealed record ReplayClipList(Guid SessionId, Guid StreamId, ReplayClip[] Clips);
+public sealed record ReplayFrameMark(long Sequence, long ElapsedMilliseconds);
+public sealed record ReplayFrameContext(string SessionId, string StreamId, long ThroughFrame,
+    ReplayFrameMark Center, ReplayFrameMark Start, ReplayFrameMark End);
 
 public sealed partial class WorldRecordings
 {
@@ -38,6 +41,46 @@ public sealed partial class WorldRecordings
             var clips = new List<ReplayClip>();
             while (rows.Read()) clips.Add(ReadClip(rows, stream));
             return new(id, stream, clips.ToArray());
+        }
+    }
+
+    public ReplayFrameContext FrameContext(Guid id, long centerFrame, long throughFrame, OperatorIdentity actor, CancellationToken cancellation)
+    {
+        const int windowMilliseconds = 5000;
+        var info = ReplayClipRecording(id, actor, write: false);
+        if (centerFrame < 1 || centerFrame > throughFrame)
+            throw new ArgumentException("Use a positive center frame within the saved range.");
+        if (throughFrame > info.AcceptedSequence)
+            throw new KeyNotFoundException("No saved world frame with this sequence.");
+
+        var session = id.ToString("D");
+        lock (gate)
+        {
+            var center = ReadMark("""
+                SELECT sequence, elapsed FROM world_frames WHERE session=$session AND sequence=$center
+                """, ("$center", centerFrame));
+            var start = ReadMark("""
+                SELECT sequence, elapsed FROM world_frames
+                WHERE session=$session AND sequence BETWEEN $first AND $center AND elapsed >= $time
+                ORDER BY sequence LIMIT 1
+                """, ("$first", Math.Max(1, centerFrame - 149)), ("$center", centerFrame),
+                ("$time", center.ElapsedMilliseconds - windowMilliseconds));
+            var end = ReadMark("""
+                SELECT sequence, elapsed FROM world_frames
+                WHERE session=$session AND sequence BETWEEN $center AND $last AND elapsed <= $time
+                ORDER BY sequence DESC LIMIT 1
+                """, ("$center", centerFrame), ("$last", Math.Min(throughFrame, centerFrame + 150)),
+                ("$time", center.ElapsedMilliseconds + windowMilliseconds));
+            return new(info.Header.sessionId, info.Header.streamId, throughFrame, center, start, end);
+        }
+
+        ReplayFrameMark ReadMark(string query, params (string Name, object Value)[] parameters)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            using var command = Command(query, [("$session", session), .. parameters]);
+            using var row = command.ExecuteReader();
+            if (!row.Read()) throw new InvalidDataException("Saved world frame sequence has a gap.");
+            return new(row.GetInt64(0), row.GetInt64(1));
         }
     }
 

@@ -23,16 +23,22 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   let connecting = false, stepping = false, savedLimit = null, savedFinished = false;
   let reviewPlayer = null, actors = new Map(), actorInitialized = false;
   let clipStart = null, clipEnd = null, clipPosition = null, clipPlayback = '';
+  let eventContextRequest = null;
   let returnLiveSource = null, liveRetryTimer;
   let venueReview = null, venueAnchor = null;
   const cameras = mountCameras(getKey, unauthorized, () => scene, freeView);
   const cameraForm = mountWorldCameraForm(() => scene, freeView);
-  const eventSearch = mountWorldEventSearch(response, readFrame, eventNames, () => { if (frame) showEvents(frame); });
+  const eventSearch = mountWorldEventSearch(response, readFrame, eventNames, () => {
+    clearEventContext();
+    if (frame) showEvents(frame);
+    reviewControls();
+  });
   const policyFrames = mountWorldPolicyFrames(response, readFrame);
   const savedClips = mountSavedClips(response, canWriteClips, loadClip);
   function message(text, error = false) { $('world-message').textContent = text; $('world-message').classList.toggle('replay-error', error); }
   function stop() {
     epoch++; clearTimeout(liveRetryTimer); liveRetryTimer = undefined;
+    clearEventContext();
     controller?.abort(); controller = null; connected = connecting = stepping = false;
     scene?.weather.pause(); scene?.draw(); $('world-pause').textContent = '繼續回放';
   }
@@ -155,6 +161,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   }
   function selectRoom(room, center = true) {
     if (room !== 'all' && !info?.header.roomIds.includes(Number(room))) return;
+    clearEventContext();
     $('world-room').value = room;
     const camera = $('world-camera');
     scene?.setAudioRoom(room);
@@ -262,6 +269,51 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     clipEnd = { sequence: clip.endFrame, elapsedMilliseconds: clip.endMilliseconds };
     clipPlayback = ''; reviewControls();
   }
+  function replayThroughFrame() {
+    return info && Number.isInteger(savedLimit) ? Math.min(savedLimit, info.acceptedSequence) : info?.acceptedSequence;
+  }
+  function clearEventContext() {
+    if (eventContextRequest) {
+      eventContextRequest.abort(); eventContextRequest = null; stepping = false;
+    }
+    $('world-event-context-status').textContent = '';
+  }
+  async function markEventContext() {
+    if ($('world-event-context').disabled) return;
+    const { sessionId, streamId } = info.header;
+    const { sequence: centerFrame, elapsedMilliseconds } = frame.packet;
+    const throughFrame = replayThroughFrame();
+    const request = eventContextRequest = new AbortController();
+    const signal = AbortSignal.any([request.signal, AbortSignal.timeout(8000)]);
+    const note = $('world-event-context-status');
+    stepping = true; reviewControls(); note.textContent = '正在核對事件前後的保存畫格…';
+    try {
+      const query = new URLSearchParams({ centerFrame, throughFrame });
+      const value = await (await response(`/api/sessions/${sessionId}/world/frame-context?${query}`, signal)).json();
+      if (eventContextRequest !== request) return;
+      const { center, start, end } = value;
+      const validMark = mark => Number.isSafeInteger(mark?.sequence) && Number.isSafeInteger(mark.elapsedMilliseconds)
+        && mark.elapsedMilliseconds >= 0 && mark.sequence >= 1 && mark.sequence <= throughFrame;
+      if (value.sessionId !== sessionId || value.streamId !== streamId || value.throughFrame !== throughFrame
+        || center?.sequence !== centerFrame || center.elapsedMilliseconds !== elapsedMilliseconds || !validMark(start) || !validMark(end)
+        || start.sequence > centerFrame || end.sequence < centerFrame || start.sequence < centerFrame - 149 || end.sequence > centerFrame + 150
+        || start.elapsedMilliseconds > elapsedMilliseconds || start.elapsedMilliseconds < elapsedMilliseconds - 5000
+        || end.elapsedMilliseconds < elapsedMilliseconds || end.elapsedMilliseconds > elapsedMilliseconds + 5000
+        || (start.sequence === centerFrame && start.elapsedMilliseconds !== elapsedMilliseconds)
+        || (end.sequence === centerFrame && end.elapsedMilliseconds !== elapsedMilliseconds)) throw new Error('回應的片段範圍不同。');
+      if (start.sequence === end.sequence) {
+        note.textContent = '事件附近只有一個保存畫格，已保留原標記。';
+        return;
+      }
+      loadClip({ startFrame: start.sequence, startMilliseconds: start.elapsedMilliseconds,
+        endFrame: end.sequence, endMilliseconds: end.elapsedMilliseconds });
+      note.textContent = `已標記第 ${start.sequence} 至 ${end.sequence} 格，包含事件第 ${centerFrame} 格。`;
+    } catch {
+      if (eventContextRequest === request) note.textContent = '無法核對事件片段，已保留原標記。';
+    } finally {
+      if (eventContextRequest === request) { eventContextRequest = null; stepping = false; reviewControls(); }
+    }
+  }
   function reviewControls() {
     const recent = $('world-recent');
     const canReturn = Boolean(returnLiveSource);
@@ -278,7 +330,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     clipControls(idle);
     $('world-review').hidden = !showing;
     $('world-frame-back').disabled = !idle || frame.packet.sequence <= 1;
-    const throughFrame = info && Number.isInteger(savedLimit) ? Math.min(savedLimit, info.acceptedSequence) : info?.acceptedSequence;
+    const throughFrame = replayThroughFrame();
     savedClips.update(showing ? { sessionId: info.header.sessionId, streamId: info.header.streamId, roomIds: info.header.roomIds, throughFrame, complete: info.complete } : null,
       idle, clipEnd ? { startFrame: clipStart.sequence, endFrame: clipEnd.sequence } : null);
     $('world-frame-next').disabled = !idle || frame.packet.sequence >= throughFrame;
@@ -289,6 +341,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     $('world-review-player-name').textContent = reviewPlayer ? `檢討玩家 ${reviewPlayer.name} · ${shortId(reviewPlayer.id)}` : '';
     eventSearch.update(showing ? { sessionId: info.header.sessionId, streamId: info.header.streamId,
       throughFrame, room: $('world-room').value, playerId: reviewPlayer?.id ?? null, frameSequence: frame.packet.sequence, idle } : null);
+    $('world-event-context').disabled = !idle || !filteredEvents(frame).length;
     policyFrames.update(showing ? { sessionId: info.header.sessionId, streamId: info.header.streamId,
       throughFrame, frameSequence: frame.packet.sequence, idle } : null);
   }
@@ -424,6 +477,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   }
   function show(value, single = false) {
     const previous = single ? null : frame?.packet.frame;
+    if (frame?.packet.sequence !== value.packet.sequence) clearEventContext();
     frame = value;
     info.durationMilliseconds = Math.max(info.durationMilliseconds, value.packet.elapsedMilliseconds);
     info.acceptedSequence = Math.max(info.acceptedSequence, value.packet.sequence);
@@ -793,7 +847,9 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   $('world-clip-end').addEventListener('click', () => markClip(true));
   $('world-clip-play').addEventListener('click', () => playClip());
   $('world-clip-clear').addEventListener('click', () => { clearClip(); reviewControls(); });
+  $('world-event-context').addEventListener('click', markEventContext);
   $('world-review-clear-player').addEventListener('click', () => {
+    clearEventContext();
     reviewPlayer = null;
     if (frame) { showStatistics(); showEvents(frame); }
     reviewControls();

@@ -161,6 +161,25 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         request(route + "/frames/0", expected=400)
         request(route + f"/frames/{info['acceptedSequence'] + 1}", expected=404)
         check(True, "Exact frame reads retain authorization and reject invalid or missing frames")
+        context_route = route + "/frame-context"
+        center = combat_packet["sequence"]
+        mark = lambda packet: {"sequence": packet["sequence"], "elapsedMilliseconds": packet["elapsedMilliseconds"]}
+        eligible = [packet for packet in packets if abs(packet["elapsedMilliseconds"] - combat_packet["elapsedMilliseconds"]) <= 5000]
+        expected_context = {"sessionId": session, "streamId": info["header"]["streamId"], "throughFrame": info["acceptedSequence"],
+                            "center": mark(combat_packet), "start": mark(eligible[0]), "end": mark(eligible[-1])}
+        check(request(f"{context_route}?centerFrame={center}&throughFrame={info['acceptedSequence']}", "Room5") == expected_context,
+              "Frame context returns the original center and time bounds within the authorized recording")
+        check(request(f"{context_route}?centerFrame={center}&throughFrame={center}") ==
+              dict(expected_context, throughFrame=center, end=mark(combat_packet)) and
+              request(f"{context_route}?centerFrame=1&throughFrame=1")["end"] == mark(packets[0]),
+              "Frame context stays within a fixed saved prefix, including a one-frame prefix")
+        request(f"{context_route}?centerFrame=0&throughFrame={center}", expected=400)
+        request(f"{context_route}?centerFrame={center + 1}&throughFrame={center}", expected=400)
+        request(f"{context_route}?centerFrame={center}&throughFrame={info['acceptedSequence'] + 1}", expected=404)
+        request(f"{context_route}?centerFrame={center}&throughFrame={center}", "Room1", 403)
+        request(f"{context_route}?centerFrame={center}&throughFrame={center}", "GameServer", 403)
+        request(f"{context_route}?centerFrame={center}&throughFrame={center}", "invalid", 401)
+        check(True, "Frame context rejects invalid ranges, missing frames and unauthorized roles")
         policy_route = route + "/policy-frames"
         tail = info["acceptedSequence"]
         policy = request(f"{policy_route}?throughFrame={tail}", "Room5")

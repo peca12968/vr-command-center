@@ -736,6 +736,42 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       && await page.locator('#world-review-player-scope').isVisible(),
       'The latest damage shortcut opens the original saved damage and keeps the personal event filter');
     await page.locator('#world-review').screenshot({ path: path.join(screenshots, 'world-player-latest-damage.png') });
+    const contextButton = page.locator('#world-event-context'), contextStatus = page.locator('#world-event-context-status');
+    await page.locator('#world-event-kind').selectOption('ReloadCompleted');
+    check(await contextButton.isDisabled(), 'Marking event context requires a matching event at the current paused frame');
+    await page.locator('#world-event-kind').selectOption('PlayerDamaged');
+    await clipStart.click();
+    const existingMarks = await clipStatus.innerText();
+    const contextPattern = `**${reviewRoute}/frame-context?**`;
+    await page.route(contextPattern, async route => {
+      const original = await route.fetch(), value = await original.json();
+      value.end.elapsedMilliseconds = value.center.elapsedMilliseconds + 5001;
+      await route.fulfill({ response: original, json: value });
+    }, { times: 1 });
+    await contextButton.click();
+    await contextStatus.filter({ hasText: '無法核對事件片段' }).waitFor();
+    check(await clipStatus.innerText() === existingMarks && Number(await canvas.getAttribute('data-sequence')) === eventSequence,
+      'A context response outside the five-second bound preserves the manually marked interval and current frame');
+    const originalContext = page.waitForResponse(response => new URL(response.url()).pathname === `${reviewRoute}/frame-context`);
+    await contextButton.click();
+    const reply = await originalContext;
+    const bounds = await reply.json();
+    await contextStatus.filter({ hasText: `包含事件第 ${eventSequence} 格` }).waitFor();
+    check(reply.headers()['cache-control'] === 'no-store' && bounds.throughFrame === finalFrame
+      && bounds.center.sequence === eventSequence && bounds.start.sequence < bounds.end.sequence
+      && Number(await canvas.getAttribute('data-sequence')) === eventSequence,
+      'Event context marks only the original sealed range while leaving the selected player damage visible');
+    await page.locator('#world-speed').evaluate(select => { select.value = '4'; });
+    const contextWatch = page.waitForRequest(request => {
+      const url = new URL(request.url());
+      return url.pathname === `${reviewRoute}/watch` && url.searchParams.get('fromFrame') === String(bounds.start.sequence)
+        && url.searchParams.get('throughFrame') === String(bounds.end.sequence);
+    });
+    await clipPlay.click(); await contextWatch; await waitClipEnd();
+    check(Number(await canvas.getAttribute('data-sequence')) === bounds.end.sequence
+      && await page.locator('#world-event-kind').inputValue() === 'PlayerDamaged'
+      && await page.locator('#world-review-player-scope').isVisible(),
+      'Playing the marked context stops at the exact original endpoint and retains the personal filter');
     const other = await context.newPage(); await other.goto(base + '/console/'); await other.locator('#login-key').fill(tokens.Room1); await other.locator('#login-form button').click();
     await other.locator('#tab-world').click(); await other.waitForFunction(() => document.querySelector('#world-message').textContent.includes('目前沒有'));
     check(await other.locator('#world-recording option').count() === 0, 'Room-scoped observer list reveals no foreign world'); await other.close();
