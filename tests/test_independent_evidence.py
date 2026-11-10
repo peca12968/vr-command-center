@@ -1,5 +1,6 @@
 """Closed independent evidence must not hide identity / tail / acceptance errors."""
 import csv
+from datetime import datetime, timezone
 import hashlib
 import importlib.util
 import io
@@ -163,6 +164,31 @@ class IndependentEvidenceTests(unittest.TestCase):
         with patch('sys.argv', ['verify-independent-evidence', str(self.directory), '--output', str(output)]):
             with self.assertRaisesRegex(ValueError, 'preserved input'): m.main()
         self.assertFalse(output.exists())
+
+    def test_exercise_pause_uses_saved_utc_interval_and_the_original_room(self):
+        capture = datetime(2026, 11, 10, tzinfo=timezone.utc)
+        pause = {'pausedTick': 40, 'accepted': 10, 'resumed': 11}
+        paused, peer_ticks = [], []
+        room1 = m.exercise_room_observer(1, capture, {'p1'}, pause, paused, [])
+        room2 = m.exercise_room_observer(2, capture, {'p2'}, pause, paused, peer_ticks)
+
+        def packet(room, time, tick, phase='Running', observed=10):
+            return {'sequence': time, 'suspended': False, 'elapsedMilliseconds': time, 'observedSequence': observed,
+                    'frame': {'phase': phase, 'tick': tick, 'players': [
+                        {'id': f'p{room}', 'roomId': room, 'connected': True, 'rig': {'kind': 'Simulated'}, 'health': 100}]}}
+
+        room1(packet(1, 100, 40, 'Paused'))
+        room1(packet(1, 300, 40, 'Paused'))
+        for time, tick in [(99, 39), (100, 40), (200, 42), (300, 44), (301, 45)]:
+            room2(packet(2, time, tick))
+        self.assertEqual([40, 42, 44], peer_ticks)
+        for observe, bad in [(room2, packet(2, 200, 40, 'Paused')),
+                             (room1, packet(1, 200, 41, 'Paused')),
+                             (room1, packet(1, 200, 40, 'Paused', observed=11))]:
+            with self.assertRaisesRegex(ValueError, 'Pause crossed'):
+                observe(bad)
+        with self.assertRaisesRegex(ValueError, 'original room roster'):
+            room2(packet(1, 200, 42))
 
 
 if __name__ == '__main__': unittest.main()

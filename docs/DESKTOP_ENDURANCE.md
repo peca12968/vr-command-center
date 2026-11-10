@@ -1,5 +1,15 @@
 # 長場原生自動化輸入
 
+## 獨立五房封存重查
+
+同機五房各五席的長場完成、原程序退出且執行資料複製至 F 槽後，可重新讀取每房原世界與戰鬥日誌、玩家日誌和 CSV。
+
+```powershell
+python scripts/verify-independent-evidence.py 'artifacts/desktop-exercise/<本次場次>' --exercise --output 'artifacts/<新核對檔>.json'
+```
+
+工具用房 1 保存的暫停畫格界定 UTC 區間，再核對其餘四房在該區間各自前進的 tick。五房共同執行區間須至少為測試時長減 10 秒，給原開場、暫停與恢復留出時間。工具要求該共同區間含每個原席位至少一次由戰鬥日誌確認的發射，並逐房比對封存序號、玩家結果、伺服器確認及 CSV。
+
 ## Windows 0.50.0 合併長場診斷複驗
 
 2026-11-10 使用同一 Windows 0.50.0 玩家包及管理包 0.31.108，以 `--mode linked --players-per-room 5 --seconds 900 --endurance --pose-continuity` 複驗。場次 `20261110-212904-c88bec46` 退出碼 0，通過 6 項。25 席各發射 90 次、換彈 45 次，逐席收到原戰績並由伺服器確認。原戰鬥日誌重算 2,250 發，與封存統計及 25 列 CSV 相符。

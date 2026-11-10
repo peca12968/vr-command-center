@@ -593,7 +593,7 @@ class VenueReconnectWindow:
 
 
 def verify_world_journal(path, world, combat_sequence, through, applied_end, *, player_sources=None, guarded_begin=None,
-                         players=None, concurrency=None, sealed_fires=None, reconnect_window=None):
+                         players=None, concurrency=None, sealed_fires=None, reconnect_window=None, on_packet=None):
     spec = importlib.util.spec_from_file_location('field_world_journal', Path(__file__).with_name('analyze-world-journal.py'))
     analyzer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(analyzer)
@@ -618,6 +618,8 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
             observe_roster(packet)
         if reconnect_window is not None:
             observe_reconnect(packet)
+        if on_packet is not None:
+            on_packet(packet)
 
     def check_begin_frame(packet):
         nonlocal begin_roster
@@ -656,7 +658,7 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
     try:
         journal = analyzer.analyze(path, accepted_sequence=begin['appliedAtSequence'] if begin is not None else None,
                                    expected_header=expected, on_running_frame=count_player_rigs if player_sources is not None else None,
-                                   on_packet=observe_packet if begin is not None or concurrency is not None or reconnect_window is not None else None)
+                                   on_packet=observe_packet if any(item is not None for item in (begin, concurrency, reconnect_window, on_packet)) else None)
     except EvidenceError:
         raise
     except (OSError, ValueError, TypeError, KeyError, AttributeError, ArithmeticError, RecursionError) as error:
