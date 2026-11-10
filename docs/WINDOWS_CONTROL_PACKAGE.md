@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `VRCommand-ControlServer-0.31.100-win-x64.zip` 支援整批公告場館端點。ZIP 為 52,920,674 bytes，SHA-256 `2a36a4ddf18c9d10efddae31311ce5287e0f10b18d298b0686ffee625190b46e`。解壓核對 546 筆清單及 526 個發行檔案。 [五房啟動](WINDOWS_SERVER_PACKAGE.md#依場館計畫批次啟動)
+
 2026-11-10 `VRCommand-ControlServer-0.31.99-win-x64.zip` 可確認分房恢復沿用全場敵軍策略，並核對全館預覽後是否有更新的分房命令。ZIP 為 52,916,425 bytes，SHA-256 `86a02a8f2c7b6cf04560703315adfed0c1392379519b30c7794e41b4c58ce2ef`。解壓核對 546 筆清單及 526 個發行檔案。 [分房操作](LAYOUT.md#合併場分房敵軍策略)
 
 2026-11-10 `VRCommand-ControlServer-0.31.98-win-x64.zip` 加入合併場的分房敵軍策略。ZIP 為 52,913,898 bytes，SHA-256 `e991ce29abceb85fdb94488f2958be31461cf4ad8d52f54f921433f26abfa4cd`。解壓核對 546 筆清單及 526 個發行檔案，通過 107 項管理包檢查。 [分房操作](LAYOUT.md#合併場分房敵軍策略)

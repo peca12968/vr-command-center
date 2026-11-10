@@ -1,5 +1,7 @@
 # Windows 遊戲伺服器包
 
+2026-11-10 `windows-server-0.50.0-launcher1.10-win-x64.zip` 為 84,800,547 bytes，SHA-256 `e12a6049410a3d01a3423bf9ff1ddffa7125db627f0c3c1beaabfab196258b1b`。解壓核對 330 筆清單。全館啟動使用管理包 0.31.100 的整批端點公告。 [五房啟動](#依場館計畫批次啟動)
+
 2026-11-10 `windows-server-0.50.0-launcher1.9-win-x64.zip` 為 84,799,236 bytes，SHA-256 `59c159d66daa7fbd97a256b8713eb6aee48132191d9574579ef5ac2da0ada43b`。解壓核對 330 筆清單，328 個檔案與 1.8 逐檔一致。遊戲來源、Windows 玩家及 Quest 開發 APK 沿用 0.50.0。 [五房視窗操作](#從-windows-視窗核對並啟動)
 
 2026-11-10 `windows-server-0.50.0-launcher1.8-win-x64.zip` 為 84,794,219 bytes，SHA-256 `d551a2d461e02619ddb8e434af0925c23d5eb4167bd83a3460587b5b52ef0fc7`。解壓核對 330 筆清單。遊戲來源支援合併場分房敵軍策略，與同版 Windows 玩家及 Quest APK 使用相同場景網路識別。 [分房操作](LAYOUT.md#合併場分房敵軍策略)

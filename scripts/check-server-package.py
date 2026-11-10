@@ -1,5 +1,6 @@
 """Exercise portable Windows packages, five rooms, Linked and owned process cleanup."""
 import argparse,base64,csv,ctypes,hashlib,importlib.util,io,ipaddress,json,os,re,shutil,socket,sqlite3,subprocess,sys,tempfile,threading,time,urllib.error,urllib.request,uuid,zipfile
+from contextlib import closing
 from datetime import datetime,timedelta,timezone
 from decimal import Decimal
 from pathlib import Path
@@ -585,7 +586,7 @@ def main():
         ready=out/'venue-endpoint-rollback-ready.json'
         report=out/'venue-endpoint-rollback-final.json'
         database=(data/'sessions/worlds.db').resolve(strict=True)
-        with sqlite3.connect(database.as_uri()+'?mode=rw',uri=True,timeout=10) as db:
+        with closing(sqlite3.connect(database.as_uri()+'?mode=rw',uri=True,timeout=10)) as db, db:
             db.execute(f"""CREATE TRIGGER fixture_reject_fifth_endpoint BEFORE INSERT ON connection_endpoints
                 WHEN NEW.session = '{uuid.UUID(ids[-1])}' BEGIN SELECT RAISE(ABORT, 'fixture endpoint rejection'); END""")
         try:
@@ -614,7 +615,7 @@ def main():
                   'The control-room overview advertises none of the five rejected endpoints')
             for session in ids:command(session,'End')
         finally:
-            with sqlite3.connect(database.as_uri()+'?mode=rw',uri=True,timeout=10) as db:
+            with closing(sqlite3.connect(database.as_uri()+'?mode=rw',uri=True,timeout=10)) as db, db:
                 db.execute('DROP TRIGGER fixture_reject_fifth_endpoint')
     def player(entry,room):
         state=request('/api/sessions/'+entry['sessionId']+'/players',{'playerId':str(uuid.uuid4()),'roomId':room,'name':'Portable server room '+str(room),'headset':'Quest3'},role='Room'+str(room));person=next(x for x in state['players'] if x['roomId']==room)
