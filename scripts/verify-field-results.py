@@ -1,7 +1,7 @@
 """Check sealed Windows server results against Windows player logs or Quest logcat."""
 import argparse
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_EVEN
 import hashlib
 import importlib.util
 import ipaddress
@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import struct
 import subprocess
 import uuid
 import zipfile
@@ -19,6 +20,10 @@ import zlib
 
 
 COMBAT = ('ammoUsed', 'shotsHit', 'kills', 'hitsReceived', 'damageTaken')
+# TelemetryOutbox version 1 uses the WorldEventKind byte and .NET Guid byte order.
+COMBAT_EVENT = struct.Struct('<qq16sB16s16s16si')
+SHOT_FIRED, SHOT_HIT, ENEMY_ELIMINATED, PLAYER_DAMAGED = 0, 1, 2, 4
+EMPTY_GUID = bytes(16)
 LAN = tuple(map(ipaddress.IPv4Network, ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16')))
 SERVER_MARKER = re.compile(r'VR_SERVER_(ADMISSION_APPROVED|PEER|DEBRIEF_ACK|DEBRIEF_TIMEOUT) id=(0|[1-9][0-9]{0,19})(?: endpoint=(\S+))?')
 CONNECT = re.compile(r'VR_CLIENT_CONNECTED id=(0|[1-9][0-9]{0,19})')
@@ -253,6 +258,99 @@ def scores(row):
     return values + (accuracy,)
 
 
+def verify_combat_journal(path, session_id, stream_id, origin, final_sequence, authority_end, ledger):
+    digest = hashlib.sha256()
+    projected = {uuid.UUID(pid).bytes_le: dict.fromkeys(COMBAT, 0) | {'health': 100} for pid in ledger}
+    reports, shots, eliminated = {}, {}, set()
+    acknowledged = 0
+    complete = sealed = False
+
+    def apply(record):
+        sequence, observed, report, kind, player, shot, enemy, damage = record
+        require(sequence == len(reports) + 1 <= final_sequence and 1 <= observed < authority_end
+                and report != EMPTY_GUID and report not in reports and player in projected,
+                'Invalid combat journal event sequence, identity or player')
+        totals = projected[player]
+        if kind == PLAYER_DAMAGED:
+            require(shot == enemy == EMPTY_GUID and 1 <= damage <= 1000 and totals['health'] > 0,
+                    'Invalid combat journal damage')
+            actual = min(damage, totals['health'])
+            totals['hitsReceived'] += 1
+            totals['damageTaken'] += actual
+            totals['health'] -= actual
+        else:
+            require(shot != EMPTY_GUID and damage == 0, 'Invalid combat journal shot')
+            if kind == SHOT_FIRED:
+                require(enemy == EMPTY_GUID and shot not in shots and totals['health'] > 0, 'Invalid combat journal fire')
+                shots[shot] = (player, EMPTY_GUID)
+                totals['ammoUsed'] += 1
+            else:
+                require(enemy != EMPTY_GUID and enemy not in eliminated, 'Invalid combat journal target')
+                if kind == SHOT_HIT:
+                    require(shots.get(shot) == (player, EMPTY_GUID), 'Combat journal hit needs the original unscored shot')
+                    shots[shot] = (player, enemy)
+                    totals['shotsHit'] += 1
+                else:
+                    require(kind == ENEMY_ELIMINATED and shots.get(shot) == (player, enemy),
+                            'Combat journal elimination needs the original confirmed hit')
+                    eliminated.add(enemy)
+                    totals['kills'] += 1
+        reports[report] = sequence
+
+    with path.open('rb') as source:
+        before = os.fstat(source.fileno())
+
+        def read(length):
+            raw = source.read(length)
+            require(len(raw) == length, 'Torn combat journal record')
+            digest.update(raw)
+            return raw
+
+        def frame():
+            length, = struct.unpack('<i', read(4))
+            require(1 <= length <= 65536, 'Invalid combat journal record length')
+            payload = read(length)
+            require(hashlib.sha256(payload).digest() == read(32), 'Combat journal checksum mismatch')
+            return payload
+
+        origin_bytes = origin.encode('ascii')
+        header = (struct.pack('<Bi', 1, 1) + uuid.UUID(session_id).bytes_le + uuid.UUID(stream_id).bytes_le
+                  + bytes([len(origin_bytes)]) + origin_bytes)
+        require(frame() == header, 'Combat journal header differs from the original session, stream or origin')
+        while source.tell() < before.st_size:
+            payload = frame()
+            tag, body = payload[0], payload[1:]
+            require(not sealed, 'Combat journal contains records after its seal')
+            if tag == 2:
+                require(not complete and len(body) >= 4, 'Invalid combat journal batch boundary')
+                count, = struct.unpack_from('<i', body)
+                require(1 <= count <= 500 and len(body) == 4 + count * COMBAT_EVENT.size, 'Invalid combat journal batch size')
+                for record in COMBAT_EVENT.iter_unpack(body[4:]):
+                    apply(record)
+            elif tag == 3:
+                require(not complete and body == struct.pack('<q', len(reports)), 'Invalid combat journal completion boundary')
+                complete = True
+            elif tag == 4:
+                require(len(body) == 24, 'Invalid combat journal acknowledgement size')
+                sequence, report = struct.unpack('<q16s', body)
+                require(sequence > acknowledged and reports.get(report) == sequence, 'Invalid combat journal acknowledgement')
+                acknowledged = sequence
+            else:
+                require(tag == 5 and not body and complete and acknowledged == len(reports), 'Invalid combat journal seal')
+                sealed = True
+        after = os.fstat(source.fileno())
+        require(source.tell() == before.st_size == after.st_size and before.st_mtime_ns == after.st_mtime_ns,
+                'Combat journal changed during verification')
+
+    require(sealed and acknowledged == final_sequence, 'Missing combat journal seal or exact acknowledged event sequence')
+    for pid, row in ledger.items():
+        totals = projected[uuid.UUID(pid).bytes_le]
+        ammo, hits = totals['ammoUsed'], totals['shotsHit']
+        totals['accuracyPercent'] = (Decimal(100 * hits) / ammo).quantize(Decimal('0.01'), rounding=ROUND_HALF_EVEN) if ammo else 0
+        require(scores(totals) == scores(row), 'Combat journal replay differs from sealed player statistics')
+    return {'sha256': digest.hexdigest(), 'events': final_sequence, 'players': len(projected)}
+
+
 def roster_periods(players, minimum_ms, applied_end, *, require_tracked=False):
     expected = {pid: player['roomId'] for pid, player in players.items()}
     periods = []
@@ -479,16 +577,17 @@ def verify_udp_source_preflights(pairs, binding, addresses):
 
 
 def verify(topology, server_ips, launcher, session, statistics, endpoint, server_log, player_logs, *, quest_player_logs=(),
-           world_journal=None, room_alignments=None, udp_preflight=None, udp_source_preflights=None, verify_player_sources=False):
+           world_journal=None, combat_journal=None, room_alignments=None, udp_preflight=None, udp_source_preflights=None,
+           verify_player_sources=False):
     report, _ = verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log,
                                len(player_logs) + len(quest_player_logs), player_logs, quest_player_logs=quest_player_logs,
-                               world_journal=world_journal, room_alignments=room_alignments, udp_preflight=udp_preflight,
+                               world_journal=world_journal, combat_journal=combat_journal, room_alignments=room_alignments, udp_preflight=udp_preflight,
                                udp_source_preflights=udp_source_preflights, verify_player_sources=verify_player_sources)
     return report
 
 
 def verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log, size, player_logs, *,
-                   require_remote=True, quest_player_logs=(), world_journal=None, applied_end=None, room_alignments=None,
+                   require_remote=True, quest_player_logs=(), world_journal=None, combat_journal=None, applied_end=None, room_alignments=None,
                    udp_preflight=None, udp_source_preflights=None, verify_player_sources=False, quest_capture_logs=(),
                    tracking_begin=None, concurrency=None):
     integer(size, 1, 25)
@@ -597,6 +696,8 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
     journal = verify_world_journal(world_journal, world, combat_sequence, through, applied_end,
                                    player_sources=player_sources, tracking_begin=tracking_begin, players=players,
                                    concurrency=concurrency) if world_journal is not None else None
+    combat_evidence = verify_combat_journal(combat_journal, session_id, stream_id, origin, combat_sequence,
+                                            applied_end if applied_end is not None else through, ledger) if combat_journal is not None else None
     alignments = None
     if room_alignments is not None:
         require(journal is not None and quest_players == size, 'MR alignment evidence requires the closed world journal and all original Quest logs')
@@ -610,6 +711,7 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
             **({'udpPreflight': preflight} if preflight is not None else {}),
             **({'udpSourcePreflight': source_preflight} if source_preflight is not None else {}),
             **({'worldJournal': journal} if journal else {}),
+            **({'combatJournal': combat_evidence} if combat_evidence else {}),
             **({'playerSources': sorted(player_sources.values(), key=lambda row: (row['roomId'], row['seat']))}
                if player_sources is not None else {}),
             **({'roomAlignments': alignments} if alignments is not None else {})}, room_sources
@@ -761,6 +863,9 @@ def verify_venue(manifest_path):
             'Venue must contain the original five independent sessions or one linked session')
     journals = any('worldJournal' in entry for entry in entries)
     require(not journals or all('worldJournal' in entry for entry in entries), 'Provide a world journal for every session in this batch')
+    combat_journals = any('combatJournal' in entry for entry in entries)
+    require(not combat_journals or all('combatJournal' in entry for entry in entries),
+            'Provide a combat journal for every session in this batch')
     require_tracked = manifest.get('requireTrackedRoster', False)
     require(type(require_tracked) is bool, 'requireTrackedRoster must be a boolean')
     require(not require_tracked or 'minimumConcurrentMilliseconds' in manifest,
@@ -913,6 +1018,7 @@ def verify_venue(manifest_path):
                                          require_remote=False,
                                          quest_player_logs=((address, content(path), pid) for address, path, pid in quest_logs),
                                          world_journal=evidence_path(entry['worldJournal']) if journals else None,
+                                         combat_journal=evidence_path(entry['combatJournal']) if combat_journals else None,
                                          applied_end=row['appliedAtSequence'], room_alignments=alignments, udp_preflight=preflight_paths,
                                          udp_source_preflights=source_paths, verify_player_sources=verify_player_sources,
                                          quest_capture_logs=(quest_capture_log(*evidence) for evidence in captured),
@@ -936,6 +1042,7 @@ def verify_venue(manifest_path):
                           **({'udpPreflight': report['udpPreflight']} if preflights else {}),
                           **({'udpSourcePreflight': report['udpSourcePreflight']} if source_preflights else {}),
                           **({'worldJournal': report['worldJournal']} if journals else {}),
+                          **({'combatJournal': report['combatJournal']} if combat_journals else {}),
                           **({'playerSources': report['playerSources']} if verify_player_sources else {}),
                           **({'experienceMode': experience} if check_alignments else {}),
                           **({'roomAlignments': report['roomAlignments']} if alignments is not None else {})})
@@ -956,6 +1063,7 @@ def verify_venue(manifest_path):
             **({'udpPreflightsVerified': len(exchanges)} if preflights else {}),
             **({'udpSourcePreflightsVerified': len(exchanges)} if source_preflights else {}),
             **({'worldJournalsVerified': len(summaries)} if journals else {}),
+            **({'combatJournalsVerified': len(summaries)} if combat_journals else {}),
             **({'concurrentRoster': concurrency.summary(len(player_ids))} if concurrency is not None else {}),
             **({'trackingBegin': {'requestId': begin_request, 'sessions': len(summaries),
                                   'trackedPlayers': sum(item['worldJournal']['trackingBegin']['trackedPlayers'] for item in summaries)}}
@@ -969,6 +1077,7 @@ def main():
     parser.add_argument('--topology', choices=('same-host', 'direct-lan'))
     parser.add_argument('--server-ip', action='append', help='Repeat for each assigned server IPv4')
     parser.add_argument('--world-journal', type=Path, help='Original closed .worldlog for a single session')
+    parser.add_argument('--combat-journal', type=Path, help='Original closed combat .journal for a single session')
     parser.add_argument('--verify-player-sources', action='store_true', help='Match each player log startup with accepted rigs in the closed journal')
     parser.add_argument('--udp-preflight', nargs=2, type=Path, metavar=('LISTENER', 'PROBE'), help='Original UDP preflight reports for this session')
     parser.add_argument('--udp-source-preflight', action='append', nargs=2, type=Path, metavar=('LISTENER', 'PROBE'),
@@ -982,7 +1091,7 @@ def main():
     args = parser.parse_args()
     json_paths = [args.launcher_report, args.session, args.statistics, args.endpoint]
     single_args = [args.topology, args.server_ip, *json_paths, args.server_log, args.player or args.quest_player]
-    if (args.venue_manifest and (any(single_args) or args.world_journal or args.room_alignment or args.udp_preflight
+    if (args.venue_manifest and (any(single_args) or args.world_journal or args.combat_journal or args.room_alignment or args.udp_preflight
                                  or args.udp_source_preflight or args.verify_player_sources)) or (not args.venue_manifest and not all(single_args)):
         parser.error('Provide --venue-manifest alone or all single-session options.')
     if args.udp_preflight and args.udp_source_preflight:
@@ -997,6 +1106,8 @@ def main():
             inputs = [*json_paths, args.server_log, *(Path(row[1]) for row in chain(windows, quest))]
             if args.world_journal is not None:
                 inputs.append(args.world_journal)
+            if args.combat_journal is not None:
+                inputs.append(args.combat_journal)
             if args.udp_preflight is not None:
                 inputs.extend(args.udp_preflight)
             if args.udp_source_preflight is not None:
@@ -1017,7 +1128,8 @@ def main():
                 quest_players.append((ipv4(address), content(Path(path)), integer(int(pid), 1, 2**31 - 1)))
             report = verify(args.topology, {ipv4(address) for address in args.server_ip},
                             *(read_json(content(path)) for path in json_paths), content(args.server_log), players,
-                            quest_player_logs=quest_players, world_journal=args.world_journal, room_alignments=alignments,
+                            quest_player_logs=quest_players, world_journal=args.world_journal, combat_journal=args.combat_journal,
+                            room_alignments=alignments,
                             udp_preflight=args.udp_preflight, udp_source_preflights=args.udp_source_preflight,
                             verify_player_sources=args.verify_player_sources)
     except EvidenceError as error:

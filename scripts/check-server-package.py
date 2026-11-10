@@ -553,6 +553,7 @@ def main():
     def verify_delivery(entry,owners):
         manifest_entry = None
         world_journal = None
+        combat_journal = None
         server=(entry['work']/'server.log').read_text(encoding='utf-8',errors='replace')
         acks=[int(value) for value in re.findall(r'VR_SERVER_DEBRIEF_ACK id=(\d+)',server)]
         check(len(acks)==len(owners) and set(acks)=={c['connection'] for c in owners}
@@ -587,8 +588,10 @@ def main():
                     evidence_zip.write_bytes(raw)
                     session,statistics,endpoint=exported
                     world_journal = entry['work']/'telemetry'/(entry['sessionId']+'.worldlog')
+                    combat_journal = entry['work']/'telemetry'/(entry['sessionId']+'.journal')
                     manifest_entry={'evidenceZip':str(evidence_zip),'launcherReport':str(entry['reportPath']),
                         'serverLog':str(entry['work']/'server.log'),'worldJournal':str(world_journal),
+                        'combatJournal':str(combat_journal),
                         'players':[{'address':address,'log':str(c['log'])} for c in owners]}
                 preflight = (out/(entry['label']+'-lan-listener.ndjson'), out/(entry['label']+'-lan-probe.json')) if args.check_lan_preflight else None
                 if manifest_entry is not None and preflight is not None:
@@ -596,6 +599,7 @@ def main():
                 ip=ipaddress.IPv4Address(address)
                 result=field.verify('same-host',{ip},read(entry['reportPath']),session,statistics,endpoint,server,
                     [(ip,field.content(c['log'])) for c in owners], world_journal=world_journal,
+                    combat_journal=combat_journal,
                     udp_source_preflights=[preflight] if preflight is not None else None,
                     verify_player_sources=args.check_venue_openxr and world_journal is not None)
                 save(entry['label']+'-field-results.json',result)
@@ -603,6 +607,9 @@ def main():
                 if world_journal is not None:
                     check(result['worldJournal']['frames']==result['worldSequence'] and result['worldJournal']['runningFrames']>0,
                           entry['label']+' field report verifies the original closed world journal')
+                    check(result['combatJournal']['events']==result['combatSequence']
+                          and result['combatJournal']['players']==len(owners),
+                          entry['label']+' original combat journal reproduces each sealed player result')
                 if preflight is not None:
                     coverage = result['udpSourcePreflight']
                     check(coverage['observedSourceAddresses']==coverage['verifiedSourceAddresses']==1
@@ -710,6 +717,19 @@ def main():
         check(summary['worldJournalsVerified'] == len(entries)
               and all(row['worldJournal']['frames'] == row['worldSequence'] and row['worldJournal']['runningFrames'] > 0
                       for row in summary['sessions']), label + ' field evidence verifies every original closed world journal')
+        check(summary['combatJournalsVerified'] == len(entries)
+              and all(row['combatJournal']['events'] == row['combatSequence']
+                      and row['combatJournal']['players'] == 5 * len(row['roomIds']) for row in summary['sessions']),
+              label + ' original combat journals reproduce the sealed scores of all 25 seats')
+        # Exercise the missing terminal seal using a new copy of one original file.
+        first = evidence['sessions'][0]
+        original_journal = Path(first['combatJournal']).read_bytes()
+        assert original_journal[-37:-32] == b'\x01\x00\x00\x00\x05'
+        unsealed = out / (label + '-field-combat-without-seal.journal')
+        unsealed.write_bytes(original_journal[:-37])
+        rejected = run(dict(evidence, sessions=[dict(first, combatJournal=str(unsealed)), *evidence['sessions'][1:]]))
+        check(rejected.returncode == 1 and not rejected.stdout and 'combat journal seal' in rejected.stderr,
+              label + ' field evidence rejects an original combat prefix without its terminal seal')
         if concurrent_seconds is not None:
             coverage = summary['concurrentRoster']
             check(coverage['players'] == 25 and coverage['longestMilliseconds'] >= concurrent_seconds * 1000,

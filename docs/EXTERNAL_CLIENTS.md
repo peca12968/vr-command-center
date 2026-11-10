@@ -226,6 +226,12 @@ python scripts/verify-field-results.py --topology direct-lan `
 
 如要一併驗收原生回放檔，等啟動器回報 `sealed-stopped` 後，從其 `workDirectory` 下的 `telemetry` 保留 `<sessionId>.worldlog`。在單場命令加入 `--world-journal .\room-01.worldlog`。工具唯讀檢查每筆記錄的校驗碼與連續影格，核對場次、來源、房間、校正設定和最後封存。它確認原檔含活動中影格及兩種封存的尾界，再輸出檔案 SHA-256、總影格數及活動中影格數。活動中影格須為 `Running`、tick 大於零且未中止來源。原生回放檔逐筆讀取，可超過文字日誌的 16 MiB 上限。 [原生世界紀錄](WORLD_SOURCE.md)
 
+### 從原始戰鬥日誌重算戰績
+
+在同一個 `telemetry` 目錄保留 `<sessionId>.journal`，單場命令加入 `--combat-journal .\room-01.journal`。五房清單則在各 `sessions[]` 填寫 `"combatJournal": "room-01.journal"`，使用相對於清單的路徑。獨立模式需五份，合併模式需一份。可同時提供 `worldJournal`，各自核對戰鬥事件和回放畫格。
+
+工具唯讀核對原場次、來源、每筆事件的校驗碼、連續序號、累計確認和終端封存，逐席重算耗彈、命中、擊殺、中彈、損耗、剩餘健康及命中率，再與已核對的管理統計和玩家結果比較。沒有戰鬥事件的場次也須有原完成與封存紀錄。任一檔案或戰績不一致時，整份驗收以退出碼 1 結束。成功摘要包含逐場 `combatJournal` 的 SHA-256、事件數及核對席位數，全館另有 `combatJournalsVerified`。
+
 加入 `--verify-player-sources` 後，工具也會以原入場連結玩家日誌與封存回放，逐席列出房號、席次、來源、姿態種類及符合條件的活動影格數。Windows OpenXR 日誌須含原啟動順序、執行環境及同一 UDP 埠，回放須有對應的 `Tracked` 姿態。Unity Mock Runtime 會獨立標記為 `windows-openxr-mock-tracked`。一般 Windows OpenXR 回報 `windows-openxr-tracked`，桌面模擬回報 `windows-desktop-simulated`。Quest logcat 須核對原 PID、入場及 `Tracked` 姿態，回報 `quest-logcat-tracked`。名冊上的 VIVE XR 或 Quest 3 分類與實體裝置型號仍由現場核對。姿態與日誌來源不一致，或原席位在活動影格中從未接受連線姿態時，工具會拒絕本次核對。
 
 `same-host` 要求全部觀察到的來源都在宣告的伺服器位址清單。`direct-lan` 要求至少有一個清單外的私有 IPv4，且所有玩家的實際來源均符合各自填入的位址。實體主機數與網路容量仍須現場確認，工具摘要分別保留 `physicalHostsVerified` 與 `networkCapacityAccepted` 為 `false`。NAT 或中繼環境需另記拓撲與轉譯結果。

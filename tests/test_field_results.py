@@ -103,6 +103,29 @@ def world_journal(path, world, *, header_changes=None, combat=0, active=True, se
     path.write_bytes(b''.join(raw))
 
 
+def combat_journal(path, launcher, records=(), *, sealed=True, receipt=None):
+    def frame(payload):
+        return struct.pack('<i', len(payload)) + payload + hashlib.sha256(payload).digest()
+
+    def guid(value):
+        return uuid.UUID(value).bytes_le if value else bytes(16)
+
+    origin = launcher['finalCombatStream']['origin'].encode('ascii')
+    header = (struct.pack('<Bi', 1, 1) + guid(launcher['sessionId']) + guid(launcher['streamId'])
+              + bytes([len(origin)]) + origin)
+    raw = [frame(header)]
+    if records:
+        events = b''.join(struct.pack('<qq16sB16s16s16si', sequence, 7, guid(id_for(900 + sequence)),
+                                      kind, guid(player), guid(shot), guid(enemy), damage)
+                          for sequence, (kind, player, shot, enemy, damage) in enumerate(records, 1))
+        raw.append(frame(struct.pack('<Bi', 2, len(records)) + events))
+        raw.append(frame(struct.pack('<Bq16s', 4, len(records), guid(receipt or id_for(900 + len(records))))))
+    raw.append(frame(struct.pack('<Bq', 3, len(records))))
+    if sealed:
+        raw.append(frame(b'\x05'))
+    path.write_bytes(b''.join(raw))
+
+
 class PlayerSourceEvidenceTests(unittest.TestCase):
     desktop_startup = 'VR_NETWORK_STARTED role=Client started=True background=True port=7777\n'
 
@@ -1398,6 +1421,52 @@ class FieldResultsTests(unittest.TestCase):
         with self.assertRaisesRegex(field.EvidenceError, 'nonempty combat'):
             field.verify(*data)
 
+    def test_combat_journal_recomputes_shots_kills_and_clamped_health(self):
+        data = fixture()
+        launcher, session, stats, clients = data[2], data[3], data[4], data[7]
+        shooter, target = (row['id'] for row in session['players'])
+        shot_a, shot_b, shot_c, enemy = map(id_for, (21, 22, 23, 24))
+        events = [(0, shooter, shot_a, None, 0), (1, shooter, shot_a, enemy, 0), (2, shooter, shot_a, enemy, 0),
+                  (0, shooter, shot_b, None, 0), (0, shooter, shot_c, None, 0),
+                  (4, target, None, None, 20), (4, target, None, None, 100)]
+        launcher['finalCombatStream']['acceptedSequence'] = session['combatStream']['acceptedSequence'] = len(events)
+        stats['origin'] = 'Simulation'
+        stats['players'][0].update(ammoUsed=3, shotsHit=1, kills=1, accuracyPercent=field.Decimal('33.33'))
+        stats['players'][1].update(hitsReceived=2, damageTaken=100, health=0)
+        for index, (address, log) in enumerate(clients):
+            lines = log.splitlines()
+            result = json.loads(lines[1].split(' ', 1)[1])
+            result.update(stats['players'][index], finalStreamSequence=len(events))
+            result['accuracyPercent'] = float(result['accuracyPercent'])
+            lines[1] = 'VR_CLIENT_DEBRIEF_FINAL ' + json.dumps(result)
+            clients[index] = address, '\n'.join(lines) + '\n'
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'original.journal'
+            combat_journal(path, launcher, events)
+            raw = path.read_bytes()
+            self.assertEqual(field.verify(*data, combat_journal=path)['combatJournal'],
+                             {'sha256': hashlib.sha256(raw).hexdigest(), 'events': 7, 'players': 2})
+            self.assertEqual(path.read_bytes(), raw)
+            combat_journal(path, launcher, [*events[:-1], (4, target, None, None, 10)])
+            self.assertTrue(field.verify(*data)['consistent'])
+            with self.assertRaisesRegex(field.EvidenceError, 'replay differs from sealed player statistics'):
+                field.verify(*data, combat_journal=path)
+            combat_journal(path, launcher, events, receipt=id_for(901))
+            with self.assertRaisesRegex(field.EvidenceError, 'combat journal acknowledgement'):
+                field.verify(*data, combat_journal=path)
+            combat_journal(path, launcher, [events[1], events[0], *events[2:]])
+            with self.assertRaisesRegex(field.EvidenceError, 'hit needs the original unscored shot'):
+                field.verify(*data, combat_journal=path)
+            combat_journal(path, dict(launcher, sessionId=id_for(911)), events)
+            with self.assertRaisesRegex(field.EvidenceError, 'header differs'):
+                field.verify(*data, combat_journal=path)
+            path.write_bytes(raw[:-1])
+            with self.assertRaisesRegex(field.EvidenceError, 'Torn combat journal'):
+                field.verify(*data, combat_journal=path)
+            path.write_bytes(raw[:-1] + bytes([raw[-1] ^ 1]))
+            with self.assertRaisesRegex(field.EvidenceError, 'checksum mismatch'):
+                field.verify(*data, combat_journal=path)
+
     def test_cli_success_and_private_failure_diagnostics(self):
         topology, ips, launcher, session, stats, endpoint, server, clients = fixture()
         with tempfile.TemporaryDirectory(prefix='field-check-') as directory:
@@ -1419,6 +1488,12 @@ class FieldResultsTests(unittest.TestCase):
             self.assertNotIn('worldJournal', legacy)
             archived = subprocess.run([*command, '--world-journal', str(journal)], capture_output=True, text=True, check=True)
             self.assertEqual(80, json.loads(archived.stdout)['worldJournal']['frames'])
+            combat = root / 'original.journal'
+            combat_journal(combat, launcher)
+            closed = subprocess.run([*command, '--world-journal', str(journal), '--combat-journal', str(combat)],
+                                    capture_output=True, text=True, check=True)
+            self.assertEqual(json.loads(closed.stdout)['combatJournal']['events'], 0)
+            self.assertNotIn(directory, closed.stdout)
             (root / 'server-log').write_text(server.replace('192.168.5.20', '192.168.5.50'), encoding='utf-8')
             failure = subprocess.run(command, capture_output=True, text=True)
             self.assertEqual(failure.returncode, 1)
@@ -1438,6 +1513,30 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertFalse(report['physicalHostsVerified'])
                 self.assertFalse(report['networkCapacityAccepted'])
                 self.assertNotIn('192.168', json.dumps(report))
+
+    def test_venue_combat_journal_rejects_unsealed_original_in_either_topology(self):
+        for mode in ('Linked', 'Independent'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, _ = venue_fixture(root, mode, with_journals=True)
+                for index, entry in enumerate(manifest['sessions']):
+                    entry['combatJournal'] = f'Room {index + 1}.journal'
+                    launcher = field.read_json((root / entry['launcherReport']).read_text(encoding='utf-8'))
+                    combat_journal(root / entry['combatJournal'], launcher, sealed=index != 0)
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'combat journal.*seal'):
+                    field.verify_venue(path)
+                entry = manifest['sessions'][0]
+                launcher = field.read_json((root / entry['launcherReport']).read_text(encoding='utf-8'))
+                combat_journal(root / entry['combatJournal'], launcher)
+                report = field.verify_venue(path)
+                self.assertEqual(report['combatJournalsVerified'], len(manifest['sessions']))
+                self.assertEqual(sum(row['combatJournal']['players'] for row in report['sessions']), 25)
+                if mode == 'Independent':
+                    del entry['combatJournal']
+                    path.write_text(json.dumps(manifest), encoding='utf-8')
+                    with self.assertRaisesRegex(field.EvidenceError, 'combat journal for every session'):
+                        field.verify_venue(path)
 
     def test_venue_verifies_the_original_guarded_begin_for_both_topologies(self):
         request = id_for(999)
