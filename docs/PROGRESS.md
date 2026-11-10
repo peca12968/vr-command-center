@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 核對五房啟動計畫的場次序號
+
+- 控制台 0.31.112 下載第二版計畫，逐場寫入序號與任務版本。Windows 啟動器 1.13 在讀取計畫及取得全館本機啟動鎖後各核對一次。若場次變更，先回主控台重讀並下載。既有第一版手動計畫仍使用原房間、場次及 UDP 核對。 [操作方式](WINDOWS_SERVER_PACKAGE.md#依場館計畫批次啟動)
+- Chromium 14 項通過。實際 Windows 三包驗收 `run-b2fd4e8d5dbe4198913cd4709001eda8` 退出 0、451 項通過。兩種拓撲都拒絕舊下載檔。測試在啟動器取得鎖後改動第五房，五個工作程序都未寫入遊戲設定，原場次無來源。重新下載後經同機固定指紋 HTTPS／WSS 啟動，五房獨立及合併各有 25 席同時連線，50 份原戰績及伺服器確認一致，六場共 943 格完整回放、6 份 CSV 及雙封存。活動場次歸零，C／F 快照 234 檔雜湊相符。 [瀏覽器驗收](../artifacts/console-venue-plan-revisions/checks.json) · [Windows 驗收](../artifacts/server-package-checks/run-b2fd4e8d5dbe4198913cd4709001eda8/checks.json)
+- 使用者關閉先前的遮擋視窗後，WinForms 已輸入隔離實例路徑。兩次「載入／更新」仍回報 `PickerHost.exe` 遮擋。測試停在讀取場次前，退出碼 1。已清理本次視窗與管理服務，C／F 快照 9 檔雜湊相符。 [遮擋紀錄](../artifacts/server-gui/run-3a672de014cf412abe6d29225a32ca31/gui-blocker.json) · [清理](../artifacts/server-gui/run-3a672de014cf412abe6d29225a32ca31/cleanup.json)
+- Release 零警告，1,074 項核心、102 項世界串流及 17 項 Python 套件檢查通過。解壓管理包通過 107 項檢查，原 API 程序通過 769 項 HTTP。來源 `69b8fa1a`，管理包收據的 184 個來源雜湊相符。沿用 Windows／Quest 0.50.2，解壓清單及原 Quest 67 開發簽章的離線一致性核對通過。GitHub Actions job `129982850290` 因帳務或支出上限未啟動。跨機、頭盔與廠商硬體驗收仍待。 [管理包驗收](../artifacts/control-package-checks/run-fd73f939963d432bb87ad6e341b7fcb5/checks.json) · [HTTP 驗收](../artifacts/http-smoke-venue-plan-revisions.log) · [發行核對](../artifacts/venue-release-0.50.2-plan-revisions.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42859887316)
+
 ## 2026-11-11 全館戰績回條下載與離線核對
 
 - 管理包 0.31.111 在「全館收尾」增加主控專用的批次回條 JSON。雙封存後可保存各原場次、尾界和入場確認狀態，原場館驗收 ZIP 維持原格式。離線清單可選填 `venueDebriefReceipts`，逐席比對原始玩家與伺服器日誌核對過的結果，輸出原檔 SHA-256。 [下載方式](SESSION_CLOSURE.md#下載本批戰績回條) · [驗收設定](EXTERNAL_CLIENTS.md#一次核對五房-25-席)

@@ -1,5 +1,7 @@
 # Windows 遊戲伺服器包
 
+2026-11-11 `VRCommand-GameServer-0.50.2-1.13-venue-plan-win-x64.zip` 為 84,807,939 bytes，SHA-256 `9886b6d73eeb0f90a162938245897f08e9b466a051e9a8e2641b039e7f653c76`。解壓核對 330 筆清單。第二版場館計畫須比對原場次序號與任務版本，沿用遊戲 0.50.2。 [操作方式](#依場館計畫批次啟動)
+
 2026-11-10 `VRCommand-GameServer-0.50.2-1.12-debrief-win-x64.zip` 為 84,807,998 bytes，SHA-256 `59e25280556639f219faecbdbd3b174bddaa99fad29e778e9feea971ff65f1cb`。解壓核對 330 筆清單。遊戲 0.50.2 可將玩家戰績回條送至 0.31.109 管理包。 [任務收尾](SESSION_CLOSURE.md#玩家戰績回條)
 
 2026-11-10 `VRCommand-GameServer-0.50.1-1.12-https-venue-final-win-x64.zip` 為 84,807,075 bytes，SHA-256 `a8290ac78089d0281177962b01409c4c733c1bb3a371ab4820894de3aca5aa0b`。解壓核對 330 筆清單，沿用原 0.50.1 遊戲。啟動器可用一份私人 HTTPS 設定查詢場次及啟動五房批次。 [設定方式](#建立遊戲主機的-https-連線設定)
