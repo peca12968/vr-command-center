@@ -68,8 +68,10 @@ using (var queue = TelemetryOutbox.OpenExisting(journalPath))
     if (existing is null && queue.AcknowledgedSequence > 0)
         throw new InvalidDataException("The server is missing the previously acknowledged stream.");
     var missionClockVersion = existing?.MissionClockVersion ?? 0;
-    var attached = await Post<CombatStreamView>(http, path + "/combat-stream", new OpenCombatStream(queue.StreamId, origin, missionClockVersion));
+    var roomEnemyPolicyVersion = existing?.RoomEnemyPolicyVersion ?? 0;
+    var attached = await Post<CombatStreamView>(http, path + "/combat-stream", new OpenCombatStream(queue.StreamId, origin, missionClockVersion, roomEnemyPolicyVersion));
     if (attached.StreamId != queue.StreamId || attached.Origin != origin || attached.MissionClockVersion != missionClockVersion
+        || attached.RoomEnemyPolicyVersion != roomEnemyPolicyVersion
         || attached.AcceptedSequence < queue.AcknowledgedSequence || attached.AcceptedSequence > queue.LastSequence
         || (attached.Sealed && (!queue.Complete || attached.AcceptedSequence != queue.LastSequence))
         || (queue.Sealed && !attached.Sealed)) throw new InvalidDataException("Combat attachment disagrees with the saved journal.");

@@ -209,5 +209,58 @@ internal static class ArenaSessionChecks
         var unstarted = new ArenaWorld([3], []);
         Reject<InvalidOperationException>(() => unstarted.SetPhase(WorldPhase.Running),
             "Direct simulation still requires a player before its first Begin");
+        LinkedRoomPolicies(check, mission);
+    }
+
+    private static void LinkedRoomPolicies(Action<bool, string> check, Mission original)
+    {
+        var manager = new SessionManager();
+        var mission = original with { Definition = original.Definition with { Props = [], Enemies = new(5, EnemyBehavior.Hold, false) } };
+        var session = manager.Create(SessionMode.Linked, [1, 2, 3, 4, 5], mission);
+        var room1 = new OperatorIdentity("room-1", OperatorRole.RoomController, 1);
+        var room2 = new OperatorIdentity("room-2", OperatorRole.RoomController, 2);
+        var change = new ControlCommand(Guid.NewGuid(), ControlAction.SetRoomEnemies,
+            RoomEnemyPolicy: new(2, new(EnemyBehavior.Patrol, true)));
+        var unavailable = false;
+        try { manager.Execute(session.Id, change, room2); } catch (InvalidOperationException) { unavailable = true; }
+        check(unavailable, "A room policy requires the attached game source capability");
+        manager.OpenStream(session.Id, new(Guid.NewGuid(), CombatOrigin.Simulation, RoomEnemyPolicyVersion: 1));
+        var denied = false;
+        try { manager.Execute(session.Id, change, room1); } catch (AccessDeniedException) { denied = true; }
+        check(denied, "A linked room controller cannot change another room's enemy policy");
+        for (var room = 1; room <= 2; room++) manager.Join(session.Id, Guid.NewGuid(), "Seat " + room, room, HeadsetKind.Quest3);
+        ManagementSnapshot Read() => JsonSerializer.Deserialize<ManagementSnapshot>(JsonSerializer.Serialize(manager.Get(session.Id), JsonFormat.Options),
+            new JsonSerializerOptions(JsonFormat.Options) { IncludeFields = true })!;
+        var adapter = new ArenaSession();
+        adapter.Apply(Read());
+        foreach (var player in manager.Get(session.Id).Players)
+        {
+            var head = ArenaSession.Spawn(player.RoomId, player.Seat);
+            check(adapter.Connect((ulong)player.RoomId, player.Id, player.RoomId, player.Seat, player.AdmissionId)
+                && adapter.Pose((ulong)player.RoomId, head, head, new(0, 0, 1), 0), "Each linked room sends its original admitted pose");
+        }
+        manager.Execute(session.Id, new(Guid.NewGuid(), ControlAction.Begin));
+        var receipt = manager.Execute(session.Id, change, room2);
+        check(manager.Execute(session.Id, change, room2).Duplicate
+              && receipt.Session.Enemies == mission.Definition.Enemies && receipt.Session.RoomEnemyPolicies!.Single().RoomId == 2,
+            "A scoped command is idempotent and retains the global count and policy");
+        adapter.Apply(Read());
+        adapter.Tick(0);
+        var world = adapter.World.Snapshot();
+        var shots = adapter.World.Events(0).Where(entry => entry.Kind == WorldEventKind.EnemyShot).ToArray();
+        check(world.Enemies.Single(enemy => enemy.RoomId == 2).Walking && world.Enemies.Where(enemy => enemy.RoomId != 2).All(enemy => !enemy.Walking)
+            && shots.Length == 1 && world.Players.Single(player => player.RoomId == 2).Health == 80
+            && world.Players.Single(player => player.RoomId == 1).Health == 100,
+            "Only the overridden linked room patrols and applies real enemy damage");
+        var recorded = WorldRecordingPacket.Capture(adapter.World, 1, 0, receipt.AppliedAtSequence, 0, 0, _ => new RecordedRig());
+        check(recorded.frame.roomEnemyPolicies is [{ roomId: 2, behavior: "Patrol", autoAttack: true }],
+            "The world recording captures exactly the effective room override");
+        manager.Execute(session.Id, new(Guid.NewGuid(), ControlAction.SetEnemies, Enemies: mission.Definition.Enemies));
+        adapter.Apply(Read());
+        adapter.Tick(.05);
+        check(adapter.World.Snapshot().Enemies.All(enemy => !enemy.Walking)
+            && manager.Get(session.Id).RoomEnemyPolicies is null
+            && manager.Observed(session.Id, receipt.AppliedAtSequence, room2).RoomEnemyPolicies!.Length == 1,
+            "The global command restores all rooms while the original override remains in history");
     }
 }

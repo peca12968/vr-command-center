@@ -295,21 +295,30 @@ public sealed partial class WorldRecordings
                     applied ? report.WorldSequence : null), applied ? info!.Header.streamId : null, venueEnvironmentSince == environmentSince);
             }
             Dictionary<int, RoomEnemiesEvidence>? enemyRooms = null;
-            if (includeRoomDetails && enemiesSince > 1 && current.State is SessionState.Running or SessionState.Paused)
+            if (includeRoomDetails && (enemiesSince > 1 || current.RoomEnemyPolicies is not null)
+                && current.State is SessionState.Running or SessionState.Paused)
             {
                 var enemies = current.Enemies;
-                var applied = confirmed && observedSequence >= enemiesSince && frame is not null
-                    && frame.Packet.frame.behavior == enemies.Behavior.ToString() && frame.Packet.frame.autoAttack == enemies.AutoAttack;
-                var setting = new RoomVenueEnemies(enemies.Behavior, enemies.AutoAttack, enemiesSince, applied ? report.WorldSequence : null);
-                var byRoom = applied ? frame!.Packet.frame.enemies.ToLookup(enemy => enemy.roomId) : null;
-                enemyRooms = current.RoomIds.ToDictionary(room => room, room =>
+                var byRoom = confirmed ? frame!.Packet.frame.enemies.ToLookup(enemy => enemy.roomId) : null;
+                foreach (var room in current.RoomIds)
                 {
-                    var observedEnemies = byRoom?[room];
+                    var local = current.RoomEnemyPolicies?.SingleOrDefault(policy => policy.RoomId == room);
+                    var since = local?.AppliedAtSequence ?? enemiesSince;
+                    if (since <= 1) continue;
+                    var recorded = frame?.Packet.frame.roomEnemyPolicies?.SingleOrDefault(policy => policy.roomId == room);
+                    var behavior = local?.Behavior ?? enemies.Behavior;
+                    var autoAttack = local?.AutoAttack ?? enemies.AutoAttack;
+                    var applied = confirmed && observedSequence >= since && frame is not null
+                        && (recorded?.behavior ?? frame.Packet.frame.behavior) == behavior.ToString()
+                        && (recorded?.autoAttack ?? frame.Packet.frame.autoAttack) == autoAttack
+                        && (local is null) == (recorded is null);
+                    var setting = new RoomVenueEnemies(behavior, autoAttack, since, applied ? report.WorldSequence : null);
+                    var observedEnemies = applied ? byRoom?[room] : null;
                     var population = observedEnemies is null ? null
                         : new RoomEnemyPopulation(observedEnemies.Count(), observedEnemies.Count(enemy => enemy.health > 0));
-                    return new RoomEnemiesEvidence(setting, applied ? info!.Header.streamId : null, venueEnemiesSince == enemiesSince,
-                        enemies.Count, population);
-                });
+                    (enemyRooms ??= []).Add(room, new(setting, applied ? info!.Header.streamId : null, local is null && venueEnemiesSince == since,
+                        enemies.Count, population));
+                }
             }
             var endpoint = includeRoomDetails && current.State != SessionState.Ended ? EndpointRow(current) : null;
             var vrParticipationObserved = confirmed && current.State is SessionState.Preparing or SessionState.Running

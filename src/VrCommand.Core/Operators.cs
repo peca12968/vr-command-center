@@ -47,6 +47,18 @@ public static class AccessPolicy
         throw new AccessDeniedException("Player management is limited to the controller's room.");
     }
 
+    internal static void Control(OperatorIdentity actor, SessionView session, ControlCommand command)
+    {
+        if (command.Action != ControlAction.SetRoomEnemies) { Manage(actor, session.Mode, session.RoomIds); return; }
+        var room = command.RoomEnemyPolicy?.RoomId ?? 0;
+        Validate(actor);
+        if (actor.Role is not (OperatorRole.Internal or OperatorRole.Master) &&
+            (actor.Role != OperatorRole.RoomController || actor.RoomId != room))
+            throw new AccessDeniedException("Enemy policy changes are limited to the controller's room.");
+        if (session.Mode != SessionMode.Linked || !session.RoomIds.Contains(room))
+            throw new InvalidOperationException("A room enemy policy requires a room in a linked session.");
+    }
+
     public static void AuthorMission(OperatorIdentity actor)
     {
         Validate(actor);

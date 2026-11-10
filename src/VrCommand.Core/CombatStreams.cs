@@ -1,7 +1,11 @@
+using System.Text.Json.Serialization;
+
 namespace VrCommand.Core;
 
-public record OpenCombatStream(Guid StreamId, CombatOrigin Origin, int MissionClockVersion = 0);
-public record CombatStreamView(Guid StreamId, CombatOrigin Origin, OperatorIdentity Owner, long AcceptedSequence = 0, bool Sealed = false, int MissionClockVersion = 0);
+public record OpenCombatStream(Guid StreamId, CombatOrigin Origin, int MissionClockVersion = 0,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int RoomEnemyPolicyVersion = 0);
+public record CombatStreamView(Guid StreamId, CombatOrigin Origin, OperatorIdentity Owner, long AcceptedSequence = 0, bool Sealed = false, int MissionClockVersion = 0,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int RoomEnemyPolicyVersion = 0);
 public record StreamCombatRecord(Guid StreamId, long StreamSequence, long ObservedSequence, CombatReport Report);
 public record SealCombatStream(Guid StreamId, long FinalSequence);
 public record StreamReceipt(Guid StreamId, long AcceptedSequence, bool Duplicate, SessionStatistics Statistics);
@@ -16,11 +20,13 @@ internal static class CombatStreamProjection
         {
             var open = entry.Read<OpenCombatStream>();
             if (open.StreamId == Guid.Empty || open.Origin == CombatOrigin.Unspecified || !Enum.IsDefined(open.Origin)
-                || open.MissionClockVersion is < 0 or > 1 || (open.MissionClockVersion != 0 && entry.SchemaVersion < 7))
+                || open.MissionClockVersion is < 0 or > 1 || open.RoomEnemyPolicyVersion is < 0 or > 1
+                || ((open.MissionClockVersion != 0 || open.RoomEnemyPolicyVersion != 0) && entry.SchemaVersion < 7))
                 throw new ArgumentException("A stream requires a non-empty ID and explicit origin.");
             if (current.State != SessionState.Preparing || current.CombatStream is not null)
                 throw new InvalidOperationException("Attach one combat stream while preparing, before combat begins.");
-            return current with { CombatStream = new(open.StreamId, open.Origin, actor, MissionClockVersion: open.MissionClockVersion) };
+            return current with { CombatStream = new(open.StreamId, open.Origin, actor, MissionClockVersion: open.MissionClockVersion,
+                RoomEnemyPolicyVersion: open.RoomEnemyPolicyVersion) };
         }
         var stream = current.CombatStream ?? throw new InvalidOperationException("No combat stream is attached.");
         if (stream.Owner != actor) throw new AccessDeniedException("Combat stream belongs to another server identity.");
@@ -87,7 +93,8 @@ public sealed partial class SessionManager
             var history = Find(id);
             if (history.View.CombatStream is { } existing)
             {
-                if (existing.StreamId != request.StreamId || existing.Origin != request.Origin || existing.Owner != actor || existing.MissionClockVersion != request.MissionClockVersion)
+                if (existing.StreamId != request.StreamId || existing.Origin != request.Origin || existing.Owner != actor
+                    || existing.MissionClockVersion != request.MissionClockVersion || existing.RoomEnemyPolicyVersion != request.RoomEnemyPolicyVersion)
                     throw new InvalidOperationException("A different stream or owner is already attached.");
                 return existing;
             }

@@ -219,12 +219,14 @@ public sealed partial class WorldRecordings
             .Select(entry => new { entry.eventId, entry.tick, entry.kind, entry.playerId, entry.shotId, entry.enemyId, entry.damage,
                 entry.hasRay, entry.origin, entry.direction, entry.distance, entry.hit, entry.targetId });
         var frame = packet.frame;
+        var roomPolicy = frame.roomEnemyPolicies?.SingleOrDefault(policy => policy.roomId == roomId);
         return new
         {
             packet.sequence, packet.elapsedMilliseconds, packet.suspended, packet.weather, packet.lightning,
             frame = new
             {
-                frame.tick, frame.phase, frame.behavior, frame.autoAttack, frame.night, frame.visibility,
+                frame.tick, frame.phase, behavior = roomPolicy?.behavior ?? frame.behavior,
+                autoAttack = roomPolicy?.autoAttack ?? frame.autoAttack, frame.night, frame.visibility,
                 players = frame.players.Where(player => player.roomId == roomId),
                 enemies = frame.enemies.Where(enemy => enemy.roomId == roomId)
             },

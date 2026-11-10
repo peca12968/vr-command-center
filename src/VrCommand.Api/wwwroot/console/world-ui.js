@@ -171,7 +171,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     }
     for (const button of $('world-room-quick').children)
       button.setAttribute('aria-pressed', String(button.dataset.worldRoom === room));
-    if (frame) showActors();
+    if (frame) { showActors(); showEnemyPolicy(); }
     showStatistics();
     if (mode === 'replay' && frame) showEvents(frame);
     reviewControls();
@@ -488,9 +488,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     const packet = value.packet;
     $('world-time').textContent = `${time(packet.elapsedMilliseconds)} / ${time(info.durationMilliseconds)} · 幀 ${packet.sequence}`;
     $('world-environment').textContent = `${packet.weather} · ${packet.frame.night ? '夜間' : '日間'} · ${packet.lightning ? '雷電啟用' : '無雷電'}${packet.suspended ? ' · 管理中斷暫停' : ''}`;
-    const { behavior, autoAttack } = packet.frame;
-    $('world-enemy-policy').textContent = ['Hold', 'Patrol', 'Advance'].includes(behavior) && typeof autoAttack === 'boolean'
-      ? '此快照的敵軍策略 · ' + describeEnemies({ behavior, autoAttack }) : '';
+    showEnemyPolicy();
     $('world-timeline').max = String(Math.max(info.durationMilliseconds, packet.elapsedMilliseconds, 1)); $('world-timeline').value = String(packet.elapsedMilliseconds);
     showRoomCounts(packet); showStatistics();
     if (mode === 'replay') showEvents(value);
@@ -640,8 +638,19 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     if (kind === 'environment') return packet.weather === setting.weather && packet.frame.night === (setting.timeOfDay === 'Night')
       && packet.lightning === setting.lightning;
     const enemies = packet.frame.enemies.filter(enemy => enemy.roomId === target.roomId);
-    return packet.frame.behavior === setting.behavior && packet.frame.autoAttack === setting.autoAttack
+    const policy = packet.frame.roomEnemyPolicies?.find(row => row.roomId === target.roomId) ?? packet.frame;
+    return policy.behavior === setting.behavior && policy.autoAttack === setting.autoAttack
       && enemies.length === population.present && enemies.filter(enemy => enemy.health > 0).length === population.alive;
+  }
+  function showEnemyPolicy() {
+    const packet = frame?.packet.frame, room = $('world-room').value;
+    if (!packet) return;
+    const local = packet.roomEnemyPolicies?.find(row => row.roomId === Number(room));
+    const { behavior, autoAttack } = local ?? packet;
+    const overrideRooms = packet.roomEnemyPolicies?.map(row => row.roomId) ?? [];
+    $('world-enemy-policy').textContent = ['Hold', 'Patrol', 'Advance'].includes(behavior) && typeof autoAttack === 'boolean'
+      ? (local ? `房間 ${room} 策略 · ` : '此快照的敵軍策略 · ') + describeEnemies({ behavior, autoAttack })
+        + (room === 'all' && overrideRooms.length ? ` · 分房策略 ${overrideRooms.join('、')}` : '') : '';
   }
   function showRecording(roomId) {
     const key = JSON.stringify(info.header);

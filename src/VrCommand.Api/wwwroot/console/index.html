@@ -203,6 +203,19 @@
           <div class="two-columns controls-grid">
             <section><h3>即時環境</h3><p id="live-environment" class="hint"></p><form id="environment-form"><fieldset id="environment-fields"><div class="form-row"><label>模式<select id="live-mode" disabled><option value="VR">VR</option><option value="MR">MR</option></select></label><label>天氣<select id="live-weather"><option value="Clear">晴朗</option><option value="Rain">下雨</option><option value="Fog">濃霧</option><option value="Storm">暴風雨</option></select></label><label>時段<select id="live-time"><option value="Day">白天</option><option value="Night">夜晚</option></select></label></div><label class="check"><input id="live-lightning" type="checkbox">閃電</label><div class="button-row"><button type="submit" class="secondary">套用環境</button><button type="button" id="reload-environment" class="quiet">載入目前設定</button></div></fieldset></form></section>
             <section><h3>敵軍設定</h3><p id="live-enemies" class="hint"></p><p class="hint">目標為全場總數。出生點暫時被占用時，增援會等到有空位。觀戰快照另列實際人數。</p><form id="enemies-form"><fieldset id="enemies-fields"><div class="form-row"><label>敵軍目標數量<input id="live-count" type="number" min="0" max="100" required></label><label>攻擊方式<select id="live-behavior"><option value="Hold">守備</option><option value="Patrol">巡邏</option><option value="Advance">推進</option></select></label></div><label class="check"><input id="live-auto-attack" type="checkbox">自動攻擊</label><div class="button-row"><button type="submit" class="secondary">套用敵軍設定</button><button type="button" id="reload-enemies" class="quiet">載入目前設定</button></div></fieldset></form></section>
+            <section id="room-enemies-panel" hidden>
+              <h3>合併場分房敵軍策略</h3>
+              <p id="room-enemies-current" class="hint" role="status"></p>
+              <form id="room-enemies-form"><fieldset id="room-enemies-fields">
+                <div class="form-row">
+                  <label>房間<select id="room-enemies-room"></select></label>
+                  <label>攻擊方式<select id="room-enemies-behavior"><option value="Hold">守備</option><option value="Patrol">巡邏</option><option value="Advance">推進</option></select></label>
+                </div>
+                <label class="check"><input id="room-enemies-inherit" type="checkbox">沿用全場策略</label>
+                <label class="check"><input id="room-enemies-auto" type="checkbox">自動攻擊</label>
+                <div class="button-row"><button type="submit" class="secondary">套用本房策略</button><button id="room-enemies-reload" type="button" class="quiet">載入目前策略</button></div>
+              </fieldset></form>
+            </section>
           </div><p class="hint">設定會儲存至場次紀錄，遊戲伺服器確認後同步環境與敵軍。電腦示範使用合成頭手；Quest／VIVE、MR 與廠商硬體仍待實機驗證。</p>
           <div class="subheading"><h3>玩家名冊</h3><span id="player-count" class="hint"></span></div>
           <form id="join-form"><fieldset id="join-fields" class="join-fields"><label>玩家名稱<input id="player-name" required maxlength="80" placeholder="例如 Alpha 01"></label><label>房間<select id="player-room"></select></label><label>頭盔<select id="player-headset"><option value="Quest3">Meta Quest 3</option><option value="ViveXr">VIVE XR（後續整合）</option></select></label><button type="submit">加入名冊</button></fieldset></form>
@@ -391,7 +404,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.97 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.98 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

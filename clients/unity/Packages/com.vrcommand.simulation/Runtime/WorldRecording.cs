@@ -72,11 +72,18 @@ namespace VrCommand.Simulation
         public bool hasFireState; public long fireSequence,fireTickPlusOne;
         public RecordedVector fireOrigin=new RecordedVector(),fireDirection=new RecordedVector();
     }
+    [Serializable] public sealed class RecordedRoomEnemyPolicy
+    {
+        public int roomId;
+        public string behavior = "";
+        public bool autoAttack;
+    }
     [Serializable] public sealed class RecordedFrame
     {
         public long tick, throughSequence;
         public string phase = "Preparing", behavior = "Hold", visibility = "Clear";
         public bool autoAttack, night;
+        public RecordedRoomEnemyPolicy[]? roomEnemyPolicies;
         public RecordedPlayer[] players = new RecordedPlayer[0]; public RecordedEnemy[] enemies = new RecordedEnemy[0];
     }
     [Serializable] public sealed class RecordedEvent
@@ -104,6 +111,7 @@ namespace VrCommand.Simulation
                 weather = weather, lightning = lightning, suspended = suspended,
                 frame = new RecordedFrame { tick = snapshot.Tick, throughSequence = snapshot.ThroughSequence, phase = snapshot.Phase.ToString(), behavior = snapshot.Behavior.ToString(),
                     visibility = snapshot.Visibility.ToString(), autoAttack = snapshot.AutoAttack, night = snapshot.Night,
+                    roomEnemyPolicies = world.RecordRoomEnemyPolicies(),
                     players = snapshot.Players.Select(player => new RecordedPlayer { id = player.Id.ToString("D"), roomId = player.RoomId, head = new RecordedVector(player.Head),
                         muzzle = new RecordedVector(player.Muzzle), forward = new RecordedVector(player.Forward), health = player.Health, magazine = player.Magazine, reserve = player.Reserve,
                         connected = player.Connected, reloading = player.Reloading, hasPlayerPresentation=playerPresentationVersion==1, walking=playerPresentationVersion==1&&player.Walking, hasWeaponPresentation = weaponPresentationVersion == 1,
@@ -176,6 +184,13 @@ namespace VrCommand.Simulation
                 || !new[] { "Preparing", "Running", "Paused", "Ended" }.Contains(packet.frame.phase)
                 || !new[] { "Hold", "Patrol", "Advance" }.Contains(packet.frame.behavior) || !new[] { "Clear", "Fog", "Storm" }.Contains(packet.frame.visibility)
                 || !new[] { "Clear", "Rain", "Fog", "Storm" }.Contains(packet.weather)) throw new ArgumentException("Invalid recording packet sequence or frame.");
+            if (packet.frame.roomEnemyPolicies is { Length: > 0 } policies)
+            {
+                if (header.roomIds.Length != 5 || policies.Length > 5 || policies.Any(policy => policy == null
+                    || !header.roomIds.Contains(policy.roomId) || policy.behavior is not ("Hold" or "Patrol" or "Advance"))
+                    || !policies.Select(policy => policy.roomId).SequenceEqual(policies.Select(policy => policy.roomId).Distinct().OrderBy(room => room)))
+                    throw new ArgumentException("Invalid recorded room enemy policies.");
+            }
             if (previous == null && (packet.frame.phase != "Preparing" || packet.frame.tick != 0 || packet.events.Length != 0 || packet.throughCombatSequence != 0 || packet.elapsedMilliseconds != 0))
                 throw new ArgumentException("Recording must start from the unstarted world.");
             if (packet.frame.phase == "Preparing" && (packet.frame.tick != 0 || packet.events.Length != 0)) throw new ArgumentException("Preparing worlds cannot advance combat time.");

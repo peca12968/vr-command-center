@@ -217,7 +217,7 @@ namespace VrCommand.Unity
 
         private SessionSnapshot latestSnapshot;
         private bool streamReady;
-        [Serializable] private sealed class StreamStatus { public string streamId; public string origin; public long acceptedSequence; public bool @sealed; public int missionClockVersion; }
+        [Serializable] private sealed class StreamStatus { public string streamId; public string origin; public long acceptedSequence; public bool @sealed; public int missionClockVersion, roomEnemyPolicyVersion; }
         [Serializable] private sealed class StreamReceipt { public string streamId; public long acceptedSequence; }
         private UnityWebRequest TelemetryRequest(string suffix, string body)
         {
@@ -228,13 +228,13 @@ namespace VrCommand.Unity
         }
         private IEnumerator OpenTelemetry()
         {
-            using (var request = TelemetryRequest("", "{\"streamId\":\"" + outbox.StreamId.ToString("D") + "\",\"origin\":\"" + outbox.Origin + "\",\"missionClockVersion\":1}"))
+            using (var request = TelemetryRequest("", "{\"streamId\":\"" + outbox.StreamId.ToString("D") + "\",\"origin\":\"" + outbox.Origin + "\",\"missionClockVersion\":1,\"roomEnemyPolicyVersion\":1}"))
             {
                 yield return request.SendWebRequest();
                 if (request.result != UnityWebRequest.Result.Success) yield break;
                 StreamStatus response = null; try { response = JsonUtility.FromJson<StreamStatus>(request.downloadHandler.text); } catch (Exception) { }
                 streamReady = response != null && Guid.TryParse(response.streamId, out var id) && id == outbox.StreamId && response.origin == outbox.Origin
-                    && response.acceptedSequence == 0 && !response.@sealed && response.missionClockVersion == 1;
+                    && response.acceptedSequence == 0 && !response.@sealed && response.missionClockVersion == 1 && response.roomEnemyPolicyVersion == 1;
             }
         }
         private IEnumerator DeliverTelemetry()

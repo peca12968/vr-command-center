@@ -5,7 +5,9 @@ namespace VrCommand.Core;
 public enum SessionMode { Independent, Linked }
 public enum HeadsetKind { ViveXr, Quest3 }
 public enum SessionState { Preparing, Running, Paused, Ended }
-public enum ControlAction { Unspecified, Begin, Pause, Resume, End, SetEnvironment, SetEnemies, SetMissionClock, SetRoomAlignment }
+public enum ControlAction { Unspecified, Begin, Pause, Resume, End, SetEnvironment, SetEnemies, SetMissionClock, SetRoomAlignment, SetRoomEnemies }
+public record RoomEnemyPolicy(int RoomId, EnemyBehavior Behavior, bool AutoAttack, long AppliedAtSequence);
+public record RoomEnemyPolicyChange(int RoomId, VenueEnemyPolicy? Policy);
 public record MissionClockSettings(bool AutoEnd);
 public record MissionClockStatus(int Version, bool AutoEnd, long ConfiguredAtSequence);
 public record MissionClockExpiration(Guid StreamId, long ObservedSequence, long Tick);
@@ -18,14 +20,16 @@ public record SessionView(Guid Id, SessionMode Mode, int[] RoomIds, Mission Miss
     DateTimeOffset CreatedAtUtc, DateTimeOffset? StartedAtUtc, DateTimeOffset? EndedAtUtc,
     SessionState State, Player[] Players, EnvironmentSettings Environment, EnemySettings Enemies, long Sequence,
     CombatStreamView? CombatStream = null, MissionClockStatus? MissionClock = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomAlignmentPins? RoomAlignment = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomAlignmentPins? RoomAlignment = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomEnemyPolicy[]? RoomEnemyPolicies = null);
 public record RoomView(int Id, int Capacity, Guid? SessionId, int PlayerCount);
 public record SessionOverview(SessionView Session, SessionStatistics Statistics, SessionEvent[] RecentEvents);
 public record ControlCommand(Guid CommandId, ControlAction Action, EnvironmentSettings? Environment = null,
     EnemySettings? Enemies = null, long? ExpectedSequence = null, MissionClockSettings? MissionClock = null, MissionClockExpiration? ClockExpiration = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomAlignmentPins? RoomAlignment = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MrTrackingRoomId = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? VrParticipationRoomId = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? VrParticipationRoomId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomEnemyPolicyChange? RoomEnemyPolicy = null);
 public record CommandReceipt(Guid CommandId, long AppliedAtSequence, bool Duplicate, SessionView Session);
 public sealed class MixedRealityNotReadyException(ControlAction action) : InvalidOperationException(action == ControlAction.Resume
     ? "MR resume requires a fresh paused snapshot with tracked Quest 3 poses for living players."
@@ -254,7 +258,7 @@ public sealed partial class SessionManager
         {
             var history = Find(id);
             actor ??= OperatorIdentity.Internal;
-            AccessPolicy.Manage(actor, history.View.Mode, history.View.RoomIds);
+            AccessPolicy.Control(actor, history.View, command);
             if (history.Commands.TryGetValue(command.CommandId, out var previous))
             {
                 if (previous.Read<ControlCommand>() != command || (previous.Actor ?? OperatorIdentity.Internal) != actor)
@@ -391,6 +395,7 @@ public sealed partial class SessionManager
     private static SessionView Snapshot(SessionView session) => session with
     {
         RoomIds = [.. session.RoomIds], Players = [.. session.Players],
+        RoomEnemyPolicies = session.RoomEnemyPolicies?.ToArray(),
         Mission = session.Mission with { Definition = session.Mission.Definition with { Props = [.. session.Mission.Definition.Props] } }
     };
 }

@@ -63,6 +63,10 @@ internal static class SessionProjection
             MissionStore.ValidateEnemies(command.Enemies);
         else if (command.Enemies is not null)
             throw new ArgumentException("Enemies is only allowed for SetEnemies.");
+        if ((command.Action == ControlAction.SetRoomEnemies) != (command.RoomEnemyPolicy is not null)
+            || command.RoomEnemyPolicy is { } roomPolicy && (roomPolicy.RoomId is < 1 or > SessionManager.RoomCount
+                || roomPolicy.Policy is { } policy && (policy.Behavior is not { } behavior || !Enum.IsDefined(behavior) || !policy.AutoAttack.HasValue)))
+            throw new ArgumentException("A room enemy policy requires a room and complete settings, or null to use venue settings.");
         if ((command.Action == ControlAction.SetMissionClock) != (command.MissionClock is not null))
             throw new ArgumentException("Mission clock settings are required only for SetMissionClock.");
         if ((command.Action == ControlAction.SetRoomAlignment) != (command.RoomAlignment is not null))
@@ -141,8 +145,10 @@ internal static class SessionProjection
                 AccessPolicy.Player(actor, current, player.RoomId);
                 break;
             case SessionEventKind.ControlApplied:
-                AccessPolicy.Manage(actor, current.Mode, current.RoomIds);
                 var command = entry.Read<ControlCommand>();
+                AccessPolicy.Control(actor, current, command);
+                if (command.Action == ControlAction.SetRoomEnemies && entry.SchemaVersion < 7)
+                    throw new InvalidDataException("Room enemy policies require event schema 7.");
                 if ((command.MissionClock is not null || command.ClockExpiration is not null) && entry.SchemaVersion < 7)
                     throw new InvalidDataException("Mission clocks require event schema 7.");
                 if (command.MrTrackingRoomId is { } trackingRoom && (entry.SchemaVersion < 7
@@ -244,13 +250,23 @@ internal static class SessionProjection
             ControlAction.Resume when session.State == SessionState.Paused => session with { State = SessionState.Running },
             ControlAction.End => session with { State = SessionState.Ended, EndedAtUtc = now },
             ControlAction.SetEnvironment => session with { Environment = command.Environment! },
-            ControlAction.SetEnemies => session with { Enemies = command.Enemies! },
+            ControlAction.SetEnemies => session with { Enemies = command.Enemies!, RoomEnemyPolicies = null },
+            ControlAction.SetRoomEnemies when session.CombatStream?.RoomEnemyPolicyVersion == 1
+                => SetRoomEnemyPolicy(session, command.RoomEnemyPolicy!, sequence),
             ControlAction.SetMissionClock when session.State == SessionState.Preparing
                 && (!command.MissionClock!.AutoEnd || session.CombatStream?.MissionClockVersion == 1)
                 => session with { MissionClock = new(1, command.MissionClock!.AutoEnd, sequence) },
             ControlAction.SetRoomAlignment => PinAlignment(session, command.RoomAlignment!),
             _ => throw new InvalidOperationException($"Cannot apply {command.Action} while {session.State} or without players.")
         };
+    }
+
+    private static SessionView SetRoomEnemyPolicy(SessionView session, RoomEnemyPolicyChange change, long sequence)
+    {
+        var next = (session.RoomEnemyPolicies ?? []).Where(policy => policy.RoomId != change.RoomId).ToList();
+        if (change.Policy is { } policy)
+            next.Add(new(change.RoomId, policy.Behavior!.Value, policy.AutoAttack!.Value, sequence));
+        return session with { RoomEnemyPolicies = next.Count == 0 ? null : next.OrderBy(row => row.RoomId).ToArray() };
     }
 
     private static SessionView PinAlignment(SessionView session, RoomAlignmentPins pins)

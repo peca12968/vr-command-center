@@ -44,6 +44,7 @@ namespace VrCommand.Simulation
         public WorldPhase Phase { get; private set; } = WorldPhase.Preparing;
         public AiBehavior Behavior { get; private set; } = AiBehavior.Hold;
         public bool AutoAttack { get; private set; } = true;
+        private Dictionary<int, (AiBehavior Behavior, bool AutoAttack)> roomEnemyPolicies = new Dictionary<int, (AiBehavior, bool)>();
         public Visibility Visibility { get; private set; }
         public bool Night { get; private set; }
 
@@ -114,6 +115,20 @@ namespace VrCommand.Simulation
             if (Behavior != behavior) foreach (var enemy in enemies) enemy.Route.Clear();
             Behavior = behavior; AutoAttack = autoAttack; Visibility = visibility; Night = night;
         }
+        internal void SetRoomEnemyPolicies(Dictionary<int, (AiBehavior Behavior, bool AutoAttack)> policies)
+        {
+            foreach (var enemy in enemies)
+            {
+                var next = policies.TryGetValue(enemy.Room, out var policy) ? policy.Behavior : Behavior;
+                if (EnemyPolicy(enemy.Room).Behavior != next) enemy.Route.Clear();
+            }
+            roomEnemyPolicies = policies;
+        }
+        private (AiBehavior Behavior, bool AutoAttack) EnemyPolicy(int room) =>
+            roomEnemyPolicies.TryGetValue(room, out var policy) ? policy : (Behavior, AutoAttack);
+        internal RecordedRoomEnemyPolicy[]? RecordRoomEnemyPolicies() => roomEnemyPolicies.Count == 0 ? null :
+            roomEnemyPolicies.OrderBy(pair => pair.Key).Select(pair => new RecordedRoomEnemyPolicy
+            { roomId = pair.Key, behavior = pair.Value.Behavior.ToString(), autoAttack = pair.Value.AutoAttack }).ToArray();
         private Player FindPlayer(Guid id) => players.SingleOrDefault(p => p.Id == id) ?? throw new KeyNotFoundException("Player not found.");
         private void ValidatePose(int room, Vec3 head, Vec3 muzzle, Vec3 forward)
         {
@@ -184,20 +199,21 @@ namespace VrCommand.Simulation
             {
                 enemy.Walking = false;
                 if (enemy.Health <= 0) continue;
+                var (behavior, autoAttack) = EnemyPolicy(enemy.Room);
                 var targets = players.Where(p => p.Connected && p.Health > 0 && p.Room == enemy.Room && Vec3.Distance(p.Head, enemy.Feet + new Vec3(0, 1.4f, 0)) <= range)
                     .OrderBy(p => Vec3.Distance(p.Head, enemy.Feet)).ThenBy(p => p.Id).ToArray();
                 var target = targets.FirstOrDefault();
-                if (Behavior == AiBehavior.Patrol)
+                if (behavior == AiBehavior.Patrol)
                 {
                     var destination = enemy.Returning ? enemy.Start : enemy.Patrol;
                     if (Vec3.Distance(enemy.Feet, destination) < .15f) { enemy.Returning = !enemy.Returning; destination = enemy.Returning ? enemy.Start : enemy.Patrol; }
                     Move(enemy, destination);
                 }
-                else if (Behavior == AiBehavior.Advance && target != null && Vec3.Distance(enemy.Feet, Vec3.Flat(target.Head)) > 2)
+                else if (behavior == AiBehavior.Advance && target != null && Vec3.Distance(enemy.Feet, Vec3.Flat(target.Head)) > 2)
                     Move(enemy, Vec3.Flat(target.Head));
                 var muzzle = enemy.Feet + new Vec3(0, 1.4f, 0);
                 Player? attackTarget = null; Hit? hit = null; var direction = new Vec3();
-                if (AutoAttack && TickNumber >= enemy.NextShot)
+                if (autoAttack && TickNumber >= enemy.NextShot)
                 {
                     // At most five candidates in this room. A blocked closest
                     // player must not hide another player whose real cast hits.
@@ -213,7 +229,7 @@ namespace VrCommand.Simulation
                 // Track the last selected player's current pose during cooldown.
                 // This ID is presentation only: every actual shot casts again.
                 var aimTarget = targets.FirstOrDefault(p => p.Id == enemy.AimTarget) ?? target;
-                if (AutoAttack && aimTarget != null)
+                if (autoAttack && aimTarget != null)
                 {
                     var aim = aimTarget.Head - muzzle;
                     if (aim.Length >= .001f) enemy.Forward = aim.Normalized();

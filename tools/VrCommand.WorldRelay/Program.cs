@@ -45,12 +45,13 @@ async Task<T> Post<T>(HttpClient client, string route, object body)
     using var response = await client.PostAsync(route, content); response.EnsureSuccessStatusCode();
     return (await response.Content.ReadFromJsonAsync<T>(JsonFormat.Options))!;
 }
-async Task Deliver(HttpClient client, TelemetryOutbox queue, int missionClockVersion = 0)
+async Task Deliver(HttpClient client, TelemetryOutbox queue, int missionClockVersion = 0, int roomEnemyPolicyVersion = 0)
 {
     var route = "/api/sessions/" + queue.SessionId + "/combat-stream";
     var origin = Enum.Parse<CombatOrigin>(queue.Origin);
-    var attached = await Post<CombatStreamView>(client, route, new OpenCombatStream(queue.StreamId, origin, missionClockVersion));
+    var attached = await Post<CombatStreamView>(client, route, new OpenCombatStream(queue.StreamId, origin, missionClockVersion, roomEnemyPolicyVersion));
     if (attached.StreamId != queue.StreamId || attached.Origin != origin || attached.MissionClockVersion != missionClockVersion
+        || attached.RoomEnemyPolicyVersion != roomEnemyPolicyVersion
         || attached.AcceptedSequence < queue.AcknowledgedSequence || attached.AcceptedSequence > queue.LastSequence
         || (attached.Sealed && (!queue.Complete || attached.AcceptedSequence != queue.LastSequence))
         || (queue.Sealed && !attached.Sealed)) throw new InvalidDataException("Combat attachment disagrees with the saved journal.");
@@ -71,7 +72,11 @@ async Task Deliver(HttpClient client, TelemetryOutbox queue, int missionClockVer
 }
 async Task PublishBinary(HttpClient client, TelemetryOutbox combat, WorldOutbox saved, WorldRecordingHeader header)
 {
-    await Deliver(client, combat, header.missionClockVersion);
+    var session = await client.GetFromJsonAsync<SessionView>("/api/sessions/" + combat.SessionId.ToString("D"), JsonFormat.Options);
+    if (session?.Id != combat.SessionId || session.CombatStream is { } source
+        && (source.StreamId != combat.StreamId || source.Origin.ToString() != combat.Origin))
+        throw new InvalidDataException("Server stream identity mismatch.");
+    await Deliver(client, combat, header.missionClockVersion, session.CombatStream?.RoomEnemyPolicyVersion ?? 0);
     using var publisher = new WorldPublisher(saved, codec, new WorldWebSocket(client.BaseAddress!.ToString(), combat.SessionId, client.DefaultRequestHeaders.Authorization!.Parameter!));
     while (saved.Pending != null || (saved.Complete && !saved.Sealed))
     {

@@ -97,6 +97,7 @@ def main():
     p.add_argument('--check-venue-begin', action='store_true', help='Start both native topologies with one witnessed Begin per topology')
     p.add_argument('--check-venue-launcher', action='store_true', help='Use one real Windows launcher for the explicitly prepared servers of each topology')
     p.add_argument('--check-venue-plan-ui', action='store_true', help='Launch each topology with the exact plan downloaded from Chromium')
+    p.add_argument('--check-linked-room-enemies', action='store_true', help='Change one linked room through Chromium and verify original combat and replay')
     p.add_argument('--check-venue-tracking-gate', action='store_true', help='Reject full tracking Begin while the same native roster is otherwise ready')
     p.add_argument('--check-venue-participation-gate', action='store_true', help='Require all 25 effective native seats and verify their original Preparing frames')
     p.add_argument('--check-venue-end', action='store_true', help='End each native topology in one batch and read its original archives')
@@ -195,6 +196,8 @@ def main():
                 'individual launcher report workflows must be checked separately')
     if args.check_venue_plan_ui and (not args.check_venue_launcher or not shutil.which('node')):
         p.error('--check-venue-plan-ui requires --check-venue-launcher and Node.js with Playwright Chromium')
+    if args.check_linked_room_enemies and (not args.player_package or args.check_room_combat or not shutil.which('node')):
+        p.error('--check-linked-room-enemies requires the player package, Node.js and a separate run from --check-room-combat')
     if args.check_venue_tracking_gate and not args.check_venue_begin:p.error('--check-venue-tracking-gate requires --check-venue-begin')
     if args.check_venue_participation_gate and not (args.check_venue_begin and args.player_package):
         p.error('--check-venue-participation-gate requires --check-venue-begin and all native player seats')
@@ -1370,6 +1373,48 @@ def main():
         check(observed['complete'] and observed['requestId']==batch['requestId'] and len(observed['rooms'])==5,
               f'{mode} packaged console confirms every original {kind} room and opens the native room 4 witness')
 
+    def check_linked_room_enemies(entry):
+        session=entry['sessionId']; route=f'/api/sessions/{session}'
+        denied={'commandId':str(uuid.uuid4()),'action':'SetRoomEnemies','roomEnemyPolicy':{'roomId':2,'policy':{'behavior':'Patrol','autoAttack':True}}}
+        request(route+'/commands',denied,'Room1',expected=403)
+        request(route+'/commands',denied,'GameServer',expected=403)
+        driver=ROOT/'tests/browser/check-room-enemies-native.cjs'
+        browser=subprocess.run([shutil.which('node'),str(driver)],cwd=driver.parent,
+            input=json.dumps({'base':uri,'token':keys['Room2'],'sessionId':session}),
+            text=True,encoding='utf-8',capture_output=True,timeout=45,creationflags=subprocess.CREATE_NO_WINDOW)
+        diagnostic=browser.stderr
+        for key in keys.values():diagnostic=diagnostic.replace(key,'[redacted]')
+        check(browser.returncode==0,'Room 2 Chromium command succeeded '+diagnostic[-700:])
+        applied=json.loads(browser.stdout)
+        override={'roomId':2,'behavior':'Patrol','autoAttack':True}
+        check(applied['session']['roomEnemyPolicies']==[{**override,'appliedAtSequence':applied['appliedAtSequence']}]
+              and applied['session']['enemies']=={'count':5,'behavior':'Hold','autoAttack':False},
+              'Room 2 has one original override while shared count and policy remain intact')
+        def witnessed():
+            info=request(route+'/world')
+            frame=request(route+'/world/frames/'+str(info['acceptedSequence']))
+            packet=frame['packet']
+            if (packet['observedSequence']>=applied['appliedAtSequence'] and packet['frame'].get('roomEnemyPolicies')==[override]
+                    and any(row['roomId']==2 and row['damageTaken']>0 for row in frame['statistics'])
+                    and all(row['damageTaken']==0 for row in frame['statistics'] if row['roomId']!=2)):
+                return frame
+        active=wait(witnessed,20,'original native room 2 policy and damage')
+        cards=request('/api/rooms/readiness',role='Room2')['rooms']
+        check(len(cards)==1 and cards[0]['id']==2 and cards[0]['enemies']['setting']['appliedAtSequence']==applied['appliedAtSequence']
+              and cards[0]['enemies']['setting']['worldSequence'] is not None,
+              'Room 2 readiness ties its own override to an original saved frame')
+        restored=request(route+'/commands',{'commandId':str(uuid.uuid4()),'action':'SetRoomEnemies',
+            'roomEnemyPolicy':{'roomId':2,'policy':None}},'Room2')
+        def quiet():
+            info=request(route+'/world')
+            packet=request(route+'/world/frames/'+str(info['acceptedSequence']))['packet']
+            if (packet['observedSequence']>=restored['appliedAtSequence'] and packet['frame']['tick']>=active['packet']['frame']['tick']+24
+                    and not packet['frame'].get('roomEnemyPolicies') and not any(row['walking'] for row in packet['frame']['enemies'])):
+                return packet
+        after=wait(quiet,15,'original room 2 returns to the venue policy')
+        entry['roomEnemyWitness']={'applied':applied['appliedAtSequence'],'active':active['packet']['sequence'],
+                                    'restored':restored['appliedAtSequence'],'after':after['sequence']}
+        save('linked-room-enemy-witness.json',entry['roomEnemyWitness'])
     def finish(entry):
         entry['process'].wait(timeout=80);w=entry['witness'];w.wait();w.close();entry['witness']=None
         report=read(entry['reportPath'])
@@ -1413,6 +1458,26 @@ def main():
                     if kind=='complete':break
         check(len(frames)==report['finalWorld']['acceptedSequence'] and [x['packet']['sequence'] for x in frames]==list(range(1,len(frames)+1)) and frames[-1]['packet']['frame']['phase']=='Ended',entry['label']+' full API replay through terminal frame')
         save(entry['label']+'-replay.json',frames)
+        if 'roomEnemyWitness' in entry:
+            witness=entry['roomEnemyWitness']; route='/api/sessions/'+entry['sessionId']+'/world'
+            room_by_player={body['id']:body['roomId'] for body in frames[witness['active']-1]['packet']['frame']['players']}
+            shots=[event for value in frames for event in value['packet']['events'] if event['kind']=='EnemyShot']
+            check(shots and all(room_by_player[event['playerId']]==2 for event in shots)
+                  and all(not any(event['kind']=='EnemyShot' for event in value['packet']['events'])
+                          for value in frames if value['packet']['sequence']>witness['after']),
+                  'All original enemy shots stay in Room 2 and stop after the recorded restore boundary')
+            window=[value['packet'] for value in frames if witness['applied']<=value['packet']['observedSequence']<witness['restored']]
+            check(any(enemy['roomId']==2 and enemy['walking'] for packet in window for enemy in packet['frame']['enemies'])
+                  and all(not enemy['walking'] for packet in window for enemy in packet['frame']['enemies'] if enemy['roomId']!=2),
+                  'Original replay preserves actual patrol only in the overridden room')
+            timeline=route+f"/policy-frames?throughFrame={len(frames)}&includeEnemyRoster=true&roomId="
+            room2=request(timeline+'2',role='Room2')
+            room1=request(timeline+'1',role='Room1')
+            transitions=[row for row in room2['frames'] if 'enemies' in row['changes']]
+            check(len(transitions)==2 and [(row['policy']['behavior'],row['policy']['autoAttack']) for row in transitions]
+                  ==[('Patrol',True),('Hold',False)] and all(row['policy']['behavior']=='Hold' for row in room1['frames']),
+                  'Room 2 timeline finds both original policy transitions while Room 1 retains Hold')
+            save('linked-room-enemy-timeline.json',room2)
         if 'venueOpenxr' in entry:
             window=entry['venueOpenxr']
             check(all(frames[packet['sequence']-1]['packet']==packet for packet in window['packets']),
@@ -2942,7 +3007,7 @@ def main():
             if args.check_venue_launcher and not linked:
                 venue_entries=launch_venue(batch,False)
             for rooms in ([[1,2,3,4,5]] if linked else [[r] for r in range(1,6)]):
-                enemy_count=5*len(rooms) if args.check_room_combat else 1
+                enemy_count=5*len(rooms) if args.check_room_combat else (5 if linked and args.check_linked_room_enemies else 1)
                 if batch is not None:
                     state=batch[rooms[0]-1]
                 elif imported_mission:
@@ -3111,6 +3176,7 @@ def main():
             if args.check_room_combat:
                 stage('running-native-ai-combat',mode='Linked' if linked else 'Independent')
                 exercise_room_combat(entries,round_clients)
+            if args.check_linked_room_enemies and linked:check_linked_room_enemies(entries[0])
             if args.check_venue_phase:verify_venue_phase(entries,linked)
             if args.venue_concurrent_roster_seconds is not None:
                 stage('observing-concurrent-roster', mode='Linked' if linked else 'Independent',

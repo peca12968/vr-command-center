@@ -87,15 +87,19 @@ public sealed partial class WorldRecordings
             using var command = Command("""
                 SELECT sequence, elapsed, coalesce(json_extract(packet,'$.frame.phase'),'Preparing'),
                   coalesce(json_extract(packet,'$.weather'),'Clear'), coalesce(json_extract(packet,'$.frame.night'),0),
-                  coalesce(json_extract(packet,'$.lightning'),0), coalesce(json_extract(packet,'$.frame.behavior'),'Hold'),
-                  coalesce(json_extract(packet,'$.frame.autoAttack'),0),
+                  coalesce(json_extract(packet,'$.lightning'),0),
+                  coalesce(json_extract(roomPolicy.value,'$.behavior'),json_extract(packet,'$.frame.behavior'),'Hold'),
+                  coalesce(json_extract(roomPolicy.value,'$.autoAttack'),json_extract(packet,'$.frame.autoAttack'),0),
                   CASE WHEN $roster THEN (
                     SELECT json_object('enemyIds',json_group_array(json_extract(enemy.value,'$.id') ORDER BY json_extract(enemy.value,'$.id')),
                         'alive',count(CASE WHEN json_extract(enemy.value,'$.health') > 0 THEN 1 END))
                     FROM json_each(world_frames.packet,'$.frame.enemies') AS enemy
                     WHERE $room IS NULL OR json_extract(enemy.value,'$.roomId')=$room
                   ) END
-                FROM world_frames WHERE session=$id AND sequence BETWEEN $first AND $boundary ORDER BY sequence LIMIT 128
+                FROM world_frames
+                LEFT JOIN json_each(world_frames.packet,'$.frame.roomEnemyPolicies') AS roomPolicy
+                  ON $room IS NOT NULL AND json_extract(roomPolicy.value,'$.roomId')=$room
+                WHERE session=$id AND sequence BETWEEN $first AND $boundary ORDER BY sequence LIMIT 128
                 """, ("$id", id.ToString("D")), ("$first", first), ("$boundary", boundary),
                 ("$roster", includeEnemyRoster), ("$room", (object?)roomId ?? DBNull.Value));
             using var row = command.ExecuteReader();

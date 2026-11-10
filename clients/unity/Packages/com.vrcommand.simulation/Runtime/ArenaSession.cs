@@ -18,6 +18,7 @@ namespace VrCommand.Simulation
         public ManagedPlayer[] players = null!;
         public ManagedMissionClock? missionClock;
         public ManagedRoomAlignment? roomAlignment;
+        public RecordedRoomEnemyPolicy[]? roomEnemyPolicies;
     }
     [Serializable] public sealed class ManagedRoomAlignment
     {
@@ -97,6 +98,15 @@ namespace VrCommand.Simulation
                 || !new[] { "Day", "Night" }.Contains(snapshot.environment.timeOfDay))
                 throw new ArgumentException("Unsupported or incomplete arena mission snapshot.");
             var mixedReality = snapshot.environment.mode == "MR";
+            var roomPolicies = new Dictionary<int, (AiBehavior Behavior, bool AutoAttack)>();
+            foreach (var policy in snapshot.roomEnemyPolicies ?? Array.Empty<RecordedRoomEnemyPolicy>())
+            {
+                if (snapshot.roomIds.Length != 5 || policy == null || !snapshot.roomIds.Contains(policy.roomId)
+                    || !Enum.TryParse<AiBehavior>(policy.behavior, out var roomBehavior) || roomBehavior.ToString() != policy.behavior
+                    || roomPolicies.ContainsKey(policy.roomId))
+                    throw new ArgumentException("Invalid room enemy policy.");
+                roomPolicies.Add(policy.roomId, (roomBehavior, policy.autoAttack));
+            }
             if (World != null && (id != sessionId || mission != missionId || snapshot.sequence < sequence
                 || mixedReality != IsMixedReality || !snapshot.roomIds.OrderBy(room => room).SequenceEqual(roomIds)))
                 throw new InvalidOperationException("The running server cannot switch session, mission, experience mode or rewind management state.");
@@ -182,6 +192,7 @@ namespace VrCommand.Simulation
             World.SetPolicy(behavior, snapshot.enemies.autoAttack,
                 snapshot.environment.weather == "Fog" ? Visibility.Fog : snapshot.environment.weather == "Storm" ? Visibility.Storm : Visibility.Clear,
                 snapshot.environment.timeOfDay == "Night");
+            World.SetRoomEnemyPolicies(roomPolicies);
             if (phase == WorldPhase.Paused && World.Phase == WorldPhase.Preparing) World.SetManagedPhase(WorldPhase.Running);
             if (World.Phase != phase) World.SetManagedPhase(phase);
         }

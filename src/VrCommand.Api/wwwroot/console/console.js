@@ -66,6 +66,7 @@ const roomPlan = mountIndependentPlan({
 let timer;
 let selectionEpoch = 0, venueClosureEpoch = 0, operationsViewEpoch = 0;
 let archivedPlan = null;
+let roomEnemyDraft = '';
 
 function notify(message, error = false) {
   $('notice').textContent = message;
@@ -169,6 +170,7 @@ function runSession(action) {
   });
 }
 function logout() {
+  roomEnemyDraft = '';
   selectionEpoch++;
   venueClosureEpoch++;
   report.reset(); state.statistics = null;
@@ -443,6 +445,7 @@ function applyPermissions() {
   $('launch-version').disabled = locked || !state.draftBase;
   $('save-revision').disabled = locked || !master() || !state.draftBase || state.draftBase.number !== knownHeadNumber(state.draftBase.seriesId);
   for (const id of ['environment-fields', 'enemies-fields']) $(id).disabled = locked || !manages() || ended || !session;
+  renderRoomEnemyPolicy();
   $('clock-fields').disabled = locked || !manages() || session?.state !== 'Preparing' || session?.combatStream?.missionClockVersion !== 1;
   $('join-fields').disabled = locked || session?.state !== 'Preparing';
   const mixedReality = session?.environment.mode === 'MR';
@@ -476,6 +479,28 @@ function applyPermissions() {
   alignmentPins.update();
   mrDeployment.update();
   mrVenue.update();
+}
+function renderRoomEnemyPolicy(reload = false) {
+  const session = state.session, panel = $('room-enemies-panel'), picker = $('room-enemies-room');
+  panel.hidden = session?.mode !== 'Linked' || session.state === 'Ended' || session.combatStream?.roomEnemyPolicyVersion !== 1;
+  if (panel.hidden) { roomEnemyDraft = ''; return; }
+  const rooms = session.roomIds.filter(room => ownsRoom(room));
+  const scope = JSON.stringify([session.id, rooms]);
+  if (picker.dataset.scope !== scope) {
+    fillOptions('room-enemies-room', rooms.map(room => [room, `房間 ${room}`]));
+    picker.dataset.scope = scope;
+  }
+  const room = Number(picker.value), policy = session.roomEnemyPolicies?.find(value => value.roomId === room);
+  const settings = policy ?? session.enemies, draft = session.id + '/' + room;
+  if (reload || roomEnemyDraft !== draft) {
+    roomEnemyDraft = draft;
+    $('room-enemies-behavior').value = settings.behavior;
+    $('room-enemies-auto').checked = settings.autoAttack;
+    $('room-enemies-inherit').checked = !policy;
+  }
+  $('room-enemies-current').textContent = `房間 ${room} · ${policy ? '本房策略' : '沿用全場'} · ${behaviorNames[settings.behavior]} · 自動攻擊${settings.autoAttack ? '開啟' : '關閉'}`;
+  $('room-enemies-fields').disabled = !room || state.busy || !!state.pending;
+  $('room-enemies-behavior').disabled = $('room-enemies-auto').disabled = $('room-enemies-inherit').checked;
 }
 function venueTargets(action) {
   const rows = state.venue?.[{ SetEnvironment: 'environment', SetEnemies: 'enemies' }[action] ?? action.toLowerCase()];
@@ -1453,6 +1478,17 @@ submit('create-session-form', createSession);
 submit('join-form', joinPlayer, runSession);
 submit('environment-form', () => command('SetEnvironment', { environment: environment('live') }, state.environmentSequence), runSession);
 submit('enemies-form', () => command('SetEnemies', { enemies: enemies('live') }, state.enemiesSequence), runSession);
+$('room-enemies-room').addEventListener('change', () => renderRoomEnemyPolicy(true));
+$('room-enemies-reload').addEventListener('click', () => renderRoomEnemyPolicy(true));
+$('room-enemies-inherit').addEventListener('change', () => renderRoomEnemyPolicy());
+submit('room-enemies-form', () => {
+  if ($('room-enemies-panel').hidden || state.session.combatStream?.roomEnemyPolicyVersion !== 1) return;
+  const roomId = Number($('room-enemies-room').value);
+  if (!ownsRoom(roomId) || !state.session.roomIds.includes(roomId)) return;
+  const policy = $('room-enemies-inherit').checked ? null
+    : { behavior: $('room-enemies-behavior').value, autoAttack: $('room-enemies-auto').checked };
+  return command('SetRoomEnemies', { roomEnemyPolicy: { roomId, policy } }, null);
+}, runSession);
 submit('clock-form', () => command('SetMissionClock', { missionClock: { autoEnd: $('clock-auto-end').checked } }, state.clockSequence), runSession);
 $('reload-clock').addEventListener('click', loadClock);
 $('clock-auto-end').addEventListener('change', () => { state.clockSequence = state.session?.sequence; });

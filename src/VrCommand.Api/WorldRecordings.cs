@@ -200,6 +200,10 @@ public sealed partial class WorldRecordings : IDisposable
                 || packet.frame.night != (observed.Environment.TimeOfDay == TimeOfDay.Night)
                 || packet.frame.visibility != (observed.Environment.Weather is Weather.Fog or Weather.Storm ? observed.Environment.Weather.ToString() : "Clear"))
                 throw new InvalidOperationException("Recorded policy disagrees with its management observation.");
+            var roomPolicies = packet.frame.roomEnemyPolicies ?? [];
+            if (!roomPolicies.Select(policy => (policy.roomId, policy.behavior, policy.autoAttack)).SequenceEqual(
+                (observed.RoomEnemyPolicies ?? []).Select(policy => (policy.RoomId, policy.Behavior.ToString(), policy.AutoAttack))))
+                throw new InvalidOperationException("Recorded room enemy policy disagrees with its management observation.");
             if (observed.Players.Any(player => !packet.frame.players.Any(body => body.id == player.Id.ToString("D") && body.roomId == player.RoomId)))
                 throw new InvalidOperationException("Recording must include every admitted player body.");
             RequireEnemyRoster(info.Header, observed.Enemies.Count, packet.frame);
