@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `VRCommand-ControlServer-0.31.103-win-x64.zip` 會在 Quest 3 MR 五房部署頁顯示各房原端點，並在瀏覽器交付 ZIP 前重新核對來源。ZIP 為 52,925,549 bytes，SHA-256 `27ec4e6f1a50a12fdb31cde4313d8cd7b2e173a68f7795633b43926fba1bf72b`。解壓核對 546 筆清單及 526 個發行檔案。 [部署操作](QUEST3.md#從主控台下載五房部署包)
+
 2026-11-10 `VRCommand-ControlServer-0.31.102-win-x64.zip` 可在原來源短暫停止更新時停用已開啟的五房配票預覽，並在同一來源恢復後重新開放下載。ZIP 為 52,924,195 bytes，SHA-256 `bea1676d7621421c96ccfb3821e36b609fbeaeab614c2c7c71089bafafa1c214`。解壓核對 546 筆清單及 526 個發行檔案。 [配票操作](EXTERNAL_CLIENTS.md#按房間下載連線檔)
 
 2026-11-10 `VRCommand-ControlServer-0.31.101-win-x64.zip` 會在原遊戲來源沒有近期有效畫格時暫停新批次端點的配票。ZIP 為 52,922,457 bytes，SHA-256 `5d0c83b19b7bfd39c9a1057ae4874227d79f6cbb95010a76c60ac73014c80793`。解壓核對 546 筆清單及 526 個發行檔案。 [配票操作](EXTERNAL_CLIENTS.md#按房間下載連線檔)

@@ -287,6 +287,8 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-mr-venue-depl
 2. 以主控登入「房間與場次」，選取合併 MR 場次或任一獨立 MR 場次。在「Quest 3 MR 五房部署包」依房號選取五份鎖定的原始校正 JSON，按「下載五房部署包 ZIP」。畫面會提示場次、端點、名冊或校正檔有問題的房間。
 3. 保留 `quest-mr-venue.zip`，可直接預檢或為指定席位部署。外層 ZIP 包含五個房間連線 ZIP、五份校正原檔及 `venue.json`。由主控保管整包，入場票券自簽發起有效五分鐘。
 
+控制台 0.31.103 會在五房部署區顯示各房公布的 UDP 端點。批次公告的遊戲來源暫停更新時，下載按鈕會停用，已選的校正檔會保留。原來源恢復後可再次點選下載。若等待 ZIP 回應期間原端點失效，控制台會擋下該次下載，並指出需要確認的房間。
+
 管理 API `POST /api/mr-deployment/venue-bundle` 限主控。請求包含 `topology`，以及五筆 `rooms`，各有 `roomId`、`sessionId`、五個 `players`（`playerId`、`admissionId`）及 Base64 的 `alignmentFile`。服務按同一次讀取的場次和端點驗證五房，完整通過後以 `Cache-Control: no-store` 回傳 ZIP。場次、校正原檔、端點或當前名冊不符時回傳 `409` 及房號，無法取得部分部署包。裝置安裝和場館 UDP 可達性仍需實測。
 
 #### 直接用 ZIP 預檢或部署單席
