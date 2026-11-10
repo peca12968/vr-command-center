@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-11 `VRCommand-ControlServer-0.31.110-startup-validation-win-x64.zip` 在操作員憑證設定不合規，或工作階段、任務庫無法取得寫入鎖時，以失敗碼 1 及明確診斷結束新程序。ZIP 為 52,980,876 bytes，SHA-256 `7a961c987685e2d0f081957a84e71397a9be08c6b8e585241db4b12f79d8582f`，解壓核對 552 筆清單及 532 個發行檔案。 [發行核對](../artifacts/venue-release-0.50.2-startup-validation.json)
+
 2026-11-11 `VRCommand-ControlServer-0.31.110-venue-debrief-win-x64.zip` 可在全館收尾逐房核對戰績回條。ZIP 為 52,979,956 bytes，SHA-256 `2ba2320c161cbbc9b8c3d02d401110fe82ea41efd3782f263fb3b618b686da2b`，解壓核對 552 筆清單與 532 個發行檔案。搭配 Windows 與 Quest 遊戲 0.50.2。 [操作方式](SESSION_CLOSURE.md#全館批次結束) · [發行核對](../artifacts/venue-release-0.50.2-venue-debrief.json)
 
 2026-11-10 `VRCommand-ControlServer-0.31.109-debrief-win-x64.zip` 可在個別場次查看玩家戰績回條。ZIP 為 52,976,827 bytes，SHA-256 `8dbc8121a660e1123afd41ab4dcd24b10536af19f589402f8f5cccd5890eb27a`，解壓核對 552 筆清單與 532 個發行檔案。 [玩家戰績回條](SESSION_CLOSURE.md#玩家戰績回條)

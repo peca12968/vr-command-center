@@ -1,5 +1,14 @@
 # 開發進度
 
+## 2026-11-11 管理服務的啟動拒絕與完整 HTTP 驗收
+
+- 已知的操作員憑證設定錯誤、工作階段寫入鎖及任務庫寫入鎖取得失敗，現在由管理服務寫出對應診斷，結束新程序並回傳退出碼 1。憑證先於資料存取驗證，診斷不含憑證或資料路徑。寫入鎖沿用原排他規則，既有服務及原場次保持。 [管理包](WINDOWS_CONTROL_PACKAGE.md)
+- 原版在 10 秒門檻內仍曾逾時。第一個修正版讓四種無效憑證正常退出，但解壓套件的完整測試隨後在原工作階段鎖的未處理例外逾時。測試初版另曾因 Windows 輸出編碼假設失敗，改以 ASCII 診斷片段核對原始位元。舊證據保留。 [原版 HTTP](../artifacts/http-smoke-before-controlled-operator-exit.log) · [首包 HTTP](../artifacts/http-smoke-operator-startup-packaged.log)
+- 最終完整 HTTP 兩場均退出 0、769 項通過。第一場以測試程序專用的 `DOTNET_PROCESSOR_COUNT=4` 執行來源建置，第二場使用 Windows 預設設定直接啟動最終解壓包的 API。原 10 秒門檻保留。驗證四種無效憑證及兩種寫入鎖拒絕，原服務仍可讀取同一份場次狀態。前幾次 Windows 逾時的環境原因仍未確定。 [最終管理包 HTTP](../artifacts/http-smoke-startup-validation-package-default.log) · [四處理器診斷場](../artifacts/http-smoke-controlled-startup-four-processors.log) · [.NET 處理器數設定](https://learn.microsoft.com/en-us/dotnet/core/compatibility/core-libraries/6.0/environment-processorcount-on-windows)
+- Release 零警告，1,074 項核心、102 項世界串流及 107 項解壓管理包檢查通過。 [管理包測試](../artifacts/control-package-checks/run-d5f42704a8a04949aed7ac1cd3468013/checks.json)
+- 最終解壓包另完成 HTTPS／WSS 隔離場 `run-876c37a301cc4ae39ce0e14828707b03`，退出碼 0、39 項通過。一席同機 Windows 模擬玩家的原戰績及回條相符，世界尾界 26 格，戰鬥尾界 0 筆，雙封存完成。管理與原生程序均已清理。 [加密場測試](../artifacts/control-https-checks/run-876c37a301cc4ae39ce0e14828707b03/checks.json)
+- 來源 `dfcbe039`，管理包收據 184 個建置來源雜湊吻合，沿用遊戲 0.50.2／Quest 67，發行一致性核對通過。GitHub Actions job `129965749156` 因帳務或支出上限未啟動。 [發行核對](../artifacts/venue-release-0.50.2-startup-validation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42855064723)
+
 ## 2026-11-11 全館收尾逐房顯示戰績回條
 
 - 管理包 0.31.110 在全館收尾逐房顯示已確認與未確認的名冊席數。五房合併仍分列各房。等待雙封存、無來源及尚無回條分開顯示。歷史批次依原場次更新，個別玩家可從「查看場次」追查。主控讀取可加 `includeDebriefReceipts=true`，回應只含各房計數。 [操作說明](SESSION_CLOSURE.md#全館批次結束)
