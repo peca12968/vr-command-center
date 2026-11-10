@@ -18,6 +18,7 @@ internal static partial class LiveHardwareGateway
         AllowDuplicateProperties = false, UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
         PropertyNameCaseInsensitive = false, WriteIndented = false, MaxDepth = 12
     };
+    private static readonly JsonSerializerOptions HeartbeatWire = new(Wire) { RespectRequiredConstructorParameters = true };
 
     private sealed record SeatDevice(Guid DeviceId, [property: JsonRequired] int Seat);
     private sealed record SeatMap(int Version, string ManagementUrl, Guid SessionId, int RoomId, int MockPort, int Seconds, SeatDevice[] Devices);
@@ -172,7 +173,7 @@ internal static partial class LiveHardwareGateway
         }
     }
 
-    internal static async Task<int> Run(string input, string output, string? stopFile, bool statusEnabled)
+    internal static async Task<int> Run(string input, string output, string? stopFile, bool statusEnabled, string? statusDirectory)
     {
         var config = ReadInput<Configuration>(input);
         ValidateRoom(config.SessionId, config.RoomId, config.MockPort, config.Seconds);
@@ -187,6 +188,7 @@ internal static partial class LiveHardwareGateway
         using var client = CreateManagementClient(config.ManagementUrl);
         await VerifyIdentity(client, config.RoomId);
         using var leases = AcquireGatewayLeases(config);
+        using var heartbeat = statusDirectory is null ? null : new GatewayHeartbeat(statusDirectory, config, input, output, stopFile);
 
         var bindings = config.Bindings.ToDictionary(b => (b.PlayerId, b.AdmissionId, b.Seat));
         var route = FeedbackRoute(config);
@@ -194,12 +196,13 @@ internal static partial class LiveHardwareGateway
         int connections = 0, attachments = 0, managementFaults = 0, mockFaults = 0, dropped = 0, acknowledged = 0;
         var termination = "duration";
         var statusSequence = 0;
-        (string Phase, int Connections, int Attachments, int ManagementFaults, int MockFaults, int Dropped, int Acknowledged, int Batches)? prior = null;
+        GatewayProgress? prior = null;
         void PublishStatus(string phase, string? reason = null, string? fault = null)
         {
-            if (!statusEnabled) return;
-            var progress = (phase, connections, attachments, managementFaults, mockFaults, dropped, acknowledged, attempts.Count);
-            if (progress == prior) return;
+            if (!statusEnabled && heartbeat is null) return;
+            var progress = new GatewayProgress(phase, connections, attachments, managementFaults, mockFaults, dropped, acknowledged, attempts.Count);
+            heartbeat?.Publish(progress, reason, fault);
+            if (!statusEnabled || progress == prior) return;
             prior = progress;
             Console.WriteLine(JsonSerializer.Serialize(new { version = 1, kind = "gateway-status", config.RoomId,
                 sequence = ++statusSequence, observedAtUtc = DateTimeOffset.UtcNow, phase,
@@ -250,7 +253,7 @@ internal static partial class LiveHardwareGateway
                         var current = await Read(client, route, config, after, run.Token);
                         page = current.Page;
                         if (ActiveEpoch(page) != epoch) break;
-                        if (page.ResetReason is not null) continue;
+                        if (page.ResetReason is not null) { heartbeat?.Refresh(); continue; }
                         var deliveries = page.Signals.Where(current.IsFresh).Select(signal =>
                         {
                             bindings.TryGetValue((signal.PlayerId, signal.AdmissionId, signal.Seat), out var binding);

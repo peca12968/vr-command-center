@@ -181,10 +181,12 @@ def run(args):
                 configs[room] = runtime/f'room-{room}.json'
                 configs[room].write_text(json.dumps(config),encoding='utf-8')
 
-            def invoke(room, key_role, report, *, config=None, stop=None):
+            def invoke(room, key_role, report, *, config=None, stop=None, status_directory=None):
                 command = ['dotnet',str(binary),'--live',str(config or configs[room]),'--output',str(report)]
                 if stop is not None:
                     command += ['--stop-file',str(stop)]
+                if status_directory is not None:
+                    command += ['--status-directory',str(status_directory)]
                 return start(command, {**env,'VR_COMMAND_ROOM_KEY':keys[key_role]})
 
             def stopped(gateway, report, *, attached_once):
@@ -793,31 +795,145 @@ def run(args):
                     request(venue_path+'/combat-stream', {'streamId':stream_id,'origin':'Simulation'}, 'GameServer')
                     started = request(venue_path+'/commands', {'commandId':str(uuid.uuid4()),'action':'Begin'})
                     venue_streams[owner] = (stream_id, started['appliedAtSequence'], 0)
+                status_directory = runtime/f'{label}-status'
+                status_directory.mkdir()
+
+                def venue_status(directory=status_directory):
+                    result = subprocess.run(['dotnet',str(binary),'--venue-status',str(folder/'venue-bindings.json'),
+                                             '--status-directory',str(directory)],env=env,check=True,timeout=5,
+                                            capture_output=True,text=True,encoding='utf-8',creationflags=HIDDEN)
+                    assert not result.stderr and not any(secret in result.stdout for secret in private)
+                    summary = json.loads(result.stdout)
+                    assert summary['mode']==mode and summary['physicalDeliveryConfirmed'] is False
+                    assert [(row['roomId'],row['sessionId']) for row in summary['rooms']]==list(owners.items())
+                    return summary['rooms']
+
+                check(all(row['state']=='waiting' and row['status'] is None for row in venue_status()) and not list(status_directory.iterdir()),
+                      f'{mode} status without credentials reports five waiting rooms and writes no files')
+                stop_venue_room = runtime/f'{label}-stop-room-1'
+                room1_options = {'config':config_files[1],'status_directory':status_directory}
+                alias_path = status_directory/'room-01.status.json'
+                alias = invoke(1, 'Room1', alias_path, **room1_options)
+                alias_log, _ = alias.communicate(timeout=8)
+                assert alias.returncode==1 and 'ArgumentException' in alias_log and not alias_path.exists()
                 venue_reports = {room:out/f'{label}-venue-room-{room}-report.json' for room in rooms}
-                gateways = {room:invoke(room, f'Room{room}', venue_reports[room], config=config_files[room]) for room in rooms}
+                gateways = {room:invoke(room, f'Room{room}', venue_reports[room], config=config_files[room],
+                                        stop=stop_venue_room if room==1 and mode=='Linked' else None,
+                                        status_directory=status_directory) for room in rooms}
                 venue_connections = {}
                 for room in rooms:
                     path = '/api/sessions/' + owners[room]
                     venue_connections[room] = accept(venue_peers[room], room, bound=True)
                 assert len(set(venue_connections.values())) == 5
 
-                confirmed = {}
-                for count in (5, 1):
-                    for room in rooms:
-                        stream_id, observed, position = venue_streams[owners[room]]
-                        reports = [{'streamId':stream_id,'streamSequence':position+index+1,'observedSequence':observed,
-                                    'report':{'reportId':str(uuid.uuid4()),'kind':'ShotFired','origin':'Simulation','playerId':player['id'],
-                                              'shotId':str(uuid.uuid4())}} for index,player in enumerate(rosters[room][:count])]
-                        request('/api/sessions/'+owners[room]+'/combat-stream/batch', reports, 'GameServer')
-                        venue_streams[owners[room]] = (stream_id, observed, position+count)
-                        received = venue_peers[room].read('feedback')
-                        assert received['roomId']==room and received['connectionId']==venue_connections[room]
-                        assert [(row['signal']['reportId'],row['deviceId']) for row in received['signals']] == [
-                            (report['report']['reportId'],expected_devices[room][player['seat']])
-                            for report,player in zip(reports,rosters[room][:count],strict=True)]
-                        if count == 5:
-                            confirmed[room] = {report['report']['reportId'] for report in reports}
-                        venue_peers[room].reply()
+                def send_venue_batch(room, count):
+                    stream_id, observed, position = venue_streams[owners[room]]
+                    reports = [{'streamId':stream_id,'streamSequence':position+index+1,'observedSequence':observed,
+                                'report':{'reportId':str(uuid.uuid4()),'kind':'ShotFired','origin':'Simulation','playerId':player['id'],
+                                          'shotId':str(uuid.uuid4())}} for index,player in enumerate(rosters[room][:count])]
+                    request('/api/sessions/'+owners[room]+'/combat-stream/batch', reports, 'GameServer')
+                    venue_streams[owners[room]] = (stream_id, observed, position+count)
+                    received = venue_peers[room].read('feedback')
+                    assert received['roomId']==room and received['connectionId']==venue_connections[room]
+                    assert [(row['signal']['reportId'],row['deviceId']) for row in received['signals']] == [
+                        (report['report']['reportId'],expected_devices[room][player['seat']])
+                        for report,player in zip(reports,rosters[room][:count],strict=True)]
+                    venue_peers[room].reply()
+                    return {report['report']['reportId'] for report in reports}
+
+                def all_at_count(count):
+                    rows = venue_status()
+                    return rows if all(row['state']=='current' and row['status']['progress']['phase']=='active'
+                                       and row['status']['progress']['acknowledged']==count for row in rows) else None
+
+                confirmed = {room:send_venue_batch(room, 5) for room in rooms}
+                for room in rooms:
+                    send_venue_batch(room, 1)
+                original_status = wait(lambda:all_at_count(6), 'five active room snapshots with six ACKs each')
+                def refreshed():
+                    rows = all_at_count(6)
+                    return rows if rows and all(new['status']['sequence']>old['status']['sequence']
+                                                and new['status']['runId']==old['status']['runId']
+                                                for new,old in zip(rows,original_status,strict=True)) else None
+                snapshot_path = status_directory/'room-01.status.json'
+                if os.name == 'nt':
+                    reader = start(['powershell.exe','-NoProfile','-NonInteractive','-Command',
+                        "$file=[IO.FileStream]::new($env:VR_TEST_STATUS_PATH,[IO.FileMode]::Open,[IO.FileAccess]::Read,"
+                        "([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)); try { "
+                        "[Console]::WriteLine('open'); $null=[Console]::ReadLine(); "
+                        "$text=[IO.StreamReader]::new($file); [Console]::WriteLine($text.ReadToEnd()) } finally { $file.Dispose() }"],
+                        {**env,'VR_TEST_STATUS_PATH':str(snapshot_path)})
+                    assert reader.stdout.readline().strip()=='open'
+                    held_status = venue_status()[0]['status']
+                    fresh = wait(lambda:rows if (rows:=refreshed()) and rows[0]['status']['sequence']>held_status['sequence'] else None,
+                                 'all five idle snapshots advance while Windows reader holds room 1 open')
+                    old_snapshot, _ = reader.communicate(input='close\n',timeout=5)
+                    assert reader.returncode==0 and json.loads(old_snapshot)['sequence']<=held_status['sequence']
+                else:
+                    with snapshot_path.open('rb') as reader:
+                        held_status = json.load(reader)
+                        fresh = wait(lambda:rows if (rows:=refreshed()) and rows[0]['status']['sequence']>held_status['sequence'] else None,
+                                     'all five idle snapshots advance while a reader holds room 1 open')
+                save(f'{label}-venue-status-active.json', fresh)
+                check(all(sha(file)==digest for file,digest in hashes.items()),
+                      f'{mode} five statuses preserve bindings and advance while room 1 is open in another reader')
+
+                if mode=='Linked':
+                    bad = runtime/'invalid-venue-status'
+                    bad.mkdir()
+                    (bad/'room-01.status.json').write_text('{',encoding='utf-8')
+                    sample = fresh[1]['status']
+                    (bad/'room-02.status.json').write_text(json.dumps({**sample,'sessionId':str(uuid.uuid4())}),encoding='utf-8')
+                    (bad/'room-03.status.json').write_text(json.dumps({**fresh[2]['status'],'observedAtUtc':'2099-01-01T00:00:00Z'}),encoding='utf-8')
+                    (bad/'room-04.status.json').write_text(json.dumps({**fresh[3]['status'],'physicalDeliveryConfirmed':True}),encoding='utf-8')
+                    rejected = venue_status(bad)
+                    check([row['state'] for row in rejected]==['invalid','mismatch','invalid','invalid','waiting']
+                          and all(row['status'] is None for row in rejected), 'Invalid, future-dated and wrong-session files expose no old ACK counters')
+
+                    stop_venue_room.touch()
+                    first_room = gateways[1]
+                    stdout, _ = first_room.communicate(timeout=8)
+                    assert first_room.returncode==0 and not any(secret in stdout for secret in private)
+                    stopped_room = venue_status()[0]
+                    check(stopped_room['state']=='stopped' and stopped_room['status']['termination']=='operator-stop'
+                          and stopped_room['status']['progress']['acknowledged']==6 and venue_reports[1].is_file(),
+                          'Graceful room stop publishes the terminal heartbeat after the original report')
+
+                    crash_report = out/'linked-venue-crash-report.json'
+                    crashed = invoke(1, 'Room1', crash_report, **room1_options)
+                    venue_connections[1] = accept(venue_peers[1], 1, venue_connections[1], bound=True)
+                    send_venue_batch(1, 1)
+                    def room_one_at_count(count):
+                        row = venue_status()[0]
+                        return row if row['state']=='current' and row['status']['progress']['phase']=='active' and row['status']['progress']['acknowledged']==count else None
+                    before_crash = wait(lambda:room_one_at_count(1), 'original ACK before forced room exit')
+                    crashed.kill()
+                    crashed.communicate(timeout=8)
+                    assert crashed.returncode!=0 and not crash_report.exists()
+                    def stale_room():
+                        rows = venue_status()
+                        return rows if rows[0]['state']=='stale' else None
+                    stale = wait(stale_room, 'killed gateway becomes stale')
+                    assert stale[0]['status'] is None and all(row['state']=='current' and row['status']['runId']==old['status']['runId']
+                                                            for row,old in zip(stale[1:],fresh[1:],strict=True))
+                    for room in rooms[1:]:
+                        send_venue_batch(room, 1)
+                    during = wait(lambda:rows if (rows:=stale_room()) and all(row['status'] and row['status']['progress']['acknowledged']==7 for row in rows[1:])
+                                  else None, 'four original connections ACK while room 1 stays stale')
+                    save('linked-venue-status-stale.json', during)
+                    check(during[0]['status'] is None, 'Killed room becomes stale while the other four original connections acknowledge fresh feedback')
+
+                    restart_report = out/'linked-venue-restart-report.json'
+                    restarted = invoke(1, 'Room1', restart_report, **room1_options)
+                    venue_connections[1] = accept(venue_peers[1], 1, venue_connections[1], bound=True)
+                    recovered = wait(lambda:room_one_at_count(0), 'restarted room initially has no acknowledgements')
+                    assert recovered['status']['runId'] not in (before_crash['status']['runId'],stopped_room['status']['runId'])
+                    assert venue_peers[1].lines.empty()
+                    restarted_ids = send_venue_batch(1, 1)
+                    final_recovered = wait(lambda:room_one_at_count(1), 'restarted room acknowledges exactly one new batch')
+                    save('linked-venue-status-restarted.json', final_recovered)
+                    check(final_recovered['status']['runId']==recovered['status']['runId'],
+                          'Restart uses a new run ID, clears ACK counts and delivers only fresh feedback')
                 for owner, (stream_id, _, position) in venue_streams.items():
                     venue_path = '/api/sessions/'+owner
                     request(venue_path+'/commands', {'commandId':str(uuid.uuid4()),'action':'End'})
@@ -828,7 +944,18 @@ def run(args):
                     result = json.loads(venue_reports[room].read_bytes())
                     ids = {delivery['signal']['reportId'] for attempt in result['attempts'] if attempt['status']=='simulated-acknowledged'
                            for delivery in attempt['deliveries']}
-                    assert confirmed[room] <= ids and result['physicalDeliveryConfirmed'] is False and result['termination']=='ended'
+                    termination = 'operator-stop' if mode=='Linked' and room==1 else 'ended'
+                    assert confirmed[room] <= ids and result['physicalDeliveryConfirmed'] is False and result['termination']==termination
+                if mode=='Linked':
+                    stdout, _ = restarted.communicate(timeout=8)
+                    report = json.loads(restart_report.read_bytes())
+                    assert restarted.returncode==0 and not any(secret in stdout for secret in private)
+                    assert report['termination']=='ended' and report['acknowledged']==1 and {
+                        delivery['signal']['reportId'] for attempt in report['attempts'] for delivery in attempt['deliveries']}==restarted_ids
+                terminal = venue_status()
+                check(all(row['state']=='stopped' and row['status']['termination']=='ended' for row in terminal),
+                      f'{mode} all five terminal snapshots identify the mock run that ended')
+                save(f'{label}-venue-status-terminal.json', terminal)
                 check(request('/api/sessions')==[], f'{mode} launches all five generated settings and confirms 25 exact mock deliveries before ending')
         finally:
             for process in reversed(processes):

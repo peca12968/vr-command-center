@@ -27,7 +27,7 @@ $page.signals
 
 ## 現況
 
-硬體由外部公司負責，目前尚待技術資料或 SDK。模擬器 0.2.8 支援以下即時排演，以及[離線回饋模擬](HARDWARE_SIMULATOR.md)的事件重建、佇列、重送和到期測試。設備輸入、強度映射、實體停止及廠商協議列入後續實機驗收。
+硬體由外部公司負責，目前尚待技術資料或 SDK。模擬器 0.2.9 支援以下即時排演，以及[離線回饋模擬](HARDWARE_SIMULATOR.md)的事件重建、佇列、重送和到期測試。設備輸入、強度映射、實體停止及廠商協議列入後續實機驗收。
 
 ### 依現行名冊建立座位綁定
 
@@ -86,7 +86,7 @@ try {
 
 ## 即時模擬閘道
 
-解壓模擬器 0.2.8 後，用 Python 3.12 開啟模擬設備。每房使用自己的程序和 TCP 埠，模擬連線固定使用本機 `127.0.0.1`。指定 `--room` 時，設備只接受該房握手。後續批次須符合握手房號及連線 ID 才會確認。
+解壓模擬器後，用 Python 3.12 開啟模擬設備。每房使用自己的程序和 TCP 埠，模擬連線固定使用本機 `127.0.0.1`。指定 `--room` 時，設備只接受該房握手。後續批次須符合握手房號及連線 ID 才會確認。
 
 ```powershell
 python .\mock-device.py --room 1 --port 19101
@@ -141,6 +141,17 @@ dotnet .\VrCommand.HardwareSimulator.dll --live ..\room-1.json --output ..\room-
 | `stopped` | 終止原因已確定，報告檔已寫出並關閉 |
 
 沒有看到 `stopped` 時，請核對程序退出碼和報告。指定 `--status` 時，原結束摘要仍會接在狀態列後面。程式讀取時可用 `kind` 區分兩者。狀態不含金鑰、位址或玩家識別，`physicalDeliveryConfirmed` 固定為 `false`。
+
+### 查看五房排演狀態
+
+使用模擬器 0.2.9。每次排演先建立專用的本機狀態目錄，五房啟動時都加上同一個 `--status-directory`。每房仍使用自己的房控金鑰和新的報告路徑。狀態檔在狀態變更或閘道迴圈中每隔約 500 毫秒以原子替換更新。正常結束時，先寫完報告，再發布終止狀態。
+
+```powershell
+dotnet .\VrCommand.HardwareSimulator.dll --live ..\venue\room-01.json --output ..\room-01-report.json --status-directory ..\venue-status
+dotnet .\VrCommand.HardwareSimulator.dll --venue-status ..\venue\venue-bindings.json --status-directory ..\venue-status
+```
+
+第二行只讀本機檔案，無須金鑰。可重複執行以取得最新快照。每房依原場次 UUID 及房號核對，`current` 的 `progress.phase` 顯示閘道正在等待、連線、模擬確認或發生故障。超過三秒未更新的執行中狀態會顯示 `stale`，隱藏該房上次的模擬確認計數。未發布狀態顯示 `waiting`，房號或場次不合顯示 `mismatch`，損壞或未來時間顯示 `invalid`。`stopped` 可查最後計數及停止原因。重啟同房後會換新的 `runId` 並重算計數。這些狀態記錄的是本機模擬，`physicalDeliveryConfirmed` 固定為 `false`。
 
 ### 同房閘道的互斥與重新啟動
 

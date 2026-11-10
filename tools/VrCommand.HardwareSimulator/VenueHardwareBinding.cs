@@ -6,6 +6,8 @@ internal static partial class LiveHardwareGateway
 {
     private sealed record VenueMap(int Version, string ManagementUrl, [property: JsonRequired] SessionMode Mode, int Seconds, VenueRoomMap[] Rooms);
     private sealed record VenueRoomMap(int RoomId, Guid SessionId, int MockPort, SeatDevice[] Devices);
+    private sealed record VenueBindingManifest(int Version, [property: JsonRequired] SessionMode Mode, VenueBindingRoom[] Rooms);
+    private sealed record VenueBindingRoom(int RoomId, Guid SessionId, long SessionSequence, string Configuration, int BoundSeats);
 
     internal static async Task<int> BindVenue(string input, string output)
     {
@@ -47,11 +49,9 @@ internal static partial class LiveHardwareGateway
             || bindingsAcrossRooms.Select(binding => binding.AdmissionId).Distinct().Count() != devices.Length)
             throw new InvalidDataException("The snapshot repeats a player or admission across rooms.");
 
-        var manifest = new { version = 1, mode = map.Mode, rooms = entries.Select(entry => new
-        {
-            entry.Configuration.RoomId, entry.Configuration.SessionId, entry.SessionSequence,
-            configuration = entry.FileName, boundSeats = entry.Configuration.Bindings.Length
-        }).ToArray() };
+        var manifest = new VenueBindingManifest(1, map.Mode, entries.Select(entry => new VenueBindingRoom(
+            entry.Configuration.RoomId, entry.Configuration.SessionId, entry.SessionSequence, entry.FileName,
+            entry.Configuration.Bindings.Length)).ToArray());
         const string manifestName = "venue-bindings.json";
         var staging = Directory.CreateDirectory(Path.Combine(parent, $".vr-venue-bindings-{Guid.NewGuid():N}")).FullName;
         try
