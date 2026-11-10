@@ -743,6 +743,90 @@ class FieldResultsTests(unittest.TestCase):
                 with self.assertRaisesRegex(field.EvidenceError, 'continuous concurrent roster'):
                     field.verify_venue(path)
 
+    def test_distinct_remote_roster_matches_all_sources_and_connection_history(self):
+        for mode, offsets in (('Linked', [0]), ('Independent', [0, 100, 200, 300, 400])):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, _ = venue_fixture(root, mode, remote=True, quest_per_room=1, with_journals=True)
+                self.concurrent_journals(root, manifest, offsets)
+                manifest.update(requireDistinctRemoteRoster=True, minimumConcurrentMilliseconds=5000)
+                sources = []
+                for entry in manifest['sessions']:
+                    session, _, endpoint = field.management_zip(root / entry['evidenceZip'])
+                    server_log = root / entry['serverLog']
+                    server = server_log.read_text(encoding='utf-8')
+                    for owner, source in zip(session['players'], entry['players'], strict=True):
+                        connection = owner['roomId'] * 5 + owner['seat']
+                        peer = f'192.168.5.{30 + connection}'
+                        server = server.replace(f"endpoint={source['address']}:{5000 + connection}",
+                                                f'endpoint={peer}:{5000 + connection}')
+                        source['address'] = peer
+                        if 'logcatPid' not in source:
+                            client = root / source['log']
+                            startup = f"VR_NETWORK_STARTED role=Client started=True background=True port={endpoint['port']}\n"
+                            client.write_text(startup + client.read_text(encoding='utf-8'), encoding='utf-8')
+                            sources.append((source, server_log, connection))
+                    server_log.write_text(server, encoding='utf-8')
+                first, first_server, connection = sources[0]
+                client = root / first['log']
+                client_text = client.read_text(encoding='utf-8').replace(f'VR_CLIENT_CONNECTED id={connection}\n',
+                    f'VR_CLIENT_CONNECTED id=100\nVR_CLIENT_DISCONNECTED\nVR_CLIENT_CONNECTED id={connection}\n')
+                client.write_text(client_text, encoding='utf-8')
+                server_text = first_server.read_text(encoding='utf-8').replace(f'VR_SERVER_ADMISSION_APPROVED id={connection}\n',
+                    f"VR_SERVER_ADMISSION_APPROVED id=100\nVR_SERVER_PEER id=100 endpoint={first['address']}:5100\n"
+                    f'VR_SERVER_CLIENT_LEFT id=100\nVR_SERVER_ADMISSION_APPROVED id={connection}\n')
+                first_server.write_text(server_text, encoding='utf-8')
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                report = field.verify_venue(path)
+                self.assertEqual(report['distinctRemoteRoster'],
+                    {'seatsVerified': 25, 'distinctSourceAddresses': 25, 'connectionsVerified': 26})
+                self.assertEqual([room['playersOutsideDeclaredServer'] for room in report['rooms']], [5] * 5)
+                self.assertEqual(report['concurrentRoster']['players'], 25)
+                self.assertFalse(report['physicalHostsVerified'])
+                self.assertNotIn('192.168', json.dumps(report))
+
+                for changed, error in (
+                    (server_text.replace(f"endpoint={first['address']}:5100", 'endpoint=192.168.5.250:5100'), 'Historical UDP peer'),
+                    (server_text + 'VR_SERVER_ADMISSION_APPROVED id=101\n', 'every approved connection'),
+                ):
+                    first_server.write_text(changed, encoding='utf-8')
+                    with self.assertRaisesRegex(field.EvidenceError, error):
+                        field.verify_venue(path)
+                first_server.write_text(server_text, encoding='utf-8')
+                port = field.management_zip(root / manifest['sessions'][0]['evidenceZip'])[2]['port']
+                client.write_text(client_text.replace(f'port={port}', 'port=9876'), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'original Windows client startup'):
+                    field.verify_venue(path)
+                client.write_text(client_text, encoding='utf-8')
+
+                last, last_server, last_connection = sources[-1]
+                last_text = last_server.read_text(encoding='utf-8')
+                for replacement in (first['address'], manifest['serverIps'][0]):
+                    with self.subTest(replacement=replacement):
+                        original = last['address']
+                        last['address'] = replacement
+                        last_server.write_text(last_text.replace(f'endpoint={original}:{5000 + last_connection}',
+                            f'endpoint={replacement}:{5000 + last_connection}'), encoding='utf-8')
+                        path.write_text(json.dumps(manifest), encoding='utf-8')
+                        with self.assertRaisesRegex(field.EvidenceError, 'one unique observed IPv4'):
+                            field.verify_venue(path)
+                        last['address'] = original
+                last_server.write_text(last_text, encoding='utf-8')
+
+    def test_distinct_remote_roster_requires_direct_lan_and_a_common_window(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, _ = venue_fixture(root, 'Linked', with_journals=True)
+            for changes, error in (
+                ({'requireDistinctRemoteRoster': 1}, 'must be a boolean'),
+                ({'requireDistinctRemoteRoster': True, 'minimumConcurrentMilliseconds': 5000}, 'requires direct-lan'),
+                ({'requireDistinctRemoteRoster': True, 'topology': 'direct-lan'}, 'minimumConcurrentMilliseconds'),
+            ):
+                with self.subTest(changes=changes):
+                    path.write_text(json.dumps(dict(manifest, **changes)), encoding='utf-8')
+                    with self.assertRaisesRegex(field.EvidenceError, error):
+                        field.verify_venue(path)
+
     def test_venue_concurrent_roster_rejects_full_rooms_at_different_times(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

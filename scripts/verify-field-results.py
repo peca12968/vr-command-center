@@ -191,14 +191,14 @@ def server_connections(log, port, *, verify_history=False):
     return peers, acknowledged, approved, released
 
 
-def client_result(log, *, connections=None, require_startup=False):
+def client_result(log, *, connections=None, require_startup=False, startup_port=None):
     connection = None
     final = None
     seen = set()
     started = not require_startup
     for line in log.splitlines():
         if require_startup and line.startswith('VR_NETWORK_STARTED '):
-            require(not started and client_startup_on_port(line), 'Expected one original Windows client startup')
+            require(not started and client_startup_on_port(line, startup_port), 'Expected one original Windows client startup')
             started = True
         if line.startswith(PLAYER_MARKERS):
             require(started, 'Windows player marker precedes the original client startup')
@@ -780,7 +780,7 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
                    require_remote=True, quest_player_logs=(), world_journal=None, combat_journal=None, applied_end=None, room_alignments=None,
                    udp_preflight=None, udp_source_preflights=None, verify_player_sources=False, quest_capture_logs=(),
                    guarded_begin=None, concurrency=None, verify_reconnect_history=False, reconnect_window=None,
-                   quest_deployments=None):
+                   quest_deployments=None, require_distinct_remote_roster=False):
     integer(size, 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(not verify_player_sources or world_journal is not None, 'Player source verification requires the original closed world journal')
@@ -838,7 +838,8 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
     quest_logs = ((address, log, pid, None) for address, log, pid in quest_player_logs)
     for expected_ip, log, pid, capture_seat in chain(windows_logs, quest_logs, quest_capture_logs):
         history = [] if verify_reconnect_history else None
-        connection, result = (client_result(log, connections=history, require_startup=verify_reconnect_history) if pid is None
+        connection, result = (client_result(log, connections=history, require_startup=verify_reconnect_history,
+                                            startup_port=port if require_distinct_remote_roster else None) if pid is None
                               else quest_client_result(log, pid, port, connections=history))
         require(connection in acknowledged and connection not in used_connections, 'Missing or reused server acknowledgement')
         observed = peer_address(peers[connection])
@@ -887,6 +888,8 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
     require(used_connections == acknowledged and used_players == set(players), 'Extra acknowledgement or missing result')
     if verify_reconnect_history:
         require(verified_history == peers.keys(), 'Server log contains unmatched UDP peer records')
+    if require_distinct_remote_roster:
+        require(verified_history == approved.keys(), 'Distinct remote roster requires a matched UDP source for every approved connection')
     require(all(len(sources) <= 5 for sources in room_sources.values()), 'Room participant limit exceeded')
 
     peer_ips = {address for address, _ in endpoints}
@@ -1201,12 +1204,17 @@ def verify_venue(manifest_path):
         require(journals, 'Concurrent roster verification requires the original world journals for the full batch')
         concurrency = VenueRosterOverlap(integer(manifest['minimumConcurrentMilliseconds'], 1000, 900000),
                                          require_tracked=require_tracked, require_fire=require_fire)
+    require_distinct_remote_roster = manifest.get('requireDistinctRemoteRoster', False)
+    require(type(require_distinct_remote_roster) is bool, 'requireDistinctRemoteRoster must be a boolean')
+    require(not require_distinct_remote_roster or (topology == 'direct-lan' and concurrency is not None),
+            'requireDistinctRemoteRoster requires direct-lan and minimumConcurrentMilliseconds')
     verify_player_sources = manifest.get('verifyPlayerSources', False)
     require(type(verify_player_sources) is bool and (not verify_player_sources or journals),
             'Player source verification requires a boolean option and the original world journals for the full batch')
     verify_player_sources = verify_player_sources or require_tracked
     verify_reconnect_history = manifest.get('verifyReconnectHistory', False)
     require(type(verify_reconnect_history) is bool, 'verifyReconnectHistory must be a boolean')
+    verify_reconnect_history = verify_reconnect_history or require_distinct_remote_roster
     reconnect_window = None
     if 'reconnectWindow' in manifest:
         require(verify_reconnect_history and journals, 'reconnectWindow requires verified reconnect history and the original world journals')
@@ -1402,7 +1410,8 @@ def verify_venue(manifest_path):
                                          quest_capture_logs=(quest_capture_log(*evidence) for evidence in captured),
                                          guarded_begin=guarded_begin, concurrency=concurrency,
                                          verify_reconnect_history=verify_reconnect_history, reconnect_window=reconnect_window,
-                                         quest_deployments=quest_deployments)
+                                         quest_deployments=quest_deployments,
+                                         require_distinct_remote_roster=require_distinct_remote_roster)
         verified_pairs = ([report['udpPreflight']] if preflights else report['udpSourcePreflight']['pairs'] if source_preflights else [])
         for pair in verified_pairs:
             exchange = pair['exchangeSha256']
@@ -1436,6 +1445,9 @@ def verify_venue(manifest_path):
     require(windows_link_reports in (0, windows_players), 'Windows link evidence must cover every Windows seat in the venue')
     peer_ips = {address for sources in rooms.values() for address in sources}
     remote = peer_ips - server_ips
+    if require_distinct_remote_roster:
+        require(len(remote) == len(player_ids),
+                'Distinct remote roster requires one unique observed IPv4 outside the declared server addresses for every seat')
     require(topology != 'direct-lan' or remote, 'Direct LAN needs a peer outside the declared server addresses')
     begin_summary = {}
     if begin_kind is not None:
@@ -1458,6 +1470,8 @@ def verify_venue(manifest_path):
             'distinctPeerAddresses': len(peer_ips), 'distinctAddressesOutsideDeclaredServer': len(remote),
             'serverAcknowledgements': sum(item['serverAcknowledgements'] for item in summaries),
             'physicalHostsVerified': False, 'networkCapacityAccepted': False,
+            **({'distinctRemoteRoster': {'seatsVerified': len(player_ids), 'distinctSourceAddresses': len(remote),
+                'connectionsVerified': reconnect_summary['reconnectHistory']['observedConnections']}} if require_distinct_remote_roster else {}),
             **({'questLogcatPlayers': quest_players} if quest_players else {}),
             **({'questCaptureBatchesVerified': capture_batches, 'questCaptureSeatsVerified': quest_players} if capture_supplied else {}),
             **({'questDeployment': deployment_summary} if deployment_summary is not None else {}),
