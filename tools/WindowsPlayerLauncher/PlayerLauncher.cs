@@ -26,11 +26,22 @@ internal static class PlayerLauncher
     private static int Number(Dictionary<string, object> value, string key)
     { object result; return value.TryGetValue(key, out result) && result is int ? (int)result : -1; }
     private static void Require(bool condition, string message) { if (!condition) throw new InvalidDataException(message); }
-    private static Dictionary<string, object> Read(string path, long max)
+    private static Dictionary<string, object> Read(string path, long max, string expectedHash = null)
     {
-        Require(new FileInfo(path).Length <= max, "檔案過大，請重新取得正確檔案。");
-        var value = Map(Json.DeserializeObject(File.ReadAllText(path, Encoding.UTF8)));
-        Require(value != null, "檔案格式不正確。"); return value;
+        using (var file = File.OpenRead(path))
+        {
+            Require(file.Length <= max, "檔案過大，請重新取得正確檔案。");
+            if (expectedHash != null)
+            {
+                Require(Hash(file) == expectedHash, "本機玩家包清單與場館發行報告不同。");
+                file.Position = 0;
+            }
+            using (var reader = new StreamReader(file, Encoding.UTF8))
+            {
+                var value = Map(Json.DeserializeObject(reader.ReadToEnd()));
+                Require(value != null, "檔案格式不正確。"); return value;
+            }
+        }
     }
     private static void PlainPath(string path)
     {
@@ -47,11 +58,26 @@ internal static class PlayerLauncher
         PlainPath(path); return path;
     }
     private static string Hash(string path)
-    { using (var sha = SHA256.Create()) using (var file = File.OpenRead(path)) return BitConverter.ToString(sha.ComputeHash(file)).Replace("-", "").ToLowerInvariant(); }
-    private static void Verify()
+    { using (var file = File.OpenRead(path)) return Hash(file); }
+    private static string Hash(Stream stream)
+    { using (var sha = SHA256.Create()) return BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", "").ToLowerInvariant(); }
+    private static string ReadReleaseManifestHash(string path)
     {
-        PlainPath(Path.Combine(Root, "player-package.json"));
-        var manifest = Read(Path.Combine(Root, "player-package.json"), 4 * 1024 * 1024);
+        PlainPath(path);
+        var release = Read(path, 8192);
+        object verified, windows;
+        Require(release.TryGetValue("verified", out verified) && verified is bool && (bool)verified
+            && Text(release, "scope") == "offline-package-consistency", "請使用已核對的場館發行報告。");
+        Require(release.TryGetValue("windows", out windows) && Map(windows) != null, "發行報告缺少 Windows 玩家套件資訊。");
+        var hash = Text(Map(windows), "playerManifestSha256");
+        Require(hash != null && Regex.IsMatch(hash, @"\A[a-f0-9]{64}\z"), "發行報告缺少有效的 Windows 玩家套件清單雜湊。");
+        return hash;
+    }
+    private static void Verify(string releaseManifestHash = null)
+    {
+        var manifestPath = Path.Combine(Root, "player-package.json");
+        PlainPath(manifestPath);
+        var manifest = Read(manifestPath, 4 * 1024 * 1024, releaseManifestHash);
         Require(Number(manifest, "version") == 1 && Text(manifest, "platform") == "Windows-x64", "玩家包版本不正確。");
         object rows; Require(manifest.TryGetValue("files", out rows) && rows is object[], "玩家包清單缺失。");
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -66,6 +92,23 @@ internal static class PlayerLauncher
         }
         Require(seen.Contains("VrCommand.exe") && seen.Contains("UnityPlayer.dll") && seen.Contains("Launch-Player.exe")
             && seen.Contains("VrCommand_Data/globalgamemanagers") && seen.Contains("build-receipt.json"), "玩家包缺少必要檔案。");
+        if (releaseManifestHash != null)
+        {
+            seen.Add("player-package.json");
+            var directories = new Stack<string>();
+            directories.Push(Root);
+            while (directories.Count != 0)
+            {
+                foreach (var entry in Directory.EnumerateFileSystemEntries(directories.Pop()))
+                {
+                    var attributes = File.GetAttributes(entry);
+                    Require((attributes & FileAttributes.ReparsePoint) == 0, "發行包不能包含檔案或目錄連結。");
+                    if ((attributes & FileAttributes.Directory) != 0) directories.Push(entry);
+                    else Require(seen.Remove(entry.Substring(Root.Length).Replace('\\', '/')), "本機玩家包含有發行清單外的檔案。");
+                }
+            }
+            Require(seen.Count == 0, "本機玩家包缺少發行清單中的檔案。");
+        }
     }
     private static Dictionary<string, object> Config(string path)
     {
@@ -102,6 +145,16 @@ internal static class PlayerLauncher
         if (File.Exists(report)) File.Delete(report);
         File.Move(temporary, report);
     }
+    private static void ProcessReport(string status, string releaseManifestHash, Process child = null,
+        bool exited = false, string linkMetrics = null, string log = null)
+    {
+        var value = new Dictionary<string, object> { { "status", status } };
+        if (child != null) value.Add("processId", child.Id);
+        if (exited) value.Add("exitCode", child.ExitCode);
+        if (linkMetrics != null) value.Add("linkMetrics", LinkEvidence(linkMetrics, log));
+        if (releaseManifestHash != null) value.Add("playerManifestSha256", releaseManifestHash);
+        Report(value);
+    }
     private static void StatusReport(PlayerConnectionMonitor monitor, int processId, bool exited)
     {
         if (statusReport == null) return;
@@ -118,10 +171,8 @@ internal static class PlayerLauncher
     {
         if (!File.Exists(path)) return null;
         PlainPath(path);
-        using (var sha = SHA256.Create())
         using (var file = File.OpenRead(path))
-            return file.Length > 0 && file.Length <= limit
-                ? BitConverter.ToString(sha.ComputeHash(file)).Replace("-", "").ToLowerInvariant() : null;
+            return file.Length > 0 && file.Length <= limit ? Hash(file) : null;
     }
     private static object LinkEvidence(string metrics, string log)
     {
@@ -136,9 +187,10 @@ internal static class PlayerLauncher
         catch (InvalidDataException) { }
         return null;
     }
-    private static Process Launch(string config, bool headless, string log, string reviewedHash = null, bool openXR = false, string linkMetrics = null)
+    private static Process Launch(string config, bool headless, string log, string reviewedHash = null, bool openXR = false,
+        string linkMetrics = null, string releaseManifestHash = null)
     {
-        Verify(); Config(config);
+        Verify(releaseManifestHash); Config(config);
         Require(reviewedHash == null || Hash(config) == reviewedHash, "連線檔已變更，請重新載入後核對。");
         var args = "--vr-config " + Quote(config) + " -job-worker-count 2";
         if (headless) args += " -batchmode -nographics";
@@ -148,14 +200,14 @@ internal static class PlayerLauncher
         var child = Process.Start(new ProcessStartInfo(Path.Combine(Root, "VrCommand.exe"), args)
         { UseShellExecute = false, WorkingDirectory = Root, CreateNoWindow = headless });
         Require(child != null, "無法啟動玩家程式。");
-        try { Report(new { status = "started", processId = child.Id }); return child; }
+        try { ProcessReport("started", releaseManifestHash, child); return child; }
         catch { if (!child.HasExited) { child.Kill(); child.WaitForExit(); } child.Dispose(); throw; }
     }
     [STAThread]
     private static int Main(string[] args)
     {
-        string config = null, log = null, linkMetrics = null; bool launch = false, wait = false, headless = false, verify = false, openXR = false;
-        bool invalidLinkOption = false;
+        string config = null, log = null, linkMetrics = null, releasePath = null;
+        bool launch = false, wait = false, headless = false, verify = false, openXR = false, invalidEvidenceOption = false;
         try
         {
             for (var i = 0; i < args.Length; i++)
@@ -165,14 +217,16 @@ internal static class PlayerLauncher
                 else if (args[i] == "--headless") headless = true;
                 else if (args[i] == "--openxr") openXR = true;
                 else if (args[i] == "--verify") verify = true;
-                else if (args[i] == "--link-metrics")
+                else if (args[i] == "--link-metrics" || args[i] == "--release-report")
                 {
-                    if (i + 1 == args.Length || args[i + 1].StartsWith("--", StringComparison.Ordinal)) invalidLinkOption = true;
+                    var option = args[i];
+                    if (i + 1 == args.Length || args[i + 1].StartsWith("--", StringComparison.Ordinal)) invalidEvidenceOption = true;
                     else
                     {
                         var path = Path.GetFullPath(args[++i]);
-                        if (linkMetrics == null) linkMetrics = path;
-                        else invalidLinkOption = true;
+                        if (option == "--link-metrics" && linkMetrics == null) linkMetrics = path;
+                        else if (option == "--release-report" && releasePath == null) releasePath = path;
+                        else invalidEvidenceOption = true;
                     }
                 }
                 else if ((args[i] == "--config" || args[i] == "--log" || args[i] == "--report" || args[i] == "--status-report") && i + 1 < args.Length)
@@ -190,7 +244,7 @@ internal static class PlayerLauncher
                 && !SamePath(statusReport, config) && !SamePath(statusReport, log) && !SamePath(statusReport, report)), "連線狀態報告須搭配等待啟動及獨立的新記錄路徑。");
             Require((!headless && !wait || launch) && (!launch || config != null), "請提供玩家連線檔。");
             Require(!openXR || (launch && !headless && !verify), "OpenXR 需要直接啟動有圖形的玩家端。");
-            Require(!invalidLinkOption, "請只指定一次連線量測 JSON 路徑。");
+            Require(!invalidEvidenceOption, "連線量測與發行報告各只能指定一份檔案。");
             if (linkMetrics != null)
             {
                 Require(launch && wait && !verify && log != null && report != null && String.Equals(Path.GetExtension(linkMetrics), ".json", StringComparison.OrdinalIgnoreCase)
@@ -200,10 +254,14 @@ internal static class PlayerLauncher
                 foreach (var path in new[] { linkMetrics, log, report, statusReport })
                     if (path != null) PlainPath(Path.GetDirectoryName(path));
             }
-            if (verify) { Verify(); Report(new { status = "verified" }); return 0; }
+            Require(releasePath == null || ((verify != launch) && !SamePath(releasePath, config) && !SamePath(releasePath, log)
+                && !SamePath(releasePath, statusReport) && !SamePath(releasePath, linkMetrics) && !SamePath(releasePath, report)),
+                "發行報告須搭配核對或直接啟動，並使用獨立路徑。");
+            var releaseManifestHash = releasePath == null ? null : ReadReleaseManifestHash(releasePath);
+            if (verify) { Verify(releaseManifestHash); ProcessReport("verified", releaseManifestHash); return 0; }
             if (launch)
             {
-                using (var child = Launch(config, headless, log, openXR: openXR, linkMetrics: linkMetrics))
+                using (var child = Launch(config, headless, log, openXR: openXR, linkMetrics: linkMetrics, releaseManifestHash: releaseManifestHash))
                 {
                     if (!wait) return 0;
                     if (statusReport == null) child.WaitForExit();
@@ -213,8 +271,7 @@ internal static class PlayerLauncher
                         while (!child.WaitForExit(200)) { monitor.Poll(); StatusReport(monitor, child.Id, false); }
                         monitor.Poll(exited: true); StatusReport(monitor, child.Id, true);
                     }
-                    if (linkMetrics == null) Report(new { status = "exited", processId = child.Id, exitCode = child.ExitCode });
-                    else Report(new { status = "exited", processId = child.Id, exitCode = child.ExitCode, linkMetrics = LinkEvidence(linkMetrics, log) });
+                    ProcessReport("exited", releaseManifestHash, child, exited: true, linkMetrics: linkMetrics, log: log);
                     return child.ExitCode;
                 }
             }
@@ -224,7 +281,8 @@ internal static class PlayerLauncher
         catch
         {
             // Serializer / IO exception text can contain input. Do not echo secrets or file contents.
-            if (report != null && !File.Exists(report) && !report.StartsWith(Root, StringComparison.OrdinalIgnoreCase) && !SamePath(report, config) && !SamePath(report, log) && !SamePath(report, linkMetrics))
+            if (report != null && !File.Exists(report) && !report.StartsWith(Root, StringComparison.OrdinalIgnoreCase) && !SamePath(report, config)
+                && !SamePath(report, log) && !SamePath(report, linkMetrics) && !SamePath(report, releasePath))
                 try { Report(new { status = "rejected", reason = "Package, connection file or launch options are invalid." }); } catch { }
             if (report == null) MessageBox.Show("無法啟動。請確認玩家包已完整解壓，並重新選擇控制台下載的玩家連線檔。", "VR Command 玩家", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return 1;

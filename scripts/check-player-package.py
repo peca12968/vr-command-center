@@ -19,7 +19,7 @@ spec = importlib.util.spec_from_file_location('player_package', ROOT / 'scripts/
 package = importlib.util.module_from_spec(spec); spec.loader.exec_module(package)
 
 
-def check_openxr_unavailable(folder, directory, base):
+def check_openxr_unavailable(folder, directory, base, release=None, manifest_hash=None):
     config = directory / 'openxr-fixture.json'
     log = directory / 'openxr-unavailable.log'
     report = directory / 'openxr-process.json'
@@ -27,6 +27,8 @@ def check_openxr_unavailable(folder, directory, base):
     env = {**os.environ, 'XR_RUNTIME_JSON': str(directory / 'missing-openxr-runtime.json')}
     command = [str(folder / 'Launch-Player.exe'), '--config', str(config), '--launch', '--openxr', '--wait',
                '--log', str(log), '--report', str(report), '--status-report', str(status)]
+    if release is not None:
+        command += ['--release-report', str(release)]
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as isolated:
         isolated.bind(('127.0.0.1', 0))
         config.write_text(json.dumps(dict(base, port=isolated.getsockname()[1])), encoding='utf-8')
@@ -44,6 +46,7 @@ def check_openxr_unavailable(folder, directory, base):
     if (code != 2 or launch['status'] != 'exited' or launch['exitCode'] != 2
             or connection['state'] != 'OpenXRUnavailable' or connection['exited'] is not True
             or connection['processId'] != launch['processId']
+            or launch.get('playerManifestSha256') != manifest_hash
             or [line for line in messages if line.startswith('VR_OPENXR_STARTUP ')]
             != ['VR_OPENXR_STARTUP status=requested', 'VR_OPENXR_STARTUP status=unavailable']
             or any(line.startswith('VR_NETWORK_STARTED ') for line in messages)):
@@ -53,6 +56,8 @@ def check_openxr_unavailable(folder, directory, base):
 def main():
     parser = argparse.ArgumentParser(description=__doc__); parser.add_argument('package_directory', type=Path)
     parser.add_argument('--check-openxr-unavailable', action='store_true', help='Run a graphical player with a missing OpenXR runtime for that process')
+    parser.add_argument('--release-report', type=Path, help='Original offline release report for this package')
+    parser.add_argument('--other-release-report', type=Path, help='Original offline report for a different package')
     args = parser.parse_args(); folder = package.plain(args.package_directory)
     if os.name != 'nt' or folder.name != package.TOP: parser.error('Use an extracted Windows package')
     manifest = package.verify(folder)
@@ -61,13 +66,14 @@ def main():
     directory = ROOT / 'artifacts/player-package-checks' / (datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + uuid.uuid4().hex[:8])
     directory.mkdir(parents=True, exist_ok=False); findings = []
 
-    def check(label, options, success=False, executable=None):
+    def check(label, options, success=False, executable=None, manifest_hash=None):
         report = directory / ('report-' + str(len(findings)) + '.json')
         result = subprocess.run([str(executable or folder / 'Launch-Player.exe'), *options, '--report', str(report)],
                                 cwd=directory, timeout=45, creationflags=subprocess.CREATE_NO_WINDOW)
         value = json.loads(report.read_text(encoding='utf-8'))
         expected = 'verified' if success else 'rejected'
-        if result.returncode != (0 if success else 1) or value.get('status') != expected or 'processId' in value:
+        if (result.returncode != (0 if success else 1) or value.get('status') != expected or 'processId' in value
+                or value.get('playerManifestSha256') != manifest_hash):
             raise AssertionError('Actual launcher result differed: ' + label)
         findings.append(label); print('PASS:', label, flush=True)
 
@@ -106,17 +112,64 @@ def main():
     metrics.write_text('preserve original metrics', encoding='utf-8')
     check('Rejects existing link metrics without overwriting them', [*with_log, '--link-metrics', str(metrics)])
     assert metrics.read_text(encoding='utf-8') == 'preserve original metrics' and not future_log.exists() and not (folder / 'link.json').exists()
+    manifest_hash = package.digest(folder / 'player-package.json')
+    release = args.release_report.resolve(strict=True) if args.release_report else directory / 'venue-release.json'
+    release_shape = {'verified': True, 'scope': 'offline-package-consistency', 'windows': {'playerManifestSha256': manifest_hash}}
+    if not args.release_report:
+        release.write_text(json.dumps(release_shape), encoding='utf-8-sig')
+    original_release = release.read_bytes()
+    check('Matches the original release and verifies every local package file', ['--verify', '--release-report', str(release)],
+          success=True, manifest_hash=manifest_hash)
+    other_release = args.other_release_report.resolve(strict=True) if args.other_release_report else directory / 'different-release.json'
+    if not args.other_release_report:
+        other_release.write_text(json.dumps({**release_shape, 'windows': {'playerManifestSha256': '0' * 64}}), encoding='utf-8')
+    other_bytes = other_release.read_bytes()
+    assert json.loads(other_bytes.decode('utf-8-sig'))['windows']['playerManifestSha256'] != manifest_hash
+    check('Refuses a different release before spawning any player', [*with_log, '--release-report', str(other_release)])
+    for label, value in [('a legacy release without the player manifest', {**release_shape, 'windows': {}}),
+                         ('an unverified release', {**release_shape, 'verified': False}),
+                         ('a malformed manifest hash', {**release_shape, 'windows': {'playerManifestSha256': manifest_hash + '\n'}})]:
+        invalid = directory / 'invalid-release.json'
+        invalid.write_text(json.dumps(value), encoding='utf-8')
+        check('Refuses ' + label, ['--verify', '--release-report', str(invalid)])
+    check('Refuses duplicate release arguments without showing a modal', ['--verify', '--release-report', str(release), '--release-report', str(other_release)])
+    check('Refuses a release report without verify or launch', ['--release-report', str(release)])
+    assert not future_log.exists() and release.read_bytes() == original_release and other_release.read_bytes() == other_bytes
     if args.check_openxr_unavailable:
-        check_openxr_unavailable(folder, directory, base)
+        check_openxr_unavailable(folder, directory, base, release, manifest_hash)
         findings.append('Graphical OpenXR launch with a missing runtime exits before admission')
         print('PASS:', findings[-1], flush=True)
     # A fresh minimal copy is intentionally incomplete. Never alter the delivered package.
     broken = directory / 'broken-package'; broken.mkdir(); shutil.copyfile(folder / 'Launch-Player.exe', broken / 'Launch-Player.exe')
     shutil.copyfile(folder / 'player-package.json', broken / 'player-package.json')
     check('Rejects missing runtime files', ['--verify'], executable=broken / 'Launch-Player.exe')
+    check('Matching release alone cannot authorize an incomplete player package', ['--verify', '--release-report', str(release)],
+          executable=broken / 'Launch-Player.exe')
     bad = json.loads(json.dumps(manifest)); bad['files'][0]['path'] = '../outside'
     (broken / 'player-package.json').write_text(json.dumps(bad), encoding='utf-8')
     check('Rejects a manifest path outside the package', ['--verify'], executable=broken / 'Launch-Player.exe')
+    local = directory / 'minimal release fixture'
+    local.mkdir()
+    launcher = local / 'Launch-Player.exe'
+    shutil.copyfile(folder / launcher.name, launcher)
+    entries = [launcher]
+    for name in ('VrCommand.exe', 'UnityPlayer.dll', 'VrCommand_Data/globalgamemanagers', 'build-receipt.json'):
+        file = local / name
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_bytes(b'fixture')
+        entries.append(file)
+    local_manifest = local / 'player-package.json'
+    local_manifest.write_text(json.dumps({'version': 1, 'platform': 'Windows-x64', 'files': [
+        {'path': file.relative_to(local).as_posix(), 'sha256': package.digest(file), 'bytes': file.stat().st_size}
+        for file in entries]}), encoding='utf-8')
+    local_release = directory / 'minimal-release.json'
+    local_hash = package.digest(local_manifest)
+    local_release.write_text(json.dumps({**release_shape, 'windows': {'playerManifestSha256': local_hash}}), encoding='utf-8')
+    check('Release verification accepts a fixture with exactly its original manifest files',
+          ['--verify', '--release-report', str(local_release)], success=True, executable=launcher, manifest_hash=local_hash)
+    (local / 'VrCommand_Data' / 'unexpected.dll').write_bytes(b'unlisted fixture')
+    check('Release verification rejects an unlisted file inside the runtime even when every listed file matches',
+          ['--verify', '--release-report', str(local_release)], executable=launcher)
     for report in directory.glob('report-*.json'):
         if 'fixture-secret' in report.read_text(encoding='utf-8') or 'fixture-not-a-ticket' in report.read_text(encoding='utf-8'):
             raise AssertionError('Diagnostic report leaked fixture credentials')

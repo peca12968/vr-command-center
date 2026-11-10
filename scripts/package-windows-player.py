@@ -48,6 +48,7 @@ WASD移動；方向鍵或按住右鍵拖曳瞄準；Space／左鍵射擊；R換�
 
 Windows 開發版自 0.46.0 起可用 VrCommand.exe --vr-config 玩家連線檔 --vr-link-metrics 新JSON絕對路徑 選用連線量測。上層目錄須已存在。結果含往返時間、逾時與 Unity 更新次數。
 啟動器 1.5 可在 --launch --wait --log 新日誌 --report 新程序報告 加上 --link-metrics 新量測.json。程序結束時會在程序報告保存原日誌與量測檔的 SHA-256，供封存驗收核對。請保留三個原檔。
+啟動器 1.6 可在 --verify 或 --launch 加上 --release-report 原發行報告.json，逐檔核對場館交付的 Windows 玩家套件。
 
 環境：Windows x64、適用的圖形驅動及 .NET Framework 4.8；不需要Unity Editor、Python或.NET 10 SDK。
 來源、場景與伺服器須同版。平常使用桌面合成頭手，實際Simulation／GameServer來源以場次為準。
@@ -115,9 +116,11 @@ def relative_file(folder, name):
     return plain(folder / name)
 
 
-def verify(folder):
+def verify(folder, *, manifest_bytes=None):
     folder = plain(folder)
-    manifest = json.loads((folder / 'player-package.json').read_text(encoding='utf-8'))
+    if manifest_bytes is None:
+        manifest_bytes = plain(folder / 'player-package.json').read_bytes()
+    manifest = json.loads(manifest_bytes.decode('utf-8'))
     if manifest.get('version') != 1 or manifest.get('platform') != 'Windows-x64' or not isinstance(manifest.get('files'), list):
         raise ValueError('Unsupported player package')
     seen = set()
@@ -149,7 +152,7 @@ def package(player, output, compiler):
         subprocess.run([str(compiler), '/nologo', '/target:winexe', '/platform:x64', '/optimize+', '/warnaserror+',
                         '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', '/reference:System.Web.Extensions.dll',
                         '/out:' + str(folder / 'Launch-Player.exe'), str(source)], check=True)
-        manifest = {'version': 1, 'platform': 'Windows-x64', 'launcherVersion': '1.5.0', 'createdAtUtc': datetime.now(timezone.utc).isoformat(),
+        manifest = {'version': 1, 'platform': 'Windows-x64', 'launcherVersion': '1.6.0', 'createdAtUtc': datetime.now(timezone.utc).isoformat(),
                     'build': receipt, 'launcherSourceSha256': digest(source), 'scope': 'Offline portable PC player; no tickets; not a signature or network/device verification',
                     'files': [{'path': file.relative_to(folder).as_posix(), 'bytes': file.stat().st_size, 'sha256': digest(file)}
                               for file in sorted(folder.rglob('*')) if file.is_file()]}

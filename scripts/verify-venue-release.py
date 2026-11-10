@@ -1,5 +1,6 @@
 """Verify the matching Windows packages and the signed Quest development APK before distribution."""
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -49,7 +50,10 @@ def identity(receipt, target):
 def verify_windows(control, server, player):
     control_manifest = control_package.verify(control)
     server_manifest = server_package.verify(server)
-    player_manifest = player_package.verify(player)
+    manifest_path = player_package.plain(player / 'player-package.json')
+    manifest_bytes = manifest_path.read_bytes()
+    player_manifest = player_package.verify(player, manifest_bytes=manifest_bytes)
+    player_manifest_hash = hashlib.sha256(manifest_bytes).hexdigest()
     published = read(control / 'publish-receipt.json')
     console = control_manifest.get('consoleVersion')
     require(published.get('schemaVersion') == 1 and published.get('target') == 'win-x64'
@@ -77,9 +81,11 @@ def verify_windows(control, server, player):
     require({f.relative_to(player).as_posix() for f in player.rglob('*') if f.is_file()}
             == {row['path'] for row in player_manifest['files']} | {'player-package.json'},
             'Windows player package contains unlisted files')
+    require(digest(manifest_path) == player_manifest_hash, 'Windows player manifest changed during verification')
     return game, {'apiVersion': control_manifest['apiVersion'], 'consoleVersion': console, 'buildCommit': published['baseCommit'],
                   'controlFiles': len(control_manifest['files']), 'pairedGameFiles': len(runtime),
-                  'serverFiles': len(server_manifest['files']), 'playerFiles': len(player_manifest['files'])}
+                  'serverFiles': len(server_manifest['files']), 'playerFiles': len(player_manifest['files']),
+                  'playerManifestSha256': player_manifest_hash}
 
 
 def quest_metadata(badging, signing):

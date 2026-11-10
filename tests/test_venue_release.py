@@ -1,9 +1,11 @@
 """Offline verification boundaries, independent of native or headset acceptance."""
 import importlib.util
+import hashlib
 import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
 
 
@@ -52,6 +54,13 @@ class VenueReleaseTests(unittest.TestCase):
         self.assertEqual(identity, {key: self.source[key] for key in release.IDENTITY})
         self.assertEqual(summary['pairedGameFiles'], 4)
         self.assertEqual(summary['consoleVersion'], '0.31.83')
+        manifest = self.player / 'player-package.json'
+        original = manifest.read_bytes()
+        self.assertEqual(summary['playerManifestSha256'], hashlib.sha256(original).hexdigest())
+        manifest.write_bytes(original + b'\n')
+        _, repackaged = release.verify_windows(self.control, self.server, self.player)
+        self.assertEqual(repackaged['pairedGameFiles'], summary['pairedGameFiles'])
+        self.assertNotEqual(repackaged['playerManifestSha256'], summary['playerManifestSha256'])
 
     def test_individually_valid_player_with_replaced_runtime_is_not_a_pair(self):
         self.write(self.player, 'VrCommand.exe', 'different but manifest-consistent game')
@@ -63,6 +72,18 @@ class VenueReleaseTests(unittest.TestCase):
         self.write(self.player, 'unlisted.json', {})
         with self.assertRaisesRegex(ValueError, 'unlisted files'):
             release.verify_windows(self.control, self.server, self.player)
+
+    def test_player_manifest_replacement_during_verification_is_rejected(self):
+        verify = release.player_package.verify
+
+        def replace_after_verifying(folder, *, manifest_bytes):
+            checked = verify(folder, manifest_bytes=manifest_bytes)
+            (folder / 'player-package.json').write_bytes(manifest_bytes + b'\n')
+            return checked
+
+        with patch.object(release.player_package, 'verify', side_effect=replace_after_verifying):
+            with self.assertRaisesRegex(ValueError, 'manifest changed during verification'):
+                release.verify_windows(self.control, self.server, self.player)
 
     def test_quest_uses_original_receipt_bytes_and_build_identity(self):
         apk = self.root / 'game.apk'

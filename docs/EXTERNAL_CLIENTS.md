@@ -26,7 +26,7 @@ if ($LASTEXITCODE -eq 0) {
 
 通過時輸出一行 `verified: true` 的 JSON，列出管理版本、Windows 共同遊戲檔案數，以及 Quest 版本、雜湊和簽章憑證摘要。工具逐檔核對 Windows 清單與兩包的共用遊戲檔案，再比對 Quest 與 Windows 的建置來源及場景網路識別。APK 會另查驗套件 ID、ARM64、OpenXR 函式庫及 v2 簽章。若拒絕，請保留錯誤與原檔，重新取得配套交付物後再核對。這項唯讀檢查的範圍是交付物一致性，實際連線及頭盔運行請依後文驗收。
 
-成功的 `venue-release.json` 可供 Quest 部署工具逐席核對裝置上已安裝的 APK。 [使用發行報告](QUEST3.md#核對頭盔內已安裝的發行-apk)
+成功的 `venue-release.json` 可供 Quest 部署工具逐席核對裝置上已安裝的 APK。重新產生的報告也含 `windows.playerManifestSha256`，可供 Windows 玩家啟動器 1.6 在每台電腦核對主控交付的原套件。主控將同一份報告交給各 Windows 席位，玩家連線檔仍按席位個別交付。 [Quest 部署](QUEST3.md#核對頭盔內已安裝的發行-apk) · [Windows 核對](WINDOWS_PLAYER_PACKAGE.md#依場館發行報告核對玩家包)
 
 ## 分開啟動程式
 

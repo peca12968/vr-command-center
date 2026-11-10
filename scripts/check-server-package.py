@@ -68,6 +68,7 @@ def reconcile_ai_damage(frames, owners, enabled_sequence, disabled_sequence):
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('package',type=Path);p.add_argument('--control-package',type=Path,required=True);p.add_argument('--runtime-root',type=Path,required=True);p.add_argument('--observe-closure-ui',action='store_true')
     p.add_argument('--player-package',type=Path,help='Launch five players per room from the API room ZIP, using this extracted player package')
+    p.add_argument('--windows-release-report',type=Path,help='Pass the original release report through every packaged Windows launcher')
     p.add_argument('--game-address',type=ipaddress.IPv4Address,help='Local private IPv4 for the three-package check')
     p.add_argument('--check-lan-preflight',action='store_true',help='Release a same-PC UDP preflight before Unity binds each original game port')
     p.add_argument('--check-vr-venue-tickets',action='store_true',help='Launch all 25 players in each mode from the shipped console venue ZIP')
@@ -172,6 +173,8 @@ def main():
         p.error('--check-venue-concurrent-fire requires --venue-concurrent-roster-seconds and all desktop seats')
     if args.check_venue_link_metrics and (not args.venue_field_evidence or args.check_venue_openxr_reconnect or args.check_venue_concurrent_fire):
         p.error('--check-venue-link-metrics requires venue field evidence and the original packaged client connections')
+    if args.windows_release_report and (not args.player_package or args.check_venue_concurrent_fire or args.openxr_mock_only):
+        p.error('--windows-release-report requires the packaged Windows launchers in the ordinary venue check')
     if args.check_venue_field_ui and not args.venue_field_evidence:
         p.error('--check-venue-field-ui requires --venue-field-evidence')
     if args.check_room_readiness and not args.player_package:p.error('--check-room-readiness requires five players per room')
@@ -229,6 +232,7 @@ def main():
         except OSError:p.error('--game-address must be assigned to this PC')
     folder=args.package.resolve();manifest=package.verify(folder);assert manifest['launcherSourceSha256']==package.digest(ROOT/'tools/WindowsServerLauncher/ServerLauncher.cs')
     player_folder=None
+    windows_release_hash=None
     openxr_mock=None
     if args.player_package:
         player_folder=args.player_package.resolve()
@@ -236,6 +240,13 @@ def main():
         player_manifest=player_package.verify(player_folder)
         if player_manifest['build']['sourceFingerprint']!=manifest['build']['sourceFingerprint']:
             p.error('Player and server packages must share the Unity build source')
+        if args.windows_release_report:
+            args.windows_release_report=args.windows_release_report.resolve(strict=True)
+            release=json.loads(args.windows_release_report.read_text(encoding='utf-8-sig'))
+            windows_release_hash=player_package.digest(player_folder/'player-package.json')
+            if (release.get('verified') is not True or release.get('scope')!='offline-package-consistency'
+                    or release.get('windows',{}).get('playerManifestSha256')!=windows_release_hash):
+                p.error('Release report must identify this original Windows player package')
     if args.openxr_mock_only or args.check_venue_openxr:
         unity=ROOT/'clients/unity'
         mock_package_version=read(unity/'Packages/manifest.json')['dependencies']['com.unity.xr.openxr']
@@ -580,6 +591,8 @@ def main():
         flags=['--headless'] if mock is None else ['--openxr']
         if metrics is not None:
             flags += ['--link-metrics',str(metrics)]
+        if args.windows_release_report:
+            flags += ['--release-report',str(args.windows_release_report)]
         environment=env if mock is None else {**env,**mock}
         child=subprocess.Popen([str(player_folder/'Launch-Player.exe'),'--config',str(file),'--launch',
             *flags,'--wait','--log',str(log),'--report',str(report)],cwd=runtime,env=environment)
@@ -595,6 +608,8 @@ def main():
         if info['status']!='started':raise RuntimeError('Player launcher did not report a live child')
         client['witness']=control.ChildWitness(info['processId'],allow_terminate=True)
         client['nativePid']=info['processId']
+        if info.get('playerManifestSha256')!=windows_release_hash:
+            raise RuntimeError('Player launcher did not report the expected release manifest')
         return client
     def stop_player(client):
         child=client['process']
@@ -614,6 +629,8 @@ def main():
                 status=read(report)
                 if 'linkMetrics' in client:
                     status.pop('linkMetrics',None)
+                if status.pop('playerManifestSha256',None)!=windows_release_hash:
+                    raise RuntimeError('Player launcher exit differs from its original release manifest')
                 if child.returncode!=0 or status!={'status':'exited','processId':client['nativePid'],'exitCode':0}:
                     raise RuntimeError('Launcher did not confirm original player exit')
                 witness.close()
@@ -2919,6 +2936,9 @@ def main():
                 check(len({c['nativePid'] for c in round_clients})==25 and all(
                     c['process'].poll() is None and c['witness'].kernel.WaitForSingleObject(c['witness'].handle,0)==258
                     for c in round_clients),'25 simultaneous owned native players '+('Linked' if linked else 'Independent'))
+                if windows_release_hash:
+                    check(all(read(c['launcherReport'])['playerManifestSha256']==windows_release_hash for c in round_clients),
+                          ('Linked' if linked else 'Independent')+' original 25 player processes all use the released Windows package')
             if args.check_venue_link_metrics:
                 stage('collecting-player-link-metrics',mode='Linked' if linked else 'Independent')
                 wait(lambda:all(c['linkMetrics'].is_file() for c in round_clients),55,'all original packaged client link reports')
@@ -3181,7 +3201,8 @@ def main():
             'preparedIndependentSet':args.prepare_independent_set,
             'independentRoomMissions':args.check_independent_room_missions,
             'importedMissionTemplate':imported_mission['id'] if imported_mission else None,
-            'sourceFingerprint':manifest['build']['sourceFingerprint'],'gameAddress':address})
+            'sourceFingerprint':manifest['build']['sourceFingerprint'],'gameAddress':address,
+            **({'windowsReleaseManifestSha256':windows_release_hash} if windows_release_hash else {})})
     except BaseException as error:stage('failed',errorType=type(error).__name__);raise
     finally:
         for gate in reconnect_gates:

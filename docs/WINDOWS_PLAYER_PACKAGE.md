@@ -83,6 +83,18 @@ Windows 玩家包 0.49.0 的圖形玩家端可以選用 OpenXR。先讓相容的
 
 Windows 建置啟用 Touch 與 Unity 的 HTC Vive Controller 兩個 OpenXR 互動設定。Touch 沿用右扳機射擊、A 換彈、B 重讀票券，左手 X／Y 翻頁及關閉簡報。HTC Vive Controller 使用右扳機射擊、右握把換彈、右 Menu 重讀票券，左觸控板按下翻頁、左 Menu 關閉、左握把查看字型授權。實際控制器由 Windows OpenXR 執行環境回報，VIVE XR 的確切型號及相符設定仍待頭盔到場驗收。MR 透視與房間對位沿用 Quest 3 Android 路徑。 [Unity XR 手動啟動](https://docs.unity3d.com/Packages/com.unity.xr.management@4.6/manual/EndUser.html#load-xr-plug-ins) · [HTC Vive 控制器設定](https://docs.unity3d.com/Packages/com.unity.xr.openxr@1.19/manual/features/htcvivecontrollerprofile.html)
 
+#### 依場館發行報告核對玩家包
+
+在啟動器 1.6 加上 `--release-report`，選用主控為本次交付產生的原始 `venue-release.json`。先以 `--verify` 做離線檢查，也可在桌面或 OpenXR 的直接啟動命令加上同一選項，讓每次啟動都重新核對。
+
+```powershell
+& .\Launch-Player.exe --verify --release-report 'C:\Delivery\venue-release.json' --report 'C:\Private\package-check.json'
+& .\Launch-Player.exe --config 'C:\Private\my-seat.json' --launch --openxr --wait `
+  --release-report 'C:\Delivery\venue-release.json' --report 'C:\Private\launch-report.json'
+```
+
+啟動器先以發行報告比對原清單的 SHA-256，再按該清單逐檔核對本機玩家包。清單屬於不同發行批次、檔案被更換或資料夾內有清單外檔案時，會以退出碼 1 停在啟動前。連線檔、發行報告及本次程序報告均放在解壓目錄外。成功時，程序報告保留核對過的 `playerManifestSha256`，可搭配原入場日誌留存。選用此模式須使用含 Windows 清單雜湊的新報告。雜湊依賴主控交付的原報告，發行者身分與實體頭盔由現場核對。 [產生場館發行報告](EXTERNAL_CLIENTS.md#發送前離線核對交付套件)
+
 #### 本機追蹤整合驗證
 
 測試使用 Unity OpenXR 套件附的 Windows Mock Runtime，另外由測試 DLL 提供固定頭手座標。只有測試玩家程序的 `XR_RUNTIME_JSON` 會指向測試環境。遊戲由解壓玩家包的啟動器執行，用主控簽發的原票券入場，走正常追蹤、回放和戰績流程。另一席使用桌面玩家作對照。這項驗證使用模擬裝置。 [Khronos 載入器規格](https://registry.khronos.org/OpenXR/specs/1.1/loader.html#overriding-the-default-runtime-usage)
