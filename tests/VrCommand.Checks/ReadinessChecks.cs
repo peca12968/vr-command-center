@@ -9,7 +9,8 @@ internal static class ReadinessChecks
     internal static void Run(Action<bool, string> check, string directory)
     {
         var clock = new Clock { Now = DateTimeOffset.Parse("2026-10-31T08:00:00Z") };
-        var manager = new SessionManager(); var master = new OperatorIdentity("readiness-master", OperatorRole.Master);
+        var events = new MemorySessionEventStore();
+        var manager = new SessionManager(events); var master = new OperatorIdentity("readiness-master", OperatorRole.Master);
         var room = new OperatorIdentity("readiness-room", OperatorRole.RoomController, 1);
         var other = room with { RoomId = 2 }; var server = new OperatorIdentity("readiness-server", OperatorRole.GameServer);
         var mission = new MissionStore(Path.Combine(directory, "readiness-missions")).Create(new("Readiness", "Accepted snapshots", 60,
@@ -100,6 +101,32 @@ internal static class ReadinessChecks
         Refresh(); bridge.Disconnect(2); Save();
         check(store.ReadinessByRoom(room).Single().VrParticipation is { AwaitingPose: [1], AwaitingAdmission.Length: 0, Eliminated.Length: 0 }
             && store.ReadinessByRoom(other).Single().VrParticipation is null, "A missing VR pose identifies only the original room and numbered seat");
+        var vrPause = new ControlCommand(Guid.NewGuid(), ControlAction.Pause, ExpectedSequence: manager.Get(id).Sequence,
+            VrParticipationRoomId: 1);
+        void RejectPause(Func<CommandReceipt> action, string message)
+        {
+            try { _ = action(); } catch (VrParticipationPauseException) { check(true, message); return; }
+            throw new Exception(message);
+        }
+        RejectPause(() => manager.Execute(id, vrPause, room), "A VR loss pause requires a world witness even through the domain entry point");
+        RejectPause(() => store.ExecuteCommand(id, vrPause with { VrParticipationRoomId = 2 }, master),
+            "A missing VR pose cannot authorize a pause reported for another room");
+        var lastPose = clock.Now;
+        clock.Now = lastPose.AddMilliseconds(1500.01);
+        RejectPause(() => store.ExecuteCommand(id, vrPause, room), "Expired VR loss evidence cannot authorize a pause");
+        clock.Now = lastPose;
+        check(store.ReadinessByRoom(room).Single().VrParticipationPauseAvailable == true,
+            "Only a fresh explicit unavailable VR pose enables the room pause");
+        var paused = store.ExecuteCommand(id, vrPause, room);
+        check(store.ReadinessByRoom(room).Single().VrPause is { TriggerRoomId: 1, WorldSequence: null }
+            && paused.Session.State == SessionState.Paused, "A committed VR pause waits for its own world observation");
+        Refresh(); Save();
+        var replayed = new SessionManager(events).GetWithPhase(id, room, out _, out var vrTrigger);
+        check(vrTrigger == 1 && replayed.PhaseSinceSequence == paused.AppliedAtSequence
+            && store.ReadinessByRoom(room).Single().VrPause is { TriggerRoomId: 1, WorldSequence: not null }
+            && store.ExecuteCommand(id, vrPause, room).Duplicate, "A VR pause persists its original room and is safe to retry after source observation");
+        manager.Execute(id, new(Guid.NewGuid(), ControlAction.Resume), room);
+        Refresh();
         Save(eliminated: true);
         check(store.ReadinessByRoom(room).Single().VrParticipation is { AwaitingPose.Length: 0, Eliminated: [1] },
             "An eliminated VR seat is not an operational pose warning");

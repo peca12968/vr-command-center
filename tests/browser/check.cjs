@@ -183,6 +183,12 @@ async function main() {
         browser: await browser.version(), result: 'passed', scope: 'room clocks with real API, accepted synthetic WebSocket frames and Chromium' }, null, 2));
       console.log(`PASS: ${checks} focused room clock checks. Screenshots: ${screenshots}`); return;
     }
+    if (process.argv.includes('--vr-participation-pause-only')) {
+      await require('./vr-participation-pause-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
+      check(browserErrors.length === 0, 'VR participation pause has no uncaught browser or policy errors');
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed' }, null, 2));
+      console.log(`PASS: ${checks} focused VR participation pause checks. Screenshots: ${screenshots}`); return;
+    }
     if (process.argv.includes('--venue-scores-only')) {
       await require('./venue-scores-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
       check(browserErrors.length === 0, 'Venue scores have no uncaught browser or policy errors');
@@ -540,6 +546,7 @@ async function main() {
     await require('./room-clock-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
     await require('./venue-phase-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
     await require('./venue-scores-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
+    await require('./vr-participation-pause-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
     await require('./full-tracking-begin-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
     await require('./mission-template-browser.cjs')({ context, api, tokens, directory, root, base, screenshots, check, captureErrors, availablePort });
     await require('./ticket-download-fence.cjs').checkTicketDownloadFence({ context, api, tokens, base, screenshots, check, captureErrors });

@@ -71,6 +71,7 @@ def main():
     p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
     p.add_argument('--check-room-observer',action='store_true',help='Verify room-scoped observation and instant replay on the original Linked source')
     p.add_argument('--check-room-participation',action='store_true',help='Disconnect and restore one original VR admission in each five-room mode')
+    p.add_argument('--check-vr-participation-pause',action='store_true',help='Pause from the shipped room card during each native VR disconnect')
     p.add_argument('--check-room-endpoints',action='store_true',help='Verify real published UDP endpoints in the room cards and scoped API')
     p.add_argument('--check-room-clocks', action='store_true', help='Verify room clocks and the original pause/resume boundaries in both modes')
     p.add_argument('--check-venue-phase', action='store_true', help='Verify whole-venue pause and resume against both native topologies')
@@ -151,6 +152,8 @@ def main():
     if args.check_room_observer and not args.player_package:p.error('--check-room-observer requires the three-package check')
     if args.check_room_participation and (not args.check_room_readiness or args.peer_diagnostics):
         p.error('--check-room-participation requires --check-room-readiness without the one-connection peer diagnostics check')
+    if args.check_vr_participation_pause and not args.check_room_participation:
+        p.error('--check-vr-participation-pause requires --check-room-participation')
     if args.check_room_clocks and not args.player_package:p.error('--check-room-clocks requires five players per room')
     if args.check_venue_phase and not args.check_room_clocks:p.error('--check-venue-phase requires --check-room-clocks')
     if args.check_venue_begin and not args.player_package:p.error('--check-venue-begin requires the three-package check')
@@ -1901,6 +1904,32 @@ def main():
             alert = wait(lambda:read(observer_out/'participation-alert.json') if (observer_out/'participation-alert.json').is_file() else None,
                          10, 'actual console highlights only the missing VR seat')
             check(alert['roomId'] == room and alert['seat'] == seat, 'shipped console identifies the affected native VR seat')
+        pause = None
+        if args.check_vr_participation_pause:
+            sid = entry['sessionId']
+            role = 'Master' if linked else 'Room4'
+            node = shutil.which('node')
+            if not node: raise RuntimeError('Node is required for the shipped VR pause console check')
+            descriptor = runtime/(mode.lower()+'-vr-pause-private.json')
+            descriptor.write_text(json.dumps({'base':uri,'key':keys[role],'sessionId':sid,
+                'roomId':room,'seat':seat,'linked':linked}),encoding='utf-8')
+            evidence = out/(mode.lower()+'-vr-pause-ui.json')
+            with (out/(mode.lower()+'-vr-pause-ui.log')).open('xb') as log:
+                subprocess.run([node, str(ROOT/'tests/browser/check-vr-participation-pause-native.cjs'),
+                    str(descriptor), str(evidence)], stdout=log, stderr=subprocess.STDOUT, check=True, timeout=50)
+            pause = read(evidence)
+            sequence = pause['appliedAtSequence']
+            def observed_pause():
+                rows = request('/api/rooms/readiness')['rooms']
+                affected = [row for row in rows if row['sessionId'] == sid]
+                if len(affected) == (5 if linked else 1) and all(
+                    row.get('vrPause',{}).get('triggerRoomId') == room and row['vrPause']['appliedAtSequence'] == sequence
+                    and row['vrPause']['worldSequence'] and row['sourceState'] == 'Fresh' for row in affected):
+                    return affected
+            pause['appliedRooms'] = wait(observed_pause, 20, mode+' original VR pause source confirmation')
+            check(pause['sessionId'] == sid and pause['roomId'] == room and request('/api/sessions/'+sid)['state'] == 'Paused'
+                  and all(request('/api/sessions/'+other)['state'] == 'Running' for other in set(expected.values())-{sid}),
+                  mode+' room card pauses exactly the affected scope and the original source confirms it')
         server_log = entry['work']/'server.log'
         wait(lambda:f'VR_SERVER_CLIENT_LEFT id={connections[0]}\n' in server_log.read_text(encoding='utf-8'), 50,
              mode+' original UDP transport release')
@@ -1908,6 +1937,13 @@ def main():
         with config.open('xb') as stream: stream.write(initial)
         recovered = packaged_player(entry, original['player'], config)
         round_clients[index] = recovered
+        if pause is not None:
+            wait(lambda: recovered['log'].is_file() and 'VR_CLIENT_CONNECTED id=' in recovered['log'].read_text(encoding='utf-8'),
+                 25, mode+' original VR seat reconnects while paused')
+            resume = request('/api/sessions/'+entry['sessionId']+'/commands', {'commandId':str(uuid.uuid4()),'action':'Resume'},
+                             role='Master' if linked else 'Room4')
+            check(resume['session']['state'] == 'Running' and resume['appliedAtSequence'] > pause['appliedAtSequence'],
+                  mode+' operator resumes the exact original session after the seat reconnects')
         after = wait(lambda:snapshot(False), 30, mode+' original admission restores all five room counts')
         new_connections = re.findall(r'^VR_CLIENT_CONNECTED id=(\d+)$', recovered['log'].read_text(encoding='utf-8'), re.M)
         check(len(new_connections) == 1 and new_connections != connections and recovered['nativePid'] != original['nativePid']
@@ -1917,7 +1953,8 @@ def main():
                                 10, 'actual console clears the original VR alert')
             check(recovered_ui['rooms'] == [1,2,3,4,5], 'shipped console clears the seat warning and restores all five actual room counts')
         save(mode.lower()+'-room-participation.json', {'before':before,'missing':missing,'after':after,
-             'roomId':room,'seat':seat,'oldConnectionId':connections[0],'newConnectionId':new_connections[0]})
+             'roomId':room,'seat':seat,'oldConnectionId':connections[0],'newConnectionId':new_connections[0],
+             **({'pause':pause} if pause is not None else {})})
     def verify_venue_environment(entries, linked):
         route = '/api/venue/phase'
         mode = 'linked' if linked else 'independent'

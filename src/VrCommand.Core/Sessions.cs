@@ -24,7 +24,8 @@ public record SessionOverview(SessionView Session, SessionStatistics Statistics,
 public record ControlCommand(Guid CommandId, ControlAction Action, EnvironmentSettings? Environment = null,
     EnemySettings? Enemies = null, long? ExpectedSequence = null, MissionClockSettings? MissionClock = null, MissionClockExpiration? ClockExpiration = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomAlignmentPins? RoomAlignment = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MrTrackingRoomId = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MrTrackingRoomId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? VrParticipationRoomId = null);
 public record CommandReceipt(Guid CommandId, long AppliedAtSequence, bool Duplicate, SessionView Session);
 public sealed class MixedRealityNotReadyException(ControlAction action) : InvalidOperationException(action == ControlAction.Resume
     ? "MR resume requires a fresh paused snapshot with tracked Quest 3 poses for living players."
@@ -33,6 +34,7 @@ public sealed class MixedRealityNotReadyException(ControlAction action) : Invali
     public ControlAction Action { get; } = action;
 }
 public sealed class MixedRealityTrackingPauseException() : InvalidOperationException("No current lost MR tracking in the requested room.");
+public sealed class VrParticipationPauseException() : InvalidOperationException("No current unavailable VR pose in the requested room.");
 
 // Management and combat telemetry; this does not simulate a 3D world or determine physical collisions.
 public sealed partial class SessionManager
@@ -133,6 +135,11 @@ public sealed partial class SessionManager
     public (SessionView View, long PhaseSinceSequence, ControlAction? VenueAction, long? VenueEnvironmentSequence, long? VenueEnemiesSequence,
         long EnvironmentSinceSequence)
         GetWithPhase(Guid id, OperatorIdentity? actor, out long enemiesSinceSequence)
+        => GetWithPhase(id, actor, out enemiesSinceSequence, out _);
+
+    public (SessionView View, long PhaseSinceSequence, ControlAction? VenueAction, long? VenueEnvironmentSequence, long? VenueEnemiesSequence,
+        long EnvironmentSinceSequence)
+        GetWithPhase(Guid id, OperatorIdentity? actor, out long enemiesSinceSequence, out int? vrPauseRoomId)
     {
         lock (gate)
         {
@@ -140,6 +147,8 @@ public sealed partial class SessionManager
             AccessPolicy.Read(actor ?? OperatorIdentity.Internal, history.View.RoomIds);
             enemiesSinceSequence = history.EnemiesSinceSequence;
             var venue = history.Events[(int)history.PhaseSinceSequence - 1];
+            vrPauseRoomId = history.View.State == SessionState.Paused && history.View.Environment.Mode == ExperienceMode.VR
+                ? venue.Read<ControlCommand>().VrParticipationRoomId : null;
             return (Snapshot(history.View), history.PhaseSinceSequence,
                 venue.Venue is null ? null : venue.Read<ControlCommand>().Action,
                 history.Events[(int)history.EnvironmentSinceSequence - 1].Venue is null ? null : history.EnvironmentSinceSequence,
@@ -236,7 +245,8 @@ public sealed partial class SessionManager
         }
     }
 
-    public CommandReceipt Execute(Guid id, ControlCommand command, OperatorIdentity? actor = null, long? readyMrSequence = null)
+    public CommandReceipt Execute(Guid id, ControlCommand command, OperatorIdentity? actor = null, long? readyMrSequence = null,
+        long? readyVrSequence = null)
     {
         ArgumentNullException.ThrowIfNull(command);
         SessionProjection.ValidateCommand(command);
@@ -266,6 +276,11 @@ public sealed partial class SessionManager
                     || history.View.Environment.Mode != ExperienceMode.MR || !history.View.RoomIds.Contains(room)
                     || history.View.CombatStream?.Origin != CombatOrigin.GameServer))
                 throw new MixedRealityTrackingPauseException();
+            if (command.VrParticipationRoomId is { } vrRoom
+                && (readyVrSequence != history.View.Sequence || history.View.State != SessionState.Running
+                    || history.View.Environment.Mode != ExperienceMode.VR || !history.View.RoomIds.Contains(vrRoom)
+                    || history.View.CombatStream is null))
+                throw new VrParticipationPauseException();
             var entry = SessionEvent.Create(id, history.View.Sequence + 1, SessionEventKind.ControlApplied, command, actor);
             var updated = Commit(history, entry);
             return new(command.CommandId, entry.Sequence, false, updated);

@@ -91,6 +91,8 @@ app.Use(async (context, next) =>
                 code = mr.Action == ControlAction.Resume ? "mr-resume-readiness-required" : "mr-readiness-required" });
         else if (ex is MixedRealityTrackingPauseException)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "mr-tracking-pause-no-witness" });
+        else if (ex is VrParticipationPauseException)
+            await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "vr-participation-pause-no-witness" });
         else if (ex is MixedRealityAlignmentRequiredException)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "mr-alignment-required" });
         else if (ex is IndependentRoomsOccupiedException occupied)

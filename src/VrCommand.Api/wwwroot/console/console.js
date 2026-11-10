@@ -115,6 +115,7 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
         if (code === 'mr-readiness-required') message = 'MR 場次尚未就緒。請查看「MR 開場檢查」，並確認等候中的 Quest 3 玩家已完成場地對位。';
         else if (code === 'mr-resume-readiness-required') message = 'MR 場次尚未符合繼續條件。請查看「MR 繼續檢查」。';
         else if (code === 'mr-tracking-pause-no-witness') message = '目前未確認本房仍有追蹤中斷。請查看最新追蹤狀態。';
+        else if (code === 'vr-participation-pause-no-witness') message = '目前未確認本房仍有姿態中斷。請查看最新參戰狀態。';
         else if (code === 'mr-alignment-required') message = '請由主控鎖定 MR 校正檔後再配票。';
         else if (code === 'independent-rooms-occupied' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 使用中，五場都未建立。請確認房間狀態後再試。`;
         else if (code === 'venue-phase-changed') message = '全館場次狀態已變更，本批命令未套用。請重新整理後確認房間。';
@@ -289,13 +290,16 @@ function renderRooms() {
       const mrPause = element('p', '', 'hint');
       mrPause.dataset.roomMrPause = room.id;
       mrPause.hidden = true;
+      const vrPause = element('p', '', 'hint');
+      vrPause.dataset.roomVrPause = room.id;
+      vrPause.hidden = true;
       const environment = element('p', '', 'hint');
       environment.dataset.roomEnvironment = room.id;
       environment.hidden = true;
       const enemies = element('p', '', 'hint');
       enemies.dataset.roomEnemies = room.id;
       enemies.hidden = true;
-      card.append(status, endpoint, clock, phase, mrPause, environment, enemies);
+      card.append(status, endpoint, clock, phase, mrPause, vrPause, environment, enemies);
     }
     const button = element('button', room.sessionId ? '查看場次' : '選擇此房間', 'quiet small');
     button.type = 'button'; button.disabled = state.busy || !!state.pending;
@@ -310,10 +314,11 @@ function renderRooms() {
         tab('world', { mode: 'live', sessionId: room.sessionId, roomId: room.id });
       });
       actions.append(watch);
-      const pause = element('button', session?.mode === 'Linked' ? '暫停五房合併場次' : '暫停本房重新對位', 'quiet small');
+      const vr = session?.environment?.mode === 'VR';
+      const pause = element('button', session?.mode === 'Linked' ? '暫停五房合併場次' : vr ? '暫停本房檢查席位' : '暫停本房重新對位', 'quiet small');
       pause.type = 'button'; pause.hidden = true; pause.disabled = true;
-      pause.dataset.roomMrTrackingPause = room.id;
-      pause.addEventListener('click', () => pauseMrTracking(room.id, room.sessionId));
+      pause.dataset[vr ? 'roomVrParticipationPause' : 'roomMrTrackingPause'] = room.id;
+      pause.addEventListener('click', () => pauseParticipation(room.id, room.sessionId, vr ? 'VR' : 'MR'));
       actions.append(pause);
       for (const [kind, label] of [['environment', '檢視環境快照'], ['enemies', '檢視敵軍快照']]) {
         const snapshot = element('button', label, 'quiet small');
@@ -820,16 +825,19 @@ async function command(action, extra = {}, expectedSequence = state.session.sequ
   state.pending = { kind: 'command', path: '/sessions/' + state.session.id + '/commands', method: 'POST', body: { commandId: uuid(), action, expectedSequence, ...extra } };
   await sendPending();
 }
-function pauseMrTracking(roomId, sessionId) {
-  const target = roomReadiness.trackingPause(roomId);
+function pauseParticipation(roomId, sessionId, mode) {
+  const target = roomReadiness.trackingPause(roomId, mode);
   if (state.busy || state.pending || target?.sessionId !== sessionId) return;
-  const scope = target.linked ? `房間 ${roomId} 的追蹤中斷已確認。要暫停五房合併場次，讓所有房間一起暫停嗎？`
-    : `房間 ${roomId} 的追蹤中斷已確認。要暫停本房進行重新對位嗎？`;
+  const reason = mode === 'VR' ? '姿態中斷' : '追蹤中斷';
+  const action = target.linked ? '暫停五房合併場次，讓所有房間一起暫停'
+    : mode === 'VR' ? '暫停本房檢查席位' : '暫停本房進行重新對位';
+  const scope = `房間 ${roomId} 的${reason}已確認。要${action}嗎？`;
   if (!confirm(scope)) return;
   void run(async () => {
     if (state.pending || !state.rooms.some(room => room.id === roomId && room.sessionId === sessionId)) return;
-    state.pending = { kind: 'mr-tracking-pause', path: `/sessions/${sessionId}/commands`, method: 'POST', sessionId,
-      body: { commandId: uuid(), action: 'Pause', expectedSequence: target.sequence, mrTrackingRoomId: roomId } };
+    const field = mode === 'VR' ? 'vrParticipationRoomId' : 'mrTrackingRoomId';
+    state.pending = { kind: 'participation-pause', path: `/sessions/${sessionId}/commands`, method: 'POST', sessionId, mode,
+      body: { commandId: uuid(), action: 'Pause', expectedSequence: target.sequence, [field]: roomId } };
     await sendPending();
   });
 }
@@ -880,11 +888,11 @@ async function sendPending() {
               : row.appliedAtSequence > Math.max(target.phaseSinceSequence, target.environmentSinceSequence ?? 0, target.enemiesSinceSequence ?? 0)))))
         throw new Error('Incomplete venue phase receipt');
     }
-    if (pending.kind === 'mr-tracking-pause' && (response?.commandId !== pending.body.commandId
+    if (pending.kind === 'participation-pause' && (response?.commandId !== pending.body.commandId
         || response.session?.id !== pending.sessionId || typeof response.duplicate !== 'boolean'
         || response.appliedAtSequence !== pending.body.expectedSequence + 1
         || !Number.isSafeInteger(response.session.sequence) || response.session.sequence < response.appliedAtSequence))
-      throw new Error('Incomplete MR tracking pause receipt');
+      throw new Error('Incomplete participation pause receipt');
     state.pending = null;
     if (pending.kind === 'create') { $('include-ended').checked = response.state === 'Ended'; resetSelection(response.id); }
     if (pending.kind === 'command' && pending.body.action === 'End' && response.session.state === 'Ended') $('include-ended').checked = true;
@@ -892,8 +900,10 @@ async function sendPending() {
     if (venueEnded) $('include-ended').checked = true;
     if (pending.kind === 'join') $('player-name').value = '';
     await refresh();
-    if (pending.kind === 'mr-tracking-pause') {
-      notify('管理端已接受重新對位暫停。請從房卡確認遊戲端已套用。'); return;
+    if (pending.kind === 'participation-pause') {
+      notify(pending.mode === 'VR' ? '管理端已接受席位檢查暫停。請從房卡確認遊戲端已套用。'
+        : '管理端已接受重新對位暫停。請從房卡確認遊戲端已套用。');
+      return;
     }
     loadEnvironment(); loadEnemies(); loadClock();
     notify(venueEnded ? '全館結束已記錄。可查看各場的資料封存狀態。'

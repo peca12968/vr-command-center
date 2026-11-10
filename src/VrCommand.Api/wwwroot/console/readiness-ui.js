@@ -174,13 +174,23 @@ export function roomReadinessView(report, room, session, elapsed) {
   return { source, ready: attention ? 0 : ready, attention, text };
 }
 
+function mayPauseRoom(room, session, actor) {
+  return session?.state === 'Running' && session.roomIds?.includes(room.id)
+    && (actor?.role === 'Master' || (actor?.role === 'RoomController' && actor.roomId === room.id
+      && session.mode === 'Independent' && session.roomIds.length === 1));
+}
 export function roomMrTrackingPauseTarget(report, room, session, elapsed, actor) {
-  if (session?.state !== 'Running' || session.environment?.mode !== 'MR'
-    || session.combatStream?.origin !== 'GameServer' || !session.roomIds?.includes(room.id)
-    || (actor?.role !== 'Master' && !(actor?.role === 'RoomController' && actor.roomId === room.id
-      && session.mode === 'Independent' && session.roomIds.length === 1))) return null;
+  if (!mayPauseRoom(room, session, actor) || session.environment?.mode !== 'MR'
+    || session.combatStream?.origin !== 'GameServer') return null;
   const row = roomReadinessRow(report, room, session);
   if (row?.mrTrackingPauseAvailable !== true || !roomReadinessView(report, room, session, elapsed).attention) return null;
+  return { sessionId: session.id, sequence: row.sessionSequence, linked: session.mode === 'Linked' };
+}
+export function roomVrParticipationPauseTarget(report, room, session, elapsed, actor) {
+  if (!mayPauseRoom(room, session, actor) || session.environment?.mode !== 'VR' || !session.combatStream) return null;
+  const row = roomReadinessRow(report, room, session);
+  if (row?.vrParticipationPauseAvailable !== true || !roomReadinessView(report, room, session, elapsed).attention
+    || !row.vrParticipation?.awaitingPose?.length) return null;
   return { sessionId: session.id, sequence: row.sessionSequence, linked: session.mode === 'Linked' };
 }
 
@@ -193,6 +203,15 @@ export function roomMrPauseView(report, room, session, elapsed, unavailable = fa
   const source = unavailable ? 'Unavailable' : sourceAt(row, elapsed);
   return source === 'Fresh' && Number.isSafeInteger(pause.worldSequence) && pause.worldSequence > 0
     ? 'MR 暫停已套用' : `MR 暫停待確認 · ${source === 'Fresh' ? '等待階段同步' : labels[source]}`;
+}
+function roomVrPauseView(report, room, session, elapsed, unavailable) {
+  if (session?.state !== 'Paused' || session.environment?.mode !== 'VR') return null;
+  const row = roomReadinessRow(report, room, session), pause = row?.vrPause;
+  if (!session.roomIds?.includes(pause?.triggerRoomId) || !Number.isSafeInteger(pause.appliedAtSequence)
+    || pause.appliedAtSequence < 1 || pause.appliedAtSequence > row.sessionSequence) return null;
+  const applied = !unavailable && sourceAt(row, elapsed) === 'Fresh'
+    && Number.isSafeInteger(pause.worldSequence) && pause.worldSequence > 0;
+  return `房間 ${pause.triggerRoomId} 姿態中斷 · VR 暫停${applied ? '已套用' : '待確認'}`;
 }
 
 export function venueTrackingRow(report, room, session, elapsed) {
@@ -260,11 +279,12 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
   function settingFrame(roomId, kind) {
     return settingStatus(roomId, kind)?.target;
   }
-  function trackingPause(roomId) {
+  function trackingPause(roomId, mode) {
     const { rooms, sessions, actor } = getState();
     const room = rooms.find(row => row.id === roomId);
     if (!active || failed || !room || document.visibilityState !== 'visible') return null;
-    return roomMrTrackingPauseTarget(report, room, sessions.find(row => row.id === room.sessionId), performance.now() - started, actor);
+    const target = mode === 'VR' ? roomVrParticipationPauseTarget : roomMrTrackingPauseTarget;
+    return target(report, room, sessions.find(row => row.id === room.sessionId), performance.now() - started, actor);
   }
   function venueBegin(target, roomId, policy = 'normal') {
     const waiting = (state, text) => ({ state, text, ready: false });
@@ -356,8 +376,14 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
       mrPause.hidden = !pause;
       mrPause.textContent = pause ?? '';
       mrPause.classList.toggle('tracking-attention', !!pause && pause.startsWith('MR 暫停待確認'));
-      const pauseButton = cell.parentElement.querySelector('[data-room-mr-tracking-pause]');
-      const target = active && !failed && roomMrTrackingPauseTarget(report, room, session, elapsed, actor);
+      const vrPause = cell.parentElement.querySelector('[data-room-vr-pause]');
+      const vrStatus = roomVrPauseView(report, room, session, elapsed, failed);
+      vrPause.hidden = !vrStatus;
+      vrPause.textContent = vrStatus ?? '';
+      vrPause.classList.toggle('tracking-attention', !!vrStatus && vrStatus.endsWith('待確認'));
+      const pauseButton = cell.parentElement.querySelector('[data-room-mr-tracking-pause], [data-room-vr-participation-pause]');
+      const target = active && !failed && (session?.environment?.mode === 'VR' ? roomVrParticipationPauseTarget
+        : roomMrTrackingPauseTarget)(report, room, session, elapsed, actor);
       pauseButton.hidden = !target;
       pauseButton.disabled = !target || busy || !!pending;
       cell.parentElement.querySelector('[data-room-endpoint]').textContent = roomEndpointText(failed ? null : report, room, session);
