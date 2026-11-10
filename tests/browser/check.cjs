@@ -225,6 +225,12 @@ async function main() {
       await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed' }, null, 2));
       console.log(`PASS: ${checks} focused venue score checks. Screenshots: ${screenshots}`); return;
     }
+    if (process.argv.includes('--setting-drafts-only')) {
+      await require('./setting-drafts-browser.cjs')({ page, api, tokens, base, check });
+      check(browserErrors.length === 0, 'Live setting drafts have no uncaught browser or policy errors');
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed' }, null, 2));
+      console.log(`PASS: ${checks} focused setting draft checks. Screenshots: ${screenshots}`); return;
+    }
     if (process.argv.includes('--room-enemy-edit-only')) {
       await require('./room-enemy-edit-browser.cjs')({ page, api, tokens, base, check });
       check(browserErrors.length === 0, 'Room policy edits have no uncaught browser or policy errors');
@@ -367,7 +373,7 @@ async function main() {
     await api('/sessions/' + session.id + '/commands', 'POST', { commandId: randomUUID(), action: 'SetEnemies', enemies: { count: 9, behavior: 'Patrol', autoAttack: true } });
     await page.locator('#live-count').fill('5');
     await page.locator('#enemies-form button[type=submit]').click();
-    await page.waitForFunction(() => document.querySelector('#notice').textContent.includes('場次狀態或名額已變更'));
+    await page.waitForFunction(() => document.querySelector('#notice').textContent.includes('場次設定已變更'));
     check((await api('/sessions/' + session.id)).enemies.count === 9, 'Stale editor sequence cannot overwrite another operator command');
     await page.locator('#refresh').click();
     await page.waitForFunction(() => document.querySelector('#live-enemies').textContent.startsWith('目標 9 名'));
@@ -587,6 +593,10 @@ async function main() {
     captureErrors(roomEnemyEditor);
     try { await require('./room-enemy-edit-browser.cjs')({ page: roomEnemyEditor, api, tokens, base, check }); }
     finally { await roomEnemyEditor.close(); }
+    const settingEditor = await context.newPage();
+    captureErrors(settingEditor);
+    try { await require('./setting-drafts-browser.cjs')({ page: settingEditor, api, tokens, base, check }); }
+    finally { await settingEditor.close(); }
     await require('./venue-phase-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
     await require('./venue-scores-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
     await require('./vr-participation-pause-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });

@@ -107,6 +107,8 @@ app.Use(async (context, next) =>
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "enemy-capacity-exceeded", maxCount = capacity.MaxCount });
         else if (ex is RoomEnemyPolicyChangedException)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "room-enemy-policy-changed" });
+        else if (ex is SessionSettingChangedException)
+            await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "setting-revision-changed" });
         else if (ex is MixedRealityNotReadyException mr)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message,
                 code = mr.Action == ControlAction.Resume ? "mr-resume-readiness-required" : "mr-readiness-required" });

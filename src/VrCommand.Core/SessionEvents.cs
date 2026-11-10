@@ -56,6 +56,9 @@ internal static class SessionProjection
         if (command.CommandId == Guid.Empty || command.Action == ControlAction.Unspecified
             || !Enum.IsDefined(command.Action) || command.ExpectedSequence < 0)
             throw new ArgumentException("A command requires a non-empty ID, valid action and non-negative expected sequence.");
+        if (command.ExpectedSettingSequence is long setting
+            && (setting < 1 || command.Action is not (ControlAction.SetEnvironment or ControlAction.SetEnemies)))
+            throw new ArgumentException("A positive setting revision is only allowed for environment and enemy settings.");
         if (command.Action == ControlAction.SetEnvironment)
             MissionStore.ValidateEnvironment(command.Environment);
         else if (command.Environment is not null)

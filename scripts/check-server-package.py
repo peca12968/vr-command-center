@@ -3192,6 +3192,36 @@ def main():
         save(mode+'-venue-environment.json', evidence)
         if args.check_venue_environment_ui:
             verify_setting_batch_ui(mode, 'environment', 'latestEnvironment', evidence[-1]['receipt'])
+        if not linked:
+            room_routes = [f"/api/sessions/{entry['sessionId']}" for entry in entries]
+            path = room_routes[0]
+            loaded = [request(room + '/overview') for room in room_routes]
+            original = loaded[0]
+            climate = dict(original['session']['environment'], weather='Storm', timeOfDay='Night', lightning=True)
+            enemies = dict(original['session']['enemies'], behavior='Patrol', autoAttack=False)
+            changes = [
+                {'commandId': str(uuid.uuid4()), 'action': 'SetEnvironment', 'environment': climate,
+                 'expectedSettingSequence': original['settingRevisions']['environment']},
+                {'commandId': str(uuid.uuid4()), 'action': 'SetEnemies', 'enemies': enemies,
+                 'expectedSettingSequence': original['settingRevisions']['enemies']},
+            ]
+            receipts = [request(path + '/commands', change) for change in changes]
+            check(receipts[1]['appliedAtSequence'] == receipts[0]['appliedAtSequence'] + 1
+                  and receipts[1]['session']['environment'] == climate and receipts[1]['session']['enemies'] == enemies,
+                  'two direct setting drafts from the same overview apply through the native management service')
+            def observed_direct():
+                sequence = request(path + '/world')['acceptedSequence']
+                packet = request(f'{path}/world/frames/{sequence}')['packet']
+                frame = packet['frame']
+                if (packet['observedSequence'] >= receipts[1]['appliedAtSequence'] and packet['weather'] == 'Storm'
+                    and packet['lightning'] and frame['night'] and frame['phase'] == 'Running'
+                    and any(enemy['walking'] for enemy in frame['enemies'])):
+                    return packet
+            direct = wait(observed_direct, 20, 'native direct environment and enemy setting witness')
+            check(all(request(room + '/overview')['settingRevisions'] == prior['settingRevisions']
+                      for room, prior in zip(room_routes[1:], loaded[1:])),
+                  'direct settings reach an original game frame while the other independent rooms retain their revisions')
+            save('independent-direct-settings.json', {'changes': changes, 'receipts': receipts, 'frame': direct})
 
     def verify_room_clocks(entries, linked):
         mode = 'linked' if linked else 'independent'

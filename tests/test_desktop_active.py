@@ -149,6 +149,14 @@ class OperatorUiTests(unittest.TestCase):
             candidate=copy.deepcopy(value);change(candidate)
             with self.assertRaises(ValueError):self.validate(candidate,environment)
 
+    def test_current_setting_fences_are_accepted_without_loosening_legacy_receipt_checks(self):
+        value,environment=self.fixture()
+        for attempt in value['attempts']:
+            body=attempt['body'];body['expectedSettingSequence']=body['expectedSequence'];body['expectedSequence']=None
+        self.assertEqual(self.validate(value,environment),value['receipts'])
+        value['attempts'][0]['body']['expectedSequence']=1
+        with self.assertRaises(ValueError):self.validate(value,environment)
+
     def test_wrong_form_settings_sequence_and_unknown_results_fail_closed(self):
         value,environment=self.fixture()
         for change in (lambda a:a['body']['environment'].__setitem__('weather','Clear'),lambda a:a['body'].__setitem__('expectedSequence',None),

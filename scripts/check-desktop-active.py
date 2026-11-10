@@ -39,8 +39,10 @@ def validate_ui_exchange(value,request,session_id,environment,behavior):
         intents+=1
         if action_index>=2 or action!=('SetEnvironment','SetEnemies')[action_index] or intents>3 or attempt.get('intent')!=intents:
             raise ValueError('UI intents continued after acceptance, changed order or exceeded the bound')
+        revision=body.get('expectedSettingSequence',body.get('expectedSequence'))
         if attempt['request']!=request or attempt['status'] not in (200,409) or body['action']!=action \
-            or type(body.get('expectedSequence')) is not int or body['expectedSequence']<1 \
+            or type(revision) is not int or revision<1 \
+            or (body.get('expectedSettingSequence') is not None and body.get('expectedSequence') is not None) \
             or action not in ('SetEnvironment','SetEnemies'):raise ValueError('Unexpected UI command attempt')
         if action=='SetEnvironment' and body.get('environment')!=environment \
             or action=='SetEnemies' and body.get('enemies')!={'count':5,'behavior':behavior,'autoAttack':False}:
@@ -51,7 +53,7 @@ def validate_ui_exchange(value,request,session_id,environment,behavior):
         if attempt['status']==200:
             receipt=attempt['receipt']
             if receipt['commandId']!=body['commandId'] or receipt['duplicate'] is not False or receipt['session']['id']!=session_id \
-                or receipt['appliedAtSequence']<=body['expectedSequence']:raise ValueError('UI receipt differs from its actual submitted command')
+                or receipt['appliedAtSequence']<=revision:raise ValueError('UI receipt differs from its actual submitted command')
             action_index+=1;intents=0
     return value['receipts']
 

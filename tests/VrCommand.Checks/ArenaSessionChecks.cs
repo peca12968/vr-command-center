@@ -329,5 +329,31 @@ internal static class ArenaSessionChecks
         check(local.Session.RoomEnemyPolicies!.Length == 2 && local.AppliedAtSequence > globalSequence + 1,
             "An intervening change in another room leaves the original room draft valid");
         RejectPolicy(newDraft with { CommandId = Guid.NewGuid() }, "A stale same-room policy appends no event");
+
+        var revisionsBefore = manager.GetOverview(session.Id, master).SettingRevisions!;
+        var climate = new ControlCommand(Guid.NewGuid(), ControlAction.SetEnvironment,
+            Environment: local.Session.Environment with { Weather = Weather.Rain }, ExpectedSettingSequence: revisionsBefore.Environment);
+        var wholeEnemies = new ControlCommand(Guid.NewGuid(), ControlAction.SetEnemies,
+            Enemies: local.Session.Enemies, ExpectedSettingSequence: revisionsBefore.Enemies);
+        var rain = manager.Execute(session.Id, climate, master);
+        var inherited = manager.Execute(session.Id, wholeEnemies, master);
+        check(inherited.Session.Environment.Weather == Weather.Rain && inherited.Session.RoomEnemyPolicies is null
+            && revisionsBefore.Enemies == local.AppliedAtSequence,
+            "Independent environment and global enemy revisions permit both commands in sequence");
+        manager = new SessionManager(store);
+        check(manager.GetOverview(session.Id, master).SettingRevisions == new SessionSettingRevisions(rain.AppliedAtSequence, inherited.AppliedAtSequence)
+            && manager.Execute(session.Id, climate, master) is { Duplicate: true } rainRetry
+            && rainRetry.AppliedAtSequence == rain.AppliedAtSequence,
+            "Session setting revisions and accepted retries reconstruct from the original journal");
+        var laterRoom = manager.Execute(session.Id, newDraft with { CommandId = Guid.NewGuid(), RoomEnemyPolicy = new(2, global) }, room2);
+        try { manager.Execute(session.Id, wholeEnemies with { CommandId = Guid.NewGuid(), ExpectedSettingSequence = inherited.AppliedAtSequence }, master); }
+        catch (SessionSettingChangedException)
+        {
+            var actual = manager.Get(session.Id);
+            check(actual.Sequence == laterRoom.AppliedAtSequence && actual.RoomEnemyPolicies is [{ RoomId: 2 }],
+                "A stale global enemy setting cannot clear a newer room policy");
+            return;
+        }
+        throw new Exception("Expected a global enemy setting revision conflict");
     }
 }

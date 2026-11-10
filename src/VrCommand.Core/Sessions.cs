@@ -25,14 +25,17 @@ public record SessionView(Guid Id, SessionMode Mode, int[] RoomIds, Mission Miss
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomAlignmentPins? RoomAlignment = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomEnemyPolicy[]? RoomEnemyPolicies = null);
 public record RoomView(int Id, int Capacity, Guid? SessionId, int PlayerCount);
+public record SessionSettingRevisions(long Environment, long Enemies);
 public record SessionOverview(SessionView Session, SessionStatistics Statistics, SessionEvent[] RecentEvents,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<int, long>? RoomEnemyPolicySequences = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyDictionary<int, long>? RoomEnemyPolicySequences = null,
+    SessionSettingRevisions? SettingRevisions = null);
 public record ControlCommand(Guid CommandId, ControlAction Action, EnvironmentSettings? Environment = null,
     EnemySettings? Enemies = null, long? ExpectedSequence = null, MissionClockSettings? MissionClock = null, MissionClockExpiration? ClockExpiration = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomAlignmentPins? RoomAlignment = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? MrTrackingRoomId = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? VrParticipationRoomId = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomEnemyPolicyChange? RoomEnemyPolicy = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomEnemyPolicyChange? RoomEnemyPolicy = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? ExpectedSettingSequence = null);
 public record CommandReceipt(Guid CommandId, long AppliedAtSequence, bool Duplicate, SessionView Session);
 public sealed class MixedRealityNotReadyException(ControlAction action) : InvalidOperationException(action == ControlAction.Resume
     ? "MR resume requires a fresh paused snapshot with tracked Quest 3 poses for living players."
@@ -44,6 +47,7 @@ public sealed class MixedRealityTrackingPauseException() : InvalidOperationExcep
 public sealed class VrParticipationPauseException() : InvalidOperationException("No current unavailable VR pose in the requested room.");
 public sealed class VrParticipationResumeException() : InvalidOperationException("VR resume requires fresh paused poses for the current living roster.");
 public sealed class RoomEnemyPolicyChangedException() : InvalidOperationException("The selected room enemy policy changed; reload it before editing.");
+public sealed class SessionSettingChangedException() : InvalidOperationException("The selected session setting changed; reload it before editing.");
 
 // Management and combat telemetry; this does not simulate a 3D world or determine physical collisions.
 public sealed partial class SessionManager
@@ -90,6 +94,8 @@ public sealed partial class SessionManager
                 var next = SessionProjection.Apply(view, entry);
                 if (!MatchesRoomEnemyPolicy(command, enemiesSince, roomEnemies))
                     throw new InvalidDataException("Room enemy policy revision does not match prior state.");
+                if (!MatchesSettingRevision(command, environmentSince, enemiesSince, roomEnemies))
+                    throw new InvalidDataException("Session setting revision does not match prior state.");
                 if (entry.Venue is not null) RestoreVenueEvent(events, entry, phaseSince, environmentSince, enemiesSince, roomEnemies, command!);
                 if (command?.Action == ControlAction.SetEnvironment) environmentSince = entry.Sequence;
                 if (command?.Action == ControlAction.SetEnemies) enemiesSince = entry.Sequence;
@@ -199,7 +205,8 @@ public sealed partial class SessionManager
                 ? history.View.RoomIds.Where(room => actor.Role != OperatorRole.RoomController || actor.RoomId == room)
                     .ToDictionary(room => room, room => RoomEnemyPolicySequence(room, history.EnemiesSinceSequence, history.RoomEnemyRevisions))
                 : null;
-            return new(Snapshot(history.View), Statistics(history), history.Events.TakeLast(20).ToArray(), roomEnemyPolicySequences);
+            return new(Snapshot(history.View), Statistics(history), history.Events.TakeLast(20).ToArray(), roomEnemyPolicySequences,
+                new(history.EnvironmentSinceSequence, EnemySettingSequence(history.EnemiesSinceSequence, history.RoomEnemyRevisions)));
         }
     }
 
@@ -293,6 +300,8 @@ public sealed partial class SessionManager
                 throw new InvalidOperationException("Session changed; refresh before issuing this command.");
             if (!MatchesRoomEnemyPolicy(command, history.EnemiesSinceSequence, history.RoomEnemyRevisions))
                 throw new RoomEnemyPolicyChangedException();
+            if (!MatchesSettingRevision(command, history.EnvironmentSinceSequence, history.EnemiesSinceSequence, history.RoomEnemyRevisions))
+                throw new SessionSettingChangedException();
             if (command.Environment is { } environment && environment.Mode != history.View.Environment.Mode)
                 throw new InvalidOperationException("Experience mode is fixed when a session is created.");
             if (command.Enemies is { } enemies && enemies.Count > history.View.Enemies.Count)
@@ -414,6 +423,14 @@ public sealed partial class SessionManager
     private static bool MatchesRoomEnemyPolicy(ControlCommand? command, long enemiesSince, ImmutableDictionary<int, long> revisions) =>
         command?.RoomEnemyPolicy is not { ExpectedPolicySequence: long expected } change
         || expected == RoomEnemyPolicySequence(change.RoomId, enemiesSince, revisions);
+
+    private static long EnemySettingSequence(long enemiesSince, ImmutableDictionary<int, long> revisions) =>
+        revisions.Values.DefaultIfEmpty(enemiesSince).Max();
+
+    private static bool MatchesSettingRevision(ControlCommand? command, long environmentSince, long enemiesSince,
+        ImmutableDictionary<int, long> revisions) =>
+        command?.ExpectedSettingSequence is not long expected || expected == (command.Action == ControlAction.SetEnvironment
+            ? environmentSince : EnemySettingSequence(enemiesSince, revisions));
 
     private static long PhaseSince(SessionView? previous, SessionView current, long phaseSince) =>
         previous?.State == current.State ? phaseSince : current.Sequence;
