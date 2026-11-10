@@ -41,7 +41,7 @@ async function main() {
     const forRoom = room => players.filter(player => player.roomId === room);
     const playerOptions = () => picker.locator('option[value^="p:"]').evaluateAll(options => options.map(option => [option.value.slice(2), option.textContent]));
     const enemies = picker.locator('option[value^="e:"]');
-    async function checkRoom(room) {
+    async function checkRoom(room, roomOnly = false) {
       assert.equal(await page.locator('#world-room').inputValue(), String(room));
       const options = new Map(await playerOptions());
       assert.equal(options.size, 5);
@@ -49,6 +49,10 @@ async function main() {
       const names = await page.locator('#world-statistics tr td:first-child').allTextContents();
       assert.deepEqual(names.sort(), forRoom(room).map(player => player.name).sort());
       assert.ok((await enemies.allTextContents()).every(label => label.includes(` · 房間 ${room} · `)));
+      if (roomOnly) {
+        assert.equal(await page.locator('#world-room-quick').isHidden(), true);
+        return;
+      }
       const sample = await page.locator(`[data-world-room="${room}"]`).evaluate(button => ({
         sequence: Number(document.querySelector('#world-canvas').dataset.sequence), count: button.lastElementChild.textContent
       }));
@@ -178,7 +182,7 @@ async function main() {
     await armLiveWatchFault(page, sessionId, 'eof');
     await page.locator('[data-watch-room-only="4"]').click();
     await waitForLiveFrame(page, reconnect.recoveredFrame);
-    await checkRoom(4);
+    await checkRoom(4, true);
     assert.deepEqual(await page.locator('#world-room option').evaluateAll(rows => rows.map(row => row.value)), ['4']);
     assert.match(await page.locator('#world-status').textContent(), /僅接收房間 4/);
     const roomFrame = await cutLiveWatch(page);
@@ -213,7 +217,7 @@ async function main() {
     assert.equal(new URL(exact.url()).searchParams.get('observerRoomId'), '4');
     assert.equal((await exact.json()).observerRoomId, 4);
     await page.waitForFunction(sequence => Number(document.querySelector('#world-canvas').dataset.sequence) === sequence, previousFrame);
-    await checkRoom(4);
+    await checkRoom(4, true);
     assert.deepEqual(scopedWatches, [['live', '4'], ['live', '4'], ['replay', '4']]);
     roomOnly = { roomId: 4, roomFrame, roomRecovered, previousFrame, scopedPlayers: scoped.statistics.length };
     await page.locator('#world-player').screenshot({ path: path.join(out, 'room-only-replay.png') });
