@@ -3,7 +3,7 @@ import argparse,hashlib,importlib.util,json,os,re,shutil,subprocess,uuid,zipfile
 from datetime import datetime,timezone
 from pathlib import Path,PurePosixPath
 ROOT=Path(__file__).resolve().parents[1];TOP='VRCommand-ControlServer'
-SECRET_KEYS={'operatorkeys','operatorkeyfile','gameserverkey','jointicket','playerticketsigningkey','controlpipetoken'}
+SECRET_KEYS={'operatorkeys','operatorkeyfile','gameserverkey','jointicket','playerticketsigningkey','controlpipetoken','vr_command_control_pfx_password'}
 FORBIDDEN_PARTS={'data','missions','sessions','telemetry','journals'}
 README='''VR Command Windows 管理服務包 API 0.31.0／控制台 0.31.108
 
@@ -36,8 +36,9 @@ GameServer角色供遊戲伺服器使用，不能拿到玩家端；玩家使用�
 停止管理API不會假造任務End、世界seal或玩家結果；遊戲伺服器與任務收尾分開處理。
 
 執行環境：Windows x64及.NET Framework 4.8。API已自含.NET/ASP.NET Core，不需安裝Python或.NET SDK。
-127.0.0.1只供本機；其他控制PC須用本機實際IPv4並能連到相同HTTP埠。
-本包沒有自動修改防火牆、部署TLS/NAT或證明LAN可達；實際跨機與頭盔仍待驗證。
+場館可在127.0.0.1管理實例加入control-https.json與control-https.pfx，另開指定IPv4的HTTPS房控入口。
+PFX密碼由啟動程序的VR_COMMAND_CONTROL_PFX_PASSWORD提供，詳細操作見專案docs/WINDOWS_CONTROL_PACKAGE.md。
+啟動器不修改防火牆、DNS或NAT；實際跨機與頭盔仍待驗證。
 控制台可管理任務、五房名冊與觀戰資料；Unity GameServer與玩家包仍須另外啟動。
 主控可在已完成雙封存的場次「任務收尾」下載場館驗收資料ZIP。ZIP含名冊、統計與公告端點，請與原始遊戲日誌私下保管。
 主控可在「全館收尾」一次下載選定批次的驗收 ZIP，含原批次明細與每場的驗收資料。
@@ -64,7 +65,7 @@ def relative(name):
     return PurePosixPath(name)
 def payload(name,content=None):
     path=relative(name);parts={part.lower() for part in path.parts}
-    if parts&FORBIDDEN_PARTS or path.suffix.lower() in {'.db','.sqlite','.sqlite3','.journal','.worldlog','.combat','.key'} or path.name.lower() in {'operator-keys.json','control-instance.json','keys.json'} or path.name.lower().endswith(('-wal','-shm')):raise ValueError('Live data / credentials cannot be packaged: '+name)
+    if parts&FORBIDDEN_PARTS or path.suffix.lower() in {'.db','.sqlite','.sqlite3','.journal','.worldlog','.combat','.key','.pfx','.p12'} or path.name.lower() in {'operator-keys.json','control-instance.json','control-https.json','keys.json'} or path.name.lower().endswith(('-wal','-shm')):raise ValueError('Live data / credentials cannot be packaged: '+name)
     if path.suffix.lower()=='.json' and content is not None:
         def visit(value):
             if isinstance(value,dict):

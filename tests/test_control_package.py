@@ -13,15 +13,16 @@ class ControlPackageBoundaryTests(unittest.TestCase):
         folder=self.temporary();self.manifest(folder,'README.txt',b'original');(folder/'README.txt').write_bytes(b'modified')
         with self.assertRaises(ValueError):m.verify(folder)
     def test_even_hash_matching_nested_credentials_cannot_be_shipped(self):
-        for key in ('OperatorKeys','joinTicket','ControlPipeToken','GameServerKey'):
+        for key in ('OperatorKeys','joinTicket','ControlPipeToken','GameServerKey','VR_COMMAND_CONTROL_PFX_PASSWORD'):
             with self.subTest(key=key):
                 folder=self.temporary();self.manifest(folder,'settings.json',json.dumps({'nested':[{'unknown':{key:'sensitive'}}]}).encode())
                 with self.assertRaises(ValueError):m.verify(folder)
     def test_additional_instance_files_cannot_hitchhike_on_a_valid_package(self):
         folder=self.temporary();self.manifest(folder,'README.txt',b'original');(folder/'operator-keys.json').write_text('{}',encoding='utf-8')
         with self.assertRaises(ValueError):m.verify(folder)
-    def test_matching_hash_does_not_authorize_database_or_ticket_key_paths(self):
-        for name in ('Runtime/missions/missions.db','Runtime/sessions/worlds.db-wal','Runtime/player-ticket-signing.key','Runtime/old.worldlog'):
+    def test_matching_hash_does_not_authorize_private_paths(self):
+        for name in ('Runtime/missions/missions.db','Runtime/sessions/worlds.db-wal','Runtime/player-ticket-signing.key','Runtime/old.worldlog',
+                     'Runtime/control-https.json','Runtime/control-https.pfx','Runtime/site.P12'):
             with self.subTest(name=name):
                 folder=self.temporary();self.manifest(folder,name,b'not-for-distribution')
                 with self.assertRaises(ValueError):m.verify(folder)

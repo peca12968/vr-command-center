@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `VRCommand-ControlServer-0.31.108-venue-https-win-x64.zip` 可同時提供場館 HTTPS 與本機遊戲管理 HTTP。ZIP 為 52,958,499 bytes，SHA-256 `75404520bae27eff4a8da79538e3f44055620cf1b8ee5f5e7025c5de967a3ca5`。解壓核對 552 筆清單及 532 個發行檔案。 [場館設定](#啟用場館-https)
+
 2026-11-10 `VRCommand-ControlServer-0.31.108-win-x64.zip` 支援從發射、命中及擊殺追查同發射擊。ZIP 為 52,955,370 bytes，SHA-256 `777724118f443456c61f90507a20283ba7204a8a60d05ecb27ff7cc3d46bf356`。解壓核對 552 筆清單及 532 個發行檔案。 [射擊檢討](WORLD_RECORDING.md#追查同發射擊)
 
 2026-11-10 `VRCommand-ControlServer-0.31.107-win-x64.zip` 支援依原錄製起訖讀取片段戰績。ZIP 為 52,944,041 bytes，SHA-256 `cf7a9fe38754e08335790992ea70c1dd145daf827c4030a50f4f071350c58036`。解壓核對 549 筆清單及 529 個發行檔案。 [片段回放](WORLD_RECORDING.md#重看指定片段)
@@ -178,14 +180,43 @@ API **0.31.0**／控制台 **0.31.19**，管理服務可以獨立解壓執行。
 
 ## 使用
 
-1. 完整解壓至本機簡短路徑，開啟`Start-Control.exe`。首次選擇IPv4與埠號，按「新增資料實例」。預設127.0.0.1:5081只供本機；可明確選取本機已配置的IPv4供其他控制PC連線。
+1. 完整解壓至本機簡短路徑，開啟`Start-Control.exe`。首次選擇 IPv4 與埠號，按「新增資料實例」。預設 `127.0.0.1:5081` 供本機使用。場館的其他控制電腦可使用 HTTPS 入口。 [場館設定](#啟用場館-https)
 2. 按「啟動管理服務」，等候「服務已就緒」，再按「開啟控制台」。選擇Master或Room1–Room5，複製該角色金鑰到控制台登入；GameServer角色供遊戲伺服器使用。
 3. 重開時按「選取資料實例」，選擇原資料夾的`control-instance.json`，再啟動。選取實例會帶回原地址／埠號；修改旁邊的設定只用於新增實例，不會默默改寫已選取實例。
 4. 任務結束後等候正常戰績與封存完成，再停止管理服務。視窗關閉也會等待自己的API停止；API停止與任務End／世界seal是不同流程。
 
 資料實例預設放在使用者LocalAppData的`VrCommand/ControlServers/<新識別>`。每個實例保有七個互異角色金鑰、玩家票券簽章金鑰、任務庫與場次／世界資料。完整保留該資料夾供重開及備份；只有全體writer停止後才備份全部檔案與WAL。管理服務包本身以程式、網站、執行環境與授權文件組成，實例資料由啟動器另外建立。
 
-本輪在有SDK的這台PC，移除啟動環境的dotnet PATH、設定不存在的DOTNET_ROOT，再從實際API的OS程序handle與載入的coreclr路徑確認使用包內執行環境。這不是乾淨新機、跨機LAN、TLS、頭盔或25位操作驗收；網路可達性與場館部署仍須另驗。啟動器不設定防火牆或系統網路。原Unity0.39.0／code49／NGO29與e0d60e4e...雙平台保持，未因本輪重新執行Editor或建置頭盔。
+初版驗收在有 SDK 的電腦上移除啟動環境的 dotnet PATH，並設定不存在的 DOTNET_ROOT。實際 API 的程序 handle 與載入的 coreclr 路徑證實使用包內執行環境。初版當時的測試範圍為同機 HTTP。Windows 新機、跨機及頭盔各有現場驗收，啟動器不設定防火牆或系統網路。
+
+## 啟用場館 HTTPS
+
+在已停止的 `127.0.0.1` 管理實例資料夾內，放入 `control-https.json` 與 `control-https.pfx`。JSON 填管理電腦已配置的場館 IPv4。HTTPS 埠可用 443 或 1024 至 65535，須與管理實例原 HTTP 埠不同。
+
+```json
+{
+  "schemaVersion": 1,
+  "bindAddress": "192.168.50.10",
+  "port": 8443
+}
+```
+
+PFX 由場館管理員提供，包含一張當前有效的站台憑證、該憑證的私鑰，以及必要的中繼憑證。房控用的 DNS 名稱或 IPv4 要在憑證的名稱範圍內。管理員負責設定 DNS、房控信任及防火牆通行範圍。PFX 留在原本的私人資料實例，和操作員金鑰及資料庫一併保管。
+
+在解壓後的管理包目錄執行下列 PowerShell，輸入 PFX 密碼後啟動圖形介面。選取原實例，再按「啟動管理服務」。
+
+```powershell
+$secure = Read-Host '管理 HTTPS PFX 密碼' -AsSecureString
+try {
+    $env:VR_COMMAND_CONTROL_PFX_PASSWORD = [System.Net.NetworkCredential]::new('', $secure).Password
+    Start-Process -FilePath '.\Start-Control.exe'
+} finally {
+    Remove-Item Env:VR_COMMAND_CONTROL_PFX_PASSWORD -ErrorAction SilentlyContinue
+    $secure.Dispose()
+}
+```
+
+畫面顯示本機管理位址和房控 HTTPS 監聽位址。CLI `--run` 使用同一設定，並在就緒報告提供 `httpsBinding`。`uri` 仍是本機 HTTP，供本機遊戲伺服器與「開啟控制台」使用。房控應使用憑證上的 DNS 名稱或 IPv4 加 `/console/`。若 PFX、密碼或 HTTPS 埠有誤，本次啟動會失敗。更換憑證及監聽設定須先正常停止服務。 [Kestrel 端點與憑證](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/servers/kestrel/endpoints?view=aspnetcore-10.0)
 
 ## 從房控電腦核對管理服務
 
@@ -216,9 +247,12 @@ python .\scripts\check-venue-operator.py https://control.venue.example --role ro
 python scripts/publish-control-server.py --build-root "$env:LOCALAPPDATA/VrCommand/BuildRuns"
 python scripts/package-control-server.py --publication <上述全新輸出目錄> --stage-root "$env:LOCALAPPDATA/VrCommand/Pkg" --output <新的ZIP>
 python scripts/check-control-package.py <完整解壓後的VRCommand-ControlServer> --runtime-root "$env:LOCALAPPDATA/VrCommand/ControlChecks"
+python scripts/check-control-https.py <完整解壓後的VRCommand-ControlServer> --runtime-root "$env:LOCALAPPDATA/VrCommand/HttpsChecks" --listen-address <本機場館IPv4>
 python scripts/check-control-report.py <完整解壓後的VRCommand-ControlServer>
 python scripts/check-control-gui.py <完整解壓後的VRCommand-ControlServer> --runtime-root "$env:LOCALAPPDATA/VrCommand/ControlChecks"
 ```
+
+HTTPS 驗證可另帶 `--server-package <完整解壓後的VRCommand-GameServer>`，用一個 Windows 模擬玩家核對房控配票、即時畫格、回放與原戰績回條。憑證由測試在獨立實例產生，信任只限本次測試。
 
 publish從明確的來源清單建立全新C槽snapshot，在該snapshot增加RID鎖定群組；原repository的NuGet lock不改，原依賴群組／contentHash必須一致。API及其依賴整組publish，self-contained runtimeconfig與必要native DLL明確核對；編譯、輸入與每份輸出雜湊保存於receipt。package拒絕資料庫、journal、票券／角色金鑰設定、額外publication檔案、連結與越界路徑。manifest是完整性清單，並非數位簽章。
 

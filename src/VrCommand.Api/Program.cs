@@ -3,11 +3,13 @@ using VrCommand.Core;
 using VrCommand.Persistence;
 using VrCommand.Api;
 
+using var controlHttps = ControlHttps.Load();
 var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
     Args = args,
     WebRootPath = Path.Combine(AppContext.BaseDirectory, "wwwroot")
 });
+controlHttps?.Configure(builder);
 var operatorKeyFile = builder.Configuration["OperatorKeyFile"];
 if (!string.IsNullOrWhiteSpace(operatorKeyFile))
     builder.Configuration.AddJsonFile(Path.GetFullPath(operatorKeyFile), optional: false, reloadOnChange: false)

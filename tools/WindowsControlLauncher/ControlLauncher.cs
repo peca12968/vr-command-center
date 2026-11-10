@@ -100,30 +100,72 @@ internal static class ControlLauncher
         Require(!Inside(path, Root) && (data == null || !Inside(path, data)) && !File.Exists(path) && !Directory.Exists(path), "結果路徑已存在或與管理包／資料重疊。");
         Require(Directory.Exists(Path.GetDirectoryName(Full(path))), "結果路徑的資料夾不存在。");
     }
+    private sealed class HttpsSettings
+    {
+        internal const string PasswordVariable = "VR_COMMAND_CONTROL_PFX_PASSWORD";
+        internal const string Prefix = "VR_COMMAND_MANAGED_TLS_";
+        internal string Address;
+        internal int Port;
+        internal string Password;
+
+        internal static HttpsSettings Load(string root, Dictionary<string, object> instance)
+        {
+            var path = Path.Combine(root, "control-https.json");
+            try { File.GetAttributes(path); }
+            catch (FileNotFoundException) { return null; }
+
+            Require(Text(instance, "bindAddress") == "127.0.0.1", "啟用HTTPS時，原管理HTTP必須使用127.0.0.1。");
+            var config = Read(path, 4096);
+            var address = Bind(Text(config, "bindAddress") ?? "");
+            var port = Number(config, "port");
+            Require(config.Count == 3 && Number(config, "schemaVersion") == 1 && (port == 443 || port >= 1024 && port <= 65535)
+                && port != Number(instance, "port"), "HTTPS設定版本或埠號錯誤。");
+
+            var certificate = Path.Combine(root, "control-https.pfx");
+            Plain(certificate);
+            Require(File.Exists(certificate) && new FileInfo(certificate).Length <= 1024 * 1024, "請提供管理HTTPS PFX檔。");
+            var password = Environment.GetEnvironmentVariable(PasswordVariable);
+            Require(!String.IsNullOrEmpty(password), "請在啟動程序提供管理HTTPS PFX密碼。");
+            return new HttpsSettings { Address = address, Port = port, Password = password };
+        }
+    }
     internal sealed class Service : IDisposable
     {
-        internal Process Child; internal string Uri; internal string RuntimeModule; internal bool Graceful; internal volatile bool Ready;
+        internal Process Child; internal string Uri; internal string HttpsBinding; internal string RuntimeModule; internal bool Graceful; internal volatile bool Ready;
         internal int ChildId; internal int ExitCode = -1; private FileStream lease; private string nonce; private Dictionary<string, object> keys; private readonly object gate = new object(); private string tail = "";
+        private string certificatePassword;
         internal string LogTail { get { lock (gate) return tail; } }
         private void Line(string value)
         {
             if (value == null) return;
             if (value == "VR_CONTROL_READY " + nonce) { Ready = true; return; }
             value = value.Replace(nonce, "[redacted]"); foreach (var role in Roles) value = value.Replace(Text(keys, role), "[redacted]");
+            if (certificatePassword != null) value = value.Replace(certificatePassword, "[redacted]");
             lock (gate) { tail += value + "\n"; if (tail.Length > 4096) tail = tail.Substring(tail.Length - 4096); }
         }
         internal void Start(string root)
         {
             Verify(); var instance = Instance(root); keys = Keys(root); nonce = Token();
             var lockPath = Path.Combine(root, ".control-server.lock"); Plain(lockPath); lease = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            var https = HttpsSettings.Load(root, instance);
             Uri = "http://" + Text(instance, "bindAddress") + ":" + Number(instance, "port");
             var info = new ProcessStartInfo(Path.Combine(Root, "Runtime", "VrCommand.Api.exe"), "--urls " + Uri) { WorkingDirectory = Full(root), UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
-            var remove = new List<string>(); foreach (string name in info.EnvironmentVariables.Keys) if (name.StartsWith("OperatorKeys__", StringComparison.OrdinalIgnoreCase) || String.Equals(name, "OperatorKeyFile", StringComparison.OrdinalIgnoreCase) || String.Equals(name, "PlayerTicketSigningKey", StringComparison.OrdinalIgnoreCase) || String.Equals(name, "ControlPipeToken", StringComparison.OrdinalIgnoreCase)) remove.Add(name);
+            var remove = new List<string>(); foreach (string name in info.EnvironmentVariables.Keys) if (name.StartsWith("OperatorKeys__", StringComparison.OrdinalIgnoreCase) || String.Equals(name, "OperatorKeyFile", StringComparison.OrdinalIgnoreCase) || String.Equals(name, "PlayerTicketSigningKey", StringComparison.OrdinalIgnoreCase) || String.Equals(name, "ControlPipeToken", StringComparison.OrdinalIgnoreCase) || name.StartsWith(HttpsSettings.Prefix, StringComparison.OrdinalIgnoreCase) || String.Equals(name, HttpsSettings.PasswordVariable, StringComparison.OrdinalIgnoreCase)) remove.Add(name);
             foreach (var name in remove) info.EnvironmentVariables.Remove(name);
             info.EnvironmentVariables["OperatorKeyFile"] = Path.Combine(Full(root), "operator-keys.json"); info.EnvironmentVariables["DataDirectory"] = Path.Combine(Full(root), "missions"); info.EnvironmentVariables["SessionDataDirectory"] = Path.Combine(Full(root), "sessions");
             info.EnvironmentVariables["ControlPipeToken"] = nonce; info.EnvironmentVariables["ASPNETCORE_ENVIRONMENT"] = "Production"; info.EnvironmentVariables["Logging__LogLevel__Default"] = "Warning";
+            if (https != null)
+            {
+                HttpsBinding = "https://" + https.Address + ":" + https.Port;
+                certificatePassword = https.Password;
+                info.EnvironmentVariables[HttpsSettings.Prefix + "ADDRESS"] = https.Address;
+                info.EnvironmentVariables[HttpsSettings.Prefix + "PORT"] = https.Port.ToString();
+                info.EnvironmentVariables[HttpsSettings.Prefix + "LOCAL_PORT"] = Number(instance, "port").ToString();
+                info.EnvironmentVariables[HttpsSettings.PasswordVariable] = https.Password;
+            }
             Child = new Process { StartInfo = info }; Child.OutputDataReceived += (s, e) => Line(e.Data); Child.ErrorDataReceived += (s, e) => Line(e.Data);
             Require(Child.Start(), "管理服務未啟動。"); ChildId = Child.Id; Child.BeginOutputReadLine(); Child.BeginErrorReadLine();
+            info.EnvironmentVariables.Remove(HttpsSettings.PasswordVariable);
             var until = Stopwatch.StartNew();
             while (until.Elapsed.TotalSeconds < 30 && !Child.HasExited)
             {
@@ -175,7 +217,7 @@ internal static class ControlLauncher
             int seconds; Require(options.ContainsKey("--seconds") && Int32.TryParse(options["--seconds"], out seconds) && seconds >= 1 && seconds <= 3600, "請指定1至3600秒的檢查上限。"); seconds = Int32.Parse(options["--seconds"]);
             Require(options.ContainsKey("--ready-report"), "請指定新的就緒報告。"); var ready = options["--ready-report"]; OutputPath(ready, options["--run"]); Require(!String.Equals(Full(ready), Full(report), StringComparison.OrdinalIgnoreCase), "報告路徑重疊。");
             string stop = null; if (options.ContainsKey("--stop-file")) { stop = options["--stop-file"]; OutputPath(stop, options["--run"]); Require(!String.Equals(Full(stop), Full(ready), StringComparison.OrdinalIgnoreCase) && !String.Equals(Full(stop), Full(report), StringComparison.OrdinalIgnoreCase), "停止路徑重疊。"); }
-            service = new Service(); service.Start(options["--run"]); SaveNew(ready, new { status = "ready", childPid = service.ChildId, uri = service.Uri, runtimeCoreClr = service.RuntimeModule, utc = DateTime.UtcNow.ToString("O") });
+            service = new Service(); service.Start(options["--run"]); SaveNew(ready, new { status = "ready", childPid = service.ChildId, uri = service.Uri, httpsBinding = service.HttpsBinding, runtimeCoreClr = service.RuntimeModule, utc = DateTime.UtcNow.ToString("O") });
             var elapsed = Stopwatch.StartNew(); while (elapsed.Elapsed.TotalSeconds < seconds && service.Running && (stop == null || !File.Exists(stop))) Thread.Sleep(50);
             var requested = service.Running; service.Stop(); result = requested && service.Graceful ? 0 : 1;
             SaveNew(report, new { status = result == 0 ? "stopped" : "failed", complete = result == 0, childPid = service.ChildId, childExited = !service.Running, exitCode = service.ExitCode, graceful = service.Graceful, logTail = service.LogTail, utc = DateTime.UtcNow.ToString("O") }); return result;
@@ -209,7 +251,7 @@ internal static class ControlLauncher
             var credentials = new FlowLayoutPanel { Width = 620, Height = 44 }; role.Items.AddRange(Roles); role.SelectedIndex = 0; credentials.Controls.Add(role); credentials.Controls.Add(copy); credentials.Controls.Add(open); panel.Controls.Add(credentials); panel.Controls.Add(status);
             create.Click += (s, e) => Try(() => { var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrCommand", "ControlServers", DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")); Verify(); Initialize(path, bind.Text, (int)port.Value); LoadInstance(path); });
             select.Click += (s, e) => { using (var dialog = new OpenFileDialog { Title = "選取資料實例的control-instance.json", Filter = "VR Command資料實例|control-instance.json", FileName = "control-instance.json", CheckFileExists = true, Multiselect = false, AutoUpgradeEnabled = true, InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData) }) if (dialog.ShowDialog(this) == DialogResult.OK) Try(() => LoadInstance(Path.GetDirectoryName(dialog.FileName))); };
-            start.Click += (s, e) => { var selectedRoot = folder.Text; busy = true; UpdateButtons(); status.Text = "正在啟動並核對管理服務…"; ThreadPool.QueueUserWorkItem(x => { try { var next = new Service(); service = next; next.Start(selectedRoot); BeginInvoke((Action)(() => { busy = false; status.Text = "服務已就緒：" + next.Uri; UpdateButtons(); })); } catch { if (service != null) { try { service.Dispose(); service = null; } catch { } } BeginInvoke((Action)(() => { busy = false; status.Text = service == null ? "啟動失敗，請確認資料、地址與埠號。" : "啟動未完成，服務停止尚未確認。請保留此視窗。"; UpdateButtons(); })); } }); };
+            start.Click += (s, e) => { var selectedRoot = folder.Text; busy = true; UpdateButtons(); status.Text = "正在啟動並核對管理服務…"; ThreadPool.QueueUserWorkItem(x => { try { var next = new Service(); service = next; next.Start(selectedRoot); BeginInvoke((Action)(() => { busy = false; status.Text = "服務已就緒：" + next.Uri + (next.HttpsBinding == null ? "" : "\r\n房控HTTPS監聽：" + next.HttpsBinding); UpdateButtons(); })); } catch { if (service != null) { try { service.Dispose(); service = null; } catch { } } BeginInvoke((Action)(() => { busy = false; status.Text = service == null ? "啟動失敗，請確認資料、地址、埠號與HTTPS設定。" : "啟動未完成，服務停止尚未確認。請保留此視窗。"; UpdateButtons(); })); } }); };
             stop.Click += (s, e) => Stop(false); open.Click += (s, e) => Try(() => Process.Start(new ProcessStartInfo(service.Uri + "/console/") { UseShellExecute = true })); copy.Click += (s, e) => Try(() => { Clipboard.SetText(ControlLauncher.Text(Keys(folder.Text), role.Text)); status.Text = "已複製所選角色的登入金鑰。"; });
             bind.SelectedIndexChanged += (s, e) => UpdateButtons(); port.ValueChanged += (s, e) => UpdateButtons();
             var monitor = new System.Windows.Forms.Timer { Interval = 1000 }; monitor.Tick += (s, e) => { if (!busy && service != null && !service.Running) { status.Text = "管理服務已中斷；確認停止後可重開原資料實例。"; UpdateButtons(); } }; monitor.Start();
