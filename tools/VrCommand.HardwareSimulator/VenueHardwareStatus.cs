@@ -101,7 +101,8 @@ internal static partial class LiveHardwareGateway
                 || progress is not { Connections: >= 0, Attachments: >= 0, ManagementFaults: >= 0, MockFaults: >= 0, Dropped: >= 0, Acknowledged: >= 0, Batches: >= 0 }
                 || progress.Phase is not ("checking-management" or "paused" or "waiting-source" or "waiting-mission" or "connecting"
                     or "active" or "awaiting-ack" or "mock-unavailable" or "management-unavailable" or "stopped")
-                || (progress.Phase == "stopped" ? status.Termination is not ("duration" or "ended" or "attempt-limit" or "binding-mismatch" or "operator-stop") : status.Termination is not null)
+                || (progress.Phase == "stopped" ? status.Termination is not ("duration" or "ended" or "attempt-limit"
+                    or "binding-mismatch" or "operator-stop" or ManagementRefused or ManagementInvalidResponse) : status.Termination is not null)
                 || (progress.Phase == "mock-unavailable" ? status.Fault is not ("mock-disconnected" or "mock-timeout" or "mock-invalid-reply") : status.Fault is not null))
                 return ("invalid", null);
             if (status.RoomId != room.RoomId || status.SessionId != room.SessionId) return ("mismatch", null);

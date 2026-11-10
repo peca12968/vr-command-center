@@ -10,6 +10,7 @@ using VrCommand.Core;
 internal static partial class LiveHardwareGateway
 {
     private const int MaxBatch = 32, MaxAttempts = 1024, MaxFrameBytes = 32 * 1024;
+    private const string ManagementRefused = "management-refused", ManagementInvalidResponse = "management-invalid-response";
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(150);
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan SignalLifetime = TimeSpan.FromSeconds(2);
@@ -313,6 +314,9 @@ internal static partial class LiveHardwareGateway
             }
         }
         catch (BindingMismatch) { termination = "binding-mismatch"; }
+        catch (AccessDeniedException) { managementFaults++; termination = ManagementRefused; }
+        catch (Exception failure) when (failure is InvalidDataException or JsonException)
+        { managementFaults++; termination = ManagementInvalidResponse; }
         catch (OperationCanceledException) when (run.IsCancellationRequested) { }
         finally
         {
@@ -322,7 +326,7 @@ internal static partial class LiveHardwareGateway
 
         if (termination == "duration" && operatorStop.IsCancellationRequested) termination = "operator-stop";
 
-        var complete = attachments > 0 && termination is not ("attempt-limit" or "binding-mismatch");
+        var complete = attachments > 0 && termination is ("duration" or "ended" or "operator-stop");
         using (var destination = new FileStream(output, FileMode.CreateNew, FileAccess.Write, FileShare.None))
         {
             JsonSerializer.Serialize(destination, new { version = 1, complete, simulatedHardwareOnly = true, physicalDeliveryConfirmed = false,

@@ -1,6 +1,9 @@
 """Run the compiled gateway, real isolated management API and separate loopback mock processes."""
 import argparse
+from contextlib import closing, contextmanager
 import hashlib
+import http.client
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
@@ -26,6 +29,46 @@ HIDDEN = subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0
 def sha(path):
     with path.open('rb') as stream:
         return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
+@contextmanager
+def authority_gate(port, owners):
+    routes = {f'/api/sessions/{session}/rooms/{room}/hardware-feedback': room for room, session in owners.items()}
+    faults, injected = {}, set()
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def do_GET(self):
+            path = self.path.split('?', 1)[0]
+            room = routes.get(path)
+            if room in faults:
+                status, body = faults[room]
+                injected.add(room)
+            elif room is not None or path == '/api/me':
+                with closing(http.client.HTTPConnection('127.0.0.1', port, timeout=2)) as upstream:
+                    upstream.request('GET', self.path, headers={'Authorization': self.headers['Authorization']})
+                    reply = upstream.getresponse()
+                    status, body = reply.status, reply.read(192 * 1024 + 1)
+            else:
+                status, body = 404, b''
+            self.send_response(status)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+        server.daemon_threads = False
+        worker = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .05})
+        worker.start()
+        try:
+            yield f'http://127.0.0.1:{server.server_port}', faults, injected
+        finally:
+            server.shutdown()
+            worker.join(2)
+            assert not worker.is_alive()
 
 
 def run(args):
@@ -917,6 +960,59 @@ def run(args):
                 assert all(not any(secret in file.read_text(encoding='utf-8') for secret in private) for file in fleet_directory.glob('*.json'))
                 save(f'{label}-fleet-close.json', closed_batch)
                 check(True, f'{mode} single-process fleet delivers all 25 exact bindings, cancels the held batch and publishes all terminal results')
+                if mode=='Linked':
+                    fault_directory = out/'linked-fleet-authority-faults'
+                    fault_stop = runtime/'linked-fleet-authority-faults.stop'
+                    fault_bindings = runtime/'linked-fleet-authority-fault-bindings'
+                    shutil.copytree(folder, fault_bindings)
+                    with authority_gate(port, owners) as (origin, faults, injected):
+                        for file in fault_bindings.glob('room-*.json'):
+                            value = json.loads(file.read_bytes())
+                            file.write_text(json.dumps(dict(value, managementUrl=origin)), encoding='utf-8')
+                        faulty = start_fleet(fault_bindings, fault_directory, fault_stop)
+                        for room in rooms:
+                            path = '/api/sessions/' + owners[room]
+                            venue_connections[room] = accept(venue_peers[room], room, venue_connections[room], bound=True)
+                        cases = [(1, 403, b'', 'management-refused'),
+                                 (2, 200, b'{', 'management-invalid-response'),
+                                 (3, 200, b'{}', 'management-invalid-response')]
+                        acknowledged, cancelled = {}, {}
+                        for room, status, body, reason in cases:
+                            acknowledged[room] = send_venue_batch(room, 1)
+                            wait(lambda:venue_status(fault_directory)[room-1]['status']['progress']['acknowledged']==1,
+                                 'original acknowledgment before authority fault')
+                            cancelled[room] = send_venue_batch(room, 1, 'observe-close')
+                            faults[room] = (status, body)
+                            closed_batch = venue_peers[room].read('closed')
+                            assert closed_batch['connectionId']==venue_connections[room]
+                            terminal = wait(lambda:row if (row:=venue_status(fault_directory)[room-1])['state']=='stopped' else None,
+                                            'authority fault publishes a stopped room')
+                            assert terminal['status']['termination']==reason and terminal['status']['progress']['acknowledged']==1
+                        assert faulty.poll() is None and not (fault_directory/'venue-report.json').exists()
+                        unaffected = send_venue_batch(5, 1)
+                        wait(lambda:venue_status(fault_directory)[4]['status']['progress']['acknowledged']==1,
+                             'unaffected room acknowledges on its original connection')
+                        fault_stop.touch()
+                        stdout, _ = faulty.communicate(timeout=8)
+                        aggregate = json.loads((fault_directory/'venue-report.json').read_bytes())
+                        assert faulty.returncode==1 and json.loads(stdout)==aggregate and aggregate['complete'] is False
+                        assert injected == {room for room, _, _, _ in cases}
+                        for room, _, _, reason in cases:
+                            row = aggregate['rooms'][room-1]
+                            assert row['exitCode']==1 and row['error'] is None
+                            result = json.loads((fault_directory/row['report']).read_bytes())
+                            assert result['termination']==reason and result['complete'] is False and result['managementFaults']==1
+                            assert result['acknowledged']==1 and result['physicalDeliveryConfirmed'] is False
+                            assert {attempt['status']:{item['signal']['reportId'] for item in attempt['deliveries']}
+                                    for attempt in result['attempts']}=={
+                                        'simulated-acknowledged':acknowledged[room], 'cancelled':cancelled[room]}
+                        room_five = json.loads((fault_directory/aggregate['rooms'][4]['report']).read_bytes())
+                        assert room_five['acknowledged']==1 and room_five['termination']=='operator-stop'
+                        assert {item['signal']['reportId'] for attempt in room_five['attempts']
+                                for item in attempt['deliveries']}==unaffected
+                        assert all(not any(secret in file.read_text(encoding='utf-8') for secret in private)
+                                   for file in fault_directory.glob('*.json'))
+                        check(True, 'Authority refusal, invalid JSON and invalid feedback cancel their batches, preserve room reports and leave another room active')
                 if mode=='Independent':
                     check(True, 'The revoked room fails the fleet result while an unaffected room confirms fresh feedback on its original connection')
                     old_stream, _, position = venue_streams.pop(owners[3])
