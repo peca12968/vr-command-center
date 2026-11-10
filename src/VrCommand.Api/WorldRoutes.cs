@@ -22,6 +22,17 @@ public static class WorldRoutes
         });
         app.MapGet("/api/sessions/{id:guid}/connection-endpoint", (Guid id, WorldRecordings store, HttpContext context) => store.ConnectionEndpoint(id, Actor(context)));
         app.MapPut("/api/sessions/{id:guid}/connection-endpoint", (Guid id, ConnectionEndpointDraft draft, WorldRecordings store, HttpContext context) => store.PublishEndpoint(id, draft, Actor(context)));
+        app.MapGet("/api/venue/connection-endpoints", (HttpContext context) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            if (Actor(context).Role != OperatorRole.GameServer) throw new AccessDeniedException("Venue publication requires the game-server identity.");
+            return new { version = 1 };
+        });
+        app.MapPut("/api/venue/connection-endpoints", (VenueEndpointBatch batch, WorldRecordings store, HttpContext context) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            return store.PublishVenueEndpoints(batch, Actor(context));
+        });
         app.MapGet("/api/sessions/{id:guid}/world/publish", Publish);
         app.MapGet("/api/sessions/{id:guid}/world/watch", Watch);
         app.MapGet("/api/sessions/{id:guid}/world/policy-frames", (Guid id, long throughFrame, long? afterFrame, bool? includeEnemyRoster, int? roomId,

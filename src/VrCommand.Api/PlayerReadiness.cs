@@ -59,8 +59,9 @@ public sealed partial class WorldRecordings
 
     public CommandReceipt ExecuteCommand(Guid id, ControlCommand command, OperatorIdentity actor)
     {
+        // Beginning or ending a Preparing session must serialize with venue endpoint publication.
         if (command.MrTrackingRoomId is null && command.VrParticipationRoomId is null
-            && command.Action is not (ControlAction.Begin or ControlAction.Resume))
+            && command.Action is not (ControlAction.Begin or ControlAction.Resume or ControlAction.End))
             return manager.Execute(id, command, actor);
         lock (gate)
         {
@@ -100,11 +101,14 @@ public sealed partial class WorldRecordings
     public VenuePhaseReceipt ExecuteVenuePhase(ControlAction action, VenuePhaseFence?[]? fences, Guid requestId, OperatorIdentity actor,
         VenueClimate? climate = null, VenueEnemyPolicy? enemyPolicy = null, bool requireFullTracking = false, bool requireFullParticipation = false)
     {
-        if (action is not (ControlAction.Begin or ControlAction.Resume))
+        if (action is not (ControlAction.Begin or ControlAction.Resume or ControlAction.End))
             return manager.ExecuteVenuePhase(action, fences, requestId, actor, climate: climate, enemyPolicy: enemyPolicy,
                 requireFullTracking: requireFullTracking, requireFullParticipation: requireFullParticipation);
         lock (gate)
         {
+            if (action == ControlAction.End)
+                return manager.ExecuteVenuePhase(action, fences, requestId, actor, climate: climate, enemyPolicy: enemyPolicy,
+                    requireFullTracking: requireFullTracking, requireFullParticipation: requireFullParticipation);
             var plan = manager.ReadVenuePhase(actor);
             var begin = action == ControlAction.Begin;
             var requireFullRoster = requireFullTracking || requireFullParticipation;

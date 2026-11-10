@@ -328,7 +328,8 @@ internal static class ServerLauncher
         {
             Config = config; Work = Full(work); Plain(Work); Need(!Inside(Work, Root) && !Inside(Root, Work) && !Directory.Exists(Work) && !File.Exists(Work), "請使用程式包之外的新資料夾。");
         }
-        internal void Start(Func<bool> cancelled = null, bool peerDiagnostics = false, bool packageVerified = false, Action beforeNative = null)
+        internal void Start(Func<bool> cancelled = null, bool peerDiagnostics = false, bool packageVerified = false,
+            Action beforeNative = null, bool deferPublication = false)
         {
             Config.Validate(); if (!packageVerified) Verify(); Config.Identity(); var state = Config.Request("/api/sessions/" + Config.Session);
             var experience = Text(Child(state, "environment"), "mode");
@@ -376,14 +377,23 @@ internal static class ServerLauncher
                         }
                         Need(cancelled == null || !cancelled(), "已中止啟動；此輪未完成。");
                         Need(!Process.Exited, "遊戲程序在公告前結束。");
-                        var endpoint = Config.Request("/api/sessions/" + Config.Session + "/connection-endpoint", new { version = 1, streamId = Stream, address = Config.Address, port = Config.Port });
-                        Need(Text(endpoint, "sessionId") == Config.Session && Text(endpoint, "streamId") == Stream && Text(endpoint, "address") == Config.Address && Num(endpoint, "port") == Config.Port && !Yes(endpoint, "sessionEnded"), "公告回條不符。");
-                        VerifiedUdp = binding; Status = "伺服器就緒，請在控制台開始任務"; return;
+                        VerifiedUdp = binding;
+                        if (deferPublication) Status = "已確認 UDP，等候全館公告";
+                        else ConfirmEndpoint(Config.Request("/api/sessions/" + Config.Session + "/connection-endpoint", EndpointDraft()));
+                        return;
                     }
                 }
                 Thread.Sleep(250);
             }
             throw new IOException(awaitingUdp ? "90 秒內未確認原遊戲程序的 UDP 綁定。" : "遊戲來源90秒內未就緒。");
+        }
+        internal object EndpointDraft() { return new { version = 1, streamId = Stream, address = Config.Address, port = Config.Port }; }
+        internal void ConfirmEndpoint(Dictionary<string, object> endpoint)
+        {
+            Need(Num(endpoint, "version") == 1 && Text(endpoint, "sessionId") == Config.Session && Text(endpoint, "streamId") == Stream
+                && Text(endpoint, "address") == Config.Address && Num(endpoint, "port") == Config.Port
+                && endpoint.ContainsKey("sessionEnded") && endpoint["sessionEnded"] is bool && !Yes(endpoint, "sessionEnded"), "公告回條不符。");
+            Status = "伺服器就緒，請在控制台開始任務";
         }
         bool NetworkStarted()
         {
@@ -512,6 +522,8 @@ internal static class ServerLauncher
         }
     }
 
+    const string VenueEndpointsRoute = "/api/venue/connection-endpoints";
+
     static int RunVenue(Dictionary<string, string> options, ref bool outputValid)
     {
         outputValid = false;
@@ -561,6 +573,8 @@ internal static class ServerLauncher
             && ((object[])raw).Length == (topology == "Linked" ? 1 : 5), "請提供完整的獨立或合併場館設定。");
         Verify();
         var catalog = Catalog.Load(instancePath);
+        Need(Num(catalog.Target.Request(VenueEndpointsRoute, missing: true), "version") == 1,
+            "管理服務尚未支援全館端點公告，請搭配 0.31.100 或以上版本。");
         var rooms = new HashSet<int>(); var ports = new HashSet<int>();
         var servers = new List<VenueServer>();
         foreach (var item in (object[])plan["servers"])
@@ -603,6 +617,8 @@ internal static class ServerLauncher
         var gate = new VenueGate();
         var workers = new List<Thread>();
         var published = false;
+        var endpointPublication = "not-attempted";
+        string publicationError = null;
         using (var reserved = new CountdownEvent(servers.Count))
         using (var launch = new ManualResetEventSlim())
         using (var started = new CountdownEvent(servers.Count))
@@ -625,7 +641,7 @@ internal static class ServerLauncher
                                     reservedSlot = true;
                                     reserved.Signal();
                                     launch.Wait();
-                                });
+                                }, deferPublication: true);
                                 server.Ready = true;
                             }
                             catch (Exception error) { server.Error = Safe(error); gate.Abort = true; }
@@ -644,9 +660,27 @@ internal static class ServerLauncher
                 started.Wait();
                 if (!gate.Abort && !cancel() && servers.TrueForAll(server => server.Ready && !server.Run.Process.Exited))
                 {
-                    Save(ready, new { schemaVersion = 1, status = "venue-ready", topology = plan.Topology, instanceId = plan.Catalog.InstanceId,
-                        servers = servers.ConvertAll(server => new { roomIds = server.Choice.Rooms, ready = server.Run.Ready() }) });
-                    published = true;
+                    try
+                    {
+                        foreach (var server in servers)
+                            Need(!server.Run.Process.Exited && UdpBinding.Find(server.Run.Process.Pid, server.Config.Bind, server.Config.Port) != null,
+                                "房間 " + String.Join("、", server.Choice.Rooms) + " 的原遊戲程序或 UDP 綁定已失效。");
+                        Need(!cancel(), "已中止啟動；此輪未完成。");
+                        endpointPublication = "unconfirmed";
+                        var receipt = plan.Catalog.Target.Request(VenueEndpointsRoute, new { version = 1, topology = plan.Topology,
+                            servers = servers.ConvertAll(server => new { sessionId = server.Choice.Id, endpoint = server.Run.EndpointDraft() }) });
+                        object raw;
+                        Need(Num(receipt, "version") == 1 && Text(receipt, "topology") == plan.Topology
+                            && receipt.TryGetValue("servers", out raw) && raw is object[] && ((object[])raw).Length == servers.Count, "全館公告回條不符。");
+                        var endpoints = (object[])receipt["servers"];
+                        for (var index = 0; index < servers.Count; index++) servers[index].Run.ConfirmEndpoint(Map(endpoints[index]));
+                        endpointPublication = "confirmed";
+                        Need(!cancel(), "已中止啟動；此輪未完成。");
+                        Save(ready, new { schemaVersion = 1, status = "venue-ready", topology = plan.Topology, instanceId = plan.Catalog.InstanceId,
+                            servers = servers.ConvertAll(server => new { roomIds = server.Choice.Rooms, ready = server.Run.Ready() }) });
+                        published = true;
+                    }
+                    catch (Exception error) { publicationError = Safe(error); }
                 }
             }
             finally
@@ -660,6 +694,7 @@ internal static class ServerLauncher
         var complete = published && !cancel() && servers.TrueForAll(server => server.Error == null && server.Run.Complete && server.Run.Cleanup);
         Save(report, new { schemaVersion = 1, status = complete ? "venue-sealed-stopped" : "venue-incomplete",
             complete = complete, topology = plan.Topology, instanceId = plan.Catalog.InstanceId, readyPublished = published,
+            endpointPublication = endpointPublication, publicationError = publicationError,
             servers = servers.ConvertAll(server => new { roomIds = server.Choice.Rooms,
                 result = server.Run.Report(server.Run.Complete && server.Run.Cleanup ? "sealed-stopped" : "incomplete", server.Error) }) });
         return complete ? 0 : 1;

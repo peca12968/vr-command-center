@@ -6,7 +6,7 @@ ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('server_player_package',ROOT/'scripts/package-windows-player.py');player=importlib.util.module_from_spec(spec);spec.loader.exec_module(player)
 digest=player.digest;plain=player.plain
 TOP='VRCommand-GameServer'
-README='''VR Command Windows 遊戲伺服器啟動器 1.9／Windows 遊戲程式
+README='''VR Command Windows 遊戲伺服器啟動器 1.10／Windows 遊戲程式
 
 完整解壓後開啟 Launch-Server.exe。先啟動配套的管理服務，在網頁控制台建立 Preparing VR 或 MR 場次。
 按「選擇檔案」選control-instance.json，或在路徑欄直接貼上完整檔案路徑，再按「載入／更新」。只使用既有GameServer角色金鑰。
@@ -15,6 +15,7 @@ README='''VR Command Windows 遊戲伺服器啟動器 1.9／Windows 遊戲程式
 獨立房間各開一個啟動器、各選場次與不同UDP埠；五房Linked場次只開一個。
 使用控制台下載的五房計畫時，按「五房批次啟動」，貼上 JSON 完整路徑或選檔，按「核對計畫」。
 確認房間、任務、場次與 UDP 埠後按「啟動全館」。視窗會在啟動前重新核對原計畫，並顯示就緒及最後結果位置。
+全館批次請使用控制台 0.31.100 或以上的管理包。所有原遊戲程序與 UDP 綁定均確認後，管理服務一次公告整批端點。
 有新場次時按載入／更新。清單只列尚未綁定來源的 Preparing 場次。啟動前會向原管理服務重新核對場次與來源。
 MR 場次如缺少校正鎖定，清單會標示待鎖定，選取後顯示房號並停用啟動。由主控鎖定後按載入／更新。
 CLI 啟動同樣在建立遊戲程序前檢查鎖定。唯讀清單報告含 canStart 及 missingAlignmentRoomIds，供操作員辨識缺少鎖定的房間。
@@ -82,7 +83,7 @@ def main():
     with (stage/'compile.log').open('xb') as log:subprocess.run([str(compiler),'/nologo','/warnaserror','/codepage:65001','/target:winexe','/platform:x64','/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Web.Extensions.dll','/out:'+str(folder/'Launch-Server.exe'),str(frozen)],stdout=log,stderr=subprocess.STDOUT,check=True)
     if digest(source)!=source_hash:raise ValueError('Launcher source changed during compilation')
     (folder/'README.txt').write_text(README,encoding='utf-8')
-    manifest={'schemaVersion':1,'target':'win-x64','launcherVersion':'1.9.0','createdAtUtc':datetime.now(timezone.utc).isoformat(),'build':receipt,'launcherSourceSha256':source_hash,'scope':'Standalone server launcher; no keys, tickets or databases; manifest is not a signature.',
+    manifest={'schemaVersion':1,'target':'win-x64','launcherVersion':'1.10.0','createdAtUtc':datetime.now(timezone.utc).isoformat(),'build':receipt,'launcherSourceSha256':source_hash,'scope':'Standalone server launcher; no keys, tickets or databases; manifest is not a signature.',
         'files':[{'path':p.relative_to(folder).as_posix(),'bytes':p.stat().st_size,'sha256':digest(p)} for p in sorted(folder.rglob('*')) if p.is_file()]}
     (folder/'server-package.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8');verify(folder)
     output=plain(args.output);output.parent.mkdir(parents=True,exist_ok=True)

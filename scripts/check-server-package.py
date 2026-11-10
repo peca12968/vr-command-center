@@ -1,5 +1,5 @@
 """Exercise portable Windows packages, five rooms, Linked and owned process cleanup."""
-import argparse,base64,csv,ctypes,hashlib,importlib.util,io,ipaddress,json,os,re,shutil,socket,subprocess,sys,tempfile,threading,time,urllib.error,urllib.request,uuid,zipfile
+import argparse,base64,csv,ctypes,hashlib,importlib.util,io,ipaddress,json,os,re,shutil,socket,sqlite3,subprocess,sys,tempfile,threading,time,urllib.error,urllib.request,uuid,zipfile
 from datetime import datetime,timedelta,timezone
 from decimal import Decimal
 from pathlib import Path
@@ -98,6 +98,7 @@ def main():
     p.add_argument('--check-venue-launcher', action='store_true', help='Use one real Windows launcher for the explicitly prepared servers of each topology')
     p.add_argument('--check-venue-plan-ui', action='store_true', help='Launch each topology with the exact plan downloaded from Chromium')
     p.add_argument('--check-venue-preview', action='store_true', help='Run the shared Windows venue preview before both topology launches')
+    p.add_argument('--check-venue-endpoint-batch', action='store_true', help='Verify endpoint batch retries and force a last-room transaction rollback')
     p.add_argument('--check-linked-room-enemies', action='store_true', help='Change one linked room through Chromium and verify original combat and replay')
     p.add_argument('--check-venue-tracking-gate', action='store_true', help='Reject full tracking Begin while the same native roster is otherwise ready')
     p.add_argument('--check-venue-participation-gate', action='store_true', help='Require all 25 effective native seats and verify their original Preparing frames')
@@ -199,6 +200,8 @@ def main():
         p.error('--check-venue-plan-ui requires --check-venue-launcher and Node.js with Playwright Chromium')
     if args.check_venue_preview and not args.check_venue_launcher:
         p.error('--check-venue-preview requires --check-venue-launcher')
+    if args.check_venue_endpoint_batch and not args.check_venue_launcher:
+        p.error('--check-venue-endpoint-batch requires --check-venue-launcher')
     if args.check_linked_room_enemies and (not args.player_package or args.check_room_combat or not shutil.which('node')):
         p.error('--check-linked-room-enemies requires the player package, Node.js and a separate run from --check-room-combat')
     if args.check_venue_tracking_gate and not args.check_venue_begin:p.error('--check-venue-tracking-gate requires --check-venue-begin')
@@ -549,7 +552,70 @@ def main():
               label+' confirms the exact game processes, sorted original rooms and UDP bindings')
         for entry,state,row in zip(entries,states,witness['servers'],strict=True):
             confirm_launch(entry,state,row['ready'])
+        if args.check_venue_endpoint_batch:
+            endpoint_route='/api/venue/connection-endpoints'
+            originals=[request('/api/sessions/'+state['id']+'/connection-endpoint') for state in states]
+            targets=[{'sessionId':row['sessionId'],'endpoint':{key:row[key] for key in ('version','streamId','address','port')}}
+                     for row in reversed(originals)]
+            batch={'version':1,'topology':topology,'servers':targets}
+            request(endpoint_route,batch,'Room1',method='PUT',expected=403)
+            request(endpoint_route,dict(batch,servers=targets[:-1]),'GameServer',method='PUT',expected=400)
+            changed=list(targets)
+            changed[0]=dict(changed[0],endpoint=dict(changed[0]['endpoint'],streamId=str(uuid.uuid4())))
+            request(endpoint_route,dict(batch,servers=changed),'GameServer',method='PUT',expected=409)
+            repeated=request(endpoint_route,batch,'GameServer',method='PUT')
+            check(repeated=={'version':1,'topology':topology,'servers':originals}
+                  and len({row['createdAtUtc'] for row in originals})==1,
+                  label+' whole-batch retry returns the exact sorted, simultaneously committed endpoints')
+            save(label+'-endpoint-batch.json',repeated)
         return entries
+
+    def reject_last_venue_endpoint():
+        states=[create([room],f'venue endpoint rollback room {room}') for room in range(1,6)]
+        ids=[state['id'] for state in states]
+        ports=[]
+        while len(ports)<5:
+            port=free(socket.SOCK_DGRAM,address)
+            if port not in ports:ports.append(port)
+        plan=runtime/'venue-endpoint-rollback.json'
+        plan.write_text(json.dumps({'version':1,'controlInstance':str(data/'control-instance.json'),'topology':'Independent',
+            'address':address,'listenAddress':address,'servers':[{'roomIds':state['roomIds'],'sessionId':state['id'],'port':port}
+                for state,port in zip(states,ports,strict=True)]}),encoding='utf-8')
+        work=runtime/'venue-endpoint-rollback-work'
+        ready=out/'venue-endpoint-rollback-ready.json'
+        report=out/'venue-endpoint-rollback-final.json'
+        database=(data/'sessions/worlds.db').resolve(strict=True)
+        with sqlite3.connect(database.as_uri()+'?mode=rw',uri=True,timeout=10) as db:
+            db.execute(f"""CREATE TRIGGER fixture_reject_fifth_endpoint BEFORE INSERT ON connection_endpoints
+                WHEN NEW.session = '{uuid.UUID(ids[-1])}' BEGIN SELECT RAISE(ABORT, 'fixture endpoint rejection'); END""")
+        try:
+            with subprocess.Popen([str(exe),'--venue-run',str(plan),'--work',str(work),'--seconds','60',
+                '--ready-report',str(ready),'--report',str(report)],cwd=out,env=env) as process:
+                try: code=process.wait(timeout=120)
+                except subprocess.TimeoutExpired:
+                    process.kill();process.wait(timeout=15);raise
+            value=read(report)
+            rows=[row['result'] for row in value['servers']]
+            check(code==1 and value['status']=='venue-incomplete' and not value['complete'] and not value['readyPublished']
+                  and value['endpointPublication']=='unconfirmed' and 'HTTP 500' in value['publicationError'] and not ready.exists(),
+                  'A real last-room SQLite insert rejection prevents publication and a successful venue report')
+            check([row['sessionId'] for row in rows]==ids and len({row['childPid'] for row in rows})==5
+                  and all(row['childPid']>0 and row['childExited'] and row['cleanupCompleted'] and not row['complete']
+                          and row['udpBinding']['processId']==row['childPid'] for row in rows),
+                  'All five original native processes and UDP bindings existed, then the launcher stopped its own children')
+            for row in rows:
+                route='/api/sessions/'+row['sessionId']
+                request(route+'/connection-endpoint',expected=404)
+                current=request(route)
+                check(current['state']=='Preparing' and current['combatStream']['streamId']==row['streamId']
+                      and request(route+'/world')['header']['streamId']==row['streamId'],
+                      'Rolled-back room preserves the original Preparing source with no advertised endpoint')
+            check(all('endpoint' not in room for room in request('/api/rooms/readiness')['rooms']),
+                  'The control-room overview advertises none of the five rejected endpoints')
+            for session in ids:command(session,'End')
+        finally:
+            with sqlite3.connect(database.as_uri()+'?mode=rw',uri=True,timeout=10) as db:
+                db.execute('DROP TRIGGER fixture_reject_fifth_endpoint')
     def player(entry,room):
         state=request('/api/sessions/'+entry['sessionId']+'/players',{'playerId':str(uuid.uuid4()),'roomId':room,'name':'Portable server room '+str(room),'headset':'Quest3'},role='Room'+str(room));person=next(x for x in state['players'] if x['roomId']==room)
         invitation=request('/api/sessions/'+state['id']+'/players/'+person['id']+'/join-ticket',{},role='Room'+str(room),admission=person['admissionId']);file=runtime/(entry['label']+'-client-'+str(room)+'.json');file.write_text(json.dumps({'role':'Client','address':address,'port':entry['ready']['port'],'joinTicket':invitation['ticket']}),encoding='utf-8');log=runtime/(file.stem+'.log')
@@ -3447,6 +3513,8 @@ def main():
             debrief.validate_result(finals[0],{'id':entry['sessionId']},client['player'],entry['sealed'])
             save(client['player']['id']+'-result.json',finals[0])
             stop_player(client)
+        if args.check_venue_endpoint_batch:
+            reject_last_venue_endpoint()
         # A killed launcher must close its already-assigned Job and stop the exact owned native handle.
         crash=launch(create([1],'parent-exit',auto_attack=args.check_interrupted_replay),'parent-exit',listen_address='0.0.0.0')
         if args.check_interrupted_replay:
