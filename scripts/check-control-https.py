@@ -174,6 +174,7 @@ def main():
     parser.add_argument('--game-management-https', action='store_true', help='Use HTTPS and WSS from the native game server too')
     parser.add_argument('--check-debrief-receipts', action='store_true', help='Match the HTTPS receipt to the original native admission')
     parser.add_argument('--operator-network', action='store_true', help='Check direct workstation witnesses and reject the same-PC inventory')
+    parser.add_argument('--operator-network-browser', action='store_true', help='Exercise workstation downloads and verification in Chromium')
     args = parser.parse_args()
     if os.name != 'nt':
         parser.error('Run the actual Windows launcher on Windows.')
@@ -181,6 +182,8 @@ def main():
         parser.error('--game-management-https requires --server-package.')
     if args.check_debrief_receipts and not args.game_management_https:
         parser.error('--check-debrief-receipts requires --game-management-https.')
+    if args.operator_network_browser and not args.operator_network:
+        parser.error('--operator-network-browser requires --operator-network.')
     if args.operator_network and not any(args.listen_address in ipaddress.IPv4Network(net)
                                          for net in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16')):
         parser.error('--operator-network requires an assigned private --listen-address.')
@@ -381,6 +384,13 @@ def main():
                                                               'error': 'unexpected-http-400'} and not rejected.stderr,
                       'the master CLI cannot claim six workstations from six same-PC signed reports')
                 (output / 'workstation-same-pc-rejected.json').write_text(json.dumps(verdict), encoding='utf-8')
+                if args.operator_network_browser:
+                    subprocess.run(['node', str(ROOT / 'tests/browser/operator-network-browser.cjs'), status['httpsBinding'],
+                                    status['uri'], str(instance / 'leaf.cer'), str(output)],
+                                   env=dict(os.environ, VR_COMMAND_OPERATOR_BROWSER_KEYS=json.dumps({
+                                       role: keys[role.capitalize()] for role in preflight.ROLES})), timeout=100, check=True)
+                    check(read(output / 'workstation-browser-checks.json')['complete'],
+                          'Chromium workstation flow uses the packaged HTTPS listener and rejects six same-PC receipts')
 
             check(request(local, '/api/me', keys['GameServer'])['role'] == 'GameServer', 'local game server identity still works')
             mission = {'name': 'HTTPS fixture', 'briefing': 'Isolated management', 'durationSeconds': 60,
@@ -418,6 +428,8 @@ def main():
             scope += ' One native server and Windows Simulation client on the same PC.'
         if args.game_management_https:
             scope += ' Game management uses pinned HTTPS and WSS.'
+        if args.operator_network_browser:
+            scope += ' Chromium workstation checks distinguish same-PC TLS from simulated successful verification.'
         (output / 'checks.json').write_text(json.dumps({'complete': complete, 'checks': checks, 'preflights': reports,
                                                        'scope': scope}, indent=2) + '\n', encoding='utf-8')
         print(output / 'checks.json', flush=True)

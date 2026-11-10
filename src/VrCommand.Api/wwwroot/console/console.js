@@ -9,6 +9,7 @@ import { mountMrVenueBundle } from './mr-venue-bundle-ui.js';
 import { mountVrVenueTickets } from './vr-venue-tickets-ui.js';
 import { mountVenueServerPlan } from './venue-server-plan-ui.js';
 import { mountVenueLaunchReview } from './venue-launch-review-ui.js';
+import { mountOperatorNetwork } from './operator-network-ui.js';
 import { mountReport, mountVenueReport } from './report-ui.js';
 import { mountVenueHistory } from './venue-history-ui.js';
 import { mountReadiness, mountRoomReadiness } from './readiness-ui.js';
@@ -42,6 +43,7 @@ const mrVenue = mountMrVenueBundle(() => state, api, download, roomReadiness.tic
 const vrVenue = mountVrVenueTickets(() => state, api, download, roomReadiness.ticketSourceLive);
 const venueServerPlan = mountVenueServerPlan(() => state, api, download);
 const venueLaunchReview = mountVenueLaunchReview(() => state, api);
+const operatorNetwork = mountOperatorNetwork(() => state, api, download, uuid);
 const alignmentPins = mountAlignmentPins({ state: () => state,
   checkFile: file => api('/room-alignment/check-file', 'POST', file),
   pin: (id, roomAlignment, sequence) => runSession(() => {
@@ -196,6 +198,7 @@ function logout() {
   vrVenue.active(false);
   venueServerPlan.active(false);
   venueLaunchReview.active(false);
+  operatorNetwork.active(false);
   replay.active(false); replay.reset(); world.active(false); world.reset(); readiness.active(false); readiness.reset(); roomReadiness.active(false); connections.active(false); connections.reset();
   state.epoch++; state.key = ''; state.actor = null; state.selected = null; state.session = null; state.pending = null;
   state.rooms = []; state.venue = null; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
@@ -1559,6 +1562,7 @@ function tab(name, worldTarget = null) {
   vrVenue.active(name === 'operations');
   venueServerPlan.active(name === 'operations');
   venueLaunchReview.active(name === 'operations');
+  operatorNetwork.active(name === 'operations');
 }
 function submit(id, action, execute = run) { $(id).addEventListener('submit', event => { event.preventDefault(); execute(action); }); }
 $('login-form').addEventListener('submit', login);

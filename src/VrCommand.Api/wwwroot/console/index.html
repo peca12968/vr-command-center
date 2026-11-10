@@ -32,6 +32,27 @@
         <div class="section-heading"><div><p class="eyebrow">VENUE STATUS</p><h2>五房間總覽</h2></div><span class="badge">Quest 3 優先</span></div>
         <p class="hint">房卡顯示名冊人數與最近的有效姿態，分列合成與追蹤。</p>
         <div id="rooms" class="rooms"></div>
+        <details id="operator-network" class="panel" hidden>
+          <summary>主控與五房控連線核對</summary>
+          <p class="hint">請在同一個場館 HTTPS 網址，用本輪代號在各工作站下載回條。管理服務會記下本次連線的實際來源。回條有效 15 分鐘。</p>
+          <div class="form-row">
+            <label>本輪工作站代號<input id="operator-network-challenge" maxlength="36" spellcheck="false" autocomplete="off"></label>
+          </div>
+          <div class="button-row">
+            <button id="operator-network-generate" type="button" class="quiet" hidden>產生新代號</button>
+            <button id="operator-network-issue" type="button" class="secondary" disabled>下載本站回條</button>
+          </div>
+          <div id="operator-network-master" hidden>
+            <p class="hint">請交叉比對原工作站位址清單。選取本站及五房的原始回條，檔案順序不限。確認結果涵蓋操作台 HTTPS 來源，玩家 UDP 另行驗收。</p>
+            <div class="form-row">
+              <label>預定工作站位址 JSON<input id="operator-network-inventory" type="file" accept=".json,application/json"></label>
+              <label>主控與五房回條 JSON<input id="operator-network-receipts" type="file" accept=".json,application/json" multiple></label>
+            </div>
+            <button id="operator-network-verify" type="button" class="secondary" disabled>核對六台工作站</button>
+          </div>
+          <p id="operator-network-status" class="hint" role="status"></p>
+          <ul id="operator-network-result" class="event-list" aria-label="已核對的工作站來源"></ul>
+        </details>
         <details id="venue-server-plan" class="panel" hidden>
           <summary>Windows 遊戲伺服器啟動計畫</summary>
           <p class="hint">第四版計畫適用於 Windows 啟動器 1.15 以上。請填入遊戲伺服器電腦上的管理實例路徑及網路設定。</p>
@@ -433,7 +454,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.122 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.123 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>
