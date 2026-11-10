@@ -70,6 +70,13 @@ export function mountIndependentPlan({ available, catalog, pinned, common, inspe
   preview.addEventListener('change', changed);
   return {
     render, enabled, setRevision,
+    restore(revisions) {
+      toggle.checked = true;
+      preview.value = '1';
+      for (const id of new Set(revisions.map(revision => revision.mission.id))) invalidate(id);
+      for (const [index, row] of rows.entries()) assign(row, revisions[index]);
+      changed();
+    },
     preview: () => ({ roomId: previewRow().roomId, revision: previewRow().current?.revision }),
     ready: () => rows.every(row => row.current?.state === 'valid'),
     revisions: () => rows.map(row => row.current?.revision),

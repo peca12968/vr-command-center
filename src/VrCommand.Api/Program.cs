@@ -239,6 +239,23 @@ app.MapGet("/api/venue/closure/{id:guid}", (Guid id, bool? includeScores, WorldR
     context.Response.Headers.CacheControl = "no-store";
     return worlds.ReadVenueClosure(Actor(context), includeScores == true, id);
 });
+app.MapGet("/api/venue/closure/{id:guid}/independent-plan", (Guid id, SessionManager manager, SqliteMissionLibrary store, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var actor = Actor(context);
+    var batch = manager.ReadVenueEnd(id, actor);
+    var sessions = batch.Sessions.Select(applied => manager.Get(applied.SessionId, actor))
+        .OrderBy(session => session.RoomIds[0]).ToArray();
+    if (sessions.Any(session => session.Mode != SessionMode.Independent || session.State != SessionState.Ended || session.RoomIds.Length != 1)
+        || !sessions.Select(session => session.RoomIds[0]).SequenceEqual(Enumerable.Range(1, SessionManager.RoomCount)))
+        throw new InvalidOperationException("The End batch must contain one independent session for each of the five rooms.");
+
+    return new
+    {
+        batch.RequestId,
+        Rooms = sessions.Select(session => new { RoomId = session.RoomIds[0], SessionId = session.Id, Revision = store.Version(session.Mission.Id, actor) }).ToArray()
+    };
+});
 app.MapGet("/api/venue/closure/{id:guid}/reports.zip", (Guid id, SessionManager manager, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";

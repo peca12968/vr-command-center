@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `VRCommand-ControlServer-0.31.91-win-x64.zip` 可從全館結束批次套用五房原任務版本。ZIP 為 52,875,286 bytes，SHA-256 `3aaf852593eb65c4939b7e7b140045ee2cd76a81a963a24b64d45f32608801d8`。解壓核對 543 筆清單與 523 個執行檔。 [操作說明](MISSION_VERSIONS.md#從全館收尾套用五房原版本)
+
 2026-11-10 `VRCommand-ControlServer-0.31.90-win-x64.zip` 提供觀戰統計的玩家列跟隨。ZIP 為 52,872,341 bytes，SHA-256 `a0f1782e26014a67a48b784fb5c8c72c4c418ed2ba9dcdb34a47503c1d457a9e`。解壓核對 543 筆清單與 523 個執行檔。 [觀戰操作](WORLD_RECORDING.md#操作)
 
 2026-11-10 `VRCommand-ControlServer-0.31.89-win-x64.zip` 新增個人封存戰績 CSV。ZIP 為 52,871,130 bytes，SHA-256 `ad3d3a73389c300f51740f3e3f33a58c835c98d4f01adc60f6e18ccea0259f9d`。解壓核對 543 筆清單與 523 個執行檔。 [個人戰績](REPORTS.md#從戰績開啟個人回放)

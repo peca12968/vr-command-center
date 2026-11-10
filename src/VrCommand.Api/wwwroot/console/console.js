@@ -62,7 +62,8 @@ const roomPlan = mountIndependentPlan({
   changed: () => { placement.scheduleLaunch(); applyPermissions(); }
 });
 let timer;
-let selectionEpoch = 0, venueClosureEpoch = 0, ticketViewEpoch = 0;
+let selectionEpoch = 0, venueClosureEpoch = 0, operationsViewEpoch = 0;
+let archivedPlan = null;
 
 function notify(message, error = false) {
   $('notice').textContent = message;
@@ -581,6 +582,7 @@ function applyVenuePermissions() {
   const begin = master() ? venueTargets('Begin') : [], pause = venueTargets('Pause'), resume = venueTargets('Resume'), end = venueTargets('End');
   const locked = state.busy || !!state.pending || !master();
   venueHistory.update(!locked);
+  $('restore-venue-plan').disabled = locked || !archivedPlan;
   vrVenue.update();
   const policy = venueBeginPolicy();
   const starting = (policy !== 'normal' && begin.flatMap(target => target.roomIds).length !== 5)
@@ -651,12 +653,41 @@ async function selectVenueClosure() {
   if (request === venueClosureEpoch && epoch === state.epoch) await refresh().catch(showRefreshError);
 }
 
+async function restoreVenuePlan() {
+  const plan = archivedPlan, epoch = state.epoch, selection = venueClosureEpoch, view = operationsViewEpoch;
+  if (!plan || $('restore-venue-plan').disabled) return;
+  const current = () => master() && state.epoch === epoch && venueClosureEpoch === selection
+    && operationsViewEpoch === view && archivedPlan?.requestId === plan.requestId;
+  let restored = false;
+  await run(async () => {
+    if (!current()) return;
+    const result = await api(`/venue/closure/${encodeURIComponent(plan.requestId)}/independent-plan`);
+    if (!current()) return;
+    if (result?.requestId !== plan.requestId || !Array.isArray(result.rooms) || result.rooms.length !== plan.sessionIds.length
+      || result.rooms.some((room, index) => room?.roomId !== index + 1 || room.sessionId !== plan.sessionIds[index]
+        || !room.revision?.mission?.id || !Number.isSafeInteger(room.revision.number) || room.revision.number < 1
+        || !['VR', 'MR'].includes(room.revision.mission.definition?.environment?.mode)
+        || !Array.isArray(room.revision.mission.definition.props))) {
+      notify('無法核對本批五房的原任務版本，已保留目前的準備選擇。', true);
+      return;
+    }
+    $('launch-mode').value = 'IndependentSet';
+    roomPlan.restore(result.rooms.map(room => room.revision));
+    restored = true;
+    notify('已套用本批五房的原任務版本。請核對各房場地，再建立準備場次。');
+  });
+  if (restored && current()) $('launch-review-room').focus();
+}
+
 function renderVenueClosure(report, loading = false) {
   const panel = $('venue-closure'), batch = report?.batch;
   const signature = master() ? JSON.stringify([venueHistory.selected(), report, loading]) : '';
   if (panel.dataset.report === signature) return;
   panel.dataset.report = signature;
   panel.hidden = !master();
+  const restore = $('restore-venue-plan');
+  archivedPlan = null;
+  restore.hidden = restore.disabled = true;
   const rows = $('venue-closure-rows');
   rows.replaceChildren();
   $('venue-closure-table').hidden = true;
@@ -679,6 +710,14 @@ function renderVenueClosure(report, loading = false) {
     return;
   }
   $('venue-closure-summary').textContent = `${new Date(batch.recordedAtUtc).toLocaleString('zh-TW')} · 請等遊戲伺服器完成玩家戰績傳送與收尾。`;
+  const sessions = [...batch.sessions].sort((a, b) => a.roomIds[0] - b.roomIds[0]);
+  if (typeof batch.requestId === 'string' && sessions.length === 5
+    && sessions.every((session, index) => session.roomIds.length === 1 && session.roomIds[0] === index + 1)
+    && new Set(sessions.map(session => session.sessionId)).size === 5) {
+    archivedPlan = { requestId: batch.requestId, sessionIds: sessions.map(session => session.sessionId) };
+    restore.hidden = false;
+    restore.disabled = state.busy || !!state.pending;
+  }
   for (const session of batch.sessions) {
     const button = element('button', '查看場次', 'quiet small');
     button.type = 'button';
@@ -994,7 +1033,7 @@ function ticketDestination() {
   return { address, port };
 }
 async function confirmTicketRoster(session, roomId, players, { wholeRoom = false, view }) {
-  const applies = () => view === ticketViewEpoch && !$('operations-view').hidden
+  const applies = () => view === operationsViewEpoch && !$('operations-view').hidden
     && state.selected === session.id && state.session?.id === session.id && ownsRoom(roomId);
   if (!applies()) return false;
   const current = await api('/sessions/' + session.id);
@@ -1015,7 +1054,7 @@ async function downloadTicket(player) {
   if (!player.admissionId) throw new Error('控制台與 API 版本不一致，請更新服務並重新整理。');
   const destination = ticketDestination();
   if (!destination) return;
-  const view = ticketViewEpoch;
+  const view = operationsViewEpoch;
   const ticket = await api(`/sessions/${session.id}/players/${player.id}/join-ticket`, 'POST', undefined, undefined, player.admissionId);
   const config = { role: 'Client', ...destination, joinTicket: ticket.ticket };
   if (session.environment.mode === 'MR') {
@@ -1035,7 +1074,7 @@ function downloadRoomTickets() {
   const players = session.players.filter(player => player.roomId === roomId);
   if (!players.length) return;
   const admissions = players.map(player => ({ playerId: player.id, admissionId: player.admissionId }));
-  const view = ticketViewEpoch;
+  const view = operationsViewEpoch;
   void runSession(async () => {
     const bundle = await api(`/sessions/${session.id}/rooms/${roomId}/join-ticket-bundle`, 'POST',
       { ...destination, players: admissions }, undefined, undefined, 'blob');
@@ -1324,7 +1363,7 @@ for (const id of ['prop-asset', 'prop-x', 'prop-y', 'prop-z', 'prop-yaw']) $(id)
 });
 
 function tab(name, worldTarget = null) {
-  if (name !== 'operations') ticketViewEpoch++;
+  if (name !== 'operations') operationsViewEpoch++;
   if (name !== 'missions') { placement.clearTrial(); clearMissionTemplate(); clearPropCopies(); }
   finishPropGesture();
   for (const candidate of ['operations', 'missions', 'replay', 'world']) { const active = candidate === name; $(candidate + '-view').hidden = !active; $('tab-' + candidate).classList.toggle('active', active); $('tab-' + candidate).setAttribute('aria-pressed', String(active)); }
@@ -1366,6 +1405,7 @@ for (const [id, other] of [['venue-full-tracking', 'venue-full-participation'], 
 $('venue-pause').addEventListener('click', () => run(() => venuePhase('Pause')));
 $('venue-resume').addEventListener('click', () => run(() => venuePhase('Resume')));
 $('venue-end').addEventListener('click', () => run(() => venuePhase('End')));
+$('restore-venue-plan').addEventListener('click', restoreVenuePlan);
 submit('venue-environment-form', () => venuePhase('SetEnvironment', { environment: {
   weather: $('venue-weather').value, timeOfDay: $('venue-time').value, lightning: $('venue-lightning').checked
 } }));
