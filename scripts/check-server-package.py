@@ -692,6 +692,8 @@ def main():
         manifest_path = runtime / (label + '-field-manifest.json')
         common = {'version': 1, 'mode': mode, 'topology': 'same-host', 'serverIps': [address],
                   **({'verifyPlayerSources': True} if args.check_venue_openxr else {})}
+        if args.check_venue_participation_gate:
+            common['verifyParticipationBegin'] = True
         concurrent_seconds = args.venue_concurrent_roster_seconds
         if concurrent_seconds is not None:
             common['minimumConcurrentMilliseconds'] = concurrent_seconds * 1000
@@ -724,6 +726,23 @@ def main():
               and all(row['combatJournal']['events'] == row['combatSequence']
                       and row['combatJournal']['players'] == 5 * len(row['roomIds']) for row in summary['sessions']),
               label + ' original combat journals reproduce the sealed scores of all 25 seats')
+        if args.check_venue_participation_gate:
+            proofs=read(out/(label+'-full-participation-begin.json'))
+            receipt=read(out/(label+'-venue-begin.json'))['receipt']
+            check(summary['participationBegin']=={'requestId':receipt['requestId'], 'sessions':len(entries),
+                  'participants':25, 'trackedPlayers':0, 'simulatedPlayers':25},
+                  label+' untouched field ZIP verifies the original 25-seat simulated Begin')
+            archived={tuple(row['roomIds']):row for row in closed['sessions']}
+            for report in summary['sessions']:
+                row=archived[tuple(report['roomIds'])]; witness=row['participationBegin']; expected=proofs[row['sessionId']]
+                proof=report['worldJournal']['participationBegin']
+                assert witness=={'requestId':receipt['requestId'], 'appliedAtSequence':expected['appliedAtSequence'],
+                                'frame':expected['witness']} and 'trackingBegin' not in row
+                assert proof['preparingFrame']==expected['witness']['worldSequence'] and proof['firstRunningFrame']>proof['preparingFrame']
+            check(True,label+' offline frame proofs match the original live Begin receipts and sealed source')
+            wrong_policy=run(dict(evidence,verifyParticipationBegin=False,verifyTrackingBegin=True))
+            check(wrong_policy.returncode==1 and not wrong_policy.stdout and 'missing an original guarded Begin witness' in wrong_policy.stderr,
+                  label+' original participation archive cannot pass as a tracking-only Begin')
         # Exercise the missing terminal seal using a new copy of one original file.
         first = evidence['sessions'][0]
         original_journal = Path(first['combatJournal']).read_bytes()

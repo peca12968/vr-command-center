@@ -203,8 +203,9 @@ internal static class VenuePhaseChecks
             var manager = new SessionManager(store);
             var retry = manager.ExecuteVenuePhase(ControlAction.Begin, participationTargets, participationKey, master, requireFullParticipation: true);
             var appliedBegin = retry.Sessions.Single();
+            var evidence = manager.ReadVenueBeginEvidence(appliedBegin.SessionId, master);
             check(retry.Duplicate && retry.RequireFullParticipation && manager.Get(appliedBegin.SessionId).State == SessionState.Running
-                && manager.Events(appliedBegin.SessionId).Single(entry => entry.Sequence == appliedBegin.AppliedAtSequence).Venue?.ParticipationFrame == participationFrame,
+                && evidence == (null, new VenueParticipationBegin(participationKey, appliedBegin.AppliedAtSequence, participationFrame)),
                 "Full participation policy and frame survive a management restart");
             Reject<InvalidOperationException>(() => manager.ExecuteVenuePhase(ControlAction.Begin, participationTargets, participationKey, master),
                 "A retry cannot weaken the original participation policy after reopening SQLite");

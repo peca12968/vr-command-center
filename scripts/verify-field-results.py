@@ -420,38 +420,45 @@ class VenueRosterOverlap:
                 **({'rigKind': 'Tracked'} if self.require_tracked else {})}
 
 
-def verify_world_journal(path, world, combat_sequence, through, applied_end, *, player_sources=None, tracking_begin=None,
+def verify_world_journal(path, world, combat_sequence, through, applied_end, *, player_sources=None, guarded_begin=None,
                          players=None, concurrency=None):
     spec = importlib.util.spec_from_file_location('field_world_journal', Path(__file__).with_name('analyze-world-journal.py'))
     analyzer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(analyzer)
     fields = ('schemaVersion', 'sessionId', 'streamId', 'origin', 'roomIds', 'calibration', 'captureStartedAtUtc')
     expected = {key: world['header'].get(key) for key in fields}
-    tracked = None
+    begin_kind, begin = guarded_begin if guarded_begin is not None else (None, None)
+    tracked_only = begin_kind == 'trackingBegin' or expected['calibration'] == 'quest-room-mr-v1'
+    allowed_rigs = ('Tracked',) if tracked_only else ('Tracked', 'Simulated')
+    roster_label = 'tracked' if begin_kind == 'trackingBegin' else 'participating'
+    begin_roster = None
     if concurrency is not None:
         observe_roster, periods = roster_periods(players, concurrency.minimum_ms, applied_end,
                                                 require_tracked=concurrency.require_tracked)
 
     def observe_packet(packet):
-        if tracking_begin is not None:
-            check_tracking_frame(packet)
+        if begin is not None:
+            check_begin_frame(packet)
         if concurrency is not None:
             observe_roster(packet)
 
-    def check_tracking_frame(packet):
-        nonlocal tracked
-        if packet['sequence'] != tracking_begin['frame']['worldSequence']:
+    def check_begin_frame(packet):
+        nonlocal begin_roster
+        if packet['sequence'] != begin['frame']['worldSequence']:
             return
         frame = packet['frame']
-        require(integer(packet['elapsedMilliseconds']) == tracking_begin['frame']['elapsedMilliseconds']
-                and integer(packet['observedSequence'], 1) == tracking_begin['appliedAtSequence'] - 1
+        require(integer(packet['elapsedMilliseconds']) == begin['frame']['elapsedMilliseconds']
+                and integer(packet['observedSequence'], 1) == begin['appliedAtSequence'] - 1
                 and packet['suspended'] is False and frame['phase'] == 'Preparing' and integer(frame['tick'], 0, 0) == 0,
                 'Guarded Begin frame differs from the original Preparing boundary')
         rows = roster(frame['players'], 'id', len(players))
-        require(set(rows) == set(players) and all(row['connected'] is True and row['rig']['kind'] == 'Tracked'
+        require(set(rows) == set(players) and all(row['connected'] is True and row['rig']['kind'] in allowed_rigs
                     and integer(row['health'], 1, 100) and integer(row['roomId'], 1, 5) == players[pid]['roomId']
-                    for pid, row in rows.items()), 'Guarded Begin frame does not contain the original tracked roster')
-        tracked = len(rows)
+                    for pid, row in rows.items()), f'Guarded Begin frame does not contain the original {roster_label} roster')
+        tracked = sum(row['rig']['kind'] == 'Tracked' for row in rows.values())
+        begin_roster = {'trackedPlayers': tracked}
+        if begin_kind == 'participationBegin':
+            begin_roster.update(participants=len(rows), simulatedPlayers=len(rows) - tracked)
 
     def count_player_rigs(frame):
         rows = frame['players']
@@ -470,9 +477,9 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
             seen.add(pid)
 
     try:
-        journal = analyzer.analyze(path, accepted_sequence=tracking_begin['appliedAtSequence'] if tracking_begin is not None else None,
+        journal = analyzer.analyze(path, accepted_sequence=begin['appliedAtSequence'] if begin is not None else None,
                                    expected_header=expected, on_running_frame=count_player_rigs if player_sources is not None else None,
-                                   on_packet=observe_packet if tracking_begin is not None or concurrency is not None else None)
+                                   on_packet=observe_packet if begin is not None or concurrency is not None else None)
     except EvidenceError:
         raise
     except (OSError, ValueError, TypeError, KeyError, AttributeError, ArithmeticError, RecursionError) as error:
@@ -494,14 +501,14 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
     if concurrency is not None:
         concurrency.add(journal['captureStartedAtUtc'], periods)
     result = {'sha256': journal['sha256'], 'frames': sequence, 'runningFrames': journal['runningFrames']}
-    if tracking_begin is not None:
+    if begin is not None:
         first = journal['firstApplied']
-        require(tracked is not None and first is not None
-                and first['worldSequence'] > tracking_begin['frame']['worldSequence'],
+        require(begin_roster is not None and first is not None
+                and first['worldSequence'] > begin['frame']['worldSequence'] and first['observedSequence'] < applied_end,
                 'World journal lacks the guarded Begin witness or its subsequent application')
-        result['trackingBegin'] = {'requestId': tracking_begin['requestId'], 'appliedAtSequence': tracking_begin['appliedAtSequence'],
-                                   'preparingFrame': tracking_begin['frame']['worldSequence'],
-                                   'firstRunningFrame': first['worldSequence'], 'trackedPlayers': tracked}
+        result[begin_kind] = {'requestId': begin['requestId'], 'appliedAtSequence': begin['appliedAtSequence'],
+                              'preparingFrame': begin['frame']['worldSequence'],
+                              'firstRunningFrame': first['worldSequence'], **begin_roster}
     return result
 
 
@@ -589,7 +596,7 @@ def verify(topology, server_ips, launcher, session, statistics, endpoint, server
 def verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log, size, player_logs, *,
                    require_remote=True, quest_player_logs=(), world_journal=None, combat_journal=None, applied_end=None, room_alignments=None,
                    udp_preflight=None, udp_source_preflights=None, verify_player_sources=False, quest_capture_logs=(),
-                   tracking_begin=None, concurrency=None):
+                   guarded_begin=None, concurrency=None):
     integer(size, 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(not verify_player_sources or world_journal is not None, 'Player source verification requires the original closed world journal')
@@ -694,7 +701,7 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
     preflight = verify_udp_preflight(udp_preflight, binding, peer_ips)[0] if udp_preflight else None
     source_preflight = verify_udp_source_preflights(udp_source_preflights, binding, peer_ips) if udp_source_preflights is not None else None
     journal = verify_world_journal(world_journal, world, combat_sequence, through, applied_end,
-                                   player_sources=player_sources, tracking_begin=tracking_begin, players=players,
+                                   player_sources=player_sources, guarded_begin=guarded_begin, players=players,
                                    concurrency=concurrency) if world_journal is not None else None
     combat_evidence = verify_combat_journal(combat_journal, session_id, stream_id, origin, combat_sequence,
                                             applied_end if applied_end is not None else through, ledger) if combat_journal is not None else None
@@ -880,8 +887,12 @@ def verify_venue(manifest_path):
             'Player source verification requires a boolean option and the original world journals for the full batch')
     verify_player_sources = verify_player_sources or require_tracked
     verify_tracking_begin = manifest.get('verifyTrackingBegin', False)
-    require(type(verify_tracking_begin) is bool and (not verify_tracking_begin or journals),
+    verify_participation_begin = manifest.get('verifyParticipationBegin', False)
+    require(type(verify_tracking_begin) is bool and type(verify_participation_begin) is bool
+            and (not (verify_tracking_begin or verify_participation_begin) or journals),
             'Guarded Begin verification requires a boolean option and the original world journals for the full batch')
+    require(not (verify_tracking_begin and verify_participation_begin), 'Choose one guarded Begin verification policy')
+    begin_kind = 'trackingBegin' if verify_tracking_begin else 'participationBegin' if verify_participation_begin else None
     check_alignments = any('roomAlignments' in entry for entry in entries)
     require(not check_alignments or journals, 'MR alignment evidence requires the original world journals for the full batch')
     preflights = any('udpPreflight' in entry for entry in entries)
@@ -964,22 +975,24 @@ def verify_venue(manifest_path):
                 'Closure and original sealed session boundaries differ')
         end_times.add(datetime.fromisoformat(session['endedAtUtc']))
         stream = identity(launcher['streamId'])
-        tracking_begin = None
-        if verify_tracking_begin:
+        guarded_begin = None
+        if begin_kind is not None:
             verify_experience(session, launcher['finalWorld']['header'])
-            tracking_begin = row.get('trackingBegin')
-            require(type(tracking_begin) is dict and set(tracking_begin) == {'requestId', 'appliedAtSequence', 'frame'},
+            require(not ('trackingBegin' in row and 'participationBegin' in row), 'Closure has conflicting guarded Begin witnesses')
+            begin = row.get(begin_kind)
+            require(type(begin) is dict and set(begin) == {'requestId', 'appliedAtSequence', 'frame'},
                     'Closure is missing an original guarded Begin witness')
-            request = identity(tracking_begin['requestId'])
+            request = identity(begin['requestId'])
             require(request != closure['requestId'] and begin_request in (None, request),
                     'Venue sessions do not share one original guarded Begin request')
             begin_request = request
-            integer(tracking_begin['appliedAtSequence'], 2, row['appliedAtSequence'] - 1)
-            frame = tracking_begin['frame']
+            integer(begin['appliedAtSequence'], 2, row['appliedAtSequence'] - 1)
+            frame = begin['frame']
             require(type(frame) is dict and set(frame) == {'streamId', 'worldSequence', 'elapsedMilliseconds'}
                     and identity(frame['streamId']) == stream, 'Guarded Begin witness uses another world source')
             integer(frame['worldSequence'], 1, launcher['finalWorld']['acceptedSequence'] - 1)
             integer(frame['elapsedMilliseconds'])
+            guarded_begin = begin_kind, begin
         binding = (ipv4(endpoint['address']), integer(endpoint['port'], 1024, 65535))
         require(stream not in stream_ids and binding not in bindings, 'Venue reused a world stream or server UDP binding')
         stream_ids.add(stream)
@@ -1022,7 +1035,7 @@ def verify_venue(manifest_path):
                                          applied_end=row['appliedAtSequence'], room_alignments=alignments, udp_preflight=preflight_paths,
                                          udp_source_preflights=source_paths, verify_player_sources=verify_player_sources,
                                          quest_capture_logs=(quest_capture_log(*evidence) for evidence in captured),
-                                         tracking_begin=tracking_begin, concurrency=concurrency)
+                                         guarded_begin=guarded_begin, concurrency=concurrency)
         verified_pairs = ([report['udpPreflight']] if preflights else report['udpSourcePreflight']['pairs'] if source_preflights else [])
         for pair in verified_pairs:
             exchange = pair['exchangeSha256']
@@ -1051,6 +1064,11 @@ def verify_venue(manifest_path):
     peer_ips = {address for sources in rooms.values() for address in sources}
     remote = peer_ips - server_ips
     require(topology != 'direct-lan' or remote, 'Direct LAN needs a peer outside the declared server addresses')
+    begin_summary = {}
+    if begin_kind is not None:
+        counts = ('trackedPlayers', 'simulatedPlayers', 'participants') if verify_participation_begin else ('trackedPlayers',)
+        begin_summary[begin_kind] = {'requestId': begin_request, 'sessions': len(summaries),
+                                    **{name: sum(item['worldJournal'][begin_kind][name] for item in summaries) for name in counts}}
     return {'version': 1, 'consistent': True, 'declaredTopology': topology, 'mode': mode, 'players': len(player_ids),
             'rooms': [{'roomId': room, 'players': len(rooms[room]),
                        'playersOutsideDeclaredServer': sum(address in remote for address in rooms[room])} for room in all_rooms],
@@ -1065,9 +1083,7 @@ def verify_venue(manifest_path):
             **({'worldJournalsVerified': len(summaries)} if journals else {}),
             **({'combatJournalsVerified': len(summaries)} if combat_journals else {}),
             **({'concurrentRoster': concurrency.summary(len(player_ids))} if concurrency is not None else {}),
-            **({'trackingBegin': {'requestId': begin_request, 'sessions': len(summaries),
-                                  'trackedPlayers': sum(item['worldJournal']['trackingBegin']['trackedPlayers'] for item in summaries)}}
-               if verify_tracking_begin else {}),
+            **begin_summary,
             **({'roomAlignmentsVerified': sum(len(row.get('roomAlignments', [])) for row in summaries)} if check_alignments else {})}
 
 

@@ -1593,6 +1593,64 @@ class FieldResultsTests(unittest.TestCase):
                 path.write_text(json.dumps(manifest), encoding='utf-8')
                 self.assertNotIn('trackingBegin', field.verify_venue(path))
 
+    def test_venue_full_participation_requires_original_witness(self):
+        for mode in ('Linked', 'Independent'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, batch = venue_fixture(root, mode, remote=True, with_journals=True,
+                    mr_rooms=(2, 4) if mode == 'Independent' else ())
+                manifest['verifyParticipationBegin'] = True
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'missing an original guarded Begin witness'):
+                    field.verify_venue(path)
+
+                request_id = id_for(999)
+                sources = []
+                for entry, row in zip(manifest['sessions'], batch['sessions'], strict=True):
+                    session, _, _ = field.management_zip(root / entry['evidenceZip'])
+                    world = json.loads((root / entry['launcherReport']).read_bytes())['finalWorld']
+                    mr = session['environment']['mode'] == 'MR'
+                    players = [{'id': p['id'], 'roomId': p['roomId'], 'connected': True, 'health': 100,
+                                'rig': {'kind': 'Tracked' if mr else 'Simulated'}} for p in session['players']]
+                    journal = root / entry['worldJournal']
+                    world_journal(journal, world, players=lambda _, phase: players if phase == 'Preparing' else [], preparing_sequence=6)
+                    row['participationBegin'] = {'requestId': request_id, 'appliedAtSequence': 7,
+                        'frame': {'streamId': world['header']['streamId'], 'worldSequence': 1, 'elapsedMilliseconds': 100}}
+                    sources.append((journal, world, players, mr))
+
+                (root / manifest['closure']).write_text(json.dumps({'batch': batch}), encoding='utf-8')
+                result = field.verify_venue(path)
+                tracked = 10 if mode == 'Independent' else 0
+                self.assertEqual({'requestId': request_id, 'sessions': len(sources), 'participants': 25,
+                    'trackedPlayers': tracked, 'simulatedPlayers': 25 - tracked}, result['participationBegin'])
+                self.assertTrue(all(row['worldJournal']['participationBegin']['firstRunningFrame'] == 2 for row in result['sessions']))
+
+                journal, world, players, _ = sources[0]
+                players[0]['connected'] = False
+                world_journal(journal, world, players=lambda _, phase: players if phase == 'Preparing' else [], preparing_sequence=6)
+                with self.assertRaisesRegex(field.EvidenceError, 'original participating roster'):
+                    field.verify_venue(path)
+                players[0]['connected'] = True
+                world_journal(journal, world, players=lambda _, phase: players if phase == 'Preparing' else [],
+                              preparing_sequence=6, running_sequence=8)
+                with self.assertRaisesRegex(field.EvidenceError, 'subsequent application'):
+                    field.verify_venue(path)
+                world_journal(journal, world, players=lambda _, phase: players if phase == 'Preparing' else [], preparing_sequence=6)
+
+                path.write_text(json.dumps(dict(manifest, verifyTrackingBegin=True)), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'Choose one guarded Begin'):
+                    field.verify_venue(path)
+                path.write_text(json.dumps(dict(manifest, verifyTrackingBegin=True, verifyParticipationBegin=False)), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'missing an original guarded Begin witness'):
+                    field.verify_venue(path)
+                if mode == 'Independent':
+                    path.write_text(json.dumps(manifest), encoding='utf-8')
+                    journal, world, players, _ = next(source for source in sources if source[3])
+                    players[0]['rig']['kind'] = 'Simulated'
+                    world_journal(journal, world, players=lambda _, phase: players if phase == 'Preparing' else [], preparing_sequence=6)
+                    with self.assertRaisesRegex(field.EvidenceError, 'original participating roster'):
+                        field.verify_venue(path)
+
     def test_venue_accepts_quest_logcat_in_both_topologies(self):
         for mode, quest_per_room in (('Linked', 5), ('Independent', 1)):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:

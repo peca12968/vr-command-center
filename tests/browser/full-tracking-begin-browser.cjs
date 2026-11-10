@@ -138,6 +138,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       `${mode} accepts the optional 25-seat policy with both simulated and tracked sources`);
       const retry = await api('/venue/phase', 'POST', body, 'Master', 200, undefined, requestId);
       await api('/venue/phase', 'POST', { ...body, requireFullParticipation: false }, 'Master', 409, undefined, requestId);
+      const proofs = new Map();
       for (const { sessionId, appliedAtSequence } of receipt.sessions) {
         const fence = readyFences.find(fence => fence.sessionId === sessionId);
         const history = await api(`/sessions/${sessionId}/events`);
@@ -152,13 +153,20 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         assert.equal(frame.packet.elapsedMilliseconds, proof.elapsedMilliseconds);
         assert.equal(frame.packet.frame.phase, 'Preparing');
         assert.ok(frame.packet.frame.players.every(player => player.connected && ['Simulated', 'Tracked'].includes(player.rig.kind)));
+        proofs.set(sessionId, { requestId, appliedAtSequence, frame: proof });
       }
       check(retry.duplicate && retry.requireFullParticipation && JSON.stringify(retry.sessions) === JSON.stringify(receipt.sessions),
         `${mode} retry preserves the original policy and the exact accepted Preparing frames`);
-      for (const { id } of sessions) {
-        await api(`/sessions/${id}/commands`, 'POST', { commandId: randomUUID(), action: 'End' });
-        active.delete(id);
+      const endTargets = (await api('/venue/phase')).end.map(({ sessionId, phaseSinceSequence }) => ({ sessionId, phaseSinceSequence }));
+      const ended = await api('/venue/phase', 'POST', { action: 'End', targets: endTargets }, 'Master', 200, undefined, randomUUID());
+      for (const { id } of sessions) active.delete(id);
+      const { batch } = await api(`/venue/closure/${ended.requestId}`);
+      assert.equal(batch.sessions.length, proofs.size);
+      for (const row of batch.sessions) {
+        assert.deepEqual(row.participationBegin, proofs.get(row.sessionId));
+        assert.equal(row.trackingBegin, undefined);
       }
+      check(true, `${mode} closure carries the same participation proof without a tracking-only claim`);
     }
   }
   try {

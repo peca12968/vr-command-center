@@ -8,7 +8,8 @@ internal sealed record VenueReplay(Guid StreamId, long ThroughSequence);
 internal sealed record VenueClosureSession(Guid SessionId, long AppliedAtSequence, int[] RoomIds, string MissionName,
     VenueArchiveState Combat, VenueArchiveState World, bool FieldEvidenceReady,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueReplay? Replay,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTrackingBegin? TrackingBegin);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTrackingBegin? TrackingBegin,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueParticipationBegin? ParticipationBegin);
 internal sealed record VenueClosureBatch(Guid RequestId, DateTimeOffset RecordedAtUtc, VenueClosureSession[] Sessions);
 
 public sealed partial class WorldRecordings
@@ -41,8 +42,9 @@ public sealed partial class WorldRecordings
             (world, replay) = VenueWorldArchive(session, stream, actor);
             if (world == VenueArchiveState.Sealed) evidence = BuildFieldEvidence(session, stream, actor).Evidence;
         }
+        var (tracking, participation) = manager.ReadVenueBeginEvidence(session.Id, actor);
         return (new(session.Id, applied.AppliedAtSequence, session.RoomIds, session.Mission.Definition.Name,
-            combat, world, evidence is not null, replay, manager.ReadVenueTrackingBegin(session.Id, actor)), evidence);
+            combat, world, evidence is not null, replay, tracking, participation), evidence);
     }
 
     private (VenueArchiveState State, VenueReplay? Replay) VenueWorldArchive(SessionView session, CombatStreamView stream, OperatorIdentity actor)

@@ -31,6 +31,7 @@ public record VenueEndSummary(Guid RequestId, DateTimeOffset RecordedAtUtc, int[
 public record VenueEndHistory(VenueEndSummary[] Batches, Guid? NextBefore);
 public record VenueTrackingFrame(Guid StreamId, long WorldSequence, long ElapsedMilliseconds);
 public record VenueTrackingBegin(Guid RequestId, long AppliedAtSequence, VenueTrackingFrame Frame);
+public record VenueParticipationBegin(Guid RequestId, long AppliedAtSequence, VenueTrackingFrame Frame);
 public record VenuePhaseWitness(long PhaseSinceSequence, long SessionSequence, bool Ready, int[]? FullRooms = null,
     VenueTrackingFrame? BeginFrame = null);
 public sealed class VenuePhaseChangedException() : InvalidOperationException("The venue phase targets changed; review the current rooms.");
@@ -109,17 +110,21 @@ public sealed partial class SessionManager
         lock (gate) return ToEndBatch(id);
     }
 
-    public VenueTrackingBegin? ReadVenueTrackingBegin(Guid id, OperatorIdentity actor)
+    public VenueTrackingBegin? ReadVenueTrackingBegin(Guid id, OperatorIdentity actor) => ReadVenueBeginEvidence(id, actor).Tracking;
+
+    public (VenueTrackingBegin? Tracking, VenueParticipationBegin? Participation) ReadVenueBeginEvidence(Guid id, OperatorIdentity actor)
     {
         RequireVenueMaster(actor);
         lock (gate)
         {
             var history = Find(id);
-            if (history.View.StartedAtUtc is not { } started) return null;
+            if (history.View.StartedAtUtc is not { } started) return (null, null);
             var entry = history.Events.FirstOrDefault(entry => entry.RecordedAtUtc == started
                 && entry.Kind == SessionEventKind.ControlApplied && entry.Read<ControlCommand>().Action == ControlAction.Begin);
-            return entry?.Venue?.TrackingFrame is { } frame
-                ? new(entry.Read<ControlCommand>().CommandId, entry.Sequence, frame) : null;
+            if (entry?.Venue is not { } venue) return (null, null);
+            var requestId = entry.Read<ControlCommand>().CommandId;
+            return (venue.TrackingFrame is { } tracking ? new(requestId, entry.Sequence, tracking) : null,
+                venue.ParticipationFrame is { } participation ? new(requestId, entry.Sequence, participation) : null);
         }
     }
 

@@ -313,6 +313,12 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json
 
 結果中的 `trackingBegin` 列出原開始批次、場次數及通過核對的追蹤席位數。逐場 `worldJournal.trackingBegin` 列出原準備畫格、開始序號和第一格符合條件的執行畫格。管理包 0.31.65 或更早的開場仍可走一般封存核對。追蹤姿態、裝置來源與實體容量分別驗收。 [開場操作](PLAYER_READINESS.md#五房追蹤驗收開場)
 
+### 核對五房有效姿態開場
+
+若場次使用「五房開場須各有 5 席已連線且姿態有效」，用管理包 0.31.79 下載原全館收尾的場館驗收 ZIP。在 `venue.json` 設定 `"verifyParticipationBegin": true`，每場提供原 `worldJournal`。此選項與 `verifyTrackingBegin` 擇一。
+
+工具從 `closure.json` 讀取 `participationBegin`，依原錄製核對同一次開場、管理序號、準備中畫格、25 位原名冊玩家及其房間，再找出各場在結束前套用開場的第一個有效執行格。VR 開場可核對合成或追蹤姿態，MR 須為追蹤。結果的 `participationBegin` 列出全館及逐場的確認席數，並分列合成與追蹤。 [開場操作](PLAYER_READINESS.md#五房各-5-席有效姿態開場)
+
 ### 直接使用 Quest 批次擷取報告
 
 在 `direct-lan` 場館清單加入下列欄位。保留每份原 `capture-report.json` 與同一資料夾內的原日誌。網路計畫使用 Quest UDP 預檢的版本 1 格式，列出這次五房所有遊戲端點，以及各 Quest 席位實際使用的 IPv4。 [網路計畫格式](QUEST3.md#批次預檢五房-quest-席位) · [整批擷取](QUEST3.md#一次擷取五房-quest-日誌)
