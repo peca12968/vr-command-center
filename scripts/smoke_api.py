@@ -215,7 +215,7 @@ try:
     with (test_directory / "server.log").open("w", encoding="utf-8") as log:
         key_file = test_directory / "operator-keys.local.json"
 
-        def launch(overrides=None, use_key_file=False):
+        def launch(overrides=None, use_key_file=False, output=log):
             process_environment = environment.copy()
             args = ["dotnet", str(DLL), "--urls", base_url]
             if use_key_file:
@@ -227,7 +227,7 @@ try:
                 process_environment.update(overrides)
             return subprocess.Popen(
                 args, cwd=ROOT, env=process_environment,
-                stdout=log, stderr=subprocess.STDOUT,
+                stdout=output, stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
             )
 
@@ -252,18 +252,25 @@ try:
                         raise RuntimeError("API startup timed out")
                     time.sleep(0.1)
 
-        for invalid in [
-            {"OperatorKeys__Master": ""},
-            {"OperatorKeys__Master": "short"},
-            {"OperatorKeys__Room1": tokens["Master"]},
-            {"OperatorKeys__Room9": secrets.token_urlsafe(32)},
+        for label, invalid, diagnostic in [
+            ("missing", {"OperatorKeys__Master": ""}, "OperatorKeys:Master must be a unique credential"),
+            ("weak", {"OperatorKeys__Master": "short"}, "OperatorKeys:Master must be a unique credential"),
+            ("duplicate", {"OperatorKeys__Room1": tokens["Master"]}, "Operator credentials must be distinct across consoles."),
+            ("unknown", {"OperatorKeys__Room9": secrets.token_urlsafe(32)}, "Unknown OperatorKeys configuration name."),
         ]:
-            invalid_process = launch(overrides=invalid)
-            try:
-                require(invalid_process.wait(timeout=10) != 0, "Missing, weak, duplicated or unknown credentials prevent API startup")
-            finally:
-                if invalid_process.poll() is None:
-                    stop(invalid_process)
+            invalid_log = test_directory / f"invalid-credentials-{label}.log"
+            with invalid_log.open("wb") as output:
+                invalid_process = launch(overrides=invalid, output=output)
+                try:
+                    exit_code = invalid_process.wait(timeout=10)
+                finally:
+                    if invalid_process.poll() is None:
+                        stop(invalid_process)
+            message = invalid_log.read_bytes()
+            require(exit_code == 1 and diagnostic.encode("ascii") in message and b"Unhandled exception" not in message
+                    and not any(key and key.encode("ascii") in message for key in [*tokens.values(), *invalid.values()])
+                    and not any((test_directory / name).exists() for name in ("missions", "sessions", "player-ticket-signing.key")),
+                    f"{label.capitalize()} operator credential exits cleanly with a safe diagnostic before creating data")
 
         process = launch()
         try:

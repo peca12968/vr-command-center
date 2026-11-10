@@ -14,7 +14,13 @@ var operatorKeyFile = builder.Configuration["OperatorKeyFile"];
 if (!string.IsNullOrWhiteSpace(operatorKeyFile))
     builder.Configuration.AddJsonFile(Path.GetFullPath(operatorKeyFile), optional: false, reloadOnChange: false)
         .AddEnvironmentVariables().AddCommandLine(args);
-var authentication = new OperatorAuthentication(builder.Configuration);
+OperatorAuthentication authentication;
+try { authentication = new(builder.Configuration); }
+catch (OperatorConfigurationException error)
+{
+    Console.Error.WriteLine(error.Message);
+    return 1;
+}
 builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter(allowIntegerValues: false)));
 var dataDirectory = Path.GetFullPath(builder.Configuration["DataDirectory"]
@@ -472,6 +478,7 @@ app.MapDelete("/api/sessions/{id:guid}", (Guid id, SessionManager manager, HttpC
     return Results.NoContent();
 });
 app.Run();
+return 0;
 
 static OperatorIdentity Actor(HttpContext context) => (OperatorIdentity)context.Items[typeof(OperatorIdentity)]!;
 

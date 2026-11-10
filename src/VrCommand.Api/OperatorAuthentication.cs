@@ -2,6 +2,8 @@ using System.Security.Cryptography;
 using System.Text;
 using VrCommand.Core;
 
+internal sealed class OperatorConfigurationException(string message) : Exception(message) { }
+
 // Console credentials for the LAN prototype, separate from future human-account authentication.
 internal sealed class OperatorAuthentication
 {
@@ -13,7 +15,7 @@ internal sealed class OperatorAuthentication
         foreach (var room in Enumerable.Range(1, SessionManager.RoomCount)) knownNames.Add($"Room{room}");
         foreach (var item in configuration.GetSection("OperatorKeys").GetChildren())
         {
-            if (!knownNames.Contains(item.Key)) throw new InvalidOperationException("Unknown OperatorKeys configuration name.");
+            if (!knownNames.Contains(item.Key)) throw new OperatorConfigurationException("Unknown OperatorKeys configuration name.");
         }
         Add("Master", new("master", OperatorRole.Master), required: true);
         Add("GameServer", new("game-server", OperatorRole.GameServer));
@@ -25,10 +27,10 @@ internal sealed class OperatorAuthentication
             var key = configuration[$"OperatorKeys:{name}"];
             if (string.IsNullOrEmpty(key) && !required) return;
             if (key is null || key.Length is < 32 or > 512 || key.Any(char.IsWhiteSpace))
-                throw new InvalidOperationException($"OperatorKeys:{name} must be a unique credential of 32–512 non-whitespace characters.");
+                throw new OperatorConfigurationException($"OperatorKeys:{name} must be a unique credential of 32–512 non-whitespace characters.");
             var digest = SHA256.HashData(Encoding.UTF8.GetBytes(key));
             if (identities.Any(item => CryptographicOperations.FixedTimeEquals(item.Digest, digest)))
-                throw new InvalidOperationException("Operator credentials must be distinct across consoles.");
+                throw new OperatorConfigurationException("Operator credentials must be distinct across consoles.");
             identities.Add((digest, identity));
         }
     }
