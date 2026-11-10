@@ -9,7 +9,7 @@ internal static class MixedVenueDeployment
 {
     internal sealed record BundleRequest(BundleRoom[] Rooms);
     internal sealed record BundleRoom(int RoomId, Guid SessionId, ExperienceMode Mode, Guid StreamId, TicketAdmission?[] Players, byte[]? AlignmentFile);
-    internal sealed record CheckRequest(string Topology, CheckRoom[] Rooms);
+    internal sealed record CheckRequest(string Topology, CheckRoom[] Rooms, bool RequireLiveSource = false);
     internal sealed record CheckRoom(int RoomId, Guid SessionId, ExperienceMode Mode, byte[][] ConnectionFiles, byte[]? AlignmentFile);
     internal sealed record Preview(Room[] Rooms)
     {
@@ -129,7 +129,7 @@ internal static class MixedVenueDeployment
 
     internal static VrVenueTickets.CheckResult Check(CheckRequest input, WorldRecordings worlds, OperatorIdentity actor, PlayerJoinTicketSigner signer)
     {
-        var sources = worlds.ReadVenueSources(null, actor);
+        var sources = worlds.ReadVenueSources(null, actor, requireLiveCapture: input.RequireLiveSource);
         var plan = Plan(sources);
         var results = new List<VrVenueTickets.SeatResult>(SessionManager.MaxPlayers);
         foreach (var wanted in input.Rooms.OrderBy(room => room.RoomId))
@@ -143,11 +143,13 @@ internal static class MixedVenueDeployment
                     : room.Endpoint is null || room.Problem is "venue-endpoint-loopback" or "venue-endpoint-reused" ? Status("endpoint-mismatch")
                     : room.Problem == "venue-alignment-unlocked" ? Status("alignment-not-locked")
                     : room.Problem == "venue-roster-reused" ? Status("venue-unavailable")
+                    : input.RequireLiveSource && room.TicketSourceLive != true ? Status("source-stale")
                     : VerifySeat(sources[wanted.SessionId].Session, room, wanted.ConnectionFiles[seat], seat, alignment, signer);
                 results.Add(result);
             }
         }
-        return new(input.Topology, results.All(seat => seat.Status == "matched"), [.. results]);
+        var matched = results.All(seat => seat.Status == "matched");
+        return new(input.Topology, matched, [.. results], input.RequireLiveSource ? matched : null);
     }
 
     private static VrVenueTickets.SeatResult VerifySeat(SessionView session, Room room, byte[] json, int seat,

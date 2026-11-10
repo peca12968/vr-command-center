@@ -1,13 +1,16 @@
+using System.Net;
+using System.Text.Json.Serialization;
 using VrCommand.Core;
 
 namespace VrCommand.Api;
 
 internal static partial class VrVenueTickets
 {
-    internal sealed record CheckRequest(string Topology, CheckRoom[] Rooms);
+    internal sealed record CheckRequest(string Topology, CheckRoom[] Rooms, bool RequireLiveSource = false);
     internal sealed record CheckRoom(int RoomId, Guid SessionId, byte[][] ConnectionFiles);
     internal sealed record SeatResult(int RoomId, int Seat, string Status, HeadsetKind? Headset = null);
-    internal sealed record CheckResult(string Topology, bool AllMatched, SeatResult[] Seats);
+    internal sealed record CheckResult(string Topology, bool AllMatched, SeatResult[] Seats,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? LiveSourceVerified);
     private sealed record Connection(string? Role, string? Address, int Port, string? JoinTicket);
 
     internal static async Task<CheckRequest> ReadCheck(HttpRequest request, CancellationToken cancellation)
@@ -25,7 +28,7 @@ internal static partial class VrVenueTickets
 
     internal static CheckResult Check(CheckRequest input, WorldRecordings worlds, OperatorIdentity actor, PlayerJoinTicketSigner signer)
     {
-        var sources = worlds.ReadVenueSources(null, actor);
+        var sources = worlds.ReadVenueSources(null, actor, requireLiveCapture: input.RequireLiveSource);
         var plan = Plan(sources);
         var seats = new List<SeatResult>(SessionManager.MaxPlayers);
         foreach (var room in input.Rooms.OrderBy(room => room.RoomId))
@@ -36,10 +39,13 @@ internal static partial class VrVenueTickets
                 SeatResult result;
                 if (current.SessionId != room.SessionId || plan.Topology?.ToString() != input.Topology)
                     result = new(room.RoomId, seat, "session-unavailable");
-                else if (current.Endpoint is not { } endpoint || current.Problem == "vr-venue-endpoint-reused")
+                else if (current.Endpoint is not { } endpoint || current.Problem == "vr-venue-endpoint-reused"
+                    || (input.RequireLiveSource && IPAddress.IsLoopback(IPAddress.Parse(endpoint.Address))))
                     result = new(room.RoomId, seat, "endpoint-mismatch");
                 else if (current.Problem == "vr-venue-roster-reused")
                     result = new(room.RoomId, seat, "venue-unavailable");
+                else if (input.RequireLiveSource && current.TicketSourceLive != true)
+                    result = new(room.RoomId, seat, "source-stale");
                 else
                 {
                     var player = sources[room.SessionId].Session.Players.SingleOrDefault(player => player.RoomId == room.RoomId && player.Seat == seat);
@@ -49,7 +55,8 @@ internal static partial class VrVenueTickets
                 seats.Add(result);
             }
         }
-        return new(input.Topology, seats.All(seat => seat.Status == "matched"), [.. seats]);
+        var matched = seats.All(seat => seat.Status == "matched");
+        return new(input.Topology, matched, [.. seats], input.RequireLiveSource ? matched : null);
     }
 
     internal static SeatResult CheckConnection(Guid sessionId, Player player, byte[] json, ConnectionEndpoint endpoint, PlayerJoinTicketSigner signer)

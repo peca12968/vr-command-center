@@ -39,11 +39,11 @@ def main():
             if after['dependencies'].get(group)!=entries:raise ValueError('Original dependency pins changed: '+name+' '+group)
     with (root/'publish.log').open('xb') as log:subprocess.run(['dotnet','publish',str(project),'--configuration','Release','--no-restore','--self-contained','true','-o',str(publication),*common],cwd=source,stdout=log,stderr=subprocess.STDOUT,check=True)
     frameworks=runtime_config(publication)
-    if 'v0.31.103' not in (publication/'wwwroot/console/index.html').read_text(encoding='utf-8'):raise ValueError('Expected console 0.31.103 in the actual publication')
+    if 'v0.31.104' not in (publication/'wwwroot/console/index.html').read_text(encoding='utf-8'):raise ValueError('Expected console 0.31.104 in the actual publication')
     if set(frameworks.values())!={args.runtime_version}:raise ValueError('Published runtime differs from the requested patch')
     for name,value in hashes.items():
         if digest(ROOT/name)!=value:raise ValueError('Repository source changed during publication: '+name)
-    receipt={'schemaVersion':1,'target':'win-x64','apiVersion':'0.31.0','consoleVersion':'0.31.103','completedAtUtc':datetime.now(timezone.utc).isoformat(),'runtimeFrameworks':frameworks,
+    receipt={'schemaVersion':1,'target':'win-x64','apiVersion':'0.31.0','consoleVersion':'0.31.104','completedAtUtc':datetime.now(timezone.utc).isoformat(),'runtimeFrameworks':frameworks,
         'baseCommit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),'sourceFiles':hashes,
         'isolatedLocks':{name:{'originalSha256':hashes[name],'publishedSha256':digest(source/name)} for name in locks},
         'files':{v.relative_to(publication).as_posix():digest(v) for v in sorted(publication.rglob('*')) if v.is_file()},

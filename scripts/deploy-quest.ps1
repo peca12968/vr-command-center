@@ -212,11 +212,14 @@ function Get-ManagementTarget([string]$Address) {
     return @{ Origin = $uri; Headers = @{ Authorization = 'Bearer ' + $masterKey } }
 }
 
-function Confirm-VenueWithManagement([string]$Address, [string]$Topology, [object[]]$Rooms, $PublishedEndpoints, [string]$Mode = 'MR') {
+function Confirm-VenueWithManagement([string]$Address, [string]$Topology, [object[]]$Rooms, $PublishedEndpoints, [string]$Mode = 'MR',
+    [switch]$RequireLiveSource) {
     $target = Get-ManagementTarget $Address
     $endpoint = [Uri]::new($target.Origin, "/api/$($Mode.ToLowerInvariant())-deployment/venue-check")
     $checksHeadset = $Mode -cin @('VR','Mixed')
-    $body = @{ topology = $Topology; rooms = $Rooms } | ConvertTo-Json -Compress -Depth 6
+    $requestBody = @{ topology = $Topology; rooms = $Rooms }
+    if ($RequireLiveSource) { $requestBody.requireLiveSource = $true }
+    $body = $requestBody | ConvertTo-Json -Compress -Depth 6
     try {
         $response = Invoke-WebRequest -Uri $endpoint -Method Post -ContentType 'application/json' `
             -Headers $target.Headers -Body $body -NoProxy -MaximumRedirection 0 -TimeoutSec 10 -SkipHttpErrorCheck
@@ -228,8 +231,12 @@ function Confirm-VenueWithManagement([string]$Address, [string]$Topology, [objec
     if ($result.topology -cne $Topology -or $result.allMatched -isnot [bool] -or $result.seats -isnot [array] -or $result.seats.Count -ne 25) {
         throw 'The management service returned an invalid venue check receipt.'
     }
+    if ($RequireLiveSource -and ($result.liveSourceVerified -isnot [bool] -or $result.liveSourceVerified -ne $result.allMatched)) {
+        throw 'The management service did not return a current-source verification receipt.'
+    }
     $validStatuses = @('matched', 'session-unavailable', 'seat-unavailable', 'connection-invalid', 'ticket-invalid', 'wrong-seat', 'admission-changed')
     if ($checksHeadset) { $validStatuses += @('endpoint-mismatch', 'venue-unavailable') }
+    if ($RequireLiveSource) { $validStatuses += @('source-stale', 'endpoint-mismatch') }
     if ($Mode -cne 'VR') { $validStatuses += @('alignment-not-locked', 'connection-hash-mismatch', 'alignment-invalid', 'alignment-wrong-room', 'alignment-hash-mismatch') }
     $failures = for ($i = 0; $i -lt 25; $i++) {
         $room = [int][Math]::Floor($i / 5) + 1
@@ -245,6 +252,7 @@ function Confirm-VenueWithManagement([string]$Address, [string]$Topology, [objec
     if ($result.allMatched -ne (-not $failures)) { throw 'The management service returned an inconsistent venue check receipt.' }
     if ($failures) { throw ('Live venue check failed. ' + ($failures -join '; ')) }
     if ($checksHeadset) { return $result.seats }
+    if ($RequireLiveSource) { return }
     foreach ($sessionId in $PublishedEndpoints.Keys) {
         $source = [Uri]::new($target.Origin, "/api/sessions/$sessionId/connection-endpoint")
         try {
@@ -428,15 +436,17 @@ function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$Selecte
         EarliestExpiry = $earliest; LiveRooms = $liveRooms.ToArray(); PublishedEndpoints = $publishedEndpoints; SeatHeadsets = @{} }
 }
 
-function Confirm-VenueReadback($Venue) {
+function Confirm-VenueReadback($Venue, [switch]$RequireLiveSource) {
     if ($ManagementApi) {
         if ($Venue.Report.mode -cin @('VR','Mixed')) {
-            $seats = @(Confirm-VenueWithManagement $ManagementApi $Venue.Report.topology $Venue.LiveRooms $Venue.PublishedEndpoints -Mode $Venue.Report.mode)
+            $seats = @(Confirm-VenueWithManagement $ManagementApi $Venue.Report.topology $Venue.LiveRooms $Venue.PublishedEndpoints `
+                -Mode $Venue.Report.mode -RequireLiveSource:$RequireLiveSource)
             foreach ($row in $seats) { $Venue.SeatHeadsets["$($row.roomId)/$($row.seat + 1)"] = $row.headset }
             $Venue.Report.quest3Seats = @($seats | Where-Object headset -CEQ 'Quest3').Count
         } else {
             if (-not $Venue.Report.alignmentPinsVerified) { throw 'The live venue check requires all 25 connection files to carry locked MR alignment hashes.' }
-            Confirm-VenueWithManagement $ManagementApi $Venue.Report.topology $Venue.LiveRooms $Venue.PublishedEndpoints
+            Confirm-VenueWithManagement $ManagementApi $Venue.Report.topology $Venue.LiveRooms $Venue.PublishedEndpoints `
+                -RequireLiveSource:$RequireLiveSource
         }
         $Venue.Report.managementVerified = $true
     }
@@ -738,6 +748,15 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, [str
         }
         if ($connection.Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) {
             $device.status = 'ticket-expired'; return $report
+        }
+        try { Confirm-VenueReadback $Venue -RequireLiveSource }
+        catch {
+            $device.status = 'venue-check-failed'
+            $device.failedStep = 'verify-live-venue'
+            return $report
+        }
+        if ($checksHeadset -and $Venue.SeatHeadsets["$($row.roomId)/$($row.seat)"] -cne 'Quest3') {
+            $device.status = 'seat-headset-mismatch'; return $report
         }
         $deployment = @{}
         try {
@@ -1042,8 +1061,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Could not identify the selected Android device.' }
     $model = ([string]$model).Trim()
     if ($model -ne 'Quest 3') { throw 'Selected device is not a Meta Quest 3. No app was installed.' }
+    if ($ManagementApi) { Confirm-VenueReadback $venue -RequireLiveSource }
     & $AdbPath -s $Serial install -r $apk
     if ($LASTEXITCODE -ne 0) { throw 'APK installation failed.' }
+    if ($ManagementApi) { Confirm-VenueReadback $venue -RequireLiveSource }
     Set-QuestConnection $Serial $config $ticket $alignment -UsePassthrough:$Passthrough -RequestMixedReality:$isMixedReality
 } finally {
     $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose()

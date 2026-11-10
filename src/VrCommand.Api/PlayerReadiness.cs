@@ -340,7 +340,7 @@ public sealed partial class WorldRecordings
             var poseStream = includeRoomDetails && confirmed && current.State == SessionState.Running
                 && (current.Environment.Mode == ExperienceMode.VR || mrState == "WaitingPlayers") ? info!.Header.streamId : null;
             return (report, clock, venuePhase, beginState, environmentEvidence, enemyRooms, endpoint, vrParticipationObserved, beginFrame,
-                venueTrackingObserved, poseStream, endpoint is null ? null : ManagedTicketSourceLive(current));
+                venueTrackingObserved, poseStream, endpoint is null ? null : TicketSourceLive(current));
         }
     }
 }

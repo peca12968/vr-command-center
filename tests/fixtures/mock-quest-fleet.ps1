@@ -97,6 +97,17 @@ switch -CaseSensitive ($args[3]) {
     }
     'am' { if ($fault -ceq 'force-stop') { exit 1 }; exit 0 }
     'mkdir' { if ($fault -ceq 'directory') { exit 1 }; exit 0 }
-    'monkey' { if ($fault -ceq 'launch') { exit 1 }; exit 0 }
+    'monkey' {
+        if ($fault -ceq 'launch') { exit 1 }
+        if ($serial -ceq $env:VR_QUEST_FLEET_HOLD_AFTER_LAUNCH) {
+            [IO.File]::WriteAllText((Join-Path $root 'first-launch.request'), 'original mock launch')
+            $deadline = [DateTimeOffset]::UtcNow.AddSeconds(25)
+            while (-not [IO.File]::Exists((Join-Path $root 'continue.request'))) {
+                if ([DateTimeOffset]::UtcNow -ge $deadline) { exit 96 }
+                Start-Sleep -Milliseconds 50
+            }
+        }
+        exit 0
+    }
 }
 exit 98

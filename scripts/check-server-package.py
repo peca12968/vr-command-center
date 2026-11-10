@@ -193,6 +193,7 @@ def main():
     p.add_argument('--check-managed-mr', action='store_true', help='Verify the MR alignment startup gate, desktop rejection and Preparing seal')
     p.add_argument('--mr-venue-bundle-only', action='store_true', help='Verify both MR venue exports from native publishers, without starting desktop players')
     p.add_argument('--check-mr-venue-source-recovery', action='store_true', help='Hold an original signed MR ZIP while its managed Linked publisher pauses and recovers')
+    p.add_argument('--check-mr-venue-write-gate', action='store_true', help='Verify a managed MR source interruption between two mock Quest writes')
     p.add_argument('--mixed-venue-bundle-only', action='store_true', help='Verify a mixed five-room console ZIP and mapped mock Quest deployment from native publishers')
     p.add_argument('--openxr-mock-only', action='store_true', help='Verify a packaged graphical OpenXR client with the installed Unity mock runtime')
     p.add_argument('--check-openxr-reconnect', action='store_true', help='Interrupt the tracked UDP client and reload its ticket with the mock right Vive menu button')
@@ -205,6 +206,8 @@ def main():
     if args.check_mapped_quest and not args.mr_venue_bundle_only:p.error('--check-mapped-quest requires --mr-venue-bundle-only')
     if args.check_mr_venue_source_recovery and not args.mr_venue_bundle_only:
         p.error('--check-mr-venue-source-recovery requires --mr-venue-bundle-only')
+    if args.check_mr_venue_write_gate and not args.check_mr_venue_source_recovery:
+        p.error('--check-mr-venue-write-gate requires --check-mr-venue-source-recovery')
     if args.check_room_endpoints and not (args.check_vr_venue_tickets or args.mixed_venue_bundle_only):
         p.error('--check-room-endpoints requires --check-vr-venue-tickets or --mixed-venue-bundle-only')
     venue_only = args.mr_venue_bundle_only or args.mixed_venue_bundle_only
@@ -3003,6 +3006,10 @@ def main():
                     subset = destination / 'partial'
                     subset.mkdir()
                     verify_mapped_quest(deploy, subset, environment, raw, mode, files, hashes, partial=True)
+                if managed and args.check_mr_venue_write_gate:
+                    boundary = destination / 'write-boundary'
+                    boundary.mkdir()
+                    verify_mr_venue_write_gate(entries[0], deploy, boundary, environment, raw, rooms)
             endpoints = {entry['sessionId']: f'{address}:{entry["ready"]["port"]}' for entry in entries}
             check(report['managementVerified'] and report['alignmentPinsVerified'] and report['topology'] == mode and report['seats'] == 25
                 and [(row['roomId'], row['seats'], row['endpoint'], row['alignmentSha256']) for row in report['rooms']] == [
@@ -3018,6 +3025,80 @@ def main():
             for entry in entries:
                 finish(entry)
                 verify_mr_alignment_archive(entry, alignment_exports)
+
+    def verify_mr_venue_write_gate(entry, deploy, destination, environment, raw, rooms):
+        route = '/api/mr-deployment/venue-check'
+        proof = {'topology': 'Linked', 'rooms': []}
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            for room in rooms:
+                room_id = room['roomId']
+                with zipfile.ZipFile(io.BytesIO(archive.read(f'room-{room_id:02}-connections.zip'))) as tickets:
+                    connections = [base64.b64encode(tickets.read(f'room-{room_id:02}-seat-{seat:02}.json')).decode()
+                                   for seat in range(1, 6)]
+                proof['rooms'].append({'roomId': room_id, 'sessionId': room['sessionId'],
+                    'alignmentFile': room['alignmentFile'], 'connectionFiles': connections})
+        strict = dict(proof, requireLiveSource=True)
+        initial = request(route, strict)
+        check(initial['allMatched'] and initial['liveSourceVerified'] and len(initial['seats']) == 25,
+              'Strict MR check binds the signed 25-seat bundle to its current managed publisher')
+        tampered = json.loads(json.dumps(strict))
+        first_config = json.loads(base64.b64decode(proof['rooms'][0]['connectionFiles'][0]))
+        tampered['rooms'][0]['connectionFiles'][0] = base64.b64encode(json.dumps(dict(first_config, port=1024 if first_config['port'] != 1024 else 1025)).encode()).decode()
+        mismatch = request(route, tampered)
+        check(not mismatch['liveSourceVerified'] and [(row['roomId'], row['seat'], row['status']) for row in mismatch['seats'] if row['status'] != 'matched']
+              == [(1, 0, 'endpoint-mismatch')], 'Strict MR check rejects a changed UDP port with the original valid ticket')
+        selected = [{'roomId': room, 'seat': 1, 'serial': f'fixture-{(room - 1) * 5 + 1:02}'} for room in (1, 3, 5)]
+        mapping = destination / 'device-map.json'
+        mapping.write_text(json.dumps({'version': 1, 'seats': selected}), encoding='utf-8')
+        mapped = [*deploy, '-DeviceMap', str(mapping), '-AllowPartialMap', '-DeployMappedSeats', '-ExpectedVersionCode', '61',
+                  '-AdbPath', str(ROOT/'tests/fixtures/mock-quest-fleet.ps1')]
+        fixture_env = {**environment, 'VR_QUEST_FLEET_FIXTURE': str(destination), 'VR_QUEST_FLEET_FAULTS': ''}
+        held_env = {**fixture_env, 'VR_QUEST_FLEET_HOLD_AFTER_LAUNCH': selected[0]['serial']}
+        resume = destination/'continue.request'
+        session_route = '/api/sessions/' + entry['sessionId']
+        with subprocess.Popen(mapped, env=held_env, cwd=destination, text=True, encoding='utf-8', stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE) as cli:
+            try:
+                def first_launched():
+                    if cli.poll() is not None: raise RuntimeError('Mapped Quest CLI exited before the first original mock launch')
+                    return (destination/'first-launch.request').is_file()
+                wait(first_launched, 25, 'first original Quest mock launch reaches the fixture boundary')
+                with hold_owned_unity_threads(entry['witness'], entry['ready']['childPid']):
+                    wait(lambda: all(row.get('ticketSourceLive') is False for row in request('/api/rooms/readiness')['rooms']),
+                         12, 'original MR source goes stale between mapped seats')
+                    held_world = request(session_route + '/world')
+                    held_receipt = request(route, strict)
+                    readonly = request(route, proof)
+                    check(held_receipt['liveSourceVerified'] is False and not held_receipt['allMatched']
+                          and {row['status'] for row in held_receipt['seats']} == {'source-stale'}
+                          and readonly['allMatched'] and 'liveSourceVerified' not in readonly,
+                          'Held source blocks strict deployment while original read-only signature check remains available')
+                    resume.touch(exist_ok=False)
+                    stdout, _ = cli.communicate(timeout=15)
+                    interrupted = json.loads(stdout)
+                    check(cli.returncode == 1 and not interrupted['complete'] and interrupted['managementVerified']
+                          and [row['status'] for row in interrupted['devices']] == ['launch-requested', 'venue-check-failed', 'not-attempted']
+                          and interrupted['devices'][1]['failedStep'] == 'verify-live-venue'
+                          and {path.name for path in destination.glob('fixture-*')} == {selected[0]['serial']},
+                          'MR deployment preserves the first mock write and performs no writes on the blocked or pending device')
+            finally:
+                if cli.poll() is None: cli.kill(); cli.communicate(timeout=10)
+        before = (destination / selected[0]['serial'] / 'vr-connection.json').read_bytes()
+        adb_log = destination/'adb.log'
+        old_commands = adb_log.read_text(encoding='utf-8').splitlines()
+        mapping.write_text(json.dumps({'version': 1, 'seats': selected[1:]}), encoding='utf-8')
+        restored = wait(lambda: (receipt if (receipt := request(route, strict))['liveSourceVerified'] else None),
+                        18, 'original MR publisher restores strict venue verification')
+        resumed = request(session_route + '/world')
+        retried = json.loads(subprocess.check_output(mapped, env=fixture_env, cwd=destination, encoding='utf-8', timeout=45))
+        new_commands = adb_log.read_text(encoding='utf-8').splitlines()[len(old_commands):]
+        check(restored == initial and resumed['header'] == held_world['header'] and resumed['acceptedSequence'] > held_world['acceptedSequence']
+              and retried['complete'] and retried['mappedSeats'] == 2 and all(row['status'] == 'launch-requested' for row in retried['devices'])
+              and {line.split()[1] for line in new_commands if line.startswith('-s ')} == {row['serial'] for row in selected[1:]}
+              and before == (destination / selected[0]['serial'] / 'vr-connection.json').read_bytes(),
+              'The same native publisher recovers and an explicit retry deploys only the two remaining mock devices')
+        save('mr-venue-write-gate.json', {'interrupted': interrupted, 'retried': retried, 'heldSequence': held_world['acceptedSequence'],
+            'resumedSequence': resumed['acceptedSequence'], 'staleSeats': len(held_receipt['seats'])})
     def check_mixed_venue_bundle():
         stage('native-mixed-venue-bundle')
         markers = [{'room': {'x': x, 'z': z}, 'tracking': {'x': x, 'z': z}} for x, z in [(-2, -2), (2, -2), (-2, 2)]]

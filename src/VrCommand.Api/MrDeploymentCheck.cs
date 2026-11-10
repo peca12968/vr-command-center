@@ -1,3 +1,5 @@
+using System.Net;
+using System.Text.Json.Serialization;
 using VrCommand.Core;
 
 namespace VrCommand.Api;
@@ -9,9 +11,10 @@ internal static class MrDeploymentCheck
 
     internal sealed record Files(byte[] ConnectionFile, byte[] AlignmentFile);
     internal sealed record Result(string Status, int RoomId, int Seat, DateTimeOffset? ExpiresAtUtc = null);
-    internal sealed record VenueFiles(string Topology, VenueRoom[] Rooms);
+    internal sealed record VenueFiles(string Topology, VenueRoom[] Rooms, bool RequireLiveSource = false);
     internal sealed record VenueRoom(int RoomId, Guid SessionId, byte[][] ConnectionFiles, byte[] AlignmentFile);
-    internal sealed record VenueResult(string Topology, bool AllMatched, Result[] Seats);
+    internal sealed record VenueResult(string Topology, bool AllMatched, Result[] Seats,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? LiveSourceVerified);
     private sealed record Connection(string? Role, string? Address, int Port, string? JoinTicket, string? RoomAlignmentSha256);
 
     internal static async Task<Files> ReadFiles(HttpRequest request, CancellationToken cancellation)
@@ -46,26 +49,38 @@ internal static class MrDeploymentCheck
         return CheckFiles(session.Id, player, files.ConnectionFile, ReadAlignment(files.AlignmentFile), hash, signer);
     }
 
-    internal static VenueResult CheckVenue(VenueFiles files, SessionView[] snapshot, PlayerJoinTicketSigner signer)
+    internal static VenueResult CheckVenue(VenueFiles files, WorldRecordings worlds, SessionManager manager,
+        OperatorIdentity actor, PlayerJoinTicketSigner signer)
     {
         var mode = files.Topology == "Linked" ? SessionMode.Linked : SessionMode.Independent;
+        var sources = files.RequireLiveSource
+            ? worlds.ReadVenueSources(files.Rooms.Select(room => room.SessionId).Distinct().ToArray(), actor, requireLiveCapture: true) : null;
+        var snapshot = sources is null ? manager.List(false, actor) : sources.Values.Select(source => source.Session).ToArray();
         var results = new List<Result>(SessionManager.RoomCount * SessionManager.PlayersPerRoom);
+        var endpoints = new HashSet<(string, int)>();
         foreach (var room in files.Rooms.OrderBy(room => room.RoomId))
         {
             var session = snapshot.SingleOrDefault(view => view.Id == room.SessionId && view.State != SessionState.Ended
                 && view.Mode == mode && view.Environment.Mode == ExperienceMode.MR && view.RoomIds.Contains(room.RoomId));
+            var endpoint = session is not null && sources is not null ? sources[session.Id].Endpoint : null;
+            var sourceProblem = session is null || sources is null ? null
+                : endpoint is null || IPAddress.IsLoopback(IPAddress.Parse(endpoint.Address))
+                    || (mode == SessionMode.Independent && !endpoints.Add((endpoint.Address, endpoint.Port))) ? "endpoint-mismatch"
+                : sources[session.Id].TicketSourceLive != true ? "source-stale" : null;
             var hash = session?.RoomAlignment?.ForRoom(room.RoomId);
             var alignment = hash is null ? null : ReadAlignment(room.AlignmentFile);
             for (var seat = 0; seat < SessionManager.PlayersPerRoom; seat++)
             {
                 var player = session?.Players.SingleOrDefault(player => player.RoomId == room.RoomId && player.Seat == seat && player.Headset == HeadsetKind.Quest3);
                 if (session is null) results.Add(new("session-unavailable", room.RoomId, seat));
+                else if (sourceProblem is not null) results.Add(new(sourceProblem, room.RoomId, seat));
                 else if (hash is null) results.Add(new("alignment-not-locked", room.RoomId, seat));
                 else if (player is null) results.Add(new("seat-unavailable", room.RoomId, seat));
-                else results.Add(CheckFiles(session.Id, player, room.ConnectionFiles[seat], alignment, hash, signer));
+                else results.Add(CheckFiles(session.Id, player, room.ConnectionFiles[seat], alignment, hash, signer, endpoint));
             }
         }
-        return new(files.Topology, results.All(result => result.Status == "matched"), [.. results]);
+        var matched = results.All(result => result.Status == "matched");
+        return new(files.Topology, matched, [.. results], files.RequireLiveSource ? matched : null);
     }
 
     internal static CheckedRoomAlignmentFile? ReadAlignment(byte[] file)

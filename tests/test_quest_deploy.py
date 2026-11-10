@@ -907,11 +907,14 @@ else:
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
-                calls.append((self.path, self.headers['Authorization'], json.loads(self.rfile.read(int(self.headers['Content-Length'])))))
+                body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                calls.append((self.path, self.headers['Authorization'], body))
                 payload = {'topology': 'Linked', 'allMatched': not stale[0], 'seats': [
                     {'roomId': room, 'seat': seat, 'status': 'admission-changed' if stale[0] and (room, seat) == (2, 1) else 'matched',
                      'headset': headset[0] if (room, seat) == (2, 1) else 'Quest3'}
                     for room in range(1, 6) for seat in range(5)]}
+                if body.get('requireLiveSource') is True:
+                    payload['liveSourceVerified'] = payload['allMatched']
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
@@ -964,7 +967,8 @@ else:
             finally:
                 server.shutdown()
                 thread.join()
-        self.assertEqual(4, len(calls))
+        self.assertEqual(4, sum('requireLiveSource' not in proof for _, _, proof in calls))
+        self.assertEqual(28, sum(proof.get('requireLiveSource') is True for _, _, proof in calls))
         for route, key, proof in calls:
             self.assertEqual(('/api/vr-deployment/venue-check', 'Bearer private-fixture-master'), (route, key))
             for room in proof['rooms']:
@@ -1046,9 +1050,12 @@ else:
                 self.wfile.write(json.dumps(payload).encode())
 
             def do_POST(self):
-                self.rfile.read(int(self.headers['Content-Length']))
-                self.respond({'topology': 'Linked', 'allMatched': True, 'seats': [
-                    {'roomId': room, 'seat': seat, 'status': 'matched'} for room in range(1, 6) for seat in range(5)]})
+                body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                receipt = {'topology': 'Linked', 'allMatched': True, 'seats': [
+                    {'roomId': room, 'seat': seat, 'status': 'matched'} for room in range(1, 6) for seat in range(5)]}
+                if body.get('requireLiveSource') is True:
+                    receipt['liveSourceVerified'] = True
+                self.respond(receipt)
 
             def do_GET(self):
                 if self.path == f'/api/sessions/{session}/readiness':
@@ -1079,7 +1086,7 @@ else:
                     self.assertEqual(1, pending.returncode, pending.stderr)
                     self.assertEqual(['mr-profile-pending'] * 2, [row['status'] for row in json.loads(pending.stdout)['seats']])
                 self.assertEqual(before, (self.root / 'adb.log').read_bytes())
-                self.assertEqual(deploy_calls + (deploy_calls + [f'/api/sessions/{session}/readiness']) * 3, calls)
+                self.assertEqual(deploy_calls + (deploy_calls[:2] + [f'/api/sessions/{session}/readiness']) * 3, calls)
             finally:
                 server.shutdown()
                 thread.join(timeout=5)
@@ -1087,7 +1094,8 @@ else:
         report = json.loads(result.stdout)
         self.assertEqual((True, True, True, 2, 23), (report['complete'], report['managementVerified'],
                          report['alignmentPinsVerified'], report['mappedSeats'], report['unmappedSeats']))
-        self.assertEqual(['/api/mr-deployment/venue-check', f'/api/sessions/{session}/connection-endpoint'], deploy_calls)
+        self.assertEqual(['/api/mr-deployment/venue-check', f'/api/sessions/{session}/connection-endpoint',
+                          '/api/mr-deployment/venue-check', '/api/mr-deployment/venue-check'], deploy_calls)
         self.assertEqual({'fixture-03','fixture-22'}, {path.name for path in self.root.glob('fixture-*')})
         for row in selected:
             room, seat = row['roomId'], row['seat']
@@ -1145,6 +1153,11 @@ else:
 
     def test_mapped_deployment_stops_before_writing_to_changed_device(self):
         self.assert_mapped_deployment_stops('identity-changed', 'device-identity-changed', None)
+
+    def test_mapped_deployment_requires_a_current_source_receipt_before_each_seat(self):
+        for reason in ('source-stale', 'missing-receipt'):
+            with self.subTest(reason=reason):
+                self.assert_mapped_deployment_stops(reason, 'venue-check-failed', 'verify-live-venue', partial=True)
 
     def test_release_report_requires_verified_quest_identity_before_adb(self):
         files, _ = self.bundle('Linked')
@@ -1218,6 +1231,7 @@ else:
             path.write_text(json.dumps(mapping), encoding='utf-8')
         session = str(self.session_ids[0])
         calls = []
+        write_checks = []
 
         class Handler(BaseHTTPRequestHandler):
             def respond(self, data):
@@ -1228,9 +1242,19 @@ else:
                 self.wfile.write(json.dumps(data).encode())
 
             def do_POST(self):
-                self.rfile.read(int(self.headers['Content-Length']))
-                self.respond({'topology': 'Linked', 'allMatched': True, 'seats': [
-                    {'roomId': room, 'seat': seat, 'status': 'matched'} for room in range(1, 6) for seat in range(5)]})
+                body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                receipt = {'topology': 'Linked', 'allMatched': True, 'seats': [
+                    {'roomId': room, 'seat': seat, 'status': 'matched'} for room in range(1, 6) for seat in range(5)]}
+                if body.get('requireLiveSource') is True:
+                    write_checks.append(body)
+                    receipt['liveSourceVerified'] = True
+                    if len(write_checks) == 4 and fault == 'source-stale':
+                        receipt.update(allMatched=False, liveSourceVerified=False)
+                        for row in receipt['seats'][-5:]:
+                            row['status'] = 'source-stale'
+                    if len(write_checks) == 4 and fault == 'missing-receipt':
+                        del receipt['liveSourceVerified']
+                self.respond(receipt)
 
             def do_GET(self):
                 self.respond({'version': 1, 'sessionId': session, 'sessionEnded': False, 'address': '192.168.1.10', 'port': 7777})
@@ -1263,7 +1287,11 @@ else:
                          [row['status'] for row in report['devices']])
         self.assertEqual([True] * 3 + [None] * (count - 3), [row.get('filesVerified') for row in report['devices']])
         self.assertEqual([None] * 3 + [failed_step] + [None] * (count - 4), [row.get('failedStep') for row in report['devices']])
-        self.assertEqual(['/api/mr-deployment/venue-check', f'/api/sessions/{session}/connection-endpoint'], calls)
+        expected_write_checks = 3 if fault in ('identity-changed', 'apk-changed') else 4
+        self.assertEqual(['/api/mr-deployment/venue-check', f'/api/sessions/{session}/connection-endpoint']
+                         + ['/api/mr-deployment/venue-check'] * expected_write_checks, calls)
+        self.assertEqual(expected_write_checks, len(write_checks))
+        self.assertTrue(all(proof == write_checks[0] for proof in write_checks))
         active = (before / 'vr-connection.json').read_bytes()
         if fault in ('config-active-changed', 'launch'):
             self.assertEqual(seats[1]['room-01-seat-04.json']['joinTicket'], json.loads(active)['joinTicket'])
@@ -1382,6 +1410,63 @@ else:
             finally:
                 server.shutdown()
                 thread.join(timeout=5)
+
+    def test_single_online_seat_rechecks_the_source_after_apk_install(self):
+        files, _ = self.bundle('Linked')
+        scripts = self.root / 'scripts'
+        scripts.mkdir()
+        script = scripts / 'deploy-quest.ps1'
+        shutil.copyfile(ROOT / 'scripts' / script.name, script)
+        adb = scripts / 'mock-adb.ps1'
+        adb.write_text(ADB_FIXTURE, encoding='utf-8')
+        apk = self.root / 'artifacts/quest/VrCommand.apk'
+        apk.parent.mkdir(parents=True)
+        apk.write_bytes(b'mock APK')
+        (self.root / 'remote').mkdir()
+        log = self.root / 'adb.log'
+        reads = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def respond(self, data):
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(data).encode())
+
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                strict = body.get('requireLiveSource') is True
+                installed = log.is_file() and ' install ' in log.read_text(encoding='utf-8')
+                reads.append((strict, installed))
+                live = not installed
+                receipt = {'topology': 'Linked', 'allMatched': live, 'seats': [
+                    {'roomId': room, 'seat': seat, 'status': 'matched' if live else 'source-stale'}
+                    for room in range(1, 6) for seat in range(5)]}
+                if strict:
+                    receipt['liveSourceVerified'] = live
+                self.respond(receipt)
+
+            def do_GET(self):
+                self.respond({'version': 1, 'sessionId': str(self.server.session), 'sessionEnded': False, 'address': '192.168.1.10', 'port': 7777})
+
+            def log_message(self, *args):
+                pass
+
+        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+            server.session = self.session_ids[0]
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                result = self.run_bundle(files, '-RoomId', '4', '-Seat', '3', '-Serial', 'fixture', '-AdbPath', str(adb),
+                    '-ManagementApi', f'http://127.0.0.1:{server.server_port}', script=script,
+                    environment={**os.environ, 'QUEST_TEST_ROOT': str(self.root), 'VR_COMMAND_MASTER_KEY': 'PRIVATE_MASTER_CANARY'})
+            finally:
+                server.shutdown()
+                thread.join(timeout=5)
+        self.assert_rejected(result, 'source-stale')
+        self.assertEqual([(False, False), (True, False), (True, True)], reads)
+        self.assertEqual(2, len(log.read_text(encoding='utf-8').splitlines()))
+        self.assertFalse(list((self.root / 'remote').iterdir()))
 
     def test_both_topologies_check_all_twenty_five_seats_without_printing_tickets(self):
         for topology, endpoint_count in (('Linked',1), ('Independent',5)):

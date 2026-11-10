@@ -46,7 +46,8 @@ public sealed partial class WorldRecordings
         lock (gate) return EndpointRow(manager.Get(id, actor)) ?? throw new KeyNotFoundException("The game source has not published connection settings.");
     }
 
-    internal Dictionary<Guid, (SessionView Session, ConnectionEndpoint? Endpoint, bool? TicketSourceLive)> ReadVenueSources(Guid[]? ids, OperatorIdentity actor)
+    internal Dictionary<Guid, (SessionView Session, ConnectionEndpoint? Endpoint, bool? TicketSourceLive)> ReadVenueSources(
+        Guid[]? ids, OperatorIdentity actor, bool requireLiveCapture = false)
     {
         if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue exports require the master operator.");
         lock (gate)
@@ -54,27 +55,27 @@ public sealed partial class WorldRecordings
                 .ToDictionary(session => session.Id, session =>
                 {
                     var endpoint = EndpointRow(session);
-                    return (session, endpoint, endpoint is null ? null : ManagedTicketSourceLive(session));
+                    return (session, endpoint, endpoint is null ? null : TicketSourceLive(session, requireLiveCapture));
                 });
     }
 
     internal void RequireTicketSource(SessionView session)
     {
         lock (gate)
-            if (ManagedTicketSourceLive(session) == false) throw new TicketSourceUnavailableException();
+            if (TicketSourceLive(session) == false) throw new TicketSourceUnavailableException();
     }
 
-    // An immutable endpoint remains readable for investigation; only a managed
-    // venue publication requires recent capture evidence before issuing tickets.
-    private bool? ManagedTicketSourceLive(SessionView session)
+    // Ordinary issuance preserves legacy endpoint behavior. Deployment can
+    // require recent capture evidence for every published source.
+    private bool? TicketSourceLive(SessionView session, bool includeLegacy = false)
     {
         using var command = Command("""
             SELECT json_extract(r.header,'$.captureStartedAtUtc'),r.duration,r.complete,r.accepted,
                 json_extract(f.packet,'$.suspended'),json_extract(f.packet,'$.frame.phase')
-            FROM managed_connection_endpoints m JOIN recordings r ON r.session=m.session
+            FROM recordings r
             LEFT JOIN world_frames f ON f.session=r.session AND f.sequence=r.accepted
-            WHERE m.session=$id
-            """, ("$id", session.Id.ToString("D")));
+            WHERE r.session=$id AND ($includeLegacy OR EXISTS (SELECT 1 FROM managed_connection_endpoints m WHERE m.session=r.session))
+            """, ("$id", session.Id.ToString("D")), ("$includeLegacy", includeLegacy));
         using var row = command.ExecuteReader();
         if (!row.Read()) return null;
         if (row.GetBoolean(2) || row.GetInt64(3) <= 0 || row.IsDBNull(0) || row.IsDBNull(4) || row.GetBoolean(4) || row.IsDBNull(5)

@@ -381,13 +381,13 @@ app.MapPost("/api/sessions/{id:guid}/rooms/{roomId:int}/players/{playerId:guid}/
         ?? throw new KeyNotFoundException("Player does not exist in this room.");
     return MrDeploymentCheck.Check(session, player, files, ticketSigner);
 });
-app.MapPost("/api/mr-deployment/venue-check", async (SessionManager manager, HttpContext context) =>
+app.MapPost("/api/mr-deployment/venue-check", async (WorldRecordings worlds, SessionManager manager, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";
     var actor = Actor(context);
     if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Venue deployment checks require the master operator.");
     var files = await MrDeploymentCheck.ReadVenue(context.Request, context.RequestAborted);
-    return MrDeploymentCheck.CheckVenue(files, manager.List(false, actor), ticketSigner);
+    return MrDeploymentCheck.CheckVenue(files, worlds, manager, actor, ticketSigner);
 });
 app.MapPost("/api/mr-deployment/venue-bundle", async (WorldRecordings worlds, HttpContext context) =>
 {
