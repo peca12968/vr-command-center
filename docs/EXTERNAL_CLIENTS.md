@@ -304,6 +304,7 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `requireConcurrentFire` | 選用。填 `true` 時須一併設定 `minimumConcurrentMilliseconds`，並在每場提供 `worldJournal` 與 `combatJournal`。要求 25 個原席位在同一段合格區間各有一次已封存射擊 |
 | `udpPreflightBatch` 或 `udpPreflightBatches` | 選用。單份原 Quest 批次報告路徑，或 1 至 25 份原報告路徑的陣列。可搭配逐場 `udpSourcePreflights` |
 | `questCaptures` | 選用。填原 Quest 網路計畫及 1 至 25 份完整日誌擷取報告。可與 UDP 預檢報告一併使用 |
+| `questDeployments` | 選用。填原離線發行報告及 1 至 25 份正式 Quest 部署報告，核對原入場及 APK 雜湊 |
 | `sessions` | 獨立模式填五場，合併模式填一場 |
 | `sessions[].launcherReport`、`serverLog` | 各場啟動器終止報告及伺服器日誌的路徑 |
 | `sessions[].evidenceZip` | 使用 `closure` 時填各場原 ZIP。使用 `venueBundle` 時省略 |
@@ -387,6 +388,21 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json
 ```
 
 每份報告須完整，合起來必須剛好涵蓋計畫列出的 Quest 席位。工具重讀日誌核對位元組數和 SHA-256，再核對原程序、房號席位、伺服器觀察到的 IPv4、遊戲端點和戰績確認。成功摘要會列出 `questCaptureBatchesVerified` 及 `questCaptureSeatsVerified`。混合場可用 `windowsPlayers` 集中補上 Windows 日誌，或逐場填在 `sessions[].players`。若需要手動提交已完成的 Quest 日誌，沿用上方 `players` 及 `logcatPid` 格式。
+
+### 核對封存席位的 Quest 發行 APK
+
+使用 `-ReleaseReport` 部署時，保存正式部署指令輸出的 JSON，以及用來部署的原 `venue-release.json`。若部署途中停止，保留原報告和後續只重試未完成席位的報告。將檔名加到五房 `venue.json` 中。 [Quest 部署操作](QUEST3.md#核對頭盔內已安裝的發行-apk)
+
+```json
+{
+  "questDeployments": {
+    "releaseReport": "venue-release.json",
+    "reports": ["quest-deployment.json", "quest-deployment-retry.json"]
+  }
+}
+```
+
+驗收核對每個成功席位的原場次、玩家、入場名額、房號、席位、UDP 埠與 APK 版本。每席須有已核對 APK 及設定檔的啟動紀錄，並與原 Quest logcat、伺服器戰績確認及封存資料一致。預檢報告、其他場次的入場、重複成功席位或缺少任一 Quest logcat 席位均會拒絕。可搭配 `questCaptures` 或逐場提供原 Quest logcat。摘要 `questDeployment` 列出版本代碼、APK 雜湊、報告數及核對席位數。實體裝置與運行環境須現場驗收。
 
 ### 核對 MR 校正封存
 

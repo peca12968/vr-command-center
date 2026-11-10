@@ -722,6 +722,7 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, [str
     if (-not $DeployMappedSeats) { $report.complete = $true; return $report }
 
     $report.phase = 'deployment'
+    if ($ExpectedHash) { $report.apkVerificationVersion = 1 }
     $WarningPreference = 'SilentlyContinue'
     foreach ($device in $devices) { $device.status = 'not-attempted'; $device.Remove('apkVerified') }
     for ($index = 0; $index -lt $Map.Count; $index++) {
@@ -744,6 +745,12 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, [str
                 -RequestMixedReality:($null -ne $connection.Alignment) -Deployment $deployment
             $device.filesVerified = $true
             $device.status = 'launch-requested'
+            if ($ExpectedHash) {
+                $device.sessionId = $connection.Ticket.SessionId.ToString('D')
+                $device.playerId = $connection.Ticket.PlayerId.ToString('D')
+                $device.admissionId = $connection.Ticket.AdmissionId.ToString('D')
+                $device.port = $connection.Ticket.Config.port
+            }
         } catch {
             $device.status = if ($_.Exception -is [IO.InvalidDataException]) { 'file-verification-failed' } else { 'deployment-failed' }
             $device.failedStep = $deployment.Step

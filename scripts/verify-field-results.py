@@ -86,12 +86,18 @@ def ipv4(value):
     return address
 
 
-def read_quest_plan_file(path):
+def read_quest_json(path):
     with path.open('rb') as source:
         raw = source.read(MAX_QUEST_PLAN_BYTES + 1)
     require(len(raw) <= MAX_QUEST_PLAN_BYTES, 'Quest plan or report is too large')
     value = read_json(raw.decode('utf-8-sig'))
-    require(type(value) is dict and type(value.get('version')) is int and value['version'] == 1,
+    require(type(value) is dict, 'Expected a Quest JSON object')
+    return value
+
+
+def read_quest_plan_file(path):
+    value = read_quest_json(path)
+    require(type(value.get('version')) is int and value['version'] == 1,
             'Expected a version 1 Quest plan or report')
     return value
 
@@ -773,7 +779,8 @@ def verify(topology, server_ips, launcher, session, statistics, endpoint, server
 def verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log, size, player_logs, *,
                    require_remote=True, quest_player_logs=(), world_journal=None, combat_journal=None, applied_end=None, room_alignments=None,
                    udp_preflight=None, udp_source_preflights=None, verify_player_sources=False, quest_capture_logs=(),
-                   guarded_begin=None, concurrency=None, verify_reconnect_history=False, reconnect_window=None):
+                   guarded_begin=None, concurrency=None, verify_reconnect_history=False, reconnect_window=None,
+                   quest_deployments=None):
     integer(size, 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(not verify_player_sources or world_journal is not None, 'Player source verification requires the original closed world journal')
@@ -854,6 +861,10 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
                 and integer(result['worldSequence'], 1) == world_sequence and integer(result['throughSequence'], 1) == through
                 and integer(result['finalStreamSequence']) == combat_sequence and scores(result) == scores(stats),
                 'Player result differs from the final seals or statistics')
+        if pid is not None and quest_deployments is not None:
+            seat = integer(owner['seat'], 0, 4) + 1
+            require(quest_deployments.pop((room, seat), None) == (session_id, player_id, owner['admissionId'], port),
+                    f'Quest deployment does not match the original admission and endpoint for room {room} seat {seat}')
         if player_sources is not None or verify_reconnect_history:
             seat = integer(owner['seat'], 0, 4) + 1
             require((room, seat) not in source_seats, 'Duplicate seat in the player source evidence')
@@ -1028,6 +1039,50 @@ def quest_capture_log(address, path, pid, seat, size, digest):
     return address, raw.decode('utf-8-sig'), pid, seat
 
 
+def read_quest_deployments(spec, mode, evidence_path):
+    require(type(spec) is dict and set(spec) == {'releaseReport', 'reports'},
+            'Provide the original Quest release report and deployment reports')
+    release = read_quest_json(evidence_path(spec['releaseReport']))
+    quest = release.get('quest')
+    require(release.get('verified') is True and release.get('scope') == 'offline-package-consistency'
+            and type(quest) is dict and quest.get('applicationId') == 'com.vrcommand.quest'
+            and quest.get('architecture') == 'arm64-v8a' and quest.get('signatureV2') is True,
+            'Quest release report was not verified for the original application')
+    version = integer(quest.get('versionCode'), 1, 2**31 - 1)
+    digest = quest.get('sha256')
+    require(type(digest) is str and re.fullmatch(r'[0-9a-f]{64}', digest), 'Invalid Quest release APK digest')
+    reports = spec['reports']
+    require(type(reports) is list and 1 <= len(reports) <= 25, 'Provide 1 to 25 Quest deployment reports')
+    deployed = {}
+    for name in reports:
+        report = read_quest_json(evidence_path(name))
+        require(report.get('phase') == 'deployment' and report.get('managementVerified') is True
+                and report.get('topology') == mode and integer(report.get('apkVerificationVersion'), 1, 1),
+                'Quest deployment report lacks verified deployment or uses another topology')
+        require(report.get('expectedApkSha256') == digest and integer(report.get('expectedVersionCode'), 1) == version,
+                'Quest deployment report differs from the original release APK')
+        devices = report.get('devices')
+        require(type(devices) is list and 1 <= len(devices) <= 25
+                and all(type(row) is dict and type(row.get('status')) is str for row in devices),
+                'Invalid Quest deployment device list')
+        launched = [row for row in devices if row.get('status') == 'launch-requested']
+        require(launched and report.get('complete') is (len(launched) == len(devices))
+                and devices[:len(launched)] == launched, 'Quest deployment report lacks a consistent successful prefix')
+        seats = set()
+        for row in devices:
+            room, seat = integer(row.get('roomId'), 1, 5), integer(row.get('seat'), 1, 5)
+            require((room, seat) not in seats, 'Quest deployment report repeats a device seat')
+            seats.add((room, seat))
+            if row['status'] != 'launch-requested':
+                continue
+            require((room, seat) not in deployed and row.get('apkVerified') is True and row.get('filesVerified') is True
+                    and integer(row.get('versionCode'), 1) == version,
+                    'Quest deployment repeats a successful seat or lacks verified APK and configuration')
+            deployed[room, seat] = (identity(row['sessionId']), identity(row['playerId']), identity(row['admissionId']),
+                                    integer(row.get('port'), 1024, 65535))
+    return deployed, {'versionCode': version, 'apkSha256': digest, 'reportsVerified': len(reports), 'seatsVerified': len(deployed)}
+
+
 def verify_venue(manifest_path):
     manifest_path = manifest_path.resolve(strict=True)
     manifest = read_json(content(manifest_path))
@@ -1140,6 +1195,10 @@ def verify_venue(manifest_path):
     if capture_supplied:
         require(topology == 'direct-lan', 'Quest capture batches require direct LAN evidence')
         captures, capture_endpoints, capture_batches = read_quest_capture_batches(manifest['questCaptures'], mode, expected, evidence_path)
+    quest_deployments, deployment_summary = None, None
+    if 'questDeployments' in manifest:
+        require(topology == 'direct-lan', 'Quest deployment evidence requires direct LAN evidence')
+        quest_deployments, deployment_summary = read_quest_deployments(manifest['questDeployments'], mode, evidence_path)
 
     rooms, summaries = {}, []
     quest_players = 0
@@ -1240,7 +1299,8 @@ def verify_venue(manifest_path):
                                          udp_source_preflights=source_paths, verify_player_sources=verify_player_sources,
                                          quest_capture_logs=(quest_capture_log(*evidence) for evidence in captured),
                                          guarded_begin=guarded_begin, concurrency=concurrency,
-                                         verify_reconnect_history=verify_reconnect_history, reconnect_window=reconnect_window)
+                                         verify_reconnect_history=verify_reconnect_history, reconnect_window=reconnect_window,
+                                         quest_deployments=quest_deployments)
         verified_pairs = ([report['udpPreflight']] if preflights else report['udpSourcePreflight']['pairs'] if source_preflights else [])
         for pair in verified_pairs:
             exchange = pair['exchangeSha256']
@@ -1267,6 +1327,7 @@ def verify_venue(manifest_path):
                           **({'roomAlignments': report['roomAlignments']} if alignments is not None else {})})
 
     require(recorded_at in end_times and not expected, 'Closure time or session set differs from the terminal evidence')
+    require(not quest_deployments, 'Quest deployment reports include seats without original Quest logcat evidence')
     peer_ips = {address for sources in rooms.values() for address in sources}
     remote = peer_ips - server_ips
     require(topology != 'direct-lan' or remote, 'Direct LAN needs a peer outside the declared server addresses')
@@ -1293,6 +1354,7 @@ def verify_venue(manifest_path):
             'physicalHostsVerified': False, 'networkCapacityAccepted': False,
             **({'questLogcatPlayers': quest_players} if quest_players else {}),
             **({'questCaptureBatchesVerified': capture_batches, 'questCaptureSeatsVerified': quest_players} if capture_supplied else {}),
+            **({'questDeployment': deployment_summary} if deployment_summary is not None else {}),
             **({'udpPreflightsVerified': len(exchanges)} if preflights else {}),
             **({'udpSourcePreflightsVerified': len(exchanges)} if source_preflights else {}),
             **({'worldJournalsVerified': len(summaries)} if journals else {}),

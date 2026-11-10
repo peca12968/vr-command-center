@@ -1281,6 +1281,11 @@ else:
         self.assertEqual(count + 4, sum(line.endswith(' shell getprop ro.serialno') for line in commands))
         if check_release:
             self.assertEqual([True] * 3 + [None] * (count - 3), [row.get('apkVerified') for row in report['devices']])
+            self.assertEqual(1, report['apkVerificationVersion'])
+            for index, row in enumerate(report['devices'][:3]):
+                self.assertEqual((session, str(self.players[index]), str(self.admissions[index]), 7777),
+                                 (row['sessionId'], row['playerId'], row['admissionId'], row['port']))
+            self.assertTrue(all('admissionId' not in row for row in report['devices'][3:]))
             self.assertEqual(2, sum(line.startswith('-s fixture-04 shell pm path ') for line in commands))
             self.assertFalse(any(line.startswith('-s fixture-04 shell mkdir ') for line in commands))
         self.assertEqual(fault in ('force-stop', 'config-move', 'config-active-changed', 'launch'),

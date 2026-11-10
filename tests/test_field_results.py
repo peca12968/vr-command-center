@@ -996,6 +996,82 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertEqual(25, report['serverAcknowledgements'])
                 self.assertEqual(1, report['questCaptureBatchesVerified'])
 
+    def quest_deployment_evidence(self, root, manifest, quest_per_room):
+        digest = '2a' * 32
+        release = {'verified': True, 'scope': 'offline-package-consistency', 'quest': {'applicationId': 'com.vrcommand.quest',
+            'architecture': 'arm64-v8a', 'signatureV2': True, 'versionCode': 64, 'sha256': digest}}
+        (root / 'release.json').write_text(json.dumps(release), encoding='utf-8')
+        rows = []
+        for entry in manifest['sessions']:
+            session, _, endpoint = field.management_zip(root / entry['evidenceZip'])
+            rows.extend({'roomId': player['roomId'], 'seat': player['seat'] + 1, 'status': 'launch-requested',
+                         'apkVerified': True, 'filesVerified': True, 'versionCode': 64, 'port': endpoint['port'],
+                         'sessionId': session['id'], 'playerId': player['id'], 'admissionId': player['admissionId']}
+                        for player in session['players'] if player['seat'] >= 5 - quest_per_room)
+        report = {'phase': 'deployment', 'managementVerified': True, 'apkVerificationVersion': 1, 'topology': manifest['mode'],
+                  'complete': True, 'expectedApkSha256': digest, 'expectedVersionCode': 64, 'devices': rows}
+        manifest['questDeployments'] = {'releaseReport': 'release.json', 'reports': ['deployment.json']}
+        return report
+
+    def test_quest_deployments_bind_original_release_and_retried_seats_to_both_venue_modes(self):
+        for mode, quest_per_room in (('Independent', 2), ('Linked', 5)):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest = quest_capture_venue_fixture(root, mode, quest_per_room=quest_per_room)
+                report = self.quest_deployment_evidence(root, manifest, quest_per_room)
+                rows = report['devices']
+                interrupted = dict(report, complete=False, devices=rows[:3] + [
+                    {'roomId': row['roomId'], 'seat': row['seat'], 'status': 'apk-hash-mismatch' if index == 0 else 'not-attempted'}
+                    for index, row in enumerate(rows[3:])])
+                (root / 'deployment.json').write_text(json.dumps(interrupted), encoding='utf-8')
+                (root / 'retry.json').write_text(json.dumps(dict(report, devices=rows[3:])), encoding='utf-8')
+                manifest['questDeployments']['reports'].insert(0, 'retry.json')
+                if mode == 'Linked':
+                    manifest = self.pack_venue(root, manifest)
+                    manifest.pop('windowsPlayers')
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                result = field.verify_venue(path)
+                self.assertEqual({'versionCode': 64, 'apkSha256': '2a' * 32, 'reportsVerified': 2, 'seatsVerified': 5 * quest_per_room},
+                                 result['questDeployment'])
+                self.assertEqual(25, result['serverAcknowledgements'])
+                self.assertFalse(result['physicalHostsVerified'])
+                self.assertNotIn(rows[0]['admissionId'], json.dumps(result))
+
+    def test_quest_deployments_reject_swapped_originals_and_incomplete_or_duplicate_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, _ = venue_fixture(root, 'Independent', remote=True, quest_per_room=2)
+            original = self.quest_deployment_evidence(root, manifest, 2)
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            deploy = root / 'deployment.json'
+            cases = (
+                ('preflight', 'lacks verified deployment', lambda report: report.update(phase='preflight')),
+                ('different APK', 'differs from the original release APK', lambda report: report.update(expectedApkSha256='9b' * 32)),
+                ('missing verification', 'lacks verified APK', lambda report: report['devices'][0].pop('apkVerified')),
+                ('wrong session', 'original admission and endpoint', lambda report: report['devices'][0].update(sessionId=id_for(2000))),
+                ('wrong player', 'original admission and endpoint', lambda report: report['devices'][0].update(playerId=id_for(2001))),
+                ('wrong admission', 'original admission and endpoint', lambda report: report['devices'][0].update(admissionId=id_for(2002))),
+                ('wrong endpoint', 'original admission and endpoint', lambda report: report['devices'][0].update(port=7999)),
+                ('missing seat', 'original admission and endpoint', lambda report: report['devices'].pop()),
+                ('duplicate seat', 'repeats a device seat', lambda report: report['devices'].append(report['devices'][0])),
+                ('non-prefix launch', 'consistent successful prefix', lambda report: report['devices'][0].update(status='not-attempted')),
+                ('extra Windows seat', 'without original Quest logcat', lambda report: report['devices'].append(dict(report['devices'][0], seat=1))),
+            )
+            for label, message, change in cases:
+                with self.subTest(label=label):
+                    report = deepcopy(original)
+                    change(report)
+                    deploy.write_text(json.dumps(report), encoding='utf-8')
+                    with self.assertRaisesRegex(field.EvidenceError, message):
+                        field.verify_venue(path)
+            deploy.write_text(json.dumps(original), encoding='utf-8')
+            self.assertEqual(10, field.verify_venue(path)['questDeployment']['seatsVerified'])
+            (root / 'duplicate.json').write_bytes(deploy.read_bytes())
+            manifest['questDeployments']['reports'].append('duplicate.json')
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'repeats a successful seat'):
+                field.verify_venue(path)
+
     def test_venue_rejects_incomplete_wrong_and_tampered_capture_evidence(self):
         cases = {
             'incomplete report': 'incomplete or has the wrong topology',

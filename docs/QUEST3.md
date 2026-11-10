@@ -355,6 +355,8 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 
 批次預檢會先核對所有指定裝置。`apk-hash-mismatch` 表示版本代碼相符但 APK 位元組不同。`apk-unverified` 表示無法讀出 APK 的雜湊，或 Android 回傳多個套件檔。正式部署逐席開始寫入前會再核對一次。若第二次核對失敗，該席不寫入設定，後續席位標記為 `not-attempted`。`apkVerified: true` 表示該席已完成當階段的 APK 核對，入場及追蹤仍由主控台驗證。
 
+保存 `-DeployMappedSeats` 輸出的 UTF-8 JSON，包含中途中斷但已有成功席位的報告。成功席位附原場次、玩家、入場及連線埠，可在封存驗收與 logcat 和原戰績對照。 [核對封存席位](EXTERNAL_CLIENTS.md#核對封存席位的-quest-發行-apk)
+
 #### 啟動前核對裝置檔案
 
 單席與整批部署都會先傳送並核對 MR 原校正檔，再驗證暫存的玩家連線檔。兩項核對通過且票券仍有效時，才停止遊戲並啟用新的連線檔。啟用後再次核對最終路徑的 SHA-256，通過才送出啟動指令。批次沿用裝置上已安裝的 APK，因此傳輸或暫存核對失敗時，原遊戲程序及原連線檔可以保留。單席流程另含 APK 安裝階段。
