@@ -389,11 +389,12 @@ def main():
             if value:return value
             time.sleep(.1)
         raise RuntimeError('Timeout: '+label)
-    def request(path,body=None,role='Master',method=None,expected=200,admission=None,raw_response=False,request_id=None):
+    def request(path,body=None,role='Master',method=None,expected=200,admission=None,raw_response=False,request_id=None,
+                content_type=None):
         h={'Authorization':'Bearer '+keys[role]};h.update({'Content-Type':'application/json'} if body is not None else {})
         if admission:h['If-Match-Admission']=admission
         if request_id:h['Idempotency-Key']=request_id
-        if isinstance(body,bytes):h['Content-Type']='application/octet-stream'
+        if isinstance(body,bytes):h['Content-Type']=content_type or 'application/octet-stream'
         req=urllib.request.Request(uri+path,data=body if isinstance(body,bytes) or body is None else json.dumps(body).encode(),headers=h,method=method)
         try:
             with urllib.request.urlopen(req,timeout=5) as r:code=r.status;raw=r.read();headers=r.headers
@@ -668,12 +669,13 @@ def main():
                     def do_POST(self):
                         if not self.authorized():return
                         length=int(self.headers.get('Content-Length','0'))
-                        if not change_at_open or self.path!=guarded_path or guarded_posts or not 0<length<=4096:
+                        if (not change_at_open or self.path!=guarded_path or guarded_posts or not 0<length<=4096
+                                or self.headers.get_content_type()!='application/json'):
                             self.send_error(400);return
                         body=self.rfile.read(length)
                         guarded_posts.append(json.loads(body))
                         advance_revision()
-                        rejected,_=request(self.path,body,role='GameServer',expected=409,raw_response=True)
+                        rejected,_=request(self.path,body,role='GameServer',expected=409,raw_response=True,content_type='application/json')
                         self.reply(409,rejected)
                 fixture_dir=runtime/(label+suffix+'-instance')
                 fixture_dir.mkdir()
