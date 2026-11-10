@@ -32,6 +32,14 @@ PoseSend／PoseReceive／PoseAccepted／拒絕／throttle及既有WorldCapture�
 
 ## 校準與分析
 
+合併場的自動移動、射擊及換彈測試可在 `check-desktop-exercise.py --mode linked --endurance` 加上 `--pose-continuity`。確認原測試程序已退出、清理完成且產生 SSD 副本後，再讀取該場在 F 槽的封存。
+
+```powershell
+python scripts/analyze-pose-continuity.py 'artifacts/desktop-exercise/<本次場次>' --exercise
+```
+
+工具從原世界日誌逐格查驗封存，按席位記錄前一格、首個失效格、最後失效格和恢復格。跨入暫停或結束的中斷保留未知的恢復格。工具使用原連線與 UTC 擷取時間對照客戶端送出、伺服器接收與接受、姿態年齡及各自主執行緒空窗，並列出最長的執行中畫格擷取間隔。時鐘未通過核對時，對應觀察留空。分析結果存為 `exercise-pose-continuity-analysis.json`，並保留原長場的通過或失敗狀態。
+
 ```powershell
 # 兩個headless真client，一位由自有loopback gate刻意中斷上行1.2秒。
 python scripts/check-pose-continuity.py --api-dll '<本次API.dll>' --runtime-root "$env:LOCALAPPDATA/VrCommand/SimulationRuns"

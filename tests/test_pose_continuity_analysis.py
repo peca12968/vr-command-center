@@ -69,5 +69,46 @@ class SparseAnalysisTests(unittest.TestCase):
         report = self.fixture(); report['streams'][0]['connection'] = True
         with self.assertRaises(ValueError): m.validate(report, 'Client', False)
 
+    def test_exercise_windows_keep_seats_separate_and_do_not_bridge_pause(self):
+        owners = {'a': {'roomId': 1, 'seat': 0, 'nativeConnectionId': 7},
+                  'b': {'roomId': 2, 'seat': 0, 'nativeConnectionId': 8}}
+
+        def packet(sequence, inactive=(), phase='Running'):
+            return {'sequence': sequence, 'elapsedMilliseconds': 100 * sequence, 'suspended': False,
+                    'frame': {'phase': phase, 'tick': sequence, 'players': [
+                        {'id': identity, 'roomId': owner['roomId'], 'connected': identity not in inactive,
+                         'rig': {'kind': 'None' if identity in inactive else 'Simulated'}}
+                        for identity, owner in owners.items()]}}
+
+        packets = [packet(1), packet(2, ('a',)), packet(3, ('a', 'b')), packet(4, ('a',)),
+                   packet(5, ('a',), phase='Paused'), packet(6, ('a',)), packet(7)]
+
+        def read(observe):
+            for row in packets:
+                observe(row)
+
+        _, windows, gap = m.exercise_incidents(read, owners)
+        bounds = [(row['connection'], row['preceding']['frame'] if row['preceding'] else None,
+                   row['firstInactive']['frame'], row['lastInactive']['frame'],
+                   row['recovered']['frame'] if row['recovered'] else None) for row in windows]
+        self.assertEqual([(7, 1, 2, 4, None), (8, 2, 3, 3, 4), (7, None, 6, 6, 7)], bounds)
+        self.assertEqual(100, gap['milliseconds'])
+        packets[0]['frame']['players'][0]['roomId'] = 2
+        with self.assertRaisesRegex(ValueError, 'another room'):
+            m.exercise_incidents(read, owners)
+
+    def test_exercise_observations_match_only_connection_and_window_with_valid_clock(self):
+        report = self.fixture()
+        valid = m.validate(report, 'Client', False)
+        start, end = BASE + 11000000, BASE + 15000000
+        matching = m.exercise_observations(report, valid, 7, start, end, ('PoseSend',))
+        self.assertEqual(matching['poseGaps']['PoseSend'], report['gaps'][0])
+        self.assertIsNotNone(matching['mainThreadWindow'])
+        wrong_connection = m.exercise_observations(report, valid, 8, start, end, ('PoseSend',))
+        outside = m.exercise_observations(report, valid, 7, end + 3000000, end + 4000000, ('PoseSend',))
+        self.assertIsNone(wrong_connection['poseGaps']['PoseSend'])
+        self.assertIsNone(outside['poseGaps']['PoseSend'])
+        self.assertIsNone(m.exercise_observations(report, {**valid, 'clockJoinValid': False}, 7, start, end, ('PoseSend',)))
+
 
 if __name__ == '__main__': unittest.main()
