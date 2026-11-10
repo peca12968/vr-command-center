@@ -1,7 +1,16 @@
 const phaseNames = { Preparing: '準備中', Running: '執行中', Paused: '已暫停', Ended: '已結束' };
 const weatherNames = { Clear: '晴朗', Rain: '下雨', Fog: '濃霧', Storm: '暴風雨' };
 const behaviorNames = { Hold: '固守', Patrol: '巡邏', Advance: '推進' };
-const changeNames = { initial: '首格狀態', phase: '場次階段', environment: '環境', enemies: '敵軍策略' };
+const changeNames = { initial: '首格狀態', phase: '場次階段', environment: '環境', enemies: '敵軍策略', 'enemy-roster': '敵軍增減' };
+const enemyId = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
+
+function matchesRoster(value, elapsed, roomId, roster) {
+  if (value?.packet?.elapsedMilliseconds !== elapsed || !Array.isArray(value.packet.frame?.enemies)) return false;
+  const enemies = value.packet.frame.enemies.filter(enemy => roomId === null || enemy.roomId === roomId);
+  const ids = enemies.map(enemy => enemy.id).sort();
+  return ids.length === roster.enemyIds.length && ids.every((id, index) => id === roster.enemyIds[index])
+    && enemies.filter(enemy => enemy.health > 0).length === roster.alive;
+}
 
 export function mountWorldPolicyFrames(response, jump) {
   const start = document.getElementById('world-policy-start');
@@ -19,7 +28,7 @@ export function mountWorldPolicyFrames(response, jump) {
   }
 
   function update(value) {
-    const key = value ? JSON.stringify([value.sessionId, value.streamId, value.throughFrame]) : '';
+    const key = value ? JSON.stringify([value.sessionId, value.streamId, value.throughFrame, value.room]) : '';
     const changed = key !== scopeKey;
     scope = value;
     if (pending && (changed || !scope?.idle)) {
@@ -39,28 +48,37 @@ export function mountWorldPolicyFrames(response, jump) {
 
   async function read(afterFrame) {
     if (!scope?.idle || pending) return;
-    const { sessionId, streamId, throughFrame } = scope;
+    const { sessionId, streamId, throughFrame, room } = scope;
+    const roomId = room === 'all' ? null : Number(room);
     const request = new AbortController(), requestedGeneration = generation;
     pending = request;
     controls();
     status.textContent = '正在查閱已保存的設定…';
     try {
       const signal = AbortSignal.any([request.signal, AbortSignal.timeout(8000)]);
-      const query = new URLSearchParams({ afterFrame, throughFrame });
+      const query = new URLSearchParams({ afterFrame, throughFrame, includeEnemyRoster: 'true' });
+      if (roomId !== null) query.set('roomId', String(roomId));
       const value = await (await response(`/api/sessions/${sessionId}/world/policy-frames?${query}`, signal)).json();
       if (pending !== request) return;
       const end = value.scannedThroughFrame;
       if (value.sessionId !== sessionId || value.streamId !== streamId || value.throughFrame !== throughFrame || value.afterFrame !== afterFrame
+          || value.includeEnemyRoster !== true || (value.roomId ?? null) !== roomId
           || !Number.isSafeInteger(end) || end <= afterFrame || end > Math.min(throughFrame, afterFrame + 1024)
           || value.nextAfterFrame !== (end < throughFrame ? end : null) || !Array.isArray(value.frames) || value.frames.length > 24)
         throw new Error('錄製範圍不符。');
       let previous = afterFrame;
-      const rows = value.frames.map(({ frameSequence, elapsedMilliseconds, policy, changes }) => {
+      const rows = value.frames.map(({ frameSequence, elapsedMilliseconds, policy, changes, enemyRoster }) => {
         if (!Number.isSafeInteger(frameSequence) || frameSequence <= previous || frameSequence > end
             || !Number.isSafeInteger(elapsedMilliseconds) || elapsedMilliseconds < 0 || !Array.isArray(changes) || changes.length === 0
             || changes.some(change => !Object.hasOwn(changeNames, change)) || !policy
             || !Object.hasOwn(phaseNames, policy.phase) || !Object.hasOwn(weatherNames, policy.weather) || !Object.hasOwn(behaviorNames, policy.behavior)
             || [policy.night, policy.lightning, policy.autoAttack].some(value => typeof value !== 'boolean')) throw new Error('設定畫格不符。');
+        const { enemyIds, alive, added, removed } = enemyRoster ?? {};
+        if (!Array.isArray(enemyIds) || enemyIds.length > 100 || enemyIds.some((id, index) => typeof id !== 'string'
+            || !enemyId.test(id) || (index > 0 && enemyIds[index - 1] >= id))
+          || [alive, added, removed].some(count => !Number.isSafeInteger(count) || count < 0 || count > 100)
+          || alive > enemyIds.length || added > enemyIds.length || changes.includes('enemy-roster') !== (added + removed > 0))
+          throw new Error('敵軍快照不符。');
         previous = frameSequence;
         const row = document.createElement('li');
         const button = document.createElement('button');
@@ -68,10 +86,13 @@ export function mountWorldPolicyFrames(response, jump) {
         button.className = 'quiet';
         button.dataset.frameSequence = String(frameSequence);
         button.textContent = `第 ${frameSequence} 格 · ${(elapsedMilliseconds / 1000).toFixed(2)} 秒 · ${changes.map(change => changeNames[change]).join('、')}`;
-        button.addEventListener('click', () => jump(frameSequence, () => generation === requestedGeneration));
+        button.addEventListener('click', () => jump(frameSequence, () => generation === requestedGeneration,
+          frame => matchesRoster(frame, elapsedMilliseconds, roomId, enemyRoster)));
         const summary = document.createElement('span');
         summary.className = 'hint';
-        summary.textContent = ` ${phaseNames[policy.phase]} · ${weatherNames[policy.weather]}／${policy.night ? '夜晚' : '白天'}／閃電${policy.lightning ? '開啟' : '關閉'} · ${behaviorNames[policy.behavior]}／自動攻擊${policy.autoAttack ? '開啟' : '關閉'}`;
+        const rosterSummary = `${roomId === null ? '全場' : `房間 ${roomId}`} · 在場 ${enemyIds.length}／存活 ${alive}`
+          + (added || removed ? `／增援 ${added}／撤除 ${removed}` : '');
+        summary.textContent = ` ${phaseNames[policy.phase]} · ${weatherNames[policy.weather]}／${policy.night ? '夜晚' : '白天'}／閃電${policy.lightning ? '開啟' : '關閉'} · ${behaviorNames[policy.behavior]}／自動攻擊${policy.autoAttack ? '開啟' : '關閉'} · ${rosterSummary}`;
         row.append(button, summary);
         return row;
       });

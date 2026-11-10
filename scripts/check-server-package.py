@@ -3154,6 +3154,35 @@ def main():
                   'operator can remove the new enemies and pause with the original enemy retained')
             save('live-reinforcement-controls.json',{'denied':denied,'added':added,'reinforced':reinforced,'reduced':reduced,'paused':paused,'after':after})
             command(entry['sessionId'],'End');finish(entry)
+            replay=[value['packet'] for value in read(out/'live-reinforcement-replay.json')]
+            timeline=f"{session}/world/policy-frames?throughFrame={replay[-1]['sequence']}"
+            scoped=timeline+'&includeEnemyRoster=true&roomId=1'
+            legacy=request(timeline)
+            roster=request(scoped,role='Room1')
+            expected_roster=[]
+            previous_ids=None
+            for packet in replay:
+                enemies=packet['frame']['enemies']
+                ids={enemy['id'] for enemy in enemies}
+                if previous_ids is not None and ids!=previous_ids:
+                    expected_roster.append((packet['sequence'],{'enemyIds':sorted(ids),'alive':sum(enemy['health']>0 for enemy in enemies),
+                                                               'added':len(ids-previous_ids),'removed':len(previous_ids-ids)}))
+                previous_ids=ids
+            actual_roster=[(row['frameSequence'],row['enemyRoster']) for row in roster['frames'] if 'enemy-roster' in row['changes']]
+            check(roster['nextAfterFrame'] is None and roster['roomId']==1 and roster['includeEnemyRoster']
+                  and roster['scannedThroughFrame']==replay[-1]['sequence'] and actual_roster==expected_roster
+                  and sum(row['added'] for _,row in actual_roster)==83 and sum(row['removed'] for _,row in actual_roster)==83
+                  and all(original_id in row['enemyIds'] for _,row in actual_roster),
+                  'saved enemy-roster timeline exactly matches all original reinforcement and withdrawal identities')
+            legacy_sequences={row['frameSequence'] for row in legacy['frames']}
+            first_change=actual_roster[0][0]
+            suffix=request(scoped+f'&afterFrame={first_change-1}',role='Room1')
+            check(first_change not in legacy_sequences and 'includeEnemyRoster' not in legacy
+                  and all('enemyRoster' not in row for row in legacy['frames'])
+                  and suffix['frames'][0]==next(row for row in roster['frames'] if row['frameSequence']==first_change),
+                  'an unchanged strategy still indexes reinforcement using the actual predecessor across cursors')
+            request(scoped,role='Room2',expected=403)
+            save('live-reinforcement-roster.json',roster)
             text=client['log'].read_text(encoding='utf-8',errors='replace')
             check(venue.player_result_phase(text)=='acknowledged','reinforcement player confirms its sealed result')
             finals=[json.loads(line.split('VR_CLIENT_DEBRIEF_FINAL ',1)[1]) for line in text.splitlines() if 'VR_CLIENT_DEBRIEF_FINAL ' in line]

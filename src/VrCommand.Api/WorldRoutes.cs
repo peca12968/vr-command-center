@@ -24,10 +24,10 @@ public static class WorldRoutes
         app.MapPut("/api/sessions/{id:guid}/connection-endpoint", (Guid id, ConnectionEndpointDraft draft, WorldRecordings store, HttpContext context) => store.PublishEndpoint(id, draft, Actor(context)));
         app.MapGet("/api/sessions/{id:guid}/world/publish", Publish);
         app.MapGet("/api/sessions/{id:guid}/world/watch", Watch);
-        app.MapGet("/api/sessions/{id:guid}/world/policy-frames", (Guid id, long throughFrame, long? afterFrame,
+        app.MapGet("/api/sessions/{id:guid}/world/policy-frames", (Guid id, long throughFrame, long? afterFrame, bool? includeEnemyRoster, int? roomId,
             WorldRecordings store, HttpContext context) =>
         {
-            var page = store.PolicyFrames(id, afterFrame ?? 0, throughFrame, Actor(context), context.RequestAborted);
+            var page = store.PolicyFrames(id, afterFrame ?? 0, throughFrame, includeEnemyRoster == true, roomId, Actor(context), context.RequestAborted);
             context.Response.Headers.CacheControl = "no-store";
             return Results.Json(page, WorldJson.Options);
         });

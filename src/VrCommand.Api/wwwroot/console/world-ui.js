@@ -343,7 +343,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
       throughFrame, room: $('world-room').value, playerId: reviewPlayer?.id ?? null, frameSequence: frame.packet.sequence, idle } : null);
     $('world-event-context').disabled = !idle || !filteredEvents(frame).length;
     policyFrames.update(showing ? { sessionId: info.header.sessionId, streamId: info.header.streamId,
-      throughFrame, frameSequence: frame.packet.sequence, idle } : null);
+      throughFrame, room: $('world-room').value, frameSequence: frame.packet.sequence, idle } : null);
   }
   function filteredEvents(value, players = new Map(value.statistics.map(player => [player.playerId.toLowerCase(), player]))) {
     const room = $('world-room').value, kind = eventSearch.kind();

@@ -83,13 +83,38 @@ module.exports = async function environmentBrowser({ page, api, tokens, director
       'Scoped policy lookup retains the original weather and omits the repeated unchanged setting');
     await page.locator('#world-room').selectOption('4');
     await page.locator('#world-camera').selectOption('top');
+    const lookup = page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return url.pathname.endsWith(policyRoute) && url.searchParams.get('includeEnemyRoster') === 'true'
+        && url.searchParams.get('roomId') === '4';
+    });
     await page.locator('#world-policy-start').click();
+    const rosterPage = await (await lookup).json();
     const results = page.locator('#world-policy-results');
     const change = policyPage.frames.find(row => row.changes.includes('phase') && row.policy.phase === 'Paused');
     const target = results.locator(`[data-frame-sequence="${change.frameSequence}"]`);
     await target.waitFor();
     check(await results.getByRole('button').count() === expected.length && (await results.innerText()).includes('暴風雨／夜晚／閃電開啟'),
       'Paused replay renders the actual weather policy and the original transition frames');
+    const enemies = frames[change.frameSequence - 1].frame.enemies.filter(enemy => enemy.roomId === 4);
+    const alive = enemies.filter(enemy => enemy.health > 0).length;
+    check(rosterPage.roomId === 4 && rosterPage.frames.find(row => row.frameSequence === change.frameSequence)
+      .enemyRoster.enemyIds.join(',') === enemies.map(enemy => enemy.id).sort().join(',')
+      && (await target.locator('..').innerText()).includes(`房間 4 · 在場 ${enemies.length}／存活 ${alive}`),
+      'Paused replay uses the selected room and renders the original roster and living count');
+    const priorSequence = await canvas.getAttribute('data-sequence');
+    await page.route(`**/world/frames/${change.frameSequence}`, async route => {
+      const response = await route.fetch();
+      const json = await response.json();
+      json.packet.frame.enemies = enemies.length ? json.packet.frame.enemies.filter(enemy => enemy.roomId !== 4)
+        : [...json.packet.frame.enemies, { id: '00000000-0000-0000-0000-000000000001', roomId: 4, health: 100 }];
+      await route.fulfill({ response, json });
+    }, { times: 1 });
+    await target.click();
+    await page.locator('#world-frame-message').filter({ hasText: '讀取快照失敗' }).waitFor();
+    check(await canvas.getAttribute('data-sequence') === priorSequence
+      && await page.locator('#world-camera').inputValue() === 'top',
+      'A mismatched room roster leaves the displayed snapshot and camera in place');
     await target.click();
     await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${change.frameSequence} 格` }).waitFor();
     check(await canvas.getAttribute('data-sequence') === String(change.frameSequence)
@@ -100,6 +125,8 @@ module.exports = async function environmentBrowser({ page, api, tokens, director
     check(await results.getByRole('button').first().getAttribute('data-frame-sequence') === String(change.frameSequence),
       'The current-frame policy cursor includes a transition on the selected frame');
     await results.screenshot({ path: path.join(screenshots, 'world-policy-frames.png') });
+    await page.locator('#world-room').selectOption('all');
+    check(await results.getByRole('button').count() === 0, 'Changing the observation room clears the prior roster results');
     await page.evaluate(() => {
       const original = window.fetch; window.restoreEnvironmentFetch = () => { window.fetch = original; };
       window.fetch = async (...args) => {

@@ -200,6 +200,27 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         request(f"{policy_route}?throughFrame={tail}", "Room1", 403)
         request(f"{policy_route}?throughFrame={tail}", "invalid", 401)
         check(True, "Policy lookup rejects invalid bounds and retains archive authorization")
+        roster_route = f"{policy_route}?throughFrame={tail}&includeEnemyRoster=true"
+        scoped = request(roster_route + "&roomId=5", "Room5")
+        unscoped = request(roster_route)
+        check("includeEnemyRoster" not in policy and "roomId" not in policy
+              and all("enemyRoster" not in row for row in policy["frames"])
+              and scoped["includeEnemyRoster"] and scoped["roomId"] == 5
+              and unscoped["includeEnemyRoster"] and "roomId" not in unscoped and scoped["frames"] == unscoped["frames"],
+              "Roster projection is opt-in and the single recorded room matches the all-room projection")
+        for row in scoped["frames"]:
+            index = row["frameSequence"] - 1
+            enemies = packets[index]["frame"]["enemies"]
+            ids = {enemy["id"] for enemy in enemies}
+            previous = {enemy["id"] for enemy in packets[index - 1]["frame"]["enemies"]} if index else ids
+            assert row["enemyRoster"] == {"enemyIds": sorted(ids), "alive": sum(enemy["health"] > 0 for enemy in enemies),
+                                          "added": len(ids - previous), "removed": len(previous - ids)}
+        check(True, "Roster rows report original saved identities and living count")
+        request(roster_route + "&roomId=1", expected=400)
+        request(roster_route + "&roomId=5", "Room1", 403)
+        request(f"{policy_route}?throughFrame={tail}&roomId=5", expected=400)
+        request(f"{policy_route}?throughFrame={tail}&includeEnemyRoster=invalid", expected=400)
+        check(True, "Roster lookup rejects out-of-recording rooms and retains authorization")
         search = route + "/event-frames"
         boundary = combat_packet["sequence"]
         page = request(f"{search}?throughFrame={boundary}&roomId=5&kind=PlayerDamaged", "Room5")
