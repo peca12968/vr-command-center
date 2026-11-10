@@ -68,33 +68,34 @@ namespace VrCommand.Unity.Tests
                 using var reload = Bind(NetworkAvatar.TrackedReloadBinding);
                 var gate = new TrackedWeaponReleaseGate();
                 // Pose, readiness and focus are fixtures. The controller uses actual Dynamic input events.
-                var steps = new (int trackingState, bool ready, bool xrFocused, bool fire, bool reload, bool allowed)[]
+                var steps = new (int trackingState, bool ready, bool xrFocused, bool fire, bool reload, bool tap, bool allowed)[]
                 {
-                    (3, true, true, true, false, false), (3, true, true, false, false, false), (3, true, true, true, false, true),
-                    (1, true, true, false, false, false), (3, true, true, true, false, false),
-                    (3, true, true, false, true, false), (3, true, true, false, false, false), (3, true, true, false, true, true),
-                    (3, false, true, false, false, false), (3, true, true, false, true, false),
-                    (3, true, true, false, false, false), (3, true, true, true, false, true),
-                    (3, true, false, true, false, false), (3, true, false, false, false, false),
-                    (3, true, true, true, false, false), (3, true, true, false, true, false),
-                    (3, true, true, false, false, false), (3, true, true, false, true, true)
+                    (3, true, true, true, false, false, false), (3, true, true, false, false, false, false), (3, true, true, true, false, false, true),
+                    (1, true, true, false, false, false, false), (3, true, true, true, false, false, false),
+                    (3, true, true, false, true, false, false), (3, true, true, false, false, false, false), (3, true, true, false, true, false, true),
+                    (3, false, true, false, false, false, false), (3, true, true, false, true, false, false),
+                    (3, true, true, false, false, false, false), (3, true, true, true, false, false, true),
+                    (3, true, false, true, false, false, false), (3, true, false, false, false, false, false),
+                    (3, true, true, true, false, false, false), (3, true, true, false, true, false, false),
+                    (3, true, true, false, false, false, false), (3, true, true, false, true, false, true),
+                    // A tap on the first restored frame cannot arm the weapon.
+                    (3, true, false, false, false, false, false), (3, true, true, false, false, true, false),
+                    (3, true, true, false, false, false, false), (3, true, true, false, false, true, true),
+                    (3, true, true, false, false, false, true)
                 };
                 foreach (var step in steps)
                 {
                     var sampled = false;
-                    var heldFire = false;
-                    var heldReload = false;
+                    TrackedWeaponInput input = default;
                     var tracked = false;
                     var allowed = false;
                     Action sample = () =>
                     {
                         if (sampled || InputState.currentUpdateType != InputUpdateType.Dynamic) return;
-                        heldFire = fire.ReadValue<float>() > .5f;
-                        heldReload = reload.ReadValue<float>() > .5f;
+                        input = new TrackedWeaponInput(fire, reload);
                         tracked = NetworkAvatar.HasTracking(tracking, isTracked);
                         allowed = gate.Allows(step.ready && tracked && TrackedInputFocus.Available(true, step.xrFocused, false),
-                            heldFire || heldReload,
-                            fire.WasPressedThisFrame() || reload.WasPressedThisFrame());
+                            input.Held, input.Pressed);
                         sampled = true;
                     };
                     InputSystem.onAfterUpdate += sample;
@@ -104,18 +105,26 @@ namespace VrCommand.Unity.Tests
                         {
                             device.trackingState.WriteValueIntoEvent(step.trackingState, state);
                             device.isTracked.WriteValueIntoEvent(1f, state);
-                            device.triggerPressed.WriteValueIntoEvent(step.fire ? 1f : 0f, state);
+                            device.triggerPressed.WriteValueIntoEvent(step.fire || step.tap ? 1f : 0f, state);
                             device.primaryButton.WriteValueIntoEvent(step.reload ? 1f : 0f, state);
                             InputSystem.QueueEvent(state);
+                            if (step.tap)
+                            {
+                                device.triggerPressed.WriteValueIntoEvent(0f, state);
+                                InputSystem.QueueEvent(state);
+                            }
                         }
                         for (var frame = 0; !sampled && frame < 120; frame++) yield return null;
                     }
                     finally { InputSystem.onAfterUpdate -= sample; }
                     Assert.IsTrue(sampled, "The official controller must deliver a Dynamic input sample");
-                    Assert.AreEqual(step.fire, heldFire);
-                    Assert.AreEqual(step.reload, heldReload);
+                    Assert.AreEqual(step.fire, input.FireHeld);
+                    Assert.AreEqual(step.reload, input.ReloadHeld);
+                    if (step.tap) Assert.IsTrue(input.FirePressed, "The press and release must arrive in one Dynamic update");
                     Assert.AreEqual(step.trackingState == 3, tracked);
                     Assert.AreEqual(step.allowed, allowed);
+                    Assert.AreEqual(step.allowed && (step.fire || step.tap), allowed && input.WantsFire,
+                        "An eligible short trigger tap submits once even when the sampled button is already released");
                 }
             }
             finally

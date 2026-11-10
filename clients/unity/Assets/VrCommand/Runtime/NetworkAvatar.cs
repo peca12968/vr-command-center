@@ -11,6 +11,22 @@ using Unity.Collections;
 
 namespace VrCommand.Unity
 {
+    internal readonly struct TrackedWeaponInput
+    {
+        internal readonly bool FireHeld, ReloadHeld, FirePressed, ReloadPressed;
+        internal bool Held => FireHeld || ReloadHeld;
+        internal bool Pressed => FirePressed || ReloadPressed;
+        internal bool WantsFire => FireHeld || FirePressed;
+
+        internal TrackedWeaponInput(InputAction trigger, InputAction reload)
+        {
+            FireHeld = trigger.ReadValue<float>() > .5f;
+            ReloadHeld = reload.ReadValue<float>() > .5f;
+            FirePressed = trigger.WasPressedThisFrame();
+            ReloadPressed = reload.WasPressedThisFrame();
+        }
+    }
+
     internal struct TrackedWeaponReleaseGate
     {
         internal bool Armed { get; private set; }
@@ -293,9 +309,10 @@ namespace VrCommand.Unity
                     if (tracked ? validTrackedPose : pose.Valid()) {NativePoseTrace.Sending(OwnerClientId,pose.source);SubmitPoseRpc(pose);}
                     else NativePoseTrace.OwnerUnavailable("LocalPoseInvalid",OwnerClientId);
                 }
-                var held = exercising ? exercise.Fire || exercise.Reload : tracked ? trigger.ReadValue<float>() > .5f || reload.ReadValue<float>() > .5f
+                var trackedInput = tracked ? new TrackedWeaponInput(trigger, reload) : default;
+                var held = exercising ? exercise.Fire || exercise.Reload : tracked ? trackedInput.Held
                     : desktopFire || desktopReload || Mouse.current?.leftButton.isPressed == true || Keyboard.current?.spaceKey.isPressed == true || Keyboard.current?.rKey.isPressed == true;
-                var pressed = exercising ? exercise.Fire || exercise.Reload : tracked ? trigger.WasPressedThisFrame() || reload.WasPressedThisFrame()
+                var pressed = exercising ? exercise.Fire || exercise.Reload : tracked ? trackedInput.Pressed
                     : desktopFire || desktopReload || Mouse.current?.leftButton.wasPressedThisFrame == true || Keyboard.current?.spaceKey.wasPressedThisFrame == true || Keyboard.current?.rKey.wasPressedThisFrame == true;
                 var allowWeapon = briefingPanel.Weapons.Allows(briefingPanel.Open, held, pressed);
                 var ready = authority != null && authority.Ready.Value && VenueBootstrap.Instance.State == "Running" && !ending;
@@ -303,8 +320,8 @@ namespace VrCommand.Unity
                     && PoseAccepted.Value && hasBody && body.connected && body.health > 0, held, pressed);
                 if (ready && allowWeapon && trackedArmed && inputAvailable)
                 {
-                    var wantsReload = exercising ? exercise.Reload : tracked ? reload.WasPressedThisFrame() : desktopReload || Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame;
-                    var wantsFire = exercising ? exercise.Fire : tracked ? trigger.ReadValue<float>() > .5f
+                    var wantsReload = exercising ? exercise.Reload : tracked ? trackedInput.ReloadPressed : desktopReload || Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame;
+                    var wantsFire = exercising ? exercise.Fire : tracked ? trackedInput.WantsFire
                         : desktopFire || Mouse.current != null && Pressed(Mouse.current.leftButton) || Keyboard.current != null && Pressed(Keyboard.current.spaceKey);
                     if (wantsReload) { SubmitWeaponRpc(++inputSequence, true, tracked ? trackedPose : CurrentPose()); if (exercising) DesktopClientExercise.Submitted(true); }
                     else if (wantsFire && Time.unscaledTime >= nextFire)
