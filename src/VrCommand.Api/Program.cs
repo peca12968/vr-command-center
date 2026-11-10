@@ -258,20 +258,20 @@ app.MapGet("/api/venue/server-plan", (SessionManager manager, HttpContext contex
     context.Response.Headers.CacheControl = "no-store";
     return manager.ReadVenueServerPlan(Actor(context));
 });
-app.MapGet("/api/venue/closure", (bool? includeScores, WorldRecordings worlds, HttpContext context) =>
+app.MapGet("/api/venue/closure", (bool? includeScores, bool? includeDebriefReceipts, WorldRecordings worlds, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";
-    return worlds.ReadVenueClosure(Actor(context), includeScores == true);
+    return worlds.ReadVenueClosure(Actor(context), includeScores == true, includeDebriefReceipts == true);
 });
 app.MapGet("/api/venue/closure/history", (Guid? before, int? limit, SessionManager manager, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";
     return manager.ReadVenueEndHistory(before, limit ?? 20, Actor(context));
 });
-app.MapGet("/api/venue/closure/{id:guid}", (Guid id, bool? includeScores, WorldRecordings worlds, HttpContext context) =>
+app.MapGet("/api/venue/closure/{id:guid}", (Guid id, bool? includeScores, bool? includeDebriefReceipts, WorldRecordings worlds, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";
-    return worlds.ReadVenueClosure(Actor(context), includeScores == true, id);
+    return worlds.ReadVenueClosure(Actor(context), includeScores == true, includeDebriefReceipts == true, id);
 });
 app.MapGet("/api/venue/closure/{id:guid}/independent-plan", (Guid id, SessionManager manager, SqliteMissionLibrary store, HttpContext context) =>
 {

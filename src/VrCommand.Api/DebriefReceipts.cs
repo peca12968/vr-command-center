@@ -54,11 +54,7 @@ public sealed partial class WorldRecordings
             var session = manager.Get(id, actor);
             var world = Info(id, actor);
             if (!HasDebriefBoundary(session, world)) return world;
-            using var query = Command("SELECT admission FROM debrief_receipts WHERE session=$session", ("$session", id.ToString("D")));
-            using var rows = query.ExecuteReader();
-            var acknowledged = new HashSet<Guid>();
-            while (rows.Read()) acknowledged.Add(Guid.Parse(rows.GetString(0)));
-
+            var acknowledged = ReadDebriefAdmissions(id);
             var players = session.Players.Where(player => actor.Role == OperatorRole.Master || player.RoomId == actor.RoomId)
                 .OrderBy(player => player.RoomId).ThenBy(player => player.Seat)
                 .Select(player => new DebriefReceiptPlayer(player.Id, player.AdmissionId, player.RoomId, player.Name,
@@ -66,6 +62,15 @@ public sealed partial class WorldRecordings
             return world with { DebriefReceipts = new(session.CombatStream!.StreamId, session.Sequence,
                 session.CombatStream.AcceptedSequence, world.AcceptedSequence, players) };
         }
+    }
+
+    private HashSet<Guid> ReadDebriefAdmissions(Guid id)
+    {
+        using var query = Command("SELECT admission FROM debrief_receipts WHERE session=$session", ("$session", id.ToString("D")));
+        using var rows = query.ExecuteReader();
+        var acknowledged = new HashSet<Guid>();
+        while (rows.Read()) acknowledged.Add(Guid.Parse(rows.GetString(0)));
+        return acknowledged;
     }
 
     private static bool HasDebriefBoundary(SessionView session, WorldRecordingInfo world) =>

@@ -557,6 +557,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await page.unroute(route, lost);
     const table = page.locator('#venue-closure-table');
     const archive = id => page.locator(`[data-venue-closure-session="${id}"] td`);
+    const debriefRoom = id => page.locator(`[data-venue-debrief-room="${id}"]`);
     const closure = (await api('/venue/closure')).batch;
     check(closure.requestId === requests[0].id && requests.length === 2 && JSON.stringify(requests[0]) === JSON.stringify(requests[1])
       && closure.sessions.every((session, index) => session.roomIds.join() === String(index + 1)),
@@ -565,6 +566,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     check((await archive(preparing[0]).allTextContents()).slice(2, 4).join() === '等待封存,等待封存'
       && (await archive(extra.id).allTextContents()).slice(2, 4).join() === '沒有遊戲來源,沒有遊戲來源',
       'The archive distinguishes an unsealed source from a preparing room that never had a source');
+    check(await debriefRoom(1).textContent() === '等待雙封存' && await debriefRoom(3).textContent() === '沒有遊戲來源',
+      'The receipt column distinguishes a waiting source from a room without a game server');
     const ending = await api(`/sessions/${preparing[0]}`);
     first(ending);
     await api(`/sessions/${ending.id}/combat-stream/seal`, 'POST', { streamId: ending.combatStream.streamId, finalSequence: 0 }, 'GameServer');
@@ -690,6 +693,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     for (let i = 0; i < 19; i++) {
       const synthetic = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [4] }, 'Master', 201);
       active.add(synthetic.id);
+      if (i === 0) await api(`/sessions/${synthetic.id}/players`, 'POST',
+        { playerId: randomUUID(), roomId: 4, name: 'Unconfirmed fixture seat', headset: 'Quest3' });
       const publish = i === 0 ? await start(synthetic.id, 4, true) : null;
       const preview = (await api('/venue/phase')).end;
       const batch = await api('/venue/phase', 'POST', { action: 'End', targets: preview }, 'Master', 200, undefined, randomUUID());
@@ -737,6 +742,36 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const privatePath = fieldPath(evidenceId), fieldUrl = base + '/api' + privatePath;
     const batchZip = await fetch(fieldUrl, auth), directZip = await fetch(base + `/api/sessions/${originalSession}/field-evidence.zip`, auth);
     const batchBytes = Buffer.from(await batchZip.arrayBuffer());
+    await debriefRoom(4).filter({ hasText: '已確認 0／2 席 · 2 席未確認' }).waitFor();
+    const sessionPath = `/sessions/${originalSession}`;
+    const { debriefReceipts: originalReceipts } = await api(sessionPath + '/world?includeDebriefReceipts=true');
+    const [acknowledged] = originalReceipts.players;
+    const { streamId, throughSequence, finalStreamSequence, worldSequence } = originalReceipts;
+    await api(sessionPath + '/debrief-receipts', 'POST', { streamId, throughSequence, finalStreamSequence, worldSequence,
+      players: [{ playerId: acknowledged.playerId, admissionId: acknowledged.admissionId, roomId: 4 }] }, 'GameServer', 204);
+    const closurePath = '/venue/closure/' + evidenceId;
+    const receiptsPath = closurePath + '?includeDebriefReceipts=true';
+    const { debriefReceipts } = await api(receiptsPath);
+    assert.deepEqual(debriefReceipts, { requestId: evidenceId, rooms: [
+      { sessionId: originalSession, roomId: 4, rosterCount: 2, confirmedCount: 1 }] });
+    assert.equal(Object.hasOwn(await api(closurePath), 'debriefReceipts'), false);
+    await api(receiptsPath, 'GET', undefined, 'Room4', 403);
+    await debriefRoom(4).filter({ hasText: '已確認 1／2 席 · 1 席未確認' }).waitFor();
+    check(batchBytes.equals(Buffer.from(await (await fetch(fieldUrl, auth)).arrayBuffer())),
+      'A late receipt updates only the original historical room count without changing its private evidence ZIP');
+    await table.screenshot({ path: path.join(screenshots, 'venue-debrief-partial.png') });
+    const selectedClosure = url => url.pathname === '/api' + closurePath && url.searchParams.get('includeDebriefReceipts') === 'true';
+    await page.route(selectedClosure, async route => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.debriefReceipts.requestId = closure.requestId;
+      await route.fulfill({ response, json: body });
+    });
+    try {
+      await page.locator('#refresh').click();
+      await debriefRoom(4).filter({ hasText: '回條狀態未取得' }).waitFor();
+      check(await fieldButton.isEnabled(), 'A foreign receipt batch is hidden while the original sealed export stays available');
+    } finally { await page.unroute(selectedClosure); }
     const fieldDownload = page.waitForEvent('download');
     await fieldButton.click();
     const downloadedField = await fieldDownload;

@@ -1436,6 +1436,10 @@ def main():
             for row in rows for room in row['roomIds']],
             'total': totals([player for roster in players.values() for player in roster])}
         config = {'base': uri, 'masterKey': keys['Master'], 'mode': mode, 'sessions': rows, 'scores': scores}
+        if args.check_debrief_receipts:
+            config['debriefReceipts'] = {'requestId': closed['requestId'], 'rooms': [
+                {'sessionId': room['sessionId'], 'roomId': room['roomId'], 'rosterCount': room['totals']['players'],
+                 'confirmedCount': room['totals']['players']} for room in scores['rooms']]}
         if args.check_venue_replay_alignment:
             config['alignReplay'] = closed['requestId']
         scoped = linked and args.check_player_room_replay
@@ -1451,6 +1455,9 @@ def main():
         result = read(output)
         check(result['scores'] == scores and scores['total']['players'] == 25,
               f'{mode} shipped console renders exact room and batch totals from all 25 original sealed statistics')
+        if args.check_debrief_receipts:
+            check(result['debriefReceipts'] == config['debriefReceipts'],
+                  f'{mode} shipped console renders the five original room receipt counts')
         check(result['complete'] and [item['sessionId'] for item in result['results']] == [row['sessionId'] for row in rows]
               and all(item['throughSequence'] == sources[item['sessionId']]['acceptedSequence'] for item in result['results']),
               f'{mode} shipped console opens every original sealed native replay')

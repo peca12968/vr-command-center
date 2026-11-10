@@ -8,9 +8,10 @@ async function main() {
   const [descriptor, output] = process.argv.slice(2);
   const config = JSON.parse(await fs.readFile(descriptor, 'utf8'));
   assert.match(config.base, /^http:\/\/127\.0\.0\.1:\d+$/);
-  const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_CLOSURE_CHROMIUM,
+    args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const results = [], fieldEvidence = [], participation = [];
-  let history, roomReplay, scores, alignment;
+  let history, roomReplay, scores, alignment, debriefReceipts;
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1080 }, acceptDownloads: true });
     const errors = [];
@@ -38,6 +39,18 @@ async function main() {
         rows.map(row => [...row.cells].map(cell => cell.textContent))), expected);
       await scoresTable.screenshot({ path: path.join(path.dirname(output), config.mode + '-venue-scores.png') });
       scores = body.scores;
+      if (config.debriefReceipts) {
+        assert.deepEqual(body.debriefReceipts, config.debriefReceipts);
+        const table = page.locator('#venue-closure-table');
+        for (const room of config.debriefReceipts.rooms) {
+          const cell = table.locator(`[data-venue-closure-session="${room.sessionId}"] [data-venue-debrief-room="${room.roomId}"]`);
+          const label = config.mode === 'linked' ? `房間 ${room.roomId} · ` : '';
+          assert.equal(await cell.textContent(), label + `已確認 ${room.confirmedCount}／${room.rosterCount} 席`);
+        }
+        assert.equal(await table.locator('[data-venue-debrief-room]').count(), config.debriefReceipts.rooms.length);
+        await table.screenshot({ path: path.join(path.dirname(output), config.mode + '-venue-debrief-receipts.png') });
+        debriefReceipts = body.debriefReceipts;
+      }
     }
     async function openReplay(session) {
       const original = page.waitForResponse(response =>
@@ -405,7 +418,7 @@ async function main() {
   } finally {
     await browser.close();
   }
-  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation, scores, alignment }, null, 2), { flag: 'wx' });
+  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation, scores, alignment, debriefReceipts }, null, 2), { flag: 'wx' });
 }
 main().catch(error => {
   const location = error.stack?.match(/check-venue-replay-native\.cjs:(\d+):(\d+)\)/);

@@ -243,7 +243,7 @@ async function refreshData(epoch) {
   const closureSelection = venueClosureEpoch, batchId = venueHistory.selected();
   const current = () => epoch === state.epoch && selection === selectionEpoch && includeEnded === $('include-ended').checked;
   const venueRead = master() ? api('/venue/phase').catch(error => { if (error.status === 401) throw error; return null; }) : null;
-  const venueClosureRead = master() ? api((batchId ? '/venue/closure/' + batchId : '/venue/closure') + '?includeScores=true')
+  const venueClosureRead = master() ? api((batchId ? '/venue/closure/' + batchId : '/venue/closure') + '?includeScores=true&includeDebriefReceipts=true')
     .catch(error => { if (error.status === 401) throw error; return null; }) : null;
   const [rooms, catalog, sessions, venue, venueClosure] = await Promise.all([
     api('/rooms'), api('/mission-library'), api('/sessions?includeEnded=' + includeEnded), venueRead, venueClosureRead
@@ -777,6 +777,7 @@ function renderVenueClosure(report, loading = false) {
   }
   $('venue-closure-summary').textContent = `${new Date(batch.recordedAtUtc).toLocaleString('zh-TW')} · 請等遊戲伺服器完成玩家戰績傳送與收尾。`;
   const sessions = [...batch.sessions].sort((a, b) => a.roomIds[0] - b.roomIds[0]);
+  const receipts = venueDebriefRooms(batch, report.debriefReceipts);
   const replayRooms = sessions.filter(session => session.roomIds.length === 1 && session.world === 'Sealed'
     && typeof session.replay?.streamId === 'string' && Number.isSafeInteger(session.replay.throughSequence)
     && session.replay.throughSequence > 0).map(session => ({ roomId: session.roomIds[0], sessionId: session.sessionId,
@@ -837,13 +838,42 @@ function renderVenueClosure(report, loading = false) {
         actions.append(witness);
       }
     }
-    const result = row([`房間 ${session.roomIds.join('、')}`, session.missionName, archiveNames[session.combat], archiveNames[session.world], actions]);
+    const debrief = element('div');
+    for (const roomId of session.roomIds) {
+      const count = receipts.get(roomId);
+      let text = session.world === 'NoSource' ? '沒有遊戲來源' : session.world === 'SourceMismatch' ? '來源待核對'
+        : session.combat !== 'Sealed' || session.world !== 'Sealed' ? '等待雙封存' : '回條狀態未取得';
+      if (count?.confirmedCount != null) text = count.rosterCount === 0 ? '名冊無玩家'
+        : `已確認 ${count.confirmedCount}／${count.rosterCount} 席`
+          + (count.confirmedCount < count.rosterCount ? ` · ${count.rosterCount - count.confirmedCount} 席未確認` : '');
+      const status = element('div', session.roomIds.length > 1 ? `房間 ${roomId} · ${text}` : text);
+      status.dataset.venueDebriefRoom = roomId;
+      debrief.append(status);
+    }
+    const result = row([`房間 ${session.roomIds.join('、')}`, session.missionName, archiveNames[session.combat], archiveNames[session.world], debrief, actions]);
     result.dataset.venueClosureSession = session.sessionId;
     rows.append(result);
   }
   $('venue-closure-table').hidden = false;
   renderVenueScores(batch, report.scores);
   venueReport.update(batch);
+}
+function venueDebriefRooms(batch, summary) {
+  if (!summary || typeof batch.requestId !== 'string' || summary.requestId !== batch.requestId
+    || !Array.isArray(summary.rooms)) return new Map();
+  const expected = new Map(batch.sessions.flatMap(session => session.roomIds.map(room => [room, session])));
+  const rooms = new Map();
+  if (summary.rooms.length !== expected.size) return rooms;
+  for (const room of summary.rooms) {
+    const session = expected.get(room?.roomId);
+    if (!session || session.sessionId !== room.sessionId || rooms.has(room.roomId)
+      || !Number.isInteger(room.rosterCount) || room.rosterCount < 0 || room.rosterCount > 5) return new Map();
+    const sealed = session.combat === 'Sealed' && session.world === 'Sealed';
+    if (sealed ? !Number.isInteger(room.confirmedCount) || room.confirmedCount < 0 || room.confirmedCount > room.rosterCount
+      : room.confirmedCount !== null) return new Map();
+    rooms.set(room.roomId, room);
+  }
+  return rooms;
 }
 function renderVenueScores(batch, scores) {
   if (!scores || typeof batch.requestId !== 'string' || scores.requestId !== batch.requestId || !Array.isArray(scores.rooms)

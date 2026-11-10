@@ -99,7 +99,7 @@ module.exports = async ({ context, api, tokens, base, screenshots, check, captur
     await page.locator('#venue-closure-load').click();
     const selector = page.locator('#venue-closure-batch');
     await selector.locator(`option[value="${independent}"]`).waitFor({ state: 'attached' });
-    const target = base + '/api' + scoresUrl(independent);
+    const target = base + '/api' + scoresUrl(independent) + '&includeDebriefReceipts=true';
     const swap = async route => {
       const response = await route.fetch();
       await route.fulfill({ response, json: { ...await response.json(), scores: combined.scores } });
