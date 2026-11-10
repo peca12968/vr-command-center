@@ -9,6 +9,7 @@ module.exports = async function missionReadRecovery({ context, api, tokens, base
     enemies: { count: 0, behavior: 'Hold', autoAttack: false }, props: [] }, 'Master', 201, undefined, randomUUID());
   const second = await api(`/missions/${first.id}/revisions`, 'POST', { ...first.definition, name: '讀取恢復・第二版', durationSeconds: 120 }, 'Master', 201, undefined, randomUUID());
   const page = await context.newPage(), errors = [], requests = []; let requestsTruncated = false;
+  const catalogFaults = [];
   page.on('pageerror', error => errors.push(error.message));
   page.on('request', request => {
     const pathname = new URL(request.url()).pathname;
@@ -32,20 +33,43 @@ module.exports = async function missionReadRecovery({ context, api, tokens, base
   }
   const click = id => () => page.locator('#' + id).click();
   async function failRefresh(action, status = 503) {
-    let release, observed, timer;
+    let release, observed, settleDelivery;
+    const fault = { status, refreshClicks: 0, catalogRequests: 0, delivered: false };
+    catalogFaults.push(fault);
     const gate = new Promise(resolve => { release = resolve; });
-    const requested = new Promise((resolve, reject) => { observed = resolve; timer = setTimeout(() => reject(new Error('Catalog fault was not requested')), 5000); });
+    const requested = new Promise(resolve => { observed = resolve; });
+    const delivered = new Promise(resolve => { settleDelivery = resolve; });
     await page.route('**/api/mission-library', async route => {
-      observed(); await gate;
-      if (status === 0) await route.abort('failed');
-      else await route.fulfill({ status, json: { error: 'Catalog temporarily unavailable' } });
-    });
+      fault.catalogRequests++; observed(); await gate;
+      try {
+        if (status === 0) await route.abort('failed');
+        else await route.fulfill({ status, json: { error: 'Catalog temporarily unavailable' } });
+        fault.delivered = true; settleDelivery(null);
+      } catch (error) { settleDelivery(error); }
+    }, { times: 1 });
     try {
-      await page.locator('#refresh').click(); await requested; clearTimeout(timer);
+      // A manual click can share a refresh started before this route was installed.
+      // Wait for a new catalog request within the original setup deadline.
+      const deadline = performance.now() + 5000;
+      while (!fault.catalogRequests && performance.now() < deadline) {
+        fault.refreshClicks++;
+        await page.locator('#refresh').click({ timeout: Math.max(1, deadline - performance.now()) });
+        const remaining = deadline - performance.now();
+        if (!fault.catalogRequests && remaining > 0) {
+          let timer;
+          try { await Promise.race([requested, new Promise(resolve => { timer = setTimeout(resolve, Math.min(100, remaining)); })]); }
+          finally { clearTimeout(timer); }
+        }
+      }
+      if (fault.catalogRequests !== 1) throw new Error('Catalog fault was not requested within the setup deadline');
       await action(release);
     } finally {
-      release(); clearTimeout(timer);
+      release();
       await page.unrouteAll({ behavior: 'wait' });
+      if (fault.catalogRequests) {
+        const error = await delivered;
+        if (error) throw error;
+      }
     }
   }
   try {
@@ -242,5 +266,8 @@ module.exports = async function missionReadRecovery({ context, api, tokens, base
     await fs.writeFile(path.join(screenshots, 'mission-read-recovery-failure.json'), JSON.stringify({ state, requests, requestsTruncated, errors }, null, 2));
     await page.screenshot({ path: path.join(screenshots, 'mission-read-recovery-failure.png'), fullPage: true, timeout: 5000 }).catch(() => {});
     throw error;
-  } finally { await page.close(); }
+  } finally {
+    try { await fs.writeFile(path.join(screenshots, 'mission-catalog-faults.json'), JSON.stringify(catalogFaults, null, 2)); }
+    finally { await page.close(); }
+  }
 };
