@@ -12,6 +12,21 @@ def read(p):return json.loads(p.read_text(encoding='utf-8'))
 def free(kind=socket.SOCK_STREAM,address='127.0.0.1'):
     with socket.socket(socket.AF_INET,kind) as s:s.bind((address,0));return s.getsockname()[1]
 
+def replace_fixture_file(path, value):
+    pending = path.with_suffix('.new')
+    with pending.open('x', encoding='ascii') as output:
+        output.write(value)
+    deadline = time.monotonic() + 1
+    while True:
+        try:
+            os.replace(pending, path)
+            return
+        except PermissionError as error:
+            # The runtime can be opening the current command at the same instant.
+            if error.winerror not in (5, 32) or time.monotonic() >= deadline:
+                raise
+            time.sleep(.02)
+
 def reconcile_ai_damage(frames, owners, enabled_sequence, disabled_sequence):
     totals={player:{'roomId':room,'hitsReceived':0,'damageTaken':0} for player,room in owners.items()}
     events=set(); pending=None; last_sequence=0; damage_events=0
@@ -60,6 +75,7 @@ def main():
     p.add_argument('--check-quest-vr-partial-map',action='store_true',help='Use a mixed headset roster and deploy five selected Quest seats from each original VR venue ZIP')
     p.add_argument('--check-windows-venue-staging',action='store_true',help='Stage VIVE XR seats from the original VR or mixed venue ZIP')
     p.add_argument('--check-venue-openxr',action='store_true',help='Use one graphical mock OpenXR seat alongside 24 desktop peers per topology')
+    p.add_argument('--check-venue-openxr-reconnect', action='store_true', help='Interrupt one tracked UDP client and reconnect its original process in both five-room modes')
     p.add_argument('--check-venue-live-tracking',action='store_true',help='Verify the Master-only running tracking overview during native OpenXR loss')
     p.add_argument('--peer-diagnostics',action='store_true',help='Verify observed UDP peers in Linked and absence in default Independent runs')
     p.add_argument('--field-evidence',action='store_true',help='Verify the management ZIP with the original Linked player and server logs')
@@ -123,6 +139,9 @@ def main():
         p.error('--check-venue-openxr requires --check-quest-vr-partial-map and its own venue participation check')
     if args.check_venue_live_tracking and not args.check_venue_openxr:
         p.error('--check-venue-live-tracking requires --check-venue-openxr')
+    if args.check_venue_openxr_reconnect and (not args.check_venue_openxr or args.peer_diagnostics
+            or args.check_windows_venue_staging or args.check_room_combat):
+        p.error('--check-venue-openxr-reconnect requires --check-venue-openxr and its own connection and combat checks')
     if (args.openxr_mock_only or args.check_venue_openxr) != bool(args.openxr_mock_pose_dll):
         p.error('Supply --openxr-mock-pose-dll with --openxr-mock-only or --check-venue-openxr')
     if venue_only:
@@ -426,6 +445,24 @@ def main():
                 mock=openxr_environment(entry['label']+'-openxr-runtime.json',tracking_loss)
                 entry['openxrLossMarker']=tracking_loss
                 entry['openxrPlayerId']=person['id']
+                if args.check_venue_openxr_reconnect:
+                    controls = {}
+                    for name in ('reconnect', 'trigger'):
+                        command_file = runtime / (entry['label'] + '-openxr-' + name + '.request')
+                        ack_file = command_file.with_suffix('.ack')
+                        command_file.write_text('0', encoding='ascii')
+                        controls[name] = (command_file, ack_file)
+                        mock['VR_COMMAND_OPENXR_' + name.upper() + '_COMMAND'] = str(command_file)
+                        mock['VR_COMMAND_OPENXR_' + name.upper() + '_ACK'] = str(ack_file)
+                    udp = module('venue_reconnect_udp', 'udp_gate.py')
+                    gate = udp.LoopbackGate(entry['ready']['port'], lambda: False, local_address=address).start()
+                    reconnect_gates.append(gate)
+                    original_file = file
+                    content = read(file)
+                    file = file.with_stem(file.stem + '-relay')
+                    file.write_text(json.dumps(dict(content, port=gate.port)), encoding='ascii')
+                    entry['openxrReconnect'] = {'gate':gate, 'controls':controls, 'originalFile':original_file,
+                                                'originalHash':package.digest(original_file)}
             launched.append(packaged_player(entry,person,file,mock=mock))
         return launched
 
@@ -1169,6 +1206,26 @@ def main():
             check(all({row['id'] for row in value['packet']['frame']['players'] if row['connected']}==expected
                       and value['packet']['frame']['phase']=='Running' for value in frames[lost['sequence']-1:held['sequence']]),
                   entry['label']+' every replay frame of held tracking loss preserves the other admissions')
+        if 'venueReconnectWindow' in entry:
+            window = entry['venueReconnectWindow']
+            first, last = window['first'], window['last']
+            start, end = first['sequence'], last['sequence']
+            checkpoints = [first, last, *window['outage']]
+            check(start < end and all(frames[packet['sequence']-1]['packet'] == packet for packet in checkpoints),
+                  entry['label']+' sealed replay preserves the exact UDP reconnect window checkpoints')
+            expected = window['peers']
+            for value in frames[start-1:end]:
+                packet = value['packet']; frame = packet['frame']
+                connected = {row['id']:row['rig']['kind'] for row in frame['players'] if row['connected']}
+                target = window['target']
+                tracked = connected.pop(target, None)
+                if (frame['phase'] != 'Running' or packet['suspended'] or connected != expected or
+                        (window['outage'] and window['outage'][0]['sequence'] <= packet['sequence'] <= window['outage'][-1]['sequence'] and tracked is not None)):
+                    raise AssertionError(entry['label']+' UDP reconnect replay changed an unaffected seat or lost the outage boundary')
+            check(True, entry['label']+' all sealed UDP reconnect window frames preserve unaffected admissions')
+            save(entry['label']+'-reconnect-window.json', {'firstSequence':start, 'lastSequence':end, 'frames':end-start+1,
+                'unaffectedSeats':len(expected), 'affectedPlayerId':window['target'],
+                'outageSequences':[packet['sequence'] for packet in window['outage']]})
         if 'combatWindow' in entry:
             window=entry['combatWindow']
             actual={value['packet']['sequence']:value for value in frames}
@@ -1277,21 +1334,6 @@ def main():
             if client['process'].poll() is not None:
                 raise RuntimeError('An original player exited before End')
             return client['log'].read_text(encoding='utf-8',errors='replace') if client['log'].exists() else ''
-
-        def replace_fixture_file(path,value):
-            pending=path.with_suffix('.new')
-            with pending.open('x',encoding='ascii') as output:
-                output.write(value)
-            deadline=time.monotonic()+1
-            while True:
-                try:
-                    os.replace(pending,path)
-                    break
-                except PermissionError as error:
-                    # The runtime can be opening the current command at the same instant.
-                    if error.winerror not in (5,32) or time.monotonic()>=deadline:
-                        raise
-                    time.sleep(.02)
 
         reconnect_states=[]
         def confirm_reconnect_sync(state):
@@ -1800,7 +1842,7 @@ def main():
         begin=read(out/(entry['label']+'-running.json'))['acceptedBeginSequence']
         config_hash=package.digest(original['configPath'])
 
-        def checkpoint(available, minimum_tick):
+        def checkpoint(available, minimum_tick, revision=begin):
             rooms=request('/api/rooms/readiness')['rooms']
             if {row['roomId']:row['sessionId'] for row in rooms}!=sessions_by_room or len(rooms)!=5:
                 return None
@@ -1815,7 +1857,7 @@ def main():
             } for row in rooms):
                 return None
             report=request(session+'/readiness')
-            if report['sourceState']!='Fresh' or report['observedSequence']!=begin or report['sessionSequence']!=begin:
+            if report['sourceState']!='Fresh' or report['observedSequence']!=revision or report['sessionSequence']!=revision:
                 return None
             expected={(pid,row['admissionId'],row['roomId'],row['seat'],pid!=tracked or available) for pid,row in scoped.items()}
             if {(row['playerId'],row['admissionId'],row['roomId'],row['seat'],row['canParticipate']) for row in report['players']}!=expected:
@@ -1824,7 +1866,7 @@ def main():
             frame=packet['frame']
             rigs={row['id']:row['rig']['kind'] for row in frame['players'] if row['connected']}
             expected_rigs={pid:'Tracked' if pid==tracked else 'Simulated' for pid in scoped if pid!=tracked or available}
-            if packet['observedSequence']==begin and frame['phase']=='Running' and frame['tick']>=minimum_tick and rigs==expected_rigs:
+            if packet['observedSequence']==revision and frame['phase']=='Running' and frame['tick']>=minimum_tick and rigs==expected_rigs:
                 return {'packet':packet,'rooms':rooms,'readiness':report}
             return None
 
@@ -1857,6 +1899,111 @@ def main():
         entry['venueOpenxr']={'packets':packets,'players':list(scoped)}
         save(mode+'-venue-openxr-checkpoints.json',{'ready':ready,'lost':lost,'held':held,'recovered':recovered,
             'mockRuntimeSha256':package.digest(runtime_file),'fixtureSha256':package.digest(args.openxr_mock_pose_dll)})
+        if args.check_venue_openxr_reconnect:
+            verify_venue_openxr_reconnect(entries, round_clients, entry, original, checkpoint, recovered, mode)
+
+    def verify_venue_openxr_reconnect(entries, round_clients, entry, client, checkpoint, recovered, mode):
+        stage('running-venue-openxr-reconnect', mode=mode)
+        sid = entry['sessionId']; session = '/api/sessions/'+sid
+        person = client['player']; target_id = person['id']
+        fixture = entry['openxrReconnect']
+        gate = fixture['gate']
+        history = {'reconnect':['0 0'], 'trigger':['0 0']}
+
+        def log():
+            return client['log'].read_text(encoding='utf-8', errors='replace')
+
+        def connection_ids():
+            return re.findall(r'^VR_CLIENT_CONNECTED id=(\d+)$', log(), re.M)
+
+        def sync(name, value, *expected):
+            command_path, ack_path = fixture['controls'][name]
+            if value is not None:
+                replace_fixture_file(command_path, value)
+            history[name].extend(expected)
+            wait(lambda:ack_path.is_file() and ack_path.read_text(encoding='ascii').splitlines()==history[name],
+                 12, mode+' OpenXR sync '+name+' '+history[name][-1])
+
+        def pose(value):
+            return next(row for row in value['packet']['frame']['players'] if row['id']==target_id)
+
+        def sample_peers(other):
+            path = '/api/sessions/'+other['sessionId']
+            revision = read(out/(other['label']+'-running.json'))['acceptedBeginSequence']
+            expected = {(row['id'],row['admissionId'],row['roomId'],row['seat']) for row in
+                        (owner['player'] for owner in round_clients if owner['sessionId']==other['sessionId'])}
+            def original():
+                report = request(path+'/readiness')
+                if report['sourceState'] != 'Fresh' or report['observedSequence'] != revision or report['sessionSequence'] != revision:
+                    return None
+                actual = {(row['playerId'],row['admissionId'],row['roomId'],row['seat']) for row in report['players']
+                          if row['canParticipate'] and row['rigKind']=='Simulated'}
+                if actual != expected:
+                    return None
+                packet = request(path+'/world/frames/'+str(report['worldSequence']))['packet']
+                return packet if packet['frame']['phase']=='Running' and not packet['suspended'] else None
+            return wait(original, 15, other['label']+' original peers during venue reconnect')
+
+        sync('reconnect', None)
+        sync('trigger', None)
+        magazine = pose(recovered)['magazine']
+        sync('trigger', '2', '2 1', '2 0')
+        def fired_once():
+            revision = request(session)['sequence']
+            if revision <= recovered['readiness']['sessionSequence']:
+                return None
+            value = checkpoint(True, recovered['packet']['frame']['tick']+1, revision)
+            if value and pose(value)['magazine']==magazine-1:
+                return value
+        before = wait(fired_once, 15, mode+' original tracked seat fires one round before outage')
+        revision = before['readiness']['sessionSequence']
+        sync('reconnect', '1', '1 1')
+        old_ids = connection_ids()
+        first_other = {other['sessionId']:sample_peers(other) for other in entries if other is not entry}
+        check(len(old_ids)==1 and gate.counts['upstream']>0 and gate.counts['downstream']>0,
+              mode+' only the original tracked player used the owned same-host UDP relay')
+        gate.close()
+        relay = gate.report()
+        check(relay['threadStopped'] and relay['error'] is None, mode+' tracked relay closed cleanly')
+        server_log = entry['work']/'server.log'
+        wait(lambda:'VR_CLIENT_DISCONNECTED' in log() and
+             f'VR_SERVER_CLIENT_LEFT id={old_ids[0]}' in server_log.read_text(encoding='utf-8',errors='replace').splitlines(),
+             45, mode+' actual client and server UDP disconnect')
+        lost = wait(lambda:checkpoint(False,before['packet']['frame']['tick']+1,revision), 15, mode+' original tracked seat loses readiness after disconnect')
+        signed = request(session+'/players/'+target_id+'/join-ticket',{},role='Room5',admission=person['admissionId'])
+        original_config = read(fixture['originalFile'])
+        check(signed['ticket'] and signed['ticket']!=original_config['joinTicket'] and request(session)['sequence']==revision,
+              mode+' room desk reissues the original admission without changing the roster')
+        replace_fixture_file(client['configPath'],json.dumps(dict(original_config,joinTicket=signed['ticket'])))
+        held = wait(lambda:checkpoint(False,lost['packet']['frame']['tick']+50,revision), 15, mode+' held menu cannot reconnect')
+        check(connection_ids()==old_ids and 'VR_CLIENT_ADMISSION_REJECTED' not in log(), mode+' held menu leaves only the original connection in the log')
+        sync('reconnect', '0', '0 0')
+        released = wait(lambda:checkpoint(False,held['packet']['frame']['tick']+14,revision), 15, mode+' released menu cannot reconnect')
+        check(connection_ids()==old_ids, mode+' menu release does not start a connection')
+        sync('reconnect', '1', '1 1')
+        wait(lambda:len(connection_ids())==2, 20, mode+' new original transport after explicit menu press')
+        renewed = wait(lambda:checkpoint(True,released['packet']['frame']['tick']+1,revision), 20, mode+' same original admission restores tracked readiness')
+        new_ids = connection_ids()
+        check(new_ids[:1]==old_ids and len(set(new_ids))==2 and client['process'].poll() is None
+              and client['witness'].kernel.WaitForSingleObject(client['witness'].handle,0)==258
+              and log().count('VR_OPENXR_STARTUP status=active')==log().count('VR_CLIENT_DISCONNECTED')==1
+              and 'VR_CLIENT_ADMISSION_REJECTED' not in log() and package.digest(fixture['originalFile'])==fixture['originalHash']
+              and all(pose(before)[key]==pose(renewed)[key] for key in ('health','magazine','reserve')),
+              mode+' original tracked player process recovers without resetting spent ammunition, health or reserve')
+        client['reconnectIds'] = new_ids
+        for other in entries:
+            tracked = other is entry
+            other['venueReconnectWindow'] = {
+                'first':before['packet'] if tracked else first_other[other['sessionId']],
+                'last':renewed['packet'] if tracked else sample_peers(other),
+                'outage':[item['packet'] for item in (lost,held,released)] if tracked else [],
+                'target':target_id if tracked else None,
+                'peers':{owner['player']['id']:'Simulated' for owner in round_clients
+                         if owner['sessionId']==other['sessionId'] and owner is not client}}
+        save(mode+'-venue-openxr-reconnect.json',{'roomId':person['roomId'],'seat':person['seat']+1,
+            'admissionId':person['admissionId'],'originalNativePid':client['nativePid'], 'connections':new_ids,
+            'relay':relay, 'managementRevision':revision, 'synchronizedInput':history,
+            'before':before, 'lost':lost, 'held':held, 'released':released, 'renewed':renewed})
 
     def verify_room_readiness(round_clients,linked):
         expected={client['player']['roomId']:client['sessionId'] for client in round_clients}
@@ -2746,9 +2893,13 @@ def main():
             for client in round_clients:
                 text=client['log'].read_text(encoding='utf-8',errors='replace');check(venue.player_result_phase(text)=='acknowledged','original player result / disconnect '+client['player']['id']);finals=[json.loads(line.split('VR_CLIENT_DEBRIEF_FINAL ',1)[1]) for line in text.splitlines() if 'VR_CLIENT_DEBRIEF_FINAL ' in line];check(len(finals)==1,'one original final result '+client['player']['id']);final=finals[0];entry=next(e for e in entries if e['sessionId']==client['sessionId']);debrief.validate_result(final,{'id':entry['sessionId']},client['player'],entry['sealed']);check(True,'original admission / exact final seals / stats '+client['player']['id']);save(client['player']['id']+'-result.json',final)
                 if player_folder:
-                    connections=set(re.findall(r'VR_CLIENT_CONNECTED id=(\d+)',text))
-                    if len(connections)!=1:raise RuntimeError('Player did not have one original native connection')
-                    client['connection']=int(connections.pop())
+                    connections=re.findall(r'VR_CLIENT_CONNECTED id=(\d+)',text)
+                    if client.get('reconnectIds'):
+                        check(connections==client['reconnectIds'] and final['ammoUsed']==1,
+                              entry['label']+' original tracked player seals one shot on its new connection')
+                    elif len(connections)!=1:
+                        raise RuntimeError('Player did not have one original native connection')
+                    client['connection']=int(connections[-1])
                     client['final']=final
                 else:
                     report_csv=request('/api/sessions/'+client['sessionId']+'/report.csv')
@@ -2907,6 +3058,7 @@ def main():
             'questVrDeploy':args.check_quest_vr_deploy,
             'questVrPartialMap':args.check_quest_vr_partial_map,
             'venueOpenxr':args.check_venue_openxr,
+            'venueOpenxrReconnect':args.check_venue_openxr_reconnect,
             'openxrReconnect':args.check_openxr_reconnect,
             'openxrRevocation':args.check_openxr_revocation,
             'venueEnvironment':args.check_venue_environment,
@@ -2955,7 +3107,8 @@ def main():
         remaining={'errors':cleanup,'remainingRunners':[e['label'] for e in runners if e['process'].poll() is None],
                    'remainingClients':[c['player']['id'] for c in clients if c['process'].poll() is None],'apiRemaining':api is not None and api.poll() is None}
         if args.hardware_simulator_package:remaining['remainingHardware']=[process.pid for process in hardware_processes if process.poll() is None]
-        if args.check_openxr_reconnect:remaining['remainingReconnectRelays']=sum(gate.thread.is_alive() for gate in reconnect_gates)
+        if args.check_openxr_reconnect or args.check_venue_openxr_reconnect:
+            remaining['remainingReconnectRelays']=sum(gate.thread.is_alive() for gate in reconnect_gates)
         save('cleanup.json',remaining)
         if cleanup:raise RuntimeError('Cleanup not confirmed; do not snapshot live runtime')
         venue.snapshot_runtime(runtime,out/'runtime-snapshot')

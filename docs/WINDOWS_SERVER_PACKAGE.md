@@ -96,6 +96,8 @@ Quest 小批次驗證可在三包命令加上 `--check-vr-venue-tickets --check-
 
 使用管理包 0.31.72 可再加 `--check-venue-live-tracking`，在上述實際來源的四個取樣點比對主控 API 的 `venueTracking`，並核對房控權限。 [執行中五房追蹤](PLAYER_READINESS.md#執行中五房追蹤總覽)
 
+加上 `--check-venue-openxr-reconnect` 可在兩種拓撲各中斷第 5 房第 2 席的本機 UDP 轉送。此測試需支援 Vive Menu 及扳機的測試 DLL，請省略 `--check-windows-venue-staging`、`--peer-diagnostics` 與 `--check-room-combat`。使用原 ZIP 的測試副本設定轉送端點，切回原伺服器時由房控重發同一入場的票券。測試核對原 OpenXR 程序、重連前的單發耗彈、恢復的有效追蹤、封存回放中的其餘 24 席，以及重連後的戰績確認。 [五房重連操作](QUEST_RECONNECT.md#五房-udp-中斷複驗)
+
 搭配控制台 0.31.10，可加上 `--check-interrupted-replay`。測試在另一個獨立場次錄到敵軍實際傷害後終止該次啟動器，核對原遊戲程序退出，再檢查保存片段的尾端、戰績及未封存狀態。 [中斷場次回放](WORLD_RECORDING.md#回放未封存的已保存片段)
 
 2026-11-02 本輪同源Unity0.41.1／code52／NGO29／242真正Editor、4ebd雙平台：新server主包 `windows-server-0.41.1-v2-win-x64.zip`，**82,673,732 bytes／SHA256 `ca285a42e0c22bdde17f62eb6dd8a65523c9d3a5cae19a33cad41636899fb368`**、311 manifest／ZIP312。啟動器1.1來源fb57807d...不變但重新編譯binary不同，runtime逐byte同v1；v1與所有舊包保持。包說明改引用Runtime/build-receipt.json，不再寫死Unity0.39。

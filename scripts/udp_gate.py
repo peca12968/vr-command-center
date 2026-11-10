@@ -1,4 +1,4 @@
-"""Bounded opaque UDP gate for one owned loopback client; never records payloads."""
+"""Bounded opaque UDP gate for one owned same-host client; never records payloads."""
 from collections import deque
 import socket
 import threading
@@ -135,7 +135,7 @@ def summarize_traffic(boundaries, owners):
 
 
 class LoopbackGate:
-    def __init__(self, server_port, should_hold, *, mode='delay', pass_small_bytes=0, max_hold_seconds=8, max_packets=1024, max_bytes=2 * 1024 * 1024, traffic=None, peer=None):
+    def __init__(self, server_port, should_hold, *, mode='delay', pass_small_bytes=0, max_hold_seconds=8, max_packets=1024, max_bytes=2 * 1024 * 1024, traffic=None, peer=None, local_address='127.0.0.1'):
         if mode not in ('delay', 'drop', 'measure', 'periodic-loss') or not 0 <= pass_small_bytes <= 64 or not 0 < server_port < 65536 or not 0 < max_hold_seconds <= 40 or not 0 < max_packets <= 1024 or not 0 < max_bytes <= 2 * 1024 * 1024:
             raise ValueError('Gate bounds are invalid')
         if mode in ('measure', 'periodic-loss'):
@@ -145,10 +145,10 @@ class LoopbackGate:
         elif traffic is not None or peer is not None:
             raise ValueError('Use the transparent mode to measure forwarded traffic')
         self.traffic = traffic; self.peer = peer
-        self.server = ('127.0.0.1', server_port); self.client = None; self.should_hold = should_hold
+        self.server = (local_address, server_port); self.client = None; self.should_hold = should_hold
         self.mode = mode; self.pass_small_bytes = pass_small_bytes; self.max_hold_seconds = max_hold_seconds; self.max_packets = max_packets; self.max_bytes = max_bytes
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.socket.bind(('127.0.0.1', 0)); self.port = self.socket.getsockname()[1]; self.socket.settimeout(.02)
+        self.socket.bind((local_address, 0)); self.port = self.socket.getsockname()[1]; self.socket.settimeout(.02)
         self.stop_event = threading.Event(); self.release_event = threading.Event(); self.held = threading.Event()
         self.queue = deque(); self.queued_bytes = 0; self.started = None; self.released_at = None; self.release_reason = None; self.error = None
         self.counts = {'upstream': 0, 'downstream': 0, 'held': 0, 'released': 0, 'dropped': 0, 'smallPassed':0, 'foreignDropped': 0, 'connectionResets':0, 'peakPackets': 0, 'peakBytes': 0}
@@ -183,7 +183,7 @@ class LoopbackGate:
                 except socket.timeout: continue
                 except ConnectionResetError: self.counts['connectionResets'] += 1; continue
                 if sender != self.server:
-                    if sender[0] != '127.0.0.1' or (self.client is not None and sender != self.client):
+                    if sender[0] != self.server[0] or (self.client is not None and sender != self.client):
                         self.counts['foreignDropped'] += 1; continue
                     self.client = sender; self._forward(data, self.server, 'upstream'); continue
                 if self.client is None: self.counts['foreignDropped'] += 1; continue
