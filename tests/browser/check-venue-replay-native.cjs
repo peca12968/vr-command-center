@@ -10,14 +10,35 @@ async function main() {
   assert.match(config.base, /^http:\/\/127\.0\.0\.1:\d+$/);
   const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const results = [], fieldEvidence = [], participation = [];
-  let history, roomReplay;
+  let history, roomReplay, scores;
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1080 }, acceptDownloads: true });
     const errors = [];
     page.on('pageerror', error => errors.push(error.name));
     await page.goto(config.base + '/console/');
     await page.locator('#login-key').fill(config.masterKey);
+    const scoreResponse = config.scores && page.waitForResponse(reply => {
+      const url = new URL(reply.url());
+      return url.pathname === '/api/venue/closure' && url.searchParams.get('includeScores') === 'true';
+    });
     await page.locator('#login-form button').click();
+    if (scoreResponse) {
+      const response = await scoreResponse;
+      const body = await response.json();
+      assert.equal(response.status(), 200);
+      assert.equal(body.batch.requestId, config.scores.requestId);
+      assert.deepEqual(body.scores, config.scores);
+      const cells = (label, totals) => [label, totals.players, totals.ammoUsed, totals.shotsHit, totals.kills,
+        totals.hitsReceived, totals.damageTaken, totals.accuracyPercent + '%'].map(String);
+      const expected = config.scores.rooms.map(room => cells('房間 ' + room.roomId, room.totals));
+      expected.push(cells('本批合計', config.scores.total));
+      const scoresTable = page.locator('#venue-score-table');
+      await scoresTable.waitFor();
+      assert.deepEqual(await scoresTable.locator('tbody tr').evaluateAll(rows =>
+        rows.map(row => [...row.cells].map(cell => cell.textContent))), expected);
+      await scoresTable.screenshot({ path: path.join(path.dirname(output), config.mode + '-venue-scores.png') });
+      scores = body.scores;
+    }
     async function openReplay(session) {
       const original = page.waitForResponse(response =>
         new URL(response.url()).pathname === `/api/sessions/${session.sessionId}/world/watch`);
@@ -260,6 +281,6 @@ async function main() {
   } finally {
     await browser.close();
   }
-  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation }, null, 2), { flag: 'wx' });
+  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation, scores }, null, 2), { flag: 'wx' });
 }
 main().catch(error => { console.error(error.name + ': native venue replay UI failed'); process.exitCode = 1; });

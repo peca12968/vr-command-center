@@ -46,6 +46,12 @@ Windows 管理包 0.31.37 起，主控可在「最近一次全館收尾」按「
 
 `GET /api/venue/closure/{batchId}/reports.zip` 限主控，回傳 `vr-command-venue-reports-v1-{batchId}.zip` 與 `Cache-Control: no-store`。若任一場的戰鬥報表尚未完成，回傳 `409`、`venue-reports-not-ready` 與待封存房號。即使房間重用或已有新批次，原批次網址仍指向原場次和報表。
 
+### 在全館收尾比較分房戰績
+
+Windows 管理包 0.31.81 在「全館收尾」顯示所選批次的分房戰績與本批合計。所有原場次的最終戰鬥報表可讀後才顯示。分房表含玩家數、耗彈、命中、擊殺、中彈、耗損與命中率。未參與該批的房間不列入，原批次中的空房會保留零值列。命中率以該列總命中除以總耗彈，合併場的每份玩家戰績只計入原房一次。
+
+主控可在批次清單選擇舊批次，比較當時的最終戰績。管理 API 在 `GET /api/venue/closure` 或 `GET /api/venue/closure/{batchId}` 加上 `includeScores=true` 時，隨原批次提供已就緒的 `scores`。它沿用戰鬥報表的權限與封存條件。世界回放封存狀態在原區塊獨立顯示。
+
 ## 最終性與權限
 
 SessionManager 在同一把鎖內檢查身分／房間、Ended 與戰鬥封存，再擷取場次及 ledger。已綁 combat stream 必須接受精確 seal，只有 End 不足以匯出；尾端補送完成但尚未 seal 仍回 409。未綁 stream 的歷史場次 End 後不能接受新戰鬥，故可匯出。報表不新增事件、不更動歷史，也不寫入伺服器的匯出檔案。

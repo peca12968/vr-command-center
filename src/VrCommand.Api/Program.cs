@@ -220,20 +220,20 @@ app.MapGet("/api/venue/phase", (SessionManager manager, HttpContext context) =>
     context.Response.Headers.CacheControl = "no-store";
     return manager.ReadVenuePhase(Actor(context));
 });
-app.MapGet("/api/venue/closure", (WorldRecordings worlds, HttpContext context) =>
+app.MapGet("/api/venue/closure", (bool? includeScores, WorldRecordings worlds, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";
-    return new { batch = worlds.ReadVenueClosure(Actor(context)) };
+    return worlds.ReadVenueClosure(Actor(context), includeScores == true);
 });
 app.MapGet("/api/venue/closure/history", (Guid? before, int? limit, SessionManager manager, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";
     return manager.ReadVenueEndHistory(before, limit ?? 20, Actor(context));
 });
-app.MapGet("/api/venue/closure/{id:guid}", (Guid id, WorldRecordings worlds, HttpContext context) =>
+app.MapGet("/api/venue/closure/{id:guid}", (Guid id, bool? includeScores, WorldRecordings worlds, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";
-    return new { batch = worlds.ReadVenueClosure(Actor(context), id) };
+    return worlds.ReadVenueClosure(Actor(context), includeScores == true, id);
 });
 app.MapGet("/api/venue/closure/{id:guid}/reports.zip", (Guid id, SessionManager manager, HttpContext context) =>
 {

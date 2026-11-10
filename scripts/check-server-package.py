@@ -866,7 +866,19 @@ def main():
             raise RuntimeError('Node is required for the shipped replay console check')
         descriptor = runtime / f'{mode}-venue-replay-private.json'
         output = out / f'{mode}-venue-replay-ui.json'
-        config = {'base': uri, 'masterKey': keys['Master'], 'mode': mode, 'sessions': rows}
+        def totals(players):
+            fields = ('ammoUsed', 'shotsHit', 'kills', 'hitsReceived', 'damageTaken')
+            counts = {key: sum(player[key] for player in players) for key in fields}
+            accuracy = round(Decimal(100 * counts['shotsHit']) / counts['ammoUsed'], 2) if counts['ammoUsed'] else 0
+            return {'players': len(players), **counts, 'accuracyPercent': float(accuracy)}
+
+        players = {entry['sessionId']: entry['sealed']['statistics']['players'] for entry in entries}
+        scores = {'requestId': closed['requestId'], 'rooms': [
+            {'roomId': room, 'sessionId': row['sessionId'],
+             'totals': totals([player for player in players[row['sessionId']] if player['roomId'] == room])}
+            for row in rows for room in row['roomIds']],
+            'total': totals([player for roster in players.values() for player in roster])}
+        config = {'base': uri, 'masterKey': keys['Master'], 'mode': mode, 'sessions': rows, 'scores': scores}
         scoped = linked and args.check_player_room_replay
         if scoped:
             config['roomReplaySource'] = str(out/'linked-replay.json')
@@ -877,6 +889,8 @@ def main():
             subprocess.run([node, str(ROOT/'tests/browser/check-venue-replay-native.cjs'), str(descriptor), str(output)],
                            stdout=log, stderr=subprocess.STDOUT, check=True, timeout=75)
         result = read(output)
+        check(result['scores'] == scores and scores['total']['players'] == 25,
+              f'{mode} shipped console renders exact room and batch totals from all 25 original sealed statistics')
         check(result['complete'] and [item['sessionId'] for item in result['results']] == [row['sessionId'] for row in rows]
               and all(item['throughSequence'] == sources[item['sessionId']]['acceptedSequence'] for item in result['results']),
               f'{mode} shipped console opens every original sealed native replay')
@@ -2641,7 +2655,9 @@ def main():
                     report_csv=request('/api/sessions/'+client['sessionId']+'/report.csv')
                     (out/(client['player']['id']+'.csv')).write_text(report_csv,encoding='utf-8')
                 stop_player(client)
-                if player_folder:check(True,'player launcher confirmed original child exit '+client['player']['id'])
+                if player_folder:
+                    method = 'player launcher' if client.get('launcherReport') else 'native exercise fixture'
+                    check(True,method+' confirmed original child exit '+client['player']['id'])
             if player_folder:
                 evidence_entries = [verify_delivery(entry,[c for c in round_clients if c['sessionId']==entry['sessionId']])
                                     for entry in entries]

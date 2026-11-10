@@ -232,7 +232,7 @@ async function refreshData(epoch) {
   const closureSelection = venueClosureEpoch, batchId = venueHistory.selected();
   const current = () => epoch === state.epoch && selection === selectionEpoch && includeEnded === $('include-ended').checked;
   const venueRead = master() ? api('/venue/phase').catch(error => { if (error.status === 401) throw error; return null; }) : null;
-  const venueClosureRead = master() ? api(batchId ? '/venue/closure/' + batchId : '/venue/closure')
+  const venueClosureRead = master() ? api((batchId ? '/venue/closure/' + batchId : '/venue/closure') + '?includeScores=true')
     .catch(error => { if (error.status === 401) throw error; return null; }) : null;
   const [rooms, catalog, sessions, venue, venueClosure] = await Promise.all([
     api('/rooms'), api('/mission-library'), api('/sessions?includeEnded=' + includeEnded), venueRead, venueClosureRead
@@ -623,6 +623,8 @@ function renderVenueClosure(report, loading = false) {
   const rows = $('venue-closure-rows');
   rows.replaceChildren();
   $('venue-closure-table').hidden = true;
+  $('venue-score-table').hidden = true;
+  $('venue-score-rows').replaceChildren();
   if (panel.hidden) { venueReport.update(null); $('venue-closure-summary').textContent = ''; return; }
   if (loading || batch === null) {
     venueReport.update(null);
@@ -691,7 +693,29 @@ function renderVenueClosure(report, loading = false) {
     rows.append(result);
   }
   $('venue-closure-table').hidden = false;
+  renderVenueScores(batch, report.scores);
   venueReport.update(batch);
+}
+function renderVenueScores(batch, scores) {
+  if (!scores || typeof batch.requestId !== 'string' || scores.requestId !== batch.requestId || !Array.isArray(scores.rooms)
+    || batch.sessions.some(session => !['Sealed', 'NoSource'].includes(session.combat))) return;
+  const expected = new Map(batch.sessions.flatMap(session => session.roomIds.map(room => [room, session.sessionId])));
+  const actual = new Set(scores.rooms.map(score => score?.roomId));
+  const keys = ['players', 'ammoUsed', 'shotsHit', 'kills', 'hitsReceived', 'damageTaken'];
+  const valid = totals => totals && keys.every(key => Number.isSafeInteger(totals[key]) && totals[key] >= 0)
+    && Number.isFinite(totals.accuracyPercent) && totals.accuracyPercent >= 0 && totals.accuracyPercent <= 100;
+  if (scores.rooms.length !== expected.size || actual.size !== expected.size || !valid(scores.total)
+    || scores.rooms.some(score => !expected.has(score?.roomId) || expected.get(score.roomId) !== score.sessionId
+      || !valid(score.totals))) return;
+  const scoreRow = (label, totals) => row([label, ...keys.map(key => totals[key]), totals.accuracyPercent + '%']);
+  const rows = scores.rooms.map(score => {
+    const item = scoreRow('房間 ' + score.roomId, score.totals);
+    item.dataset.venueScoreRoom = score.roomId;
+    return item;
+  });
+  rows.push(scoreRow('本批合計', scores.total));
+  $('venue-score-rows').replaceChildren(...rows);
+  $('venue-score-table').hidden = false;
 }
 function row(cells) { const tr = element('tr'); for (const value of cells) { const td = element('td'); if (value instanceof Node) td.append(value); else td.textContent = value; tr.append(td); } return tr; }
 function emptyTable(id, columns, message) { const tr = element('tr'), td = element('td', message, 'empty-cell'); td.colSpan = columns; tr.append(td); $(id).replaceChildren(tr); }

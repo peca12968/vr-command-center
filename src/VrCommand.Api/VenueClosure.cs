@@ -11,12 +11,37 @@ internal sealed record VenueClosureSession(Guid SessionId, long AppliedAtSequenc
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTrackingBegin? TrackingBegin,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueParticipationBegin? ParticipationBegin);
 internal sealed record VenueClosureBatch(Guid RequestId, DateTimeOffset RecordedAtUtc, VenueClosureSession[] Sessions);
+internal sealed record VenueClosureResponse(VenueClosureBatch? Batch,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueBattleScores? Scores);
+internal sealed record VenueBattleScores(Guid RequestId, VenueRoomScore[] Rooms, VenueBattleTotals Total);
+internal sealed record VenueRoomScore(int RoomId, Guid SessionId, VenueBattleTotals Totals);
+internal sealed record VenueBattleTotals(int Players, long AmmoUsed, long ShotsHit, long Kills, long HitsReceived, long DamageTaken)
+{
+    public decimal AccuracyPercent => AmmoUsed == 0 ? 0 : decimal.Round(100m * ShotsHit / AmmoUsed, 2);
+
+    internal static VenueBattleTotals From(PlayerStatistics[] players) => new(players.Length,
+        players.Sum(player => player.AmmoUsed), players.Sum(player => player.ShotsHit), players.Sum(player => player.Kills),
+        players.Sum(player => player.HitsReceived), players.Sum(player => player.DamageTaken));
+}
 
 public sealed partial class WorldRecordings
 {
-    internal VenueClosureBatch? ReadVenueClosure(OperatorIdentity actor, Guid? batchId = null)
+    internal VenueClosureResponse ReadVenueClosure(OperatorIdentity actor, bool includeScores, Guid? batchId = null)
     {
-        lock (gate) return ReadVenueClosureData(actor, batchId)?.Batch;
+        lock (gate)
+        {
+            var batch = ReadVenueClosureData(actor, batchId)?.Batch;
+            if (!includeScores || batch is null
+                || batch.Sessions.Any(session => session.Combat is not (VenueArchiveState.Sealed or VenueArchiveState.NoSource)))
+                return new(batch, null);
+
+            var final = manager.FinalVenueReports(batch.RequestId, actor);
+            var rooms = final.Sessions.SelectMany(item => item.Report.RoomIds.Select(room =>
+                new VenueRoomScore(room, item.Report.SessionId, VenueBattleTotals.From(item.Report.ForRoom(room).Players))))
+                .OrderBy(score => score.RoomId).ToArray();
+            return new(batch, new(final.RequestId, rooms,
+                VenueBattleTotals.From(final.Sessions.SelectMany(item => item.Report.Players).ToArray())));
+        }
     }
 
     private (VenueClosureBatch Batch, FieldEvidence?[] Evidence)? ReadVenueClosureData(OperatorIdentity actor, Guid? batchId)
