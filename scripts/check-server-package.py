@@ -3921,7 +3921,7 @@ def main():
                 else:
                     room_replay_props = [{'assetId':'barrel','position':{'x':4.5,'y':0,'z':4.5},'yawDegrees':0}]
                     state=create(rooms,'linked' if linked else 'independent',enemy_count=enemy_count,
-                                 props=room_replay_props if linked and args.check_player_room_replay else None)
+                                 props=room_replay_props if linked and (args.check_player_room_replay or args.check_room_observer) else None)
                 if args.check_venue_launcher:
                     entry=launch_venue([state],True)[0] if linked else venue_entries[rooms[0]-1]
                 else:
