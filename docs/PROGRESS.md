@@ -1,5 +1,14 @@
 # 開發進度
 
+## 2026-11-11 在遊戲來源登記時核對場次序號
+
+- 控制台 0.31.113 匯出第三版計畫。Windows 啟動器 1.14 將原序號傳給遊戲 0.50.3，管理服務在寫入來源的同一次操作內比對序號。遊戲確認原序號回條才啟動 UDP。舊 1.13 拒絕第三版計畫，使用第三版的 1.14 也在建立遊戲工作目錄前拒絕缺少此能力的舊管理包。新啟動器仍可讀取第二版並使用登記檢查，第一版手動計畫保留原流程。 [操作與版本](WINDOWS_SERVER_PACKAGE.md#依場館計畫批次啟動)
+- Windows 三包 `run-b0ee6c2a4c954dcc961e344742c41c1f` 退出 0、459 項。測試在原 Unity 的來源請求抵達時以 SetEnvironment 推進同一場次序號。管理服務回 409，遊戲退出碼 2，無來源、UDP 綁定或就緒公告。重新下載後，五房獨立及合併各 25 席同機連線，最終來源仍保存各計畫序號，50 份戰績與原伺服器確認相符，六場共 939 格完整回放、6 份 CSV 及雙封存。活動場次歸零，C／F 快照 242 檔雜湊相符。核對是逐場執行，先登記的其他獨立房間仍保留來源供收尾。 [Windows 驗收](../artifacts/server-package-checks/run-b0ee6c2a4c954dcc961e344742c41c1f/checks.json) · [競態結果](../artifacts/server-package-checks/run-b0ee6c2a4c954dcc961e344742c41c1f/linked-venue-source-stale.json)
+- 前兩輪保留為失敗。第一輪轉送測試請求時誤用二進位 Content-Type，實際收到 415。第二輪由 Chromium 拒絕 loopback 1719 埠，尚未啟動遊戲。只修正測試轉送及高位埠選取，原套件及核對條件相同。兩輪均清理，C／F 快照 152 與 36 檔各自雜湊相符。 [415 紀錄](../artifacts/guarded-source-0503-build/native-suite.log) · [連接埠紀錄](../artifacts/guarded-source-0503-build/native-suite-json-forwarded.log)
+- 273 項 Unity EditMode 通過，Windows 與 Quest 0.50.3／68 的來源指紋、場景及玩家網路識別相符。Quest ARM64 開發 APK 61,030,026 bytes，SHA-256 `8951cc81c078c39f436a1737e45f7a78dfc61b4b349b2e43b05832b1aeec0a0d`，原 v2 開發簽章核對通過。Windows 玩家包 84,773,048 bytes，SHA-256 `8fe90c6541ae1f5f6b79f611e504c0466e5627aeb9a6bfb18296ea602a3c8ea2`。跨機、頭盔及廠商硬體仍待現場驗收。 [Editor 結果](../artifacts/guarded-source-0503-build/EditMode.xml) · [發行核對](../artifacts/venue-release-0.50.3-guarded-source.json)
+- Release 零警告，1,079 項核心、14 項 Chromium、107 項管理包、38 項玩家包及 17 項 Python 套件檢查通過。管理包建置來源 `bb6a2b83`，184 個來源雜湊相符。最終 Windows 驗收程式來源 `000bd136`，GitHub Actions job `129997244080` 因帳務或支出上限未啟動。 [瀏覽器結果](../artifacts/console-guarded-source-plan/checks.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42863975238)
+- 解壓管理包以測試程序專用 `DOTNET_PROCESSOR_COUNT=4` 通過 785 項 HTTP。預設設定的首輪在重複憑證案例輸出預期診斷後仍超過 10 秒門檻，保留失敗與子程序輸出。兩次測試使用同一套件及原期限。來源建置另通過 102 項世界串流檢查。 [HTTP 通過](../artifacts/guarded-source-0503-build/http-smoke-four-processors.log) · [首輪 HTTP](../artifacts/guarded-source-0503-build/http-smoke.log) · [世界串流](../artifacts/guarded-source-0503-build/world-smoke.log)
+
 ## 2026-11-11 核對五房啟動計畫的場次序號
 
 - 控制台 0.31.112 下載第二版計畫，逐場寫入序號與任務版本。Windows 啟動器 1.13 在讀取計畫及取得全館本機啟動鎖後各核對一次。若場次變更，先回主控台重讀並下載。既有第一版手動計畫仍使用原房間、場次及 UDP 核對。 [操作方式](WINDOWS_SERVER_PACKAGE.md#依場館計畫批次啟動)

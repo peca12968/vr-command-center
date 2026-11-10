@@ -1,5 +1,7 @@
 # Windows 遊戲伺服器包
 
+2026-11-11 `VRCommand-GameServer-0.50.3-1.14-guarded-source-win-x64.zip` 為 84,808,914 bytes，SHA-256 `889e69380e7f32becf3c18fc0d9cbdeec1427943252932c5ad5d55a9b0e503e6`。解壓核對 330 筆清單。支援在登記遊戲來源時核對原場次序號。 [操作方式](#依場館計畫批次啟動)
+
 2026-11-11 `VRCommand-GameServer-0.50.2-1.13-venue-plan-win-x64.zip` 為 84,807,939 bytes，SHA-256 `9886b6d73eeb0f90a162938245897f08e9b466a051e9a8e2641b039e7f653c76`。解壓核對 330 筆清單。第二版場館計畫須比對原場次序號與任務版本，沿用遊戲 0.50.2。 [操作方式](#依場館計畫批次啟動)
 
 2026-11-10 `VRCommand-GameServer-0.50.2-1.12-debrief-win-x64.zip` 為 84,807,998 bytes，SHA-256 `59e25280556639f219faecbdbd3b174bddaa99fad29e778e9feea971ff65f1cb`。解壓核對 330 筆清單。遊戲 0.50.2 可將玩家戰績回條送至 0.31.109 管理包。 [任務收尾](SESSION_CLOSURE.md#玩家戰績回條)
