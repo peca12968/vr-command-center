@@ -34,7 +34,7 @@ const connections = mountConnections(() => state, logout);
 const closure = mountClosure(() => state, logout, target => tab('world', target), report);
 const alignment = mountAlignment(api, download);
 const mrDeployment = mountMrDeployment(() => state, api);
-const mrVenue = mountMrVenueBundle(() => state, api, download);
+const mrVenue = mountMrVenueBundle(() => state, api, download, roomReadiness.ticketDestination);
 const vrVenue = mountVrVenueTickets(() => state, api, download, roomReadiness.ticketSourceLive);
 const venueServerPlan = mountVenueServerPlan(() => state, api, download);
 const alignmentPins = mountAlignmentPins({ state: () => state,
@@ -641,6 +641,7 @@ function applyVenuePermissions() {
   const locked = state.busy || !!state.pending || !master();
   venueHistory.update(!locked);
   $('restore-venue-plan').disabled = locked || !archivedPlan;
+  mrVenue.update();
   vrVenue.update();
   venueServerPlan.update();
   const policy = venueBeginPolicy();

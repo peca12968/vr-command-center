@@ -192,6 +192,7 @@ def main():
     p.add_argument('--check-interrupted-replay', action='store_true', help='Play the saved native prefix after the owned launcher is killed')
     p.add_argument('--check-managed-mr', action='store_true', help='Verify the MR alignment startup gate, desktop rejection and Preparing seal')
     p.add_argument('--mr-venue-bundle-only', action='store_true', help='Verify both MR venue exports from native publishers, without starting desktop players')
+    p.add_argument('--check-mr-venue-source-recovery', action='store_true', help='Hold an original signed MR ZIP while its managed Linked publisher pauses and recovers')
     p.add_argument('--mixed-venue-bundle-only', action='store_true', help='Verify a mixed five-room console ZIP and mapped mock Quest deployment from native publishers')
     p.add_argument('--openxr-mock-only', action='store_true', help='Verify a packaged graphical OpenXR client with the installed Unity mock runtime')
     p.add_argument('--check-openxr-reconnect', action='store_true', help='Interrupt the tracked UDP client and reload its ticket with the mock right Vive menu button')
@@ -202,6 +203,8 @@ def main():
     args=p.parse_args()
     if os.name!='nt':p.error('Actual Windows processes required')
     if args.check_mapped_quest and not args.mr_venue_bundle_only:p.error('--check-mapped-quest requires --mr-venue-bundle-only')
+    if args.check_mr_venue_source_recovery and not args.mr_venue_bundle_only:
+        p.error('--check-mr-venue-source-recovery requires --mr-venue-bundle-only')
     if args.check_room_endpoints and not (args.check_vr_venue_tickets or args.mixed_venue_bundle_only):
         p.error('--check-room-endpoints requires --check-vr-venue-tickets or --mixed-venue-bundle-only')
     venue_only = args.mr_venue_bundle_only or args.mixed_venue_bundle_only
@@ -2866,6 +2869,8 @@ def main():
         sid = entry['sessionId']
         terminal = request('/api/sessions/'+sid)
         report = read(entry['reportPath'])
+        if 'venueIndex' in entry:
+            report = report['servers'][entry['venueIndex']]['result']
         header = report['finalWorld']['header']
         supplied = {room: files[room] for room in terminal['roomIds']}
         proofs = field.verify_room_alignments(terminal, header, supplied)
@@ -2896,6 +2901,51 @@ def main():
             path.write_bytes(files[room])
         return paths
 
+    def recover_mr_venue_source(entry, rooms, alignments):
+        node = shutil.which('node')
+        if not node: raise RuntimeError('Node is required for the native MR browser check')
+        route = '/api/sessions/' + entry['sessionId']
+        endpoint = request(route + '/connection-endpoint')
+        body = {'topology': 'Linked', 'rooms': rooms}
+        signed = out/'mr-source-signed.request'
+        blocked = out/'mr-source-blocked.request'
+        descriptor = runtime/'mr-source-private.json'
+        bundle = runtime/'mr-source-recovered.zip'
+        output = out/'mr-source-browser.json'
+        descriptor.write_text(json.dumps({'base': uri, 'masterKey': keys['Master'], 'signed': str(signed), 'blocked': str(blocked),
+            'files': [str(alignments[room]) for room in range(1, 6)], 'endpoint': f'{endpoint["address"]}:{endpoint["port"]}'}), encoding='utf-8')
+        def readiness(live):
+            rows = request('/api/rooms/readiness')['rooms']
+            return rows if len(rows) == 5 and all(row.get('ticketSourceLive') is live and row.get('endpoint') == endpoint for row in rows) else None
+        driver = ROOT/'tests/browser/check-mr-venue-source-native.cjs'
+        with (out/'mr-source-browser.log').open('xb') as log:
+            browser = subprocess.Popen([node, str(driver), str(descriptor), str(bundle), str(output)], stdout=log, stderr=subprocess.STDOUT)
+            try:
+                def marker(path):
+                    if browser.poll() is not None: raise RuntimeError('Original MR browser exited early')
+                    return path.is_file()
+                wait(lambda: marker(signed), 25, 'one original Chromium request receives its signed MR ZIP')
+                with hold_owned_unity_threads(entry['witness'], entry['ready']['childPid']) as thread_count:
+                    stale = wait(lambda: readiness(False), 12, 'managed MR source expires')
+                    held_world = request(route+'/world')
+                    rejection = request('/api/mr-deployment/venue-bundle', body, expected=409)
+                    check(rejection['code'] == 'venue-endpoint-stale' and rejection['roomId'] == 1,
+                          'New MR issuance refuses the same held native publisher')
+                    wait(lambda: marker(blocked), 12, 'Chromium discards the original signed ZIP and keeps the five files')
+                restored = wait(lambda: readiness(True), 18, 'same MR source resumes publishing')
+                resumed_world = request(route+'/world')
+                check(resumed_world['header'] == held_world['header'] and resumed_world['acceptedSequence'] > held_world['acceptedSequence']
+                      and request(route+'/connection-endpoint') == endpoint
+                      and entry['witness'].kernel.WaitForSingleObject(entry['witness'].handle, 0) == 258,
+                      'The original MR Unity handle advances the same world and published endpoint')
+                check(browser.wait(timeout=35) == 0 and read(output)['restoredFiveFiles'] and bundle.is_file(),
+                      'Same browser panel retains five calibration files, suppresses the held ZIP and exports only on a new click')
+                save('mr-source-native.json', {'threadCount': thread_count, 'heldReadiness': stale, 'restoredReadiness': restored,
+                    'heldWorld': held_world, 'resumedWorld': resumed_world, 'rejection': rejection})
+                return bundle.read_bytes()
+            finally:
+                if browser.poll() is None: browser.terminate(); browser.wait(timeout=10)
+
     def check_mr_venue_bundle():
         pwsh = shutil.which('pwsh')
         if not pwsh: raise RuntimeError('PowerShell is required for Quest venue preflight')
@@ -2913,6 +2963,7 @@ def main():
                 states = request('/api/sessions/independent-set', {'missionId': mission['id']}, expected=201, request_id=str(uuid.uuid4()))['sessions']
                 sessions.extend(state['id'] for state in states)
             entries, rooms = [], []
+            managed = args.check_mr_venue_source_recovery and mode == 'Linked'
             for state in states:
                 sid = state['id']; route = '/api/sessions/' + sid
                 pins = {f'room{room}': hashes[room] for room in state['roomIds']}
@@ -2922,10 +2973,14 @@ def main():
                         state = request(route + '/players', {'playerId': str(uuid.uuid4()), 'roomId': room, 'name': f'MR venue {room}/{seat}', 'headset': 'Quest3'})
                     rooms.append({'roomId': room, 'sessionId': sid, 'alignmentFile': base64.b64encode(files[room]).decode(),
                         'players': [{'playerId': row['id'], 'admissionId': row['admissionId']} for row in state['players'] if row['roomId'] == room]})
-                entries.append(launch(state, f'mr-venue-{mode.lower()}-{state["roomIds"][0]}'))
+                if managed: entries.extend(launch_venue([state], True, label='mr-venue-source-linked'))
+                else: entries.append(launch(state, f'mr-venue-{mode.lower()}-{state["roomIds"][0]}'))
             before = request('/api/sessions')
-            raw, headers = request('/api/mr-deployment/venue-bundle', {'topology': mode, 'rooms': rooms}, raw_response=True)
-            check(headers['Cache-Control'] == 'no-store' and headers.get_content_type() == 'application/zip', mode + ' native endpoint export is a non-cacheable ZIP')
+            if managed:
+                raw = recover_mr_venue_source(entries[0], rooms, alignment_exports)
+            else:
+                raw, headers = request('/api/mr-deployment/venue-bundle', {'topology': mode, 'rooms': rooms}, raw_response=True)
+                check(headers['Cache-Control'] == 'no-store' and headers.get_content_type() == 'application/zip', mode + ' native endpoint export is a non-cacheable ZIP')
             with tempfile.TemporaryDirectory(prefix='deployment-', dir=runtime) as scratch:
                 destination = Path(scratch).resolve()
                 if destination.parent != runtime: raise RuntimeError('Invalid owned deployment scratch directory')

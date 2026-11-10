@@ -88,7 +88,7 @@ export function mrReadinessView(report, session, elapsed, actor) {
 }
 
 function roomReadinessRow(report, room, session) {
-  if (!room.sessionId || session?.id !== room.sessionId || session.state === 'Ended'
+  if (!room?.sessionId || session?.id !== room.sessionId || session.state === 'Ended'
     || report?.version !== 1 || !Array.isArray(report.rooms) || report.rooms.length > 5) return null;
   const matches = report.rooms.filter(row => row?.roomId === room.id);
   if (matches.length !== 1) return null;
@@ -110,11 +110,16 @@ export function roomEndpointText(report, room, session) {
     + (row.ticketSourceLive === false ? ' · 遊戲來源暫未確認，暫停配票' : '');
 }
 
-export function roomTicketSourceLive(report, room, session, original, elapsed) {
+export function roomTicketDestination(report, room, session, elapsed) {
   const row = roomReadinessRow(report, room, session), endpoint = row?.endpoint;
-  return row?.ticketSourceLive === true && validEndpoint(endpoint, session) && !endpoint.sessionEnded
-    && endpoint.streamId === original?.streamId && endpoint.address === original.address && endpoint.port === original.port
-    && Number.isFinite(row.sourceAgeMilliseconds) && row.sourceAgeMilliseconds + elapsed <= 5000;
+  if (!validEndpoint(endpoint, session) || endpoint.sessionEnded) return null;
+  const live = row.ticketSourceLive === true && Number.isFinite(row.sourceAgeMilliseconds) && row.sourceAgeMilliseconds + elapsed <= 5000;
+  return { endpoint, live: row.ticketSourceLive == null ? null : live };
+}
+
+export function roomTicketSourceLive(report, room, session, original, elapsed) {
+  const destination = roomTicketDestination(report, room, session, elapsed), endpoint = destination?.endpoint;
+  return destination?.live === true && endpoint.streamId === original?.streamId && endpoint.address === original.address && endpoint.port === original.port;
 }
 
 export function roomVenuePhaseView(report, room, session, elapsed, unavailable = false) {
@@ -351,6 +356,10 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     return active && !failed && document.visibilityState === 'visible' && room?.sessionId === sessionId
       && roomTicketSourceLive(report, room, sessions.find(row => row.id === sessionId), endpoint, performance.now() - started);
   }
+  function ticketDestination(room, session) {
+    return active && !failed && document.visibilityState === 'visible'
+      ? roomTicketDestination(report, room, session, performance.now() - started) : null;
+  }
   function settingFrame(roomId, kind) {
     return settingStatus(roomId, kind)?.target;
   }
@@ -551,7 +560,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') update(); else reset(); });
   setInterval(update, 250);
-  return { update, venueReady, venueBegin, venueResume, settingFrame, settingStatus, trackingPause, vrResume, poseFrame, ticketSourceLive,
+  return { update, venueReady, venueBegin, venueResume, settingFrame, settingStatus, trackingPause, vrResume, poseFrame, ticketSourceLive, ticketDestination,
     active(value) { active = value; if (value) update(); else reset(); } };
 }
 

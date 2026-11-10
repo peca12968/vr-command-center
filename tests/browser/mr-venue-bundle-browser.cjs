@@ -146,9 +146,10 @@ module.exports = async ({ context, api, tokens, base, root, directory, screensho
       }
       await login('Master'); await panel.waitFor(); await upload(files);
       if (topology === 'Linked') {
-        await submit.click();
-        await status.filter({ hasText: '房間 1 · 尚未公布端點' }).waitFor();
-        check(await panel.locator('label').filter({ hasText: '5/5 Quest 3 席' }).count() === 5,
+        const waiting = panel.locator('label').filter({ hasText: '尚未公布端點' });
+        await waiting.first().waitFor();
+        check(await submit.isDisabled() && await waiting.count() === 5
+          && await panel.locator('label').filter({ hasText: '5/5 Quest 3 席' }).count() === 5,
           'Five complete rosters do not allow export until the game source publishes its endpoint');
       }
       const endpoints = new Map();

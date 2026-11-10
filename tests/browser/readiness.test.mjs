@@ -5,7 +5,7 @@ const code = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/rea
 const missionClock = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/mission-clock.js', import.meta.url), 'utf8');
 const connection = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/connection-ui.js', import.meta.url), 'utf8');
 const dataModule = source => 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
-const { readinessView, roomReadinessView, roomEndpointText, roomTicketSourceLive, mrReadinessView, roomMissionTimeView, roomVenuePhaseView,
+const { readinessView, roomReadinessView, roomEndpointText, roomTicketDestination, roomTicketSourceLive, mrReadinessView, roomMissionTimeView, roomVenuePhaseView,
   roomMrTrackingPauseTarget, roomMrPauseView, venueTrackingRow, roomPoseFrameTarget } =
   await import(dataModule(code.replace('./mission-clock.js', dataModule(missionClock)).replace('./connection-ui.js', dataModule(connection))));
 const player = { id: 'player', admissionId: 'first', roomId: 1, seat: 0 };
@@ -115,6 +115,9 @@ test('A managed ticket preview requires a current frame from its own endpoint', 
   assert.equal(roomTicketSourceLive(snapshot({ ticketSourceLive: false }), room, current, endpoint, 0), false);
   assert.equal(roomTicketSourceLive(snapshot(), room, current, { ...endpoint, port: 7778 }, 0), false);
   assert.equal(roomTicketSourceLive(snapshot({ sessionSequence: current.sequence - 1 }), room, current, endpoint, 0), false);
+  assert.deepEqual(roomTicketDestination(snapshot(), room, current, 1001), { endpoint, live: false });
+  assert.deepEqual(roomTicketDestination(snapshot({ ticketSourceLive: undefined }), room, current, 1001), { endpoint, live: null });
+  assert.equal(roomTicketDestination(snapshot({ sessionSequence: current.sequence - 1 }), room, current, 0), null);
 });
 test('Venue confirmation requires its exact room, phase and fresh accepted world evidence', () => {
   const paused = { ...session, state: 'Paused' };
