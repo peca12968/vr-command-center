@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-11 全館戰績回條下載與離線核對
+
+- 管理包 0.31.111 在「全館收尾」增加主控專用的批次回條 JSON。雙封存後可保存各原場次、尾界和入場確認狀態，原場館驗收 ZIP 維持原格式。離線清單可選填 `venueDebriefReceipts`，逐席比對原始玩家與伺服器日誌核對過的結果，輸出原檔 SHA-256。 [下載方式](SESSION_CLOSURE.md#下載本批戰績回條) · [驗收設定](EXTERNAL_CLIENTS.md#一次核對五房-25-席)
+- 79 項離線證據測試及 98 項 Chromium 場館流程檢查通過。涵蓋錯批、封存尾界或入場識別、缺席位及未確認拒絕，另以實際瀏覽器核對部分回條 JSON 的下載原位元組、權限、雙封存門檻及原 ZIP。首次瀏覽器場的驗收程式引用錯誤變數後失敗，修正後使用新隔離場通過。 [瀏覽器驗證](../artifacts/console-venue-debrief-export-final/checks.json) · [下載畫面](../artifacts/console-venue-debrief-export-final/venue-debrief-export.png)
+- 三個解壓 Windows 套件的 `run-5027a81c5da04f92a3fa1208ea68f620` 退出 0、469 項通過。五房獨立與合併各 25 席同機模擬玩家，50 份回條與原伺服器確認及玩家結果一致，六場完整回放 857 格、6 份 CSV 及雙封存通過。兩種模式的完整 ZIP 與分場檔得出同一核對結果，Chrome 從最新及歷史批次下載相同原位元組。將一席回條改為未確認後，兩種模式都拒絕離線驗收。活動場次及測試程序已清理，C／F 快照 223 檔同雜湊。 [原生驗證](../artifacts/server-package-checks/run-5027a81c5da04f92a3fa1208ea68f620/checks.json) · [合併場離線報告](../artifacts/server-package-checks/run-5027a81c5da04f92a3fa1208ea68f620/linked-venue-field-results.json)
+- Release 零警告，1,074 項核心、102 項世界串流、107 項管理包及 769 項完整 HTTP 通過。最終 HTTP 使用 Windows 預設設定獨立啟動解壓包。首次與套件檢查並行的 HTTP 在任務庫寫入鎖案例逾時，未輸出預期診斷，保留失敗紀錄，原 10 秒門檻未調整。 [管理包測試](../artifacts/control-package-checks/run-0d9035fd7425421abed66e88f53b58a4/checks.json) · [HTTP 通過](../artifacts/http-smoke-receipt-export-package-isolated.log) · [首輪 HTTP](../artifacts/http-smoke-receipt-export-package.log)
+- 管理包來源 `9f545a62`，建置收據 184 個來源雜湊吻合。沿用遊戲 0.50.2／Quest 67，發行一致性核對通過。GitHub Actions job `129972452748` 因帳務或支出上限未啟動。 [發行核對](../artifacts/venue-release-0.50.2-receipt-export.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42856947151)
+
 ## 2026-11-11 管理服務的啟動拒絕與完整 HTTP 驗收
 
 - 已知的操作員憑證設定錯誤、工作階段寫入鎖及任務庫寫入鎖取得失敗，現在由管理服務寫出對應診斷，結束新程序並回傳退出碼 1。憑證先於資料存取驗證，診斷不含憑證或資料路徑。寫入鎖沿用原排他規則，既有服務及原場次保持。 [管理包](WINDOWS_CONTROL_PACKAGE.md)
