@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-10 HTTPS 五房批次啟動
+
+- 啟動器 1.12 可從遊戲主機的私人 `control-instance.json` 取得管理 HTTPS 原點、指紋及 GameServer 金鑰。相同設定供待開清單、個別圖形啟動及五房計畫使用。圖形介面在啟動前重讀連線設定，若憑證指紋已換則清除選取。計畫格式維持原樣。 [分機設定](WINDOWS_SERVER_PACKAGE.md#建立遊戲主機的-https-連線設定)
+- 最終解壓場 `run-dd8711553f2c4f56a5c5950a8ad15ebc` 退出碼 0、446 項通過。從實際 Chrome 下載兩種原計畫，Windows 啟動器以 HTTPS 讀取及公告端點，原生遊戲以 WSS 上傳世界。獨立和合併各 25 席同機模擬玩家，開場保留逐席原有效姿態。六場共 940 格完整回放、50 份原玩家結果與伺服器確認、6 份 CSV，雙封存與原始結果一致。活動場次和程序均清理，C／F 249 檔逐檔同雜湊，對外測試 JSON 無金鑰及指紋。 [批次報告](../artifacts/server-package-checks/run-dd8711553f2c4f56a5c5950a8ad15ebc/checks.json)
+- 錯誤指紋、明文位址及錯誤角色在原生程序啟動前遭拒，原場次保持。另驗證第五房公告寫入失敗時整批回滾，五個原程序均由啟動器清理。Framework 模型通過 48 項，實際待開清單通過 51 項，含圖形選取變更保護。封裝邊界通過 10 項。 [待開清單報告](../artifacts/server-catalog/run-105285026c0f4d19928b9339b7f45f99/checks.json)
+- 首候選 `run-4d78ec12d1f94c92a4df8a6618951764` 的清單請求仍走未配置指紋的路徑，改用共用請求設定後通過。第二場 `run-2a56d9602299409a805af927902138f4` 在瀏覽器環境失敗，F 槽 headless 執行檔的獨立重試也未啟動。最終用這台已安裝的 Chrome 重跑原斷言。前兩場失敗、原包及清理紀錄保留。
+- 功能源碼 `a829db03287973d2d74295cc10930cce1ee7ee52`。Windows 遊戲及 Quest 0.50.1／66 沿用原建置，離線報告核對新啟動器及原遊戲檔案。GitHub Actions job `129925249859` 因帳務或支出上限未啟動。正式跨機、實體頭盔及廠商硬體仍待驗收。 [發行核對](../artifacts/venue-release-game-0501-launcher112.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42843664490)
+
 ## 2026-11-10 遊戲主機的 HTTPS 與 WSS 管理連線
 
 - Windows 0.50.1 及啟動器 1.11 可透過個別場次 CLI 連線到管理站台。設定用管理員提供的葉憑證 SHA-256 核對 HTTPS 管理請求及 WSS 世界串流。原生遊戲的 HTTP 管理請求拒絕轉址。 [設定與套件](WINDOWS_SERVER_PACKAGE.md#遊戲主機連到遠端管理-https)
