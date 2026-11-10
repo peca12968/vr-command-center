@@ -200,6 +200,11 @@ app.MapPost("/api/sessions/independent-set", (CreateIndependentSet request, Sqli
     return Results.Json(receipt, statusCode: receipt.Duplicate ? StatusCodes.Status200OK : StatusCodes.Status201Created);
 });
 app.MapGet("/api/sessions/{id:guid}", (Guid id, SessionManager manager, HttpContext context) => manager.Get(id, Actor(context)));
+app.MapGet("/api/sessions/{id:guid}/overview", (Guid id, SessionManager manager, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    return manager.GetOverview(id, Actor(context));
+});
 app.MapGet("/api/sessions", (bool? includeEnded, SessionManager manager, HttpContext context) => manager.List(includeEnded ?? false, Actor(context)));
 app.MapGet("/api/sessions/{id:guid}/events", (Guid id, long? after, int? limit, SessionManager manager, HttpContext context) =>
     manager.Events(id, after ?? 0, limit ?? 100, Actor(context)));

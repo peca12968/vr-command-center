@@ -4,6 +4,10 @@ API／控制台 **0.27.0** 新增 `GET /api/sessions/{id}/report.csv`。在「�
 
 檔案為 UTF-8 BOM、逗號分隔、CRLF 換行，所有欄位加雙引號，內部雙引號重複。固定名稱 `vr-command-report-v1-{sessionId}.csv`，可供試算表或標準 CSV reader 讀取。HTTP 使用 `text/csv; charset=utf-8`、attachment、`Cache-Control: no-store`。
 
+## 場次與戰績同步
+
+控制台 0.31.73 以 `GET /api/sessions/{id}/overview` 一次讀取場次、玩家戰績和最近最多 20 筆事件。場次的序號、統計的 `throughSequence` 及最後一筆事件序號對齊。戰鬥串流等待補送或確認封存的狀態也取自這次讀取。讀取權限與原場次相同，回應使用 `Cache-Control: no-store`。
+
 ## 五房分房匯出
 
 控制台 0.31.8 在五房連線場次的任務統計中提供報表範圍。主控預設下載全場，也可選定其中一房。房控畫面固定為自己的房間。下載期間會鎖定範圍，切換場次或登出會取消該次下載。

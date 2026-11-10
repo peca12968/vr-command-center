@@ -647,6 +647,12 @@ try:
             require(live_ticket["ticket"] not in json.dumps(events), "Player admission ticket is never written into event history")
             require(len(events) == current["sequence"] and [e["sequence"] for e in events] == list(range(1, len(events) + 1)),
                     "Ordered event stream covers accepted mutations without gaps")
+            payload, headers = request("GET", session_path + "/overview", raw=True)
+            require(len(events) > 20 and headers["Cache-Control"] == "no-store"
+                    and json.loads(payload) == {"session": current, "statistics": statistics, "recentEvents": events[-20:]},
+                    "Operator overview returns the same revision, statistics and exact last twenty events")
+            request("GET", session_path + "/overview", expected=401, identity=None)
+            request("GET", f"/api/sessions/{independent[1]['id']}/overview", expected=403, identity="Room1")
             page = request("GET", session_path + "/events?after=1&limit=2")
             require([e["sequence"] for e in page] == [2, 3], "HTTP event cursor is exclusive")
             request("GET", session_path + "/events?after=-1", expected=400)
@@ -832,6 +838,11 @@ try:
             request("POST", stream_path + "/combat-stream/reports", {**first, "report": {**first["report"], "origin": "GameServer"}}, 409, identity="GameServer")
             accepted = request("POST", stream_path + "/combat-stream/reports", first, identity="GameServer")
             require(accepted["acceptedSequence"] == 1 and accepted["statistics"]["pendingTelemetry"], "Ended stream accepts only its known Running-context tail and stays visibly unsealed")
+            pending = request("GET", stream_path + "/overview", identity="Room1")
+            require(pending["session"]["state"] == "Ended" and not pending["session"]["combatStream"]["sealed"]
+                    and pending["statistics"] == accepted["statistics"]
+                    and pending["recentEvents"][-1]["sequence"] == pending["session"]["sequence"] == pending["statistics"]["throughSequence"],
+                    "Operator overview pairs pending totals with the exact accepted tail while the stream remains unsealed")
             feedback = stream_path + "/rooms/1/hardware-feedback"
             request("GET", feedback, expected=401, identity=None)
             request("GET", feedback, expected=403, identity="Room2")
@@ -856,6 +867,11 @@ try:
             player_stats = delivered["statistics"]["players"][0]
             require(delivered["complete"] and delivered["sealedStream"] and delivered["acknowledged"] == 6 and not delivered["statistics"]["pendingTelemetry"],
                     "Separate recovery process drains the durable journal after API restart and seals its exact boundary")
+            final_overview = request("GET", stream_path + "/overview", identity="Room1")
+            require(final_overview["session"]["combatStream"]["sealed"] and final_overview["statistics"] == delivered["statistics"]
+                    and final_overview["recentEvents"][-1]["kind"] == "CombatStreamSealed"
+                    and final_overview["recentEvents"][-1]["sequence"] == final_overview["session"]["sequence"] == final_overview["statistics"]["throughSequence"],
+                    "Operator overview pairs final statistics and seal in the same restored revision")
             sealed_csv, _ = request("GET", stream_path + "/report.csv", raw=True)
             sealed_rows = list(csv.DictReader(io.StringIO(sealed_csv.decode("utf-8-sig"))))
             require(len(sealed_rows) == 1 and int(sealed_rows[0]["finalStreamSequence"]) == 6

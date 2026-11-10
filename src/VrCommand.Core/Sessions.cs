@@ -20,6 +20,7 @@ public record SessionView(Guid Id, SessionMode Mode, int[] RoomIds, Mission Miss
     CombatStreamView? CombatStream = null, MissionClockStatus? MissionClock = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomAlignmentPins? RoomAlignment = null);
 public record RoomView(int Id, int Capacity, Guid? SessionId, int PlayerCount);
+public record SessionOverview(SessionView Session, SessionStatistics Statistics, SessionEvent[] RecentEvents);
 public record ControlCommand(Guid CommandId, ControlAction Action, EnvironmentSettings? Environment = null,
     EnemySettings? Enemies = null, long? ExpectedSequence = null, MissionClockSettings? MissionClock = null, MissionClockExpiration? ClockExpiration = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomAlignmentPins? RoomAlignment = null,
@@ -153,6 +154,16 @@ public sealed partial class SessionManager
             .Where(s => includeEnded || s.State != SessionState.Ended)
             .Where(s => AccessPolicy.CanRead(actor ?? OperatorIdentity.Internal, s.RoomIds))
             .OrderByDescending(s => s.CreatedAtUtc).Select(Snapshot).ToArray();
+    }
+
+    public SessionOverview GetOverview(Guid id, OperatorIdentity actor)
+    {
+        lock (gate)
+        {
+            var history = Find(id);
+            AccessPolicy.Read(actor, history.View.RoomIds);
+            return new(Snapshot(history.View), Statistics(history), history.Events.TakeLast(20).ToArray());
+        }
     }
 
     public SessionEvent[] Events(Guid id, long after = 0, int limit = 100, OperatorIdentity? actor = null)

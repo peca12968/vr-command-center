@@ -261,12 +261,11 @@ async function refreshData(epoch) {
   renderRooms();
   const selected = state.selected, previous = state.session;
   if (selected) {
-    const [session, statistics] = await Promise.all([api('/sessions/' + selected), api('/sessions/' + selected + '/statistics')]);
-    const events = await api(`/sessions/${selected}/events?after=${Math.max(0, session.sequence - 20)}&limit=20`);
+    const { session, statistics, recentEvents } = await api('/sessions/' + selected + '/overview');
     if (!current() || selected !== state.selected) return;
     state.session = session;
     if (previous?.id !== session.id) { loadEnvironment(); loadEnemies(); loadClock(); }
-    renderSession(statistics, events);
+    renderSession(statistics, recentEvents);
   }
   $('last-update').textContent = '更新於 ' + time(Date.now());
   applyPermissions();

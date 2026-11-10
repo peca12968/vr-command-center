@@ -56,6 +56,25 @@ async function main() {
     diagnosticPage = page;
     function captureErrors(target) { target.on('pageerror', error => browserErrors.push(error.message)); target.on('console', message => { if (/Content Security Policy|violates.*directive/i.test(message.text())) browserErrors.push(message.text()); }); }
     captureErrors(page);
+    if (process.argv.includes('--statistics-snapshot-only')) {
+      const mission = await api('/missions', 'POST', { name: 'Battle statistics snapshot', briefing: 'Verify consistent revisions', durationSeconds: 600, environment: { mode: 'VR', weather: 'Clear', timeOfDay: 'Day', lightning: false }, enemies: { count: 1, behavior: 'Hold', autoAttack: false }, props: [] }, 'Master', 201);
+      const session = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [1] }, 'Master', 201);
+      const playerId = randomUUID();
+      await api('/sessions/' + session.id + '/players', 'POST', { playerId, name: 'Alpha 01', roomId: 1, headset: 'Quest3' });
+      await api('/sessions/' + session.id + '/commands', 'POST', { commandId: randomUUID(), action: 'Begin' });
+      await page.goto(base + '/console/'); await page.locator('#login-key').fill(tokens.Master); await page.locator('#login-form button').click();
+      await page.waitForFunction(() => document.querySelector('#session-phase').textContent === '執行中');
+      const held = await require('./statistics-fence.cjs')({ page, api, base, session, playerId, shotId: randomUUID(), enemyId: randomUUID(), reportId: randomUUID, screenshots, check });
+      try {
+        held.release();
+        await page.waitForFunction(sequence => document.querySelector('#session-meta').textContent.endsWith('序號 ' + sequence)
+          && document.querySelector('#event-list li')?.textContent.includes('#' + sequence + ' ')
+          && Array.from(document.querySelectorAll('#statistics tr td'), cell => cell.textContent).join('|') === 'Alpha 01|1|1|20|1|100%|80', held.acceptedSequence, { polling: 100 });
+        check(browserErrors.length === 0, 'Statistics snapshot refresh reaches final combat totals without browser or policy errors');
+      } finally { await held.dispose(); }
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed', scope: 'Battle statistics snapshot, real API and Chromium' }, null, 2));
+      console.log(`PASS: ${checks} focused statistics snapshot checks. Screenshots: ${screenshots}`); return;
+    }
     if (process.argv.includes('--mission-versions-only')) {
       const mission = await api('/missions', 'POST', { name: '任務版本核對', briefing: '原始開場簡報', durationSeconds: 900,
         environment: { mode: 'VR', weather: 'Storm', timeOfDay: 'Night', lightning: true }, enemies: { count: 1, behavior: 'Hold', autoAttack: false },
@@ -301,7 +320,7 @@ async function main() {
     await page.locator('[data-command=Resume]').click();
     await page.waitForFunction(() => document.querySelector('#session-phase').textContent === '執行中');
     const playerId = session.players[0].id, shotId = randomUUID(), enemyId = randomUUID();
-    const heldStatistics = await require('./statistics-fence.cjs')({ page, api, base, session, playerId, shotId, enemyId, reportId: randomUUID, screenshots });
+    const heldStatistics = await require('./statistics-fence.cjs')({ page, api, base, session, playerId, shotId, enemyId, reportId: randomUUID, screenshots, check });
     try {
       check(heldStatistics.partial.origin === '模擬資料' && heldStatistics.partial.rows.some(row => row.join('|') === 'Alpha 01|1|0|0|0|0%|100'),
         'A genuine older Simulation read does not prove the later accepted combat totals have reached the console');
