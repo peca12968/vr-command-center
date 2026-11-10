@@ -350,6 +350,8 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json
 
 摘要核對五房各五個席位、原封存來源、每位玩家的原入場與 UDP 來源，以及 25 筆伺服器戰績確認。它逐房列出在伺服器位址清單以外的玩家數。`direct-lan` 至少須觀察到一筆這類連線，仍須依實際設備及網路拓撲核對主機數、同時遊玩與容量。
 
+提供回放檔的整批驗收會檢查每場最後影格已觀察到該批結束指令，並輸出 `worldJournalsVerified` 與逐場摘要。回放畫面及遊戲事件內容可用原回放介面另行檢視。
+
 ### 核對 25 席各自的直連來源
 
 每席使用不同 IPv4 的場館，可在原五房驗收清單加入下列欄位。請完整填寫 `serverIps` 的伺服器介面位址，並保留每席原程序的完整日誌、每場啟用 UDP 來源診斷的伺服器日誌及原封存 `worldJournal`。
@@ -365,8 +367,6 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json
 以原 `verify-field-results.py --venue-manifest` 命令執行。工具先將原玩家日誌、伺服器的核准／UDP 來源／釋放和最終戰績逐席配對，並比對五房原錄製的共同執行時段。同一席重連可換 UDP 埠，IPv4 須維持相同。若兩席共用一個來源 IPv4、任一席使用伺服器位址，或原伺服器有無法配對的核准紀錄，嚴格驗收會拒絕。
 
 成功摘要的 `distinctRemoteRoster` 列出核對席位、不同來源位址及歷次連線的數量。可同時使用 `requireTrackedRoster` 及 `requireConcurrentFire`。原始日誌中的網路位址保留在場館私人資料夾，摘要只列計數。實體裝置數與網路容量依現地驗收。
-
-提供回放檔的整批驗收會檢查每場最後影格已觀察到該批結束指令，並輸出 `worldJournalsVerified` 與逐場摘要。回放畫面及遊戲事件內容可用原回放介面另行檢視。
 
 ### 核對 25 席同時連線的區間
 
