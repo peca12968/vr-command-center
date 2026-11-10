@@ -601,6 +601,29 @@ class FieldResultsTests(unittest.TestCase):
             self.assertEqual(report['longestMilliseconds'], 2600)
             self.assertEqual(report['fromUtc'], '2026-11-09T00:00:05.300000+00:00')
 
+    def test_venue_concurrent_fire_needs_advancement_after_same_tick_packets(self):
+        for final_duplicate in (12, 17):
+            with self.subTest(final_duplicate=final_duplicate), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, _ = venue_fixture(root, 'Linked', with_journals=True)
+
+                def repeat_tick(packet):
+                    if 12 <= packet['sequence'] <= final_duplicate:
+                        packet['frame']['tick'] = 11
+                        for event in packet['events']:
+                            event['tick'] = 11
+
+                self.concurrent_fire_journals(root, manifest, edit_packet=repeat_tick)
+                manifest.update(minimumConcurrentMilliseconds=1000, requireConcurrentFire=True)
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                if final_duplicate == 12:
+                    report = field.verify_venue(path)['concurrentRoster']
+                    self.assertEqual(report['playersWithConfirmedFire'], 25)
+                    self.assertEqual(report['longestMilliseconds'], 7700)
+                else:
+                    with self.assertRaisesRegex(field.EvidenceError, 'sealed shot from every original seat'):
+                        field.verify_venue(path)
+
     def test_venue_concurrent_fire_requires_boolean_and_both_original_journals(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -312,7 +312,7 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json
 
 在原五房場館清單設定 `"requireConcurrentFire": true` 與 `"minimumConcurrentMilliseconds": 10000`，或填入該場驗收所需的毫秒數。每場保留原 `worldJournal` 與 `combatJournal`。25 席連線且任務持續執行時，讓每席至少開火一次，再結束全館並等待雙封存。
 
-工具核對回放射擊與戰鬥日誌中的原事件、射擊、玩家及戰鬥序號。射擊 tick 所在的相鄰兩格都須位於同一段五房共同區間。合格時 `concurrentRoster.playersWithConfirmedFire` 為 25，時間範圍取符合條件的最長區間。只連線或在共同區間之外射擊的席位會使驗收失敗。可與 `requireTrackedRoster` 一併啟用。實體設備數與跨機容量依現地驗收另行確認。
+工具核對回放射擊與戰鬥日誌中的原事件、射擊、玩家及戰鬥序號。夾住射擊 tick 的前後畫格都須位於同一段五房共同區間。射擊造成的同 tick 額外畫格須等到 500 毫秒內的下一個前進 tick，才計入驗收。合格時 `concurrentRoster.playersWithConfirmedFire` 為 25，時間範圍取符合條件的最長區間。只連線或在共同區間之外射擊的席位會使驗收失敗。可與 `requireTrackedRoster` 一併啟用。實體設備數與跨機容量依現地驗收另行確認。
 
 ### 核對五房追蹤開場錄製
 
