@@ -1,5 +1,15 @@
 # 開發進度
 
+## 2026-11-10 五房封存核對共用發行報告
+
+五房驗收清單可指定一份 `venueReleaseReport`。Windows 以退出報告中的玩家清單雜湊和原日誌核對最終戰績。Quest 用同一份報告核對原 APK、原部署、入場與戰績。所有席位都要有對應證據。Windows 啟動器 1.7 在退出後直接留下原日誌雜湊，可省略連線量測。 [封存操作](EXTERNAL_CLIENTS.md#核對全館共用的發行報告)
+
+- 同機 Windows 三包 `run-f10c7d9d608e4aafbec0d2d0d5270384` 通過 449 項。獨立與合併模式各 25 個 0.49.1 玩家程序，全程未啟用連線量測。驗收逐席比對 50 份退出報告、原日誌及原戰績確認。兩種模式均拒絕互換同一發行版本的原退出報告。六場共 914 格完整回放。清理後 C／F 221 個檔案雜湊一致。
+- 1.6 原封存批次另外唯讀複驗，兩種模式各 25 席可沿用原量測雜湊核對。換用 1.5 報告會拒絕，原封存結果保持相同。證據為 `artifacts/venue-release16-closed-readback.json`。兩種模式另以 15 個 Windows 和 10 個 Quest 測試席位驗證共用報告，涵蓋缺席、調換及不符 APK。頭盔、跨機及廠商設備仍待實機驗收。
+- 最終解壓玩家包通過 39 項檢查。1.7 原發行報告為 `artifacts/venue-release-player17.json`，SHA-256 `7224f784ef7de0c8ebc35ab0f1b8646e83118840e10d18d549530988bb9a5b54`。離線核對使用管理包 0.31.95、Windows 0.49.1 伺服器和原 Quest 0.49.1／64 APK。 [套件與雜湊](WINDOWS_PLAYER_PACKAGE.md)
+- 封存驗收 76 項及離線發行 6 項通過。Python 玩家包檢查 7 項通過，另 1 項因 Windows 符號連結建立權限跳過。
+- 功能來源 `93c651bfda81bacd78095b1f1415489c9c92c31f`。GitHub Actions job `129729878801` 因帳務或支出上限未啟動。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42786778521)
+
 ## 2026-11-10 Windows 玩家啟動前核對場館發行包
 
 場館發行工具會在原報告附上 Windows 玩家清單的 SHA-256。啟動器 1.6 選用 `--release-report` 時，先核對原清單及其全部檔案，再核對解壓目錄的檔案集合。啟動和退出報告都保留原清單雜湊。 [Windows 核對操作](WINDOWS_PLAYER_PACKAGE.md#依場館發行報告核對玩家包)

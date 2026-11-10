@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-10 `VRCommand-Player-0.49.1-launcher1.7.0-win-x64.zip` 為 84,765,133 bytes，SHA-256 `fa10a1a931d8c43e2b8c3531ea14aad57456299307a5be14e4969c6301c0af74`。解壓核對 330 個清單檔案及 39 項實際啟動器檢查。 [全館封存操作](EXTERNAL_CLIENTS.md#核對全館共用的發行報告)
+
 2026-11-10 `VRCommand-Player-0.49.1-launcher1.6.0-final-win-x64.zip` 為 84,765,095 bytes，SHA-256 `8450efd4603eccf3c442c82cd1e6f0156b1169206a09bdcfc81a8b922541d626`。解壓核對 330 個清單檔案及 39 項實際啟動器檢查。 [依場館發行報告核對玩家包](#依場館發行報告核對玩家包)
 
 2026-11-10 `VRCommand-Player-0.49.1-launcher1.5.0-final-win-x64.zip` 為 84,765,041 bytes，SHA-256 `3629cda8fab5513116498527180f4fdbd9b9b55b1d46efeae6308716a6149ada`。解壓核對 330 個清單檔案及 29 項實際啟動器檢查。選用 `--link-metrics` 時，啟動器將原量測與玩家日誌的雜湊寫入終止報告。 [操作方式](EXTERNAL_CLIENTS.md#將-windows-連線量測納入五房封存)
