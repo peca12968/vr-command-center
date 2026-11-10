@@ -155,4 +155,6 @@ jobs:
             artifacts/live-hardware-gateway/*/interrupted-room-3-close.json
             artifacts/live-hardware-gateway/*/*-stop-report.json
             artifacts/live-hardware-gateway/*/*-stop-close.json
+            artifacts/live-hardware-gateway/*/*-fleet/venue-report.json
+            artifacts/live-hardware-gateway/*/*-fleet-close.json
           if-no-files-found: ignore

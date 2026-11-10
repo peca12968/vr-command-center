@@ -38,6 +38,10 @@ internal static partial class LiveHardwareGateway
     private sealed class MockPortLeaseUnavailable : IOException { }
     private sealed class DeviceLeaseUnavailable : IOException { }
 
+    internal static bool IsExpectedFailure(Exception error) => error is ArgumentException or InvalidDataException
+        or InvalidOperationException or JsonException or IOException or UnauthorizedAccessException or AccessDeniedException
+        or KeyNotFoundException or HttpRequestException or TimeoutException;
+
     private sealed class GatewayLeases(string directory) : IDisposable
     {
         private readonly List<FileStream> handles = [];
@@ -173,7 +177,7 @@ internal static partial class LiveHardwareGateway
         }
     }
 
-    internal static async Task<int> Run(string input, string output, string? stopFile, bool statusEnabled, string? statusDirectory)
+    private static Configuration ReadConfiguration(string input)
     {
         var config = ReadInput<Configuration>(input);
         ValidateRoom(config.SessionId, config.RoomId, config.MockPort, config.Seconds);
@@ -185,9 +189,21 @@ internal static partial class LiveHardwareGateway
             || config.Bindings.Select(b => b.DeviceId).Distinct().Count() != config.Bindings.Length
             || config.Bindings.Select(b => b.AdmissionId).Distinct().Count() != config.Bindings.Length)
             throw new ArgumentException("Use one room and unique seat, device, player and admission bindings.");
+        return config;
+    }
+
+    internal static async Task<int> Run(string input, string output, string? stopFile, bool statusEnabled, string? statusDirectory)
+    {
+        var config = ReadConfiguration(input);
         using var client = CreateManagementClient(config.ManagementUrl);
         await VerifyIdentity(client, config.RoomId);
         using var leases = AcquireGatewayLeases(config);
+        return await RunRoom(config, client, input, output, stopFile, statusEnabled, statusDirectory);
+    }
+
+    private static async Task<int> RunRoom(Configuration config, HttpClient client, string input, string output,
+        string? stopFile, bool statusEnabled, string? statusDirectory, bool writeSummary = true)
+    {
         using var heartbeat = statusDirectory is null ? null : new GatewayHeartbeat(statusDirectory, config, input, output, stopFile);
 
         var bindings = config.Bindings.ToDictionary(b => (b.PlayerId, b.AdmissionId, b.Seat));
@@ -314,7 +330,8 @@ internal static partial class LiveHardwareGateway
             destination.Flush(true);
         }
         PublishStatus("stopped", termination);
-        Console.WriteLine(JsonSerializer.Serialize(new { complete, simulatedHardwareOnly = true, physicalDeliveryConfirmed = false, acknowledged }, Wire));
+        if (writeSummary)
+            Console.WriteLine(JsonSerializer.Serialize(new { complete, simulatedHardwareOnly = true, physicalDeliveryConfirmed = false, acknowledged }, Wire));
         return complete ? 0 : 1;
     }
 

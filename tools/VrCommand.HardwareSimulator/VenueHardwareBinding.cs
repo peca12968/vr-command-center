@@ -9,6 +9,18 @@ internal static partial class LiveHardwareGateway
     private sealed record VenueBindingManifest(int Version, [property: JsonRequired] SessionMode Mode, VenueBindingRoom[] Rooms);
     private sealed record VenueBindingRoom(int RoomId, Guid SessionId, long SessionSequence, string Configuration, int BoundSeats);
 
+    private static VenueBindingManifest ReadVenueManifest(string path)
+    {
+        var manifest = ReadInput<VenueBindingManifest>(path);
+        if (manifest.Version != 1 || !Enum.IsDefined(manifest.Mode) || manifest.Rooms is not { Length: SessionManager.RoomCount }
+            || manifest.Rooms.Any(room => room is null || room.SessionId == Guid.Empty || room.SessionSequence < 1 || room.BoundSeats is < 1 or > 5
+                || room.Configuration != FormattableString.Invariant($"room-{room.RoomId:00}.json"))
+            || !manifest.Rooms.Select(room => room.RoomId).SequenceEqual(Enumerable.Range(1, SessionManager.RoomCount))
+            || manifest.Rooms.Select(room => room.SessionId).Distinct().Count() != (manifest.Mode == SessionMode.Linked ? 1 : SessionManager.RoomCount))
+            throw new InvalidDataException("Unexpected venue binding manifest.");
+        return manifest;
+    }
+
     internal static async Task<int> BindVenue(string input, string output)
     {
         var parent = Path.GetDirectoryName(output);

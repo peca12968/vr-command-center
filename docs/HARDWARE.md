@@ -27,7 +27,7 @@ $page.signals
 
 ## 現況
 
-硬體由外部公司負責，目前尚待技術資料或 SDK。模擬器 0.2.9 支援以下即時排演，以及[離線回饋模擬](HARDWARE_SIMULATOR.md)的事件重建、佇列、重送和到期測試。設備輸入、強度映射、實體停止及廠商協議列入後續實機驗收。
+硬體由外部公司負責，目前尚待技術資料或 SDK。模擬器 0.2.10 支援以下即時排演，以及[離線回饋模擬](HARDWARE_SIMULATOR.md)的事件重建、佇列、重送和到期測試。設備輸入、強度映射、實體停止及廠商協議列入後續實機驗收。
 
 ### 依現行名冊建立座位綁定
 
@@ -83,6 +83,27 @@ try {
 輸出資料夾須為新路徑，父目錄須已存在。工具以主控身分讀取 `GET /api/venue/hardware-bindings` 的同一份五房名冊快照。五房都核對成功後才發布 `room-01.json` 至 `room-05.json` 以及記錄原場次和序號的 `venue-bindings.json`。任一房場次不符、席位缺人或資源重複時，不會發布資料夾。這一步不會啟動閘道。
 
 每房排演仍用該房的 `VR_COMMAND_ROOM_KEY` 與對應的 `room-XX.json`。如果設定發布後入場名額被換掉，閘道會依版本 2 設定的入場核對停止或拒絕握手。
+
+### 一次啟動與停止五房排演
+
+使用 0.2.10 的 `--live-venue` 搭配原 `venue-bindings.json` 與同目錄的五房設定。先按各房設定啟動對應埠的本機模擬設備。執行指令的程序使用 `VR_COMMAND_ROOM_1_KEY` 至 `VR_COMMAND_ROOM_5_KEY`，各值為該房的房控憑證。每次指定新的輸出目錄和停止標記，兩者的父目錄都須存在。
+
+```powershell
+try {
+    foreach ($room in 1..5) {
+        Set-Item -Path "Env:VR_COMMAND_ROOM_${room}_KEY" -Value (Read-Host "房間 $room 控制金鑰" -MaskInput)
+    }
+    dotnet .\VrCommand.HardwareSimulator.dll --live-venue ..\venue\venue-bindings.json --output ..\rehearsal-01 --stop-file ..\rehearsal-01.stop
+} finally {
+    foreach ($room in 1..5) {
+        Remove-Item -Path "Env:VR_COMMAND_ROOM_${room}_KEY" -ErrorAction SilentlyContinue
+    }
+}
+```
+
+在開始連接前，程序會核對五房設定、房控身分、現行入場與本機資源鎖。任何一房啟動檢查失敗時，整批拒絕。可在另一個終端使用 `--venue-status`，將 `--status-directory` 指向本次輸出目錄。要停止全部仍在排演的房間，在另一個終端以 `New-Item -ItemType File -Path ..\rehearsal-01.stop` 建立標記。
+
+五房各有自己的連線、回饋游標與報告。運行中若一房入場失效，該房取消待確認批次並停止，其他房繼續排演。程序在各房結束後發布 `venue-report.json`，可從各房退出碼及報告確認結果。只有五房都符合原閘道的附掛與終止條件時，整批退出碼為 0。已確認的回饋數量和取消的批次請查各房報告。這個指令控制本機模擬閘道，遊戲場次照常由主控操作。
 
 ## 即時模擬閘道
 

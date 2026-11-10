@@ -76,13 +76,7 @@ internal static partial class LiveHardwareGateway
     internal static int ReadVenueStatus(string manifestPath, string directory)
     {
         if (!Directory.Exists(directory)) throw new ArgumentException("Use an existing status directory.");
-        var manifest = ReadInput<VenueBindingManifest>(manifestPath);
-        if (manifest.Version != 1 || !Enum.IsDefined(manifest.Mode) || manifest.Rooms is not { Length: SessionManager.RoomCount }
-            || manifest.Rooms.Any(room => room is null || room.SessionId == Guid.Empty || room.SessionSequence < 1 || room.BoundSeats is < 1 or > 5
-                || room.Configuration != FormattableString.Invariant($"room-{room.RoomId:00}.json"))
-            || !manifest.Rooms.Select(room => room.RoomId).SequenceEqual(Enumerable.Range(1, SessionManager.RoomCount))
-            || manifest.Rooms.Select(room => room.SessionId).Distinct().Count() != (manifest.Mode == SessionMode.Linked ? 1 : SessionManager.RoomCount))
-            throw new InvalidDataException("Unexpected venue binding manifest.");
+        var manifest = ReadVenueManifest(manifestPath);
 
         var rooms = manifest.Rooms.Select(room =>
         {

@@ -7,6 +7,13 @@ var bind = args.Length != 0 && args[0] == "--bind-room";
 var bindVenue = args.Length != 0 && args[0] == "--bind-venue";
 try
 {
+    if (args.FirstOrDefault() == "--live-venue")
+    {
+        if (args.Length != 6 || args[2] != "--output" || args[4] != "--stop-file")
+            throw new ArgumentException("Use --live-venue <venue-bindings.json> --output <new-directory> --stop-file <new-marker>.");
+        return await LiveHardwareGateway.RunVenue(Path.GetFullPath(args[1]),
+            Path.TrimEndingDirectorySeparator(Path.GetFullPath(args[3])), Path.GetFullPath(args[5]));
+    }
     if (args.FirstOrDefault() == "--venue-status")
     {
         if (args.Length != 4 || args[2] != "--status-directory")
@@ -56,12 +63,13 @@ try
     Console.WriteLine(JsonSerializer.Serialize(new { complete = true, simulatedHardwareOnly = true, physicalDeliveryConfirmed = false, inputSteps = report.InputSteps }, JsonFormat.Options));
     return 0;
 }
-catch (Exception error) when (error is ArgumentException or InvalidDataException or InvalidOperationException or JsonException or IOException or UnauthorizedAccessException or AccessDeniedException or KeyNotFoundException or HttpRequestException or TimeoutException)
+catch (Exception error) when (LiveHardwareGateway.IsExpectedFailure(error))
 {
     // Never echo untrusted input, payloads or credentials into diagnostics.
     var message = args.FirstOrDefault() switch
     {
         "--live" => "Live hardware rehearsal rejected: ",
+        "--live-venue" => "Venue hardware rehearsal rejected: ",
         "--bind-room" => "Room hardware binding rejected: ",
         "--bind-venue" => "Venue hardware binding rejected: ",
         "--venue-status" => "Venue hardware status rejected: ",

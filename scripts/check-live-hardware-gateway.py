@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import queue
 import secrets
+import shutil
 import socket
 import struct
 import subprocess
@@ -35,7 +36,8 @@ def run(args):
     token = secrets.token_hex(32)
     private = [*keys.values(), token]
     env = {k:v for k,v in os.environ.items() if not k.lower().startswith('operatorkeys__') and k.lower() not in
-           ('operatorkeyfile','playerticketsigningkey','controlpipetoken','datadirectory','sessiondatadirectory','vr_command_room_key','vr_command_master_key')}
+           ('operatorkeyfile','playerticketsigningkey','controlpipetoken','datadirectory','sessiondatadirectory','vr_command_room_key','vr_command_master_key')
+           and k.upper() not in {f'VR_COMMAND_ROOM_{room}_KEY' for room in range(1,6)}}
     findings, closed, processes, api_log = [], [], [], []
     binary = args.simulator_dll.resolve()
     files = {p.name:sha(p) for p in binary.parent.iterdir() if p.is_file()}
@@ -810,23 +812,9 @@ def run(args):
 
                 check(all(row['state']=='waiting' and row['status'] is None for row in venue_status()) and not list(status_directory.iterdir()),
                       f'{mode} status without credentials reports five waiting rooms and writes no files')
-                stop_venue_room = runtime/f'{label}-stop-room-1'
-                room1_options = {'config':config_files[1],'status_directory':status_directory}
-                alias_path = status_directory/'room-01.status.json'
-                alias = invoke(1, 'Room1', alias_path, **room1_options)
-                alias_log, _ = alias.communicate(timeout=8)
-                assert alias.returncode==1 and 'ArgumentException' in alias_log and not alias_path.exists()
-                venue_reports = {room:out/f'{label}-venue-room-{room}-report.json' for room in rooms}
-                gateways = {room:invoke(room, f'Room{room}', venue_reports[room], config=config_files[room],
-                                        stop=stop_venue_room if room==1 and mode=='Linked' else None,
-                                        status_directory=status_directory) for room in rooms}
                 venue_connections = {}
-                for room in rooms:
-                    path = '/api/sessions/' + owners[room]
-                    venue_connections[room] = accept(venue_peers[room], room, bound=True)
-                assert len(set(venue_connections.values())) == 5
 
-                def send_venue_batch(room, count):
+                def send_venue_batch(room, count, decision='ack'):
                     stream_id, observed, position = venue_streams[owners[room]]
                     reports = [{'streamId':stream_id,'streamSequence':position+index+1,'observedSequence':observed,
                                 'report':{'reportId':str(uuid.uuid4()),'kind':'ShotFired','origin':'Simulation','playerId':player['id'],
@@ -838,8 +826,131 @@ def run(args):
                     assert [(row['signal']['reportId'],row['deviceId']) for row in received['signals']] == [
                         (report['report']['reportId'],expected_devices[room][player['seat']])
                         for report,player in zip(reports,rosters[room][:count],strict=True)]
-                    venue_peers[room].reply()
+                    venue_peers[room].reply(decision)
                     return {report['report']['reportId'] for report in reports}
+
+                def start_fleet(bindings_folder, destination, stop, **overrides):
+                    credentials = {f'VR_COMMAND_ROOM_{room}_KEY':keys[f'Room{room}'] for room in rooms}
+                    return start(['dotnet',str(binary),'--live-venue',str(bindings_folder/'venue-bindings.json'),
+                                  '--output',str(destination),'--stop-file',str(stop)], {**env, **credentials, **overrides})
+
+                fleet_stop = runtime/f'{label}-fleet.stop'
+                fleet_directory = out/f'{label}-fleet'
+                if mode=='Linked':
+                    def refused(bindings_folder, error, **overrides):
+                        denied = start_fleet(bindings_folder, fleet_directory, fleet_stop, **overrides)
+                        diagnostic, _ = denied.communicate(timeout=8)
+                        assert denied.returncode==1 and error in diagnostic and not any(secret in diagnostic for secret in private)
+                        assert not fleet_directory.exists()
+
+                    refused(folder, 'AccessDeniedException', VR_COMMAND_ROOM_5_KEY=keys['Room4'])
+                    altered = runtime/'altered-venue-bindings'
+                    shutil.copytree(folder, altered)
+                    changed_path = altered/config_files[5].name
+                    configuration = json.loads(changed_path.read_bytes())
+                    changed_path.write_text(json.dumps(dict(configuration, managementUrl='http://127.0.0.1:1')), encoding='utf-8')
+                    refused(altered, 'InvalidDataException')
+                    configuration['bindings'][0]['admissionId'] = str(uuid.uuid4())
+                    changed_path.write_text(json.dumps(configuration), encoding='utf-8')
+                    refused(altered, 'InvalidOperationException')
+                    check(all(peer.lines.empty() for peer in venue_peers.values()),
+                          'Wrong room key, mixed management origins and stale admissions refuse the fleet before publishing or connecting')
+
+                    owner_stop = runtime/'original-room-five.stop'
+                    owner_report = out/'original-room-five-stop-report.json'
+                    original_room = invoke(5,'Room5',owner_report,config=config_files[5],stop=owner_stop)
+                    path = '/api/sessions/' + owners[5]
+                    original_hello = venue_peers[5].read('hello')
+                    prior_attach = attached(5,bound=True)
+                    venue_peers[5].reply('ready-observe-close')
+                    wait(lambda:attached(5,bound=True)>prior_attach, 'original room five attaches before the conflicting fleet')
+                    refused(folder, 'GatewayLeaseUnavailable')
+                    assert original_room.poll() is None and all(peer.lines.empty() for peer in venue_peers.values())
+                    owner_stop.touch()
+                    original_close = venue_peers[5].read('closed')
+                    stopped(original_room,owner_report,attached_once=True)
+                    check(original_close['connectionId']==original_hello['connectionId'],
+                          'A lease conflict keeps the original room five alive and releases the four partial fleet leases')
+
+                fleet = start_fleet(folder, fleet_directory, fleet_stop)
+                for room in rooms:
+                    path = '/api/sessions/' + owners[room]
+                    venue_connections[room] = accept(venue_peers[room], room, bound=True)
+                fleet_delivered = {room:send_venue_batch(room, 5) for room in rooms}
+                wait(lambda:all(row['state']=='current' and row['status']['progress']['acknowledged']==5
+                                for row in venue_status(fleet_directory)), f'{mode} fleet acknowledges all 25 current bindings')
+                held_ids = send_venue_batch(3, 1, 'observe-close')
+                if mode=='Independent':
+                    player = rosters[3][0]
+                    room_path = '/api/sessions/'+owners[3]
+                    request(room_path+'/players/'+player['id'], role='Room3', method='DELETE', admission=player['admissionId'])
+                    closed_batch = venue_peers[3].read('closed')
+                    wait(lambda:venue_status(fleet_directory)[2]['state']=='stopped', 'revoked fleet room stops')
+                    assert fleet.poll() is None and not (fleet_directory/'venue-report.json').exists()
+                    fleet_delivered[4] |= send_venue_batch(4, 1)
+                    wait(lambda:venue_status(fleet_directory)[3]['status']['progress']['acknowledged']==6, 'unaffected room still acknowledges')
+                    fleet_stop.touch()
+                else:
+                    fleet_stop.touch()
+                    closed_batch = venue_peers[3].read('closed')
+                fleet_stdout, _ = fleet.communicate(timeout=8)
+                fleet_report = json.loads((fleet_directory/'venue-report.json').read_bytes())
+                assert json.loads(fleet_stdout)==fleet_report and fleet_report['mode']==mode and not fleet_report['physicalDeliveryConfirmed']
+                assert fleet.returncode==int(mode=='Independent') and fleet_report['complete'] is (mode=='Linked') and fleet_stop.is_file()
+                assert len(set(venue_connections.values()))==5
+                assert [(row['roomId'],row['sessionId']) for row in fleet_report['rooms']]==list(owners.items())
+                for room, row in zip(rooms,fleet_report['rooms'],strict=True):
+                    mismatch_room = mode=='Independent' and room==3
+                    assert row=={'roomId':room,'sessionId':owners[room],'exitCode':int(mismatch_room),
+                                 'report':f'room-{room:02}-report.json','error':None}
+                    report = json.loads((fleet_directory/row['report']).read_bytes())
+                    delivered = {delivery['signal']['reportId'] for attempt in report['attempts']
+                                 if attempt['status']=='simulated-acknowledged' for delivery in attempt['deliveries']}
+                    assert delivered==fleet_delivered[room] and not report['physicalDeliveryConfirmed']
+                    assert report['termination']==('binding-mismatch' if mismatch_room else 'operator-stop')
+                    if room==3:
+                        attempt, = [attempt for attempt in report['attempts'] if attempt['status']=='cancelled']
+                        assert attempt['batchId']==closed_batch['batchId'] and attempt['connectionId']==closed_batch['connectionId']==venue_connections[3]
+                        assert {delivery['signal']['reportId'] for delivery in attempt['deliveries']}==held_ids
+                assert all(row['state']=='stopped' for row in venue_status(fleet_directory))
+                assert all(session['state']=='Running' for session in request('/api/sessions'))
+                assert all(not any(secret in file.read_text(encoding='utf-8') for secret in private) for file in fleet_directory.glob('*.json'))
+                save(f'{label}-fleet-close.json', closed_batch)
+                check(True, f'{mode} single-process fleet delivers all 25 exact bindings, cancels the held batch and publishes all terminal results')
+                if mode=='Independent':
+                    check(True, 'The revoked room fails the fleet result while an unaffected room confirms fresh feedback on its original connection')
+                    old_stream, _, position = venue_streams.pop(owners[3])
+                    request(room_path+'/commands', {'commandId':str(uuid.uuid4()),'action':'End'})
+                    request(room_path+'/combat-stream/seal', {'streamId':old_stream,'finalSequence':position}, 'GameServer')
+                    restored = request('/api/sessions', {'missionId':mission['id'],'mode':'Independent','roomIds':[3]})
+                    owners[3] = restored['id']
+                    room_path = '/api/sessions/'+owners[3]
+                    for occupant in rosters[3]:
+                        restored = request(room_path+'/players', {'playerId':occupant['id'],'roomId':3,
+                                           'name':occupant['name'],'headset':'Quest3'},'Room3')
+                    rosters[3] = restored['players']
+                    next(plan for plan in venue_map['rooms'] if plan['roomId']==3)['sessionId'] = owners[3]
+                    folder = bind_venue(label+'-rebound', venue_map)
+                    config_files = {room:folder/file.name for room,file in config_files.items()}
+                    new_stream = str(uuid.uuid4())
+                    request(room_path+'/combat-stream', {'streamId':new_stream,'origin':'Simulation'}, 'GameServer')
+                    started = request(room_path+'/commands', {'commandId':str(uuid.uuid4()),'action':'Begin'})
+                    venue_streams[owners[3]] = (new_stream, started['appliedAtSequence'], 0)
+
+                stop_venue_room = runtime/f'{label}-stop-room-1'
+                room1_options = {'config':config_files[1],'status_directory':status_directory}
+                alias_path = status_directory/'room-01.status.json'
+                alias = invoke(1, 'Room1', alias_path, **room1_options)
+                alias_log, _ = alias.communicate(timeout=8)
+                assert alias.returncode==1 and 'ArgumentException' in alias_log and not alias_path.exists()
+                venue_reports = {room:out/f'{label}-venue-room-{room}-report.json' for room in rooms}
+                gateways = {room:invoke(room, f'Room{room}', venue_reports[room], config=config_files[room],
+                                        stop=stop_venue_room if room==1 and mode=='Linked' else None,
+                                        status_directory=status_directory) for room in rooms}
+                for room in rooms:
+                    path = '/api/sessions/' + owners[room]
+                    venue_connections[room] = accept(venue_peers[room], room, venue_connections[room], bound=True)
+                assert len(set(venue_connections.values())) == 5
 
                 def all_at_count(count):
                     rows = venue_status()
