@@ -70,7 +70,7 @@ const roomPlan = mountIndependentPlan({
 let timer;
 let selectionEpoch = 0, venueClosureEpoch = 0, operationsViewEpoch = 0;
 let archivedPlan = null;
-let roomEnemyDraft = '';
+let roomEnemyDraft = null, roomEnemyPolicySequences = null;
 
 function notify(message, error = false) {
   $('notice').textContent = message;
@@ -129,6 +129,7 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
         else if (code === 'ticket-source-unavailable') message = '原遊戲來源暫未更新，配票已暫停。請查看房卡的連線狀態。';
         else if (code === 'independent-rooms-occupied' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 使用中，五場都未建立。請確認房間狀態後再試。`;
         else if (code === 'venue-phase-changed') message = '全館場次狀態已變更，本批命令未套用。請重新整理後確認房間。';
+        else if (code === 'room-enemy-policy-changed') message = '本房敵軍策略已變更。草稿仍保留，請載入目前策略再編輯。';
         else if (code === 'venue-pause-not-observed' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 尚未回傳有效的暫停快照，本批場次維持暫停。`;
         else if (code === 'venue-resume-not-ready' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 的 MR 追蹤尚未就緒，本批場次維持暫停。`;
         else if (code === 'venue-begin-not-ready' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 的名冊或遊戲快照尚未就緒，本批場次維持準備中。`;
@@ -178,7 +179,7 @@ function runSession(action) {
   });
 }
 function logout() {
-  roomEnemyDraft = '';
+  roomEnemyDraft = roomEnemyPolicySequences = null;
   selectionEpoch++;
   venueClosureEpoch++;
   report.reset(); state.statistics = null;
@@ -279,9 +280,10 @@ async function refreshData(epoch) {
   renderRooms();
   const selected = state.selected, previous = state.session;
   if (selected) {
-    const { session, statistics, recentEvents } = await api('/sessions/' + selected + '/overview');
+    const { session, statistics, recentEvents, roomEnemyPolicySequences: policySequences } = await api('/sessions/' + selected + '/overview');
     if (!current() || selected !== state.selected) return;
     state.session = session;
+    roomEnemyPolicySequences = policySequences;
     if (previous?.id !== session.id) { loadEnvironment(); loadEnemies(); loadClock(); }
     renderSession(statistics, recentEvents);
   }
@@ -378,6 +380,7 @@ function renderRooms() {
   roomReadiness.update();
 }
 function resetSelection(id) {
+  roomEnemyDraft = roomEnemyPolicySequences = null;
   report.reset(); readiness.reset(); connections.reset(); state.statistics = null; state.selected = id; state.session = null;
   closure.reset();
   alignmentPins.reset();
@@ -501,7 +504,7 @@ function applyPermissions() {
 function renderRoomEnemyPolicy(reload = false) {
   const session = state.session, panel = $('room-enemies-panel'), picker = $('room-enemies-room');
   panel.hidden = session?.mode !== 'Linked' || session.state === 'Ended' || session.combatStream?.roomEnemyPolicyVersion !== 1;
-  if (panel.hidden) { roomEnemyDraft = ''; return; }
+  if (panel.hidden) { roomEnemyDraft = null; return; }
   const rooms = session.roomIds.filter(room => ownsRoom(room));
   const scope = JSON.stringify([session.id, rooms]);
   if (picker.dataset.scope !== scope) {
@@ -509,16 +512,26 @@ function renderRoomEnemyPolicy(reload = false) {
     picker.dataset.scope = scope;
   }
   const room = Number(picker.value), policy = session.roomEnemyPolicies?.find(value => value.roomId === room);
-  const settings = policy ?? session.enemies, draft = session.id + '/' + room;
-  if (reload || roomEnemyDraft !== draft) {
-    roomEnemyDraft = draft;
+  const settings = policy ?? session.enemies, key = session.id + '/' + room;
+  const sequence = roomEnemyPolicySequences?.[room];
+  const available = Number.isSafeInteger(sequence) && sequence > 0 && sequence <= session.sequence;
+  if (available && (reload || roomEnemyDraft?.key !== key)) {
+    roomEnemyDraft = { key, sequence };
     $('room-enemies-behavior').value = settings.behavior;
     $('room-enemies-auto').checked = settings.autoAttack;
     $('room-enemies-inherit').checked = !policy;
   }
   $('room-enemies-current').textContent = `房間 ${room} · ${policy ? '本房策略' : '沿用全場'} · ${behaviorNames[settings.behavior]} · 自動攻擊${settings.autoAttack ? '開啟' : '關閉'}`;
+  const draft = roomEnemyDraft?.key === key ? roomEnemyDraft : null;
+  const stale = draft?.conflicted || draft?.sequence !== sequence;
+  const status = $('room-enemies-draft');
+  status.textContent = !available ? '尚未取得本房策略版本。請載入目前策略。'
+    : stale ? '本房策略已有更新，已保留草稿。載入目前策略會取代草稿。' : '';
+  status.hidden = !status.textContent;
   $('room-enemies-fields').disabled = !room || state.busy || !!state.pending;
-  $('room-enemies-behavior').disabled = $('room-enemies-auto').disabled = $('room-enemies-inherit').checked;
+  $('room-enemies-inherit').disabled = !available;
+  $('room-enemies-behavior').disabled = $('room-enemies-auto').disabled = !available || $('room-enemies-inherit').checked;
+  $('room-enemies-apply').disabled = !available || stale;
 }
 function venueTargets(action) {
   const rows = state.venue?.[{ SetEnvironment: 'environment', SetEnemies: 'enemies' }[action] ?? action.toLowerCase()];
@@ -1049,6 +1062,14 @@ async function sendPending() {
   try {
     const response = await api(pending.path, pending.method, pending.body, pending.requestId, pending.admissionId);
     if (state.pending !== pending) return;
+    const roomPolicy = pending.body?.roomEnemyPolicy;
+    if (roomPolicy) {
+      const sequence = response?.appliedAtSequence, session = response?.session?.id;
+      if (response?.commandId !== pending.body.commandId || '/sessions/' + session + '/commands' !== pending.path
+        || !Number.isSafeInteger(sequence) || sequence <= roomPolicy.expectedPolicySequence)
+        throw new Error('Room enemy policy receipt mismatch');
+      if (roomEnemyDraft?.key === session + '/' + roomPolicy.roomId) roomEnemyDraft.sequence = sequence;
+    }
     if (pending.kind === 'mission-create' || pending.kind === 'mission-revise') {
       pending.accepted = response.id;
       const selectedLaunch = commonLaunchRevision();
@@ -1119,6 +1140,7 @@ async function sendPending() {
     notify(venueEnded ? '全館結束已記錄。可查看各場的資料封存狀態。'
       : { create: '場次建立結果已確認。請核對目前狀態，再加入玩家及開始任務。', 'create-set': '五個獨立場次已確認。請由各房核對名冊及準備狀態。', join: '玩家加入操作已確認，請核對目前名冊；尚不代表頭盔在線。', leave: '玩家移出操作已確認，請核對目前名冊。', command: '控制命令已確認。', 'venue-phase': '全館管理命令已確認。可從各房快照核對遊戲端套用狀態。' }[pending.kind]);
   } catch (error) {
+    if (error.code === 'room-enemy-policy-changed' && roomEnemyDraft) roomEnemyDraft.conflicted = true;
     if (pending.kind === 'create' && error.layout) placement.rejected(pending.body.missionId, pending.body.mode, error.layout);
     if (pending.kind === 'create-set' && error.layout) {
       const id = pending.body.rooms ? roomPlan.reject(error.roomId) : pending.body.missionId;
@@ -1561,15 +1583,19 @@ submit('join-form', joinPlayer, runSession);
 submit('environment-form', () => command('SetEnvironment', { environment: environment('live') }, state.environmentSequence), runSession);
 submit('enemies-form', () => command('SetEnemies', { enemies: enemies('live') }, state.enemiesSequence), runSession);
 $('room-enemies-room').addEventListener('change', () => renderRoomEnemyPolicy(true));
-$('room-enemies-reload').addEventListener('click', () => renderRoomEnemyPolicy(true));
+$('room-enemies-reload').addEventListener('click', () => runSession(async () => {
+  await refresh();
+  renderRoomEnemyPolicy(true);
+}));
 $('room-enemies-inherit').addEventListener('change', () => renderRoomEnemyPolicy());
 submit('room-enemies-form', () => {
   if ($('room-enemies-panel').hidden || state.session.combatStream?.roomEnemyPolicyVersion !== 1) return;
   const roomId = Number($('room-enemies-room').value);
   if (!ownsRoom(roomId) || !state.session.roomIds.includes(roomId)) return;
+  if ($('room-enemies-apply').disabled || !roomEnemyDraft) return;
   const policy = $('room-enemies-inherit').checked ? null
     : { behavior: $('room-enemies-behavior').value, autoAttack: $('room-enemies-auto').checked };
-  return command('SetRoomEnemies', { roomEnemyPolicy: { roomId, policy } }, null);
+  return command('SetRoomEnemies', { roomEnemyPolicy: { roomId, policy, expectedPolicySequence: roomEnemyDraft.sequence } }, null);
 }, runSession);
 submit('clock-form', () => command('SetMissionClock', { missionClock: { autoEnd: $('clock-auto-end').checked } }, state.clockSequence), runSession);
 $('reload-clock').addEventListener('click', loadClock);

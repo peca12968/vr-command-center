@@ -6,7 +6,8 @@ const { chromium } = require('playwright');
   for await (const chunk of process.stdin) input.push(chunk);
   const { base, token, sessionId, restoreSequence, venuePreview } = JSON.parse(Buffer.concat(input).toString('utf8'));
   assert.match(base, /^http:\/\/127\.0\.0\.1:\d+$/);
-  const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_CLOSURE_CHROMIUM,
+    args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   try {
     const page = await browser.newPage();
     await page.goto(base + '/console/');
@@ -51,7 +52,9 @@ const { chromium } = require('playwright');
     assert.equal(accepted.status(), 200);
     const command = accepted.request().postDataJSON();
     assert.equal(command.action, 'SetRoomEnemies');
-    assert.deepEqual(command.roomEnemyPolicy, { roomId: 2, policy: { behavior: 'Patrol', autoAttack: true } });
+    const { expectedPolicySequence, ...policy } = command.roomEnemyPolicy;
+    assert.ok(Number.isSafeInteger(expectedPolicySequence) && expectedPolicySequence > 0);
+    assert.deepEqual(policy, { roomId: 2, policy: { behavior: 'Patrol', autoAttack: true } });
     await page.locator('#room-enemies-current').filter({ hasText: '本房策略 · 巡邏 · 自動攻擊開啟' }).waitFor();
     process.stdout.write(JSON.stringify(await accepted.json()));
   } finally { await browser.close(); }

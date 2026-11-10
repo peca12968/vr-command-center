@@ -222,6 +222,7 @@
             <section id="room-enemies-panel" hidden>
               <h3>合併場分房敵軍策略</h3>
               <p id="room-enemies-current" class="hint" role="status"></p>
+              <p id="room-enemies-draft" class="hint" role="status" hidden></p>
               <form id="room-enemies-form"><fieldset id="room-enemies-fields">
                 <div class="form-row">
                   <label>房間<select id="room-enemies-room"></select></label>
@@ -229,7 +230,7 @@
                 </div>
                 <label class="check"><input id="room-enemies-inherit" type="checkbox">沿用全場策略</label>
                 <label class="check"><input id="room-enemies-auto" type="checkbox">自動攻擊</label>
-                <div class="button-row"><button type="submit" class="secondary">套用本房策略</button><button id="room-enemies-reload" type="button" class="quiet">載入目前策略</button></div>
+                <div class="button-row"><button id="room-enemies-apply" type="submit" class="secondary">套用本房策略</button><button id="room-enemies-reload" type="button" class="quiet">載入目前策略</button></div>
               </fieldset></form>
             </section>
           </div><p class="hint">設定會儲存至場次紀錄，遊戲伺服器確認後同步環境與敵軍。電腦示範使用合成頭手；Quest／VIVE、MR 與廠商硬體仍待實機驗證。</p>
@@ -428,7 +429,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.118 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.119 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

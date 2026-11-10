@@ -222,7 +222,7 @@ internal static class ArenaSessionChecks
         var room1 = new OperatorIdentity("room-1", OperatorRole.RoomController, 1);
         var room2 = new OperatorIdentity("room-2", OperatorRole.RoomController, 2);
         var change = new ControlCommand(Guid.NewGuid(), ControlAction.SetRoomEnemies,
-            RoomEnemyPolicy: new(2, new(EnemyBehavior.Patrol, true)));
+            RoomEnemyPolicy: new(2, new(EnemyBehavior.Patrol, true), ExpectedPolicySequence: session.Sequence));
         var unavailable = false;
         try { manager.Execute(session.Id, change, room2); } catch (InvalidOperationException) { unavailable = true; }
         check(unavailable, "A room policy requires the attached game source capability");
@@ -285,6 +285,12 @@ internal static class ArenaSessionChecks
             && manager.GetWithPhase(session.Id, room2, out _, out _, out var revisions).View.RoomEnemyPolicies is null
             && revisions.Count == 1 && revisions[2] == restore.AppliedAtSequence,
             "A scoped return to inheritance remains identifiable after reopening the original history");
+        var scoped = manager.GetOverview(session.Id, room2).RoomEnemyPolicySequences!;
+        check(scoped.Count == 1 && scoped[2] == restore.AppliedAtSequence
+            && manager.GetOverview(session.Id, master).RoomEnemyPolicySequences!.Count == 5
+            && manager.Execute(session.Id, change, room2) is { Duplicate: true } oldReceipt
+            && oldReceipt.AppliedAtSequence == receipt.AppliedAtSequence,
+            "Room policy revisions are scoped and an exact accepted retry keeps its original sequence after restart");
         var globalRequest = Guid.NewGuid();
         var batch = manager.ExecuteVenuePhase(ControlAction.SetEnemies, [Fence(restored)], globalRequest, master, enemyPolicy: global);
         manager = new SessionManager(store);
@@ -305,5 +311,23 @@ internal static class ArenaSessionChecks
             && manager.Get(session.Id).RoomEnemyPolicies is null
             && manager.Observed(session.Id, receipt.AppliedAtSequence, room2).RoomEnemyPolicies!.Length == 1,
             "The global command restores all rooms while the original override remains in history");
+
+        void RejectPolicy(ControlCommand draft, string description)
+        {
+            var sequence = manager.Get(session.Id).Sequence;
+            try { manager.Execute(session.Id, draft, room2); }
+            catch (RoomEnemyPolicyChangedException) { check(manager.Get(session.Id).Sequence == sequence, description); return; }
+            throw new Exception("Expected a room enemy policy revision conflict");
+        }
+        RejectPolicy(change with { CommandId = Guid.NewGuid(), RoomEnemyPolicy = change.RoomEnemyPolicy! with
+            { ExpectedPolicySequence = restore.AppliedAtSequence } },
+            "A newer global change invalidates the inherited room revision even when effective values stay the same");
+        var globalSequence = manager.GetOverview(session.Id, room2).RoomEnemyPolicySequences![2];
+        var newDraft = change with { CommandId = Guid.NewGuid(), RoomEnemyPolicy = change.RoomEnemyPolicy! with { ExpectedPolicySequence = globalSequence } };
+        manager.Execute(session.Id, new(Guid.NewGuid(), ControlAction.SetRoomEnemies, RoomEnemyPolicy: new(1, global)), room1);
+        var local = manager.Execute(session.Id, newDraft, room2);
+        check(local.Session.RoomEnemyPolicies!.Length == 2 && local.AppliedAtSequence > globalSequence + 1,
+            "An intervening change in another room leaves the original room draft valid");
+        RejectPolicy(newDraft with { CommandId = Guid.NewGuid() }, "A stale same-room policy appends no event");
     }
 }

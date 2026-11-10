@@ -66,6 +66,7 @@ internal static class SessionProjection
             throw new ArgumentException("Enemies is only allowed for SetEnemies.");
         if ((command.Action == ControlAction.SetRoomEnemies) != (command.RoomEnemyPolicy is not null)
             || command.RoomEnemyPolicy is { } roomPolicy && (roomPolicy.RoomId is < 1 or > SessionManager.RoomCount
+                || roomPolicy.ExpectedPolicySequence is < 1
                 || roomPolicy.Policy is { } policy && (policy.Behavior is not { } behavior || !Enum.IsDefined(behavior) || !policy.AutoAttack.HasValue)))
             throw new ArgumentException("A room enemy policy requires a room and complete settings, or null to use venue settings.");
         if ((command.Action == ControlAction.SetMissionClock) != (command.MissionClock is not null))
