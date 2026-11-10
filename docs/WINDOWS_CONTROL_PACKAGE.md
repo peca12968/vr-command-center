@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-11 `VRCommand-ControlServer-0.31.115-venue-launch-review-win-x64.zip` 為 53,007,477 bytes，SHA-256 `24b159207ef17782e6aa308d320017a9a9d4908498b10059af6a101534993866`。解壓核對 555 筆清單與 535 個發行檔案。主控可從原啟動報告唯讀核對來源及端點。 [操作方式](WINDOWS_SERVER_PACKAGE.md#核對未確認的啟動報告) · [發行核對](../artifacts/venue-release-0.50.4-launch-review.json)
+
 2026-11-11 `VRCommand-ControlServer-0.31.114-venue-source-batch-win-x64.zip` 為 52,989,867 bytes，SHA-256 `f529ae0a5ce5dcd8e404fce7a0c36b7b54ba7c256483e422227c154f10ce855c`。解壓核對 552 筆清單與 532 個發行檔案。管理服務在同一筆交易核對並登記整批遊戲來源。 [操作方式](WINDOWS_SERVER_PACKAGE.md#依場館計畫批次啟動)
 
 2026-11-11 `VRCommand-ControlServer-0.31.113-guarded-source-win-x64.zip` 為 52,985,085 bytes，SHA-256 `c713cb92051b7b9ff145e904e795dca8d6fd153d79294df0fc1b9d9dc376a513`。解壓核對 552 筆清單與 532 個發行檔案。搭配 1.14 啟動器，核對場次序號與寫入遊戲來源在同一次操作完成。 [操作方式](WINDOWS_SERVER_PACKAGE.md#依場館計畫批次啟動) · [發行核對](../artifacts/venue-release-0.50.3-guarded-source.json)

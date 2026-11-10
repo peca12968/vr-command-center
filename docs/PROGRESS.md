@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 在主控台核對未確認的全館啟動報告
+
+- 管理包 0.31.115 新增主控唯讀核對。瀏覽器解析第四版啟動結果，只送出原批次、場次、來源識別及 UDP 綁定欄位。管理包會核對實例，逐房顯示原場次、來源、端點與近期快照狀態。綁定為 `0.0.0.0` 時核對埠號，公告位址由管理端讀取。 [操作方式](WINDOWS_SERVER_PACKAGE.md#核對未確認的啟動報告)
+- Windows 三包 `run-3e0a640cd90942cdb9305675112793f7` 退出 0、475 項通過。實際匯入兩份 1.16 啟動器報告。第一份顯示原五房準備中且全數未綁定。第二份在管理端已保存合併端點、但兩個成功回條均被代理換成 502 後產生，主控台找到原來源及端點，並顯示無近期快照。用錯誤埠號再次核對時顯示不符。核對前後的原場次與端點相同。 [未綁定結果](../artifacts/server-package-checks/run-3e0a640cd90942cdb9305675112793f7/independent-venue-unbound-browser-review.json) · [已公告結果](../artifacts/server-package-checks/run-3e0a640cd90942cdb9305675112793f7/lost-endpoint-browser-review.json)
+- 同一驗收中的正常五房獨立及合併各 25 席同機連線，50 份戰績、6 份 CSV、959 格完整回放及雙封存。兩個報告故障案例另列。活動場次歸零，C／F 快照 289 檔雜湊相符。首輪在管理服務就緒前逾時，未啟動遊戲，C／F 快照 9 檔相符。第二輪在新實例以測試專用的四處理器設定通過，仍使用原 40 秒門檻。 [Windows 驗收](../artifacts/server-package-checks/run-3e0a640cd90942cdb9305675112793f7/checks.json) · [首輪紀錄](../artifacts/venue-launch-review-native.log)
+- Release 零警告，1,086 項核心、11 項 Chromium、825 項 HTTP、107 項管理包及 27 項 Python 檢查通過。管理包來源 `28b80322`，186 個來源雜湊相符。沿用啟動器 1.16、Windows 遊戲與 Quest 0.50.4，發行一致性核對通過。GitHub Actions job `130029775694` 因帳務或支出上限未啟動。跨機、頭盔及廠商硬體仍待驗收。 [瀏覽器驗收](../artifacts/console-venue-launch-review/checks.json) · [發行核對](../artifacts/venue-release-0.50.4-launch-review.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42873262957)
+
 ## 2026-11-11 啟動器重送原全館回條請求
 
 - Windows 啟動器 1.16 遇到暫時性傳輸錯誤或 HTTP 502、503、504 時，會在原程序可用的條件下，將同一份來源登記或端點公告資料重送一次。回條仍須符合原場次及來源，端點公告前後也會核對原程序的 UDP 綁定。報告記錄是否重送。兩次都無法確認時會停止並保留 `unconfirmed` 結果。 [操作與報告](WINDOWS_SERVER_PACKAGE.md#依場館計畫批次啟動)
