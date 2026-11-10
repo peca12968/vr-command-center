@@ -27,7 +27,7 @@ const liveSettingDrafts = { environment: null, enemies: null };
 let comparedVersion = null;
 let checkedTemplate = null, templateEpoch = 0, loadedText = null;
 const objectHistory = placementHistory();
-const world = mountWorld(() => state.key, logout, venueEnemyText, master);
+const world = mountWorld(() => state.key, logout, venueEnemyText, master, download);
 const report = mountReport(() => state, logout, () => { renderStatistics(); closure.update(); });
 const venueReport = mountVenueReport(() => state, logout, download);
 const venueHistory = mountVenueHistory(api, selectVenueClosure);

@@ -3,6 +3,7 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const { isDeepStrictEqual } = require('node:util');
+const readCsv = require('./csv.cjs');
 
 module.exports = async function worldBrowser({ page, context, api, tokens, directory, root, base, screenshots, check, liveWatchOnly }) {
   const keys = path.join(directory, 'world-keys.json'); await fs.writeFile(keys, JSON.stringify({ OperatorKeys: tokens }));
@@ -507,8 +508,54 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       && clipReport.players.some(row => row.hitsReceived > 0 && row.damageTaken > 0)
       && Number(await canvas.getAttribute('data-sequence')) === clipTail,
     'Clip statistics count original damage on the inclusive boundary without seeking or changing room');
-    await page.locator('#world-room').selectOption('all');
-    check(await clipStats.isHidden(), 'Changing the replay room clears the previous clip statistics');
+    const clipExport = page.locator('#world-clip-stats-export'), clipExportStatus = page.locator('#world-clip-stats-export-status');
+    const csvPath = new URL(statsResponse.url()).pathname + '.csv';
+    const exportReply = page.waitForResponse(response => new URL(response.url()).pathname === csvPath);
+    const clipExported = page.waitForEvent('download');
+    await clipExport.click();
+    const csvResponse = await exportReply, clipDownload = await clipExported;
+    const raw = await fs.readFile(await clipDownload.path()), parsed = readCsv(raw);
+    const clipQuery = new URL(csvResponse.url()).searchParams;
+    check(csvResponse.status() === 200 && csvResponse.headers()['cache-control'] === 'no-store' && raw.equals(await csvResponse.body())
+      && clipDownload.suggestedFilename() === `vr-command-clip-statistics-v1-${clipReport.sessionId}-${eventSequence}-${clipTail}-room-02.csv`
+      && clipQuery.get('streamId') === clipReport.streamId && clipQuery.get('roomId') === '2'
+      && parsed.length === clipReport.players.length && parsed.every((row, index) => {
+        const player = clipReport.players[index];
+        return row.sessionId === clipReport.sessionId && row.streamId === clipReport.streamId
+          && row.fromFrame === String(eventSequence) && row.throughFrame === String(clipTail) && row.reportRoomId === '2'
+          && row.playerId === player.playerId && Number(row.damageTaken) === player.damageTaken && Number(row.matchedShots) === player.matchedShots;
+      }), 'Clip CSV download preserves the exact authorized room, stream, bounds and saved counters');
+    check((await clipStats.locator('tbody tr td:nth-last-child(2)').allTextContents()).join(',')
+      === clipReport.players.map(row => row.matchedShots).join(','), 'Clip statistics display the actual hit numerator separately from recorded hits');
+    await fs.writeFile(path.join(screenshots, 'world-clip-statistics.csv'), raw);
+    await page.route(url => url.pathname === csvPath, route => route.fulfill({ status: 200, contentType: 'text/csv-fake', body: 'fixture' }), { times: 1 });
+    await clipExport.click();
+    await clipExportStatus.filter({ hasText: '無法下載片段戰績' }).waitFor();
+    check(await clipExport.isEnabled() && await clipStats.isVisible(), 'Invalid clip CSV MIME leaves the verified table and allows a retry');
+
+    const gate = Promise.withResolvers(), captured = Promise.withResolvers(), delivered = Promise.withResolvers();
+    const csvRoute = url => url.pathname === csvPath;
+    const holdCsv = async route => {
+      try {
+        const response = await route.fetch(); captured.resolve(response.status());
+        await gate.promise; await route.fulfill({ response });
+      } catch { captured.resolve(null); }
+      finally { delivered.resolve(); }
+    };
+    let lateDownloads = 0;
+    const countDownload = () => lateDownloads++;
+    page.on('download', countDownload);
+    await page.route(csvRoute, holdCsv);
+    try {
+      await clipExport.click();
+      const observed = await captured.promise;
+      await page.locator('#world-room').selectOption('all');
+      gate.resolve(); await delivered.promise;
+      check(observed === 200 && await clipStats.isHidden() && await clipExport.isDisabled() && lateDownloads === 0,
+        'Changing the replay room invalidates a previously authorized clip CSV before download');
+    } finally {
+      gate.resolve(); await page.unroute(csvRoute, holdCsv); page.off('download', countDownload);
+    }
     await page.locator('#world-room').selectOption('2');
     const clipWatch = (start, rate) => page.waitForRequest(request => {
       const query = new URL(request.url()).searchParams;

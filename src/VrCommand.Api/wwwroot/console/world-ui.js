@@ -21,7 +21,7 @@ const isBeginWitness = witness => witness?.kind === 'tracking-begin' || witness?
 const witnessLabels = { enemies: '敵軍', environment: '環境', 'tracking-begin': '追蹤開場', 'participation-begin': '有效姿態開場',
   'pose-interruption': '姿態中斷' };
 
-export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips) {
+export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips, download) {
   let active = false, scene, controller, epoch = 0, listEpoch = 0, listController, info, frame, geometry = '', mode = '', connected = false, received = 0;
   let connecting = false, stepping = false, savedLimit = null, savedFinished = false;
   let reviewPlayer = null, actors = new Map(), actorInitialized = false;
@@ -40,7 +40,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   });
   const policyFrames = mountWorldPolicyFrames(response, readFrame);
   const savedClips = mountSavedClips(response, canWriteClips, loadClip);
-  const clipStatistics = mountWorldClipStatistics(response);
+  const clipStatistics = mountWorldClipStatistics(response, download);
   const shotTrace = mountWorldShotTrace(response, readFrame, eventNames);
   function message(text, error = false) { $('world-message').textContent = text; $('world-message').classList.toggle('replay-error', error); }
   function stop() {

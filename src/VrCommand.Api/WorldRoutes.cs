@@ -86,6 +86,14 @@ public static class WorldRoutes
             context.Response.Headers.CacheControl = "no-store";
             return store.ClipStatistics(id, fromFrame, throughFrame, roomId, playerId, Actor(context), context.RequestAborted);
         });
+        app.MapGet("/api/sessions/{id:guid}/world/clip-statistics.csv", (Guid id, Guid streamId, long fromFrame, long throughFrame,
+            int? roomId, Guid? playerId, WorldRecordings store, HttpContext context) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            var report = store.ClipStatistics(id, fromFrame, throughFrame, roomId, playerId, Actor(context), context.RequestAborted);
+            if (report.StreamId != streamId.ToString("D")) throw new InvalidOperationException("The recording source differs from the selected clip.");
+            return Results.File(ClipStatisticsCsv.Encode(report), "text/csv; charset=utf-8", ClipStatisticsCsv.FileName(report));
+        });
         app.MapGet("/api/sessions/{id:guid}/world/event-neighbor", (Guid id, long throughFrame, long fromFrame, string direction,
             int? roomId, string? kind, Guid? playerId, WorldRecordings store, HttpContext context) =>
         {

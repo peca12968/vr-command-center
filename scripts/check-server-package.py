@@ -193,6 +193,7 @@ def main():
     p.add_argument('--check-venue-replay-alignment', action='store_true', help='Switch to the original adjacent room at the same recorded UTC time')
     p.add_argument('--check-venue-mission-time', action='store_true', help='Switch original independent replays by mission tick in the shipped console')
     p.add_argument('--check-player-room-replay', action='store_true', help='Export a single room from the original native Linked combat replay')
+    p.add_argument('--check-clip-statistics-csv', action='store_true', help='Download the original room player clip counters from the shipped console')
     p.add_argument('--check-venue-history-ui', action='store_true', help='Reopen and download the earlier batch after the newer native round')
     p.add_argument('--check-venue-environment', action='store_true', help='Confirm two batch environment changes in each native topology')
     p.add_argument('--check-venue-environment-ui', action='store_true', help='Open the original environment batch witness in the packaged console')
@@ -327,6 +328,8 @@ def main():
         p.error('--check-venue-mission-time requires --check-venue-replay-ui')
     if args.check_player_room_replay and not (args.check_venue_replay_ui and args.check_room_combat):
         p.error('--check-player-room-replay requires --check-venue-replay-ui and --check-room-combat')
+    if args.check_clip_statistics_csv and not args.check_player_room_replay:
+        p.error('--check-clip-statistics-csv requires --check-player-room-replay')
     if args.check_venue_history_ui and not (args.check_venue_replay_ui and args.check_venue_reports):
         p.error('--check-venue-history-ui requires --check-venue-replay-ui and --check-venue-reports')
     if args.check_venue_environment and not args.player_package:
@@ -1777,6 +1780,8 @@ def main():
         if scoped:
             config['roomReplaySource'] = str(out/'linked-replay.json')
             config['roomReviewKey'] = keys['Room3']
+            if args.check_clip_statistics_csv:
+                config['checkClipStatisticsCsv'] = True
         if earlier:
             config['history'] = {'batch': earlier, 'zip': str(out/'independent-venue-reports.zip')}
         descriptor.write_text(json.dumps(config), encoding='utf-8')
@@ -1845,6 +1850,17 @@ def main():
                   and len(report['players']) == 1 and report['players'][0]['hitsReceived'] >= damage['matches']
                   and report['players'][0]['damageTaken'] > 0 and report['players'][0]['accuracyPercent'] is None,
                   'linked room 3 clip statistics match the original native hits and damage for one player')
+            if args.check_clip_statistics_csv:
+                raw = (out/'linked-room-03-clip-statistics.csv').read_bytes()
+                row, = csv.DictReader(io.StringIO(raw.decode('utf-8-sig'), newline=''))
+                original, = report['players']
+                check(raw.startswith(b'\xef\xbb\xbf') and damage['clipCsv'] is True
+                      and (row['sessionId'], row['streamId'], row['reportRoomId'], row['reportPlayerId'], row['playerId'])
+                          == (report['sessionId'], report['streamId'], '3', original['playerId'], original['playerId'])
+                      and (int(row['fromFrame']), int(row['throughFrame'])) == (report['fromFrame'], report['throughFrame'])
+                      and all(int(row[key]) == original[key] for key in ('ammoUsed','shotsHit','matchedShots','kills','hitsReceived','damageTaken'))
+                      and row['accuracyPercent'] == '',
+                      'linked room 3 downloads the original personal clip CSV with actual damage and an undefined hit rate')
         if earlier:
             older = earlier['sessions'][2]
             history = result['history']

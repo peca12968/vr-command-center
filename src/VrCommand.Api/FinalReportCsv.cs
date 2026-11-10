@@ -89,26 +89,31 @@ public static class FinalReportCsv
         {
             object?[] fields = [
                 report.ReportVersion, player is null ? "Session" : "Player", report.SessionId, report.MissionId,
-                Text(report.MissionName), report.Mode, string.Join('|', report.RoomIds),
+                CsvReportRows.Text(report.MissionName), report.Mode, string.Join('|', report.RoomIds),
                 report.CreatedAtUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
                 report.StartedAtUtc?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
                 report.EndedAtUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
                 report.PlannedDurationSeconds, report.ThroughSequence, report.Origin?.ToString() ?? "None",
-                report.StreamId, report.FinalStreamSequence, player?.PlayerId, player is null ? null : Text(player.Name),
+                report.StreamId, report.FinalStreamSequence, player?.PlayerId, player is null ? null : CsvReportRows.Text(player.Name),
                 player?.RoomId, player?.AmmoUsed, player?.ShotsHit, player?.Kills, player?.DamageTaken,
                 player?.HitsReceived, player?.AccuracyPercent, player?.Health];
             Row(report.ReportRoomId is int room ? [.. fields, room] : fields);
         }
 
-        void Row(params object?[] cells)
-        {
-            csv.AppendJoin(',', cells.Select(cell => "\"" +
-                (Convert.ToString(cell, CultureInfo.InvariantCulture) ?? "").Replace("\"", "\"\"") + "\""));
-            csv.Append("\r\n");
-        }
+        void Row(params object?[] cells) => CsvReportRows.Append(csv, cells);
+    }
+}
+
+internal static class CsvReportRows
+{
+    internal static void Append(StringBuilder csv, params object?[] cells)
+    {
+        csv.AppendJoin(',', cells.Select(cell => "\"" +
+            (Convert.ToString(cell, CultureInfo.InvariantCulture) ?? "").Replace("\"", "\"\"") + "\""));
+        csv.Append("\r\n");
     }
 
-    private static string Text(string value)
+    internal static string Text(string value)
     {
         // Quoting alone does not stop a spreadsheet from evaluating a formula.
         // Preserve the original text after an explicit apostrophe; JSON/statistics are untouched.

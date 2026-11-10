@@ -1,5 +1,8 @@
 """Real WebSocket publisher, authenticated SSE observation and SQLite restart checks."""
 from copy import deepcopy
+import csv
+from decimal import Decimal
+import io
 import json
 import os
 from pathlib import Path
@@ -61,6 +64,8 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         if response.headers.get_content_type() == "text/event-stream":
             return response
         with response:
+            if response.headers.get_content_type() == "text/csv":
+                return response.headers, response.read()
             return json.load(response)
 
     def start():
@@ -237,6 +242,40 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         request(f"{clip_route}?fromFrame=1&throughFrame=301", expected=400)
         request(f"{clip_route}?fromFrame=1&throughFrame={info['acceptedSequence'] + 1}", expected=404)
         check(True, "Clip statistics enforce room authorization, ordered bounds and the saved archive tail")
+        clip_csv = clip.replace("/clip-statistics?", "/clip-statistics.csv?") + f"&streamId={info['header']['streamId']}&playerId={damaged}"
+        headers, raw = request(clip_csv, "Room5")
+        rows = list(csv.DictReader(io.StringIO(raw.decode("utf-8-sig"), newline="")))
+        row, = rows
+        stat, = request(clip + f"&playerId={damaged}", "Room5")["players"]
+        filename = (f"vr-command-clip-statistics-v1-{session}-{combat_packet['sequence']}-{combat_packet['sequence']}"
+                    f"-room-05-player-{damaged}.csv")
+        check(raw.startswith(b"\xef\xbb\xbf") and raw.endswith(b"\r\n") and headers["Cache-Control"] == "no-store"
+              and headers["Content-Type"] == "text/csv; charset=utf-8" and filename in headers["Content-Disposition"]
+              and (row["rowType"], row["sessionId"], row["streamId"], row["reportRoomId"], row["reportPlayerId"], row["playerId"])
+                  == ("Player", session, info["header"]["streamId"], "5", damaged, damaged)
+              and all(int(row[key]) == stat[key] for key in ("ammoUsed", "shotsHit", "matchedShots", "kills", "hitsReceived", "damageTaken"))
+              and (None if row["accuracyPercent"] == "" else Decimal(row["accuracyPercent"]))
+                  == (None if stat["accuracyPercent"] is None else Decimal(str(stat["accuracyPercent"])))
+              and request(clip_csv, "Room5")[1] == raw and request(session_route) == terminal,
+              "Clip CSV preserves exact read-only scope, counters and undefined accuracy from the saved prefix")
+        _, complete_clip = request(f"{clip_route}.csv?fromFrame=1&throughFrame={tail}&streamId={info['header']['streamId']}")
+        whole, = list(csv.DictReader(io.StringIO(complete_clip.decode("utf-8-sig"), newline="")))
+        original = statistics_before_receipts["players"][0]
+        check(whole["reportRoomId"] == "" and whole["reportPlayerId"] == "" and int(whole["ammoUsed"]) == original["ammoUsed"]
+              and int(whole["shotsHit"]) == int(whole["matchedShots"]) == original["shotsHit"]
+              and Decimal(whole["accuracyPercent"]) == Decimal(str(original["accuracyPercent"])),
+              "Full saved clip CSV preserves the original hit numerator and percentage")
+        _, empty_clip = request(f"{clip_route}.csv?fromFrame=1&throughFrame=1&streamId={info['header']['streamId']}")
+        empty, = list(csv.DictReader(io.StringIO(empty_clip.decode("utf-8-sig"), newline="")))
+        check(empty["rowType"] == "Clip" and empty["sessionId"] == session and empty["playerId"] == empty["ammoUsed"] == "",
+              "An empty clip CSV preserves its original scope without an invented player or metric")
+        request(clip_csv + "&roomId=4", "Room5", 403)
+        request(clip_csv, "GameServer", 403)
+        request(clip_csv, "invalid", 401)
+        request(clip_csv.replace(info["header"]["streamId"], str(uuid4())), "Room5", 409)
+        request(clip_csv.replace(f"&streamId={info['header']['streamId']}", ""), "Room5", 400)
+        request(f"{clip_route}.csv?fromFrame=1&throughFrame=301&streamId={info['header']['streamId']}", expected=400)
+        check(True, "Clip CSV rejects foreign scopes, unauthorized readers, wrong streams and invalid bounds")
         context_route = route + "/frame-context"
         center = combat_packet["sequence"]
         mark = lambda packet: {"sequence": packet["sequence"], "elapsedMilliseconds": packet["elapsedMilliseconds"]}
@@ -522,8 +561,9 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         damage_stream = str(uuid4())
         damage_player = str(uuid4())
         other_player = str(uuid4())
+        spreadsheet_name = ' =HYPERLINK("test","fixture")\r\nline two'
         request(overkill_session + "/players", method="POST", body={"playerId": damage_player,
-                "name": "Overkill fixture", "roomId": 5, "headset": "Quest3"})
+                "name": spreadsheet_name, "roomId": 5, "headset": "Quest3"})
         request(overkill_session + "/players", method="POST", body={"playerId": other_player,
                 "name": "Other room fixture", "roomId": 1, "headset": "Quest3"})
         request(overkill_session + "/combat-stream", "GameServer", method="POST",
@@ -595,6 +635,11 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
               and damage_stats[0]["damageTaken"] == 100 and damage_stats[0]["health"] == 0
               and damage_clip[0]["damageTaken"] == 50 and damage_clip[0]["hitsReceived"] == 1,
               "The scoped replay retains the original hit but reports the same actual health loss as final statistics")
+        _, safe_clip = request(overkill_world + f"/clip-statistics.csv?fromFrame=3&throughFrame=3&streamId={damage_stream}", "Room5")
+        safe, = list(csv.DictReader(io.StringIO(safe_clip.decode("utf-8-sig"), newline="")))
+        check(safe["playerName"] == "'" + spreadsheet_name and damage_clip[0]["name"] == spreadsheet_name
+              and safe["reportRoomId"] == safe["playerRoomId"] == "5" and safe["damageTaken"] == "50" and safe["accuracyPercent"] == "",
+              "Scoped clip CSV protects formula text and preserves actual loss, quotes and line breaks")
         master_frame = request(overkill_world + "/frames/3")
         other_frame = request(overkill_world + "/frames/3?observerRoomId=1", "Room1")
         listed = next(record for record in request("/api/world-recordings", "Room5") if record["header"]["sessionId"] == overkill_id)

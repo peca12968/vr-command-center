@@ -3,6 +3,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { chromium } = require('playwright');
+const readCsv = require('./csv.cjs');
 
 async function main() {
   const [descriptor, output] = process.argv.slice(2);
@@ -295,7 +296,7 @@ async function main() {
       const contextStart = mark(nearby[0]), contextEnd = mark(nearby.at(-1));
       const review = await browser.newPage({ viewport: { width: 1440, height: 1080 } });
       const writes = [];
-      let clipStatistics;
+      let clipStatistics, clipCsv;
       review.on('request', request => {
         if (new URL(request.url()).pathname.startsWith('/api/') && request.method() !== 'GET') writes.push(request.method());
       });
@@ -341,8 +342,28 @@ async function main() {
             accuracyPercent: null }] });
         const clipTable = review.locator('#world-clip-stats-results');
         await clipTable.waitFor();
-        assert.deepEqual(await clipTable.locator('tbody td').allTextContents(),
-          [String(roomId), damaged.name, '0', '0', '0', String(included.length), String(clipStatistics.players[0].damageTaken), '—']);
+        const displayed = [String(roomId), damaged.name, '0', '0', '0', String(included.length), String(clipStatistics.players[0].damageTaken)];
+        if (await clipTable.getByRole('columnheader', { name: '計入命中率', exact: true }).count()) displayed.push('0');
+        assert.deepEqual(await clipTable.locator('tbody td').allTextContents(), [...displayed, '—']);
+        if (config.checkClipStatisticsCsv) {
+          assert.equal(displayed.length, 8);
+          const reply = review.waitForResponse(response => new URL(response.url()).pathname === new URL(world).pathname + '/clip-statistics.csv');
+          const started = review.waitForEvent('download');
+          await review.locator('#world-clip-stats-export').click();
+          const csvReply = await reply, file = await started, raw = await fs.readFile(await file.path());
+          const query = new URL(csvReply.url()).searchParams;
+          assert.equal(csvReply.status(), 200);
+          assert.equal(csvReply.headers()['cache-control'], 'no-store');
+          assert.deepEqual([query.get('fromFrame'), query.get('throughFrame'), query.get('streamId'), query.get('roomId'), query.get('playerId')],
+            [String(contextStart.sequence), String(contextEnd.sequence), header.streamId, '3', damaged.playerId]);
+          assert.ok(raw.equals(await csvReply.body()));
+          const expectedName = `vr-command-clip-statistics-v1-${replay.sessionId}-${contextStart.sequence}-${contextEnd.sequence}-room-03-player-${damaged.playerId}.csv`;
+          assert.equal(file.suggestedFilename(), expectedName);
+          assert.deepEqual(readCsv(raw).map(row => [row.playerId, row.reportRoomId, row.matchedShots, row.accuracyPercent]),
+            [[damaged.playerId, '3', '0', '']]);
+          await fs.writeFile(path.join(path.dirname(output), 'linked-room-03-clip-statistics.csv'), raw, { flag: 'wx' });
+          clipCsv = true;
+        }
         assert.equal(Number(await canvas.getAttribute('data-sequence')), center.sequence);
         await review.locator('#world-clip').screenshot({ path: path.join(path.dirname(output), 'linked-room-03-clip-statistics.png') });
         // Setting the rate on a paused replay can start it. Set the value without changing the current frame.
@@ -365,7 +386,7 @@ async function main() {
       } finally { await review.close(); await page.bringToFront(); }
       return { roomId, start, end, retainedEvents, omittedEvents, props: props.length, apiRequests: apiRequests.length,
         latestDamage: { frame: latest.packet.sequence, matches: damageEvents(latest).length, managementWrites: writes.length,
-          contextStart, contextEnd, clipStatistics } };
+          contextStart, contextEnd, clipStatistics, clipCsv } };
     }
     for (const session of config.sessions) {
       if (session.participationBegin) {
