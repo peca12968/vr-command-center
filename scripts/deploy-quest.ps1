@@ -16,6 +16,7 @@ param(
     [Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='CapturePlan')][switch]$AllowPartialMap,
     [Parameter(Mandatory, ParameterSetName='CapturePlan')][switch]$ReadCapturePlan,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,2147483647)][int]$ExpectedVersionCode,
+    [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$ReleaseReport,
     [Parameter(ParameterSetName='Bundle')][switch]$DeployMappedSeats,
     [Parameter(ParameterSetName='Bundle')][switch]$VerifyTrackedSeats,
     [Parameter(ParameterSetName='Bundle')][switch]$AllHeadsets,
@@ -620,7 +621,34 @@ function Get-QuestDeviceInventory {
     return ,$inventory
 }
 
-function Get-MappedQuestStatus($Row, $Inventory) {
+function Read-QuestRelease([string]$Path) {
+    $report = (Read-DeploymentJson $Path 8192 'venue release report').Document
+    $quest = $report.quest
+    if ($report.verified -isnot [bool] -or -not $report.verified -or
+        $report.scope -isnot [string] -or $report.scope -cne 'offline-package-consistency' -or
+        $quest.applicationId -isnot [string] -or $quest.applicationId -cne 'com.vrcommand.quest' -or
+        $quest.architecture -isnot [string] -or $quest.architecture -cne 'arm64-v8a' -or
+        $quest.signatureV2 -isnot [bool] -or -not $quest.signatureV2 -or
+        -not (Test-JsonInteger $quest.versionCode) -or $quest.versionCode -lt 1 -or $quest.versionCode -gt [int]::MaxValue -or
+        $quest.sha256 -isnot [string] -or $quest.sha256 -cnotmatch '\A[0-9a-f]{64}\z') {
+        throw 'Use the successful offline venue release report for the original Quest APK.'
+    }
+    return $quest
+}
+
+function Get-QuestApkStatus([string]$TargetSerial, [string]$ExpectedHash) {
+    $paths = @(& $AdbPath -s $TargetSerial shell pm path --user current com.vrcommand.quest 2>$null)
+    # A release is one standalone APK. Never pass an unexpected path to the remote shell.
+    if ($LASTEXITCODE -ne 0 -or $paths.Count -ne 1 -or $paths[0] -cnotmatch '\Apackage:((?:/[A-Za-z0-9._=+~-]+)+/base\.apk)\z') {
+        return 'apk-unverified'
+    }
+    $hash = Read-QuestFileHash $TargetSerial $Matches[1]
+    if (-not $hash) { return 'apk-unverified' }
+    if ($hash -cne $ExpectedHash) { return 'apk-hash-mismatch' }
+    return 'ready'
+}
+
+function Get-MappedQuestStatus($Row, $Inventory, [int]$VersionCode, [string]$ExpectedHash) {
     $result = [ordered]@{ roomId = $Row.roomId; seat = $Row.seat; status = 'ready' }
     $status = $Inventory[$Row.serial]
     if ($status -cne 'device') {
@@ -638,7 +666,11 @@ function Get-MappedQuestStatus($Row, $Inventory) {
         $result.status = 'package-unavailable'; return $result
     }
     $result.versionCode = $code
-    if ($code -ne $ExpectedVersionCode) { $result.status = 'version-mismatch' }
+    if ($code -ne $VersionCode) { $result.status = 'version-mismatch'; return $result }
+    if ($ExpectedHash) {
+        $result.status = Get-QuestApkStatus $Row.serial $ExpectedHash
+        if ($result.status -ceq 'ready') { $result.apkVerified = $true }
+    }
     return $result
 }
 
@@ -649,10 +681,10 @@ function Read-QuestDeviceSerial([string]$TargetSerial) {
     return [string]$lines[0]
 }
 
-function Invoke-MappedQuestSeats($Venue, [object[]]$Map) {
+function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, [string]$ExpectedHash) {
     if (-not (Test-Path -LiteralPath $AdbPath -PathType Leaf)) { throw 'Android platform-tools are not installed.' }
     $inventory = Get-QuestDeviceInventory
-    $devices = @($Map | ForEach-Object { Get-MappedQuestStatus $_ $inventory })
+    $devices = @($Map | ForEach-Object { Get-MappedQuestStatus $_ $inventory $VersionCode $ExpectedHash })
     $reportedSerials = [string[]]::new($Map.Count)
     $firstSeatBySerial = [Collections.Generic.Dictionary[string,int]]::new([StringComparer]::OrdinalIgnoreCase)
     for ($index = 0; $index -lt $Map.Count; $index++) {
@@ -667,8 +699,9 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map) {
             $firstSeatBySerial.Add($reportedSerial, $index)
         }
     }
-    $report = [ordered]@{ phase = 'preflight'; topology = $Venue.Report.topology; expectedVersionCode = $ExpectedVersionCode;
+    $report = [ordered]@{ phase = 'preflight'; topology = $Venue.Report.topology; expectedVersionCode = $VersionCode;
         earliestExpiryUtc = $Venue.Report.earliestExpiryUtc; complete = $false; devices = $devices }
+    if ($ExpectedHash) { $report.expectedApkSha256 = $ExpectedHash }
     if ($AllowPartialMap) {
         $report.mappedSeats = $Map.Count
         $report.unmappedSeats = $Venue.Report.seats - $Map.Count
@@ -690,13 +723,18 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map) {
 
     $report.phase = 'deployment'
     $WarningPreference = 'SilentlyContinue'
-    foreach ($device in $devices) { $device.status = 'not-attempted' }
+    foreach ($device in $devices) { $device.status = 'not-attempted'; $device.Remove('apkVerified') }
     for ($index = 0; $index -lt $Map.Count; $index++) {
         $row = $Map[$index]; $device = $devices[$index]
         $connection = $Venue.Connections["$($row.roomId)/$($row.seat)"]
         $reportedSerial = Read-QuestDeviceSerial $row.serial
         if (-not $reportedSerial) { $device.status = 'device-identity-unavailable'; return $report }
         if ($reportedSerial -cne $reportedSerials[$index]) { $device.status = 'device-identity-changed'; return $report }
+        if ($ExpectedHash) {
+            $apkStatus = Get-QuestApkStatus $row.serial $ExpectedHash
+            if ($apkStatus -cne 'ready') { $device.status = $apkStatus; return $report }
+            $device.apkVerified = $true
+        }
         if ($connection.Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) {
             $device.status = 'ticket-expired'; return $report
         }
@@ -724,10 +762,15 @@ function Enter-QuestDeployment {
     return $lock
 }
 
-function Confirm-QuestFileHash([string]$TargetSerial, [string]$Path, [string]$ExpectedHash, [string]$Description) {
+function Read-QuestFileHash([string]$TargetSerial, [string]$Path) {
     $lines = @(& $AdbPath -s $TargetSerial shell sha256sum $Path 2>$null)
-    if ($LASTEXITCODE -ne 0 -or $lines.Count -ne 1 -or $lines[0] -cnotmatch '\A([0-9a-f]{64})[ \t]+(.+)\z' -or
-        $Matches[1] -cne $ExpectedHash -or $Matches[2] -cne $Path) {
+    if ($LASTEXITCODE -eq 0 -and $lines.Count -eq 1 -and $lines[0] -cmatch '\A([0-9a-f]{64})[ \t]+(.+)\z' -and $Matches[2] -ceq $Path) {
+        return $Matches[1]
+    }
+}
+
+function Confirm-QuestFileHash([string]$TargetSerial, [string]$Path, [string]$ExpectedHash, [string]$Description) {
+    if ((Read-QuestFileHash $TargetSerial $Path) -cne $ExpectedHash) {
         throw [IO.InvalidDataException]::new("$Description could not be verified on the selected Quest.")
     }
 }
@@ -894,7 +937,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
     }
     if ($VerifyTrackedSeats) {
         if (-not $ManagementApi -or $RoomId -or $Seat -or $PSBoundParameters.ContainsKey('Serial') -or
-            $ExpectedVersionCode -or $DeployMappedSeats -or $CheckOnly -or ($AllowPartialMap -and -not $DeviceMap)) {
+            $ExpectedVersionCode -or $ReleaseReport -or $DeployMappedSeats -or $CheckOnly -or ($AllowPartialMap -and -not $DeviceMap)) {
             throw 'Use -VerifyTrackedSeats with -ManagementApi and an optional -DeviceMap; omit deployment and device-check parameters.'
         }
         $map = @(if ($DeviceMap) { Read-QuestDeviceMap $DeviceMap -Partial:$AllowPartialMap }
@@ -905,24 +948,26 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
         return
     }
     if ($DeviceMap) {
-        if ($RoomId -or $Seat -or $PSBoundParameters.ContainsKey('Serial') -or -not $ExpectedVersionCode) {
-            throw 'Use -DeviceMap with -ExpectedVersionCode and omit -RoomId, -Seat and -Serial.'
+        if ($RoomId -or $Seat -or $PSBoundParameters.ContainsKey('Serial') -or [bool]$ExpectedVersionCode -eq [bool]$ReleaseReport) {
+            throw 'Use -DeviceMap with either -ExpectedVersionCode or -ReleaseReport and omit -RoomId, -Seat and -Serial.'
         }
         if ($DeployMappedSeats -and ($CheckOnly -or -not $ManagementApi)) {
             throw '-DeployMappedSeats requires -ManagementApi and cannot be combined with -CheckOnly.'
         }
         $map = @(Read-QuestDeviceMap $DeviceMap -Partial:$AllowPartialMap)
         $venue = Read-VenueBundle $VenueBundle 0 0
+        $release = if ($ReleaseReport) { Read-QuestRelease $ReleaseReport }
+        $versionCode = if ($release) { $release.versionCode } else { $ExpectedVersionCode }
         if ($DeployMappedSeats) {
             $deploymentLock = Enter-QuestDeployment
-            try { $result = Invoke-MappedQuestSeats $venue $map }
+            try { $result = Invoke-MappedQuestSeats $venue $map $versionCode $release.sha256 }
             finally { $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose() }
-        } else { $result = Invoke-MappedQuestSeats $venue $map }
+        } else { $result = Invoke-MappedQuestSeats $venue $map $versionCode $release.sha256 }
         $result | ConvertTo-Json -Depth 4 -Compress
         if (-not $result.complete) { exit 1 }
         return
     }
-    if ($DeployMappedSeats -or $ExpectedVersionCode -or $AllowPartialMap) { throw 'Specify -DeviceMap for mapped deployment parameters.' }
+    if ($DeployMappedSeats -or $ExpectedVersionCode -or $ReleaseReport -or $AllowPartialMap) { throw 'Specify -DeviceMap for mapped deployment parameters.' }
     if ([bool]$RoomId -ne [bool]$Seat) { throw 'Specify both -RoomId and -Seat, or omit both for five-room preflight.' }
     if (-not $RoomId -and $Serial) { throw 'Specify -RoomId and -Seat when targeting a Quest device.' }
     if ($RoomId -and -not $CheckOnly -and [string]::IsNullOrWhiteSpace($Serial)) { throw 'Specify -Serial to deploy a bundle seat to a Quest 3.' }

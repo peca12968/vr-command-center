@@ -19,6 +19,7 @@ $serial = $args[1]
 if ($args[0] -cne '-s' -or $serial -cnotmatch '\Afixture-(0[1-9]|1[0-9]|2[0-5])\z') { exit 99 }
 $fault = $faults[$serial]
 $device = Join-Path $root $serial
+$versionCode = if ($env:VR_QUEST_FLEET_VERSION_CODE) { [int]$env:VR_QUEST_FLEET_VERSION_CODE } else { 61 }
 if ($args[2] -ceq 'push') {
     $null = [IO.Directory]::CreateDirectory($device)
     $file = Join-Path $device ($args[4].Split('/')[-1])
@@ -49,10 +50,16 @@ switch -CaseSensitive ($args[3]) {
         exit 0
     }
     'pm' {
+        if (($args[4..7] -join ' ') -ceq 'path --user current com.vrcommand.quest') {
+            if ($fault -ceq 'apk-path-malformed') { 'package:/data/app/base.apk;UNEXPECTED-COMMAND'; exit 0 }
+            'package:/data/app/~~VRGameHash==/com.vrcommand.quest-XR_Package+=/base.apk'
+            if ($fault -ceq 'apk-split') { 'package:/data/app/extra/split_config.arm64_v8a.apk' }
+            exit 0
+        }
         if (($args[4..10] -join ' ') -cne 'list packages -e --show-versioncode --user current com.vrcommand.quest') { exit 98 }
-        if ($fault -ceq 'package-missing') { 'package:com.vrcommand.quest.other versionCode:61' }
-        elseif ($fault -ceq 'version-mismatch') { 'package:com.vrcommand.quest versionCode:60' }
-        else { 'package:com.vrcommand.quest versionCode:61' }
+        if ($fault -ceq 'package-missing') { "package:com.vrcommand.quest.other versionCode:$versionCode" }
+        elseif ($fault -ceq 'version-mismatch') { "package:com.vrcommand.quest versionCode:$($versionCode - 1)" }
+        else { "package:com.vrcommand.quest versionCode:$versionCode" }
         exit 0
     }
     'mv' {
@@ -65,6 +72,20 @@ switch -CaseSensitive ($args[3]) {
         exit 0
     }
     'sha256sum' {
+        $path = $args[4]
+        if ($path -ceq '/data/app/~~VRGameHash==/com.vrcommand.quest-XR_Package+=/base.apk') {
+            if ($fault -ceq 'apk-unreadable') { exit 1 }
+            $hash = (Get-FileHash -LiteralPath $env:VR_QUEST_FLEET_APK -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($fault -ceq 'apk-changed') {
+                $reads = @(Get-Content -LiteralPath (Join-Path $root 'adb.log') |
+                    Where-Object { $_ -ceq "-s $serial shell sha256sum $path" })
+                if ($reads.Count -gt 1) { $hash = '0' * 64 }
+            }
+            if ($fault -ceq 'apk-hash-mismatch') { $hash = '0' * 64 }
+            if ($fault -ceq 'apk-hash-wrong-path') { "$hash  /data/app/other/base.apk"; exit 0 }
+            "$hash  $path"
+            exit 0
+        }
         $file = Join-Path $device ($args[4].Split('/')[-1])
         $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
         "$hash  $($args[4])"

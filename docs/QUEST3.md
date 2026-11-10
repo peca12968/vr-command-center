@@ -341,6 +341,20 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.z
 
 中途失敗會停止並以非零結束碼回報。`launch-requested` 表示該席的檔案已核對，並已送出啟動指令。`file-verification-failed` 表示該席無法確認裝置檔案與預期內容相同，且尚未送出啟動。`deployment-failed` 表示其他部署步驟失敗。這兩種部署錯誤另附 `failedStep`，可辨別遊戲是否已經過停止指令與正式檔案切換。`not-attempted` 表示該席未進入寫入階段。 [核對頭盔追蹤席位](#核對頭盔追蹤席位)
 
+#### 核對頭盔內已安裝的發行 APK
+
+先在操作電腦執行四件套件的離線驗證，將成功輸出的 JSON 存為 `venue-release.json`。用 `-ReleaseReport` 取代 `-ExpectedVersionCode`，即可同時核對版本代碼和裝置上 `base.apk` 的 SHA-256。使用可信任的原始驗證報告，報告可搭配完整或部分裝置清單。 [產生離線發行報告](EXTERNAL_CLIENTS.md#發送前離線核對交付套件) · [Android 套件路徑查詢](https://developer.android.com/tools/adb#pm)
+
+```powershell
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
+    -DeviceMap .\device-map.json -ReleaseReport .\venue-release.json -CheckOnly
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
+    -DeviceMap .\device-map.json -ReleaseReport .\venue-release.json -DeployMappedSeats `
+    -ManagementApi http://127.0.0.1:5081
+```
+
+批次預檢會先核對所有指定裝置。`apk-hash-mismatch` 表示版本代碼相符但 APK 位元組不同。`apk-unverified` 表示無法讀出 APK 的雜湊，或 Android 回傳多個套件檔。正式部署逐席開始寫入前會再核對一次。若第二次核對失敗，該席不寫入設定，後續席位標記為 `not-attempted`。`apkVerified: true` 表示該席已完成當階段的 APK 核對，入場及追蹤仍由主控台驗證。
+
 #### 啟動前核對裝置檔案
 
 單席與整批部署都會先傳送並核對 MR 原校正檔，再驗證暫存的玩家連線檔。兩項核對通過且票券仍有效時，才停止遊戲並啟用新的連線檔。啟用後再次核對最終路徑的 SHA-256，通過才送出啟動指令。批次沿用裝置上已安裝的 APK，因此傳輸或暫存核對失敗時，原遊戲程序及原連線檔可以保留。單席流程另含 APK 安裝階段。

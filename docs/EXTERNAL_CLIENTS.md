@@ -13,15 +13,20 @@
 先完整解壓三個 Windows 套件，把 Quest 開發 APK 與同名的原始 `.receipt.json` 放在一起。使用 Unity 的 Android SDK Build Tools 36.0.0 及 OpenJDK，在儲存庫執行下列命令並替換路徑。
 
 ```powershell
-python scripts/verify-venue-release.py `
+$release = python scripts/verify-venue-release.py `
   --control 'C:\Delivery\VRCommand-ControlServer' `
   --server 'C:\Delivery\VRCommand-GameServer' `
   --player 'C:\Delivery\VRCommand-Player' `
   --quest-apk 'C:\Delivery\vr-command-quest-0.49.1-arm64-debug.apk' `
   --sdk 'F:\Unity\AndroidPlayer\SDK' --jdk 'F:\Unity\AndroidPlayer\OpenJDK'
+if ($LASTEXITCODE -eq 0) {
+    $release | Set-Content -LiteralPath .\venue-release.json -Encoding utf8
+}
 ```
 
 通過時輸出一行 `verified: true` 的 JSON，列出管理版本、Windows 共同遊戲檔案數，以及 Quest 版本、雜湊和簽章憑證摘要。工具逐檔核對 Windows 清單與兩包的共用遊戲檔案，再比對 Quest 與 Windows 的建置來源及場景網路識別。APK 會另查驗套件 ID、ARM64、OpenXR 函式庫及 v2 簽章。若拒絕，請保留錯誤與原檔，重新取得配套交付物後再核對。這項唯讀檢查的範圍是交付物一致性，實際連線及頭盔運行請依後文驗收。
+
+成功的 `venue-release.json` 可供 Quest 部署工具逐席核對裝置上已安裝的 APK。 [使用發行報告](QUEST3.md#核對頭盔內已安裝的發行-apk)
 
 ## 分開啟動程式
 

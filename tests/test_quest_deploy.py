@@ -707,11 +707,22 @@ else:
         self.assertNotIn('capture-ready', repeat.stderr)
         self.assertEqual(before, {path.name: path.read_bytes() for path in output.iterdir()})
 
-    def run_fleet(self, files, mapping, *flags, faults=None, environment=None, fleet_root=None):
+    def run_fleet(self, files, mapping, *flags, faults=None, environment=None, fleet_root=None, release=None):
         env = {**os.environ, **(environment or {}), 'VR_QUEST_FLEET_FIXTURE': str(fleet_root or self.root),
                'VR_QUEST_FLEET_FAULTS': json.dumps(faults or {})}
-        return self.run_bundle(files, '-DeviceMap', str(mapping), '-ExpectedVersionCode', '61', '-AdbPath',
+        version = ('-ExpectedVersionCode', '61') if release is None else ('-ReleaseReport', str(release))
+        return self.run_bundle(files, '-DeviceMap', str(mapping), *version, '-AdbPath',
                                str(ROOT / 'tests/fixtures/mock-quest-fleet.ps1'), *flags, environment=env)
+
+    def release_report(self):
+        apk = self.root / 'original-development.apk'
+        apk.write_bytes(b'installed APK byte fixture')
+        document = {'verified': True, 'scope': 'offline-package-consistency',
+                    'quest': {'applicationId': 'com.vrcommand.quest', 'architecture': 'arm64-v8a', 'signatureV2': True,
+                              'versionCode': 64, 'sha256': hashlib.sha256(apk.read_bytes()).hexdigest()}}
+        report = self.root / 'release.json'
+        report.write_text(json.dumps(document), encoding='utf-8')
+        return report, document, {'VR_QUEST_FLEET_APK': str(apk), 'VR_QUEST_FLEET_VERSION_CODE': '64'}
 
     def assert_rejected(self, result, message):
         self.assertNotEqual(0, result.returncode)
@@ -1135,6 +1146,55 @@ else:
     def test_mapped_deployment_stops_before_writing_to_changed_device(self):
         self.assert_mapped_deployment_stops('identity-changed', 'device-identity-changed', None)
 
+    def test_release_report_requires_verified_quest_identity_before_adb(self):
+        files, _ = self.bundle('Linked')
+        mapping, _ = self.device_map()
+        release, original, env = self.release_report()
+        for target, field, value in [('report', 'verified', 'true'), ('report', 'scope', 'device'),
+                                     ('quest', 'applicationId', 'com.other'), ('quest', 'applicationId', ['com.vrcommand.quest']),
+                                     ('quest', 'signatureV2', False),
+                                     ('quest', 'versionCode', '61'), ('quest', 'sha256', 'z' * 64)]:
+            with self.subTest(field=field):
+                document = copy.deepcopy(original)
+                (document if target == 'report' else document['quest'])[field] = value
+                release.write_text(json.dumps(document), encoding='utf-8')
+                result = self.run_fleet(files, mapping, '-CheckOnly', release=release, environment=env)
+                self.assert_rejected(result, 'successful offline venue release report')
+        self.assert_rejected(self.run_fleet(files, mapping, '-CheckOnly', '-ExpectedVersionCode', '64',
+                                           release=release, environment=env), 'either -ExpectedVersionCode or -ReleaseReport')
+        self.assertFalse((self.root / 'adb.log').exists())
+
+    def test_release_apk_check_fences_all_25_seats_before_any_deployment(self):
+        files, _ = self.bundle('Independent')
+        mapping, _ = self.device_map()
+        release, original, env = self.release_report()
+        faults = {'fixture-02': 'apk-hash-mismatch', 'fixture-04': 'apk-path-malformed', 'fixture-08': 'apk-split',
+                  'fixture-09': 'apk-unreadable', 'fixture-10': 'apk-hash-wrong-path', 'fixture-25': 'version-mismatch'}
+        result = self.run_fleet(files, mapping, '-DeployMappedSeats', '-ManagementApi', 'http://127.0.0.1:1',
+                                faults=faults, release=release, environment=env)
+        self.assertEqual(1, result.returncode, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(('preflight', False, 64, original['quest']['sha256']),
+                         (report['phase'], report['complete'], report['expectedVersionCode'], report['expectedApkSha256']))
+        self.assertEqual(25, len(report['devices']))
+        self.assertEqual({2: 'apk-hash-mismatch', 4: 'apk-unverified', 8: 'apk-unverified', 9: 'apk-unverified',
+                          10: 'apk-unverified', 25: 'version-mismatch'},
+                         {i: row['status'] for i, row in enumerate(report['devices'], 1) if row['status'] != 'ready'})
+        self.assertEqual(19, sum(row.get('apkVerified', False) for row in report['devices']))
+        commands = (self.root / 'adb.log').read_text(encoding='utf-8').splitlines()
+        self.assertEqual(24, sum(' shell pm path ' in line for line in commands))
+        self.assertEqual(22, sum(' shell sha256sum ' in line for line in commands))
+        self.assertTrue(all(line == 'devices' or any(' shell ' + op in line for op in ('pm ', 'getprop ', 'sha256sum ')) for line in commands))
+        self.assertFalse(any(self.root.glob('fixture-*')))
+        for canary in ('fixture-', '/data/app/', 'UNEXPECTED-COMMAND', 'v2.'):
+            self.assertNotIn(canary, result.stdout + result.stderr)
+        ready = self.run_fleet(files, mapping, '-CheckOnly', release=release, environment=env)
+        self.assertEqual(0, ready.returncode, ready.stderr)
+        self.assertTrue(all(row['apkVerified'] and row['status'] == 'ready' for row in json.loads(ready.stdout)['devices']))
+
+    def test_release_apk_changed_after_preflight_stops_before_the_affected_seat(self):
+        self.assert_mapped_deployment_stops('apk-changed', 'apk-hash-mismatch', None, partial=True, check_release=True)
+
     def test_mapped_deployment_reports_exact_failure_boundary(self):
         cases = (
             ('directory', 'deployment-failed', 'prepare-device'),
@@ -1148,7 +1208,7 @@ else:
             with self.subTest(fault=fault):
                 self.assert_mapped_deployment_stops(fault, status, step, partial=True)
 
-    def assert_mapped_deployment_stops(self, fault, expected_status, failed_step, *, partial=False):
+    def assert_mapped_deployment_stops(self, fault, expected_status, failed_step, *, partial=False, check_release=False):
         files, seats = self.bundle('Linked')
         path, _ = self.device_map()
         count = 5 if partial else 25
@@ -1182,14 +1242,17 @@ else:
         before = fleet / 'fixture-04'
         before.mkdir(parents=True)
         (before / 'vr-connection.json').write_bytes(b'previous connection')
+        release, release_env = None, {}
+        if check_release:
+            release, _, release_env = self.release_report()
         with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
                 flags = ('-AllowPartialMap',) if partial else ()
                 result = self.run_fleet(files, path, *flags, '-DeployMappedSeats', '-ManagementApi', f'http://127.0.0.1:{server.server_port}',
-                                        faults={'fixture-04': fault}, environment={'VR_COMMAND_MASTER_KEY': 'PRIVATE_MASTER_CANARY'},
-                                        fleet_root=fleet)
+                                        faults={'fixture-04': fault}, environment={**release_env, 'VR_COMMAND_MASTER_KEY': 'PRIVATE_MASTER_CANARY'},
+                                        fleet_root=fleet, release=release)
             finally:
                 server.shutdown()
                 thread.join(timeout=5)
@@ -1214,8 +1277,12 @@ else:
             self.assertEqual(seats[1][f'room-01-seat-{seat:02}.json']['joinTicket'], actual['joinTicket'])
         commands = (fleet / 'adb.log').read_text(encoding='utf-8').splitlines()
         first_write = next(index for index, line in enumerate(commands) if 'shell mkdir -p' in line)
-        self.assertEqual(3 * count + 2, first_write)
+        self.assertEqual(3 * count + 2 + (2 * count + 2 if check_release else 0), first_write)
         self.assertEqual(count + 4, sum(line.endswith(' shell getprop ro.serialno') for line in commands))
+        if check_release:
+            self.assertEqual([True] * 3 + [None] * (count - 3), [row.get('apkVerified') for row in report['devices']])
+            self.assertEqual(2, sum(line.startswith('-s fixture-04 shell pm path ') for line in commands))
+            self.assertFalse(any(line.startswith('-s fixture-04 shell mkdir ') for line in commands))
         self.assertEqual(fault in ('force-stop', 'config-move', 'config-active-changed', 'launch'),
                          any(line.startswith('-s fixture-04 shell am force-stop ') for line in commands))
         if fault == 'identity-changed':
