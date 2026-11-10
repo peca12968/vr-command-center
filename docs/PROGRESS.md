@@ -1,11 +1,20 @@
 # 開發進度
 
+## 2026-11-10 Windows 0.49.0 雙模式長場複驗
+
+使用 Windows 0.49.0 遊戲包與管理包 0.31.83。合併場 25 席，獨立場五房各 5 席。兩種模式各運行 900 秒，使用原生玩家程序及原移動、射擊和換彈路徑。 [長場設定與結果](DESKTOP_ENDURANCE.md#windows-0490-長場複驗)
+
+- `artifacts/desktop-exercise/20261110-112148-71bac159` 退出碼 0，18 項通過。六場核對 51,211 格完整回放，其中 51,003 格為執行中。每席 90 發射擊、45 次換彈。獨立第 1 房暫停並繼續原場次，另四房同期間各前進 49 至 50 tick。
+- 50 份原戰績、50 次伺服器確認及 6 份 CSV 逐席相符。六場世界與戰鬥均已封存。停寫後用 `verify-field-results.py` 的既有日誌核對器重算六份原戰鬥日誌的 4,500 筆事件，對上全部原戰績，結果保存在 `closed-combat-audit.json`。
+- 活動場次與剩餘測試程序皆為零，C／F 的 174 檔執行資料逐檔 SHA-256 一致。本次為單機 Windows 模擬輸入，實體頭盔、MR 場地、跨機 25 人及廠商設備待驗。
+
 ## 2026-11-10 場館交付套件離線核對
 
 新增 `scripts/verify-venue-release.py`，在發送前核對已解壓的管理、Windows 伺服器、Windows 玩家與 Quest 開發 APK。逐檔核對 Windows 清單及兩份遊戲執行檔案，並用原建置憑證比對 Unity 來源和場景、玩家的網路識別。Quest 另用本機 Android 工具核實套件資訊及 v2 簽章。 [操作](EXTERNAL_CLIENTS.md#發送前離線核對交付套件)
 
 - 管理包 0.31.83／API 0.31.0 核對 540 檔，兩個 Windows 0.49.0 遊戲包各 330 檔，其中 323 個共同檔案的內容一致。Quest 0.49.0／63 為 60,963,642 bytes，SHA-256 `ad996caf883c962ed8b2b489c1dbd465b1456abd45f33c2f119da83b87fd0dd2`。實際 SDK 工具確認 ARM64、SDK 32／35、OpenXR 函式庫和 v2 簽章，通過紀錄 `artifacts/venue-release-0490-7631dc.log`。
-- 舊 0.48.1 Windows 伺服器單獨通過其 328 檔核對，與現行 0.49.0 玩家配對時遭拒絕，退出碼 1。紀錄 `artifacts/venue-release-mixed-7631dc.log`。本機通過 5 項新增測試，既有套件測試 25 項中 24 項通過、1 項略過。此檢查為離線交付一致性，頭盔安裝、跨機連線與場地測試各自驗收。
+- 舊 0.48.1 Windows 伺服器單獨通過其 328 檔核對，與現行 0.49.0 玩家配對時遭拒絕。換回配套的 0.48.1 玩家後，仍會因建置識別拒絕 0.49.0 Quest APK。兩次均退出碼 1，保留 `artifacts/venue-release-mixed-7631dc.log` 與 `artifacts/venue-release-mixed-quest-7631dc.log`。
+- 本機通過 5 項新增測試，既有套件測試 25 項中 24 項通過、1 項略過。工具來源 `45257db525b84e7df6654746bb8cdee058c87cad`。GitHub Actions job `129610332660` 因帳務或支出上限未啟動。頭盔安裝、跨機連線與場地測試各自驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42749755565)
 
 ## 2026-11-10 從 VR 房卡確認席位恢復並繼續
 
