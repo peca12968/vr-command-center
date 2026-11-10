@@ -3,7 +3,7 @@ import argparse,hashlib,json,shutil,uuid,zipfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 FILES=['VrCommand.HardwareSimulator.dll','VrCommand.HardwareSimulator.deps.json','VrCommand.HardwareSimulator.runtimeconfig.json','VrCommand.Core.dll','VrCommand.Simulation.dll']
-VERSION='0.2.6'
+VERSION='0.2.7'
 README=f'''VR Command 硬體回饋模擬器 {VERSION}
 
 需要 .NET 10 runtime，本機使用10.0.14驗證。這不是Unity玩家程式或廠商SDK。
@@ -14,6 +14,7 @@ dotnet VrCommand.HardwareSimulator.dll --input example.json --output <新的包�
 python mock-device.py --room 1 --port 19101
 在另一個終端設定 VR_COMMAND_ROOM_KEY，再執行：
 dotnet VrCommand.HardwareSimulator.dll --live <包外room-config.json> --output <新的包外report.json>
+加上 --status 可在終端查看逐行 JSON 狀態，例如暫停、握手、等待 ACK 及模擬設備失聯。每行只包含房號、狀態和累計數字，stopped 表示報告已寫出並關閉。
 同一台電腦的同一帳戶，每個原場次及房間只能有一個即時閘道。GatewayLeaseUnavailable 表示無法取得本機鎖定，請確認原閘道已退出及應用程式資料夾可寫入。
 同一帳戶的運作中閘道也須使用不同模擬 TCP 埠及設備 ID。MockPortLeaseUnavailable 與 DeviceLeaseUnavailable 分別表示指定資源無法取得，請核對各房設定。
 即時模式可加上 --stop-file <尚不存在的本機標記檔>。每個程序使用獨立路徑。建立空白標記檔後，該程序關閉模擬連線，待確認的批次記為 cancelled，報告終止原因為 operator-stop。
@@ -43,7 +44,7 @@ def sha(p):
 def verify(folder):
     folder=folder.resolve();manifest=read(folder/'hardware-package.json')
     version=(manifest.get('toolVersion'),manifest.get('mode'))
-    if manifest.get('schemaVersion')!=1 or version not in {('0.1.0','OfflineSimulationOnly'),('0.2.0','OfflineAndLiveSimulation'),('0.2.1','OfflineAndLiveSimulation'),('0.2.2','OfflineAndLiveSimulation'),('0.2.3','OfflineAndLiveSimulation'),('0.2.4','OfflineAndLiveSimulation'),('0.2.5','OfflineAndLiveSimulation'),(VERSION,'OfflineAndLiveSimulation')}:raise ValueError('Unsupported simulator package')
+    if manifest.get('schemaVersion')!=1 or version not in {('0.1.0','OfflineSimulationOnly'),('0.2.0','OfflineAndLiveSimulation'),('0.2.1','OfflineAndLiveSimulation'),('0.2.2','OfflineAndLiveSimulation'),('0.2.3','OfflineAndLiveSimulation'),('0.2.4','OfflineAndLiveSimulation'),('0.2.5','OfflineAndLiveSimulation'),('0.2.6','OfflineAndLiveSimulation'),(VERSION,'OfflineAndLiveSimulation')}:raise ValueError('Unsupported simulator package')
     expected=set(FILES)|{'example.json','README.txt'}
     if version[1]=='OfflineAndLiveSimulation':expected.add('mock-device.py')
     if set(manifest['files'])!=expected:raise ValueError('Unexpected simulator package payload')

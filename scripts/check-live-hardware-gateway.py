@@ -283,6 +283,86 @@ def run(args):
                   and crossing_result['connections']==2 and crossing_result['attachments']==1 and crossing_result['attempts']==[],
                   'A late ready after Pause and Resume cannot attach its old connection to the new Running epoch')
 
+            status_report = out/'operator-status-report.json'
+            status_stop = runtime/'operator-status.stop'
+            status_command = ['dotnet',str(binary),'--live',str(stop_config),'--output',str(status_report),'--status']
+            status_env = {**env,'VR_COMMAND_ROOM_KEY':keys['Room1']}
+            duplicate_status = start([*status_command,'--status'], status_env)
+            duplicate_output, _ = duplicate_status.communicate(timeout=8)
+            check(duplicate_status.returncode==1 and 'ArgumentException' in duplicate_output and not status_report.exists(),
+                  'Duplicate status options fail before creating a report or opening a mock connection')
+
+            action('Pause')
+            status_gateway = start([*status_command,'--stop-file',str(status_stop)], status_env)
+            status_lines = queue.Queue()
+            status_history = []
+
+            def collect_status():
+                for line in status_gateway.stdout:
+                    status_lines.put(line)
+
+            status_reader = threading.Thread(target=collect_status, daemon=True)
+            status_reader.start()
+
+            def read_status(phase):
+                deadline = time.monotonic()+8
+                while time.monotonic()<deadline:
+                    raw = status_lines.get(timeout=max(0.01, deadline-time.monotonic()))
+                    assert not any(secret in raw for secret in private)
+                    event = json.loads(raw)
+                    assert set(event)=={'version','kind','roomId','sequence','observedAtUtc','phase','connections','attachments',
+                                        'managementFaults','mockFaults','dropped','acknowledged','batches','termination','fault',
+                                        'simulatedHardwareOnly','physicalDeliveryConfirmed'}
+                    assert event['kind']=='gateway-status' and event['version']==event['roomId']==1
+                    assert event['sequence']==len(status_history)+1
+                    assert event['simulatedHardwareOnly'] is True and event['physicalDeliveryConfirmed'] is False
+                    status_history.append(event)
+                    if event['phase']==phase:
+                        return event
+                raise RuntimeError('Missing live gateway status: '+phase)
+
+            check(read_status('paused')['connections']==0 and status_gateway.poll() is None and not status_report.exists(),
+                  'Live operator output reports paused without waiting for a terminal report')
+            epoch = action('Resume')
+            read_status('connecting')
+            first_status_connection = accept(stop_peer,1)
+            check(read_status('active')['attachments']==1, 'Live active status requires the original mock handshake and authority attachment')
+            lost_ids = publish([(alpha,'ShotFired')])
+            lost_status_batch = stop_peer.read('feedback')
+            assert [row['signal']['reportId'] for row in lost_status_batch['signals']]==lost_ids
+            check(read_status('awaiting-ack')['acknowledged']==0, 'A pending batch is visible without claiming an acknowledgement')
+            stop_peer.reply('drop')
+            lost_status = read_status('mock-unavailable')
+            check(lost_status['fault']=='mock-disconnected' and lost_status['mockFaults']==1 and lost_status['acknowledged']==0,
+                  'Mock disconnection reports a bounded fault code and no delivery acknowledgement')
+            read_status('connecting')
+            accept(stop_peer,1,first_status_connection)
+            check(read_status('active')['attachments']==2, 'After disconnection the live status reports a fresh attachment')
+            next_ids = publish([(alpha,'ShotFired')])
+            next_status_batch = stop_peer.read('feedback')
+            assert [row['signal']['reportId'] for row in next_status_batch['signals']]==next_ids
+            read_status('awaiting-ack')
+            stop_peer.reply()
+            check(read_status('active')['acknowledged']==1, 'Only the new confirmed batch advances the live acknowledgement count')
+            pending_ids = publish([(alpha,'ShotFired')])
+            pending_status_batch = stop_peer.read('feedback')
+            assert [row['signal']['reportId'] for row in pending_status_batch['signals']]==pending_ids
+            read_status('awaiting-ack')
+            stop_peer.reply('observe-close')
+            status_stop.touch()
+            assert stop_peer.read('closed')['batchId']==pending_status_batch['batchId']
+            final_status = read_status('stopped')
+            status_result = json.loads(status_report.read_text(encoding='utf-8'))
+            status_gateway.wait(timeout=8)
+            status_reader.join(timeout=5)
+            final_summary = json.loads(status_lines.get(timeout=1))
+            check(status_gateway.returncode==0 and not status_reader.is_alive() and status_lines.empty()
+                  and final_status['termination']=='operator-stop' and final_status['batches']==3
+                  and final_status['acknowledged']==status_result['acknowledged']==final_summary['acknowledged']==1
+                  and [row['status'] for row in status_result['attempts']]==['mock-disconnected','simulated-acknowledged','cancelled'],
+                  'The final live status agrees with the durable report after operator stop cancels the pending batch')
+            save('operator-status.json', status_history)
+
             gateways = {room:invoke(room,f'Room{room}',out/f'room-{room}-report.json') for room in peers}
             connections = {room:accept(peer,room) for room,peer in peers.items()}
 

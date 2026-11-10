@@ -6,18 +6,32 @@ var live = args.Length != 0 && args[0] == "--live";
 var bind = args.Length != 0 && args[0] == "--bind-room";
 try
 {
-    var withStopFile = live && args.Length == 6 && args[4] == "--stop-file";
-    if ((args.Length != 4 && !withStopFile) || args[0] is not ("--input" or "--live" or "--bind-room") || args[2] != "--output")
-        throw new ArgumentException("Use --input, --live or --bind-room <input.json> --output <new-output.json> [--stop-file <new-marker> for --live]");
+    if (args.Length < 4 || (!live && args.Length != 4) || args[0] is not ("--input" or "--live" or "--bind-room") || args[2] != "--output")
+        throw new ArgumentException("Use --input, --live or --bind-room <input.json> --output <new-output.json> [--stop-file <new-marker>] [--status] for --live.");
     var input = Path.GetFullPath(args[1]); var output = Path.GetFullPath(args[3]);
     if (!input.EndsWith(".json", StringComparison.OrdinalIgnoreCase) || !output.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
         || string.Equals(input, output, StringComparison.OrdinalIgnoreCase) || File.Exists(output)) throw new ArgumentException("Use separate JSON input and a new output file.");
-    var stopFile = withStopFile ? Path.GetFullPath(args[5]) : null;
+    string? stopFile = null;
+    var status = false;
+    for (var index = 4; index < args.Length; index++)
+    {
+        switch (args[index])
+        {
+            case "--status" when !status:
+                status = true;
+                break;
+            case "--stop-file" when stopFile is null && index + 1 < args.Length && !args[index + 1].StartsWith("--", StringComparison.Ordinal):
+                stopFile = Path.GetFullPath(args[++index]);
+                break;
+            default:
+                throw new ArgumentException("Use each live option at most once and provide a stop marker path.");
+        }
+    }
     if (stopFile is not null && (string.Equals(stopFile, input, StringComparison.OrdinalIgnoreCase)
         || string.Equals(stopFile, output, StringComparison.OrdinalIgnoreCase) || File.Exists(stopFile)
         || Directory.Exists(stopFile) || !Directory.Exists(Path.GetDirectoryName(stopFile))))
         throw new ArgumentException("Use a separate, absent stop marker in an existing directory.");
-    if (live) return await LiveHardwareGateway.Run(input, output, stopFile);
+    if (live) return await LiveHardwareGateway.Run(input, output, stopFile, status);
     if (bind) return await LiveHardwareGateway.BindRoom(input, output);
     using var source = new FileStream(input, FileMode.Open, FileAccess.Read, FileShare.Read);
     if (source.Length is < 1 or > 8 * 1024 * 1024) throw new ArgumentException("Input exceeds the offline simulation limit.");

@@ -151,7 +151,7 @@ internal static class LiveHardwareGateway
         }
     }
 
-    internal static async Task<int> Run(string input, string output, string? stopFile)
+    internal static async Task<int> Run(string input, string output, string? stopFile, bool statusEnabled)
     {
         var config = ReadInput<Configuration>(input);
         ValidateRoom(config.SessionId, config.RoomId, config.MockPort, config.Seconds);
@@ -170,14 +170,28 @@ internal static class LiveHardwareGateway
         var bindings = config.Bindings.ToDictionary(b => (b.PlayerId, b.AdmissionId, b.Seat));
         var route = FeedbackRoute(config);
         var attempts = new List<Attempt>();
-        int connections = 0, attachments = 0, managementFaults = 0, mockFaults = 0, dropped = 0;
+        int connections = 0, attachments = 0, managementFaults = 0, mockFaults = 0, dropped = 0, acknowledged = 0;
         var termination = "duration";
+        var statusSequence = 0;
+        (string Phase, int Connections, int Attachments, int ManagementFaults, int MockFaults, int Dropped, int Acknowledged, int Batches)? prior = null;
+        void PublishStatus(string phase, string? reason = null, string? fault = null)
+        {
+            if (!statusEnabled) return;
+            var progress = (phase, connections, attachments, managementFaults, mockFaults, dropped, acknowledged, attempts.Count);
+            if (progress == prior) return;
+            prior = progress;
+            Console.WriteLine(JsonSerializer.Serialize(new { version = 1, kind = "gateway-status", config.RoomId,
+                sequence = ++statusSequence, observedAtUtc = DateTimeOffset.UtcNow, phase,
+                connections, attachments, managementFaults, mockFaults, dropped, acknowledged, batches = attempts.Count,
+                termination = reason, fault, simulatedHardwareOnly = true, physicalDeliveryConfirmed = false }, Wire));
+        }
         using var duration = new CancellationTokenSource(TimeSpan.FromSeconds(config.Seconds));
         using var operatorStop = new CancellationTokenSource();
         using var run = CancellationTokenSource.CreateLinkedTokenSource(duration.Token, operatorStop.Token);
         var watch = stopFile is null ? Task.CompletedTask : WatchForStop(stopFile, operatorStop, run.Token);
         try
         {
+            PublishStatus("checking-management");
             while (!run.IsCancellationRequested)
             {
                 try
@@ -190,9 +204,11 @@ internal static class LiveHardwareGateway
                     }
                     if (ActiveEpoch(page) is not { } epoch)
                     {
+                        PublishStatus(page.State == SessionState.Paused ? "paused" : page.State == SessionState.Running ? "waiting-source" : "waiting-mission");
                         await Task.Delay(PollInterval, run.Token);
                         continue;
                     }
+                    PublishStatus("connecting");
                     using var mock = new TcpClient(AddressFamily.InterNetwork);
                     var connection = Guid.NewGuid();
                     await Connect(mock, config.MockPort, run.Token);
@@ -201,7 +217,11 @@ internal static class LiveHardwareGateway
                         "ready", connection, null, run.Token);
                     connections++;
                     page = (await Read(client, route, config, null, run.Token)).Page;
-                    if (ActiveEpoch(page) == epoch) attachments++;
+                    if (ActiveEpoch(page) == epoch)
+                    {
+                        attachments++;
+                        PublishStatus("active");
+                    }
                     while (ActiveEpoch(page) == epoch)
                     {
                         await Task.Delay(PollInterval, run.Token);
@@ -216,12 +236,13 @@ internal static class LiveHardwareGateway
                             return binding is null ? null : new Delivery(binding.DeviceId, signal);
                         }).OfType<Delivery>().ToArray();
                         dropped += page.Signals.Length - deliveries.Length;
-                        if (deliveries.Length == 0) continue;
-                        if (deliveries.Length > MaxBatch) { dropped += deliveries.Length; continue; }
+                        if (deliveries.Length == 0) { PublishStatus("active"); continue; }
+                        if (deliveries.Length > MaxBatch) { dropped += deliveries.Length; PublishStatus("active"); continue; }
                         if (attempts.Count >= MaxAttempts) { termination = "attempt-limit"; break; }
 
                         var batch = Guid.NewGuid();
                         var status = "cancelled";
+                        PublishStatus("awaiting-ack");
                         try
                         {
                             var invalid = await ExchangeFeedback(wire, client, route, config, after, page, deliveries, connection, batch, run.Token);
@@ -231,9 +252,11 @@ internal static class LiveHardwareGateway
                                 break;
                             }
                             status = "simulated-acknowledged";
+                            acknowledged += deliveries.Length;
                         }
                         catch (MockFailure failure) { status = failure.Message; throw; }
                         finally { attempts.Add(new(connection, batch, status, deliveries)); }
+                        PublishStatus("active");
                     }
                     if (page.State == SessionState.Ended)
                     {
@@ -241,9 +264,11 @@ internal static class LiveHardwareGateway
                         break;
                     }
                     if (termination == "attempt-limit") break;
+                    PublishStatus("checking-management");
                 }
-                catch (MockFailure) { mockFaults++; }
-                catch (Exception failure) when (failure is HttpRequestException or TimeoutException || failure is IOException && failure is not InvalidDataException) { managementFaults++; }
+                catch (MockFailure failure) { mockFaults++; PublishStatus("mock-unavailable", fault: failure.Message); }
+                catch (Exception failure) when (failure is HttpRequestException or TimeoutException || failure is IOException && failure is not InvalidDataException)
+                { managementFaults++; PublishStatus("management-unavailable"); }
                 await Task.Delay(PollInterval, run.Token);
             }
         }
@@ -258,11 +283,13 @@ internal static class LiveHardwareGateway
         if (termination == "duration" && operatorStop.IsCancellationRequested) termination = "operator-stop";
 
         var complete = attachments > 0 && termination is not ("attempt-limit" or "binding-mismatch");
-        var acknowledged = attempts.Where(item => item.Status == "simulated-acknowledged").Sum(item => item.Deliveries.Length);
-        using var destination = new FileStream(output, FileMode.CreateNew, FileAccess.Write, FileShare.None);
-        JsonSerializer.Serialize(destination, new { version = 1, complete, simulatedHardwareOnly = true, physicalDeliveryConfirmed = false,
-            config.SessionId, config.RoomId, termination, connections, attachments, managementFaults, mockFaults, dropped, acknowledged, attempts }, JsonFormat.Options);
-        destination.Flush(true);
+        using (var destination = new FileStream(output, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+        {
+            JsonSerializer.Serialize(destination, new { version = 1, complete, simulatedHardwareOnly = true, physicalDeliveryConfirmed = false,
+                config.SessionId, config.RoomId, termination, connections, attachments, managementFaults, mockFaults, dropped, acknowledged, attempts }, JsonFormat.Options);
+            destination.Flush(true);
+        }
+        PublishStatus("stopped", termination);
         Console.WriteLine(JsonSerializer.Serialize(new { complete, simulatedHardwareOnly = true, physicalDeliveryConfirmed = false, acknowledged }, Wire));
         return complete ? 0 : 1;
     }

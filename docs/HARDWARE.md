@@ -27,7 +27,7 @@ $page.signals
 
 ## 現況
 
-硬體由外部公司負責，目前尚待技術資料或 SDK。模擬器 0.2.5 支援以下即時排演，以及[離線回饋模擬](HARDWARE_SIMULATOR.md)的事件重建、佇列、重送和到期測試。設備輸入、強度映射、實體停止及廠商協議列入後續實機驗收。
+硬體由外部公司負責，目前尚待技術資料或 SDK。模擬器 0.2.7 支援以下即時排演，以及[離線回饋模擬](HARDWARE_SIMULATOR.md)的事件重建、佇列、重送和到期測試。設備輸入、強度映射、實體停止及廠商協議列入後續實機驗收。
 
 ### 依現行名冊建立座位綁定
 
@@ -57,7 +57,7 @@ dotnet .\VrCommand.HardwareSimulator.dll --bind-room ..\room-1-seats.json --outp
 
 ## 即時模擬閘道
 
-解壓模擬器 0.2.6 後，用 Python 3.12 開啟模擬設備。每房使用自己的程序和 TCP 埠，模擬連線固定使用本機 `127.0.0.1`。指定 `--room` 時，設備只接受該房握手。後續批次須符合握手房號及連線 ID 才會確認。
+解壓模擬器 0.2.7 後，用 Python 3.12 開啟模擬設備。每房使用自己的程序和 TCP 埠，模擬連線固定使用本機 `127.0.0.1`。指定 `--room` 時，設備只接受該房握手。後續批次須符合握手房號及連線 ID 才會確認。
 
 ```powershell
 python .\mock-device.py --room 1 --port 19101
@@ -91,6 +91,27 @@ try {
 ```
 
 閘道每次只處理一批，最多 32 個訊號。模擬設備須回覆同一連線 ID 和批次 ID。等待回覆期間及收到回覆後都會向管理服務核對原訊號、Running 階段、現行入場及兩秒期限。如果管理狀態先使批次失效，閘道會取消該批並關閉原連線。錯誤、逾時或斷線的批次會記下個別狀態，重新握手後從目前序號開始。成功狀態為 `simulated-acknowledged`。報告的 `acknowledged` 是成功確認的模擬訊號數，`physicalDeliveryConfirmed` 固定為 `false`。
+
+### 查看排演中的閘道狀態
+
+在已設定本房金鑰的終端加入 `--status`。這個選項可與 `--stop-file` 一起使用。
+
+```powershell
+dotnet .\VrCommand.HardwareSimulator.dll --live ..\room-1.json --output ..\room-1-report.json --status
+```
+
+終端會在狀態或計數變動時輸出一行 `kind` 為 `gateway-status` 的版本 1 JSON，包含房號、觀察時間、程序內序號與累計計數。
+
+| 狀態 | 操作者看到的進度 |
+| --- | --- |
+| `checking-management`、`waiting-mission`、`waiting-source` | 正在核對管理服務，或等待任務和戰鬥來源 |
+| `paused` | 任務已暫停，閘道未連接模擬設備 |
+| `connecting`、`active` | 正在握手，或已握手並接上本房回饋來源 |
+| `awaiting-ack` | 批次等候確認，`acknowledged` 只計入已核對的模擬訊號 |
+| `mock-unavailable`、`management-unavailable` | 模擬連線或管理讀取發生錯誤，`fault` 可顯示模擬斷線、逾時或無效回覆 |
+| `stopped` | 終止原因已確定，報告檔已寫出並關閉 |
+
+沒有看到 `stopped` 時，請核對程序退出碼和報告。指定 `--status` 時，原結束摘要仍會接在狀態列後面。程式讀取時可用 `kind` 區分兩者。狀態不含金鑰、位址或玩家識別，`physicalDeliveryConfirmed` 固定為 `false`。
 
 ### 同房閘道的互斥與重新啟動
 
