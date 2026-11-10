@@ -137,10 +137,16 @@ internal static class ServerLauncher
                 || status == WebExceptionStatus.SendFailure || status == WebExceptionStatus.Timeout;
         }
     }
+    internal sealed class ManagementRequestFailed : IOException
+    {
+        internal readonly int StatusCode;
+        internal ManagementRequestFailed(int code) : base("管理服務請求失敗，HTTP " + code + "。") { StatusCode = code; }
+    }
     internal sealed class Settings
     {
         internal string Api, Key, Session, Address, Bind, CertificateSha256; internal int Port;
         internal long ExpectedSequence;
+        internal string VenueLaunchId;
         internal static Settings From(Dictionary<string, object> value)
         {
             var pin = Text(value, "managementCertificateSha256");
@@ -185,7 +191,7 @@ internal static class ServerLauncher
             }
             Need(Key != null && Key.Length >= 32 && Key.Length <= 512, "GameServer金鑰格式錯誤。"); foreach (var c in Key) Need(c > 32 && c < 127, "GameServer金鑰格式錯誤。");
         }
-        internal object Config(string telemetry, string origin) { return new { role = "Server", address = Address, listenAddress = Bind, port = Port, sessionId = Session, managementApiUrl = Api, managementCertificateSha256 = CertificateSha256, gameServerKey = Key, telemetryOrigin = origin, telemetryDirectory = telemetry, expectedSequence = ExpectedSequence }; }
+        internal object Config(string telemetry, string origin) { return new { role = "Server", address = Address, listenAddress = Bind, port = Port, sessionId = Session, managementApiUrl = Api, managementCertificateSha256 = CertificateSha256, gameServerKey = Key, telemetryOrigin = origin, telemetryDirectory = telemetry, expectedSequence = ExpectedSequence, venueLaunchId = VenueLaunchId }; }
 
         private bool CheckCertificate(X509Certificate certificate, SslPolicyErrors errors)
         {
@@ -220,7 +226,7 @@ internal static class ServerLauncher
                 if (response != null) response.Dispose();
                 if (missing && code == 404) return null;
                 if (body == null && ManagementUnavailable.IsTemporary(code, error.Status)) throw new ManagementUnavailable(code);
-                throw new IOException("管理服務請求失敗，HTTP " + code + "。");
+                throw new ManagementRequestFailed(code);
             }
             catch (IOException error)
             {
@@ -228,12 +234,13 @@ internal static class ServerLauncher
                 throw;
             }
         }
-        internal void Identity(bool requireGuardedStream = false)
+        internal void Identity(long planVersion = 1)
         {
             ValidateTarget();
             var service = Request("/");
             Need(Text(service, "version") == "0.31.0", "需要管理服務0.31.0。");
-            Need(!requireGuardedStream || Num(service, "guardedCombatStreamVersion") == 1, "此計畫需要支援場次序號登記的管理包 0.31.113 或以上版本。");
+            Need(planVersion < 2 || Num(service, "guardedCombatStreamVersion") == 1, "此計畫需要支援場次序號登記的管理包 0.31.113 或以上版本。");
+            Need(planVersion < 4 || Num(service, "venueStreamBatchVersion") == 1, "此計畫需要支援整批來源登記的管理包 0.31.114 或以上版本。");
             Need(Text(Request("/api/me"), "role") == "GameServer", "請使用GameServer角色金鑰。");
         }
         internal void CheckPort()
@@ -302,10 +309,10 @@ internal static class ServerLauncher
     internal sealed class Catalog
     {
         internal Settings Target; internal string PathName, InstanceId; internal List<Choice> Choices;
-        internal static Catalog Load(string path, bool requireGuardedStream = false)
+        internal static Catalog Load(string path, long planVersion = 1)
         {
             var catalog = ReadTarget(path);
-            catalog.Target.Identity(requireGuardedStream);
+            catalog.Target.Identity(planVersion);
             catalog.Choices = Parse(catalog.Target.Sessions());
             return catalog;
         }
@@ -409,6 +416,7 @@ internal static class ServerLauncher
     {
         internal Settings Config; internal string Work, Stream; internal Native Process; internal volatile string Status = "準備中"; internal bool Complete, Cleanup; internal uint? Code; internal Dictionary<string, object> FinalWorld, FinalStream; Mutex lease; bool ownsLease;
         internal UdpBinding VerifiedUdp;
+        internal string Candidate { get; private set; }
         internal bool PeerDiagnosticsEnabled { get; private set; }
         private string Origin;
         const int ManagementRecoverySeconds = 15;
@@ -419,7 +427,7 @@ internal static class ServerLauncher
             Config = config; Work = Full(work); Plain(Work); Need(!Inside(Work, Root) && !Inside(Root, Work) && !Directory.Exists(Work) && !File.Exists(Work), "請使用程式包之外的新資料夾。");
         }
         internal void Start(Func<bool> cancelled = null, bool peerDiagnostics = false, bool packageVerified = false,
-            Action beforeNative = null, bool deferPublication = false)
+            Action beforeNative = null, bool deferPublication = false, Action candidateReady = null)
         {
             Config.Validate(); if (!packageVerified) Verify(); Config.Identity(); var state = Config.Request("/api/sessions/" + Config.Session);
             var experience = Text(Child(state, "environment"), "mode");
@@ -446,10 +454,24 @@ internal static class ServerLauncher
             while (timer.Elapsed.TotalSeconds < 90)
             {
                 Need(cancelled == null || !cancelled(), "已中止啟動；此輪未完成。");
+                var exited = Process.Exited;
                 var log = BootstrapLog();
                 Need(!log.Contains("VR_GUARDED_SOURCE_OPEN status=conflict"), "場次序號已變更或已有來源，請回主控台重新核對。");
                 Need(!log.Contains("VR_GUARDED_SOURCE_OPEN status=failed"), "管理服務未確認場次序號，請核對版本與連線設定。");
-                Need(!Process.Exited, "遊戲程序在就緒前結束。");
+                Need(!exited, "遊戲程序在就緒前結束。");
+                if (candidateReady != null && Candidate == null)
+                {
+                    const string marker = "VR_VENUE_STREAM_CANDIDATE stream=";
+                    var offset = log.IndexOf(marker, StringComparison.Ordinal);
+                    var end = offset < 0 ? -1 : log.IndexOf('\n', offset);
+                    if (end >= 0)
+                    {
+                        offset += marker.Length;
+                        Candidate = Choice.GuidValue(log.Substring(offset, end - offset).TrimEnd('\r'));
+                        Status = "等待管理服務登記整批來源";
+                        candidateReady();
+                    }
+                }
                 // This private log line is emitted only AFTER Unity verifies its own immutable combat-stream receipt.
                 // New work/log + actual owned process + canonical bootstrap order bind the API stream to this child.
                 if (log.Contains(startedLine + "\n") || log.Contains(startedLine + "\r\n"))
@@ -458,6 +480,8 @@ internal static class ServerLauncher
                     Stream = Text(stream, "streamId");
                     Need(Guid.TryParseExact(Stream, "D", out id) && id != Guid.Empty && Text(stream, "origin") == Origin && Text(Child(stream, "owner"), "id") == "game-server", "遊戲來源身分不符。");
                     Need(Config.ExpectedSequence == 0 || Num(stream, "expectedSequence") == Config.ExpectedSequence, "遊戲來源未確認本次場次序號。");
+                    Need(Config.VenueLaunchId == null || (Stream == Candidate && Text(stream, "venueLaunchId") == Config.VenueLaunchId),
+                        "遊戲來源未確認本次全館登記。");
                     var world = Config.Request("/api/sessions/" + Config.Session + "/world", missing: true);
                     if (world != null)
                     {
@@ -481,6 +505,18 @@ internal static class ServerLauncher
                 Thread.Sleep(250);
             }
             throw new IOException(awaitingUdp ? "90 秒內未確認原遊戲程序的 UDP 綁定。" : "遊戲來源90秒內未就緒。");
+        }
+        internal object SourceDraft()
+        {
+            return new { sessionId = Config.Session, streamId = Candidate, origin = Origin, expectedSequence = Config.ExpectedSequence };
+        }
+        internal void ConfirmSource(Dictionary<string, object> row)
+        {
+            var stream = Child(row, "stream");
+            Need(Text(row, "sessionId") == Config.Session && Text(stream, "streamId") == Candidate
+                && Text(stream, "origin") == Origin && Text(stream, "venueLaunchId") == Config.VenueLaunchId
+                && Num(stream, "expectedSequence") == Config.ExpectedSequence && Text(Child(stream, "owner"), "id") == "game-server",
+                "整批來源回條不符。");
         }
         internal object EndpointDraft() { return new { version = 1, streamId = Stream, address = Config.Address, port = Config.Port }; }
         internal void ConfirmEndpoint(Dictionary<string, object> endpoint)
@@ -625,6 +661,7 @@ internal static class ServerLauncher
     }
 
     const string VenueEndpointsRoute = "/api/venue/connection-endpoints";
+    const string VenueSourcesRoute = "/api/venue/combat-streams";
 
     static int RunVenue(Dictionary<string, string> options, ref bool outputValid)
     {
@@ -670,15 +707,18 @@ internal static class ServerLauncher
     static VenuePlan LoadVenuePlan(Dictionary<string, object> plan, string instancePath)
     {
         var version = Num(plan, "version"); var topology = Text(plan, "topology"); object raw;
-        Need(version >= 1 && version <= 3 && plan.Count == 6 && (topology == "Linked" || topology == "Independent")
+        Need(version >= 1 && version <= 4 && plan.Count == 6 && (topology == "Linked" || topology == "Independent")
             && plan.TryGetValue("servers", out raw) && raw is object[]
             && ((object[])raw).Length == (topology == "Linked" ? 1 : 5), "請提供完整的獨立或合併場館設定。");
         Verify();
         var guarded = version >= 2;
         if (guarded)
-            Need(Num(Read(Path.Combine(Root, "Runtime", "build-receipt.json"), 8192), "guardedCombatStreamVersion") == 1,
-                "此計畫需要支援場次序號登記的遊戲伺服器 0.50.3 或以上版本。");
-        var catalog = Catalog.Load(instancePath, guarded);
+        {
+            var build = Read(Path.Combine(Root, "Runtime", "build-receipt.json"), 8192);
+            Need(Num(build, "guardedCombatStreamVersion") == 1, "此計畫需要支援場次序號登記的遊戲伺服器 0.50.3 或以上版本。");
+            Need(version < 4 || Num(build, "venueStreamBatchVersion") == 1, "此計畫需要支援整批來源登記的遊戲伺服器 0.50.4 或以上版本。");
+        }
+        var catalog = Catalog.Load(instancePath, version);
         Need(Num(catalog.Target.Request(VenueEndpointsRoute, missing: true), "version") == 1,
             "管理服務尚未支援全館端點公告，請搭配 0.31.100 或以上版本。");
         var rooms = new HashSet<int>(); var ports = new HashSet<int>();
@@ -718,8 +758,10 @@ internal static class ServerLauncher
     {
         Need(!cancel(), "已中止啟動；此輪未完成。");
         var servers = plan.Servers;
+        var launchId = plan.Version >= 4 ? Guid.NewGuid().ToString("D") : null;
         foreach (var server in servers)
         {
+            server.Config.VenueLaunchId = launchId;
             var name = plan.Topology == "Linked" ? "linked" : "room-" + server.Choice.Rooms[0].ToString("00", System.Globalization.CultureInfo.InvariantCulture);
             server.Run = new Run(server.Config, Path.Combine(work, name));
         }
@@ -732,9 +774,12 @@ internal static class ServerLauncher
         var workers = new List<Thread>();
         var published = false;
         var endpointPublication = "not-attempted";
+        var sourceAttachment = "not-attempted";
+        string sourceAttachmentError = null;
         string publicationError = null;
         using (var reserved = new CountdownEvent(servers.Count))
         using (var launch = new ManualResetEventSlim())
+        using (var candidates = new CountdownEvent(servers.Count))
         using (var started = new CountdownEvent(servers.Count))
         using (var proceed = new ManualResetEventSlim())
         {
@@ -746,6 +791,7 @@ internal static class ServerLauncher
                     var worker = new Thread(delegate()
                     {
                         var reservedSlot = false;
+                        var signaledCandidate = false;
                         try
                         {
                             try
@@ -755,11 +801,20 @@ internal static class ServerLauncher
                                     reservedSlot = true;
                                     reserved.Signal();
                                     launch.Wait();
-                                }, deferPublication: true);
+                                }, deferPublication: true, candidateReady: launchId == null ? (Action)null : delegate
+                                {
+                                    signaledCandidate = true;
+                                    candidates.Signal();
+                                });
                                 server.Ready = true;
                             }
                             catch (Exception error) { server.Error = Safe(error); gate.Abort = true; }
-                            finally { if (!reservedSlot) reserved.Signal(); started.Signal(); }
+                            finally
+                            {
+                                if (!reservedSlot) reserved.Signal();
+                                if (!signaledCandidate) candidates.Signal();
+                                started.Signal();
+                            }
                             proceed.Wait();
                             if (!gate.Abort) server.Run.Wait(seconds, cancel);
                         }
@@ -780,6 +835,37 @@ internal static class ServerLauncher
                     }
                 }
                 launch.Set();
+                if (launchId != null)
+                {
+                    candidates.Wait();
+                    if (!gate.Abort && !cancel() && servers.TrueForAll(server => server.Run.Candidate != null && !server.Run.Process.Exited))
+                    {
+                        sourceAttachment = "unconfirmed";
+                        try
+                        {
+                            var receipt = plan.Catalog.Target.Request(VenueSourcesRoute, new { version = 1, topology = plan.Topology,
+                                launchId = launchId, servers = servers.ConvertAll(server => server.Run.SourceDraft()) });
+                            object raw;
+                            Need(Num(receipt, "version") == 1 && Text(receipt, "topology") == plan.Topology && Text(receipt, "launchId") == launchId
+                                && receipt.TryGetValue("servers", out raw) && raw is object[] && ((object[])raw).Length == servers.Count,
+                                "整批來源回條不符。");
+                            var sources = (object[])receipt["servers"];
+                            for (var index = 0; index < servers.Count; index++) servers[index].Run.ConfirmSource(Map(sources[index]));
+                            sourceAttachment = "confirmed";
+                        }
+                        catch (Exception error)
+                        {
+                            var rejected = error as ManagementRequestFailed;
+                            if (rejected != null && rejected.StatusCode == 409)
+                            {
+                                sourceAttachment = "rejected";
+                                sourceAttachmentError = "整批來源登記遭拒絕，請在主控台重新核對場次（HTTP 409）。";
+                            }
+                            else sourceAttachmentError = Safe(error);
+                        }
+                    }
+                    if (sourceAttachment != "confirmed") gate.Abort = true;
+                }
                 started.Wait();
                 if (!gate.Abort && !cancel() && servers.TrueForAll(server => server.Ready && !server.Run.Process.Exited))
                 {
@@ -817,6 +903,7 @@ internal static class ServerLauncher
         var complete = published && !cancel() && servers.TrueForAll(server => server.Error == null && server.Run.Complete && server.Run.Cleanup);
         Save(report, new { schemaVersion = 1, status = complete ? "venue-sealed-stopped" : "venue-incomplete",
             complete = complete, topology = plan.Topology, instanceId = plan.Catalog.InstanceId, readyPublished = published,
+            venueLaunchId = launchId, sourceAttachment = sourceAttachment, sourceAttachmentError = sourceAttachmentError,
             endpointPublication = endpointPublication, publicationError = publicationError,
             servers = servers.ConvertAll(server => new { roomIds = server.Choice.Rooms,
                 result = server.Run.Report(server.Run.Complete && server.Run.Cleanup ? "sealed-stopped" : "incomplete", server.Error) }) });

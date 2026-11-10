@@ -4,10 +4,16 @@ namespace VrCommand.Core;
 
 public record OpenCombatStream(Guid StreamId, CombatOrigin Origin, int MissionClockVersion = 0,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int RoomEnemyPolicyVersion = 0,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? ExpectedSequence = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? ExpectedSequence = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? VenueLaunchId = null);
 public record CombatStreamView(Guid StreamId, CombatOrigin Origin, OperatorIdentity Owner, long AcceptedSequence = 0, bool Sealed = false, int MissionClockVersion = 0,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int RoomEnemyPolicyVersion = 0,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? ExpectedSequence = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? ExpectedSequence = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? VenueLaunchId = null);
+public record VenueStreamCandidate(Guid SessionId, Guid StreamId, CombatOrigin Origin, long ExpectedSequence);
+public record VenueStreamBatch(int Version, Guid LaunchId, SessionMode Topology, VenueStreamCandidate[] Servers);
+public record VenueStreamSource(Guid SessionId, CombatStreamView Stream);
+public record VenueStreamBatchReceipt(int Version, Guid LaunchId, SessionMode Topology, VenueStreamSource[] Servers);
 public record StreamCombatRecord(Guid StreamId, long StreamSequence, long ObservedSequence, CombatReport Report);
 public record SealCombatStream(Guid StreamId, long FinalSequence);
 public record StreamReceipt(Guid StreamId, long AcceptedSequence, bool Duplicate, SessionStatistics Statistics);
@@ -23,6 +29,7 @@ internal static class CombatStreamProjection
             var open = entry.Read<OpenCombatStream>();
             if (open.StreamId == Guid.Empty || open.Origin == CombatOrigin.Unspecified || !Enum.IsDefined(open.Origin)
                 || open.MissionClockVersion is < 0 or > 1 || open.RoomEnemyPolicyVersion is < 0 or > 1
+                || (open.VenueLaunchId.HasValue && (open.VenueLaunchId == Guid.Empty || open.ExpectedSequence is null or < 1))
                 || ((open.MissionClockVersion != 0 || open.RoomEnemyPolicyVersion != 0 || open.ExpectedSequence.HasValue) && entry.SchemaVersion < 7))
                 throw new ArgumentException("A stream requires a non-empty ID and explicit origin.");
             if (current.State != SessionState.Preparing || current.CombatStream is not null)
@@ -30,7 +37,7 @@ internal static class CombatStreamProjection
             if (open.ExpectedSequence is long expected && expected != current.Sequence)
                 throw new InvalidOperationException("Session changed after the launch plan was reviewed.");
             return current with { CombatStream = new(open.StreamId, open.Origin, actor, MissionClockVersion: open.MissionClockVersion,
-                RoomEnemyPolicyVersion: open.RoomEnemyPolicyVersion, ExpectedSequence: open.ExpectedSequence) };
+                RoomEnemyPolicyVersion: open.RoomEnemyPolicyVersion, ExpectedSequence: open.ExpectedSequence, VenueLaunchId: open.VenueLaunchId) };
         }
         var stream = current.CombatStream ?? throw new InvalidOperationException("No combat stream is attached.");
         if (stream.Owner != actor) throw new AccessDeniedException("Combat stream belongs to another server identity.");
@@ -110,21 +117,76 @@ public sealed partial class SessionManager
     {
         ArgumentNullException.ThrowIfNull(request);
         actor ??= OperatorIdentity.Internal; AccessPolicy.ReportCombat(actor);
+        if (request.VenueLaunchId.HasValue) throw new ArgumentException("A venue launch ID requires batch attachment.");
         lock (gate)
         {
             var history = Find(id);
             if (history.View.CombatStream is { } existing)
             {
-                if (existing.StreamId != request.StreamId || existing.Origin != request.Origin || existing.Owner != actor
-                    || existing.MissionClockVersion != request.MissionClockVersion || existing.RoomEnemyPolicyVersion != request.RoomEnemyPolicyVersion
-                    || existing.ExpectedSequence != request.ExpectedSequence)
+                if (!MatchesOpening(existing, request, actor))
                     throw new InvalidOperationException("A different stream or owner is already attached.");
                 return existing;
             }
-            if (history.View.Environment.Mode == ExperienceMode.MR && request.Origin != CombatOrigin.GameServer)
-                throw new InvalidOperationException("MR sessions require a GameServer combat stream.");
-            return Commit(history, SessionEvent.Create(id, history.View.Sequence + 1, SessionEventKind.CombatStreamOpened, request, actor)).CombatStream!;
+            return Commit(history, StreamOpening(history, request, actor)).CombatStream!;
         }
+    }
+
+    public VenueStreamBatchReceipt OpenVenueStreams(VenueStreamBatch request, OperatorIdentity actor)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        AccessPolicy.ReportCombat(actor);
+        if (request.Version != 1 || request.LaunchId == Guid.Empty || request.Topology is not (SessionMode.Linked or SessionMode.Independent)
+            || request.Servers is null || request.Servers.Length != (request.Topology == SessionMode.Linked ? 1 : RoomCount)
+            || request.Servers.Any(row => row is null || row.SessionId == Guid.Empty || row.StreamId == Guid.Empty || row.ExpectedSequence < 1)
+            || request.Servers.Select(row => row.SessionId).Distinct().Count() != request.Servers.Length
+            || request.Servers.Select(row => row.StreamId).Distinct().Count() != request.Servers.Length)
+            throw new ArgumentException("Provide one distinct source for each original venue session.");
+
+        lock (gate)
+        {
+            var targets = request.Servers.Select(row => (History: Find(row.SessionId),
+                Open: new OpenCombatStream(row.StreamId, row.Origin, 1, 1, row.ExpectedSequence, request.LaunchId)))
+                .OrderBy(target => target.History.View.RoomIds[0]).ToArray();
+            if (targets.Any(target => target.History.View.Mode != request.Topology)
+                || !targets.SelectMany(target => target.History.View.RoomIds).Order().SequenceEqual(Enumerable.Range(1, RoomCount)))
+                throw new InvalidOperationException("The original sessions do not cover the selected venue topology.");
+
+            var attached = sessions.Values.Count(history => history.View.CombatStream?.VenueLaunchId == request.LaunchId);
+            if (attached != 0)
+            {
+                if (attached != targets.Length || targets.Any(target => target.History.View.CombatStream is not { } stream
+                    || !MatchesOpening(stream, target.Open, actor)))
+                    throw new InvalidOperationException("The venue launch ID already has different sources.");
+                return VenueSourceReceipt(request, targets.Select(target => target.History.View));
+            }
+            if (eventStore is not IAtomicSessionEventStore store)
+                throw new InvalidOperationException("Venue attachment requires a transactional session store.");
+
+            var entries = targets.Select(target => StreamOpening(target.History, target.Open, actor)).ToArray();
+            var views = entries.Select((entry, index) => SessionProjection.Apply(targets[index].History.View, entry)).ToArray();
+            store.AppendBatch(entries);
+            for (var index = 0; index < targets.Length; index++)
+            {
+                var history = targets[index].History;
+                RememberCommitted(history, entries[index], views[index], history.Combat, history.Authority);
+            }
+            return VenueSourceReceipt(request, views);
+        }
+    }
+
+    private static VenueStreamBatchReceipt VenueSourceReceipt(VenueStreamBatch request, IEnumerable<SessionView> views) =>
+        new(1, request.LaunchId, request.Topology, views.Select(view => new VenueStreamSource(view.Id, view.CombatStream!)).ToArray());
+
+    private static bool MatchesOpening(CombatStreamView stream, OpenCombatStream request, OperatorIdentity actor) =>
+        stream.StreamId == request.StreamId && stream.Origin == request.Origin && stream.Owner == actor
+        && stream.MissionClockVersion == request.MissionClockVersion && stream.RoomEnemyPolicyVersion == request.RoomEnemyPolicyVersion
+        && stream.ExpectedSequence == request.ExpectedSequence && stream.VenueLaunchId == request.VenueLaunchId;
+
+    private static SessionEvent StreamOpening(History history, OpenCombatStream request, OperatorIdentity actor)
+    {
+        if (history.View.Environment.Mode == ExperienceMode.MR && request.Origin != CombatOrigin.GameServer)
+            throw new InvalidOperationException("MR sessions require a GameServer combat stream.");
+        return SessionEvent.Create(history.View.Id, history.View.Sequence + 1, SessionEventKind.CombatStreamOpened, request, actor);
     }
 
     public StreamReceipt ReportStream(Guid id, StreamCombatRecord record, OperatorIdentity? actor = null)

@@ -64,7 +64,7 @@ export function mountVenueServerPlan(getState, api, download) {
     const servers = preview.topology === 'Linked'
       ? [server(preview.rooms[0], preview.rooms.map(room => room.roomId), values[0])]
       : preview.rooms.map((room, index) => server(room, [room.roomId], values[index]));
-    return { version: 3, controlInstance, topology: preview.topology, address: advertised, listenAddress, servers };
+    return { version: 4, controlInstance, topology: preview.topology, address: advertised, listenAddress, servers };
   }
 
   function update() {
@@ -143,7 +143,7 @@ export function mountVenueServerPlan(getState, api, download) {
         return;
       }
       download('vr-command-venue-server-plan.json', new Blob([JSON.stringify(value, null, 2) + '\n'], { type: 'application/json' }));
-      $('status').textContent = '已下載含場次序號的計畫。請使用 Windows 啟動器 1.14 以上版本。場次有變更時請重新讀取並下載。';
+      $('status').textContent = '已下載整批來源登記計畫。請使用 Windows 啟動器 1.15 以上版本。場次有變更時請重新讀取並下載。';
     } catch {
       if (request.current()) {
         resetPreview();

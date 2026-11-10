@@ -22,6 +22,7 @@ namespace VrCommand.Unity
         public string telemetryOrigin = "Simulation";
         public string telemetryDirectory = "";
         public long expectedSequence;
+        public string venueLaunchId = "";
         public string roomAlignmentSha256 = "";
         public bool questPassthrough;
         public bool requestMixedReality;
@@ -57,6 +58,10 @@ namespace VrCommand.Unity
                 throw new InvalidOperationException("Headsets must use client mode.");
             if (config.expectedSequence < 0 || (config.expectedSequence > 0 && config.role != "Server"))
                 throw new InvalidOperationException("A reviewed session sequence is valid only for a dedicated server.");
+            if (!string.IsNullOrEmpty(config.venueLaunchId)
+                && (config.expectedSequence < 1 || !Guid.TryParseExact(config.venueLaunchId, "D", out var launchId)
+                    || launchId == Guid.Empty || launchId.ToString("D") != config.venueLaunchId))
+                throw new InvalidOperationException("Venue attachment requires a canonical launch ID and reviewed sequence.");
             if (config.IsServer && (!Guid.TryParse(config.sessionId, out _) || string.IsNullOrWhiteSpace(config.gameServerKey)))
                 throw new InvalidOperationException("Server management configuration is missing.");
             if (config.IsServer)

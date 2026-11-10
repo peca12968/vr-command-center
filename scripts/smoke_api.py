@@ -881,6 +881,30 @@ try:
             require(request("POST", guarded_route, approved, identity="GameServer") == opened
                     and request("GET", guarded_path) == latest, "Exact guarded source retry appends no event")
             request("DELETE", guarded_path, expected=204)
+            venue_route = "/api/venue/combat-streams"
+            prepared = request("POST", "/api/sessions/independent-set", {"missionId": mission["id"]}, 201,
+                               request_id=str(uuid.uuid4()))["sessions"]
+            candidates = [{"sessionId": row["id"], "streamId": str(uuid.uuid4()), "origin": "Simulation",
+                           "expectedSequence": row["sequence"]} for row in prepared]
+            batch = {"version": 1, "launchId": str(uuid.uuid4()), "topology": "Independent", "servers": candidates}
+            request("PUT", venue_route, batch, 403)
+            changed_path = "/api/sessions/" + prepared[-1]["id"]
+            last = request("POST", changed_path + "/commands", {"commandId": str(uuid.uuid4()), "action": "SetEnvironment",
+                           "expectedSequence": prepared[-1]["sequence"], "environment": prepared[-1]["environment"]})["session"]
+            request("PUT", venue_route, batch, 409, identity="GameServer")
+            originals = [request("GET", "/api/sessions/" + row["id"]) for row in prepared]
+            require(originals == [*prepared[:-1], last] and all(row["combatStream"] is None for row in originals),
+                    "A stale fifth candidate leaves all five original sessions unbound")
+            candidates[-1]["expectedSequence"] = last["sequence"]
+            attached = request("PUT", venue_route, batch, identity="GameServer")
+            require(attached["launchId"] == batch["launchId"]
+                    and [row["sessionId"] for row in attached["servers"]] == [row["id"] for row in prepared]
+                    and all(row["stream"]["venueLaunchId"] == batch["launchId"] for row in attached["servers"]),
+                    "A valid venue batch returns all original source identities together")
+            require(request("PUT", venue_route, {**batch, "servers": candidates[::-1]}, identity="GameServer") == attached,
+                    "Reordered venue retry returns the same source receipt")
+            for row in prepared:
+                request("DELETE", "/api/sessions/" + row["id"], expected=204)
             relay_dll = Path(os.environ.get("VR_COMMAND_TELEMETRY_RELAY_DLL", ROOT / "tools/VrCommand.TelemetryRelay/bin/Release/net10.0/VrCommand.TelemetryRelay.dll"))
             journal = test_directory / "outbox.journal"
             relay_args = ["dotnet", str(relay_dll), "--journal", str(journal), "--base-url", base_url, "--key-file", str(key_file)]

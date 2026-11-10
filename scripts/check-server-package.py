@@ -644,7 +644,7 @@ def main():
                 check(completed.returncode==0 and read(file)==plan,label+suffix+' downloads exact session and mission revisions: '+diagnostic[-600:])
                 return file
             def refresh_plan():
-                plan['version']=3
+                plan['version']=4
                 plan['servers']=[{**row,'sessionSequence':state['sequence'],'missionId':state['mission']['id']}
                                  for row,state in zip(plan['servers'],states,strict=True)]
             def advance_revision():
@@ -655,8 +655,8 @@ def main():
             @contextmanager
             def revision_fixture(suffix, change_at_open):
                 catalog_reads=[]
-                guarded_posts=[]
-                guarded_path='/api/sessions/'+states[-1]['id']+'/combat-stream/guarded-open'
+                batch_requests=[]
+                batch_path='/api/venue/combat-streams'
                 class RevisionFixture(BaseHTTPRequestHandler):
                     def log_message(self, *args):pass
                     def authorized(self):
@@ -676,16 +676,17 @@ def main():
                             catalog_reads.append(self.path)
                         body,_=request(self.path,role='GameServer',raw_response=True)
                         self.reply(200,body)
-                    def do_POST(self):
+                    def do_PUT(self):
                         if not self.authorized():return
                         length=int(self.headers.get('Content-Length','0'))
-                        if (not change_at_open or self.path!=guarded_path or guarded_posts or not 0<length<=4096
+                        if (not change_at_open or self.path!=batch_path or batch_requests or not 0<length<=4096
                                 or self.headers.get_content_type()!='application/json'):
                             self.send_error(400);return
                         body=self.rfile.read(length)
-                        guarded_posts.append(json.loads(body))
+                        batch_requests.append(json.loads(body))
                         advance_revision()
-                        rejected,_=request(self.path,body,role='GameServer',expected=409,raw_response=True,content_type='application/json')
+                        rejected,_=request(self.path,body,role='GameServer',method='PUT',expected=409,
+                                           raw_response=True,content_type='application/json')
                         self.reply(409,rejected)
                 fixture_dir=runtime/(label+suffix+'-instance')
                 fixture_dir.mkdir()
@@ -698,7 +699,7 @@ def main():
                     thread=threading.Thread(target=fixture.serve_forever,daemon=True)
                     thread.start()
                     try:
-                        yield file,catalog_reads,guarded_posts
+                        yield file,catalog_reads,batch_requests
                     finally:
                         fixture.shutdown()
                         thread.join()
@@ -720,20 +721,32 @@ def main():
                 check(len(catalog_reads)==2 and '房間 5' in blocked['error'] and '場次序號' in blocked['error']
                       and not gate_ready.exists() and not list(gate_work.iterdir()),
                       'A real fifth-room edit at the final launch gate stops every worker before writing a native config')
-            else:
-                source_work,source_ready=runtime/(label+'-source-work'),out/(label+'-source-ready.json')
-                with revision_fixture('-source',change_at_open=True) as (source_plan,catalog_reads,guarded_posts):
-                    blocked=read(call(label+'-source-stale',args_for(source_plan,source_work,source_ready)))
-                result=blocked['servers'][0]['result']
-                boot_log=(source_work/'linked/server.log').read_text(encoding='utf-8',errors='replace')
-                check(len(catalog_reads)==2 and len(guarded_posts)==1
-                      and guarded_posts[0]['expectedSequence']==states[-1]['sequence']
-                      and result['childPid'] and result['childExited'] and result['cleanupCompleted']
-                      and '場次序號已變更' in result['error'] and result['udpBinding'] is None
-                      and 'VR_GUARDED_SOURCE_OPEN status=conflict' in boot_log and 'VR_NETWORK_STARTED' not in boot_log
-                      and not source_ready.exists() and blocked['endpointPublication']=='not-attempted',
-                      'The original Unity process loses a late guarded-open race, never binds UDP, and is cleaned up without readiness')
-                request('/api/sessions/'+states[-1]['id']+'/connection-endpoint',expected=404)
+                states[-1]=request('/api/sessions/'+states[-1]['id'])
+                refresh_plan()
+                download_plan('-browser-before-batch')
+            source_work,source_ready=runtime/(label+'-source-work'),out/(label+'-source-ready.json')
+            with revision_fixture('-source',change_at_open=True) as (source_plan,catalog_reads,batch_requests):
+                blocked=read(call(label+'-source-stale',args_for(source_plan,source_work,source_ready)))
+            check(len(catalog_reads)==2 and len(batch_requests)==1 and blocked['sourceAttachment']=='rejected'
+                  and 'HTTP 409' in blocked['sourceAttachmentError'] and not source_ready.exists()
+                  and blocked['endpointPublication']=='not-attempted' and not blocked['readyPublished'],
+                  label+' original launcher observes rejection before any venue readiness or endpoint announcement')
+            batch=batch_requests[0]
+            check(batch['topology']==topology and batch['launchId']==blocked['venueLaunchId']
+                  and [(row['sessionId'],row['expectedSequence']) for row in batch['servers']]
+                  ==[(state['id'],state['sequence']) for state in states],
+                  label+' late request reached the API with every exact original candidate and revision')
+            for entry,candidate,state in zip(blocked['servers'],batch['servers'],states,strict=True):
+                result=entry['result']
+                folder=source_work/('linked' if linked else f"room-{state['roomIds'][0]:02}")
+                boot_log=(folder/'server.log').read_text(encoding='utf-8',errors='replace')
+                check(result['sessionId']==state['id'] and result['childPid'] and result['childExited'] and result['cleanupCompleted']
+                      and result['udpBinding'] is None and 'VR_NETWORK_STARTED' not in boot_log
+                      and f"VR_VENUE_STREAM_CANDIDATE stream={candidate['streamId']}" in boot_log,
+                      label+f" rooms {state['roomIds']} prepared the original journal but exited without opening UDP")
+                request('/api/sessions/'+state['id']+'/connection-endpoint',expected=404)
+            check(all(request('/api/sessions/'+state['id'])==state for state in states[:-1]),
+                  label+' batch rejection leaves every unchanged room at its exact original unbound state')
             updated=request('/api/sessions/'+states[-1]['id'])
             check(updated['id']==states[-1]['id'] and updated['sequence']==states[-1]['sequence']+1
                   and updated['state']=='Preparing' and updated['combatStream'] is None,
@@ -793,8 +806,11 @@ def main():
         for entry,state,row in zip(entries,states,witness['servers'],strict=True):
             confirm_launch(entry,state,row['ready'])
         if args.check_venue_plan_ui:
-            check(all(request('/api/sessions/'+state['id'])['combatStream']['expectedSequence']==state['sequence']
-                      for state in states),label+' original Unity sources are durably bound to the reviewed sequences')
+            sources=[request('/api/sessions/'+state['id'])['combatStream'] for state in states]
+            launch_ids={source['venueLaunchId'] for source in sources}
+            check(len(launch_ids)==1 and uuid.UUID(launch_ids.pop()).int!=0
+                  and [source['expectedSequence'] for source in sources]==[state['sequence'] for state in states],
+                  label+' every original Unity source is durably bound to the same launch ID and reviewed sequences')
         if venue_pin:
             generated = [read(entry['work'] / 'server-config.json') for entry in entries]
             check(all(value['managementApiUrl'] == venue_uri and value['managementCertificateSha256'] == venue_pin

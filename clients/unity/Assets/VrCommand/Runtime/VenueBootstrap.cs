@@ -230,7 +230,8 @@ namespace VrCommand.Unity
 
         private SessionSnapshot latestSnapshot;
         private bool streamReady;
-        [Serializable] private sealed class StreamStatus { public string streamId; public string origin; public long acceptedSequence, expectedSequence; public bool @sealed; public int missionClockVersion, roomEnemyPolicyVersion; }
+        [Serializable] private sealed class StreamStatus { public string streamId, origin, venueLaunchId; public long acceptedSequence, expectedSequence; public bool @sealed; public int missionClockVersion, roomEnemyPolicyVersion; }
+        [Serializable] private sealed class VenueStreamStatus { public string id, state; public StreamStatus combatStream; }
         [Serializable] private sealed class StreamReceipt { public string streamId; public long acceptedSequence; }
         private sealed class ManagementCertificateHandler : CertificateHandler
         {
@@ -255,6 +256,11 @@ namespace VrCommand.Unity
         }
         private IEnumerator OpenTelemetry()
         {
+            if (!string.IsNullOrEmpty(configuration.venueLaunchId))
+            {
+                yield return AwaitVenueStream();
+                yield break;
+            }
             var expected = configuration.expectedSequence;
             var route = expected > 0 ? "/combat-stream/guarded-open" : "/combat-stream";
             var body = "{\"streamId\":\"" + outbox.StreamId.ToString("D") + "\",\"origin\":\"" + outbox.Origin
@@ -273,9 +279,7 @@ namespace VrCommand.Unity
                     yield break;
                 }
                 StreamStatus response = null; try { response = JsonUtility.FromJson<StreamStatus>(request.downloadHandler.text); } catch (Exception) { }
-                streamReady = response != null && Guid.TryParse(response.streamId, out var id) && id == outbox.StreamId && response.origin == outbox.Origin
-                    && response.acceptedSequence == 0 && !response.@sealed && response.missionClockVersion == 1 && response.roomEnemyPolicyVersion == 1
-                    && (expected == 0 || response.expectedSequence == expected);
+                streamReady = MatchesStream(response);
                 if (expected > 0 && !streamReady)
                 {
                     Debug.Log("VR_GUARDED_SOURCE_OPEN status=failed");
@@ -283,6 +287,41 @@ namespace VrCommand.Unity
                 }
             }
         }
+
+        private IEnumerator AwaitVenueStream()
+        {
+            Debug.Log("VR_VENUE_STREAM_CANDIDATE stream=" + outbox.StreamId.ToString("D"));
+            var deadline = Time.realtimeSinceStartupAsDouble + 90;
+            while (Time.realtimeSinceStartupAsDouble < deadline)
+            {
+                using (var request = UnityWebRequest.Get(configuration.managementApiUrl.TrimEnd('/') + "/api/sessions/" + configuration.sessionId))
+                {
+                    AuthorizeManagement(request);
+                    yield return request.SendWebRequest();
+                    if (request.result == UnityWebRequest.Result.Success)
+                    {
+                        VenueStreamStatus response = null;
+                        try { response = JsonUtility.FromJson<VenueStreamStatus>(request.downloadHandler.text); } catch (Exception) { }
+                        if (response == null || response.id != configuration.sessionId || response.state != "Preparing") break;
+                        if (!string.IsNullOrEmpty(response.combatStream?.streamId))
+                        {
+                            streamReady = MatchesStream(response.combatStream);
+                            if (streamReady) yield break;
+                            break;
+                        }
+                    }
+                }
+                yield return new WaitForSecondsRealtime(.25f);
+            }
+            Debug.Log("VR_GUARDED_SOURCE_OPEN status=failed");
+            if (!Application.isEditor) Application.Quit(2);
+        }
+
+        private bool MatchesStream(StreamStatus response) =>
+            response != null && Guid.TryParse(response.streamId, out var id) && id == outbox.StreamId && response.origin == outbox.Origin
+            && response.acceptedSequence == 0 && !response.@sealed && response.missionClockVersion == 1 && response.roomEnemyPolicyVersion == 1
+            && (configuration.expectedSequence == 0 || response.expectedSequence == configuration.expectedSequence)
+            && (string.IsNullOrEmpty(configuration.venueLaunchId) || response.venueLaunchId == configuration.venueLaunchId);
         private IEnumerator DeliverTelemetry()
         {
             while (outbox != null && !outbox.Sealed)

@@ -16,6 +16,7 @@ internal static class TelemetryChecks
         var player = Guid.NewGuid(); var enemy = Guid.NewGuid(); Guid id, stream, guardedId; long observed; StreamCombatRecord[] tail;
         var guardedStream = Guid.NewGuid();
         long guardedSequence;
+        VenueStreamBatch venueBatch;
         var world = new ArenaWorld([3], []); world.AddPlayer(player, 3, new(0, 1.4f, -3)); world.AddEnemy(enemy, 3, new(0, 0, 3), new(0, 0, 3));
         using (var store = new SqliteSessionEventStore(data))
         {
@@ -71,6 +72,29 @@ internal static class TelemetryChecks
             Reject<InvalidOperationException>(() => manager.OpenStream(guardedId, open with { ExpectedSequence = null }, game),
                 "Legacy retry cannot change the original guarded request");
             manager.End(guardedId);
+
+            var venueSessions = Enumerable.Range(1, SessionManager.RoomCount)
+                .Select(room => manager.Create(SessionMode.Independent, [room], mission)).ToArray();
+            venueBatch = new(1, Guid.NewGuid(), SessionMode.Independent, venueSessions.Select(session =>
+                new VenueStreamCandidate(session.Id, Guid.NewGuid(), CombatOrigin.Simulation, session.Sequence)).ToArray());
+            Reject<AccessDeniedException>(() => manager.OpenVenueStreams(venueBatch, master), "Master cannot attach venue game sources");
+            var last = venueSessions[^1];
+            var changed = manager.Execute(last.Id, new(Guid.NewGuid(), ControlAction.SetEnvironment, Environment: last.Environment)).Session;
+            Reject<InvalidOperationException>(() => manager.OpenVenueStreams(venueBatch, game),
+                "A stale fifth room rejects atomic source attachment");
+            check(venueSessions.All(session => manager.Get(session.Id) is { CombatStream: null } current
+                && current.Sequence == (session.Id == last.Id ? changed.Sequence : session.Sequence)),
+                "Stale fifth-room registration leaves all five histories unbound");
+            venueBatch.Servers[^1] = venueBatch.Servers[^1] with { ExpectedSequence = changed.Sequence };
+            var attached = manager.OpenVenueStreams(venueBatch, game);
+            check(attached.Servers.Select(row => row.SessionId).SequenceEqual(venueSessions.Select(session => session.Id))
+                && attached.Servers.All(row => row.Stream.VenueLaunchId == venueBatch.LaunchId
+                    && manager.Get(row.SessionId).Sequence == row.Stream.ExpectedSequence + 1),
+                "One venue transaction attaches all five original sources in room order");
+            var firstCandidate = venueBatch.Servers[0];
+            Reject<ArgumentException>(() => manager.OpenStream(firstCandidate.SessionId,
+                new(firstCandidate.StreamId, firstCandidate.Origin, 1, 1, firstCandidate.ExpectedSequence, venueBatch.LaunchId), game),
+                "A single-source request cannot impersonate a venue attachment");
         }
         using (var store = new SqliteSessionEventStore(data)) using (var queue = TelemetryOutbox.OpenExisting(file))
         {
@@ -80,6 +104,14 @@ internal static class TelemetryChecks
                 && manager.OpenGuardedStream(guardedId, new(guardedStream, CombatOrigin.Simulation, ExpectedSequence: guardedSequence), game)
                     == guardedBeforeRetry.CombatStream && manager.Get(guardedId).Sequence == guardedBeforeRetry.Sequence,
                 "SQLite replay preserves the guarded source and the exact retry after End");
+            var recoveredVenue = manager.OpenVenueStreams(venueBatch with { Servers = venueBatch.Servers.Reverse().ToArray() }, game);
+            check(recoveredVenue.Servers.Select(row => row.Stream.StreamId).SequenceEqual(venueBatch.Servers.Select(row => row.StreamId))
+                && recoveredVenue.Servers.All(row => manager.Get(row.SessionId).Sequence == row.Stream.ExpectedSequence + 1),
+                "A reordered venue retry after SQLite restart reuses the original five events");
+            var altered = venueBatch.Servers.ToArray();
+            altered[0] = altered[0] with { StreamId = Guid.NewGuid() };
+            Reject<InvalidOperationException>(() => manager.OpenVenueStreams(venueBatch with { Servers = altered }, game),
+                "A retry cannot replace a source in the original venue launch");
             check(queue.Complete && queue.Pending!.StreamSequence == 4 && manager.Get(id).CombatStream!.AcceptedSequence == 3,
                 "Independent journal and SQLite restart resume from their durable acknowledged prefix");
             check(manager.ReportStreamBatch(id, tail, game).AcceptedSequence == 6 && manager.Statistics(id).Players[0].Kills == 1,

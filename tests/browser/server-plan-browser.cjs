@@ -54,7 +54,7 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
     return session;
   };
   const end = async id => { await command(id, 'End'); active.delete(id); };
-  const shape = (topology, sessions) => ({ version: 3, controlInstance: 'C:\\Private Venue\\control\\control-instance.json', topology,
+  const shape = (topology, sessions) => ({ version: 4, controlInstance: 'C:\\Private Venue\\control\\control-instance.json', topology,
     address: '192.168.1.10', listenAddress: '0.0.0.0',
     servers: sessions.map((session, index) => ({ sessionId: session.id, sessionSequence: session.sequence,
       missionId: session.mission.id, roomIds: session.roomIds, port: 18800 + index })) });
