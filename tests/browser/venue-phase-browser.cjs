@@ -649,11 +649,12 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await reportStatus.filter({ hasText: '報表格式不符' }).waitFor();
     check(await reportButton.isEnabled(), 'An invalid ZIP media type reports an error and releases the download button');
     await page.unroute(reportsUrl);
-    const archiveRoute = '**/api/venue/closure';
+    const archiveRoute = url => url.pathname === '/api/venue/closure' && url.searchParams.get('includeScores') === 'true';
     await page.route(archiveRoute, request => request.fulfill({ status: 503 }));
     await page.locator('#refresh').click();
     await page.locator('#venue-closure-summary').filter({ hasText: '暫時無法確認' }).waitFor();
-    check(await table.isHidden() && !await reportButton.isVisible(), 'A failed closure read removes the previous seal and download display');
+    check(await table.isHidden() && !await reportButton.isVisible() && !await page.locator('#venue-score-table').isVisible(),
+      'A failed closure read removes the previous seal, downloads and score display');
     await page.unroute(archiveRoute);
     const replacementEnd = (await api('/venue/phase')).end;
     const nextBatch = await api('/venue/phase', 'POST', { action: 'End', targets: replacementEnd }, 'Master', 200, undefined, randomUUID());
