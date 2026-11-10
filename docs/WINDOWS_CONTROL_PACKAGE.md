@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-11 `VRCommand-ControlServer-0.31.117-room-observation-win-x64.zip` 為 53,010,627 bytes，SHA-256 `974c2557af4c09c2c88f9baaab3504a62706f8172479cd357a9af217dd0c81ca`。解壓核對 555 筆清單及 535 個發行檔案。合併場可從房卡啟用本房觀戰串流。 [房卡操作](WORLD_RECORDING.md#從房卡或全館收尾開啟)
+
 2026-11-11 `VRCommand-ControlServer-0.31.116-replay-loss-win-x64.zip` 為 53,007,796 bytes，SHA-256 `d169c1b8cf8d7f5b5c9376c43b4aebbb40b1716c87860346934d9e3bb8ec3c3c`。解壓核對 555 筆清單及 535 個發行檔案。回放片段、逐格與最終戰績依實際生命值耗損核對。 [片段戰績](WORLD_RECORDING.md#重看指定片段) · [發行核對](../artifacts/venue-release-0.50.4-replay-loss.json)
 
 2026-11-11 `VRCommand-ControlServer-0.31.115-venue-launch-review-win-x64.zip` 為 53,007,477 bytes，SHA-256 `24b159207ef17782e6aa308d320017a9a9d4908498b10059af6a101534993866`。解壓核對 555 筆清單與 535 個發行檔案。主控可從原啟動報告唯讀核對來源及端點。 [操作方式](WINDOWS_SERVER_PACKAGE.md#核對未確認的啟動報告) · [發行核對](../artifacts/venue-release-0.50.4-launch-review.json)

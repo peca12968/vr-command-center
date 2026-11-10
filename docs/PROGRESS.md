@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-11 合併場本房觀戰串流
+
+- 管理包 0.31.117 增加房卡「僅接收本房資料」。從此入口開始，管理服務投影本房的場景物件、玩家、敵軍、事件及戰績，保留原錄製識別與序號。逐格、即時回看及重連沿用選定房間。原「即時觀戰」仍可開啟既有共用檢視。 [操作說明](WORLD_RECORDING.md#從房卡或全館收尾開啟)
+- 0.31.116 對新 `observerRoomId` 參數回應共用串流。0.31.117 使用同一個合併場測試本房即時串流、逐格、固定範圍回放，以及指定別房時的 403。省略參數仍取得共用畫格。Release 零警告，1,093 項核心、108 項世界串流、111 項瀏覽器模組、825 項 HTTP 及 107 項管理包檢查通過。 [舊版對照](../artifacts/room-observation-opt-in-baseline.log) · [套件串流測試](../artifacts/room-observation-package-world.log)
+- 套件來源 `629809cc`，187 個工作樹來源雜湊相符，其中 29 個既有檔案與 Git 只差換行。Windows 與 Quest 0.50.4 發行一致性通過。GitHub Actions job `130058315685` 因帳務或支出上限未啟動。 [發行核對](../artifacts/venue-release-0.50.4-room-observation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42881401239)
+- 首輪原生場在本房重連與逐格資料核對後，因測試任務未放置掩體而未通過幾何斷言。原失敗保留，清理完成，C／F 214 檔一致。後續重驗用同一套件及包含每房掩體的既有測試選項。 [首輪紀錄](../artifacts/room-observation-native.log)
+- 含掩體的 Windows 原生場通過 422 項，含 9 項 Chromium 觀戰檢查。原共用串流可從第 4 房切到第 2 房及全館 25 席。第 4 房專用串流只回傳本房掩體、敵軍、5 席及本房戰績。第 187 格斷線後從同一來源恢復到第 191 格，回看後可用逐格查詢到原第 190 格。觀戰操作沒有管理寫入。兩種拓撲各 25 席同機入場，核對 50 份原戰績與伺服器確認、1,636 格回放、11 份 CSV 及雙封存。活動場次歸零，原生 C／F 221 檔及管理包測試 27 檔一致。跨機、頭盔與廠商設備另待實測。 [原生驗收](../artifacts/server-package-checks/run-e84c912edeaf471fa0f5ae5a1221bc67/checks.json) · [本房畫面](../artifacts/server-package-checks/run-e84c912edeaf471fa0f5ae5a1221bc67/room-observer/room-only-replay.png)
+
 ## 2026-11-11 回放耗損與最終戰績一致
 
 - 管理包 0.31.116 讓逐格與最終戰績使用同一個生命值耗損規則。片段以起點前一格的生命值計算損失，保留原事件傷害和中彈次數。舊資料的零生命值超額耗損在讀取時修正。測試以原封存條件成功封存舊格式資料，原存檔的事件與統計內容均保留。 [片段戰績](WORLD_RECORDING.md#重看指定片段)
