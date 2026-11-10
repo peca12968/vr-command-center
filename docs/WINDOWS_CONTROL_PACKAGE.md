@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `windows-control-console-0.31.83-vr-resume-win-x64.zip` 提供 VR 房卡席位恢復檢查與繼續。ZIP 為 52,852,966 bytes，SHA-256 `d203ce5545ff84d2c553898e9494a327a03f2991b343d7c24e85bf3476ca1c4d`，解壓核對 540 筆清單及 520 個執行檔案。 [恢復操作](PLAYER_READINESS.md#從-vr-房卡確認恢復並繼續)
+
 2026-11-10 `windows-control-console-0.31.82-vr-pause-win-x64.zip` 提供 VR 房卡暫停與遊戲端套用確認。ZIP 為 52,850,515 bytes，SHA-256 `9f2f4bf1390a25307cd0cc2966639409db81f45113fabb28c6e7370c7d4404ed`，解壓核對 540 筆清單及 520 個執行檔案。 [房卡操作](PLAYER_READINESS.md#從-vr-房卡暫停檢查席位)
 
 2026-11-10 `windows-control-console-0.31.81-venue-scores-win-x64.zip` 在全館收尾提供分房最終戰績與本批合計。ZIP 為 52,847,763 bytes，SHA-256 `1dd1051f1462d54af63bccd5caa1574224e636f43cf1bdd96ef1da64e429a555`，解壓核對 540 筆清單及 520 個執行檔案。 [戰績操作](REPORTS.md#在全館收尾比較分房戰績)
