@@ -179,13 +179,40 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
       && (room === 'all' || player.roomId === Number(room))) ?? [];
     $('world-statistics-heading').textContent = room && room !== 'all' ? `${roomName(room)} · 此快照已核對的統計` : '此快照已核對的統計';
     $('world-statistics-empty').hidden = !frame || players.length > 0;
-    $('world-statistics').replaceChildren(...players.map(player => {
-      const row = document.createElement('tr');
-      for (const text of [player.name, player.ammoUsed, player.kills, player.damageTaken, player.hitsReceived, player.accuracyPercent + '%', player.health]) {
-        const cell = document.createElement('td'); cell.textContent = text; row.append(cell);
+    const table = $('world-statistics');
+    const previous = new Map(Array.from(table.rows, row => [row.dataset.playerId, row]));
+    const visible = new Set(players.map(player => player.playerId));
+    for (const [id, row] of previous) if (!visible.has(id)) row.remove();
+    let cursor = table.firstElementChild;
+    for (const player of players) {
+      const key = 'p:' + player.playerId;
+      const values = [player.name, player.ammoUsed, player.kills, player.damageTaken, player.hitsReceived, player.accuracyPercent + '%', player.health];
+      let row = previous.get(player.playerId);
+      if (!row) {
+        row = document.createElement('tr');
+        row.dataset.playerId = player.playerId;
+        for (const value of values) row.insertCell().textContent = value;
+        const follow = document.createElement('button');
+        follow.type = 'button'; follow.className = 'quiet small'; follow.textContent = '跟隨';
+        follow.addEventListener('click', () => {
+          if (!active || !frame || !scene || !actors.has(key)) return;
+          selectActor(key);
+          setCamera('follow');
+        });
+        row.insertCell().append(follow);
+      } else {
+        for (const [index, value] of values.entries()) {
+          if (row.cells[index].textContent !== String(value)) row.cells[index].textContent = value;
+        }
       }
-      return row;
-    }));
+      const follow = row.lastElementChild.firstElementChild;
+      const label = `跟隨 ${player.name} · 房間 ${player.roomId} · ${shortId(player.playerId)}`;
+      if (follow.getAttribute('aria-label') !== label) follow.setAttribute('aria-label', label);
+      const unavailable = !actors.has(key);
+      if (follow.disabled !== unavailable) follow.disabled = unavailable;
+      if (row !== cursor) table.insertBefore(row, cursor);
+      cursor = row.nextElementSibling;
+    }
   }
   function canExtendSaved() {
     return active && mode === 'replay' && info?.header.sessionId === $('world-recording').value
@@ -354,6 +381,13 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
       + ` · ${actor.id}` : '可點選目前房間的角色，或從選單選取。';
     const details = $('world-actor-info');
     if (details.textContent !== text) details.textContent = text;
+  }
+  function setCamera(view) {
+    if (!scene) return;
+    $('world-camera').value = view;
+    if (view === 'follow') { scene.follow = true; scene.draw(); }
+    else if (view === 'free') scene.follow = false;
+    else scene.preset(view, $('world-room').value);
   }
   function showActors() {
     const picker = $('world-actor'), room = $('world-room').value;
@@ -693,7 +727,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   $('world-speed').addEventListener('change', () => { if (mode === 'replay' && clipPlayback !== 'paused' && clipPlayback !== 'finished') replayFromCurrent(); });
   $('world-actor').addEventListener('change', () => selectActor($('world-actor').value));
   $('world-room').addEventListener('change', () => selectRoom($('world-room').value));
-  $('world-camera').addEventListener('change', () => { const view = $('world-camera').value; if (!scene) return; if (view === 'follow') { scene.follow = true; scene.draw(); } else if (view === 'free') scene.follow = false; else scene.preset(view, $('world-room').value); });
+  $('world-camera').addEventListener('change', () => setCamera($('world-camera').value));
   setInterval(() => { if (active) status(); }, 500);
   return { reset, active(value, target = null) {
     active = value;

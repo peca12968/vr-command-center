@@ -2889,14 +2889,16 @@ def main():
                 node = shutil.which('node')
                 if not node: raise RuntimeError('Node is required to observe the shipped console')
                 descriptor = runtime/'room-observer-private.json'
-                descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'sessionId':entries[0]['sessionId'],
+                descriptor.write_text(json.dumps({'base':uri,'roomKey':keys['Room4'],'sessionId':entries[0]['sessionId'],
                     'players':[{key:client['player'][key] for key in ('id','roomId','name')} for client in round_clients]}), encoding='utf-8')
                 browser_out = out/'room-observer'
                 subprocess.run([node, str(ROOT/'tests/browser/check-room-observer-native.cjs'), str(descriptor), str(browser_out)],
                                cwd=ROOT/'tests/browser', check=True, timeout=70)
                 observed = read(browser_out/'checks.json')
                 check(observed['complete'] and observed['players']==25 and observed['sessionId']==entries[0]['sessionId']
-                      and len(observed['checks'])==6 and observed['recent']['roomId']==observed['reconnect']['roomId']==2
+                      and len(observed['checks'])==7 and observed['recent']['roomId']==observed['reconnect']['roomId']==2
+                      and observed['rowFollow']['roomId']==4 and observed['rowFollow']['withoutNewStream'] is True
+                      and observed['rowFollow']['activatedAt']>=observed['rowFollow']['focusedAt']+3
                       and observed['recent']['resumedFrame']>observed['recent']['tail']
                       and observed['reconnect']['recoveredFrame']>observed['reconnect']['disconnectedFrame'],
                       'shipped console returns to the same 25-player Linked source after instant replay and a live disconnect')

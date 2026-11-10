@@ -189,8 +189,12 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     check(await page.locator('#world-room').inputValue() === '2' && (await choices()).length === 3
       && (await actorPicker.locator(`option[value="p:${subject}"]`).textContent()).includes(subjectName)
       && await actorPicker.locator('img').count() === 0, 'Linked room observation lists only its actors and renders recorded player names as text');
-    await actorPicker.selectOption('p:' + subject);
-    await view.selectOption('follow');
+    const followRow = page.locator(`#world-statistics tr[data-player-id="${subject}"] button`);
+    check((await followRow.getAttribute('aria-label')).includes(subjectName) && await followRow.locator('img').count() === 0,
+      'Player row follow control uses the accepted name as literal text');
+    await followRow.click();
+    check(await actorPicker.inputValue() === 'p:' + subject && await view.inputValue() === 'follow',
+      'The player statistics row activates its exact follow target');
     const lastTarget = await linkedCanvas.getAttribute('data-camera');
     await api(`/sessions/${linked.id}/players/${subject}`, 'DELETE', undefined, 'Master', 204,
       linkedState.players.find(player => player.id === subject).admissionId);
@@ -198,7 +202,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     linkedPublish(linkedState);
     await view.locator('option[value="follow"]:disabled').waitFor({ state: 'attached' });
     check(await actorPicker.inputValue() === '' && (await choices()).includes('p:' + roomPeer)
-      && await view.inputValue() === 'free' && await linkedCanvas.getAttribute('data-camera') === lastTarget,
+      && await view.inputValue() === 'free' && await linkedCanvas.getAttribute('data-camera') === lastTarget && await followRow.isDisabled(),
       'A removed follow target leaves the last camera position and never selects the remaining teammate');
     await page.locator('[data-world-room="all"]').click();
     check((await choices()).length === 3 && await actorPicker.inputValue() === '',

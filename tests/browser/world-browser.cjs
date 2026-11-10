@@ -44,7 +44,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     check(!await page.locator('#world-room-quick').isVisible(), 'Single-room observation keeps the existing compact controls');
     const before = Number(await canvas.getAttribute('data-sequence'));
     await page.waitForFunction(sequence => Number(document.querySelector('#world-canvas').dataset.sequence) > sequence, before);
-    check((await page.locator('#world-statistics tr td').allTextContents()).join('|') === 'World Simulation|2|1|20|1|100%|80', 'Streamed per-frame combat statistics match the authoritative report prefix');
+    check((await page.locator('#world-statistics tr td:not(:last-child)').allTextContents()).join('|') === 'World Simulation|2|1|20|1|100%|80', 'Streamed per-frame combat statistics match the authoritative report prefix');
     const camera = await canvas.getAttribute('data-camera'); await page.locator('#world-camera').selectOption('top');
     check(await canvas.getAttribute('data-camera') !== camera, 'Streamed world supports the god-view camera preset');
     await page.locator('#world-room').selectOption('2');
@@ -405,7 +405,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       await quickPage.locator('#world-freshness').filter({ hasText: '已到即時回看尾端' }).waitFor();
       check(archiveInfo.durationMilliseconds <= 10000 && query.get('fromFrame') === '1' && query.get('throughFrame') === String(finalFrame)
         && Number(await quickCanvas.getAttribute('data-sequence')) === finalFrame && await quickPage.locator('#world-frame-next').isDisabled()
-        && (await quickPage.locator('#world-statistics tr td').allTextContents()).join('|') === 'World Simulation|2|1|20|1|100%|80',
+        && (await quickPage.locator('#world-statistics tr td:not(:last-child)').allTextContents()).join('|') === 'World Simulation|2|1|20|1|100%|80',
       'Instant replay shorter than ten seconds includes the first exact frame and stops at the original tail with its combat totals');
       await quickPage.locator('#world-frame-back').click();
       await quickPage.waitForFunction(sequence => Number(document.querySelector('#world-canvas').dataset.sequence) === sequence, finalFrame - 1);
@@ -426,7 +426,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await page.waitForFunction(() => !document.querySelector('#camera-save').disabled);
     check(await page.locator('#camera-positions option').count() === 0 && await page.locator('#camera-name').inputValue() === '', 'Switching recordings clears camera selection and draft names');
     await page.waitForFunction(() => document.querySelector('#world-status').textContent.includes('已結束') && document.querySelector('#world-status').textContent.includes('核對封存'));
-    check((await page.locator('#world-statistics tr td').allTextContents()).join('|') === 'World Simulation|2|1|20|1|100%|80' && (await page.locator('#world-environment').innerText()).includes('Storm'), 'Persisted replay reaches the exact final statistics and recorded environment');
+    check((await page.locator('#world-statistics tr td:not(:last-child)').allTextContents()).join('|') === 'World Simulation|2|1|20|1|100%|80' && (await page.locator('#world-environment').innerText()).includes('Storm'), 'Persisted replay reaches the exact final statistics and recorded environment');
     await page.locator('#world-speed').selectOption('0.25');
     await page.locator('#world-timeline').evaluate(input => { input.value = '0'; input.dispatchEvent(new Event('change', { bubbles: true })); });
     await page.waitForFunction(() => document.querySelector('#world-canvas').dataset.sequence === '1');
@@ -690,7 +690,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     check(watchQuery.get('mode') === 'replay' && watchQuery.get('fromFrame') === String(finalFrame)
       && personal.playerId === finalPlayer.playerId && personal.throughFrame === finalFrame && personal.afterFrame === 0
       && Number(await canvas.getAttribute('data-sequence')) === finalFrame && await page.locator('#world-review-player-scope').isVisible()
-      && (await page.locator('#world-statistics tr td').allTextContents()).join('|') === 'World Simulation|2|1|20|1|100%|80',
+      && (await page.locator('#world-statistics tr td:not(:last-child)').allTextContents()).join('|') === 'World Simulation|2|1|20|1|100%|80',
       'Final player statistics open the exact sealed tail and start a player-ID search of the original archive');
     await page.locator('#world-event-search-results button').first().click();
     await page.waitForFunction(value => Number(document.querySelector('#world-canvas').dataset.sequence) === value, personal.frames[0].frameSequence, { polling: 50 });

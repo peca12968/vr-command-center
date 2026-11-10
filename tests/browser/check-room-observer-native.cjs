@@ -7,14 +7,14 @@ const { armLiveWatchFault, cutLiveWatch, waitForLiveFrame } = require('./live-wa
 
 async function main() {
   const [descriptor, out] = process.argv.slice(2);
-  const { base, masterKey, sessionId, players } = JSON.parse(await fs.readFile(descriptor, 'utf8'));
+  const { base, roomKey, sessionId, players } = JSON.parse(await fs.readFile(descriptor, 'utf8'));
   assert.match(base, /^http:\/\/127\.0\.0\.1:\d+$/);
   assert.equal(players.length, 25);
   await fs.mkdir(out);
   const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const errors = [], requests = [], watches = [];
   const checks = [];
-  let recent, reconnect;
+  let recent, reconnect, rowFollow;
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1080 } });
     page.on('pageerror', error => errors.push(error.name));
@@ -25,10 +25,10 @@ async function main() {
       if (url.pathname.endsWith('/world/watch')) watches.push(url.pathname);
     });
     await page.goto(base + '/console/');
-    await page.locator('#login-key').fill(masterKey);
+    await page.locator('#login-key').fill(roomKey);
     await page.locator('#login-form button').click();
     async function sessionRevision() {
-      const response = await page.request.get(`${base}/api/sessions/${sessionId}`, { headers: { Authorization: 'Bearer ' + masterKey } });
+      const response = await page.request.get(`${base}/api/sessions/${sessionId}`, { headers: { Authorization: 'Bearer ' + roomKey } });
       assert.equal(response.status(), 200);
       const session = await response.json();
       assert.equal(session.players.length, 25);
@@ -55,16 +55,30 @@ async function main() {
     assert.equal(await camera.inputValue(), 'top');
     checks.push('Original room card scopes named native players, enemies and statistics');
     const following = forRoom(4)[2];
-    await picker.selectOption('p:' + following.id);
-    await camera.selectOption('follow');
+    const rowFollowButton = page.locator(`#world-statistics tr[data-player-id="${following.id}"] button`);
+    const overhead = await canvas.getAttribute('data-camera');
+    await rowFollowButton.focus();
+    const focusedAt = Number(await canvas.getAttribute('data-sequence'));
+    await page.waitForFunction(after => Number(document.querySelector('#world-canvas').dataset.sequence) >= after + 3,
+      focusedAt, { polling: 100 });
+    assert.equal(await rowFollowButton.evaluate(button => document.activeElement === button), true);
+    const activatedAt = Number(await canvas.getAttribute('data-sequence'));
+    await page.keyboard.press('Enter');
     await page.locator('#world-actor-info').filter({ hasText: following.name }).waitFor();
     const position = await canvas.getAttribute('data-camera');
+    assert.equal(await picker.inputValue(), 'p:' + following.id);
+    assert.equal(await camera.inputValue(), 'follow');
+    assert.notEqual(position, overhead);
+    assert.deepEqual(watches, [`/api/sessions/${sessionId}/world/watch`]);
+    rowFollow = { roomId: 4, focusedAt, activatedAt, withoutNewStream: true };
+    checks.push('A focused player row survives newer native frames and follows the exact actor with Enter');
     await page.locator('[data-world-room="2"]').click();
     await checkRoom(2);
     const sequence = Number(await canvas.getAttribute('data-sequence'));
     await page.waitForFunction(after => Number(document.querySelector('#world-canvas').dataset.sequence) > after, sequence, { polling: 100 });
     assert.equal(await picker.inputValue(), '');
     assert.equal(await camera.inputValue(), 'free');
+    assert.equal(await rowFollowButton.count(), 0);
     assert.notEqual(await canvas.getAttribute('data-camera'), position);
     checks.push('Switching rooms clears the foreign follow target across new native frames');
     await page.locator('#world-player').screenshot({ path: path.join(out, 'room-2.png') });
@@ -98,7 +112,7 @@ async function main() {
     // DevTools need not retain a streamed response body. Read the same fixed
     // range independently while asserting the browser reaches its exact tail.
     const [savedReplay] = await Promise.all([
-      page.request.get(replay.url(), { headers: { Authorization: 'Bearer ' + masterKey } }),
+      page.request.get(replay.url(), { headers: { Authorization: 'Bearer ' + roomKey } }),
       page.waitForFunction(() => document.querySelector('#world-freshness').textContent === '已到即時回看尾端', null, { polling: 100 })
     ]);
     assert.equal(savedReplay.status(), 200);
@@ -147,6 +161,6 @@ async function main() {
     assert.equal(await sessionRevision(), revision);
     assert.deepEqual(errors, []);
   } finally { await browser.close(); }
-  await fs.writeFile(path.join(out, 'checks.json'), JSON.stringify({ complete: true, checks, sessionId, players: 25, recent, reconnect, nonGetRequests: requests }, null, 2), { flag: 'wx' });
+  await fs.writeFile(path.join(out, 'checks.json'), JSON.stringify({ complete: true, checks, sessionId, players: 25, rowFollow, recent, reconnect, nonGetRequests: requests }, null, 2), { flag: 'wx' });
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

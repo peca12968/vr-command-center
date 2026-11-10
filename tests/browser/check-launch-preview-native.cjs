@@ -24,7 +24,7 @@ async function verifyRoomView(page, api, route, room) {
     scope: document.querySelector('#world-room').value,
     counts: [...document.querySelectorAll('[data-world-room]')].map(button => [button.dataset.worldRoom,
       button.lastElementChild.textContent, button.getAttribute('aria-pressed')]),
-    statistics: [...document.querySelectorAll('#world-statistics tr')].map(row => [...row.cells].map(cell => cell.textContent))
+    statistics: [...document.querySelectorAll('#world-statistics tr')].map(row => [...row.cells].slice(0, -1).map(cell => cell.textContent))
   }));
   assert.equal(snapshot.scope, String(room));
   const exact = await api(`${route}/world/frames/${snapshot.sequence}`);
