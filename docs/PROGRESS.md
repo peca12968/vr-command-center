@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 依任務活動時間對齊獨立房回放
+
+- 控制台 0.31.125 的「同批房間回放」可按原擷取時間或任務活動時間對齊。同批獨立房各自封存後，以保存刻數找不晚於基準、差距最多 10 刻的原畫格。遇到暫停等原因讓同一刻有多格時，使用最早保存格。切回基準房會回到原畫格。鏡頭操作尚未確認時，兩種模式都會保留原房。 [操作與 API](WORLD_RECORDING.md#對齊同批獨立房間的回放)
+- 來源與解壓包各通過 21 項 Chromium 專項，包括 UTC 時間不重疊、缺 UTC、無任務時鐘、重複刻數、超出封存範圍及舊回應隔離。舊 0.31.124 解壓包缺少新端點。首輪測試把缺 UTC 的空字串當作 null，後按實際契約驗證。Release 零警告，1,101 項核心、825 項 HTTP、107 項管理包通過。發行來源 `aeaca7bc` 的 188 個檔案雜湊相符，29 個與 Git 只差換行。Windows 與 Quest 0.50.4 離線發行核對通過。GitHub Actions job `130137556317` 因帳務或支出上限未啟動。 [對齊專項](../artifacts/console-mission-time-replay-package/checks.json) · [來源與 ZIP](../artifacts/mission-time-replay-source-validation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42904134703)
+- Windows 三包通過 415 項原生檢查。獨立場的 Chromium 依任務時間從第 1 房第 185 格切到第 2 房第 147 格，兩格皆是第 2 刻，目標為該刻最早保存格。原 UTC 對齊從第 178 格切到第 141 格，時間差 51 毫秒。合併場沿用一份錄製。兩種模式各有 25 個同機玩家端，六場核對 897 格回放、50 份戰績、11 份 CSV、雙封存及原伺服器確認。活動場次歸零，原生及管理包 C／F 各 220、27 檔相符。跨機玩家、實體頭盔與廠商設備待現場驗收。 [原生驗收](../artifacts/server-package-checks/run-46fa72d7d6f347b9b88d6993a7565d00/checks.json) · [原畫格核對](../artifacts/mission-time-replay-native-validation.json)
+- 同一解壓包通過 111 項 Node 與 915 項完整 Chromium 回歸。八個任務列表故障均確認各攔截一筆並送達，保存 145 個瀏覽器證據檔。 [完整回歸](../artifacts/console-mission-time-replay-full/checks.json) · [回歸雜湊](../artifacts/mission-time-replay-full-validation.json)
+
 ## 2026-11-11 VR 單席連線檔交付前核對
 
 - 控制台 0.31.124 在 VR 場次提供逐席連線檔核對。主控可核對整場，房控只可核對本房。服務用目前入場識別、票券簽章、場次、席位、原公告端點及近期有效畫格判定。畫面顯示票券效期並標記只能同機使用的位址。切換席位或名冊更換時會清除舊結果。舊 0.31.123 解壓包回傳 404，首輪合成畫格缺名冊中的玩家身體亦遭拒，修正測試資料後才通過。 [操作與 API](EXTERNAL_CLIENTS.md#在管理台核對-vr-單席連線檔) · [舊版對照](../artifacts/vr-seat-file-baseline.log) · [首輪測試](../artifacts/vr-seat-file-source.log)
