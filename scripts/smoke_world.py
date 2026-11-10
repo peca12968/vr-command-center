@@ -161,6 +161,26 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         request(route + "/frames/0", expected=400)
         request(route + f"/frames/{info['acceptedSequence'] + 1}", expected=404)
         check(True, "Exact frame reads retain authorization and reject invalid or missing frames")
+        policy_route = route + "/policy-frames"
+        tail = info["acceptedSequence"]
+        policy = request(f"{policy_route}?throughFrame={tail}", "Room5")
+        check(policy["sessionId"] == session and policy["streamId"] == info["header"]["streamId"]
+              and policy["scannedThroughFrame"] == tail and policy["nextAfterFrame"] is None
+              and policy["frames"][0]["changes"] == ["initial"] and policy["frames"][0]["frameSequence"] == 1
+              and any(row["changes"] == ["environment"] and row["policy"]["weather"] == "Storm"
+                      and row["policy"]["night"] and row["policy"]["lightning"] for row in policy["frames"])
+              and policy["frames"][-1]["changes"] == ["phase"] and policy["frames"][-1]["policy"]["phase"] == "Ended",
+              "Policy timeline indexes the original first and final states in the saved prefix")
+        prefix = request(f"{policy_route}?throughFrame={tail - 1}")
+        suffix = request(f"{policy_route}?throughFrame={tail}&afterFrame={tail - 1}")
+        check(prefix["frames"] + suffix["frames"] == policy["frames"]
+              and request(f"{policy_route}?throughFrame={tail}&afterFrame={tail}")["frames"] == [],
+              "Policy cursor compares its first candidate with the previous saved frame and respects the fixed tail")
+        request(f"{policy_route}?throughFrame={tail}&afterFrame=-1", expected=400)
+        request(f"{policy_route}?throughFrame={tail + 1}", expected=404)
+        request(f"{policy_route}?throughFrame={tail}", "Room1", 403)
+        request(f"{policy_route}?throughFrame={tail}", "invalid", 401)
+        check(True, "Policy lookup rejects invalid bounds and retains archive authorization")
         search = route + "/event-frames"
         boundary = combat_packet["sequence"]
         page = request(f"{search}?throughFrame={boundary}&roomId=5&kind=PlayerDamaged", "Room5")

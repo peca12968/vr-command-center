@@ -71,6 +71,15 @@ async function main() {
       await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed' }, null, 2));
       console.log(`PASS: ${checks} focused live observation checks. Screenshots: ${screenshots}`); return;
     }
+    if (process.argv.includes('--environment-only')) {
+      await page.goto(base + '/console/');
+      await page.locator('#login-key').fill(tokens.Master);
+      await page.locator('#login-form button').click();
+      await require('./environment-browser.cjs')({ page, api, tokens, directory, root, base, screenshots, check });
+      check(browserErrors.length === 0, 'Environment and recorded policy review have no uncaught browser or policy errors');
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed' }, null, 2));
+      console.log(`PASS: ${checks} focused environment and policy checks. Screenshots: ${screenshots}`); return;
+    }
     if (process.argv.includes('--layout-only')) {
       const mission = await api('/missions', 'POST', { name: 'Layout test template', briefing: '', durationSeconds: 600,
         environment: { mode: 'VR', weather: 'Clear', timeOfDay: 'Day', lightning: false },

@@ -306,6 +306,41 @@ def verify_marksmanship_bundle(v, entry, csv_report):
     return {'bytes': len(raw), 'sha256': hashlib.sha256(raw).hexdigest(), 'files': len(expected)}
 
 
+def check_policy_frames(v, entry, rows):
+    expected = []
+    previous = {}
+    groups = {'phase': ('phase',), 'environment': ('weather', 'night', 'lightning'), 'enemies': ('behavior', 'autoAttack')}
+    for row in rows:
+        packet = row['packet']
+        frame = packet['frame']
+        policy = {name: frame[name] for name in ('phase', 'night', 'behavior', 'autoAttack')}
+        policy.update(weather=packet['weather'], lightning=packet['lightning'])
+        changes = [name for name, fields in groups.items() if any(policy[field] != previous.get(field) for field in fields)]
+        if changes:
+            expected.append({'frameSequence': packet['sequence'], 'elapsedMilliseconds': packet['elapsedMilliseconds'],
+                             'policy': policy, 'changes': changes if previous else ['initial']})
+        previous = policy
+    if not all(sum(group in hit['changes'] for hit in expected) >= 2 for group in ('environment', 'enemies')):
+        raise ValueError('Operator policy changes are missing from the original native replay')
+    through = rows[-1]['packet']['sequence']
+    stream = entry['sealed']['world']['header']['streamId']
+    found = []
+    pages = []
+    cursor = 0
+    while cursor < through:
+        page = v.request(f'/api/sessions/{entry["id"]}/world/policy-frames?throughFrame={through}&afterFrame={cursor}')
+        end = page['scannedThroughFrame']
+        if (page['sessionId'], page['streamId'], page['throughFrame'], page['afterFrame'], page['nextAfterFrame']) != (
+                entry['id'], stream, through, cursor, end if end < through else None) or not cursor < end <= min(through, cursor + 1024):
+            raise ValueError('Policy page left the original native recording or saved boundary')
+        found.extend(page['frames'])
+        pages.append(page)
+        cursor = end
+    if found != expected:
+        raise ValueError('Policy timeline differs from the original complete native replay')
+    v.save(entry['name']+'-policy-frames.json', {'complete': True, 'pages': pages, 'matchedFrames': len(found)})
+
+
 def replay(v,entry,pause):
     request=urllib.request.Request(v.base+f'/api/sessions/{entry["id"]}/world/watch?mode=replay&fromMs=0&rate=4',headers={'Authorization':'Bearer '+v.tokens['Master']})
     rows=[];faults=[];previous=0;last=None;ranges={p['id']:{'min':None,'max':None,'reload':False,'cycles':{}} for p in entry['players']};last_running=None;running=0
@@ -349,6 +384,8 @@ def replay(v,entry,pause):
         v.save(entry['name']+'-marksmanship-replay.json',proof)
     if v.args.check_frame_review and result['complete']:
         check_frame_review(v, entry, rows)
+    if v.args.check_policy_frames and result['complete']:
+        check_policy_frames(v, entry, rows)
     return result
 
 def run(v):
@@ -495,6 +532,8 @@ def run(v):
                 playback=replay(v,e,pause if e is entries[0] else None);check(playback['complete'],e['name']+': all replay frames retain original bodies, movement/reload, seals and results')
                 if v.args.check_frame_review:
                     check(True, e['name'] + ': exact shot frame, resumed frames and room/player search pages match the native archive')
+                if v.args.check_policy_frames:
+                    check(True, e['name'] + ': phase, environment and enemy changes match the complete original native replay')
         if v.args.endurance:
             # All native sources are stopped first. Each independent reader still
             # consumes every frame at the original rate4 and its original deadline.
@@ -512,6 +551,7 @@ def main():
     p.add_argument('--replay-workers',type=int,choices=(1,5),default=1,help='Endurance only: independent closed-source replay readers; every stream retains rate4 and all original gates')
     p.add_argument('--operator-controls',action='store_true',help='After the base motion window, apply Storm Night Patrol then Fog Day Advance through normal management commands; no console UI or physical operator input')
     p.add_argument('--check-frame-review', action='store_true', help='Verify an exact native shot frame and resume during the short exercise')
+    p.add_argument('--check-policy-frames', action='store_true', help='Compare recorded policy pages with the full native exercise replay')
     p.add_argument('--marksmanship', action='store_true', help='Verify two accepted hits and one elimination per seat using saved layout and normal desktop weapon input')
     p.add_argument('--link-metrics', action='store_true', help='Collect 30 opt-in native link measurements per client during the 40-second short exercise')
     p.add_argument('--udp-traffic', action='store_true', help='Measure forwarded UDP payload bytes per original client in the 40-second short exercise')
@@ -520,6 +560,7 @@ def main():
     if args.endurance and (args.seconds not in (60,900) or args.operator_controls) or not args.endurance and args.seconds not in range(12,41):p.error('Short seconds must be 12..40; endurance requires 60 or 900 and no operator-controls')
     if args.replay_workers!=1 and not args.endurance:p.error('Parallel replay readers require the explicit endurance profile')
     if args.check_frame_review and args.endurance:p.error('Frame review uses the short exercise')
+    if args.check_policy_frames and not args.operator_controls:p.error('Policy frame review requires the operator-controls exercise')
     if args.marksmanship and (args.endurance or args.operator_controls or args.players_per_room!=5):p.error('Marksmanship requires five players per room and the short input profile without operator policy changes')
     if args.link_metrics and (args.endurance or args.seconds!=40):p.error('Link measurement requires the 40-second short exercise')
     if args.udp_periodic_loss:

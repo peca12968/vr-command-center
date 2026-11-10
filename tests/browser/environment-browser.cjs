@@ -69,6 +69,37 @@ module.exports = async function environmentBrowser({ page, api, tokens, director
     await page.locator('#world-pause').click(); const paused = await canvas.getAttribute('data-weather-tick'); await page.waitForTimeout(200);
     check(await canvas.getAttribute('data-weather-tick') === paused && await canvas.getAttribute('data-weather-flash') === 'false', 'Replay pause freezes rain and clears any held flash');
     await page.locator('#world-sound').click(); check(await page.locator('#world-sound').getAttribute('aria-pressed') === 'false', 'Sound can be explicitly disabled after replay without changing the archive');
+    const policyRoute = `/sessions/${info.header.sessionId}/world/policy-frames`;
+    const expected = frames.filter((frame, index) => {
+      if (index === 0) return true;
+      const previous = frames[index - 1];
+      return ['phase', 'behavior', 'night', 'autoAttack'].some(key => frame.frame[key] !== previous.frame[key])
+        || ['weather', 'lightning'].some(key => frame[key] !== previous[key]);
+    });
+    const policyPage = await api(policyRoute + `?throughFrame=${frames.at(-1).sequence}`, 'GET', undefined, 'Room4');
+    check(policyPage.frames.map(row => row.frameSequence).join(',') === expected.map(frame => frame.sequence).join(',')
+      && policyPage.frames[0].policy.weather === 'Storm' && policyPage.frames[0].policy.night && policyPage.frames[0].policy.lightning
+      && !policyPage.frames.some(row => row.changes.includes('environment')),
+      'Scoped policy lookup retains the original weather and omits the repeated unchanged setting');
+    await page.locator('#world-room').selectOption('4');
+    await page.locator('#world-camera').selectOption('top');
+    await page.locator('#world-policy-start').click();
+    const results = page.locator('#world-policy-results');
+    const change = policyPage.frames.find(row => row.changes.includes('phase') && row.policy.phase === 'Paused');
+    const target = results.locator(`[data-frame-sequence="${change.frameSequence}"]`);
+    await target.waitFor();
+    check(await results.getByRole('button').count() === expected.length && (await results.innerText()).includes('暴風雨／夜晚／閃電開啟'),
+      'Paused replay renders the actual weather policy and the original transition frames');
+    await target.click();
+    await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${change.frameSequence} 格` }).waitFor();
+    check(await canvas.getAttribute('data-sequence') === String(change.frameSequence)
+      && await page.locator('#world-room').inputValue() === '4' && await page.locator('#world-camera').inputValue() === 'top',
+      'Selecting a policy transition jumps to its original frame and retains the selected room camera');
+    await page.locator('#world-policy-here').click();
+    await page.locator('#world-policy-status').filter({ hasText: `已查閱第 ${change.frameSequence} 至` }).waitFor();
+    check(await results.getByRole('button').first().getAttribute('data-frame-sequence') === String(change.frameSequence),
+      'The current-frame policy cursor includes a transition on the selected frame');
+    await results.screenshot({ path: path.join(screenshots, 'world-policy-frames.png') });
     await page.evaluate(() => {
       const original = window.fetch; window.restoreEnvironmentFetch = () => { window.fetch = original; };
       window.fetch = async (...args) => {
@@ -94,6 +125,8 @@ module.exports = async function environmentBrowser({ page, api, tokens, director
       'Legacy response metadata keeps old lighting and disables invented rain/audio presentation');
     await page.evaluate(() => window.restoreEnvironmentFetch());
     await page.locator('#tab-operations').click();
+    check(await results.getByRole('button').count() === 0 && await page.locator('#world-policy-start').isDisabled(),
+      'Leaving the replay clears the policy results and disables archived jumps');
   } finally {
     if (child.exitCode === null && child.signalCode === null) { child.kill(); await finished; }
   }

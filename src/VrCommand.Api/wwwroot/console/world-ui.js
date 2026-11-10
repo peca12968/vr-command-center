@@ -2,6 +2,7 @@ import { ReplayScene } from './replay-scene.js';
 import { mountCameras } from './camera-ui.js';
 import { mountWorldCameraForm } from './world-camera-form.js';
 import { mountWorldEventSearch } from './world-event-search.js';
+import { mountWorldPolicyFrames } from './world-policy-frames.js';
 import { mountSavedClips } from './saved-clips-ui.js';
 import { recordedClock } from './mission-clock.js';
 
@@ -25,6 +26,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   const cameras = mountCameras(getKey, unauthorized, () => scene, freeView);
   const cameraForm = mountWorldCameraForm(() => scene, freeView);
   const eventSearch = mountWorldEventSearch(response, readFrame, eventNames, () => { if (frame) showEvents(frame); });
+  const policyFrames = mountWorldPolicyFrames(response, readFrame);
   const savedClips = mountSavedClips(response, canWriteClips, loadClip);
   function message(text, error = false) { $('world-message').textContent = text; $('world-message').classList.toggle('replay-error', error); }
   function stop() {
@@ -244,6 +246,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     $('world-review-player-name').textContent = reviewPlayer ? `檢討玩家 ${reviewPlayer.name} · ${shortId(reviewPlayer.id)}` : '';
     eventSearch.update(showing ? { sessionId: info.header.sessionId, streamId: info.header.streamId,
       throughFrame, room: $('world-room').value, playerId: reviewPlayer?.id ?? null, frameSequence: frame.packet.sequence, idle } : null);
+    policyFrames.update(showing ? { sessionId: info.header.sessionId, streamId: info.header.streamId,
+      throughFrame, frameSequence: frame.packet.sequence, idle } : null);
   }
   function showEvents(value) {
     const players = new Map(value.statistics.map(player => [player.playerId.toLowerCase(), player]));

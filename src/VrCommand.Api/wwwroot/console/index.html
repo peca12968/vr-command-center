@@ -323,6 +323,13 @@
               <p id="world-event-search-status" class="hint" role="status"></p>
               <ul id="world-event-search-results" aria-label="戰鬥事件搜尋結果"></ul>
             </fieldset>
+            <fieldset class="camera-positions">
+              <legend>錄製中的設定切換</legend>
+              <p class="hint">查閱原錄製中的場次階段、環境及敵軍策略。暫停後選取結果，可在目前房間視角檢視該格。</p>
+              <div class="button-row"><button id="world-policy-start" type="button" class="quiet" disabled>從第一格查閱</button><button id="world-policy-here" type="button" class="quiet" disabled>從目前格查閱</button><button id="world-policy-next" type="button" class="quiet" disabled>查閱後續設定</button></div>
+              <p id="world-policy-status" class="hint" role="status"></p>
+              <ul id="world-policy-results" aria-label="設定切換畫格"></ul>
+            </fieldset>
           </section>
           <div class="form-row"><label>鏡頭<select id="world-camera"><option value="overview">斜角全景</option><option value="top">上帝俯視</option><option value="follow">跟隨選取角色</option><option value="free">自由調整</option></select></label><label>鏡頭、統計與事件房間<select id="world-room"></select></label><label>選取角色<select id="world-actor"></select></label></div>
           <fieldset id="world-camera-editor" class="camera-positions" disabled><legend>精確調整觀看位置與角度</legend>
@@ -354,7 +361,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.83 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.84 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>
