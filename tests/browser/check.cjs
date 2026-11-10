@@ -194,6 +194,12 @@ async function main() {
       await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), result: 'passed', scope: 'Atomic five-room preparation with actual API, SQLite and Chromium' }, null, 2));
       console.log(`PASS: ${checks} focused independent set checks. Screenshots: ${screenshots}`); return;
     }
+    if (process.argv.includes('--vr-connection-check-only')) {
+      await require('./vr-connection-check-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
+      check(browserErrors.length === 0, 'VR file checks have no uncaught browser or policy errors');
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), result: 'passed', scope: 'VR seat file check against a real API and Chromium with synthetic game source' }, null, 2));
+      console.log(`PASS: ${checks} focused VR connection file checks. Screenshots: ${screenshots}`); return;
+    }
     if (process.argv.includes('--mr-deployment-only')) {
       await require('./mr-deployment-browser.cjs')({ context, api, tokens, base, directory, screenshots, check, captureErrors });
       check(browserErrors.length === 0, 'MR deployment checks have no uncaught browser or policy errors');
@@ -583,6 +589,7 @@ async function main() {
     await require('./mr-start-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
     await require('./mr-alignment-pins-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
     await require('./mr-deployment-browser.cjs')({ context, api, tokens, base, directory, screenshots, check, captureErrors });
+    await require('./vr-connection-check-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
     await require('./independent-set-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
     await require('./server-plan-browser.cjs').checkServerPlan({ context, api, tokens, base, screenshots, check, captureErrors });
     await require('./venue-launch-review-browser.cjs').checkVenueLaunchReview({ context, api, tokens, base, screenshots, check, captureErrors, instanceId });

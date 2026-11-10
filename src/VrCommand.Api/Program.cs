@@ -455,6 +455,20 @@ app.MapPost("/api/sessions/{id:guid}/rooms/{roomId:int}/players/{playerId:guid}/
         ?? throw new KeyNotFoundException("Player does not exist in this room.");
     return MrDeploymentCheck.Check(session, player, files, ticketSigner);
 });
+app.MapPost("/api/sessions/{id:guid}/rooms/{roomId:int}/players/{playerId:guid}/vr-connection-check", async (Guid id, int roomId, Guid playerId, WorldRecordings worlds, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var actor = Actor(context);
+    if (actor.Role != OperatorRole.Master && (actor.Role != OperatorRole.RoomController || actor.RoomId != roomId))
+        throw new AccessDeniedException("Connection file checks are limited to the controller's room.");
+    var expected = AdmissionMatch(context) ?? throw new ArgumentException("If-Match-Admission is required; reload the current player roster.");
+    var file = await VrVenueTickets.ReadSeatFile(context.Request, context.RequestAborted);
+    var (session, endpoint, sourceLive) = worlds.ReadSeatDeploymentSource(id, roomId, actor);
+    var player = session.Players.SingleOrDefault(p => p.Id == playerId && p.RoomId == roomId)
+        ?? throw new KeyNotFoundException("Player does not exist in this room.");
+    if (expected != player.AdmissionId) throw new InvalidOperationException("Player admission changed; reload the current roster.");
+    return VrVenueTickets.CheckSeatFile(id, player, file, endpoint, sourceLive, ticketSigner);
+});
 app.MapPost("/api/mr-deployment/venue-check", async (WorldRecordings worlds, SessionManager manager, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";

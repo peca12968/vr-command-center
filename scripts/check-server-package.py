@@ -149,6 +149,7 @@ def main():
     p.add_argument('--game-address',type=ipaddress.IPv4Address,help='Local private IPv4 for the three-package check')
     p.add_argument('--check-lan-preflight',action='store_true',help='Release a same-PC UDP preflight before Unity binds each original game port')
     p.add_argument('--check-vr-venue-tickets',action='store_true',help='Launch all 25 players in each mode from the shipped console venue ZIP')
+    p.add_argument('--check-vr-seat-files',action='store_true',help='Verify each original VR venue seat file against its live native endpoint before launch')
     p.add_argument('--check-quest-vr-deploy',action='store_true',help='Run Quest preflight and mapped mock deployment from each original VR venue ZIP')
     p.add_argument('--check-quest-vr-partial-map',action='store_true',help='Use a mixed headset roster and deploy five selected Quest seats from each original VR venue ZIP')
     p.add_argument('--check-windows-venue-staging',action='store_true',help='Stage VIVE XR seats from the original VR or mixed venue ZIP')
@@ -252,6 +253,8 @@ def main():
         p.error('--check-lan-preflight requires the three-package check')
     if args.check_vr_venue_tickets and not args.player_package:
         p.error('--check-vr-venue-tickets requires the three-package check')
+    if args.check_vr_seat_files and not args.check_vr_venue_tickets:
+        p.error('--check-vr-seat-files requires --check-vr-venue-tickets')
     if args.check_quest_vr_deploy and not args.check_vr_venue_tickets:
         p.error('--check-quest-vr-deploy requires --check-vr-venue-tickets')
     if args.check_quest_vr_partial_map and (not args.check_vr_venue_tickets or args.check_quest_vr_deploy):
@@ -1215,6 +1218,31 @@ def main():
                   and archive.namelist() == ['venue.json', *[row['ticketsZip'] for row in expected]]
                   and archive.testzip() is None, mode+' shipped browser ZIP includes the five original rooms and no other files')
             files = [archive.read(row['ticketsZip']) for row in expected]
+        if args.check_vr_seat_files:
+            before = request('/api/sessions')
+            verified = []
+            for (entry, room, people), raw in zip(staged, files, strict=True):
+                with zipfile.ZipFile(io.BytesIO(raw)) as seats:
+                    for person in people:
+                        seat = person['seat']
+                        file = seats.read(f'room-{room:02}-seat-{seat+1:02}.json')
+                        route = f"/api/sessions/{entry['sessionId']}/rooms/{room}/players/{person['id']}/vr-connection-check"
+                        reply, headers = request(route, {'connectionFile': base64.b64encode(file).decode()},
+                                                 role=f'Room{room}', admission=person['admissionId'], raw_response=True)
+                        result = json.loads(reply)
+                        assert result['status'] == 'matched' and (result['roomId'], result['seat']) == (room, seat)
+                        assert (result['address'], result['port']) == (address, entry['ready']['port'])
+                        assert result['expiresAtUtc'] and headers['Cache-Control'] == 'no-store'
+                        if room == 1 and seat == 0:
+                            altered = dict(json.loads(file), port=1024 if result['port'] != 1024 else 1025)
+                            mismatch = request(route, {'connectionFile': base64.b64encode(json.dumps(altered).encode()).decode()},
+                                               role='Room1', admission=person['admissionId'])
+                            check(mismatch['status'] == 'endpoint-mismatch' and mismatch['port'] == result['port'],
+                                  mode+' native seat file check diagnoses a modified port')
+                        verified.append(result)
+            check(len(verified) == 25 and request('/api/sessions') == before,
+                  mode+' exact original 25 VR seat files match their current live native endpoints without changing the roster')
+            save(f'{label}-vr-seat-file-checks.json', verified)
         windows_files = {}
         if args.check_quest_vr_deploy or args.check_quest_vr_partial_map:
             before = request('/api/sessions')

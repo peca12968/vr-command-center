@@ -65,6 +65,19 @@ public sealed partial class WorldRecordings
             if (TicketSourceLive(session) == false) throw new TicketSourceUnavailableException();
     }
 
+    internal (SessionView Session, ConnectionEndpoint? Endpoint, bool SourceLive) ReadSeatDeploymentSource(Guid id, int roomId, OperatorIdentity actor)
+    {
+        lock (gate)
+        {
+            var session = manager.Get(id, actor);
+            AccessPolicy.Player(actor, session, roomId);
+            if (session.State == SessionState.Ended || session.Environment.Mode != ExperienceMode.VR)
+                throw new InvalidOperationException("VR file checks require an active VR session.");
+            var endpoint = EndpointRow(session);
+            return (session, endpoint, endpoint is not null && TicketSourceLive(session, includeLegacy: true) == true);
+        }
+    }
+
     // Ordinary issuance preserves legacy endpoint behavior. Deployment can
     // require recent capture evidence for every published source.
     private bool? TicketSourceLive(SessionView session, bool includeLegacy = false)

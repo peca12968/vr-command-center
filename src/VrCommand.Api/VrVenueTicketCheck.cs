@@ -11,7 +11,17 @@ internal static partial class VrVenueTickets
     internal sealed record SeatResult(int RoomId, int Seat, string Status, HeadsetKind? Headset = null);
     internal sealed record CheckResult(string Topology, bool AllMatched, SeatResult[] Seats,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? LiveSourceVerified);
+    internal sealed record SeatFile(byte[] ConnectionFile);
+    internal sealed record SeatFileResult(string Status, int RoomId, int Seat, DateTimeOffset? ExpiresAtUtc, string? Address, int? Port);
     private sealed record Connection(string? Role, string? Address, int Port, string? JoinTicket);
+
+    internal static async Task<SeatFile> ReadSeatFile(HttpRequest request, CancellationToken cancellation)
+    {
+        const string message = "Provide one original VR connection file of at most 2 KiB.";
+        var file = await DeploymentJson.Read<SeatFile>(request, 3 * 1024, message, cancellation);
+        if (file.ConnectionFile is not { Length: > 0 and <= 2048 }) throw new ArgumentException(message);
+        return file;
+    }
 
     internal static async Task<CheckRequest> ReadCheck(HttpRequest request, CancellationToken cancellation)
     {
@@ -59,18 +69,32 @@ internal static partial class VrVenueTickets
         return new(input.Topology, matched, [.. seats], input.RequireLiveSource ? matched : null);
     }
 
+    internal static SeatFileResult CheckSeatFile(Guid sessionId, Player player, SeatFile file, ConnectionEndpoint? endpoint,
+        bool sourceLive, PlayerJoinTicketSigner signer)
+    {
+        var (status, expires) = InspectConnection(sessionId, player, file.ConnectionFile, endpoint, signer);
+        if (status == "matched") status = endpoint is null ? "endpoint-unpublished" : sourceLive ? status : "source-stale";
+        return new(status, player.RoomId, player.Seat, status == "matched" ? expires : null, endpoint?.Address, endpoint?.Port);
+    }
+
     internal static SeatResult CheckConnection(Guid sessionId, Player player, byte[] json, ConnectionEndpoint endpoint, PlayerJoinTicketSigner signer)
     {
-        SeatResult Status(string value) => new(player.RoomId, player.Seat, value);
+        var (status, _) = InspectConnection(sessionId, player, json, endpoint, signer);
+        return new(player.RoomId, player.Seat, status, status == "matched" ? player.Headset : null);
+    }
+
+    private static (string Status, DateTimeOffset? ExpiresAtUtc) InspectConnection(Guid sessionId, Player player, byte[] json,
+        ConnectionEndpoint? endpoint, PlayerJoinTicketSigner signer)
+    {
         var config = DeploymentJson.Connection<Connection>(json);
         if (config is not { Role: "Client", JoinTicket.Length: > 0 } || !ConnectionDestination.IsValid(config.Address, config.Port))
-            return Status("connection-invalid");
-        if (config.Address != endpoint.Address || config.Port != endpoint.Port) return Status("endpoint-mismatch");
+            return ("connection-invalid", null);
+        if (endpoint is not null && (config.Address != endpoint.Address || config.Port != endpoint.Port)) return ("endpoint-mismatch", null);
         PlayerJoinClaims claims;
         try { claims = signer.Validate(config.JoinTicket, sessionId); }
-        catch (AccessDeniedException) { return Status("ticket-invalid"); }
-        if (claims.RoomId != player.RoomId || claims.Seat != player.Seat) return Status("wrong-seat");
-        if (claims.PlayerId != player.Id || claims.AdmissionId != player.AdmissionId) return Status("admission-changed");
-        return new(player.RoomId, player.Seat, "matched", player.Headset);
+        catch (AccessDeniedException) { return ("ticket-invalid", null); }
+        if (claims.RoomId != player.RoomId || claims.Seat != player.Seat) return ("wrong-seat", null);
+        if (claims.PlayerId != player.Id || claims.AdmissionId != player.AdmissionId) return ("admission-changed", null);
+        return ("matched", claims.ExpiresAtUtc);
     }
 }

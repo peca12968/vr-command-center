@@ -4,7 +4,7 @@ import { drawLayoutProps, mountLayout } from './layout-ui.js';
 import { mountIndependentPlan } from './independent-plan-ui.js';
 import { mountAlignment } from './alignment-ui.js';
 import { mountAlignmentPins } from './alignment-pins-ui.js';
-import { mountMrDeployment } from './mr-deployment-ui.js';
+import { mountSeatDeployment } from './seat-deployment-ui.js';
 import { mountMrVenueBundle } from './mr-venue-bundle-ui.js';
 import { mountVrVenueTickets } from './vr-venue-tickets-ui.js';
 import { mountVenueServerPlan } from './venue-server-plan-ui.js';
@@ -38,7 +38,7 @@ const roomReadiness = mountRoomReadiness(() => state, logout, applyVenuePermissi
 const connections = mountConnections(() => state, logout);
 const closure = mountClosure(() => state, logout, target => tab('world', target), report);
 const alignment = mountAlignment(api, download);
-const mrDeployment = mountMrDeployment(() => state, api);
+const seatDeployments = ['VR', 'MR'].map(mode => mountSeatDeployment(() => state, api, mode));
 const mrVenue = mountMrVenueBundle(() => state, api, download, roomReadiness.ticketDestination);
 const vrVenue = mountVrVenueTickets(() => state, api, download, roomReadiness.ticketSourceLive);
 const venueServerPlan = mountVenueServerPlan(() => state, api, download);
@@ -193,7 +193,7 @@ function logout() {
   clearMissionComparison();
   clearMissionTemplate(); loadedText = null;
   alignmentPins.active(false);
-  mrDeployment.active(false);
+  seatDeployments.forEach(panel => panel.active(false));
   mrVenue.active(false);
   vrVenue.active(false);
   venueServerPlan.active(false);
@@ -392,7 +392,7 @@ function resetSelection(id) {
   report.reset(); readiness.reset(); connections.reset(); state.statistics = null; state.selected = id; state.session = null;
   closure.reset();
   alignmentPins.reset();
-  mrDeployment.reset();
+  seatDeployments.forEach(panel => panel.reset());
   $('statistics-scope').hidden = true; $('statistics-scope-status').textContent = '';
   $('session-panel').hidden = true;
 }
@@ -509,7 +509,7 @@ function applyPermissions() {
     button.disabled = locked || ended || !ownsRoom(room) || (button.dataset.playerAction === 'ticket' && !canIssueTicket(session, room));
   });
   alignmentPins.update();
-  mrDeployment.update();
+  seatDeployments.forEach(panel => panel.update());
   mrVenue.update();
 }
 function renderRoomEnemyPolicy(reload = false) {
@@ -1557,7 +1557,7 @@ function tab(name, worldTarget = null) {
   closure.active(name === 'operations');
   alignment.active(name === 'missions' && master());
   alignmentPins.active(name === 'operations');
-  mrDeployment.active(name === 'operations');
+  seatDeployments.forEach(panel => panel.active(name === 'operations'));
   mrVenue.active(name === 'operations');
   vrVenue.active(name === 'operations');
   venueServerPlan.active(name === 'operations');
