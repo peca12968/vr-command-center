@@ -96,6 +96,7 @@ def main():
     p.add_argument('--check-venue-phase', action='store_true', help='Verify whole-venue pause and resume against both native topologies')
     p.add_argument('--check-venue-begin', action='store_true', help='Start both native topologies with one witnessed Begin per topology')
     p.add_argument('--check-venue-launcher', action='store_true', help='Use one real Windows launcher for the explicitly prepared servers of each topology')
+    p.add_argument('--check-venue-plan-ui', action='store_true', help='Launch each topology with the exact plan downloaded from Chromium')
     p.add_argument('--check-venue-tracking-gate', action='store_true', help='Reject full tracking Begin while the same native roster is otherwise ready')
     p.add_argument('--check-venue-participation-gate', action='store_true', help='Require all 25 effective native seats and verify their original Preparing frames')
     p.add_argument('--check-venue-end', action='store_true', help='End each native topology in one batch and read its original archives')
@@ -192,6 +193,8 @@ def main():
                                              args.venue_field_evidence, args.observe_closure_ui))):
         p.error('--check-venue-launcher requires --prepare-independent-set --check-venue-begin --check-venue-end; '
                 'individual launcher report workflows must be checked separately')
+    if args.check_venue_plan_ui and (not args.check_venue_launcher or not shutil.which('node')):
+        p.error('--check-venue-plan-ui requires --check-venue-launcher and Node.js with Playwright Chromium')
     if args.check_venue_tracking_gate and not args.check_venue_begin:p.error('--check-venue-tracking-gate requires --check-venue-begin')
     if args.check_venue_participation_gate and not (args.check_venue_begin and args.player_package):
         p.error('--check-venue-participation-gate requires --check-venue-begin and all native player seats')
@@ -488,7 +491,17 @@ def main():
                     if owns_lease:
                         kernel.ReleaseMutex(lease)
                     kernel.CloseHandle(lease)
-        plan_file.write_text(json.dumps(dict(plan,servers=list(reversed(plan['servers'])))),encoding='utf-8')
+        if args.check_venue_plan_ui:
+            plan_file=runtime/(label+'-browser-plan.json')
+            driver=ROOT/'tests/browser/server-plan-browser.cjs'
+            completed=subprocess.run([shutil.which('node'),str(driver)],cwd=driver.parent,
+                input=json.dumps({'base':uri,'token':keys['Master'],'plan':plan,'output':str(plan_file)}),
+                text=True,encoding='utf-8',capture_output=True,timeout=45,creationflags=subprocess.CREATE_NO_WINDOW)
+            diagnostic=completed.stderr
+            for key in keys.values():diagnostic=diagnostic.replace(key,'[redacted]')
+            check(completed.returncode==0 and read(plan_file)==plan,label+' actual console download matches the original venue: '+diagnostic[-600:])
+        else:
+            plan_file.write_text(json.dumps(dict(plan,servers=list(reversed(plan['servers'])))),encoding='utf-8')
         extra=['--peer-diagnostics','on'] if args.peer_diagnostics else []
         process=subprocess.Popen([str(exe),*map(str,args_for(plan_file,work,ready)),'--report',str(report),*extra],cwd=out,env=env)
         entries=[]

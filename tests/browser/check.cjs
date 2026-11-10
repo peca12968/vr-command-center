@@ -56,6 +56,12 @@ async function main() {
     diagnosticPage = page;
     function captureErrors(target) { target.on('pageerror', error => browserErrors.push(error.message)); target.on('console', message => { if (/Content Security Policy|violates.*directive/i.test(message.text())) browserErrors.push(message.text()); }); }
     captureErrors(page);
+    if (process.argv.includes('--server-plan-only')) {
+      await require('./server-plan-browser.cjs').checkServerPlan({ context, api, tokens, base, screenshots, check, captureErrors });
+      check(browserErrors.length === 0, 'Server plan has no uncaught browser or policy errors');
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed', scope: 'venue server plan with isolated API and Chromium' }, null, 2));
+      console.log(`PASS: ${checks} focused server plan checks. Screenshots: ${screenshots}`); return;
+    }
     if (process.argv.includes('--venue-time-replay-only')) {
       await require('./venue-time-replay-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
       check(browserErrors.length === 0, 'Venue time replay has no uncaught browser or policy errors');
@@ -558,6 +564,7 @@ async function main() {
     await require('./mr-alignment-pins-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
     await require('./mr-deployment-browser.cjs')({ context, api, tokens, base, directory, screenshots, check, captureErrors });
     await require('./independent-set-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
+    await require('./server-plan-browser.cjs').checkServerPlan({ context, api, tokens, base, screenshots, check, captureErrors });
     await require('./mr-venue-bundle-browser.cjs')({ context, api, tokens, base, root, directory, screenshots, check, captureErrors });
     await require('./vr-venue-tickets-browser.cjs')({ context, api, tokens, base, root, directory, screenshots, check, captureErrors });
     await require('./room-clock-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });

@@ -32,6 +32,24 @@
         <div class="section-heading"><div><p class="eyebrow">VENUE STATUS</p><h2>五房間總覽</h2></div><span class="badge">Quest 3 優先</span></div>
         <p class="hint">房卡顯示名冊人數與最近的有效姿態，分列合成與追蹤。</p>
         <div id="rooms" class="rooms"></div>
+        <details id="venue-server-plan" class="panel" hidden>
+          <summary>Windows 遊戲伺服器啟動計畫</summary>
+          <p class="hint">下載給 Windows 啟動器 1.8 使用。請填入遊戲伺服器電腦上的管理實例路徑及網路設定。</p>
+          <button id="venue-server-read" type="button" class="quiet">讀取五房場次</button>
+          <p id="venue-server-status" class="hint" role="status"></p>
+          <ul id="venue-server-rooms" class="event-list" aria-label="原場次及啟動條件"></ul>
+          <form id="venue-server-form" hidden>
+            <fieldset id="venue-server-fields">
+              <div class="form-row"><label>管理實例完整路徑<input id="venue-server-instance" type="text" maxlength="240" placeholder="C:\VRCommand\control\control-instance.json" autocomplete="off"></label></div>
+              <div class="form-row">
+                <label>公告 IPv4<input id="venue-server-address" type="text" maxlength="15" value="127.0.0.1" autocomplete="off"></label>
+                <label>本機綁定 IPv4<input id="venue-server-bind" type="text" maxlength="15" placeholder="預設同公告 IPv4" autocomplete="off"></label>
+              </div>
+              <div id="venue-server-ports" class="form-row"></div>
+              <button id="venue-server-download" type="submit" class="secondary" disabled>下載啟動計畫 JSON</button>
+            </fieldset>
+          </form>
+        </details>
         <section id="venue-live-tracking" class="panel" aria-labelledby="venue-live-tracking-title" hidden>
           <h3 id="venue-live-tracking-title">執行中五房追蹤</h3>
           <p id="venue-live-tracking-summary" class="hint" role="status"></p>
@@ -373,7 +391,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.96 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.97 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

@@ -86,7 +86,7 @@ def main():
         for name,value in [('duration-low','0'),('duration-high','3601'),('duration-bool','true')]:call(name,['--run',data,'--seconds',value,'--ready-report',out/(name+'-ready.json')],False)
         alias=out/'alias-report.json';call('report-alias',['--run',data,'--seconds','1','--ready-report',str(alias).upper()],False,report=alias)
         entry=start(data,'first');check(request(entry,keys,'/')['version']=='0.31.0','actual portable API version');request(entry,keys,'/api/rooms',role=None,expected=401);check(True,'anonymous management requests rejected')
-        html,headers=request(entry,keys,'/console/',role=None);check(manifest.get('consoleVersion')=='0.31.96' and 'v0.31.96' in html and "script-src 'self'" in headers['Content-Security-Policy'],'published current console served with original CSP and explicit UI version')
+        html,headers=request(entry,keys,'/console/',role=None);check(manifest.get('consoleVersion')=='0.31.97' and 'v0.31.97' in html and "script-src 'self'" in headers['Content-Security-Policy'],'published current console served with original CSP and explicit UI version')
         for role in package_roles:check(request(entry,keys,'/api/me',role=role)['role']==('RoomController' if role.startswith('Room') else role),'actual isolated role identity: '+role)
         markers = [{'room': {'x': x, 'z': z}, 'tracking': {'x': -z - 3, 'z': x - 1}} for x, z in [(-2, -2), (2, -2), (-2, 2)]]
         alignment_input = {'roomId': 5, 'markers': markers}

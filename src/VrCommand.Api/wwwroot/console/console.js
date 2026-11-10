@@ -7,6 +7,7 @@ import { mountAlignmentPins } from './alignment-pins-ui.js';
 import { mountMrDeployment } from './mr-deployment-ui.js';
 import { mountMrVenueBundle } from './mr-venue-bundle-ui.js';
 import { mountVrVenueTickets } from './vr-venue-tickets-ui.js';
+import { mountVenueServerPlan } from './venue-server-plan-ui.js';
 import { mountReport, mountVenueReport } from './report-ui.js';
 import { mountVenueHistory } from './venue-history-ui.js';
 import { mountReadiness, mountRoomReadiness } from './readiness-ui.js';
@@ -35,6 +36,7 @@ const alignment = mountAlignment(api, download);
 const mrDeployment = mountMrDeployment(() => state, api);
 const mrVenue = mountMrVenueBundle(() => state, api, download);
 const vrVenue = mountVrVenueTickets(() => state, api, download);
+const venueServerPlan = mountVenueServerPlan(() => state, api, download);
 const alignmentPins = mountAlignmentPins({ state: () => state,
   checkFile: file => api('/room-alignment/check-file', 'POST', file),
   pin: (id, roomAlignment, sequence) => runSession(() => {
@@ -178,6 +180,7 @@ function logout() {
   mrDeployment.active(false);
   mrVenue.active(false);
   vrVenue.active(false);
+  venueServerPlan.active(false);
   replay.active(false); replay.reset(); world.active(false); world.reset(); readiness.active(false); readiness.reset(); roomReadiness.active(false); connections.active(false); connections.reset();
   state.epoch++; state.key = ''; state.actor = null; state.selected = null; state.session = null; state.pending = null;
   state.rooms = []; state.venue = null; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
@@ -606,6 +609,7 @@ function applyVenuePermissions() {
   venueHistory.update(!locked);
   $('restore-venue-plan').disabled = locked || !archivedPlan;
   vrVenue.update();
+  venueServerPlan.update();
   const policy = venueBeginPolicy();
   const starting = (policy !== 'normal' && begin.flatMap(target => target.roomIds).length !== 5)
     || begin.some(target => !roomReadiness.venueReady(target, 'Begin', policy));
@@ -1404,6 +1408,7 @@ function tab(name, worldTarget = null) {
   mrDeployment.active(name === 'operations');
   mrVenue.active(name === 'operations');
   vrVenue.active(name === 'operations');
+  venueServerPlan.active(name === 'operations');
 }
 function submit(id, action, execute = run) { $(id).addEventListener('submit', event => { event.preventDefault(); execute(action); }); }
 $('login-form').addEventListener('submit', login);
