@@ -1,5 +1,6 @@
 const $ = id => document.getElementById(id);
 const svgNamespace = 'http://www.w3.org/2000/svg';
+const propHalfSizes = new Map([['sandbag', [1, .35]], ['barrel', [.35, .35]]]);
 const labels = {
   InvalidProp: '座標或角度不是有效數字', UnsupportedAsset: '目前場地只支援沙包與油桶',
   NotFloorLevel: '物件必須放在地面（Y=0）', OutsideRoom: '旋轉後的包圍盒超出 12 × 12 公尺場地',
@@ -13,9 +14,13 @@ function svg(tag, attributes) {
   for (const [key, value] of Object.entries(attributes)) node.setAttribute(key, value);
   return node;
 }
+// With SVG y = -world z, the simulation's positive yaw is a positive SVG rotation.
+const propTransform = prop => `translate(${prop.position.x} ${-prop.position.z}) rotate(${prop.yawDegrees})`;
+const box = (halfX, halfZ) => ({ x: -halfX, y: -halfZ, width: 2 * halfX, height: 2 * halfZ });
+
 export function drawLayoutProps(layer, props, selected = null) {
   layer.replaceChildren(...props.map((prop, index) => {
-    const group = svg('g', { transform: `translate(${prop.position.x} ${-prop.position.z}) rotate(${-prop.yawDegrees})`, 'data-index': index });
+    const group = svg('g', { transform: propTransform(prop), 'data-index': index });
     const name = `物件 ${index + 1} ${prop.assetId}`;
     if (selected !== null) {
       group.dataset.selected = String(index === selected);
@@ -23,11 +28,12 @@ export function drawLayoutProps(layer, props, selected = null) {
     } else {
       const title = svg('title', {}); text(title, name); group.append(title);
     }
-    const barrel = prop.assetId === 'barrel', sandbag = prop.assetId === 'sandbag';
-    if (barrel || sandbag) {
-      const shape = barrel ? svg('circle', { r: '.35', fill: '#658d87' })
-        : svg('rect', { x: '-1', y: '-.35', width: '2', height: '.7', rx: '.08', fill: '#a69b63' });
-      const envelope = svg('rect', { x: barrel ? '-.35' : '-1', y: '-.35', width: barrel ? '.7' : '2', height: '.7',
+    const halfSize = propHalfSizes.get(prop.assetId);
+    if (halfSize) {
+      const dimensions = box(...halfSize);
+      const shape = prop.assetId === 'barrel' ? svg('circle', { r: halfSize[0], fill: '#658d87' })
+        : svg('rect', { ...dimensions, rx: '.08', fill: '#a69b63' });
+      const envelope = svg('rect', { ...dimensions,
         fill: 'none', stroke: '#d2dca2', 'stroke-width': '.04', 'stroke-dasharray': '.1 .06', 'data-envelope': prop.assetId });
       group.append(shape, envelope);
     } else {
@@ -36,6 +42,23 @@ export function drawLayoutProps(layer, props, selected = null) {
     const label = svg('text', { y: '.12' }); text(label, index + 1); group.append(label);
     return group;
   }));
+}
+
+function drawClearance(prefix, report, props) {
+  const toggle = $(prefix + '-layout-show-clearance'), layer = $(prefix + '-layout-clearance');
+  toggle.disabled = report?.canStart !== true;
+  const visible = !toggle.disabled && toggle.checked;
+  $(prefix + '-layout-clearance-legend').hidden = !visible;
+  if (!visible) { layer.replaceChildren(); return; }
+  const radius = report.playerRadius, room = report.roomHalfSize - radius;
+  layer.replaceChildren(svg('rect', { ...box(room, room), class: 'layout-clearance-room' }),
+    ...props.flatMap((prop, index) => {
+      const halfSize = propHalfSizes.get(prop.assetId);
+      if (!halfSize) return [];
+      const [halfX, halfZ] = halfSize;
+      return [svg('rect', { ...box(halfX + radius, halfZ + radius), transform: propTransform(prop),
+        class: 'layout-clearance-prop', 'data-clearance-index': index })];
+    }));
 }
 function accept(report, mode, experienceMode) {
   const profile = experienceMode === 'MR' ? 'mr-room-v1' : 'vr-room-v1';
@@ -159,13 +182,16 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
       : '五個出生位皆有到中線的取樣路徑。';
     text(routeSummary, fine.length ? coverage + ` · 0.125 公尺取樣 · 出生位 ${fine.join('、')}` : coverage);
     if (prefix === 'draft') {
+      drawClearance('draft', report, report?.canStart ? draft().props : []);
       drawRoutes('layout-routes', (routes ?? []).filter(route => route.path.length));
       paintTrial();
     } else {
       const details = $('launch-layout-map-details');
       details.hidden = !report?.applies;
       $('launch-layout-map').setAttribute('viewBox', report?.canStart ? '-7 -7 14 14' : '-11 -11 22 22');
-      drawLayoutProps($('launch-layout-props'), details.hidden ? [] : selection().props);
+      const props = details.hidden ? [] : selection().props;
+      drawLayoutProps($('launch-layout-props'), props);
+      drawClearance('launch', report, props);
       drawRoutes('launch-layout-routes', (routes ?? []).filter(route => route.path.length));
       drawSpawns('launch-layout-spawns', report, missing);
       if (report) markInvalid('launch-layout-props', report);
@@ -193,6 +219,7 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
     generation++; draftSerial++; launchSerial++; clearTimeout(draftTimer); clearTimeout(launchTimer);
     draftKey = launchKey = ''; draftReport = launchReport = trial = null; cache.clear(); savedRequests.clear(); clearMarks(); $('layout-spawns').replaceChildren();
     $('launch-layout-map-details').open = false;
+    $('draft-layout-show-clearance').checked = $('launch-layout-show-clearance').checked = false;
     paint('draft', null, '修改配置後自動檢查。草稿仍可保存，開場前須修正問題。');
     paint('launch', null, '選取保存的任務版本後檢查場地。');
   }
@@ -254,5 +281,7 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
   }
   $('layout-try-removal').addEventListener('click', tryRemoval);
   $('layout-clear-trial').addEventListener('click', clearTrial);
+  $('draft-layout-show-clearance').addEventListener('change', () => drawClearance('draft', draftReport, draft().props));
+  $('launch-layout-show-clearance').addEventListener('change', () => drawClearance('launch', launchReport, selection().props));
   reset(); return { reset, scheduleDraft, scheduleLaunch, canLaunch, rejected, recheckDraft, recheckLaunch, clearTrial, inspectSaved, invalidateSaved };
 }

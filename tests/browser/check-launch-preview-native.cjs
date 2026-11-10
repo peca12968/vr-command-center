@@ -88,7 +88,7 @@ async function main() {
     await page.locator('#prop-select').selectOption('0');
     await page.locator('#prop-x').fill('3.5');
     await page.locator('#prop-x').blur();
-    assert.equal(await page.locator('#prop-layer [data-index="0"]').getAttribute('transform'), 'translate(3.5 0) rotate(-15)');
+    assert.equal(await page.locator('#prop-layer [data-index="0"]').getAttribute('transform'), 'translate(3.5 0) rotate(15)');
     await page.locator('#launch-version').click();
     await page.locator('#launch-mode').selectOption('Linked');
     await page.locator('#launch-preview-briefing summary').click();
@@ -112,7 +112,7 @@ async function main() {
     }));
     const layout = await api(`/missions/${original.id}/layout?mode=Linked`);
     assert.deepEqual(map.props, definition.props.map((prop, index) => ({ index, asset: prop.assetId,
-      transform: `translate(${prop.position.x} ${-prop.position.z}) rotate(${-prop.yawDegrees})` })));
+      transform: `translate(${prop.position.x} ${-prop.position.z}) rotate(${prop.yawDegrees})` })));
     assert.deepEqual(map.spawns, layout.spawns.map(spawn => ({ seat: spawn.seat, radius: layout.playerRadius,
       transform: `translate(${spawn.x} ${-spawn.z})` })));
     assert.equal(map.routes.length, 5);

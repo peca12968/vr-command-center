@@ -135,7 +135,7 @@ module.exports = async function independentSetBrowser({ context, api, tokens, ba
     check(await page.locator('#launch-preview-rooms').innerText() === '房間 5'
       && await page.locator('#launch-preview-duration').innerText() === '420 秒'
       && (await page.locator('#launch-preview-environment').innerText()).includes('暴風雨')
-      && await page.locator('#launch-layout-props [data-index="0"]').getAttribute('transform') === 'translate(2 -1) rotate(-45)',
+      && await page.locator('#launch-layout-props [data-index="0"]').getAttribute('transform') === 'translate(2 -1) rotate(45)',
       'Each room preview reflects its exact assigned duration, environment and saved geometry');
     await page.locator('#launch-room-missions').screenshot({ path: path.join(screenshots, 'independent-room-missions.png') });
     await page.setViewportSize({ width: 390, height: 844 });

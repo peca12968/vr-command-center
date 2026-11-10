@@ -1701,7 +1701,7 @@ $('remove-prop').addEventListener('click', () => { if (state.prop >= 0) editProp
 for (const type of ['input', 'change']) $('mission-form').addEventListener(type, event => {
   if (loadedText && event.target.id === 'draft-name') loadedText.name = null;
   if (loadedText && event.target.id === 'draft-briefing') loadedText.briefing = null;
-  if (!['layout-session-mode', 'prop-select'].includes(event.target.id) && !event.target.closest('#prop-copy-panel')) dirtyDraft();
+  if (!['layout-session-mode', 'prop-select', 'draft-layout-show-clearance'].includes(event.target.id) && !event.target.closest('#prop-copy-panel')) dirtyDraft();
 });
 $('layout-session-mode').addEventListener('change', () => placement.scheduleDraft());
 $('layout-recheck-draft').addEventListener('click', () => placement.recheckDraft());

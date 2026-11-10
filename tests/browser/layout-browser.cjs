@@ -7,7 +7,7 @@ module.exports = async function layoutBrowser({ context, api, tokens, base, miss
   const prop = (assetId, x, z, yawDegrees = 0) => ({ assetId, position: { x, y: 0, z }, yawDegrees });
   const bad = await api('/missions', 'POST', { ...mission.definition, name: '場地檢查・可修正草稿',
     enemies: { ...mission.definition.enemies, count: 0 },
-    props: [prop('barrel', 0, -3), prop('sandbag', 5.5, 2, 45), prop('barrel', 2, 2), prop('barrel', 2, 2)] }, 'Master', 201);
+    props: [prop('barrel', 0, -3), prop('sandbag', 5.5, 2, 45), prop('barrel', 2, 2), prop('barrel', 2, 2, -30)] }, 'Master', 201);
   const barricade = await api('/missions', 'POST', { ...mission.definition, name: '場地通路・連續沙包',
     props: [...[-5, -3, -1, 1, 3, 5].map(x => prop('sandbag', x, -1)), prop('barrel', 4, 3)] }, 'Master', 201);
   const mr = await api('/missions', 'POST', { ...mission.definition, name: 'MR 開場檢查',
@@ -19,6 +19,11 @@ module.exports = async function layoutBrowser({ context, api, tokens, base, miss
     await editor.goto(base + '/console/'); await editor.locator('#login-key').fill(tokens.Master); await editor.locator('#login-form button').click();
     await editor.locator('#tab-missions').click(); await editor.locator(`#edit-mission option[value="${bad.id}"]`).waitFor({ state: 'attached' });
     await editor.locator('#edit-mission').selectOption(bad.id); await editor.locator('#load-mission').click(); await status('draft', 'invalid');
+    const projectedYaw = (layer, index) => editor.locator(`#${layer} [data-index="${index}"]`)
+      .evaluate(node => node.transform.baseVal.getItem(1).matrix.b);
+    check(Math.abs(await projectedYaw('prop-layer', 1) - Math.SQRT1_2) < 1e-7
+      && Math.abs(await projectedYaw('prop-layer', 3) + .5) < 1e-7,
+      'Draft rotation projects the original world yaw through the flipped Z axis');
     check(await editor.locator('#prop-layer [data-layout-invalid=true]').count() === 4 && await editor.locator('#layout-spawns circle').count() === 5,
       'Layout preflight marks every overlapping, outside-room and spawn-blocking prop with all five real spawn spaces');
     const issues = await editor.locator('#draft-layout-issues').innerText();
@@ -52,7 +57,25 @@ module.exports = async function layoutBrowser({ context, api, tokens, base, miss
     check(await editor.locator('#launch-layout-props [data-index="0"]').getAttribute('transform') === 'translate(0 3) rotate(0)'
       && await editor.locator('#prop-layer [data-index="0"]').getAttribute('transform') === 'translate(0 0) rotate(0)',
       'The saved map keeps its original prop while an unsaved draft moves the same prop');
+    const draftClearance = editor.locator('#draft-layout-show-clearance');
+    await draftClearance.check();
+    const clearance = prefix => editor.locator(`#${prefix}-layout-clearance`).evaluate(layer => ({
+      width: Number(layer.querySelector('.layout-clearance-room').getAttribute('width')),
+      props: [...layer.querySelectorAll('[data-clearance-index]')].map(node => ({
+        width: Number(node.getAttribute('width')), height: Number(node.getAttribute('height')),
+        transform: node.getAttribute('transform')
+      }))
+    }));
+    const draftBounds = await clearance('draft');
+    check(draftBounds.width === 11.4 && draftBounds.props[1].width === 2.6
+      && Math.abs(draftBounds.props[1].height - 1.3) < 1e-7
+      && draftBounds.props[1].transform === 'translate(4 -2) rotate(45)'
+      && draftBounds.props[3].transform === 'translate(-2 -2) rotate(-30)',
+      'The walking overlay shows the room inset and the rotated body-expanded obstacle boxes');
     await editor.locator('#save-revision').click(); await editor.waitForFunction(() => document.querySelector('#draft-status').textContent.startsWith('已儲存') && !document.querySelector('#mission-fields').disabled);
+    const savedStatus = await editor.locator('#draft-status').innerText();
+    await draftClearance.uncheck(); await draftClearance.check();
+    check(await editor.locator('#draft-status').innerText() === savedStatus, 'Changing the walking overlay leaves the saved draft clean');
     const fixedId = (await api(`/missions/${saved.id}/history`)).headId;
     await editor.locator('#launch-version').click(); await status('launch', 'valid'); await editor.locator('#launch-room').selectOption('3');
     check(await editor.locator('#create-session-form button').isEnabled() && (await api(`/missions/${saved.id}/layout`)).canStart === false,
@@ -63,6 +86,11 @@ module.exports = async function layoutBrowser({ context, api, tokens, base, miss
       && await editor.locator('#launch-layout-spawns circle').count() === 5
       && await editor.locator('#launch-layout-routes polyline').count() === fixedLayout.routePreview.seats.filter(seat => seat.path.length).length,
       'Selecting the corrected saved revision changes the map, spawns and route overlay together');
+    await editor.locator('#launch-layout-show-clearance').check();
+    check(JSON.stringify(await clearance('launch')) === JSON.stringify(draftBounds)
+      && Math.abs(await projectedYaw('launch-layout-props', 1) - Math.SQRT1_2) < 1e-7
+      && Math.abs(await projectedYaw('launch-layout-props', 3) + .5) < 1e-7,
+      'The saved launch map uses the same exact yaw and movement limits as the verified draft');
     await editor.setViewportSize({ width: 390, height: 844 });
     check(await editor.locator('#launch-layout-map').isVisible()
       && await editor.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
@@ -82,6 +110,9 @@ module.exports = async function layoutBrowser({ context, api, tokens, base, miss
     check(await editor.locator('#launch-layout-props [data-layout-invalid]').count() === 4
       && await editor.locator('#launch-layout-routes polyline').count() === 0,
       'A delayed report cannot replace another saved version’s map overlays');
+    check(await editor.locator('#launch-layout-show-clearance').isDisabled()
+      && await editor.locator('#launch-layout-clearance rect').count() === 0,
+      'An invalid saved report cannot retain the previous version’s walking overlay');
     await editor.unroute(savedPattern);
     const dense = await api('/missions', 'POST', { ...mission.definition, name: '依模式核對初始敵軍', enemies: { ...mission.definition.enemies, count: 100 },
       props: [2, 4].flatMap(z => [-3, -1, 1, 3].map(x => prop('sandbag', x, z))) }, 'Master', 201);

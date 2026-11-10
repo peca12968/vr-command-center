@@ -55,6 +55,12 @@ internal static class MissionLayoutChecks
         check(Inspect(tooTight).RoutePreview!.Seats.All(route => route.Path.Length == 0),
             "Finer samples cannot fit a body through an opening below the movement footprint");
         check(Inspect([Prop("sandbag", 5.2f, 1, 45)]).Issues.Any(i => i.Code == "OutsideRoom"), "Rotated cover corners cannot extend beyond the room even when its centre is inside");
+        var angled = new WorldProp(Guid.NewGuid(), 3, PropKind.Sandbag, new Vec3(4, 0, 2), 45);
+        var angledWalk = new ArenaWalkSurface(new Vec3(), [angled]);
+        var margin = new Vec3(4.86f, 0, 1.14f);
+        check(!angledWalk.Walkable(margin) && angledWalk.Walkable(new Vec3(4.86f, 0, 2.86f))
+            && ArenaGeometry.RayBox(margin + new Vec3(0, 2, 0), new Vec3(0, -1, 0), angled.Center, angled.HalfSize, angled.Yaw, 3) is null,
+            "A positive-yaw sandbag expands the walking footprint beyond its cover box on the actual world side");
         check(Inspect([Prop("barrel", 5.65f, 1)]).CanStart == true, "A cover face may touch the room boundary within the defined float tolerance");
         check(Inspect([Prop("sandbag", 0, 2), Prop("sandbag", 2, 2)]).CanStart == true, "Face-touching cover is allowed for barricades without positive-area overlap");
         check(Inspect([Prop("sandbag", 0, 2, 45), Prop("sandbag", .5656854f, 2.5656854f, 45)]).CanStart == true, "SAT allows separated rotated cover whose axis-aligned envelopes overlap");

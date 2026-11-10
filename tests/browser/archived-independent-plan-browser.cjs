@@ -103,7 +103,7 @@ module.exports = async function archivedIndependentPlanBrowser({ context, api, t
     await page.locator('#launch-layout-map-details summary').click();
     check((await page.locator('#launch-room-mission-2 option:checked').innerText()).includes('歷史')
       && await page.locator('#launch-preview-duration').innerText() === '440 秒'
-      && await page.locator('#launch-layout-props [data-index="0"]').getAttribute('transform') === 'translate(2 -1) rotate(-45)',
+      && await page.locator('#launch-layout-props [data-index="0"]').getAttribute('transform') === 'translate(2 -1) rotate(45)',
       'A restored historical MR room previews its original timing and barrel position');
     await page.locator('#launch-room-missions').screenshot({ path: path.join(screenshots, 'independent-archived-plan.png') });
 

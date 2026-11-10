@@ -442,6 +442,10 @@ def main():
             if args.check_layout_fine_opening:
                 props=[{'assetId':'barrel' if x==-1.4 else 'sandbag','position':{'x':x,'y':0,'z':-1},'yawDegrees':0}
                        for x in (-4.75,-2.75,-1.4,.75,2.75,4.75)]
+                props.extend([
+                    {'assetId':'sandbag','position':{'x':4,'y':0,'z':2},'yawDegrees':45},
+                    {'assetId':'barrel','position':{'x':-2,'y':0,'z':2},'yawDegrees':-30},
+                ])
         return request('/api/missions',{'name':'Portable '+label,'briefing':'Owned PC package fixture','durationSeconds':600,'environment':{'mode':experience,'weather':'Clear','timeOfDay':'Day','lightning':False},'enemies':{'count':enemy_count,'behavior':'Hold','autoAttack':auto_attack},'props':props},expected=201)
     def create(rooms,label, **options):
         mission=save_mission(label,**options)
