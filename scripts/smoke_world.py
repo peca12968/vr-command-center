@@ -161,6 +161,26 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         request(route + "/frames/0", expected=400)
         request(route + f"/frames/{info['acceptedSequence'] + 1}", expected=404)
         check(True, "Exact frame reads retain authorization and reject invalid or missing frames")
+        kill_packet, kill = next((packet, entry) for packet in packets for entry in packet["events"]
+                                 if entry["kind"] == "EnemyEliminated")
+        tail = info["acceptedSequence"]
+        trace_route = route + "/shot-trace"
+        trace_query = f"{trace_route}?fromFrame={kill_packet['sequence']}&throughFrame={tail}&eventId={kill['eventId']}"
+        expected_trace = {"sessionId": info["header"]["sessionId"], "streamId": info["header"]["streamId"],
+                          "fromFrame": kill_packet["sequence"], "throughFrame": tail, "eventId": kill["eventId"],
+                          "shotId": kill["shotId"], "playerId": kill["playerId"], "roomId": 5,
+                          "events": [{"eventId": entry["eventId"], "kind": entry["kind"], "frameSequence": packet["sequence"],
+                                      "elapsedMilliseconds": packet["elapsedMilliseconds"], "roomId": 5}
+                                     for packet in packets for entry in packet["events"] if entry["shotId"] == kill["shotId"]]}
+        check(len(expected_trace["events"]) == 3 and request(trace_query, "Room5") == expected_trace,
+              "A room controller's shot trace matches all original saved fire, hit and elimination records")
+        request(trace_query + "&roomId=4", "Room5", 403)
+        request(trace_query, "GameServer", 403)
+        request(trace_query, "invalid", 401)
+        request(trace_query.replace(kill["eventId"], str(uuid4())), expected=404)
+        request(trace_query.replace(f"throughFrame={tail}", f"throughFrame={tail + 1}"), expected=404)
+        request(trace_query.replace(f"throughFrame={tail}", "throughFrame=0"), expected=400)
+        check(True, "Shot trace rejects foreign scopes, unauthorized readers, missing events and invalid saved boundaries")
         clip_route = route + "/clip-statistics"
         clip = f"{clip_route}?fromFrame={combat_packet['sequence']}&throughFrame={combat_packet['sequence']}"
         statistics = request(clip, "Room5")
@@ -473,6 +493,7 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         process = start()
         check(request(route) == info, "SQLite restart restores recording identity, cursor, time and completion")
         check(request(exact_route, "Room5") == exact, "The exact event frame and its statistics remain identical after restart")
+        check(request(trace_query, "Room5") == expected_trace, "Restart reconstructs shot report links from the existing persisted session")
         check(request(f"{search}?throughFrame={boundary}&roomId=5&kind=PlayerDamaged", "Room5") == page,
               "Search reconstructs the same result after restart using the existing archive")
         check(request(route)["header"]["environmentVersion"] == 0, "Pre-versioned stored headers remain explicitly legacy instead of acquiring invented effects")

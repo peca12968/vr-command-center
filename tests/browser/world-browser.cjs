@@ -786,6 +786,42 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       && await page.locator('#world-event-kind').inputValue() === 'PlayerDamaged'
       && await page.locator('#world-review-player-scope').isVisible(),
       'Playing the marked context stops at the exact original endpoint and retains the personal filter');
+    await page.locator('#world-event-kind').selectOption('EnemyEliminated');
+    await page.locator('#world-event-search-start').click();
+    const killFrame = page.locator('#world-event-search-results button').first();
+    const killSequence = Number(await killFrame.getAttribute('data-frame-sequence'));
+    const killPacket = await api(`${archiveRoute}/frames/${killSequence}`);
+    const kill = killPacket.packet.events.find(event => event.kind === 'EnemyEliminated' && event.playerId === finalPlayer.playerId);
+    if (!kill) throw new Error('The completed combat fixture had no saved elimination for this player');
+    await killFrame.click();
+    const shotResponse = page.waitForResponse(response => new URL(response.url()).pathname === `/api${archiveRoute}/shot-trace`);
+    await page.locator(`[data-shot-trace="${kill.eventId}"]`).click();
+    const traceReply = await shotResponse, shotTrace = await traceReply.json();
+    const tracePanel = page.locator('#world-shot-trace'), traceStatus = page.locator('#world-shot-trace-status');
+    await traceStatus.filter({ hasText: '保存範圍內有 3 筆紀錄' }).waitFor();
+    check(traceReply.headers()['cache-control'] === 'no-store' && shotTrace.eventId === kill.eventId
+      && shotTrace.shotId === kill.shotId && shotTrace.throughFrame === finalFrame && shotTrace.playerId === finalPlayer.playerId
+      && shotTrace.events.map(event => event.kind).join(',') === 'ShotFired,ShotHit,EnemyEliminated'
+      && await tracePanel.locator('li').count() === 3 && Number(await canvas.getAttribute('data-sequence')) === killSequence,
+      'Tracing the original elimination shows its own fire and hit in saved order without moving the reviewed frame');
+    for (const [index, event] of shotTrace.events.entries()) {
+      const button = tracePanel.locator('li button').nth(index);
+      if (event.frameSequence === killSequence) {
+        check(await button.isDisabled(), 'An event already at the current saved frame does not reload it');
+      } else {
+        await button.click();
+        await page.waitForFunction(sequence => Number(document.querySelector('#world-canvas').dataset.sequence) === sequence,
+          event.frameSequence, { polling: 50 });
+        check(await tracePanel.isVisible(), 'Shot navigation opens the verified saved frame and keeps the linked records');
+        break;
+      }
+    }
+    await page.screenshot({ path: path.join(screenshots, 'world-shot-trace.png'), fullPage: true });
+    const roomFilter = page.locator('#world-room');
+    const previousRoom = await roomFilter.inputValue();
+    await roomFilter.selectOption(previousRoom === 'all' ? '2' : 'all');
+    check(!await tracePanel.isVisible() && await page.locator('#world-review-player-scope').isVisible(),
+      'Changing the review room clears the trace while retaining the player filter');
     const other = await context.newPage(); await other.goto(base + '/console/'); await other.locator('#login-key').fill(tokens.Room1); await other.locator('#login-form button').click();
     await other.locator('#tab-world').click(); await other.waitForFunction(() => document.querySelector('#world-message').textContent.includes('目前沒有'));
     check(await other.locator('#world-recording option').count() === 0, 'Room-scoped observer list reveals no foreign world'); await other.close();

@@ -5,6 +5,7 @@ import { mountWorldEventSearch } from './world-event-search.js';
 import { mountWorldPolicyFrames } from './world-policy-frames.js';
 import { mountSavedClips } from './saved-clips-ui.js';
 import { mountWorldClipStatistics } from './world-clip-statistics.js';
+import { mountWorldShotTrace, isTraceableShot } from './world-shot-trace.js';
 import { recordedClock } from './mission-clock.js';
 
 const $ = id => document.getElementById(id);
@@ -37,11 +38,13 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   const policyFrames = mountWorldPolicyFrames(response, readFrame);
   const savedClips = mountSavedClips(response, canWriteClips, loadClip);
   const clipStatistics = mountWorldClipStatistics(response);
+  const shotTrace = mountWorldShotTrace(response, readFrame, eventNames);
   function message(text, error = false) { $('world-message').textContent = text; $('world-message').classList.toggle('replay-error', error); }
   function stop() {
     epoch++; clearTimeout(liveRetryTimer); liveRetryTimer = undefined;
     clearEventContext();
     clipStatistics.update(null, false);
+    shotTrace.update(null, false);
     controller?.abort(); controller = null; connected = connecting = stepping = false;
     scene?.weather.pause(); scene?.draw(); $('world-pause').textContent = '繼續回放';
   }
@@ -340,6 +343,9 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     const throughFrame = replayThroughFrame();
     savedClips.update(showing ? { sessionId: info.header.sessionId, streamId: info.header.streamId, roomIds: info.header.roomIds, throughFrame, complete: info.complete } : null,
       idle, clipEnd ? { startFrame: clipStart.sequence, endFrame: clipEnd.sequence } : null);
+    shotTrace.update(showing ? { sessionId: info.header.sessionId, streamId: info.header.streamId, roomIds: info.header.roomIds,
+      throughFrame, roomId: clipRoom === 'all' ? null : Number(clipRoom), playerId: reviewPlayer?.id ?? null,
+      frameSequence: frame.packet.sequence } : null, idle);
     $('world-frame-next').disabled = !idle || frame.packet.sequence >= throughFrame;
     const extend = $('world-frame-extend');
     extend.hidden = !canExtendSaved();
@@ -367,6 +373,17 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
         shortId(event.enemyId), event.kind === 'PlayerDamaged' ? event.damage : '—']) {
         const cell = document.createElement('td'); cell.textContent = text; row.append(cell);
       }
+      const action = document.createElement('td');
+      if (isTraceableShot(event)) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'quiet';
+        button.dataset.shotTrace = event.eventId;
+        button.textContent = '追查同發射擊';
+        button.addEventListener('click', () => shotTrace.read(event));
+        action.append(button);
+      }
+      row.append(action);
       return row;
     });
     $('world-events').replaceChildren(...rows);

@@ -211,9 +211,31 @@ def check_frame_review(v, entry, frames):
                                        if player['playerId'] == player_id):
             raise RuntimeError('Player event search does not reconcile with final ammunition')
         searches.append({'roomId': room, 'playerId': player_id, 'matchingEvents': count, 'pages': pages})
+    by_shot = {}
+    shot_kinds = {'ShotFired', 'ShotHit', 'EnemyEliminated'}
+    for frame in frames:
+        packet = frame['packet']
+        rooms = {player['playerId']: player['roomId'] for player in frame['statistics']}
+        for event in packet['events']:
+            if event['kind'] not in shot_kinds:
+                continue
+            by_shot.setdefault((event['playerId'], event['shotId']), []).append({
+                'eventId': event['eventId'], 'kind': event['kind'], 'frameSequence': packet['sequence'],
+                'elapsedMilliseconds': packet['elapsedMilliseconds'], 'roomId': rooms[event['playerId']]})
+    traces = []
+    for (player_id, shot_id), events in by_shot.items():
+        anchor = events[-1]
+        from_frame, event_id, room = anchor['frameSequence'], anchor['eventId'], anchor['roomId']
+        trace = v.request(f'{route}/shot-trace?fromFrame={from_frame}&throughFrame={through}&eventId={event_id}&roomId={room}')
+        if trace != {'sessionId': entry['id'], 'streamId': stream_id, 'fromFrame': from_frame, 'throughFrame': through,
+                     'eventId': event_id, 'shotId': shot_id, 'playerId': player_id, 'roomId': room, 'events': events}:
+            raise RuntimeError('Native shot trace differs from its original saved records')
+        traces.append(trace)
+    if {trace['playerId'] for trace in traces} != {player['id'] for player in entry['players']}:
+        raise RuntimeError('No original saved shot trace for every admitted player')
     v.save(entry['name'] + '-frame-review.json', {'complete': True, 'sequence': sequence,
            'resumedSequences': [frame['packet']['sequence'] for frame in resumed], 'frame': exact,
-           'searches': searches})
+           'searches': searches, 'shotTraces': traces})
 
 def marksmanship_props():
     # Standard floor placement excludes the other candidates in the first enemy row.
@@ -631,7 +653,7 @@ def run(v):
                 if v.args.incoming_fire:
                     check(True,e['name']+': full replay reconciles original player shots and same-room enemy damage with each saved statistics prefix')
                 if v.args.check_frame_review:
-                    check(True, e['name'] + ': exact shot frame, resumed frames and room/player search pages match the native archive')
+                    check(True, e['name'] + ': exact shot frame, resumed frames, room/player search and shot traces match the native archive')
                 if v.args.check_policy_frames:
                     check(True, e['name'] + ': phase, environment and enemy changes match the complete original native replay')
         if v.args.endurance:

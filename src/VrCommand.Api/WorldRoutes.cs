@@ -71,6 +71,12 @@ public static class WorldRoutes
             context.Response.Headers.CacheControl = "no-store";
             return Results.Json(neighbor, WorldJson.Options);
         });
+        app.MapGet("/api/sessions/{id:guid}/world/shot-trace", (Guid id, long fromFrame, long throughFrame, Guid eventId,
+            int? roomId, WorldRecordings store, HttpContext context) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            return store.ShotTrace(id, fromFrame, throughFrame, eventId, roomId, Actor(context), context.RequestAborted);
+        });
         app.MapGet("/api/sessions/{id:guid}/world/frames/{sequence:long}", (Guid id, long sequence, WorldRecordings store, HttpContext context) =>
         {
             if (sequence < 1) throw new ArgumentException("Frame sequence must be positive.");

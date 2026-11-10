@@ -360,7 +360,11 @@
               <p id="saved-clip-message" class="hint" role="status"></p>
             </fieldset>
             <p id="world-no-events" class="hint">此格沒有符合篩選的戰鬥事件。</p>
-            <div id="world-event-table" class="table-scroll" hidden><table><caption class="sr-only">此格戰鬥事件</caption><thead><tr><th>事件</th><th>類型</th><th>玩家</th><th>敵軍</th><th>玩家耗損</th></tr></thead><tbody id="world-events"></tbody></table></div>
+            <div id="world-event-table" class="table-scroll" hidden><table><caption class="sr-only">此格戰鬥事件</caption><thead><tr><th>事件</th><th>類型</th><th>玩家</th><th>敵軍</th><th>玩家耗損</th><th>射擊檢討</th></tr></thead><tbody id="world-events"></tbody></table></div>
+            <section id="world-shot-trace" aria-label="同發射擊紀錄" hidden>
+              <p id="world-shot-trace-status" role="status"></p>
+              <ul id="world-shot-trace-events"></ul>
+            </section>
             <fieldset class="camera-positions">
               <legend>搜尋戰鬥事件</legend>
               <div id="world-review-player-scope" class="button-row" hidden><span id="world-review-player-name"></span><button id="world-review-clear-player" type="button" class="quiet">顯示所有玩家</button></div>
@@ -409,7 +413,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.107 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.108 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

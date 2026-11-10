@@ -184,6 +184,23 @@ internal static class WorldChecks
             && store.ClipStatistics(linked.Id, 3, 4, null, null, room2, default) is { RoomId: 2, Players.Length: 0 },
             "Clip statistics preserve empty frames and limit room operators to their own recorded events");
         Reject<AccessDeniedException>(() => store.ClipStatistics(linked.Id, 3, 4, 1, null, room2, default), "Clip statistics reject another room scope");
+        var fired = store.Frame(linked.Id, 3, master)!.Packet.events.Single();
+        var fireId = Guid.Parse(fired.eventId);
+        var trace = store.ShotTrace(linked.Id, 3, 3, fireId, 1, master, default);
+        check(trace.ShotId == firstShot && trace.ThroughFrame == 3
+            && trace.Events.SequenceEqual([new(fireId, "ShotFired", 3, 150, 1)]),
+            "Shot trace excludes already durable outcomes beyond the requested saved prefix");
+        var hit = store.Frame(linked.Id, 4, master)!.Packet.events.First();
+        var hitId = Guid.Parse(hit.eventId);
+        check(store.ShotTrace(linked.Id, 4, 4, hitId, 1, master, default).Events.SequenceEqual(
+            [new(fireId, "ShotFired", 3, 150, 1), new(hitId, "ShotHit", 4, 200, 1)]),
+            "Tracing a saved hit finds the earlier original fire and never mixes a neighboring shot");
+        var elimination = store.Frame(linked.Id, 4, master)!.Packet.events.Single(item => item.kind == "EnemyEliminated");
+        check(store.ShotTrace(linked.Id, 4, 4, Guid.Parse(elimination.eventId), null, master, default) is { RoomId: null, Events.Length: 3 } killTrace
+            && killTrace.ShotId == secondShot && killTrace.Events.All(row => row.FrameSequence == 4),
+            "A saved elimination identifies its own three ordered records at the same frame");
+        Reject<KeyNotFoundException>(() => store.ShotTrace(linked.Id, 3, 4, fireId, null, room2, default), "Shot trace conceals another room's anchor");
+        Reject<AccessDeniedException>(() => store.ShotTrace(linked.Id, 3, 4, fireId, 1, room2, default), "Shot trace rejects another room scope");
         manager.End(linked.Id, master);
     }
 }

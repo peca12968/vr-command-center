@@ -71,6 +71,16 @@ public sealed partial class SessionManager
         }
     }
 
+    public StreamCombatRecord[] CombatShotWitnesses(Guid id, Guid shotId, OperatorIdentity actor)
+    {
+        lock (gate)
+        {
+            var history = Find(id); AccessPolicy.Read(actor, history.View.RoomIds);
+            return history.Combat.ShotReports(shotId).Where(entry => entry.Kind == SessionEventKind.StreamCombatRecorded)
+                .Select(entry => entry.Read<StreamCombatRecord>()).ToArray();
+        }
+    }
+
     // Each row remains its own durable event. Retrying a partially committed batch deduplicates its accepted prefix.
     public StreamReceipt ReportStreamBatch(Guid id, StreamCombatRecord[] records, OperatorIdentity? actor = null)
     {

@@ -15,7 +15,7 @@ public record CombatReceipt(Guid ReportId, long AppliedAtSequence, bool Duplicat
 // Incremental projection. A prepared change is applied only after its event has committed to storage.
 internal sealed class CombatLedger
 {
-    private record Shot(Guid PlayerId, Guid? EnemyId = null);
+    private record Shot(Guid PlayerId, Guid FiredReportId, Guid? EnemyId = null, Guid? HitReportId = null, Guid? KillReportId = null);
     private readonly Dictionary<Guid, Shot> shots = [];
     private readonly HashSet<Guid> eliminated = [];
     private readonly Dictionary<Guid, PlayerStatistics> players = [];
@@ -45,6 +45,8 @@ internal sealed class CombatLedger
     }
 
     internal SessionEvent? Find(Guid reportId) => reports.GetValueOrDefault(reportId);
+    internal SessionEvent[] ShotReports(Guid shotId) => shots.TryGetValue(shotId, out var shot)
+        ? new Guid?[] { shot.FiredReportId, shot.HitReportId, shot.KillReportId }.OfType<Guid>().Select(id => reports[id]).ToArray() : [];
     internal SessionStatistics Snapshot(Guid sessionId, long sequence) => new(sessionId, sequence, origin,
         players.Values.OrderBy(p => p.RoomId).ThenBy(p => p.PlayerId).ToArray());
 
@@ -100,9 +102,14 @@ internal sealed class CombatLedger
             origin ??= report.Origin;
             players[report.PlayerId] = statistic;
             reports.Add(report.ReportId, entry);
-            if (report.Kind == CombatKind.ShotFired) shots.Add(report.ShotId!.Value, new(report.PlayerId));
-            if (report.Kind == CombatKind.ShotHit) shots[report.ShotId!.Value] = new(report.PlayerId, report.EnemyId);
-            if (report.Kind == CombatKind.EnemyEliminated) eliminated.Add(report.EnemyId!.Value);
+            if (report.Kind == CombatKind.ShotFired) shots.Add(report.ShotId!.Value, new(report.PlayerId, report.ReportId));
+            if (report.Kind == CombatKind.ShotHit)
+                shots[report.ShotId!.Value] = shot! with { EnemyId = report.EnemyId, HitReportId = report.ReportId };
+            if (report.Kind == CombatKind.EnemyEliminated)
+            {
+                eliminated.Add(report.EnemyId!.Value);
+                shots[report.ShotId!.Value] = shot! with { KillReportId = report.ReportId };
+            }
         };
     }
 }
