@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { chromium } = require('playwright');
+const { armLiveWatchFault, cutLiveWatch, waitForLiveFrame } = require('./live-watch-fault.cjs');
 
 async function main() {
   const [descriptor, out] = process.argv.slice(2);
@@ -13,7 +14,7 @@ async function main() {
   const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const errors = [], requests = [], watches = [];
   const checks = [];
-  let recent;
+  let recent, reconnect;
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1080 } });
     page.on('pageerror', error => errors.push(error.name));
@@ -121,6 +122,7 @@ async function main() {
     assert.equal(await page.locator('#world-frame-extend').isVisible(), false);
     await page.locator('#world-player').screenshot({ path: path.join(out, 'recent-tail.png') });
     checks.push('Instant replay seeks the witnessed ten-second window and confirms its exact displayed native tail');
+    await armLiveWatchFault(page, sessionId, 'eof');
     await page.getByRole('button', { name: '返回即時觀戰' }).click();
     await page.waitForFunction(sequence => Number(document.querySelector('#world-canvas').dataset.sequence) > sequence
       && !document.querySelector('#world-recent').disabled && document.querySelector('#world-review').hidden,
@@ -133,11 +135,18 @@ async function main() {
       fromMilliseconds: from, firstMilliseconds: start.elapsedMilliseconds, tailMilliseconds: end.elapsedMilliseconds,
       resumedFrame: Number(await canvas.getAttribute('data-sequence')), roomId: 2 };
     checks.push('Instant replay returns to newer live frames from the same source with room and overhead camera preserved');
+    const disconnectedFrame = await cutLiveWatch(page);
+    await waitForLiveFrame(page, disconnectedFrame);
+    await checkRoom(2);
+    assert.equal(await canvas.getAttribute('data-camera'), fixedCamera);
+    assert.deepEqual(watches, Array(4).fill(`/api/sessions/${sessionId}/world/watch`));
+    reconnect = { disconnectedFrame, recoveredFrame: Number(await canvas.getAttribute('data-sequence')), roomId: 2 };
+    checks.push('An EOF on the real native observation response reconnects once without changing room or camera');
     // The operations tab may calculate a read-only draft layout while the browser logs in.
     assert.deepEqual(requests.filter(request => request !== 'POST /api/mission-layout'), []);
     assert.equal(await sessionRevision(), revision);
     assert.deepEqual(errors, []);
   } finally { await browser.close(); }
-  await fs.writeFile(path.join(out, 'checks.json'), JSON.stringify({ complete: true, checks, sessionId, players: 25, recent, nonGetRequests: requests }, null, 2), { flag: 'wx' });
+  await fs.writeFile(path.join(out, 'checks.json'), JSON.stringify({ complete: true, checks, sessionId, players: 25, recent, reconnect, nonGetRequests: requests }, null, 2), { flag: 'wx' });
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

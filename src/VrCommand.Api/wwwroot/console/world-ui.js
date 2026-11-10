@@ -11,19 +11,25 @@ const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫�
 const eventNames = { ShotFired: '玩家射擊', ShotHit: '命中敵軍', EnemyEliminated: '擊殺敵軍', EnemyShot: '敵軍射擊', PlayerDamaged: '玩家受傷', ReloadStarted: '開始換彈', ReloadCompleted: '完成換彈' };
 const shortId = id => id && id !== '00000000-0000-0000-0000-000000000000' ? id.slice(0, 8) : '—';
 const roomName = room => room === 'all' ? '全部房間' : '房間 ' + room;
+const LIVE_RETRY_DELAYS = [500, 1000, 2000];
+const LIVE_IDLE_MILLISECONDS = 6000;
 
 export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips) {
   let active = false, scene, controller, epoch = 0, listEpoch = 0, listController, info, frame, geometry = '', mode = '', connected = false, received = 0;
   let connecting = false, stepping = false, savedLimit = null, savedFinished = false;
   let reviewPlayer = null, actors = new Map(), actorInitialized = false;
   let clipStart = null, clipEnd = null, clipPosition = null, clipPlayback = '';
-  let recentSource = null;
+  let recentSource = null, liveRetryTimer;
   const cameras = mountCameras(getKey, unauthorized, () => scene, freeView);
   const cameraForm = mountWorldCameraForm(() => scene, freeView);
   const eventSearch = mountWorldEventSearch(response, readFrame, eventNames, () => { if (frame) showEvents(frame); });
   const savedClips = mountSavedClips(response, canWriteClips, loadClip);
   function message(text, error = false) { $('world-message').textContent = text; $('world-message').classList.toggle('replay-error', error); }
-  function stop() { epoch++; controller?.abort(); controller = null; connected = connecting = stepping = false; scene?.weather.pause(); scene?.draw(); $('world-pause').textContent = '繼續回放'; }
+  function stop() {
+    epoch++; clearTimeout(liveRetryTimer); liveRetryTimer = undefined;
+    controller?.abort(); controller = null; connected = connecting = stepping = false;
+    scene?.weather.pause(); scene?.draw(); $('world-pause').textContent = '繼續回放';
+  }
   function stopList() { listEpoch++; listController?.abort(); listController = null; }
   function reset() {
     reviewPlayer = recentSource = null; clearClip();
@@ -271,6 +277,15 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     recentSource = null;
     return connect('live', 0, null, null, target);
   }
+  function retryLive(id, key, sourceKey, request, attempt) {
+    if (!sourceKey || info?.complete || attempt >= LIVE_RETRY_DELAYS.length) return false;
+    liveRetryTimer = setTimeout(() => {
+      if (request === epoch && active && getKey() === key && $('world-recording').value === id)
+        void connect('live', 0, null, null, { mode: 'live', sessionId: id, sourceKey }, false, attempt + 1);
+    }, LIVE_RETRY_DELAYS[attempt]);
+    message(`即時觀戰中斷，正在重新連接（${attempt + 1}/${LIVE_RETRY_DELAYS.length}）。`, true);
+    return true;
+  }
   function toggleRecent() {
     if ($('world-recent').disabled) return;
     if (recentSource) return openLive();
@@ -441,8 +456,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     return packet.frame.behavior === setting.behavior && packet.frame.autoAttack === setting.autoAttack
       && enemies.length === population.present && enemies.filter(enemy => enemy.health > 0).length === population.alive;
   }
-  async function connect(nextMode, milliseconds = 0, sequence = null, replayLimit = savedLimit, target = null, clip = false) {
-    const id = $('world-recording').value; if (!active || !id) return;
+  async function connect(nextMode, milliseconds = 0, sequence = null, replayLimit = savedLimit, target = null, clip = false, liveAttempt = 0) {
+    const id = $('world-recording').value, key = getKey(); if (!active || !id || !key) return;
     stop(); mode = nextMode;
     const expectedGeometry = target?.sourceKey ?? recentSource ?? (clip ? geometry : null);
     clipPlayback = clip ? 'playing' : '';
@@ -456,19 +471,39 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     let hasHeader = false, reachedSavedEnd = false, lastSequence = sequence === null ? null : sequence - 1;
     let recentJump = Boolean(target?.sourceKey || recentSource);
     let playerFrame = null, playerComplete = false, witnessFrame = null;
+    let lastLiveSequence = liveAttempt ? frame?.packet.sequence ?? 0 : 0;
+    let idleTimer, idleExpired = false, transportFailure = false;
+    function watchLive() {
+      if (nextMode !== 'live') return;
+      clearTimeout(idleTimer);
+      if (hasHeader && info?.complete) return;
+      idleTimer = setTimeout(() => {
+        if (request !== epoch || own.signal.aborted || (hasHeader && info?.complete)) return;
+        idleExpired = true; own.abort();
+      }, LIVE_IDLE_MILLISECONDS);
+    }
     connecting = true; reviewControls(); $('world-frame-message').textContent = '';
     message(nextMode === 'live' ? '正在連接即時觀戰…' : '正在讀取已保存快照…');
+    watchLive();
     try {
       const position = sequence === null ? `fromMs=${Math.round(milliseconds)}` : `fromFrame=${sequence}`;
       const url = `/api/sessions/${id}/world/watch?mode=${nextMode}&${position}&rate=${$('world-speed').value}${limit === null ? '' : `&throughFrame=${limit}`}`;
-      const stream = await response(url, signal);
+      let stream;
+      try { stream = await response(url, signal); }
+      catch (error) {
+        transportFailure = error instanceof TypeError || error.status === 408 || (error.status >= 500 && error.status <= 599);
+        throw error;
+      }
       if (request !== epoch || !active) return;
       if (!stream.body || !stream.headers.get('content-type')?.startsWith('text/event-stream')) throw new Error('缺少觀戰串流。');
       connected = true; connecting = false; $('world-pause').textContent = mode === 'live' ? '從此刻回放' : '暫停回放';
       const reader = stream.body.getReader(), decoder = new TextDecoder(); let buffer = '';
       try {
         while (true) {
-          const { done, value } = await reader.read(); if (done) break;
+          let chunk;
+          try { chunk = await reader.read(); }
+          catch (error) { transportFailure = true; throw error; }
+          const { done, value } = chunk; if (done) break;
           if (request !== epoch || !active) return;
           buffer += decoder.decode(value, { stream: true });
           if (buffer.length > 2 * 1024 * 1024) throw new Error('觀戰資料超過單份快照限制。');
@@ -480,6 +515,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
             const sourceRecord = ['header', 'status', 'complete', 'saved-end'].includes(type);
             if (expectedGeometry && (sourceRecord ? JSON.stringify(data.header) !== expectedGeometry : type === 'frame' && !hasHeader))
               throw new Error('回應的錄製來源不同。');
+            if (sourceRecord || type === 'frame') watchLive();
             if (type === 'header') {
               if (hasHeader || data.header?.sessionId !== id || (target && !matchesTarget(data, target)))
                 throw new Error('回應的錄製場次或來源不同。');
@@ -509,6 +545,13 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
               message(`${info.header.origin} · ${info.header.rulesVersion} · ${info.header.assetSet === 'player-fire-v1' ? '軍事掩體／玩家及敵軍射擊效果 v1（依保存射線）' : info.header.assetSet === 'combat-effects-v1' ? '軍事掩體／敵軍射擊閃光及後座 v1（依保存射線）' : info.header.assetSet === 'armed-combatants-v1' ? '軍事掩體／敵軍雙手持槍／換彈 v1（合成姿勢）' : info.header.assetSet === 'weapon-actions-v1' ? '軍事掩體／人形敵軍／換彈動作 v1（合成手套非追蹤）' : info.header.assetSet === 'combatants-v1' ? '軍事掩體／步槍／人形敵軍 v1（命中採粗略包圍盒）' : info.header.assetSet === 'service-rifle-v1' ? '軍事掩體／玩家步槍 v1（命中／碰撞採包圍盒）' : info.header.assetSet === 'field-props-v1' ? '軍事掩體 v1（命中／碰撞採包圍盒）' : '基本幾何素材'} · ${info.header.calibration === 'quest-room-mr-v1' ? 'Quest 3 MR 錄製設定。' : 'VR 未校正。'}頭手來源請見角色資訊。${info.header.environmentVersion === 1 ? '環境聲光 v1 依保存的模擬時間重建，非原始音軌。' : '舊錄製沒有聲光效果版本，僅保留原有光霧顯示。'}`);
               status();
             } else if (type === 'frame') {
+              if (nextMode === 'live') {
+                const current = data.packet.sequence;
+                if (!hasHeader || !Number.isSafeInteger(current) || current < 1 || current < lastLiveSequence)
+                  throw new Error('即時觀戰的快照序號不符。');
+                if (current === lastLiveSequence) continue;
+                lastLiveSequence = current; liveAttempt = 0;
+              }
               if (playerReview) {
                 if (!hasHeader || playerFrame || data.packet.sequence !== target.throughSequence
                   || data.packet.frame.phase !== 'Ended' || data.packet.throughCombatSequence !== target.throughCombatSequence)
@@ -546,6 +589,10 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
         }
       } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
       if (request === epoch) {
+        if (nextMode === 'live' && (idleExpired || !info?.complete)) {
+          transportFailure = true;
+          throw new Error('即時觀戰串流已關閉。');
+        }
         if (limit !== null && !reachedSavedEnd) throw new Error('尚未讀到已保存片段尾端。');
         if (playerReview && !playerComplete) throw new Error('尚未讀到原場次的封存結尾。');
         connected = false;
@@ -567,12 +614,15 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
         }
       }
     } catch (error) {
-      if (request === epoch && !own.signal.aborted) {
+      if (request === epoch && (!own.signal.aborted || idleExpired)) {
         if (playerReview || witness) resetRecording();
         if (clip) clipPlayback = '';
-        connected = connecting = false; message('觀戰已中斷：' + error.message + '；可重新連接。', true); status();
+        connected = connecting = false; status();
+        const original = hasHeader ? geometry : liveAttempt ? expectedGeometry : null;
+        if (nextMode === 'live' && (idleExpired || transportFailure) && retryLive(id, key, original, request, liveAttempt)) return;
+        message('觀戰已中斷：' + (idleExpired ? '等待即時資料逾時' : error.message) + '；可重新連接。', true);
       }
-    }
+    } finally { clearTimeout(idleTimer); }
   }
   $('world-refresh').addEventListener('click', () => refresh());
   $('world-sound').addEventListener('click', async () => { if (scene?.weather.version === 1 || scene?.weather.audio.combat.version === 1) { const pending = scene.weather.audio.toggle(); status(); await pending; if (active && getKey()) status(); } });

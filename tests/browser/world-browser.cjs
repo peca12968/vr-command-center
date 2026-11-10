@@ -4,7 +4,7 @@ const { spawn } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const { isDeepStrictEqual } = require('node:util');
 
-module.exports = async function worldBrowser({ page, context, api, tokens, directory, root, base, screenshots, check }) {
+module.exports = async function worldBrowser({ page, context, api, tokens, directory, root, base, screenshots, check, liveWatchOnly }) {
   const keys = path.join(directory, 'world-keys.json'); await fs.writeFile(keys, JSON.stringify({ OperatorKeys: tokens }));
   const relay = process.env.VR_COMMAND_WORLD_RELAY_DLL || path.join(root, 'tools/VrCommand.WorldRelay/bin/Release/net10.0/VrCommand.WorldRelay.dll');
   const children = [];
@@ -50,6 +50,8 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await page.locator('#world-room').selectOption('2');
     check((await page.locator('#world-statistics-heading').innerText()).startsWith('房間 2') && await page.locator('#world-camera').inputValue() === 'top',
       'The room selector scopes frame statistics and preserves the overhead preset');
+    await require('./live-watch-fault.cjs').checkLiveWatch({ page, base, live, api, canvas, screenshots, check, extended: liveWatchOnly });
+    if (liveWatchOnly) return;
     await page.locator('#world-room').selectOption('all');
     check((await canvas.getAttribute('data-camera')).split(',').every(value => Number.isFinite(Number(value))), 'All-room focus restores a finite camera instead of using an invalid room coordinate');
     await require('./camera-controls.cjs')({ page, check, screenshots });

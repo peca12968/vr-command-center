@@ -2491,9 +2491,10 @@ def main():
                                cwd=ROOT/'tests/browser', check=True, timeout=70)
                 observed = read(browser_out/'checks.json')
                 check(observed['complete'] and observed['players']==25 and observed['sessionId']==entries[0]['sessionId']
-                      and len(observed['checks'])==5 and observed['recent']['roomId']==2
-                      and observed['recent']['resumedFrame']>observed['recent']['tail'],
-                      'shipped console scopes actors and returns to the same 25-player Linked source after instant replay')
+                      and len(observed['checks'])==6 and observed['recent']['roomId']==observed['reconnect']['roomId']==2
+                      and observed['recent']['resumedFrame']>observed['recent']['tail']
+                      and observed['reconnect']['recoveredFrame']>observed['reconnect']['disconnectedFrame'],
+                      'shipped console returns to the same 25-player Linked source after instant replay and a live disconnect')
             if args.check_room_participation:verify_room_participation(entries,round_clients,linked)
             if args.check_room_clocks:verify_room_clocks(entries,linked)
             if args.check_venue_environment:verify_venue_environment(entries,linked)

@@ -56,6 +56,15 @@ async function main() {
     diagnosticPage = page;
     function captureErrors(target) { target.on('pageerror', error => browserErrors.push(error.message)); target.on('console', message => { if (/Content Security Policy|violates.*directive/i.test(message.text())) browserErrors.push(message.text()); }); }
     captureErrors(page);
+    if (process.argv.includes('--live-watch-only')) {
+      await page.goto(base + '/console/');
+      await page.locator('#login-key').fill(tokens.Master);
+      await page.locator('#login-form button').click();
+      await require('./world-browser.cjs')({ page, context, api, tokens, directory, root, base, screenshots, check, liveWatchOnly: true });
+      check(browserErrors.length === 0, 'Live observation recovery has no uncaught browser or policy errors');
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed' }, null, 2));
+      console.log(`PASS: ${checks} focused live observation checks. Screenshots: ${screenshots}`); return;
+    }
     if (process.argv.includes('--layout-only')) {
       const mission = await api('/missions', 'POST', { name: 'Layout test template', briefing: '', durationSeconds: 600,
         environment: { mode: 'VR', weather: 'Clear', timeOfDay: 'Day', lightning: false },
