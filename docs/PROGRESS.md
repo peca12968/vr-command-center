@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 啟動器重送原全館回條請求
+
+- Windows 啟動器 1.16 遇到暫時性傳輸錯誤或 HTTP 502、503、504 時，會在原程序可用的條件下，將同一份來源登記或端點公告資料重送一次。回條仍須符合原場次及來源，端點公告前後也會核對原程序的 UDP 綁定。報告記錄是否重送。兩次都無法確認時會停止並保留 `unconfirmed` 結果。 [操作與報告](WINDOWS_SERVER_PACKAGE.md#依場館計畫批次啟動)
+- Windows 故障驗收 `run-69a3f0dc284c40869803dbbc17359597` 退出 0、478 項。代理讓原管理服務先提交來源及端點，再把第一次成功回條換成 502。五房獨立及合併各自的兩個重送均與原請求及原回條雜湊相同，兩種模式各 25 席同機連線，完成 50 份戰績、6 份 CSV、976 格全回放及雙封存。另驗證兩次 503 後停止全部五個遊戲程序，直接 409 只送一次，第五房端點資料庫寫入失敗會回復整批公告。活動場次歸零，C／F 快照 303 檔同雜湊。 [Windows 驗收](../artifacts/server-package-checks/run-69a3f0dc284c40869803dbbc17359597/checks.json) · [獨立回條](../artifacts/server-package-checks/run-69a3f0dc284c40869803dbbc17359597/independent-venue-receipt-gate.json) · [合併回條](../artifacts/server-package-checks/run-69a3f0dc284c40869803dbbc17359597/linked-venue-receipt-gate.json)
+- 固定指紋 HTTPS／WSS 回歸 `run-1c213f320ec6441fa06def2b64f7ceb6` 退出 0、476 項。兩種模式正常各 25 席同機連線，來源及公告均一次成功，50 份戰績、6 份 CSV、966 格全回放及雙封存。兩個日誌工具可讀回合併場原封存來源。活動場次歸零，C／F 快照 268 檔同雜湊。場次清單與 MR 校正門檻另通過 51 項套件及 48 項 Framework 檢查。 [HTTPS 回歸](../artifacts/server-package-checks/run-1c213f320ec6441fa06def2b64f7ceb6/checks.json) · [場次清單](../artifacts/venue-receipt-retry-catalog.log)
+- 20 項 Python 檢查通過。來源 `172d2c21`，GitHub Actions job `130020025484` 因帳務或支出上限未啟動。伺服器包與 1.15 相比，328 個清單檔案相同，只有啟動器與包內說明變更。沿用管理包 0.31.114、Windows 玩家端與 Quest ARM64 0.50.4／69，發行一致性及原開發簽章通過核對。跨機、頭盔與廠商硬體仍待驗收。 [發行核對](../artifacts/venue-release-0.50.4-receipt-retry.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42870452707)
+
 ## 2026-11-11 一次登記五房的原始遊戲來源
 
 - 控制台 0.31.114 下載第四版計畫。Windows 啟動器 1.15 等遊戲 0.50.4 準備各自的日誌來源，再由管理服務在同一筆 SQLite 交易核對序號及寫入全部來源。各遊戲核對原批次回條後才開啟 UDP。舊版 1.14 拒絕第四版計畫，新版啟動器連到 0.31.113 管理包也會在建立工作目錄前拒絕。既有第二、三版保留逐場登記流程。 [操作與版本](WINDOWS_SERVER_PACKAGE.md#依場館計畫批次啟動) · [混版結果](../artifacts/venue-source-batch-0504-build/old-management/run.json)
