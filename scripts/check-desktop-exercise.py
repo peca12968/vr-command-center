@@ -10,6 +10,7 @@ def module(name,file):
 capacity=module('exercise_capacity','check-desktop-capacity.py');vm=capacity.venue_module;debrief=module('exercise_debrief','check-desktop-debrief.py')
 active=module('exercise_active','check-desktop-active.py')
 udp=module('exercise_udp','udp_gate.py')
+continuity=module('exercise_continuity','check-desktop-multiplayer-long.py')
 
 def validate_control_receipts(responses,session_id,command_ids,previous_sequence):
     if len(responses)!=2 or len(set(command_ids))!=2:raise ValueError('Expected two distinct operator intents')
@@ -117,7 +118,7 @@ def summarize_link_report(report, owner):
             'playerLoopHz': sum(row['playerLoopFrames'] for row in samples) / sum(row['windowSeconds'] for row in samples)}
 
 
-class ExerciseVenue(vm.Venue):
+class ExerciseVenue(continuity.DiagnosticVenue):
     def __init__(self,args):
         super().__init__(args,artifact_family='desktop-exercise')
         self.exercise={};self.receipts=[];self.pauses={};self.link_reports={}
@@ -647,6 +648,9 @@ def run(v):
                 loss = udp.summarize_periodic_loss(traffic_boundaries, v.udp_meter.snapshot(), native)
                 v.save(mode+'-udp-periodic-loss.json', loss)
                 check(True, mode+': every original connection experienced verified bidirectional periodic loss and delivered its original result')
+            if v.args.pose_continuity:
+                v.finish_continuity()
+                check(True, 'linked: original native processes completed sparse pose diagnostics')
             v.stop_round(e)
             if not v.args.endurance:
                 playback=replay(v,e,pause if e is entries[0] else None);check(playback['complete'],e['name']+': all replay frames retain original bodies, movement/reload, seals and results')
@@ -672,6 +676,7 @@ def run(v):
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--runtime-root',type=Path,required=True);p.add_argument('--mode',choices=('linked','independent','both'),default='both');p.add_argument('--players-per-room',type=int,choices=(1,5),default=5);p.add_argument('--seconds',type=int,default=16)
     p.add_argument('--endurance',action='store_true',help='Explicit separate bounded native profile: --seconds 60 (smoke) or 900 (long); never combined with operator-controls')
+    p.add_argument('--pose-continuity', action='store_true', help='Collect existing sparse pose diagnostics from the original Linked endurance processes')
     p.add_argument('--replay-workers',type=int,choices=(1,5),default=1,help='Endurance only: independent closed-source replay readers; every stream retains rate4 and all original gates')
     p.add_argument('--operator-controls',action='store_true',help='After the base motion window, apply Storm Night Patrol then Fog Day Advance through normal management commands; no console UI or physical operator input')
     p.add_argument('--check-frame-review', action='store_true', help='Verify an exact native shot frame and resume during the short exercise')
@@ -684,6 +689,7 @@ def main():
     p.add_argument('--api-dll',type=Path,default=Path(os.environ.get('VR_COMMAND_API_DLL',ROOT/'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')));p.add_argument('--player-exe',type=Path,default=ROOT/'artifacts/desktop/VrCommand.exe');args=p.parse_args();args.duration=600;args.visible_room=0;args.job_workers=2;args.check=False
     if args.endurance and (args.seconds not in (60,900) or args.operator_controls) or not args.endurance and args.seconds not in range(12,41):p.error('Short seconds must be 12..40; endurance requires 60 or 900 and no operator-controls')
     if args.replay_workers!=1 and not args.endurance:p.error('Parallel replay readers require the explicit endurance profile')
+    if args.pose_continuity and (not args.endurance or args.mode != 'linked'):p.error('Pose continuity requires the Linked endurance profile')
     if args.check_frame_review and args.endurance:p.error('Frame review uses the short exercise')
     if args.check_policy_frames and not args.operator_controls:p.error('Policy frame review requires the operator-controls exercise')
     if args.marksmanship and (args.endurance or args.operator_controls or args.players_per_room!=5):p.error('Marksmanship requires five players per room and the short input profile without operator policy changes')
@@ -703,7 +709,16 @@ def main():
             if (v.directory/(entry['name']+'-full-replay.json')).exists():continue
             try:
                 if v.request(f'/api/sessions/{entry["id"]}/world',optional=True):
-                    v.seal(entry);result=replay(v,entry,v.pauses.get(entry['id']));forensics.append({'sessionId':entry['id'],'replayRead':True,'replayContinuityPassed':result['complete'],'acceptancePassed':False})
+                    v.seal(entry)
+                    if args.pose_continuity and not (v.directory/'multiplayer-continuity.json').exists():
+                        try:
+                            if not v.wait_for_player_results(entry)['allAcknowledged']:
+                                raise RuntimeError('Original failure case did not deliver all results before diagnostics stopped')
+                            v.finish_continuity()
+                            v.save('failure-pose-continuity.json', {'complete': True})
+                        except Exception as issue:
+                            v.save('failure-pose-continuity.json', {'complete': False, 'errorType': type(issue).__name__})
+                    result=replay(v,entry,v.pauses.get(entry['id']));forensics.append({'sessionId':entry['id'],'replayRead':True,'replayContinuityPassed':result['complete'],'acceptancePassed':False})
             except Exception as issue:forensics.append({'sessionId':entry['id'],'replayRead':False,'errorType':type(issue).__name__})
         v.save('failure-forensics.json',{'originalErrorType':type(error).__name__,'rounds':forensics,'acceptancePassed':False});raise
     finally:
