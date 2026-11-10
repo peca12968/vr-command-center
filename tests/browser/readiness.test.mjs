@@ -6,12 +6,30 @@ const missionClock = await readFile(new URL('../../src/VrCommand.Api/wwwroot/con
 const connection = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/connection-ui.js', import.meta.url), 'utf8');
 const dataModule = source => 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
 const { readinessView, roomReadinessView, roomEndpointText, mrReadinessView, roomMissionTimeView, roomVenuePhaseView,
-  roomMrTrackingPauseTarget, roomMrPauseView, venueTrackingRow } =
+  roomMrTrackingPauseTarget, roomMrPauseView, venueTrackingRow, roomPoseFrameTarget } =
   await import(dataModule(code.replace('./mission-clock.js', dataModule(missionClock)).replace('./connection-ui.js', dataModule(connection))));
 const player = { id: 'player', admissionId: 'first', roomId: 1, seat: 0 };
 const session = { id: 'session', sequence: 10, state: 'Preparing', players: [player] };
 const report = { version: 1, sessionId: 'session', sessionSequence: 10, sourceState: 'Fresh', sourceAgeMilliseconds: 10, origin: 'Simulation',
   players: [{ playerId: 'player', admissionId: 'first', roomId: 1, seat: 0, state: 'Participating', rigKind: 'Simulated', canParticipate: true }] };
+test('The read-only pose frame requires the fresh original room, stream, revision and seat', () => {
+  const room = { id: 1, sessionId: session.id, playerCount: 1, capacity: 5 };
+  const running = { ...session, state: 'Running', mode: 'Linked', roomIds: [1, 2, 3, 4, 5], combatStream: { streamId: 'stream' } };
+  const poseInterruption = { streamId: 'stream', worldSequence: 8, observedSequence: 9, seats: [1] };
+  const row = { ...report, roomId: 1, registered: 1, poseInterruption };
+  const operator = { role: 'RoomController', roomId: 1 };
+  const target = (entry = row, state = running, elapsed = 0, actor = operator) =>
+    roomPoseFrameTarget({ version: 1, rooms: [entry] }, room, state, elapsed, actor);
+  assert.deepEqual(target(), { mode: 'replay', sessionId: session.id, roomId: 1, streamId: 'stream', complete: false,
+    throughSequence: 8, witness: { kind: 'pose-interruption', observedSequence: 9, seats: [1], playerIds: ['player'] } });
+  assert.equal(target(row, running, 1491), null);
+  assert.equal(target(row, running, 0, { ...operator, roomId: 2 }), null);
+  assert.equal(target(row, { ...running, sequence: 11 }), null);
+  assert.equal(target(row, { ...running, state: 'Paused' }), null);
+  assert.equal(target({ ...row, poseInterruption: null }), null);
+  for (const change of [{ streamId: 'another' }, { worldSequence: 0 }, { observedSequence: 11 }, { seats: [2] }, { seats: [1, 1] }])
+    assert.equal(target({ ...row, poseInterruption: { ...poseInterruption, ...change } }), null);
+});
 test('Participation requires the current session, sequence, admission, room and seat', () => {
   assert.equal(readinessView(report, session, 0).rows[0].ready, true);
   for (const change of [{ sessionId: 'other' }, { version: 2 }, { sessionSequence: 9 }]) assert.equal(readinessView({ ...report, ...change }, session, 0).rows[0].ready, false);

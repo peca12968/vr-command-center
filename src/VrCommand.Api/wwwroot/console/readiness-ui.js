@@ -199,6 +199,24 @@ function mayManageRoom(room, session, actor) {
     && (actor?.role === 'Master' || (actor?.role === 'RoomController' && actor.roomId === room.id
       && session.mode === 'Independent' && session.roomIds.length === 1));
 }
+export function roomPoseFrameTarget(report, room, session, elapsed, actor) {
+  if (session?.state !== 'Running' || !session.roomIds?.includes(room.id)
+    || !(actor?.role === 'Master' || (actor?.role === 'RoomController' && actor.roomId === room.id))) return null;
+  const row = roomReadinessRow(report, room, session), pose = row?.poseInterruption;
+  if (!pose || sourceAt(row, elapsed) !== 'Fresh' || typeof pose.streamId !== 'string' || !pose.streamId
+    || pose.streamId !== session.combatStream?.streamId || !Number.isSafeInteger(pose.worldSequence) || pose.worldSequence < 1
+    || !Number.isSafeInteger(pose.observedSequence) || pose.observedSequence < 1 || pose.observedSequence > row.sessionSequence
+    || !Array.isArray(pose.seats) || !pose.seats.length || pose.seats.length > row.registered
+    || !Array.isArray(session.players)) return null;
+  const players = pose.seats.map(seat => session.players.filter(player => player.roomId === room.id && player.seat + 1 === seat));
+  if (pose.seats.some((seat, index, seats) => !Number.isInteger(seat) || seat < 1 || seat > room.capacity
+    || (index > 0 && seats[index - 1] >= seat)) || players.some(matches => matches.length !== 1 || typeof matches[0].id !== 'string'
+    || !matches[0].id) || new Set(players.map(matches => matches[0].id)).size !== players.length) return null;
+  return { mode: 'replay', sessionId: session.id, roomId: room.id, streamId: pose.streamId, complete: false,
+    throughSequence: pose.worldSequence, witness: { kind: 'pose-interruption', observedSequence: pose.observedSequence,
+      seats: pose.seats, playerIds: players.map(matches => matches[0].id) } };
+}
+
 export function roomMrTrackingPauseTarget(report, room, session, elapsed, actor) {
   if (session?.state !== 'Running' || !mayManageRoom(room, session, actor) || session.environment?.mode !== 'MR'
     || session.combatStream?.origin !== 'GameServer') return null;
@@ -305,6 +323,11 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
   }
   function settingFrame(roomId, kind) {
     return settingStatus(roomId, kind)?.target;
+  }
+  function poseFrame(roomId) {
+    const { rooms, sessions, actor } = getState(), room = rooms.find(row => row.id === roomId);
+    if (!active || failed || !room || document.visibilityState !== 'visible') return null;
+    return roomPoseFrameTarget(report, room, sessions.find(row => row.id === room.sessionId), performance.now() - started, actor);
   }
   function trackingPause(roomId, mode) {
     const { rooms, sessions, actor } = getState();
@@ -430,6 +453,11 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
         : roomMrTrackingPauseTarget)(report, room, session, elapsed, actor);
       pauseButton.hidden = !target;
       pauseButton.disabled = !target || busy || !!pending;
+      const poseButton = cell.parentElement.querySelector('[data-room-pose-frame]');
+      const pose = active && !failed && roomPoseFrameTarget(report, room, session, elapsed, actor);
+      poseButton.hidden = !pose;
+      poseButton.disabled = !pose || busy || !!pending;
+      poseButton.title = pose ? `席位 ${pose.witness.seats.join('、')} · 原畫格 ${pose.throughSequence}` : '';
       cell.parentElement.querySelector('[data-room-endpoint]').textContent = roomEndpointText(failed ? null : report, room, session);
       const clock = roomMissionTimeView(failed ? null : report, room, session, elapsed);
       const clockCell = cell.parentElement.querySelector('[data-room-clock]');
@@ -487,7 +515,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') update(); else reset(); });
   setInterval(update, 250);
-  return { update, venueReady, venueBegin, venueResume, settingFrame, settingStatus, trackingPause, vrResume,
+  return { update, venueReady, venueBegin, venueResume, settingFrame, settingStatus, trackingPause, vrResume, poseFrame,
     active(value) { active = value; if (value) update(); else reset(); } };
 }
 

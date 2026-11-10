@@ -101,6 +101,11 @@ internal static class ReadinessChecks
         Refresh(); bridge.Disconnect(2); Save();
         check(store.ReadinessByRoom(room).Single().VrParticipation is { AwaitingPose: [1], AwaitingAdmission.Length: 0, Eliminated.Length: 0 }
             && store.ReadinessByRoom(other).Single().VrParticipation is null, "A missing VR pose identifies only the original room and numbered seat");
+        check(store.ReadinessByRoom(room).Single().PoseInterruption is { Seats: [1] } vrPose
+            && vrPose.StreamId == stream.ToString("D") && vrPose.WorldSequence == sequence
+            && vrPose.ObservedSequence == manager.Get(id).Sequence
+            && store.ReadinessByRoom(other).Single().PoseInterruption is null,
+            "The affected room alone can open its exact original VR pose interruption frame");
         var vrPause = new ControlCommand(Guid.NewGuid(), ControlAction.Pause, ExpectedSequence: manager.Get(id).Sequence,
             VrParticipationRoomId: 1);
         void RejectPause(Func<CommandReceipt> action, string message)
@@ -114,6 +119,7 @@ internal static class ReadinessChecks
         var lastPose = clock.Now;
         clock.Now = lastPose.AddMilliseconds(1500.01);
         RejectPause(() => store.ExecuteCommand(id, vrPause, room), "Expired VR loss evidence cannot authorize a pause");
+        check(store.ReadinessByRoom(room).Single().PoseInterruption is null, "An expired pose frame is no longer advertised on the room card");
         clock.Now = lastPose;
         check(store.ReadinessByRoom(room).Single().VrParticipationPauseAvailable == true,
             "Only a fresh explicit unavailable VR pose enables the room pause");
@@ -148,6 +154,7 @@ internal static class ReadinessChecks
         Save(eliminated: true);
         check(store.ReadinessByRoom(room).Single().VrParticipation is { AwaitingPose.Length: 0, Eliminated: [1] },
             "An eliminated VR seat is not an operational pose warning");
+        check(store.ReadinessByRoom(room).Single().PoseInterruption is null, "Elimination does not expose a pose interruption frame");
         clock.Now = clock.Now.AddMilliseconds(1500.01);
         check(store.ReadinessByRoom(room).Single().VrParticipation is null, "An expired VR frame withdraws every seat exception");
         Refresh();
@@ -444,6 +451,9 @@ internal static class ReadinessChecks
             && rooms[4] is { MrLiving: 1, TrackedReady: 0, MrTrackingPauseAvailable: true }
             && manager.Get(id).State == SessionState.Running,
             "A tracked seat loss is scoped to its room while the operator retains control of Pause");
+        check(rooms[0].PoseInterruption is null && rooms[4].PoseInterruption is { WorldSequence: 8, Seats: [1] } mrPose
+            && mrPose.StreamId == stream.ToString("D") && mrPose.ObservedSequence == manager.Get(id).Sequence,
+            "Running MR tracking loss links only the affected room to the original accepted frame");
         var trackingPause = new ControlCommand(Guid.NewGuid(), ControlAction.Pause,
             ExpectedSequence: manager.Get(id).Sequence, MrTrackingRoomId: 5);
         Reject<MixedRealityTrackingPauseException>(() => manager.Execute(id, trackingPause, master),

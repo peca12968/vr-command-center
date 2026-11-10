@@ -8,6 +8,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
   captureErrors(page);
   const command = (id, action) => api(`/sessions/${id}/commands`, 'POST', { commandId: randomUUID(), action });
   const button = page.locator('[data-room-vr-participation-pause="4"]');
+  const poseFrame = page.locator('[data-room-pose-frame="4"]');
   const resumeButton = page.locator('[data-room-vr-resume="4"]');
   const pauseStatus = page.locator('[data-room-vr-pause="4"]');
   async function login(role) {
@@ -80,6 +81,45 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       check(wrong.code === 'vr-participation-pause-no-witness' && (await api(detail)).sequence === running.sequence,
         mode + ' refuses a pause witness from the wrong room');
       await login('Room4');
+      await until(() => publish(running, false), () => poseFrame.isEnabled());
+      await poseFrame.click();
+      await page.waitForFunction(() => document.getElementById('world-frame-message').textContent.includes('姿態中斷快照')
+        || document.getElementById('world-message').classList.contains('replay-error'), undefined, { polling: 100 });
+      assert.match(await page.locator('#world-frame-message').textContent(), /姿態中斷快照。\s*房間 4 · 席位 1/,
+        await page.locator('#world-message').textContent());
+      const viewed = Number(await page.locator('#world-canvas').getAttribute('data-sequence'));
+      const original = await api(detail + '/world/frames/' + viewed, 'GET', undefined, 'Room4');
+      check(viewed > 1 && original.packet.sequence === viewed && original.packet.observedSequence === running.sequence
+        && original.packet.frame.players.find(row => row.id === player.playerId)?.connected === false
+        && (await api(detail)).sequence === running.sequence,
+        mode + ' room desk opens its exact original saved interruption frame without changing the mission');
+      await page.locator('#tab-operations').click();
+      if (!linked) {
+        const watch = url => url.pathname === '/api' + detail + '/world/watch' && url.searchParams.get('mode') === 'replay';
+        await page.route(watch, async request => {
+          const response = await request.fetch();
+          const body = (await response.text()).split('\n').map(line => {
+            if (!line.startsWith('data: ')) return line;
+            const data = JSON.parse(line.slice(6));
+            if (data.packet) data.packet.observedSequence--;
+            return 'data: ' + JSON.stringify(data);
+          }).join('\n');
+          await request.fulfill({ response, body });
+        });
+        try {
+          await until(() => publish(running, false), () => poseFrame.isEnabled());
+          await poseFrame.click();
+          await page.locator('#world-message').filter({ hasText: '姿態中斷或指令序號不同' }).waitFor();
+          check(await page.locator('#world-canvas').getAttribute('data-sequence') === null,
+            'An altered interruption replay packet does not leave any frame on the viewer');
+        } finally {
+          await page.unroute(watch);
+        }
+        await page.locator('#tab-operations').click();
+      }
+      await until(() => publish(running, true), async () => await poseFrame.isHidden()
+        && (await page.locator('[data-room-readiness="4"]').innerText()).startsWith('1 / 1'));
+      check(await poseFrame.isHidden(), mode + ' recovery withdraws the live pose frame shortcut');
       if (linked) {
         await until(() => publish(running, false), () => page.locator('[data-room-readiness="4"]').innerText()
           .then(text => text.includes('姿態待確認席位')));

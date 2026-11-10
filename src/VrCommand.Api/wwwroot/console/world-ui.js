@@ -15,7 +15,8 @@ const roomName = room => room === 'all' ? '全部房間' : '房間 ' + room;
 const LIVE_RETRY_DELAYS = [500, 1000, 2000];
 const LIVE_IDLE_MILLISECONDS = 6000;
 const isBeginWitness = witness => witness?.kind === 'tracking-begin' || witness?.kind === 'participation-begin';
-const witnessLabels = { enemies: '敵軍', environment: '環境', 'tracking-begin': '追蹤開場', 'participation-begin': '有效姿態開場' };
+const witnessLabels = { enemies: '敵軍', environment: '環境', 'tracking-begin': '追蹤開場', 'participation-begin': '有效姿態開場',
+  'pose-interruption': '姿態中斷' };
 
 export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips) {
   let active = false, scene, controller, epoch = 0, listEpoch = 0, listController, info, frame, geometry = '', mode = '', connected = false, received = 0;
@@ -439,6 +440,17 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   }
   function matchesWitness(packet, target, header) {
     const { kind, setting, population, appliedAtSequence, elapsedMilliseconds, roomIds } = target.witness;
+    if (kind === 'pose-interruption') {
+      const { observedSequence, playerIds } = target.witness;
+      const frame = packet.frame;
+      if (packet.observedSequence !== observedSequence || packet.suspended !== false || frame?.phase !== 'Running'
+        || !Array.isArray(frame.players)) return false;
+      return playerIds.every(id => {
+        const players = frame.players.filter(player => player.id === id && player.roomId === target.roomId);
+        return players.length === 1 && Number.isInteger(players[0].health) && players[0].health > 0 && players[0].health <= 100
+          && (players[0].connected === false || (players[0].connected === true && players[0].rig?.kind === 'None'));
+      });
+    }
     if (isBeginWitness(target.witness)) {
       const frame = packet.frame;
       const mr = header.calibration === 'quest-room-mr-v1';
@@ -620,6 +632,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
             const players = witnessFrame.packet.frame.players;
             const tracked = players.filter(player => player.rig.kind === 'Tracked').length;
             text += ` 此格追蹤 ${tracked} 席、合成 ${players.length - tracked} 席。`;
+          } else if (witness.kind === 'pose-interruption') {
+            text += ` 房間 ${target.roomId} · 席位 ${witness.seats.join('、')}。`;
           }
           $('world-frame-message').textContent = text;
         }

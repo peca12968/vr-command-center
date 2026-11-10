@@ -164,6 +164,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const alertCard = page.locator('[data-room-readiness="4"]');
     const alerts = page.locator('[data-room-readiness].tracking-attention');
     const quickPause = page.locator('[data-room-mr-tracking-pause="4"]');
+    const poseFrame = page.locator('[data-room-pose-frame="4"]');
     const pauseWitness = page.locator('[data-room-mr-pause="4"]');
     const quickRequest = request => request.url().endsWith('/api' + route + '/commands') && request.method() === 'POST'
       && request.postDataJSON()?.mrTrackingRoomId === 4;
@@ -179,10 +180,24 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const deniedRoom = await api(route + '/commands', 'POST',
       { commandId: randomUUID(), action: 'Pause', expectedSequence: damaged.sequence, mrTrackingRoomId: 4 }, 'Room4', 403);
     check(Boolean(deniedRoom.error) && (await api(route)).state === 'Running', 'A room key cannot pause a linked MR session');
+    await publishUntil(panel, 'WaitingPlayers', damaged, [2], () => poseFrame.isEnabled());
+    await poseFrame.click();
+    await page.waitForFunction(() => document.getElementById('world-frame-message').textContent.includes('姿態中斷快照')
+      || document.getElementById('world-message').classList.contains('replay-error'), undefined, { polling: 100 });
+    assert.match(await page.locator('#world-frame-message').textContent(), /姿態中斷快照。\s*房間 4 · 席位 2/,
+      await page.locator('#world-message').textContent());
+    const reviewed = Number(await page.locator('#world-canvas').getAttribute('data-sequence'));
+    const snapshot = await api(route + '/world/frames/' + reviewed);
+    check(snapshot.packet.sequence === reviewed && snapshot.packet.observedSequence === damaged.sequence
+      && snapshot.packet.frame.players.some(player => player.roomId === 4 && player.health > 0 && !player.connected)
+      && (await api(route)).sequence === damaged.sequence,
+      'The MR room card opens the exact lost-tracking frame without including the eliminated seat');
+    await page.locator('#tab-operations').click();
+    await publishUntil(panel, 'WaitingPlayers', damaged, [2], () => poseFrame.isEnabled());
     await panel.screenshot({ path: path.join(screenshots, 'mr-running-waiting-seats.png') });
     await panel.locator('#mr-start-status').filter({ hasText: '快照已過期' }).waitFor();
     await alerts.waitFor({ state: 'hidden' });
-    check(await panel.locator('[data-mr-room]').count() === 0 && !await currentAlert() && await quickPause.isHidden(),
+    check(await panel.locator('[data-mr-room]').count() === 0 && !await currentAlert() && await quickPause.isHidden() && await poseFrame.isHidden(),
       'A stale Running frame clears the previously known missing seats and room alert');
     await publishUntil(panel, 'Ready', damaged, [], async () => await alertCard.innerText() === 'MR · 4 / 4 追蹤就緒');
     check(await alerts.count() === 0 && await panel.locator('li.tracking-attention').count() === 0
