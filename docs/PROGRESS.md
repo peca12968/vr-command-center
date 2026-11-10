@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-10 逐席核對 Quest 已安裝的發行 APK
+
+Quest 批次部署可用 `-ReleaseReport` 讀取四件套件的離線驗證報告，逐席核對裝置的版本代碼與原 APK SHA-256。整批先做唯讀預檢，部署逐席寫入前再核對。若 APK 已更換、無法讀取或回傳多個 APK，該席不寫入。 [部署操作](QUEST3.md#核對頭盔內已安裝的發行-apk)
+
+- 0.31.91 管理包、0.49.1 Windows 伺服器與玩家包、原 Quest 0.49.1／64 APK 通過離線一致性核對，APK v2 簽章由 Android 工具驗證。報告在 `artifacts/quest-installed-apk-gate/venue-release.json`，SHA-256 `9a041f5d8cc5307a68ebc386f4c21cb31c5f63549659e8e1b93bc516a2442a77`。
+- 整合通過 11 項，實際管理服務對合併及獨立模式各簽發 25 份原票券。模擬 ADB 對實際 APK 檔案計算雜湊，各模式 25 席預檢及部署成功，部署後的連線檔與原簽發內容一致。同版號不同雜湊案例在任何裝置寫入前回傳退出碼 1。結果在 `artifacts/quest-installed-apk-gate/acceptance.json`。本輪未執行頭盔端命令、實體入場或跨機連線。
+- Quest 部署回歸 48 項、離線發行回歸 5 項。功能來源 `96ecd86037e709d18a144e20e28d15a9d3f81ea6`。GitHub Actions job `129686337008` 因帳務或支出上限未啟動。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42773440017)
+
 ## 2026-11-10 從結案批次套用五房原任務版本
 
 控制台 0.31.91 的「全館收尾」可帶回五個獨立房間的原保存版本。逐房重新檢查場地，保留編輯器草稿，待五房空閒並由主控確認才建立新場次。合併或缺房批次不提供此操作。 [操作說明](MISSION_VERSIONS.md#從全館收尾套用五房原版本)
