@@ -2,6 +2,8 @@
 
 即時模擬與單房停止的操作方式見[硬體模擬閘道](HARDWARE.md#停止單房模擬閘道)。
 
+模擬器 0.2.11 在管理服務拒絕或回覆無效時，保留受影響房間的終止報告與模擬確認。已解壓驗證的 `hardware-simulator-0.2.11-verified-net10.zip` 為 224,896 bytes，SHA-256 `a71e547ed32d87aa8323fc7bc3e5a0ec78ee4cd6be1d351e87b95d0699d2eeeb`，清單含 8 個檔案。 [五房操作](HARDWARE.md#一次啟動與停止五房排演)
+
 模擬器 0.2.10 可由一個程序核對、啟動與停止五房排演，並輸出逐房及全館結果。`hardware-simulator-0.2.10-net10.zip` 為 217,733 bytes，SHA-256 `79c18d5ff76d22851f34531df8add6459d668612eac2a10b4e58ffb88d80efc9`，清單含 8 個檔案。 [五房操作](HARDWARE.md#一次啟動與停止五房排演)
 
 模擬器 0.2.9 可在電腦上彙整五房狀態。`hardware-simulator-0.2.9-final-net10.zip` 為 212,827 bytes，SHA-256 `bbe7f61f5144ed95abfd6511ab8c4fec2e845f4a17c400daf7dbd74c4990326a`，清單含 8 個檔案。 [五房狀態操作](HARDWARE.md#查看五房排演狀態)
