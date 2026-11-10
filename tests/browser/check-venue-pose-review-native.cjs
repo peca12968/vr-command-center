@@ -7,7 +7,7 @@ const { waitForLiveFrame } = require('./live-watch-fault.cjs');
 
 async function main() {
   const [descriptor, out] = process.argv.slice(2);
-  const { base, key, sessionId, roomId, seat, playerId, streamId } = JSON.parse(await fs.readFile(descriptor, 'utf8'));
+  const { base, key, sessionId, roomId, seat, playerId, streamId, venueOverview } = JSON.parse(await fs.readFile(descriptor, 'utf8'));
   assert.match(base, /^http:\/\/127\.0\.0\.1:\d+$/);
   const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   try {
@@ -33,7 +33,16 @@ async function main() {
     const initial = await get(sessionPath);
     assert.equal(initial.state, 'Running');
     assert.equal(initial.combatStream.streamId, streamId);
-    await page.locator(`[data-room-pose-frame="${roomId}"]`).click();
+    if (venueOverview) {
+      const row = page.locator(`[data-live-tracking-room="${roomId}"]`);
+      const button = row.getByRole('button', { name: `房間 ${roomId} 檢視姿態中斷快照` });
+      await button.waitFor();
+      assert.ok(Number.isFinite(Date.parse(await page.locator('#venue-live-tracking-sample time').getAttribute('datetime'))));
+      await button.evaluate(element => element.addEventListener('click', () => {
+        document.body.dataset.testReviewFrame = element.closest('li').dataset.worldSequence;
+      }, { once: true, capture: true }));
+      await button.click();
+    } else await page.locator(`[data-room-pose-frame="${roomId}"]`).click();
     await page.waitForFunction(() => document.getElementById('world-frame-message').textContent.includes('姿態中斷快照')
       || document.getElementById('world-message').classList.contains('replay-error'), undefined, { polling: 100 });
     assert.match(await page.locator('#world-frame-message').textContent(), new RegExp(`房間 ${roomId} · 席位 ${seat}。$`),
@@ -41,6 +50,7 @@ async function main() {
     const canvas = page.locator('#world-canvas');
     const camera = await canvas.getAttribute('data-camera');
     const before = Number(await canvas.getAttribute('data-sequence'));
+    if (venueOverview) assert.equal(Number(await page.locator('body').getAttribute('data-test-review-frame')), before);
     const viewed = (await get(sessionPath + '/world/frames/' + before)).packet;
     const original = viewed.frame.players.find(player => player.id === playerId);
     assert.ok(original?.health > 0 && original.roomId === roomId && original.connected === false);
@@ -79,7 +89,7 @@ async function main() {
     assert.deepEqual(writes, []);
     assert.deepEqual(errors, []);
     await page.locator('#world-player').screenshot({ path: path.join(out, 'live.png') });
-    await fs.writeFile(path.join(out, 'checks.json'), JSON.stringify({ complete: true, sessionId, streamId, roomId, seat, before, after }, null, 2), { flag: 'wx' });
+    await fs.writeFile(path.join(out, 'checks.json'), JSON.stringify({ complete: true, sessionId, streamId, roomId, seat, before, after, venueOverview }, null, 2), { flag: 'wx' });
   } finally { await browser.close(); }
 }
 main().catch(error => { console.error(error.name + ': native pose review failed'); process.exitCode = 1; });

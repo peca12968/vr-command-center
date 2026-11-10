@@ -27,7 +27,7 @@ public static class WorldRoutes
         app.MapGet("/api/rooms/readiness", (WorldRecordings store, HttpContext context) =>
         {
             context.Response.Headers.CacheControl = "no-store";
-            return new { version = 1, rooms = store.ReadinessByRoom(Actor(context)) };
+            return store.ReadRoomsReadiness(Actor(context));
         });
         app.MapGet("/api/sessions/{id:guid}/connection-endpoint", (Guid id, WorldRecordings store, HttpContext context) => store.ConnectionEndpoint(id, Actor(context)));
         app.MapPut("/api/sessions/{id:guid}/connection-endpoint", (Guid id, ConnectionEndpointDraft draft, WorldRecordings store, HttpContext context) => store.PublishEndpoint(id, draft, Actor(context)));

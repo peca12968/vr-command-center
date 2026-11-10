@@ -2531,9 +2531,12 @@ def main():
         destination.mkdir()
         room, seat = player['roomId'], player['seat'] + 1
         sid, stream = entry['sessionId'], entry['ready']['streamId']
+        venue_overview = args.check_venue_live_tracking
+        desk = 'Master' if venue_overview else f'Room{room}'
+        review_source = 'Master tracking overview' if venue_overview else 'room desk'
         descriptor = runtime / (mode + '-pose-review-private.json')
-        descriptor.write_text(json.dumps({'base':uri,'key':keys[f'Room{room}'],'sessionId':sid,'roomId':room,
-                                          'seat':seat,'playerId':player['id'],'streamId':stream}),encoding='utf-8')
+        descriptor.write_text(json.dumps({'base':uri,'key':keys[desk],'sessionId':sid,'roomId':room,
+                                          'seat':seat,'playerId':player['id'],'streamId':stream,'venueOverview':venue_overview}),encoding='utf-8')
         with (destination/'browser.log').open('xb') as log:
             browser = subprocess.Popen([node,str(ROOT/'tests/browser/check-venue-pose-review-native.cjs'),
                                         str(descriptor),str(destination)],stdout=log,stderr=subprocess.STDOUT)
@@ -2543,15 +2546,16 @@ def main():
                         raise RuntimeError('Pose review browser exited before opening the original snapshot')
                     file = destination/'reviewed.json'
                     return read(file) if file.is_file() else None
-                reviewed = wait(saved_review,30,mode+' room desk opens the original native pose frame')
+                reviewed = wait(saved_review,30,mode+' '+review_source+' opens the original native pose frame')
                 marker.unlink()
-                check(browser.wait(timeout=30)==0,mode+' room desk returns from the saved frame to live without writing')
+                check(browser.wait(timeout=30)==0,mode+' '+review_source+' returns from the saved frame to live without writing')
             finally:
                 if browser.poll() is None:
                     browser.kill()
                     browser.wait(timeout=10)
         result = read(destination/'checks.json')
-        check(result['complete'] and (result['sessionId'],result['streamId'],result['roomId'],result['seat'])==(sid,stream,room,seat)
+        check(result['complete'] and result['venueOverview'] is venue_overview
+              and (result['sessionId'],result['streamId'],result['roomId'],result['seat'])==(sid,stream,room,seat)
               and result['after']>result['before']==reviewed['sequence']>=minimum_sequence,
               mode+' native browser records the original room and exact interruption and recovery frames')
         route = '/api/sessions/'+sid+'/world/frames/'

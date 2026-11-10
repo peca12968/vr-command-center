@@ -60,12 +60,15 @@ const overview = { version: 1, rooms: [roomRow] };
 test('Live venue tracking counts only exact current seats and clears stale or malformed evidence', () => {
   const current = { ...session, state: 'Running', players: [0, 1, 2].map(seat => ({ ...player, seat })) };
   const venueTracking = { trackedSeats: [1], simulatedSeats: [2], waitingSeats: [], eliminatedSeats: [3] };
-  const live = fields => ({ ...overview, rooms: [{ ...roomRow, venueTracking, ...fields }] });
-  assert.deepEqual(venueTrackingRow(live(), room, current, 1490), { state: 'Incomplete', tracked: 1,
+  const live = fields => ({ ...overview, trackingSampledAtUtc: '2026-11-10T01:00:00.1234567+00:00',
+    rooms: [{ ...roomRow, venueTracking, trackingWorldSequence: 8, ...fields }] });
+  assert.deepEqual(venueTrackingRow(live(), room, current, 1490), { state: 'Incomplete', tracked: 1, worldSequence: 8,
     text: '追蹤 1 / 5 席 · 合成席位 2 · 已淘汰席位 3 · 未編列席位 4、5' });
   assert.equal(venueTrackingRow(live(), room, current, 1490.01).state, 'Stale');
   assert.equal(venueTrackingRow(live({ sessionSequence: 9 }), room, current, 0).state, 'Updating');
   assert.equal(venueTrackingRow(live({ venueTracking: undefined }), room, current, 0).state, 'WaitingRevision');
+  assert.equal(venueTrackingRow({ ...live(), trackingSampledAtUtc: 'invalid' }, room, current, 0).state, 'WaitingRevision');
+  assert.equal(venueTrackingRow(live({ trackingWorldSequence: 0 }), room, current, 0).state, 'Unavailable');
   for (const invalid of [{ eliminatedSeats: [2] }, { eliminatedSeats: [4] }, { trackedSeats: [], waitingSeats: [1] }])
     assert.equal(venueTrackingRow(live({ venueTracking: { ...venueTracking, ...invalid } }), room, current, 0).state, 'Unavailable');
   assert.equal(venueTrackingRow(live(), room, { ...current, state: 'Paused' }, 0).tracked, undefined);

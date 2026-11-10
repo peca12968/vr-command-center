@@ -29,7 +29,9 @@ const report = mountReport(() => state, logout, () => { renderStatistics(); clos
 const venueReport = mountVenueReport(() => state, logout, download);
 const venueHistory = mountVenueHistory(api, selectVenueClosure);
 const readiness = mountReadiness(() => state, logout);
-const roomReadiness = mountRoomReadiness(() => state, logout, applyVenuePermissions, venueClimateText, venueEnemyText);
+const roomReadiness = mountRoomReadiness(() => state, logout, applyVenuePermissions, venueClimateText, venueEnemyText, target => {
+  if (!state.busy && !state.pending) tab('world', target);
+});
 const connections = mountConnections(() => state, logout);
 const closure = mountClosure(() => state, logout, target => tab('world', target), report);
 const alignment = mountAlignment(api, download);

@@ -13,6 +13,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
   const start = page.locator('#venue-begin');
   const liveTracking = page.locator('#venue-live-tracking');
   const liveSummary = page.locator('#venue-live-tracking-summary');
+  const liveSample = page.locator('#venue-live-tracking-sample');
   const liveRoom = room => page.locator(`[data-live-tracking-room="${room}"]`);
   const status = room => page.locator(`[data-begin-room="${room}"]`);
   const seatState = (room, seat) => page.locator(`[data-begin-seat-room="${room}"] [data-begin-seat="${seat}"]`).getAttribute('data-seat-state');
@@ -282,14 +283,31 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       const waitSummary = text => () => liveSummary.filter({ hasText: text }).isVisible();
       check(await liveTracking.count() === 1, `${mode} provides a live tracking overview after Begin`);
       await publishUntil(sources, true, waitSummary('追蹤 25 / 25 席'));
-      const overview = (await api('/rooms/readiness')).rooms;
-      const scoped = (await api('/rooms/readiness', 'GET', undefined, 'Room2')).rooms;
-      check(overview.every(room => room.venueTracking.trackedSeats.join() === '1,2,3,4,5')
-        && scoped.length === 1 && !Object.hasOwn(scoped[0], 'venueTracking'), `${mode} verifies five original seats per room and keeps the venue breakdown Master-only`);
+      const overview = await api('/rooms/readiness');
+      const scoped = await api('/rooms/readiness', 'GET', undefined, 'Room2');
+      check(overview.rooms.every(room => room.venueTracking.trackedSeats.join() === '1,2,3,4,5' && room.trackingWorldSequence > 0)
+        && Number.isFinite(Date.parse(overview.trackingSampledAtUtc)) && scoped.rooms.length === 1
+        && !Object.hasOwn(scoped, 'trackingSampledAtUtc') && !Object.hasOwn(scoped.rooms[0], 'venueTracking')
+        && !Object.hasOwn(scoped.rooms[0], 'trackingWorldSequence'), `${mode} verifies original frames at a shared time and keeps the venue breakdown Master-only`);
+      check(await liveSample.isVisible() && Number.isFinite(Date.parse(await liveSample.locator('time').getAttribute('datetime')))
+        && (await liveRoom(1).innerText()).includes('原畫格 #'), `${mode} live tracking exposes the shared clock and room frame number`);
       await publishUntil(sources, false, waitSummary('追蹤 23 / 25 席'), true);
       check((await liveRoom(1).innerText()).includes('合成席位 5') && (await liveRoom(5).innerText()).includes('待確認席位 2'),
         `${mode} separates one simulated seat and a different seat that lost tracking`);
       await liveTracking.screenshot({ path: path.join(screenshots, `live-tracking-${mode.toLowerCase()}-loss.png`) });
+      const interruption = liveRoom(5).getByRole('button', { name: '房間 5 檢視姿態中斷快照' });
+      await publishUntil(sources, false, () => interruption.isVisible(), true);
+      const lostSession = forRoom(5).id;
+      const beforeReview = await api('/sessions');
+      const read = page.waitForRequest(request => new URL(request.url()).pathname === `/api/sessions/${lostSession}/world/watch`);
+      const originalFrame = await liveRoom(5).getAttribute('data-world-sequence');
+      await interruption.click();
+      const query = new URL((await read).url()).searchParams;
+      await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${originalFrame} 格的姿態中斷快照` }).waitFor();
+      check(query.get('mode') === 'replay' && query.get('throughFrame') === originalFrame
+        && await canvas.getAttribute('data-sequence') === originalFrame && await page.locator('#world-room').inputValue() === '5'
+        && JSON.stringify(await api('/sessions')) === JSON.stringify(beforeReview), `${mode} tracking opens the exact original interruption frame without changing the session`);
+      await page.locator('#tab-operations').click();
       const first = sources.find(source => source.route === `/sessions/${forRoom(1).id}`);
       const changed = await api(first.route + '/commands', 'POST', { commandId: randomUUID(), action: 'SetEnvironment',
         environment: first.snapshot.environment });
@@ -306,7 +324,9 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       first.snapshot = resumed.session;
       await publishUntil(sources, true, waitSummary('追蹤 25 / 25 席'));
       await liveRoom(1).filter({ hasText: '快照已過期' }).waitFor();
-      check(!(await waitSummary('追蹤 25 / 25 席')()), `${mode} withdraws confirmed counts when the original snapshots expire`);
+      await liveSample.waitFor({ state: 'hidden' });
+      check(!(await waitSummary('追蹤 25 / 25 席')()) && await interruption.isHidden(),
+        `${mode} withdraws counts, common time and review actions when the original snapshots expire`);
       await publishUntil(sources, true, waitSummary('追蹤 25 / 25 席'));
       const endTargets = (await api('/venue/phase')).end.map(({ sessionId, phaseSinceSequence }) => ({ sessionId, phaseSinceSequence }));
       const ended = await api('/venue/phase', 'POST', { action: 'End', targets: endTargets }, 'Master', 200, undefined, randomUUID());
