@@ -642,10 +642,31 @@ function Get-MappedQuestStatus($Row, $Inventory) {
     return $result
 }
 
+function Read-QuestDeviceSerial([string]$TargetSerial) {
+    $lines = @(& $AdbPath -s $TargetSerial shell getprop ro.serialno 2>$null)
+    if ($LASTEXITCODE -ne 0 -or $lines.Count -ne 1 -or $lines[0] -cnotmatch '\A[A-Za-z0-9][A-Za-z0-9._-]{0,127}\z' -or
+        $lines[0] -match '\A(?:unknown|0+)\z') { return $null }
+    return [string]$lines[0]
+}
+
 function Invoke-MappedQuestSeats($Venue, [object[]]$Map) {
     if (-not (Test-Path -LiteralPath $AdbPath -PathType Leaf)) { throw 'Android platform-tools are not installed.' }
     $inventory = Get-QuestDeviceInventory
     $devices = @($Map | ForEach-Object { Get-MappedQuestStatus $_ $inventory })
+    $reportedSerials = [string[]]::new($Map.Count)
+    $firstSeatBySerial = [Collections.Generic.Dictionary[string,int]]::new([StringComparer]::OrdinalIgnoreCase)
+    for ($index = 0; $index -lt $Map.Count; $index++) {
+        if ($devices[$index].status -cne 'ready') { continue }
+        $reportedSerial = Read-QuestDeviceSerial $Map[$index].serial
+        if (-not $reportedSerial) { $devices[$index].status = 'device-identity-unavailable'; continue }
+        $reportedSerials[$index] = $reportedSerial
+        if ($firstSeatBySerial.ContainsKey($reportedSerial)) {
+            $devices[$firstSeatBySerial[$reportedSerial]].status = 'duplicate-device'
+            $devices[$index].status = 'duplicate-device'
+        } else {
+            $firstSeatBySerial.Add($reportedSerial, $index)
+        }
+    }
     $report = [ordered]@{ phase = 'preflight'; topology = $Venue.Report.topology; expectedVersionCode = $ExpectedVersionCode;
         earliestExpiryUtc = $Venue.Report.earliestExpiryUtc; complete = $false; devices = $devices }
     if ($AllowPartialMap) {
@@ -676,6 +697,9 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map) {
         if ($connection.Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) {
             $device.status = 'ticket-expired'; return $report
         }
+        $reportedSerial = Read-QuestDeviceSerial $row.serial
+        if (-not $reportedSerial) { $device.status = 'device-identity-unavailable'; return $report }
+        if ($reportedSerial -cne $reportedSerials[$index]) { $device.status = 'device-identity-changed'; return $report }
         try {
             Set-QuestConnection $row.serial $connection.Ticket.Config $connection.Ticket $connection.Alignment -RequestMixedReality:($null -ne $connection.Alignment)
             $device.filesVerified = $true

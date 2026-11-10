@@ -1094,7 +1094,30 @@ else:
         self.assertNotIn('unmapped-device', '\n'.join(commands))
         self.assertNotIn('fixture-', result.stdout)
 
-    def test_mapped_deployment_stops_after_failure_and_keeps_prior_results(self):
+    def test_device_map_rejects_shared_and_unavailable_device_identities(self):
+        files, _ = self.bundle('Independent')
+        path, _ = self.device_map()
+        faults = {'fixture-01': 'identity-duplicate', 'fixture-07': 'identity-duplicate',
+                  'fixture-22': 'identity-invalid', 'fixture-25': 'identity-missing'}
+        result = self.run_fleet(files, path, '-CheckOnly', faults=faults)
+        self.assertEqual(1, result.returncode, result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(('preflight', False), (report['phase'], report['complete']))
+        self.assertEqual({0: 'duplicate-device', 6: 'duplicate-device', 21: 'device-identity-unavailable',
+                          24: 'device-identity-unavailable'},
+                         {i: row['status'] for i, row in enumerate(report['devices']) if row['status'] != 'ready'})
+        commands = (self.root / 'adb.log').read_text(encoding='utf-8').splitlines()
+        self.assertEqual(25, sum(line.endswith(' shell getprop ro.serialno') for line in commands))
+        self.assertTrue(all(line == 'devices' or ' shell getprop ' in line or ' shell pm list packages ' in line for line in commands))
+        self.assertNotIn('HARDWARE-SERIAL-', result.stdout + result.stderr)
+
+    def test_mapped_deployment_stops_after_file_failure_and_keeps_prior_results(self):
+        self.assert_mapped_deployment_stops('config-stage-changed', 'file-verification-failed')
+
+    def test_mapped_deployment_stops_before_writing_to_changed_device(self):
+        self.assert_mapped_deployment_stops('identity-changed', 'device-identity-changed')
+
+    def assert_mapped_deployment_stops(self, fault, expected_status):
         files, seats = self.bundle('Linked')
         path, _ = self.device_map()
         session = str(self.session_ids[0])
@@ -1127,14 +1150,14 @@ else:
             thread.start()
             try:
                 result = self.run_fleet(files, path, '-DeployMappedSeats', '-ManagementApi', f'http://127.0.0.1:{server.server_port}',
-                                        faults={'fixture-04': 'config-stage-changed'}, environment={'VR_COMMAND_MASTER_KEY': 'PRIVATE_MASTER_CANARY'})
+                                        faults={'fixture-04': fault}, environment={'VR_COMMAND_MASTER_KEY': 'PRIVATE_MASTER_CANARY'})
             finally:
                 server.shutdown()
                 thread.join(timeout=5)
         self.assertEqual(1, result.returncode, result.stderr)
         report = json.loads(result.stdout)
         self.assertEqual(('deployment', False, True), (report['phase'], report['complete'], report['managementVerified']))
-        self.assertEqual(['launch-requested'] * 3 + ['file-verification-failed'] + ['not-attempted'] * 21,
+        self.assertEqual(['launch-requested'] * 3 + [expected_status] + ['not-attempted'] * 21,
                          [row['status'] for row in report['devices']])
         self.assertEqual([True] * 3 + [None] * 22, [row.get('filesVerified') for row in report['devices']])
         self.assertEqual(['/api/mr-deployment/venue-check', f'/api/sessions/{session}/connection-endpoint'], calls)
@@ -1146,9 +1169,16 @@ else:
             self.assertEqual(seats[1][f'room-01-seat-{seat:02}.json']['joinTicket'], actual['joinTicket'])
         commands = (self.root / 'adb.log').read_text(encoding='utf-8').splitlines()
         first_write = next(index for index, line in enumerate(commands) if 'shell am force-stop' in line)
-        self.assertEqual(51, first_write)
+        self.assertEqual(77, first_write)
+        self.assertEqual(29, sum(line.endswith(' shell getprop ro.serialno') for line in commands))
+        if fault == 'identity-changed':
+            self.assertEqual(['-s fixture-04 shell pm list packages -e --show-versioncode --user current com.vrcommand.quest',
+                              '-s fixture-04 shell getprop ro.serialno',
+                              '-s fixture-04 shell getprop ro.serialno'],
+                             [line for line in commands if line.startswith('-s fixture-04 ') and not line.endswith('ro.product.model')])
         self.assertEqual(3, sum(' shell monkey ' in line for line in commands))
         self.assertNotIn('v2.', result.stdout + result.stderr)
+        self.assertNotIn('HARDWARE-SERIAL-', result.stdout + result.stderr)
         self.assertNotIn('PRIVATE_MASTER_CANARY', result.stdout + result.stderr)
 
     def test_bundle_rejects_mismatched_files_before_a_selected_deployment(self):

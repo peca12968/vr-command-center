@@ -320,7 +320,7 @@ $seats = foreach ($room in 1..5) {
     Set-Content -LiteralPath .\device-map.json -Encoding utf8
 ```
 
-用原始部署 ZIP 與清單預檢。每席會回報裝置狀態和已讀到的版本。缺席、離線、未授權、型號或版本不符時，指令回傳非零結束碼。只有 `-DeployMappedSeats` 會寫入裝置。
+用原始部署 ZIP 與清單預檢。每席會回報裝置狀態和已讀到的版本。腳本也從各台裝置讀取 Android 的 `ro.serialno`。即使清單中的 ADB 連線識別碼不同，只要裝置回報同一序號，涉及的席位都會標記為 `duplicate-device`。讀不到可用序號時標記為 `device-identity-unavailable`。缺席、離線、未授權、型號、版本或裝置身分檢查失敗時，指令回傳非零結束碼。回報不包含讀取的裝置序號。 [Android ADB 文件](https://developer.android.com/tools/adb) · [AOSP 的 shell 序號讀取權限](https://android.googlesource.com/platform/system/sepolicy/+/34df8fb682160d5862f463547b31e846aa8ab52d/private/shell.te)
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.zip `
@@ -335,7 +335,9 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.z
     -ManagementApi http://127.0.0.1:5081
 ```
 
-中途失敗會停止並以非零結束碼回報。`launch-requested` 表示該席的檔案已核對，並已送出啟動指令。`file-verification-failed` 表示無法確認裝置檔案與預期內容相同，該席未送出啟動。`deployment-failed` 表示其他部署步驟失敗。兩種失敗都可能已停止遊戲或啟用部分檔案。`not-attempted` 表示該席未進入寫入階段。已處理席位保留當下結果。可按回報定位故障，必要時重新配發票券，再用單席流程處理尚未成功的裝置。 [核對頭盔追蹤席位](#核對頭盔追蹤席位)
+正式部署在各席開始寫入前會再讀一次裝置序號。若和預檢結果不同，該席會標記為 `device-identity-changed`。若讀取失敗則標記為 `device-identity-unavailable`。兩種情況都會在該席寫入前停止。這些檢查適用於完整與部分裝置清單，現場仍須依實體標籤核對房號及席位。
+
+中途失敗會停止並以非零結束碼回報。`launch-requested` 表示該席的檔案已核對，並已送出啟動指令。`file-verification-failed` 表示無法確認裝置檔案與預期內容相同，該席未送出啟動。`deployment-failed` 表示其他部署步驟失敗。這兩種錯誤可能發生在停止遊戲或啟用部分檔案之後。`not-attempted` 表示該席未進入寫入階段。已處理席位保留當下結果。可按回報定位故障，必要時重新配發票券，再用單席流程處理尚未成功的裝置。 [核對頭盔追蹤席位](#核對頭盔追蹤席位)
 
 #### 啟動前核對裝置檔案
 

@@ -31,6 +31,18 @@ if ($args[2] -ceq 'push') {
 if ($args[2] -cne 'shell') { exit 98 }
 switch -CaseSensitive ($args[3]) {
     'getprop' {
+        if ($args[4] -ceq 'ro.serialno') {
+            if ($fault -ceq 'identity-missing') { exit 0 }
+            if ($fault -ceq 'identity-invalid') { 'unknown'; exit 0 }
+            if ($fault -ceq 'identity-duplicate') { 'HARDWARE-SERIAL-SHARED-CANARY'; exit 0 }
+            if ($fault -ceq 'identity-changed') {
+                $reads = @(Get-Content -LiteralPath (Join-Path $root 'adb.log') |
+                    Where-Object { $_ -ceq "-s $serial shell getprop ro.serialno" })
+                if ($reads.Count -gt 1) { 'HARDWARE-SERIAL-CHANGED-CANARY'; exit 0 }
+            }
+            "HARDWARE-SERIAL-$serial"
+            exit 0
+        }
         if ($args[4] -cne 'ro.product.model') { exit 98 }
         if ($fault -ceq 'wrong-model') { 'Quest 2' } else { 'Quest 3' }
         exit 0

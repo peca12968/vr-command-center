@@ -2239,11 +2239,12 @@ def main():
         commands = (destination/'adb.log').read_text(encoding='utf-8').splitlines()
         targeted = {line.split()[1] for line in commands if line.startswith('-s ')}
         mr_count = sum(files is not None and row['roomId'] in files for row in rows)
-        check(len(commands) == 1 + count * 9 + mr_count * 4 and sum(' shell monkey ' in line for line in commands) == count
+        check(len(commands) == 1 + count * 11 + mr_count * 4 and sum(' shell monkey ' in line for line in commands) == count
+              and sum(line.endswith(' shell getprop ro.serialno') for line in commands) == 2 * count
               and sum(' shell sha256sum ' in line for line in commands) == 2 * (count + mr_count)
               and targeted == {row['serial'] for row in rows}
               and all(' install ' not in line and 'unmapped-device' not in line for line in commands),
-              mode + f' all {count} mapped original signed configs are isolated by serial with the expected mode files and no APK installs')
+              mode + f' all {count} mapped original signed configs verify device identity and the expected mode files without APK installs')
         prefix = 'mixed' if mixed else 'vr' if is_vr else 'mr'
         kind = 'partial' if partial else 'mapped'
         save(f'{prefix}-venue-{mode.lower()}-{kind}-preflight.json', preview)
