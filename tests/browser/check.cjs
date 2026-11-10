@@ -56,6 +56,12 @@ async function main() {
     diagnosticPage = page;
     function captureErrors(target) { target.on('pageerror', error => browserErrors.push(error.message)); target.on('console', message => { if (/Content Security Policy|violates.*directive/i.test(message.text())) browserErrors.push(message.text()); }); }
     captureErrors(page);
+    if (process.argv.includes('--ticket-download-fence-only')) {
+      await require('./ticket-download-fence.cjs').checkTicketDownloadFence({ context, api, tokens, base, screenshots, check, captureErrors });
+      check(browserErrors.length === 0, 'Ticket download fence has no uncaught browser or policy errors');
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed', scope: 'Ticket download roster checks with real API and Chromium' }, null, 2));
+      console.log(`PASS: ${checks} focused ticket download checks. Screenshots: ${screenshots}`); return;
+    }
     if (process.argv.includes('--statistics-snapshot-only')) {
       const mission = await api('/missions', 'POST', { name: 'Battle statistics snapshot', briefing: 'Verify consistent revisions', durationSeconds: 600, environment: { mode: 'VR', weather: 'Clear', timeOfDay: 'Day', lightning: false }, enemies: { count: 1, behavior: 'Hold', autoAttack: false }, props: [] }, 'Master', 201);
       const session = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [1] }, 'Master', 201);
@@ -506,6 +512,7 @@ async function main() {
     await require('./venue-phase-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
     await require('./full-tracking-begin-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
     await require('./mission-template-browser.cjs')({ context, api, tokens, directory, root, base, screenshots, check, captureErrors, availablePort });
+    await require('./ticket-download-fence.cjs').checkTicketDownloadFence({ context, api, tokens, base, screenshots, check, captureErrors });
     check(browserErrors.length === 0, 'Browser has no uncaught script errors or CSP violations');
     await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checkedAtUtc: new Date().toISOString(), checks, browser: await browser.version(), playwright: require('playwright/package.json').version, result: 'passed', scope: 'isolated real API and browser console; no Unity or headset test' }, null, 2));
     console.log(`PASS: ${checks} real-browser checks. Screenshots: ${screenshots}`);

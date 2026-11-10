@@ -101,7 +101,7 @@ export function mountVrVenueTickets(state, api, download) {
 
   issue.addEventListener('click', async () => {
     if (issue.disabled || !preview?.ready || rosterVersion() !== version) { update(); return; }
-    const { mixed, rooms: confirmedRooms } = preview;
+    const { mixed, rooms: confirmedRooms, topology } = preview;
     const confirmations = mixed ? confirmedRooms.filter(room => room.mode === 'MR').map(room => [
       room.roomId, document.getElementById(`mixed-venue-alignment-${room.roomId}`)?.files[0]
     ]) : [];
@@ -111,7 +111,7 @@ export function mountVrVenueTickets(state, api, download) {
       roomId: room.roomId, sessionId: room.sessionId, streamId: room.endpoint.streamId,
       players: room.seats.map(({ playerId, admissionId }) => ({ playerId, admissionId }))
     })) };
-    if (!mixed) body.topology = preview.topology;
+    if (!mixed) body.topology = topology;
     const request = begin('正在核對名冊並產生 25 份連線檔…');
     try {
       if (mixed) {
@@ -124,10 +124,16 @@ export function mountVrVenueTickets(state, api, download) {
           if (alignments.has(room.roomId)) body.rooms[index].alignmentFile = alignments.get(room.roomId);
         }
       }
-      const route = mixed ? '/mixed-deployment/venue-bundle' : '/vr-deployment/venue-bundle';
-      const zip = await api(route, 'POST', body, undefined, undefined, 'blob');
+      const route = mixed ? '/mixed-deployment/venue' : '/vr-deployment/venue';
+      const zip = await api(route + '-bundle', 'POST', body, undefined, undefined, 'blob');
       if (!request.current()) return;
       if (zip.type !== 'application/zip') throw new Error('Invalid venue archive');
+      const current = await api(route);
+      if (!request.current()) return;
+      if (!current?.ready || current.topology !== topology || JSON.stringify(current.rooms) !== JSON.stringify(confirmedRooms)) {
+        clear('場次、端點或名冊已變更，未下載連線檔。請重新讀取五房名冊。');
+        update(); return;
+      }
       download(mixed ? 'vr-mr-venue-deployment.zip' : 'vr-venue-connections.zip', zip);
       status.textContent = '已下載五房連線檔。票券有效五分鐘，請依房間與席位個別交付。';
     } catch (error) {

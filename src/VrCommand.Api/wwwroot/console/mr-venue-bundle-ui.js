@@ -23,13 +23,14 @@ export function mountMrVenueBundle(state, api, download) {
   });
   let active = false, target = '', roster = '', generation = 0, pending = false;
 
-  function plan() {
+  function plan(latestSessions) {
     const { actor, session, selected, sessions, rooms: occupancy } = state();
     if (!active || actor?.role !== 'Master' || session?.id !== selected || session?.environment.mode !== 'MR' || session.state === 'Ended') return null;
     const topology = session.mode;
     const sources = rows.map(({ roomId }) => {
       const id = occupancy.find(room => room.id === roomId)?.sessionId;
-      const source = id === session.id ? session : sessions.find(view => view.id === id);
+      const source = latestSessions ? latestSessions.find(view => view.id === id)
+        : id === session.id ? session : sessions.find(view => view.id === id);
       return source?.mode === topology && source.state !== 'Ended' && source.environment.mode === 'MR'
         && (topology === 'Independent' || source.id === selected) ? source : null;
     });
@@ -86,6 +87,12 @@ export function mountMrVenueBundle(state, api, download) {
       undefined, undefined, 'blob');
       if (!applies()) return;
       if (bundle.type !== 'application/zip') throw new Error('Expected a venue ZIP download.');
+      const latest = plan(await api('/sessions'));
+      if (!applies()) return;
+      if (!latest?.ready || latest.target !== current.target || latest.roster !== current.roster) {
+        status.textContent = '場次或名冊已變更，未下載部署包。請重新整理後核對五個房間。';
+        return;
+      }
       download('quest-mr-venue.zip', bundle);
       status.textContent = '已下載五房部署包。票券有效五分鐘，請依房間與席位個別交付。';
     } catch (error) {

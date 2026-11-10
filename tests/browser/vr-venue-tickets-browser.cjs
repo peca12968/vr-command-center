@@ -3,6 +3,7 @@ const { spawnSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { holdTicketResponse } = require('./ticket-download-fence.cjs');
 
 module.exports = async ({ context, api, tokens, base, root, directory, screenshots, check, captureErrors }) => {
   const page = await context.newPage(), active = new Set(), roomIds = [1, 2, 3, 4, 5];
@@ -202,8 +203,19 @@ with zipfile.ZipFile(sys.argv[1]) as outer:
       }
 
       const seat = plan.rooms[4].seats[0];
-      await api(`/sessions/${ready.rooms[4].sessionId}/players/${seat.playerId}`, 'DELETE', undefined, 'Master', 204, seat.admissionId);
-      await add(ready.rooms[4].sessionId, 5, 1, seat.playerId);
+      const replace = async () => {
+        await api(`/sessions/${ready.rooms[4].sessionId}/players/${seat.playerId}`, 'DELETE', undefined, 'Master', 204, seat.admissionId);
+        await add(ready.rooms[4].sessionId, 5, 1, seat.playerId);
+      };
+      if (topology === 'Linked') {
+        const result = await holdTicketResponse(page, endpoint, () => issue.click(), replace, async () => {
+          await status.filter({ hasText: /名冊已變更|已下載五房/ }).waitFor();
+          return status.innerText();
+        });
+        await fs.writeFile(path.join(screenshots, 'vr-venue-late-ticket.json'), JSON.stringify(result, null, 2));
+        check(result.signedResponses === 1 && result.downloads === 0 && result.message.includes('未下載'),
+          'A signed 25-seat VR ZIP cannot download after one admission changes during delivery');
+      } else await replace();
       const stale = await post(ready, 409);
       check(stale.roomId === 5 && stale.code === 'vr-venue-roster-changed', topology + ' venue rejects one replaced admission without issuing the other 24');
       const after = await api(verify, 'POST', proof);

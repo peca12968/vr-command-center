@@ -1,8 +1,9 @@
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const { createHash, randomUUID } = require('node:crypto');
-const { mkdir, readFile, readdir } = require('node:fs/promises');
+const { mkdir, readFile, readdir, writeFile } = require('node:fs/promises');
 const path = require('node:path');
+const { holdTicketResponse } = require('./ticket-download-fence.cjs');
 
 module.exports = async ({ context, api, tokens, base, root, directory, screenshots, check, captureErrors }) => {
   const page = await context.newPage();
@@ -177,6 +178,19 @@ module.exports = async ({ context, api, tokens, base, root, directory, screensho
       assert.deepEqual(await api('/sessions'), before);
       check(true, `${topology} download verifies 25 original admissions and exact published destinations without adding session events`);
       await panel.screenshot({ path: path.join(screenshots, `mr-venue-${topology.toLowerCase()}.png`) });
+      if (topology === 'Independent') {
+        const room = request.rooms[4], seat = room.players[0];
+        const result = await holdTicketResponse(page, base + '/api' + route, () => submit.click(), async () => {
+          await api(`${roomPath(room.sessionId)}/players/${seat.playerId}`, 'DELETE', undefined, 'Master', 204, seat.admissionId);
+          await add(room.sessionId, room.roomId, 1, seat.playerId);
+        }, async () => {
+          await status.filter({ hasText: /名冊已變更|已下載五房/ }).waitFor();
+          return status.innerText();
+        });
+        await writeFile(path.join(screenshots, 'mr-venue-late-ticket.json'), JSON.stringify(result, null, 2));
+        check(result.signedResponses === 1 && result.downloads === 0 && result.message.includes('未下載'),
+          'A signed 25-seat MR ZIP cannot download after one original room admission changes during delivery');
+      }
       for (const session of sessions) await end(session.id);
       const ended = await post(request, 409);
       assert.equal(ended.code, 'venue-session-changed');

@@ -62,7 +62,7 @@ const roomPlan = mountIndependentPlan({
   changed: () => { placement.scheduleLaunch(); applyPermissions(); }
 });
 let timer;
-let selectionEpoch = 0, venueClosureEpoch = 0;
+let selectionEpoch = 0, venueClosureEpoch = 0, ticketViewEpoch = 0;
 
 function notify(message, error = false) {
   $('notice').textContent = message;
@@ -898,12 +898,29 @@ function ticketDestination() {
   }
   return { address, port };
 }
+async function confirmTicketRoster(session, roomId, players, { wholeRoom = false, view }) {
+  const applies = () => view === ticketViewEpoch && !$('operations-view').hidden
+    && state.selected === session.id && state.session?.id === session.id && ownsRoom(roomId);
+  if (!applies()) return false;
+  const current = await api('/sessions/' + session.id);
+  if (!applies()) return false;
+  const roster = current.players.filter(player => player.roomId === roomId);
+  if (current.id !== session.id || current.state === 'Ended' || current.environment.mode !== session.environment.mode
+      || current.roomAlignment?.[`room${roomId}`] !== session.roomAlignment?.[`room${roomId}`]
+      || (wholeRoom && roster.length !== players.length)
+      || !players.every(player => roster.some(row => row.id === player.id && row.admissionId === player.admissionId && row.seat === player.seat))) {
+    notify('場次或名冊已變更，未下載連線檔。請重新整理後再配票。', true);
+    return false;
+  }
+  return true;
+}
 async function downloadTicket(player) {
   const session = state.session;
   if (!canIssueTicket(session, player.roomId)) return;
   if (!player.admissionId) throw new Error('控制台與 API 版本不一致，請更新服務並重新整理。');
   const destination = ticketDestination();
   if (!destination) return;
+  const view = ticketViewEpoch;
   const ticket = await api(`/sessions/${session.id}/players/${player.id}/join-ticket`, 'POST', undefined, undefined, player.admissionId);
   const config = { role: 'Client', ...destination, joinTicket: ticket.ticket };
   if (session.environment.mode === 'MR') {
@@ -911,6 +928,7 @@ async function downloadTicket(player) {
       throw new Error('MR 連線檔的校正雜湊與目前場次不符。');
     config.roomAlignmentSha256 = ticket.roomAlignmentSha256;
   }
+  if (!await confirmTicketRoster(session, player.roomId, [player], { view })) return;
   download(`quest-player-${player.id}.json`, new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' }));
   notify(`玩家連線檔已產生，有效至 ${time(ticket.expiresAtUtc)}。請將各自檔案配置到對應玩家端。`);
 }
@@ -919,14 +937,15 @@ function downloadRoomTickets() {
   if (!canIssueTicket(session, roomId) || !ownsRoom(roomId) || !session.roomIds.includes(roomId)) return;
   const destination = ticketDestination();
   if (!destination) return;
-  const players = session.players.filter(player => player.roomId === roomId)
-    .map(player => ({ playerId: player.id, admissionId: player.admissionId }));
+  const players = session.players.filter(player => player.roomId === roomId);
   if (!players.length) return;
+  const admissions = players.map(player => ({ playerId: player.id, admissionId: player.admissionId }));
+  const view = ticketViewEpoch;
   void runSession(async () => {
     const bundle = await api(`/sessions/${session.id}/rooms/${roomId}/join-ticket-bundle`, 'POST',
-      { ...destination, players }, undefined, undefined, 'blob');
-    if (state.session?.id !== session.id || state.selected !== session.id || state.session.state === 'Ended') return;
+      { ...destination, players: admissions }, undefined, undefined, 'blob');
     if (bundle.type !== 'application/zip') throw new Error('Expected a ZIP download.');
+    if (!await confirmTicketRoster(session, roomId, players, { wholeRoom: true, view })) return;
     download(`room-${String(roomId).padStart(2, '0')}-connections.zip`, bundle);
     notify(`房間 ${roomId} 的 ${players.length} 份連線檔已產生。請按檔名席位個別交付，票券有效五分鐘。`);
   });
@@ -1210,6 +1229,7 @@ for (const id of ['prop-asset', 'prop-x', 'prop-y', 'prop-z', 'prop-yaw']) $(id)
 });
 
 function tab(name, worldTarget = null) {
+  if (name !== 'operations') ticketViewEpoch++;
   if (name !== 'missions') { placement.clearTrial(); clearMissionTemplate(); clearPropCopies(); }
   finishPropGesture();
   for (const candidate of ['operations', 'missions', 'replay', 'world']) { const active = candidate === name; $(candidate + '-view').hidden = !active; $('tab-' + candidate).classList.toggle('active', active); $('tab-' + candidate).setAttribute('aria-pressed', String(active)); }
