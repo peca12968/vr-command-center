@@ -116,6 +116,7 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
         else if (code === 'mr-resume-readiness-required') message = 'MR 場次尚未符合繼續條件。請查看「MR 繼續檢查」。';
         else if (code === 'mr-tracking-pause-no-witness') message = '目前未確認本房仍有追蹤中斷。請查看最新追蹤狀態。';
         else if (code === 'vr-participation-pause-no-witness') message = '目前未確認本房仍有姿態中斷。請查看最新參戰狀態。';
+        else if (code === 'vr-participation-resume-not-ready') message = '暫停中的席位尚未確認恢復。請查看房卡等待的席位。';
         else if (code === 'mr-alignment-required') message = '請由主控鎖定 MR 校正檔後再配票。';
         else if (code === 'independent-rooms-occupied' && Array.isArray(roomIds)) message = `房間 ${roomIds.join('、')} 使用中，五場都未建立。請確認房間狀態後再試。`;
         else if (code === 'venue-phase-changed') message = '全館場次狀態已變更，本批命令未套用。請重新整理後確認房間。';
@@ -320,6 +321,13 @@ function renderRooms() {
       pause.dataset[vr ? 'roomVrParticipationPause' : 'roomMrTrackingPause'] = room.id;
       pause.addEventListener('click', () => pauseParticipation(room.id, room.sessionId, vr ? 'VR' : 'MR'));
       actions.append(pause);
+      if (vr) {
+        const resume = element('button', session.mode === 'Linked' ? '確認恢復後繼續五房' : '確認恢復後繼續本房', 'quiet small');
+        resume.type = 'button'; resume.hidden = true; resume.disabled = true;
+        resume.dataset.roomVrResume = room.id;
+        resume.addEventListener('click', () => resumeVrParticipation(room.id, room.sessionId));
+        actions.append(resume);
+      }
       for (const [kind, label] of [['environment', '檢視環境快照'], ['enemies', '檢視敵軍快照']]) {
         const snapshot = element('button', label, 'quiet small');
         snapshot.type = 'button'; snapshot.disabled = button.disabled; snapshot.hidden = true;
@@ -446,7 +454,8 @@ function applyPermissions() {
   $('session-select').disabled = locked;
   $('include-ended').disabled = locked;
   $('refresh').disabled = !!state.pending;
-  document.querySelectorAll('.room-card button').forEach(button => { button.disabled = locked; });
+  document.querySelectorAll('.room-card button:not([data-room-vr-resume])').forEach(button => { button.disabled = locked; });
+  if (locked) document.querySelectorAll('[data-room-vr-resume]').forEach(button => { button.disabled = true; });
   document.querySelectorAll('[data-player-room]').forEach(button => {
     const room = Number(button.dataset.playerRoom);
     button.disabled = locked || ended || !ownsRoom(room) || (button.dataset.playerAction === 'ticket' && !canIssueTicket(session, room));
@@ -841,6 +850,18 @@ function pauseParticipation(roomId, sessionId, mode) {
     await sendPending();
   });
 }
+function resumeVrParticipation(roomId, sessionId) {
+  const target = roomReadiness.vrResume(roomId);
+  if (state.busy || state.pending || target?.sessionId !== sessionId) return;
+  if (!confirm(target.linked ? '五房的存活席位姿態已確認。要一起繼續合併場次嗎？'
+    : `房間 ${roomId} 的存活席位姿態已確認。要繼續本房嗎？`)) return;
+  void run(async () => {
+    if (state.pending || !state.rooms.some(room => room.id === roomId && room.sessionId === sessionId)) return;
+    state.pending = { kind: 'participation-resume', path: `/sessions/${sessionId}/commands`, method: 'POST', sessionId,
+      body: { commandId: uuid(), action: 'Resume', expectedSequence: target.sequence } };
+    await sendPending();
+  });
+}
 async function sendPending() {
   const pending = state.pending, epoch = state.epoch;
   if (!pending) return;
@@ -888,11 +909,11 @@ async function sendPending() {
               : row.appliedAtSequence > Math.max(target.phaseSinceSequence, target.environmentSinceSequence ?? 0, target.enemiesSinceSequence ?? 0)))))
         throw new Error('Incomplete venue phase receipt');
     }
-    if (pending.kind === 'participation-pause' && (response?.commandId !== pending.body.commandId
+    if (['participation-pause', 'participation-resume'].includes(pending.kind) && (response?.commandId !== pending.body.commandId
         || response.session?.id !== pending.sessionId || typeof response.duplicate !== 'boolean'
         || response.appliedAtSequence !== pending.body.expectedSequence + 1
         || !Number.isSafeInteger(response.session.sequence) || response.session.sequence < response.appliedAtSequence))
-      throw new Error('Incomplete participation pause receipt');
+      throw new Error('Incomplete participation transition receipt');
     state.pending = null;
     if (pending.kind === 'create') { $('include-ended').checked = response.state === 'Ended'; resetSelection(response.id); }
     if (pending.kind === 'command' && pending.body.action === 'End' && response.session.state === 'Ended') $('include-ended').checked = true;
@@ -903,6 +924,10 @@ async function sendPending() {
     if (pending.kind === 'participation-pause') {
       notify(pending.mode === 'VR' ? '管理端已接受席位檢查暫停。請從房卡確認遊戲端已套用。'
         : '管理端已接受重新對位暫停。請從房卡確認遊戲端已套用。');
+      return;
+    }
+    if (pending.kind === 'participation-resume') {
+      notify('管理端已接受繼續。請從房卡確認最新執行中姿態。');
       return;
     }
     loadEnvironment(); loadEnemies(); loadClock();

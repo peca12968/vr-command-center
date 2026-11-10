@@ -93,6 +93,8 @@ app.Use(async (context, next) =>
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "mr-tracking-pause-no-witness" });
         else if (ex is VrParticipationPauseException)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "vr-participation-pause-no-witness" });
+        else if (ex is VrParticipationResumeException)
+            await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "vr-participation-resume-not-ready" });
         else if (ex is MixedRealityAlignmentRequiredException)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "mr-alignment-required" });
         else if (ex is IndependentRoomsOccupiedException occupied)

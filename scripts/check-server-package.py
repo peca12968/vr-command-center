@@ -71,7 +71,7 @@ def main():
     p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
     p.add_argument('--check-room-observer',action='store_true',help='Verify room-scoped observation and instant replay on the original Linked source')
     p.add_argument('--check-room-participation',action='store_true',help='Disconnect and restore one original VR admission in each five-room mode')
-    p.add_argument('--check-vr-participation-pause',action='store_true',help='Pause from the shipped room card during each native VR disconnect')
+    p.add_argument('--check-vr-participation-pause',action='store_true',help='Pause and resume from the shipped room card during each native VR disconnect and recovery')
     p.add_argument('--check-room-endpoints',action='store_true',help='Verify real published UDP endpoints in the room cards and scoped API')
     p.add_argument('--check-room-clocks', action='store_true', help='Verify room clocks and the original pause/resume boundaries in both modes')
     p.add_argument('--check-venue-phase', action='store_true', help='Verify whole-venue pause and resume against both native topologies')
@@ -1910,14 +1910,17 @@ def main():
             role = 'Master' if linked else 'Room4'
             node = shutil.which('node')
             if not node: raise RuntimeError('Node is required for the shipped VR pause console check')
-            descriptor = runtime/(mode.lower()+'-vr-pause-private.json')
-            descriptor.write_text(json.dumps({'base':uri,'key':keys[role],'sessionId':sid,
-                'roomId':room,'seat':seat,'linked':linked}),encoding='utf-8')
-            evidence = out/(mode.lower()+'-vr-pause-ui.json')
-            with (out/(mode.lower()+'-vr-pause-ui.log')).open('xb') as log:
-                subprocess.run([node, str(ROOT/'tests/browser/check-vr-participation-pause-native.cjs'),
-                    str(descriptor), str(evidence)], stdout=log, stderr=subprocess.STDOUT, check=True, timeout=50)
-            pause = read(evidence)
+            def transition(action):
+                label = f'{mode.lower()}-vr-{action.lower()}'
+                descriptor = runtime/(label+'-private.json')
+                descriptor.write_text(json.dumps({'base':uri,'key':keys[role],'sessionId':sid,
+                    'roomId':room,'seat':seat,'linked':linked,'action':action}),encoding='utf-8')
+                evidence = out/(label+'-ui.json')
+                with (out/(label+'-ui.log')).open('xb') as log:
+                    subprocess.run([node, str(ROOT/'tests/browser/check-vr-participation-pause-native.cjs'),
+                        str(descriptor), str(evidence)], stdout=log, stderr=subprocess.STDOUT, check=True, timeout=50)
+                return read(evidence)
+            pause = transition('Pause')
             sequence = pause['appliedAtSequence']
             def observed_pause():
                 rows = request('/api/rooms/readiness')['rooms']
@@ -1930,6 +1933,10 @@ def main():
             check(pause['sessionId'] == sid and pause['roomId'] == room and request('/api/sessions/'+sid)['state'] == 'Paused'
                   and all(request('/api/sessions/'+other)['state'] == 'Running' for other in set(expected.values())-{sid}),
                   mode+' room card pauses exactly the affected scope and the original source confirms it')
+            rejected = request('/api/sessions/'+sid+'/commands', {'commandId':str(uuid.uuid4()),'action':'Resume'},
+                               role=role, expected=409)
+            check(rejected['code'] == 'vr-participation-resume-not-ready' and request('/api/sessions/'+sid)['state'] == 'Paused',
+                  mode+' direct Resume is denied while the original native seat is missing')
         server_log = entry['work']/'server.log'
         wait(lambda:f'VR_SERVER_CLIENT_LEFT id={connections[0]}\n' in server_log.read_text(encoding='utf-8'), 50,
              mode+' original UDP transport release')
@@ -1940,10 +1947,11 @@ def main():
         if pause is not None:
             wait(lambda: recovered['log'].is_file() and 'VR_CLIENT_CONNECTED id=' in recovered['log'].read_text(encoding='utf-8'),
                  25, mode+' original VR seat reconnects while paused')
-            resume = request('/api/sessions/'+entry['sessionId']+'/commands', {'commandId':str(uuid.uuid4()),'action':'Resume'},
-                             role='Master' if linked else 'Room4')
-            check(resume['session']['state'] == 'Running' and resume['appliedAtSequence'] > pause['appliedAtSequence'],
-                  mode+' operator resumes the exact original session after the seat reconnects')
+            resume = transition('Resume')
+            check(resume['sessionId'] == sid and resume['roomId'] == room and request('/api/sessions/'+sid)['state'] == 'Running'
+                  and resume['appliedAtSequence'] > pause['appliedAtSequence'],
+                  mode+' operator resumes the exact original session from the recovered room card')
+            pause['resume'] = resume
         after = wait(lambda:snapshot(False), 30, mode+' original admission restores all five room counts')
         new_connections = re.findall(r'^VR_CLIENT_CONNECTED id=(\d+)$', recovered['log'].read_text(encoding='utf-8'), re.M)
         check(len(new_connections) == 1 and new_connections != connections and recovered['nativePid'] != original['nativePid']

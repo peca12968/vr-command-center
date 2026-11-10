@@ -125,8 +125,26 @@ internal static class ReadinessChecks
         check(vrTrigger == 1 && replayed.PhaseSinceSequence == paused.AppliedAtSequence
             && store.ReadinessByRoom(room).Single().VrPause is { TriggerRoomId: 1, WorldSequence: not null }
             && store.ExecuteCommand(id, vrPause, room).Duplicate, "A VR pause persists its original room and is safe to retry after source observation");
-        manager.Execute(id, new(Guid.NewGuid(), ControlAction.Resume), room);
+        var resume = new ControlCommand(Guid.NewGuid(), ControlAction.Resume, ExpectedSequence: paused.Session.Sequence);
+        void RejectResume(Func<CommandReceipt> action, string message)
+        {
+            try { _ = action(); } catch (VrParticipationResumeException) { check(true, message); return; }
+            throw new Exception(message);
+        }
+        RejectResume(() => store.ExecuteCommand(id, resume, room), "VR recovery cannot resume while the original living seat is unavailable");
+        bridge.Connect(3, player, 1, 0, replacement); bridge.Pose(3, head, head, new(0, 0, 1), .2); Save();
+        check(store.ReadinessByRoom(room).Single().VrPause is { ReadyToResume: true, WaitingSeats.Length: 0 },
+            "A current Paused VR frame confirms recovery of the exact original seat");
+        var recoveryAt = clock.Now;
+        clock.Now = recoveryAt.AddMilliseconds(1500.01);
+        RejectResume(() => store.ExecuteCommand(id, resume, room), "Expired VR recovery evidence cannot authorize Resume");
+        clock.Now = recoveryAt;
+        RejectResume(() => manager.Execute(id, resume, room), "The domain cannot bypass the VR recovery witness");
+        var recovered = store.ExecuteCommand(id, resume, room);
+        check(recovered.Session.State == SessionState.Running && store.ExecuteCommand(id, resume, room).Duplicate,
+            "The original room resumes once and can retry after the pause marker has cleared");
         Refresh();
+        bridge.Disconnect(3);
         Save(eliminated: true);
         check(store.ReadinessByRoom(room).Single().VrParticipation is { AwaitingPose.Length: 0, Eliminated: [1] },
             "An eliminated VR seat is not an operational pose warning");

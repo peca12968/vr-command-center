@@ -35,6 +35,7 @@ public sealed class MixedRealityNotReadyException(ControlAction action) : Invali
 }
 public sealed class MixedRealityTrackingPauseException() : InvalidOperationException("No current lost MR tracking in the requested room.");
 public sealed class VrParticipationPauseException() : InvalidOperationException("No current unavailable VR pose in the requested room.");
+public sealed class VrParticipationResumeException() : InvalidOperationException("VR resume requires fresh paused poses for the current living roster.");
 
 // Management and combat telemetry; this does not simulate a 3D world or determine physical collisions.
 public sealed partial class SessionManager
@@ -147,8 +148,7 @@ public sealed partial class SessionManager
             AccessPolicy.Read(actor ?? OperatorIdentity.Internal, history.View.RoomIds);
             enemiesSinceSequence = history.EnemiesSinceSequence;
             var venue = history.Events[(int)history.PhaseSinceSequence - 1];
-            vrPauseRoomId = history.View.State == SessionState.Paused && history.View.Environment.Mode == ExperienceMode.VR
-                ? venue.Read<ControlCommand>().VrParticipationRoomId : null;
+            vrPauseRoomId = VrPauseRoom(history);
             return (Snapshot(history.View), history.PhaseSinceSequence,
                 venue.Venue is null ? null : venue.Read<ControlCommand>().Action,
                 history.Events[(int)history.EnvironmentSinceSequence - 1].Venue is null ? null : history.EnvironmentSinceSequence,
@@ -281,6 +281,9 @@ public sealed partial class SessionManager
                     || history.View.Environment.Mode != ExperienceMode.VR || !history.View.RoomIds.Contains(vrRoom)
                     || history.View.CombatStream is null))
                 throw new VrParticipationPauseException();
+            if (command.Action == ControlAction.Resume && VrPauseRoom(history) is not null
+                && readyVrSequence != history.View.Sequence)
+                throw new VrParticipationResumeException();
             var entry = SessionEvent.Create(id, history.View.Sequence + 1, SessionEventKind.ControlApplied, command, actor);
             var updated = Commit(history, entry);
             return new(command.CommandId, entry.Sequence, false, updated);
@@ -290,6 +293,10 @@ public sealed partial class SessionManager
     public static bool RequiresMrReadiness(SessionView session, ControlAction action) =>
         session.Environment.Mode == ExperienceMode.MR && (action, session.State) is
             (ControlAction.Begin, SessionState.Preparing) or (ControlAction.Resume, SessionState.Paused);
+
+    private static int? VrPauseRoom(History history) =>
+        history.View.State == SessionState.Paused && history.View.Environment.Mode == ExperienceMode.VR
+            ? history.Events[(int)history.PhaseSinceSequence - 1].Read<ControlCommand>().VrParticipationRoomId : null;
 
     public void End(Guid id, OperatorIdentity? actor = null) => Execute(id, new(Guid.NewGuid(), ControlAction.End), actor);
 

@@ -8,6 +8,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
   captureErrors(page);
   const command = (id, action) => api(`/sessions/${id}/commands`, 'POST', { commandId: randomUUID(), action });
   const button = page.locator('[data-room-vr-participation-pause="4"]');
+  const resumeButton = page.locator('[data-room-vr-resume="4"]');
   const pauseStatus = page.locator('[data-room-vr-pause="4"]');
   async function login(role) {
     await page.goto(base + '/console/');
@@ -43,22 +44,27 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       }
       const player = { playerId: randomUUID(), roomId: 4, name: 'Original VR seat', headset: 'Quest3' };
       await api(`/sessions/${id}/players`, 'POST', player);
+      const peer = linked ? { ...player, playerId: randomUUID(), roomId: 2, name: 'Other linked seat' } : null;
+      if (peer) await api(`/sessions/${id}/players`, 'POST', peer);
       const streamId = randomUUID(), started = Date.now();
       await api(`/sessions/${id}/combat-stream`, 'POST', { streamId, origin: 'Simulation' }, 'GameServer');
       let sequence = 0;
       const header = { sessionId: id, streamId, origin: 'Simulation', roomIds,
         captureStartedAtUtc: new Date(started).toISOString().replace('Z', '0000+00:00') };
-      function publish(session, connected) {
-        const point = { x: 14, y: 1.65, z: -3 }, rotation = { x: 0, y: 0, z: 0, w: 1 };
+      function publish(session, connected, peerConnected = true) {
+        const rotation = { x: 0, y: 0, z: 0, w: 1 };
+        const body = (seat, online) => {
+          const point = { x: (seat.roomId - 3) * 14, y: 1.65, z: -3 };
+          return { id: seat.playerId, roomId: seat.roomId, head: point, muzzle: point, forward: { x: 0, y: 0, z: 1 },
+            connected: online, health: 100, magazine: 30, reserve: 90, rig: online ? { kind: 'Simulated',
+              left: point, right: point, headRotation: rotation, leftRotation: rotation, rightRotation: rotation } : { kind: 'None' } };
+        };
         const frame = { sequence: ++sequence, observedSequence: session.sequence,
           elapsedMilliseconds: sequence === 1 ? 0 : Date.now() - started,
           weather: 'Clear', lightning: false, suspended: false, throughCombatSequence: 0, events: [],
           frame: { phase: session.state, tick: session.state === 'Preparing' ? 0 : 1, night: false, visibility: 'Clear',
-            behavior: 'Hold', autoAttack: false, throughSequence: 0, enemies: [], players: [
-              { id: player.playerId, roomId: 4, head: point, muzzle: point, forward: { x: 0, y: 0, z: 1 },
-                connected, health: 100, magazine: 30, reserve: 90, rig: connected ? { kind: 'Simulated',
-                  left: point, right: point, headRotation: rotation, leftRotation: rotation, rightRotation: rotation } : { kind: 'None' } }
-            ] } };
+            behavior: 'Hold', autoAttack: false, throughSequence: 0, enemies: [],
+            players: peer ? [body(peer, peerConnected), body(player, connected)] : [body(player, connected)] } };
         const result = spawnSync('python', [path.join(root, 'scripts/world_test_socket.py')], { encoding: 'utf8', timeout: 6000, windowsHide: true,
           input: JSON.stringify({ port: Number(new URL(base).port), route: `/api/sessions/${id}/world/publish`, token: tokens.GameServer,
             messages: [{ type: 'header', payload: header }, { type: 'frame', payload: frame }] }) });
@@ -112,15 +118,58 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       const result = await reply, receipt = await result.json();
       assert.equal(result.status(), 200);
       assert.equal(receipt.session.state, 'Paused');
+      const role = linked ? 'Master' : 'Room4';
+      const recoveryCommand = () => ({ commandId: randomUUID(), action: 'Resume', expectedSequence: receipt.session.sequence });
+      const denied = await api(route, 'POST', recoveryCommand(), role, 409);
+      check(denied.code === 'vr-participation-resume-not-ready', mode + ' blocks a Resume before the game observes the pause');
       await pauseStatus.filter({ hasText: 'VR 暫停待確認' }).waitFor();
       check(await button.isHidden() && (!unaffected || (await api(`/sessions/${unaffected}`)).state === 'Running'),
         mode + ' acknowledges the scoped pause before the game observes it');
-      await until(() => publish(receipt.session, false), () => pauseStatus.innerText().then(text => text.includes('VR 暫停已套用')));
-      const retry = await api(route, 'POST', result.request().postDataJSON(), linked ? 'Master' : 'Room4');
+      await until(() => publish(receipt.session, false), () => pauseStatus.innerText().then(text => text.includes('等候席位 1')));
+      const retry = await api(route, 'POST', result.request().postDataJSON(), role);
       check(retry.duplicate && retry.appliedAtSequence === receipt.appliedAtSequence
         && await page.locator('[data-room-vr-pause]:visible').count() === roomIds.length,
         mode + ' confirms the original pause across the intended rooms and retries idempotently');
       if (linked) await page.locator('#rooms').screenshot({ path: path.join(screenshots, 'vr-linked-pause.png') });
+      check(await resumeButton.isDisabled() && (await api(route, 'POST', recoveryCommand(), role, 409)).code
+        === 'vr-participation-resume-not-ready' && !(await api('/venue/phase')).resume.some(target => target.sessionId === id),
+        mode + ' shows the missing seat, rejects a direct Resume and stays out of the batch Resume plan');
+      if (linked) {
+        await until(() => publish(receipt.session, true, false), () =>
+          page.locator('[data-room-vr-pause="2"]').innerText().then(text => text.includes('等候席位 1')));
+        check(await resumeButton.isDisabled() && (await api(route, 'POST', recoveryCommand(), role, 409)).code
+          === 'vr-participation-resume-not-ready', 'A recovered trigger room cannot resume Linked while another room still lacks a living pose');
+      }
+      await until(() => publish(receipt.session, true), () => resumeButton.isEnabled());
+      if (linked) await api(route, 'POST', recoveryCommand(), 'Room4', 403);
+      if (!linked) {
+        const response = page.waitForResponse(value => value.url() === base + '/api' + route && value.request().method() === 'POST');
+        const asked = page.waitForEvent('dialog');
+        const click = resumeButton.click();
+        const dialog = await asked;
+        publish(receipt.session, false);
+        await dialog.accept(); await click;
+        const rejected = await response;
+        check(rejected.status() === 409 && (await rejected.json()).code === 'vr-participation-resume-not-ready',
+          'A second loss during the resume confirmation keeps the original room paused');
+      }
+      await until(() => publish(receipt.session, true), () => resumeButton.isEnabled());
+      if (linked) await page.locator('#rooms').screenshot({ path: path.join(screenshots, 'vr-linked-ready-to-resume.png') });
+      const resumeReply = page.waitForResponse(value => value.url() === base + '/api' + route && value.request().method() === 'POST');
+      const confirmResume = page.waitForEvent('dialog').then(async dialog => {
+        assert.match(dialog.message(), linked ? /一起繼續合併場次/ : /繼續本房/);
+        await dialog.accept();
+      });
+      await resumeButton.click(); await confirmResume;
+      const resuming = await resumeReply, resumed = await resuming.json();
+      assert.equal(resuming.status(), 200);
+      assert.equal(resumed.session.state, 'Running');
+      await until(() => publish(resumed.session, true), async () => await resumeButton.isHidden()
+        && (await page.locator('[data-room-readiness="4"][data-source-state="Fresh"]').allTextContents())
+          .some(text => text.includes('1 / 1 姿態有效')));
+      const resumeRetry = await api(route, 'POST', resuming.request().postDataJSON(), role);
+      check(resumeRetry.duplicate && resumeRetry.appliedAtSequence === resumed.appliedAtSequence && await resumeButton.isHidden(),
+        mode + ' uses the recovered frame to continue the original scope and retries once');
       await command(id, 'End'); active.delete(id);
       if (unaffected) { await command(unaffected, 'End'); active.delete(unaffected); }
     }
