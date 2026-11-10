@@ -1,5 +1,15 @@
 # 開發進度
 
+## 2026-11-10 回放敵軍增援與撤除
+
+控制台 0.31.96 在暫停回放後，依觀看房間或全場列出敵軍名單變更與在場、存活、增援和撤除數。點選畫格會核對敵軍識別碼與存活數，再保留視角跳轉。原設定查詢預設沿用原格式。 [回放操作](WORLD_RECORDING.md#查閱錄製中的設定切換)
+
+- 最終同機 Windows 原生批次 `run-b8f4bc65a89b46db9e1db3f7d12b765c` 通過 384 項。獨立與合併場各 25 個玩家程序，六場 1,043 格完整回放、50 筆原戰績確認及 6 份 CSV。另有 54 格完整增援回放和一筆玩家戰績確認。第 10 格在場總數仍為 1，名單替換一個識別碼。第 42 格增援 83 名，第 48 格撤除 83 名，保留原識別碼。首輪 `run-c2a5865e01164e0bb39ced8e4768b120` 原斷言把準備階段替換算入開戰後增撤總數而失敗，保留原證據。重測分開核對整場名單和原命令區間。清理後 C／F 的 225 個檔案雜湊一致。
+- 核心 1,030 項、HTTP 768 項、世界串流 92 項、Node 109 項、管理包 107 項通過。三個 Windows 套件與 Quest 0.49.1／64 APK 的離線報告為 `artifacts/venue-release-roster96.json`。本輪涵蓋同機 Windows，頭盔、跨機與廠商設備待實機驗收。 [管理套件](WINDOWS_CONTROL_PACKAGE.md)
+- 解壓管理包的 Chromium 獨立重跑通過 821 項。涵蓋房間篩選、核對原畫格，以及替換敵軍名單時保留畫面。首輪在第 739 項後遇到混合五房 24 席開場的斷言失敗，保留當次證據。獨立重跑通過同一斷言，原期限、斷言與產品規則沿用。證據為 `artifacts/console-roster96-chromium` 及 `artifacts/console-roster96-chromium-serial`。
+- 重新操作 Windows 啟動器 `run-189e057ea9c64701bf80b58d726f4070` 時已輸入隔離管理路徑，兩次「載入／更新」皆由 PickerHost 遮擋。依 computer-use 技能的非目標視窗規則停止，這次未進入場次清單。隔離程序已清理，C／F 九檔雜湊一致。
+- 功能來源 `72e3e62e4bb23ad644b2edbd0abdbf527ecec26b`。GitHub Actions job `129735560378` 因帳務或支出上限未啟動。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42788474250)
+
 ## 2026-11-10 五房封存核對共用發行報告
 
 五房驗收清單可指定一份 `venueReleaseReport`。Windows 以退出報告中的玩家清單雜湊和原日誌核對最終戰績。Quest 用同一份報告核對原 APK、原部署、入場與戰績。所有席位都要有對應證據。Windows 啟動器 1.7 在退出後直接留下原日誌雜湊，可省略連線量測。 [封存操作](EXTERNAL_CLIENTS.md#核對全館共用的發行報告)
