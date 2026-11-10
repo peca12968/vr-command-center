@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `VRCommand-ControlServer-0.31.89-win-x64.zip` 新增個人封存戰績 CSV。ZIP 為 52,871,130 bytes，SHA-256 `ad3d3a73389c300f51740f3e3f33a58c835c98d4f01adc60f6e18ccea0259f9d`。解壓核對 543 筆清單與 523 個執行檔。 [個人戰績](REPORTS.md#從戰績開啟個人回放)
+
 2026-11-10 `VRCommand-ControlServer-0.31.88-win-x64.zip` 新增封存戰績的「跳到最近中彈」。ZIP 為 52,869,754 bytes，SHA-256 `44b0f03bd3dc4117c7117666409990442d221b4dfe6b638173bea323f729fbea`，解壓核對 543 筆清單與 523 個執行檔。 [戰後檢討](REPORTS.md#從戰績開啟個人回放)
 
 2026-11-10 `VRCommand-ControlServer-0.31.87-win-x64.zip` 提供從姿態中斷快照返回即時觀戰。ZIP 為 52,868,764 bytes，SHA-256 `afa049dddb70971d7fcf880e35913e20a5eb18fa4e270aeda15b6238058dce22`，解壓核對 543 筆清單與 523 個執行檔。 [房卡操作](PLAYER_READINESS.md#從房卡查看姿態中斷快照)
