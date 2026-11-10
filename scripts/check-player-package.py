@@ -96,6 +96,16 @@ def main():
     existing = directory / 'existing-status.json'; existing.write_text('preserve owned fixture', encoding='utf-8')
     check('Rejects existing status output without overwriting it', [*common, '--log', str(future_log), '--status-report', str(existing)])
     assert existing.read_text(encoding='utf-8') == 'preserve owned fixture' and not future_log.exists() and not (folder / 'new-status.json').exists()
+    metrics = directory / 'original-link.json'
+    check('Rejects link metrics without a waited launch and original log', ['--link-metrics', str(metrics)])
+    with_log = [*common, '--log', str(future_log)]
+    check('Rejects link metrics inside the delivered package', [*with_log, '--link-metrics', str(folder / 'link.json')])
+    check('Rejects a link report with no parent directory', [*with_log, '--link-metrics', str(directory / 'missing' / 'link.json')])
+    check('Rejects case-aliased link metrics and status output', [*with_log, '--link-metrics', str(metrics), '--status-report', str(metrics).upper()])
+    check('Rejects duplicate link metrics options', [*with_log, '--link-metrics', str(metrics), '--link-metrics', str(directory / 'duplicate.json')])
+    metrics.write_text('preserve original metrics', encoding='utf-8')
+    check('Rejects existing link metrics without overwriting them', [*with_log, '--link-metrics', str(metrics)])
+    assert metrics.read_text(encoding='utf-8') == 'preserve original metrics' and not future_log.exists() and not (folder / 'link.json').exists()
     if args.check_openxr_unavailable:
         check_openxr_unavailable(folder, directory, base)
         findings.append('Graphical OpenXR launch with a missing runtime exits before admission')

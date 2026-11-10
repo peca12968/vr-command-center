@@ -905,6 +905,92 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertEqual(field.verify_venue(path), original)
                 self.assertEqual({file: file.read_bytes() for file in root.iterdir()}, original_files)
 
+    def add_windows_links(self, root, manifest):
+        for entry in manifest['sessions']:
+            for player in entry['players']:
+                if 'logcatPid' in player:
+                    continue
+                log = root / player['log']
+                raw_connection, _ = field.client_result(field.content(log))
+                connection = int(raw_connection)
+                metrics = log.with_suffix('.link.json')
+                launcher = log.with_suffix('.launch.json')
+                samples = [{'sequence': number, 'tick': number * 20, 'windowSeconds': 1.01, 'playerLoopFrames': 60,
+                            'result': 'Reply' if number <= 28 else 'Timeout' if number == 29 else 'Interrupted',
+                            'roundTripMilliseconds': number / 2 if number <= 28 else 0} for number in range(1, 31)]
+                metrics.write_text(json.dumps({'version': 1, 'processId': 8000 + connection, 'connection': connection,
+                    'complete': True, 'reason': 'Limit', 'batchMode': True, 'graphicsDeviceActive': False, 'samples': samples}), encoding='utf-8')
+                launcher.write_text(json.dumps({'status': 'exited', 'processId': 8000 + connection, 'exitCode': 0, 'linkMetrics': {
+                    'metricsSha256': hashlib.sha256(metrics.read_bytes()).hexdigest(),
+                    'logSha256': hashlib.sha256(log.read_bytes()).hexdigest()}}), encoding='utf-8')
+                player.update(launcherReport=launcher.name, linkMetrics=metrics.name)
+
+    def test_venue_link_metrics_cover_all_windows_seats_and_preserve_outcomes(self):
+        for mode in ('Linked', 'Independent'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, split, _ = venue_fixture(root, mode, remote=True, quest_per_room=1)
+                self.add_windows_links(root, split)
+                path.write_text(json.dumps(split), encoding='utf-8')
+                report = field.verify_venue(path)
+                links = [row for session in report['sessions'] for row in session['windowsLinkMetrics']]
+                self.assertEqual(report['windowsLinkMetricsVerified'], 20)
+                self.assertEqual(report['questLogcatPlayers'], 5)
+                self.assertEqual([(row['roomId'], row['seat']) for row in links],
+                                 [(room, seat) for room in range(1, 6) for seat in range(1, 5)])
+                self.assertTrue(all((row['attempts'], row['replies'], row['timeouts'], row['interrupted'], row['p95RoundTripMs'])
+                                    == (30, 28, 1, 1, 13.5) for row in links))
+                path.write_text(json.dumps(self.pack_venue(root, split)), encoding='utf-8')
+                self.assertEqual(field.verify_venue(path), report)
+
+    def test_venue_link_metrics_reject_swapped_logs_and_incomplete_seat_coverage(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, split, _ = venue_fixture(root, 'Independent')
+            self.add_windows_links(root, split)
+            packed = self.pack_venue(root, split)
+            swapped = deepcopy(packed)
+            a, b = swapped['windowsPlayers'][:2]
+            a['linkMetrics'], b['linkMetrics'] = b['linkMetrics'], a['linkMetrics']
+            path.write_text(json.dumps(swapped), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'original link and player log bytes'):
+                field.verify_venue(path)
+            missing = deepcopy(packed)
+            missing['windowsPlayers'][0].pop('linkMetrics')
+            missing['windowsPlayers'][0].pop('launcherReport')
+            path.write_text(json.dumps(missing), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'every Windows seat'):
+                field.verify_venue(path)
+            path.write_text(json.dumps(packed), encoding='utf-8')
+            with (root / a['log']).open('ab') as log:
+                log.write(b'benign unrelated line\n')
+            with self.assertRaisesRegex(field.EvidenceError, 'original link and player log bytes'):
+                field.verify_venue(path)
+
+    def test_venue_link_metrics_reject_wrong_connection_or_invalid_sample(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, split, _ = venue_fixture(root, 'Linked')
+            self.add_windows_links(root, split)
+            path.write_text(json.dumps(split), encoding='utf-8')
+            player = split['sessions'][0]['players'][0]
+            metrics_path, launcher_path = (root / player[key] for key in ('linkMetrics', 'launcherReport'))
+            original = json.loads(metrics_path.read_bytes())
+            launcher = json.loads(launcher_path.read_bytes())
+            edits = [(dict(original, connection=9001), 'original process and final acknowledged connection'),
+                     (dict(original, processId=9002), 'original process and final acknowledged connection'),
+                     (dict(original, samples=original['samples'][:-1]), 'complete 30 samples'),
+                     (dict(original, samples=[dict(original['samples'][0], roundTripMilliseconds=900), *original['samples'][1:]]),
+                      'sample timing')]
+            for modified, message in edits:
+                with self.subTest(message=message):
+                    raw = json.dumps(modified).encode('utf-8')
+                    metrics_path.write_bytes(raw)
+                    launcher['linkMetrics']['metricsSha256'] = hashlib.sha256(raw).hexdigest()
+                    launcher_path.write_text(json.dumps(launcher), encoding='utf-8')
+                    with self.assertRaisesRegex(field.EvidenceError, message):
+                        field.verify_venue(path)
+
     def test_packed_venue_combines_windows_with_original_quest_capture_batches(self):
         for mode in ('Linked', 'Independent'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:

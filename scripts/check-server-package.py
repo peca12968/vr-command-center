@@ -84,6 +84,7 @@ def main():
     p.add_argument('--venue-concurrent-roster-seconds', type=int, help='Require this many recorded seconds of concurrent 25-seat play in both sealed batches')
     p.add_argument('--check-venue-concurrent-fire', action='store_true',
                    help='Drive normal exercise fire on all 25 native desktop seats and verify the sealed shared window')
+    p.add_argument('--check-venue-link-metrics', action='store_true', help='Bind each packaged Windows client link report to its original sealed result')
     p.add_argument('--check-venue-field-ui',action='store_true',help='Download the original current and earlier field bundles from the shipped console')
     p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
     p.add_argument('--check-room-observer',action='store_true',help='Verify room-scoped observation and instant replay on the original Linked source')
@@ -169,6 +170,8 @@ def main():
         p.error('--venue-concurrent-roster-seconds requires --venue-field-evidence and 1..90 seconds')
     if args.check_venue_concurrent_fire and (args.venue_concurrent_roster_seconds is None or args.check_venue_openxr):
         p.error('--check-venue-concurrent-fire requires --venue-concurrent-roster-seconds and all desktop seats')
+    if args.check_venue_link_metrics and (not args.venue_field_evidence or args.check_venue_openxr_reconnect or args.check_venue_concurrent_fire):
+        p.error('--check-venue-link-metrics requires venue field evidence and the original packaged client connections')
     if args.check_venue_field_ui and not args.venue_field_evidence:
         p.error('--check-venue-field-ui requires --venue-field-evidence')
     if args.check_room_readiness and not args.player_package:p.error('--check-room-readiness requires five players per room')
@@ -573,12 +576,17 @@ def main():
             client['witness']=control.ChildWitness(child.pid)
             return client
         report=file.with_suffix('.launcher.json')
+        metrics=file.with_suffix('.link.json') if args.check_venue_link_metrics else None
         flags=['--headless'] if mock is None else ['--openxr']
+        if metrics is not None:
+            flags += ['--link-metrics',str(metrics)]
         environment=env if mock is None else {**env,**mock}
         child=subprocess.Popen([str(player_folder/'Launch-Player.exe'),'--config',str(file),'--launch',
             *flags,'--wait','--log',str(log),'--report',str(report)],cwd=runtime,env=environment)
         client={'process':child,'log':log,'player':person,'sessionId':entry['sessionId'],
             'launcherReport':report,'witness':None,'configPath':file}
+        if metrics is not None:
+            client['linkMetrics']=metrics
         clients.append(client)
         def started():
             if child.poll() is not None:raise RuntimeError('Player launcher exited before admission')
@@ -604,6 +612,8 @@ def main():
                 witness.wait()
                 child.wait(timeout=15)
                 status=read(report)
+                if 'linkMetrics' in client:
+                    status.pop('linkMetrics',None)
                 if child.returncode!=0 or status!={'status':'exited','processId':client['nativePid'],'exitCode':0}:
                     raise RuntimeError('Launcher did not confirm original player exit')
                 witness.close()
@@ -659,7 +669,9 @@ def main():
                     manifest_entry={'evidenceZip':str(evidence_zip),'launcherReport':str(entry['reportPath']),
                         'serverLog':str(entry['work']/'server.log'),'worldJournal':str(world_journal),
                         'combatJournal':str(combat_journal),
-                        'players':[{'address':address,'log':str(c['log'])} for c in owners]}
+                        'players':[{'address':address,'log':str(c['log']),
+                                    **({'launcherReport':str(c['launcherReport']),'linkMetrics':str(c['linkMetrics'])}
+                                       if 'linkMetrics' in c else {})} for c in owners]}
                 preflight = (out/(entry['label']+'-lan-listener.ndjson'), out/(entry['label']+'-lan-probe.json')) if args.check_lan_preflight else None
                 if manifest_entry is not None and preflight is not None:
                     manifest_entry['udpSourcePreflights'] = [dict(zip(('listener', 'probe'), map(str, preflight), strict=True))]
@@ -794,6 +806,16 @@ def main():
               and all(row['combatJournal']['events'] == row['combatSequence']
                       and row['combatJournal']['players'] == 5 * len(row['roomIds']) for row in summary['sessions']),
               label + ' original combat journals reproduce the sealed scores of all 25 seats')
+        if args.check_venue_link_metrics:
+            links = [row for session in summary['sessions'] for row in session['windowsLinkMetrics']]
+            check(summary['windowsLinkMetricsVerified']==len(links)==25 and all(
+                row['attempts']==row['replies']+row['timeouts']+row['interrupted']==30 and row['replies']>0 for row in links),
+                label+' 25 packaged client link reports match the original acknowledged connections and keep every outcome')
+            swapped = [dict(player) for player in evidence['windowsPlayers']]
+            swapped[0]['linkMetrics'],swapped[1]['linkMetrics'] = swapped[1]['linkMetrics'],swapped[0]['linkMetrics']
+            rejected = run(dict(evidence, windowsPlayers=swapped))
+            check(rejected.returncode==1 and 'original link and player log bytes' in rejected.stderr,
+                  label+' rejects swapping two authentic original link reports')
         if args.check_venue_participation_gate:
             proofs=read(out/(label+'-full-participation-begin.json'))
             receipt=read(out/(label+'-venue-begin.json'))['receipt']
@@ -2893,6 +2915,9 @@ def main():
                 check(len({c['nativePid'] for c in round_clients})==25 and all(
                     c['process'].poll() is None and c['witness'].kernel.WaitForSingleObject(c['witness'].handle,0)==258
                     for c in round_clients),'25 simultaneous owned native players '+('Linked' if linked else 'Independent'))
+            if args.check_venue_link_metrics:
+                stage('collecting-player-link-metrics',mode='Linked' if linked else 'Independent')
+                wait(lambda:all(c['linkMetrics'].is_file() for c in round_clients),55,'all original packaged client link reports')
             if args.check_venue_openxr:verify_venue_openxr(entries,round_clients,linked)
             elif args.check_quest_vr_deploy or args.check_quest_vr_partial_map:verify_quest_tracking(linked)
             if args.check_room_readiness:verify_room_readiness(round_clients,linked)

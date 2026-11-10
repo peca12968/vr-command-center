@@ -964,15 +964,64 @@ def venue_windows_logs(rows, expected, evidence_path):
     require(type(rows) is list and 1 <= len(rows) <= 25, 'Provide one to 25 original Windows logs in windowsPlayers')
     groups = {}
     for row in rows:
-        require(type(row) is dict and set(row) == {'address', 'log'}, 'A venue Windows log needs an address and log path')
-        address, path = ipv4(row['address']), evidence_path(row['log'])
+        address, path, link = windows_log_paths(row, evidence_path)
         _, result = client_result(content(path))
         session_id = identity(result['sessionId'])
         require(session_id in expected, 'Windows log belongs to a different venue session')
         group = groups.setdefault(session_id, [])
-        group.append((address, path))
+        group.append((address, path, link))
         require(len(group) <= len(expected[session_id]['roomIds']) * 5, 'Too many Windows logs for an original venue session')
     return groups
+
+
+def windows_log_paths(row, evidence_path):
+    base = {'address', 'log'}
+    extras = {'launcherReport', 'linkMetrics'}
+    require(type(row) is dict and set(row) in (base, base | extras),
+            'A venue Windows log needs an address and log path; provide both original link evidence files if used')
+    link = (evidence_path(row['launcherReport']), evidence_path(row['linkMetrics'])) if 'linkMetrics' in row else None
+    return ipv4(row['address']), evidence_path(row['log']), link
+
+
+def verify_windows_link(raw_log, connection, launch_path, metrics_path):
+    launch = read_json(content(launch_path))
+    with metrics_path.open('rb') as source:
+        raw_metrics = source.read(64 * 1024 + 1)
+    require(0 < len(raw_metrics) <= 64 * 1024, 'Windows link report exceeds its file limit')
+    metrics = read_json(raw_metrics.decode('utf-8-sig'))
+    proof = launch.get('linkMetrics')
+    require(launch.get('status') == 'exited' and integer(launch.get('exitCode'), 0, 0) == 0
+            and type(proof) is dict and set(proof) == {'logSha256', 'metricsSha256'}
+            and proof['logSha256'] == hashlib.sha256(raw_log).hexdigest()
+            and proof['metricsSha256'] == hashlib.sha256(raw_metrics).hexdigest(),
+            'Windows launcher did not record these original link and player log bytes')
+    require(integer(metrics.get('version'), 1, 1) and metrics.get('complete') is True and metrics.get('reason') == 'Limit'
+            and integer(metrics.get('processId'), 1, 2**31 - 1) == integer(launch.get('processId'), 1, 2**31 - 1)
+            and integer(metrics.get('connection'), 1, 2**64 - 1) == int(connection)
+            and type(metrics.get('batchMode')) is bool and type(metrics.get('graphicsDeviceActive')) is bool,
+            'Windows link report does not belong to the original process and final acknowledged connection')
+    samples = metrics['samples']
+    require(type(samples) is list and len(samples) == 30, 'Windows link report lacks the complete 30 samples')
+    tick, timeouts, interrupted, replies = 0, 0, 0, []
+    for sequence, row in enumerate(samples, 1):
+        integer(row['sequence'], sequence, sequence)
+        tick = integer(row['tick'], tick)
+        integer(row['playerLoopFrames'], 1)
+        window, rtt = row['windowSeconds'], row['roundTripMilliseconds']
+        require(type(window) in (int, Decimal) and Decimal(window).is_finite() and window >= 1
+                and type(rtt) in (int, Decimal) and Decimal(rtt).is_finite() and 0 <= rtt < 900,
+                'Invalid Windows link sample timing')
+        outcome = row['result']
+        if outcome == 'Reply':
+            replies.append(rtt)
+        else:
+            require(outcome in ('Timeout', 'Interrupted') and rtt == 0, 'Invalid Windows link sample outcome')
+            timeouts += outcome == 'Timeout'
+            interrupted += outcome == 'Interrupted'
+    replies.sort()
+    return {'attempts': len(samples), 'replies': len(replies), 'timeouts': timeouts, 'interrupted': interrupted,
+            'p95RoundTripMs': float(replies[(95 * len(replies) + 99) // 100 - 1]) if replies else None,
+            'batchMode': metrics['batchMode'], 'graphicsDeviceActive': metrics['graphicsDeviceActive']}
 
 
 def read_udp_preflight_batch(path, mode, expected_rooms):
@@ -1201,7 +1250,7 @@ def verify_venue(manifest_path):
         quest_deployments, deployment_summary = read_quest_deployments(manifest['questDeployments'], mode, evidence_path)
 
     rooms, summaries = {}, []
-    quest_players = 0
+    quest_players, windows_players, windows_link_reports = 0, 0, 0
     stream_ids, bindings, player_ids, admission_ids, end_times, exchanges = set(), set(), set(), set(), set(), set()
     begin_request = None
     for entry in entries:
@@ -1274,12 +1323,30 @@ def verify_venue(manifest_path):
                 'Each original room must include five player logs')
         quest_logs = []
         for player in players:
-            address, path = ipv4(player['address']), evidence_path(player['log'])
             if 'logcatPid' in player:
                 require(not capture_supplied, 'Use the Quest capture batches or manual Quest logs, not both')
-                quest_logs.append((address, path, integer(player['logcatPid'], 1, 2**31 - 1)))
+                require('linkMetrics' not in player and 'launcherReport' not in player, 'Windows link evidence requires a Windows player log')
+                quest_logs.append((ipv4(player['address']), evidence_path(player['log']), integer(player['logcatPid'], 1, 2**31 - 1)))
             else:
-                logs.append((address, path))
+                logs.append(windows_log_paths(player, evidence_path))
+        windows_players += len(logs)
+        link_rows = []
+        owners = {player['id']: player for player in session['players']}
+
+        def windows_logs():
+            for address, path, link in logs:
+                if link is None:
+                    yield address, content(path)
+                    continue
+                with path.open('rb') as source:
+                    raw_log = limited_read(source)
+                log = raw_log.decode('utf-8-sig')
+                connection, result = client_result(log)
+                owner = owners.get(result['playerId'])
+                require(owner is not None, 'Windows link report belongs to a different session player')
+                link_rows.append({'roomId': owner['roomId'], 'seat': integer(owner['seat'], 0, 4) + 1,
+                                  **verify_windows_link(raw_log, connection, *link)})
+                yield address, log
         preflight_paths = preflight_pair(entry['udpPreflight']) if preflights else None
         source_paths = None
         if source_preflights:
@@ -1290,7 +1357,7 @@ def verify_venue(manifest_path):
             require(1 <= len(pairs) <= size, 'Provide all-source UDP preflight reports for every original endpoint')
             source_paths = [preflight_pair(pair, base) for pair, base in pairs]
         report, sources = verify_session(topology, server_ips, launcher, session, statistics, endpoint,
-                                         server_log, size, ((address, content(path)) for address, path in logs),
+                                         server_log, size, windows_logs(),
                                          require_remote=False,
                                          quest_player_logs=((address, content(path), pid) for address, path, pid in quest_logs),
                                          world_journal=evidence_path(entry['worldJournal']) if journals else None,
@@ -1307,6 +1374,7 @@ def verify_venue(manifest_path):
             require(exchange not in exchanges, 'Venue reused a UDP preflight exchange')
             exchanges.add(exchange)
         quest_players += len(quest_logs) + len(captured)
+        windows_link_reports += len(link_rows)
         seats = {(player['roomId'], integer(player['seat'], 0, 4)) for player in session['players']}
         require(seats == {(room, seat) for room in row['roomIds'] for seat in range(5)}, 'Final roster must cover every room seat exactly once')
         for player in session['players']:
@@ -1323,11 +1391,13 @@ def verify_venue(manifest_path):
                           **({'combatJournal': report['combatJournal']} if combat_journals else {}),
                           **({'playerSources': report['playerSources']} if verify_player_sources else {}),
                           **({'reconnectHistory': report['reconnectHistory']} if verify_reconnect_history else {}),
+                          **({'windowsLinkMetrics': sorted(link_rows, key=lambda row: (row['roomId'], row['seat']))} if link_rows else {}),
                           **({'experienceMode': experience} if check_alignments else {}),
                           **({'roomAlignments': report['roomAlignments']} if alignments is not None else {})})
 
     require(recorded_at in end_times and not expected, 'Closure time or session set differs from the terminal evidence')
     require(not quest_deployments, 'Quest deployment reports include seats without original Quest logcat evidence')
+    require(windows_link_reports in (0, windows_players), 'Windows link evidence must cover every Windows seat in the venue')
     peer_ips = {address for sources in rooms.values() for address in sources}
     remote = peer_ips - server_ips
     require(topology != 'direct-lan' or remote, 'Direct LAN needs a peer outside the declared server addresses')
@@ -1355,6 +1425,7 @@ def verify_venue(manifest_path):
             **({'questLogcatPlayers': quest_players} if quest_players else {}),
             **({'questCaptureBatchesVerified': capture_batches, 'questCaptureSeatsVerified': quest_players} if capture_supplied else {}),
             **({'questDeployment': deployment_summary} if deployment_summary is not None else {}),
+            **({'windowsLinkMetricsVerified': windows_link_reports} if windows_link_reports else {}),
             **({'udpPreflightsVerified': len(exchanges)} if preflights else {}),
             **({'udpSourcePreflightsVerified': len(exchanges)} if source_preflights else {}),
             **({'worldJournalsVerified': len(summaries)} if journals else {}),

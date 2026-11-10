@@ -426,6 +426,25 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json
 
 同機驗證可執行 `scripts/check-desktop-exercise.py --runtime-root <新資料根目錄> --mode both --players-per-room 5 --seconds 40 --link-metrics`。檢查器核對每份報表的原程序與原連線，保留逾時分母，再計算回覆的 p50／p95。無圖形程序只提供 Unity 更新頻率。實際渲染幀率和跨機門檻另行量測。 [驗證結果](PROGRESS.md#2026-11-09-windows-玩家連線量測)
 
+### 將 Windows 連線量測納入五房封存
+
+使用 Windows 玩家啟動器 1.5，為每位 Windows 玩家指定不同的三個新檔案路徑。使用 Windows OpenXR 的席位可另加 `--openxr`。正常入場並讓任務執行至 30 次採樣完成，結束任務後保留玩家收到原戰績的程序日誌。等玩家程序退出且啟動器報告顯示 `exited` 後，再收集原檔。
+
+```powershell
+& .\Launch-Player.exe --config '.\room-01-seat-01.json' --launch --wait `
+  --log 'C:\Private\room-01-seat-01.log' `
+  --report 'C:\Private\room-01-seat-01-launch.json' `
+  --link-metrics 'C:\Private\room-01-seat-01-link.json'
+```
+
+將 `launcherReport` 和 `linkMetrics` 加到五房清單中的原 `windowsPlayers[]` 列，也可加到逐場 `players[]` 的 Windows 列。選用時須提供全館每位 Windows 玩家的兩個原檔。Quest 席位沿用原 logcat。啟動器報告的 `linkMetrics` 欄位保存日誌及量測檔的 SHA-256，若缺檔則為 `null`。
+
+```json
+{"address":"192.168.1.20","log":"room-01-seat-01.log","launcherReport":"room-01-seat-01-launch.json","linkMetrics":"room-01-seat-01-link.json"}
+```
+
+`verify-field-results.py --venue-manifest` 會比對檔案雜湊、原玩家程序與伺服器確認戰績的最後一條連線，並檢查每份都有 30 筆已結案樣本。若量測後重連，先前連線的量測無法與最後戰績配對。成功摘要列出每席回覆、逾時、中斷及回覆的 p95；全數未回覆時 p95 為空值。量測反映遊戲訊息往返與排程，跨機網路容量仍需現場驗收。
+
 ## 同機 UDP 流量量測
 
 ```powershell

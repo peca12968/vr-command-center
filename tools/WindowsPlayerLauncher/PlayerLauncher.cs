@@ -114,7 +114,29 @@ internal static class PlayerLauncher
         File.Move(temporary, statusReport);
         lastStatusReport = value;
     }
-    private static Process Launch(string config, bool headless, string log, string reviewedHash = null, bool openXR = false)
+    private static string EvidenceHash(string path, long limit)
+    {
+        if (!File.Exists(path)) return null;
+        PlainPath(path);
+        using (var sha = SHA256.Create())
+        using (var file = File.OpenRead(path))
+            return file.Length > 0 && file.Length <= limit
+                ? BitConverter.ToString(sha.ComputeHash(file)).Replace("-", "").ToLowerInvariant() : null;
+    }
+    private static object LinkEvidence(string metrics, string log)
+    {
+        try
+        {
+            var metricsHash = EvidenceHash(metrics, 64 * 1024);
+            var logHash = EvidenceHash(log, 16 * 1024 * 1024);
+            if (metricsHash != null && logHash != null) return new { metricsSha256 = metricsHash, logSha256 = logHash };
+        }
+        catch (IOException) { }
+        catch (UnauthorizedAccessException) { }
+        catch (InvalidDataException) { }
+        return null;
+    }
+    private static Process Launch(string config, bool headless, string log, string reviewedHash = null, bool openXR = false, string linkMetrics = null)
     {
         Verify(); Config(config);
         Require(reviewedHash == null || Hash(config) == reviewedHash, "連線檔已變更，請重新載入後核對。");
@@ -122,6 +144,7 @@ internal static class PlayerLauncher
         if (headless) args += " -batchmode -nographics";
         if (openXR) args += " -force-d3d11 --vr-openxr";
         if (log != null) args += " -logFile " + Quote(log);
+        if (linkMetrics != null) args += " --vr-link-metrics " + Quote(linkMetrics);
         var child = Process.Start(new ProcessStartInfo(Path.Combine(Root, "VrCommand.exe"), args)
         { UseShellExecute = false, WorkingDirectory = Root, CreateNoWindow = headless });
         Require(child != null, "無法啟動玩家程式。");
@@ -131,7 +154,8 @@ internal static class PlayerLauncher
     [STAThread]
     private static int Main(string[] args)
     {
-        string config = null, log = null; bool launch = false, wait = false, headless = false, verify = false, openXR = false;
+        string config = null, log = null, linkMetrics = null; bool launch = false, wait = false, headless = false, verify = false, openXR = false;
+        bool invalidLinkOption = false;
         try
         {
             for (var i = 0; i < args.Length; i++)
@@ -141,6 +165,16 @@ internal static class PlayerLauncher
                 else if (args[i] == "--headless") headless = true;
                 else if (args[i] == "--openxr") openXR = true;
                 else if (args[i] == "--verify") verify = true;
+                else if (args[i] == "--link-metrics")
+                {
+                    if (i + 1 == args.Length || args[i + 1].StartsWith("--", StringComparison.Ordinal)) invalidLinkOption = true;
+                    else
+                    {
+                        var path = Path.GetFullPath(args[++i]);
+                        if (linkMetrics == null) linkMetrics = path;
+                        else invalidLinkOption = true;
+                    }
+                }
                 else if ((args[i] == "--config" || args[i] == "--log" || args[i] == "--report" || args[i] == "--status-report") && i + 1 < args.Length)
                 {
                     var option = args[i++]; var path = Path.GetFullPath(args[i]);
@@ -148,7 +182,7 @@ internal static class PlayerLauncher
                 }
                 else throw new InvalidDataException("啟動選項不正確。");
             }
-            Require(report == null || (!File.Exists(report) && !report.StartsWith(Root, StringComparison.OrdinalIgnoreCase) && !SamePath(report, config) && !SamePath(report, log)),
+            Require(report == null || (!File.Exists(report) && !report.StartsWith(Root, StringComparison.OrdinalIgnoreCase) && !SamePath(report, config) && !SamePath(report, log) && !SamePath(report, linkMetrics)),
                 "診斷報告須使用玩家包外的新路徑。");
             Require(log == null || (!File.Exists(log) && !log.StartsWith(Root, StringComparison.OrdinalIgnoreCase) && !SamePath(log, config)),
                 "診斷記錄須使用玩家包外的新路徑。");
@@ -156,10 +190,20 @@ internal static class PlayerLauncher
                 && !SamePath(statusReport, config) && !SamePath(statusReport, log) && !SamePath(statusReport, report)), "連線狀態報告須搭配等待啟動及獨立的新記錄路徑。");
             Require((!headless && !wait || launch) && (!launch || config != null), "請提供玩家連線檔。");
             Require(!openXR || (launch && !headless && !verify), "OpenXR 需要直接啟動有圖形的玩家端。");
+            Require(!invalidLinkOption, "請只指定一次連線量測 JSON 路徑。");
+            if (linkMetrics != null)
+            {
+                Require(launch && wait && !verify && log != null && report != null && String.Equals(Path.GetExtension(linkMetrics), ".json", StringComparison.OrdinalIgnoreCase)
+                    && !linkMetrics.StartsWith(Root, StringComparison.OrdinalIgnoreCase) && !File.Exists(linkMetrics) && !Directory.Exists(linkMetrics)
+                    && !SamePath(linkMetrics, config) && !SamePath(linkMetrics, log) && !SamePath(linkMetrics, statusReport),
+                    "連線量測須搭配等待啟動，並使用玩家包外獨立的新 JSON 路徑及原日誌、程序報告。");
+                foreach (var path in new[] { linkMetrics, log, report, statusReport })
+                    if (path != null) PlainPath(Path.GetDirectoryName(path));
+            }
             if (verify) { Verify(); Report(new { status = "verified" }); return 0; }
             if (launch)
             {
-                using (var child = Launch(config, headless, log, openXR: openXR))
+                using (var child = Launch(config, headless, log, openXR: openXR, linkMetrics: linkMetrics))
                 {
                     if (!wait) return 0;
                     if (statusReport == null) child.WaitForExit();
@@ -169,7 +213,9 @@ internal static class PlayerLauncher
                         while (!child.WaitForExit(200)) { monitor.Poll(); StatusReport(monitor, child.Id, false); }
                         monitor.Poll(exited: true); StatusReport(monitor, child.Id, true);
                     }
-                    Report(new { status = "exited", processId = child.Id, exitCode = child.ExitCode }); return child.ExitCode;
+                    if (linkMetrics == null) Report(new { status = "exited", processId = child.Id, exitCode = child.ExitCode });
+                    else Report(new { status = "exited", processId = child.Id, exitCode = child.ExitCode, linkMetrics = LinkEvidence(linkMetrics, log) });
+                    return child.ExitCode;
                 }
             }
             Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
@@ -178,7 +224,7 @@ internal static class PlayerLauncher
         catch
         {
             // Serializer / IO exception text can contain input. Do not echo secrets or file contents.
-            if (report != null && !File.Exists(report) && !report.StartsWith(Root, StringComparison.OrdinalIgnoreCase) && !SamePath(report, config) && !SamePath(report, log))
+            if (report != null && !File.Exists(report) && !report.StartsWith(Root, StringComparison.OrdinalIgnoreCase) && !SamePath(report, config) && !SamePath(report, log) && !SamePath(report, linkMetrics))
                 try { Report(new { status = "rejected", reason = "Package, connection file or launch options are invalid." }); } catch { }
             if (report == null) MessageBox.Show("無法啟動。請確認玩家包已完整解壓，並重新選擇控制台下載的玩家連線檔。", "VR Command 玩家", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return 1;
