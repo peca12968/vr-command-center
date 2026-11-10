@@ -38,6 +38,8 @@ Windows 管理包 0.31.33 起，主控可在五房總覽按「開始準備中的
 
 `GET /api/venue/phase` 的 `begin` 預覽含每個目標的 `sessionId`、`phaseSinceSequence`、`sessionSequence` 與房號。送出 `Begin` 時每場須附兩個原序號。準備中可從 `GET /api/rooms/readiness` 讀取 `venueBeginReady`，主控同時收到 `venueBegin` 的條件與本房等候席號。控制台核對同一場次和序號後才顯示逐房結果。來源未就緒時回傳 `409`、`venue-begin-not-ready` 與 `roomIds`。
 
+可確認的準備中房間會在主控的 `venueBegin.seats` 提供從 1 起算的席號與狀態。欄位只列已編入名冊的席位，空席由控制台依房間容量呈現。準備快照尚未同步目前名冊時，欄位只會回報入場或場次同步狀態。
+
 ## 全館暫停與繼續
 
 Windows 管理包 0.31.31 起，主控可在五房總覽使用「全館暫停與繼續」。按「暫停執行中場次」前會列出本次房號與場次數。合併模式的五個房間會共用一個命令，獨立場的命令則在同一筆管理交易保存。各遊戲來源收到自己的新序號後套用，主控可從房卡查看已接受快照的階段。

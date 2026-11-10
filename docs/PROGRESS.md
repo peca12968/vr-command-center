@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-10 全館開場逐席狀態
+
+控制台 0.31.92 的主控可在同一張表查閱五房各席的名冊、入場同步、姿態及追蹤狀態。嚴格追蹤政策會指出仍需追蹤的合成席位。舊版名冊、過期或缺少的來源不會顯示原姿態為就緒。 [開場操作](MISSION_CLOCK.md#全館開始)
+
+- 同機 Windows 三包 `run-ef3f55f85ef54b578e19c229ddbdcf9a` 通過 399 項。合併與獨立模式各 25 個 Windows 0.49.1 客戶端，準備快照每房五席均為合成姿態。嚴格追蹤政策拒絕原批次，有效姿態政策可開場。六場完整回放共 1,034 格，50 份戰績和 50 次伺服器確認。額外唯讀核對見 `artifacts/begin-seats-native-readback.json`。
+- 管理包解壓 107 項、1,030 項核心、768 項 HTTP、109 項 Node、50 項 MR 與 66 項全館追蹤專項 Chromium 通過。完整解壓版 Chromium 通過 804 項，結果在 `artifacts/console-begin-seats-full/checks.json`。原生為同機 Windows 合成姿態，瀏覽器 MR 使用測試來源。實體頭盔、場地及跨機仍待驗收。 [Windows 管理包](WINDOWS_CONTROL_PACKAGE.md)
+- 功能來源 `06d288cfd9789c617563efedbce1c4a57246b8f2`。GitHub Actions job `129692005759` 因帳務或支出上限未啟動。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42775216907)
+
 ## 2026-11-10 封存核對 Quest 入場的發行 APK
 
 使用 `-ReleaseReport` 的正式部署報告在成功席位附上原場次、玩家、入場名額及連線埠。五房封存清單可用 `questDeployments` 將原報告、原 Quest logcat、伺服器戰績確認與 APK 雜湊逐席核對。可合併中斷前的成功席位和後續只重試未完成席位的報告。 [封存操作](EXTERNAL_CLIENTS.md#核對封存席位的-quest-發行-apk)
