@@ -43,14 +43,18 @@ def authority_gate(port, owners):
         def do_GET(self):
             path = self.path.split('?', 1)[0]
             room = routes.get(path)
-            if room in faults:
-                status, body = faults[room]
+            fault = faults.get(room)
+            if fault is not None:
                 injected.add(room)
+            if fault is not None and not callable(fault):
+                status, body = fault
             elif room is not None or path == '/api/me':
                 with closing(http.client.HTTPConnection('127.0.0.1', port, timeout=2)) as upstream:
                     upstream.request('GET', self.path, headers={'Authorization': self.headers['Authorization']})
                     reply = upstream.getresponse()
                     status, body = reply.status, reply.read(192 * 1024 + 1)
+                if fault is not None and status == 200:
+                    body = json.dumps(fault(json.loads(body))).encode()
             else:
                 status, body = 404, b''
             self.send_response(status)
@@ -976,21 +980,46 @@ def run(args):
                         for room in rooms:
                             path = '/api/sessions/' + owners[room]
                             venue_connections[room] = accept(venue_peers[room], room, venue_connections[room], bound=True)
-                        cases = [(1, 403, b'', 'management-refused'),
-                                 (2, 200, b'{', 'management-invalid-response'),
-                                 (3, 200, b'{}', 'management-invalid-response')]
+                        recovered_room = 4
+                        recovery_peer = venue_peers[recovered_room]
+                        prior_connection = venue_connections[recovered_room]
+                        first = send_venue_batch(recovered_room, 1)
+                        wait(lambda:venue_status(fault_directory)[3]['status']['progress']['acknowledged']==1,
+                             'original room 4 acknowledgement before a temporary outage')
+                        lost = send_venue_batch(recovered_room, 1, 'observe-close')
+                        faults[recovered_room] = (503, b'')
+                        outage_close = recovery_peer.read('closed')
+                        assert outage_close['connectionId']==prior_connection
+                        wait(lambda:venue_status(fault_directory)[3]['status']['progress']['phase']=='management-unavailable',
+                             'room 4 closes its pending batch during a temporary outage')
+                        del faults[recovered_room]
+                        new_hello = recovery_peer.read('hello')
+                        assert new_hello['connectionId']!=prior_connection and new_hello['roomId']==recovered_room
+                        recovery_peer.reply()
+                        wait(lambda:venue_status(fault_directory)[3]['status']['progress']['attachments']==2,
+                             'room 4 attaches after management recovers')
+                        venue_connections[recovered_room] = new_hello['connectionId']
+                        fresh = send_venue_batch(recovered_room, 1)
+                        wait(lambda:venue_status(fault_directory)[3]['status']['progress']['acknowledged']==2,
+                             'room 4 only acknowledges fresh feedback on the recovered connection')
+
+                        cases = [(1, (403, b''), 'management-refused'),
+                                 (2, (200, b'{'), 'management-invalid-response'),
+                                 (3, (200, b'{}'), 'management-invalid-response'),
+                                 (4, lambda page: dict(page, combatOrigin='GameServer'), 'management-invalid-response')]
                         acknowledged, cancelled = {}, {}
-                        for room, status, body, reason in cases:
-                            acknowledged[room] = send_venue_batch(room, 1)
-                            wait(lambda:venue_status(fault_directory)[room-1]['status']['progress']['acknowledged']==1,
+                        for room, fault, reason in cases:
+                            acknowledged[room] = first | fresh if room == recovered_room else send_venue_batch(room, 1)
+                            expected_count = len(acknowledged[room])
+                            wait(lambda:venue_status(fault_directory)[room-1]['status']['progress']['acknowledged']==expected_count,
                                  'original acknowledgment before authority fault')
                             cancelled[room] = send_venue_batch(room, 1, 'observe-close')
-                            faults[room] = (status, body)
+                            faults[room] = fault
                             closed_batch = venue_peers[room].read('closed')
                             assert closed_batch['connectionId']==venue_connections[room]
                             terminal = wait(lambda:row if (row:=venue_status(fault_directory)[room-1])['state']=='stopped' else None,
                                             'authority fault publishes a stopped room')
-                            assert terminal['status']['termination']==reason and terminal['status']['progress']['acknowledged']==1
+                            assert terminal['status']['termination']==reason and terminal['status']['progress']['acknowledged']==expected_count
                         assert faulty.poll() is None and not (fault_directory/'venue-report.json').exists()
                         unaffected = send_venue_batch(5, 1)
                         wait(lambda:venue_status(fault_directory)[4]['status']['progress']['acknowledged']==1,
@@ -999,23 +1028,46 @@ def run(args):
                         stdout, _ = faulty.communicate(timeout=8)
                         aggregate = json.loads((fault_directory/'venue-report.json').read_bytes())
                         assert faulty.returncode==1 and json.loads(stdout)==aggregate and aggregate['complete'] is False
-                        assert injected == {room for room, _, _, _ in cases}
-                        for room, _, _, reason in cases:
+                        assert injected == {room for room, _, _ in cases}
+                        for room, _, reason in cases:
                             row = aggregate['rooms'][room-1]
                             assert row['exitCode']==1 and row['error'] is None
                             result = json.loads((fault_directory/row['report']).read_bytes())
-                            assert result['termination']==reason and result['complete'] is False and result['managementFaults']==1
-                            assert result['acknowledged']==1 and result['physicalDeliveryConfirmed'] is False
-                            assert {attempt['status']:{item['signal']['reportId'] for item in attempt['deliveries']}
-                                    for attempt in result['attempts']}=={
-                                        'simulated-acknowledged':acknowledged[room], 'cancelled':cancelled[room]}
+                            assert result['termination']==reason and result['complete'] is False
+                            assert result['acknowledged']==len(acknowledged[room]) and result['physicalDeliveryConfirmed'] is False
+                            delivered = {item['signal']['reportId'] for attempt in result['attempts']
+                                         if attempt['status']=='simulated-acknowledged' for item in attempt['deliveries']}
+                            assert delivered==acknowledged[room]
+                            attempts = [attempt for attempt in result['attempts'] if attempt['status']=='cancelled']
+                            if room==recovered_room:
+                                assert result['managementFaults']>=2 and result['attachments']==2
+                                outage_attempt, = [attempt for attempt in attempts if attempt['batchId']==outage_close['batchId']]
+                                assert outage_attempt['connectionId']==prior_connection
+                                assert {item['signal']['reportId'] for item in outage_attempt['deliveries']}==lost
+                                save('linked-fleet-recover-close.json',outage_close)
+                                attempts.remove(outage_attempt)
+                            else:
+                                assert result['managementFaults']==1
+                            cancelled_attempt, = attempts
+                            assert {item['signal']['reportId'] for item in cancelled_attempt['deliveries']}==cancelled[room]
                         room_five = json.loads((fault_directory/aggregate['rooms'][4]['report']).read_bytes())
                         assert room_five['acknowledged']==1 and room_five['termination']=='operator-stop'
                         assert {item['signal']['reportId'] for attempt in room_five['attempts']
                                 for item in attempt['deliveries']}==unaffected
                         assert all(not any(secret in file.read_text(encoding='utf-8') for secret in private)
                                    for file in fault_directory.glob('*.json'))
-                        check(True, 'Authority refusal, invalid JSON and invalid feedback cancel their batches, preserve room reports and leave another room active')
+                        check(True, 'Temporary authority loss cancels the original batch and recovers only fresh feedback on a new connection')
+                        check(True, 'Authority refusal, malformed feedback and a changed origin cancel their batches and leave room five active')
+
+                        faults.clear()
+                        faults[4] = lambda page: dict(page, combatOrigin=None)
+                        invalid_directory = out/'linked-fleet-missing-origin'
+                        invalid = start_fleet(fault_bindings, invalid_directory, runtime/'linked-fleet-missing-origin.stop')
+                        diagnostic, _ = invalid.communicate(timeout=8)
+                        check(invalid.returncode==1 and 'InvalidDataException' in diagnostic and not invalid_directory.exists()
+                              and all(peer.lines.empty() for peer in venue_peers.values())
+                              and not any(secret in diagnostic for secret in private),
+                              'A current stream without a combat origin is refused before any fleet handshake')
                 if mode=='Independent':
                     check(True, 'The revoked room fails the fleet result while an unaffected room confirms fresh feedback on its original connection')
                     old_stream, _, position = venue_streams.pop(owners[3])

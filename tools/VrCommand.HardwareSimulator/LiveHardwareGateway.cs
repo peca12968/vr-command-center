@@ -257,7 +257,7 @@ internal static partial class LiveHardwareGateway
                     await Exchange(wire, new { version = 1, kind = "hello", mode = "simulation", connectionId = connection, config.RoomId },
                         "ready", connection, null, run.Token);
                     connections++;
-                    page = (await Read(client, route, config, null, run.Token)).Page;
+                    page = (await Read(client, route, config, null, run.Token, page)).Page;
                     if (ActiveEpoch(page) == epoch)
                     {
                         attachments++;
@@ -267,7 +267,7 @@ internal static partial class LiveHardwareGateway
                     {
                         await Task.Delay(PollInterval, run.Token);
                         var after = page.ThroughSequence;
-                        var current = await Read(client, route, config, after, run.Token);
+                        var current = await Read(client, route, config, after, run.Token, page);
                         page = current.Page;
                         if (ActiveEpoch(page) != epoch) break;
                         if (page.ResetReason is not null) { heartbeat?.Refresh(); continue; }
@@ -372,12 +372,12 @@ internal static partial class LiveHardwareGateway
         {
             while (await Task.WhenAny(receipt, Task.Delay(PollInterval, pending.Token)) != receipt)
             {
-                var observation = await Read(client, route, config, after, pending.Token);
+                var observation = await Read(client, route, config, after, pending.Token, page);
                 if (receipt.IsFaulted || receipt.IsCanceled) await receipt;
                 if (!StillEligible(observation)) return observation.Page;
             }
             await receipt;
-            var confirmed = await Read(client, route, config, after, pending.Token);
+            var confirmed = await Read(client, route, config, after, pending.Token, page);
             run.ThrowIfCancellationRequested();
             return StillEligible(confirmed) ? null : confirmed.Page;
         }
@@ -409,7 +409,8 @@ internal static partial class LiveHardwareGateway
         catch (OperationCanceledException) when (!run.IsCancellationRequested) { throw new TimeoutException(); }
     }
 
-    private static async Task<Observation> Read(HttpClient client, string route, Configuration config, long? after, CancellationToken run)
+    private static async Task<Observation> Read(HttpClient client, string route, Configuration config, long? after,
+        CancellationToken run, RoomHardwareFeedback? previous = null)
     {
         var started = Stopwatch.GetTimestamp();
         var query = config.Version == 2 ? "?includeBindings=true" : "";
@@ -418,11 +419,15 @@ internal static partial class LiveHardwareGateway
         if (page.Version != config.Version || (page.Version == 1 && page.Bindings is not null)
             || page.RoomId != config.RoomId || page.SessionId != config.SessionId || page.ThroughSequence < 1
             || page.ThroughSequence < after || !Enum.IsDefined(page.State) || page.CheckedAtUtc == default
+            || (page.StreamId is null ? page.CombatOrigin is not null
+                : page.StreamId == Guid.Empty || page.CombatOrigin is not (CombatOrigin.Simulation or CombatOrigin.GameServer))
+            || (page.StreamId is not null && previous is not null && previous.StreamId == page.StreamId && previous.CombatOrigin != page.CombatOrigin)
+            || (page.State == SessionState.Running ? page.RunningSinceSequence is null or < 1 || page.RunningSinceSequence > page.ThroughSequence
+                : page.RunningSinceSequence is not null)
             || (after.HasValue ? page.ResetReason is not (null or "inactive" or "backlog") : page.ResetReason != "attached")
             || page.Signals is not { Length: <= 256 } || (page.ResetReason is not null && page.Signals.Length != 0)
-            || (page.ResetReason is null && (page.State != SessionState.Running || page.StreamId is null || page.StreamId == Guid.Empty
-                || page.RunningSinceSequence is null or < 1 || page.RunningSinceSequence > page.ThroughSequence)))
-            throw new InvalidDataException("Unexpected feedback cursor, room or phase.");
+            || (page.ResetReason is null && (page.State != SessionState.Running || page.StreamId is null)))
+            throw new InvalidDataException("Unexpected feedback cursor, room, phase or combat source.");
         if (config.Version == 2)
         {
             var seats = ValidateBindingRoster(page.Bindings);
