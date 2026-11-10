@@ -18,7 +18,7 @@ public sealed class SqliteMissionLibrary : IDisposable
     public SqliteMissionLibrary(string directory)
     {
         Directory.CreateDirectory(directory);
-        lease = new(Path.Combine(directory, ".library-writer.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+        lease = StoreWriterLease.Open(Path.Combine(directory, ".library-writer.lock"), "mission library");
         db = new(new SqliteConnectionStringBuilder { DataSource = Path.Combine(directory, "missions.db"), Pooling = false }.ToString());
         try
         {

@@ -16,8 +16,7 @@ public sealed class SqliteSessionEventStore : IAtomicSessionEventStore, IDisposa
         directory = Path.GetFullPath(directory);
         Directory.CreateDirectory(directory);
         DatabasePath = Path.Combine(directory, "events.db");
-        lease = new FileStream(Path.Combine(directory, ".writer.lock"), FileMode.OpenOrCreate,
-            FileAccess.ReadWrite, FileShare.None);
+        lease = StoreWriterLease.Open(Path.Combine(directory, ".writer.lock"), "session event-store");
         SqliteConnection? initializing = null;
         try
         {

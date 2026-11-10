@@ -40,9 +40,18 @@ builder.Services.AddHostedService<MissionClockService>();
 var app = builder.Build();
 ControlPipeLifetime.Attach(app, builder.Configuration["ControlPipeToken"]);
 // Fail startup on inconsistent persisted histories, before reporting a healthy service.
-app.Services.GetRequiredService<SessionManager>();
-app.Services.GetRequiredService<SqliteMissionLibrary>();
-app.Services.GetRequiredService<WorldRecordings>();
+try
+{
+    app.Services.GetRequiredService<SessionManager>();
+    app.Services.GetRequiredService<SqliteMissionLibrary>();
+    app.Services.GetRequiredService<WorldRecordings>();
+}
+catch (StoreWriterLeaseException error)
+{
+    Console.Error.WriteLine(error.Message);
+    await app.DisposeAsync();
+    return 1;
+}
 app.UseWebSockets(new WebSocketOptions { KeepAliveInterval = TimeSpan.FromSeconds(30) });
 
 app.Use(async (context, next) =>

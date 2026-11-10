@@ -23,9 +23,11 @@ from contextlib import closing
 from concurrent.futures import ThreadPoolExecutor
 
 ROOT = Path(__file__).resolve().parents[1]
-DLL = Path(os.environ.get("VR_COMMAND_API_DLL", ROOT / "src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll"))
-if not DLL.exists():
-    raise SystemExit("Build first: dotnet build VrCommand.slnx --configuration Release")
+api_exe = os.environ.get("VR_COMMAND_API_EXE")
+api_path = Path(api_exe or os.environ.get("VR_COMMAND_API_DLL", ROOT / "src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll")).resolve()
+if not api_path.is_file():
+    raise SystemExit("Build Release or point VR_COMMAND_API_EXE to an extracted management service binary.")
+api_command = [str(api_path)] if api_exe else ["dotnet", str(api_path)]
 
 with socket.socket() as reservation:
     reservation.bind(("127.0.0.1", 0))
@@ -215,9 +217,9 @@ try:
     with (test_directory / "server.log").open("w", encoding="utf-8") as log:
         key_file = test_directory / "operator-keys.local.json"
 
-        def launch(overrides=None, use_key_file=False, output=log):
+        def launch(overrides=None, use_key_file=False, output=log, url=base_url):
             process_environment = environment.copy()
-            args = ["dotnet", str(DLL), "--urls", base_url]
+            args = [*api_command, "--urls", url]
             if use_key_file:
                 process_environment = {key: value for key, value in process_environment.items()
                                        if not key.lower().startswith("operatorkeys__")}
@@ -252,25 +254,41 @@ try:
                         raise RuntimeError("API startup timed out")
                     time.sleep(0.1)
 
-        for label, invalid, diagnostic in [
-            ("missing", {"OperatorKeys__Master": ""}, "OperatorKeys:Master must be a unique credential"),
-            ("weak", {"OperatorKeys__Master": "short"}, "OperatorKeys:Master must be a unique credential"),
-            ("duplicate", {"OperatorKeys__Room1": tokens["Master"]}, "Operator credentials must be distinct across consoles."),
-            ("unknown", {"OperatorKeys__Room9": secrets.token_urlsafe(32)}, "Unknown OperatorKeys configuration name."),
-        ]:
-            invalid_log = test_directory / f"invalid-credentials-{label}.log"
-            with invalid_log.open("wb") as output:
-                invalid_process = launch(overrides=invalid, output=output)
+        def rejected_startup(label, overrides, diagnostic, untouched=None, extra_secrets=()):
+            rejection_log = test_directory / f"startup-{label}.log"
+            expected = diagnostic.encode("ascii")
+            with socket.socket() as probe:
+                probe.bind(("127.0.0.1", 0))
+                rejected_port = probe.getsockname()[1]
+            with rejection_log.open("wb") as output:
+                rejected = launch(overrides=overrides, output=output, url=f"http://127.0.0.1:{rejected_port}")
                 try:
-                    exit_code = invalid_process.wait(timeout=10)
+                    exit_code = rejected.wait(timeout=10)
+                except subprocess.TimeoutExpired as error:
+                    raise AssertionError(f"Startup case {label} did not exit in 10 seconds. "
+                                         f"Expected diagnostic present: {expected in rejection_log.read_bytes()}.") from error
                 finally:
-                    if invalid_process.poll() is None:
-                        stop(invalid_process)
-            message = invalid_log.read_bytes()
-            require(exit_code == 1 and diagnostic.encode("ascii") in message and b"Unhandled exception" not in message
-                    and not any(key and key.encode("ascii") in message for key in [*tokens.values(), *invalid.values()])
-                    and not any((test_directory / name).exists() for name in ("missions", "sessions", "player-ticket-signing.key")),
-                    f"{label.capitalize()} operator credential exits cleanly with a safe diagnostic before creating data")
+                    if rejected.poll() is None:
+                        stop(rejected)
+            message = rejection_log.read_bytes()
+            with socket.socket() as probe:
+                probe.settimeout(1)
+                port_closed = probe.connect_ex(("127.0.0.1", rejected_port)) != 0
+            require(exit_code == 1 and expected in message and b"Unhandled exception" not in message and port_closed
+                    and not any(key and key.encode("ascii") in message for key in [*tokens.values(), *extra_secrets])
+                    and (untouched is None or not untouched.exists()),
+                    f"Startup case {label} exits with a safe diagnostic and leaves its endpoint closed")
+
+        for label, invalid, diagnostic in [
+            ("missing-credential", {"OperatorKeys__Master": ""}, "OperatorKeys:Master must be a unique credential"),
+            ("weak-credential", {"OperatorKeys__Master": "short"}, "OperatorKeys:Master must be a unique credential"),
+            ("duplicate-credential", {"OperatorKeys__Room1": tokens["Master"]}, "Operator credentials must be distinct across consoles."),
+            ("unknown-credential", {"OperatorKeys__Room9": secrets.token_urlsafe(32)}, "Unknown OperatorKeys configuration name."),
+        ]:
+            invalid_data = test_directory / label
+            rejected_startup(label, {**invalid, "DataDirectory": str(invalid_data / "missions"),
+                                     "SessionDataDirectory": str(invalid_data / "sessions")},
+                             diagnostic, untouched=invalid_data, extra_secrets=invalid.values())
 
         process = launch()
         try:
@@ -554,12 +572,9 @@ try:
             request("POST", session_path + "/commands", {"commandId": str(uuid.uuid4()), "action": "Begin", "actor": {"id": "master", "role": "Master"}}, 403, identity="Room1")
             request("POST", session_path + "/commands", {"commandId": str(uuid.uuid4()), "action": "Begin"}, 403, identity="GameServer")
             request("DELETE", session_path, expected=403, identity="Room1")
-            competing = launch()
-            try:
-                require(competing.wait(timeout=10) != 0, "Another API process cannot acquire the same event-store writer lease")
-            finally:
-                if competing.poll() is None:
-                    stop(competing)
+            rejected_startup("session-writer-conflict", {}, "Cannot acquire the session event-store writer lease.")
+            rejected_startup("mission-writer-conflict", {"SessionDataDirectory": str(test_directory / "competing-sessions")},
+                             "Cannot acquire the mission library writer lease.")
             require(request("GET", session_path) == current, "Rejected competing process leaves active state intact")
             request("POST", session_path + "/players", {**player, "playerId": str(uuid.uuid4())}, 409)
             require(all(r["playerCount"] == 5 for r in request("GET", "/api/rooms")), "Every room remains at capacity after overflow rejection")
