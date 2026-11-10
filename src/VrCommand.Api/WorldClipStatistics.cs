@@ -18,7 +18,7 @@ public sealed partial class WorldRecordings
     {
         internal PlayerStatistics Identity = identity;
         internal readonly HashSet<string> Fired = new(StringComparer.Ordinal);
-        internal int Hits, Kills, HitsReceived, DamageTaken, MatchedShots;
+        internal int Hits, Kills, HitsReceived, MatchedShots;
     }
 
     public WorldClipStatistics ClipStatistics(Guid id, long from, long through, int? room, Guid? playerId,
@@ -67,14 +67,22 @@ public sealed partial class WorldRecordings
                             if (row.Fired.Contains(entry.GetProperty("shotId").GetString()!)) row.MatchedShots++;
                             break;
                         case "EnemyEliminated": row.Kills++; break;
-                        case "PlayerDamaged": row.HitsReceived++; row.DamageTaken += entry.GetProperty("damage").GetInt32(); break;
+                        case "PlayerDamaged": row.HitsReceived++; break;
                     }
                 }
             }
         }
+        var initialHealth = new Dictionary<Guid, int>();
+        if (from > 1 && players.Values.Any(row => row.HitsReceived > 0))
+        {
+            var previous = Frame(id, from - 1, actor) ?? throw new InvalidDataException("Saved world frame sequence has a gap.");
+            initialHealth = previous.Statistics.ToDictionary(player => player.PlayerId, player => player.Health);
+        }
         return new(info.Header.sessionId, info.Header.streamId, from, through, room, playerId,
             players.Values.OrderBy(row => row.Identity.RoomId).ThenBy(row => row.Identity.PlayerId)
                 .Select(row => new WorldClipPlayerStatistics(row.Identity.PlayerId, row.Identity.Name, row.Identity.RoomId,
-                    row.Fired.Count, row.Hits, row.Kills, row.HitsReceived, row.DamageTaken, row.MatchedShots)).ToArray());
+                    row.Fired.Count, row.Hits, row.Kills, row.HitsReceived,
+                    row.HitsReceived == 0 ? 0 : initialHealth.GetValueOrDefault(row.Identity.PlayerId, 100) - row.Identity.Health,
+                    row.MatchedShots)).ToArray());
     }
 }

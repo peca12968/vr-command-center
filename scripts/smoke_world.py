@@ -1,4 +1,5 @@
 """Real WebSocket publisher, authenticated SSE observation and SQLite restart checks."""
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
@@ -54,7 +55,7 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
             response = error
         if response.status != expected:
             raise AssertionError(f"{route}: {response.status}, expected {expected}")
-        if expected != 200:
+        if expected not in (200, 201):
             response.close()
             return None
         if response.headers.get_content_type() == "text/event-stream":
@@ -508,6 +509,72 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         request(other_clips[0], expected=204, method="DELETE")
         check(request(other_clips[0], method="PUT", body=clip)["deleted"] and request(clips) == clip_list,
               "Removing clips leaves the original frames readable and late retries cannot recreate a removed clip")
+
+        # Publish a separate controlled round without session-specific props.
+        damage_mission = request("/api/missions", expected=201, method="POST",
+                                 body=dict(terminal["mission"]["definition"], props=[]))
+        overkill = request("/api/sessions", expected=201, method="POST", body={"missionId": damage_mission["id"],
+                           "mode": "Independent", "roomIds": [5]})
+        overkill_id = overkill["id"]
+        overkill_session = f"/api/sessions/{overkill_id}"
+        overkill_world = overkill_session + "/world"
+        damage_stream = str(uuid4())
+        damage_player = str(uuid4())
+        request(overkill_session + "/players", method="POST", body={"playerId": damage_player,
+                "name": "Overkill fixture", "roomId": 5, "headset": "Quest3"})
+        request(overkill_session + "/combat-stream", "GameServer", method="POST",
+                body={"streamId": damage_stream, "origin": "Simulation"})
+        damage_header = dict(info["header"], sessionId=overkill_id, streamId=damage_stream, props=[])
+        damage_template = next(entry for entry in combat_packet["events"] if entry["kind"] == "PlayerDamaged")
+
+        def damage_frame(number, combat_sequence, phase, observed, health, events=()):
+            packet = deepcopy(packets[0])
+            packet.update(sequence=number, elapsedMilliseconds=(number - 1) * 50, observedSequence=observed,
+                          throughCombatSequence=combat_sequence, events=list(events))
+            packet["frame"].update(tick=number - 1, phase=phase, throughSequence=combat_sequence)
+            packet["frame"]["players"][0].update(id=damage_player, health=health)
+            return packet
+
+        damage_publisher = WebSocket(port, overkill_world + "/publish", tokens["GameServer"])
+        try:
+            reply = damage_publisher.send({"type": "header", "payload": damage_header})
+            assert reply["type"] == "ack", reply
+            initial_damage_frame = damage_frame(1, 0, "Preparing", request(overkill_session)["sequence"], 100)
+            reply = damage_publisher.send({"type": "frame", "payload": initial_damage_frame})
+            assert reply["type"] == "ack", reply
+            begin = request(overkill_session + "/commands", method="POST",
+                            body={"commandId": str(uuid4()), "action": "Begin"})["session"]["sequence"]
+            for position, (raw, health) in enumerate([(50, 50), (90, 0)], 1):
+                event_id = str(uuid4())
+                request(overkill_session + "/combat-stream/batch", "GameServer", method="POST", body=[{
+                    "streamId": damage_stream, "streamSequence": position, "observedSequence": begin,
+                    "report": {"reportId": event_id, "kind": "PlayerDamaged", "origin": "Simulation",
+                               "playerId": damage_player, "damage": raw}}])
+                entry = dict(damage_template, sequence=position, tick=position, eventId=event_id,
+                             playerId=damage_player, damage=raw)
+                packet = damage_frame(position + 1, position, "Running", begin, health, [entry])
+                reply = damage_publisher.send({"type": "frame", "payload": packet})
+                assert reply["type"] == "ack", reply
+            end = request(overkill_session + "/commands", method="POST",
+                          body={"commandId": str(uuid4()), "action": "End"})["session"]["sequence"]
+            request(overkill_session + "/combat-stream/seal", "GameServer", method="POST",
+                    body={"streamId": damage_stream, "finalSequence": 2})
+            terminal_damage_frame = damage_frame(4, 2, "Ended", end, 0)
+            reply = damage_publisher.send({"type": "frame", "payload": terminal_damage_frame})
+            assert reply["type"] == "ack", reply
+            sealed = damage_publisher.send({"type": "seal", "finalSequence": 4})
+            assert sealed["type"] == "ack", sealed
+            check(sealed["info"]["complete"],
+                  "A recorded overkill seals through the original WebSocket publisher after combat seal")
+        finally:
+            damage_publisher.close()
+        damage_stats = request(overkill_session + "/statistics")["players"]
+        damage_view = request(overkill_world + "/frames/3", "Room5")
+        damage_clip = request(overkill_world + "/clip-statistics?fromFrame=3&throughFrame=3", "Room5")["players"]
+        check(damage_view["packet"]["events"][0]["damage"] == 90 and damage_view["statistics"] == damage_stats
+              and damage_stats[0]["damageTaken"] == 100 and damage_stats[0]["health"] == 0
+              and damage_clip[0]["damageTaken"] == 50 and damage_clip[0]["hitsReceived"] == 1,
+              "The scoped replay retains the original hit but reports the same actual health loss as final statistics")
         process.terminate()
         process.wait(timeout=10)
         # A pre-v0.16 fixture: same known frames and source, header stored before the new optional field existed.

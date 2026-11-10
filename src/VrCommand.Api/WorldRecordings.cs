@@ -169,7 +169,13 @@ public sealed partial class WorldRecordings : IDisposable
         {
             using var command = Command("SELECT packet,statistics FROM world_frames WHERE session=$id AND sequence=$seq", ("$id", id.ToString("D")), ("$seq", sequence));
             using var row = command.ExecuteReader();
-            return row.Read() ? new(WorldJson.Read<WorldRecordingPacket>(row.GetString(0)), WorldJson.Read<PlayerStatistics[]>(row.GetString(1))) : null;
+            if (!row.Read()) return null;
+            var statistics = WorldJson.Read<PlayerStatistics[]>(row.GetString(1));
+            // Older projections could add the full final hit even though the saved health was already capped at zero.
+            for (var index = 0; index < statistics.Length; index++)
+                if (statistics[index] is { Health: 0, DamageTaken: > 100 } player)
+                    statistics[index] = player with { DamageTaken = 100 };
+            return new(WorldJson.Read<WorldRecordingPacket>(row.GetString(0)), statistics);
         }
     }
 
@@ -242,7 +248,7 @@ public sealed partial class WorldRecordings : IDisposable
                     CombatKind.ShotFired => player with { AmmoUsed = player.AmmoUsed + 1 },
                     CombatKind.ShotHit => player with { ShotsHit = player.ShotsHit + 1 },
                     CombatKind.EnemyEliminated => player with { Kills = player.Kills + 1 },
-                    CombatKind.PlayerDamaged => player with { HitsReceived = player.HitsReceived + 1, DamageTaken = player.DamageTaken + report.Damage, Health = Math.Max(0, player.Health - report.Damage) },
+                    CombatKind.PlayerDamaged => player.ApplyDamage(report.Damage),
                     _ => throw new InvalidOperationException("Unknown recorded combat event.")
                 };
             }

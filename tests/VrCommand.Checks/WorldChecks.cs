@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Data.Sqlite;
 using VrCommand.Api;
 using VrCommand.Core;
 using VrCommand.Simulation;
@@ -201,6 +202,49 @@ internal static class WorldChecks
             "A saved elimination identifies its own three ordered records at the same frame");
         Reject<KeyNotFoundException>(() => store.ShotTrace(linked.Id, 3, 4, fireId, null, room2, default), "Shot trace conceals another room's anchor");
         Reject<AccessDeniedException>(() => store.ShotTrace(linked.Id, 3, 4, fireId, 1, room2, default), "Shot trace rejects another room scope");
+
+        SaveCombat(5, 2, 0, Report(CombatKind.PlayerDamaged, target: enemy, damage: 30),
+            Report(CombatKind.PlayerDamaged, target: enemy, damage: 90));
+        var overkill = store.Frame(linked.Id, 5, master)!;
+        var combatTotal = manager.Statistics(linked.Id, master).Players.Single();
+        check(overkill.Statistics.Single() == combatTotal && combatTotal is { Health: 0, HitsReceived: 3, DamageTaken: 100 }
+            && overkill.Packet.events.Select(item => item.damage).SequenceEqual([30, 90]),
+            "Overkill keeps original hit values and applies only remaining health to world statistics");
+        check(store.ClipStatistics(linked.Id, 5, 5, 1, linkedPlayer, master, default).Players.Single() is { HitsReceived: 2, DamageTaken: 80 }
+            && store.ClipStatistics(linked.Id, 1, 5, null, null, master, default).Players.Single() is { HitsReceived: 3, DamageTaken: 100 },
+            "Clip loss uses the health before the selected range, including multiple hits in one frame");
+
+        using var legacyWorld = new SqliteConnection(new SqliteConnectionStringBuilder
+            { DataSource = Path.Combine(worldDirectory, "worlds.db"), Pooling = false }.ToString());
+        legacyWorld.Open();
+        using var legacyFrame = legacyWorld.CreateCommand();
+        legacyFrame.CommandText = "UPDATE world_frames SET statistics=$stats WHERE session=$session AND sequence=$frame";
+        legacyFrame.Parameters.AddWithValue("$session", linked.Id.ToString("D"));
+        legacyFrame.Parameters.AddWithValue("$frame", 5);
+        var legacyStatistics = WorldJson.Write(new[] { combatTotal with { DamageTaken = 140 } });
+        legacyFrame.Parameters.AddWithValue("$stats", legacyStatistics);
+        check(legacyFrame.ExecuteNonQuery() == 1, "Compatibility fixture stores the original inflated projection separately from the combat packet");
+        check(restarted.Frame(linked.Id, 5, master)!.Statistics.Single() == combatTotal
+            && restarted.ClipStatistics(linked.Id, 5, 5, null, linkedPlayer, master, default).Players.Single().DamageTaken == 80,
+            "An older saved frame and clip agree with accepted health without replacing its combat events");
+
         manager.End(linked.Id, master);
+        var linkedFinal = Copy(overkill.Packet);
+        linkedFinal.sequence = 6;
+        linkedFinal.elapsedMilliseconds += 50;
+        linkedFinal.observedSequence = manager.Get(linked.Id, owner).Sequence;
+        linkedFinal.events = [];
+        linkedFinal.frame.phase = "Ended";
+        restarted.Append(linked.Id, linkedFinal, owner);
+        manager.SealStream(linked.Id, new(reinforcementStream, combatSequence), owner);
+        check(restarted.Frame(linked.Id, 6, master)!.Statistics.Single() == combatTotal,
+            "Appending after a legacy frame carries forward the accepted loss");
+        legacyFrame.Parameters["$frame"].Value = 6;
+        check(legacyFrame.ExecuteNonQuery() == 1 && restarted.Seal(linked.Id, 6, owner).Complete,
+            "A previously saved terminal projection can seal at the original combat boundary");
+        legacyFrame.CommandText = "SELECT statistics FROM world_frames WHERE session=$session AND sequence=$frame";
+        legacyFrame.Parameters.RemoveAt("$stats");
+        check((string?)legacyFrame.ExecuteScalar() == legacyStatistics,
+            "Reading and sealing an older projection does not rewrite its stored frame");
     }
 }

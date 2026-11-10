@@ -8,6 +8,12 @@ public record PlayerStatistics(Guid PlayerId, string Name, int RoomId, long Ammo
     long ShotsHit = 0, long Kills = 0, long HitsReceived = 0, long DamageTaken = 0, int Health = 100)
 {
     public decimal AccuracyPercent => AmmoUsed == 0 ? 0 : decimal.Round(100m * ShotsHit / AmmoUsed, 2);
+
+    public PlayerStatistics ApplyDamage(int damage)
+    {
+        var loss = Math.Min(damage, Health);
+        return this with { HitsReceived = checked(HitsReceived + 1), DamageTaken = checked(DamageTaken + loss), Health = Health - loss };
+    }
 }
 public record SessionStatistics(Guid SessionId, long ThroughSequence, CombatOrigin? Origin, PlayerStatistics[] Players, bool PendingTelemetry = false);
 public record CombatReceipt(Guid ReportId, long AppliedAtSequence, bool Duplicate, SessionStatistics Statistics);
@@ -92,9 +98,7 @@ internal sealed class CombatLedger
                 statistic = statistic with { Kills = checked(statistic.Kills + 1) };
                 break;
             case CombatKind.PlayerDamaged:
-                var actualDamage = Math.Min(report.Damage, statistic.Health);
-                statistic = statistic with { HitsReceived = checked(statistic.HitsReceived + 1),
-                    DamageTaken = checked(statistic.DamageTaken + actualDamage), Health = statistic.Health - actualDamage };
+                statistic = statistic.ApplyDamage(report.Damage);
                 break;
         }
         return () =>
