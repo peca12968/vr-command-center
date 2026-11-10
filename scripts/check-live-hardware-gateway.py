@@ -445,11 +445,14 @@ def run(args):
             for fault in ('wrong','timeout','drop'):
                 ids = publish([(alpha,'ShotFired')])
                 feedback(1,ids)
+                before_reconnect = attached(1)
                 peers[1].reply(fault)
-                count = attached(1)
                 hello = peers[1].read('hello')
                 assert hello['connectionId']!=connections[1]
                 publish([(alpha,'ShotFired')])
+                # The read before hello must not count as the attachment after ready.
+                wait(lambda:attached(1)>before_reconnect, 'pre-handshake read after '+fault)
+                count = attached(1)
                 peers[1].reply()
                 wait(lambda:attached(1)>count, 'reattachment after '+fault)
                 connections[1] = hello['connectionId']
