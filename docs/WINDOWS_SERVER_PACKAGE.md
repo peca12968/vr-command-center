@@ -1,5 +1,7 @@
 # Windows 遊戲伺服器包
 
+2026-11-10 `windows-server-0.49.1-launcher1.8-final-win-x64.zip` 為 84,792,691 bytes，SHA-256 `dcd31cbb24a6092b87dba8e78bf2c8adffa667bbce4b6624d06356bf85a5f7dd`。解壓核對 330 筆清單。與 0.49.1 的 1.7 伺服器包相比，328 個清單檔案的雜湊一致。 [批次操作](#依場館計畫批次啟動)
+
 2026-11-10 `windows-server-0.49.0-launcher1.7-win-x64.zip` 為 84,787,603 bytes，SHA-256 `f5ecb57361f981e6f66497bb987598a3f57a83f623ddb14d9e5ad05647002d39`。解壓核對 330 個清單檔案。此版本與 Windows 玩家包使用同源遊戲建置。
 
 2026-11-09 `windows-server-0.48.1-launcher1.7-win-x64.zip` 為 83,470,147 bytes，SHA-256 `c3d15a8fc23fec76b5a127c8ffc977719eb538074b0e2bfd693974c6be368bd0`。解壓核對 328 個清單檔案。搭配同源 0.48.1 Windows 玩家及 Quest APK。 [版本相容性](EXTERNAL_CLIENTS.md#遊戲版本相容性)
