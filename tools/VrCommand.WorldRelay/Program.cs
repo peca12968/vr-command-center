@@ -45,11 +45,20 @@ async Task<T> Post<T>(HttpClient client, string route, object body)
     using var response = await client.PostAsync(route, content); response.EnsureSuccessStatusCode();
     return (await response.Content.ReadFromJsonAsync<T>(JsonFormat.Options))!;
 }
-async Task Deliver(HttpClient client, TelemetryOutbox queue, int missionClockVersion = 0, int roomEnemyPolicyVersion = 0)
+async Task Deliver(HttpClient client, TelemetryOutbox queue, int missionClockVersion = 0, int roomEnemyPolicyVersion = 0,
+    CombatStreamView? existing = null)
 {
     var route = "/api/sessions/" + queue.SessionId + "/combat-stream";
     var origin = Enum.Parse<CombatOrigin>(queue.Origin);
-    var attached = await Post<CombatStreamView>(client, route, new OpenCombatStream(queue.StreamId, origin, missionClockVersion, roomEnemyPolicyVersion));
+    CombatStreamView attached;
+    if (existing?.ExpectedSequence is not null)
+    {
+        var actor = await client.GetFromJsonAsync<OperatorIdentity>("/api/me", JsonFormat.Options);
+        if (actor?.Role != OperatorRole.GameServer || actor != existing.Owner)
+            throw new InvalidDataException("Server stream owner mismatch.");
+        attached = existing;
+    }
+    else attached = await Post<CombatStreamView>(client, route, new OpenCombatStream(queue.StreamId, origin, missionClockVersion, roomEnemyPolicyVersion));
     if (attached.StreamId != queue.StreamId || attached.Origin != origin || attached.MissionClockVersion != missionClockVersion
         || attached.RoomEnemyPolicyVersion != roomEnemyPolicyVersion
         || attached.AcceptedSequence < queue.AcknowledgedSequence || attached.AcceptedSequence > queue.LastSequence
@@ -76,7 +85,7 @@ async Task PublishBinary(HttpClient client, TelemetryOutbox combat, WorldOutbox 
     if (session?.Id != combat.SessionId || session.CombatStream is { } source
         && (source.StreamId != combat.StreamId || source.Origin.ToString() != combat.Origin))
         throw new InvalidDataException("Server stream identity mismatch.");
-    await Deliver(client, combat, header.missionClockVersion, session.CombatStream?.RoomEnemyPolicyVersion ?? 0);
+    await Deliver(client, combat, header.missionClockVersion, session.CombatStream?.RoomEnemyPolicyVersion ?? 0, session.CombatStream);
     using var publisher = new WorldPublisher(saved, codec, new WorldWebSocket(client.BaseAddress!.ToString(), combat.SessionId, client.DefaultRequestHeaders.Authorization!.Parameter!));
     while (saved.Pending != null || (saved.Complete && !saved.Sealed))
     {

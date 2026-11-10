@@ -69,7 +69,15 @@ using (var queue = TelemetryOutbox.OpenExisting(journalPath))
         throw new InvalidDataException("The server is missing the previously acknowledged stream.");
     var missionClockVersion = existing?.MissionClockVersion ?? 0;
     var roomEnemyPolicyVersion = existing?.RoomEnemyPolicyVersion ?? 0;
-    var attached = await Post<CombatStreamView>(http, path + "/combat-stream", new OpenCombatStream(queue.StreamId, origin, missionClockVersion, roomEnemyPolicyVersion));
+    CombatStreamView attached;
+    if (existing?.ExpectedSequence is not null)
+    {
+        var actor = await http.GetFromJsonAsync<OperatorIdentity>("/api/me", JsonFormat.Options);
+        if (actor?.Role != OperatorRole.GameServer || actor != existing.Owner)
+            throw new InvalidDataException("Server stream owner mismatch.");
+        attached = existing;
+    }
+    else attached = await Post<CombatStreamView>(http, path + "/combat-stream", new OpenCombatStream(queue.StreamId, origin, missionClockVersion, roomEnemyPolicyVersion));
     if (attached.StreamId != queue.StreamId || attached.Origin != origin || attached.MissionClockVersion != missionClockVersion
         || attached.RoomEnemyPolicyVersion != roomEnemyPolicyVersion
         || attached.AcceptedSequence < queue.AcknowledgedSequence || attached.AcceptedSequence > queue.LastSequence

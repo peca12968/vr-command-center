@@ -176,6 +176,7 @@ def main():
     p.add_argument('--check-venue-launcher', action='store_true', help='Use one real Windows launcher for the explicitly prepared servers of each topology')
     p.add_argument('--venue-management-https', action='store_true', help='Use a pinned HTTPS management profile for both venue launch plans')
     p.add_argument('--check-venue-plan-ui', action='store_true', help='Launch each topology with the exact plan downloaded from Chromium')
+    p.add_argument('--check-venue-relay-readback', action='store_true', help='Use both source relay CLIs on copies of the closed original Linked journals')
     p.add_argument('--check-venue-preview', action='store_true', help='Run the shared Windows venue preview before both topology launches')
     p.add_argument('--check-venue-endpoint-batch', action='store_true', help='Verify endpoint batch retries and force a last-room transaction rollback')
     p.add_argument('--check-venue-ticket-freshness', action='store_true', help='Verify ticket issuance before and after a managed Linked source stops')
@@ -287,6 +288,8 @@ def main():
                 'individual launcher report workflows must be checked separately')
     if args.check_venue_plan_ui and (not args.check_venue_launcher or not shutil.which('node')):
         p.error('--check-venue-plan-ui requires --check-venue-launcher and Node.js with Playwright Chromium')
+    if args.check_venue_relay_readback and (not args.check_venue_plan_ui or not shutil.which('dotnet')):
+        p.error('--check-venue-relay-readback requires --check-venue-plan-ui and the built .NET relay tools')
     if args.check_venue_preview and not args.check_venue_launcher:
         p.error('--check-venue-preview requires --check-venue-launcher')
     if args.venue_management_https and not (args.check_venue_launcher and args.game_address and shutil.which('pwsh')):
@@ -2001,6 +2004,31 @@ def main():
                     if kind=='complete':break
         check(len(frames)==report['finalWorld']['acceptedSequence'] and [x['packet']['sequence'] for x in frames]==list(range(1,len(frames)+1)) and frames[-1]['packet']['frame']['phase']=='Ended',entry['label']+' full API replay through terminal frame')
         save(entry['label']+'-replay.json',frames)
+        if args.check_venue_relay_readback and entry['label']=='linked':
+            copies=runtime/'linked-relay-copies'
+            copies.mkdir()
+            session_id=entry['sessionId']
+            before=request('/api/sessions/'+session_id)
+            originals=entry['work']/'telemetry'
+            combat_copy=copies/'combat.journal'
+            world_copy=copies/'world.worldlog'
+            shutil.copyfile(originals/(session_id+'.journal'),combat_copy)
+            shutil.copyfile(originals/(session_id+'.worldlog'),world_copy)
+            def relay(tool,arguments):
+                dll=ROOT/'tools'/tool/'bin/Release/net10.0'/(tool+'.dll')
+                result=subprocess.run([shutil.which('dotnet'),str(dll),*map(str,arguments),'--base-url',uri,
+                    '--key-file',str(data/'operator-keys.json')],cwd=ROOT,capture_output=True,encoding='utf-8',timeout=30)
+                check(result.returncode==0,tool+' accepts the original guarded source')
+                return json.loads(result.stdout)
+            combat_result=relay('VrCommand.TelemetryRelay',['--journal',combat_copy])
+            world_result=relay('VrCommand.WorldRelay',['--world-journal',world_copy,'--combat-journal',combat_copy])
+            check(combat_result['sessionId']==session_id and combat_result['sealedStream']
+                  and combat_result['acknowledged']==before['combatStream']['acceptedSequence']
+                  and world_result['sessionId']==session_id and world_result['complete'] and world_result['acknowledged']==len(frames)
+                  and before['combatStream']['venueLaunchId'] and request('/api/sessions/'+session_id)==before
+                  and request('/api/sessions/'+session_id+'/world')==report['finalWorld'],
+                  'Both relay tools preserve the original attached batch, sealed boundaries and management state')
+            save('linked-relay-readback.json',{'combat':combat_result,'world':world_result})
         if 'roomEnemyWitness' in entry:
             witness=entry['roomEnemyWitness']; route='/api/sessions/'+entry['sessionId']+'/world'
             room_by_player={body['id']:body['roomId'] for body in frames[witness['active']-1]['packet']['frame']['players']}
