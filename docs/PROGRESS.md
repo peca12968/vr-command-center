@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 VR 單席連線檔交付前核對
+
+- 控制台 0.31.124 在 VR 場次提供逐席連線檔核對。主控可核對整場，房控只可核對本房。服務用目前入場識別、票券簽章、場次、席位、原公告端點及近期有效畫格判定。畫面顯示票券效期並標記只能同機使用的位址。切換席位或名冊更換時會清除舊結果。舊 0.31.123 解壓包回傳 404，首輪合成畫格缺名冊中的玩家身體亦遭拒，修正測試資料後才通過。 [操作與 API](EXTERNAL_CLIENTS.md#在管理台核對-vr-單席連線檔) · [舊版對照](../artifacts/vr-seat-file-baseline.log) · [首輪測試](../artifacts/vr-seat-file-source.log)
+- Release 零警告，1,101 項核心、825 項 HTTP、107 項管理包檢查通過。來源與解壓包各通過 14 項 VR 單席專項及 16 項 MR 部署回歸。發行來源 `0a8b4c37` 的 188 個來源檔雜湊相符，29 個與 Git 只差換行。Windows 與 Quest 0.50.4 離線發行核對通過。GitHub Actions job `130128160802` 因帳務或支出上限未啟動。 [VR 專項](../artifacts/console-vr-seat-file-package-vr-connection-check/checks.json) · [MR 專項](../artifacts/console-vr-seat-file-package-mr-deployment/checks.json) · [來源與 ZIP](../artifacts/vr-seat-file-source-validation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42901447037)
+- Windows 三包通過 377 項原生檢查。從 Chromium 下載的兩份五房 ZIP 逐一核對 50 個原始票券、席位、端點及效期，每種模式都能指出修改的埠。獨立及合併模式各有 25 個同機玩家端用原檔連線，六場共 1,104 格完整回放、50 份原戰績、11 份 CSV、雙封存與伺服器確認。活動場次歸零，原生及管理包 C／F 各 222、27 檔相符。跨機玩家、實體頭盔與廠商硬體仍待現場驗收。 [原生驗收](../artifacts/server-package-checks/run-7918d9ba406c42d39550bebc26b1cf37/checks.json) · [原檔與封存核對](../artifacts/vr-seat-file-native-validation.json)
+- 同一解壓包通過 111 項 Node 與 907 項完整 Chromium 回歸。八個任務列表故障均確認各攔截一筆並送達，保存 144 個瀏覽器證據檔。 [完整回歸](../artifacts/console-vr-seat-file-full/checks.json) · [回歸雜湊](../artifacts/vr-seat-file-full-validation.json)
+
 ## 2026-11-11 從管理台核對六台操作工作站
 
 - 控制台 0.31.123 在場館 HTTPS 顯示「主控與五房控連線核對」。主控可產生代號，六台各自下載本站簽章回條，主控選取原配置與六份 JSON 後送回原管理程序。沿用實際 TCP 來源、角色、簽章及 15 分鐘期限。可匯入瀏覽器回條或命令列報告。離開場次頁或登出會清除本輪資料。舊 0.31.122 解壓包缺少這個畫面，瀏覽器對照保留。 [操作方式](WINDOWS_CONTROL_PACKAGE.md#核對主控與五房控的直連來源) · [舊版對照](../artifacts/operator-network-browser-baseline.log)

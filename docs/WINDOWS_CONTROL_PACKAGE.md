@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-11 `VRCommand-ControlServer-0.31.124-vr-seat-check-win-x64.zip` 為 53,033,714 bytes，SHA-256 `e5649cabf85f20c13bfa123ad2e6fd8c2c80459e17b6283e429a401241130925`。解壓核對 558 筆清單與 538 個發行檔案。VR 場次可逐席核對原票券、現行入場與公告端點。 [VR 席位操作](EXTERNAL_CLIENTS.md#在管理台核對-vr-單席連線檔) · [發行核對](../artifacts/venue-release-0.50.4-vr-seat-file.json)
+
 2026-11-11 `VRCommand-ControlServer-0.31.123-workstation-console-win-x64.zip` 為 53,029,288 bytes，SHA-256 `ee7a1dece7dcf53b17a9e7a16ef1de650370b2b02d40310b593bb91165700060`。解壓核對 558 筆清單與 538 個發行檔案。場館 HTTPS 控制台可收集及核對主控與五房控的連線回條。 [工作站操作](#核對主控與五房控的直連來源) · [發行核對](../artifacts/venue-release-0.50.4-workstation-console.json)
 
 2026-11-11 `VRCommand-ControlServer-0.31.122-layout-clearance-win-x64.zip` 為 53,018,740 bytes，SHA-256 `47446747476ff463478aeba1a48df1ffe65b59dffb1ef3eca2216ebae7cdfa52`。解壓核對 555 筆清單與 535 個發行檔案。草稿與保存版本的旋轉方向對齊遊戲，並可顯示玩家通行邊界。 [平面圖操作](LAYOUT.md#開場前查看保存版本平面圖) · [發行核對](../artifacts/venue-release-0.50.4-layout-clearance.json)
