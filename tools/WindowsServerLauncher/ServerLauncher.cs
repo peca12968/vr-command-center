@@ -140,7 +140,9 @@ internal static class ServerLauncher
     internal sealed class ManagementRequestFailed : IOException
     {
         internal readonly int StatusCode;
-        internal ManagementRequestFailed(int code) : base("管理服務請求失敗，HTTP " + code + "。") { StatusCode = code; }
+        internal readonly bool Temporary;
+        internal ManagementRequestFailed(int code, bool temporary) : base("管理服務請求失敗，HTTP " + code + "。")
+        { StatusCode = code; Temporary = temporary; }
     }
     internal sealed class Settings
     {
@@ -217,20 +219,55 @@ internal static class ServerLauncher
         }
         internal Dictionary<string, object> Request(string path, object body = null, bool missing = false)
         {
+            return RequestBytes(path, body == null ? null : Encoding.UTF8.GetBytes(Json.Serialize(body)), missing);
+        }
+        internal Dictionary<string, object> RequestVenueBatch(string path, object body, Func<bool> canRetry, ref bool retried)
+        {
+            var payload = Encoding.UTF8.GetBytes(Json.Serialize(body));
+            try { return RequestBytes(path, payload, false); }
+            catch (ManagementRequestFailed error)
+            {
+                if (!error.Temporary || !canRetry()) throw;
+                retried = true;
+                return RequestBytes(path, payload, false);
+            }
+        }
+        private Dictionary<string, object> RequestBytes(string path, byte[] payload, bool missing)
+        {
             var request = ManagementRequest(path);
-            if (body != null) { request.Method = "PUT"; request.ContentType = "application/json"; var bytes = Encoding.UTF8.GetBytes(Json.Serialize(body)); request.ContentLength = bytes.Length; using (var stream = request.GetRequestStream()) stream.Write(bytes, 0, bytes.Length); }
-            try { using (var response = (HttpWebResponse)request.GetResponse()) using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8)) { Need(response.StatusCode == HttpStatusCode.OK, "管理服務回應不正確。"); var bytes = new char[256 * 1024 + 1]; var count = 0; int read; while ((read = reader.Read(bytes, count, bytes.Length - count)) > 0 && count < bytes.Length) count += read; Need(count <= 256 * 1024, "管理回應過大。"); var result = Map(Json.DeserializeObject(new string(bytes, 0, count))); Need(result != null, "管理回應格式錯誤。"); return result; } }
+            try
+            {
+                if (payload != null)
+                {
+                    request.Method = "PUT"; request.ContentType = "application/json"; request.ContentLength = payload.Length;
+                    using (var stream = request.GetRequestStream()) stream.Write(payload, 0, payload.Length);
+                }
+                using (var response = (HttpWebResponse)request.GetResponse()) using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8))
+                {
+                    Need(response.StatusCode == HttpStatusCode.OK, "管理服務回應不正確。");
+                    var chars = new char[256 * 1024 + 1]; var count = 0; int read;
+                    while ((read = reader.Read(chars, count, chars.Length - count)) > 0 && count < chars.Length) count += read;
+                    Need(count <= 256 * 1024, "管理回應過大。");
+                    var result = Map(Json.DeserializeObject(new string(chars, 0, count)));
+                    Need(result != null, "管理回應格式錯誤。"); return result;
+                }
+            }
             catch (WebException error)
             {
                 var response = error.Response as HttpWebResponse; var code = response == null ? 0 : (int)response.StatusCode;
                 if (response != null) response.Dispose();
                 if (missing && code == 404) return null;
-                if (body == null && ManagementUnavailable.IsTemporary(code, error.Status)) throw new ManagementUnavailable(code);
-                throw new ManagementRequestFailed(code);
+                var temporary = ManagementUnavailable.IsTemporary(code, error.Status);
+                if (payload == null && temporary) throw new ManagementUnavailable(code);
+                throw new ManagementRequestFailed(code, temporary);
             }
             catch (IOException error)
             {
-                if (body == null && error.InnerException is SocketException) throw new ManagementUnavailable(0);
+                if (error.InnerException is SocketException)
+                {
+                    if (payload == null) throw new ManagementUnavailable(0);
+                    throw new ManagementRequestFailed(0, true);
+                }
                 throw;
             }
         }
@@ -754,6 +791,13 @@ internal static class ServerLauncher
             "房間 " + String.Join("、", rooms) + " 的場次序號或任務版本已變更；請在主控台重新讀取並下載計畫。");
     }
 
+    static void RequireVenueUdp(List<VenueServer> servers)
+    {
+        foreach (var server in servers)
+            Need(!server.Run.Process.Exited && UdpBinding.Find(server.Run.Process.Pid, server.Config.Bind, server.Config.Port) != null,
+                "房間 " + String.Join("、", server.Choice.Rooms) + " 的原遊戲程序或 UDP 綁定已失效。");
+    }
+
     static int ExecuteVenue(VenuePlan plan, string work, int seconds, string ready, string report, bool peerDiagnostics, Func<bool> cancel)
     {
         Need(!cancel(), "已中止啟動；此輪未完成。");
@@ -775,6 +819,9 @@ internal static class ServerLauncher
         var published = false;
         var endpointPublication = "not-attempted";
         var sourceAttachment = "not-attempted";
+        var sourceAttachmentRetried = false;
+        var endpointPublicationRetried = false;
+        Func<bool> canRetry = () => !gate.Abort && !cancel() && servers.TrueForAll(server => !server.Run.Process.Exited);
         string sourceAttachmentError = null;
         string publicationError = null;
         using (var reserved = new CountdownEvent(servers.Count))
@@ -843,8 +890,9 @@ internal static class ServerLauncher
                         sourceAttachment = "unconfirmed";
                         try
                         {
-                            var receipt = plan.Catalog.Target.Request(VenueSourcesRoute, new { version = 1, topology = plan.Topology,
-                                launchId = launchId, servers = servers.ConvertAll(server => server.Run.SourceDraft()) });
+                            var receipt = plan.Catalog.Target.RequestVenueBatch(VenueSourcesRoute, new { version = 1, topology = plan.Topology,
+                                launchId = launchId, servers = servers.ConvertAll(server => server.Run.SourceDraft()) },
+                                canRetry, ref sourceAttachmentRetried);
                             object raw;
                             Need(Num(receipt, "version") == 1 && Text(receipt, "topology") == plan.Topology && Text(receipt, "launchId") == launchId
                                 && receipt.TryGetValue("servers", out raw) && raw is object[] && ((object[])raw).Length == servers.Count,
@@ -856,7 +904,7 @@ internal static class ServerLauncher
                         catch (Exception error)
                         {
                             var rejected = error as ManagementRequestFailed;
-                            if (rejected != null && rejected.StatusCode == 409)
+                            if (!sourceAttachmentRetried && rejected != null && rejected.StatusCode == 409)
                             {
                                 sourceAttachment = "rejected";
                                 sourceAttachmentError = "整批來源登記遭拒絕，請在主控台重新核對場次（HTTP 409）。";
@@ -871,19 +919,23 @@ internal static class ServerLauncher
                 {
                     try
                     {
-                        foreach (var server in servers)
-                            Need(!server.Run.Process.Exited && UdpBinding.Find(server.Run.Process.Pid, server.Config.Bind, server.Config.Port) != null,
-                                "房間 " + String.Join("、", server.Choice.Rooms) + " 的原遊戲程序或 UDP 綁定已失效。");
+                        RequireVenueUdp(servers);
                         Need(!cancel(), "已中止啟動；此輪未完成。");
                         endpointPublication = "unconfirmed";
-                        var receipt = plan.Catalog.Target.Request(VenueEndpointsRoute, new { version = 1, topology = plan.Topology,
-                            servers = servers.ConvertAll(server => new { sessionId = server.Choice.Id, endpoint = server.Run.EndpointDraft() }) });
+                        var receipt = plan.Catalog.Target.RequestVenueBatch(VenueEndpointsRoute, new { version = 1, topology = plan.Topology,
+                            servers = servers.ConvertAll(server => new { sessionId = server.Choice.Id, endpoint = server.Run.EndpointDraft() }) },
+                            () =>
+                            {
+                                if (!canRetry()) return false;
+                                RequireVenueUdp(servers); return true;
+                            }, ref endpointPublicationRetried);
                         object raw;
                         Need(Num(receipt, "version") == 1 && Text(receipt, "topology") == plan.Topology
                             && receipt.TryGetValue("servers", out raw) && raw is object[] && ((object[])raw).Length == servers.Count, "全館公告回條不符。");
                         var endpoints = (object[])receipt["servers"];
                         for (var index = 0; index < servers.Count; index++) servers[index].Run.ConfirmEndpoint(Map(endpoints[index]));
                         endpointPublication = "confirmed";
+                        RequireVenueUdp(servers);
                         Need(!cancel(), "已中止啟動；此輪未完成。");
                         Save(ready, new { schemaVersion = 1, status = "venue-ready", topology = plan.Topology, instanceId = plan.Catalog.InstanceId,
                             servers = servers.ConvertAll(server => new { roomIds = server.Choice.Rooms, ready = server.Run.Ready() }) });
@@ -903,8 +955,8 @@ internal static class ServerLauncher
         var complete = published && !cancel() && servers.TrueForAll(server => server.Error == null && server.Run.Complete && server.Run.Cleanup);
         Save(report, new { schemaVersion = 1, status = complete ? "venue-sealed-stopped" : "venue-incomplete",
             complete = complete, topology = plan.Topology, instanceId = plan.Catalog.InstanceId, readyPublished = published,
-            venueLaunchId = launchId, sourceAttachment = sourceAttachment, sourceAttachmentError = sourceAttachmentError,
-            endpointPublication = endpointPublication, publicationError = publicationError,
+            venueLaunchId = launchId, sourceAttachment = sourceAttachment, sourceAttachmentError = sourceAttachmentError, sourceAttachmentRetried = sourceAttachmentRetried,
+            endpointPublication = endpointPublication, publicationError = publicationError, endpointPublicationRetried = endpointPublicationRetried,
             servers = servers.ConvertAll(server => new { roomIds = server.Choice.Rooms,
                 result = server.Run.Report(server.Run.Complete && server.Run.Cleanup ? "sealed-stopped" : "incomplete", server.Error) }) });
         return complete ? 0 : 1;

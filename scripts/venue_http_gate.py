@@ -3,6 +3,7 @@
 HTTP bodies and credentials are forwarded in memory, never recorded. WebSocket
 bytes are opaque. Only explicitly selected session routes / publication are blocked.
 """
+import hashlib
 import http.client
 from contextlib import closing
 import http.server
@@ -85,6 +86,12 @@ class VenueHttpGate:
     def publication_blocked(self):
         with self.lock: return self.mode in PUBLICATION_BLOCKS
 
+    def is_publication_route(self, path):
+        return path == self.prefix + '/world/publish'
+
+    def response(self, method, path, body, status, headers, payload):
+        return status, headers, payload
+
     def allowed(self, method, path):
         return (method == 'GET' and path in self.reads) or (method == 'POST' and path in (
             '/api/player-tickets/validate', self.prefix + '/combat-stream', self.prefix + '/combat-stream/batch', self.prefix + '/combat-stream/seal'))
@@ -118,12 +125,53 @@ class VenueHttpGate:
         self.server.shutdown(); self.server.server_close(); self.thread.join(2); self.watchdog.join(2)
         if self.thread.is_alive() or self.watchdog.is_alive(): raise RuntimeError('Owned fault proxy did not stop')
 
+class VenueReceiptGate(VenueHttpGate):
+    """Commit each original batch upstream, then replace its first 200 with a gateway failure."""
+    source_route = '/api/venue/combat-streams'
+    endpoint_route = '/api/venue/connection-endpoints'
+
+    def __init__(self, upstream, sessions):
+        ids = tuple(str(UUID(session)) for session in sessions)
+        if len(ids) not in (1, 5) or len(set(ids)) != len(ids):
+            raise ValueError('Receipt gate requires one Linked or five Independent sessions')
+        super().__init__(upstream, ids[0])
+        self.slots = threading.BoundedSemaphore(48)
+        prefixes = tuple('/api/sessions/' + session for session in ids)
+        self.reads = ('/', '/api/me', '/api/sessions', self.endpoint_route) + tuple(
+            prefix + suffix for prefix in prefixes for suffix in ('', '/statistics', '/world'))
+        self.writes = ('/api/player-tickets/validate',) + tuple(
+            prefix + '/combat-stream/' + suffix for prefix in prefixes for suffix in ('batch', 'seal'))
+        self.publications = {prefix + '/world/publish' for prefix in prefixes}
+        self.receipts = {self.source_route: [], self.endpoint_route: []}
+
+    def is_publication_route(self, path):
+        return path in self.publications
+
+    def allowed(self, method, path):
+        return ((method == 'GET' and path in self.reads) or (method == 'POST' and path in self.writes)
+                or (method == 'PUT' and path in self.receipts))
+
+    def response(self, method, path, body, status, headers, payload):
+        if method != 'PUT' or path not in self.receipts:
+            return status, headers, payload
+        with self.lock:
+            attempts = self.receipts[path]
+            delivered = 502 if not attempts and status == 200 else status
+            attempts.append({'requestSha256': hashlib.sha256(body).hexdigest(), 'upstreamStatus': status,
+                             'receiptSha256': hashlib.sha256(payload).hexdigest(), 'deliveredStatus': delivered})
+        return (delivered, (), b'') if delivered != status else (status, headers, payload)
+
+    def receipt_snapshot(self):
+        with self.lock:
+            return {path: list(attempts) for path, attempts in self.receipts.items()}
+
 
 class _Handler(http.server.BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
     def log_message(self, *args): pass
     def do_GET(self): self.forward()
     def do_POST(self): self.forward()
+    def do_PUT(self): self.forward()
 
     def reject(self, status):
         self.send_response(status); self.send_header('Content-Length', '0'); self.send_header('Connection', 'close'); self.end_headers(); self.close_connection = True
@@ -131,7 +179,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def forward(self):
         gate = self.server.owner
         self.connection.settimeout(6)
-        if self.path == gate.prefix + '/world/publish' and self.command == 'GET' and self.headers.get('Upgrade', '').lower() == 'websocket':
+        if gate.is_publication_route(self.path) and self.command == 'GET' and self.headers.get('Upgrade', '').lower() == 'websocket':
             if gate.publication_blocked():
                 gate.bump('publicationBlocked'); return self.reject(503)
             return self.tunnel()
@@ -153,8 +201,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
                 upstream.request(self.command, self.path, body=body or None, headers=headers)
                 response = upstream.getresponse(); payload = response.read(2 * 1024 * 1024 + 1)
                 if len(payload) > 2 * 1024 * 1024: return self.reject(502)
-                self.send_response(response.status)
-                for key, value in response.getheaders():
+                status, reply_headers, payload = gate.response(self.command, self.path, body, response.status, response.getheaders(), payload)
+                self.send_response(status)
+                for key, value in reply_headers:
                     if key.lower() not in ('content-length', 'transfer-encoding', 'connection', 'server', 'date'): self.send_header(key, value)
                 self.send_header('Content-Length', str(len(payload))); self.send_header('Connection', 'close'); self.end_headers()
                 self.wfile.write(payload); gate.bump('httpForwarded')

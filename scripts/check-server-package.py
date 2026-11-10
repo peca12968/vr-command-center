@@ -176,6 +176,7 @@ def main():
     p.add_argument('--check-venue-launcher', action='store_true', help='Use one real Windows launcher for the explicitly prepared servers of each topology')
     p.add_argument('--venue-management-https', action='store_true', help='Use a pinned HTTPS management profile for both venue launch plans')
     p.add_argument('--check-venue-plan-ui', action='store_true', help='Launch each topology with the exact plan downloaded from Chromium')
+    p.add_argument('--check-venue-receipt-retry', action='store_true', help='Lose both original batch replies after commit through a loopback fixture')
     p.add_argument('--check-venue-relay-readback', action='store_true', help='Use both source relay CLIs on copies of the closed original Linked journals')
     p.add_argument('--check-venue-preview', action='store_true', help='Run the shared Windows venue preview before both topology launches')
     p.add_argument('--check-venue-endpoint-batch', action='store_true', help='Verify endpoint batch retries and force a last-room transaction rollback')
@@ -288,6 +289,8 @@ def main():
                 'individual launcher report workflows must be checked separately')
     if args.check_venue_plan_ui and (not args.check_venue_launcher or not shutil.which('node')):
         p.error('--check-venue-plan-ui requires --check-venue-launcher and Node.js with Playwright Chromium')
+    if args.check_venue_receipt_retry and (not args.check_venue_plan_ui or args.venue_management_https):
+        p.error('--check-venue-receipt-retry requires --check-venue-plan-ui and its own plain loopback management target')
     if args.check_venue_relay_readback and (not args.check_venue_plan_ui or not shutil.which('dotnet')):
         p.error('--check-venue-relay-readback requires --check-venue-plan-ui and the built .NET relay tools')
     if args.check_venue_preview and not args.check_venue_launcher:
@@ -378,6 +381,7 @@ def main():
     control.package.verify(args.control_package);out=ROOT/'artifacts/server-package-checks'/('run-'+uuid.uuid4().hex);out.mkdir(parents=True,exist_ok=False);runtime=args.runtime_root.resolve()/out.name;runtime.mkdir(parents=True,exist_ok=False)
     (ROOT/'artifacts/server-package-checks-latest-path.txt').write_text(str(out),encoding='utf-8');print(json.dumps({'stage':'starting','directory':str(out)}),flush=True)
     env=dict(os.environ);env.update(PATH=str(Path(os.environ['WINDIR'])/'System32'),DOTNET_ROOT=str(runtime/'absent-dotnet'),DOTNET_MULTILEVEL_LOOKUP='0');exe=folder/'Launch-Server.exe';control_exe=args.control_package.resolve()/'Start-Control.exe';data=runtime/'control';checks=[];runners=[];clients=[];cleanup=[];witnesses=[];api=None;api_witness=None;keys=None;sessions=[];rounds=[];observer=None;observer_log=None;observer_out=out/'closure-ui';observer_stop=out/'closure-ui-stop.request';observer_entry=None
+    receipt_gates=[]
     venue_target = data / 'control-instance.json'
     venue_uri = venue_pin = venue_password = None
     hardware_processes=[]
@@ -544,6 +548,7 @@ def main():
         work=runtime/(label+'-work')
         ready=out/(label+'-ready.json')
         report=out/(label+'-final.json')
+        receipt_gate=None
         values=[]
         ports=set()
         for state in states:
@@ -656,7 +661,7 @@ def main():
                     'action':'SetEnvironment','expectedSequence':state['sequence'],'environment':state['environment']})['session']
 
             @contextmanager
-            def revision_fixture(suffix, change_at_open):
+            def revision_fixture(suffix, fault):
                 catalog_reads=[]
                 batch_requests=[]
                 batch_path='/api/venue/combat-streams'
@@ -675,18 +680,22 @@ def main():
                     def do_GET(self):
                         if not self.authorized():return
                         if self.path=='/api/sessions':
-                            if not change_at_open and len(catalog_reads)==1:advance_revision()
+                            if fault=='catalog' and len(catalog_reads)==1:advance_revision()
                             catalog_reads.append(self.path)
                         body,_=request(self.path,role='GameServer',raw_response=True)
                         self.reply(200,body)
                     def do_PUT(self):
                         if not self.authorized():return
                         length=int(self.headers.get('Content-Length','0'))
-                        if (not change_at_open or self.path!=batch_path or batch_requests or not 0<length<=4096
+                        if (fault not in ('revision','unavailable') or self.path!=batch_path or not 0<length<=4096
                                 or self.headers.get_content_type()!='application/json'):
                             self.send_error(400);return
                         body=self.rfile.read(length)
-                        batch_requests.append(json.loads(body))
+                        batch_requests.append((hashlib.sha256(body).hexdigest(),json.loads(body)))
+                        if fault=='unavailable':
+                            self.reply(503,b'');return
+                        if len(batch_requests)!=1:
+                            self.reply(409,b'');return
                         advance_revision()
                         rejected,_=request(self.path,body,role='GameServer',method='PUT',expected=409,
                                            raw_response=True,content_type='application/json')
@@ -719,7 +728,7 @@ def main():
                       'Guarded preview rejects a wrong mission at the original sequence')
 
                 gate_work,gate_ready=runtime/(label+'-gate-work'),out/(label+'-gate-ready.json')
-                with revision_fixture('-gate',change_at_open=False) as (gate_plan,catalog_reads,_):
+                with revision_fixture('-gate',fault='catalog') as (gate_plan,catalog_reads,_):
                     blocked=read(call(label+'-gate-stale',args_for(gate_plan,gate_work,gate_ready)))
                 check(len(catalog_reads)==2 and '房間 5' in blocked['error'] and '場次序號' in blocked['error']
                       and not gate_ready.exists() and not list(gate_work.iterdir()),
@@ -728,13 +737,14 @@ def main():
                 refresh_plan()
                 download_plan('-browser-before-batch')
             source_work,source_ready=runtime/(label+'-source-work'),out/(label+'-source-ready.json')
-            with revision_fixture('-source',change_at_open=True) as (source_plan,catalog_reads,batch_requests):
+            with revision_fixture('-source',fault='revision') as (source_plan,catalog_reads,batch_requests):
                 blocked=read(call(label+'-source-stale',args_for(source_plan,source_work,source_ready)))
             check(len(catalog_reads)==2 and len(batch_requests)==1 and blocked['sourceAttachment']=='rejected'
+                  and not blocked['sourceAttachmentRetried']
                   and 'HTTP 409' in blocked['sourceAttachmentError'] and not source_ready.exists()
                   and blocked['endpointPublication']=='not-attempted' and not blocked['readyPublished'],
                   label+' original launcher observes rejection before any venue readiness or endpoint announcement')
-            batch=batch_requests[0]
+            batch=batch_requests[0][1]
             check(batch['topology']==topology and batch['launchId']==blocked['venueLaunchId']
                   and [(row['sessionId'],row['expectedSequence']) for row in batch['servers']]
                   ==[(state['id'],state['sequence']) for state in states],
@@ -762,6 +772,27 @@ def main():
                   and all(request('/api/sessions/'+state['id'])==state for state in states),
                   label+' stale downloaded plan cannot start a child, bind a source or alter any room')
             refresh_plan()
+            if args.check_venue_receipt_retry and label in ('independent-venue','linked-venue'):
+                if not linked:
+                    outage_work,outage_ready=runtime/(label+'-outage-work'),out/(label+'-outage-ready.json')
+                    with revision_fixture('-outage',fault='unavailable') as (outage_plan,_,attempts):
+                        outage=read(call(label+'-receipt-unavailable',args_for(outage_plan,outage_work,outage_ready)))
+                    check(len(attempts)==2 and attempts[0][0]==attempts[1][0] and outage['sourceAttachmentRetried']
+                          and outage['sourceAttachment']=='unconfirmed' and 'HTTP 503' in outage['sourceAttachmentError']
+                          and outage['endpointPublication']=='not-attempted' and not outage_ready.exists()
+                          and len(outage['servers'])==5
+                          and all(row['result']['childExited'] and row['result']['cleanupCompleted'] for row in outage['servers'])
+                          and all(request('/api/sessions/'+state['id'])==state for state in states),
+                          'Two unavailable replies stop all five original children after exactly one byte-identical retry')
+                gate_class=module('venue_receipt_fault_gate','venue_http_gate.py').VenueReceiptGate
+                receipt_gate=gate_class(uri,[state['id'] for state in states]).start()
+                receipt_gates.append(receipt_gate)
+                private=runtime/(label+'-receipt-instance')
+                private.mkdir()
+                marker=private/'control-instance.json'
+                shutil.copyfile(data/'operator-keys.json',private/'operator-keys.json')
+                marker.write_text(json.dumps(dict(read(data/'control-instance.json'),port=receipt_gate.server.server_port)),encoding='utf-8')
+                plan['controlInstance']=str(marker)
             plan_file=download_plan('-browser-plan')
             if not linked and args.check_venue_preview:
                 previous=runtime/(label+'-previous-plan.json')
@@ -814,6 +845,16 @@ def main():
             check(len(launch_ids)==1 and uuid.UUID(launch_ids.pop()).int!=0
                   and [source['expectedSequence'] for source in sources]==[state['sequence'] for state in states],
                   label+' every original Unity source is durably bound to the same launch ID and reviewed sequences')
+        if receipt_gate:
+            receipts=receipt_gate.receipt_snapshot()
+            for route,attempts in receipts.items():
+                check(len(attempts)==2 and [row['upstreamStatus'] for row in attempts]==[200,200]
+                      and [row['deliveredStatus'] for row in attempts]==[502,200]
+                      and len({row['requestSha256'] for row in attempts})==1
+                      and len({row['receiptSha256'] for row in attempts})==1,
+                      label+' confirms original committed '+route+' after one byte-identical retry and matching receipt')
+            save(label+'-receipt-gate.json',receipts)
+            for entry in entries:entry['receiptRetried']=True
         if venue_pin:
             generated = [read(entry['work'] / 'server-config.json') for entry in entries]
             check(all(value['managementApiUrl'] == venue_uri and value['managementCertificateSha256'] == venue_pin
@@ -1967,6 +2008,10 @@ def main():
         if 'venueIndex' in entry:
             check(report['complete'] and report['readyPublished'] and report['status']=='venue-sealed-stopped',
                   entry['label']+' original venue process final report is complete')
+            if entry.get('receiptRetried'):
+                check(report['sourceAttachment']=='confirmed' and report['sourceAttachmentRetried']
+                      and report['endpointPublication']=='confirmed' and report['endpointPublicationRetried'],
+                      entry['label']+' final report retains both confirmed retry outcomes')
             report=report['servers'][entry['venueIndex']]['result']
             check(report['sessionId']==entry['sessionId'] and report['childPid']==entry['ready']['childPid'],
                   entry['label']+' final venue result identifies the original child')
@@ -4239,6 +4284,9 @@ def main():
                 if process.poll() is None:process.terminate()
                 process.wait(timeout=10)
             except Exception as e:cleanup.append({'kind':'hardware-mock','errorType':type(e).__name__})
+        for gate in receipt_gates:
+            try:gate.close()
+            except Exception as e:cleanup.append({'kind':'venue-receipt-gate','errorType':type(e).__name__})
         try:
             if api and api.poll() is None:api_stop.write_text('stop own API',encoding='utf-8');api.wait(timeout=50)
             if api_witness:api_witness.wait();api_witness.close()
@@ -4248,6 +4296,7 @@ def main():
         if args.hardware_simulator_package:remaining['remainingHardware']=[process.pid for process in hardware_processes if process.poll() is None]
         if args.check_openxr_reconnect or args.check_venue_openxr_reconnect:
             remaining['remainingReconnectRelays']=sum(gate.thread.is_alive() for gate in reconnect_gates)
+        if receipt_gates:remaining['remainingReceiptGates']=sum(gate.thread.is_alive() for gate in receipt_gates)
         save('cleanup.json',remaining)
         if cleanup:raise RuntimeError('Cleanup not confirmed; do not snapshot live runtime')
         venue.snapshot_runtime(runtime,out/'runtime-snapshot')
