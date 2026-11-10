@@ -1,5 +1,14 @@
 # 開發進度
 
+## 2026-11-10 五房配票預覽跟隨原遊戲來源恢復
+
+控制台 0.31.102 使用同一份房卡回報核對已開啟的 VR 或混合五房配票預覽。原來源停止更新會停用下載，原場次、UDP 及名冊相同且來源恢復後可在原預覽繼續。管理服務仍在簽票時檢查來源，操作員點選下載後仍核對同一組端點及 admission。 [配票操作](EXTERNAL_CLIENTS.md#按房間下載連線檔)
+
+- 解壓三包 `run-562a53f7745345f9ba1972df5ec28d41` 通過 438 項。獨立與合併各 25 個同機 Windows 玩家程序由瀏覽器下載的原票券入場。正常六場 961 格回放、50 筆戰績及伺服器確認、6 份 CSV。整批端點寫入回復與永久中止來源的配票拒絕亦通過。原生 C／F 250 檔雜湊一致，隔離程序已清理。
+- 在另一個合併場，以 Windows 執行緒暫停功能短暫停止測試用 Unity 程序。保持原 Chromium 頁面及已讀取的預覽，實際驗證管理服務暫停簽票及瀏覽器停用下載。恢復原 69 個執行緒後，原程序 handle、場次、世界來源、UDP 及入場名冊一致，接受畫格由 13 前進至 16。同一預覽重新開放，操作員點選後成功下載五房 ZIP。這是受控的本機程序暫停／恢復。 [Windows SuspendThread](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-suspendthread)
+- 核心 1,045 項、世界串流 92 項、解壓管理包 107 項、Node 110 項及 Chromium 831 項通過。管理包 C／F 27 檔雜湊一致。完整 HTTP 測試前三個無效憑證案例通過，第四個程序在原 10 秒退出期限逾時，該次維持未通過。
+- 管理包來源 `7d59aca0be1d316a448260f9e4be9fa44c203ea8`。沿用 Windows、Quest 0.50.0 與啟動器 1.10，離線一致性報告為 `artifacts/venue-release-ticket-recovery102.json`。GitHub Actions job `129800166483` 因帳務或支出上限未啟動。跨機、頭盔與廠商硬體仍待現場驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42807457823)
+
 ## 2026-11-10 遊戲來源停止更新時暫停配票
 
 管理包 0.31.101 記錄新批次公告的端點。新發單席、整房及全館連線檔前，服務要求同一場次最近五秒內有未暫停發布且階段相符的原世界畫格。控制台保留原 UDP，並標示暫停配票。已簽票券依原期限與 admission 驗證。舊公告仍依原配票條件。 [配票操作](EXTERNAL_CLIENTS.md#按房間下載連線檔)
