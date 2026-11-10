@@ -861,7 +861,9 @@ def main():
     def start_hardware_mock(feed):
         frames=[]
         room=feed['room']; sid=feed['session']; label=f'{sid}-room-{room}'
-        mock=subprocess.Popen([sys.executable,str(hardware/'mock-device.py')],env=mock_env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
+        mock_command=[sys.executable,str(hardware/'mock-device.py')]
+        if hardware_manifest['toolVersion']=='0.2.5':mock_command+=['--room',str(room)]
+        mock=subprocess.Popen(mock_command,env=mock_env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
                               text=True,encoding='utf-8',creationflags=subprocess.CREATE_NO_WINDOW)
         hardware_processes.append(mock)
         def collect():
@@ -876,7 +878,7 @@ def main():
         config=runtime/(label+'-hardware.json')
         gateway_env={**mock_env,'VR_COMMAND_ROOM_KEY':keys[f'Room{room}']}
         simulator=str(hardware/'VrCommand.HardwareSimulator.dll')
-        if hardware_manifest['toolVersion'] in ('0.2.3','0.2.4'):
+        if hardware_manifest['toolVersion'] in ('0.2.3','0.2.4','0.2.5'):
             seat_map=runtime/(label+'-seat-map.json')
             map_value={key:value for key,value in setup.items() if key!='bindings'}
             map_value['devices']=[{'deviceId':b['deviceId'],'seat':b['seat']} for b in bindings]

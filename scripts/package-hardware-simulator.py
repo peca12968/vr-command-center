@@ -3,7 +3,7 @@ import argparse,hashlib,json,shutil,uuid,zipfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 FILES=['VrCommand.HardwareSimulator.dll','VrCommand.HardwareSimulator.deps.json','VrCommand.HardwareSimulator.runtimeconfig.json','VrCommand.Core.dll','VrCommand.Simulation.dll']
-VERSION='0.2.4'
+VERSION='0.2.5'
 README=f'''VR Command 硬體回饋模擬器 {VERSION}
 
 需要 .NET 10 runtime，本機使用10.0.14驗證。這不是Unity玩家程式或廠商SDK。
@@ -11,10 +11,11 @@ README=f'''VR Command 硬體回饋模擬器 {VERSION}
 dotnet VrCommand.HardwareSimulator.dll --input example.json --output <新的包外report.json>
 
 即時模式使用 Windows 管理包 0.31.27 以上與同房房控憑證。Python 3.12 可啟動本機模擬設備：
-python mock-device.py --port 19101
+python mock-device.py --room 1 --port 19101
 在另一個終端設定 VR_COMMAND_ROOM_KEY，再執行：
 dotnet VrCommand.HardwareSimulator.dll --live <包外room-config.json> --output <新的包外report.json>
 同一台電腦的同一帳戶，每個原場次及房間只能有一個即時閘道。GatewayLeaseUnavailable 表示無法取得本機鎖定，請確認原閘道已退出及應用程式資料夾可寫入。
+同一帳戶的運作中閘道也須使用不同模擬 TCP 埠及設備 ID。MockPortLeaseUnavailable 與 DeviceLeaseUnavailable 分別表示指定資源無法取得，請核對各房設定。
 即時模式可加上 --stop-file <尚不存在的本機標記檔>。每個程序使用獨立路徑。建立空白標記檔後，該程序關閉模擬連線，待確認的批次記為 cancelled，報告終止原因為 operator-stop。
 搭配管理包 0.31.61 以上，可從座位／設備清單建立即時設定：
 dotnet VrCommand.HardwareSimulator.dll --bind-room <包外seat-map.json> --output <新的包外room-config.json>
@@ -41,7 +42,7 @@ def sha(p):
 def verify(folder):
     folder=folder.resolve();manifest=read(folder/'hardware-package.json')
     version=(manifest.get('toolVersion'),manifest.get('mode'))
-    if manifest.get('schemaVersion')!=1 or version not in {('0.1.0','OfflineSimulationOnly'),('0.2.0','OfflineAndLiveSimulation'),('0.2.1','OfflineAndLiveSimulation'),('0.2.2','OfflineAndLiveSimulation'),('0.2.3','OfflineAndLiveSimulation'),(VERSION,'OfflineAndLiveSimulation')}:raise ValueError('Unsupported simulator package')
+    if manifest.get('schemaVersion')!=1 or version not in {('0.1.0','OfflineSimulationOnly'),('0.2.0','OfflineAndLiveSimulation'),('0.2.1','OfflineAndLiveSimulation'),('0.2.2','OfflineAndLiveSimulation'),('0.2.3','OfflineAndLiveSimulation'),('0.2.4','OfflineAndLiveSimulation'),(VERSION,'OfflineAndLiveSimulation')}:raise ValueError('Unsupported simulator package')
     expected=set(FILES)|{'example.json','README.txt'}
     if version[1]=='OfflineAndLiveSimulation':expected.add('mock-device.py')
     if set(manifest['files'])!=expected:raise ValueError('Unexpected simulator package payload')
@@ -61,7 +62,7 @@ def main():
     if not checks.get('complete') or checks.get('checks',0)<38 or cleanup!={'errors':[],'apiRemaining':False}:raise ValueError('Require completed simulator / API proof and original cleanup')
     if checks['helperSha256']!=sha(ROOT/'scripts/check-hardware-simulator.py'):raise ValueError('Proof helper changed')
     live=args.live_evidence.resolve();witness=read(live/'checks.json');peer=ROOT/'scripts/hardware-mock-peer.py'
-    if not witness.get('complete') or witness.get('checks',0)<30 or read(live/'cleanup.json')!={'allStopped':True,'apiExitCode':0}:
+    if not witness.get('complete') or witness.get('checks',0)<35 or read(live/'cleanup.json')!={'allStopped':True,'apiExitCode':0}:
         raise ValueError('Require the completed live rehearsal and process cleanup')
     if witness['helperSha256']!=sha(ROOT/'scripts/check-live-hardware-gateway.py') or witness['peerSha256']!=sha(peer):
         raise ValueError('Live proof helper or tested mock changed')

@@ -7,6 +7,7 @@ from pathlib import Path
 import queue
 import secrets
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
@@ -66,9 +67,12 @@ def run(args):
         raise RuntimeError('Timeout: '+label)
 
     class Peer:
-        def __init__(self):
+        def __init__(self, room=None):
             self.lines = queue.Queue()
-            self.process = start([sys.executable, str(peer_script), '--manual'], env)
+            command = [sys.executable, str(peer_script), '--manual']
+            if room is not None:
+                command += ['--room', str(room)]
+            self.process = start(command, env)
             self.reader = threading.Thread(target=self.collect, daemon=True)
             self.reader.start()
             self.port = self.read('listening')['port']
@@ -386,7 +390,34 @@ def run(args):
                     'name':f'Bound fixture {room}','headset':'Quest3'}, f'Room{room}')
             players = {player['roomId']:player for player in session['players']}
             original = players[1]
-            bound_peers = {room:Peer() for room in rooms}
+            bound_peers = {room:Peer(room) for room in rooms}
+            def mock_send(sock, frame):
+                data = json.dumps(frame).encode()
+                sock.sendall(struct.pack('>I',len(data))+data)
+
+            def mock_refused(stream):
+                try:
+                    return stream.read(1) == b''
+                except (ConnectionResetError, ConnectionAbortedError):
+                    return True
+
+            hello = {'version':1,'kind':'hello','mode':'simulation','connectionId':str(uuid.uuid4()),'roomId':1}
+            with socket.create_connection(('127.0.0.1',bound_peers[2].port),timeout=3) as sock, sock.makefile('rb') as wire:
+                mock_send(sock,hello)
+                assert mock_refused(wire)
+            check(bound_peers[2].read('room-rejected')=={'kind':'room-rejected','roomId':1,'expectedRoomId':2},
+                  'A room-assigned mock rejects the wrong room even when no gateway owns its port')
+            for wrong in ({'roomId':1},{'connectionId':str(uuid.uuid4())}):
+                with socket.create_connection(('127.0.0.1',bound_peers[2].port),timeout=3) as sock, sock.makefile('rb') as wire:
+                    valid = {**hello,'roomId':2,'connectionId':str(uuid.uuid4())}
+                    mock_send(sock,valid)
+                    assert bound_peers[2].read('hello')==valid
+                    bound_peers[2].reply()
+                    size, = struct.unpack('>I',wire.read(4))
+                    assert json.loads(wire.read(size))=={'version':1,'kind':'ready','connectionId':valid['connectionId']}
+                    mock_send(sock,{**valid,'kind':'feedback','batchId':str(uuid.uuid4()),'signals':[],**wrong})
+                    assert mock_refused(wire) and bound_peers[2].lines.empty()
+            check(True, 'Mock feedback must retain both the handshaken room and connection before it can be acknowledged')
             maps = {room:{'version':1,'managementUrl':base,'sessionId':sid,'roomId':room,
                 'mockPort':peer.port,'seconds':35,'devices':[{'seat':0,'deviceId':str(uuid.uuid4())}]}
                 for room,peer in bound_peers.items()}
@@ -461,8 +492,42 @@ def run(args):
             peers = bound_peers
             expected = {player['id']:json.loads(updated[room].read_text(encoding='utf-8'))['bindings'][0] for room,player in players.items()}
             bound_reports = {room:out/f'bound-room-{room}-report.json' for room in peers}
-            gateways = {room:invoke(room,f'Room{room}',bound_reports[room],config=updated[room]) for room in peers}
-            connections = {room:accept(peer,room,bound=True) for room,peer in peers.items()}
+            gateways = {1:invoke(1,'Room1',bound_reports[1],config=updated[1])}
+            connections = {1:accept(peers[1],1,bound=True)}
+            room_two = json.loads(updated[2].read_text(encoding='utf-8'))
+            device_id = expected[replacement['id']]['deviceId']
+            shared_device = runtime/'shared-device.json'
+            shared_device.write_text(json.dumps({**room_two,'bindings':[{**room_two['bindings'][0],'deviceId':device_id}]}),encoding='utf-8')
+            device_report = out/'shared-device-report.json'
+            candidate = invoke(2,'Room2',device_report,config=shared_device)
+            wait(lambda:candidate.poll() is not None or not peers[2].lines.empty(), 'shared device decision')
+            if not peers[2].lines.empty():
+                foreign_connection = accept(peers[2],2,bound=True)
+                ids = publish([(replacement,'ShotFired'),(players[2],'ShotFired')])
+                original_batch = feedback(1,ids[:1]); foreign_batch = peers[2].read('feedback')
+                assert foreign_batch['connectionId']==foreign_connection and foreign_batch['roomId']==2
+                assert foreign_batch['signals'][0]['signal']['reportId']==ids[1]
+                assert original_batch['signals'][0]['deviceId']==foreign_batch['signals'][0]['deviceId']==device_id
+                peers[1].reply(); peers[2].reply()
+                save('shared-device-witness.json',{'original':original_batch,'foreign':foreign_batch})
+                raise AssertionError('Two active rooms sent different accepted signals to the same logical device ID')
+            denial,_ = candidate.communicate(timeout=8)
+            check(candidate.returncode==1 and 'DeviceLeaseUnavailable' in denial and not device_report.exists()
+                  and not any(secret in denial for secret in private),
+                  'Another room cannot acquire a bound device even with its own mock port and valid admission')
+
+            shared_port = runtime/'shared-port.json'
+            shared_port.write_text(json.dumps({**room_two,'mockPort':peers[1].port}),encoding='utf-8')
+            port_report = out/'shared-port-report.json'
+            candidate = invoke(2,'Room2',port_report,config=shared_port)
+            denial,_ = candidate.communicate(timeout=8)
+            check(candidate.returncode==1 and 'MockPortLeaseUnavailable' in denial and not port_report.exists()
+                  and peers[1].lines.empty() and not any(secret in denial for secret in private),
+                  'Another room cannot use the original active mock port even with a distinct device binding')
+            for room in rooms[1:]:
+                gateways[room] = invoke(room,f'Room{room}',bound_reports[room],config=updated[room])
+                connections[room] = accept(peers[room],room,bound=True)
+            check(len(set(connections.values()))==5, 'Denied starts release partial leases and all five correct rooms attach')
             ids = publish([(replacement,'ShotFired')]); revoked_batch = feedback(1,ids)
             peers[1].reply('observe-close')
             request(path+'/players/'+replacement['id'], role='Room1', method='DELETE', admission=replacement['admissionId'])

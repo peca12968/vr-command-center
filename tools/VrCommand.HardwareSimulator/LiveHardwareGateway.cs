@@ -34,6 +34,22 @@ internal static class LiveHardwareGateway
     private sealed class MockFailure(string reason) : IOException(reason);
     private sealed class BindingMismatch : Exception { }
     private sealed class GatewayLeaseUnavailable : IOException { }
+    private sealed class MockPortLeaseUnavailable : IOException { }
+    private sealed class DeviceLeaseUnavailable : IOException { }
+
+    private sealed class GatewayLeases(string directory) : IDisposable
+    {
+        private readonly List<FileStream> handles = [];
+
+        // The file stays in place. Only the live OS handle owns the lease.
+        internal void Hold(string name) =>
+            handles.Add(new FileStream(Path.Combine(directory, name), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None));
+
+        public void Dispose()
+        {
+            foreach (var handle in handles) handle.Dispose();
+        }
+    }
 
     private static T ReadInput<T>(string path) where T : class
     {
@@ -99,20 +115,35 @@ internal static class LiveHardwareGateway
 
     private static string FeedbackRoute(Configuration config) => $"/api/sessions/{config.SessionId:D}/rooms/{config.RoomId}/hardware-feedback";
 
-    private static FileStream AcquireGatewayLease(Guid sessionId, int roomId)
+    private static GatewayLeases AcquireGatewayLeases(Configuration config)
     {
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify);
         if (!Path.IsPathFullyQualified(local)) throw new GatewayLeaseUnavailable();
         var directory = Path.Combine(local, "VrCommand", "HardwareGatewayLeases");
+        var leases = new GatewayLeases(directory);
         try
         {
-            Directory.CreateDirectory(directory);
-            // Keep the file in place. Only the live OS handle owns the lease,
-            // and process exit releases it without racing a replacement opener.
-            var name = FormattableString.Invariant($"{sessionId:N}-{roomId}.lock");
-            return new FileStream(Path.Combine(directory, name), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            try
+            {
+                Directory.CreateDirectory(directory);
+                leases.Hold(FormattableString.Invariant($"{config.SessionId:N}-{config.RoomId}.lock"));
+            }
+            catch (IOException) { throw new GatewayLeaseUnavailable(); }
+            try { leases.Hold(FormattableString.Invariant($"mock-port-{config.MockPort}.lock")); }
+            catch (IOException) { throw new MockPortLeaseUnavailable(); }
+            try
+            {
+                foreach (var device in config.Bindings.Select(binding => binding.DeviceId).Order())
+                    leases.Hold($"device-{device:N}.lock");
+            }
+            catch (IOException) { throw new DeviceLeaseUnavailable(); }
+            return leases;
         }
-        catch (IOException) { throw new GatewayLeaseUnavailable(); }
+        catch
+        {
+            leases.Dispose();
+            throw;
+        }
     }
 
     internal static async Task<int> Run(string input, string output, string? stopFile)
@@ -129,7 +160,7 @@ internal static class LiveHardwareGateway
             throw new ArgumentException("Use one room and unique seat, device, player and admission bindings.");
         using var client = CreateManagementClient(config.ManagementUrl);
         await VerifyIdentity(client, config.RoomId);
-        using var lease = AcquireGatewayLease(config.SessionId, config.RoomId);
+        using var leases = AcquireGatewayLeases(config);
 
         var bindings = config.Bindings.ToDictionary(b => (b.PlayerId, b.AdmissionId, b.Seat));
         var route = FeedbackRoute(config);

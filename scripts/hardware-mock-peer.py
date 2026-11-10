@@ -27,12 +27,27 @@ def emit(value):
     print(json.dumps(value), flush=True)
 
 
-def exchange(sock, manual):
-    first = True
+def exchange(sock, manual, assigned_room):
+    connection = None
+    room = None
     with sock.makefile('rb') as stream:
         while frame := receive(stream):
+            first = connection is None
             if frame['version'] != 1 or frame['mode'] != 'simulation' or frame['kind'] != ('hello' if first else 'feedback'):
                 raise ValueError('Invalid mock frame')
+            frame_room = frame['roomId']
+            if type(frame_room) is not int or not 1 <= frame_room <= 5:
+                raise ValueError('Invalid mock room')
+            if first:
+                if assigned_room is not None and frame_room != assigned_room:
+                    emit({'kind':'room-rejected', 'roomId':frame_room, 'expectedRoomId':assigned_room})
+                    return
+                connection = frame['connectionId']
+                if not isinstance(connection, str) or str(uuid.UUID(connection)) != connection:
+                    raise ValueError('Invalid mock connection')
+                room = frame_room
+            elif frame_room != room or frame['connectionId'] != connection:
+                raise ValueError('Feedback does not belong to this mock connection')
             received = time.monotonic()
             emit(frame)
             action = sys.stdin.readline().strip() if manual else 'ack'
@@ -58,12 +73,12 @@ def exchange(sock, manual):
             if not first:
                 reply['batchId'] = str(uuid.uuid4()) if action == 'wrong' else frame['batchId']
             send(sock, reply)
-            first = False
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', type=int, default=0, help='Loopback TCP port (0 chooses a free port)')
+    parser.add_argument('--room', type=int, choices=range(1,6), help='Accept handshakes for this room only')
     parser.add_argument('--manual', action='store_true', help='Read a simulated acknowledgement instruction from stdin')
     args = parser.parse_args()
     if args.port != 0 and not 1024 <= args.port <= 65535:
@@ -77,7 +92,7 @@ def main():
             with sock:
                 sock.settimeout(125)
                 try:
-                    exchange(sock, args.manual)
+                    exchange(sock, args.manual, args.room)
                 except (KeyError, TypeError, ValueError, OSError, struct.error):
                     continue
 
