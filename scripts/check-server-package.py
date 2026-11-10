@@ -74,6 +74,7 @@ def main():
     p.add_argument('--check-venue-phase', action='store_true', help='Verify whole-venue pause and resume against both native topologies')
     p.add_argument('--check-venue-begin', action='store_true', help='Start both native topologies with one witnessed Begin per topology')
     p.add_argument('--check-venue-tracking-gate', action='store_true', help='Reject full tracking Begin while the same native roster is otherwise ready')
+    p.add_argument('--check-venue-participation-gate', action='store_true', help='Require all 25 effective native seats and verify their original Preparing frames')
     p.add_argument('--check-venue-end', action='store_true', help='End each native topology in one batch and read its original archives')
     p.add_argument('--check-venue-reports', action='store_true', help='Verify the original reports ZIP for each native End batch')
     p.add_argument('--check-venue-replay-ui', action='store_true', help='Open the original native archives through the shipped console')
@@ -150,6 +151,8 @@ def main():
     if args.check_venue_phase and not args.check_room_clocks:p.error('--check-venue-phase requires --check-room-clocks')
     if args.check_venue_begin and not args.player_package:p.error('--check-venue-begin requires the three-package check')
     if args.check_venue_tracking_gate and not args.check_venue_begin:p.error('--check-venue-tracking-gate requires --check-venue-begin')
+    if args.check_venue_participation_gate and not (args.check_venue_begin and args.player_package):
+        p.error('--check-venue-participation-gate requires --check-venue-begin and all native player seats')
     if args.check_venue_end and (not args.player_package or args.observe_closure_ui):
         p.error('--check-venue-end requires the three-package check and its own End path')
     if args.check_venue_reports and (not args.check_venue_end or not args.check_room_reports):
@@ -2406,10 +2409,28 @@ def main():
                           and denied['code']=='venue-begin-not-ready' and denied['roomIds']==list(range(1,6))
                           and unchanged==preview, 'full tracking Begin refuses the native simulated roster without advancing any room')
                     save(('linked' if linked else 'independent')+'-full-tracking-denied.json',denied)
+                if args.check_venue_participation_gate:
+                    body['requireFullParticipation']=True
                 receipt=request(route,body,request_id=key)
                 applied={row['sessionId']:row['appliedAtSequence'] for row in receipt['sessions']}
                 check(not receipt['duplicate'] and applied=={sid:sequence+1 for sid,sequence in expected.items()},
                       'one native Begin reaches exactly the previewed session revisions')
+                if args.check_venue_participation_gate:
+                    proofs={}
+                    for entry in entries:
+                        sid=entry['sessionId']; seq=applied[sid]
+                        event,=request(f'/api/sessions/{sid}/events?after={seq-1}&limit=1')
+                        witness=event['venue']['participationFrame']
+                        packet=request(f'/api/sessions/{sid}/world/frames/{witness["worldSequence"]}')['packet']
+                        check(event['sequence']==seq and event['venue']['requireFullParticipation']
+                              and witness['streamId']==entry['ready']['streamId'] and packet['sequence']==witness['worldSequence']
+                              and packet['observedSequence']==seq-1 and packet['elapsedMilliseconds']==witness['elapsedMilliseconds']
+                              and packet['frame']['phase']=='Preparing' and not packet['suspended']
+                              and {p['id'] for p in packet['frame']['players']}==set(owner_ids[sid])
+                              and all(p['connected'] and p['health']==100 and p['rig']['kind']=='Simulated' for p in packet['frame']['players']),
+                              entry['label']+' participation gate retains the exact original Preparing pose for every native admission')
+                        proofs[sid]={'appliedAtSequence':seq,'witness':witness,'packet':packet}
+                    save(('linked' if linked else 'independent')+'-full-participation-begin.json',proofs)
             for entry in entries:
                 sid=entry['sessionId'];ids=owner_ids[sid]
                 if args.check_venue_begin:
@@ -2445,6 +2466,9 @@ def main():
                 retry=request(route,body,request_id=key)
                 check(retry['duplicate'] and retry['sessions']==receipt['sessions'],
                       'the late native Begin retry returns the same original receipt')
+                if args.check_venue_participation_gate:
+                    check(receipt['requireFullParticipation'] is retry['requireFullParticipation'] is True,
+                          'native retry keeps the 25-seat policy of the original accepted request')
                 save(('linked' if linked else 'independent')+'-venue-begin.json',
                      {'preview':preview,'preparing':preparing,'receipt':receipt,'observed':observed,'retry':retry})
             if args.observe_closure_ui and not linked:

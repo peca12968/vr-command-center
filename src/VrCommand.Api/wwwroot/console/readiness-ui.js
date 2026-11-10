@@ -266,7 +266,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     if (!active || failed || !room || document.visibilityState !== 'visible') return null;
     return roomMrTrackingPauseTarget(report, room, sessions.find(row => row.id === room.sessionId), performance.now() - started, actor);
   }
-  function venueBegin(target, roomId, requireFullTracking = false) {
+  function venueBegin(target, roomId, policy = 'normal') {
     const waiting = (state, text) => ({ state, text, ready: false });
     if (failed) return waiting('Unavailable', '無法確認，正在重試');
     const { rooms, sessions } = getState();
@@ -280,11 +280,15 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     if (source !== 'Fresh') return waiting(source, labels[source]);
     const mr = session.environment.mode === 'MR';
     const empty = '本房未編列席位';
-    if (requireFullTracking && details?.state !== 'WaitingRevision' && details?.state !== 'WaitingProfile'
-      && (row.registered !== room.capacity || row.trackedReady !== room.capacity))
-      return waiting('WaitingFullTracking', `名冊 ${row.registered}/${room.capacity} 席 · 追蹤 ${row.trackedReady}/${room.capacity} 席`);
+    const requireTracking = policy === 'tracking';
+    if (policy !== 'normal' && details?.state !== 'WaitingRevision' && details?.state !== 'WaitingProfile') {
+      const ready = mr || requireTracking ? row.trackedReady : row.trackedReady + row.simulatedReady;
+      if (row.registered !== room.capacity || ready !== room.capacity)
+        return waiting(requireTracking ? 'WaitingFullTracking' : 'WaitingFullParticipation',
+          `名冊 ${row.registered}/${room.capacity} 席 · ${requireTracking ? '追蹤' : '有效姿態'} ${ready}/${room.capacity} 席`);
+    }
     if (row.venueBeginReady === true)
-      return { state: 'Ready', text: row.registered ? `${row.registered} 席${mr || requireFullTracking ? '追蹤' : '姿態'}就緒` : empty, ready: true };
+      return { state: 'Ready', text: row.registered ? `${row.registered} 席${mr || requireTracking ? '追蹤' : '姿態'}就緒` : empty, ready: true };
     if (details?.state === 'WaitingRevision') return waiting('WaitingRevision', '等待遊戲端同步最新設定與名冊');
     if (details?.state === 'WaitingProfile') return waiting('WaitingProfile', '等待支援 Quest 3 MR 的遊戲來源');
     if (details?.state === 'WaitingPlayers' && Array.isArray(details.waitingSeats) && details.waitingSeats.length <= row.registered
@@ -296,9 +300,9 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     }
     return waiting('Unavailable', '開場條件尚未確認');
   }
-  function venueReady(target, action, requireFullTracking = false) {
-    if (action === 'Begin') return requireFullTracking
-      ? target.roomIds.every(room => venueBegin(target, room, true).ready)
+  function venueReady(target, action, policy = 'normal') {
+    if (action === 'Begin') return policy !== 'normal'
+      ? target.roomIds.every(room => venueBegin(target, room, policy).ready)
       : venueBegin(target, target.roomIds[0]).ready;
     if (!active || failed) return false;
     const { rooms, sessions } = getState();

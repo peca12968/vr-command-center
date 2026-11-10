@@ -4,7 +4,7 @@ const { randomUUID } = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 
-module.exports = async ({ context, api, tokens, base, root, screenshots, check, captureErrors }) => {
+module.exports = async ({ context, api, tokens, base, root, screenshots, check, captureErrors, participationOnly }) => {
   const rooms = [1, 2, 3, 4, 5];
   const page = await context.newPage();
   captureErrors(page);
@@ -87,8 +87,84 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await page.locator('#login-form button').click();
     await page.locator('#rooms .room-card').first().waitFor();
   }
+  async function checkParticipation(vr, mr) {
+    const option = page.locator('#venue-full-participation');
+    for (const mode of ['Linked', 'Mixed']) {
+      const sessions = mode === 'Linked' ? [await api('/sessions', 'POST',
+        { missionId: vr.id, mode: 'Linked', roomIds: rooms }, 'Master', 201)]
+        : (await api('/sessions/independent-set', 'POST', { rooms: rooms.map(roomId => ({ roomId,
+          missionId: [2, 4].includes(roomId) ? mr.id : vr.id })) }, 'Master', 201, undefined, randomUUID())).sessions;
+      for (const session of sessions) active.add(session.id);
+      const forRoom = room => sessions.find(session => session.roomIds.includes(room));
+      for (const room of rooms)
+        for (let seat = 1; seat <= (room === 5 ? 4 : 5); seat++) await admit(forRoom(room).id, room, seat);
+      const sources = [];
+      for (const session of sessions) sources.push(await publisher(session));
+      const targets = await getFences();
+      const payload = { action: 'Begin', targets, requireFullParticipation: true };
+      for (const source of sources) source.publish(source.snapshot, false);
+      const missing = await api('/venue/phase', 'POST', payload, 'Master', 409, undefined, randomUUID());
+      check(missing.code === 'venue-begin-not-ready' && missing.roomIds.join() === '5'
+        && (await api('/sessions')).every(session => session.state === 'Preparing'),
+      `${mode} full participation rejects the original 24-seat roster atomically`);
+      await api('/venue/phase', 'POST', { ...payload, requireFullTracking: true }, 'Master', 400, undefined, randomUUID());
+      await api('/venue/phase', 'POST', { ...payload, action: 'End' }, 'Master', 400, undefined, randomUUID());
+      await login('Master');
+      assert.equal(await option.isChecked(), false);
+      await option.check();
+      await publishUntil(sources, false, async () => (await status(5).getAttribute('data-begin-state')) === 'WaitingFullParticipation');
+      check(await start.isDisabled() && (await status(5).innerText()).includes('名冊 4/5 席 · 有效姿態 4/5 席'),
+        `${mode} operator sees the missing seat before sending Begin`);
+      await page.locator('#venue-phase').screenshot({ path: path.join(screenshots, `full-participation-${mode.toLowerCase()}-waiting.png`) });
+      const last = sources.find(source => source.route === `/sessions/${forRoom(5).id}`);
+      last.snapshot = await admit(forRoom(5).id, 5, 5);
+      await page.locator('#refresh').click();
+      await publishUntil(sources, false, async () => (await status(5).getAttribute('data-begin-state')) === 'WaitingFullParticipation', true);
+      check(await start.isDisabled() && (await status(5).innerText()).includes('名冊 5/5 席 · 有效姿態 4/5 席'),
+        `${mode} full roster still cannot start when a registered seat has no effective pose`);
+      const readyFences = await getFences();
+      for (const source of sources) source.publish(source.snapshot, false, true);
+      const disconnected = await api('/venue/phase', 'POST', { ...payload, targets: readyFences }, 'Master', 409, undefined, randomUUID());
+      check(disconnected.code === 'venue-begin-not-ready' && disconnected.roomIds.join() === '5'
+        && (await api('/sessions')).every(session => session.state === 'Preparing'), `${mode} server identifies only the room with a disconnected seat`);
+      await publishUntil(sources, false, () => start.isEnabled());
+      const receiptPromise = page.waitForResponse(response => response.url().endsWith('/api/venue/phase') && response.request().method() === 'POST');
+      const confirmation = page.waitForEvent('dialog').then(async dialog => { assert.match(dialog.message(), /25 席已連線且姿態有效/); await dialog.accept(); });
+      await start.click(); await confirmation;
+      const response = await receiptPromise, receipt = await response.json(), body = response.request().postDataJSON();
+      const requestId = (await response.request().allHeaders())['idempotency-key'];
+      check(response.status() === 200 && body.requireFullParticipation === true && !body.requireFullTracking
+        && receipt.requireFullParticipation === true && receipt.sessions.length === sessions.length,
+      `${mode} accepts the optional 25-seat policy with both simulated and tracked sources`);
+      const retry = await api('/venue/phase', 'POST', body, 'Master', 200, undefined, requestId);
+      await api('/venue/phase', 'POST', { ...body, requireFullParticipation: false }, 'Master', 409, undefined, requestId);
+      for (const { sessionId, appliedAtSequence } of receipt.sessions) {
+        const fence = readyFences.find(fence => fence.sessionId === sessionId);
+        const history = await api(`/sessions/${sessionId}/events`);
+        const event = history.find(entry => entry.sequence === appliedAtSequence);
+        const proof = event.venue.participationFrame;
+        const frame = await api(`/sessions/${sessionId}/world/frames/${proof.worldSequence}`);
+        assert.equal(appliedAtSequence, fence.sessionSequence + 1);
+        assert.equal(event.venue.requireFullParticipation, true);
+        assert.equal(event.venue.trackingFrame, undefined);
+        assert.equal(proof.streamId, sources.find(source => source.route === `/sessions/${sessionId}`).streamId);
+        assert.equal(frame.packet.observedSequence, fence.sessionSequence);
+        assert.equal(frame.packet.elapsedMilliseconds, proof.elapsedMilliseconds);
+        assert.equal(frame.packet.frame.phase, 'Preparing');
+        assert.ok(frame.packet.frame.players.every(player => player.connected && ['Simulated', 'Tracked'].includes(player.rig.kind)));
+      }
+      check(retry.duplicate && retry.requireFullParticipation && JSON.stringify(retry.sessions) === JSON.stringify(receipt.sessions),
+        `${mode} retry preserves the original policy and the exact accepted Preparing frames`);
+      for (const { id } of sessions) {
+        await api(`/sessions/${id}/commands`, 'POST', { commandId: randomUUID(), action: 'End' });
+        active.delete(id);
+      }
+    }
+  }
   try {
     const vr = await mission('VR'), mr = await mission('MR');
+    await checkParticipation(vr, mr);
+    if (participationOnly) return;
     let originalLinked;
     for (const mode of ['Linked', 'Mixed']) {
       const sessions = mode === 'Linked' ? [await api('/sessions', 'POST',

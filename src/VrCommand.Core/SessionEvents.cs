@@ -13,7 +13,9 @@ public record VenueTransition(long PhaseSinceSequence, int TargetCount,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? EnvironmentSinceSequence = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? EnemiesSinceSequence = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool RequireFullTracking = false,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTrackingFrame? TrackingFrame = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTrackingFrame? TrackingFrame = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool RequireFullParticipation = false,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTrackingFrame? ParticipationFrame = null);
 public record SessionEvent(int SchemaVersion, Guid EventId, Guid SessionId, long Sequence,
     DateTimeOffset RecordedAtUtc, SessionEventKind Kind, JsonElement Payload, OperatorIdentity? Actor = null,
     Guid? RequestId = null, [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTransition? Venue = null)
@@ -176,14 +178,18 @@ internal static class SessionProjection
 
     private static bool ValidVenueCommand(ControlCommand command, long sequence, VenueTransition venue, SessionView? session)
     {
+        var fullRoster = venue.RequireFullTracking || venue.RequireFullParticipation;
         if (command.Action != ControlAction.SetEnvironment && venue.EnvironmentSinceSequence is not null
             || command.Action != ControlAction.SetEnemies && venue.EnemiesSinceSequence is not null
-            || venue.RequireFullTracking && command.Action != ControlAction.Begin
-            || venue.TrackingFrame is { } frame && (!venue.RequireFullTracking || frame.WorldSequence < 1
+            || fullRoster && command.Action != ControlAction.Begin
+            || venue.RequireFullTracking && venue.RequireFullParticipation
+            || venue.TrackingFrame is not null && !venue.RequireFullTracking
+            || venue.RequireFullParticipation != (venue.ParticipationFrame is not null)
+            || (venue.TrackingFrame ?? venue.ParticipationFrame) is { } frame && (frame.WorldSequence < 1
                 || frame.ElapsedMilliseconds < 0 || frame.StreamId == Guid.Empty || session?.CombatStream?.StreamId != frame.StreamId)) return false;
         return command.Action switch
         {
-            ControlAction.Begin => command.ExpectedSequence == sequence - 1 && (!venue.RequireFullTracking || session is not null
+            ControlAction.Begin => command.ExpectedSequence == sequence - 1 && (!fullRoster || session is not null
                 && session.RoomIds.All(room => session.Players.Count(player => player.RoomId == room) == SessionManager.PlayersPerRoom)),
             ControlAction.Pause or ControlAction.Resume or ControlAction.End => command.ExpectedSequence is null && command.ClockExpiration is null,
             ControlAction.SetEnvironment => command.ExpectedSequence is null && venue.EnvironmentSinceSequence is > 0

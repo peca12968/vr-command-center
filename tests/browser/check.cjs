@@ -56,6 +56,12 @@ async function main() {
     diagnosticPage = page;
     function captureErrors(target) { target.on('pageerror', error => browserErrors.push(error.message)); target.on('console', message => { if (/Content Security Policy|violates.*directive/i.test(message.text())) browserErrors.push(message.text()); }); }
     captureErrors(page);
+    if (process.argv.includes('--full-participation-only')) {
+      await require('./full-tracking-begin-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors, participationOnly: true });
+      check(browserErrors.length === 0, 'Participation Begin has no uncaught browser or policy errors');
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed' }, null, 2));
+      console.log(`PASS: ${checks} focused participation checks. Screenshots: ${screenshots}`); return;
+    }
     if (process.argv.includes('--live-watch-only')) {
       await page.goto(base + '/console/');
       await page.locator('#login-key').fill(tokens.Master);

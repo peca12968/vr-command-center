@@ -139,9 +139,9 @@ internal static class VenuePhaseChecks
             Reject<VenueBeginNotReadyException>(() => manager.ExecuteVenuePhase(ControlAction.Begin, trackingTargets, trackingKey, master, evidence, requireFullTracking: true),
                 "A linked venue with one room missing tracked evidence cannot start under the full tracking policy");
             check(manager.Get(session.Id).State == SessionState.Preparing, "A rejected full-tracking Begin appends no phase event");
-            evidence[session.Id] = evidence[session.Id] with { FullyTrackedRooms = roomIds };
+            evidence[session.Id] = evidence[session.Id] with { FullRooms = roomIds };
             var wrongSource = new Dictionary<Guid, VenuePhaseWitness> { [session.Id] = evidence[session.Id] with
-                { TrackingFrame = trackingFrame with { StreamId = Guid.NewGuid() } } };
+                { BeginFrame = trackingFrame with { StreamId = Guid.NewGuid() } } };
             Reject<VenueBeginNotReadyException>(() => manager.ExecuteVenuePhase(ControlAction.Begin, trackingTargets, trackingKey, master, wrongSource,
                 requireFullTracking: true), "Guarded Begin rejects a frame from a different game source");
             trackedBegin = manager.ExecuteVenuePhase(ControlAction.Begin, trackingTargets, trackingKey, master, evidence, requireFullTracking: true);
@@ -172,6 +172,42 @@ internal static class VenuePhaseChecks
             var legacy = manager.ExecuteVenuePhase(ControlAction.Begin, trackingTargets, trackingKey, master, requireFullTracking: true);
             check(legacy.Duplicate && legacy.RequireFullTracking && manager.ReadVenueTrackingBegin(legacy.Sessions.Single().SessionId, master) is null,
                 "Existing guarded Begin events retain their policy without inventing a witness frame");
+        }
+        var participationData = Path.Combine(directory, "venue-participation");
+        var participationKey = Guid.NewGuid();
+        VenuePhaseFence[] participationTargets;
+        var participationFrame = new VenueTrackingFrame(Guid.NewGuid(), 7, 600);
+        using (var store = new SqliteSessionEventStore(participationData))
+        {
+            var manager = new SessionManager(store);
+            var roomIds = Enumerable.Range(1, SessionManager.RoomCount).ToArray();
+            var session = manager.Create(SessionMode.Linked, roomIds, mission, master);
+            manager.OpenStream(session.Id, new(participationFrame.StreamId, CombatOrigin.Simulation),
+                new OperatorIdentity("venue-participation-source", OperatorRole.GameServer));
+            foreach (var room in roomIds)
+                for (var seat = 0; seat < SessionManager.PlayersPerRoom; seat++)
+                    manager.Join(session.Id, Guid.NewGuid(), $"Seat {room}/{seat}", room, HeadsetKind.Quest3, master);
+            participationTargets = Fences(manager.ReadVenuePhase(master).Begin);
+            var target = participationTargets.Single();
+            var witness = new VenuePhaseWitness(target.PhaseSinceSequence, target.SessionSequence!.Value, true, roomIds, participationFrame);
+            var evidence = new Dictionary<Guid, VenuePhaseWitness> { [session.Id] = witness with { BeginFrame = null } };
+            Reject<VenueBeginNotReadyException>(() => manager.ExecuteVenuePhase(ControlAction.Begin, participationTargets, participationKey, master,
+                evidence, requireFullParticipation: true), "Full participation requires an exact saved Preparing frame");
+            evidence[session.Id] = witness;
+            var receipt = manager.ExecuteVenuePhase(ControlAction.Begin, participationTargets, participationKey, master, evidence, requireFullParticipation: true);
+            check(receipt.RequireFullParticipation && !receipt.RequireFullTracking && manager.ReadVenueTrackingBegin(session.Id, master) is null,
+                "Full participation starts the witnessed venue without recording a full-tracking claim");
+        }
+        using (var store = new SqliteSessionEventStore(participationData))
+        {
+            var manager = new SessionManager(store);
+            var retry = manager.ExecuteVenuePhase(ControlAction.Begin, participationTargets, participationKey, master, requireFullParticipation: true);
+            var appliedBegin = retry.Sessions.Single();
+            check(retry.Duplicate && retry.RequireFullParticipation && manager.Get(appliedBegin.SessionId).State == SessionState.Running
+                && manager.Events(appliedBegin.SessionId).Single(entry => entry.Sequence == appliedBegin.AppliedAtSequence).Venue?.ParticipationFrame == participationFrame,
+                "Full participation policy and frame survive a management restart");
+            Reject<InvalidOperationException>(() => manager.ExecuteVenuePhase(ControlAction.Begin, participationTargets, participationKey, master),
+                "A retry cannot weaken the original participation policy after reopening SQLite");
         }
         var beginId = Guid.NewGuid();
         var reportSource = new OperatorIdentity("venue-report-source", OperatorRole.GameServer);

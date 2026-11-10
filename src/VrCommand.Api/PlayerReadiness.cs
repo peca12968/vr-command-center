@@ -71,37 +71,40 @@ public sealed partial class WorldRecordings
     }
 
     public VenuePhaseReceipt ExecuteVenuePhase(ControlAction action, VenuePhaseFence?[]? fences, Guid requestId, OperatorIdentity actor,
-        VenueClimate? climate = null, VenueEnemyPolicy? enemyPolicy = null, bool requireFullTracking = false)
+        VenueClimate? climate = null, VenueEnemyPolicy? enemyPolicy = null, bool requireFullTracking = false, bool requireFullParticipation = false)
     {
         if (action is not (ControlAction.Begin or ControlAction.Resume))
             return manager.ExecuteVenuePhase(action, fences, requestId, actor, climate: climate, enemyPolicy: enemyPolicy,
-                requireFullTracking: requireFullTracking);
+                requireFullTracking: requireFullTracking, requireFullParticipation: requireFullParticipation);
         lock (gate)
         {
             var plan = manager.ReadVenuePhase(actor);
             var begin = action == ControlAction.Begin;
+            var requireFullRoster = requireFullTracking || requireFullParticipation;
             var expected = (fences ?? []).OfType<VenuePhaseFence>().ToHashSet();
             var reports = new List<(SessionReadiness Report, VenuePhaseWitness Witness)>();
             foreach (var target in (begin ? plan.Begin : plan.Resume)
                 .Where(target => expected.Contains(new(target.SessionId, target.PhaseSinceSequence, target.SessionSequence))))
             {
-                var (report, _, phase, beginState, _, _, _, _, trackingFrame, _) = ReadReadinessSnapshot(target.SessionId, actor,
-                    includeTrackingFrame: requireFullTracking);
-                if (begin ? beginState == "Ready" : phase is { Action: ControlAction.Pause, WorldSequence: not null }
+                var (report, _, phase, beginState, _, _, _, _, beginFrame, _) = ReadReadinessSnapshot(target.SessionId, actor,
+                    includeBeginFrame: requireFullRoster);
+                if (begin ? beginState == "Ready" || requireFullParticipation && beginState == "WaitingPlayers"
+                    : phase is { Action: ControlAction.Pause, WorldSequence: not null }
                     && phase.AppliedAtSequence == target.PhaseSinceSequence)
                 {
-                    var trackedRooms = requireFullTracking ? report.Players.GroupBy(player => player.RoomId)
-                        .Where(room => room.Count() == SessionManager.PlayersPerRoom && room.All(player => ReadyToBegin(player, trackedRequired: true)))
+                    var trackedRequired = requireFullTracking || report.MrStartState is not null;
+                    var fullRooms = requireFullRoster ? report.Players.GroupBy(player => player.RoomId)
+                        .Where(room => room.Count() == SessionManager.PlayersPerRoom && room.All(player => ReadyToBegin(player, trackedRequired)))
                         .Select(room => room.Key).ToArray() : null;
                     reports.Add((report, new(target.PhaseSinceSequence, report.SessionSequence, begin || report.MrResumeState == "Ready",
-                        trackedRooms, trackingFrame)));
+                        fullRooms, beginFrame)));
                 }
             }
             var now = readinessClock.GetUtcNow();
             var ready = reports.Where(row => row.Report.CapturedAtUtc is { } captured
                 && (now - captured).TotalMilliseconds is >= -FutureSourceToleranceMilliseconds and <= MaxSourceAgeMilliseconds)
                 .ToDictionary(row => row.Report.SessionId, row => row.Witness);
-            return manager.ExecuteVenuePhase(action, fences, requestId, actor, ready, climate, enemyPolicy, requireFullTracking);
+            return manager.ExecuteVenuePhase(action, fences, requestId, actor, ready, climate, enemyPolicy, requireFullTracking, requireFullParticipation);
         }
     }
 
@@ -160,8 +163,8 @@ public sealed partial class WorldRecordings
 
     private (SessionReadiness Report, RoomMissionTime? Clock, RoomVenuePhase? VenuePhase, string? BeginState,
         RoomEnvironmentEvidence? Environment, Dictionary<int, RoomEnemiesEvidence>? EnemyRooms, ConnectionEndpoint? Endpoint,
-        bool VrParticipationObserved, VenueTrackingFrame? TrackingFrame, bool VenueTrackingObserved)
-        ReadReadinessSnapshot(Guid id, OperatorIdentity actor, bool includeRoomDetails = false, bool includeTrackingFrame = false)
+        bool VrParticipationObserved, VenueTrackingFrame? BeginFrame, bool VenueTrackingObserved)
+        ReadReadinessSnapshot(Guid id, OperatorIdentity actor, bool includeRoomDetails = false, bool includeBeginFrame = false)
     {
         RequireReadinessActor(actor);
         lock (gate)
@@ -258,13 +261,13 @@ public sealed partial class WorldRecordings
             var endpoint = includeRoomDetails && current.State != SessionState.Ended ? EndpointRow(current) : null;
             var vrParticipationObserved = confirmed && current.State is SessionState.Preparing or SessionState.Running
                 && current.Environment.Mode == ExperienceMode.VR;
-            var trackingFrame = includeTrackingFrame && beginState == "Ready" && frame is not null
+            var beginFrame = includeBeginFrame && (beginState is "Ready" or "WaitingPlayers") && frame is not null
                 && Guid.TryParseExact(info?.Header.streamId, "D", out var sourceId)
                 ? new VenueTrackingFrame(sourceId, frame.Packet.sequence, frame.Packet.elapsedMilliseconds) : null;
             var venueTrackingObserved = includeRoomDetails && actor.Role == OperatorRole.Master && current.State == SessionState.Running
                 && confirmed && (!tracking || mrState is "Ready" or "WaitingPlayers")
                 && observed?.Players.Length == players.Length && players.All(player => player.State != "AwaitingAdmission");
-            return (report, clock, venuePhase, beginState, environmentEvidence, enemyRooms, endpoint, vrParticipationObserved, trackingFrame,
+            return (report, clock, venuePhase, beginState, environmentEvidence, enemyRooms, endpoint, vrParticipationObserved, beginFrame,
                 venueTrackingObserved);
         }
     }
