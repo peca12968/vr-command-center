@@ -2,11 +2,26 @@
 
 ## 遊戲版本相容性
 
-遊戲 0.48.1 使用 NGO 協定 31。Windows 遊戲伺服器、Windows 玩家與 Quest APK 請使用同版。升級時先結束現有場次，再一併更新遊戲伺服器及玩家端。API 0.31.0 供應玩家票券及世界回放，MR 伺服器須搭配支援 `SetRoomAlignment` 的管理服務。 [鎖定房間校正檔](QUEST3.md#啟動-mr-伺服器前鎖定校正檔)
+遊戲 0.49.0 使用 NGO 協定 31。Windows 遊戲伺服器、Windows 玩家與 Quest APK 請使用同版。升級時先結束現有場次，再一併更新遊戲伺服器及玩家端。API 0.31.0 供應玩家票券及世界回放，MR 伺服器須搭配支援 `SetRoomAlignment` 的管理服務。 [鎖定房間校正檔](QUEST3.md#啟動-mr-伺服器前鎖定校正檔)
 
 新版以二進位 UUID、打包整數與欄位旗標傳送角色狀態。連線房間同步完整角色清單，以完整浮點精度傳送位置、面向與射擊向量。
 
 在原生 Windows 驗證中，0.46.0 玩家攜有效票券會在入場核准前遭 0.47.0 伺服器拒絕。同一張票券由 0.47.0 使用時成功入場並取得戰績。 [版本與流量驗證](PROGRESS.md#2026-11-09-壓縮即時角色同步)
+
+### 發送前離線核對交付套件
+
+先完整解壓三個 Windows 套件，把 Quest 開發 APK 與同名的原始 `.receipt.json` 放在一起。使用 Unity 的 Android SDK Build Tools 36.0.0 及 OpenJDK，在儲存庫執行下列命令並替換路徑。
+
+```powershell
+python scripts/verify-venue-release.py `
+  --control 'C:\Delivery\VRCommand-ControlServer' `
+  --server 'C:\Delivery\VRCommand-GameServer' `
+  --player 'C:\Delivery\VRCommand-Player' `
+  --quest-apk 'C:\Delivery\vr-command-quest-0.49.0-arm64-debug.apk' `
+  --sdk 'F:\Unity\AndroidPlayer\SDK' --jdk 'F:\Unity\AndroidPlayer\OpenJDK'
+```
+
+通過時輸出一行 `verified: true` 的 JSON，列出管理版本、Windows 共同遊戲檔案數，以及 Quest 版本、雜湊和簽章憑證摘要。工具逐檔核對 Windows 清單與兩包的共用遊戲檔案，再比對 Quest 與 Windows 的建置來源及場景網路識別。APK 會另查驗套件 ID、ARM64、OpenXR 函式庫及 v2 簽章。若拒絕，請保留錯誤與原檔，重新取得配套交付物後再核對。這項唯讀檢查的範圍是交付物一致性，實際連線及頭盔運行請依後文驗收。
 
 ## 分開啟動程式
 
