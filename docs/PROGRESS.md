@@ -1,5 +1,14 @@
 # 開發進度
 
+## 2026-11-10 遊戲主機的 HTTPS 與 WSS 管理連線
+
+- Windows 0.50.1 及啟動器 1.11 可透過個別場次 CLI 連線到管理站台。設定用管理員提供的葉憑證 SHA-256 核對 HTTPS 管理請求及 WSS 世界串流。原生遊戲的 HTTP 管理請求拒絕轉址。 [設定與套件](WINDOWS_SERVER_PACKAGE.md#遊戲主機連到遠端管理-https)
+- 原生候選 `run-ded7fd8ae2ac4237873a2e6dbfbe9379` 已建立 HTTPS 戰鬥來源，世界串流未就緒。候選 Mono 程式庫的 `ClientWebSocket` 保存憑證回呼，但實際握手路徑沒有呼叫它。改用獨立 TLS 串流完成有界 WebSocket 升級，再沿用框架的訊框傳輸。保留原候選與失敗報告。 [WebSocket 升級協定](https://www.rfc-editor.org/rfc/rfc6455#section-4.1)
+- 最終解壓場 `run-7fc08d164b724dbf808c9cf81f94bf74` 退出碼 0、33 項通過。同台 Windows 使用實際區網 IPv4、測試 CA 及管理包 0.31.108。三種不合規指紋在啟動原生程序前遭拒。成功場用 HTTPS 管理與 WSS 上傳，HTTPS 房控配票讓一席 Windows 模擬玩家入場，第 26 格即時與封存內容相符。尾界 31 格、0 筆戰鬥事件，原玩家戰績及伺服器確認各一。 [加密場報告](../artifacts/control-https-checks/run-7fc08d164b724dbf808c9cf81f94bf74/checks.json)
+- 原有本機 HTTP 場 `run-8f65f3c25f6445d685f1d188e7ea580e` 退出碼 0、137 項通過。五房獨立與一個五房合併場共 591 格完整回放、10 份原玩家結果及 10 份 CSV，管理活動場次為零，隔離程序均清理。 [本機場報告](../artifacts/server-package-checks/run-8f65f3c25f6445d685f1d188e7ea580e/checks.json)
+- Windows 玩家、Windows 伺服器與 Quest 0.50.1／66 使用同一來源 `9ae1da50d4fb74875add4c6d3bcef20716528e375e892b8ae279bf42d70ad8ca` 及原網路識別。發行工具核對 Windows 兩包 323 份共同檔案與 Quest ARM64、SDK 32／35、APK v2 簽章。首次兩次核對因缺少發行收據或只放 Unity 原收據而拒絕，補齊發行收據後通過。 [發行報告](../artifacts/venue-release-game-0501-https.json)
+- Release 零警告、1,059 項核心、97 項世界串流、273 項 Unity EditMode 及 10 項伺服器封裝邊界通過。精確來源 `f8ecc23e8c01db67404d8147293cc5a7b8bdb32d`。GitHub Actions job `129913798215` 因帳務或支出上限未啟動。實際跨機、實體頭盔與廠商硬體待場館驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42840408793)
+
 ## 2026-11-10 Windows 管理包的場館 HTTPS
 
 - 啟動器讀取私人實例內的 `control-https.json` 與管理員提供的 PFX。Kestrel 在指定場館 IPv4 監聽 HTTPS，原管理 HTTP 留在 `127.0.0.1` 給同機遊戲伺服器。舊實例可照原方式啟動。HTTPS 模式拒絕外部 HTTP 設定，並忽略繼承的額外 Kestrel 端點。 [場館設定與套件](WINDOWS_CONTROL_PACKAGE.md#啟用場館-https)

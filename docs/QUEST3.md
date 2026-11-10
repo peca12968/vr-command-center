@@ -1,5 +1,7 @@
 # Quest 3 接入與工具鏈
 
+2026-11-10 Quest 3 開發 APK 更新至 0.50.1／66。`vr-command-quest-0.50.1-arm64-debug.apk` 為 61,026,698 bytes，SHA-256 `0d0c4ea6983247eecd033aaf4cd52f52a7698ecb9b2f2ba468d1d73acf71f221`。ARM64、最低 SDK 32、目標 SDK 35、APK v2 開發簽章及同版 Windows 的遊戲來源與網路識別均通過離線核對。 [驗證紀錄](PROGRESS.md#2026-11-10-遊戲主機的-https-與-wss-管理連線)
+
 2026-11-10 Quest 3 開發 APK 為 0.50.0／65，檔案 `vr-command-quest-0.50.0-arm64-debug.apk` 為 60,997,166 bytes，SHA-256 `0cb23ff041b1787e24a694b0ae9b8184764f150740710876c8cceef70d9f1bba`。與同版 Windows 玩家和伺服器使用相同的遊戲來源及場景網路識別。已核對 ARM64、最低 SDK 32、目標 SDK 35 及 APK v2 開發簽章。頭盔安裝及現場 MR 驗收待實機。 [建置紀錄](PROGRESS.md#2026-11-10-合併場分房敵軍策略)
 
 ## 開場前從頭盔執行 UDP 預檢
@@ -312,7 +314,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.z
 
 #### 用裝置清單部署 25 席
 
-先在各台 Quest 3 安裝同一版場館 APK 並授權 USB 偵錯。開發 APK `0.50.0` 的版本代碼為 `65`。建立 25 席清單後，依實體標籤把每個 `REPLACE-*` 換成對應的 ADB 裝置序號。每組房號與席位須對應一個唯一序號，清單只保存在操作電腦。腳本透過 `adb devices` 及 Android 套件管理器讀取授權狀態與已啟用的應用程式版本。 [Android ADB 文件](https://developer.android.com/tools/adb) · [套件管理器版本輸出](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/pm/PackageManagerShellCommand.java#1130)
+先在各台 Quest 3 安裝同一版場館 APK 並授權 USB 偵錯。開發 APK `0.50.1` 的版本代碼為 `66`。建立 25 席清單後，依實體標籤把每個 `REPLACE-*` 換成對應的 ADB 裝置序號。每組房號與席位須對應一個唯一序號，清單只保存在操作電腦。腳本透過 `adb devices` 及 Android 套件管理器讀取授權狀態與已啟用的應用程式版本。 [Android ADB 文件](https://developer.android.com/tools/adb) · [套件管理器版本輸出](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/pm/PackageManagerShellCommand.java#1130)
 
 ```powershell
 $seats = foreach ($room in 1..5) {
@@ -328,14 +330,14 @@ $seats = foreach ($room in 1..5) {
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.zip `
-    -DeviceMap .\device-map.json -ExpectedVersionCode 65 -CheckOnly
+    -DeviceMap .\device-map.json -ExpectedVersionCode 66 -CheckOnly
 ```
 
 正式套用時，先依下方方式設定 `VR_COMMAND_MASTER_KEY`，再加入 `-DeployMappedSeats` 與管理服務網址。所有裝置與票券核對通過後，工具依房號與席位順序寫入設定並請求啟動，使用各台已安裝的 APK。
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.zip `
-    -DeviceMap .\device-map.json -ExpectedVersionCode 65 -DeployMappedSeats `
+    -DeviceMap .\device-map.json -ExpectedVersionCode 66 -DeployMappedSeats `
     -ManagementApi http://127.0.0.1:5081
 ```
 

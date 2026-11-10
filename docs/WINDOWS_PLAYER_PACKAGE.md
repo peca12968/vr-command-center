@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-10 `VRCommand-Player-0.50.1-win-x64.zip` 為 84,771,649 bytes，SHA-256 `ae8af276cf1c18ffc9c5e9303f8e0694b110458cd07833b863f00ebed5ad057b`。解壓核對 330 筆清單，與新版 Windows 遊戲伺服器使用同一份遊戲來源。 [Windows 伺服器包](WINDOWS_SERVER_PACKAGE.md)
+
 2026-11-10 `windows-player-0.50.0.zip` 為 84,766,652 bytes，SHA-256 `6e3830c4f16e126d24ef5105cdd24d033a6c75f2e62f33d0abb2c2d5028b62a0`。解壓核對 330 筆清單，與同版 Windows 遊戲伺服器及 Quest APK 通過發行一致性核對。 [版本相容性](EXTERNAL_CLIENTS.md#遊戲版本相容性)
 
 2026-11-10 `VRCommand-Player-0.49.1-launcher1.7.0-win-x64.zip` 為 84,765,133 bytes，SHA-256 `fa10a1a931d8c43e2b8c3531ea14aad57456299307a5be14e4969c6301c0af74`。解壓核對 330 個清單檔案及 39 項實際啟動器檢查。 [全館封存操作](EXTERNAL_CLIENTS.md#核對全館共用的發行報告)

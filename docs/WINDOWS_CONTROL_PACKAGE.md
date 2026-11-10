@@ -252,7 +252,7 @@ python scripts/check-control-report.py <完整解壓後的VRCommand-ControlServe
 python scripts/check-control-gui.py <完整解壓後的VRCommand-ControlServer> --runtime-root "$env:LOCALAPPDATA/VrCommand/ControlChecks"
 ```
 
-HTTPS 驗證可另帶 `--server-package <完整解壓後的VRCommand-GameServer>`，用一個 Windows 模擬玩家核對房控配票、即時畫格、回放與原戰績回條。憑證由測試在獨立實例產生，信任只限本次測試。
+HTTPS 驗證可另帶 `--server-package <完整解壓後的VRCommand-GameServer>`，用一個 Windows 模擬玩家核對房控配票、即時畫格、回放與原戰績回條。使用啟動器 1.11 及 Windows 0.50.1 時，可加上 `--game-management-https` 一併核對原生伺服器的 HTTPS 管理請求與 WSS 世界上傳。憑證由測試在獨立實例產生，信任只限本次測試。
 
 publish從明確的來源清單建立全新C槽snapshot，在該snapshot增加RID鎖定群組；原repository的NuGet lock不改，原依賴群組／contentHash必須一致。API及其依賴整組publish，self-contained runtimeconfig與必要native DLL明確核對；編譯、輸入與每份輸出雜湊保存於receipt。package拒絕資料庫、journal、票券／角色金鑰設定、額外publication檔案、連結與越界路徑。manifest是完整性清單，並非數位簽章。
 
