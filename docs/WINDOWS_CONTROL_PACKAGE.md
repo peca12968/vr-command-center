@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-11 `VRCommand-ControlServer-0.31.126-clip-statistics-csv-win-x64.zip` 為 53,040,237 bytes，SHA-256 `2e3008df77c222480c49c3c8fe51357eaedf551261f9fec55e5d494193249672`。解壓核對 558 筆清單與 538 個發行檔案。回放可下載目前已核對範圍的片段戰績。 [片段戰績操作](REPORTS.md#下載指定片段的戰績) · [發行核對](../artifacts/venue-release-0.50.4-clip-statistics-csv.json)
+
 2026-11-11 `VRCommand-ControlServer-0.31.125-mission-time-replay-win-x64.zip` 為 53,037,410 bytes，SHA-256 `dd8bc871de4b254e54d029aa0d52af0ecf7d84b77effa918bfb128e643a337ca`。解壓核對 558 筆清單與 538 個發行檔案。獨立房的同批封存回放可按原任務活動時間對齊。 [回放操作](WORLD_RECORDING.md#對齊同批獨立房間的回放) · [發行核對](../artifacts/venue-release-0.50.4-mission-time-replay.json)
 
 2026-11-11 `VRCommand-ControlServer-0.31.124-vr-seat-check-win-x64.zip` 為 53,033,714 bytes，SHA-256 `e5649cabf85f20c13bfa123ad2e6fd8c2c80459e17b6283e429a401241130925`。解壓核對 558 筆清單與 538 個發行檔案。VR 場次可逐席核對原票券、現行入場與公告端點。 [VR 席位操作](EXTERNAL_CLIENTS.md#在管理台核對-vr-單席連線檔) · [發行核對](../artifacts/venue-release-0.50.4-vr-seat-file.json)

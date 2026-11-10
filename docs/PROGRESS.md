@@ -1,5 +1,14 @@
 # 開發進度
 
+## 2026-11-11 片段戰績 CSV 與命中率分子
+
+- 控制台 0.31.126 顯示計入片段命中率的射擊數，並從同一原錄製與選定的起訖格、房間及玩家下載 CSV。報表保留原命中數、分子、實際損耗及保存範圍。未發射時命中率留空，空片段保留範圍列。沿用試算表文字防護與房間權限。舊 0.31.125 解壓包在新增端點回傳 404。 [操作與 API](REPORTS.md#下載指定片段的戰績) · [舊版對照](../artifacts/clip-csv-world-baseline.log)
+- Release 零警告，1,101 項核心、825 項 HTTP、107 項管理包通過。來源與解壓包各通過 113 項世界串流，包含逐欄 CSV、原報表範圍、試算表引號與換行、空片段及拒絕錯誤來源。發行來源 `e2a0bc4c` 的 189 個檔案雜湊相符，29 個與 Git 只差換行。Windows 與 Quest 0.50.4 離線發行核對通過。GitHub Actions job `130145764985` 因帳務或支出上限未啟動。 [世界串流](../artifacts/clip-csv-world-package.log) · [來源與 ZIP](../artifacts/clip-csv-source-validation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42906511353)
+- 首輪 Chromium 與 Windows 原生回放皆在下載位元組的測試比對失敗，原紀錄保留。重跑的 Chromium 讀到的網路事件內容為 0 bytes，而下載檔與同一授權端點的二進位回應皆為 444 bytes，含 BOM 且逐位元組相同。測試改用二進位回應比對，保留原請求範圍與欄位斷言，沿用同一發行包。首輪 Windows 原生場已清理，C／F 215 檔相符。 [首輪瀏覽器](../artifacts/clip-csv-full.log) · [首輪原生](../artifacts/clip-csv-native.log) · [重跑位元組證據](../artifacts/console-clip-csv-binary/world-clip-statistics-byte-readback.json)
+- 使用者關閉擷取視窗後重驗 WinForms 1.17。測試實例路徑已填入，兩次載入點擊都由 `PickerHost.exe` 攔截。隔離測試停在選房及原生啟動前，啟動器、管理服務及測試客戶端皆已清理，C／F 9 檔相符。 [遮擋紀錄](../artifacts/server-gui/run-8a9c26bf32f348e6a442e67e0bf2f069/gui-blocker.json) · [清理與雜湊](../artifacts/clip-csv-first-runs-validation.json)
+- 解壓的 Windows 三包通過 421 項原生檢查。第 3 房控制台下載單人第 115 至 218 格的 CSV。原回放核對 5 次受傷、血量由 100 降至 0，期間未發射，命中率欄位留空。獨立與合併模式各有 25 個同機玩家端，六場共 1,596 格完整回放、50 份戰績、11 份結算 CSV、雙封存及原伺服器確認。活動場次歸零，原生及管理包的 C／F 快照各 220、27 檔相符。跨機玩家、實體頭盔與廠商設備待現場驗收。 [原生驗收](../artifacts/server-package-checks/run-06059370408148f38037e4f7bf6ce1dd/checks.json) · [原回放與 CSV 核對](../artifacts/clip-csv-native-validation.json)
+- 解壓管理包通過 111 項 Node 測試與 918 項 Chromium 回歸。片段匯出覆蓋報表範圍、命中率分子、錯誤回應格式和切換房間時取消舊下載。 [瀏覽器核對](../artifacts/clip-csv-full-validation.json)
+
 ## 2026-11-11 依任務活動時間對齊獨立房回放
 
 - 控制台 0.31.125 的「同批房間回放」可按原擷取時間或任務活動時間對齊。同批獨立房各自封存後，以保存刻數找不晚於基準、差距最多 10 刻的原畫格。遇到暫停等原因讓同一刻有多格時，使用最早保存格。切回基準房會回到原畫格。鏡頭操作尚未確認時，兩種模式都會保留原房。 [操作與 API](WORLD_RECORDING.md#對齊同批獨立房間的回放)

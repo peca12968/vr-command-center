@@ -356,7 +356,10 @@ async function main() {
           assert.equal(csvReply.headers()['cache-control'], 'no-store');
           assert.deepEqual([query.get('fromFrame'), query.get('throughFrame'), query.get('streamId'), query.get('roomId'), query.get('playerId')],
             [String(contextStart.sequence), String(contextEnd.sequence), header.streamId, '3', damaged.playerId]);
-          assert.ok(raw.equals(await csvReply.body()));
+          const binaryReply = await fetch(csvReply.url(), { headers: { Authorization: 'Bearer ' + config.roomReviewKey } });
+          assert.equal(binaryReply.status, 200);
+          assert.equal(raw.subarray(0, 3).toString('hex'), 'efbbbf');
+          assert.ok(raw.equals(Buffer.from(await binaryReply.arrayBuffer())), 'Downloaded CSV differs from the authorized binary response');
           const expectedName = `vr-command-clip-statistics-v1-${replay.sessionId}-${contextStart.sequence}-${contextEnd.sequence}-room-03-player-${damaged.playerId}.csv`;
           assert.equal(file.suggestedFilename(), expectedName);
           assert.deepEqual(readCsv(raw).map(row => [row.playerId, row.reportRoomId, row.matchedShots, row.accuracyPercent]),

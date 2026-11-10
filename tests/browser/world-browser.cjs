@@ -516,7 +516,17 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     const csvResponse = await exportReply, clipDownload = await clipExported;
     const raw = await fs.readFile(await clipDownload.path()), parsed = readCsv(raw);
     const clipQuery = new URL(csvResponse.url()).searchParams;
-    check(csvResponse.status() === 200 && csvResponse.headers()['cache-control'] === 'no-store' && raw.equals(await csvResponse.body())
+    const binaryReply = await fetch(csvResponse.url(), { headers: { Authorization: 'Bearer ' + tokens.Master } });
+    // Chromium's network inspector can report an empty body for this attachment.
+    const binary = Buffer.from(await binaryReply.arrayBuffer());
+    const observed = await csvResponse.body().catch(() => null);
+    await fs.writeFile(path.join(screenshots, 'world-clip-statistics-byte-readback.json'), JSON.stringify({
+      download: raw.length, binary: binary.length, browserResponse: observed?.length ?? null,
+      binaryExact: raw.equals(binary), browserResponseExact: observed ? raw.equals(observed) : null,
+      downloadBom: raw.subarray(0, 3).toString('hex'), browserResponsePrefix: observed?.subarray(0, 3).toString('hex') ?? null
+    }, null, 2));
+    check(csvResponse.status() === 200 && csvResponse.headers()['cache-control'] === 'no-store'
+      && binaryReply.status === 200 && raw.subarray(0, 3).toString('hex') === 'efbbbf' && raw.equals(binary)
       && clipDownload.suggestedFilename() === `vr-command-clip-statistics-v1-${clipReport.sessionId}-${eventSequence}-${clipTail}-room-02.csv`
       && clipQuery.get('streamId') === clipReport.streamId && clipQuery.get('roomId') === '2'
       && parsed.length === clipReport.players.length && parsed.every((row, index) => {
