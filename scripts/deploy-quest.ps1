@@ -694,12 +694,12 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map) {
     for ($index = 0; $index -lt $Map.Count; $index++) {
         $row = $Map[$index]; $device = $devices[$index]
         $connection = $Venue.Connections["$($row.roomId)/$($row.seat)"]
-        if ($connection.Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) {
-            $device.status = 'ticket-expired'; return $report
-        }
         $reportedSerial = Read-QuestDeviceSerial $row.serial
         if (-not $reportedSerial) { $device.status = 'device-identity-unavailable'; return $report }
         if ($reportedSerial -cne $reportedSerials[$index]) { $device.status = 'device-identity-changed'; return $report }
+        if ($connection.Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) {
+            $device.status = 'ticket-expired'; return $report
+        }
         try {
             Set-QuestConnection $row.serial $connection.Ticket.Config $connection.Ticket $connection.Alignment -RequestMixedReality:($null -ne $connection.Alignment)
             $device.filesVerified = $true
