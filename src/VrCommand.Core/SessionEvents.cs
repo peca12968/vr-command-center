@@ -15,7 +15,8 @@ public record VenueTransition(long PhaseSinceSequence, int TargetCount,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool RequireFullTracking = false,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTrackingFrame? TrackingFrame = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool RequireFullParticipation = false,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTrackingFrame? ParticipationFrame = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTrackingFrame? ParticipationFrame = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? RoomEnemiesSinceSequence = null);
 public record SessionEvent(int SchemaVersion, Guid EventId, Guid SessionId, long Sequence,
     DateTimeOffset RecordedAtUtc, SessionEventKind Kind, JsonElement Payload, OperatorIdentity? Actor = null,
     Guid? RequestId = null, [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueTransition? Venue = null)
@@ -193,7 +194,7 @@ internal static class SessionProjection
     {
         var fullRoster = venue.RequireFullTracking || venue.RequireFullParticipation;
         if (command.Action != ControlAction.SetEnvironment && venue.EnvironmentSinceSequence is not null
-            || command.Action != ControlAction.SetEnemies && venue.EnemiesSinceSequence is not null
+            || command.Action != ControlAction.SetEnemies && (venue.EnemiesSinceSequence is not null || venue.RoomEnemiesSinceSequence is not null)
             || fullRoster && command.Action != ControlAction.Begin
             || venue.RequireFullTracking && venue.RequireFullParticipation
             || venue.TrackingFrame is not null && !venue.RequireFullTracking
@@ -208,7 +209,8 @@ internal static class SessionProjection
             ControlAction.SetEnvironment => command.ExpectedSequence is null && venue.EnvironmentSinceSequence is > 0
                 && venue.EnvironmentSinceSequence < sequence && session?.State == SessionState.Running && command.Environment?.Mode == session.Environment.Mode,
             ControlAction.SetEnemies => command.ExpectedSequence is null && venue.EnemiesSinceSequence is > 0
-                && venue.EnemiesSinceSequence < sequence && session?.State == SessionState.Running && command.Enemies?.Count == session.Enemies.Count,
+                && venue.EnemiesSinceSequence < sequence && session?.State == SessionState.Running && command.Enemies?.Count == session.Enemies.Count
+                && (venue.RoomEnemiesSinceSequence is not { } local || local > venue.EnemiesSinceSequence && local < sequence),
             _ => false
         };
     }

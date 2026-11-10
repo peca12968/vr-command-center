@@ -317,7 +317,9 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
         || !Number.isInteger(evidence.targetCount) || evidence.targetCount < 0 || evidence.targetCount > 100
       : !['Clear', 'Rain', 'Fog', 'Storm'].includes(setting.weather) || !['Day', 'Night'].includes(setting.timeOfDay)
         || typeof setting.lightning !== 'boolean') return null;
-    const label = (evidence.venue ? '全館' : '場次') + (enemy ? '敵軍策略' : '環境');
+    const inherited = enemy && typeof evidence.inherited === 'boolean' ? evidence.inherited : undefined;
+    const label = inherited === true ? '本房恢復沿用全場策略' : inherited === false ? '本房敵軍策略'
+      : (evidence.venue ? '全館' : '場次') + (enemy ? '敵軍策略' : '環境');
     const details = enemy ? describeEnemies(setting) + ` · 全場目標 ${evidence.targetCount} 名` : describeClimate(setting);
     const view = roomVenueSettingView(row, setting, elapsed, failed, label, details);
     if (!view) return null;
@@ -326,7 +328,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
       && Number.isInteger(counts.alive) && counts.alive >= 0 && counts.alive <= counts.present ? counts : null;
     const target = view.applied && (!enemy || population) && typeof evidence.streamId === 'string' && evidence.streamId === session.combatStream?.streamId
       ? { mode: 'replay', sessionId: session.id, roomId: room.id, streamId: evidence.streamId, complete: false,
-        throughSequence: setting.worldSequence, witness: { kind, setting, population } }
+        throughSequence: setting.worldSequence, witness: { kind, setting, population, inherited } }
       : null;
     const text = population ? view.text + ` · 本房在場 ${population.present} 名、存活 ${population.alive} 名` : view.text;
     return { ...view, text, venue: evidence.venue, target, setting, population, targetCount: evidence.targetCount };

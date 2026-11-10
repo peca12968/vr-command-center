@@ -508,10 +508,17 @@ function venueTargets(action) {
     && Number.isSafeInteger(row.phaseSinceSequence) && row.phaseSinceSequence > 0 && Array.isArray(row.roomIds)
     && (action !== 'Begin' || (Number.isSafeInteger(row.sessionSequence) && row.sessionSequence >= row.phaseSinceSequence))
     && (action !== 'SetEnvironment' || (Number.isSafeInteger(row.environmentSinceSequence) && row.environmentSinceSequence > 0))
-    && (action !== 'SetEnemies' || (Number.isSafeInteger(row.enemiesSinceSequence) && row.enemiesSinceSequence > 0))
+    && (action !== 'SetEnemies' || (Number.isSafeInteger(row.enemiesSinceSequence) && row.enemiesSinceSequence > 0
+      && (row.roomEnemiesSinceSequence === undefined || (Number.isSafeInteger(row.roomEnemiesSinceSequence)
+        && row.roomEnemiesSinceSequence > row.enemiesSinceSequence))
+      && (row.roomEnemyOverrideRoomIds === undefined || (Array.isArray(row.roomEnemyOverrideRoomIds)
+        && row.roomEnemyOverrideRoomIds.length <= 5 && row.roomEnemyOverrideRoomIds.every(id => row.roomIds.includes(id))))))
     && row.roomIds.length > 0 && row.roomIds.every(id => Number.isInteger(id) && id >= 1 && id <= 5)) ? rows : [];
 }
 function venueRoomText(targets) { return targets.flatMap(row => row.roomIds).sort((a, b) => a - b).join('、'); }
+function venueEnemyOverrides(targets) {
+  return targets.flatMap(row => row.roomEnemyOverrideRoomIds ?? []).sort((a, b) => a - b).join('、');
+}
 function venueClimateText({ weather, timeOfDay, lightning }) {
   return `${weatherNames[weather]} · ${timeOfDay === 'Night' ? '夜晚' : '白天'} · ${lightning ? '閃電開啟' : '閃電關閉'}`;
 }
@@ -649,7 +656,9 @@ function applyVenuePermissions() {
     const targets = venueTargets(action);
     $(panel).hidden = !master();
     $(panel + '-fields').disabled = locked || !targets.length;
-    const targetText = targets.length ? `適用房間 ${venueRoomText(targets)} · ${targets.length} 個執行中場次。` : '等待執行中場次。';
+    const overridden = action === 'SetEnemies' ? venueEnemyOverrides(targets) : '';
+    const targetText = targets.length ? `適用房間 ${venueRoomText(targets)} · ${targets.length} 個執行中場次。`
+      + (overridden ? `套用時會清除房間 ${overridden} 的分房策略。` : '') : '等待執行中場次。';
     if ($(panel + '-targets').textContent !== targetText) $(panel + '-targets').textContent = targetText;
   }
   renderVenueSettingBatch(locked, 'environment');
@@ -686,13 +695,15 @@ async function venuePhase(action, { environment, enemyPolicy } = {}) {
     || (['Begin', 'Resume'].includes(action) && targets.some(target => !roomReadiness.venueReady(target, action, policy)))) return;
   const verb = { Begin: '開始', Pause: '暫停', Resume: '繼續', End: '結束', SetEnvironment: '設定環境給', SetEnemies: '設定敵軍策略給' }[action];
   const details = environment ? venueClimateText(environment) : enemyPolicy ? venueEnemyText(enemyPolicy) : '';
+  const overridden = enemyPolicy ? venueEnemyOverrides(targets) : '';
   const opening = { normal: '', tracking: '\n須全館 25 席追蹤就緒。', participation: '\n須全館 25 席已連線且姿態有效。' }[policy];
   const message = `${verb}房間 ${venueRoomText(targets)} 的 ${targets.length} 個場次？`
-    + opening + (details ? '\n' + details : '');
+    + opening + (details ? '\n' + details : '') + (overridden ? `\n套用時會清除房間 ${overridden} 的分房策略。` : '');
   if (!confirm(action === 'End' ? message + '\n包含尚未開始的準備場次。結束後無法繼續原場次。' : message)) return;
   state.pending = { kind: 'venue-phase', path: '/venue/phase', method: 'POST', requestId: uuid(),
-    body: { action, targets: targets.map(({ sessionId, phaseSinceSequence, sessionSequence, environmentSinceSequence, enemiesSinceSequence }) =>
-      ({ sessionId, phaseSinceSequence, sessionSequence, environmentSinceSequence, enemiesSinceSequence })), environment, enemyPolicy,
+    body: { action, targets: targets.map(({ sessionId, phaseSinceSequence, sessionSequence, environmentSinceSequence, enemiesSinceSequence,
+      roomEnemiesSinceSequence }) => ({ sessionId, phaseSinceSequence, sessionSequence, environmentSinceSequence, enemiesSinceSequence,
+      roomEnemiesSinceSequence })), environment, enemyPolicy,
       ...(policy === 'tracking' ? { requireFullTracking: true } : {}),
       ...(policy === 'participation' ? { requireFullParticipation: true } : {}) } };
   await sendPending();

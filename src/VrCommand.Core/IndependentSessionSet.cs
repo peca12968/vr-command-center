@@ -60,10 +60,8 @@ public sealed partial class SessionManager
             store.AppendBatch(entries);
             for (var index = 0; index < entries.Length; index++)
             {
-                var view = views[index];
-                sessions.Add(view.Id, new(view, [entries[index]], [], new CombatLedger(), [view], view.Sequence, view.Sequence, view.Sequence));
+                RememberCommitted(null, entries[index], views[index], new CombatLedger(), []);
             }
-            requests.Add(requestId, entries[0]);
             independentSets.Add(requestId, ids);
             return new(views.Select(Snapshot).ToArray(), false);
         }

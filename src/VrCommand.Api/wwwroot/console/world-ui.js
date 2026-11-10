@@ -602,7 +602,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     }
   }
   function matchesWitness(packet, target, header) {
-    const { kind, setting, population, appliedAtSequence, elapsedMilliseconds, roomIds } = target.witness;
+    const { kind, setting, population, appliedAtSequence, elapsedMilliseconds, roomIds, inherited } = target.witness;
     if (kind === 'pose-interruption') {
       const { observedSequence, playerIds } = target.witness;
       const frame = packet.frame;
@@ -638,7 +638,9 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     if (kind === 'environment') return packet.weather === setting.weather && packet.frame.night === (setting.timeOfDay === 'Night')
       && packet.lightning === setting.lightning;
     const enemies = packet.frame.enemies.filter(enemy => enemy.roomId === target.roomId);
-    const policy = packet.frame.roomEnemyPolicies?.find(row => row.roomId === target.roomId) ?? packet.frame;
+    const local = packet.frame.roomEnemyPolicies?.find(row => row.roomId === target.roomId);
+    if (typeof inherited === 'boolean' && inherited !== !local) return false;
+    const policy = local ?? packet.frame;
     return policy.behavior === setting.behavior && policy.autoAttack === setting.autoAttack
       && enemies.length === population.present && enemies.filter(enemy => enemy.health > 0).length === population.alive;
   }

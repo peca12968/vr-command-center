@@ -38,7 +38,8 @@ public record RoomVrPause(int TriggerRoomId, long AppliedAtSequence, long? World
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int[]? WaitingSeats = null);
 public record RoomVenueTracking(int[] TrackedSeats, int[] SimulatedSeats, int[] WaitingSeats, int[] EliminatedSeats);
 public record RoomEnvironmentEvidence(RoomVenueEnvironment Setting, string? StreamId, bool Venue);
-public record RoomEnemiesEvidence(RoomVenueEnemies Setting, string? StreamId, bool Venue, int TargetCount, RoomEnemyPopulation? Population);
+public record RoomEnemiesEvidence(RoomVenueEnemies Setting, string? StreamId, bool Venue, int TargetCount, RoomEnemyPopulation? Population,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? Inherited = null);
 public record RoomEnemyPopulation(int Present, int Alive);
 public record RoomVenueBegin(string State, int[] WaitingSeats,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] RoomVenueBeginSeat[]? Seats = null);
@@ -220,7 +221,7 @@ public sealed partial class WorldRecordings
         lock (gate)
         {
             var (current, phaseSince, venueAction, venueEnvironmentSince, venueEnemiesSince, environmentSince) =
-                manager.GetWithPhase(id, actor, out var enemiesSince, out var vrPauseRoom);
+                manager.GetWithPhase(id, actor, out var enemiesSince, out var vrPauseRoom, out var roomEnemyRevisions);
             using var exists = Command("SELECT 1 FROM recordings WHERE session=$id", ("$id", id.ToString("D")));
             var info = exists.ExecuteScalar() is null ? null : Info(id, actor);
             var frame = info is null || info.AcceptedSequence == 0 ? null : Frame(id, info.AcceptedSequence, actor);
@@ -295,7 +296,7 @@ public sealed partial class WorldRecordings
                     applied ? report.WorldSequence : null), applied ? info!.Header.streamId : null, venueEnvironmentSince == environmentSince);
             }
             Dictionary<int, RoomEnemiesEvidence>? enemyRooms = null;
-            if (includeRoomDetails && (enemiesSince > 1 || current.RoomEnemyPolicies is not null)
+            if (includeRoomDetails && (enemiesSince > 1 || !roomEnemyRevisions.IsEmpty)
                 && current.State is SessionState.Running or SessionState.Paused)
             {
                 var enemies = current.Enemies;
@@ -303,7 +304,8 @@ public sealed partial class WorldRecordings
                 foreach (var room in current.RoomIds)
                 {
                     var local = current.RoomEnemyPolicies?.SingleOrDefault(policy => policy.RoomId == room);
-                    var since = local?.AppliedAtSequence ?? enemiesSince;
+                    var hasRoomChange = roomEnemyRevisions.TryGetValue(room, out var roomSince);
+                    var since = hasRoomChange ? roomSince : enemiesSince;
                     if (since <= 1) continue;
                     var recorded = frame?.Packet.frame.roomEnemyPolicies?.SingleOrDefault(policy => policy.roomId == room);
                     var behavior = local?.Behavior ?? enemies.Behavior;
@@ -316,8 +318,8 @@ public sealed partial class WorldRecordings
                     var observedEnemies = applied ? byRoom?[room] : null;
                     var population = observedEnemies is null ? null
                         : new RoomEnemyPopulation(observedEnemies.Count(), observedEnemies.Count(enemy => enemy.health > 0));
-                    (enemyRooms ??= []).Add(room, new(setting, applied ? info!.Header.streamId : null, local is null && venueEnemiesSince == since,
-                        enemies.Count, population));
+                    (enemyRooms ??= []).Add(room, new(setting, applied ? info!.Header.streamId : null, !hasRoomChange && venueEnemiesSince == since,
+                        enemies.Count, population, hasRoomChange ? local is null : null));
                 }
             }
             var endpoint = includeRoomDetails && current.State != SessionState.Ended ? EndpointRow(current) : null;

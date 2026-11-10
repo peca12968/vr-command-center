@@ -3,11 +3,13 @@ using System.Text.Json.Serialization;
 namespace VrCommand.Core;
 
 public record VenuePhaseFence(Guid SessionId, long PhaseSinceSequence, long? SessionSequence = null,
-    long? EnvironmentSinceSequence = null, long? EnemiesSinceSequence = null);
+    long? EnvironmentSinceSequence = null, long? EnemiesSinceSequence = null, long? RoomEnemiesSinceSequence = null);
 public record VenuePhaseTarget(Guid SessionId, long PhaseSinceSequence, int[] RoomIds,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? SessionSequence = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? EnvironmentSinceSequence = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? EnemiesSinceSequence = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? EnemiesSinceSequence = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? RoomEnemiesSinceSequence = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int[]? RoomEnemyOverrideRoomIds = null);
 public record VenuePhasePlan(VenuePhaseTarget[] Pause, VenuePhaseTarget[] Resume, VenuePhaseTarget[] Begin, VenuePhaseTarget[] End,
     VenuePhaseTarget[] Environment, VenuePhaseTarget[] Enemies,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueEnemyBatch? LatestEnemies = null,
@@ -63,7 +65,11 @@ public sealed partial class SessionManager
             Targets(ControlAction.Begin).Select(history => ToTarget(history, history.View.Sequence)).ToArray(),
             Targets(ControlAction.End).Select(history => ToTarget(history)).ToArray(),
             Targets(ControlAction.SetEnvironment).Select(history => ToTarget(history, environmentSinceSequence: history.EnvironmentSinceSequence)).ToArray(),
-            Targets(ControlAction.SetEnemies).Select(history => ToTarget(history, enemiesSinceSequence: history.EnemiesSinceSequence)).ToArray(),
+            Targets(ControlAction.SetEnemies).Select(history => ToTarget(history, enemiesSinceSequence: history.EnemiesSinceSequence) with
+            {
+                RoomEnemiesSinceSequence = history.RoomEnemiesSinceSequence,
+                RoomEnemyOverrideRoomIds = history.View.RoomEnemyPolicies?.Select(policy => policy.RoomId).ToArray()
+            }).ToArray(),
             LatestVenueEnemyBatch(), LatestVenueEnvironmentBatch());
     }
 
@@ -183,7 +189,9 @@ public sealed partial class SessionManager
             || fences.Any(fence => fence is not { PhaseSinceSequence: > 0 } || fence.SessionId == Guid.Empty
                 || (begin ? fence.SessionSequence is null || fence.SessionSequence < fence.PhaseSinceSequence : fence.SessionSequence is not null)
                 || (environment ? fence.EnvironmentSinceSequence is not > 0 : fence.EnvironmentSinceSequence is not null)
-                || (enemies ? fence.EnemiesSinceSequence is not > 0 : fence.EnemiesSinceSequence is not null))
+                || (enemies ? fence.EnemiesSinceSequence is not > 0
+                    || fence.RoomEnemiesSinceSequence is { } local && local <= fence.EnemiesSinceSequence
+                    : fence.EnemiesSinceSequence is not null || fence.RoomEnemiesSinceSequence is not null))
             || fences.Select(fence => fence!.SessionId).Distinct().Count() != fences.Length)
             throw new ArgumentException("Provide distinct phase fences and the revision required by the action.");
         var expected = fences.OrderBy(fence => fence!.SessionId).ToArray();
@@ -196,14 +204,15 @@ public sealed partial class SessionManager
                     || existing[0].Venue!.RequireFullParticipation != requireFullParticipation
                     || ClimateOf(original) != climate || EnemyPolicyOf(original) != enemyPolicy
                     || !existing.Select(entry => new VenuePhaseFence(entry.SessionId, entry.Venue!.PhaseSinceSequence,
-                        begin ? entry.Sequence - 1 : null, entry.Venue.EnvironmentSinceSequence, entry.Venue.EnemiesSinceSequence)).SequenceEqual(expected))
+                        begin ? entry.Sequence - 1 : null, entry.Venue.EnvironmentSinceSequence, entry.Venue.EnemiesSinceSequence,
+                        entry.Venue.RoomEnemiesSinceSequence)).SequenceEqual(expected))
                     throw new InvalidOperationException("Venue request ID already used with different content.");
                 return Receipt(requestId, action, existing, true);
             }
             var targets = Targets(action);
             if (!targets.Select(history => new VenuePhaseFence(history.View.Id, history.PhaseSinceSequence,
                 begin ? history.View.Sequence : null, environment ? history.EnvironmentSinceSequence : null,
-                enemies ? history.EnemiesSinceSequence : null)).SequenceEqual(expected))
+                enemies ? history.EnemiesSinceSequence : null, enemies ? history.RoomEnemiesSinceSequence : null)).SequenceEqual(expected))
                 throw new VenuePhaseChangedException();
             if (begin) VerifyVenueBegin(targets, witnesses, requireFullRoster);
             if (action == ControlAction.Resume) VerifyVenueResume(targets, witnesses);
@@ -223,7 +232,8 @@ public sealed partial class SessionManager
                     venue: new(history.PhaseSinceSequence, targets.Length, environment ? history.EnvironmentSinceSequence : null,
                         enemies ? history.EnemiesSinceSequence : null, requireFullTracking,
                         requireFullTracking ? witnesses![history.View.Id].BeginFrame : null, requireFullParticipation,
-                        requireFullParticipation ? witnesses![history.View.Id].BeginFrame : null));
+                        requireFullParticipation ? witnesses![history.View.Id].BeginFrame : null,
+                        enemies ? history.RoomEnemiesSinceSequence : null));
             }).ToArray();
             var views = entries.Select((entry, index) => SessionProjection.Apply(targets[index].View, entry)).ToArray();
             store.AppendBatch(entries);
@@ -320,11 +330,13 @@ public sealed partial class SessionManager
             latestVenueEnvironment = key;
     }
 
-    private void RestoreVenueEvent(SessionEvent[] events, SessionEvent entry, long phaseSince, long environmentSince, long enemiesSince, ControlCommand command)
+    private void RestoreVenueEvent(SessionEvent[] events, SessionEvent entry, long phaseSince, long environmentSince, long enemiesSince,
+        IReadOnlyDictionary<int, long> roomEnemies, ControlCommand command)
     {
         if (entry.Venue!.PhaseSinceSequence != phaseSince
             || (command.Action == ControlAction.SetEnvironment && entry.Venue.EnvironmentSinceSequence != environmentSince)
             || (command.Action == ControlAction.SetEnemies && entry.Venue.EnemiesSinceSequence != enemiesSince)
+            || (entry.Venue.RoomEnemiesSinceSequence is { } local && local != roomEnemies.Values.DefaultIfEmpty().Max())
             || (command.Action == ControlAction.Resume && events[(int)phaseSince - 1].Venue is null))
             throw new InvalidDataException("Venue transition does not follow its original phase.");
         if (!venueTransitions.TryGetValue(command.CommandId, out var group)) venueTransitions.Add(command.CommandId, group = []);

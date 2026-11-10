@@ -1375,21 +1375,38 @@ def main():
 
     def check_linked_room_enemies(entry):
         session=entry['sessionId']; route=f'/api/sessions/{session}'
+        def venue_fences():
+            fields=('sessionId','phaseSinceSequence','enemiesSinceSequence','roomEnemiesSinceSequence')
+            targets=request('/api/venue/phase')['enemies']
+            return [{key:row[key] for key in fields if key in row} for row in targets], targets
+        def batch(targets, request_id, expected=200):
+            return request('/api/venue/phase',{'action':'SetEnemies','targets':targets,
+                'enemyPolicy':{'behavior':'Hold','autoAttack':False}},expected=expected,request_id=request_id)
+        def room_browser(role, **options):
+            driver=ROOT/'tests/browser/check-room-enemies-native.cjs'
+            browser=subprocess.run([shutil.which('node'),str(driver)],cwd=driver.parent,
+                input=json.dumps({'base':uri,'token':keys[role],'sessionId':session,**options}),
+                text=True,encoding='utf-8',capture_output=True,timeout=45,creationflags=subprocess.CREATE_NO_WINDOW)
+            diagnostic=browser.stderr
+            for key in keys.values():diagnostic=diagnostic.replace(key,'[redacted]')
+            check(browser.returncode==0,role+' Chromium room enemy check succeeded '+diagnostic[-700:])
+            return json.loads(browser.stdout)
+        stale,_=venue_fences()
         denied={'commandId':str(uuid.uuid4()),'action':'SetRoomEnemies','roomEnemyPolicy':{'roomId':2,'policy':{'behavior':'Patrol','autoAttack':True}}}
         request(route+'/commands',denied,'Room1',expected=403)
         request(route+'/commands',denied,'GameServer',expected=403)
-        driver=ROOT/'tests/browser/check-room-enemies-native.cjs'
-        browser=subprocess.run([shutil.which('node'),str(driver)],cwd=driver.parent,
-            input=json.dumps({'base':uri,'token':keys['Room2'],'sessionId':session}),
-            text=True,encoding='utf-8',capture_output=True,timeout=45,creationflags=subprocess.CREATE_NO_WINDOW)
-        diagnostic=browser.stderr
-        for key in keys.values():diagnostic=diagnostic.replace(key,'[redacted]')
-        check(browser.returncode==0,'Room 2 Chromium command succeeded '+diagnostic[-700:])
-        applied=json.loads(browser.stdout)
+        applied=room_browser('Room2')
         override={'roomId':2,'behavior':'Patrol','autoAttack':True}
         check(applied['session']['roomEnemyPolicies']==[{**override,'appliedAtSequence':applied['appliedAtSequence']}]
               and applied['session']['enemies']=={'count':5,'behavior':'Hold','autoAttack':False},
               'Room 2 has one original override while shared count and policy remain intact')
+        overwritten,targets=venue_fences()
+        check(len(targets)==1 and targets[0]['roomEnemiesSinceSequence']==applied['appliedAtSequence']
+              and targets[0]['roomEnemyOverrideRoomIds']==[2], 'Master preview identifies the original Room 2 override')
+        batch(stale,str(uuid.uuid4()),409)
+        check(request(route)['roomEnemyPolicies']==applied['session']['roomEnemyPolicies']
+              and room_browser('Master',venuePreview=True)=={'roomsToClear':[2]},
+              'A stale batch cannot overwrite the room, and the shipped Master console identifies the room to clear')
         def witnessed():
             info=request(route+'/world')
             frame=request(route+'/world/frames/'+str(info['acceptedSequence']))
@@ -1401,7 +1418,7 @@ def main():
         active=wait(witnessed,20,'original native room 2 policy and damage')
         cards=request('/api/rooms/readiness',role='Room2')['rooms']
         check(len(cards)==1 and cards[0]['roomId']==2 and cards[0]['enemies']['setting']['appliedAtSequence']==applied['appliedAtSequence']
-              and cards[0]['enemies']['setting']['worldSequence'] is not None,
+              and cards[0]['enemies']['setting']['worldSequence'] is not None and cards[0]['enemies']['inherited'] is False,
               'Room 2 readiness ties its own override to an original saved frame')
         restored=request(route+'/commands',{'commandId':str(uuid.uuid4()),'action':'SetRoomEnemies',
             'roomEnemyPolicy':{'roomId':2,'policy':None}},'Room2')
@@ -1412,8 +1429,22 @@ def main():
                     and not packet['frame'].get('roomEnemyPolicies') and not any(row['walking'] for row in packet['frame']['enemies'])):
                 return packet
         after=wait(quiet,15,'original room 2 returns to the venue policy')
+        batch(overwritten,str(uuid.uuid4()),409)
+        batch(stale,str(uuid.uuid4()),409)
+        fresh,targets=venue_fences()
+        check(len(targets)==1 and targets[0]['roomEnemiesSinceSequence']==restored['appliedAtSequence']
+              and 'roomEnemyOverrideRoomIds' not in targets[0] and not request(route).get('roomEnemyPolicies'),
+              'Both earlier previews are rejected after inheritance, even though the effective policy is the same as before')
+        restored_view=room_browser('Room2',restoreSequence=restored['appliedAtSequence'])
+        batch_key=str(uuid.uuid4())
+        accepted=batch(fresh,batch_key)
+        repeated=batch(fresh,batch_key)
+        check(accepted['duplicate'] is False and repeated['duplicate'] is True and repeated['sessions']==accepted['sessions']
+              and 'roomEnemiesSinceSequence' not in venue_fences()[1][0],
+              'Fresh venue preview applies once and retries with its original receipt after clearing the scoped fence')
         entry['roomEnemyWitness']={'applied':applied['appliedAtSequence'],'active':active['packet']['sequence'],
-                                    'restored':restored['appliedAtSequence'],'after':after['sequence']}
+                                    'restored':restored['appliedAtSequence'],'after':after['sequence'],
+                                    'roomCard':restored_view,'venueApplied':accepted['sessions'][0]['appliedAtSequence']}
         save('linked-room-enemy-witness.json',entry['roomEnemyWitness'])
     def finish(entry):
         entry['process'].wait(timeout=80);w=entry['witness'];w.wait();w.close();entry['witness']=None

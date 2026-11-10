@@ -214,7 +214,9 @@ internal static class ArenaSessionChecks
 
     private static void LinkedRoomPolicies(Action<bool, string> check, Mission original)
     {
-        var manager = new SessionManager();
+        var store = new MemorySessionEventStore();
+        var manager = new SessionManager(store);
+        var master = new OperatorIdentity("master", OperatorRole.Master);
         var mission = original with { Definition = original.Definition with { Props = [], Enemies = new(5, EnemyBehavior.Hold, false) } };
         var session = manager.Create(SessionMode.Linked, [1, 2, 3, 4, 5], mission);
         var room1 = new OperatorIdentity("room-1", OperatorRole.RoomController, 1);
@@ -240,6 +242,21 @@ internal static class ArenaSessionChecks
                 && adapter.Pose((ulong)player.RoomId, head, head, new(0, 0, 1), 0), "Each linked room sends its original admitted pose");
         }
         manager.Execute(session.Id, new(Guid.NewGuid(), ControlAction.Begin));
+        var stale = manager.ReadVenuePhase(master).Enemies.Single();
+        var global = new VenueEnemyPolicy(EnemyBehavior.Hold, false);
+        VenuePhaseFence Fence(VenuePhaseTarget target) => new(target.SessionId, target.PhaseSinceSequence,
+            EnemiesSinceSequence: target.EnemiesSinceSequence, RoomEnemiesSinceSequence: target.RoomEnemiesSinceSequence);
+        void RejectStale(VenuePhaseTarget target)
+        {
+            var before = manager.Get(session.Id).Sequence;
+            try { manager.ExecuteVenuePhase(ControlAction.SetEnemies, [Fence(target)], Guid.NewGuid(), master, enemyPolicy: global); }
+            catch (VenuePhaseChangedException)
+            {
+                check(manager.Get(session.Id).Sequence == before, "A stale venue preview cannot overwrite a newer room policy revision");
+                return;
+            }
+            throw new Exception("Expected an enemy venue preview conflict");
+        }
         var receipt = manager.Execute(session.Id, change, room2);
         check(manager.Execute(session.Id, change, room2).Duplicate
               && receipt.Session.Enemies == mission.Definition.Enemies && receipt.Session.RoomEnemyPolicies!.Single().RoomId == 2,
@@ -255,7 +272,33 @@ internal static class ArenaSessionChecks
         var recorded = WorldRecordingPacket.Capture(adapter.World, 1, 0, receipt.AppliedAtSequence, 0, 0, _ => new RecordedRig());
         check(recorded.frame.roomEnemyPolicies is [{ roomId: 2, behavior: "Patrol", autoAttack: true }],
             "The world recording captures exactly the effective room override");
-        manager.Execute(session.Id, new(Guid.NewGuid(), ControlAction.SetEnemies, Enemies: mission.Definition.Enemies));
+        var overridden = manager.ReadVenuePhase(master).Enemies.Single();
+        check(overridden.RoomEnemiesSinceSequence == receipt.AppliedAtSequence && overridden.RoomEnemyOverrideRoomIds is [2],
+            "The venue preview identifies the exact overrides it would clear");
+        RejectStale(stale);
+        var restore = manager.Execute(session.Id, new(Guid.NewGuid(), ControlAction.SetRoomEnemies, RoomEnemyPolicy: new(2, null)), room2);
+        RejectStale(overridden);
+        RejectStale(stale);
+        manager = new SessionManager(store);
+        var restored = manager.ReadVenuePhase(master).Enemies.Single();
+        check(restored.RoomEnemiesSinceSequence == restore.AppliedAtSequence && restored.RoomEnemyOverrideRoomIds is null
+            && manager.GetWithPhase(session.Id, room2, out _, out _, out var revisions).View.RoomEnemyPolicies is null
+            && revisions.Count == 1 && revisions[2] == restore.AppliedAtSequence,
+            "A scoped return to inheritance remains identifiable after reopening the original history");
+        var globalRequest = Guid.NewGuid();
+        var batch = manager.ExecuteVenuePhase(ControlAction.SetEnemies, [Fence(restored)], globalRequest, master, enemyPolicy: global);
+        manager = new SessionManager(store);
+        check(manager.ReadVenuePhase(master).Enemies.Single().RoomEnemiesSinceSequence is null
+            && manager.ExecuteVenuePhase(ControlAction.SetEnemies, [Fence(restored)], globalRequest, master, enemyPolicy: global)
+                is { Duplicate: true } duplicate && duplicate.Sessions.SequenceEqual(batch.Sessions),
+            "A fresh venue change clears the scoped fence and reopens with the exact same retry receipt");
+        var journal = store.Load().Single();
+        var last = journal[^1];
+        var legacy = new MemorySessionEventStore();
+        legacy.Seed(session.Id, [.. journal[..^1], last with { Venue = last.Venue! with { RoomEnemiesSinceSequence = null } }]);
+        check(new SessionManager(legacy).ExecuteVenuePhase(ControlAction.SetEnemies,
+            [Fence(restored) with { RoomEnemiesSinceSequence = null }], globalRequest, master, enemyPolicy: global).Duplicate,
+            "A stored venue receipt from before the scoped fence retains its original retry content");
         adapter.Apply(Read());
         adapter.Tick(.05);
         check(adapter.World.Snapshot().Enemies.All(enemy => !enemy.Walking)

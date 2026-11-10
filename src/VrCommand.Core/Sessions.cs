@@ -1,3 +1,4 @@
+using System.Collections.Immutable;
 using System.Text.Json.Serialization;
 
 namespace VrCommand.Core;
@@ -54,7 +55,11 @@ public sealed partial class SessionManager
     // A lifecycle request key is global across creation and roster mutations, including archived sessions.
     private readonly Dictionary<Guid, SessionEvent> requests = [];
     private sealed record History(SessionView View, List<SessionEvent> Events, Dictionary<Guid, SessionEvent> Commands, CombatLedger Combat,
-        List<SessionView> Authority, long PhaseSinceSequence, long EnvironmentSinceSequence, long EnemiesSinceSequence);
+        List<SessionView> Authority, long PhaseSinceSequence, long EnvironmentSinceSequence, long EnemiesSinceSequence,
+        ImmutableDictionary<int, long> RoomEnemyRevisions)
+    {
+        public long? RoomEnemiesSinceSequence => RoomEnemyRevisions.IsEmpty ? null : RoomEnemyRevisions.Values.Max();
+    }
 
     public SessionManager(ISessionEventStore? eventStore = null) : this(eventStore, TimeProvider.System) { }
 
@@ -72,6 +77,7 @@ public sealed partial class SessionManager
             long phaseSince = 0;
             long environmentSince = 1;
             long enemiesSince = 1;
+            var roomEnemies = ImmutableDictionary<int, long>.Empty;
             foreach (var entry in events)
             {
                 if (!ids.Add(entry.EventId)) throw new InvalidDataException("Duplicate event ID in session history.");
@@ -79,9 +85,10 @@ public sealed partial class SessionManager
                 if (command is not null && !commands.TryAdd(command.CommandId, entry))
                     throw new InvalidDataException("Duplicate command ID in session history.");
                 var next = SessionProjection.Apply(view, entry);
-                if (entry.Venue is not null) RestoreVenueEvent(events, entry, phaseSince, environmentSince, enemiesSince, command!);
+                if (entry.Venue is not null) RestoreVenueEvent(events, entry, phaseSince, environmentSince, enemiesSince, roomEnemies, command!);
                 if (command?.Action == ControlAction.SetEnvironment) environmentSince = entry.Sequence;
                 if (command?.Action == ControlAction.SetEnemies) enemiesSince = entry.Sequence;
+                roomEnemies = RoomEnemyRevisionsAfter(roomEnemies, command, entry.Sequence);
                 combat.Prepare(CombatBefore(view, entry, authority), entry)();
                 phaseSince = PhaseSince(view, next, phaseSince);
                 view = next;
@@ -89,7 +96,7 @@ public sealed partial class SessionManager
                 if (entry.RequestId.HasValue && !requests.TryAdd(entry.RequestId.Value, entry))
                     throw new InvalidDataException("Duplicate lifecycle request ID in persisted histories.");
             }
-            if (view is null || !sessions.TryAdd(view.Id, new(view, [.. events], commands, combat, authority, phaseSince, environmentSince, enemiesSince)))
+            if (view is null || !sessions.TryAdd(view.Id, new(view, [.. events], commands, combat, authority, phaseSince, environmentSince, enemiesSince, roomEnemies)))
                 throw new InvalidDataException("Empty or duplicate session history.");
         }
         var active = Active().ToArray();
@@ -145,12 +152,19 @@ public sealed partial class SessionManager
     public (SessionView View, long PhaseSinceSequence, ControlAction? VenueAction, long? VenueEnvironmentSequence, long? VenueEnemiesSequence,
         long EnvironmentSinceSequence)
         GetWithPhase(Guid id, OperatorIdentity? actor, out long enemiesSinceSequence, out int? vrPauseRoomId)
+        => GetWithPhase(id, actor, out enemiesSinceSequence, out vrPauseRoomId, out _);
+
+    public (SessionView View, long PhaseSinceSequence, ControlAction? VenueAction, long? VenueEnvironmentSequence, long? VenueEnemiesSequence,
+        long EnvironmentSinceSequence)
+        GetWithPhase(Guid id, OperatorIdentity? actor, out long enemiesSinceSequence, out int? vrPauseRoomId,
+            out ImmutableDictionary<int, long> roomEnemyRevisions)
     {
         lock (gate)
         {
             var history = Find(id);
             AccessPolicy.Read(actor ?? OperatorIdentity.Internal, history.View.RoomIds);
             enemiesSinceSequence = history.EnemiesSinceSequence;
+            roomEnemyRevisions = history.RoomEnemyRevisions;
             var venue = history.Events[(int)history.PhaseSinceSequence - 1];
             vrPauseRoomId = VrPauseRoom(history);
             return (Snapshot(history.View), history.PhaseSinceSequence,
@@ -369,9 +383,18 @@ public sealed partial class SessionManager
         sessions[entry.SessionId] = new(view, events, commands, combat, authority,
             PhaseSince(previous?.View, view, previous?.PhaseSinceSequence ?? 0),
             command?.Action == ControlAction.SetEnvironment ? entry.Sequence : previous?.EnvironmentSinceSequence ?? 1,
-            command?.Action == ControlAction.SetEnemies ? entry.Sequence : previous?.EnemiesSinceSequence ?? 1);
+            command?.Action == ControlAction.SetEnemies ? entry.Sequence : previous?.EnemiesSinceSequence ?? 1,
+            RoomEnemyRevisionsAfter(previous?.RoomEnemyRevisions ?? ImmutableDictionary<int, long>.Empty, command, entry.Sequence));
         if (entry.RequestId.HasValue) requests.Add(entry.RequestId.Value, entry);
     }
+
+    private static ImmutableDictionary<int, long> RoomEnemyRevisionsAfter(ImmutableDictionary<int, long> revisions,
+        ControlCommand? command, long sequence) => command?.Action switch
+    {
+        ControlAction.SetEnemies => revisions.Clear(),
+        ControlAction.SetRoomEnemies => revisions.SetItem(command.RoomEnemyPolicy!.RoomId, sequence),
+        _ => revisions
+    };
 
     private static long PhaseSince(SessionView? previous, SessionView current, long phaseSince) =>
         previous?.State == current.State ? phaseSince : current.Sequence;
