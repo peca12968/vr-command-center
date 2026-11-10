@@ -38,6 +38,7 @@ GameServer角色供遊戲伺服器使用，不能拿到玩家端；玩家使用�
 執行環境：Windows x64及.NET Framework 4.8。API已自含.NET/ASP.NET Core，不需安裝Python或.NET SDK。
 場館可在127.0.0.1管理實例加入control-https.json與control-https.pfx，另開指定IPv4的HTTPS房控入口。
 PFX密碼由啟動程序的VR_COMMAND_CONTROL_PFX_PASSWORD提供，詳細操作見專案docs/WINDOWS_CONTROL_PACKAGE.md。
+正式開場前可用 check-venue-operator.py 收集主控與五房控的直連回條，再由主控核對六台的來源位址。
 啟動器不修改防火牆、DNS或NAT；實際跨機與頭盔仍待驗證。
 控制台可管理任務、五房名冊與觀戰資料；Unity GameServer與玩家包仍須另外啟動。
 主控可在已完成雙封存的場次「任務收尾」下載場館驗收資料ZIP。ZIP含名冊、統計與公告端點，請與原始遊戲日誌私下保管。

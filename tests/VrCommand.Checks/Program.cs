@@ -110,6 +110,7 @@ try
     PlayerBodyChecks.Run(Check);
     WeaponPresentationChecks.Run(Check);
     WorldSourceChecks.Run(Check, directory);
+    OperatorNetworkChecks.Run(Check);
     Console.WriteLine($"All {checks} checks passed. These are domain checks, not headset or gameplay load tests.");
 }
 finally

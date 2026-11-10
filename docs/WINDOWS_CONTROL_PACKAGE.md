@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `VRCommand-ControlServer-0.31.108-workstations-win-x64.zip` 可為六個操作員角色簽發管理連線回條。ZIP 為 52,970,098 bytes，SHA-256 `f1899e4749f7fd29350c2c743c62cbd0752131bd15e02d886a6f75fbbb0d3679`，解壓核對 552 筆清單與 532 個發行檔案。 [工作站核對](#核對主控與五房控的直連來源)
+
 2026-11-10 `VRCommand-ControlServer-0.31.108-venue-https-win-x64.zip` 可同時提供場館 HTTPS 與本機遊戲管理 HTTP。ZIP 為 52,958,499 bytes，SHA-256 `75404520bae27eff4a8da79538e3f44055620cf1b8ee5f5e7025c5de967a3ca5`。解壓核對 552 筆清單及 532 個發行檔案。 [場館設定](#啟用場館-https)
 
 2026-11-10 `VRCommand-ControlServer-0.31.108-win-x64.zip` 支援從發射、命中及擊殺追查同發射擊。ZIP 為 52,955,370 bytes，SHA-256 `777724118f443456c61f90507a20283ba7204a8a60d05ecb27ff7cc3d46bf356`。解壓核對 552 筆清單及 532 個發行檔案。 [射擊檢討](WORLD_RECORDING.md#追查同發射擊)
@@ -231,6 +233,33 @@ python .\scripts\check-venue-operator.py https://control.venue.example --role ro
 
 退出碼 `0` 和 `complete: true` 表示從本台工作站讀到控制台頁面、匿名存取遭拒，且主控看見五房或房控只看見自己的房間，每房容量為五席。失敗時可看 `failedCheck` 和 `error`。JSON 只保留來源、預期角色與驗證結果。此預檢使用既有 HTTPS 入口，涵蓋管理網站的唯讀連線和房間範圍。玩家 UDP、控制操作及現場跨機容量另有驗收。 [玩家連線驗收](EXTERNAL_CLIENTS.md#核對-25-席各自的直連來源)
 
+### 核對主控與五房控的直連來源
+
+使用新版管理包的直接 HTTPS 監聽位址。主控先用 `(New-Guid).Guid` 產生本輪代號，交給五房控。六台使用相同的 HTTPS 原點、憑證指紋及代號，各自以分配到的角色執行。下列為房 1 的例子，其他工作站更換 `--role` 與輸出檔名。使用私有 CA 時另加 `--ca-file .\venue-ca.pem`。
+
+```powershell
+$challenge = Read-Host '本輪工作站代號'
+$fingerprint = Read-Host '管理站台憑證 SHA-256'
+python .\scripts\check-venue-operator.py https://control.venue.example --role room1 --certificate-sha256 $fingerprint --venue-challenge $challenge | Set-Content .\room1.json -Encoding utf8
+```
+
+主控依原本的實體工作站配置建立 `workstations.json`。房間位址依房 1 到房 5 的順序排列。六個來源須為相異的私有 IPv4，主控可與管理服務同機，五個房控來源各須與管理服務位址不同。
+
+```json
+{
+  "masterAddress": "192.168.50.10",
+  "roomAddresses": ["192.168.50.21", "192.168.50.22", "192.168.50.23", "192.168.50.24", "192.168.50.25"]
+}
+```
+
+在同一台主控工作站收集六份原始 JSON，並於 15 分鐘內送回同一個管理程序核對。
+
+```powershell
+python .\scripts\check-venue-operator.py https://control.venue.example --role master --certificate-sha256 $fingerprint --venue-challenge $challenge --verify-workstations .\workstations.json .\master.json .\room1.json .\room2.json .\room3.json .\room4.json .\room5.json
+```
+
+`complete: true` 表示六個角色各有一份同輪回條，簽章、時限與管理服務實際觀察到的來源都符合配置。管理服務重新啟動後，請使用新代號重做。回條含站台與工作站位址，留在場館私人資料夾。這項核對涵蓋直接管理連線的角色及位址，實體電腦標籤、玩家 UDP、場次操作及頭盔仍由現場驗收。 [玩家跨機驗收](EXTERNAL_CLIENTS.md#第二台電腦的驗收步驟)
+
 ## 啟動與停止的證據
 
 啟動器先核對manifest與來源檔案，再取得所選實例的exclusive lease。只啟動自己包內的API apphost，顯式指定資料／金鑰路徑並清除繼承的角色金鑰等覆寫。API在原始資料恢復與服務啟動成功後，透過私有stdout輸出本次隨機token的就緒事件；啟動器另核對原child仍存活、實際coreclr來自本包及原Master身分。單純程序啟動、埠號已開或別的服務回應不算就緒。
@@ -253,6 +282,8 @@ python scripts/check-control-gui.py <完整解壓後的VRCommand-ControlServer> 
 ```
 
 HTTPS 驗證可另帶 `--server-package <完整解壓後的VRCommand-GameServer>`，用一個 Windows 模擬玩家核對房控配票、即時畫格、回放與原戰績回條。使用啟動器 1.11 及 Windows 0.50.1 時，可加上 `--game-management-https` 一併核對原生伺服器的 HTTPS 管理請求與 WSS 世界上傳。憑證由測試在獨立實例產生，信任只限本次測試。
+
+新版包可另加 `--operator-network`，用本機私有 IPv4 核對六角色原回條與單一來源拒絕。現場的六工作站使用前述主控驗收流程。
 
 publish從明確的來源清單建立全新C槽snapshot，在該snapshot增加RID鎖定群組；原repository的NuGet lock不改，原依賴群組／contentHash必須一致。API及其依賴整組publish，self-contained runtimeconfig與必要native DLL明確核對；編譯、輸入與每份輸出雜湊保存於receipt。package拒絕資料庫、journal、票券／角色金鑰設定、額外publication檔案、連結與越界路徑。manifest是完整性清單，並非數位簽章。
 

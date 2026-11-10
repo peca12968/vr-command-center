@@ -1,0 +1,89 @@
+using System.Globalization;
+using System.Net;
+using System.Net.Sockets;
+using System.Security.Cryptography;
+using System.Text;
+
+namespace VrCommand.Core;
+
+public sealed record OperatorNetworkPeer(IPAddress Source, IPAddress Listener, int Port);
+public sealed record OperatorNetworkWitness(int Version, Guid Challenge, int Workstation, string Source,
+    string Listener, int Port, long ObservedAtUnixSeconds, string Signature);
+public sealed record OperatorNetworkInventory(string MasterAddress, string[] RoomAddresses);
+public sealed record OperatorNetworkCheck(Guid Challenge, string Listener, int Port, string[] WorkstationAddresses);
+
+// One verifier per running management service. Reports can be assembled without
+// storing any challenge, source address or validation result in the database.
+public sealed class OperatorNetworkProof
+{
+    private const int LifetimeSeconds = 15 * 60;
+    private readonly byte[] key = RandomNumberGenerator.GetBytes(32);
+
+    public OperatorNetworkWitness Issue(OperatorIdentity actor, Guid challenge, OperatorNetworkPeer peer, DateTimeOffset now)
+    {
+        AccessPolicy.Validate(actor);
+        if (actor.Role is not (OperatorRole.Master or OperatorRole.RoomController))
+            throw new AccessDeniedException("Workstation evidence requires a control-desk identity.");
+        RequireChallenge(challenge);
+        var (source, listener) = Addresses(peer);
+        var witness = new OperatorNetworkWitness(1, challenge, actor.RoomId ?? 0, source, listener, peer.Port, now.ToUnixTimeSeconds(), "");
+        return witness with { Signature = Convert.ToHexStringLower(Sign(witness)) };
+    }
+
+    public OperatorNetworkCheck Verify(OperatorIdentity actor, Guid challenge, OperatorNetworkPeer peer,
+        OperatorNetworkInventory? inventory, OperatorNetworkWitness[]? witnesses, DateTimeOffset now)
+    {
+        AccessPolicy.Validate(actor);
+        if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Workstation verification requires the master control desk.");
+        RequireChallenge(challenge);
+        var (source, listener) = Addresses(peer);
+        if (inventory?.RoomAddresses is not { Length: SessionManager.RoomCount } || witnesses is not { Length: SessionManager.RoomCount + 1 })
+            throw new ArgumentException("Provide one master and five room workstation addresses and witnesses.");
+
+        string[] addresses = [inventory.MasterAddress, .. inventory.RoomAddresses];
+        if (addresses.Any(address => !IsPrivateAddress(address)) || addresses.Distinct(StringComparer.Ordinal).Count() != addresses.Length
+            || inventory.RoomAddresses.Contains(listener, StringComparer.Ordinal) || addresses[0] != source)
+            throw new ArgumentException("Require distinct private IPv4 workstations, five room sources separate from the management listener, and submission from the declared master address.");
+
+        var observed = new HashSet<int>();
+        var latest = now.ToUnixTimeSeconds();
+        foreach (var witness in witnesses)
+        {
+            if (witness is null || witness.Version != 1 || witness.Challenge != challenge
+                || witness.Workstation is < 0 or > SessionManager.RoomCount || !observed.Add(witness.Workstation)
+                || witness.ObservedAtUnixSeconds < latest - LifetimeSeconds || witness.ObservedAtUnixSeconds > latest
+                || witness.Listener != listener || witness.Port != peer.Port || witness.Source != addresses[witness.Workstation]
+                || witness.Signature is not { Length: 64 } || !witness.Signature.All(char.IsAsciiHexDigitLower)
+                || !CryptographicOperations.FixedTimeEquals(Sign(witness), Convert.FromHexString(witness.Signature)))
+                throw new ArgumentException("A workstation witness is invalid, expired, duplicated or differs from this venue and expected source.");
+        }
+        return new OperatorNetworkCheck(challenge, listener, peer.Port, addresses);
+    }
+
+    private byte[] Sign(OperatorNetworkWitness value) => HMACSHA256.HashData(key, Encoding.ASCII.GetBytes(
+        string.Create(CultureInfo.InvariantCulture, $"vr-workstation\n{value.Version}\n{value.Challenge:D}\n{value.Workstation}\n{value.Source}\n{value.Listener}\n{value.Port}\n{value.ObservedAtUnixSeconds}")));
+
+    private static void RequireChallenge(Guid challenge)
+    {
+        if (challenge == Guid.Empty) throw new ArgumentException("Use a nonempty workstation check challenge.");
+    }
+
+    private static (string Source, string Listener) Addresses(OperatorNetworkPeer peer)
+    {
+        var source = AddressText(peer.Source);
+        var listener = AddressText(peer.Listener);
+        if (!IsPrivateAddress(source) || !IsPrivateAddress(listener) || peer.Port is < 1 or > 65535)
+            throw new ArgumentException("Workstation evidence requires direct HTTPS with private IPv4 endpoints.");
+        return (source, listener);
+    }
+
+    private static string AddressText(IPAddress address) => (address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address).ToString();
+
+    private static bool IsPrivateAddress(string? value)
+    {
+        if (!IPAddress.TryParse(value, out var address) || address.AddressFamily != AddressFamily.InterNetwork || address.ToString() != value)
+            return false;
+        var bytes = address.GetAddressBytes();
+        return bytes[0] == 10 || bytes[0] == 172 && bytes[1] is >= 16 and <= 31 || bytes[0] == 192 && bytes[1] == 168;
+    }
+}

@@ -128,6 +128,26 @@ app.MapWorldRoutes();
 app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
 app.MapGet("/api/me", (HttpContext context) => Actor(context));
 app.MapGet("/api/rooms", (SessionManager manager, HttpContext context) => manager.Rooms(Actor(context)));
+if (controlHttps is not null)
+{
+    var networkProof = new OperatorNetworkProof();
+    app.MapGet("/api/operator-network/witness", (HttpContext context, Guid challenge) =>
+    {
+        context.Response.Headers.CacheControl = "no-store";
+        var peer = context.Features.Get<OperatorNetworkPeer>() ?? throw new ArgumentException("Use the direct venue HTTPS listener.");
+        return networkProof.Issue(Actor(context), challenge, peer, DateTimeOffset.UtcNow);
+    });
+    app.MapPost("/api/operator-network/verify", async (HttpContext context) =>
+    {
+        context.Response.Headers.CacheControl = "no-store";
+        var actor = Actor(context);
+        if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Workstation verification requires the master control desk.");
+        var peer = context.Features.Get<OperatorNetworkPeer>() ?? throw new ArgumentException("Use the direct venue HTTPS listener.");
+        var request = await DeploymentJson.Read<OperatorNetworkSubmission>(context.Request, 8192,
+            "Invalid workstation verification submission.", context.RequestAborted, completeFile: true);
+        return networkProof.Verify(actor, request.Challenge, peer, request.Inventory, request.Witnesses, DateTimeOffset.UtcNow);
+    });
+}
 app.MapGet("/api/missions", (SqliteMissionLibrary store, HttpContext context) => store.List(Actor(context)));
 app.MapGet("/api/mission-library", (SqliteMissionLibrary store, HttpContext context) => store.Heads(Actor(context)));
 app.MapGet("/api/missions/{id:guid}", (Guid id, SqliteMissionLibrary store, HttpContext context) => store.Get(id, Actor(context)));

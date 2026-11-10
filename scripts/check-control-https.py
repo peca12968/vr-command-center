@@ -162,11 +162,15 @@ def main():
     parser.add_argument('--listen-address', type=ipaddress.IPv4Address, default=ipaddress.IPv4Address('127.0.0.1'))
     parser.add_argument('--server-package', type=Path, help='Also verify one native Windows game round through both listeners')
     parser.add_argument('--game-management-https', action='store_true', help='Use HTTPS and WSS from the native game server too')
+    parser.add_argument('--operator-network', action='store_true', help='Check direct workstation witnesses and reject the same-PC inventory')
     args = parser.parse_args()
     if os.name != 'nt':
         parser.error('Run the actual Windows launcher on Windows.')
     if args.game_management_https and not args.server_package:
         parser.error('--game-management-https requires --server-package.')
+    if args.operator_network and not any(args.listen_address in ipaddress.IPv4Network(net)
+                                         for net in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16')):
+        parser.error('--operator-network requires an assigned private --listen-address.')
 
     from importlib.util import module_from_spec, spec_from_file_location
 
@@ -238,10 +242,11 @@ def main():
         check(code == 1 and not ready.exists() and result['status'] == 'rejected'
               and result['childExited'] and (result['childPid'] > 0) == starts_child, label)
 
-    def request(connect, path, key, *, body=None, status=200, admission=None):
+    def request(connect, path, key, *, body=None, status=200, admission=None, extra_headers=None):
         headers = {'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}
         if admission:
             headers['If-Match-Admission'] = admission
+        headers.update(extra_headers or {})
         with closing(connect()) as client:
             client.request('POST' if body is not None else 'GET', path, body=None if body is None else json.dumps(body),
                            headers=headers)
@@ -308,10 +313,12 @@ def main():
                 except (ConnectionError, http.client.RemoteDisconnected):
                     checks.append('venue listener rejects plaintext requests')
 
+            challenge = str(uuid.uuid4())
+            workstation_option = ['--venue-challenge', challenge] if args.operator_network else []
             for role in preflight.ROLES:
                 result = subprocess.run([sys.executable, str(ROOT / 'scripts/check-venue-operator.py'),
                                          status['httpsBinding'], '--role', role, '--ca-file', str(ca),
-                                         '--certificate-sha256', fingerprint],
+                                         '--certificate-sha256', fingerprint, *workstation_option],
                                         env=dict(os.environ, VR_COMMAND_OPERATOR_KEY=keys[role.capitalize()]),
                                         timeout=20, capture_output=True, text=True)
                 report = json.loads(result.stdout)
@@ -324,6 +331,43 @@ def main():
 
             def local():
                 return http.client.HTTPConnection('127.0.0.1', local_port, timeout=5)
+
+            if args.operator_network:
+                witnesses = [report['networkWitness'] for report in reports.values()]
+                check(all(witness['source'] == address and witness['listener'] == address and witness['port'] == venue_port
+                          for witness in witnesses), 'six signed roles retain the actual same-PC socket source')
+                witness_path = '/api/operator-network/witness?challenge=' + challenge
+                verify_path = '/api/operator-network/verify'
+                forwarded = request(tls, witness_path, keys['Room1'], extra_headers={'X-Forwarded-For': '10.55.1.2'})
+                check(forwarded['source'] == address, 'a forwarded source header cannot change the captured socket address')
+                request(local, witness_path, keys['Master'], status=400)
+                request(tls, witness_path, keys['GameServer'], status=403)
+                request(tls, verify_path, keys['Room1'], body={}, status=403)
+                request(tls, verify_path, keys['Master'], body={'large': 'x' * 8192}, status=400)
+                check(True, 'plain HTTP, game-server issue, room verification and oversized submissions are rejected')
+                room_addresses = [f'10.211.54.{index}' for index in range(11, 17) if f'10.211.54.{index}' != address][:5]
+                inventory = {'masterAddress': address, 'roomAddresses': room_addresses}
+                mismatch = request(tls, verify_path, keys['Master'], status=400,
+                                   body={'challenge': challenge, 'inventory': inventory, 'witnesses': witnesses})
+                check('differs from this venue and expected source' in mismatch['error'],
+                      'validly formed same-PC receipts fail at the declared source check')
+                inventory_file = output / 'workstation-inventory.json'
+                inventory_file.write_text(json.dumps(inventory), encoding='utf-8')
+                files = []
+                for role, report in reports.items():
+                    path = output / ('workstation-' + role + '.json')
+                    path.write_text(json.dumps(report), encoding='utf-8')
+                    files.append(str(path))
+                rejected = subprocess.run([sys.executable, str(ROOT / 'scripts/check-venue-operator.py'), status['httpsBinding'],
+                                           '--role', 'master', '--ca-file', str(ca), '--certificate-sha256', fingerprint,
+                                           '--venue-challenge', challenge, '--verify-workstations', str(inventory_file), *files],
+                                          env=dict(os.environ, VR_COMMAND_OPERATOR_KEY=keys['Master']),
+                                          timeout=20, capture_output=True, text=True)
+                verdict = json.loads(rejected.stdout)
+                check(rejected.returncode == 1 and verdict == {'schemaVersion': 1, 'complete': False, 'failedCheck': 'workstations',
+                                                              'error': 'unexpected-http-400'} and not rejected.stderr,
+                      'the master CLI cannot claim six workstations from six same-PC signed reports')
+                (output / 'workstation-same-pc-rejected.json').write_text(json.dumps(verdict), encoding='utf-8')
 
             check(request(local, '/api/me', keys['GameServer'])['role'] == 'GameServer', 'local game server identity still works')
             mission = {'name': 'HTTPS fixture', 'briefing': 'Isolated management', 'durationSeconds': 60,

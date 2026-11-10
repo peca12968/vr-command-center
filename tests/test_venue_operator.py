@@ -14,6 +14,12 @@ operator = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(operator)
 FINGERPRINT = hashlib.sha256(b'certificate fixture').hexdigest()
 KEY = 'test-operator-key'
+CHALLENGE = '12345678-1234-5678-1234-567812345678'
+
+
+def witness(room):
+    return {'version': 1, 'challenge': CHALLENGE, 'workstation': room, 'source': f'10.31.0.{20 + room}',
+            'listener': '10.31.0.1', 'port': 443, 'observedAtUnixSeconds': 1794320000, 'signature': 'e' * 64}
 
 
 class Response(io.BytesIO):
@@ -38,14 +44,14 @@ def responses(role='RoomController', room=2, visible=(2,)):
 
 
 class VenueOperatorTests(unittest.TestCase):
-    def run_check(self, replies, role='room2', certificates=None, handshake_error=None):
+    def run_check(self, replies, role='room2', certificates=None, handshake_error=None, challenge=None):
         with patch.object(operator.http.client, 'HTTPSConnection') as https, patch.object(operator, 'operator_key', return_value=KEY) as key:
             connection = https.return_value
             connection.sock.getpeercert.return_value = b'certificate fixture'
             connection.sock.getpeercert.side_effect = certificates
             connection.getresponse.side_effect = replies
             connection.connect.side_effect = handshake_error
-            report = operator.check('venue.example', 443, object(), FINGERPRINT, role)
+            report = operator.check('venue.example', 443, object(), FINGERPRINT, role, challenge)
         return report, connection.request.call_args_list, key.call_count
 
     def test_https_origin_only(self):
@@ -117,6 +123,49 @@ class VenueOperatorTests(unittest.TestCase):
         self.assertEqual('invalid-response-length', report['error'])
         self.assertEqual(1, len(calls))
         self.assertEqual(0, prompts)
+
+    def test_optional_witness_uses_the_same_cert_and_room_identity(self):
+        value = witness(2)
+        for response, success in ((value, True), (dict(value, workstation=3), False),
+                                  (dict(value, challenge='different'), False)):
+            reply = Response(200, json.dumps(response).encode(), **{'Content-Type': 'application/json'})
+            report, calls, _ = self.run_check([*responses(), reply], challenge=CHALLENGE)
+            self.assertEqual(success, report['complete'])
+            self.assertEqual(('GET', '/api/operator-network/witness?challenge=' + CHALLENGE), calls[-1].args)
+            self.assertEqual(f'Bearer {KEY}', calls[-1].kwargs['headers']['Authorization'])
+            if success:
+                self.assertEqual(value, report['networkWitness'])
+            else:
+                self.assertEqual('workstation-witness', report['failedCheck'])
+
+    def test_venue_verification_submits_exact_reports_and_never_echoes_signatures(self):
+        roles = list(operator.ROLES)
+        expected = [witness(index)['source'] for index in range(6)]
+        inventory = {'masterAddress': expected[0], 'roomAddresses': expected[1:]}
+        files = {role: {'complete': True, 'origin': 'https://venue.example:443', 'expectedCertificateSha256': FINGERPRINT,
+                        'expectedRole': role, 'networkWitness': witness(index)} for index, role in enumerate(roles)}
+        files['inventory'] = inventory
+        result = {'challenge': CHALLENGE, 'workstationAddresses': expected, 'listener': '10.31.0.1', 'port': 443}
+        with patch.object(operator, 'local_json', side_effect=files.__getitem__), patch.object(operator, 'operator_key', return_value=KEY):
+            with patch.object(operator, 'read_route', side_effect=[None, result]) as route:
+                report = operator.verify_workstations('venue.example', 443, object(), FINGERPRINT, CHALLENGE, 'inventory', roles[::-1])
+                self.assertTrue(report['complete'])
+                self.assertEqual(expected, report['workstationAddresses'])
+                self.assertNotIn('e' * 64, json.dumps(report))
+                self.assertEqual('/api/operator-network/verify', route.call_args.args[4])
+                self.assertEqual([witness(index) for index in range(5, -1, -1)], route.call_args.kwargs['body']['witnesses'])
+            with patch.object(operator, 'read_route') as route:
+                with self.assertRaises(operator.CheckFailed):
+                    operator.verify_workstations('venue.example', 443, object(), FINGERPRINT, CHALLENGE, 'inventory', [*roles[:5], 'room4'])
+                route.assert_not_called()
+
+    def test_verify_post_cannot_send_bearer_until_certificate_matches(self):
+        with patch.object(operator.http.client, 'HTTPSConnection') as https:
+            https.return_value.sock.getpeercert.return_value = b'other certificate'
+            with self.assertRaisesRegex(operator.CheckFailed, 'certificate-fingerprint-mismatch'):
+                operator.read_route('venue.example', 443, object(), FINGERPRINT, '/api/operator-network/verify',
+                                    200, 'application/json', KEY, body={'challenge': CHALLENGE})
+            https.return_value.request.assert_not_called()
 
 
 if __name__ == '__main__':

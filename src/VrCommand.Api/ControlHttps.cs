@@ -2,8 +2,12 @@ using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using Microsoft.AspNetCore.Connections;
+using VrCommand.Core;
 
 namespace VrCommand.Api;
+
+internal sealed record OperatorNetworkSubmission(Guid Challenge, OperatorNetworkInventory Inventory, OperatorNetworkWitness[] Witnesses);
 
 // Private launch settings. A packaged TLS deployment has exactly one local HTTP
 // listener for the game server and one explicitly configured HTTPS listener.
@@ -66,11 +70,20 @@ internal sealed class ControlHttps(IPAddress address, int port, int localPort,
             // configuration must not open a second plaintext LAN listener.
             server.Configure(new ConfigurationBuilder().Build(), reloadOnChange: false);
             server.Listen(IPAddress.Loopback, localPort);
-            server.Listen(address, port, endpoint => endpoint.UseHttps(https =>
+            server.Listen(address, port, endpoint =>
             {
-                https.ServerCertificate = certificate;
-                https.ServerCertificateChain = intermediates;
-            }));
+                endpoint.UseHttps(https =>
+                {
+                    https.ServerCertificate = certificate;
+                    https.ServerCertificateChain = intermediates;
+                });
+                endpoint.Use(next => connection =>
+                {
+                    if (connection.RemoteEndPoint is IPEndPoint remote && connection.LocalEndPoint is IPEndPoint local)
+                        connection.Features.Set(new OperatorNetworkPeer(remote.Address, local.Address, local.Port));
+                    return next(connection);
+                });
+            });
         });
     }
 
