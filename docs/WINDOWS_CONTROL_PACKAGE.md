@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `windows-control-console-0.31.81-venue-scores-win-x64.zip` 在全館收尾提供分房最終戰績與本批合計。ZIP 為 52,847,763 bytes，SHA-256 `1dd1051f1462d54af63bccd5caa1574224e636f43cf1bdd96ef1da64e429a555`，解壓核對 540 筆清單及 520 個執行檔案。 [戰績操作](REPORTS.md#在全館收尾比較分房戰績)
+
 2026-11-10 `windows-control-console-0.31.80-participation-replay-win-x64.zip` 可從全館收尾回看有效姿態開場。ZIP 為 52,842,586 bytes，SHA-256 `ed34a4a3e8cf1170e21e335f72a074058c3b5389d78fa32b833119c550132ce7`，解壓核對 540 筆清單及 520 個執行檔案。 [開場回看](SESSION_CLOSURE.md#回看有效姿態開場)
 
 2026-11-10 `windows-control-console-0.31.79-participation-closure-win-x64.zip` 提供場館驗收 ZIP 的有效姿態開場畫格指標。ZIP 為 52,841,556 bytes，SHA-256 `36f9afd313e021339f17ac06327e90a3111d2c95d84447e4e9d27927de966114`，解壓核對 540 筆清單及 520 個執行檔案。 [封存核對](EXTERNAL_CLIENTS.md#核對五房有效姿態開場)
