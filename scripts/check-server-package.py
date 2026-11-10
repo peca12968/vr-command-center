@@ -1400,7 +1400,7 @@ def main():
                 return frame
         active=wait(witnessed,20,'original native room 2 policy and damage')
         cards=request('/api/rooms/readiness',role='Room2')['rooms']
-        check(len(cards)==1 and cards[0]['id']==2 and cards[0]['enemies']['setting']['appliedAtSequence']==applied['appliedAtSequence']
+        check(len(cards)==1 and cards[0]['roomId']==2 and cards[0]['enemies']['setting']['appliedAtSequence']==applied['appliedAtSequence']
               and cards[0]['enemies']['setting']['worldSequence'] is not None,
               'Room 2 readiness ties its own override to an original saved frame')
         restored=request(route+'/commands',{'commandId':str(uuid.uuid4()),'action':'SetRoomEnemies',
@@ -1470,14 +1470,22 @@ def main():
             check(any(enemy['roomId']==2 and enemy['walking'] for packet in window for enemy in packet['frame']['enemies'])
                   and all(not enemy['walking'] for packet in window for enemy in packet['frame']['enemies'] if enemy['roomId']!=2),
                   'Original replay preserves actual patrol only in the overridden room')
-            timeline=route+f"/policy-frames?throughFrame={len(frames)}&includeEnemyRoster=true&roomId="
-            room2=request(timeline+'2',role='Room2')
-            room1=request(timeline+'1',role='Room1')
-            transitions=[row for row in room2['frames'] if 'enemies' in row['changes']]
+            def timeline(room):
+                pages=[]; cursor=0
+                while cursor is not None:
+                    page=request(route+f'/policy-frames?throughFrame={len(frames)}&afterFrame={cursor}&includeEnemyRoster=true&roomId={room}',role=f'Room{room}')
+                    assert page['scannedThroughFrame']>cursor and page['roomId']==room
+                    pages.append(page)
+                    cursor=page['nextAfterFrame']
+                assert pages[-1]['scannedThroughFrame']==len(frames)
+                return pages
+            room2=timeline(2); room1=timeline(1)
+            transitions=[row for page in room2 for row in page['frames'] if 'enemies' in row['changes']]
             check(len(transitions)==2 and [(row['policy']['behavior'],row['policy']['autoAttack']) for row in transitions]
-                  ==[('Patrol',True),('Hold',False)] and all(row['policy']['behavior']=='Hold' for row in room1['frames']),
+                  ==[('Patrol',True),('Hold',False)] and all(row['policy']['behavior']=='Hold' and not row['policy']['autoAttack']
+                      for page in room1 for row in page['frames']),
                   'Room 2 timeline finds both original policy transitions while Room 1 retains Hold')
-            save('linked-room-enemy-timeline.json',room2)
+            save('linked-room-enemy-timeline.json',{'room1':room1,'room2':room2})
         if 'venueOpenxr' in entry:
             window=entry['venueOpenxr']
             check(all(frames[packet['sequence']-1]['packet']==packet for packet in window['packets']),

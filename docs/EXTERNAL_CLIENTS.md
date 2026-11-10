@@ -2,7 +2,7 @@
 
 ## 遊戲版本相容性
 
-遊戲 0.49.1 使用 NGO 協定 31。Windows 遊戲伺服器、Windows 玩家與 Quest APK 請使用同版。升級時先結束現有場次，再一併更新遊戲伺服器及玩家端。API 0.31.0 供應玩家票券及世界回放，MR 伺服器須搭配支援 `SetRoomAlignment` 的管理服務。 [鎖定房間校正檔](QUEST3.md#啟動-mr-伺服器前鎖定校正檔)
+遊戲 0.50.0 使用 NGO 協定 31。Windows 遊戲伺服器、Windows 玩家與 Quest APK 請使用同版。升級時先結束現有場次，再一併更新遊戲伺服器及玩家端。API 0.31.0 供應玩家票券及世界回放，MR 伺服器須搭配支援 `SetRoomAlignment` 的管理服務。 [鎖定房間校正檔](QUEST3.md#啟動-mr-伺服器前鎖定校正檔)
 
 新版以二進位 UUID、打包整數與欄位旗標傳送角色狀態。連線房間同步完整角色清單，以完整浮點精度傳送位置、面向與射擊向量。
 
@@ -17,7 +17,7 @@ $release = python scripts/verify-venue-release.py `
   --control 'C:\Delivery\VRCommand-ControlServer' `
   --server 'C:\Delivery\VRCommand-GameServer' `
   --player 'C:\Delivery\VRCommand-Player' `
-  --quest-apk 'C:\Delivery\vr-command-quest-0.49.1-arm64-debug.apk' `
+  --quest-apk 'C:\Delivery\vr-command-quest-0.50.0-arm64-debug.apk' `
   --sdk 'F:\Unity\AndroidPlayer\SDK' --jdk 'F:\Unity\AndroidPlayer\OpenJDK'
 if ($LASTEXITCODE -eq 0) {
     $release | Set-Content -LiteralPath .\venue-release.json -Encoding utf8

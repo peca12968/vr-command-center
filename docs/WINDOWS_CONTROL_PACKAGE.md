@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `VRCommand-ControlServer-0.31.98-win-x64.zip` 加入合併場的分房敵軍策略。ZIP 為 52,913,898 bytes，SHA-256 `e991ce29abceb85fdb94488f2958be31461cf4ad8d52f54f921433f26abfa4cd`。解壓核對 546 筆清單及 526 個發行檔案，通過 107 項管理包檢查。 [分房操作](LAYOUT.md#合併場分房敵軍策略)
+
 2026-11-10 `VRCommand-ControlServer-0.31.97-win-x64.zip` 可下載五房 Windows 伺服器啟動計畫。ZIP 為 52,907,145 bytes，SHA-256 `2635ab1537219de08a97f99566fcc027874f5e3f694ea35a046bdf53562921b7`。解壓核對 546 筆清單及 526 個發行檔案，通過 107 項管理包檢查。 [下載計畫操作](WINDOWS_SERVER_PACKAGE.md#從主控台下載場館計畫)
 
 2026-11-10 `VRCommand-ControlServer-0.31.96-win-x64.zip` 可逐房查閱回放中的敵軍增援與撤除。ZIP 為 52,894,327 bytes，SHA-256 `d362eabf85a2fd8775654f846a5b756a21f8a15b69c638f2e36e44c883a1d2f7`。解壓核對 543 筆清單及 523 個執行檔，通過 107 項管理包檢查。建置憑證記錄封裝開始時的基底 `e6bd807`，另逐檔核對 174 個建置輸入與功能提交的內容相同。 [回放操作](WORLD_RECORDING.md#查閱錄製中的設定切換)

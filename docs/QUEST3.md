@@ -1,6 +1,6 @@
 # Quest 3 接入與工具鏈
 
-2026-11-10 Quest 3 開發 APK 為 0.49.1／64，與同版 Windows 玩家和遊戲伺服器使用相同的遊戲來源及場景網路識別。已核對 ARM64、OpenXR、最低 SDK 32、目標 SDK 35 及 APK v2 開發簽章。 [建置紀錄](PROGRESS.md#2026-11-10-追蹤控制器扳機短按)
+2026-11-10 Quest 3 開發 APK 為 0.50.0／65，檔案 `vr-command-quest-0.50.0-arm64-debug.apk` 為 60,997,166 bytes，SHA-256 `0cb23ff041b1787e24a694b0ae9b8184764f150740710876c8cceef70d9f1bba`。與同版 Windows 玩家和伺服器使用相同的遊戲來源及場景網路識別。已核對 ARM64、最低 SDK 32、目標 SDK 35 及 APK v2 開發簽章。頭盔安裝及現場 MR 驗收待實機。 [建置紀錄](PROGRESS.md#2026-11-10-合併場分房敵軍策略)
 
 ## 開場前從頭盔執行 UDP 預檢
 
