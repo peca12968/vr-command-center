@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-10 `VRCommand-Player-0.49.1-launcher1.5.0-final-win-x64.zip` 為 84,765,041 bytes，SHA-256 `3629cda8fab5513116498527180f4fdbd9b9b55b1d46efeae6308716a6149ada`。解壓核對 330 個清單檔案及 29 項實際啟動器檢查。選用 `--link-metrics` 時，啟動器將原量測與玩家日誌的雜湊寫入終止報告。 [操作方式](EXTERNAL_CLIENTS.md#將-windows-連線量測納入五房封存)
+
 2026-11-10 `VRCommand-Player-0.49.1-launcher1.4.0-win-x64.zip` 為 84,763,776 bytes，SHA-256 `64e3e46861bd435b0f5b4b96e0bc6ee7b0620a81370b7e660ce096ddc5e31bd5`。解壓核對 330 個清單檔案及 22 項啟動器檢查。遊戲沿用 Windows 0.49.1，啟動器新增等待最終戰績及中斷提示。 [玩家狀態](PLAYER_CONNECTION_STATUS.md)
 
 2026-11-10 `windows-player-0.49.0-launcher-1.3.zip` 為 84,763,077 bytes，SHA-256 `20144d9ec2184923e4b4d165db3a857b9ed81af63377740722e054500426c707`。解壓核對 330 個清單檔案，23 項實際啟動器檢查通過，含缺少 OpenXR 執行環境時於入場前退出。 [Windows OpenXR 啟動](#windows-openxr-啟動)
