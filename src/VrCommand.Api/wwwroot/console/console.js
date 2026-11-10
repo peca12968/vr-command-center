@@ -35,7 +35,7 @@ const closure = mountClosure(() => state, logout, target => tab('world', target)
 const alignment = mountAlignment(api, download);
 const mrDeployment = mountMrDeployment(() => state, api);
 const mrVenue = mountMrVenueBundle(() => state, api, download);
-const vrVenue = mountVrVenueTickets(() => state, api, download);
+const vrVenue = mountVrVenueTickets(() => state, api, download, roomReadiness.ticketSourceLive);
 const venueServerPlan = mountVenueServerPlan(() => state, api, download);
 const alignmentPins = mountAlignmentPins({ state: () => state,
   checkFile: file => api('/room-alignment/check-file', 'POST', file),

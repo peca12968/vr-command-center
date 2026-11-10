@@ -6,13 +6,16 @@ async function main() {
   const [descriptor, zip, output] = process.argv.slice(2);
   const config = JSON.parse(await fs.readFile(descriptor, 'utf8'));
   const mixed = config.mode === 'Mixed';
-  let verifiedRoomEndpoints;
+  let verifiedRoomEndpoints, previewReads = 0;
   assert.match(config.base, /^http:\/\/127\.0\.0\.1:\d+$/);
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ acceptDownloads: true });
     const errors = [];
     page.on('pageerror', error => errors.push(error.name));
+    page.on('request', request => {
+      if (request.method() === 'GET' && new URL(request.url()).pathname === '/api/vr-deployment/venue') previewReads++;
+    });
     await page.goto(config.base + '/console/');
     await page.locator('#login-key').fill(config.masterKey);
     await page.locator('#login-form button').click();
@@ -44,6 +47,19 @@ async function main() {
       await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, verifiedRoomEndpoints, blocked: true }), { flag: 'wx' });
       return;
     }
+    if (config.recovery) {
+      await page.waitForFunction(() => !document.querySelector('#vr-venue-issue').disabled, null, { polling: 100 });
+      await fs.writeFile(config.recovery.ready, 'fresh preview open', { flag: 'wx' });
+      await page.waitForFunction(() => document.querySelector('#vr-venue-issue').disabled
+        && [...document.querySelectorAll('#vr-venue-rooms li')].filter(row => row.textContent.includes('暫停配票')).length === 5,
+      null, { polling: 100 });
+      assert.equal(previewReads, 1);
+      await fs.writeFile(config.recovery.blocked, 'same preview blocked', { flag: 'wx' });
+      await page.waitForFunction(() => !document.querySelector('#vr-venue-issue').disabled
+        && [...document.querySelectorAll('#vr-venue-rooms li')].every(row => !row.textContent.includes('暫停配票')),
+      null, { polling: 100 });
+      assert.equal(previewReads, 1);
+    }
     if (mixed) {
       assert.equal(await page.locator('#vr-venue-title').textContent(), 'VR／MR 混合五房配票');
       assert.equal(await page.locator('#vr-venue-files input').count(), Object.keys(config.alignments).length);
@@ -69,9 +85,11 @@ async function main() {
     assert.equal(download.suggestedFilename(), mixed ? 'vr-mr-venue-deployment.zip' : 'vr-venue-connections.zip');
     await download.saveAs(zip);
     assert.deepEqual(errors, []);
+    if (config.recovery) assert.equal(previewReads, 2);
   } finally {
     await browser.close();
   }
-  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, verifiedRoomEndpoints }, null, 2), { flag: 'wx' });
+  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, verifiedRoomEndpoints,
+    recoveredSamePreview: config.recovery ? previewReads === 2 : undefined }, null, 2), { flag: 'wx' });
 }
 main().catch(error => { console.error(error.name + ': native VR venue tickets failed'); process.exitCode = 1; });

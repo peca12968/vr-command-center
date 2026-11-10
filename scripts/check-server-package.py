@@ -1,6 +1,6 @@
 """Exercise portable Windows packages, five rooms, Linked and owned process cleanup."""
 import argparse,base64,csv,ctypes,hashlib,importlib.util,io,ipaddress,json,os,re,shutil,socket,sqlite3,subprocess,sys,tempfile,threading,time,urllib.error,urllib.request,uuid,zipfile
-from contextlib import closing
+from contextlib import closing, contextmanager
 from datetime import datetime,timedelta,timezone
 from decimal import Decimal
 from pathlib import Path
@@ -12,6 +12,71 @@ field=module('server_field_results','verify-field-results.py')
 def read(p):return json.loads(p.read_text(encoding='utf-8'))
 def free(kind=socket.SOCK_STREAM,address='127.0.0.1'):
     with socket.socket(socket.AF_INET,kind) as s:s.bind((address,0));return s.getsockname()[1]
+
+@contextmanager
+def hold_owned_unity_threads(witness, pid):
+    """Pause only the exact fixture-owned process, then undo each suspension."""
+    from ctypes import wintypes
+    kernel=witness.kernel
+    class ThreadEntry(ctypes.Structure):
+        _fields_=[('size',wintypes.DWORD),('usage',wintypes.DWORD),('id',wintypes.DWORD),('owner',wintypes.DWORD),
+                  ('base',wintypes.LONG),('delta',wintypes.LONG),('flags',wintypes.DWORD)]
+    definitions={
+        'GetProcessId':([wintypes.HANDLE],wintypes.DWORD),
+        'CreateToolhelp32Snapshot':([wintypes.DWORD,wintypes.DWORD],wintypes.HANDLE),
+        'Thread32First':([wintypes.HANDLE,ctypes.POINTER(ThreadEntry)],wintypes.BOOL),
+        'Thread32Next':([wintypes.HANDLE,ctypes.POINTER(ThreadEntry)],wintypes.BOOL),
+        'OpenThread':([wintypes.DWORD,wintypes.BOOL,wintypes.DWORD],wintypes.HANDLE),
+        'GetProcessIdOfThread':([wintypes.HANDLE],wintypes.DWORD),
+        'SuspendThread':([wintypes.HANDLE],wintypes.DWORD),
+        'ResumeThread':([wintypes.HANDLE],wintypes.DWORD),
+    }
+    for name,(arguments,result) in definitions.items():
+        function=getattr(kernel,name);function.argtypes=arguments;function.restype=result
+    if kernel.GetProcessId(witness.handle)!=pid or kernel.WaitForSingleObject(witness.handle,0)!=258:
+        raise RuntimeError('The original Unity process is not live')
+
+    def thread_ids():
+        snapshot=kernel.CreateToolhelp32Snapshot(4,0)
+        if snapshot in (None,ctypes.c_void_p(-1).value):raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            result=set()
+            row=ThreadEntry();row.size=ctypes.sizeof(row)
+            ok=kernel.Thread32First(snapshot,ctypes.byref(row))
+            while ok:
+                if row.owner==pid:result.add(row.id)
+                row.size=ctypes.sizeof(row)
+                ok=kernel.Thread32Next(snapshot,ctypes.byref(row))
+            if ctypes.get_last_error()!=18:raise ctypes.WinError(ctypes.get_last_error())
+            return result
+        finally:
+            kernel.CloseHandle(snapshot)
+
+    held={}
+    try:
+        for _ in range(4):
+            new=thread_ids()-held.keys()
+            if not new:break
+            for tid in new:
+                thread=kernel.OpenThread(0x0802,False,tid)
+                if not thread:
+                    if ctypes.get_last_error()==87:continue
+                    raise ctypes.WinError(ctypes.get_last_error())
+                if kernel.GetProcessIdOfThread(thread)!=pid or kernel.WaitForSingleObject(witness.handle,0)!=258:
+                    kernel.CloseHandle(thread)
+                    raise RuntimeError('Thread no longer belongs to the original Unity process')
+                if kernel.SuspendThread(thread)==0xffffffff:
+                    kernel.CloseHandle(thread)
+                    raise RuntimeError('Could not hold an original Unity thread')
+                held[tid]=thread
+        if not held or thread_ids()-held.keys():raise RuntimeError('Unity thread set did not stabilize')
+        yield len(held)
+    finally:
+        failed=False
+        for thread in reversed(tuple(held.values())):
+            if kernel.ResumeThread(thread)==0xffffffff:failed=True
+            kernel.CloseHandle(thread)
+        if failed:raise RuntimeError('Could not restore the original Unity threads')
 
 def replace_fixture_file(path, value):
     pending = path.with_suffix('.new')
@@ -101,6 +166,7 @@ def main():
     p.add_argument('--check-venue-preview', action='store_true', help='Run the shared Windows venue preview before both topology launches')
     p.add_argument('--check-venue-endpoint-batch', action='store_true', help='Verify endpoint batch retries and force a last-room transaction rollback')
     p.add_argument('--check-venue-ticket-freshness', action='store_true', help='Verify ticket issuance before and after a managed Linked source stops')
+    p.add_argument('--check-venue-ticket-recovery', action='store_true', help='Hold and resume the same source while one venue preview stays open')
     p.add_argument('--check-linked-room-enemies', action='store_true', help='Change one linked room through Chromium and verify original combat and replay')
     p.add_argument('--check-venue-tracking-gate', action='store_true', help='Reject full tracking Begin while the same native roster is otherwise ready')
     p.add_argument('--check-venue-participation-gate', action='store_true', help='Require all 25 effective native seats and verify their original Preparing frames')
@@ -206,6 +272,8 @@ def main():
         p.error('--check-venue-endpoint-batch requires --check-venue-launcher')
     if args.check_venue_ticket_freshness and (not args.check_venue_launcher or not shutil.which('node')):
         p.error('--check-venue-ticket-freshness requires --check-venue-launcher and Node.js with Playwright Chromium')
+    if args.check_venue_ticket_recovery and not args.check_venue_ticket_freshness:
+        p.error('--check-venue-ticket-recovery requires --check-venue-ticket-freshness')
     if args.check_linked_room_enemies and (not args.player_package or args.check_room_combat or not shutil.which('node')):
         p.error('--check-linked-room-enemies requires the player package, Node.js and a separate run from --check-room-combat')
     if args.check_venue_tracking_gate and not args.check_venue_begin:p.error('--check-venue-tracking-gate requires --check-venue-begin')
@@ -663,13 +731,51 @@ def main():
         check(all(row['problem'] is None for row in live['rooms'])
               and all(row['ticketSourceLive'] for row in request('/api/rooms/readiness')['rooms']),
               'Live managed native source issues one player ticket, one room ZIP and all five rooms')
+        def blocked():
+            preview=request('/api/vr-deployment/venue')
+            return preview if not preview['ready'] and all(row['problem']=='vr-venue-endpoint-stale' for row in preview['rooms']) else None
+        if args.check_venue_ticket_recovery:
+            opened=out/'ticket-recovery-browser-open.request'
+            paused=out/'ticket-recovery-browser-blocked.request'
+            descriptor=runtime/'ticket-recovery-private.json'
+            downloaded=runtime/'ticket-recovery-venue.zip'
+            output=out/'ticket-recovery-browser.json'
+            descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'mode':'Linked',
+                'recovery':{'ready':str(opened),'blocked':str(paused)}}),encoding='utf-8')
+            driver=ROOT/'tests/browser/check-vr-venue-tickets-native.cjs'
+            with (out/'ticket-recovery-browser.log').open('xb') as log:
+                browser=subprocess.Popen([shutil.which('node'),str(driver),str(descriptor),str(downloaded),str(output)],
+                    stdout=log,stderr=subprocess.STDOUT)
+                try:
+                    def marker(path):
+                        if browser.poll() is not None:raise RuntimeError('Original recovery browser exited early')
+                        return path.is_file()
+                    wait(lambda:marker(opened),25,'live preview opens in the original Chromium')
+                    with hold_owned_unity_threads(entry['witness'],entry['ready']['childPid']) as thread_count:
+                        held=wait(blocked,12,'the held native source expires')
+                        held_world=request(route+'/world')
+                        check(request(venue_path,venue_body,expected=409)['code']=='vr-venue-endpoint-stale',
+                              'Temporary native hold blocks the original venue request')
+                        wait(lambda:marker(paused),12,'original Chromium observes the same preview blocked')
+                    restored=wait(live_preview,18,'the same native source resumes publication')
+                    resumed_world=request(route+'/world')
+                    check(restored['rooms']==live['rooms'] and resumed_world['header']==held_world['header']
+                          and resumed_world['acceptedSequence']>held_world['acceptedSequence']
+                          and entry['witness'].kernel.WaitForSingleObject(entry['witness'].handle,0)==258
+                          and request(route+'/connection-endpoint')==endpoint,
+                          'Resumed original Unity handle advances the same stream without changing endpoints or admissions')
+                    check(browser.wait(timeout=35)==0 and read(output)['recoveredSamePreview'] and downloaded.is_file(),
+                          'One existing Chromium preview automatically reopens the same original venue and downloads its tickets')
+                    with zipfile.ZipFile(downloaded) as archive:
+                        check(archive.testzip() is None and len(archive.namelist())==6,'Recovered browser download contains all five original rooms')
+                    save('ticket-recovery-native.json',{'threadCount':thread_count,'held':held,'heldWorld':held_world,
+                        'restored':restored,'resumedWorld':resumed_world})
+                finally:
+                    if browser.poll() is None:browser.terminate();browser.wait(timeout=10)
         entry['process'].kill();entry['process'].wait(timeout=10)
         handle=entry['witness']
         check(handle.kernel.WaitForSingleObject(handle.handle,15000)==0,'Managed source crash stops the exact original Unity process')
         handle.close();entry['witness']=None
-        def blocked():
-            preview=request('/api/vr-deployment/venue')
-            return preview if not preview['ready'] and all(row['problem']=='vr-venue-endpoint-stale' for row in preview['rooms']) else None
         stale=wait(blocked,12,'managed capture freshness expires after the original source stops')
         check(request(player_path,{},'Room1',admission=first['admissionId'],expected=409)['code']=='ticket-source-unavailable'
               and request(bundle_path,room_body,'Room1',expected=409)['code']=='ticket-source-unavailable'

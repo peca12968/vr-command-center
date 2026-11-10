@@ -21,7 +21,10 @@ const guidance = {
   'venue-alignment-mismatch': '請選擇本房鎖定的原始校正檔'
 };
 
-export function mountVrVenueTickets(state, api, download) {
+const staleProblems = new Set(['vr-venue-endpoint-stale', 'venue-endpoint-stale']);
+const roomScope = rooms => JSON.stringify(rooms.map(({ ticketSourceLive, problem, ...scope }) => scope));
+
+export function mountVrVenueTickets(state, api, download, ticketSourceLive) {
   const $ = name => document.getElementById('vr-venue-' + name);
   const panel = $('panel'), read = $('read'), issue = $('issue'), rows = $('rooms'), status = $('status');
   const files = $('files');
@@ -48,6 +51,13 @@ export function mountVrVenueTickets(state, api, download) {
     rows.replaceChildren(); files.replaceChildren(); files.hidden = true; status.textContent = message;
   }
 
+  function roomProblem(room) {
+    if (room.problem && !staleProblems.has(room.problem)) return room.problem;
+    if (typeof room.ticketSourceLive !== 'boolean') return room.problem;
+    return ticketSourceLive(room.roomId, room.sessionId, room.endpoint) ? null
+      : preview.mixed ? 'venue-endpoint-stale' : 'vr-venue-endpoint-stale';
+  }
+
   function update() {
     const { actor, busy, pending: command } = state();
     panel.hidden = !active || actor?.role !== 'Master';
@@ -57,7 +67,21 @@ export function mountVrVenueTickets(state, api, download) {
     read.disabled = panel.hidden || busy || !!command || pending;
     const inputs = [...files.querySelectorAll('input')];
     for (const input of inputs) input.disabled = read.disabled;
-    issue.disabled = read.disabled || !preview?.ready || inputs.some(input => !input.files.length);
+    const problems = preview?.rooms.map(roomProblem) ?? [];
+    const ready = preview && (preview.ready || preview.rooms.some(room => staleProblems.has(room.problem))) && problems.every(problem => !problem);
+    for (const [index, problem] of problems.entries()) {
+      const note = problem ? ' · ' + (guidance[problem] ?? '需重新讀取') : '';
+      const item = rows.children[index]?.lastElementChild;
+      if (item && item.textContent !== note) item.textContent = note;
+    }
+    if (!pending && preview?.showStatus) {
+      const mode = preview.mixed ? 'VR／MR 混合獨立場' : preview.topology === 'Linked' ? '五房合併' : '五房獨立';
+      const message = ready ? `${mode} · 已讀取 25 席，請核對後配票。`
+        : problems.some(problem => staleProblems.has(problem)) ? '請確認各房列出的條件，原遊戲來源恢復後可繼續配票。'
+          : '請確認各房列出的條件，再重新讀取。';
+      if (status.textContent !== message) status.textContent = message;
+    }
+    issue.disabled = read.disabled || !ready || inputs.some(input => !input.files.length);
   }
 
   function begin(message) {
@@ -78,13 +102,13 @@ export function mountVrVenueTickets(state, api, download) {
       if (!request.current()) return;
       if (!Array.isArray(value?.rooms) || value.rooms.length !== 5 || value.rooms.some(room => !Array.isArray(room.seats)))
         throw new Error('Invalid venue preview');
-      preview = { ...value, mixed };
+      preview = { ...value, mixed, showStatus: true };
       for (const room of value.rooms) {
         const item = document.createElement('li'), destination = room.endpoint;
         const endpoint = destination ? `${destination.address}:${destination.port}${destination.address.startsWith('127.') ? '（僅本機）' : ''}` : '端點未公布';
         const seats = room.seats.map(seat => `${seat.number} ${seat.name}`).join('、');
-        const note = room.problem ? ' · ' + (guidance[room.problem] ?? '需重新讀取') : '';
-        item.textContent = `房間 ${room.roomId}${mixed && room.mode ? ' · ' + room.mode : ''} · ${room.missionName ?? '未準備場次'} · ${endpoint} · ${room.seats.length}/5 席${seats ? ' · ' + seats : ''}${note}`;
+        item.textContent = `房間 ${room.roomId}${mixed && room.mode ? ' · ' + room.mode : ''} · ${room.missionName ?? '未準備場次'} · ${endpoint} · ${room.seats.length}/5 席${seats ? ' · ' + seats : ''}`;
+        item.append(document.createElement('span'));
         rows.append(item);
         if (mixed && room.mode === 'MR' && room.alignmentSha256) {
           const label = document.createElement('label'), input = document.createElement('input');
@@ -95,14 +119,13 @@ export function mountVrVenueTickets(state, api, download) {
         }
       }
       files.hidden = files.children.length === 0;
-      status.textContent = value.ready ? `${mixed ? 'VR／MR 混合獨立場' : value.topology === 'Linked' ? '五房合併' : '五房獨立'} · 已讀取 25 席，請核對後配票。` : '請確認各房列出的條件，再重新讀取。';
     } catch {
       if (request.current()) status.textContent = '無法讀取五房名冊，請重試。';
     } finally { request.finish(); }
   });
 
   issue.addEventListener('click', async () => {
-    if (issue.disabled || !preview?.ready || rosterVersion() !== version) { update(); return; }
+    if (issue.disabled || !preview || preview.rooms.some(roomProblem) || rosterVersion() !== version) { update(); return; }
     const { mixed, rooms: confirmedRooms, topology } = preview;
     const confirmations = mixed ? confirmedRooms.filter(room => room.mode === 'MR').map(room => [
       room.roomId, document.getElementById(`mixed-venue-alignment-${room.roomId}`)?.files[0]
@@ -114,6 +137,7 @@ export function mountVrVenueTickets(state, api, download) {
       players: room.seats.map(({ playerId, admissionId }) => ({ playerId, admissionId }))
     })) };
     if (!mixed) body.topology = topology;
+    preview.showStatus = false;
     const request = begin('正在核對名冊並產生 25 份連線檔…');
     try {
       if (mixed) {
@@ -132,7 +156,7 @@ export function mountVrVenueTickets(state, api, download) {
       if (zip.type !== 'application/zip') throw new Error('Invalid venue archive');
       const current = await api(route);
       if (!request.current()) return;
-      if (!current?.ready || current.topology !== topology || JSON.stringify(current.rooms) !== JSON.stringify(confirmedRooms)) {
+      if (!current?.ready || current.topology !== topology || !Array.isArray(current.rooms) || roomScope(current.rooms) !== roomScope(confirmedRooms)) {
         clear('場次、端點或名冊已變更，未下載連線檔。請重新讀取五房名冊。');
         update(); return;
       }

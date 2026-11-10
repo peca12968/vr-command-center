@@ -16,7 +16,8 @@ internal static class MixedVenueDeployment
         public bool Ready => IsMixed(Rooms.Select(room => room.Mode)) && Rooms.All(room => room.Problem is null);
     }
     internal sealed record Room(int RoomId, Guid? SessionId, ExperienceMode? Mode, string? MissionName, ConnectionEndpoint? Endpoint,
-        VrVenueTickets.Seat[] Seats, string? AlignmentSha256, string? Problem);
+        VrVenueTickets.Seat[] Seats, string? AlignmentSha256, string? Problem,
+        [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] bool? TicketSourceLive = null);
     private sealed record ReadyRoom(Room Room, SessionView Session, ConnectionEndpoint Endpoint, Player[] Players, byte[]? AlignmentFile);
 
     private static bool IsMixed(IEnumerable<ExperienceMode?> modes) => modes.Distinct().Count(mode => mode.HasValue) == 2;
@@ -69,13 +70,13 @@ internal static class MixedVenueDeployment
             var roster = session.Players.Where(player => player.RoomId == roomId).OrderBy(player => player.Seat).ToArray();
             var seats = roster.Select(player => new VrVenueTickets.Seat(player.Seat + 1, player.Id, player.AdmissionId, player.Name)).ToArray();
             var problem = endpoint is null ? "venue-endpoint-missing"
-                : ticketSourceLive == false ? "venue-endpoint-stale"
                 : IPAddress.IsLoopback(IPAddress.Parse(endpoint.Address)) ? "venue-endpoint-loopback"
                 : !endpoints.Add((endpoint.Address, endpoint.Port)) ? "venue-endpoint-reused"
                 : mode == ExperienceMode.MR && alignment is null ? "venue-alignment-unlocked"
                 : seats.Length != SessionManager.PlayersPerRoom || (mode == ExperienceMode.MR && roster.Any(player => player.Headset != HeadsetKind.Quest3)) ? "venue-roster-changed"
-                : seats.Any(seat => !players.Add(seat.PlayerId) || !admissions.Add(seat.AdmissionId)) ? "venue-roster-reused" : null;
-            return new Room(roomId, session.Id, mode, session.Mission.Definition.Name, endpoint, seats, alignment, problem);
+                : seats.Any(seat => !players.Add(seat.PlayerId) || !admissions.Add(seat.AdmissionId)) ? "venue-roster-reused"
+                : ticketSourceLive == false ? "venue-endpoint-stale" : null;
+            return new Room(roomId, session.Id, mode, session.Mission.Definition.Name, endpoint, seats, alignment, problem, ticketSourceLive);
         }).ToArray());
     }
 

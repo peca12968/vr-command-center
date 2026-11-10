@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using VrCommand.Core;
 
 namespace VrCommand.Api;
@@ -15,7 +16,8 @@ internal static partial class VrVenueTickets
     internal sealed record Request(SessionMode Topology, RoomFence[] Rooms);
     internal sealed record RoomFence(int RoomId, Guid SessionId, Guid StreamId, TicketAdmission?[] Players);
     internal sealed record Seat(int Number, Guid PlayerId, Guid AdmissionId, string Name);
-    internal sealed record Room(int RoomId, Guid? SessionId, string? MissionName, ConnectionEndpoint? Endpoint, Seat[] Seats, string? Problem);
+    internal sealed record Room(int RoomId, Guid? SessionId, string? MissionName, ConnectionEndpoint? Endpoint, Seat[] Seats, string? Problem,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? TicketSourceLive = null);
     internal sealed record Preview(SessionMode? Topology, Room[] Rooms)
     {
         public bool Ready => Topology is not null && Rooms.All(room => room.Problem is null);
@@ -40,12 +42,12 @@ internal static partial class VrVenueTickets
                 .Select(player => new Seat(player.Seat + 1, player.Id, player.AdmissionId, player.Name)).ToArray();
             var problem = topology is null ? "vr-venue-topology-changed"
                 : endpoint is null ? "vr-venue-endpoint-missing"
-                : ticketSourceLive == false ? "vr-venue-endpoint-stale"
                 : topology == SessionMode.Independent && !endpoints.Add((endpoint.Address, endpoint.Port)) ? "vr-venue-endpoint-reused"
                 : seats.Length != SessionManager.PlayersPerRoom ? "vr-venue-roster-incomplete"
                 : seats.Any(seat => !players.Add(seat.PlayerId) || !admissions.Add(seat.AdmissionId)) ? "vr-venue-roster-reused"
+                : ticketSourceLive == false ? "vr-venue-endpoint-stale"
                 : null;
-            return new Room(roomId, session.Id, session.Mission.Definition.Name, endpoint, seats, problem);
+            return new Room(roomId, session.Id, session.Mission.Definition.Name, endpoint, seats, problem, ticketSourceLive);
         }).ToArray();
         return new(topology, rooms);
     }

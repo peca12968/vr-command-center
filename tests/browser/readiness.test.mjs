@@ -5,7 +5,7 @@ const code = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/rea
 const missionClock = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/mission-clock.js', import.meta.url), 'utf8');
 const connection = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/connection-ui.js', import.meta.url), 'utf8');
 const dataModule = source => 'data:text/javascript;base64,' + Buffer.from(source).toString('base64');
-const { readinessView, roomReadinessView, roomEndpointText, mrReadinessView, roomMissionTimeView, roomVenuePhaseView,
+const { readinessView, roomReadinessView, roomEndpointText, roomTicketSourceLive, mrReadinessView, roomMissionTimeView, roomVenuePhaseView,
   roomMrTrackingPauseTarget, roomMrPauseView, venueTrackingRow, roomPoseFrameTarget } =
   await import(dataModule(code.replace('./mission-clock.js', dataModule(missionClock)).replace('./connection-ui.js', dataModule(connection))));
 const player = { id: 'player', admissionId: 'first', roomId: 1, seat: 0 };
@@ -105,6 +105,16 @@ test('Room endpoints distinguish publication, loopback and shared connections in
     assert.equal(roomEndpointText(withEndpoint({ ...endpoint, ...invalid }), room, current), '連線端點未確認');
   assert.equal(roomEndpointText(withEndpoint(endpoint), room, { ...current, state: 'Ended' }), '連線端點未確認');
   assert.equal(roomEndpointText(withEndpoint(endpoint), { ...room, sessionId: 'replacement' }, current), '連線端點未確認');
+});
+test('A managed ticket preview requires a current frame from its own endpoint', () => {
+  const current = { ...session, combatStream: { streamId: 'stream' } };
+  const endpoint = { version: 1, sessionId: current.id, streamId: 'stream', address: '127.0.0.1', port: 7777, sessionEnded: false };
+  const snapshot = extra => ({ ...overview, rooms: [{ ...roomRow, endpoint, ticketSourceLive: true, sourceAgeMilliseconds: 4000, ...extra }] });
+  assert.equal(roomTicketSourceLive(snapshot(), room, current, endpoint, 1000), true);
+  assert.equal(roomTicketSourceLive(snapshot(), room, current, endpoint, 1001), false);
+  assert.equal(roomTicketSourceLive(snapshot({ ticketSourceLive: false }), room, current, endpoint, 0), false);
+  assert.equal(roomTicketSourceLive(snapshot(), room, current, { ...endpoint, port: 7778 }, 0), false);
+  assert.equal(roomTicketSourceLive(snapshot({ sessionSequence: current.sequence - 1 }), room, current, endpoint, 0), false);
 });
 test('Venue confirmation requires its exact room, phase and fresh accepted world evidence', () => {
   const paused = { ...session, state: 'Paused' };

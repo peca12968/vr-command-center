@@ -110,6 +110,13 @@ export function roomEndpointText(report, room, session) {
     + (row.ticketSourceLive === false ? ' · 遊戲來源暫未確認，暫停配票' : '');
 }
 
+export function roomTicketSourceLive(report, room, session, original, elapsed) {
+  const row = roomReadinessRow(report, room, session), endpoint = row?.endpoint;
+  return row?.ticketSourceLive === true && validEndpoint(endpoint, session) && !endpoint.sessionEnded
+    && endpoint.streamId === original?.streamId && endpoint.address === original.address && endpoint.port === original.port
+    && Number.isFinite(row.sourceAgeMilliseconds) && row.sourceAgeMilliseconds + elapsed <= 5000;
+}
+
 export function roomVenuePhaseView(report, room, session, elapsed, unavailable = false) {
   const row = roomReadinessRow(report, room, session), phase = row?.venuePhase;
   if (!phase || !Number.isSafeInteger(phase.appliedAtSequence) || phase.appliedAtSequence < 1 || phase.appliedAtSequence > row.sessionSequence
@@ -339,6 +346,11 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     if (sessionId !== null && room?.sessionId !== sessionId) return null;
     return settingView(room, sessions.find(row => row.id === room?.sessionId), performance.now() - started, kind);
   }
+  function ticketSourceLive(roomId, sessionId, endpoint) {
+    const { rooms, sessions } = getState(), room = rooms.find(row => row.id === roomId);
+    return active && !failed && document.visibilityState === 'visible' && room?.sessionId === sessionId
+      && roomTicketSourceLive(report, room, sessions.find(row => row.id === sessionId), endpoint, performance.now() - started);
+  }
   function settingFrame(roomId, kind) {
     return settingStatus(roomId, kind)?.target;
   }
@@ -539,7 +551,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') update(); else reset(); });
   setInterval(update, 250);
-  return { update, venueReady, venueBegin, venueResume, settingFrame, settingStatus, trackingPause, vrResume, poseFrame,
+  return { update, venueReady, venueBegin, venueResume, settingFrame, settingStatus, trackingPause, vrResume, poseFrame, ticketSourceLive,
     active(value) { active = value; if (value) update(); else reset(); } };
 }
 
