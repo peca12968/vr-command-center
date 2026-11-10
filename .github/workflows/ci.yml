@@ -26,6 +26,7 @@ jobs:
       - run: python -m unittest discover -s tests -p test_control_package.py
       - run: python -m unittest discover -s tests -p test_server_package.py
       - run: python -m unittest discover -s tests -p test_venue_release.py
+      - run: python -m unittest discover -s tests -p test_venue_operator.py
       - run: python -m unittest discover -s tests -p test_field_results.py
       - run: python -m unittest discover -s tests -p test_lan_preflight.py
       - run: python -m unittest discover -s tests -p test_quest_udp_probe.py

@@ -187,6 +187,19 @@ API **0.31.0**／控制台 **0.31.19**，管理服務可以獨立解壓執行。
 
 本輪在有SDK的這台PC，移除啟動環境的dotnet PATH、設定不存在的DOTNET_ROOT，再從實際API的OS程序handle與載入的coreclr路徑確認使用包內執行環境。這不是乾淨新機、跨機LAN、TLS、頭盔或25位操作驗收；網路可達性與場館部署仍須另驗。啟動器不設定防火牆或系統網路。原Unity0.39.0／code49／NGO29與e0d60e4e...雙平台保持，未因本輪重新執行Editor或建置頭盔。
 
+## 從房控電腦核對管理服務
+
+場館設定好管理網站的 HTTPS 入口後，在主控和五台房控電腦分別執行預檢。管理員另行提供正式 DNS 名稱（或憑證涵蓋的 IPv4）、埠號，以及站台葉憑證 DER 的 SHA-256。若管理員給的是 DER `.cer` 檔，可用 `Get-FileHash -Algorithm SHA256 -LiteralPath '.\management-leaf.cer'` 取得指紋。
+
+```powershell
+$fingerprint = Read-Host '管理員提供的站台憑證 SHA-256'
+python .\scripts\check-venue-operator.py https://control.venue.example --role room3 --certificate-sha256 $fingerprint
+```
+
+主控選 `master`，房控依工作站選 `room1` 至 `room5`。提示出現後，只輸入該工作站被分配的操作員金鑰。若場館使用自己的 CA，可加上 `--ca-file .\venue-ca.pem` 讓這次檢查使用該 CA。預檢在每次送出請求前確認 TLS 信任鏈、站台名稱和葉憑證指紋，遇到轉址會停止。更換站台憑證後，使用管理員重新提供的指紋。
+
+退出碼 `0` 和 `complete: true` 表示從本台工作站讀到控制台頁面、匿名存取遭拒，且主控看見五房或房控只看見自己的房間，每房容量為五席。失敗時可看 `failedCheck` 和 `error`。JSON 只保留來源、預期角色與驗證結果。此預檢使用既有 HTTPS 入口，涵蓋管理網站的唯讀連線和房間範圍。玩家 UDP、控制操作及現場跨機容量另有驗收。 [玩家連線驗收](EXTERNAL_CLIENTS.md#核對-25-席各自的直連來源)
+
 ## 啟動與停止的證據
 
 啟動器先核對manifest與來源檔案，再取得所選實例的exclusive lease。只啟動自己包內的API apphost，顯式指定資料／金鑰路徑並清除繼承的角色金鑰等覆寫。API在原始資料恢復與服務啟動成功後，透過私有stdout輸出本次隨機token的就緒事件；啟動器另核對原child仍存活、實際coreclr來自本包及原Master身分。單純程序啟動、埠號已開或別的服務回應不算就緒。
