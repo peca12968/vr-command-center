@@ -50,6 +50,12 @@ Windows 管理包 0.31.31 起，主控可在五房總覽使用「全館暫停與
 
 `GET /api/rooms/readiness` 會在目前階段由全館命令建立時附上 `venuePhase`，包含原命令 `action`、`appliedAtSequence`、有效的 `worldSequence` 與 `readyToResume`。快照無效時 `worldSequence` 為 `null`，命令序號仍保留。重送原管理命令會取得原回條，房卡仍依目前快照判斷遊戲端是否已套用。
 
+### 逐房確認可以繼續的條件
+
+管理包 0.31.85 在「全館場次控制」列出本次可繼續批次的每個原房間。可分辨尚無遊戲來源、等待遊戲端套用暫停、快照過期與可繼續。MR 快照已確認暫停後，還會標示等待最新名冊及設定同步，或指出等待追蹤的席號。合併場已就緒的房間會標示正在等待同場其他房間。等候席位只包含目前仍須追蹤的玩家，已淘汰席位依原規則處理。
+
+房卡會顯示同一份原因。`GET /api/rooms/readiness` 在有有效的 MR 全館暫停畫格時，可從 `venuePhase.mrResume` 讀取 `state` 與該房 `waitingSeats`。房控只收到本房席位。當暫停畫格過期或場次已繼續時，舊席位提示會撤下。整批繼續仍由管理服務在送出時核對各目標的原有條件。
+
 ## 契約與升級
 
 - `SetMissionClock` 走原 `/api/sessions/{id}/commands`，包含 `missionClock:{autoEnd:true}` 與正常 commandId／expectedSequence。Master／同房 RoomController 維持原權限；Linked 限 Master。

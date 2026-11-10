@@ -601,6 +601,20 @@ function applyVenuePermissions() {
   evidence.hidden = !resume.length;
   const message = waiting.length ? `等候房間 ${venueRoomText(waiting)} 的遊戲端確認或 MR 追蹤。` : '目標房間的暫停快照已確認。';
   if (evidence.textContent !== message) evidence.textContent = message;
+  const list = $('venue-resume-rooms');
+  const rows = resume.flatMap(target => target.roomIds.map(room => ({ room, ...roomReadiness.venueResume(target, room) })))
+    .sort((left, right) => left.room - right.room);
+  list.hidden = !rows.length;
+  const signature = JSON.stringify(rows.map(({ room, state, text }) => [room, state, text]));
+  if (list.dataset.rows !== signature) {
+    list.dataset.rows = signature;
+    list.replaceChildren(...rows.map(({ room, state, text }) => {
+      const item = element('li', `房間 ${room} · ${text}`);
+      item.dataset.resumeRoom = room;
+      item.dataset.resumeState = state;
+      return item;
+    }));
+  }
 }
 async function venuePhase(action, { environment, enemyPolicy } = {}) {
   if (!master() || state.pending) return;

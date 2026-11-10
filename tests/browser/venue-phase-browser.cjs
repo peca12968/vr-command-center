@@ -140,6 +140,9 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await roomPhase(1).filter({ hasText: '全館暫停待確認' }).waitFor();
     check(await page.locator('#venue-resume').isDisabled(),
       'An accepted management pause displays a separate waiting game status and disables whole-venue Resume');
+    check(await page.locator('[data-resume-room]').count() === 2
+      && (await page.locator('[data-resume-room="2"]').innerText()).includes('等待遊戲來源'),
+      'The venue Resume preview shows the original target rooms and identifies a missing game source');
     await run(ids[1], 'Resume'); await run(ids[1], 'Pause');
     await page.locator('#refresh').click(); await summary.filter({ hasText: /^可暫停 無 · 可繼續 房間 1$/ }).waitFor();
     const paused = await api(`/sessions/${ids[0]}`);
@@ -149,11 +152,16 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await roomPhase(2).waitFor({ state: 'hidden' });
     check(await roomPhase(1).filter({ hasText: '全館暫停已套用' }).isVisible(),
       'The original source confirms the venue pause while the later manual pause has no venue marker');
+    check(await page.locator('[data-resume-room="1"][data-resume-state="Ready"]').isVisible()
+      && await page.locator('[data-resume-room="2"]').count() === 0,
+      'A confirmed original pause is marked ready while a later manual pause leaves the preview');
     await panel.screenshot({ path: path.join(screenshots, 'venue-phase-resume.png') });
     await roomPhase(1).filter({ hasText: '快照已過期' }).waitFor();
     const declined = await api('/venue/phase', 'POST', { action: 'Resume', targets: pausePlan }, 'Master', 409, undefined, randomUUID());
     check(declined.code === 'venue-pause-not-observed' && declined.roomIds.join() === '1' && await page.locator('#venue-resume').isDisabled(),
       'Expired pause evidence clears the live confirmation and the HTTP API rejects an early Resume');
+    check(await page.locator('[data-resume-room="1"][data-resume-state="Stale"]').isVisible(),
+      'The room preview withdraws readiness when the original paused frame expires');
     await publishUntil(publish, paused, allowed);
     await click('resume', '房間 1'); await notice.filter({ hasText: '全館管理命令已確認' }).waitFor();
     const states = await Promise.all(ids.map(id => api(`/sessions/${id}`).then(session => session.state)));

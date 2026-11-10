@@ -92,7 +92,7 @@ test('Venue confirmation requires its exact room, phase and fresh accepted world
   const phase = { action: 'Pause', appliedAtSequence: 9, worldSequence: 12, readyToResume: true };
   const source = venuePhase => ({ ...overview, rooms: [{ ...roomRow, venuePhase }] });
   assert.deepEqual(roomVenuePhaseView(source(phase), room, paused, 1490),
-    { applied: true, ready: true, action: 'Pause', sequence: 9, text: '全館暫停已套用' });
+    { applied: true, ready: true, action: 'Pause', sequence: 9, state: 'Ready', text: '全館暫停已套用 · 可繼續' });
   assert.match(roomVenuePhaseView(source({ ...phase, readyToResume: false }), room, paused, 0).text, /等候 MR/);
   assert.match(roomVenuePhaseView(source(phase), room, paused, 1490.01).text, /快照已過期/);
   assert.match(roomVenuePhaseView(source(phase), room, paused, 0, true).text, /未確認/);

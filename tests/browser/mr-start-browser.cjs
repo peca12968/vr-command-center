@@ -263,6 +263,44 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     check((await api(route + '/commands', 'POST', resumed.intent)).duplicate === true,
       'The exact accepted MR Resume is idempotent');
     publish(resumed.body.session);
+    const targets = action => api('/venue/phase').then(plan => plan[action.toLowerCase()]
+      .map(({ sessionId, phaseSinceSequence }) => ({ sessionId, phaseSinceSequence })));
+    await api('/venue/phase', 'POST', { action: 'Pause', targets: await targets('Pause') }, 'Master', 200, undefined, randomUUID());
+    const venuePaused = await api(route), venueResume = page.locator('#venue-resume');
+    const resumeRoom = (room, state) => page.locator(`[data-resume-room="${room}"][data-resume-state="${state}"]`);
+    await publishUntil(panel, 'WaitingPlayers', venuePaused, [2], () => resumeRoom(4, 'WaitingPlayers').isVisible());
+    check((await resumeRoom(4, 'WaitingPlayers').innerText()).includes('等候席位 2 的追蹤')
+      && await page.locator('[data-resume-state="WaitingLinkedRooms"]').count() === 4 && await venueResume.isDisabled(),
+      'The venue Resume preview names the missing original seat and distinguishes the four other rooms in the Linked session');
+    publish(venuePaused, [2]);
+    const own = (await api('/rooms/readiness', 'GET', undefined, 'Room4')).rooms;
+    const peer = (await api('/rooms/readiness', 'GET', undefined, 'Room1')).rooms;
+    check(own.length === 1 && own[0].roomId === 4 && own[0].venuePhase.mrResume.waitingSeats.join() === '2'
+      && peer.length === 1 && peer[0].roomId === 1 && peer[0].venuePhase.mrResume.waitingSeats.length === 0,
+      'The paused tracking API scopes waiting seats to the requesting room');
+    await page.locator('#venue-resume-rooms').screenshot({ path: path.join(screenshots, 'mr-venue-resume-seats.png') });
+    const revised = await api(route + '/commands', 'POST', { commandId: randomUUID(), action: 'SetEnvironment', expectedSequence: venuePaused.sequence,
+      environment: { ...venuePaused.environment, weather: 'Rain' } });
+    await publishUntil(panel, 'WaitingRevision', venuePaused, [2], () => resumeRoom(4, 'WaitingRevision').isVisible());
+    check((await resumeRoom(4, 'WaitingRevision').innerText()).includes('最新名冊及設定同步') && await venueResume.isDisabled(),
+      'A newer paused revision replaces stale seat details with the revision blocker');
+    const originalTargets = await targets('Resume');
+    publish(venuePaused, [2]);
+    const declined = await api('/venue/phase', 'POST', { action: 'Resume', targets: originalTargets }, 'Master', 409, undefined, randomUUID());
+    check(declined.code === 'venue-resume-not-ready' && (await api(route)).sequence === revised.session.sequence,
+      'The API rejects the stale tracked snapshot without advancing the batch');
+    await publishUntil(panel, 'Ready', revised.session, [], () => venueResume.isEnabled());
+    check(await page.locator('[data-resume-state="Ready"]').count() === 5,
+      'A fresh current paused frame clears all five room blockers without requiring the eliminated seat');
+    publish(revised.session);
+    const resumeResponse = page.waitForResponse(response => response.url().endsWith('/api/venue/phase')
+      && response.request().method() === 'POST' && response.request().postDataJSON().action === 'Resume');
+    page.once('dialog', dialog => dialog.accept());
+    await venueResume.click();
+    check((await resumeResponse).status() === 200 && (await api(route)).state === 'Running',
+      'A confirmed venue Resume continues the original Linked MR session');
+    await page.locator('#venue-resume-rooms').waitFor({ state: 'hidden' });
+    publish(await api(route));
     const { session: ended } = await api(route + '/commands', 'POST', { commandId: randomUUID(), action: 'End' });
     publish(ended);
     await api(route + '/combat-stream/seal', 'POST', { streamId, finalSequence: 1 }, 'GameServer');

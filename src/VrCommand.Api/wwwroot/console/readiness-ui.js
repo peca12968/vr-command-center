@@ -103,9 +103,29 @@ export function roomVenuePhaseView(report, room, session, elapsed, unavailable =
   const source = unavailable ? 'Unavailable' : sourceAt(row, elapsed);
   const applied = source === 'Fresh' && Number.isSafeInteger(phase.worldSequence) && phase.worldSequence > 0;
   const ready = applied && phase.action === 'Pause' && phase.readyToResume;
-  const text = applied ? `${verb}已套用` + (phase.action === 'Pause' && !ready ? ' · 等候 MR 追蹤' : '')
-    : `${verb}待確認 · ${source === 'Fresh' ? '等待階段同步' : labels[source]}`;
-  return { applied, ready, action: phase.action, sequence: phase.appliedAtSequence, text };
+  let state = applied ? 'Applied' : source === 'Fresh' ? 'PhasePending' : source;
+  let detail = applied ? '' : labels[state];
+  if (applied && phase.action === 'Pause') {
+    state = ready ? 'Ready' : 'WaitingTracking';
+    detail = ready ? '可繼續' : '等候 MR 追蹤';
+    const mr = phase.mrResume;
+    if (!ready && session.environment?.mode === 'MR' && mr?.state === 'WaitingRevision') {
+      state = 'WaitingRevision'; detail = '等候最新名冊及設定同步';
+    } else if (!ready && session.environment?.mode === 'MR' && mr?.state === 'WaitingProfile') {
+      state = 'WaitingProfile'; detail = '等候 Quest 3 MR 遊戲來源';
+    } else if (!ready && session.environment?.mode === 'MR' && mr?.state === 'WaitingPlayers'
+      && Array.isArray(mr.waitingSeats) && mr.waitingSeats.length <= row.registered
+      && mr.waitingSeats.every((seat, index, seats) => Number.isInteger(seat) && seat >= 1 && seat <= room.capacity
+        && (index === 0 || seats[index - 1] < seat))) {
+      if (mr.waitingSeats.length) {
+        state = 'WaitingPlayers'; detail = `等候席位 ${mr.waitingSeats.join('、')} 的追蹤`;
+      } else if (session.mode === 'Linked') {
+        state = 'WaitingLinkedRooms'; detail = (row.registered ? '本房席位就緒' : '本房無登記席位') + ' · 等候同場其他房間';
+      }
+    }
+  }
+  const text = `${verb}${applied ? '已套用' : '待確認'}` + (detail ? ` · ${detail}` : '');
+  return { applied, ready, action: phase.action, sequence: phase.appliedAtSequence, state, text };
 }
 
 function roomVenueSettingView(row, setting, elapsed, unavailable, label, details) {
@@ -339,14 +359,18 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     if (action === 'Begin') return policy !== 'normal'
       ? target.roomIds.every(room => venueBegin(target, room, policy).ready)
       : venueBegin(target, target.roomIds[0]).ready;
-    if (!active || failed) return false;
+    return venueResume(target, target.roomIds[0]).ready;
+  }
+  function venueResume(target, roomId) {
+    const waiting = { ready: false, state: 'Updating', text: '等待目前場次的暫停確認' };
+    if (!active || failed) return waiting;
     const { rooms, sessions } = getState();
-    const room = rooms.find(row => row.id === target.roomIds[0] && row.sessionId === target.sessionId);
+    const room = rooms.find(row => row.id === roomId && row.sessionId === target.sessionId);
     const session = sessions.find(row => row.id === target.sessionId);
-    if (!room || !session) return false;
+    if (!room || !session) return waiting;
     const elapsed = performance.now() - started;
     const venue = roomVenuePhaseView(report, room, session, elapsed);
-    return venue?.ready === true && venue.sequence === target.phaseSinceSequence;
+    return venue?.action === 'Pause' && venue.sequence === target.phaseSinceSequence ? venue : waiting;
   }
   function renderVenueTracking(rooms, sessions, actor, elapsed) {
     const panel = document.getElementById('venue-live-tracking');
@@ -463,7 +487,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
   }
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') update(); else reset(); });
   setInterval(update, 250);
-  return { update, venueReady, venueBegin, settingFrame, settingStatus, trackingPause, vrResume,
+  return { update, venueReady, venueBegin, venueResume, settingFrame, settingStatus, trackingPause, vrResume,
     active(value) { active = value; if (value) update(); else reset(); } };
 }
 
