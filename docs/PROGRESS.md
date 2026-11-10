@@ -1,5 +1,15 @@
 # 開發進度
 
+## 2026-11-10 配票下載前再次核對名冊
+
+控制台 0.31.74 收到原簽發回應後再讀取有效場次及名冊，核對單席、整房與五房配票範圍。VR 及混合五房也比對原公告端點，MR 核對校正鎖定值。名冊或場次變更時停止下載。玩家入場時仍由遊戲伺服器核對原票券。 [配票操作](EXTERNAL_CLIENTS.md#下載前再次核對名冊)
+
+- 舊 0.31.73 單席、整房、合併 VR 和獨立 MR 在另一位操作員更換原入場後各下載一份失效檔案。受控測試保留真正的 HTTP 200 簽發回應，於改名冊後送達瀏覽器，四例原結果保存在 `console-ticket-download-before-5e4ec95a`、`console-ticket-vr-venue-tickets-before-9afe2340` 與 `console-ticket-mr-venue-bundle-before-9afe2340`。新版四例皆收到一次簽發回應且零下載。
+- 管理包 `artifacts/windows-control-console-0.31.74-ticket-download-win-x64.zip` 為 52,829,273 bytes，SHA-256 `5d42f2497a03df275644c5a06f71c4c60abe1048089c34da81750d315351fe80`。172 份來源、520 個執行檔案及 540 筆清單核對。解壓包專測 5 項單席與整房、24 項五房 VR、10 項五房 MR。完整回歸通過 105 項 Node、706 項 Chromium、755 項 HTTP、7 項管理包工具及 10 項伺服器封裝工具檢查。瀏覽器證據 `console-ticket-download-*-d5274842`。管理包 `run-1fce0b23524e4e09ac1c03ab2df19aa8` 通過 107 項，C／F 27 檔雜湊一致。
+- Windows 0.49.0 純 MR `run-f90cadae838045959f4a208c21927bdf` 通過 140 項，獨立與合併各核對 25 個模擬 ADB 席位及指定 5 席，準備中共封存 620 格，C／F 57 檔相符。混合場館 `run-3cb9b4c0538a451793f29965b7ca768e` 通過 123 項，主控台 25 席 ZIP 與五個原端點相符，核對指定 5 個 Quest 模擬席與 Windows 票券交接。封存 562 格，C／F 52 檔相符。
+- 純 VR `run-4227b1058e924b26878175858785fd44` 通過 381 項。獨立與合併都從主控台下載原 25 席 ZIP，各有 25 個同機 Windows 模擬玩家以原票券入場。六場共 1,572 格雙封存回放、50 份原戰績及伺服器確認，C／F 222 檔相符。三組測試皆清理完成且無活躍場次，原生輸出為 `ticket-download-native-{mr,mixed,vr}-cbd413.log`。
+- 功能與管理包來源 `30c152f70c88add29a150afa3d47bbfb150bc3cf`。GitHub Actions job `129540649299` 因帳務或支出上限未啟動。實體頭盔、跨機 25 人、實體 MR 與廠商硬體仍待現地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42728628806)
+
 ## 2026-11-10 場次與戰績採用同一序號
 
 控制台 0.31.73 從同一次管理服務讀取顯示場次狀態、玩家戰績和最近 20 筆事件，沿用原統計公式、報表及權限。 [操作方式](REPORTS.md#場次與戰績同步)
