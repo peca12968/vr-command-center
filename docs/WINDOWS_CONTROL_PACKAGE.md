@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `windows-control-console-0.31.73-statistics-snapshot-win-x64.zip` 提供同序號的場次、玩家戰績與最近事件。ZIP 為 52,827,832 bytes，SHA-256 `d5e948cacbdda15a9093cd6806ea287a20313e98efaed5c7ea133dde5daac5d6`，解壓核對 540 筆清單與 520 個執行檔案。 [戰績操作](REPORTS.md#場次與戰績同步)
+
 2026-11-10 `windows-control-console-0.31.72-live-tracking-win-x64.zip` 提供執行中五房追蹤總覽。ZIP 為 52,827,383 bytes，SHA-256 `51d69438ecb3b8565d92a0cae98926ddb52d048fdef9a24b00e0af0b40afc737`，解壓核對 540 筆清單與 520 個執行檔案。 [操作方式](PLAYER_READINESS.md#執行中五房追蹤總覽)
 
 2026-11-10 `windows-control-console-0.31.71-environment-batch-win-x64.zip` 提供最近一批全館環境指令的逐房核對及快照入口。ZIP 為 52,823,437 bytes，SHA-256 `daad337381f86a80dd65889a5405d2ec846d40d0fed9c45f9bb3c07d162fcb43`。解壓核對 540 筆清單，含 520 個執行檔案，通過 106 項管理包檢查。 [環境核對](ENVIRONMENT.md#核對最近一批環境指令)

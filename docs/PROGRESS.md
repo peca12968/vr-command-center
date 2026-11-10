@@ -1,5 +1,16 @@
 # 開發進度
 
+## 2026-11-10 場次與戰績採用同一序號
+
+控制台 0.31.73 從同一次管理服務讀取顯示場次狀態、玩家戰績和最近 20 筆事件，沿用原統計公式、報表及權限。 [操作方式](REPORTS.md#場次與戰績同步)
+
+- 舊 0.31.72 控制台在真正的戰績 GET 延遲時顯示第 4 筆戰績，但場次標頭與最近事件已顯示第 7 筆。原失敗保存為 `console-statistics-snapshot-before-82b1ecc1`。新版解壓包專測 4 項通過，三者一起顯示第 4 筆，再一起更新至第 7 筆。證據 `console-statistics-snapshot-focused-3d264e82`。
+- 通過 1,003 項領域、755 項 HTTP 與 81 項世界串流檢查，紀錄 `statistics-snapshot-backend-f8774729.log`。HTTP 核對最近 20 筆順序、房間權限、等待補送與 API 重開後的戰鬥封存。
+- 管理包 `artifacts/windows-control-console-0.31.73-statistics-snapshot-win-x64.zip` 為 52,827,832 bytes，SHA-256 `d5e948cacbdda15a9093cd6806ea287a20313e98efaed5c7ea133dde5daac5d6`。172 份來源、520 個執行檔案、540 筆清單核對。首輪管理包驗證器仍寫死 0.31.72，保留失敗 `run-ba7e0ebd692844f9b40d0a251223a779`。更新檢查後，同一解壓包通過 107 項，證據 `run-74234f3d26d0469a98bcccecd5b22363`。兩場清理後 C／F 各 9、27 檔雜湊相符。
+- 最終解壓包通過 105 項 Node、702 項 Chromium 及 7 項管理封裝工具測試。完整瀏覽器證據 `console-statistics-snapshot-full-7c763400`。
+- Windows 原生 `run-03ee6aa86554499c84ea479bcd7989e8` 通過 395 項。獨立與合併各有 25 個同機 Windows 玩家入場，213 筆原傷害事件、六場共 1,842 格封存回放、50 份戰績與原伺服器確認。從實際主控台結束第 1 房，封存後五名玩家每欄戰績、場次序號及最新事件皆與原 API 核對，第 33 筆為戰鬥封存。證據 `closure-ui/archive-battle-overview.json`。C／F 220 檔雜湊一致，無活躍場次或殘留測試程序。
+- 功能與管理包來源 `42ccb83a868df1b8485698709f13d49d7f796762`，原生與管理包驗證器來源 `075795fed57b02435eb4e4c197820ddc992c31a0`。兩個 GitHub Actions job `129534749311`、`129537248155` 因帳務或支出上限未啟動。跨機 25 人、Quest 3、VIVE XR、實體 MR 與廠商硬體仍待現地驗收。 [功能 Actions](https://github.com/peca12968/vr-command-center/actions/runs/42726906379) · [驗證 Actions](https://github.com/peca12968/vr-command-center/actions/runs/42727634462)
+
 ## 2026-11-10 Quest 3 批次部署核對裝置身分
 
 完整與部分 Quest 裝置清單均讀取裝置回報的 Android 序號。多個 ADB 連線識別碼回報同一序號時，整批在預檢停止。每席寫入前再次核對，若連線指向不同裝置或序號已不可讀，保留前面各席結果並停止。報告只保留席位及狀態。 [部署操作](QUEST3.md#用裝置清單部署-25-席)
