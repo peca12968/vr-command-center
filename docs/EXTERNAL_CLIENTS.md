@@ -32,7 +32,7 @@ if ($LASTEXITCODE -eq 0) {
 
 Windows 遊戲伺服器包可獨立啟動既有 Preparing VR 場次。CLI 已通過同機五房獨立與 Linked，WinForms 已驗證載入場次、啟動和封存後停止。 [Windows 遊戲伺服器包](WINDOWS_SERVER_PACKAGE.md)
 
-啟動器 1.8 可使用一份場館計畫，啟動五個獨立來源或一個合併來源。控制台 0.31.97 可下載包含原房號和場次的計畫。等全館就緒檔確認各場的 UDP 綁定及公告後，再從控制台配票。 [下載場館計畫](WINDOWS_SERVER_PACKAGE.md#從主控台下載場館計畫)
+啟動器 1.9 可從視窗或命令列使用一份場館計畫，啟動五個獨立來源或一個合併來源。控制台 0.31.97 以上可下載包含原房號和場次的計畫。等全館就緒檔確認各場的 UDP 綁定及公告後，再從控制台配票。 [下載場館計畫](WINDOWS_SERVER_PACKAGE.md#從主控台下載場館計畫) [五房視窗操作](WINDOWS_SERVER_PACKAGE.md#從-windows-視窗核對並啟動)
 
 API／控制台0.31.0可另用[Windows可攜管理服務](WINDOWS_CONTROL_PACKAGE.md)部署管理網站，含自己的.NET執行環境與繁中啟動器。已用真正GUI／封裝API驗證啟停、資料與角色重開，原Unity0.39／NGO29保持；管理服務、遊戲伺服器和玩家仍分開運行。以下0.30工具段落保留原功能範圍，實際LAN／頭盔仍待。
 
