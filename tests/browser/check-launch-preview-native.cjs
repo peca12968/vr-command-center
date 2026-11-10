@@ -32,7 +32,7 @@ async function verifyRoomView(page, api, route, room) {
   assert.deepEqual(snapshot.counts, ['all', ...rooms.map(String)].map(id => {
     const localPlayers = players.filter(player => id === 'all' || player.roomId === Number(id));
     const localEnemies = enemies.filter(enemy => id === 'all' || enemy.roomId === Number(id));
-    return [id, `連線玩家 ${localPlayers.filter(player => player.connected).length}/${localPlayers.length} · 存活敵軍 ${localEnemies.filter(enemy => enemy.health > 0).length}/${localEnemies.length}`, String(id === String(room))];
+    return [id, `此格有效姿態 ${localPlayers.filter(player => player.health > 0 && player.connected && ['Simulated', 'Tracked'].includes(player.rig.kind)).length}/${localPlayers.length} · 存活敵軍 ${localEnemies.filter(enemy => enemy.health > 0).length}/${localEnemies.length}`, String(id === String(room))];
   }));
   const statistics = exact.statistics.filter(player => room === 'all' || player.roomId === room);
   assert.deepEqual(snapshot.statistics, statistics.map(p => [p.name, p.ammoUsed, p.kills, p.damageTaken, p.hitsReceived, p.accuracyPercent + '%', p.health].map(String)));

@@ -50,7 +50,9 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await page.locator('#world-room').selectOption('2');
     check((await page.locator('#world-statistics-heading').innerText()).startsWith('房間 2') && await page.locator('#world-camera').inputValue() === 'top',
       'The room selector scopes frame statistics and preserves the overhead preset');
-    await require('./live-watch-fault.cjs').checkLiveWatch({ page, base, live, api, canvas, screenshots, check, extended: liveWatchOnly });
+    const { checkLiveMetadata, checkLiveWatch } = require('./live-watch-fault.cjs');
+    await checkLiveMetadata({ page, base, live, api, canvas, check });
+    await checkLiveWatch({ page, base, live, api, canvas, screenshots, check, extended: liveWatchOnly });
     if (liveWatchOnly) return;
     await page.locator('#world-room').selectOption('all');
     check((await canvas.getAttribute('data-camera')).split(',').every(value => Number.isFinite(Number(value))), 'All-room focus restores a finite camera instead of using an invalid room coordinate');

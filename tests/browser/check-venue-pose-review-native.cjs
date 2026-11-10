@@ -9,7 +9,8 @@ async function main() {
   const [descriptor, out] = process.argv.slice(2);
   const { base, key, sessionId, roomId, seat, playerId, streamId, venueOverview } = JSON.parse(await fs.readFile(descriptor, 'utf8'));
   assert.match(base, /^http:\/\/127\.0\.0\.1:\d+$/);
-  const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_CLOSURE_CHROMIUM,
+    args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const errors = [], writes = [], watches = [];
@@ -60,6 +61,9 @@ async function main() {
     assert.equal(viewed.observedSequence, initial.sequence);
     assert.equal(await page.locator('#world-room').inputValue(), String(roomId));
     assert.equal(await page.locator('#world-camera').inputValue(), 'top');
+    const actor = page.locator('#world-actor'), details = page.locator('#world-actor-info');
+    await actor.selectOption('p:' + playerId);
+    assert.match(await details.innerText(), /此格姿態未同步 · 頭手來源 None/);
     await page.locator('#world-player').screenshot({ path: path.join(out, 'saved.png') });
     await fs.writeFile(path.join(out, 'reviewed.json'), JSON.stringify({ sequence: before }), { flag: 'wx' });
 
@@ -86,6 +90,8 @@ async function main() {
     assert.equal(await page.locator('#world-recording').inputValue(), sessionId);
     assert.equal(await page.locator('#world-room').inputValue(), String(roomId));
     assert.equal(await canvas.getAttribute('data-camera'), camera);
+    assert.equal(await actor.inputValue(), 'p:' + playerId);
+    assert.match(await details.innerText(), /此格有效姿態 · 頭手來源 Tracked/);
     assert.equal((await get(sessionPath)).sequence, initial.sequence);
     assert.deepEqual(watches, [{ path: sessionPath + '/world/watch', mode: 'replay', from: String(before), through: String(before) },
       { path: sessionPath + '/world/watch', mode: 'live', from: null, through: null }]);
@@ -93,7 +99,7 @@ async function main() {
     assert.deepEqual(errors, []);
     await page.locator('#world-player').screenshot({ path: path.join(out, 'live.png') });
     await fs.writeFile(path.join(out, 'checks.json'), JSON.stringify({ complete: true, sessionId, streamId, roomId, seat, before, after,
-      venueOverview, layoutReads }, null, 2), { flag: 'wx' });
+      venueOverview, layoutReads, savedPose: 'Unavailable', livePose: 'Tracked' }, null, 2), { flag: 'wx' });
   } finally { await browser.close(); }
 }
 main().catch(error => {

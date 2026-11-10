@@ -2940,7 +2940,8 @@ def main():
         result = read(destination/'checks.json')
         check(result['complete'] and result['venueOverview'] is venue_overview
               and (result['sessionId'],result['streamId'],result['roomId'],result['seat'])==(sid,stream,room,seat)
-              and result['after']>result['before']==reviewed['sequence']>=minimum_sequence,
+              and result['after']>result['before']==reviewed['sequence']>=minimum_sequence
+              and (result['savedPose'],result['livePose'])==('Unavailable','Tracked'),
               mode+' native browser records the original room and exact interruption and recovery frames')
         route = '/api/sessions/'+sid+'/world/frames/'
         entry['poseReviewPackets'] = [request(route+str(sequence))['packet'] for sequence in (result['before'],result['after'])]

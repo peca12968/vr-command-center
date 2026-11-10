@@ -16,6 +16,7 @@ const shortId = id => id && id !== '00000000-0000-0000-0000-000000000000' ? id.s
 const roomName = room => room === 'all' ? '全部房間' : '房間 ' + room;
 const LIVE_RETRY_DELAYS = [500, 1000, 2000];
 const LIVE_IDLE_MILLISECONDS = 6000;
+const hasRecordedPose = player => player.connected && (player.rig.kind === 'Simulated' || player.rig.kind === 'Tracked');
 const isBeginWitness = witness => witness?.kind === 'tracking-begin' || witness?.kind === 'participation-begin';
 const witnessLabels = { enemies: '敵軍', environment: '環境', 'tracking-begin': '追蹤開場', 'participation-begin': '有效姿態開場',
   'pose-interruption': '姿態中斷' };
@@ -203,7 +204,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
       const players = packet.frame.players.filter(player => room === 'all' || player.roomId === Number(room));
       const enemies = packet.frame.enemies.filter(enemy => room === 'all' || enemy.roomId === Number(room));
       const count = button.lastElementChild;
-      const text = `連線玩家 ${players.filter(player => player.connected).length}/${players.length} · 存活敵軍 ${enemies.filter(enemy => enemy.health > 0).length}/${enemies.length}`;
+      const text = `此格有效姿態 ${players.filter(player => player.health > 0 && hasRecordedPose(player)).length}/${players.length} · 存活敵軍 ${enemies.filter(enemy => enemy.health > 0).length}/${enemies.length}`;
       if (count.textContent !== text) count.textContent = text;
     }
   }
@@ -448,11 +449,12 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     const saved = mode === 'replay' && typeof savedLimit === 'number';
     const enemies = frame?.packet.frame.enemies;
     const enemyCount = enemies ? ` · 敵軍 ${enemies.length} 名（${enemies.filter(enemy => enemy.health > 0).length} 存活）` : '';
-    $('world-status').textContent = `${info.header.origin}${observerRoom == null ? '' : ` · 僅接收房間 ${observerRoom}` } · ${info.complete ? '錄製已核對封存' : '錄製未封存'}${saved ? ` · 已保存片段至第 ${savedLimit} 格 · 快照階段 ${phase}` : ' · ' + phase}${clock ? ' · ' + clock : ''}${enemyCount}`;
+    let retained = false;
     if (mode === 'live') {
       const captured = info.header.captureStartedAtUtc ? Date.parse(info.header.captureStartedAtUtc) + (frame?.packet.elapsedMilliseconds ?? 0) : NaN;
       const age = Date.now() - captured, unknown = !Number.isFinite(age), clockInvalid = age < -1000;
       const stale = !connected || !received || performance.now() - received > 1500 || age > 1500;
+      retained = !!frame && !info.complete && (stale || unknown || clockInvalid);
       if (stale || unknown || clockInvalid) { scene?.weather.pause(); scene?.draw(); }
       $('world-freshness').textContent = info.complete ? '場次已封存' : unknown ? '擷取時間未知' : clockInvalid ? '來源時鐘未同步' : stale ? '快照已中斷或過期' : '正在接收快照';
       $('world-freshness').classList.toggle('replay-error', (stale || unknown || clockInvalid) && !info.complete);
@@ -463,6 +465,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
       $('world-freshness').classList.remove('replay-error');
       $('world-pause').textContent = connected ? '暫停回放' : '繼續回放';
     }
+    $('world-status').textContent = `${info.header.origin}${observerRoom == null ? '' : ` · 僅接收房間 ${observerRoom}` } · ${info.complete ? '錄製已核對封存' : '錄製未封存'}${saved ? ` · 已保存片段至第 ${savedLimit} 格 · 快照階段 ${phase}` : ' · ' + phase}${clock ? ' · ' + clock : ''}${enemyCount}${retained ? ' · 顯示最後保存格' : ''}`;
     if (!connected) { scene?.weather.pause(); scene?.draw(); }
   }
   function resetActors() {
@@ -479,8 +482,10 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     if (!choice && camera.value === 'follow') { camera.value = 'free'; if (scene) scene.follow = false; }
     if (scene && scene.selected !== key) scene.select(key);
     const actor = choice?.actor;
+    const pose = !actor || !key.startsWith('p:') ? '' : actor.health === 0 ? '已淘汰'
+      : hasRecordedPose(actor) ? '有效姿態' : actor.connected ? '無頭手資料' : '姿態未同步';
     const text = actor ? `${choice.name} · 房間 ${actor.roomId} · 血量 ${actor.health}`
-      + (key.startsWith('p:') ? ` · 彈匣 ${actor.magazine}／備彈 ${actor.reserve} · ${actor.connected ? '參戰中' : '未參戰'} · 頭手來源 ${actor.rig.kind}` : '')
+      + (pose ? ` · 彈匣 ${actor.magazine}／備彈 ${actor.reserve} · 此格${pose} · 頭手來源 ${actor.rig.kind}` : '')
       + ` · ${actor.id}` : '可點選目前房間的角色，或從選單選取。';
     const details = $('world-actor-info');
     if (details.textContent !== text) details.textContent = text;
@@ -725,10 +730,11 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     const signal = playerReview || witness ? AbortSignal.any([own.signal, AbortSignal.timeout(8000)]) : own.signal;
     if (nextMode === 'live') { received = 0; savedLimit = null; savedFinished = false; reviewPlayer = null; clearClip(); }
     const limit = nextMode === 'live' ? null : replayLimit;
-    let hasHeader = false, reachedSavedEnd = false, lastSequence = sequence === null ? null : sequence - 1;
+    let hasHeader = false, streamGeometry = '', reachedSavedEnd = false, lastSequence = sequence === null ? null : sequence - 1;
     let recentJump = Boolean(target?.sourceKey || returnLiveSource);
     let playerFrame = null, playerComplete = false, witnessFrame = null;
     let lastLiveSequence = liveAttempt ? frame?.packet.sequence ?? 0 : 0;
+    let announcedLiveSequence = 0, announcedLiveComplete = false;
     let idleTimer, idleExpired = false, transportFailure = false;
     function watchLive() {
       if (nextMode !== 'live') return;
@@ -773,8 +779,20 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
             const sourceRecord = ['header', 'status', 'complete', 'saved-end'].includes(type);
             if ((sourceRecord || type === 'frame') && (data.observerRoomId ?? null) !== observerRoom)
               throw new Error('回應的觀戰房間不同。');
-            if (expectedGeometry && (sourceRecord ? observationKey(data) !== expectedGeometry : type === 'frame' && !hasHeader))
-              throw new Error('回應的錄製來源不同。');
+            if (sourceRecord) {
+              const source = observationKey(data);
+              if ((expectedGeometry && source !== expectedGeometry) || (streamGeometry && source !== streamGeometry))
+                throw new Error('回應的錄製來源不同。');
+              if (type !== 'header' && !hasHeader) throw new Error('缺少觀戰串流的錄製標頭。');
+              if (nextMode === 'live') {
+                if (!Number.isSafeInteger(data.acceptedSequence) || data.acceptedSequence < Math.max(announcedLiveSequence, lastLiveSequence)
+                  || typeof data.complete !== 'boolean' || (announcedLiveComplete && !data.complete))
+                  throw new Error('即時觀戰的狀態序號不符。');
+                announcedLiveSequence = data.acceptedSequence;
+                announcedLiveComplete = data.complete;
+              }
+            }
+            if (type === 'frame' && !hasHeader) throw new Error('缺少觀戰串流的錄製標頭。');
             if (sourceRecord || type === 'frame') watchLive();
             if (type === 'header') {
               if (hasHeader || data.header?.sessionId !== id || (target && !matchesTarget(data, target)))
@@ -784,7 +802,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
                   throw new Error('已保存片段的尾端不符。');
                 if (!clip) savedLimit = data.acceptedSequence;
               }
-              hasHeader = true;
+              hasHeader = true; streamGeometry = observationKey(data);
               if (!clip) { info = data; savedFinished = false; }
               showRecording(target?.roomId);
             } else if (type === 'frame') {
@@ -832,7 +850,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
         }
       } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
       if (request === epoch) {
-        if (nextMode === 'live' && (idleExpired || !info?.complete)) {
+        if (nextMode === 'live' && (idleExpired || !hasHeader || !info?.complete)) {
           transportFailure = true;
           throw new Error('即時觀戰串流已關閉。');
         }

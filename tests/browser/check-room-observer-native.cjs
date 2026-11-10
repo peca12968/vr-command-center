@@ -49,12 +49,22 @@ async function main() {
       const names = await page.locator('#world-statistics tr td:first-child').allTextContents();
       assert.deepEqual(names.sort(), forRoom(room).map(player => player.name).sort());
       assert.ok((await enemies.allTextContents()).every(label => label.includes(` · 房間 ${room} · `)));
+      const sample = await page.locator(`[data-world-room="${room}"]`).evaluate(button => ({
+        sequence: Number(document.querySelector('#world-canvas').dataset.sequence), count: button.lastElementChild.textContent
+      }));
+      const response = await page.request.get(`${base}/api/sessions/${sessionId}/world/frames/${sample.sequence}`,
+        { headers: { Authorization: 'Bearer ' + roomKey } });
+      assert.equal(response.status(), 200);
+      const { packet } = await response.json();
+      const seats = packet.frame.players.filter(player => player.roomId === room);
+      const posed = seats.filter(player => player.health > 0 && player.connected && ['Tracked', 'Simulated'].includes(player.rig.kind));
+      assert.ok(sample.count.startsWith(`此格有效姿態 ${posed.length}/${seats.length} · `));
     }
     await picker.locator(`option[value="p:${forRoom(4)[0].id}"]`).waitFor({ state: 'attached' });
     assert.equal(await page.locator('#world-recording').inputValue(), sessionId);
     await checkRoom(4);
     assert.equal(await camera.inputValue(), 'top');
-    checks.push('Original room card scopes named native players, enemies and statistics');
+    checks.push('Original room card scopes native players, enemies, statistics and recorded pose counts');
     const following = forRoom(4)[2];
     const rowFollowButton = page.locator(`#world-statistics tr[data-player-id="${following.id}"] button`);
     const overhead = await canvas.getAttribute('data-camera');

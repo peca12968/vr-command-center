@@ -74,6 +74,38 @@ async function waitForLiveFrame(page, sequence) {
     && document.querySelector('#world-freshness').textContent === '正在接收快照', sequence, { timeout: 9000, polling: 100 });
 }
 
+async function checkLiveMetadata({ page, base, live, api, canvas, check }) {
+  const sessionId = live.header.sessionId;
+  const metadata = await api(`/sessions/${sessionId}/world`);
+  const frame = await api(`/sessions/${sessionId}/world/frames/${metadata.acceptedSequence}`);
+  const watch = url => url.origin === base && url.pathname === `/api/sessions/${sessionId}/world/watch`
+    && url.searchParams.get('mode') === 'live';
+  const records = [
+    [{ ...metadata, header: { ...metadata.header, streamId: '00000000-0000-4000-8000-000000000002' }, complete: true },
+      '回應的錄製來源不同', 'A foreign status after an initial live header cannot mark the original recording sealed'],
+    [{ ...metadata, acceptedSequence: metadata.acceptedSequence - 1, complete: true },
+      '即時觀戰的狀態序號不符', 'A regressive status cannot replace the last accepted live frame'],
+  ];
+  const camera = await canvas.getAttribute('data-camera');
+  for (const [substitute, error, description] of records) {
+    const body = [['header', metadata], ['frame', frame], ['status', substitute]]
+      .map(([kind, payload]) => `event: ${kind}\ndata: ${JSON.stringify(payload)}\n\n`).join('');
+    const reply = route => route.fulfill({ status: 200, contentType: 'text/event-stream', body });
+    await page.route(watch, reply, { times: 1 });
+    try {
+      await page.locator('#world-live').click();
+      await page.waitForFunction(errorText => document.querySelector('#world-message').textContent.includes(errorText)
+        || document.querySelector('#world-freshness').textContent === '場次已封存', error, { polling: 100 });
+      check((await page.locator('#world-message').innerText()).includes(error)
+        && (await page.locator('#world-freshness').innerText()).includes('過期')
+        && Number(await canvas.getAttribute('data-sequence')) === frame.packet.sequence
+        && await canvas.getAttribute('data-camera') === camera, description);
+    } finally { await page.unroute(watch, reply); }
+  }
+  await page.locator('#world-live').click();
+  await waitForLiveFrame(page, frame.packet.sequence);
+}
+
 async function checkLiveWatch({ page, base, live, api, canvas, screenshots, check, extended }) {
   const sessionId = live.header.sessionId;
   const watches = liveWatches(page, base, sessionId);
@@ -93,6 +125,8 @@ async function checkLiveWatch({ page, base, live, api, canvas, screenshots, chec
     await page.locator('#world-freshness').filter({ hasText: '快照已中斷或過期' }).waitFor();
     check(watches.requests.length === 3 && Number(await canvas.getAttribute('data-sequence')) === stalledAt,
       'Silent live transport first marks the last displayed frame stale');
+    check((await page.locator('#world-status').innerText()).includes('顯示最後保存格'),
+      'Stale live observation identifies the retained frame as the last saved view');
     await page.screenshot({ path: path.join(screenshots, 'live-watch-stalled.png') });
     await waitForLiveFrame(page, stalledAt);
     check(watches.requests.length === 4 && await canvas.getAttribute('data-camera') === fixedCamera,
@@ -137,4 +171,4 @@ async function checkLiveWatch({ page, base, live, api, canvas, screenshots, chec
   } finally { watches.dispose(); }
 }
 
-module.exports = { checkLiveWatch, armLiveWatchFault, waitForLiveFrame, cutLiveWatch };
+module.exports = { checkLiveWatch, checkLiveMetadata, armLiveWatchFault, waitForLiveFrame, cutLiveWatch };
