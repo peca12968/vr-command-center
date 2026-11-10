@@ -260,9 +260,65 @@ def marksmanship_targets(value, players):
     return targets
 
 
-def reconcile_marksmanship(frames, targets, incoming=None):
+def replenish_marksmanship(v, entry, value):
+    waves = entry['marksmanshipWaves']
+    if len(waves) >= v.args.seconds // 20:
+        return
+    targets = entry['marksmanshipTargets']
+    if {enemy['id']: enemy['health'] for enemy in value['packet']['frame']['enemies']} != dict.fromkeys(targets.values(), 0):
+        return
+    statistics = {row['playerId']: row for row in value['statistics']}
+    if set(statistics) != set(targets) or any(
+            (row['ammoUsed'], row['shotsHit'], row['kills']) != (2 * len(waves), 2 * len(waves), len(waves))
+            for row in statistics.values()):
+        raise ValueError('Target replenishment needs the exact completed original weapon cycle')
+    evidence = {'previousTargets': targets, 'commands': [], 'checkpoints': {'eliminated': value}}
+    name = entry['name'] + '-wave-' + str(len(waves) + 1) + '.json'
+    references = entry.setdefault('operatorReferences', {})
+    references[value['packet']['sequence']] = value
+    for count in (0, len(entry['players'])):
+        identity = str(uuid.uuid4())
+        expected = v.state(entry)['sequence']
+        policy = {'count': count, 'behavior': 'Hold', 'autoAttack': False}
+        receipt = v.command(entry, 'SetEnemies', commandId=identity, expectedSequence=expected, enemies=policy)
+        sequence = receipt['appliedAtSequence']
+        if (receipt['commandId'] != identity or receipt['duplicate'] is not False or receipt['session']['id'] != entry['id']
+                or receipt['session']['enemies'] != policy or sequence <= expected):
+            raise ValueError('Target replenishment receipt differs from the original command')
+        evidence['commands'].append(receipt)
+        v.save(name, evidence)
+
+        def observed():
+            sample = v.frame(entry, measure=True)
+            packet = sample['packet']
+            if (packet['observedSequence'] >= sequence and not packet['suspended']
+                    and packet['frame']['phase'] == 'Running' and len(packet['frame']['enemies']) == count):
+                return sample
+        value = v.wait(observed, 12, entry['name'] + ' target replenishment')
+        references[value['packet']['sequence']] = value
+        evidence['checkpoints'][str(count)] = value
+        v.save(name, evidence)
+    next_targets = marksmanship_targets(value, entry['players'])
+    previous_ids = {target for wave in waves for target in wave.values()}
+    if set(next_targets.values()) & previous_ids:
+        raise ValueError('A replenished enemy reused an earlier native target')
+    validate_roster(v.state(entry), entry['players'])
+    waves.append(next_targets)
+    entry['marksmanshipTargets'] = next_targets
+    evidence['nextTargets'] = next_targets
+    v.save(name, evidence)
+    v.save(entry['name'] + '-marksmanship-waves.json', waves)
+
+
+def reconcile_marksmanship(frames, targets, incoming=None, *, waves=None):
     pattern = ['ShotFired', 'ShotHit', 'ReloadStarted', 'ReloadCompleted',
                'ShotFired', 'ShotHit', 'EnemyEliminated']
+    target_waves = [targets] if waves is None else waves
+    enemy_ids = [enemy for wave in target_waves for enemy in wave.values()]
+    if (not target_waves or any(set(wave) != set(targets) for wave in target_waves)
+            or len(set(enemy_ids)) != len(enemy_ids)):
+        raise ValueError('Target waves must preserve original players and distinct native enemies')
+    complete_pattern = pattern * len(target_waves)
     progress = {player: [] for player in targets}
     active_shots = {}
     event_ids, shot_ids = set(), set()
@@ -286,7 +342,7 @@ def reconcile_marksmanship(frames, targets, incoming=None):
                 if (room is None or incoming['attackers'].get(enemy) != room or frame['phase'] != 'Running'
                         or packet['suspended'] or not frame['autoAttack']
                         or not incoming['enabled'] <= packet['observedSequence'] < incoming['disabled']
-                        or any(actions != pattern for actions in progress.values())):
+                        or any(actions != complete_pattern for actions in progress.values())):
                     raise ValueError('Enemy attack left the original room or enabled window')
                 if kind == 'EnemyShot' and pending is None and event['hasRay'] and event['hit'] == 'Friendly' and event['targetId'] == player:
                     pending = attack
@@ -299,16 +355,17 @@ def reconcile_marksmanship(frames, targets, incoming=None):
                     raise ValueError('Enemy ray and nonlethal player damage do not form one accepted pair')
                 continue
             actions = progress.get(player)
-            if pending or actions is None or len(actions) == len(pattern) or kind != pattern[len(actions)]:
+            if pending or actions is None or len(actions) == len(complete_pattern) or kind != pattern[len(actions) % len(pattern)]:
                 raise ValueError('Unexpected native fire, hit, reload or elimination order')
+            target = target_waves[len(actions) // len(pattern)][player]
             if kind == 'ShotFired':
                 shot = event['shotId']
-                if not shot or shot in shot_ids or not event['hasRay'] or event['hit'] != 'Enemy' or event['targetId'] != targets[player]:
+                if not shot or shot in shot_ids or not event['hasRay'] or event['hit'] != 'Enemy' or event['targetId'] != target:
                     raise ValueError('Native shot ray did not hit its original seat target')
                 active_shots[player] = shot
                 shot_ids.add(shot)
             elif kind in ('ShotHit', 'EnemyEliminated'):
-                if event['shotId'] != active_shots[player] or event['enemyId'] != targets[player]:
+                if event['shotId'] != active_shots[player] or event['enemyId'] != target:
                     raise ValueError('Native hit or elimination did not match its accepted ray')
             actions.append(kind)
             combat_count += int(kind not in ('ReloadStarted', 'ReloadCompleted'))
@@ -330,16 +387,18 @@ def reconcile_marksmanship(frames, targets, incoming=None):
             if (len(rows) != len(value['statistics']) or rows != {player: 100 - lost for player, lost in damage.items()}
                     or bodies != rows):
                 raise ValueError('Saved bodies or ledger omit an original player or disagree on remaining health')
-    if not progress or any(actions != pattern for actions in progress.values()):
+    if not progress or any(actions != complete_pattern for actions in progress.values()):
         raise ValueError('Each original player must hit twice, reload once and eliminate its target')
     final = frames[-1]
-    expected_enemies = dict.fromkeys(incoming['attackers'], 100) if incoming else dict.fromkeys(targets.values(), 0)
+    expected_enemies = dict.fromkeys(incoming['attackers'], 100) if incoming else dict.fromkeys(target_waves[-1].values(), 0)
     if {enemy['id']: enemy['health'] for enemy in final['packet']['frame']['enemies']} != expected_enemies:
         raise ValueError('Sealed target roster or health differs')
     if {row['playerId'] for row in final['statistics']} != set(targets):
         raise ValueError('Sealed marksmanship statistics omit original players')
-    proof = {'players': len(progress), 'shots': len(shot_ids), 'hits': 2 * len(progress),
-             'eliminations': len(progress), 'combatEvents': combat_count}
+    proof = {'players': len(progress), 'shots': len(shot_ids), 'hits': 2 * len(progress) * len(target_waves),
+             'eliminations': len(progress) * len(target_waves), 'combatEvents': combat_count}
+    if waves is not None:
+        proof['waves'] = len(target_waves)
     if incoming:
         if pending or not all(hits_received.values()):
             raise ValueError('Every original player must have a complete incoming damage witness')
@@ -494,7 +553,10 @@ def replay(v,entry,pause):
     result={'complete':not faults,'frames':previous,'runningFrames':running,'faults':faults,'ranges':ranges,'operatorReferences':len(matched),'scope':'Full accepted native replay, generated input only; original continuity policies retained'}
     v.save(entry['name']+'-full-replay.json',rows);v.save(entry['name']+'-replay-checks.json',result)
     if entry.get('marksmanshipTargets') and result['complete']:
-        proof=reconcile_marksmanship(rows,entry['marksmanshipTargets'],entry.get('incomingFire'))
+        waves = entry.get('marksmanshipWaves')
+        if waves is not None and len(waves) != entry['expectedCycles']:
+            raise ValueError('The original task did not produce every required target wave')
+        proof=reconcile_marksmanship(rows,entry['marksmanshipTargets'],entry.get('incomingFire'),waves=waves)
         if proof['combatEvents']!=v.state(entry)['combatStream']['acceptedSequence'] or last['statistics']!=entry['sealed']['statistics']['players']:
             raise ValueError('Marksmanship replay differs from the final sealed ledger')
         v.save(entry['name']+'-marksmanship-replay.json',proof)
@@ -533,6 +595,9 @@ def run(v):
             if v.args.marksmanship:
                 e['marksmanshipTargets']=marksmanship_targets(admitted,e['players'])
                 v.save(e['name']+'-marksmanship-layout.json',{'targets':e['marksmanshipTargets'],'source':admitted})
+                if v.args.endurance:
+                    e['marksmanshipWaves'] = [e['marksmanshipTargets']]
+                    v.save(e['name'] + '-marksmanship-waves.json', e['marksmanshipWaves'])
         for row in native:
             ids=set(re.findall(r'VR_CLIENT_CONNECTED id=(\d+)',debrief.log_text(v,row['name'])))
             if len(ids)!=1:raise RuntimeError('Client connection not uniquely witnessed')
@@ -573,6 +638,8 @@ def run(v):
                 try:validate_frame(value,e['players'],pause if e is entries[0] else None,e['beginSequence'])
                 except ValueError:
                     v.save('exercise-live-failure.json',{'round':e['id'],'value':value});raise
+                if v.args.endurance and v.args.marksmanship:
+                    replenish_marksmanship(v, e, value)
                 observation={'sessionId':e['id'],'sequence':value['packet']['sequence'],'tick':value['packet']['frame']['tick'],'phase':value['packet']['frame']['phase']}
                 live.append(observation)
                 if v.udp_meter is not None and observation['phase']=='Running' and not value['packet']['suspended']:
@@ -626,7 +693,7 @@ def run(v):
                 check(True,e['name']+': original players took damage after their own weapons exercise and before the observed cease-fire')
         for e in entries:
             validate_roster(v.state(e),e['players']);sealed=v.seal(e);players=sealed['statistics']['players']
-            hits,kills,accuracy=(2,1,100) if v.args.marksmanship else (0,0,0)
+            hits,kills,accuracy=(fires,cycles,100) if v.args.marksmanship else (0,0,0)
             check(all(p['ammoUsed']==fires and p['shotsHit']==hits and p['kills']==kills and p['accuracyPercent']==accuracy
                       and (0<p['health']<100 and p['damageTaken']==100-p['health']==20*p['hitsReceived'] if v.args.incoming_fire
                            else p['health']==100 and p['damageTaken']==0 and p['hitsReceived']==0) for p in players),
@@ -681,7 +748,7 @@ def main():
     p.add_argument('--operator-controls',action='store_true',help='After the base motion window, apply Storm Night Patrol then Fog Day Advance through normal management commands; no console UI or physical operator input')
     p.add_argument('--check-frame-review', action='store_true', help='Verify an exact native shot frame and resume during the short exercise')
     p.add_argument('--check-policy-frames', action='store_true', help='Compare recorded policy pages with the full native exercise replay')
-    p.add_argument('--marksmanship', action='store_true', help='Verify two accepted hits and one elimination per seat using saved layout and normal desktop weapon input')
+    p.add_argument('--marksmanship', action='store_true', help='Verify two hits and one elimination per seat and cycle; endurance replenishes targets through normal management commands')
     p.add_argument('--incoming-fire', action='store_true', help='After marksmanship, use normal AI commands to exercise damage on every original player before final results')
     p.add_argument('--link-metrics', action='store_true', help='Collect 30 opt-in native link measurements per client during the 40-second short exercise')
     p.add_argument('--udp-traffic', action='store_true', help='Measure forwarded UDP payload bytes per original client in the 40-second short exercise')
@@ -692,7 +759,8 @@ def main():
     if args.pose_continuity and (not args.endurance or args.mode != 'linked'):p.error('Pose continuity requires the Linked endurance profile')
     if args.check_frame_review and args.endurance:p.error('Frame review uses the short exercise')
     if args.check_policy_frames and not args.operator_controls:p.error('Policy frame review requires the operator-controls exercise')
-    if args.marksmanship and (args.endurance or args.operator_controls or args.players_per_room!=5):p.error('Marksmanship requires five players per room and the short input profile without operator policy changes')
+    if args.marksmanship and (args.operator_controls or args.players_per_room!=5):p.error('Marksmanship requires five players per room without operator policy changes')
+    if args.incoming_fire and args.endurance:p.error('Incoming fire uses the short marksmanship profile')
     if args.incoming_fire and (not args.marksmanship or args.link_metrics or args.udp_traffic or args.udp_periodic_loss):p.error('Incoming fire requires marksmanship without UDP or link measurement')
     if args.link_metrics and (args.endurance or args.seconds!=40):p.error('Link measurement requires the 40-second short exercise')
     if args.udp_periodic_loss:

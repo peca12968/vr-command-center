@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-11 掩體與分批射擊長場
+
+- 既有 `--marksmanship` 可搭配 60 或 900 秒 `--endurance`。每房六個標準油桶保留五席正前方的原生敵軍出生位置，各席每週期兩次命中及一擊殺。由正常管理命令補充新目標，原名冊與入場識別持續使用。保存每批命令與來源畫格，完整回放核對原目標、武器事件順序及逐格統計。敵軍採 Hold 且關閉自動攻擊。 [操作方式](DESKTOP_ENDURANCE.md#掩體與分批目標)
+- 29 項輸入／戰績與 18 項封存證據 Python 測試通過。60 秒雙模式排演 `20261111-064615-4ae3699b` 退出碼 0，19 項通過。合併場 25 席的三批目標已核對 150 發、150 次命中、75 次擊殺。獨立五房的原戰鬥與世界日誌、原戰績及 CSV 封存重查通過，測試程序清理完畢。900 秒完整長場另驗。 [排演結果](../artifacts/desktop-exercise/20261111-064615-4ae3699b/exercise-result.json) · [合併射擊證據](../artifacts/desktop-exercise/20261111-064615-4ae3699b/linked-1-marksmanship-replay.json) · [獨立封存重查](../artifacts/marksmanship-endurance-smoke-readback.json)
+
 ## 2026-11-11 Windows 0.50.4 雙模式長場驗收
 
 - 使用解壓 Windows 玩家包 0.50.4、管理包 0.31.126 及既有長場工具，五房合併與獨立各執行 900 秒。場次 `20261111-055659-c1a606db` 退出碼 0，18 項通過。兩種模式各 25 個同機玩家端，每席由正常桌面輸入流程提交 90 次射擊及 45 次換彈，活動跨度 17,950 至 18,004 刻。場景採空敵軍。跨機、真人持續操作、頭盔與廠商硬體待現場驗收。 [原驗收結果](../artifacts/desktop-exercise/20261111-055659-c1a606db/exercise-result.json) · [輸入來源](../artifacts/desktop-0504-endurance-inputs.json)

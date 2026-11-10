@@ -162,6 +162,42 @@ class MarksmanshipEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'event prefix'):
             m.reconcile_marksmanship(self.replay, self.targets)
 
+    def waves_replay(self):
+        first = copy.deepcopy(self.replay[0])
+        second = copy.deepcopy(first)
+        for event in second['packet']['events']:
+            event['sequence'] += 7
+            event['eventId'] = 'next-' + event['eventId']
+            if 'shotId' in event:event['shotId'] += '-next'
+            if 'enemyId' in event:event['enemyId'] = 'next-target'
+            if 'targetId' in event:event['targetId'] = 'next-target'
+        second['packet']['throughCombatSequence'] = 10
+        second['packet']['frame']['enemies'] = [{'id': 'next-target', 'health': 0}]
+        second['statistics'][0].update(ammoUsed=4, shotsHit=4, kills=2)
+        return [first, second], [self.targets, {'player': 'next-target'}]
+
+    def test_each_replenished_wave_preserves_its_own_native_target_and_totals(self):
+        replay, waves = self.waves_replay()
+        self.assertEqual(m.reconcile_marksmanship(replay, self.targets, waves=waves),
+                         {'players': 1, 'waves': 2, 'shots': 4, 'hits': 4, 'eliminations': 2, 'combatEvents': 10})
+        self.assertEqual(waves, [self.targets, {'player': 'next-target'}])
+
+    def test_later_wave_cannot_reuse_an_enemy_or_hit_an_old_target(self):
+        replay, waves = self.waves_replay()
+        with self.assertRaisesRegex(ValueError, 'distinct native enemies'):
+            m.reconcile_marksmanship(replay, self.targets, waves=[self.targets, self.targets])
+        replay[1]['packet']['events'][0]['targetId'] = 'target'
+        with self.assertRaisesRegex(ValueError, 'original seat target'):
+            m.reconcile_marksmanship(replay, self.targets, waves=waves)
+
+    def test_missing_wave_or_incorrect_later_ledger_cannot_pass(self):
+        replay, waves = self.waves_replay()
+        with self.assertRaisesRegex(ValueError, 'Each original player'):
+            m.reconcile_marksmanship(replay[:1], self.targets, waves=waves)
+        replay[-1]['statistics'][0]['kills'] = 1
+        with self.assertRaisesRegex(ValueError, 'event prefix'):
+            m.reconcile_marksmanship(replay, self.targets, waves=waves)
+
     def incoming_replay(self):
         window = {'rooms': {'player': 2}, 'attackers': {'reinforcement': 2}, 'enabled': 20, 'disabled': 23}
         original = copy.deepcopy(self.replay[0])

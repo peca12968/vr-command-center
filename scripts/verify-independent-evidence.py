@@ -208,8 +208,11 @@ def verify_exercise(directory):
         require(final['statistics'] == stats['players'] and packet['frame']['phase'] == 'Ended'
                 and packet['sequence'] == world['acceptedSequence'] == replay['frames'] and replay['complete'] is True,
                 'Original complete replay and sealed ledger differ')
-        require(combat_sequence == 5 * seconds // 10 and all(row['ammoUsed'] == seconds // 10 for row in ledger.values()),
-                'Original endurance shot totals differ')
+        shots = seconds // 10
+        hits, kills, accuracy = (shots, shots // 2, 100) if mode.get('marksmanship', False) else (0, 0, 0)
+        require(combat_sequence == 5 * (shots + hits + kills) and all(
+                    (row['ammoUsed'], row['shotsHit'], row['kills'], row['accuracyPercent']) == (shots, hits, kills, accuracy)
+                    for row in ledger.values()), 'Original endurance combat totals differ')
         delivery = read(name + '-results')
         results = field.roster(delivery['results'], 'playerId', 5)
         server_log = (directory / (name + '-server.log')).read_text(encoding='utf-8', errors='replace')

@@ -1,5 +1,17 @@
 # 長場原生自動化輸入
 
+## 掩體與分批目標
+
+長場可加 `--marksmanship`。每房的標準油桶配置讓五個原生敵軍站在五席正前方。每個 20 秒週期，各席經原武器流程射擊、換彈、再射擊，完成兩次命中及一次擊殺。全房目標淘汰且原統計確認後，工具經正常 `SetEnemies` 命令清空並補充下一批，保存原 UUID、接受序號、目標識別及來源畫格。60 秒排演有三批，900 秒長場有 45 批。敵軍採守備並關閉自動攻擊。
+
+```powershell
+python scripts/check-desktop-exercise.py --api-dll <管理包API-DLL> --player-exe <Windows-Player-EXE> `
+  --runtime-root <本機測試資料夾> --mode both --players-per-room 5 `
+  --seconds 900 --endurance --replay-workers 5 --marksmanship
+```
+
+回放逐席核對每批原目標、原射線、換彈、擊殺及每格統計，所有管理來源檢查點也須與回放相符。空敵軍長場及短場射擊流程沿用原參數。分批目標可用前述封存重查命令核對五房原日誌與 CSV。 [開發紀錄](PROGRESS.md#2026-11-11-掩體與分批射擊長場)
+
 ## Windows 0.50.4 合併與獨立長場
 
 2026-11-11 以解壓 Windows 0.50.4 玩家包及管理包 0.31.126 執行 `--mode both --players-per-room 5 --seconds 900 --endurance --replay-workers 5`。場次 `20261111-055659-c1a606db` 退出碼 0，18 項通過。合併及獨立各 25 個同機玩家端，每席完成 90 次射擊、45 次換彈及 45 個完整移動週期。六場共 51,471 格完整回放，4,500 筆原射擊事件與 50 份戰績、50 次原連線確認及 6 份 CSV 相符。
