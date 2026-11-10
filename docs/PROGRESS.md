@@ -3,7 +3,10 @@
 ## 2026-11-11 掩體與分批射擊長場
 
 - 既有 `--marksmanship` 可搭配 60 或 900 秒 `--endurance`。每房六個標準油桶保留五席正前方的原生敵軍出生位置，各席每週期兩次命中及一擊殺。由正常管理命令補充新目標，原名冊與入場識別持續使用。保存每批命令與來源畫格，完整回放核對原目標、武器事件順序及逐格統計。敵軍採 Hold 且關閉自動攻擊。 [操作方式](DESKTOP_ENDURANCE.md#掩體與分批目標)
-- 29 項輸入／戰績與 18 項封存證據 Python 測試通過。60 秒雙模式排演 `20261111-064615-4ae3699b` 退出碼 0，19 項通過。合併場 25 席的三批目標已核對 150 發、150 次命中、75 次擊殺。獨立五房的原戰鬥與世界日誌、原戰績及 CSV 封存重查通過，測試程序清理完畢。900 秒完整長場另驗。 [排演結果](../artifacts/desktop-exercise/20261111-064615-4ae3699b/exercise-result.json) · [合併射擊證據](../artifacts/desktop-exercise/20261111-064615-4ae3699b/linked-1-marksmanship-replay.json) · [獨立封存重查](../artifacts/marksmanship-endurance-smoke-readback.json)
+- 29 項輸入／戰績與 18 項封存證據 Python 測試通過。60 秒雙模式排演 `20261111-064615-4ae3699b` 退出碼 0，19 項通過。合併場 25 席的三批目標已核對 150 發、150 次命中、75 次擊殺。獨立五房的原戰鬥與世界日誌、原戰績及 CSV 封存重查通過，測試程序清理完畢。六場共 3,745 格回放，C／F 174 檔相符。 [排演結果](../artifacts/desktop-exercise/20261111-064615-4ae3699b/exercise-result.json) · [排演核對](../artifacts/marksmanship-endurance-smoke-validation.json) · [獨立封存重查](../artifacts/marksmanship-endurance-smoke-readback.json)
+- 功能來源 `a766af58` 搭配 Windows 0.50.4 及管理包 0.31.126，完成合併與獨立各 25 席、各 900 秒的長場。原場次 `20261111-065021-67ff3e71` 退出碼 0，19 項通過。每席完成 45 批原目標、90 發命中及 45 次擊殺。六場共 52,028 格完整回放，原日誌重算 4,500 發、4,500 次命中、2,250 次擊殺。50 份戰績、50 次原連線確認及 6 份 CSV 相符，合併報告 ZIP 與整場及五房個別 CSV 相符。 [原長場結果](../artifacts/desktop-exercise/20261111-065021-67ff3e71/exercise-result.json) · [完整來源及統計核對](../artifacts/marksmanship-endurance-long-validation.json)
+- 2,250 個原生目標識別彼此相異，528 筆補充命令及 792 個來源檢查點與完整回放相符。原世界日誌按 float32 模型精度逐格比對 API 回放。合併場共同執行 900.312 秒，獨立五房共同執行 896.081 秒，每個共同區間均含各原席位的確認射擊。活動場次歸零、測試程序無殘留，C／F 174 檔逐檔雜湊相符，九份檢查工具及原遊戲／API 執行檔雜湊相符。 [獨立原日誌重查](../artifacts/marksmanship-endurance-long-readback.json) · [本輪來源](../artifacts/desktop-0504-marksmanship-inputs.json)
+- 本輪為同機自動化輸入、守備且關閉自動攻擊的敵軍。接續驗證敵軍回擊與環境變更的長場，跨機真人、頭盔及廠商硬體仍待現場驗收。GitHub Actions `42918165696` 的 job `130185867895` 因帳務或支出上限未啟動執行步驟。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42918165696)
 
 ## 2026-11-11 Windows 0.50.4 雙模式長場驗收
 
