@@ -34,6 +34,8 @@ if (string.Equals(Path.TrimEndingDirectorySeparator(dataDirectory), Path.TrimEnd
     OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
     throw new InvalidOperationException("Mission and session data directories must be separate.");
 builder.Services.AddSingleton(_ => new SqliteSessionEventStore(sessionDirectory));
+Guid? controlInstanceId = Guid.TryParseExact(builder.Configuration["ControlInstanceId"], "D", out var configuredInstance)
+    && configuredInstance != Guid.Empty ? configuredInstance : null;
 builder.Services.AddSingleton(services => new SessionManager(services.GetRequiredService<SqliteSessionEventStore>()));
 builder.Services.AddSingleton(services => new WorldRecordings(sessionDirectory, services.GetRequiredService<SessionManager>()));
 builder.Services.AddHostedService<MissionClockService>();
@@ -272,6 +274,19 @@ app.MapGet("/api/venue/server-plan", (SessionManager manager, HttpContext contex
 {
     context.Response.Headers.CacheControl = "no-store";
     return manager.ReadVenueServerPlan(Actor(context));
+});
+app.MapPost("/api/venue/server-launch-review", async (WorldRecordings worlds, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var actor = Actor(context);
+    if (actor.Role != OperatorRole.Master) throw new AccessDeniedException("Launch review requires the master operator.");
+    var input = await DeploymentJson.Read<VenueLaunchReviewRequest>(context.Request, 4096,
+        "Provide the original venue launch identities.", context.RequestAborted, completeFile: true);
+    try { return Results.Ok(worlds.ReadVenueLaunch(input, actor, controlInstanceId)); }
+    catch (VenueLaunchInstanceMismatchException error)
+    {
+        return Results.Conflict(new { code = "venue-launch-instance-mismatch", error = error.Message });
+    }
 });
 app.MapGet("/api/venue/closure", (bool? includeScores, bool? includeDebriefReceipts, WorldRecordings worlds, HttpContext context) =>
 {

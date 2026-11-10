@@ -34,7 +34,7 @@
         <div id="rooms" class="rooms"></div>
         <details id="venue-server-plan" class="panel" hidden>
           <summary>Windows 遊戲伺服器啟動計畫</summary>
-          <p class="hint">下載給 Windows 啟動器 1.8 使用。請填入遊戲伺服器電腦上的管理實例路徑及網路設定。</p>
+          <p class="hint">第四版計畫適用於 Windows 啟動器 1.15 以上。請填入遊戲伺服器電腦上的管理實例路徑及網路設定。</p>
           <button id="venue-server-read" type="button" class="quiet">讀取五房場次</button>
           <p id="venue-server-status" class="hint" role="status"></p>
           <ul id="venue-server-rooms" class="event-list" aria-label="原場次及啟動條件"></ul>
@@ -49,6 +49,16 @@
               <button id="venue-server-download" type="submit" class="secondary" disabled>下載啟動計畫 JSON</button>
             </fieldset>
           </form>
+        </details>
+        <details id="venue-launch-review" class="panel" hidden>
+          <summary>核對未確認的全館啟動報告</summary>
+          <p class="hint">選擇第四版計畫的啟動結果 JSON。檔案只在瀏覽器解析，管理服務只接收核對所需的識別與 UDP 設定。結果為管理端取樣，無法證明玩家可連線。</p>
+          <div class="form-row">
+            <label>全館啟動結果 JSON<input id="venue-launch-review-file" type="file" accept=".json,application/json" disabled></label>
+            <button id="venue-launch-review-check" type="button" class="quiet" disabled>核對原場次</button>
+          </div>
+          <p id="venue-launch-review-summary" class="hint" role="status"></p>
+          <ul id="venue-launch-review-rooms" class="event-list" aria-label="原場次來源及端點狀態"></ul>
         </details>
         <section id="venue-live-tracking" class="panel" aria-labelledby="venue-live-tracking-title" hidden>
           <h3 id="venue-live-tracking-title">執行中五房追蹤</h3>
@@ -418,7 +428,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.114 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.115 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

@@ -153,6 +153,7 @@ internal static class ControlLauncher
             var remove = new List<string>(); foreach (string name in info.EnvironmentVariables.Keys) if (name.StartsWith("OperatorKeys__", StringComparison.OrdinalIgnoreCase) || String.Equals(name, "OperatorKeyFile", StringComparison.OrdinalIgnoreCase) || String.Equals(name, "PlayerTicketSigningKey", StringComparison.OrdinalIgnoreCase) || String.Equals(name, "ControlPipeToken", StringComparison.OrdinalIgnoreCase) || name.StartsWith(HttpsSettings.Prefix, StringComparison.OrdinalIgnoreCase) || String.Equals(name, HttpsSettings.PasswordVariable, StringComparison.OrdinalIgnoreCase)) remove.Add(name);
             foreach (var name in remove) info.EnvironmentVariables.Remove(name);
             info.EnvironmentVariables["OperatorKeyFile"] = Path.Combine(Full(root), "operator-keys.json"); info.EnvironmentVariables["DataDirectory"] = Path.Combine(Full(root), "missions"); info.EnvironmentVariables["SessionDataDirectory"] = Path.Combine(Full(root), "sessions");
+            info.EnvironmentVariables["ControlInstanceId"] = Guid.Parse(Text(instance, "instanceId")).ToString("D");
             info.EnvironmentVariables["ControlPipeToken"] = nonce; info.EnvironmentVariables["ASPNETCORE_ENVIRONMENT"] = "Production"; info.EnvironmentVariables["Logging__LogLevel__Default"] = "Warning";
             if (https != null)
             {

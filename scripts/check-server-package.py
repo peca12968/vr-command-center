@@ -177,6 +177,7 @@ def main():
     p.add_argument('--venue-management-https', action='store_true', help='Use a pinned HTTPS management profile for both venue launch plans')
     p.add_argument('--check-venue-plan-ui', action='store_true', help='Launch each topology with the exact plan downloaded from Chromium')
     p.add_argument('--check-venue-receipt-retry', action='store_true', help='Lose both original batch replies after commit through a loopback fixture')
+    p.add_argument('--check-venue-launch-review', action='store_true', help='Import original unresolved launcher reports into the shipped Chromium console')
     p.add_argument('--check-venue-relay-readback', action='store_true', help='Use both source relay CLIs on copies of the closed original Linked journals')
     p.add_argument('--check-venue-preview', action='store_true', help='Run the shared Windows venue preview before both topology launches')
     p.add_argument('--check-venue-endpoint-batch', action='store_true', help='Verify endpoint batch retries and force a last-room transaction rollback')
@@ -291,6 +292,8 @@ def main():
         p.error('--check-venue-plan-ui requires --check-venue-launcher and Node.js with Playwright Chromium')
     if args.check_venue_receipt_retry and (not args.check_venue_plan_ui or args.venue_management_https):
         p.error('--check-venue-receipt-retry requires --check-venue-plan-ui and its own plain loopback management target')
+    if args.check_venue_launch_review and not args.check_venue_receipt_retry:
+        p.error('--check-venue-launch-review requires --check-venue-receipt-retry')
     if args.check_venue_relay_readback and (not args.check_venue_plan_ui or not shutil.which('dotnet')):
         p.error('--check-venue-relay-readback requires --check-venue-plan-ui and the built .NET relay tools')
     if args.check_venue_preview and not args.check_venue_launcher:
@@ -541,6 +544,17 @@ def main():
                   label+' original Unity child owns the exact endpoint released by the UDP preflight')
             save(label+'-lan-preflight.json', dict(preflight, gameBinding=binding, scope='same-host'))
         return entry
+    def browser_launch_review(report, expected, label):
+        driver=ROOT/'tests/browser/venue-launch-review-browser.cjs'
+        output=out/(label+'-browser-review.json')
+        completed=subprocess.run([shutil.which('node'),str(driver)],cwd=driver.parent,
+            input=json.dumps({'base':uri,'token':keys['Master'],'reportPath':str(report),'expected':expected,'output':str(output)}),
+            text=True,encoding='utf-8',capture_output=True,timeout=45,creationflags=subprocess.CREATE_NO_WINDOW)
+        diagnostic=completed.stderr
+        for key in keys.values():diagnostic=diagnostic.replace(key,'[redacted]')
+        check(completed.returncode==0 and output.is_file(),label+' shipped Chromium reviews the original launcher file: '+diagnostic[-600:])
+        return read(output)
+
     def launch_venue(states, linked, *, unlocked_mr=False, label=None):
         topology='Linked' if linked else 'Independent'
         label=label or ('unlocked-mr-venue' if unlocked_mr else topology.lower()+'-venue')
@@ -784,6 +798,13 @@ def main():
                           and all(row['result']['childExited'] and row['result']['cleanupCompleted'] for row in outage['servers'])
                           and all(request('/api/sessions/'+state['id'])==state for state in states),
                           'Two unavailable replies stop all five original children after exactly one byte-identical retry')
+                    if args.check_venue_launch_review:
+                        observed=browser_launch_review(out/(label+'-receipt-unavailable.json'),
+                            [{'sessionId':state['id'],'roomIds':state['roomIds'],'phase':'Preparing','sourceState':'unbound',
+                              'endpointState':'not-checked'} for state in states],label+'-unbound')
+                        check(observed['launchId']==outage['venueLaunchId']
+                              and all(request('/api/sessions/'+state['id'])==state for state in states),
+                              'Original unbound launch review leaves all five management histories untouched')
                 gate_class=module('venue_receipt_fault_gate','venue_http_gate.py').VenueReceiptGate
                 receipt_gate=gate_class(uri,[state['id'] for state in states]).start()
                 receipt_gates.append(receipt_gate)
@@ -878,6 +899,54 @@ def main():
                   label+' whole-batch retry returns the exact sorted, simultaneously committed endpoints')
             save(label+'-endpoint-batch.json',repeated)
         return entries
+
+    def review_lost_endpoint():
+        state=create(list(range(1,6)),'launch review after both endpoint replies are lost')
+        session_id=state['id']
+        session_path='/api/sessions/'+session_id
+        target=config(session_id)
+        gate_class=module('venue_review_fault_gate','venue_http_gate.py').VenueReceiptGate
+        gate=gate_class(uri,[session_id],endpoint_losses=2).start()
+        receipt_gates.append(gate)
+        private=runtime/'lost-endpoint-instance'
+        private.mkdir()
+        marker=private/'control-instance.json'
+        shutil.copyfile(data/'operator-keys.json',private/'operator-keys.json')
+        marker.write_text(json.dumps(dict(read(data/'control-instance.json'),port=gate.server.server_port)),encoding='utf-8')
+        plan=runtime/'lost-endpoint-plan.json'
+        plan.write_text(json.dumps({'version':4,'controlInstance':str(marker),'topology':'Linked','address':address,
+            'listenAddress':'0.0.0.0','servers':[{'roomIds':state['roomIds'],'sessionId':session_id,'sessionSequence':state['sequence'],
+                                               'missionId':state['mission']['id'],'port':target['port']}]}),encoding='utf-8')
+        work=runtime/'lost-endpoint-work'
+        ready=out/'lost-endpoint-ready.json'
+        file=call('lost-endpoint-launch',['--venue-run',plan,'--work',work,'--seconds','60','--ready-report',ready])
+        result=read(file)
+        receipts=gate.receipt_snapshot()[gate.endpoint_route]
+        child=result['servers'][0]['result']
+        check(len(receipts)==2 and all(row['upstreamStatus']==200 and row['deliveredStatus']==502 for row in receipts)
+              and len({row['requestSha256'] for row in receipts})==len({row['receiptSha256'] for row in receipts})==1
+              and result['sourceAttachment']=='confirmed' and result['endpointPublication']=='unconfirmed'
+              and result['endpointPublicationRetried'] and child['childExited'] and child['cleanupCompleted'] and not ready.exists(),
+              'The original Linked launcher stops after both successful endpoint receipts are lost')
+        before=request(session_path)
+        endpoint=request(session_path+'/connection-endpoint')
+        row={'sessionId':session_id,'roomIds':state['roomIds'],'streamId':child['streamId'],
+             'udp':{'bindAddress':child['udpBinding']['address'],'port':child['udpBinding']['port']}}
+        inquiry={'version':1,'instanceId':result['instanceId'],'launchId':result['venueLaunchId'],'topology':'Linked','servers':[row]}
+        def stale_source():
+            value=request('/api/venue/server-launch-review',inquiry)
+            return value if value['servers'][0]['recentSource'] is False else None
+        wait(stale_source,15,'original stopped source ages out')
+        observed=browser_launch_review(file,[{'sessionId':session_id,'roomIds':state['roomIds'],'phase':'Preparing',
+            'sourceState':'original-source','streamId':endpoint['streamId'],'endpointState':'published','endpointAddress':address,
+            'endpointPort':endpoint['port'],'addressMatched':None,'recentSource':False}],'lost-endpoint')
+        wrong={**row,'udp':{'bindAddress':'0.0.0.0','port':1024 if endpoint['port']!=1024 else 1025}}
+        mismatch=request('/api/venue/server-launch-review',{**inquiry,'servers':[wrong]})
+        check(observed['launchId']==result['venueLaunchId'] and child['udpBinding']['address']=='0.0.0.0'
+              and mismatch['servers'][0]['endpointState']=='endpoint-mismatch'
+              and request(session_path)==before and request(session_path+'/connection-endpoint')==endpoint,
+              'Launch review checks the original endpoint, keeps wildcard address distinct, and writes no management state')
+        command(session_id,'End')
 
     def reject_last_venue_endpoint():
         states=[create([room],f'venue endpoint rollback room {room}') for room in range(1,6)]
@@ -4193,6 +4262,8 @@ def main():
             stop_player(client)
         if args.check_venue_endpoint_batch:
             reject_last_venue_endpoint()
+        if args.check_venue_launch_review:
+            review_lost_endpoint()
         if args.check_venue_ticket_freshness:
             verify_stale_ticket_source()
         # A killed launcher must close its already-assigned Job and stop the exact owned native handle.

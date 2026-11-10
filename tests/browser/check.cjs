@@ -24,7 +24,8 @@ async function main() {
   await fs.mkdir(screenshots, { recursive: !process.env.VR_COMMAND_BROWSER_ARTIFACTS });
   const tokens = Object.fromEntries(['Master', 'Room1', 'Room2', 'Room4', 'GameServer'].map(role => [role, randomBytes(32).toString('hex')]));
   const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.toLowerCase().startsWith('operatorkeys__') && !['operatorkeyfile', 'playerticketsigningkey'].includes(key.toLowerCase())));
-  Object.assign(environment, { DataDirectory: path.join(directory, 'missions'), SessionDataDirectory: path.join(directory, 'sessions'), ASPNETCORE_ENVIRONMENT: 'Production', Logging__LogLevel__Default: 'Warning' });
+  const instanceId = randomUUID();
+  Object.assign(environment, { DataDirectory: path.join(directory, 'missions'), SessionDataDirectory: path.join(directory, 'sessions'), ControlInstanceId: instanceId, ASPNETCORE_ENVIRONMENT: 'Production', Logging__LogLevel__Default: 'Warning' });
   for (const [role, value] of Object.entries(tokens)) environment['OperatorKeys__' + role] = value;
   const base = 'http://127.0.0.1:' + await availablePort();
   const processApi = spawn('dotnet', [process.env.VR_COMMAND_API_DLL || path.join(root, 'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll'), '--urls', base], { cwd: root, env: environment, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -61,6 +62,12 @@ async function main() {
       check(browserErrors.length === 0, 'Server plan has no uncaught browser or policy errors');
       await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed', scope: 'venue server plan with isolated API and Chromium' }, null, 2));
       console.log(`PASS: ${checks} focused server plan checks. Screenshots: ${screenshots}`); return;
+    }
+    if (process.argv.includes('--venue-launch-review-only')) {
+      await require('./venue-launch-review-browser.cjs').checkVenueLaunchReview({ context, api, tokens, base, screenshots, check, captureErrors, instanceId });
+      check(browserErrors.length === 0, 'Venue launch review has no uncaught browser or policy errors');
+      await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed', scope: 'read-only launch review with isolated API and Chromium' }, null, 2));
+      return;
     }
     if (process.argv.includes('--venue-time-replay-only')) {
       await require('./venue-time-replay-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });
@@ -565,6 +572,7 @@ async function main() {
     await require('./mr-deployment-browser.cjs')({ context, api, tokens, base, directory, screenshots, check, captureErrors });
     await require('./independent-set-browser.cjs')({ context, api, tokens, base, screenshots, check, captureErrors });
     await require('./server-plan-browser.cjs').checkServerPlan({ context, api, tokens, base, screenshots, check, captureErrors });
+    await require('./venue-launch-review-browser.cjs').checkVenueLaunchReview({ context, api, tokens, base, screenshots, check, captureErrors, instanceId });
     await require('./mr-venue-bundle-browser.cjs')({ context, api, tokens, base, root, directory, screenshots, check, captureErrors });
     await require('./vr-venue-tickets-browser.cjs')({ context, api, tokens, base, root, directory, screenshots, check, captureErrors });
     await require('./room-clock-browser.cjs')({ context, api, tokens, base, root, screenshots, check, captureErrors });

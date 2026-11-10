@@ -130,9 +130,9 @@ class VenueReceiptGate(VenueHttpGate):
     source_route = '/api/venue/combat-streams'
     endpoint_route = '/api/venue/connection-endpoints'
 
-    def __init__(self, upstream, sessions):
+    def __init__(self, upstream, sessions, *, endpoint_losses=1):
         ids = tuple(str(UUID(session)) for session in sessions)
-        if len(ids) not in (1, 5) or len(set(ids)) != len(ids):
+        if len(ids) not in (1, 5) or len(set(ids)) != len(ids) or endpoint_losses not in (1, 2):
             raise ValueError('Receipt gate requires one Linked or five Independent sessions')
         super().__init__(upstream, ids[0])
         self.slots = threading.BoundedSemaphore(48)
@@ -143,6 +143,7 @@ class VenueReceiptGate(VenueHttpGate):
             prefix + '/combat-stream/' + suffix for prefix in prefixes for suffix in ('batch', 'seal'))
         self.publications = {prefix + '/world/publish' for prefix in prefixes}
         self.receipts = {self.source_route: [], self.endpoint_route: []}
+        self.losses = {self.source_route: 1, self.endpoint_route: endpoint_losses}
 
     def is_publication_route(self, path):
         return path in self.publications
@@ -156,7 +157,7 @@ class VenueReceiptGate(VenueHttpGate):
             return status, headers, payload
         with self.lock:
             attempts = self.receipts[path]
-            delivered = 502 if not attempts and status == 200 else status
+            delivered = 502 if len(attempts) < self.losses[path] and status == 200 else status
             attempts.append({'requestSha256': hashlib.sha256(body).hexdigest(), 'upstreamStatus': status,
                              'receiptSha256': hashlib.sha256(payload).hexdigest(), 'deliveredStatus': delivered})
         return (delivered, (), b'') if delivered != status else (status, headers, payload)

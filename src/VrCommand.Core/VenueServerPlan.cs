@@ -6,6 +6,18 @@ public record VenueServerPlan(SessionMode? Topology, bool Ready, VenueServerPlan
 
 public sealed partial class SessionManager
 {
+    public Dictionary<Guid, SessionView> ReadVenueLaunchSessions(Guid[] sessionIds, OperatorIdentity actor)
+    {
+        RequireVenueMaster(actor);
+        lock (gate)
+        {
+            var result = new Dictionary<Guid, SessionView>();
+            foreach (var id in sessionIds)
+                if (sessions.TryGetValue(id, out var history)) result.Add(id, Snapshot(history.View));
+            return result;
+        }
+    }
+
     public VenueServerPlan ReadVenueServerPlan(OperatorIdentity actor)
     {
         RequireVenueMaster(actor);

@@ -210,6 +210,8 @@ try:
                    if not key.lower().startswith("operatorkeys__") and key.lower() not in ("operatorkeyfile", "playerticketsigningkey")}
     environment["DataDirectory"] = str(test_directory / "missions")
     environment["SessionDataDirectory"] = str(test_directory / "sessions")
+    launch_review_instance = str(uuid.uuid4())
+    environment["ControlInstanceId"] = launch_review_instance
     environment["ASPNETCORE_ENVIRONMENT"] = "Production"
     environment["Logging__LogLevel__Default"] = "Warning"
     for name, token in tokens.items():
@@ -895,6 +897,21 @@ try:
             originals = [request("GET", "/api/sessions/" + row["id"]) for row in prepared]
             require(originals == [*prepared[:-1], last] and all(row["combatStream"] is None for row in originals),
                     "A stale fifth candidate leaves all five original sessions unbound")
+            review_path = "/api/venue/server-launch-review"
+            review_targets = [{"sessionId": row["id"], "roomIds": row["roomIds"], "streamId": None, "udp": None} for row in prepared]
+            review = {"version": 1, "instanceId": launch_review_instance, "launchId": batch["launchId"],
+                      "topology": "Independent", "servers": review_targets[::-1]}
+            request("POST", review_path, review, 403, identity="Room1")
+            request("POST", review_path, review, 403, identity="GameServer")
+            request("POST", review_path, {**review, "workDirectory": "private-fixture-path"}, 400)
+            mismatch = request("POST", review_path, {**review, "instanceId": str(uuid.uuid4())}, 409)
+            require(mismatch["code"] == "venue-launch-instance-mismatch", "Launch review rejects a different configured instance")
+            inspected = request("POST", review_path, review)
+            require(inspected["instanceVerified"] and inspected["launchId"] == batch["launchId"]
+                    and [row["sessionId"] for row in inspected["servers"]] == [row["id"] for row in prepared]
+                    and all(row["phase"] == "Preparing" and row["sourceState"] == "unbound"
+                            and row["endpointState"] == "not-checked" for row in inspected["servers"]),
+                    "Launch review identifies the exact five unbound Preparing sessions in room order")
             candidates[-1]["expectedSequence"] = last["sequence"]
             attached = request("PUT", venue_route, batch, identity="GameServer")
             require(attached["launchId"] == batch["launchId"]
@@ -903,8 +920,24 @@ try:
                     "A valid venue batch returns all original source identities together")
             require(request("PUT", venue_route, {**batch, "servers": candidates[::-1]}, identity="GameServer") == attached,
                     "Reordered venue retry returns the same source receipt")
+            inspected = request("POST", review_path, review)
+            require([row["streamId"] for row in inspected["servers"]] == [row["streamId"] for row in candidates]
+                    and all(row["sourceState"] == "original-source" and row["endpointState"] == "not-published"
+                            for row in inspected["servers"]), "Launch review reads the original persisted batch before endpoint publication")
+            other = request("POST", review_path, {**review, "launchId": str(uuid.uuid4())})
+            require(all(row["sourceState"] == "different-source" and row["streamId"] is None for row in other["servers"]),
+                    "Launch review never treats a source from a different batch as the original")
+            changed_room = {**review_targets[0], "sessionId": str(uuid.uuid4())}
+            absent = request("POST", review_path, {**review, "servers": [changed_room, *review_targets[1:]]})
+            require(absent["servers"][0]["sourceState"] == "missing-session"
+                    and absent["servers"][0]["sessionId"] == changed_room["sessionId"],
+                    "Launch review does not substitute the current occupant for an unknown original session")
+            require(all(request("GET", "/api/sessions/" + row["id"])["sequence"] == candidate["expectedSequence"] + 1
+                        for row,candidate in zip(prepared,candidates,strict=True)), "Launch review does not append session events")
             for row in prepared:
                 request("DELETE", "/api/sessions/" + row["id"], expected=204)
+            require(all(row["phase"] == "Ended" and row["sourceState"] == "original-source"
+                        for row in request("POST", review_path, review)["servers"]), "Launch review reads the original ended sessions")
             relay_dll = Path(os.environ.get("VR_COMMAND_TELEMETRY_RELAY_DLL", ROOT / "tools/VrCommand.TelemetryRelay/bin/Release/net10.0/VrCommand.TelemetryRelay.dll"))
             journal = test_directory / "outbox.journal"
             relay_args = ["dotnet", str(relay_dll), "--journal", str(journal), "--base-url", base_url, "--key-file", str(key_file)]
