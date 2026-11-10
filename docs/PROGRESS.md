@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-10 主控與五房控的管理連線回條
+
+- 可攜管理包的直接 HTTPS 監聽會記下原 TCP 連線來源。主控與房控可用同一輪代號取得各自的簽章回條，主控再以獨立配置表核對六個私有 IPv4 位址。回條有效 15 分鐘，由原管理程序驗證。無需保存新場次或工作站資料。 [操作方式](WINDOWS_CONTROL_PACKAGE.md#核對主控與五房控的直連來源)
+- 新解壓包 `run-d4c00632fe4047ecafa38cd329668291` 退出碼 0、38 項通過。實際 HTTPS 的六角色均取得回條，保存同一台電腦的原來源位址，偽造轉送位址也無法替代。主控以六個相異的預期位址送回六份回條，服務在來源核對階段拒絕，CLI `complete` 為 `false`。另測明文、角色權限及超大回條拒絕。原生 Windows 遊戲伺服器仍以 HTTPS／WSS 完成一席同機入場、21 格回放、雙封存及一份原戰績確認。管理及遊戲程序已停止。 [實際套件驗證](../artifacts/control-https-checks/run-d4c00632fe4047ecafa38cd329668291/checks.json)
+- 六個獨立私有來源的成功路徑以核心測試驗證，另核對修改來源或簽章、重複角色、過期、不同監聽位址及服務重啟均遭拒。Release 零警告、1,074 項核心、768 項 HTTP、97 項世界串流、107 項原管理包、11 項工作站工具及 7 項封包邊界通過。
+- 功能源碼 `a7bba9d325eb21bd01c73f5a81640fcc7b2124e1`，三個新編譯來源的雜湊與封包收據一致。發行核對通過，沿用 Windows 和 Quest 0.50.1／66 及啟動器 1.12。GitHub Actions job `129932575121` 因帳務或支出上限未啟動。六台實體工作站、玩家跨機、頭盔及廠商硬體仍待現場驗收。 [發行核對](../artifacts/venue-release-operator-workstations.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42845737115)
+
 ## 2026-11-10 HTTPS 五房批次啟動
 
 - 啟動器 1.12 可從遊戲主機的私人 `control-instance.json` 取得管理 HTTPS 原點、指紋及 GameServer 金鑰。相同設定供待開清單、個別圖形啟動及五房計畫使用。圖形介面在啟動前重讀連線設定，若憑證指紋已換則清除選取。計畫格式維持原樣。 [分機設定](WINDOWS_SERVER_PACKAGE.md#建立遊戲主機的-https-連線設定)
