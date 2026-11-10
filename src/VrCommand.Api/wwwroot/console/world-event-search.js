@@ -80,7 +80,7 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged)
       if (pending === request) { pending = null; controls(); }
     }
   }
-  async function navigate(direction) {
+  async function navigate(direction, countMatches) {
     if (!scope?.idle || pending) return;
     const { sessionId, streamId, throughFrame, room, playerId, frameSequence } = scope;
     const filter = kind.value || null, roomId = room === 'all' ? null : Number(room);
@@ -111,7 +111,9 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged)
           if (value.nextFromFrame != null || value.frame.frameSequence !== scanned || !Number.isSafeInteger(value.frame.matchCount)
               || value.frame.matchCount < 1) throw new Error('回應的事件快照不同。');
           pending = null;
-          const jumped = await jump(scanned, () => revision === generation && scope?.frameSequence === frameSequence);
+          const matches = countMatches && (frame => frame.packet.elapsedMilliseconds === value.frame.elapsedMilliseconds
+            && countMatches(frame) === value.frame.matchCount);
+          const jumped = await jump(scanned, () => revision === generation && scope?.frameSequence === frameSequence, matches);
           if (revision === generation && !pending && scope?.frameSequence === (jumped ? scanned : frameSequence))
             status.textContent = jumped ? `已跳到第 ${scanned} 格，共 ${value.frame.matchCount} 筆符合事件。` : '讀取事件快照失敗，請再試一次。';
           return;
@@ -129,11 +131,22 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged)
       if (pending === request) { pending = null; controls(); }
     }
   }
+
+  function fromLatest(filter, frame, countMatches) {
+    if (!scope?.idle) return;
+    kind.value = filter;
+    update(scope);
+    filterChanged();
+    const count = countMatches(frame);
+    if (count) status.textContent = `已停在第 ${scope.frameSequence} 格，共 ${count} 筆符合事件。`;
+    else if (scope.frameSequence > 1) return navigate('previous', countMatches);
+    else status.textContent = '保存範圍內沒有符合條件的事件。';
+  }
   kind.addEventListener('change', () => { update(scope); filterChanged(); });
   start.addEventListener('click', () => search(0));
   here.addEventListener('click', () => search(scope.frameSequence - 1));
   next.addEventListener('click', () => search(page.nextAfterFrame));
   previousEvent.addEventListener('click', () => navigate('previous'));
   nextEvent.addEventListener('click', () => navigate('next'));
-  return { update, fromStart: () => search(0), kind: () => kind.value };
+  return { update, fromStart: () => search(0), fromLatest, kind: () => kind.value };
 }

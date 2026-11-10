@@ -318,7 +318,8 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       { shots: combat.acceptedSequence, frames: interrupted.acceptedSequence }, { polling: 100 });
     check(!(await page.locator('#closure-status').evaluate(panel => panel.classList.contains('closure-complete'))) && await page.locator('#export-report').isDisabled(),
       'Actual interrupted session reports accepted counts without declaring seals or enabling the final CSV');
-    check(await page.locator('#player-review-select').isDisabled() && await page.locator('#open-player-review').isDisabled(),
+    check(await page.locator('#player-review-select').isDisabled() && await page.locator('#open-player-review').isDisabled()
+      && await page.locator('#open-player-damage').isDisabled(),
       'An interrupted archive does not offer a sealed player review');
     await page.locator('#tab-world').click();
     await page.locator('#world-recording').selectOption(live.header.sessionId);
@@ -706,6 +707,35 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await page.locator('#world-review-clear-player').click();
     check(!await page.locator('#world-review-player-scope').isVisible() && await page.locator('#world-event-search-results button').count() === 0,
       'Showing all players clears the prior personal results');
+    const damageShortcut = page.locator('#open-player-damage');
+    const chooseFinalPlayer = async () => {
+      await page.locator('#tab-operations').click();
+      await page.locator('#player-review-select').selectOption(finalPlayer.playerId);
+    };
+    await chooseFinalPlayer();
+    await page.route(`**${reviewRoute}/frames/${eventSequence}`, async route => {
+      const original = await route.fetch();
+      const body = await original.json();
+      body.packet.events = body.packet.events.filter(event => event.kind !== 'PlayerDamaged');
+      await route.fulfill({ response: original, json: body });
+    }, { times: 1 });
+    await damageShortcut.click();
+    await eventStatus.filter({ hasText: '讀取事件快照失敗' }).waitFor();
+    check(Number(await canvas.getAttribute('data-sequence')) === finalFrame && await page.locator('#world-no-events').isVisible(),
+      'The latest damage shortcut rejects a saved frame with the right sequence but no matching damage');
+    await chooseFinalPlayer();
+    const damageRequest = page.waitForRequest(request => new URL(request.url()).pathname === `${reviewRoute}/event-neighbor`);
+    await damageShortcut.click();
+    const damageQuery = new URL((await damageRequest).url()).searchParams;
+    await eventStatus.filter({ hasText: `已跳到第 ${eventSequence} 格` }).waitFor();
+    check(damageQuery.get('playerId') === finalPlayer.playerId && damageQuery.get('direction') === 'previous'
+      && damageQuery.get('kind') === 'PlayerDamaged' && damageQuery.get('throughFrame') === String(finalFrame)
+      && damageQuery.get('fromFrame') === String(finalFrame) && Number(await canvas.getAttribute('data-sequence')) === eventSequence
+      && await page.locator('#world-event-kind').inputValue() === 'PlayerDamaged'
+      && (await page.locator('#world-events tr').allTextContents()).every(row => row.includes('玩家受傷'))
+      && await page.locator('#world-review-player-scope').isVisible(),
+      'The latest damage shortcut opens the original saved damage and keeps the personal event filter');
+    await page.locator('#world-review').screenshot({ path: path.join(screenshots, 'world-player-latest-damage.png') });
     const other = await context.newPage(); await other.goto(base + '/console/'); await other.locator('#login-key').fill(tokens.Room1); await other.locator('#login-form button').click();
     await other.locator('#tab-world').click(); await other.waitForFunction(() => document.querySelector('#world-message').textContent.includes('目前沒有'));
     check(await other.locator('#world-recording option').count() === 0, 'Room-scoped observer list reveals no foreign world'); await other.close();

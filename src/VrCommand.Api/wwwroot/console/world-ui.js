@@ -252,12 +252,15 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     policyFrames.update(showing ? { sessionId: info.header.sessionId, streamId: info.header.streamId,
       throughFrame, frameSequence: frame.packet.sequence, idle } : null);
   }
+  function filteredEvents(value, players = new Map(value.statistics.map(player => [player.playerId.toLowerCase(), player]))) {
+    const room = $('world-room').value, kind = eventSearch.kind();
+    return value.packet.events.filter(event => (!kind || event.kind === kind)
+      && (!reviewPlayer || event.playerId.toLowerCase() === reviewPlayer.id)
+      && (room === 'all' || players.get(event.playerId.toLowerCase())?.roomId === Number(room)));
+  }
   function showEvents(value) {
     const players = new Map(value.statistics.map(player => [player.playerId.toLowerCase(), player]));
-    const room = $('world-room').value, kind = eventSearch.kind();
-    const rows = value.packet.events.filter(event => (!kind || event.kind === kind)
-      && (!reviewPlayer || event.playerId.toLowerCase() === reviewPlayer.id)
-      && (room === 'all' || players.get(event.playerId.toLowerCase())?.roomId === Number(room))).map(event => {
+    const rows = filteredEvents(value, players).map(event => {
       const row = document.createElement('tr');
       const player = players.get(event.playerId.toLowerCase());
       for (const text of [event.sequence, eventNames[event.kind] ?? event.kind, player ? `${player.name} · 房間 ${player.roomId}` : shortId(event.playerId),
@@ -392,7 +395,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     received = performance.now(); $('world-canvas').dataset.sequence = String(packet.sequence); status();
   }
   function step(offset) { if (frame) return readFrame(frame.packet.sequence + offset); }
-  async function readFrame(sequence, stillCurrent = () => true) {
+  async function readFrame(sequence, stillCurrent = () => true, matches = () => true) {
     const id = $('world-recording').value;
     if (!active || mode !== 'replay' || connected || connecting || stepping || !frame || info.header.sessionId !== id) return false;
     if (sequence < 1 || sequence > info.acceptedSequence || (Number.isInteger(savedLimit) && sequence > savedLimit)) return false;
@@ -403,7 +406,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     try {
       const value = await (await response(`/api/sessions/${id}/world/frames/${sequence}`, signal)).json();
       if (request !== epoch || !active || id !== $('world-recording').value || !stillCurrent()) return false;
-      if (value.packet.sequence !== sequence) throw new Error('回應的快照序號不同。');
+      if (value.packet.sequence !== sequence || !matches(value)) throw new Error('回應的快照不同。');
       show(value, true); $('world-frame-message').textContent = `已停在第 ${sequence} 格。`;
       return true;
     } catch (error) {
@@ -643,7 +646,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
         if (playerReview) {
           reviewPlayer = { id: target.playerId, name: target.playerName };
           show(playerFrame, true);
-          void eventSearch.fromStart();
+          if (target.latestDamage) void eventSearch.fromLatest('PlayerDamaged', playerFrame, value => filteredEvents(value).length);
+          else void eventSearch.fromStart();
         }
       }
     } catch (error) {

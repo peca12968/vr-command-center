@@ -225,7 +225,38 @@ async function main() {
         assert.deepEqual(apiRequests, []);
         await player.screenshot({ path: path.join(path.dirname(output), 'linked-player-room-03.png') });
       } finally { await player.close(); await page.bringToFront(); }
-      return { roomId, start, end, retainedEvents, omittedEvents, props: props.length, apiRequests: apiRequests.length };
+      const damaged = originals.at(-1).statistics.find(player => player.roomId === roomId && player.hitsReceived > 0);
+      assert.ok(damaged);
+      const damageEvents = row => row.packet.events.filter(event => event.kind === 'PlayerDamaged' && event.playerId === damaged.playerId);
+      const latest = originals.findLast(row => damageEvents(row).length);
+      assert.ok(latest && latest.packet.sequence < replay.throughSequence);
+      const review = await browser.newPage({ viewport: { width: 1440, height: 1080 } });
+      const writes = [];
+      review.on('request', request => {
+        if (new URL(request.url()).pathname.startsWith('/api/') && request.method() !== 'GET') writes.push(request.method());
+      });
+      try {
+        await review.goto(config.base + '/console/');
+        await review.locator('#login-key').fill(config.roomReviewKey);
+        await review.locator('#login-form button').click();
+        await review.locator('#include-ended').check();
+        await review.locator('#session-select').selectOption(replay.sessionId);
+        await review.locator('#player-review-select').selectOption(damaged.playerId);
+        const neighbor = review.waitForRequest(request => new URL(request.url()).pathname === new URL(world).pathname + '/event-neighbor');
+        const exact = review.waitForResponse(reply => new URL(reply.url()).pathname === new URL(world).pathname + `/frames/${latest.packet.sequence}`);
+        await review.locator('#open-player-damage').click();
+        const query = new URL((await neighbor).url()).searchParams;
+        assert.deepEqual(['roomId', 'playerId', 'kind', 'direction', 'fromFrame', 'throughFrame'].map(field => query.get(field)),
+          [String(roomId), damaged.playerId, 'PlayerDamaged', 'previous', String(replay.throughSequence), String(replay.throughSequence)]);
+        assert.deepEqual(await (await exact).json(), latest);
+        await review.locator('#world-event-search-status').filter({ hasText: `已跳到第 ${latest.packet.sequence} 格` }).waitFor();
+        assert.equal(await review.locator('#world-room').inputValue(), String(roomId));
+        assert.equal(await review.locator('#world-events tr').count(), damageEvents(latest).length);
+        assert.deepEqual(writes, []);
+        await review.locator('#world-review').screenshot({ path: path.join(path.dirname(output), 'linked-room-03-latest-damage.png') });
+      } finally { await review.close(); await page.bringToFront(); }
+      return { roomId, start, end, retainedEvents, omittedEvents, props: props.length, apiRequests: apiRequests.length,
+        latestDamage: { frame: latest.packet.sequence, matches: damageEvents(latest).length, managementWrites: writes.length } };
     }
     for (const session of config.sessions) {
       if (session.participationBegin) {

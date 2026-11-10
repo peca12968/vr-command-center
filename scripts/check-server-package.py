@@ -947,6 +947,7 @@ def main():
         scoped = linked and args.check_player_room_replay
         if scoped:
             config['roomReplaySource'] = str(out/'linked-replay.json')
+            config['roomReviewKey'] = keys['Room3']
         if earlier:
             config['history'] = {'batch': earlier, 'zip': str(out/'independent-venue-reports.zip')}
         descriptor.write_text(json.dumps(config), encoding='utf-8')
@@ -986,6 +987,9 @@ def main():
             check(room['roomId'] == 3 and 0 < room['start'] < room['end'] <= first['throughSequence']
                   and room['retainedEvents'] > 0 and room['omittedEvents'] > 0 and room['props'] == 1 and room['apiRequests'] == 0,
                   'linked shipped room export retains original timing and room 3 combat, excluding the other four rooms')
+            damage = room['latestDamage']
+            check(1 <= damage['frame'] < first['throughSequence'] and damage['matches'] > 0 and damage['managementWrites'] == 0,
+                  'linked room 3 controller opens its latest original damage frame without management writes')
         if earlier:
             older = earlier['sessions'][2]
             history = result['history']

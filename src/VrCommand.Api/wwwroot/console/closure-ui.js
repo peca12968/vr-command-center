@@ -42,7 +42,7 @@ export function mountClosure(getState, unauthorized, openReview, report) {
   const fieldPanel = document.getElementById('field-evidence'), fieldButton = document.getElementById('download-field-evidence');
   const fieldStatus = document.getElementById('field-evidence-status');
   const reviewPanel = document.getElementById('player-review'), reviewPlayer = document.getElementById('player-review-select');
-  const reviewButton = document.getElementById('open-player-review');
+  const reviewButton = document.getElementById('open-player-review'), damageButton = document.getElementById('open-player-damage');
   let active = false, generation = 0, identity = '', controller = null, attempted = -Infinity, world = null, result = 'Waiting', refreshFailed = false;
   let fieldRequest = null;
   let reviewTarget = null, reviewOptions = '';
@@ -92,9 +92,11 @@ export function mountClosure(getState, unauthorized, openReview, report) {
     reviewPanel.hidden = !shown;
     reviewPlayer.disabled = !complete;
     reviewButton.disabled = !reviewTarget;
+    damageButton.disabled = !reviewTarget || !Number.isSafeInteger(player.hitsReceived) || player.hitsReceived < 1;
   }
   reviewPlayer.addEventListener('change', render);
   reviewButton.addEventListener('click', () => { render(); if (reviewTarget) openReview(reviewTarget); });
+  damageButton.addEventListener('click', () => { render(); if (!damageButton.disabled) openReview({ ...reviewTarget, latestDamage: true }); });
   function reset() { clear(); identity = ''; refreshFailed = false; render(); }
   async function poll() {
     const state = getState(), id = identity, epoch = state.epoch, key = state.key, request = generation;

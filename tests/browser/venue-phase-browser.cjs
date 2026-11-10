@@ -223,8 +223,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await reportRoom.selectOption('2');
     await review.selectOption(subject);
     check((await review.locator('option').evaluateAll(options => options.map(option => option.value))).sort().join(',')
-      === ['', subject, roomPeer].sort().join(',') && await openReview.isEnabled(),
-      'A sealed linked review offers only the selected room players, including a removed player from the ledger');
+      === ['', subject, roomPeer].sort().join(',') && await openReview.isEnabled() && await page.locator('#open-player-damage').isDisabled(),
+      'A sealed linked review includes the removed player in scope while keeping the damage shortcut disabled for zero hits');
     await reportRoom.selectOption('1');
     check(await review.inputValue() === '' && await openReview.isDisabled(), 'Switching rooms clears a previous personal review selection outside the scope');
     await reportRoom.selectOption('2');
