@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-11 `VRCommand-ControlServer-0.31.121-observer-integrity-win-x64.zip` 為 53,017,017 bytes，SHA-256 `2cd6e31c1e73f676ed1fc3cc7a088f74327f6c698dc090d492b1be2e823994a5`。解壓核對 555 筆清單及 535 個發行檔案。觀戰核對錄製狀態及序號，並顯示此格的姿態與最後保存格標記。 [觀戰操作](WORLD_RECORDING.md#操作) · [發行核對](../artifacts/venue-release-0.50.4-observer-integrity.json)
+
 2026-11-11 `VRCommand-ControlServer-0.31.120-setting-drafts-win-x64.zip` 為 53,016,141 bytes，SHA-256 `a813efb255223f947c741cf86fdde1c7f515c1674d4049a7706f3f0c6a4e8ed1`。解壓核對 555 筆清單及 535 個發行檔案。即時環境與敵軍可分開編輯，管理服務依設定版本檢查是否可套用。 [操作方式](ENVIRONMENT.md) · [發行核對](../artifacts/venue-release-0.50.4-setting-drafts.json)
 
 2026-11-11 `VRCommand-ControlServer-0.31.119-room-enemy-edit-win-x64.zip` 為 53,014,011 bytes，SHA-256 `5c31c8fd898b3a05f771c9df8fbbbd4efaa4a699316d93407f71a87579d2c55c`。解壓核對 555 筆清單及 535 個發行檔案。五房合併場的分房敵軍策略依各房版本套用，版本已變更時保留草稿。 [逐房操作](LAYOUT.md#合併場分房敵軍策略) · [發行核對](../artifacts/venue-release-0.50.4-room-enemy-edit.json)

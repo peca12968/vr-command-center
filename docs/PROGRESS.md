@@ -1,5 +1,14 @@
 # 開發進度
 
+## 2026-11-11 觀戰錄製身分與姿態標示
+
+- 0.31.121 的即時觀戰及回放會先核對標頭，後續狀態與封存訊息須沿用同一來源及房間。即時狀態序號倒退或撤回已接受的封存會停止該次串流，保留原畫格及鏡頭。0.31.120 解壓包可重現外來狀態把原錄製誤標為封存。新版另標記最後保存格，房間卡改顯示該格存活玩家的有效姿態數，角色保留頭手來源與淘汰狀態。 [操作說明](WORLD_RECORDING.md#即時觀戰斷線後重新連接) · [舊版對照](../artifacts/observer-integrity-baseline.log)
+- Release 零警告，1,100 項核心、825 項 HTTP、108 項世界串流、111 項 Node 及 107 項管理包檢查通過。來源與解壓包各通過 21 項即時觀戰、32 項姿態中斷專項。發行來源 `ade9b977` 的 187 個工作樹檔案雜湊相符，其中 29 個既有檔案與 Git 只差換行。C／F 管理包測試 27 檔相符，Windows 與 Quest 0.50.4 離線發行核對通過。兩次 GitHub Actions 因帳務或支出上限未啟動。 [即時觀戰專項](../artifacts/console-observer-integrity-package-live/checks.json) · [姿態專項](../artifacts/console-observer-integrity-package-pose/checks.json) · [發行核對](../artifacts/venue-release-0.50.4-observer-integrity.json) · [發行來源 CI](https://github.com/peca12968/vr-command-center/actions/runs/42892151748) · [測試來源 CI](https://github.com/peca12968/vr-command-center/actions/runs/42893314643)
+- 首輪 Windows 場已通過兩種拓撲的追蹤及 UDP 恢復，之後測試錯誤地在本房專用畫面尋找多房按鈕，場次驗收失敗。測試來源 `4f85b628` 明確區分兩種畫面，在共用畫面核對原畫格的姿態計數，本房專用畫面則確認多房按鈕隱藏。首輪清理完畢，C／F 232 檔相符。 [首輪測試](../artifacts/observer-integrity-native.log) · [清理及雜湊](../artifacts/observer-integrity-native-initial-validation.json)
+- 第二輪到達本房專用串流的幾何核對，測試任務缺少別房掩體，場次仍失敗。`14cc1ff4` 在合併觀戰的測試任務配置油桶，保留原隔離斷言。第二輪同樣清理完畢，C／F 232 檔相符。 [第二輪測試](../artifacts/observer-integrity-native-final.log) · [清理及雜湊](../artifacts/observer-integrity-native-second-validation.json)
+- 同一解壓管理包通過 891 項完整 Chromium 回歸。核對八個任務列表故障均送達，並保存 143 份證據及原日誌與結果雜湊。測試來源 `4f85b628`，管理包來源 `ade9b977`。 [完整回歸](../artifacts/console-observer-integrity-full/checks.json) · [回歸核對](../artifacts/observer-integrity-browser-validation.json)
+- 測試來源 `14cc1ff4` 搭配原解壓包通過 441 項 Windows 原生檢查。獨立與合併模式各 25 個同機玩家端，第 5 房第 2 席使用 Unity Mock Runtime。姿態回放從原中斷格 215／206 返回即時格 223／215，原房間、席位及鏡頭保留。另行切斷 UDP 後，原玩家程序重連並保留健康及彈藥，兩段封存區間 320／315 格核對其餘 24 席。合併第 4 房專用串流回傳本房 5 席、掩體與戰績，由原格 593 重新連到 598。六場共 3,577 格回放、50 份戰績、11 份 CSV、原伺服器確認及雙封存，活動場次歸零，C／F 237 檔相符。測試來源 CI job `130103035828` 因帳務或支出上限未啟動。實體頭盔、跨機及廠商設備待實測。 [Windows 驗收](../artifacts/server-package-checks/run-16413070e86f452eb8b68de79b0b562f/checks.json) · [原生核對](../artifacts/observer-integrity-native-validation.json) · [測試來源 CI](https://github.com/peca12968/vr-command-center/actions/runs/42894242299)
+
 ## 2026-11-11 即時環境與敵軍各自保留草稿
 
 - 0.31.119 的解壓包重現套用環境時會重設尚未送出的敵軍設定。0.31.120 分別保留環境與敵軍草稿，依設定版本套用。其他設定、名冊及可操作的階段變更不會使原草稿失效。全場敵軍版本包含分房策略變更，同一設定的舊稿被拒絕後仍可查看，按「載入目前設定」才取代。舊 API 場次序號繼續適用。 [操作與 API](ENVIRONMENT.md) · [舊版對照](../artifacts/setting-drafts-baseline.log) · [套件專項](../artifacts/console-setting-drafts-package/checks.json)
