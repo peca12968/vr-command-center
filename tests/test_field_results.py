@@ -1515,6 +1515,78 @@ class FieldResultsTests(unittest.TestCase):
         with self.assertRaisesRegex(field.EvidenceError, 'terminal disconnect'):
             field.verify(*data)
 
+    def reconnect_history_fixture(self):
+        data = fixture()
+        data[3]['players'][0]['seat'] = 0
+        data[3]['players'][1]['seat'] = 1
+        address, log = data[7][1]
+        data[7][1] = (address, 'VR_CLIENT_CONNECTED id=8\nVR_CLIENT_DISCONNECTED\n' + log)
+        startup_marker = 'VR_NETWORK_STARTED role=Client started=True background=True port=7777\n'
+        data[7] = [(address, startup_marker + log) for address, log in data[7]]
+        startup, rest = data[6].split('\n', 1)
+        data[6] = (startup + '\nVR_SERVER_ADMISSION_APPROVED id=8\nVR_SERVER_PEER id=8 endpoint=192.168.5.20:5010\n'
+                   'VR_SERVER_CLIENT_LEFT id=8\n' + rest)
+        return data
+
+    def test_reconnect_history_verifies_original_windows_and_quest_connection_order(self):
+        for quest in (False, True):
+            with self.subTest(quest=quest), tempfile.TemporaryDirectory() as directory:
+                data = self.reconnect_history_fixture()
+                address, log = data[7].pop()
+                player_markers = log.split('\n', 1)[1]
+                quest_logs = []
+                if quest:
+                    data[3]['players'][1]['headset'] = 'Quest3'
+                    quest_logs.append((address, quest_logcat(player_markers), 7342))
+                else:
+                    data[7].append((address, PlayerSourceEvidenceTests.openxr_startup('Unity Mock Runtime') + player_markers))
+                journal = Path(directory) / 'original.worldlog'
+                owners = data[3]['players']
+                rows = [{'id': owner['id'], 'roomId': 1, 'connected': True, 'rig': {'kind': kind}}
+                        for owner, kind in zip(owners, ('Simulated', 'Tracked'), strict=True)]
+                world_journal(journal, data[2]['finalWorld'], players=lambda _, phase: rows if phase == 'Running' else [])
+                report = field.verify(*data, quest_player_logs=quest_logs, world_journal=journal,
+                                      verify_player_sources=True, verify_reconnect_history=True)
+                self.assertEqual({'observedConnections': 3, 'retiredConnections': 1,
+                                  'reconnectedSeats': [{'roomId': 1, 'seat': 2, 'retiredConnections': 1}]},
+                                 report['reconnectHistory'])
+                self.assertEqual(2, report['serverAcknowledgements'])
+                self.assertEqual('quest-logcat-tracked' if quest else 'windows-openxr-mock-tracked', report['playerSources'][1]['source'])
+                self.assertNotIn('192.168', json.dumps(report))
+
+    def test_reconnect_history_rejects_missing_reordered_or_shared_prior_connections(self):
+        for case, error in (
+            ('missing', 'Missing server release'), ('late', 'Missing server release'),
+            ('wrong source', 'Historical UDP peer differs'), ('shared', 'reused across player logs'),
+            ('extra peer', 'unmatched UDP peer records'), ('ack after release', 'acknowledgement follows server release'),
+            ('second startup', 'one original Windows client startup'), ('missing startup', 'precedes the original client startup'),
+        ):
+            with self.subTest(case=case):
+                data = self.reconnect_history_fixture()
+                left = 'VR_SERVER_CLIENT_LEFT id=8\n'
+                if case in ('missing', 'late'):
+                    data[6] = data[6].replace(left, '') + (left if case == 'late' else '')
+                elif case == 'wrong source':
+                    data[6] = data[6].replace('192.168.5.20:5010', '192.168.5.22:5010')
+                elif case == 'shared':
+                    _, log = data[7][0]
+                    startup, log = log.split('\n', 1)
+                    data[7][0] = (data[7][1][0], startup + '\nVR_CLIENT_CONNECTED id=8\nVR_CLIENT_DISCONNECTED\n' + log)
+                    data[6] = data[6].replace('192.168.5.10:5001', '192.168.5.20:5001')
+                elif case == 'extra peer':
+                    address, log = data[7][1]
+                    startup, _, _, remaining = log.split('\n', 3)
+                    data[7][1] = (address, startup + '\n' + remaining)
+                elif case == 'ack after release':
+                    data[6] = data[6].replace('VR_SERVER_DEBRIEF_ACK id=2', 'VR_SERVER_CLIENT_LEFT id=2\nVR_SERVER_DEBRIEF_ACK id=2')
+                else:
+                    address, log = data[7][1]
+                    startup, remaining = log.split('\n', 1)
+                    data[7][1] = (address, startup + '\n' + log if case == 'second startup' else remaining)
+                with self.assertRaisesRegex(field.EvidenceError, error):
+                    field.verify(*data, verify_reconnect_history=True)
+                self.assertEqual(2, field.verify(*data)['serverAcknowledgements'])
+
     def test_requires_current_admission_and_all_three_sequence_boundaries(self):
         base = fixture()
         for old, new in [(id_for(14), id_for(999)), ('"worldSequence": 80', '"worldSequence": 79'),
@@ -1610,7 +1682,7 @@ class FieldResultsTests(unittest.TestCase):
                 field.verify(*data, combat_journal=path)
 
     def test_cli_success_and_private_failure_diagnostics(self):
-        topology, ips, launcher, session, stats, endpoint, server, clients = fixture()
+        topology, ips, launcher, session, stats, endpoint, server, clients = self.reconnect_history_fixture()
         with tempfile.TemporaryDirectory(prefix='field-check-') as directory:
             root = Path(directory)
             command = [sys.executable, str(SCRIPT), '--topology', topology, '--server-ip', str(next(iter(ips)))]
@@ -1628,13 +1700,15 @@ class FieldResultsTests(unittest.TestCase):
             legacy = json.loads(success.stdout)
             self.assertTrue(legacy['consistent'])
             self.assertNotIn('worldJournal', legacy)
+            self.assertNotIn('reconnectHistory', legacy)
             archived = subprocess.run([*command, '--world-journal', str(journal)], capture_output=True, text=True, check=True)
             self.assertEqual(80, json.loads(archived.stdout)['worldJournal']['frames'])
             combat = root / 'original.journal'
             combat_journal(combat, launcher)
-            closed = subprocess.run([*command, '--world-journal', str(journal), '--combat-journal', str(combat)],
+            closed = subprocess.run([*command, '--world-journal', str(journal), '--combat-journal', str(combat), '--verify-reconnect-history'],
                                     capture_output=True, text=True, check=True)
             self.assertEqual(json.loads(closed.stdout)['combatJournal']['events'], 0)
+            self.assertEqual(json.loads(closed.stdout)['reconnectHistory']['retiredConnections'], 1)
             self.assertNotIn(directory, closed.stdout)
             (root / 'server-log').write_text(server.replace('192.168.5.20', '192.168.5.50'), encoding='utf-8')
             failure = subprocess.run(command, capture_output=True, text=True)

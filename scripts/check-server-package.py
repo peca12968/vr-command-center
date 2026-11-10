@@ -139,7 +139,7 @@ def main():
         p.error('--check-venue-openxr requires --check-quest-vr-partial-map and its own venue participation check')
     if args.check_venue_live_tracking and not args.check_venue_openxr:
         p.error('--check-venue-live-tracking requires --check-venue-openxr')
-    if args.check_venue_openxr_reconnect and (not args.check_venue_openxr or args.peer_diagnostics
+    if args.check_venue_openxr_reconnect and (not args.check_venue_openxr or (args.peer_diagnostics and not args.venue_field_evidence)
             or args.check_windows_venue_staging or args.check_room_combat):
         p.error('--check-venue-openxr-reconnect requires --check-venue-openxr and its own connection and combat checks')
     if (args.openxr_mock_only or args.check_venue_openxr) != bool(args.openxr_mock_pose_dll):
@@ -622,8 +622,9 @@ def main():
             peers=re.findall(r'^VR_SERVER_PEER id=(\d+) endpoint=(\S+)$',server,re.M)
             check('VR_SERVER_PEER_LIMIT' not in server,entry['label']+' no peer log overflow')
             if entry['peerDiagnostics']:
-                check(len(peers)==len(acks) and {int(connection) for connection,_ in peers}==set(acks),
-                    entry['label']+' exactly one UDP endpoint for every original acknowledged connection')
+                expected_peers={int(connection) for client in owners for connection in client.get('reconnectIds', [client['connection']])}
+                check(len(peers)==len(expected_peers) and {int(connection) for connection,_ in peers}==expected_peers,
+                    entry['label']+' exact UDP peer history for the original player processes')
                 session_path='/api/sessions/'+entry['sessionId']
                 session_raw,_=request(session_path,raw_response=True)
                 endpoint_raw,_=request(session_path+'/connection-endpoint',raw_response=True)
@@ -661,7 +662,8 @@ def main():
                     [(ip,field.content(c['log'])) for c in owners], world_journal=world_journal,
                     combat_journal=combat_journal,
                     udp_source_preflights=[preflight] if preflight is not None else None,
-                    verify_player_sources=args.check_venue_openxr and world_journal is not None)
+                    verify_player_sources=args.check_venue_openxr and not args.check_venue_openxr_reconnect and world_journal is not None,
+                    verify_reconnect_history=args.check_venue_openxr_reconnect)
                 save(entry['label']+'-field-results.json',result)
                 check(result['serverAcknowledgements']==len(acks),entry['label']+' field report matches same-PC endpoints and sealed player results')
                 if world_journal is not None:
@@ -748,7 +750,8 @@ def main():
         bundle_file.write_bytes(bundle)
         manifest_path = runtime / (label + '-field-manifest.json')
         common = {'version': 1, 'mode': mode, 'topology': 'same-host', 'serverIps': [address],
-                  **({'verifyPlayerSources': True} if args.check_venue_openxr else {})}
+                  **({'verifyPlayerSources': True} if args.check_venue_openxr and not args.check_venue_openxr_reconnect else {}),
+                  **({'verifyReconnectHistory': True} if args.check_venue_openxr_reconnect else {})}
         if args.check_venue_participation_gate:
             common['verifyParticipationBegin'] = True
         concurrent_seconds = args.venue_concurrent_roster_seconds
@@ -821,7 +824,26 @@ def main():
             tracked = run(dict(evidence, requireTrackedRoster=True))
             check(tracked.returncode == 1 and not tracked.stdout and 'original Quest or non-mock Windows OpenXR' in tracked.stderr,
                   label + ' continuous desktop roster cannot satisfy the tracked-only evidence gate')
-        if args.check_venue_openxr:
+        if args.check_venue_openxr_reconnect:
+            check(summary['reconnectHistory']=={'observedConnections':26,'retiredConnections':1,
+                  'reconnectedSeats':[{'roomId':5,'seat':2,'retiredConnections':1}]},
+                  label+' field evidence verifies the released connection and its exact original seat')
+            witness=read(out/(label+'-venue-openxr-reconnect.json'))
+            old_connection=witness['connections'][0]
+            session_id=witness['renewed']['readiness']['sessionId']
+            target=next(row for row in evidence['sessions'] if read(Path(row['launcherReport']))['sessionId']==session_id)
+            server=Path(target['serverLog']).read_bytes()
+            release=f'VR_SERVER_CLIENT_LEFT id={old_connection}\n'.encode('ascii')
+            if release not in server:
+                release=release.replace(b'\n',b'\r\n')
+            assert server.count(release)==1
+            missing_release=out/(label+'-field-server-without-release.log')
+            missing_release.write_bytes(server.replace(release,b'',1))
+            missing=run(dict(evidence,sessions=[dict(row,serverLog=str(missing_release)) if row is target else row
+                                               for row in evidence['sessions']]))
+            check(missing.returncode==1 and not missing.stdout and 'Missing server release' in missing.stderr,
+                  label+' original venue closure cannot pass without the superseded transport release')
+        elif args.check_venue_openxr:
             sources={(row['roomId'],row['seat']):row['source'] for session in summary['sessions'] for row in session['playerSources']}
             check(sources=={(room,seat):'windows-openxr-mock-tracked' if (room,seat)==(5,2) else 'windows-desktop-simulated'
                            for room in range(1,6) for seat in range(1,6)},

@@ -96,7 +96,9 @@ Quest 小批次驗證可在三包命令加上 `--check-vr-venue-tickets --check-
 
 使用管理包 0.31.72 可再加 `--check-venue-live-tracking`，在上述實際來源的四個取樣點比對主控 API 的 `venueTracking`，並核對房控權限。 [執行中五房追蹤](PLAYER_READINESS.md#執行中五房追蹤總覽)
 
-加上 `--check-venue-openxr-reconnect` 可在兩種拓撲各中斷第 5 房第 2 席的本機 UDP 轉送。此測試需支援 Vive Menu 及扳機的測試 DLL，請省略 `--check-windows-venue-staging`、`--peer-diagnostics` 與 `--check-room-combat`。使用原 ZIP 的測試副本設定轉送端點，切回原伺服器時由房控重發同一入場的票券。測試核對原 OpenXR 程序、重連前的單發耗彈、恢復的有效追蹤、封存回放中的其餘 24 席，以及重連後的戰績確認。 [五房重連操作](QUEST_RECONNECT.md#五房-udp-中斷複驗)
+加上 `--check-venue-openxr-reconnect` 可在兩種拓撲各中斷第 5 房第 2 席的本機 UDP 轉送。此測試需支援 Vive Menu 及扳機的測試 DLL，請省略 `--check-windows-venue-staging` 與 `--check-room-combat`。使用原 ZIP 的測試副本設定轉送端點，切回原伺服器時由房控重發同一入場的票券。測試核對原 OpenXR 程序、重連前的單發耗彈、恢復的有效追蹤、封存回放中的其餘 24 席，以及重連後的戰績確認。 [五房重連操作](QUEST_RECONNECT.md#五房-udp-中斷複驗)
+
+同時傳入 `--peer-diagnostics --field-evidence --venue-field-evidence --check-venue-end`，可用上述原程序及伺服器日誌複驗場館 ZIP 的重連歷程。這場排演的 OpenXR 初始啟動埠屬於本機轉送，姿態由原生回放核對，離線檢查使用舊連線釋放、來源與最終戰績。 [離線重連驗收](EXTERNAL_CLIENTS.md#核對原程序的重連歷程)
 
 搭配控制台 0.31.10，可加上 `--check-interrupted-replay`。測試在另一個獨立場次錄到敵軍實際傷害後終止該次啟動器，核對原遊戲程序退出，再檢查保存片段的尾端、戰績及未封存狀態。 [中斷場次回放](WORLD_RECORDING.md#回放未封存的已保存片段)
 

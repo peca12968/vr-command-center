@@ -239,6 +239,12 @@ python scripts/verify-field-results.py --topology direct-lan `
 
 每場最多 25 位玩家。檢查器逐位比對結束名冊的入場 ID、房間、個人戰績、三種封存序號，以及最終連線的 UDP 來源與伺服器確認。玩家曾重連時使用收到戰績的最後一條連線。名冊異動造成最終統計包含已離場玩家時，這套固定名冊驗收會拒絕。文字日誌、JSON 與 ZIP 每份最多 16 MiB。成功輸出可另存 JSON，摘要只含計數、房間、序號及範圍。失敗以退出碼 1 表示，診斷文字省略原始位址、票券和檔案路徑。
 
+### 核對原程序的重連歷程
+
+單場可加 `--verify-reconnect-history`，五房清單可填 `"verifyReconnectHistory": true`。開場前先啟用伺服器的 UDP 來源診斷。各席須提供同一原程序的完整 Windows 日誌或單一 PID 的 Quest logcat，並填寫該席本次任務使用的 IPv4。此模式適用於來源 IPv4 相同的重連，UDP 埠可以改變。
+
+驗收會比對每條已連線記錄的伺服器核准及 UDP 來源，確認舊連線在下一條核准前已由伺服器釋放，最後一條才有原戰績確認。無法歸入任何玩家日誌的伺服器來源記錄會使驗收失敗。`reconnectHistory` 提供總連線數、已釋放的舊連線數與重連房號席位。入場識別以最後封存的原戰績核對，歷史來源記錄提供連線識別與順序。 [伺服器來源診斷](WINDOWS_SERVER_PACKAGE.md#跨機來源診斷)
+
 如要一併驗收原生回放檔，等啟動器回報 `sealed-stopped` 後，從其 `workDirectory` 下的 `telemetry` 保留 `<sessionId>.worldlog`。在單場命令加入 `--world-journal .\room-01.worldlog`。工具唯讀檢查每筆記錄的校驗碼與連續影格，核對場次、來源、房間、校正設定和最後封存。它確認原檔含活動中影格及兩種封存的尾界，再輸出檔案 SHA-256、總影格數及活動中影格數。活動中影格須為 `Running`、tick 大於零且未中止來源。原生回放檔逐筆讀取，可超過文字日誌的 16 MiB 上限。 [原生世界紀錄](WORLD_SOURCE.md)
 
 ### 從原始戰鬥日誌重算戰績

@@ -27,7 +27,7 @@ SHOT_FIRED, SHOT_HIT, ENEMY_ELIMINATED, PLAYER_DAMAGED = 0, 1, 2, 4
 WORLD_COMBAT_KINDS = ('ShotFired', 'ShotHit', 'EnemyEliminated', 'PlayerDamaged')
 EMPTY_GUID = bytes(16)
 LAN = tuple(map(ipaddress.IPv4Network, ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16')))
-SERVER_MARKER = re.compile(r'VR_SERVER_(ADMISSION_APPROVED|PEER|DEBRIEF_ACK|DEBRIEF_TIMEOUT) id=(0|[1-9][0-9]{0,19})(?: endpoint=(\S+))?')
+SERVER_MARKER = re.compile(r'VR_SERVER_(ADMISSION_APPROVED|PEER|CLIENT_LEFT|DEBRIEF_ACK|DEBRIEF_TIMEOUT) id=(0|[1-9][0-9]{0,19})(?: endpoint=(\S+))?')
 CONNECT = re.compile(r'VR_CLIENT_CONNECTED id=(0|[1-9][0-9]{0,19})')
 LOGCAT_UNITY = re.compile(r'[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3} +'
                           r'([1-9][0-9]{0,9}) +[1-9][0-9]{0,9} I Unity *: (.*)')
@@ -147,17 +147,18 @@ def peer_address(endpoint):
     return ipv4(host), int(port)
 
 
-def server_connections(log, port):
-    approved, peers, acknowledged = set(), {}, set()
+def server_connections(log, port, *, verify_history=False):
+    approved, peers, released, acknowledged = {}, {}, {}, set()
     started = 0
-    for line in log.splitlines():
+    for order, line in enumerate(log.splitlines()):
         if line.startswith('VR_NETWORK_STARTED '):
             require(line == f'VR_NETWORK_STARTED role=Server started=True background=True port={port}',
                     'Server log startup differs from the reported UDP binding')
             started += 1
         if line.startswith('VR_SERVER_PEER_LIMIT'):
             raise EvidenceError('UDP peer log reached its recording limit')
-        if not line.startswith(('VR_SERVER_ADMISSION_APPROVED ', 'VR_SERVER_PEER ', 'VR_SERVER_DEBRIEF_ACK ', 'VR_SERVER_DEBRIEF_TIMEOUT ')):
+        if not (line.startswith(('VR_SERVER_ADMISSION_APPROVED ', 'VR_SERVER_PEER ', 'VR_SERVER_DEBRIEF_ACK ', 'VR_SERVER_DEBRIEF_TIMEOUT '))
+                or (verify_history and line.startswith('VR_SERVER_CLIENT_LEFT '))):
             continue
         require(started == 1, 'Server connection marker precedes startup')
         match = SERVER_MARKER.fullmatch(line)
@@ -166,30 +167,43 @@ def server_connections(log, port):
         require(bool(endpoint) == (kind == 'PEER'), 'Unexpected server marker format')
         if kind == 'ADMISSION_APPROVED':
             require(connection not in approved, 'Duplicate server admission marker')
-            approved.add(connection)
+            approved[connection] = order
         elif kind == 'PEER':
-            require(connection in approved and connection not in peers, 'Missing approval or duplicate UDP peer marker')
+            require(connection in approved and connection not in peers and connection not in released, 'Missing approval or duplicate UDP peer marker')
             peers[connection] = endpoint
+        elif kind == 'CLIENT_LEFT':
+            if connection in approved:
+                require(connection not in released, 'Duplicate server release marker')
+                released[connection] = order
         elif kind == 'DEBRIEF_ACK':
             require(connection in peers and connection not in acknowledged, 'Missing UDP peer or duplicate server acknowledgement')
+            require(connection not in released, 'Server acknowledgement follows server release')
             acknowledged.add(connection)
         else:
             raise EvidenceError('Server recorded a player result timeout')
     require(started == 1, 'Expected one original server startup in the log')
-    return peers, acknowledged
+    return peers, acknowledged, approved, released
 
 
-def client_result(log):
+def client_result(log, *, connections=None, require_startup=False):
     connection = None
     final = None
     seen = set()
+    started = not require_startup
     for line in log.splitlines():
+        if require_startup and line.startswith('VR_NETWORK_STARTED '):
+            require(not started and client_startup_on_port(line), 'Expected one original Windows client startup')
+            started = True
+        if line.startswith(PLAYER_MARKERS):
+            require(started, 'Windows player marker precedes the original client startup')
         if line.startswith('VR_CLIENT_CONNECTED '):
             match = CONNECT.fullmatch(line)
             require(match is not None and connection is None and final is None, 'Unexpected player connection marker')
             connection = match.group(1)
             require(connection not in seen, 'Player connection number reused')
             seen.add(connection)
+            if connections is not None:
+                connections.append(connection)
         elif line == 'VR_CLIENT_DISCONNECTED':
             connection = None
         elif line.startswith('VR_CLIENT_DEBRIEF_FINAL '):
@@ -199,11 +213,12 @@ def client_result(log):
     return final
 
 
-def client_startup_on_port(message, port):
-    return re.fullmatch(rf'VR_NETWORK_STARTED role=Client started=True background=(True|False) port={port}', message) is not None
+def client_startup_on_port(message, port=None):
+    match = re.fullmatch(r'VR_NETWORK_STARTED role=Client started=True background=(True|False) port=([1-9][0-9]{0,4})', message)
+    return match is not None and int(match[2]) <= 65535 and (port is None or int(match[2]) == port)
 
 
-def quest_client_result(log, pid, port):
+def quest_client_result(log, pid, port, *, connections=None):
     pid = str(integer(pid, 1, 2**31 - 1))
     started = False
     markers = []
@@ -220,7 +235,17 @@ def quest_client_result(log, pid, port):
             require(process == pid and started, 'Quest logcat player marker is outside the original client process or startup')
             markers.append(message)
     require(started, 'Missing original Quest client startup in logcat')
-    return client_result('\n'.join(markers))
+    return client_result('\n'.join(markers), connections=connections)
+
+
+def verify_reconnect_chain(connections, used, peers, acknowledged, approved, released, expected_ip):
+    require(not used.intersection(connections), 'A connection was reused across player logs')
+    for previous, following in zip(connections, connections[1:]):
+        require(previous in peers and previous not in acknowledged and following in approved
+                and previous in released and released[previous] < approved[following],
+                'Missing server release before the next approved connection')
+        require(peer_address(peers[previous])[0] == expected_ip, 'Historical UDP peer differs from the declared source')
+    used.update(connections)
 
 
 def windows_player_source(log, port):
@@ -647,18 +672,19 @@ def verify_udp_source_preflights(pairs, binding, addresses):
 
 def verify(topology, server_ips, launcher, session, statistics, endpoint, server_log, player_logs, *, quest_player_logs=(),
            world_journal=None, combat_journal=None, room_alignments=None, udp_preflight=None, udp_source_preflights=None,
-           verify_player_sources=False):
+           verify_player_sources=False, verify_reconnect_history=False):
     report, _ = verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log,
                                len(player_logs) + len(quest_player_logs), player_logs, quest_player_logs=quest_player_logs,
                                world_journal=world_journal, combat_journal=combat_journal, room_alignments=room_alignments, udp_preflight=udp_preflight,
-                               udp_source_preflights=udp_source_preflights, verify_player_sources=verify_player_sources)
+                               udp_source_preflights=udp_source_preflights, verify_player_sources=verify_player_sources,
+                               verify_reconnect_history=verify_reconnect_history)
     return report
 
 
 def verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log, size, player_logs, *,
                    require_remote=True, quest_player_logs=(), world_journal=None, combat_journal=None, applied_end=None, room_alignments=None,
                    udp_preflight=None, udp_source_preflights=None, verify_player_sources=False, quest_capture_logs=(),
-                   guarded_begin=None, concurrency=None):
+                   guarded_begin=None, concurrency=None, verify_reconnect_history=False):
     integer(size, 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(not verify_player_sources or world_journal is not None, 'Player source verification requires the original closed world journal')
@@ -705,8 +731,9 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
     else:
         require(statistics['origin'] == origin, 'Statistics source differs from the seals')
 
-    peers, acknowledged = server_connections(server_log, port)
+    peers, acknowledged, approved, released = server_connections(server_log, port, verify_history=verify_reconnect_history)
     used_players, used_connections, endpoints = set(), set(), set()
+    verified_history, reconnected_seats = set(), []
     room_sources = {}
     player_sources = {} if verify_player_sources else None
     source_seats = set()
@@ -714,7 +741,9 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
     windows_logs = ((address, log, None, None) for address, log in player_logs)
     quest_logs = ((address, log, pid, None) for address, log, pid in quest_player_logs)
     for expected_ip, log, pid, capture_seat in chain(windows_logs, quest_logs, quest_capture_logs):
-        connection, result = client_result(log) if pid is None else quest_client_result(log, pid, port)
+        history = [] if verify_reconnect_history else None
+        connection, result = (client_result(log, connections=history, require_startup=verify_reconnect_history) if pid is None
+                              else quest_client_result(log, pid, port, connections=history))
         require(connection in acknowledged and connection not in used_connections, 'Missing or reused server acknowledgement')
         observed = peer_address(peers[connection])
         require(observed[0] == expected_ip and observed not in endpoints, 'UDP peer differs from the declared source or is reused')
@@ -736,10 +765,15 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
                 and integer(result['worldSequence'], 1) == world_sequence and integer(result['throughSequence'], 1) == through
                 and integer(result['finalStreamSequence']) == combat_sequence and scores(result) == scores(stats),
                 'Player result differs from the final seals or statistics')
-        if player_sources is not None:
+        if player_sources is not None or verify_reconnect_history:
             seat = integer(owner['seat'], 0, 4) + 1
             require((room, seat) not in source_seats, 'Duplicate seat in the player source evidence')
             source_seats.add((room, seat))
+        if verify_reconnect_history:
+            verify_reconnect_chain(history, verified_history, peers, acknowledged, approved, released, expected_ip)
+            if len(history) > 1:
+                reconnected_seats.append({'roomId': room, 'seat': seat, 'retiredConnections': len(history) - 1})
+        if player_sources is not None:
             source, rig = windows_player_source(log, port) if pid is None else ('quest-logcat-tracked', 'Tracked')
             if concurrency is not None and concurrency.require_tracked:
                 require(source in ('quest-logcat-tracked', 'windows-openxr-tracked'),
@@ -751,6 +785,8 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
         endpoints.add(observed)
         room_sources.setdefault(room, []).append(observed[0])
     require(used_connections == acknowledged and used_players == set(players), 'Extra acknowledgement or missing result')
+    if verify_reconnect_history:
+        require(verified_history == peers.keys(), 'Server log contains unmatched UDP peer records')
     require(all(len(sources) <= 5 for sources in room_sources.values()), 'Room participant limit exceeded')
 
     peer_ips = {address for address, _ in endpoints}
@@ -785,6 +821,10 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
             **({'combatJournal': combat_evidence} if combat_evidence else {}),
             **({'playerSources': sorted(player_sources.values(), key=lambda row: (row['roomId'], row['seat']))}
                if player_sources is not None else {}),
+            **({'reconnectHistory': {'observedConnections': len(verified_history),
+                                     'retiredConnections': len(verified_history) - len(used_connections),
+                                     'reconnectedSeats': sorted(reconnected_seats, key=lambda row: (row['roomId'], row['seat']))}}
+               if verify_reconnect_history else {}),
             **({'roomAlignments': alignments} if alignments is not None else {})}, room_sources
 
 
@@ -954,6 +994,8 @@ def verify_venue(manifest_path):
     require(type(verify_player_sources) is bool and (not verify_player_sources or journals),
             'Player source verification requires a boolean option and the original world journals for the full batch')
     verify_player_sources = verify_player_sources or require_tracked
+    verify_reconnect_history = manifest.get('verifyReconnectHistory', False)
+    require(type(verify_reconnect_history) is bool, 'verifyReconnectHistory must be a boolean')
     verify_tracking_begin = manifest.get('verifyTrackingBegin', False)
     verify_participation_begin = manifest.get('verifyParticipationBegin', False)
     require(type(verify_tracking_begin) is bool and type(verify_participation_begin) is bool
@@ -1103,7 +1145,8 @@ def verify_venue(manifest_path):
                                          applied_end=row['appliedAtSequence'], room_alignments=alignments, udp_preflight=preflight_paths,
                                          udp_source_preflights=source_paths, verify_player_sources=verify_player_sources,
                                          quest_capture_logs=(quest_capture_log(*evidence) for evidence in captured),
-                                         guarded_begin=guarded_begin, concurrency=concurrency)
+                                         guarded_begin=guarded_begin, concurrency=concurrency,
+                                         verify_reconnect_history=verify_reconnect_history)
         verified_pairs = ([report['udpPreflight']] if preflights else report['udpSourcePreflight']['pairs'] if source_preflights else [])
         for pair in verified_pairs:
             exchange = pair['exchangeSha256']
@@ -1125,6 +1168,7 @@ def verify_venue(manifest_path):
                           **({'worldJournal': report['worldJournal']} if journals else {}),
                           **({'combatJournal': report['combatJournal']} if combat_journals else {}),
                           **({'playerSources': report['playerSources']} if verify_player_sources else {}),
+                          **({'reconnectHistory': report['reconnectHistory']} if verify_reconnect_history else {}),
                           **({'experienceMode': experience} if check_alignments else {}),
                           **({'roomAlignments': report['roomAlignments']} if alignments is not None else {})})
 
@@ -1137,6 +1181,13 @@ def verify_venue(manifest_path):
         counts = ('trackedPlayers', 'simulatedPlayers', 'participants') if verify_participation_begin else ('trackedPlayers',)
         begin_summary[begin_kind] = {'requestId': begin_request, 'sessions': len(summaries),
                                     **{name: sum(item['worldJournal'][begin_kind][name] for item in summaries) for name in counts}}
+    reconnect_summary = {}
+    if verify_reconnect_history:
+        histories = [row['reconnectHistory'] for row in summaries]
+        reconnect_summary['reconnectHistory'] = {
+            **{key: sum(row[key] for row in histories) for key in ('observedConnections', 'retiredConnections')},
+            'reconnectedSeats': sorted(chain.from_iterable(row['reconnectedSeats'] for row in histories),
+                                       key=lambda row: (row['roomId'], row['seat']))}
     return {'version': 1, 'consistent': True, 'declaredTopology': topology, 'mode': mode, 'players': len(player_ids),
             'rooms': [{'roomId': room, 'players': len(rooms[room]),
                        'playersOutsideDeclaredServer': sum(address in remote for address in rooms[room])} for room in all_rooms],
@@ -1152,6 +1203,7 @@ def verify_venue(manifest_path):
             **({'combatJournalsVerified': len(summaries)} if combat_journals else {}),
             **({'concurrentRoster': concurrency.summary(len(player_ids))} if concurrency is not None else {}),
             **begin_summary,
+            **reconnect_summary,
             **({'roomAlignmentsVerified': sum(len(row.get('roomAlignments', [])) for row in summaries)} if check_alignments else {})}
 
 
@@ -1163,6 +1215,7 @@ def main():
     parser.add_argument('--world-journal', type=Path, help='Original closed .worldlog for a single session')
     parser.add_argument('--combat-journal', type=Path, help='Original closed combat .journal for a single session')
     parser.add_argument('--verify-player-sources', action='store_true', help='Match each player log startup with accepted rigs in the closed journal')
+    parser.add_argument('--verify-reconnect-history', action='store_true', help='Match the complete connection history to original server peer, release and result markers')
     parser.add_argument('--udp-preflight', nargs=2, type=Path, metavar=('LISTENER', 'PROBE'), help='Original UDP preflight reports for this session')
     parser.add_argument('--udp-source-preflight', action='append', nargs=2, type=Path, metavar=('LISTENER', 'PROBE'),
                         help='Repeat for every acknowledged UDP source address at this binding')
@@ -1176,7 +1229,7 @@ def main():
     json_paths = [args.launcher_report, args.session, args.statistics, args.endpoint]
     single_args = [args.topology, args.server_ip, *json_paths, args.server_log, args.player or args.quest_player]
     if (args.venue_manifest and (any(single_args) or args.world_journal or args.combat_journal or args.room_alignment or args.udp_preflight
-                                 or args.udp_source_preflight or args.verify_player_sources)) or (not args.venue_manifest and not all(single_args)):
+                                 or args.udp_source_preflight or args.verify_player_sources or args.verify_reconnect_history)) or (not args.venue_manifest and not all(single_args)):
         parser.error('Provide --venue-manifest alone or all single-session options.')
     if args.udp_preflight and args.udp_source_preflight:
         parser.error('Use either --udp-preflight or --udp-source-preflight.')
@@ -1215,7 +1268,7 @@ def main():
                             quest_player_logs=quest_players, world_journal=args.world_journal, combat_journal=args.combat_journal,
                             room_alignments=alignments,
                             udp_preflight=args.udp_preflight, udp_source_preflights=args.udp_source_preflight,
-                            verify_player_sources=args.verify_player_sources)
+                            verify_player_sources=args.verify_player_sources, verify_reconnect_history=args.verify_reconnect_history)
     except EvidenceError as error:
         parser.exit(1, f'Field evidence rejected. {error}.\n')
     except (OSError, UnicodeError, ArithmeticError, AttributeError, KeyError, TypeError, ValueError, RecursionError,
