@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-11 `VRCommand-ControlServer-0.31.122-layout-clearance-win-x64.zip` 為 53,018,740 bytes，SHA-256 `47446747476ff463478aeba1a48df1ffe65b59dffb1ef3eca2216ebae7cdfa52`。解壓核對 555 筆清單與 535 個發行檔案。草稿與保存版本的旋轉方向對齊遊戲，並可顯示玩家通行邊界。 [平面圖操作](LAYOUT.md#開場前查看保存版本平面圖) · [發行核對](../artifacts/venue-release-0.50.4-layout-clearance.json)
+
 2026-11-11 `VRCommand-ControlServer-0.31.121-observer-integrity-win-x64.zip` 為 53,017,017 bytes，SHA-256 `2cd6e31c1e73f676ed1fc3cc7a088f74327f6c698dc090d492b1be2e823994a5`。解壓核對 555 筆清單及 535 個發行檔案。觀戰核對錄製狀態及序號，並顯示此格的姿態與最後保存格標記。 [觀戰操作](WORLD_RECORDING.md#操作) · [發行核對](../artifacts/venue-release-0.50.4-observer-integrity.json)
 
 2026-11-11 `VRCommand-ControlServer-0.31.120-setting-drafts-win-x64.zip` 為 53,016,141 bytes，SHA-256 `a813efb255223f947c741cf86fdde1c7f515c1674d4049a7706f3f0c6a4e8ed1`。解壓核對 555 筆清單及 535 個發行檔案。即時環境與敵軍可分開編輯，管理服務依設定版本檢查是否可套用。 [操作方式](ENVIRONMENT.md) · [發行核對](../artifacts/venue-release-0.50.4-setting-drafts.json)

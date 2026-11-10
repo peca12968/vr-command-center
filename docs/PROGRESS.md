@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 場景旋轉方向與玩家通行邊界
+
+- 舊 0.31.121 解壓包在 Chromium 重現非直角掩體的鏡像。0.31.122 使用遊戲座標轉換後的角度繪製草稿、保存版本與複製預覽。草稿與開場平面圖可顯示玩家中心距牆 0.3 公尺的邊界，以及掩體沿局部 X／Z 擴張 0.3 公尺後的阻擋範圍。圖層預設關閉，配置通過檢查後可勾選，切換時保留任務草稿狀態。 [操作說明](LAYOUT.md#開場前查看保存版本平面圖) · [舊版對照](../artifacts/layout-clearance-baseline.log) · [新版平面圖](../artifacts/console-layout-clearance-package/layout-valid-launch.png)
+- 來源 `6804d5d0` 的 Release 零警告，通過 1,101 項核心、825 項 HTTP、111 項 Node 和 107 項管理包檢查。來源與解壓包各通過 44 項場景專項，包含正 45° 沙包、負 30° 油桶，以及旋轉掩體在通行與命中規則下的邊界對照。發行記錄核對 187 個來源檔，其中 29 個與 Git 只差換行。Windows 與 Quest 0.50.4 離線發行核對通過。GitHub Actions job `130110884205` 因帳務或支出上限未啟動。 [場景專項](../artifacts/console-layout-clearance-package/checks.json) · [來源及 ZIP 核對](../artifacts/layout-clearance-source-validation.json) · [離線發行核對](../artifacts/venue-release-0.50.4-layout-clearance.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42896498552)
+- Windows 三包通過 386 項原生檢查。獨立及合併模式各有 25 個同機玩家端同時連線，六場回放合計 768 格，核對 50 份戰績、11 份 CSV、雙封存及原伺服器確認。各房封存世界保留旋轉沙包與油桶的原座標及角度。每場的五席皆使用 0.125 公尺細格預覽原窄缺口。活動場次歸零，原生及管理包 C／F 各 218、27 檔相符。沿用 0.50.4 的遊戲執行檔，跨機、實體頭盔與廠商設備待實測。 [原生驗收](../artifacts/server-package-checks/run-1e1530449daa461c80a494bbb7d16455/checks.json) · [場景、封存與雜湊核對](../artifacts/layout-clearance-native-validation.json)
+- 同一解壓包通過 896 項完整 Chromium 回歸，八個任務列表故障均攔截一筆請求並確認送達。保存 143 個瀏覽器證據檔，核對結果、日誌及原 ZIP 雜湊。 [完整回歸](../artifacts/console-layout-clearance-full/checks.json) · [瀏覽器證據核對](../artifacts/layout-clearance-browser-validation.json)
+
 ## 2026-11-11 觀戰錄製身分與姿態標示
 
 - 0.31.121 的即時觀戰及回放會先核對標頭，後續狀態與封存訊息須沿用同一來源及房間。即時狀態序號倒退或撤回已接受的封存會停止該次串流，保留原畫格及鏡頭。0.31.120 解壓包可重現外來狀態把原錄製誤標為封存。新版另標記最後保存格，房間卡改顯示該格存活玩家的有效姿態數，角色保留頭手來源與淘汰狀態。 [操作說明](WORLD_RECORDING.md#即時觀戰斷線後重新連接) · [舊版對照](../artifacts/observer-integrity-baseline.log)
