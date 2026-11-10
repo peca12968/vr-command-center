@@ -383,7 +383,8 @@
             <p id="world-frame-message" class="hint" role="status"></p>
             <fieldset id="world-venue-review" class="camera-positions" hidden>
               <legend>同批房間回放</legend>
-              <p class="hint">暫停後可用目前擷取時間對齊同批其他房間。</p>
+              <p class="hint">暫停後可用擷取時間或已保存的任務活動時間，對齊同批其他房間。</p>
+              <label>對齊依據<select id="world-venue-basis" disabled><option value="utc">擷取時間</option><option value="tick">任務活動時間</option></select></label>
               <div id="world-venue-rooms" class="button-row"></div>
               <p id="world-venue-message" class="hint" role="status"></p>
             </fieldset>
@@ -464,7 +465,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.124 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.125 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

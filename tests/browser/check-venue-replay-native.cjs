@@ -11,7 +11,7 @@ async function main() {
   const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_CLOSURE_CHROMIUM,
     args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const results = [], fieldEvidence = [], participation = [], receiptExports = [];
-  let history, roomReplay, scores, alignment, debriefReceipts;
+  let history, roomReplay, scores, alignment, missionTime, debriefReceipts;
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1080 }, acceptDownloads: true });
     const errors = [];
@@ -169,6 +169,49 @@ async function main() {
       }
       return { start, end, reached: Number(await canvas.getAttribute('data-sequence')), elapsedMilliseconds: packet.elapsedMilliseconds,
         clipId: await savedOption.getAttribute('value'), playerReplay: { start, end, originalPackets: exported.packets.length, apiRequests: apiRequests.length } };
+    }
+    async function reviewMissionTime(replay) {
+      const panel = page.locator('#world-venue-review');
+      if (config.mode === 'linked') {
+        assert.equal(await panel.isHidden(), true);
+        return { hidden: true };
+      }
+      const { requestId, targetSessionId, targetRoom, targetTimeline } = config.missionTime;
+      const original = async (id, sequence) => {
+        const received = await fetch(`${config.base}/api/sessions/${id}/world/frames/${sequence}`, {
+          headers: { Authorization: 'Bearer ' + config.masterKey } });
+        assert.equal(received.status, 200);
+        return received.json();
+      };
+      const canvas = page.locator('#world-canvas');
+      let sequence = Number(await canvas.getAttribute('data-sequence'));
+      let source = await original(replay.sessionId, sequence);
+      for (let attempt = 0; source.packet.frame.tick === 0 && attempt < 20; attempt++) {
+        await page.locator('#world-frame-next').click();
+        await page.locator(`#world-canvas[data-sequence="${++sequence}"]`).waitFor();
+        source = await original(replay.sessionId, sequence);
+      }
+      const fromTick = source.packet.frame.tick;
+      assert.ok(fromTick > 0 && fromTick <= targetTimeline.at(-1)[1]);
+      const floor = targetTimeline.findLast(([, tick]) => tick <= fromTick)?.[1];
+      assert.ok(floor > 0 && fromTick - floor <= 10);
+      const expectedSequence = targetTimeline.find(([, tick]) => tick === floor)[0];
+      await page.locator('#world-venue-basis').selectOption('tick');
+      const match = page.waitForResponse(reply => new URL(reply.url()).pathname === `/api/venue/closure/${requestId}/replay-at-tick`);
+      await page.locator(`[data-venue-align-room="${targetRoom}"]`).click();
+      const response = await match;
+      assert.equal(response.status(), 200);
+      const body = await response.json();
+      assert.deepEqual([body.requestId, body.fromSessionId, body.fromFrame, body.fromTick, body.roomId, body.frameTick],
+        [requestId, replay.sessionId, sequence, fromTick, targetRoom, floor]);
+      assert.deepEqual(body.frame, await original(targetSessionId, expectedSequence));
+      await page.locator('#world-venue-message').filter({ hasText: '已對齊房間 ' + targetRoom }).waitFor();
+      assert.equal(await page.locator('#world-recording').inputValue(), targetSessionId);
+      assert.equal(await canvas.getAttribute('data-sequence'), String(expectedSequence));
+      assert.equal(await page.locator('#world-clip-play').isDisabled(), true);
+      await panel.screenshot({ path: path.join(path.dirname(output), 'independent-venue-mission-time.png') });
+      return { requestId, fromSessionId: replay.sessionId, toSessionId: targetSessionId,
+        fromFrame: sequence, toFrame: expectedSequence, fromTick, frameTick: floor };
     }
     async function reviewRoom(replay) {
       const roomId = 3;
@@ -374,6 +417,7 @@ async function main() {
         await page.screenshot({ path: path.join(path.dirname(output), config.mode + '-venue-replay.png') });
         replay.interval = await reviewInterval(replay);
         if (config.roomReplaySource) roomReplay = await reviewRoom(replay);
+        if (config.missionTime) missionTime = await reviewMissionTime(replay);
       }
       results.push(replay);
       await page.locator('#tab-operations').click();
@@ -429,7 +473,7 @@ async function main() {
   } finally {
     await browser.close();
   }
-  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation, scores, alignment, debriefReceipts, receiptExports }, null, 2), { flag: 'wx' });
+  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation, scores, alignment, missionTime, debriefReceipts, receiptExports }, null, 2), { flag: 'wx' });
 }
 main().catch(error => {
   const location = error.stack?.match(/check-venue-replay-native\.cjs:(\d+):(\d+)\)/);

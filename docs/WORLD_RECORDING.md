@@ -22,6 +22,12 @@ Windows 管理包 0.31.80 可從全館收尾直接回看原有效姿態開場。
 
 對齊使用主控唯讀的 `GET /api/venue/closure/{id}/replay-at`，以 `fromSessionId`、`fromFrame` 和 `roomId` 指定原畫格及目標房間。合併場沿用同一錄製的房間切換。
 
+控制台 0.31.125 在同一區域提供「任務活動時間」。兩個獨立房即使在不同時段開場，也可依錄製中的遊戲刻數對齊。每秒 20 刻，暫停期間會保留原刻數。目標房使用最接近且不晚於基準的有效刻數，最多早 10 刻。同一刻有多格時，會停在目標房最先保存的那一格。返回基準房會回到原畫格。
+
+此模式需要同批雙封存、含任務時鐘的錄製，以及正數的任務刻數。目標房尚未錄到指定活動時間、沒有符合範圍的畫格，或錄製來源不符時，保留目前畫面。擷取時間仍是有 UTC 資料時的預設。切換對齊依據、逐格或續播會重設比較基準。鏡頭操作尚待確認時，兩種對齊都會等候原操作結束。
+
+活動時間使用唯讀的 `GET /api/venue/closure/{id}/replay-at-tick`，參數同上，回應含原畫格與兩邊的刻數。服務按已驗證為非遞減的原刻數搜尋，沿用原錄製及管理權限。 [Windows 原生驗收](PROGRESS.md)
+
 API0.30新增[來源連線公告](EXTERNAL_CLIENTS.md)：worlds.db的connection_endpoints保存session／stream／owner綁定的不可變地址／port，GET供控制台、PUT限GameServer owner且world header已存在。原header／世界schema1不變，公告不是連通性或戰鬥授權。
 
 API0.29新增唯讀[玩家參戰快照](PLAYER_READINESS.md)，以最後接受幀的Observed入場核對當前名冊，回報擷取年齡與狀態、不傳頭手座標。世界schema／歷史及原始header不變；GameServer不能使用此控制台診斷。

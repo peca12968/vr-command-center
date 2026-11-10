@@ -336,6 +336,12 @@ app.MapGet("/api/venue/closure/{id:guid}/replay-at", (Guid id, Guid fromSessionI
     context.Response.Headers.CacheControl = "no-store";
     return Results.Json(worlds.ReadVenueReplayAt(id, fromSessionId, fromFrame, roomId, Actor(context)), WorldJson.Options);
 });
+app.MapGet("/api/venue/closure/{id:guid}/replay-at-tick", (Guid id, Guid fromSessionId, long fromFrame, int roomId,
+    WorldRecordings worlds, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    return Results.Json(worlds.ReadVenueReplayAtTick(id, fromSessionId, fromFrame, roomId, Actor(context)), WorldJson.Options);
+});
 app.MapGet("/api/venue/closure/{id:guid}/field-evidence.zip", (Guid id, WorldRecordings worlds, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";

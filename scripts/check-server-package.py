@@ -191,6 +191,7 @@ def main():
     p.add_argument('--check-venue-reports', action='store_true', help='Verify the original reports ZIP for each native End batch')
     p.add_argument('--check-venue-replay-ui', action='store_true', help='Open the original native archives through the shipped console')
     p.add_argument('--check-venue-replay-alignment', action='store_true', help='Switch to the original adjacent room at the same recorded UTC time')
+    p.add_argument('--check-venue-mission-time', action='store_true', help='Switch original independent replays by mission tick in the shipped console')
     p.add_argument('--check-player-room-replay', action='store_true', help='Export a single room from the original native Linked combat replay')
     p.add_argument('--check-venue-history-ui', action='store_true', help='Reopen and download the earlier batch after the newer native round')
     p.add_argument('--check-venue-environment', action='store_true', help='Confirm two batch environment changes in each native topology')
@@ -322,6 +323,8 @@ def main():
         p.error('--check-venue-replay-ui requires --check-venue-end')
     if args.check_venue_replay_alignment and not (args.check_venue_replay_ui and args.check_venue_participation_gate):
         p.error('--check-venue-replay-alignment requires --check-venue-replay-ui and --check-venue-participation-gate')
+    if args.check_venue_mission_time and not args.check_venue_replay_ui:
+        p.error('--check-venue-mission-time requires --check-venue-replay-ui')
     if args.check_player_room_replay and not (args.check_venue_replay_ui and args.check_room_combat):
         p.error('--check-player-room-replay requires --check-venue-replay-ui and --check-room-combat')
     if args.check_venue_history_ui and not (args.check_venue_replay_ui and args.check_venue_reports):
@@ -1764,6 +1767,12 @@ def main():
                  'confirmedCount': room['totals']['players']} for room in scores['rooms']]}
         if args.check_venue_replay_alignment:
             config['alignReplay'] = closed['requestId']
+        if args.check_venue_mission_time:
+            config['missionTime'] = {'requestId': closed['requestId']}
+            if not linked:
+                target = entries[1]
+                config['missionTime'].update(targetSessionId=target['sessionId'], targetRoom=2,
+                    targetTimeline=[[row['packet']['sequence'], row['packet']['frame']['tick']] for row in read(out/'room-2-replay.json')])
         scoped = linked and args.check_player_room_replay
         if scoped:
             config['roomReplaySource'] = str(out/'linked-replay.json')
@@ -1796,6 +1805,12 @@ def main():
                   and alignment['fromSessionId'] == rows[0]['sessionId'] and alignment['toSessionId'] == rows[1]['sessionId']
                   and 0 <= alignment['millisecondsBeforeAnchor'] <= 500,
                   f'{mode} shipped console scopes UTC replay alignment to separate original room recordings')
+        if args.check_venue_mission_time:
+            mission_match = result['missionTime']
+            check(mission_match == {'hidden': True} if linked else mission_match['requestId'] == closed['requestId']
+                  and mission_match['fromSessionId'] == rows[0]['sessionId'] and mission_match['toSessionId'] == rows[1]['sessionId']
+                  and 0 <= mission_match['fromTick'] - mission_match['frameTick'] <= 10,
+                  f'{mode} shipped console scopes mission tick alignment to the exact original room frames')
         first = result['results'][0]
         interval = first['interval']
         check(0 < interval['start'] < interval['end'] == interval['reached'] < first['throughSequence'],

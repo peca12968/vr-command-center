@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using VrCommand.Core;
+using VrCommand.Simulation;
 
 namespace VrCommand.Api;
 
@@ -7,6 +8,8 @@ internal enum VenueArchiveState { NoSource, Missing, Waiting, SourceMismatch, Se
 internal sealed record VenueReplay(Guid StreamId, long ThroughSequence);
 internal sealed record VenueReplayMatch(Guid RequestId, Guid FromSessionId, long FromFrame, int RoomId,
     DateTimeOffset CapturedAtUtc, DateTimeOffset FrameCapturedAtUtc, WorldRecordingInfo Recording, WorldFrameView Frame);
+internal sealed record VenueMissionReplayMatch(Guid RequestId, Guid FromSessionId, long FromFrame, int RoomId,
+    long FromTick, long FrameTick, WorldRecordingInfo Recording, WorldFrameView Frame);
 internal sealed record VenueClosureSession(Guid SessionId, long AppliedAtSequence, int[] RoomIds, string MissionName,
     VenueArchiveState Combat, VenueArchiveState World, bool FieldEvidenceReady,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueReplay? Replay,
@@ -37,20 +40,11 @@ public sealed partial class WorldRecordings
             throw new ArgumentException("Specify an original frame and a room from 1 to 5.");
         lock (gate)
         {
-            var batch = manager.ReadVenueEnd(batchId, actor);
-            var sessions = batch.Sessions.Select(row => manager.Get(row.SessionId, actor))
-                .Where(session => session.Mode == SessionMode.Independent && session.State == SessionState.Ended && session.RoomIds.Length == 1)
-                .ToArray();
-            var source = sessions.SingleOrDefault(session => session.Id == fromSessionId);
-            var destination = sessions.SingleOrDefault(session => session.RoomIds[0] == roomId);
-            if (source is null || destination is null || sessions.Length < 2)
-                throw new KeyNotFoundException("The source and destination must belong to the original independent End batch.");
-
-            var sourceInfo = ReadTimedVenueReplay(source, actor);
-            if (fromFrame > sourceInfo.AcceptedSequence || Frame(source.Id, fromFrame, actor) is not { } original)
-                throw new KeyNotFoundException("No source frame at this sealed sequence.");
+            var (source, destination) = VenueReplaySessions(batchId, fromSessionId, roomId, actor);
+            var sourceInfo = ReadVenueReplayRecording(source, actor, missionClock: false);
+            var original = VenueReplaySourceFrame(source, sourceInfo, fromFrame, actor);
             var captured = sourceInfo.CapturedAtUtc!.Value.AddMilliseconds(original.Packet.elapsedMilliseconds - sourceInfo.DurationMilliseconds);
-            var recording = destination.Id == source.Id ? sourceInfo : ReadTimedVenueReplay(destination, actor);
+            var recording = destination.Id == source.Id ? sourceInfo : ReadVenueReplayRecording(destination, actor, missionClock: false);
             var start = recording.CapturedAtUtc!.Value.AddMilliseconds(-recording.DurationMilliseconds);
             if (captured < start || captured > recording.CapturedAtUtc.Value)
                 throw new InvalidOperationException("The destination recording does not cover the source capture time.");
@@ -64,13 +58,83 @@ public sealed partial class WorldRecordings
         }
     }
 
-    private WorldRecordingInfo ReadTimedVenueReplay(SessionView session, OperatorIdentity actor)
+    internal VenueMissionReplayMatch ReadVenueReplayAtTick(Guid batchId, Guid fromSessionId, long fromFrame, int roomId, OperatorIdentity actor)
+    {
+        if (fromFrame < 1 || roomId is < 1 or > SessionManager.RoomCount)
+            throw new ArgumentException("Specify an original frame and a room from 1 to 5.");
+        lock (gate)
+        {
+            var (source, destination) = VenueReplaySessions(batchId, fromSessionId, roomId, actor);
+            var sourceInfo = ReadVenueReplayRecording(source, actor, missionClock: true);
+            var original = VenueReplaySourceFrame(source, sourceInfo, fromFrame, actor);
+            var tick = original.Packet.frame.tick;
+            if (tick < 1) throw new InvalidOperationException("Select a source frame with positive recorded mission time.");
+            if (destination.Id == source.Id) return new(batchId, fromSessionId, fromFrame, roomId, tick, tick, sourceInfo, original);
+
+            var recording = ReadVenueReplayRecording(destination, actor, missionClock: true);
+            var tail = recording.AcceptedSequence;
+            if (tick > RecordedTick(destination.Id, tail))
+                throw new InvalidOperationException("The destination recording does not cover the source mission time.");
+            var sequence = FirstFrameAtOrAfterTick(destination.Id, tick, tail);
+            var matchedTick = RecordedTick(destination.Id, sequence);
+            if (matchedTick > tick)
+            {
+                matchedTick = RecordedTick(destination.Id, sequence - 1);
+                sequence = FirstFrameAtOrAfterTick(destination.Id, matchedTick, sequence - 1);
+            }
+            if (matchedTick < 1 || tick - matchedTick > MissionClock.TicksPerSecond / 2)
+                throw new InvalidOperationException("No destination frame within half a second of recorded mission time.");
+            var frame = Frame(destination.Id, sequence, actor) ?? throw new InvalidDataException("Missing destination frame.");
+            return new(batchId, fromSessionId, fromFrame, roomId, tick, matchedTick, recording, frame);
+        }
+    }
+
+    private (SessionView Source, SessionView Destination) VenueReplaySessions(Guid batchId, Guid fromSessionId, int roomId, OperatorIdentity actor)
+    {
+        var batch = manager.ReadVenueEnd(batchId, actor);
+        var sessions = batch.Sessions.Select(row => manager.Get(row.SessionId, actor))
+            .Where(session => session.Mode == SessionMode.Independent && session.State == SessionState.Ended && session.RoomIds.Length == 1)
+            .ToArray();
+        var source = sessions.SingleOrDefault(session => session.Id == fromSessionId);
+        var destination = sessions.SingleOrDefault(session => session.RoomIds[0] == roomId);
+        if (source is null || destination is null || sessions.Length < 2)
+            throw new KeyNotFoundException("The source and destination must belong to the original independent End batch.");
+        return (source, destination);
+    }
+
+    private WorldFrameView VenueReplaySourceFrame(SessionView source, WorldRecordingInfo recording, long sequence, OperatorIdentity actor)
+        => sequence <= recording.AcceptedSequence && Frame(source.Id, sequence, actor) is { } frame
+            ? frame : throw new KeyNotFoundException("No source frame at this sealed sequence.");
+
+    private WorldRecordingInfo ReadVenueReplayRecording(SessionView session, OperatorIdentity actor, bool missionClock)
     {
         var info = Info(session.Id, actor);
         if (session.CombatStream is not { Sealed: true } stream || !info.Complete || info.AcceptedSequence < 1
-            || info.CapturedAtUtc is null || !MatchesVenueSource(session, stream, info))
-            throw new InvalidOperationException("Both original recordings need sealed streams and recorded UTC capture clocks.");
+            || !MatchesVenueSource(session, stream, info)
+            || (missionClock ? info.Header.missionClockVersion != MissionClock.Version : info.CapturedAtUtc is null))
+            throw new InvalidOperationException(missionClock ? "Both original recordings need sealed streams and mission clocks."
+                : "Both original recordings need sealed streams and recorded UTC capture clocks.");
         return info;
+    }
+
+    private long RecordedTick(Guid id, long sequence)
+    {
+        using var command = Command("SELECT json_extract(packet,'$.frame.tick') FROM world_frames WHERE session=$id AND sequence=$seq",
+            ("$id", id.ToString("D")), ("$seq", sequence));
+        return command.ExecuteScalar() is long tick ? tick : throw new InvalidDataException("Missing recorded mission tick.");
+    }
+
+    private long FirstFrameAtOrAfterTick(Guid id, long tick, long last)
+    {
+        // Accepted frame ticks are monotonic. Read only the tick at each primary-key probe, even across long pauses.
+        long first = 1;
+        while (first < last)
+        {
+            var middle = first + (last - first) / 2;
+            if (RecordedTick(id, middle) < tick) first = middle + 1;
+            else last = middle;
+        }
+        return first;
     }
 
     internal VenueClosureResponse ReadVenueClosure(OperatorIdentity actor, bool includeScores, bool includeDebriefReceipts, Guid? batchId = null)

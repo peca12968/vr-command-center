@@ -6,7 +6,7 @@ import { mountWorldPolicyFrames } from './world-policy-frames.js';
 import { mountSavedClips } from './saved-clips-ui.js';
 import { mountWorldClipStatistics } from './world-clip-statistics.js';
 import { mountWorldShotTrace, isTraceableShot } from './world-shot-trace.js';
-import { recordedClock } from './mission-clock.js';
+import { missionTicksPerSecond, recordedClock } from './mission-clock.js';
 
 const $ = id => document.getElementById(id);
 const time = milliseconds => (milliseconds / 1000).toFixed(2) + ' 秒';
@@ -30,6 +30,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   let returnLiveSource = null, liveRetryTimer;
   let observerRoom = null;
   let venueReview = null, venueAnchor = null;
+  const venueBasis = $('world-venue-basis');
   const cameras = mountCameras(getKey, unauthorized, () => scene, freeView);
   const cameraForm = mountWorldCameraForm(() => scene, freeView);
   const eventSearch = mountWorldEventSearch(response, readFrame, eventNames, () => {
@@ -102,9 +103,10 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
         observerRoom = target.observerRoomId ?? null;
         if (target.venue) {
           const rooms = target.venue.rooms.flatMap(room => {
-            const recording = rows.find(row => matchesTarget(row, room) && row.header.roomIds.length === 1
-              && Number.isFinite(Date.parse(row.header.captureStartedAtUtc)));
-            return recording ? [{ ...room, headerKey: observationKey(recording) }] : [];
+            const recording = rows.find(row => matchesTarget(row, room) && row.header.roomIds.length === 1);
+            if (!recording) return [];
+            const utc = Number.isFinite(Date.parse(recording.header.captureStartedAtUtc)), tick = recording.header.missionClockVersion === 1;
+            return utc || tick ? [{ ...room, utc, tick, headerKey: observationKey(recording) }] : [];
           });
           if (rooms.length > 1 && rooms.some(room => room.sessionId === target.sessionId)) bindVenueReview({ requestId: target.venue.requestId, rooms });
         }
@@ -342,10 +344,21 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     if (recent.textContent !== recentLabel) recent.textContent = recentLabel;
     const showing = active && mode === 'replay' && info?.header.sessionId === $('world-recording').value && Boolean(frame);
     const idle = showing && !connected && !connecting && !stepping;
-    const venueAvailable = showing && info.complete && venueReview?.rooms.some(room => room.sessionId === info.header.sessionId && room.headerKey === geometry);
+    const source = showing && info.complete && venueReview?.rooms.find(room => room.sessionId === info.header.sessionId && room.headerKey === geometry);
+    const bases = [...venueBasis.options].filter(option => {
+      option.disabled = !source?.[option.value] || !venueReview.rooms.some(room => room !== source && room[option.value]);
+      return !option.disabled;
+    });
+    const venueAvailable = bases.length > 0;
+    if (venueAvailable && !bases.some(option => option.value === venueBasis.value)) venueBasis.value = bases[0].value;
     $('world-venue-review').hidden = !venueAvailable;
+    const venueLocked = !idle || !venueAvailable || $('world-recording').disabled;
+    venueBasis.disabled = venueLocked;
+    const basis = venueBasis.value;
     for (const button of $('world-venue-rooms').children)
-      button.disabled = !idle || !venueAvailable || button.dataset.venueSession === info.header.sessionId;
+      button.disabled = venueLocked || button.dataset.venueSession === info.header.sessionId
+        || !venueReview.rooms.find(room => room.sessionId === button.dataset.venueSession)?.[basis]
+        || (basis === 'tick' && !(frame.packet.frame.tick > 0));
     clipControls(idle);
     const clipRoom = $('world-room').value;
     clipStatistics.update(showing && clipEnd ? { sessionId: info.header.sessionId, streamId: info.header.streamId,
@@ -542,6 +555,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   }
   function bindVenueReview(value) {
     venueReview = value;
+    venueBasis.value = 'utc';
     clearVenueAnchor();
     $('world-venue-rooms').replaceChildren(...(value?.rooms ?? []).map(room => {
       const button = document.createElement('button');
@@ -552,25 +566,39 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
       return button;
     }));
   }
+  venueBasis.addEventListener('change', () => {
+    clearVenueAnchor();
+    if (venueBasis.value === 'tick' && frame?.packet.frame.tick === 0)
+      $('world-venue-message').textContent = '請先停在已開始計算任務活動時間的畫格。';
+    reviewControls();
+  });
+  function venuePosition(basis, recording, packet) {
+    return basis === 'tick' ? packet?.frame?.tick : Date.parse(recording?.header?.captureStartedAtUtc) + packet?.elapsedMilliseconds;
+  }
   async function switchVenueRoom(room) {
-    const view = venueReview, picker = $('world-recording'), sessionId = picker.value;
+    const view = venueReview, picker = $('world-recording'), sessionId = picker.value, basis = venueBasis.value;
     if (!view?.rooms.includes(room) || !active || mode !== 'replay' || !info?.complete || !frame
-      || !view.rooms.some(source => source.sessionId === sessionId && source.headerKey === geometry)
-      || sessionId !== info.header.sessionId || room.sessionId === sessionId || connected || connecting || stepping) return;
+      || !room[basis] || !view.rooms.some(source => source.sessionId === sessionId && source.headerKey === geometry && source[basis])
+      || sessionId !== info.header.sessionId || room.sessionId === sessionId || picker.disabled || connected || connecting || stepping) return;
     const anchor = venueAnchor ?? { fromSessionId: sessionId, fromFrame: frame.packet.sequence,
-      captured: Date.parse(info.header.captureStartedAtUtc) + frame.packet.elapsedMilliseconds };
-    if (!Number.isFinite(anchor.captured)) return;
+      position: venuePosition(basis, info, frame.packet) };
+    if (!Number.isSafeInteger(anchor.position) || (basis === 'tick' && anchor.position < 1)) return;
     controller?.abort(); controller = new AbortController();
     const request = ++epoch, signal = AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]);
     const note = $('world-venue-message');
-    stepping = true; reviewControls(); note.textContent = '正在核對同批房間的原擷取時間…';
+    stepping = true; reviewControls(); note.textContent = `正在核對同批房間的${basis === 'tick' ? '任務活動時間' : '原擷取時間'}…`;
     try {
       const query = new URLSearchParams({ fromSessionId: anchor.fromSessionId, fromFrame: anchor.fromFrame, roomId: room.roomId });
-      const result = await (await response(`/api/venue/closure/${encodeURIComponent(view.requestId)}/replay-at?${query}`, signal)).json();
+      const route = basis === 'tick' ? 'replay-at-tick' : 'replay-at';
+      const result = await (await response(`/api/venue/closure/${encodeURIComponent(view.requestId)}/${route}?${query}`, signal)).json();
       if (request !== epoch || !active || venueReview !== view || picker.value !== sessionId) return;
+      if (picker.disabled) { note.textContent = '請先確認本房鏡頭操作結果，已保留目前畫面。'; return; }
       const recording = result.recording, value = result.frame, packet = value?.packet;
-      const captured = Date.parse(recording?.header?.captureStartedAtUtc) + packet?.elapsedMilliseconds;
-      const gap = anchor.captured - captured;
+      const position = venuePosition(basis, recording, packet), gap = anchor.position - position;
+      const clockMatches = basis === 'tick'
+        ? Number.isSafeInteger(position) && position > 0 && result.fromTick === anchor.position && result.frameTick === position
+          && gap >= 0 && gap <= missionTicksPerSecond / 2
+        : Date.parse(result.capturedAtUtc) === anchor.position && Date.parse(result.frameCapturedAtUtc) === position && gap >= 0 && gap <= 500;
       if (result.requestId !== view.requestId || result.fromSessionId !== anchor.fromSessionId || result.fromFrame !== anchor.fromFrame
         || result.roomId !== room.roomId || !recording || !matchesTarget(recording, room) || observationKey(recording) !== room.headerKey
         || !Number.isSafeInteger(packet?.sequence) || packet.sequence < 1 || packet.sequence > room.throughSequence
@@ -578,14 +606,16 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
         || packet.elapsedMilliseconds < 0 || packet.elapsedMilliseconds > recording.durationMilliseconds
         || !Array.isArray(packet.frame?.players) || !Array.isArray(packet.frame.enemies) || !Array.isArray(packet.events) || !Array.isArray(value.statistics)
         || (room.sessionId === anchor.fromSessionId && packet.sequence !== anchor.fromFrame)
-        || Date.parse(result.capturedAtUtc) !== anchor.captured || Date.parse(result.frameCapturedAtUtc) !== captured || !(gap >= 0 && gap <= 500)
+        || !clockMatches
         || ![...picker.options].some(option => option.value === room.sessionId)) throw new Error('Recording or frame differs.');
       picker.value = room.sessionId;
       info = recording; frame = savedLimit = null; savedFinished = false; reviewPlayer = returnLiveSource = null;
       showRecording(room.roomId); recordingControls(); show(value, true);
       venueAnchor = anchor;
       $('world-frame-message').textContent = `已停在第 ${packet.sequence} 格。`;
-      note.textContent = `已對齊房間 ${room.roomId} · ${gap ? `畫格早於對照時間 ${gap} 毫秒` : '相同擷取時間'}。`;
+      const detail = basis === 'tick' ? (gap ? `活動畫格早 ${gap * 1000 / missionTicksPerSecond} 毫秒` : '相同任務活動時間')
+        : (gap ? `畫格早於對照時間 ${gap} 毫秒` : '相同擷取時間');
+      note.textContent = `已對齊房間 ${room.roomId} · ${detail}。`;
     } catch (error) {
       if (request === epoch) note.textContent = error.status === 409
         ? '此房找不到可對齊的封存畫格，已保留目前畫面。'
