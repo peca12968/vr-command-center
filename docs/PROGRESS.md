@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-11 任務列表故障測試與完整回歸
+
+- 測試 `16c1c3b0` 在原五秒內等待確實攔截下一筆任務列表 GET，最多注入一次故障。若更新按鈕共用舊請求，測試可再觸發唯讀更新。各案例保留攔截及送達證據，原讀寫斷言和管理服務期限均維持。獨立對照確認舊請求扣住期間，手動更新未另發請求，釋放後可攔截新請求並送出 HTTP 503。原逾時當下的請求順序未取得。 [重疊對照](../artifacts/catalog-refresh-overlap-probe.log) · [任務讀取專項](../artifacts/console-catalog-fault-recovery/checks.json)
+- 沿用 `d3f999c3` 發行的 Windows 管理包 0.31.119，ZIP SHA-256 為 `5c31c8fd898b3a05f771c9df8fbbbd4efaa4a699316d93407f71a87579d2c55c`。這次修改測試夾具。GitHub Actions job `130081861186` 因帳務或支出上限未啟動。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42888151970)
+- 使用 Playwright 1.62.1 的 Chromium Headless Shell 151.0.7922.34，31 項任務專項與 878 項完整回歸均通過。兩次各八個故障案例均攔截一筆請求並確認送達，完整流程涵蓋逐房策略、任務編輯、觀戰、回放及戰績。核對 143 個完整回歸證據檔的目錄數量，以及日誌、結果、故障紀錄和原套件的 SHA-256。先前系統 Chrome 的滾輪失敗及鎖定 Chromium 的任務列表逾時均保留。這次使用隔離管理服務與瀏覽器，原 386 項 Windows 原生驗收另列。 [完整結果](../artifacts/console-catalog-fault-full/checks.json) · [故障紀錄](../artifacts/console-catalog-fault-full/mission-catalog-faults.json) · [來源與雜湊](../artifacts/catalog-fault-full-validation.json)
+
 ## 2026-11-11 分房敵軍策略的並行編輯
 
 - 管理台 0.31.119 以場次概覽提供的本房序號送出策略。管理服務在原命令交易內核對。較新的本房修改、恢復沿用或全場策略會使原草稿過期，其他房的策略更新可以獨立完成。套用回覆未確認時，同一份命令可取回原接受序號。舊版 API 請求可省略新增的 `expectedPolicySequence`，沿用原行為。 [操作說明](LAYOUT.md#合併場分房敵軍策略)
