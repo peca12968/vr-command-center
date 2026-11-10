@@ -25,7 +25,9 @@ function parsePreview(value) {
     return { roomId, sessionId, sessionSequence, missionId, missionName, experienceMode, state };
   });
   const sessions = new Set(rows.map(room => room.sessionId));
-  if ((topology === 'Linked' && (sessions.has(null) || sessions.size !== 1))
+  const first = rows[0];
+  if ((topology === 'Linked' && (sessions.has(null) || sessions.size !== 1 || rows.some(room =>
+      room.sessionSequence !== first.sessionSequence || room.missionId !== first.missionId)))
       || (topology === 'Independent' && (sessions.has(null) || sessions.size !== 5))
       || ready !== (topology !== null && rows.every(room => room.state === 'ready')))
     throw new Error('Invalid venue topology');
@@ -56,10 +58,13 @@ export function mountVenueServerPlan(getState, api, download) {
     if (inputs.some(input => !/^[1-9]\d{3,4}$/.test(input.value) || !validDestination(advertised, Number(input.value)))) return null;
     const values = inputs.map(input => Number(input.value));
     if (new Set(values).size !== values.length) return null;
+    const server = ({ sessionId, sessionSequence, missionId }, roomIds, port) => ({
+      sessionId, sessionSequence, missionId, roomIds, port
+    });
     const servers = preview.topology === 'Linked'
-      ? [{ sessionId: preview.rooms[0].sessionId, roomIds: preview.rooms.map(room => room.roomId), port: values[0] }]
-      : preview.rooms.map((room, index) => ({ sessionId: room.sessionId, roomIds: [room.roomId], port: values[index] }));
-    return { version: 1, controlInstance, topology: preview.topology, address: advertised, listenAddress, servers };
+      ? [server(preview.rooms[0], preview.rooms.map(room => room.roomId), values[0])]
+      : preview.rooms.map((room, index) => server(room, [room.roomId], values[index]));
+    return { version: 2, controlInstance, topology: preview.topology, address: advertised, listenAddress, servers };
   }
 
   function update() {
@@ -138,7 +143,7 @@ export function mountVenueServerPlan(getState, api, download) {
         return;
       }
       download('vr-command-venue-server-plan.json', new Blob([JSON.stringify(value, null, 2) + '\n'], { type: 'application/json' }));
-      $('status').textContent = '已下載計畫。請在遊戲伺服器電腦使用 Windows 啟動器 1.8。';
+      $('status').textContent = '已下載含場次序號的計畫。請使用 Windows 啟動器 1.13 以上版本。場次有變更時請重新讀取並下載。';
     } catch {
       if (request.current()) {
         resetPreview();

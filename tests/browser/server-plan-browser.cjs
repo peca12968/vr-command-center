@@ -54,9 +54,10 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
     return session;
   };
   const end = async id => { await command(id, 'End'); active.delete(id); };
-  const shape = (topology, sessions) => ({ version: 1, controlInstance: 'C:\\Private Venue\\control\\control-instance.json', topology,
+  const shape = (topology, sessions) => ({ version: 2, controlInstance: 'C:\\Private Venue\\control\\control-instance.json', topology,
     address: '192.168.1.10', listenAddress: '0.0.0.0',
-    servers: sessions.map((session, index) => ({ sessionId: session.id, roomIds: session.roomIds, port: 18800 + index })) });
+    servers: sessions.map((session, index) => ({ sessionId: session.id, sessionSequence: session.sequence,
+      missionId: session.mission.id, roomIds: session.roomIds, port: 18800 + index })) });
   try {
     await api(route, 'GET', undefined, 'Room1', 403);
     await api(route, 'GET', undefined, 'GameServer', 403);
@@ -75,6 +76,7 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
       && (await page.locator('#venue-server-rooms li').nth(2).textContent()).includes('等待鎖定 MR 校正'),
       'A mixed venue exposes the exact MR room waiting for a lock and cannot download');
     await command(independent[2].id, 'SetRoomAlignment', { roomAlignment: { room3: 'a'.repeat(64) } });
+    independent[2] = await api(state(independent[2].id));
     await page.locator('#venue-server-read').click();
     await page.locator('#venue-server-form').waitFor();
     const independentPlan = shape('Independent', independent);
@@ -92,12 +94,21 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
     await download(page, path.join(screenshots, 'independent-venue-server-plan.json'), independentPlan);
     check(JSON.stringify(await api('/sessions')) === JSON.stringify(before)
       && requests.length > 0 && requests.every(([method, body]) => method === 'GET' && body === null),
-      'Actual download retains the five-room mapping and excludes credentials from the plan and the local path from management requests');
+      'Actual download retains the five room revisions and mission IDs without exposing credentials or sending the local path to management');
     await page.locator(panel).screenshot({ path: path.join(screenshots, 'venue-server-plan.png') });
 
-    await api(state(independent[4].id) + '/combat-stream', 'POST', { streamId: randomUUID(), origin: 'Simulation' }, 'GameServer');
     const unexpected = [];
     page.on('download', file => unexpected.push(file.suggestedFilename()));
+    await command(independent[4].id, 'SetEnvironment', { environment: { ...independent[4].environment, weather: 'Rain' } });
+    await page.locator(issue).click();
+    await page.locator(status).filter({ hasText: '場次狀態已變更' }).waitFor();
+    check(await page.locator('#venue-server-form').isHidden() && !unexpected.length,
+      'A configuration revision on the same Preparing session cancels the stale export');
+
+    await page.locator('#venue-server-read').click();
+    await page.locator('#venue-server-form').waitFor();
+    await fill(page, independentPlan);
+    await api(state(independent[4].id) + '/combat-stream', 'POST', { streamId: randomUUID(), origin: 'Simulation' }, 'GameServer');
     await page.locator(issue).click();
     await page.locator(status).filter({ hasText: '場次狀態已變更' }).waitFor();
     check(await page.locator('#venue-server-form').isHidden() && !unexpected.length,
@@ -111,7 +122,7 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
     await fill(page, linkedPlan);
     await download(page, path.join(screenshots, 'linked-venue-server-plan.json'), linkedPlan);
     check(await page.locator(ports).count() === 1 && unexpected.length === 1,
-      'A Linked venue downloads one port and the five original room IDs in one server row');
+      'A Linked venue downloads one port and one exact session revision for all five original rooms');
     await page.locator('#tab-missions').click();
     await page.locator('#tab-operations').click();
     await page.locator(panel + ' summary').click();

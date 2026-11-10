@@ -250,6 +250,7 @@ internal static class ServerLauncher
     internal sealed class Choice
     {
         internal string Id, MissionId, MissionName, Mode, Experience; internal int[] Rooms, MissingAlignmentRooms;
+        internal long Sequence;
         internal bool CanStart { get { return MissingAlignmentRooms.Length == 0; } }
         internal static string GuidValue(string value) { Guid id; Need(Guid.TryParseExact(value, "D", out id) && id != Guid.Empty && id.ToString("D") == value, "場次或任務識別格式錯誤。"); return value; }
         internal static int[] ReadRooms(Dictionary<string, object> value, string mode)
@@ -278,7 +279,8 @@ internal static class ServerLauncher
             Need(!String.IsNullOrWhiteSpace(name) && name.Length <= 100, "任務名稱格式錯誤。");
             var mode = Text(value, "mode"); var rooms = ReadRooms(value, mode); var experience = Text(Child(value, "environment"), "mode");
             return new Choice { Id = GuidValue(Text(value, "id")), MissionId = GuidValue(Text(mission, "id")), MissionName = name,
-                Mode = mode, Experience = experience, Rooms = rooms, MissingAlignmentRooms = experience == "MR" ? MissingAlignment(value, rooms) : new int[0] };
+                Sequence = Num(value, "sequence"), Mode = mode, Experience = experience, Rooms = rooms,
+                MissingAlignmentRooms = experience == "MR" ? MissingAlignment(value, rooms) : new int[0] };
         }
         internal static string Label(string value)
         {
@@ -586,19 +588,26 @@ internal static class ServerLauncher
 
     sealed class VenuePlan
     {
+        internal long Version;
         internal Catalog Catalog;
         internal string Topology;
         internal List<VenueServer> Servers;
         internal object Public()
         {
             return new { schemaVersion = 1, status = "venue-checked", complete = true, topology = Topology, instanceId = Catalog.InstanceId,
-                servers = Servers.ConvertAll(server => new { roomIds = server.Choice.Rooms, sessionId = server.Choice.Id,
-                    missionId = server.Choice.MissionId, missionName = server.Choice.MissionName, experienceMode = server.Choice.Experience,
-                    address = server.Config.Address, listenAddress = server.Config.Bind, port = server.Config.Port }) };
+                servers = Servers.ConvertAll(server =>
+                {
+                    var choice = server.Choice;
+                    var row = new Dictionary<string, object> { { "roomIds", choice.Rooms }, { "sessionId", choice.Id },
+                        { "missionId", choice.MissionId }, { "missionName", choice.MissionName }, { "experienceMode", choice.Experience },
+                        { "address", server.Config.Address }, { "listenAddress", server.Config.Bind }, { "port", server.Config.Port } };
+                    if (Version == 2) row.Add("sessionSequence", choice.Sequence);
+                    return row;
+                }) };
         }
         internal bool Same(VenuePlan other)
         {
-            return Catalog.Same(other.Catalog) && Json.Serialize(Public()) == Json.Serialize(other.Public());
+            return Version == other.Version && Catalog.Same(other.Catalog) && Json.Serialize(Public()) == Json.Serialize(other.Public());
         }
     }
 
@@ -647,8 +656,8 @@ internal static class ServerLauncher
 
     static VenuePlan LoadVenuePlan(Dictionary<string, object> plan, string instancePath)
     {
-        var topology = Text(plan, "topology"); object raw;
-        Need(Num(plan, "version") == 1 && plan.Count == 6 && (topology == "Linked" || topology == "Independent")
+        var version = Num(plan, "version"); var topology = Text(plan, "topology"); object raw;
+        Need((version == 1 || version == 2) && plan.Count == 6 && (topology == "Linked" || topology == "Independent")
             && plan.TryGetValue("servers", out raw) && raw is object[]
             && ((object[])raw).Length == (topology == "Linked" ? 1 : 5), "請提供完整的獨立或合併場館設定。");
         Verify();
@@ -660,11 +669,14 @@ internal static class ServerLauncher
         foreach (var item in (object[])plan["servers"])
         {
             var row = Map(item);
-            Need(row != null && row.Count == 3 && Num(row, "port") >= 1024 && Num(row, "port") <= 65535, "請提供有效場次、房號及 UDP 埠。");
+            Need(row != null && row.Count == (version == 2 ? 5 : 3) && Num(row, "port") >= 1024 && Num(row, "port") <= 65535,
+                "請提供有效場次、房號及 UDP 埠。");
             var choice = catalog.Choices.Find(candidate => candidate.Id == Text(row, "sessionId"));
             var assigned = Choice.ReadRooms(row, topology);
             Need(choice != null && choice.Mode == topology && String.Join(",", choice.Rooms) == String.Join(",", assigned),
                 "原場次與房間不符或已無法啟動。");
+            if (version == 2)
+                CheckVenueRevision(choice, Num(row, "sessionSequence"), Choice.GuidValue(Text(row, "missionId")), assigned);
             Need(choice.CanStart, Choice.AlignmentPrompt(choice.MissingAlignmentRooms));
             foreach (var room in assigned) Need(rooms.Add(room), "場館房間重複。");
             var config = catalog.Target.ForSession(choice.Id, Text(plan, "address"), Text(plan, "listenAddress"), (int)Num(row, "port"));
@@ -675,7 +687,13 @@ internal static class ServerLauncher
         foreach (var server in servers)
             try { server.Config.CheckPort(); }
             catch (SocketException) { throw new InvalidDataException("無法使用房間 " + String.Join("、", server.Choice.Rooms) + " 的 UDP 埠 " + server.Config.Port + "。"); }
-        return new VenuePlan { Catalog = catalog, Topology = topology, Servers = servers };
+        return new VenuePlan { Version = version, Catalog = catalog, Topology = topology, Servers = servers };
+    }
+
+    static void CheckVenueRevision(Choice current, long sequence, string missionId, int[] rooms)
+    {
+        Need(sequence > 0 && current != null && current.Sequence == sequence && current.MissionId == missionId,
+            "房間 " + String.Join("、", rooms) + " 的場次序號或任務版本已變更；請在主控台重新讀取並下載計畫。");
     }
 
     static int ExecuteVenue(VenuePlan plan, string work, int seconds, string ready, string report, bool peerDiagnostics, Func<bool> cancel)
@@ -734,6 +752,15 @@ internal static class ServerLauncher
                     workers.Add(worker);
                 }
                 reserved.Wait();
+                if (plan.Version == 2 && !gate.Abort && !cancel())
+                {
+                    var current = Catalog.Parse(plan.Catalog.Target.Sessions());
+                    foreach (var server in servers)
+                    {
+                        var expected = server.Choice;
+                        CheckVenueRevision(current.Find(choice => choice.Id == expected.Id), expected.Sequence, expected.MissionId, expected.Rooms);
+                    }
+                }
                 launch.Set();
                 started.Wait();
                 if (!gate.Abort && !cancel() && servers.TrueForAll(server => server.Ready && !server.Run.Process.Exited))
@@ -880,6 +907,7 @@ internal static class ServerLauncher
                     var item = new ListViewItem(new[] { room, Choice.Label(server.Choice.MissionName) + " · " + server.Choice.Experience,
                         server.Choice.Id, endpoint });
                     item.ToolTipText = server.Choice.Detail() + "\r\n本機綁定：" + server.Config.Bind + ":" + server.Config.Port;
+                    if (result.Version == 2) item.ToolTipText += "\r\n場次序號：" + server.Choice.Sequence;
                     rooms.Items.Add(item);
                 }
                 summary.Text = (result.Topology == "Linked" ? "五房合併" : "五房獨立") + " · " + result.Servers.Count + " 個遊戲伺服器";

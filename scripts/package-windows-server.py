@@ -6,7 +6,7 @@ ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('server_player_package',ROOT/'scripts/package-windows-player.py');player=importlib.util.module_from_spec(spec);spec.loader.exec_module(player)
 digest=player.digest;plain=player.plain
 TOP='VRCommand-GameServer'
-README='''VR Command Windows 遊戲伺服器啟動器 1.12／Windows 遊戲程式
+README='''VR Command Windows 遊戲伺服器啟動器 1.13／Windows 遊戲程式
 
 完整解壓後開啟 Launch-Server.exe。先啟動配套的管理服務，在網頁控制台建立 Preparing VR 或 MR 場次。
 按「選擇檔案」選control-instance.json，或在路徑欄直接貼上完整檔案路徑，再按「載入／更新」。只使用既有GameServer角色金鑰。
@@ -14,7 +14,7 @@ README='''VR Command Windows 遊戲伺服器啟動器 1.12／Windows 遊戲程�
 更新只保留同一路徑、實例、API、GameServer 金鑰與 HTTPS 指紋中仍在清單內的原選取。場次或設定改變時須重新載入及選擇。
 獨立房間各開一個啟動器、各選場次與不同UDP埠；五房Linked場次只開一個。
 使用控制台下載的五房計畫時，按「五房批次啟動」，貼上 JSON 完整路徑或選檔，按「核對計畫」。
-確認房間、任務、場次與 UDP 埠後按「啟動全館」。視窗會在啟動前重新核對原計畫，並顯示就緒及最後結果位置。
+確認房間、任務、場次與 UDP 埠後按「啟動全館」。新版下載包含場次序號及任務版本，取得全館啟動鎖後會再次核對。若設定已變更，請回主控台重新下載。
 全館批次請使用控制台 0.31.100 或以上的管理包。所有原遊戲程序與 UDP 綁定均確認後，管理服務一次公告整批端點。
 有新場次時按載入／更新。清單只列尚未綁定來源的 Preparing 場次。啟動前會向原管理服務重新核對場次與來源。
 MR 場次如缺少校正鎖定，清單會標示待鎖定，選取後顯示房號並停用啟動。由主控鎖定後按載入／更新。
@@ -37,8 +37,9 @@ CLI：Launch-Server.exe --run 私人JSON --work 全新資料夾 --seconds 3600 -
 五房批次：Launch-Server.exe --venue-run 私人計畫JSON --work 全新資料夾 --seconds 3600 --ready-report 新就緒檔 --report 新結果檔
 唯讀核對五房計畫：Launch-Server.exe --venue-check 計畫JSON完整路徑 --report 新結果檔
 直接開啟五房視窗並填入路徑：Launch-Server.exe --venue-window 計畫JSON完整路徑
-計畫欄位：version=1、controlInstance（管理實例完整路徑）、topology（Independent 或 Linked）、address、listenAddress、servers。
-每個 servers 項目含 sessionId、roomIds 及 port。獨立列五筆及不同 UDP 埠，合併列一筆且 roomIds 含五房。原場次須為未綁來源的 Preparing。
+計畫欄位：version=2、controlInstance（管理實例完整路徑）、topology（Independent 或 Linked）、address、listenAddress、servers。
+每個 servers 項目含 sessionId、sessionSequence、missionId、roomIds 及 port。獨立列五筆及不同 UDP 埠，合併列一筆且 roomIds 含五房。原場次須為未綁來源的 Preparing。
+既有 version=1 手動計畫仍可使用，沿用原房間及 UDP 核對流程。
 等全館就緒檔出現，再由原控制台操作配票與場次。個別原子程序、UDP 綁定、雙封存與終止結果會逐場記錄。設定及結果須留在包外。
 場館驗收可在圖形介面勾選「記錄本次玩家連線來源（場館驗收）」，或在上述CLI另加 --peer-diagnostics on。
 每場須明確開啟。結果的 peerDiagnosticsEnabled 記錄啟動時是否開啟，原連線編號與來源位址及埠可在 workDirectory 下的 server.log 核對。
@@ -85,7 +86,7 @@ def main():
     with (stage/'compile.log').open('xb') as log:subprocess.run([str(compiler),'/nologo','/warnaserror','/codepage:65001','/target:winexe','/platform:x64','/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Web.Extensions.dll','/out:'+str(folder/'Launch-Server.exe'),str(frozen)],stdout=log,stderr=subprocess.STDOUT,check=True)
     if digest(source)!=source_hash:raise ValueError('Launcher source changed during compilation')
     (folder/'README.txt').write_text(README,encoding='utf-8')
-    manifest={'schemaVersion':1,'target':'win-x64','launcherVersion':'1.12.0','createdAtUtc':datetime.now(timezone.utc).isoformat(),'build':receipt,'launcherSourceSha256':source_hash,'scope':'Standalone server launcher; no keys, tickets or databases; manifest is not a signature.',
+    manifest={'schemaVersion':1,'target':'win-x64','launcherVersion':'1.13.0','createdAtUtc':datetime.now(timezone.utc).isoformat(),'build':receipt,'launcherSourceSha256':source_hash,'scope':'Standalone server launcher; no keys, tickets or databases; manifest is not a signature.',
         'files':[{'path':p.relative_to(folder).as_posix(),'bytes':p.stat().st_size,'sha256':digest(p)} for p in sorted(folder.rglob('*')) if p.is_file()]}
     (folder/'server-package.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8');verify(folder)
     output=plain(args.output);output.parent.mkdir(parents=True,exist_ok=True)

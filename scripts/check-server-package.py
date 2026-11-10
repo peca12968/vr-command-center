@@ -3,6 +3,7 @@ import argparse,base64,csv,ctypes,hashlib,importlib.util,io,ipaddress,json,os,re
 from contextlib import closing, contextmanager
 from datetime import datetime,timedelta,timezone
 from decimal import Decimal
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 def module(name,file):
@@ -578,6 +579,13 @@ def main():
                 wrong_preview=call('preview-wrong-room',['--venue-check',stale])
                 check('原場次與房間不符' in read(wrong_preview)['error'], 'The shared venue preview rejects a mismatched room assignment')
             plan_file.write_text(json.dumps(plan),encoding='utf-8')
+            if args.check_venue_preview:
+                legacy=read(call('preview-legacy-venue',['--venue-check',plan_file],good=True))
+                check(legacy['topology']=='Independent'
+                      and [(row['sessionId'],row['roomIds'],row['port']) for row in legacy['servers']]
+                      ==[(row['sessionId'],row['roomIds'],row['port']) for row in plan['servers']]
+                      and all('sessionSequence' not in row for row in legacy['servers']),
+                      'legacy v1 plan retains its original successful preview and report shape')
             with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as occupied:
                 occupied.setsockopt(socket.SOL_SOCKET,socket.SO_EXCLUSIVEADDRUSE,1)
                 occupied.bind((address,values[-1]['port']))
@@ -614,14 +622,85 @@ def main():
                         kernel.ReleaseMutex(lease)
                     kernel.CloseHandle(lease)
         if args.check_venue_plan_ui:
-            plan_file=runtime/(label+'-browser-plan.json')
             driver=ROOT/'tests/browser/server-plan-browser.cjs'
-            completed=subprocess.run([shutil.which('node'),str(driver)],cwd=driver.parent,
-                input=json.dumps({'base':uri,'token':keys['Master'],'plan':plan,'output':str(plan_file)}),
-                text=True,encoding='utf-8',capture_output=True,timeout=45,creationflags=subprocess.CREATE_NO_WINDOW)
-            diagnostic=completed.stderr
-            for key in keys.values():diagnostic=diagnostic.replace(key,'[redacted]')
-            check(completed.returncode==0 and read(plan_file)==plan,label+' actual console download matches the original venue: '+diagnostic[-600:])
+            def download_plan(suffix):
+                file=runtime/(label+suffix+'.json')
+                completed=subprocess.run([shutil.which('node'),str(driver)],cwd=driver.parent,
+                    input=json.dumps({'base':uri,'token':keys['Master'],'plan':plan,'output':str(file)}),
+                    text=True,encoding='utf-8',capture_output=True,timeout=45,creationflags=subprocess.CREATE_NO_WINDOW)
+                diagnostic=completed.stderr
+                for key in keys.values():diagnostic=diagnostic.replace(key,'[redacted]')
+                check(completed.returncode==0 and read(file)==plan,label+suffix+' downloads exact session and mission revisions: '+diagnostic[-600:])
+                return file
+            def refresh_plan():
+                plan['version']=2
+                plan['servers']=[{**row,'sessionSequence':state['sequence'],'missionId':state['mission']['id']}
+                                 for row,state in zip(plan['servers'],states,strict=True)]
+            def advance_revision():
+                state=states[-1]
+                return request('/api/sessions/'+state['id']+'/commands',{'commandId':str(uuid.uuid4()),
+                    'action':'SetEnvironment','expectedSequence':state['sequence'],'environment':state['environment']})['session']
+
+            refresh_plan()
+            old_plan=download_plan('-browser-original')
+            empty_work,empty_ready=runtime/(label+'-stale-work'),out/(label+'-stale-ready.json')
+            if not linked:
+                wrong_plan=runtime/(label+'-wrong-mission.json')
+                wrong_plan.write_text(json.dumps(dict(plan,servers=[*plan['servers'][:-1],
+                    {**plan['servers'][-1],'missionId':str(uuid.uuid4())}])),encoding='utf-8')
+                wrong=read(call(label+'-wrong-mission',['--venue-check',wrong_plan]))
+                check('房間 5' in wrong['error'] and '任務版本已變更' in wrong['error'],
+                      'v2 preview rejects a wrong mission at the original sequence')
+
+                # Change the real fifth session only after the launcher has loaded the plan and reserved every worker.
+                catalog_reads=[]
+                class LaunchGateFixture(BaseHTTPRequestHandler):
+                    def log_message(self, *args):pass
+                    def do_GET(self):
+                        if self.headers.get('Authorization')!='Bearer '+keys['GameServer']:
+                            self.send_error(403);return
+                        if self.path=='/api/sessions':
+                            if len(catalog_reads)==1:advance_revision()
+                            catalog_reads.append(self.path)
+                        body,_=request(self.path,role='GameServer',raw_response=True)
+                        self.send_response(200)
+                        self.send_header('Content-Length',str(len(body)))
+                        self.end_headers()
+                        self.wfile.write(body)
+                gate_dir=runtime/(label+'-gate-instance')
+                gate_dir.mkdir()
+                gate_marker=gate_dir/'control-instance.json'
+                shutil.copyfile(data/'operator-keys.json',gate_dir/'operator-keys.json')
+                gate_plan=runtime/(label+'-gate-plan.json')
+                gate_work,gate_ready=runtime/(label+'-gate-work'),out/(label+'-gate-ready.json')
+                with ThreadingHTTPServer(('127.0.0.1',0),LaunchGateFixture) as fixture:
+                    gate_marker.write_text(json.dumps(dict(read(data/'control-instance.json'),port=fixture.server_port)),encoding='utf-8')
+                    gate_plan.write_text(json.dumps(dict(plan,controlInstance=str(gate_marker))),encoding='utf-8')
+                    thread=threading.Thread(target=fixture.serve_forever,daemon=True)
+                    thread.start()
+                    try:
+                        blocked=read(call(label+'-gate-stale',args_for(gate_plan,gate_work,gate_ready)))
+                    finally:
+                        fixture.shutdown()
+                        thread.join()
+                check(len(catalog_reads)==2 and '房間 5' in blocked['error'] and '場次序號' in blocked['error']
+                      and not gate_ready.exists() and not list(gate_work.iterdir()),
+                      'A real fifth-room edit at the final launch gate stops every worker before writing a native config')
+                updated=request('/api/sessions/'+states[-1]['id'])
+            else:
+                updated=advance_revision()
+            check(updated['id']==states[-1]['id'] and updated['sequence']==states[-1]['sequence']+1
+                  and updated['state']=='Preparing' and updated['combatStream'] is None,
+                  label+' original session remains launchable with a newer configuration revision')
+            states[-1]=updated
+            stale_preview=read(call(label+'-stale-preview',['--venue-check',old_plan]))
+            stale_run=read(call(label+'-stale-run',args_for(old_plan,empty_work,empty_ready)))
+            check(all('場次序號' in result['error'] and '重新讀取並下載' in result['error'] for result in (stale_preview,stale_run))
+                  and not empty_work.exists() and not empty_ready.exists()
+                  and all(request('/api/sessions/'+state['id'])==state for state in states),
+                  label+' stale downloaded plan cannot start a child, bind a source or alter any room')
+            refresh_plan()
+            plan_file=download_plan('-browser-plan')
         else:
             plan_file.write_text(json.dumps(dict(plan,servers=list(reversed(plan['servers'])))),encoding='utf-8')
         if args.check_venue_preview:
