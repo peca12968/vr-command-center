@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `VRCommand-ControlServer-0.31.95-win-x64.zip` 可在暫停的戰鬥事件上標記前後保存畫格。ZIP 為 52,890,437 bytes，SHA-256 `2cc8506a3a418b431b89a0c42258b5bf2d193eec479a83d51d12abaa590333e1`。解壓核對 543 筆清單及 523 個執行檔，通過 107 項管理包檢查。 [回放操作](WORLD_RECORDING.md#重看指定片段)
+
 2026-11-10 `VRCommand-ControlServer-0.31.94-win-x64.zip` 提供主控的五房硬體名冊快照。ZIP 為 52,886,246 bytes，SHA-256 `079c47487ada9c4c51862abe5b4854c416469d4e954be2d568b3e65d23921d63`。解壓核對 543 筆清單與 523 個執行檔。 [五房綁定操作](HARDWARE.md#一次建立五房設備綁定)
 
 2026-11-10 `VRCommand-ControlServer-0.31.93-win-x64.zip` 提供同批獨立房間的回放對齊。ZIP 為 52,884,271 bytes，SHA-256 `17123aae22f880a0a647c41ec094e1d21ce381f8318e3f0aa0a134f892bda9ef`。解壓核對 543 筆清單與 523 個執行檔。 [回放操作](WORLD_RECORDING.md#對齊同批獨立房間的回放)
