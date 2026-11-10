@@ -23,7 +23,8 @@ if ($args[2] -ceq 'push') {
     $null = [IO.Directory]::CreateDirectory($device)
     $file = Join-Path $device ($args[4].Split('/')[-1])
     Copy-Item -LiteralPath $args[3] -Destination $file
-    if ($fault -ceq 'config-stage-changed' -and $args[4].Contains('/vr-connection-')) {
+    if (($fault -ceq 'config-stage-changed' -and $args[4].Contains('/vr-connection-')) -or
+        ($fault -ceq 'alignment-stage-changed' -and $args[4].Contains('/vr-room-alignment-'))) {
         [IO.File]::AppendAllText($file, "`n")
     }
     exit 0
@@ -58,6 +59,9 @@ switch -CaseSensitive ($args[3]) {
         $name = $args[5].Split('/')[-1]
         if ($name -ceq 'vr-connection.json' -and $fault -ceq 'config-move') { exit 1 }
         Move-Item -Force -LiteralPath (Join-Path $device ($args[4].Split('/')[-1])) -Destination (Join-Path $device $name)
+        if ($name -ceq 'vr-connection.json' -and $fault -ceq 'config-active-changed') {
+            [IO.File]::AppendAllText((Join-Path $device $name), "`n")
+        }
         exit 0
     }
     'sha256sum' {
@@ -70,6 +74,8 @@ switch -CaseSensitive ($args[3]) {
         Remove-Item -LiteralPath (Join-Path $device ($args[5].Split('/')[-1])) -ErrorAction SilentlyContinue
         exit 0
     }
-    { $_ -cin @('am', 'mkdir', 'monkey') } { exit 0 }
+    'am' { if ($fault -ceq 'force-stop') { exit 1 }; exit 0 }
+    'mkdir' { if ($fault -ceq 'directory') { exit 1 }; exit 0 }
+    'monkey' { if ($fault -ceq 'launch') { exit 1 }; exit 0 }
 }
 exit 98

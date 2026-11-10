@@ -339,13 +339,22 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.z
 
 正式部署在各席開始寫入前會再讀一次裝置序號。若和預檢結果不同，該席會標記為 `device-identity-changed`。若讀取失敗則標記為 `device-identity-unavailable`。兩種情況都會在該席寫入前停止。這些檢查適用於完整與部分裝置清單，現場仍須依實體標籤核對房號及席位。
 
-中途失敗會停止並以非零結束碼回報。`launch-requested` 表示該席的檔案已核對，並已送出啟動指令。`file-verification-failed` 表示無法確認裝置檔案與預期內容相同，該席未送出啟動。`deployment-failed` 表示其他部署步驟失敗。這兩種錯誤可能發生在停止遊戲或啟用部分檔案之後。`not-attempted` 表示該席未進入寫入階段。已處理席位保留當下結果。可按回報定位故障，必要時重新配發票券，再用單席流程處理尚未成功的裝置。 [核對頭盔追蹤席位](#核對頭盔追蹤席位)
+中途失敗會停止並以非零結束碼回報。`launch-requested` 表示該席的檔案已核對，並已送出啟動指令。`file-verification-failed` 表示該席無法確認裝置檔案與預期內容相同，且尚未送出啟動。`deployment-failed` 表示其他部署步驟失敗。這兩種部署錯誤另附 `failedStep`，可辨別遊戲是否已經過停止指令與正式檔案切換。`not-attempted` 表示該席未進入寫入階段。 [核對頭盔追蹤席位](#核對頭盔追蹤席位)
 
 #### 啟動前核對裝置檔案
 
 單席與整批部署都會先傳送並核對 MR 原校正檔，再驗證暫存的玩家連線檔。兩項核對通過且票券仍有效時，才停止遊戲並啟用新的連線檔。啟用後再次核對最終路徑的 SHA-256，通過才送出啟動指令。批次沿用裝置上已安裝的 APK，因此傳輸或暫存核對失敗時，原遊戲程序及原連線檔可以保留。單席流程另含 APK 安裝階段。
 
-暫存檔失敗時工具會嘗試清理該檔。如果停止遊戲失敗，工具保留原連線檔。如果在停止後啟用檔案或核對最終路徑失敗，該席可能已停止或已寫入新檔，請依回報處理該席。
+| `failedStep` | 操作員可確認的部署進度 |
+| --- | --- |
+| `prepare-device`、`stage-alignment`、`stage-connection` | 尚未送出停止指令或切換連線檔。工具會嘗試清理傳輸中的暫存檔。 |
+| `check-expiry-before-staging`、`check-expiry-before-stop` | 票券已過期，尚未送出停止指令或切換連線檔。請下載目前部署包。 |
+| `stop-game` | 停止指令失敗，尚未切換連線檔。請確認遊戲程序狀態。 |
+| `activate-connection`、`verify-active-connection` | 停止指令已成功。新連線檔可能已切換，但尚未完成最終驗證。 |
+| `clean-local-connection`、`check-expiry-before-launch` | 新連線檔已切換並通過驗證，尚未送出啟動。後者須取得新票券。 |
+| `launch-game` | 新連線檔已通過驗證，啟動指令未成功。請確認裝置和入場狀態。 |
+
+排除故障後，可在新裝置清單中只列待重試的失敗席位和 `not-attempted` 席位，再以 `-AllowPartialMap -DeployMappedSeats` 執行上方批次命令。原部署包仍須通過線上核對且票券有效。排除已回報 `launch-requested` 的席位可避免再次停止那些遊戲。這個恢復流程沿用已安裝的 APK。遊戲實際入場及追蹤請再從主控台核對。
 
 整批回報以 `filesVerified: true` 標示已完成檔案核對並送出啟動的席位。遊戲是否完成入場及追蹤，請用同一部署 ZIP 再核對。 [追蹤操作](#核對頭盔追蹤席位) · [Android 檔案傳輸](https://developer.android.com/tools/adb) · [Android 校驗工具](https://android.googlesource.com/platform/external/toybox/%2B/40d21c59f76a9388b0ebb5c4c706732c2d034a67/toys/lsb/md5sum.c)
 

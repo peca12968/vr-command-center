@@ -707,8 +707,9 @@ else:
         self.assertNotIn('capture-ready', repeat.stderr)
         self.assertEqual(before, {path.name: path.read_bytes() for path in output.iterdir()})
 
-    def run_fleet(self, files, mapping, *flags, faults=None, environment=None):
-        env = {**os.environ, **(environment or {}), 'VR_QUEST_FLEET_FIXTURE': str(self.root), 'VR_QUEST_FLEET_FAULTS': json.dumps(faults or {})}
+    def run_fleet(self, files, mapping, *flags, faults=None, environment=None, fleet_root=None):
+        env = {**os.environ, **(environment or {}), 'VR_QUEST_FLEET_FIXTURE': str(fleet_root or self.root),
+               'VR_QUEST_FLEET_FAULTS': json.dumps(faults or {})}
         return self.run_bundle(files, '-DeviceMap', str(mapping), '-ExpectedVersionCode', '61', '-AdbPath',
                                str(ROOT / 'tests/fixtures/mock-quest-fleet.ps1'), *flags, environment=env)
 
@@ -1129,14 +1130,32 @@ else:
         self.assertNotIn('HARDWARE-SERIAL-', result.stdout + result.stderr)
 
     def test_mapped_deployment_stops_after_file_failure_and_keeps_prior_results(self):
-        self.assert_mapped_deployment_stops('config-stage-changed', 'file-verification-failed')
+        self.assert_mapped_deployment_stops('config-stage-changed', 'file-verification-failed', 'stage-connection')
 
     def test_mapped_deployment_stops_before_writing_to_changed_device(self):
-        self.assert_mapped_deployment_stops('identity-changed', 'device-identity-changed')
+        self.assert_mapped_deployment_stops('identity-changed', 'device-identity-changed', None)
 
-    def assert_mapped_deployment_stops(self, fault, expected_status):
+    def test_mapped_deployment_reports_exact_failure_boundary(self):
+        cases = (
+            ('directory', 'deployment-failed', 'prepare-device'),
+            ('alignment-stage-changed', 'file-verification-failed', 'stage-alignment'),
+            ('force-stop', 'deployment-failed', 'stop-game'),
+            ('config-move', 'deployment-failed', 'activate-connection'),
+            ('config-active-changed', 'file-verification-failed', 'verify-active-connection'),
+            ('launch', 'deployment-failed', 'launch-game'),
+        )
+        for fault, status, step in cases:
+            with self.subTest(fault=fault):
+                self.assert_mapped_deployment_stops(fault, status, step, partial=True)
+
+    def assert_mapped_deployment_stops(self, fault, expected_status, failed_step, *, partial=False):
         files, seats = self.bundle('Linked')
         path, _ = self.device_map()
+        count = 5 if partial else 25
+        if partial:
+            mapping = json.loads(path.read_bytes())
+            mapping['seats'] = [row for row in mapping['seats'] if row['roomId'] == 1]
+            path.write_text(json.dumps(mapping), encoding='utf-8')
         session = str(self.session_ids[0])
         calls = []
 
@@ -1159,42 +1178,52 @@ else:
             def log_message(self, *args):
                 pass
 
-        before = self.root / 'fixture-04'
-        before.mkdir()
+        fleet = self.root / fault
+        before = fleet / 'fixture-04'
+        before.mkdir(parents=True)
         (before / 'vr-connection.json').write_bytes(b'previous connection')
         with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
-                result = self.run_fleet(files, path, '-DeployMappedSeats', '-ManagementApi', f'http://127.0.0.1:{server.server_port}',
-                                        faults={'fixture-04': fault}, environment={'VR_COMMAND_MASTER_KEY': 'PRIVATE_MASTER_CANARY'})
+                flags = ('-AllowPartialMap',) if partial else ()
+                result = self.run_fleet(files, path, *flags, '-DeployMappedSeats', '-ManagementApi', f'http://127.0.0.1:{server.server_port}',
+                                        faults={'fixture-04': fault}, environment={'VR_COMMAND_MASTER_KEY': 'PRIVATE_MASTER_CANARY'},
+                                        fleet_root=fleet)
             finally:
                 server.shutdown()
                 thread.join(timeout=5)
         self.assertEqual(1, result.returncode, result.stderr)
         report = json.loads(result.stdout)
         self.assertEqual(('deployment', False, True), (report['phase'], report['complete'], report['managementVerified']))
-        self.assertEqual(['launch-requested'] * 3 + [expected_status] + ['not-attempted'] * 21,
+        self.assertEqual(['launch-requested'] * 3 + [expected_status] + ['not-attempted'] * (count - 4),
                          [row['status'] for row in report['devices']])
-        self.assertEqual([True] * 3 + [None] * 22, [row.get('filesVerified') for row in report['devices']])
+        self.assertEqual([True] * 3 + [None] * (count - 3), [row.get('filesVerified') for row in report['devices']])
+        self.assertEqual([None] * 3 + [failed_step] + [None] * (count - 4), [row.get('failedStep') for row in report['devices']])
         self.assertEqual(['/api/mr-deployment/venue-check', f'/api/sessions/{session}/connection-endpoint'], calls)
-        self.assertEqual(b'previous connection', (before / 'vr-connection.json').read_bytes())
+        active = (before / 'vr-connection.json').read_bytes()
+        if fault in ('config-active-changed', 'launch'):
+            self.assertEqual(seats[1]['room-01-seat-04.json']['joinTicket'], json.loads(active)['joinTicket'])
+            self.assertEqual(fault == 'config-active-changed', active.endswith(b'\n'))
+        else:
+            self.assertEqual(b'previous connection', active)
         self.assertFalse(list(before.glob('*.tmp')))
-        self.assertEqual(['fixture-01','fixture-02','fixture-03','fixture-04'], sorted(folder.name for folder in self.root.glob('fixture-*')))
+        self.assertEqual(['fixture-01','fixture-02','fixture-03','fixture-04'], sorted(folder.name for folder in fleet.glob('fixture-*')))
         for seat in range(1, 4):
-            actual = json.loads((self.root / f'fixture-{seat:02}' / 'vr-connection.json').read_bytes())
+            actual = json.loads((fleet / f'fixture-{seat:02}' / 'vr-connection.json').read_bytes())
             self.assertEqual(seats[1][f'room-01-seat-{seat:02}.json']['joinTicket'], actual['joinTicket'])
-        commands = (self.root / 'adb.log').read_text(encoding='utf-8').splitlines()
+        commands = (fleet / 'adb.log').read_text(encoding='utf-8').splitlines()
         first_write = next(index for index, line in enumerate(commands) if 'shell mkdir -p' in line)
-        self.assertEqual(77, first_write)
-        self.assertEqual(29, sum(line.endswith(' shell getprop ro.serialno') for line in commands))
-        self.assertFalse(any(line.startswith('-s fixture-04 shell am force-stop ') for line in commands))
+        self.assertEqual(3 * count + 2, first_write)
+        self.assertEqual(count + 4, sum(line.endswith(' shell getprop ro.serialno') for line in commands))
+        self.assertEqual(fault in ('force-stop', 'config-move', 'config-active-changed', 'launch'),
+                         any(line.startswith('-s fixture-04 shell am force-stop ') for line in commands))
         if fault == 'identity-changed':
             self.assertEqual(['-s fixture-04 shell pm list packages -e --show-versioncode --user current com.vrcommand.quest',
                               '-s fixture-04 shell getprop ro.serialno',
                               '-s fixture-04 shell getprop ro.serialno'],
                              [line for line in commands if line.startswith('-s fixture-04 ') and not line.endswith('ro.product.model')])
-        self.assertEqual(3, sum(' shell monkey ' in line for line in commands))
+        self.assertEqual(4 if fault == 'launch' else 3, sum(' shell monkey ' in line for line in commands))
         self.assertNotIn('v2.', result.stdout + result.stderr)
         self.assertNotIn('HARDWARE-SERIAL-', result.stdout + result.stderr)
         self.assertNotIn('PRIVATE_MASTER_CANARY', result.stdout + result.stderr)

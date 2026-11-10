@@ -2436,6 +2436,45 @@ def main():
         kind = 'partial' if partial else 'mapped'
         save(f'{prefix}-venue-{mode.lower()}-{kind}-preflight.json', preview)
         save(f'{prefix}-venue-{mode.lower()}-{kind}-deployment.json', applied)
+        if not mixed:
+            return
+
+        recovery = destination / 'recovery'
+        recovery.mkdir()
+        first, failed, *pending = rows
+        log = recovery / 'adb.log'
+        recovery_env = {**environment, 'VR_QUEST_FLEET_FIXTURE': str(recovery),
+                        'VR_QUEST_FLEET_FAULTS': json.dumps({failed['serial']: 'config-active-changed'})}
+        interrupted = subprocess.run([*mapped, '-DeployMappedSeats'], env=recovery_env, timeout=45, encoding='utf-8',
+                                     cwd=destination, capture_output=True)
+        failed_report = json.loads(interrupted.stdout)
+        check(interrupted.returncode == 1 and not failed_report['complete'] and failed_report['managementVerified']
+              and [device['status'] for device in failed_report['devices']] ==
+              ['launch-requested', 'file-verification-failed', *(['not-attempted'] * len(pending))]
+              and [device.get('failedStep') for device in failed_report['devices']] ==
+              [None, 'verify-active-connection', *([None] * len(pending))]
+              and sum(' shell monkey ' in line for line in log.read_text(encoding='utf-8').splitlines()) == 1
+              and not any((recovery / row['serial']).exists() for row in pending),
+              'mixed recovery identifies an active-file verification failure after the first successful seat')
+        previous = recovery / first['serial'] / 'vr-connection.json'
+        previous_bytes = previous.read_bytes()
+        log.unlink()
+        retry_rows = [failed, *pending]
+        mapping.write_text(json.dumps({'version': 1, 'seats': retry_rows}), encoding='utf-8')
+        recovery_env['VR_QUEST_FLEET_FAULTS'] = ''
+        retried = json.loads(subprocess.check_output([*mapped, '-DeployMappedSeats'], env=recovery_env, timeout=45,
+                                                     encoding='utf-8', cwd=destination))
+        retry_commands = log.read_text(encoding='utf-8').splitlines()
+        check(retried['complete'] and retried['managementVerified'] and retried['mappedSeats'] == len(retry_rows)
+              and [(device['roomId'], device['seat'], device['status'], device.get('filesVerified')) for device in retried['devices']]
+              == [(row['roomId'], row['seat'], 'launch-requested', True) for row in retry_rows]
+              and {line.split()[1] for line in retry_commands if line.startswith('-s ')} == {row['serial'] for row in retry_rows}
+              and previous.read_bytes() == previous_bytes
+              and all((recovery / row['serial'] / 'vr-connection.json').read_bytes() ==
+                      (destination / row['serial'] / 'vr-connection.json').read_bytes() for row in retry_rows),
+              'mixed retry repairs only the failed and pending seats with the original signed bundle')
+        save('mixed-venue-interrupted-deployment.json', failed_report)
+        save('mixed-venue-retried-deployment.json', retried)
     try:
         subprocess.run([str(control_exe),'--init',str(data),'--port',str(free()),'--report',str(out/'control-init.json')],env=env,check=True,timeout=30);keys=read(data/'operator-keys.json')['OperatorKeys'];marker=read(data/'control-instance.json');uri='http://127.0.0.1:'+str(marker['port'])
         api_ready=out/'control-ready.json';api_stop=out/'control-stop.request';api=subprocess.Popen([str(control_exe),'--run',str(data),'--seconds','1800','--ready-report',str(api_ready),'--stop-file',str(api_stop),'--report',str(out/'control-final.json')],env=env,cwd=out)

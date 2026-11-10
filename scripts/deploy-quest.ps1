@@ -700,15 +700,15 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map) {
         if ($connection.Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) {
             $device.status = 'ticket-expired'; return $report
         }
+        $deployment = @{}
         try {
-            Set-QuestConnection $row.serial $connection.Ticket.Config $connection.Ticket $connection.Alignment -RequestMixedReality:($null -ne $connection.Alignment)
+            Set-QuestConnection $row.serial $connection.Ticket.Config $connection.Ticket $connection.Alignment `
+                -RequestMixedReality:($null -ne $connection.Alignment) -Deployment $deployment
             $device.filesVerified = $true
             $device.status = 'launch-requested'
-        } catch [IO.InvalidDataException] {
-            $device.status = 'file-verification-failed'
-            return $report
         } catch {
-            $device.status = 'deployment-failed'
+            $device.status = if ($_.Exception -is [IO.InvalidDataException]) { 'file-verification-failed' } else { 'deployment-failed' }
+            $device.failedStep = $deployment.Step
             return $report
         }
     }
@@ -733,7 +733,7 @@ function Confirm-QuestFileHash([string]$TargetSerial, [string]$Path, [string]$Ex
 }
 
 function Publish-QuestFile([string]$TargetSerial, [string]$Local, [string]$Staging, [string]$Destination, [string]$Description,
-    [string]$ExpectedHash, [string]$ContentHash, [scriptblock]$BeforeActivation) {
+    [string]$ExpectedHash, [string]$ContentHash, [scriptblock]$BeforeActivation, [hashtable]$ConnectionDeployment) {
     $stagedHash = if ($ContentHash) { $ContentHash } else { (Get-FileHash -LiteralPath $Local -Algorithm SHA256).Hash.ToLowerInvariant() }
     try {
         & $AdbPath -s $TargetSerial push $Local $Staging | Out-Null
@@ -746,8 +746,10 @@ function Publish-QuestFile([string]$TargetSerial, [string]$Local, [string]$Stagi
         } else {
             Confirm-QuestFileHash $TargetSerial $Staging $stagedHash $Description
             if ($BeforeActivation) { & $BeforeActivation }
+            if ($null -ne $ConnectionDeployment) { $ConnectionDeployment.Step = 'activate-connection' }
             & $AdbPath -s $TargetSerial shell mv $Staging $Destination | Out-Null
             if ($LASTEXITCODE -ne 0) { throw "$Description could not be activated." }
+            if ($null -ne $ConnectionDeployment) { $ConnectionDeployment.Step = 'verify-active-connection' }
             Confirm-QuestFileHash $TargetSerial $Destination $stagedHash $Description
         }
     } catch {
@@ -802,12 +804,15 @@ function Update-QuestPlayerTicket($Fresh, $Ticket) {
         status = if ($sameTicket) { 'ticket-file-current' } else { 'ticket-file-refreshed' } } | ConvertTo-Json -Compress
 }
 
-function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment, [switch]$UsePassthrough, [switch]$RequestMixedReality) {
+function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment, [switch]$UsePassthrough, [switch]$RequestMixedReality,
+    [hashtable]$Deployment = @{}) {
+    $Deployment.Step = 'prepare-device'
     $remoteDirectory = '/sdcard/Android/data/com.vrcommand.quest/files'
     & $AdbPath -s $TargetSerial shell mkdir -p $remoteDirectory | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'App data directory could not be prepared.' }
     $deploymentId = [Guid]::NewGuid().ToString('N')
     if ($Alignment) {
+        $Deployment.Step = 'stage-alignment'
         $alignmentHash = $Alignment.Hash
         $stagedAlignment = [IO.Path]::GetTempFileName()
         try {
@@ -817,21 +822,29 @@ function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment
         } finally { Remove-Item -LiteralPath $stagedAlignment }
         if (-not $Ticket.AlignmentHash) { $Config | Add-Member -NotePropertyName 'roomAlignmentSha256' -NotePropertyValue $alignmentHash }
     }
+    $Deployment.Step = 'stage-connection'
     if ($UsePassthrough -or $RequestMixedReality) { $Config | Add-Member -NotePropertyName 'questPassthrough' -NotePropertyValue $true }
     if ($RequestMixedReality) { $Config | Add-Member -NotePropertyName 'requestMixedReality' -NotePropertyValue $true }
     $stagedConfig = [IO.Path]::GetTempFileName()
     try {
+        $Deployment.Step = 'check-expiry-before-staging'
         if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired during deployment. Download a fresh connection file.' }
+        $Deployment.Step = 'stage-connection'
         [IO.File]::WriteAllText($stagedConfig, ($Config | ConvertTo-Json -Depth 4 -Compress))
         # The active config is the commit point. Its referenced alignment is already verified by hash.
         Publish-QuestFile $TargetSerial $stagedConfig "$remoteDirectory/vr-connection-$deploymentId.tmp" `
-            "$remoteDirectory/vr-connection.json" 'Player connection file' -BeforeActivation {
+            "$remoteDirectory/vr-connection.json" 'Player connection file' -ConnectionDeployment $Deployment -BeforeActivation {
+                $Deployment.Step = 'check-expiry-before-stop'
                 if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired before activation. Download a fresh connection file.' }
+                $Deployment.Step = 'stop-game'
                 & $AdbPath -s $TargetSerial shell am force-stop com.vrcommand.quest | Out-Null
                 if ($LASTEXITCODE -ne 0) { throw 'Quest app could not be stopped before activating configuration.' }
             }
+        $Deployment.Step = 'clean-local-connection'
     } finally { Remove-Item -LiteralPath $stagedConfig }
+    $Deployment.Step = 'check-expiry-before-launch'
     if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired before launch. Download a fresh connection file.' }
+    $Deployment.Step = 'launch-game'
     & $AdbPath -s $TargetSerial shell monkey -p com.vrcommand.quest -c android.intent.category.LAUNCHER 1 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Quest app launch failed.' }
 }
