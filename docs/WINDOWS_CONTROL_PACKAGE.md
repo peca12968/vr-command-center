@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-11 `VRCommand-ControlServer-0.31.119-room-enemy-edit-win-x64.zip` 為 53,014,011 bytes，SHA-256 `5c31c8fd898b3a05f771c9df8fbbbd4efaa4a699316d93407f71a87579d2c55c`。解壓核對 555 筆清單及 535 個發行檔案。五房合併場的分房敵軍策略依各房版本套用，版本已變更時保留草稿。 [逐房操作](LAYOUT.md#合併場分房敵軍策略) · [發行核對](../artifacts/venue-release-0.50.4-room-enemy-edit.json)
+
 2026-11-11 `VRCommand-ControlServer-0.31.118-mission-text-win-x64.zip` 為 53,011,585 bytes，SHA-256 `fdd0324239620985b0036c48c6e280d4600f4c48c9215ff41496474161759703`。解壓核對 555 筆清單及 535 個發行檔案。管理台保留未編輯的任務名稱和簡報原文，並在載入及保存後讀回時核對版本。 [任務版本操作](MISSION_VERSIONS.md) · [發行核對](../artifacts/venue-release-0.50.4-mission-text.json)
 
 2026-11-11 `VRCommand-ControlServer-0.31.117-room-observation-win-x64.zip` 為 53,010,627 bytes，SHA-256 `974c2557af4c09c2c88f9baaab3504a62706f8172479cd357a9af217dd0c81ca`。解壓核對 555 筆清單及 535 個發行檔案。合併場可從房卡啟用本房觀戰串流。 [房卡操作](WORLD_RECORDING.md#從房卡或全館收尾開啟)

@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-11 分房敵軍策略的並行編輯
+
+- 管理台 0.31.119 以場次概覽提供的本房序號送出策略。管理服務在原命令交易內核對。較新的本房修改、恢復沿用或全場策略會使原草稿過期，其他房的策略更新可以獨立完成。套用回覆未確認時，同一份命令可取回原接受序號。舊版 API 請求可省略新增的 `expectedPolicySequence`，沿用原行為。 [操作說明](LAYOUT.md#合併場分房敵軍策略)
+- 解壓 0.31.118 與實際 Chromium 重現同房較新的命令被舊草稿覆蓋，原送出得到 HTTP 200。0.31.119 同一流程得到 HTTP 409，管理資料及草稿仍保留。來源與套件均通過 9 項逐房編輯及 98 項全館操作瀏覽器檢查。錯誤回覆後以原請求內容重試，核對原接受序號。核心另核對重開後的序號、回條及房間範圍。 [舊版對照](../artifacts/room-enemy-edit-baseline-status.log) · [逐房瀏覽器](../artifacts/console-room-enemy-edit-package/checks.json) · [全館瀏覽器](../artifacts/console-room-enemy-edit-venue-package/checks.json)
+- Release 零警告，1,097 項核心、825 項套件 HTTP、111 項 Node、107 項管理包檢查通過。套件由 `d3f999c3` 發行，187 個來源檔雜湊相符，29 個既有檔案與 Git 只差換行。管理包測試 C／F 27 檔相符，既有 Windows 與 Quest 0.50.4 套件一致性通過。GitHub Actions job `130074231245` 因帳務或支出上限未啟動。 [管理包](WINDOWS_CONTROL_PACKAGE.md) · [發行核對](../artifacts/venue-release-0.50.4-room-enemy-edit.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42885960617)
+- Windows 解壓三包通過 386 項。第 2 房從 Chromium 送出帶版本的巡邏與開火命令，原保存格 157 確認套用。回放核對巡邏與射擊僅發生於第 2 房，恢復沿用後停止開火，第 1 房維持守備。五房獨立和合併各有 25 個同機 Windows 玩家端同時連線。六場共 903 格回放、50 份原戰績與伺服器確認、11 份 CSV 及雙封存。活動場次歸零，原生 C／F 218 檔相符。跨機、頭盔與廠商設備另待實測。 [Windows 驗收](../artifacts/server-package-checks/run-4e30695d11a34c17b8a1370819d1c299/checks.json) · [原畫格與序號](../artifacts/room-enemy-edit-native-validation.json)
+- 完整瀏覽器回歸仍有失敗。系統 Chrome 在舊版一次、新版兩次均未通過觀戰滾輪檢查。專案鎖定的 Chromium 通過滾輪，但完整流程後續未在五秒內取得任務列表故障測試所等待的請求，同套件單獨重跑任務讀取則通過 31 項。各次結果保留。 [舊包對照](../artifacts/room-enemy-edit-full-baseline.log) · [鎖定 Chromium 完整流程](../artifacts/room-enemy-edit-full-pinned.log) · [任務讀取專項](../artifacts/console-room-enemy-edit-mission-read-pinned/checks.json)
+
 ## 2026-11-11 任務文字與版本核對
 
 - 管理台 0.31.118 保留已載入名稱的前後空白及任務簡報的原始換行。修改時間或場地設定再儲存時，未編輯的文字沿用原值。載入及比對核對任務系列、識別與版號。保存已受理但讀回舊版時保留原請求，供操作員用同一筆請求確認。 [操作說明](MISSION_VERSIONS.md)
