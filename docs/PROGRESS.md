@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 即時環境與敵軍各自保留草稿
+
+- 0.31.119 的解壓包重現套用環境時會重設尚未送出的敵軍設定。0.31.120 分別保留環境與敵軍草稿，依設定版本套用。其他設定、名冊及可操作的階段變更不會使原草稿失效。全場敵軍版本包含分房策略變更，同一設定的舊稿被拒絕後仍可查看，按「載入目前設定」才取代。舊 API 場次序號繼續適用。 [操作與 API](ENVIRONMENT.md) · [舊版對照](../artifacts/setting-drafts-baseline.log) · [套件專項](../artifacts/console-setting-drafts-package/checks.json)
+- Release 零警告，1,100 項核心、28 項 Python、111 項 Node、107 項管理包、825 項 HTTP 通過。首輪 HTTP 的精確回應未列出新增的設定版本而失敗，測試來源 `9311c546` 改用原命令回條驗證兩個欄位，其他欄位仍精確相等。沿用 `8a9a23a9` 發行的同一套件重跑。187 個來源檔與發行記錄相符，其中 29 個既有檔案與 Git 只差換行。管理包 C／F 27 檔相符。Windows 與 Quest 0.50.4 的離線發行核對通過。兩個 GitHub Actions job 均因帳務或支出上限未啟動。 [首輪 HTTP](../artifacts/setting-drafts-http.log) · [新版 HTTP](../artifacts/setting-drafts-http-final.log) · [發行核對](../artifacts/venue-release-0.50.4-setting-drafts.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42890054210)
+- Windows 三包通過 396 項。獨立第 1 房用同一份場次概覽送出環境版本 10 與敵軍版本 1，接受序號 11、12。原保存格 228 觀察到序號 12，同時記錄暴風雨、夜晚、閃電與巡邏，另外四房的版本保持。合併場另驗天氣切換與第 2 房的策略套用、恢復及回放。兩種拓撲各 25 個同機玩家端同時連線，六場核對 1,009 格回放、50 份原戰績、11 份 CSV、原伺服器確認及雙封存。活動場次歸零，原生 C／F 218 檔相符。跨機、頭盔及廠商設備待實測。 [原生驗收](../artifacts/server-package-checks/run-a7677063b6994721b720491d408426f0/checks.json) · [原畫格及核對](../artifacts/setting-drafts-validation.json)
+- 解壓套件通過 10 項設定草稿、9 項分房策略專項與 885 項完整 Chromium 回歸。完整回歸保留八筆任務列表故障的逐筆送達證據。來源 `9311c546` 與套件 `8a9a23a9` 分別記錄，完整結果及日誌已核對雜湊。 [完整結果](../artifacts/console-setting-drafts-full/checks.json) · [瀏覽器驗收核對](../artifacts/setting-drafts-browser-validation.json)
+
 ## 2026-11-11 任務列表故障測試與完整回歸
 
 - 測試 `16c1c3b0` 在原五秒內等待確實攔截下一筆任務列表 GET，最多注入一次故障。若更新按鈕共用舊請求，測試可再觸發唯讀更新。各案例保留攔截及送達證據，原讀寫斷言和管理服務期限均維持。獨立對照確認舊請求扣住期間，手動更新未另發請求，釋放後可攔截新請求並送出 HTTP 503。原逾時當下的請求順序未取得。 [重疊對照](../artifacts/catalog-refresh-overlap-probe.log) · [任務讀取專項](../artifacts/console-catalog-fault-recovery/checks.json)
