@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 回放耗損與最終戰績一致
+
+- 管理包 0.31.116 讓逐格與最終戰績使用同一個生命值耗損規則。片段以起點前一格的生命值計算損失，保留原事件傷害和中彈次數。舊資料的零生命值超額耗損在讀取時修正。測試以原封存條件成功封存舊格式資料，原存檔的事件與統計內容均保留。 [片段戰績](WORLD_RECORDING.md#重看指定片段)
+- 舊版 0.31.115 收到剩 50 點時的 90 點事件，接受原戰鬥事件及世界畫格後，因最終戰績不符而拒絕封存。0.31.116 使用相同情境通過原 WebSocket 封存，片段只計 50 點耗損。首輪核心夾具的 200 點超出世界事件上限，已保留。兩次串流夾具分別補正建立場次的 201 回覆及新場次的幾何識別後通過。 [舊版串流對照](../artifacts/overkill-world-http-old-package-detail.log) · [新版套件串流](../artifacts/overkill-world-package-http.log)
+- Release 零警告，1,093 項核心、104 項世界串流、825 項 HTTP 及 107 項解壓管理包檢查通過。發行來源 `0b860a90`，186 個工作樹來源雜湊相符，其中 30 個既有檔案與 Git 只差換行。沿用 Windows 與 Quest 0.50.4 的發行一致性核對通過。GitHub Actions job `130049505543` 因帳務或支出上限未啟動。 [管理包](WINDOWS_CONTROL_PACKAGE.md) · [發行核對](../artifacts/venue-release-0.50.4-replay-loss.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42878887960)
+- Windows 0.50.4、啟動器 1.17 與解壓管理包的同機整合通過 421 項。獨立及合併各 25 席同時入場，六場共 1,509 格完整回放、212 筆傷害、50 份原戰績及伺服器確認、11 份 CSV 及雙封存。合併場第 3 房房控以 Chromium 從原中彈畫格標記第 181 至 244 格，該席顯示 1 次中彈、20 點耗損。全部測試程序已清理，原生 C／F 220 檔及管理包驗收 27 檔雜湊相符。跨機、頭盔和廠商硬體仍待驗收。 [Windows 驗收](../artifacts/server-package-checks/run-da066e9c00724d72934d281e6040381d/checks.json) · [片段畫面](../artifacts/server-package-checks/run-da066e9c00724d72934d281e6040381d/linked-room-03-clip-statistics.png)
+
 ## 2026-11-11 Windows 啟動器背景載入待開場次
 
 - 啟動器 1.17 在背景讀取單房清單。等候時暫停選房及啟動，視窗仍可關閉。成功時只保留同一實例中仍可用的原選取，失敗時清空清單。隔離的 WinForms 程序以實際管理服務及本機代理扣住清單回覆。1.16 在等候期間未通過訊息迴圈檢查。1.17 通過 55 項 Framework 與 51 項清單檢查，涵蓋原場次保留、503 後清除及回覆仍被扣住時關閉。 [新版驗收](../artifacts/server-catalog/run-6e05c627462f421cad7cc9775c6ef71f/checks.json) · [舊版對照](../artifacts/server-catalog-baseline-117-packaged/artifacts/server-catalog/run-34b572c5ebe449bc96269364ad004313/framework-proof.json)
