@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-10 Windows 管理包的場館 HTTPS
+
+- 啟動器讀取私人實例內的 `control-https.json` 與管理員提供的 PFX。Kestrel 在指定場館 IPv4 監聽 HTTPS，原管理 HTTP 留在 `127.0.0.1` 給同機遊戲伺服器。舊實例可照原方式啟動。HTTPS 模式拒絕外部 HTTP 設定，並忽略繼承的額外 Kestrel 端點。 [場館設定與套件](WINDOWS_CONTROL_PACKAGE.md#啟用場館-https)
+- Windows 實際解壓包含 552 筆清單、532 個發行檔案，管理服務舊流程通過 107 項。新 HTTPS 場在同一台 Windows 的區網 IPv4 通過 24 項，含六角色、只信任合成根憑證時驗證中繼鏈、七個拒絕啟動案例、區網 HTTP 拒絕、主控寫入與房控權限。
+- 同包接 Windows 0.50.0 原生伺服器及一個模擬玩家，最終 `run-899b3a2ae45c4bdabdbad007d34f8f7e` 退出碼 0，30 項通過。HTTPS 房控簽發票券及觀察原生場，房外觀察被拒。封存後第 16 格與即時畫格相同，雙封存尾端為 21 格、0 筆戰鬥事件，原玩家戰績與伺服器確認各一筆。兩個管理監聽器與原遊戲伺服器均已停止。 [原生報告](../artifacts/control-https-checks/run-899b3a2ae45c4bdabdbad007d34f8f7e/checks.json)
+- 原生首場 `run-d1be96bc8225412683f93f08c4626e3f` 用錯查詢路徑，收到 HTTP 405。次場 `run-349750783ec54af09f8656c841f6d013` 用開場時的公告驗證結束狀態而被拒。兩場失敗與原封存保持，修正驗證腳本後以第三場通過。
+- Release 零警告、1,053 項核心、768 項 HTTP、97 項世界串流、6 項管理管線、7 項封包邊界及 8 項房控預檢通過。功能來源 `e127ce0a1fd1c25485633eb73f51473ecc524b9b`。GitHub Actions job `129903015566` 因帳務或支出上限未啟動。正式憑證、六台工作站跨機、實體頭盔與廠商硬體仍待場館驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42837359749)
+
 ## 2026-11-10 場館主控與五房管理入口預檢
 
 - `check-venue-operator.py` 從指定工作站讀取管理網站的 HTTPS 入口，每次請求先核對信任鏈、站台名稱與管理員提供的葉憑證指紋，再檢查匿名拒絕、角色及房間。工具只用 GET，結果不含操作員金鑰、操作員 ID 或場次。 [操作方式](WINDOWS_CONTROL_PACKAGE.md#從房控電腦核對管理服務)
