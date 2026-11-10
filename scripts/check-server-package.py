@@ -629,6 +629,10 @@ def main():
                 status=read(report)
                 if 'linkMetrics' in client:
                     status.pop('linkMetrics',None)
+                release_log_hash=status.pop('playerLogSha256',None)
+                if windows_release_hash and 'final' in client and (release_log_hash is not None or 'linkMetrics' not in client):
+                    if release_log_hash!=control.sha(client['log']):
+                        raise RuntimeError('Player launcher exit does not identify the original release log')
                 if status.pop('playerManifestSha256',None)!=windows_release_hash:
                     raise RuntimeError('Player launcher exit differs from its original release manifest')
                 if child.returncode!=0 or status!={'status':'exited','processId':client['nativePid'],'exitCode':0}:
@@ -687,8 +691,8 @@ def main():
                         'serverLog':str(entry['work']/'server.log'),'worldJournal':str(world_journal),
                         'combatJournal':str(combat_journal),
                         'players':[{'address':address,'log':str(c['log']),
-                                    **({'launcherReport':str(c['launcherReport']),'linkMetrics':str(c['linkMetrics'])}
-                                       if 'linkMetrics' in c else {})} for c in owners]}
+                                    **({'launcherReport':str(c['launcherReport'])} if windows_release_hash or 'linkMetrics' in c else {}),
+                                    **({'linkMetrics':str(c['linkMetrics'])} if 'linkMetrics' in c else {})} for c in owners]}
                 preflight = (out/(entry['label']+'-lan-listener.ndjson'), out/(entry['label']+'-lan-probe.json')) if args.check_lan_preflight else None
                 if manifest_entry is not None and preflight is not None:
                     manifest_entry['udpSourcePreflights'] = [dict(zip(('listener', 'probe'), map(str, preflight), strict=True))]
@@ -787,6 +791,8 @@ def main():
         common = {'version': 1, 'mode': mode, 'topology': 'same-host', 'serverIps': [address],
                   **({'verifyPlayerSources': True} if args.check_venue_openxr and not args.check_venue_openxr_reconnect else {}),
                   **({'verifyReconnectHistory': True} if args.check_venue_openxr_reconnect else {})}
+        if args.windows_release_report:
+            common['venueReleaseReport']=str(args.windows_release_report)
         if args.check_venue_participation_gate:
             common['verifyParticipationBegin'] = True
         concurrent_seconds = args.venue_concurrent_roster_seconds
@@ -823,6 +829,17 @@ def main():
               and all(row['combatJournal']['events'] == row['combatSequence']
                       and row['combatJournal']['players'] == 5 * len(row['roomIds']) for row in summary['sessions']),
               label + ' original combat journals reproduce the sealed scores of all 25 seats')
+        if args.windows_release_report:
+            expected_seats=[{'roomId':room,'seat':seat} for room in range(1,6) for seat in range(1,6)]
+            check(summary['venueRelease']=={'reportSha256':control.sha(args.windows_release_report),
+                    'windows':{'playerManifestSha256':windows_release_hash,'seatsVerified':25}}
+                  and [seat for session in summary['sessions'] for seat in session['windowsReleaseSeats']]==expected_seats,
+                  label+' field release identifies the original 25 acknowledged Windows seats')
+            swapped=[dict(player) for player in evidence['windowsPlayers']]
+            swapped[0]['launcherReport'],swapped[1]['launcherReport']=swapped[1]['launcherReport'],swapped[0]['launcherReport']
+            rejected=run(dict(evidence,windowsPlayers=swapped))
+            check(rejected.returncode==1 and 'original' in rejected.stderr and 'log' in rejected.stderr,
+                  label+' rejects an authentic launcher report from another seat of the same release')
         if args.check_venue_link_metrics:
             links = [row for session in summary['sessions'] for row in session['windowsLinkMetrics']]
             check(summary['windowsLinkMetricsVerified']==len(links)==25 and all(

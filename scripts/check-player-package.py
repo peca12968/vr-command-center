@@ -47,6 +47,7 @@ def check_openxr_unavailable(folder, directory, base, release=None, manifest_has
             or connection['state'] != 'OpenXRUnavailable' or connection['exited'] is not True
             or connection['processId'] != launch['processId']
             or launch.get('playerManifestSha256') != manifest_hash
+            or (manifest_hash is not None and launch.get('playerLogSha256') != package.digest(log))
             or [line for line in messages if line.startswith('VR_OPENXR_STARTUP ')]
             != ['VR_OPENXR_STARTUP status=requested', 'VR_OPENXR_STARTUP status=unavailable']
             or any(line.startswith('VR_NETWORK_STARTED ') for line in messages)):

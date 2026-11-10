@@ -1099,6 +1099,99 @@ class FieldResultsTests(unittest.TestCase):
         manifest['questDeployments'] = {'releaseReport': 'release.json', 'reports': ['deployment.json']}
         return report
 
+    def add_shared_release(self, root, manifest, quest_per_room):
+        if quest_per_room:
+            deployment = self.quest_deployment_evidence(root, manifest, quest_per_room)
+            (root / 'deployment.json').write_text(json.dumps(deployment), encoding='utf-8')
+            manifest['questDeployments'].pop('releaseReport')
+        path = root / 'release.json'
+        release = json.loads(path.read_bytes()) if path.exists() else {'verified': True, 'scope': 'offline-package-consistency'}
+        release['windows'] = {'playerManifestSha256': 'bc' * 32}
+        path.write_text(json.dumps(release), encoding='utf-8-sig')
+        manifest['venueReleaseReport'] = path.name
+        for entry in manifest['sessions']:
+            for seat in entry['players']:
+                if 'logcatPid' in seat:
+                    continue
+                log = root / seat['log']
+                connection, _ = field.client_result(field.content(log))
+                launch = log.with_suffix('.launch.json')
+                value = {'status': 'exited', 'exitCode': 0, 'processId': 9000 + int(connection),
+                         'playerManifestSha256': 'bc' * 32, 'playerLogSha256': hashlib.sha256(log.read_bytes()).hexdigest()}
+                launch.write_text(json.dumps(value), encoding='utf-8')
+                seat['launcherReport'] = launch.name
+        return path
+
+    def test_shared_venue_release_accepts_both_topologies_and_original_mixed_seats(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, _ = venue_fixture(root, mode, remote=True, quest_per_room=2)
+                release = self.add_shared_release(root, manifest, 2)
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                split = field.verify_venue(path)
+                self.assertEqual(split['venueRelease'], {'reportSha256': hashlib.sha256(release.read_bytes()).hexdigest(),
+                    'windows': {'playerManifestSha256': 'bc' * 32, 'seatsVerified': 15},
+                    'quest': {'versionCode': 64, 'apkSha256': '2a' * 32, 'reportsVerified': 1, 'seatsVerified': 10}})
+                self.assertEqual([seat for session in split['sessions'] for seat in session['windowsReleaseSeats']],
+                                 [{'roomId': room, 'seat': seat} for room in range(1, 6) for seat in range(1, 4)])
+                self.assertNotIn('windowsLinkMetricsVerified', split)
+                self.assertFalse(split['physicalHostsVerified'])
+                path.write_text(json.dumps(self.pack_venue(root, manifest)), encoding='utf-8')
+                self.assertEqual(field.verify_venue(path), split)
+
+    def test_shared_venue_release_rejects_swapped_or_incomplete_proofs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, _ = venue_fixture(root, 'Independent', remote=True, quest_per_room=2)
+            self.add_shared_release(root, manifest, 2)
+            swapped, missing_windows, missing_quest, duplicate_release = (deepcopy(manifest) for _ in range(4))
+            first, second = swapped['sessions'][0]['players'][:2]
+            first['launcherReport'], second['launcherReport'] = second['launcherReport'], first['launcherReport']
+            missing_windows['sessions'][0]['players'][0].pop('launcherReport')
+            missing_quest.pop('questDeployments')
+            duplicate_release['questDeployments']['releaseReport'] = 'other-release.json'
+            for candidate, message in [(swapped, 'original player log bytes'), (missing_windows, 'every Windows seat'),
+                                       (missing_quest, 'every Quest seat'), (duplicate_release, 'exactly one release report')]:
+                with self.subTest(message=message):
+                    path.write_text(json.dumps(candidate), encoding='utf-8')
+                    with self.assertRaisesRegex(field.EvidenceError, message):
+                        field.verify_venue(path)
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            launch_path = root / manifest['sessions'][0]['players'][0]['launcherReport']
+            launch = json.loads(launch_path.read_bytes())
+            launch['playerManifestSha256'] = '11' * 32
+            launch_path.write_text(json.dumps(launch), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'original venue release manifest'):
+                field.verify_venue(path)
+            release_path = root / manifest['venueReleaseReport']
+            release = json.loads(release_path.read_bytes())
+            release['quest']['sha256'] = '35' * 32
+            release_path.write_text(json.dumps(release), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'differs from the original release APK'):
+                field.verify_venue(path)
+
+    def test_shared_venue_release_can_recheck_original_link_metrics_proof(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, _ = venue_fixture(root, 'Linked')
+            self.add_shared_release(root, manifest, 0)
+            self.add_windows_links(root, manifest)
+            for entry in manifest['sessions']:
+                for seat in entry['players']:
+                    launch_path = root / seat['launcherReport']
+                    launch = json.loads(launch_path.read_bytes())
+                    launch['playerManifestSha256'] = 'bc' * 32
+                    launch_path.write_text(json.dumps(launch), encoding='utf-8')
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            result = field.verify_venue(path)
+            self.assertEqual(result['windowsLinkMetricsVerified'], 25)
+            self.assertEqual(result['venueRelease']['windows']['seatsVerified'], 25)
+            manifest['sessions'][0]['players'][0].pop('linkMetrics')
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'original player log bytes'):
+                field.verify_venue(path)
+
     def test_quest_deployments_bind_original_release_and_retried_seats_to_both_venue_modes(self):
         for mode, quest_per_room in (('Independent', 2), ('Linked', 5)):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:

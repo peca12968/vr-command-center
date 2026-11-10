@@ -964,27 +964,27 @@ def venue_windows_logs(rows, expected, evidence_path):
     require(type(rows) is list and 1 <= len(rows) <= 25, 'Provide one to 25 original Windows logs in windowsPlayers')
     groups = {}
     for row in rows:
-        address, path, link = windows_log_paths(row, evidence_path)
+        address, path, launch, metrics = windows_log_paths(row, evidence_path)
         _, result = client_result(content(path))
         session_id = identity(result['sessionId'])
         require(session_id in expected, 'Windows log belongs to a different venue session')
         group = groups.setdefault(session_id, [])
-        group.append((address, path, link))
+        group.append((address, path, launch, metrics))
         require(len(group) <= len(expected[session_id]['roomIds']) * 5, 'Too many Windows logs for an original venue session')
     return groups
 
 
 def windows_log_paths(row, evidence_path):
     base = {'address', 'log'}
-    extras = {'launcherReport', 'linkMetrics'}
-    require(type(row) is dict and set(row) in (base, base | extras),
-            'A venue Windows log needs an address and log path; provide both original link evidence files if used')
-    link = (evidence_path(row['launcherReport']), evidence_path(row['linkMetrics'])) if 'linkMetrics' in row else None
-    return ipv4(row['address']), evidence_path(row['log']), link
+    launcher = base | {'launcherReport'}
+    require(type(row) is dict and set(row) in (base, launcher, launcher | {'linkMetrics'}),
+            'A venue Windows log needs an address and log path; link metrics require the original launcher report')
+    launch = evidence_path(row['launcherReport']) if 'launcherReport' in row else None
+    metrics = evidence_path(row['linkMetrics']) if 'linkMetrics' in row else None
+    return ipv4(row['address']), evidence_path(row['log']), launch, metrics
 
 
-def verify_windows_link(raw_log, connection, launch_path, metrics_path):
-    launch = read_json(content(launch_path))
+def verify_windows_link(log_hash, connection, launch, metrics_path):
     with metrics_path.open('rb') as source:
         raw_metrics = source.read(64 * 1024 + 1)
     require(0 < len(raw_metrics) <= 64 * 1024, 'Windows link report exceeds its file limit')
@@ -992,7 +992,7 @@ def verify_windows_link(raw_log, connection, launch_path, metrics_path):
     proof = launch.get('linkMetrics')
     require(launch.get('status') == 'exited' and integer(launch.get('exitCode'), 0, 0) == 0
             and type(proof) is dict and set(proof) == {'logSha256', 'metricsSha256'}
-            and proof['logSha256'] == hashlib.sha256(raw_log).hexdigest()
+            and proof['logSha256'] == log_hash
             and proof['metricsSha256'] == hashlib.sha256(raw_metrics).hexdigest(),
             'Windows launcher did not record these original link and player log bytes')
     require(integer(metrics.get('version'), 1, 1) and metrics.get('complete') is True and metrics.get('reason') == 'Limit'
@@ -1088,10 +1088,12 @@ def quest_capture_log(address, path, pid, seat, size, digest):
     return address, raw.decode('utf-8-sig'), pid, seat
 
 
-def read_quest_deployments(spec, mode, evidence_path):
-    require(type(spec) is dict and set(spec) == {'releaseReport', 'reports'},
-            'Provide the original Quest release report and deployment reports')
-    release = read_quest_json(evidence_path(spec['releaseReport']))
+def read_quest_deployments(spec, mode, evidence_path, release=None):
+    expected = {'releaseReport', 'reports'} if release is None else {'reports'}
+    require(type(spec) is dict and set(spec) == expected,
+            'Provide the original Quest deployment reports and exactly one release report for the selected mode')
+    if release is None:
+        release = read_quest_json(evidence_path(spec['releaseReport']))
     quest = release.get('quest')
     require(release.get('verified') is True and release.get('scope') == 'offline-package-consistency'
             and type(quest) is dict and quest.get('applicationId') == 'com.vrcommand.quest'
@@ -1132,6 +1134,16 @@ def read_quest_deployments(spec, mode, evidence_path):
     return deployed, {'versionCode': version, 'apkSha256': digest, 'reportsVerified': len(reports), 'seatsVerified': len(deployed)}
 
 
+def read_venue_release(path):
+    with path.open('rb') as file:
+        raw = file.read(8193)
+    require(0 < len(raw) <= 8192, 'Venue release report exceeds its file limit')
+    release = read_json(raw.decode('utf-8-sig'))
+    require(type(release) is dict and release.get('verified') is True and release.get('scope') == 'offline-package-consistency',
+            'Provide a verified offline venue release report')
+    return release, hashlib.sha256(raw).hexdigest()
+
+
 def verify_venue(manifest_path):
     manifest_path = manifest_path.resolve(strict=True)
     manifest = read_json(content(manifest_path))
@@ -1150,6 +1162,11 @@ def verify_venue(manifest_path):
         require(path not in seen_paths, 'Evidence paths must be distinct across the venue')
         seen_paths.add(path)
         return path
+
+    release, release_hash = (read_venue_release(evidence_path(manifest['venueReleaseReport']))
+                             if 'venueReleaseReport' in manifest else (None, None))
+    windows_release = release.get('windows') if release is not None else None
+    windows_hash = windows_release.get('playerManifestSha256') if type(windows_release) is dict else None
 
     packed = 'venueBundle' in manifest
     require(packed != ('closure' in manifest), 'Provide either venueBundle or the original closure and per-session ZIPs')
@@ -1247,7 +1264,7 @@ def verify_venue(manifest_path):
     quest_deployments, deployment_summary = None, None
     if 'questDeployments' in manifest:
         require(topology == 'direct-lan', 'Quest deployment evidence requires direct LAN evidence')
-        quest_deployments, deployment_summary = read_quest_deployments(manifest['questDeployments'], mode, evidence_path)
+        quest_deployments, deployment_summary = read_quest_deployments(manifest['questDeployments'], mode, evidence_path, release)
 
     rooms, summaries = {}, []
     quest_players, windows_players, windows_link_reports = 0, 0, 0
@@ -1325,27 +1342,45 @@ def verify_venue(manifest_path):
         for player in players:
             if 'logcatPid' in player:
                 require(not capture_supplied, 'Use the Quest capture batches or manual Quest logs, not both')
-                require('linkMetrics' not in player and 'launcherReport' not in player, 'Windows link evidence requires a Windows player log')
+                require('linkMetrics' not in player and 'launcherReport' not in player, 'Windows launcher evidence requires a Windows player log')
                 quest_logs.append((ipv4(player['address']), evidence_path(player['log']), integer(player['logcatPid'], 1, 2**31 - 1)))
             else:
                 logs.append(windows_log_paths(player, evidence_path))
         windows_players += len(logs)
+        if release is not None and logs:
+            require(type(windows_hash) is str and re.fullmatch(r'[0-9a-f]{64}', windows_hash),
+                    'Venue release report lacks a valid Windows player manifest digest')
+            require(all(launch is not None for _, _, launch, _ in logs), 'Release evidence requires the launcher report for every Windows seat')
+        if release is not None and (quest_logs or captured):
+            require(deployment_summary is not None, 'Release evidence requires original deployments for every Quest seat')
         link_rows = []
+        release_seats = []
         owners = {player['id']: player for player in session['players']}
 
         def windows_logs():
-            for address, path, link in logs:
-                if link is None:
+            for address, path, launch_path, metrics_path in logs:
+                if launch_path is None:
                     yield address, content(path)
                     continue
+                require(release is not None or metrics_path is not None, 'A Windows launcher report requires venue release or link evidence')
                 with path.open('rb') as source:
                     raw_log = limited_read(source)
                 log = raw_log.decode('utf-8-sig')
+                log_hash = hashlib.sha256(raw_log).hexdigest()
+                launch = read_json(content(launch_path))
                 connection, result = client_result(log)
                 owner = owners.get(result['playerId'])
-                require(owner is not None, 'Windows link report belongs to a different session player')
-                link_rows.append({'roomId': owner['roomId'], 'seat': integer(owner['seat'], 0, 4) + 1,
-                                  **verify_windows_link(raw_log, connection, *link)})
+                require(owner is not None, 'Windows launcher evidence belongs to a different session player')
+                seat = {'roomId': owner['roomId'], 'seat': integer(owner['seat'], 0, 4) + 1}
+                if metrics_path is not None:
+                    link_rows.append({**seat, **verify_windows_link(log_hash, connection, launch, metrics_path)})
+                if release is not None:
+                    require(launch.get('status') == 'exited' and integer(launch.get('exitCode'), 0, 0) == 0
+                            and integer(launch.get('processId'), 1, 2**31 - 1) and launch.get('playerManifestSha256') == windows_hash,
+                            'Windows launcher did not exit with the original venue release manifest')
+                    require(launch.get('playerLogSha256') == log_hash if 'playerLogSha256' in launch else metrics_path is not None,
+                            'Windows release evidence does not match the original player log bytes')
+                    release_seats.append(seat)
                 yield address, log
         preflight_paths = preflight_pair(entry['udpPreflight']) if preflights else None
         source_paths = None
@@ -1392,6 +1427,7 @@ def verify_venue(manifest_path):
                           **({'playerSources': report['playerSources']} if verify_player_sources else {}),
                           **({'reconnectHistory': report['reconnectHistory']} if verify_reconnect_history else {}),
                           **({'windowsLinkMetrics': sorted(link_rows, key=lambda row: (row['roomId'], row['seat']))} if link_rows else {}),
+                          **({'windowsReleaseSeats': sorted(release_seats, key=lambda row: (row['roomId'], row['seat']))} if release_seats else {}),
                           **({'experienceMode': experience} if check_alignments else {}),
                           **({'roomAlignments': report['roomAlignments']} if alignments is not None else {})})
 
@@ -1425,6 +1461,9 @@ def verify_venue(manifest_path):
             **({'questLogcatPlayers': quest_players} if quest_players else {}),
             **({'questCaptureBatchesVerified': capture_batches, 'questCaptureSeatsVerified': quest_players} if capture_supplied else {}),
             **({'questDeployment': deployment_summary} if deployment_summary is not None else {}),
+            **({'venueRelease': {'reportSha256': release_hash,
+                **({'windows': {'playerManifestSha256': windows_hash, 'seatsVerified': windows_players}} if windows_players else {}),
+                **({'quest': deployment_summary} if deployment_summary is not None else {})}} if release is not None else {}),
             **({'windowsLinkMetricsVerified': windows_link_reports} if windows_link_reports else {}),
             **({'udpPreflightsVerified': len(exchanges)} if preflights else {}),
             **({'udpSourcePreflightsVerified': len(exchanges)} if source_preflights else {}),

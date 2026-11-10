@@ -151,7 +151,17 @@ internal static class PlayerLauncher
         var value = new Dictionary<string, object> { { "status", status } };
         if (child != null) value.Add("processId", child.Id);
         if (exited) value.Add("exitCode", child.ExitCode);
-        if (linkMetrics != null) value.Add("linkMetrics", LinkEvidence(linkMetrics, log));
+        if (exited && log != null && (linkMetrics != null || releaseManifestHash != null))
+        {
+            var logHash = EvidenceHash(log, 16 * 1024 * 1024);
+            if (releaseManifestHash != null) value.Add("playerLogSha256", logHash);
+            if (linkMetrics != null)
+            {
+                var metricsHash = EvidenceHash(linkMetrics, 64 * 1024);
+                value.Add("linkMetrics", metricsHash != null && logHash != null
+                    ? new { metricsSha256 = metricsHash, logSha256 = logHash } : null);
+            }
+        }
         if (releaseManifestHash != null) value.Add("playerManifestSha256", releaseManifestHash);
         Report(value);
     }
@@ -169,18 +179,12 @@ internal static class PlayerLauncher
     }
     private static string EvidenceHash(string path, long limit)
     {
-        if (!File.Exists(path)) return null;
-        PlainPath(path);
-        using (var file = File.OpenRead(path))
-            return file.Length > 0 && file.Length <= limit ? Hash(file) : null;
-    }
-    private static object LinkEvidence(string metrics, string log)
-    {
         try
         {
-            var metricsHash = EvidenceHash(metrics, 64 * 1024);
-            var logHash = EvidenceHash(log, 16 * 1024 * 1024);
-            if (metricsHash != null && logHash != null) return new { metricsSha256 = metricsHash, logSha256 = logHash };
+            if (!File.Exists(path)) return null;
+            PlainPath(path);
+            using (var file = File.OpenRead(path))
+                return file.Length > 0 && file.Length <= limit ? Hash(file) : null;
         }
         catch (IOException) { }
         catch (UnauthorizedAccessException) { }

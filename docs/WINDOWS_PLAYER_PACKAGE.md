@@ -92,10 +92,12 @@ Windows 建置啟用 Touch 與 Unity 的 HTC Vive Controller 兩個 OpenXR 互�
 ```powershell
 & .\Launch-Player.exe --verify --release-report 'C:\Delivery\venue-release.json' --report 'C:\Private\package-check.json'
 & .\Launch-Player.exe --config 'C:\Private\my-seat.json' --launch --openxr --wait `
-  --release-report 'C:\Delivery\venue-release.json' --report 'C:\Private\launch-report.json'
+  --release-report 'C:\Delivery\venue-release.json' --log 'C:\Private\player.log' --report 'C:\Private\launch-report.json'
 ```
 
 啟動器先以發行報告比對原清單的 SHA-256，再按該清單逐檔核對本機玩家包。清單屬於不同發行批次、檔案被更換或資料夾內有清單外檔案時，會以退出碼 1 停在啟動前。連線檔、發行報告及本次程序報告均放在解壓目錄外。成功時，程序報告保留核對過的 `playerManifestSha256`，可搭配原入場日誌留存。選用此模式須使用含 Windows 清單雜湊的新報告。雜湊依賴主控交付的原報告，發行者身分與實體頭盔由現場核對。 [產生場館發行報告](EXTERNAL_CLIENTS.md#發送前離線核對交付套件)
+
+啟動器 1.7 搭配 `--wait`、`--log`、`--report` 時，退出報告也會保存原玩家日誌的 SHA-256。若日誌缺失、為空、無法讀取或超過 16 MiB，欄位為空值。封存驗收可直接配對原日誌及退出報告。 [全館封存操作](EXTERNAL_CLIENTS.md#核對全館共用的發行報告)
 
 #### 本機追蹤整合驗證
 

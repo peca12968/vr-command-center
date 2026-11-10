@@ -305,6 +305,7 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `udpPreflightBatch` 或 `udpPreflightBatches` | 選用。單份原 Quest 批次報告路徑，或 1 至 25 份原報告路徑的陣列。可搭配逐場 `udpSourcePreflights` |
 | `questCaptures` | 選用。填原 Quest 網路計畫及 1 至 25 份完整日誌擷取報告。可與 UDP 預檢報告一併使用 |
 | `questDeployments` | 選用。填原離線發行報告及 1 至 25 份正式 Quest 部署報告，核對原入場及 APK 雜湊 |
+| `venueReleaseReport` | 選用。核對全館所有 Windows 與 Quest 席位共用的原發行報告。Quest 的 `questDeployments` 此時只填 `reports` |
 | `sessions` | 獨立模式填五場，合併模式填一場 |
 | `sessions[].launcherReport`、`serverLog` | 各場啟動器終止報告及伺服器日誌的路徑 |
 | `sessions[].evidenceZip` | 使用 `closure` 時填各場原 ZIP。使用 `venueBundle` 時省略 |
@@ -444,6 +445,24 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json
 ```
 
 `verify-field-results.py --venue-manifest` 會比對檔案雜湊、原玩家程序與伺服器確認戰績的最後一條連線，並檢查每份都有 30 筆已結案樣本。若量測後重連，先前連線的量測無法與最後戰績配對。成功摘要列出每席回覆、逾時、中斷及回覆的 p95；全數未回覆時 p95 為空值。量測反映遊戲訊息往返與排程，跨機網路容量仍需現場驗收。
+
+### 核對全館共用的發行報告
+
+把同一份 `venue-release.json` 用於 Windows 啟動及 Quest 部署。Windows 啟動器 1.7 加上 `--release-report`、`--wait`、`--log` 和 `--report`，即可保留原日誌與退出報告。既有 1.6 場次可提供同次已完成的原連線量測檔，沿用其日誌雜湊。 [Windows 啟動操作](WINDOWS_PLAYER_PACKAGE.md#依場館發行報告核對玩家包)
+
+五房封存清單頂層加入 `venueReleaseReport`。每個 Windows 席位在 `windowsPlayers` 或 `sessions[].players` 加入 `launcherReport`；需要驗證原量測時再加 `linkMetrics`。Quest 席位照常提供原 logcat，並把各批原部署報告放入 `questDeployments.reports`，共用頂層的發行報告。全館只有 Windows 席位時可省略 `questDeployments`。
+
+```json
+{
+  "venueReleaseReport": "venue-release.json",
+  "windowsPlayers": [
+    {"address":"192.168.1.20","log":"pc-01.log","launcherReport":"pc-01-launch.json"}
+  ],
+  "questDeployments": {"reports": ["quest-a/deployment-report.json"]}
+}
+```
+
+同一個 `verify-field-results.py --venue-manifest` 指令會核對所有席位。Windows 核對退出報告的清單雜湊、原日誌及伺服器確認的最終戰績。Quest 核對共用報告的 APK 雜湊、原部署、入場及戰績。缺少任何席位的原證據、換用其他席位的報告或使用不同發行包時，整批拒絕。成功摘要的 `venueRelease` 列出發行報告雜湊及各平台核對席位數。僅核對 Quest 時仍可沿用原有的 `questDeployments.releaseReport` 格式。實體設備與主機身分依現場驗收。
 
 ## 同機 UDP 流量量測
 
