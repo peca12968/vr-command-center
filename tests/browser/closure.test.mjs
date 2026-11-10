@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 const code = await readFile(new URL('../../src/VrCommand.Api/wwwroot/console/closure-ui.js', import.meta.url), 'utf8');
-const { closureView } = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
+const { closureView, debriefReceiptPlayers } = await import('data:text/javascript;base64,' + Buffer.from(code).toString('base64'));
 const session = { id: 'session', sequence: 20, state: 'Ended', roomIds: [1], mission: { definition: { durationSeconds: 600 } }, combatStream: { streamId: 'stream', origin: 'Simulation', acceptedSequence: 0, sealed: true, missionClockVersion: 1 } };
 const stats = { sessionId: session.id, throughSequence: 20, pendingTelemetry: false, origin: null };
 const world = { header: { schemaVersion: 1, sessionId: session.id, streamId: 'stream', origin: 'Simulation', roomIds: [1], missionClockVersion: 1, missionDurationSeconds: 600 }, acceptedSequence: 2, complete: true };
@@ -43,4 +43,20 @@ test('Saved counts are independent of sealing and disappear when their own sourc
   assert.equal(view(pending, { ...stats, throughSequence: 19 }, partial).combatCount, null);
   assert.equal(view(pending, stats, partial, 'Unavailable').worldCount, null);
   assert.equal(view(pending, stats, { ...partial, header: { ...world.header, streamId: 'other' } }).worldCount, null);
+});
+
+test('Receipt rows require exact sealed boundaries and the original visible admissions', () => {
+  const players = [{ id: 'player-1', admissionId: 'admission-1', roomId: 1, name: 'One' },
+    { id: 'player-2', admissionId: 'admission-2', roomId: 2, name: 'Two' }];
+  const linked = { ...session, players };
+  const room = { role: 'RoomController', roomId: 1 };
+  const row = { ...players[0], playerId: players[0].id, acknowledged: true };
+  const payload = { streamId: 'stream', throughSequence: 20, finalStreamSequence: 0, worldSequence: 2, players: [row] };
+  const read = change => debriefReceiptPlayers(linked, room, { ...world, debriefReceipts: { ...payload, ...change } });
+  assert.deepEqual(read({}), [row]);
+  for (const change of [{ streamId: 'other' }, { throughSequence: 21 }, { finalStreamSequence: 1 }, { worldSequence: 3 },
+    { players: [] }, { players: [row, row] }, { players: [{ ...row, roomId: 2 }] },
+    { players: [{ ...row, admissionId: 'revoked' }] }, { players: [{ ...row, acknowledged: 'true' }] }]) {
+    assert.equal(read(change), null);
+  }
 });

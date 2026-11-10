@@ -132,6 +132,37 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         info = request(route)
         check(info["header"]["environmentVersion"] == 1, "New world source explicitly versions its deterministic environment presentation")
         check(info["complete"] and info["acceptedSequence"] == result["frames"] == 44, "All ordered source frames durably seal after combat confirmation")
+        session_route = "/api/sessions/" + session
+        terminal = request(session_route)
+        statistics_before_receipts = request(session_route + "/statistics")
+        receipt_route = session_route + "/debrief-receipts"
+        receipts_world = route + "?includeDebriefReceipts=true"
+        unconfirmed = request(receipts_world)["debriefReceipts"]
+        receipt_rows = unconfirmed["players"]
+        check(receipt_rows and not any(row["acknowledged"] for row in receipt_rows)
+              and "debriefReceipts" not in info, "A sealed recording without receipts keeps every terminal admission unconfirmed")
+        batch = {key: unconfirmed[key] for key in ("streamId", "throughSequence", "finalStreamSequence", "worldSequence")}
+        batch["players"] = [{key: receipt_rows[0][key] for key in ("playerId", "admissionId", "roomId")}]
+        request(receipt_route, "Master", 403, "POST", batch)
+        request(receipt_route, "Room5", 403, "POST", batch)
+        request(receipts_world, "Room1", 403)
+        request(receipts_world, "GameServer", 403)
+        check(True, "Debrief receipt writes require the game-server identity and reads preserve room authorization")
+        for key in ("throughSequence", "finalStreamSequence", "worldSequence"):
+            request(receipt_route, "GameServer", 409, "POST", {**batch, key: batch[key] + 1})
+        request(receipt_route, "GameServer", 409, "POST", {**batch, "streamId": str(uuid4())})
+        request(receipt_route, "GameServer", 400, "POST", {**batch, "players": batch["players"] * 2})
+        request(receipt_route, "GameServer", 409, "POST", {**batch, "players": [
+            *batch["players"], {**batch["players"][0], "admissionId": str(uuid4())}]})
+        check(request(receipts_world)["debriefReceipts"] == unconfirmed,
+              "Wrong sealed boundaries and mixed invalid admission batches cannot record partial receipts")
+        request(receipt_route, "GameServer", 204, "POST", batch)
+        confirmed = request(receipts_world, "Room5")["debriefReceipts"]
+        request(receipt_route, "GameServer", 204, "POST", batch)
+        check(confirmed["players"] == [{**row, "acknowledged": index == 0} for index, row in enumerate(receipt_rows)]
+              and request(receipts_world)["debriefReceipts"] == confirmed and request(route) == info
+              and request(session_route) == terminal and request(session_route + "/statistics") == statistics_before_receipts,
+              "Original admission receipt and idempotent retry preserve exact archive, session and statistics boundaries")
         endpoint_route = "/api/sessions/" + session + "/connection-endpoint"
         endpoint_draft = {"version": 1, "streamId": info["header"]["streamId"], "address": "127.0.0.1", "port": 17777}
         request(endpoint_route, "Room1", 403)
@@ -492,6 +523,7 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         info["header"]["environmentVersion"] = 0
         process = start()
         check(request(route) == info, "SQLite restart restores recording identity, cursor, time and completion")
+        check(request(receipts_world)["debriefReceipts"] == confirmed, "SQLite restart retains the original debrief receipt")
         check(request(exact_route, "Room5") == exact, "The exact event frame and its statistics remain identical after restart")
         check(request(trace_query, "Room5") == expected_trace, "Restart reconstructs shot report links from the existing persisted session")
         check(request(f"{search}?throughFrame={boundary}&roomId=5&kind=PlayerDamaged", "Room5") == page,

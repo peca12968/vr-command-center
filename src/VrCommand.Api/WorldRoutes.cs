@@ -13,7 +13,23 @@ public static class WorldRoutes
     public static void MapWorldRoutes(this WebApplication app)
     {
         app.MapGet("/api/world-recordings", (WorldRecordings store, HttpContext context) => Results.Json(store.List(Actor(context)), WorldJson.Options));
-        app.MapGet("/api/sessions/{id:guid}/world", (Guid id, WorldRecordings store, HttpContext context) => Results.Json(store.Info(id, Actor(context)), WorldJson.Options));
+        app.MapGet("/api/sessions/{id:guid}/world", (Guid id, bool? includeDebriefReceipts, WorldRecordings store, HttpContext context) =>
+        {
+            var actor = Actor(context);
+            if (includeDebriefReceipts != true) return Results.Json(store.Info(id, actor), WorldJson.Options);
+            context.Response.Headers.CacheControl = "no-store";
+            return Results.Json(store.ReadWorldWithDebriefReceipts(id, actor), WorldJson.Options);
+        });
+        app.MapPost("/api/sessions/{id:guid}/debrief-receipts", async (Guid id, WorldRecordings store, HttpContext context) =>
+        {
+            var actor = Actor(context);
+            if (actor.Role != OperatorRole.GameServer)
+                throw new AccessDeniedException("Only the original game server can report debrief receipts.");
+            var batch = await DeploymentJson.Read<DebriefReceiptBatch>(context.Request, 4096,
+                "Provide the sealed boundaries and original admissions.", context.RequestAborted, completeFile: true);
+            store.PublishDebriefReceipts(id, batch, actor);
+            return Results.NoContent();
+        });
         app.MapGet("/api/sessions/{id:guid}/readiness", (Guid id, WorldRecordings store, HttpContext context) => store.Readiness(id, Actor(context)));
         app.MapPost("/api/venue/tracked-readiness", async (WorldRecordings store, HttpContext context) =>
         {

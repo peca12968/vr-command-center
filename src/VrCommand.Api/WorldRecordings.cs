@@ -22,7 +22,11 @@ public static class WorldJson
     }
 }
 
-public record WorldRecordingInfo(WorldRecordingHeader Header, long AcceptedSequence, long DurationMilliseconds, bool Complete, DateTimeOffset UpdatedAtUtc, string MissionName, DateTimeOffset? CapturedAtUtc);
+public record WorldRecordingInfo(WorldRecordingHeader Header, long AcceptedSequence, long DurationMilliseconds, bool Complete, DateTimeOffset UpdatedAtUtc, string MissionName, DateTimeOffset? CapturedAtUtc)
+{
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DebriefReceiptView? DebriefReceipts { get; init; }
+}
 public record WorldFrameView(WorldRecordingPacket Packet, PlayerStatistics[] Statistics);
 
 // Indexed, append-only frames are read on demand; startup never loads an entire world recording.
@@ -72,6 +76,9 @@ public sealed partial class WorldRecordings : IDisposable
                   owner TEXT NOT NULL, body TEXT NOT NULL, created TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS managed_connection_endpoints (
                   session TEXT PRIMARY KEY REFERENCES connection_endpoints(session));
+                CREATE TABLE IF NOT EXISTS debrief_receipts (
+                  session TEXT NOT NULL REFERENCES recordings(session), admission TEXT NOT NULL,
+                  PRIMARY KEY(session, admission));
                 PRAGMA user_version=1;
                 """);
             setup.ExecuteNonQuery();

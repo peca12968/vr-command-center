@@ -6,6 +6,7 @@ module.exports = async ({ context, api, tokens, base, mission, screenshots, chec
   const sessions = [];
   for (const room of rooms) {
     const created = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [room.id] }, 'Master', 201);
+    await api(`/sessions/${created.id}/players`, 'POST', { playerId: randomUUID(), name: 'Closure receipt fixture', roomId: room.id, headset: 'Quest3' });
     await api(`/sessions/${created.id}/combat-stream`, 'POST', { streamId: randomUUID(), origin: 'Simulation', missionClockVersion: 1 }, 'GameServer');
     await api(`/sessions/${created.id}/commands`, 'POST', { commandId: randomUUID(), action: 'End' });
     await api(`/sessions/${created.id}/combat-stream/seal`, 'POST', { streamId: (await api(`/sessions/${created.id}`)).combatStream.streamId, finalSequence: 0 }, 'GameServer');
@@ -18,14 +19,20 @@ module.exports = async ({ context, api, tokens, base, mission, screenshots, chec
   const page = await context.newPage();
   const completed = () => page.locator('#closure-status.closure-complete');
   try {
-    await page.route(`**/api/sessions/${first.id}/world`, async route => {
+    await page.route(`**/api/sessions/${first.id}/world?includeDebriefReceipts=true`, async route => {
       if (hold) { requested(); await gate; }
       const status = ({ unavailable: 503, missing: 404, forbidden: 403, unauthorized: 401 })[mode];
-      const value = recording(first, mode === 'complete');
+      const value = recording(first, ['complete', 'unconfirmed-receipt', 'confirmed-receipt'].includes(mode));
       if (mode === 'foreign') value.header.streamId = randomUUID();
+      if (mode.endsWith('-receipt')) {
+        const [player] = first.players;
+        value.debriefReceipts = { streamId: first.combatStream.streamId, throughSequence: first.sequence,
+          finalStreamSequence: 0, worldSequence: value.acceptedSequence, players: [{ playerId: player.id, admissionId: player.admissionId,
+            roomId: player.roomId, name: player.name, acknowledged: mode === 'confirmed-receipt' }] };
+      }
       await route.fulfill(status ? { status, json: { error: 'fixture' } } : { json: value }).catch(() => {});
     });
-    await page.route(`**/api/sessions/${second.id}/world`, route => route.fulfill({ json: recording(second, false) }));
+    await page.route(`**/api/sessions/${second.id}/world?includeDebriefReceipts=true`, route => route.fulfill({ json: recording(second, false) }));
     await page.goto(base + '/console/'); await page.bringToFront();
     await page.locator('#login-key').fill(tokens.Master); await page.locator('#login-form button').click();
     await page.locator('#include-ended').check(); await page.locator('#session-select').selectOption(first.id);
@@ -35,9 +42,17 @@ module.exports = async ({ context, api, tokens, base, mission, screenshots, chec
     mode = 'complete'; await completed().waitFor();
     check((await page.locator('#closure-summary').innerText()).includes('不確認送達'), 'Dual archive confirmation explicitly leaves player result delivery and server shutdown unconfirmed');
     await page.screenshot({ path: path.join(screenshots, 'closure-complete.png'), fullPage: true });
+    mode = 'unconfirmed-receipt';
+    await page.locator('#debrief-receipt-count').filter({ hasText: '已確認 0／1 席' }).waitFor();
+    await page.locator('#debrief-receipt-count').click();
+    check((await page.locator('#debrief-receipt-players li').innerText()).endsWith('未確認'), 'A terminal roster entry without a receipt stays unconfirmed');
+    mode = 'confirmed-receipt';
+    await page.locator('#debrief-receipt-count').filter({ hasText: '已確認 1／1 席' }).waitFor();
+    check((await page.locator('#debrief-receipt-players li').innerText()).endsWith('已確認'), 'A matching receipt updates the original terminal roster entry');
     for (const [next, expected] of [['unavailable', '暫時無法確認'], ['missing', '尚未取得'], ['foreign', '尚未對上'], ['forbidden', '暫時無法確認']]) {
       mode = next; await page.waitForFunction(text => document.querySelector('#closure-summary').textContent.includes(text), expected);
       check(await completed().count() === 0, `World ${next} cannot reuse a previous completed archive`);
+      if (next === 'unavailable') check(await page.locator('#debrief-receipts').isHidden(), 'A failed refresh clears displayed player receipts');
     }
     await page.screenshot({ path: path.join(screenshots, 'closure-unconfirmed.png'), fullPage: true });
     mode = 'complete'; await completed().waitFor();

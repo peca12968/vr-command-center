@@ -34,10 +34,12 @@ async function main() {
   const budget = setTimeout(cancelled, 90000);
   try {
     await Promise.race([(async () => {
-      server = await chromium.launchServer({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+      server = await chromium.launchServer({ headless: true, executablePath: process.env.VR_CLOSURE_CHROMIUM,
+        args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
       browser = await chromium.connect(server.wsEndpoint()); const context = await browser.newContext({ viewport: { width: 1440, height: 1080 } }); page = await context.newPage();
       const errors = []; page.on('pageerror', error => errors.push(error.name));
-      page.on('response', response => { if (response.url() === config.base + '/api/sessions/' + config.sessionId + '/world' && response.status() === 200)
+      const worldUrl = config.base + '/api/sessions/' + config.sessionId + '/world';
+      page.on('response', response => { if ([worldUrl, worldUrl + '?includeDebriefReceipts=true'].includes(response.url()) && response.status() === 200)
         response.json().then(value => { lastWorld = value; }).catch(() => {}); });
       await page.goto(config.base + '/console/'); await page.locator('#login-key').fill(config.masterKey); await page.locator('#login-form button').click();
       await page.locator('#session-select').selectOption(config.sessionId); await page.waitForFunction(() => document.querySelector('#session-phase').textContent === '執行中');
@@ -102,7 +104,20 @@ async function main() {
       assert.equal(await page.locator('#include-ended').isChecked(), true);
       assert.equal(lastWorld?.header.sessionId, config.sessionId); assert.equal(lastWorld?.header.streamId, config.streamId); assert.equal(lastWorld?.complete, true);
       assert.equal(await page.locator('#closure-combat').innerText(), '戰鬥統計：已封存'); assert.equal(await page.locator('#closure-world').innerText(), '世界回放：已封存');
-      const summary = await page.locator('#closure-summary').innerText(); assert.match(summary, /不確認送達/); assert.equal(await page.locator('#export-report').isEnabled(), true); assert.deepEqual(errors, []);
+      const summary = await page.locator('#closure-summary').innerText();
+      if (!lastWorld?.debriefReceipts) assert.match(summary, /不確認送達/);
+      else assert.match(summary, /遊戲伺服器會依原流程完成收尾/);
+      assert.equal(await page.locator('#export-report').isEnabled(), true); assert.deepEqual(errors, []);
+      if (config.debriefReceiptCount) {
+        const count = page.locator('#debrief-receipt-count').filter({ hasText: `已確認 ${config.debriefReceiptCount}／${config.debriefReceiptCount} 席` });
+        await count.waitFor();
+        await count.click();
+        const rows = await page.locator('#debrief-receipt-players li').allTextContents();
+        assert.equal(rows.length, config.debriefReceiptCount);
+        assert.ok(rows.every(row => row.endsWith(' · 已確認')));
+        await page.screenshot({ path: path.join(out, 'debrief-receipts.png'), fullPage: true });
+        await save('debrief-receipts.json', { sessionId: config.sessionId, streamId: config.streamId, rows });
+      }
       if (config.battleOverview) {
         const reply = page.waitForResponse(response => response.url() === config.base + '/api/sessions/' + config.sessionId + '/overview');
         await page.locator('#refresh').click();

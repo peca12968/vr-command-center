@@ -146,6 +146,7 @@ def main():
     p.add_argument('--check-venue-openxr-reconnect', action='store_true', help='Interrupt one tracked UDP client and reconnect its original process in both five-room modes')
     p.add_argument('--check-venue-live-tracking',action='store_true',help='Verify the Master-only running tracking overview during native OpenXR loss')
     p.add_argument('--peer-diagnostics',action='store_true',help='Verify observed UDP peers in Linked and absence in default Independent runs')
+    p.add_argument('--check-debrief-receipts',action='store_true',help='Match published management receipts to every original native result')
     p.add_argument('--field-evidence',action='store_true',help='Verify the management ZIP with the original Linked player and server logs')
     p.add_argument('--venue-field-evidence',action='store_true',help='Verify full sealed admission evidence for both original venue End batches')
     p.add_argument('--venue-concurrent-roster-seconds', type=int, help='Require this many recorded seconds of concurrent 25-seat play in both sealed batches')
@@ -244,6 +245,8 @@ def main():
     if args.check_windows_venue_staging and not (args.check_quest_vr_partial_map or args.mixed_venue_bundle_only):
         p.error('--check-windows-venue-staging requires --check-quest-vr-partial-map or --mixed-venue-bundle-only')
     if args.peer_diagnostics and not args.player_package:p.error('--peer-diagnostics requires the three-package check')
+    if args.check_debrief_receipts and not (args.player_package or args.openxr_mock_only):
+        p.error('--check-debrief-receipts requires native player package or OpenXR mock verification')
     if args.field_evidence and not args.peer_diagnostics:p.error('--field-evidence requires --peer-diagnostics')
     if args.venue_field_evidence and not (args.field_evidence and args.check_venue_end):
         p.error('--venue-field-evidence requires --field-evidence and --check-venue-end')
@@ -1148,6 +1151,21 @@ def main():
                 or any(row[k]!=final[k] for k in fields) or any(Decimal(row[k])!=Decimal(str(final[k])) for k in numbers):
                 raise ValueError('CSV row differs from the original sealed player result')
         (out/(entry['label']+'-report.csv')).write_bytes(raw)
+        if args.check_debrief_receipts:
+            route='/api/sessions/'+entry['sessionId']+'/world?includeDebriefReceipts=true'
+            snapshot=request(route)['debriefReceipts']
+            boundaries=('streamId','throughSequence','finalStreamSequence','worldSequence')
+            check({row['playerId'] for row in snapshot['players']}==set(results)
+                  and len(snapshot['players'])==len(results)
+                  and all(row['acknowledged'] and row['admissionId']==results[row['playerId']]['admissionId']
+                          and row['roomId']==results[row['playerId']]['roomId']
+                          and all(snapshot[key]==results[row['playerId']][key] for key in boundaries)
+                          for row in snapshot['players']),entry['label']+' management receipts match original native results and both seals')
+            for room in sorted({row['roomId'] for row in snapshot['players']}):
+                scoped=request(route,role=f'Room{room}')['debriefReceipts']
+                check(scoped=={**snapshot,'players':[row for row in snapshot['players'] if row['roomId']==room]},
+                      entry['label']+f' room {room} reads only its original admissions and receipts')
+            save(entry['label']+'-debrief-receipts.json',snapshot)
         if args.check_room_reports and entry['label']=='linked':
             session_path='/api/sessions/'+entry['sessionId']
             prefix='vr-command-report-v1-'+entry['sessionId']
@@ -3648,7 +3666,9 @@ def main():
                 descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'sessionId':observer_entry['sessionId'],
                     'streamId':observer_entry['ready']['streamId'],'endRequestFile':str(out/'closure-end.request'),
                     'roomReadiness':args.check_room_readiness,'roomParticipation':args.check_room_participation,
-                    'battleOverview':args.check_room_combat}),encoding='utf-8')
+                    'battleOverview':args.check_room_combat,
+                    'debriefReceiptCount':len([client for client in round_clients if client['sessionId']==observer_entry['sessionId']])
+                        if args.check_debrief_receipts else None}),encoding='utf-8')
                 observer_log=(runtime/'closure-ui.log').open('xb')
                 node=shutil.which('node')
                 if not node:raise RuntimeError('Test observer requires installed Node; shipped launchers do not')

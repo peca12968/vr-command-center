@@ -1,5 +1,7 @@
 # Windows 遊戲伺服器包
 
+2026-11-10 `VRCommand-GameServer-0.50.2-1.12-debrief-win-x64.zip` 為 84,807,998 bytes，SHA-256 `59e25280556639f219faecbdbd3b174bddaa99fad29e778e9feea971ff65f1cb`。解壓核對 330 筆清單。遊戲 0.50.2 可將玩家戰績回條送至 0.31.109 管理包。 [任務收尾](SESSION_CLOSURE.md#玩家戰績回條)
+
 2026-11-10 `VRCommand-GameServer-0.50.1-1.12-https-venue-final-win-x64.zip` 為 84,807,075 bytes，SHA-256 `a8290ac78089d0281177962b01409c4c733c1bb3a371ab4820894de3aca5aa0b`。解壓核對 330 筆清單，沿用原 0.50.1 遊戲。啟動器可用一份私人 HTTPS 設定查詢場次及啟動五房批次。 [設定方式](#建立遊戲主機的-https-連線設定)
 
 2026-11-10 `VRCommand-GameServer-0.50.1-1.11-https-win-x64.zip` 為 84,806,680 bytes，SHA-256 `80b733db21c1351e0701c8630f67b44ae2c45099d06f3a32c5c7983a19cfd984`。解壓核對 330 筆清單。個別場次 CLI 支援指定管理站台的 HTTPS、WSS 及憑證指紋。 [遊戲主機設定](#遊戲主機連到遠端管理-https)

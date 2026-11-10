@@ -27,7 +27,7 @@ def free_port(address):
         return probe.getsockname()[1]
 
 
-def verify_native(server_folder, runtime, output, keys, tls, request, mission, management_uri, check, game_pin=None):
+def verify_native(server_folder, runtime, output, keys, tls, request, mission, management_uri, check, game_pin=None, debrief_receipts=False):
     state = request(tls, '/api/sessions', keys['Master'], status=201,
                     body={'missionId': mission['id'], 'mode': 'Independent', 'roomIds': [1]})
     route = '/api/sessions/' + state['id']
@@ -142,6 +142,16 @@ def verify_native(server_folder, runtime, output, keys, tls, request, mission, m
                                 field.content(work / 'server.log'), [(local, field.content(log))])
         check(evidence['serverAcknowledgements'] == 1, 'HTTPS-issued player ticket leads to one original acknowledged result')
         (output / 'native-field-results.json').write_text(json.dumps(evidence, indent=2), encoding='utf-8')
+        if debrief_receipts:
+            scoped = route + '/world?includeDebriefReceipts=true'
+            snapshot = request(tls, scoped, keys['Room1'])['debriefReceipts']
+            check(snapshot == {'streamId': combat['streamId'], 'throughSequence': terminal['sequence'],
+                               'finalStreamSequence': evidence['combatSequence'], 'worldSequence': evidence['worldSequence'],
+                               'players': [{'playerId': player['id'], 'admissionId': player['admissionId'], 'roomId': 1,
+                                            'name': player['name'], 'acknowledged': True}]},
+                  'pinned native HTTPS publishes the exact receipt from the original admitted connection')
+            request(tls, scoped, keys['Room2'], status=403)
+            (output / 'native-debrief-receipts.json').write_text(json.dumps(snapshot, indent=2), encoding='utf-8')
     finally:
         try:
             if not ended:
@@ -162,12 +172,15 @@ def main():
     parser.add_argument('--listen-address', type=ipaddress.IPv4Address, default=ipaddress.IPv4Address('127.0.0.1'))
     parser.add_argument('--server-package', type=Path, help='Also verify one native Windows game round through both listeners')
     parser.add_argument('--game-management-https', action='store_true', help='Use HTTPS and WSS from the native game server too')
+    parser.add_argument('--check-debrief-receipts', action='store_true', help='Match the HTTPS receipt to the original native admission')
     parser.add_argument('--operator-network', action='store_true', help='Check direct workstation witnesses and reject the same-PC inventory')
     args = parser.parse_args()
     if os.name != 'nt':
         parser.error('Run the actual Windows launcher on Windows.')
     if args.game_management_https and not args.server_package:
         parser.error('--game-management-https requires --server-package.')
+    if args.check_debrief_receipts and not args.game_management_https:
+        parser.error('--check-debrief-receipts requires --game-management-https.')
     if args.operator_network and not any(args.listen_address in ipaddress.IPv4Network(net)
                                          for net in ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16')):
         parser.error('--operator-network requires an assigned private --listen-address.')
@@ -380,7 +393,7 @@ def main():
             if server_folder:
                 game_uri = status['httpsBinding'] if args.game_management_https else status['uri']
                 verify_native(server_folder, runtime, output, keys, tls, request, created, game_uri, check,
-                              game_pin=fingerprint if args.game_management_https else None)
+                              game_pin=fingerprint if args.game_management_https else None, debrief_receipts=args.check_debrief_receipts)
         finally:
             if runner.poll() is None:
                 stop.touch()

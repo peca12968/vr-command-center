@@ -48,11 +48,24 @@ namespace VrCommand.Unity
         private sealed class EndingClient
         {
             internal TicketApproval Admission;
-            internal MissionDebrief Context;
+            internal MissionDebrief Context, Result;
             internal double Deadline;
-            internal bool Sent, Acknowledged;
+            internal bool Acknowledged;
+        }
+        [Serializable] private sealed class DebriefReceiptAdmission
+        {
+            public string playerId, admissionId;
+            public int roomId;
+        }
+        [Serializable] private sealed class DebriefReceiptBatch
+        {
+            public string streamId;
+            public long throughSequence, finalStreamSequence, worldSequence;
+            public DebriefReceiptAdmission[] players;
         }
         private readonly Dictionary<ulong, EndingClient> ending = new Dictionary<ulong, EndingClient>();
+        private readonly List<DebriefReceiptAdmission> pendingDebriefReceipts = new List<DebriefReceiptAdmission>();
+        private bool publishingDebriefReceipts;
         public MissionDebriefState Debrief { get; } = new MissionDebriefState();
         private bool deliveringDebriefs;
         public string PlayerStatus => Debrief.Result != null ? Debrief.Result.Display : Debrief.Pending
@@ -233,16 +246,16 @@ namespace VrCommand.Unity
             if (!string.IsNullOrEmpty(configuration.managementCertificateSha256))
                 request.certificateHandler = new ManagementCertificateHandler(configuration.managementCertificateSha256);
         }
-        private UnityWebRequest TelemetryRequest(string suffix, string body)
+        private UnityWebRequest ManagementPost(string suffix, string body)
         {
-            var request = new UnityWebRequest(configuration.managementApiUrl.TrimEnd('/') + "/api/sessions/" + configuration.sessionId + "/combat-stream" + suffix, "POST");
+            var request = new UnityWebRequest(configuration.managementApiUrl.TrimEnd('/') + "/api/sessions/" + configuration.sessionId + suffix, "POST");
             request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(body)); request.downloadHandler = new DownloadHandlerBuffer();
             request.SetRequestHeader("Content-Type", "application/json"); AuthorizeManagement(request);
             return request;
         }
         private IEnumerator OpenTelemetry()
         {
-            using (var request = TelemetryRequest("", "{\"streamId\":\"" + outbox.StreamId.ToString("D") + "\",\"origin\":\"" + outbox.Origin + "\",\"missionClockVersion\":1,\"roomEnemyPolicyVersion\":1}"))
+            using (var request = ManagementPost("/combat-stream", "{\"streamId\":\"" + outbox.StreamId.ToString("D") + "\",\"origin\":\"" + outbox.Origin + "\",\"missionClockVersion\":1,\"roomEnemyPolicyVersion\":1}"))
             {
                 yield return request.SendWebRequest();
                 if (request.result != UnityWebRequest.Result.Success) yield break;
@@ -258,7 +271,7 @@ namespace VrCommand.Unity
                 var batch = outbox.PendingBatch();
                 if (batch.Length == 0 && !outbox.Complete) { yield return new WaitForSecondsRealtime(.2f); continue; }
                 var body = batch.Length != 0 ? TelemetryOutbox.BatchJson(batch) : "{\"streamId\":\"" + outbox.StreamId.ToString("D") + "\",\"finalSequence\":" + outbox.LastSequence.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}";
-                using (var request = TelemetryRequest(batch.Length != 0 ? "/batch" : "/seal", body))
+                using (var request = ManagementPost(batch.Length != 0 ? "/combat-stream/batch" : "/combat-stream/seal", body))
                 {
                     yield return request.SendWebRequest();
                     if (request.responseCode >= 400 && request.responseCode < 500)
@@ -374,7 +387,7 @@ namespace VrCommand.Unity
                         }
                     if (ending.Count == 0) yield break;
                     var unsent = false;
-                    foreach (var delivery in ending.Values) if (!delivery.Sent) { unsent = true; break; }
+                    foreach (var delivery in ending.Values) if (delivery.Result == null) { unsent = true; break; }
                     if (unsent && outbox.Sealed && combatAuthority.Recording.Sealed)
                     {
                         using (var request = UnityWebRequest.Get(configuration.managementApiUrl.TrimEnd('/') + "/api/sessions/" + configuration.sessionId + "/statistics"))
@@ -386,12 +399,12 @@ namespace VrCommand.Unity
                                 try { statistics = JsonUtility.FromJson<DebriefStatistics>(request.downloadHandler.text); } catch (ArgumentException) { }
                             if (statistics != null)
                                 foreach (var client in new List<ulong>(ending.Keys))
-                                    if (ending.TryGetValue(client, out var delivery) && !delivery.Sent && Time.realtimeSinceStartupAsDouble < delivery.Deadline)
+                                    if (ending.TryGetValue(client, out var delivery) && delivery.Result == null && Time.realtimeSinceStartupAsDouble < delivery.Deadline)
                                     {
                                         if (!delivery.Context.MatchesSealedWorld(combatAuthority.Recording)) continue;
                                         var result = statistics.Select(delivery.Admission, delivery.Context);
                                         if (result == null) continue;
-                                        delivery.Sent = true; combatAuthority.SendDebrief(client, result, true);
+                                        delivery.Result = result; combatAuthority.SendDebrief(client, result, true);
                                     }
                         }
                     }
@@ -402,8 +415,42 @@ namespace VrCommand.Unity
         }
         public void AcknowledgeDebrief(ulong client, string sessionId, string playerId, string admissionId)
         {
-            if (ending.TryGetValue(client, out var delivery) && delivery.Sent && delivery.Context.sessionId == sessionId
-                && delivery.Admission.playerId == playerId && delivery.Admission.admissionId == admissionId) delivery.Acknowledged = true;
+            if (!ending.TryGetValue(client, out var delivery) || delivery.Acknowledged || delivery.Result == null
+                || delivery.Result.sessionId != sessionId || delivery.Result.playerId != playerId || delivery.Result.admissionId != admissionId) return;
+            delivery.Acknowledged = true;
+            pendingDebriefReceipts.Add(new DebriefReceiptAdmission { playerId = playerId, admissionId = admissionId, roomId = delivery.Result.roomId });
+            if (!publishingDebriefReceipts) StartCoroutine(PublishDebriefReceipts(delivery.Result));
+        }
+
+        private IEnumerator PublishDebriefReceipts(MissionDebrief boundary)
+        {
+            publishingDebriefReceipts = true;
+            var deadline = Time.realtimeSinceStartupAsDouble + 15;
+            try
+            {
+                while (pendingDebriefReceipts.Count != 0 && Time.realtimeSinceStartupAsDouble < deadline)
+                {
+                    yield return new WaitForSecondsRealtime(.25f);
+                    var batch = new DebriefReceiptBatch { streamId = boundary.streamId, throughSequence = boundary.throughSequence,
+                        finalStreamSequence = boundary.finalStreamSequence, worldSequence = boundary.worldSequence,
+                        players = pendingDebriefReceipts.ToArray() };
+                    using (var request = ManagementPost("/debrief-receipts", JsonUtility.ToJson(batch)))
+                    {
+                        request.timeout = 3;
+                        yield return request.SendWebRequest();
+                        if (request.responseCode == 204)
+                            pendingDebriefReceipts.RemoveRange(0, batch.players.Length);
+                        else if (request.responseCode >= 400 && request.responseCode < 500 && request.responseCode != 429)
+                            break;
+                    }
+                }
+            }
+            finally
+            {
+                if (pendingDebriefReceipts.Count != 0) Debug.LogWarning("VR_SERVER_DEBRIEF_RECEIPTS_UNCONFIRMED count=" + pendingDebriefReceipts.Count);
+                pendingDebriefReceipts.Clear();
+                publishingDebriefReceipts = false;
+            }
         }
         public bool ReceiveDebrief(MissionDebrief value, bool final)
         {

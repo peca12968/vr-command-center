@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `VRCommand-ControlServer-0.31.109-debrief-win-x64.zip` 可在個別場次查看玩家戰績回條。ZIP 為 52,976,827 bytes，SHA-256 `8dbc8121a660e1123afd41ab4dcd24b10536af19f589402f8f5cccd5890eb27a`，解壓核對 552 筆清單與 532 個發行檔案。 [玩家戰績回條](SESSION_CLOSURE.md#玩家戰績回條)
+
 2026-11-10 `VRCommand-ControlServer-0.31.108-workstations-win-x64.zip` 可為六個操作員角色簽發管理連線回條。ZIP 為 52,970,098 bytes，SHA-256 `f1899e4749f7fd29350c2c743c62cbd0752131bd15e02d886a6f75fbbb0d3679`，解壓核對 552 筆清單與 532 個發行檔案。 [工作站核對](#核對主控與五房控的直連來源)
 
 2026-11-10 `VRCommand-ControlServer-0.31.108-venue-https-win-x64.zip` 可同時提供場館 HTTPS 與本機遊戲管理 HTTP。ZIP 為 52,958,499 bytes，SHA-256 `75404520bae27eff4a8da79538e3f44055620cf1b8ee5f5e7025c5de967a3ca5`。解壓核對 552 筆清單及 532 個發行檔案。 [場館設定](#啟用場館-https)

@@ -36,16 +36,30 @@ export function closureView(session, statistics, world, result = 'Waiting') {
     warning: result === 'Unavailable' || result === 'Missing' || result === 'Received' && !valid };
 }
 
+export function debriefReceiptPlayers(session, actor, world) {
+  const receipts = world?.debriefReceipts;
+  if (!receipts || receipts.streamId !== session.combatStream.streamId || receipts.throughSequence !== session.sequence
+    || receipts.finalStreamSequence !== session.combatStream.acceptedSequence || receipts.worldSequence !== world.acceptedSequence
+    || !Array.isArray(receipts.players) || !Array.isArray(session.players) || !['Master', 'RoomController'].includes(actor.role)) return null;
+  const roster = session.players.filter(player => actor.role === 'Master' || player.roomId === actor.roomId);
+  if (receipts.players.length !== roster.length || new Set(receipts.players.map(row => row?.playerId)).size !== roster.length
+    || !receipts.players.every(row => row && typeof row.acknowledged === 'boolean' && roster.some(player => player.id === row.playerId
+      && player.admissionId === row.admissionId && player.roomId === row.roomId && player.name === row.name))) return null;
+  return receipts.players;
+}
+
 export function mountClosure(getState, unauthorized, openReview, report) {
   const panel = document.getElementById('closure-status'), combat = document.getElementById('closure-combat'), worldLabel = document.getElementById('closure-world'), summary = document.getElementById('closure-summary');
   const retained = document.getElementById('closure-retained');
+  const receiptsPanel = document.getElementById('debrief-receipts'), receiptsLabel = document.getElementById('debrief-receipt-count');
+  const receiptsList = document.getElementById('debrief-receipt-players');
   const fieldPanel = document.getElementById('field-evidence'), fieldButton = document.getElementById('download-field-evidence');
   const fieldStatus = document.getElementById('field-evidence-status');
   const reviewPanel = document.getElementById('player-review'), reviewPlayer = document.getElementById('player-review-select');
   const reviewButton = document.getElementById('open-player-review'), damageButton = document.getElementById('open-player-damage');
   let active = false, generation = 0, identity = '', controller = null, attempted = -Infinity, world = null, result = 'Waiting', refreshFailed = false;
   let fieldRequest = null;
-  let reviewTarget = null, reviewOptions = '';
+  let reviewTarget = null, reviewOptions = '', receiptRows = '';
   const context = () => {
     const state = getState(), session = state.session;
     return state.actor && state.key && !state.pending && session?.id === state.selected && sequence(session.sequence)
@@ -55,6 +69,7 @@ export function mountClosure(getState, unauthorized, openReview, report) {
   function clear() {
     stop(); world = null; result = 'Waiting'; attempted = -Infinity;
     fieldRequest?.abort(); fieldRequest = null; fieldStatus.textContent = '';
+    receiptsPanel.open = false;
   }
   function render() {
     const state = getState();
@@ -62,6 +77,20 @@ export function mountClosure(getState, unauthorized, openReview, report) {
       : refreshFailed ? { complete: false, combat: '未確認', world: '未確認', text: '場次更新失敗，封存狀態未確認；等待重新取得場次資料。', warning: true }
       : closureView(state.session, state.statistics, world, result);
     combat.textContent = '戰鬥統計：' + view.combat; worldLabel.textContent = '世界回放：' + view.world; summary.textContent = view.text;
+    const receipts = view.complete ? debriefReceiptPlayers(state.session, state.actor, world) : null;
+    receiptsPanel.hidden = !receipts?.length;
+    if (receipts) summary.textContent = '戰鬥統計與世界回放已封存。遊戲伺服器會依原流程完成收尾。';
+    const rows = JSON.stringify(receipts);
+    if (rows !== receiptRows) {
+      receiptRows = rows;
+      receiptsLabel.textContent = receipts?.length
+        ? `玩家戰績回條 · 已確認 ${receipts.filter(player => player.acknowledged).length}／${receipts.length} 席` : '';
+      receiptsList.replaceChildren(...(receipts || []).map(player => {
+        const row = document.createElement('li');
+        row.textContent = `房間 ${player.roomId} · ${player.name} · ${player.acknowledged ? '已確認' : '未確認'}`;
+        return row;
+      }));
+    }
     const counts = [];
     if (sequence(view.combatCount)) counts.push(`已接受 ${view.combatCount} 筆戰鬥資料`);
     if (sequence(view.worldCount)) counts.push(`已保存 ${view.worldCount} 格錄製`);
@@ -107,7 +136,7 @@ export function mountClosure(getState, unauthorized, openReview, report) {
     const current = () => request === generation && active && context() === id && getState().epoch === epoch && getState().key === key && document.visibilityState === 'visible';
     const timeout = setTimeout(() => own.abort(), 5000);
     try {
-      const response = await fetch(`/api/sessions/${state.selected}/world`, { headers: { Authorization: 'Bearer ' + key }, signal: own.signal, cache: 'no-store' });
+      const response = await fetch(`/api/sessions/${state.selected}/world?includeDebriefReceipts=true`, { headers: { Authorization: 'Bearer ' + key }, signal: own.signal, cache: 'no-store' });
       if (!current()) return;
       if (response.status === 401) { unauthorized(); return; }
       if (response.status === 404) { world = null; result = 'Missing'; return; }
