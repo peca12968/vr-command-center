@@ -17,7 +17,8 @@ using System.Windows.Forms;
 internal static class ServerLauncher
 {
     internal static readonly string Root = Path.GetFullPath(AppDomain.CurrentDomain.BaseDirectory).TrimEnd(Path.DirectorySeparatorChar);
-    internal static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = 4 * 1024 * 1024 };
+    [ThreadStatic] static JavaScriptSerializer serializer;
+    internal static JavaScriptSerializer Json { get { return serializer ?? (serializer = new JavaScriptSerializer { MaxJsonLength = 4 * 1024 * 1024 }); } }
     internal static void Need(bool ok, string message) { if (!ok) throw new InvalidDataException(message); }
     internal static string Safe(Exception error) { return error is InvalidDataException || error is IOException ? error.Message : error.GetType().Name; }
     internal static Dictionary<string, object> Map(object value) { return value as Dictionary<string, object>; }
@@ -176,6 +177,14 @@ internal static class ServerLauncher
             }
         }
         internal void Identity() { ValidateTarget(); Need(Text(Request("/"), "version") == "0.31.0", "需要管理服務0.31.0。"); Need(Text(Request("/api/me"), "role") == "GameServer", "請使用GameServer角色金鑰。"); }
+        internal void CheckPort()
+        {
+            using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
+            {
+                socket.ExclusiveAddressUse = true;
+                socket.Bind(new IPEndPoint(IPAddress.Parse(Bind), Port));
+            }
+        }
         internal object[] Sessions()
         {
             var request = (HttpWebRequest)WebRequest.Create(Api + "/api/sessions"); request.Proxy = null; request.AllowAutoRedirect = false; request.Timeout = 5000; request.ReadWriteTimeout = 5000; request.Headers[HttpRequestHeader.Authorization] = "Bearer " + Key;
@@ -319,9 +328,9 @@ internal static class ServerLauncher
         {
             Config = config; Work = Full(work); Plain(Work); Need(!Inside(Work, Root) && !Inside(Root, Work) && !Directory.Exists(Work) && !File.Exists(Work), "請使用程式包之外的新資料夾。");
         }
-        internal void Start(Func<bool> cancelled = null, bool peerDiagnostics = false)
+        internal void Start(Func<bool> cancelled = null, bool peerDiagnostics = false, bool packageVerified = false, Action beforeNative = null)
         {
-            Config.Validate(); Verify(); Config.Identity(); var state = Config.Request("/api/sessions/" + Config.Session);
+            Config.Validate(); if (!packageVerified) Verify(); Config.Identity(); var state = Config.Request("/api/sessions/" + Config.Session);
             var experience = Text(Child(state, "environment"), "mode");
             object streamValue;
             Need(Text(state, "id") == Config.Session && Text(state, "state") == "Preparing" && state.TryGetValue("combatStream", out streamValue) && streamValue == null
@@ -334,7 +343,9 @@ internal static class ServerLauncher
             Origin = experience == "MR" ? "GameServer" : "Simulation";
             string name; using (var sha = SHA256.Create()) name = Hex(sha.ComputeHash(Encoding.UTF8.GetBytes(Config.Api + "/" + Config.Session)));
             bool created; lease = new Mutex(true, "Local\\VRCommand.Server." + name, out created); ownsLease = created; Need(created, "此場次已有本機啟動器。");
-            using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp)) { socket.ExclusiveAddressUse = true; socket.Bind(new IPEndPoint(IPAddress.Parse(Config.Bind), Config.Port)); }
+            Config.CheckPort();
+            if (beforeNative != null) beforeNative();
+            Need(cancelled == null || !cancelled(), "已中止啟動；此輪未完成。");
             Directory.CreateDirectory(Work); Save(Path.Combine(Work, "server-config.json"), Config.Config(Path.Combine(Work, "telemetry"), Origin));
             Process = new Native(Path.Combine(Work, "server-config.json"), Path.Combine(Work, "server.log"), peerDiagnostics);
             PeerDiagnosticsEnabled = peerDiagnostics;
@@ -363,6 +374,7 @@ internal static class ServerLauncher
                             Thread.Sleep(250);
                             continue;
                         }
+                        Need(cancelled == null || !cancelled(), "已中止啟動；此輪未完成。");
                         Need(!Process.Exited, "遊戲程序在公告前結束。");
                         var endpoint = Config.Request("/api/sessions/" + Config.Session + "/connection-endpoint", new { version = 1, streamId = Stream, address = Config.Address, port = Config.Port });
                         Need(Text(endpoint, "sessionId") == Config.Session && Text(endpoint, "streamId") == Stream && Text(endpoint, "address") == Config.Address && Num(endpoint, "port") == Config.Port && !Yes(endpoint, "sessionEnded"), "公告回條不符。");
@@ -455,11 +467,150 @@ internal static class ServerLauncher
             Need(elapsed.TotalSeconds < ManagementRecoverySeconds, "管理服務等待恢復逾時，保留journal供檢查。");
         }
         internal object Report(string status, string error) { return new { schemaVersion = 1, status = status, complete = Complete && Cleanup, sessionId = Config.Session, streamId = Stream, childPid = Process == null ? (int?)null : Process.Pid, childExited = Process == null ? (bool?)null : Cleanup, cleanupCompleted = Cleanup, exitCode = Code, workDirectory = Work, udpBinding = VerifiedUdp == null ? null : VerifiedUdp.Public(), peerDiagnosticsEnabled = PeerDiagnosticsEnabled, finalWorld = FinalWorld, finalCombatStream = FinalStream, playerResultsAcknowledged = (bool?)null, managementRecovery = new { outages = managementOutages, recoveries = managementRecoveries, longestMilliseconds = longestManagementOutageMilliseconds }, error = error, scope = "Owned server lifecycle and API dual seals; 36s retention, intentional OS process termination after seals, no graceful Unity shutdown / client delivery / gameplay / LAN capacity claim." }; }
+        internal object Ready() { return new { schemaVersion = 1, status = "ready", sessionId = Config.Session, streamId = Stream, childPid = Process.Pid, address = Config.Address, port = Config.Port, workDirectory = Work, udpBinding = VerifiedUdp.Public(), peerDiagnosticsEnabled = PeerDiagnosticsEnabled }; }
         public void Dispose()
         {
-            try { if (Process != null) { Process.Stop(); Code = Process.ExitCode; Process.Dispose(); } Cleanup = true; }
+            try
+            {
+                if (Process != null) try { Process.Stop(); Code = Process.ExitCode; }
+                finally { Process.Dispose(); }
+                Cleanup = true;
+            }
             finally { if (lease != null) { if (ownsLease) lease.ReleaseMutex(); lease.Dispose(); lease = null; ownsLease = false; } }
         }
+    }
+
+    sealed class VenueServer
+    {
+        internal Choice Choice;
+        internal Run Run;
+        internal bool Ready;
+        internal string Error;
+    }
+
+    sealed class VenueGate
+    {
+        internal volatile bool Abort;
+    }
+
+    static int RunVenue(Dictionary<string, string> options, ref bool outputValid)
+    {
+        outputValid = false;
+        string diagnostics; var peerDiagnostics = options.TryGetValue("--peer-diagnostics", out diagnostics);
+        Need(!peerDiagnostics || diagnostics == "on", "來源診斷只接受 on。");
+        Need(options.Count == (peerDiagnostics ? 6 : 5) && options.ContainsKey("--work")
+            && options.ContainsKey("--seconds") && options.ContainsKey("--ready-report"), "需要venue-run/work/seconds/ready-report/report五個參數。");
+        int seconds; Need(Int32.TryParse(options["--seconds"], out seconds) && seconds >= 60 && seconds <= 86400, "執行期限須為60至86400秒。");
+        var planPath = Full(options["--venue-run"]); var work = Full(options["--work"]);
+        Need(!Inside(planPath, Root) && !Inside(planPath, work) && !Inside(work, Root) && !Inside(Root, work)
+            && !Directory.Exists(work) && !File.Exists(work) && Directory.Exists(Path.GetDirectoryName(work)), "請使用包外的設定檔及全新工作目錄。");
+        Plain(work);
+        var plan = Read(planPath, 8192); var instancePath = Text(plan, "controlInstance");
+        Need(!String.IsNullOrWhiteSpace(instancePath) && Path.IsPathRooted(instancePath), "需要管理實例的完整路徑。");
+        var instanceDirectory = Path.GetDirectoryName(Full(instancePath));
+        Need(!Inside(work, instanceDirectory) && !Inside(instanceDirectory, work), "工作目錄必須與管理實例分開。");
+        var report = options["--report"]; var ready = options["--ready-report"];
+        Output(report, instanceDirectory); Output(ready, instanceDirectory);
+        Output(report, work); Output(ready, work);
+        Need(!String.Equals(Full(report), Full(ready), StringComparison.OrdinalIgnoreCase), "結果路徑不能重複。");
+        outputValid = true;
+        var topology = Text(plan, "topology"); object raw;
+        Need(Num(plan, "version") == 1 && plan.Count == 6 && (topology == "Linked" || topology == "Independent")
+            && plan.TryGetValue("servers", out raw) && raw is object[]
+            && ((object[])raw).Length == (topology == "Linked" ? 1 : 5), "請提供完整的獨立或合併場館設定。");
+        Verify();
+        var catalog = Catalog.Load(instancePath);
+        var rooms = new HashSet<int>(); var ports = new HashSet<int>();
+        var servers = new List<VenueServer>();
+        foreach (var item in (object[])plan["servers"])
+        {
+            var row = Map(item);
+            Need(row != null && row.Count == 3 && Num(row, "port") >= 1024 && Num(row, "port") <= 65535, "請提供有效場次、房號及 UDP 埠。");
+            var choice = catalog.Choices.Find(candidate => candidate.Id == Text(row, "sessionId"));
+            var assigned = Choice.ReadRooms(row, topology);
+            Need(choice != null && choice.Mode == topology && String.Join(",", choice.Rooms) == String.Join(",", assigned),
+                "原場次與房間不符或已無法啟動。");
+            Need(choice.CanStart, Choice.AlignmentPrompt(choice.MissingAlignmentRooms));
+            foreach (var room in assigned) Need(rooms.Add(room), "場館房間重複。");
+            var config = new Settings { Api = catalog.Target.Api, Key = catalog.Target.Key, Session = choice.Id, Address = Text(plan, "address"),
+                Bind = Text(plan, "listenAddress"), Port = (int)Num(row, "port") };
+            config.Validate();
+            Need(ports.Add(config.Port), "獨立場次須使用不同的 UDP 埠。");
+            var name = topology == "Linked" ? "linked" : "room-" + assigned[0].ToString("00", System.Globalization.CultureInfo.InvariantCulture);
+            servers.Add(new VenueServer { Choice = choice, Run = new Run(config, Path.Combine(work, name)) });
+        }
+        servers.Sort((a, b) => a.Choice.Rooms[0].CompareTo(b.Choice.Rooms[0]));
+        foreach (var server in servers)
+            try { server.Run.Config.CheckPort(); }
+            catch (SocketException) { throw new InvalidDataException("無法使用房間 " + String.Join("、", server.Choice.Rooms) + " 的 UDP 埠 " + server.Run.Config.Port + "。"); }
+        var staging = Path.Combine(Path.GetDirectoryName(work), ".vr-venue-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(staging);
+        try { Directory.Move(staging, work); }
+        finally { if (Directory.Exists(staging)) Directory.Delete(staging); }
+
+        var gate = new VenueGate();
+        var workers = new List<Thread>();
+        var published = false;
+        using (var reserved = new CountdownEvent(servers.Count))
+        using (var launch = new ManualResetEventSlim())
+        using (var started = new CountdownEvent(servers.Count))
+        using (var proceed = new ManualResetEventSlim())
+        {
+            try
+            {
+                foreach (var entry in servers)
+                {
+                    var server = entry;
+                    var worker = new Thread(delegate()
+                    {
+                        var reservedSlot = false;
+                        try
+                        {
+                            try
+                            {
+                                server.Run.Start(() => gate.Abort, peerDiagnostics, packageVerified: true, beforeNative: delegate
+                                {
+                                    reservedSlot = true;
+                                    reserved.Signal();
+                                    launch.Wait();
+                                });
+                                server.Ready = true;
+                            }
+                            catch (Exception error) { server.Error = Safe(error); gate.Abort = true; }
+                            finally { if (!reservedSlot) reserved.Signal(); started.Signal(); }
+                            proceed.Wait();
+                            if (!gate.Abort) server.Run.Wait(seconds, () => false);
+                        }
+                        catch (Exception error) { server.Error = Safe(error); }
+                        finally { try { server.Run.Dispose(); } catch (Exception error) { server.Error = Safe(error); } }
+                    });
+                    worker.Start();
+                    workers.Add(worker);
+                }
+                reserved.Wait();
+                launch.Set();
+                started.Wait();
+                if (!gate.Abort && servers.TrueForAll(server => server.Ready && !server.Run.Process.Exited))
+                {
+                    Save(ready, new { schemaVersion = 1, status = "venue-ready", topology = topology, instanceId = catalog.InstanceId,
+                        servers = servers.ConvertAll(server => new { roomIds = server.Choice.Rooms, ready = server.Run.Ready() }) });
+                    published = true;
+                }
+            }
+            finally
+            {
+                gate.Abort = !published;
+                launch.Set();
+                proceed.Set();
+                foreach (var worker in workers) worker.Join();
+            }
+        }
+        var complete = published && servers.TrueForAll(server => server.Error == null && server.Run.Complete && server.Run.Cleanup);
+        Save(report, new { schemaVersion = 1, status = complete ? "venue-sealed-stopped" : "venue-incomplete",
+            complete = complete, topology = topology, instanceId = catalog.InstanceId, readyPublished = published,
+            servers = servers.ConvertAll(server => new { roomIds = server.Choice.Rooms,
+                result = server.Run.Report(server.Run.Complete && server.Run.Cleanup ? "sealed-stopped" : "incomplete", server.Error) }) });
+        return complete ? 0 : 1;
     }
     internal sealed class Window : Form
     {
@@ -524,6 +675,7 @@ internal static class ServerLauncher
             Need(options.ContainsKey("--report"), "需要結果路徑。"); report = options["--report"]; Output(report, options.ContainsKey("--catalog") ? Path.GetDirectoryName(Full(options["--catalog"])) : options.ContainsKey("--work") ? options["--work"] : null); outputValid = true;
             if (options.Count == 2 && options.ContainsKey("--verify")) { Need(options["--verify"] == "package", "驗證參數錯誤。"); Verify(); Save(report, new { schemaVersion = 1, complete = true, status = "verified" }); return 0; }
             if (options.Count == 2 && options.ContainsKey("--catalog")) { Verify(); Save(report, Catalog.Load(options["--catalog"]).Public()); return 0; }
+            if (options.ContainsKey("--venue-run")) return RunVenue(options, ref outputValid);
             string diagnostics;
             var peerDiagnostics = options.TryGetValue("--peer-diagnostics", out diagnostics);
             Need(!peerDiagnostics || diagnostics == "on", "來源診斷只接受 on。");
@@ -531,7 +683,7 @@ internal static class ServerLauncher
             int seconds; Need(Int32.TryParse(options["--seconds"], out seconds) && seconds >= 60 && seconds <= 86400, "執行期限須為60至86400秒。");
             var configPath = Full(options["--run"]); var work = Full(options["--work"]); Need(!Inside(configPath, Root) && !Inside(configPath, work) && !Inside(work, configPath), "設定必須在程式包與新資料夾之外。");
             Output(report, work); Output(options["--ready-report"], work); Need(!String.Equals(Full(report), Full(options["--ready-report"]), StringComparison.OrdinalIgnoreCase), "結果路徑不能重複。");
-            run = new Run(Settings.From(Read(configPath, 8192)), work); run.Start(peerDiagnostics: peerDiagnostics); Save(options["--ready-report"], new { schemaVersion = 1, status = "ready", sessionId = run.Config.Session, streamId = run.Stream, childPid = run.Process.Pid, address = run.Config.Address, port = run.Config.Port, workDirectory = run.Work, udpBinding = run.VerifiedUdp.Public(), peerDiagnosticsEnabled = run.PeerDiagnosticsEnabled }); run.Wait(seconds, () => false);
+            run = new Run(Settings.From(Read(configPath, 8192)), work); run.Start(peerDiagnostics: peerDiagnostics); Save(options["--ready-report"], run.Ready()); run.Wait(seconds, () => false);
         }
         catch (Exception e) { error = Safe(e); }
         finally { if (run != null) try { run.Dispose(); } catch (Exception e) { error = Safe(e); } }

@@ -1,5 +1,5 @@
 """Exercise portable Windows packages, five rooms, Linked and owned process cleanup."""
-import argparse,base64,csv,hashlib,importlib.util,io,ipaddress,json,os,re,shutil,socket,subprocess,sys,tempfile,threading,time,urllib.error,urllib.request,uuid,zipfile
+import argparse,base64,csv,ctypes,hashlib,importlib.util,io,ipaddress,json,os,re,shutil,socket,subprocess,sys,tempfile,threading,time,urllib.error,urllib.request,uuid,zipfile
 from datetime import datetime,timedelta,timezone
 from decimal import Decimal
 from pathlib import Path
@@ -95,6 +95,7 @@ def main():
     p.add_argument('--check-room-clocks', action='store_true', help='Verify room clocks and the original pause/resume boundaries in both modes')
     p.add_argument('--check-venue-phase', action='store_true', help='Verify whole-venue pause and resume against both native topologies')
     p.add_argument('--check-venue-begin', action='store_true', help='Start both native topologies with one witnessed Begin per topology')
+    p.add_argument('--check-venue-launcher', action='store_true', help='Use one real Windows launcher for the explicitly prepared servers of each topology')
     p.add_argument('--check-venue-tracking-gate', action='store_true', help='Reject full tracking Begin while the same native roster is otherwise ready')
     p.add_argument('--check-venue-participation-gate', action='store_true', help='Require all 25 effective native seats and verify their original Preparing frames')
     p.add_argument('--check-venue-end', action='store_true', help='End each native topology in one batch and read its original archives')
@@ -186,6 +187,11 @@ def main():
     if args.check_room_clocks and not args.player_package:p.error('--check-room-clocks requires five players per room')
     if args.check_venue_phase and not args.check_room_clocks:p.error('--check-venue-phase requires --check-room-clocks')
     if args.check_venue_begin and not args.player_package:p.error('--check-venue-begin requires the three-package check')
+    if args.check_venue_launcher and (not all((args.prepare_independent_set, args.check_venue_begin, args.check_venue_end))
+                                     or any((args.check_lan_preflight, args.check_layout_preview, args.field_evidence,
+                                             args.venue_field_evidence, args.observe_closure_ui))):
+        p.error('--check-venue-launcher requires --prepare-independent-set --check-venue-begin --check-venue-end; '
+                'individual launcher report workflows must be checked separately')
     if args.check_venue_tracking_gate and not args.check_venue_begin:p.error('--check-venue-tracking-gate requires --check-venue-begin')
     if args.check_venue_participation_gate and not (args.check_venue_begin and args.player_package):
         p.error('--check-venue-participation-gate requires --check-venue-begin and all native player seats')
@@ -395,7 +401,11 @@ def main():
         def is_ready():
             if child.poll() is not None:raise RuntimeError('Server launcher exited before ready '+label)
             return read(ready) if ready.exists() else None
-        info=wait(is_ready,100,label+' ready');w=control.ChildWitness(info['childPid']);entry['witness']=w;witnesses.append(w);entry['ready']=info
+        info=wait(is_ready,100,label+' ready')
+        return confirm_launch(entry,state,info,preflight,verify_layout)
+    def confirm_launch(entry,state,info,preflight=None,verify_layout=True):
+        label,value,diagnostics=entry['label'],entry['config'],entry['peerDiagnostics']
+        w=control.ChildWitness(info['childPid']);entry['witness']=w;witnesses.append(w);entry['ready']=info
         check(info['peerDiagnosticsEnabled'] is diagnostics, label+' ready report records the explicit diagnostics choice')
         if args.check_layout_preview and verify_layout:entry['layoutSession']=state
         endpoint=request('/api/sessions/'+state['id']+'/connection-endpoint');check(info['streamId']==endpoint['streamId'] and info['port']==endpoint['port'] and endpoint['address']==address,label+' original endpoint / child')
@@ -414,6 +424,92 @@ def main():
                   label+' original Unity child owns the exact endpoint released by the UDP preflight')
             save(label+'-lan-preflight.json', dict(preflight, gameBinding=binding, scope='same-host'))
         return entry
+    def launch_venue(states, linked, *, unlocked_mr=False):
+        topology='Linked' if linked else 'Independent'
+        label='unlocked-mr-venue' if unlocked_mr else topology.lower()+'-venue'
+        plan_file=runtime/(label+'.json')
+        work=runtime/(label+'-work')
+        ready=out/(label+'-ready.json')
+        report=out/(label+'-final.json')
+        values=[]
+        ports=set()
+        for state in states:
+            value=config(state['id'])
+            while value['port'] in ports:
+                value=config(state['id'])
+            ports.add(value['port']);values.append(value)
+        plan={'version':1,'controlInstance':str(data/'control-instance.json'),'topology':topology,'address':address,'listenAddress':address,
+              'servers':[{'roomIds':state['roomIds'],'sessionId':state['id'],'port':value['port']} for state,value in zip(states,values,strict=True)]}
+        def args_for(plan_file,work,ready):
+            return ['--venue-run',plan_file,'--work',work,'--seconds','600','--ready-report',ready]
+        if unlocked_mr:
+            plan_file.write_text(json.dumps(plan),encoding='utf-8')
+            call(label,args_for(plan_file,work,ready),report=report)
+            check('校正鎖定' in read(report)['error'] and not work.exists() and not ready.exists()
+                  and request('/api/sessions/'+states[0]['id'])['combatStream'] is None,
+                  'unlocked Linked MR venue cannot start or publish a game source')
+            return []
+        if not linked:
+            stale=runtime/'venue-wrong-room.json'
+            wrong=list(plan['servers']);wrong[0]={**wrong[0],'sessionId':wrong[1]['sessionId']}
+            stale.write_text(json.dumps(dict(plan,servers=wrong)),encoding='utf-8')
+            empty_work=runtime/'venue-rejected-work'
+            empty_ready=out/'venue-rejected-ready.json'
+            call('venue-wrong-room',args_for(stale,empty_work,empty_ready))
+            plan_file.write_text(json.dumps(plan),encoding='utf-8')
+            with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as occupied:
+                occupied.setsockopt(socket.SOL_SOCKET,socket.SO_EXCLUSIVEADDRUSE,1)
+                occupied.bind((address,values[-1]['port']))
+                call('venue-occupied-port',args_for(plan_file,empty_work,empty_ready))
+            check(not empty_work.exists() and not empty_ready.exists()
+                  and all(request('/api/sessions/'+row['id'])['combatStream'] is None for row in states),
+                  'wrong room assignment or occupied fifth UDP port rejects the entire venue before any server starts')
+            kernel=ctypes.WinDLL('kernel32',use_last_error=True)
+            kernel.CreateMutexW.argtypes=(ctypes.c_void_p,ctypes.c_int,ctypes.c_wchar_p)
+            kernel.CreateMutexW.restype=ctypes.c_void_p
+            kernel.CloseHandle.argtypes=(ctypes.c_void_p,)
+            kernel.ReleaseMutex.argtypes=(ctypes.c_void_p,)
+            lock_name='Local\\VRCommand.Server.'+hashlib.sha256(f"{uri}/{states[-1]['id']}".encode()).hexdigest()
+            ctypes.set_last_error(0)
+            lease=kernel.CreateMutexW(None,True,lock_name)
+            owns_lease=bool(lease) and ctypes.get_last_error()!=183
+            try:
+                check(owns_lease,'fixture reserves only the original fifth session launch lease')
+                locked_work=runtime/'venue-session-locked'
+                locked_report=call('venue-session-locked',args_for(plan_file,locked_work,empty_ready))
+                locked=read(locked_report)
+                check(locked['status']=='venue-incomplete' and not locked['readyPublished'] and not empty_ready.exists()
+                      and not list(locked_work.iterdir()) and len(locked['servers'])==5
+                      and all(row['result']['childPid'] is None and row['result']['cleanupCompleted'] for row in locked['servers'])
+                      and all(request('/api/sessions/'+row['id'])['combatStream'] is None for row in states),
+                      'one occupied session lease cancels all venue starts before any child or source is created')
+            finally:
+                if lease:
+                    if owns_lease:
+                        kernel.ReleaseMutex(lease)
+                    kernel.CloseHandle(lease)
+        plan_file.write_text(json.dumps(dict(plan,servers=list(reversed(plan['servers'])))),encoding='utf-8')
+        extra=['--peer-diagnostics','on'] if args.peer_diagnostics else []
+        process=subprocess.Popen([str(exe),*map(str,args_for(plan_file,work,ready)),'--report',str(report),*extra],cwd=out,env=env)
+        entries=[]
+        for index,(state,value) in enumerate(zip(states,values,strict=True)):
+            name='linked' if linked else f"room-{state['roomIds'][0]:02}"
+            entry={'process':process,'readyPath':ready,'reportPath':report,'work':work/name,'config':value,'label':('linked' if linked else f'room-{index+1}'),
+                   'sessionId':state['id'],'witness':None,'peerDiagnostics':args.peer_diagnostics,'venueIndex':index}
+            runners.append(entry);entries.append(entry)
+        def is_ready():
+            if process.poll() is not None:raise RuntimeError('Venue launcher exited before all sources were ready')
+            return read(ready) if ready.exists() else None
+        witness=wait(is_ready,120,label+' ready')
+        check(witness['status']=='venue-ready' and witness['topology']==topology and witness['instanceId']==read(data/'control-instance.json')['instanceId']
+              and [(row['roomIds'],row['ready']['sessionId'],row['ready']['port']) for row in witness['servers']]
+                  ==[(state['roomIds'],state['id'],value['port']) for state,value in zip(states,values,strict=True)]
+              and len({row['ready']['childPid'] for row in witness['servers']})==len(states)
+              and all(Path(row['ready']['workDirectory'])==entry['work'] for entry,row in zip(entries,witness['servers'],strict=True)),
+              label+' confirms the exact game processes, sorted original rooms and UDP bindings')
+        for entry,state,row in zip(entries,states,witness['servers'],strict=True):
+            confirm_launch(entry,state,row['ready'])
+        return entries
     def player(entry,room):
         state=request('/api/sessions/'+entry['sessionId']+'/players',{'playerId':str(uuid.uuid4()),'roomId':room,'name':'Portable server room '+str(room),'headset':'Quest3'},role='Room'+str(room));person=next(x for x in state['players'] if x['roomId']==room)
         invitation=request('/api/sessions/'+state['id']+'/players/'+person['id']+'/join-ticket',{},role='Room'+str(room),admission=person['admissionId']);file=runtime/(entry['label']+'-client-'+str(room)+'.json');file.write_text(json.dumps({'role':'Client','address':address,'port':entry['ready']['port'],'joinTicket':invitation['ticket']}),encoding='utf-8');log=runtime/(file.stem+'.log')
@@ -1263,7 +1359,14 @@ def main():
 
     def finish(entry):
         entry['process'].wait(timeout=80);w=entry['witness'];w.wait();w.close();entry['witness']=None
-        report=read(entry['reportPath']);check(entry['process'].returncode==0 and report['complete'] and report['cleanupCompleted'] and report['childExited'] and report['playerResultsAcknowledged'] is None,entry['label']+' dual seal / retained36 / original process terminal')
+        report=read(entry['reportPath'])
+        if 'venueIndex' in entry:
+            check(report['complete'] and report['readyPublished'] and report['status']=='venue-sealed-stopped',
+                  entry['label']+' original venue process final report is complete')
+            report=report['servers'][entry['venueIndex']]['result']
+            check(report['sessionId']==entry['sessionId'] and report['childPid']==entry['ready']['childPid'],
+                  entry['label']+' final venue result identifies the original child')
+        check(entry['process'].returncode==0 and report['complete'] and report['cleanupCompleted'] and report['childExited'] and report['playerResultsAcknowledged'] is None,entry['label']+' dual seal / retained36 / original process terminal')
         check(report['udpBinding'] == entry['ready']['udpBinding'], entry['label'] + ' terminal report preserves the startup UDP observation')
         check(report['peerDiagnosticsEnabled'] is entry['peerDiagnostics'], entry['label']+' terminal report preserves the startup diagnostics choice')
         if 'layoutSession' in entry:
@@ -2792,6 +2895,10 @@ def main():
             save('imported-mission.json',imported_mission)
         if args.openxr_mock_only:
             check_openxr_mock()
+        if args.check_venue_launcher:
+            unlocked=create(list(range(1,6)),'unlocked venue alignment',experience='MR')
+            launch_venue([unlocked],True,unlocked_mr=True)
+            command(unlocked['id'],'End')
         for linked in ([] if venue_only or args.openxr_mock_only else [False,True]):
             entries=[];round_clients=[];staged=[]
             batch=None
@@ -2819,6 +2926,8 @@ def main():
                       and all(state['mission']==mission and state['mode']=='Independent' and state['state']=='Preparing' for state,mission in zip(batch,missions)),
                       'one real management request prepares all five native independent sessions and its retry returns the same IDs')
                 save('independent-preparation-receipt.json',prepared)
+            if args.check_venue_launcher and not linked:
+                venue_entries=launch_venue(batch,False)
             for rooms in ([[1,2,3,4,5]] if linked else [[r] for r in range(1,6)]):
                 enemy_count=5*len(rooms) if args.check_room_combat else 1
                 if batch is not None:
@@ -2830,7 +2939,11 @@ def main():
                     room_replay_props = [{'assetId':'barrel','position':{'x':4.5,'y':0,'z':4.5},'yawDegrees':0}]
                     state=create(rooms,'linked' if linked else 'independent',enemy_count=enemy_count,
                                  props=room_replay_props if linked and args.check_player_room_replay else None)
-                entry=launch(state,('linked' if linked else 'room-'+str(rooms[0])));entries.append(entry)
+                if args.check_venue_launcher:
+                    entry=launch_venue([state],True)[0] if linked else venue_entries[rooms[0]-1]
+                else:
+                    entry=launch(state,('linked' if linked else 'room-'+str(rooms[0])))
+                entries.append(entry)
                 if args.check_room_clocks and (linked or rooms == [1]):
                     request('/api/sessions/'+state['id']+'/commands', {'commandId':str(uuid.uuid4()),'action':'SetMissionClock','missionClock':{'autoEnd':True}})
                 entry['combatEnemyCount']=enemy_count

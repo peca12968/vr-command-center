@@ -20,6 +20,39 @@ Unity 0.47.0 伺服器可搭配控制台 0.31.14。啟動器 1.5 可選擇待開
 
 本輪單房的一名 Windows 模擬玩家在同機入場。開始與結束由測試程式經管理 API 送出，UDP 來源、原戰績、伺服器確認回條與 79 格回放均通過核對。原遊戲程序停止後從視窗正常關閉，診斷選項清除。 [實測紀錄](PROGRESS.md#2026-11-10-windows-遊戲伺服器選檔至結算驗收)
 
+## 依場館計畫批次啟動
+
+啟動器 1.8 的 `--venue-run` 使用同一份計畫啟動五個獨立遊戲伺服器，或啟動涵蓋五房的一個合併伺服器。先在本機管理服務準備場次，取得各房原場次 ID。計畫與工作目錄放在解壓包及管理實例之外。計畫只引用本機 `control-instance.json`，由啟動器讀取該實例的 GameServer 憑證。
+
+```json
+{
+  "version": 1,
+  "controlInstance": "C:\\VRCommand\\control\\control-instance.json",
+  "topology": "Independent",
+  "address": "192.168.1.100",
+  "listenAddress": "192.168.1.100",
+  "servers": [
+    {"roomIds": [1], "sessionId": "11111111-1111-4111-8111-111111111111", "port": 7771},
+    {"roomIds": [2], "sessionId": "22222222-2222-4222-8222-222222222222", "port": 7772},
+    {"roomIds": [3], "sessionId": "33333333-3333-4333-8333-333333333333", "port": 7773},
+    {"roomIds": [4], "sessionId": "44444444-4444-4444-8444-444444444444", "port": 7774},
+    {"roomIds": [5], "sessionId": "55555555-5555-4555-8555-555555555555", "port": 7775}
+  ]
+}
+```
+
+換成實際位址、場次與 UDP 埠。合併模式使用 `Linked`，`servers` 只有一筆，該筆的 `roomIds` 為 `[1,2,3,4,5]`。同機排演可以將兩個位址都設為 `127.0.0.1`。MR 場次仍須先由主控完成原房間校正鎖定。
+
+```powershell
+& .\Launch-Server.exe --venue-run 'C:\VRCommand\venue-plan.json' `
+  --work 'C:\VRCommand\run-01' --seconds 3600 `
+  --ready-report 'C:\VRCommand\venue-ready-01.json' --report 'C:\VRCommand\venue-result-01.json'
+```
+
+啟動前會核對全館原場次、房號、校正鎖定及本機 UDP 埠，並取得全部原場次的本機啟動鎖。等 `venue-ready` 報告出現，確認各房原場次、來源、公告及 Windows 觀察到的 UDP 綁定，再由控制台配票和開始。獨立場的房控可以各自操作，主控也能沿用原全館開始及結束。
+
+若全館就緒前有程序啟動失敗，本次啟動器會停止自己已建立的遊戲程序。已附掛的場次和錄製留在管理端，由主控依原流程結束。全館就緒後，各場分別等雙封存與 36 秒保留期，正常收尾後由原啟動器停止各自的子程序。若其中一場失敗，其他已就緒場次仍各自收尾。最終報告的 `servers[].result` 保留逐場退出與封存結果，全部場次均成功時才回報 `venue-sealed-stopped`。可加 `--peer-diagnostics on` 為這次所有子程序啟用原來源診斷。
+
 ## 管理服務短暫中斷
 
 2026-11-09 主包 `artifacts/server-packages/windows-server-0.47.0-launcher1.5-win-x64.zip`，83,466,340 bytes，SHA-256 `89cdef1e26468a25cd4a145a817f8b5fe11fddbf2ecd834cfdf3f4394b13a891`。解壓後逐檔核對 328 筆。遊戲執行內容使用 0.47.0 的原建置，配套管理包為控制台 0.31.14。 [實測結果](PROGRESS.md#2026-11-09-遊戲伺服器保留原場次等待管理恢復)
