@@ -115,6 +115,11 @@ internal static class LiveHardwareGateway
 
     private static string FeedbackRoute(Configuration config) => $"/api/sessions/{config.SessionId:D}/rooms/{config.RoomId}/hardware-feedback";
 
+    private static (Guid Stream, long Since)? ActiveEpoch(RoomHardwareFeedback page) =>
+        page.State == SessionState.Running && page.ResetReason != "inactive"
+        && page.StreamId is { } stream && stream != Guid.Empty && page.RunningSinceSequence is > 0 and var since
+            ? (stream, since) : null;
+
     private static GatewayLeases AcquireGatewayLeases(Configuration config)
     {
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData, Environment.SpecialFolderOption.DoNotVerify);
@@ -175,29 +180,35 @@ internal static class LiveHardwareGateway
         {
             while (!run.IsCancellationRequested)
             {
-                using var mock = new TcpClient(AddressFamily.InterNetwork);
-                var connection = Guid.NewGuid();
                 try
                 {
-                    if (config.Version == 2 && (await Read(client, route, config, null, run.Token)).Page.State == SessionState.Ended)
+                    var page = (await Read(client, route, config, null, run.Token)).Page;
+                    if (page.State == SessionState.Ended)
                     {
                         termination = "ended";
                         break;
                     }
+                    if (ActiveEpoch(page) is not { } epoch)
+                    {
+                        await Task.Delay(PollInterval, run.Token);
+                        continue;
+                    }
+                    using var mock = new TcpClient(AddressFamily.InterNetwork);
+                    var connection = Guid.NewGuid();
                     await Connect(mock, config.MockPort, run.Token);
                     var wire = mock.GetStream();
                     await Exchange(wire, new { version = 1, kind = "hello", mode = "simulation", connectionId = connection, config.RoomId },
                         "ready", connection, null, run.Token);
                     connections++;
-                    var page = (await Read(client, route, config, null, run.Token)).Page;
-                    attachments++;
-                    var reattach = false;
-                    while (page.State != SessionState.Ended)
+                    page = (await Read(client, route, config, null, run.Token)).Page;
+                    if (ActiveEpoch(page) == epoch) attachments++;
+                    while (ActiveEpoch(page) == epoch)
                     {
                         await Task.Delay(PollInterval, run.Token);
                         var after = page.ThroughSequence;
                         var current = await Read(client, route, config, after, run.Token);
                         page = current.Page;
+                        if (ActiveEpoch(page) != epoch) break;
                         if (page.ResetReason is not null) continue;
                         var deliveries = page.Signals.Where(current.IsFresh).Select(signal =>
                         {
@@ -214,17 +225,22 @@ internal static class LiveHardwareGateway
                         try
                         {
                             var invalid = await ExchangeFeedback(wire, client, route, config, after, page, deliveries, connection, batch, run.Token);
-                            if (invalid is null) status = "simulated-acknowledged";
-                            else if (invalid.State == SessionState.Ended) page = invalid;
-                            else reattach = true;
+                            if (invalid is not null)
+                            {
+                                page = invalid;
+                                break;
+                            }
+                            status = "simulated-acknowledged";
                         }
                         catch (MockFailure failure) { status = failure.Message; throw; }
                         finally { attempts.Add(new(connection, batch, status, deliveries)); }
-                        if (reattach) break;
                     }
-                    if (reattach) continue;
-                    if (page.State == SessionState.Ended) termination = "ended";
-                    break;
+                    if (page.State == SessionState.Ended)
+                    {
+                        termination = "ended";
+                        break;
+                    }
+                    if (termination == "attempt-limit") break;
                 }
                 catch (MockFailure) { mockFaults++; }
                 catch (Exception failure) when (failure is HttpRequestException or TimeoutException || failure is IOException && failure is not InvalidDataException) { managementFaults++; }

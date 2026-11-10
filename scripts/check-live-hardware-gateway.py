@@ -81,9 +81,9 @@ def run(args):
             for line in self.process.stdout:
                 self.lines.put(line)
 
-        def read(self, kind):
+        def read(self, kind=None):
             frame = json.loads(self.lines.get(timeout=8))
-            assert frame['kind'] == kind
+            assert kind is None or frame['kind'] == kind
             return frame
 
         def reply(self, command='ack'):
@@ -238,6 +238,51 @@ def run(args):
             check(stopped(idle,idle_report,attached_once=True)['attempts']==[] and idle_stop.is_file(),
                   'Operator stop finishes an idle attached gateway and preserves the marker')
 
+            pause_stop = runtime/'idle-pause.stop'
+            pause_report = out/'idle-pause-report.json'
+            idle_pause = invoke(1,'Room1',pause_report,config=stop_config,stop=pause_stop)
+            idle_hello = stop_peer.read('hello')
+            previous_count = attached(1)
+            stop_peer.reply('ready-observe-close')
+            wait(lambda:attached(1)>previous_count,'idle Pause original attachment')
+            action('Pause')
+            idle_closed = stop_peer.read()
+            save('idle-pause-close.json',idle_closed)
+            check(idle_closed['kind']=='closed' and idle_closed['connectionId']==idle_hello['connectionId']
+                  and idle_closed['batchId'] is None, 'Pause closes an already attached idle connection')
+            try:
+                unexpected = stop_peer.lines.get(timeout=.6)
+            except queue.Empty:
+                unexpected = None
+            check(unexpected is None and idle_pause.poll() is None, 'The gateway stays disconnected while paused')
+            epoch = action('Resume')
+            resumed_idle = accept(stop_peer,1,idle_hello['connectionId'])
+            pause_stop.touch()
+            idle_log,_ = idle_pause.communicate(timeout=8)
+            idle_result = json.loads(pause_report.read_text(encoding='utf-8'))
+            check(idle_pause.returncode==0 and not any(secret in idle_log for secret in private)
+                  and resumed_idle != idle_hello['connectionId'] and idle_result['attempts']==[]
+                  and idle_result['termination']=='operator-stop' and idle_result['connections']==idle_result['attachments']==2,
+                  'Resume establishes a new connection with a fresh cursor after an idle Pause')
+
+            crossing_stop = runtime/'crossing-handshake.stop'
+            crossing_report = out/'crossing-handshake-report.json'
+            crossing = invoke(1,'Room1',crossing_report,config=stop_config,stop=crossing_stop)
+            stale_hello = stop_peer.read('hello')
+            action('Pause')
+            epoch = action('Resume')
+            stop_peer.reply('ready-observe-close')
+            stale_close = stop_peer.read('closed')
+            accept(stop_peer,1,stale_hello['connectionId'])
+            crossing_stop.touch()
+            crossing_log,_ = crossing.communicate(timeout=8)
+            crossing_result = json.loads(crossing_report.read_text(encoding='utf-8'))
+            save('crossing-handshake-close.json',stale_close)
+            check(crossing.returncode==0 and not any(secret in crossing_log for secret in private)
+                  and stale_close['connectionId']==stale_hello['connectionId'] and stale_close['batchId'] is None
+                  and crossing_result['connections']==2 and crossing_result['attachments']==1 and crossing_result['attempts']==[],
+                  'A late ready after Pause and Resume cannot attach its old connection to the new Running epoch')
+
             gateways = {room:invoke(room,f'Room{room}',out/f'room-{room}-report.json') for room in peers}
             connections = {room:accept(peer,room) for room,peer in peers.items()}
 
@@ -291,8 +336,8 @@ def run(args):
             save('pause-close.json',closed_batch)
             check(closed_batch['connectionId']==paused_batch['connectionId'] and closed_batch['batchId']==paused_batch['batchId'],
                   'Pause closes the exact pending connection without an ACK')
-            connections[1] = accept(peers[1],1,connections[1])
             old_epoch = epoch; epoch = action('Resume')
+            connections = {room:accept(peer,room,connections[room]) for room,peer in peers.items()}
             publish([(alpha,'ShotFired')], observed=old_epoch)
             ids = publish([(alpha,'ShotFired')]); feedback(1,ids); peers[1].reply()
             check(True, 'Resume emits only the new Running epoch after a paused in-flight batch')
@@ -371,8 +416,8 @@ def run(args):
                   'simulated-acknowledged'] and reports[1]['acknowledged']==7 and reports[1]['mockFaults']==3,
                   'Wrong ACK, timeout, disconnect and Pause remain non-acknowledged attempts')
             check([a['status'] for a in reports[2]['attempts']]==['simulated-acknowledged','simulated-acknowledged','cancelled']
-                  and reports[2]['acknowledged']==2 and reports[2]['connections']==1,
-                  'The other room acknowledges on its original connection after the operator stop and still cancels at End')
+                  and reports[2]['acknowledged']==2 and reports[2]['connections']==2,
+                  'The other room acknowledges on its resumed connection after the operator stop and still cancels at End')
             history = {e['eventId']:e for e in request(path+'/events')}
             for report in [*reports.values(),stop_result,recovered_result]:
                 for attempt in report['attempts']:
@@ -486,13 +531,19 @@ def run(args):
                     'playerId':player['id'],'admissionId':player['admissionId'],'seat':player['seat']}]
                 save(f'bound-room-{room}-config.json',value)
             check(True, 'Explicit regeneration preserves each of the five device maps and binds the new admission')
+            bound_reports = {room:out/f'bound-room-{room}-report.json' for room in bound_peers}
+            preparing_reads = attached(1, bound=True)
+            preparing = invoke(1,'Room1',bound_reports[1],config=updated[1])
+            wait(lambda:attached(1,bound=True)>=preparing_reads+2 or not bound_peers[1].lines.empty(),
+                 'gateway polls the Preparing room without arming the mock')
+            check(bound_peers[1].lines.empty() and preparing.poll() is None,
+                  'A correctly bound Preparing room waits for Running without a mock handshake')
             stream = str(uuid.uuid4())
             request(path+'/combat-stream', {'streamId':stream,'origin':'Simulation'}, 'GameServer')
             epoch = action('Begin'); sequence = 0
             peers = bound_peers
             expected = {player['id']:json.loads(updated[room].read_text(encoding='utf-8'))['bindings'][0] for room,player in players.items()}
-            bound_reports = {room:out/f'bound-room-{room}-report.json' for room in peers}
-            gateways = {1:invoke(1,'Room1',bound_reports[1],config=updated[1])}
+            gateways = {1:preparing}
             connections = {1:accept(peers[1],1,bound=True)}
             room_two = json.loads(updated[2].read_text(encoding='utf-8'))
             device_id = expected[replacement['id']]['deviceId']

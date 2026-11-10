@@ -27,6 +27,21 @@ def emit(value):
     print(json.dumps(value), flush=True)
 
 
+def observe_close(sock, stream, frame, received):
+    sock.settimeout(2)
+    transport = 'eof'
+    try:
+        if stream.read(1) != b'':
+            raise ValueError('Expected the gateway to close its connection')
+    except (ConnectionResetError, ConnectionAbortedError):
+        transport = 'reset'
+    except TimeoutError:
+        transport = 'still-open'
+    emit({'kind':'closed' if transport != 'still-open' else 'still-open', 'connectionId':frame['connectionId'],
+          'batchId':frame.get('batchId'), 'transport':transport,
+          'elapsedMilliseconds':round((time.monotonic()-received)*1000, 2)})
+
+
 def exchange(sock, manual, assigned_room):
     connection = None
     room = None
@@ -57,22 +72,17 @@ def exchange(sock, manual, assigned_room):
             if action == 'drop':
                 return
             if action == 'observe-close':
-                sock.settimeout(2)
-                transport = 'eof'
-                try:
-                    if stream.read(1) != b'':
-                        raise ValueError('Expected the gateway to close its pending connection')
-                except (ConnectionResetError, ConnectionAbortedError):
-                    transport = 'reset'
-                emit({'kind':'closed','connectionId':frame['connectionId'],'batchId':frame.get('batchId'),
-                      'transport':transport,'elapsedMilliseconds':round((time.monotonic()-received)*1000, 2)})
+                observe_close(sock, stream, frame, received)
                 return
-            if action not in ('ack', 'wrong'):
-                raise ValueError('Use ack, wrong, drop, timeout or observe-close')
+            if action not in ('ack', 'wrong') and not (first and action == 'ready-observe-close'):
+                raise ValueError('Use ack, wrong, drop, timeout, observe-close or ready-observe-close during hello')
             reply = {'version':1, 'kind':'ready' if first else 'ack', 'connectionId':frame['connectionId']}
             if not first:
                 reply['batchId'] = str(uuid.uuid4()) if action == 'wrong' else frame['batchId']
             send(sock, reply)
+            if action == 'ready-observe-close':
+                observe_close(sock, stream, frame, received)
+                return
 
 
 def main():

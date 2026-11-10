@@ -888,7 +888,7 @@ def main():
         frames=[]
         room=feed['room']; sid=feed['session']; label=f'{sid}-room-{room}'
         mock_command=[sys.executable,str(hardware/'mock-device.py')]
-        if hardware_manifest['toolVersion']=='0.2.5':mock_command+=['--room',str(room)]
+        if hardware_manifest['toolVersion'] in ('0.2.5','0.2.6'):mock_command+=['--room',str(room)]
         mock=subprocess.Popen(mock_command,env=mock_env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,
                               text=True,encoding='utf-8',creationflags=subprocess.CREATE_NO_WINDOW)
         hardware_processes.append(mock)
@@ -904,7 +904,7 @@ def main():
         config=runtime/(label+'-hardware.json')
         gateway_env={**mock_env,'VR_COMMAND_ROOM_KEY':keys[f'Room{room}']}
         simulator=str(hardware/'VrCommand.HardwareSimulator.dll')
-        if hardware_manifest['toolVersion'] in ('0.2.3','0.2.4','0.2.5'):
+        if hardware_manifest['toolVersion'] in ('0.2.3','0.2.4','0.2.5','0.2.6'):
             seat_map=runtime/(label+'-seat-map.json')
             map_value={key:value for key,value in setup.items() if key!='bindings'}
             map_value['devices']=[{'deviceId':b['deviceId'],'seat':b['seat']} for b in bindings]
@@ -1923,6 +1923,10 @@ def main():
     def verify_venue_phase(entries, linked):
         mode = 'linked' if linked else 'independent'
         room_two = None if linked else entries[1]['sessionId']
+        mock_feeds = [feed for entry in entries for feed in entry.get('hardwareFeedback', []) if 'mock' in feed]
+        verify_mock_resume = mock_feeds and hardware_manifest['toolVersion'] == '0.2.6'
+        def handshakes(feed):
+            return [frame['connectionId'] for frame in feed['mock']['frames'] if frame['kind']=='hello']
         if room_two: command(room_two, 'Pause')
         route = '/api/venue/phase'
         def submit(action):
@@ -1961,7 +1965,18 @@ def main():
         check(retry['duplicate'] and retry['sessions'] == pause['sessions'] and request(route)['resume'] == [],
               mode+' late venue Pause retry keeps the original receipt without pausing again')
         save(mode+'-venue-phase.json', {'pause': pause, 'paused': paused, 'resume': resume, 'resumed': resumed, 'pauseRetry': retry})
+        if verify_mock_resume and room_two:
+            manual = next(feed for feed in mock_feeds if feed['session']==room_two)
+            check(len(handshakes(manual))==1, 'independent room 2 stays on hold while the other four rooms resume')
         if room_two: command(room_two, 'Resume')
+        if verify_mock_resume:
+            resumed_connections = {}
+            for feed in mock_feeds:
+                ids = wait(lambda: (current if len(current := handshakes(feed)) >= 2 else None), 8,
+                           mode+f' room {feed["room"]} resumed mock handshake')
+                check(len(ids)==len(set(ids))==2, mode+f' room {feed["room"]} resumes on exactly one fresh mock connection')
+                resumed_connections[feed['room']] = ids
+            save(mode+'-venue-hardware-connections.json',resumed_connections)
     def verify_mr_alignment_archive(entry, files):
         sid = entry['sessionId']
         terminal = request('/api/sessions/'+sid)
