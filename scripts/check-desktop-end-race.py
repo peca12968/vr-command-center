@@ -6,6 +6,7 @@ import json
 import os
 import re
 from pathlib import Path
+import subprocess
 import sys
 import time
 import urllib.request
@@ -16,6 +17,63 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('race_debrief', ROOT/'scripts/check-desktop-debrief.py')
 debrief = importlib.util.module_from_spec(spec); spec.loader.exec_module(debrief)
 vm = debrief.venue_module
+
+
+class PackagedRaceVenue(vm.Venue):
+    def __init__(self, args, witness):
+        super().__init__(args, artifact_family='desktop-end-race')
+        self.witness = witness
+        self.packaged = {}
+
+    def launch(self, name, config, visible=False, *, extra_args=()):
+        if name not in ('end-race-first', 'end-race-late'):
+            return super().launch(name, config, visible, extra_args=extra_args)
+        self.save(name + '.json', config)
+        path = self.directory / name
+        report = path.with_suffix('.launch.json')
+        status = path.with_suffix('.status.json')
+        process = subprocess.Popen([str(self.args.player_package / 'Launch-Player.exe'), '--launch', '--headless', '--wait',
+            '--config', str(path.with_suffix('.json')), '--log', str(path.with_suffix('.log')),
+            '--report', str(report), '--status-report', str(status)], cwd=self.directory, creationflags=subprocess.CREATE_NO_WINDOW)
+        self.processes[name] = process
+        self.packaged[name] = {'status': status, 'handle': None, 'pid': None}
+
+        def started():
+            if not report.is_file(): return None
+            result = vm.read_json(report)
+            return result if result['status'] == 'started' else None
+
+        result = self.wait(started, 20, name + ' packaged native start')
+        pid = result['processId']
+        if type(pid) is not int or pid <= 0 or pid in (process.pid, os.getpid()):
+            raise ValueError('Unexpected original packaged player process')
+        self.packaged[name].update(pid=pid, handle=self.witness(pid, allow_terminate=True))
+
+    def status(self, name, state):
+        record = self.packaged[name]
+        if not record['status'].is_file(): return None
+        result = vm.read_json(record['status'])
+        if result['processId'] != record['pid'] or result['complete'] is not True or result['logAvailable'] is not True:
+            raise ValueError('Packaged status does not match the original native player log')
+        return result if result['state'] == state else None
+
+    def stop(self, name):
+        if name not in self.packaged:
+            return super().stop(name)
+        process = self.processes[name]
+        handle = self.packaged[name]['handle']
+        if handle is not None:
+            handle.terminate()
+            handle.wait()
+            if process.wait(timeout=15) != 0:
+                raise RuntimeError('Packaged launcher did not publish its terminal status')
+            handle.close()
+            self.packaged[name]['handle'] = None
+        elif process.poll() is None:
+            subprocess.run([str(Path(os.environ['WINDIR']) / 'System32/taskkill.exe'), '/PID', str(process.pid), '/T', '/F'],
+                           capture_output=True, timeout=10, check=True)
+            process.wait(timeout=10)
+        del self.processes[name]
 
 
 def tool_fingerprint():
@@ -51,10 +109,24 @@ def main():
     p.add_argument('--player-exe', type=Path, default=ROOT/'artifacts/desktop/VrCommand.exe')
     p.add_argument('--api-dll', type=Path, default=Path(os.environ.get('VR_COMMAND_API_DLL', ROOT/'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')))
     p.add_argument('--mode', choices=['join-delay','result-drop','result-large-drop'], default='join-delay')
+    p.add_argument('--player-package', type=Path, help='For result-drop, verify waiting and interrupted status using the current extracted Windows player launcher')
     p.add_argument('--post-seal-delay', type=float, default=1, help='Additional join-delay seconds after exact seal, 0..3')
     args = p.parse_args(); args.duration=300; args.job_workers=2; args.visible_room=0; args.check=False
     if not 0 <= args.post_seal_delay <= 3: p.error('post-seal-delay must be 0..3 seconds')
-    vm.verify_player(args); fingerprint=tool_fingerprint(); v = vm.Venue(args, artifact_family='desktop-end-race'); gate = None; report = None
+    if args.player_package:
+        if args.mode != 'result-drop': p.error('Packaged status verification requires --mode result-drop')
+        from importlib.util import spec_from_file_location, module_from_spec
+        spec = spec_from_file_location('race_package_check', ROOT/'scripts/check-player-package.py')
+        check_package = module_from_spec(spec); spec.loader.exec_module(check_package)
+        args.player_package = check_package.package.plain(args.player_package)
+        manifest = check_package.package.verify(args.player_package)
+        if manifest['launcherSourceSha256'] != check_package.package.digest(ROOT/'tools/WindowsPlayerLauncher/PlayerLauncher.cs'):
+            p.error('Use the package from the current launcher source')
+        args.player_exe = args.player_package / 'VrCommand.exe'
+        spec = spec_from_file_location('race_control_check', ROOT/'scripts/check-control-package.py')
+        control = module_from_spec(spec); spec.loader.exec_module(control)
+    vm.verify_player(args); fingerprint=tool_fingerprint(); gate = None; report = None
+    v = PackagedRaceVenue(args, control.ChildWitness) if args.player_package else vm.Venue(args, artifact_family='desktop-end-race')
     try:
         v.start()
         mission = v.request('/api/missions', {'name':'End during approved join', 'briefing':'Owned UDP hold; genuine Windows clients, no injected gameplay',
@@ -93,6 +165,9 @@ def main():
             time.sleep(args.post_seal_delay)
         else:
             v.wait(lambda:gate.held.is_set(),5,'drop armed after pending receipt')
+            if args.player_package:
+                pending_status = v.wait(lambda:v.status('end-race-late', 'ResultPending'),5,'original packaged launcher waiting for results')
+                v.save('packaged-result-pending.json', pending_status)
             def terminal():
                 if re.search(r'^VR_SERVER_DEBRIEF_TIMEOUT id='+late_connection+r'$',server(),re.M): return 'resultDeadline'
                 if args.mode=='result-drop' and re.search(r'^VR_SERVER_CLIENT_LEFT id='+late_connection+r'$',server(),re.M): return 'connectionReleased'
@@ -103,10 +178,17 @@ def main():
             timeout_observation={'secondsSinceEndRequest':time.monotonic()-end_started,'terminalKind':terminal_kind,'finalReceived':False,'pendingReceived':True}
             v.save('timeout-observation.json',timeout_observation)
             v.wait(lambda:re.search(r'^VR_SERVER_CLIENT_LEFT id='+late_connection+r'$',server(),re.M),5,'server releases timed-out connection')
+            if args.player_package:
+                v.stop('end-race-late')  # Stop only the original native child while its result is still blocked.
+                interrupted = v.status('end-race-late', 'ResultInterrupted')
+                if (not interrupted or not interrupted['exited'] or interrupted['transitions'] !=
+                        ['Waiting', 'Connected', 'ResultPending', 'ResultInterrupted']):
+                    raise RuntimeError('The packaged launcher did not retain the exact interrupted result history')
+                v.save('packaged-result-interrupted.json', interrupted)
         if gate.release_reason is not None: raise RuntimeError('Gate limit invalidated the intended experiment')
         gate.release()
         deadline=time.monotonic()+36
-        while time.monotonic()<deadline:
+        while not args.player_package and time.monotonic()<deadline:
             if gate.error: raise RuntimeError(gate.error)
             text=debrief.log_text(v,'end-race-late')
             if 'VR_CLIENT_DEBRIEF_FINAL ' in text or 'VR_CLIENT_DISCONNECTED' in text or 'VR_CLIENT_ADMISSION_REJECTED' in text: break
@@ -118,6 +200,12 @@ def main():
         report={'complete':False,'source':'Actual Windows UDP; bounded opaque downstream delay or loss; Simulation rigs','headsets':0,
             'playerBuildReceipt':v.receipt,'mode':args.mode,'beforeEndClientConnectedLogged':connected_before,'firstResult':first_result,'lateResult':late_result,
             'timeoutObservation':timeout_observation,'sealed':sealed,'gate':gate.report()}
+        if args.player_package:
+            first_status = v.wait(lambda:v.status('end-race-first', 'Final'),5,'unaffected packaged launcher receives results')
+            if first_status['transitions'] != ['Waiting', 'Connected', 'ResultPending', 'Final'] or late_result is not None:
+                raise RuntimeError('The normal packaged result and interrupted result were not distinguished')
+            v.save('packaged-result-final.json', first_status)
+            report['packagedStatus'] = {'unaffected': first_status, 'pending': pending_status, 'interrupted': interrupted}
         v.save('race-result.json',report)
         if args.mode=='join-delay' and late_result is None: raise RuntimeError('Approved participant did not receive its sealed result')
         if args.mode=='join-delay': v.wait(lambda:server().count('VR_SERVER_DEBRIEF_ACK ')==2,5,'both result acknowledgements')
@@ -134,6 +222,8 @@ def main():
             'unaffected peer receives exact own sealed result','delayed participant receives result' if args.mode=='join-delay' else 'pending participant has no final during bounded packet loss',
             'Ended ticket rejected without result or ledger mutation','combat stream id and final sequence agree',
             'entire replay contiguous and final packet / statistics unchanged']
+        if args.player_package:
+            report['checks'].append('Extracted player launcher distinguishes exact pending, interrupted and final histories')
         v.save('race-result.json',report);v.evidence.extend(report['checks'])
         v.summary()
     except BaseException as error:

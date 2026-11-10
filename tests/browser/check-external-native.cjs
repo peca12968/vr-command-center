@@ -218,7 +218,9 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
       results.push(result);
       if (launcherStatus) {
         const state = await until(async () => { const s = JSON.parse(await fs.readFile(statusPath, 'utf8').catch(() => '{}')); return s.state === 'Final' && s; }, 'launcher retained sealed result status');
-        assert.equal(state.complete, true); assert.deepEqual(state.transitions, ['Waiting', 'Connected', 'Final']);
+        assert.equal(state.complete, true);
+        const pending = (await fs.readFile(log, 'utf8')).includes(`VR_CLIENT_DEBRIEF_PENDING ${id}`);
+        assert.deepEqual(state.transitions, pending ? ['Waiting', 'Connected', 'ResultPending', 'Final'] : ['Waiting', 'Connected', 'Final']);
         const serialized = JSON.stringify(state); assert.ok(!serialized.includes(player.id) && !serialized.includes(player.admissionId) && !Object.values(tokens).some(token => serialized.includes(token)));
       }
     }

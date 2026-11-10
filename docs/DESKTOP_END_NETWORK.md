@@ -11,6 +11,8 @@ python scripts/check-desktop-end-race.py --runtime-root "$env:LOCALAPPDATA\VrCom
 python scripts/check-desktop-end-race.py --runtime-root "$env:LOCALAPPDATA\VrCommand\SimulationRuns" --mode result-large-drop
 ```
 
+`--mode result-drop --player-package <解壓後的 VRCommand-Player 目錄>` 可用 Windows 啟動器 1.4 重現戰績等待中斷。兩位原生玩家都用套件啟動。檢查器等受影響端收到等待戰績、且伺服器已釋放該連線，再在仍阻斷下行時關閉自己啟動的受影響程序，核對終止狀態為 `ResultInterrupted`。另一位玩家正常收到對應雙封存的 `Final`。這個變體同時驗證了等待期間關閉遊戲的狀態提示。 [玩家狀態說明](PLAYER_CONNECTION_STATUS.md)
+
 | 模式 | 真正故障條件 | 檢查 |
 |---|---|---|
 | join-delay | 伺服器記錄新的pending時開始暫存下行；已approved、client尚無CONNECTED log就End，精確seal後再延遲1秒（可設`--post-seal-delay 0..3`）釋放 | 原順序轉送後兩位各自收到自己的sealed結果並ack |

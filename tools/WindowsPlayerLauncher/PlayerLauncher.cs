@@ -167,7 +167,7 @@ internal static class PlayerLauncher
                     {
                         var monitor = new PlayerConnectionMonitor(log);
                         while (!child.WaitForExit(200)) { monitor.Poll(); StatusReport(monitor, child.Id, false); }
-                        monitor.Poll(); StatusReport(monitor, child.Id, true);
+                        monitor.Poll(exited: true); StatusReport(monitor, child.Id, true);
                     }
                     Report(new { status = "exited", processId = child.Id, exitCode = child.ExitCode }); return child.ExitCode;
                 }
@@ -309,8 +309,9 @@ internal static class PlayerLauncher
             timer.Tick += delegate
             {
                 if (child == null) { RenderTicket(); return; }
-                monitor.Poll(); status.Text = monitor.Message;
-                if (child.HasExited)
+                var exited = child.HasExited;
+                monitor.Poll(exited); status.Text = monitor.Message;
+                if (exited)
                 {
                     var final = monitor.State == "Final"; child.Dispose(); child = null; choose.Enabled = true; load.Enabled = true; path.Enabled = true; play.Enabled = review.Loaded;
                     RenderTicket();
@@ -373,8 +374,20 @@ internal sealed class PlayerConnectionMonitor
         else if ((value == "VR_OPENXR_STARTUP status=rejected" || value == "VR_OPENXR_STARTUP status=unavailable")
                  && (State == "Waiting" || State == "Unconfirmed")) Change("OpenXRUnavailable");
         else if (value == "VR_CLIENT_ADMISSION_REJECTED") Change("Rejected");
-        else if (value == "VR_CLIENT_DISCONNECTED" && State != "Final") Change("Disconnected");
-        else if (value.StartsWith("VR_CLIENT_DEBRIEF_FINAL {", StringComparison.Ordinal) && State == "Connected") Change("Final");
+        else if (value == "VR_CLIENT_DISCONNECTED")
+        {
+            if (State == "ResultPending") Change("ResultInterrupted");
+            else if (State != "ResultInterrupted") Change("Disconnected");
+        }
+        else if (State == "Connected" && IsPendingMarker(value)) Change("ResultPending");
+        else if ((State == "Connected" || State == "ResultPending") && value.StartsWith("VR_CLIENT_DEBRIEF_FINAL {", StringComparison.Ordinal)) Change("Final");
+    }
+    private static bool IsPendingMarker(string value)
+    {
+        const string prefix = "VR_CLIENT_DEBRIEF_PENDING ";
+        Guid session;
+        return value.Length == prefix.Length + 36 && value.StartsWith(prefix, StringComparison.Ordinal)
+            && Guid.TryParseExact(value.Substring(prefix.Length), "D", out session) && session != Guid.Empty;
     }
     internal void WaitingSeconds(double seconds) { if (State == "Waiting" && seconds >= 30) Change("Unconfirmed"); }
     internal void Feed(string value)
@@ -389,19 +402,32 @@ internal sealed class PlayerConnectionMonitor
             }
         }
     }
-    public void Poll()
+    public void Poll(bool exited = false)
     {
         WaitingSeconds(clock.Elapsed.TotalSeconds);
-        if (invalidLog) return;
+        if (!invalidLog) ReadAvailable(exited);
+        if (exited && State == "ResultPending") Change("ResultInterrupted");
+    }
+    private void ReadAvailable(bool drain)
+    {
         try
         {
             using (var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
             {
-                if (file.Length < offset || file.Length - offset > 2 * 1024 * 1024)
+                var remaining = file.Length - offset;
+                if (remaining < 0 || remaining > 2 * 1024 * 1024)
                 { LogAvailable = false; Truncated = true; invalidLog = true; return; }
                 file.Position = offset; var bytes = new byte[65536]; var chars = new char[65536];
-                var length = file.Read(bytes, 0, bytes.Length); offset += length;
-                Feed(new string(chars, 0, decoder.GetChars(bytes, 0, length, chars, 0, false))); LogAvailable = true;
+                while (remaining > 0)
+                {
+                    var length = file.Read(bytes, 0, (int)Math.Min(remaining, bytes.Length));
+                    if (length == 0) break;
+                    offset += length;
+                    Feed(new string(chars, 0, decoder.GetChars(bytes, 0, length, chars, 0, false)));
+                    if (!drain) break;
+                    remaining -= length;
+                }
+                LogAvailable = true;
             }
         }
         catch (IOException) { LogAvailable = false; }
@@ -412,6 +438,9 @@ internal sealed class PlayerConnectionMonitor
         get
         {
             if (State == "Final") return "遊戲回報已收到最終戰績。結束斷線不會清除戰績。";
+            if (State == "ResultPending") return LogAvailable ? "正在等待最終戰績。請保留遊戲視窗，等候結果。"
+                : "先前正在等待最終戰績，目前無法讀取記錄。請查看遊戲視窗。";
+            if (State == "ResultInterrupted") return "等待戰績期間已中斷，未確認收到最終戰績。請向控制人員核對。";
             if (State == "OpenXRUnavailable") return "OpenXR 未能啟動。請確認頭盔與 Windows OpenXR 執行環境。";
             if (State == "Rejected") return "遊戲回報入場遭拒。請向控制人員重新取得自己的連線檔。";
             if (State == "Disconnected") return "遊戲回報連線中斷。可在遊戲內重新讀取控制人員更新的票券。";

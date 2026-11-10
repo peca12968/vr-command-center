@@ -43,7 +43,7 @@ README = '''VR Command Windows 玩家包
 啟動前的票券倒數依本機時間顯示，入場由遊戲伺服器驗證。
 
 WASD移動；方向鍵或按住右鍵拖曳瞄準；Space／左鍵射擊；R換彈；B任務簡報；Escape關閉簡報。
-任務由控制人員開始、暫停與結束。結束後等待最終戰績，勿立即關窗。
+任務由控制人員開始、暫停與結束。啟動器顯示「正在等待最終戰績」時，請保留遊戲視窗。等待期間若中斷，可請控制人員從原場次確認戰績。
 同次入場斷線可在遊戲的Reconnect按鈕重新讀取原路徑的最新票券。
 
 Windows 開發版自 0.46.0 起可用 VrCommand.exe --vr-config 玩家連線檔 --vr-link-metrics 新JSON絕對路徑 選用連線量測。上層目錄須已存在。結果含往返時間、逾時與 Unity 更新次數。
@@ -148,7 +148,7 @@ def package(player, output, compiler):
         subprocess.run([str(compiler), '/nologo', '/target:winexe', '/platform:x64', '/optimize+', '/warnaserror+',
                         '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', '/reference:System.Web.Extensions.dll',
                         '/out:' + str(folder / 'Launch-Player.exe'), str(source)], check=True)
-        manifest = {'version': 1, 'platform': 'Windows-x64', 'launcherVersion': '1.3.0', 'createdAtUtc': datetime.now(timezone.utc).isoformat(),
+        manifest = {'version': 1, 'platform': 'Windows-x64', 'launcherVersion': '1.4.0', 'createdAtUtc': datetime.now(timezone.utc).isoformat(),
                     'build': receipt, 'launcherSourceSha256': digest(source), 'scope': 'Offline portable PC player; no tickets; not a signature or network/device verification',
                     'files': [{'path': file.relative_to(folder).as_posix(), 'bytes': file.stat().st_size, 'sha256': digest(file)}
                               for file in sorted(folder.rglob('*')) if file.is_file()]}

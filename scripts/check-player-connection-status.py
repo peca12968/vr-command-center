@@ -31,7 +31,7 @@ def main():
     run = subprocess.run([str(executable), str(directory / 'fixtures')], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
     (directory / 'run.log').write_bytes(run.stdout)
     if run.returncode: raise RuntimeError('Actual launcher monitor checks failed; preserve the run log')
-    report = json.loads(run.stdout.decode('utf-8')); assert report['complete'] and report['checks'] == 17
+    report = json.loads(run.stdout.decode('utf-8')); assert report['complete'] and report['checks'] == 26
     report['sourceHashes'] = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in sources}
     (directory / 'checks.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     print(json.dumps({'complete': True, 'checks': report['checks'], 'directory': str(directory), 'sourceHashes': report['sourceHashes']}))
