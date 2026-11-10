@@ -3,9 +3,11 @@ using System.Text.Json.Serialization;
 namespace VrCommand.Core;
 
 public record OpenCombatStream(Guid StreamId, CombatOrigin Origin, int MissionClockVersion = 0,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int RoomEnemyPolicyVersion = 0);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int RoomEnemyPolicyVersion = 0,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? ExpectedSequence = null);
 public record CombatStreamView(Guid StreamId, CombatOrigin Origin, OperatorIdentity Owner, long AcceptedSequence = 0, bool Sealed = false, int MissionClockVersion = 0,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int RoomEnemyPolicyVersion = 0);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] int RoomEnemyPolicyVersion = 0,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] long? ExpectedSequence = null);
 public record StreamCombatRecord(Guid StreamId, long StreamSequence, long ObservedSequence, CombatReport Report);
 public record SealCombatStream(Guid StreamId, long FinalSequence);
 public record StreamReceipt(Guid StreamId, long AcceptedSequence, bool Duplicate, SessionStatistics Statistics);
@@ -21,12 +23,14 @@ internal static class CombatStreamProjection
             var open = entry.Read<OpenCombatStream>();
             if (open.StreamId == Guid.Empty || open.Origin == CombatOrigin.Unspecified || !Enum.IsDefined(open.Origin)
                 || open.MissionClockVersion is < 0 or > 1 || open.RoomEnemyPolicyVersion is < 0 or > 1
-                || ((open.MissionClockVersion != 0 || open.RoomEnemyPolicyVersion != 0) && entry.SchemaVersion < 7))
+                || ((open.MissionClockVersion != 0 || open.RoomEnemyPolicyVersion != 0 || open.ExpectedSequence.HasValue) && entry.SchemaVersion < 7))
                 throw new ArgumentException("A stream requires a non-empty ID and explicit origin.");
             if (current.State != SessionState.Preparing || current.CombatStream is not null)
                 throw new InvalidOperationException("Attach one combat stream while preparing, before combat begins.");
+            if (open.ExpectedSequence is long expected && expected != current.Sequence)
+                throw new InvalidOperationException("Session changed after the launch plan was reviewed.");
             return current with { CombatStream = new(open.StreamId, open.Origin, actor, MissionClockVersion: open.MissionClockVersion,
-                RoomEnemyPolicyVersion: open.RoomEnemyPolicyVersion) };
+                RoomEnemyPolicyVersion: open.RoomEnemyPolicyVersion, ExpectedSequence: open.ExpectedSequence) };
         }
         var stream = current.CombatStream ?? throw new InvalidOperationException("No combat stream is attached.");
         if (stream.Owner != actor) throw new AccessDeniedException("Combat stream belongs to another server identity.");
@@ -94,6 +98,14 @@ public sealed partial class SessionManager
             return receipt! with { Duplicate = duplicate };
         }
     }
+    public CombatStreamView OpenGuardedStream(Guid id, OpenCombatStream request, OperatorIdentity actor)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        AccessPolicy.ReportCombat(actor);
+        if (request.ExpectedSequence is null or < 1) throw new ArgumentException("A positive expected session sequence is required.");
+        return OpenStream(id, request, actor);
+    }
+
     public CombatStreamView OpenStream(Guid id, OpenCombatStream request, OperatorIdentity? actor = null)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -104,7 +116,8 @@ public sealed partial class SessionManager
             if (history.View.CombatStream is { } existing)
             {
                 if (existing.StreamId != request.StreamId || existing.Origin != request.Origin || existing.Owner != actor
-                    || existing.MissionClockVersion != request.MissionClockVersion || existing.RoomEnemyPolicyVersion != request.RoomEnemyPolicyVersion)
+                    || existing.MissionClockVersion != request.MissionClockVersion || existing.RoomEnemyPolicyVersion != request.RoomEnemyPolicyVersion
+                    || existing.ExpectedSequence != request.ExpectedSequence)
                     throw new InvalidOperationException("A different stream or owner is already attached.");
                 return existing;
             }

@@ -21,6 +21,7 @@ namespace VrCommand.Unity
         public string gameServerKey = "";
         public string telemetryOrigin = "Simulation";
         public string telemetryDirectory = "";
+        public long expectedSequence;
         public string roomAlignmentSha256 = "";
         public bool questPassthrough;
         public bool requestMixedReality;
@@ -54,6 +55,8 @@ namespace VrCommand.Unity
                 throw new InvalidOperationException("Connection configuration is invalid.");
             if (Application.platform == RuntimePlatform.Android && config.role != "Client")
                 throw new InvalidOperationException("Headsets must use client mode.");
+            if (config.expectedSequence < 0 || (config.expectedSequence > 0 && config.role != "Server"))
+                throw new InvalidOperationException("A reviewed session sequence is valid only for a dedicated server.");
             if (config.IsServer && (!Guid.TryParse(config.sessionId, out _) || string.IsNullOrWhiteSpace(config.gameServerKey)))
                 throw new InvalidOperationException("Server management configuration is missing.");
             if (config.IsServer)

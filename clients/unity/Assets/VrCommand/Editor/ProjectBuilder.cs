@@ -99,8 +99,8 @@ namespace VrCommand.Unity.Editor
         {
             PlayerSettings.companyName = "VR Command";
             PlayerSettings.productName = "VR Command Quest";
-            PlayerSettings.bundleVersion = "0.50.2";
-            PlayerSettings.Android.bundleVersionCode = 67;
+            PlayerSettings.bundleVersion = "0.50.3";
+            PlayerSettings.Android.bundleVersionCode = 68;
             PlayerSettings.insecureHttpOption = InsecureHttpOption.DevelopmentOnly;
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, "com.vrcommand.quest");
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
@@ -295,6 +295,7 @@ namespace VrCommand.Unity.Editor
         [Serializable] private sealed class PlayerBuildReceipt
         {
             public int schemaVersion = 1;
+            public int guardedCombatStreamVersion = 1;
             public string target, outputPath, completedAtUtc, unityVersion, sourceFingerprint, sceneNetworkId, playerPrefabId;
             public long totalBytes;
         }

@@ -140,6 +140,7 @@ internal static class ServerLauncher
     internal sealed class Settings
     {
         internal string Api, Key, Session, Address, Bind, CertificateSha256; internal int Port;
+        internal long ExpectedSequence;
         internal static Settings From(Dictionary<string, object> value)
         {
             var pin = Text(value, "managementCertificateSha256");
@@ -184,7 +185,7 @@ internal static class ServerLauncher
             }
             Need(Key != null && Key.Length >= 32 && Key.Length <= 512, "GameServer金鑰格式錯誤。"); foreach (var c in Key) Need(c > 32 && c < 127, "GameServer金鑰格式錯誤。");
         }
-        internal object Config(string telemetry, string origin) { return new { role = "Server", address = Address, listenAddress = Bind, port = Port, sessionId = Session, managementApiUrl = Api, managementCertificateSha256 = CertificateSha256, gameServerKey = Key, telemetryOrigin = origin, telemetryDirectory = telemetry }; }
+        internal object Config(string telemetry, string origin) { return new { role = "Server", address = Address, listenAddress = Bind, port = Port, sessionId = Session, managementApiUrl = Api, managementCertificateSha256 = CertificateSha256, gameServerKey = Key, telemetryOrigin = origin, telemetryDirectory = telemetry, expectedSequence = ExpectedSequence }; }
 
         private bool CheckCertificate(X509Certificate certificate, SslPolicyErrors errors)
         {
@@ -227,7 +228,14 @@ internal static class ServerLauncher
                 throw;
             }
         }
-        internal void Identity() { ValidateTarget(); Need(Text(Request("/"), "version") == "0.31.0", "需要管理服務0.31.0。"); Need(Text(Request("/api/me"), "role") == "GameServer", "請使用GameServer角色金鑰。"); }
+        internal void Identity(bool requireGuardedStream = false)
+        {
+            ValidateTarget();
+            var service = Request("/");
+            Need(Text(service, "version") == "0.31.0", "需要管理服務0.31.0。");
+            Need(!requireGuardedStream || Num(service, "guardedCombatStreamVersion") == 1, "此計畫需要支援場次序號登記的管理包 0.31.113 或以上版本。");
+            Need(Text(Request("/api/me"), "role") == "GameServer", "請使用GameServer角色金鑰。");
+        }
         internal void CheckPort()
         {
             using (var socket = new Socket(AddressFamily.InterNetwork, SocketType.Dgram, ProtocolType.Udp))
@@ -294,10 +302,10 @@ internal static class ServerLauncher
     internal sealed class Catalog
     {
         internal Settings Target; internal string PathName, InstanceId; internal List<Choice> Choices;
-        internal static Catalog Load(string path)
+        internal static Catalog Load(string path, bool requireGuardedStream = false)
         {
             var catalog = ReadTarget(path);
-            catalog.Target.Identity();
+            catalog.Target.Identity(requireGuardedStream);
             catalog.Choices = Parse(catalog.Target.Sessions());
             return catalog;
         }
@@ -434,17 +442,22 @@ internal static class ServerLauncher
             PeerDiagnosticsEnabled = peerDiagnostics;
             var timer = Stopwatch.StartNew(); Status = "等待遊戲來源與UDP啟動";
             var awaitingUdp = false;
+            var startedLine = "VR_NETWORK_STARTED role=Server started=True background=True port=" + Config.Port;
             while (timer.Elapsed.TotalSeconds < 90)
             {
                 Need(cancelled == null || !cancelled(), "已中止啟動；此輪未完成。");
+                var log = BootstrapLog();
+                Need(!log.Contains("VR_GUARDED_SOURCE_OPEN status=conflict"), "場次序號已變更或已有來源，請回主控台重新核對。");
+                Need(!log.Contains("VR_GUARDED_SOURCE_OPEN status=failed"), "管理服務未確認場次序號，請核對版本與連線設定。");
                 Need(!Process.Exited, "遊戲程序在就緒前結束。");
                 // This private log line is emitted only AFTER Unity verifies its own immutable combat-stream receipt.
                 // New work/log + actual owned process + canonical bootstrap order bind the API stream to this child.
-                if (NetworkStarted())
+                if (log.Contains(startedLine + "\n") || log.Contains(startedLine + "\r\n"))
                 {
                     state = Config.Request("/api/sessions/" + Config.Session); var stream = Child(state, "combatStream"); Guid id;
                     Stream = Text(stream, "streamId");
                     Need(Guid.TryParseExact(Stream, "D", out id) && id != Guid.Empty && Text(stream, "origin") == Origin && Text(Child(stream, "owner"), "id") == "game-server", "遊戲來源身分不符。");
+                    Need(Config.ExpectedSequence == 0 || Num(stream, "expectedSequence") == Config.ExpectedSequence, "遊戲來源未確認本次場次序號。");
                     var world = Config.Request("/api/sessions/" + Config.Session + "/world", missing: true);
                     if (world != null)
                     {
@@ -477,12 +490,12 @@ internal static class ServerLauncher
                 && endpoint.ContainsKey("sessionEnded") && endpoint["sessionEnded"] is bool && !Yes(endpoint, "sessionEnded"), "公告回條不符。");
             Status = "伺服器就緒，請在控制台開始任務";
         }
-        bool NetworkStarted()
+        string BootstrapLog()
         {
-            var path = Path.Combine(Work, "server.log"); if (!File.Exists(path)) return false;
+            var path = Path.Combine(Work, "server.log"); if (!File.Exists(path)) return "";
             using (var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite)) using (var reader = new StreamReader(file, Encoding.UTF8))
             {
-                Need(file.Length <= 4 * 1024 * 1024, "就緒log超界。"); var text = reader.ReadToEnd(); return text.Contains("VR_NETWORK_STARTED role=Server started=True background=True port=" + Config.Port + "\n") || text.Contains("VR_NETWORK_STARTED role=Server started=True background=True port=" + Config.Port + "\r\n");
+                Need(file.Length <= 4 * 1024 * 1024, "就緒log超界。"); return reader.ReadToEnd();
             }
         }
         internal void Wait(int seconds, Func<bool> cancel)
@@ -601,7 +614,7 @@ internal static class ServerLauncher
                     var row = new Dictionary<string, object> { { "roomIds", choice.Rooms }, { "sessionId", choice.Id },
                         { "missionId", choice.MissionId }, { "missionName", choice.MissionName }, { "experienceMode", choice.Experience },
                         { "address", server.Config.Address }, { "listenAddress", server.Config.Bind }, { "port", server.Config.Port } };
-                    if (Version == 2) row.Add("sessionSequence", choice.Sequence);
+                    if (Version >= 2) row.Add("sessionSequence", choice.Sequence);
                     return row;
                 }) };
         }
@@ -657,11 +670,15 @@ internal static class ServerLauncher
     static VenuePlan LoadVenuePlan(Dictionary<string, object> plan, string instancePath)
     {
         var version = Num(plan, "version"); var topology = Text(plan, "topology"); object raw;
-        Need((version == 1 || version == 2) && plan.Count == 6 && (topology == "Linked" || topology == "Independent")
+        Need(version >= 1 && version <= 3 && plan.Count == 6 && (topology == "Linked" || topology == "Independent")
             && plan.TryGetValue("servers", out raw) && raw is object[]
             && ((object[])raw).Length == (topology == "Linked" ? 1 : 5), "請提供完整的獨立或合併場館設定。");
         Verify();
-        var catalog = Catalog.Load(instancePath);
+        var guarded = version >= 2;
+        if (guarded)
+            Need(Num(Read(Path.Combine(Root, "Runtime", "build-receipt.json"), 8192), "guardedCombatStreamVersion") == 1,
+                "此計畫需要支援場次序號登記的遊戲伺服器 0.50.3 或以上版本。");
+        var catalog = Catalog.Load(instancePath, guarded);
         Need(Num(catalog.Target.Request(VenueEndpointsRoute, missing: true), "version") == 1,
             "管理服務尚未支援全館端點公告，請搭配 0.31.100 或以上版本。");
         var rooms = new HashSet<int>(); var ports = new HashSet<int>();
@@ -669,17 +686,18 @@ internal static class ServerLauncher
         foreach (var item in (object[])plan["servers"])
         {
             var row = Map(item);
-            Need(row != null && row.Count == (version == 2 ? 5 : 3) && Num(row, "port") >= 1024 && Num(row, "port") <= 65535,
+            Need(row != null && row.Count == (guarded ? 5 : 3) && Num(row, "port") >= 1024 && Num(row, "port") <= 65535,
                 "請提供有效場次、房號及 UDP 埠。");
             var choice = catalog.Choices.Find(candidate => candidate.Id == Text(row, "sessionId"));
             var assigned = Choice.ReadRooms(row, topology);
             Need(choice != null && choice.Mode == topology && String.Join(",", choice.Rooms) == String.Join(",", assigned),
                 "原場次與房間不符或已無法啟動。");
-            if (version == 2)
+            if (guarded)
                 CheckVenueRevision(choice, Num(row, "sessionSequence"), Choice.GuidValue(Text(row, "missionId")), assigned);
             Need(choice.CanStart, Choice.AlignmentPrompt(choice.MissingAlignmentRooms));
             foreach (var room in assigned) Need(rooms.Add(room), "場館房間重複。");
             var config = catalog.Target.ForSession(choice.Id, Text(plan, "address"), Text(plan, "listenAddress"), (int)Num(row, "port"));
+            if (guarded) config.ExpectedSequence = choice.Sequence;
             Need(ports.Add(config.Port), "獨立場次須使用不同的 UDP 埠。");
             servers.Add(new VenueServer { Choice = choice, Config = config });
         }
@@ -752,7 +770,7 @@ internal static class ServerLauncher
                     workers.Add(worker);
                 }
                 reserved.Wait();
-                if (plan.Version == 2 && !gate.Abort && !cancel())
+                if (plan.Version >= 2 && !gate.Abort && !cancel())
                 {
                     var current = Catalog.Parse(plan.Catalog.Target.Sessions());
                     foreach (var server in servers)
@@ -907,7 +925,7 @@ internal static class ServerLauncher
                     var item = new ListViewItem(new[] { room, Choice.Label(server.Choice.MissionName) + " · " + server.Choice.Experience,
                         server.Choice.Id, endpoint });
                     item.ToolTipText = server.Choice.Detail() + "\r\n本機綁定：" + server.Config.Bind + ":" + server.Config.Port;
-                    if (result.Version == 2) item.ToolTipText += "\r\n場次序號：" + server.Choice.Sequence;
+                    if (result.Version >= 2) item.ToolTipText += "\r\n場次序號：" + server.Choice.Sequence;
                     rooms.Items.Add(item);
                 }
                 summary.Text = (result.Topology == "Linked" ? "五房合併" : "五房獨立") + " · " + result.Servers.Count + " 個遊戲伺服器";

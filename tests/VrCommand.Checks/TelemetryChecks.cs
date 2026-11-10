@@ -13,7 +13,9 @@ internal static class TelemetryChecks
         var game = new OperatorIdentity("game", OperatorRole.GameServer); var other = new OperatorIdentity("other", OperatorRole.GameServer);
         var master = new OperatorIdentity("master", OperatorRole.Master);
         var data = Path.Combine(directory, "telemetry-db"); var file = Path.Combine(directory, "telemetry.journal");
-        var player = Guid.NewGuid(); var enemy = Guid.NewGuid(); Guid id, stream; long observed; StreamCombatRecord[] tail;
+        var player = Guid.NewGuid(); var enemy = Guid.NewGuid(); Guid id, stream, guardedId; long observed; StreamCombatRecord[] tail;
+        var guardedStream = Guid.NewGuid();
+        long guardedSequence;
         var world = new ArenaWorld([3], []); world.AddPlayer(player, 3, new(0, 1.4f, -3)); world.AddEnemy(enemy, 3, new(0, 0, 3), new(0, 0, 3));
         using (var store = new SqliteSessionEventStore(data))
         {
@@ -53,10 +55,31 @@ internal static class TelemetryChecks
             world.SetPhase(WorldPhase.Ended); queue.Finish(world); tail = Batch(queue);
             check(queue.Complete && queue.LastSequence == 6 && queue.AcknowledgedSequence == 3,
                 "World completion persists a final boundary independently of network delivery");
+
+            var preview = manager.Create(SessionMode.Independent, [2], mission);
+            guardedId = preview.Id;
+            var edit = manager.Execute(guardedId, new(Guid.NewGuid(), ControlAction.SetEnvironment, Environment: preview.Environment));
+            guardedSequence = edit.Session.Sequence;
+            var open = new OpenCombatStream(guardedStream, CombatOrigin.Simulation, ExpectedSequence: preview.Sequence);
+            Reject<InvalidOperationException>(() => manager.OpenGuardedStream(guardedId, open, game),
+                "An original Preparing session cannot attach from an older reviewed sequence");
+            check(manager.Get(guardedId).Sequence == guardedSequence && manager.Get(guardedId).CombatStream is null,
+                "Stale attachment neither advances history nor reserves a source");
+            var guarded = manager.OpenGuardedStream(guardedId, open with { ExpectedSequence = guardedSequence }, game);
+            check(guarded.ExpectedSequence == guardedSequence && manager.Get(guardedId).Sequence == guardedSequence + 1,
+                "A guarded open preserves the exact preceding sequence in the accepted source");
+            Reject<InvalidOperationException>(() => manager.OpenStream(guardedId, open with { ExpectedSequence = null }, game),
+                "Legacy retry cannot change the original guarded request");
+            manager.End(guardedId);
         }
         using (var store = new SqliteSessionEventStore(data)) using (var queue = TelemetryOutbox.OpenExisting(file))
         {
             var manager = new SessionManager(store);
+            var guardedBeforeRetry = manager.Get(guardedId);
+            check(guardedBeforeRetry.State == SessionState.Ended
+                && manager.OpenGuardedStream(guardedId, new(guardedStream, CombatOrigin.Simulation, ExpectedSequence: guardedSequence), game)
+                    == guardedBeforeRetry.CombatStream && manager.Get(guardedId).Sequence == guardedBeforeRetry.Sequence,
+                "SQLite replay preserves the guarded source and the exact retry after End");
             check(queue.Complete && queue.Pending!.StreamSequence == 4 && manager.Get(id).CombatStream!.AcceptedSequence == 3,
                 "Independent journal and SQLite restart resume from their durable acknowledged prefix");
             check(manager.ReportStreamBatch(id, tail, game).AcceptedSequence == 6 && manager.Statistics(id).Players[0].Kills == 1,

@@ -860,6 +860,27 @@ try:
             require(request("GET", "/api/sessions/" + geometric_result["sessionId"])["state"] == "Ended"
                     and all(room["sessionId"] is None for room in request("GET", "/api/rooms")),
                     "Geometric demo archives its own session and releases all its reservations")
+            guarded = request("POST", "/api/sessions", {"missionId": mission["id"], "mode": "Independent", "roomIds": [1]}, 201)
+            guarded_path = "/api/sessions/" + guarded["id"]
+            guarded_route = guarded_path + "/combat-stream/guarded-open"
+            stream = {"streamId": str(uuid.uuid4()), "origin": "Simulation", "missionClockVersion": 1, "roomEnemyPolicyVersion": 1}
+            request("POST", guarded_route, {**stream, "expectedSequence": guarded["sequence"]}, 403)
+            request("POST", guarded_route, stream, 400, identity="GameServer")
+            request("POST", guarded_route, {**stream, "expectedSequence": 0}, 400, identity="GameServer")
+            edited = request("POST", guarded_path + "/commands", {"commandId": str(uuid.uuid4()), "action": "SetEnvironment",
+                             "expectedSequence": guarded["sequence"], "environment": guarded["environment"]})["session"]
+            request("POST", guarded_route, {**stream, "expectedSequence": guarded["sequence"]}, 409, identity="GameServer")
+            require(request("GET", guarded_path) == edited and edited["combatStream"] is None,
+                    "Guarded source conflict leaves the exact edited Preparing state unbound")
+            approved = {**stream, "expectedSequence": edited["sequence"]}
+            opened = request("POST", guarded_route, approved, identity="GameServer")
+            latest = request("GET", guarded_path)
+            require(opened["expectedSequence"] == edited["sequence"] and latest["combatStream"] == opened
+                    and latest["sequence"] == edited["sequence"] + 1, "Guarded source receipt echoes the preceding session revision")
+            request("POST", guarded_path + "/combat-stream", stream, 409, identity="GameServer")
+            require(request("POST", guarded_route, approved, identity="GameServer") == opened
+                    and request("GET", guarded_path) == latest, "Exact guarded source retry appends no event")
+            request("DELETE", guarded_path, expected=204)
             relay_dll = Path(os.environ.get("VR_COMMAND_TELEMETRY_RELAY_DLL", ROOT / "tools/VrCommand.TelemetryRelay/bin/Release/net10.0/VrCommand.TelemetryRelay.dll"))
             journal = test_directory / "outbox.journal"
             relay_args = ["dotnet", str(relay_dll), "--journal", str(journal), "--base-url", base_url, "--key-file", str(key_file)]
