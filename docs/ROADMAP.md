@@ -1,5 +1,7 @@
 # 長期開發目標
 
+2026-11-10 Windows 0.50.1 遊戲主機可由 CLI 使用 HTTPS 管理請求與 WSS 發布世界，並以管理員提供的憑證指紋核對站台。 [遊戲主機設定](WINDOWS_SERVER_PACKAGE.md#遊戲主機連到遠端管理-https)
+
 2026-11-10 Windows 管理包可在指定場館 IPv4 提供 HTTPS，並為同機遊戲伺服器保留獨立的本機 HTTP。 [場館設定](WINDOWS_CONTROL_PACKAGE.md#啟用場館-https)
 
 2026-11-10 主控與房控電腦可逐台預檢管理網站的 HTTPS 憑證、操作員角色和可見房間。 [房控預檢](WINDOWS_CONTROL_PACKAGE.md#從房控電腦核對管理服務)

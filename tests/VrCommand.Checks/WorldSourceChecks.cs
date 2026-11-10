@@ -1,4 +1,11 @@
 using System.Text.Json;
+using System.Net;
+using System.Net.Security;
+using System.Net.Sockets;
+using System.Net.WebSockets;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using VrCommand.Api;
 using VrCommand.Core;
 using VrCommand.Simulation;
@@ -116,6 +123,60 @@ internal static class WorldSourceChecks
         var corrupt = Path.Combine(directory, "world-corrupt.bin"); bytes[^1] ^= 1; File.WriteAllBytes(corrupt, bytes);
         Reject<InvalidDataException>(() => WorldOutbox.Recover(corrupt, codec), "World record checksum rejects silent payload corruption");
         Reject<ArgumentException>(() => new WorldWebSocket("https://example.test/?key=bad", id, "server"), "World connection refuses credential-bearing query URLs");
+        Reject<ArgumentException>(() => new WorldWebSocket("http://127.0.0.1", id, "server", new string('a', 64)), "World connection refuses a certificate pin over plaintext");
+        Reject<ArgumentException>(() => new WorldWebSocket("https://example.test", id, "server", new string('A', 64)), "World connection refuses a noncanonical certificate pin");
+        CheckPinnedUpgrade(check, id).GetAwaiter().GetResult();
+    }
+
+    private static async Task CheckPinnedUpgrade(Action<bool, string> check, Guid session)
+    {
+        using var key = RSA.Create(2048);
+        var request = new CertificateRequest("CN=world test", key, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        using var generated = request.CreateSelfSigned(DateTimeOffset.UtcNow.AddMinutes(-5), DateTimeOffset.UtcNow.AddHours(1));
+        // Schannel needs a native key handle that can be imported from PKCS#12.
+        using var leaf = X509CertificateLoader.LoadPkcs12(generated.Export(X509ContentType.Pkcs12), "");
+        var pin = leaf.GetCertHashString(HashAlgorithmName.SHA256).ToLowerInvariant();
+        foreach (var mode in new[] { "valid", "redirect", "wrong-accept" })
+        {
+            using var listener = new TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+            var serving = Respond();
+            using var client = new WorldWebSocket("https://127.0.0.1:" + ((IPEndPoint)listener.LocalEndpoint).Port, session, "fixture-key", pin);
+            var connected = false;
+            try { await client.Connect(deadline.Token); connected = true; }
+            catch (WorldConnectionInterrupted) when (mode != "valid") { }
+            check(connected == (mode == "valid"), "Pinned WSS validates the HTTP upgrade: " + mode);
+            if (connected) check(await client.Exchange("first", deadline.Token) == "first", "Pinned WSS uses the original managed WebSocket framing");
+            await serving;
+
+            async Task Respond()
+            {
+                using var peer = await listener.AcceptTcpClientAsync(deadline.Token);
+                using var tls = new SslStream(peer.GetStream());
+                await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions { ServerCertificate = leaf }, deadline.Token);
+                using var reader = new StreamReader(tls, Encoding.ASCII, leaveOpen: true);
+                if (await reader.ReadLineAsync(deadline.Token) != $"GET /api/sessions/{session:D}/world/publish HTTP/1.1")
+                    throw new InvalidDataException("Unexpected WSS path.");
+                var fields = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+                while (await reader.ReadLineAsync(deadline.Token) is { Length: > 0 } line)
+                {
+                    var separator = line.IndexOf(':');
+                    fields.Add(line[..separator], line[(separator + 1)..].Trim());
+                }
+                if (fields["Authorization"] != "Bearer fixture-key") throw new InvalidDataException("WSS identity missing.");
+                var accept = Convert.ToBase64String(SHA1.HashData(Encoding.ASCII.GetBytes(fields["Sec-WebSocket-Key"] + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
+                var response = mode == "redirect" ? "HTTP/1.1 302 Found\r\nLocation: /elsewhere\r\n\r\n"
+                    : "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: "
+                        + (mode == "valid" ? accept : "wrong") + "\r\n\r\n";
+                await tls.WriteAsync(Encoding.ASCII.GetBytes(response), deadline.Token);
+                if (mode != "valid") return;
+                using var socket = WebSocket.CreateFromStream(tls, true, null, TimeSpan.FromSeconds(30));
+                var buffer = new byte[32];
+                var received = await socket.ReceiveAsync(new ArraySegment<byte>(buffer), deadline.Token);
+                await socket.SendAsync(new ArraySegment<byte>(buffer, 0, received.Count), received.MessageType, received.EndOfMessage, deadline.Token);
+            }
+        }
     }
     private sealed class Codec : IWorldCodec
     {

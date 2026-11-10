@@ -7,8 +7,10 @@ using System.IO;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Net.Security;
 using System.Runtime.InteropServices;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading;
 using System.Web.Script.Serialization;
@@ -137,10 +139,14 @@ internal static class ServerLauncher
     }
     internal sealed class Settings
     {
-        internal string Api, Key, Session, Address, Bind; internal int Port;
+        internal string Api, Key, Session, Address, Bind, CertificateSha256; internal int Port;
         internal static Settings From(Dictionary<string, object> value)
         {
-            Need(value.Count == 7 && Num(value, "port") >= 1024 && Num(value, "port") <= 65535, "請使用七欄伺服器連線檔與有效UDP埠。"); var result = new Settings { Api = Text(value, "managementApiUrl"), Key = Text(value, "gameServerKey"), Session = Text(value, "sessionId"), Address = Text(value, "address"), Bind = Text(value, "listenAddress"), Port = (int)Num(value, "port") };
+            var pin = Text(value, "managementCertificateSha256");
+            Need(value.Count == (value.ContainsKey("managementCertificateSha256") ? 8 : 7)
+                && (!value.ContainsKey("managementCertificateSha256") || !String.IsNullOrEmpty(pin))
+                && Num(value, "port") >= 1024 && Num(value, "port") <= 65535, "請使用伺服器連線檔與有效UDP埠。");
+            var result = new Settings { Api = Text(value, "managementApiUrl"), Key = Text(value, "gameServerKey"), Session = Text(value, "sessionId"), Address = Text(value, "address"), Bind = Text(value, "listenAddress"), Port = (int)Num(value, "port"), CertificateSha256 = pin };
             Need(Text(value, "role") == "Server", "這是獨立伺服器啟動器。"); result.Validate(); return result;
         }
         internal void Validate()
@@ -151,14 +157,47 @@ internal static class ServerLauncher
         }
         internal void ValidateTarget()
         {
-            Uri uri; Need(Uri.TryCreate(Api, UriKind.Absolute, out uri) && uri.Scheme == "http" && uri.AbsolutePath == "/" && uri.Query == "" && uri.Fragment == "" && uri.UserInfo == "" && uri.Port >= 1024 && uri.Port <= 65535, "管理地址須為http://IPv4:埠。");
-            IPv4(uri.Host, false); Need(Api == "http://" + uri.Host + ":" + uri.Port, "管理地址須為http://IPv4:埠，不含結尾斜線。");
+            Uri uri;
+            Need(Uri.TryCreate(Api, UriKind.Absolute, out uri) && (uri.Scheme == "http" || uri.Scheme == "https")
+                && uri.AbsolutePath == "/" && uri.Query == "" && uri.Fragment == "" && uri.UserInfo == "", "請使用管理服務的HTTP或HTTPS原點。");
+            var authority = uri.Scheme + "://" + uri.Host;
+            if (uri.Scheme == "http")
+            {
+                IPv4(uri.Host, false);
+                Need(uri.Port >= 1024 && Api == authority + ":" + uri.Port && CertificateSha256 == null,
+                    "HTTP使用IPv4與埠號；憑證指紋須搭配HTTPS。");
+            }
+            else
+            {
+                if (uri.HostNameType == UriHostNameType.IPv4) IPv4(uri.Host, false);
+                else Need(uri.HostNameType == UriHostNameType.Dns && System.Text.RegularExpressions.Regex.IsMatch(uri.Host,
+                    @"\A[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\z"), "HTTPS管理名稱不正確。");
+                Need((uri.Port == 443 || uri.Port >= 1024) && (Api == authority + ":" + uri.Port || uri.Port == 443 && Api == authority), "HTTPS管理原點格式不正確。");
+                Need(CertificateSha256 != null && System.Text.RegularExpressions.Regex.IsMatch(CertificateSha256, @"\A[0-9a-f]{64}\z"), "HTTPS需要管理員提供的憑證SHA-256。");
+            }
             Need(Key != null && Key.Length >= 32 && Key.Length <= 512, "GameServer金鑰格式錯誤。"); foreach (var c in Key) Need(c > 32 && c < 127, "GameServer金鑰格式錯誤。");
         }
-        internal object Config(string telemetry, string origin) { return new { role = "Server", address = Address, listenAddress = Bind, port = Port, sessionId = Session, managementApiUrl = Api, gameServerKey = Key, telemetryOrigin = origin, telemetryDirectory = telemetry }; }
+        internal object Config(string telemetry, string origin) { return new { role = "Server", address = Address, listenAddress = Bind, port = Port, sessionId = Session, managementApiUrl = Api, managementCertificateSha256 = CertificateSha256, gameServerKey = Key, telemetryOrigin = origin, telemetryDirectory = telemetry }; }
+
+        private bool CheckCertificate(X509Certificate certificate, SslPolicyErrors errors)
+        {
+            if (certificate == null || (errors & ~SslPolicyErrors.RemoteCertificateChainErrors) != SslPolicyErrors.None) return false;
+            using (var hash = SHA256.Create())
+            using (var leaf = new X509Certificate2(certificate))
+            {
+                var now = DateTime.UtcNow;
+                return leaf.NotBefore.ToUniversalTime() <= now && now < leaf.NotAfter.ToUniversalTime()
+                    && BitConverter.ToString(hash.ComputeHash(leaf.RawData)).Replace("-", "").ToLowerInvariant() == CertificateSha256;
+            }
+        }
         internal Dictionary<string, object> Request(string path, object body = null, bool missing = false)
         {
             var request = (HttpWebRequest)WebRequest.Create(Api + path); request.Proxy = null; request.AllowAutoRedirect = false; request.Timeout = 5000; request.ReadWriteTimeout = 5000;
+            if (CertificateSha256 != null)
+            {
+                request.ConnectionGroupName = CertificateSha256;
+                request.ServerCertificateValidationCallback = (sender, certificate, chain, errors) => CheckCertificate(certificate, errors);
+            }
             request.Headers[HttpRequestHeader.Authorization] = "Bearer " + Key;
             if (body != null) { request.Method = "PUT"; request.ContentType = "application/json"; var bytes = Encoding.UTF8.GetBytes(Json.Serialize(body)); request.ContentLength = bytes.Length; using (var stream = request.GetRequestStream()) stream.Write(bytes, 0, bytes.Length); }
             try { using (var response = (HttpWebResponse)request.GetResponse()) using (var reader = new StreamReader(response.GetResponseStream(), Encoding.UTF8)) { Need(response.StatusCode == HttpStatusCode.OK, "管理服務回應不正確。"); var bytes = new char[256 * 1024 + 1]; var count = 0; int read; while ((read = reader.Read(bytes, count, bytes.Length - count)) > 0 && count < bytes.Length) count += read; Need(count <= 256 * 1024, "管理回應過大。"); var result = Map(Json.DeserializeObject(new string(bytes, 0, count))); Need(result != null, "管理回應格式錯誤。"); return result; } }

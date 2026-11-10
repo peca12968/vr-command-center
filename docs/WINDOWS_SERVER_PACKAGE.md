@@ -1,5 +1,7 @@
 # Windows 遊戲伺服器包
 
+2026-11-10 `VRCommand-GameServer-0.50.1-1.11-https-win-x64.zip` 為 84,806,680 bytes，SHA-256 `80b733db21c1351e0701c8630f67b44ae2c45099d06f3a32c5c7983a19cfd984`。解壓核對 330 筆清單。個別場次 CLI 支援指定管理站台的 HTTPS、WSS 及憑證指紋。 [遊戲主機設定](#遊戲主機連到遠端管理-https)
+
 2026-11-10 `windows-server-0.50.0-launcher1.10-win-x64.zip` 為 84,800,547 bytes，SHA-256 `e12a6049410a3d01a3423bf9ff1ddffa7125db627f0c3c1beaabfab196258b1b`。解壓核對 330 筆清單。全館啟動使用管理包 0.31.100 的整批端點公告。 [五房啟動](#依場館計畫批次啟動)
 
 2026-11-10 `windows-server-0.50.0-launcher1.9-win-x64.zip` 為 84,799,236 bytes，SHA-256 `59c159d66daa7fbd97a256b8713eb6aee48132191d9574579ef5ac2da0ada43b`。解壓核對 330 筆清單，328 個檔案與 1.8 逐檔一致。遊戲來源、Windows 玩家及 Quest 開發 APK 沿用 0.50.0。 [五房視窗操作](#從-windows-視窗核對並啟動)
@@ -84,6 +86,25 @@ Unity 0.47.0 伺服器可搭配控制台 0.31.14。啟動器 1.5 可選擇待開
 終止報告的 `endpointPublication` 會記錄 `not-attempted`、`unconfirmed` 或 `confirmed`。若回條未確認，請先在管理服務核對原場次與端點再處理，因為管理服務可能已提交而啟動器未收到回應。配票仍以全館就緒檔為準。
 
 若全館就緒前有程序啟動失敗，本次啟動器會停止自己已建立的遊戲程序。已附掛的場次和錄製留在管理端，由主控依原流程結束。全館就緒後，各場分別等雙封存與 36 秒保留期，正常收尾後由原啟動器停止各自的子程序。若其中一場失敗，其他已就緒場次仍各自收尾。最終報告的 `servers[].result` 保留逐場退出與封存結果，全部場次均成功時才回報 `venue-sealed-stopped`。可加 `--peer-diagnostics on` 為這次所有子程序啟用原來源診斷。
+
+## 遊戲主機連到遠端管理 HTTPS
+
+遊戲主機與管理主機分開時，可用啟動器 1.11 的個別場次 CLI。把管理員提供的 HTTPS 原點與葉憑證 SHA-256 指紋填入私人伺服器設定。原點使用小寫 DNS 名稱或正規 IPv4，結尾不加斜線。使用 443 時可省略埠號。指紋為 DER 葉憑證雜湊的小寫 64 位十六進位字串。
+
+```json
+{
+  "role": "Server",
+  "managementApiUrl": "https://control.venue.example:8443",
+  "managementCertificateSha256": "填入管理員另外提供的葉憑證SHA-256",
+  "gameServerKey": "填入GameServer金鑰",
+  "sessionId": "填入Preparing場次UUID",
+  "address": "192.168.50.20",
+  "listenAddress": "192.168.50.20",
+  "port": 7777
+}
+```
+
+透過既有 `Launch-Server.exe --run` 啟動。遊戲主機只需要 `GameServer` 金鑰。HTTPS 管理請求與 WSS 世界串流核對同一張當前有效的葉憑證，遊戲管理 HTTP 請求遇到轉址會停止。這個部署使用設定中的明確憑證信任，管理員應另外交付指紋。更新站台憑證前先完成場次封存，再更新遊戲主機的設定。房控瀏覽器仍使用一般 HTTPS 信任鏈。 [管理服務設定](WINDOWS_CONTROL_PACKAGE.md#啟用場館-https) · [Unity 憑證驗證](https://docs.unity3d.com/6000.0/Documentation/ScriptReference/Networking.CertificateHandler.ValidateCertificate.html)
 
 ## 管理服務短暫中斷
 
@@ -213,7 +234,7 @@ Windows子程序以suspended建立，先加入私人kill-on-close Job，再Resum
 
 ## CLI與建置
 
-七欄私人設定：`role`為Server，`managementApiUrl`為`http://IPv4:port`且不含結尾斜線，`gameServerKey`、`sessionId`、`address`、`listenAddress`、`port`。拒絕Client／Host、額外欄位、Master／Room角色、混淆IPv4、越界埠與既有輸出。報告採同目錄新暫存檔完成Flush後Move發布，目的檔不覆蓋。
+既有 HTTP 私人設定包含 `role`、`managementApiUrl`、`gameServerKey`、`sessionId`、`address`、`listenAddress` 及 `port`。`role` 須為 `Server`，HTTP 格式為 `http://IPv4:port`。HTTPS 增加 `managementCertificateSha256`。拒絕多餘欄位、Master 或 Room 角色、混淆 IPv4、越界埠及重複的輸出路徑。報告在同目錄完成寫入後以新檔名發布。
 
 ```powershell
 Launch-Server.exe --run <私人JSON> --work <全新包外資料夾> --seconds 3600 --ready-report <新就緒檔> --report <新結果檔>

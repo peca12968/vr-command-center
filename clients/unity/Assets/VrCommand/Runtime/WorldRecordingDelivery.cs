@@ -31,7 +31,8 @@ namespace VrCommand.Unity
                 Exception failure = null; var delivered = false;
                 try
                 {
-                    if (publisher == null) publisher = new WorldPublisher(source, codec, new WorldWebSocket(configuration.managementApiUrl, Guid.Parse(configuration.sessionId), configuration.gameServerKey));
+                    if (publisher == null) publisher = new WorldPublisher(source, codec, new WorldWebSocket(configuration.managementApiUrl,
+                        Guid.Parse(configuration.sessionId), configuration.gameServerKey, configuration.managementCertificateSha256));
                     operation = new CancellationTokenSource(TimeSpan.FromSeconds(10));
                     var sender = publisher; var acknowledged = combat.AcknowledgedSequence; var sealedCombat = combat.Sealed; var token = operation.Token;
                     active = Task.Run(() => sender.Deliver(acknowledged, sealedCombat, token));

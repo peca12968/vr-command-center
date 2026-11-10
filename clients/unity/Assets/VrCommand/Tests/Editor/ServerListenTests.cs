@@ -32,5 +32,14 @@ namespace VrCommand.Unity.Tests
             foreach (var value in new[] { "127.1", "127.0.0.01", " 127.0.0.1", "::1", "tcp://127.0.0.1", "224.0.0.1", "255.255.255.255" })
                 Assert.Throws<InvalidOperationException>(() => { _ = new LaunchConfiguration { listenAddress = value }.ServerListenAddress; });
         }
+
+        [Test] public void ManagementHttpsRequiresCanonicalLeafPinAndAnOrigin()
+        {
+            var pin = new string('a', 64);
+            new LaunchConfiguration { managementApiUrl = "https://control.venue.example:8443", managementCertificateSha256 = pin }.ValidateManagementOrigin();
+            Assert.Throws<InvalidOperationException>(() => new LaunchConfiguration { managementApiUrl = "https://control.venue.example" }.ValidateManagementOrigin());
+            Assert.Throws<InvalidOperationException>(() => new LaunchConfiguration { managementApiUrl = "https://control.venue.example/elsewhere", managementCertificateSha256 = pin }.ValidateManagementOrigin());
+            Assert.Throws<InvalidOperationException>(() => new LaunchConfiguration { managementCertificateSha256 = pin }.ValidateManagementOrigin());
+        }
     }
 }

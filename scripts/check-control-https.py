@@ -27,7 +27,7 @@ def free_port(address):
         return probe.getsockname()[1]
 
 
-def verify_native(server_folder, runtime, output, keys, tls, request, mission, local_uri, check):
+def verify_native(server_folder, runtime, output, keys, tls, request, mission, management_uri, check, game_pin=None):
     state = request(tls, '/api/sessions', keys['Master'], status=201,
                     body={'missionId': mission['id'], 'mode': 'Independent', 'roomIds': [1]})
     route = '/api/sessions/' + state['id']
@@ -39,12 +39,27 @@ def verify_native(server_folder, runtime, output, keys, tls, request, mission, l
         probe.bind(('127.0.0.1', 0))
         udp_port = probe.getsockname()[1]
     config = runtime / 'server-config.json'
-    config.write_text(json.dumps({'role': 'Server', 'managementApiUrl': local_uri, 'gameServerKey': keys['GameServer'],
-                                  'sessionId': state['id'], 'address': '127.0.0.1', 'listenAddress': '127.0.0.1',
-                                  'port': udp_port}), encoding='utf-8')
+    game_settings = {'role': 'Server', 'managementApiUrl': management_uri, 'gameServerKey': keys['GameServer'],
+                     'sessionId': state['id'], 'address': '127.0.0.1', 'listenAddress': '127.0.0.1', 'port': udp_port}
+    launcher = str(server_folder / 'Launch-Server.exe')
+    if game_pin:
+        for label, invalid in [('missing-game-pin', game_settings), ('wrong-game-pin', dict(game_settings, managementCertificateSha256='0' * 64)),
+                               ('invalid-game-pin', dict(game_settings, managementCertificateSha256='A' * 64))]:
+            rejected = output / (label + '.json')
+            unused_ready = output / (label + '-ready.json')
+            unused_work = runtime / (label + '-work')
+            config.write_text(json.dumps(invalid), encoding='utf-8')
+            failure = subprocess.run([launcher, '--run', str(config), '--work', str(unused_work), '--seconds', '60',
+                                      '--ready-report', str(unused_ready), '--report', str(rejected)], cwd=runtime, timeout=25)
+            report = read(rejected)
+            check(failure.returncode == 1 and not unused_ready.exists() and not unused_work.exists()
+                  and report['status'] == ('incomplete' if label == 'wrong-game-pin' else 'rejected')
+                  and report.get('childPid') is None, label + ' rejected before native launch')
+        game_settings['managementCertificateSha256'] = game_pin
+    config.write_text(json.dumps(game_settings), encoding='utf-8')
     ready, final = output / 'server-ready.json', output / 'server-final.json'
     work = runtime / 'server-work'
-    runner = subprocess.Popen([str(server_folder / 'Launch-Server.exe'), '--run', str(config), '--work', str(work),
+    runner = subprocess.Popen([launcher, '--run', str(config), '--work', str(work),
                                '--seconds', '120', '--ready-report', str(ready), '--report', str(final), '--peer-diagnostics', 'on'],
                               cwd=runtime)
     client = None
@@ -65,7 +80,7 @@ def verify_native(server_folder, runtime, output, keys, tls, request, mission, l
         origin = read(ready)
         endpoint = request(tls, route + '/connection-endpoint', keys['Room1'])
         check(endpoint['streamId'] == origin['streamId'] and endpoint['port'] == udp_port,
-              'HTTPS room sees the original locally managed game endpoint')
+              'HTTPS room sees the original game endpoint')
         ticket = request(tls, route + '/players/' + player['id'] + '/join-ticket', keys['Room1'], body={},
                          admission=player['admissionId'])
         player_config = runtime / 'player-config.json'
@@ -146,9 +161,12 @@ def main():
     parser.add_argument('--runtime-root', type=Path, required=True)
     parser.add_argument('--listen-address', type=ipaddress.IPv4Address, default=ipaddress.IPv4Address('127.0.0.1'))
     parser.add_argument('--server-package', type=Path, help='Also verify one native Windows game round through both listeners')
+    parser.add_argument('--game-management-https', action='store_true', help='Use HTTPS and WSS from the native game server too')
     args = parser.parse_args()
     if os.name != 'nt':
         parser.error('Run the actual Windows launcher on Windows.')
+    if args.game_management_https and not args.server_package:
+        parser.error('--game-management-https requires --server-package.')
 
     from importlib.util import module_from_spec, spec_from_file_location
 
@@ -316,7 +334,9 @@ def main():
             check(request(local, '/api/missions/' + created['id'], keys['Master']) == created,
                   'HTTPS Master writes and local API sees the same mission; room authoring denied')
             if server_folder:
-                verify_native(server_folder, runtime, output, keys, tls, request, created, status['uri'], check)
+                game_uri = status['httpsBinding'] if args.game_management_https else status['uri']
+                verify_native(server_folder, runtime, output, keys, tls, request, created, game_uri, check,
+                              game_pin=fingerprint if args.game_management_https else None)
         finally:
             if runner.poll() is None:
                 stop.touch()
@@ -339,6 +359,8 @@ def main():
         scope = 'One Windows PC, its own IPv4, packaged API and synthetic CA.'
         if server_folder:
             scope += ' One native server and Windows Simulation client on the same PC.'
+        if args.game_management_https:
+            scope += ' Game management uses pinned HTTPS and WSS.'
         (output / 'checks.json').write_text(json.dumps({'complete': complete, 'checks': checks, 'preflights': reports,
                                                        'scope': scope}, indent=2) + '\n', encoding='utf-8')
         print(output / 'checks.json', flush=True)

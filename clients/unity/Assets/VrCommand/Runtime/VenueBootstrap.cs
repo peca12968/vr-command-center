@@ -219,11 +219,25 @@ namespace VrCommand.Unity
         private bool streamReady;
         [Serializable] private sealed class StreamStatus { public string streamId; public string origin; public long acceptedSequence; public bool @sealed; public int missionClockVersion, roomEnemyPolicyVersion; }
         [Serializable] private sealed class StreamReceipt { public string streamId; public long acceptedSequence; }
+        private sealed class ManagementCertificateHandler : CertificateHandler
+        {
+            private readonly string expected;
+            internal ManagementCertificateHandler(string expected) { this.expected = expected; }
+            protected override bool ValidateCertificate(byte[] certificateData) => ManagementCertificatePin.Matches(certificateData, expected);
+        }
+        private void AuthorizeManagement(UnityWebRequest request)
+        {
+            request.SetRequestHeader("Authorization", "Bearer " + configuration.gameServerKey);
+            request.redirectLimit = 0;
+            request.timeout = 5;
+            if (!string.IsNullOrEmpty(configuration.managementCertificateSha256))
+                request.certificateHandler = new ManagementCertificateHandler(configuration.managementCertificateSha256);
+        }
         private UnityWebRequest TelemetryRequest(string suffix, string body)
         {
             var request = new UnityWebRequest(configuration.managementApiUrl.TrimEnd('/') + "/api/sessions/" + configuration.sessionId + "/combat-stream" + suffix, "POST");
             request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(body)); request.downloadHandler = new DownloadHandlerBuffer();
-            request.SetRequestHeader("Content-Type", "application/json"); request.SetRequestHeader("Authorization", "Bearer " + configuration.gameServerKey); request.timeout = 5;
+            request.SetRequestHeader("Content-Type", "application/json"); AuthorizeManagement(request);
             return request;
         }
         private IEnumerator OpenTelemetry()
@@ -286,8 +300,7 @@ namespace VrCommand.Unity
         {
             using (var request = UnityWebRequest.Get(configuration.managementApiUrl.TrimEnd('/') + "/api/sessions/" + configuration.sessionId))
             {
-                request.SetRequestHeader("Authorization", "Bearer " + configuration.gameServerKey);
-                request.timeout = 5;
+                AuthorizeManagement(request);
                 yield return request.SendWebRequest();
                 managementReady = false;
                 if (request.result != UnityWebRequest.Result.Success) yield break;
@@ -366,7 +379,7 @@ namespace VrCommand.Unity
                     {
                         using (var request = UnityWebRequest.Get(configuration.managementApiUrl.TrimEnd('/') + "/api/sessions/" + configuration.sessionId + "/statistics"))
                         {
-                            request.SetRequestHeader("Authorization", "Bearer " + configuration.gameServerKey); request.timeout = 5;
+                            AuthorizeManagement(request);
                             yield return request.SendWebRequest();
                             DebriefStatistics statistics = null;
                             if (request.result == UnityWebRequest.Result.Success)
@@ -436,8 +449,7 @@ namespace VrCommand.Unity
                 request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(body));
                 request.downloadHandler = new DownloadHandlerBuffer();
                 request.SetRequestHeader("Content-Type", "application/json");
-                request.SetRequestHeader("Authorization", "Bearer " + configuration.gameServerKey);
-                request.timeout = 5;
+                AuthorizeManagement(request);
                 yield return request.SendWebRequest();
                 if (request.result != UnityWebRequest.Result.Success || (!preflight && (!networkManager.IsListening || !networkManager.PendingClients.ContainsKey(clientId))))
                 { Reject(response); yield break; }

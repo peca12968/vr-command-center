@@ -6,7 +6,7 @@ ROOT=Path(__file__).resolve().parents[1]
 spec=importlib.util.spec_from_file_location('server_player_package',ROOT/'scripts/package-windows-player.py');player=importlib.util.module_from_spec(spec);spec.loader.exec_module(player)
 digest=player.digest;plain=player.plain
 TOP='VRCommand-GameServer'
-README='''VR Command Windows 遊戲伺服器啟動器 1.10／Windows 遊戲程式
+README='''VR Command Windows 遊戲伺服器啟動器 1.11／Windows 遊戲程式
 
 完整解壓後開啟 Launch-Server.exe。先啟動配套的管理服務，在網頁控制台建立 Preparing VR 或 MR 場次。
 按「選擇檔案」選control-instance.json，或在路徑欄直接貼上完整檔案路徑，再按「載入／更新」。只使用既有GameServer角色金鑰。
@@ -27,9 +27,11 @@ CLI 啟動同樣在建立遊戲程序前檢查鎖定。唯讀清單報告含 can
 此停止方式為封存後的OS程序終止，不宣稱Unity正常退出／本地最後回條落盤或玩家全部收到戰績。
 啟動器關閉時，已加入私人Windows Job的子程序會被停止；這不是斷電恢復機制。
 
-管理服務與此啟動器在同機時，可直接選既有實例。遠端管理服務可用CLI七欄JSON：
+管理服務與此啟動器在同機時，可直接選既有實例。CLI七欄JSON：
 role="Server",managementApiUrl="http://IPv4:埠",gameServerKey="既有GameServer金鑰",
 sessionId="Preparing場次UUID",address="玩家看到的IPv4",listenAddress="本機IPv4或0.0.0.0",port=7777。
+分機部署請將 managementApiUrl 設為管理站台 HTTPS 原點，並加上第八欄 managementCertificateSha256（管理員提供的葉憑證 SHA-256，小寫）。
+遠端 HTTPS 目前使用個別場次 CLI。設定示例與憑證更換步驟見專案 docs/WINDOWS_SERVER_PACKAGE.md。
 不要把此私人JSON、管理實例或日誌資料加回共用ZIP。Unity只收到GameServer金鑰，沒有Master金鑰。
 CLI：Launch-Server.exe --run 私人JSON --work 全新資料夾 --seconds 3600 --ready-report 新就緒檔 --report 新結果檔
 五房批次：Launch-Server.exe --venue-run 私人計畫JSON --work 全新資料夾 --seconds 3600 --ready-report 新就緒檔 --report 新結果檔
@@ -83,7 +85,7 @@ def main():
     with (stage/'compile.log').open('xb') as log:subprocess.run([str(compiler),'/nologo','/warnaserror','/codepage:65001','/target:winexe','/platform:x64','/r:System.Windows.Forms.dll','/r:System.Drawing.dll','/r:System.Web.Extensions.dll','/out:'+str(folder/'Launch-Server.exe'),str(frozen)],stdout=log,stderr=subprocess.STDOUT,check=True)
     if digest(source)!=source_hash:raise ValueError('Launcher source changed during compilation')
     (folder/'README.txt').write_text(README,encoding='utf-8')
-    manifest={'schemaVersion':1,'target':'win-x64','launcherVersion':'1.10.0','createdAtUtc':datetime.now(timezone.utc).isoformat(),'build':receipt,'launcherSourceSha256':source_hash,'scope':'Standalone server launcher; no keys, tickets or databases; manifest is not a signature.',
+    manifest={'schemaVersion':1,'target':'win-x64','launcherVersion':'1.11.0','createdAtUtc':datetime.now(timezone.utc).isoformat(),'build':receipt,'launcherSourceSha256':source_hash,'scope':'Standalone server launcher; no keys, tickets or databases; manifest is not a signature.',
         'files':[{'path':p.relative_to(folder).as_posix(),'bytes':p.stat().st_size,'sha256':digest(p)} for p in sorted(folder.rglob('*')) if p.is_file()]}
     (folder/'server-package.json').write_text(json.dumps(manifest,indent=2)+'\n',encoding='utf-8');verify(folder)
     output=plain(args.output);output.parent.mkdir(parents=True,exist_ok=True)

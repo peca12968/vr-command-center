@@ -17,6 +17,7 @@ namespace VrCommand.Unity
         public string joinTicket = "";
         public string sessionId = "";
         public string managementApiUrl = "http://127.0.0.1:5080";
+        public string managementCertificateSha256 = "";
         public string gameServerKey = "";
         public string telemetryOrigin = "Simulation";
         public string telemetryDirectory = "";
@@ -58,6 +59,7 @@ namespace VrCommand.Unity
             if (config.IsServer)
             {
                 _ = config.ServerListenAddress;
+                config.ValidateManagementOrigin();
                 config.sessionId = Guid.Parse(config.sessionId).ToString("D");
                 if (string.IsNullOrEmpty(config.telemetryOrigin)) config.telemetryOrigin = "Simulation";
             }
@@ -76,6 +78,17 @@ namespace VrCommand.Unity
             if (config.requestMixedReality && !config.questPassthrough)
                 throw new InvalidOperationException("MR admission requires the Quest passthrough profile.");
             return config;
+        }
+
+        internal void ValidateManagementOrigin()
+        {
+            if (!Uri.TryCreate(managementApiUrl, UriKind.Absolute, out var origin)
+                || (origin.Scheme != "http" && origin.Scheme != "https") || origin.AbsolutePath != "/"
+                || origin.Query != "" || origin.Fragment != "" || origin.UserInfo != ""
+                || (origin.Scheme == "https" ? !ManagementCertificatePin.IsValid(managementCertificateSha256)
+                    : !string.IsNullOrEmpty(managementCertificateSha256)))
+                throw new InvalidOperationException("Invalid management origin or HTTPS certificate pin.");
+            managementApiUrl = origin.GetLeftPart(UriPartial.Authority);
         }
     }
 
