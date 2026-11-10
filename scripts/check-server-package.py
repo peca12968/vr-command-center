@@ -65,6 +65,8 @@ def main():
     p.add_argument('--field-evidence',action='store_true',help='Verify the management ZIP with the original Linked player and server logs')
     p.add_argument('--venue-field-evidence',action='store_true',help='Verify full sealed admission evidence for both original venue End batches')
     p.add_argument('--venue-concurrent-roster-seconds', type=int, help='Require this many recorded seconds of concurrent 25-seat play in both sealed batches')
+    p.add_argument('--check-venue-concurrent-fire', action='store_true',
+                   help='Drive normal exercise fire on all 25 native desktop seats and verify the sealed shared window')
     p.add_argument('--check-venue-field-ui',action='store_true',help='Download the original current and earlier field bundles from the shipped console')
     p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
     p.add_argument('--check-room-observer',action='store_true',help='Verify room-scoped observation and instant replay on the original Linked source')
@@ -141,6 +143,8 @@ def main():
         p.error('--venue-field-evidence requires --field-evidence and --check-venue-end')
     if args.venue_concurrent_roster_seconds is not None and (not args.venue_field_evidence or not 1 <= args.venue_concurrent_roster_seconds <= 90):
         p.error('--venue-concurrent-roster-seconds requires --venue-field-evidence and 1..90 seconds')
+    if args.check_venue_concurrent_fire and (args.venue_concurrent_roster_seconds is None or args.check_venue_openxr):
+        p.error('--check-venue-concurrent-fire requires --venue-concurrent-roster-seconds and all desktop seats')
     if args.check_venue_field_ui and not args.venue_field_evidence:
         p.error('--check-venue-field-ui requires --venue-field-evidence')
     if args.check_room_readiness and not args.player_package:p.error('--check-room-readiness requires five players per room')
@@ -512,6 +516,16 @@ def main():
 
     def packaged_player(entry,person,file, *, mock=None):
         log=file.with_suffix('.log')
+        if args.check_venue_concurrent_fire:
+            exercise=file.with_suffix('.exercise')
+            child=subprocess.Popen([str(player_folder/'VrCommand.exe'), '-batchmode', '-nographics',
+                '-job-worker-count', '2', '-logFile', str(log), '--vr-config', str(file),
+                '--vr-desktop-exercise', str(exercise)], cwd=runtime, env=env, creationflags=subprocess.CREATE_NO_WINDOW)
+            client={'process':child,'log':log,'player':person,'sessionId':entry['sessionId'],
+                    'configPath':file,'nativePid':child.pid,'witness':None}
+            clients.append(client)
+            client['witness']=control.ChildWitness(child.pid)
+            return client
         report=file.with_suffix('.launcher.json')
         flags=['--headless'] if mock is None else ['--openxr']
         environment=env if mock is None else {**env,**mock}
@@ -553,6 +567,9 @@ def main():
         elif child.poll() is None:
             child.terminate()
         child.wait(timeout=15)
+        if not report and client.get('witness'):
+            client['witness'].close()
+            client['witness']=None
     def verify_delivery(entry,owners):
         manifest_entry = None
         world_journal = None
@@ -663,7 +680,7 @@ def main():
         save(entry['label']+'-delivery.json',{'serverAcknowledgedConnections':acks,
             'players':[{'playerId':c['player']['id'],'admissionId':c['player']['admissionId'],
                 'roomId':c['player']['roomId'],'seat':c['player']['seat'],'connectionId':c['connection'],
-                'nativePid':c['nativePid'],'launcherPid':c['process'].pid} for c in owners]})
+                'nativePid':c['nativePid'],'launcherPid':c['process'].pid if c.get('launcherReport') else None} for c in owners]})
         check(True,entry['label']+' CSV rows match sealed player results')
         return manifest_entry
 
@@ -697,6 +714,8 @@ def main():
         concurrent_seconds = args.venue_concurrent_roster_seconds
         if concurrent_seconds is not None:
             common['minimumConcurrentMilliseconds'] = concurrent_seconds * 1000
+        if args.check_venue_concurrent_fire:
+            common['requireConcurrentFire'] = True
         evidence = dict(common, venueBundle=str(bundle_file),
                         sessions=[{key: value for key, value in entry.items() if key not in ('evidenceZip', 'players')}
                                   for entry in reversed(entries)],
@@ -756,6 +775,9 @@ def main():
             coverage = summary['concurrentRoster']
             check(coverage['players'] == 25 and coverage['longestMilliseconds'] >= concurrent_seconds * 1000,
                   label + ' original closed world journals verify the continuous concurrent 25-seat window')
+            if args.check_venue_concurrent_fire:
+                check(coverage['playersWithConfirmedFire'] == 25,
+                      label + ' original world and combat journals verify fire from all 25 seats inside one shared window')
             tracked = run(dict(evidence, requireTrackedRoster=True))
             check(tracked.returncode == 1 and not tracked.stdout and 'original Quest or non-mock Windows OpenXR' in tracked.stderr,
                   label + ' continuous desktop roster cannot satisfy the tracked-only evidence gate')

@@ -257,6 +257,7 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `verifyTrackingBegin` | 選用。填布林值 `true` 核對同一批追蹤開場採用的原始準備中畫格及後續執行畫格。每場均須提供 `worldJournal` |
 | `minimumConcurrentMilliseconds` | 選用。填 1,000 至 900,000 的整數，要求 25 席同時連線且遊戲持續執行的最短毫秒數。每場均須提供 `worldJournal` |
 | `requireTrackedRoster` | 選用。填 `true` 時須一併設定 `minimumConcurrentMilliseconds`，並逐席核對同一區間的追蹤姿態及原始玩家日誌 |
+| `requireConcurrentFire` | 選用。填 `true` 時須一併設定 `minimumConcurrentMilliseconds`，並在每場提供 `worldJournal` 與 `combatJournal`。要求 25 個原席位在同一段合格區間各有一次已封存射擊 |
 | `udpPreflightBatch` 或 `udpPreflightBatches` | 選用。單份原 Quest 批次報告路徑，或 1 至 25 份原報告路徑的陣列。可搭配逐場 `udpSourcePreflights` |
 | `questCaptures` | 選用。填原 Quest 網路計畫及 1 至 25 份完整日誌擷取報告。可與 UDP 預檢報告一併使用 |
 | `sessions` | 獨立模式填五場，合併模式填一場 |
@@ -306,6 +307,12 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json
 獨立模式按五份錄製的 UTC 擷取時間求共同區間，合併模式直接使用該場錄製。跨機擷取前需校對各遊戲伺服器時鐘。通過時 `concurrentRoster` 會列出最長共同區間的毫秒數與 UTC 起訖。時長不足時，整份驗收會退出並回傳錯誤。這份結果核對的是封存快照，實際時鐘同步、頭盔操作、實體主機數及網路容量須另依場館驗收。
 
 要驗收 25 席同時維持追蹤，在同一份清單再設定 `"requireTrackedRoster": true`。每個合格畫格須同時包含所有原席位的有效 `Tracked` 姿態，並沿用原有的 500 毫秒畫格間隔及執行狀態條件。此選項會自動核對 `playerSources`，逐席接受已配對原入場的 Quest logcat，或已完成 OpenXR 啟動且執行環境未標示為 Unity Mock Runtime 的 Windows 日誌。桌面模擬及已識別的 Mock Runtime 日誌會被拒絕。通過時 `concurrentRoster.rigKind` 為 `Tracked`，並附各場 `playerSources`。實體頭盔與主機身分仍需現場確認。 [驗收紀錄](PROGRESS.md#2026-11-10-核對-25-席同時追蹤的封存區間)
+
+### 核對 25 席在共同區間開火
+
+在原五房場館清單設定 `"requireConcurrentFire": true` 與 `"minimumConcurrentMilliseconds": 10000`，或填入該場驗收所需的毫秒數。每場保留原 `worldJournal` 與 `combatJournal`。25 席連線且任務持續執行時，讓每席至少開火一次，再結束全館並等待雙封存。
+
+工具核對回放射擊與戰鬥日誌中的原事件、射擊、玩家及戰鬥序號。射擊 tick 所在的相鄰兩格都須位於同一段五房共同區間。合格時 `concurrentRoster.playersWithConfirmedFire` 為 25，時間範圍取符合條件的最長區間。只連線或在共同區間之外射擊的席位會使驗收失敗。可與 `requireTrackedRoster` 一併啟用。實體設備數與跨機容量依現地驗收另行確認。
 
 ### 核對五房追蹤開場錄製
 

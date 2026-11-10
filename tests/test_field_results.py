@@ -495,6 +495,125 @@ class FieldResultsTests(unittest.TestCase):
                           players=lambda _, phase: deepcopy(members) if phase == 'Running' else [], edit_packet=edit_packet)
             launch.write_text(json.dumps(launcher), encoding='utf-8')
 
+    def concurrent_fire_journals(self, root, manifest, *, fire_frame=lambda _: 12, edit_packet=None):
+        for index, entry in enumerate(manifest['sessions']):
+            archive_path = root / entry['evidenceZip']
+            session, stats, endpoint = field.management_zip(archive_path)
+            launch = root / entry['launcherReport']
+            launcher = json.loads(launch.read_text(encoding='utf-8'))
+            roster = session['players']
+            shots = sorted((number, player['id']) for player in roster
+                           if (number := fire_frame(player)) is not None)
+            records, events = [], {}
+            for ordinal, (number, player) in enumerate(shots, 1):
+                shot = id_for(800 + ordinal)
+                records.append((field.SHOT_FIRED, player, shot, None, 0))
+                events.setdefault(number, []).append({'kind': 'ShotFired', 'eventId': id_for(900 + ordinal),
+                    'shotId': shot, 'playerId': player, 'tick': number})
+            players_who_fired = {player for _, player in shots}
+            launcher['finalCombatStream']['acceptedSequence'] = len(shots)
+            session['combatStream'] = launcher['finalCombatStream']
+            stats['origin'] = launcher['finalCombatStream']['origin']
+            for row, source in zip(stats['players'], entry['players'], strict=True):
+                row['ammoUsed'] = int(row['playerId'] in players_who_fired)
+                log = root / source['log']
+                lines = log.read_text(encoding='utf-8').splitlines()
+                marker, payload = lines[1].split(' ', 1)
+                result = json.loads(payload)
+                lines[1] = marker + ' ' + json.dumps(dict(result, ammoUsed=row['ammoUsed'], finalStreamSequence=len(shots)))
+                log.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+            with zipfile.ZipFile(archive_path, 'w') as archive:
+                for name, data in zip(('session', 'statistics', 'endpoint'), (session, stats, endpoint), strict=True):
+                    archive.writestr(name + '.json', json.dumps(data))
+            entry['combatJournal'] = f'Room {index + 1}.journal'
+            combat_journal(root / entry['combatJournal'], launcher, records)
+            players = [{'id': player['id'], 'roomId': player['roomId'], 'connected': True} for player in roster]
+            capture_start = datetime.fromisoformat('2026-11-09T00:00:00+00:00') + timedelta(milliseconds=index * 150)
+
+            def packet_at(number, phase):
+                return deepcopy(players) if phase == 'Running' else []
+
+            def with_events(packet):
+                number = packet['sequence']
+                packet.update(events=events.get(number, []), throughCombatSequence=sum(frame <= number for frame, _ in shots))
+                if edit_packet is not None:
+                    edit_packet(packet)
+
+            world_journal(root / entry['worldJournal'], launcher['finalWorld'], capture_start=capture_start.isoformat(),
+                          players=packet_at, edit_packet=with_events)
+            launch.write_text(json.dumps(launcher), encoding='utf-8')
+
+    def test_venue_requires_a_sealed_shot_for_every_seat_in_the_common_interval(self):
+        for mode in ('Linked', 'Independent'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, _ = venue_fixture(root, mode, with_journals=True)
+                self.concurrent_fire_journals(root, manifest)
+                manifest.update(minimumConcurrentMilliseconds=1000, requireConcurrentFire=True)
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                report = field.verify_venue(path)['concurrentRoster']
+                self.assertEqual(report['playersWithConfirmedFire'], 25)
+                self.assertEqual(report['longestMilliseconds'], 7700 if mode == 'Linked' else 7100)
+
+    def test_venue_concurrent_fire_rejects_idle_seats_and_shots_straddling_shared_boundary(self):
+        for frame in (None, 8):
+            with self.subTest(frame=frame), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, _ = venue_fixture(root, 'Independent', with_journals=True)
+                self.concurrent_fire_journals(root, manifest, fire_frame=lambda player:
+                    frame if (player['roomId'], player['seat']) == (1, 0) else 12)
+                manifest.update(minimumConcurrentMilliseconds=1000, requireConcurrentFire=True)
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'sealed shot from every original seat'):
+                    field.verify_venue(path)
+                manifest['requireConcurrentFire'] = False
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                self.assertEqual(field.verify_venue(path)['concurrentRoster']['players'], 25)
+
+    def test_venue_concurrent_fire_rejects_substituted_event_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, _ = venue_fixture(root, 'Linked', with_journals=True)
+
+            def substitute(packet):
+                if packet['events']:
+                    packet['events'][0]['eventId'] = id_for(980)
+
+            self.concurrent_fire_journals(root, manifest, edit_packet=substitute)
+            manifest.update(minimumConcurrentMilliseconds=1000, requireConcurrentFire=True)
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'original sealed combat event'):
+                field.verify_venue(path)
+
+    def test_venue_concurrent_fire_reports_the_longest_window_that_has_all_shots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, _ = venue_fixture(root, 'Linked', with_journals=True)
+
+            def interrupt(packet):
+                if packet['sequence'] == 52:
+                    packet['suspended'] = True
+
+            self.concurrent_fire_journals(root, manifest, fire_frame=lambda _: 60, edit_packet=interrupt)
+            manifest.update(minimumConcurrentMilliseconds=1000, requireConcurrentFire=True)
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            report = field.verify_venue(path)['concurrentRoster']
+            self.assertEqual(report['longestMilliseconds'], 2600)
+            self.assertEqual(report['fromUtc'], '2026-11-09T00:00:05.300000+00:00')
+
+    def test_venue_concurrent_fire_requires_boolean_and_both_original_journals(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, _ = venue_fixture(root, 'Linked', with_journals=True)
+            for settings, message in (
+                ({'requireConcurrentFire': 1}, 'must be a boolean'),
+                ({'requireConcurrentFire': True}, 'requires minimumConcurrentMilliseconds'),
+                ({'requireConcurrentFire': True, 'minimumConcurrentMilliseconds': 1000}, 'original combat journals'),
+            ):
+                path.write_text(json.dumps(manifest | settings), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, message):
+                    field.verify_venue(path)
+
     def test_venue_concurrent_roster_uses_the_longest_common_capture_interval(self):
         for mode, offsets, duration in (('Linked', [0], 7700), ('Independent', [0, 150, 300, 450, 600], 7100)):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:

@@ -1,5 +1,6 @@
 """Check sealed Windows server results against Windows player logs or Quest logcat."""
 import argparse
+from bisect import bisect_left
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_EVEN
 import hashlib
@@ -23,6 +24,7 @@ COMBAT = ('ammoUsed', 'shotsHit', 'kills', 'hitsReceived', 'damageTaken')
 # TelemetryOutbox version 1 uses the WorldEventKind byte and .NET Guid byte order.
 COMBAT_EVENT = struct.Struct('<qq16sB16s16s16si')
 SHOT_FIRED, SHOT_HIT, ENEMY_ELIMINATED, PLAYER_DAMAGED = 0, 1, 2, 4
+WORLD_COMBAT_KINDS = ('ShotFired', 'ShotHit', 'EnemyEliminated', 'PlayerDamaged')
 EMPTY_GUID = bytes(16)
 LAN = tuple(map(ipaddress.IPv4Network, ('10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16')))
 SERVER_MARKER = re.compile(r'VR_SERVER_(ADMISSION_APPROVED|PEER|DEBRIEF_ACK|DEBRIEF_TIMEOUT) id=(0|[1-9][0-9]{0,19})(?: endpoint=(\S+))?')
@@ -258,7 +260,7 @@ def scores(row):
     return values + (accuracy,)
 
 
-def verify_combat_journal(path, session_id, stream_id, origin, final_sequence, authority_end, ledger):
+def verify_combat_journal(path, session_id, stream_id, origin, final_sequence, authority_end, ledger, *, fired=None):
     digest = hashlib.sha256()
     projected = {uuid.UUID(pid).bytes_le: dict.fromkeys(COMBAT, 0) | {'health': 100} for pid in ledger}
     reports, shots, eliminated = {}, {}, set()
@@ -284,6 +286,8 @@ def verify_combat_journal(path, session_id, stream_id, origin, final_sequence, a
                 require(enemy == EMPTY_GUID and shot not in shots and totals['health'] > 0, 'Invalid combat journal fire')
                 shots[shot] = (player, EMPTY_GUID)
                 totals['ammoUsed'] += 1
+                if fired is not None:
+                    fired[sequence] = (report, player, shot, observed)
             else:
                 require(enemy != EMPTY_GUID and enemy not in eliminated, 'Invalid combat journal target')
                 if kind == SHOT_HIT:
@@ -351,13 +355,31 @@ def verify_combat_journal(path, session_id, stream_id, origin, final_sequence, a
     return {'sha256': digest.hexdigest(), 'events': final_sequence, 'players': len(projected)}
 
 
-def roster_periods(players, minimum_ms, applied_end, *, require_tracked=False):
+def roster_periods(players, minimum_ms, applied_end, *, require_tracked=False, sealed_fires=None):
     expected = {pid: player['roomId'] for pid, player in players.items()}
-    periods = []
+    periods, fires = [], []
     start = previous = previous_tick = None
+    combat_sequence = 0
+
+    def match_fires(packet):
+        nonlocal combat_sequence
+        matched = []
+        for event in packet['events']:
+            if event['kind'] not in WORLD_COMBAT_KINDS:
+                continue
+            combat_sequence += 1
+            if event['kind'] == 'ShotFired':
+                source = sealed_fires.pop(combat_sequence, None)
+                identities = tuple(uuid.UUID(identity(event[key])).bytes_le for key in ('eventId', 'playerId', 'shotId'))
+                require(source is not None and source[:3] == identities and source[3] <= packet['observedSequence'],
+                        'World fire differs from its original sealed combat event')
+                matched.append((identity(event['playerId']), integer(event['tick'])))
+        require(combat_sequence == packet['throughCombatSequence'], 'World packet has a different combat boundary')
+        return matched
 
     def observe(packet):
         nonlocal start, previous, previous_tick
+        matched = match_fires(packet) if sealed_fires is not None else ()
         frame = packet['frame']
         if frame['phase'] != 'Running' or packet['suspended'] is not False or packet['observedSequence'] >= applied_end:
             previous = None
@@ -373,6 +395,8 @@ def roster_periods(players, minimum_ms, applied_end, *, require_tracked=False):
         elapsed = integer(packet['elapsedMilliseconds'])
         if previous is None or elapsed - previous > MAX_CONCURRENT_FRAME_GAP_MS or tick <= previous_tick:
             start = elapsed
+        else:
+            fires.extend((previous, elapsed, pid) for pid, event_tick in matched if previous_tick <= event_tick <= tick)
         previous, previous_tick = elapsed, tick
         if elapsed - start >= minimum_ms:
             if periods and periods[-1][0] == start:
@@ -380,19 +404,23 @@ def roster_periods(players, minimum_ms, applied_end, *, require_tracked=False):
             else:
                 periods.append((start, elapsed))
 
-    return observe, periods
+    return observe, periods, fires
 
 
 class VenueRosterOverlap:
-    def __init__(self, minimum_ms, *, require_tracked=False):
+    def __init__(self, minimum_ms, *, require_tracked=False, require_fire=False):
         self.minimum_ms = minimum_ms
         self.minimum = timedelta(milliseconds=minimum_ms)
         self.require_tracked = require_tracked
+        self.require_fire = require_fire
+        self.fires = []
         self.intervals = None
 
-    def add(self, capture_started_at, periods):
+    def add(self, capture_started_at, periods, fires):
         require(capture_started_at is not None, 'Concurrent roster verification requires an original UTC capture clock')
         capture = datetime.fromisoformat(capture_started_at).astimezone(timezone.utc)
+        self.fires.extend((capture + timedelta(milliseconds=before), capture + timedelta(milliseconds=after), pid)
+                          for before, after, pid in fires)
         right = [(capture + timedelta(milliseconds=start), capture + timedelta(milliseconds=end)) for start, end in periods]
         if self.intervals is None:
             self.intervals = right
@@ -412,16 +440,34 @@ class VenueRosterOverlap:
 
     def summary(self, players):
         require(self.intervals, 'Original recordings do not show the required continuous concurrent roster')
-        start, end = max(self.intervals, key=lambda pair: pair[1] - pair[0])
+        candidates = self.intervals
+        if self.require_fire:
+            # A world event only gives a tick. Both samples bracketing it must
+            # fit inside the common UTC window to count it for the original seat.
+            fires = sorted(self.fires)
+            candidates = []
+            for start, end in self.intervals:
+                seats = set()
+                index = bisect_left(fires, start, key=lambda fire: fire[0])
+                while index < len(fires) and fires[index][0] <= end:
+                    _, after, player = fires[index]
+                    if after <= end:
+                        seats.add(player)
+                    index += 1
+                if len(seats) == players:
+                    candidates.append((start, end))
+            require(candidates, 'No continuous concurrent roster interval contains a sealed shot from every original seat')
+        start, end = max(candidates, key=lambda pair: pair[1] - pair[0])
         return {'players': players, 'minimumMilliseconds': self.minimum_ms,
                 'longestMilliseconds': (end - start) // timedelta(milliseconds=1),
                 'maxFrameGapMilliseconds': MAX_CONCURRENT_FRAME_GAP_MS,
                 'fromUtc': start.isoformat(), 'throughUtc': end.isoformat(),
+                **({'playersWithConfirmedFire': players} if self.require_fire else {}),
                 **({'rigKind': 'Tracked'} if self.require_tracked else {})}
 
 
 def verify_world_journal(path, world, combat_sequence, through, applied_end, *, player_sources=None, guarded_begin=None,
-                         players=None, concurrency=None):
+                         players=None, concurrency=None, sealed_fires=None):
     spec = importlib.util.spec_from_file_location('field_world_journal', Path(__file__).with_name('analyze-world-journal.py'))
     analyzer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(analyzer)
@@ -433,8 +479,8 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
     roster_label = 'tracked' if begin_kind == 'trackingBegin' else 'participating'
     begin_roster = None
     if concurrency is not None:
-        observe_roster, periods = roster_periods(players, concurrency.minimum_ms, applied_end,
-                                                require_tracked=concurrency.require_tracked)
+        observe_roster, periods, fires = roster_periods(players, concurrency.minimum_ms, applied_end,
+                                                       require_tracked=concurrency.require_tracked, sealed_fires=sealed_fires)
 
     def observe_packet(packet):
         if begin is not None:
@@ -499,7 +545,8 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
         require(all(source['runningFrames'] > 0 for source in player_sources.values()),
                 'World journal lacks an active accepted pose for an original seat')
     if concurrency is not None:
-        concurrency.add(journal['captureStartedAtUtc'], periods)
+        require(not sealed_fires, 'Original sealed combat fire is missing from the world journal')
+        concurrency.add(journal['captureStartedAtUtc'], periods, fires)
     result = {'sha256': journal['sha256'], 'frames': sequence, 'runningFrames': journal['runningFrames']}
     if begin is not None:
         first = journal['firstApplied']
@@ -700,11 +747,13 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
         require(not remote, 'A peer is outside the declared same-host addresses')
     preflight = verify_udp_preflight(udp_preflight, binding, peer_ips)[0] if udp_preflight else None
     source_preflight = verify_udp_source_preflights(udp_source_preflights, binding, peer_ips) if udp_source_preflights is not None else None
+    sealed_fires = {} if concurrency is not None and concurrency.require_fire else None
+    combat_evidence = verify_combat_journal(combat_journal, session_id, stream_id, origin, combat_sequence,
+                                            applied_end if applied_end is not None else through, ledger,
+                                            fired=sealed_fires) if combat_journal is not None else None
     journal = verify_world_journal(world_journal, world, combat_sequence, through, applied_end,
                                    player_sources=player_sources, guarded_begin=guarded_begin, players=players,
-                                   concurrency=concurrency) if world_journal is not None else None
-    combat_evidence = verify_combat_journal(combat_journal, session_id, stream_id, origin, combat_sequence,
-                                            applied_end if applied_end is not None else through, ledger) if combat_journal is not None else None
+                                   concurrency=concurrency, sealed_fires=sealed_fires) if world_journal is not None else None
     alignments = None
     if room_alignments is not None:
         require(journal is not None and quest_players == size, 'MR alignment evidence requires the closed world journal and all original Quest logs')
@@ -877,11 +926,15 @@ def verify_venue(manifest_path):
     require(type(require_tracked) is bool, 'requireTrackedRoster must be a boolean')
     require(not require_tracked or 'minimumConcurrentMilliseconds' in manifest,
             'requireTrackedRoster requires minimumConcurrentMilliseconds')
+    require_fire = manifest.get('requireConcurrentFire', False)
+    require(type(require_fire) is bool, 'requireConcurrentFire must be a boolean')
+    require(not require_fire or ('minimumConcurrentMilliseconds' in manifest and combat_journals),
+            'requireConcurrentFire requires minimumConcurrentMilliseconds and the original combat journals for the full batch')
     concurrency = None
     if 'minimumConcurrentMilliseconds' in manifest:
         require(journals, 'Concurrent roster verification requires the original world journals for the full batch')
         concurrency = VenueRosterOverlap(integer(manifest['minimumConcurrentMilliseconds'], 1000, 900000),
-                                         require_tracked=require_tracked)
+                                         require_tracked=require_tracked, require_fire=require_fire)
     verify_player_sources = manifest.get('verifyPlayerSources', False)
     require(type(verify_player_sources) is bool and (not verify_player_sources or journals),
             'Player source verification requires a boolean option and the original world journals for the full batch')
