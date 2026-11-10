@@ -53,6 +53,13 @@ internal static class ServerCatalogProof
         }
     }
 
+    static bool PressEnter(Control control, bool repeated = false)
+    {
+        const int keyDown = 0x0100;
+        var message = Message.Create(control.Handle, keyDown, (IntPtr)Keys.Enter, repeated ? (IntPtr)(1 << 30) : IntPtr.Zero);
+        return control.PreProcessMessage(ref message);
+    }
+
     static void CheckResponsiveCatalog(string delayedInstance)
     {
         var folder = Path.GetDirectoryName(delayedInstance);
@@ -67,6 +74,7 @@ internal static class ServerCatalogProof
         using (var window = new ServerLauncher.Window { ShowInTaskbar = false, Opacity = 0 })
         {
             var path = window.Controls.OfType<TextBox>().First();
+            var address = window.Controls.OfType<TextBox>().Skip(1).First();
             var rooms = window.Controls.OfType<ComboBox>().Single();
             var refresh = window.Controls.OfType<Button>().Single(button => button.Text == "載入／更新");
             var start = window.Controls.OfType<Button>().Single(button => button.Text == "啟動伺服器");
@@ -82,7 +90,11 @@ internal static class ServerCatalogProof
                 {
                     path.Text = delayedInstance;
                     arm("success");
-                    refresh.PerformClick();
+                    PressEnter(address);
+                    Check(refresh.Enabled && !rooms.Enabled && !start.Enabled, "Enter outside the path does not load or launch a session");
+                    Check(PressEnter(path, repeated: true) && refresh.Enabled && !rooms.Enabled && !start.Enabled,
+                        "held Enter on the path does not issue a repeat load");
+                    Check(PressEnter(path), "Enter on the management path is handled by the actual WinForms key path");
                     await WaitFor(() => File.Exists(entered), "catalog request reaches the relay");
                     Check(!File.Exists(release) && !refresh.Enabled && !path.Enabled && !start.Enabled && !rooms.Enabled,
                         "the WinForms message loop runs while the catalog response is held and launch stays disabled");
@@ -95,7 +107,7 @@ internal static class ServerCatalogProof
                     Check(start.Enabled, "the first explicitly selected original room can start");
 
                     arm("success");
-                    refresh.PerformClick();
+                    Check(PressEnter(path), "Enter refresh uses the existing catalog path after an explicit selection");
                     await WaitFor(() => File.Exists(entered), "refresh reaches the relay");
                     Check(!start.Enabled, "a refresh makes the previously selected room ineligible while the read is pending");
                     File.WriteAllText(release, "");

@@ -1130,7 +1130,7 @@ internal static class ServerLauncher
             Text = "VR Command 遊戲伺服器"; ClientSize = new Size(920, 580); Font = new Font("Microsoft JhengHei UI", 11); FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false;
             Add(new Label { Text = "每個獨立房間一個伺服器；五房合併場次只需一個。", AutoSize = true }, 24, 24, 860, 30);
             Add(new Label { Text = "管理實例檔案完整路徑", AutoSize = true }, 24, 56, 600, 28); Add(selected, 24, 86, 594, 32); Add(open, 630, 84, 120, 36); Add(refresh, 766, 84, 124, 36);
-            Add(new Label { Text = "可選檔，也可直接貼上control-instance.json路徑，再按載入／更新。", AutoSize = true }, 24, 127, 866, 30);
+            Add(new Label { Text = "可選檔，也可貼上 control-instance.json 路徑，按 Enter 或「載入／更新」。", AutoSize = true }, 24, 127, 866, 30);
             Add(new Label { Text = "尚未綁定來源的 VR 或 MR 場次", AutoSize = true }, 24, 164, 400, 28); Add(session, 24, 194, 866, 34); Add(detail, 24, 240, 866, 76);
             Add(new Label { Text = "公告IPv4", AutoSize = true }, 24, 327, 210, 28); Add(address, 24, 358, 230, 32); Add(new Label { Text = "本機綁定IPv4", AutoSize = true }, 284, 327, 230, 28); Add(bind, 284, 358, 230, 32); Add(new Label { Text = "UDP埠", AutoSize = true }, 544, 327, 130, 28); Add(port, 544, 358, 130, 32);
             Add(peerDiagnostics, 24, 400, 430, 30);
@@ -1156,6 +1156,14 @@ internal static class ServerLauncher
             var timer = new System.Windows.Forms.Timer { Interval = 500 }; timer.Tick += delegate { if (active != null && !cancel) state.Text = active.Status; };
             FormClosed += delegate { timer.Dispose(); };
             timer.Start();
+        }
+        protected override bool ProcessCmdKey(ref Message message, Keys keyData)
+        {
+            if (keyData != Keys.Enter || !selected.IsHandleCreated || message.HWnd != selected.Handle)
+                return base.ProcessCmdKey(ref message, keyData);
+            const long repeatedKey = 1L << 30;
+            if (refresh.Enabled && (message.LParam.ToInt64() & repeatedKey) == 0) refresh.PerformClick();
+            return true;
         }
         void Add(Control control, int x, int y, int w, int h) { control.SetBounds(x, y, w, h); Controls.Add(control); }
         void Guard(Action action) { try { action(); } catch (Exception e) { state.Text = "未完成：" + Safe(e); } }

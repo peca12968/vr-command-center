@@ -1,5 +1,7 @@
 # Windows 遊戲伺服器包
 
+2026-11-11 `VRCommand-GameServer-0.50.4-1.18-keyboard-win-x64.zip` 為 84,814,935 bytes，SHA-256 `0ce48c52dc23f83eb5960b529c0765c6f807dcd7595233fe4c207006514cf434`。解壓核對 330 筆清單。啟動器提供管理路徑欄 Enter 載入，搭配 Windows 遊戲 0.50.4。 [鍵盤操作](SERVER_CATALOG.md)
+
 2026-11-11 `VRCommand-GameServer-0.50.4-1.17-catalog-win-x64.zip` 為 84,814,710 bytes，SHA-256 `ea9e997f21a93c51609d0255babb2ad65ee97198953ee65ab216f846c1453d5b`。解壓核對 330 筆清單。啟動器在背景讀取單房視窗的待開清單，遊戲沿用 0.50.4。 [待開清單操作](SERVER_CATALOG.md)
 
 2026-11-11 `VRCommand-GameServer-0.50.4-1.16-venue-receipt-retry-win-x64.zip` 為 84,812,731 bytes，SHA-256 `a033b9936e45cb4fdfc72d1d0af99c83ddbea12a602051c39822e2bd8fd5fc5f`。解壓核對 330 筆清單。遊戲沿用 0.50.4，啟動器可重送原全館來源登記及端點公告。 [操作與報告](#依場館計畫批次啟動)

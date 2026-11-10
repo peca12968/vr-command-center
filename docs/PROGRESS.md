@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-11 啟動器鍵盤載入管理實例
+
+- Windows 啟動器 1.18 的管理實例路徑欄接受 Enter，送到既有的載入按鈕流程。按住 Enter 的重複鍵會被消耗，讀取期間維持原控制項鎖定、明確選房及啟動資格核對。介面與包內操作說明已加入按鍵提示。 [操作方式](SERVER_CATALOG.md)
+- 重新解壓發行包後，51 項待開清單 CLI／API 與 59 項真正 Framework 檢查通過。訊息迴圈測試從路徑控制項的原生 Enter 訊息載入及更新，核對初次明確選房、保留原選取、等待回應時停用、錯誤清除及等候期間關窗。Windows、Quest 與管理包的離線發行一致性核對通過。 [清單驗收](../artifacts/server-catalog/run-893bce33d1b344fd81a8f25968c67cdb/checks.json) · [訊息迴圈](../artifacts/server-catalog/run-893bce33d1b344fd81a8f25968c67cdb/framework-proof.json) · [發行核對](../artifacts/venue-release-0.50.4-server-keyboard.json)
+- 實際桌面驗收已列出本次 1.18 視窗，但取得焦點及重新選取的嘗試皆回傳 `GetCursorPos` 存取拒絕 `0x80070005`。這輪停在桌面輸入前，隔離啟動器、管理服務及測試客戶端均已清理。 [桌面錯誤](../artifacts/server-gui/run-d974dcbc7872446abded7efd4c46df58/gui-blocker.json) · [清理](../artifacts/server-gui/run-d974dcbc7872446abded7efd4c46df58/cleanup.json)
+
 ## 2026-11-11 片段戰績 CSV 與命中率分子
 
 - 控制台 0.31.126 顯示計入片段命中率的射擊數，並從同一原錄製與選定的起訖格、房間及玩家下載 CSV。報表保留原命中數、分子、實際損耗及保存範圍。未發射時命中率留空，空片段保留範圍列。沿用試算表文字防護與房間權限。舊 0.31.125 解壓包在新增端點回傳 404。 [操作與 API](REPORTS.md#下載指定片段的戰績) · [舊版對照](../artifacts/clip-csv-world-baseline.log)
