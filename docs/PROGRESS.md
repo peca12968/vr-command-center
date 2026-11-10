@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 硬體模擬閘道核對戰鬥來源
+
+- 模擬器 0.2.12 在附掛前核對戰鬥串流、來源及階段序號。已附掛的同一串流若回報另一種來源，該房以 `management-invalid-response` 結束，取消待確認批次並保留原確認。其他房可繼續排演。 [操作說明](HARDWARE.md#一次啟動與停止五房排演)
+- 0.2.11 對照場在收到改報來源的回覆後，第 4 房沒有發布終止結果。0.2.12 的第 4 房先遇到短暫 503，關閉原連線並取消原批次，恢復後使用新連線確認新回饋。之後注入來源矛盾時，第 4 房保存兩筆原確認與兩筆取消紀錄，第 5 房仍在原連線確認。啟動前缺少戰鬥來源的案例在模擬握手前被拒絕。 [舊版對照](../artifacts/hardware-0212-baseline.log) · [新版房間報告](../artifacts/live-hardware-gateway/run-b06b5bcb2ad947148fdf3cf8fded3d52/linked-fleet-authority-faults/room-04-report.json)
+- Release 零警告，1,086 項核心、38 項離線及 72 項即時檢查通過。解壓驗證的 0.2.12 套件八個檔案與清單相符，範例輸出與原檢查結果逐位元相同。來源 `c600534d` 已推送。GitHub Actions job `130036533084` 因帳務或支出上限未啟動。 [套件資料](HARDWARE_SIMULATOR.md) · [即時檢查](../artifacts/live-hardware-gateway/run-b06b5bcb2ad947148fdf3cf8fded3d52/checks.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42875201022)
+- Windows 遊戲 0.50.4、啟動器 1.16、管理包 0.31.115 與解壓模擬器 0.2.12 的命令列整合測試通過 430 項。獨立與合併模式各 25 席同機連線，十房次累計 212 筆模擬確認，對應 50 個原入場識別。六場共 1,765 格完整回放，50 份戰績、11 份 CSV、雙封存與原伺服器確認皆相符。程序清理完成，C／F 快照 238 檔雜湊一致。WinForms、跨機、頭盔及廠商設備另待驗收。 [Windows 驗收](../artifacts/server-package-checks/run-9547b73f0c434c158d298e155c9b9c54/checks.json)
+
 ## 2026-11-11 在主控台核對未確認的全館啟動報告
 
 - 管理包 0.31.115 新增主控唯讀核對。瀏覽器解析第四版啟動結果，只送出原批次、場次、來源識別及 UDP 綁定欄位。管理包會核對實例，逐房顯示原場次、來源、端點與近期快照狀態。綁定為 `0.0.0.0` 時核對埠號，公告位址由管理端讀取。 [操作方式](WINDOWS_SERVER_PACKAGE.md#核對未確認的啟動報告)
