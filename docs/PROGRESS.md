@@ -1,5 +1,15 @@
 # 開發進度
 
+## 2026-11-10 窄缺口的細格通路預覽
+
+控制台 0.31.76 對原 0.5 公尺格點未找到路徑的出生位補查 0.125 公尺格點。每段使用原 `ArenaWalkSurface.ClearSegment`，草稿及保存版本都標示採用細格的席位。 [場地操作](LAYOUT.md#出生位通路預覽)
+
+- 舊版對偏移的 0.8 公尺沙包與油桶缺口回報無路徑，原反例 `layout-fine-before-8890638a.log`。新版五席都找到取樣通路，一席依序通過原遊戲權威端的姿態檢查並到達中線。縮至約 0.58 公尺仍找不到路徑。領域 1,006 項、HTTP 758 項、世界串流 83 項通過。證據 `layout-fine-backend.log`。
+- Chromium 解壓版場地專測 39 項，從草稿實際輸入六件物件的小數座標，保存後開場平面圖逐點與原草稿相符。證據 `console-layout-fine-focused-86028cea`。管理包 `artifacts/windows-control-console-0.31.76-fine-opening-win-x64.zip` 為 52,837,112 bytes，SHA-256 `9296a87ff50338c8a35862dda7d45f36326751ff614def8cacf99a844a0490e5`，核對 172 個發布來源、520 個執行檔案與 540 筆清單。管理包 CLI 通過 107 項，執行紀錄 `control-package-checks/run-fc8d18ad774145068c47fbd30183cc22` 的 C/F 兩份 27 檔雜湊相同。管理包及伺服器包的 Python 測試共 17 項通過。
+- 沿用 Windows 遊戲端與伺服器 0.49.0，五房獨立與五房合併共 387 項原生檢查通過。六場的保存通路共 30 條均經過偏移缺口，原生世界載入的六件掩體座標也逐房核對。兩種模式合計 50 筆原始結果，六場回放共 979 幀，核對雙封存與伺服器確認後清理。執行紀錄 `server-package-checks/run-855ff482f9a1436cafda03b3b18ba62c` 的 C/F 兩份 218 檔雜湊相同。
+- 解壓版完整回歸通過 108 項 Node 與 708 項 Chromium 檢查。紀錄 `layout-fine-browser-full-86028cea.log`，截圖 `console-layout-fine-full-86028cea`。
+- 功能與管理包來源 `e8174fc7fa8e9983ca0ac2f43cf3a6046290438d`。GitHub Actions job `129557139334` 因帳務或支出上限未啟動。實體頭盔、跨機 25 人、實體 MR 與廠商硬體仍待現地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42733534003)
+
 ## 2026-11-10 五房硬體模擬資源互斥
 
 硬體模擬器 0.2.5 在原場次／房間互斥之外，鎖定同機同帳戶的模擬 TCP 埠及每個已綁設備 ID。發生衝突時在連線前拒絕，釋放本次已取得的鎖定。模擬接收程序可指定房號，後續回饋須符合原握手房號及連線。 [操作方式](HARDWARE.md#五房資源互斥)
