@@ -1,3 +1,4 @@
+const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const path = require('node:path');
