@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-11 `VRCommand-ControlServer-0.31.123-workstation-console-win-x64.zip` 為 53,029,288 bytes，SHA-256 `ee7a1dece7dcf53b17a9e7a16ef1de650370b2b02d40310b593bb91165700060`。解壓核對 558 筆清單與 538 個發行檔案。場館 HTTPS 控制台可收集及核對主控與五房控的連線回條。 [工作站操作](#核對主控與五房控的直連來源) · [發行核對](../artifacts/venue-release-0.50.4-workstation-console.json)
+
 2026-11-11 `VRCommand-ControlServer-0.31.122-layout-clearance-win-x64.zip` 為 53,018,740 bytes，SHA-256 `47446747476ff463478aeba1a48df1ffe65b59dffb1ef3eca2216ebae7cdfa52`。解壓核對 555 筆清單與 535 個發行檔案。草稿與保存版本的旋轉方向對齊遊戲，並可顯示玩家通行邊界。 [平面圖操作](LAYOUT.md#開場前查看保存版本平面圖) · [發行核對](../artifacts/venue-release-0.50.4-layout-clearance.json)
 
 2026-11-11 `VRCommand-ControlServer-0.31.121-observer-integrity-win-x64.zip` 為 53,017,017 bytes，SHA-256 `2cd6e31c1e73f676ed1fc3cc7a088f74327f6c698dc090d492b1be2e823994a5`。解壓核對 555 筆清單及 535 個發行檔案。觀戰核對錄製狀態及序號，並顯示此格的姿態與最後保存格標記。 [觀戰操作](WORLD_RECORDING.md#操作) · [發行核對](../artifacts/venue-release-0.50.4-observer-integrity.json)

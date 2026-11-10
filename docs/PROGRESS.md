@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 從管理台核對六台操作工作站
+
+- 控制台 0.31.123 在場館 HTTPS 顯示「主控與五房控連線核對」。主控可產生代號，六台各自下載本站簽章回條，主控選取原配置與六份 JSON 後送回原管理程序。沿用實際 TCP 來源、角色、簽章及 15 分鐘期限。可匯入瀏覽器回條或命令列報告。離開場次頁或登出會清除本輪資料。舊 0.31.122 解壓包缺少這個畫面，瀏覽器對照保留。 [操作方式](WINDOWS_CONTROL_PACKAGE.md#核對主控與五房控的直連來源) · [舊版對照](../artifacts/operator-network-browser-baseline.log)
+- Windows 解壓包通過 40 項 HTTPS 整合與 17 項 Chromium 專項。六個角色確實從本機場館 IPv4 取得簽章，管理服務拒絕六份相同來源的回條。六台成功畫面使用模擬回應，核心測試另驗六個私有來源的簽章與過期拒絕。原生一場同機 Windows 玩家經 HTTPS 配票及 UDP 入場，遊戲端用指定憑證指紋連接 HTTPS／WSS，核對本房原畫格 21、戰鬥與世界雙封存至第 26 格及一筆原入場戰績確認。HTTP 與 HTTPS 監聽正常關閉，管理包 C／F 27 檔相符。實體六台工作站、跨機玩家、頭盔及廠商硬體仍待現場驗收。 [HTTPS 整合](../artifacts/control-https-checks/run-2b52798a71d541928e959729c22673fd/checks.json) · [瀏覽器專項](../artifacts/control-https-checks/run-2b52798a71d541928e959729c22673fd/workstation-browser-checks.json) · [雜湊核對](../artifacts/operator-network-browser-tls-validation.json)
+- Release 零警告，1,101 項核心、825 項 HTTP、11 項命令列工具、107 項管理包通過。發行來源 `1a938458` 的 188 個檔案雜湊相符，29 個與 Git 只差換行。Windows 與 Quest 0.50.4 離線發行核對通過。GitHub Actions job `130121529689` 因帳務或支出上限未啟動。 [發行核對](../artifacts/venue-release-0.50.4-workstation-console.json) · [來源與 ZIP](../artifacts/operator-network-browser-source-validation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42899545558)
+- 同一解壓包通過 111 項 Node 與 896 項完整 Chromium 回歸。核對八個任務列表故障均攔截一筆請求並確認送達，保存 143 個瀏覽器證據檔。 [完整回歸](../artifacts/console-workstation-123-full/checks.json) · [回歸雜湊](../artifacts/operator-network-browser-full-validation.json)
+
 ## 2026-11-11 場景旋轉方向與玩家通行邊界
 
 - 舊 0.31.121 解壓包在 Chromium 重現非直角掩體的鏡像。0.31.122 使用遊戲座標轉換後的角度繪製草稿、保存版本與複製預覽。草稿與開場平面圖可顯示玩家中心距牆 0.3 公尺的邊界，以及掩體沿局部 X／Z 擴張 0.3 公尺後的阻擋範圍。圖層預設關閉，配置通過檢查後可勾選，切換時保留任務草稿狀態。 [操作說明](LAYOUT.md#開場前查看保存版本平面圖) · [舊版對照](../artifacts/layout-clearance-baseline.log) · [新版平面圖](../artifacts/console-layout-clearance-package/layout-valid-launch.png)
