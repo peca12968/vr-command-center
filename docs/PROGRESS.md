@@ -1,5 +1,14 @@
 # 開發進度
 
+## 2026-11-11 控制台查看玩家戰績回條
+
+- 管理包 0.31.109 搭配遊戲 0.50.2。在個別場次的「任務收尾」展開回條，依終止名冊查看確認席數。主控看整場，房控看本房。回條只接受原遊戲來源及原入場，核對場次序號和雙封存尾界。保存後可重送及重啟讀回，原場次、統計和錄製序號保持。 [操作方式](SESSION_CLOSURE.md#玩家戰績回條)
+- 以三個 Windows 解壓包執行 `run-b41952417c2742469866a2912f8e4750`，372 項通過。五房獨立與合併各 25 席同機模擬玩家，50 份回條逐席與原玩家戰績及伺服器確認相符。六場完整回放共 1,019 格，6 份 CSV，兩種模式均完成雙封存。合併場五個房控各只讀原房五席。實際 Chrome 控制台送出房間 1 的 End 並顯示 5／5 席已確認。活動場次和測試程序已清理，C／F 220 檔同雜湊。 [原生驗收](../artifacts/server-package-checks/run-b41952417c2742469866a2912f8e4750/checks.json) · [控制台實拍](../artifacts/server-package-checks/run-b41952417c2742469866a2912f8e4750/closure-ui/debrief-receipts.png)
+- 獨立 HTTPS／WSS 場 `run-ab449025280c4a1797edfd32999ca709` 39 項通過。一席同機原生模擬玩家的回條由原遊戲程序經固定指紋的 HTTPS 提交，與原入場、21 格世界封存及零事件戰鬥封存相符。其他房控無法讀取該場回條。原遊戲與管理程序已退出。 [加密場驗收](../artifacts/control-https-checks/run-ab449025280c4a1797edfd32999ca709/checks.json)
+- 本機 Release 零警告，1,074 項核心、768 項 HTTP、102 項世界串流、107 項管理包、111 項 Node、23 項 Chrome 收尾及 273 項 Unity EditMode 通過。首次 Chrome 使用過期的發行靜態檔而逾時，重建並核對靜態檔後以相同斷言通過。 [瀏覽器測試](../artifacts/console-debrief-closure-fresh/checks.json)
+- Windows 和 Quest 0.50.2／67 同源 `8166c7096af52399b95896c265a5f25112025a7ec27729dc3e7b293351e8bf1d`，Windows 兩包 323 個共同檔案、Quest ARM64 及 APK v2 開發簽章核對通過。管理包在提交前由相同工作目錄建置，收據記載基底 `d6fb7278`，另逐檔核對 183 個來源雜湊。首次 APK 核對因收據檔名錯誤被拒，正名後同一份 APK 通過。 [發行核對](../artifacts/venue-release-0.50.2-debrief.json)
+- 功能源碼已推送 `9a777200`。GitHub Actions job `129948867553` 因帳務或支出上限未啟動。跨機 25 位玩家、Quest 3／VIVE XR 頭盔與廠商硬體仍待現場驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42850315522)
+
 ## 2026-11-10 Windows 啟動器圖形介面重驗
 
 - 使用啟動器 1.12、Windows 遊戲 0.50.1 和管理包 0.31.108 重試。已在啟動器輸入隔離管理實例路徑。「載入／更新」兩次被 `PickerHost.exe` 攔截，第二次已重新啟用並擷取目標視窗。停止桌面輸入後終止本次啟動器，測試以退出碼 1 收尾，未觀察到原生遊戲程序啟動。隔離管理服務正常退出，C／F 的 9 份快照檔案逐檔雜湊一致。 [圖形介面阻擋](../artifacts/server-gui/run-3ed4533cb2b345e1ab43a48193bb6e7c/gui-blocker.json) · [清理結果](../artifacts/server-gui/run-3ed4533cb2b345e1ab43a48193bb6e7c/cleanup.json)
