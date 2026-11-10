@@ -5,6 +5,8 @@
 - Windows 啟動器 1.18 的管理實例路徑欄接受 Enter，送到既有的載入按鈕流程。按住 Enter 的重複鍵會被消耗，讀取期間維持原控制項鎖定、明確選房及啟動資格核對。介面與包內操作說明已加入按鍵提示。 [操作方式](SERVER_CATALOG.md)
 - 重新解壓發行包後，51 項待開清單 CLI／API 與 59 項真正 Framework 檢查通過。訊息迴圈測試從路徑控制項的原生 Enter 訊息載入及更新，核對初次明確選房、保留原選取、等待回應時停用、錯誤清除及等候期間關窗。Windows、Quest 與管理包的離線發行一致性核對通過。 [清單驗收](../artifacts/server-catalog/run-893bce33d1b344fd81a8f25968c67cdb/checks.json) · [訊息迴圈](../artifacts/server-catalog/run-893bce33d1b344fd81a8f25968c67cdb/framework-proof.json) · [發行核對](../artifacts/venue-release-0.50.4-server-keyboard.json)
 - 實際桌面驗收已列出本次 1.18 視窗，但取得焦點及重新選取的嘗試皆回傳 `GetCursorPos` 存取拒絕 `0x80070005`。這輪停在桌面輸入前，隔離啟動器、管理服務及測試客戶端均已清理。 [桌面錯誤](../artifacts/server-gui/run-d974dcbc7872446abded7efd4c46df58/gui-blocker.json) · [清理](../artifacts/server-gui/run-d974dcbc7872446abded7efd4c46df58/cleanup.json)
+- 10 項 Python 封裝測試通過，清單及桌面失敗場的 C／F 快照各 22、9 檔逐檔相符。解壓三包通過 421 項原生檢查，五房獨立及合併各 25 個同機玩家端，六場共 1,527 格完整回放、50 份原戰績、11 份結算 CSV、雙封存與原伺服器確認。第 3 房單人第 105 至 210 格 CSV 與原 5 次受傷及 100 點實際損耗一致。活動場次歸零，清理無殘留，原生 C／F 220 檔相符。跨機、實體頭盔與廠商設備待現場驗收。 [封裝與快照](../artifacts/server-keyboard-package-validation.json) · [原生驗收](../artifacts/server-package-checks/run-424649612a0546c8a4cdad47f22c73eb/checks.json) · [回放與戰績核對](../artifacts/server-keyboard-native-validation.json)
+- 功能來源 `41820748`，編譯輸入與 Git 原始碼逐位元組相符，323 個遊戲 runtime 檔案與前版相符。GitHub Actions `42909292501` 的 job `130155381496` 沒有執行步驟，失敗註記為帳務或支出上限。 [來源核對](../artifacts/server-keyboard-source-validation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42909292501)
 
 ## 2026-11-11 片段戰績 CSV 與命中率分子
 
