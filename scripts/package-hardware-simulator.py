@@ -3,7 +3,7 @@ import argparse,hashlib,json,shutil,uuid,zipfile
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 FILES=['VrCommand.HardwareSimulator.dll','VrCommand.HardwareSimulator.deps.json','VrCommand.HardwareSimulator.runtimeconfig.json','VrCommand.Core.dll','VrCommand.Simulation.dll']
-VERSION='0.2.7'
+VERSION='0.2.8'
 README=f'''VR Command 硬體回饋模擬器 {VERSION}
 
 需要 .NET 10 runtime，本機使用10.0.14驗證。這不是Unity玩家程式或廠商SDK。
@@ -21,6 +21,9 @@ dotnet VrCommand.HardwareSimulator.dll --live <包外room-config.json> --output 
 搭配管理包 0.31.61 以上，可從座位／設備清單建立即時設定：
 dotnet VrCommand.HardwareSimulator.dll --bind-room <包外seat-map.json> --output <新的包外room-config.json>
 此命令使用本房房控金鑰讀取當前名冊。版本 2 即時設定在握手前及排演中核對原入場。名冊不符時以 binding-mismatch 結束，請核對座位後重新產生設定。
+搭配管理包 0.31.94，可用 VR_COMMAND_MASTER_KEY 一次核對五房並輸出各房設定：
+dotnet VrCommand.HardwareSimulator.dll --bind-venue <包外venue-map.json> --output <新的包外資料夾>
+整批核對五房原場次、現行名冊與互不重複的模擬埠及設備 ID。正式排演仍各用房控金鑰。
 配置範例、模擬協議和操作方式見專案 docs/HARDWARE.md。憑證放在程序環境，設定與報告放在包外。
 即時模式以唯讀 HTTP 取事件，模擬連線僅使用 127.0.0.1 TCP。回覆只確認模擬批次，physicalDeliveryConfirmed 固定為 false。
 閘道等待確認時會繼續檢查管理狀態。已暫停、結束或失效的批次會中止，模擬設備可用 --manual 的 observe-close 觀察該連線關閉。
@@ -44,7 +47,7 @@ def sha(p):
 def verify(folder):
     folder=folder.resolve();manifest=read(folder/'hardware-package.json')
     version=(manifest.get('toolVersion'),manifest.get('mode'))
-    if manifest.get('schemaVersion')!=1 or version not in {('0.1.0','OfflineSimulationOnly'),('0.2.0','OfflineAndLiveSimulation'),('0.2.1','OfflineAndLiveSimulation'),('0.2.2','OfflineAndLiveSimulation'),('0.2.3','OfflineAndLiveSimulation'),('0.2.4','OfflineAndLiveSimulation'),('0.2.5','OfflineAndLiveSimulation'),('0.2.6','OfflineAndLiveSimulation'),(VERSION,'OfflineAndLiveSimulation')}:raise ValueError('Unsupported simulator package')
+    if manifest.get('schemaVersion')!=1 or version not in {('0.1.0','OfflineSimulationOnly'),('0.2.0','OfflineAndLiveSimulation'),('0.2.1','OfflineAndLiveSimulation'),('0.2.2','OfflineAndLiveSimulation'),('0.2.3','OfflineAndLiveSimulation'),('0.2.4','OfflineAndLiveSimulation'),('0.2.5','OfflineAndLiveSimulation'),('0.2.6','OfflineAndLiveSimulation'),('0.2.7','OfflineAndLiveSimulation'),(VERSION,'OfflineAndLiveSimulation')}:raise ValueError('Unsupported simulator package')
     expected=set(FILES)|{'example.json','README.txt'}
     if version[1]=='OfflineAndLiveSimulation':expected.add('mock-device.py')
     if set(manifest['files'])!=expected:raise ValueError('Unexpected simulator package payload')

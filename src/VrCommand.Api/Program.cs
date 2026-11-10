@@ -224,6 +224,11 @@ app.MapGet("/api/venue/phase", (SessionManager manager, HttpContext context) =>
     context.Response.Headers.CacheControl = "no-store";
     return manager.ReadVenuePhase(Actor(context));
 });
+app.MapGet("/api/venue/hardware-bindings", (SessionManager manager, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    return manager.ReadVenueHardwareBindings(Actor(context));
+});
 app.MapGet("/api/venue/closure", (bool? includeScores, WorldRecordings worlds, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";

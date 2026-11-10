@@ -27,7 +27,7 @@ $page.signals
 
 ## 現況
 
-硬體由外部公司負責，目前尚待技術資料或 SDK。模擬器 0.2.7 支援以下即時排演，以及[離線回饋模擬](HARDWARE_SIMULATOR.md)的事件重建、佇列、重送和到期測試。設備輸入、強度映射、實體停止及廠商協議列入後續實機驗收。
+硬體由外部公司負責，目前尚待技術資料或 SDK。模擬器 0.2.8 支援以下即時排演，以及[離線回饋模擬](HARDWARE_SIMULATOR.md)的事件重建、佇列、重送和到期測試。設備輸入、強度映射、實體停止及廠商協議列入後續實機驗收。
 
 ### 依現行名冊建立座位綁定
 
@@ -55,9 +55,38 @@ dotnet .\VrCommand.HardwareSimulator.dll --bind-room ..\room-1-seats.json --outp
 
 閘道在握手前、取用回饋時及確認批次時均核對當次綁定。若任一已配置座位的入場失效，閘道會關閉該房模擬連線，待確認批次記為 `cancelled`，報告記為 `binding-mismatch` 並回傳退出碼 1。核對座位後可重新產生設定並啟動。其他房間各自使用其設定及連線。
 
+### 一次建立五房設備綁定
+
+使用管理包 0.31.94 與模擬器 0.2.8。主控可為五個獨立場次或一個合併場次一次建立設定。輸入須列出房間 1 至 5、各房當前場次 UUID、不同的模擬 TCP 埠，以及每房 1 至 5 個已編列席位。各設備 ID 在五房間須唯一。
+
+以下以五房合併為例。把 `$sessionId` 換成目前合併場次的 UUID。獨立模式用 `Independent`，各房填自己的場次 UUID。`seat` 從 0 起算。請把 UUID 對應到排演中實際要用的模擬設備。
+
+```powershell
+$sessionId = '11111111-1111-4111-8111-111111111111'
+$rooms = foreach ($room in 1..5) {
+    $devices = foreach ($seat in 0..4) {
+        @{ seat = $seat; deviceId = [guid]::NewGuid().ToString('D') }
+    }
+    @{ roomId = $room; sessionId = $sessionId; mockPort = 19100 + $room; devices = @($devices) }
+}
+@{ version = 1; managementUrl = 'http://127.0.0.1:5081'; mode = 'Linked'; seconds = 60; rooms = @($rooms) } |
+    ConvertTo-Json -Depth 5 | Set-Content -LiteralPath ..\venue-map.json -Encoding utf8NoBOM
+
+$env:VR_COMMAND_MASTER_KEY = Read-Host '輸入主控金鑰' -MaskInput
+try {
+    dotnet .\VrCommand.HardwareSimulator.dll --bind-venue ..\venue-map.json --output ..\venue-bindings-run01
+} finally {
+    Remove-Item Env:VR_COMMAND_MASTER_KEY
+}
+```
+
+輸出資料夾須為新路徑，父目錄須已存在。工具以主控身分讀取 `GET /api/venue/hardware-bindings` 的同一份五房名冊快照。五房都核對成功後才發布 `room-01.json` 至 `room-05.json` 以及記錄原場次和序號的 `venue-bindings.json`。任一房場次不符、席位缺人或資源重複時，不會發布資料夾。這一步不會啟動閘道。
+
+每房排演仍用該房的 `VR_COMMAND_ROOM_KEY` 與對應的 `room-XX.json`。如果設定發布後入場名額被換掉，閘道會依版本 2 設定的入場核對停止或拒絕握手。
+
 ## 即時模擬閘道
 
-解壓模擬器 0.2.7 後，用 Python 3.12 開啟模擬設備。每房使用自己的程序和 TCP 埠，模擬連線固定使用本機 `127.0.0.1`。指定 `--room` 時，設備只接受該房握手。後續批次須符合握手房號及連線 ID 才會確認。
+解壓模擬器 0.2.8 後，用 Python 3.12 開啟模擬設備。每房使用自己的程序和 TCP 埠，模擬連線固定使用本機 `127.0.0.1`。指定 `--room` 時，設備只接受該房握手。後續批次須符合握手房號及連線 ID 才會確認。
 
 ```powershell
 python .\mock-device.py --room 1 --port 19101

@@ -7,7 +7,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using VrCommand.Core;
 
-internal static class LiveHardwareGateway
+internal static partial class LiveHardwareGateway
 {
     private const int MaxBatch = 32, MaxAttempts = 1024, MaxFrameBytes = 32 * 1024;
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(150);
@@ -65,13 +65,13 @@ internal static class LiveHardwareGateway
             throw new ArgumentException("Use a session, one room, a mock port and a bounded rehearsal duration.");
     }
 
-    private static HttpClient CreateManagementClient(string origin)
+    private static HttpClient CreateManagementClient(string origin, string keyVariable = "VR_COMMAND_ROOM_KEY")
     {
         if (!Uri.TryCreate(origin, UriKind.Absolute, out var api) || api.UserInfo.Length != 0 || api.Query.Length != 0
             || api.Fragment.Length != 0 || api.AbsolutePath != "/" || !(api.Scheme == "https" || api.Scheme == "http" && api.Host == "127.0.0.1"))
             throw new ArgumentException("Use an HTTPS management origin or 127.0.0.1 HTTP.");
-        var key = Environment.GetEnvironmentVariable("VR_COMMAND_ROOM_KEY");
-        if (string.IsNullOrWhiteSpace(key) || key.Length > 512 || key.Any(c => c <= 32 || c >= 127)) throw new ArgumentException("Set the room operator key in the environment.");
+        var key = Environment.GetEnvironmentVariable(keyVariable);
+        if (string.IsNullOrWhiteSpace(key) || key.Length > 512 || key.Any(c => c <= 32 || c >= 127)) throw new ArgumentException("Set the required operator key in the environment.");
 
         var client = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false, UseProxy = false })
             { BaseAddress = api, Timeout = Timeout.InfiniteTimeSpan };
@@ -90,27 +90,48 @@ internal static class LiveHardwareGateway
     {
         var map = ReadInput<SeatMap>(input);
         ValidateRoom(map.SessionId, map.RoomId, map.MockPort, map.Seconds);
-        if (map.Version != 1 || map.Devices is not { Length: >= 1 and <= 5 }
-            || map.Devices.Any(device => device is null || device.DeviceId == Guid.Empty || device.Seat is < 0 or > 4)
-            || map.Devices.Select(device => device.Seat).Distinct().Count() != map.Devices.Length
-            || map.Devices.Select(device => device.DeviceId).Distinct().Count() != map.Devices.Length)
-            throw new ArgumentException("Use unique seats and device IDs.");
+        if (map.Version != 1) throw new ArgumentException("Use version 1 seat maps.");
+        ValidateDevices(map.Devices);
         var config = new Configuration(2, map.ManagementUrl, map.SessionId, map.RoomId, map.MockPort, map.Seconds, []);
         using var client = CreateManagementClient(map.ManagementUrl);
         await VerifyIdentity(client, map.RoomId);
         var page = (await Read(client, FeedbackRoute(config), config, null, CancellationToken.None)).Page;
         if (page.State == SessionState.Ended) throw new InvalidOperationException("The rehearsal session has ended.");
-        var roster = page.Bindings!.ToDictionary(binding => binding.Seat);
-        var bindings = map.Devices.OrderBy(device => device.Seat).Select(device =>
-        {
-            if (!roster.TryGetValue(device.Seat, out var seat)) throw new InvalidOperationException("A mapped seat has no current admission.");
-            return new Binding(device.DeviceId, seat.PlayerId, seat.AdmissionId, seat.Seat);
-        }).ToArray();
+        var bindings = ResolveBindings(map.Devices, page.Bindings!);
         using var destination = new FileStream(output, FileMode.CreateNew, FileAccess.Write, FileShare.None);
         JsonSerializer.Serialize(destination, config with { Bindings = bindings }, JsonFormat.Options);
         destination.Flush(true);
         Console.WriteLine(JsonSerializer.Serialize(new { complete = true, config.SessionId, config.RoomId, boundSeats = bindings.Length }, Wire));
         return 0;
+    }
+
+    private static void ValidateDevices(SeatDevice[] devices)
+    {
+        if (devices is not { Length: >= 1 and <= 5 }
+            || devices.Any(device => device is null || device.DeviceId == Guid.Empty || device.Seat is < 0 or > 4)
+            || devices.Select(device => device.Seat).Distinct().Count() != devices.Length
+            || devices.Select(device => device.DeviceId).Distinct().Count() != devices.Length)
+            throw new ArgumentException("Use unique seats and device IDs.");
+    }
+
+    private static Binding[] ResolveBindings(SeatDevice[] devices, RoomHardwareSeat[] seats)
+    {
+        var roster = seats.ToDictionary(binding => binding.Seat);
+        return devices.OrderBy(device => device.Seat).Select(device =>
+        {
+            if (!roster.TryGetValue(device.Seat, out var seat)) throw new InvalidOperationException("A mapped seat has no current admission.");
+            return new Binding(device.DeviceId, seat.PlayerId, seat.AdmissionId, seat.Seat);
+        }).ToArray();
+    }
+
+    private static RoomHardwareSeat[] ValidateBindingRoster(RoomHardwareSeat[]? seats)
+    {
+        if (seats is not { Length: <= 5 } || seats.Any(seat => seat is null || seat.PlayerId == Guid.Empty || seat.AdmissionId == Guid.Empty || seat.Seat is < 0 or > 4)
+            || seats.Select(seat => seat.Seat).Distinct().Count() != seats.Length
+            || seats.Select(seat => seat.PlayerId).Distinct().Count() != seats.Length
+            || seats.Select(seat => seat.AdmissionId).Distinct().Count() != seats.Length)
+            throw new InvalidDataException("Invalid feedback binding roster.");
+        return seats;
     }
 
     private static string FeedbackRoute(Configuration config) => $"/api/sessions/{config.SessionId:D}/rooms/{config.RoomId}/hardware-feedback";
@@ -380,12 +401,7 @@ internal static class LiveHardwareGateway
             throw new InvalidDataException("Unexpected feedback cursor, room or phase.");
         if (config.Version == 2)
         {
-            var seats = page.Bindings;
-            if (seats is not { Length: <= 5 } || seats.Any(seat => seat is null || seat.PlayerId == Guid.Empty || seat.AdmissionId == Guid.Empty || seat.Seat is < 0 or > 4)
-                || seats.Select(seat => seat.Seat).Distinct().Count() != seats.Length
-                || seats.Select(seat => seat.PlayerId).Distinct().Count() != seats.Length
-                || seats.Select(seat => seat.AdmissionId).Distinct().Count() != seats.Length)
-                throw new InvalidDataException("Invalid feedback binding roster.");
+            var seats = ValidateBindingRoster(page.Bindings);
             if (page.State != SessionState.Ended && config.Bindings.Any(binding => !seats.Contains(new RoomHardwareSeat(binding.PlayerId, binding.AdmissionId, binding.Seat))))
                 throw new BindingMismatch();
         }

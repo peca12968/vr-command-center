@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `VRCommand-ControlServer-0.31.94-win-x64.zip` 提供主控的五房硬體名冊快照。ZIP 為 52,886,246 bytes，SHA-256 `079c47487ada9c4c51862abe5b4854c416469d4e954be2d568b3e65d23921d63`。解壓核對 543 筆清單與 523 個執行檔。 [五房綁定操作](HARDWARE.md#一次建立五房設備綁定)
+
 2026-11-10 `VRCommand-ControlServer-0.31.93-win-x64.zip` 提供同批獨立房間的回放對齊。ZIP 為 52,884,271 bytes，SHA-256 `17123aae22f880a0a647c41ec094e1d21ce381f8318e3f0aa0a134f892bda9ef`。解壓核對 543 筆清單與 523 個執行檔。 [回放操作](WORLD_RECORDING.md#對齊同批獨立房間的回放)
 
 2026-11-10 `VRCommand-ControlServer-0.31.92-win-x64.zip` 提供全館開場逐席狀態。ZIP 為 52,878,039 bytes，SHA-256 `b5c2432541bffb257f4fa52b579dfb956308672566856f705caad6499d6f8db7`。解壓核對 543 筆清單與 523 個執行檔。 [開場操作](MISSION_CLOCK.md#全館開始)

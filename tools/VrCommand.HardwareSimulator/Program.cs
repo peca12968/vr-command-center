@@ -4,13 +4,15 @@ using VrCommand.Core;
 
 var live = args.Length != 0 && args[0] == "--live";
 var bind = args.Length != 0 && args[0] == "--bind-room";
+var bindVenue = args.Length != 0 && args[0] == "--bind-venue";
 try
 {
-    if (args.Length < 4 || (!live && args.Length != 4) || args[0] is not ("--input" or "--live" or "--bind-room") || args[2] != "--output")
-        throw new ArgumentException("Use --input, --live or --bind-room <input.json> --output <new-output.json> [--stop-file <new-marker>] [--status] for --live.");
+    if (args.Length < 4 || (!live && args.Length != 4) || args[0] is not ("--input" or "--live" or "--bind-room" or "--bind-venue") || args[2] != "--output")
+        throw new ArgumentException("Use --input, --live, --bind-room or --bind-venue <input.json> --output <new-path>.");
     var input = Path.GetFullPath(args[1]); var output = Path.GetFullPath(args[3]);
-    if (!input.EndsWith(".json", StringComparison.OrdinalIgnoreCase) || !output.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+    if (!input.EndsWith(".json", StringComparison.OrdinalIgnoreCase) || (!bindVenue && !output.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
         || string.Equals(input, output, StringComparison.OrdinalIgnoreCase) || File.Exists(output)) throw new ArgumentException("Use separate JSON input and a new output file.");
+    if (bindVenue) return await LiveHardwareGateway.BindVenue(input, Path.TrimEndingDirectorySeparator(output));
     string? stopFile = null;
     var status = false;
     for (var index = 4; index < args.Length; index++)
@@ -47,6 +49,13 @@ try
 catch (Exception error) when (error is ArgumentException or InvalidDataException or InvalidOperationException or JsonException or IOException or UnauthorizedAccessException or AccessDeniedException or KeyNotFoundException or HttpRequestException or TimeoutException)
 {
     // Never echo untrusted input, payloads or credentials into diagnostics.
-    Console.Error.WriteLine((live ? "Live hardware rehearsal rejected: " : bind ? "Room hardware binding rejected: " : "Offline hardware simulation rejected: ") + error.GetType().Name);
+    var message = args.FirstOrDefault() switch
+    {
+        "--live" => "Live hardware rehearsal rejected: ",
+        "--bind-room" => "Room hardware binding rejected: ",
+        "--bind-venue" => "Venue hardware binding rejected: ",
+        _ => "Offline hardware simulation rejected: "
+    };
+    Console.Error.WriteLine(message + error.GetType().Name);
     return 1;
 }

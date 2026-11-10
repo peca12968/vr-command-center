@@ -35,7 +35,7 @@ def run(args):
     token = secrets.token_hex(32)
     private = [*keys.values(), token]
     env = {k:v for k,v in os.environ.items() if not k.lower().startswith('operatorkeys__') and k.lower() not in
-           ('operatorkeyfile','playerticketsigningkey','controlpipetoken','datadirectory','sessiondatadirectory','vr_command_room_key')}
+           ('operatorkeyfile','playerticketsigningkey','controlpipetoken','datadirectory','sessiondatadirectory','vr_command_room_key','vr_command_master_key')}
     findings, closed, processes, api_log = [], [], [], []
     binary = args.simulator_dll.resolve()
     files = {p.name:sha(p) for p in binary.parent.iterdir() if p.is_file()}
@@ -688,6 +688,148 @@ def run(args):
             request(path+'/combat-stream/seal',{'streamId':stream,'finalSequence':sequence},'GameServer')
             bind('ended',maps[2],'Room2','InvalidOperationException')
             check(request('/api/sessions')==[], 'Room binding rehearsal leaves no active session')
+
+            def venue_denied(role, status):
+                try:
+                    request('/api/venue/hardware-bindings', role=role)
+                except urllib.error.HTTPError as denied:
+                    assert denied.code == status
+                    denied.close()
+                else:
+                    raise AssertionError('An unavailable or unauthorized venue snapshot was readable')
+
+            venue_denied('Master', 409)
+            for role in ('Room1', 'GameServer'):
+                venue_denied(role, 403)
+            check(True, 'Only a master with all five occupied rooms can read the venue binding snapshot')
+
+            def bind_venue(label, venue_map, role='Master', error=None, *, destination=None):
+                input_path = runtime / f'{label}-venue-map.json'
+                input_path.write_text(json.dumps(venue_map), encoding='utf-8')
+                result_path = destination or out / f'{label}-bindings'
+                existed = result_path.exists()
+                process = start(['dotnet',str(binary),'--bind-venue',str(input_path),'--output',str(result_path)],
+                                {**env, 'VR_COMMAND_MASTER_KEY':keys[role]})
+                output, _ = process.communicate(timeout=8)
+                assert not any(secret in output for secret in private)
+                if error:
+                    assert process.returncode == 1 and error in output and result_path.exists() == existed, output
+                    return None
+                assert process.returncode == 0 and json.loads(output) == {
+                    'complete':True,'mode':venue_map['mode'],'rooms':5,'boundSeats':25}, output
+                return result_path
+
+            for mode in ('Linked', 'Independent'):
+                groups = [list(rooms)] if mode == 'Linked' else [[room] for room in rooms]
+                label = mode.lower()
+                owners, venue_streams, rosters = {}, {}, {}
+                venue_peers = {room:Peer(room) for room in rooms}
+                for group in groups:
+                    view = request('/api/sessions', {'missionId':mission['id'],'mode':mode,'roomIds':group})
+                    venue_path = '/api/sessions/' + view['id']
+                    for room in group:
+                        owners[room] = view['id']
+                        for seat in range(5):
+                            view = request(venue_path+'/players', {'playerId':str(uuid.uuid4()),'roomId':room,
+                                'name':f'Venue binding {room}/{seat}','headset':'Quest3'},f'Room{room}')
+                        rosters[room] = [player for player in view['players'] if player['roomId'] == room]
+                venue_map = {'version':1,'managementUrl':base,'mode':mode,'seconds':60,'rooms':[
+                    {'roomId':room,'sessionId':owners[room],'mockPort':venue_peers[room].port,
+                     'devices':[{'seat':seat,'deviceId':str(uuid.uuid4())} for seat in reversed(range(5))]}
+                    for room in reversed(rooms)]}
+                original = request('/api/venue/hardware-bindings')
+                assert original['version'] == 1 and original['mode'] == mode and len(original['rooms']) == 5
+                if mode == 'Linked':
+                    venue_denied('Room2', 403)
+                    before = request('/api/sessions')
+                    altered = json.loads(json.dumps(venue_map))
+                    altered['rooms'][0]['devices'][0]['deviceId'] = altered['rooms'][1]['devices'][0]['deviceId']
+                    bind_venue('duplicate-venue-device', altered, error='ArgumentException')
+                    altered = json.loads(json.dumps(venue_map))
+                    altered['rooms'][0]['mockPort'] = altered['rooms'][1]['mockPort']
+                    bind_venue('duplicate-venue-port', altered, error='ArgumentException')
+                    bind_venue('stale-venue', {**venue_map, 'rooms': [dict(row, sessionId=str(uuid.UUID(int=37))) for row in venue_map['rooms']]},
+                               error='InvalidOperationException')
+                    bind_venue('wrong-venue-role', venue_map, 'Room1', error='AccessDeniedException')
+                    missing = rosters[5][-1]
+                    target_path = '/api/sessions/'+owners[5]+'/players'
+                    request(target_path+'/'+missing['id'], role='Room5', method='DELETE', admission=missing['admissionId'])
+                    bind_venue('vacant-venue-seat', venue_map, error='InvalidOperationException')
+                    view = request(target_path, {'playerId':missing['id'],'roomId':5,'name':missing['name'],'headset':'Quest3'},'Room5')
+                    rosters[5] = [player for player in view['players'] if player['roomId'] == 5]
+                    original = request('/api/venue/hardware-bindings')
+                    assert request('/api/sessions')[0]['sequence'] > before[0]['sequence']
+                    check(all(peer.lines.empty() for peer in venue_peers.values()),
+                          'Duplicate resources, stale sessions, vacant seats and wrong roles publish no venue settings or device traffic')
+
+                previous = request('/api/sessions')
+                folder = bind_venue(label, venue_map)
+                manifest = json.loads((folder/'venue-bindings.json').read_bytes())
+                assert manifest['version'] == 1 and manifest['mode'] == mode
+                assert sorted(file.name for file in folder.iterdir()) == [*[f'room-{room:02}.json' for room in rooms], 'venue-bindings.json']
+                config_files, expected_devices = {}, {}
+                for plan, actual, snapshot in zip(sorted(venue_map['rooms'], key=lambda row: row['roomId']), manifest['rooms'], original['rooms'], strict=True):
+                    room = plan['roomId']
+                    assert actual == {'roomId':room,'sessionId':owners[room],'sessionSequence':snapshot['sessionSequence'],
+                                      'configuration':f'room-{room:02}.json','boundSeats':5}
+                    config_files[room] = folder/actual['configuration']
+                    assert not any(secret in config_files[room].read_text(encoding='utf-8') for secret in private)
+                    config = json.loads(config_files[room].read_bytes())
+                    expected_devices[room] = {device['seat']:device['deviceId'] for device in plan['devices']}
+                    assert config == {'version':2,'managementUrl':base,'sessionId':owners[room],'roomId':room,
+                        'mockPort':plan['mockPort'],'seconds':60,'bindings':[
+                            {'deviceId':expected_devices[room][player['seat']], 'playerId':player['id'],
+                             'admissionId':player['admissionId'],'seat':player['seat']}
+                            for player in sorted(rosters[room], key=lambda player: player['seat'])]}
+                hashes = {file:sha(file) for file in folder.iterdir()}
+                bind_venue(label+'-same-path', venue_map, error='ArgumentException', destination=folder)
+                check(request('/api/sessions') == previous and all(peer.lines.empty() for peer in venue_peers.values())
+                      and all(sha(file)==digest for file,digest in hashes.items()) and not list(out.glob('.vr-venue-bindings-*')),
+                      f'{mode} publishes all 25 exact bindings from one read-only snapshot and preserves existing output')
+
+                for owner in set(owners.values()):
+                    venue_path = '/api/sessions/' + owner
+                    stream_id = str(uuid.uuid4())
+                    request(venue_path+'/combat-stream', {'streamId':stream_id,'origin':'Simulation'}, 'GameServer')
+                    started = request(venue_path+'/commands', {'commandId':str(uuid.uuid4()),'action':'Begin'})
+                    venue_streams[owner] = (stream_id, started['appliedAtSequence'], 0)
+                venue_reports = {room:out/f'{label}-venue-room-{room}-report.json' for room in rooms}
+                gateways = {room:invoke(room, f'Room{room}', venue_reports[room], config=config_files[room]) for room in rooms}
+                venue_connections = {}
+                for room in rooms:
+                    path = '/api/sessions/' + owners[room]
+                    venue_connections[room] = accept(venue_peers[room], room, bound=True)
+                assert len(set(venue_connections.values())) == 5
+
+                confirmed = {}
+                for count in (5, 1):
+                    for room in rooms:
+                        stream_id, observed, position = venue_streams[owners[room]]
+                        reports = [{'streamId':stream_id,'streamSequence':position+index+1,'observedSequence':observed,
+                                    'report':{'reportId':str(uuid.uuid4()),'kind':'ShotFired','origin':'Simulation','playerId':player['id'],
+                                              'shotId':str(uuid.uuid4())}} for index,player in enumerate(rosters[room][:count])]
+                        request('/api/sessions/'+owners[room]+'/combat-stream/batch', reports, 'GameServer')
+                        venue_streams[owners[room]] = (stream_id, observed, position+count)
+                        received = venue_peers[room].read('feedback')
+                        assert received['roomId']==room and received['connectionId']==venue_connections[room]
+                        assert [(row['signal']['reportId'],row['deviceId']) for row in received['signals']] == [
+                            (report['report']['reportId'],expected_devices[room][player['seat']])
+                            for report,player in zip(reports,rosters[room][:count],strict=True)]
+                        if count == 5:
+                            confirmed[room] = {report['report']['reportId'] for report in reports}
+                        venue_peers[room].reply()
+                for owner, (stream_id, _, position) in venue_streams.items():
+                    venue_path = '/api/sessions/'+owner
+                    request(venue_path+'/commands', {'commandId':str(uuid.uuid4()),'action':'End'})
+                    request(venue_path+'/combat-stream/seal', {'streamId':stream_id,'finalSequence':position}, 'GameServer')
+                for room, gateway in gateways.items():
+                    stdout, _ = gateway.communicate(timeout=8)
+                    assert gateway.returncode == 0 and not any(secret in stdout for secret in private), stdout
+                    result = json.loads(venue_reports[room].read_bytes())
+                    ids = {delivery['signal']['reportId'] for attempt in result['attempts'] if attempt['status']=='simulated-acknowledged'
+                           for delivery in attempt['deliveries']}
+                    assert confirmed[room] <= ids and result['physicalDeliveryConfirmed'] is False and result['termination']=='ended'
+                check(request('/api/sessions')==[], f'{mode} launches all five generated settings and confirms 25 exact mock deliveries before ending')
         finally:
             for process in reversed(processes):
                 if process is api:

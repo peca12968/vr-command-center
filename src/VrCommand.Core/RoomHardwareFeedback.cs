@@ -6,6 +6,8 @@ public record RoomHardwareSignal(Guid EventId, long EventSequence, long StreamSe
     Guid ReportId, CombatKind Kind, Guid PlayerId, Guid AdmissionId, int Seat, int Damage, DateTimeOffset AcceptedAtUtc);
 
 public record RoomHardwareSeat(Guid PlayerId, Guid AdmissionId, [property: JsonRequired] int Seat);
+public record VenueHardwareRoom(int RoomId, Guid SessionId, long SessionSequence, RoomHardwareSeat[] Bindings);
+public record VenueHardwareBindings(int Version, SessionMode Mode, VenueHardwareRoom[] Rooms);
 
 public record RoomHardwareFeedback(int Version, Guid SessionId, int RoomId, Guid? StreamId, CombatOrigin? CombatOrigin,
     SessionState State, long ThroughSequence, long? RunningSinceSequence, DateTimeOffset CheckedAtUtc,
@@ -19,6 +21,24 @@ public sealed partial class SessionManager
 {
     private const int MaxHardwareFeedbackEvents = 256;
     private static readonly TimeSpan HardwareFeedbackAcceptedAge = TimeSpan.FromSeconds(2);
+
+    public VenueHardwareBindings ReadVenueHardwareBindings(OperatorIdentity actor)
+    {
+        RequireVenueMaster(actor);
+        var sessions = List(false, actor);
+        var mode = sessions.FirstOrDefault()?.Mode;
+        var rooms = sessions.SelectMany(session => session.RoomIds.Select(room =>
+                new VenueHardwareRoom(room, session.Id, session.Sequence, HardwareSeats(session, room))))
+            .OrderBy(room => room.RoomId).ToArray();
+        if (mode is null || sessions.Length != (mode == SessionMode.Linked ? 1 : RoomCount)
+            || sessions.Any(session => session.Mode != mode)
+            || !rooms.Select(room => room.RoomId).SequenceEqual(Enumerable.Range(1, RoomCount)))
+            throw new InvalidOperationException("Five current rooms must belong to one linked or five independent sessions.");
+        return new(1, mode.Value, rooms);
+    }
+
+    private static RoomHardwareSeat[] HardwareSeats(SessionView session, int roomId) => session.Players.Where(player => player.RoomId == roomId)
+        .OrderBy(player => player.Seat).Select(player => new RoomHardwareSeat(player.Id, player.AdmissionId, player.Seat)).ToArray();
 
     public RoomHardwareFeedback ReadHardwareFeedback(Guid id, int roomId, long? after, OperatorIdentity actor, bool includeBindings = false)
     {
@@ -34,8 +54,7 @@ public sealed partial class SessionManager
             var now = clock.GetUtcNow();
             var stream = session.CombatStream;
             var running = session.State == SessionState.Running ? history.PhaseSinceSequence : (long?)null;
-            var bindings = includeBindings ? session.Players.Where(player => player.RoomId == roomId)
-                .OrderBy(player => player.Seat).Select(player => new RoomHardwareSeat(player.Id, player.AdmissionId, player.Seat)).ToArray() : null;
+            var bindings = includeBindings ? HardwareSeats(session, roomId) : null;
             RoomHardwareFeedback Page(string? reset, RoomHardwareSignal[] signals) => new(includeBindings ? 2 : 1, id, roomId, stream?.StreamId,
                 stream?.Origin, session.State, session.Sequence, running, now, reset, signals) { Bindings = bindings };
             // New readers and slow readers take a fresh cursor instead of replaying a backlog as live feedback.
