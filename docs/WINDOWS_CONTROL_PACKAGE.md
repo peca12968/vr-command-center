@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `VRCommand-ControlServer-0.31.108-win-x64.zip` 支援從發射、命中及擊殺追查同發射擊。ZIP 為 52,955,370 bytes，SHA-256 `777724118f443456c61f90507a20283ba7204a8a60d05ecb27ff7cc3d46bf356`。解壓核對 552 筆清單及 532 個發行檔案。 [射擊檢討](WORLD_RECORDING.md#追查同發射擊)
+
 2026-11-10 `VRCommand-ControlServer-0.31.107-win-x64.zip` 支援依原錄製起訖讀取片段戰績。ZIP 為 52,944,041 bytes，SHA-256 `cf7a9fe38754e08335790992ea70c1dd145daf827c4030a50f4f071350c58036`。解壓核對 549 筆清單及 529 個發行檔案。 [片段回放](WORLD_RECORDING.md#重看指定片段)
 
 2026-11-10 `VRCommand-ControlServer-0.31.106-win-x64.zip` 在五房追蹤總覽顯示共同取樣及各房原畫格，並可直接開啟中斷回放。ZIP 為 52,933,388 bytes，SHA-256 `4337bd3734be390c0a007beb9efa514b503d225d4e7ea007af206eb4adb48463`。解壓核對 546 筆清單及 526 個發行檔案。 [追蹤總覽](PLAYER_READINESS.md#執行中五房追蹤總覽)

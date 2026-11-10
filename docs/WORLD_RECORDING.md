@@ -76,7 +76,15 @@ v0.16 新增 `environmentVersion:1`，依保存的 tick／環境重現雨、日�
 
 單格使用 `GET /api/sessions/{id}/world/frames/{sequence}`，依原場次讀取權限回傳該快照及統計。回放串流可用 `mode=replay&fromFrame={sequence}` 明確指定第一格，此參數與 `fromMs` 擇一。第一格與已接受的最後一格限制逐格範圍。換場、離開頁籤或登出會取消逐格請求。 [驗證紀錄](PROGRESS.md#2026-11-06-任務回放逐格檢視)
 
-原生 Windows 短場可用 `scripts/check-desktop-exercise.py --check-frame-review`，把單格射擊事件和續播前兩格與同場完整保存回放逐欄比對。 [自動操作驗證](DESKTOP_EXERCISE.md)
+原生 Windows 短場可用 `scripts/check-desktop-exercise.py --check-frame-review`，把單格射擊事件、續播前兩格、分房與逐席事件搜尋及同發射擊結果與同場完整保存回放逐欄比對。 [自動操作驗證](DESKTOP_EXERCISE.md)
+
+### 追查同發射擊
+
+控制台 0.31.108 可在暫停回放時，從玩家射擊、命中敵軍或擊殺敵軍事件按「追查同發射擊」。清單依原射擊 ID 顯示已保存的發射、命中及擊殺事件，並列出各自的畫格及房間。點選其他畫格前，控制台會核對該格的事件、玩家、射擊 ID 與房間。追查及跳格會沿用目前的房間和個人檢討範圍。
+
+未封存回放以本次確認的保存尾端為限。清單尚未出現命中或擊殺時，只代表查詢範圍內沒有對應的保存事件。更換房間、檢討玩家或錄製會清除查詢結果。
+
+唯讀端點 `GET /api/sessions/{id}/world/shot-trace` 使用 `fromFrame`、`throughFrame`、`eventId` 及選用的 `roomId`。`fromFrame` 是所選事件的畫格，結果也可包含該格之前的同發射擊事件。房控只能查詢本房。服務由原戰鬥報告找到同發射擊，再依保存畫格的戰鬥序號定位。回應使用 `Cache-Control: no-store`。
 
 ### 查閱錄製中的設定切換
 
