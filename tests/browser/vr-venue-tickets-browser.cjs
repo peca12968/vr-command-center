@@ -167,6 +167,11 @@ with zipfile.ZipFile(sys.argv[1]) as outer:
         && !denied.allMatched && denied.seats[0].status === 'endpoint-mismatch'
         && denied.seats.slice(1).every(seat => seat.status === 'matched'),
         topology + ' VR live check verifies original bytes, current headset assignment and endpoint');
+      const deployment = await api(verify, 'POST', { ...proof, requireLiveSource: true });
+      const blockedBy = topology === 'Linked' ? 'endpoint-mismatch' : 'source-stale';
+      check(!Object.hasOwn(readback, 'liveSourceVerified') && !deployment.allMatched && deployment.liveSourceVerified === false
+        && deployment.seats.length === 25 && deployment.seats.every(seat => seat.status === blockedBy),
+      `${topology} device writes reject ${blockedBy} even when the original 25 signed files pass read-only verification`);
       if (topology === 'Linked') await panel.screenshot({ path: path.join(screenshots, 'vr-venue-tickets.png') });
       if (topology === 'Independent') {
         let notify, release, finish, late = false;

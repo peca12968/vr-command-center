@@ -305,14 +305,14 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.z
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.zip `
-    -RoomId 4 -Seat 2 -Serial YOUR_ADB_SERIAL
+    -RoomId 4 -Seat 2 -Serial YOUR_ADB_SERIAL -ManagementApi http://127.0.0.1:5081
 ```
 
-任一席位過期、場次或校正檔不符時，整份 ZIP 預檢失敗，應從主控下載當前部署包。也可沿用下方 `-ManagementApi` 與 `VR_COMMAND_MASTER_KEY`，把範例的 `-VenueManifest .\venue.json` 換成 `-VenueBundle .\quest-mr-venue.zip`。ZIP 線上模式另會比對每個場次目前公布的 UDP 端點，裝置操作前須全數核對成功。
+任一席位過期、場次或校正檔不符時，整份 ZIP 預檢失敗，應從主控下載當前部署包。線上操作使用 `-ManagementApi` 與 `VR_COMMAND_MASTER_KEY`。管理包 0.31.104 支援單席線上部署在 APK 安裝前及安裝後各核對一次原遊戲來源。安裝後核對失敗時會停在連線檔寫入前。
 
 #### 用裝置清單部署 25 席
 
-先在各台 Quest 3 安裝同一版場館 APK 並授權 USB 偵錯。開發 APK `0.49.1` 的版本代碼為 `64`。建立 25 席清單後，依實體標籤把每個 `REPLACE-*` 換成對應的 ADB 裝置序號。每組房號與席位須對應一個唯一序號，清單只保存在操作電腦。腳本透過 `adb devices` 及 Android 套件管理器讀取授權狀態與已啟用的應用程式版本。 [Android ADB 文件](https://developer.android.com/tools/adb) · [套件管理器版本輸出](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/pm/PackageManagerShellCommand.java#1130)
+先在各台 Quest 3 安裝同一版場館 APK 並授權 USB 偵錯。開發 APK `0.50.0` 的版本代碼為 `65`。建立 25 席清單後，依實體標籤把每個 `REPLACE-*` 換成對應的 ADB 裝置序號。每組房號與席位須對應一個唯一序號，清單只保存在操作電腦。腳本透過 `adb devices` 及 Android 套件管理器讀取授權狀態與已啟用的應用程式版本。 [Android ADB 文件](https://developer.android.com/tools/adb) · [套件管理器版本輸出](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/services/core/java/com/android/server/pm/PackageManagerShellCommand.java#1130)
 
 ```powershell
 $seats = foreach ($room in 1..5) {
@@ -328,18 +328,22 @@ $seats = foreach ($room in 1..5) {
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.zip `
-    -DeviceMap .\device-map.json -ExpectedVersionCode 64 -CheckOnly
+    -DeviceMap .\device-map.json -ExpectedVersionCode 65 -CheckOnly
 ```
 
 正式套用時，先依下方方式設定 `VR_COMMAND_MASTER_KEY`，再加入 `-DeployMappedSeats` 與管理服務網址。所有裝置與票券核對通過後，工具依房號與席位順序寫入設定並請求啟動，使用各台已安裝的 APK。
 
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.zip `
-    -DeviceMap .\device-map.json -ExpectedVersionCode 64 -DeployMappedSeats `
+    -DeviceMap .\device-map.json -ExpectedVersionCode 65 -DeployMappedSeats `
     -ManagementApi http://127.0.0.1:5081
 ```
 
 正式部署在各席開始寫入前會再讀一次裝置序號。若和預檢結果不同，該席會標記為 `device-identity-changed`。若讀取失敗則標記為 `device-identity-unavailable`。兩種情況都會在該席寫入前停止。這些檢查適用於完整與部分裝置清單，現場仍須依實體標籤核對房號及席位。
+
+正式部署使用管理包 0.31.104 或更新版。每席寫入前，服務會重新核對整份原部署 ZIP 的 25 個入場、端點及各來源最近五秒內的有效遊戲畫格。VR、MR 及混合部署都適用，部分清單仍使用同一份五房 ZIP 驗證。任一來源失效時，目前席位回報 `venue-check-failed`，後續席位標記為 `not-attempted`。已送出啟動的席位保留原結果。純預檢仍可用來核對檔案、端點與名冊。
+
+各模式的 `venue-check` 接受 `requireLiveSource: true`，並在回條明確傳回 `liveSourceVerified`。來源缺少近期有效畫格時，該房席位會回報 `source-stale`。預設請求省略此欄，沿用只讀核對回條。
 
 中途失敗會停止並以非零結束碼回報。`launch-requested` 表示該席的檔案已核對，並已送出啟動指令。`file-verification-failed` 表示該席無法確認裝置檔案與預期內容相同，且尚未送出啟動。`deployment-failed` 表示其他部署步驟失敗。這兩種部署錯誤另附 `failedStep`，可辨別遊戲是否已經過停止指令與正式檔案切換。`not-attempted` 表示該席未進入寫入階段。 [核對頭盔追蹤席位](#核對頭盔追蹤席位)
 
@@ -365,6 +369,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 
 | `failedStep` | 操作員可確認的部署進度 |
 | --- | --- |
+| `verify-live-venue` | 服務未確認原來源、端點及名冊。該席尚未開始寫入。 |
 | `prepare-device`、`stage-alignment`、`stage-connection` | 尚未送出停止指令或切換連線檔。工具會嘗試清理傳輸中的暫存檔。 |
 | `check-expiry-before-staging`、`check-expiry-before-stop` | 票券已過期，尚未送出停止指令或切換連線檔。請下載目前部署包。 |
 | `stop-game` | 停止指令失敗，尚未切換連線檔。請確認遊戲程序狀態。 |
