@@ -14,6 +14,8 @@ public static class FinalReportCsv
         roomId is int room ? FormattableString.Invariant($"vr-command-report-v1-{sessionId:D}-room-{room:00}.csv")
             : FileName(sessionId);
 
+    public static string FileName(Guid sessionId, Guid playerId) => $"vr-command-report-v1-{sessionId:D}-player-{playerId:D}.csv";
+
     internal static byte[] EncodeBundle(FinalSessionReport report)
     {
         using var output = new MemoryStream();

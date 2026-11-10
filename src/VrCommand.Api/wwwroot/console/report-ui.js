@@ -2,7 +2,9 @@ export function mountReport(current, unauthorized, scopeChanged) {
   const button = document.getElementById('export-report'), status = document.getElementById('report-status');
   const bundle = document.getElementById('export-report-bundle');
   const roomField = document.getElementById('report-room-field'), room = document.getElementById('report-room');
+  const playerPicker = document.getElementById('player-review-select'), playerButton = document.getElementById('export-player-report');
   let generation = 0, controller = null, availability = null, scopeIdentity = '';
+  let playerShown = false, requestedPlayer = null;
   const ready = value => value.actor && value.session?.state === 'Ended' &&
     value.statistics?.sessionId === value.session.id && value.statistics.throughSequence === value.session.sequence &&
     !value.statistics.pendingTelemetry;
@@ -16,7 +18,17 @@ export function mountReport(current, unauthorized, scopeChanged) {
     const id = scope(value);
     return id === null ? value.statistics.players : value.statistics.players.filter(player => player.roomId === id);
   }
-  function update() {
+  const canExportPlayer = () => !current().pending && ready(current());
+  function updatePlayer(shown = playerShown) {
+    playerShown = shown;
+    const eligible = shown && canExportPlayer() && players().some(player => player.playerId === playerPicker.value);
+    if (requestedPlayer && (!eligible || playerPicker.value !== requestedPlayer)) {
+      generation++; controller.abort(); controller = null; requestedPlayer = null;
+      status.textContent = availability ?? '';
+    }
+    playerButton.disabled = !eligible || !!controller;
+  }
+  function update(shown = playerShown) {
     const value = current();
     const identity = linked(value) ? value.epoch + '/' + value.session.id : '';
     if (identity !== scopeIdentity) {
@@ -29,6 +41,7 @@ export function mountReport(current, unauthorized, scopeChanged) {
           if (value.actor.role === 'Master' || id === value.actor.roomId) room.add(new Option(`房間 ${id}`, String(id)));
       }
     }
+    updatePlayer(shown);
     button.disabled = !!controller || !ready(value);
     bundle.hidden = !canBundle(value);
     bundle.disabled = bundle.hidden || button.disabled;
@@ -41,19 +54,23 @@ export function mountReport(current, unauthorized, scopeChanged) {
   }
   function reset() {
     generation++; controller?.abort(); controller = null; availability = null; scopeIdentity = '';
+    playerShown = false; requestedPlayer = null; playerButton.disabled = true;
     status.textContent = ''; button.disabled = true; room.disabled = true; roomField.hidden = true; room.replaceChildren();
     bundle.hidden = bundle.disabled = true;
   }
   room.addEventListener('change', () => { availability = null; update(); scopeChanged(); });
-  async function download(allRooms) {
+  async function download(allRooms, playerId = null) {
     const value = current();
     if (controller || !ready(value) || (allRooms && !canBundle(value))) return;
     const attempt = ++generation, epoch = value.epoch, id = value.session.id, roomId = scope(value);
     const active = () => attempt === generation && current().epoch === epoch && current().session?.id === id
-      && (allRooms ? canBundle(current()) : scope(current()) === roomId);
+      && (allRooms ? canBundle(current()) : scope(current()) === roomId)
+      && (!playerId || (playerShown && playerPicker.value === playerId && canExportPlayer()));
     const suffix = roomId === null ? '' : '-room-' + String(roomId).padStart(2, '0');
-    const path = allRooms ? '/reports.zip' : `${roomId === null ? '' : `/rooms/${roomId}`}/report.csv`;
+    const path = playerId ? `/players/${playerId}/report.csv` : allRooms ? '/reports.zip'
+      : `${roomId === null ? '' : `/rooms/${roomId}`}/report.csv`;
     const request = new AbortController(); controller = request;
+    requestedPlayer = playerId;
     const timeout = setTimeout(() => request.abort(), 8000);
     update(); status.textContent = allRooms ? '正在下載五房戰績 ZIP…' : '正在下載最終報表…';
     try {
@@ -72,20 +89,23 @@ export function mountReport(current, unauthorized, scopeChanged) {
       if (!active()) return;
       const url = URL.createObjectURL(blob), link = document.createElement('a');
       try {
-        link.href = url; link.download = allRooms ? `vr-command-reports-v1-${id}.zip` : `vr-command-report-v1-${id}${suffix}.csv`;
+        link.href = url; link.download = allRooms ? `vr-command-reports-v1-${id}.zip`
+          : `vr-command-report-v1-${id}${playerId ? `-player-${playerId}` : suffix}.csv`;
         document.body.append(link); link.click();
       } finally { link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000); }
-      status.textContent = allRooms ? '已下載全場及五份分房戰績 CSV。' : '最終報表已下載；來源與封存序號列於 CSV。';
+      status.textContent = playerId ? '已下載所選玩家的最終戰績。' : allRooms ? '已下載全場及五份分房戰績 CSV。'
+        : '最終報表已下載；來源與封存序號列於 CSV。';
     } catch (error) {
       if (active()) status.textContent = request.signal.aborted ? '下載逾時或已中止，可重新下載。' : error.message;
     } finally {
       clearTimeout(timeout);
-      if (attempt === generation) { controller = null; update(); }
+      if (attempt === generation) { controller = null; requestedPlayer = null; update(); }
     }
   }
   button.addEventListener('click', () => download(false));
   bundle.addEventListener('click', () => download(true));
-  return { update, reset, roomId, players };
+  playerButton.addEventListener('click', () => { if (!playerButton.disabled) void download(false, playerPicker.value); });
+  return { update, reset, roomId, players, canExportPlayer };
 }
 
 export function mountVenueReport(current, unauthorized, save) {

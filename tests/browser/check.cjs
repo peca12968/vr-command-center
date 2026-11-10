@@ -447,7 +447,8 @@ async function main() {
     page.once('dialog', dialog => dialog.accept()); await page.locator('[data-command=End]').click();
     await page.waitForFunction(() => document.querySelector('#session-phase').textContent === '已結束' && document.querySelector('#telemetry-status').textContent.includes('尚未確認完整'));
     check(await page.locator('#session-panel').isVisible() && await page.locator('#include-ended').isChecked(), 'Ending a bound stream retains its archived session and visibly pending final statistics');
-    check(await page.locator('#export-report').isDisabled(), 'Unsealed ended session cannot offer a final report download');
+    check(await page.locator('#export-report').isDisabled() && await page.locator('#export-player-report').isDisabled(),
+      'Unsealed ended session cannot offer a full or personal final report download');
     await page.locator('#report-room').selectOption('2');
     check(await page.locator('#statistics tr').count() === 1 && (await page.locator('#statistics').innerText()).includes(xssName)
       && await page.locator('#export-report').isDisabled(), 'Room statistics can be inspected before seal without enabling final CSV');

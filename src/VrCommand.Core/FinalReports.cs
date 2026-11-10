@@ -41,6 +41,16 @@ public sealed partial class SessionManager
 
     public FinalSessionReport FinalReport(Guid id, OperatorIdentity actor) => FinalReport(id, actor, null);
 
+    public FinalSessionReport FinalPlayerReport(Guid id, Guid playerId, OperatorIdentity actor)
+    {
+        var report = FinalReport(id, actor);
+        var player = report.Players.SingleOrDefault(row => row.PlayerId == playerId
+            && (actor.Role != OperatorRole.RoomController || row.RoomId == actor.RoomId))
+            ?? throw new KeyNotFoundException("No final report for this player.");
+        return report with { Players = [player] };
+    }
+
+
     public FinalSessionReport FinalReport(Guid id, OperatorIdentity actor, int? roomId)
     {
         ArgumentNullException.ThrowIfNull(actor);

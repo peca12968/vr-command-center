@@ -730,6 +730,18 @@ try:
                     and "-room-01.csv" in scoped_headers.get("Content-Disposition", ""),
                     "Room report exports only its final ledger rows with the original metadata and a marked scope")
             require(request("GET", scoped_url, raw=True)[0] == scoped, "Master downloads the same exact room report bytes")
+            personal = next(row for row in final_rows if row["playerRoomId"] == "1")
+            personal_url = session_path + f'/players/{personal["playerId"]}/report.csv'
+            private_csv, private_headers = request("GET", personal_url, identity="Room1", raw=True)
+            require(list(csv.DictReader(io.StringIO(private_csv.decode("utf-8-sig")))) == [personal]
+                    and private_headers.get_content_type() == "text/csv" and private_headers["Cache-Control"] == "no-store"
+                    and f'-player-{personal["playerId"]}.csv' in private_headers.get("Content-Disposition", ""),
+                    "Authorized personal CSV contains exactly its original sealed row")
+            require(request("GET", personal_url, raw=True)[0] == private_csv, "Master sees the same exact personal CSV bytes")
+            request("GET", personal_url, identity="Room2", expected=404)
+            request("GET", session_path + f"/players/{uuid.uuid4()}/report.csv", identity="Room2", expected=404)
+            request("GET", personal_url, identity="GameServer", expected=403)
+            request("GET", personal_url, identity=None, expected=401)
             request("GET", scoped_url, identity="Room2", expected=403)
             request("GET", scoped_url, identity="GameServer", expected=403)
             request("GET", scoped_url, identity=None, expected=401)
@@ -776,6 +788,8 @@ try:
                     "Real HTTP CSV bytes survive API restart and operator-key rotation")
             require(request("GET", scoped_url, identity="Room1", raw=True)[0] == scoped,
                     "Scoped CSV bytes survive API restart and operator-key rotation")
+            require(request("GET", personal_url, identity="Room1", raw=True)[0] == private_csv,
+                    "Personal CSV bytes survive API restart and operator-key rotation")
             require(request("GET", reports_url, raw=True)[0] == reports,
                     "Linked ZIP bytes survive API restart and operator-key rotation")
             demo = subprocess.run([sys.executable, str(ROOT / "scripts/demo_combat.py"), "--base-url", base_url,

@@ -29,7 +29,7 @@ module.exports = async function reportBrowser({ context, tokens, base, api, sess
     await fs.writeFile(path.join(screenshots, 'final-report.csv'), bytes);
   }
   // The server response is obtained under real authorization before delaying delivery.
-  async function hold() {
+  async function hold(pattern = '**/api/sessions/*/report.csv') {
     let requested, release, delivered;
     const request = new Promise(resolve => { requested = resolve; });
     const gate = new Promise(resolve => { release = resolve; });
@@ -39,8 +39,8 @@ module.exports = async function reportBrowser({ context, tokens, base, api, sess
       try { await route.fulfill({ response }); } catch { /* The browser intentionally aborts this stale request. */ }
       finally { delivered(); }
     };
-    await page.route('**/api/sessions/*/report.csv', handler);
-    return { request, release, done, handler };
+    await page.route(pattern, handler);
+    return { request, release, done, handler, pattern };
   }
   try {
     await page.goto(base + '/console/'); await login(); await select(session.id);
@@ -140,10 +140,39 @@ module.exports = async function reportBrowser({ context, tokens, base, api, sess
     await select(session.id); await select(linked.id);
     check(await scope.inputValue() === '' && (await displayedRooms()).join(',') === '1,2',
       'Changing sessions resets the previous room filter');
+    const picker = page.locator('#player-review-select'), personalButton = page.locator('#export-player-report');
+    const finalRows = readCsv(Buffer.from(await (await fetchCsv(linked.id)).arrayBuffer()));
+    const player1 = finalRows.find(row => row.playerRoomId === '1').playerId;
+    const player2 = finalRows.find(row => row.playerRoomId === '2').playerId;
+    const personalUrl = player => `${base}/api/sessions/${linked.id}/players/${player}/report.csv`;
+    await picker.selectOption(player1);
+    check(await personalButton.isEnabled() && await page.locator('#open-player-review').isDisabled(),
+      'The sealed combat ledger allows a personal download while the world recording is unavailable');
+    const personalHeld = await hold(personalUrl(player1));
+    const beforePersonal = downloads.length;
+    await personalButton.click(); await personalHeld.request;
+    try {
+      await picker.selectOption(player2); await picker.selectOption(player1);
+    } finally { personalHeld.release(); }
+    await personalHeld.done; await page.unroute(personalHeld.pattern, personalHeld.handler);
+    check(downloads.length === beforePersonal && await personalButton.isEnabled(),
+      'Switching the individual selection away and back cancels the old download');
     await page.locator('#logout').click(); await login('Room1', linked.id); await select(linked.id);
     check(await scope.inputValue() === '1' && await scope.isDisabled() && await scope.locator('option').count() === 1,
       'Room controller sees only its own report scope, with no stale master choice after logout');
     await scopedDownload(1, 'Room1');
+    await picker.selectOption(player1);
+    const personalReady = page.waitForEvent('download');
+    await personalButton.click(); const personalFile = await personalReady;
+    const personalBytes = await fs.readFile(await personalFile.path());
+    const personalRows = readCsv(personalBytes);
+    check(personalFile.suggestedFilename() === `vr-command-report-v1-${linked.id}-player-${player1}.csv`
+      && JSON.stringify(personalRows) === JSON.stringify(finalRows.filter(row => row.playerId === player1))
+      && (await picker.locator('option').evaluateAll(options => options.map(option => option.value))).join(',') === `,${player1}`,
+      'Room 1 downloads exactly the selected original player row and its picker omits the other room');
+    check((await fetch(personalUrl(player2), { headers: { Authorization: 'Bearer ' + tokens.Room1 } })).status === 404,
+      'An individual CSV request cannot expose another room player');
+    await fs.writeFile(path.join(screenshots, 'individual-report-room1.csv'), personalBytes);
     check(!await bundleButton.isVisible(), 'Room controller never sees the all-room ZIP action');
     await page.setViewportSize({ width: 390, height: 844 });
     check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)

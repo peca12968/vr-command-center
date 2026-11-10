@@ -74,8 +74,7 @@ export function mountClosure(getState, unauthorized, openReview, report) {
   function renderReview(state, complete) {
     const { session } = state;
     const players = report.players(), roomId = report.roomId();
-    const shown = active && session?.state === 'Ended' && !!session.combatStream
-      && players.length > 0;
+    const shown = active && session?.state === 'Ended' && players.length > 0;
     const options = JSON.stringify(shown ? [session.id, players.map(player => [player.playerId, player.name, player.roomId])] : null);
     if (options !== reviewOptions) {
       const previous = reviewPlayer.dataset.session === session?.id ? reviewPlayer.value : '';
@@ -89,10 +88,12 @@ export function mountClosure(getState, unauthorized, openReview, report) {
     reviewTarget = complete && player ? { mode: 'replay', sessionId: session.id, streamId: session.combatStream.streamId,
       throughSequence: world.acceptedSequence, throughCombatSequence: session.combatStream.acceptedSequence, complete: true,
       playerId: player.playerId, playerName: player.name, roomId } : null;
+    const reportVisible = shown && !refreshFailed && !!context() && document.visibilityState === 'visible';
     reviewPanel.hidden = !shown;
-    reviewPlayer.disabled = !complete;
+    reviewPlayer.disabled = !shown || (!complete && !(reportVisible && report.canExportPlayer()));
     reviewButton.disabled = !reviewTarget;
     damageButton.disabled = !reviewTarget || !Number.isSafeInteger(player.hitsReceived) || player.hitsReceived < 1;
+    report.update(reportVisible);
   }
   reviewPlayer.addEventListener('change', render);
   reviewButton.addEventListener('click', () => { render(); if (reviewTarget) openReview(reviewTarget); });

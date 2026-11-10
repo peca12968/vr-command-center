@@ -1,7 +1,9 @@
 """Bounded real UDP delay / result loss across End, using owned Simulation clients."""
 import argparse
+import csv
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import re
@@ -103,6 +105,28 @@ def replay(v,entry,sealed):
     return {'complete':True,'frames':previous,'finalPacketAndStatisticsMatch':True}
 
 
+def verify_personal_report(v, entry, player):
+    route = f'/api/sessions/{entry["id"]}'
+    filename = f'vr-command-report-v1-{entry["id"]}-player-{player["id"]}.csv'
+
+    def download(suffix, role):
+        request = urllib.request.Request(v.base + route + suffix, headers={'Authorization': 'Bearer ' + v.tokens[role]})
+        with urllib.request.urlopen(request, timeout=8) as response:
+            if response.headers.get_content_type() != 'text/csv' or response.headers['Cache-Control'] != 'no-store':
+                raise ValueError('Invalid final CSV response')
+            return response.read(), response.headers['Content-Disposition']
+
+    data, disposition = download(f'/players/{player["id"]}/report.csv', f'Room{player["roomId"]}')
+    original, _ = download('/report.csv', 'Master')
+    def rows(content):
+        return list(csv.DictReader(io.StringIO(content.decode('utf-8-sig'))))
+    selected = [row for row in rows(original) if row['playerId'] == player['id']]
+    if len(selected) != 1 or rows(data) != selected or filename not in disposition:
+        raise ValueError('The personal file did not preserve exactly the original sealed player row')
+    with (v.directory / 'interrupted-player-report.csv').open('xb') as output:
+        output.write(data)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--runtime-root', type=Path, required=True)
@@ -110,9 +134,11 @@ def main():
     p.add_argument('--api-dll', type=Path, default=Path(os.environ.get('VR_COMMAND_API_DLL', ROOT/'src/VrCommand.Api/bin/Release/net10.0/VrCommand.Api.dll')))
     p.add_argument('--mode', choices=['join-delay','result-drop','result-large-drop'], default='join-delay')
     p.add_argument('--player-package', type=Path, help='For result-drop, verify waiting and interrupted status using the current extracted Windows player launcher')
+    p.add_argument('--verify-personal-report', action='store_true', help='Verify the interrupted player can obtain its sealed row from the current management API')
     p.add_argument('--post-seal-delay', type=float, default=1, help='Additional join-delay seconds after exact seal, 0..3')
     args = p.parse_args(); args.duration=300; args.job_workers=2; args.visible_room=0; args.check=False
     if not 0 <= args.post_seal_delay <= 3: p.error('post-seal-delay must be 0..3 seconds')
+    if args.verify_personal_report and not args.player_package: p.error('Personal report verification requires --player-package')
     if args.player_package:
         if args.mode != 'result-drop': p.error('Packaged status verification requires --mode result-drop')
         from importlib.util import spec_from_file_location, module_from_spec
@@ -224,6 +250,9 @@ def main():
             'entire replay contiguous and final packet / statistics unchanged']
         if args.player_package:
             report['checks'].append('Extracted player launcher distinguishes exact pending, interrupted and final histories')
+        if args.verify_personal_report:
+            verify_personal_report(v, entry, late)
+            report['checks'].append('Room controller retrieves exactly the interrupted player sealed CSV row')
         v.save('race-result.json',report);v.evidence.extend(report['checks'])
         v.summary()
     except BaseException as error:

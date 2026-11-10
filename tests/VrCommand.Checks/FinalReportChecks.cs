@@ -46,6 +46,7 @@ internal static class FinalReportChecks
                 Record(3, CombatKind.EnemyEliminated, shot, enemy), Record(4, CombatKind.PlayerDamaged, damage: 20) };
             manager.ReportStreamBatch(id, records, server);
             Reject<InvalidOperationException>(() => manager.FinalReport(id, master), "Receiving all known reports without exact seal remains non-final");
+            Reject<InvalidOperationException>(() => manager.FinalPlayerReport(id, player, room), "Individual export also waits for the original combat seal");
             Reject<InvalidOperationException>(() => manager.SealStream(id, new(stream, 3), server), "A shorter seal cannot unlock final export");
             Parallel.Invoke(() => manager.SealStream(id, new(stream, 4), server), () =>
             {
@@ -125,6 +126,15 @@ internal static class FinalReportChecks
             && Encoding.UTF8.GetString(ownCsv).Contains("\"'=room1\"")
             && FinalReportCsv.FileName(linked, 1).EndsWith("-room-01.csv", StringComparison.Ordinal),
             "Master and room controller get identical scoped bytes with formula protection and a distinct filename");
+        var personal = empty.FinalPlayerReport(linked, departed, room);
+        check(personal.Players.SequenceEqual(own.Players) && personal.ReportRoomId is null
+            && FinalReportCsv.Encode(personal).SequenceEqual(FinalReportCsv.Encode(empty.FinalPlayerReport(linked, departed, master)))
+            && Encoding.UTF8.GetString(FinalReportCsv.Encode(personal)).Contains("\"'=room1\"")
+            && FinalReportCsv.FileName(linked, departed).EndsWith($"-player-{departed:D}.csv", StringComparison.Ordinal),
+            "Personal CSV preserves the original departed row, formula protection and a distinct filename");
+        Reject<KeyNotFoundException>(() => empty.FinalPlayerReport(linked, visitor, room), "Personal export hides foreign-room players");
+        Reject<KeyNotFoundException>(() => empty.FinalPlayerReport(linked, Guid.NewGuid(), room), "Personal export does not invent a missing player row");
+        Reject<AccessDeniedException>(() => empty.FinalPlayerReport(linked, departed, server), "Game-server credentials cannot export individual reports");
         var unoccupied = empty.FinalReport(linked, master, 5);
         check(unoccupied.ReportRoomId == 5 && unoccupied.Players.Length == 0
             && Encoding.UTF8.GetString(FinalReportCsv.Encode(unoccupied)).Contains("\"Session\""),

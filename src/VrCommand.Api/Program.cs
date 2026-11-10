@@ -272,6 +272,12 @@ app.MapGet("/api/sessions/{id:guid}/report.csv", (Guid id, SessionManager manage
     ExportReport(id, null, manager, context));
 app.MapGet("/api/sessions/{id:guid}/rooms/{roomId:int}/report.csv", (Guid id, int roomId, SessionManager manager, HttpContext context) =>
     ExportReport(id, roomId, manager, context));
+app.MapGet("/api/sessions/{id:guid}/players/{playerId:guid}/report.csv", (Guid id, Guid playerId, SessionManager manager, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var report = manager.FinalPlayerReport(id, playerId, Actor(context));
+    return Results.File(FinalReportCsv.Encode(report), "text/csv; charset=utf-8", FinalReportCsv.FileName(id, playerId));
+});
 app.MapGet("/api/sessions/{id:guid}/reports.zip", (Guid id, SessionManager manager, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";
