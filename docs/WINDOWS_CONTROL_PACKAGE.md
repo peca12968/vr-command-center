@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `windows-control-console-0.31.80-participation-replay-win-x64.zip` 可從全館收尾回看有效姿態開場。ZIP 為 52,842,586 bytes，SHA-256 `ed34a4a3e8cf1170e21e335f72a074058c3b5389d78fa32b833119c550132ce7`，解壓核對 540 筆清單及 520 個執行檔案。 [開場回看](SESSION_CLOSURE.md#回看有效姿態開場)
+
 2026-11-10 `windows-control-console-0.31.79-participation-closure-win-x64.zip` 提供場館驗收 ZIP 的有效姿態開場畫格指標。ZIP 為 52,841,556 bytes，SHA-256 `36f9afd313e021339f17ac06327e90a3111d2c95d84447e4e9d27927de966114`，解壓核對 540 筆清單及 520 個執行檔案。 [封存核對](EXTERNAL_CLIENTS.md#核對五房有效姿態開場)
 
 2026-11-10 `windows-control-console-0.31.78-full-participation-win-x64.zip` 提供可選的五房 25 席有效姿態開場。ZIP 為 52,840,795 bytes，SHA-256 `d4cdbbdb51b399596f846853c543f57a9756bb1a5dbe514b678bc005fa513292`，解壓核對 540 筆清單與 520 個執行檔案。 [開場操作](PLAYER_READINESS.md#五房各-5-席有效姿態開場)
