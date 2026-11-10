@@ -3,6 +3,7 @@ const { spawnSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { waitForLiveFrame } = require('./live-watch-fault.cjs');
 
 module.exports = async ({ context, api, tokens, base, root, screenshots, check, captureErrors, participationOnly }) => {
   const rooms = [1, 2, 3, 4, 5];
@@ -307,6 +308,11 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       check(query.get('mode') === 'replay' && query.get('throughFrame') === originalFrame
         && await canvas.getAttribute('data-sequence') === originalFrame && await page.locator('#world-room').inputValue() === '5'
         && JSON.stringify(await api('/sessions')) === JSON.stringify(beforeReview), `${mode} tracking opens the exact original interruption frame without changing the session`);
+      for (const source of sources) source.publish(source.snapshot, false);
+      await page.locator('#world-recent').filter({ hasText: '返回即時觀戰' }).click();
+      await waitForLiveFrame(page, Number(originalFrame));
+      check(await page.locator('#world-recording').inputValue() === lostSession && await page.locator('#world-room').inputValue() === '5',
+        `${mode} returns from the exact interruption frame to the original live room`);
       await page.locator('#tab-operations').click();
       const first = sources.find(source => source.route === `/sessions/${forRoom(1).id}`);
       const changed = await api(first.route + '/commands', 'POST', { commandId: randomUUID(), action: 'SetEnvironment',

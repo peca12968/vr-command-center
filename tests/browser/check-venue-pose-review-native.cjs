@@ -13,12 +13,15 @@ async function main() {
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const errors = [], writes = [], watches = [];
+    let layoutReads = 0;
     const sessionPath = `/api/sessions/${sessionId}`;
     page.on('pageerror', error => errors.push(error.name));
     page.on('request', request => {
       const url = new URL(request.url());
       if (url.origin !== base || !url.pathname.startsWith('/api/')) return;
-      if (request.method() !== 'GET') writes.push(request.method());
+      // Master login inspects its default draft via the read-only layout route.
+      if (request.method() === 'POST' && url.pathname === '/api/mission-layout') layoutReads++;
+      else if (request.method() !== 'GET') writes.push(request.method());
       if (url.pathname.endsWith('/world/watch')) watches.push({ path: url.pathname, mode: url.searchParams.get('mode'),
         from: url.searchParams.get('fromFrame'), through: url.searchParams.get('throughFrame') });
     });
@@ -89,7 +92,12 @@ async function main() {
     assert.deepEqual(writes, []);
     assert.deepEqual(errors, []);
     await page.locator('#world-player').screenshot({ path: path.join(out, 'live.png') });
-    await fs.writeFile(path.join(out, 'checks.json'), JSON.stringify({ complete: true, sessionId, streamId, roomId, seat, before, after, venueOverview }, null, 2), { flag: 'wx' });
+    await fs.writeFile(path.join(out, 'checks.json'), JSON.stringify({ complete: true, sessionId, streamId, roomId, seat, before, after,
+      venueOverview, layoutReads }, null, 2), { flag: 'wx' });
   } finally { await browser.close(); }
 }
-main().catch(error => { console.error(error.name + ': native pose review failed'); process.exitCode = 1; });
+main().catch(error => {
+  const location = error.stack?.match(/check-venue-pose-review-native\.cjs:(\d+):(\d+)\)/);
+  console.error(error.name + ': native pose review failed' + (location ? ` at ${location[1]}:${location[2]}` : ''));
+  process.exitCode = 1;
+});
