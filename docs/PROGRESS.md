@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-11 Windows 啟動器背景載入待開場次
+
+- 啟動器 1.17 在背景讀取單房清單。等候時暫停選房及啟動，視窗仍可關閉。成功時只保留同一實例中仍可用的原選取，失敗時清空清單。隔離的 WinForms 程序以實際管理服務及本機代理扣住清單回覆。1.16 在等候期間未通過訊息迴圈檢查。1.17 通過 55 項 Framework 與 51 項清單檢查，涵蓋原場次保留、503 後清除及回覆仍被扣住時關閉。 [新版驗收](../artifacts/server-catalog/run-6e05c627462f421cad7cc9775c6ef71f/checks.json) · [舊版對照](../artifacts/server-catalog-baseline-117-packaged/artifacts/server-catalog/run-34b572c5ebe449bc96269364ad004313/framework-proof.json)
+- 新版首輪代理漏轉管理根路由，第二輪測試程式逾時。代理補上根路由，測試在建立表單前保存執行緒的同步內容，訊息迴圈結束後還原，正式重跑通過。首次舊版取證的 Git 檔案換行與原包編譯輸入不同，對照場改用雜湊吻合的原編譯輸入。上述試次與原門檻皆保留。 [首輪](../artifacts/server-117-catalog.log) · [第二輪](../artifacts/server-117-catalog-final.log)
+- 另外以 1.16 操作實際可見桌面視窗。輸入隔離管理路徑後，兩次載入點擊均由 `PickerHost.exe` 攔截，未載入場次。停止桌面輸入後清理原程序，C／F 9 檔相符。1.17 的 WinForms 檢查在測試程序內進行，完整桌面操作另待複驗。 [桌面遮擋](../artifacts/server-gui/run-521f12cd822e4a45a3d103274bd3ee1e/gui-blocker.json)
+- 解壓 1.17 套件通過 400 項同機原生整合檢查。獨立及合併各有 25 席同時連線，六場共 929 格完整回放、50 份原戰績和伺服器確認、11 份 CSV 及雙封存。活動場次歸零，C／F 216 檔相符。套件中 328 檔與 1.16 雜湊相同，沿用 0.50.4 Windows 遊戲與 Quest ARM64 開發 APK。 [Windows 驗收](../artifacts/server-package-checks/run-35591fb182ff4b4e866fc082e6ef7301/checks.json) · [發行核對](../artifacts/venue-release-0.50.4-catalog-117.json)
+- 套件的啟動器來源雜湊與 GitHub 提交 `4ec8226c` 相符。GitHub Actions job `130044587030` 因帳務或支出上限未啟動。跨機、實體頭盔及廠商設備仍待驗收。 [伺服器包](WINDOWS_SERVER_PACKAGE.md) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42877492400)
+
 ## 2026-11-11 硬體模擬閘道核對戰鬥來源
 
 - 模擬器 0.2.12 在附掛前核對戰鬥串流、來源及階段序號。已附掛的同一串流若回報另一種來源，該房以 `management-invalid-response` 結束，取消待確認批次並保留原確認。其他房可繼續排演。 [操作說明](HARDWARE.md#一次啟動與停止五房排演)
