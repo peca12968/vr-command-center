@@ -75,6 +75,7 @@ def main():
     p.add_argument('--check-quest-vr-partial-map',action='store_true',help='Use a mixed headset roster and deploy five selected Quest seats from each original VR venue ZIP')
     p.add_argument('--check-windows-venue-staging',action='store_true',help='Stage VIVE XR seats from the original VR or mixed venue ZIP')
     p.add_argument('--check-venue-openxr',action='store_true',help='Use one graphical mock OpenXR seat alongside 24 desktop peers per topology')
+    p.add_argument('--check-venue-pose-review', action='store_true', help='Open the original OpenXR interruption frame and return to the same live room')
     p.add_argument('--check-venue-openxr-reconnect', action='store_true', help='Interrupt one tracked UDP client and reconnect its original process in both five-room modes')
     p.add_argument('--check-venue-live-tracking',action='store_true',help='Verify the Master-only running tracking overview during native OpenXR loss')
     p.add_argument('--peer-diagnostics',action='store_true',help='Verify observed UDP peers in Linked and absence in default Independent runs')
@@ -139,6 +140,8 @@ def main():
         p.error('--check-venue-openxr requires --check-quest-vr-partial-map and its own venue participation check')
     if args.check_venue_live_tracking and not args.check_venue_openxr:
         p.error('--check-venue-live-tracking requires --check-venue-openxr')
+    if args.check_venue_pose_review and not args.check_venue_openxr:
+        p.error('--check-venue-pose-review requires --check-venue-openxr')
     if args.check_venue_openxr_reconnect and (not args.check_venue_openxr or (args.peer_diagnostics and not args.venue_field_evidence)
             or args.check_windows_venue_staging or args.check_room_combat):
         p.error('--check-venue-openxr-reconnect requires --check-venue-openxr and its own connection and combat checks')
@@ -1228,6 +1231,9 @@ def main():
             check(all({row['id'] for row in value['packet']['frame']['players'] if row['connected']}==expected
                       and value['packet']['frame']['phase']=='Running' for value in frames[lost['sequence']-1:held['sequence']]),
                   entry['label']+' every replay frame of held tracking loss preserves the other admissions')
+        if 'poseReviewPackets' in entry:
+            check(all(frames[packet['sequence']-1]['packet']==packet for packet in entry['poseReviewPackets']),
+                  entry['label']+' the reviewed interruption and returned live packets both match sealed replay')
         if 'venueReconnectWindow' in entry:
             window = entry['venueReconnectWindow']
             first, last = window['first'], window['last']
@@ -1901,8 +1907,10 @@ def main():
             lost=wait(lambda:checkpoint(False,ready['packet']['frame']['tick']+1),15,mode+' original OpenXR loss')
             verify_quest_tracking(linked,'awaiting-tracked-pose','lost')
             held=wait(lambda:checkpoint(False,lost['packet']['frame']['tick']+14),15,mode+' isolated held tracking loss')
+            if args.check_venue_pose_review:
+                verify_venue_pose_review(entry, original['player'], marker, mode, held['packet']['sequence'])
         finally:
-            marker.unlink()
+            marker.unlink(missing_ok=True)
         recovered=wait(lambda:checkpoint(True,held['packet']['frame']['tick']+1),15,mode+' original OpenXR recovery')
         verify_quest_tracking(linked,'tracked-ready','recovered')
         if args.check_venue_live_tracking:
@@ -1923,6 +1931,40 @@ def main():
             'mockRuntimeSha256':package.digest(runtime_file),'fixtureSha256':package.digest(args.openxr_mock_pose_dll)})
         if args.check_venue_openxr_reconnect:
             verify_venue_openxr_reconnect(entries, round_clients, entry, original, checkpoint, recovered, mode)
+
+    def verify_venue_pose_review(entry, player, marker, mode, minimum_sequence):
+        node = shutil.which('node')
+        if not node:
+            raise RuntimeError('Node is required for the packaged pose review browser')
+        destination = out / (mode + '-pose-review')
+        destination.mkdir()
+        room, seat = player['roomId'], player['seat'] + 1
+        sid, stream = entry['sessionId'], entry['ready']['streamId']
+        descriptor = runtime / (mode + '-pose-review-private.json')
+        descriptor.write_text(json.dumps({'base':uri,'key':keys[f'Room{room}'],'sessionId':sid,'roomId':room,
+                                          'seat':seat,'playerId':player['id'],'streamId':stream}),encoding='utf-8')
+        with (destination/'browser.log').open('xb') as log:
+            browser = subprocess.Popen([node,str(ROOT/'tests/browser/check-venue-pose-review-native.cjs'),
+                                        str(descriptor),str(destination)],stdout=log,stderr=subprocess.STDOUT)
+            try:
+                def saved_review():
+                    if browser.poll() is not None:
+                        raise RuntimeError('Pose review browser exited before opening the original snapshot')
+                    file = destination/'reviewed.json'
+                    return read(file) if file.is_file() else None
+                reviewed = wait(saved_review,30,mode+' room desk opens the original native pose frame')
+                marker.unlink()
+                check(browser.wait(timeout=30)==0,mode+' room desk returns from the saved frame to live without writing')
+            finally:
+                if browser.poll() is None:
+                    browser.kill()
+                    browser.wait(timeout=10)
+        result = read(destination/'checks.json')
+        check(result['complete'] and (result['sessionId'],result['streamId'],result['roomId'],result['seat'])==(sid,stream,room,seat)
+              and result['after']>result['before']==reviewed['sequence']>=minimum_sequence,
+              mode+' native browser records the original room and exact interruption and recovery frames')
+        route = '/api/sessions/'+sid+'/world/frames/'
+        entry['poseReviewPackets'] = [request(route+str(sequence))['packet'] for sequence in (result['before'],result['after'])]
 
     def verify_venue_openxr_reconnect(entries, round_clients, entry, client, checkpoint, recovered, mode):
         stage('running-venue-openxr-reconnect', mode=mode)
@@ -3080,6 +3122,7 @@ def main():
             'questVrDeploy':args.check_quest_vr_deploy,
             'questVrPartialMap':args.check_quest_vr_partial_map,
             'venueOpenxr':args.check_venue_openxr,
+            'venuePoseReview':args.check_venue_pose_review,
             'venueOpenxrReconnect':args.check_venue_openxr_reconnect,
             'openxrReconnect':args.check_openxr_reconnect,
             'openxrRevocation':args.check_openxr_revocation,

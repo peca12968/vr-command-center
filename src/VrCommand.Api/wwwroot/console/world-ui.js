@@ -23,7 +23,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   let connecting = false, stepping = false, savedLimit = null, savedFinished = false;
   let reviewPlayer = null, actors = new Map(), actorInitialized = false;
   let clipStart = null, clipEnd = null, clipPosition = null, clipPlayback = '';
-  let recentSource = null, liveRetryTimer;
+  let returnLiveSource = null, liveRetryTimer;
   const cameras = mountCameras(getKey, unauthorized, () => scene, freeView);
   const cameraForm = mountWorldCameraForm(() => scene, freeView);
   const eventSearch = mountWorldEventSearch(response, readFrame, eventNames, () => { if (frame) showEvents(frame); });
@@ -37,7 +37,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   }
   function stopList() { listEpoch++; listController?.abort(); listController = null; }
   function reset() {
-    reviewPlayer = recentSource = null; clearClip();
+    reviewPlayer = returnLiveSource = null; clearClip();
     stop(); stopList(); info = frame = savedLimit = null; savedFinished = false; geometry = ''; mode = ''; cameras.reset(); cameraForm.reset(); reviewControls();
     $('world-recording').replaceChildren(); $('world-player').hidden = true; message('選取已錄製的場次，開始觀戰或回放。');
     recordingControls(); bindRooms([]);
@@ -85,7 +85,9 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
         resetRecording();
         const limit = target.mode === 'replay' && !target.complete ? target.throughSequence : null;
         const sequence = target.playerId || target.witness ? target.throughSequence : target.mode === 'replay' ? 1 : null;
-        void connect(target.mode, 0, sequence, limit, begin ? { ...target, archive: row } : target);
+        const replayTarget = begin ? { ...target, archive: row }
+          : target.witness?.kind === 'pose-interruption' ? { ...target, returnToLive: row.complete === false } : target;
+        void connect(target.mode, 0, sequence, limit, replayTarget);
         return;
       }
       if (rows.some(row => row.header.sessionId === selected)) picker.value = selected;
@@ -120,7 +122,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     $('world-replay').textContent = selected?.dataset.complete === 'false' ? '回放已保存片段' : '從頭回放';
   }
   function resetRecording() {
-    reviewPlayer = recentSource = null; clearClip();
+    reviewPlayer = returnLiveSource = null; clearClip();
     stop(); cameras.bind(null); cameraForm.reset(); info = frame = savedLimit = null; savedFinished = false; geometry = ''; mode = '';
     bindRooms([]); resetActors(); delete $('world-canvas').dataset.sequence;
     recordingControls(); reviewControls(); $('world-player').hidden = true; message('已切換場次，請開始觀戰或回放。');
@@ -187,7 +189,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   }
   function canExtendSaved() {
     return active && mode === 'replay' && info?.header.sessionId === $('world-recording').value
-      && !recentSource && !info.complete && savedFinished && frame?.packet.sequence === savedLimit;
+      && !returnLiveSource && !info.complete && savedFinished && frame?.packet.sequence === savedLimit;
   }
   function clearClip() { clipStart = clipEnd = clipPosition = null; clipPlayback = ''; }
   function clipControls(idle) {
@@ -226,7 +228,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   }
   function reviewControls() {
     const recent = $('world-recent');
-    const canReturn = Boolean(recentSource);
+    const canReturn = Boolean(returnLiveSource);
     recent.hidden = mode !== 'live' && !canReturn;
     recent.disabled = !active || (!canReturn && (mode !== 'live' || !connected || !received || !(frame?.packet.sequence > 1)));
     const recentLabel = canReturn ? '返回即時觀戰' : '回看最近 10 秒';
@@ -280,8 +282,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     return replayAt(0, sequence);
   }
   function openLive() {
-    const target = recentSource ? { mode: 'live', sessionId: $('world-recording').value, sourceKey: recentSource } : null;
-    recentSource = null;
+    const target = returnLiveSource ? { mode: 'live', sessionId: $('world-recording').value, sourceKey: returnLiveSource } : null;
+    returnLiveSource = null;
     return connect('live', 0, null, null, target);
   }
   function retryLive(id, key, sourceKey, request, attempt) {
@@ -295,9 +297,9 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   }
   function toggleRecent() {
     if ($('world-recent').disabled) return;
-    if (recentSource) return openLive();
+    if (returnLiveSource) return openLive();
     const { sequence, elapsedMilliseconds } = frame.packet;
-    recentSource = geometry;
+    returnLiveSource = geometry;
     return elapsedMilliseconds <= 10000 ? connect('replay', 0, 1, sequence)
       : connect('replay', elapsedMilliseconds - 10000, null, sequence);
   }
@@ -323,7 +325,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
       $('world-freshness').classList.toggle('replay-error', (stale || unknown || clockInvalid) && !info.complete);
     } else {
       const atSavedEnd = saved && savedFinished && frame?.packet.sequence === savedLimit;
-      $('world-freshness').textContent = atSavedEnd ? (recentSource ? '已到即時回看尾端' : '已到已保存片段尾端')
+      $('world-freshness').textContent = atSavedEnd ? (returnLiveSource ? '已到即時回看尾端' : '已到已保存片段尾端')
         : connected ? '回放中' : '回放已暫停／結束';
       $('world-freshness').classList.remove('replay-error');
       $('world-pause').textContent = connected ? '暫停回放' : '繼續回放';
@@ -481,7 +483,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   async function connect(nextMode, milliseconds = 0, sequence = null, replayLimit = savedLimit, target = null, clip = false, liveAttempt = 0) {
     const id = $('world-recording').value, key = getKey(); if (!active || !id || !key) return;
     stop(); mode = nextMode;
-    const expectedGeometry = target?.sourceKey ?? recentSource ?? (clip ? geometry : null);
+    const expectedGeometry = target?.sourceKey ?? returnLiveSource ?? (clip ? geometry : null);
     clipPlayback = clip ? 'playing' : '';
     clipPosition = clip ? sequence : null;
     const own = controller = new AbortController(), request = epoch;
@@ -491,7 +493,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
     if (nextMode === 'live') { received = 0; savedLimit = null; savedFinished = false; reviewPlayer = null; clearClip(); }
     const limit = nextMode === 'live' ? null : replayLimit;
     let hasHeader = false, reachedSavedEnd = false, lastSequence = sequence === null ? null : sequence - 1;
-    let recentJump = Boolean(target?.sourceKey || recentSource);
+    let recentJump = Boolean(target?.sourceKey || returnLiveSource);
     let playerFrame = null, playerComplete = false, witnessFrame = null;
     let lastLiveSequence = liveAttempt ? frame?.packet.sequence ?? 0 : 0;
     let idleTimer, idleExpired = false, transportFailure = false;
@@ -626,6 +628,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
             savedLimit = info.complete ? null : info.acceptedSequence;
             savedFinished = savedLimit === sequence;
           }
+          if (target.returnToLive) returnLiveSource = geometry;
           show(witnessFrame, true);
           let text = `已停在第 ${target.throughSequence} 格的${witnessLabel}快照。`;
           if (witness.kind === 'participation-begin') {
@@ -660,7 +663,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
   $('world-live').addEventListener('click', openLive);
   $('world-recent').addEventListener('click', toggleRecent);
   $('world-replay').addEventListener('click', () => {
-    recentSource = null;
+    returnLiveSource = null;
     savedLimit = $('world-recording').selectedOptions[0]?.dataset.complete === 'false' ? 'latest' : null;
     connect('replay', 0, 1);
   });
@@ -697,6 +700,6 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips)
         message('正在尋找原場次錄製…');
       }
       void refresh(target);
-    } else { recentSource = null; clearClip(); stop(); stopList(); status(); }
+    } else { returnLiveSource = null; clearClip(); stop(); stopList(); status(); }
   } };
 }

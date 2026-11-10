@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
 const path = require('node:path');
+const { waitForLiveFrame } = require('./live-watch-fault.cjs');
 
 module.exports = async ({ context, api, tokens, base, root, screenshots, check, captureErrors }) => {
   const page = await context.newPage(), active = new Set();
@@ -93,6 +94,15 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         && original.packet.frame.players.find(row => row.id === player.playerId)?.connected === false
         && (await api(detail)).sequence === running.sequence,
         mode + ' room desk opens its exact original saved interruption frame without changing the mission');
+      const camera = await page.locator('#world-canvas').getAttribute('data-camera');
+      const returnLive = page.locator('#world-recent').filter({ hasText: '返回即時觀戰' });
+      await returnLive.waitFor();
+      publish(running, true);
+      await returnLive.click();
+      await waitForLiveFrame(page, viewed);
+      check(await page.locator('#world-recording').inputValue() === id && await page.locator('#world-room').inputValue() === '4'
+        && await page.locator('#world-canvas').getAttribute('data-camera') === camera,
+        mode + ' returns to the exact live recording with the same room and camera');
       await page.locator('#tab-operations').click();
       if (!linked) {
         const watch = url => url.pathname === '/api' + detail + '/world/watch' && url.searchParams.get('mode') === 'replay';
