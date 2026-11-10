@@ -14,6 +14,16 @@ def read(p):return json.loads(p.read_text(encoding='utf-8'))
 def free(kind=socket.SOCK_STREAM,address='127.0.0.1'):
     with socket.socket(socket.AF_INET,kind) as s:s.bind((address,0));return s.getsockname()[1]
 
+def venue_browser_port():
+    # Windows may assign a low port that Chromium blocks (for example 1719).
+    for _ in range(64):
+        port=49152+uuid.uuid4().int%16384
+        with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as probe:
+            try:probe.bind(('127.0.0.1',port))
+            except OSError:continue
+            return port
+    raise RuntimeError('No free high loopback port for the venue browser fixture')
+
 @contextmanager
 def hold_owned_unity_threads(witness, pid):
     """Pause only the exact fixture-owned process, then undo each suspension."""
@@ -3628,7 +3638,8 @@ def main():
         save('mixed-venue-interrupted-deployment.json', failed_report)
         save('mixed-venue-retried-deployment.json', retried)
     try:
-        subprocess.run([str(control_exe),'--init',str(data),'--port',str(free()),'--report',str(out/'control-init.json')],env=env,check=True,timeout=30);keys=read(data/'operator-keys.json')['OperatorKeys'];marker=read(data/'control-instance.json');uri='http://127.0.0.1:'+str(marker['port'])
+        management_port=venue_browser_port() if args.check_venue_plan_ui else free()
+        subprocess.run([str(control_exe),'--init',str(data),'--port',str(management_port),'--report',str(out/'control-init.json')],env=env,check=True,timeout=30);keys=read(data/'operator-keys.json')['OperatorKeys'];marker=read(data/'control-instance.json');uri='http://127.0.0.1:'+str(marker['port'])
         control_env = env
         if args.venue_management_https:
             port = free(address=address)
