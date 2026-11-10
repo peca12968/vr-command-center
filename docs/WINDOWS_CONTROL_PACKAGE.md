@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-10 `VRCommand-ControlServer-0.31.87-win-x64.zip` 提供從姿態中斷快照返回即時觀戰。ZIP 為 52,868,764 bytes，SHA-256 `afa049dddb70971d7fcf880e35913e20a5eb18fa4e270aeda15b6238058dce22`，解壓核對 543 筆清單與 523 個執行檔。 [房卡操作](PLAYER_READINESS.md#從房卡查看姿態中斷快照)
+
 2026-11-10 `VRCommand-ControlServer-0.31.86-win-x64.zip` 提供 VR／MR 房卡姿態中斷快照。ZIP 為 52,868,690 bytes，SHA-256 `970a23fd1fb2c73e53f0d3d79b312cd09e7c0477c82d3c039ffc967e0a2abec9`，解壓核對 543 筆清單與 523 個執行檔。 [房卡操作](PLAYER_READINESS.md#從房卡查看姿態中斷快照)
 
 2026-11-10 `windows-control-console-0.31.83-vr-resume-win-x64.zip` 提供 VR 房卡席位恢復檢查與繼續。ZIP 為 52,852,966 bytes，SHA-256 `d203ce5545ff84d2c553898e9494a327a03f2991b343d7c24e85bf3476ca1c4d`，解壓核對 540 筆清單及 520 個執行檔案。 [恢復操作](PLAYER_READINESS.md#從-vr-房卡確認恢復並繼續)
