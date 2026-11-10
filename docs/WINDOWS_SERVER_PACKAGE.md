@@ -38,6 +38,14 @@ Unity 0.47.0 伺服器可搭配控制台 0.31.14。啟動器 1.5 可選擇待開
 
 可在三包整合驗證加入 `--prepare-independent-set --check-venue-begin --check-venue-end --check-venue-launcher --check-venue-plan-ui`，使用 Chromium 下載原計畫再交給啟動器。
 
+### 從 Windows 視窗核對並啟動
+
+啟動器 1.9 的「五房批次啟動」可以貼上控制台下載的 JSON 完整路徑，或按「選擇計畫」。按「核對計畫」後，確認五個獨立場次或一個合併場次的房號、任務、場次 ID 與 UDP 埠。將滑鼠停在清單列可看見任務版本與本機綁定位址。修改路徑會清除前次核對結果。按「啟動全館」時，啟動器重新核對原計畫和管理實例。若有變動，請重讀並確認。
+
+視窗顯示「全館就緒」後，回控制台配票、開始和結束任務。結束後等視窗顯示全館結果。中止會停止這次視窗建立的遊戲程序，並把這批標為未完成。工作及結果分別寫入本機的 `%LOCALAPPDATA%\VrCommand\GameServers` 與 `GameServerReports`。
+
+也可用 `Launch-Server.exe --venue-window <計畫完整路徑>` 開啟五房視窗並填入路徑。命令列的 `--venue-check <計畫完整路徑> --report <新結果檔>` 會核對相同的房間、任務、校正及 UDP 條件。核對結果沒有憑證，啟動時仍會取得原場次的本機鎖。
+
 ### 手動建立及執行場館計畫
 
 ```json

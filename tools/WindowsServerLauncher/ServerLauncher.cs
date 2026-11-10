@@ -483,6 +483,7 @@ internal static class ServerLauncher
     sealed class VenueServer
     {
         internal Choice Choice;
+        internal Settings Config;
         internal Run Run;
         internal bool Ready;
         internal string Error;
@@ -491,6 +492,24 @@ internal static class ServerLauncher
     sealed class VenueGate
     {
         internal volatile bool Abort;
+    }
+
+    sealed class VenuePlan
+    {
+        internal Catalog Catalog;
+        internal string Topology;
+        internal List<VenueServer> Servers;
+        internal object Public()
+        {
+            return new { schemaVersion = 1, status = "venue-checked", complete = true, topology = Topology, instanceId = Catalog.InstanceId,
+                servers = Servers.ConvertAll(server => new { roomIds = server.Choice.Rooms, sessionId = server.Choice.Id,
+                    missionId = server.Choice.MissionId, missionName = server.Choice.MissionName, experienceMode = server.Choice.Experience,
+                    address = server.Config.Address, listenAddress = server.Config.Bind, port = server.Config.Port }) };
+        }
+        internal bool Same(VenuePlan other)
+        {
+            return Catalog.Same(other.Catalog) && Json.Serialize(Public()) == Json.Serialize(other.Public());
+        }
     }
 
     static int RunVenue(Dictionary<string, string> options, ref bool outputValid)
@@ -505,15 +524,37 @@ internal static class ServerLauncher
         Need(!Inside(planPath, Root) && !Inside(planPath, work) && !Inside(work, Root) && !Inside(Root, work)
             && !Directory.Exists(work) && !File.Exists(work) && Directory.Exists(Path.GetDirectoryName(work)), "請使用包外的設定檔及全新工作目錄。");
         Plain(work);
-        var plan = Read(planPath, 8192); var instancePath = Text(plan, "controlInstance");
-        Need(!String.IsNullOrWhiteSpace(instancePath) && Path.IsPathRooted(instancePath), "需要管理實例的完整路徑。");
-        var instanceDirectory = Path.GetDirectoryName(Full(instancePath));
+        var plan = Read(planPath, 8192);
+        var instancePath = VenueInstancePath(plan);
+        var instanceDirectory = Path.GetDirectoryName(instancePath);
         Need(!Inside(work, instanceDirectory) && !Inside(instanceDirectory, work), "工作目錄必須與管理實例分開。");
         var report = options["--report"]; var ready = options["--ready-report"];
         Output(report, instanceDirectory); Output(ready, instanceDirectory);
         Output(report, work); Output(ready, work);
         Need(!String.Equals(Full(report), Full(ready), StringComparison.OrdinalIgnoreCase), "結果路徑不能重複。");
         outputValid = true;
+        return ExecuteVenue(LoadVenuePlan(plan, instancePath), work, seconds, ready, report, peerDiagnostics, () => false);
+    }
+
+    static string VenueInstancePath(Dictionary<string, object> plan)
+    {
+        var instancePath = Text(plan, "controlInstance");
+        Need(!String.IsNullOrWhiteSpace(instancePath) && Path.IsPathRooted(instancePath), "需要管理實例的完整路徑。");
+        return Full(instancePath);
+    }
+
+    static VenuePlan ReadVenuePlan(string path, Action<string> checkInstance = null)
+    {
+        Need(!String.IsNullOrWhiteSpace(path) && Path.IsPathRooted(path), "需要場館計畫的完整路徑。");
+        path = Full(path);
+        Need(!Inside(path, Root), "場館計畫必須在程式包之外。");
+        var plan = Read(path, 8192); var instance = VenueInstancePath(plan);
+        if (checkInstance != null) checkInstance(Path.GetDirectoryName(instance));
+        return LoadVenuePlan(plan, instance);
+    }
+
+    static VenuePlan LoadVenuePlan(Dictionary<string, object> plan, string instancePath)
+    {
         var topology = Text(plan, "topology"); object raw;
         Need(Num(plan, "version") == 1 && plan.Count == 6 && (topology == "Linked" || topology == "Independent")
             && plan.TryGetValue("servers", out raw) && raw is object[]
@@ -536,13 +577,24 @@ internal static class ServerLauncher
                 Bind = Text(plan, "listenAddress"), Port = (int)Num(row, "port") };
             config.Validate();
             Need(ports.Add(config.Port), "獨立場次須使用不同的 UDP 埠。");
-            var name = topology == "Linked" ? "linked" : "room-" + assigned[0].ToString("00", System.Globalization.CultureInfo.InvariantCulture);
-            servers.Add(new VenueServer { Choice = choice, Run = new Run(config, Path.Combine(work, name)) });
+            servers.Add(new VenueServer { Choice = choice, Config = config });
         }
         servers.Sort((a, b) => a.Choice.Rooms[0].CompareTo(b.Choice.Rooms[0]));
         foreach (var server in servers)
-            try { server.Run.Config.CheckPort(); }
-            catch (SocketException) { throw new InvalidDataException("無法使用房間 " + String.Join("、", server.Choice.Rooms) + " 的 UDP 埠 " + server.Run.Config.Port + "。"); }
+            try { server.Config.CheckPort(); }
+            catch (SocketException) { throw new InvalidDataException("無法使用房間 " + String.Join("、", server.Choice.Rooms) + " 的 UDP 埠 " + server.Config.Port + "。"); }
+        return new VenuePlan { Catalog = catalog, Topology = topology, Servers = servers };
+    }
+
+    static int ExecuteVenue(VenuePlan plan, string work, int seconds, string ready, string report, bool peerDiagnostics, Func<bool> cancel)
+    {
+        Need(!cancel(), "已中止啟動；此輪未完成。");
+        var servers = plan.Servers;
+        foreach (var server in servers)
+        {
+            var name = plan.Topology == "Linked" ? "linked" : "room-" + server.Choice.Rooms[0].ToString("00", System.Globalization.CultureInfo.InvariantCulture);
+            server.Run = new Run(server.Config, Path.Combine(work, name));
+        }
         var staging = Path.Combine(Path.GetDirectoryName(work), ".vr-venue-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(staging);
         try { Directory.Move(staging, work); }
@@ -568,7 +620,7 @@ internal static class ServerLauncher
                         {
                             try
                             {
-                                server.Run.Start(() => gate.Abort, peerDiagnostics, packageVerified: true, beforeNative: delegate
+                                server.Run.Start(() => gate.Abort || cancel(), peerDiagnostics, packageVerified: true, beforeNative: delegate
                                 {
                                     reservedSlot = true;
                                     reserved.Signal();
@@ -579,7 +631,7 @@ internal static class ServerLauncher
                             catch (Exception error) { server.Error = Safe(error); gate.Abort = true; }
                             finally { if (!reservedSlot) reserved.Signal(); started.Signal(); }
                             proceed.Wait();
-                            if (!gate.Abort) server.Run.Wait(seconds, () => false);
+                            if (!gate.Abort) server.Run.Wait(seconds, cancel);
                         }
                         catch (Exception error) { server.Error = Safe(error); }
                         finally { try { server.Run.Dispose(); } catch (Exception error) { server.Error = Safe(error); } }
@@ -590,9 +642,9 @@ internal static class ServerLauncher
                 reserved.Wait();
                 launch.Set();
                 started.Wait();
-                if (!gate.Abort && servers.TrueForAll(server => server.Ready && !server.Run.Process.Exited))
+                if (!gate.Abort && !cancel() && servers.TrueForAll(server => server.Ready && !server.Run.Process.Exited))
                 {
-                    Save(ready, new { schemaVersion = 1, status = "venue-ready", topology = topology, instanceId = catalog.InstanceId,
+                    Save(ready, new { schemaVersion = 1, status = "venue-ready", topology = plan.Topology, instanceId = plan.Catalog.InstanceId,
                         servers = servers.ConvertAll(server => new { roomIds = server.Choice.Rooms, ready = server.Run.Ready() }) });
                     published = true;
                 }
@@ -605,18 +657,168 @@ internal static class ServerLauncher
                 foreach (var worker in workers) worker.Join();
             }
         }
-        var complete = published && servers.TrueForAll(server => server.Error == null && server.Run.Complete && server.Run.Cleanup);
+        var complete = published && !cancel() && servers.TrueForAll(server => server.Error == null && server.Run.Complete && server.Run.Cleanup);
         Save(report, new { schemaVersion = 1, status = complete ? "venue-sealed-stopped" : "venue-incomplete",
-            complete = complete, topology = topology, instanceId = catalog.InstanceId, readyPublished = published,
+            complete = complete, topology = plan.Topology, instanceId = plan.Catalog.InstanceId, readyPublished = published,
             servers = servers.ConvertAll(server => new { roomIds = server.Choice.Rooms,
                 result = server.Run.Report(server.Run.Complete && server.Run.Cleanup ? "sealed-stopped" : "incomplete", server.Error) }) });
         return complete ? 0 : 1;
     }
+
+    sealed class VenueWindow : Form
+    {
+        readonly TextBox path = new TextBox(), status = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
+        readonly Button browse = new Button { Text = "選擇計畫" }, check = new Button { Text = "核對計畫" },
+            start = new Button { Text = "啟動全館", Enabled = false }, abort = new Button { Text = "中止全館", Enabled = false };
+        readonly CheckBox peers = new CheckBox { Text = "記錄本次玩家連線來源（場館驗收）", AutoSize = true };
+        readonly Label summary = new Label { AutoEllipsis = true };
+        readonly ListView rooms = new ListView { View = View.Details, FullRowSelect = true, ShowItemToolTips = true, AccessibleName = "五房計畫明細" };
+        VenuePlan preview;
+        bool busy, readyShown;
+        volatile bool cancel;
+        string readyPath;
+
+        internal VenueWindow(string initialPath = "")
+        {
+            Text = "VR Command 五房批次啟動";
+            ClientSize = new Size(1000, 494); Font = new Font("Microsoft JhengHei UI", 11);
+            FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false;
+            Add(new Label { Text = "場館計畫 JSON 完整路徑", AutoSize = true }, 22, 20, 500, 26);
+            Add(path, 22, 50, 680, 32); Add(browse, 715, 48, 118, 36); Add(check, 846, 48, 132, 36);
+            Add(summary, 22, 92, 956, 30);
+            rooms.Columns.Add("房間", 140); rooms.Columns.Add("任務", 225); rooms.Columns.Add("場次 ID", 340); rooms.Columns.Add("公告位址與 UDP", 230);
+            Add(rooms, 22, 126, 956, 195);
+            Add(peers, 22, 329, 600, 29); Add(start, 22, 368, 165, 36); Add(abort, 200, 368, 165, 36);
+            Add(status, 22, 416, 956, 56);
+            path.AccessibleName = "場館計畫 JSON 完整路徑";
+            status.AccessibleName = "批次啟動狀態";
+            path.TextChanged += delegate { ClearPreview(); };
+            browse.Click += delegate
+            {
+                using (var dialog = new OpenFileDialog { Filter = "場館計畫 (*.json)|*.json", CheckFileExists = true })
+                    if (dialog.ShowDialog(this) == DialogResult.OK) path.Text = dialog.FileName;
+            };
+            check.Click += delegate { CheckPlan(); };
+            start.Click += delegate { StartVenue(); };
+            abort.Click += delegate { cancel = true; abort.Enabled = false; status.Text = "中止中；此輪不算正常封存完成。"; };
+            FormClosing += delegate(object sender, FormClosingEventArgs e)
+            {
+                if (!busy) return;
+                e.Cancel = true;
+                status.Text = readyPath == null ? "請等候計畫核對完成。" : "全館仍在執行；請由控制台結束任務，或按中止全館。";
+            };
+            var timer = new System.Windows.Forms.Timer { Interval = 400 };
+            timer.Tick += delegate
+            {
+                if (readyPath == null || readyShown || cancel || !File.Exists(readyPath)) return;
+                readyShown = true;
+                status.Text = "全館就緒。請由控制台配票、開始及結束任務。\r\n就緒紀錄：" + readyPath;
+            };
+            FormClosed += delegate { timer.Dispose(); };
+            timer.Start();
+            ClearPreview();
+            path.Text = initialPath;
+        }
+
+        void Add(Control control, int x, int y, int width, int height)
+        {
+            control.SetBounds(x, y, width, height);
+            Controls.Add(control);
+        }
+
+        void ClearPreview()
+        {
+            preview = null; rooms.Items.Clear(); start.Enabled = false;
+            summary.Text = "請載入並核對控制台下載的五房場館計畫。";
+            status.Text = "核對計畫後會列出房間、任務及連線端點。";
+        }
+
+        void Background(Action work, Action<Exception> complete)
+        {
+            busy = true; path.Enabled = browse.Enabled = check.Enabled = start.Enabled = peers.Enabled = false;
+            new Thread(delegate()
+            {
+                Exception failure = null;
+                try { work(); } catch (Exception error) { failure = error; }
+                BeginInvoke((Action)delegate
+                {
+                    busy = false; path.Enabled = browse.Enabled = check.Enabled = peers.Enabled = true;
+                    abort.Enabled = false; readyPath = null;
+                    complete(failure);
+                    start.Enabled = preview != null;
+                });
+            }).Start();
+        }
+
+        void CheckPlan()
+        {
+            var selectedPath = path.Text.Trim();
+            ClearPreview();
+            status.Text = "正在核對場次、校正鎖定與 UDP 埠。";
+            VenuePlan result = null;
+            Background(() => result = ReadVenuePlan(selectedPath), failure =>
+            {
+                if (failure != null) { status.Text = "核對未完成：" + Safe(failure); return; }
+                preview = result;
+                foreach (var server in result.Servers)
+                {
+                    var room = String.Join("、", server.Choice.Rooms);
+                    var endpoint = server.Config.Address + ":" + server.Config.Port;
+                    var item = new ListViewItem(new[] { room, Choice.Label(server.Choice.MissionName) + " · " + server.Choice.Experience,
+                        server.Choice.Id, endpoint });
+                    item.ToolTipText = server.Choice.Detail() + "\r\n本機綁定：" + server.Config.Bind + ":" + server.Config.Port;
+                    rooms.Items.Add(item);
+                }
+                summary.Text = (result.Topology == "Linked" ? "五房合併" : "五房獨立") + " · " + result.Servers.Count + " 個遊戲伺服器";
+                status.Text = "計畫已核對。確認房間與端點後按啟動全館。";
+            });
+        }
+
+        void StartVenue()
+        {
+            var reviewed = preview;
+            if (reviewed == null || busy) return;
+            var selectedPath = path.Text.Trim();
+            var capturePeers = peers.Checked;
+            cancel = false; readyShown = false; abort.Enabled = true;
+            status.Text = "正在重新核對計畫，然後啟動全館。";
+            var local = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrCommand");
+            var runs = Path.Combine(local, "GameServers");
+            var reports = Path.Combine(local, "GameServerReports");
+            var id = "venue-" + Guid.NewGuid().ToString("N");
+            var work = Path.Combine(runs, id);
+            var ready = Path.Combine(reports, id + "-ready.json");
+            var report = Path.Combine(reports, id + "-final.json");
+            readyPath = ready;
+            var result = 1;
+            Background(delegate
+            {
+                var current = ReadVenuePlan(selectedPath);
+                Need(reviewed.Same(current), "計畫或管理實例已變更；請重新核對。");
+                var instance = Path.GetDirectoryName(current.Catalog.PathName);
+                Need(!Inside(work, instance) && !Inside(instance, work) && !Inside(reports, instance), "工作及結果目錄必須與管理實例分開。");
+                Need(!cancel, "已中止啟動；此輪未完成。");
+                Plain(runs); Plain(reports);
+                Directory.CreateDirectory(runs); Directory.CreateDirectory(reports);
+                Output(ready, work); Output(report, work);
+                result = ExecuteVenue(current, work, 86400, ready, report, capturePeers, () => cancel);
+            }, failure =>
+            {
+                preview = null; peers.Checked = false;
+                status.Text = result == 0 ? "全館任務已封存並停止。"
+                    : "未完成：" + (failure != null ? Safe(failure) : "請核對各房結果。");
+                if (File.Exists(report)) status.AppendText("\r\n結果：" + report);
+                summary.Text = "再次啟動前請重新核對場館計畫。";
+            });
+        }
+    }
+
     internal sealed class Window : Form
     {
         readonly TextBox selected = new TextBox(), address = new TextBox { Text = "127.0.0.1" }, bind = new TextBox { Text = "127.0.0.1" };
         readonly NumericUpDown port = new NumericUpDown { Minimum = 1024, Maximum = 65535, Value = 7777 }; readonly ComboBox session = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Enabled = false };
-        readonly Button open = new Button { Text = "選擇檔案" }, refresh = new Button { Text = "載入／更新" }, start = new Button { Text = "啟動伺服器", Enabled = false }, abort = new Button { Text = "中止伺服器", Enabled = false };
+        readonly Button open = new Button { Text = "選擇檔案" }, refresh = new Button { Text = "載入／更新" }, start = new Button { Text = "啟動伺服器", Enabled = false }, abort = new Button { Text = "中止伺服器", Enabled = false },
+            venue = new Button { Text = "五房批次啟動" };
         readonly CheckBox peerDiagnostics = new CheckBox { Text = "記錄本次玩家連線來源（場館驗收）" };
         readonly Label state = new Label { Text = "先啟動管理服務，再載入其管理實例。", AutoSize = false }, detail = new Label { Text = "請先載入，再明確選擇要啟動的房間與任務。", AutoEllipsis = true };
         readonly CatalogState catalog = new CatalogState(); Run active; volatile bool cancel; Thread worker;
@@ -630,10 +832,11 @@ internal static class ServerLauncher
             Add(new Label { Text = "公告IPv4", AutoSize = true }, 24, 327, 210, 28); Add(address, 24, 358, 230, 32); Add(new Label { Text = "本機綁定IPv4", AutoSize = true }, 284, 327, 230, 28); Add(bind, 284, 358, 230, 32); Add(new Label { Text = "UDP埠", AutoSize = true }, 544, 327, 130, 28); Add(port, 544, 358, 130, 32);
             Add(peerDiagnostics, 24, 400, 430, 30);
             Add(new Label { Text = "開啟後，來源 IP 與埠會寫入本機私有 server.log。", AutoSize = true }, 463, 404, 427, 28);
-            Add(start, 24, 452, 260, 40); Add(abort, 310, 452, 260, 40); Add(state, 24, 510, 866, 64);
+            Add(start, 24, 452, 260, 40); Add(abort, 310, 452, 260, 40); Add(venue, 630, 452, 260, 40); Add(state, 24, 510, 866, 64);
             selected.TextChanged += delegate { catalog.Edit(selected.Text); start.Enabled = session.Enabled = false; detail.Text = "路徑已變更，請重新載入；未沿用舊場次。"; };
             open.Click += delegate { using (var dialog = new OpenFileDialog { Filter = "管理實例|control-instance.json", CheckFileExists = true }) if (dialog.ShowDialog(this) == DialogResult.OK) { selected.Text = dialog.FileName; Guard(LoadInstance); } };
             refresh.Click += delegate { Guard(LoadInstance); };
+            venue.Click += delegate { using (var window = new VenueWindow()) window.ShowDialog(this); };
             session.SelectedIndexChanged += delegate { if (catalog.Loaded) { var choice = session.SelectedItem as Choice; catalog.Select(choice == null ? null : choice.Id); ShowSelection(); } };
             start.Click += delegate { Guard(Begin); }; abort.Click += delegate { cancel = true; abort.Enabled = false; state.Text = "中止中；此輪不算正常封存完成。"; };
             FormClosing += delegate(object sender, FormClosingEventArgs e) { if (worker != null && worker.IsAlive) { e.Cancel = true; state.Text = "伺服器仍在執行；請由控制台結束任務，或按中止。"; } };
@@ -659,15 +862,20 @@ internal static class ServerLauncher
             var work = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrCommand", "GameServers", DateTime.UtcNow.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N"));
             var reports = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrCommand", "GameServerReports"); Directory.CreateDirectory(reports); var report = Path.Combine(reports, Guid.NewGuid().ToString("N") + ".json");
             var capturePeers = peerDiagnostics.Checked;
-            active = new Run(config, work); cancel = false; open.Enabled = refresh.Enabled = start.Enabled = selected.Enabled = address.Enabled = bind.Enabled = port.Enabled = session.Enabled = peerDiagnostics.Enabled = false; abort.Enabled = true;
+            active = new Run(config, work); cancel = false; open.Enabled = refresh.Enabled = start.Enabled = selected.Enabled = address.Enabled = bind.Enabled = port.Enabled = session.Enabled = peerDiagnostics.Enabled = venue.Enabled = false; abort.Enabled = true;
             worker = new Thread(delegate() { string error = null; try { active.Start(() => cancel, capturePeers); active.Wait(86400, () => cancel); } catch (Exception e) { error = Safe(e); } finally { try { active.Dispose(); } catch (Exception e) { error = Safe(e); } }
                 try { Save(report, active.Report(active.Complete && active.Cleanup ? "sealed-stopped" : "incomplete", error)); } catch (Exception e) { error = Safe(e); }
-                var final = error == null && active.Complete && active.Cleanup ? "任務已封存並停止。" : "未完成：" + (error ?? "封存未確認。"); BeginInvoke((Action)delegate { active = null; catalog.Edit(selected.Text); session.Enabled = false; detail.Text = "此輪已收尾；再次啟動前請重新載入場次。"; state.Text = final + " 結果：" + report; peerDiagnostics.Checked = false; open.Enabled = refresh.Enabled = selected.Enabled = address.Enabled = bind.Enabled = port.Enabled = peerDiagnostics.Enabled = true; abort.Enabled = false; }); }); worker.IsBackground = false; worker.Start();
+                var final = error == null && active.Complete && active.Cleanup ? "任務已封存並停止。" : "未完成：" + (error ?? "封存未確認。"); BeginInvoke((Action)delegate { active = null; catalog.Edit(selected.Text); session.Enabled = false; detail.Text = "此輪已收尾；再次啟動前請重新載入場次。"; state.Text = final + " 結果：" + report; peerDiagnostics.Checked = false; open.Enabled = refresh.Enabled = selected.Enabled = address.Enabled = bind.Enabled = port.Enabled = peerDiagnostics.Enabled = venue.Enabled = true; abort.Enabled = false; }); }); worker.IsBackground = false; worker.Start();
         }
     }
     [STAThread] static int Main(string[] args)
     {
-        if (args.Length == 0) { Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false); Application.Run(new Window()); return 0; }
+        if (args.Length == 0 || args.Length == 2 && args[0] == "--venue-window")
+        {
+            Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
+            using (Form window = args.Length == 0 ? (Form)new Window() : new VenueWindow(args[1])) Application.Run(window);
+            return 0;
+        }
         string report = null; Run run = null; bool outputValid = false; string error = null;
         try
         {
@@ -675,6 +883,12 @@ internal static class ServerLauncher
             Need(options.ContainsKey("--report"), "需要結果路徑。"); report = options["--report"]; Output(report, options.ContainsKey("--catalog") ? Path.GetDirectoryName(Full(options["--catalog"])) : options.ContainsKey("--work") ? options["--work"] : null); outputValid = true;
             if (options.Count == 2 && options.ContainsKey("--verify")) { Need(options["--verify"] == "package", "驗證參數錯誤。"); Verify(); Save(report, new { schemaVersion = 1, complete = true, status = "verified" }); return 0; }
             if (options.Count == 2 && options.ContainsKey("--catalog")) { Verify(); Save(report, Catalog.Load(options["--catalog"]).Public()); return 0; }
+            if (options.Count == 2 && options.ContainsKey("--venue-check"))
+            {
+                outputValid = false;
+                var preview = ReadVenuePlan(options["--venue-check"], instance => { Output(report, instance); outputValid = true; });
+                Save(report, preview.Public()); return 0;
+            }
             if (options.ContainsKey("--venue-run")) return RunVenue(options, ref outputValid);
             string diagnostics;
             var peerDiagnostics = options.TryGetValue("--peer-diagnostics", out diagnostics);

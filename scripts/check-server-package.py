@@ -97,6 +97,7 @@ def main():
     p.add_argument('--check-venue-begin', action='store_true', help='Start both native topologies with one witnessed Begin per topology')
     p.add_argument('--check-venue-launcher', action='store_true', help='Use one real Windows launcher for the explicitly prepared servers of each topology')
     p.add_argument('--check-venue-plan-ui', action='store_true', help='Launch each topology with the exact plan downloaded from Chromium')
+    p.add_argument('--check-venue-preview', action='store_true', help='Run the shared Windows venue preview before both topology launches')
     p.add_argument('--check-linked-room-enemies', action='store_true', help='Change one linked room through Chromium and verify original combat and replay')
     p.add_argument('--check-venue-tracking-gate', action='store_true', help='Reject full tracking Begin while the same native roster is otherwise ready')
     p.add_argument('--check-venue-participation-gate', action='store_true', help='Require all 25 effective native seats and verify their original Preparing frames')
@@ -196,6 +197,8 @@ def main():
                 'individual launcher report workflows must be checked separately')
     if args.check_venue_plan_ui and (not args.check_venue_launcher or not shutil.which('node')):
         p.error('--check-venue-plan-ui requires --check-venue-launcher and Node.js with Playwright Chromium')
+    if args.check_venue_preview and not args.check_venue_launcher:
+        p.error('--check-venue-preview requires --check-venue-launcher')
     if args.check_linked_room_enemies and (not args.player_package or args.check_room_combat or not shutil.which('node')):
         p.error('--check-linked-room-enemies requires the player package, Node.js and a separate run from --check-room-combat')
     if args.check_venue_tracking_gate and not args.check_venue_begin:p.error('--check-venue-tracking-gate requires --check-venue-begin')
@@ -450,6 +453,9 @@ def main():
             return ['--venue-run',plan_file,'--work',work,'--seconds','600','--ready-report',ready]
         if unlocked_mr:
             plan_file.write_text(json.dumps(plan),encoding='utf-8')
+            if args.check_venue_preview:
+                blocked=call('preview-unlocked-mr',['--venue-check',plan_file])
+                check('校正鎖定' in read(blocked)['error'], 'The shared venue preview rejects an unlocked Linked MR plan')
             call(label,args_for(plan_file,work,ready),report=report)
             check('校正鎖定' in read(report)['error'] and not work.exists() and not ready.exists()
                   and request('/api/sessions/'+states[0]['id'])['combatStream'] is None,
@@ -462,11 +468,18 @@ def main():
             empty_work=runtime/'venue-rejected-work'
             empty_ready=out/'venue-rejected-ready.json'
             call('venue-wrong-room',args_for(stale,empty_work,empty_ready))
+            if args.check_venue_preview:
+                wrong_preview=call('preview-wrong-room',['--venue-check',stale])
+                check('原場次與房間不符' in read(wrong_preview)['error'], 'The shared venue preview rejects a mismatched room assignment')
             plan_file.write_text(json.dumps(plan),encoding='utf-8')
             with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as occupied:
                 occupied.setsockopt(socket.SOL_SOCKET,socket.SO_EXCLUSIVEADDRUSE,1)
                 occupied.bind((address,values[-1]['port']))
                 call('venue-occupied-port',args_for(plan_file,empty_work,empty_ready))
+                if args.check_venue_preview:
+                    busy_preview=call('preview-occupied-port',['--venue-check',plan_file])
+                    check(f'房間 5 的 UDP 埠 {values[-1]["port"]}' in read(busy_preview)['error'],
+                          'The shared venue preview identifies the unavailable original fifth-room port')
             check(not empty_work.exists() and not empty_ready.exists()
                   and all(request('/api/sessions/'+row['id'])['combatStream'] is None for row in states),
                   'wrong room assignment or occupied fifth UDP port rejects the entire venue before any server starts')
@@ -505,6 +518,17 @@ def main():
             check(completed.returncode==0 and read(plan_file)==plan,label+' actual console download matches the original venue: '+diagnostic[-600:])
         else:
             plan_file.write_text(json.dumps(dict(plan,servers=list(reversed(plan['servers'])))),encoding='utf-8')
+        if args.check_venue_preview:
+            preview=call(label+'-preview',['--venue-check',plan_file],good=True)
+            actual=read(preview)
+            expected=[{**plan_row,'missionId':state['mission']['id'],'missionName':state['mission']['definition']['name'],
+                       'experienceMode':state['environment']['mode'],'address':address,'listenAddress':address}
+                      for plan_row,state in zip(plan['servers'],states,strict=True)]
+            check(actual=={'schemaVersion':1,'status':'venue-checked','complete':True,'topology':topology,
+                           'instanceId':read(data/'control-instance.json')['instanceId'],'servers':expected}
+                  and not work.exists() and not ready.exists()
+                  and all(request('/api/sessions/'+row['id'])==row for row in states),
+                  label+' shared preview lists exact original rooms, missions and UDP without modifying any session or publishing readiness')
         extra=['--peer-diagnostics','on'] if args.peer_diagnostics else []
         process=subprocess.Popen([str(exe),*map(str,args_for(plan_file,work,ready)),'--report',str(report),*extra],cwd=out,env=env)
         entries=[]
