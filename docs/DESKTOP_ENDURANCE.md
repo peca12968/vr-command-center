@@ -10,6 +10,12 @@ python scripts/verify-independent-evidence.py 'artifacts/desktop-exercise/<本�
 
 工具用房 1 保存的暫停畫格界定 UTC 區間，再核對其餘四房在該區間各自前進的 tick。五房共同執行區間須至少為測試時長減 10 秒，給原開場、暫停與恢復留出時間。工具要求該共同區間含每個原席位至少一次由戰鬥日誌確認的發射，並逐房比對封存序號、玩家結果、伺服器確認及 CSV。
 
+## Windows 0.50.0 獨立五房長場複驗
+
+2026-11-10 使用 Windows 0.50.0 與管理包 0.31.108，執行 `--mode independent --players-per-room 5 --seconds 900 --endurance --replay-workers 5`。場次 `20261110-214953-c8e65da7` 退出碼 0，通過 13 項。五房各自封存 8,585、8,587、8,560、8,537、8,535 格，合計 42,804 格完整回放。25 席各發射 90 次、換彈 45 次。五個原戰鬥日誌的 2,250 發與 25 份原戰績、伺服器確認及五份 CSV 相符。
+
+房 1 的 25 個暫停畫格均維持 tick 42，同一 UTC 區間內房 2 至 5 各前進 50、50、51、50 tick。原保存畫格核對 895.670 秒共同運行，25 席皆有區間內發射紀錄。活動場次與剩餘測試程序均為零，C／F 97 檔逐檔雜湊一致。證據為 `artifacts/desktop-0500-independent-closure-verification.json`。這次通過的範圍是同機自動化獨立五房。 [開發進度](PROGRESS.md#2026-11-10-windows-0500-獨立五房長場複驗)
+
 ## Windows 0.50.0 合併長場診斷複驗
 
 2026-11-10 使用同一 Windows 0.50.0 玩家包及管理包 0.31.108，以 `--mode linked --players-per-room 5 --seconds 900 --endurance --pose-continuity` 複驗。場次 `20261110-212904-c88bec46` 退出碼 0，通過 6 項。25 席各發射 90 次、換彈 45 次，逐席收到原戰績並由伺服器確認。原戰鬥日誌重算 2,250 發，與封存統計及 25 列 CSV 相符。
