@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-11 一次登記五房的原始遊戲來源
+
+- 控制台 0.31.114 下載第四版計畫。Windows 啟動器 1.15 等遊戲 0.50.4 準備各自的日誌來源，再由管理服務在同一筆 SQLite 交易核對序號及寫入全部來源。各遊戲核對原批次回條後才開啟 UDP。舊版 1.14 拒絕第四版計畫，新版啟動器連到 0.31.113 管理包也會在建立工作目錄前拒絕。既有第二、三版保留逐場登記流程。 [操作與版本](WINDOWS_SERVER_PACKAGE.md#依場館計畫批次啟動) · [混版結果](../artifacts/venue-source-batch-0504-build/old-management/run.json)
+- Windows 三包 `run-489a7427d47f4fb88e18cc4210008a15` 退出 0、476 項通過。測試等五個遊戲程序準備好才推進第五房序號，管理服務回 409，五房皆維持未綁定，五個程序都在開啟 UDP 前停止。合併場同樣通過晚到變更的拒絕測試。重新下載原場次後，兩種模式各 25 席同機連線，50 份戰績、6 份 CSV、六場共 1,016 格完整回放及雙封存。終止時活動場次歸零，C／F 快照 268 檔雜湊相符。 [Windows 驗收](../artifacts/server-package-checks/run-489a7427d47f4fb88e18cc4210008a15/checks.json) · [五房拒絕結果](../artifacts/server-package-checks/run-489a7427d47f4fb88e18cc4210008a15/independent-venue-source-stale.json)
+- 兩個日誌工具以原 GameServer 身分讀回合併場封存副本，核對 154 格世界與零筆戰鬥事件的尾界。管理端場次與世界紀錄保持相同。來源登記後若另有 UDP 或遊戲程序故障，仍保留已登記來源供主控收尾。 [日誌讀回](../artifacts/server-package-checks/run-489a7427d47f4fb88e18cc4210008a15/linked-relay-readback.json)
+- 273 項 Unity EditMode 通過。Windows 與 Quest 0.50.4／69 的來源指紋、場景與玩家網路識別相符。Quest ARM64 APK 為 61,039,738 bytes，SHA-256 `5f2ebbdbf8ae1bf28677991954876f1d8842a4b14e2ff01f3ac2eb3264893263`，v2 開發簽章已核對。Windows 玩家包為 84,773,997 bytes，SHA-256 `7f40e6cafb33de50da9056a96b094bf9159d7a87db8df8dcff20d4bcde942910`。中間提交帶入 Unity 暫時產生的預載清單，最終提交已恢復原本清單。跨機、頭盔及廠商硬體仍待驗收。 [Editor 結果](../artifacts/venue-source-batch-0504-build/EditMode.xml) · [發行核對](../artifacts/venue-release-0.50.4-source-batch.json)
+- Release 零警告，1,086 項核心、14 項 Chromium、804 項 HTTP、102 項世界串流、107 項管理包、38 項玩家包及 17 項 Python 套件檢查通過。HTTP 使用測試程序專用的四處理器設定。管理包建置來源 `2388e357`，184 個來源雜湊相符，兩個日誌工具及驗收程式使用 `4ceb31c4`。GitHub Actions job `130009944656` 因帳務或支出上限未啟動。 [HTTP 結果](../artifacts/venue-source-batch-0504-build/http-smoke.log) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42867582936)
+
 ## 2026-11-11 在遊戲來源登記時核對場次序號
 
 - 控制台 0.31.113 匯出第三版計畫。Windows 啟動器 1.14 將原序號傳給遊戲 0.50.3，管理服務在寫入來源的同一次操作內比對序號。遊戲確認原序號回條才啟動 UDP。舊 1.13 拒絕第三版計畫，使用第三版的 1.14 也在建立遊戲工作目錄前拒絕缺少此能力的舊管理包。新啟動器仍可讀取第二版並使用登記檢查，第一版手動計畫保留原流程。 [操作與版本](WINDOWS_SERVER_PACKAGE.md#依場館計畫批次啟動)

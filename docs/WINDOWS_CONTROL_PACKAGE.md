@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-11 `VRCommand-ControlServer-0.31.114-venue-source-batch-win-x64.zip` 為 52,989,867 bytes，SHA-256 `f529ae0a5ce5dcd8e404fce7a0c36b7b54ba7c256483e422227c154f10ce855c`。解壓核對 552 筆清單與 532 個發行檔案。管理服務在同一筆交易核對並登記整批遊戲來源。 [操作方式](WINDOWS_SERVER_PACKAGE.md#依場館計畫批次啟動)
+
 2026-11-11 `VRCommand-ControlServer-0.31.113-guarded-source-win-x64.zip` 為 52,985,085 bytes，SHA-256 `c713cb92051b7b9ff145e904e795dca8d6fd153d79294df0fc1b9d9dc376a513`。解壓核對 552 筆清單與 532 個發行檔案。搭配 1.14 啟動器，核對場次序號與寫入遊戲來源在同一次操作完成。 [操作方式](WINDOWS_SERVER_PACKAGE.md#依場館計畫批次啟動) · [發行核對](../artifacts/venue-release-0.50.3-guarded-source.json)
 
 2026-11-11 `VRCommand-ControlServer-0.31.112-venue-plan-win-x64.zip` 下載的第二版場館計畫包含場次序號與任務版本，搭配 Windows 啟動器 1.13。ZIP 為 52,984,487 bytes，SHA-256 `ae2bc7c2efb5c9eab6f7b0be69665abb83c2672ae96571677a259dcd7727b8b4`，解壓核對 552 筆清單與 532 個發行檔案。 [操作方式](WINDOWS_SERVER_PACKAGE.md#從主控台下載場館計畫) · [發行核對](../artifacts/venue-release-0.50.2-plan-revisions.json)
