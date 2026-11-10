@@ -481,6 +481,92 @@ def preflight_fixture(root, label, *, server, peer, port, exchange=None):
 
 
 class FieldResultsTests(unittest.TestCase):
+    def reconnect_window_fixture(self, root, mode, defect=None):
+        path, manifest, _ = venue_fixture(root, mode, with_journals=True)
+        manifest['verifyReconnectHistory'] = True
+        manifest['reconnectWindow'] = {'roomId': 5, 'seat': 2, 'firstUnavailableSequence': 20, 'recoveredSequence': 31}
+        for entry in manifest['sessions']:
+            session, _, endpoint = field.management_zip(root / entry['evidenceZip'])
+            members = [{'id': row['id'], 'roomId': row['roomId'], 'health': 100, 'connected': True, 'rig': {'kind': 'Simulated'}}
+                       for row in session['players']]
+            target = next((row for row in session['players'] if row['roomId'] == 5 and row['seat'] == 1), None)
+            for row, log in zip(session['players'], entry['players'], strict=True):
+                log_path = root / log['log']
+                original = log_path.read_text(encoding='utf-8')
+                startup = f"VR_NETWORK_STARTED role=Client started=True background=True port={endpoint['port']}\n"
+                if row is target and defect != 'no history':
+                    original = 'VR_CLIENT_CONNECTED id=99\nVR_CLIENT_DISCONNECTED\n' + original
+                    server_path = root / entry['serverLog']
+                    first, rest = server_path.read_text(encoding='utf-8').split('\n', 1)
+                    server_path.write_text(first + '\nVR_SERVER_ADMISSION_APPROVED id=99\n'
+                                           f"VR_SERVER_PEER id=99 endpoint={log['address']}:5123\n"
+                                           'VR_SERVER_CLIENT_LEFT id=99\n' + rest, encoding='utf-8')
+                log_path.write_text(startup + original, encoding='utf-8')
+
+            def edit(packet):
+                number = packet['sequence']
+                frame = packet['frame']
+                if target and 20 <= number < (32 if defect == 'no recovery' else 31):
+                    lost = next(row for row in frame['players'] if row['id'] == target['id'])
+                    lost.update(connected=False, rig={'kind': 'None'})
+                if number == 25 and 1 in session['roomIds'] and defect == 'peer drop':
+                    frame['players'][0].update(connected=False, rig={'kind': 'None'})
+                if target and number == 25 and defect == 'paused':
+                    frame['phase'] = 'Paused'
+                if target and number >= 25 and defect == 'capture gap':
+                    packet['elapsedMilliseconds'] += 700
+                if target and 20 <= number <= 31 and defect == 'stalled clock':
+                    packet['elapsedMilliseconds'] = 2000
+
+            launch = root / entry['launcherReport']
+            launcher = json.loads(launch.read_bytes())
+            capture = '2026-11-09T00:00:03+00:00' if defect == 'late other room' and not target else '2026-11-09T00:00:00+00:00'
+            world_journal(root / entry['worldJournal'], launcher['finalWorld'], capture_start=capture,
+                          players=lambda _, phase: deepcopy(members) if phase == 'Running' else [], edit_packet=edit)
+            launch.write_text(json.dumps(launcher), encoding='utf-8')
+        path.write_text(json.dumps(manifest), encoding='utf-8')
+        return path, manifest
+
+    def test_venue_reconnect_window_matches_original_pose_and_all_other_rooms(self):
+        for mode in ('Linked', 'Independent'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                path, _ = self.reconnect_window_fixture(Path(directory), mode)
+                report = field.verify_venue(path)
+                self.assertEqual({'roomId': 5, 'seat': 2, 'unaffectedSeats': 24, 'beforeSequence': 19,
+                                  'firstUnavailableSequence': 20, 'recoveredSequence': 31, 'unavailableFrames': 11,
+                                  'maxFrameGapMilliseconds': 500, 'observedUnavailableMilliseconds': 1100,
+                                  'beforeUtc': '2026-11-09T00:00:01.900000+00:00',
+                                  'firstUnavailableUtc': '2026-11-09T00:00:02+00:00', 'recoveredUtc': '2026-11-09T00:00:03.100000+00:00'},
+                                 report['reconnectWindow'])
+                self.assertEqual(1, report['reconnectHistory']['retiredConnections'])
+
+    def test_venue_reconnect_window_rejects_incomplete_or_misaligned_evidence(self):
+        for mode, defect, error in (
+            ('Linked', 'peer drop', 'does not isolate'), ('Independent', 'peer drop', 'Other rooms do not cover'),
+            ('Independent', 'late other room', 'Other rooms do not cover'), ('Linked', 'paused', 'leaves the original Running phase'),
+            ('Linked', 'no recovery', 'does not isolate'), ('Linked', 'capture gap', 'capture gap or stalled tick'),
+            ('Linked', 'stalled clock', 'capture clock does not advance'),
+            ('Linked', 'no history', 'has no verified retired connection'),
+        ):
+            with self.subTest(mode=mode, defect=defect), tempfile.TemporaryDirectory() as directory:
+                path, _ = self.reconnect_window_fixture(Path(directory), mode, defect)
+                with self.assertRaisesRegex(field.EvidenceError, error):
+                    field.verify_venue(path)
+
+    def test_venue_reconnect_window_requires_bounded_selection_and_opt_in(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path, manifest = self.reconnect_window_fixture(Path(directory), 'Linked')
+            for changes, error in (
+                ({'verifyReconnectHistory': False}, 'requires verified reconnect history'),
+                ({'reconnectWindow': dict(manifest['reconnectWindow'], recoveredSequence=21)}, 'Invalid numeric evidence'),
+                ({'reconnectWindow': dict(manifest['reconnectWindow'], recoveredSequence=1000)}, 'outside the original Running recording'),
+                ({'reconnectWindow': dict(manifest['reconnectWindow'], playerId=id_for(1))}, 'Select one original seat'),
+            ):
+                with self.subTest(changes=changes):
+                    path.write_text(json.dumps(dict(manifest, **changes)), encoding='utf-8')
+                    with self.assertRaisesRegex(field.EvidenceError, error):
+                        field.verify_venue(path)
+
     def concurrent_journals(self, root, manifest, offsets, edit_packet=None, *, tracked=False):
         for entry, offset in zip(manifest['sessions'], offsets, strict=True):
             session, _, _ = field.management_zip(root / entry['evidenceZip'])

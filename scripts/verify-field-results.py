@@ -380,7 +380,7 @@ def verify_combat_journal(path, session_id, stream_id, origin, final_sequence, a
     return {'sha256': digest.hexdigest(), 'events': final_sequence, 'players': len(projected)}
 
 
-def roster_periods(players, minimum_ms, applied_end, *, require_tracked=False, sealed_fires=None):
+def roster_periods(players, minimum_ms, applied_end, *, require_tracked=False, sealed_fires=None, require_living=False):
     expected = {pid: player['roomId'] for pid, player in players.items()}
     periods, fires, pending_fires = [], [], []
     start = previous = previous_tick = None
@@ -414,7 +414,9 @@ def roster_periods(players, minimum_ms, applied_end, *, require_tracked=False, s
         rows = frame['players']
         require(type(rows) is list and len(rows) <= 25, 'Invalid player rows in the concurrent roster evidence')
         connected = {row['id']: integer(row['roomId'], 1, 5) for row in rows
-                     if row['connected'] is True and (not require_tracked or row['rig']['kind'] == 'Tracked')}
+                     if row['connected'] is True and (not require_tracked or row['rig']['kind'] == 'Tracked')
+                     and (not require_living or (integer(row['health'], 0, 100) > 0
+                                                 and row['rig']['kind'] in ('Tracked', 'Simulated')))}
         tick = integer(frame['tick'])
         if len(rows) != len(expected) or connected != expected or not tick:
             previous = None
@@ -422,9 +424,9 @@ def roster_periods(players, minimum_ms, applied_end, *, require_tracked=False, s
             pending_fires.clear()
             return
         elapsed = integer(packet['elapsedMilliseconds'])
-        if sealed_fires is not None and tick == previous_tick:
-            # Combat can capture several packets in one tick. Wait for actual
-            # advancement before crediting any fire or extending the window.
+        if (sealed_fires is not None or require_living) and tick == previous_tick:
+            # Several packets may share a tick. Wait for actual advancement
+            # before crediting any fire or extending the window.
             if previous is not None and elapsed - previous <= MAX_CONCURRENT_FRAME_GAP_MS:
                 pending_fires.extend(pid for pid, event_tick in matched if event_tick == tick)
             else:
@@ -506,8 +508,86 @@ class VenueRosterOverlap:
                 **({'rigKind': 'Tracked'} if self.require_tracked else {})}
 
 
+class VenueReconnectWindow:
+    def __init__(self, selection):
+        require(type(selection) is dict and set(selection) == {'roomId', 'seat', 'firstUnavailableSequence', 'recoveredSequence'},
+                'Select one original seat and the unavailable and recovered world sequences')
+        self.room = integer(selection['roomId'], 1, 5)
+        self.seat = integer(selection['seat'], 1, 5)
+        self.first = integer(selection['firstUnavailableSequence'], 2)
+        self.recovered = integer(selection['recoveredSequence'], self.first + 2)
+        self.coverage = []
+        self.target_window = None
+
+    def watch(self, players, applied_end, final_sequence, *, tracked_only):
+        target = next((pid for pid, player in players.items()
+                       if (player['roomId'], player['seat'] + 1) == (self.room, self.seat)), None)
+        if target is None:
+            observe, periods, _ = roster_periods(players, 1, applied_end, require_tracked=tracked_only, require_living=True)
+
+            def finish(capture):
+                self.coverage.append([(capture + timedelta(milliseconds=first), capture + timedelta(milliseconds=last))
+                                      for first, last in periods])
+            return observe, finish
+
+        require(self.recovered < final_sequence, 'Reconnect window boundary is outside the original Running recording')
+        previous_tick = advancing_elapsed = first_tick = None
+        boundaries = {}
+        before = self.first - 1
+        rigs = ('Tracked',) if tracked_only else ('Tracked', 'Simulated')
+
+        def observe(packet):
+            nonlocal previous_tick, advancing_elapsed, first_tick
+            sequence = packet['sequence']
+            if not before <= sequence <= self.recovered:
+                return
+            frame = packet['frame']
+            require(frame['phase'] == 'Running' and packet['suspended'] is False and packet['observedSequence'] < applied_end,
+                    'Reconnect window leaves the original Running phase')
+            elapsed, tick = integer(packet['elapsedMilliseconds']), integer(frame['tick'], 1)
+            if previous_tick is not None:
+                require(tick >= previous_tick and elapsed - advancing_elapsed <= MAX_CONCURRENT_FRAME_GAP_MS,
+                        'Reconnect window has a capture gap or stalled tick')
+            if tick != previous_tick:
+                advancing_elapsed = elapsed
+            previous_tick = tick
+            if sequence in (before, self.first, self.recovered):
+                boundaries[sequence] = elapsed
+            if sequence == self.first:
+                first_tick = tick
+            if sequence == self.recovered:
+                require(first_tick is not None and tick > first_tick, 'Reconnect window does not advance beyond the unavailable pose')
+            rows = roster(frame['players'], 'id', len(players))
+            require(rows.keys() == players.keys() and all(integer(row['roomId'], 1, 5) == players[pid]['roomId']
+                    and integer(row['health'], 0, 100) > 0 for pid, row in rows.items()),
+                    'Reconnect window does not contain the original living room roster')
+            available = {pid for pid, row in rows.items() if row['connected'] is True and row['rig']['kind'] in rigs}
+            expected = players.keys() - ({target} if self.first <= sequence < self.recovered else set())
+            require(available == expected and (target in expected or rows[target]['connected'] is False),
+                    'Reconnect window does not isolate the selected seat or restore its pose')
+
+        def finish(capture):
+            require(boundaries.keys() == {before, self.first, self.recovered}, 'Missing reconnect window boundary frames')
+            require(boundaries[self.recovered] > boundaries[self.first], 'Reconnect window capture clock does not advance')
+            self.target_window = {sequence: capture + timedelta(milliseconds=elapsed) for sequence, elapsed in boundaries.items()}
+        return observe, finish
+
+    def summary(self, histories, players):
+        require(any((row['roomId'], row['seat']) == (self.room, self.seat) for row in histories),
+                'Selected reconnect seat has no verified retired connection')
+        require(self.target_window is not None, 'Selected reconnect seat is missing from the original recording')
+        before, first, recovered = (self.target_window[seq] for seq in (self.first - 1, self.first, self.recovered))
+        require(all(any(start <= before and recovered <= end for start, end in intervals) for intervals in self.coverage),
+                'Other rooms do not cover the reconnect window with continuous original poses')
+        return {'roomId': self.room, 'seat': self.seat, 'unaffectedSeats': players - 1,
+                'beforeSequence': self.first - 1, 'firstUnavailableSequence': self.first, 'recoveredSequence': self.recovered,
+                'unavailableFrames': self.recovered - self.first, 'maxFrameGapMilliseconds': MAX_CONCURRENT_FRAME_GAP_MS,
+                'observedUnavailableMilliseconds': (recovered - first) // timedelta(milliseconds=1),
+                'beforeUtc': before.isoformat(), 'firstUnavailableUtc': first.isoformat(), 'recoveredUtc': recovered.isoformat()}
+
+
 def verify_world_journal(path, world, combat_sequence, through, applied_end, *, player_sources=None, guarded_begin=None,
-                         players=None, concurrency=None, sealed_fires=None):
+                         players=None, concurrency=None, sealed_fires=None, reconnect_window=None):
     spec = importlib.util.spec_from_file_location('field_world_journal', Path(__file__).with_name('analyze-world-journal.py'))
     analyzer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(analyzer)
@@ -521,12 +601,17 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
     if concurrency is not None:
         observe_roster, periods, fires = roster_periods(players, concurrency.minimum_ms, applied_end,
                                                        require_tracked=concurrency.require_tracked, sealed_fires=sealed_fires)
+    if reconnect_window is not None:
+        observe_reconnect, finish_reconnect = reconnect_window.watch(players, applied_end, world['acceptedSequence'],
+            tracked_only=expected['calibration'] == 'quest-room-mr-v1')
 
     def observe_packet(packet):
         if begin is not None:
             check_begin_frame(packet)
         if concurrency is not None:
             observe_roster(packet)
+        if reconnect_window is not None:
+            observe_reconnect(packet)
 
     def check_begin_frame(packet):
         nonlocal begin_roster
@@ -565,7 +650,7 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
     try:
         journal = analyzer.analyze(path, accepted_sequence=begin['appliedAtSequence'] if begin is not None else None,
                                    expected_header=expected, on_running_frame=count_player_rigs if player_sources is not None else None,
-                                   on_packet=observe_packet if begin is not None or concurrency is not None else None)
+                                   on_packet=observe_packet if begin is not None or concurrency is not None or reconnect_window is not None else None)
     except EvidenceError:
         raise
     except (OSError, ValueError, TypeError, KeyError, AttributeError, ArithmeticError, RecursionError) as error:
@@ -587,6 +672,10 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
     if concurrency is not None:
         require(not sealed_fires, 'Original sealed combat fire is missing from the world journal')
         concurrency.add(journal['captureStartedAtUtc'], periods, fires)
+    if reconnect_window is not None:
+        capture = journal['captureStartedAtUtc']
+        require(capture is not None, 'Reconnect window requires an original UTC capture clock')
+        finish_reconnect(datetime.fromisoformat(capture).astimezone(timezone.utc))
     result = {'sha256': journal['sha256'], 'frames': sequence, 'runningFrames': journal['runningFrames']}
     if begin is not None:
         first = journal['firstApplied']
@@ -684,7 +773,7 @@ def verify(topology, server_ips, launcher, session, statistics, endpoint, server
 def verify_session(topology, server_ips, launcher, session, statistics, endpoint, server_log, size, player_logs, *,
                    require_remote=True, quest_player_logs=(), world_journal=None, combat_journal=None, applied_end=None, room_alignments=None,
                    udp_preflight=None, udp_source_preflights=None, verify_player_sources=False, quest_capture_logs=(),
-                   guarded_begin=None, concurrency=None, verify_reconnect_history=False):
+                   guarded_begin=None, concurrency=None, verify_reconnect_history=False, reconnect_window=None):
     integer(size, 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(not verify_player_sources or world_journal is not None, 'Player source verification requires the original closed world journal')
@@ -804,7 +893,8 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
                                             fired=sealed_fires) if combat_journal is not None else None
     journal = verify_world_journal(world_journal, world, combat_sequence, through, applied_end,
                                    player_sources=player_sources, guarded_begin=guarded_begin, players=players,
-                                   concurrency=concurrency, sealed_fires=sealed_fires) if world_journal is not None else None
+                                   concurrency=concurrency, sealed_fires=sealed_fires,
+                                   reconnect_window=reconnect_window) if world_journal is not None else None
     alignments = None
     if room_alignments is not None:
         require(journal is not None and quest_players == size, 'MR alignment evidence requires the closed world journal and all original Quest logs')
@@ -996,6 +1086,10 @@ def verify_venue(manifest_path):
     verify_player_sources = verify_player_sources or require_tracked
     verify_reconnect_history = manifest.get('verifyReconnectHistory', False)
     require(type(verify_reconnect_history) is bool, 'verifyReconnectHistory must be a boolean')
+    reconnect_window = None
+    if 'reconnectWindow' in manifest:
+        require(verify_reconnect_history and journals, 'reconnectWindow requires verified reconnect history and the original world journals')
+        reconnect_window = VenueReconnectWindow(manifest['reconnectWindow'])
     verify_tracking_begin = manifest.get('verifyTrackingBegin', False)
     verify_participation_begin = manifest.get('verifyParticipationBegin', False)
     require(type(verify_tracking_begin) is bool and type(verify_participation_begin) is bool
@@ -1146,7 +1240,7 @@ def verify_venue(manifest_path):
                                          udp_source_preflights=source_paths, verify_player_sources=verify_player_sources,
                                          quest_capture_logs=(quest_capture_log(*evidence) for evidence in captured),
                                          guarded_begin=guarded_begin, concurrency=concurrency,
-                                         verify_reconnect_history=verify_reconnect_history)
+                                         verify_reconnect_history=verify_reconnect_history, reconnect_window=reconnect_window)
         verified_pairs = ([report['udpPreflight']] if preflights else report['udpSourcePreflight']['pairs'] if source_preflights else [])
         for pair in verified_pairs:
             exchange = pair['exchangeSha256']
@@ -1188,6 +1282,8 @@ def verify_venue(manifest_path):
             **{key: sum(row[key] for row in histories) for key in ('observedConnections', 'retiredConnections')},
             'reconnectedSeats': sorted(chain.from_iterable(row['reconnectedSeats'] for row in histories),
                                        key=lambda row: (row['roomId'], row['seat']))}
+    if reconnect_window is not None:
+        reconnect_summary['reconnectWindow'] = reconnect_window.summary(reconnect_summary['reconnectHistory']['reconnectedSeats'], len(player_ids))
     return {'version': 1, 'consistent': True, 'declaredTopology': topology, 'mode': mode, 'players': len(player_ids),
             'rooms': [{'roomId': room, 'players': len(rooms[room]),
                        'playersOutsideDeclaredServer': sum(address in remote for address in rooms[room])} for room in all_rooms],

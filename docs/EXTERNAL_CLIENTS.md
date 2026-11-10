@@ -245,6 +245,24 @@ python scripts/verify-field-results.py --topology direct-lan `
 
 驗收會比對每條已連線記錄的伺服器核准及 UDP 來源，確認舊連線在下一條核准前已由伺服器釋放，最後一條才有原戰績確認。無法歸入任何玩家日誌的伺服器來源記錄會使驗收失敗。`reconnectHistory` 提供總連線數、已釋放的舊連線數與重連房號席位。入場識別以最後封存的原戰績核對，歷史來源記錄提供連線識別與順序。 [伺服器來源診斷](WINDOWS_SERVER_PACKAGE.md#跨機來源診斷)
 
+#### 核對重連席位的回放區間
+
+五房清單開啟 `verifyReconnectHistory` 並提供所有原始 `worldJournal` 後，可再填 `reconnectWindow`。從該席原場次的回放取第一格姿態無效與第一格恢復有效姿態的世界序號。房號與席位由 1 起算。
+
+```json
+{
+  "verifyReconnectHistory": true,
+  "reconnectWindow": {
+    "roomId": 5,
+    "seat": 2,
+    "firstUnavailableSequence": 297,
+    "recoveredSequence": 603
+  }
+}
+```
+
+工具核對中斷前一格至恢復格均在任務執行中，指定席位至少有兩格連續無有效姿態，恢復格有效，且其餘 24 席維持存活及有效姿態。獨立房間依各自原始 UTC 擷取時鐘對齊。回放有超過 500 毫秒的取樣缺口、停滯，或任何其他席位也中斷時，這段驗收會失敗。摘要列出房席、三個原始畫格、擷取時間與觀察到的無效期間。UDP 日誌另核對歷次連線順序，回放時間代表伺服器接受姿態的畫格時間。
+
 如要一併驗收原生回放檔，等啟動器回報 `sealed-stopped` 後，從其 `workDirectory` 下的 `telemetry` 保留 `<sessionId>.worldlog`。在單場命令加入 `--world-journal .\room-01.worldlog`。工具唯讀檢查每筆記錄的校驗碼與連續影格，核對場次、來源、房間、校正設定和最後封存。它確認原檔含活動中影格及兩種封存的尾界，再輸出檔案 SHA-256、總影格數及活動中影格數。活動中影格須為 `Running`、tick 大於零且未中止來源。原生回放檔逐筆讀取，可超過文字日誌的 16 MiB 上限。 [原生世界紀錄](WORLD_SOURCE.md)
 
 ### 從原始戰鬥日誌重算戰績
