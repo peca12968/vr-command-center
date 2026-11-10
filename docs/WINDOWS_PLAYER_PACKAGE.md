@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-10 `VRCommand-Player-0.49.1-launcher1.4.0-win-x64.zip` 為 84,763,776 bytes，SHA-256 `64e3e46861bd435b0f5b4b96e0bc6ee7b0620a81370b7e660ce096ddc5e31bd5`。解壓核對 330 個清單檔案及 22 項啟動器檢查。遊戲沿用 Windows 0.49.1，啟動器新增等待最終戰績及中斷提示。 [玩家狀態](PLAYER_CONNECTION_STATUS.md)
+
 2026-11-10 `windows-player-0.49.0-launcher-1.3.zip` 為 84,763,077 bytes，SHA-256 `20144d9ec2184923e4b4d165db3a857b9ed81af63377740722e054500426c707`。解壓核對 330 個清單檔案，23 項實際啟動器檢查通過，含缺少 OpenXR 執行環境時於入場前退出。 [Windows OpenXR 啟動](#windows-openxr-啟動)
 
 2026-11-09 `windows-player-0.48.1-launcher-1.2.zip` 為 83,445,374 bytes，SHA-256 `ba90488aa06ed3b7154f71600b58bb974968a92db99a962571967005afd95f8c`。解壓核對 328 個清單檔案，19 項 Windows 啟動器檢查通過。遊戲端 0.48.1 使用同源的 Windows 與 Quest 建置。 [版本相容性](EXTERNAL_CLIENTS.md#遊戲版本相容性)
