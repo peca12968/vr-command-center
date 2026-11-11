@@ -215,6 +215,8 @@ def main():
     p.add_argument('--hardware-simulator-package',type=Path,help='Pass native live feedback through this extracted mock gateway package')
     p.add_argument('--prepare-independent-set',action='store_true',help='Prepare the five independent native sessions in one management request')
     p.add_argument('--check-independent-room-missions',action='store_true',help='Assign a different saved VR mission to every independent room and verify the accepted native world')
+    p.add_argument('--check-independent-room-layouts-ui', action='store_true',
+                   help='Use the shipped five-room layout overview to review and prepare the distinct native room missions')
     p.add_argument('--mission-template',type=Path,help='Check and save an exported VR mission template, then run both native topologies with it')
     p.add_argument('--check-interrupted-replay', action='store_true', help='Play the saved native prefix after the owned launcher is killed')
     p.add_argument('--check-managed-mr', action='store_true', help='Verify the MR alignment startup gate, desktop rejection and Preparing seal')
@@ -377,6 +379,8 @@ def main():
         p.error('--check-layout-fine-opening requires --check-layout-preview')
     if args.check_independent_room_missions and (not args.prepare_independent_set or args.check_layout_preview or args.check_room_combat):
         p.error('--check-independent-room-missions requires --prepare-independent-set and its own mission fixtures')
+    if args.check_independent_room_layouts_ui and (not args.check_independent_room_missions or not shutil.which('node')):
+        p.error('--check-independent-room-layouts-ui requires --check-independent-room-missions and Chromium')
     if args.mission_template and (not args.prepare_independent_set or venue_only or args.openxr_mock_only
             or args.check_independent_room_missions or args.check_layout_preview or args.check_room_combat):
         p.error('--mission-template requires --prepare-independent-set and the ordinary two-topology check')
@@ -4184,8 +4188,22 @@ def main():
                     mission=imported_mission or save_mission('five independently prepared rooms',enemy_count=5 if args.check_room_combat else 1)
                     missions=[mission]*5
                     body={'missionId':mission['id']}
-                key=str(uuid.uuid4()); route='/api/sessions/independent-set'
-                prepared=request(route,body,expected=201,request_id=key)
+                route='/api/sessions/independent-set'
+                if args.check_independent_room_layouts_ui:
+                    output = out / 'native-independent-room-layouts.json'
+                    driver = ROOT / 'tests/browser/server-plan-browser.cjs'
+                    completed = subprocess.run([shutil.which('node'), str(driver)], cwd=driver.parent,
+                        input=json.dumps({'base': uri, 'token': keys['Master'], 'missions': missions, 'output': str(output)}),
+                        capture_output=True, encoding='utf-8', timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
+                    check(completed.returncode == 0 and output.is_file(), 'shipped browser reviews and submits all five original room layouts: '
+                          + completed.stderr.replace(keys['Master'], '[redacted]')[-600:])
+                    observed = read(output)
+                    check([{'roomId': row['roomId'], 'missionId': row['missionId']} for row in observed['previews']] == body['rooms'],
+                          'all five native preparation targets match the exact browser previews')
+                    key, prepared = observed['requestId'], observed['prepared']
+                else:
+                    key = str(uuid.uuid4())
+                    prepared = request(route, body, expected=201, request_id=key)
                 batch=prepared['sessions']
                 sessions.extend(state['id'] for state in batch)
                 retry=request(route,body,request_id=key)

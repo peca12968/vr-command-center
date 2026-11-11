@@ -92,6 +92,40 @@ function routePreview(report) {
   }
   return preview.seats;
 }
+
+function drawSpawns(layer, report, missing) {
+  const blocked = new Set(report?.issues.filter(issue => issue.code === 'SpawnBlocked').map(issue => issue.seat));
+  layer.replaceChildren(...(report?.applies ? report.spawns : []).map(spawn => {
+    const group = svg('g', { transform: `translate(${spawn.x} ${-spawn.z})`, 'data-seat': spawn.seat });
+    if (missing.includes(spawn.seat + 1)) group.dataset.routeMissing = 'true';
+    if (blocked.has(spawn.seat)) group.dataset.spawnBlocked = 'true';
+    const circle = svg('circle', { r: report.playerRadius });
+    const label = svg('text', { y: '.12' }); text(label, spawn.seat + 1);
+    group.append(circle, label); return group;
+  }));
+}
+
+function markInvalid(layer, report) {
+  const invalid = new Set(report.invalidProps);
+  for (const prop of layer.children) {
+    if (invalid.has(Number(prop.dataset.index))) prop.dataset.layoutInvalid = 'true';
+    else delete prop.dataset.layoutInvalid;
+  }
+}
+
+export function savedRoomLayoutMap(roomId, props, report) {
+  const map = svg('svg', { class: 'room-layout-map', viewBox: '-11 -11 22 22', role: 'img',
+    'aria-label': `房間 ${roomId} 的保存配置與出生位` });
+  const floor = svg('rect', { ...box(6, 6), class: 'room-layout-floor' });
+  const axes = svg('path', { d: 'M -6 0 H 6 M 0 -6 V 6', class: 'room-layout-axes' });
+  const spawns = svg('g', { class: 'room-layout-spawns' }), objects = svg('g', { class: 'room-layout-props' });
+  const missing = routePreview(report)?.filter(route => !route.path.length).map(route => route.seat + 1) ?? [];
+  drawSpawns(spawns, report, missing);
+  drawLayoutProps(objects, props);
+  markInvalid(objects, report);
+  map.append(floor, axes, spawns, objects);
+  return map;
+}
 export function mountLayout({ api, epoch, active, editable, draft, selection, changed, selectProp, selectedProp }) {
   let generation = 0, draftSerial = 0, launchSerial = 0, draftTimer, launchTimer;
   let draftKey = '', draftReport = null, launchKey = '', launchReport = null;
@@ -116,24 +150,6 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
     $(id).replaceChildren(...routes.map(route => svg('polyline', {
       points: route.path.map(point => `${point.x},${-point.z}`).join(' '), 'data-sample-step': route.sampleStep ?? .5
     })));
-  }
-  function drawSpawns(id, report, missing) {
-    const blocked = new Set(report?.issues.filter(issue => issue.code === 'SpawnBlocked').map(issue => issue.seat));
-    $(id).replaceChildren(...(report?.applies ? report.spawns : []).map(spawn => {
-      const group = svg('g', { transform: `translate(${spawn.x} ${-spawn.z})`, 'data-seat': spawn.seat });
-      if (missing.includes(spawn.seat + 1)) group.dataset.routeMissing = 'true';
-      if (blocked.has(spawn.seat)) group.dataset.spawnBlocked = 'true';
-      const circle = svg('circle', { r: report.playerRadius });
-      const label = svg('text', { y: '.12' }); text(label, spawn.seat + 1);
-      group.append(circle, label); return group;
-    }));
-  }
-  function markInvalid(id, report) {
-    const invalid = new Set(report.invalidProps);
-    for (const prop of $(id).children) {
-      if (invalid.has(Number(prop.dataset.index))) prop.dataset.layoutInvalid = 'true';
-      else delete prop.dataset.layoutInvalid;
-    }
   }
   function paintTrial() {
     const index = selectedProp();
@@ -194,8 +210,8 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
       drawLayoutProps($('launch-layout-props'), props);
       drawClearance('launch', report, props);
       drawRoutes('launch-layout-routes', (routes ?? []).filter(route => route.path.length));
-      drawSpawns('launch-layout-spawns', report, missing);
-      if (report) markInvalid('launch-layout-props', report);
+      drawSpawns($('launch-layout-spawns'), report, missing);
+      if (report) markInvalid($('launch-layout-props'), report);
     }
     if (!report) { text(summary, message); summary.dataset.status = 'unknown'; return; }
     summary.dataset.status = !report.applies ? 'not-applicable' : report.canStart ? 'valid' : 'invalid';
@@ -212,8 +228,8 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
     }
     if (report.truncated) { const item = document.createElement('li'); text(item, '僅列出前 128 個問題；圖中已標出所有涉及物件。'); list.append(item); }
     if (prefix === 'draft') {
-      markInvalid('prop-layer', report);
-      drawSpawns('layout-spawns', report, missing);
+      markInvalid($('prop-layer'), report);
+      drawSpawns($('layout-spawns'), report, missing);
     }
   }
   function reset() {

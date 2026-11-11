@@ -210,7 +210,13 @@
               </section>
               <button type="submit">建立準備場次</button>
             </fieldset>
-          </form><div class="layout-report"><p id="launch-layout-summary" class="hint" role="status" aria-live="polite">選取保存的任務版本後檢查場地。</p><ul id="launch-layout-issues"></ul><p id="launch-layout-route-summary" class="hint" hidden></p>
+          </form>
+          <details id="launch-room-layouts" class="layout-report" hidden>
+            <summary>同時查看五房平面圖</summary>
+            <p class="hint">上方是 +Z，右方是 +X。紅色標示配置問題，橘色標示未找到取樣通路的出生位。</p>
+            <div id="launch-room-layouts-grid"></div>
+          </details>
+          <div class="layout-report"><p id="launch-layout-summary" class="hint" role="status" aria-live="polite">選取保存的任務版本後檢查場地。</p><ul id="launch-layout-issues"></ul><p id="launch-layout-route-summary" class="hint" hidden></p>
             <details id="launch-layout-map-details" hidden>
               <summary>查看保存版本的場地平面圖</summary>
               <p id="launch-layout-legend" class="hint">顯示預覽版本的房間本地座標。上方是 +Z，右方是 +X。紅色為配置問題，橘色為未找到取樣通路的出生位。</p>
@@ -494,7 +500,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.133 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.134 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

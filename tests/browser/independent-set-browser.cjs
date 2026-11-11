@@ -115,31 +115,73 @@ module.exports = async function independentSetBrowser({ context, api, tokens, ba
     const alternateDraft = { ...draft, name: '房間各自的夜戰版本', durationSeconds: 420, environment: { ...draft.environment, mode: 'MR', weather: 'Storm', lightning: true },
       props: [{ assetId: 'barrel', position: { x: 2, y: 0, z: 1 }, yawDegrees: 45 }] };
     const alternate = await api('/missions', 'POST', alternateDraft, 'Master', 201);
+    const overlap = await api('/missions', 'POST', { ...draft, name: '重疊配置', props: [
+      { assetId: 'sandbag', position: { x: 0, y: 0, z: 2 }, yawDegrees: 0 },
+      { assetId: 'barrel', position: { x: 0, y: 0, z: 2 }, yawDegrees: 0 }
+    ] }, 'Master', 201);
     await page.locator('#refresh').click();
     await missionList.selectOption(head);
     await page.locator('#launch-room-missions-toggle').check();
     const roomMission = room => page.locator('#launch-room-mission-' + room);
     const roomLayout = room => page.locator('#launch-room-layout-' + room);
     const previewRoom = page.locator('#launch-review-room');
+    const overview = page.locator('#launch-room-layouts');
+    const card = room => overview.locator(`[data-room-layout-preview="${room}"]`);
     await enabled();
     check(await roomMission(1).inputValue() === head && await roomMission(5).inputValue() === head,
       'Enabling room assignments starts from the explicitly selected shared version');
+    await overview.locator('summary').click();
+    await card(5).locator('svg').waitFor();
+    check(await overview.locator('svg[viewBox="-11 -11 22 22"]').count() === 5
+      && await overview.locator('.room-layout-spawns [data-seat]').count() === 25
+      && await roomPage.locator('#launch-room-layouts').isHidden(),
+      'The Master can compare five saved rooms at the same scale with their authoritative spawn locations');
     await roomMission(4).selectOption(dense.id);
     await roomLayout(4).filter({ hasText: '場地配置未通過' }).waitFor();
     await previewRoom.selectOption('1'); await valid();
     check(await submit.isDisabled() && (await api('/sessions')).length === 0,
       'An invalid fourth room blocks creation even while another room’s map is valid');
+
+    let releaseLayout, finishLayout, layoutStarted = false;
+    const layoutGate = new Promise(resolve => { releaseLayout = resolve; });
+    const layoutDone = new Promise(resolve => { finishLayout = resolve; });
+    const layoutRoute = `**/api/missions/${overlap.id}/layout?mode=Independent`;
+    const holdLayout = async route => {
+      layoutStarted = true;
+      try { const response = await route.fetch(); await layoutGate; await route.fulfill({ response }); }
+      finally { finishLayout(); }
+    };
+    await page.route(layoutRoute, holdLayout);
+    try {
+      const request = page.waitForRequest(layoutRoute);
+      await roomMission(4).selectOption(overlap.id); await request;
+      check(await card(4).locator('svg').count() === 0 && await card(4).locator('[data-status=pending]').count() === 1
+        && await card(1).locator('svg').count() === 1,
+        'Changing one saved assignment immediately clears its old map while other maps remain visible');
+      await roomMission(4).selectOption(alternate.id); await card(4).locator('.room-layout-props [data-index="0"]').waitFor();
+    } finally { releaseLayout(); if (layoutStarted) await layoutDone; await page.unroute(layoutRoute, holdLayout); }
+    check(await card(4).getAttribute('data-mission-id') === alternate.id && await card(4).locator('[data-status=valid]').count() === 1,
+      'A held response from a replaced assignment cannot change the new room map');
+    await roomMission(4).selectOption(overlap.id);
+    await card(4).locator('[data-status=invalid]').waitFor();
+    check(await card(4).locator('[data-layout-invalid=true]').count() === 2 && await submit.isDisabled(),
+      'The overview marks both overlapping props from the exact saved report and retains the original launch gate');
     for (const room of [2, 4, 5]) await roomMission(room).selectOption(alternate.id);
     await enabled();
-    await page.locator('#launch-layout-map-details summary').click();
+    await card(5).getByRole('button').click();
     check(await page.locator('#launch-preview-rooms').innerText() === '房間 5'
       && await page.locator('#launch-preview-duration').innerText() === '420 秒'
       && (await page.locator('#launch-preview-environment').innerText()).includes('暴風雨')
-      && await page.locator('#launch-layout-props [data-index="0"]').getAttribute('transform') === 'translate(2 -1) rotate(45)',
+      && await page.locator('#launch-layout-map-details').evaluate(node => node.open)
+      && await page.locator('#launch-layout-props [data-index="0"]').getAttribute('transform') === 'translate(2 -1) rotate(45)'
+      && await card(2).locator('.room-layout-props [data-index="0"]').getAttribute('transform') === 'translate(2 -1) rotate(45)'
+      && await card(1).locator('.room-layout-props [data-index]').count() === 0,
       'Each room preview reflects its exact assigned duration, environment and saved geometry');
+    await overview.screenshot({ path: path.join(screenshots, 'independent-room-layouts.png') });
     await page.locator('#launch-room-missions').screenshot({ path: path.join(screenshots, 'independent-room-missions.png') });
     await page.setViewportSize({ width: 390, height: 844 });
-    check(await roomMission(5).isVisible() && await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
+    check(await roomMission(5).isVisible() && await card(5).locator('svg').isVisible()
+      && await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
       'All five assignment controls fit the mobile console without horizontal overflow');
     await page.setViewportSize({ width: 1440, height: 1080 });
     const alternateHead = await api(`/missions/${alternate.id}/revisions`, 'POST', { ...alternateDraft, durationSeconds: 450 }, 'Master', 201, undefined, randomUUID());
@@ -206,7 +248,8 @@ module.exports = async function independentSetBrowser({ context, api, tokens, ba
     check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'The receipt keeps its table scroll inside the mobile viewport');
     await receipt.screenshot({ path: path.join(screenshots, 'independent-mixed-receipt.png') });
     await page.locator('#logout').click();
-    check(await receipt.evaluate(node => node.hidden) && (await receiptRows()).length === 0, 'Logout clears the confirmed five-room receipt');
+    check(await receipt.evaluate(node => node.hidden) && (await receiptRows()).length === 0
+      && await overview.isHidden() && await overview.locator('svg').count() === 0, 'Logout clears the confirmed receipt and all five saved previews');
   } finally {
     await page.unroute(endpoint);
     for (const id of owned) if ((await api(`/sessions/${id}`)).state !== 'Ended') await end(id);

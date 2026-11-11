@@ -41,6 +41,21 @@
 .layout-route-warning{color:#ffcb83}
 #launch-room-missions-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:0 14px;align-items:start}
 #launch-room-missions-fields [data-status=invalid],#launch-room-missions-fields [data-status=error]{color:#ffb9a8}
+#launch-room-layouts summary{cursor:pointer}
+#launch-room-layouts-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,12rem),1fr));gap:12px}
+#launch-room-layouts-grid article{min-width:0;padding:10px;border:1px solid var(--line);border-radius:5px}
+#launch-room-layouts-grid h4{margin:0 0 6px}
+#launch-room-layouts-grid p{overflow-wrap:anywhere;margin-bottom:6px}
+#launch-room-layouts-grid button{margin-top:8px}
+.room-layout-map{display:block;width:100%;aspect-ratio:1;background:#101913;border:1px solid var(--line);border-radius:4px}
+.room-layout-floor{fill:#526d3b22;stroke:#a9bb78;stroke-width:.1}
+.room-layout-axes{fill:none;stroke:#758c77;stroke-width:.06}
+.room-layout-props text{fill:#f2f4da;font-size:.65px;text-anchor:middle}
+.room-layout-props [data-layout-invalid=true] [data-envelope]{stroke:#ff9f8b;stroke-width:.15}
+.room-layout-spawns circle{fill:#4e839433;stroke:#80c4d5;stroke-width:.1}
+.room-layout-spawns text{fill:#b2dfec;font-size:.5px;text-anchor:middle}
+.room-layout-spawns [data-route-missing] circle{fill:#ffbb6333;stroke:#ffbb63}
+.room-layout-spawns [data-spawn-blocked] circle{fill:#ff9f8b33;stroke:#ff9f8b}
 #launch-layout-map-details{margin:10px 0 14px}
 #launch-layout-map-details summary{cursor:pointer}
 #launch-layout-map{display:block;width:100%;max-width:440px;aspect-ratio:1;border:1px solid var(--line);border-radius:5px;background:#101913}

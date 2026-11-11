@@ -1,7 +1,10 @@
+import { savedRoomLayoutMap } from './layout-ui.js';
+
 const $ = id => document.getElementById(id);
 
 export function mountIndependentPlan({ available, catalog, pinned, common, inspect, invalidate, changed }) {
   const toggle = $('launch-room-missions-toggle'), panel = $('launch-room-missions'), preview = $('launch-review-room');
+  const overview = $('launch-room-layouts'), maps = $('launch-room-layouts-grid');
   let choices = new Map(), optionKey = '';
   const rows = Array.from({ length: 5 }, (_, index) => {
     const roomId = index + 1, label = document.createElement('label'), select = document.createElement('select');
@@ -12,7 +15,24 @@ export function mountIndependentPlan({ available, catalog, pinned, common, inspe
     select.setAttribute('aria-describedby', status.id);
     label.append(select, status); $('launch-room-missions-fields').append(label);
     preview.add(new Option('房間 ' + roomId, String(roomId)));
-    const row = { roomId, select, status, current: null };
+    const card = document.createElement('article'), title = document.createElement('h4');
+    const version = document.createElement('p'), mapStatus = document.createElement('p'), map = document.createElement('div');
+    const detail = document.createElement('button');
+    card.dataset.roomLayoutPreview = String(roomId);
+    title.textContent = '房間 ' + roomId;
+    mapStatus.className = 'hint';
+    detail.type = 'button'; detail.className = 'quiet small'; detail.textContent = '查看詳細檢查';
+    detail.setAttribute('aria-label', `查看房間 ${roomId} 的詳細場地檢查`);
+    card.append(title, version, mapStatus, map, detail); maps.append(card);
+    const row = { roomId, select, status, current: null, card, version, mapStatus, map, detail };
+    detail.addEventListener('click', () => {
+      if (!enabled() || !overview.open || !row.current?.report?.applies) return;
+      preview.value = String(roomId);
+      changed();
+      const fullMap = $('launch-layout-map-details');
+      fullMap.open = true;
+      fullMap.querySelector('summary').focus();
+    });
     select.addEventListener('change', () => {
       if (!enabled()) return;
       assign(row, choices.get(select.value));
@@ -23,12 +43,29 @@ export function mountIndependentPlan({ available, catalog, pinned, common, inspe
   });
   const enabled = () => available() && toggle.checked;
   const previewRow = () => rows[Number(preview.value) - 1];
+  function renderMaps() {
+    if (!overview.open || !enabled()) return;
+    for (const row of rows) {
+      const { revision, report, state = 'empty' } = row.current ?? {};
+      const id = revision?.mission.id ?? '';
+      row.version.textContent = row.select.selectedOptions[0]?.textContent ?? '';
+      row.mapStatus.textContent = row.status.textContent;
+      row.mapStatus.dataset.status = state;
+      row.card.dataset.missionId = id;
+      if (row.mapReport === report && row.mapMission === id) continue;
+      row.mapReport = report; row.mapMission = id;
+      row.detail.disabled = !report?.applies;
+      row.map.replaceChildren(...(report?.applies ? [savedRoomLayoutMap(row.roomId, revision.mission.definition.props, report)] : []));
+    }
+  }
   function render() {
     const visible = enabled();
     $('launch-room-missions-option').hidden = !available();
     $('launch-common-mission').hidden = visible;
     $('launch-mission').required = !visible;
     panel.hidden = !visible;
+    overview.hidden = !visible;
+    if (!visible) overview.open = false;
     if (!visible) return;
     const heads = catalog();
     choices = new Map([...heads, pinned(), ...rows.map(row => row.current?.revision)].filter(Boolean)
@@ -48,11 +85,13 @@ export function mountIndependentPlan({ available, catalog, pinned, common, inspe
       row.status.textContent = definition ? `${definition.environment.mode} · ${definition.durationSeconds} 秒 · ${layoutStatus}` : layoutStatus;
     }
     optionKey = key;
+    renderMaps();
   }
   function assign(row, revision) {
     if (!revision) { row.current = null; return; }
     const assignment = row.current = { revision, state: 'pending' };
     void inspect(revision).then(report => {
+      assignment.report = report;
       assignment.state = report.applies && report.canStart === true ? 'valid' : 'invalid';
     }, () => { assignment.state = 'error'; }).then(() => { if (row.current === assignment && enabled()) changed(); });
   }
@@ -68,6 +107,7 @@ export function mountIndependentPlan({ available, catalog, pinned, common, inspe
     changed();
   });
   preview.addEventListener('change', changed);
+  overview.addEventListener('toggle', renderMaps);
   return {
     render, enabled, setRevision,
     restore(revisions) {
@@ -96,7 +136,10 @@ export function mountIndependentPlan({ available, catalog, pinned, common, inspe
     },
     reset() {
       toggle.checked = false; preview.value = '1'; choices.clear(); optionKey = '';
-      for (const row of rows) { row.current = null; row.select.replaceChildren(); row.status.textContent = ''; }
+      for (const row of rows) {
+        row.current = null; row.select.replaceChildren(); row.status.textContent = '';
+        row.map.replaceChildren(); row.mapReport = row.mapMission = undefined;
+      }
       render();
     }
   };

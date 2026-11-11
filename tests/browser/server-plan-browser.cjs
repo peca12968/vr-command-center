@@ -136,20 +136,61 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
 
 module.exports = { checkServerPlan };
 
+async function prepareRoomLayouts(page, missions, output) {
+  await page.locator('#launch-mode').selectOption('IndependentSet');
+  await page.locator('#launch-room-missions-toggle').check();
+  for (const [index, mission] of missions.entries())
+    await page.locator(`#launch-room-mission-${index + 1}`).selectOption(mission.id);
+  const overview = page.locator('#launch-room-layouts');
+  await overview.locator('summary').click();
+  const previews = [];
+  for (const [index, mission] of missions.entries()) {
+    const roomId = index + 1, card = overview.locator(`[data-room-layout-preview="${roomId}"]`);
+    await card.locator('[data-status=valid]').waitFor();
+    const transforms = await card.locator('.room-layout-props [data-index]').evaluateAll(nodes => nodes.map(node => node.getAttribute('transform')));
+    assert.equal(await card.getAttribute('data-mission-id'), mission.id);
+    assert.equal(await card.locator('.room-layout-spawns [data-seat]').count(), 5);
+    assert.deepEqual(transforms, mission.definition.props.map(prop =>
+      `translate(${prop.position.x} ${-prop.position.z}) rotate(${prop.yawDegrees})`));
+    previews.push({ roomId, missionId: mission.id, transforms });
+  }
+  await overview.screenshot({ path: path.join(path.dirname(output), 'native-independent-room-layouts.png') });
+  const response = page.waitForResponse(reply => new URL(reply.url()).pathname === '/api/sessions/independent-set'
+    && reply.request().method() === 'POST');
+  const confirmation = page.waitForEvent('dialog').then(async dialog => {
+    const text = dialog.message();
+    await dialog.accept();
+    return text;
+  });
+  await page.locator('#create-session-form button[type=submit]').click();
+  const accepted = await response;
+  assert.equal(accepted.status(), 201);
+  const confirmationText = await confirmation;
+  assert(previews.every(({ roomId }, index) => confirmationText.includes(`房間 ${roomId}　${missions[index].definition.name}`)));
+  assert.deepEqual(accepted.request().postDataJSON(), { rooms: previews.map(({ roomId, missionId }) => ({ roomId, missionId })) });
+  const prepared = await accepted.json(), requestId = accepted.request().headers()['idempotency-key'];
+  assert.match(requestId, /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/);
+  await page.locator('#launch-independent-receipt-rows tr').last().waitFor();
+  await fs.writeFile(output, JSON.stringify({ previews, requestId, prepared }, null, 2), { flag: 'wx' });
+}
+
 if (require.main === module) {
   (async () => {
     const { chromium } = require('playwright');
     const input = [];
     for await (const chunk of process.stdin) input.push(chunk);
-    const { base, token, plan, output } = JSON.parse(Buffer.concat(input).toString('utf8'));
+    const { base, token, plan, missions, output } = JSON.parse(Buffer.concat(input).toString('utf8'));
     assert.match(base, /^http:\/\/127\.0\.0\.1:\d+$/);
     const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_SERVER_PLAN_CHROMIUM });
     try {
       const page = await browser.newPage({ acceptDownloads: true });
       await login(page, base, token);
-      await open(page);
-      await fill(page, plan);
-      await download(page, output, plan);
+      if (missions) await prepareRoomLayouts(page, missions, output);
+      else {
+        await open(page);
+        await fill(page, plan);
+        await download(page, output, plan);
+      }
     } finally { await browser.close(); }
   })().catch(error => { console.error(error); process.exitCode = 1; });
 }
