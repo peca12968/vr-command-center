@@ -15,6 +15,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.XR.Management;
 using UnityEngine.XR.OpenXR;
+using UnityEngine.XR.OpenXR.Features;
 using UnityEngine.XR.OpenXR.Features.CompositionLayers;
 using UnityEngine.XR.OpenXR.Features.Interactions;
 using UnityEngine.XR.OpenXR.Features.Meta;
@@ -99,8 +100,8 @@ namespace VrCommand.Unity.Editor
         {
             PlayerSettings.companyName = "VR Command";
             PlayerSettings.productName = "VR Command Quest";
-            PlayerSettings.bundleVersion = "0.50.5";
-            PlayerSettings.Android.bundleVersionCode = 70;
+            PlayerSettings.bundleVersion = "0.50.6";
+            PlayerSettings.Android.bundleVersionCode = 71;
             PlayerSettings.insecureHttpOption = InsecureHttpOption.DevelopmentOnly;
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, "com.vrcommand.quest");
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
@@ -284,12 +285,61 @@ namespace VrCommand.Unity.Editor
                 sourceFingerprint = SourceFingerprint(),
                 sceneNetworkId = GlobalObjectId.GetGlobalObjectIdSlow(GameObject.Find("Scene Authority").GetComponent<NetworkObject>()).ToString(),
                 playerPrefabId = GlobalObjectId.GetGlobalObjectIdSlow(GameObject.Find("Network Manager").GetComponent<NetworkManager>().NetworkConfig.PlayerPrefab.GetComponent<NetworkObject>()).ToString() };
-            var report = BuildPipeline.BuildPlayer(new BuildPlayerOptions { scenes = new[] { ScenePath }, locationPathName = path,
-                target = target, options = BuildOptions.Development });
+            var options = new BuildPlayerOptions { scenes = new[] { ScenePath }, locationPathName = path,
+                target = target, options = BuildOptions.Development };
+            var report = target == BuildTarget.StandaloneWindows64 ? BuildWindows(options) : BuildPipeline.BuildPlayer(options);
             if (report.summary.result != BuildResult.Succeeded) throw new BuildFailedException("VR Command player build failed.");
             receipt.completedAtUtc = DateTime.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
             receipt.totalBytes = (long)report.summary.totalSize;
             File.WriteAllText(Path.Combine(Path.GetDirectoryName(path), "build-receipt.json"), JsonUtility.ToJson(receipt, true));
+        }
+
+        private static BuildReport BuildWindows(BuildPlayerOptions options)
+        {
+            var settings = OpenXRSettings.GetSettingsForBuildTargetGroup(BuildTargetGroup.Standalone);
+            var original = settings.GetFeatures();
+            var metaAssembly = typeof(ARSessionFeature).Assembly;
+            // Meta OpenXR exposes some features in the Standalone editor settings, but
+            // its managed assembly is built only for Android and the Editor.
+            if (original.Any(feature => feature != null && feature.GetType().Assembly == metaAssembly && feature.enabled))
+                throw new BuildFailedException("A Windows OpenXR feature requires the Android-only Meta OpenXR assembly.");
+            var windowsFeatures = original.Where(feature => feature == null || feature.GetType().Assembly != metaAssembly).ToArray();
+            var settingsAsset = AssetDatabase.GetAssetPath(settings);
+            var settingsPath = Path.GetFullPath(Path.Combine(Application.dataPath, "..", settingsAsset));
+            var originalSettings = File.ReadAllBytes(settingsPath);
+            try
+            {
+                SetOpenXRFeatureReferences(settings, windowsFeatures);
+                var report = BuildPipeline.BuildPlayer(options);
+                if (report.summary.result == BuildResult.Succeeded)
+                {
+                    // XR Management emits a native probe even when managed startup is
+                    // disabled. Windows starts OpenXR explicitly after mode selection.
+                    var bootConfig = Path.Combine(Path.GetDirectoryName(options.locationPathName),
+                        Path.GetFileNameWithoutExtension(options.locationPathName) + "_Data", "boot.config");
+                    var entries = File.ReadAllLines(bootConfig);
+                    File.WriteAllLines(bootConfig, entries.Where(entry => entry != "xrsdk-pre-init-library=UnityOpenXR"));
+                }
+                return report;
+            }
+            finally
+            {
+                // The player build can invalidate the excluded feature object handles.
+                // Restore the exact asset, including its Quest and editor references.
+                File.WriteAllBytes(settingsPath, originalSettings);
+                AssetDatabase.ImportAsset(settingsAsset, ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
+            }
+        }
+
+        private static void SetOpenXRFeatureReferences(OpenXRSettings settings, OpenXRFeature[] references)
+        {
+            using var serialized = new SerializedObject(settings);
+            var features = serialized.FindProperty("features");
+            features.arraySize = references.Length;
+            for (var i = 0; i < references.Length; i++)
+                features.GetArrayElementAtIndex(i).objectReferenceValue = references[i];
+            serialized.ApplyModifiedPropertiesWithoutUndo();
+            AssetDatabase.SaveAssetIfDirty(settings);
         }
 
         [Serializable] private sealed class PlayerBuildReceipt

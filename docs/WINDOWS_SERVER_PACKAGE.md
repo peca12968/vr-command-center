@@ -1,5 +1,7 @@
 # Windows 遊戲伺服器包
 
+2026-11-11 `VRCommand-GameServer-0.50.6-1.20-win-x64.zip` 為 84,981,819 bytes，SHA-256 `b6ce6d22ba811a9f6743d33f2720a14c90ddc909ad1dc8ca64b4fe3b442d7c73`，解壓核對 331 筆清單。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.6-1.20-win-x64.zip) · [發行核對](../artifacts/venue-release-0.50.6-xr-startup.json)
+
 2026-11-11 `VRCommand-GameServer-0.50.5-1.20-win-x64.zip` 為 84,815,253 bytes，SHA-256 `872b8bd494d13497897b001020b093b8902e3e029763cff3c2532946caf29683`。解壓核對 330 筆清單。五房批次支援 Alt+V、Enter 與 Alt+S。 [批次鍵盤操作](#從-windows-視窗核對並啟動)
 
 2026-11-11 `VRCommand-GameServer-0.50.5-1.19-win-x64.zip` 為 84,815,122 bytes，SHA-256 `8f92eca496b21c6b4977e689e9487d95727134b7ff1608df48d921694fe487d2`。解壓核對 330 筆清單。支援 Alt+R 選房、Alt+P 設定 UDP 埠及 Alt+S 啟動。 [操作方式](SERVER_CATALOG.md)

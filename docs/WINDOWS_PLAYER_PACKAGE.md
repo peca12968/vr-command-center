@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-11 `VRCommand-Player-0.50.6-win-x64.zip` 為 84,940,657 bytes，SHA-256 `f8a3805101d189661f796f58f3f2613ab5acef5c712f05ae04588fb8b7c83e75`，解壓核對 331 筆清單。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.6-win-x64.zip) · [驗收](PROGRESS.md#2026-11-11-windows-桌面與-openxr-啟動)
+
 2026-11-11 `VRCommand-Player-0.50.5-weapon-gate-win-x64.zip` 為 84,774,121 bytes，SHA-256 `d314681ee0da6a6d4fbfe73b6bb31906f903ee7e42506e7ec8bc3ba5670a7879`，解壓核對 330 筆清單。桌面玩家淘汰後不再提交射擊及換彈請求。 [實際鍵盤驗證](DESKTOP_WEAPON_INPUT.md)
 
 2026-11-10 `VRCommand-Player-0.50.2-win-x64.zip` 為 84,772,574 bytes，SHA-256 `16bbd61c6ffa5f3e24dfd78bc83fedbeba35b8976cf14b66d011b2acd789b67a`。解壓核對 330 筆清單，並與 0.50.2 伺服器及 Quest 開發 APK 核對同源。 [發行核對](../artifacts/venue-release-0.50.2-debrief.json)
@@ -92,6 +94,8 @@ Windows 玩家包 0.49.0 的圖形玩家端可以選用 OpenXR。先讓相容的
 ```
 
 啟動器使用 Direct3D 11。OpenXR 顯示和輸入子系統開始運作後，遊戲才送出入場請求。OpenXR 無法啟動時，玩家程序退出碼為 2。可加上 `--log` 和 `--status-report` 指定包外兩個新檔，檢查 `OpenXRUnavailable`。平常雙擊啟動器仍使用桌面模式。
+
+自 0.50.6 起，Windows 建置會在明確選用 OpenXR 後才探測執行環境，並只封裝 Windows 可載入的 OpenXR 功能。Quest 建置仍在啟動時初始化 OpenXR。Unity 的原生預載也能在建立圖形裝置前提供顯示卡選擇資訊，使用不同顯示卡的 Windows 頭盔與螢幕組合須在實機驗收。 [Unity XR SDK 預載介面](https://docs.unity.cn/6000.2/Documentation/Manual/xrsdk-pre-init-interface.html)
 
 Windows 建置啟用 Touch 與 Unity 的 HTC Vive Controller 兩個 OpenXR 互動設定。Touch 沿用右扳機射擊、A 換彈、B 重讀票券，左手 X／Y 翻頁及關閉簡報。HTC Vive Controller 使用右扳機射擊、右握把換彈、右 Menu 重讀票券，左觸控板按下翻頁、左 Menu 關閉、左握把查看字型授權。實際控制器由 Windows OpenXR 執行環境回報，VIVE XR 的確切型號及相符設定仍待頭盔到場驗收。MR 透視與房間對位沿用 Quest 3 Android 路徑。 [Unity XR 手動啟動](https://docs.unity3d.com/Packages/com.unity.xr.management@4.6/manual/EndUser.html#load-xr-plug-ins) · [HTC Vive 控制器設定](https://docs.unity3d.com/Packages/com.unity.xr.openxr@1.19/manual/features/htcvivecontrollerprofile.html)
 

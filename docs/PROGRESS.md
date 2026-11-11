@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 Windows 桌面與 OpenXR 啟動
+
+- Windows 0.50.6 在明確選用 OpenXR 時才探測執行環境。Windows 建置排除只供 Android 使用的 Meta OpenXR 管理元件引用，建置後還原原設定檔。0.50.5 的對照只移除原生預載設定，頭盔外形錯誤消失，12 筆序列化錯誤仍在。第一個 0.50.6 執行檔的兩種錯誤均消失，但 Unity 把暫時移除的引用寫成空值，封裝拒絕了該候選。最終建置逐位元組還原原設定，通過來源和封裝核對。 [原對照](../artifacts/desktop-xr-startup-0506/0505-boot-ab/evidence.json) · [最終核對](../artifacts/desktop-xr-startup-0506/validation.json)
+- 解壓後的 Windows 玩家端顯示房間 HUD，畫面沒有啟動診斷遮罩。實際鍵盤輸入經伺服器接受，兩份原戰績、送達確認及雙封存相符。4 項檢查通過，C／F 14 檔逐一相符。 [桌面操作](../artifacts/desktop-debrief/20261111-094907-aff2be9e/summary.json)
+- 解壓後的伺服器及玩家包通過 82 項 OpenXR 模擬及啟動器檢查。OpenXR 在傳輸與入場前就緒，追蹤中斷、恢復和重新按下扳機在 111 格原回放中相符。C／F 42 檔逐一相符。玩家包另外通過 39 項檢查，執行環境缺失時回報 `OpenXRUnavailable` 並以代碼 2 退出。 [OpenXR 模擬](../artifacts/server-package-checks/run-351e0d5593984310bdb937bfc5b7b367/evidence.json) · [缺失執行環境](../artifacts/player-package-checks/20261111-095152-40f1e3b0/openxr-status.json)
+- Unity 273 項 EditMode 檢查通過。Windows 玩家與伺服器共用的 324 個執行檔案相符，Quest 0.50.6／71 APK 保有原生 OpenXR 預載。兩平台的來源指紋與場景、預製物件網路識別相符。Quest 3、VIVE XR、雙顯示卡組合、跨機真人及廠商硬體仍待現場驗收。 [發行核對](../artifacts/venue-release-0.50.6-xr-startup.json)
+
 ## 2026-11-11 五房批次啟動鍵盤流程
 
 - Windows 啟動器 1.20 支援 Alt+V 開啟五房批次視窗、在計畫路徑欄按 Enter 核對，以及 Alt+S 啟動。整輪結束或計畫重核失敗後，視窗會清除舊清單。 [操作方式](WINDOWS_SERVER_PACKAGE.md#從-windows-視窗核對並啟動)
