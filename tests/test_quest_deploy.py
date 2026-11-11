@@ -1139,7 +1139,7 @@ else:
                 server.shutdown()
                 thread.join()
         self.assertEqual(4, sum('requireLiveSource' not in proof for _, _, proof in calls))
-        self.assertEqual(28, sum(proof.get('requireLiveSource') is True for _, _, proof in calls))
+        self.assertEqual(56, sum(proof.get('requireLiveSource') is True for _, _, proof in calls))
         for route, key, proof in calls:
             self.assertEqual(('/api/vr-deployment/venue-check', 'Bearer private-fixture-master'), (route, key))
             for room in proof['rooms']:
@@ -1267,8 +1267,8 @@ else:
         report = json.loads(result.stdout)
         self.assertEqual((True, True, True, 2, 23), (report['complete'], report['managementVerified'],
                          report['alignmentPinsVerified'], report['mappedSeats'], report['unmappedSeats']))
-        self.assertEqual(['/api/mr-deployment/venue-check', f'/api/sessions/{session}/connection-endpoint',
-                          '/api/mr-deployment/venue-check', '/api/mr-deployment/venue-check'], deploy_calls)
+        self.assertEqual(['/api/mr-deployment/venue-check', f'/api/sessions/{session}/connection-endpoint']
+                         + ['/api/mr-deployment/venue-check'] * 4, deploy_calls)
         self.assertEqual({'fixture-03','fixture-22'}, {path.name for path in self.root.glob('fixture-*')})
         for row in selected:
             room, seat = row['roomId'], row['seat']
@@ -1331,6 +1331,10 @@ else:
         for reason in ('source-stale', 'missing-receipt'):
             with self.subTest(reason=reason):
                 self.assert_mapped_deployment_stops(reason, 'venue-check-failed', 'verify-live-venue', partial=True)
+
+    def test_mapped_deployment_checks_the_original_source_after_staging(self):
+        self.assert_mapped_deployment_stops('source-stale-after-staging', 'venue-check-failed',
+                                            'verify-live-venue-before-stop', partial=True)
 
     def test_release_report_requires_verified_quest_identity_before_adb(self):
         files, _ = self.bundle('Linked')
@@ -1542,11 +1546,13 @@ else:
                 if body.get('requireLiveSource') is True:
                     write_checks.append(body)
                     receipt['liveSourceVerified'] = True
-                    if len(write_checks) == 4 and fault == 'source-stale':
+                    commands = (fleet / 'adb.log').read_text(encoding='utf-8').splitlines()
+                    staged = any(line.startswith('-s fixture-04 shell sha256sum ') and '/vr-connection-' in line for line in commands)
+                    if (len(write_checks) == 7 and fault == 'source-stale') or (staged and fault == 'source-stale-after-staging'):
                         receipt.update(allMatched=False, liveSourceVerified=False)
                         for row in receipt['seats'][-5:]:
                             row['status'] = 'source-stale'
-                    if len(write_checks) == 4 and fault == 'missing-receipt':
+                    if len(write_checks) == 7 and fault == 'missing-receipt':
                         del receipt['liveSourceVerified']
                 self.respond(receipt)
 
@@ -1581,7 +1587,9 @@ else:
                          [row['status'] for row in report['devices']])
         self.assertEqual([True] * 3 + [None] * (count - 3), [row.get('filesVerified') for row in report['devices']])
         self.assertEqual([None] * 3 + [failed_step] + [None] * (count - 4), [row.get('failedStep') for row in report['devices']])
-        expected_write_checks = 3 if fault in ('identity-changed', 'apk-changed') else 4
+        expected_write_checks = 6 if fault in ('identity-changed', 'apk-changed') else 7
+        if fault in ('force-stop', 'config-move', 'config-active-changed', 'launch', 'source-stale-after-staging'):
+            expected_write_checks += 1
         self.assertEqual(['/api/mr-deployment/venue-check', f'/api/sessions/{session}/connection-endpoint']
                          + ['/api/mr-deployment/venue-check'] * expected_write_checks, calls)
         self.assertEqual(expected_write_checks, len(write_checks))
@@ -1612,6 +1620,10 @@ else:
             self.assertFalse(any(line.startswith('-s fixture-04 shell mkdir ') for line in commands))
         self.assertEqual(fault in ('force-stop', 'config-move', 'config-active-changed', 'launch'),
                          any(line.startswith('-s fixture-04 shell am force-stop ') for line in commands))
+        if fault == 'source-stale-after-staging':
+            self.assertTrue(any(line.startswith('-s fixture-04 shell sha256sum ') and '/vr-connection-' in line for line in commands))
+            self.assertTrue(any(line.startswith('-s fixture-04 shell rm -f ') and '/vr-connection-' in line for line in commands))
+            self.assertFalse(any(line.startswith('-s fixture-04 shell mv ') and line.endswith('/vr-connection.json') for line in commands))
         if fault == 'identity-changed':
             self.assertEqual(['-s fixture-04 shell pm list packages -e --show-versioncode --user current com.vrcommand.quest',
                               '-s fixture-04 shell getprop ro.serialno',
@@ -1706,6 +1718,12 @@ else:
                 thread.join(timeout=5)
 
     def test_single_online_seat_rechecks_the_source_after_apk_install(self):
+        self.assert_single_online_seat_rechecks_source(after_staging=False)
+
+    def test_single_online_seat_rechecks_the_source_after_staging(self):
+        self.assert_single_online_seat_rechecks_source(after_staging=True)
+
+    def assert_single_online_seat_rechecks_source(self, *, after_staging):
         files, _ = self.bundle('Linked')
         scripts = self.root / 'scripts'
         scripts.mkdir()
@@ -1716,7 +1734,10 @@ else:
         apk = self.root / 'artifacts/quest/VrCommand.apk'
         apk.parent.mkdir(parents=True)
         apk.write_bytes(b'mock APK')
-        (self.root / 'remote').mkdir()
+        remote = self.root / 'remote'
+        remote.mkdir()
+        if after_staging:
+            (remote / 'vr-connection.json').write_bytes(b'previous connection')
         log = self.root / 'adb.log'
         reads = []
 
@@ -1730,9 +1751,11 @@ else:
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                 strict = body.get('requireLiveSource') is True
-                installed = log.is_file() and ' install ' in log.read_text(encoding='utf-8')
-                reads.append((strict, installed))
-                live = not installed
+                commands = log.read_text(encoding='utf-8').splitlines() if log.is_file() else []
+                installed = any(' install ' in line for line in commands)
+                staged = any(' shell sha256sum ' in line and '/vr-connection-' in line for line in commands)
+                reads.append((strict, installed, staged))
+                live = not (staged if after_staging else installed)
                 receipt = {'topology': 'Linked', 'allMatched': live, 'seats': [
                     {'roomId': room, 'seat': seat, 'status': 'matched' if live else 'source-stale'}
                     for room in range(1, 6) for seat in range(5)]}
@@ -1758,9 +1781,18 @@ else:
                 server.shutdown()
                 thread.join(timeout=5)
         self.assert_rejected(result, 'source-stale')
-        self.assertEqual([(False, False), (True, False), (True, True)], reads)
-        self.assertEqual(2, len(log.read_text(encoding='utf-8').splitlines()))
-        self.assertFalse(list((self.root / 'remote').iterdir()))
+        expected = [(False, False, False), (True, False, False), (True, True, False)]
+        commands = log.read_text(encoding='utf-8').splitlines()
+        if after_staging:
+            expected.append((True, True, True))
+            self.assertTrue(any(' shell rm -f ' in line and '/vr-connection-' in line for line in commands))
+            self.assertFalse(any(' force-stop ' in line or ' monkey ' in line for line in commands))
+            self.assertFalse(list(remote.glob('*.tmp')))
+            self.assertEqual(b'previous connection', (remote / 'vr-connection.json').read_bytes())
+        else:
+            self.assertEqual(2, len(commands))
+            self.assertFalse(list(remote.iterdir()))
+        self.assertEqual(expected, reads)
 
     def test_both_topologies_check_all_twenty_five_seats_without_printing_tickets(self):
         for topology, endpoint_count in (('Linked',1), ('Independent',5)):

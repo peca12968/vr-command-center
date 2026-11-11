@@ -332,7 +332,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\quest-mr-venue.z
     -RoomId 4 -Seat 2 -Serial YOUR_ADB_SERIAL -ManagementApi http://127.0.0.1:5081
 ```
 
-任一席位過期、場次或校正檔不符時，整份 ZIP 預檢失敗，應從主控下載當前部署包。線上操作使用 `-ManagementApi` 與 `VR_COMMAND_MASTER_KEY`。管理包 0.31.104 支援單席線上部署在 APK 安裝前及安裝後各核對一次原遊戲來源。安裝後核對失敗時會停在連線檔寫入前。
+任一席位過期、場次或校正檔不符時，整份 ZIP 預檢失敗，應從主控下載當前部署包。線上操作使用 `-ManagementApi` 與 `VR_COMMAND_MASTER_KEY`。管理包 0.31.104 支援單席線上部署在 APK 安裝前及安裝後各核對一次原遊戲來源。安裝後核對失敗時會停在連線檔寫入前。單席線上部署也會在停止遊戲前重新核對已驗證暫存檔所對應的原場次。
 
 #### 用裝置清單部署 25 席
 
@@ -391,10 +391,13 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 
 單席與整批部署都會先傳送並核對 MR 原校正檔，再驗證暫存的玩家連線檔。兩項核對通過且票券仍有效時，才停止遊戲並啟用新的連線檔。啟用後再次核對最終路徑的 SHA-256，通過才送出啟動指令。批次沿用裝置上已安裝的 APK，因此傳輸或暫存核對失敗時，原遊戲程序及原連線檔可以保留。單席流程另含 APK 安裝階段。
 
+線上部署會在暫存連線檔通過 SHA-256 核對後，再向管理服務核對原五房來源、端點及入場。核對失敗時會嘗試移除該席暫存連線檔。部署工具會保留正式連線檔，並略過該席的停止及啟動指令。整批回報 `venue-check-failed`，已完成席位保留，後續席位維持 `not-attempted`。來源恢復後可依原報告重試。 [重試操作](#從原部署報告重試未完成席位)
+
 | `failedStep` | 操作員可確認的部署進度 |
 | --- | --- |
 | `verify-live-venue` | 服務未確認原來源、端點及名冊。該席尚未開始寫入。 |
 | `prepare-device`、`stage-alignment`、`stage-connection` | 尚未送出停止指令或切換連線檔。工具會嘗試清理傳輸中的暫存檔。 |
+| `verify-live-venue-before-stop` | 暫存檔已驗證，但最新線上核對失敗。正式連線檔仍為原檔，尚未送出停止或啟動指令。 |
 | `check-expiry-before-staging`、`check-expiry-before-stop` | 票券已過期，尚未送出停止指令或切換連線檔。請下載目前部署包。 |
 | `stop-game` | 停止指令失敗，尚未切換連線檔。請確認遊戲程序狀態。 |
 | `activate-connection`、`verify-active-connection` | 停止指令已成功。新連線檔可能已切換，但尚未完成最終驗證。 |

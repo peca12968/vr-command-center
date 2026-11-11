@@ -938,7 +938,7 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, [str
         $deployment = @{}
         try {
             Set-QuestConnection $row.serial $connection.Ticket.Config $connection.Ticket $connection.Alignment `
-                -RequestMixedReality:($null -ne $connection.Alignment) -Deployment $deployment
+                -RequestMixedReality:($null -ne $connection.Alignment) -Deployment $deployment -LiveVenue $Venue
             $device.filesVerified = $true
             $device.status = 'launch-requested'
             if ($ExpectedHash) {
@@ -948,7 +948,9 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, [str
                 $device.port = $connection.Ticket.Config.port
             }
         } catch {
-            $device.status = if ($_.Exception -is [IO.InvalidDataException]) { 'file-verification-failed' } else { 'deployment-failed' }
+            $device.status = if ($deployment.Step -ceq 'verify-live-venue-before-stop') { 'venue-check-failed' }
+                elseif ($_.Exception -is [IO.InvalidDataException]) { 'file-verification-failed' }
+                else { 'deployment-failed' }
             $device.failedStep = $deployment.Step
             return $report
         }
@@ -1051,7 +1053,7 @@ function Update-QuestPlayerTicket($Fresh, $Ticket) {
 }
 
 function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment, [switch]$UsePassthrough, [switch]$RequestMixedReality,
-    [hashtable]$Deployment = @{}) {
+    [hashtable]$Deployment = @{}, $LiveVenue) {
     $Deployment.Step = 'prepare-device'
     $remoteDirectory = '/sdcard/Android/data/com.vrcommand.quest/files'
     & $AdbPath -s $TargetSerial shell mkdir -p $remoteDirectory | Out-Null
@@ -1080,6 +1082,14 @@ function Set-QuestConnection([string]$TargetSerial, $Config, $Ticket, $Alignment
         # The active config is the commit point. Its referenced alignment is already verified by hash.
         Publish-QuestFile $TargetSerial $stagedConfig "$remoteDirectory/vr-connection-$deploymentId.tmp" `
             "$remoteDirectory/vr-connection.json" 'Player connection file' -ConnectionDeployment $Deployment -BeforeActivation {
+                if ($LiveVenue) {
+                    $Deployment.Step = 'verify-live-venue-before-stop'
+                    Confirm-VenueReadback $LiveVenue -RequireLiveSource
+                    $seatKey = "$($Ticket.RoomId)/$($Ticket.Seat + 1)"
+                    if ($LiveVenue.Report.mode -cin @('VR','Mixed') -and $LiveVenue.SeatHeadsets[$seatKey] -cne 'Quest3') {
+                        throw 'The selected seat is not assigned to a Quest 3 player.'
+                    }
+                }
                 $Deployment.Step = 'check-expiry-before-stop'
                 if ($Ticket.ExpiresAtUtc -le [DateTimeOffset]::UtcNow) { throw 'Player ticket expired before activation. Download a fresh connection file.' }
                 $Deployment.Step = 'stop-game'
@@ -1247,7 +1257,8 @@ try {
     & $AdbPath -s $Serial install -r $apk
     if ($LASTEXITCODE -ne 0) { throw 'APK installation failed.' }
     if ($ManagementApi) { Confirm-VenueReadback $venue -RequireLiveSource }
-    Set-QuestConnection $Serial $config $ticket $alignment -UsePassthrough:$Passthrough -RequestMixedReality:$isMixedReality
+    Set-QuestConnection $Serial $config $ticket $alignment -UsePassthrough:$Passthrough -RequestMixedReality:$isMixedReality `
+        -LiveVenue $(if ($ManagementApi) { $venue })
 } finally {
     $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose()
 }

@@ -3895,6 +3895,70 @@ def main():
               'The same native publisher recovers and an explicit retry deploys only the two remaining mock devices')
         save('mr-venue-write-gate.json', {'interrupted': interrupted, 'retried': retried, 'heldSequence': held_world['acceptedSequence'],
             'resumedSequence': resumed['acceptedSequence'], 'staleSeats': len(held_receipt['seats'])})
+
+        staging = destination/'staging-boundary'
+        staging.mkdir()
+        staging_map = staging/'device-map.json'
+        staging_map.write_text(json.dumps({'version': 1, 'seats': selected}), encoding='utf-8')
+        stage_command = [str(staging_map) if option == str(mapping) else option for option in mapped]
+        second_device = staging/selected[1]['serial']
+        second_device.mkdir()
+        active_config = second_device/'vr-connection.json'
+        original = b'Original mock active connection\n'
+        active_config.write_bytes(original)
+        stage_env = {**fixture_env, 'VR_QUEST_FLEET_FIXTURE': str(staging)}
+        staged_env = {**stage_env, 'VR_QUEST_FLEET_HOLD_AFTER_STAGE': selected[1]['serial']}
+        with subprocess.Popen(stage_command, env=staged_env, cwd=staging, text=True, encoding='utf-8',
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE) as cli:
+            try:
+                def staged_connection():
+                    if cli.poll() is not None: raise RuntimeError('Mapped Quest CLI exited before the staged hash check')
+                    return (staging/'connection-staged.request').is_file()
+                wait(staged_connection, 25, 'the second Quest mock stages and hashes the original connection file')
+                staged_file, = second_device.glob('vr-connection-*.tmp')
+                staged_hash = hashlib.sha256(staged_file.read_bytes()).hexdigest()
+                assert staged_hash == (staging/'connection-staged.request').read_text(encoding='utf-8')
+                with hold_owned_unity_threads(entry['witness'], entry['ready']['childPid']):
+                    wait(lambda: all(row.get('ticketSourceLive') is False for row in request('/api/rooms/readiness')['rooms']),
+                         12, 'original MR source goes stale after the staged file was hashed')
+                    stale_world = request(session_route + '/world')
+                    stale = request(route, strict)
+                    assert stale['liveSourceVerified'] is False and {row['status'] for row in stale['seats']} == {'source-stale'}
+                    (staging/'continue.request').touch(exist_ok=False)
+                    stdout, _ = cli.communicate(timeout=15)
+                    blocked = json.loads(stdout)
+                    commands = (staging/'adb.log').read_text(encoding='utf-8').splitlines()
+                    affected = [line for line in commands if line.startswith('-s '+selected[1]['serial']+' ')]
+                    check(cli.returncode == 1 and not blocked['complete'] and blocked['managementVerified']
+                          and [row['status'] for row in blocked['devices']] == ['launch-requested', 'venue-check-failed', 'not-attempted']
+                          and blocked['devices'][1]['failedStep'] == 'verify-live-venue-before-stop'
+                          and active_config.read_bytes() == original and not staged_file.exists()
+                          and any(' shell rm -f ' in line and staged_file.name in line for line in affected)
+                          and not any(' shell am force-stop ' in line or ' shell monkey ' in line
+                                      or (' shell mv ' in line and line.endswith('/vr-connection.json')) for line in affected)
+                          and not (staging/selected[2]['serial']).exists(),
+                          'After staging, a stale original MR source discards the second mock temporary file without stopping its app')
+            finally:
+                if cli.poll() is None: cli.kill(); cli.communicate(timeout=10)
+        previous = staging/'interrupted.json'
+        previous.write_bytes(stdout.encode('utf-8'))
+        first_connection = staging/selected[0]['serial']/'vr-connection.json'
+        first_bytes = first_connection.read_bytes()
+        wait(lambda: request(route, strict)['liveSourceVerified'], 18, 'the original MR publisher recovers after staging interruption')
+        recovered_world = request(session_route + '/world')
+        resumed_cli = subprocess.run([*stage_command, '-RetryIncomplete', str(previous)], env=stage_env, cwd=staging,
+                                     encoding='utf-8', capture_output=True, timeout=45)
+        resumed = json.loads(resumed_cli.stdout)
+        new_commands = (staging/'adb.log').read_text(encoding='utf-8').splitlines()[len(commands):]
+        check(resumed_cli.returncode == 0 and resumed['complete'] and all(row['status'] == 'launch-requested' for row in resumed['devices'])
+              and resumed['previousDeploymentSha256'] == hashlib.sha256(previous.read_bytes()).hexdigest()
+              and recovered_world['header'] == stale_world['header'] and recovered_world['acceptedSequence'] > stale_world['acceptedSequence']
+              and first_connection.read_bytes() == first_bytes and active_config.read_bytes() != original
+              and {line.split()[1] for line in new_commands if line.startswith('-s ')} == {row['serial'] for row in selected[1:]},
+              'The same MR publisher recovers and the original report retries only the blocked and unattempted mock devices')
+        save('mr-venue-activation-gate.json', {'blocked': blocked, 'retried': resumed, 'stagedSha256': staged_hash,
+            'originalActiveSha256': hashlib.sha256(original).hexdigest(), 'heldSequence': stale_world['acceptedSequence'],
+            'resumedSequence': recovered_world['acceptedSequence'], 'staleSeats': len(stale['seats'])})
     def check_mixed_venue_bundle():
         stage('native-mixed-venue-bundle')
         markers = [{'room': {'x': x, 'z': z}, 'tracking': {'x': x, 'z': z}} for x, z in [(-2, -2), (2, -2), (-2, 2)]]

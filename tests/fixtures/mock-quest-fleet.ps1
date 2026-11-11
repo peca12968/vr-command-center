@@ -89,6 +89,14 @@ switch -CaseSensitive ($args[3]) {
         }
         $file = Join-Path $device ($args[4].Split('/')[-1])
         $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($serial -ceq $env:VR_QUEST_FLEET_HOLD_AFTER_STAGE -and $path -cmatch '/vr-connection-[0-9a-f]+\.tmp$') {
+            [IO.File]::WriteAllText((Join-Path $root 'connection-staged.request'), $hash)
+            $deadline = [DateTimeOffset]::UtcNow.AddSeconds(25)
+            while (-not [IO.File]::Exists((Join-Path $root 'continue.request'))) {
+                if ([DateTimeOffset]::UtcNow -ge $deadline) { exit 96 }
+                Start-Sleep -Milliseconds 50
+            }
+        }
         "$hash  $($args[4])"
         exit 0
     }
