@@ -102,32 +102,61 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
     await command(independent[4].id, 'SetEnvironment', { environment: { ...independent[4].environment, weather: 'Rain' } });
     await page.locator(issue).click();
     await page.locator(status).filter({ hasText: '場次狀態已變更' }).waitFor();
-    check(await page.locator('#venue-server-form').isHidden() && !unexpected.length,
-      'A configuration revision on the same Preparing session cancels the stale export');
+    check(await page.locator('#venue-server-form').isHidden() && !unexpected.length
+      && (await page.locator(status).textContent()).includes('房間 5'),
+      'A configuration revision identifies the changed room and cancels the stale export');
 
     await page.locator('#venue-server-read').click();
     await page.locator('#venue-server-form').waitFor();
-    await fill(page, independentPlan);
+    const revisedIndependent = shape('Independent', await Promise.all(independent.map(session => api(state(session.id)))));
+    check((await page.locator(ports).evaluateAll(inputs => inputs.map(input => Number(input.value))))
+      .every((port, index) => port === revisedIndependent.servers[index].port),
+      'Rereading after a stale export restores the five explicit room ports');
+    await download(page, path.join(screenshots, 'revised-independent-venue-server-plan.json'), revisedIndependent);
+    check(unexpected.length === 1, 'The revised plan uses the new revision and the original explicit ports');
     await api(state(independent[4].id) + '/combat-stream', 'POST', { streamId: randomUUID(), origin: 'Simulation' }, 'GameServer');
     await page.locator(issue).click();
     await page.locator(status).filter({ hasText: '場次狀態已變更' }).waitFor();
-    check(await page.locator('#venue-server-form').isHidden() && !unexpected.length,
+    check(await page.locator('#venue-server-form').isHidden() && unexpected.length === 1,
       'A source attached between preview and download cancels the stale export');
+    await page.locator('#venue-server-read').click();
+    await page.locator('#venue-server-rooms li').nth(4).filter({ hasText: '已附掛遊戲來源' }).waitFor();
+    check(await page.locator('#venue-server-form').isHidden(), 'An unavailable preview cannot download a saved port draft');
     for (const session of independent) await end(session.id);
 
     const linked = await create(vr, 'Linked', [1, 2, 3, 4, 5]);
     await page.locator('#venue-server-read').click();
     await page.locator('#venue-server-form').waitFor();
     const linkedPlan = shape('Linked', [linked]);
+    check(await page.locator(ports).first().inputValue() === '7777', 'Linked and Independent use separate port drafts');
+    linkedPlan.servers[0].port = 19341;
     await fill(page, linkedPlan);
+    await page.locator(ports).first().fill('');
+    await page.locator('#venue-server-read').click();
+    await page.locator('#venue-server-form').waitFor();
+    check(await page.locator(ports).first().inputValue() === '' && await page.locator(issue).isDisabled(),
+      'Rereading an explicitly cleared port does not silently substitute the default');
+    await page.locator(ports).first().fill(String(linkedPlan.servers[0].port));
     await download(page, path.join(screenshots, 'linked-venue-server-plan.json'), linkedPlan);
-    check(await page.locator(ports).count() === 1 && unexpected.length === 1,
+    check(await page.locator(ports).count() === 1 && unexpected.length === 2,
       'A Linked venue downloads one port and one exact session revision for all five original rooms');
+    await end(linked.id);
+    const replacement = [];
+    for (const room of [1, 2, 3, 4, 5]) replacement.push(await create(vr, 'Independent', [room]));
+    await page.locator('#venue-server-read').click();
+    await page.locator('#venue-server-form').waitFor();
+    check((await page.locator(ports).evaluateAll(inputs => inputs.map(input => input.value))).join(',') === '18800,18801,18802,18803,18804',
+      'Returning to Independent restores its original room ports, even after an unavailable preview');
+    await download(page, path.join(screenshots, 'replacement-venue-server-plan.json'), shape('Independent', replacement));
     await page.locator('#tab-missions').click();
     await page.locator('#tab-operations').click();
     await page.locator(panel + ' summary').click();
     check(await page.locator('#venue-server-instance').inputValue() === '' && await page.locator('#venue-server-form').isHidden(),
       'Leaving operations discards the local path and the selected plan');
+    await page.locator('#venue-server-read').click();
+    await page.locator('#venue-server-form').waitFor();
+    check((await page.locator(ports).evaluateAll(inputs => inputs.map(input => input.value))).join(',') === '7777,7778,7779,7780,7781',
+      'Leaving operations clears the port drafts together with the plan');
   } finally {
     await page.close();
     for (const id of active) await end(id);
@@ -189,6 +218,8 @@ if (require.main === module) {
       else {
         await open(page);
         await fill(page, plan);
+        await page.locator('#venue-server-read').click();
+        await page.locator('#venue-server-form').waitFor();
         await download(page, output, plan);
       }
     } finally { await browser.close(); }

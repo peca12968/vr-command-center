@@ -47,6 +47,7 @@ export function mountVenueServerPlan(getState, api, download) {
   const $ = name => document.getElementById('venue-server-' + name);
   const panel = document.getElementById('venue-server-plan'), form = $('form'), fields = $('fields');
   const instance = $('instance'), address = $('address'), bind = $('bind'), ports = $('ports');
+  const portDrafts = new Map();
   let active = false, generation = 0, pending = false, preview = null;
 
   function plan() {
@@ -77,6 +78,7 @@ export function mountVenueServerPlan(getState, api, download) {
   }
 
   function resetPreview() {
+    if (preview?.ready) portDrafts.set(preview.topology, [...ports.querySelectorAll('input')].map(input => input.value));
     preview = null;
     $('rooms').replaceChildren();
     ports.replaceChildren();
@@ -91,11 +93,12 @@ export function mountVenueServerPlan(getState, api, download) {
       return li;
     }));
     const targets = value.topology === 'Linked' ? ['合併場次'] : value.rooms.map(room => `房間 ${room.roomId}`);
+    const savedPorts = portDrafts.get(value.topology);
     ports.replaceChildren(...(value.ready ? targets.map((name, index) => {
       const label = document.createElement('label'), input = document.createElement('input');
       label.textContent = `${name} UDP 埠`;
       input.type = 'number'; input.min = '1024'; input.max = '65535'; input.required = true;
-      input.value = String(7777 + index);
+      input.value = savedPorts?.[index] ?? String(7777 + index);
       label.append(input);
       return label;
     }) : []));
@@ -132,14 +135,17 @@ export function mountVenueServerPlan(getState, api, download) {
     event.preventDefault();
     const value = plan();
     if ($('download').disabled || !value) return;
-    const expected = JSON.stringify(preview);
+    const expected = preview;
     const request = begin('正在重新核對原場次…');
     try {
       const current = parsePreview(await api('/venue/server-plan'));
       if (!request.current()) return;
-      if (JSON.stringify(current) !== expected) {
+      if (JSON.stringify(current) !== JSON.stringify(expected)) {
+        const changed = current.rooms.filter((room, index) => JSON.stringify(room) !== JSON.stringify(expected.rooms[index]))
+          .map(room => room.roomId);
         resetPreview();
-        $('status').textContent = '場次狀態已變更，請重新讀取五房場次。';
+        const scope = changed.length ? `（房間 ${changed.join('、')}）` : '';
+        $('status').textContent = `場次狀態已變更${scope}，請重新讀取五房場次。已保留本頁輸入的 UDP 埠。`;
         return;
       }
       download('vr-command-venue-server-plan.json', new Blob([JSON.stringify(value, null, 2) + '\n'], { type: 'application/json' }));
@@ -156,7 +162,7 @@ export function mountVenueServerPlan(getState, api, download) {
     active = on;
     if (!on) {
       generation++; pending = false;
-      resetPreview(); form.reset(); panel.open = false;
+      resetPreview(); portDrafts.clear(); form.reset(); panel.open = false;
       $('status').textContent = '';
     }
     update();
