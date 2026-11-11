@@ -138,6 +138,10 @@ export function mountIndependentPlan({ available, catalog, pinned, common, inspe
       toggle.checked = false; preview.value = '1'; choices.clear(); optionKey = '';
       for (const row of rows) {
         row.current = null; row.select.replaceChildren(); row.status.textContent = '';
+        row.version.textContent = ''; row.mapStatus.textContent = '';
+        delete row.card.dataset.missionId;
+        delete row.mapStatus.dataset.status;
+        row.detail.disabled = true;
         row.map.replaceChildren(); row.mapReport = row.mapMission = undefined;
       }
       render();

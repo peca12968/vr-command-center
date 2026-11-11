@@ -249,7 +249,9 @@ module.exports = async function independentSetBrowser({ context, api, tokens, ba
     await receipt.screenshot({ path: path.join(screenshots, 'independent-mixed-receipt.png') });
     await page.locator('#logout').click();
     check(await receipt.evaluate(node => node.hidden) && (await receiptRows()).length === 0
-      && await overview.isHidden() && await overview.locator('svg').count() === 0, 'Logout clears the confirmed receipt and all five saved previews');
+      && await overview.isHidden() && await overview.locator('svg, [data-mission-id], [data-status]').count() === 0
+      && (await overview.locator('[data-room-layout-preview] p').allTextContents()).every(value => value === ''),
+    'Logout clears the confirmed receipt and all five saved previews, including labels and version identifiers');
   } finally {
     await page.unroute(endpoint);
     for (const id of owned) if ((await api(`/sessions/${id}`)).state !== 'Ended') await end(id);
