@@ -7,6 +7,7 @@
 - 60 秒雙模式排演 `20261111-082444-5ceed344` 退出碼 0，37 項通過。每席三批目標、六發命中、三次擊殺及三次換彈，六場共 300 次命中、150 次擊殺、75 次敵軍命中與 1,500 點損耗。50 份原戰績及確認、6 份 CSV、4,449 格完整回放相符；原政策時間線各 7 格，第 1 獨立房含暫停／恢復為 9 格。原生與管理程序已退出，C／F 174 檔相符，獨立五房原日誌重查通過。 [原排演](../artifacts/desktop-exercise/20261111-082444-5ceed344/exercise-result.json) · [核對](../artifacts/incoming-endurance-smoke-validation.json) · [原日誌重查](../artifacts/incoming-endurance-smoke-readback.json)
 - 本輪沿用 Windows／Quest 0.50.5 與管理包 0.31.126，未重建遊戲或 APK。驗證為同機 Windows 程式產生的輸入，原生畫面／音效、跨機真人、頭盔及廠商硬體仍依完整十一項目標驗收。
 - 功能來源 `15539c87` 已推送 GitHub。14 份檢查工具／測試輸入已在長場前凍結，11 份與 Git 逐位元組相符、3 份只差換行，原 API DLL 雜湊保持。900 秒雙模式長場 `20261111-082953-583de9b9` 已啟動，原程序仍在執行；尚未通過，不提前複製執行資料。GitHub Actions `42931733893` 的 job `130231897425` 因帳務或支出上限未啟動，步驟為空，仍為失敗。 [來源核對](../artifacts/incoming-endurance-source-validation.json) · [長場日誌](../artifacts/incoming-endurance-long.log) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42931733893)
+- 原長場的合併子階段已完成 900 秒、45 批目標、每席 90 發與 45 次換彈，後續受控回擊為各席一次中彈。25 份原戰績及伺服器確認、2,250 發命中、1,125 次擊殺、500 點損耗與 8,652 格完整回放相符，其中 8,623 格為 Running。138 個來源檢查點及 7 個政策變更格相符，14 份檢查工具／測試輸入雜湊保持。原程序已進入獨立五房 900 秒階段；整輪尚未通過，未複製執行資料，待其結束及原日誌重查後再核定。 [合併子階段紀錄](../artifacts/incoming-endurance-linked-stage.json)
 
 ## 2026-11-11 桌面玩家淘汰後的武器請求
 
