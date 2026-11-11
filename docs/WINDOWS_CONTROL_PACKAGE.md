@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-11 `VRCommand-ControlServer-0.31.144-projected-events-win-x64.zip` 為 53,081,518 bytes，SHA-256 `a975d44a03fc4d9c58a3bf3e12ab839795fe36ab36cc9af3fa368d2e419fa8b5`。本房回放的事件搜尋和跳轉採用與本房畫格相同的篩選。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.144-projected-events-win-x64.zip) · [操作說明](WORLD_RECORDING.md#依房間與種類搜尋戰鬥事件)
+
 2026-11-11 `VRCommand-ControlServer-0.31.143-closure-replay-win-x64.zip` 為 53,079,206 bytes，SHA-256 `ea716f1db724a506ca9ded16e887bae36a653e2614124d035c23f9da49dfe5d9`。支援從單一場次收尾直接播放原錄製或已保存片段。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.143-closure-replay-win-x64.zip) · [操作說明](WORLD_RECORDING.md#從單一場次的任務收尾回放)
 
 2026-11-11 `VRCommand-ControlServer-0.31.142-session-reprepare-win-x64.zip` 為 53,078,580 bytes，SHA-256 `7d5b4ba76c5aee2b6271a7d4eafb52d02c376a57393c5800541086d289bdedb2`。支援從單一已結束場次選用原任務版本。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.142-session-reprepare-win-x64.zip) · [操作說明](MISSION_VERSIONS.md#從單一已結束場次選用原任務)
