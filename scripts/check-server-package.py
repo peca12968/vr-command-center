@@ -4334,12 +4334,19 @@ def main():
                 if args.check_independent_room_layouts_ui:
                     output = out / 'native-independent-room-layouts.json'
                     driver = ROOT / 'tests/browser/server-plan-browser.cjs'
+                    invalid = save_mission('overlapping independent room layout', props=[
+                        {'assetId': asset, 'position': {'x': 0, 'y': 0, 'z': 2}, 'yawDegrees': 0}
+                        for asset in ('sandbag', 'barrel')])
                     completed = subprocess.run([shutil.which('node'), str(driver)], cwd=driver.parent,
-                        input=json.dumps({'base': uri, 'token': keys['Master'], 'missions': missions, 'output': str(output)}),
+                        input=json.dumps({'base': uri, 'token': keys['Master'], 'missions': missions,
+                                          'invalidMission': invalid['id'], 'output': str(output)}),
                         capture_output=True, encoding='utf-8', timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
                     check(completed.returncode == 0 and output.is_file(), 'shipped browser reviews and submits all five original room layouts: '
                           + completed.stderr.replace(keys['Master'], '[redacted]')[-600:])
                     observed = read(output)
+                    check(observed['rejection'] == {'roomId': 4, 'invalidProps': [0, 1],
+                          'marked': [{'roomId': room, 'indices': [0, 1]} for room in (4, 5)]},
+                          'the exact creation rejection marks the two shared invalid props before the browser submits corrected assignments')
                     check([{'roomId': row['roomId'], 'missionId': row['missionId']} for row in observed['previews']] == body['rooms'],
                           'all five native preparation targets match the exact browser previews')
                     key, prepared = observed['requestId'], observed['prepared']

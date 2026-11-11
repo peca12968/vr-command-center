@@ -119,6 +119,7 @@ module.exports = async function independentSetBrowser({ context, api, tokens, ba
       { assetId: 'sandbag', position: { x: 0, y: 0, z: 2 }, yawDegrees: 0 },
       { assetId: 'barrel', position: { x: 0, y: 0, z: 2 }, yawDegrees: 0 }
     ] }, 'Master', 201);
+    const rejectedLayout = await api('/missions', 'POST', { ...overlap.definition, name: '開場送件時的場地拒絕' }, 'Master', 201);
     await page.locator('#refresh').click();
     await missionList.selectOption(head);
     await page.locator('#launch-room-missions-toggle').check();
@@ -166,6 +167,37 @@ module.exports = async function independentSetBrowser({ context, api, tokens, ba
     await card(4).locator('[data-status=invalid]').waitFor();
     check(await card(4).locator('[data-layout-invalid=true]').count() === 2 && await submit.isDisabled(),
       'The overview marks both overlapping props from the exact saved report and retains the original launch gate');
+    const rejectedLayoutRoute = `**/api/missions/${rejectedLayout.id}/layout?mode=Independent`;
+    const simulateStalePreview = async route => {
+      const actual = await route.fetch();
+      const layout = await actual.json();
+      assert.equal(layout.canStart, false);
+      await route.fulfill({ response: actual, json: { ...layout, canStart: true, issues: [], invalidProps: [] } });
+    };
+    await page.route(rejectedLayoutRoute, simulateStalePreview);
+    try {
+      await roomMission(4).selectOption(rejectedLayout.id);
+      await roomMission(5).selectOption(rejectedLayout.id);
+      await enabled();
+    } finally { await page.unroute(rejectedLayoutRoute, simulateStalePreview); }
+    const rejectedResponse = page.waitForResponse(response => response.url().endsWith('/api/sessions/independent-set')
+      && response.request().method() === 'POST' && response.status() >= 400);
+    await confirmPlan(true);
+    const rejected = await (await rejectedResponse).json();
+    assert.equal(rejected.roomId, 4);
+    assert.deepEqual(rejected.layout.invalidProps, [0, 1]);
+    await notice.filter({ hasText: '房間 4 的場地未通過檢查' }).waitFor();
+    check(await previewRoom.inputValue() === '4' && await card(4).locator('[data-status=invalid]').count() === 1
+      && await card(5).locator('[data-status=invalid]').count() === 1 && await submit.isDisabled()
+      && (await api('/sessions')).length === 0, 'The actual creation rejection identifies room four and leaves the entire venue free');
+    check(await card(4).locator('[data-layout-invalid=true]').count() === 2
+      && await card(5).locator('[data-layout-invalid=true]').count() === 2 && await card(1).locator('svg').count() === 1,
+      'The authoritative rejection marks both offending props in every room using the rejected version');
+    await card(5).getByRole('button').click();
+    check(await previewRoom.inputValue() === '5' && await page.locator('#launch-layout-summary[data-status=invalid]').count() === 1
+      && await page.locator('#launch-layout-props [data-layout-invalid=true]').count() === 2,
+      'Each affected room can open the same authoritative detailed rejection');
+    await overview.screenshot({ path: path.join(screenshots, 'independent-room-layout-rejection.png') });
     for (const room of [2, 4, 5]) await roomMission(room).selectOption(alternate.id);
     await enabled();
     await card(5).getByRole('button').click();

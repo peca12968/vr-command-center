@@ -1195,7 +1195,7 @@ async function sendPending() {
     if (error.code === 'room-enemy-policy-changed' && roomEnemyDraft) roomEnemyDraft.conflicted = true;
     if (pending.kind === 'create' && error.layout) placement.rejected(pending.body.missionId, pending.body.mode, error.layout);
     if (pending.kind === 'create-set' && error.layout) {
-      const id = pending.body.rooms ? roomPlan.reject(error.roomId) : pending.body.missionId;
+      const id = pending.body.rooms ? roomPlan.reject(error.roomId, error.layout) : pending.body.missionId;
       if (id) placement.rejected(id, 'Independent', error.layout);
     }
     if (state.pending === pending && !pending.accepted && error.status >= 400 && error.status < 500) {

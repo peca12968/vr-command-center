@@ -1,4 +1,4 @@
-import { savedRoomLayoutMap } from './layout-ui.js';
+import { savedRoomLayoutMap, validateLayoutReport } from './layout-ui.js';
 
 const $ = id => document.getElementById(id);
 
@@ -120,12 +120,16 @@ export function mountIndependentPlan({ available, catalog, pinned, common, inspe
     preview: () => ({ roomId: previewRow().roomId, revision: previewRow().current?.revision }),
     ready: () => rows.every(row => row.current?.state === 'valid'),
     revisions: () => rows.map(row => row.current?.revision),
-    reject(roomId) {
+    reject(roomId, layout) {
       const row = roomId ? rows[roomId - 1] : previewRow();
       if (!enabled() || !row?.current) return;
-      const id = row.current.revision.mission.id;
+      const { mission } = row.current.revision;
+      let report;
+      try { report = validateLayoutReport(layout, 'Independent', mission.definition.environment.mode); }
+      catch { /* Keep launch blocked if the rejection report cannot be drawn. */ }
+      const id = mission.id;
       for (const assigned of rows) if (assigned.current?.revision.mission.id === id)
-        assigned.current = { revision: assigned.current.revision, state: 'invalid' };
+        assigned.current = { revision: assigned.current.revision, report, state: 'invalid' };
       preview.value = String(row.roomId);
       return id;
     },

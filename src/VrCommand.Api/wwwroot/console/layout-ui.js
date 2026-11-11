@@ -61,7 +61,7 @@ function drawClearance(prefix, report, props) {
         class: 'layout-clearance-prop', 'data-clearance-index': index })];
     }));
 }
-function accept(report, mode, experienceMode) {
+export function validateLayoutReport(report, mode, experienceMode) {
   const profile = experienceMode === 'MR' ? 'mr-room-v1' : 'vr-room-v1';
   if (report?.version !== 1 || !['vr-room-v1', 'mr-room-v1'].includes(report.profile) || report.rulesVersion !== '0.8.0' || report.mode !== mode
     || (experienceMode && report.profile !== profile) || report.roomHalfSize !== 6 || report.playerRadius !== .3
@@ -137,7 +137,7 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
     if (savedRequests.has(key)) return savedRequests.get(key);
     const request = api(`/missions/${selected.id}/layout?mode=${encodeURIComponent(selected.mode)}`)
       .then(value => {
-        const report = accept(value, selected.mode, selected.experienceMode);
+        const report = validateLayoutReport(value, selected.mode, selected.experienceMode);
         if (savedRequests.get(key) === request) cache.set(key, report);
         return report;
       }).finally(() => { if (savedRequests.get(key) === request) savedRequests.delete(key); });
@@ -173,7 +173,7 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
     trial = attempt;
     paintTrial();
     try {
-      const report = accept(await api('/mission-layout', 'POST', { ...body, props: body.props.filter((_, position) => position !== index) }), body.mode, body.experienceMode);
+      const report = validateLayoutReport(await api('/mission-layout', 'POST', { ...body, props: body.props.filter((_, position) => position !== index) }), body.mode, body.experienceMode);
       if (trial !== attempt || identity !== epoch()) return;
       const routes = routePreview(report);
       if (!routes || routes.some(route => !route.path.length && baseline[route.seat].path.length)) throw new Error('Invalid trial routes.');
@@ -249,7 +249,7 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
     clearTimeout(draftTimer); clearMarks(); $('layout-spawns').replaceChildren(); paint('draft', null, '檢查目前配置中…');
     draftTimer = setTimeout(async () => {
       try {
-        const report = accept(await api('/mission-layout', 'POST', body), body.mode, body.experienceMode);
+        const report = validateLayoutReport(await api('/mission-layout', 'POST', body), body.mode, body.experienceMode);
         if (identity !== epoch() || token !== generation || serial !== draftSerial || key !== JSON.stringify(draft())) return;
         draftReport = report; paint('draft', report);
       } catch {
@@ -286,7 +286,7 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
   function rejected(id, mode, report) {
     const key = id + '/' + mode, current = selection();
     if (current.id + '/' + current.mode !== key) return;
-    try { accept(report, mode, current.experienceMode); } catch { launchKey = ''; launchReport = null; paint('launch', null, '場地檢查版本已變更，請更新控制台後再開場。'); changed(); return; }
+    try { validateLayoutReport(report, mode, current.experienceMode); } catch { launchKey = ''; launchReport = null; paint('launch', null, '場地檢查版本已變更，請更新控制台後再開場。'); changed(); return; }
     savedRequests.delete(key); cache.set(key, report);
     launchSerial++; clearTimeout(launchTimer); launchKey = key; launchReport = report; paint('launch', report); changed();
   }

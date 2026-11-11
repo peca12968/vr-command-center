@@ -165,42 +165,79 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
 
 module.exports = { checkServerPlan };
 
-async function prepareRoomLayouts(page, missions, output) {
+async function prepareRoomLayouts(page, missions, invalidMission, output) {
+  await page.locator('#launch-mission').selectOption(missions[0].id);
   await page.locator('#launch-mode').selectOption('IndependentSet');
   await page.locator('#launch-room-missions-toggle').check();
-  for (const [index, mission] of missions.entries())
-    await page.locator(`#launch-room-mission-${index + 1}`).selectOption(mission.id);
+  const assignment = room => page.locator(`#launch-room-mission-${room}`);
   const overview = page.locator('#launch-room-layouts');
+  const card = room => overview.locator(`[data-room-layout-preview="${room}"]`);
+  const submit = page.locator('#create-session-form button[type=submit]');
+  async function submitPlan() {
+    const response = page.waitForResponse(reply => new URL(reply.url()).pathname === '/api/sessions/independent-set'
+      && reply.request().method() === 'POST');
+    const confirmation = page.waitForEvent('dialog').then(async dialog => {
+      const text = dialog.message();
+      await dialog.accept();
+      return text;
+    });
+    await submit.click();
+    return { response: await response, confirmationText: await confirmation };
+  }
   await overview.locator('summary').click();
+  let rejection;
+  if (invalidMission) {
+    const pattern = `**/api/missions/${invalidMission}/layout?mode=Independent`;
+    const stale = async route => {
+      const response = await route.fetch();
+      const layout = await response.json();
+      assert.equal(layout.canStart, false);
+      await route.fulfill({ response, json: { ...layout, canStart: true, issues: [], invalidProps: [] } });
+    };
+    await page.route(pattern, stale);
+    try {
+      for (const [index, mission] of missions.entries()) await assignment(index + 1).selectOption(index >= 3 ? invalidMission : mission.id);
+      await page.locator('#layout-recheck-launch').click();
+      for (const room of [4, 5]) await card(room).locator('[data-status=valid]').waitFor();
+    } finally { await page.unroute(pattern, stale); }
+    const { response } = await submitPlan();
+    assert(response.status() >= 400 && response.status() < 500);
+    const refused = await response.json();
+    assert.equal(refused.roomId, 4);
+    assert.deepEqual(refused.layout.invalidProps, [0, 1]);
+    await page.locator('#notice').filter({ hasText: '房間 4 的場地未通過檢查' }).waitFor();
+    assert(await submit.isDisabled());
+    const marked = [];
+    for (const room of [4, 5]) {
+      const indices = await card(room).locator('[data-layout-invalid=true]').evaluateAll(props => props.map(prop => Number(prop.dataset.index)));
+      assert.deepEqual(indices, refused.layout.invalidProps);
+      marked.push({ roomId: room, indices });
+    }
+    await overview.screenshot({ path: path.join(path.dirname(output), 'native-independent-layout-rejection.png') });
+    rejection = { roomId: refused.roomId, invalidProps: refused.layout.invalidProps, marked };
+  }
+  for (const [index, mission] of missions.entries())
+    await assignment(index + 1).selectOption(mission.id);
   const previews = [];
   for (const [index, mission] of missions.entries()) {
-    const roomId = index + 1, card = overview.locator(`[data-room-layout-preview="${roomId}"]`);
-    await card.locator('[data-status=valid]').waitFor();
-    const transforms = await card.locator('.room-layout-props [data-index]').evaluateAll(nodes => nodes.map(node => node.getAttribute('transform')));
-    assert.equal(await card.getAttribute('data-mission-id'), mission.id);
-    assert.equal(await card.locator('.room-layout-spawns [data-seat]').count(), 5);
+    const roomId = index + 1, map = card(roomId);
+    await map.locator('[data-status=valid]').waitFor();
+    const transforms = await map.locator('.room-layout-props [data-index]').evaluateAll(nodes => nodes.map(node => node.getAttribute('transform')));
+    assert.equal(await map.getAttribute('data-mission-id'), mission.id);
+    assert.equal(await map.locator('.room-layout-spawns [data-seat]').count(), 5);
     assert.deepEqual(transforms, mission.definition.props.map(prop =>
       `translate(${prop.position.x} ${-prop.position.z}) rotate(${prop.yawDegrees})`));
     previews.push({ roomId, missionId: mission.id, transforms });
   }
   await overview.screenshot({ path: path.join(path.dirname(output), 'native-independent-room-layouts.png') });
-  const response = page.waitForResponse(reply => new URL(reply.url()).pathname === '/api/sessions/independent-set'
-    && reply.request().method() === 'POST');
-  const confirmation = page.waitForEvent('dialog').then(async dialog => {
-    const text = dialog.message();
-    await dialog.accept();
-    return text;
-  });
-  await page.locator('#create-session-form button[type=submit]').click();
-  const accepted = await response;
+  const { response: accepted, confirmationText } = await submitPlan();
   assert.equal(accepted.status(), 201);
-  const confirmationText = await confirmation;
   assert(previews.every(({ roomId }, index) => confirmationText.includes(`房間 ${roomId}　${missions[index].definition.name}`)));
   assert.deepEqual(accepted.request().postDataJSON(), { rooms: previews.map(({ roomId, missionId }) => ({ roomId, missionId })) });
   const prepared = await accepted.json(), requestId = accepted.request().headers()['idempotency-key'];
   assert.match(requestId, /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/);
   await page.locator('#launch-independent-receipt-rows tr').last().waitFor();
-  await fs.writeFile(output, JSON.stringify({ previews, requestId, prepared }, null, 2), { flag: 'wx' });
+  await fs.writeFile(output, JSON.stringify({ previews, requestId, prepared, rejection }, null, 2), { flag: 'wx' });
 }
 
 if (require.main === module) {
@@ -208,13 +245,13 @@ if (require.main === module) {
     const { chromium } = require('playwright');
     const input = [];
     for await (const chunk of process.stdin) input.push(chunk);
-    const { base, token, plan, missions, output } = JSON.parse(Buffer.concat(input).toString('utf8'));
+    const { base, token, plan, missions, invalidMission, output } = JSON.parse(Buffer.concat(input).toString('utf8'));
     assert.match(base, /^http:\/\/127\.0\.0\.1:\d+$/);
     const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_SERVER_PLAN_CHROMIUM });
     try {
       const page = await browser.newPage({ acceptDownloads: true });
       await login(page, base, token);
-      if (missions) await prepareRoomLayouts(page, missions, output);
+      if (missions) await prepareRoomLayouts(page, missions, invalidMission, output);
       else {
         await open(page);
         await fill(page, plan);
