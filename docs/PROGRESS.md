@@ -6,6 +6,7 @@
 - 實際編譯的 WinForms 類別通過 9 項模式、Enter 和連線檔狀態檢查。原連線檔與狀態監測各通過 36、26 項。首場實際視窗顯示預選桌面，Windows 防火牆提示遮住視窗，測試等待玩家啟動逾時，未開啟玩家程序。原測試保持失敗，程序清理及 C／F 14 檔相符。 [檢查摘要](../artifacts/player-mode-18/validation.json) · [視窗測試清理](../artifacts/desktop-venue/20261111-100051-c4e7fc32/external-ui/native-cleanup.json)
 - 解壓後的啟動器通過 39 項 CLI 檢查，包含缺少 OpenXR 執行環境時在入場前退出。新版啟動器以 CLI 執行 OpenXR 模擬與桌面席，通過 82 項、106 格封存回放、兩席原戰績、CSV 及原確認，C／F 42 檔相符。實際視窗選模式後入場仍待複驗。 [CLI 核對](../artifacts/player-package-checks/20261111-100545-3f9a9f1d/openxr-status.json) · [OpenXR 模擬](../artifacts/server-package-checks/run-81f7b3e4c73549db86f3034650bcaf2b/evidence.json)
 - 新包的 331 個清單檔案中有 329 個與前版相符，使用同一個 0.50.6 Windows 遊戲及 Quest APK。新發行報告核對 324 個玩家與伺服器共用檔案。 [發行核對](../artifacts/venue-release-0.50.6-player-1.8.json)
+- 功能來源 `a957c880` 已推送，啟動器、封裝工具及驗證腳本與 Git 逐位元組相符。GitHub Actions `42943934951` 的 job `130272055275` 因帳務或支出上限未啟動。 [來源核對](../artifacts/player-mode-18/source-validation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42943934951)
 
 ## 2026-11-11 Windows 桌面與 OpenXR 啟動
 
