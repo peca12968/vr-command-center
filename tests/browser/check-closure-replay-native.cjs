@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { chromium } = require('playwright');
+const readCsv = require('./csv.cjs');
 
 async function main() {
   const chunks = [];
@@ -12,7 +13,7 @@ async function main() {
   const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_CLOSURE_CHROMIUM,
     args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   try {
-    const page = await browser.newPage();
+    const page = await browser.newPage({ acceptDownloads: true });
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(base + '/console/');
@@ -69,9 +70,75 @@ async function main() {
     }
     assert.equal(frames.at(-1).packet.frame.phase, 'Ended');
     await page.locator('#world-player').screenshot({ path: path.join(path.dirname(output), path.basename(output, '.json') + '.png') });
+    const wanted = frames.flatMap(({ packet }) => {
+      const matchCount = packet.events.filter(event => event.kind === 'PlayerDamaged').length;
+      return matchCount ? [{ frameSequence: packet.sequence, elapsedMilliseconds: packet.elapsedMilliseconds, matchCount }] : [];
+    });
+    if (recording.header.roomIds.length === 1) assert(wanted.length > 0);
+    const waitForRoute = suffix => page.waitForResponse(reply => {
+      const url = new URL(reply.url());
+      return url.pathname === `/api/sessions/${sessionId}/world/${suffix}` && url.searchParams.get('observerRoomId') === String(roomId);
+    });
+    await page.locator('#world-event-kind').selectOption('PlayerDamaged');
+    const eventPath = `**/api/sessions/${sessionId}/world/event-frames?*`;
+    await page.route(eventPath, async route => {
+      const original = await route.fetch();
+      await route.fulfill({ response: original, json: { ...(await original.json()), observerRoomId: roomId % 5 + 1 } });
+    }, { times: 1 });
+    await page.locator('#world-event-search-start').click();
+    await page.locator('#world-event-search-status').filter({ hasText: '搜尋失敗' }).waitFor();
+    assert.equal(await page.locator('#world-event-search-results button').count(), 0);
+    const searchReply = waitForRoute('event-frames');
+    await page.locator('#world-event-search-start').click();
+    const search = await (await searchReply).json();
+    assert.equal(search.observerRoomId, roomId);
+    assert.deepEqual(search.frames, wanted.filter(hit => hit.frameSequence <= search.scannedThroughFrame).slice(0, 24));
+    const neighborReply = waitForRoute('event-neighbor');
+    await page.locator('#world-event-previous').click();
+    const neighbor = await (await neighborReply).json();
+    assert.equal(neighbor.observerRoomId, roomId);
+    const previous = wanted.filter(hit => hit.frameSequence < recording.acceptedSequence).at(-1) ?? null;
+    assert.deepEqual(neighbor.frame, previous);
+    if (previous) {
+      await page.waitForFunction(sequence => Number(document.querySelector('#world-canvas').dataset.sequence) === sequence,
+        previous.frameSequence);
+    }
+    let clip = null;
+    if (search.frames.length) {
+      const [firstHit] = search.frames;
+      const frameReply = waitForRoute(`frames/${firstHit.frameSequence}`);
+      await page.locator('#world-event-search-results button').first().click();
+      assert.equal((await (await frameReply).json()).observerRoomId, roomId);
+      await page.waitForFunction(sequence => Number(document.querySelector('#world-canvas').dataset.sequence) === sequence,
+        firstHit.frameSequence);
+      const from = firstHit.frameSequence, through = from + 1;
+      if (through <= recording.acceptedSequence) {
+        await page.locator('#world-clip-start').click();
+        await page.locator('#world-frame-next').click();
+        await page.waitForFunction(sequence => Number(document.querySelector('#world-canvas').dataset.sequence) === sequence, through);
+        await page.locator('#world-clip-end').click();
+        const metricsReply = page.waitForResponse(reply => new URL(reply.url()).pathname.endsWith('/world/clip-statistics'));
+        await page.locator('#world-clip-stats-read').click();
+        const metrics = await (await metricsReply).json();
+        assert.equal(metrics.roomId, roomId);
+        assert.equal(metrics.fromFrame, from);
+        assert.equal(metrics.throughFrame, through);
+        assert(metrics.players.some(row => row.hitsReceived > 0) && metrics.players.every(row => row.roomId === roomId));
+        const download = page.waitForEvent('download');
+        await page.locator('#world-clip-stats-export').click();
+        const file = await download;
+        const target = path.join(path.dirname(output), path.basename(output, '.json') + '-damage.csv');
+        await file.saveAs(target);
+        const rows = readCsv(await fs.readFile(target));
+        assert(rows.length && rows.every(row => row.reportRoomId === String(roomId) && row.playerRoomId === String(roomId)));
+        clip = { from, through, roomId, rows: rows.length };
+      }
+    }
     await fs.writeFile(output, JSON.stringify({ sessionId, streamId, roomId, fromFrame: frames[0].packet.sequence,
       throughFrame: frames.at(-1).packet.sequence, complete: true, projectedFrames: frames.length,
-      visibleRooms: [roomId], terminalPhase: frames.at(-1).packet.frame.phase }, null, 2), { flag: 'wx' });
+      visibleRooms: [roomId], terminalPhase: frames.at(-1).packet.frame.phase,
+      projectedDamageFrames: wanted, previousDamageFrame: neighbor.frame?.frameSequence ?? null,
+      rejectedOtherRoomSearch: true, clip }, null, 2), { flag: 'wx' });
   } finally { await browser.close(); }
 }
 

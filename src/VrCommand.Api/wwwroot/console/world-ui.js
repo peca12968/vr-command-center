@@ -40,7 +40,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     clearEventContext();
     if (frame) showEvents(frame);
     reviewControls();
-  });
+  }, value => filteredEvents(value).length);
   const policyFrames = mountWorldPolicyFrames(response, readFrame);
   const savedClips = mountSavedClips(response, canWriteClips, loadClip);
   const clipStatistics = mountWorldClipStatistics(response, download);
@@ -455,7 +455,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     $('world-review-player-scope').hidden = !showing || !reviewPlayer;
     $('world-review-player-name').textContent = reviewPlayer ? `檢討玩家 ${reviewPlayer.name} · ${shortId(reviewPlayer.id)}` : '';
     eventSearch.update(showing ? { sessionId: info.header.sessionId, streamId: info.header.streamId,
-      throughFrame, room: $('world-room').value, playerId: reviewPlayer?.id ?? null, frameSequence: frame.packet.sequence, idle } : null);
+      throughFrame, room: $('world-room').value, observerRoomId: info.observerRoomId ?? null,
+      playerId: reviewPlayer?.id ?? null, frameSequence: frame.packet.sequence, idle } : null);
     $('world-event-context').disabled = !idle || !filteredEvents(frame).length;
     policyFrames.update(showing ? { sessionId: info.header.sessionId, streamId: info.header.streamId,
       throughFrame, room: $('world-room').value, frameSequence: frame.packet.sequence, idle } : null);

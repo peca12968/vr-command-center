@@ -74,9 +74,9 @@ public static class WorldRoutes
             return Results.Json(page, WorldJson.Options);
         });
         app.MapGet("/api/sessions/{id:guid}/world/event-frames", (Guid id, long throughFrame, long? afterFrame, int? roomId,
-            string? kind, Guid? playerId, WorldRecordings store, HttpContext context) =>
+            string? kind, Guid? playerId, int? observerRoomId, WorldRecordings store, HttpContext context) =>
         {
-            var page = store.EventFrames(id, afterFrame ?? 0, throughFrame, roomId, kind, playerId, Actor(context), context.RequestAborted);
+            var page = store.EventFrames(id, afterFrame ?? 0, throughFrame, roomId, kind, playerId, Actor(context), context.RequestAborted, observerRoomId);
             context.Response.Headers.CacheControl = "no-store";
             return Results.Json(page, WorldJson.Options);
         });
@@ -95,9 +95,9 @@ public static class WorldRoutes
             return Results.File(ClipStatisticsCsv.Encode(report), "text/csv; charset=utf-8", ClipStatisticsCsv.FileName(report));
         });
         app.MapGet("/api/sessions/{id:guid}/world/event-neighbor", (Guid id, long throughFrame, long fromFrame, string direction,
-            int? roomId, string? kind, Guid? playerId, WorldRecordings store, HttpContext context) =>
+            int? roomId, string? kind, Guid? playerId, int? observerRoomId, WorldRecordings store, HttpContext context) =>
         {
-            var neighbor = store.EventNeighbor(id, fromFrame, throughFrame, direction, roomId, kind, playerId, Actor(context), context.RequestAborted);
+            var neighbor = store.EventNeighbor(id, fromFrame, throughFrame, direction, roomId, kind, playerId, Actor(context), context.RequestAborted, observerRoomId);
             context.Response.Headers.CacheControl = "no-store";
             return Results.Json(neighbor, WorldJson.Options);
         });

@@ -1,4 +1,4 @@
-export function mountWorldEventSearch(response, jump, eventNames, filterChanged) {
+export function mountWorldEventSearch(response, jump, eventNames, filterChanged, countVisibleEvents) {
   const kind = document.getElementById('world-event-kind');
   const start = document.getElementById('world-event-search-start');
   const here = document.getElementById('world-event-search-here');
@@ -26,7 +26,7 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged)
   }
   function update(value) {
     if (!value) kind.value = '';
-    const key = value ? JSON.stringify([value.sessionId, value.streamId, value.throughFrame, value.room, value.playerId, kind.value]) : '';
+    const key = value ? JSON.stringify([value.sessionId, value.streamId, value.throughFrame, value.room, value.observerRoomId, value.playerId, kind.value]) : '';
     scope = value;
     if (key !== scopeKey) {
       revision++;
@@ -44,12 +44,13 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged)
 
   async function search(afterFrame) {
     if (!scope?.idle || pending) return;
-    const { sessionId, streamId, throughFrame, room, playerId } = scope;
+    const { sessionId, streamId, throughFrame, room, observerRoomId, playerId } = scope;
     const query = new URLSearchParams({ afterFrame, throughFrame });
     if (room !== 'all') query.set('roomId', room);
+    if (observerRoomId !== null) query.set('observerRoomId', observerRoomId);
     if (playerId) query.set('playerId', playerId);
     if (kind.value) query.set('kind', kind.value);
-    const request = new AbortController();
+    const generation = revision, request = new AbortController();
     pending = request;
     controls();
     status.textContent = '正在搜尋已保存的事件…';
@@ -58,7 +59,19 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged)
       const value = await (await response(`/api/sessions/${sessionId}/world/event-frames?${query}`, signal)).json();
       if (pending !== request) return;
       if (value.sessionId !== sessionId || value.streamId !== streamId || value.throughFrame !== throughFrame
-          || value.afterFrame !== afterFrame || (value.playerId ?? null) !== playerId) throw new Error('回應的錄製範圍不同。');
+          || value.afterFrame !== afterFrame || (value.observerRoomId ?? null) !== observerRoomId || (value.playerId ?? null) !== playerId)
+        throw new Error('回應的錄製範圍不同。');
+      const end = value.scannedThroughFrame;
+      if (!Number.isSafeInteger(end) || end < afterFrame || (end === afterFrame && afterFrame < throughFrame)
+        || end > Math.min(throughFrame, afterFrame + 128) || value.nextAfterFrame !== (end < throughFrame ? end : null)
+        || !Array.isArray(value.frames) || value.frames.length > 24) throw new Error('回應的搜尋游標不同。');
+      let previous = afterFrame;
+      for (const hit of value.frames) {
+        if (!Number.isSafeInteger(hit?.frameSequence) || hit.frameSequence <= previous || hit.frameSequence > end
+          || !Number.isSafeInteger(hit.elapsedMilliseconds) || hit.elapsedMilliseconds < 0
+          || !Number.isSafeInteger(hit.matchCount) || hit.matchCount < 1) throw new Error('回應的事件畫格不同。');
+        previous = hit.frameSequence;
+      }
       page = value;
       results.replaceChildren(...page.frames.map(hit => {
         const row = document.createElement('li');
@@ -67,7 +80,9 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged)
         button.className = 'quiet';
         button.dataset.frameSequence = String(hit.frameSequence);
         button.textContent = `第 ${hit.frameSequence} 格 · ${(hit.elapsedMilliseconds / 1000).toFixed(2)} 秒 · ${hit.matchCount} 筆`;
-        button.addEventListener('click', () => jump(hit.frameSequence));
+        button.addEventListener('click', () => jump(hit.frameSequence, () => revision === generation,
+          frame => frame.packet.elapsedMilliseconds === hit.elapsedMilliseconds
+            && (observerRoomId === null || countVisibleEvents(frame) === hit.matchCount)));
         row.append(button);
         return row;
       }));
@@ -82,7 +97,7 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged)
   }
   async function navigate(direction, countMatches) {
     if (!scope?.idle || pending) return;
-    const { sessionId, streamId, throughFrame, room, playerId, frameSequence } = scope;
+    const { sessionId, streamId, throughFrame, room, observerRoomId, playerId, frameSequence } = scope;
     const filter = kind.value || null, roomId = room === 'all' ? null : Number(room);
     const generation = revision, request = new AbortController();
     pending = request;
@@ -94,6 +109,7 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged)
     try {
       const query = new URLSearchParams({ throughFrame, direction });
       if (roomId !== null) query.set('roomId', room);
+      if (observerRoomId !== null) query.set('observerRoomId', observerRoomId);
       if (playerId) query.set('playerId', playerId);
       if (filter) query.set('kind', filter);
       for (;;) {
@@ -104,6 +120,7 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged)
         const scanned = value.scannedToFrame;
         if (value.sessionId !== sessionId || value.streamId !== streamId || value.throughFrame !== throughFrame
             || value.fromFrame !== cursor || value.direction !== direction || (value.roomId ?? null) !== roomId
+            || (value.observerRoomId ?? null) !== observerRoomId
             || (value.kind ?? null) !== filter || (value.playerId ?? null) !== playerId
             || !Number.isSafeInteger(scanned) || (direction === 'previous' ? scanned < end || scanned >= cursor : scanned > end || scanned <= cursor))
           throw new Error('回應的事件範圍不同。');
@@ -111,8 +128,9 @@ export function mountWorldEventSearch(response, jump, eventNames, filterChanged)
           if (value.nextFromFrame != null || value.frame.frameSequence !== scanned || !Number.isSafeInteger(value.frame.matchCount)
               || value.frame.matchCount < 1) throw new Error('回應的事件快照不同。');
           pending = null;
-          const matches = countMatches && (frame => frame.packet.elapsedMilliseconds === value.frame.elapsedMilliseconds
-            && countMatches(frame) === value.frame.matchCount);
+          const count = countMatches ?? (observerRoomId !== null ? countVisibleEvents : null);
+          const matches = frame => frame.packet.elapsedMilliseconds === value.frame.elapsedMilliseconds
+            && (!count || count(frame) === value.frame.matchCount);
           const jumped = await jump(scanned, () => revision === generation && scope?.frameSequence === frameSequence, matches);
           if (revision === generation && !pending && scope?.frameSequence === (jumped ? scanned : frameSequence))
             status.textContent = jumped ? `已跳到第 ${scanned} 格，共 ${value.frame.matchCount} 筆符合事件。` : '讀取事件快照失敗，請再試一次。';

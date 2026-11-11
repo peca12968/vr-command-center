@@ -601,6 +601,8 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
                                "playerId": damage_player, "damage": raw}}])
                 entry = dict(damage_template, sequence=position, tick=position, eventId=event_id,
                              playerId=damage_player, damage=raw)
+                if position == 1:
+                    entry["targetId"] = other_player  # Source retains this event; the Room 5 projection omits it.
                 packet = damage_frame(position + 1, position, "Running", begin, health, [entry])
                 reply = damage_publisher.send({"type": "frame", "payload": packet})
                 assert reply["type"] == "ack", reply
@@ -656,6 +658,23 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
             kind, replay_info = event(replay_room)
             check(kind == "header" and replay_info["observerRoomId"] == 5 and event(replay_room) == ("frame", damage_view)
                   and event(replay_room)[0] == "saved-end", "Room replay uses the same projection through the original saved boundary")
+        event_path = overkill_world + "/event-frames?throughFrame=4&kind=PlayerDamaged"
+        legacy_search = request(event_path + "&roomId=5", "Room5")
+        scoped_search = request(event_path + "&observerRoomId=5", "Room5")
+        check([row["frameSequence"] for row in legacy_search["frames"]] == [2, 3]
+              and request(overkill_world + "/frames/2?observerRoomId=5", "Room5")["packet"]["events"] == []
+              and scoped_search["frames"] == legacy_search["frames"][1:] and scoped_search.get("observerRoomId") == 5
+              and request(event_path + "&observerRoomId=1", "Room1")["frames"] == [],
+              "Projected event search omits an event that belongs to the room player but is absent from the projected frame")
+        neighbor_path = overkill_world + "/event-neighbor?throughFrame=4&kind=PlayerDamaged"
+        for direction, start_frame in [("next", 1), ("previous", 4)]:
+            found = request(neighbor_path + f"&fromFrame={start_frame}&direction={direction}&observerRoomId=5", "Room5")
+            check(found["observerRoomId"] == found["roomId"] == 5 and found["frame"] == scoped_search["frames"][0],
+                  f"Projected {direction} navigation matches the exact scoped search and skips the omitted event")
+        for url in [event_path, neighbor_path + "&fromFrame=1&direction=next"]:
+            request(url + "&observerRoomId=5", "Room1", 403)
+            request(url + "&observerRoomId=5&roomId=1", "Room5", 400)
+        check(True, "Projected event lookup rejects a foreign observation room and conflicting room filters")
         policy_roster = overkill_world + "/policy-frames?throughFrame=4&includeEnemyRoster=true"
         local_roster = request(policy_roster + "&roomId=1", "Room1")
         check(local_roster["roomId"] == 1 and all(not row["enemyRoster"]["enemyIds"] for row in local_roster["frames"])
