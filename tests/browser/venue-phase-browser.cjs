@@ -80,6 +80,20 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     }
     throw new Error('Expected a room confirmation from the accepted frame');
   }
+  async function verifySettingDownload(name, key, requestId) {
+    const button = page.locator(`#venue-${name}-batch-download`);
+    const response = await page.request.get(base + '/api/venue/phase', { headers: { Authorization: 'Bearer ' + tokens.Master } });
+    assert.equal(response.status(), 200);
+    const expected = await response.body();
+    assert.equal(JSON.parse(expected)[key].requestId, requestId);
+    const file = page.waitForEvent('download');
+    await button.click();
+    const downloaded = await file;
+    assert.equal(downloaded.suggestedFilename(), `vr-command-venue-${name}-${requestId}.json`);
+    const target = path.join(screenshots, downloaded.suggestedFilename());
+    await downloaded.saveAs(target);
+    check((await fs.readFile(target)).equals(expected), `The ${name} batch downloads the byte-identical original venue phase response`);
+  }
 
   try {
     assert.deepEqual(await api('/sessions'), []);
@@ -346,6 +360,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       return Promise.all([1, 2].map(room => roomEnvironment(room).filter({ hasText: '全館環境已套用' }).isVisible())).then(rows => rows.every(Boolean));
     });
     check(true, 'Both rooms confirm their own matching environment frames');
+    await verifySettingDownload('environment', 'latestEnvironment', climateReceipt.requestId);
     async function openSetting(kind, room, id, button = page.locator(`[data-room-${kind}-frame="${room}"]`)) {
       const watched = page.waitForResponse(response => new URL(response.url()).pathname === `/api/sessions/${id}/world/watch`);
       await button.click();
@@ -466,6 +481,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       return Promise.all([1, 2].map(room => roomEnemies(room).filter({ hasText: '全館敵軍策略已套用' }).isVisible())).then(rows => rows.every(Boolean));
     });
     check(true, 'Enemy policy is confirmed only by both original game sources');
+    await verifySettingDownload('enemy', 'latestEnemies', enemyReceipt.requestId);
     const patrol = await openSetting('enemies', 1, preparing[0], batchReplay(1, 'Applied'));
     await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${patrol} 格的敵軍快照` }).waitFor();
     const patrolFrame = await api(`/sessions/${preparing[0]}/world/frames/${patrol}`);
@@ -844,7 +860,9 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
     check(!lateDownload && await fieldButton.isDisabled(), 'A held field ZIP cannot download after changing to a different batch');
     await login('Room2');
     check(await page.locator('#venue-closure').isHidden() && await fieldButton.isHidden() && await picker.locator('option').count() === 1
-      && await enemyBatch.isHidden() && await environmentBatch.isHidden(), 'Switching to room control clears Master-only history and setting batches');
+      && await enemyBatch.isHidden() && await environmentBatch.isHidden()
+      && await page.locator('#venue-enemy-batch-download').isDisabled() && await page.locator('#venue-environment-batch-download').isDisabled(),
+      'Switching to room control clears Master-only history, setting batches and their downloads');
   } finally {
     await page.unroute(route); await page.close();
     for (const id of active) await end(id);

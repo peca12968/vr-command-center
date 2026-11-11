@@ -407,7 +407,7 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json
 
 ### 核對五房環境與敵軍指令的執行畫格
 
-在場次執行中送出「全館即時環境」或「全館敵軍策略」後，等各房顯示已套用，再保存主控唯讀 `GET /api/venue/phase` 的原 JSON 回覆。每次都保留對應檔案，下一批同類指令會更新最新批次。待全館結束後，和各場原始 `.worldlog`、原場館驗收 ZIP 一併交給 `verify-field-results.py --venue-manifest`。
+在場次執行中送出「全館即時環境」或「全館敵軍策略」後，等各房顯示已套用，再按對應的「下載環境批次 JSON」或「下載敵軍批次 JSON」。控制台 0.31.127 會下載畫面所用的原 `GET /api/venue/phase` 回覆，檔名含批次 ID。每次都保留對應檔案，下一批同類指令會更新最新批次。待全館結束後，和各場原始 `.worldlog`、原場館驗收 ZIP 一併交給 `verify-field-results.py --venue-manifest`。
 
 ```json
 {

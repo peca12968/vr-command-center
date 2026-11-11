@@ -22,7 +22,7 @@ const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫�
 const weatherNames = { Clear: '晴朗', Rain: '下雨', Fog: '濃霧', Storm: '暴風雨' };
 const behaviorNames = { Hold: '守備', Patrol: '巡邏', Advance: '推進' };
 const archiveNames = { NoSource: '沒有遊戲來源', Missing: '尚無錄製紀錄', Waiting: '等待封存', SourceMismatch: '來源尚未對上', Sealed: '已封存' };
-const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: null, rooms: [], venue: null, missions: [], catalog: [], launchPinned: null, history: null, draftBase: null, draftChanged: false, draftSavedAt: '', sessions: [], session: null, selected: null, pending: null, props: [], prop: -1, settingRevisions: null };
+const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: null, rooms: [], venue: null, venuePhaseBlob: null, missions: [], catalog: [], launchPinned: null, history: null, draftBase: null, draftChanged: false, draftSavedAt: '', sessions: [], session: null, selected: null, pending: null, props: [], prop: -1, settingRevisions: null };
 const liveSettingDrafts = { environment: null, enemies: null };
 let comparedVersion = null;
 let checkedTemplate = null, templateEpoch = 0, loadedText = null;
@@ -201,7 +201,8 @@ function logout() {
   operatorNetwork.active(false);
   replay.active(false); replay.reset(); world.active(false); world.reset(); readiness.active(false); readiness.reset(); roomReadiness.active(false); connections.active(false); connections.reset();
   state.epoch++; state.key = ''; state.actor = null; state.selected = null; state.session = null; state.pending = null;
-  state.rooms = []; state.venue = null; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
+  setVenuePhase(null);
+  state.rooms = []; state.missions = []; state.catalog = []; state.launchPinned = null; state.history = null; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.sessions = []; state.refreshPromise = null;
   $('venue-full-tracking').checked = false;
   $('venue-full-participation').checked = false;
   renderVenueBegin([], false);
@@ -240,12 +241,16 @@ async function login(event) {
   finally { state.busy = false; $('login-form').querySelector('button').disabled = false; applyPermissions(); }
 }
 function showRefreshError(error) { if (state.actor) notify(error.status ? error.message : '更新失敗；目前顯示上次資料，請確認連線。', true); }
+function setVenuePhase(snapshot) {
+  state.venue = snapshot?.plan ?? null;
+  state.venuePhaseBlob = snapshot?.blob ?? null;
+}
 function refresh() {
   if (!state.actor || state.pending) return Promise.resolve();
   if (state.refreshPromise) return state.refreshPromise;
   const epoch = state.epoch;
   const pending = refreshData(epoch).catch(error => {
-    if (epoch === state.epoch) { closure.invalidate(); state.venue = null; applyVenuePermissions(); renderVenueClosure(null); }
+    if (epoch === state.epoch) { closure.invalidate(); setVenuePhase(null); applyVenuePermissions(); renderVenueClosure(null); }
     throw error;
   }).finally(() => { if (state.refreshPromise === pending) state.refreshPromise = null; });
   state.refreshPromise = pending;
@@ -255,7 +260,9 @@ async function refreshData(epoch) {
   const selection = selectionEpoch, includeEnded = $('include-ended').checked;
   const closureSelection = venueClosureEpoch, batchId = venueHistory.selected();
   const current = () => epoch === state.epoch && selection === selectionEpoch && includeEnded === $('include-ended').checked;
-  const venueRead = master() ? api('/venue/phase').catch(error => { if (error.status === 401) throw error; return null; }) : null;
+  const venueRead = master() ? api('/venue/phase', 'GET', undefined, undefined, undefined, 'blob')
+    .then(async blob => ({ blob, plan: JSON.parse(await blob.text()) }))
+    .catch(error => { if (error.status === 401) throw error; return null; }) : null;
   const venueClosureRead = master() ? api((batchId ? '/venue/closure/' + batchId : '/venue/closure') + '?includeScores=true&includeDebriefReceipts=true')
     .catch(error => { if (error.status === 401) throw error; return null; }) : null;
   const [rooms, catalog, sessions, venue, venueClosure] = await Promise.all([
@@ -269,7 +276,8 @@ async function refreshData(epoch) {
   const prior = [...state.catalog, state.launchPinned].find(row => row?.mission.id === launch);
   const editedSeries = state.catalog.find(row => row.mission.id === edit)?.seriesId;
   state.launchPinned = prior && !heads.some(row => row.mission.id === launch) ? prior : null;
-  state.rooms = rooms; state.venue = venue; state.catalog = heads; state.missions = heads.map(row => row.mission); state.sessions = sessions;
+  setVenuePhase(venue);
+  state.rooms = rooms; state.catalog = heads; state.missions = heads.map(row => row.mission); state.sessions = sessions;
   if (closureSelection === venueClosureEpoch)
     renderVenueClosure(batchId && venueClosure?.batch?.requestId !== batchId ? null : venueClosure);
   if (state.selected === null && sessions.length) state.selected = sessions[0].id;
@@ -598,6 +606,7 @@ function renderVenueSettingBatch(locked, kind) {
   const rows = valid ? batch.sessions.flatMap(session => session.roomIds.map(room => ({ room, session, ...settingBatchRoom(kind, batch, session, room) })))
     .sort((a, b) => a.room - b.room) : [];
   panel.hidden = !rows.length || new Set(rows.map(row => row.room)).size !== rows.length;
+  $(id + '-download').disabled = locked || panel.hidden || !state.venuePhaseBlob;
   const text = panel.hidden ? '' : `${enemy ? venueEnemyText(batch) : venueClimateText(batch)} · ${rows.filter(row => row.status === 'Applied').length} / ${rows.length} 房已確認`;
   if (summary.textContent !== text) summary.textContent = text;
   const signature = panel.hidden ? '' : JSON.stringify([batch.requestId, locked, rows.map(({ room, session, status, text }) =>
@@ -1172,7 +1181,7 @@ async function sendPending() {
     }
     if (state.pending === pending && !pending.accepted && error.status >= 400 && error.status < 500) {
       state.pending = null;
-      if (pending.kind === 'venue-phase') state.venue = null;
+      if (pending.kind === 'venue-phase') setVenuePhase(null);
     }
     throw error;
   }
@@ -1601,6 +1610,14 @@ $('venue-pause').addEventListener('click', () => run(() => venuePhase('Pause')))
 $('venue-resume').addEventListener('click', () => run(() => venuePhase('Resume')));
 $('venue-end').addEventListener('click', () => run(() => venuePhase('End')));
 $('restore-venue-plan').addEventListener('click', restoreVenuePlan);
+for (const [name, key] of [['environment', 'latestEnvironment'], ['enemy', 'latestEnemies']]) {
+  const button = $('venue-' + name + '-batch-download');
+  button.addEventListener('click', () => {
+    const batch = state.venue?.[key];
+    if (!master() || state.busy || state.pending || button.disabled || !batch || !state.venuePhaseBlob) return;
+    download(`vr-command-venue-${name}-${batch.requestId}.json`, state.venuePhaseBlob);
+  });
+}
 submit('venue-environment-form', () => venuePhase('SetEnvironment', { environment: {
   weather: $('venue-weather').value, timeOfDay: $('venue-time').value, lightning: $('venue-lightning').checked
 } }));
