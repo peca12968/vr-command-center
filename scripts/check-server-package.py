@@ -4093,7 +4093,7 @@ def main():
         log = recovery / 'adb.log'
         recovery_env = {**environment, 'VR_QUEST_FLEET_FIXTURE': str(recovery),
                         'VR_QUEST_FLEET_FAULTS': json.dumps({failed['serial']: 'config-active-changed'})}
-        interrupted = subprocess.run([*mapped, '-DeployMappedSeats'], env=recovery_env, timeout=45, encoding='utf-8',
+        interrupted = subprocess.run([*mapped, '-DeployMappedSeats'], env=recovery_env, timeout=45,
                                      cwd=destination, capture_output=True)
         failed_report = json.loads(interrupted.stdout)
         check(interrupted.returncode == 1 and not failed_report['complete'] and failed_report['managementVerified']
@@ -4109,12 +4109,13 @@ def main():
         retry_rows = [failed, *pending]
         map_bytes = mapping.read_bytes()
         report_file = recovery / 'interrupted-deployment.json'
-        report_file.write_text(interrupted.stdout, encoding='utf-8')
+        report_file.write_bytes(interrupted.stdout)
         (recovery / 'interrupted-adb.log').write_bytes(log.read_bytes())
         log.unlink()
         recovery_env['VR_QUEST_FLEET_FAULTS'] = ''
-        retried = json.loads(subprocess.check_output([*mapped, '-DeployMappedSeats', '-RetryIncomplete', str(report_file)], env=recovery_env, timeout=45,
-                                                     encoding='utf-8', cwd=destination))
+        retry_bytes = subprocess.check_output([*mapped, '-DeployMappedSeats', '-RetryIncomplete', str(report_file)],
+                                              env=recovery_env, timeout=45, cwd=destination)
+        retried = json.loads(retry_bytes)
         retry_commands = log.read_text(encoding='utf-8').splitlines()
         check(retried['complete'] and retried['managementVerified']
               and (not partial or retried['mappedSeats'] == len(rows))
@@ -4130,8 +4131,9 @@ def main():
                       (destination / row['serial'] / 'vr-connection.json').read_bytes() for row in retry_rows),
               mode + ' retry touches only failed and pending seats with the original signed bundle and map')
         recovery_prefix = 'mixed-venue' if mixed else f'vr-venue-{mode.lower()}'
-        save(f'{recovery_prefix}-interrupted-deployment.json', failed_report)
-        save(f'{recovery_prefix}-retried-deployment.json', retried)
+        for phase, raw in (('interrupted', interrupted.stdout), ('retried', retry_bytes)):
+            with (out / f'{recovery_prefix}-{phase}-deployment.json').open('xb') as saved:
+                saved.write(raw)
     try:
         management_port=venue_browser_port() if args.check_venue_plan_ui else free()
         subprocess.run([str(control_exe),'--init',str(data),'--port',str(management_port),'--report',str(out/'control-init.json')],env=env,check=True,timeout=30);keys=read(data/'operator-keys.json')['OperatorKeys'];marker=read(data/'control-instance.json');uri='http://127.0.0.1:'+str(marker['port'])
