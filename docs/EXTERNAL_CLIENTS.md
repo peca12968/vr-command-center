@@ -498,7 +498,7 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json
 
 ### 核對全館共用的發行報告
 
-把同一份 `venue-release.json` 用於 Windows 啟動及 Quest 部署。Windows 啟動器 1.7 加上 `--release-report`、`--wait`、`--log` 和 `--report`，即可保留原日誌與退出報告。既有 1.6 場次可提供同次已完成的原連線量測檔，沿用其日誌雜湊。 [Windows 啟動操作](WINDOWS_PLAYER_PACKAGE.md#依場館發行報告核對玩家包)
+把同一份 `venue-release.json` 用於 Windows 啟動及 Quest 部署。Windows 啟動器 1.9 可從視窗核對報告，遊戲關閉後交回同一資料夾的 `player.log` 和 `launch-report.json`。命令列可從啟動器 1.7 起加上 `--release-report`、`--wait`、`--log` 和 `--report` 留存同等資料。既有 1.6 場次可提供同次已完成的原連線量測檔，沿用其日誌雜湊。 [Windows 啟動操作](WINDOWS_PLAYER_PACKAGE.md#依場館發行報告核對玩家包)
 
 五房封存清單頂層加入 `venueReleaseReport`。每個 Windows 席位在 `windowsPlayers` 或 `sessions[].players` 加入 `launcherReport`；需要驗證原量測時再加 `linkMetrics`。Quest 席位照常提供原 logcat，並把各批原部署報告放入 `questDeployments.reports`，共用頂層的發行報告。全館只有 Windows 席位時可省略 `questDeployments`。
 

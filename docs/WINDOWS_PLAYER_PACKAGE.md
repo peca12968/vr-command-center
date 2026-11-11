@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-11 `VRCommand-Player-0.50.7-1.9-win-x64.zip` 為 84,942,855 bytes，SHA-256 `b5027281b55aaa125825dda1772217b604322f0ac3609f3ceba3e460bc2ce752`。含 331 筆清單，玩家視窗可核對場館發行報告並保留原程序紀錄。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.7-1.9-win-x64.zip) · [本包發行報告](../artifacts/venue-release-0.50.7-player-1.9.json)
+
 2026-11-11 `VRCommand-Player-0.50.7-1.8-win-x64.zip` 為 84,941,218 bytes，SHA-256 `37a909f78639c0a9d46cf166bd6016a0854a0beee82371e733014601ac84a5d0`。解壓核對 331 筆清單，實測 Unity PlayerConnection 只監聽本機。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.7-1.8-win-x64.zip) · [發行核對](../artifacts/venue-release-0.50.7-local-profiler.json)
 
 2026-11-11 `VRCommand-Player-0.50.6-1.8-win-x64.zip` 為 84,941,042 bytes，SHA-256 `4f577da46047880f593bf9961a77e54b1cf6bc94de95de7855b9b20bbec9ac4b`，331 筆清單核對通過。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.6-1.8-win-x64.zip) · [驗收](PROGRESS.md#2026-11-11-玩家啟動器的桌面與-openxr-模式)
@@ -108,6 +110,10 @@ OpenXR 模式使用 Direct3D 11。顯示和輸入子系統開始運作後，遊�
 Windows 建置啟用 Touch 與 Unity 的 HTC Vive Controller 兩個 OpenXR 互動設定。Touch 沿用右扳機射擊、A 換彈、B 重讀票券，左手 X／Y 翻頁及關閉簡報。HTC Vive Controller 使用右扳機射擊、右握把換彈、右 Menu 重讀票券，左觸控板按下翻頁、左 Menu 關閉、左握把查看字型授權。實際控制器由 Windows OpenXR 執行環境回報，VIVE XR 的確切型號及相符設定仍待頭盔到場驗收。MR 透視與房間對位沿用 Quest 3 Android 路徑。 [Unity XR 手動啟動](https://docs.unity3d.com/Packages/com.unity.xr.management@4.6/manual/EndUser.html#load-xr-plug-ins) · [HTC Vive 控制器設定](https://docs.unity3d.com/Packages/com.unity.xr.openxr@1.19/manual/features/htcvivecontrollerprofile.html)
 
 #### 依場館發行報告核對玩家包
+
+在啟動器 1.9 開啟玩家視窗並載入自己的連線檔。按「選擇發行報告」，或貼上主控提供的原 `venue-release.json` 完整路徑，再按 Enter 核對。清單相符後，選桌面或 Windows OpenXR，再按「開始遊戲」。啟動時會重新檢查報告及套件，修改路徑或檔案後須重新核對。場館若未提供發行報告，可留空沿用一般啟動流程。
+
+遊戲關閉後，在啟動器按「開啟本次紀錄資料夾」，把同一資料夾的 `player.log` 和 `launch-report.json` 交給控制人員。每次發行核對啟動都會建立自己的資料夾。退出報告包含原套件清單和玩家日誌的雜湊、程序識別及退出碼。 [全館封存操作](EXTERNAL_CLIENTS.md#核對全館共用的發行報告)
 
 在啟動器 1.6 加上 `--release-report`，選用主控為本次交付產生的原始 `venue-release.json`。先以 `--verify` 做離線檢查，也可在桌面或 OpenXR 的直接啟動命令加上同一選項，讓每次啟動都重新核對。
 

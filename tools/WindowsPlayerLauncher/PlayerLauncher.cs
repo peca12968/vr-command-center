@@ -16,7 +16,6 @@ internal static class PlayerLauncher
 {
     private static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = 4 * 1024 * 1024 };
     private static readonly string Root = AppDomain.CurrentDomain.BaseDirectory;
-    private static string report;
     private static string statusReport;
     private static string lastStatusReport;
     private static bool SamePath(string a, string b) { return a != null && b != null && String.Equals(a, b, StringComparison.OrdinalIgnoreCase); }
@@ -136,18 +135,22 @@ internal static class PlayerLauncher
         }
         result.Append('\\', slashes * 2); return result.Append('"').ToString();
     }
-    private static void Report(object value)
+    private static void Report(string path, object value)
     {
-        if (report == null) return;
-        // Caller explicitly supplies this diagnostic path; never overwrite an input or package file.
-        var temporary = report + "." + Guid.NewGuid().ToString("N") + ".tmp";
-        File.WriteAllText(temporary, Json.Serialize(value), new UTF8Encoding(false));
-        if (File.Exists(report)) File.Delete(report);
-        File.Move(temporary, report);
+        if (path == null) return;
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, Json.Serialize(value), new UTF8Encoding(false));
+            if (File.Exists(path)) File.Replace(temporary, path, null);
+            else File.Move(temporary, path);
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
-    private static void ProcessReport(string status, string releaseManifestHash, Process child = null,
+    private static void ProcessReport(string path, string status, string releaseManifestHash, Process child = null,
         bool exited = false, string linkMetrics = null, string log = null)
     {
+        if (path == null) return;
         var value = new Dictionary<string, object> { { "status", status } };
         if (child != null) value.Add("processId", child.Id);
         if (exited) value.Add("exitCode", child.ExitCode);
@@ -163,7 +166,7 @@ internal static class PlayerLauncher
             }
         }
         if (releaseManifestHash != null) value.Add("playerManifestSha256", releaseManifestHash);
-        Report(value);
+        Report(path, value);
     }
     private static void StatusReport(PlayerConnectionMonitor monitor, int processId, bool exited)
     {
@@ -192,7 +195,7 @@ internal static class PlayerLauncher
         return null;
     }
     private static Process Launch(string config, bool headless, string log, string reviewedHash = null, bool openXR = false,
-        string linkMetrics = null, string releaseManifestHash = null)
+        string linkMetrics = null, string releaseManifestHash = null, string reportPath = null)
     {
         Verify(releaseManifestHash); Config(config);
         Require(reviewedHash == null || Hash(config) == reviewedHash, "連線檔已變更，請重新載入後核對。");
@@ -204,13 +207,13 @@ internal static class PlayerLauncher
         var child = Process.Start(new ProcessStartInfo(Path.Combine(Root, "VrCommand.exe"), args)
         { UseShellExecute = false, WorkingDirectory = Root, CreateNoWindow = headless });
         Require(child != null, "無法啟動玩家程式。");
-        try { ProcessReport("started", releaseManifestHash, child); return child; }
+        try { ProcessReport(reportPath, "started", releaseManifestHash, child); return child; }
         catch { if (!child.HasExited) { child.Kill(); child.WaitForExit(); } child.Dispose(); throw; }
     }
     [STAThread]
     private static int Main(string[] args)
     {
-        string config = null, log = null, linkMetrics = null, releasePath = null;
+        string config = null, log = null, linkMetrics = null, releasePath = null, report = null;
         bool launch = false, wait = false, headless = false, verify = false, openXR = false, invalidEvidenceOption = false;
         try
         {
@@ -262,10 +265,11 @@ internal static class PlayerLauncher
                 && !SamePath(releasePath, statusReport) && !SamePath(releasePath, linkMetrics) && !SamePath(releasePath, report)),
                 "發行報告須搭配核對或直接啟動，並使用獨立路徑。");
             var releaseManifestHash = releasePath == null ? null : ReadReleaseManifestHash(releasePath);
-            if (verify) { Verify(releaseManifestHash); ProcessReport("verified", releaseManifestHash); return 0; }
+            if (verify) { Verify(releaseManifestHash); ProcessReport(report, "verified", releaseManifestHash); return 0; }
             if (launch)
             {
-                using (var child = Launch(config, headless, log, openXR: openXR, linkMetrics: linkMetrics, releaseManifestHash: releaseManifestHash))
+                using (var child = Launch(config, headless, log, openXR: openXR, linkMetrics: linkMetrics,
+                    releaseManifestHash: releaseManifestHash, reportPath: report))
                 {
                     if (!wait) return 0;
                     if (statusReport == null) child.WaitForExit();
@@ -275,19 +279,19 @@ internal static class PlayerLauncher
                         while (!child.WaitForExit(200)) { monitor.Poll(); StatusReport(monitor, child.Id, false); }
                         monitor.Poll(exited: true); StatusReport(monitor, child.Id, true);
                     }
-                    ProcessReport("exited", releaseManifestHash, child, exited: true, linkMetrics: linkMetrics, log: log);
+                    ProcessReport(report, "exited", releaseManifestHash, child, exited: true, linkMetrics: linkMetrics, log: log);
                     return child.ExitCode;
                 }
             }
             Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
-            Application.Run(new PlayerForm(config, log)); return 0;
+            Application.Run(new PlayerForm(config, log, report)); return 0;
         }
         catch
         {
             // Serializer / IO exception text can contain input. Do not echo secrets or file contents.
             if (report != null && !File.Exists(report) && !report.StartsWith(Root, StringComparison.OrdinalIgnoreCase) && !SamePath(report, config)
                 && !SamePath(report, log) && !SamePath(report, linkMetrics) && !SamePath(report, releasePath))
-                try { Report(new { status = "rejected", reason = "Package, connection file or launch options are invalid." }); } catch { }
+                try { Report(report, new { status = "rejected", reason = "Package, connection file or launch options are invalid." }); } catch { }
             if (report == null) MessageBox.Show("無法啟動。請確認玩家包已完整解壓，並重新選擇控制台下載的玩家連線檔。", "VR Command 玩家", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return 1;
         }
@@ -326,6 +330,32 @@ internal static class PlayerLauncher
                     Require(Hash(FilePath) == ContentHash, "連線檔已變更，請重新載入後核對。");
             }
             catch { Clear(); throw; }
+        }
+    }
+
+    internal sealed class ReleaseReview
+    {
+        private string file;
+        private string contentHash;
+        public string ManifestHash { get; private set; }
+        public void Clear() { file = null; contentHash = null; ManifestHash = null; }
+        public void Load(string path)
+        {
+            Clear();
+            Require(!String.IsNullOrWhiteSpace(path) && Path.IsPathRooted(path) && Path.GetPathRoot(path).Length > 2,
+                "請輸入發行報告完整路徑。");
+            var full = Path.GetFullPath(path); PlainPath(full);
+            using (var lease = File.OpenRead(full))
+            {
+                var expected = ReadReleaseManifestHash(full);
+                Require(Hash(PackagePath("player-package.json")) == expected, "本機玩家包清單與場館發行報告不同。");
+                contentHash = Hash(lease); file = full; ManifestHash = expected;
+            }
+        }
+        public string RequireCurrent()
+        {
+            if (file != null && EvidenceHash(file, 8192) == contentHash) return ManifestHash;
+            Clear(); throw new InvalidDataException("發行報告已變更，請重新載入後核對。");
         }
     }
     internal sealed class TicketPreview
@@ -368,12 +398,17 @@ internal static class PlayerLauncher
         private readonly Button play = new Button { Text = "開始遊戲(&S)", AccessibleName = "開始遊戲", AutoSize = true, Enabled = false };
         private readonly RadioButton openXR = new RadioButton { Text = "Windows OpenXR(&O)", AutoSize = true };
         private readonly TextBox path = new TextBox { Dock = DockStyle.Top, AccessibleName = "玩家連線檔完整路徑" };
+        private readonly TextBox releasePath = new TextBox { Dock = DockStyle.Top, AccessibleName = "場館發行報告完整路徑" };
+        private readonly Label releaseInfo = new Label { Dock = DockStyle.Top, Height = 33, UseMnemonic = false };
+        private readonly LinkLabel records = new LinkLabel { Text = "開啟本次紀錄資料夾", Dock = DockStyle.Top, Height = 30, Visible = false };
         private readonly ConfigReview review = new ConfigReview();
+        private readonly ReleaseReview release = new ReleaseReview();
         private bool settingPath;
         private Process child; private PlayerConnectionMonitor monitor;
-        public PlayerForm(string initial, string diagnosticLog)
+        private bool HasReleasePath { get { return !String.IsNullOrWhiteSpace(releasePath.Text); } }
+        public PlayerForm(string initial, string diagnosticLog, string diagnosticReport)
         {
-            Text = "VR Command 玩家"; ClientSize = new Size(660, 478); MinimumSize = new Size(676, 517);
+            Text = "VR Command 玩家"; ClientSize = new Size(660, 608); MinimumSize = new Size(676, 647);
             Font = new Font("Microsoft JhengHei UI", 11); Padding = new Padding(20); StartPosition = FormStartPosition.CenterScreen;
             var title = new Label { Text = "選擇控制台下載的玩家連線檔", Dock = DockStyle.Top, Height = 40 };
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 45 };
@@ -385,7 +420,13 @@ internal static class PlayerLauncher
             modes.Controls.Add(openXR);
             var pathHint = new Label { Text = "可選檔或貼上完整路徑，再按 Enter 載入。", Dock = DockStyle.Top, Height = 35 };
             var hint = new Label { Text = "票券過期或入場被拒絕時，請向控制人員重新取得連線檔。", Dock = DockStyle.Top, Height = 50 };
-            Controls.Add(hint); Controls.Add(status); Controls.Add(buttons); Controls.Add(modes); Controls.Add(ticketInfo); Controls.Add(selected); Controls.Add(pathHint); Controls.Add(path); Controls.Add(title);
+            var releaseButtons = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40 };
+            var chooseRelease = new Button { Text = "選擇發行報告…", AutoSize = true };
+            var loadRelease = new Button { Text = "核對發行報告(&R)", AccessibleName = "核對發行報告", AutoSize = true };
+            releaseButtons.Controls.Add(chooseRelease); releaseButtons.Controls.Add(loadRelease);
+            Controls.Add(hint); Controls.Add(records); Controls.Add(status); Controls.Add(buttons); Controls.Add(modes);
+            Controls.Add(releaseInfo); Controls.Add(releaseButtons); Controls.Add(releasePath);
+            Controls.Add(ticketInfo); Controls.Add(selected); Controls.Add(pathHint); Controls.Add(path); Controls.Add(title);
             path.TextChanged += delegate
             {
                 if (settingPath) return;
@@ -399,23 +440,59 @@ internal static class PlayerLauncher
                 using (var dialog = new OpenFileDialog { Filter = "玩家連線檔 (*.json)|*.json", CheckFileExists = true, Multiselect = false })
                     if (dialog.ShowDialog(this) == DialogResult.OK) SelectConfig(dialog.FileName);
             };
+            releasePath.TextChanged += delegate
+            {
+                release.Clear();
+                releaseInfo.Text = HasReleasePath ? "請按 Enter 或「核對發行報告」。" : "場館發行報告（選用）";
+                UpdatePlay();
+            };
+            loadRelease.Click += delegate { SelectRelease(); };
+            chooseRelease.Click += delegate
+            {
+                using (var dialog = new OpenFileDialog { Filter = "發行報告 (*.json)|*.json", CheckFileExists = true, Multiselect = false })
+                    if (dialog.ShowDialog(this) == DialogResult.OK) { releasePath.Text = dialog.FileName; SelectRelease(); }
+            };
+            string activeRelease = null, activeLog = null, activeReport = null, resultFolder = null;
+            records.LinkClicked += delegate
+            {
+                try { using (Process.Start(new ProcessStartInfo(resultFolder) { UseShellExecute = true })) { } }
+                catch { status.Text = "無法開啟本次紀錄資料夾。"; }
+            };
             play.Click += delegate
             {
                 play.Enabled = false; status.Text = "正在核對玩家包…"; Refresh();
                 try
                 {
                     review.RequireCurrent();
-                    var ownLog = diagnosticLog;
-                    if (ownLog == null)
+                    var releaseHash = HasReleasePath ? release.RequireCurrent() : null;
+                    var ownLog = diagnosticLog; var ownReport = diagnosticReport;
+                    Require((ownLog == null || (!File.Exists(ownLog) && !Directory.Exists(ownLog)))
+                        && (ownReport == null || (!File.Exists(ownReport) && !Directory.Exists(ownReport))),
+                        "診斷記錄與報告須使用新路徑。");
+                    if (ownLog == null || (releaseHash != null && ownReport == null))
                     {
                         var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrCommand", "PlayerRuns", Guid.NewGuid().ToString("N"));
-                        Directory.CreateDirectory(directory); ownLog = Path.Combine(directory, "player.log");
+                        Directory.CreateDirectory(directory);
+                        if (ownLog == null) ownLog = Path.Combine(directory, "player.log");
+                        if (ownReport == null && releaseHash != null) ownReport = Path.Combine(directory, "launch-report.json");
                     }
-                    child = Launch(review.FilePath, false, ownLog, review.ContentHash, openXR: openXR.Checked); monitor = new PlayerConnectionMonitor(ownLog);
-                    choose.Enabled = false; load.Enabled = false; path.Enabled = false; modes.Enabled = false; status.Text = monitor.Message;
+                    child = Launch(review.FilePath, false, ownLog, review.ContentHash, openXR: openXR.Checked,
+                        releaseManifestHash: releaseHash, reportPath: ownReport);
+                    diagnosticLog = null; diagnosticReport = null;
+                    activeRelease = releaseHash; activeLog = ownLog; activeReport = ownReport;
+                    records.Visible = false; resultFolder = null;
+                    monitor = new PlayerConnectionMonitor(ownLog);
+                    choose.Enabled = false; load.Enabled = false; path.Enabled = false; modes.Enabled = false;
+                    releasePath.Enabled = false; chooseRelease.Enabled = false; loadRelease.Enabled = false;
+                    status.Text = monitor.Message;
                     RenderTicket();
                 }
-                catch { review.Clear(); RenderTicket(); selected.Text = "請重新載入並核對連線檔。"; status.Text = "無法啟動或檔案已變更。請確認玩家包完整，再重新載入正確的連線檔。"; play.Enabled = false; }
+                catch
+                {
+                    if (HasReleasePath && release.ManifestHash == null) releaseInfo.Text = "發行報告已變更或遺失，請重新核對。";
+                    review.Clear(); RenderTicket(); selected.Text = "請重新載入並核對連線檔。";
+                    status.Text = "無法啟動或檔案已變更。請確認玩家包完整，再重新載入正確的連線檔。"; UpdatePlay();
+                }
             };
             var timer = new Timer { Interval = 500 };
             timer.Tick += delegate
@@ -425,22 +502,57 @@ internal static class PlayerLauncher
                 monitor.Poll(exited); status.Text = monitor.Message;
                 if (exited)
                 {
-                    var final = monitor.State == "Final"; child.Dispose(); child = null; choose.Enabled = true; load.Enabled = true; path.Enabled = true; modes.Enabled = true; play.Enabled = review.Loaded;
+                    var saved = true;
+                    if (activeRelease != null)
+                    {
+                        try
+                        {
+                            ProcessReport(activeReport, "exited", activeRelease, child, exited: true, log: activeLog);
+                            resultFolder = Path.GetDirectoryName(activeReport); records.Visible = true;
+                        }
+                        catch { saved = false; }
+                    }
+                    var final = monitor.State == "Final"; child.Dispose(); child = null;
+                    choose.Enabled = true; load.Enabled = true; path.Enabled = true; modes.Enabled = true;
+                    releasePath.Enabled = true; chooseRelease.Enabled = true; loadRelease.Enabled = true; UpdatePlay();
                     RenderTicket();
                     status.Text = final ? "遊戲已關閉；本次已收到最終戰績。" : "遊戲已關閉。" + monitor.Message;
+                    if (!saved) status.Text += " 本次程序報告儲存失敗。";
                 }
+            };
+            FormClosing += delegate(object sender, FormClosingEventArgs args)
+            {
+                if (args.CloseReason != CloseReason.UserClosing || child == null || activeRelease == null) return;
+                args.Cancel = true; status.Text = "請先關閉遊戲，等本次程序報告儲存完成。";
             };
             timer.Start(); FormClosed += delegate { timer.Dispose(); if (child != null) child.Dispose(); };
             selected.Text = "尚未選擇連線檔";
+            releaseInfo.Text = "場館發行報告（選用）";
             if (initial != null) SelectConfig(initial);
         }
         protected override bool ProcessCmdKey(ref Message message, Keys keyData)
         {
-            if (keyData != Keys.Enter || !path.IsHandleCreated || message.HWnd != path.Handle)
-                return base.ProcessCmdKey(ref message, keyData);
-            const long repeatedKey = 1L << 30;
-            if (path.Enabled && (message.LParam.ToInt64() & repeatedKey) == 0) SelectConfig(path.Text);
-            return true;
+            if (keyData == Keys.Enter)
+            {
+                var repeated = (message.LParam.ToInt64() & (1L << 30)) != 0;
+                if (path.IsHandleCreated && message.HWnd == path.Handle)
+                { if (path.Enabled && !repeated) SelectConfig(path.Text); return true; }
+                if (releasePath.IsHandleCreated && message.HWnd == releasePath.Handle)
+                { if (releasePath.Enabled && !repeated) SelectRelease(); return true; }
+            }
+            return base.ProcessCmdKey(ref message, keyData);
+        }
+        private void UpdatePlay() { play.Enabled = child == null && review.Loaded && (!HasReleasePath || release.ManifestHash != null); }
+        private void SelectRelease()
+        {
+            release.Clear();
+            if (HasReleasePath)
+            {
+                try { release.Load(releasePath.Text); releaseInfo.Text = "發行清單相符，啟動時會逐檔核對。"; }
+                catch { releaseInfo.Text = "發行報告或套件不符。請核對主控交付的原始檔案。"; }
+            }
+            else releaseInfo.Text = "場館發行報告（選用）";
+            UpdatePlay();
         }
         private void SelectConfig(string file)
         {
@@ -450,7 +562,7 @@ internal static class PlayerLauncher
                 try { path.Text = review.FilePath; } finally { settingPath = false; }
                 selected.Text = Path.GetFileName(review.FilePath) + "\n伺服器 " + review.Endpoint;
                 RenderTicket();
-                play.Enabled = true; status.Text = "核對目的地與席位，選擇遊戲模式，再按「開始遊戲」。";
+                UpdatePlay(); status.Text = "核對目的地與席位，選擇遊戲模式，再按「開始遊戲」。";
             }
             catch { review.Clear(); RenderTicket(); play.Enabled = false; selected.Text = "未接受此連線檔"; status.Text = "請使用控制台下載的玩家連線檔完整路徑。"; }
         }

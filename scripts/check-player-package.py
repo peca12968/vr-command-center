@@ -96,6 +96,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__); parser.add_argument('package_directory', type=Path)
     parser.add_argument('--check-openxr-unavailable', action='store_true', help='Run a graphical player with a missing OpenXR runtime for that process')
     parser.add_argument('--check-local-profiler', action='store_true', help='Check the actual owned Unity PlayerConnection sockets without a player config')
+    parser.add_argument('--check-release-form', action='store_true', help='Exercise the shipped WinForms handlers with an actual owned OpenXR child')
     parser.add_argument('--release-report', type=Path, help='Original offline release report for this package')
     parser.add_argument('--other-release-report', type=Path, help='Original offline report for a different package')
     args = parser.parse_args(); folder = package.plain(args.package_directory)
@@ -182,6 +183,21 @@ def main():
     if args.check_openxr_unavailable:
         check_openxr_unavailable(folder, directory, base, release, manifest_hash)
         findings.append('Graphical OpenXR launch with a missing runtime exits before admission')
+        print('PASS:', findings[-1], flush=True)
+    if args.check_release_form:
+        compiler = Path(os.environ.get('WINDIR', 'C:/Windows')) / 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+        runner = directory / 'release-form-checks.exe'
+        subprocess.run([str(compiler), '/nologo', '/target:exe', '/platform:x64', '/warnaserror+',
+                        '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', '/reference:System.Web.Extensions.dll',
+                        '/out:' + str(runner), str(ROOT / 'tools/WindowsPlayerLauncher/ReleaseFormChecks.cs')],
+                       check=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
+        result = subprocess.run([str(runner), str(folder), str(directory), str(valid), str(release), str(other_release)],
+                                capture_output=True, timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
+        (directory / 'release-form-run.log').write_bytes(result.stdout + result.stderr)
+        result.check_returncode()
+        reviewed = json.loads((directory / 'release-form-checks.json').read_bytes())
+        assert reviewed['complete'] and reviewed['checks'] == 16
+        findings.append('Shipped WinForms release selection rejects stale reports and publishes the owned child log digest')
         print('PASS:', findings[-1], flush=True)
     # A fresh minimal copy is intentionally incomplete. Never alter the delivered package.
     broken = directory / 'broken-package'; broken.mkdir(); shutil.copyfile(folder / 'Launch-Player.exe', broken / 'Launch-Player.exe')
