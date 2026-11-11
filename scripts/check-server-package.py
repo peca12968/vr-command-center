@@ -1646,6 +1646,29 @@ def main():
             debrief_file = out / (label + '-venue-debrief-export.json')
             debrief_file.write_bytes(snapshot)
             common['venueDebriefReceipts'] = str(debrief_file)
+            original_receipts = {row['sessionId']: row for row in json.loads(snapshot)['sessions']}
+            seat_views = []
+            for row in closed['sessions']:
+                session = request('/api/sessions/' + row['sessionId'])
+                original = original_receipts[session['id']]
+                acknowledged = {player['admissionId'] for player in original['players'] if player['acknowledged']}
+                for room in row['roomIds']:
+                    detail_route = f'{route}/rooms/{room}/debrief-receipts'
+                    raw_detail, detail_headers = request(detail_route, raw_response=True)
+                    request(detail_route, role=f'Room{room}', expected=403)
+                    detail = json.loads(raw_detail)
+                    roster = sorted((player for player in session['players'] if player['roomId'] == room),
+                                    key=lambda player: player['seat'])
+                    expected = {'version': 1, 'requestId': closed['requestId'], 'roomId': room,
+                                **{key: value for key, value in original.items() if key != 'players'},
+                                'players': [{'seat': player['seat'] + 1, 'name': player['name'],
+                                             'acknowledged': player['admissionId'] in acknowledged} for player in roster]}
+                    check(detail == expected and detail_headers['Cache-Control'] == 'no-store'
+                          and len(detail['players']) == players_per_room and all(player['acknowledged'] for player in detail['players']),
+                          f'{label} room {room} seat detail matches the original sealed roster and native receipts')
+                    seat_views.append(detail)
+            seats_file = out / (label + '-venue-debrief-seats.json')
+            save(seats_file.name, seat_views)
         if args.windows_release_report:
             common['venueReleaseReport']=str(args.windows_release_report)
         if args.check_venue_participation_gate:
@@ -1808,7 +1831,7 @@ def main():
               label + ' field evidence rejects relabeling the same-PC peers as direct LAN')
         manifest_path.write_text(json.dumps(evidence), encoding='utf-8')
         return {'batchId': closed['requestId'], 'zip': str(bundle_file), 'route': bundle_route,
-                **({'debrief': str(debrief_file)} if debrief_file is not None else {})}
+                **({'debrief': str(debrief_file), 'debriefSeats': str(seats_file)} if debrief_file is not None else {})}
 
     def verify_venue_field_ui(mode, current, earlier):
         node = shutil.which('node')
@@ -1828,6 +1851,11 @@ def main():
         if args.check_debrief_receipts:
             check(result['receiptExports'] == [case['batchId'] for case in cases],
                   mode + ' shipped console downloads exact receipt exports for the selected original batches')
+            expected = [{'batchId': case['batchId'], 'rooms': [
+                {'roomId': room['roomId'], 'sessionId': room['sessionId'], 'seats': len(room['players'])}
+                for room in read(Path(case['debriefSeats']))]} for case in cases]
+            check(result['debriefSeats'] == expected,
+                  mode + ' shipped console opens every original room and filters confirmed native seats')
     def verify_live_room_navigation(entries, clients, linked):
         topology = 'Linked' if linked else 'Independent'
         rooms = []

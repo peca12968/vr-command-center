@@ -577,6 +577,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const debriefRoom = id => page.locator(`[data-venue-debrief-room="${id}"]`);
     const closure = (await api('/venue/closure')).batch;
     const debriefExport = id => `/venue/closure/${id}/debrief-receipts.json`;
+    const debriefDetail = (id, room) => `/venue/closure/${id}/rooms/${room}/debrief-receipts`;
+    const showSeats = room => page.locator(`[data-venue-debrief-seats="${room}"]`);
     const debriefButton = page.locator('#export-venue-debrief');
     await api(debriefExport(closure.requestId), 'GET', undefined, 'Master', 409);
     check(closure.requestId === requests[0].id && requests.length === 2 && JSON.stringify(requests[0]) === JSON.stringify(requests[1])
@@ -590,6 +592,11 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       'The archive distinguishes an unsealed source from a preparing room that never had a source');
     check(await debriefRoom(1).textContent() === '等待雙封存' && await debriefRoom(3).textContent() === '沒有遊戲來源',
       'The receipt column distinguishes a waiting source from a room without a game server');
+    await api(debriefDetail(closure.requestId, 1), 'GET', undefined, 'Master', 409);
+    await api(debriefDetail(closure.requestId, 3), 'GET', undefined, 'Master', 409);
+    await api(debriefDetail(closure.requestId, 5), 'GET', undefined, 'Master', 404);
+    check(await showSeats(1).count() === 0 && await showSeats(3).count() === 0,
+      'Unsealed or source-free rooms cannot expose a receipt detail');
     const ending = await api(`/sessions/${preparing[0]}`);
     first(ending);
     await api(`/sessions/${ending.id}/combat-stream/seal`, 'POST', { streamId: ending.combatStream.streamId, finalSequence: 0 }, 'GameServer');
@@ -771,6 +778,25 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const { debriefReceipts: originalReceipts } = await api(sessionPath + '/world?includeDebriefReceipts=true');
     const [acknowledged] = originalReceipts.players;
     const { streamId, throughSequence, finalStreamSequence, worldSequence } = originalReceipts;
+    const detailPath = debriefDetail(evidenceId, 4);
+    const detailPanel = page.locator('#venue-debrief-seats'), detailStatus = page.locator('#venue-debrief-seats-status');
+    const seatRows = page.locator('#venue-debrief-seat-rows tr');
+    const activeReplacement = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [4] }, 'Master', 201);
+    active.add(activeReplacement.id);
+    await api(`/sessions/${activeReplacement.id}/players`, 'POST',
+      { playerId: randomUUID(), roomId: 4, name: 'Replacement fixture seat', headset: 'Quest3' });
+    await showSeats(4).click();
+    await detailStatus.filter({ hasText: '已確認 0／2 席' }).waitFor();
+    const beforeReceipt = await api(detailPath);
+    const roster = (await api(sessionPath)).players.sort((a, b) => a.seat - b.seat);
+    assert.deepEqual(beforeReceipt, { version: 1, requestId: evidenceId, sessionId: originalSession, roomId: 4, streamId,
+      throughSequence, finalStreamSequence, worldSequence,
+      players: roster.map(player => ({ seat: player.seat + 1, name: player.name, acknowledged: false })) });
+    await api(detailPath, 'GET', undefined, 'Room4', 403);
+    await api(detailPath, 'GET', undefined, 'GameServer', 403);
+    check(await seatRows.count() === 2 && !(await detailPanel.innerText()).includes('Replacement fixture seat')
+      && (await fetch(base + '/api' + detailPath, auth)).headers.get('cache-control') === 'no-store',
+      'The original archived room exposes only its terminal seats even while a new room roster uses the same room');
     await api(sessionPath + '/debrief-receipts', 'POST', { streamId, throughSequence, finalStreamSequence, worldSequence,
       players: [{ playerId: acknowledged.playerId, admissionId: acknowledged.admissionId, roomId: 4 }] }, 'GameServer', 204);
     const closurePath = '/venue/closure/' + evidenceId;
@@ -781,6 +807,50 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     assert.equal(Object.hasOwn(await api(closurePath), 'debriefReceipts'), false);
     await api(receiptsPath, 'GET', undefined, 'Room4', 403);
     await debriefRoom(4).filter({ hasText: '已確認 1／2 席 · 1 席未確認' }).waitFor();
+    await detailStatus.filter({ hasText: '已確認 1／2 席' }).waitFor();
+    check((await seatRows.allTextContents()).join('|') === roster.map(player => `${player.seat + 1}${player.name}`
+      + (player.admissionId === acknowledged.admissionId ? '已確認' : '未確認')).join('|'),
+      'A late acknowledgement updates the open original room without switching batches');
+    await page.locator('#venue-debrief-only-missing').check();
+    check(await seatRows.count() === 1 && (await seatRows.first().innerText()).includes('未確認'),
+      'The receipt filter leaves only the exact unconfirmed seat');
+    await page.setViewportSize({ width: 390, height: 844 });
+    check(await detailPanel.evaluate(panel => panel.scrollWidth <= panel.clientWidth + 1), 'The receipt detail fits the mobile console');
+    await page.setViewportSize({ width: 1440, height: 1080 });
+    await detailPanel.screenshot({ path: path.join(screenshots, 'venue-debrief-seats.png') });
+    const detailRoute = '**/api' + detailPath;
+    const foreignDetail = async route => {
+      const response = await route.fetch();
+      await route.fulfill({ response, json: { ...await response.json(), roomId: 3 } });
+    };
+    await page.route(detailRoute, foreignDetail);
+    try {
+      await page.locator('#venue-debrief-seats-refresh').click();
+      await detailStatus.filter({ hasText: '暫時無法確認原席位回條' }).waitFor();
+      check(await seatRows.count() === 0, 'A response for another room removes all previous detail rows');
+    } finally { await page.unroute(detailRoute, foreignDetail); }
+    let releaseDetail, finishDetail, startedDetail = false;
+    const detailGate = new Promise(resolve => { releaseDetail = resolve; });
+    const detailDone = new Promise(resolve => { finishDetail = resolve; });
+    const holdDetail = async route => {
+      startedDetail = true;
+      try {
+        const response = await route.fetch();
+        await detailGate;
+        await route.fulfill({ response });
+      } catch { /* Changing batch aborts the original request. */ }
+      finally { finishDetail(); }
+    };
+    await page.route(detailRoute, holdDetail);
+    try {
+      const request = page.waitForRequest(detailRoute);
+      await page.locator('#venue-debrief-seats-refresh').click(); await request;
+      await picker.selectOption(closure.requestId);
+      await detailPanel.waitFor({ state: 'hidden' });
+    } finally { releaseDetail(); if (startedDetail) await detailDone; await page.unroute(detailRoute, holdDetail); }
+    await picker.selectOption(evidenceId);
+    await showSeats(4).waitFor();
+    check(await detailPanel.isHidden() && await seatRows.count() === 0, 'A held old-batch receipt cannot reopen the detail after switching batches');
     const receiptUrl = base + '/api' + debriefExport(evidenceId);
     const receiptResponse = await fetch(receiptUrl, auth);
     const bytes = Buffer.from(await receiptResponse.arrayBuffer());

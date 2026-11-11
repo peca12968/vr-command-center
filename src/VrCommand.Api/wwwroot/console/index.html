@@ -172,6 +172,19 @@
           <div id="venue-closure-table" class="table-scroll" hidden>
             <table><thead><tr><th scope="col">房間</th><th scope="col">任務</th><th scope="col">戰鬥統計</th><th scope="col">世界回放</th><th scope="col">戰績回條</th><th scope="col">場次</th></tr></thead><tbody id="venue-closure-rows"></tbody></table>
           </div>
+          <section id="venue-debrief-seats" class="layout-report" aria-labelledby="venue-debrief-seats-title" hidden>
+            <h4 id="venue-debrief-seats-title" tabindex="-1">席位戰績回條</h4>
+            <div class="button-row">
+              <label class="check"><input id="venue-debrief-only-missing" type="checkbox" disabled>只顯示未確認</label>
+              <button id="venue-debrief-seats-refresh" type="button" class="quiet small">重新讀取</button>
+              <button id="venue-debrief-seats-close" type="button" class="quiet small">關閉席位明細</button>
+            </div>
+            <p id="venue-debrief-seats-status" class="hint" role="status"></p>
+            <div id="venue-debrief-seat-table" class="table-scroll" hidden><table>
+              <thead><tr><th scope="col">席位</th><th scope="col">玩家</th><th scope="col">回條</th></tr></thead>
+              <tbody id="venue-debrief-seat-rows"></tbody>
+            </table></div>
+          </section>
           <div id="venue-score-table" class="table-scroll" hidden>
             <table aria-label="本批最終戰績"><thead><tr><th scope="col">範圍</th><th scope="col">玩家</th><th scope="col">耗彈</th><th scope="col">命中</th><th scope="col">擊殺</th><th scope="col">中彈</th><th scope="col">耗損</th><th scope="col">命中率</th></tr></thead><tbody id="venue-score-rows"></tbody></table>
           </div>
@@ -480,7 +493,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.131 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.132 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

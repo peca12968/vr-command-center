@@ -12,6 +12,9 @@ internal sealed record VenueDebriefExport(int Version, Guid RequestId, VenueDebr
 internal sealed record VenueDebriefExportSession(Guid SessionId, Guid StreamId, long ThroughSequence,
     long FinalStreamSequence, long WorldSequence, VenueDebriefExportPlayer[] Players);
 internal sealed record VenueDebriefExportPlayer(Guid PlayerId, Guid AdmissionId, int RoomId, bool Acknowledged);
+internal sealed record VenueDebriefSeat(int Seat, string Name, bool Acknowledged);
+internal sealed record VenueDebriefSeats(int Version, Guid RequestId, Guid SessionId, int RoomId, Guid StreamId,
+    long ThroughSequence, long FinalStreamSequence, long WorldSequence, VenueDebriefSeat[] Players);
 
 public sealed partial class WorldRecordings
 {
@@ -88,6 +91,26 @@ public sealed partial class WorldRecordings
                     replay.ThroughSequence, players));
             }
             return new(1, batch.RequestId, sessions.ToArray());
+        }
+    }
+
+    internal VenueDebriefSeats ReadVenueDebriefSeats(Guid id, int roomId, OperatorIdentity actor)
+    {
+        lock (gate)
+        {
+            var batch = manager.ReadVenueEnd(id, actor);
+            var session = batch.Sessions.Select(item => manager.Get(item.SessionId, actor))
+                .SingleOrDefault(original => original.RoomIds.Contains(roomId))
+                ?? throw new KeyNotFoundException("The original End batch does not include this room.");
+            if (session.State != SessionState.Ended || session.CombatStream is not { Sealed: true } stream
+                || VenueWorldArchive(session, stream, actor) is not (VenueArchiveState.Sealed, { } replay))
+                throw new InvalidOperationException("The original session needs sealed combat and world data.");
+
+            var confirmed = ReadDebriefAdmissions(session.Id);
+            var players = session.Players.Where(player => player.RoomId == roomId).OrderBy(player => player.Seat)
+                .Select(player => new VenueDebriefSeat(player.Seat + 1, player.Name, confirmed.Contains(player.AdmissionId))).ToArray();
+            return new(1, batch.RequestId, session.Id, roomId, stream.StreamId, session.Sequence,
+                stream.AcceptedSequence, replay.ThroughSequence, players);
         }
     }
 

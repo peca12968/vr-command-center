@@ -11,7 +11,7 @@ async function main() {
   assert.match(config.base, /^http:\/\/127\.0\.0\.1:\d+$/);
   const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_CLOSURE_CHROMIUM,
     args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
-  const results = [], fieldEvidence = [], participation = [], receiptExports = [];
+  const results = [], fieldEvidence = [], participation = [], receiptExports = [], debriefSeats = [];
   let history, roomReplay, scores, alignment, missionTime, debriefReceipts;
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1080 }, acceptDownloads: true });
@@ -446,7 +446,7 @@ async function main() {
       results.push(replay);
       await page.locator('#tab-operations').click();
     }
-    for (const { batchId, zip, archived, debrief } of config.fieldEvidence ?? []) {
+    for (const { batchId, zip, archived, debrief, debriefSeats: detail } of config.fieldEvidence ?? []) {
       if (archived) {
         await page.locator('#venue-closure-load').click();
         await page.locator('#venue-closure-batch').selectOption(batchId);
@@ -470,6 +470,28 @@ async function main() {
         assert.equal(receipt.suggestedFilename(), `vr-command-venue-debrief-receipts-v1-${batchId}.json`);
         assert((await fs.readFile(await receipt.path())).equals(await fs.readFile(debrief)));
         receiptExports.push(batchId);
+      }
+      if (detail) {
+        const rooms = [];
+        const panel = page.locator('#venue-debrief-seats'), rows = page.locator('#venue-debrief-seat-rows tr');
+        for (const expected of JSON.parse(await fs.readFile(detail, 'utf8'))) {
+          const roomId = expected.roomId;
+          const route = `/api/venue/closure/${batchId}/rooms/${roomId}/debrief-receipts`;
+          const read = page.waitForResponse(reply => new URL(reply.url()).pathname === route);
+          await page.locator(`[data-venue-debrief-seats="${roomId}"]`).click();
+          const response = await read;
+          assert.equal(response.status(), 200);
+          assert.deepEqual(await response.json(), expected);
+          await rows.last().waitFor();
+          assert.deepEqual(await rows.evaluateAll(items => items.map(row => [...row.cells].map(cell => cell.textContent))),
+            expected.players.map(player => [String(player.seat), player.name, '已確認']));
+          await page.locator('#venue-debrief-only-missing').check();
+          assert.equal(await rows.count(), 0);
+          assert.match(await panel.innerText(), /沒有未確認席位/);
+          await page.locator('#venue-debrief-seats-close').click();
+          rooms.push({ roomId, sessionId: expected.sessionId, seats: expected.players.length });
+        }
+        debriefSeats.push({ batchId, rooms });
       }
     }
     if (config.history) {
@@ -497,7 +519,7 @@ async function main() {
   } finally {
     await browser.close();
   }
-  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation, scores, alignment, missionTime, debriefReceipts, receiptExports }, null, 2), { flag: 'wx' });
+  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation, scores, alignment, missionTime, debriefReceipts, receiptExports, debriefSeats }, null, 2), { flag: 'wx' });
 }
 main().catch(error => {
   const location = error.stack?.match(/check-venue-replay-native\.cjs:(\d+):(\d+)\)/);

@@ -12,6 +12,7 @@ import { mountVenueLaunchReview } from './venue-launch-review-ui.js';
 import { mountOperatorNetwork } from './operator-network-ui.js';
 import { mountReport, mountVenueReport } from './report-ui.js';
 import { mountVenueHistory } from './venue-history-ui.js';
+import { mountVenueDebriefSeats } from './venue-debrief-ui.js';
 import { mountReadiness, mountRoomReadiness } from './readiness-ui.js';
 import { mountConnections, validDestination } from './connection-ui.js';
 import { mountClosure } from './closure-ui.js';
@@ -32,6 +33,7 @@ const world = mountWorld(() => state.key, logout, venueEnemyText, master, downlo
 const report = mountReport(() => state, logout, () => { renderStatistics(); closure.update(); });
 const venueReport = mountVenueReport(() => state, logout, download);
 const venueHistory = mountVenueHistory(api, selectVenueClosure);
+const venueDebrief = mountVenueDebriefSeats(() => state, logout);
 const readiness = mountReadiness(() => state, logout);
 const roomReadiness = mountRoomReadiness(() => state, logout, applyVenuePermissions, venueClimateText, venueEnemyText, target => {
   if (!state.busy && !state.pending) tab('world', target);
@@ -811,9 +813,9 @@ function renderVenueClosure(report, loading = false) {
   $('venue-closure-table').hidden = true;
   $('venue-score-table').hidden = true;
   $('venue-score-rows').replaceChildren();
-  if (panel.hidden) { venueReport.update(null); $('venue-closure-summary').textContent = ''; return; }
+  if (panel.hidden) { venueReport.update(null); venueDebrief.update(null); $('venue-closure-summary').textContent = ''; return; }
   if (loading || batch === null) {
-    venueReport.update(null);
+    venueReport.update(null); venueDebrief.update(null);
     $('venue-closure-summary').textContent = loading ? '正在讀取選定的結束批次…' : '目前沒有已結束的全館批次。';
     return;
   }
@@ -823,13 +825,14 @@ function renderVenueClosure(report, loading = false) {
       || !Array.isArray(session.roomIds) || !session.roomIds.length || session.roomIds.length > 5
       || !session.roomIds.every(id => Number.isInteger(id) && id >= 1 && id <= 5)
       || !Object.hasOwn(archiveNames, session.combat) || !Object.hasOwn(archiveNames, session.world))) {
-    venueReport.update(null);
+    venueReport.update(null); venueDebrief.update(null);
     $('venue-closure-summary').textContent = '暫時無法確認全館封存狀態。';
     return;
   }
   $('venue-closure-summary').textContent = `${new Date(batch.recordedAtUtc).toLocaleString('zh-TW')} · 請等遊戲伺服器完成玩家戰績傳送與收尾。`;
   const sessions = [...batch.sessions].sort((a, b) => a.roomIds[0] - b.roomIds[0]);
   const receipts = venueDebriefRooms(batch, report.debriefReceipts);
+  venueDebrief.update(batch, receipts);
   const replayRooms = sessions.filter(session => session.roomIds.length === 1 && session.world === 'Sealed'
     && typeof session.replay?.streamId === 'string' && Number.isSafeInteger(session.replay.throughSequence)
     && session.replay.throughSequence > 0).map(session => ({ roomId: session.roomIds[0], sessionId: session.sessionId,
@@ -901,6 +904,13 @@ function renderVenueClosure(report, loading = false) {
       const status = element('div', session.roomIds.length > 1 ? `房間 ${roomId} · ${text}` : text);
       status.dataset.venueDebriefRoom = roomId;
       debrief.append(status);
+      if (venueDebrief.available(roomId)) {
+        const seats = element('button', '查看席位', 'quiet small');
+        seats.type = 'button'; seats.dataset.venueDebriefSeats = roomId;
+        seats.setAttribute('aria-label', `查看房間 ${roomId} 的戰績回條`);
+        seats.addEventListener('click', () => venueDebrief.open(roomId));
+        debrief.append(seats);
+      }
     }
     const result = row([`房間 ${session.roomIds.join('、')}`, session.missionName, archiveNames[session.combat], archiveNames[session.world], debrief, actions]);
     result.dataset.venueClosureSession = session.sessionId;
@@ -1589,6 +1599,7 @@ function tab(name, worldTarget = null) {
   replay.active(name === 'replay'); world.active(name === 'world', worldTarget); readiness.active(name === 'operations'); connections.active(name === 'operations');
   roomReadiness.active(name === 'operations');
   closure.active(name === 'operations');
+  venueDebrief.active(name === 'operations');
   alignment.active(name === 'missions' && master());
   alignmentPins.active(name === 'operations');
   seatDeployments.forEach(panel => panel.active(name === 'operations'));
