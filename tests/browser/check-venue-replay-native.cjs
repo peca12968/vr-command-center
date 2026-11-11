@@ -11,7 +11,7 @@ async function main() {
   assert.match(config.base, /^http:\/\/127\.0\.0\.1:\d+$/);
   const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_CLOSURE_CHROMIUM,
     args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
-  const results = [], fieldEvidence = [], participation = [], receiptExports = [], debriefSeats = [], debriefCsv = [];
+  const results = [], fieldEvidence = [], participation = [], receiptExports = [], debriefSeats = [], debriefCsv = [], debriefReplay = [];
   let history, roomReplay, scores, alignment, missionTime, debriefReceipts;
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1080 }, acceptDownloads: true });
@@ -483,6 +483,7 @@ async function main() {
           const response = await read;
           assert.equal(response.status(), 200);
           assert.equal(new URL(response.url()).searchParams.get('includeScores'), 'true');
+          assert.equal(new URL(response.url()).searchParams.get('includePlayerIds'), 'true');
           assert.deepEqual(await response.json(), expected);
           await rows.last().waitFor();
           assert.deepEqual(await rows.evaluateAll(items => items.map(row => [...row.cells].slice(0, 3).map(cell => cell.textContent))),
@@ -501,7 +502,35 @@ async function main() {
           await page.locator('#venue-debrief-only-missing').check();
           assert.equal(await rows.count(), 0);
           assert.match(await panel.innerText(), /沒有未確認席位/);
-          await page.locator('#venue-debrief-seats-close').click();
+          if (personal && roomId === personal.roomId) {
+            await page.locator('#venue-debrief-only-missing').uncheck();
+            const player = expected.players.find(row => row.seat === personal.seat);
+            const world = `/api/sessions/${expected.sessionId}/world`;
+            const watch = page.waitForRequest(request => new URL(request.url()).pathname === world + '/watch');
+            const search = page.waitForResponse(reply => new URL(reply.url()).pathname === world + '/event-frames');
+            await page.locator(`[data-venue-debrief-replay="${player.seat}"]`).click();
+            const query = new URL((await watch).url()).searchParams;
+            assert.deepEqual([query.get('mode'), query.get('fromFrame')], ['replay', String(expected.worldSequence)]);
+            const eventResponse = await search;
+            const { sessionId, streamId, playerId, throughFrame, frames } = await eventResponse.json();
+            assert.deepEqual([sessionId, streamId, playerId, throughFrame, new URL(eventResponse.url()).searchParams.get('roomId')],
+              [expected.sessionId, expected.streamId, player.playerId, expected.worldSequence, String(roomId)]);
+            assert.equal(await page.locator('#world-room').inputValue(), String(roomId));
+            assert.match(await page.locator('#world-review-player-name').innerText(), new RegExp(playerId.slice(0, 8)));
+            const canvas = page.locator('#world-canvas');
+            assert.equal(Number(await canvas.getAttribute('data-sequence')), throughFrame);
+            if (frames.length) {
+              await page.locator(`#world-event-search-results button[data-frame-sequence="${frames[0].frameSequence}"]`).click();
+              await page.waitForFunction(sequence => Number(document.querySelector('#world-canvas').dataset.sequence) === sequence,
+                frames[0].frameSequence, { polling: 100 });
+              assert.equal(await page.locator('#world-events tr').count(), frames[0].matchCount);
+            }
+            await page.locator('#world-review').screenshot({ path: path.join(path.dirname(output), `${config.mode}-${batchId}-seat-replay.png`) });
+            debriefReplay.push({ batchId, sessionId, roomId, playerId, streamId, throughFrame, frames });
+            await page.locator('#tab-operations').click();
+          } else {
+            await page.locator('#venue-debrief-seats-close').click();
+          }
           rooms.push({ roomId, sessionId: expected.sessionId, seats: expected.players.length });
         }
         debriefSeats.push({ batchId, rooms });
@@ -532,7 +561,7 @@ async function main() {
   } finally {
     await browser.close();
   }
-  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation, scores, alignment, missionTime, debriefReceipts, receiptExports, debriefSeats, debriefCsv }, null, 2), { flag: 'wx' });
+  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation, scores, alignment, missionTime, debriefReceipts, receiptExports, debriefSeats, debriefCsv, debriefReplay }, null, 2), { flag: 'wx' });
 }
 main().catch(error => {
   const location = error.stack?.match(/check-venue-replay-native\.cjs:(\d+):(\d+)\)/);

@@ -782,7 +782,9 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const { streamId, throughSequence, finalStreamSequence, worldSequence } = originalReceipts;
     const detailPath = debriefDetail(evidenceId, 4);
     const scoredDetailPath = detailPath + '?includeScores=true';
-    const detailRoute = url => url.pathname === `/api${detailPath}` && url.searchParams.get('includeScores') === 'true';
+    const identifiedDetailPath = scoredDetailPath + '&includePlayerIds=true';
+    const detailRoute = url => url.pathname === `/api${detailPath}` && url.searchParams.get('includeScores') === 'true'
+      && url.searchParams.get('includePlayerIds') === 'true';
     const detailPanel = page.locator('#venue-debrief-seats'), detailStatus = page.locator('#venue-debrief-seats-status');
     const seatRows = page.locator('#venue-debrief-seat-rows tr');
     const activeReplacement = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [4] }, 'Master', 201);
@@ -800,12 +802,16 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await api(detailPath, 'GET', undefined, 'GameServer', 403);
     await api(scoredDetailPath, 'GET', undefined, 'Room4', 403);
     await api(scoredDetailPath, 'GET', undefined, 'GameServer', 403);
+    await api(identifiedDetailPath, 'GET', undefined, 'Room4', 403);
+    await api(identifiedDetailPath, 'GET', undefined, 'GameServer', 403);
     check(await seatRows.count() === 2 && !(await detailPanel.innerText()).includes('Replacement fixture seat')
       && (await fetch(base + '/api' + detailPath, auth)).headers.get('cache-control') === 'no-store',
       'The original archived room exposes only its terminal seats even while a new room roster uses the same room');
     const finalScore = { ammoUsed: 0, shotsHit: 0, kills: 0, hitsReceived: 0, damageTaken: 0, accuracyPercent: 0, health: 100 };
     const scored = await fetch(base + '/api' + scoredDetailPath, auth);
     assert.deepEqual(await scored.json(), { ...beforeReceipt, players: beforeReceipt.players.map(row => ({ ...row, score: finalScore })) });
+    assert.deepEqual(await api(identifiedDetailPath), { ...beforeReceipt, players: beforeReceipt.players.map((row, index) =>
+      ({ ...row, score: finalScore, playerId: roster[index].id })) });
     check(scored.headers.get('cache-control') === 'no-store'
       && (await seatRows.evaluateAll(rows => rows.map(row => [...row.cells].slice(4).map(cell => cell.textContent).join('|')))).join(';')
         === '0|0|0|0|0|0%|100;0|0|0|0|0|0%|100',
@@ -822,6 +828,19 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       await detailStatus.filter({ hasText: '暫時無法確認原席位回條' }).waitFor();
       check(await seatRows.count() === 0, 'An invalid score clears the table without keeping prior values');
     } finally { await page.unroute(detailRoute, brokenScore); }
+    const repeatedPlayer = async route => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.players[1].playerId = body.players[0].playerId;
+      await route.fulfill({ response, json: body });
+    };
+    await page.route(detailRoute, repeatedPlayer);
+    try {
+      await page.locator('#venue-debrief-seats-refresh').click();
+      await detailStatus.filter({ hasText: '暫時無法確認原席位回條' }).waitFor();
+      check(await page.locator('[data-venue-debrief-replay]').count() === 0,
+        'Repeated player identities cannot expose a seat replay action');
+    } finally { await page.unroute(detailRoute, repeatedPlayer); }
     await api(sessionPath + '/debrief-receipts', 'POST', { streamId, throughSequence, finalStreamSequence, worldSequence,
       players: [{ playerId: acknowledged.playerId, admissionId: acknowledged.admissionId, roomId: 4 }] }, 'GameServer', 204);
     const closurePath = '/venue/closure/' + evidenceId;
@@ -875,10 +894,38 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       await csvStatus.filter({ hasText: '暫時無法下載原封存戰績' }).waitFor();
       check(unexpectedCsv === 0 && await csvButton.isEnabled(), 'A substituted session filename is rejected and the exact seat can retry');
     } finally { await page.unroute(csvRoute, foreignCsv); page.off('download', unexpected); }
+    const otherPlayerCsv = async route => {
+      const response = await route.fetch();
+      await route.fulfill({ response, headers: { ...response.headers(), 'content-disposition':
+        `attachment; filename=vr-command-report-v1-${originalSession}-player-${acknowledged.playerId}.csv` } });
+    };
+    await page.route(csvRoute, otherPlayerCsv); page.on('download', unexpected);
+    try {
+      await csvButton.click();
+      await csvStatus.filter({ hasText: '暫時無法下載原封存戰績' }).waitFor();
+      check(unexpectedCsv === 0 && await csvButton.isEnabled(), 'A different player CSV from the same archive is refused');
+    } finally { await page.unroute(csvRoute, otherPlayerCsv); page.off('download', unexpected); }
     await page.setViewportSize({ width: 390, height: 844 });
     check(await detailPanel.evaluate(panel => panel.scrollWidth <= panel.clientWidth + 1), 'The receipt detail fits the mobile console');
     await page.setViewportSize({ width: 1440, height: 1080 });
     await detailPanel.screenshot({ path: path.join(screenshots, 'venue-debrief-seats.png') });
+    const worldPath = `/api/sessions/${originalSession}/world`;
+    const watchSeat = page.waitForRequest(request => new URL(request.url()).pathname === worldPath + '/watch');
+    const findSeat = page.waitForResponse(response => new URL(response.url()).pathname === worldPath + '/event-frames');
+    await page.locator(`[data-venue-debrief-replay="${missing.seat + 1}"]`).click();
+    const watch = new URL((await watchSeat).url()).searchParams;
+    const search = await findSeat;
+    const personalFrames = await search.json();
+    check(watch.get('mode') === 'replay' && watch.get('fromFrame') === String(worldSequence)
+      && personalFrames.playerId === missing.id && new URL(search.url()).searchParams.get('roomId') === '4'
+      && personalFrames.throughFrame === worldSequence
+      && personalFrames.streamId === streamId && await detailPanel.isHidden()
+      && await page.locator('#world-recording').inputValue() === originalSession && await page.locator('#world-room').inputValue() === '4'
+      && (await page.locator('#world-review-player-name').innerText()).includes(missing.id.slice(0, 8)),
+      'The unconfirmed seat opens its original scoped replay even after the room has been reused');
+    await page.locator('#tab-operations').click();
+    await showSeats(4).click();
+    await detailStatus.filter({ hasText: '已確認 1／2 席' }).waitFor();
     let releaseCsv, finishCsv, startedCsv = false;
     const csvGate = new Promise(resolve => { releaseCsv = resolve; });
     const csvDone = new Promise(resolve => { finishCsv = resolve; });

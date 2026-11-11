@@ -1677,7 +1677,7 @@ def main():
                     check(detail == expected and detail_headers['Cache-Control'] == 'no-store'
                           and len(detail['players']) == players_per_room and all(player['acknowledged'] for player in detail['players']),
                           f'{label} room {room} seat detail matches the original sealed roster and native receipts')
-                    scored_route = detail_route + '?includeScores=true'
+                    scored_route = detail_route + '?includeScores=true&includePlayerIds=true'
                     scored, score_headers = request(scored_route, raw_response=True)
                     request(scored_route, role=f'Room{room}', expected=403)
                     scores = []
@@ -1696,8 +1696,8 @@ def main():
                         seat_reports.append({'roomId': room, 'seat': seat, 'filename': name,
                                              'sha256': hashlib.sha256(csv_bytes).hexdigest()})
                     view = json.loads(scored)
-                    check(view == {**expected, 'players': [dict(seat, score=score)
-                          for seat, score in zip(expected['players'], scores, strict=True)]}
+                    check(view == {**expected, 'players': [dict(seat, score=score, playerId=player['id'])
+                          for seat, score, player in zip(expected['players'], scores, roster, strict=True)]}
                           and score_headers['Cache-Control'] == 'no-store',
                           f'{label} room {room} seat scores match all seven metrics of the original sealed personal CSVs')
                     seat_views.append(view)
@@ -1896,6 +1896,18 @@ def main():
             csv_checks = [{'batchId': case['batchId'], **next(row for row in reversed(read(Path(case['debriefSeatReports'])))
                            if row['roomId'] == 5)} for case in cases]
             check(result['debriefCsv'] == csv_checks, mode + ' shipped console downloads the exact original personal seat CSV')
+            replays = []
+            for case in cases:
+                room = next(row for row in read(Path(case['debriefSeats'])) if row['roomId'] == 5)
+                player = room['players'][-1]
+                events = request(f'/api/sessions/{room["sessionId"]}/world/event-frames?afterFrame=0'
+                                 f'&throughFrame={room["worldSequence"]}&roomId=5&playerId={player["playerId"]}')
+                assert not args.check_room_combat or events['frames']
+                replays.append({'batchId': case['batchId'], 'sessionId': room['sessionId'], 'roomId': 5,
+                                'playerId': player['playerId'], 'streamId': room['streamId'],
+                                'throughFrame': room['worldSequence'], 'frames': events['frames']})
+            check(result['debriefReplay'] == replays,
+                  mode + ' shipped console opens each original room five seat replay and its exact event frames')
     def verify_live_room_navigation(entries, clients, linked):
         topology = 'Linked' if linked else 'Independent'
         rooms = []

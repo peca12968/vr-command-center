@@ -9,22 +9,23 @@ function validScore(score) {
     && sequence(score.health) && score.health <= 100;
 }
 
-export function mountVenueDebriefSeats(current, unauthorized, save) {
+export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) {
   const panel = $('venue-debrief-seats'), title = $('venue-debrief-seats-title');
   const rows = $('venue-debrief-seat-rows'), status = $('venue-debrief-seats-status');
   const table = $('venue-debrief-seat-table'), onlyMissing = $('venue-debrief-only-missing');
   const refresh = $('venue-debrief-seats-refresh');
   const csvStatus = $('venue-debrief-csv-status');
   let active = false, rooms = new Map(), target = null, controller = null, players = null;
-  let csvRequest = null;
+  let csvRequest = null, throughCombatSequence = null;
 
   function updateCsvButtons() {
     for (const button of rows.querySelectorAll('[data-venue-debrief-csv]')) button.disabled = !!csvRequest;
   }
 
-  async function downloadSeat(seat) {
+  async function downloadSeat(player) {
     const { actor, key, epoch } = current(), requested = target;
-    if (!active || !requested || csvRequest || actor?.role !== 'Master' || !players?.some(player => player.seat === seat)) return;
+    if (!active || !requested || csvRequest || actor?.role !== 'Master' || !players?.includes(player)) return;
+    const { seat, playerId } = player;
     const request = new AbortController(); csvRequest = request;
     const timeout = setTimeout(() => request.abort(), 8000);
     const inScope = () => csvRequest === request && active && current().epoch === epoch && target?.id === requested.id;
@@ -38,9 +39,8 @@ export function mountVenueDebriefSeats(current, unauthorized, save) {
       if (!response.ok) throw new Error('Unavailable');
       const contentType = response.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase();
       const name = response.headers.get('Content-Disposition')?.match(/^attachment;\s*filename="?([^";\s]+)"?(?:;|$)/i)?.[1];
-      const prefix = `vr-command-report-v1-${requested.sessionId}-player-`;
-      if (contentType !== 'text/csv' || !name?.startsWith(prefix) || !name.endsWith('.csv')
-        || !uuid.test(name.slice(prefix.length, -4))) throw new Error('Mismatch');
+      if (contentType !== 'text/csv' || name !== `vr-command-report-v1-${requested.sessionId}-player-${playerId}.csv`)
+        throw new Error('Mismatch');
       const blob = await response.blob();
       if (!inScope()) return;
       save(name, blob);
@@ -50,6 +50,14 @@ export function mountVenueDebriefSeats(current, unauthorized, save) {
       clearTimeout(timeout);
       if (csvRequest === request) { csvRequest = null; updateCsvButtons(); }
     }
+  }
+
+  function replaySeat(player) {
+    const { actor, busy, pending } = current();
+    if (!active || !target || actor?.role !== 'Master' || busy || pending || !players?.includes(player)) return;
+    openReplay({ mode: 'replay', complete: true, sessionId: target.sessionId, roomId: target.roomId,
+      streamId: target.streamId, throughSequence: target.worldSequence, throughCombatSequence,
+      playerId: player.playerId, playerName: player.name });
   }
 
   function render() {
@@ -62,8 +70,15 @@ export function mountVenueDebriefSeats(current, unauthorized, save) {
       button.type = 'button'; button.className = 'quiet small'; button.textContent = '下載 CSV';
       button.setAttribute('aria-label', `下載第 ${player.seat} 席個人戰績 CSV`);
       button.dataset.venueDebriefCsv = String(player.seat);
-      button.addEventListener('click', () => downloadSeat(player.seat));
-      row.insertCell().append(button);
+      button.addEventListener('click', () => downloadSeat(player));
+      const replay = document.createElement('button');
+      replay.type = 'button'; replay.className = 'quiet small'; replay.textContent = '個人回放';
+      replay.setAttribute('aria-label', `開啟第 ${player.seat} 席個人回放`);
+      replay.dataset.venueDebriefReplay = String(player.seat);
+      replay.addEventListener('click', () => replaySeat(player));
+      const actions = document.createElement('div');
+      actions.className = 'button-row'; actions.append(button, replay);
+      row.insertCell().append(actions);
       for (const value of [...countFields.map(field => player.score[field]), `${player.score.accuracyPercent}%`, player.score.health])
         row.insertCell().textContent = value;
       return row;
@@ -77,7 +92,7 @@ export function mountVenueDebriefSeats(current, unauthorized, save) {
   }
 
   function close() {
-    controller?.abort(); controller = null; target = null; players = null;
+    controller?.abort(); controller = null; target = null; players = null; throughCombatSequence = null;
     csvRequest?.abort(); csvRequest = null; csvStatus.textContent = '';
     panel.hidden = true; onlyMissing.checked = false; status.textContent = ''; render();
   }
@@ -85,13 +100,13 @@ export function mountVenueDebriefSeats(current, unauthorized, save) {
   async function read() {
     const state = current(), requested = target;
     if (!active || !requested || controller || state.actor?.role !== 'Master') return;
-    const request = new AbortController(); controller = request; players = null;
+    const request = new AbortController(); controller = request; players = null; throughCombatSequence = null;
     const timeout = setTimeout(() => request.abort(), 8000);
     const stateEpoch = state.epoch;
     const inScope = () => controller === request && active && current().epoch === stateEpoch && target?.id === requested.id;
     render(); status.textContent = '正在讀取原批次的席位回條…';
     try {
-      const response = await fetch(`/api/venue/closure/${requested.batchId}/rooms/${requested.roomId}/debrief-receipts?includeScores=true`, {
+      const response = await fetch(`/api/venue/closure/${requested.batchId}/rooms/${requested.roomId}/debrief-receipts?includeScores=true&includePlayerIds=true`, {
         headers: { Authorization: 'Bearer ' + state.key }, cache: 'no-store', signal: request.signal
       });
       if (!inScope()) return;
@@ -104,10 +119,12 @@ export function mountVenueDebriefSeats(current, unauthorized, save) {
         || !sequence(body.throughSequence) || body.throughSequence < target.appliedAtSequence || !sequence(body.finalStreamSequence)
         || !Array.isArray(body.players) || body.players.length !== target.rosterCount
         || new Set(body.players.map(player => player?.seat)).size !== target.rosterCount
+        || new Set(body.players.map(player => player?.playerId)).size !== target.rosterCount
         || !body.players.every(player => Number.isInteger(player?.seat) && player.seat >= 1 && player.seat <= 5
-          && typeof player.name === 'string' && typeof player.acknowledged === 'boolean' && validScore(player.score))
+          && uuid.test(player.playerId ?? '') && typeof player.name === 'string' && typeof player.acknowledged === 'boolean' && validScore(player.score))
         || body.players.filter(player => player.acknowledged).length < target.confirmedCount) throw new Error('Mismatch');
       players = [...body.players].sort((a, b) => a.seat - b.seat);
+      throughCombatSequence = body.finalStreamSequence;
     } catch { if (inScope()) status.textContent = '暫時無法確認原席位回條，可重新讀取。'; }
     finally {
       clearTimeout(timeout);
