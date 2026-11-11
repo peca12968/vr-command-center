@@ -71,6 +71,10 @@ Windows 三包原生測試可加 `--prepare-independent-set --mission-template <
 
 主控可用 `GET /api/venue/closure/{id}/independent-plan` 讀取原批次 ID 與依房號排列的 `roomId`、`sessionId` 和 `revision`。不存在的批次回應 `404`。合併場次或缺少任一房間的批次回應 `409`。
 
+管理包 0.31.140 也可從同一入口套用完整合併場次的原任務。選取該批次後按「套用本批五房任務版本」，準備區切到「五房全連線」，預覽原保存版本的簡報、時間、環境、敵軍與場地。即使任務庫已保存新版，仍會選取當時使用的版本。場地通過合併模式檢查且五房空閒時，可按「建立準備場次」建立新的合併場次。編輯中的草稿會保留。
+
+主控可用 `GET /api/venue/closure/{id}/linked-plan` 讀取原批次、場次識別、五個房號及保存版本。端點使用 `Cache-Control: no-store`，且只接受包含一個完整合併場次的結束批次。不存在的批次回應 `404`，其他批次回應 `409`。
+
 ## API
 
 所有端點須 /api Bearer 認證並傳入已認證身分。任務是全館共用範本，Master、RoomController、GameServer 可讀；建立／修訂只允許 Master，受信任的 in-process Internal 可用於工具／匯入，HTTP 不配發 Internal。版本作者來自服務端身分，請求 body 不提供作者欄位。舊 JSON 匯入版標記為 Internal，這表示舊來源沒有作者資訊，不代表可以識別原始操作人。
