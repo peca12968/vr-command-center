@@ -401,9 +401,22 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 | `clean-local-connection`、`check-expiry-before-launch` | 新連線檔已切換並通過驗證，尚未送出啟動。後者須取得新票券。 |
 | `launch-game` | 新連線檔已通過驗證，啟動指令未成功。請確認裝置和入場狀態。 |
 
-排除故障後，可在新裝置清單中只列待重試的失敗席位和 `not-attempted` 席位，再以 `-AllowPartialMap -DeployMappedSeats` 執行上方批次命令。原部署包仍須通過線上核對且票券有效。排除已回報 `launch-requested` 的席位可避免再次停止那些遊戲。這個恢復流程沿用已安裝的 APK。遊戲實際入場及追蹤請再從主控台核對。
-
 整批回報以 `filesVerified: true` 標示已完成檔案核對並送出啟動的席位。遊戲是否完成入場及追蹤，請用同一部署 ZIP 再核對。 [追蹤操作](#核對頭盔追蹤席位) · [Android 檔案傳輸](https://developer.android.com/tools/adb) · [Android 校驗工具](https://android.googlesource.com/platform/external/toybox/%2B/40d21c59f76a9388b0ebb5c4c706732c2d034a67/toys/lsb/md5sum.c)
+
+#### 從原部署報告重試未完成席位
+
+正式部署請將 JSON 輸出保存到新的私人檔案。排除故障後，提供最近一次 `phase: "deployment"` 且 `complete: false` 的原始報告，搭配原部署 ZIP、原裝置清單與相同 APK 核對條件。部分清單沿用 `-AllowPartialMap`。下例使用原發行報告核對 APK。若首次使用 `-ExpectedVersionCode`，重試沿用相同版本代碼。
+
+```powershell
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
+    -DeviceMap .\device-map.json -ReleaseReport .\venue-release.json -DeployMappedSeats `
+    -ManagementApi http://127.0.0.1:5081 -RetryIncomplete .\quest-deploy-first.json `
+    > .\quest-deploy-retry.json
+```
+
+工具跳過報告裡已送出啟動的裝置，只查詢及部署其餘席位。它會核對原 ZIP 雜湊、房席分配、Android 裝置身分及原 APK 條件。待重試的 ADB 連線若指向另一台頭盔，即使房席清單沒有改動，仍會在寫入前停下。每個待重試席位寫入前仍須通過原五房的線上檢查，所有票券須仍有效。報告只保存加鹽雜湊及必要場次資訊。
+
+進入寫入階段後，新報告會累計先前及本次已送出啟動的結果。若再中斷，下一輪使用最新的部署報告；驗收時也使用最新的累計報告。若重試只走到 `phase: "preflight"`，繼續保留上一份部署報告。若沒有完整回條、前次啟動結果不明、需替換頭盔或原票券已過期，先從主控與實機核對目前狀態，再用只列待部署席位的新清單和有效票券，以 `-AllowPartialMap -DeployMappedSeats` 重新部署。
 
 #### 部署指定的 Quest 席位
 

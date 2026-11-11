@@ -153,6 +153,7 @@ def main():
     p.add_argument('--check-vr-seat-files',action='store_true',help='Verify each original VR venue seat file against its live native endpoint before launch')
     p.add_argument('--check-quest-vr-deploy',action='store_true',help='Run Quest preflight and mapped mock deployment from each original VR venue ZIP')
     p.add_argument('--check-quest-vr-partial-map',action='store_true',help='Use a mixed headset roster and deploy five selected Quest seats from each original VR venue ZIP')
+    p.add_argument('--check-quest-deployment-retry',action='store_true',help='Interrupt and resume the original mapped VR deployment without repeating successful seats')
     p.add_argument('--check-windows-venue-staging',action='store_true',help='Stage VIVE XR seats from the original VR or mixed venue ZIP')
     p.add_argument('--check-venue-openxr',action='store_true',help='Use one graphical mock OpenXR seat alongside 24 desktop peers per topology')
     p.add_argument('--check-venue-pose-review', action='store_true', help='Open the original OpenXR interruption frame and return to the same live room')
@@ -271,6 +272,8 @@ def main():
         p.error('--check-quest-vr-deploy requires --check-vr-venue-tickets')
     if args.check_quest_vr_partial_map and (not args.check_vr_venue_tickets or args.check_quest_vr_deploy):
         p.error('--check-quest-vr-partial-map requires --check-vr-venue-tickets without the full Quest fleet check')
+    if args.check_quest_deployment_retry and not (args.check_quest_vr_deploy or args.check_quest_vr_partial_map):
+        p.error('--check-quest-deployment-retry requires one of the mapped VR checks')
     if args.check_windows_venue_staging and not (args.check_quest_vr_partial_map or args.mixed_venue_bundle_only):
         p.error('--check-windows-venue-staging requires --check-quest-vr-partial-map or --mixed-venue-bundle-only')
     if args.peer_diagnostics and not args.player_package:p.error('--peer-diagnostics requires the three-package check')
@@ -4005,6 +4008,11 @@ def main():
             mapping.write_text(json.dumps({'version': 1, 'seats': [*rows, {'roomId': 2, 'seat': 2, 'serial': 'fixture-07'}]}), encoding='utf-8')
             refused = subprocess.run([*mapped, '-DeployMappedSeats'], env=environment, timeout=45, encoding='utf-8',
                                      cwd=destination, capture_output=True)
+            if not refused.stdout.strip():
+                locked = 'Another Quest deployment is running' in refused.stderr
+                save(f'vr-venue-{mode.lower()}-partial-rejection-no-report.json',
+                     {'exitCode': refused.returncode, 'deploymentMutexBusy': locked})
+                raise RuntimeError(f'{mode} Quest deployment did not emit a report (exit {refused.returncode}, mutex busy: {locked})')
             result = json.loads(refused.stdout)
             check(refused.returncode == 1 and result['complete'] is False and result['managementVerified'] is True
                   and result['mappedSeats'] == 6 and not any(destination.glob('fixture-*'))
@@ -4076,7 +4084,7 @@ def main():
         kind = 'partial' if partial else 'mapped'
         save(f'{prefix}-venue-{mode.lower()}-{kind}-preflight.json', preview)
         save(f'{prefix}-venue-{mode.lower()}-{kind}-deployment.json', applied)
-        if not mixed:
+        if not (mixed or args.check_quest_deployment_retry):
             return
 
         recovery = destination / 'recovery'
@@ -4095,26 +4103,34 @@ def main():
               [None, 'verify-active-connection', *([None] * len(pending))]
               and sum(' shell monkey ' in line for line in log.read_text(encoding='utf-8').splitlines()) == 1
               and not any((recovery / row['serial']).exists() for row in pending),
-              'mixed recovery identifies an active-file verification failure after the first successful seat')
+              mode + ' deployment identifies an active-file verification failure after the first successful seat')
         previous = recovery / first['serial'] / 'vr-connection.json'
         previous_bytes = previous.read_bytes()
-        log.unlink()
         retry_rows = [failed, *pending]
-        mapping.write_text(json.dumps({'version': 1, 'seats': retry_rows}), encoding='utf-8')
+        map_bytes = mapping.read_bytes()
+        report_file = recovery / 'interrupted-deployment.json'
+        report_file.write_text(interrupted.stdout, encoding='utf-8')
+        (recovery / 'interrupted-adb.log').write_bytes(log.read_bytes())
+        log.unlink()
         recovery_env['VR_QUEST_FLEET_FAULTS'] = ''
-        retried = json.loads(subprocess.check_output([*mapped, '-DeployMappedSeats'], env=recovery_env, timeout=45,
+        retried = json.loads(subprocess.check_output([*mapped, '-DeployMappedSeats', '-RetryIncomplete', str(report_file)], env=recovery_env, timeout=45,
                                                      encoding='utf-8', cwd=destination))
         retry_commands = log.read_text(encoding='utf-8').splitlines()
-        check(retried['complete'] and retried['managementVerified'] and retried['mappedSeats'] == len(retry_rows)
+        check(retried['complete'] and retried['managementVerified']
+              and (not partial or retried['mappedSeats'] == len(rows))
+              and retried['devices'][0] == failed_report['devices'][0]
+              and retried['retry'] == failed_report['retry']
+              and mapping.read_bytes() == map_bytes
               and [(device['roomId'], device['seat'], device['status'], device.get('filesVerified')) for device in retried['devices']]
-              == [(row['roomId'], row['seat'], 'launch-requested', True) for row in retry_rows]
+              == [(row['roomId'], row['seat'], 'launch-requested', True) for row in rows]
               and {line.split()[1] for line in retry_commands if line.startswith('-s ')} == {row['serial'] for row in retry_rows}
               and previous.read_bytes() == previous_bytes
               and all((recovery / row['serial'] / 'vr-connection.json').read_bytes() ==
                       (destination / row['serial'] / 'vr-connection.json').read_bytes() for row in retry_rows),
-              'mixed retry repairs only the failed and pending seats with the original signed bundle')
-        save('mixed-venue-interrupted-deployment.json', failed_report)
-        save('mixed-venue-retried-deployment.json', retried)
+              mode + ' retry touches only failed and pending seats with the original signed bundle and map')
+        recovery_prefix = 'mixed-venue' if mixed else f'vr-venue-{mode.lower()}'
+        save(f'{recovery_prefix}-interrupted-deployment.json', failed_report)
+        save(f'{recovery_prefix}-retried-deployment.json', retried)
     try:
         management_port=venue_browser_port() if args.check_venue_plan_ui else free()
         subprocess.run([str(control_exe),'--init',str(data),'--port',str(management_port),'--report',str(out/'control-init.json')],env=env,check=True,timeout=30);keys=read(data/'operator-keys.json')['OperatorKeys'];marker=read(data/'control-instance.json');uri='http://127.0.0.1:'+str(marker['port'])
@@ -4663,6 +4679,7 @@ def main():
             'lanPreflight':args.check_lan_preflight,
             'vrVenueTickets':args.check_vr_venue_tickets,
             'questVrDeploy':args.check_quest_vr_deploy,
+            'questDeploymentRetry':args.check_quest_deployment_retry,
             'questVrPartialMap':args.check_quest_vr_partial_map,
             'venueOpenxr':args.check_venue_openxr,
             'venuePoseReview':args.check_venue_pose_review,

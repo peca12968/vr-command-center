@@ -37,6 +37,7 @@ switch -CaseSensitive ($args[3]) {
             if ($fault -ceq 'identity-missing') { exit 0 }
             if ($fault -ceq 'identity-invalid') { 'unknown'; exit 0 }
             if ($fault -ceq 'identity-duplicate') { 'HARDWARE-SERIAL-SHARED-CANARY'; exit 0 }
+            if ($fault -ceq 'identity-first-device') { 'HARDWARE-SERIAL-fixture-01'; exit 0 }
             if ($fault -ceq 'identity-changed') {
                 $reads = @(Get-Content -LiteralPath (Join-Path $root 'adb.log') |
                     Where-Object { $_ -ceq "-s $serial shell getprop ro.serialno" })

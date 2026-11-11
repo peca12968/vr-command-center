@@ -1276,6 +1276,125 @@ else:
             with self.subTest(fault=fault):
                 self.assert_mapped_deployment_stops(fault, status, step, partial=True)
 
+    def test_mapped_deployment_retries_only_original_unfinished_seats(self):
+        files, _ = self.bundle('Independent')
+        original = self.write_bundle(files)
+        original_bytes = original.read_bytes()
+        mapping, _ = self.device_map()
+        rows = json.loads(mapping.read_bytes())
+        rows['seats'] = [row for row in rows['seats'] if row['roomId'] == 1 and row['seat'] <= 3]
+        mapping.write_text(json.dumps(rows), encoding='utf-8')
+        release, _, release_env = self.release_report()
+        sessions = {str(session): 7777 + index for index, session in enumerate(self.session_ids)}
+        calls = []
+
+        class Handler(BaseHTTPRequestHandler):
+            def respond(self, body):
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(body).encode())
+
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                calls.append(body)
+                response = {'topology': 'Independent', 'allMatched': True, 'seats': [
+                    {'roomId': room, 'seat': seat, 'status': 'matched'} for room in range(1, 6) for seat in range(5)]}
+                if body.get('requireLiveSource'):
+                    response['liveSourceVerified'] = True
+                self.respond(response)
+
+            def do_GET(self):
+                session = self.path.split('/')[3]
+                self.respond({'version': 1, 'sessionId': session, 'sessionEnded': False, 'address': '192.168.1.10', 'port': sessions[session]})
+
+            def log_message(self, *args):
+                pass
+
+        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                command = ['pwsh', '-NoProfile', '-NonInteractive', '-File', str(ROOT/'scripts/deploy-quest.ps1'),
+                           '-VenueBundle', str(original), '-DeviceMap', str(mapping), '-AllowPartialMap',
+                           '-ReleaseReport', str(release), '-AdbPath', str(ROOT/'tests/fixtures/mock-quest-fleet.ps1'),
+                           '-DeployMappedSeats', '-ManagementApi', f'http://127.0.0.1:{server.server_port}']
+                log = self.root/'adb.log'
+                first_report = self.root/'first.json'
+
+                def invoke(*extra, faults=None):
+                    return subprocess.run([*command, *extra], capture_output=True, encoding='utf-8', timeout=20,
+                        env={**os.environ, **release_env, 'VR_QUEST_FLEET_FIXTURE': str(self.root),
+                             'VR_COMMAND_MASTER_KEY': 'PRIVATE_MASTER_CANARY', 'VR_QUEST_FLEET_FAULTS': json.dumps(faults or {})})
+
+                first = invoke(faults={'fixture-02': 'config-active-changed'})
+                self.assertEqual(1, first.returncode, first.stderr)
+                interrupted = json.loads(first.stdout)
+                self.assertEqual(['launch-requested','file-verification-failed','not-attempted'],
+                                 [row['status'] for row in interrupted['devices']])
+                self.assertEqual(hashlib.sha256(original_bytes).hexdigest(), interrupted['retry']['venueSha256'])
+                first_report.write_text(first.stdout, encoding='utf-8')
+                done_config = self.root/'fixture-01/vr-connection.json'
+                done_bytes = done_config.read_bytes()
+                log.unlink()
+                retry = ('-RetryIncomplete', str(first_report))
+
+                original.write_bytes(original_bytes + b'ignored ZIP suffix')
+                self.assert_rejected(invoke(*retry), 'original ZIP, device map and APK requirement')
+                original.write_bytes(original_bytes)
+                changed = copy.deepcopy(rows)
+                changed['seats'][0]['serial'] = 'fixture-04'
+                mapping.write_text(json.dumps(changed), encoding='utf-8')
+                self.assert_rejected(invoke(*retry), 'original ZIP, device map and APK requirement')
+                mapping.write_text(json.dumps(rows), encoding='utf-8')
+                changed = copy.deepcopy(interrupted)
+                changed['devices'][1].update(status='deployment-failed', failedStep='launch-game')
+                uncertain = self.root/'uncertain.json'
+                uncertain.write_text(json.dumps(changed), encoding='utf-8')
+                self.assert_rejected(invoke('-RetryIncomplete', str(uncertain)), 'Confirm the previous launch outcome')
+                self.assertFalse(log.exists())
+
+                alias = invoke(*retry, faults={'fixture-02': 'identity-first-device'})
+                self.assertEqual(1, alias.returncode, alias.stderr)
+                rejected = json.loads(alias.stdout)
+                self.assertEqual('preflight', rejected['phase'])
+                self.assertEqual(['device-identity-changed', 'ready'], [row['status'] for row in rejected['devices']])
+                commands = log.read_text(encoding='utf-8')
+                self.assertNotIn('-s fixture-01 ', commands)
+                self.assertNotIn('force-stop', commands)
+                self.assertNotIn(' push ', commands)
+                log.unlink()
+
+                retry_again = invoke(*retry, faults={'fixture-03': 'config-stage-changed'})
+                self.assertEqual(1, retry_again.returncode, retry_again.stderr)
+                retried = json.loads(retry_again.stdout)
+                self.assertEqual(interrupted['devices'][0], retried['devices'][0])
+                self.assertEqual(['launch-requested','launch-requested','file-verification-failed'],
+                                 [row['status'] for row in retried['devices']])
+                self.assertEqual(interrupted['retry'], retried['retry'])
+                self.assertNotIn('-s fixture-01 ', log.read_text(encoding='utf-8'))
+                report = self.root/'retry.json'
+                report.write_text(retry_again.stdout, encoding='utf-8')
+                log.unlink()
+
+                resumed = invoke('-RetryIncomplete', str(report))
+                self.assertEqual(0, resumed.returncode, resumed.stderr)
+                final = json.loads(resumed.stdout)
+                self.assertEqual((True, 3, 22), (final['complete'], final['mappedSeats'], final['unmappedSeats']))
+                self.assertEqual(retried['devices'][:2], final['devices'][:2])
+                self.assertTrue(all(row['status'] == 'launch-requested' and row['apkVerified'] for row in final['devices']))
+                self.assertEqual(done_bytes, done_config.read_bytes())
+                commands = log.read_text(encoding='utf-8').splitlines()
+                self.assertEqual({'fixture-03'}, {line.split()[1] for line in commands if line.startswith('-s ')})
+                self.assertEqual(1, sum(' shell monkey ' in line for line in commands))
+                self.assertTrue(all(len(call['rooms']) == 5 for call in calls))
+                for text in (first.stdout, retry_again.stdout, resumed.stdout):
+                    for secret in ('PRIVATE_MASTER_CANARY', 'HARDWARE-SERIAL-', 'fixture-01', 'v2.'):
+                        self.assertNotIn(secret, text)
+            finally:
+                server.shutdown()
+                thread.join(timeout=5)
+
     def assert_mapped_deployment_stops(self, fault, expected_status, failed_step, *, partial=False, check_release=False):
         files, seats = self.bundle('Linked')
         path, _ = self.device_map()
