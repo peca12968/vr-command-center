@@ -1,5 +1,7 @@
 """Collect original Quest UDP preflight pairs before starting a five-room venue."""
 import argparse
+from datetime import datetime, timedelta, timezone
+import hashlib
 import importlib.util
 import json
 import math
@@ -21,6 +23,7 @@ FIELD_SPEC = importlib.util.spec_from_file_location('field_results', ROOT / 'ver
 field = importlib.util.module_from_spec(FIELD_SPEC)
 FIELD_SPEC.loader.exec_module(field)
 CREATE_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+PREFLIGHT_WINDOW = timedelta(minutes=30)
 
 
 def require(condition, message):
@@ -69,6 +72,25 @@ def wait_for_listener(process, path, expected):
     raise ValueError('UDP listener did not report its binding.')
 
 
+def report_bytes(path, limit=32768):
+    with path.open('rb') as stream:
+        raw = stream.read(limit + 1)
+    require(0 < len(raw) <= limit, 'Invalid original UDP report size.')
+    return raw
+
+
+def pair_metadata(listener, probe):
+    raw = report_bytes(listener)
+    completed = read_json(raw.splitlines()[-1])['completedAtUtc']
+    return {'completedAtUtc': completed, 'listenerSha256': hashlib.sha256(raw).hexdigest(),
+            'probeSha256': hashlib.sha256(report_bytes(probe)).hexdigest()}
+
+
+def fresh(stamp, now):
+    completed = datetime.fromisoformat(stamp)
+    return completed.utcoffset() == timedelta(0) and timedelta(0) < now - completed <= PREFLIGHT_WINDOW
+
+
 def probe_seat(shell, adb, directory, group, device, count, timeout_ms):
     room, seat = device['roomId'], device['seat']
     label = f'room-{room:02}-seat-{seat:02}'
@@ -112,7 +134,9 @@ def probe_seat(shell, adb, directory, group, device, count, timeout_ms):
             require(pair.get('complete') is True and pair.get('stage') == 'pair-verified' and pair.get('port') == port
                     and pair.get('matched') == count and pair.get('exchangeSha256') == report.get('exchangeSha256')
                     and re.fullmatch(r'[0-9a-f]{64}', pair.get('exchangeSha256', '')), 'UDP report pair did not verify.')
-        result.update(complete=True, stage='verified', exchangeSha256=pair['exchangeSha256'])
+        metadata = pair_metadata(listener_path, probe_path)
+        require(fresh(metadata['completedAtUtc'], datetime.now(timezone.utc)), 'Invalid listener completion time.')
+        result.update(complete=True, stage='verified', exchangeSha256=pair['exchangeSha256'], **metadata)
     except (OSError, ValueError, TypeError, AttributeError, KeyError, RecursionError, subprocess.SubprocessError):
         result['stage'] = stage
     if listener_path.is_file():
@@ -122,15 +146,75 @@ def probe_seat(shell, adb, directory, group, device, count, timeout_ms):
     return result
 
 
-def probe_venue(shell, adb, mode, groups, directory, count, timeout_ms):
+def read_retry(path, mode, groups, plan_hash, count):
+    previous = read_json(report_bytes(path, limit=256 * 1024))
+    require(type(previous) is dict and field.integer(previous.get('version'), 1, 1) == 1
+            and previous.get('scope') == 'quest-udp-preflight-only' and previous.get('mode') == mode
+            and previous.get('planSha256') == plan_hash and type(previous.get('sampleCount')) is int
+            and previous['sampleCount'] == count, 'Retry must use the original Quest plan and sample count.')
+    originals = previous['groups']
+    require(type(originals) is list and len(originals) == len(groups), 'Retry room groups differ.')
+    seats = {}
+    for original, group in zip(originals, groups, strict=True):
+        require(type(original) is dict and original['roomIds'] == group['roomIds'] and type(original['seats']) is list
+                and len(original['seats']) == len(group['devices']), 'Retry room groups differ.')
+        for row, device in zip(original['seats'], group['devices'], strict=True):
+            require(type(row) is dict and type(row.get('complete')) is bool
+                    and all(type(row[key]) is int and row[key] == device[key] for key in ('roomId', 'seat')),
+                    'Retry seats differ.')
+            if row['complete']:
+                seats[device['roomId'], device['seat']] = row
+    return seats
+
+
+def reuse_seat(row, previous_directory, directory, group, device, count, exchanges):
+    try:
+        listener, probe = ((previous_directory / row[key]).resolve(strict=True) for key in ('listener', 'probe'))
+        metadata = pair_metadata(listener, probe)
+        now = datetime.now(timezone.utc)
+        if (listener == probe or row['exchangeSha256'] in exchanges
+                or any(row[key] != value for key, value in metadata.items()) or not fresh(metadata['completedAtUtc'], now)):
+            return None
+        summary, _ = field.verify_udp_preflight((listener, probe),
+            {'address': group['address'], 'port': group['port'], 'observedAtUtc': now.isoformat()},
+            {field.ipv4(device['address'])})
+        if summary['samples'] != count or summary['exchangeSha256'] != row['exchangeSha256']:
+            return None
+    except (OSError, ValueError, TypeError, AttributeError, IndexError, KeyError, RecursionError):
+        return None
+    retained = {'roomId': device['roomId'], 'seat': device['seat'], 'complete': True, 'stage': 'reused',
+                'exchangeSha256': summary['exchangeSha256'], **metadata}
+    for key, path in (('listener', listener), ('probe', probe)):
+        try:
+            retained[key] = os.path.relpath(path, directory)
+        except ValueError:  # The original report can be on another Windows drive.
+            retained[key] = str(path)
+    return retained
+
+
+def probe_venue(shell, adb, mode, groups, directory, count, timeout_ms, retry_report=None):
+    plan_hash = hashlib.sha256(json.dumps([mode, groups], sort_keys=True, separators=(',', ':')).encode('utf-8')).hexdigest()
+    previous = read_retry(retry_report, mode, groups, plan_hash, count) if retry_report else {}
     directory.mkdir()
     deadline = time.monotonic() + 20 * 60
     results, exchanges = [], set()
+    interrupted = False
     for group in groups:
         seats = []
         for device in group['devices']:
-            seat = (probe_seat(shell, adb, directory, group, device, count, timeout_ms) if time.monotonic() < deadline
-                    else {'roomId': device['roomId'], 'seat': device['seat'], 'complete': False, 'stage': 'budget'})
+            room, number = device['roomId'], device['seat']
+            seat = {'roomId': room, 'seat': number, 'complete': False, 'stage': 'not-attempted' if interrupted else 'budget'}
+            if not interrupted and time.monotonic() < deadline:
+                try:
+                    row = previous.get((room, number))
+                    retained = reuse_seat(row, retry_report.parent, directory, group, device, count, exchanges) if row else None
+                    if retained is not None:
+                        seat = retained
+                    elif time.monotonic() < deadline:
+                        seat = probe_seat(shell, adb, directory, group, device, count, timeout_ms)
+                except KeyboardInterrupt:
+                    interrupted = True
+                    seat['stage'] = 'interrupted'
             if seat['complete']:
                 exchange = seat['exchangeSha256']
                 if exchange in exchanges:
@@ -138,14 +222,22 @@ def probe_venue(shell, adb, mode, groups, directory, count, timeout_ms):
                 exchanges.add(exchange)
             seats.append(seat)
             print(json.dumps({key: seat[key] for key in ('roomId', 'seat', 'complete', 'stage')}), file=sys.stderr, flush=True)
-        complete = all(seat['complete'] for seat in seats)
-        summary = {'roomIds': group['roomIds'], 'complete': complete, 'seats': seats}
-        if complete:
-            summary['udpSourcePreflights'] = [{key: seat[key] for key in ('listener', 'probe')} for seat in seats]
-        results.append(summary)
+        results.append({'roomIds': group['roomIds'], 'seats': seats})
+
+    checked_at = datetime.now(timezone.utc)
+    for group in results:
+        for seat in group['seats']:
+            if seat['complete'] and not fresh(seat['completedAtUtc'], checked_at):
+                seat.update(complete=False, stage='expired')
+                print(json.dumps({key: seat[key] for key in ('roomId', 'seat', 'complete', 'stage')}), file=sys.stderr, flush=True)
+        group['complete'] = all(seat['complete'] for seat in group['seats'])
+        if group['complete']:
+            group['udpSourcePreflights'] = [{key: seat[key] for key in ('listener', 'probe')} for seat in group['seats']]
     seats = [seat for group in results for seat in group['seats']]
     report = {'version': 1, 'scope': 'quest-udp-preflight-only', 'mode': mode, 'complete': all(seat['complete'] for seat in seats),
-              'expectedSeats': len(seats), 'verifiedSeats': sum(seat['complete'] for seat in seats), 'groups': results}
+              'planSha256': plan_hash, 'sampleCount': count, 'interrupted': interrupted,
+              'expectedSeats': len(seats), 'verifiedSeats': sum(seat['complete'] for seat in seats),
+              'reusedSeats': sum(seat['stage'] == 'reused' for seat in seats), 'groups': results}
     with (directory / 'preflight-report.json').open('x', encoding='utf-8', newline='\n') as output:
         json.dump(report, output, indent=2)
         output.write('\n')
@@ -158,6 +250,7 @@ def main():
     parser.add_argument('--device-map', required=True, type=Path)
     parser.add_argument('--network-plan', required=True, type=Path)
     parser.add_argument('--output-directory', required=True, type=Path)
+    parser.add_argument('--retry-report', type=Path, help='Original batch report to retain fresh, verified seats from')
     parser.add_argument('--count', type=int, default=5)
     parser.add_argument('--timeout-ms', type=int, default=900)
     args = parser.parse_args()
@@ -170,10 +263,10 @@ def main():
         require(adb.is_file() and powershell is not None, 'ADB or PowerShell is missing.')
         shell = [powershell, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned',
                  '-File', str(ROOT / 'check-lan-udp.ps1')]
-        report = probe_venue(shell, adb, mode, groups, args.output_directory, args.count, args.timeout_ms)
-    except (OSError, ValueError, argparse.ArgumentTypeError, RecursionError):
-        parser.exit(1, 'Quest venue preflight could not start or save its report. Check the maps, tools and new output directory.\n')
-    print(json.dumps({key: report[key] for key in ('complete', 'expectedSeats', 'verifiedSeats')}))
+        report = probe_venue(shell, adb, mode, groups, args.output_directory, args.count, args.timeout_ms, args.retry_report)
+    except (OSError, ValueError, argparse.ArgumentTypeError, TypeError, KeyError, RecursionError):
+        parser.exit(1, 'Quest venue preflight could not start or save its report. Check the maps, retry report, tools and new output directory.\n')
+    print(json.dumps({key: report[key] for key in ('complete', 'expectedSeats', 'verifiedSeats', 'reusedSeats', 'interrupted')}))
     return 0 if report['complete'] else 1
 
 

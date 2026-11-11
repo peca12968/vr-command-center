@@ -184,6 +184,64 @@ class QuestUdpProtocolTests(unittest.TestCase):
             probes.assert_not_called()
             self.assertEqual((SERVER, port), game.getsockname())
 
+    @unittest.skipUnless(POWERSHELL, 'PowerShell is required for the Quest venue listener')
+    def test_venue_retry_reuses_original_pairs_and_reprobes_changed_or_expired_evidence(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reservation:
+            reservation.bind((SERVER, 0))
+            port = reservation.getsockname()[1]
+        shell = [POWERSHELL, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned',
+                 '-File', str(ROOT / 'scripts/check-lan-udp.ps1')]
+        devices = [{'roomId': room, 'seat': 1, 'serial': f'fixture-{room}', 'address': f'127.0.0.{room + 1}'}
+                   for room in range(1, 4)]
+        groups = [{'roomIds': [1, 2, 3, 4, 5], 'address': SERVER, 'port': port, 'devices': devices}]
+
+        def java_probe(args):
+            command = [*self.java, str(args.key_file), args.local_address, args.peer_address, str(args.port),
+                       str(args.count), str(args.timeout_ms)]
+            return json.loads(subprocess.run(command, capture_output=True, check=True, timeout=8).stdout)
+
+        def run(name, retry_report=None, offline=None):
+            output = self.work / name
+            with patch.object(quest_venue, 'device_ready', side_effect=lambda _, serial: serial != offline), patch.object(
+                    quest_venue.quest_udp, 'run_probe', side_effect=java_probe) as probes, redirect_stderr(io.StringIO()):
+                report = quest_venue.probe_venue(shell, self.work / 'adb-fixture.exe', 'Linked', groups, output, 2, 900, retry_report)
+            return report, [call.args[0].serial for call in probes.call_args_list]
+
+        first, first_calls = run('first', offline='fixture-2')
+        self.assertEqual(['fixture-1', 'fixture-3'], first_calls)
+        self.assertFalse(first['complete'])
+        self.assertEqual(2, first['verifiedSeats'])
+        self.assertEqual(['verified', 'device', 'verified'], [seat['stage'] for seat in first['groups'][0]['seats']])
+        original_dir = self.work / 'first'
+        original = {path.name: path.read_bytes() for path in original_dir.iterdir()}
+        second, second_calls = run('retry', original_dir / 'preflight-report.json')
+        self.assertTrue(second['complete'])
+        self.assertEqual(['fixture-2'], second_calls)
+        self.assertEqual(2, second['reusedSeats'])
+        self.assertEqual(original, {path.name: path.read_bytes() for path in original_dir.iterdir()})
+        retry_dir = self.work / 'retry'
+        retained, _, changed = second['groups'][0]['seats']
+        self.assertEqual(original_dir / 'room-01-seat-01-listener.ndjson', (retry_dir / retained['listener']).resolve())
+        altered_probe = retry_dir / 'changed-probe.json'
+        altered_probe.write_bytes((retry_dir / changed['probe']).read_bytes() + b'\n')
+        changed['probe'] = altered_probe.name
+
+        # Keep exact hashes for the synthetic expired input so the time guard is the reason it cannot be retained.
+        old_listener = retry_dir / retained['listener']
+        lines = old_listener.read_bytes().splitlines()
+        terminal = json.loads(lines[-1])
+        terminal['completedAtUtc'] = (datetime.now(timezone.utc) - timedelta(minutes=31)).isoformat()
+        expired_listener = retry_dir / 'expired-listener.ndjson'
+        expired_listener.write_bytes(lines[0] + b'\n' + json.dumps(terminal).encode() + b'\n')
+        retained.update(listener=expired_listener.name, completedAtUtc=terminal['completedAtUtc'],
+                        listenerSha256=hashlib.sha256(expired_listener.read_bytes()).hexdigest())
+        modified_report = retry_dir / 'expired-report.json'
+        modified_report.write_text(json.dumps(second), encoding='utf-8')
+        third, third_calls = run('refresh', modified_report)
+        self.assertTrue(third['complete'])
+        self.assertEqual(1, third['reusedSeats'])
+        self.assertEqual(['fixture-1', 'fixture-3'], third_calls)
+
 
 class QuestUdpVenuePlanTests(unittest.TestCase):
     def setUp(self):
@@ -244,7 +302,8 @@ class QuestUdpVenuePlanTests(unittest.TestCase):
             result = {'roomId': room, 'seat': number, 'stage': 'device', 'complete': False}
             if (room, number) != (1, 2):
                 exchange = 'shared' if (room, number) in ((1, 1), (1, 3)) else f'{room}-{number}'
-                result.update(stage='verified', complete=True, exchangeSha256=exchange, listener='listener.ndjson', probe='probe.json')
+                result.update(stage='verified', complete=True, exchangeSha256=exchange, listener='listener.ndjson', probe='probe.json',
+                              completedAtUtc=(datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat())
             return result
 
         with patch.object(quest_venue, 'probe_seat', side_effect=seat) as checked, redirect_stderr(io.StringIO()) as diagnostics:
@@ -258,6 +317,27 @@ class QuestUdpVenuePlanTests(unittest.TestCase):
         self.assertNotIn('device-1-2', diagnostics.getvalue())
         with self.assertRaises(FileExistsError):
             quest_venue.probe_venue([], Path('adb'), mode, groups, output, 3, 900)
+
+    def test_venue_interrupt_saves_partial_batch_and_rejects_changed_retry_map(self):
+        mode, groups = self.plan()
+        output = self.root / 'interrupted'
+        first = {'roomId': 1, 'seat': 1, 'complete': True, 'stage': 'verified', 'exchangeSha256': 'a' * 64,
+                 'listener': 'listener.ndjson', 'probe': 'probe.json',
+                 'completedAtUtc': (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()}
+        with patch.object(quest_venue, 'probe_seat', side_effect=[first, KeyboardInterrupt]) as probe, redirect_stderr(io.StringIO()):
+            result = quest_venue.probe_venue([], Path('adb'), mode, groups, output, 3, 900)
+        self.assertEqual(2, probe.call_count)
+        self.assertTrue(result['interrupted'])
+        self.assertFalse(result['complete'])
+        self.assertEqual(1, result['verifiedSeats'])
+        self.assertEqual(['verified', 'interrupted', 'not-attempted', 'not-attempted', 'not-attempted'],
+                         [row['stage'] for row in result['groups'][0]['seats']])
+        self.assertEqual(result, json.loads((output / 'preflight-report.json').read_bytes()))
+        retry = self.root / 'retry'
+        groups[0]['devices'][0]['serial'] = 'replacement'
+        with self.assertRaisesRegex(ValueError, 'original Quest plan and sample count'):
+            quest_venue.probe_venue([], Path('adb'), mode, groups, retry, 3, 900, output / 'preflight-report.json')
+        self.assertFalse(retry.exists())
 
 
 class QuestUdpAdbTests(unittest.TestCase):

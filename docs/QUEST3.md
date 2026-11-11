@@ -61,6 +61,20 @@ python .\scripts\probe-quest-venue.py --adb $adb --device-map .\device-map.json 
 
 全部探測完成後，按原網路清單啟動遊戲伺服器。封存驗收清單可用 `udpPreflightBatch` 引用一份報告，或用 `udpPreflightBatches` 引用多份。混合 Windows 與 Quest 時，可在開場前用場館工具核對各席位的雙端報告，也可在封存驗收清單逐場補上 Windows 來源的 `udpSourcePreflights`。 [場館 UDP 核對](EXTERNAL_CLIENTS.md#開場前核對五房-udp-報告) · [封存核對](EXTERNAL_CLIENTS.md#核對每個玩家來源的-udp-預檢)
 
+### 重試 Quest UDP 預檢席位
+
+某席失敗或操作員在探測中按 Ctrl+C 時，工具會保存已確認的結果與未完成席位。恢復裝置連線後，使用同一份裝置對照與網路清單、相同樣本數，以及新的輸出資料夾。
+
+```powershell
+python .\scripts\probe-quest-venue.py --adb $adb --device-map .\device-map.json `
+  --network-plan .\quest-network.json --count 5 `
+  --retry-report .\quest-udp-batch\preflight-report.json --output-directory .\quest-udp-retry
+```
+
+工具會逐席核對原監聽及探測報告的 SHA-256、來源、埠及有效時間。通過的席位標為 `reused`，其餘席位重新探測。`reusedSeats` 為仍有效且沿用的席位數。批次結束時已超過 30 分鐘的席位標為 `expired`。若還有缺件，可用最新一輪報告再次重試。
+
+完成後用新一輪的 `preflight-report.json` 做場館核對。它仍會引用先前有效的原始雙端報告，請保留各輪資料夾與原相對位置。若更換裝置、來源 IPv4 或所用端點，請用更新的清單開始新批次。
+
 ## 追蹤恢復後的武器輸入
 
 遊戲自 0.48.1 起，在應用程式及 OpenXR 工作階段均有輸入焦點時才處理頭盔操作。系統選單或應用程式暫停期間會停止發布本機追蹤姿態。返回遊戲後，右手扳機、換彈鍵及 B 重連鍵各自需要先放開，再按下。 [Unity OpenXR 焦點介面](https://docs.unity3d.com/Packages/com.unity.xr.openxr@1.19/api/UnityEngine.XR.OpenXR.OpenXRUtility.html#UnityEngine_XR_OpenXR_OpenXRUtility_IsSessionFocused)
