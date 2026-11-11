@@ -257,6 +257,8 @@ Quest 小批次驗證可在三包命令加上 `--check-vr-venue-tickets --check-
 
 在批次 VR 驗證加入 `--check-quest-deployment-retry`，可讓模擬 ADB 在第一席送出啟動後中斷，再用原報告和原清單補跑其餘席位。`--mixed-venue-bundle-only` 也會核對這個流程及 MR 校正檔。 [重試操作](QUEST3.md#從原部署報告重試未完成席位)
 
+批次 VR 驗證可另加 `--check-quest-tracking-wait`。用原控制台部署 ZIP 等候追蹤就緒，驗證較新的原生保存格仍將 25 個同機桌面玩家標為合成姿態，且逾時不改變任何場次序號。 [現場操作](QUEST3.md#等候指定席位同時追蹤就緒)
+
 五房 VR 追蹤驗證可在上述小批次命令再加 `--check-venue-openxr --openxr-mock-pose-dll '<測試 DLL 路徑>' --check-room-readiness --check-venue-begin --check-venue-end --check-room-reports --check-venue-reports`。兩種模式各以一個 Windows OpenXR 模擬玩家和 24 個桌面玩家同時入場。工具沿用控制台下載的原 ZIP，核對第 5 房第 2 席的就緒、中斷及恢復，並保存其餘 24 席的狀態與原場次回放。VIVE XR 是該席在名冊上的裝置分類，驗證使用 Unity Mock Runtime。 [測試 DLL 建置](WINDOWS_PLAYER_PACKAGE.md#本機追蹤整合驗證)
 
 使用管理包 0.31.72 可再加 `--check-venue-live-tracking`，在上述實際來源的四個取樣點比對主控 API 的 `venueTracking`，並核對房控權限。 [執行中五房追蹤](PLAYER_READINESS.md#執行中五房追蹤總覽)

@@ -20,6 +20,7 @@ param(
     [Parameter(ParameterSetName='Bundle')][switch]$DeployMappedSeats,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$RetryIncomplete,
     [Parameter(ParameterSetName='Bundle')][switch]$VerifyTrackedSeats,
+    [Parameter(ParameterSetName='Bundle')][ValidateRange(1,120)][int]$WaitForTrackedSeconds,
     [Parameter(ParameterSetName='Bundle')][switch]$AllHeadsets,
     [Parameter(ParameterSetName='Venue')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Windows')][ValidateNotNullOrEmpty()][string]$ManagementApi,
     [Parameter(Mandatory, ParameterSetName='Windows')][ValidateNotNullOrEmpty()][string]$WindowsSeatMap,
@@ -554,19 +555,33 @@ function Read-QuestDeviceMap([string]$Path, [switch]$Partial) {
     $map.seats | Sort-Object roomId, seat
 }
 
-function Read-VenueTrackedReadiness($Target, $Venue) {
+function Read-VenueTrackedReadiness($Target, $Venue, [int]$RequestMilliseconds) {
     $url = [Uri]::new($Target.Origin, '/api/venue/tracked-readiness')
     $rooms = @($Venue.LiveRooms | ForEach-Object { @{ roomId = $_.roomId; sessionId = $_.sessionId } })
     $ids = @($rooms.sessionId | Sort-Object -Unique)
     $body = @{ topology = $Venue.Report.topology; rooms = $rooms } | ConvertTo-Json -Compress -Depth 3
+    $handler = [Net.Http.HttpClientHandler]::new()
+    $handler.UseProxy = $handler.AllowAutoRedirect = $false
+    $client = [Net.Http.HttpClient]::new($handler)
+    $client.MaxResponseContentBufferSize = 256KB
+    $cancellation = [Threading.CancellationTokenSource]::new($RequestMilliseconds)
+    $content = [Net.Http.StringContent]::new($body, [Text.Encoding]::UTF8, 'application/json')
+    $response = $null
     $timer = [Diagnostics.Stopwatch]::StartNew()
     try {
-        $response = Invoke-WebRequest -Uri $url -Method Post -Headers $Target.Headers -ContentType 'application/json' -Body $body -NoProxy `
-            -MaximumRedirection 0 -TimeoutSec 10 -SkipHttpErrorCheck
+        $client.DefaultRequestHeaders.Add('Authorization', $Target.Headers.Authorization)
+        $response = $client.PostAsync($url, $content, $cancellation.Token).GetAwaiter().GetResult()
         if ($response.StatusCode -eq 409) { return @{ Status = 'venue-changed' } }
+        if ($response.StatusCode -in 401,403) { return @{ Status = 'readiness-access-denied' } }
         if ($response.StatusCode -ne 200) { return @{ Status = 'readiness-unavailable' } }
-        $batch = ConvertFrom-Json -InputObject $response.Content
+        $raw = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
     } catch { return @{ Status = 'readiness-unavailable' } }
+    finally {
+        if ($response) { $response.Dispose() }
+        $content.Dispose(); $cancellation.Dispose(); $client.Dispose()
+    }
+    try { $batch = ConvertFrom-Json -InputObject $raw }
+    catch { return @{ Status = 'readiness-invalid' } }
     if (-not (Test-JsonInteger $batch.version) -or $batch.version -ne 1 -or $batch.topology -cne $Venue.Report.topology -or
         -not $batch.sampledAtUtc -or -not (Test-JsonInteger $batch.maxSourceAgeMilliseconds) -or $batch.maxSourceAgeMilliseconds -ne 1500 -or
         $batch.sessions -isnot [array] -or $batch.sessions.Count -ne $ids.Count) {
@@ -617,10 +632,7 @@ function Get-TrackedSeatStatus($Batch, $Snapshot, $Connection) {
     return 'tracked-ready'
 }
 
-function Confirm-TrackedSeats($Venue, [object[]]$Map, [switch]$IncludeAllHeadsets) {
-    Confirm-VenueReadback $Venue
-    $target = Get-ManagementTarget $ManagementApi
-    $batch = Read-VenueTrackedReadiness $target $Venue
+function New-TrackedSeatReport($Venue, [object[]]$Map, $Batch, [switch]$IncludeAllHeadsets) {
     $hasHeadsets = $Venue.Report.mode -cin @('VR','Mixed')
     $seats = @(foreach ($row in $Map) {
         $key = "$($row.roomId)/$($row.seat)"
@@ -640,6 +652,49 @@ function Confirm-TrackedSeats($Venue, [object[]]$Map, [switch]$IncludeAllHeadset
         complete = ($seats.Count -gt 0 -and -not ($seats | Where-Object { $_.status -cne 'tracked-ready' })); seats = $seats }
     if ($batch.SampledAtUtc) { $report.sampledAtUtc = $batch.SampledAtUtc }
     if ($IncludeAllHeadsets) { $report.scope = 'venue' }
+    return $report
+}
+
+function Confirm-TrackedSeats($Venue, [object[]]$Map, [switch]$IncludeAllHeadsets) {
+    Confirm-VenueReadback $Venue
+    $target = Get-ManagementTarget $ManagementApi
+    if (-not $WaitForTrackedSeconds) {
+        return New-TrackedSeatReport $Venue $Map (Read-VenueTrackedReadiness $target $Venue 10000) -IncludeAllHeadsets:$IncludeAllHeadsets
+    }
+
+    $timer = [Diagnostics.Stopwatch]::StartNew()
+    $limit = 1000 * $WaitForTrackedSeconds
+    $samples = 0
+    $terminal = @('venue-changed','seat-unavailable','admission-changed','seat-headset-mismatch','readiness-invalid','readiness-access-denied')
+    $report = $null
+    do {
+        $ticketMilliseconds = ($Venue.EarliestExpiry - [DateTimeOffset]::UtcNow).TotalMilliseconds
+        $remaining = $limit - $timer.Elapsed.TotalMilliseconds
+        if ($ticketMilliseconds -lt 1) {
+            $report = New-TrackedSeatReport $Venue $Map @{ Status = 'ticket-expired' } -IncludeAllHeadsets:$IncludeAllHeadsets
+            $outcome = 'ticket-expired'; break
+        }
+        if ($remaining -lt 1) { $outcome = 'timed-out'; break }
+        $timeout = [int][Math]::Floor([Math]::Min(10000, [Math]::Min($remaining, $ticketMilliseconds)))
+        $batch = Read-VenueTrackedReadiness $target $Venue $timeout
+        $samples++
+        if ($Venue.EarliestExpiry -le [DateTimeOffset]::UtcNow) {
+            $report = New-TrackedSeatReport $Venue $Map @{ Status = 'ticket-expired' } -IncludeAllHeadsets:$IncludeAllHeadsets
+            $outcome = 'ticket-expired'; break
+        }
+        if ($timer.Elapsed.TotalMilliseconds -ge $limit) { $outcome = 'timed-out'; break }
+        $report = New-TrackedSeatReport $Venue $Map $batch -IncludeAllHeadsets:$IncludeAllHeadsets
+        if ($report.complete) { $outcome = 'ready'; break }
+        if (-not $report.seats.Count) { $outcome = 'no-selected-seats'; break }
+        $invalid = $report.seats | Where-Object { $_.status -cin $terminal } | Select-Object -First 1
+        if ($invalid) { $outcome = $invalid.status; break }
+        $remaining = [Math]::Min($limit - $timer.Elapsed.TotalMilliseconds, ($Venue.EarliestExpiry - [DateTimeOffset]::UtcNow).TotalMilliseconds)
+        if ($remaining -ge 1) { Start-Sleep -Milliseconds ([int][Math]::Floor([Math]::Min(1000, $remaining))) }
+    } while ($true)
+    if (-not $report) {
+        $report = New-TrackedSeatReport $Venue $Map @{ Status = 'readiness-unavailable' } -IncludeAllHeadsets:$IncludeAllHeadsets
+    }
+    $report.wait = [ordered]@{ maximumSeconds = $WaitForTrackedSeconds; samples = $samples; outcome = $outcome }
     return $report
 }
 
@@ -1080,6 +1135,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Windows') { Export-WindowsVenueSeats; return
 $alignment = $null
 $alignmentHash = $null
 if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
+    if ($WaitForTrackedSeconds -and -not $VerifyTrackedSeats) { throw 'Use -WaitForTrackedSeconds only with -VerifyTrackedSeats.' }
     if ($RetryIncomplete -and (-not $DeployMappedSeats -or -not $DeviceMap)) {
         throw 'Use -RetryIncomplete with -DeployMappedSeats and the original -DeviceMap.'
     }

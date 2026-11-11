@@ -446,6 +446,17 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 
 混合 Quest 3 與 VIVE 名冊的場館可加上 `-AllHeadsets`，用同一份 ZIP 核對全部 25 席。此模式不能搭配裝置清單或部分席位。報告含 `scope: "venue"`，各席的 `registeredHeadset` 取自管理名冊。報告核對伺服器接收的追蹤狀態，實體裝置型號與控制器操作由現場驗收。
 
+##### 等候指定席位同時追蹤就緒
+
+加入 `-WaitForTrackedSeconds` 可在原部署包核對完成後，等待 1 至 120 秒。每次重新取得同一個五房取樣，並逐席核對原入場名額及 1.5 秒的畫格期限。只有同一輪所有指定席位就緒才會結束等待並回傳退出碼 0。
+
+```powershell
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
+    -ManagementApi http://127.0.0.1:5081 -VerifyTrackedSeats -AllHeadsets -WaitForTrackedSeconds 30
+```
+
+JSON 仍只輸出一次。`wait.samples` 是嘗試的取樣次數，`wait.outcome` 表示 `ready`、`timed-out` 或停止原因。逾時時保留本次期限內最後一輪席位結果。原場次、入場或權限有變、收到無效回條或票券到期時，會停止並回傳退出碼 1。這個操作只讀取追蹤資料，開始任務仍由主控依原開場條件執行。 [五房追蹤驗收開場](PLAYER_READINESS.md#五房追蹤驗收開場)
+
 | 狀態 | 現場核對 |
 | --- | --- |
 | `awaiting-tracked-pose`、`not-tracked` | 檢查頭盔有無進入遊戲、恢復焦點並完成 MR 取點 |
@@ -454,6 +465,7 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 | `venue-changed` | 核對期間原場次、房間或版本已有變更，請核對現場並重新取樣 |
 | `seat-unavailable`、`admission-changed`、`seat-headset-mismatch` | 核對當前名冊與所選席位，重新下載有變更的部署包 |
 | `readiness-unavailable`、`readiness-invalid` | 核對管理服務連線、版本與場次 |
+| `readiness-access-denied`、`ticket-expired` | 核對主控權限或下載目前有效的原場館部署包 |
 
 票券到期後可從主控下載新的 ZIP 供核對。報告反映全館同一取樣點，實際裝置序號、網路來源及全館持續容量另由現場驗收確認。 [收集 Quest 場館驗收日誌](#收集-quest-場館驗收日誌)
 

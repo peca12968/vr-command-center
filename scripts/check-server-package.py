@@ -154,6 +154,7 @@ def main():
     p.add_argument('--check-quest-vr-deploy',action='store_true',help='Run Quest preflight and mapped mock deployment from each original VR venue ZIP')
     p.add_argument('--check-quest-vr-partial-map',action='store_true',help='Use a mixed headset roster and deploy five selected Quest seats from each original VR venue ZIP')
     p.add_argument('--check-quest-deployment-retry',action='store_true',help='Interrupt and resume the original mapped VR deployment without repeating successful seats')
+    p.add_argument('--check-quest-tracking-wait',action='store_true',help='Verify that the tracked-seat wait times out against the original same-PC simulation clients')
     p.add_argument('--check-windows-venue-staging',action='store_true',help='Stage VIVE XR seats from the original VR or mixed venue ZIP')
     p.add_argument('--check-venue-openxr',action='store_true',help='Use one graphical mock OpenXR seat alongside 24 desktop peers per topology')
     p.add_argument('--check-venue-pose-review', action='store_true', help='Open the original OpenXR interruption frame and return to the same live room')
@@ -274,6 +275,8 @@ def main():
         p.error('--check-quest-vr-partial-map requires --check-vr-venue-tickets without the full Quest fleet check')
     if args.check_quest_deployment_retry and not (args.check_quest_vr_deploy or args.check_quest_vr_partial_map):
         p.error('--check-quest-deployment-retry requires one of the mapped VR checks')
+    if args.check_quest_tracking_wait and (args.check_venue_openxr or not (args.check_quest_vr_deploy or args.check_quest_vr_partial_map)):
+        p.error('--check-quest-tracking-wait requires a mapped VR check with the default desktop clients')
     if args.check_windows_venue_staging and not (args.check_quest_vr_partial_map or args.mixed_venue_bundle_only):
         p.error('--check-windows-venue-staging requires --check-quest-vr-partial-map or --mixed-venue-bundle-only')
     if args.peer_diagnostics and not args.player_package:p.error('--peer-diagnostics requires the three-package check')
@@ -3089,9 +3092,11 @@ def main():
         mode='linked' if linked else 'independent'
         bundle=runtime/(mode+'-vr-venue-connections.zip')
         full_venue=['-AllHeadsets'] if args.check_quest_vr_partial_map else []
-        tracking=subprocess.run([shutil.which('pwsh'),'-NoProfile','-File',str(ROOT/'scripts/deploy-quest.ps1'),
+        command_line=[shutil.which('pwsh'),'-NoProfile','-File',str(ROOT/'scripts/deploy-quest.ps1'),
             '-VenueBundle',str(bundle),'-ManagementApi',uri,'-VerifyTrackedSeats','-AdbPath',str(runtime/'absent-adb.exe'),
-            *full_venue],env={**os.environ,'VR_COMMAND_MASTER_KEY':keys['Master']},timeout=25,encoding='utf-8',capture_output=True)
+            *full_venue]
+        environment={**os.environ,'VR_COMMAND_MASTER_KEY':keys['Master']}
+        tracking=subprocess.run(command_line,env=environment,timeout=25,encoding='utf-8',capture_output=True)
         report=json.loads(tracking.stdout)
         suffix='-'+checkpoint if checkpoint else ''
         save(mode+'-vr-venue-tracked-readiness'+suffix+'.json',report)
@@ -3104,6 +3109,22 @@ def main():
             check(report['scope']=='venue' and [(row['roomId'],row['seat'],row['registeredHeadset']) for row in report['seats']]==
                   [(room,seat,'ViveXr' if seat in (2,4) else 'Quest3') for room in range(1,6) for seat in range(1,6)],
                   mode+' venue tracking includes all original Quest and VIVE admissions')
+        if args.check_quest_tracking_wait:
+            initial_revision = {row['id']:row['sequence'] for row in request('/api/sessions')}
+            waiting = subprocess.run([*command_line, '-WaitForTrackedSeconds', '3'], env=environment, timeout=20,
+                                     encoding='utf-8', capture_output=True)
+            waited = json.loads(waiting.stdout)
+            save(mode+'-vr-venue-tracked-wait.json', waited)
+            check(waiting.returncode == 1 and waited['complete'] is False and waited['managementVerified'] is True
+                  and waited['wait']['outcome'] == 'timed-out' and waited['wait']['maximumSeconds'] == 3
+                  and waited['wait']['samples'] >= 2 and waited['sampledAtUtc'] > report['sampledAtUtc']
+                  and len(waited['seats']) == 25 and all(current['worldSequence'] > first['worldSequence']
+                      and {key:value for key,value in current.items() if key != 'worldSequence'} ==
+                          {key:value for key,value in first.items() if key != 'worldSequence'}
+                      for current, first in zip(waited['seats'], report['seats'], strict=True)),
+                  mode+' tracked wait returns the latest original sample without treating same-PC simulated poses as tracked')
+            check(initial_revision == {row['id']:row['sequence'] for row in request('/api/sessions')},
+                  mode+' tracked wait leaves all original management revisions unchanged')
         if checkpoint == 'initial':
             route = '/api/venue/tracked-readiness'
             rooms = [{'roomId': row['id'], 'sessionId': row['sessionId']} for row in request('/api/rooms')]
@@ -4688,6 +4709,7 @@ def main():
             'vrVenueTickets':args.check_vr_venue_tickets,
             'questVrDeploy':args.check_quest_vr_deploy,
             'questDeploymentRetry':args.check_quest_deployment_retry,
+            'questTrackingWait':args.check_quest_tracking_wait,
             'questVrPartialMap':args.check_quest_vr_partial_map,
             'venueOpenxr':args.check_venue_openxr,
             'venuePoseReview':args.check_venue_pose_review,

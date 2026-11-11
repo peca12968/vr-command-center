@@ -901,6 +901,124 @@ else:
                 server.shutdown()
                 thread.join(timeout=5)
 
+    def test_tracked_wait_requires_one_complete_sample_and_stops_at_original_venue_boundaries(self):
+        topology = 'Independent'
+        key = 'private-tracked-wait-fixture'
+        calls, samples = [], []
+        mode = 'recover'
+        delayed = Event()
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+                calls.append((self.path, self.headers.get('Authorization'), body))
+                if self.path == '/api/vr-deployment/venue-check':
+                    self.reply(200, {'topology': topology, 'allMatched': True, 'seats': [
+                        {'roomId': room, 'seat': seat, 'status': 'matched', 'headset': 'ViveXr' if seat == 4 else 'Quest3'}
+                        for room in range(1, 6) for seat in range(5)]})
+                    return
+                if self.path != '/api/venue/tracked-readiness':
+                    self.reply(404, {})
+                    return
+                sample = len(samples) + 1
+                samples.append(body)
+                if mode in ('changed-venue', 'access-denied') and sample == 2:
+                    self.reply(409 if mode == 'changed-venue' else 403, {})
+                    return
+                when = f'2026-11-11T00:00:{sample:02}Z'
+                expected = (1, 0) if sample % 2 else (5, 4)
+                reports = {}
+                for room in range(1, 6):
+                    session = str(self.suite.session_ids[0 if topology == 'Linked' else room - 1])
+                    report = reports.setdefault(session, dict(version=1, sessionId=session, sourceState='Fresh', origin='Simulation',
+                        worldSequence=100+sample, sessionSequence=12, observedSequence=12, sampledAtUtc=when,
+                        sourceAgeMilliseconds=25, players=[]))
+                    for seat in range(5):
+                        index = (room-1)*5+seat
+                        pending = (room, seat) == expected and (mode in ('alternating', 'ticket-expiry') or (mode == 'recover' and sample < 3)
+                            or mode in ('changed-venue', 'changed-admission', 'access-denied'))
+                        admission = uuid.uuid4() if mode == 'changed-admission' and sample == 2 and (room,seat)==(5,4) else self.suite.admissions[index]
+                        report['players'].append(dict(roomId=room, seat=seat, playerId=str(self.suite.players[index]),
+                            admissionId=str(admission), state='Participating', canParticipate=True, rigKind='Simulated' if pending else 'Tracked'))
+                if mode == 'slow':
+                    delayed.set()
+                    time.sleep(1.8)
+                self.reply(200, dict(version=1, topology=topology, sampledAtUtc=when, maxSourceAgeMilliseconds=1500,
+                    sessions=list(reports.values())))
+
+            def reply(self, code, value):
+                data = json.dumps(value).encode()
+                self.send_response(code)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Content-Length', str(len(data)))
+                self.end_headers()
+                try:
+                    self.wfile.write(data)
+                except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                    pass
+
+            def log_message(self, *args):
+                pass
+
+        Handler.suite = self
+        with ThreadingHTTPServer(('127.0.0.1', 0), Handler) as server:
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            env = {**os.environ, 'VR_COMMAND_MASTER_KEY': key}
+            args = ('-VerifyTrackedSeats', '-AllHeadsets', '-ManagementApi', f'http://127.0.0.1:{server.server_port}',
+                    '-AdbPath', str(self.root/'absent-adb.exe'))
+
+            def wait(files, seconds, success=False):
+                calls.clear()
+                samples.clear()
+                result = self.run_bundle(files, *args, '-WaitForTrackedSeconds', str(seconds), environment=env)
+                self.assertEqual(0 if success else 1, result.returncode, result.stderr)
+                report = json.loads(result.stdout)
+                self.assertEqual(success, report['complete'])
+                self.assertEqual(len(samples), report['wait']['samples'])
+                self.assertEqual([('/api/vr-deployment/venue-check', 'Bearer '+key)] + [('/api/venue/tracked-readiness', 'Bearer '+key)]*len(samples),
+                                 [(route, auth) for route, auth, _ in calls])
+                self.assertTrue(all(sample == samples[0] for sample in samples))
+                self.assertFalse((self.root/'adb.log').exists())
+                self.assertNotIn(key, result.stdout+result.stderr)
+                return report
+
+            try:
+                for topology in ('Independent', 'Linked'):
+                    with self.subTest(topology=topology):
+                        files, _ = self.vr_bundle(topology)
+                        ready = wait(files, 5, success=True)
+                        self.assertEqual(dict(maximumSeconds=5, samples=3, outcome='ready'), ready['wait'])
+                        self.assertEqual({103}, {seat['worldSequence'] for seat in ready['seats']})
+                        self.assertEqual(25, sum(seat['status']=='tracked-ready' for seat in ready['seats']))
+
+                mode = 'alternating'
+                partial = wait(files, 3)
+                self.assertEqual('timed-out', partial['wait']['outcome'])
+                self.assertGreaterEqual(partial['wait']['samples'], 2)
+                self.assertEqual(24, sum(row['status']=='tracked-ready' for row in partial['seats']))
+                self.assertEqual(1, len({row['worldSequence'] for row in partial['seats']}))
+                for mode, status in (('changed-venue','venue-changed'), ('changed-admission','admission-changed'),
+                                     ('access-denied','readiness-access-denied')):
+                    report = wait(files, 8)
+                    self.assertEqual((2, status), (report['wait']['samples'], report['wait']['outcome']))
+                    self.assertIn(status, {seat['status'] for seat in report['seats']})
+                mode = 'slow'
+                slow = wait(files, 1)
+                self.assertTrue(delayed.is_set())
+                self.assertEqual((1, 'timed-out'), (slow['wait']['samples'], slow['wait']['outcome']))
+                self.assertTrue(all(seat['status']=='readiness-unavailable' for seat in slow['seats']))
+                mode = 'ticket-expiry'
+                self.expiry = int(time.time()) + 5
+                expired_files, _ = self.vr_bundle(topology)
+                expired = wait(expired_files, 10)
+                self.assertEqual('ticket-expired', expired['wait']['outcome'])
+                self.assertEqual({'ticket-expired'}, {seat['status'] for seat in expired['seats']})
+                self.assert_rejected(self.run_bundle(files, '-WaitForTrackedSeconds', '3', '-CheckOnly'), 'only with -VerifyTrackedSeats')
+            finally:
+                server.shutdown()
+                thread.join(timeout=5)
+
     def test_bundle_preflight_and_seat_selection_need_no_extraction_or_adb(self):
         for topology in ('Linked', 'Independent'):
             with self.subTest(topology=topology):
