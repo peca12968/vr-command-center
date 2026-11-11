@@ -716,10 +716,14 @@ function Read-QuestDeviceSerial([string]$TargetSerial) {
     return [string]$lines[0]
 }
 
-function Get-QuestDeploymentFingerprint([string]$Salt, [string]$Value) {
+function Get-QuestSha256([byte[]]$Bytes) {
     $sha = [Security.Cryptography.SHA256]::Create()
-    try { return [BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes("$Salt`n$Value"))).Replace('-', '').ToLowerInvariant() }
+    try { return [BitConverter]::ToString($sha.ComputeHash($Bytes)).Replace('-', '').ToLowerInvariant() }
     finally { $sha.Dispose() }
+}
+
+function Get-QuestDeploymentFingerprint([string]$Salt, [string]$Value) {
+    return Get-QuestSha256 ([Text.Encoding]::UTF8.GetBytes("$Salt`n$Value"))
 }
 
 function Get-QuestMapFingerprint([object[]]$Map, [string]$Salt) {
@@ -728,7 +732,8 @@ function Get-QuestMapFingerprint([object[]]$Map, [string]$Salt) {
 }
 
 function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, [string]$ExpectedHash) {
-    $previous = (Read-DeploymentJson $RetryIncomplete 32768 'original deployment report').Document
+    $original = Read-DeploymentJson $RetryIncomplete 32768 'original deployment report'
+    $previous = $original.Document
     $proof = $previous.retry
     $hashPattern = '\A[0-9a-f]{64}\z'
     if ($previous.phase -cne 'deployment' -or $previous.complete -isnot [bool] -or $previous.complete -or
@@ -784,7 +789,7 @@ function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, [s
         if ($entry.failedStep -ceq 'launch-game') { throw 'Confirm the previous launch outcome on the affected headset before retrying that seat manually.' }
     }
     if ($completed.Count -eq $Map.Count) { throw 'This deployment report has no seats left to retry.' }
-    return @{ Proof = $proof; Completed = $completed.ToArray() }
+    return @{ Proof = $proof; Completed = $completed.ToArray(); PreviousSha256 = Get-QuestSha256 $original.Bytes }
 }
 
 function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, [string]$ExpectedHash, $Retry) {
@@ -838,6 +843,7 @@ function Invoke-MappedQuestSeats($Venue, [object[]]$Map, [int]$VersionCode, [str
     if ($ExpectedHash) { $report.apkVerificationVersion = 1 }
     if ($Retry) {
         $report.retry = $Retry.Proof
+        $report.previousDeploymentSha256 = $Retry.PreviousSha256
         $report.devices = $Retry.Completed + $devices
         if ($AllowPartialMap) {
             $report.mappedSeats = $originalMap.Count

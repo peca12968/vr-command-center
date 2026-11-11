@@ -86,13 +86,17 @@ def ipv4(value):
     return address
 
 
-def read_quest_json(path):
+def read_quest_document(path):
     with path.open('rb') as source:
         raw = source.read(MAX_QUEST_PLAN_BYTES + 1)
     require(len(raw) <= MAX_QUEST_PLAN_BYTES, 'Quest plan or report is too large')
     value = read_json(raw.decode('utf-8-sig'))
     require(type(value) is dict, 'Expected a Quest JSON object')
-    return value
+    return value, raw
+
+
+def read_quest_json(path):
+    return read_quest_document(path)[0]
 
 
 def read_quest_plan_file(path):
@@ -1286,6 +1290,53 @@ def quest_capture_log(address, path, pid, seat, size, digest):
     return address, raw.decode('utf-8-sig'), pid, seat
 
 
+def quest_deployment_retry_proof(report, count):
+    def hex_field(value, length):
+        return type(value) is str and len(value) == length and re.fullmatch(r'[0-9a-f]+', value) is not None
+
+    proof, previous = report.get('retry'), report.get('previousDeploymentSha256')
+    if 'retry' not in report:
+        require('previousDeploymentSha256' not in report, 'Quest deployment predecessor lacks original retry proof')
+        return None, None
+    require(type(proof) is dict and set(proof) == {'version', 'venueSha256', 'mapSha256', 'salt', 'devices'}
+            and integer(proof['version'], 1, 1) and hex_field(proof['salt'], 32)
+            and all(hex_field(proof[key], 64) for key in ('venueSha256', 'mapSha256'))
+            and type(proof['devices']) is list and len(proof['devices']) == count
+            and all(hex_field(device, 64) for device in proof['devices']) and len(set(proof['devices'])) == count,
+            'Invalid Quest deployment retry proof')
+    require('previousDeploymentSha256' not in report or hex_field(previous, 64), 'Invalid Quest deployment predecessor digest')
+    return proof, previous
+
+
+def quest_deployment_leaves(attempts):
+    has_successor = set()
+    for digest, attempt in attempts.items():
+        parent_digest = attempt['previous']
+        if parent_digest is None:
+            continue
+        require(parent_digest != digest and parent_digest not in has_successor, 'Conflicting Quest deployment retry branches')
+        has_successor.add(parent_digest)
+        if parent_digest in attempts:
+            parent = attempts[parent_digest]
+            require(not parent['complete'] and parent['proof'] == attempt['proof'] and parent['seats'] == attempt['seats']
+                    and attempt['launched'][:len(parent['launched'])] == parent['launched'],
+                    'Quest deployment retry changes its original proof, seats or completed prefix')
+
+    leaves = [attempt for digest, attempt in attempts.items() if digest not in has_successor]
+    salts = [attempt['proof']['salt'] for attempt in leaves if attempt['proof'] is not None]
+    require(len(salts) == len(set(salts)), 'Quest deployment retry history is disconnected; provide the linked reports or the latest report alone')
+    linked = len(attempts.keys() & has_successor)
+    visited = set()
+    for leaf in leaves:
+        digest = leaf['previous']
+        while digest in attempts:
+            require(digest not in visited, 'Cyclic Quest deployment retry history')
+            visited.add(digest)
+            digest = attempts[digest]['previous']
+    require(len(visited) == linked, 'Cyclic Quest deployment retry history')
+    return leaves, linked
+
+
 def read_quest_deployments(spec, mode, evidence_path, release=None):
     expected = {'releaseReport', 'reports'} if release is None else {'reports'}
     require(type(spec) is dict and set(spec) == expected,
@@ -1302,9 +1353,11 @@ def read_quest_deployments(spec, mode, evidence_path, release=None):
     require(type(digest) is str and re.fullmatch(r'[0-9a-f]{64}', digest), 'Invalid Quest release APK digest')
     reports = spec['reports']
     require(type(reports) is list and 1 <= len(reports) <= 25, 'Provide 1 to 25 Quest deployment reports')
-    deployed = {}
+    attempts = {}
     for name in reports:
-        report = read_quest_json(evidence_path(name))
+        report, raw = read_quest_document(evidence_path(name))
+        report_hash = hashlib.sha256(raw).hexdigest()
+        require(report_hash not in attempts, 'Quest deployment repeats a successful seat or the same original report')
         require(report.get('phase') == 'deployment' and report.get('managementVerified') is True
                 and report.get('topology') == mode and integer(report.get('apkVerificationVersion'), 1, 1),
                 'Quest deployment report lacks verified deployment or uses another topology')
@@ -1315,21 +1368,35 @@ def read_quest_deployments(spec, mode, evidence_path, release=None):
                 and all(type(row) is dict and type(row.get('status')) is str for row in devices),
                 'Invalid Quest deployment device list')
         launched = [row for row in devices if row.get('status') == 'launch-requested']
-        require(launched and report.get('complete') is (len(launched) == len(devices))
+        require(report.get('complete') is (len(launched) == len(devices))
                 and devices[:len(launched)] == launched, 'Quest deployment report lacks a consistent successful prefix')
-        seats = set()
+        proof, previous = quest_deployment_retry_proof(report, len(devices))
+        seats, confirmed = {}, {}
         for row in devices:
             room, seat = integer(row.get('roomId'), 1, 5), integer(row.get('seat'), 1, 5)
             require((room, seat) not in seats, 'Quest deployment report repeats a device seat')
-            seats.add((room, seat))
+            seats[room, seat] = None
             if row['status'] != 'launch-requested':
                 continue
-            require((room, seat) not in deployed and row.get('apkVerified') is True and row.get('filesVerified') is True
+            require(row.get('apkVerified') is True and row.get('filesVerified') is True
                     and integer(row.get('versionCode'), 1) == version,
-                    'Quest deployment repeats a successful seat or lacks verified APK and configuration')
-            deployed[room, seat] = (identity(row['sessionId']), identity(row['playerId']), identity(row['admissionId']),
-                                    integer(row.get('port'), 1024, 65535))
-    return deployed, {'versionCode': version, 'apkSha256': digest, 'reportsVerified': len(reports), 'seatsVerified': len(deployed)}
+                    'Quest deployment lacks verified APK and configuration')
+            confirmed[room, seat] = (identity(row['sessionId']), identity(row['playerId']), identity(row['admissionId']),
+                                     integer(row.get('port'), 1024, 65535))
+        attempts[report_hash] = dict(proof=proof, previous=previous, complete=report['complete'], seats=tuple(seats),
+                                     launched=launched, confirmed=confirmed)
+
+    leaves, linked = quest_deployment_leaves(attempts)
+    deployed = {}
+    for attempt in leaves:
+        confirmed = attempt['confirmed']
+        require(confirmed, 'Quest deployment report lacks a consistent successful prefix')
+        require(deployed.keys().isdisjoint(confirmed), 'Quest deployment repeats a successful seat')
+        deployed.update(confirmed)
+    summary = {'versionCode': version, 'apkSha256': digest, 'reportsVerified': len(reports), 'seatsVerified': len(deployed)}
+    if linked:
+        summary['retryReportsLinked'] = linked
+    return deployed, summary
 
 
 def read_venue_release(path):

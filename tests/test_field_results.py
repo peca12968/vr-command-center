@@ -1694,6 +1694,65 @@ class FieldResultsTests(unittest.TestCase):
             with self.assertRaisesRegex(field.EvidenceError, 'repeats a successful seat'):
                 field.verify_venue(path)
 
+    def test_quest_deployment_history_accepts_exact_cumulative_retries_in_both_modes(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest = quest_capture_venue_fixture(root, mode, quest_per_room=1)
+                complete = self.quest_deployment_evidence(root, manifest, 1)
+                rows = complete['devices']
+                proof = dict(version=1, venueSha256='12'*32, mapSha256='34'*32, salt='56'*16,
+                             devices=[f'{seat:064x}' for seat in range(1, len(rows)+1)])
+
+                def save_report(name, value):
+                    raw = (json.dumps(value) + '\r\n').encode('utf-8-sig')
+                    (root/name).write_bytes(raw)
+                    return hashlib.sha256(raw).hexdigest()
+
+                def incomplete(count, **fields):
+                    return dict(complete, retry=proof, complete=False, devices=rows[:count] + [
+                        dict(roomId=row['roomId'], seat=row['seat'], status='not-attempted') for row in rows[count:]], **fields)
+
+                first = incomplete(0)
+                first_hash = save_report('deployment.json', first)
+                second = incomplete(2, previousDeploymentSha256=first_hash)
+                second_hash = save_report('second.json', second)
+                final = dict(complete, retry=proof, previousDeploymentSha256=second_hash)
+                save_report('final.json', final)
+                reports = manifest['questDeployments']['reports']
+                reports[:] = ['final.json', 'deployment.json', 'second.json']
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                checked = field.verify_venue(path)
+                self.assertEqual((3, 2, 5), tuple(checked['questDeployment'][key] for key in
+                    ('reportsVerified', 'retryReportsLinked', 'seatsVerified')))
+                self.assertEqual(25, checked['serverAcknowledgements'])
+
+                reports[:] = ['final.json']
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                latest = field.verify_venue(path)
+                self.assertEqual(5, latest['questDeployment']['seatsVerified'])
+                self.assertNotIn('retryReportsLinked', latest['questDeployment'])
+
+                cases = (
+                    ('changed proof', 'changes its original proof', dict(final, retry=dict(proof, mapSha256='78'*32))),
+                    ('changed completed seat', 'changes its original proof', dict(final, devices=[dict(rows[0], port=7999), *rows[1:]])),
+                    ('different predecessor', 'history is disconnected', dict(final, previousDeploymentSha256='9a'*32)),
+                    ('unlinked old cumulative', 'history is disconnected', dict(complete, retry=proof)),
+                )
+                reports[:] = ['deployment.json', 'second.json', 'final.json']
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                for label, message, report in cases:
+                    with self.subTest(label=label):
+                        save_report('final.json', report)
+                        with self.assertRaisesRegex(field.EvidenceError, message):
+                            field.verify_venue(path)
+                save_report('final.json', final)
+                save_report('fork.json', incomplete(3, previousDeploymentSha256=second_hash))
+                reports.append('fork.json')
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'Conflicting Quest deployment retry branches'):
+                    field.verify_venue(path)
+
     def test_venue_rejects_incomplete_wrong_and_tampered_capture_evidence(self):
         cases = {
             'incomplete report': 'completeness differs',

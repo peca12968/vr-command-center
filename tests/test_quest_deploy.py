@@ -1372,6 +1372,7 @@ else:
                 self.assertEqual(['launch-requested','launch-requested','file-verification-failed'],
                                  [row['status'] for row in retried['devices']])
                 self.assertEqual(interrupted['retry'], retried['retry'])
+                self.assertEqual(hashlib.sha256(first_report.read_bytes()).hexdigest(), retried['previousDeploymentSha256'])
                 self.assertNotIn('-s fixture-01 ', log.read_text(encoding='utf-8'))
                 report = self.root/'retry.json'
                 report.write_text(retry_again.stdout, encoding='utf-8')
@@ -1381,6 +1382,7 @@ else:
                 self.assertEqual(0, resumed.returncode, resumed.stderr)
                 final = json.loads(resumed.stdout)
                 self.assertEqual((True, 3, 22), (final['complete'], final['mappedSeats'], final['unmappedSeats']))
+                self.assertEqual(hashlib.sha256(report.read_bytes()).hexdigest(), final['previousDeploymentSha256'])
                 self.assertEqual(retried['devices'][:2], final['devices'][:2])
                 self.assertTrue(all(row['status'] == 'launch-requested' and row['apkVerified'] for row in final['devices']))
                 self.assertEqual(done_bytes, done_config.read_bytes())

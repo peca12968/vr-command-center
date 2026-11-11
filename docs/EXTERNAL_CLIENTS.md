@@ -525,7 +525,7 @@ python scripts/verify-field-results.py --venue-stages .\stages.json
 
 ### 核對封存席位的 Quest 發行 APK
 
-使用 `-ReleaseReport` 部署時，保存正式部署指令輸出的 JSON，以及用來部署的原 `venue-release.json`。若部署途中停止，保留原報告和後續只重試未完成席位的報告。將檔名加到五房 `venue.json` 中。 [Quest 部署操作](QUEST3.md#核對頭盔內已安裝的發行-apk)
+使用 `-ReleaseReport` 部署時，保存正式部署指令輸出的 JSON，以及用來部署的原 `venue-release.json`。使用 `-RetryIncomplete` 續跑時，可在五房 `venue.json` 只填最新的累計報告，或把它與一路承接的原報告一併填入。檔案可任意排序，請保留原始位元組。使用手動分批清單時，填各份報告，各份成功席位必須互不重複。 [Quest 部署操作](QUEST3.md#從原部署報告重試未完成席位)
 
 ```json
 {
@@ -536,7 +536,7 @@ python scripts/verify-field-results.py --venue-stages .\stages.json
 }
 ```
 
-驗收核對每個成功席位的原場次、玩家、入場名額、房號、席位、UDP 埠與 APK 版本。每席須有已核對 APK 及設定檔的啟動紀錄，並與原 Quest logcat、伺服器戰績確認及封存資料一致。預檢報告、其他場次的入場、重複成功席位或缺少任一 Quest logcat 席位均會拒絕。可搭配 `questCaptures` 或逐場提供原 Quest logcat。摘要 `questDeployment` 列出版本代碼、APK 雜湊、報告數及核對席位數。實體裝置與運行環境須現場驗收。
+驗收核對每個成功席位的原場次、玩家、入場名額、房號、席位、UDP 埠與 APK 版本。每席須有已核對 APK 及設定檔的啟動紀錄，並與原 Quest logcat、伺服器戰績確認及封存資料一致。提交重試歷史時，工具會核對前一份報告的 SHA-256、同一原部署及已完成席位，累計結果中的每席只計一次。歷史中斷、分岔或修改已完成席位都會拒絕。早期未記錄前一份雜湊的累計報告只需提交最新一份。摘要 `questDeployment` 列出版本代碼、APK 雜湊、報告數及核對席位數，成功核對報告承接時另列 `retryReportsLinked`。實體裝置與運行環境須現場驗收。
 
 ### 核對 MR 校正封存
 

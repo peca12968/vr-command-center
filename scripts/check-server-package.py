@@ -4120,6 +4120,7 @@ def main():
               and (not partial or retried['mappedSeats'] == len(rows))
               and retried['devices'][0] == failed_report['devices'][0]
               and retried['retry'] == failed_report['retry']
+              and retried['previousDeploymentSha256'] == control.sha(report_file)
               and mapping.read_bytes() == map_bytes
               and [(device['roomId'], device['seat'], device['status'], device.get('filesVerified')) for device in retried['devices']]
               == [(row['roomId'], row['seat'], 'launch-requested', True) for row in rows]
