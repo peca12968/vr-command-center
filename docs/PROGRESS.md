@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 五房分階段總驗收
+
+- `verify-field-results.py --venue-stages` 一次重驗獨立與合併模式各自的 5、10、25 席原始封存。核對各模式的原場次時間順序、每批同時在線區間、同一份發行報告及不同的原結束回條、場次、世界來源與入場識別。輸出包含總清單及六份批次清單的原始位元組雜湊。 [總驗收操作](EXTERNAL_CLIENTS.md#一次驗收兩種模式的三個階段)
+- 唯讀重驗 F 槽六批 0.50.7 Windows 同機資料，核對 18 份原世界日誌、18 份原戰鬥日誌及 80 筆伺服器戰績確認。要求 2,000 毫秒同時在線，六批最短的共同區間為 8,250 毫秒。六份個別驗收輸出與原報告相同。 [總清單](../artifacts/venue-stage-series-0507/stages.json) · [總驗收結果](../artifacts/venue-stage-series-0507/stages-results.json)
+- 六份由原場次衍生的驗收副本均被拒絕，涵蓋缺批、重複階段、發行報告位元組改變、原日誌位元組改變、誤標直連及不足 9,000 毫秒共同在線。86 項 Python 測試通過，另含同批識別重用、時間順序及每席不同直連來源的拒絕案例。 [拒絕案例](../artifacts/venue-stage-series-0507/source-validation.json)
+- GitHub Actions 在 `a4165409` 因帳務或支出上限未啟動任何步驟。這一輪重驗先前的同機原始封存。實體跨機、真人分階段、頭盔與廠商硬體仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42954486962)
+
 ## 2026-11-11 五房 5、10、25 人分階段驗收
 
 - 場館驗收清單可指定 `expectedPlayersPerRoom`。省略時沿用每房 5 席與全館 25 席。核對原場次、名冊、UDP 來源、戰績確認與原封存時，合併場也逐房比對席數。測試涵蓋總數正確但席位分配錯誤的拒絕案例。 [現場操作](EXTERNAL_CLIENTS.md#分階段驗收-5-人與-10-人)
