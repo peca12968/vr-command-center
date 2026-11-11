@@ -211,6 +211,16 @@
               <button type="submit">建立準備場次</button>
             </fieldset>
           </form>
+          <details id="launch-mission-file-panel" class="layout-report" hidden>
+            <summary>五房任務配置檔</summary>
+            <p class="hint">可在開場前保存五房的任務版本。載入時需使用含有這些版本的任務庫。</p>
+            <div class="button-row">
+              <button id="download-venue-missions" type="button" class="quiet" disabled>下載目前配置</button>
+              <label>配置 JSON<input id="venue-missions-file" type="file" accept=".json,application/json" disabled></label>
+              <button id="load-venue-missions" type="button" class="quiet" disabled>載入配置</button>
+            </div>
+            <p id="venue-missions-file-status" class="hint" role="status"></p>
+          </details>
           <details id="launch-room-layouts" class="layout-report" hidden>
             <summary>同時查看五房平面圖</summary>
             <p class="hint">上方是 +Z，右方是 +X。紅色標示配置問題，橘色標示未找到取樣通路的出生位。</p>
@@ -505,7 +515,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.140 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.141 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

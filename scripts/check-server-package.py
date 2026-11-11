@@ -220,6 +220,7 @@ def main():
     p.add_argument('--check-independent-room-layouts-ui', action='store_true',
                    help='Use the shipped five-room layout overview to review and prepare the distinct native room missions')
     p.add_argument('--check-linked-archive-plan-ui', action='store_true', help='Recreate the original Linked mission from the packaged console and run it')
+    p.add_argument('--check-venue-mission-file-ui', action='store_true', help='Download and reload the browser mission files before preparing each topology')
     p.add_argument('--mission-template',type=Path,help='Check and save an exported VR mission template, then run both native topologies with it')
     p.add_argument('--check-interrupted-replay', action='store_true', help='Play the saved native prefix after the owned launcher is killed')
     p.add_argument('--check-managed-mr', action='store_true', help='Verify the MR alignment startup gate, desktop rejection and Preparing seal')
@@ -391,6 +392,8 @@ def main():
     if args.check_linked_archive_plan_ui and (not args.player_package or venue_only or args.openxr_mock_only
             or args.mission_template or args.check_layout_preview or args.check_room_combat or not shutil.which('node')):
         p.error('--check-linked-archive-plan-ui requires the ordinary three-package run and Chromium')
+    if args.check_venue_mission_file_ui and not (args.check_independent_room_layouts_ui and args.check_linked_archive_plan_ui):
+        p.error('--check-venue-mission-file-ui requires both native browser mission preparation checks')
     if args.mission_template and (not args.prepare_independent_set or venue_only or args.openxr_mock_only
             or args.check_independent_room_missions or args.check_layout_preview or args.check_room_combat):
         p.error('--mission-template requires --prepare-independent-set and the ordinary two-topology check')
@@ -538,11 +541,16 @@ def main():
         driver = ROOT/'tests/browser/server-plan-browser.cjs'
         completed = subprocess.run([shutil.which('node'), str(driver)], cwd=driver.parent,
                                    input=json.dumps({'base': uri, 'token': keys['Master'], 'output': str(output),
+                                                     'useMissionFile': args.check_venue_mission_file_ui,
                                                      'linkedArchive': {'batchId': batch['requestId'], 'sessionId': original['id'], 'mission': mission}}),
                                    capture_output=True, encoding='utf-8', timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
         check(completed.returncode == 0 and output.is_file(), 'shipped console restores the historical Linked batch: '
               + completed.stderr.replace(keys['Master'], '[redacted]')[-600:])
         observed = read(output)
+        if args.check_venue_mission_file_ui:
+            check(observed['filePlan'] == {'schemaVersion': 1, 'mode': 'Linked',
+                                          'rooms': [{'roomId': room, 'missionId': mission['id']} for room in rooms]},
+                  'fresh console reopens the saved Linked mission file with all five original assignments')
         prepared = observed['prepared']
         check(prepared['id'] != original['id'] and prepared['mode'] == 'Linked' and prepared['roomIds'] == rooms
               and prepared['mission'] == mission and prepared['mission']['id'] != head['id']
@@ -4373,11 +4381,15 @@ def main():
                         for asset in ('sandbag', 'barrel')])
                     completed = subprocess.run([shutil.which('node'), str(driver)], cwd=driver.parent,
                         input=json.dumps({'base': uri, 'token': keys['Master'], 'missions': missions,
-                                          'invalidMission': invalid['id'], 'output': str(output)}),
+                                          'invalidMission': invalid['id'], 'output': str(output),
+                                          'useMissionFile': args.check_venue_mission_file_ui}),
                         capture_output=True, encoding='utf-8', timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
                     check(completed.returncode == 0 and output.is_file(), 'shipped browser reviews and submits all five original room layouts: '
                           + completed.stderr.replace(keys['Master'], '[redacted]')[-600:])
                     observed = read(output)
+                    if args.check_venue_mission_file_ui:
+                        check(observed['filePlan'] == {'schemaVersion': 1, 'mode': 'IndependentSet', **body},
+                              'fresh console reopens the saved independent mission file with the five original assignments')
                     check(observed['rejection'] == {'roomId': 4, 'invalidProps': [0, 1],
                           'marked': [{'roomId': room, 'indices': [0, 1]} for room in (4, 5)]},
                           'the exact creation rejection marks the two shared invalid props before the browser submits corrected assignments')

@@ -165,7 +165,27 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
 
 module.exports = { checkServerPlan };
 
-async function prepareRoomLayouts(page, missions, invalidMission, output) {
+async function roundTripMissionFile(page, base, token, mode, missions, output) {
+  const panel = page.locator('#launch-mission-file-panel');
+  await panel.locator('summary').click();
+  const event = page.waitForEvent('download');
+  await page.locator('#download-venue-missions').click();
+  const file = await event;
+  const filename = path.join(path.dirname(output), file.suggestedFilename());
+  await file.saveAs(filename);
+  const plan = JSON.parse(await fs.readFile(filename, 'utf8'));
+  assert.deepEqual(plan, { schemaVersion: 1, mode, rooms: missions.map((mission, index) => ({ roomId: index + 1, missionId: mission.id })) });
+  await login(page, base, token);
+  assert.equal(await page.locator('#launch-mode').inputValue(), 'Independent');
+  await panel.locator('summary').click();
+  await page.locator('#venue-missions-file').setInputFiles(filename);
+  await page.locator('#load-venue-missions').click();
+  await page.locator('#venue-missions-file-status').filter({ hasText: '已載入五房任務配置' }).waitFor();
+  assert.equal(await page.locator('#launch-mode').inputValue(), mode);
+  return plan;
+}
+
+async function prepareRoomLayouts(page, missions, invalidMission, output, reloadMissionFile) {
   await page.locator('#launch-mission').selectOption(missions[0].id);
   await page.locator('#launch-mode').selectOption('IndependentSet');
   await page.locator('#launch-room-missions-toggle').check();
@@ -218,6 +238,8 @@ async function prepareRoomLayouts(page, missions, invalidMission, output) {
   }
   for (const [index, mission] of missions.entries())
     await assignment(index + 1).selectOption(mission.id);
+  const filePlan = reloadMissionFile && await reloadMissionFile('IndependentSet', missions);
+  if (filePlan) await overview.locator('summary').click();
   const previews = [];
   for (const [index, mission] of missions.entries()) {
     const roomId = index + 1, map = card(roomId);
@@ -237,10 +259,10 @@ async function prepareRoomLayouts(page, missions, invalidMission, output) {
   const prepared = await accepted.json(), requestId = accepted.request().headers()['idempotency-key'];
   assert.match(requestId, /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/);
   await page.locator('#launch-independent-receipt-rows tr').last().waitFor();
-  await fs.writeFile(output, JSON.stringify({ previews, requestId, prepared, rejection }, null, 2), { flag: 'wx' });
+  await fs.writeFile(output, JSON.stringify({ previews, requestId, prepared, rejection, filePlan }, null, 2), { flag: 'wx' });
 }
 
-async function restoreLinkedArchive(page, archive, output) {
+async function restoreLinkedArchive(page, archive, output, reloadMissionFile) {
   await page.locator('#venue-closure-table').waitFor();
   const route = `/api/venue/closure/${archive.batchId}/linked-plan`;
   const read = page.waitForResponse(reply => new URL(reply.url()).pathname === route);
@@ -254,6 +276,7 @@ async function restoreLinkedArchive(page, archive, output) {
   });
   assert.equal(original.revision.number, 1);
   await page.locator('#notice').filter({ hasText: '已套用本批五房' }).waitFor();
+  const filePlan = reloadMissionFile && await reloadMissionFile('Linked', Array(5).fill(archive.mission));
   await page.locator('#launch-layout-summary[data-status=valid]').waitFor();
   assert.equal(await page.locator('#launch-mode').inputValue(), 'Linked');
   assert.equal(await page.locator('#launch-mission').inputValue(), archive.mission.id);
@@ -265,7 +288,7 @@ async function restoreLinkedArchive(page, archive, output) {
   const accepted = await create;
   assert.equal(accepted.status(), 201);
   assert.deepEqual(accepted.request().postDataJSON(), { missionId: archive.mission.id, mode: 'Linked', roomIds: [1, 2, 3, 4, 5] });
-  await fs.writeFile(output, JSON.stringify({ original, prepared: await accepted.json() }, null, 2), { flag: 'wx' });
+  await fs.writeFile(output, JSON.stringify({ original, prepared: await accepted.json(), filePlan }, null, 2), { flag: 'wx' });
 }
 
 if (require.main === module) {
@@ -273,14 +296,15 @@ if (require.main === module) {
     const { chromium } = require('playwright');
     const input = [];
     for await (const chunk of process.stdin) input.push(chunk);
-    const { base, token, plan, missions, invalidMission, linkedArchive, output } = JSON.parse(Buffer.concat(input).toString('utf8'));
+    const { base, token, plan, missions, invalidMission, linkedArchive, output, useMissionFile } = JSON.parse(Buffer.concat(input).toString('utf8'));
     assert.match(base, /^http:\/\/127\.0\.0\.1:\d+$/);
     const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_SERVER_PLAN_CHROMIUM });
     try {
       const page = await browser.newPage({ acceptDownloads: true });
       await login(page, base, token);
-      if (missions) await prepareRoomLayouts(page, missions, invalidMission, output);
-      else if (linkedArchive) await restoreLinkedArchive(page, linkedArchive, output);
+      const reloadMissionFile = useMissionFile ? (mode, versions) => roundTripMissionFile(page, base, token, mode, versions, output) : undefined;
+      if (missions) await prepareRoomLayouts(page, missions, invalidMission, output, reloadMissionFile);
+      else if (linkedArchive) await restoreLinkedArchive(page, linkedArchive, output, reloadMissionFile);
       else {
         await open(page);
         await fill(page, plan);

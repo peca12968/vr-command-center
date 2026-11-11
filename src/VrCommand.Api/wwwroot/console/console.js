@@ -24,6 +24,8 @@ const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫�
 const weatherNames = { Clear: '晴朗', Rain: '下雨', Fog: '濃霧', Storm: '暴風雨' };
 const behaviorNames = { Hold: '守備', Patrol: '巡邏', Advance: '推進' };
 const archiveNames = { NoSource: '沒有遊戲來源', Missing: '尚無錄製紀錄', Waiting: '等待封存', SourceMismatch: '來源尚未對上', Sealed: '已封存' };
+const venueMissionRooms = [1, 2, 3, 4, 5];
+const venueMissionFileLimit = 4096;
 const state = { key: '', actor: null, epoch: 0, busy: false, refreshPromise: null, rooms: [], venue: null, venuePhaseBlob: null, missions: [], catalog: [], launchPinned: null, history: null, draftBase: null, draftChanged: false, draftSavedAt: '', sessions: [], session: null, selected: null, pending: null, props: [], prop: -1, settingRevisions: null };
 const liveSettingDrafts = { environment: null, enemies: null };
 let comparedVersion = null;
@@ -212,6 +214,7 @@ function logout() {
   venueHistory.reset(); renderVenueClosure(null);
   state.props = []; state.prop = -1; clearPropHistory(); propMove.reset();
   roomPlan.reset(); placement.reset();
+  clearVenueMissionFile();
   renderIndependentReceipt();
   clearInterval(timer);
   $('workspace').hidden = true; $('login-panel').hidden = false; $('logout').hidden = true;
@@ -420,6 +423,88 @@ function commonLaunchRevision() {
   return state.catalog.find(row => row.mission.id === missionId)
     ?? (state.launchPinned?.mission.id === missionId ? state.launchPinned : null);
 }
+function venueMissionSelection() {
+  const mode = $('launch-mode').value;
+  if (mode !== 'Linked' && mode !== 'IndependentSet') return null;
+  const common = commonLaunchRevision();
+  const revisions = roomPlan.enabled() ? roomPlan.revisions() : venueMissionRooms.map(() => common);
+  if (revisions.some(revision => !revision)) return null;
+  return { schemaVersion: 1, mode, rooms: venueMissionRooms.map((roomId, index) => ({
+    roomId, missionId: revisions[index].mission.id
+  })) };
+}
+function parseVenueMissionFile(text) {
+  const plan = JSON.parse(text);
+  const exactKeys = (object, keys) => object && Object.keys(object).length === keys.length
+    && keys.every(key => Object.hasOwn(object, key));
+  if (!exactKeys(plan, ['schemaVersion', 'mode', 'rooms']) || plan.schemaVersion !== 1
+    || !['Linked', 'IndependentSet'].includes(plan.mode) || !Array.isArray(plan.rooms)
+    || plan.rooms.length !== venueMissionRooms.length) throw new Error();
+  const rooms = [...plan.rooms].sort((a, b) => a?.roomId - b?.roomId);
+  if (!rooms.every((row, index) => exactKeys(row, ['roomId', 'missionId']) && row.roomId === venueMissionRooms[index]
+    && typeof row.missionId === 'string' && /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(row.missionId))) throw new Error();
+  const ids = rooms.map(room => room.missionId.toLowerCase());
+  if (plan.mode === 'Linked' && new Set(ids).size !== 1) throw new Error();
+  return { mode: plan.mode, ids };
+}
+function clearVenueMissionFile() {
+  $('venue-missions-file').value = '';
+  $('load-venue-missions').disabled = true;
+  $('venue-missions-file-status').textContent = '';
+  $('launch-mission-file-panel').open = false;
+}
+function validLaunchRevision(revision) {
+  const definition = revision?.mission?.definition;
+  return !!revision?.mission?.id && Number.isSafeInteger(revision.number) && revision.number > 0
+    && typeof definition?.name === 'string' && Number.isSafeInteger(definition.durationSeconds)
+    && ['VR', 'MR'].includes(definition.environment?.mode) && !!definition.enemies && Array.isArray(definition.props);
+}
+function applyVenueMissionRevisions(mode, revisions) {
+  $('launch-mode').value = mode;
+  if (mode === 'IndependentSet') {
+    roomPlan.restore(revisions);
+  } else {
+    const [revision] = revisions;
+    state.launchPinned = revision;
+    missionOptions(revision.mission.id);
+    placement.recheckLaunch();
+  }
+}
+async function loadVenueMissionFile() {
+  const input = $('venue-missions-file'), file = input.files[0], status = $('venue-missions-file-status');
+  const epoch = state.epoch, view = operationsViewEpoch;
+  if (!file || $('load-venue-missions').disabled) return;
+  const current = () => master() && state.epoch === epoch && operationsViewEpoch === view && input.files[0] === file;
+  status.textContent = '正在核對配置檔內的任務版本…';
+  await run(async () => {
+    if (!current()) return;
+    let plan;
+    try {
+      if (!file.size || file.size > venueMissionFileLimit) throw new Error();
+      plan = parseVenueMissionFile(await file.text());
+    } catch {
+      if (current()) status.textContent = '配置格式不符。請選擇 4 KiB 以內的五房任務配置 JSON。';
+      return;
+    }
+    if (!current()) return;
+    const ids = [...new Set(plan.ids)];
+    const results = await Promise.allSettled(ids.map(async id => {
+      const revision = await api(`/missions/${id}/version`);
+      if (!validLaunchRevision(revision) || revision.mission.id !== id) throw new Error();
+      return [id, revision];
+    }));
+    if (!current()) return;
+    if (results.some(result => result.status === 'rejected')) {
+      const failed = new Set(ids.filter((id, index) => results[index].status === 'rejected'));
+      const rooms = venueMissionRooms.filter(room => failed.has(plan.ids[room - 1]));
+      status.textContent = `無法核對房間 ${rooms.join('、')} 的任務版本，已保留目前配置。請確認任務庫含有原保存版本。`;
+      return;
+    }
+    const revisions = new Map(results.map(result => result.value));
+    applyVenueMissionRevisions(plan.mode, plan.ids.map(id => revisions.get(id)));
+    status.textContent = '已載入五房任務配置。請核對場地，再建立準備場次。';
+  }, true);
+}
 function launchPlan() {
   const mode = $('launch-mode').value, mixed = roomPlan.enabled();
   const preview = mixed ? roomPlan.preview() : null;
@@ -462,6 +547,10 @@ function applyPermissions() {
   $('create-fields').disabled = locked || state.actor.role === 'GameServer';
   $('launch-room').disabled = $('launch-mode').value !== 'Independent';
   roomPlan.render();
+  $('launch-mission-file-panel').hidden = !master();
+  $('download-venue-missions').disabled = locked || !master() || !venueMissionSelection();
+  $('venue-missions-file').disabled = locked || !master();
+  $('load-venue-missions').disabled = locked || !master() || !$('venue-missions-file').files.length;
   const plan = launchPlan();
   renderLaunchPreview(plan);
   const create = $('create-session-form').querySelector('button');
@@ -779,8 +868,6 @@ async function restoreVenuePlan() {
   const linked = plan.mode === 'Linked';
   const current = () => master() && state.epoch === epoch && venueClosureEpoch === selection
     && operationsViewEpoch === view && archivedPlan?.requestId === plan.requestId && archivedPlan.mode === plan.mode;
-  const validRevision = revision => !!revision?.mission?.id && Number.isSafeInteger(revision.number) && revision.number > 0
-    && ['VR', 'MR'].includes(revision.mission.definition?.environment?.mode) && Array.isArray(revision.mission.definition.props);
   let restored = false;
   await run(async () => {
     if (!current()) return;
@@ -788,23 +875,16 @@ async function restoreVenuePlan() {
     if (!current()) return;
     const matches = result?.requestId === plan.requestId && (linked
       ? result.sessionId === plan.sessionIds[0] && Array.isArray(result.roomIds) && result.roomIds.length === 5
-        && result.roomIds.every((room, index) => room === index + 1) && validRevision(result.revision)
+        && result.roomIds.every((room, index) => room === index + 1) && validLaunchRevision(result.revision)
         && result.revision.mission.definition.name === plan.missionName
       : Array.isArray(result.rooms) && result.rooms.length === plan.sessionIds.length
         && result.rooms.every((room, index) => room?.roomId === index + 1 && room.sessionId === plan.sessionIds[index]
-          && validRevision(room.revision)));
+          && validLaunchRevision(room.revision)));
     if (!matches) {
       notify('無法核對本批五房的原任務版本，已保留目前的準備選擇。', true);
       return;
     }
-    $('launch-mode').value = plan.mode;
-    if (linked) {
-      state.launchPinned = result.revision;
-      missionOptions(result.revision.mission.id);
-      placement.recheckLaunch();
-    } else {
-      roomPlan.restore(result.rooms.map(room => room.revision));
-    }
+    applyVenueMissionRevisions(plan.mode, linked ? [result.revision] : result.rooms.map(room => room.revision));
     restored = true;
     notify('已套用本批五房的原任務版本。請核對各房場地，再建立準備場次。');
   });
@@ -1608,7 +1688,7 @@ for (const id of ['prop-asset', 'prop-x', 'prop-y', 'prop-z', 'prop-yaw']) $(id)
 });
 
 function tab(name, worldTarget = null) {
-  if (name !== 'operations') operationsViewEpoch++;
+  if (name !== 'operations') { operationsViewEpoch++; clearVenueMissionFile(); }
   if (name !== 'missions') { placement.clearTrial(); clearMissionTemplate(); clearPropCopies(); propMove.reset(); }
   finishPropGesture();
   for (const candidate of ['operations', 'missions', 'replay', 'world']) { const active = candidate === name; $(candidate + '-view').hidden = !active; $('tab-' + candidate).classList.toggle('active', active); $('tab-' + candidate).setAttribute('aria-pressed', String(active)); }
@@ -1641,6 +1721,14 @@ $('session-select').addEventListener('change', () => selectSession($('session-se
 $('launch-mode').addEventListener('change', () => { placement.scheduleLaunch(); applyPermissions(); });
 $('launch-mission').addEventListener('change', () => { placement.scheduleLaunch(); applyPermissions(); });
 $('launch-room').addEventListener('change', applyPermissions);
+$('venue-missions-file').addEventListener('change', () => { $('venue-missions-file-status').textContent = ''; applyPermissions(); });
+$('load-venue-missions').addEventListener('click', loadVenueMissionFile);
+$('download-venue-missions').addEventListener('click', () => {
+  const plan = venueMissionSelection();
+  if ($('download-venue-missions').disabled || !plan) return;
+  const filename = plan.mode === 'Linked' ? 'vr-venue-missions-linked.json' : 'vr-venue-missions-independent.json';
+  download(filename, new Blob([JSON.stringify(plan, null, 2) + '\n'], { type: 'application/json' }));
+});
 for (const kind of ['environment', 'enemies']) {
   $('reload-' + kind).addEventListener('click', () => runSession(async () => {
     await refresh();
