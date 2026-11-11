@@ -598,10 +598,10 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
     spec = importlib.util.spec_from_file_location('field_world_journal', Path(__file__).with_name('analyze-world-journal.py'))
     analyzer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(analyzer)
-    fields = ('schemaVersion', 'sessionId', 'streamId', 'origin', 'roomIds', 'calibration', 'captureStartedAtUtc')
-    expected = {key: world['header'].get(key) for key in fields}
+    expected = world['header']
+    quest_mr = expected.get('calibration') == 'quest-room-mr-v1'
     begin_kind, begin = guarded_begin if guarded_begin is not None else (None, None)
-    tracked_only = begin_kind == 'trackingBegin' or expected['calibration'] == 'quest-room-mr-v1'
+    tracked_only = begin_kind == 'trackingBegin' or quest_mr
     allowed_rigs = ('Tracked',) if tracked_only else ('Tracked', 'Simulated')
     roster_label = 'tracked' if begin_kind == 'trackingBegin' else 'participating'
     begin_roster = None
@@ -612,7 +612,7 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
                                                        require_tracked=concurrency.require_tracked, sealed_fires=sealed_fires)
     if reconnect_window is not None:
         observe_reconnect, finish_reconnect = reconnect_window.watch(players, applied_end, world['acceptedSequence'],
-            tracked_only=expected['calibration'] == 'quest-room-mr-v1')
+            tracked_only=quest_mr)
 
     def observe_packet(packet):
         if begin is not None:
@@ -673,7 +673,7 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
 
     try:
         journal = analyzer.analyze(path, accepted_sequence=begin['appliedAtSequence'] if begin is not None else None,
-                                   expected_header=expected, on_running_frame=count_player_rigs if player_sources is not None else None,
+                                   expected_full_header=expected, on_running_frame=count_player_rigs if player_sources is not None else None,
                                    on_packet=observe_packet if controls or any(item is not None for item in (begin, concurrency, reconnect_window, on_packet)) else None)
     except EvidenceError:
         raise

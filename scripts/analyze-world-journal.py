@@ -5,11 +5,43 @@ Outputs bounded metadata only. Never repairs, truncates, acknowledges or publish
 """
 import argparse
 from datetime import datetime, timedelta
+from decimal import Decimal
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import struct
+
+
+# WorldRecordingHeader initializes capabilities added to schema 1 to zero.
+LEGACY_ZERO_CAPABILITIES = (
+    'environmentVersion', 'enemyPresentationVersion', 'weaponPresentationVersion',
+    'enemyFireVersion', 'playerFireVersion', 'combatAudioVersion', 'playerPresentationVersion',
+    'missionClockVersion', 'missionDurationSeconds', 'reinforcementVersion',
+)
+
+
+def recorded_float(value):
+    if type(value) not in (int, float, Decimal) or not math.isfinite(value):
+        raise ValueError('Invalid recorded prop coordinate')
+    # Unity and .NET can spell the same System.Single differently in JSON.
+    return struct.unpack('<f', struct.pack('<f', value))[0] or 0.0
+
+
+def canonical_recording_header(header):
+    normalized = dict.fromkeys(LEGACY_ZERO_CAPABILITIES, 0) | header
+    if 'props' in normalized:
+        if type(normalized['props']) is not list:
+            raise ValueError('Invalid recorded props')
+        props = []
+        for prop in normalized['props']:
+            feet = dict(prop['feet'])
+            for axis in ('x', 'y', 'z'):
+                feet[axis] = recorded_float(feet[axis])
+            props.append(dict(prop, feet=feet, yaw=recorded_float(prop['yaw'])))
+        normalized['props'] = props
+    return json.dumps(normalized, sort_keys=True, allow_nan=False)
 
 
 def utc(value):
@@ -18,8 +50,8 @@ def utc(value):
     return result
 
 
-def analyze(path, accepted_sequence=None, response_utc=None, *, expected_session=None, expected_header=None, on_running_frame=None,
-            on_packet=None):
+def analyze(path, accepted_sequence=None, response_utc=None, *, expected_session=None, expected_header=None, expected_full_header=None,
+            on_running_frame=None, on_packet=None):
     if accepted_sequence is not None and (type(accepted_sequence) is not int or accepted_sequence < 1): raise ValueError('Positive accepted Begin sequence required')
     if response_utc and accepted_sequence is None: raise ValueError('Response timing requires a known accepted Begin boundary')
     response = utc(response_utc) if response_utc else None
@@ -51,6 +83,8 @@ def analyze(path, accepted_sequence=None, response_utc=None, *, expected_session
                     observed_header = {key: header.get(key) for key in expected_header}
                     if json.dumps(observed_header, sort_keys=True) != json.dumps(expected_header, sort_keys=True):
                         raise ValueError('Journal header differs from the expected source')
+                if expected_full_header is not None and canonical_recording_header(header) != canonical_recording_header(expected_full_header):
+                    raise ValueError('Journal header differs from the sealed recording')
             elif tag == 1:
                 packet = json.loads(payload[1:]); frame = packet['frame']
                 if complete or last and last['phase'] == 'Ended': raise ValueError('Frame after terminal boundary')

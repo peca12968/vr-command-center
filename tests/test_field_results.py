@@ -1884,6 +1884,9 @@ class FieldResultsTests(unittest.TestCase):
     def test_original_world_journal_matches_the_sealed_evidence(self):
         data = fixture()
         world = data[2]['finalWorld']
+        prop = {'id': id_for(17), 'kind': 'Barrel', 'roomId': 1, 'feet': {'x': 0.1, 'y': 0, 'z': 2}, 'yaw': 45}
+        world['header'].update(props=[prop], rulesVersion='0.8.0', assetSet='field-props-v1',
+                               missionClockVersion=1, missionDurationSeconds=60)
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / 'session.worldlog'
             world_journal(path, world)
@@ -1894,6 +1897,16 @@ class FieldResultsTests(unittest.TestCase):
             for changes, message in (
                 ({'header_changes': {'streamId': id_for(3)}}, 'source or record integrity'),
                 ({'header_changes': {'calibration': 'quest-room-mr-v1'}}, 'source or record integrity'),
+                ({'header_changes': {'props': []}}, 'source or record integrity'),
+                ({'header_changes': {'props': [dict(prop, feet=dict(prop['feet'], x=0.125))]}}, 'source or record integrity'),
+                ({'header_changes': {'props': [dict(prop, feet=dict(prop['feet'], y=False))]}}, 'source or record integrity'),
+                ({'header_changes': {'props': [dict(prop, yaw=46)]}}, 'source or record integrity'),
+                ({'header_changes': {'rulesVersion': '0.9.0'}}, 'source or record integrity'),
+                ({'header_changes': {'assetSet': 'primitives-v1'}}, 'source or record integrity'),
+                ({'header_changes': {'missionDurationSeconds': 61}}, 'source or record integrity'),
+                ({'header_changes': {'missionClockVersion': True}}, 'source or record integrity'),
+                ({'header_changes': {'enemyPresentationVersion': 1}}, 'source or record integrity'),
+                ({'header_changes': {'unknownCapability': 1}}, 'source or record integrity'),
                 ({'active': False}, 'active play'),
                 ({'sealed': False}, 'durable world and combat seals'),
                 ({'combat': 1}, 'durable world and combat seals'),
@@ -1913,16 +1926,37 @@ class FieldResultsTests(unittest.TestCase):
             with self.assertRaisesRegex(field.EvidenceError, 'source or record integrity'):
                 field.verify(*data, world_journal=path)
 
+    def test_original_world_header_accepts_native_float_encoding_and_legacy_zero_defaults(self):
+        data = fixture()
+        world = data[2]['finalWorld']
+        prop = {'id': id_for(17), 'kind': 'Barrel', 'roomId': 1, 'feet': {'x': 0.1, 'y': 0, 'z': 2}, 'yaw': 45}
+        world['header']['props'] = [prop]
+        raw_prop = dict(prop, feet={'x': 0.10000000149011612, 'y': -0.0, 'z': 2.0}, yaw=45.0)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'session.worldlog'
+            world_journal(path, world, header_changes={'props': [raw_prop]})
+            world['header'].update(environmentVersion=0, missionClockVersion=0, missionDurationSeconds=0)
+            self.assertEqual(80, field.verify(*data, world_journal=path)['worldJournal']['frames'])
+            world['header']['environmentVersion'] = 1
+            with self.assertRaisesRegex(field.EvidenceError, 'source or record integrity'):
+                field.verify(*data, world_journal=path)
+
     def test_venue_requires_all_original_journals_when_supplied(self):
         for mode in ('Independent', 'Linked'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 path, manifest, _ = venue_fixture(root, mode, with_journals=True)
+                entry = manifest['sessions'][0]
+                source = root / entry['worldJournal']
+                launcher_path = root / entry['launcherReport']
+                launcher = json.loads(launcher_path.read_text())
+                launcher['finalWorld']['header']['props'] = [{'id': id_for(17), 'kind': 'Barrel', 'roomId': 1,
+                    'feet': {'x': 0.1, 'y': 0, 'z': 2.5}, 'yaw': 45}]
+                world_journal(source, launcher['finalWorld'])
+                launcher_path.write_text(json.dumps(launcher), encoding='utf-8')
                 report = field.verify_venue(path)
                 self.assertEqual(5 if mode == 'Independent' else 1, report['worldJournalsVerified'])
                 self.assertTrue(all(row['worldJournal']['frames'] == row['worldSequence'] for row in report['sessions']))
-                source = root / manifest['sessions'][0]['worldJournal']
-                launcher = json.loads((root / manifest['sessions'][0]['launcherReport']).read_text())
                 world_journal(source, launcher['finalWorld'], end_sequence=7)
                 with self.assertRaisesRegex(field.EvidenceError, 'management boundary'):
                     field.verify_venue(path)
