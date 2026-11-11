@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 將歷史任務保存為下一版
+
+- 控制台 0.31.128 可從任務版本比較將選定舊版的完整內容追加為下一版。確認視窗列出來源、接續版本及預計版號。當前草稿、物件復原紀錄、已選開場版本及既有場次保留原內容。 [操作說明](MISSION_VERSIONS.md#將歷史版本保存為下一版)
+- 真 API 與 Chromium 驗證取消、同時修訂及回應遺失。確認視窗開啟時若另一位主控先保存，第 4 版的原請求被拒絕。重新整理後以第 5 版為基準將第 1 版完整內容存成第 6 版。即使第 7 版已存在，重試仍以原請求 ID 確認同一個第 6 版。 [專項 50 項](../artifacts/console-mission-restore-128-publication/checks.json)
+- 111 項 Node、從 ZIP 解壓執行的 929 項 Chromium 檢查及 107 項 Windows 管理包檢查均通過。ZIP 559 檔逐一與解壓結果比對，管理測試清理後 C／F 27 檔雜湊相符。 [管理包](WINDOWS_CONTROL_PACKAGE.md) · [驗證摘要](../artifacts/mission-restore-0.31.128-validation.json)
+- GitHub Actions 對 `38c656be` 因帳務或支出上限未啟動任何步驟。本輪驗證使用管理服務與瀏覽器，跨機 25 人、頭盔及廠商硬體仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42960724885)
+
 ## 2026-11-11 Windows 伺服器 0.50.7 單房視窗複驗
 
 - 使用既有 Windows 遊戲伺服器 0.50.7、啟動器 1.20 和管理控制台 0.31.127。兩場從 WinForms 貼上隔離實例的完整路徑、載入兩房、核對房間一及任務版本、設定 UDP 埠，再用鍵盤啟動。測試程式以管理 API 開始與結束任務，兩場都等雙封存與原生程序停止後從視窗關閉，退出碼皆為 0。 [鍵盤操作](WINDOWS_SERVER_PACKAGE.md#選檔啟動及結算驗收)
