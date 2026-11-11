@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-11 `VRCommand-ControlServer-0.31.135-live-event-win-x64.zip` 為 53,069,127 bytes，SHA-256 `a762f4b0408489b714a707bfc783bb6b99bbedd6e243caa24771ba9614aa12a8`。即時觀戰可按事件種類定位同房最近保存格，再返回原錄製。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.135-live-event-win-x64.zip) · [操作說明](WORLD_RECORDING.md#從即時觀戰定位最近事件)
+
 2026-11-11 `VRCommand-ControlServer-0.31.134-room-layouts-final-win-x64.zip` 為 53,068,259 bytes，SHA-256 `790fdf39e9ecdd4067d61575fdb21228b2eee8d11cb91182fede7ca20c6a8561`。主控可在逐房指定任務時同時核對五張保存平面圖。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.134-room-layouts-final-win-x64.zip) · [操作說明](MISSION_VERSIONS.md#逐房指定任務版本)
 
 2026-11-11 `VRCommand-ControlServer-0.31.133-seat-report-win-x64.zip` 為 53,065,219 bytes，SHA-256 `4ff07d1f768fd321d0c30e9779a413418db0a33f681c8409910ca1ee8d72c668`。可從全館收尾的原席位直接下載個人封存 CSV。解壓核對 564 筆清單。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.133-seat-report-win-x64.zip) · [操作說明](SESSION_CLOSURE.md#從全館收尾查看席位)

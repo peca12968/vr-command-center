@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-11 即時觀戰定位最近事件
+
+- 控制台 0.31.135 依選定的事件種類及房間，從畫面上的最後保存格往前找，停在符合的原保存格。返回時保留房間與鏡頭。17 項解壓版觀戰專項通過，包含原來源不符、找不到事件、返回更新中的同一來源及手機版面。 [操作說明](WORLD_RECORDING.md#從即時觀戰定位最近事件) · [畫面](../artifacts/console-live-event-135-focused/world-live-event.png)
+- 沿用 Windows 遊戲 0.50.7，485 項原生檢查通過。獨立及合併各 25 個同機玩家端，兩種模式逐房驗證共十次定位及返回。六份已關閉的原世界日誌核對十次定位均是按下當時各房最近的原受傷事件。六場雙封存、1,987 格完整回放、50 筆原戰績和伺服器確認相符，隔離場次及程序清理完成。 [原生結果](../artifacts/server-package-checks/run-be796644c6214d48b1b6b4617ac966eb/checks.json)
+- 111 項 Node、979 項完整 Chromium 及 107 項 Windows 管理包檢查通過。管理包解壓逐一核對 565 檔。測試停止後，遊戲及管理的 C／F 快照各有 251、18 個非資料庫檔案雜湊相符。GitHub Actions 因帳務或支出上限未啟動。頭盔、跨機及廠商硬體仍待現場驗收。 [管理包](WINDOWS_CONTROL_PACKAGE.md) · [核對摘要](../artifacts/live-event-0.31.135-validation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42980925032)
+
 ## 2026-11-11 Quest 部署重試歷史納入收尾驗收
 
 - 累計部署報告保存上一份原檔的 SHA-256。五房收尾可讀取最新報告或一路承接的原始報告，核對同一部署 ZIP、裝置清單及已完成席位。歷史中斷、分岔、修改已完成席位或跨批重複成功席位均會拒絕。手動分批部署的互不重複報告仍可沿用。93 項收尾驗收及 51 項部署測試通過。 [操作說明](EXTERNAL_CLIENTS.md#核對封存席位的-quest-發行-apk)
