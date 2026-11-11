@@ -464,11 +464,36 @@ function applyVenueMissionRevisions(mode, revisions) {
   if (mode === 'IndependentSet') {
     roomPlan.restore(revisions);
   } else {
-    const [revision] = revisions;
-    state.launchPinned = revision;
-    missionOptions(revision.mission.id);
-    placement.recheckLaunch();
+    pinLaunchRevision(revisions[0]);
   }
+}
+function pinLaunchRevision(revision) {
+  state.launchPinned = revision;
+  missionOptions(revision.mission.id);
+  placement.recheckLaunch();
+}
+async function prepareFromSession() {
+  const session = state.session, epoch = state.epoch, selection = selectionEpoch, view = operationsViewEpoch;
+  if ($('prepare-from-session').disabled || !manages(session) || session.state !== 'Ended') return;
+  const id = session.mission.id;
+  const current = () => state.epoch === epoch && selectionEpoch === selection && operationsViewEpoch === view
+    && state.session?.id === session.id && state.session.state === 'Ended' && manages();
+  let prepared = false;
+  await run(async () => {
+    if (!current()) return;
+    const revision = await api(`/missions/${id}/version`);
+    if (!current()) return;
+    if (!validLaunchRevision(revision) || revision.mission.id !== id) {
+      notify('無法核對原場次的任務版本，已保留目前的準備選擇。', true);
+      return;
+    }
+    $('launch-mode').value = session.mode;
+    if (session.mode === 'Independent') $('launch-room').value = String(session.roomIds[0]);
+    pinLaunchRevision(revision);
+    prepared = true;
+    notify('已選用原場次的任務版本。請核對場地，再建立準備場次。');
+  }, true);
+  if (prepared && current()) $('launch-mission').focus();
 }
 async function loadVenueMissionFile() {
   const input = $('venue-missions-file'), file = input.files[0], status = $('venue-missions-file-status');
@@ -543,6 +568,9 @@ function renderLaunchPreview(plan) {
 function applyPermissions() {
   if (!state.actor) return;
   const session = state.session, ended = session?.state === 'Ended', locked = state.busy || !!state.pending;
+  const prepare = $('prepare-from-session');
+  prepare.hidden = !ended || !manages(session);
+  prepare.disabled = locked || prepare.hidden;
   applyVenuePermissions();
   $('create-fields').disabled = locked || state.actor.role === 'GameServer';
   $('launch-room').disabled = $('launch-mode').value !== 'Independent';
@@ -1718,6 +1746,7 @@ $('include-ended').addEventListener('change', async () => {
   if (epoch === state.epoch) await refresh().catch(showRefreshError);
 });
 $('session-select').addEventListener('change', () => selectSession($('session-select').value));
+$('prepare-from-session').addEventListener('click', prepareFromSession);
 $('launch-mode').addEventListener('change', () => { placement.scheduleLaunch(); applyPermissions(); });
 $('launch-mission').addEventListener('change', () => { placement.scheduleLaunch(); applyPermissions(); });
 $('launch-room').addEventListener('change', applyPermissions);

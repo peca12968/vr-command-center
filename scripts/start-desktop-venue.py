@@ -413,9 +413,47 @@ def check_venue(venue, rooms):
     assert next(r for r in occupied if r['id'] == 1)['sessionId'] is None
     assert all(next(r for r in occupied if r['id'] == n)['sessionId'] == rooms[n-1]['id'] for n in range(2, 6))
     venue.request('/api/sessions', {'missionId': rooms[0]['mission']['id'], 'mode': 'Linked', 'roomIds': [1,2,3,4,5]}, expected=409)
-    replacement = venue.create(rooms[0]['mission'], [1], 'room-1-replacement', role='Room1')
+    if venue.args.check_reprepare_ui:
+        original = venue.state(rooms[0])
+        mission = original['mission']
+        head = venue.request(f'/api/missions/{mission["id"]}/revisions',
+            dict(mission['definition'], durationSeconds=120, props=[]), expected=201, request_id=str(uuid.uuid4()))
+        output = venue.directory / 'reprepared-room.json'
+        driver = ROOT / 'tests/browser/session-reprepare-browser.cjs'
+        completed = subprocess.run([shutil.which('node'), str(driver)], cwd=driver.parent,
+            input=json.dumps({'base': venue.base, 'token': venue.tokens['Room1'], 'session': original, 'output': str(output)}),
+            capture_output=True, encoding='utf-8', timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
+        if completed.returncode or not output.is_file():
+            raise RuntimeError('Room 1 browser did not create its replacement: ' + completed.stderr.replace(venue.tokens['Room1'], '[redacted]')[-1500:])
+        prepared = json.loads(output.read_bytes())
+        assert prepared['id'] != original['id'] and prepared['mission'] == mission and prepared['mission']['id'] != head['id']
+        assert prepared['roomIds'] == [1] and prepared['mode'] == 'Independent' and prepared['players'] == []
+        replacement = venue.adopt(prepared, 'room-1-replacement')
+        player_id = str(uuid.uuid4())
+        result = venue.request(f'/api/sessions/{prepared["id"]}/players',
+            {'playerId': player_id, 'roomId': 1, 'name': 'Replacement PC room 1', 'headset': 'Quest3'}, role='Room1')
+        replacement['players'].append(next(player for player in result['players'] if player['id'] == player_id))
+    else:
+        replacement = venue.create(rooms[0]['mission'], [1], 'room-1-replacement', role='Room1')
     venue.clients([replacement]); venue.command(replacement, 'Begin')
-    venue.wait(lambda: venue.frame(replacement, measure=True)['packet']['frame']['tick'] >= 20, 30, 'reused room 1')
+    def running_replacement():
+        packet = venue.frame(replacement, measure=True)['packet']
+        return packet if packet['frame']['phase'] == 'Running' and packet['frame']['tick'] >= 20 else None
+    reopened = venue.wait(running_replacement, 30, 'reused room 1')
+    if venue.args.check_reprepare_ui:
+        header = venue.request(f'/api/sessions/{replacement["id"]}/world')['header']
+        env, enemies = mission['definition']['environment'], mission['definition']['enemies']
+        prop, = header['props']
+        saved, = mission['definition']['props']
+        assert header['roomIds'] == [1] and header['missionDurationSeconds'] == mission['definition']['durationSeconds']
+        assert reopened['weather'] == env['weather'] and reopened['lightning'] == env['lightning']
+        assert reopened['frame']['night'] == (env['timeOfDay'] == 'Night')
+        assert reopened['frame']['behavior'] == enemies['behavior'] and not reopened['frame']['autoAttack']
+        assert prop['kind'] == 'Sandbag' and prop['yaw'] == saved['yawDegrees'] and prop['roomId'] == 1
+        assert prop['feet'] == dict(saved['position'], x=saved['position']['x'] - 28)
+        venue.save('reprepared-room-world.json', {'originalSessionId': original['id'], 'missionId': mission['id'],
+            'newerMissionId': head['id'], 'worldHeader': header, 'runningSequence': reopened['sequence']})
+        record('Room controller restores an earlier saved mission through the shipped console and starts its exact native world')
     assert len(venue.request('/api/sessions')) == 5
     assert venue.request('/api/sessions/' + rooms[0]['id'] + '/statistics') == first['statistics']
     for entry in rooms[1:]: assert venue.connected(entry) and venue.state(entry)['state'] == 'Running'
@@ -457,9 +495,12 @@ def main():
     parser.add_argument('--duration', type=int, choices=range(60,1801), default=900, metavar='60..1800')
     parser.add_argument('--visible-room', type=int, choices=range(0,6), default=1, help='One playable PC room; 0 makes all clients headless')
     parser.add_argument('--check', action='store_true', help='Headless native five-room isolation, room reuse and later Linked validation')
+    parser.add_argument('--check-reprepare-ui', action='store_true', help='Create the replacement through the room controller browser after saving a newer mission version')
     parser.add_argument('--job-workers', type=int, choices=range(1,17), default=2, help='Unity job workers per native process; recorded in evidence')
     parser.add_argument('--runtime-root', type=Path, help='Optional SSD directory for fresh isolated SQLite / journals; closed snapshot is copied back to F artifacts')
     args = parser.parse_args()
+    if args.check_reprepare_ui and (not args.check or not shutil.which('node')):
+        parser.error('--check-reprepare-ui requires --check and Chromium')
     try: verify_player(args)
     except (OSError, RuntimeError, ValueError) as error: parser.error(str(error))
     if args.check: args.visible_room = 0
