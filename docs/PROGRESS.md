@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 Windows 玩家視窗的發行核對與紀錄
+
+- 玩家啟動器 1.9 可從圖形介面載入主控發行報告。清單不同或已核對的報告被改動時會停止啟動。核對成功後仍在實際啟動時逐檔檢查。玩家關閉遊戲後可開啟本次私有紀錄資料夾，將原日誌與退出報告一併交回主控。 [操作與套件](WINDOWS_PLAYER_PACKAGE.md#依場館發行報告核對玩家包)
+- 41 項解壓後套件檢查及 16 項實際 WinForms 事件檢查通過。後者執行已封裝的視窗處理程式及真 Unity 子程序，以缺少 OpenXR 執行環境驗證退出碼 2、同程序與兩份原始雜湊。兩次測試工具早期失敗各保留原紀錄，修正 AppDomain 路徑結尾與 Unity 標準輸出混入測試結果。人工操作及 OpenXR 頭盔入場待實機。 [視窗驗證](../artifacts/player-package-checks/20261111-111419-233d7006/release-form-checks.json)
+- 三包命令列同機驗收通過 444 項。獨立及合併各 25 席，核對 50 筆伺服器戰績確認、六個世界與戰鬥雙封存、943 格回放及 50 份與新版清單相符的原程序紀錄。活動場次及殘留程序為零，C／F 221 檔雜湊相符。使用原 Windows 與 Quest 0.50.7 遊戲來源，Windows 玩家與伺服器 324 個遊戲檔逐檔相同。 [驗證摘要](../artifacts/player-release-form-1.9/validation.json) · [新發行報告](../artifacts/venue-release-0.50.7-player-1.9.json)
+- GitHub Actions 在 `d8bf4ac3` 上因帳戶付款或支出上限未啟動任何步驟。跨機 25 席、Quest 3／VIVE XR 實機及廠商硬體整合仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42951573694)
+
 ## 2026-11-11 回放檔頭與原場景設定驗收
 
 - 封存驗收將原始 `.worldlog` 的完整檔頭與啟動器封存報告比對，涵蓋每個擺設物件的位置與角度、任務時鐘、校正、規則與呈現版本。物件座標依原 `System.Single` 值比較，舊檔缺少的能力欄位依原定義以零比較。單場及五房驗收都使用同一套比對。 [操作說明](EXTERNAL_CLIENTS.md#核對原始回放檔頭與封存)
