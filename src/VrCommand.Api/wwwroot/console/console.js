@@ -33,7 +33,7 @@ const world = mountWorld(() => state.key, logout, venueEnemyText, master, downlo
 const report = mountReport(() => state, logout, () => { renderStatistics(); closure.update(); });
 const venueReport = mountVenueReport(() => state, logout, download);
 const venueHistory = mountVenueHistory(api, selectVenueClosure);
-const venueDebrief = mountVenueDebriefSeats(() => state, logout);
+const venueDebrief = mountVenueDebriefSeats(() => state, logout, download);
 const readiness = mountReadiness(() => state, logout);
 const roomReadiness = mountRoomReadiness(() => state, logout, applyVenuePermissions, venueClimateText, venueEnemyText, target => {
   if (!state.busy && !state.pending) tab('world', target);

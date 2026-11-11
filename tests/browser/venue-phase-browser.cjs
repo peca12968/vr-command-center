@@ -578,6 +578,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const closure = (await api('/venue/closure')).batch;
     const debriefExport = id => `/venue/closure/${id}/debrief-receipts.json`;
     const debriefDetail = (id, room) => `/venue/closure/${id}/rooms/${room}/debrief-receipts`;
+    const seatReport = (id, room, seat) => `/venue/closure/${id}/rooms/${room}/seats/${seat}/report.csv`;
     const showSeats = room => page.locator(`[data-venue-debrief-seats="${room}"]`);
     const debriefButton = page.locator('#export-venue-debrief');
     await api(debriefExport(closure.requestId), 'GET', undefined, 'Master', 409);
@@ -595,6 +596,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await api(debriefDetail(closure.requestId, 1), 'GET', undefined, 'Master', 409);
     await api(debriefDetail(closure.requestId, 3), 'GET', undefined, 'Master', 409);
     await api(debriefDetail(closure.requestId, 5), 'GET', undefined, 'Master', 404);
+    await api(seatReport(closure.requestId, 1, 1), 'GET', undefined, 'Master', 409);
     check(await showSeats(1).count() === 0 && await showSeats(3).count() === 0,
       'Unsealed or source-free rooms cannot expose a receipt detail');
     const ending = await api(`/sessions/${preparing[0]}`);
@@ -808,16 +810,78 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await api(receiptsPath, 'GET', undefined, 'Room4', 403);
     await debriefRoom(4).filter({ hasText: '已確認 1／2 席 · 1 席未確認' }).waitFor();
     await detailStatus.filter({ hasText: '已確認 1／2 席' }).waitFor();
-    check((await seatRows.allTextContents()).join('|') === roster.map(player => `${player.seat + 1}${player.name}`
+    check((await seatRows.evaluateAll(rows => rows.map(row => [...row.cells].slice(0, 3).map(cell => cell.textContent).join('')))).join('|')
+      === roster.map(player => `${player.seat + 1}${player.name}`
       + (player.admissionId === acknowledged.admissionId ? '已確認' : '未確認')).join('|'),
       'A late acknowledgement updates the open original room without switching batches');
     await page.locator('#venue-debrief-only-missing').check();
     check(await seatRows.count() === 1 && (await seatRows.first().innerText()).includes('未確認'),
       'The receipt filter leaves only the exact unconfirmed seat');
+    const missing = roster.find(player => player.admissionId !== acknowledged.admissionId);
+    const reportPath = seatReport(evidenceId, 4, missing.seat + 1), csvRoute = '**/api' + reportPath;
+    const csvButton = page.locator(`[data-venue-debrief-csv="${missing.seat + 1}"]`);
+    const csvStatus = page.locator('#venue-debrief-csv-status');
+    const direct = await fetch(base + `/api/sessions/${originalSession}/players/${missing.id}/report.csv`, auth);
+    const exactCsv = Buffer.from(await direct.arrayBuffer());
+    assert(direct.ok);
+    await api(reportPath, 'GET', undefined, 'Room4', 403);
+    await api(reportPath, 'GET', undefined, 'GameServer', 403);
+    await api(seatReport(evidenceId, 4, 5), 'GET', undefined, 'Master', 404);
+    await api(seatReport(evidenceId, 1, 1), 'GET', undefined, 'Master', 404);
+    const csvResponse = page.waitForResponse(csvRoute), csvDownload = page.waitForEvent('download');
+    await csvButton.click();
+    const personal = await csvDownload;
+    check((await csvResponse).headers()['cache-control'] === 'no-store'
+      && personal.suggestedFilename() === `vr-command-report-v1-${originalSession}-player-${missing.id}.csv`
+      && exactCsv.equals(await fs.readFile(await personal.path())),
+      'The unconfirmed archived seat downloads the original personal CSV even after the room has been reused');
+    check((await api(detailPath)).players.find(player => player.seat === missing.seat + 1)?.acknowledged === false,
+      'Downloading the personal CSV leaves the original acknowledgement unchanged');
+    const foreignCsv = async route => {
+      const response = await route.fetch();
+      await route.fulfill({ response, headers: { ...response.headers(), 'content-disposition':
+        `attachment; filename=vr-command-report-v1-${activeReplacement.id}-player-${missing.id}.csv` } });
+    };
+    await page.route(csvRoute, foreignCsv);
+    let unexpectedCsv = 0;
+    const unexpected = () => { unexpectedCsv++; };
+    page.on('download', unexpected);
+    try {
+      await csvButton.click();
+      await csvStatus.filter({ hasText: '暫時無法下載原封存戰績' }).waitFor();
+      check(unexpectedCsv === 0 && await csvButton.isEnabled(), 'A substituted session filename is rejected and the exact seat can retry');
+    } finally { await page.unroute(csvRoute, foreignCsv); page.off('download', unexpected); }
     await page.setViewportSize({ width: 390, height: 844 });
     check(await detailPanel.evaluate(panel => panel.scrollWidth <= panel.clientWidth + 1), 'The receipt detail fits the mobile console');
     await page.setViewportSize({ width: 1440, height: 1080 });
     await detailPanel.screenshot({ path: path.join(screenshots, 'venue-debrief-seats.png') });
+    let releaseCsv, finishCsv, startedCsv = false;
+    const csvGate = new Promise(resolve => { releaseCsv = resolve; });
+    const csvDone = new Promise(resolve => { finishCsv = resolve; });
+    const holdCsv = async route => {
+      startedCsv = true;
+      try {
+        const response = await route.fetch();
+        await csvGate;
+        await route.fulfill({ response });
+      } catch { /* Changing batch aborts the original download. */ }
+      finally { finishCsv(); }
+    };
+    await page.route(csvRoute, holdCsv); page.on('download', unexpected);
+    try {
+      const request = page.waitForRequest(csvRoute);
+      await csvButton.click(); await request;
+      await picker.selectOption(closure.requestId);
+      await detailPanel.waitFor({ state: 'hidden' });
+    } finally {
+      releaseCsv(); if (startedCsv) await csvDone;
+      await page.unroute(csvRoute, holdCsv); page.off('download', unexpected);
+    }
+    await picker.selectOption(evidenceId);
+    await showSeats(4).click();
+    await detailStatus.filter({ hasText: '已確認 1／2 席' }).waitFor();
+    check(unexpectedCsv === 0 && await csvStatus.textContent() === '',
+      'A held personal CSV cannot download after changing the batch');
     const detailRoute = '**/api' + detailPath;
     const foreignDetail = async route => {
       const response = await route.fetch();

@@ -1648,6 +1648,7 @@ def main():
             common['venueDebriefReceipts'] = str(debrief_file)
             original_receipts = {row['sessionId']: row for row in json.loads(snapshot)['sessions']}
             seat_views = []
+            seat_reports = []
             for row in closed['sessions']:
                 session = request('/api/sessions/' + row['sessionId'])
                 original = original_receipts[session['id']]
@@ -1667,8 +1668,21 @@ def main():
                           and len(detail['players']) == players_per_room and all(player['acknowledged'] for player in detail['players']),
                           f'{label} room {room} seat detail matches the original sealed roster and native receipts')
                     seat_views.append(detail)
+                    for player in roster:
+                        seat = player['seat'] + 1
+                        seat_route = f'{route}/rooms/{room}/seats/{seat}/report.csv'
+                        csv_bytes, csv_headers = request(seat_route, raw_response=True)
+                        direct, _ = request(f'/api/sessions/{session["id"]}/players/{player["id"]}/report.csv', raw_response=True)
+                        name = f'vr-command-report-v1-{session["id"]}-player-{player["id"]}.csv'
+                        check(csv_bytes == direct and csv_headers['Cache-Control'] == 'no-store'
+                              and csv_headers.get_content_type() == 'text/csv' and name in csv_headers['Content-Disposition'],
+                              f'{label} room {room} seat {seat} CSV exactly matches its original sealed personal report')
+                        seat_reports.append({'roomId': room, 'seat': seat, 'filename': name,
+                                             'sha256': hashlib.sha256(csv_bytes).hexdigest()})
             seats_file = out / (label + '-venue-debrief-seats.json')
             save(seats_file.name, seat_views)
+            seat_reports_file = out / (label + '-venue-debrief-csv.json')
+            save(seat_reports_file.name, seat_reports)
         if args.windows_release_report:
             common['venueReleaseReport']=str(args.windows_release_report)
         if args.check_venue_participation_gate:
@@ -1831,7 +1845,8 @@ def main():
               label + ' field evidence rejects relabeling the same-PC peers as direct LAN')
         manifest_path.write_text(json.dumps(evidence), encoding='utf-8')
         return {'batchId': closed['requestId'], 'zip': str(bundle_file), 'route': bundle_route,
-                **({'debrief': str(debrief_file), 'debriefSeats': str(seats_file)} if debrief_file is not None else {})}
+                **({'debrief': str(debrief_file), 'debriefSeats': str(seats_file), 'debriefSeatReports': str(seat_reports_file)}
+                   if debrief_file is not None else {})}
 
     def verify_venue_field_ui(mode, current, earlier):
         node = shutil.which('node')
@@ -1856,6 +1871,9 @@ def main():
                 for room in read(Path(case['debriefSeats']))]} for case in cases]
             check(result['debriefSeats'] == expected,
                   mode + ' shipped console opens every original room and filters confirmed native seats')
+            csv_checks = [{'batchId': case['batchId'], **next(row for row in reversed(read(Path(case['debriefSeatReports'])))
+                           if row['roomId'] == 5)} for case in cases]
+            check(result['debriefCsv'] == csv_checks, mode + ' shipped console downloads the exact original personal seat CSV')
     def verify_live_room_navigation(entries, clients, linked):
         topology = 'Linked' if linked else 'Independent'
         rooms = []

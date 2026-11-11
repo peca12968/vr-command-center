@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { randomUUID } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
 const { chromium } = require('playwright');
 const readCsv = require('./csv.cjs');
 
@@ -11,7 +11,7 @@ async function main() {
   assert.match(config.base, /^http:\/\/127\.0\.0\.1:\d+$/);
   const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_CLOSURE_CHROMIUM,
     args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
-  const results = [], fieldEvidence = [], participation = [], receiptExports = [], debriefSeats = [];
+  const results = [], fieldEvidence = [], participation = [], receiptExports = [], debriefSeats = [], debriefCsv = [];
   let history, roomReplay, scores, alignment, missionTime, debriefReceipts;
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1080 }, acceptDownloads: true });
@@ -446,7 +446,7 @@ async function main() {
       results.push(replay);
       await page.locator('#tab-operations').click();
     }
-    for (const { batchId, zip, archived, debrief, debriefSeats: detail } of config.fieldEvidence ?? []) {
+    for (const { batchId, zip, archived, debrief, debriefSeats: detail, debriefSeatReports: reports } of config.fieldEvidence ?? []) {
       if (archived) {
         await page.locator('#venue-closure-load').click();
         await page.locator('#venue-closure-batch').selectOption(batchId);
@@ -473,6 +473,7 @@ async function main() {
       }
       if (detail) {
         const rooms = [];
+        const personal = reports && JSON.parse(await fs.readFile(reports, 'utf8')).findLast(row => row.roomId === 5);
         const panel = page.locator('#venue-debrief-seats'), rows = page.locator('#venue-debrief-seat-rows tr');
         for (const expected of JSON.parse(await fs.readFile(detail, 'utf8'))) {
           const roomId = expected.roomId;
@@ -483,8 +484,16 @@ async function main() {
           assert.equal(response.status(), 200);
           assert.deepEqual(await response.json(), expected);
           await rows.last().waitFor();
-          assert.deepEqual(await rows.evaluateAll(items => items.map(row => [...row.cells].map(cell => cell.textContent))),
+          assert.deepEqual(await rows.evaluateAll(items => items.map(row => [...row.cells].slice(0, 3).map(cell => cell.textContent))),
             expected.players.map(player => [String(player.seat), player.name, '已確認']));
+          if (personal && roomId === personal.roomId) {
+            const download = page.waitForEvent('download');
+            await page.locator(`[data-venue-debrief-csv="${personal.seat}"]`).click();
+            const csv = await download;
+            assert.equal(csv.suggestedFilename(), personal.filename);
+            assert.equal(createHash('sha256').update(await fs.readFile(await csv.path())).digest('hex'), personal.sha256);
+            debriefCsv.push({ batchId, ...personal });
+          }
           await page.locator('#venue-debrief-only-missing').check();
           assert.equal(await rows.count(), 0);
           assert.match(await panel.innerText(), /沒有未確認席位/);
@@ -519,7 +528,7 @@ async function main() {
   } finally {
     await browser.close();
   }
-  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation, scores, alignment, missionTime, debriefReceipts, receiptExports, debriefSeats }, null, 2), { flag: 'wx' });
+  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation, scores, alignment, missionTime, debriefReceipts, receiptExports, debriefSeats, debriefCsv }, null, 2), { flag: 'wx' });
 }
 main().catch(error => {
   const location = error.stack?.match(/check-venue-replay-native\.cjs:(\d+):(\d+)\)/);

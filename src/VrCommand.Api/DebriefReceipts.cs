@@ -98,20 +98,37 @@ public sealed partial class WorldRecordings
     {
         lock (gate)
         {
-            var batch = manager.ReadVenueEnd(id, actor);
-            var session = batch.Sessions.Select(item => manager.Get(item.SessionId, actor))
-                .SingleOrDefault(original => original.RoomIds.Contains(roomId))
-                ?? throw new KeyNotFoundException("The original End batch does not include this room.");
-            if (session.State != SessionState.Ended || session.CombatStream is not { Sealed: true } stream
-                || VenueWorldArchive(session, stream, actor) is not (VenueArchiveState.Sealed, { } replay))
-                throw new InvalidOperationException("The original session needs sealed combat and world data.");
-
+            var (session, replay) = SealedVenueDebriefRoom(id, roomId, actor);
+            var stream = session.CombatStream!;
             var confirmed = ReadDebriefAdmissions(session.Id);
             var players = session.Players.Where(player => player.RoomId == roomId).OrderBy(player => player.Seat)
                 .Select(player => new VenueDebriefSeat(player.Seat + 1, player.Name, confirmed.Contains(player.AdmissionId))).ToArray();
-            return new(1, batch.RequestId, session.Id, roomId, stream.StreamId, session.Sequence,
+            return new(1, id, session.Id, roomId, stream.StreamId, session.Sequence,
                 stream.AcceptedSequence, replay.ThroughSequence, players);
         }
+    }
+
+    internal FinalSessionReport ReadVenueDebriefSeatReport(Guid id, int roomId, int seat, OperatorIdentity actor)
+    {
+        lock (gate)
+        {
+            var (session, _) = SealedVenueDebriefRoom(id, roomId, actor);
+            var player = session.Players.SingleOrDefault(player => player.RoomId == roomId && player.Seat + 1 == seat)
+                ?? throw new KeyNotFoundException("The original terminal roster does not include this seat.");
+            return manager.FinalPlayerReport(session.Id, player.Id, actor);
+        }
+    }
+
+    private (SessionView Session, VenueReplay Replay) SealedVenueDebriefRoom(Guid id, int roomId, OperatorIdentity actor)
+    {
+        var batch = manager.ReadVenueEnd(id, actor);
+        var session = batch.Sessions.Select(item => manager.Get(item.SessionId, actor))
+            .SingleOrDefault(original => original.RoomIds.Contains(roomId))
+            ?? throw new KeyNotFoundException("The original End batch does not include this room.");
+        if (session.State != SessionState.Ended || session.CombatStream is not { Sealed: true } stream
+            || VenueWorldArchive(session, stream, actor) is not (VenueArchiveState.Sealed, { } replay))
+            throw new InvalidOperationException("The original session needs sealed combat and world data.");
+        return (session, replay);
     }
 
     private HashSet<Guid> ReadDebriefAdmissions(Guid id)

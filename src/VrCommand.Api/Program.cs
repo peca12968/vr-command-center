@@ -361,6 +361,14 @@ app.MapGet("/api/venue/closure/{id:guid}/rooms/{roomId:int}/debrief-receipts", (
     context.Response.Headers.CacheControl = "no-store";
     return worlds.ReadVenueDebriefSeats(id, roomId, Actor(context));
 });
+app.MapGet("/api/venue/closure/{id:guid}/rooms/{roomId:int}/seats/{seat:int}/report.csv", (Guid id, int roomId, int seat,
+    WorldRecordings worlds, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var report = worlds.ReadVenueDebriefSeatReport(id, roomId, seat, Actor(context));
+    return Results.File(FinalReportCsv.Encode(report), "text/csv; charset=utf-8",
+        FinalReportCsv.FileName(report.SessionId, report.Players[0].PlayerId));
+});
 app.MapPost("/api/venue/phase", (VenuePhaseRequest request, WorldRecordings worlds, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";
