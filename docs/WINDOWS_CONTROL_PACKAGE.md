@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-11 `VRCommand-ControlServer-0.31.131-placement-rotation-win-x64.zip` 為 53,052,518 bytes，SHA-256 `8b8ac2cfa248f3508963c875d9950200517a834c1faab1c1e1a7625da335646b`。管理台可預覽並批次旋轉及平移所選場地物件。解壓核對 561 筆清單。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.131-placement-rotation-win-x64.zip) · [操作說明](LAYOUT.md#批次旋轉場地物件)
+
 2026-11-11 `VRCommand-ControlServer-0.31.130-placement-move-win-x64.zip` 為 53,050,953 bytes，SHA-256 `d2e921b126b41efa9f4ff2a251998e86ededeeeda4119f16e378d3930bf365f2`。主控可預覽及一次移動所選場地物件。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.130-placement-move-win-x64.zip) · [操作說明](LAYOUT.md#批次移動場地物件)
 
 2026-11-11 `VRCommand-ControlServer-0.31.129-live-rooms-win-x64.zip` 為 53,044,445 bytes，SHA-256 `aaede94ebb4d2eb63c38289a7a9c012172cc3a47aaf1525f6d0bad5dd264a9b5`。主控可從觀戰頁直接切換目前房間。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.129-live-rooms-win-x64.zip) · [操作說明](WORLD_RECORDING.md#從觀戰頁切換目前房間)

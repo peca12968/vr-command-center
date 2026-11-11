@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-11 批次旋轉場地物件
+
+- 控制台 0.31.131 支援以所選物件的平均位置為轉軸，先旋轉再依房間本地 X／Z 平移。配置圖顯示原轉軸及帶編號的目的位置與方向。確認後可單步套用、復原或重做。64 項配置編輯 Chromium 專項通過，涵蓋小數角度、錯誤角度、草稿預覽、版本保留和範本匯出。 [操作說明](LAYOUT.md#批次旋轉場地物件) · [配置圖](../artifacts/console-batch-rotation-131-publication/placement-batch-rotation-map.png)
+- 將瀏覽器下載的原範本匯入管理包，再由既有 Windows 遊戲 0.50.7 啟動兩種模式。401 項原生檢查通過，獨立與合併各 25 個同機玩家端，兩輪共 30 筆物件位置及角度逐一相符。六場完成雙封存、942 格完整回放，50 筆原戰績、伺服器確認及 CSV 相符。跨機與頭盔仍待實機驗收。 [原範本](../artifacts/console-batch-rotation-131-publication/placement-batch-rotation-template.json) · [原生檢查](../artifacts/server-package-checks/run-d80838d11f984633ba4ac0c064036e88/checks.json)
+- 111 項 Node、959 項解壓包 Chromium 及 107 項 Windows 管理包檢查通過。ZIP 解壓後逐一核對 562 檔。程序停止後，遊戲與管理測試的 C／F 快照分別有 213、18 個非資料庫檔案雜湊相符。GitHub Actions 對 `ebdeb7aa` 因帳務或支出上限未啟動任何步驟。 [管理包](WINDOWS_CONTROL_PACKAGE.md) · [核對摘要](../artifacts/placement-rotation-0.31.131-validation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42970778100)
+
 ## 2026-11-11 Quest UDP 逐席重試
 
 - 批次工具接受原報告。原裝置、端點、來源或樣本數變更時拒絕沿用。重試逐席核對原雙端報告的雜湊、來源、埠及有效時間。只重新探測未通過的席位，並把仍有效的原報告連同新報告列入本輪結果。探測中按 Ctrl+C 可保存已完成與待補席位。 [操作說明](QUEST3.md#重試-quest-udp-預檢席位)
