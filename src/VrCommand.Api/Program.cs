@@ -355,11 +355,11 @@ app.MapGet("/api/venue/closure/{id:guid}/debrief-receipts.json", (Guid id, World
     return Results.File(System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(snapshot, JsonFormat.Options), "application/json",
         $"vr-command-venue-debrief-receipts-v1-{id:D}.json");
 });
-app.MapGet("/api/venue/closure/{id:guid}/rooms/{roomId:int}/debrief-receipts", (Guid id, int roomId,
+app.MapGet("/api/venue/closure/{id:guid}/rooms/{roomId:int}/debrief-receipts", (Guid id, int roomId, bool? includeScores,
     WorldRecordings worlds, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";
-    return worlds.ReadVenueDebriefSeats(id, roomId, Actor(context));
+    return worlds.ReadVenueDebriefSeats(id, roomId, Actor(context), includeScores == true);
 });
 app.MapGet("/api/venue/closure/{id:guid}/rooms/{roomId:int}/seats/{seat:int}/report.csv", (Guid id, int roomId, int seat,
     WorldRecordings worlds, HttpContext context) =>

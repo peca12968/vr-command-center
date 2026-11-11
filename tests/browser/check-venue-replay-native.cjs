@@ -482,10 +482,14 @@ async function main() {
           await page.locator(`[data-venue-debrief-seats="${roomId}"]`).click();
           const response = await read;
           assert.equal(response.status(), 200);
+          assert.equal(new URL(response.url()).searchParams.get('includeScores'), 'true');
           assert.deepEqual(await response.json(), expected);
           await rows.last().waitFor();
           assert.deepEqual(await rows.evaluateAll(items => items.map(row => [...row.cells].slice(0, 3).map(cell => cell.textContent))),
             expected.players.map(player => [String(player.seat), player.name, '已確認']));
+          assert.deepEqual(await rows.evaluateAll(items => items.map(row => [...row.cells].slice(4).map(cell => cell.textContent))),
+            expected.players.map(({ score }) => [score.ammoUsed, score.shotsHit, score.kills, score.hitsReceived, score.damageTaken,
+              `${score.accuracyPercent}%`, score.health].map(String)));
           if (personal && roomId === personal.roomId) {
             const download = page.waitForEvent('download');
             await page.locator(`[data-venue-debrief-csv="${personal.seat}"]`).click();

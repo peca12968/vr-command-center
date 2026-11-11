@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using VrCommand.Core;
 
 namespace VrCommand.Api;
@@ -12,7 +13,14 @@ internal sealed record VenueDebriefExport(int Version, Guid RequestId, VenueDebr
 internal sealed record VenueDebriefExportSession(Guid SessionId, Guid StreamId, long ThroughSequence,
     long FinalStreamSequence, long WorldSequence, VenueDebriefExportPlayer[] Players);
 internal sealed record VenueDebriefExportPlayer(Guid PlayerId, Guid AdmissionId, int RoomId, bool Acknowledged);
-internal sealed record VenueDebriefSeat(int Seat, string Name, bool Acknowledged);
+internal sealed record VenueDebriefSeat(int Seat, string Name, bool Acknowledged,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueDebriefSeatScore? Score);
+internal sealed record VenueDebriefSeatScore(long AmmoUsed, long ShotsHit, long Kills, long HitsReceived,
+    long DamageTaken, decimal AccuracyPercent, int Health)
+{
+    internal static VenueDebriefSeatScore From(PlayerStatistics player) => new(player.AmmoUsed, player.ShotsHit,
+        player.Kills, player.HitsReceived, player.DamageTaken, player.AccuracyPercent, player.Health);
+}
 internal sealed record VenueDebriefSeats(int Version, Guid RequestId, Guid SessionId, int RoomId, Guid StreamId,
     long ThroughSequence, long FinalStreamSequence, long WorldSequence, VenueDebriefSeat[] Players);
 
@@ -94,15 +102,18 @@ public sealed partial class WorldRecordings
         }
     }
 
-    internal VenueDebriefSeats ReadVenueDebriefSeats(Guid id, int roomId, OperatorIdentity actor)
+    internal VenueDebriefSeats ReadVenueDebriefSeats(Guid id, int roomId, OperatorIdentity actor, bool includeScores)
     {
         lock (gate)
         {
             var (session, replay) = SealedVenueDebriefRoom(id, roomId, actor);
             var stream = session.CombatStream!;
             var confirmed = ReadDebriefAdmissions(session.Id);
+            var scores = includeScores ? manager.FinalReport(session.Id, actor, roomId).Players
+                .ToDictionary(player => player.PlayerId, VenueDebriefSeatScore.From) : null;
             var players = session.Players.Where(player => player.RoomId == roomId).OrderBy(player => player.Seat)
-                .Select(player => new VenueDebriefSeat(player.Seat + 1, player.Name, confirmed.Contains(player.AdmissionId))).ToArray();
+                .Select(player => new VenueDebriefSeat(player.Seat + 1, player.Name, confirmed.Contains(player.AdmissionId),
+                    scores?[player.Id])).ToArray();
             return new(1, id, session.Id, roomId, stream.StreamId, session.Sequence,
                 stream.AcceptedSequence, replay.ThroughSequence, players);
         }

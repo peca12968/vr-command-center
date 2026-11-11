@@ -781,6 +781,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const [acknowledged] = originalReceipts.players;
     const { streamId, throughSequence, finalStreamSequence, worldSequence } = originalReceipts;
     const detailPath = debriefDetail(evidenceId, 4);
+    const scoredDetailPath = detailPath + '?includeScores=true';
+    const detailRoute = url => url.pathname === `/api${detailPath}` && url.searchParams.get('includeScores') === 'true';
     const detailPanel = page.locator('#venue-debrief-seats'), detailStatus = page.locator('#venue-debrief-seats-status');
     const seatRows = page.locator('#venue-debrief-seat-rows tr');
     const activeReplacement = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [4] }, 'Master', 201);
@@ -796,9 +798,30 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       players: roster.map(player => ({ seat: player.seat + 1, name: player.name, acknowledged: false })) });
     await api(detailPath, 'GET', undefined, 'Room4', 403);
     await api(detailPath, 'GET', undefined, 'GameServer', 403);
+    await api(scoredDetailPath, 'GET', undefined, 'Room4', 403);
+    await api(scoredDetailPath, 'GET', undefined, 'GameServer', 403);
     check(await seatRows.count() === 2 && !(await detailPanel.innerText()).includes('Replacement fixture seat')
       && (await fetch(base + '/api' + detailPath, auth)).headers.get('cache-control') === 'no-store',
       'The original archived room exposes only its terminal seats even while a new room roster uses the same room');
+    const finalScore = { ammoUsed: 0, shotsHit: 0, kills: 0, hitsReceived: 0, damageTaken: 0, accuracyPercent: 0, health: 100 };
+    const scored = await fetch(base + '/api' + scoredDetailPath, auth);
+    assert.deepEqual(await scored.json(), { ...beforeReceipt, players: beforeReceipt.players.map(row => ({ ...row, score: finalScore })) });
+    check(scored.headers.get('cache-control') === 'no-store'
+      && (await seatRows.evaluateAll(rows => rows.map(row => [...row.cells].slice(4).map(cell => cell.textContent).join('|')))).join(';')
+        === '0|0|0|0|0|0%|100;0|0|0|0|0|0%|100',
+      'The opted-in receipt includes the original final score of both unconfirmed seats and the browser renders every metric');
+    const brokenScore = async route => {
+      const response = await route.fetch();
+      const original = await response.json();
+      original.players[0].score.ammoUsed = -1;
+      await route.fulfill({ response, json: original });
+    };
+    await page.route(detailRoute, brokenScore);
+    try {
+      await page.locator('#venue-debrief-seats-refresh').click();
+      await detailStatus.filter({ hasText: '暫時無法確認原席位回條' }).waitFor();
+      check(await seatRows.count() === 0, 'An invalid score clears the table without keeping prior values');
+    } finally { await page.unroute(detailRoute, brokenScore); }
     await api(sessionPath + '/debrief-receipts', 'POST', { streamId, throughSequence, finalStreamSequence, worldSequence,
       players: [{ playerId: acknowledged.playerId, admissionId: acknowledged.admissionId, roomId: 4 }] }, 'GameServer', 204);
     const closurePath = '/venue/closure/' + evidenceId;
@@ -815,7 +838,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       + (player.admissionId === acknowledged.admissionId ? '已確認' : '未確認')).join('|'),
       'A late acknowledgement updates the open original room without switching batches');
     await page.locator('#venue-debrief-only-missing').check();
-    check(await seatRows.count() === 1 && (await seatRows.first().innerText()).includes('未確認'),
+    check(await seatRows.count() === 1 && (await seatRows.first().innerText()).includes('未確認')
+      && await seatRows.first().locator('td').last().innerText() === '100',
       'The receipt filter leaves only the exact unconfirmed seat');
     const missing = roster.find(player => player.admissionId !== acknowledged.admissionId);
     const reportPath = seatReport(evidenceId, 4, missing.seat + 1), csvRoute = '**/api' + reportPath;
@@ -882,7 +906,6 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await detailStatus.filter({ hasText: '已確認 1／2 席' }).waitFor();
     check(unexpectedCsv === 0 && await csvStatus.textContent() === '',
       'A held personal CSV cannot download after changing the batch');
-    const detailRoute = '**/api' + detailPath;
     const foreignDetail = async route => {
       const response = await route.fetch();
       await route.fulfill({ response, json: { ...await response.json(), roomId: 3 } });
@@ -907,7 +930,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     };
     await page.route(detailRoute, holdDetail);
     try {
-      const request = page.waitForRequest(detailRoute);
+      const request = page.waitForRequest(request => detailRoute(new URL(request.url())));
       await page.locator('#venue-debrief-seats-refresh').click(); await request;
       await picker.selectOption(closure.requestId);
       await detailPanel.waitFor({ state: 'hidden' });

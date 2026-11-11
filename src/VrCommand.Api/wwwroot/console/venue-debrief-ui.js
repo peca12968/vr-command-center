@@ -1,6 +1,13 @@
 const $ = id => document.getElementById(id);
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const sequence = value => Number.isSafeInteger(value) && value >= 0;
+const countFields = ['ammoUsed', 'shotsHit', 'kills', 'hitsReceived', 'damageTaken'];
+
+function validScore(score) {
+  return score && countFields.every(field => sequence(score[field])) && score.shotsHit <= score.ammoUsed
+    && Number.isFinite(score.accuracyPercent) && score.accuracyPercent >= 0 && score.accuracyPercent <= 100
+    && sequence(score.health) && score.health <= 100;
+}
 
 export function mountVenueDebriefSeats(current, unauthorized, save) {
   const panel = $('venue-debrief-seats'), title = $('venue-debrief-seats-title');
@@ -57,6 +64,8 @@ export function mountVenueDebriefSeats(current, unauthorized, save) {
       button.dataset.venueDebriefCsv = String(player.seat);
       button.addEventListener('click', () => downloadSeat(player.seat));
       row.insertCell().append(button);
+      for (const value of [...countFields.map(field => player.score[field]), `${player.score.accuracyPercent}%`, player.score.health])
+        row.insertCell().textContent = value;
       return row;
     }));
     table.hidden = !visible.length;
@@ -82,7 +91,7 @@ export function mountVenueDebriefSeats(current, unauthorized, save) {
     const inScope = () => controller === request && active && current().epoch === stateEpoch && target?.id === requested.id;
     render(); status.textContent = '正在讀取原批次的席位回條…';
     try {
-      const response = await fetch(`/api/venue/closure/${requested.batchId}/rooms/${requested.roomId}/debrief-receipts`, {
+      const response = await fetch(`/api/venue/closure/${requested.batchId}/rooms/${requested.roomId}/debrief-receipts?includeScores=true`, {
         headers: { Authorization: 'Bearer ' + state.key }, cache: 'no-store', signal: request.signal
       });
       if (!inScope()) return;
@@ -96,7 +105,7 @@ export function mountVenueDebriefSeats(current, unauthorized, save) {
         || !Array.isArray(body.players) || body.players.length !== target.rosterCount
         || new Set(body.players.map(player => player?.seat)).size !== target.rosterCount
         || !body.players.every(player => Number.isInteger(player?.seat) && player.seat >= 1 && player.seat <= 5
-          && typeof player.name === 'string' && typeof player.acknowledged === 'boolean')
+          && typeof player.name === 'string' && typeof player.acknowledged === 'boolean' && validScore(player.score))
         || body.players.filter(player => player.acknowledged).length < target.confirmedCount) throw new Error('Mismatch');
       players = [...body.players].sort((a, b) => a.seat - b.seat);
     } catch { if (inScope()) status.textContent = '暫時無法確認原席位回條，可重新讀取。'; }

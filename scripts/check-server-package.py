@@ -1677,7 +1677,10 @@ def main():
                     check(detail == expected and detail_headers['Cache-Control'] == 'no-store'
                           and len(detail['players']) == players_per_room and all(player['acknowledged'] for player in detail['players']),
                           f'{label} room {room} seat detail matches the original sealed roster and native receipts')
-                    seat_views.append(detail)
+                    scored_route = detail_route + '?includeScores=true'
+                    scored, score_headers = request(scored_route, raw_response=True)
+                    request(scored_route, role=f'Room{room}', expected=403)
+                    scores = []
                     for player in roster:
                         seat = player['seat'] + 1
                         seat_route = f'{route}/rooms/{room}/seats/{seat}/report.csv'
@@ -1687,8 +1690,17 @@ def main():
                         check(csv_bytes == direct and csv_headers['Cache-Control'] == 'no-store'
                               and csv_headers.get_content_type() == 'text/csv' and name in csv_headers['Content-Disposition'],
                               f'{label} room {room} seat {seat} CSV exactly matches its original sealed personal report')
+                        csv_row, = csv.DictReader(io.StringIO(csv_bytes.decode('utf-8-sig'), newline=''))
+                        scores.append({key: int(csv_row[key]) for key in ('ammoUsed', 'shotsHit', 'kills', 'hitsReceived', 'damageTaken', 'health')}
+                                      | {'accuracyPercent': float(csv_row['accuracyPercent'])})
                         seat_reports.append({'roomId': room, 'seat': seat, 'filename': name,
                                              'sha256': hashlib.sha256(csv_bytes).hexdigest()})
+                    view = json.loads(scored)
+                    check(view == {**expected, 'players': [dict(seat, score=score)
+                          for seat, score in zip(expected['players'], scores, strict=True)]}
+                          and score_headers['Cache-Control'] == 'no-store',
+                          f'{label} room {room} seat scores match all seven metrics of the original sealed personal CSVs')
+                    seat_views.append(view)
             seats_file = out / (label + '-venue-debrief-seats.json')
             save(seats_file.name, seat_views)
             seat_reports_file = out / (label + '-venue-debrief-csv.json')
