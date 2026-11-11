@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-11 伺服器啟動器的鍵盤選房與啟動
+
+- Windows 啟動器 1.19 在單場視窗加入 Alt+R、Alt+P、Alt+S。實際按 Enter 載入管理實例後，先確認未選場時 Alt+S 維持停用，再用 Alt+R 及方向鍵選第 1 房、Alt+P 設定 UDP 埠、Alt+S 啟動。原程序公告正確端點。 [操作方式](SERVER_CATALOG.md)
+- 實際解壓包視窗場 `run-58f3717e0f014de0aa62730d7e6b8522` 完成同機 Windows 玩家入場、API 測試開始與結束、戰績伺服器確認、雙封存、235 格世界日誌及 Alt+F4 關閉。測試程序皆退出，C／F 16 檔逐檔相符。 [視窗驗收](../artifacts/server-gui/run-58f3717e0f014de0aa62730d7e6b8522/checks.json)
+- 封裝 10 項、清單 51 項及 Framework 59 項通過。首次清單檢查在舊按鈕文字定位失敗，保留原失敗，更新驗證器後通過。兩次清單場的 C／F 快照為 17 與 22 檔。Windows 伺服器及玩家套件的 323 個共用執行檔案相符，並通過同版 Quest 0.50.5 APK 離線發行核對。 [封裝與快照](../artifacts/server-keyboard-119-validation.json) · [發行核對](../artifacts/venue-release-0.50.5-server-119.json)
+
 ## 2026-11-11 長場結束前的環境切換與敵軍回擊
 
 - 長場射擊工具可搭配 `--incoming-fire`，在全部原分批射擊及換彈完成後，讓同一批原玩家接受新敵軍回擊並停火。明確加上 `--incoming-environment` 時，回擊前切為雨夜與閃電設定，確認停火後切為霧天白晝。逐頁對照原環境／敵軍策略時間線與完整回放。回擊發生在長時間操作完成後，持續全程交火另驗。 [操作方式](DESKTOP_ENDURANCE.md#長場射擊後的環境切換與敵軍回擊)

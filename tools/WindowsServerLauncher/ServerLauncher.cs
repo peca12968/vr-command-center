@@ -1120,7 +1120,7 @@ internal static class ServerLauncher
     {
         readonly TextBox selected = new TextBox(), address = new TextBox { Text = "127.0.0.1" }, bind = new TextBox { Text = "127.0.0.1" };
         readonly NumericUpDown port = new NumericUpDown { Minimum = 1024, Maximum = 65535, Value = 7777 }; readonly ComboBox session = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Enabled = false };
-        readonly Button open = new Button { Text = "選擇檔案" }, refresh = new Button { Text = "載入／更新" }, start = new Button { Text = "啟動伺服器", Enabled = false }, abort = new Button { Text = "中止伺服器", Enabled = false },
+        readonly Button open = new Button { Text = "選擇檔案" }, refresh = new Button { Text = "載入／更新" }, start = new Button { Text = "啟動伺服器 (&S)", Enabled = false }, abort = new Button { Text = "中止伺服器", Enabled = false },
             venue = new Button { Text = "五房批次啟動" };
         readonly CheckBox peerDiagnostics = new CheckBox { Text = "記錄本次玩家連線來源（場館驗收）" };
         readonly Label state = new Label { Text = "先啟動管理服務，再載入其管理實例。", AutoSize = false }, detail = new Label { Text = "請先載入，再明確選擇要啟動的房間與任務。", AutoEllipsis = true };
@@ -1131,8 +1131,8 @@ internal static class ServerLauncher
             Add(new Label { Text = "每個獨立房間一個伺服器；五房合併場次只需一個。", AutoSize = true }, 24, 24, 860, 30);
             Add(new Label { Text = "管理實例檔案完整路徑", AutoSize = true }, 24, 56, 600, 28); Add(selected, 24, 86, 594, 32); Add(open, 630, 84, 120, 36); Add(refresh, 766, 84, 124, 36);
             Add(new Label { Text = "可選檔，也可貼上 control-instance.json 路徑，按 Enter 或「載入／更新」。", AutoSize = true }, 24, 127, 866, 30);
-            Add(new Label { Text = "尚未綁定來源的 VR 或 MR 場次", AutoSize = true }, 24, 164, 400, 28); Add(session, 24, 194, 866, 34); Add(detail, 24, 240, 866, 76);
-            Add(new Label { Text = "公告IPv4", AutoSize = true }, 24, 327, 210, 28); Add(address, 24, 358, 230, 32); Add(new Label { Text = "本機綁定IPv4", AutoSize = true }, 284, 327, 230, 28); Add(bind, 284, 358, 230, 32); Add(new Label { Text = "UDP埠", AutoSize = true }, 544, 327, 130, 28); Add(port, 544, 358, 130, 32);
+            Add(new Label { Text = "尚未綁定來源的 VR 或 MR 場次 (&R)", AutoSize = true }, 24, 164, 400, 28); Add(session, 24, 194, 866, 34); Add(detail, 24, 240, 866, 76);
+            Add(new Label { Text = "公告IPv4", AutoSize = true }, 24, 327, 210, 28); Add(address, 24, 358, 230, 32); Add(new Label { Text = "本機綁定IPv4", AutoSize = true }, 284, 327, 230, 28); Add(bind, 284, 358, 230, 32); Add(new Label { Text = "UDP 埠 (&P)", AutoSize = true }, 544, 327, 130, 28); Add(port, 544, 358, 130, 32);
             Add(peerDiagnostics, 24, 400, 430, 30);
             Add(new Label { Text = "開啟後，來源 IP 與埠會寫入本機私有 server.log。", AutoSize = true }, 463, 404, 427, 28);
             Add(start, 24, 452, 260, 40); Add(abort, 310, 452, 260, 40); Add(venue, 630, 452, 260, 40); Add(state, 24, 510, 866, 64);

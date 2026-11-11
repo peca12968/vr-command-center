@@ -77,7 +77,7 @@ internal static class ServerCatalogProof
             var address = window.Controls.OfType<TextBox>().Skip(1).First();
             var rooms = window.Controls.OfType<ComboBox>().Single();
             var refresh = window.Controls.OfType<Button>().Single(button => button.Text == "載入／更新");
-            var start = window.Controls.OfType<Button>().Single(button => button.Text == "啟動伺服器");
+            var start = window.Controls.OfType<Button>().Single(button => button.Text == "啟動伺服器 (&S)");
             Action<string> arm = response =>
             {
                 File.Delete(entered);

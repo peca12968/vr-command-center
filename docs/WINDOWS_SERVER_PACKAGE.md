@@ -1,5 +1,7 @@
 # Windows 遊戲伺服器包
 
+2026-11-11 `VRCommand-GameServer-0.50.5-1.19-win-x64.zip` 為 84,815,122 bytes，SHA-256 `8f92eca496b21c6b4977e689e9487d95727134b7ff1608df48d921694fe487d2`。解壓核對 330 筆清單。支援 Alt+R 選房、Alt+P 設定 UDP 埠及 Alt+S 啟動。 [操作方式](SERVER_CATALOG.md)
+
 2026-11-11 `VRCommand-GameServer-0.50.5-1.18-weapon-gate-win-x64.zip` 為 84,815,059 bytes，SHA-256 `80a9c1f88f430b7d201ba4f5e63962ecc81c4a201937b60ff71d6a2fce0eca16`，解壓核對 330 筆清單。搭配同版 0.50.5 玩家與 Quest 開發 APK。 [桌面武器輸入](DESKTOP_WEAPON_INPUT.md)
 
 2026-11-11 `VRCommand-GameServer-0.50.4-1.18-keyboard-win-x64.zip` 為 84,814,935 bytes，SHA-256 `0ce48c52dc23f83eb5960b529c0765c6f807dcd7595233fe4c207006514cf434`。解壓核對 330 筆清單。啟動器提供管理路徑欄 Enter 載入，搭配 Windows 遊戲 0.50.4。 [鍵盤操作](SERVER_CATALOG.md)
