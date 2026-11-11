@@ -377,16 +377,28 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     check(await page.locator('#player-review-select').isDisabled() && await page.locator('#open-player-review').isDisabled()
       && await page.locator('#open-player-damage').isDisabled(),
       'An interrupted archive does not offer a sealed player review');
-    const closureReplay = page.waitForRequest(request => {
-      const { pathname, searchParams } = new URL(request.url());
-      return pathname === `/api/sessions/${live.header.sessionId}/world/watch` && searchParams.get('mode') === 'replay'
-        && searchParams.get('fromFrame') === '1' && searchParams.get('throughFrame') === String(interrupted.acceptedSequence);
-    });
-    await page.locator('#open-closure-replay').click();
-    await closureReplay;
-    await page.waitForFunction(tail => Number(document.querySelector('#world-canvas').dataset.sequence) === tail
-      && document.querySelector('#world-freshness').textContent === '已到已保存片段尾端', interrupted.acceptedSequence, { polling: 100 });
-    check((await page.locator('#world-status').innerText()).includes('錄製未封存'), 'Single-session closure replays the exact saved prefix from frame one without a seal');
+    const roomReplay = await context.newPage();
+    try {
+      await roomReplay.goto(base + '/console/');
+      await roomReplay.locator('#login-key').fill(tokens.Room2);
+      await roomReplay.locator('#login-form button').click();
+      await roomReplay.locator('#include-ended').check();
+      await roomReplay.locator('#session-select').selectOption(live.header.sessionId);
+      const closureReplay = roomReplay.waitForRequest(request => {
+        const { pathname, searchParams } = new URL(request.url());
+        return pathname === `/api/sessions/${live.header.sessionId}/world/watch` && searchParams.get('mode') === 'replay'
+          && searchParams.get('observerRoomId') === '2' && searchParams.get('fromFrame') === '1'
+          && searchParams.get('throughFrame') === String(interrupted.acceptedSequence);
+      });
+      await roomReplay.locator('#open-closure-replay').click();
+      await closureReplay;
+      await roomReplay.waitForFunction(tail => Number(document.querySelector('#world-canvas').dataset.sequence) === tail
+        && document.querySelector('#world-freshness').textContent === '已到已保存片段尾端', interrupted.acceptedSequence, { polling: 100 });
+      const status = await roomReplay.locator('#world-status').innerText();
+      check(status.includes('錄製未封存') && status.includes('僅接收房間 2'),
+        'Room controller closure replays the exact scoped saved prefix from frame one without a seal');
+      await roomReplay.locator('#world-player').screenshot({ path: path.join(screenshots, 'closure-saved-room-replay.png') });
+    } finally { await roomReplay.close(); await page.bringToFront(); }
     await page.locator('#tab-world').click();
     await page.locator('#world-recording').selectOption(live.header.sessionId);
     check(await page.locator('#world-replay').innerText() === '回放已保存片段', 'An incomplete recording offers a bounded saved replay');

@@ -24,12 +24,26 @@ async function main() {
     await page.getByRole('button', { name: '回放原場次', exact: true }).and(page.locator('#open-closure-replay')).click();
     const response = await reply;
     assert.equal(response.status(), 200);
-    const query = new URL(response.url()).searchParams;
+    const replay = new URL(response.url()), query = replay.searchParams;
     assert.equal(query.get('mode'), 'replay');
     assert.equal(query.get('fromFrame'), '1');
     assert.equal(query.get('observerRoomId'), String(roomId));
     assert.equal(query.has('throughFrame'), false);
-    const records = (await response.text()).trim().split('\n\n').map(block => {
+    const canvas = page.locator('#world-canvas');
+    await page.waitForFunction(tail => Number(document.querySelector('#world-canvas').dataset.sequence) === tail,
+      recording.acceptedSequence, { polling: 100 });
+    assert.equal(await page.locator('#world-recording').inputValue(), sessionId);
+    assert.deepEqual(await page.locator('#world-room option').evaluateAll(options => options.map(option => option.value)), [String(roomId)]);
+    assert.equal(await page.locator('#world-camera').inputValue(), 'top');
+    assert.match(await page.locator('#world-status').innerText(), new RegExp(`僅接收房間 ${roomId}`));
+    assert.equal(await canvas.getAttribute('data-sequence'), String(recording.acceptedSequence));
+    assert.deepEqual(errors, []);
+    // Read the same authenticated projection separately. Chromium does not
+    // always retain a completed SSE response body for Network.getResponseBody.
+    query.set('rate', '4');
+    const captured = await fetch(replay, { headers: { Authorization: 'Bearer ' + token }, signal: AbortSignal.timeout(20000) });
+    assert.equal(captured.status, 200);
+    const records = (await captured.text()).trim().split('\n\n').map(block => {
       const lines = block.split('\n');
       return { event: lines.find(line => line.startsWith('event: '))?.slice(7),
         data: JSON.parse(lines.find(line => line.startsWith('data: ')).slice(6)) };
@@ -54,15 +68,6 @@ async function main() {
       assert([...packet.frame.players, ...packet.frame.enemies, ...statistics].every(row => row.roomId === roomId));
     }
     assert.equal(frames.at(-1).packet.frame.phase, 'Ended');
-    const canvas = page.locator('#world-canvas');
-    await page.waitForFunction(tail => Number(document.querySelector('#world-canvas').dataset.sequence) === tail,
-      recording.acceptedSequence, { polling: 100 });
-    assert.equal(await page.locator('#world-recording').inputValue(), sessionId);
-    assert.deepEqual(await page.locator('#world-room option').evaluateAll(options => options.map(option => option.value)), [String(roomId)]);
-    assert.equal(await page.locator('#world-camera').inputValue(), 'top');
-    assert.match(await page.locator('#world-status').innerText(), new RegExp(`僅接收房間 ${roomId}`));
-    assert.equal(await canvas.getAttribute('data-sequence'), String(recording.acceptedSequence));
-    assert.deepEqual(errors, []);
     await page.locator('#world-player').screenshot({ path: path.join(path.dirname(output), path.basename(output, '.json') + '.png') });
     await fs.writeFile(output, JSON.stringify({ sessionId, streamId, roomId, fromFrame: frames[0].packet.sequence,
       throughFrame: frames.at(-1).packet.sequence, complete: true, projectedFrames: frames.length,
