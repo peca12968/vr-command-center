@@ -1,5 +1,7 @@
 # Quest 3 接入與工具鏈
 
+2026-11-11 Quest 開發 APK 0.50.7／72 為 61,037,854 bytes，SHA-256 `74457e3422ae4d312ba4d073fca1e3e982aedc55bccf9312656a21c638cf0473`。發行核對通過 ARM64、最低 SDK 32、目標 SDK 35、OpenXR 預載及 APK v2 開發簽章。安裝與操作待頭盔。 [APK](../artifacts/quest-packages/vr-command-quest-0.50.7-arm64-debug.apk) · [發行核對](../artifacts/venue-release-0.50.7-local-profiler.json)
+
 2026-11-11 Quest 開發 APK 0.50.6／71 為 61,037,858 bytes，SHA-256 `d8047b1358b4f6ef355b15791b44a747977a56b0e2d62a7bf8cdf977d6a6a79a`。已核對 ARM64、最低 SDK 32、目標 SDK 35、APK v2 開發簽章與 OpenXR 預載。 [APK](../artifacts/quest-packages/vr-command-quest-0.50.6-arm64-debug.apk) · [發行核對](../artifacts/venue-release-0.50.6-xr-startup.json)
 
 2026-11-11 Quest 開發 APK 0.50.5／70 為 61,037,854 bytes，SHA-256 `43b95a998e113896a0286338f3d47c928822bd60cadc7a460d6918a70d4a9254`。已核對 ARM64、最低 SDK 32、目標 SDK 35、APK v2 開發簽章，與 Windows 玩家及伺服器使用相同遊戲來源和場景網路識別。實機安裝與操作待頭盔。 [APK](../artifacts/quest-packages/vr-command-quest-0.50.5-arm64-debug.apk) · [發行核對](../artifacts/venue-release-0.50.5-weapon-gate.json)

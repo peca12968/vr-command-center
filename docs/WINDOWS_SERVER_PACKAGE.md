@@ -1,5 +1,7 @@
 # Windows 遊戲伺服器包
 
+2026-11-11 `VRCommand-GameServer-0.50.7-1.20-win-x64.zip` 為 84,981,993 bytes，SHA-256 `ce417b05968a31d3ecf13cb07acc8f8c132ea481e8a746de8ddf52e04154ab03`。解壓核對 331 筆清單。執行中的合併場實測指定網卡上的遊戲 UDP 及本機上的 Unity 編輯器連線。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.7-1.20-win-x64.zip) · [監聽紀錄](../artifacts/windows-local-profiler-0507/linked-server-sockets.json)
+
 2026-11-11 `VRCommand-GameServer-0.50.6-1.20-win-x64.zip` 為 84,981,819 bytes，SHA-256 `b6ce6d22ba811a9f6743d33f2720a14c90ddc909ad1dc8ca64b4fe3b442d7c73`，解壓核對 331 筆清單。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.6-1.20-win-x64.zip) · [發行核對](../artifacts/venue-release-0.50.6-xr-startup.json)
 
 2026-11-11 `VRCommand-GameServer-0.50.5-1.20-win-x64.zip` 為 84,815,253 bytes，SHA-256 `872b8bd494d13497897b001020b093b8902e3e029763cff3c2532946caf29683`。解壓核對 330 筆清單。五房批次支援 Alt+V、Enter 與 Alt+S。 [批次鍵盤操作](#從-windows-視窗核對並啟動)

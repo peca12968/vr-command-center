@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-11 `VRCommand-Player-0.50.7-1.8-win-x64.zip` 為 84,941,218 bytes，SHA-256 `37a909f78639c0a9d46cf166bd6016a0854a0beee82371e733014601ac84a5d0`。解壓核對 331 筆清單，實測 Unity PlayerConnection 只監聽本機。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.7-1.8-win-x64.zip) · [發行核對](../artifacts/venue-release-0.50.7-local-profiler.json)
+
 2026-11-11 `VRCommand-Player-0.50.6-1.8-win-x64.zip` 為 84,941,042 bytes，SHA-256 `4f577da46047880f593bf9961a77e54b1cf6bc94de95de7855b9b20bbec9ac4b`，331 筆清單核對通過。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.6-1.8-win-x64.zip) · [驗收](PROGRESS.md#2026-11-11-玩家啟動器的桌面與-openxr-模式)
 
 2026-11-11 `VRCommand-Player-0.50.6-win-x64.zip` 為 84,940,657 bytes，SHA-256 `f8a3805101d189661f796f58f3f2613ab5acef5c712f05ae04588fb8b7c83e75`，解壓核對 331 筆清單。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.6-win-x64.zip) · [驗收](PROGRESS.md#2026-11-11-windows-桌面與-openxr-啟動)
@@ -98,6 +100,10 @@ runtime只收VrCommand.exe／UnityPlayer／CrashHandler／WinPix及D3D12、MonoB
 OpenXR 模式使用 Direct3D 11。顯示和輸入子系統開始運作後，遊戲才送出入場請求。OpenXR 無法啟動時，視窗會提示確認頭盔與 Windows OpenXR 執行環境，玩家程序退出碼為 2。命令列可加上 `--log` 和 `--status-report` 指定包外兩個新檔，檢查 `OpenXRUnavailable`。
 
 自 0.50.6 起，Windows 建置會在明確選用 OpenXR 後才探測執行環境，並只封裝 Windows 可載入的 OpenXR 功能。Quest 建置仍在啟動時初始化 OpenXR。Unity 的原生預載也能在建立圖形裝置前提供顯示卡選擇資訊，使用不同顯示卡的 Windows 頭盔與螢幕組合須在實機驗收。 [Unity XR SDK 預載介面](https://docs.unity.cn/6000.2/Documentation/Manual/xrsdk-pre-init-interface.html)
+
+自 0.50.7 起，Windows 開發版的 Unity PlayerConnection 只監聽本機 `127.0.0.1`，並停用區網發現廣播。場館玩家仍以主控公告的遊戲 IPv4 與 UDP 埠入場。 [Unity Profiler 連線說明](https://docs.unity3d.com/2022.2/Documentation/Manual/profiler-profiling-applications.html)
+
+可在 `scripts/check-player-package.py` 加上 `--check-local-profiler`，對解壓後的 Windows 玩家包量測實際監聽。此步驟以空白的測試目錄啟動玩家並保存 `local-profiler.json`。
 
 Windows 建置啟用 Touch 與 Unity 的 HTC Vive Controller 兩個 OpenXR 互動設定。Touch 沿用右扳機射擊、A 換彈、B 重讀票券，左手 X／Y 翻頁及關閉簡報。HTC Vive Controller 使用右扳機射擊、右握把換彈、右 Menu 重讀票券，左觸控板按下翻頁、左 Menu 關閉、左握把查看字型授權。實際控制器由 Windows OpenXR 執行環境回報，VIVE XR 的確切型號及相符設定仍待頭盔到場驗收。MR 透視與房間對位沿用 Quest 3 Android 路徑。 [Unity XR 手動啟動](https://docs.unity3d.com/Packages/com.unity.xr.management@4.6/manual/EndUser.html#load-xr-plug-ins) · [HTC Vive 控制器設定](https://docs.unity3d.com/Packages/com.unity.xr.openxr@1.19/manual/features/htcvivecontrollerprofile.html)
 

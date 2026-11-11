@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 Windows Unity 編輯器連線限制為本機
+
+- Windows 0.50.6 的原執行檔在遊戲連線啟動前監聽所有介面的 TCP 並發布 Unity 發現廣播。只移除設定或將模式寫成 `None` 都仍會監聽。同一執行檔改為本機監聽並停用廣播後，實際量測只剩 `127.0.0.1` 的 TCP 監聽。 [原對照](../artifacts/windows-local-profiler-0507/results.json) · [本機監聽對照](../artifacts/windows-local-profiler-0507/local-results.json)
+- Windows 0.50.7 在建置時套用本機監聽與停用廣播。解壓的原 0.50.6 包遭新增的監聽檢查拒絕，新包通過全部 40 項檢查，含缺少 OpenXR 執行環境時在入場前退出。合併場伺服器在實際執行時以指定網卡監聽遊戲 UDP、以本機監聽 Unity 編輯器 TCP。 [舊包量測](../artifacts/player-package-checks/20261111-104143-c213fa07/local-profiler.json) · [新包量測](../artifacts/player-package-checks/20261111-104705-59cf5b5e/local-profiler.json) · [伺服器量測](../artifacts/windows-local-profiler-0507/linked-server-sockets.json)
+- OpenXR 模擬及桌面兩席通過 82 項、116 格回放與兩份戰績。獨立五房與合併各 25 個同機玩家端通過 399 項、954 格回放及 50 份戰績確認。C／F 分別核對 42 與 219 檔，程序均已清理。模擬場的補充取樣在玩家斷線後取得，實際遊戲監聽以合併場就緒時的資料為準。 [模擬](../artifacts/server-package-checks/run-dc7dc71d87494ea59fe2e0d4c9323bcf/evidence.json) · [雙模式](../artifacts/server-package-checks/run-7e4fe46a9d5a4eb196e16e652f316c8a/evidence.json)
+- Unity 273 項 EditMode 檢查通過。Windows 及 Quest 0.50.7／72 同源並核對原網路識別，Windows 兩包核對 324 個共用執行檔案。既有防火牆提示及玩家啟動器視窗仍待複驗，跨機真人、頭盔、MR 場地及廠商硬體依原目標繼續驗收。 [核對摘要](../artifacts/windows-local-profiler-0507/validation.json) · [發行核對](../artifacts/venue-release-0.50.7-local-profiler.json)
+
 ## 2026-11-11 主控下載環境與敵軍批次
 
 - 控制台 0.31.127 可從兩種批次區塊下載畫面使用的原 `/api/venue/phase` JSON。檔名含原批次 ID，主控重新登入後也可下載仍列為最近一批的已結束場次資料。 [操作方式](EXTERNAL_CLIENTS.md#核對五房環境與敵軍指令的執行畫格)

@@ -12,6 +12,7 @@ from pathlib import Path
 import shutil
 import socket
 import subprocess
+import time
 import uuid
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -54,9 +55,47 @@ def check_openxr_unavailable(folder, directory, base, release=None, manifest_has
         raise AssertionError('Unavailable Windows OpenXR must exit before network admission')
 
 
+def check_local_profiler(folder, directory):
+    log = directory / 'local-profiler.log'
+    command = [str(folder / 'VrCommand.exe'), '-batchmode', '-nographics', '-job-worker-count', '2',
+               '-logFile', str(log), '--vr-config', str(directory / 'absent-player-config.json')]
+    powershell = Path(os.environ['WINDIR']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
+    with subprocess.Popen(command, cwd=directory, creationflags=subprocess.CREATE_NO_WINDOW) as process:
+        try:
+            deadline = time.monotonic() + 30
+            while process.poll() is None and time.monotonic() < deadline:
+                messages = log.read_text(encoding='utf-8', errors='replace') if log.exists() else ''
+                if 'XRGeneral Settings awakening...' in messages:
+                    break
+                time.sleep(.2)
+            else:
+                raise AssertionError('Packaged development player did not reach startup')
+            script = ("@{tcp=@(Get-NetTCPConnection -State Listen -OwningProcess " + str(process.pid)
+                      + " -ErrorAction SilentlyContinue | Select-Object LocalAddress,LocalPort);"
+                      + "udp=@(Get-NetUDPEndpoint -OwningProcess " + str(process.pid)
+                      + " -ErrorAction SilentlyContinue | Select-Object LocalAddress,LocalPort)} | ConvertTo-Json -Depth 3 -Compress")
+            query = subprocess.run([str(powershell), '-NoProfile', '-NonInteractive', '-Command', script],
+                                   capture_output=True, encoding='utf-8', timeout=10, check=True,
+                                   creationflags=subprocess.CREATE_NO_WINDOW)
+            sockets = json.loads(query.stdout)
+            messages = log.read_text(encoding='utf-8', errors='replace')
+            result = {'processId': process.pid, **sockets, 'alive': process.poll() is None,
+                      'gameNetworkStarted': 'VR_NETWORK_STARTED ' in messages,
+                      'discoveryBroadcastStarted': 'Started UDP target info broadcast' in messages}
+            (directory / 'local-profiler.json').write_text(json.dumps(result, indent=2) + '\n', encoding='utf-8')
+            if (not result['alive'] or result['gameNetworkStarted'] or result['discoveryBroadcastStarted']
+                    or len(sockets['tcp']) != 1 or sockets['tcp'][0]['LocalAddress'] != '127.0.0.1' or sockets['udp']):
+                raise AssertionError('Unity PlayerConnection did not stay on loopback without discovery broadcast')
+        finally:
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=10)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__); parser.add_argument('package_directory', type=Path)
     parser.add_argument('--check-openxr-unavailable', action='store_true', help='Run a graphical player with a missing OpenXR runtime for that process')
+    parser.add_argument('--check-local-profiler', action='store_true', help='Check the actual owned Unity PlayerConnection sockets without a player config')
     parser.add_argument('--release-report', type=Path, help='Original offline release report for this package')
     parser.add_argument('--other-release-report', type=Path, help='Original offline report for a different package')
     args = parser.parse_args(); folder = package.plain(args.package_directory)
@@ -136,6 +175,10 @@ def main():
     check('Refuses duplicate release arguments without showing a modal', ['--verify', '--release-report', str(release), '--release-report', str(other_release)])
     check('Refuses a release report without verify or launch', ['--release-report', str(release)])
     assert not future_log.exists() and release.read_bytes() == original_release and other_release.read_bytes() == other_bytes
+    if args.check_local_profiler:
+        check_local_profiler(folder, directory)
+        findings.append('Actual Unity PlayerConnection listens only on loopback with no discovery broadcast')
+        print('PASS:', findings[-1], flush=True)
     if args.check_openxr_unavailable:
         check_openxr_unavailable(folder, directory, base, release, manifest_hash)
         findings.append('Graphical OpenXR launch with a missing runtime exits before admission')

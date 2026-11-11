@@ -100,8 +100,8 @@ namespace VrCommand.Unity.Editor
         {
             PlayerSettings.companyName = "VR Command";
             PlayerSettings.productName = "VR Command Quest";
-            PlayerSettings.bundleVersion = "0.50.6";
-            PlayerSettings.Android.bundleVersionCode = 71;
+            PlayerSettings.bundleVersion = "0.50.7";
+            PlayerSettings.Android.bundleVersionCode = 72;
             PlayerSettings.insecureHttpOption = InsecureHttpOption.DevelopmentOnly;
             PlayerSettings.SetApplicationIdentifier(NamedBuildTarget.Android, "com.vrcommand.quest");
             PlayerSettings.SetScriptingBackend(NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
@@ -317,8 +317,18 @@ namespace VrCommand.Unity.Editor
                     // disabled. Windows starts OpenXR explicitly after mode selection.
                     var bootConfig = Path.Combine(Path.GetDirectoryName(options.locationPathName),
                         Path.GetFileNameWithoutExtension(options.locationPathName) + "_Data", "boot.config");
-                    var entries = File.ReadAllLines(bootConfig);
-                    File.WriteAllLines(bootConfig, entries.Where(entry => entry != "xrsdk-pre-init-library=UnityOpenXR"));
+                    var entries = File.ReadAllLines(bootConfig).Where(entry =>
+                        entry != "xrsdk-pre-init-library=UnityOpenXR"
+                        && !entry.StartsWith("player-connection-ip=", StringComparison.Ordinal)
+                        && !entry.StartsWith("player-connection-listen-address=", StringComparison.Ordinal)
+                        && !entry.StartsWith("player-connection-multicast=", StringComparison.Ordinal));
+                    // Keep development profiling available on the same PC without a
+                    // listener on the venue interfaces or discovery broadcasts.
+                    File.WriteAllLines(bootConfig, entries.Concat(new[]
+                    {
+                        "player-connection-listen-address=127.0.0.1",
+                        "player-connection-multicast=0"
+                    }));
                 }
                 return report;
             }
