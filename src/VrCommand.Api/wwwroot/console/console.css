@@ -31,6 +31,11 @@
 .layout-clearance-room{fill:none;stroke:#89d4da;stroke-width:.065;stroke-dasharray:.18 .1}
 .layout-clearance-prop{fill:#ffb35c26;stroke:#ffb35c;stroke-width:.055}
 #prop-copy-preview text{display:none}
+#prop-move-list{max-height:12rem;overflow:auto;margin-top:10px}
+#prop-move-list label{margin:0;padding:5px 2px;overflow-wrap:anywhere}
+#prop-move-list input{flex-shrink:0}
+#prop-layer [data-move-selected] [data-envelope],#prop-move-preview [data-envelope]{stroke:#a2e1e9;stroke-width:.1}
+#prop-move-preview text{fill:#def9fa;text-anchor:middle;pointer-events:none;font-size:.38px}
 #layout-spawns [data-route-missing] circle{fill:#ffbb6333;stroke:#ffbb63}
 .layout-route-warning{color:#ffcb83}
 #launch-room-missions-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:0 14px;align-items:start}

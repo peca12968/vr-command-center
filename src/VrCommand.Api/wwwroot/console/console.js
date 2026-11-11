@@ -16,6 +16,7 @@ import { mountReadiness, mountRoomReadiness } from './readiness-ui.js';
 import { mountConnections, validDestination } from './connection-ui.js';
 import { mountClosure } from './closure-ui.js';
 import { placementHistory } from './placement-history.js';
+import { mountPlacementMove } from './placement-move.js';
 const replay = mountReplay();
 const $ = id => document.getElementById(id);
 const phases = { Preparing: '準備中', Running: '執行中', Paused: '已暫停', Ended: '已結束' };
@@ -207,7 +208,7 @@ function logout() {
   $('venue-full-participation').checked = false;
   renderVenueBegin([], false);
   venueHistory.reset(); renderVenueClosure(null);
-  state.props = []; state.prop = -1; clearPropHistory();
+  state.props = []; state.prop = -1; clearPropHistory(); propMove.reset();
   roomPlan.reset(); placement.reset();
   renderIndependentReceipt();
   clearInterval(timer);
@@ -1275,6 +1276,7 @@ function downloadRoomTickets() {
 
 function resetDraft() {
   placement.clearTrial();
+  propMove.reset();
   clearMissionComparison();
   clearMissionTemplate(); loadedText = null;
   $('mission-form').reset(); state.props = []; state.prop = -1; state.draftBase = null; state.draftChanged = false; state.draftSavedAt = ''; state.history = null;
@@ -1355,6 +1357,7 @@ async function loadDraft({ id, seriesId, number }, older = false) {
 }
 function fillDraft(draft) {
   placement.clearTrial(); clearMissionComparison();
+  propMove.reset();
   $('draft-name').value = draft.name; $('draft-briefing').value = draft.briefing; $('draft-duration').value = draft.durationSeconds;
   // Text controls normalize line endings. Keep the source text until that field is edited.
   loadedText = {
@@ -1459,6 +1462,7 @@ function renderProps(updateInspector = true) {
   clearPropCopies();
   renderPropHistory();
   drawLayoutProps($('prop-layer'), state.props, state.prop);
+  propMove.update(updateInspector);
   placement.scheduleDraft();
   if (!updateInspector) return;
   fillOptions('prop-select', state.props.length ? state.props.map((p, i) => [String(i), `${i + 1} · ${p.assetId}`]) : [['', '尚無物件']], String(state.prop));
@@ -1471,6 +1475,8 @@ function dirtyDraft() { state.draftChanged = true; clearMissionComparison(); dra
 let propGesture = null;
 let propCopies = [];
 const maxProps = 500;
+const propMove = mountPlacementMove({ props: () => state.props, editable,
+  apply: moves => editProp(() => { for (const { prop, position } of moves) prop.position = position; }) });
 function clearPropCopies() {
   propCopies = [];
   $('prop-copy-preview').replaceChildren();
@@ -1575,7 +1581,7 @@ for (const id of ['prop-asset', 'prop-x', 'prop-y', 'prop-z', 'prop-yaw']) $(id)
 
 function tab(name, worldTarget = null) {
   if (name !== 'operations') operationsViewEpoch++;
-  if (name !== 'missions') { placement.clearTrial(); clearMissionTemplate(); clearPropCopies(); }
+  if (name !== 'missions') { placement.clearTrial(); clearMissionTemplate(); clearPropCopies(); propMove.reset(); }
   finishPropGesture();
   for (const candidate of ['operations', 'missions', 'replay', 'world']) { const active = candidate === name; $(candidate + '-view').hidden = !active; $('tab-' + candidate).classList.toggle('active', active); $('tab-' + candidate).setAttribute('aria-pressed', String(active)); }
   replay.active(name === 'replay'); world.active(name === 'world', worldTarget); readiness.active(name === 'operations'); connections.active(name === 'operations');
@@ -1743,14 +1749,16 @@ $('preview-prop-copy').addEventListener('click', previewPropCopies);
 $('apply-prop-copy').addEventListener('click', applyPropCopies);
 for (const event of ['input', 'change']) $('prop-copy-panel').addEventListener(event, clearPropCopies);
 $('prop-copy-panel').addEventListener('toggle', () => {
-  if (!$('prop-copy-panel').open) clearPropCopies();
+  if ($('prop-copy-panel').open) $('prop-move-panel').open = false;
+  else clearPropCopies();
 });
 $('rotate-prop').addEventListener('click', () => { if (state.props[state.prop]) editProp(() => { state.props[state.prop].yawDegrees = (state.props[state.prop].yawDegrees + 15) % 360; }); });
 $('remove-prop').addEventListener('click', () => { if (state.prop >= 0) editProp(() => { state.props.splice(state.prop, 1); state.prop = Math.min(state.prop, state.props.length - 1); }); });
 for (const type of ['input', 'change']) $('mission-form').addEventListener(type, event => {
   if (loadedText && event.target.id === 'draft-name') loadedText.name = null;
   if (loadedText && event.target.id === 'draft-briefing') loadedText.briefing = null;
-  if (!['layout-session-mode', 'prop-select', 'draft-layout-show-clearance'].includes(event.target.id) && !event.target.closest('#prop-copy-panel')) dirtyDraft();
+  if (!['layout-session-mode', 'prop-select', 'draft-layout-show-clearance'].includes(event.target.id)
+    && !event.target.closest('#prop-copy-panel, #prop-move-panel')) dirtyDraft();
 });
 $('layout-session-mode').addEventListener('change', () => placement.scheduleDraft());
 $('layout-recheck-draft').addEventListener('click', () => placement.recheckDraft());

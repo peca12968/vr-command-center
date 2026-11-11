@@ -144,6 +144,72 @@ module.exports = async ({ context, api, tokens, base, mission, screenshots, chec
     const rowTemplate = path.join(screenshots, 'placement-row-template.json');
     await (await templateDownload).saveAs(rowTemplate);
     check(rowMatches(JSON.parse(await fs.readFile(rowTemplate, 'utf8')).definition.props), 'Actual saved-version template download retains every row position and angle');
+
+    await page.locator('#prop-move-panel summary').click();
+    const moveSelection = index => page.locator(`[data-move-index="${index}"]`);
+    const movePreview = page.locator('#preview-prop-move'), moveApply = page.locator('#apply-prop-move');
+    const moveGhosts = page.locator('#prop-move-preview [data-index]');
+    const selectedObjects = page.locator('#prop-layer [data-move-selected]');
+    const beforeMove = await page.locator('#draft-status').innerText();
+    await page.locator('#select-all-prop-move').click();
+    check(await selectedObjects.count() === 3 && await page.locator('#prop-move-list input:checked').count() === 3,
+      'Select all marks the same three objects on the map and in the batch list');
+    await page.locator('#clear-prop-move-selection').click();
+    check(await selectedObjects.count() === 0 && await movePreview.isDisabled(), 'Clearing selection removes all map marks and disables preview');
+    await moveSelection(0).check(); await moveSelection(2).check();
+    await movePreview.click();
+    check(await moveApply.isDisabled() && await moveGhosts.count() === 0
+      && (await page.locator('#prop-move-status').innerText()).includes('至少一項須非零'), 'Batch translation rejects a zero displacement');
+    await field('prop-move-x', 9); await movePreview.click();
+    check(await moveApply.isDisabled() && await moveGhosts.count() === 0 && (await page.locator('#prop-move-status').innerText()).includes('超出配置圖'),
+      'One object outside the map rejects the entire batch preview');
+    await field('prop-move-x', 0.25); await field('prop-move-z', 0.5); await movePreview.click();
+    const previewNumbers = await moveGhosts.locator('text').allTextContents();
+    check(await moveGhosts.count() === 2 && previewNumbers.join(',') === '1,3'
+      && await objects.count() === 3 && await page.locator('#undo-prop').isDisabled() && (await page.locator('#draft-status').innerText()) === beforeMove,
+      'Preview keeps original numbering, geometry and edit history while showing the two destinations');
+    await page.locator('#layout-map').screenshot({ path: path.join(screenshots, 'placement-batch-move-map.png') });
+    await page.setViewportSize({ width: 390, height: 844 });
+    check(await page.locator('#prop-move-panel').evaluate(panel => panel.scrollWidth <= panel.clientWidth + 1), 'Batch move controls fit the mobile editor');
+    await page.setViewportSize({ width: 1440, height: 1080 });
+    await moveSelection(2).uncheck();
+    check(await moveApply.isDisabled() && await moveGhosts.count() === 0, 'Changing the group invalidates the displayed destinations');
+    await moveSelection(2).check(); await movePreview.click();
+    await page.locator('#tab-operations').click(); await page.locator('#tab-missions').click();
+    check(await moveGhosts.count() === 0 && await page.locator('#prop-move-list input:checked').count() === 0,
+      'Leaving the mission editor clears the pending group and its preview');
+    await page.locator('#prop-move-panel summary').click();
+    await moveSelection(0).check(); await moveSelection(2).check();
+    await field('prop-move-x', 0.25); await field('prop-move-z', 0.5); await movePreview.click(); await moveApply.click();
+    const moved = [
+      { ...expectedRow[0], position: { x: -3.25, y: 0, z: 2.625 } }, expectedRow[1],
+      { ...expectedRow[2], position: { x: 1.5, y: 0, z: 2.875 } }
+    ];
+    const expectedTransforms = expected => expected.map(prop => `translate(${prop.position.x} ${-prop.position.z}) rotate(${prop.yawDegrees})`).join('|');
+    const transforms = () => objects.evaluateAll(nodes => nodes.map(node => node.getAttribute('transform')).join('|'));
+    check(await transforms() === expectedTransforms(moved) && (await status()).includes('可復原 1') && await moveGhosts.count() === 0,
+      'One batch edit moves only the selected objects, preserving order and exact unsnapped geometry');
+    await undo();
+    check(await transforms() === expectedTransforms(expectedRow), 'A single undo restores every original position');
+    await redo();
+    check(await transforms() === expectedTransforms(moved), 'A single redo restores the complete batch translation');
+    await page.locator('#save-revision').click();
+    await wait(() => document.querySelector('#draft-status').textContent.startsWith('已儲存') && !document.querySelector('#mission-fields').disabled);
+    const batchHead = (await api(`/missions/${rowSaved.id}/history`)).headId;
+    check(JSON.stringify((await api(`/missions/${batchHead}`)).definition.props) === JSON.stringify(moved)
+      && rowMatches((await api(`/missions/${rowHistory.headId}`)).definition.props),
+      'The batch revision stores only the confirmed geometry and keeps the previous version immutable');
+    await load(batchHead);
+    check(await transforms() === expectedTransforms(moved) && await page.locator('#undo-prop').isDisabled(),
+      'Reload shows the complete batch geometry and starts a fresh undo history');
+    await page.locator('#mission-version').selectOption(batchHead);
+    const batchExport = page.waitForEvent('download');
+    await page.locator('#export-mission-template').click();
+    const batchTemplate = path.join(screenshots, 'placement-batch-move-template.json');
+    await (await batchExport).saveAs(batchTemplate);
+    check(JSON.stringify(JSON.parse(await fs.readFile(batchTemplate, 'utf8')).definition.props) === JSON.stringify(moved),
+      'The exported mission contains the exact new batch geometry for the game server');
+
     await page.locator('#rotate-prop').click(); page.once('dialog', dialog => dialog.accept()); await page.locator('#new-mission').click();
     check(await page.locator('#prop-layer [data-index]').count() === 0 && await page.locator('#undo-prop').isDisabled(), 'A new mission cannot undo into a different mission document');
     await page.locator('#add-barrel').click(); page.once('dialog', dialog => dialog.accept()); await page.locator('#logout').click();

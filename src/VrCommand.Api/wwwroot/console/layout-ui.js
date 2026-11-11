@@ -18,10 +18,11 @@ function svg(tag, attributes) {
 const propTransform = prop => `translate(${prop.position.x} ${-prop.position.z}) rotate(${prop.yawDegrees})`;
 const box = (halfX, halfZ) => ({ x: -halfX, y: -halfZ, width: 2 * halfX, height: 2 * halfZ });
 
-export function drawLayoutProps(layer, props, selected = null) {
+export function drawLayoutProps(layer, props, selected = null, indices = null) {
   layer.replaceChildren(...props.map((prop, index) => {
-    const group = svg('g', { transform: propTransform(prop), 'data-index': index });
-    const name = `物件 ${index + 1} ${prop.assetId}`;
+    const originalIndex = indices?.[index] ?? index;
+    const group = svg('g', { transform: propTransform(prop), 'data-index': originalIndex });
+    const name = `物件 ${originalIndex + 1} ${prop.assetId}`;
     if (selected !== null) {
       group.dataset.selected = String(index === selected);
       group.setAttribute('role', 'button'); group.setAttribute('tabindex', '0'); group.setAttribute('aria-label', name);
@@ -39,7 +40,7 @@ export function drawLayoutProps(layer, props, selected = null) {
     } else {
       group.append(svg('circle', { r: '.28', fill: '#754a40' }));
     }
-    const label = svg('text', { y: '.12' }); text(label, index + 1); group.append(label);
+    const label = svg('text', { y: '.12' }); text(label, originalIndex + 1); group.append(label);
     return group;
   }));
 }
