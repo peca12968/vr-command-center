@@ -1,5 +1,22 @@
 # 長場原生自動化輸入
 
+## 長場射擊後的環境切換與敵軍回擊
+
+`--endurance --marksmanship` 可搭配 `--incoming-fire`。每席先完成全部分批目標與原射擊／換彈週期，明確停止程式產生的武器輸入，再以正常管理命令清空舊敵軍、配置新敵軍並啟用攻擊。確認各原玩家實際受傷後停火，保留原入場、世界來源與連線，以原戰績、CSV、雙封存及完整回放核對。要求所有原玩家仍存活，原彈藥、擊殺、中彈、實際損耗與剩餘健康須相符。
+
+另加 `--incoming-environment`，會在回擊前套用雨夜與閃電設定，停火並取得原生來源確認後切換為霧天白晝。`--check-policy-frames` 會逐頁對照完整回放的環境、敵軍策略與任務階段時間線。
+
+```powershell
+python scripts/check-desktop-exercise.py --api-dll <管理包API-DLL> --player-exe <Windows-Player-EXE> `
+  --runtime-root <新本機測試資料夾> --mode both --players-per-room 5 `
+  --seconds 900 --endurance --replay-workers 5 --marksmanship `
+  --incoming-fire --incoming-environment --check-policy-frames
+```
+
+先以 `--seconds 60` 排演相同流程。長場仍為每席 45 批目標、90 發及 45 次換彈；60 秒為三批、六發及三次換彈。回擊與環境切換發生在這段操作完成後。此驗證涵蓋同機 Windows 程式產生的輸入與原生戰鬥資料；持續全程交火、原生畫面／音效、真人操作、跨機與頭盔各自驗收。
+
+封存重查工具會以原敵軍啟用序號為受傷界線，核對原戰鬥日誌、原玩家結果、伺服器確認及 CSV，並從原世界日誌查驗雨夜及霧天的保存檢查點。既有不含回擊的場次仍要求血量全程為 100。
+
 ## 掩體與分批目標
 
 長場可加 `--marksmanship`。每房的標準油桶配置讓五個原生敵軍站在五席正前方。每個 20 秒週期，各席經原武器流程射擊、換彈、再射擊，完成兩次命中及一次擊殺。全房目標淘汰且原統計確認後，工具經正常 `SetEnemies` 命令清空並補充下一批，保存原 UUID、接受序號、目標識別及來源畫格。60 秒排演有三批，900 秒長場有 45 批。敵軍採守備並關閉自動攻擊。

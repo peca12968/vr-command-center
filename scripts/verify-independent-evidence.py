@@ -132,17 +132,24 @@ def verify(directory):
     return {'run': directory.name, 'sourceFingerprint': fingerprint, 'acceptancePassed': expected_pass, 'participants': total, 'rooms': summaries, 'evidenceHashes': evidence}
 
 
-def exercise_room_observer(room, capture, owners, pause, paused, peers):
+def exercise_room_observer(room, capture, owners, pause, paused, peers, damage_since=None, references=None, matched=None):
     """Match the planned Pause to saved packets and compare peers on the same host UTC clock."""
     def observe(packet):
         frame = packet['frame']
+        if references and packet['sequence'] in references:
+            expected = references[packet['sequence']]
+            require((packet['weather'], packet['lightning'], frame['night'], packet['observedSequence']) == expected,
+                    'Saved incoming environment checkpoint differs from its original journal')
+            matched.add(packet['sequence'])
         phase = frame['phase']
         if phase not in ('Running', 'Paused'):
             return
         players = frame['players']
         require(packet['suspended'] is False and len(players) == len(owners)
                 and {p['id'] for p in players} == owners and all(p['roomId'] == room
-                    and p['connected'] is True and p['rig']['kind'] == 'Simulated' and p['health'] == 100 for p in players),
+                    and p['connected'] is True and p['rig']['kind'] == 'Simulated'
+                    and (0 < p['health'] <= 100 if damage_since is not None and packet['observedSequence'] >= damage_since
+                         else p['health'] == 100) for p in players),
                 'Active frame differs from the original room roster')
         when = capture + timedelta(milliseconds=count(packet['elapsedMilliseconds']))
         tick, observed = count(frame['tick']), count(packet['observedSequence'])
@@ -153,6 +160,19 @@ def exercise_room_observer(room, capture, owners, pause, paused, peers):
         elif room != 1 and paused[0][1] <= when <= paused[-1][1]:
             peers.append(tick)
     return observe
+
+
+def exercise_combat_total(ledger, shots, marksmanship, incoming):
+    hits, kills, accuracy = (shots, shots // 2, 100) if marksmanship else (0, 0, 0)
+    damage_events = 0
+    for row in ledger.values():
+        require((row['ammoUsed'], row['shotsHit'], row['kills'], row['accuracyPercent']) == (shots, hits, kills, accuracy),
+                'Original endurance weapon totals differ')
+        lost, received, health = row['damageTaken'], row['hitsReceived'], row['health']
+        require(0 < lost < 100 and received > 0 and lost == 20 * received == 100 - health if incoming
+                else lost == received == 0 and health == 100, 'Original endurance damage totals differ')
+        damage_events += received
+    return len(ledger) * (shots + hits + kills) + damage_events
 
 
 def verify_exercise(directory):
@@ -209,10 +229,26 @@ def verify_exercise(directory):
                 and packet['sequence'] == world['acceptedSequence'] == replay['frames'] and replay['complete'] is True,
                 'Original complete replay and sealed ledger differ')
         shots = seconds // 10
-        hits, kills, accuracy = (shots, shots // 2, 100) if mode.get('marksmanship', False) else (0, 0, 0)
-        require(combat_sequence == 5 * (shots + hits + kills) and all(
-                    (row['ammoUsed'], row['shotsHit'], row['kills'], row['accuracyPercent']) == (shots, hits, kills, accuracy)
-                    for row in ledger.values()), 'Original endurance combat totals differ')
+        require(combat_sequence == exercise_combat_total(ledger, shots, mode.get('marksmanship', False), mode.get('incomingFire', False)),
+                'Original endurance combat totals differ')
+        damage_since = None
+        environment_references, matched_environment = {}, set()
+        if mode.get('incomingFire', False):
+            incoming_evidence = read(name + '-incoming-fire')
+            incoming = incoming_evidence['window']
+            require(incoming['rooms'] == dict.fromkeys(owners, room)
+                    and 0 < count(incoming['enabled']) < count(incoming['disabled']) <= through,
+                    'Incoming-fire window differs from original owners or command boundary')
+            damage_since = incoming['enabled']
+            if mode.get('incomingEnvironment', False):
+                for label, weather, night in [('Storm environment', 'Storm', True), ('Fog environment', 'Fog', False)]:
+                    point = incoming_evidence['checkpoints'][label]['packet']
+                    require(point['weather'] == weather and point['lightning'] == night and point['frame']['night'] == night,
+                            'Incoming environment checkpoint has the wrong policy')
+                    observed = count(point['observedSequence'])
+                    require(observed < damage_since if night else observed > incoming['disabled'],
+                            'Incoming environment checkpoint crossed its attack window')
+                    environment_references[count(point['sequence'])] = (weather, night, night, observed)
         delivery = read(name + '-results')
         results = field.roster(delivery['results'], 'playerId', 5)
         server_log = (directory / (name + '-server.log')).read_text(encoding='utf-8', errors='replace')
@@ -249,10 +285,12 @@ def verify_exercise(directory):
         combat = field.verify_combat_journal(journal.with_suffix('.journal'), session, stream, 'Simulation',
                                              combat_sequence, through, ledger, fired=fires)
         capture = datetime.fromisoformat(header['captureStartedAtUtc'])
-        observe = exercise_room_observer(room, capture, set(owners), pause, paused, peers)
+        observe = exercise_room_observer(room, capture, set(owners), pause, paused, peers, damage_since,
+                                         environment_references, matched_environment)
         saved = field.verify_world_journal(journal.with_suffix('.worldlog'), world, combat_sequence, through,
                                            packet['observedSequence'], players=owners, concurrency=concurrent, sealed_fires=fires,
                                            on_packet=observe)
+        require(matched_environment == set(environment_references), 'Original journal omitted an incoming environment checkpoint')
         if room == 1:
             require(len(paused) >= 2 and paused[-1][1] > paused[0][1]
                     and any(sequence == pause['pausedSourceSequence'] for sequence, _ in paused),
@@ -260,6 +298,7 @@ def verify_exercise(directory):
         else:
             require(len(peers) >= 2 and peers[-1] > peers[0], 'Another room did not advance inside the saved Pause window')
         rooms.append({'roomId': room, 'world': saved, 'combat': combat, 'csvSha256': csv_hash,
+                      'incomingEnvironmentCheckpoints': len(matched_environment),
                       'peerTicksAdvancedDuringPause': peers[-1] - peers[0] if peers else None})
     return {'run': directory.name, 'acceptancePassed': True, 'participants': 25, 'rooms': rooms,
             'pausedFrames': len(paused), 'pausedTick': pause['pausedTick'], 'concurrentRoster': concurrent.summary(25)}

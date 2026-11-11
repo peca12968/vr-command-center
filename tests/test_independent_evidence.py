@@ -191,4 +191,53 @@ class IndependentEvidenceTests(unittest.TestCase):
             room2(packet(1, 200, 42))
 
 
+class EnduranceCombatTests(unittest.TestCase):
+    def ledger(self):
+        return {'p': {'ammoUsed': 90, 'shotsHit': 90, 'kills': 45, 'accuracyPercent': 100,
+                      'health': 60, 'damageTaken': 40, 'hitsReceived': 2}}
+
+    def test_closed_endurance_combat_includes_exact_incoming_damage_events(self):
+        self.assertEqual(m.exercise_combat_total(self.ledger(), 90, True, True), 227)
+        clean = self.ledger()
+        clean['p'].update(health=100, damageTaken=0, hitsReceived=0)
+        self.assertEqual(m.exercise_combat_total(clean, 90, True, False), 225)
+        with self.assertRaisesRegex(ValueError, 'damage totals'):
+            m.exercise_combat_total(self.ledger(), 90, True, False)
+
+    def test_incoming_health_hits_and_damage_must_describe_the_same_nonlethal_events(self):
+        for field, wrong in [('health', 80), ('hitsReceived', 1), ('damageTaken', 100)]:
+            ledger = self.ledger()
+            ledger['p'][field] = wrong
+            with self.subTest(field=field), self.assertRaisesRegex(ValueError, 'damage totals'):
+                m.exercise_combat_total(ledger, 90, True, True)
+
+    def test_damage_before_the_original_enable_fence_is_rejected(self):
+        capture = datetime(2026, 11, 10, tzinfo=timezone.utc)
+        observe = m.exercise_room_observer(1, capture, {'p'}, {}, [], [], damage_since=20)
+        packet = {'sequence': 1, 'suspended': False, 'elapsedMilliseconds': 100, 'observedSequence': 19,
+                  'frame': {'phase': 'Running', 'tick': 1, 'players': [
+                      {'id': 'p', 'roomId': 1, 'connected': True, 'rig': {'kind': 'Simulated'}, 'health': 80}]}}
+        with self.assertRaisesRegex(ValueError, 'original room roster'):
+            observe(packet)
+        packet['observedSequence'] = 20
+        observe(packet)
+        packet['frame']['players'][0]['health'] = 0
+        with self.assertRaisesRegex(ValueError, 'original room roster'):
+            observe(packet)
+
+    def test_environment_checkpoint_must_match_original_journal_policy(self):
+        matched = set()
+        observe = m.exercise_room_observer(1, datetime(2026, 11, 10, tzinfo=timezone.utc), {'p'}, {}, [], [],
+                                           references={7: ('Storm', True, True, 19)}, matched=matched)
+        packet = {'sequence': 7, 'weather': 'Storm', 'lightning': True, 'suspended': False,
+                  'elapsedMilliseconds': 100, 'observedSequence': 19,
+                  'frame': {'phase': 'Running', 'tick': 1, 'night': True, 'players': [
+                      {'id': 'p', 'roomId': 1, 'connected': True, 'rig': {'kind': 'Simulated'}, 'health': 100}]}}
+        observe(packet)
+        self.assertEqual(matched, {7})
+        packet['weather'] = 'Rain'
+        with self.assertRaisesRegex(ValueError, 'environment checkpoint'):
+            observe(packet)
+
+
 if __name__ == '__main__': unittest.main()

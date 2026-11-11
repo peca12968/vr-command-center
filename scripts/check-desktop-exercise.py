@@ -413,6 +413,21 @@ def exercise_incoming_fire(v, entry):
     references = entry.setdefault('operatorReferences', {})
     name = entry['name'] + '-incoming-fire.json'
 
+    def environment(weather, night):
+        identity = str(uuid.uuid4())
+        expected = v.state(entry)['sequence']
+        policy = {'mode': 'VR', 'weather': weather, 'timeOfDay': 'Night' if night else 'Day', 'lightning': weather == 'Storm'}
+        receipt = v.command(entry, 'SetEnvironment', commandId=identity, expectedSequence=expected, environment=policy)
+        sequence = receipt['appliedAtSequence']
+        if (receipt['commandId'] != identity or receipt['duplicate'] is not False or receipt['session']['id'] != entry['id']
+                or receipt['session']['environment'] != policy or sequence <= expected):
+            raise ValueError('Incoming-fire environment receipt does not match the original command')
+        evidence['commands'].append(receipt)
+        v.save(name, evidence)
+        return checkpoint(weather + ' environment', sequence, lambda value: value['packet']['weather'] == weather
+                          and value['packet']['lightning'] == policy['lightning']
+                          and value['packet']['frame']['night'] == night)
+
     def command(count, attack):
         identity = str(uuid.uuid4())
         expected = v.state(entry)['sequence']
@@ -443,11 +458,15 @@ def exercise_incoming_fire(v, entry):
                {enemy['id']: enemy['health'] for enemy in value['packet']['frame']['enemies']} == dict.fromkeys(targets.values(), 0))
     cleared = command(0, False)
     checkpoint('original enemies cleared', cleared, lambda value: not value['packet']['frame']['enemies'])
+    if v.args.incoming_environment:
+        environment('Storm', True)
     enabled = command(len(rooms), True)
     live = checkpoint('original players damaged', enabled, lambda value: value['packet']['frame']['autoAttack']
                       and {row['playerId'] for row in value['statistics'] if row['hitsReceived'] > 0} == rooms.keys())
     disabled = command(len(rooms), False)
     quiet = checkpoint('attack disabled', disabled, lambda value: not value['packet']['frame']['autoAttack'])
+    if v.args.incoming_environment:
+        environment('Fog', False)
     attackers = {enemy['id']: enemy['roomId'] for enemy in live['packet']['frame']['enemies']}
     if (attackers.keys() & set(targets.values()) or sorted(attackers.values()) != sorted(rooms.values())
             or attackers != {enemy['id']: enemy['roomId'] for enemy in quiet['packet']['frame']['enemies']}):
@@ -734,8 +753,12 @@ def run(v):
                 pending={pool.submit(replay,v,e,pause if e is entries[0] else None):e for e in entries}
                 for future in concurrent.futures.as_completed(pending):
                     e=pending[future];playback=future.result();check(playback['complete'],e['name']+': complete endurance replay retains every original body and every movement/reload/two-shot cycle')
+                    if v.args.incoming_fire:
+                        check(True,e['name']+': complete endurance replay reconciles every target wave and original incoming damage')
+                    if v.args.check_policy_frames:
+                        check(True,e['name']+': recorded policy pages match the full endurance replay')
         findings=capacity.native_log_findings(v.directory);check(not findings,mode+': no native send queue errors')
-        modes.append({'mode':mode,'clients':len(native),'automatedInputs':True,'operatorControls':v.args.operator_controls,'endurance':v.args.endurance,'marksmanship':v.args.marksmanship,'linkMetrics':v.args.link_metrics,'udpTraffic':v.args.udp_traffic,'udpPeriodicLoss':v.args.udp_periodic_loss,'requestedSeconds':v.args.seconds,'maximumReplayWorkers':v.args.replay_workers,'replayRate':4,'physicalOperators':0,'networkCapacityAccepted':False})
+        modes.append({'mode':mode,'clients':len(native),'automatedInputs':True,'operatorControls':v.args.operator_controls,'endurance':v.args.endurance,'marksmanship':v.args.marksmanship,'linkMetrics':v.args.link_metrics,'udpTraffic':v.args.udp_traffic,'udpPeriodicLoss':v.args.udp_periodic_loss,'requestedSeconds':v.args.seconds,'maximumReplayWorkers':v.args.replay_workers,'replayRate':4,'physicalOperators':0,'networkCapacityAccepted':False,'incomingEnvironment':v.args.incoming_environment})
         if v.args.incoming_fire:
             modes[-1]['incomingFire'] = True
     v.summary();v.save('exercise-result.json',{'complete':False,'modes':modes,'headsets':0,'hosts':1,'renderedClients':0,'posesWrittenDirectly':False,'newTestRpc':False,'automatedInput':True,'physicalOperators':0,'networkCapacityAccepted':False,'scope':'Actual Windows native clients using generated desktop movement/weapon intents through original RPCs; not humans, XR, LAN or capacity acceptance'})
@@ -750,6 +773,7 @@ def main():
     p.add_argument('--check-policy-frames', action='store_true', help='Compare recorded policy pages with the full native exercise replay')
     p.add_argument('--marksmanship', action='store_true', help='Verify two hits and one elimination per seat and cycle; endurance replenishes targets through normal management commands')
     p.add_argument('--incoming-fire', action='store_true', help='After marksmanship, use normal AI commands to exercise damage on every original player before final results')
+    p.add_argument('--incoming-environment', action='store_true', help='With incoming-fire, apply Storm Night before attack and Fog Day after the observed cease-fire')
     p.add_argument('--link-metrics', action='store_true', help='Collect 30 opt-in native link measurements per client during the 40-second short exercise')
     p.add_argument('--udp-traffic', action='store_true', help='Measure forwarded UDP payload bytes per original client in the 40-second short exercise')
     p.add_argument('--udp-periodic-loss', action='store_true', help='Measure and drop every twentieth datagram per player and direction after admission in the 40-second short exercise')
@@ -758,9 +782,9 @@ def main():
     if args.replay_workers!=1 and not args.endurance:p.error('Parallel replay readers require the explicit endurance profile')
     if args.pose_continuity and (not args.endurance or args.mode != 'linked'):p.error('Pose continuity requires the Linked endurance profile')
     if args.check_frame_review and args.endurance:p.error('Frame review uses the short exercise')
-    if args.check_policy_frames and not args.operator_controls:p.error('Policy frame review requires the operator-controls exercise')
+    if args.check_policy_frames and not (args.operator_controls or args.incoming_environment):p.error('Policy frame review requires operator-controls or incoming-environment')
     if args.marksmanship and (args.operator_controls or args.players_per_room!=5):p.error('Marksmanship requires five players per room without operator policy changes')
-    if args.incoming_fire and args.endurance:p.error('Incoming fire uses the short marksmanship profile')
+    if args.incoming_environment and not args.incoming_fire:p.error('Incoming environment requires incoming-fire')
     if args.incoming_fire and (not args.marksmanship or args.link_metrics or args.udp_traffic or args.udp_periodic_loss):p.error('Incoming fire requires marksmanship without UDP or link measurement')
     if args.link_metrics and (args.endurance or args.seconds!=40):p.error('Link measurement requires the 40-second short exercise')
     if args.udp_periodic_loss:

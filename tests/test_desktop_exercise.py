@@ -220,6 +220,34 @@ class MarksmanshipEvidenceTests(unittest.TestCase):
         self.assertEqual(proof, {'players': 1, 'shots': 2, 'hits': 2, 'eliminations': 1,
                                  'combatEvents': 6, 'hitsReceived': 1, 'damageTaken': 20})
 
+    def endurance_incoming_replay(self):
+        waves_replay, waves = self.waves_replay()
+        _, window = self.incoming_replay()
+        for row in waves_replay:
+            row['packet']['observedSequence'] = 10
+            row['statistics'][0].update(roomId=2, health=100, damageTaken=0, hitsReceived=0)
+        attack = self.incoming_replay()[0][-1]
+        for event in attack['packet']['events']:
+            event['sequence'] += 7
+        attack['packet']['throughCombatSequence'] = 11
+        attack['statistics'][0].update(ammoUsed=4, shotsHit=4, kills=2)
+        return [*waves_replay, attack], waves, window
+
+    def test_incoming_fire_after_all_waves_preserves_full_shooting_history(self):
+        rows, waves, window = self.endurance_incoming_replay()
+        self.assertEqual(m.reconcile_marksmanship(rows, self.targets, window, waves=waves),
+                         {'players': 1, 'waves': 2, 'shots': 4, 'hits': 4, 'eliminations': 2,
+                          'combatEvents': 11, 'hitsReceived': 1, 'damageTaken': 20})
+
+    def test_incoming_fire_cannot_appear_before_the_last_target_wave(self):
+        rows, waves, window = self.endurance_incoming_replay()
+        attack = rows.pop()
+        for event in attack['packet']['events']:
+            event['sequence'] -= 7
+        rows.insert(1, attack)
+        with self.assertRaisesRegex(ValueError, 'enabled window'):
+            m.reconcile_marksmanship(rows, self.targets, window, waves=waves)
+
     def test_incoming_ray_must_come_from_the_same_room_during_attack(self):
         for field, value in [('observedSequence', 19), ('observedSequence', 23), ('suspended', True)]:
             replay, window = self.incoming_replay()
