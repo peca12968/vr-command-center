@@ -112,6 +112,7 @@ jobs:
       - run: node --check tests/browser/check-saved-replay-native.cjs
       - run: node --check tests/browser/check-launch-preview-native.cjs
       - run: node --check tests/browser/check-external-native.cjs
+      - run: node --check tests/browser/check-live-rooms-native.cjs
       - run: npm install --global pnpm@11.25.0
       - run: pnpm --dir tests/browser install --frozen-lockfile
       - run: pnpm --dir tests/browser exec playwright install --with-deps chromium

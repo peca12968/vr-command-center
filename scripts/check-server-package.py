@@ -171,6 +171,8 @@ def main():
     p.add_argument('--check-venue-field-ui',action='store_true',help='Download the original current and earlier field bundles from the shipped console')
     p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
     p.add_argument('--check-room-observer',action='store_true',help='Verify room-scoped observation and instant replay on the original Linked source')
+    p.add_argument('--check-live-room-navigation', action='store_true',
+                   help='Switch all five live rooms in Chromium and re-read each displayed native frame after sealing')
     p.add_argument('--check-room-participation',action='store_true',help='Disconnect and restore one original VR admission in each five-room mode')
     p.add_argument('--check-vr-participation-pause',action='store_true',help='Pause and resume from the shipped room card during each native VR disconnect and recovery')
     p.add_argument('--check-room-endpoints',action='store_true',help='Verify real published UDP endpoints in the room cards and scoped API')
@@ -303,6 +305,9 @@ def main():
     if args.check_room_clocks and not args.player_package:p.error('--check-room-clocks requires the three-package check')
     if args.check_venue_phase and not args.check_room_clocks:p.error('--check-venue-phase requires --check-room-clocks')
     if args.check_venue_begin and not args.player_package:p.error('--check-venue-begin requires the three-package check')
+    if args.check_live_room_navigation and (venue_only or args.openxr_mock_only or not args.check_venue_begin
+                                           or not args.player_package or not shutil.which('node')):
+        p.error('--check-live-room-navigation requires the two-topology three-package check with --check-venue-begin and Node.js')
     if args.check_venue_launcher and (not all((args.prepare_independent_set, args.check_venue_begin, args.check_venue_end))
                                      or any((args.check_lan_preflight, args.check_layout_preview, args.field_evidence,
                                              args.venue_field_evidence, args.observe_closure_ui))):
@@ -1765,6 +1770,36 @@ def main():
         if args.check_debrief_receipts:
             check(result['receiptExports'] == [case['batchId'] for case in cases],
                   mode + ' shipped console downloads exact receipt exports for the selected original batches')
+    def verify_live_room_navigation(entries, clients, linked):
+        topology = 'Linked' if linked else 'Independent'
+        rooms = []
+        for entry in entries:
+            sid = entry['sessionId']
+            minimum = (entry['combatWindow']['disabledSequence'] if args.check_room_combat else
+                       read(out/(entry['label']+'-running.json'))['acceptedBeginSequence'])
+            for room_id in request('/api/sessions/'+sid)['roomIds']:
+                players = [client['player']['id'] for client in clients
+                           if client['sessionId'] == sid and client['player']['roomId'] == room_id]
+                assert len(players) == players_per_room
+                rooms.append({'roomId': room_id, 'sessionId': sid, 'streamId': entry['ready']['streamId'],
+                              'minimumSequence': minimum, 'playerIds': players})
+        descriptor = runtime/(topology.lower()+'-live-rooms-private.json')
+        descriptor.write_text(json.dumps({'base': uri, 'masterKey': keys['Master'], 'topology': topology,
+            'rooms': sorted(rooms, key=lambda room: room['roomId']), 'requireDamage': args.check_room_combat}), encoding='utf-8')
+        browser_out = out/(topology.lower()+'-live-rooms')
+        try:
+            with (out/(topology.lower()+'-live-rooms-browser.log')).open('xb') as log:
+                subprocess.run([shutil.which('node'), str(ROOT/'tests/browser/check-live-rooms-native.cjs'),
+                                str(descriptor), str(browser_out)], cwd=ROOT/'tests/browser', stdout=log,
+                               stderr=subprocess.STDOUT, check=True, timeout=85)
+        finally:
+            descriptor.unlink()
+        observed = read(browser_out/'checks.json')
+        check(observed['complete'] and observed['topology'] == topology and observed['scopedWatches'] == 5
+              and observed['retiredWatches'] == 4 and [sample['roomId'] for sample in observed['samples']] == [1,4,2,5,3],
+              topology+' shipped console switches all five original live rooms and retires the previous streams')
+        return observed['samples']
+
     def verify_venue_reports(entries, receipt, linked):
         mode = 'linked' if linked else 'independent'
         key = receipt['requestId']
@@ -4237,6 +4272,10 @@ def main():
             if args.check_room_combat:
                 stage('running-native-ai-combat',mode='Linked' if linked else 'Independent')
                 exercise_room_combat(entries,round_clients)
+            live_samples = []
+            if args.check_live_room_navigation:
+                stage('checking-live-room-navigation',mode='Linked' if linked else 'Independent')
+                live_samples = verify_live_room_navigation(entries,round_clients,linked)
             if args.check_linked_room_enemies and linked:check_linked_room_enemies(entries[0])
             if args.check_venue_phase:verify_venue_phase(entries,linked)
             if args.venue_concurrent_roster_seconds is not None:
@@ -4264,6 +4303,13 @@ def main():
                     if args.observe_closure_ui and not linked and entry is observer_entry:(out/'closure-end.request').write_text('request one normal UI End',encoding='utf-8')
                     else:command(entry['sessionId'],'End')
             for entry in entries:finish(entry)
+            for sample in live_samples:
+                sid, room_id, sequence = (sample[key] for key in ('sessionId','roomId','sequence'))
+                route = f'/api/sessions/{sid}/world'
+                archived = request(route+f'?observerRoomId={room_id}')
+                check(archived['complete'] and archived['header']['streamId'] == sample['streamId']
+                      and request(route+f'/frames/{sequence}?observerRoomId={room_id}') == sample['frame'],
+                      f'{sid} room {room_id} frame {sequence} remains exact after native sealing')
             if args.check_venue_end:
                 closed = request('/api/venue/closure')['batch']
                 retry = request(route, body, request_id=key)
