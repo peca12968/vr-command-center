@@ -82,6 +82,18 @@ Unity 0.47.0 伺服器可搭配控制台 0.31.14。啟動器 1.5 可選擇待開
 
 也可用 `Launch-Server.exe --venue-window <計畫完整路徑>` 開啟五房視窗並填入路徑。命令列的 `--venue-check <計畫完整路徑> --report <新結果檔>` 會核對相同的房間、任務、校正及 UDP 條件。核對結果沒有憑證，啟動時仍會取得原場次的本機鎖。
 
+### 重跑五房視窗驗收
+
+在 Windows 使用解壓後的伺服器包及管理包，指定新的本機測試目錄。`--topology Independent` 驗證五個伺服器，`--topology Linked` 驗證一個涵蓋五房的伺服器。`--players-per-room 5` 會啟動 25 個同機 Windows 模擬端。
+
+```powershell
+python scripts/check-server-venue-gui.py <伺服器包目錄> --control-package <管理包目錄> --runtime-root "$env:LOCALAPPDATA/VrCommand/VenueGuiChecks" --topology Linked --players-per-room 5
+```
+
+1. 測試程式會建立隔離管理實例及第四版啟動計畫，再開啟批次視窗。按 Enter 核對清單，確認所有房間、場次與 UDP 埠，勾選來源紀錄，按 Alt+S。將 `{"topology":"Linked"}` 或 `{"topology":"Independent"}` 存為本輪輸出目錄的 `preview.review.json`。
+2. 測試程式配票並透過管理 API 開始、結束場次。畫面顯示「全館任務已封存並停止」後關閉視窗，確認視窗消失，再將 `{"closed":true}` 存為同一目錄的 `closed.review.json`。
+3. 查看 `checks.json`、戰績 CSV 與 `cleanup.json`。驗收核對原伺服器公告的端點、每席結果回條，以及戰鬥和世界日誌的封存邊界。`runtime-snapshot` 包含本輪隔離實例資料，保留在本機。
+
 ### 手動建立及執行場館計畫
 
 ```json
