@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-11 `VRCommand-ControlServer-0.31.141-venue-missions-win-x64.zip` 為 53,077,832 bytes，SHA-256 `218fe8ba9b3d9a5422d61ceb4a1fad4f5baafdcff424122b6ac1fda95974f67a`。支援開場前下載及載入五房任務配置檔。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.141-venue-missions-win-x64.zip) · [操作說明](MISSION_VERSIONS.md#在開場前保存五房任務配置)
+
 2026-11-11 `VRCommand-ControlServer-0.31.140-linked-archive-win-x64.zip` 為 53,074,040 bytes，SHA-256 `80a07ea1b2da80955cf0ea96c6693c677871773fb87e20569ca67e6fccc5cb80`。主控可從全館收尾套用完整合併場的原任務版本。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.140-linked-archive-win-x64.zip) · [操作說明](MISSION_VERSIONS.md#從全館收尾套用五房原版本)
 
 2026-11-11 `VRCommand-ControlServer-0.31.139-layout-rejection-win-x64.zip` 為 53,072,943 bytes，SHA-256 `84595b1957f375a15f0b6cdc23c6ba14c0a3d9f2774403baa0df1f9a09a3bc20`。建立五房場次若收到場地拒絕，所有使用同一版本的房間會顯示回覆指出的問題物件及出生位。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.139-layout-rejection-win-x64.zip) · [操作說明](MISSION_VERSIONS.md#逐房指定任務版本)
