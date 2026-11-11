@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 Quest 收尾以原伺服器紀錄核對來源
+
+- 場館驗收的 `questCaptures` 可使用部署時的 `deviceMap`。工具從每席原 Quest 日誌的最後連線取得伺服器確認的 UDP 來源，核對映射席位、不同私有 IPv4、原遊戲埠與封存戰績。摘要標示 `questCaptureAddressSource=server-observed`。選用 `networkPlan` 時仍會核對現場獨立記錄的 IPv4。 [操作說明](EXTERNAL_CLIENTS.md#以原-quest-裝置對照表驗收收尾)
+- 以獨立和合併模式各五個模擬 Quest 席位的原擷取與重試資料驗證，核對結果與明列 IPv4 的驗收一致。再搭配每場 20 個 Windows 席位的收件 ZIP 驗證混合流程，兩模式各核對 25 筆模擬戰績確認。原 Quest 報告與日誌各八檔雜湊保持。 [驗證摘要](../artifacts/quest-observed-sources-0507/validation.json)
+- 重複的 Quest 來源 IPv4、伺服器自身位址及錯誤連線埠均遭拒絕。上一輪原 Windows 收件與六批分階段總驗收逐位元重驗相符。92 項場館 Python 測試與 9 項 Quest UDP 預檢測試通過。
+- GitHub Actions 在 `5cc7730d` 因帳務或支出上限未啟動任何步驟。兩種混合場驗收使用模擬 Quest 與伺服器來源資料。實體跨機、頭盔及廠商硬體仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42958787704)
+
 ## 2026-11-11 Quest 日誌擷取中斷後逐席重試
 
 - `capture-quest-field-log.py --retry-incomplete` 會用原部署 ZIP、裝置對照表與首次擷取報告核對房席、場次及連線埠，只對失敗席位重新讀取 logcat。重試使用新資料夾，保留首次已完成的原日誌、擷取報告與 `.partial`。 [重試操作](QUEST3.md#重試未完成的-quest-擷取席位)
