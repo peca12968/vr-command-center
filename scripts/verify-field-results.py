@@ -1249,8 +1249,15 @@ def read_venue_control_batches(references, expected, closure, recorded_at, evide
 
 
 def verify_venue(manifest_path):
+    report, _ = verify_venue_batch(manifest_path)
+    return report
+
+
+def verify_venue_batch(manifest_path):
     manifest_path = manifest_path.resolve(strict=True)
-    manifest = read_json(content(manifest_path))
+    with manifest_path.open('rb') as stream:
+        raw_manifest = limited_read(stream)
+    manifest = read_json(raw_manifest.decode('utf-8-sig'))
     integer(manifest['version'], 1, 1)
     players_per_room = integer(manifest.get('expectedPlayersPerRoom', 5), 1, 5)
     topology, mode = manifest['topology'], manifest['mode']
@@ -1279,7 +1286,7 @@ def verify_venue(manifest_path):
         closure, archives = venue_bundle(evidence_path(manifest['venueBundle']), mode)
     else:
         closure = read_json(content(evidence_path(manifest['closure'])))['batch']
-    identity(closure['requestId'])
+    closure_id = identity(closure['requestId'])
     recorded_at = datetime.fromisoformat(closure['recordedAtUtc'])
     require(recorded_at.utcoffset() is not None, 'Closure time must specify a time zone')
     all_rooms = list(range(1, 6))
@@ -1386,6 +1393,7 @@ def verify_venue(manifest_path):
     rooms, summaries = {}, []
     quest_players, windows_players, windows_link_reports = 0, 0, 0
     stream_ids, bindings, player_ids, admission_ids, end_times, exchanges = set(), set(), set(), set(), set(), set()
+    start_times = set()
     begin_request = None
     for entry in entries:
         launcher = read_json(content(evidence_path(entry['launcherReport'])))
@@ -1419,6 +1427,7 @@ def verify_venue(manifest_path):
                 and integer(row['replay']['throughSequence'], 1) == integer(launcher['finalWorld']['acceptedSequence'], 1)
                 and integer(row['appliedAtSequence'], 1) < integer(session['sequence'], 1),
                 'Closure and original sealed session boundaries differ')
+        start_times.add(datetime.fromisoformat(session['startedAtUtc']))
         end_times.add(datetime.fromisoformat(session['endedAtUtc']))
         stream = identity(launcher['streamId'])
         guarded_begin = None
@@ -1577,7 +1586,7 @@ def verify_venue(manifest_path):
                                        key=lambda row: (row['roomId'], row['seat']))}
     if reconnect_window is not None:
         reconnect_summary['reconnectWindow'] = reconnect_window.summary(reconnect_summary['reconnectHistory']['reconnectedSeats'], len(player_ids))
-    return {'version': 1, 'consistent': True, 'declaredTopology': topology, 'mode': mode, 'players': len(player_ids),
+    report = {'version': 1, 'consistent': True, 'declaredTopology': topology, 'mode': mode, 'players': len(player_ids),
             **({'expectedPlayersPerRoom': players_per_room} if 'expectedPlayersPerRoom' in manifest else {}),
             'rooms': [{'roomId': room, 'players': len(rooms[room]),
                        'playersOutsideDeclaredServer': sum(address in remote for address in rooms[room])} for room in all_rooms],
@@ -1605,11 +1614,88 @@ def verify_venue(manifest_path):
             **begin_summary,
             **reconnect_summary,
             **({'roomAlignmentsVerified': sum(len(row.get('roomAlignments', [])) for row in summaries)} if check_alignments else {})}
+    return report, {'manifestSha256': hashlib.sha256(raw_manifest).hexdigest(), 'closureRequestId': closure_id,
+                    'started': min(start_times), 'ended': max(end_times),
+                    'identities': {'closure': {closure_id}, 'session': {row['sessionId'] for row in rows},
+                                   'world stream': stream_ids, 'admission': admission_ids}}
+
+
+def verify_venue_stages(plan_path):
+    plan_path = plan_path.resolve(strict=True)
+    with plan_path.open('rb') as stream:
+        raw_plan = limited_read(stream)
+    plan = read_json(raw_plan.decode('utf-8-sig'))
+    required = {'version', 'topology', 'minimumConcurrentMilliseconds', 'venueManifests'}
+    require(type(plan) is dict and required <= plan.keys() <= required | {'requireDistinctRemoteRoster'},
+            'Invalid staged venue plan fields')
+    integer(plan['version'], 1, 1)
+    topology = plan['topology']
+    require(topology in ('same-host', 'direct-lan'), 'Invalid staged venue topology')
+    minimum = integer(plan['minimumConcurrentMilliseconds'], 1000, 900000)
+    distinct = plan.get('requireDistinctRemoteRoster', False)
+    require(type(distinct) is bool and (not distinct or topology == 'direct-lan'),
+            'Distinct staged roster requires a boolean option and direct-lan topology')
+    modes, sizes = ('Independent', 'Linked'), (5, 10, 25)
+    names = plan['venueManifests']
+    require(type(names) is list and len(names) == len(modes) * len(sizes)
+            and all(type(name) is str and bool(name.strip()) for name in names),
+            'Provide six venue manifests for the two 5, 10 and 25 seat series')
+    paths = [(plan_path.parent / name).resolve(strict=True) for name in names]
+    require(plan_path not in paths and len(set(paths)) == len(paths), 'Staged venue manifest paths must be distinct')
+
+    stages, used = {}, {}
+    release_hash = None
+    for path in paths:
+        report, batch = verify_venue_batch(path)
+        mode, players = report['mode'], report['players']
+        key = mode, players
+        require(mode in modes and players in sizes and key not in stages,
+                'Staged venue evidence must cover each mode and seat count exactly once')
+        require(report['declaredTopology'] == topology, 'Venue batch topology differs from the staged plan')
+        for label, values in batch['identities'].items():
+            seen = used.setdefault(label, set())
+            require(seen.isdisjoint(values), f'Staged venue evidence reuses an original {label} identity')
+            seen.update(values)
+        current_release = report.get('venueRelease', {}).get('reportSha256')
+        require(current_release is not None and release_hash in (None, current_release),
+                'Every staged venue batch must use the same original verified release report')
+        release_hash = current_release
+        overlap = report.get('concurrentRoster')
+        require(overlap is not None and overlap['longestMilliseconds'] >= minimum,
+                'Venue batch lacks the continuous concurrent roster required by the staged plan')
+        require(not distinct or report.get('distinctRemoteRoster', {}).get('seatsVerified') == players,
+                'Venue batch lacks distinct original remote sources for every seat')
+        stages[key] = (report, batch)
+
+    for mode in modes:
+        batches = [stages[mode, players][1] for players in sizes]
+        require(all(before['ended'] <= after['started'] for before, after in zip(batches, batches[1:])),
+                f'{mode} original sessions do not run in 5, 10 and 25 seat order')
+
+    results = []
+    for players in sizes:
+        for mode in modes:
+            report, batch = stages[mode, players]
+            results.append({'mode': mode, 'players': players, 'closureRequestId': batch['closureRequestId'],
+                            'manifestSha256': batch['manifestSha256'],
+                            'startedAtUtc': batch['started'].astimezone(timezone.utc).isoformat(),
+                            'endedAtUtc': batch['ended'].astimezone(timezone.utc).isoformat(),
+                            'serverAcknowledgements': report['serverAcknowledgements'],
+                            'worldJournalsVerified': report['worldJournalsVerified'],
+                            'concurrentRoster': report['concurrentRoster'],
+                            **{field: report[field] for field in ('combatJournalsVerified', 'distinctRemoteRoster') if field in report}})
+    return {'version': 1, 'consistent': True, 'declaredTopology': topology,
+            'planSha256': hashlib.sha256(raw_plan).hexdigest(), 'venueReleaseSha256': release_hash,
+            'minimumConcurrentMilliseconds': minimum, 'requireDistinctRemoteRoster': distinct, 'stages': results,
+            'serverAcknowledgements': sum(stage['serverAcknowledgements'] for stage in results),
+            'physicalHostsVerified': False, 'networkCapacityAccepted': False}
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--venue-manifest', type=Path, help='Check one full five-room End batch from a private manifest')
+    venue = parser.add_mutually_exclusive_group()
+    venue.add_argument('--venue-manifest', type=Path, help='Check one five-room End batch from a private manifest')
+    venue.add_argument('--venue-stages', type=Path, help='Verify the six original five-room batches for staged 5, 10 and 25 player runs')
     parser.add_argument('--topology', choices=('same-host', 'direct-lan'))
     parser.add_argument('--server-ip', action='append', help='Repeat for each assigned server IPv4')
     parser.add_argument('--world-journal', type=Path, help='Original closed .worldlog for a single session')
@@ -1628,13 +1714,17 @@ def main():
     args = parser.parse_args()
     json_paths = [args.launcher_report, args.session, args.statistics, args.endpoint]
     single_args = [args.topology, args.server_ip, *json_paths, args.server_log, args.player or args.quest_player]
-    if (args.venue_manifest and (any(single_args) or args.world_journal or args.combat_journal or args.room_alignment or args.udp_preflight
-                                 or args.udp_source_preflight or args.verify_player_sources or args.verify_reconnect_history)) or (not args.venue_manifest and not all(single_args)):
-        parser.error('Provide --venue-manifest alone or all single-session options.')
+    batch = args.venue_manifest or args.venue_stages
+    extra_single_args = [args.world_journal, args.combat_journal, args.room_alignment, args.udp_preflight,
+                         args.udp_source_preflight, args.verify_player_sources, args.verify_reconnect_history]
+    if (batch and any(single_args + extra_single_args)) or (not batch and not all(single_args)):
+        parser.error('Provide --venue-manifest or --venue-stages alone, or all single-session options.')
     if args.udp_preflight and args.udp_source_preflight:
         parser.error('Use either --udp-preflight or --udp-source-preflight.')
     try:
-        if args.venue_manifest:
+        if args.venue_stages:
+            report = verify_venue_stages(args.venue_stages)
+        elif args.venue_manifest:
             report = verify_venue(args.venue_manifest)
         else:
             windows = args.player or []

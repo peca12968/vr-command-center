@@ -372,6 +372,32 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json
 
 需要核對同時在線時，加上 `minimumConcurrentMilliseconds` 並提供每場原 `.worldlog`。現場每席有各自的 IPv4 時，也可加上 `requireDistinctRemoteRoster`，用同一個欄位核對該階段每位玩家的原 UDP 來源。25 人階段可省略 `expectedPlayersPerRoom`。
 
+#### 一次驗收兩種模式的三個階段
+
+準備六份 `venue.json`，每份都保留該批原始場館封存、遊戲日誌及同一份 `venueReleaseReport`。各批清單啟用 `minimumConcurrentMilliseconds`，並提供所有原 `.worldlog`。將六份清單的路徑填入 `stages.json`。路徑相對於 `stages.json`，清單列出的順序可調整。
+
+```json
+{
+  "version": 1,
+  "topology": "direct-lan",
+  "minimumConcurrentMilliseconds": 10000,
+  "venueManifests": [
+    "5-independent/venue.json",
+    "5-linked/venue.json",
+    "10-independent/venue.json",
+    "10-linked/venue.json",
+    "25-independent/venue.json",
+    "25-linked/venue.json"
+  ]
+}
+```
+
+```powershell
+python scripts/verify-field-results.py --venue-stages .\stages.json
+```
+
+工具會重驗六批原始資料，要求各模式的 5、10、25 人場次按原開始與結束時間依序完成。各批須符合總清單的拓撲與同時在線門檻，且不得共用原結束回條、場次、世界來源或入場識別。結果列出每批原結束回條、清單雜湊、開始與結束時間、同時在線區間及伺服器戰績確認。若要每席都有不同直連 IPv4，可在 `direct-lan` 總清單與六份批次清單都加上 `"requireDistinctRemoteRoster": true`。同機排演使用 `same-host`，現場實體主機數及網路容量仍須驗收。
+
 ### 核對 25 席各自的直連來源
 
 每席使用不同 IPv4 的場館，可在原五房驗收清單加入下列欄位。請完整填寫 `serverIps` 的伺服器介面位址，並保留每席原程序的完整日誌、每場啟用 UDP 來源診斷的伺服器日誌及原封存 `worldJournal`。

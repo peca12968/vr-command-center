@@ -187,13 +187,16 @@ class PlayerSourceEvidenceTests(unittest.TestCase):
                 field.verify(*data, verify_player_sources=True)
 
 
-def venue_fixture(root, mode, *, remote=False, quest_per_room=0, with_journals=False, mr_rooms=(), room_sizes=(5,) * 5):
+def venue_fixture(root, mode, *, remote=False, quest_per_room=0, with_journals=False, mr_rooms=(), room_sizes=(5,) * 5,
+                  id_offset=0, minutes_after=0):
     def write_json(path, value):
         path.write_text(json.dumps(value), encoding='utf-8')
 
     server_ip, remote_ip = '192.168.5.10', '192.168.5.20'
     groups = [[1, 2, 3, 4, 5]] if mode == 'Linked' else [[room] for room in range(1, 6)]
-    batch = {'requestId': id_for(1000), 'recordedAtUtc': '2026-11-09T00:01:00+00:00', 'sessions': []}
+    started = datetime.fromisoformat('2026-11-09T00:00:00+00:00') + timedelta(minutes=minutes_after)
+    ended = started + timedelta(minutes=1)
+    batch = {'requestId': id_for(1000 + id_offset), 'recordedAtUtc': ended.isoformat(), 'sessions': []}
     manifest = {'version': 1, 'mode': mode, 'topology': 'direct-lan' if remote else 'same-host',
                 'serverIps': [server_ip], 'closure': 'closure.json', 'sessions': []}
     for rooms in groups:
@@ -201,7 +204,7 @@ def venue_fixture(root, mode, *, remote=False, quest_per_room=0, with_journals=F
         experience = 'MR' if rooms[0] in mr_rooms else 'VR'
         origin = 'GameServer' if experience == 'MR' else 'Simulation'
         _, _, launcher, session, stats, endpoint, _, _ = fixture(remote=False)
-        session_id, stream = id_for(100 + rooms[0]), id_for(200 + rooms[0])
+        session_id, stream = id_for(100 + rooms[0] + id_offset), id_for(200 + rooms[0] + id_offset)
         port = 7776 + rooms[0]
         launcher.update(sessionId=session_id, streamId=stream)
         launcher['udpBinding']['port'] = port
@@ -209,6 +212,7 @@ def venue_fixture(root, mode, *, remote=False, quest_per_room=0, with_journals=F
             calibration='quest-room-mr-v1' if experience == 'MR' else 'uncalibrated-vr')
         launcher['finalCombatStream'].update(streamId=stream, origin=origin)
         session.update(id=session_id, mode=mode, roomIds=rooms, players=[], combatStream=launcher['finalCombatStream'],
+                       startedAtUtc=started.isoformat(), endedAtUtc=ended.isoformat(),
                        environment={'mode': experience}, mission={'definition': {'name': prefix, 'environment': {'mode': experience}}})
         stats.update(sessionId=session_id, players=[])
         endpoint.update(sessionId=session_id, streamId=stream, port=port)
@@ -235,7 +239,7 @@ def venue_fixture(root, mode, *, remote=False, quest_per_room=0, with_journals=F
         for room in rooms:
             for seat in range(room_sizes[room - 1]):
                 connection = room * 5 + seat
-                player, admission = id_for(300 + connection), id_for(400 + connection)
+                player, admission = id_for(300 + connection + id_offset), id_for(400 + connection + id_offset)
                 is_quest = experience == 'MR' or seat >= room_sizes[room - 1] - quest_per_room
                 peer = f'192.168.5.{30 + connection}' if is_quest else remote_ip if remote and room == 5 and seat == room_sizes[room - 1] - 1 else server_ip
                 session['players'].append({'id': player, 'admissionId': admission, 'roomId': room, 'seat': seat, 'headset': 'Quest3'})
@@ -481,6 +485,88 @@ def preflight_fixture(root, label, *, server, peer, port, exchange=None):
 
 
 class FieldResultsTests(unittest.TestCase):
+    def staged_batch(self, root, mode, count, id_offset, minutes_after, *, remote=False):
+        root.mkdir()
+        path, manifest, _ = venue_fixture(root, mode, remote=remote, with_journals=True,
+            room_sizes=(count,) * 5, id_offset=id_offset, minutes_after=minutes_after)
+        offsets = [0] if mode == 'Linked' else [0, 100, 200, 300, 400]
+        capture_start = datetime.fromisoformat('2026-11-09T08:00:00+08:00') + timedelta(minutes=minutes_after)
+        self.concurrent_journals(root, manifest, offsets, capture_start=capture_start)
+        self.add_shared_release(root, manifest, 0)
+        manifest['minimumConcurrentMilliseconds'] = 1000
+        if count != 5:
+            manifest['expectedPlayersPerRoom'] = count
+        if mode == 'Linked':
+            manifest = self.pack_venue(root, manifest)
+        path.write_text(json.dumps(manifest), encoding='utf-8')
+        return str(path.relative_to(root.parent))
+
+    def staged_plan(self, root, *, remote=False):
+        names = [self.staged_batch(root / f'{count}-{mode}', mode, count, index * 10000, minutes, remote=remote)
+                 for minutes, count in enumerate((1, 2, 5), 1)
+                 for index, mode in ((minutes * 2, 'Independent'), (minutes * 2 + 1, 'Linked'))]
+        return {'version': 1, 'topology': 'direct-lan' if remote else 'same-host',
+                'minimumConcurrentMilliseconds': 2000, 'venueManifests': names}
+
+    def test_staged_venue_checks_original_batches_and_has_one_report_per_mode_and_size(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = self.staged_plan(root)
+            plan['venueManifests'].reverse()
+            path = root / 'stages.json'
+            raw = json.dumps(plan).encode('utf-8-sig')
+            path.write_bytes(raw)
+            result = subprocess.run([sys.executable, str(SCRIPT), '--venue-stages', str(path)],
+                                    capture_output=True, check=True)
+            report = json.loads(result.stdout)
+            self.assertEqual([(mode, size) for size in (5, 10, 25) for mode in ('Independent', 'Linked')],
+                             [(item['mode'], item['players']) for item in report['stages']])
+            self.assertEqual(80, report['serverAcknowledgements'])
+            self.assertEqual(6, len({item['closureRequestId'] for item in report['stages']}))
+            self.assertEqual(hashlib.sha256(raw).hexdigest(), report['planSha256'])
+            release = root / '1-Independent' / 'release.json'
+            self.assertEqual(hashlib.sha256(release.read_bytes()).hexdigest(), report['venueReleaseSha256'])
+            self.assertFalse(report['physicalHostsVerified'])
+            self.assertFalse(report['networkCapacityAccepted'])
+
+    def test_staged_venue_rejects_incomplete_repeated_misordered_or_mismatched_batches(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = self.staged_plan(root)
+            names = plan['venueManifests']
+            reused = self.staged_batch(root / 'reused', 'Independent', 2, 20000, 2)
+            late = self.staged_batch(root / 'late', 'Independent', 1, 80000, 8)
+            remote = self.staged_batch(root / 'remote', 'Independent', 1, 90000, 1, remote=True)
+            path = root / 'stages.json'
+            for changes, error in (
+                ({'venueManifests': names[:-1]}, 'six venue manifests'),
+                ({'venueManifests': [names[0], *names[:-1]]}, 'paths must be distinct'),
+                ({'venueManifests': [*names[:2], reused, *names[3:]]}, 'reuses an original closure identity'),
+                ({'venueManifests': [late, *names[1:]]}, 'do not run in 5, 10 and 25 seat order'),
+                ({'venueManifests': [remote, *names[1:]]}, 'topology differs from the staged plan'),
+                ({'minimumConcurrentMilliseconds': 9000}, 'continuous concurrent roster required'),
+            ):
+                with self.subTest(changes=changes):
+                    path.write_text(json.dumps(dict(plan, **changes)), encoding='utf-8')
+                    with self.assertRaisesRegex(field.EvidenceError, error):
+                        field.verify_venue_stages(path)
+            changed_release = root / '5-Linked' / 'release.json'
+            changed_release.write_bytes(changed_release.read_bytes() + b'\n')
+            self.assertEqual(25, field.verify_venue(root / names[-1])['players'])
+            path.write_text(json.dumps(plan), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'same original verified release report'):
+                field.verify_venue_stages(path)
+
+    def test_staged_distinct_remote_requirement_cannot_use_weaker_lan_batches(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = self.staged_plan(root, remote=True)
+            plan['requireDistinctRemoteRoster'] = True
+            path = root / 'stages.json'
+            path.write_text(json.dumps(plan), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'distinct original remote sources'):
+                field.verify_venue_stages(path)
+
     def test_venue_pilot_requires_declared_room_sizes_and_preserves_original_concurrency(self):
         for mode, offsets in (('Linked', [0]), ('Independent', [0, 100, 200, 300, 400])):
             for count in (1, 2):
@@ -710,7 +796,7 @@ class FieldResultsTests(unittest.TestCase):
                     with self.assertRaisesRegex(field.EvidenceError, error):
                         field.verify_venue(path)
 
-    def concurrent_journals(self, root, manifest, offsets, edit_packet=None, *, tracked=False):
+    def concurrent_journals(self, root, manifest, offsets, edit_packet=None, *, tracked=False, capture_start=None):
         for entry, offset in zip(manifest['sessions'], offsets, strict=True):
             session, _, _ = field.management_zip(root / entry['evidenceZip'])
             members = [{'id': player['id'], 'roomId': player['roomId'], 'connected': True} for player in session['players']]
@@ -719,7 +805,7 @@ class FieldResultsTests(unittest.TestCase):
                     member['rig'] = {'kind': 'Tracked'}
             launch = root / entry['launcherReport']
             launcher = json.loads(launch.read_text(encoding='utf-8'))
-            start = datetime.fromisoformat('2026-11-09T08:00:00+08:00') + timedelta(milliseconds=offset)
+            start = (capture_start or datetime.fromisoformat('2026-11-09T08:00:00+08:00')) + timedelta(milliseconds=offset)
             world_journal(root / entry['worldJournal'], launcher['finalWorld'], capture_start=start.isoformat(),
                           players=lambda _, phase: deepcopy(members) if phase == 'Running' else [], edit_packet=edit_packet)
             launch.write_text(json.dumps(launcher), encoding='utf-8')
