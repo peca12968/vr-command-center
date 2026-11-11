@@ -164,6 +164,10 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
       const current = Boolean(mode === 'live' && recording && info?.header.sessionId === recording.header.sessionId && observerRoom === room);
       button.setAttribute('aria-pressed', String(current));
       button.disabled = !active || !recording || current || !!roomSwitch || !!listController || connecting || $('world-recording').disabled;
+      if (recording) {
+        const label = current ? '觀戰中' : '即時觀戰';
+        if (button.lastElementChild.textContent !== label) button.lastElementChild.textContent = label;
+      }
     }
   }
   function stopRoomSwitch() { roomSwitch?.abort(); roomSwitch = null; }

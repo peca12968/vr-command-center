@@ -98,9 +98,14 @@ module.exports = async function venueTimeReplayBrowser({ context, api, tokens, b
       && await page.locator('#world-canvas').getAttribute('data-sequence') === '4',
       'A substituted recording stream leaves the current live room and frame intact');
     await openLiveRoom(2, ids[1], 4);
-    check(await liveRoom(1).isEnabled() && await liveRoom(2).isDisabled(),
+    check(await liveRoom(1).isEnabled() && await liveRoom(2).isDisabled() && (await liveRoom(2).innerText()).includes('觀戰中'),
       'The Independent room switch selects the exact other recording without returning to operations');
     await page.locator('#world-live-rooms').screenshot({ path: path.join(screenshots, 'world-live-rooms.png') });
+    await page.setViewportSize({ width: 390, height: 844 });
+    check(await page.locator('#world-live-rooms').evaluate(panel => panel.scrollWidth <= panel.clientWidth + 1),
+      'The five live room entries fit the mobile observer panel');
+    await page.locator('#world-live-rooms').screenshot({ path: path.join(screenshots, 'world-live-rooms-mobile.png') });
+    await page.setViewportSize({ width: 1440, height: 1080 });
     const roomDesk = await context.newPage();
     captureErrors(roomDesk);
     try {
