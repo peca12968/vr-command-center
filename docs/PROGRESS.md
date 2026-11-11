@@ -1,5 +1,13 @@
 # 開發進度
 
+## 2026-11-11 回放檔頭與原場景設定驗收
+
+- 封存驗收將原始 `.worldlog` 的完整檔頭與啟動器封存報告比對，涵蓋每個擺設物件的位置與角度、任務時鐘、校正、規則與呈現版本。物件座標依原 `System.Single` 值比較，舊檔缺少的能力欄位依原定義以零比較。單場及五房驗收都使用同一套比對。 [操作說明](EXTERNAL_CLIENTS.md#核對原始回放檔頭與封存)
+- 從已封存且含八個場景物件的原場次各複製一份回放，分別更動物件位置、角度、任務時長或素材版本。四份副本各重算檔頭校驗碼，後續記錄逐位元相同。原工具四份均接受，新工具均拒絕，原檔在兩版皆通過。 [原始檔對照](../artifacts/world-header-field-0507/native-header-mutations.json)
+- 以 Windows 0.50.7 的玩家與伺服器套件及原管理套件重跑，獨立五房與合併各 25 個同機玩家端。478 項通過，核對六份回放與六份戰鬥封存、915 格、80 筆場景物件與 50 筆原伺服器戰績確認。活動場次與殘留程序為零，C／F 221 檔雜湊相符。0.50.6 原封存六份也通過唯讀重查。 [驗證摘要](../artifacts/world-header-field-0507/validation.json)
+- 首次整館驗證遇到清單讀取器的 `Decimal` 座標被拒絕。修正後同一批五份獨立房封存通過唯讀重查，原失敗與 C／F 130 檔保留。場館驗收 81、回放 14、姿態連續性 10 項 Python 測試通過。GitHub 在 `5d75e647` 上因帳戶付款或支出上限未啟動任何步驟。 [首次執行](../artifacts/world-header-field-0507/native-before-decimal.log) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42950059229)
+- 玩家圖形啟動器複驗時仍被 Windows 防火牆提示遮住。本次完成同機套件與封存驗收，跨機 25 席、Quest 3／VIVE XR 實機及廠商硬體整合另待驗收。
+
 ## 2026-11-11 Windows Unity 編輯器連線限制為本機
 
 - Windows 0.50.6 的原執行檔在遊戲連線啟動前監聽所有介面的 TCP 並發布 Unity 發現廣播。只移除設定或將模式寫成 `None` 都仍會監聽。同一執行檔改為本機監聽並停用廣播後，實際量測只剩 `127.0.0.1` 的 TCP 監聽。 [原對照](../artifacts/windows-local-profiler-0507/results.json) · [本機監聽對照](../artifacts/windows-local-profiler-0507/local-results.json)
