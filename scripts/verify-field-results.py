@@ -988,12 +988,14 @@ def venue_windows_logs(rows, expected, evidence_path, players_per_room):
     require(type(rows) is list and 1 <= len(rows) <= 25, 'Provide one to 25 original Windows logs in windowsPlayers')
     groups = {}
     for row in rows:
-        address, path, launch, metrics = windows_log_paths(row, evidence_path)
-        _, result = client_result(content(path))
+        files = windows_log_paths(row, evidence_path)
+        _, path, launch, _, bundle = files
+        raw_log, _ = read_windows_evidence(path, launch, bundle)
+        _, result = client_result(raw_log.decode('utf-8-sig'))
         session_id = identity(result['sessionId'])
         require(session_id in expected, 'Windows log belongs to a different venue session')
         group = groups.setdefault(session_id, [])
-        group.append((address, path, launch, metrics))
+        group.append(files)
         require(len(group) <= len(expected[session_id]['roomIds']) * players_per_room,
                 'Too many Windows logs for an original venue session')
     return groups
@@ -1002,11 +1004,28 @@ def venue_windows_logs(rows, expected, evidence_path, players_per_room):
 def windows_log_paths(row, evidence_path):
     base = {'address', 'log'}
     launcher = base | {'launcherReport'}
-    require(type(row) is dict and set(row) in (base, launcher, launcher | {'linkMetrics'}),
-            'A venue Windows log needs an address and log path; link metrics require the original launcher report')
+    bundled = {'address', 'evidenceZip'}
+    require(type(row) is dict and set(row) in (base, launcher, launcher | {'linkMetrics'}, bundled, bundled | {'linkMetrics'}),
+            'Provide either the original Windows files or the player evidence ZIP for one address')
     launch = evidence_path(row['launcherReport']) if 'launcherReport' in row else None
     metrics = evidence_path(row['linkMetrics']) if 'linkMetrics' in row else None
-    return ipv4(row['address']), evidence_path(row['log']), launch, metrics
+    log = evidence_path(row['log']) if 'log' in row else None
+    bundle = evidence_path(row['evidenceZip']) if 'evidenceZip' in row else None
+    return ipv4(row['address']), log, launch, metrics, bundle
+
+
+def read_windows_evidence(log, launcher, bundle):
+    if bundle is not None:
+        with bundle.open('rb') as source:
+            require(os.fstat(source.fileno()).st_size <= MAX_FILE_BYTES + 65536, 'Windows evidence ZIP exceeds its file limit')
+            with zipfile.ZipFile(source) as archive:
+                require(sorted(archive.namelist()) == ['launch-report.json', 'player.log'],
+                        'Windows evidence ZIP must contain only the original player log and launcher report')
+                require(archive.getinfo('launch-report.json').file_size <= 4096, 'Windows launcher report exceeds its ZIP entry limit')
+                return evidence_zip_entry(archive, 'player.log'), evidence_zip_entry(archive, 'launch-report.json').decode('utf-8-sig')
+    with log.open('rb') as source:
+        raw_log = limited_read(source)
+    return raw_log, content(launcher) if launcher is not None else None
 
 
 def verify_windows_link(log_hash, connection, launch, metrics_path):
@@ -1468,7 +1487,8 @@ def verify_venue_batch(manifest_path):
         for player in players:
             if 'logcatPid' in player:
                 require(not capture_supplied, 'Use the Quest capture batches or manual Quest logs, not both')
-                require('linkMetrics' not in player and 'launcherReport' not in player, 'Windows launcher evidence requires a Windows player log')
+                require(not {'linkMetrics', 'launcherReport', 'evidenceZip'} & player.keys(),
+                        'Windows launcher evidence requires a Windows player log')
                 quest_logs.append((ipv4(player['address']), evidence_path(player['log']), integer(player['logcatPid'], 1, 2**31 - 1)))
             else:
                 logs.append(windows_log_paths(player, evidence_path))
@@ -1476,7 +1496,8 @@ def verify_venue_batch(manifest_path):
         if release is not None and logs:
             require(type(windows_hash) is str and re.fullmatch(r'[0-9a-f]{64}', windows_hash),
                     'Venue release report lacks a valid Windows player manifest digest')
-            require(all(launch is not None for _, _, launch, _ in logs), 'Release evidence requires the launcher report for every Windows seat')
+            require(all(launch is not None or bundle is not None for _, _, launch, _, bundle in logs),
+                    'Release evidence requires the launcher report for every Windows seat')
         if release is not None and (quest_logs or captured):
             require(deployment_summary is not None, 'Release evidence requires original deployments for every Quest seat')
         link_rows = []
@@ -1484,16 +1505,15 @@ def verify_venue_batch(manifest_path):
         owners = {player['id']: player for player in session['players']}
 
         def windows_logs():
-            for address, path, launch_path, metrics_path in logs:
-                if launch_path is None:
-                    yield address, content(path)
+            for address, path, launch_path, metrics_path, bundle in logs:
+                raw_log, raw_launch = read_windows_evidence(path, launch_path, bundle)
+                log = raw_log.decode('utf-8-sig')
+                if raw_launch is None:
+                    yield address, log
                     continue
                 require(release is not None or metrics_path is not None, 'A Windows launcher report requires venue release or link evidence')
-                with path.open('rb') as source:
-                    raw_log = limited_read(source)
-                log = raw_log.decode('utf-8-sig')
                 log_hash = hashlib.sha256(raw_log).hexdigest()
-                launch = read_json(content(launch_path))
+                launch = read_json(raw_launch)
                 connection, result = client_result(log)
                 owner = owners.get(result['playerId'])
                 require(owner is not None, 'Windows launcher evidence belongs to a different session player')

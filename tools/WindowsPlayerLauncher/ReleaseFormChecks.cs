@@ -126,6 +126,7 @@ public sealed class ReleaseFormChecks : MarshalByRefObject
                 var messages = File.ReadAllText(log);
                 Check(messages.Contains("VR_OPENXR_STARTUP status=") && !messages.Contains("VR_CLIENT_CONNECTED"),
                     "Actual child fails OpenXR setup before admission");
+                Check(!File.Exists(Path.Combine(directory, "player-evidence.zip")), "Failed startup publishes no player evidence archive");
                 Check(Hash(originalRelease) == releaseHash && Hash(config) == configHash, "Original input files are preserved");
                 return Json.Serialize(new { complete = true, checks, processId = pid, recordsDirectory = directory });
             }

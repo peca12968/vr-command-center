@@ -13,7 +13,7 @@ def main():
     sources = [ROOT / 'tools/WindowsPlayerLauncher' / n for n in ['PlayerLauncher.cs', 'ConfigReviewChecks.cs']]
     exe = directory / 'checks.exe'
     done = subprocess.run([str(compiler), '/nologo', '/target:exe', '/platform:x64', '/warnaserror+', '/main:PlayerReviewChecks',
-        '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', '/reference:System.Web.Extensions.dll',
+        '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', '/reference:System.Web.Extensions.dll', '/reference:System.IO.Compression.dll',
         '/out:' + str(exe), *map(str, sources)], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=45, creationflags=subprocess.CREATE_NO_WINDOW)
     (directory / 'compile.log').write_bytes(done.stdout)
     if done.returncode: raise RuntimeError('ConfigReview compilation failed; preserve log')

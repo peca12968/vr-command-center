@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
+using System.IO.Compression;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
@@ -168,6 +169,43 @@ internal static class PlayerLauncher
         if (releaseManifestHash != null) value.Add("playerManifestSha256", releaseManifestHash);
         Report(path, value);
     }
+    private static bool WriteEvidenceZip(string path, string logPath, string reportPath, string manifestHash, int processId)
+    {
+        PlainPath(Path.GetDirectoryName(path)); PlainPath(logPath); PlainPath(reportPath);
+        var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
+        try
+        {
+            using (var log = File.OpenRead(logPath))
+            using (var report = File.OpenRead(reportPath))
+            {
+                var result = Read(reportPath, 4096);
+                Require(Text(result, "status") == "exited" && Number(result, "exitCode") == 0 && Number(result, "processId") == processId
+                    && Text(result, "playerManifestSha256") == manifestHash && log.Length <= 16 * 1024 * 1024,
+                    "本次日誌與退出報告不符。");
+                var terminal = new PlayerConnectionMonitor(logPath);
+                using (var reader = new StreamReader(log, Encoding.UTF8, true, 4096, true))
+                {
+                    var buffer = new char[4096];
+                    int count;
+                    while ((count = reader.Read(buffer, 0, buffer.Length)) != 0)
+                        terminal.Feed(new string(buffer, 0, count));
+                }
+                if (!terminal.FinalDisconnected) return false;
+                log.Position = 0;
+                Require(Text(result, "playerLogSha256") == Hash(log), "本次日誌與退出報告不符。");
+                log.Position = 0;
+                using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                using (var zip = new ZipArchive(file, ZipArchiveMode.Create))
+                {
+                    using (var entry = zip.CreateEntry("player.log", CompressionLevel.Fastest).Open()) log.CopyTo(entry);
+                    using (var entry = zip.CreateEntry("launch-report.json", CompressionLevel.Fastest).Open()) report.CopyTo(entry);
+                }
+            }
+            File.Move(temporary, path);
+            return true;
+        }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
     private static void StatusReport(PlayerConnectionMonitor monitor, int processId, bool exited)
     {
         if (statusReport == null) return;
@@ -213,7 +251,7 @@ internal static class PlayerLauncher
     [STAThread]
     private static int Main(string[] args)
     {
-        string config = null, log = null, linkMetrics = null, releasePath = null, report = null;
+        string config = null, log = null, linkMetrics = null, releasePath = null, report = null, evidenceZip = null;
         bool launch = false, wait = false, headless = false, verify = false, openXR = false, invalidEvidenceOption = false;
         try
         {
@@ -224,7 +262,7 @@ internal static class PlayerLauncher
                 else if (args[i] == "--headless") headless = true;
                 else if (args[i] == "--openxr") openXR = true;
                 else if (args[i] == "--verify") verify = true;
-                else if (args[i] == "--link-metrics" || args[i] == "--release-report")
+                else if (args[i] == "--link-metrics" || args[i] == "--release-report" || args[i] == "--evidence-zip")
                 {
                     var option = args[i];
                     if (i + 1 == args.Length || args[i + 1].StartsWith("--", StringComparison.Ordinal)) invalidEvidenceOption = true;
@@ -233,6 +271,7 @@ internal static class PlayerLauncher
                         var path = Path.GetFullPath(args[++i]);
                         if (option == "--link-metrics" && linkMetrics == null) linkMetrics = path;
                         else if (option == "--release-report" && releasePath == null) releasePath = path;
+                        else if (option == "--evidence-zip" && evidenceZip == null) evidenceZip = path;
                         else invalidEvidenceOption = true;
                     }
                 }
@@ -251,7 +290,7 @@ internal static class PlayerLauncher
                 && !SamePath(statusReport, config) && !SamePath(statusReport, log) && !SamePath(statusReport, report)), "連線狀態報告須搭配等待啟動及獨立的新記錄路徑。");
             Require((!headless && !wait || launch) && (!launch || config != null), "請提供玩家連線檔。");
             Require(!openXR || (launch && !headless && !verify), "OpenXR 需要直接啟動有圖形的玩家端。");
-            Require(!invalidEvidenceOption, "連線量測與發行報告各只能指定一份檔案。");
+            Require(!invalidEvidenceOption, "連線量測、發行報告及驗收 ZIP 各只能指定一份檔案。");
             if (linkMetrics != null)
             {
                 Require(launch && wait && !verify && log != null && report != null && String.Equals(Path.GetExtension(linkMetrics), ".json", StringComparison.OrdinalIgnoreCase)
@@ -264,6 +303,16 @@ internal static class PlayerLauncher
             Require(releasePath == null || ((verify != launch) && !SamePath(releasePath, config) && !SamePath(releasePath, log)
                 && !SamePath(releasePath, statusReport) && !SamePath(releasePath, linkMetrics) && !SamePath(releasePath, report)),
                 "發行報告須搭配核對或直接啟動，並使用獨立路徑。");
+            if (evidenceZip != null)
+            {
+                Require(launch && wait && !verify && releasePath != null && log != null && report != null
+                    && String.Equals(Path.GetExtension(evidenceZip), ".zip", StringComparison.OrdinalIgnoreCase)
+                    && !evidenceZip.StartsWith(Root, StringComparison.OrdinalIgnoreCase) && !File.Exists(evidenceZip) && !Directory.Exists(evidenceZip),
+                    "驗收 ZIP 須搭配等待啟動、原日誌、退出報告及發行報告，並使用玩家包外的新 ZIP 路徑。");
+                foreach (var path in new[] { config, log, report, statusReport, linkMetrics, releasePath })
+                    Require(!SamePath(evidenceZip, path), "驗收 ZIP 須使用獨立路徑。");
+                PlainPath(Path.GetDirectoryName(evidenceZip));
+            }
             var releaseManifestHash = releasePath == null ? null : ReadReleaseManifestHash(releasePath);
             if (verify) { Verify(releaseManifestHash); ProcessReport(report, "verified", releaseManifestHash); return 0; }
             if (launch)
@@ -280,6 +329,9 @@ internal static class PlayerLauncher
                         monitor.Poll(exited: true); StatusReport(monitor, child.Id, true);
                     }
                     ProcessReport(report, "exited", releaseManifestHash, child, exited: true, linkMetrics: linkMetrics, log: log);
+                    if (evidenceZip != null && child.ExitCode == 0)
+                        Require(WriteEvidenceZip(evidenceZip, log, report, releaseManifestHash, child.Id),
+                            "等待最終戰績及結束斷線後才可建立驗收 ZIP。");
                     return child.ExitCode;
                 }
             }
@@ -290,7 +342,7 @@ internal static class PlayerLauncher
         {
             // Serializer / IO exception text can contain input. Do not echo secrets or file contents.
             if (report != null && !File.Exists(report) && !report.StartsWith(Root, StringComparison.OrdinalIgnoreCase) && !SamePath(report, config)
-                && !SamePath(report, log) && !SamePath(report, linkMetrics) && !SamePath(report, releasePath))
+                && !SamePath(report, log) && !SamePath(report, linkMetrics) && !SamePath(report, releasePath) && !SamePath(report, evidenceZip))
                 try { Report(report, new { status = "rejected", reason = "Package, connection file or launch options are invalid." }); } catch { }
             if (report == null) MessageBox.Show("無法啟動。請確認玩家包已完整解壓，並重新選擇控制台下載的玩家連線檔。", "VR Command 玩家", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             return 1;
@@ -502,7 +554,7 @@ internal static class PlayerLauncher
                 monitor.Poll(exited); status.Text = monitor.Message;
                 if (exited)
                 {
-                    var saved = true;
+                    var saved = true; var zipStatus = "";
                     if (activeRelease != null)
                     {
                         try
@@ -511,6 +563,15 @@ internal static class PlayerLauncher
                             resultFolder = Path.GetDirectoryName(activeReport); records.Visible = true;
                         }
                         catch { saved = false; }
+                        if (saved && child.ExitCode == 0)
+                        {
+                            try
+                            {
+                                if (WriteEvidenceZip(Path.Combine(resultFolder, "player-evidence.zip"), activeLog, activeReport, activeRelease, child.Id))
+                                    zipStatus = " 本次驗收 ZIP 已建立。";
+                            }
+                            catch { zipStatus = " 本次驗收 ZIP 未能建立，可在紀錄資料夾查看原檔。"; }
+                        }
                     }
                     var final = monitor.State == "Final"; child.Dispose(); child = null;
                     choose.Enabled = true; load.Enabled = true; path.Enabled = true; modes.Enabled = true;
@@ -518,6 +579,7 @@ internal static class PlayerLauncher
                     RenderTicket();
                     status.Text = final ? "遊戲已關閉；本次已收到最終戰績。" : "遊戲已關閉。" + monitor.Message;
                     if (!saved) status.Text += " 本次程序報告儲存失敗。";
+                    status.Text += zipStatus;
                 }
             };
             FormClosing += delegate(object sender, FormClosingEventArgs args)
@@ -589,6 +651,7 @@ internal sealed class PlayerConnectionMonitor
     private bool invalidLog;
     public string State { get; private set; }
     public bool LogAvailable { get; private set; }
+    public bool FinalDisconnected { get; private set; }
     public bool Truncated { get; private set; }
     public readonly List<string> Transitions = new List<string>();
     public PlayerConnectionMonitor(string log) { path = log; Change("Waiting"); }
@@ -601,8 +664,11 @@ internal sealed class PlayerConnectionMonitor
     internal void Observe(string value)
     {
         // Exact markers only. Never serialize or display arbitrary log text / IDs.
-        if (Regex.IsMatch(value, "^VR_CLIENT_CONNECTED id=[0-9]+$")) Change("Connected");
-        else if (State == "Final") return;
+        if (Regex.IsMatch(value, "^VR_CLIENT_CONNECTED id=[0-9]+$")) { FinalDisconnected = false; Change("Connected"); }
+        else if (State == "Final")
+        {
+            if (value == "VR_CLIENT_DISCONNECTED") FinalDisconnected = true;
+        }
         else if ((value == "VR_OPENXR_STARTUP status=rejected" || value == "VR_OPENXR_STARTUP status=unavailable")
                  && (State == "Waiting" || State == "Unconfirmed")) Change("OpenXRUnavailable");
         else if (value == "VR_CLIENT_ADMISSION_REJECTED") Change("Rejected");

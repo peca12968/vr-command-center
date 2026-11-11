@@ -146,6 +146,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('package',type=Path);p.add_argument('--control-package',type=Path,required=True);p.add_argument('--runtime-root',type=Path,required=True);p.add_argument('--observe-closure-ui',action='store_true')
     p.add_argument('--player-package',type=Path,help='Launch five players per room from the API room ZIP, using this extracted player package')
     p.add_argument('--windows-release-report',type=Path,help='Pass the original release report through every packaged Windows launcher')
+    p.add_argument('--check-windows-evidence-zip',action='store_true',help='Verify the original player ZIP exported by every released Windows launcher')
     p.add_argument('--game-address',type=ipaddress.IPv4Address,help='Local private IPv4 for the three-package check')
     p.add_argument('--check-lan-preflight',action='store_true',help='Release a same-PC UDP preflight before Unity binds each original game port')
     p.add_argument('--check-vr-venue-tickets',action='store_true',help='Launch all 25 players in each mode from the shipped console venue ZIP')
@@ -289,6 +290,8 @@ def main():
         p.error('--check-venue-link-metrics requires venue field evidence and the original packaged client connections')
     if args.windows_release_report and (not args.player_package or args.check_venue_concurrent_fire or args.openxr_mock_only):
         p.error('--windows-release-report requires the packaged Windows launchers in the ordinary venue check')
+    if args.check_windows_evidence_zip and not (args.windows_release_report and args.venue_field_evidence):
+        p.error('--check-windows-evidence-zip requires Windows release and venue field evidence')
     if args.check_venue_field_ui and not args.venue_field_evidence:
         p.error('--check-venue-field-ui requires --venue-field-evidence')
     if args.check_room_readiness and not args.player_package:p.error('--check-room-readiness requires the three-package check')
@@ -1327,6 +1330,9 @@ def main():
             flags += ['--link-metrics',str(metrics)]
         if args.windows_release_report:
             flags += ['--release-report',str(args.windows_release_report)]
+        archive=file.with_suffix('.evidence.zip') if args.check_windows_evidence_zip else None
+        if archive is not None:
+            flags += ['--evidence-zip',str(archive)]
         environment=env if mock is None else {**env,**mock}
         child=subprocess.Popen([str(player_folder/'Launch-Player.exe'),'--config',str(file),'--launch',
             *flags,'--wait','--log',str(log),'--report',str(report)],cwd=runtime,env=environment)
@@ -1334,6 +1340,8 @@ def main():
             'launcherReport':report,'witness':None,'configPath':file}
         if metrics is not None:
             client['linkMetrics']=metrics
+        if archive is not None:
+            client['evidenceZip']=archive
         clients.append(client)
         def started():
             if child.poll() is not None:raise RuntimeError('Player launcher exited before admission')
@@ -1369,10 +1377,17 @@ def main():
                         raise RuntimeError('Player launcher exit does not identify the original release log')
                 if status.pop('playerManifestSha256',None)!=windows_release_hash:
                     raise RuntimeError('Player launcher exit differs from its original release manifest')
-                if child.returncode!=0 or status!={'status':'exited','processId':client['nativePid'],'exitCode':0}:
+                allowed_codes=(0,1) if 'evidenceZip' in client and 'final' not in client else (0,)
+                if child.returncode not in allowed_codes or status!={'status':'exited','processId':client['nativePid'],'exitCode':0}:
                     raise RuntimeError('Launcher did not confirm original player exit')
                 witness.close()
                 client['witness']=None
+                if 'evidenceZip' in client and 'final' in client:
+                    with zipfile.ZipFile(client['evidenceZip']) as bundle:
+                        check(sorted(bundle.namelist())==['launch-report.json','player.log']
+                              and bundle.read('player.log')==client['log'].read_bytes()
+                              and bundle.read('launch-report.json')==report.read_bytes(),
+                              'player ZIP contains the exact original log and exited report')
             elif not report.exists() or read(report)['status'] not in ('exited','rejected'):
                 raise RuntimeError('Native player cleanup unknown')
         elif child.poll() is None:
@@ -1595,6 +1610,14 @@ def main():
         original = run(split)
         check(original.returncode == 0 and json.loads(original.stdout) == summary,
               label + ' untouched venue ZIP and unordered Windows logs match the original split field summary')
+        if args.check_windows_evidence_zip:
+            bundled = dict(evidence, windowsPlayers=[{'address': player['address'],
+                'evidenceZip': str(Path(player['log']).with_suffix('.evidence.zip')),
+                **({'linkMetrics': player['linkMetrics']} if 'linkMetrics' in player else {})} for player in evidence['windowsPlayers']])
+            zipped = run(bundled)
+            check(zipped.returncode == 0 and json.loads(zipped.stdout) == summary,
+                  label + ' original Windows player ZIPs match the exact loose-file field report')
+            (runtime / (label + '-player-archives-manifest.json')).write_text(json.dumps(bundled), encoding='utf-8')
         check(summary['consistent'] and summary['mode'] == mode and summary['players'] == summary['serverAcknowledgements'] == venue_players
               and summary['rooms'] == [{'roomId': room, 'players': players_per_room, 'playersOutsideDeclaredServer': 0} for room in range(1, 6)]
               and not summary['physicalHostsVerified'] and not summary['networkCapacityAccepted'],

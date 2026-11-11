@@ -24,7 +24,8 @@ def main():
     sources = [ROOT / 'tools/WindowsPlayerLauncher' / name for name in ['PlayerLauncher.cs', 'ConnectionStatusChecks.cs']]
     executable = directory / 'checks.exe'
     result = subprocess.run([str(args.compiler), '/nologo', '/target:exe', '/platform:x64', '/optimize+', '/warnaserror+', '/main:LauncherStateChecks',
-        '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', '/reference:System.Web.Extensions.dll', '/out:' + str(executable), *map(str, sources)],
+        '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', '/reference:System.Web.Extensions.dll',
+        '/reference:System.IO.Compression.dll', '/out:' + str(executable), *map(str, sources)],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=45, creationflags=subprocess.CREATE_NO_WINDOW)
     (directory / 'compile.log').write_bytes(result.stdout)
     if result.returncode: raise RuntimeError('Actual launcher monitor compilation failed; preserve the compile log')

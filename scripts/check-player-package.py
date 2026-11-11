@@ -25,11 +25,12 @@ def check_openxr_unavailable(folder, directory, base, release=None, manifest_has
     log = directory / 'openxr-unavailable.log'
     report = directory / 'openxr-process.json'
     status = directory / 'openxr-status.json'
+    evidence = directory / 'openxr-player-evidence.zip'
     env = {**os.environ, 'XR_RUNTIME_JSON': str(directory / 'missing-openxr-runtime.json')}
     command = [str(folder / 'Launch-Player.exe'), '--config', str(config), '--launch', '--openxr', '--wait',
                '--log', str(log), '--report', str(report), '--status-report', str(status)]
     if release is not None:
-        command += ['--release-report', str(release)]
+        command += ['--release-report', str(release), '--evidence-zip', str(evidence)]
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as isolated:
         isolated.bind(('127.0.0.1', 0))
         config.write_text(json.dumps(dict(base, port=isolated.getsockname()[1])), encoding='utf-8')
@@ -44,7 +45,7 @@ def check_openxr_unavailable(folder, directory, base, release=None, manifest_has
     messages = log.read_text(encoding='utf-8', errors='replace').splitlines()
     launch = json.loads(report.read_text(encoding='utf-8'))
     connection = json.loads(status.read_text(encoding='utf-8'))
-    if (code != 2 or launch['status'] != 'exited' or launch['exitCode'] != 2
+    if (code != 2 or evidence.exists() or launch['status'] != 'exited' or launch['exitCode'] != 2
             or connection['state'] != 'OpenXRUnavailable' or connection['exited'] is not True
             or connection['processId'] != launch['processId']
             or launch.get('playerManifestSha256') != manifest_hash
@@ -175,6 +176,15 @@ def main():
         check('Refuses ' + label, ['--verify', '--release-report', str(invalid)])
     check('Refuses duplicate release arguments without showing a modal', ['--verify', '--release-report', str(release), '--release-report', str(other_release)])
     check('Refuses a release report without verify or launch', ['--release-report', str(release)])
+    evidence = directory / 'player-evidence.zip'
+    with_release = [*with_log, '--release-report', str(release)]
+    check('Rejects player evidence ZIP without an original release', [*with_log, '--evidence-zip', str(evidence)])
+    check('Rejects player evidence ZIP inside the delivered package', [*with_release, '--evidence-zip', str(folder / evidence.name)])
+    check('Rejects duplicate player evidence ZIP arguments', [*with_release, '--evidence-zip', str(evidence),
+                                                            '--evidence-zip', str(directory / 'another.zip')])
+    evidence.write_bytes(b'original evidence fixture')
+    check('Preserves an existing player evidence ZIP', [*with_release, '--evidence-zip', str(evidence)])
+    assert evidence.read_bytes() == b'original evidence fixture'
     assert not future_log.exists() and release.read_bytes() == original_release and other_release.read_bytes() == other_bytes
     if args.check_local_profiler:
         check_local_profiler(folder, directory)
@@ -196,7 +206,7 @@ def main():
         (directory / 'release-form-run.log').write_bytes(result.stdout + result.stderr)
         result.check_returncode()
         reviewed = json.loads((directory / 'release-form-checks.json').read_bytes())
-        assert reviewed['complete'] and reviewed['checks'] == 16
+        assert reviewed['complete'] and reviewed['checks'] == 17
         findings.append('Shipped WinForms release selection rejects stale reports and publishes the owned child log digest')
         print('PASS:', findings[-1], flush=True)
     # A fresh minimal copy is intentionally incomplete. Never alter the delivered package.

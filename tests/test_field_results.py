@@ -1435,6 +1435,42 @@ class FieldResultsTests(unittest.TestCase):
                 seat['launcherReport'] = launch.name
         return path
 
+    def test_windows_player_zip_matches_loose_evidence_and_rejects_changed_members(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, _ = venue_fixture(root, mode, room_sizes=(1,) * 5)
+                manifest['expectedPlayersPerRoom'] = 1
+                self.add_shared_release(root, manifest, 0)
+                packed = self.pack_venue(root, manifest)
+                path.write_text(json.dumps(packed), encoding='utf-8')
+                original = field.verify_venue(path)
+                zipped = deepcopy(packed)
+                player = zipped['windowsPlayers'][0]
+                log = (root / player.pop('log')).read_bytes()
+                report = (root / player.pop('launcherReport')).read_bytes()
+                player['evidenceZip'] = 'returned player.zip'
+                path.write_text(json.dumps(zipped), encoding='utf-8')
+
+                def write_zip(player_log, launcher_report, extra=False):
+                    with zipfile.ZipFile(root / player['evidenceZip'], 'w', zipfile.ZIP_DEFLATED) as archive:
+                        archive.writestr('player.log', player_log)
+                        archive.writestr('launch-report.json', launcher_report)
+                        if extra:
+                            archive.writestr('unrelated.json', '{}')
+
+                write_zip(log, report)
+                self.assertEqual(original, field.verify_venue(path))
+                for bad_log, bad_report, extra, message in (
+                    (log + b'\nextra log bytes\n', report, False, 'original player log bytes'),
+                    (log, b'x' * 4097, False, 'ZIP entry limit'),
+                    (log, report, True, 'must contain only the original'),
+                ):
+                    with self.subTest(message=message):
+                        write_zip(bad_log, bad_report, extra)
+                        with self.assertRaisesRegex(field.EvidenceError, message):
+                            field.verify_venue(path)
+
     def test_shared_venue_release_accepts_both_topologies_and_original_mixed_seats(self):
         for mode in ('Independent', 'Linked'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
