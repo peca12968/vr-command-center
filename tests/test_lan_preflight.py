@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -68,6 +69,101 @@ class LanPreflightTests(unittest.TestCase):
                 finally:
                     if process.poll() is None:
                         process.kill()
+
+    def venue_pair(self, port, peer, label, *, encoding='utf-8'):
+        with self.listener(port, 2, peer=peer, filename=f'{label}-listener.ndjson') as (listener, path):
+            result = self.run_script('-Mode', 'Probe', *self.options(port, 2, local=peer))
+            self.assertEqual(0, result.returncode, result.stderr or result.stdout)
+            self.assertEqual(0, listener.wait(timeout=5))
+        probe = self.root / f'{label}-probe.json'
+        probe.write_text(result.stdout, encoding=encoding)
+        return {'listener': path.name, 'probe': probe.name}
+
+    def venue_json(self, name, value):
+        path = self.root / name
+        path.write_text(json.dumps(value), encoding='utf-8')
+        return path
+
+    def venue_check(self, plan, output, *inputs, status=0):
+        report = self.root / output
+        result = subprocess.run([sys.executable, str(ROOT / 'scripts/check-venue-udp-preflight.py'),
+                                 '--network-plan', str(plan), '--output', str(report), *map(str, inputs)],
+                                capture_output=True, text=True, timeout=45)
+        self.assertEqual(status, result.returncode, result.stderr or result.stdout)
+        self.assertNotIn(LOOPBACK, result.stdout + result.stderr)
+        self.assertNotIn(str(self.root), result.stdout + result.stderr)
+        return json.loads(report.read_text(encoding='utf-8'))
+
+    def test_venue_linked_shared_sources_and_original_batch(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as reserved:
+            reserved.bind((LOOPBACK, 0))
+            port = reserved.getsockname()[1]
+        rooms = list(range(1, 6))
+        plan = self.venue_json('plan.json', {'version': 1, 'mode': 'Linked',
+            'endpoints': [{'roomIds': rooms, 'address': LOOPBACK, 'port': port}],
+            'sources': [{'roomId': room, 'seat': seat, 'address': f'127.0.0.{2 if seat <= 3 else 3}'}
+                        for room in rooms for seat in rooms]})
+        first = self.venue_pair(port, '127.0.0.2', 'first', encoding='utf-16')
+        second = self.venue_pair(port, '127.0.0.3', 'second', encoding='utf-8-sig')
+        original_reports = {name: (self.root / name).read_bytes() for name in (*first.values(), *second.values())}
+        manual = self.venue_json('pairs.json', {'version': 1, 'pairs': [first]})
+        batch = self.venue_json('batch.json', {'version': 1, 'scope': 'quest-udp-preflight-only',
+            'mode': 'Linked', 'complete': True,
+            'groups': [{'roomIds': rooms, 'complete': True, 'udpSourcePreflights': [second]}]})
+        report = self.venue_check(plan, 'readiness.json', '--pairs', manual, '--batch', batch)
+        self.assertEqual(('same-host', 2, 2), (report['network'], report['expectedSources'], report['verifiedSources']))
+        group, = report['groups']
+        self.assertTrue(report['complete'])
+        self.assertEqual([15, 10], [len(row['seats']) for row in group['sources']])
+        self.assertEqual([first, second], group['udpSourcePreflights'])
+        copied = self.venue_check(plan, 'copied.json', '--batch', self.root / 'readiness.json')
+        self.assertEqual(group, copied['groups'][0])
+
+        missing = self.venue_check(plan, 'missing.json', '--pairs', manual, status=1)
+        self.assertEqual(['verified', 'missing'], [row['status'] for row in missing['groups'][0]['sources']])
+        self.assertNotIn('udpSourcePreflights', missing['groups'][0])
+        self.assertFalse(missing['complete'])
+        duplicate = self.venue_check(plan, 'duplicate.json', '--pairs', manual, '--batch', self.root / 'readiness.json', status=1)
+        self.assertEqual(['duplicate-pair', 'verified'], [row['status'] for row in duplicate['groups'][0]['sources']])
+        wrong = self.venue_json('wrong.json', {'version': 1, 'pairs': [{**first, 'listener': second['listener']},
+                                                                     {'listener': 'absent', 'probe': 'absent'}]})
+        invalid = self.venue_check(plan, 'invalid.json', '--pairs', wrong, status=1)
+        self.assertEqual(1, invalid['unreadablePairs'])
+        self.assertEqual(['invalid-or-expired', 'missing'], [row['status'] for row in invalid['groups'][0]['sources']])
+        before = (self.root / 'readiness.json').read_bytes()
+        self.venue_check(plan, 'readiness.json', '--batch', batch, status=1)
+        self.assertEqual(before, (self.root / 'readiness.json').read_bytes())
+        self.assertEqual(original_reports, {name: (self.root / name).read_bytes() for name in original_reports})
+
+    def test_venue_independent_requires_a_pair_per_port_for_the_same_source(self):
+        ports = []
+        sockets = []
+        try:
+            for _ in range(5):
+                reserved = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                sockets.append(reserved)
+                reserved.bind((LOOPBACK, 0))
+                ports.append(reserved.getsockname()[1])
+        finally:
+            for reserved in sockets:
+                reserved.close()
+        peer = '127.0.0.2'
+        pairs = [self.venue_pair(port, peer, f'room-{room}') for room, port in enumerate(ports, 1)]
+        plan_value = {'version': 1, 'mode': 'Independent',
+            'endpoints': [{'roomIds': [room], 'address': LOOPBACK, 'port': port} for room, port in enumerate(ports, 1)],
+            'sources': [{'roomId': room, 'seat': 1, 'address': peer} for room in range(1, 6)]}
+        plan = self.venue_json('plan.json', plan_value)
+        manifest = self.venue_json('pairs.json', {'version': 1, 'pairs': list(reversed(pairs))})
+        report = self.venue_check(plan, 'readiness.json', '--pairs', manifest)
+        self.assertEqual((5, 5), (report['expectedSources'], report['verifiedSources']))
+        self.assertTrue(report['complete'])
+        self.assertEqual([[1], [2], [3], [4], [5]], [group['roomIds'] for group in report['groups']])
+        self.assertEqual([[pair] for pair in pairs], [group['udpSourcePreflights'] for group in report['groups']])
+        plan_value['sources'][4]['address'] = '127.0.0.3'
+        wrong = self.venue_json('wrong-source.json', plan_value)
+        invalid = self.venue_check(wrong, 'unmatched.json', '--pairs', manifest, status=1)
+        self.assertEqual((1, 4), (invalid['unmatchedPairs'], invalid['verifiedSources']))
+        self.assertEqual('missing', invalid['groups'][4]['sources'][0]['status'])
 
     def test_key_is_created_once_and_errors_hide_private_values(self):
         original = self.key.read_bytes()

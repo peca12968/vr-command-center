@@ -232,6 +232,33 @@ Quest 批次工具的原報告可直接加入封存驗收清單。只有一份�
 
 驗收依原房號與模式合併。Quest 原始檔路徑以各批次報告所在目錄為準，逐場補上的路徑以封存驗收清單所在目錄為準。所有報告合起來須覆蓋每個原端點和所有已確認來源。若同一個來源 IPv4 在同一端點已有有效報告，只保留一組。原綁定位址、埠、完成時間及已確認來源仍會逐組核對。 [Quest 批次預檢](QUEST3.md#批次預檢五房-quest-席位)
 
+### 開場前核對五房 UDP 報告
+
+Windows 與 Quest 混用時，可在啟動遊戲伺服器前先核對報告是否齊全。沿用版本 1 網路清單的 `mode`、`endpoints` 與 `sources`，在 `sources` 填本次預計使用的房號、席位和來源 IPv4，至少涵蓋五房各一席。共用來源 IPv4 的席位可填相同位址。同一端點只需要一組該來源的報告，五房獨立時則各埠分開核對。整份清單使用私有 LAN 位址或使用 loopback 進行同機演練。 [網路清單格式](QUEST3.md#批次預檢五房-quest-席位)
+
+將手動取得的 Windows 或 Quest 雙端報告列在 `pairs.json`。`listener` 與 `probe` 的相對路徑以這份清單所在的目錄為準。
+
+```json
+{
+  "version": 1,
+  "pairs": [
+    {"listener": "windows/room-1-listener.ndjson", "probe": "windows/room-1-probe.json"}
+  ]
+}
+```
+
+可一併加入原 Quest 批次報告，每份使用一個 `--batch`。只有批次報告時可省略 `--pairs`。
+
+```powershell
+python .\scripts\check-venue-udp-preflight.py `
+  --network-plan .\venue-network.json --pairs .\pairs.json `
+  --batch .\quest-a\preflight-report.json --output .\venue-readiness.json
+```
+
+報告依房間端點列出各來源涵蓋的席位。`missing` 代表還缺一組，`duplicate-pair` 或 `duplicate-exchange` 代表需排除重複報告，`invalid-or-expired` 代表原雙端報告不符或已超過 30 分鐘。`unmatchedPairs` 和 `unreadablePairs` 分別計算不在本次計畫內及無法讀取的組數。補齊後使用新的輸出檔重跑。所有來源通過且沒有多餘或無法讀取的報告時，程式以 `0` 結束。
+
+可將完整報告的路徑填入封存驗收清單的 `udpPreflightBatch`。原雙端報告須一併保留。結束後，驗收工具會用遊戲伺服器實際綁定時間與已確認的玩家來源重驗每組。`network` 為 `same-host` 的結果只代表同機 UDP，跨機連線與頭盔仍須現場測試。
+
 ### 核對封存戰績與 UDP 來源
 
 離線核對工具使用已完成的一場 Windows 伺服器任務。啟動器 1.7 可勾選「記錄本次玩家連線來源（場館驗收）」，CLI 可加 `--peer-diagnostics on`。將公告及本機綁定都設為這台電腦實際使用的 IPv4，選擇名冊固定的場次。結束後等待原啟動器寫出 `sealed-stopped` 報告，並等玩家寫完戰績與斷線日誌。 [伺服器操作](WINDOWS_SERVER_PACKAGE.md#跨機來源診斷)
@@ -320,7 +347,7 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `minimumConcurrentMilliseconds` | 選用。填 1,000 至 900,000 的整數，要求本階段全數席位同時連線且遊戲持續執行的最短毫秒數。每場均須提供 `worldJournal` |
 | `requireTrackedRoster` | 選用。填 `true` 時須一併設定 `minimumConcurrentMilliseconds`，並逐席核對同一區間的追蹤姿態及原始玩家日誌 |
 | `requireConcurrentFire` | 選用。填 `true` 時須一併設定 `minimumConcurrentMilliseconds`，並在每場提供 `worldJournal` 與 `combatJournal`。要求本階段每個原席位在同一段合格區間各有一次已封存射擊 |
-| `udpPreflightBatch` 或 `udpPreflightBatches` | 選用。單份原 Quest 批次報告路徑，或 1 至 25 份原報告路徑的陣列。可搭配逐場 `udpSourcePreflights` |
+| `udpPreflightBatch` 或 `udpPreflightBatches` | 選用。單份完整的場館 UDP 核對報告或原 Quest 批次報告路徑，也可填 1 至 25 份報告路徑的陣列。可搭配逐場 `udpSourcePreflights` |
 | `questCaptures` | 選用。填原 Quest 網路計畫或裝置對照表，以及 1 至 25 份原擷取報告。可與 UDP 預檢報告一併使用 |
 | `questDeployments` | 選用。填原離線發行報告及 1 至 25 份正式 Quest 部署報告，核對原入場及 APK 雜湊 |
 | `venueReleaseReport` | 選用。核對全館所有 Windows 與 Quest 席位共用的原發行報告。Quest 的 `questDeployments` 此時只填 `reports` |

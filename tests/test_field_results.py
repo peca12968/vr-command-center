@@ -2044,6 +2044,23 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertNotIn('192.168', json.dumps(report))
                 self.assertFalse(report['physicalHostsVerified'])
 
+                merged = [{'roomIds': original['roomIds'], 'complete': True,
+                           'udpSourcePreflights': list(session['udpSourcePreflights'])}
+                          for original, session in zip(closure['sessions'], manifest['sessions'], strict=True)]
+                by_rooms = {tuple(group['roomIds']): group['udpSourcePreflights'] for group in merged}
+                for folder, rows in groups.items():
+                    for row in rows:
+                        by_rooms[tuple(row['roomIds'])].extend({key: f'{folder}/{value}' for key, value in source.items()}
+                                                              for source in row['udpSourcePreflights'])
+                (root / 'venue-readiness.json').write_text(json.dumps({'version': 1, 'scope': 'venue-udp-preflight-only',
+                    'mode': mode, 'complete': True, 'groups': merged}), encoding='utf-8')
+                merged_manifest = {key: value for key, value in manifest.items() if key != 'udpPreflightBatches'}
+                merged_manifest['udpPreflightBatch'] = 'venue-readiness.json'
+                merged_manifest['sessions'] = [{key: value for key, value in session.items() if key != 'udpSourcePreflights'}
+                                               for session in manifest['sessions']]
+                path.write_text(json.dumps(merged_manifest), encoding='utf-8')
+                self.assertEqual(report, field.verify_venue(path))
+
                 first = manifest['sessions'][0]
                 if mode == 'Linked':
                     original_manual = first['udpSourcePreflights']

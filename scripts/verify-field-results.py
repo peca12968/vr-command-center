@@ -130,11 +130,12 @@ def quest_network_address(value):
     return value
 
 
-def read_quest_network_plan(path):
+def read_quest_network_plan(path, *, allow_shared_sources=False):
     plan = read_quest_plan_file(path)
     require(set(plan) == {'version', 'mode', 'endpoints', 'sources'}, 'Unexpected Quest network plan fields')
     sources = {seat: quest_network_address(value) for seat, value in quest_seats(plan['sources'], 'address').items()}
-    require(len(set(sources.values())) == len(sources), 'Use a distinct IPv4 for each mapped Quest')
+    if not allow_shared_sources:
+        require(len(set(sources.values())) == len(sources), 'Use a distinct IPv4 for each mapped Quest')
     mode = plan['mode']
     require(mode in ('Independent', 'Linked'), 'Expected Independent or Linked venue mode')
     expected = {QUEST_ROOMS} if mode == 'Linked' else {(room,) for room in QUEST_ROOMS}
@@ -1178,16 +1179,17 @@ def verify_windows_link(log_hash, connection, launch, metrics_path):
 
 def read_udp_preflight_batch(path, mode, expected_rooms):
     batch = read_json(content(path))
-    require(integer(batch['version'], 1, 1) and batch.get('scope') == 'quest-udp-preflight-only' and batch.get('mode') == mode
-            and batch.get('complete') is True, 'Provide a complete Quest UDP preflight batch for the original mode')
+    require(integer(batch['version'], 1, 1) and batch.get('scope') in ('quest-udp-preflight-only', 'venue-udp-preflight-only')
+            and batch.get('mode') == mode and batch.get('complete') is True,
+            'Provide a complete UDP preflight batch for the original mode')
     groups = batch['groups']
-    require(type(groups) is list and 1 <= len(groups) <= len(expected_rooms), 'Invalid Quest UDP endpoint groups')
+    require(type(groups) is list and 1 <= len(groups) <= len(expected_rooms), 'Invalid UDP endpoint groups')
     sources = {}
     for group in groups:
         room_ids = group['roomIds']
         require(type(room_ids) is list and all(type(room) is int for room in room_ids) and room_ids in expected_rooms
                 and tuple(room_ids) not in sources and group.get('complete') is True,
-                'Invalid or repeated Quest UDP endpoint group')
+                'Invalid or repeated UDP endpoint group')
         pairs = group['udpSourcePreflights']
         require(type(pairs) is list and 1 <= len(pairs) <= len(room_ids) * 5, 'Invalid all-source UDP preflight list')
         sources[tuple(room_ids)] = [(pair, path.parent) for pair in pairs]
