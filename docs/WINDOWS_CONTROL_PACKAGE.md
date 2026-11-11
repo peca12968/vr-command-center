@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-11 `VRCommand-ControlServer-0.31.129-live-rooms-win-x64.zip` 為 53,044,445 bytes，SHA-256 `aaede94ebb4d2eb63c38289a7a9c012172cc3a47aaf1525f6d0bad5dd264a9b5`。主控可從觀戰頁直接切換目前房間。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.129-live-rooms-win-x64.zip) · [操作說明](WORLD_RECORDING.md#從觀戰頁切換目前房間)
+
 2026-11-11 `VRCommand-ControlServer-0.31.128-mission-restore-win-x64.zip` 為 53,042,122 bytes，SHA-256 `aa6c5764b6dcbb83ca22ac3d0244a19ebbcb2c58529a5451479e1436aa90d2d6`。解壓核對 558 筆清單與 538 個發行檔案。主控可在任務版本比較中將舊版內容保存為下一版，保留目前草稿。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.128-mission-restore-win-x64.zip) · [操作說明](MISSION_VERSIONS.md#將歷史版本保存為下一版)
 
 2026-11-11 `VRCommand-ControlServer-0.31.127-venue-setting-download-win-x64.zip` 為 53,040,936 bytes，SHA-256 `f159c318057ce2ebf6bda12329a9c503813883b847563f06a889e557d3ac8c4a`。解壓核對 558 筆清單與 538 個發行檔案。主控可下載畫面使用的環境或敵軍批次 JSON。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.127-venue-setting-download-win-x64.zip) · [發行核對](../artifacts/venue-release-0.50.6-console-127.json)

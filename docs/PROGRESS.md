@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 觀戰頁直接切換目前房間
+
+- 控制台 0.31.129 提供主控房間入口。獨立模式可直接切換各自錄製，合併模式沿用同一場次，只讀取選定房間的場景與統計。選取後開啟上帝俯視，並標示目前觀戰房間。 [操作說明](WORLD_RECORDING.md#從觀戰頁切換目前房間)
+- 使用隔離 API 與 Chromium 核對房間與錄製來源、房控權限、合併模式的分房統計及手機版面。若房間已結束或來源不符，保留原畫面。專項 29 項通過。 [專項結果](../artifacts/console-live-rooms-129-final-publication/checks.json)
+- 111 項 Node、從交付 ZIP 解壓執行的 937 項 Chromium 及 107 項 Windows 管理包檢查通過。ZIP 559 檔逐一核對，Windows 管理測試關閉後 C／F 27 檔雜湊相符。最終包使用 `5f08bcbd`，預覽包及因舊回條檔名衝突而未完成的封裝候選均保留。 [管理包](WINDOWS_CONTROL_PACKAGE.md) · [驗證摘要](../artifacts/live-rooms-0.31.129-validation.json)
+- GitHub Actions 對 `d9a58ee0` 和 `5f08bcbd` 因帳務或支出上限未啟動任何步驟。視窗回歸使用瀏覽器與測試發布的快照，跨機、頭盔及廠商硬體仍待現場驗收。 [初版 GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42963458604) · [交付版 GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42963585426)
+
 ## 2026-11-11 五房批次視窗的 25 席同機驗收
 
 - 以遊戲伺服器 0.50.7、啟動器 1.20 及管理包 0.31.128 操作實際 WinForms 視窗。兩次均用 Enter 核對第四版計畫、勾選來源紀錄並用 Alt+S 啟動。合併模式啟動一個伺服器與一個 UDP 端點，獨立模式啟動五個伺服器與五個端點，實際公告皆符合原計畫。 [重跑方式](WINDOWS_SERVER_PACKAGE.md#重跑五房視窗驗收)
