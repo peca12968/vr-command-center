@@ -6,6 +6,7 @@
 - Windows 0.50.7 在建置時套用本機監聽與停用廣播。解壓的原 0.50.6 包遭新增的監聽檢查拒絕，新包通過全部 40 項檢查，含缺少 OpenXR 執行環境時在入場前退出。合併場伺服器在實際執行時以指定網卡監聽遊戲 UDP、以本機監聽 Unity 編輯器 TCP。 [舊包量測](../artifacts/player-package-checks/20261111-104143-c213fa07/local-profiler.json) · [新包量測](../artifacts/player-package-checks/20261111-104705-59cf5b5e/local-profiler.json) · [伺服器量測](../artifacts/windows-local-profiler-0507/linked-server-sockets.json)
 - OpenXR 模擬及桌面兩席通過 82 項、116 格回放與兩份戰績。獨立五房與合併各 25 個同機玩家端通過 399 項、954 格回放及 50 份戰績確認。C／F 分別核對 42 與 219 檔，程序均已清理。模擬場的補充取樣在玩家斷線後取得，實際遊戲監聽以合併場就緒時的資料為準。 [模擬](../artifacts/server-package-checks/run-dc7dc71d87494ea59fe2e0d4c9323bcf/evidence.json) · [雙模式](../artifacts/server-package-checks/run-7e4fe46a9d5a4eb196e16e652f316c8a/evidence.json)
 - Unity 273 項 EditMode 檢查通過。Windows 及 Quest 0.50.7／72 同源並核對原網路識別，Windows 兩包核對 324 個共用執行檔案。既有防火牆提示及玩家啟動器視窗仍待複驗，跨機真人、頭盔、MR 場地及廠商硬體依原目標繼續驗收。 [核對摘要](../artifacts/windows-local-profiler-0507/validation.json) · [發行核對](../artifacts/venue-release-0.50.7-local-profiler.json)
+- 功能來源 `a4ed5f01` 已推送，建置腳本只與 Git 相差換行，版本設定和玩家檢查腳本逐位元組相符。GitHub Actions `42948735527` 的 job `130287713995` 因帳務或支出上限未啟動。 [來源核對](../artifacts/windows-local-profiler-0507/source-validation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42948735527)
 
 ## 2026-11-11 主控下載環境與敵軍批次
 
