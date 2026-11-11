@@ -187,7 +187,7 @@ class PlayerSourceEvidenceTests(unittest.TestCase):
                 field.verify(*data, verify_player_sources=True)
 
 
-def venue_fixture(root, mode, *, remote=False, quest_per_room=0, with_journals=False, mr_rooms=()):
+def venue_fixture(root, mode, *, remote=False, quest_per_room=0, with_journals=False, mr_rooms=(), room_sizes=(5,) * 5):
     def write_json(path, value):
         path.write_text(json.dumps(value), encoding='utf-8')
 
@@ -233,11 +233,11 @@ def venue_fixture(root, mode, *, remote=False, quest_per_room=0, with_journals=F
         manifest['sessions'].append(entry)
         server = f'VR_NETWORK_STARTED role=Server started=True background=True port={port}\n'
         for room in rooms:
-            for seat in range(5):
+            for seat in range(room_sizes[room - 1]):
                 connection = room * 5 + seat
                 player, admission = id_for(300 + connection), id_for(400 + connection)
-                is_quest = experience == 'MR' or seat >= 5 - quest_per_room
-                peer = f'192.168.5.{30 + connection}' if is_quest else remote_ip if remote and room == 5 and seat == 4 else server_ip
+                is_quest = experience == 'MR' or seat >= room_sizes[room - 1] - quest_per_room
+                peer = f'192.168.5.{30 + connection}' if is_quest else remote_ip if remote and room == 5 and seat == room_sizes[room - 1] - 1 else server_ip
                 session['players'].append({'id': player, 'admissionId': admission, 'roomId': room, 'seat': seat, 'headset': 'Quest3'})
                 row = {field_name: 0 for field_name in field.COMBAT} | {'playerId': player, 'roomId': room, 'health': 100, 'accuracyPercent': 0}
                 stats['players'].append(row)
@@ -481,6 +481,41 @@ def preflight_fixture(root, label, *, server, peer, port, exchange=None):
 
 
 class FieldResultsTests(unittest.TestCase):
+    def test_venue_pilot_requires_declared_room_sizes_and_preserves_original_concurrency(self):
+        for mode, offsets in (('Linked', [0]), ('Independent', [0, 100, 200, 300, 400])):
+            for count in (1, 2):
+                with self.subTest(mode=mode, count=count), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    path, manifest, _ = venue_fixture(root, mode, remote=True, with_journals=True, room_sizes=(count,) * 5)
+                    with self.assertRaisesRegex(field.EvidenceError, 'player log count'):
+                        field.verify_venue(path)
+                    self.concurrent_journals(root, manifest, offsets)
+                    manifest.update(expectedPlayersPerRoom=count, minimumConcurrentMilliseconds=1000)
+                    path.write_text(json.dumps(manifest), encoding='utf-8')
+                    split = field.verify_venue(path)
+                    path.write_text(json.dumps(self.pack_venue(root, manifest)), encoding='utf-8')
+                    self.assertEqual(split, field.verify_venue(path))
+                    self.assertEqual((count, count * 5, count * 5),
+                                     (split['expectedPlayersPerRoom'], split['players'], split['serverAcknowledgements']))
+                    self.assertEqual([count] * 5, [room['players'] for room in split['rooms']])
+                    self.assertEqual(count * 5, split['concurrentRoster']['players'])
+                    self.assertEqual(1, split['distinctAddressesOutsideDeclaredServer'])
+                    self.assertFalse(split['physicalHostsVerified'])
+                    self.assertFalse(split['networkCapacityAccepted'])
+
+    def test_linked_venue_pilot_rejects_the_correct_total_in_the_wrong_rooms(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path, manifest, _ = venue_fixture(Path(directory), 'Linked', room_sizes=(2, 2, 2, 1, 3))
+            manifest['expectedPlayersPerRoom'] = 2
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'expected seats in an original room'):
+                field.verify_venue(path)
+            for count in (False, 0, 6, 2.0, '2'):
+                with self.subTest(count=count):
+                    path.write_text(json.dumps(dict(manifest, expectedPlayersPerRoom=count)), encoding='utf-8')
+                    with self.assertRaisesRegex(field.EvidenceError, 'Invalid numeric evidence'):
+                        field.verify_venue(path)
+
     def test_venue_control_batches_require_exact_original_running_frames(self):
         for mode in ('Independent', 'Linked'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:

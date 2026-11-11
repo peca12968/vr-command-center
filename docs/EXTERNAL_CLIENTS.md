@@ -311,14 +311,15 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `version` | 數字 `1` |
 | `mode` | `Independent` 或 `Linked` |
 | `topology` | `same-host` 或 `direct-lan` |
+| `expectedPlayersPerRoom` | 選用。每房原場次須有的席數，填 1 至 5 的整數。省略時為 5，按全館 25 席核對 |
 | `serverIps` | 所有本次伺服器電腦已指派的 IPv4，使用字串陣列 |
 | `venueBundle` 或 `closure` | 原批次的場館驗收 ZIP 路徑，或原 `closure.json` 路徑。選一種 |
 | `venueDebriefReceipts` | 選用。從同一批次下載的戰績回條 JSON 路徑 |
 | `verifyPlayerSources` | 選用。填布林值 `true` 核對所有原席位的日誌與姿態。每場均須提供 `worldJournal` |
 | `verifyTrackingBegin` | 選用。填布林值 `true` 核對同一批追蹤開場採用的原始準備中畫格及後續執行畫格。每場均須提供 `worldJournal` |
-| `minimumConcurrentMilliseconds` | 選用。填 1,000 至 900,000 的整數，要求 25 席同時連線且遊戲持續執行的最短毫秒數。每場均須提供 `worldJournal` |
+| `minimumConcurrentMilliseconds` | 選用。填 1,000 至 900,000 的整數，要求本階段全數席位同時連線且遊戲持續執行的最短毫秒數。每場均須提供 `worldJournal` |
 | `requireTrackedRoster` | 選用。填 `true` 時須一併設定 `minimumConcurrentMilliseconds`，並逐席核對同一區間的追蹤姿態及原始玩家日誌 |
-| `requireConcurrentFire` | 選用。填 `true` 時須一併設定 `minimumConcurrentMilliseconds`，並在每場提供 `worldJournal` 與 `combatJournal`。要求 25 個原席位在同一段合格區間各有一次已封存射擊 |
+| `requireConcurrentFire` | 選用。填 `true` 時須一併設定 `minimumConcurrentMilliseconds`，並在每場提供 `worldJournal` 與 `combatJournal`。要求本階段每個原席位在同一段合格區間各有一次已封存射擊 |
 | `udpPreflightBatch` 或 `udpPreflightBatches` | 選用。單份原 Quest 批次報告路徑，或 1 至 25 份原報告路徑的陣列。可搭配逐場 `udpSourcePreflights` |
 | `questCaptures` | 選用。填原 Quest 網路計畫及 1 至 25 份完整日誌擷取報告。可與 UDP 預檢報告一併使用 |
 | `questDeployments` | 選用。填原離線發行報告及 1 至 25 份正式 Quest 部署報告，核對原入場及 APK 雜湊 |
@@ -364,6 +365,12 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json
 摘要核對五房各五個席位、原封存來源、每位玩家的原入場與 UDP 來源，以及 25 筆伺服器戰績確認。它逐房列出在伺服器位址清單以外的玩家數。`direct-lan` 至少須觀察到一筆這類連線，仍須依實際設備及網路拓撲核對主機數、同時遊玩與容量。
 
 提供回放檔的整批驗收會逐場比對完整檔頭，檢查最後影格已觀察到該批結束指令，並輸出 `worldJournalsVerified` 與逐場摘要。回放畫面及遊戲事件內容可用原回放介面另行檢視。
+
+### 分階段驗收 5 人與 10 人
+
+5 人階段在五房各登記 1 席，10 人階段各登記 2 席。使用一般全館開始及全館結束，按每個階段與模式保留一份原場館驗收 ZIP、原封存和完整日誌。將 `expectedPlayersPerRoom` 分別填成 `1` 或 `2`，沿用 `verify-field-results.py --venue-manifest`。驗收會逐房確認宣告的席數、原席位、UDP 來源及伺服器戰績確認，結果同時列出每房預期席數與實際人數。合併場的總人數相符時，仍須核對每房的席數。
+
+需要核對同時在線時，加上 `minimumConcurrentMilliseconds` 並提供每場原 `.worldlog`。現場每席有各自的 IPv4 時，也可加上 `requireDistinctRemoteRoster`，用同一個欄位核對該階段每位玩家的原 UDP 來源。25 人階段可省略 `expectedPlayersPerRoom`。
 
 ### 核對 25 席各自的直連來源
 

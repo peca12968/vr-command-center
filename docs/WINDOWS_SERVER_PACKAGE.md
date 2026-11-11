@@ -233,6 +233,8 @@ python scripts/check-server-package.py <VRCommand-GameServer> `
 
 搭配管理包 0.31.46，可加上 `--prepare-independent-set --check-independent-room-missions`。測試用一筆 API 請求為五個獨立房指定不同的 VR 任務。逐房核對已進入 Running 的原遊戲快照及標頭，包括任務時間、天氣、日夜、雷電、敵軍策略與數量，以及掩體座標與角度。接著按原流程核對回放、雙封存及原玩家戰績。 [逐房操作](MISSION_VERSIONS.md#逐房指定任務版本)
 
+要以同機 Windows 套件排演 5 人或 10 人場測，在三包命令加入 `--peer-diagnostics --field-evidence --venue-field-evidence --check-venue-end --field-players-per-room 1` 或將最後的數字改成 `2`。工具從房間連線 ZIP 啟動指定席數，對兩種模式核對同次原封存與戰績。加上 `--check-venue-begin` 會檢查未滿 25 席時全員參與閘門拒絕開始，接著以一般全館開始執行該階段。 [現場清單](EXTERNAL_CLIENTS.md#分階段驗收-5-人與-10-人)
+
 Quest 小批次驗證可在三包命令加上 `--check-vr-venue-tickets --check-quest-vr-partial-map`。獨立與合併的名冊各登記 15 個 Quest 3 席位與 10 個 VIVE XR 席位。工具從原控制台 ZIP 測試錯列 VIVE 的拒絕，再把五份指定設定送至模擬 ADB。MR 可省略 `--player-package`，保留本機 `--game-address`，改用 `--mr-venue-bundle-only --check-mapped-quest`，核對完整清單與五席清單各自使用的原鎖定校正檔。 [小批次操作](QUEST3.md#部署指定的-quest-席位)
 
 五房 VR 追蹤驗證可在上述小批次命令再加 `--check-venue-openxr --openxr-mock-pose-dll '<測試 DLL 路徑>' --check-room-readiness --check-venue-begin --check-venue-end --check-room-reports --check-venue-reports`。兩種模式各以一個 Windows OpenXR 模擬玩家和 24 個桌面玩家同時入場。工具沿用控制台下載的原 ZIP，核對第 5 房第 2 席的就緒、中斷及恢復，並保存其餘 24 席的狀態與原場次回放。VIVE XR 是該席在名冊上的裝置分類，驗證使用 Unity Mock Runtime。 [測試 DLL 建置](WINDOWS_PLAYER_PACKAGE.md#本機追蹤整合驗證)

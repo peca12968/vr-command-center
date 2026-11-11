@@ -161,7 +161,9 @@ def main():
     p.add_argument('--check-debrief-receipts',action='store_true',help='Match published management receipts to every original native result')
     p.add_argument('--field-evidence',action='store_true',help='Verify the management ZIP with the original Linked player and server logs')
     p.add_argument('--venue-field-evidence',action='store_true',help='Verify full sealed admission evidence for both original venue End batches')
-    p.add_argument('--venue-concurrent-roster-seconds', type=int, help='Require this many recorded seconds of concurrent 25-seat play in both sealed batches')
+    p.add_argument('--field-players-per-room', type=int, choices=range(1, 6), default=5,
+                   help='Seat count for staged venue field runs with room ticket ZIPs (default: 5)')
+    p.add_argument('--venue-concurrent-roster-seconds', type=int, help='Require this many recorded seconds of concurrent play in both sealed batches')
     p.add_argument('--check-venue-concurrent-fire', action='store_true',
                    help='Drive normal exercise fire on all 25 native desktop seats and verify the sealed shared window')
     p.add_argument('--check-venue-link-metrics', action='store_true', help='Bind each packaged Windows client link report to its original sealed result')
@@ -270,6 +272,15 @@ def main():
     if args.field_evidence and not args.peer_diagnostics:p.error('--field-evidence requires --peer-diagnostics')
     if args.venue_field_evidence and not (args.field_evidence and args.check_venue_end):
         p.error('--venue-field-evidence requires --field-evidence and --check-venue-end')
+    players_per_room = args.field_players_per_room
+    venue_players = players_per_room * 5
+    if players_per_room != 5:
+        if not args.venue_field_evidence:
+            p.error('--field-players-per-room requires --venue-field-evidence')
+        if args.check_vr_venue_tickets or args.check_room_observer:
+            p.error('The console venue ticket and room observer fixtures require the original five seats per room')
+        if args.check_venue_participation_gate:
+            p.error('--check-venue-participation-gate exercises a successful full-roster Begin and requires five seats per room')
     if args.venue_concurrent_roster_seconds is not None and (not args.venue_field_evidence or not 1 <= args.venue_concurrent_roster_seconds <= 90):
         p.error('--venue-concurrent-roster-seconds requires --venue-field-evidence and 1..90 seconds')
     if args.check_venue_concurrent_fire and (args.venue_concurrent_roster_seconds is None or args.check_venue_openxr):
@@ -280,13 +291,13 @@ def main():
         p.error('--windows-release-report requires the packaged Windows launchers in the ordinary venue check')
     if args.check_venue_field_ui and not args.venue_field_evidence:
         p.error('--check-venue-field-ui requires --venue-field-evidence')
-    if args.check_room_readiness and not args.player_package:p.error('--check-room-readiness requires five players per room')
+    if args.check_room_readiness and not args.player_package:p.error('--check-room-readiness requires the three-package check')
     if args.check_room_observer and not args.player_package:p.error('--check-room-observer requires the three-package check')
     if args.check_room_participation and (not args.check_room_readiness or args.peer_diagnostics):
         p.error('--check-room-participation requires --check-room-readiness without the one-connection peer diagnostics check')
     if args.check_vr_participation_pause and not args.check_room_participation:
         p.error('--check-vr-participation-pause requires --check-room-participation')
-    if args.check_room_clocks and not args.player_package:p.error('--check-room-clocks requires five players per room')
+    if args.check_room_clocks and not args.player_package:p.error('--check-room-clocks requires the three-package check')
     if args.check_venue_phase and not args.check_room_clocks:p.error('--check-venue-phase requires --check-room-clocks')
     if args.check_venue_begin and not args.player_package:p.error('--check-venue-begin requires the three-package check')
     if args.check_venue_launcher and (not all((args.prepare_independent_set, args.check_venue_begin, args.check_venue_end))
@@ -1015,10 +1026,10 @@ def main():
         state=request('/api/sessions/'+entry['sessionId']+'/players',{'playerId':str(uuid.uuid4()),'roomId':room,'name':'Portable server room '+str(room),'headset':'Quest3'},role='Room'+str(room));person=next(x for x in state['players'] if x['roomId']==room)
         invitation=request('/api/sessions/'+state['id']+'/players/'+person['id']+'/join-ticket',{},role='Room'+str(room),admission=person['admissionId']);file=runtime/(entry['label']+'-client-'+str(room)+'.json');file.write_text(json.dumps({'role':'Client','address':address,'port':entry['ready']['port'],'joinTicket':invitation['ticket']}),encoding='utf-8');log=runtime/(file.stem+'.log')
         child=subprocess.Popen([str(folder/'Runtime/VrCommand.exe'),'-batchmode','-nographics','-job-worker-count','2','-logFile',str(log),'--vr-config',str(file)],cwd=runtime,env=env,creationflags=subprocess.CREATE_NO_WINDOW);client={'process':child,'log':log,'player':person,'sessionId':state['id']};clients.append(client);return client
-    def prepare_room_roster(entry,room):
+    def prepare_room_roster(entry,room,count=5):
         path='/api/sessions/'+entry['sessionId']
         role='Room'+str(room)
-        for seat in range(1,6):
+        for seat in range(1,count+1):
             headset = 'ViveXr' if args.check_quest_vr_partial_map and seat in (2, 4) else 'Quest3'
             state=request(path+'/players',{'playerId':str(uuid.uuid4()),'roomId':room,
                 'name':f'Portable room {room} seat {seat}','headset':headset},role=role)
@@ -1127,8 +1138,8 @@ def main():
     def room_players(entry,room,people=None,raw=None,*,windows_files=None):
         path='/api/sessions/'+entry['sessionId']
         role='Room'+str(room)
-        if people is None: people=prepare_room_roster(entry,room)
-        names=[f'room-{room:02}-seat-{seat:02}.json' for seat in range(1,6)]
+        if people is None: people=prepare_room_roster(entry,room,players_per_room)
+        names=[f'room-{room:02}-seat-{seat:02}.json' for seat in range(1,len(people)+1)]
         destination={'address':address,'port':entry['ready']['port']}
         if raw is None:
             raw,headers=request(path+f'/rooms/{room}/join-ticket-bundle',
@@ -1141,8 +1152,8 @@ def main():
         (directory/'download.zip').write_bytes(raw)
         prepared=[]
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
-            check(archive.namelist()==names and [p['seat'] for p in people]==list(range(5)),
-                entry['label']+f' room {room} exact five seats')
+            check(archive.namelist()==names and [p['seat'] for p in people]==list(range(len(people))),
+                entry['label']+f' room {room} exact {len(people)} seats')
             for name,person in zip(names,people,strict=True):
                 content=archive.read(name)
                 value=json.loads(content)
@@ -1480,9 +1491,9 @@ def main():
                     role=f'Room{room}',raw_response=True)
                 scoped_rows=list(csv.DictReader(io.StringIO(scoped.decode('utf-8-sig'),newline='')))
                 expected=[dict(row,reportRoomId=str(room)) for row in rows if row['playerRoomId']==str(room)]
-                check(len(expected)==5 and scoped_rows==expected and scoped_headers['Cache-Control']=='no-store'
+                check(len(expected)==players_per_room and scoped_rows==expected and scoped_headers['Cache-Control']=='no-store'
                     and f'-room-{room:02}.csv' in scoped_headers['Content-Disposition'],
-                    f'room {room} CSV matches its five original sealed Linked player rows')
+                    f'room {room} CSV matches its {players_per_room} original sealed Linked player rows')
                 (out/f'linked-scoped-room-{room:02}.csv').write_bytes(scoped)
                 expected_files[f'{prefix}-room-{room:02}.csv']=scoped
             request(session_path+'/rooms/2/report.csv',role='Room1',expected=403)
@@ -1493,7 +1504,7 @@ def main():
             with zipfile.ZipFile(io.BytesIO(reports)) as archive:
                 check(archive.namelist()==list(expected_files) and archive.testzip() is None
                       and all(archive.read(name)==content for name,content in expected_files.items()),
-                      'Linked battle ZIP matches the exact six CSVs from the original 25 player results')
+                      f'Linked battle ZIP matches the exact six CSVs from the original {venue_players} player results')
             request(session_path+'/reports.zip',role='Room1',expected=403)
             (out/'linked-reports.zip').write_bytes(reports)
         save(entry['label']+'-delivery.json',{'serverAcknowledgedConnections':acks,
@@ -1541,6 +1552,7 @@ def main():
         bundle_file.write_bytes(bundle)
         manifest_path = runtime / (label + '-field-manifest.json')
         common = {'version': 1, 'mode': mode, 'topology': 'same-host', 'serverIps': [address],
+                  **({'expectedPlayersPerRoom': players_per_room} if players_per_room != 5 else {}),
                   **({'verifyPlayerSources': True} if args.check_venue_openxr and not args.check_venue_openxr_reconnect else {}),
                   **({'verifyReconnectHistory': True} if args.check_venue_openxr_reconnect else {})}
         if label in venue_control_reports:
@@ -1583,10 +1595,17 @@ def main():
         original = run(split)
         check(original.returncode == 0 and json.loads(original.stdout) == summary,
               label + ' untouched venue ZIP and unordered Windows logs match the original split field summary')
-        check(summary['consistent'] and summary['mode'] == mode and summary['players'] == summary['serverAcknowledgements'] == 25
-              and summary['rooms'] == [{'roomId': room, 'players': 5, 'playersOutsideDeclaredServer': 0} for room in range(1, 6)]
+        check(summary['consistent'] and summary['mode'] == mode and summary['players'] == summary['serverAcknowledgements'] == venue_players
+              and summary['rooms'] == [{'roomId': room, 'players': players_per_room, 'playersOutsideDeclaredServer': 0} for room in range(1, 6)]
               and not summary['physicalHostsVerified'] and not summary['networkCapacityAccepted'],
-              label + ' field evidence matches all 25 original sealed admissions and UDP peers')
+              label + f' field evidence matches all {venue_players} original sealed admissions and UDP peers')
+        if players_per_room != 5:
+            check(summary['expectedPlayersPerRoom'] == players_per_room, label + ' field report preserves the explicit stage size')
+            full_manifest = dict(evidence)
+            del full_manifest['expectedPlayersPerRoom']
+            wrong_stage = run(full_manifest)
+            check(wrong_stage.returncode == 1 and not wrong_stage.stdout and 'player log count' in wrong_stage.stderr,
+                  label + ' sealed staged roster cannot pass default full-venue verification')
         if label in venue_control_reports:
             batches = summary['venueControlBatches']
             check([batch['action'] for batch in batches] == [row['action'] for row in venue_control_reports[label]]
@@ -1595,7 +1614,7 @@ def main():
                   label + ' original journals contain an exact Running witness for every venue control batch')
         if debrief_file is not None:
             check(summary['venueDebriefReceipts'] == {'sha256': control.sha(debrief_file), 'sessions': len(entries),
-                                                    'acknowledgedPlayers': 25},
+                                                    'acknowledgedPlayers': venue_players},
                   label + ' field evidence matches every stored receipt to original native acknowledgements')
             modified = field.read_json(debrief_file.read_bytes())
             modified['sessions'][0]['players'][0]['acknowledged'] = False
@@ -1610,14 +1629,14 @@ def main():
                       for row in summary['sessions']), label + ' field evidence verifies every original closed world journal')
         check(summary['combatJournalsVerified'] == len(entries)
               and all(row['combatJournal']['events'] == row['combatSequence']
-                      and row['combatJournal']['players'] == 5 * len(row['roomIds']) for row in summary['sessions']),
-              label + ' original combat journals reproduce the sealed scores of all 25 seats')
+                      and row['combatJournal']['players'] == players_per_room * len(row['roomIds']) for row in summary['sessions']),
+              label + f' original combat journals reproduce the sealed scores of all {venue_players} seats')
         if args.windows_release_report:
-            expected_seats=[{'roomId':room,'seat':seat} for room in range(1,6) for seat in range(1,6)]
+            expected_seats=[{'roomId':room,'seat':seat} for room in range(1,6) for seat in range(1,players_per_room+1)]
             check(summary['venueRelease']=={'reportSha256':control.sha(args.windows_release_report),
-                    'windows':{'playerManifestSha256':windows_release_hash,'seatsVerified':25}}
+                    'windows':{'playerManifestSha256':windows_release_hash,'seatsVerified':venue_players}}
                   and [seat for session in summary['sessions'] for seat in session['windowsReleaseSeats']]==expected_seats,
-                  label+' field release identifies the original 25 acknowledged Windows seats')
+                  label+f' field release identifies the original {venue_players} acknowledged Windows seats')
             swapped=[dict(player) for player in evidence['windowsPlayers']]
             swapped[0]['launcherReport'],swapped[1]['launcherReport']=swapped[1]['launcherReport'],swapped[0]['launcherReport']
             rejected=run(dict(evidence,windowsPlayers=swapped))
@@ -1625,9 +1644,9 @@ def main():
                   label+' rejects an authentic launcher report from another seat of the same release')
         if args.check_venue_link_metrics:
             links = [row for session in summary['sessions'] for row in session['windowsLinkMetrics']]
-            check(summary['windowsLinkMetricsVerified']==len(links)==25 and all(
+            check(summary['windowsLinkMetricsVerified']==len(links)==venue_players and all(
                 row['attempts']==row['replies']+row['timeouts']+row['interrupted']==30 and row['replies']>0 for row in links),
-                label+' 25 packaged client link reports match the original acknowledged connections and keep every outcome')
+                label+f' {venue_players} packaged client link reports match the original acknowledged connections and keep every outcome')
             swapped = [dict(player) for player in evidence['windowsPlayers']]
             swapped[0]['linkMetrics'],swapped[1]['linkMetrics'] = swapped[1]['linkMetrics'],swapped[0]['linkMetrics']
             rejected = run(dict(evidence, windowsPlayers=swapped))
@@ -1637,8 +1656,8 @@ def main():
             proofs=read(out/(label+'-full-participation-begin.json'))
             receipt=read(out/(label+'-venue-begin.json'))['receipt']
             check(summary['participationBegin']=={'requestId':receipt['requestId'], 'sessions':len(entries),
-                  'participants':25, 'trackedPlayers':0, 'simulatedPlayers':25},
-                  label+' untouched field ZIP verifies the original 25-seat simulated Begin')
+                  'participants':venue_players, 'trackedPlayers':0, 'simulatedPlayers':venue_players},
+                  label+f' untouched field ZIP verifies the original {venue_players}-seat simulated Begin')
             archived={tuple(row['roomIds']):row for row in closed['sessions']}
             for report in summary['sessions']:
                 row=archived[tuple(report['roomIds'])]; witness=row['participationBegin']; expected=proofs[row['sessionId']]
@@ -1661,11 +1680,11 @@ def main():
               label + ' field evidence rejects an original combat prefix without its terminal seal')
         if concurrent_seconds is not None:
             coverage = summary['concurrentRoster']
-            check(coverage['players'] == 25 and coverage['longestMilliseconds'] >= concurrent_seconds * 1000,
-                  label + ' original closed world journals verify the continuous concurrent 25-seat window')
+            check(coverage['players'] == venue_players and coverage['longestMilliseconds'] >= concurrent_seconds * 1000,
+                  label + f' original closed world journals verify the continuous concurrent {venue_players}-seat window')
             if args.check_venue_concurrent_fire:
-                check(coverage['playersWithConfirmedFire'] == 25,
-                      label + ' original world and combat journals verify fire from all 25 seats inside one shared window')
+                check(coverage['playersWithConfirmedFire'] == venue_players,
+                      label + f' original world and combat journals verify fire from all {venue_players} seats inside one shared window')
             tracked = run(dict(evidence, requireTrackedRoster=True))
             check(tracked.returncode == 1 and not tracked.stdout and 'original Quest or non-mock Windows OpenXR' in tracked.stderr,
                   label + ' continuous desktop roster cannot satisfy the tracked-only evidence gate')
@@ -1753,7 +1772,8 @@ def main():
                 original = (out/(entry['label']+'-report.csv')).read_text(encoding='utf-8-sig')
                 original_rows = list(csv.DictReader(io.StringIO(original)))
                 check(scoped == [dict(row, reportRoomId=str(room)) for row in original_rows if row['playerRoomId'] == str(room)]
-                      and len(scoped) == 5, f'{mode} batch room {room} preserves its five sealed native rows')
+                      and len(scoped) == players_per_room,
+                      f'{mode} batch room {room} preserves its {players_per_room} sealed native rows')
             manifest_sessions.append({'sessionId': sid, 'roomIds': rooms, 'appliedAtSequence': sequences[sid],
                 'throughSequence': entry['sealed']['statistics']['throughSequence'], 'files': files})
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
@@ -1815,8 +1835,8 @@ def main():
             subprocess.run([node, str(ROOT/'tests/browser/check-venue-replay-native.cjs'), str(descriptor), str(output)],
                            stdout=log, stderr=subprocess.STDOUT, check=True, timeout=75)
         result = read(output)
-        check(result['scores'] == scores and scores['total']['players'] == 25,
-              f'{mode} shipped console renders exact room and batch totals from all 25 original sealed statistics')
+        check(result['scores'] == scores and scores['total']['players'] == venue_players,
+              f'{mode} shipped console renders exact room and batch totals from all {venue_players} original sealed statistics')
         if args.check_debrief_receipts:
             check(result['debriefReceipts'] == config['debriefReceipts'],
                   f'{mode} shipped console renders the five original room receipt counts')
@@ -3158,11 +3178,11 @@ def main():
             rows=summary['rooms']
             if summary['version']!=1 or len(rows)!=5 or {row['roomId']:row['sessionId'] for row in rows}!=expected:
                 return None
-            return summary if all(row['sourceState']=='Fresh' and row['registered']==5 and
+            return summary if all(row['sourceState']=='Fresh' and row['registered']==players_per_room and
                 row['trackedReady']==int(args.check_venue_openxr and row['roomId']==5)
-                and row['simulatedReady']==5-row['trackedReady'] for row in rows) else None
+                and row['simulatedReady']==players_per_room-row['trackedReady'] for row in rows) else None
         save(('linked' if linked else 'independent')+'-room-readiness.json',wait(all_ready,20,'five fresh room aggregates'))
-        check(True,('Linked' if linked else 'Independent')+' has five fresh 5/5 room counts with expected rig types')
+        check(True,('Linked' if linked else 'Independent')+f' has five fresh {players_per_room}/{players_per_room} room counts with expected rig types')
         room=request('/api/rooms/readiness',role='Room1')
         check(room['version']==1 and len(room['rooms'])==1 and room['rooms'][0]['roomId']==1
             and room['rooms'][0]['sessionId']==expected[1],'room operator only receives its own active room aggregate')
@@ -4056,10 +4076,16 @@ def main():
                 if args.check_venue_tracking_gate:
                     denied=request(route,{**body,'requireFullTracking':True},request_id=str(uuid.uuid4()),expected=409)
                     unchanged=request(route)['begin']
-                    check(all(row['registered']==5 and row['trackedReady']<5 for row in preparing)
+                    check(all(row['registered']==players_per_room and row['trackedReady']<5 for row in preparing)
                           and denied['code']=='venue-begin-not-ready' and denied['roomIds']==list(range(1,6))
                           and unchanged==preview, 'full tracking Begin refuses the native simulated roster without advancing any room')
                     save(('linked' if linked else 'independent')+'-full-tracking-denied.json',denied)
+                if players_per_room != 5:
+                    denied=request(route,{**body,'requireFullParticipation':True},request_id=str(uuid.uuid4()),expected=409)
+                    check(denied['code']=='venue-begin-not-ready' and denied['roomIds']==list(range(1,6))
+                          and request(route)['begin']==preview,
+                          'full-roster Begin refuses the pilot without advancing any room')
+                    save(('linked' if linked else 'independent')+'-full-participation-denied.json',denied)
                 if args.check_venue_participation_gate:
                     body['requireFullParticipation']=True
                 receipt=request(route,body,request_id=key)
@@ -4151,12 +4177,12 @@ def main():
                     players=frame['packet']['frame']['players']
                     check(len(players)==len(owners) and {p['id']:p['roomId'] for p in players}==rooms_by_player,
                         entry['label']+' exact connected room roster')
-                check(len({c['nativePid'] for c in round_clients})==25 and all(
+                check(len({c['nativePid'] for c in round_clients})==venue_players and all(
                     c['process'].poll() is None and c['witness'].kernel.WaitForSingleObject(c['witness'].handle,0)==258
-                    for c in round_clients),'25 simultaneous owned native players '+('Linked' if linked else 'Independent'))
+                    for c in round_clients),f'{venue_players} simultaneous owned native players '+('Linked' if linked else 'Independent'))
                 if windows_release_hash:
                     check(all(read(c['launcherReport'])['playerManifestSha256']==windows_release_hash for c in round_clients),
-                          ('Linked' if linked else 'Independent')+' original 25 player processes all use the released Windows package')
+                          ('Linked' if linked else 'Independent')+f' original {venue_players} player processes all use the released Windows package')
             if args.check_venue_link_metrics:
                 stage('collecting-player-link-metrics',mode='Linked' if linked else 'Independent')
                 wait(lambda:all(c['linkMetrics'].is_file() for c in round_clients),55,'all original packaged client link reports')
@@ -4426,7 +4452,7 @@ def main():
             'One graphical Unity mock OpenXR client and 24 desktop peers in each same-host venue topology.' if args.check_venue_openxr else
             'Five Windows VR/MR Preparing endpoints and 25 signed files from the console mixed ZIP.' if args.mixed_venue_bundle_only else
             'Real Windows MR Preparing endpoints and 25 signed files per topology.' if args.mr_venue_bundle_only else
-            'Three portable packages, five Independent rooms then Linked, 25 simultaneous same-PC Simulation clients per topology.'
+            f'Three portable packages, five Independent rooms then Linked, {venue_players} simultaneous same-PC Simulation clients per topology.'
             if player_folder else 'Two portable packages, five Independent rooms then Linked, five same-PC Simulation clients per topology.'),
             'managedMrPreparing':args.check_managed_mr,
             'roomCombat':args.check_room_combat,
@@ -4441,6 +4467,7 @@ def main():
             'venueReplayAlignment':args.check_venue_replay_alignment,
             'venueHistoryUi':args.check_venue_history_ui,
             'venueFieldEvidence':args.venue_field_evidence,
+            **({'expectedPlayersPerRoom': players_per_room} if players_per_room != 5 else {}),
             'venueFieldUi':args.check_venue_field_ui,
             'lanPreflight':args.check_lan_preflight,
             'vrVenueTickets':args.check_vr_venue_tickets,

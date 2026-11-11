@@ -984,7 +984,7 @@ def venue_bundle(path, mode):
         return closure, {name: evidence_zip_entry(archive, name) for name in names}
 
 
-def venue_windows_logs(rows, expected, evidence_path):
+def venue_windows_logs(rows, expected, evidence_path, players_per_room):
     require(type(rows) is list and 1 <= len(rows) <= 25, 'Provide one to 25 original Windows logs in windowsPlayers')
     groups = {}
     for row in rows:
@@ -994,7 +994,8 @@ def venue_windows_logs(rows, expected, evidence_path):
         require(session_id in expected, 'Windows log belongs to a different venue session')
         group = groups.setdefault(session_id, [])
         group.append((address, path, launch, metrics))
-        require(len(group) <= len(expected[session_id]['roomIds']) * 5, 'Too many Windows logs for an original venue session')
+        require(len(group) <= len(expected[session_id]['roomIds']) * players_per_room,
+                'Too many Windows logs for an original venue session')
     return groups
 
 
@@ -1251,6 +1252,7 @@ def verify_venue(manifest_path):
     manifest_path = manifest_path.resolve(strict=True)
     manifest = read_json(content(manifest_path))
     integer(manifest['version'], 1, 1)
+    players_per_room = integer(manifest.get('expectedPlayersPerRoom', 5), 1, 5)
     topology, mode = manifest['topology'], manifest['mode']
     require(topology in ('same-host', 'direct-lan') and mode in ('Independent', 'Linked'), 'Invalid venue topology or mode')
     addresses = manifest['serverIps']
@@ -1369,7 +1371,7 @@ def verify_venue(manifest_path):
         control_summary, controls = read_venue_control_batches(manifest['venueControlBatches'], expected, closure, recorded_at, evidence_path)
 
     windows_supplied = 'windowsPlayers' in manifest
-    windows_by_session = venue_windows_logs(manifest['windowsPlayers'], expected, evidence_path) if windows_supplied else {}
+    windows_by_session = venue_windows_logs(manifest['windowsPlayers'], expected, evidence_path, players_per_room) if windows_supplied else {}
 
     capture_supplied = 'questCaptures' in manifest
     captures, capture_endpoints, capture_batches = {}, {}, 0
@@ -1451,8 +1453,8 @@ def verify_venue(manifest_path):
         if windows_supplied:
             require(all('logcatPid' in player for player in players), 'Use windowsPlayers or per-session Windows logs, not both')
         size = len(players) + len(captured) + len(logs)
-        require(size == len(row['roomIds']) * 5,
-                'Each original room must include five player logs')
+        require(size == len(row['roomIds']) * players_per_room,
+                'Session player log count differs from the expected seats per room')
         quest_logs = []
         for player in players:
             if 'logcatPid' in player:
@@ -1520,6 +1522,8 @@ def verify_venue(manifest_path):
                                          quest_deployments=quest_deployments,
                                          require_distinct_remote_roster=require_distinct_remote_roster,
                                          control_batches=controls.get(session['id'], ()))
+        require(set(sources) == set(row['roomIds']) and all(len(peers) == players_per_room for peers in sources.values()),
+                'Verified player count differs from the expected seats in an original room')
         if debrief_receipts is not None:
             verify_venue_debrief_session(debrief_receipts.pop(session['id'], None), session, stream, report)
         verified_pairs = ([report['udpPreflight']] if preflights else report['udpSourcePreflight']['pairs'] if source_preflights else [])
@@ -1530,7 +1534,7 @@ def verify_venue(manifest_path):
         quest_players += len(quest_logs) + len(captured)
         windows_link_reports += len(link_rows)
         seats = {(player['roomId'], integer(player['seat'], 0, 4)) for player in session['players']}
-        require(seats == {(room, seat) for room in row['roomIds'] for seat in range(5)}, 'Final roster must cover every room seat exactly once')
+        require(len(seats) == size, 'Final roster repeats a room seat')
         for player in session['players']:
             player_id, admission = player['id'], player['admissionId']
             require(player_id not in player_ids and admission not in admission_ids, 'Player or admission is reused across rooms')
@@ -1574,6 +1578,7 @@ def verify_venue(manifest_path):
     if reconnect_window is not None:
         reconnect_summary['reconnectWindow'] = reconnect_window.summary(reconnect_summary['reconnectHistory']['reconnectedSeats'], len(player_ids))
     return {'version': 1, 'consistent': True, 'declaredTopology': topology, 'mode': mode, 'players': len(player_ids),
+            **({'expectedPlayersPerRoom': players_per_room} if 'expectedPlayersPerRoom' in manifest else {}),
             'rooms': [{'roomId': room, 'players': len(rooms[room]),
                        'playersOutsideDeclaredServer': sum(address in remote for address in rooms[room])} for room in all_rooms],
             'sessions': sorted(summaries, key=lambda item: item['roomIds']),
