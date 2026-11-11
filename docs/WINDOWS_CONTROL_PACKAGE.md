@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-11 `VRCommand-ControlServer-0.31.138-port-drafts-win-x64.zip` 為 53,072,726 bytes，SHA-256 `dbbbf83fbf1732b16c2c3ed1bcb1c8f2ee690c1941da92ac4fbc52aec213e739`。重讀五房啟動計畫時可保留本頁輸入的 UDP 埠，並核對最新場次。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.138-port-drafts-win-x64.zip) · [操作說明](WINDOWS_SERVER_PACKAGE.md#從主控台下載場館計畫)
+
 2026-11-11 `VRCommand-ControlServer-0.31.137-seat-replay-win-x64.zip` 為 53,072,161 bytes，SHA-256 `ab50f8cb077ae7c3adb30cbe1fa01f65d4768d89bcece2fdee0af663e1ace0e5`。主控可從原批次的席位明細開啟個人回放。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.137-seat-replay-win-x64.zip) · [操作說明](SESSION_CLOSURE.md#從全館收尾查看席位)
 
 2026-11-11 `VRCommand-ControlServer-0.31.136-seat-scores-win-x64.zip` 為 53,071,201 bytes，SHA-256 `bdf5940f7cfd9da977e6259e1751edefdacf1568ad0e1ee568fe9c55018dff56`。主控可在全館收尾查看每席七項原封存戰績。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.136-seat-scores-win-x64.zip) · [操作說明](SESSION_CLOSURE.md#從全館收尾查看席位)
