@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-11 從全館席位下載個人戰績
+
+- 控制台 0.31.133 可從原結束批次的席位明細直接下載個人 CSV。使用原結束名冊的房號及席號核對戰鬥與世界封存，房間重開後仍指向原場次。下載後的回條仍以原遊戲伺服器確認為準。111 項收尾 Chromium 專項通過，包含未確認席位的原檔、房控權限、錯誤檔名、手機版面與切換批次時取消下載。 [操作說明](SESSION_CLOSURE.md#從全館收尾查看席位)
+- 571 項 Windows 原生檢查通過。獨立及合併各 25 個同機玩家端，50 份逐席 CSV 均與原封存個人戰績逐位元一致，50 席原戰績均有中彈與耗損。瀏覽器從獨立、合併及較早的獨立批次各下載一份原檔。六場雙封存共 1,579 格完整回放，50 筆原戰績與遊戲伺服器確認相符。跨機、頭盔及廠商硬體仍待現場驗收。 [原生結果](../artifacts/server-package-checks/run-8efd945f6e174910a8f6054519b6b551/checks.json)
+- 825 項 HTTP、111 項 Node、970 項解壓包 Chromium 與 107 項 Windows 管理包檢查通過。ZIP 解壓逐一核對 565 檔。隔離遊戲與管理測試停止後，C／F 快照分別有 220、18 個非資料庫檔案雜湊相符。GitHub Actions 對 `531332f3` 因帳務或支出上限未啟動任何步驟。 [管理包](WINDOWS_CONTROL_PACKAGE.md) · [核對摘要](../artifacts/seat-report-0.31.133-validation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42974206955)
+
 ## 2026-11-11 全館戰績回條席位明細
 
 - 管理台 0.31.132 可在全館收尾選擇原批次與房間，查看原結束名冊的席號、玩家和回條，或只顯示未確認。原房間已被新場次使用時，仍讀取原場次的雙封存。晚到回條可更新已開啟的明細。107 項收尾 Chromium 專項通過，涵蓋房控拒絕、房間重用、手機版面及切換批次後的延遲回應。 [操作說明](SESSION_CLOSURE.md#從全館收尾查看席位) · [明細畫面](../artifacts/console-debrief-seats-132-focused/venue-debrief-seats.png)
