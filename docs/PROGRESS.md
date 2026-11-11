@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 Windows 玩家驗收 ZIP
+
+- 玩家啟動器 1.10 在核對發行、收到最終戰績、結束斷線且玩家程序以退出碼 0 結束後，封裝 `player.log` 與 `launch-report.json`。封裝前以關閉後的原日誌核對退出報告雜湊。視窗從本次紀錄資料夾取出 `player-evidence.zip`，命令列可用 `--evidence-zip`。 [玩家端操作](WINDOWS_PLAYER_PACKAGE.md#依場館發行報告核對玩家包)
+- 主控可直接在原驗收清單填 `evidenceZip`，工具逐席核對原入場、原發行、日誌雜湊和伺服器戰績確認。異常副本中的其他場次 ZIP、配錯席位的退出報告、改動日誌及額外成員均遭拒絕。 [主控操作](EXTERNAL_CLIENTS.md#收集-windows-玩家驗收-zip)
+- 原 Windows 0.50.7 的獨立與合併模式各有 25 個同機玩家端，540 項通過。測試工具在已收到原戰績及斷線後結束自有玩家程序，50 份原生 ZIP 只含兩份逐位元相同的原檔，確認未含該席原票券位元組。由 F 槽 ZIP 重驗與散檔摘要一致，含 921 格回放、六場原雙封存及 50 筆伺服器確認。C／F 273 檔一致，活動場次及殘留程序為零。舊六批分階段總驗收的輸出相同。 [驗證摘要](../artifacts/windows-seat-evidence-0507/validation.json)
+- 45 項解壓套件、17 項 WinForms 事件及 87 項場館 Python 測試通過。WinForms 驗證包含缺少 OpenXR 執行環境時保留退出報告與日誌，且未產生驗收 ZIP。人工視窗收尾、跨機真人及頭盔仍待驗。GitHub Actions 在 `79e0b52e` 因帳務或支出上限未啟動任何步驟。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42955693336)
+
 ## 2026-11-11 五房分階段總驗收
 
 - `verify-field-results.py --venue-stages` 一次重驗獨立與合併模式各自的 5、10、25 席原始封存。核對各模式的原場次時間順序、每批同時在線區間、同一份發行報告及不同的原結束回條、場次、世界來源與入場識別。輸出包含總清單及六份批次清單的原始位元組雜湊。 [總驗收操作](EXTERNAL_CLIENTS.md#一次驗收兩種模式的三個階段)
