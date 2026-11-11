@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 Quest 日誌擷取中斷後逐席重試
+
+- `capture-quest-field-log.py --retry-incomplete` 會用原部署 ZIP、裝置對照表與首次擷取報告核對房席、場次及連線埠，只對失敗席位重新讀取 logcat。重試使用新資料夾，保留首次已完成的原日誌、擷取報告與 `.partial`。 [重試操作](QUEST3.md#重試未完成的-quest-擷取席位)
+- 五房驗收可同時讀取部分完成與重試報告，核對每份原報告的席數和完成狀態，逐席驗證成功的日誌雜湊、原入場及伺服器戰績確認。成功的席位須剛好覆蓋原網路計畫，重複的完整擷取會拒絕。摘要另列未完成報告及失敗嘗試次數。 [驗收清單](EXTERNAL_CLIENTS.md#直接使用-quest-批次擷取報告)
+- 模擬 ADB 在獨立與合併模式各產出四席完整日誌與一席 `.partial`，重試只擷取各自缺少的一席。兩種模式都驗證五席 Quest 證據，首次報告與部分日誌雜湊相符。只交首次報告會失敗。另以實際 CLI 及 PowerShell 部署解析器驗證混合場重試第 2 房第 3 席，錯場次或錯埠在擷取前拒絕。 [模擬驗證](../artifacts/quest-capture-retry-0507/validation.json)
+- 90 項場館 Python 測試與兩項 Quest 擷取命令列測試通過，含完整 25 席模擬擷取。GitHub Actions 在 `970771e4` 因帳務或支出上限未啟動任何步驟。Quest 3／VIVE XR 實機、跨機與廠商硬體仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42957961103)
+
 ## 2026-11-11 Windows 玩家驗收 ZIP 收件核對
 
 - 五房驗收清單可設定 `windowsEvidenceDirectory`，直接從原 ZIP 的場次、入場識別、退出報告及伺服器戰績確認配回席位。`--inspect-windows-inbox` 列出已收、缺件及衝突檔案；缺件時回傳退出碼 1。IPv4 取自原伺服器觀察的 UDP 來源。混合場可沿用 Windows 電腦對照表，Quest 證據依原流程核對。 [收件操作](EXTERNAL_CLIENTS.md#按收件資料夾找缺件及錯批)
