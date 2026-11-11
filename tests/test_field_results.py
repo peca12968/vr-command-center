@@ -481,6 +481,62 @@ def preflight_fixture(root, label, *, server, peer, port, exchange=None):
 
 
 class FieldResultsTests(unittest.TestCase):
+    def test_venue_control_batches_require_exact_original_running_frames(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, closure = venue_fixture(root, mode, with_journals=True)
+                climate = {'weather': 'Storm', 'timeOfDay': 'Night', 'lightning': True}
+                enemies = {'behavior': 'Advance', 'autoAttack': False}
+                reports = {}
+                manifest['venueControlBatches'] = []
+                for index, (action, key, policy, sequence) in enumerate((
+                    ('SetEnvironment', 'latestEnvironment', climate, 4), ('SetEnemies', 'latestEnemies', enemies, 6),
+                )):
+                    report = {'requestId': id_for(2010 + index), 'recordedAtUtc': '2026-11-09T00:00:01+00:00',
+                              'sessions': [{**{key: row[key] for key in ('sessionId', 'roomIds')},
+                                            'appliedAtSequence': sequence, 'state': 'Current'} for row in closure['sessions']], **policy}
+                    name = root / (action + '.json')
+                    name.write_text(json.dumps({key: report}), encoding='utf-8')
+                    reports[action] = (name, key, report)
+                    manifest['venueControlBatches'].append({'action': action, 'phaseReport': name.name})
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+
+                def configure(packet):
+                    if packet['frame']['phase'] != 'Running':
+                        return
+                    first_policy = packet['sequence'] < 10
+                    packet.update(weather='Storm', lightning=True, observedSequence=4 if first_policy else 6)
+                    packet['frame'].update(night=True, **({'behavior': 'Hold', 'autoAttack': True} if first_policy else enemies))
+
+                for entry in manifest['sessions']:
+                    launcher = json.loads((root / entry['launcherReport']).read_text(encoding='utf-8'))
+                    world_journal(root / entry['worldJournal'], launcher['finalWorld'], preparing_sequence=3, edit_packet=configure)
+                result = field.verify_venue(path)
+                self.assertEqual([item['sessionsVerified'] for item in result['venueControlBatches']], [len(manifest['sessions'])] * 2)
+                for row in result['sessions']:
+                    frames = row['worldJournal']['venueControlFrames']
+                    self.assertEqual([(frame['action'], frame['appliedAtSequence'], frame['worldSequence']) for frame in frames],
+                                     [('SetEnvironment', 4, 2), ('SetEnemies', 6, 10)])
+                for action, change, message in (
+                    ('SetEnvironment', {'lightning': False}, 'disagrees with the venue environment'),
+                    ('SetEnemies', {'behavior': 'Hold'}, 'disagrees with the venue enemy'),
+                    ('SetEnemies', {'recordedAtUtc': '2026-11-10T00:00:01+00:00'}, 'identity or time'),
+                    ('SetEnvironment', {'sessions': []}, 'cover every original session'),
+                ):
+                    with self.subTest(change=change):
+                        name, key, report = reports[action]
+                        name.write_text(json.dumps({key: {**report, **change}}), encoding='utf-8')
+                        with self.assertRaisesRegex(field.EvidenceError, message):
+                            field.verify_venue(path)
+                        name.write_text(json.dumps({key: report}), encoding='utf-8')
+                name, key, report = reports['SetEnvironment']
+                late = deepcopy(report)
+                late['sessions'][0]['appliedAtSequence'] = 5
+                name.write_text(json.dumps({key: late}), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'lacks an exact Running frame'):
+                    field.verify_venue(path)
+
     def test_venue_receipt_export_matches_original_logs_and_rejects_mismatches(self):
         for mode in ('Independent', 'Linked'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:

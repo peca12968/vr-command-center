@@ -405,6 +405,21 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json
 
 工具從 `closure.json` 讀取 `participationBegin`，依原錄製核對同一次開場、管理序號、準備中畫格、25 位原名冊玩家及其房間，再找出各場在結束前套用開場的第一個有效執行格。VR 開場可核對合成或追蹤姿態，MR 須為追蹤。結果的 `participationBegin` 列出全館及逐場的確認席數，並分列合成與追蹤。 [開場操作](PLAYER_READINESS.md#五房各-5-席有效姿態開場)
 
+### 核對五房環境與敵軍指令的執行畫格
+
+在場次執行中送出「全館即時環境」或「全館敵軍策略」後，等各房顯示已套用，再保存主控唯讀 `GET /api/venue/phase` 的原 JSON 回覆。每次都保留對應檔案，下一批同類指令會更新最新批次。待全館結束後，和各場原始 `.worldlog`、原場館驗收 ZIP 一併交給 `verify-field-results.py --venue-manifest`。
+
+```json
+{
+  "venueControlBatches": [
+    {"action": "SetEnvironment", "phaseReport": "storm-night.json"},
+    {"action": "SetEnemies", "phaseReport": "advance-hold-fire.json"}
+  ]
+}
+```
+
+工具依原場次、房間及管理序號逐場找出有效的執行畫格。環境核對天氣、日夜及閃電；敵軍策略核對行為與自動攻擊開關。可用逐場 `worldJournal.venueControlFrames` 的 `worldSequence` 定位回放。需要確認的批次應在下一個管理變更前取得畫格。僅有較晚序號的相同設定，或只有暫停、暫緩及結束畫格時，該批驗收會失敗。
+
 ### 直接使用 Quest 批次擷取報告
 
 在 `direct-lan` 場館清單加入下列欄位。保留每份原 `capture-report.json` 與同一資料夾內的原日誌。網路計畫使用 Quest UDP 預檢的版本 1 格式，列出這次五房所有遊戲端點，以及各 Quest 席位實際使用的 IPv4。 [網路計畫格式](QUEST3.md#批次預檢五房-quest-席位) · [整批擷取](QUEST3.md#一次擷取五房-quest-日誌)

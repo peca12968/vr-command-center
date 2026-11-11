@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 五房環境與敵軍指令的封存核對
+
+- `verify-field-results.py` 可用原主控 `/api/venue/phase` JSON 核對環境及敵軍策略。每個原場次須在封存世界日誌中保存同一管理序號的執行畫格。摘要列出每批指令及各場回放格。 [操作方式](EXTERNAL_CLIENTS.md#核對五房環境與敵軍指令的執行畫格)
+- Windows 0.50.6、玩家啟動器 1.8、伺服器啟動器 1.20 在同一台電腦的私有 IPv4 各運行 25 席。獨立五房及合併場各核對四批指令，合計 24 個原執行畫格。490 項原生檢查、1,670 格完整回放、50 份原戰績與伺服器確認通過。C／F 221 檔逐一相符，程序清理完成。 [原生結果](../artifacts/server-package-checks/run-bd83049719e447479afc92074bca520d/evidence.json) · [F 槽副本重查](../artifacts/venue-control-batches-0506/native-readback-validation.json)
+- 80 項 Python 驗證通過。首輪新增測試讓準備格序號高於後續執行格，原驗證正確拒絕，修正測試資料後重跑全組。兩種模式各用修改過的天氣報告副本重查，均在原執行畫格的值不符時拒絕。 [測試結果](../artifacts/venue-control-batches-0506/python-final.log)
+- 沿用既有 Windows 與 Quest 發行檔。本輪使用同機玩家端與主控 API 操作。玩家啟動器視窗複驗、跨機真人、頭盔、MR 場地與廠商硬體仍待驗收。
+
 ## 2026-11-11 玩家啟動器的桌面與 OpenXR 模式
 
 - Windows 玩家啟動器 1.8 預選桌面模式。視窗內可用 Alt+D 選桌面、Alt+O 選 OpenXR、Alt+S 啟動，貼上連線檔路徑後可按 Enter 載入。遊戲執行期間鎖定模式和連線檔，程序退出後可在同一視窗重試。 [玩家操作](WINDOWS_PLAYER_PACKAGE.md#玩家操作)

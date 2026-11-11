@@ -593,7 +593,8 @@ class VenueReconnectWindow:
 
 
 def verify_world_journal(path, world, combat_sequence, through, applied_end, *, player_sources=None, guarded_begin=None,
-                         players=None, concurrency=None, sealed_fires=None, reconnect_window=None, on_packet=None):
+                         players=None, concurrency=None, sealed_fires=None, reconnect_window=None, on_packet=None,
+                         control_batches=()):
     spec = importlib.util.spec_from_file_location('field_world_journal', Path(__file__).with_name('analyze-world-journal.py'))
     analyzer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(analyzer)
@@ -604,6 +605,8 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
     allowed_rigs = ('Tracked',) if tracked_only else ('Tracked', 'Simulated')
     roster_label = 'tracked' if begin_kind == 'trackingBegin' else 'participating'
     begin_roster = None
+    controls = {batch['appliedAtSequence']: batch for batch in control_batches}
+    control_frames = {}
     if concurrency is not None:
         observe_roster, periods, fires = roster_periods(players, concurrency.minimum_ms, applied_end,
                                                        require_tracked=concurrency.require_tracked, sealed_fires=sealed_fires)
@@ -618,6 +621,19 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
             observe_roster(packet)
         if reconnect_window is not None:
             observe_reconnect(packet)
+        observed = packet['observedSequence']
+        if observed in controls and packet['frame']['phase'] == 'Running' and packet['suspended'] is False and packet['frame']['tick'] > 0:
+            batch = controls[observed]
+            frame = packet['frame']
+            if batch['action'] == 'SetEnvironment':
+                require(packet['weather'] == batch['weather'] and packet['lightning'] is batch['lightning']
+                        and frame['night'] is (batch['timeOfDay'] == 'Night'),
+                        'Original Running frame disagrees with the venue environment batch')
+            else:
+                require(frame['behavior'] == batch['behavior'] and frame['autoAttack'] is batch['autoAttack']
+                        and frame.get('roomEnemyPolicies') in (None, []),
+                        'Original Running frame disagrees with the venue enemy policy batch')
+            control_frames.setdefault(observed, {**batch, 'worldSequence': packet['sequence']})
         if on_packet is not None:
             on_packet(packet)
 
@@ -658,7 +674,7 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
     try:
         journal = analyzer.analyze(path, accepted_sequence=begin['appliedAtSequence'] if begin is not None else None,
                                    expected_header=expected, on_running_frame=count_player_rigs if player_sources is not None else None,
-                                   on_packet=observe_packet if any(item is not None for item in (begin, concurrency, reconnect_window, on_packet)) else None)
+                                   on_packet=observe_packet if controls or any(item is not None for item in (begin, concurrency, reconnect_window, on_packet)) else None)
     except EvidenceError:
         raise
     except (OSError, ValueError, TypeError, KeyError, AttributeError, ArithmeticError, RecursionError) as error:
@@ -685,6 +701,9 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
         require(capture is not None, 'Reconnect window requires an original UTC capture clock')
         finish_reconnect(datetime.fromisoformat(capture).astimezone(timezone.utc))
     result = {'sha256': journal['sha256'], 'frames': sequence, 'runningFrames': journal['runningFrames']}
+    if controls:
+        require(control_frames.keys() == controls.keys(), 'World journal lacks an exact Running frame for a venue control batch')
+        result['venueControlFrames'] = [control_frames[observed] for observed in sorted(control_frames)]
     if begin is not None:
         first = journal['firstApplied']
         require(begin_roster is not None and first is not None
@@ -782,7 +801,7 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
                    require_remote=True, quest_player_logs=(), world_journal=None, combat_journal=None, applied_end=None, room_alignments=None,
                    udp_preflight=None, udp_source_preflights=None, verify_player_sources=False, quest_capture_logs=(),
                    guarded_begin=None, concurrency=None, verify_reconnect_history=False, reconnect_window=None,
-                   quest_deployments=None, require_distinct_remote_roster=False):
+                   quest_deployments=None, require_distinct_remote_roster=False, control_batches=()):
     integer(size, 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(not verify_player_sources or world_journal is not None, 'Player source verification requires the original closed world journal')
@@ -910,7 +929,7 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
     journal = verify_world_journal(world_journal, world, combat_sequence, through, applied_end,
                                    player_sources=player_sources, guarded_begin=guarded_begin, players=players,
                                    concurrency=concurrency, sealed_fires=sealed_fires,
-                                   reconnect_window=reconnect_window) if world_journal is not None else None
+                                   reconnect_window=reconnect_window, control_batches=control_batches) if world_journal is not None else None
     alignments = None
     if room_alignments is not None:
         require(journal is not None and quest_players == size, 'MR alignment evidence requires the closed world journal and all original Quest logs')
@@ -1187,6 +1206,47 @@ def verify_venue_debrief_session(receipts, session, stream, report):
     require(confirmed == roster, 'Management debrief receipts differ from the original admissions')
 
 
+def read_venue_control_batches(references, expected, closure, recorded_at, evidence_path):
+    require(type(references) is list and 1 <= len(references) <= 32,
+            'Provide 1 to 32 original venue phase reports')
+    batches = {}
+    by_session = {sid: {} for sid in expected}
+    for reference in references:
+        require(type(reference) is dict and set(reference) == {'action', 'phaseReport'}
+                and reference['action'] in ('SetEnvironment', 'SetEnemies'), 'Invalid venue control batch reference')
+        action = reference['action']
+        phase = read_json(content(evidence_path(reference['phaseReport'])))
+        require(type(phase) is dict, 'Invalid venue phase report')
+        batch = phase.get('latestEnvironment' if action == 'SetEnvironment' else 'latestEnemies')
+        require(type(batch) is dict, 'Venue phase report lacks the selected original control batch')
+        request = identity(batch['requestId'])
+        when = datetime.fromisoformat(batch['recordedAtUtc'])
+        require(request != closure['requestId'] and request not in batches and when.utcoffset() is not None
+                and when <= recorded_at, 'Venue control batch identity or time differs from the original closure')
+        if action == 'SetEnvironment':
+            policy = {name: batch[name] for name in ('weather', 'timeOfDay', 'lightning')}
+            require(policy['weather'] in ('Clear', 'Rain', 'Fog', 'Storm') and policy['timeOfDay'] in ('Day', 'Night')
+                    and type(policy['lightning']) is bool, 'Invalid venue environment batch policy')
+        else:
+            policy = {name: batch[name] for name in ('behavior', 'autoAttack')}
+            require(policy['behavior'] in ('Hold', 'Patrol', 'Advance') and type(policy['autoAttack']) is bool,
+                    'Invalid venue enemy batch policy')
+        targets = batch['sessions']
+        require(type(targets) is list and len(targets) == len(expected), 'Venue control batch must cover every original session')
+        seen = set()
+        for target in targets:
+            sid = identity(target['sessionId'])
+            require(sid in expected and sid not in seen and target['roomIds'] == expected[sid]['roomIds']
+                    and all(type(room) is int for room in target['roomIds'])
+                    and target['state'] in ('Current', 'Superseded', 'Ended'), 'Venue control target differs from the original room or session')
+            sequence = integer(target['appliedAtSequence'], 1, expected[sid]['appliedAtSequence'] - 1)
+            require(sequence not in by_session[sid], 'Venue control batches reuse an applied sequence')
+            seen.add(sid)
+            by_session[sid][sequence] = {'requestId': request, 'action': action, 'appliedAtSequence': sequence, **policy}
+        batches[request] = {'requestId': request, 'action': action, 'sessionsVerified': len(expected), **policy}
+    return list(batches.values()), {sid: targets.values() for sid, targets in by_session.items()}
+
+
 def verify_venue(manifest_path):
     manifest_path = manifest_path.resolve(strict=True)
     manifest = read_json(content(manifest_path))
@@ -1303,6 +1363,10 @@ def verify_venue(manifest_path):
     require(len(expected) == len(rows) and all(type(row['roomIds']) is list and row['roomIds']
             and all(integer(room, 1, 5) for room in row['roomIds']) for row in rows)
             and sorted(row['roomIds'] for row in rows) == expected_rooms, 'Closure does not cover exactly the five original rooms')
+    control_summary, controls = [], {}
+    if 'venueControlBatches' in manifest:
+        require(journals, 'Venue control batch verification requires the original world journals for the full batch')
+        control_summary, controls = read_venue_control_batches(manifest['venueControlBatches'], expected, closure, recorded_at, evidence_path)
 
     windows_supplied = 'windowsPlayers' in manifest
     windows_by_session = venue_windows_logs(manifest['windowsPlayers'], expected, evidence_path) if windows_supplied else {}
@@ -1454,7 +1518,8 @@ def verify_venue(manifest_path):
                                          guarded_begin=guarded_begin, concurrency=concurrency,
                                          verify_reconnect_history=verify_reconnect_history, reconnect_window=reconnect_window,
                                          quest_deployments=quest_deployments,
-                                         require_distinct_remote_roster=require_distinct_remote_roster)
+                                         require_distinct_remote_roster=require_distinct_remote_roster,
+                                         control_batches=controls.get(session['id'], ()))
         if debrief_receipts is not None:
             verify_venue_debrief_session(debrief_receipts.pop(session['id'], None), session, stream, report)
         verified_pairs = ([report['udpPreflight']] if preflights else report['udpSourcePreflight']['pairs'] if source_preflights else [])
@@ -1530,6 +1595,7 @@ def verify_venue(manifest_path):
             **({'udpSourcePreflightsVerified': len(exchanges)} if source_preflights else {}),
             **({'worldJournalsVerified': len(summaries)} if journals else {}),
             **({'combatJournalsVerified': len(summaries)} if combat_journals else {}),
+            **({'venueControlBatches': control_summary} if control_summary else {}),
             **({'concurrentRoster': concurrency.summary(len(player_ids))} if concurrency is not None else {}),
             **begin_summary,
             **reconnect_summary,

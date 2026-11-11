@@ -394,6 +394,7 @@ def main():
     (ROOT/'artifacts/server-package-checks-latest-path.txt').write_text(str(out),encoding='utf-8');print(json.dumps({'stage':'starting','directory':str(out)}),flush=True)
     env=dict(os.environ);env.update(PATH=str(Path(os.environ['WINDIR'])/'System32'),DOTNET_ROOT=str(runtime/'absent-dotnet'),DOTNET_MULTILEVEL_LOOKUP='0');exe=folder/'Launch-Server.exe';control_exe=args.control_package.resolve()/'Start-Control.exe';data=runtime/'control';checks=[];runners=[];clients=[];cleanup=[];witnesses=[];api=None;api_witness=None;keys=None;sessions=[];rounds=[];observer=None;observer_log=None;observer_out=out/'closure-ui';observer_stop=out/'closure-ui-stop.request';observer_entry=None
     receipt_gates=[]
+    venue_control_reports={}
     venue_target = data / 'control-instance.json'
     venue_uri = venue_pin = venue_password = None
     hardware_processes=[]
@@ -1499,6 +1500,20 @@ def main():
         check(True,entry['label']+' CSV rows match sealed player results')
         return manifest_entry
 
+    def preserve_venue_control_report(mode, action, receipt):
+        if not args.venue_field_evidence:
+            return
+        raw, _ = request('/api/venue/phase', raw_response=True)
+        key = 'latestEnvironment' if action == 'SetEnvironment' else 'latestEnemies'
+        batch = field.read_json(raw)[key]
+        check(batch['requestId'] == receipt['requestId']
+              and {row['sessionId']: row['appliedAtSequence'] for row in batch['sessions']}
+              == {row['sessionId']: row['appliedAtSequence'] for row in receipt['sessions']},
+              mode + ' phase report preserves the original ' + action + ' receipt')
+        path = out / (mode + '-phase-' + receipt['requestId'] + '.json')
+        path.write_bytes(raw)
+        venue_control_reports.setdefault(mode, []).append({'action': action, 'phaseReport': str(path)})
+
     def verify_venue_field_evidence(mode, closed, entries):
         label = mode.lower()
         route = '/api/venue/closure/' + closed['requestId']
@@ -1525,6 +1540,8 @@ def main():
         common = {'version': 1, 'mode': mode, 'topology': 'same-host', 'serverIps': [address],
                   **({'verifyPlayerSources': True} if args.check_venue_openxr and not args.check_venue_openxr_reconnect else {}),
                   **({'verifyReconnectHistory': True} if args.check_venue_openxr_reconnect else {})}
+        if label in venue_control_reports:
+            common['venueControlBatches'] = venue_control_reports[label]
         debrief_file = None
         if args.check_debrief_receipts:
             debrief_route = route + '/debrief-receipts.json'
@@ -1567,6 +1584,12 @@ def main():
               and summary['rooms'] == [{'roomId': room, 'players': 5, 'playersOutsideDeclaredServer': 0} for room in range(1, 6)]
               and not summary['physicalHostsVerified'] and not summary['networkCapacityAccepted'],
               label + ' field evidence matches all 25 original sealed admissions and UDP peers')
+        if label in venue_control_reports:
+            batches = summary['venueControlBatches']
+            check([batch['action'] for batch in batches] == [row['action'] for row in venue_control_reports[label]]
+                  and all(batch['sessionsVerified'] == len(entries) for batch in batches)
+                  and all(len(row['worldJournal']['venueControlFrames']) == len(batches) for row in summary['sessions']),
+                  label + ' original journals contain an exact Running witness for every venue control batch')
         if debrief_file is not None:
             check(summary['venueDebriefReceipts'] == {'sha256': control.sha(debrief_file), 'sessions': len(entries),
                                                     'acknowledgedPlayers': 25},
@@ -1998,6 +2021,7 @@ def main():
                   and all(request('/api/sessions/'+sid)['enemies'] == {'count': count, **policy} for sid, count in expected.items()),
                   f'native {behavior} enemy policy confirms all sources and preserves their original targets')
             venue_changes.append({'policy': policy, 'receipt': receipt, 'rooms': observed})
+            preserve_venue_control_report('linked' if len(entries) == 1 else 'independent', 'SetEnemies', receipt)
             return applied
 
         def stopped_attack(entry, owners, enabled, live, entry_feeds, disabled, behavior):
@@ -3253,6 +3277,7 @@ def main():
                           for sid, packet in frames.items()),
                   f'{mode} {weather} original accepted frames record all three values and their receipt sequence')
             evidence.append({'receipt': receipt, 'rooms': confirmed, 'frames': frames})
+            preserve_venue_control_report(mode, 'SetEnvironment', receipt)
         save(mode+'-venue-environment.json', evidence)
         if args.check_venue_environment_ui:
             verify_setting_batch_ui(mode, 'environment', 'latestEnvironment', evidence[-1]['receipt'])
