@@ -219,6 +219,7 @@ def main():
     p.add_argument('--check-independent-room-missions',action='store_true',help='Assign a different saved VR mission to every independent room and verify the accepted native world')
     p.add_argument('--check-independent-room-layouts-ui', action='store_true',
                    help='Use the shipped five-room layout overview to review and prepare the distinct native room missions')
+    p.add_argument('--check-linked-archive-plan-ui', action='store_true', help='Recreate the original Linked mission from the packaged console and run it')
     p.add_argument('--mission-template',type=Path,help='Check and save an exported VR mission template, then run both native topologies with it')
     p.add_argument('--check-interrupted-replay', action='store_true', help='Play the saved native prefix after the owned launcher is killed')
     p.add_argument('--check-managed-mr', action='store_true', help='Verify the MR alignment startup gate, desktop rejection and Preparing seal')
@@ -387,6 +388,9 @@ def main():
         p.error('--check-independent-room-missions requires --prepare-independent-set and its own mission fixtures')
     if args.check_independent_room_layouts_ui and (not args.check_independent_room_missions or not shutil.which('node')):
         p.error('--check-independent-room-layouts-ui requires --check-independent-room-missions and Chromium')
+    if args.check_linked_archive_plan_ui and (not args.player_package or venue_only or args.openxr_mock_only
+            or args.mission_template or args.check_layout_preview or args.check_room_combat or not shutil.which('node')):
+        p.error('--check-linked-archive-plan-ui requires the ordinary three-package run and Chromium')
     if args.mission_template and (not args.prepare_independent_set or venue_only or args.openxr_mock_only
             or args.check_independent_room_missions or args.check_layout_preview or args.check_room_combat):
         p.error('--mission-template requires --prepare-independent-set and the ordinary two-topology check')
@@ -497,7 +501,7 @@ def main():
         mission=save_mission(label,**options)
         state=request('/api/sessions',{'missionId':mission['id'],'mode':'Linked' if len(rooms)==5 else 'Independent','roomIds':rooms},expected=201);sessions.append(state['id']);return state
 
-    def verify_template_world(entry, mission, running):
+    def verify_template_world(entry, mission, running, source='imported template', evidence='template'):
         info=request(f"/api/sessions/{entry['sessionId']}/world")
         definition=mission['definition']; environment=definition['environment']; enemies=definition['enemies']
         header=info['header']; packet=running['packet']; frame=packet['frame']
@@ -515,8 +519,38 @@ def main():
               and frame['behavior']==enemies['behavior'] and frame['autoAttack']==enemies['autoAttack']
               and len(frame['enemies'])==enemies['count'] and len(actual)==len(expected)
               and all(matches(left,right) for left,right in zip(actual,expected)),
-              entry['label']+' native duration, environment, enemies and cover match the imported template')
-        save(entry['label']+'-template-world.json',{'missionId':mission['id'],'header':header,'runningSequence':packet['sequence']})
+              entry['label']+' native duration, environment, enemies and cover match the '+source)
+        save(entry['label']+'-'+evidence+'-world.json',{'missionId':mission['id'],'header':header,'runningSequence':packet['sequence']})
+
+    def prepare_linked_archive(rooms):
+        definition = {'name': 'Portable archived Linked mission', 'briefing': 'Original five-room briefing', 'durationSeconds': 420,
+                      'environment': {'mode': 'VR', 'weather': 'Rain', 'timeOfDay': 'Night', 'lightning': False},
+                      'enemies': {'count': 5, 'behavior': 'Hold', 'autoAttack': False},
+                      'props': [{'assetId': 'barrel', 'position': {'x': 2, 'y': 0, 'z': 1}, 'yawDegrees': 45}]}
+        mission = request('/api/missions', definition, expected=201)
+        original = request('/api/sessions', {'missionId': mission['id'], 'mode': 'Linked', 'roomIds': rooms}, expected=201)
+        targets = request('/api/venue/phase')['end']
+        assert [row['sessionId'] for row in targets] == [original['id']]
+        batch = request('/api/venue/phase', {'action': 'End', 'targets': targets}, request_id=str(uuid.uuid4()))
+        head = request(f'/api/missions/{mission["id"]}/revisions', dict(definition, durationSeconds=600, props=[]),
+                       expected=201, request_id=str(uuid.uuid4()))
+        output = out/'native-linked-archive-plan.json'
+        driver = ROOT/'tests/browser/server-plan-browser.cjs'
+        completed = subprocess.run([shutil.which('node'), str(driver)], cwd=driver.parent,
+                                   input=json.dumps({'base': uri, 'token': keys['Master'], 'output': str(output),
+                                                     'linkedArchive': {'batchId': batch['requestId'], 'sessionId': original['id'], 'mission': mission}}),
+                                   capture_output=True, encoding='utf-8', timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
+        check(completed.returncode == 0 and output.is_file(), 'shipped console restores the historical Linked batch: '
+              + completed.stderr.replace(keys['Master'], '[redacted]')[-600:])
+        observed = read(output)
+        prepared = observed['prepared']
+        check(prepared['id'] != original['id'] and prepared['mode'] == 'Linked' and prepared['roomIds'] == rooms
+              and prepared['mission'] == mission and prepared['mission']['id'] != head['id']
+              and request('/api/sessions/'+original['id'])['state'] == 'Ended'
+              and request('/api/venue/closure/'+batch['requestId']+'/linked-plan') == observed['original'],
+              'new Linked session uses the archived mission while the original batch remains intact')
+        sessions.append(prepared['id'])
+        return prepared
 
     def verify_lan_preflight(value, label):
         powershell = Path(os.environ['WINDIR']) / 'System32/WindowsPowerShell/v1.0/powershell.exe'
@@ -4370,6 +4404,8 @@ def main():
                 elif imported_mission:
                     state=request('/api/sessions',{'missionId':imported_mission['id'],'mode':'Linked','roomIds':rooms},expected=201)
                     sessions.append(state['id'])
+                elif linked and args.check_linked_archive_plan_ui:
+                    state=prepare_linked_archive(rooms)
                 else:
                     room_replay_props = [{'assetId':'barrel','position':{'x':4.5,'y':0,'z':4.5},'yawDegrees':0}]
                     state=create(rooms,'linked' if linked else 'independent',enemy_count=enemy_count,
@@ -4447,6 +4483,8 @@ def main():
                 running=wait(lambda:observe(entry,ids,sequence),20,entry['label']+' original Begin applied')
                 if imported_mission:
                     verify_template_world(entry,imported_mission,running)
+                if linked and args.check_linked_archive_plan_ui:
+                    verify_template_world(entry,state['mission'],running,source='archived Linked mission',evidence='archive-plan')
                 if args.check_independent_room_missions and not linked:
                     room=entries.index(entry)+1
                     mission=missions[room-1]

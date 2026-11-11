@@ -324,6 +324,20 @@ app.MapGet("/api/venue/closure/{id:guid}/independent-plan", (Guid id, SessionMan
         Rooms = sessions.Select(session => new { RoomId = session.RoomIds[0], SessionId = session.Id, Revision = store.Version(session.Mission.Id, actor) }).ToArray()
     };
 });
+app.MapGet("/api/venue/closure/{id:guid}/linked-plan", (Guid id, SessionManager manager, SqliteMissionLibrary store, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var actor = Actor(context);
+    var batch = manager.ReadVenueEnd(id, actor);
+    if (batch.Sessions.Length != 1)
+        throw new InvalidOperationException("The End batch must contain one linked session covering all five rooms.");
+    var session = manager.Get(batch.Sessions[0].SessionId, actor);
+    if (session.Mode != SessionMode.Linked || session.State != SessionState.Ended
+        || !session.RoomIds.SequenceEqual(Enumerable.Range(1, SessionManager.RoomCount)))
+        throw new InvalidOperationException("The End batch must contain one linked session covering all five rooms.");
+
+    return new { batch.RequestId, SessionId = session.Id, session.RoomIds, Revision = store.Version(session.Mission.Id, actor) };
+});
 app.MapGet("/api/venue/closure/{id:guid}/reports.zip", (Guid id, SessionManager manager, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";

@@ -240,18 +240,47 @@ async function prepareRoomLayouts(page, missions, invalidMission, output) {
   await fs.writeFile(output, JSON.stringify({ previews, requestId, prepared, rejection }, null, 2), { flag: 'wx' });
 }
 
+async function restoreLinkedArchive(page, archive, output) {
+  await page.locator('#venue-closure-table').waitFor();
+  const route = `/api/venue/closure/${archive.batchId}/linked-plan`;
+  const read = page.waitForResponse(reply => new URL(reply.url()).pathname === route);
+  await page.locator('#restore-venue-plan').click();
+  const response = await read;
+  assert.equal(response.status(), 200);
+  assert.equal(response.headers()['cache-control'], 'no-store');
+  const original = await response.json();
+  assert.deepEqual({ ...original, revision: original.revision.mission }, {
+    requestId: archive.batchId, sessionId: archive.sessionId, roomIds: [1, 2, 3, 4, 5], revision: archive.mission
+  });
+  assert.equal(original.revision.number, 1);
+  await page.locator('#notice').filter({ hasText: '已套用本批五房' }).waitFor();
+  await page.locator('#launch-layout-summary[data-status=valid]').waitFor();
+  assert.equal(await page.locator('#launch-mode').inputValue(), 'Linked');
+  assert.equal(await page.locator('#launch-mission').inputValue(), archive.mission.id);
+  assert.match(await page.locator('#launch-preview-version').innerText(), /歷史/);
+  assert.equal(await page.locator('#launch-preview-duration').innerText(), `${archive.mission.definition.durationSeconds} 秒`);
+  await page.locator('#launch-preview').screenshot({ path: path.join(path.dirname(output), 'native-linked-archive-preview.png') });
+  const create = page.waitForResponse(reply => new URL(reply.url()).pathname === '/api/sessions' && reply.request().method() === 'POST');
+  await page.locator('#create-session-form button[type=submit]').click();
+  const accepted = await create;
+  assert.equal(accepted.status(), 201);
+  assert.deepEqual(accepted.request().postDataJSON(), { missionId: archive.mission.id, mode: 'Linked', roomIds: [1, 2, 3, 4, 5] });
+  await fs.writeFile(output, JSON.stringify({ original, prepared: await accepted.json() }, null, 2), { flag: 'wx' });
+}
+
 if (require.main === module) {
   (async () => {
     const { chromium } = require('playwright');
     const input = [];
     for await (const chunk of process.stdin) input.push(chunk);
-    const { base, token, plan, missions, invalidMission, output } = JSON.parse(Buffer.concat(input).toString('utf8'));
+    const { base, token, plan, missions, invalidMission, linkedArchive, output } = JSON.parse(Buffer.concat(input).toString('utf8'));
     assert.match(base, /^http:\/\/127\.0\.0\.1:\d+$/);
     const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_SERVER_PLAN_CHROMIUM });
     try {
       const page = await browser.newPage({ acceptDownloads: true });
       await login(page, base, token);
       if (missions) await prepareRoomLayouts(page, missions, invalidMission, output);
+      else if (linkedArchive) await restoreLinkedArchive(page, linkedArchive, output);
       else {
         await open(page);
         await fill(page, plan);

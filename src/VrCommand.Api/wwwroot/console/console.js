@@ -776,27 +776,39 @@ async function selectVenueClosure() {
 async function restoreVenuePlan() {
   const plan = archivedPlan, epoch = state.epoch, selection = venueClosureEpoch, view = operationsViewEpoch;
   if (!plan || $('restore-venue-plan').disabled) return;
+  const linked = plan.mode === 'Linked';
   const current = () => master() && state.epoch === epoch && venueClosureEpoch === selection
-    && operationsViewEpoch === view && archivedPlan?.requestId === plan.requestId;
+    && operationsViewEpoch === view && archivedPlan?.requestId === plan.requestId && archivedPlan.mode === plan.mode;
+  const validRevision = revision => !!revision?.mission?.id && Number.isSafeInteger(revision.number) && revision.number > 0
+    && ['VR', 'MR'].includes(revision.mission.definition?.environment?.mode) && Array.isArray(revision.mission.definition.props);
   let restored = false;
   await run(async () => {
     if (!current()) return;
-    const result = await api(`/venue/closure/${encodeURIComponent(plan.requestId)}/independent-plan`);
+    const result = await api(`/venue/closure/${encodeURIComponent(plan.requestId)}/${linked ? 'linked-plan' : 'independent-plan'}`);
     if (!current()) return;
-    if (result?.requestId !== plan.requestId || !Array.isArray(result.rooms) || result.rooms.length !== plan.sessionIds.length
-      || result.rooms.some((room, index) => room?.roomId !== index + 1 || room.sessionId !== plan.sessionIds[index]
-        || !room.revision?.mission?.id || !Number.isSafeInteger(room.revision.number) || room.revision.number < 1
-        || !['VR', 'MR'].includes(room.revision.mission.definition?.environment?.mode)
-        || !Array.isArray(room.revision.mission.definition.props))) {
+    const matches = result?.requestId === plan.requestId && (linked
+      ? result.sessionId === plan.sessionIds[0] && Array.isArray(result.roomIds) && result.roomIds.length === 5
+        && result.roomIds.every((room, index) => room === index + 1) && validRevision(result.revision)
+        && result.revision.mission.definition.name === plan.missionName
+      : Array.isArray(result.rooms) && result.rooms.length === plan.sessionIds.length
+        && result.rooms.every((room, index) => room?.roomId === index + 1 && room.sessionId === plan.sessionIds[index]
+          && validRevision(room.revision)));
+    if (!matches) {
       notify('無法核對本批五房的原任務版本，已保留目前的準備選擇。', true);
       return;
     }
-    $('launch-mode').value = 'IndependentSet';
-    roomPlan.restore(result.rooms.map(room => room.revision));
+    $('launch-mode').value = plan.mode;
+    if (linked) {
+      state.launchPinned = result.revision;
+      missionOptions(result.revision.mission.id);
+      placement.recheckLaunch();
+    } else {
+      roomPlan.restore(result.rooms.map(room => room.revision));
+    }
     restored = true;
     notify('已套用本批五房的原任務版本。請核對各房場地，再建立準備場次。');
   });
-  if (restored && current()) $('launch-review-room').focus();
+  if (restored && current()) $(linked ? 'launch-mission' : 'launch-review-room').focus();
 }
 
 function renderVenueClosure(report, loading = false) {
@@ -838,10 +850,14 @@ function renderVenueClosure(report, loading = false) {
     && session.replay.throughSequence > 0).map(session => ({ roomId: session.roomIds[0], sessionId: session.sessionId,
     streamId: session.replay.streamId, throughSequence: session.replay.throughSequence, complete: true, mode: 'replay' }));
   const venue = replayRooms.length > 1 && typeof batch.requestId === 'string' ? { requestId: batch.requestId, rooms: replayRooms } : null;
-  if (typeof batch.requestId === 'string' && sessions.length === 5
+  const linkedPlan = sessions.length === 1 && sessions[0].roomIds.length === 5
+    && sessions[0].roomIds.every((room, index) => room === index + 1);
+  const independentPlan = sessions.length === 5
     && sessions.every((session, index) => session.roomIds.length === 1 && session.roomIds[0] === index + 1)
-    && new Set(sessions.map(session => session.sessionId)).size === 5) {
-    archivedPlan = { requestId: batch.requestId, sessionIds: sessions.map(session => session.sessionId) };
+    && new Set(sessions.map(session => session.sessionId)).size === 5;
+  if (typeof batch.requestId === 'string' && (linkedPlan || independentPlan)) {
+    archivedPlan = { requestId: batch.requestId, sessionIds: sessions.map(session => session.sessionId),
+      mode: linkedPlan ? 'Linked' : 'IndependentSet', missionName: sessions[0].missionName };
     restore.hidden = false;
     restore.disabled = state.busy || !!state.pending;
   }

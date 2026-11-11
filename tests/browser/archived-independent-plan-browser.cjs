@@ -10,10 +10,12 @@ module.exports = async function archivedIndependentPlanBrowser({ context, api, t
   const create = page.locator('#create-session-form button'), notice = page.locator('#notice');
   const activeIds = new Set();
   const archivePath = id => `/venue/closure/${id}/independent-plan`;
+  const linkedPath = id => `/venue/closure/${id}/linked-plan`;
   const selections = () => page.locator('#launch-room-missions-fields select').evaluateAll(fields => fields.map(field => field.value));
   const draft = { name: '結案原任務 A', briefing: '結案前的配置', durationSeconds: 360,
     environment: { mode: 'VR', weather: 'Rain', timeOfDay: 'Night', lightning: false },
-    enemies: { count: 2, behavior: 'Hold', autoAttack: false }, props: [] };
+    enemies: { count: 2, behavior: 'Hold', autoAttack: false },
+    props: [{ assetId: 'sandbag', position: { x: -2, y: 0, z: 2 }, yawDegrees: 30 }] };
   async function login(role) {
     await page.goto(base + '/console/');
     await page.locator('#login-key').fill(tokens[role]);
@@ -46,6 +48,7 @@ module.exports = async function archivedIndependentPlanBrowser({ context, api, t
     const mrHead = await api(`/missions/${mr.id}/revisions`, 'POST', { ...mrDraft, durationSeconds: 480, props: [] }, 'Master', 201, undefined, randomUUID());
     const linked = await newSession('Linked', [1, 2, 3, 4, 5], vr.id);
     const linkedBatch = await venueEnd();
+    await api(`/missions/${vr.id}/revisions`, 'POST', { ...draft, durationSeconds: 700, props: [] }, 'Master', 201, undefined, randomUUID());
     await newSession('Independent', [3], vr.id);
     const partialBatch = await venueEnd();
     const oldPlan = await api(archivePath(archive.requestId));
@@ -58,6 +61,16 @@ module.exports = async function archivedIndependentPlanBrowser({ context, api, t
     await api(archivePath(randomUUID()), 'GET', undefined, 'Master', 404);
     await api(archivePath(linkedBatch.requestId), 'GET', undefined, 'Master', 409);
     await api(archivePath(partialBatch.requestId), 'GET', undefined, 'Master', 409);
+    const linkedPlan = await api(linkedPath(linkedBatch.requestId));
+    assert.equal(linkedPlan.requestId, linkedBatch.requestId);
+    assert.equal(linkedPlan.sessionId, linked.id);
+    assert.deepEqual(linkedPlan.roomIds, [1, 2, 3, 4, 5]);
+    assert.equal(linkedPlan.revision.number, 1);
+    assert.deepEqual(linkedPlan.revision.mission, vr);
+    await api(linkedPath(linkedBatch.requestId), 'GET', undefined, 'Room2', 403);
+    await api(linkedPath(archive.requestId), 'GET', undefined, 'Master', 409);
+    await api(linkedPath(partialBatch.requestId), 'GET', undefined, 'Master', 409);
+    await api(linkedPath(randomUUID()), 'GET', undefined, 'Master', 404);
     await login('Room2');
     check(await restore.isHidden(), 'Room control cannot read or apply the archived five-room plan');
     const blocker = await newSession('Independent', [4], vr.id);
@@ -68,7 +81,8 @@ module.exports = async function archivedIndependentPlanBrowser({ context, api, t
     await page.locator('#venue-closure-load').click();
     await batchList.selectOption(linkedBatch.requestId);
     await rows.filter({ hasText: '房間 1、2、3、4、5' }).waitFor();
-    check(await restore.isHidden() && (await api(`/sessions/${linked.id}`)).state === 'Ended', 'A linked batch has no five-room restore action');
+    check(await restore.isVisible() && (await api(`/sessions/${linked.id}`)).state === 'Ended',
+      'A complete historical Linked batch offers its original saved mission');
 
     await page.locator('#tab-missions').click();
     await page.locator('#edit-mission').selectOption(mrHead.id);
@@ -77,6 +91,26 @@ module.exports = async function archivedIndependentPlanBrowser({ context, api, t
     await page.waitForFunction(() => document.querySelector('#draft-duration').value === '480' && !document.querySelector('#mission-fields').disabled);
     await duration.fill('499');
     await page.locator('#tab-operations').click();
+    const linkedRoute = '**/api' + linkedPath(linkedBatch.requestId);
+    await page.route(linkedRoute, route => route.fulfill({ status: 200, json: { ...linkedPlan, roomIds: [1, 2, 3, 4, 4] } }), { times: 1 });
+    await restore.click();
+    await notice.filter({ hasText: '無法核對本批五房' }).waitFor();
+    check(await mode.inputValue() === 'Independent' && await duration.inputValue() === '499',
+      'A malformed Linked response leaves the current launch mode and dirty draft intact');
+    const linkedRead = page.waitForResponse(response => response.url() === base + '/api' + linkedPath(linkedBatch.requestId));
+    await restore.click();
+    assert.equal((await linkedRead).headers()['cache-control'], 'no-store');
+    await notice.filter({ hasText: '已套用本批五房' }).waitFor();
+    await page.locator('#launch-layout-summary[data-status=valid]').waitFor();
+    const mission = page.locator('#launch-mission');
+    check(await mode.inputValue() === 'Linked' && await mission.inputValue() === vr.id && await duration.inputValue() === '499'
+      && (await mission.locator('option:checked').innerText()).includes('歷史')
+      && await page.locator('#launch-preview-duration').innerText() === '360 秒'
+      && (await page.locator('#launch-preview-environment').innerText()).includes('下雨')
+      && await page.locator('#launch-layout-props [data-index="0"]').getAttribute('transform') === 'translate(-2 -2) rotate(30)'
+      && await create.isDisabled() && (await api('/sessions')).map(session => session.id).join() === blocker.id,
+      'Linked restore pins the original duration, weather and cover while leaving the occupied room and draft alone');
+    await page.locator('#launch-preview').screenshot({ path: path.join(screenshots, 'linked-archived-plan.png') });
     await batchList.selectOption(archive.requestId);
     await restore.waitFor();
     const archiveRoute = '**/api' + archivePath(archive.requestId);
@@ -87,7 +121,7 @@ module.exports = async function archivedIndependentPlanBrowser({ context, api, t
     }, { times: 1 });
     await restore.click();
     await notice.filter({ hasText: '無法核對本批五房' }).waitFor();
-    check(await mode.inputValue() === 'Independent' && (await api('/sessions')).map(session => session.id).join() === blocker.id,
+    check(await mode.inputValue() === 'Linked' && (await api('/sessions')).map(session => session.id).join() === blocker.id,
       'A mismatched archived session leaves the preparation mode and occupied room untouched');
 
     const read = page.waitForResponse(response => response.url() === base + '/api' + archivePath(archive.requestId));
@@ -120,6 +154,19 @@ module.exports = async function archivedIndependentPlanBrowser({ context, api, t
         && session.roomIds[0] === plan[index].roomId && session.mission.id === plan[index].missionId)
       && JSON.stringify(await api(archivePath(archive.requestId))) === JSON.stringify(oldPlan),
       'Explicit confirmation creates five fresh sessions with the archived assignments and preserves the original archive');
+    for (const session of recreated) await end(session.id);
+    await page.locator('#refresh').click();
+    await batchList.selectOption(linkedBatch.requestId);
+    await restore.click();
+    await notice.filter({ hasText: '已套用本批五房' }).waitFor();
+    await create.click();
+    await notice.filter({ hasText: '場次建立結果已確認' }).waitFor();
+    const [newLinked] = await api('/sessions');
+    activeIds.add(newLinked.id);
+    check(newLinked.id !== linked.id && newLinked.mode === 'Linked' && newLinked.state === 'Preparing'
+      && newLinked.roomIds.join() === '1,2,3,4,5' && newLinked.mission.id === vr.id && await duration.inputValue() === '499'
+      && JSON.stringify(await api(linkedPath(linkedBatch.requestId))) === JSON.stringify(linkedPlan),
+      'The original Linked mission creates a new five-room session without rewriting the archived mission or the draft');
   } finally {
     for (const id of activeIds) await end(id);
     await page.close();
