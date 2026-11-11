@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-11 Windows 伺服器 0.50.7 單房視窗複驗
+
+- 使用既有 Windows 遊戲伺服器 0.50.7、啟動器 1.20 和管理控制台 0.31.127。兩場從 WinForms 貼上隔離實例的完整路徑、載入兩房、核對房間一及任務版本、設定 UDP 埠，再用鍵盤啟動。測試程式以管理 API 開始與結束任務，兩場都等雙封存與原生程序停止後從視窗關閉，退出碼皆為 0。 [鍵盤操作](WINDOWS_SERVER_PACKAGE.md#選檔啟動及結算驗收)
+- 第一場核對 463 格世界紀錄，名冊有一席，未啟動玩家端。第二場在視窗啟用來源紀錄，一名同機 Windows 模擬玩家連線。伺服器觀察到的 UDP 來源、原戰績與一份伺服器確認回條相符，世界紀錄封存至第 218 格，沒有待確認的世界幀。 [第一場](../artifacts/server-gui/run-00c7f690d70946ebab2ce0ada5429d4c/checks.json) · [同機來源與戰績](../artifacts/server-gui/run-00f28fc026c04d788d09273ce796a48c/field-results.json)
+- 另一次開啟系統選檔對話框時，檔名欄兩次點擊由 `PickerHost.exe` 攔截，該次未選檔、未啟動伺服器，退出碼為 1。三次測試均已清理，C／F 快照分別核對 14、16、9 檔。系統選檔、跨機 25 人、頭盔與廠商硬體仍待驗收。 [選檔阻擋](../artifacts/server-gui/run-f651c72a83894de681badf777efe94c1/gui-blocker.json) · [同機場清理](../artifacts/server-gui/run-00f28fc026c04d788d09273ce796a48c/cleanup.json)
+
 ## 2026-11-11 Quest 收尾以原伺服器紀錄核對來源
 
 - 場館驗收的 `questCaptures` 可使用部署時的 `deviceMap`。工具從每席原 Quest 日誌的最後連線取得伺服器確認的 UDP 來源，核對映射席位、不同私有 IPv4、原遊戲埠與封存戰績。摘要標示 `questCaptureAddressSource=server-observed`。選用 `networkPlan` 時仍會核對現場獨立記錄的 IPv4。 [操作說明](EXTERNAL_CLIENTS.md#以原-quest-裝置對照表驗收收尾)
