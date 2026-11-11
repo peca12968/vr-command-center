@@ -507,14 +507,28 @@ async function main() {
             const player = expected.players.find(row => row.seat === personal.seat);
             const world = `/api/sessions/${expected.sessionId}/world`;
             const watch = page.waitForRequest(request => new URL(request.url()).pathname === world + '/watch');
-            const search = page.waitForResponse(reply => new URL(reply.url()).pathname === world + '/event-frames');
+            const findEvents = () => page.waitForResponse(reply => new URL(reply.url()).pathname === world + '/event-frames');
+            const search = findEvents();
             await page.locator(`[data-venue-debrief-replay="${player.seat}"]`).click();
             const query = new URL((await watch).url()).searchParams;
             assert.deepEqual([query.get('mode'), query.get('fromFrame')], ['replay', String(expected.worldSequence)]);
-            const eventResponse = await search;
-            const { sessionId, streamId, playerId, throughFrame, frames } = await eventResponse.json();
-            assert.deepEqual([sessionId, streamId, playerId, throughFrame, new URL(eventResponse.url()).searchParams.get('roomId')],
-              [expected.sessionId, expected.streamId, player.playerId, expected.worldSequence, String(roomId)]);
+            const { sessionId, streamId, worldSequence: throughFrame } = expected, { playerId } = player;
+            const pages = [];
+            let eventResponse = await search, cursor = 0;
+            for (;;) {
+              const events = await eventResponse.json();
+              const { afterFrame, scannedThroughFrame, nextAfterFrame, frames } = events;
+              assert.deepEqual([events.sessionId, events.streamId, events.playerId, events.throughFrame, afterFrame,
+                new URL(eventResponse.url()).searchParams.get('roomId')], [sessionId, streamId, playerId, throughFrame, cursor, String(roomId)]);
+              pages.push({ afterFrame, scannedThroughFrame, nextAfterFrame: nextAfterFrame ?? null, frames });
+              if (frames.length || nextAfterFrame == null) break;
+              assert(nextAfterFrame === scannedThroughFrame && nextAfterFrame > cursor && nextAfterFrame < throughFrame);
+              cursor = nextAfterFrame;
+              const following = findEvents();
+              await page.locator('#world-event-search-next').click();
+              eventResponse = await following;
+            }
+            const { frames } = pages.at(-1);
             assert.equal(await page.locator('#world-room').inputValue(), String(roomId));
             assert.match(await page.locator('#world-review-player-name').innerText(), new RegExp(playerId.slice(0, 8)));
             const canvas = page.locator('#world-canvas');
@@ -526,7 +540,7 @@ async function main() {
               assert.equal(await page.locator('#world-events tr').count(), frames[0].matchCount);
             }
             await page.locator('#world-review').screenshot({ path: path.join(path.dirname(output), `${config.mode}-${batchId}-seat-replay.png`) });
-            debriefReplay.push({ batchId, sessionId, roomId, playerId, streamId, throughFrame, frames });
+            debriefReplay.push({ batchId, sessionId, roomId, playerId, streamId, throughFrame, pages });
             await page.locator('#tab-operations').click();
           } else {
             await page.locator('#venue-debrief-seats-close').click();

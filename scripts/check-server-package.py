@@ -1900,12 +1900,21 @@ def main():
             for case in cases:
                 room = next(row for row in read(Path(case['debriefSeats'])) if row['roomId'] == 5)
                 player = room['players'][-1]
-                events = request(f'/api/sessions/{room["sessionId"]}/world/event-frames?afterFrame=0'
-                                 f'&throughFrame={room["worldSequence"]}&roomId=5&playerId={player["playerId"]}')
-                assert not args.check_room_combat or events['frames']
+                pages, cursor = [], 0
+                while True:
+                    events = request(f'/api/sessions/{room["sessionId"]}/world/event-frames?afterFrame={cursor}'
+                                     f'&throughFrame={room["worldSequence"]}&roomId=5&playerId={player["playerId"]}')
+                    next_cursor = events.get('nextAfterFrame')
+                    pages.append({**{key: events[key] for key in ('afterFrame', 'scannedThroughFrame', 'frames')},
+                                  'nextAfterFrame': next_cursor})
+                    if events['frames'] or next_cursor is None:
+                        break
+                    assert next_cursor == events['scannedThroughFrame'] and cursor < next_cursor < room['worldSequence']
+                    cursor = next_cursor
+                assert not args.check_room_combat or pages[-1]['frames']
                 replays.append({'batchId': case['batchId'], 'sessionId': room['sessionId'], 'roomId': 5,
                                 'playerId': player['playerId'], 'streamId': room['streamId'],
-                                'throughFrame': room['worldSequence'], 'frames': events['frames']})
+                                'throughFrame': room['worldSequence'], 'pages': pages})
             check(result['debriefReplay'] == replays,
                   mode + ' shipped console opens each original room five seat replay and its exact event frames')
     def verify_live_room_navigation(entries, clients, linked):

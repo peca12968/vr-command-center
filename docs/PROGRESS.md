@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 從全館席位開啟個人回放
+
+- 控制台 0.31.137 在全館收尾「查看席位」新增「個人回放」。主控可從原批次開啟該玩家及房間，停在封存尾格，再檢視玩家的保存事件。未確認回條的席位也可回看。個人 CSV 會核對原場次及該席玩家識別。 [操作說明](SESSION_CLOSURE.md#從全館收尾查看席位)
+- 116 項解壓包 Chromium 專項通過，涵蓋房間重用、未確認席位、重複玩家識別及錯玩家 CSV。首輪測試曾在事件回應內核對房號，既有 API 的房號實際在請求參數，已修正測試。第一輪原生瀏覽器已開啟原場次，但檢查器誤要求第一頁必有事件。保留原紀錄，複驗使用原「繼續搜尋」進到下一頁。 [瀏覽器專項](../artifacts/console-seat-replay-137-final/checks.json) · [首輪原生瀏覽器結果](../artifacts/server-package-checks/run-099c0c47f1e54acc9e11e13b5c9c63b5/independent-venue-field-ui.json)
+- 沿用 Windows 遊戲 0.50.7 完成 583 項原生整合。獨立和合併各有 25 個同機玩家端。三次席位操作涵蓋兩種模式及歷史批次，每次均翻到第二頁並跳轉首筆事件，頁面畫格與原遊戲世界日誌相符。六場雙封存、1,600 格完整回放及 50 份原玩家戰績與伺服器確認相符，場次與程序已清理。 [驗證摘要](../artifacts/venue-seat-replay-0.31.137-validation.json)
+- 825 項 HTTP、113 項世界串流、111 項 Node 及 107 項管理包檢查通過。管理包 564 筆清單逐檔核對，程序停止後遊戲與管理 C／F 快照分別有 220、18 個非資料庫檔案雜湊一致。產品來源 `9b93a61c` 已推送。GitHub Actions 因帳務或支出上限未啟動。頭盔、跨機與廠商設備仍待現場驗收。 [Windows 管理包](WINDOWS_CONTROL_PACKAGE.md) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42987238524)
+
 ## 2026-11-11 五房排演可單獨停止指定房間
 
 - 硬體模擬器 0.2.13 支援五房運行中以 `room-01.stop` 至 `room-05.stop` 停止單房。獨立和合併模式均驗證第二房保留五筆原確認、取消一筆待確認批次，第五房沿用原連線確認第六筆。第二房發布終止狀態後可用同一設定另開閘道，使用新連線和當前游標。兩種模式的遊戲場次仍處於 Running。 [操作說明](HARDWARE.md#停止五房排演中的指定房間) · [即時檢查](../artifacts/live-hardware-gateway/run-739fa4feb63441348900b3ee8bb76806/checks.json)
