@@ -4304,12 +4304,12 @@ def main():
                     else:command(entry['sessionId'],'End')
             for entry in entries:finish(entry)
             for sample in live_samples:
-                sid, room_id, sequence = (sample[key] for key in ('sessionId','roomId','sequence'))
-                route = f'/api/sessions/{sid}/world'
-                archived = request(route+f'?observerRoomId={room_id}')
+                world_sid, observed_room, frame_sequence = (sample[field] for field in ('sessionId','roomId','sequence'))
+                world_route = f'/api/sessions/{world_sid}/world'
+                archived = request(world_route+f'?observerRoomId={observed_room}')
                 check(archived['complete'] and archived['header']['streamId'] == sample['streamId']
-                      and request(route+f'/frames/{sequence}?observerRoomId={room_id}') == sample['frame'],
-                      f'{sid} room {room_id} frame {sequence} remains exact after native sealing')
+                      and request(world_route+f'/frames/{frame_sequence}?observerRoomId={observed_room}') == sample['frame'],
+                      f'{world_sid} room {observed_room} frame {frame_sequence} remains exact after native sealing')
             if args.check_venue_end:
                 closed = request('/api/venue/closure')['batch']
                 retry = request(route, body, request_id=key)
