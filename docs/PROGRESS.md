@@ -1,5 +1,14 @@
 # 開發進度
 
+## 2026-11-11 主控下載環境與敵軍批次
+
+- 控制台 0.31.127 可從兩種批次區塊下載畫面使用的原 `/api/venue/phase` JSON。檔名含原批次 ID，主控重新登入後也可下載仍列為最近一批的已結束場次資料。 [操作方式](EXTERNAL_CLIENTS.md#核對五房環境與敵軍指令的執行畫格)
+- 用實際解壓的管理包在獨立五房與合併場各運行 25 個同機 Windows 玩家端。Chromium 下載的四個 JSON 與原 API 回覆逐位元組相符，直接納入各場封存驗收。506 項檢查、1,830 格完整回放、50 份原戰績確認通過，程序清理完成，C／F 221 檔相符。 [原生結果](../artifacts/server-package-checks/run-e3383a7378ce461aaab4db0307f2d773/evidence.json) · [下載及來源核對](../artifacts/venue-setting-download-127/validation.json)
+- 管理包 107 項檢查、C／F 27 檔相符，封裝 7 項及封存操作的 Chromium 專項 100 項通過。首次專項的舊斷言計算整個區塊的按鈕數，新增下載按鈕後失敗。把選取器限定為原回放按鈕，再重跑全部專項。 [管理包驗證](../artifacts/control-package-checks/run-a41755a566074d9b961be0648a1ba601/checks.json) · [瀏覽器專項](../artifacts/console-venue-setting-download-127-final/checks.json)
+- 完整回歸通過 111 項 Node 測試與 920 項 Chromium 檢查。首輪 Node 測試通過，但相對輸出路徑從 pnpm 子目錄解析，瀏覽器未啟動。以專案的絕對輸出路徑重跑後通過。 [完整回歸](../artifacts/console-venue-setting-full-127/checks.json)
+- Windows／Quest 發行核對使用遊戲 0.50.6 及新版管理包。玩家啟動器視窗、跨機真人、頭盔、MR 場地及廠商硬體依原驗收範圍續驗。 [發行核對](../artifacts/venue-release-0.50.6-console-127.json)
+- 發行來源為 `ac6ed21f`，最終驗證來源為 `d355174c`。解壓的 HTML 與 JavaScript 及凍結的測試來源與對應 Git 提交逐位元組相符。GitHub Actions `42946903308` 的 job `130281773299` 因帳務或支出上限未啟動。 [來源核對](../artifacts/venue-setting-download-127/source-validation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42946903308)
+
 ## 2026-11-11 五房環境與敵軍指令的封存核對
 
 - `verify-field-results.py` 可用原主控 `/api/venue/phase` JSON 核對環境及敵軍策略。每個原場次須在封存世界日誌中保存同一管理序號的執行畫格。摘要列出每批指令及各場回放格。 [操作方式](EXTERNAL_CLIENTS.md#核對五房環境與敵軍指令的執行畫格)
