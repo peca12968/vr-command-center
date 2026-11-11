@@ -478,6 +478,8 @@ function applyPermissions() {
   $('use-mission-template').disabled = locked || !master() || !checkedTemplate;
   $('compare-version').disabled = locked || !state.history || !$('mission-version').value;
   $('launch-compared-version').disabled = locked || !comparedVersion;
+  $('restore-compared-version').hidden = !master();
+  $('restore-compared-version').disabled = locked || !master() || !restoreParent();
   $('more-versions').disabled = locked || !state.history?.nextBefore;
   $('launch-version').disabled = locked || !state.draftBase;
   $('save-revision').disabled = locked || !master() || !state.draftBase || state.draftBase.number !== knownHeadNumber(state.draftBase.seriesId);
@@ -1105,21 +1107,27 @@ async function sendPending() {
       const selectedLaunch = commonLaunchRevision();
       await refreshData(epoch);
       if (epoch !== state.epoch) return;
-      const parent = pending.kind === 'mission-revise' ? state.draftBase : null;
+      const parent = pending.parent;
       const revision = await api(`/missions/${response.id}/version`);
       if (epoch !== state.epoch) return;
       requireMissionVersion(revision, response.id, parent?.seriesId ?? response.id, (parent?.number ?? 0) + 1);
       if (revision.previousId !== (parent?.mission.id ?? null)) throw new MissionVersionMismatch();
+      if (pending.restoredFrom && JSON.stringify(revision.mission.definition) !== JSON.stringify(pending.body))
+        throw new MissionVersionMismatch();
       const history = await api(`/missions/${response.id}/history`);
       if (epoch !== state.epoch) return;
       requireMissionHistory(history, revision.seriesId, revision.number);
       if (!await rememberHead(history, epoch)) return;
-      state.draftBase = revision; state.draftChanged = false; state.draftSavedAt = response.createdAtUtc; state.history = history;
+      if (!pending.restoredFrom) {
+        state.draftBase = revision; state.draftChanged = false; state.draftSavedAt = response.createdAtUtc;
+      }
+      state.history = history;
       clearMissionComparison();
-      state.launchPinned = selectedLaunch ?? revision;
-      renderHistory(response.id); missionOptions(state.launchPinned.mission.id, history.headId); draftStatus();
+      state.launchPinned = selectedLaunch ?? (pending.restoredFrom ? null : revision);
+      renderHistory(response.id); missionOptions(state.launchPinned?.mission.id, history.headId); draftStatus();
       state.pending = null;
-      notify('任務保存已確認，原版本與既有場次保持不變。可選擇此版本開場。'); return;
+      notify(pending.restoredFrom ? `已將第 ${pending.restoredFrom} 版內容保存為第 ${revision.number} 版。`
+        : '任務保存已確認，原版本與既有場次保持不變。可選擇此版本開場。'); return;
     }
     if (pending.kind === 'create-set') {
       const sessions = response?.sessions;
@@ -1182,6 +1190,8 @@ async function sendPending() {
     if (state.pending === pending && !pending.accepted && error.status >= 400 && error.status < 500) {
       state.pending = null;
       if (pending.kind === 'venue-phase') setVenuePhase(null);
+      if (pending.restoredFrom && error.status === 409)
+        error.message = '無法接續已確認的任務版本。草稿已保留，請重新整理並核對最新版本後再試。';
     }
     throw error;
   }
@@ -1397,6 +1407,7 @@ function clearMissionComparison() {
   $('mission-comparison-summary').textContent = '';
   $('mission-comparison-rows').replaceChildren();
   $('launch-compared-version').disabled = true;
+  $('restore-compared-version').disabled = true;
 }
 async function compareMissionVersion(id) {
   const epoch = state.epoch, series = state.history?.seriesId;
@@ -1431,10 +1442,16 @@ async function compareMissionVersion(id) {
   $('mission-comparison-table').hidden = rows.length === 0;
   $('mission-comparison').hidden = false;
 }
+function restoreParent() {
+  if (!comparedVersion) return null;
+  return state.catalog.find(row => row.seriesId === comparedVersion.seriesId && row.number > comparedVersion.number) ?? null;
+}
 async function saveMission(revise = false) {
   if (state.pending || (revise && !state.draftBase)) return;
   clearPropCopies();
-  state.pending = { kind: revise ? 'mission-revise' : 'mission-create', path: revise ? `/missions/${state.draftBase.mission.id}/revisions` : '/missions', method: 'POST', requestId: uuid(),
+  const parent = revise ? state.draftBase : null;
+  state.pending = { kind: revise ? 'mission-revise' : 'mission-create', parent,
+    path: parent ? `/missions/${parent.mission.id}/revisions` : '/missions', method: 'POST', requestId: uuid(),
     body: draftDefinition() };
   await sendPending();
 }
@@ -1708,6 +1725,17 @@ function pinLaunchVersion(revision) {
 }
 $('launch-version').addEventListener('click', () => pinLaunchVersion(state.draftBase));
 $('launch-compared-version').addEventListener('click', () => pinLaunchVersion(comparedVersion));
+$('restore-compared-version').addEventListener('click', () => {
+  const parent = restoreParent(), source = comparedVersion;
+  if (!master() || state.busy || state.pending || !parent) return;
+  if (!confirm(`將「${source.mission.definition.name}」第 ${source.number} 版的內容接在第 ${parent.number} 版後，保存為第 ${parent.number + 1} 版？目前草稿會保留。`)) return;
+  const body = structuredClone(source.mission.definition);
+  run(async () => {
+    state.pending = { kind: 'mission-revise', parent, restoredFrom: source.number,
+      path: `/missions/${parent.mission.id}/revisions`, method: 'POST', requestId: uuid(), body };
+    await sendPending();
+  });
+});
 $('new-mission').addEventListener('click', () => { if (confirmDraftDiscard('建立新草稿')) resetDraft(); });
 $('add-sandbag').addEventListener('click', () => addProp('sandbag'));
 $('add-barrel').addEventListener('click', () => addProp('barrel'));

@@ -187,6 +187,80 @@ module.exports = async function missionBrowser({ page, context, api, tokens, bas
       check(await compared.evaluate(node => node.hidden) && await editor.locator('#mission-comparison-rows tr').count() === 0,
         'A delayed comparison response from a prior login cannot reopen the comparison or restore private draft data');
     } finally { releaseComparison(); await editor.unroute(`**/api/missions/${mission.id}/version`); }
+
+    await editor.locator('#login-key').fill(tokens.Master); await editor.locator('#login-form button').click();
+    await editor.locator('#tab-missions').click(); await editor.locator('#edit-mission').selectOption(fourth.id);
+    await editor.locator('#load-mission').click(); await waitForDom(() => document.querySelector('#draft-status').textContent.includes('第 4 版')); await ready();
+    await editor.locator('#launch-version').click(); await editor.locator('#tab-missions').click();
+    const restore = editor.locator('#restore-compared-version');
+    await editor.locator('#compare-version').click(); await compared.waitFor(); await ready();
+    check(await restore.isDisabled(), 'The current revision cannot be restored as a historical revision');
+    await editor.locator('#draft-name').fill('保留未儲存的任務草稿');
+    await editor.locator('#prop-x').fill('5.5'); await editor.locator('#prop-x').blur();
+    const undoBeforeRestore = await editor.locator('#prop-history-status').innerText();
+    await editor.locator('#mission-version').selectOption(mission.id); await editor.locator('#compare-version').click(); await compared.waitFor(); await ready();
+    await editor.setViewportSize({ width: 390, height: 844 });
+    check(await restore.isEnabled() && await editor.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'The historical restore action fits the mobile layout');
+    await editor.screenshot({ path: path.join(screenshots, 'mission-restore-mobile.png'), fullPage: true });
+    await editor.setViewportSize({ width: 1440, height: 1080 });
+    editor.once('dialog', dialog => dialog.dismiss());
+    await restore.click();
+    check((await api(`/missions/${mission.id}/history`)).headId === fourth.id && await editor.locator('#pending-command').isHidden(),
+      'Cancelling historical restore makes no library revision or pending request');
+
+    const restoreRequests = [], restoreRoute = '**/api/missions/*/revisions';
+    let discardRestoreResponse = false;
+    await editor.route(restoreRoute, async route => {
+      const request = route.request();
+      const attempt = { path: new URL(request.url()).pathname, body: request.postData(), key: request.headers()['idempotency-key'] };
+      restoreRequests.push(attempt);
+      if (!discardRestoreResponse) { await route.continue(); return; }
+      discardRestoreResponse = false;
+      attempt.deliveredStatus = (await route.fetch()).status();
+      await route.abort('failed');
+    });
+    try {
+      const dialogOpened = editor.waitForEvent('dialog');
+      const staleRestore = restore.click();
+      const dialog = await dialogOpened;
+      let fifth;
+      try {
+        fifth = await revise(fourth.id, { ...fourth.definition, name: '另一主控在確認期間保存第五版' });
+        check(dialog.message().includes('第 1 版') && dialog.message().includes('第 4 版後') && dialog.message().includes('第 5 版'),
+          'Restore confirmation displays the selected historical revision, exact parent and expected next revision');
+      } finally { await dialog.accept(); await staleRestore; }
+      await waitForDom(() => document.querySelector('#notice').textContent.includes('無法接續已確認的任務版本')); await ready();
+      check(restoreRequests[0].path.endsWith(`/${fourth.id}/revisions`) && (await api(`/missions/${mission.id}/history`)).headId === fifth.id
+        && await editor.locator('#pending-command').isHidden() && await editor.locator('#draft-name').inputValue() === '保留未儲存的任務草稿',
+        'A new head during confirmation rejects the exact stale parent and retains the draft');
+      await editor.locator('#refresh').click(); await editor.locator(`#edit-mission option[value="${fifth.id}"]`).waitFor({ state: 'attached' }); await ready();
+      await editor.screenshot({ path: path.join(screenshots, 'mission-restore-desktop.png'), fullPage: true });
+      discardRestoreResponse = true;
+      editor.once('dialog', confirmation => confirmation.accept());
+      await restore.click();
+      await waitForDom(() => !document.querySelector('#pending-command').hidden && !document.querySelector('#retry-command').disabled);
+      const sixthId = (await api(`/missions/${mission.id}/history`)).headId;
+      const sixth = await api(`/missions/${sixthId}/version`);
+      check(restoreRequests[1].deliveredStatus === 201 && sixth.number === 6 && sixth.previousId === fifth.id
+        && JSON.stringify(sixth.mission.definition) === JSON.stringify(mission.definition),
+        'Restore sends the original complete historical definition and appends it once to the newly confirmed head');
+      const seventh = await revise(sixthId, { ...sixth.mission.definition, name: '另一主控在重試前保存第七版' });
+      await editor.locator('#retry-command').click();
+      await waitForDom(() => document.querySelector('#pending-command').hidden && document.querySelector('#notice').textContent.includes('保存為第 6 版')); await ready();
+      const { deliveredStatus, ...firstRestore } = restoreRequests[1];
+      const history = await api(`/missions/${mission.id}/history`);
+      check(restoreRequests.length === 3 && firstRestore.key && JSON.stringify(restoreRequests[2]) === JSON.stringify(firstRestore)
+        && history.headId === seventh.id && history.versions.filter(row => row.number === 6).length === 1,
+        'A lost restore response retries the same payload and request ID even after a later revision is saved');
+      check(await editor.locator('#draft-name').inputValue() === '保留未儲存的任務草稿' && await editor.locator('#prop-x').inputValue() === '5.5'
+        && await editor.locator('#undo-prop').isEnabled() && await editor.locator('#prop-history-status').innerText() === undoBeforeRestore
+        && (await editor.locator('#draft-status').innerText()).includes('第 4 版') && await editor.locator('#save-revision').isDisabled(),
+        'Restoring a saved version preserves the dirty draft, original base and object undo history');
+      const originalSession = await api(`/sessions/${session.id}`);
+      check(await editor.locator('#mission-version').inputValue() === sixthId && await editor.locator('#launch-mission').inputValue() === fourth.id
+        && originalSession.mission.id === mission.id && JSON.stringify(originalSession.mission.definition) === JSON.stringify(mission.definition),
+        'Restore selects the confirmed history entry and preserves the existing launch pin and session snapshot');
+    } finally { await editor.unroute(restoreRoute); }
     check(errors.length === 0, 'Mission revision workflow has no uncaught browser script errors');
   } catch (error) {
     const diagnostic = await editor.evaluate(() => ({ visibility: document.visibilityState,
