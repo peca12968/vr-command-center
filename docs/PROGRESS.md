@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-11 即時切房的 Windows 原生驗收
+
+- 使用控制台 0.31.129 與 Windows 遊戲 0.50.7。獨立和合併模式各有 25 個同機 Windows 客戶端。主控依序選擇第 1、4、2、5、3 房，兩輪各使用五條分房串流，切換時關閉前四條。每房觀察到畫格前進，畫面顯示的五席統計逐欄符合原伺服器該格，包含實際遊戲內中彈及耗損。 [重跑方式](WORLD_RECORDING.md#從觀戰頁切換目前房間) · [合併場畫面](../artifacts/server-package-checks/run-ef9575ca23964ef5bda1fb9a9978918e/linked-live-rooms/live-room.png)
+- 驗收通過 483 項。封存後重讀先前觀戰的十個畫格與統計，全部相符。獨立五場完整回放 1,539 格，合併場 285 格。50 筆原戰績與伺服器確認、場次 CSV 及合併分房 ZIP 相符。活動場次歸零，隔離程序已清理，C／F 254 檔雜湊相符。 [驗收摘要](../artifacts/native-live-rooms-0.31.129-validation.json)
+- 首輪五個獨立房已通過畫格核對，驗收工具之後把結束命令重試送到錯誤路徑而退出。修正工具後使用新隔離場次重跑，首輪結果保留。GitHub Actions 對 `1e954888` 因帳務或支出上限未執行。跨機 25 人、頭盔及廠商硬體仍待現場驗收。 [首次測試](../artifacts/server-package-checks/run-31d416c258be4b98b511a13265e8f3a3/stage.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42965334311)
+
 ## 2026-11-11 觀戰頁直接切換目前房間
 
 - 控制台 0.31.129 提供主控房間入口。獨立模式可直接切換各自錄製，合併模式沿用同一場次，只讀取選定房間的場景與統計。選取後開啟上帝俯視，並標示目前觀戰房間。 [操作說明](WORLD_RECORDING.md#從觀戰頁切換目前房間)
