@@ -25,7 +25,7 @@ export function closureView(session, statistics, world, result = 'Waiting') {
   const complete = combatSealed && worldSealed;
   const worldText = worldSealed ? '已封存' : result === 'Unavailable' ? '暫時無法確認' : result === 'Missing' ? '尚無世界錄製紀錄'
     : result === 'Received' && !valid ? '來源尚未對上' : result === 'Received' ? '等待封存' : '正在確認';
-  return { complete, combat: combatSealed ? '已封存' : combat ? '等待封存' : '等待統計同步', world: worldText,
+  return { complete, worldComplete: worldSealed, combat: combatSealed ? '已封存' : combat ? '等待封存' : '等待統計同步', world: worldText,
     combatCount: combat ? stream.acceptedSequence : null, worldCount: result === 'Received' && valid ? world.acceptedSequence : null,
     text: complete ? '戰鬥統計與世界回放已封存。請繼續等待遊戲伺服器完成玩家戰績傳送與收尾；此頁不確認送達。'
       : result === 'Unavailable' ? '暫時無法確認世界回放，正在重試；請先保留遊戲伺服器。'
@@ -51,6 +51,7 @@ export function debriefReceiptPlayers(session, actor, world) {
 export function mountClosure(getState, unauthorized, openReview, report) {
   const panel = document.getElementById('closure-status'), combat = document.getElementById('closure-combat'), worldLabel = document.getElementById('closure-world'), summary = document.getElementById('closure-summary');
   const retained = document.getElementById('closure-retained');
+  const replayButton = document.getElementById('open-closure-replay');
   const receiptsPanel = document.getElementById('debrief-receipts'), receiptsLabel = document.getElementById('debrief-receipt-count');
   const receiptsList = document.getElementById('debrief-receipt-players');
   const fieldPanel = document.getElementById('field-evidence'), fieldButton = document.getElementById('download-field-evidence');
@@ -59,7 +60,7 @@ export function mountClosure(getState, unauthorized, openReview, report) {
   const reviewButton = document.getElementById('open-player-review'), damageButton = document.getElementById('open-player-damage');
   let active = false, generation = 0, identity = '', controller = null, attempted = -Infinity, world = null, result = 'Waiting', refreshFailed = false;
   let fieldRequest = null;
-  let reviewTarget = null, reviewOptions = '', receiptRows = '';
+  let replayTarget = null, reviewTarget = null, reviewOptions = '', receiptRows = '';
   const context = () => {
     const state = getState(), session = state.session;
     return state.actor && state.key && !state.pending && session?.id === state.selected && sequence(session.sequence)
@@ -95,6 +96,17 @@ export function mountClosure(getState, unauthorized, openReview, report) {
     if (sequence(view.combatCount)) counts.push(`已接受 ${view.combatCount} 筆戰鬥資料`);
     if (sequence(view.worldCount)) counts.push(`已保存 ${view.worldCount} 格錄製`);
     retained.textContent = counts.join(' · '); retained.hidden = counts.length === 0;
+    const { session, actor } = state;
+    const roomId = actor?.role === 'RoomController' ? actor.roomId
+      : session?.roomIds.length === 1 ? session.roomIds[0] : null;
+    const scope = actor?.role === 'RoomController' && session?.roomIds.includes(roomId) ? roomId : null;
+    replayTarget = view.worldCount > 0 && (actor?.role === 'Master' || scope !== null) ? {
+      mode: 'replay', sessionId: session.id, streamId: session.combatStream.streamId, roomId,
+      observerRoomId: scope, throughSequence: view.worldCount, complete: view.worldComplete
+    } : null;
+    replayButton.hidden = !replayTarget;
+    replayButton.disabled = !replayTarget || state.busy;
+    replayButton.textContent = view.worldComplete ? '回放原場次' : '回放已保存片段';
     panel.classList.toggle('closure-complete', view.complete); panel.classList.toggle('warning', view.warning);
     fieldPanel.hidden = state.actor?.role !== 'Master' || state.session?.state !== 'Ended';
     fieldButton.disabled = fieldPanel.hidden || !!fieldRequest || !view.complete || !state.session?.startedAtUtc || !state.session?.players?.length;
@@ -125,6 +137,7 @@ export function mountClosure(getState, unauthorized, openReview, report) {
     report.update(reportVisible);
   }
   reviewPlayer.addEventListener('change', render);
+  replayButton.addEventListener('click', () => { render(); if (!replayButton.disabled) openReview(replayTarget); });
   reviewButton.addEventListener('click', () => { render(); if (reviewTarget) openReview(reviewTarget); });
   damageButton.addEventListener('click', () => { render(); if (!damageButton.disabled) openReview({ ...reviewTarget, latestDamage: true }); });
   function reset() { clear(); identity = ''; refreshFailed = false; render(); }

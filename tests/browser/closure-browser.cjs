@@ -18,6 +18,7 @@ module.exports = async ({ context, api, tokens, base, mission, screenshots, chec
   let gate = new Promise(resolve => { release = resolve; }), began = new Promise(resolve => { requested = resolve; });
   const page = await context.newPage();
   const completed = () => page.locator('#closure-status.closure-complete');
+  const replay = page.locator('#open-closure-replay');
   try {
     await page.route(`**/api/sessions/${first.id}/world?includeDebriefReceipts=true`, async route => {
       if (hold) { requested(); await gate; }
@@ -38,8 +39,10 @@ module.exports = async ({ context, api, tokens, base, mission, screenshots, chec
     await page.locator('#include-ended').check(); await page.locator('#session-select').selectOption(first.id);
     await page.waitForFunction(() => document.querySelector('#closure-combat').textContent.includes('已封存') && document.querySelector('#closure-world').textContent.includes('等待封存'));
     check(await completed().count() === 0 && await page.locator('#export-report').isEnabled(), 'Combat seal permits the original CSV independently while world archive remains pending; world response is a UI fixture');
+    check(await replay.innerText() === '回放已保存片段' && await replay.isEnabled(), 'A verified saved prefix offers replay while the world seal is pending');
     await page.screenshot({ path: path.join(screenshots, 'closure-pending.png'), fullPage: true });
     mode = 'complete'; await completed().waitFor();
+    check(await replay.innerText() === '回放原場次' && await replay.isEnabled(), 'A matching world seal offers replay from the start of the original recording');
     check((await page.locator('#closure-summary').innerText()).includes('不確認送達'), 'Dual archive confirmation explicitly leaves player result delivery and server shutdown unconfirmed');
     await page.screenshot({ path: path.join(screenshots, 'closure-complete.png'), fullPage: true });
     mode = 'unconfirmed-receipt';
@@ -51,14 +54,14 @@ module.exports = async ({ context, api, tokens, base, mission, screenshots, chec
     check((await page.locator('#debrief-receipt-players li').innerText()).endsWith('已確認'), 'A matching receipt updates the original terminal roster entry');
     for (const [next, expected] of [['unavailable', '暫時無法確認'], ['missing', '尚未取得'], ['foreign', '尚未對上'], ['forbidden', '暫時無法確認']]) {
       mode = next; await page.waitForFunction(text => document.querySelector('#closure-summary').textContent.includes(text), expected);
-      check(await completed().count() === 0, `World ${next} cannot reuse a previous completed archive`);
+      check(await completed().count() === 0 && await replay.isHidden(), `World ${next} cannot reuse a previous archive or replay action`);
       if (next === 'unavailable') check(await page.locator('#debrief-receipts').isHidden(), 'A failed refresh clears displayed player receipts');
     }
     await page.screenshot({ path: path.join(screenshots, 'closure-unconfirmed.png'), fullPage: true });
     mode = 'complete'; await completed().waitFor();
     await page.route('**/api/rooms', route => route.fulfill({ status: 503, json: { error: 'fixture refresh failure' } }));
     await page.locator('#refresh').click(); await page.waitForFunction(() => document.querySelector('#closure-summary').textContent.includes('場次更新失敗'));
-    check(await completed().count() === 0, 'A failed management refresh invalidates archive confirmation even if the old world was complete');
+    check(await completed().count() === 0 && await replay.isHidden(), 'A failed management refresh clears the old archive confirmation and replay action');
     await page.unroute('**/api/rooms'); await page.locator('#refresh').click(); await completed().waitFor();
     hold = true; await began; await page.locator('#session-select').selectOption(second.id); release();
     await page.waitForFunction(() => document.querySelector('#closure-world').textContent.includes('等待封存'));

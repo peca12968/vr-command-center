@@ -362,6 +362,22 @@ class Venue:
         return not errors and not self.processes
 
 
+def observe_room_replay(venue, entry, room, name):
+    recording = entry['sealed']['world']
+    output = venue.directory / (name + '.json')
+    driver = ROOT / 'tests/browser/check-closure-replay-native.cjs'
+    role = 'Room' + str(room)
+    completed = subprocess.run([shutil.which('node'), str(driver)], cwd=driver.parent,
+        input=json.dumps({'base': venue.base, 'token': venue.tokens[role], 'roomId': room,
+                          'recording': recording, 'output': str(output)}),
+        capture_output=True, encoding='utf-8', timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
+    if completed.returncode or not output.is_file():
+        raise RuntimeError('Room replay browser failed: ' + completed.stderr.replace(venue.tokens[role], '[redacted]')[-2000:])
+    result = json.loads(output.read_bytes())
+    assert result['sessionId'] == entry['id'] and result['streamId'] == recording['header']['streamId']
+    assert result['roomId'] == room and result['throughFrame'] == recording['acceptedSequence']
+
+
 def check_venue(venue, rooms):
     def record(message): venue.evidence.append(message); venue.stage('checking', check=message)
     assert len(venue.request('/api/sessions')) == 5
@@ -458,6 +474,9 @@ def check_venue(venue, rooms):
     assert venue.request('/api/sessions/' + rooms[0]['id'] + '/statistics') == first['statistics']
     for entry in rooms[1:]: assert venue.connected(entry) and venue.state(entry)['state'] == 'Running'
     record('Ended room releases only its seat; reuse preserves old history and four live worlds; premature Linked creation rejected')
+    if venue.args.check_session_replay_ui:
+        observe_room_replay(venue, rooms[0], 1, 'original-independent-replay')
+        record('Room controller opens the original full replay after a new session reuses its room')
     for entry in [*rooms[1:], replacement]: venue.seal(entry); venue.stop_round(entry)
     assert venue.request('/api/sessions') == []
     assert len(venue.request('/api/sessions?includeEnded=true')) == 6
@@ -482,6 +501,10 @@ def check_venue(venue, rooms):
     time.sleep(.6)
     assert venue.frame(linked, measure=True)['packet']['frame']['tick'] == paused['packet']['frame']['tick']
     venue.seal(linked)
+    if venue.args.check_session_replay_ui:
+        venue.request('/api/sessions/' + linked['id'] + '/world/watch?mode=replay&observerRoomId=3', role='Room2', expected=403)
+        observe_room_replay(venue, linked, 2, 'linked-room-2-replay')
+        record('Linked room controller receives every original frame with only its own room data')
     assert len(venue.request('/api/sessions?includeEnded=true')) == 7
     streams = [e['sealed']['world']['header']['streamId'] for e in venue.rounds]
     assert len(set(streams)) == 7
@@ -496,11 +519,14 @@ def main():
     parser.add_argument('--visible-room', type=int, choices=range(0,6), default=1, help='One playable PC room; 0 makes all clients headless')
     parser.add_argument('--check', action='store_true', help='Headless native five-room isolation, room reuse and later Linked validation')
     parser.add_argument('--check-reprepare-ui', action='store_true', help='Create the replacement through the room controller browser after saving a newer mission version')
+    parser.add_argument('--check-session-replay-ui', action='store_true', help='Open the original independent and scoped linked replays in the room controller browser')
     parser.add_argument('--job-workers', type=int, choices=range(1,17), default=2, help='Unity job workers per native process; recorded in evidence')
     parser.add_argument('--runtime-root', type=Path, help='Optional SSD directory for fresh isolated SQLite / journals; closed snapshot is copied back to F artifacts')
     args = parser.parse_args()
     if args.check_reprepare_ui and (not args.check or not shutil.which('node')):
         parser.error('--check-reprepare-ui requires --check and Chromium')
+    if args.check_session_replay_ui and (not args.check or not shutil.which('node')):
+        parser.error('--check-session-replay-ui requires --check and Chromium')
     try: verify_player(args)
     except (OSError, RuntimeError, ValueError) as error: parser.error(str(error))
     if args.check: args.visible_room = 0
