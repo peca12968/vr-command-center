@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-11 `VRCommand-ControlServer-0.31.143-closure-replay-win-x64.zip` 為 53,079,206 bytes，SHA-256 `ea716f1db724a506ca9ded16e887bae36a653e2614124d035c23f9da49dfe5d9`。支援從單一場次收尾直接播放原錄製或已保存片段。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.143-closure-replay-win-x64.zip) · [操作說明](WORLD_RECORDING.md#從單一場次的任務收尾回放)
+
 2026-11-11 `VRCommand-ControlServer-0.31.142-session-reprepare-win-x64.zip` 為 53,078,580 bytes，SHA-256 `7d5b4ba76c5aee2b6271a7d4eafb52d02c376a57393c5800541086d289bdedb2`。支援從單一已結束場次選用原任務版本。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.142-session-reprepare-win-x64.zip) · [操作說明](MISSION_VERSIONS.md#從單一已結束場次選用原任務)
 
 2026-11-11 `VRCommand-ControlServer-0.31.141-venue-missions-win-x64.zip` 為 53,077,832 bytes，SHA-256 `218fe8ba9b3d9a5422d61ceb4a1fad4f5baafdcff424122b6ac1fda95974f67a`。支援開場前下載及載入五房任務配置檔。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.141-venue-missions-win-x64.zip) · [操作說明](MISSION_VERSIONS.md#在開場前保存五房任務配置)
