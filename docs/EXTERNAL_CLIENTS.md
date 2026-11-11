@@ -321,7 +321,7 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `requireTrackedRoster` | 選用。填 `true` 時須一併設定 `minimumConcurrentMilliseconds`，並逐席核對同一區間的追蹤姿態及原始玩家日誌 |
 | `requireConcurrentFire` | 選用。填 `true` 時須一併設定 `minimumConcurrentMilliseconds`，並在每場提供 `worldJournal` 與 `combatJournal`。要求本階段每個原席位在同一段合格區間各有一次已封存射擊 |
 | `udpPreflightBatch` 或 `udpPreflightBatches` | 選用。單份原 Quest 批次報告路徑，或 1 至 25 份原報告路徑的陣列。可搭配逐場 `udpSourcePreflights` |
-| `questCaptures` | 選用。填原 Quest 網路計畫及 1 至 25 份完整日誌擷取報告。可與 UDP 預檢報告一併使用 |
+| `questCaptures` | 選用。填原 Quest 網路計畫或裝置對照表，以及 1 至 25 份原擷取報告。可與 UDP 預檢報告一併使用 |
 | `questDeployments` | 選用。填原離線發行報告及 1 至 25 份正式 Quest 部署報告，核對原入場及 APK 雜湊 |
 | `venueReleaseReport` | 選用。核對全館所有 Windows 與 Quest 席位共用的原發行報告。Quest 的 `questDeployments` 此時只填 `reports` |
 | `sessions` | 獨立模式填五場，合併模式填一場 |
@@ -474,6 +474,19 @@ python scripts/verify-field-results.py --venue-stages .\stages.json
 ```
 
 首次與重試的原報告可一併列入。各報告保留原成功與失敗記錄，所有成功席位合起來須剛好涵蓋計畫列出的 Quest 席位，每席只接受一次完整擷取。工具重讀完整日誌核對位元組數和 SHA-256，再核對原程序、房號席位、伺服器觀察到的 IPv4、遊戲端點和戰績確認。成功摘要列出 `questCaptureBatchesVerified` 及 `questCaptureSeatsVerified`，若曾有未完成報告，另列 `questCaptureIncompleteReports` 與 `questCaptureFailedAttempts`。混合場可用 `windowsPlayers` 或 `windowsEvidenceDirectory` 補上 Windows 證據。手動提交 Quest 原日誌可沿用 `players` 及 `logcatPid`。 [重試失敗席位](QUEST3.md#重試未完成的-quest-擷取席位)
+
+#### 以原 Quest 裝置對照表驗收收尾
+
+收尾時可在 `questCaptures` 選用部署時的版本 1 `deviceMap` 及原 `reports`。工具依各席原程序的最後連線及伺服器戰績確認取得來源 IPv4，核對每個映射席位有各自的私有直連位址及正確遊戲埠。摘要會標示 `questCaptureAddressSource` 為 `server-observed`。選用原 `networkPlan` 時，工具會將伺服器觀察的來源與現場獨立記錄的 IPv4 比對。開場前的 UDP 預檢沿用原網路計畫。 [裝置與網路計畫](QUEST3.md#批次預檢五房-quest-席位)
+
+```json
+{
+  "questCaptures": {
+    "deviceMap": "device-map.json",
+    "reports": ["quest-capture/capture-report.json", "quest-capture-retry/capture-report.json"]
+  }
+}
+```
 
 ### 核對封存席位的 Quest 發行 APK
 

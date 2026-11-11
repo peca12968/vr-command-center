@@ -38,13 +38,9 @@ def read_json(raw):
 
 
 def load_plan(device_map_path, network_plan_path):
-    device_map = field.read_quest_plan_file(device_map_path)
-    require(device_map.keys() == {'version', 'seats'}, 'Unexpected Quest device map fields.')
-    serials = field.quest_seats(device_map['seats'], 'serial')
+    serials = field.read_quest_device_map(device_map_path)
     mode, endpoints, sources = field.read_quest_network_plan(network_plan_path)
     require(serials.keys() == sources.keys(), 'Network sources must match the mapped Quest seats exactly.')
-    require(len(set(serials.values())) == len(serials) and all(re.fullmatch(r'[A-Za-z0-9\[][A-Za-z0-9._:%\[\]-]{0,127}', value)
-            for value in serials.values()), 'Use distinct explicit ADB serials.')
     groups = []
     for rooms, (address, port) in sorted(endpoints.items()):
         devices = [{'roomId': room, 'seat': seat, 'serial': serials[room, seat], 'address': sources[room, seat]}

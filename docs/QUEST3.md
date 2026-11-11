@@ -573,7 +573,7 @@ python .\scripts\capture-quest-field-log.py --adb $adb `
     --output-directory .\quest-capture-retry --seconds 1800
 ```
 
-重試只擷取原報告中失敗的席位。保留首次和重試的原報告、各自的日誌及記錄實際 IPv4 的網路計畫，交給五房驗收工具。重試仍須取得同一個原入場的完整紀錄。混合場可在同一份驗收清單加入 Windows 席位。 [核對原始擷取報告](EXTERNAL_CLIENTS.md#直接使用-quest-批次擷取報告)
+重試只擷取原報告中失敗的席位。保留首次和重試的原報告、各自的日誌，以及原裝置對照表或記錄實際 IPv4 的網路計畫，交給五房驗收工具。重試仍須取得同一個原入場的完整紀錄。混合場可在同一份驗收清單加入 Windows 席位。 [核對原始擷取報告](EXTERNAL_CLIENTS.md#直接使用-quest-批次擷取報告)
 
 ## 連線與仍待實作事項
 

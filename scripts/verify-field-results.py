@@ -113,6 +113,15 @@ def quest_seats(rows, field):
     return seats
 
 
+def read_quest_device_map(path):
+    value = read_quest_plan_file(path)
+    require(set(value) == {'version', 'seats'}, 'Unexpected Quest device map fields')
+    serials = quest_seats(value['seats'], 'serial')
+    require(len(set(serials.values())) == len(serials) and all(re.fullmatch(r'[A-Za-z0-9\[][A-Za-z0-9._:%\[\]-]{0,127}', serial)
+            for serial in serials.values()), 'Use distinct explicit ADB serials')
+    return serials
+
+
 def quest_network_address(value):
     require(type(value) is str, 'Expected a Quest plan IPv4 address')
     parsed = ipv4(value)
@@ -801,7 +810,8 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
                    require_remote=True, quest_player_logs=(), world_journal=None, combat_journal=None, applied_end=None, room_alignments=None,
                    udp_preflight=None, udp_source_preflights=None, verify_player_sources=False, quest_capture_logs=(),
                    guarded_begin=None, concurrency=None, verify_reconnect_history=False, reconnect_window=None,
-                   quest_deployments=None, require_distinct_remote_roster=False, control_batches=()):
+                   quest_deployments=None, require_distinct_remote_roster=False, control_batches=(),
+                   observed_quest_addresses=None):
     integer(size, 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(not verify_player_sources or world_journal is not None, 'Player source verification requires the original closed world journal')
@@ -864,6 +874,12 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
                               else quest_client_result(log, pid, port, connections=history))
         require(connection in acknowledged and connection not in used_connections, 'Missing or reused server acknowledgement')
         observed = peer_address(peers[connection])
+        if expected_ip is None:
+            require(capture_seat is not None and observed_quest_addresses is not None,
+                    'Server-observed addresses require original mapped Quest capture evidence')
+            expected_ip = observed[0]
+            require(expected_ip not in observed_quest_addresses, 'Use a distinct observed IPv4 for each mapped Quest')
+            observed_quest_addresses.add(expected_ip)
         require(observed[0] == expected_ip and observed not in endpoints, 'UDP peer differs from the declared source or is reused')
         player_id = identity(result['playerId'])
         require(player_id in players and player_id not in used_players, 'Unexpected or duplicated result player')
@@ -1214,10 +1230,16 @@ def read_quest_capture_report(path, mode):
 
 
 def read_quest_capture_batches(spec, mode, expected, evidence_path):
-    require(type(spec) is dict and set(spec) == {'networkPlan', 'reports'},
-            'Provide a Quest network plan and capture reports')
-    plan_mode, endpoints, sources = read_quest_network_plan(evidence_path(spec['networkPlan']))
-    require(plan_mode == mode, 'Quest network plan differs from the venue mode')
+    require(type(spec) is dict and set(spec) in ({'networkPlan', 'reports'}, {'deviceMap', 'reports'}),
+            'Provide capture reports and either a Quest network plan or the original device map')
+    observed = 'deviceMap' in spec
+    if observed:
+        sources = dict.fromkeys(read_quest_device_map(evidence_path(spec['deviceMap'])))
+        endpoints = {}
+    else:
+        plan_mode, endpoints, plan_sources = read_quest_network_plan(evidence_path(spec['networkPlan']))
+        require(plan_mode == mode, 'Quest network plan differs from the venue mode')
+        sources = {seat: ipv4(address) for seat, address in plan_sources.items()}
     reports = spec['reports']
     require(type(reports) is list and 1 <= len(reports) <= 25, 'Provide 1 to 25 Quest capture reports')
     captures, used_seats = {}, set()
@@ -1233,16 +1255,23 @@ def read_quest_capture_batches(spec, mode, expected, evidence_path):
             session_id = row['sessionId']
             session = expected.get(session_id)
             require(session is not None and seat[0] in session['roomIds'], 'Quest capture does not match an original session and room')
-            require(row['port'] == endpoints[tuple(session['roomIds'])][1], 'Quest capture port differs from the network plan')
+            rooms = tuple(session['roomIds'])
+            if observed:
+                _, port = endpoints.setdefault(rooms, (None, row['port']))
+                require(row['port'] == port, 'Quest capture reports disagree on the original game port')
+            else:
+                require(row['port'] == endpoints[rooms][1], 'Quest capture port differs from the network plan')
             if not row['complete']:
                 continue
             require(seat not in used_seats, 'Quest capture repeats a completed seat')
             log = evidence_path(row['log'], path.parent)
             require(log.parent == path.parent and log.name == row['log'], 'Quest capture log must be next to its report')
-            captures.setdefault(session_id, []).append((ipv4(sources[seat]), log, row['logcatPid'], seat, row['bytes'], row['sha256']))
+            captures.setdefault(session_id, []).append((sources[seat], log, row['logcatPid'], seat, row['bytes'], row['sha256']))
             used_seats.add(seat)
     require(used_seats == sources.keys(), 'Quest capture reports must cover the planned Quest seats exactly')
     summary = {'questCaptureBatchesVerified': len(reports)}
+    if observed:
+        summary['questCaptureAddressSource'] = 'server-observed'
     if incomplete_reports:
         summary.update(questCaptureIncompleteReports=incomplete_reports, questCaptureFailedAttempts=failed_attempts)
     return captures, endpoints, summary
@@ -1531,6 +1560,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
     if capture_supplied and not inspect_windows:
         require(topology == 'direct-lan', 'Quest capture batches require direct LAN evidence')
         captures, capture_endpoints, capture_summary = read_quest_capture_batches(manifest['questCaptures'], mode, expected, evidence_path)
+    observed_quest_addresses = set() if capture_summary.get('questCaptureAddressSource') == 'server-observed' else None
     quest_deployments, deployment_summary = None, None
     if 'questDeployments' in manifest and not inspect_windows:
         require(topology == 'direct-lan', 'Quest deployment evidence requires direct LAN evidence')
@@ -1618,9 +1648,12 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
         stream_ids.add(stream)
         bindings.add(binding)
         captured = captures.get(session['id'], [])
-        if capture_supplied:
-            require((str(binding[0]), binding[1]) == capture_endpoints[tuple(row['roomIds'])],
-                    'Quest network plan endpoint differs from the original game binding')
+        planned_binding = capture_endpoints.get(tuple(row['roomIds']))
+        if planned_binding is not None:
+            planned_address, planned_port = planned_binding
+            require(binding[1] == planned_port and (planned_address is None or str(binding[0]) == planned_address),
+                    'Quest network plan endpoint differs from the original game binding' if planned_address is not None
+                    else 'Quest capture port differs from the original game binding')
         logs = list(windows_by_session.get(session['id'], []))
         players = entry.get('players', []) if capture_supplied or windows_supplied else entry['players']
         require(type(players) is list and all(type(player) is dict for player in players), 'Invalid player log list')
@@ -1692,7 +1725,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
                                          verify_reconnect_history=verify_reconnect_history, reconnect_window=reconnect_window,
                                          quest_deployments=quest_deployments,
                                          require_distinct_remote_roster=require_distinct_remote_roster,
-                                         control_batches=controls.get(session['id'], ()))
+                                         control_batches=controls.get(session['id'], ()), observed_quest_addresses=observed_quest_addresses)
         require(set(sources) == set(row['roomIds']) and all(len(peers) == players_per_room for peers in sources.values()),
                 'Verified player count differs from the expected seats in an original room')
         if debrief_receipts is not None:

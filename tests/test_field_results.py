@@ -348,6 +348,14 @@ else:
     return path, manifest
 
 
+def observed_quest_capture_spec(root, spec):
+    network = json.loads((root / spec['networkPlan']).read_bytes())
+    rows = [{'roomId': row['roomId'], 'seat': row['seat'], 'serial': f"fixture-{row['roomId']}-{row['seat']}"}
+            for row in network['sources']]
+    (root / 'quest-device-map.json').write_text(json.dumps({'version': 1, 'seats': rows}), encoding='utf-8')
+    return {'deviceMap': 'quest-device-map.json', 'reports': spec['reports']}
+
+
 class QuestCaptureTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix='quest-live-capture-')
@@ -1768,6 +1776,53 @@ class FieldResultsTests(unittest.TestCase):
                 path.write_text(json.dumps(manifest), encoding='utf-8')
                 with self.assertRaisesRegex(field.EvidenceError, 'repeats a completed seat'):
                     field.verify_venue(path)
+
+    def test_mixed_venue_uses_original_quest_device_map_and_windows_inbox(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest = quest_capture_venue_fixture(root, mode, quest_per_room=1, batches=1,
+                    use_capture_tool=True, interrupt_first=True)
+                self.add_shared_release(root, manifest, 1)
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                baseline = field.verify_venue(path)
+                observed = self.windows_inbox_fixture(root, manifest)
+                observed['questCaptures'] = observed_quest_capture_spec(root, manifest['questCaptures'])
+                windows = [{'roomId': room, 'seat': seat, 'station': f'PC-{room}-{seat}'}
+                           for room in range(1, 6) for seat in range(1, 5)]
+                (root / 'windows-seats.json').write_text(json.dumps({'version': 1, 'seats': windows}), encoding='utf-8')
+                observed['windowsSeatMap'] = 'windows-seats.json'
+                path.write_text(json.dumps(observed), encoding='utf-8')
+                report = field.verify_venue(path)
+                self.assertEqual('server-observed', report.pop('questCaptureAddressSource'))
+                self.assertEqual(baseline, report)
+                self.assertEqual((5, 20, 25), (report['questCaptureSeatsVerified'],
+                    report['venueRelease']['windows']['seatsVerified'], report['serverAcknowledgements']))
+                self.assertNotIn('192.168.', json.dumps(report))
+
+    def test_observed_quest_capture_rejects_duplicate_or_local_sources_and_wrong_binding(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest = quest_capture_venue_fixture(root, 'Independent', quest_per_room=1, batches=1)
+            network = json.loads((root / manifest['questCaptures']['networkPlan']).read_bytes())
+            sources = {row['roomId']: row['address'] for row in network['sources']}
+            manifest['questCaptures'] = observed_quest_capture_spec(root, manifest['questCaptures'])
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            server = root / manifest['sessions'][1]['serverLog']
+            original = server.read_text(encoding='utf-8')
+            for address, error in ((sources[1], 'distinct observed IPv4'),
+                                   (network['endpoints'][0]['address'], 'own direct LAN address')):
+                with self.subTest(address=address):
+                    server.write_text(original.replace(f'endpoint={sources[2]}:', f'endpoint={address}:'), encoding='utf-8')
+                    with self.assertRaisesRegex(field.EvidenceError, error):
+                        field.verify_venue(path)
+            server.write_text(original, encoding='utf-8')
+            report_path = root / manifest['questCaptures']['reports'][0]
+            capture = json.loads(report_path.read_bytes())
+            capture['seats'][0]['port'] += 1
+            report_path.write_text(json.dumps(capture), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'port differs from the original game binding'):
+                field.verify_venue(path)
 
     @unittest.skipUnless(HAS_POWERSHELL, 'UDP evidence requires PowerShell')
     def test_venue_combines_all_quest_capture_seats_with_all_source_preflight(self):
