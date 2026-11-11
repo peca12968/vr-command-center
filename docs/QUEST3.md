@@ -63,7 +63,7 @@ python .\scripts\probe-quest-venue.py --adb $adb --device-map .\device-map.json 
 
 ### 重試 Quest UDP 預檢席位
 
-某席失敗或操作員在探測中按 Ctrl+C 時，工具會保存已確認的結果與未完成席位。恢復裝置連線後，使用同一份裝置對照與網路清單、相同樣本數，以及新的輸出資料夾。
+某席失敗或操作員在探測中按 Ctrl+C 時，工具會保存已確認的結果與未完成席位。重試需使用支援 `--retry-report` 的版本所產生的報告。恢復裝置連線後，使用同一份裝置對照與網路清單、相同樣本數，以及新的輸出資料夾。
 
 ```powershell
 python .\scripts\probe-quest-venue.py --adb $adb --device-map .\device-map.json `
