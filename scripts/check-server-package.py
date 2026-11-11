@@ -186,6 +186,8 @@ def main():
     p.add_argument('--check-venue-launch-review', action='store_true', help='Import original unresolved launcher reports into the shipped Chromium console')
     p.add_argument('--check-venue-relay-readback', action='store_true', help='Use both source relay CLIs on copies of the closed original Linked journals')
     p.add_argument('--check-venue-preview', action='store_true', help='Run the shared Windows venue preview before both topology launches')
+    p.add_argument('--check-venue-udp-readiness', action='store_true',
+                   help='Match original UDP preflight reports to the launcher preview and actual game bindings')
     p.add_argument('--check-venue-endpoint-batch', action='store_true', help='Verify endpoint batch retries and force a last-room transaction rollback')
     p.add_argument('--check-venue-ticket-freshness', action='store_true', help='Verify ticket issuance before and after a managed Linked source stops')
     p.add_argument('--check-venue-ticket-recovery', action='store_true', help='Hold and resume the same source while one venue preview stays open')
@@ -315,6 +317,8 @@ def main():
                 'individual launcher report workflows must be checked separately')
     if args.check_venue_plan_ui and (not args.check_venue_launcher or not shutil.which('node')):
         p.error('--check-venue-plan-ui requires --check-venue-launcher and Node.js with Playwright Chromium')
+    if args.check_venue_udp_readiness and not (args.check_venue_launcher and args.check_venue_preview):
+        p.error('--check-venue-udp-readiness requires --check-venue-launcher and --check-venue-preview')
     if args.check_venue_receipt_retry and (not args.check_venue_plan_ui or args.venue_management_https):
         p.error('--check-venue-receipt-retry requires --check-venue-plan-ui and its own plain loopback management target')
     if args.check_venue_launch_review and not args.check_venue_receipt_retry:
@@ -547,6 +551,48 @@ def main():
               and pair['exchangeSha256'] == reply['exchangeSha256'] == final['exchangeSha256'],
               label+' original listener and probe reports match the same authenticated exchange')
         return {'listener': final, 'probe': reply, 'pair': pair}
+
+    def venue_udp_readiness(label, topology, states, values, plan_path, preview):
+        endpoints = [{'roomIds': state['roomIds'], 'address': value['address'], 'port': value['port']}
+                     for state, value in zip(states, values, strict=True)]
+        sources = [{'roomId': room, 'seat': seat, 'address': address}
+                   for room in range(1, 6) for seat in range(1, players_per_room + 1)]
+        network = out / (label + '-udp-network.json')
+        network.write_text(json.dumps({'version': 1, 'mode': topology, 'endpoints': endpoints, 'sources': sources}), encoding='utf-8')
+        pairs = []
+        for value, endpoint in zip(values, endpoints, strict=True):
+            suffix = label + '-rooms-' + '-'.join(map(str, endpoint['roomIds']))
+            verify_lan_preflight(value, suffix)
+            pairs.append({'listener': suffix + '-lan-listener.ndjson', 'probe': suffix + '-lan-probe.json'})
+        manifest = out / (label + '-udp-pairs.json')
+        manifest.write_text(json.dumps({'version': 1, 'pairs': pairs}), encoding='utf-8')
+
+        def run(preview_path, suffix):
+            report = out / (label + suffix + '.json')
+            result = subprocess.run([sys.executable, str(ROOT / 'scripts/check-venue-udp-preflight.py'),
+                '--network-plan', str(network), '--pairs', str(manifest), '--launcher-preview', str(preview_path),
+                '--output', str(report)], capture_output=True, encoding='utf-8', timeout=75)
+            return result, read(report)
+
+        changed = read(plan_path)
+        last = next(row for row in changed['servers'] if row['roomIds'] == endpoints[-1]['roomIds'])
+        original_ports = {item['port'] for item in endpoints}
+        while last['port'] in original_ports:
+            last['port'] = free(socket.SOCK_DGRAM, address)
+        wrong_plan = runtime / (label + '-udp-wrong-port-plan.json')
+        wrong_plan.write_text(json.dumps(changed), encoding='utf-8')
+        wrong = call(label + '-udp-wrong-port-preview', ['--venue-check', wrong_plan], good=True)
+        result, rejected = run(wrong, '-udp-rejected')
+        check(result.returncode == 1 and not rejected['complete'] and rejected['verifiedSources'] == len(values)
+              and not rejected['launcherPreview']['complete']
+              and rejected['launcherPreview']['groups'][-1] == {'roomIds': endpoints[-1]['roomIds'], 'issues': ['port-mismatch']},
+              label + ' original UDP reports cannot pass with a changed last launcher port')
+        result, readiness = run(preview, '-udp-readiness')
+        check(result.returncode == 0 and readiness['complete'] and readiness['verifiedSources'] == len(values)
+              and readiness['launcherPreview']['sha256'] == hashlib.sha256(preview.read_bytes()).hexdigest()
+              and all(not group['issues'] for group in readiness['launcherPreview']['groups']),
+              label + ' readiness matches every original launcher preview binding and preserves its digest')
+        return pairs
 
     def launch(state,label, *, listen_address=None, verify_layout=True):
         value=config(state['id'], listenAddress=listen_address or address);file=runtime/(label+'.json');file.write_text(json.dumps(value),encoding='utf-8');ready=out/(label+'-ready.json');report=out/(label+'-final.json');work=runtime/(label+'-work')
@@ -859,6 +905,7 @@ def main():
                       'Existing v2 plans still preview the exact revisions with the guarded packages')
         else:
             plan_file.write_text(json.dumps(dict(plan,servers=list(reversed(plan['servers'])))),encoding='utf-8')
+        udp_pairs = []
         if args.check_venue_preview:
             preview=call(label+'-preview',['--venue-check',plan_file],good=True)
             actual=read(preview)
@@ -870,6 +917,8 @@ def main():
                   and not work.exists() and not ready.exists()
                   and all(request('/api/sessions/'+row['id'])==row for row in states),
                   label+' shared preview lists exact original rooms, missions and UDP without modifying any session or publishing readiness')
+            if args.check_venue_udp_readiness:
+                udp_pairs = venue_udp_readiness(label, topology, states, values, plan_file, preview)
         if venue_pin:
             listed = read(call(label + '-https-catalog', ['--catalog', venue_target], good=True))
             check(listed['instanceId'] == read(venue_target)['instanceId']
@@ -896,6 +945,15 @@ def main():
               label+' confirms the exact game processes, sorted original rooms and UDP bindings')
         for entry,state,row in zip(entries,states,witness['servers'],strict=True):
             confirm_launch(entry,state,row['ready'])
+        if udp_pairs:
+            checks = []
+            for state, pair, row in zip(states, udp_pairs, witness['servers'], strict=True):
+                binding = row['ready']['udpBinding']
+                summary, _ = field.verify_udp_preflight((out / pair['listener'], out / pair['probe']),
+                                                         binding, {ipaddress.IPv4Address(address)})
+                checks.append({'roomIds': state['roomIds'], 'sessionId': state['id'], 'binding': binding, 'pair': summary})
+            save(label + '-udp-game-bindings.json', checks)
+            check(len(checks) == len(values), label + ' each original pair re-verifies against the actual Unity bind time and port')
         if args.check_venue_plan_ui:
             sources=[request('/api/sessions/'+state['id'])['combatStream'] for state in states]
             launch_ids={source['venueLaunchId'] for source in sources}

@@ -119,6 +119,30 @@ class LanPreflightTests(unittest.TestCase):
         copied = self.venue_check(plan, 'copied.json', '--batch', self.root / 'readiness.json')
         self.assertEqual(group, copied['groups'][0])
 
+        launch_row = {'roomIds': rooms, 'sessionId': '5bc170f1-5b9b-4da4-bc94-9c51e464431b', 'port': port,
+                      'address': LOOPBACK, 'listenAddress': LOOPBACK}
+        launch = {'schemaVersion': 1, 'status': 'venue-checked', 'complete': True, 'topology': 'Linked', 'servers': [launch_row]}
+        preview = self.venue_json('preview.json', launch)
+        accepted = self.venue_check(plan, 'with-preview.json', '--batch', self.root / 'readiness.json', '--launcher-preview', preview)
+        self.assertEqual({'sha256': hashlib.sha256(preview.read_bytes()).hexdigest(), 'complete': True,
+                          'topologyMatches': True, 'groups': [{'roomIds': rooms, 'issues': []}]}, accepted['launcherPreview'])
+        launch_row.update(address='127.0.0.3', listenAddress='0.0.0.0')
+        different = self.venue_json('different-preview.json', launch)
+        mismatched = self.venue_check(plan, 'mismatched.json', '--batch', self.root / 'readiness.json',
+                                      '--launcher-preview', different, status=1)
+        self.assertEqual(2, mismatched['verifiedSources'])
+        self.assertFalse(mismatched['complete'])
+        self.assertEqual([{'roomIds': rooms, 'issues': ['advertised-address-mismatch', 'listen-address-mismatch']}],
+                         mismatched['launcherPreview']['groups'])
+        split = {**launch, 'topology': 'Independent', 'servers': [
+            {**launch_row, 'roomIds': [room], 'sessionId': f'00000000-0000-4000-8000-{room:012}', 'port': 3000 + room}
+            for room in rooms]}
+        split_preview = self.venue_json('split-preview.json', split)
+        other_topology = self.venue_check(plan, 'other-topology.json', '--launcher-preview', split_preview, status=1)
+        self.assertFalse(other_topology['launcherPreview']['topologyMatches'])
+        self.assertCountEqual(['missing-launch-endpoint', *['unexpected-launch-endpoint'] * 5],
+                              [row['issues'][0] for row in other_topology['launcherPreview']['groups']])
+
         missing = self.venue_check(plan, 'missing.json', '--pairs', manual, status=1)
         self.assertEqual(['verified', 'missing'], [row['status'] for row in missing['groups'][0]['sources']])
         self.assertNotIn('udpSourcePreflights', missing['groups'][0])

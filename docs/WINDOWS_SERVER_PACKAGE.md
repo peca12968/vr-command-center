@@ -82,6 +82,8 @@ Unity 0.47.0 伺服器可搭配控制台 0.31.14。啟動器 1.5 可選擇待開
 
 也可用 `Launch-Server.exe --venue-window <計畫完整路徑>` 開啟五房視窗並填入路徑。命令列的 `--venue-check <計畫完整路徑> --report <新結果檔>` 會核對相同的房間、任務、校正及 UDP 條件。核對結果沒有憑證，啟動時仍會取得原場次的本機鎖。
 
+開場前可將這份成功預覽和 Windows／Quest UDP 雙端報告一併核對。若某房的模式、埠或公告／綁定位址與網路清單不符，場館報告會標出該房，供主控修正。 [五房 UDP 核對](EXTERNAL_CLIENTS.md#開場前核對五房-udp-報告)
+
 ### 重跑五房視窗驗收
 
 在 Windows 使用解壓後的伺服器包及管理包，指定新的本機測試目錄。`--topology Independent` 驗證五個伺服器，`--topology Linked` 驗證一個涵蓋五房的伺服器。`--players-per-room 5` 會啟動 25 個同機 Windows 模擬端。
