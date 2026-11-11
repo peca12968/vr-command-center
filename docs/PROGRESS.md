@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-11 全館戰績回條席位明細
+
+- 管理台 0.31.132 可在全館收尾選擇原批次與房間，查看原結束名冊的席號、玩家和回條，或只顯示未確認。原房間已被新場次使用時，仍讀取原場次的雙封存。晚到回條可更新已開啟的明細。107 項收尾 Chromium 專項通過，涵蓋房控拒絕、房間重用、手機版面及切換批次後的延遲回應。 [操作說明](SESSION_CLOSURE.md#從全館收尾查看席位) · [明細畫面](../artifacts/console-debrief-seats-132-focused/venue-debrief-seats.png)
+- 482 項 Windows 原生檢查通過。獨立與合併各 25 個同機玩家端，逐房核對瀏覽器顯示的 50 席回條與遊戲伺服器的原確認。合併場後還重開較早的獨立批次並核對五房。六場雙封存共 884 格完整回放，50 筆 CSV 相符，活動場次與隔離程序已清理。跨機、頭盔及廠商硬體仍待現場驗收。 [原生結果](../artifacts/server-package-checks/run-bbf4bfb0f76141cf98dc16bdd2ae810b/checks.json)
+- 825 項 HTTP、111 項 Node、966 項解壓包 Chromium 與 107 項 Windows 管理包檢查通過。ZIP 解壓後逐一核對 565 檔，隔離遊戲與管理測試的 C／F 快照分別有 220、18 個非資料庫檔案雜湊相符。GitHub Actions 對 `bc634702` 因帳務或支出上限未啟動任何步驟。 [管理包](WINDOWS_CONTROL_PACKAGE.md) · [核對摘要](../artifacts/debrief-seats-0.31.132-validation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42972682221)
+
 ## 2026-11-11 批次旋轉場地物件
 
 - 控制台 0.31.131 支援以所選物件的平均位置為轉軸，先旋轉再依房間本地 X／Z 平移。配置圖顯示原轉軸及帶編號的目的位置與方向。確認後可單步套用、復原或重做。64 項配置編輯 Chromium 專項通過，涵蓋小數角度、錯誤角度、草稿預覽、版本保留和範本匯出。 [操作說明](LAYOUT.md#批次旋轉場地物件) · [配置圖](../artifacts/console-batch-rotation-131-publication/placement-batch-rotation-map.png)
