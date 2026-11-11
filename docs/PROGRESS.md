@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 批次移動場地物件
+
+- 控制台 0.31.130 支援勾選多個物件及預覽 X／Z 位移。配置圖以原編號標示目的位置，套用與復原各只需一步。56 項場地編輯專項通過，涵蓋手機版面、選取變更後清除預覽、舊版保留及新配置保存重載。 [操作說明](LAYOUT.md#批次移動場地物件) · [配置圖預覽](../artifacts/console-batch-move-130-publication/placement-batch-move-map.png)
+- 直接匯入瀏覽器下載的範本，使用既有 Windows 遊戲 0.50.7 啟動獨立與合併模式。兩輪各有 25 個同機客戶端，五房各核對三件物件的新座標與角度。449 項 Windows 整合檢查通過，六場共 944 格完整回放、50 筆原戰績及伺服器確認，兩批皆完成戰鬥與世界封存。 [原匯出範本](../artifacts/console-batch-move-130-publication/placement-batch-move-template.json) · [原生驗收](../artifacts/server-package-checks/run-baff5a6aa1a14b4c838b9d05cdefb20a/checks.json)
+- 111 項 Node、從交付 ZIP 解壓執行的 951 項 Chromium 及 107 項 Windows 管理包檢查均通過。ZIP 562 檔逐一核對，管理包與遊戲驗收清理後 C／F 快照分別有 27、254 檔雜湊相符。 [交付包](WINDOWS_CONTROL_PACKAGE.md) · [核對摘要](../artifacts/placement-move-0.31.130-validation.json)
+- GitHub Actions 對 `b9126204` 因帳務或支出上限未啟動任何步驟。跨機 25 人、頭盔與廠商硬體仍待現場驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42966280297)
+
 ## 2026-11-11 即時切房的 Windows 原生驗收
 
 - 使用控制台 0.31.129 與 Windows 遊戲 0.50.7。獨立和合併模式各有 25 個同機 Windows 客戶端。主控依序選擇第 1、4、2、5、3 房，兩輪各使用五條分房串流，切換時關閉前四條。每房觀察到畫格前進，畫面顯示的五席統計逐欄符合原伺服器該格，包含實際遊戲內中彈及耗損。 [重跑方式](WORLD_RECORDING.md#從觀戰頁切換目前房間) · [合併場畫面](../artifacts/server-package-checks/run-ef9575ca23964ef5bda1fb9a9978918e/linked-live-rooms/live-room.png)
