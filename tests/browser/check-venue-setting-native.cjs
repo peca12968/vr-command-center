@@ -5,7 +5,7 @@ const { chromium } = require('playwright');
 
 async function main() {
   const [descriptor, output] = process.argv.slice(2);
-  const { base, masterKey, kind, batch } = JSON.parse(await fs.readFile(descriptor, 'utf8'));
+  const { base, masterKey, kind, batch, verifyDownload } = JSON.parse(await fs.readFile(descriptor, 'utf8'));
   assert.ok(['enemy', 'environment'].includes(kind));
   const enemy = kind === 'enemy', label = enemy ? '敵軍快照' : '環境快照';
   const original = batch.sessions.flatMap(session => session.roomIds.map(room => ({ room, ...session })))
@@ -22,7 +22,7 @@ async function main() {
   const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   let evidence;
   try {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 1080 } });
+    const page = await browser.newPage({ viewport: { width: 1440, height: 1080 }, acceptDownloads: true });
     const errors = [];
     page.on('pageerror', error => errors.push(error.name));
     await page.goto(base + '/console/');
@@ -37,6 +37,15 @@ async function main() {
     for (const [index, row] of original.entries()) {
       const target = enemy ? ` · 全場目標 ${row.targetCount} 名` : '';
       assert.ok(rendered[index].includes(`房間 ${row.room} · 原命令 ${row.appliedAtSequence}${target}`));
+    }
+    let phaseDownload;
+    if (verifyDownload) {
+      const downloaded = page.waitForEvent('download');
+      await panel.locator(`#venue-${kind}-batch-download`).click();
+      const file = await downloaded;
+      phaseDownload = `vr-command-venue-${kind}-${batch.requestId}.json`;
+      assert.equal(file.suggestedFilename(), phaseDownload);
+      await file.saveAs(path.join(output, phaseDownload));
     }
     await panel.screenshot({ path: path.join(output, 'batch.png') });
     const room = original[3], route = `/api/sessions/${room.sessionId}/world`;
@@ -66,7 +75,8 @@ async function main() {
     assert.deepEqual(errors, []);
     await page.locator('#world-viewport').screenshot({ path: path.join(output, 'room-4-witness.png') });
     evidence = { complete: true, requestId: batch.requestId, rooms: original.map(({ room, sessionId, appliedAtSequence }) => ({ room, sessionId, appliedAtSequence })),
-      witness: { room: room.room, sessionId: room.sessionId, frame, observedSequence: packet.observedSequence } };
+      witness: { room: room.room, sessionId: room.sessionId, frame, observedSequence: packet.observedSequence },
+      ...(phaseDownload ? { phaseDownload } : {}) };
   } finally { await browser.close(); }
   await fs.writeFile(path.join(output, 'checks.json'), JSON.stringify(evidence, null, 2), { flag: 'wx' });
 }

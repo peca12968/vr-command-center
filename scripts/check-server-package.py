@@ -197,6 +197,7 @@ def main():
     p.add_argument('--check-venue-history-ui', action='store_true', help='Reopen and download the earlier batch after the newer native round')
     p.add_argument('--check-venue-environment', action='store_true', help='Confirm two batch environment changes in each native topology')
     p.add_argument('--check-venue-environment-ui', action='store_true', help='Open the original environment batch witness in the packaged console')
+    p.add_argument('--check-venue-setting-downloads', action='store_true', help='Use original browser downloads in both sealed field evidence reports')
     p.add_argument('--check-venue-enemies', action='store_true', help='Use venue enemy policy to enable and stop native attacks')
     p.add_argument('--check-venue-enemy-ui', action='store_true', help='Verify the original enemy batch and open its live witness in the packaged console')
     p.add_argument('--check-layout-preview',action='store_true',help='Load a saved barricade opening and compare its preview with native world geometry')
@@ -340,6 +341,8 @@ def main():
         p.error('--check-venue-enemies requires --check-room-combat')
     if args.check_venue_enemy_ui and not args.check_venue_enemies:
         p.error('--check-venue-enemy-ui requires --check-venue-enemies')
+    if args.check_venue_setting_downloads and not (args.venue_field_evidence and args.check_venue_environment_ui and args.check_venue_enemy_ui):
+        p.error('--check-venue-setting-downloads requires --venue-field-evidence and both setting UI checks')
     if args.check_room_reports and not args.player_package:p.error('--check-room-reports requires the three-package check')
     if args.check_room_combat and not args.check_room_reports:p.error('--check-room-combat requires --check-room-reports')
     if args.check_hardware_feedback and not args.check_room_combat:p.error('--check-hardware-feedback requires --check-room-combat')
@@ -2068,7 +2071,8 @@ def main():
                 verify_setting_batch_ui(mode, 'enemy', 'latestEnemies', venue_changes[-1]['receipt'])
 
     def verify_setting_batch_ui(mode, kind, key, receipt):
-        batch = request('/api/venue/phase')[key]
+        phase, _ = request('/api/venue/phase', raw_response=True)
+        batch = field.read_json(phase)[key]
         revisions = {row['sessionId']: row['appliedAtSequence'] for row in receipt['sessions']}
         check(batch['requestId']==receipt['requestId']
               and {row['sessionId']:row['appliedAtSequence'] for row in batch['sessions']}==revisions,
@@ -2078,12 +2082,23 @@ def main():
         destination = out/f'{mode}-venue-{kind}-ui'; destination.mkdir()
         with tempfile.TemporaryDirectory(prefix='setting-ui-', dir=runtime) as directory:
             descriptor = Path(directory)/'fixture.json'
-            descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'kind':kind,'batch':batch}),encoding='utf-8')
+            descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'kind':kind,'batch':batch,
+                                              'verifyDownload':args.check_venue_setting_downloads}),encoding='utf-8')
             subprocess.run([node,str(ROOT/'tests/browser/check-venue-setting-native.cjs'),str(descriptor),str(destination)],
                            cwd=ROOT/'tests/browser',check=True,timeout=65)
         observed = read(destination/'checks.json')
         check(observed['complete'] and observed['requestId']==batch['requestId'] and len(observed['rooms'])==5,
               f'{mode} packaged console confirms every original {kind} room and opens the native room 4 witness')
+        if args.check_venue_setting_downloads:
+            filename = f'vr-command-venue-{kind}-{batch["requestId"]}.json'
+            downloaded = destination / filename
+            check(observed['phaseDownload'] == filename and downloaded.read_bytes() == phase,
+                  f'{mode} packaged console {kind} download matches the original phase response byte for byte')
+            references = venue_control_reports[mode]
+            original = Path(references[-1]['phaseReport'])
+            check(original.name == f'{mode}-phase-{batch["requestId"]}.json' and original.read_bytes() == phase,
+                  f'{mode} field manifest uses the exact downloaded {kind} batch response')
+            references[-1] = {**references[-1], 'phaseReport': str(downloaded)}
 
     def check_linked_room_enemies(entry):
         session=entry['sessionId']; route=f'/api/sessions/{session}'

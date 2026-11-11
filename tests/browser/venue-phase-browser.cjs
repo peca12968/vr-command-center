@@ -421,7 +421,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     check(await roomEnvironment(1).filter({ hasText: '全館環境待確認' }).isVisible() && await environmentFrame(1).isHidden(),
       'A room-specific override clears its marker and the other room expires independently');
     await climateRoom(1, 'Waiting').waitFor();
-    check(await climateRoom(2, 'Superseded').isVisible() && await environmentBatch.getByRole('button').count() === 0,
+    check(await climateRoom(2, 'Superseded').isVisible()
+      && await environmentBatch.getByRole('button', { name: '檢視環境快照' }).count() === 0,
       'Expired environment evidence removes its shortcut while the original superseded room remains visible');
 
     const policy = { behavior: 'Patrol', autoAttack: true };
@@ -622,11 +623,13 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await login('Master');
     await archive(ending.id).nth(3).filter({ hasText: '已封存' }).waitFor();
     await batchRoom(1, 'Ended').waitFor(); await batchRoom(2, 'Ended').waitFor();
-    check(await enemyBatch.getByRole('button').count() === 0
+    check(await enemyBatch.getByRole('button', { name: '檢視敵軍快照' }).count() === 0
+      && await page.locator('#venue-enemy-batch-download').isEnabled()
       && await batchRoom(1, 'Ended').filter({ hasText: `原命令 ${batch.sessions[0].appliedAtSequence}` }).isVisible(),
       'Relogin restores the original ended enemy batch even after the room is reused');
     await climateRoom(1, 'Ended').waitFor(); await climateRoom(2, 'Ended').waitFor();
-    check(await environmentBatch.getByRole('button').count() === 0
+    check(await environmentBatch.getByRole('button', { name: '檢視環境快照' }).count() === 0
+      && await page.locator('#venue-environment-batch-download').isEnabled()
       && await climateRoom(1, 'Ended').filter({ hasText: `原命令 ${durableBatch.sessions[0].appliedAtSequence}` }).isVisible(),
       'After relogin and room reuse the environment batch still refers only to its original ended sessions');
     await archive(ending.id).last().getByRole('button', { name: '查看場次' }).click();
