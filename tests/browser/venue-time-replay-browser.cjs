@@ -8,6 +8,7 @@ module.exports = async function venueTimeReplayBrowser({ context, api, tokens, b
   captureErrors(page);
   const picker = page.locator('#world-recording'), note = page.locator('#world-venue-message'), basis = page.locator('#world-venue-basis');
   const align = room => page.locator(`[data-venue-align-room="${room}"]`);
+  const liveRoom = room => page.locator(`[data-live-room="${room}"]`);
   const canvasAt = sequence => page.locator(`#world-canvas[data-sequence="${sequence}"]`).waitFor();
   const control = (id, action) => api(`/sessions/${id}/commands`, 'POST', { commandId: randomUUID(), action });
   const batchEnd = async () => {
@@ -19,11 +20,12 @@ module.exports = async function venueTimeReplayBrowser({ context, api, tokens, b
   const origin = 'Simulation', clock = Date.now() - 8000;
   function utc(offset) { return new Date(clock + offset).toISOString().replace('Z', '0000+00:00'); }
   async function source(session, start, times, ticks) {
-    const { id, roomIds: [roomId] } = session;
+    const { id, roomIds } = session;
     const streamId = randomUUID(), route = `/sessions/${id}`;
-    await api(route + '/players', 'POST', { playerId: randomUUID(), name: `Replay room ${roomId}`, roomId, headset: 'Quest3' });
+    for (const roomId of roomIds)
+      await api(route + '/players', 'POST', { playerId: randomUUID(), name: `Replay room ${roomId}`, roomId, headset: 'Quest3' });
     await api(route + '/combat-stream', 'POST', { streamId, origin, ...(ticks ? { missionClockVersion: 1 } : {}) }, 'GameServer');
-    const header = { sessionId: id, streamId, origin, roomIds: [roomId], ...(start === null ? {} : { captureStartedAtUtc: utc(start) }),
+    const header = { sessionId: id, streamId, origin, roomIds, ...(start === null ? {} : { captureStartedAtUtc: utc(start) }),
       ...(ticks ? { missionClockVersion: 1, missionDurationSeconds: 120 } : {}) };
     function send(messages) {
       const result = spawnSync('python', [path.join(root, 'scripts/world_test_socket.py')], { encoding: 'utf8', timeout: 6000, windowsHide: true,
@@ -33,18 +35,20 @@ module.exports = async function venueTimeReplayBrowser({ context, api, tokens, b
       return JSON.parse(result.stdout);
     }
     function frame(snapshot, elapsedMilliseconds, sequence) {
-      const head = { x: (roomId - 3) * 14, y: 1.65, z: -3 };
+      const players = snapshot.players.map(({ id, roomId }) => {
+        const head = { x: (roomId - 3) * 14, y: 1.65, z: -3 };
+        return { id, roomId, head, muzzle: head, forward: { x: 0, y: 0, z: 1 }, connected: true, health: 100, magazine: 30, reserve: 90,
+          rig: { kind: 'Simulated', left: head, right: head } };
+      });
       return { type: 'frame', payload: { sequence, observedSequence: snapshot.sequence, elapsedMilliseconds, weather: 'Clear', lightning: false,
         throughCombatSequence: 0, events: [], frame: { phase: snapshot.state, tick: ticks?.[sequence - 1] ?? (snapshot.state === 'Preparing' ? 0 : sequence),
-          night: false, throughSequence: 0, enemies: [], players: snapshot.players.map(player => ({ id: player.id, roomId,
-            head, muzzle: head, forward: { x: 0, y: 0, z: 1 }, connected: true, health: 100, magazine: 30, reserve: 90,
-            rig: { kind: 'Simulated', left: head, right: head } })) } } };
+          night: false, throughSequence: 0, enemies: [], players } } };
     }
     assert.equal(send([frame(await api(route), times[0], 1)]).acceptedSequence, 1);
     let running = (await control(id, 'Begin')).session;
     for (let index = 1; index < times.length - 1; index++) {
-      if (roomId === 2 && index === 2) running = (await control(id, 'Pause')).session;
-      if (roomId === 2 && index === 3) running = (await control(id, 'Resume')).session;
+      if (roomIds[0] === 2 && index === 2) running = (await control(id, 'Pause')).session;
+      if (roomIds[0] === 2 && index === 3) running = (await control(id, 'Resume')).session;
       assert.equal(send([frame(running, times[index], index + 1)]).acceptedSequence, index + 1);
     }
     return async function seal() {
@@ -52,6 +56,18 @@ module.exports = async function venueTimeReplayBrowser({ context, api, tokens, b
       await api(route + '/combat-stream/seal', 'POST', { streamId, finalSequence: 0 }, 'GameServer');
       assert.equal(send([{ type: 'seal', finalSequence: times.length }]).complete, true);
     };
+  }
+  async function openLiveRoom(room, sessionId, sequence) {
+    const observed = page.waitForRequest(request => {
+      const url = new URL(request.url());
+      return url.pathname === `/api/sessions/${sessionId}/world/watch` && url.searchParams.get('observerRoomId') === String(room)
+        && url.searchParams.get('mode') === 'live' && request.method() === 'GET';
+    });
+    await liveRoom(room).click(); await observed;
+    await page.locator('#world-status').filter({ hasText: `僅接收房間 ${room}` }).waitFor(); await canvasAt(sequence);
+    assert.equal(await picker.inputValue(), sessionId);
+    assert.equal(await page.locator('#world-room').inputValue(), String(room));
+    assert.equal(await liveRoom(room).getAttribute('aria-pressed'), 'true');
   }
   try {
     assert.deepEqual(await api('/sessions'), []);
@@ -65,7 +81,42 @@ module.exports = async function venueTimeReplayBrowser({ context, api, tokens, b
       [200, [0, 300, 600, 1150, 1200], [0, 20, 20, 39, 40]], [900, [0, 100, 500]],
       [4000, [0, 200, 600], [0, 30, 45]], [null, [0, 300, 4000], [0, 21, 70]]];
     for (const [index, [start, times, ticks]] of clocks.entries()) seals.push(await source(sessions[index], start, times, ticks));
+    await page.goto(base + '/console/');
+    await page.locator('#login-key').fill(tokens.Master); await page.locator('#login-form button').click();
+    await page.locator('#tab-world').click();
+    await openLiveRoom(1, ids[0], 4);
+    check(await page.locator('#world-live-rooms button').count() === 5 && await page.locator('#world-camera').inputValue() === 'top',
+      'The master opens a room-scoped top view directly from the five active Independent rooms');
+    await page.route(url => url.pathname === `/api/sessions/${ids[1]}/world` && url.searchParams.get('observerRoomId') === '2', async route => {
+      const actual = await route.fetch(), altered = await actual.json();
+      altered.header.streamId = randomUUID();
+      await route.fulfill({ response: actual, json: altered });
+    }, { times: 1 });
+    await liveRoom(2).click();
+    await page.locator('#world-message').filter({ hasText: '已保留目前畫面' }).waitFor();
+    check(await picker.inputValue() === ids[0] && await page.locator('#world-room').inputValue() === '1'
+      && await page.locator('#world-canvas').getAttribute('data-sequence') === '4',
+      'A substituted recording stream leaves the current live room and frame intact');
+    await openLiveRoom(2, ids[1], 4);
+    check(await liveRoom(1).isEnabled() && await liveRoom(2).isDisabled(),
+      'The Independent room switch selects the exact other recording without returning to operations');
+    await page.locator('#world-live-rooms').screenshot({ path: path.join(screenshots, 'world-live-rooms.png') });
+    const roomDesk = await context.newPage();
+    captureErrors(roomDesk);
+    try {
+      await roomDesk.goto(base + '/console/');
+      await roomDesk.locator('#login-key').fill(tokens.Room2); await roomDesk.locator('#login-form button').click();
+      await roomDesk.locator('#tab-world').click();
+      await roomDesk.locator(`#world-recording option[value="${ids[1]}"]`).waitFor({ state: 'attached' });
+      check(await roomDesk.locator('#world-live-rooms').isHidden(), 'Room controllers keep the existing recording view without the master room selector');
+    } finally { await roomDesk.close(); }
     const original = await batchEnd();
+    await liveRoom(1).click();
+    await page.locator('#world-message').filter({ hasText: '無法確認房間 1' }).waitFor();
+    check(await picker.inputValue() === ids[1], 'An ended room cannot reopen from an earlier live room list');
+    await page.locator('#world-refresh').click();
+    await page.locator('#world-live-rooms').waitFor({ state: 'hidden' });
+    check(await picker.inputValue() === ids[1], 'Ending the venue withdraws live room entries without selecting another recording');
     const compare = (room, from = ids[0], sequence = 3, batch = original) =>
       `/venue/closure/${batch}/replay-at?${new URLSearchParams({ fromSessionId: from, fromFrame: sequence, roomId: room })}`;
     const byTick = (...args) => compare(...args).replace('/replay-at?', '/replay-at-tick?');
@@ -107,8 +158,7 @@ module.exports = async function venueTimeReplayBrowser({ context, api, tokens, b
     await api(byTick(2, replacement.id), 'GET', undefined, 'Master', 404);
     check(true, 'The mission clock API rejects tick zero, legacy clocks, gaps, out-of-range ticks, reused rooms and room credentials');
 
-    await page.goto(base + '/console/');
-    await page.locator('#login-key').fill(tokens.Master); await page.locator('#login-form button').click();
+    await page.locator('#tab-operations').click();
     await page.locator('#venue-closure-load').click();
     await page.locator('#venue-closure-batch').selectOption(original);
     await page.locator(`[data-venue-replay="${ids[0]}"]`).click();
@@ -192,6 +242,17 @@ module.exports = async function venueTimeReplayBrowser({ context, api, tokens, b
     await picker.selectOption(ids[0]);
     check(await page.locator('#world-venue-review').isHidden() && await page.locator('#world-venue-rooms button').count() === 0,
       'Selecting a recording directly clears all original batch actions');
+
+    const linked = await api('/sessions', 'POST', { mode: 'Linked', roomIds: [1, 2, 3, 4, 5], missionId: mission.id }, 'Master', 201);
+    active.add(linked.id);
+    const sealLinked = await source(linked, 0, [0, 300, 600], [0, 12, 24]);
+    await page.locator('#world-refresh').click();
+    await openLiveRoom(3, linked.id, 2);
+    await openLiveRoom(5, linked.id, 2);
+    check((await page.locator('#world-statistics tr').allTextContents()).some(row => row.includes('Replay room 5'))
+      && !(await page.locator('#world-statistics tr').allTextContents()).some(row => row.includes('Replay room 3')),
+      'Linked room navigation keeps the same session and renders only the newly selected room’s statistics');
+    await control(linked.id, 'End'); active.delete(linked.id); await sealLinked();
   } finally {
     for (const id of active) await control(id, 'End');
     await page.close();

@@ -29,6 +29,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   let eventContextRequest = null;
   let returnLiveSource = null, liveRetryTimer;
   let observerRoom = null;
+  let liveRooms = new Map(), roomSwitch;
   let venueReview = null, venueAnchor = null;
   const venueBasis = $('world-venue-basis');
   const cameras = mountCameras(getKey, unauthorized, () => scene, freeView);
@@ -45,6 +46,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   function message(text, error = false) { $('world-message').textContent = text; $('world-message').classList.toggle('replay-error', error); }
   function stop() {
     epoch++; clearTimeout(liveRetryTimer); liveRetryTimer = undefined;
+    stopRoomSwitch();
     clearEventContext();
     clipStatistics.update(null, false);
     shotTrace.update(null, false);
@@ -57,6 +59,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     reviewPlayer = returnLiveSource = null; clearClip(); bindVenueReview(null);
     stop(); stopList(); info = frame = savedLimit = null; savedFinished = false; geometry = ''; mode = ''; cameras.reset(); cameraForm.reset(); reviewControls();
     $('world-recording').replaceChildren(); $('world-player').hidden = true; message('選取已錄製的場次，開始觀戰或回放。');
+    bindLiveRooms([], []);
     recordingControls(); bindRooms([]);
     resetActors(); scene?.reset(); $('world-sound').textContent = '音效：關閉'; $('world-sound').disabled = true;
   }
@@ -73,13 +76,18 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     return result;
   }
   async function refresh(target = null) {
-    stopList();
+    stopList(); stopRoomSwitch();
     const request = listEpoch, key = getKey(); if (!active || !key) return;
     const controller = listController = new AbortController();
     const signal = target ? AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]) : controller.signal;
+    const roomRead = canWriteClips() ? response('/api/rooms', AbortSignal.any([signal, AbortSignal.timeout(8000)]))
+      .then(result => result.json()).catch(() => []) : [];
+    let recordings;
+    liveRoomControls();
     try {
       const rows = await (await response('/api/world-recordings', signal)).json();
       if (request !== listEpoch || !active || getKey() !== key) return;
+      recordings = rows;
       const picker = $('world-recording'), selected = picker.value;
       picker.replaceChildren(...rows.map(row => {
         const option = document.createElement('option'); option.value = row.header.sessionId;
@@ -122,9 +130,67 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
       recordingControls(); reviewControls();
       if (!rows.length) message('目前沒有可讀取的世界錄製；等待遊戲伺服器開始發送。');
     } catch (error) {
-      if (request === listEpoch && active) message(target ? '目前無法讀取原場次的錄製。請回到房間與場次重新開啟。' : error.message, true);
+      if (request === listEpoch && active) {
+        bindLiveRooms([], []);
+        message(target ? '目前無法讀取原場次的錄製。請回到房間與場次重新開啟。' : error.message, true);
+      }
     } finally {
+      const rooms = await roomRead;
       if (listController === controller) listController = null;
+      if (recordings && request === listEpoch && active && getKey() === key) bindLiveRooms(rooms, recordings);
+      liveRoomControls();
+    }
+  }
+  function bindLiveRooms(rooms, recordings) {
+    if (!Array.isArray(rooms)) rooms = [];
+    liveRooms = new Map(rooms.map(room => [room.id, recordings.find(row => row.header?.sessionId === room.sessionId
+      && row.header?.roomIds?.includes(room.id) && row.complete === false && row.acceptedSequence > 0)]));
+    const panel = $('world-live-rooms');
+    panel.hidden = !rooms.some(room => room.sessionId);
+    panel.replaceChildren(...(panel.hidden ? [] : rooms.map(({ id, sessionId }) => {
+      const button = document.createElement('button'), title = document.createElement('strong'), status = document.createElement('span');
+      button.type = 'button'; button.className = 'quiet'; button.dataset.liveRoom = String(id);
+      title.textContent = roomName(id);
+      status.textContent = liveRooms.get(id) ? '即時觀戰' : sessionId ? '等待可觀戰錄製' : '空房';
+      button.append(title, status);
+      button.addEventListener('click', () => switchLiveRoom(id));
+      return button;
+    })));
+    liveRoomControls();
+  }
+  function liveRoomControls() {
+    for (const button of $('world-live-rooms').children) {
+      const room = Number(button.dataset.liveRoom), recording = liveRooms.get(room);
+      const current = Boolean(mode === 'live' && recording && info?.header.sessionId === recording.header.sessionId && observerRoom === room);
+      button.setAttribute('aria-pressed', String(current));
+      button.disabled = !active || !recording || current || !!roomSwitch || !!listController || connecting || $('world-recording').disabled;
+    }
+  }
+  function stopRoomSwitch() { roomSwitch?.abort(); roomSwitch = null; }
+  async function switchLiveRoom(roomId) {
+    const recording = liveRooms.get(roomId), picker = $('world-recording');
+    if (!active || !canWriteClips() || !recording || roomSwitch || listController || connecting || picker.disabled) return;
+    const { sessionId, streamId } = recording.header;
+    const request = roomSwitch = new AbortController();
+    const signal = AbortSignal.any([request.signal, AbortSignal.timeout(8000)]);
+    liveRoomControls();
+    try {
+      const verified = await (await response(`/api/sessions/${sessionId}/world?observerRoomId=${roomId}`, signal)).json();
+      const rooms = await (await response('/api/rooms', signal)).json();
+      if (roomSwitch !== request || !active || picker.disabled) return;
+      if (verified.observerRoomId !== roomId || verified.header?.sessionId !== sessionId || verified.header?.streamId !== streamId
+        || !verified.header.roomIds.includes(roomId) || verified.complete !== false || !(verified.acceptedSequence > 0)
+        || !rooms.some(room => room.id === roomId && room.sessionId === sessionId)
+        || ![...picker.options].some(option => option.value === sessionId)) throw new Error('Room recording changed');
+      picker.value = sessionId;
+      resetRecording();
+      observerRoom = roomId;
+      void connect('live', 0, null, null, { mode: 'live', sessionId, roomId, sourceKey: observationKey(verified) });
+    } catch {
+      if (roomSwitch === request && active) message(`無法確認房間 ${roomId} 的即時錄製。已保留目前畫面，請更新錄製列表。`, true);
+    } finally {
+      if (roomSwitch === request) roomSwitch = null;
+      liveRoomControls();
     }
   }
   function matchesTarget(recording, target) {
@@ -452,6 +518,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   }
   function status() {
     reviewControls();
+    liveRoomControls();
     if (!info) return;
     $('world-sound').disabled = info.header.environmentVersion !== 1 && info.header.combatAudioVersion !== 1 || scene?.weather.audio.state === 'loading';
     const audio = scene?.weather.audio.state || 'off';
@@ -970,6 +1037,6 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
         message('正在尋找原場次錄製…');
       }
       void refresh(target);
-    } else { returnLiveSource = null; clearClip(); bindVenueReview(null); stop(); stopList(); status(); }
+    } else { returnLiveSource = null; clearClip(); bindVenueReview(null); stop(); stopList(); bindLiveRooms([], []); status(); }
   } };
 }
