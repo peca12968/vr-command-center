@@ -210,6 +210,51 @@ module.exports = async ({ context, api, tokens, base, mission, screenshots, chec
     check(JSON.stringify(JSON.parse(await fs.readFile(batchTemplate, 'utf8')).definition.props) === JSON.stringify(moved),
       'The exported mission contains the exact new batch geometry for the game server');
 
+    await page.locator('#prop-move-panel summary').click();
+    await moveSelection(0).check();
+    const pivot = page.locator('#prop-move-preview [data-rotation-pivot]');
+    await field('prop-move-yaw', -22.5); await movePreview.click();
+    check(await moveGhosts.getAttribute('transform') === 'translate(-3.25 -2.625) rotate(-10)'
+      && await pivot.getAttribute('transform') === 'translate(-3.25 -2.625)',
+      'A single selected object turns in place with a fractional negative angle');
+    await field('prop-move-yaw', 361); await movePreview.click();
+    check(await moveApply.isDisabled() && await moveGhosts.count() === 0 && await pivot.count() === 0,
+      'An out-of-range angle clears the pending geometry and blocks apply');
+    await moveSelection(2).check();
+    await field('prop-move-yaw', 90); await field('prop-move-x', 0.5); await field('prop-move-z', -0.75);
+    await movePreview.click();
+    const rotated = [
+      { ...moved[0], position: { x: -0.5, y: 0, z: 4.375 }, yawDegrees: 102.5 }, moved[1],
+      { ...moved[2], position: { x: -0.25, y: 0, z: -0.375 }, yawDegrees: 102.5 }
+    ];
+    check(await moveGhosts.evaluateAll(nodes => nodes.map(node => node.getAttribute('transform')).join('|'))
+      === expectedTransforms([rotated[0], rotated[2]]) && await pivot.getAttribute('transform') === 'translate(-0.875 -2.75)'
+      && await transforms() === expectedTransforms(moved) && await page.locator('#undo-prop').isDisabled(),
+      'The preview turns clockwise around the original center, then applies the room-local offset without editing the draft');
+    await page.locator('#layout-map').screenshot({ path: path.join(screenshots, 'placement-batch-rotation-map.png') });
+    await moveApply.click();
+    check(await transforms() === expectedTransforms(rotated) && (await status()).includes('可復原 1') && await pivot.count() === 0,
+      'Batch rotation and translation update only the selected positions and facings in one history step');
+    await undo();
+    check(await transforms() === expectedTransforms(moved), 'One undo restores every original position and angle');
+    await redo();
+    check(await transforms() === expectedTransforms(rotated), 'One redo restores the complete rotated layout');
+    await page.locator('#save-revision').click();
+    await wait(() => document.querySelector('#draft-status').textContent.startsWith('已儲存') && !document.querySelector('#mission-fields').disabled);
+    const rotatedHead = (await api(`/missions/${rowSaved.id}/history`)).headId;
+    check(JSON.stringify((await api(`/missions/${rotatedHead}`)).definition.props) === JSON.stringify(rotated)
+      && JSON.stringify((await api(`/missions/${batchHead}`)).definition.props) === JSON.stringify(moved),
+      'The rotated revision retains exact geometry and leaves its source version unchanged');
+    await load(rotatedHead);
+    await page.locator('#mission-version').selectOption(rotatedHead);
+    const rotationExport = page.waitForEvent('download');
+    await page.locator('#export-mission-template').click();
+    const rotationTemplate = path.join(screenshots, 'placement-batch-rotation-template.json');
+    await (await rotationExport).saveAs(rotationTemplate);
+    check(await transforms() === expectedTransforms(rotated)
+      && JSON.stringify(JSON.parse(await fs.readFile(rotationTemplate, 'utf8')).definition.props) === JSON.stringify(rotated),
+      'Reloaded and exported task both retain the rotated layout for the game server');
+
     await page.locator('#rotate-prop').click(); page.once('dialog', dialog => dialog.accept()); await page.locator('#new-mission').click();
     check(await page.locator('#prop-layer [data-index]').count() === 0 && await page.locator('#undo-prop').isDisabled(), 'A new mission cannot undo into a different mission document');
     await page.locator('#add-barrel').click(); page.once('dialog', dialog => dialog.accept()); await page.locator('#logout').click();

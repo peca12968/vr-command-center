@@ -1476,7 +1476,9 @@ let propGesture = null;
 let propCopies = [];
 const maxProps = 500;
 const propMove = mountPlacementMove({ props: () => state.props, editable,
-  apply: moves => editProp(() => { for (const { prop, position } of moves) prop.position = position; }) });
+  apply: moves => editProp(() => {
+    for (const { prop, position, yawDegrees } of moves) Object.assign(prop, { position, yawDegrees });
+  }) });
 function clearPropCopies() {
   propCopies = [];
   $('prop-copy-preview').replaceChildren();
