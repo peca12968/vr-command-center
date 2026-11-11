@@ -365,23 +365,27 @@ internal static class PlayerLauncher
         private readonly Label selected = new Label { AutoSize = false, Dock = DockStyle.Top, Height = 75, UseMnemonic = false };
         private readonly Label ticketInfo = new Label { AutoSize = false, Dock = DockStyle.Top, Height = 58, UseMnemonic = false };
         private readonly Label status = new Label { AutoSize = false, Dock = DockStyle.Top, Height = 65 };
-        private readonly Button play = new Button { Text = "開始遊戲", AutoSize = true, Enabled = false };
+        private readonly Button play = new Button { Text = "開始遊戲(&S)", AccessibleName = "開始遊戲", AutoSize = true, Enabled = false };
+        private readonly RadioButton openXR = new RadioButton { Text = "Windows OpenXR(&O)", AutoSize = true };
         private readonly TextBox path = new TextBox { Dock = DockStyle.Top, AccessibleName = "玩家連線檔完整路徑" };
         private readonly ConfigReview review = new ConfigReview();
         private bool settingPath;
         private Process child; private PlayerConnectionMonitor monitor;
         public PlayerForm(string initial, string diagnosticLog)
         {
-            Text = "VR Command 玩家"; ClientSize = new Size(660, 438); MinimumSize = new Size(676, 477);
+            Text = "VR Command 玩家"; ClientSize = new Size(660, 478); MinimumSize = new Size(676, 517);
             Font = new Font("Microsoft JhengHei UI", 11); Padding = new Padding(20); StartPosition = FormStartPosition.CenterScreen;
             var title = new Label { Text = "選擇控制台下載的玩家連線檔", Dock = DockStyle.Top, Height = 40 };
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 45 };
             var choose = new Button { Text = "選擇連線檔…", AutoSize = true };
             var load = new Button { Text = "載入／更新", AutoSize = true };
             buttons.Controls.Add(choose); buttons.Controls.Add(load); buttons.Controls.Add(play);
-            var pathHint = new Label { Text = "可選檔或貼上完整路徑，再按「載入／更新」。", Dock = DockStyle.Top, Height = 35 };
+            var modes = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40, AccessibleName = "遊戲模式" };
+            modes.Controls.Add(new RadioButton { Text = "桌面模式(&D)", AutoSize = true, Checked = true });
+            modes.Controls.Add(openXR);
+            var pathHint = new Label { Text = "可選檔或貼上完整路徑，再按 Enter 載入。", Dock = DockStyle.Top, Height = 35 };
             var hint = new Label { Text = "票券過期或入場被拒絕時，請向控制人員重新取得連線檔。", Dock = DockStyle.Top, Height = 50 };
-            Controls.Add(hint); Controls.Add(status); Controls.Add(buttons); Controls.Add(ticketInfo); Controls.Add(selected); Controls.Add(pathHint); Controls.Add(path); Controls.Add(title);
+            Controls.Add(hint); Controls.Add(status); Controls.Add(buttons); Controls.Add(modes); Controls.Add(ticketInfo); Controls.Add(selected); Controls.Add(pathHint); Controls.Add(path); Controls.Add(title);
             path.TextChanged += delegate
             {
                 if (settingPath) return;
@@ -407,8 +411,8 @@ internal static class PlayerLauncher
                         var directory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "VrCommand", "PlayerRuns", Guid.NewGuid().ToString("N"));
                         Directory.CreateDirectory(directory); ownLog = Path.Combine(directory, "player.log");
                     }
-                    child = Launch(review.FilePath, false, ownLog, review.ContentHash); monitor = new PlayerConnectionMonitor(ownLog);
-                    choose.Enabled = false; load.Enabled = false; path.Enabled = false; status.Text = monitor.Message;
+                    child = Launch(review.FilePath, false, ownLog, review.ContentHash, openXR: openXR.Checked); monitor = new PlayerConnectionMonitor(ownLog);
+                    choose.Enabled = false; load.Enabled = false; path.Enabled = false; modes.Enabled = false; status.Text = monitor.Message;
                     RenderTicket();
                 }
                 catch { review.Clear(); RenderTicket(); selected.Text = "請重新載入並核對連線檔。"; status.Text = "無法啟動或檔案已變更。請確認玩家包完整，再重新載入正確的連線檔。"; play.Enabled = false; }
@@ -421,7 +425,7 @@ internal static class PlayerLauncher
                 monitor.Poll(exited); status.Text = monitor.Message;
                 if (exited)
                 {
-                    var final = monitor.State == "Final"; child.Dispose(); child = null; choose.Enabled = true; load.Enabled = true; path.Enabled = true; play.Enabled = review.Loaded;
+                    var final = monitor.State == "Final"; child.Dispose(); child = null; choose.Enabled = true; load.Enabled = true; path.Enabled = true; modes.Enabled = true; play.Enabled = review.Loaded;
                     RenderTicket();
                     status.Text = final ? "遊戲已關閉；本次已收到最終戰績。" : "遊戲已關閉。" + monitor.Message;
                 }
@@ -429,6 +433,14 @@ internal static class PlayerLauncher
             timer.Start(); FormClosed += delegate { timer.Dispose(); if (child != null) child.Dispose(); };
             selected.Text = "尚未選擇連線檔";
             if (initial != null) SelectConfig(initial);
+        }
+        protected override bool ProcessCmdKey(ref Message message, Keys keyData)
+        {
+            if (keyData != Keys.Enter || !path.IsHandleCreated || message.HWnd != path.Handle)
+                return base.ProcessCmdKey(ref message, keyData);
+            const long repeatedKey = 1L << 30;
+            if (path.Enabled && (message.LParam.ToInt64() & repeatedKey) == 0) SelectConfig(path.Text);
+            return true;
         }
         private void SelectConfig(string file)
         {
@@ -438,7 +450,7 @@ internal static class PlayerLauncher
                 try { path.Text = review.FilePath; } finally { settingPath = false; }
                 selected.Text = Path.GetFileName(review.FilePath) + "\n伺服器 " + review.Endpoint;
                 RenderTicket();
-                play.Enabled = true; status.Text = "連線檔已載入。核對目的地與席位後按「開始遊戲」。";
+                play.Enabled = true; status.Text = "核對目的地與席位，選擇遊戲模式，再按「開始遊戲」。";
             }
             catch { review.Clear(); RenderTicket(); play.Enabled = false; selected.Text = "未接受此連線檔"; status.Text = "請使用控制台下載的玩家連線檔完整路徑。"; }
         }

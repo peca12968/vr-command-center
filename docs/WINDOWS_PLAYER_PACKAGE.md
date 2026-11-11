@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-11 `VRCommand-Player-0.50.6-1.8-win-x64.zip` 為 84,941,042 bytes，SHA-256 `4f577da46047880f593bf9961a77e54b1cf6bc94de95de7855b9b20bbec9ac4b`，331 筆清單核對通過。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.6-1.8-win-x64.zip) · [驗收](PROGRESS.md#2026-11-11-玩家啟動器的桌面與-openxr-模式)
+
 2026-11-11 `VRCommand-Player-0.50.6-win-x64.zip` 為 84,940,657 bytes，SHA-256 `f8a3805101d189661f796f58f3f2613ab5acef5c712f05ae04588fb8b7c83e75`，解壓核對 331 筆清單。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.6-win-x64.zip) · [驗收](PROGRESS.md#2026-11-11-windows-桌面與-openxr-啟動)
 
 2026-11-11 `VRCommand-Player-0.50.5-weapon-gate-win-x64.zip` 為 84,774,121 bytes，SHA-256 `d314681ee0da6a6d4fbfe73b6bb31906f903ee7e42506e7ec8bc3ba5670a7879`，解壓核對 330 筆清單。桌面玩家淘汰後不再提交射擊及換彈請求。 [實際鍵盤驗證](DESKTOP_WEAPON_INPUT.md)
@@ -77,8 +79,8 @@ runtime只收VrCommand.exe／UnityPlayer／CrashHandler／WinPix及D3D12、MonoB
 ## 玩家操作
 
 1. 將ZIP完整解壓到本機資料夾，保留VrCommand_Data等所有檔案。不要直接在壓縮檔中執行，也不要只複製EXE。
-2. 開啟Launch-Player.exe，按「選擇連線檔…」，選擇控制人員提供的JSON。啟動器只顯示檔名與IPv4／port，不顯示票券。
-3. 按「開始遊戲」。啟動器核對玩家包中列出的全部檔案雜湊，再用獨立程序開啟遊戲；同一啟動器不重複開啟同一玩家。
+2. 開啟 Launch-Player.exe，選擇控制人員提供的 JSON，或貼上完整路徑後按 Enter 載入。核對伺服器 IPv4、UDP 埠及連線檔標示的席位。
+3. 啟動器 1.8 預選桌面模式。用 Alt+D 選桌面、Alt+O 選 Windows OpenXR，再按「開始遊戲」或 Alt+S。啟動器先核對玩家包與連線檔。遊戲關閉後即可在同一視窗選擇模式並重試。
 4. 用WASD移動、Ctrl按住或C切換蹲姿、方向鍵或右鍵拖曳瞄準、Space／左鍵射擊、R換彈、B任務簡報。完整操作見[DESKTOP](DESKTOP.md)。結束時等待最終戰績。
 
 關閉啟動器不會終止已開啟的遊戲或替操作員End。遊戲結束後啟動器可再次使用，但仍須有效短票券；重新配票後，將新檔存回相同路徑可使用遊戲原Reconnect流程。連線檔的角色／四欄結構、IPv4及port先離線檢查；票券簽章、效期、admission、room／seat仍由遊戲伺服器驗證，格式正確不代表可入場。
@@ -87,13 +89,13 @@ runtime只收VrCommand.exe／UnityPlayer／CrashHandler／WinPix及D3D12、MonoB
 
 五房場館的主控可先用原 ZIP 和電腦對照表匯出各 Windows 席位的連線檔。 [分發連線檔](EXTERNAL_CLIENTS.md#依電腦分發-windows-vr-連線檔)
 
-Windows 玩家包 0.49.0 的圖形玩家端可以選用 OpenXR。先讓相容的頭盔連上 Windows OpenXR 執行環境，再由解壓後的玩家包資料夾執行。使用主控簽發的四欄 VR 玩家連線檔。
+先讓相容的頭盔連上 Windows OpenXR 執行環境，再用啟動器選「Windows OpenXR」及「開始遊戲」，或從解壓後的玩家包資料夾執行下列命令。兩種方式都使用主控簽發的四欄 VR 玩家連線檔。
 
 ```powershell
 .\Launch-Player.exe --config 'C:\Venue\player.json' --launch --openxr --wait
 ```
 
-啟動器使用 Direct3D 11。OpenXR 顯示和輸入子系統開始運作後，遊戲才送出入場請求。OpenXR 無法啟動時，玩家程序退出碼為 2。可加上 `--log` 和 `--status-report` 指定包外兩個新檔，檢查 `OpenXRUnavailable`。平常雙擊啟動器仍使用桌面模式。
+OpenXR 模式使用 Direct3D 11。顯示和輸入子系統開始運作後，遊戲才送出入場請求。OpenXR 無法啟動時，視窗會提示確認頭盔與 Windows OpenXR 執行環境，玩家程序退出碼為 2。命令列可加上 `--log` 和 `--status-report` 指定包外兩個新檔，檢查 `OpenXRUnavailable`。
 
 自 0.50.6 起，Windows 建置會在明確選用 OpenXR 後才探測執行環境，並只封裝 Windows 可載入的 OpenXR 功能。Quest 建置仍在啟動時初始化 OpenXR。Unity 的原生預載也能在建立圖形裝置前提供顯示卡選擇資訊，使用不同顯示卡的 Windows 頭盔與螢幕組合須在實機驗收。 [Unity XR SDK 預載介面](https://docs.unity.cn/6000.2/Documentation/Manual/xrsdk-pre-init-interface.html)
 
@@ -163,5 +165,7 @@ node tests/browser/check-external-native.cjs '<本次隔離ready.json>' '<解壓
 # 第一位使用真正啟動器按鈕，第二位背景啟動；需要人工／允許的UI操作：
 node tests/browser/check-external-native.cjs '<本次隔離ready.json>' '<解壓目錄>/VRCommand-Player' --package-interactive
 ```
+
+使用 `--package-interactive --package-path-input` 時，在實際啟動器貼上測試輸出的連線檔路徑，按 Enter 載入並啟動。若要核對 OpenXR 模擬席，先為測試程序設定 `XR_RUNTIME_JSON` 指向測試姿態 DLL 的 manifest、`VR_COMMAND_OPENXR_MOCK_DLL` 指向 Unity Mock Runtime，並加上 `--package-mock-openxr`。在視窗選 OpenXR 再啟動，測試會核對模擬執行環境、原席位追蹤及傳輸順序。 [模擬套件與姿態 DLL](#本機追蹤整合驗證)
 
 檢查器只接受自己新開的external／Simulation／loopback fixture。workflow結果與程序cleanup分開保存，只有cleanup也成功才寫complete的checks.json；實際退出可能是測試主動關閉的signal，不能只以exitCode非空判定。各輪成功、未完成原因與Windows安全性提示限制見[PROGRESS](PROGRESS.md)。原生GUI與背景流程、同機與跨機、模擬與頭盔證據須分開陳述。

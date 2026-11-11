@@ -22,7 +22,7 @@ async function main() {
   const options = process.argv.slice(3);
   const packageRoot = options[0] && !options[0].startsWith('--') ? path.resolve(options.shift()) : null;
   const addressOptions = options.filter(option => option.startsWith('--local-game-address='));
-  const knownOptions = ['--package-interactive', '--package-path-input', '--package-ticket-preview', '--launcher-status', '--room-ticket-bundle'];
+  const knownOptions = ['--package-interactive', '--package-path-input', '--package-ticket-preview', '--package-mock-openxr', '--launcher-status', '--room-ticket-bundle'];
   assert.ok(options.every(option => knownOptions.includes(option) || addressOptions.includes(option)), 'Unknown external workflow option');
   assert.ok(addressOptions.length <= 1, 'Specify one local game address');
   const gameAddress = addressOptions[0]?.slice('--local-game-address='.length) ?? '127.0.0.1';
@@ -42,6 +42,9 @@ async function main() {
   assert.ok(!packagePathInput || interactivePackage, 'Path entry requires the actual interactive player launcher');
   const packageTicketPreview = options.includes('--package-ticket-preview');
   assert.ok(!packageTicketPreview || packagePathInput, 'Ticket preview requires the actual launcher path entry');
+  const packageMockOpenXR = options.includes('--package-mock-openxr');
+  assert.ok(!packageMockOpenXR || interactivePackage && process.env.XR_RUNTIME_JSON && process.env.VR_COMMAND_OPENXR_MOCK_DLL,
+    'Mock OpenXR requires an interactive player package and the per-process mock runtime');
   const launcherStatus = options.includes('--launcher-status');
   const roomTicketBundle = options.includes('--room-ticket-bundle');
   assert.ok(!launcherStatus || packageRoot && !interactivePackage, 'Status CLI checks require a package and no GUI mode');
@@ -173,6 +176,24 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
     }
     await page.waitForFunction(() => document.querySelectorAll('#roster .ready-player').length === 2);
     check(true, 'Two separately owned real Unity clients join using only the actual UI-downloaded short-ticket configs');
+    if (interactivePackage) {
+      const [gui, peer] = children;
+      const readiness = await api(`/sessions/${id}/readiness`);
+      for (const [owned, rigKind] of [[gui, packageMockOpenXR ? 'Tracked' : 'Simulated'], [peer, 'Simulated']]) {
+        const row = readiness.players.find(p => p.playerId === owned.player.id && p.admissionId === owned.player.admissionId);
+        assert.ok(row?.canParticipate && row.rigKind === rigKind, 'Original seat reports the requested rig kind');
+      }
+      const lines = (await fs.readFile(gui.log, 'utf8')).split(/\r?\n/);
+      const markers = lines.filter(line => line.startsWith('VR_OPENXR_STARTUP '));
+      assert.deepEqual(markers, packageMockOpenXR ? ['VR_OPENXR_STARTUP status=requested', 'VR_OPENXR_STARTUP status=active'] : []);
+      if (packageMockOpenXR) {
+        const network = lines.findIndex(line => line.startsWith('VR_NETWORK_STARTED role=Client started=True '));
+        assert.ok(lines.some(line => line.includes('Runtime Name: Unity Mock Runtime')), 'Owned player confirms the Unity Mock Runtime');
+        assert.ok(lines.indexOf(markers[1]) < network, 'Selected OpenXR mode becomes active before the owned player starts transport');
+      }
+      check(true, packageMockOpenXR ? 'Actual WinForms OpenXR selection starts the tracked rig before transport'
+        : 'Actual WinForms desktop launch starts the simulated rig without requesting OpenXR');
+    }
     if (launcherStatus) {
       for (const owned of children) {
         const state = await until(async () => { const s = JSON.parse(await fs.readFile(owned.statusPath, 'utf8').catch(() => '{}')); return s.state === 'Connected' && s; }, 'launcher actual admission status');
@@ -232,7 +253,9 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
     assert.equal(await fingerprint(), originalTool);
     if (packageRoot) check(children.every(row => row.nativeId) && packageManifest.build.sourceFingerprint === ready.playerBuildReceipt.sourceFingerprint, 'Both players run from the extracted portable package via its real launcher, with Unicode / spaces / ampersand config paths');
     const networkScope = addressOptions.length ? 'same-host private IPv4' : 'same-host loopback';
-    outcome = { complete: true, toolFingerprint: originalTool, checks, findings, configs, results, world, stats, packageRoot, packageManifest, roomTicketBundle, networkScope, gameAddress, scope: `Two separately launched PC clients / ${networkScope} / Chromium SwiftShader / zero headsets` };
+    outcome = { complete: true, toolFingerprint: originalTool, checks, findings, configs, results, world, stats, packageRoot, packageManifest, roomTicketBundle,
+      guiMode: interactivePackage ? (packageMockOpenXR ? 'OpenXRMock' : 'Desktop') : null, networkScope, gameAddress,
+      scope: `Two separately launched PC clients / ${networkScope} / Chromium SwiftShader / zero headsets` };
     await fs.writeFile(path.join(evidence, 'workflow-checks.json'), JSON.stringify({ ...outcome, complete: false, workflowComplete: true, cleanupPending: true }, null, 2));
   } catch (error) {
     if (page && !page.isClosed()) await page.screenshot({ path: path.join(evidence, 'failure.png'), fullPage: true }).catch(() => {});
