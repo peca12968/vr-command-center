@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 啟動器預覽與五房 UDP 核對
+
+- 場館 UDP 工具可直接讀取 Windows 啟動器 `--venue-check` 產生的原預覽。比對五房模式、房間、埠、公告 IPv4 與本機綁定 IPv4。若其中一房不符，報告指出房間與原因，即使雙端報告都有效，整體仍回報未完成。報告保存原預覽 SHA-256。 [操作說明](EXTERNAL_CLIENTS.md#開場前核對五房-udp-報告)
+- 使用從管理台 0.31.130 下載的第四版計畫，與 Windows 啟動器 1.20 及遊戲 0.50.7 解壓包整合。獨立場與合併場各用原計畫、只改最後一個埠的計畫產生預覽。兩份錯埠預覽均被 UDP 工具拒絕，原預覽通過。六組原始 UDP 報告在實際 Unity 程序綁定後，按原時間與埠重驗通過。 [獨立場核對](../artifacts/server-package-checks/run-184a3547c1cd446fb66d376d75b152a6/independent-venue-udp-readiness.json) · [合併場核對](../artifacts/server-package-checks/run-184a3547c1cd446fb66d376d75b152a6/linked-venue-udp-readiness.json)
+- 477 項 Windows 原生檢查通過。獨立與合併各 25 個同機玩家端同時入場，六場雙封存共 987 格完整回放，50 筆原戰績、伺服器確認及 CSV 相符。活動場次歸零，隔離程序均已停止，C／F 快照另有 254 個非資料庫檔案雜湊相符。跨機 25 人、Quest／VIVE XR 實機及廠商硬體仍待現場驗收。 [原生驗收摘要](../artifacts/server-package-checks/run-184a3547c1cd446fb66d376d75b152a6/udp-preview-validation.json)
+- 本機 8 項 Windows UDP、9 項 Quest 預檢及 1 項封存整合測試通過。GitHub Actions 對 `82314f71` 因帳務或支出上限未啟動任何步驟。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42969046975)
+
 ## 2026-11-11 五房開場前 UDP 報告核對
 
 - 場館主控可依五房網路清單核對 Windows 雙端報告和 Quest 原批次報告。共用端點及來源 IPv4 的席位共用一組報告，五房獨立時按各自的遊戲埠核對。缺件、重複、過期、不符或無法讀取時，報告會指出待補的席位或列出多餘組數。完整報告可交給原封存驗收，屆時用實際綁定時間與已確認的玩家來源再查。 [操作說明](EXTERNAL_CLIENTS.md#開場前核對五房-udp-報告)
