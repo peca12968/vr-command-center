@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-11 五房保存配置並排預覽
+
+- 控制台 0.31.134 在逐房指定任務時可並排查看五張同尺度平面圖，核對保存物件、朝向及出生位。更換單房版本時先清除舊圖，其他房可繼續核對。可從每張圖開啟該房的詳細通路檢查。最後一次修正讓登出一併清除圖、標籤及保存版本 ID，已加入瀏覽器斷言。 [操作說明](MISSION_VERSIONS.md#逐房指定任務版本) · [預覽畫面](../artifacts/console-room-layouts-134-final-focused/independent-room-layouts.png)
+- 400 項 Windows 原生檢查通過。原瀏覽器建立回條、五房保存版本與 Windows 遊戲世界的物件位置及朝向逐房相符。獨立及合併各有 25 個同機玩家端，六場完成雙封存和 962 格完整回放，六份 CSV 共 50 筆原玩家結果及 50 筆伺服器確認。隔離場次及程序已清理。沿用 Windows 遊戲 0.50.7，跨機、頭盔及廠商硬體仍待現場驗收。 [原生結果](../artifacts/server-package-checks/run-aab495aa64a64b5b8e80fc2ceb7184da/checks.json) · [瀏覽器原回條](../artifacts/server-package-checks/run-aab495aa64a64b5b8e80fc2ceb7184da/native-independent-room-layouts.json)
+- 最終管理包通過 111 項 Node、38 項 Chromium 專項、974 項完整 Chromium 及 107 項 Windows 管理包檢查。ZIP 解壓逐一核對 565 檔。遊戲與管理測試停止後，C／F 快照分別有 213、18 個非資料庫檔案雜湊相符。初版 ZIP 在加強後的登出斷言重現問題，原始證據已保留。GitHub Actions 對 `d3c614d6` 因帳務或支出上限未啟動任何步驟。 [管理包](WINDOWS_CONTROL_PACKAGE.md) · [核對摘要](../artifacts/room-layouts-0.31.134-validation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42976283648)
+
 ## 2026-11-11 從全館席位下載個人戰績
 
 - 控制台 0.31.133 可從原結束批次的席位明細直接下載個人 CSV。使用原結束名冊的房號及席號核對戰鬥與世界封存，房間重開後仍指向原場次。下載後的回條仍以原遊戲伺服器確認為準。111 項收尾 Chromium 專項通過，包含未確認席位的原檔、房控權限、錯誤檔名、手機版面與切換批次時取消下載。 [操作說明](SESSION_CLOSURE.md#從全館收尾查看席位)

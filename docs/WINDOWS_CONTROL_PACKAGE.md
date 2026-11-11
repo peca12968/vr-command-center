@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-11 `VRCommand-ControlServer-0.31.134-room-layouts-final-win-x64.zip` 為 53,068,259 bytes，SHA-256 `790fdf39e9ecdd4067d61575fdb21228b2eee8d11cb91182fede7ca20c6a8561`。主控可在逐房指定任務時同時核對五張保存平面圖。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.134-room-layouts-final-win-x64.zip) · [操作說明](MISSION_VERSIONS.md#逐房指定任務版本)
+
 2026-11-11 `VRCommand-ControlServer-0.31.133-seat-report-win-x64.zip` 為 53,065,219 bytes，SHA-256 `4ff07d1f768fd321d0c30e9779a413418db0a33f681c8409910ca1ee8d72c668`。可從全館收尾的原席位直接下載個人封存 CSV。解壓核對 564 筆清單。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.133-seat-report-win-x64.zip) · [操作說明](SESSION_CLOSURE.md#從全館收尾查看席位)
 
 2026-11-11 `VRCommand-ControlServer-0.31.132-debrief-seats-win-x64.zip` 為 53,062,930 bytes，SHA-256 `b2fccb88421a0d7373e497626065f0897f86d509bd0b19e7c9dcfe773b406f8e`。全館收尾可按房間查看原結束名冊的席位回條。解壓核對 564 筆清單。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.132-debrief-seats-win-x64.zip) · [操作說明](SESSION_CLOSURE.md#從全館收尾查看席位)
