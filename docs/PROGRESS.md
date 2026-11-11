@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-11 Quest 部署重試歷史納入收尾驗收
+
+- 累計部署報告保存上一份原檔的 SHA-256。五房收尾可讀取最新報告或一路承接的原始報告，核對同一部署 ZIP、裝置清單及已完成席位。歷史中斷、分岔、修改已完成席位或跨批重複成功席位均會拒絕。手動分批部署的互不重複報告仍可沿用。93 項收尾驗收及 51 項部署測試通過。 [操作說明](EXTERNAL_CLIENTS.md#核對封存席位的-quest-發行-apk)
+- 使用實際部署 PowerShell、原 Quest 0.50.7／72 APK 及模擬 ADB 和場館資料，獨立三份與合併兩份部署報告均完成驗收。兩種模式各配對 5 席 Quest、20 席 Windows 和 25 筆模擬伺服器確認。舊驗收工具拒絕重疊報告，新版接受原檔承接並拒絕改過換行的副本。原六批 Windows 5／10／25 席總驗收結果相同。 [命令列整合](../artifacts/quest-deployment-history-0507/deployment-history-results.json)
+- 原生混合場使用既有 Windows 遊戲 0.50.7 和控制台 0.31.134。第一輪匯出重排了 JSON，留存原報告雜湊因此與部署當時不同。修正留存方式後重跑 126 項通過，直接以 F 槽原檔核對前一份報告雜湊。五個準備場次封存 649 格、C／F 的 49 個非資料庫檔案相符，活動場次及殘留程序為零。GitHub Actions 因帳務或支出上限未啟動。頭盔、跨機與廠商硬體仍待現場驗收。 [驗證摘要](../artifacts/quest-deployment-history-0507/validation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42979679910)
+
 ## 2026-11-11 Quest 部署按原報告重試
 
 - `deploy-quest.ps1 -RetryIncomplete` 使用原五房 ZIP、原裝置清單及上一份部署報告，只核對與補跑失敗及未執行的席位。待重試裝置的原身分、APK 條件、票券與五房遊戲來源仍須通過檢查。進入寫入階段後的報告會累計原結果。若上一輪的啟動結果不明，腳本會停止自動重試。51 項 Quest 部署測試通過，涵蓋連續中斷、裝置身分錯配、ZIP 或清單變更及 APK 回條保留。 [重試操作](QUEST3.md#從原部署報告重試未完成席位)
