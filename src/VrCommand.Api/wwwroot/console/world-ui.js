@@ -32,6 +32,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   let liveRooms = new Map(), roomSwitch;
   let venueReview = null, venueAnchor = null;
   const venueBasis = $('world-venue-basis');
+  const liveEventKind = $('world-live-event-kind'), liveEventButton = $('world-live-event');
+  for (const [kind, label] of Object.entries(eventNames)) liveEventKind.add(new Option(label, kind));
   const cameras = mountCameras(getKey, unauthorized, () => scene, freeView);
   const cameraForm = mountWorldCameraForm(() => scene, freeView);
   const eventSearch = mountWorldEventSearch(response, readFrame, eventNames, () => {
@@ -58,6 +60,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     observerRoom = null;
     reviewPlayer = returnLiveSource = null; clearClip(); bindVenueReview(null);
     stop(); stopList(); info = frame = savedLimit = null; savedFinished = false; geometry = ''; mode = ''; cameras.reset(); cameraForm.reset(); reviewControls();
+    liveEventKind.value = '';
     $('world-recording').replaceChildren(); $('world-player').hidden = true; message('選取已錄製的場次，開始觀戰或回放。');
     bindLiveRooms([], []);
     recordingControls(); bindRooms([]);
@@ -408,10 +411,13 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   function reviewControls() {
     const recent = $('world-recent');
     const canReturn = Boolean(returnLiveSource);
+    const liveFrame = active && mode === 'live' && connected && received && Boolean(frame);
     recent.hidden = mode !== 'live' && !canReturn;
-    recent.disabled = !active || (!canReturn && (mode !== 'live' || !connected || !received || !(frame?.packet.sequence > 1)));
+    recent.disabled = !active || (!canReturn && (!liveFrame || frame.packet.sequence <= 1));
     const recentLabel = canReturn ? '返回即時觀戰' : '回看最近 10 秒';
     if (recent.textContent !== recentLabel) recent.textContent = recentLabel;
+    $('world-live-event-tools').hidden = mode !== 'live';
+    liveEventButton.disabled = liveEventKind.disabled = !liveFrame;
     const showing = active && mode === 'replay' && info?.header.sessionId === $('world-recording').value && Boolean(frame);
     const idle = showing && !connected && !connecting && !stepping;
     const source = showing && info.complete && venueReview?.rooms.find(room => room.sessionId === info.header.sessionId && room.headerKey === geometry);
@@ -519,6 +525,18 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     returnLiveSource = geometry;
     return elapsedMilliseconds <= 10000 ? connect('replay', 0, 1, sequence)
       : connect('replay', elapsedMilliseconds - 10000, null, sequence);
+  }
+  function locateLiveEvent() {
+    if (liveEventButton.disabled) return;
+    stop();
+    mode = 'replay';
+    returnLiveSource = geometry;
+    savedLimit = frame.packet.sequence;
+    savedFinished = true;
+    status();
+    $('world-recent').focus({ preventScroll: true });
+    message('已暫停即時觀戰，可檢視保存的戰鬥事件。');
+    void eventSearch.fromLatest(liveEventKind.value, frame, value => filteredEvents(value).length);
   }
   function status() {
     reviewControls();
@@ -1001,6 +1019,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   $('world-recording').addEventListener('change', resetRecording);
   $('world-live').addEventListener('click', openLive);
   $('world-recent').addEventListener('click', toggleRecent);
+  liveEventButton.addEventListener('click', locateLiveEvent);
   $('world-replay').addEventListener('click', () => {
     returnLiveSource = null;
     savedLimit = $('world-recording').selectedOptions[0]?.dataset.complete === 'false' ? 'latest' : null;

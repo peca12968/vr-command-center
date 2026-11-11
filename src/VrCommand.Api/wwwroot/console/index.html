@@ -406,7 +406,12 @@
           <div id="world-viewport"><canvas id="world-canvas" tabindex="0" aria-label="世界錄製 3D 觀察場景，可拖曳及點選角色"></canvas><div class="replay-overlay"><span id="world-environment"></span><span id="world-freshness"></span></div></div>
           <p id="world-enemy-policy" class="hint"></p>
           <p class="hint">拖曳旋轉 · Shift／右鍵拖曳平移 · 滾輪縮放 · 雙擊場地定位鏡頭 · 點選角色。綠色為玩家，紅色為敵軍；雙手依錄製來源顯示。</p>
-          <div class="button-row"><button id="world-recent" type="button" class="secondary" hidden disabled>回看最近 10 秒</button></div>
+          <div class="button-row"><button id="world-recent" type="button" class="secondary" hidden disabled>回看最近 10 秒</button>
+            <div id="world-live-event-tools" class="world-live-event-tools" hidden>
+              <label>事件種類<select id="world-live-event-kind" disabled><option value="">全部事件</option></select></label>
+              <button id="world-live-event" type="button" class="quiet" disabled>定位最近事件</button>
+            </div>
+          </div>
           <div class="replay-transport"><button id="world-pause" class="quiet">暫停回放</button><button id="world-sound" class="quiet" aria-pressed="false" disabled>音效：關閉</button><label>速度<select id="world-speed"><option value="0.25">0.25×</option><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select></label><output id="world-time"></output></div>
           <label>跳轉已保存時間<input id="world-timeline" type="range" min="0" max="1" step="1" value="0" aria-label="世界錄製回放時間軸"></label>
           <section id="world-review" hidden aria-labelledby="world-review-heading">
@@ -500,7 +505,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.134 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.135 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

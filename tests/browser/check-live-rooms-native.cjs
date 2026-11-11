@@ -100,12 +100,57 @@ async function main() {
       return [url.pathname, url.searchParams.get('mode'), Number(url.searchParams.get('observerRoomId'))];
     }), samples.map(row => [`/api/sessions/${row.sessionId}/world/watch`, 'live', row.roomId]));
     assert.equal(watches.filter(request => retired.has(request)).length, 4);
+    const scopedWatches = watches.length, liveEventReviews = [];
+    if (requireDamage) {
+      for (const roomId of [3, 1, 4, 2, 5]) {
+        const { sessionId, streamId } = rooms.find(room => room.roomId === roomId);
+        const route = `/sessions/${sessionId}/world`, scope = `observerRoomId=${roomId}`;
+        const canvas = page.locator('#world-canvas');
+        if (roomId !== 3) await page.locator(`[data-live-room="${roomId}"]`).click();
+        await page.waitForFunction(({ roomId, sessionId }) => {
+          const $ = id => document.getElementById(id);
+          return !$('world-live-event').disabled && $('world-room').value === String(roomId)
+            && $('world-recording').value === sessionId && $('world-freshness').textContent === '正在接收快照';
+        }, { roomId, sessionId }, { polling: 100 });
+        const camera = await canvas.getAttribute('data-camera');
+        await page.locator('#world-live-event-kind').selectOption('PlayerDamaged');
+        const neighbor = page.waitForResponse(response => new URL(response.url()).pathname === `/api${route}/event-neighbor`);
+        await page.locator('#world-live-event').click();
+        const response = await neighbor, hit = await response.json();
+        const query = new URL(response.url()).searchParams;
+        assert.equal(hit.streamId, streamId);
+        assert.equal(hit.roomId, roomId);
+        assert.equal(hit.kind, 'PlayerDamaged');
+        assert.equal(query.get('fromFrame'), query.get('throughFrame'));
+        assert.ok(hit.frame.frameSequence < hit.throughFrame);
+        await page.locator('#world-event-search-status').filter({ hasText: `已跳到第 ${hit.frame.frameSequence} 格` }).waitFor();
+        const original = await get(`${route}/frames/${hit.frame.frameSequence}?${scope}`);
+        assert.equal(original.observerRoomId, roomId);
+        assert.equal(original.packet.elapsedMilliseconds, hit.frame.elapsedMilliseconds);
+        assert.equal(original.packet.events.filter(event => event.kind === 'PlayerDamaged').length, hit.frame.matchCount);
+        assert.equal(Number(await canvas.getAttribute('data-sequence')), hit.frame.frameSequence);
+        assert.equal(await page.locator('#world-events tr').count(), hit.frame.matchCount);
+        assert.equal(await canvas.getAttribute('data-camera'), camera);
+        if (roomId === 3) await page.locator('#world-player').screenshot({ path: path.join(output, 'located-live-event.png') });
+        const returning = page.waitForRequest(request => {
+          const url = new URL(request.url());
+          return url.pathname === `/api${route}/watch` && url.searchParams.get('mode') === 'live'
+            && url.searchParams.get('observerRoomId') === String(roomId);
+        });
+        await page.locator('#world-recent').click(); await returning;
+        await page.waitForFunction(tail => !document.querySelector('#world-live-event').disabled
+          && Number(document.querySelector('#world-canvas').dataset.sequence) > tail, hit.throughFrame, { polling: 100 });
+        assert.equal(await canvas.getAttribute('data-camera'), camera);
+        liveEventReviews.push({ roomId, sessionId, streamId, visibleTail: hit.throughFrame, eventFrame: hit.frame.frameSequence,
+          matchCount: hit.frame.matchCount, returnedSequence: Number(await canvas.getAttribute('data-sequence')) });
+      }
+    }
     assert.deepEqual(writes.filter(request => request !== 'POST /api/mission-layout'), []);
     assert.deepEqual(errors, []);
     await page.locator('#world-player').screenshot({ path: path.join(output, 'live-room.png') });
     await page.locator('#world-live-rooms').screenshot({ path: path.join(output, 'room-selector.png') });
-    await fs.writeFile(path.join(output, 'checks.json'), JSON.stringify({ complete: true, topology, samples,
-      scopedWatches: watches.length, retiredWatches: 4, nonGetRequests: writes }, null, 2), { flag: 'wx' });
+    await fs.writeFile(path.join(output, 'checks.json'), JSON.stringify({ complete: true, topology, samples, liveEventReviews,
+      scopedWatches, retiredWatches: 4, nonGetRequests: writes }, null, 2), { flag: 'wx' });
   } catch (error) {
     await page.screenshot({ path: path.join(output, 'failure.png'), timeout: 5000 }).catch(() => {});
     throw error;

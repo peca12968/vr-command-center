@@ -82,11 +82,12 @@ async function main() {
       await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed' }, null, 2));
       console.log(`PASS: ${checks} focused participation checks. Screenshots: ${screenshots}`); return;
     }
-    if (process.argv.includes('--live-watch-only')) {
+    if (process.argv.includes('--live-watch-only') || process.argv.includes('--live-event-only')) {
+      const liveEventOnly = process.argv.includes('--live-event-only');
       await page.goto(base + '/console/');
       await page.locator('#login-key').fill(tokens.Master);
       await page.locator('#login-form button').click();
-      await require('./world-browser.cjs')({ page, context, api, tokens, directory, root, base, screenshots, check, liveWatchOnly: true });
+      await require('./world-browser.cjs')({ page, context, api, tokens, directory, root, base, screenshots, check, liveWatchOnly: true, liveEventOnly });
       check(browserErrors.length === 0, 'Live observation recovery has no uncaught browser or policy errors');
       await fs.writeFile(path.join(screenshots, 'checks.json'), JSON.stringify({ checks, result: 'passed' }, null, 2));
       console.log(`PASS: ${checks} focused live observation checks. Screenshots: ${screenshots}`); return;

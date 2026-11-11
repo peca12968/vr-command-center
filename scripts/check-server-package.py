@@ -1909,6 +1909,11 @@ def main():
         check(observed['complete'] and observed['topology'] == topology and observed['scopedWatches'] == 5
               and observed['retiredWatches'] == 4 and [sample['roomId'] for sample in observed['samples']] == [1,4,2,5,3],
               topology+' shipped console switches all five original live rooms and retires the previous streams')
+        if args.check_room_combat:
+            reviews = observed['liveEventReviews']
+            check([row['roomId'] for row in reviews] == [3,1,4,2,5]
+                  and all(row['matchCount'] > 0 and row['eventFrame'] < row['visibleTail'] < row['returnedSequence'] for row in reviews),
+                  topology+' shipped console pauses at the latest original room damage events and returns to each live source')
         return observed['samples']
 
     def verify_venue_reports(entries, receipt, linked):

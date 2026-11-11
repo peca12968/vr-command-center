@@ -5,7 +5,7 @@ const { randomUUID } = require('node:crypto');
 const { isDeepStrictEqual } = require('node:util');
 const readCsv = require('./csv.cjs');
 
-module.exports = async function worldBrowser({ page, context, api, tokens, directory, root, base, screenshots, check, liveWatchOnly }) {
+module.exports = async function worldBrowser({ page, context, api, tokens, directory, root, base, screenshots, check, liveWatchOnly, liveEventOnly }) {
   const keys = path.join(directory, 'world-keys.json'); await fs.writeFile(keys, JSON.stringify({ OperatorKeys: tokens }));
   const relay = process.env.VR_COMMAND_WORLD_RELAY_DLL || path.join(root, 'tools/VrCommand.WorldRelay/bin/Release/net10.0/VrCommand.WorldRelay.dll');
   const children = [];
@@ -51,6 +51,59 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     await page.locator('#world-room').selectOption('2');
     check((await page.locator('#world-statistics-heading').innerText()).startsWith('房間 2') && await page.locator('#world-camera').inputValue() === 'top',
       'The room selector scopes frame statistics and preserves the overhead preset');
+    {
+      const liveEvent = page.locator('#world-live-event'), liveKind = page.locator('#world-live-event-kind');
+      const eventStatus = page.locator('#world-event-search-status'), returnLive = page.locator('#world-recent');
+      const eventNeighbor = `**/api/sessions/${live.header.sessionId}/world/event-neighbor?*`;
+      const eventResponse = result => new URL(result.url()).pathname.endsWith('/world/event-neighbor');
+      const waitLiveEvent = () => page.waitForFunction(() => !document.querySelector('#world-live-event').disabled, null, { polling: 100 });
+      const overhead = await canvas.getAttribute('data-camera');
+      await liveKind.selectOption('PlayerDamaged');
+      const located = page.waitForResponse(eventResponse);
+      await liveEvent.click();
+      const locatedResponse = await located, hit = await locatedResponse.json();
+      await eventStatus.filter({ hasText: `已跳到第 ${hit.frame.frameSequence} 格` }).waitFor();
+      const query = new URL(locatedResponse.url()).searchParams;
+      check(hit.streamId === live.header.streamId && query.get('roomId') === '2' && query.get('kind') === 'PlayerDamaged'
+        && query.get('fromFrame') === query.get('throughFrame') && hit.frame.frameSequence < hit.throughFrame
+        && Number(await canvas.getAttribute('data-sequence')) === hit.frame.frameSequence
+        && await page.locator('#world-events tr').count() === hit.frame.matchCount
+        && await canvas.getAttribute('data-camera') === overhead && await returnLive.innerText() === '返回即時觀戰',
+      'Live event lookup freezes the visible tail and pauses at the exact original damage frame in the selected room');
+      await page.screenshot({ path: path.join(screenshots, 'world-live-event.png'), fullPage: true });
+      await returnLive.click(); await waitLiveEvent();
+      await page.waitForFunction(tail => Number(document.querySelector('#world-canvas').dataset.sequence) > tail, hit.throughFrame, { polling: 100 });
+      check(Number(await canvas.getAttribute('data-sequence')) > hit.throughFrame
+        && await page.locator('#world-room').inputValue() === '2' && await canvas.getAttribute('data-camera') === overhead
+        && await page.locator('#world-review').isHidden(), 'Returning from a located event resumes the same live room with its overhead view');
+
+      await page.route(eventNeighbor, async route => {
+        const original = await route.fetch();
+        await route.fulfill({ response: original, json: { ...await original.json(), streamId: randomUUID() } });
+      });
+      const replaced = page.waitForRequest(eventResponse);
+      await liveEvent.click();
+      const rejectedTail = new URL((await replaced).url()).searchParams.get('throughFrame');
+      await eventStatus.filter({ hasText: '尋找事件失敗' }).waitFor();
+      check(await canvas.getAttribute('data-sequence') === rejectedTail && await returnLive.isEnabled(),
+        'Live event lookup ignores a substituted source and keeps the original paused frame');
+      await page.unroute(eventNeighbor);
+      await returnLive.click(); await waitLiveEvent();
+      await liveKind.selectOption('ReloadStarted');
+      const missing = page.waitForResponse(eventResponse);
+      await liveEvent.click();
+      const missingResult = await (await missing).json();
+      await eventStatus.filter({ hasText: '沒有上一筆符合條件的事件' }).waitFor();
+      check(missingResult.frame === null && Number(await canvas.getAttribute('data-sequence')) === missingResult.throughFrame
+        && await returnLive.isEnabled() && await liveEvent.isHidden(), 'No matching live event preserves the visible saved frame and the return action');
+      await returnLive.click(); await waitLiveEvent();
+      await liveKind.selectOption('');
+      await page.setViewportSize({ width: 390, height: 850 });
+      check(await page.locator('#world-live-event-tools').evaluate(node => node.scrollWidth <= node.clientWidth),
+        'The live event selector and action fit a mobile console');
+      await page.setViewportSize({ width: 1440, height: 1080 });
+    }
+    if (liveEventOnly) return;
     const { checkLiveMetadata, checkLiveWatch } = require('./live-watch-fault.cjs');
     await checkLiveMetadata({ page, base, live, api, canvas, check });
     await checkLiveWatch({ page, base, live, api, canvas, screenshots, check, extended: liveWatchOnly });
