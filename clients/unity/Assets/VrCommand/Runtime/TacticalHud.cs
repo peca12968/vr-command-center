@@ -56,6 +56,7 @@ namespace VrCommand.Unity
     {
         public string phase, status, source = "Simulation";
         public int room, health, magazine, reserve;
+        public ulong weaponSubmissions, weaponPresses;
         public float bearing;
         public bool reloading, ready, poseAccepted, connected, tracking;
         public double renderedAtSeconds;
@@ -180,6 +181,7 @@ namespace VrCommand.Unity
                 LastDrawn = new TacticalHudSnapshot { phase = phase, status = status, room = player.room, health = player.health,
                     magazine = player.magazine, reserve = player.reserve, reloading = player.reloading, bearing = bearing, labels = labels.ToArray(),
                     ready = combat.Ready.Value, poseAccepted = avatar.PoseAccepted.Value, connected = player.connected, tracking = avatar.TrackingReady,
+                    weaponSubmissions = avatar.WeaponSubmissions, weaponPresses = avatar.WeaponPresses,
                     renderedAtSeconds = Time.realtimeSinceStartupAsDouble, frameDeltaSeconds = Time.unscaledDeltaTime };
                 NativeWeatherProbe.ObserveHud(LastDrawn);
             }

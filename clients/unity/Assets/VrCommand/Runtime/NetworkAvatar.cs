@@ -122,6 +122,9 @@ namespace VrCommand.Unity
         private float nextFire;
         private double nextWeaponAccept;
         private ulong inputSequence;
+        internal ulong WeaponSubmissions => inputSequence;
+        private ulong diagnosticWeaponPresses;
+        internal ulong WeaponPresses => diagnosticWeaponPresses;
         private Renderer[] visuals;
         private bool desktopFire, desktopReload, windowKeyFallbackLogged;
         private Vector2 windowLook, windowMovement;
@@ -314,10 +317,11 @@ namespace VrCommand.Unity
                     : desktopFire || desktopReload || Mouse.current?.leftButton.isPressed == true || Keyboard.current?.spaceKey.isPressed == true || Keyboard.current?.rKey.isPressed == true;
                 var pressed = exercising ? exercise.Fire || exercise.Reload : tracked ? trackedInput.Pressed
                     : desktopFire || desktopReload || Mouse.current?.leftButton.wasPressedThisFrame == true || Keyboard.current?.spaceKey.wasPressedThisFrame == true || Keyboard.current?.rKey.wasPressedThisFrame == true;
+                if (!tracked && pressed && NativeWeatherProbe.Recording) diagnosticWeaponPresses++;
                 var allowWeapon = briefingPanel.Weapons.Allows(briefingPanel.Open, held, pressed);
-                var ready = authority != null && authority.Ready.Value && VenueBootstrap.Instance.State == "Running" && !ending;
-                var trackedArmed = !tracked || trackedWeaponRelease.Allows(ready && allowWeapon && validTrackedPose
-                    && PoseAccepted.Value && hasBody && body.connected && body.health > 0, held, pressed);
+                var ready = authority != null && authority.Ready.Value && VenueBootstrap.Instance.State == "Running" && !ending
+                    && hasBody && body.connected && body.health > 0 && PoseAccepted.Value;
+                var trackedArmed = !tracked || trackedWeaponRelease.Allows(ready && allowWeapon && validTrackedPose, held, pressed);
                 if (ready && allowWeapon && trackedArmed && inputAvailable)
                 {
                     var wantsReload = exercising ? exercise.Reload : tracked ? trackedInput.ReloadPressed : desktopReload || Keyboard.current != null && Keyboard.current.rKey.wasPressedThisFrame;

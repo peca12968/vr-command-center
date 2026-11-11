@@ -1,5 +1,15 @@
 # 開發進度
 
+## 2026-11-11 桌面玩家淘汰後的武器請求
+
+- Unity 0.50.5／Android code 70 將存活、身體連線與姿態確認納入桌面和追蹤玩家共用的武器提交條件。保留追蹤玩家放開按鍵後重新允許觸發的原有檢查，伺服器武器規則與 NGO 31 沿用。明確開啟 HUD 診斷時，可核對本機按鍵數與既有提交序號。 [操作及驗證](DESKTOP_WEAPON_INPUT.md)
+- 修正前診斷場 `20261111-075500-de5f99b6` 以四次實際鍵盤操作重現淘汰後多送兩筆武器請求，累計數為 0／1／2／2／3／4，退出碼 1 保持。0.50.5 解壓玩家包場 `20261111-080011-af9fb3c5` 完成相同四次實際按鍵，累計數為 0／1／2／2／2／2，退出碼 0。兩場本機按鍵計數均為 0／1／2／2／3／4，淘汰時管理就緒、姿態確認、連線及追蹤旗標均有效。 [修正前](../artifacts/desktop-venue/20261111-075500-de5f99b6/weapon-gate-result.json) · [修正後](../artifacts/desktop-venue/20261111-080011-af9fb3c5/weapon-gate-result.json)
+- 兩場均核對原玩家的一發耗彈、五次中彈、100 點損耗及健康 0，原戰績、同一原生連線的伺服器確認、CSV、雙封存與 941／812 格完整回放相符。每場 C／F 執行資料快照 16 檔逐檔相符，兩次驗證使用相同檢查工具，清理無殘留。較早的舊 HUD 工具在等待操作時超過原 1.5 秒來源新鮮度，退出碼 1 及原證據保持。 [核對紀錄](../artifacts/weapon-gate-native-validation.json) · [較早來源逾時](../artifacts/desktop-weapon-gate-ui-baseline.log)
+- 真正 Unity Editor 273 項測試全數通過，零跳過。Windows 玩家與伺服器新 ZIP 各核對 330 筆清單，Windows 玩家啟動器 38 項檢查通過。原 0.50.4 Windows、Quest、建置日誌及來源封存在 `unity-0.50.4-before-weapon-gate-20261111-074158`，修正前診斷版本另存。 [Editor 結果](../artifacts/weapon-gate-after-build/editmode-results.xml) · [玩家包](WINDOWS_PLAYER_PACKAGE.md) · [伺服器包](WINDOWS_SERVER_PACKAGE.md)
+- Windows 與 Quest 0.50.5 使用相同 `a9caeb4f...` 指紋與原場景／玩家 prefab 網路識別，管理包維持 0.31.126。Quest APK 已核對 ARM64、最低 SDK 32、目標 SDK 35 及 v2 開發簽章，尚未安裝頭盔。保存本次成功 Editor 匯入的 XR Simulation 設定與 GUID 參照及既有 PC 渲染設定序列化更新，個人模擬／Composition Layers 偏好維持忽略。 [同源發行核對](../artifacts/venue-release-0.50.5-weapon-gate.json)
+- 解壓 0.50.5 玩家包完成合併 25 席與獨立五房各 5 席的短場射擊及敵軍回擊回歸，場次 `20261111-080817-c8326858` 退出碼 0、37 項通過。六場 2,729 格完整回放、100 發命中、50 次擊殺及 75 次原敵軍命中／1,500 點損耗，與 50 份原戰績、50 次原連線確認及 6 份 CSV 相符。活動場次歸零，C／F 174 檔雜湊相符，測試程序均已退出。來源為同機程式產生的操作輸入，跨機真人、MR 場地、頭盔及廠商硬體仍待現場驗收。 [原多人結果](../artifacts/desktop-exercise/20261111-080817-c8326858/exercise-result.json) · [核對紀錄](../artifacts/weapon-gate-multiplayer-validation.json)
+- 使用者關閉擷取視窗後，1.18 啟動器成功輸入隔離管理實例路徑並以 Enter 載入，未自選場次。點擊房間選單時兩次由 `PickerHost.exe` 攔截，停止桌面點擊並清理本輪實例，未啟動遊戲伺服器。該場仍為失敗，完整 GUI 開場驗收持續追蹤。 [遮擋紀錄](../artifacts/server-gui/run-fa60524b52494d9b83d80831f09d6972/gui-blocker.json) · [清理](../artifacts/server-gui/run-fa60524b52494d9b83d80831f09d6972/cleanup.json)
+
 ## 2026-11-11 掩體與分批射擊長場
 
 - 既有 `--marksmanship` 可搭配 60 或 900 秒 `--endurance`。每房六個標準油桶保留五席正前方的原生敵軍出生位置，各席每週期兩次命中及一擊殺。由正常管理命令補充新目標，原名冊與入場識別持續使用。保存每批命令與來源畫格，完整回放核對原目標、武器事件順序及逐格統計。敵軍採 Hold 且關閉自動攻擊。 [操作方式](DESKTOP_ENDURANCE.md#掩體與分批目標)

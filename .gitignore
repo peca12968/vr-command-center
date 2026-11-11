@@ -26,6 +26,10 @@ clients/unity/*.sln
 clients/unity/*.slnx
 clients/unity/*.suo
 clients/unity/Assets/Resources/PerformanceTestRun*.json*
+clients/unity/Assets/CompositionLayers.meta
+clients/unity/Assets/CompositionLayers/UserSettings.meta
+clients/unity/Assets/XR/UserSimulationSettings.meta
+clients/unity/Assets/XR/UserSimulationSettings/
 
 *.worldlog
 *.journal

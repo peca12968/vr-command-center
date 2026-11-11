@@ -1,5 +1,7 @@
 # VR Command Center
 
+2026-11-11 [桌面玩家武器輸入](docs/DESKTOP_WEAPON_INPUT.md)：Windows 0.50.5 修正淘汰後仍送出射擊與換彈請求的問題，已以實際鍵盤操作核對修正前後行為、戰績、CSV 及完整回放。完整開發與場館驗收進度見[進度](docs/PROGRESS.md)。
+
 2026-11-02 [電腦端900秒動態長場](docs/DESKTOP_ENDURANCE.md)：Unity0.41.1／52／242真正Editor／4ebd雙平台，Linked25端後五房各5端、18項／51601全回放／51351 Running、50原結果／6CSV／雙seal與原ACK成功，每人90發45reload／45週期。普通入場8／354亦通過；原0.41走道失敗保留，未修復舊31／371等，非真人／跨機／頭盔容量，完整11active。
 
 2026-11-02 新版伺服器包106項／623回放與實際WinForms載入／選場／啟動／封存36秒／停止／關閉成功，首新GUI空名冊409失敗及舊PickerHost失敗均保留。詳見[伺服器包](docs/WINDOWS_SERVER_PACKAGE.md)；以下較舊GUI待驗文字為當時歷史，完整11active。

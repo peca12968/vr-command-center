@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-11 `VRCommand-Player-0.50.5-weapon-gate-win-x64.zip` 為 84,774,121 bytes，SHA-256 `d314681ee0da6a6d4fbfe73b6bb31906f903ee7e42506e7ec8bc3ba5670a7879`，解壓核對 330 筆清單。桌面玩家淘汰後不再提交射擊及換彈請求。 [實際鍵盤驗證](DESKTOP_WEAPON_INPUT.md)
+
 2026-11-10 `VRCommand-Player-0.50.2-win-x64.zip` 為 84,772,574 bytes，SHA-256 `16bbd61c6ffa5f3e24dfd78bc83fedbeba35b8976cf14b66d011b2acd789b67a`。解壓核對 330 筆清單，並與 0.50.2 伺服器及 Quest 開發 APK 核對同源。 [發行核對](../artifacts/venue-release-0.50.2-debrief.json)
 
 2026-11-10 `VRCommand-Player-0.50.1-win-x64.zip` 為 84,771,649 bytes，SHA-256 `ae8af276cf1c18ffc9c5e9303f8e0694b110458cd07833b863f00ebed5ad057b`。解壓核對 330 筆清單，與新版 Windows 遊戲伺服器使用同一份遊戲來源。 [Windows 伺服器包](WINDOWS_SERVER_PACKAGE.md)

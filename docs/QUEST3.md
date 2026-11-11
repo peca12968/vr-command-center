@@ -1,5 +1,7 @@
 # Quest 3 接入與工具鏈
 
+2026-11-11 Quest 開發 APK 0.50.5／70 為 61,037,854 bytes，SHA-256 `43b95a998e113896a0286338f3d47c928822bd60cadc7a460d6918a70d4a9254`。已核對 ARM64、最低 SDK 32、目標 SDK 35、APK v2 開發簽章，與 Windows 玩家及伺服器使用相同遊戲來源和場景網路識別。實機安裝與操作待頭盔。 [APK](../artifacts/quest-packages/vr-command-quest-0.50.5-arm64-debug.apk) · [發行核對](../artifacts/venue-release-0.50.5-weapon-gate.json)
+
 2026-11-10 Quest 3 開發 APK 0.50.2／67 為 61,028,450 bytes，SHA-256 `916c314102a8af03a5480f0548f3f8d2ddbc3b79c63493c17a2a4ec7fdf7ce35`。已核對 ARM64、最低 SDK 32、目標 SDK 35、APK v2 開發簽章，以及與 Windows 0.50.2 的來源及網路識別。頭盔安裝與運行待實機。 [APK](../artifacts/quest-packages/vr-command-quest-0.50.2-arm64-debug.apk) · [發行核對](../artifacts/venue-release-0.50.2-debrief.json)
 
 2026-11-10 Quest 3 開發 APK 更新至 0.50.1／66。`vr-command-quest-0.50.1-arm64-debug.apk` 為 61,026,698 bytes，SHA-256 `0d0c4ea6983247eecd033aaf4cd52f52a7698ecb9b2f2ba468d1d73acf71f221`。ARM64、最低 SDK 32、目標 SDK 35、APK v2 開發簽章及同版 Windows 的遊戲來源與網路識別均通過離線核對。 [驗證紀錄](PROGRESS.md#2026-11-10-遊戲主機的-https-與-wss-管理連線)
