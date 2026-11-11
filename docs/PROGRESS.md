@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 Windows 玩家驗收 ZIP 收件核對
+
+- 五房驗收清單可設定 `windowsEvidenceDirectory`，直接從原 ZIP 的場次、入場識別、退出報告及伺服器戰績確認配回席位。`--inspect-windows-inbox` 列出已收、缺件及衝突檔案；缺件時回傳退出碼 1。IPv4 取自原伺服器觀察的 UDP 來源。混合場可沿用 Windows 電腦對照表，Quest 證據依原流程核對。 [收件操作](EXTERNAL_CLIENTS.md#按收件資料夾找缺件及錯批)
+- 使用上一輪 0.50.7 Windows 同機封存的 50 份原 ZIP，調整檔名及放入順序後，獨立與合併各 25 席均完成配對。兩份完整驗收摘要與原逐檔驗收逐位元相同，先前六批總驗收輸出亦相同。 [驗證摘要](../artifacts/windows-field-inbox-0507/validation.json)
+- 不完整收件資料夾精確列出第 5 房第 4、5 席缺件，並分別列出重複席位、其他場次、配錯的退出報告及不可讀 ZIP。完整驗收拒絕該資料夾。89 項 Python 測試通過，含混合名冊、Quest 檔待補及伺服器逾時的測試。 [缺件範例](../artifacts/windows-field-inbox-0507/incomplete-inbox-status.json)
+- GitHub Actions 在 `d10560ee` 因帳務或支出上限未啟動任何步驟。人工視窗、實體跨機、頭盔與廠商硬體仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42956908589)
+
 ## 2026-11-11 Windows 玩家驗收 ZIP
 
 - 玩家啟動器 1.10 在核對發行、收到最終戰績、結束斷線且玩家程序以退出碼 0 結束後，封裝 `player.log` 與 `launch-report.json`。封裝前以關閉後的原日誌核對退出報告雜湊。視窗從本次紀錄資料夾取出 `player-evidence.zip`，命令列可用 `--evidence-zip`。 [玩家端操作](WINDOWS_PLAYER_PACKAGE.md#依場館發行報告核對玩家包)
