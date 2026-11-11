@@ -560,7 +560,20 @@ python .\scripts\capture-quest-field-log.py --adb $adb `
 
 預設要求完整 25 席。若名冊混有 VIVE，使用只列 Quest 席位的部署清單並加上 `--allow-partial-map`。擷取並行執行。看到 `venue-capture-ready` 代表清單各席都已讀到對應程序的啟動記錄，再依管理台確認入場及追蹤後開場。已入場玩家可沿用原部署包的票券資料核對日誌，包含擷取時已過期的原票券。需要重新入場時仍依遊戲伺服器的票券規則。
 
-場次結束後，`capture-report.json` 依房號、席位及場次列出完整日誌、`logcatPid` 和 SHA-256。任一席失敗時，整批回傳退出碼 1，已完成的日誌與可用的 `.partial` 各自保留。保留完整的原批次報告和同一資料夾內的日誌，連同記錄實際 IPv4 的網路計畫交給五房驗收工具。混合場可在同一份驗收清單加入 Windows 席位。 [直接使用 Quest 批次擷取報告](EXTERNAL_CLIENTS.md#直接使用-quest-批次擷取報告)
+場次結束後，`capture-report.json` 依房號、席位及場次列出完整日誌、`logcatPid` 和 SHA-256。任一席失敗時，整批回傳退出碼 1，已完成的日誌與可用的 `.partial` 各自保留。
+
+### 重試未完成的 Quest 擷取席位
+
+若 ADB 中斷後仍能讀到原遊戲程序的啟動、入場、最終戰績及結束斷線記錄，使用相同的部署 ZIP、原裝置對照表與原擷取報告重試。混合場繼續帶 `--allow-partial-map`。新輸出資料夾須尚未建立。
+
+```powershell
+python .\scripts\capture-quest-field-log.py --adb $adb `
+    --venue-bundle .\vr-venue-connections.zip --device-map .\device-map.json `
+    --retry-incomplete .\quest-capture\capture-report.json `
+    --output-directory .\quest-capture-retry --seconds 1800
+```
+
+重試只擷取原報告中失敗的席位。保留首次和重試的原報告、各自的日誌及記錄實際 IPv4 的網路計畫，交給五房驗收工具。重試仍須取得同一個原入場的完整紀錄。混合場可在同一份驗收清單加入 Windows 席位。 [核對原始擷取報告](EXTERNAL_CLIENTS.md#直接使用-quest-批次擷取報告)
 
 ## 連線與仍待實作事項
 

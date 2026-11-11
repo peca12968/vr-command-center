@@ -473,7 +473,7 @@ python scripts/verify-field-results.py --venue-stages .\stages.json
 }
 ```
 
-每份報告須完整，合起來必須剛好涵蓋計畫列出的 Quest 席位。工具重讀日誌核對位元組數和 SHA-256，再核對原程序、房號席位、伺服器觀察到的 IPv4、遊戲端點和戰績確認。成功摘要會列出 `questCaptureBatchesVerified` 及 `questCaptureSeatsVerified`。混合場可用 `windowsPlayers` 集中補上 Windows 日誌，或逐場填在 `sessions[].players`。若需要手動提交已完成的 Quest 日誌，沿用上方 `players` 及 `logcatPid` 格式。
+首次與重試的原報告可一併列入。各報告保留原成功與失敗記錄，所有成功席位合起來須剛好涵蓋計畫列出的 Quest 席位，每席只接受一次完整擷取。工具重讀完整日誌核對位元組數和 SHA-256，再核對原程序、房號席位、伺服器觀察到的 IPv4、遊戲端點和戰績確認。成功摘要列出 `questCaptureBatchesVerified` 及 `questCaptureSeatsVerified`，若曾有未完成報告，另列 `questCaptureIncompleteReports` 與 `questCaptureFailedAttempts`。混合場可用 `windowsPlayers` 或 `windowsEvidenceDirectory` 補上 Windows 證據。手動提交 Quest 原日誌可沿用 `players` 及 `logcatPid`。 [重試失敗席位](QUEST3.md#重試未完成的-quest-擷取席位)
 
 ### 核對封存席位的 Quest 發行 APK
 

@@ -707,6 +707,32 @@ else:
         self.assertNotIn('capture-ready', repeat.stderr)
         self.assertEqual(before, {path.name: path.read_bytes() for path in output.iterdir()})
 
+        expected = self.mock_capture_devices(document['seats'], 'Independent')
+        retry_output = self.root / 'retried capture'
+        retry = list(command)
+        retry[retry.index('--output-directory') + 1] = str(retry_output)
+        retry += ['--allow-partial-map', '--retry-incomplete', str(output / 'capture-report.json')]
+        finished = subprocess.run(retry, cwd=self.root, capture_output=True, encoding='utf-8', timeout=20)
+        self.assertEqual(0, finished.returncode, finished.stderr)
+        recovered = json.loads((retry_output / 'capture-report.json').read_bytes())
+        self.assertEqual((True, 1, 1), (recovered['complete'], recovered['expectedSeats'], recovered['capturedSeats']))
+        seat, = recovered['seats']
+        self.assertEqual((2, 3), (seat['roomId'], seat['seat']))
+        self.assertEqual(expected[2, 3][2], (retry_output / seat['log']).read_bytes())
+        self.assertEqual(before, {path.name: path.read_bytes() for path in output.iterdir()})
+        self.assertEqual(1, sum(json.loads(line)['stage'] == 'capture-ready' for line in finished.stderr.splitlines()))
+
+        wrong_prior = self.root / 'wrong-prior.json'
+        failed['port'] += 1
+        wrong_prior.write_text(json.dumps(report), encoding='utf-8')
+        unstarted = self.root / 'unstarted capture'
+        retry[retry.index('--output-directory') + 1] = str(unstarted)
+        retry[-1] = str(wrong_prior)
+        rejected = subprocess.run(retry, cwd=self.root, capture_output=True, encoding='utf-8', timeout=20)
+        self.assertEqual(1, rejected.returncode, rejected.stderr)
+        self.assertIn('does not match the original deployment seats', rejected.stderr)
+        self.assertFalse(unstarted.exists())
+
     def run_fleet(self, files, mapping, *flags, faults=None, environment=None, fleet_root=None, release=None):
         env = {**os.environ, **(environment or {}), 'VR_QUEST_FLEET_FIXTURE': str(fleet_root or self.root),
                'VR_QUEST_FLEET_FAULTS': json.dumps(faults or {})}

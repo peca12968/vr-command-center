@@ -1178,6 +1178,41 @@ def read_udp_preflight_batch(path, mode, expected_rooms):
     return sources
 
 
+def read_quest_capture_report(path, mode):
+    report = read_quest_plan_file(path)
+    require(set(report) == {'version', 'complete', 'topology', 'expectedSeats', 'capturedSeats', 'scope', 'seats'}
+            and type(report['complete']) is bool and report['topology'] == mode and report['scope'] == 'quest-logcat-only',
+            'Quest capture report has an invalid format or the wrong topology')
+    count = integer(report['expectedSeats'], 1, 25)
+    captured = integer(report['capturedSeats'], 0, count)
+    rows = report['seats']
+    require(type(rows) is list and len(rows) == count, 'Quest capture report seat totals differ')
+    seen = set()
+    common = {'roomId', 'seat', 'sessionId', 'port', 'complete'}
+    successful = common | {'log', 'logcatPid', 'bytes', 'sha256'}
+    failed = common | {'reason'}
+    for row in rows:
+        require(type(row) is dict and common <= row.keys() and type(row.get('complete')) is bool, 'Invalid Quest capture seat outcome')
+        seat = integer(row['roomId'], 1, 5), integer(row['seat'], 1, 5)
+        require(seat not in seen, 'Quest capture report repeats a seat')
+        seen.add(seat)
+        identity(row['sessionId'])
+        integer(row['port'], 1024, 65535)
+        log_name = f'room-{seat[0]:02}-seat-{seat[1]:02}-logcat.txt'
+        if row['complete']:
+            require(set(row) == successful and row['log'] == log_name, 'Expected the original Quest capture log name and metadata')
+            require(type(row['sha256']) is str and re.fullmatch(r'[0-9a-f]{64}', row['sha256']),
+                    'Invalid original Quest capture digest')
+            integer(row['logcatPid'], 1, 2**31 - 1)
+            integer(row['bytes'], 1, MAX_FILE_BYTES)
+        else:
+            require(set(row) in (failed, failed | {'partial'}) and type(row['reason']) is str and bool(row['reason'])
+                    and row.get('partial', log_name + '.partial') == log_name + '.partial', 'Invalid failed Quest capture row')
+    require(sum(row['complete'] for row in rows) == captured and report['complete'] == (captured == count),
+            'Quest capture report completeness differs from its seat totals')
+    return report
+
+
 def read_quest_capture_batches(spec, mode, expected, evidence_path):
     require(type(spec) is dict and set(spec) == {'networkPlan', 'reports'},
             'Provide a Quest network plan and capture reports')
@@ -1186,35 +1221,31 @@ def read_quest_capture_batches(spec, mode, expected, evidence_path):
     reports = spec['reports']
     require(type(reports) is list and 1 <= len(reports) <= 25, 'Provide 1 to 25 Quest capture reports')
     captures, used_seats = {}, set()
+    incomplete_reports = failed_attempts = 0
     for name in reports:
         path = evidence_path(name)
-        report = read_quest_plan_file(path)
-        require(set(report) == {'version', 'complete', 'topology', 'expectedSeats', 'capturedSeats', 'scope', 'seats'}
-                and report['complete'] is True and report['topology'] == mode and report['scope'] == 'quest-logcat-only',
-                'Quest capture report is incomplete or has the wrong topology')
-        count = integer(report['expectedSeats'], 1, 25)
-        require(integer(report['capturedSeats'], 1, 25) == count and type(report['seats']) is list
-                and len(report['seats']) == count, 'Quest capture report seat totals differ')
+        report = read_quest_capture_report(path, mode)
+        incomplete_reports += not report['complete']
+        failed_attempts += report['expectedSeats'] - report['capturedSeats']
         for row in report['seats']:
-            require(type(row) is dict and set(row) == {'roomId', 'seat', 'sessionId', 'port', 'complete', 'log',
-                    'logcatPid', 'bytes', 'sha256'} and row['complete'] is True, 'Quest capture seat is incomplete')
-            seat = integer(row['roomId'], 1, 5), integer(row['seat'], 1, 5)
-            require(seat in sources and seat not in used_seats, 'Quest capture repeats or names an unplanned seat')
-            session_id = identity(row['sessionId'])
+            seat = row['roomId'], row['seat']
+            require(seat in sources, 'Quest capture names an unplanned seat')
+            session_id = row['sessionId']
             session = expected.get(session_id)
             require(session is not None and seat[0] in session['roomIds'], 'Quest capture does not match an original session and room')
-            require(integer(row['port'], 1024, 65535) == endpoints[tuple(session['roomIds'])][1],
-                    'Quest capture port differs from the network plan')
-            require(row['log'] == f'room-{seat[0]:02}-seat-{seat[1]:02}-logcat.txt', 'Expected the original Quest capture log name')
+            require(row['port'] == endpoints[tuple(session['roomIds'])][1], 'Quest capture port differs from the network plan')
+            if not row['complete']:
+                continue
+            require(seat not in used_seats, 'Quest capture repeats a completed seat')
             log = evidence_path(row['log'], path.parent)
             require(log.parent == path.parent and log.name == row['log'], 'Quest capture log must be next to its report')
-            require(type(row['sha256']) is str and re.fullmatch(r'[0-9a-f]{64}', row['sha256']),
-                    'Invalid original Quest capture digest')
-            captures.setdefault(session_id, []).append((ipv4(sources[seat]), log, integer(row['logcatPid'], 1, 2**31 - 1),
-                                                        seat, integer(row['bytes'], 1, MAX_FILE_BYTES), row['sha256']))
+            captures.setdefault(session_id, []).append((ipv4(sources[seat]), log, row['logcatPid'], seat, row['bytes'], row['sha256']))
             used_seats.add(seat)
     require(used_seats == sources.keys(), 'Quest capture reports must cover the planned Quest seats exactly')
-    return captures, endpoints, len(reports)
+    summary = {'questCaptureBatchesVerified': len(reports)}
+    if incomplete_reports:
+        summary.update(questCaptureIncompleteReports=incomplete_reports, questCaptureFailedAttempts=failed_attempts)
+    return captures, endpoints, summary
 
 
 def quest_capture_log(address, path, pid, seat, size, digest):
@@ -1496,10 +1527,10 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
     windows_by_session = venue_windows_logs(manifest['windowsPlayers'], expected, evidence_path, players_per_room) if explicit_windows else {}
 
     capture_supplied = 'questCaptures' in manifest
-    captures, capture_endpoints, capture_batches = {}, {}, 0
+    captures, capture_endpoints, capture_summary = {}, {}, {}
     if capture_supplied and not inspect_windows:
         require(topology == 'direct-lan', 'Quest capture batches require direct LAN evidence')
-        captures, capture_endpoints, capture_batches = read_quest_capture_batches(manifest['questCaptures'], mode, expected, evidence_path)
+        captures, capture_endpoints, capture_summary = read_quest_capture_batches(manifest['questCaptures'], mode, expected, evidence_path)
     quest_deployments, deployment_summary = None, None
     if 'questDeployments' in manifest and not inspect_windows:
         require(topology == 'direct-lan', 'Quest deployment evidence requires direct LAN evidence')
@@ -1730,7 +1761,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
             **({'distinctRemoteRoster': {'seatsVerified': len(player_ids), 'distinctSourceAddresses': len(remote),
                 'connectionsVerified': reconnect_summary['reconnectHistory']['observedConnections']}} if require_distinct_remote_roster else {}),
             **({'questLogcatPlayers': quest_players} if quest_players else {}),
-            **({'questCaptureBatchesVerified': capture_batches, 'questCaptureSeatsVerified': quest_players} if capture_supplied else {}),
+            **({**capture_summary, 'questCaptureSeatsVerified': quest_players} if capture_supplied else {}),
             **({'questDeployment': deployment_summary} if deployment_summary is not None else {}),
             **({'venueRelease': {'reportSha256': release_hash,
                 **({'windows': {'playerManifestSha256': windows_hash, 'seatsVerified': windows_players}} if windows_players else {}),

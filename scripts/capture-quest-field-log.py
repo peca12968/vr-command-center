@@ -154,6 +154,20 @@ def venue_plan(bundle, device_map, partial):
     return field.read_json(result.stdout.decode('utf-8-sig'))
 
 
+def retry_capture_plan(plan, report_path):
+    report = field.read_quest_capture_report(report_path, plan['topology'])
+    seats = {(row['roomId'], row['seat']): row for row in plan['seats']}
+    retry = []
+    for row in report['seats']:
+        original = seats.get((row['roomId'], row['seat']))
+        field.require(original is not None and row['sessionId'] == original['sessionId'] and row['port'] == original['port'],
+                      'Prior Quest capture report does not match the original deployment seats')
+        if not row['complete']:
+            retry.append(original)
+    field.require(retry, 'Prior Quest capture report has no incomplete seats')
+    return {**plan, 'seats': retry}
+
+
 async def capture_venue(adb, plan, directory, seconds):
     directory.mkdir()
     ready = 0
@@ -203,6 +217,7 @@ def main():
     parser.add_argument('--venue-bundle', type=Path, help='Original five-room deployment ZIP for concurrent capture')
     parser.add_argument('--device-map', type=Path, help='Version 1 Quest device map used for deployment')
     parser.add_argument('--allow-partial-map', action='store_true', help='Capture only the explicitly mapped Quest seats')
+    parser.add_argument('--retry-incomplete', type=Path, help='Read only the failed seats from this original venue capture report')
     parser.add_argument('--output-directory', type=Path, help='New private directory for venue captures and the report')
     parser.add_argument('--seconds', type=int, default=1800, help='Total capture deadline, 1 through 7200 seconds')
     args = parser.parse_args()
@@ -212,9 +227,11 @@ def main():
         adb = [str(args.adb.resolve())]
         single = (args.serial, args.connection_file, args.output)
         venue = (args.venue_bundle, args.device_map, args.output_directory)
-        if any(venue) or args.allow_partial_map:
+        if any(venue) or args.allow_partial_map or args.retry_incomplete:
             field.require(all(venue) and not any(single), 'Use a venue ZIP, device map and output directory together')
             plan = venue_plan(args.venue_bundle, args.device_map, args.allow_partial_map)
+            if args.retry_incomplete:
+                plan = retry_capture_plan(plan, args.retry_incomplete)
             report = asyncio.run(capture_venue(adb, plan, args.output_directory, args.seconds))
         else:
             field.require(all(single), 'Use a serial, connection file and output log together')

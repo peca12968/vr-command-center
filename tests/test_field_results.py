@@ -264,7 +264,7 @@ def venue_fixture(root, mode, *, remote=False, quest_per_room=0, with_journals=F
     return path, manifest, batch
 
 
-def quest_capture_venue_fixture(root, mode, *, quest_per_room=2, batches=2, use_capture_tool=False):
+def quest_capture_venue_fixture(root, mode, *, quest_per_room=2, batches=2, use_capture_tool=False, interrupt_first=False):
     path, manifest, _ = venue_fixture(root, mode, remote=True, quest_per_room=quest_per_room)
     network = {'version': 1, 'mode': mode, 'endpoints': [], 'sources': []}
     mapped, inputs = [], {}
@@ -294,10 +294,22 @@ if sys.argv[3:] == ['shell', 'pidof', 'com.vrcommand.quest']:
     print(7342)
 else:
     assert sys.argv[3:] == ['logcat', '-b', 'main', '--pid=7342', '-v', 'threadtime', '-s', 'Unity:I']
-    sys.stdout.buffer.write((Path(__file__).parent / (serial + '.log')).read_bytes())
+    root = Path(__file__).parent
+    raw = (root / (serial + '.log')).read_bytes()
+    if (root / (serial + '.interrupt')).exists():
+        for line in raw.splitlines(keepends=True):
+            if b'VR_CLIENT_DEBRIEF_FINAL ' in line:
+                break
+            sys.stdout.buffer.write(line)
+    else:
+        sys.stdout.buffer.write(raw)
 """, encoding='utf-8')
         for serial, raw in inputs.items():
             (root / (serial + '.log')).write_bytes(raw)
+    if interrupt_first:
+        assert use_capture_tool and batches == 1
+        interruption = root / (mapped[0]['serial'] + '.interrupt')
+        interruption.touch()
     reports = []
     for index in range(batches):
         directory = root / f'capture batch {index + 1}'
@@ -306,7 +318,7 @@ else:
             plan = {'version': 1, 'topology': mode, 'seats': seats}
             with redirect_stderr(io.StringIO()):
                 result = asyncio.run(capture_tool.capture_venue([sys.executable, str(adb)], plan, directory, 25))
-            assert result['complete'] and result['capturedSeats'] == len(seats)
+            assert result['complete'] is (not interrupt_first) and result['capturedSeats'] == len(seats) - int(interrupt_first)
         else:
             directory.mkdir()
             captured = []
@@ -320,6 +332,15 @@ else:
             (directory / 'capture-report.json').write_text(json.dumps(
                 {'version': 1, 'complete': True, 'topology': mode, 'expectedSeats': len(seats),
                  'capturedSeats': len(seats), 'scope': 'quest-logcat-only', 'seats': captured}), encoding='utf-8')
+        reports.append(str((directory / 'capture-report.json').relative_to(root)))
+    if interrupt_first:
+        retry = capture_tool.retry_capture_plan(plan, root / reports[0])
+        assert retry['seats'] == mapped[:1]
+        interruption.unlink()
+        directory = root / 'retry batch'
+        with redirect_stderr(io.StringIO()):
+            result = asyncio.run(capture_tool.capture_venue([sys.executable, str(adb)], retry, directory, 25))
+        assert result['complete'] and result['capturedSeats'] == 1
         reports.append(str((directory / 'capture-report.json').relative_to(root)))
     (root / 'network-plan.json').write_text(json.dumps(network), encoding='utf-8')
     manifest['questCaptures'] = {'networkPlan': 'network-plan.json', 'reports': reports}
@@ -1667,8 +1688,8 @@ class FieldResultsTests(unittest.TestCase):
 
     def test_venue_rejects_incomplete_wrong_and_tampered_capture_evidence(self):
         cases = {
-            'incomplete report': 'incomplete or has the wrong topology',
-            'wrong topology': 'incomplete or has the wrong topology',
+            'incomplete report': 'completeness differs',
+            'wrong topology': 'wrong topology',
             'wrong session': 'original session and room',
             'wrong port': 'capture port differs',
             'wrong pid': 'Quest',
@@ -1710,6 +1731,42 @@ class FieldResultsTests(unittest.TestCase):
                 network_path.write_text(json.dumps(network), encoding='utf-8')
                 path.write_text(json.dumps(manifest), encoding='utf-8')
                 with self.assertRaisesRegex(field.EvidenceError, error):
+                    field.verify_venue(path)
+
+    def test_venue_recovers_one_interrupted_adb_seat_without_replacing_completed_captures(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest = quest_capture_venue_fixture(root, mode, quest_per_room=1, batches=1,
+                                                               use_capture_tool=True, interrupt_first=True)
+                first_name, retry_name = manifest['questCaptures']['reports']
+                first_path, retry_path = root / first_name, root / retry_name
+                first_bytes = first_path.read_bytes()
+                first = json.loads(first_bytes)
+                retry = json.loads(retry_path.read_bytes())
+                self.assertFalse(first['complete'])
+                self.assertEqual((5, 4), (first['expectedSeats'], first['capturedSeats']))
+                missing, = [row for row in first['seats'] if not row['complete']]
+                partial = first_path.parent / missing['partial']
+                raw_partial = partial.read_bytes()
+                self.assertTrue(raw_partial)
+                self.assertNotIn(b'VR_CLIENT_DEBRIEF_FINAL', raw_partial)
+                self.assertEqual((missing['roomId'], missing['seat']), (retry['seats'][0]['roomId'], retry['seats'][0]['seat']))
+                report = field.verify_venue(path)
+                self.assertEqual(25, report['serverAcknowledgements'])
+                self.assertEqual((2, 5, 1, 1), (report['questCaptureBatchesVerified'], report['questCaptureSeatsVerified'],
+                                               report['questCaptureIncompleteReports'], report['questCaptureFailedAttempts']))
+                self.assertEqual(first_bytes, first_path.read_bytes())
+                self.assertEqual(raw_partial, partial.read_bytes())
+                manifest['questCaptures']['reports'] = [first_name]
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'cover the planned Quest seats'):
+                    field.verify_venue(path)
+                duplicate = root / 'duplicate'
+                shutil.copytree(retry_path.parent, duplicate)
+                manifest['questCaptures']['reports'] = [first_name, retry_name, 'duplicate/capture-report.json']
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'repeats a completed seat'):
                     field.verify_venue(path)
 
     @unittest.skipUnless(HAS_POWERSHELL, 'UDP evidence requires PowerShell')
