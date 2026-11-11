@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-11 五房批次啟動鍵盤流程
+
+- Windows 啟動器 1.20 支援 Alt+V 開啟五房批次視窗、在計畫路徑欄按 Enter 核對，以及 Alt+S 啟動。啟動後清除已完成的預覽，計畫重核失敗時也清除舊清單。 [操作方式](WINDOWS_SERVER_PACKAGE.md#從-windows-視窗核對並啟動)
+- 實際解壓包視窗 `run-0265f1863fc5403b9ca7dd33b9e42b89` 以鍵盤核對第四版計畫。核對後更換第五房 UDP 埠，原視窗拒絕啟動並清除舊清單，五場均未登記來源或公告端點。重新核對後以 Alt+S 啟動五房，所有端點與新計畫相符。 [拒絕證據](../artifacts/server-venue-gui/run-0265f1863fc5403b9ca7dd33b9e42b89/stale-plan-rejection.json) · [五房就緒](../artifacts/server-venue-gui/run-0265f1863fc5403b9ca7dd33b9e42b89/venue-ready.json)
+- 每房一個同機 Windows 玩家完成入場、測試 API 開始與結束、戰績確認及雙封存。五房共 217 格世界日誌，原伺服器均停止，兩個視窗正常關閉，測試程序已退出，C／F 40 檔逐檔相符。首輪驗證器在 API 啟動前讀取簽章檔而失敗，保留原紀錄並調整讀取時機。 [五房結果](../artifacts/server-venue-gui/run-0265f1863fc5403b9ca7dd33b9e42b89/checks.json)
+- 封裝 10 項、清單 51 項及 Framework 59 項通過，涵蓋單場視窗 Enter 載入、按住 Enter 與原選擇規則。新包沿用同版 0.50.5 遊戲，Windows 伺服器及玩家的 323 個共用檔案相符，Quest APK 離線發行核對通過。 [封裝與副本核對](../artifacts/server-venue-keyboard-120-validation.json) · [發行核對](../artifacts/venue-release-0.50.5-server-120.json)
+
 ## 2026-11-11 伺服器啟動器的鍵盤選房與啟動
 
 - Windows 啟動器 1.19 在單場視窗加入 Alt+R、Alt+P、Alt+S。實際按 Enter 載入管理實例後，先確認未選場時 Alt+S 維持停用，再用 Alt+R 及方向鍵選第 1 房、Alt+P 設定 UDP 埠、Alt+S 啟動。原程序公告正確端點。 [操作方式](SERVER_CATALOG.md)

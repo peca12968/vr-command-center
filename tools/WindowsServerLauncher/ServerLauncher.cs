@@ -967,11 +967,19 @@ internal static class ServerLauncher
         return complete ? 0 : 1;
     }
 
+    static bool HandlePathEnter(ref Message message, Keys keyData, TextBox path, Button action)
+    {
+        if (keyData != Keys.Enter || !path.IsHandleCreated || message.HWnd != path.Handle) return false;
+        const long repeatedKey = 1L << 30;
+        if (action.Enabled && (message.LParam.ToInt64() & repeatedKey) == 0) action.PerformClick();
+        return true;
+    }
+
     sealed class VenueWindow : Form
     {
         readonly TextBox path = new TextBox(), status = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
         readonly Button browse = new Button { Text = "選擇計畫" }, check = new Button { Text = "核對計畫" },
-            start = new Button { Text = "啟動全館", Enabled = false }, abort = new Button { Text = "中止全館", Enabled = false };
+            start = new Button { Text = "啟動全館 (&S)", Enabled = false }, abort = new Button { Text = "中止全館", Enabled = false };
         readonly CheckBox peers = new CheckBox { Text = "記錄本次玩家連線來源（場館驗收）", AutoSize = true };
         readonly Label summary = new Label { AutoEllipsis = true };
         readonly ListView rooms = new ListView { View = View.Details, FullRowSelect = true, ShowItemToolTips = true, AccessibleName = "五房計畫明細" };
@@ -1032,7 +1040,12 @@ internal static class ServerLauncher
         {
             preview = null; rooms.Items.Clear(); start.Enabled = false;
             summary.Text = "請載入並核對控制台下載的五房場館計畫。";
-            status.Text = "核對計畫後會列出房間、任務及連線端點。";
+            status.Text = "在路徑欄按 Enter 或按「核對計畫」，查看房間、任務及連線端點。";
+        }
+
+        protected override bool ProcessCmdKey(ref Message message, Keys keyData)
+        {
+            return HandlePathEnter(ref message, keyData, path, check) || base.ProcessCmdKey(ref message, keyData);
         }
 
         void Background(Action work, Action<Exception> complete)
@@ -1107,7 +1120,7 @@ internal static class ServerLauncher
                 result = ExecuteVenue(current, work, 86400, ready, report, capturePeers, () => cancel);
             }, failure =>
             {
-                preview = null; peers.Checked = false;
+                preview = null; rooms.Items.Clear(); peers.Checked = false;
                 status.Text = result == 0 ? "全館任務已封存並停止。"
                     : "未完成：" + (failure != null ? Safe(failure) : "請核對各房結果。");
                 if (File.Exists(report)) status.AppendText("\r\n結果：" + report);
@@ -1121,7 +1134,7 @@ internal static class ServerLauncher
         readonly TextBox selected = new TextBox(), address = new TextBox { Text = "127.0.0.1" }, bind = new TextBox { Text = "127.0.0.1" };
         readonly NumericUpDown port = new NumericUpDown { Minimum = 1024, Maximum = 65535, Value = 7777 }; readonly ComboBox session = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Enabled = false };
         readonly Button open = new Button { Text = "選擇檔案" }, refresh = new Button { Text = "載入／更新" }, start = new Button { Text = "啟動伺服器 (&S)", Enabled = false }, abort = new Button { Text = "中止伺服器", Enabled = false },
-            venue = new Button { Text = "五房批次啟動" };
+            venue = new Button { Text = "五房批次啟動 (&V)" };
         readonly CheckBox peerDiagnostics = new CheckBox { Text = "記錄本次玩家連線來源（場館驗收）" };
         readonly Label state = new Label { Text = "先啟動管理服務，再載入其管理實例。", AutoSize = false }, detail = new Label { Text = "請先載入，再明確選擇要啟動的房間與任務。", AutoEllipsis = true };
         readonly CatalogState catalog = new CatalogState(); Run active; volatile bool cancel; Thread worker; bool loading;
@@ -1159,11 +1172,7 @@ internal static class ServerLauncher
         }
         protected override bool ProcessCmdKey(ref Message message, Keys keyData)
         {
-            if (keyData != Keys.Enter || !selected.IsHandleCreated || message.HWnd != selected.Handle)
-                return base.ProcessCmdKey(ref message, keyData);
-            const long repeatedKey = 1L << 30;
-            if (refresh.Enabled && (message.LParam.ToInt64() & repeatedKey) == 0) refresh.PerformClick();
-            return true;
+            return HandlePathEnter(ref message, keyData, selected, refresh) || base.ProcessCmdKey(ref message, keyData);
         }
         void Add(Control control, int x, int y, int w, int h) { control.SetBounds(x, y, w, h); Controls.Add(control); }
         void Guard(Action action) { try { action(); } catch (Exception e) { state.Text = "未完成：" + Safe(e); } }
