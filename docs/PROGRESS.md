@@ -5,7 +5,8 @@
 - 長場射擊工具可搭配 `--incoming-fire`，在全部原分批射擊及換彈完成後，讓同一批原玩家接受新敵軍回擊並停火。明確加上 `--incoming-environment` 時，回擊前切為雨夜與閃電設定，確認停火後切為霧天白晝。逐頁對照原環境／敵軍策略時間線與完整回放。回擊發生在長時間操作完成後，持續全程交火另驗。 [操作方式](DESKTOP_ENDURANCE.md#長場射擊後的環境切換與敵軍回擊)
 - 31 項射擊／戰績與 22 項封存證據 Python 檢查通過。受傷只允許出現在原攻擊啟用序號之後，必須保留原玩家及正值健康；原中彈、損耗、健康與戰鬥日誌尾界須相符。原世界日誌亦核對雨夜與霧天檢查點。舊的不含回擊排演 `20261111-064615-4ae3699b` 通過新版重查。 [舊場重查](../artifacts/incoming-endurance-prior-readback.json)
 - 60 秒雙模式排演 `20261111-082444-5ceed344` 退出碼 0，37 項通過。每席三批目標、六發命中、三次擊殺及三次換彈，六場共 300 次命中、150 次擊殺、75 次敵軍命中與 1,500 點損耗。50 份原戰績及確認、6 份 CSV、4,449 格完整回放相符；原政策時間線各 7 格，第 1 獨立房含暫停／恢復為 9 格。原生與管理程序已退出，C／F 174 檔相符，獨立五房原日誌重查通過。 [原排演](../artifacts/desktop-exercise/20261111-082444-5ceed344/exercise-result.json) · [核對](../artifacts/incoming-endurance-smoke-validation.json) · [原日誌重查](../artifacts/incoming-endurance-smoke-readback.json)
-- 本輪沿用 Windows／Quest 0.50.5 與管理包 0.31.126，未重建遊戲或 APK。驗證為同機 Windows 程式產生的輸入，原生畫面／音效、跨機真人、頭盔及廠商硬體仍依完整十一項目標驗收。接續執行同條件的 900 秒雙模式長場。
+- 本輪沿用 Windows／Quest 0.50.5 與管理包 0.31.126，未重建遊戲或 APK。驗證為同機 Windows 程式產生的輸入，原生畫面／音效、跨機真人、頭盔及廠商硬體仍依完整十一項目標驗收。
+- 功能來源 `15539c87` 已推送 GitHub。14 份檢查工具／測試輸入已在長場前凍結，11 份與 Git 逐位元組相符、3 份只差換行，原 API DLL 雜湊保持。900 秒雙模式長場 `20261111-082953-583de9b9` 已啟動，原程序仍在執行；尚未通過，不提前複製執行資料。GitHub Actions `42931733893` 的 job `130231897425` 因帳務或支出上限未啟動，步驟為空，仍為失敗。 [來源核對](../artifacts/incoming-endurance-source-validation.json) · [長場日誌](../artifacts/incoming-endurance-long.log) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/42931733893)
 
 ## 2026-11-11 桌面玩家淘汰後的武器請求
 
