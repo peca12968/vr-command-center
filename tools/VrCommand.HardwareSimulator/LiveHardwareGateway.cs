@@ -11,6 +11,7 @@ internal static partial class LiveHardwareGateway
 {
     private const int MaxBatch = 32, MaxAttempts = 1024, MaxFrameBytes = 32 * 1024;
     private const string ManagementRefused = "management-refused", ManagementInvalidResponse = "management-invalid-response";
+    private const string OperatorStop = "operator-stop", OperatorRoomStop = "operator-room-stop";
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(150);
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromMilliseconds(750);
     private static readonly TimeSpan SignalLifetime = TimeSpan.FromSeconds(2);
@@ -54,6 +55,7 @@ internal static partial class LiveHardwareGateway
         public void Dispose()
         {
             foreach (var handle in handles) handle.Dispose();
+            handles.Clear();
         }
     }
 
@@ -203,7 +205,8 @@ internal static partial class LiveHardwareGateway
     }
 
     private static async Task<int> RunRoom(Configuration config, HttpClient client, string input, string output,
-        string? stopFile, bool statusEnabled, string? statusDirectory, bool writeSummary = true)
+        string? stopFile, bool statusEnabled, string? statusDirectory, bool writeSummary = true,
+        string? roomStopFile = null, GatewayLeases? roomLeases = null)
     {
         using var heartbeat = statusDirectory is null ? null : new GatewayHeartbeat(statusDirectory, config, input, output, stopFile);
 
@@ -229,7 +232,9 @@ internal static partial class LiveHardwareGateway
         using var duration = new CancellationTokenSource(TimeSpan.FromSeconds(config.Seconds));
         using var operatorStop = new CancellationTokenSource();
         using var run = CancellationTokenSource.CreateLinkedTokenSource(duration.Token, operatorStop.Token);
-        var watch = stopFile is null ? Task.CompletedTask : WatchForStop(stopFile, operatorStop, run.Token);
+        var watch = stopFile is null && roomStopFile is null ? Task.FromResult<string?>(null)
+            : WatchForStop(stopFile, roomStopFile, operatorStop, run.Token);
+        string? requestedStop;
         try
         {
             PublishStatus("checking-management");
@@ -321,39 +326,42 @@ internal static partial class LiveHardwareGateway
         finally
         {
             run.Cancel();
-            await watch;
+            requestedStop = await watch;
         }
 
-        if (termination == "duration" && operatorStop.IsCancellationRequested) termination = "operator-stop";
+        if (termination == "duration" && requestedStop is not null) termination = requestedStop;
 
-        var complete = attachments > 0 && termination is ("duration" or "ended" or "operator-stop");
+        var complete = attachments > 0 && termination is ("duration" or "ended" or OperatorStop or OperatorRoomStop);
         using (var destination = new FileStream(output, FileMode.CreateNew, FileAccess.Write, FileShare.None))
         {
             JsonSerializer.Serialize(destination, new { version = 1, complete, simulatedHardwareOnly = true, physicalDeliveryConfirmed = false,
                 config.SessionId, config.RoomId, termination, connections, attachments, managementFaults, mockFaults, dropped, acknowledged, attempts }, JsonFormat.Options);
             destination.Flush(true);
         }
+        roomLeases?.Dispose();
         PublishStatus("stopped", termination);
         if (writeSummary)
             Console.WriteLine(JsonSerializer.Serialize(new { complete, simulatedHardwareOnly = true, physicalDeliveryConfirmed = false, acknowledged }, Wire));
         return complete ? 0 : 1;
     }
 
-    private static async Task WatchForStop(string path, CancellationTokenSource operatorStop, CancellationToken run)
+    private static async Task<string?> WatchForStop(string? stopFile, string? roomStopFile, CancellationTokenSource operatorStop, CancellationToken run)
     {
         try
         {
             while (!run.IsCancellationRequested)
             {
-                if (File.Exists(path))
+                var reason = File.Exists(stopFile) ? OperatorStop : File.Exists(roomStopFile) ? OperatorRoomStop : null;
+                if (reason is not null)
                 {
                     operatorStop.Cancel();
-                    return;
+                    return reason;
                 }
                 await Task.Delay(PollInterval, run);
             }
         }
         catch (OperationCanceledException) when (run.IsCancellationRequested) { }
+        return null;
     }
 
     // Monitor the authority while the peer holds the batch, and read it again after an ACK.

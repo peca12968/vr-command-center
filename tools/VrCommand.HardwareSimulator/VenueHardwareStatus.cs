@@ -102,7 +102,7 @@ internal static partial class LiveHardwareGateway
                 || progress.Phase is not ("checking-management" or "paused" or "waiting-source" or "waiting-mission" or "connecting"
                     or "active" or "awaiting-ack" or "mock-unavailable" or "management-unavailable" or "stopped")
                 || (progress.Phase == "stopped" ? status.Termination is not ("duration" or "ended" or "attempt-limit"
-                    or "binding-mismatch" or "operator-stop" or ManagementRefused or ManagementInvalidResponse) : status.Termination is not null)
+                    or "binding-mismatch" or OperatorStop or OperatorRoomStop or ManagementRefused or ManagementInvalidResponse) : status.Termination is not null)
                 || (progress.Phase == "mock-unavailable" ? status.Fault is not ("mock-disconnected" or "mock-timeout" or "mock-invalid-reply") : status.Fault is not null))
                 return ("invalid", null);
             if (status.RoomId != room.RoomId || status.SessionId != room.SessionId) return ("mismatch", null);

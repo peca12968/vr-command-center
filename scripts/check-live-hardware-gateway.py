@@ -929,6 +929,36 @@ def run(args):
                 fleet_delivered = {room:send_venue_batch(room, 5) for room in rooms}
                 wait(lambda:all(row['state']=='current' and row['status']['progress']['acknowledged']==5
                                 for row in venue_status(fleet_directory)), f'{mode} fleet acknowledges all 25 current bindings')
+                room_two_pending = send_venue_batch(2, 1, 'observe-close')
+                (fleet_directory/'room-02.stop').touch()
+                local_close = venue_peers[2].read('closed')
+                stopped_room = wait(lambda:row if (row:=venue_status(fleet_directory)[1])['state']=='stopped' else None,
+                                    f'{mode} room two stops independently')
+                assert stopped_room['status']['termination']=='operator-room-stop'
+                assert stopped_room['status']['progress']['acknowledged']==5
+                local_report_path = fleet_directory/'room-02-report.json'
+                local_report_bytes = local_report_path.read_bytes()
+                assert fleet.poll() is None and not fleet_stop.exists() and not (fleet_directory/'venue-report.json').exists()
+                assert all(row['state']=='current' for room,row in zip(rooms,venue_status(fleet_directory),strict=True) if room!=2)
+                fleet_delivered[5] |= send_venue_batch(5, 1)
+                wait(lambda:venue_status(fleet_directory)[4]['status']['progress']['acknowledged']==6,
+                     f'{mode} room five acknowledges on its original connection after room two stops')
+
+                separate_marker = runtime/f'{label}-room-two-restart.stop'
+                separate_report = out/f'{label}-room-two-restart.json'
+                restarted = invoke(2,'Room2',separate_report,config=config_files[2],stop=separate_marker)
+                path = '/api/sessions/' + owners[2]
+                restart_hello = venue_peers[2].read('hello')
+                assert restart_hello['roomId']==2 and restart_hello['connectionId']!=venue_connections[2]
+                prior_attach = attached(2,bound=True)
+                venue_peers[2].reply('ready-observe-close')
+                wait(lambda:attached(2,bound=True)>prior_attach, f'{mode} room two attaches on released leases')
+                separate_marker.touch()
+                restart_close = venue_peers[2].read('closed')
+                stopped(restarted,separate_report,attached_once=True)
+                assert restart_close['connectionId']==restart_hello['connectionId'] and fleet.poll() is None
+                save(f'{label}-fleet-room-stop-close.json', local_close)
+                save(f'{label}-fleet-room-restart-close.json', restart_close)
                 held_ids = send_venue_batch(3, 1, 'observe-close')
                 if mode=='Independent':
                     player = rosters[3][0]
@@ -949,6 +979,7 @@ def run(args):
                 assert fleet.returncode==int(mode=='Independent') and fleet_report['complete'] is (mode=='Linked') and fleet_stop.is_file()
                 assert len(set(venue_connections.values()))==5
                 assert [(row['roomId'],row['sessionId']) for row in fleet_report['rooms']]==list(owners.items())
+                assert local_report_path.read_bytes()==local_report_bytes
                 for room, row in zip(rooms,fleet_report['rooms'],strict=True):
                     mismatch_room = mode=='Independent' and room==3
                     assert row=={'roomId':room,'sessionId':owners[room],'exitCode':int(mismatch_room),
@@ -957,15 +988,18 @@ def run(args):
                     delivered = {delivery['signal']['reportId'] for attempt in report['attempts']
                                  if attempt['status']=='simulated-acknowledged' for delivery in attempt['deliveries']}
                     assert delivered==fleet_delivered[room] and not report['physicalDeliveryConfirmed']
-                    assert report['termination']==('binding-mismatch' if mismatch_room else 'operator-stop')
-                    if room==3:
+                    reason = {2:'operator-room-stop',3:'binding-mismatch' if mismatch_room else 'operator-stop'}
+                    assert report['termination']==reason.get(room,'operator-stop')
+                    if room in (2,3):
+                        observed_close, cancelled_ids = (local_close,room_two_pending) if room==2 else (closed_batch,held_ids)
                         attempt, = [attempt for attempt in report['attempts'] if attempt['status']=='cancelled']
-                        assert attempt['batchId']==closed_batch['batchId'] and attempt['connectionId']==closed_batch['connectionId']==venue_connections[3]
-                        assert {delivery['signal']['reportId'] for delivery in attempt['deliveries']}==held_ids
+                        assert attempt['batchId']==observed_close['batchId'] and attempt['connectionId']==observed_close['connectionId']==venue_connections[room]
+                        assert {delivery['signal']['reportId'] for delivery in attempt['deliveries']}==cancelled_ids
                 assert all(row['state']=='stopped' for row in venue_status(fleet_directory))
                 assert all(session['state']=='Running' for session in request('/api/sessions'))
                 assert all(not any(secret in file.read_text(encoding='utf-8') for secret in private) for file in fleet_directory.glob('*.json'))
                 save(f'{label}-fleet-close.json', closed_batch)
+                check(True, f'{mode} room marker cancels only its original held batch and releases leases while other rooms continue')
                 check(True, f'{mode} single-process fleet delivers all 25 exact bindings, cancels the held batch and publishes all terminal results')
                 if mode=='Linked':
                     fault_directory = out/'linked-fleet-authority-faults'

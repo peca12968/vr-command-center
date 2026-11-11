@@ -57,7 +57,8 @@ internal static partial class LiveHardwareGateway
             try { Directory.Move(staging, output); }
             finally { if (Directory.Exists(staging)) Directory.Delete(staging); }
 
-            var rooms = await Task.WhenAll(configs.Select((entry, index) => RunVenueRoom(entry.Config, clients[index], entry.Path, output, stopFile)));
+            var rooms = await Task.WhenAll(configs.Select((entry, index) =>
+                RunVenueRoom(entry.Config, clients[index], entry.Path, output, stopFile, leases[index])));
             var complete = rooms.All(room => room.ExitCode == 0);
             var report = new { version = 1, complete, manifest.Mode, simulatedHardwareOnly = true, physicalDeliveryConfirmed = false, rooms };
             var stagedReport = Path.Combine(output, "venue-report.tmp");
@@ -77,18 +78,22 @@ internal static partial class LiveHardwareGateway
         }
     }
 
-    private static async Task<VenueRunResult> RunVenueRoom(Configuration config, HttpClient client, string input, string directory, string stopFile)
+    private static async Task<VenueRunResult> RunVenueRoom(Configuration config, HttpClient client, string input, string directory,
+        string stopFile, GatewayLeases leases)
     {
         var fileName = FormattableString.Invariant($"room-{config.RoomId:00}-report.json");
         var output = Path.Combine(directory, fileName);
+        var roomStop = Path.Combine(directory, FormattableString.Invariant($"room-{config.RoomId:00}.stop"));
         try
         {
-            var exit = await RunRoom(config, client, input, output, stopFile, statusEnabled: false, statusDirectory: directory, writeSummary: false);
+            var exit = await RunRoom(config, client, input, output, stopFile, statusEnabled: false, statusDirectory: directory,
+                writeSummary: false, roomStopFile: roomStop, roomLeases: leases);
             return new(config.RoomId, config.SessionId, exit, fileName, null);
         }
         catch (Exception error) when (IsExpectedFailure(error))
         {
             return new(config.RoomId, config.SessionId, 1, null, error.GetType().Name);
         }
+        finally { leases.Dispose(); }
     }
 }
