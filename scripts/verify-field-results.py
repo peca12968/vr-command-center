@@ -153,7 +153,7 @@ def peer_address(endpoint):
     return ipv4(host), int(port)
 
 
-def server_connections(log, port, *, verify_history=False):
+def server_connections(log, port, *, verify_history=False, allow_timeout=False):
     approved, peers, released, acknowledged = {}, {}, {}, set()
     started = 0
     for order, line in enumerate(log.splitlines()):
@@ -185,7 +185,7 @@ def server_connections(log, port, *, verify_history=False):
             require(connection in peers and connection not in acknowledged, 'Missing UDP peer or duplicate server acknowledgement')
             require(connection not in released, 'Server acknowledgement follows server release')
             acknowledged.add(connection)
-        else:
+        elif not allow_timeout:
             raise EvidenceError('Server recorded a player result timeout')
     require(started == 1, 'Expected one original server startup in the log')
     return peers, acknowledged, approved, released
@@ -1028,6 +1028,98 @@ def read_windows_evidence(log, launcher, bundle):
     return raw_log, content(launcher) if launcher is not None else None
 
 
+def verify_windows_release(log_hash, launch, windows_hash, *, has_link_metrics=False):
+    require(launch.get('status') == 'exited' and integer(launch.get('exitCode'), 0, 0) == 0
+            and integer(launch.get('processId'), 1, 2**31 - 1) and launch.get('playerManifestSha256') == windows_hash,
+            'Windows launcher did not exit with the original venue release manifest')
+    require(launch.get('playerLogSha256') == log_hash if 'playerLogSha256' in launch else has_link_metrics,
+            'Windows release evidence does not match the original player log bytes')
+
+
+def read_windows_seat_map(path):
+    value = read_json(content(path))
+    require(type(value) is dict and set(value) == {'version', 'seats'}, 'Invalid Windows seat map')
+    integer(value['version'], 1, 1)
+    rows = value['seats']
+    require(type(rows) is list and 1 <= len(rows) <= 25, 'Expected 1 to 25 Windows seats')
+    seats, stations = {}, set()
+    for row in rows:
+        require(type(row) is dict and set(row) == {'roomId', 'seat', 'station'}, 'Invalid Windows seat map row')
+        seat = integer(row['roomId'], 1, 5), integer(row['seat'], 1, 5)
+        station = row['station']
+        require(type(station) is str and re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9-]{0,31}', station), 'Invalid Windows station label')
+        require(seat not in seats and station.lower() not in stations, 'Windows seat map repeats a seat or station')
+        seats[seat] = station
+        stations.add(station.lower())
+    return seats
+
+
+def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, seat_map, evidence_path):
+    require(directory.is_dir(), 'Windows evidence inbox must be a directory')
+    require(type(windows_hash) is str and re.fullmatch(r'[0-9a-f]{64}', windows_hash),
+            'Windows evidence inbox requires the original Windows release report')
+    files = sorted(path for path in directory.iterdir() if path.suffix.lower() == '.zip' and path.is_file())
+    require(len(files) <= 50, 'Windows evidence inbox contains more than 50 ZIPs')
+    batches, roster_seats = {}, {}
+    for _, launcher, session, _, endpoint, server_log in inputs:
+        session_id = identity(session['id'])
+        original = expected.get(session_id)
+        require(original is not None and session_id not in batches and session['state'] == 'Ended'
+                and original['world'] == original['combat'] == 'Sealed'
+                and launcher['status'] == 'sealed-stopped' and launcher['complete'] is endpoint['sessionEnded'] is True
+                and launcher['sessionId'] == endpoint['sessionId'] == session_id and session['roomIds'] == original['roomIds']
+                and launcher['streamId'] == endpoint['streamId'] == original['replay']['streamId'],
+                'Windows inbox roster or endpoint differs from the original sealed batch')
+        port = integer(endpoint['port'], 1024, 65535)
+        peers, acknowledgements, _, _ = server_connections(server_log, port, allow_timeout=True)
+        owners = roster(session['players'], 'id', len(session['roomIds']) * players_per_room)
+        for player_id, owner in owners.items():
+            room, seat = integer(owner['roomId'], 1, 5), integer(owner['seat'], 0, 4) + 1
+            require(room in original['roomIds'] and (room, seat) not in roster_seats, 'Windows inbox roster repeats or misplaces a seat')
+            roster_seats[room, seat] = (session_id, player_id)
+        batches[session_id] = (launcher['streamId'], owners, peers, acknowledgements)
+    require(all(sum(seat[0] == room for seat in roster_seats) == players_per_room for room in range(1, 6)),
+            'Windows inbox original roster has an unexpected room size')
+    if seat_map is not None:
+        require(seat_map.keys() <= roster_seats.keys(), 'Windows seat map names a seat outside the original batch roster')
+    selected = {owner: seat for seat, owner in roster_seats.items() if seat_map is None or seat in seat_map}
+    received, groups, issues, connections = {}, {}, [], set()
+    for file in files:
+        try:
+            path = evidence_path(str(file))
+            raw_log, raw_launch = read_windows_evidence(None, None, path)
+            connection, result = client_result(raw_log.decode('utf-8-sig'))
+            session_id, player_id = identity(result['sessionId']), identity(result['playerId'])
+            require(session_id in batches, 'Player ZIP belongs to another venue batch')
+            stream, owners, peers, acknowledgements = batches[session_id]
+            seat = selected.get((session_id, player_id))
+            require(seat is not None, 'Player ZIP does not match an expected Windows seat')
+            require(result['admissionId'] == owners[player_id]['admissionId'] and integer(result['roomId'], 1, 5) == seat[0]
+                    and result['streamId'] == stream, 'Player ZIP admission, room or stream differs from the original roster')
+            verify_windows_release(hashlib.sha256(raw_log).hexdigest(), read_json(raw_launch), windows_hash)
+            require(connection in acknowledgements, 'Player ZIP lacks an original server acknowledgement')
+            require(seat not in received and (session_id, connection) not in connections, 'Player ZIP repeats a seat or acknowledged connection')
+            address, _ = peer_address(peers[connection])
+        except EvidenceError as error:
+            issues.append({'file': file.name, 'reason': str(error)})
+            continue
+        except (OSError, UnicodeError, ArithmeticError, AttributeError, KeyError, TypeError, ValueError,
+                RecursionError, zipfile.BadZipFile, zlib.error, NotImplementedError, RuntimeError):
+            issues.append({'file': file.name, 'reason': 'Player ZIP cannot be read as original Windows evidence'})
+            continue
+        received[seat] = file.name
+        connections.add((session_id, connection))
+        groups.setdefault(session_id, []).append((address, None, None, None, path))
+
+    def seat_row(seat):
+        return {'roomId': seat[0], 'seat': seat[1], **({'station': seat_map[seat]} if seat_map is not None else {})}
+
+    missing = sorted(set(selected.values()) - received.keys())
+    return groups, {'complete': not missing and not issues, 'expectedWindowsSeats': len(selected),
+                    'receivedWindowsSeats': len(received), 'missingSeats': [seat_row(seat) for seat in missing],
+                    'receivedSeats': [dict(seat_row(seat), file=received[seat]) for seat in sorted(received)], 'issues': issues}
+
+
 def verify_windows_link(log_hash, connection, launch, metrics_path):
     with metrics_path.open('rb') as source:
         raw_metrics = source.read(64 * 1024 + 1)
@@ -1272,7 +1364,7 @@ def verify_venue(manifest_path):
     return report
 
 
-def verify_venue_batch(manifest_path):
+def verify_venue_batch(manifest_path, *, inspect_windows=False):
     manifest_path = manifest_path.resolve(strict=True)
     with manifest_path.open('rb') as stream:
         raw_manifest = limited_read(stream)
@@ -1316,7 +1408,7 @@ def verify_venue_batch(manifest_path):
             'Venue must contain the original five independent sessions or one linked session')
     debrief_receipts, debrief_hash = (read_venue_debrief_receipts(evidence_path(manifest['venueDebriefReceipts']),
                                                                closure['requestId'], len(rows))
-                                    if 'venueDebriefReceipts' in manifest else (None, None))
+                                    if 'venueDebriefReceipts' in manifest and not inspect_windows else (None, None))
     journals = any('worldJournal' in entry for entry in entries)
     require(not journals or all('worldJournal' in entry for entry in entries), 'Provide a world journal for every session in this batch')
     combat_journals = any('combatJournal' in entry for entry in entries)
@@ -1371,7 +1463,7 @@ def verify_venue_batch(manifest_path):
             'Provide all-source UDP preflight reports for every session in this batch')
 
     batch_pairs = {}
-    if batch_supplied:
+    if batch_supplied and not inspect_windows:
         batch_names = [manifest['udpPreflightBatch']] if single_batch else manifest['udpPreflightBatches']
         require(type(batch_names) is list and 1 <= len(batch_names) <= 25, 'Provide 1 to 25 Quest UDP batch reports')
         for name in batch_names:
@@ -1392,29 +1484,28 @@ def verify_venue_batch(manifest_path):
             and all(integer(room, 1, 5) for room in row['roomIds']) for row in rows)
             and sorted(row['roomIds'] for row in rows) == expected_rooms, 'Closure does not cover exactly the five original rooms')
     control_summary, controls = [], {}
-    if 'venueControlBatches' in manifest:
+    if 'venueControlBatches' in manifest and not inspect_windows:
         require(journals, 'Venue control batch verification requires the original world journals for the full batch')
         control_summary, controls = read_venue_control_batches(manifest['venueControlBatches'], expected, closure, recorded_at, evidence_path)
 
-    windows_supplied = 'windowsPlayers' in manifest
-    windows_by_session = venue_windows_logs(manifest['windowsPlayers'], expected, evidence_path, players_per_room) if windows_supplied else {}
+    inbox_supplied = 'windowsEvidenceDirectory' in manifest
+    explicit_windows = 'windowsPlayers' in manifest
+    require(not (inbox_supplied and explicit_windows), 'Use either windowsEvidenceDirectory or windowsPlayers')
+    require(inbox_supplied or not (inspect_windows or 'windowsSeatMap' in manifest), 'Windows inbox inspection and seat maps require windowsEvidenceDirectory')
+    windows_supplied = inbox_supplied or explicit_windows
+    windows_by_session = venue_windows_logs(manifest['windowsPlayers'], expected, evidence_path, players_per_room) if explicit_windows else {}
 
     capture_supplied = 'questCaptures' in manifest
     captures, capture_endpoints, capture_batches = {}, {}, 0
-    if capture_supplied:
+    if capture_supplied and not inspect_windows:
         require(topology == 'direct-lan', 'Quest capture batches require direct LAN evidence')
         captures, capture_endpoints, capture_batches = read_quest_capture_batches(manifest['questCaptures'], mode, expected, evidence_path)
     quest_deployments, deployment_summary = None, None
-    if 'questDeployments' in manifest:
+    if 'questDeployments' in manifest and not inspect_windows:
         require(topology == 'direct-lan', 'Quest deployment evidence requires direct LAN evidence')
         quest_deployments, deployment_summary = read_quest_deployments(manifest['questDeployments'], mode, evidence_path, release)
 
-    rooms, summaries = {}, []
-    quest_players, windows_players, windows_link_reports = 0, 0, 0
-    stream_ids, bindings, player_ids, admission_ids, end_times, exchanges = set(), set(), set(), set(), set(), set()
-    start_times = set()
-    begin_request = None
-    for entry in entries:
+    def load_session(entry):
         launcher = read_json(content(evidence_path(entry['launcherReport'])))
         if packed:
             require('evidenceZip' not in entry, 'Omit per-session evidenceZip when using venueBundle')
@@ -1426,7 +1517,31 @@ def verify_venue_batch(manifest_path):
             require(session['id'] == launch_id, 'Venue ZIP member differs from its original launcher session')
         else:
             session, statistics, endpoint = management_zip(evidence_path(entry['evidenceZip']))
-        server_log = content(evidence_path(entry['serverLog']))
+        return entry, launcher, session, statistics, endpoint, content(evidence_path(entry['serverLog']))
+
+    inputs = (load_session(entry) for entry in entries)
+    if inbox_supplied:
+        for entry in entries:
+            require(all(type(player) is dict and 'logcatPid' in player for player in entry.get('players', [])),
+                    'Use only Quest evidence in per-session players when using a Windows inbox')
+        seat_map = read_windows_seat_map(evidence_path(manifest['windowsSeatMap'])) if 'windowsSeatMap' in manifest else None
+        require(seat_map is not None or not (capture_supplied or any(entry.get('players') for entry in entries)),
+                'Provide the Windows seat map when the batch contains Quest evidence')
+        name = manifest['windowsEvidenceDirectory']
+        require(type(name) is str and bool(name), 'Windows evidence directory is missing')
+        directory = (manifest_path.parent / name).resolve(strict=True)
+        inputs = list(inputs)
+        windows_by_session, inbox = windows_inbox(directory, inputs, expected, players_per_room, windows_hash, seat_map, evidence_path)
+        if inspect_windows:
+            return {'version': 1, 'scope': 'windows-inbox', 'mode': mode, 'closureRequestId': closure_id, **inbox}, None
+        require(inbox['complete'], 'Windows inbox is incomplete or contains conflicting files; use --inspect-windows-inbox')
+
+    rooms, summaries = {}, []
+    quest_players, windows_players, windows_link_reports = 0, 0, 0
+    stream_ids, bindings, player_ids, admission_ids, end_times, exchanges = set(), set(), set(), set(), set(), set()
+    start_times = set()
+    begin_request = None
+    for entry, launcher, session, statistics, endpoint, server_log in inputs:
         alignments = None
         if check_alignments:
             experience = verify_experience(session, launcher['finalWorld']['header'])
@@ -1521,11 +1636,7 @@ def verify_venue_batch(manifest_path):
                 if metrics_path is not None:
                     link_rows.append({**seat, **verify_windows_link(log_hash, connection, launch, metrics_path)})
                 if release is not None:
-                    require(launch.get('status') == 'exited' and integer(launch.get('exitCode'), 0, 0) == 0
-                            and integer(launch.get('processId'), 1, 2**31 - 1) and launch.get('playerManifestSha256') == windows_hash,
-                            'Windows launcher did not exit with the original venue release manifest')
-                    require(launch.get('playerLogSha256') == log_hash if 'playerLogSha256' in launch else metrics_path is not None,
-                            'Windows release evidence does not match the original player log bytes')
+                    verify_windows_release(log_hash, launch, windows_hash, has_link_metrics=metrics_path is not None)
                     release_seats.append(seat)
                 yield address, log
         preflight_paths = preflight_pair(entry['udpPreflight']) if preflights else None
@@ -1716,6 +1827,7 @@ def main():
     venue = parser.add_mutually_exclusive_group()
     venue.add_argument('--venue-manifest', type=Path, help='Check one five-room End batch from a private manifest')
     venue.add_argument('--venue-stages', type=Path, help='Verify the six original five-room batches for staged 5, 10 and 25 player runs')
+    parser.add_argument('--inspect-windows-inbox', action='store_true', help='List missing seats and conflicting Windows ZIPs in a venue manifest inbox')
     parser.add_argument('--topology', choices=('same-host', 'direct-lan'))
     parser.add_argument('--server-ip', action='append', help='Repeat for each assigned server IPv4')
     parser.add_argument('--world-journal', type=Path, help='Original closed .worldlog for a single session')
@@ -1739,10 +1851,14 @@ def main():
                          args.udp_source_preflight, args.verify_player_sources, args.verify_reconnect_history]
     if (batch and any(single_args + extra_single_args)) or (not batch and not all(single_args)):
         parser.error('Provide --venue-manifest or --venue-stages alone, or all single-session options.')
+    if args.inspect_windows_inbox and not args.venue_manifest:
+        parser.error('--inspect-windows-inbox requires --venue-manifest.')
     if args.udp_preflight and args.udp_source_preflight:
         parser.error('Use either --udp-preflight or --udp-source-preflight.')
     try:
-        if args.venue_stages:
+        if args.inspect_windows_inbox:
+            report, _ = verify_venue_batch(args.venue_manifest, inspect_windows=True)
+        elif args.venue_stages:
             report = verify_venue_stages(args.venue_stages)
         elif args.venue_manifest:
             report = verify_venue(args.venue_manifest)
@@ -1785,6 +1901,8 @@ def main():
             zipfile.BadZipFile, zlib.error, NotImplementedError, RuntimeError):
         parser.exit(1, 'Field evidence rejected. Check topology, original admissions, UDP peer markers, final seals and complete logs.\n')
     print(json.dumps(report, indent=2))
+    if args.inspect_windows_inbox and not report['complete']:
+        raise SystemExit(1)
 
 
 if __name__ == '__main__':

@@ -1435,6 +1435,71 @@ class FieldResultsTests(unittest.TestCase):
                 seat['launcherReport'] = launch.name
         return path
 
+    def windows_inbox_fixture(self, root, manifest):
+        packed = self.pack_venue(root, manifest)
+        inbox = root / 'returned'
+        inbox.mkdir()
+        for index, player in enumerate(packed.pop('windowsPlayers')):
+            with zipfile.ZipFile(inbox / f'box-{index:02}.ZIP', 'w', zipfile.ZIP_DEFLATED) as archive:
+                archive.write(root / player['log'], 'player.log')
+                archive.write(root / player['launcherReport'], 'launch-report.json')
+        packed['windowsEvidenceDirectory'] = inbox.name
+        return packed
+
+    def test_windows_inbox_receives_only_the_mapped_windows_seats_in_a_mixed_batch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, _ = venue_fixture(root, 'Linked', remote=True, quest_per_room=1)
+            self.add_shared_release(root, manifest, 1)
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            original = field.verify_venue(path)
+            packed = self.windows_inbox_fixture(root, manifest)
+            path.write_text(json.dumps(packed), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'Windows seat map'):
+                field.verify_venue_batch(path, inspect_windows=True)
+
+            seats = [{'roomId': room, 'seat': seat, 'station': f'PC-{room}-{seat}'}
+                     for room in range(1, 6) for seat in range(1, 5)]
+            seat_map = root / 'windows-seats.json'
+            seat_map.write_text(json.dumps({'version': 1, 'seats': seats}), encoding='utf-8')
+            packed['windowsSeatMap'] = seat_map.name
+            path.write_text(json.dumps(packed), encoding='utf-8')
+            inspection, _ = field.verify_venue_batch(path, inspect_windows=True)
+            self.assertTrue(inspection['complete'])
+            self.assertEqual(20, inspection['receivedWindowsSeats'])
+            self.assertEqual(seats, [{key: row[key] for key in ('roomId', 'seat', 'station')}
+                                     for row in inspection['receivedSeats']])
+            self.assertNotIn('192.168.', json.dumps(inspection))
+            self.assertEqual(original, field.verify_venue(path))
+            path.write_text(json.dumps(dict(packed, questDeployments={'reports': ['not-yet-returned.json']})), encoding='utf-8')
+            self.assertEqual(inspection, field.verify_venue_batch(path, inspect_windows=True)[0])
+            path.write_text(json.dumps(packed), encoding='utf-8')
+            seats[-1]['seat'] = 5
+            seat_map.write_text(json.dumps({'version': 1, 'seats': seats}), encoding='utf-8')
+            wrong, _ = field.verify_venue_batch(path, inspect_windows=True)
+            self.assertFalse(wrong['complete'])
+            self.assertEqual([seats[-1]], wrong['missingSeats'])
+            self.assertIn('expected Windows seat', wrong['issues'][0]['reason'])
+
+    def test_windows_inbox_reports_missing_acknowledgement_without_weakening_final_verification(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, _ = venue_fixture(root, 'Linked', room_sizes=(1,) * 5)
+            manifest['expectedPlayersPerRoom'] = 1
+            self.add_shared_release(root, manifest, 0)
+            packed = self.windows_inbox_fixture(root, manifest)
+            path.write_text(json.dumps(packed), encoding='utf-8')
+            server = root / packed['sessions'][0]['serverLog']
+            server.write_text(server.read_text(encoding='utf-8').replace('DEBRIEF_ACK id=5', 'DEBRIEF_TIMEOUT id=5'), encoding='utf-8')
+            result = subprocess.run([sys.executable, str(SCRIPT), '--venue-manifest', str(path), '--inspect-windows-inbox'], capture_output=True)
+            self.assertEqual(1, result.returncode)
+            report = json.loads(result.stdout)
+            self.assertEqual([{'roomId': 1, 'seat': 1}], report['missingSeats'])
+            self.assertEqual(4, report['receivedWindowsSeats'])
+            self.assertIn('lacks an original server acknowledgement', report['issues'][0]['reason'])
+            with self.assertRaisesRegex(field.EvidenceError, 'Windows inbox is incomplete'):
+                field.verify_venue(path)
+
     def test_windows_player_zip_matches_loose_evidence_and_rejects_changed_members(self):
         for mode in ('Independent', 'Linked'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:

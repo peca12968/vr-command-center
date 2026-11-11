@@ -332,6 +332,8 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `sessions[].udpPreflight` | 選用。每場提供原 UDP 預檢報告的 `listener` 與 `probe` 路徑 |
 | `sessions[].udpSourcePreflights` | 選用。每場按實際來源 IPv4 填一組 `listener` 與 `probe`。可補上 Quest 批次以外的來源 |
 | `windowsPlayers` | 選用。集中填入所有 Windows 席位，每筆提供玩家裝置實際使用的 IPv4 `address`，再填原日誌路徑 `log` 或原玩家驗收 ZIP 路徑 `evidenceZip` |
+| `windowsEvidenceDirectory` | 選用。Windows 玩家 ZIP 收件資料夾。與 `windowsPlayers` 擇一 |
+| `windowsSeatMap` | 選用。收件資料夾用的版本 1 Windows 電腦對照表。混合 Quest 場次須指定應收的 Windows 席位 |
 | `sessions[].players` | 逐場填寫尚未由 `windowsPlayers` 或 `questCaptures` 提供的席位，每筆填實際 IPv4 `address` 及原日誌路徑 `log`。手動填入 Quest 3 原 logcat 時另填數字 `logcatPid`，例如 `7342`。該場席位已全部由前兩欄提供時可省略 |
 
 路徑可以是絕對路徑，或相對於 `venue.json` 所在資料夾。同一檔案只能使用一次。以下是五房獨立模式的 Windows 範例，請依現場配置填入實際地址與檔名。混合場可改用 `questCaptures` 或逐場補上 Quest 原 logcat。兩種方式合計每房須有五席。
@@ -556,6 +558,19 @@ python scripts/verify-field-results.py --venue-stages .\stages.json
 ```
 
 工具直接讀取 ZIP 內原日誌與退出報告。每席可使用 ZIP 或分開的 `log`、`launcherReport`，同一批可混用不同格式。另有原連線量測時，`linkMetrics` 仍填其原 JSON 路徑。 [玩家端操作](WINDOWS_PLAYER_PACKAGE.md#依場館發行報告核對玩家包)
+
+#### 按收件資料夾找缺件及錯批
+
+將這一批玩家 ZIP 放進同一個私人資料夾。保留 `venueReleaseReport`、原場館封存、各場原啟動器報告與伺服器日誌，在清單填入 `"windowsEvidenceDirectory": "returned"`。混合 Windows 與 Quest 場次另填 `windowsSeatMap`，使用原本分發連線檔的電腦對照表。 [對照表格式](#依電腦分發-windows-vr-連線檔)
+
+```powershell
+python scripts/verify-field-results.py --venue-manifest .\venue.json --inspect-windows-inbox
+python scripts/verify-field-results.py --venue-manifest .\venue.json
+```
+
+第一條指令列出應收及已收的 Windows 席位、缺件與有問題的檔名，缺件或衝突時以退出碼 1 結束。配對依據是原名冊的入場與場次識別、退出報告及原伺服器對該連線的戰績確認，玩家可自行命名 ZIP。每席的 IPv4 取自伺服器觀察到的對應 UDP 來源。需要另外指定各席預期的 IPv4 或核對連線量測時，可沿用 `windowsPlayers`。
+
+收件完成後執行第二條指令，工具沿用同一資料夾完成原場次封存及戰績驗收。混合場的 Quest 證據照原欄位提供，可在 Windows 收件檢查後補齊。
 
 ## 同機 UDP 流量量測
 
