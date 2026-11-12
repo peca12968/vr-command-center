@@ -11,7 +11,7 @@ async function main() {
   assert.match(config.base, /^http:\/\/127\.0\.0\.1:\d+$/);
   const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_CLOSURE_CHROMIUM,
     args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
-  const results = [], fieldEvidence = [], participation = [], receiptExports = [], debriefSeats = [], debriefCsv = [], debriefReplay = [];
+  const results = [], fieldEvidence = [], participation = [], receiptExports = [], debriefSeats = [], debriefCsv = [], debriefReplay = [], debriefAll = [];
   let history, roomReplay, scores, alignment, missionTime, debriefReceipts;
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1080 }, acceptDownloads: true });
@@ -475,7 +475,18 @@ async function main() {
         const rooms = [];
         const personal = reports && JSON.parse(await fs.readFile(reports, 'utf8')).findLast(row => row.roomId === 5);
         const panel = page.locator('#venue-debrief-seats'), rows = page.locator('#venue-debrief-seat-rows tr');
-        for (const expected of JSON.parse(await fs.readFile(detail, 'utf8'))) {
+        const originalRooms = JSON.parse(await fs.readFile(detail, 'utf8')).sort((a, b) => a.roomId - b.roomId);
+        const originalSeats = originalRooms.flatMap(room => room.players.map(player => [String(room.roomId), String(player.seat), player.name, '已確認']));
+        const groupRead = page.waitForResponse(reply => new URL(reply.url()).pathname === `/api/venue/closure/${batchId}/debrief-seats`);
+        await page.locator('#venue-debrief-all').click();
+        assert.deepEqual(await (await groupRead).json(), { version: 1, requestId: batchId, rooms: originalRooms });
+        await page.locator('#venue-debrief-seats-status').filter({ hasText: '沒有未確認席位' }).waitFor();
+        assert.equal(await rows.count(), 0);
+        await page.locator('#venue-debrief-only-missing').uncheck();
+        assert.deepEqual(await rows.evaluateAll(items => items.map(row => [...row.cells].slice(0, 4).map(cell => cell.textContent))), originalSeats);
+        debriefAll.push({ batchId, seats: originalSeats.length });
+        await page.locator('#venue-debrief-seats-close').click();
+        for (const expected of originalRooms) {
           const roomId = expected.roomId;
           const route = `/api/venue/closure/${batchId}/rooms/${roomId}/debrief-receipts`;
           const read = page.waitForResponse(reply => new URL(reply.url()).pathname === route);
@@ -575,7 +586,7 @@ async function main() {
   } finally {
     await browser.close();
   }
-  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation, scores, alignment, missionTime, debriefReceipts, receiptExports, debriefSeats, debriefCsv, debriefReplay }, null, 2), { flag: 'wx' });
+  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation, scores, alignment, missionTime, debriefReceipts, receiptExports, debriefSeats, debriefCsv, debriefReplay, debriefAll }, null, 2), { flag: 'wx' });
 }
 main().catch(error => {
   const location = error.stack?.match(/check-venue-replay-native\.cjs:(\d+):(\d+)\)/);

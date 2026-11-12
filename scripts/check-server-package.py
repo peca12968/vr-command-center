@@ -1757,6 +1757,14 @@ def main():
                           and score_headers['Cache-Control'] == 'no-store',
                           f'{label} room {room} seat scores match all seven metrics of the original sealed personal CSVs')
                     seat_views.append(view)
+            batch_view, batch_headers = request(route + '/debrief-seats', raw_response=True)
+            request(route + '/debrief-seats', role='Room1', expected=403)
+            combined_seats = json.loads(batch_view)
+            check(batch_headers['Cache-Control'] == 'no-store'
+                  and combined_seats == {'version': 1, 'requestId': closed['requestId'],
+                      'rooms': sorted(seat_views, key=lambda room: room['roomId'])},
+                  label + ' whole-venue seat list exactly matches every original scoped receipt and score')
+            save(label + '-venue-debrief-all.json', combined_seats)
             seats_file = out / (label + '-venue-debrief-seats.json')
             save(seats_file.name, seat_views)
             seat_reports_file = out / (label + '-venue-debrief-csv.json')
@@ -1949,6 +1957,9 @@ def main():
                 for room in read(Path(case['debriefSeats']))]} for case in cases]
             check(result['debriefSeats'] == expected,
                   mode + ' shipped console opens every original room and filters confirmed native seats')
+            check(result['debriefAll'] == [{'batchId': case['batchId'], 'seats': sum(room['seats'] for room in case['rooms'])}
+                                          for case in expected],
+                  mode + ' shipped console lists every original native seat together and starts with no unconfirmed rows')
             csv_checks = [{'batchId': case['batchId'], **next(row for row in reversed(read(Path(case['debriefSeatReports'])))
                            if row['roomId'] == 5)} for case in cases]
             check(result['debriefCsv'] == csv_checks, mode + ' shipped console downloads the exact original personal seat CSV')

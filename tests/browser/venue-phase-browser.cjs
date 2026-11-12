@@ -578,6 +578,11 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const closure = (await api('/venue/closure')).batch;
     const debriefExport = id => `/venue/closure/${id}/debrief-receipts.json`;
     const debriefDetail = (id, room) => `/venue/closure/${id}/rooms/${room}/debrief-receipts`;
+    const batchSeats = id => `/venue/closure/${id}/debrief-seats`;
+    const showAllSeats = page.locator('#venue-debrief-all');
+    const seatPanel = page.locator('#venue-debrief-seats');
+    const seatStatus = page.locator('#venue-debrief-seats-status');
+    const groupRows = page.locator('#venue-debrief-seat-rows tr');
     const seatReport = (id, room, seat) => `/venue/closure/${id}/rooms/${room}/seats/${seat}/report.csv`;
     const showSeats = room => page.locator(`[data-venue-debrief-seats="${room}"]`);
     const debriefButton = page.locator('#export-venue-debrief');
@@ -599,6 +604,11 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await api(seatReport(closure.requestId, 1, 1), 'GET', undefined, 'Master', 409);
     check(await showSeats(1).count() === 0 && await showSeats(3).count() === 0,
       'Unsealed or source-free rooms cannot expose a receipt detail');
+    assert.deepEqual(await api(batchSeats(closure.requestId)), { version: 1, requestId: closure.requestId, rooms: [] });
+    await api(batchSeats(closure.requestId), 'GET', undefined, 'Room1', 403);
+    await api(batchSeats(closure.requestId), 'GET', undefined, 'GameServer', 403);
+    await api(batchSeats(randomUUID()), 'GET', undefined, 'Master', 404);
+    check(await showAllSeats.isHidden(), 'The aggregate requires Master and an original batch with sealed seats before opening in the console');
     const ending = await api(`/sessions/${preparing[0]}`);
     first(ending);
     await api(`/sessions/${ending.id}/combat-stream/seal`, 'POST', { streamId: ending.combatStream.streamId, finalSequence: 0 }, 'GameServer');
@@ -606,6 +616,15 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     check(await archive(ending.id).nth(3).textContent() === '等待封存', 'A combat seal alone does not mark the world replay sealed');
     first.seal();
     await archive(ending.id).nth(3).filter({ hasText: '已封存' }).waitFor();
+    const readyDetail = await api(debriefDetail(closure.requestId, 1) + '?includeScores=true&includePlayerIds=true');
+    assert.deepEqual(await api(batchSeats(closure.requestId)), { version: 1, requestId: closure.requestId, rooms: [readyDetail] });
+    await showAllSeats.click();
+    await seatStatus.filter({ hasText: '房間 2 尚無可核對回條' }).waitFor();
+    check(await groupRows.count() === readyDetail.players.length
+      && (await groupRows.locator('td:first-child').allTextContents()).every(room => room === '1')
+      && await page.locator('#venue-debrief-only-missing').isChecked(),
+      'The group shows the sealed independent room and calls out the still-unsealed occupied room');
+    await page.locator('#venue-debrief-seats-close').click();
     const reportsPath = `/venue/closure/${closure.requestId}/reports.zip`;
     const reportButton = page.locator('#export-venue-reports');
     const reportStatus = page.locator('#venue-report-status');
@@ -1100,9 +1119,62 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
     check(!lateDownload && await fieldButton.isDisabled(), 'A held field ZIP cannot download after changing to a different batch');
     await login('Room2');
     check(await page.locator('#venue-closure').isHidden() && await fieldButton.isHidden() && await picker.locator('option').count() === 1
-      && await enemyBatch.isHidden() && await environmentBatch.isHidden()
+      && await enemyBatch.isHidden() && await environmentBatch.isHidden() && await showAllSeats.isHidden()
       && await page.locator('#venue-enemy-batch-download').isDisabled() && await page.locator('#venue-environment-batch-download').isDisabled(),
       'Switching to room control clears Master-only history, setting batches and their downloads');
+
+    for (const id of active) await end(id);
+    const combined = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Linked', roomIds: [1, 2, 3, 4, 5] }, 'Master', 201);
+    active.add(combined.id);
+    const roomTwo = randomUUID();
+    await api(`/sessions/${combined.id}/players`, 'POST', { playerId: roomTwo, roomId: 2, name: '第二房席位', headset: 'Quest3' });
+    const combinedPublish = await prepare(combined.id, 1, true);
+    const combinedEnd = (await api('/venue/phase')).end;
+    const originalBatch = await api('/venue/phase', 'POST', { action: 'End', targets: combinedEnd }, 'Master', 200, undefined, randomUUID());
+    active.delete(combined.id);
+    const combinedPath = `/sessions/${combined.id}`;
+    const finalCombined = await api(combinedPath);
+    combinedPublish(finalCombined);
+    await api(combinedPath + '/combat-stream/seal', 'POST', { streamId: finalCombined.combatStream.streamId, finalSequence: 0 }, 'GameServer');
+    combinedPublish.seal();
+    await login('Master');
+    await showAllSeats.click();
+    await seatStatus.filter({ hasText: '已確認 0／2 席' }).waitFor();
+    check((await groupRows.locator('td:first-child').allTextContents()).join() === '1,2'
+      && (await api(batchSeats(originalBatch.requestId))).rooms.every(room => room.sessionId === combined.id),
+      'The linked group shows the original shared recording as two distinct occupied rooms');
+    const groupRoute = '**/api' + batchSeats(originalBatch.requestId);
+    const foreignRoomSource = async route => {
+      const response = await route.fetch();
+      const body = await response.json();
+      body.rooms[1].streamId = randomUUID();
+      await route.fulfill({ response, json: body });
+    };
+    await page.route(groupRoute, foreignRoomSource);
+    try {
+      await page.locator('#venue-debrief-seats-refresh').click();
+      await seatStatus.filter({ hasText: '暫時無法確認原席位回條' }).waitFor();
+      check(await groupRows.count() === 0, 'A substituted room stream clears the aggregate and its seat actions');
+    } finally { await page.unroute(groupRoute, foreignRoomSource); }
+    const originalView = (await api(combinedPath + '/world?includeDebriefReceipts=true')).debriefReceipts;
+    const roomOne = originalView.players.find(player => player.roomId === 1);
+    await api(combinedPath + '/debrief-receipts', 'POST', { ...originalView,
+      players: [{ playerId: roomOne.playerId, admissionId: roomOne.admissionId, roomId: roomOne.roomId }] }, 'GameServer', 204);
+    await seatStatus.filter({ hasText: '已確認 1／2 席' }).waitFor();
+    check(await groupRows.count() === 1 && await groupRows.first().locator('td').first().textContent() === '2',
+      'A late acknowledgement removes only its original seat from the open whole-venue filter');
+    const groupDownload = page.waitForEvent('download');
+    await seatPanel.getByRole('button', { name: '下載房間 2 第 1 席個人戰績 CSV' }).click();
+    const seatFile = await groupDownload;
+    const roomTwoCsv = await fetch(base + '/api' + combinedPath + `/players/${roomTwo}/report.csv`, auth);
+    check(seatFile.suggestedFilename() === `vr-command-report-v1-${combined.id}-player-${roomTwo}.csv`
+      && (await fs.readFile(await seatFile.path())).equals(Buffer.from(await roomTwoCsv.arrayBuffer())),
+      'The group downloads the byte-identical original room and player CSV even when seat numbers repeat');
+    await seatPanel.screenshot({ path: path.join(screenshots, 'venue-debrief-all.png') });
+    await seatPanel.getByRole('button', { name: '開啟房間 2 第 1 席個人回放' }).click();
+    await page.locator('#world-review-player-scope').waitFor();
+    check(await recording.inputValue() === combined.id && await page.locator('#world-room').inputValue() === '2',
+      'The group opens the original scoped replay for the selected seat');
   } finally {
     await page.unroute(route); await page.close();
     for (const id of active) await end(id);

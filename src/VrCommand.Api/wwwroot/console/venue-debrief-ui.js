@@ -9,14 +9,29 @@ function validScore(score) {
     && sequence(score.health) && score.health <= 100;
 }
 
+function validatedPlayers(body, room) {
+  if (body?.version !== 1 || body.requestId !== room.batchId || body.sessionId !== room.sessionId
+    || body.roomId !== room.roomId || body.streamId !== room.streamId || body.worldSequence !== room.worldSequence
+    || !sequence(body.throughSequence) || body.throughSequence < room.appliedAtSequence || !sequence(body.finalStreamSequence)
+    || !Array.isArray(body.players) || body.players.length !== room.rosterCount
+    || new Set(body.players.map(player => player?.seat)).size !== room.rosterCount
+    || new Set(body.players.map(player => player?.playerId)).size !== room.rosterCount
+    || !body.players.every(player => Number.isInteger(player?.seat) && player.seat >= 1 && player.seat <= 5
+      && uuid.test(player.playerId ?? '') && typeof player.name === 'string' && typeof player.acknowledged === 'boolean' && validScore(player.score))
+    || body.players.filter(player => player.acknowledged).length < room.confirmedCount) throw new Error('Mismatch');
+  return [...body.players].sort((a, b) => a.seat - b.seat)
+    .map(player => ({ ...player, room, throughCombatSequence: body.finalStreamSequence }));
+}
+
 export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) {
   const panel = $('venue-debrief-seats'), title = $('venue-debrief-seats-title');
   const rows = $('venue-debrief-seat-rows'), status = $('venue-debrief-seats-status');
   const table = $('venue-debrief-seat-table'), onlyMissing = $('venue-debrief-only-missing');
   const refresh = $('venue-debrief-seats-refresh');
   const csvStatus = $('venue-debrief-csv-status');
-  let active = false, rooms = new Map(), target = null, controller = null, players = null;
-  let csvRequest = null, throughCombatSequence = null;
+  const all = $('venue-debrief-all'), roomHeading = $('venue-debrief-room-heading');
+  let active = false, rooms = new Map(), batchTarget = null, target = null, controller = null, players = null;
+  let csvRequest = null;
 
   function updateCsvButtons() {
     for (const button of rows.querySelectorAll('[data-venue-debrief-csv]')) button.disabled = !!csvRequest;
@@ -25,13 +40,14 @@ export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) 
   async function downloadSeat(player) {
     const { actor, key, epoch } = current(), requested = target;
     if (!active || !requested || csvRequest || actor?.role !== 'Master' || !players?.includes(player)) return;
-    const { seat, playerId } = player;
+    const { seat, playerId, room } = player;
+    const seatLabel = requested.roomId === null ? `房間 ${room.roomId} 第 ${seat} 席` : `第 ${seat} 席`;
     const request = new AbortController(); csvRequest = request;
     const timeout = setTimeout(() => request.abort(), 8000);
     const inScope = () => csvRequest === request && active && current().epoch === epoch && target?.id === requested.id;
-    updateCsvButtons(); csvStatus.textContent = `正在下載第 ${seat} 席的個人戰績…`;
+    updateCsvButtons(); csvStatus.textContent = `正在下載${seatLabel}的個人戰績…`;
     try {
-      const response = await fetch(`/api/venue/closure/${requested.batchId}/rooms/${requested.roomId}/seats/${seat}/report.csv`, {
+      const response = await fetch(`/api/venue/closure/${requested.batchId}/rooms/${room.roomId}/seats/${seat}/report.csv`, {
         headers: { Authorization: 'Bearer ' + key }, cache: 'no-store', signal: request.signal
       });
       if (!inScope()) return;
@@ -39,12 +55,12 @@ export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) 
       if (!response.ok) throw new Error('Unavailable');
       const contentType = response.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase();
       const name = response.headers.get('Content-Disposition')?.match(/^attachment;\s*filename="?([^";\s]+)"?(?:;|$)/i)?.[1];
-      if (contentType !== 'text/csv' || name !== `vr-command-report-v1-${requested.sessionId}-player-${playerId}.csv`)
+      if (contentType !== 'text/csv' || name !== `vr-command-report-v1-${room.sessionId}-player-${playerId}.csv`)
         throw new Error('Mismatch');
       const blob = await response.blob();
       if (!inScope()) return;
       save(name, blob);
-      csvStatus.textContent = `已下載第 ${seat} 席的原封存戰績。`;
+      csvStatus.textContent = `已下載${seatLabel}的原封存戰績。`;
     } catch { if (inScope()) csvStatus.textContent = '暫時無法下載原封存戰績，可重新下載。'; }
     finally {
       clearTimeout(timeout);
@@ -55,25 +71,30 @@ export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) 
   function replaySeat(player) {
     const { actor, busy, pending } = current();
     if (!active || !target || actor?.role !== 'Master' || busy || pending || !players?.includes(player)) return;
-    openReplay({ mode: 'replay', complete: true, sessionId: target.sessionId, roomId: target.roomId,
-      streamId: target.streamId, throughSequence: target.worldSequence, throughCombatSequence,
+    const { room, throughCombatSequence } = player;
+    openReplay({ mode: 'replay', complete: true, sessionId: room.sessionId, roomId: room.roomId,
+      streamId: room.streamId, throughSequence: room.worldSequence, throughCombatSequence,
       playerId: player.playerId, playerName: player.name });
   }
 
   function render() {
+    const combined = target?.roomId === null;
+    roomHeading.hidden = !combined;
     const visible = players?.filter(player => !onlyMissing.checked || !player.acknowledged) ?? [];
     rows.replaceChildren(...visible.map(player => {
       const row = rows.insertRow();
+      const seatLabel = combined ? `房間 ${player.room.roomId} 第 ${player.seat} 席` : `第 ${player.seat} 席`;
+      if (combined) row.insertCell().textContent = player.room.roomId;
       for (const value of [player.seat, player.name, player.acknowledged ? '已確認' : '未確認'])
         row.insertCell().textContent = value;
       const button = document.createElement('button');
       button.type = 'button'; button.className = 'quiet small'; button.textContent = '下載 CSV';
-      button.setAttribute('aria-label', `下載第 ${player.seat} 席個人戰績 CSV`);
+      button.setAttribute('aria-label', `下載${seatLabel}個人戰績 CSV`);
       button.dataset.venueDebriefCsv = String(player.seat);
       button.addEventListener('click', () => downloadSeat(player));
       const replay = document.createElement('button');
       replay.type = 'button'; replay.className = 'quiet small'; replay.textContent = '個人回放';
-      replay.setAttribute('aria-label', `開啟第 ${player.seat} 席個人回放`);
+      replay.setAttribute('aria-label', `開啟${seatLabel}個人回放`);
       replay.dataset.venueDebriefReplay = String(player.seat);
       replay.addEventListener('click', () => replaySeat(player));
       const actions = document.createElement('div');
@@ -87,12 +108,16 @@ export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) 
     onlyMissing.disabled = !players;
     refresh.disabled = !!controller;
     updateCsvButtons();
-    if (players) status.textContent = `已確認 ${players.filter(player => player.acknowledged).length}／${players.length} 席`
-      + (!visible.length ? ' · 沒有未確認席位' : '');
+    if (players) {
+      const pending = target.pendingRooms ?? [];
+      status.textContent = `已確認 ${players.filter(player => player.acknowledged).length}／${players.length} 席`
+        + (!visible.length ? (pending.length ? ' · 已封存房間沒有未確認席位' : ' · 沒有未確認席位') : '')
+        + (pending.length ? ` · 房間 ${pending.join('、')} 尚無可核對回條` : '');
+    }
   }
 
   function close() {
-    controller?.abort(); controller = null; target = null; players = null; throughCombatSequence = null;
+    controller?.abort(); controller = null; target = null; players = null;
     csvRequest?.abort(); csvRequest = null; csvStatus.textContent = '';
     panel.hidden = true; onlyMissing.checked = false; status.textContent = ''; render();
   }
@@ -100,13 +125,16 @@ export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) 
   async function read() {
     const state = current(), requested = target;
     if (!active || !requested || controller || state.actor?.role !== 'Master') return;
-    const request = new AbortController(); controller = request; players = null; throughCombatSequence = null;
+    const request = new AbortController(); controller = request; players = null;
     const timeout = setTimeout(() => request.abort(), 8000);
     const stateEpoch = state.epoch;
     const inScope = () => controller === request && active && current().epoch === stateEpoch && target?.id === requested.id;
     render(); status.textContent = '正在讀取原批次的席位回條…';
     try {
-      const response = await fetch(`/api/venue/closure/${requested.batchId}/rooms/${requested.roomId}/debrief-receipts?includeScores=true&includePlayerIds=true`, {
+      const path = `/api/venue/closure/${requested.batchId}`;
+      const detailPath = requested.roomId === null ? '/debrief-seats'
+        : `/rooms/${requested.roomId}/debrief-receipts?includeScores=true&includePlayerIds=true`;
+      const response = await fetch(path + detailPath, {
         headers: { Authorization: 'Bearer ' + state.key }, cache: 'no-store', signal: request.signal
       });
       if (!inScope()) return;
@@ -114,17 +142,12 @@ export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) 
       if (!response.ok) throw new Error('Unavailable');
       const body = await response.json();
       if (!inScope()) return;
-      if (body?.version !== 1 || body.requestId !== target.batchId || body.sessionId !== target.sessionId
-        || body.roomId !== target.roomId || body.streamId !== target.streamId || body.worldSequence !== target.worldSequence
-        || !sequence(body.throughSequence) || body.throughSequence < target.appliedAtSequence || !sequence(body.finalStreamSequence)
-        || !Array.isArray(body.players) || body.players.length !== target.rosterCount
-        || new Set(body.players.map(player => player?.seat)).size !== target.rosterCount
-        || new Set(body.players.map(player => player?.playerId)).size !== target.rosterCount
-        || !body.players.every(player => Number.isInteger(player?.seat) && player.seat >= 1 && player.seat <= 5
-          && uuid.test(player.playerId ?? '') && typeof player.name === 'string' && typeof player.acknowledged === 'boolean' && validScore(player.score))
-        || body.players.filter(player => player.acknowledged).length < target.confirmedCount) throw new Error('Mismatch');
-      players = [...body.players].sort((a, b) => a.seat - b.seat);
-      throughCombatSequence = body.finalStreamSequence;
+      if (target.roomId === null) {
+        if (body?.version !== 1 || body.requestId !== target.batchId || !Array.isArray(body.rooms)
+          || body.rooms.length !== target.rooms.length) throw new Error('Mismatch');
+        const returned = new Map(body.rooms.map(room => [room?.roomId, room]));
+        players = target.rooms.flatMap(room => validatedPlayers(returned.get(room.roomId), room));
+      } else players = validatedPlayers(body, target);
     } catch { if (inScope()) status.textContent = '暫時無法確認原席位回條，可重新讀取。'; }
     finally {
       clearTimeout(timeout);
@@ -148,21 +171,37 @@ export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) 
           rosterCount: count.rosterCount, confirmedCount: count.confirmedCount });
       }
     }
+    batchTarget = rooms.size ? { id: batch.requestId + '/all', batchId: batch.requestId, roomId: null,
+      rooms: [...rooms.values()].sort((a, b) => a.roomId - b.roomId),
+      pendingRooms: [...counts.values()].filter(count => count.rosterCount > 0 && !rooms.has(count.roomId))
+        .map(count => count.roomId).sort((a, b) => a - b) } : null;
+    all.hidden = all.disabled = !batchTarget;
     if (!target) return;
-    const next = rooms.get(target.roomId);
+    const next = target.roomId === null ? batchTarget : rooms.get(target.roomId);
     if (next?.id !== target.id || next.rosterCount !== target.rosterCount) { close(); return; }
-    const advanced = next.confirmedCount > target.confirmedCount;
+    const before = target.rooms ?? [target], after = next.rooms ?? [next];
+    const changedRooms = after.length !== before.length || after.some((room, index) => room.id !== before[index].id);
+    const advanced = after.some(room => (before.find(previous => previous.id === room.id)?.confirmedCount ?? -1) < room.confirmedCount
+      && (players?.filter(player => player.room.id === room.id && player.acknowledged).length ?? -1) < room.confirmedCount);
+    const pendingChanged = String(next.pendingRooms) !== String(target.pendingRooms);
     target = next;
-    if (advanced && (players?.filter(player => player.acknowledged).length ?? -1) < next.confirmedCount) void read();
+    if (changedRooms || advanced) {
+      controller?.abort(); controller = null; void read();
+    } else if (pendingChanged && players) render();
+  }
+
+  function open(selection) {
+    if (!active || current().actor?.role !== 'Master' || !selection) return;
+    close(); target = selection; panel.hidden = false;
+    onlyMissing.checked = selection.roomId === null;
+    title.textContent = selection.roomId === null ? '全館席位戰績回條' : `房間 ${selection.roomId} 的戰績回條`;
+    title.focus(); void read();
   }
 
   onlyMissing.addEventListener('change', render);
   refresh.addEventListener('click', read);
   $('venue-debrief-seats-close').addEventListener('click', close);
+  all.addEventListener('click', () => open(batchTarget));
   return { update, available: roomId => rooms.has(roomId), active(on) { active = on; if (!on) close(); },
-    open(roomId) {
-      if (!active || current().actor?.role !== 'Master' || !rooms.has(roomId)) return;
-      close(); target = rooms.get(roomId); panel.hidden = false;
-      title.textContent = `房間 ${roomId} 的戰績回條`; title.focus(); void read();
-    } };
+    open: roomId => open(rooms.get(roomId)) };
 }

@@ -24,6 +24,7 @@ internal sealed record VenueDebriefSeatScore(long AmmoUsed, long ShotsHit, long 
 }
 internal sealed record VenueDebriefSeats(int Version, Guid RequestId, Guid SessionId, int RoomId, Guid StreamId,
     long ThroughSequence, long FinalStreamSequence, long WorldSequence, VenueDebriefSeat[] Players);
+internal sealed record VenueDebriefBatchSeats(int Version, Guid RequestId, VenueDebriefSeats[] Rooms);
 
 public sealed partial class WorldRecordings
 {
@@ -108,16 +109,43 @@ public sealed partial class WorldRecordings
         lock (gate)
         {
             var (session, replay) = SealedVenueDebriefRoom(id, roomId, actor);
-            var stream = session.CombatStream!;
             var confirmed = ReadDebriefAdmissions(session.Id);
             var scores = includeScores ? manager.FinalReport(session.Id, actor, roomId).Players
                 .ToDictionary(player => player.PlayerId, VenueDebriefSeatScore.From) : null;
-            var players = session.Players.Where(player => player.RoomId == roomId).OrderBy(player => player.Seat)
-                .Select(player => new VenueDebriefSeat(player.Seat + 1, player.Name, confirmed.Contains(player.AdmissionId),
-                    scores?[player.Id], includePlayerIds ? player.Id : null)).ToArray();
-            return new(1, id, session.Id, roomId, stream.StreamId, session.Sequence,
-                stream.AcceptedSequence, replay.ThroughSequence, players);
+            return BuildVenueDebriefSeats(id, roomId, session, replay, confirmed, scores, includePlayerIds);
         }
+    }
+
+    internal VenueDebriefBatchSeats ReadVenueDebriefBatchSeats(Guid id, OperatorIdentity actor)
+    {
+        lock (gate)
+        {
+            var batch = manager.ReadVenueEnd(id, actor);
+            var rooms = new List<VenueDebriefSeats>(SessionManager.RoomCount);
+            foreach (var original in batch.Sessions)
+            {
+                var session = manager.Get(original.SessionId, actor);
+                if (session.Players.Length == 0 || session.State != SessionState.Ended
+                    || session.CombatStream is not { Sealed: true } stream
+                    || VenueWorldArchive(session, stream, actor) is not (VenueArchiveState.Sealed, { } replay)) continue;
+                var confirmed = ReadDebriefAdmissions(session.Id);
+                var scores = manager.FinalReport(session.Id, actor).Players.ToDictionary(player => player.PlayerId, VenueDebriefSeatScore.From);
+                foreach (var roomId in session.Players.Select(player => player.RoomId).Distinct())
+                    rooms.Add(BuildVenueDebriefSeats(id, roomId, session, replay, confirmed, scores, includePlayerIds: true));
+            }
+            return new(1, id, rooms.OrderBy(room => room.RoomId).ToArray());
+        }
+    }
+
+    private static VenueDebriefSeats BuildVenueDebriefSeats(Guid id, int roomId, SessionView session, VenueReplay replay,
+        HashSet<Guid> confirmed, Dictionary<Guid, VenueDebriefSeatScore>? scores, bool includePlayerIds)
+    {
+        var stream = session.CombatStream!;
+        var players = session.Players.Where(player => player.RoomId == roomId).OrderBy(player => player.Seat)
+            .Select(player => new VenueDebriefSeat(player.Seat + 1, player.Name, confirmed.Contains(player.AdmissionId),
+                scores?[player.Id], includePlayerIds ? player.Id : null)).ToArray();
+        return new(1, id, session.Id, roomId, stream.StreamId, session.Sequence,
+            stream.AcceptedSequence, replay.ThroughSequence, players);
     }
 
     internal FinalSessionReport ReadVenueDebriefSeatReport(Guid id, int roomId, int seat, OperatorIdentity actor)
