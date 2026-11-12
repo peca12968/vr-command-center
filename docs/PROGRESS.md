@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 Quest 開場追蹤核對原部署
+
+- 開場前的 Quest 追蹤核對可指定完整部署報告。工具先比對原 ZIP 雜湊、原裝置對照表，以及逐席的場次、玩家、入場名額與端口，然後讀取管理服務目前的追蹤狀態。就緒或等待中的回條均保存原部署報告的 SHA-256。 [操作方式](QUEST3.md#核對本次部署與追蹤席位)
+- Windows 本機通過 54 項部署測試及 108 項封存測試。兩席 MR 模擬確認同輪就緒、MR 來源尚未就緒，以及 10 種錯批或參數組合在連線前遭拒。追蹤查詢全程未呼叫 ADB。 [測試](../tests/test_quest_deploy.py)
+- 功能來源 `4ef2787` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43325247448)
+
 ## 2026-11-13 Quest UDP 預檢核對原 Windows 批次
 
 - Quest 批次預檢可在呼叫 ADB 前核對原 Windows 啟動計畫、成功預覽與網路清單。報告保留兩份原檔的路徑與雜湊。重試須沿用原檔，全館核對及封存驗收可直接重讀這項證據。 [操作方式](QUEST3.md#預檢前核對-windows-原啟動批次)
