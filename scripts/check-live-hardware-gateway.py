@@ -876,7 +876,8 @@ def run(args):
                     assert [(row['signal']['reportId'],row['deviceId']) for row in received['signals']] == [
                         (report['report']['reportId'],expected_devices[room][player['seat']])
                         for report,player in zip(reports,rosters[room][:count],strict=True)]
-                    venue_peers[room].reply(decision)
+                    if decision is not None:
+                        venue_peers[room].reply(decision)
                     return {report['report']['reportId'] for report in reports}
 
                 def start_fleet(bindings_folder, destination, stop, **overrides):
@@ -1121,6 +1122,81 @@ def run(args):
                     request(room_path+'/combat-stream', {'streamId':new_stream,'origin':'Simulation'}, 'GameServer')
                     started = request(room_path+'/commands', {'commandId':str(uuid.uuid4()),'action':'Begin'})
                     venue_streams[owners[3]] = (new_stream, started['appliedAtSequence'], 0)
+
+                continuity_bindings = runtime/f'{label}-continuity-bindings'
+                shutil.copytree(folder, continuity_bindings)
+                continuity_directory = out/f'{label}-continuity'
+                continuity_stop = runtime/f'{label}-continuity.stop'
+                with authority_gate(port, owners) as (origin, faults, _):
+                    for file in continuity_bindings.glob('room-*.json'):
+                        config = json.loads(file.read_bytes())
+                        file.write_text(json.dumps(dict(config, managementUrl=origin)), encoding='utf-8')
+                    continuous = start_fleet(continuity_bindings, continuity_directory, continuity_stop)
+                    for room in rooms:
+                        path = '/api/sessions/' + owners[room]
+                        venue_connections[room] = accept(venue_peers[room], room, venue_connections[room], bound=True)
+                    for room, kind, weather in ((1, 'cursor', 'Fog'), (2, 'clock', 'Rain')):
+                        original_ids = send_venue_batch(room, 1)
+                        wait(lambda:venue_status(continuity_directory)[room-1]['status']['progress']['acknowledged']==1,
+                             'original acknowledgment before the continuity test')
+                        pending_ids = send_venue_batch(room, 1, decision=None)
+                        observed = request('/api/sessions/'+owners[room]+'/commands', {'commandId':str(uuid.uuid4()),
+                            'action':'SetEnvironment','environment':{'mode':'VR','weather':weather,'timeOfDay':'Day','lightning':False}})
+                        upper = observed['appliedAtSequence']
+                        advanced, rewind = threading.Event(), threading.Event()
+                        delivered_pages, stale_pages = [], []
+
+                        def substitute(page):
+                            signals = [row for row in page['signals'] if row['reportId'] in pending_ids]
+                            if page['throughSequence'] != upper or len(signals) != 1:
+                                return page
+                            if not rewind.is_set():
+                                delivered_pages.append(page)
+                                advanced.set()
+                                return page
+                            assert signals[0]['eventSequence'] < upper
+                            stale = (dict(page, throughSequence=upper-1) if kind=='cursor'
+                                     else dict(page, checkedAtUtc=signals[0]['acceptedAtUtc']))
+                            stale_pages.append(stale)
+                            return stale
+
+                        faults[room] = substitute
+                        assert advanced.wait(.55), 'Gateway did not inspect the newer page while waiting for the mock ACK'
+                        rewind.set()
+                        venue_peers[room].reply('ack')
+
+                        def observed_result():
+                            row = venue_status(continuity_directory)[room-1]
+                            if row['state']=='stopped' or row['status']['progress']['acknowledged'] > 1:
+                                return row
+
+                        terminal = wait(observed_result, f'{mode} {kind} after a newer authority read')
+                        assert delivered_pages and stale_pages
+                        save(f'{label}-continuity-{kind}.json', {'advanced':delivered_pages[0], 'substituted':stale_pages[0],
+                            'originalIds':sorted(original_ids),'pendingIds':sorted(pending_ids),'result':terminal})
+                        check(terminal['state']=='stopped' and terminal['status']['termination']=='management-invalid-response'
+                              and terminal['status']['progress']['acknowledged']==1,
+                              f'{mode} rejects a regressed {kind} after observing a newer original pending batch')
+                        result = json.loads((continuity_directory/f'room-{room:02}-report.json').read_bytes())
+                        assert [attempt['status'] for attempt in result['attempts']]==['simulated-acknowledged','cancelled']
+                        assert {item['signal']['reportId'] for item in result['attempts'][1]['deliveries']}==pending_ids
+                        assert not result['complete'] and result['acknowledged']==1 and not result['physicalDeliveryConfirmed']
+                        del faults[room]
+
+                    unaffected = send_venue_batch(5, 1)
+                    wait(lambda:venue_status(continuity_directory)[4]['status']['progress']['acknowledged']==1,
+                         'room five remains active after other rooms reject authority regressions')
+                    assert continuous.poll() is None
+                    continuity_stop.touch()
+                    stdout, _ = continuous.communicate(timeout=8)
+                    aggregate = json.loads((continuity_directory/'venue-report.json').read_bytes())
+                    assert continuous.returncode==1 and json.loads(stdout)==aggregate
+                    assert [row['exitCode'] for row in aggregate['rooms']]==[1,1,0,0,0]
+                    room_five = json.loads((continuity_directory/'room-05-report.json').read_bytes())
+                    assert {item['signal']['reportId'] for attempt in room_five['attempts']
+                            for item in attempt['deliveries']}==unaffected
+                    check(room_five['attempts'][0]['status']=='simulated-acknowledged' and room_five['termination']=='operator-stop',
+                          f'{mode} unaffected room confirms fresh feedback on its original connection')
 
                 stop_venue_room = runtime/f'{label}-stop-room-1'
                 room1_options = {'config':config_files[1],'status_directory':status_directory}

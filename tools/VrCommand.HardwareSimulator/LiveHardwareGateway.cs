@@ -212,6 +212,14 @@ internal static partial class LiveHardwareGateway
 
         var bindings = config.Bindings.ToDictionary(b => (b.PlayerId, b.AdmissionId, b.Seat));
         var route = FeedbackRoute(config);
+        RoomHardwareFeedback? latest = null;
+        async Task<Observation> ReadCurrent(long? after, CancellationToken token)
+        {
+            // Keep the authority's last verified response independently of the delivery cursor.
+            var observation = await Read(client, route, config, after, token, latest);
+            latest = observation.Page;
+            return observation;
+        }
         var attempts = new List<Attempt>();
         int connections = 0, attachments = 0, managementFaults = 0, mockFaults = 0, dropped = 0, acknowledged = 0;
         var termination = "duration";
@@ -242,7 +250,7 @@ internal static partial class LiveHardwareGateway
             {
                 try
                 {
-                    var page = (await Read(client, route, config, null, run.Token)).Page;
+                    var page = (await ReadCurrent(null, run.Token)).Page;
                     if (page.State == SessionState.Ended)
                     {
                         termination = "ended";
@@ -262,7 +270,7 @@ internal static partial class LiveHardwareGateway
                     await Exchange(wire, new { version = 1, kind = "hello", mode = "simulation", connectionId = connection, config.RoomId },
                         "ready", connection, null, run.Token);
                     connections++;
-                    page = (await Read(client, route, config, null, run.Token, page)).Page;
+                    page = (await ReadCurrent(null, run.Token)).Page;
                     if (ActiveEpoch(page) == epoch)
                     {
                         attachments++;
@@ -272,7 +280,7 @@ internal static partial class LiveHardwareGateway
                     {
                         await Task.Delay(PollInterval, run.Token);
                         var after = page.ThroughSequence;
-                        var current = await Read(client, route, config, after, run.Token, page);
+                        var current = await ReadCurrent(after, run.Token);
                         page = current.Page;
                         if (ActiveEpoch(page) != epoch) break;
                         if (page.ResetReason is not null) { heartbeat?.Refresh(); continue; }
@@ -291,7 +299,7 @@ internal static partial class LiveHardwareGateway
                         PublishStatus("awaiting-ack");
                         try
                         {
-                            var invalid = await ExchangeFeedback(wire, client, route, config, after, page, deliveries, connection, batch, run.Token);
+                            var invalid = await ExchangeFeedback(wire, ReadCurrent, config.RoomId, after, page, deliveries, connection, batch, run.Token);
                             if (invalid is not null)
                             {
                                 page = invalid;
@@ -366,12 +374,12 @@ internal static partial class LiveHardwareGateway
 
     // Monitor the authority while the peer holds the batch, and read it again after an ACK.
     // Cancelling the exchange joins its socket read before the caller closes and replaces the connection.
-    private static async Task<RoomHardwareFeedback?> ExchangeFeedback(NetworkStream wire, HttpClient client, string route, Configuration config,
+    private static async Task<RoomHardwareFeedback?> ExchangeFeedback(NetworkStream wire, Func<long?, CancellationToken, Task<Observation>> readCurrent, int roomId,
         long after, RoomHardwareFeedback page, Delivery[] deliveries, Guid connection, Guid batch, CancellationToken run)
     {
         using var pending = CancellationTokenSource.CreateLinkedTokenSource(run);
         var receipt = Exchange(wire, new { version = 1, kind = "feedback", mode = "simulation", connectionId = connection,
-            batchId = batch, config.RoomId, page.StreamId, page.RunningSinceSequence, signals = deliveries }, "ack", connection, batch, pending.Token);
+            batchId = batch, roomId, page.StreamId, page.RunningSinceSequence, signals = deliveries }, "ack", connection, batch, pending.Token);
 
         bool StillEligible(Observation observed) => observed.Page.State == SessionState.Running && observed.Page.ResetReason is null
             && observed.Page.StreamId == page.StreamId && observed.Page.RunningSinceSequence == page.RunningSinceSequence
@@ -380,12 +388,12 @@ internal static partial class LiveHardwareGateway
         {
             while (await Task.WhenAny(receipt, Task.Delay(PollInterval, pending.Token)) != receipt)
             {
-                var observation = await Read(client, route, config, after, pending.Token, page);
+                var observation = await readCurrent(after, pending.Token);
                 if (receipt.IsFaulted || receipt.IsCanceled) await receipt;
                 if (!StillEligible(observation)) return observation.Page;
             }
             await receipt;
-            var confirmed = await Read(client, route, config, after, pending.Token, page);
+            var confirmed = await readCurrent(after, pending.Token);
             run.ThrowIfCancellationRequested();
             return StillEligible(confirmed) ? null : confirmed.Page;
         }
@@ -427,6 +435,7 @@ internal static partial class LiveHardwareGateway
         if (page.Version != config.Version || (page.Version == 1 && page.Bindings is not null)
             || page.RoomId != config.RoomId || page.SessionId != config.SessionId || page.ThroughSequence < 1
             || page.ThroughSequence < after || !Enum.IsDefined(page.State) || page.CheckedAtUtc == default
+            || (previous is not null && (page.ThroughSequence < previous.ThroughSequence || page.CheckedAtUtc < previous.CheckedAtUtc))
             || (page.StreamId is null ? page.CombatOrigin is not null
                 : page.StreamId == Guid.Empty || page.CombatOrigin is not (CombatOrigin.Simulation or CombatOrigin.GameServer))
             || (page.StreamId is not null && previous is not null && previous.StreamId == page.StreamId && previous.CombatOrigin != page.CombatOrigin)
