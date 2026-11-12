@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 從原預覽產生五房 UDP 網路清單
+
+- `prepare-venue-network-plan.py` 先比對原 Windows 啟動計畫及成功預覽的模式、場次、任務版本、序號與端點，再用全館席位 IPv4 產生原格式網路清單。可按階段指定每房席數，並使用原裝置表產生 Quest 專用子集。 [操作方式](EXTERNAL_CLIENTS.md#從原啟動預覽產生網路清單)
+- 10 項 LAN 預檢、11 項 Quest UDP 及 108 項離線封存測試通過。新清單通過原 PowerShell 雙端 UDP 核對，Quest 子集以同機 Java 探測程式完成兩席往返。既有 Windows 獨立及合併各 25 席的網路清單重建一致，原啟動檔案及證據雜湊一致。 [驗證紀錄](../artifacts/venue-network-plan-preparation-validation.json)
+- 功能來源 `68115f7` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43322696693)
+
 ## 2026-11-13 五房配置檔平面圖對照
 
 - Windows 管理包 0.31.160 可在五房配置檔預覽中選房，以相同比例對照目前準備與檔案版本的保存物件、角度、出生位及配置問題。對照保留原準備和編輯草稿。 [操作方式](MISSION_VERSIONS.md#在開場前保存五房任務配置)
