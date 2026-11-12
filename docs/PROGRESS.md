@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 Quest UDP 預檢核對原 Windows 批次
+
+- Quest 批次預檢可在呼叫 ADB 前核對原 Windows 啟動計畫、成功預覽與網路清單。報告保留兩份原檔的路徑與雜湊。重試須沿用原檔，全館核對及封存驗收可直接重讀這項證據。 [操作方式](QUEST3.md#預檢前核對-windows-原啟動批次)
+- 12 項 Quest UDP、10 項 LAN 預檢及 108 項封存測試通過。同機 Java 與 PowerShell 兩席 UDP 往返通過全館核對，重試拒絕沿用原埠的新場次，亦拒絕省略原啟動證據。既有 Windows 同機 50 份玩家 ZIP、6 組 UDP 預檢及 2,502 格回放重驗一致。 [驗證紀錄](../artifacts/quest-udp-launch-binding-validation.json)
+- 功能來源 `0f7743f` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43324108182)
+
 ## 2026-11-13 從原預覽產生五房 UDP 網路清單
 
 - `prepare-venue-network-plan.py` 先比對原 Windows 啟動計畫及成功預覽的模式、場次、任務版本、序號與端點，再用全館席位 IPv4 產生原格式網路清單。可按階段指定每房席數，並使用原裝置表產生 Quest 專用子集。 [操作方式](EXTERNAL_CLIENTS.md#從原啟動預覽產生網路清單)
