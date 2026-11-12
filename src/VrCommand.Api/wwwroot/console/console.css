@@ -70,6 +70,9 @@
 #venue-missions-review :is(td,th):is(:nth-child(2),:nth-child(3)){white-space:normal;overflow-wrap:anywhere}
 #venue-missions-review td:first-child{min-width:0}
 #venue-missions-review [data-changed=true] td:nth-child(3){color:var(--accent)}
+#venue-missions-maps-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:12px}
+#venue-missions-maps-grid article{min-width:0;padding:10px;border:1px solid var(--line);border-radius:5px;overflow-wrap:anywhere}
+#venue-missions-maps-grid h4{margin:0 0 6px}
 .mission-file-climate,.mission-file-enemies{margin:4px 0 0}
 #launch-layout-spawns circle{fill:#4e839433;stroke:#80c4d5;stroke-width:.05;stroke-dasharray:.08 .04}
 #launch-layout-spawns text{fill:#b2dfec;font-size:.3px;text-anchor:middle}

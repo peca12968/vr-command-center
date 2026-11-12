@@ -11,6 +11,8 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
   const save = page.locator('#download-venue-missions'), load = page.locator('#load-venue-missions');
   const preview = page.locator('#preview-venue-missions'), review = page.locator('#venue-missions-review');
   const reviewRows = review.locator('tbody tr');
+  const maps = page.locator('#venue-missions-maps'), mapRoom = page.locator('#venue-missions-map-room');
+  const currentMap = maps.locator('[data-source=current]'), fileMap = maps.locator('[data-source=file]');
   const status = page.locator('#venue-missions-file-status'), create = page.locator('#create-session-form button[type=submit]');
   const choices = page.locator('#launch-room-missions-fields select');
   const selected = () => choices.evaluateAll(fields => fields.map(field => field.value));
@@ -65,7 +67,8 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
     assert.deepEqual(independent.value, { schemaVersion: 1, mode: 'IndependentSet', rooms: rooms(ids) });
     check((await api('/sessions')).length === 0, 'Both downloaded configuration files contain only version assignments and need no prior session');
 
-    const head = await api(`/missions/${a.id}/revisions`, 'POST', { ...template, durationSeconds: 690, props: [],
+    const head = await api(`/missions/${a.id}/revisions`, 'POST', { ...template, durationSeconds: 690,
+      props: [{ assetId: 'sandbag', position: { x: -2, y: 0, z: 1 }, yawDegrees: -30 }],
       environment: { ...template.environment, weather: 'Fog', timeOfDay: 'Day' },
       enemies: { count: 0, behavior: 'Advance', autoAttack: false } },
       'Master', 201, undefined, randomUUID());
@@ -105,24 +108,67 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
     check(await enemies(2, 0) === '0 名 · 推進 · 自動攻擊關閉' && await enemies(3, 0) === '2 名 · 守備 · 自動攻擊關閉'
       && await enemies(3, 1) === '4 名 · 巡邏 · 自動攻擊開啟',
       'The file review compares the exact saved historical and current enemy settings');
+    await currentMap.locator('[data-seat]').first().waitFor();
+    check(await mapRoom.inputValue() === '1' && await currentMap.getAttribute('data-mission-id') === head.id
+      && await fileMap.getAttribute('data-mission-id') === a.id && await currentMap.locator('svg').getAttribute('viewBox') === await fileMap.locator('svg').getAttribute('viewBox')
+      && await currentMap.locator('.room-layout-props [data-index="0"]').getAttribute('transform') === 'translate(-2 -1) rotate(-30)'
+      && await fileMap.locator('.room-layout-props [data-index="0"]').getAttribute('transform') === 'translate(2 -2) rotate(30)'
+      && await currentMap.locator('[data-seat]').count() === 5 && await fileMap.locator('[data-seat]').count() === 5,
+      'The room comparison plots both original versions, exact object transforms and all five spawn slots at the same scale');
+    await mapRoom.selectOption('2');
+    check(await currentMap.locator('svg').count() === 0 && await fileMap.getAttribute('data-mission-id') === b.id
+      && (await fileMap.locator('svg').getAttribute('aria-label')).startsWith('房間 2') && await mission.inputValue() === head.id,
+      'An unassigned current room shows only the incoming MR map and leaves preparation unchanged');
     await mode.selectOption('Linked');
     check(await reviewRows.locator('td:nth-child(2)').evaluateAll(cells => cells.every(cell => cell.textContent.includes('第 2 版')))
       && (await review.innerText()).includes('目前為五房全連線'),
       'Changing the current plan updates the comparison while the file assignments stay fixed');
+    await currentMap.locator('[data-seat]').first().waitFor();
+    check(await mapRoom.inputValue() === '2' && await currentMap.getAttribute('data-mission-id') === head.id
+      && await fileMap.getAttribute('data-mission-id') === b.id && await draft.inputValue() === '691',
+      'Changing current topology updates the selected room map while the incoming assignment and draft stay pinned');
+    await maps.screenshot({ path: path.join(screenshots, 'venue-mission-file-maps.png') });
+    check(await maps.locator('article').evaluateAll(([before, after]) => before.offsetTop === after.offsetTop
+      && before.offsetWidth === after.offsetWidth && before.offsetLeft < after.offsetLeft),
+      'Desktop comparison places both plans side by side at equal width');
     await review.screenshot({ path: path.join(screenshots, 'venue-mission-file-review.png') });
     await page.setViewportSize({ width: 390, height: 844 });
     check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
       'A narrow screen keeps the preview table inside its own scroll region');
+    check(await maps.locator('article').evaluateAll(([before, after]) => before.offsetTop < after.offsetTop
+      && before.offsetWidth === after.offsetWidth), 'Narrow comparison stacks both maps at equal width');
     await page.setViewportSize({ width: 1440, height: 1080 });
     const withInvalidLayout = structuredClone(independent.value);
     withInvalidLayout.rooms[4].missionId = invalidLayout.id;
-    await input.setInputFiles({ name: 'layout.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(withInvalidLayout)) });
-    check(await review.isHidden(), 'Choosing a different file clears the old comparison immediately');
+    const waitingLayout = url => url.pathname === `/api/missions/${invalidLayout.id}/layout` && url.searchParams.get('mode') === 'Linked';
+    let releaseLayout;
+    const layoutGate = new Promise(resolve => { releaseLayout = resolve; });
+    const holdLayout = async route => { await layoutGate; await route.continue(); };
+    await page.route(waitingLayout, holdLayout, { times: 1 });
+    try {
+      await Promise.all([page.waitForRequest(request => waitingLayout(new URL(request.url()))), mission.selectOption(invalidLayout.id)]);
+      check(await currentMap.getAttribute('data-mission-id') === invalidLayout.id && await currentMap.locator('svg').count() === 1
+        && await currentMap.locator('[data-seat]').count() === 0 && (await currentMap.innerText()).includes('正在核對'),
+        'The current map shows the exact saved props while its own spawn report is pending');
+      await input.setInputFiles({ name: 'layout.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(withInvalidLayout)) });
+      check(await review.isHidden() && await maps.isHidden() && await maps.locator('svg').count() === 0,
+        'Choosing a different file clears the old table and maps immediately');
+      const response = page.waitForResponse(reply => waitingLayout(new URL(reply.url())));
+      releaseLayout();
+      assert.equal((await response).status(), 200);
+      await mission.selectOption(head.id);
+      check(await maps.isHidden() && await maps.locator('svg').count() === 0,
+        'A completed old layout read cannot restore maps after replacing the file');
+    } finally { releaseLayout(); await page.unroute(waitingLayout, holdLayout); }
     await preview.click();
     await review.waitFor();
     check(await reviewRows.last().locator('[data-status=invalid]').count() === 1
       && await mission.inputValue() === head.id && await mode.inputValue() === 'Linked',
       'The preview flags the actual invalid room layout while leaving the current plan untouched');
+    await mapRoom.selectOption('5');
+    check(await fileMap.getAttribute('data-mission-id') === invalidLayout.id
+      && await fileMap.locator('[data-layout-invalid=true]').count() === 2 && await create.isDisabled(),
+      'The incoming map marks both overlapping saved objects while the active preparation still controls creation');
     await input.setInputFiles(independent.target);
     await load.click();
     await status.filter({ hasText: '已載入' }).waitFor();
@@ -185,7 +231,7 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
     await page.waitForFunction(() => !document.querySelector('#mission-fields').disabled);
     await page.locator('#tab-operations').click();
     check(await mode.inputValue() === 'IndependentSet' && await panel.getAttribute('open') === null
-      && await input.inputValue() === '' && await status.textContent() === '' && await review.isHidden(),
+      && await input.inputValue() === '' && await status.textContent() === '' && await review.isHidden() && await maps.isHidden(),
       'Leaving operations discards an in-flight file read and clears the file selection');
     await panel.locator('summary').click();
     await input.setInputFiles(linked.target);

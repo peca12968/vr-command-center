@@ -173,7 +173,7 @@ export function savedRoomLayoutMap(roomId, props, report) {
   const missing = routePreview(report)?.filter(route => !route.path.length).map(route => route.seat + 1) ?? [];
   drawSpawns(spawns, report, missing);
   drawLayoutProps(objects, props);
-  markInvalid(objects, report);
+  if (report) markInvalid(objects, report);
   map.append(floor, axes, spawns, objects);
   return map;
 }
