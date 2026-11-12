@@ -106,6 +106,7 @@ module.exports = async ({ context, api, tokens, base, mission, screenshots, chec
     const ghosts = page.locator('#prop-copy-preview [data-index]');
     const objects = page.locator('#prop-layer [data-index]');
     const apply = page.locator('#apply-prop-copy');
+    const copyStatus = page.locator('#prop-copy-status');
     await field('prop-copy-count', 21); await preview();
     check(await apply.isDisabled() && await ghosts.count() === 0 && (await page.locator('#prop-copy-status').innerText()).includes('1 至 20'),
       'Row preview rejects a count beyond twenty without placing any copies');
@@ -113,7 +114,15 @@ module.exports = async ({ context, api, tokens, base, mission, screenshots, chec
     check(await apply.isDisabled() && await ghosts.count() === 0, 'A zero displacement cannot preview stacked copies');
     await field('prop-copy-x', 10); await preview();
     check(await apply.isDisabled() && (await page.locator('#prop-copy-status').innerText()).includes('超出配置圖'), 'An out-of-map row is rejected as a whole');
+    await field('prop-copy-x', 0.25); await preview();
+    await copyStatus.filter({ hasText: '預覽配置有' }).waitFor();
+    check((await ghosts.locator('text').allTextContents()).join() === '2,3'
+      && await page.locator('#prop-copy-preview [data-layout-invalid="true"]').count() === 2
+      && (await page.locator('#prop-copy-issues').innerText()).includes('物件 1 與 2')
+      && await objects.count() === 1 && await page.locator('#undo-prop').isDisabled(),
+      'The original layout service detects overlapping copies before they alter the draft or undo history');
     await field('prop-copy-x', 2.375); await field('prop-copy-z', 0.125); await preview();
+    await copyStatus.filter({ hasText: '預覽場地檢查通過' }).waitFor();
     check(await ghosts.count() === 2 && await objects.count() === 1 && await page.locator('#undo-prop').isDisabled()
       && (await page.locator('#draft-status').innerText()) === loadedRowStatus && !(await apply.isDisabled()),
       'Two translucent copies preview without changing the saved draft, selection history, or actual objects');
@@ -149,6 +158,7 @@ module.exports = async ({ context, api, tokens, base, mission, screenshots, chec
     const moveSelection = index => page.locator(`[data-move-index="${index}"]`);
     const movePreview = page.locator('#preview-prop-move'), moveApply = page.locator('#apply-prop-move');
     const moveGhosts = page.locator('#prop-move-preview [data-index]');
+    const moveStatus = page.locator('#prop-move-status');
     const selectedObjects = page.locator('#prop-layer [data-move-selected]');
     const beforeMove = await page.locator('#draft-status').innerText();
     await page.locator('#select-all-prop-move').click();
@@ -163,7 +173,60 @@ module.exports = async ({ context, api, tokens, base, mission, screenshots, chec
     await field('prop-move-x', 9); await movePreview.click();
     check(await moveApply.isDisabled() && await moveGhosts.count() === 0 && (await page.locator('#prop-move-status').innerText()).includes('超出配置圖'),
       'One object outside the map rejects the entire batch preview');
+    await field('prop-move-x', 4.5); await movePreview.click();
+    await moveStatus.filter({ hasText: '預覽配置有' }).waitFor();
+    check(await page.locator('#prop-move-preview [data-index="2"][data-layout-invalid="true"]').count() === 1
+      && (await page.locator('#prop-move-issues').innerText()).includes('物件 3：旋轉後的包圍盒超出')
+      && await objects.count() === 3 && await page.locator('#undo-prop').isDisabled(),
+      'An in-map destination with an out-of-room footprint is marked before a batch move can change the draft');
+    await page.locator('#layout-map').screenshot({ path: path.join(screenshots, 'placement-proposal-outside-room.png') });
+
+    const layoutRoute = '**/api/mission-layout';
+    let release, reportReady, handled, started = false;
+    const held = new Promise(resolve => { release = resolve; });
+    const ready = new Promise(resolve => { reportReady = resolve; });
+    const done = new Promise(resolve => { handled = resolve; });
+    const isOldProposal = request => request.url() === base + '/api/mission-layout'
+      && request.postDataJSON()?.props[2]?.position.x === 5.75;
+    const holdInvalid = async route => {
+      if (!isOldProposal(route.request())) return route.continue();
+      started = true;
+      try {
+        const response = await route.fetch();
+        reportReady(null);
+        await held;
+        await route.fulfill({ response });
+        handled(null);
+      } catch (error) { reportReady(error); handled(error); }
+    };
+    await page.route(layoutRoute, holdInvalid);
+    try {
+      const requested = page.waitForRequest(isOldProposal, { timeout: 5000 });
+      await movePreview.click();
+      await requested;
+      const error = await ready;
+      if (error) throw error;
+      check(await moveApply.isDisabled(), 'A pending proposal check leaves Apply disabled');
+      await field('prop-move-x', 0.25); await field('prop-move-z', 0.5); await movePreview.click();
+      await moveStatus.filter({ hasText: '預覽場地檢查通過' }).waitFor();
+    } finally {
+      release();
+      const error = started ? await done : null;
+      await page.unroute(layoutRoute, holdInvalid);
+      if (error) throw error;
+    }
+    check((await moveStatus.innerText()).includes('預覽場地檢查通過') && await page.locator('#prop-move-issues li').count() === 0,
+      'A held invalid proposal response cannot replace the newer valid geometry or warnings');
+    const failProposal = route => route.fulfill({ status: 503, contentType: 'application/json', body: '{}' });
+    await page.route(layoutRoute, failProposal);
+    try {
+      await movePreview.click();
+      await moveStatus.filter({ hasText: '預覽檢查未完成' }).waitFor();
+      check(await moveApply.isEnabled() && await page.locator('#undo-prop').isDisabled(),
+        'A failed check is visible and still permits local draft editing');
+    } finally { await page.unroute(layoutRoute, failProposal); }
     await field('prop-move-x', 0.25); await field('prop-move-z', 0.5); await movePreview.click();
+    await moveStatus.filter({ hasText: '預覽場地檢查通過' }).waitFor();
     const previewNumbers = await moveGhosts.locator('text').allTextContents();
     check(await moveGhosts.count() === 2 && previewNumbers.join(',') === '1,3'
       && await objects.count() === 3 && await page.locator('#undo-prop').isDisabled() && (await page.locator('#draft-status').innerText()) === beforeMove,

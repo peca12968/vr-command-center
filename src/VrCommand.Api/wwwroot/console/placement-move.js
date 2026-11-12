@@ -1,19 +1,18 @@
-import { drawLayoutProps } from './layout-ui.js';
+import { drawLayoutProps, mountLayoutProposal } from './layout-ui.js';
 
 const $ = id => document.getElementById(id);
 
-export function mountPlacementMove({ props, editable, apply }) {
+export function mountPlacementMove({ props, editable, inspect, apply }) {
   const panel = $('prop-move-panel'), list = $('prop-move-list');
   const selection = new Set();
   const inputs = [$('prop-move-x'), $('prop-move-z'), $('prop-move-yaw')];
   const previewLayer = $('prop-move-preview'), status = $('prop-move-status');
+  const preview = mountLayoutProposal('move', inspect);
   let moves = [];
 
   function clearPreview() {
     moves = [];
-    previewLayer.replaceChildren();
-    $('apply-prop-move').disabled = true;
-    status.textContent = '';
+    preview.clear();
   }
 
   function paintSelection() {
@@ -102,8 +101,8 @@ export function mountPlacementMove({ props, editable, apply }) {
       status.textContent = '至少一件物件的中心超出配置圖的 ±10 公尺範圍。'; return;
     }
     moves = proposed;
-    drawLayoutProps(previewLayer, moves.map(({ prop, position, yawDegrees }) => ({ ...prop, position, yawDegrees })),
-      null, moves.map(move => move.index));
+    const destinations = new Map(moves.map(({ index, prop, position, yawDegrees }) => [index, { ...prop, position, yawDegrees }]));
+    drawLayoutProps(previewLayer, [...destinations.values()], null, [...destinations.keys()]);
     if (yaw) {
       const pivot = document.createElementNS(previewLayer.namespaceURI, 'path');
       pivot.setAttribute('data-rotation-pivot', '');
@@ -111,12 +110,11 @@ export function mountPlacementMove({ props, editable, apply }) {
       pivot.setAttribute('d', 'M -.22 0 H .22 M 0 -.22 V .22');
       previewLayer.append(pivot);
     }
-    status.textContent = `已預覽 ${moves.length} 件物件。`;
-    $('apply-prop-move').disabled = false;
+    void preview.check(props().map((prop, index) => destinations.get(index) ?? prop), `已預覽 ${moves.length} 件物件。`);
   });
   $('apply-prop-move').addEventListener('click', () => {
-    if (!editable() || !moves.length) return;
+    if (!editable() || !moves.length || $('apply-prop-move').disabled) return;
     apply(moves);
   });
-  return { update, reset };
+  return { update, reset, clearPreview };
 }

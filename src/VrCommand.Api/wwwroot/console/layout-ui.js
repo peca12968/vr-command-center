@@ -113,6 +113,57 @@ function markInvalid(layer, report) {
   }
 }
 
+export function mountLayoutProposal(kind, inspect) {
+  const layer = $(`prop-${kind}-preview`), status = $(`prop-${kind}-status`);
+  const issues = $(`prop-${kind}-issues`), apply = $(`apply-prop-${kind}`);
+  let serial = 0;
+
+  function clear() {
+    serial++;
+    layer.replaceChildren();
+    issues.replaceChildren();
+    status.textContent = '';
+    delete status.dataset.layoutStatus;
+    apply.disabled = true;
+  }
+
+  async function check(props, label) {
+    const request = ++serial;
+    status.dataset.layoutStatus = 'checking';
+    status.textContent = label + ' 正在檢查完整配置…';
+    try {
+      const report = await inspect(props);
+      if (request !== serial) return;
+      if (report.applies !== true || typeof report.canStart !== 'boolean'
+        || !Number.isInteger(report.totalIssueCount) || report.totalIssueCount < 0) throw new Error('Unsupported preview.');
+      markInvalid(layer, report);
+      status.dataset.layoutStatus = report.canStart ? 'valid' : 'invalid';
+      const missing = routePreview(report)?.filter(route => !route.path.length).map(route => route.seat + 1) ?? [];
+      status.textContent = label + (report.canStart ? ' 預覽場地檢查通過。'
+        : ` 預覽配置有 ${report.totalIssueCount} 個問題，可先調整預覽或繼續編輯草稿。`)
+        + (missing.length ? ` 出生位 ${missing.join('、')} 未找到通往中線的取樣路徑。` : '');
+      issues.replaceChildren(...report.issues.map(issue => {
+        const row = document.createElement('li');
+        row.textContent = description(issue);
+        return row;
+      }));
+      if (report.truncated) {
+        const row = document.createElement('li');
+        row.textContent = '僅列出前 128 個問題。';
+        issues.append(row);
+      }
+    } catch {
+      if (request !== serial) return;
+      status.dataset.layoutStatus = 'unavailable';
+      status.textContent = label + ' 預覽檢查未完成，可重新預覽或繼續編輯草稿。';
+    } finally {
+      if (request === serial) apply.disabled = false;
+    }
+  }
+
+  return { clear, check };
+}
+
 export function savedRoomLayoutMap(roomId, props, report) {
   const map = svg('svg', { class: 'room-layout-map', viewBox: '-11 -11 22 22', role: 'img',
     'aria-label': `房間 ${roomId} 的保存配置與出生位` });
@@ -258,6 +309,10 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
       }
     }, 180);
   }
+  async function inspectProposal(props) {
+    const body = { ...draft(), props: structuredClone(props) };
+    return validateLayoutReport(await api('/mission-layout', 'POST', body), body.mode, body.experienceMode);
+  }
   function scheduleLaunch() {
     if (!active()) return;
     const selected = selection(), key = selected.id ? selected.id + '/' + selected.mode : '';
@@ -300,5 +355,5 @@ export function mountLayout({ api, epoch, active, editable, draft, selection, ch
   $('layout-clear-trial').addEventListener('click', clearTrial);
   $('draft-layout-show-clearance').addEventListener('change', () => drawClearance('draft', draftReport, draft().props));
   $('launch-layout-show-clearance').addEventListener('change', () => drawClearance('launch', launchReport, selection().props));
-  reset(); return { reset, scheduleDraft, scheduleLaunch, canLaunch, rejected, recheckDraft, recheckLaunch, clearTrial, inspectSaved, invalidateSaved };
+  reset(); return { reset, scheduleDraft, scheduleLaunch, canLaunch, rejected, recheckDraft, recheckLaunch, clearTrial, inspectSaved, invalidateSaved, inspectProposal };
 }

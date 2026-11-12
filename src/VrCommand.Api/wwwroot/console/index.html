@@ -375,7 +375,7 @@
               <details id="prop-copy-panel" class="camera-positions"><summary>複製成列</summary>
                 <div class="form-row"><label>新增份數<input id="prop-copy-count" inputmode="numeric" maxlength="2" value="1"></label><label>每份 X 位移（公尺）<input id="prop-copy-x" inputmode="decimal" maxlength="20" value="2"></label><label>每份 Z 位移（公尺）<input id="prop-copy-z" inputmode="decimal" maxlength="20" value="0"></label></div>
                 <div class="button-row"><button id="preview-prop-copy" type="button" class="quiet">預覽複製</button><button id="apply-prop-copy" type="button" class="secondary" disabled>加入配置</button></div>
-                <p class="hint">預覽在配置圖上以半透明顯示。加入後會檢查範圍、重疊與出生位。</p><p id="prop-copy-status" class="hint" role="status"></p>
+                <p id="prop-copy-status" class="hint" role="status"></p><ul id="prop-copy-issues" class="layout-proposal-issues" aria-label="複製預覽的配置問題"></ul>
               </details>
             </div>
               <details id="prop-move-panel" class="camera-positions"><summary>批次移動與旋轉</summary>
@@ -385,7 +385,7 @@
                 <label>旋轉（度）<input id="prop-move-yaw" inputmode="decimal" maxlength="20" value="0" aria-describedby="prop-move-yaw-hint"></label>
                 <p id="prop-move-yaw-hint" class="hint">以所選物件的平均位置為中心。正角度順時針，先旋轉再位移。</p>
                 <div class="button-row"><button id="preview-prop-move" type="button" class="quiet" disabled>預覽調整</button><button id="apply-prop-move" type="button" class="secondary" disabled>套用調整</button></div>
-                <p id="prop-move-status" class="hint" role="status"></p>
+                <p id="prop-move-status" class="hint" role="status"></p><ul id="prop-move-issues" class="layout-proposal-issues" aria-label="調整預覽的配置問題"></ul>
               </details>
             </div>
           </div>
@@ -518,7 +518,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.149 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.150 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

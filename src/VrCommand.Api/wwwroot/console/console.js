@@ -1,6 +1,6 @@
 import { mountWorld } from './world-ui.js';
 import { mountReplay } from './replay-ui.js';
-import { drawLayoutProps, mountLayout } from './layout-ui.js';
+import { drawLayoutProps, mountLayout, mountLayoutProposal } from './layout-ui.js';
 import { mountIndependentPlan } from './independent-plan-ui.js';
 import { mountAlignment } from './alignment-ui.js';
 import { mountAlignmentPins } from './alignment-pins-ui.js';
@@ -1585,7 +1585,7 @@ function restoreParent() {
 }
 async function saveMission(revise = false) {
   if (state.pending || (revise && !state.draftBase)) return;
-  clearPropCopies();
+  clearPropCopies(); propMove.clearPreview();
   const parent = revise ? state.draftBase : null;
   state.pending = { kind: revise ? 'mission-revise' : 'mission-create', parent,
     path: parent ? `/missions/${parent.mission.id}/revisions` : '/missions', method: 'POST', requestId: uuid(),
@@ -1609,15 +1609,14 @@ function dirtyDraft() { state.draftChanged = true; clearMissionComparison(); dra
 let propGesture = null;
 let propCopies = [];
 const maxProps = 500;
-const propMove = mountPlacementMove({ props: () => state.props, editable,
+const copyProposal = mountLayoutProposal('copy', placement.inspectProposal);
+const propMove = mountPlacementMove({ props: () => state.props, editable, inspect: placement.inspectProposal,
   apply: moves => editProp(() => {
     for (const { prop, position, yawDegrees } of moves) Object.assign(prop, { position, yawDegrees });
   }) });
 function clearPropCopies() {
   propCopies = [];
-  $('prop-copy-preview').replaceChildren();
-  $('prop-copy-status').textContent = '';
-  $('apply-prop-copy').disabled = true;
+  copyProposal.clear();
 }
 function previewPropCopies() {
   const prop = state.props[state.prop];
@@ -1639,12 +1638,11 @@ function previewPropCopies() {
     return;
   }
   propCopies = copies;
-  drawLayoutProps($('prop-copy-preview'), copies);
-  status.textContent = `已預覽 ${copies.length} 份。`;
-  $('apply-prop-copy').disabled = false;
+  drawLayoutProps($('prop-copy-preview'), copies, null, copies.map((_, index) => state.props.length + index));
+  void copyProposal.check([...state.props, ...copies], `已預覽 ${copies.length} 份。`);
 }
 function applyPropCopies() {
-  if (!editable() || !propCopies.length) return;
+  if (!editable() || !propCopies.length || $('apply-prop-copy').disabled) return;
   editProp(() => { state.props.push(...propCopies); state.prop = state.props.length - 1; });
 }
 function propSnapshot() { return { props: structuredClone(state.props), prop: state.prop }; }
@@ -1894,6 +1892,9 @@ $('add-barrel').addEventListener('click', () => addProp('barrel'));
 $('preview-prop-copy').addEventListener('click', previewPropCopies);
 $('apply-prop-copy').addEventListener('click', applyPropCopies);
 for (const event of ['input', 'change']) $('prop-copy-panel').addEventListener(event, clearPropCopies);
+for (const id of ['draft-mode', 'draft-count', 'layout-session-mode']) for (const event of ['input', 'change']) {
+  $(id).addEventListener(event, () => { clearPropCopies(); propMove.clearPreview(); });
+}
 $('prop-copy-panel').addEventListener('toggle', () => {
   if ($('prop-copy-panel').open) $('prop-move-panel').open = false;
   else clearPropCopies();

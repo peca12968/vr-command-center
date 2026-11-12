@@ -62,6 +62,10 @@
 #launch-layout-props text{font-size:.38px;fill:#f2f4da;text-anchor:middle;pointer-events:none}
 #launch-layout-props [data-layout-invalid=true]{stroke:#ff9f8b;stroke-width:.12}
 #launch-layout-props [data-layout-invalid=true] [data-envelope]{stroke:#ff9f8b}
+.layout-proposal-issues{max-height:180px;overflow:auto;margin:8px 0;padding-left:22px;font-size:.85rem;color:#ffb9a8}
+.layout-proposal-issues:empty{display:none}
+#prop-copy-preview [data-layout-invalid=true] [data-envelope],#prop-move-preview [data-layout-invalid=true] [data-envelope]{stroke:#ff9f8b;stroke-width:.14}
+[data-layout-status=invalid]{color:#ffb9a8}
 #launch-layout-spawns circle{fill:#4e839433;stroke:#80c4d5;stroke-width:.05;stroke-dasharray:.08 .04}
 #launch-layout-spawns text{fill:#b2dfec;font-size:.3px;text-anchor:middle}
 #launch-layout-spawns [data-route-missing] circle{fill:#ffbb6333;stroke:#ffbb63}
