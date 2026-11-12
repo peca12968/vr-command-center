@@ -311,6 +311,19 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         check(prefix["frames"] + suffix["frames"] == policy["frames"]
               and request(f"{policy_route}?throughFrame={tail}&afterFrame={tail}")["frames"] == [],
               "Policy cursor compares its first candidate with the previous saved frame and respects the fixed tail")
+        environment_rows = [row for row in policy["frames"] if "environment" in row["changes"]]
+        filtered = request(f"{policy_route}?throughFrame={tail}&change=environment", "Room5")
+        change_frame = environment_rows[0]["frameSequence"]
+        empty = request(f"{policy_route}?throughFrame={change_frame - 1}&change=environment", "Room5")
+        at_change = request(f"{policy_route}?throughFrame={change_frame}&afterFrame={change_frame - 1}&change=environment", "Room5")
+        check(filtered == dict(policy, change="environment", frames=environment_rows)
+              and not empty["frames"] and empty["scannedThroughFrame"] == change_frame - 1
+              and at_change["frames"] == environment_rows[:1],
+              "Environment-only pages retain the exact saved transition and compare a cursor with its predecessor")
+        request(f"{policy_route}?throughFrame={tail}&change=invalid", expected=400)
+        request(f"{policy_route}?throughFrame={tail}&change=enemy-roster", expected=400)
+        request(f"{policy_route}?throughFrame={tail}&change=environment", "Room1", 403)
+        check(True, "Policy kind lookup rejects invalid filters and retains recording permissions")
         request(f"{policy_route}?throughFrame={tail}&afterFrame=-1", expected=400)
         request(f"{policy_route}?throughFrame={tail + 1}", expected=404)
         request(f"{policy_route}?throughFrame={tail}", "Room1", 403)

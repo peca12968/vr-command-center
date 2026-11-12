@@ -12,7 +12,18 @@ function matchesRoster(value, elapsed, roomId, roster) {
     && enemies.filter(enemy => enemy.health > 0).length === roster.alive;
 }
 
+function matchesPolicy(value, roomId, policy) {
+  const packet = value?.packet, frame = packet?.frame;
+  if (!frame) return false;
+  const local = roomId === null ? null : frame.roomEnemyPolicies?.find(row => row.roomId === roomId);
+  return (frame.phase ?? 'Preparing') === policy.phase && (packet.weather ?? 'Clear') === policy.weather
+    && (frame.night ?? false) === policy.night && (packet.lightning ?? false) === policy.lightning
+    && (local?.behavior ?? frame.behavior ?? 'Hold') === policy.behavior
+    && (local?.autoAttack ?? frame.autoAttack ?? false) === policy.autoAttack;
+}
+
 export function mountWorldPolicyFrames(response, jump) {
+  const filter = document.getElementById('world-policy-change');
   const start = document.getElementById('world-policy-start');
   const here = document.getElementById('world-policy-here');
   const next = document.getElementById('world-policy-next');
@@ -22,13 +33,15 @@ export function mountWorldPolicyFrames(response, jump) {
 
   function controls() {
     const idle = scope?.idle && !pending;
+    filter.disabled = !scope?.idle;
     start.disabled = here.disabled = !idle;
     next.disabled = !idle || cursor == null;
     for (const button of results.querySelectorAll('button')) button.disabled = !idle;
   }
 
   function update(value) {
-    const key = value ? JSON.stringify([value.sessionId, value.streamId, value.throughFrame, value.room]) : '';
+    if (!value) filter.value = '';
+    const key = value ? JSON.stringify([value.sessionId, value.streamId, value.throughFrame, value.room, filter.value]) : '';
     const changed = key !== scopeKey;
     scope = value;
     if (pending && (changed || !scope?.idle)) {
@@ -50,6 +63,7 @@ export function mountWorldPolicyFrames(response, jump) {
     if (!scope?.idle || pending) return;
     const { sessionId, streamId, throughFrame, room } = scope;
     const roomId = room === 'all' ? null : Number(room);
+    const changeKind = filter.value || null;
     const request = new AbortController(), requestedGeneration = generation;
     pending = request;
     controls();
@@ -58,11 +72,12 @@ export function mountWorldPolicyFrames(response, jump) {
       const signal = AbortSignal.any([request.signal, AbortSignal.timeout(8000)]);
       const query = new URLSearchParams({ afterFrame, throughFrame, includeEnemyRoster: 'true' });
       if (roomId !== null) query.set('roomId', String(roomId));
+      if (changeKind !== null) query.set('change', changeKind);
       const value = await (await response(`/api/sessions/${sessionId}/world/policy-frames?${query}`, signal)).json();
       if (pending !== request) return;
       const end = value.scannedThroughFrame;
       if (value.sessionId !== sessionId || value.streamId !== streamId || value.throughFrame !== throughFrame || value.afterFrame !== afterFrame
-          || value.includeEnemyRoster !== true || (value.roomId ?? null) !== roomId
+          || value.includeEnemyRoster !== true || (value.roomId ?? null) !== roomId || (value.change ?? null) !== changeKind
           || !Number.isSafeInteger(end) || end <= afterFrame || end > Math.min(throughFrame, afterFrame + 1024)
           || value.nextAfterFrame !== (end < throughFrame ? end : null) || !Array.isArray(value.frames) || value.frames.length > 24)
         throw new Error('錄製範圍不符。');
@@ -70,7 +85,7 @@ export function mountWorldPolicyFrames(response, jump) {
       const rows = value.frames.map(({ frameSequence, elapsedMilliseconds, policy, changes, enemyRoster }) => {
         if (!Number.isSafeInteger(frameSequence) || frameSequence <= previous || frameSequence > end
             || !Number.isSafeInteger(elapsedMilliseconds) || elapsedMilliseconds < 0 || !Array.isArray(changes) || changes.length === 0
-            || changes.some(change => !Object.hasOwn(changeNames, change)) || !policy
+            || changes.some(change => !Object.hasOwn(changeNames, change)) || (changeKind !== null && !changes.includes(changeKind)) || !policy
             || !Object.hasOwn(phaseNames, policy.phase) || !Object.hasOwn(weatherNames, policy.weather) || !Object.hasOwn(behaviorNames, policy.behavior)
             || [policy.night, policy.lightning, policy.autoAttack].some(value => typeof value !== 'boolean')) throw new Error('設定畫格不符。');
         const { enemyIds, alive, added, removed } = enemyRoster ?? {};
@@ -87,7 +102,7 @@ export function mountWorldPolicyFrames(response, jump) {
         button.dataset.frameSequence = String(frameSequence);
         button.textContent = `第 ${frameSequence} 格 · ${(elapsedMilliseconds / 1000).toFixed(2)} 秒 · ${changes.map(change => changeNames[change]).join('、')}`;
         button.addEventListener('click', () => jump(frameSequence, () => generation === requestedGeneration,
-          frame => matchesRoster(frame, elapsedMilliseconds, roomId, enemyRoster)));
+          frame => matchesPolicy(frame, roomId, policy) && matchesRoster(frame, elapsedMilliseconds, roomId, enemyRoster)));
         const summary = document.createElement('span');
         summary.className = 'hint';
         const rosterSummary = `${roomId === null ? '全場' : `房間 ${roomId}`} · 在場 ${enemyIds.length}／存活 ${alive}`
@@ -106,6 +121,7 @@ export function mountWorldPolicyFrames(response, jump) {
     }
   }
 
+  filter.addEventListener('change', () => update(scope));
   start.addEventListener('click', () => read(0));
   here.addEventListener('click', () => read(scope.frameSequence - 1));
   next.addEventListener('click', () => read(cursor));

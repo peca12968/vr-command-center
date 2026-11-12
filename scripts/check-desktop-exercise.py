@@ -517,21 +517,26 @@ def check_policy_frames(v, entry, rows):
         raise ValueError('Operator policy changes are missing from the original native replay')
     through = rows[-1]['packet']['sequence']
     stream = entry['sealed']['world']['header']['streamId']
-    found = []
-    pages = []
-    cursor = 0
-    while cursor < through:
-        page = v.request(f'/api/sessions/{entry["id"]}/world/policy-frames?throughFrame={through}&afterFrame={cursor}')
-        end = page['scannedThroughFrame']
-        if (page['sessionId'], page['streamId'], page['throughFrame'], page['afterFrame'], page['nextAfterFrame']) != (
-                entry['id'], stream, through, cursor, end if end < through else None) or not cursor < end <= min(through, cursor + 1024):
-            raise ValueError('Policy page left the original native recording or saved boundary')
-        found.extend(page['frames'])
-        pages.append(page)
-        cursor = end
-    if found != expected:
+    def read_pages(change=None):
+        found, pages, cursor = [], [], 0
+        suffix = f'&change={change}' if change else ''
+        while cursor < through:
+            page = v.request(f'/api/sessions/{entry["id"]}/world/policy-frames?throughFrame={through}&afterFrame={cursor}{suffix}')
+            end = page['scannedThroughFrame']
+            if (page['sessionId'], page['streamId'], page['throughFrame'], page['afterFrame'], page['nextAfterFrame'], page.get('change')) != (
+                    entry['id'], stream, through, cursor, end if end < through else None, change) or not cursor < end <= min(through, cursor + 1024):
+                raise ValueError('Policy page left the original native recording or saved boundary')
+            found.extend(page['frames'])
+            pages.append(page)
+            cursor = end
+        return found, pages
+
+    found, pages = read_pages()
+    environment, environment_pages = read_pages('environment')
+    if found != expected or environment != [row for row in expected if 'environment' in row['changes']]:
         raise ValueError('Policy timeline differs from the original complete native replay')
-    v.save(entry['name']+'-policy-frames.json', {'complete': True, 'pages': pages, 'matchedFrames': len(found)})
+    v.save(entry['name']+'-policy-frames.json', {'complete': True, 'pages': pages, 'matchedFrames': len(found),
+                                               'environmentPages': environment_pages, 'matchedEnvironmentFrames': len(environment)})
 
 
 def replay(v,entry,pause):

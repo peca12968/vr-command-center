@@ -10,13 +10,14 @@ public record WorldPolicyFrame(long FrameSequence, long ElapsedMilliseconds, Rec
 public record WorldPolicyPage(string SessionId, string StreamId, long ThroughFrame, long AfterFrame,
     long ScannedThroughFrame, long? NextAfterFrame, IReadOnlyList<WorldPolicyFrame> Frames,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IncludeEnemyRoster = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? RoomId = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? RoomId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Change = null);
 
 public sealed partial class WorldRecordings
 {
     private sealed record EnemyRosterState(string[] EnemyIds, int Alive);
 
-    public WorldPolicyPage PolicyFrames(Guid id, long after, long through, bool includeEnemyRoster, int? roomId,
+    public WorldPolicyPage PolicyFrames(Guid id, long after, long through, bool includeEnemyRoster, int? roomId, string? change,
         OperatorIdentity actor, CancellationToken cancellation)
     {
         var info = Info(id, actor);
@@ -26,6 +27,9 @@ public sealed partial class WorldRecordings
             throw new KeyNotFoundException("No saved world frame with this sequence.");
         if (roomId.HasValue && (!includeEnemyRoster || !info.Header.roomIds.Contains(roomId.Value)))
             throw new ArgumentException("Select a room within this recording when including enemy rosters.");
+        if (change is not (null or "initial" or "phase" or "environment" or "enemies" or "enemy-roster")
+            || (change == "enemy-roster" && !includeEnemyRoster))
+            throw new ArgumentException("Use a recorded policy change kind. Enemy roster changes require includeEnemyRoster.");
 
         var frames = new List<WorldPolicyFrame>();
         var scanned = after;
@@ -61,10 +65,13 @@ public sealed partial class WorldRecordings
                             if (policy.Behavior != previous.Behavior || policy.AutoAttack != previous.AutoAttack) changes.Add("enemies");
                             if (rosterChanged) changes.Add("enemy-roster");
                         }
-                        var observation = roster is null ? null : new WorldPolicyEnemyRoster(roster.EnemyIds, roster.Alive,
-                            rosterChanged ? roster.EnemyIds.Except(previousRoster!.EnemyIds).Count() : 0,
-                            rosterChanged ? previousRoster!.EnemyIds.Except(roster.EnemyIds).Count() : 0);
-                        frames.Add(new(scanned, candidate.Elapsed, policy, changes.ToArray(), observation));
+                        if (change is null || changes.Contains(change))
+                        {
+                            var observation = roster is null ? null : new WorldPolicyEnemyRoster(roster.EnemyIds, roster.Alive,
+                                rosterChanged ? roster.EnemyIds.Except(previousRoster!.EnemyIds).Count() : 0,
+                                rosterChanged ? previousRoster!.EnemyIds.Except(roster.EnemyIds).Count() : 0);
+                            frames.Add(new(scanned, candidate.Elapsed, policy, changes.ToArray(), observation));
+                        }
                     }
                 }
                 previous = policy;
@@ -73,7 +80,7 @@ public sealed partial class WorldRecordings
             }
         }
         return new(info.Header.sessionId, info.Header.streamId, through, after, scanned, scanned < through ? scanned : null,
-            frames, includeEnemyRoster ? true : null, roomId);
+            frames, includeEnemyRoster ? true : null, roomId, change);
     }
 
     private List<(long Sequence, long Elapsed, RecordedWorldPolicy Policy, string? Roster)> ReadPolicies(Guid id,

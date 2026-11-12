@@ -1,6 +1,10 @@
+const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { spawn } = require('node:child_process');
+const { execFile, spawn } = require('node:child_process');
+const { promisify } = require('node:util');
+
+const execute = promisify(execFile);
 
 module.exports = async function environmentBrowser({ page, api, tokens, directory, root, base, screenshots, check }) {
   const previousSessions = new Set((await api('/world-recordings')).map(row => row.header.sessionId));
@@ -154,6 +158,65 @@ module.exports = async function environmentBrowser({ page, api, tokens, director
     await page.locator('#tab-operations').click();
     check(await results.getByRole('button').count() === 0 && await page.locator('#world-policy-start').isDisabled(),
       'Leaving the replay clears the policy results and disables archived jumps');
+
+    const changedRecording = path.join(directory, 'environment-policy-change.ndjson');
+    const { stdout } = await execute('dotnet', [relay, '--recording', changedRecording, '--base-url', base, '--key-file', keys,
+      '--demo-room', '4', '--seconds', '1'], { cwd: root, windowsHide: true, timeout: 30000 });
+    const changed = JSON.parse(stdout);
+    assert.equal(changed.complete, true);
+    const changedFrames = (await fs.readFile(changedRecording, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+      .filter(row => row.type === 'frame').map(row => row.payload);
+    const storm = changedFrames.find(row => row.weather === 'Storm');
+    assert(storm?.frame.night && storm.lightning);
+    await page.locator('#tab-world').click();
+    await page.locator('#world-refresh').click();
+    await page.locator('#world-recording').selectOption(changed.sessionId);
+    await page.locator('#world-replay').click();
+    await page.waitForFunction(() => !document.querySelector('#world-policy-start').disabled);
+    await page.locator('#world-room').selectOption('4');
+    await page.locator('#world-camera').selectOption('top');
+    const filter = page.locator('#world-policy-change');
+    const policyStatus = page.locator('#world-policy-status');
+    await filter.selectOption('environment');
+    await page.locator('#world-policy-start').click();
+    const savedStorm = results.locator(`[data-frame-sequence="${storm.sequence}"]`);
+    await savedStorm.waitFor();
+    check(await results.getByRole('button').count() === 1 && (await results.innerText()).includes('暴風雨／夜晚／閃電開啟'),
+      'The environment filter finds the original saved storm without the initial state or phase changes');
+    await results.screenshot({ path: path.join(screenshots, 'world-policy-environment-only.png') });
+
+    const previousFrame = await canvas.getAttribute('data-sequence');
+    await page.route(`**/world/frames/${storm.sequence}`, async route => {
+      const response = await route.fetch();
+      const json = await response.json();
+      json.packet.lightning = false;
+      await route.fulfill({ response, json });
+    }, { times: 1 });
+    await savedStorm.click();
+    await page.locator('#world-frame-message').filter({ hasText: '讀取快照失敗' }).waitFor();
+    check(await canvas.getAttribute('data-sequence') === previousFrame && await page.locator('#world-camera').inputValue() === 'top',
+      'A frame with mismatched lightning leaves the displayed snapshot and camera unchanged');
+    await savedStorm.click();
+    await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${storm.sequence} 格` }).waitFor();
+    check(await canvas.getAttribute('data-sequence') === String(storm.sequence) && await page.locator('#world-room').inputValue() === '4',
+      'The matching environment frame opens in the original selected room');
+
+    await filter.selectOption('phase');
+    check(await results.getByRole('button').count() === 0 && await page.locator('#world-policy-next').isDisabled(),
+      'Changing the policy kind clears the previous results and cursor');
+    await page.route('**/world/policy-frames?*change=phase', async route => {
+      const response = await route.fetch();
+      const json = await response.json();
+      json.change = 'environment';
+      await route.fulfill({ response, json });
+    }, { times: 1 });
+    await page.locator('#world-policy-start').click();
+    await policyStatus.filter({ hasText: '無法查閱設定切換' }).waitFor();
+    check(await results.getByRole('button').count() === 0, 'The browser refuses a policy page for a different requested kind');
+    await page.locator('#world-policy-start').click();
+    await results.getByRole('button').last().waitFor();
+    check(await results.getByRole('button').count() === 3 && (await results.getByRole('button').allTextContents()).every(text => text.includes('場次階段')),
+      'The phase filter independently returns the original Begin, Pause and End transitions');
   } finally {
     if (child.exitCode === null && child.signalCode === null) { child.kill(); await finished; }
   }
