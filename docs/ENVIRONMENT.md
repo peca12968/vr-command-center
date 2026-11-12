@@ -26,6 +26,8 @@ Windows 管理包 0.31.35 起，主控可在五房總覽的「全館即時環境
 
 保存全館環境紀錄的管理資料庫須由 0.31.35 或更新的管理包開啟。
 
+在管理包 0.31.153 的回放中，暫停後選取「設定種類」的「環境變更」，可查閱目前錄製內保存的天氣、日夜或閃電切換。即使後續有更新的環境指令，仍可依原錄製回看先前的變更。 [回放操作](WORLD_RECORDING.md#查閱錄製中的設定切換)
+
 ## 聲光與回放
 
 需求 5 的顯示來源為同一份 C# 9／.NET Standard 2.1 `EnvironmentPresentation`。Unity 有雨線網格、霧、日夜光照、閃電及兩個 AudioSource 的接入來源；瀏覽器觀戰／持久世界回放已有實際 Chromium／Web Audio 驗證。後續真正 Unity 已通過整個工程匯入／編譯、Shader／AudioImporter、NGO、34 項 EditMode、Windows 及 Quest APK；五房 PC 已執行各自環境，完整 GPU／聲音聽感與頭盔仍待驗。下方保留初版 v0.16 診斷歷史，最新範圍以 PROGRESS／DESKTOP_VENUE 為準。

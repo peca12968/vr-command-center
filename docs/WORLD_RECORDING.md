@@ -134,9 +134,13 @@ v0.16 新增 `environmentVersion:1`，依保存的 tick／環境重現雨、日�
 
 從 0.31.96 起，清單另依目前觀看的房間或全場顯示在場、存活、增援與撤除人數。敵軍識別碼加入或離開名單時會列出變更。敵軍被擊倒後若仍在名單，反映在存活人數。點選清單的一格時，控制台會核對保存畫格的名單和存活人數，然後保留房間與視角跳到該時刻。
 
+管理包 0.31.153 可在「設定種類」選取「環境變更」，再從第一格或目前格查閱。也可單獨選場次階段、敵軍策略、敵軍增減或首格狀態。更換種類會清除上一組結果與查閱位置。點選結果時會核對該格的階段、天氣、日夜、閃電、有效敵軍策略與名單，確認後保留目前房間及鏡頭並跳轉。
+
 清單比較相鄰的已保存畫格。若兩格之間曾有多次變更，清單顯示下一個實際保存的狀態。未封存的回放依本次固定尾端查閱。換房、換場、切頁或登出時會清除結果。
 
 唯讀端點 `GET /api/sessions/{id}/world/policy-frames` 需要 `throughFrame`，可用 `afterFrame` 指定不包含的游標。每頁最多查閱 1,024 格並回傳最多 24 格，`nextAfterFrame` 非空時可繼續。傳入 `includeEnemyRoster=true` 可取得名單與變動量，並可用 `roomId` 指定錄製涵蓋的房間。權限沿用原錄製。原生設定變更可用 `scripts/check-desktop-exercise.py --operator-controls --check-policy-frames` 核對，原生增撤援可用 `scripts/check-server-package.py --check-live-reinforcement` 核對。
+
+選填 `change` 可只回傳符合 `initial`、`phase`、`environment`、`enemies` 或 `enemy-roster` 的原畫格。`enemy-roster` 需搭配 `includeEnemyRoster=true`。回應會回傳使用的種類。若這一頁沒有符合的畫格，仍可依 `nextAfterFrame` 繼續查閱原保存範圍。
 
 ### 重看指定片段
 

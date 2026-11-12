@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 依設定種類查閱回放畫格
+
+- 管理包 0.31.153 可在暫停回放中依環境、場次階段、敵軍策略、敵軍增減或首格狀態查閱原保存畫格。點選結果時，控制台核對原設定與名單再跳轉。來源與解壓包各通過 31 項瀏覽器專項，涵蓋篩選出原暴風雨畫格、錯誤的閃電設定保留原畫面，以及更換種類時清除原清單與游標。 [操作說明](WORLD_RECORDING.md#查閱錄製中的設定切換) · [原畫格結果](../artifacts/console-policy-filter-153-package/world-policy-environment-only.png)
+- Windows 0.50.7 同機通過 36 項。獨立及合併各 25 個模擬玩家端，六場各經歷暴風雨夜晚與濃霧白天。篩選回傳的 12 格逐一對上 2,862 格完整回放中的原時間與設定。六場封存保留 6 份 CSV 及 50 筆伺服器戰績回條。程序停止後，原生與管理 C／F 快照分別有 165、18 個非資料庫檔案一致。 [驗證摘要](../artifacts/replay-policy-filter-0.31.153-validation.json)
+- 解壓核對 564 筆清單。133 項世界串流、825 項 HTTP 及 107 項管理包檢查通過。離線核對沿用 Windows 與 Quest 0.50.7 和 Windows 玩家啟動器 1.13。功能來源 `fa9dc4c` 已推送，GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商硬體仍待驗收。 [管理包](WINDOWS_CONTROL_PACKAGE.md) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43286292835)
+
 ## 2026-11-13 開場前核對五房保存環境
 
 - 管理包 0.31.152 在各房任務選項、配置檔預覽、建立確認及已確認的五房建立結果顯示初始天氣、日夜與閃電。來源與解壓包各通過 69 項 Chromium 專項，涵蓋歷史與目前版本並排、保存環境欄位不符的回覆拒絕，以及原保存環境與場次目前環境不同時的回條顯示。 [操作方式](MISSION_VERSIONS.md#逐房指定任務版本) · [配置檔預覽](../artifacts/console-mission-climate-152-package/venue-mission-file-review.png)
