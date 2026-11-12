@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-13 `VRCommand-ControlServer-0.31.156-venue-score-summary-win-x64.zip` 為 53,111,552 bytes，SHA-256 `9c8a5a8abcf62033deb947a920371a83beb71c2c60a092c31d28199794b36637`。全館收尾可下載各房及全批戰績合計。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.156-venue-score-summary-win-x64.zip) · [分房戰績](REPORTS.md#在全館收尾比較分房戰績)
+
 2026-11-13 `VRCommand-ControlServer-0.31.155-live-policy-review-win-x64.zip` 為 53,108,899 bytes，SHA-256 `b5d486ad995368641b4c8140f2ee89f7e62d52cb3bbe583ece565a4dfc83d6c9`。即時觀戰可定位最近的保存設定，並返回同場最新快照。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.155-live-policy-review-win-x64.zip) · [操作方式](WORLD_RECORDING.md#從即時觀戰定位最近設定)
 
 2026-11-13 `VRCommand-ControlServer-0.31.154-replay-policy-neighbor-win-x64.zip` 為 53,107,857 bytes，SHA-256 `d0742333206c63707d3b086c4ff31bf04b96b3001fd33a11866e81c32e536614`。回放可從目前畫格向前或向後跳到符合種類的最近原設定。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.154-replay-policy-neighbor-win-x64.zip) · [操作方式](WORLD_RECORDING.md#查閱錄製中的設定切換)
