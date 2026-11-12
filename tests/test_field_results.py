@@ -2172,6 +2172,52 @@ class FieldResultsTests(unittest.TestCase):
             self.assertEqual(5, report['udpSourcePreflightsVerified'])
             self.assertEqual(25, report['serverAcknowledgements'])
             self.assertFalse(report['physicalHostsVerified'])
+            plan = {'version': 4, 'topology': 'Independent', 'controlInstance': 'fixture/control-instance.json', 'servers': []}
+            preview = {'schemaVersion': 1, 'status': 'venue-checked', 'complete': True, 'topology': 'Independent', 'servers': []}
+            for index, entry in enumerate(manifest['sessions'], 1):
+                archive = root / entry['evidenceZip']
+                session, statistics, endpoint = field.management_zip(archive)
+                session['mission']['id'] = id_for(100 + index)
+                with zipfile.ZipFile(archive, 'w') as bundle:
+                    for name, value in [('session.json', session), ('statistics.json', statistics), ('endpoint.json', endpoint)]:
+                        bundle.writestr(name, json.dumps(value))
+                plan.update(address=endpoint['address'], listenAddress=endpoint['address'])
+                plan['servers'].append({'sessionId': session['id'], 'missionId': session['mission']['id'],
+                                        'roomIds': [index], 'sessionSequence': 5, 'port': endpoint['port']})
+                preview['servers'].append({**plan['servers'][-1], 'address': endpoint['address'], 'listenAddress': endpoint['address']})
+            plan_path = batch_folder / 'launch.json'
+            preview_path = batch_folder / 'preview.json'
+
+            def save_binding():
+                plan_path.write_text(json.dumps(plan), encoding='utf-8')
+                preview_path.write_text(json.dumps(preview), encoding='utf-8')
+                checked = field.compare_udp_launch_documents(field.read_udp_launcher_document(plan_path, preview=False),
+                                                             field.read_udp_launcher_document(preview_path, preview=True))
+                bound = dict(batch, scope='venue-udp-preflight-only',
+                             launchBinding={'plan': plan_path.name, 'preview': preview_path.name, **checked},
+                             launcherPreview={'sha256': checked['previewSha256'], 'complete': True})
+                batch_path.write_text(json.dumps(bound), encoding='utf-8')
+
+            save_binding()
+            self.assertEqual(5, field.verify_venue(path)['udpSourcePreflightsVerified'])
+            preview_path.write_bytes(preview_path.read_bytes() + b'\n')
+            with self.assertRaisesRegex(field.EvidenceError, 'differs from the UDP readiness proof'):
+                field.verify_venue(path)
+            original_session = plan['servers'][-1]['sessionId']
+            plan['servers'][-1]['sessionId'] = preview['servers'][-1]['sessionId'] = id_for(999)
+            save_binding()
+            with self.assertRaisesRegex(field.EvidenceError, 'sessions differ from the original sealed batch'):
+                field.verify_venue(path)
+            plan['servers'][-1]['sessionId'] = preview['servers'][-1]['sessionId'] = original_session
+            for key, altered in [('port', 17777), ('missionId', id_for(998)), ('sessionSequence', 999)]:
+                with self.subTest(sealed_binding=key):
+                    original_value = plan['servers'][-1][key]
+                    plan['servers'][-1][key] = preview['servers'][-1][key] = altered
+                    save_binding()
+                    with self.assertRaisesRegex(field.EvidenceError, 'does not match the sealed mission and game binding'):
+                        field.verify_venue(path)
+                    plan['servers'][-1][key] = preview['servers'][-1][key] = original_value
+            batch_path.write_text(json.dumps(batch), encoding='utf-8')
             entry = manifest['sessions'][0]
             entry['udpPreflight'] = groups[0]['udpSourcePreflights'][0]
             path.write_text(json.dumps(manifest), encoding='utf-8')

@@ -624,12 +624,16 @@ def main():
             pairs.append({'listener': suffix + '-lan-listener.ndjson', 'probe': suffix + '-lan-probe.json'})
         manifest = out / (label + '-udp-pairs.json')
         manifest.write_text(json.dumps({'version': 1, 'pairs': pairs}), encoding='utf-8')
+        original_plan = out / (label + '-udp-original-launch-plan.json')
+        shutil.copyfile(plan_path, original_plan)
 
         def run(preview_path, suffix):
             report = out / (label + suffix + '.json')
             result = subprocess.run([sys.executable, str(ROOT / 'scripts/check-venue-udp-preflight.py'),
                 '--network-plan', str(network), '--pairs', str(manifest), '--launcher-preview', str(preview_path),
-                '--output', str(report)], capture_output=True, encoding='utf-8', timeout=75)
+                '--launch-plan', str(original_plan), '--output', str(report)], capture_output=True, encoding='utf-8', timeout=75)
+            if not report.is_file():
+                raise RuntimeError(f'{label}{suffix} produced no readiness report (exit {result.returncode}): {result.stderr.strip()}')
             return result, read(report)
 
         changed = read(plan_path)
@@ -645,11 +649,22 @@ def main():
               and not rejected['launcherPreview']['complete']
               and rejected['launcherPreview']['groups'][-1] == {'roomIds': endpoints[-1]['roomIds'], 'issues': ['port-mismatch']},
               label + ' original UDP reports cannot pass with a changed last launcher port')
+        substituted = read(preview)
+        substituted['servers'][-1]['sessionId'] = str(uuid.uuid4())
+        stale = out / (label + '-udp-wrong-session-preview.json')
+        stale.write_text(json.dumps(substituted), encoding='utf-8')
+        result, rejected = run(stale, '-udp-rejected-session')
+        check(result.returncode == 1 and not rejected['complete'] and rejected['verifiedSources'] == len(values)
+              and rejected['launcherPreview']['complete'] and not rejected['launchBinding']['complete']
+              and rejected['launchBinding']['groups'][-1] == {'roomIds': endpoints[-1]['roomIds'], 'issues': ['session-mismatch']},
+              label + ' matching UDP addresses and ports cannot authorize a preview of another session')
         result, readiness = run(preview, '-udp-readiness')
         check(result.returncode == 0 and readiness['complete'] and readiness['verifiedSources'] == len(values)
               and readiness['launcherPreview']['sha256'] == hashlib.sha256(preview.read_bytes()).hexdigest()
-              and all(not group['issues'] for group in readiness['launcherPreview']['groups']),
-              label + ' readiness matches every original launcher preview binding and preserves its digest')
+              and readiness['launchBinding']['planSha256'] == hashlib.sha256(original_plan.read_bytes()).hexdigest()
+              and readiness['launchBinding']['previewSha256'] == readiness['launcherPreview']['sha256']
+              and all(not group['issues'] for group in readiness['launchBinding']['groups']),
+              label + ' readiness matches the original launch plan and preview for every room group')
         return pairs
 
     def launch(state,label, *, listen_address=None, verify_layout=True):
@@ -962,6 +977,10 @@ def main():
                 check([row['sessionSequence'] for row in result['servers']]==[state['sequence'] for state in states],
                       'Existing v2 plans still preview the exact revisions with the guarded packages')
         else:
+            if args.check_venue_udp_readiness:
+                plan['version']=4
+                plan['servers']=[{**row,'sessionSequence':state['sequence'],'missionId':state['mission']['id']}
+                                 for row,state in zip(plan['servers'],states,strict=True)]
             plan_file.write_text(json.dumps(dict(plan,servers=list(reversed(plan['servers'])))),encoding='utf-8')
         udp_pairs = []
         if args.check_venue_preview:

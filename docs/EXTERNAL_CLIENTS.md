@@ -255,21 +255,22 @@ Windows 與 Quest 混用時，可在啟動遊戲伺服器前先核對報告是�
 
 Quest 批次重試完成後，`--batch` 指向最新完整的報告，並保留各輪原始資料夾供工具核對。 [重試 Quest 預檢](QUEST3.md#重試-quest-udp-預檢席位)
 
-使用 Windows 批次啟動時，也可提供啟動器 `--venue-check` 產生的原成功預覽。在 UDP 監聽工具啟動前或退出後產生預覽，並使用實際要啟動的那份計畫。要將報告交給原封存驗收，啟動計畫的公告 IPv4 和本機綁定 IPv4 都填成網路清單上的同一個具體位址。
+使用 Windows 批次啟動時，可用 `--launch-plan` 和 `--launcher-preview` 同時提供控制台下載的原啟動計畫，以及啟動器 `--venue-check` 產生的成功預覽。在 UDP 監聽工具啟動前或退出後產生預覽，並使用實際要啟動的那份計畫。計畫的公告 IPv4 和本機綁定 IPv4 都填成網路清單上的同一個具體位址。 [下載啟動計畫](WINDOWS_SERVER_PACKAGE.md#依場館計畫批次啟動)
 
 ```powershell
 & .\Launch-Server.exe --venue-check 'C:\VRCommand\venue-plan.json' --report 'C:\VRCommand\venue-preview.json'
 python .\scripts\check-venue-udp-preflight.py `
   --network-plan .\venue-network.json --pairs .\pairs.json `
-  --batch .\quest-a\preflight-report.json --launcher-preview 'C:\VRCommand\venue-preview.json' `
+  --batch .\quest-a\preflight-report.json `
+  --launch-plan 'C:\VRCommand\venue-plan.json' --launcher-preview 'C:\VRCommand\venue-preview.json' `
   --output .\venue-readiness.json
 ```
 
 報告依房間端點列出各來源涵蓋的席位。`missing` 代表還缺一組，`duplicate-pair` 或 `duplicate-exchange` 代表需排除重複報告，`invalid-or-expired` 代表原雙端報告不符或已超過 30 分鐘。`unmatchedPairs` 和 `unreadablePairs` 分別計算不在本次計畫內及無法讀取的組數。補齊後使用新的輸出檔重跑。所有來源通過且沒有多餘或無法讀取的報告時，程式以 `0` 結束。
 
-指定 `--launcher-preview` 後，預覽的模式、房間、UDP 埠、公告 IPv4 與本機綁定 IPv4 也須全部相符。`launcherPreview.groups` 會標出哪個房間端點不符，即使各席的雙端報告本身有效，整體仍回報未完成。報告會保存原預覽檔的 SHA-256。修正後請對實際要用的計畫重新產生預覽並核對。
+指定 `--launcher-preview` 後，預覽的模式、房間、UDP 埠、公告 IPv4 與本機綁定 IPv4 須符合網路清單。若也提供原計畫，`launchBinding.groups` 會逐房核對場次 ID、任務版本 ID、場次序號與端點。任一欄位不符時，即使雙端 UDP 報告已通過，整體仍回報未完成。計畫及預覽均記錄路徑及 SHA-256。場次修改後，請重新下載啟動計畫並產生同一份計畫的預覽。舊版只提供 `--launcher-preview` 的命令仍可核對端點。
 
-可將完整報告的路徑填入封存驗收清單的 `udpPreflightBatch`。原雙端報告須一併保留。結束後，驗收工具會用遊戲伺服器實際綁定時間與已確認的玩家來源重驗每組。`network` 為 `same-host` 的結果只代表同機 UDP，跨機連線與頭盔仍須現場測試。
+可將完整報告的路徑填入封存驗收清單的 `udpPreflightBatch`。請保留原雙端報告，以及 `launchBinding` 所引用的原計畫和預覽，並維持檔案間的路徑。結束後，驗收工具會用遊戲伺服器實際綁定時間與已確認的玩家來源重驗每組，並比對原計畫與封存的場次、任務版本及端點。若透過 `--batch` 重新納入含 `launchBinding` 的報告，須再次提供相同的計畫和預覽。`network` 為 `same-host` 的結果代表同機 UDP，跨機連線與頭盔仍須現場測試。
 
 ### 核對封存戰績與 UDP 來源
 

@@ -126,6 +126,27 @@ class LanPreflightTests(unittest.TestCase):
         accepted = self.venue_check(plan, 'with-preview.json', '--batch', self.root / 'readiness.json', '--launcher-preview', preview)
         self.assertEqual({'sha256': hashlib.sha256(preview.read_bytes()).hexdigest(), 'complete': True,
                           'topologyMatches': True, 'groups': [{'roomIds': rooms, 'issues': []}]}, accepted['launcherPreview'])
+        guarded = {**launch_row, 'missionId': '00000000-0000-4000-8000-000000000071', 'sessionSequence': 7}
+        original = self.venue_json('guarded-plan.json', {'version': 4, 'topology': 'Linked', 'controlInstance': 'fixture/control-instance.json',
+            'address': LOOPBACK, 'listenAddress': LOOPBACK,
+            'servers': [{key: value for key, value in guarded.items() if key not in ('address', 'listenAddress')}]})
+        guarded_preview = self.venue_json('guarded-preview.json', {**launch, 'servers': [guarded]})
+        bound = self.venue_check(plan, 'bound.json', '--batch', self.root / 'readiness.json',
+                                 '--launcher-preview', guarded_preview, '--launch-plan', original)
+        self.assertEqual({'plan': original.name, 'preview': guarded_preview.name, 'complete': True, 'mode': 'Linked',
+                          'planSha256': hashlib.sha256(original.read_bytes()).hexdigest(),
+                          'previewSha256': hashlib.sha256(guarded_preview.read_bytes()).hexdigest(),
+                          'groups': [{'roomIds': rooms, 'issues': []}]}, bound['launchBinding'])
+        again = self.venue_check(plan, 'rechecked.json', '--batch', self.root / 'bound.json',
+                                 '--launcher-preview', guarded_preview, '--launch-plan', original)
+        self.assertEqual(bound['launchBinding'], again['launchBinding'])
+        outdated = self.venue_json('outdated-preview.json', {**launch, 'servers': [dict(guarded,
+            sessionId='00000000-0000-4000-8000-000000000072', missionId='00000000-0000-4000-8000-000000000073', sessionSequence=6)]})
+        refused = self.venue_check(plan, 'outdated.json', '--batch', self.root / 'readiness.json',
+                                   '--launcher-preview', outdated, '--launch-plan', original, status=1)
+        self.assertTrue(refused['launcherPreview']['complete'])
+        self.assertEqual(2, refused['verifiedSources'])
+        self.assertEqual(['session-mismatch', 'mission-mismatch', 'session-sequence-mismatch'], refused['launchBinding']['groups'][0]['issues'])
         launch_row.update(address='127.0.0.3', listenAddress='0.0.0.0')
         different = self.venue_json('different-preview.json', launch)
         mismatched = self.venue_check(plan, 'mismatched.json', '--batch', self.root / 'readiness.json',

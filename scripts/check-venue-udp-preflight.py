@@ -4,7 +4,6 @@ import argparse
 import codecs
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
-import hashlib
 import importlib.util
 import json
 import os
@@ -34,7 +33,7 @@ def path_reference(path, directory):
         return str(path)
 
 
-def load_pairs(pairs_path, batch_paths, mode, rooms):
+def load_pairs(pairs_path, batch_paths, mode, rooms, binding):
     pairs = []
     if pairs_path:
         manifest = field.read_quest_plan_file(pairs_path)
@@ -42,39 +41,18 @@ def load_pairs(pairs_path, batch_paths, mode, rooms):
                       'Expected a version 1 list of report pairs')
         pairs.extend((row, pairs_path.parent, None) for row in manifest['pairs'])
     for path in batch_paths:
-        for group, rows in field.read_udp_preflight_batch(path, mode, rooms).items():
+        sources, launch = field.read_udp_preflight_batch(path, mode, rooms)
+        if launch is not None:
+            field.require(binding is not None and all(binding[key] == launch[0][key] for key in ('planSha256', 'previewSha256')),
+                          'Reuse the original Windows plan and preview when including a bound UDP report')
+        for group, rows in sources.items():
             pairs.extend((row, base, group) for row, base in rows)
     field.require(len(pairs) <= 50, 'Too many UDP preflight reports')
     return pairs
 
 
-def check_launcher_preview(path, mode, endpoints):
-    with path.open('rb') as stream:
-        raw = stream.read(field.MAX_QUEST_PLAN_BYTES + 1)
-    field.require(len(raw) <= field.MAX_QUEST_PLAN_BYTES, 'Launcher preview is too large')
-    preview = field.read_json(raw.decode('utf-8-sig'))
-    field.require(type(preview) is dict and field.integer(preview['schemaVersion'], 1, 1) == 1
-                  and preview['status'] == 'venue-checked' and preview['complete'] is True,
-                  'Provide the original successful Windows launcher preview')
-    topology, servers = preview['topology'], preview['servers']
-    field.require(topology in ('Independent', 'Linked'), 'Invalid launcher topology')
-    rooms = {field.QUEST_ROOMS} if topology == 'Linked' else {(room,) for room in field.QUEST_ROOMS}
-    field.require(type(servers) is list and len(servers) == len(rooms), 'Incomplete launcher preview')
-    bindings, sessions = {}, set()
-    for row in servers:
-        field.require(type(row) is dict and type(row['sessionId']) is str and type(row['roomIds']) is list
-                      and all(type(room) is int for room in row['roomIds']), 'Invalid launcher room group')
-        group = tuple(row['roomIds'])
-        session = field.identity(row['sessionId'])
-        field.require(group in rooms and group not in bindings and session not in sessions, 'Repeated launcher room or session')
-        address = field.quest_network_address(row['address'])
-        listen = row['listenAddress']
-        if listen != '0.0.0.0':
-            listen = field.quest_network_address(listen)
-        bindings[group] = address, listen, field.integer(row['port'], 1024, 65535)
-        sessions.add(session)
-    field.require(len({port for _, _, port in bindings.values()}) == len(bindings), 'Repeated launcher port')
-
+def check_launcher_preview(preview, mode, endpoints):
+    digest, topology, bindings = preview
     groups = []
     for group in sorted(endpoints.keys() | bindings.keys()):
         if group not in bindings:
@@ -83,21 +61,29 @@ def check_launcher_preview(path, mode, endpoints):
             issues = ['unexpected-launch-endpoint']
         else:
             address, port = endpoints[group]
-            advertised, listen, launch_port = bindings[group]
+            binding = bindings[group]
             issues = [name for matches, name in (
-                (port == launch_port, 'port-mismatch'),
-                (address == advertised, 'advertised-address-mismatch'),
-                (address == listen, 'listen-address-mismatch'),
+                (port == binding['port'], 'port-mismatch'),
+                (address == binding['address'], 'advertised-address-mismatch'),
+                (address == binding['listenAddress'], 'listen-address-mismatch'),
             ) if not matches]
         groups.append({'roomIds': list(group), 'issues': issues})
-    return {'sha256': hashlib.sha256(raw).hexdigest(), 'complete': topology == mode and not any(row['issues'] for row in groups),
+    return {'sha256': digest, 'complete': topology == mode and not any(row['issues'] for row in groups),
             'topologyMatches': topology == mode, 'groups': groups}
 
 
-def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None):
+def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, launch_plan=None):
     mode, endpoints, sources = field.read_quest_network_plan(plan, allow_shared_sources=True)
     field.require({room for room, _ in sources} == set(field.QUEST_ROOMS), 'Plan a source for every room')
-    launch_check = check_launcher_preview(launcher_preview, mode, endpoints) if launcher_preview else None
+    field.require(launch_plan is None or launcher_preview is not None, 'A launch plan requires its original launcher preview')
+    preview = field.read_udp_launcher_document(launcher_preview, preview=True) if launcher_preview else None
+    launch_check = check_launcher_preview(preview, mode, endpoints) if preview else None
+    binding = None
+    if launch_plan:
+        planned = field.read_udp_launcher_document(launch_plan, preview=False)
+        binding = {'plan': path_reference(launch_plan.resolve(), output.parent),
+                   'preview': path_reference(launcher_preview.resolve(), output.parent),
+                   **field.compare_udp_launch_documents(planned, preview)}
     rooms = sorted(endpoints)
     room_groups = {room: group for group in rooms for room in group}
     expected = defaultdict(list)
@@ -110,7 +96,7 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None):
     observed = defaultdict(list)
     path_counts = Counter()
     unmatched = unreadable = 0
-    for pair, base, declared_group in load_pairs(pairs_path, batch_paths, mode, [list(group) for group in rooms]):
+    for pair, base, declared_group in load_pairs(pairs_path, batch_paths, mode, [list(group) for group in rooms], binding):
         try:
             field.require(type(pair) is dict and set(pair) == {'listener', 'probe'}
                           and all(type(value) is str and value for value in pair.values()), 'Invalid UDP report paths')
@@ -162,14 +148,15 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None):
         groups.append(result)
 
     complete = (not (unmatched or unreadable) and all(group['complete'] for group in groups)
-                and (launch_check is None or launch_check['complete']))
+                and (launch_check is None or launch_check['complete']) and (binding is None or binding['complete']))
     return {'version': 1, 'scope': 'venue-udp-preflight-only', 'mode': mode,
             'network': 'same-host' if True in address_modes else 'private-lan-plan',
             'complete': complete,
             'checkedAtUtc': checked_at, 'expectedSources': len(expected),
             'verifiedSources': sum(row['status'] == 'verified' for row in results.values()),
             'unmatchedPairs': unmatched, 'unreadablePairs': unreadable, 'groups': groups,
-            **({'launcherPreview': launch_check} if launch_check is not None else {})}
+            **({'launcherPreview': launch_check} if launch_check is not None else {}),
+            **({'launchBinding': binding} if binding is not None else {})}
 
 
 def main():
@@ -178,13 +165,14 @@ def main():
     parser.add_argument('--pairs', type=Path, help='Version 1 JSON list of original listener and probe report paths')
     parser.add_argument('--batch', type=Path, action='append', default=[], help='Original completed UDP batch report')
     parser.add_argument('--launcher-preview', type=Path, help='Original successful Launch-Server.exe --venue-check report')
+    parser.add_argument('--launch-plan', type=Path, help='Original revision-guarded Windows launch plan for the provided preview')
     parser.add_argument('--output', required=True, type=Path, help='New readiness report (also usable for sealed verification)')
     args = parser.parse_args()
     if len(args.batch) > 25:
         parser.error('At most 25 existing batch reports are supported.')
     try:
         field.require(not args.output.exists(), 'Use a new output file')
-        result = check_venue(args.network_plan, args.pairs, args.batch, args.output.resolve(), args.launcher_preview)
+        result = check_venue(args.network_plan, args.pairs, args.batch, args.output.resolve(), args.launcher_preview, args.launch_plan)
         with args.output.open('x', encoding='utf-8', newline='\n') as stream:
             json.dump(result, stream, indent=2)
             stream.write('\n')
@@ -193,6 +181,8 @@ def main():
     summary = {key: result[key] for key in ('complete', 'expectedSources', 'verifiedSources', 'unmatchedPairs', 'unreadablePairs')}
     if 'launcherPreview' in result:
         summary['launcherPreviewMatches'] = result['launcherPreview']['complete']
+    if 'launchBinding' in result:
+        summary['launchPlanMatches'] = result['launchBinding']['complete']
     print(json.dumps(summary))
     return 0 if result['complete'] else 1
 
