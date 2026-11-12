@@ -112,7 +112,9 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 `
   -WindowsSeatMap .\windows-seat-map.json -WindowsOutputDirectory 'F:\private\windows-seats'
 ```
 
-工具先向管理服務核對全館 25 份原票券、現行入場及遊戲端點，然後原樣寫出對照表中的 VR 連線檔，例如 `pc-PC-A-room-01-seat-02.json`。選到 Quest 3、MR 房間、重複席位、過期票券或過時名冊時，整批拒絕。成功摘要列出每台電腦的檔名、端點與效期，使用原票券剩餘的有效時間。
+搭配管理包 0.31.148，工具在寫入暫存目錄前及正式交付前各核對一次全館 25 份原票券、現行入場、遊戲端點及近期原來源畫格。核對成功後才一次交付對照表中的原 VR 連線檔，例如 `pc-PC-A-room-01-seat-02.json`。若來源在暫存期間停止更新，工具會指出受影響的房間和席位並移除這批暫存。來源恢復且原票券仍有效時，可用同一份 ZIP 重新執行。
+
+選到 Quest 3、MR 房間、重複席位、過期票券或過時名冊時，整批拒絕。成功摘要列出每台電腦的檔名、端點與效期，並記錄 `liveSourceVerified: true`。純 VR 同機排演可使用 loopback，玩家只能在遊戲伺服器所在電腦使用該目的地。跨機仍須使用場館 LAN 端點。
 
 把每份 JSON 私下交給對應電腦。玩家在該電腦用解壓後的 `Launch-Player.exe --config <該台連線檔> --launch --openxr --wait` 加入。Quest 席位可從同一份原場館 ZIP 使用 Quest 的批次部署流程。 [Windows OpenXR 啟動](WINDOWS_PLAYER_PACKAGE.md#windows-openxr-啟動) · [Quest 席位部署](QUEST3.md#部署指定的-quest-席位)
 
@@ -121,6 +123,8 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 `
 主控可用 `GET /api/vr-deployment/venue` 讀取預覽。向 `POST /api/vr-deployment/venue-bundle` 送出同一預覽的 `topology` 以及五個 `rooms`，每房提供 `roomId`、`sessionId`、公布的 `streamId` 和五筆 `players` 的 `playerId`、`admissionId`。服務以同一份現行場館快照核對所有房間。任何一房不符時回應 409，附對應房號，整批無 ZIP。
 
 管理包 0.31.42 提供 `POST /api/vr-deployment/venue-check`，限主控。請求提供 `topology` 與五筆 `rooms`。每房提供 `roomId`、`sessionId` 及依席位排序的五份 Base64 `connectionFiles`，回傳逐席的票券、端點及現行名冊核對狀態，以及成功席的裝置類型。Quest 部署工具可直接讀取原 ZIP 使用此端點。 [Quest 部署操作](QUEST3.md#直接使用-vr-五房連線-zip)
+
+純 VR Windows 匯出另傳 `requireLiveSource: true` 及 `allowLoopback: true`。後者允許純 VR Windows 同機端點，仍須通過票券、名冊及來源時效核對。Quest 的實機部署依原 LAN 條件檢查。
 
 ## 結束與保存
 

@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-13 `VRCommand-ControlServer-0.31.148-windows-source-gate-win-x64.zip` 為 53,092,123 bytes，SHA-256 `6ff6abe82f062ad9d099feea0138ca9cf956c30c251b67797399235ae3581b04`。支援在 Windows 五房連線檔交付前核對原遊戲來源。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.148-windows-source-gate-win-x64.zip) · [分發方式](EXTERNAL_CLIENTS.md#依電腦分發-windows-vr-連線檔)
+
 2026-11-13 `VRCommand-ControlServer-0.31.147-recording-pages-win-x64.zip` 為 53,091,893 bytes，SHA-256 `98a1a672aed29e91be0c7b569cfc0473426eb5efda2f407b55e679178a554df6`。觀戰清單先顯示最近 30 筆錄製及使用中的來源，可向前載入並從收尾直接回放原場次。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.147-recording-pages-win-x64.zip) · [操作說明](WORLD_RECORDING.md#載入較早錄製)
 
 2026-11-13 `VRCommand-ControlServer-0.31.146-archive-list-win-x64.zip` 為 53,085,046 bytes，SHA-256 `e4e27df2b4c25a134a362c4daa3e57a9d64c3b159cac9e0ecd3699f9b4290d69`。錄製清單改為分批查詢。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.146-archive-list-win-x64.zip) · [錄製說明](WORLD_RECORDING.md#儲存與驗證邊界)

@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-13 Windows 五房連線檔交付前核對遊戲來源
+
+- 管理包 0.31.148 和部署工具在暫存前、正式交付前各核對 25 份原票券、名冊、端點及近期原畫格。舊工具在來源失效對照仍回傳成功。新版在暫存前拒絕，並在暫存完成後收到失效回條時移除 25 個暫存檔，兩次均無交付目錄。54 項部署工具測試通過。 [分發方式](EXTERNAL_CLIENTS.md#依電腦分發-windows-vr-連線檔) · [驗證摘要](../artifacts/windows-source-gate-0.31.148-validation.json)
+- 解壓管理包通過 30 項 Chromium 專項。純 VR Windows loopback 在無原畫格時仍拒絕，接受當前畫格後核對 25 席，Quest 仍要求區網端點。首輪瀏覽器測試的首格時間不為零，伺服器依錄製契約拒絕。更正測試的首格及下一格後通過。 [瀏覽器結果](../artifacts/console-windows-source-gate-148-vr-package/checks.json)
+- Windows 遊戲 0.50.7 同機通過 420 項。獨立與合併各交付 10 份原 VIVE 連線檔並各有 25 個同機模擬玩家端，核對六場雙封存、1,285 格回放、6 份 CSV 及 50 筆戰績回條。另停止原合併伺服器，已簽出的原檔在來源過時後被拒絕匯出。混合 VR／MR 另通過 123 項，交付一份原 Windows VR 連線檔，拒絕 Quest 及 MR 席，五房準備後雙封存共 874 格。原生、混合及管理 C／F 快照分別有 227、49、18 個非資料庫檔案一致。 [原生結果](../artifacts/server-package-checks/run-9beee9fe90184ec5a9cc7328d5444dad/checks.json) · [混合場結果](../artifacts/server-package-checks/run-e31e352826d0474d8352869240417673/checks.json)
+- 解壓核對 564 筆清單，825 項 HTTP 與 107 項管理包檢查通過。離線發行核對使用具原發行回條的 Quest 0.50.7／72 APK，首次指向工作目錄的 APK 因沒有發行回條而拒絕。功能來源 `84586d11` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、實體 MR 與廠商硬體仍待驗收。 [發行核對](../artifacts/windows-source-gate-148-release-package.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43268583573)
+
 ## 2026-11-13 觀戰錄製清單分頁
 
 - 管理包 0.31.147 先顯示最近 30 筆錄製及使用中的來源，操作員可再載入較早場次。131 項串流檢查比對主控與第 1、5 房控制台可見的 268、121、147 筆錄製，逐頁核對順序、權限和游標。261 項 Chromium 專項包含從全館收尾開啟第一頁以外的原錄製、翻頁保留回放，以及合併場觀戰與收尾。 [操作說明](WORLD_RECORDING.md#載入較早錄製) · [驗證摘要](../artifacts/recording-pages-0.31.147-validation.json)
