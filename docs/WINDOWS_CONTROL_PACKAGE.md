@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-13 `VRCommand-ControlServer-0.31.154-replay-policy-neighbor-win-x64.zip` 為 53,107,857 bytes，SHA-256 `d0742333206c63707d3b086c4ff31bf04b96b3001fd33a11866e81c32e536614`。回放可從目前畫格向前或向後跳到符合種類的最近原設定。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.154-replay-policy-neighbor-win-x64.zip) · [操作方式](WORLD_RECORDING.md#查閱錄製中的設定切換)
+
 2026-11-13 `VRCommand-ControlServer-0.31.153-replay-policy-filter-win-x64.zip` 為 53,102,059 bytes，SHA-256 `067d0d7d45bcbdaa65b4bb9c15d3fab6f8136933345f8a164f044d36f340b673`。回放可依設定種類查閱原畫格，跳轉時核對原設定與名單。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.153-replay-policy-filter-win-x64.zip) · [操作方式](WORLD_RECORDING.md#查閱錄製中的設定切換)
 
 2026-11-13 `VRCommand-ControlServer-0.31.152-mission-climate-win-x64.zip` 為 53,100,746 bytes，SHA-256 `b7a5157512f3205ee33b1d02e9888776471e1f3654aa8c855ca89b2c46adf52a`。逐房準備與配置檔預覽顯示原保存版本的初始環境，並在五房建立回覆核對初始環境。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.152-mission-climate-win-x64.zip) · [操作方式](MISSION_VERSIONS.md#逐房指定任務版本)
