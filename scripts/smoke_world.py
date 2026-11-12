@@ -333,7 +333,16 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
               and prev["scannedToFrame"] == following["scannedToFrame"] == change_frame
               and prev["nextFromFrame"] is None and no_repeat["frame"] is None and no_repeat["scannedToFrame"] == 1,
               "Policy neighbors match the original adjacent transition in either direction and exclude the current frame")
+        inclusive = request(f"{policy_neighbor}?throughFrame={change_frame}&change=environment"
+                            f"&direction=previous&includeFrom=true&fromFrame={change_frame}", "Room5")
+        first = request(f"{policy_neighbor}?throughFrame=1&direction=previous&includeFrom=true&fromFrame=1&change=initial", "Room5")
+        check(inclusive["includeFrom"] is True and inclusive["frame"] == environment_rows[0]
+              and inclusive["scannedToFrame"] == change_frame and inclusive["nextFromFrame"] is None
+              and first["frame"] == policy["frames"][0] and first["nextFromFrame"] is None
+              and "includeFrom" not in prev,
+              "Inclusive previous lookup can match the fixed tail or first saved frame without changing the adjacent query")
         request(seek + "&direction=sideways&fromFrame=1", expected=400)
+        request(seek + "&direction=next&fromFrame=1&includeFrom=true", expected=400)
         request(seek + f"&direction=next&fromFrame={tail + 1}", expected=400)
         request(seek + "&direction=next&fromFrame=1", "Room1", 403)
         request(f"{policy_neighbor}?throughFrame={tail + 1}&direction=next&fromFrame=1", expected=404)
@@ -964,6 +973,11 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
               and request(sparse_route + "&change=initial&direction=previous&fromFrame=77")["frame"]["frameSequence"] == 1
               and request(sparse_route + "&change=phase&direction=next&fromFrame=1025")["frame"]["frameSequence"] == 1101,
               "Both policy neighbor directions continue across an empty bounded page and retain the original predecessor")
+        inclusive = request(sparse_route + "&change=initial&direction=previous&fromFrame=1101&includeFrom=true")
+        resumed = request(sparse_route + f"&change=initial&direction=previous&fromFrame={inclusive['nextFromFrame']}")
+        check(inclusive["includeFrom"] and inclusive["frame"] is None and inclusive["scannedToFrame"] == inclusive["nextFromFrame"] == 78
+              and "includeFrom" not in resumed and resumed["frame"]["frameSequence"] == 1,
+              "Live policy lookup includes its anchor once and resumes before the empty page boundary")
         print(f"All {count} world streaming checks passed. No Unity or headset execution.")
     finally:
         if demo is not None and demo.poll() is None:

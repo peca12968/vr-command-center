@@ -52,6 +52,11 @@ def operator_phase(v,entry,environment,behavior):
         return value,distances
     value,distances=v.wait(observed,15,'generated clients plus operator '+behavior)
     witness['applied']=value;witness['enemyMovementMeters']=distances;save()
+    if v.args.check_policy_frames:
+        tail=value['packet']['sequence']
+        witness['liveEnvironmentLookup']=v.request(f'/api/sessions/{entry["id"]}/world/policy-neighbor?throughFrame={tail}'
+            f'&fromFrame={tail}&direction=previous&includeFrom=true&change=environment')
+        save()
     references=entry.setdefault('operatorReferences',{})
     for point in [before,value]:references[point['packet']['sequence']]=point
     validate_roster(v.state(entry),entry['players'])
@@ -546,9 +551,20 @@ def check_policy_frames(v, entry, rows):
                     entry['id'], stream, through, start, direction, 'environment', target['frameSequence'], None, target):
                 raise ValueError('Policy neighbor differs from the original native environment transition')
             neighbors.append(item)
+    live_lookups = []
+    for witness in entry.get('operatorControls', []):
+        item = witness['liveEnvironmentLookup']
+        before, tail = (witness[key]['packet']['sequence'] for key in ('before', 'applied'))
+        target = next(row for row in reversed(environment) if row['frameSequence'] <= tail)
+        if (item['sessionId'], item['streamId'], item['throughFrame'], item['fromFrame'], item['direction'], item.get('includeFrom'),
+                item['change'], item['scannedToFrame'], item['nextFromFrame'], item['frame']) != (
+                entry['id'], stream, tail, tail, 'previous', True, 'environment', target['frameSequence'], None, target) or not (
+                before < target['frameSequence'] <= tail < through and target['policy']['weather'] == witness['environment']['weather']):
+            raise ValueError('Live environment lookup differs from the first saved frame of the original applied change')
+        live_lookups.append(item)
     v.save(entry['name']+'-policy-frames.json', {'complete': True, 'pages': pages, 'matchedFrames': len(found),
                                                'environmentPages': environment_pages, 'matchedEnvironmentFrames': len(environment),
-                                               'environmentNeighbors': neighbors})
+                                               'environmentNeighbors': neighbors, 'liveEnvironmentLookups': live_lookups})
 
 
 def replay(v,entry,pause):

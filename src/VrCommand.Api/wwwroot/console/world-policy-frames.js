@@ -131,12 +131,12 @@ export function mountWorldPolicyFrames(response, jump) {
     }
   }
 
-  async function navigate(direction) {
+  async function navigate(direction, includeCurrent = false) {
     if (!scope?.idle || pending) return;
     const { sessionId, streamId, throughFrame, room, frameSequence } = scope;
     const roomId = room === 'all' ? null : Number(room), changeKind = filter.value || null;
     const reverse = direction === 'previous', limit = reverse ? 1 : throughFrame;
-    if (frameSequence === limit) return;
+    if (frameSequence === limit && !includeCurrent) return;
     const request = new AbortController(), requestedGeneration = generation;
     const signal = AbortSignal.any([request.signal, AbortSignal.timeout(30000)]);
     const query = new URLSearchParams({ throughFrame, direction, includeEnemyRoster: 'true' });
@@ -145,18 +145,21 @@ export function mountWorldPolicyFrames(response, jump) {
     pending = request;
     controls();
     status.textContent = '正在尋找相鄰的設定畫格…';
-    let from = frameSequence;
+    let from = frameSequence, includeFrom = includeCurrent;
     try {
       for (;;) {
         query.set('fromFrame', String(from));
+        if (includeFrom) query.set('includeFrom', 'true');
+        else query.delete('includeFrom');
         const value = await (await response(`/api/sessions/${sessionId}/world/policy-neighbor?${query}`, signal)).json();
         if (pending !== request || scope.frameSequence !== frameSequence) return;
         const scanned = value.scannedToFrame;
-        const boundary = reverse ? Math.max(1, from - 1024) : Math.min(throughFrame, from + 1024);
+        const boundary = reverse ? Math.max(1, from - (includeFrom ? 1023 : 1024)) : Math.min(throughFrame, from + 1024);
         if (value.sessionId !== sessionId || value.streamId !== streamId || value.throughFrame !== throughFrame
             || value.fromFrame !== from || value.direction !== direction || value.includeEnemyRoster !== true
+            || (value.includeFrom ?? false) !== includeFrom
             || value.roomId !== roomId || value.change !== changeKind || !Number.isSafeInteger(scanned)
-            || (reverse ? scanned < boundary || scanned >= from : scanned > boundary || scanned <= from))
+            || (reverse ? scanned < boundary || scanned > (includeFrom ? from : from - 1) : scanned > boundary || scanned <= from))
           throw new Error('回應的設定搜尋範圍不同。');
         if (value.frame !== null) {
           validatePolicyHit(value.frame, changeKind, scanned, scanned);
@@ -172,10 +175,11 @@ export function mountWorldPolicyFrames(response, jump) {
         if (scanned !== boundary || value.nextFromFrame !== (scanned === limit ? null : scanned))
           throw new Error('回應的設定搜尋游標不同。');
         if (scanned === limit) {
-          status.textContent = '保存範圍內沒有其他符合條件的設定畫格。';
+          status.textContent = includeCurrent ? '保存範圍內沒有符合條件的設定畫格。' : '保存範圍內沒有其他符合條件的設定畫格。';
           return;
         }
         from = scanned;
+        includeFrom = false;
       }
     } catch {
       if (pending === request) status.textContent = '尋找設定畫格失敗，請再試一次。';
@@ -184,11 +188,18 @@ export function mountWorldPolicyFrames(response, jump) {
     }
   }
 
+  function fromLatest(change) {
+    if (!scope?.idle) return;
+    filter.value = change;
+    update(scope);
+    return navigate('previous', true);
+  }
+
   filter.addEventListener('change', () => update(scope));
   start.addEventListener('click', () => read(0));
   here.addEventListener('click', () => read(scope.frameSequence - 1));
   next.addEventListener('click', () => read(cursor));
   previousChange.addEventListener('click', () => navigate('previous'));
   nextChange.addEventListener('click', () => navigate('next'));
-  return { update };
+  return { update, fromLatest };
 }

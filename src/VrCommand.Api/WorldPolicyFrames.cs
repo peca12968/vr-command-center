@@ -13,7 +13,8 @@ public record WorldPolicyPage(string SessionId, string StreamId, long ThroughFra
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? RoomId = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Change = null);
 public record WorldPolicyNeighbor(string SessionId, string StreamId, long ThroughFrame, long FromFrame, string Direction,
-    bool IncludeEnemyRoster, int? RoomId, string? Change, long ScannedToFrame, long? NextFromFrame, WorldPolicyFrame? Frame);
+    bool IncludeEnemyRoster, int? RoomId, string? Change, long ScannedToFrame, long? NextFromFrame, WorldPolicyFrame? Frame,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)] bool IncludeFrom = false);
 
 public sealed partial class WorldRecordings
 {
@@ -40,22 +41,23 @@ public sealed partial class WorldRecordings
             frames, includeEnemyRoster ? true : null, roomId, change);
     }
 
-    public WorldPolicyNeighbor PolicyNeighbor(Guid id, long from, long through, string direction, bool includeEnemyRoster,
+    public WorldPolicyNeighbor PolicyNeighbor(Guid id, long from, long through, string direction, bool includeFrom, bool includeEnemyRoster,
         int? roomId, string? change, OperatorIdentity actor, CancellationToken cancellation)
     {
         var info = Info(id, actor);
-        if (from < 1 || from > through || direction is not ("previous" or "next"))
+        if (from < 1 || from > through || direction is not ("previous" or "next") || (includeFrom && direction != "previous"))
             throw new ArgumentException("Use a saved frame within the limit and select previous or next.");
         ValidatePolicyScope(info, through, includeEnemyRoster, roomId, change);
         var reverse = direction == "previous";
         var end = reverse ? 1 : through;
-        var boundary = reverse ? Math.Max(end, from - 1024) : Math.Min(end, from + 1024);
-        foreach (var candidate in ReadPolicyChanges(id, from, boundary, reverse, includeEnemyRoster, roomId, change, cancellation))
+        var cursor = includeFrom ? from + 1 : from;
+        var boundary = reverse ? Math.Max(end, cursor - 1024) : Math.Min(end, cursor + 1024);
+        foreach (var candidate in ReadPolicyChanges(id, cursor, boundary, reverse, includeEnemyRoster, roomId, change, cancellation))
             if (candidate.Match is { } match)
                 return new(info.Header.sessionId, info.Header.streamId, through, from, direction, includeEnemyRoster,
-                    roomId, change, candidate.Sequence, null, match);
+                    roomId, change, candidate.Sequence, null, match, includeFrom);
         return new(info.Header.sessionId, info.Header.streamId, through, from, direction, includeEnemyRoster,
-            roomId, change, boundary, boundary == end ? null : boundary, null);
+            roomId, change, boundary, boundary == end ? null : boundary, null, includeFrom);
     }
 
     private static void ValidatePolicyScope(WorldRecordingInfo info, long through, bool includeEnemyRoster, int? roomId, string? change)

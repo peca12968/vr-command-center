@@ -45,6 +45,50 @@ module.exports = async function environmentBrowser({ page, api, tokens, director
     const rainTick = await canvas.getAttribute('data-weather-tick');
     await page.waitForFunction(tick => document.querySelector('#world-canvas').dataset.weatherTick !== tick, rainTick);
     check(await canvas.getAttribute('data-weather-fog') === '0.02', 'Storm drops and fog advance from received authoritative simulation ticks');
+    const livePolicy = page.locator('#world-live-policy'), liveKind = page.locator('#world-live-policy-kind');
+    const livePolicyStatus = page.locator('#world-policy-status'), resumeLive = page.locator('#world-recent');
+    const fixedRoom = page.locator('#world-room'), viewCamera = page.locator('#world-camera');
+    await fixedRoom.selectOption('4'); await viewCamera.selectOption('top');
+    async function locateLive(change) {
+      await liveKind.selectOption(change);
+      await livePolicy.evaluate(button => button.addEventListener('click', () => {
+        button.dataset.shownFrame = document.querySelector('#world-canvas').dataset.sequence;
+      }, { capture: true, once: true }));
+      const replied = page.waitForResponse(response => {
+        const url = new URL(response.url());
+        return url.pathname.endsWith(`/sessions/${info.header.sessionId}/world/policy-neighbor`)
+          && url.searchParams.get('includeFrom') === 'true' && url.searchParams.get('change') === change;
+      });
+      await livePolicy.click();
+      const result = await (await replied).json();
+      assert.equal(result.throughFrame, Number(await livePolicy.getAttribute('data-shown-frame')));
+      return result;
+    }
+    const latestPhase = await locateLive('phase');
+    const jumpSequence = latestPhase.frame.frameSequence;
+    await livePolicyStatus.filter({ hasText: `已跳到第 ${jumpSequence} 格` }).waitFor();
+    const phaseFrame = await api(`/sessions/${info.header.sessionId}/world/frames/${jumpSequence}`, 'GET', undefined, 'Room4');
+    check(latestPhase.streamId === info.header.streamId && latestPhase.throughFrame === latestPhase.fromFrame
+      && latestPhase.roomId === 4 && latestPhase.direction === 'previous' && latestPhase.frame.changes.includes('phase')
+      && phaseFrame.packet.frame.phase === 'Running' && jumpSequence < latestPhase.throughFrame
+      && await canvas.getAttribute('data-sequence') === String(jumpSequence) && await viewCamera.inputValue() === 'top',
+      'Live policy review jumps from the fixed shown tail to the original running phase in the chosen room and camera');
+    check(await livePolicy.isHidden() && await resumeLive.textContent() === '返回即時觀戰'
+      && await page.locator('#world-policy-change').inputValue() === 'phase' && await fixedRoom.inputValue() === '4',
+      'Live lookup enters a paused review with the selected policy kind and the original room');
+    await resumeLive.click();
+    await page.waitForFunction(tail => Number(document.querySelector('#world-canvas').dataset.sequence) > tail
+      && !document.querySelector('#world-live-policy').disabled, latestPhase.throughFrame);
+    check(await fixedRoom.inputValue() === '4' && await viewCamera.inputValue() === 'top',
+      'Returning to live policy observation receives newer snapshots and preserves room and camera');
+    const missingEnvironment = await locateLive('environment');
+    await livePolicyStatus.filter({ hasText: '沒有符合條件' }).waitFor();
+    check(missingEnvironment.frame === null && missingEnvironment.throughFrame > latestPhase.throughFrame
+      && await canvas.getAttribute('data-sequence') === String(missingEnvironment.throughFrame),
+      'Live lookup with no environment change retains the exact displayed snapshot');
+    await fs.writeFile(path.join(screenshots, 'world-live-policy.json'), JSON.stringify({ latestPhase, missingEnvironment }, null, 2));
+    await resumeLive.click();
+    await livePolicy.waitFor();
     for (const name of ['rain-loop.wav', 'thunder.wav']) {
       const response = await fetch(base + '/console/audio/' + name), served = Buffer.from(await response.arrayBuffer());
       const canonical = await fs.readFile(path.join(root, 'clients/unity/Assets/VrCommand/Audio', name));

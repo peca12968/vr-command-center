@@ -80,9 +80,9 @@ public static class WorldRoutes
             return Results.Json(page, WorldJson.Options);
         });
         app.MapGet("/api/sessions/{id:guid}/world/policy-neighbor", (Guid id, long fromFrame, long throughFrame, string direction,
-            bool? includeEnemyRoster, int? roomId, string? change, WorldRecordings store, HttpContext context) =>
+            bool? includeFrom, bool? includeEnemyRoster, int? roomId, string? change, WorldRecordings store, HttpContext context) =>
         {
-            var result = store.PolicyNeighbor(id, fromFrame, throughFrame, direction, includeEnemyRoster == true, roomId,
+            var result = store.PolicyNeighbor(id, fromFrame, throughFrame, direction, includeFrom == true, includeEnemyRoster == true, roomId,
                 change, Actor(context), context.RequestAborted);
             context.Response.Headers.CacheControl = "no-store";
             return Results.Json(result, WorldJson.Options);
