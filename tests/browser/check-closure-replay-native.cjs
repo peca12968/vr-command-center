@@ -124,6 +124,21 @@ async function main() {
         assert.equal(metrics.fromFrame, from);
         assert.equal(metrics.throughFrame, through);
         assert(metrics.players.some(row => row.hitsReceived > 0) && metrics.players.every(row => row.roomId === roomId));
+        const csvPath = `**/api/sessions/${sessionId}/world/clip-statistics.csv?*`;
+        await page.route(csvPath, async route => {
+          const original = await route.fetch();
+          const bytes = await original.body();
+          const altered = Buffer.from(bytes.toString('utf8').replace(streamId, '00000000-0000-0000-0000-000000000000'));
+          assert(!bytes.equals(altered));
+          await route.fulfill({ response: original, body: altered });
+        }, { times: 1 });
+        const refused = Promise.race([
+          page.waitForEvent('download').then(() => false),
+          page.locator('#world-clip-stats-export-status').filter({ hasText: '無法下載片段戰績' }).waitFor().then(() => true)
+        ]);
+        await page.locator('#world-clip-stats-export').click();
+        assert(await refused, 'A same-type CSV from another stream must not download');
+        assert(await page.locator('#world-clip-stats-results').isVisible());
         const download = page.waitForEvent('download');
         await page.locator('#world-clip-stats-export').click();
         const file = await download;
@@ -131,7 +146,7 @@ async function main() {
         await file.saveAs(target);
         const rows = readCsv(await fs.readFile(target));
         assert(rows.length && rows.every(row => row.reportRoomId === String(roomId) && row.playerRoomId === String(roomId)));
-        clip = { from, through, roomId, rows: rows.length };
+        clip = { from, through, roomId, rows: rows.length, refusedForeignStream: true };
       }
     }
     await fs.writeFile(output, JSON.stringify({ sessionId, streamId, roomId, fromFrame: frames[0].packet.sequence,
