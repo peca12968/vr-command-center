@@ -1669,6 +1669,47 @@ class FieldResultsTests(unittest.TestCase):
             with self.assertRaisesRegex(field.EvidenceError, 'Windows inbox is incomplete'):
                 field.verify_venue(path)
 
+    def test_windows_inbox_rejects_result_mismatches_before_full_verification(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, _ = venue_fixture(root, mode, room_sizes=(1,) * 5)
+                manifest['expectedPlayersPerRoom'] = 1
+                self.add_shared_release(root, manifest, 0)
+                inbox = self.windows_inbox_fixture(root, manifest)
+                path.write_text(json.dumps(inbox), encoding='utf-8')
+                original, _ = field.verify_venue_batch(path, inspect_windows=True)
+                self.assertTrue(original['complete'])
+                target = original['receivedSeats'][0]
+                archive_path = root / inbox['windowsEvidenceDirectory'] / target['file']
+                archive_bytes = archive_path.read_bytes()
+                with zipfile.ZipFile(archive_path) as archive:
+                    player_log = archive.read('player.log').decode('utf-8')
+                    launch = json.loads(archive.read('launch-report.json'))
+
+                for name, value in [('health', 80), ('throughSequence', 8), ('worldSequence', 79), ('finalStreamSequence', 1)]:
+                    with self.subTest(field=name):
+                        old = json.loads(next(line.split('VR_CLIENT_DEBRIEF_FINAL ', 1)[1] for line in player_log.splitlines()
+                                              if line.startswith('VR_CLIENT_DEBRIEF_FINAL ')))
+                        altered = player_log.replace(json.dumps(old), json.dumps({**old, name: value})).encode()
+                        self.assertNotEqual(player_log.encode(), altered)
+                        with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as archive:
+                            archive.writestr('player.log', altered)
+                            archive.writestr('launch-report.json', json.dumps({**launch, 'playerLogSha256': hashlib.sha256(altered).hexdigest()}))
+                        result = subprocess.run([sys.executable, str(SCRIPT), '--venue-manifest', str(path), '--inspect-windows-inbox'],
+                                                capture_output=True)
+                        self.assertEqual(1, result.returncode)
+                        inspection = json.loads(result.stdout)
+                        self.assertFalse(inspection['complete'])
+                        self.assertEqual(4, inspection['receivedWindowsSeats'])
+                        self.assertEqual([{'roomId': target['roomId'], 'seat': target['seat']}], inspection['missingSeats'])
+                        self.assertEqual(target['file'], inspection['issues'][0]['file'])
+                        self.assertIn('differs from the final seals or statistics', inspection['issues'][0]['reason'])
+                        with self.assertRaisesRegex(field.EvidenceError, 'Windows inbox is incomplete'):
+                            field.verify_venue(path)
+                archive_path.write_bytes(archive_bytes)
+                self.assertEqual(original, field.verify_venue_batch(path, inspect_windows=True)[0])
+
     def test_venue_accepts_one_original_batch_launcher_report(self):
         for mode in ('Independent', 'Linked'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:

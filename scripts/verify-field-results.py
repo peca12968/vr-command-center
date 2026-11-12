@@ -808,6 +808,29 @@ def require_terminal_launcher(launcher):
             and integer(launcher['exitCode'], 0, 0) == 0, 'Launcher lacks terminal evidence')
 
 
+def sealed_result_boundary(session, statistics, world, combat, stream_id):
+    header, origin = world['header'], combat['origin']
+    require(world['complete'] is combat['sealed'] is True and statistics['pendingTelemetry'] is False
+            and header['streamId'] == combat['streamId'] == stream_id and header['origin'] == origin
+            and origin in ('Simulation', 'GameServer') and session['combatStream'] == combat,
+            'World and combat seals disagree')
+    through = integer(session['sequence'], 1)
+    require(integer(statistics['throughSequence'], 1) == through, 'Statistics do not match the terminal session sequence')
+    return {'sessionId': session['id'], 'streamId': stream_id, 'origin': origin,
+            'worldSequence': integer(world['acceptedSequence'], 1), 'throughSequence': through,
+            'finalStreamSequence': integer(combat['acceptedSequence'])}
+
+
+def verify_player_terminal_result(result, owner, stats, boundary):
+    room = integer(owner['roomId'], 1, 5)
+    require(integer(result['roomId'], 1, 5) == integer(stats['roomId'], 1, 5) == room
+            and result['admissionId'] == owner['admissionId'], 'Player result admission or room differs')
+    require(integer(result['version'], 1, 1)
+            and all(type(result[key]) is type(value) and result[key] == value for key, value in boundary.items())
+            and scores(result) == scores(stats), 'Player result differs from the final seals or statistics')
+    return room
+
+
 def verify(topology, server_ips, launcher, session, statistics, endpoint, server_log, player_logs, *, quest_player_logs=(),
            world_journal=None, combat_journal=None, room_alignments=None, udp_preflight=None, udp_source_preflights=None,
            verify_player_sources=False, verify_reconnect_history=False):
@@ -851,15 +874,9 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
     started, ended = (datetime.fromisoformat(session[field]) for field in ('startedAtUtc', 'endedAtUtc'))
     require(started.utcoffset() is not None and ended.utcoffset() is not None and started <= ended,
             'Invalid session start or end time')
-    origin = header['origin']
-    require(world['complete'] is combat['sealed'] is True and statistics['pendingTelemetry'] is False
-            and header['streamId'] == combat['streamId'] == stream_id and origin == combat['origin']
-            and origin in ('Simulation', 'GameServer') and session['combatStream'] == combat,
-            'World and combat seals disagree')
-    world_sequence = integer(world['acceptedSequence'], 1)
-    combat_sequence = integer(combat['acceptedSequence'])
-    through = integer(session['sequence'], 1)
-    require(integer(statistics['throughSequence'], 1) == through, 'Statistics do not match the terminal session sequence')
+    boundary = sealed_result_boundary(session, statistics, world, combat, stream_id)
+    origin = boundary['origin']
+    world_sequence, through, combat_sequence = (boundary[key] for key in ('worldSequence', 'throughSequence', 'finalStreamSequence'))
     players = roster(session['players'], 'id', size)
     ledger = roster(statistics['players'], 'playerId', size)
     require(set(players) == set(ledger), 'Final roster and statistics disagree')
@@ -899,17 +916,11 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
             require(owner.get('headset') == 'Quest3' and topology == 'direct-lan' and expected_ip not in server_ips,
                     'Quest logcat requires a Quest 3 admission and its own direct LAN address')
             quest_players += 1
-        room = integer(owner['roomId'], 1, 5)
-        require(room in rooms and integer(result['roomId'], 1, 5) == integer(stats['roomId'], 1, 5) == room
-                and result['admissionId'] == owner['admissionId'], 'Player result admission or room differs')
+        room = verify_player_terminal_result(result, owner, stats, boundary)
+        require(room in rooms, 'Player result admission or room differs')
         if capture_seat is not None:
             require((room, integer(owner['seat'], 0, 4) + 1) == capture_seat,
                     'Quest capture room or seat differs from the original admission')
-        require(integer(result['version'], 1, 1) and result['sessionId'] == session_id
-                and result['streamId'] == stream_id and result['origin'] == origin
-                and integer(result['worldSequence'], 1) == world_sequence and integer(result['throughSequence'], 1) == through
-                and integer(result['finalStreamSequence']) == combat_sequence and scores(result) == scores(stats),
-                'Player result differs from the final seals or statistics')
         if pid is not None and quest_deployments is not None:
             seat = integer(owner['seat'], 0, 4) + 1
             require(quest_deployments.pop((room, seat), None) == (session_id, player_id, owner['admissionId'], port),
@@ -1096,23 +1107,32 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
     files = sorted(path for path in directory.iterdir() if path.suffix.lower() == '.zip' and path.is_file())
     require(len(files) <= 50, 'Windows evidence inbox contains more than 50 ZIPs')
     batches, roster_seats = {}, {}
-    for _, launcher, session, _, endpoint, server_log in inputs:
+    for _, launcher, session, statistics, endpoint, server_log in inputs:
         session_id = identity(session['id'])
         original = expected.get(session_id)
+        require_terminal_launcher(launcher)
         require(original is not None and session_id not in batches and session['state'] == 'Ended'
                 and original['world'] == original['combat'] == 'Sealed'
-                and launcher['status'] == 'sealed-stopped' and launcher['complete'] is endpoint['sessionEnded'] is True
+                and endpoint['sessionEnded'] is True
                 and launcher['sessionId'] == endpoint['sessionId'] == session_id and session['roomIds'] == original['roomIds']
                 and launcher['streamId'] == endpoint['streamId'] == original['replay']['streamId'],
                 'Windows inbox roster or endpoint differs from the original sealed batch')
+        world, combat = launcher['finalWorld'], launcher['finalCombatStream']
+        header = world['header']
+        boundary = sealed_result_boundary(session, statistics, world, combat, launcher['streamId'])
+        require(header['sessionId'] == statistics['sessionId'] == session_id and header['roomIds'] == session['roomIds']
+                and boundary['worldSequence'] == integer(original['replay']['throughSequence'], 1),
+                'Windows inbox statistics or seals differ from the original closure')
         port = integer(endpoint['port'], 1024, 65535)
         peers, acknowledgements, _, _ = server_connections(server_log, port, allow_timeout=True)
-        owners = roster(session['players'], 'id', len(session['roomIds']) * players_per_room)
+        size = len(session['roomIds']) * players_per_room
+        owners, ledger = roster(session['players'], 'id', size), roster(statistics['players'], 'playerId', size)
+        require(owners.keys() == ledger.keys(), 'Final roster and statistics disagree')
         for player_id, owner in owners.items():
             room, seat = integer(owner['roomId'], 1, 5), integer(owner['seat'], 0, 4) + 1
             require(room in original['roomIds'] and (room, seat) not in roster_seats, 'Windows inbox roster repeats or misplaces a seat')
             roster_seats[room, seat] = (session_id, player_id)
-        batches[session_id] = (launcher['streamId'], owners, peers, acknowledgements)
+        batches[session_id] = (boundary, owners, ledger, peers, acknowledgements)
     require(all(sum(seat[0] == room for seat in roster_seats) == players_per_room for room in range(1, 6)),
             'Windows inbox original roster has an unexpected room size')
     if seat_map is not None:
@@ -1126,16 +1146,15 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
             connection, result = client_result(raw_log.decode('utf-8-sig'))
             session_id, player_id = identity(result['sessionId']), identity(result['playerId'])
             require(session_id in batches, 'Player ZIP belongs to another venue batch')
-            stream, owners, peers, acknowledgements = batches[session_id]
+            boundary, owners, ledger, peers, acknowledgements = batches[session_id]
             seat = selected.get((session_id, player_id))
             require(seat is not None, 'Player ZIP does not match an expected Windows seat')
-            require(result['admissionId'] == owners[player_id]['admissionId'] and integer(result['roomId'], 1, 5) == seat[0]
-                    and result['streamId'] == stream, 'Player ZIP admission, room or stream differs from the original roster')
             log_hash, launch = hashlib.sha256(raw_log).hexdigest(), read_json(raw_launch)
             require(raw_metrics is not None or 'linkMetrics' not in launch, 'Player ZIP lacks its recorded Windows link report')
             metrics = verify_windows_link(log_hash, connection, launch, raw_metrics, link_criteria) if raw_metrics is not None else None
             verify_windows_release(log_hash, launch, windows_hash, has_link_metrics=raw_metrics is not None)
             require(connection in acknowledgements, 'Player ZIP lacks an original server acknowledgement')
+            verify_player_terminal_result(result, owners[player_id], ledger[player_id], boundary)
             require(seat not in received and (session_id, connection) not in connections, 'Player ZIP repeats a seat or acknowledged connection')
             address, _ = peer_address(peers[connection])
         except EvidenceError as error:
