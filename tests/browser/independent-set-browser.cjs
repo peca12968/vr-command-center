@@ -302,9 +302,15 @@ module.exports = async function independentSetBrowser({ context, api, tokens, ba
       && row.cells.join('|') === (row.missionId === head ? `房間 ${index + 1}|${draft.name} · 第 2 版|VR · 600 秒|${rain}|${initialEnemies}|${mixed.sessions[index].id}`
         : `房間 ${index + 1}|${alternateDraft.name} · 第 1 版|MR · 420 秒|${storm}|${alternateEnemies}|${mixed.sessions[index].id}`)),
       'The confirmed receipt retains the saved environment and enemies even if the live settings in the response differ');
-    await page.setViewportSize({ width: 390, height: 844 });
-    check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'The receipt keeps its table scroll inside the mobile viewport');
     await receipt.screenshot({ path: path.join(screenshots, 'independent-mixed-receipt.png') });
+    await page.setViewportSize({ width: 390, height: 844 });
+    const scroll = receipt.locator('.table-scroll');
+    check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)
+      && await scroll.evaluate(panel => panel.scrollWidth > panel.clientWidth
+        && panel.querySelector('td:nth-child(5)').getBoundingClientRect().width >= 90),
+      'The mobile receipt scrolls within its panel and keeps enough width for the saved enemy column');
+    await scroll.evaluate(panel => { panel.scrollLeft = panel.scrollWidth; });
+    await receipt.screenshot({ path: path.join(screenshots, 'independent-mixed-receipt-mobile.png') });
     await page.locator('#logout').click();
     check(await receipt.evaluate(node => node.hidden) && (await receiptRows()).length === 0
       && await overview.isHidden() && await overview.locator('svg, [data-mission-id], [data-status]').count() === 0
