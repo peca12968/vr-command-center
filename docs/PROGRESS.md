@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 合併下載場館驗收與全員回條
+
+- 管理包 0.31.158 在所選原收尾批次提供「下載驗收 ZIP 與全員回條」。資料齊備及名冊全數確認後，ZIP 會保留原封存內容並內附 `debrief-receipts.json`。離線清單產生器及驗收工具可直接使用。 [收尾操作](SESSION_CLOSURE.md#下載驗收-zip-與全員回條)
+- 1,101 項核心、825 項 HTTP、138 項世界串流、108 項離線封存與 113 項 Node 測試通過。來源與解壓版各通過 127 項場館瀏覽器檢查，下載內容逐位元核對。Windows 可攜管理包通過 107 項檢查。既有 Windows 同機六批重新封裝後驗證 80 筆原回條，摘要與原紀錄一致。 [管理包](WINDOWS_CONTROL_PACKAGE.md) · [驗證紀錄](../artifacts/venue-field-receipts-158-validation.json)
+- 首次完整 Chromium 回歸在混合場開場等待回應逾時，保留原紀錄。同一版本重跑通過 1,067 項。功能來源 `3e70369` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43315987891)
+
 ## 2026-11-13 統一六場追蹤及遊戲射擊驗收
 
 - 5、10、25 人的獨立與合併驗收可在總清單一次指定全體追蹤與每席封存射擊。兩項皆啟用時，逐批核對同一段共同執行區間。各批有更長時間門檻時沿用其設定。 [操作方式](EXTERNAL_CLIENTS.md#統一核對追蹤及遊戲射擊)
