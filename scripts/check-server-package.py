@@ -4657,7 +4657,7 @@ def main():
                               for field, outcome in (('replies', 'Reply'), ('timeouts', 'Timeout'), ('interrupted', 'Interrupted'))}
                     check(preview == {'processId': measured['nativePid'], 'metricsSha256': control.sha(measured['linkMetrics']), **counts}
                           and sum(counts.values()) == 30 and metrics['complete'] is True
-                          and request('/api/sessions/' + measured['sessionId'])['phase'] == 'Running'
+                          and request('/api/sessions/' + measured['sessionId'])['state'] == 'Running'
                           and measured['process'].poll() is None,
                           'shipped graphical form displays the original link outcomes before End while the game is running')
             if args.check_venue_openxr:verify_venue_openxr(entries,round_clients,linked)
