@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 從 Windows 玩家視窗啟用連線量測
+
+- Windows 玩家啟動器 1.13 可在核對發行報告後勾選本次連線量測。遊戲關閉後從紀錄資料夾取出驗收 ZIP，下一場恢復未勾選。44 項解壓包啟動器檢查及 20 項 WinForms 發行核對通過，包括已核對的發行報告變更時清除量測選擇及拒絕啟動。解壓清單 331 個檔案中，329 個與 1.12 雜湊相同。 [操作方式](WINDOWS_PLAYER_PACKAGE.md#依場館發行報告核對玩家包) · [視窗畫面](../artifacts/player-link-form-1.13-layout.png)
+- 516 項 Windows 同機整合通過。獨立及合併各 25 個模擬玩家端，其中各一席透過 WinForms 啟動實際圖形玩家、收到戰績並正常關窗。兩份圖形席位 ZIP 均逐檔核對原始資料，並納入兩批共 50 份原 ZIP 的收件與封存驗收。1,500 筆量測皆取得回覆。六場雙封存共 3,695 格回放、6 份 CSV 及 50 筆伺服器戰績回條。程序停止後，C／F 快照 378 個非資料庫檔案一致。 [驗證摘要](../artifacts/player-link-form-1.13-validation.json)
+- 首輪驗收腳本在逐房回放讀完後才發出圖形玩家關窗指令，晚於該測試的期限。修正驗收腳本在收到原最終戰績及結束斷線後關窗，使用同一份 1.13 玩家包重新驗證。功能來源 `fc5bad7` 與測試修正 `db4ded8` 已推送，兩次 GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商硬體仍待驗收。 [首輪紀錄](../artifacts/player-link-form-1.13-native.log) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43281125222)
+
 ## 2026-11-13 Windows 玩家驗收 ZIP 納入連線量測
 
 - Windows 玩家啟動器 1.12 可將同一次的原始連線量測、玩家日誌與退出報告放入驗收 ZIP。主控收件時依原入場、程序、最後連線與伺服器戰績回條核對。Windows 玩家包通過 42 項啟動器檢查及 331 筆解壓清單核對，其中 329 個檔案與 1.11 雜湊相同。 [收件流程](EXTERNAL_CLIENTS.md#收集-windows-玩家驗收-zip) · [玩家包](WINDOWS_PLAYER_PACKAGE.md)

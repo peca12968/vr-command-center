@@ -611,7 +611,9 @@ python scripts/verify-field-results.py --venue-stages .\stages.json
 
 工具直接讀取 ZIP 內原日誌與退出報告。每席可使用 ZIP 或分開的 `log`、`launcherReport`，同一批可混用不同格式。 [玩家端操作](WINDOWS_PLAYER_PACKAGE.md#依場館發行報告核對玩家包)
 
-Windows 啟動器 1.12 可將原量測一併加入驗收 ZIP。需要量測的場次，每個 Windows 席位均使用獨立的新路徑。保留任務執行至每席 30 筆量測結案，再由主控結束任務。
+需要量測時，Windows 啟動器 1.13 的玩家在視窗核對本次場館發行報告後，勾選「記錄本次連線量測」再開始遊戲。保留任務執行至每席 30 筆量測結案，再由主控結束任務。玩家收到最終戰績並關閉遊戲後，從本次紀錄資料夾交回 ZIP。
+
+啟動器 1.12 或更新版本也可從命令列匯出原量測。每個 Windows 席位均使用獨立的新路徑。
 
 ```powershell
 & .\Launch-Player.exe --config '.\room-01-seat-01.json' --launch --wait `
