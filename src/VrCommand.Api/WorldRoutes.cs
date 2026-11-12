@@ -79,6 +79,14 @@ public static class WorldRoutes
             context.Response.Headers.CacheControl = "no-store";
             return Results.Json(page, WorldJson.Options);
         });
+        app.MapGet("/api/sessions/{id:guid}/world/policy-neighbor", (Guid id, long fromFrame, long throughFrame, string direction,
+            bool? includeEnemyRoster, int? roomId, string? change, WorldRecordings store, HttpContext context) =>
+        {
+            var result = store.PolicyNeighbor(id, fromFrame, throughFrame, direction, includeEnemyRoster == true, roomId,
+                change, Actor(context), context.RequestAborted);
+            context.Response.Headers.CacheControl = "no-store";
+            return Results.Json(result, WorldJson.Options);
+        });
         app.MapGet("/api/sessions/{id:guid}/world/event-frames", (Guid id, long throughFrame, long? afterFrame, int? roomId,
             string? kind, Guid? playerId, int? observerRoomId, WorldRecordings store, HttpContext context) =>
         {

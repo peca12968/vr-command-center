@@ -22,11 +22,27 @@ function matchesPolicy(value, roomId, policy) {
     && (local?.autoAttack ?? frame.autoAttack ?? false) === policy.autoAttack;
 }
 
+function validatePolicyHit({ frameSequence, elapsedMilliseconds, policy, changes, enemyRoster }, changeKind, lower, upper) {
+  if (!Number.isSafeInteger(frameSequence) || frameSequence < lower || frameSequence > upper
+      || !Number.isSafeInteger(elapsedMilliseconds) || elapsedMilliseconds < 0 || !Array.isArray(changes) || changes.length === 0
+      || changes.some(change => !Object.hasOwn(changeNames, change)) || (changeKind !== null && !changes.includes(changeKind)) || !policy
+      || !Object.hasOwn(phaseNames, policy.phase) || !Object.hasOwn(weatherNames, policy.weather) || !Object.hasOwn(behaviorNames, policy.behavior)
+      || [policy.night, policy.lightning, policy.autoAttack].some(value => typeof value !== 'boolean')) throw new Error('設定畫格不符。');
+  const { enemyIds, alive, added, removed } = enemyRoster ?? {};
+  if (!Array.isArray(enemyIds) || enemyIds.length > 100 || enemyIds.some((id, index) => typeof id !== 'string'
+      || !enemyId.test(id) || (index > 0 && enemyIds[index - 1] >= id))
+    || [alive, added, removed].some(count => !Number.isSafeInteger(count) || count < 0 || count > 100)
+    || alive > enemyIds.length || added > enemyIds.length || changes.includes('enemy-roster') !== (added + removed > 0))
+    throw new Error('敵軍快照不符。');
+}
+
 export function mountWorldPolicyFrames(response, jump) {
   const filter = document.getElementById('world-policy-change');
   const start = document.getElementById('world-policy-start');
   const here = document.getElementById('world-policy-here');
   const next = document.getElementById('world-policy-next');
+  const previousChange = document.getElementById('world-policy-previous-change');
+  const nextChange = document.getElementById('world-policy-next-change');
   const results = document.getElementById('world-policy-results');
   const status = document.getElementById('world-policy-status');
   let scope, scopeKey = '', generation = 0, cursor, pending;
@@ -36,6 +52,8 @@ export function mountWorldPolicyFrames(response, jump) {
     filter.disabled = !scope?.idle;
     start.disabled = here.disabled = !idle;
     next.disabled = !idle || cursor == null;
+    previousChange.disabled = !idle || scope.frameSequence <= 1;
+    nextChange.disabled = !idle || scope.frameSequence >= scope.throughFrame;
     for (const button of results.querySelectorAll('button')) button.disabled = !idle;
   }
 
@@ -82,18 +100,10 @@ export function mountWorldPolicyFrames(response, jump) {
           || value.nextAfterFrame !== (end < throughFrame ? end : null) || !Array.isArray(value.frames) || value.frames.length > 24)
         throw new Error('錄製範圍不符。');
       let previous = afterFrame;
-      const rows = value.frames.map(({ frameSequence, elapsedMilliseconds, policy, changes, enemyRoster }) => {
-        if (!Number.isSafeInteger(frameSequence) || frameSequence <= previous || frameSequence > end
-            || !Number.isSafeInteger(elapsedMilliseconds) || elapsedMilliseconds < 0 || !Array.isArray(changes) || changes.length === 0
-            || changes.some(change => !Object.hasOwn(changeNames, change)) || (changeKind !== null && !changes.includes(changeKind)) || !policy
-            || !Object.hasOwn(phaseNames, policy.phase) || !Object.hasOwn(weatherNames, policy.weather) || !Object.hasOwn(behaviorNames, policy.behavior)
-            || [policy.night, policy.lightning, policy.autoAttack].some(value => typeof value !== 'boolean')) throw new Error('設定畫格不符。');
-        const { enemyIds, alive, added, removed } = enemyRoster ?? {};
-        if (!Array.isArray(enemyIds) || enemyIds.length > 100 || enemyIds.some((id, index) => typeof id !== 'string'
-            || !enemyId.test(id) || (index > 0 && enemyIds[index - 1] >= id))
-          || [alive, added, removed].some(count => !Number.isSafeInteger(count) || count < 0 || count > 100)
-          || alive > enemyIds.length || added > enemyIds.length || changes.includes('enemy-roster') !== (added + removed > 0))
-          throw new Error('敵軍快照不符。');
+      const rows = value.frames.map(hit => {
+        validatePolicyHit(hit, changeKind, previous + 1, end);
+        const { frameSequence, elapsedMilliseconds, policy, changes, enemyRoster } = hit;
+        const { enemyIds, alive, added, removed } = enemyRoster;
         previous = frameSequence;
         const row = document.createElement('li');
         const button = document.createElement('button');
@@ -121,9 +131,64 @@ export function mountWorldPolicyFrames(response, jump) {
     }
   }
 
+  async function navigate(direction) {
+    if (!scope?.idle || pending) return;
+    const { sessionId, streamId, throughFrame, room, frameSequence } = scope;
+    const roomId = room === 'all' ? null : Number(room), changeKind = filter.value || null;
+    const reverse = direction === 'previous', limit = reverse ? 1 : throughFrame;
+    if (frameSequence === limit) return;
+    const request = new AbortController(), requestedGeneration = generation;
+    const signal = AbortSignal.any([request.signal, AbortSignal.timeout(30000)]);
+    const query = new URLSearchParams({ throughFrame, direction, includeEnemyRoster: 'true' });
+    if (roomId !== null) query.set('roomId', String(roomId));
+    if (changeKind !== null) query.set('change', changeKind);
+    pending = request;
+    controls();
+    status.textContent = '正在尋找相鄰的設定畫格…';
+    let from = frameSequence;
+    try {
+      for (;;) {
+        query.set('fromFrame', String(from));
+        const value = await (await response(`/api/sessions/${sessionId}/world/policy-neighbor?${query}`, signal)).json();
+        if (pending !== request || scope.frameSequence !== frameSequence) return;
+        const scanned = value.scannedToFrame;
+        const boundary = reverse ? Math.max(1, from - 1024) : Math.min(throughFrame, from + 1024);
+        if (value.sessionId !== sessionId || value.streamId !== streamId || value.throughFrame !== throughFrame
+            || value.fromFrame !== from || value.direction !== direction || value.includeEnemyRoster !== true
+            || value.roomId !== roomId || value.change !== changeKind || !Number.isSafeInteger(scanned)
+            || (reverse ? scanned < boundary || scanned >= from : scanned > boundary || scanned <= from))
+          throw new Error('回應的設定搜尋範圍不同。');
+        if (value.frame !== null) {
+          validatePolicyHit(value.frame, changeKind, scanned, scanned);
+          if (value.nextFromFrame !== null) throw new Error('回應的設定搜尋游標不同。');
+          const { elapsedMilliseconds, policy, enemyRoster } = value.frame;
+          pending = null;
+          const jumped = await jump(scanned, () => generation === requestedGeneration && scope?.frameSequence === frameSequence,
+            frame => matchesPolicy(frame, roomId, policy) && matchesRoster(frame, elapsedMilliseconds, roomId, enemyRoster));
+          if (generation === requestedGeneration && !pending && scope?.frameSequence === (jumped ? scanned : frameSequence))
+            status.textContent = jumped ? `已跳到第 ${scanned} 格。` : '讀取設定畫格失敗，請再試一次。';
+          return;
+        }
+        if (scanned !== boundary || value.nextFromFrame !== (scanned === limit ? null : scanned))
+          throw new Error('回應的設定搜尋游標不同。');
+        if (scanned === limit) {
+          status.textContent = '保存範圍內沒有其他符合條件的設定畫格。';
+          return;
+        }
+        from = scanned;
+      }
+    } catch {
+      if (pending === request) status.textContent = '尋找設定畫格失敗，請再試一次。';
+    } finally {
+      if (pending === request) { pending = null; controls(); }
+    }
+  }
+
   filter.addEventListener('change', () => update(scope));
   start.addEventListener('click', () => read(0));
   here.addEventListener('click', () => read(scope.frameSequence - 1));
   next.addEventListener('click', () => read(cursor));
+  previousChange.addEventListener('click', () => navigate('previous'));
+  nextChange.addEventListener('click', () => navigate('next'));
   return { update };
 }

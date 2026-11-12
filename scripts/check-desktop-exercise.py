@@ -535,8 +535,20 @@ def check_policy_frames(v, entry, rows):
     environment, environment_pages = read_pages('environment')
     if found != expected or environment != [row for row in expected if 'environment' in row['changes']]:
         raise ValueError('Policy timeline differs from the original complete native replay')
+    neighbors = []
+    for first, second in zip(environment, environment[1:]):
+        for direction, anchor, target in (('next', first, second), ('previous', second, first)):
+            start = anchor['frameSequence']
+            item = v.request(f'/api/sessions/{entry["id"]}/world/policy-neighbor?throughFrame={through}&change=environment'
+                             f'&fromFrame={start}&direction={direction}')
+            if (item['sessionId'], item['streamId'], item['throughFrame'], item['fromFrame'], item['direction'], item['change'],
+                    item['scannedToFrame'], item['nextFromFrame'], item['frame']) != (
+                    entry['id'], stream, through, start, direction, 'environment', target['frameSequence'], None, target):
+                raise ValueError('Policy neighbor differs from the original native environment transition')
+            neighbors.append(item)
     v.save(entry['name']+'-policy-frames.json', {'complete': True, 'pages': pages, 'matchedFrames': len(found),
-                                               'environmentPages': environment_pages, 'matchedEnvironmentFrames': len(environment)})
+                                               'environmentPages': environment_pages, 'matchedEnvironmentFrames': len(environment),
+                                               'environmentNeighbors': neighbors})
 
 
 def replay(v,entry,pause):

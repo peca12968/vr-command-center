@@ -12,10 +12,13 @@ public record WorldPolicyPage(string SessionId, string StreamId, long ThroughFra
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] bool? IncludeEnemyRoster = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? RoomId = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Change = null);
+public record WorldPolicyNeighbor(string SessionId, string StreamId, long ThroughFrame, long FromFrame, string Direction,
+    bool IncludeEnemyRoster, int? RoomId, string? Change, long ScannedToFrame, long? NextFromFrame, WorldPolicyFrame? Frame);
 
 public sealed partial class WorldRecordings
 {
     private sealed record EnemyRosterState(string[] EnemyIds, int Alive);
+    private sealed record PolicySample(long Sequence, long Elapsed, RecordedWorldPolicy Policy, EnemyRosterState? Roster);
 
     public WorldPolicyPage PolicyFrames(Guid id, long after, long through, bool includeEnemyRoster, int? roomId, string? change,
         OperatorIdentity actor, CancellationToken cancellation)
@@ -23,6 +26,40 @@ public sealed partial class WorldRecordings
         var info = Info(id, actor);
         if (after < 0 || through < 1 || after > through)
             throw new ArgumentException("Use a positive saved frame limit and a cursor within that limit.");
+        ValidatePolicyScope(info, through, includeEnemyRoster, roomId, change);
+        var frames = new List<WorldPolicyFrame>();
+        var scanned = after;
+        foreach (var candidate in ReadPolicyChanges(id, after, Math.Min(through, after + 1024), false, includeEnemyRoster, roomId, change, cancellation))
+        {
+            scanned = candidate.Sequence;
+            if (candidate.Match is not { } match) continue;
+            frames.Add(match);
+            if (frames.Count == 24) break;
+        }
+        return new(info.Header.sessionId, info.Header.streamId, through, after, scanned, scanned < through ? scanned : null,
+            frames, includeEnemyRoster ? true : null, roomId, change);
+    }
+
+    public WorldPolicyNeighbor PolicyNeighbor(Guid id, long from, long through, string direction, bool includeEnemyRoster,
+        int? roomId, string? change, OperatorIdentity actor, CancellationToken cancellation)
+    {
+        var info = Info(id, actor);
+        if (from < 1 || from > through || direction is not ("previous" or "next"))
+            throw new ArgumentException("Use a saved frame within the limit and select previous or next.");
+        ValidatePolicyScope(info, through, includeEnemyRoster, roomId, change);
+        var reverse = direction == "previous";
+        var end = reverse ? 1 : through;
+        var boundary = reverse ? Math.Max(end, from - 1024) : Math.Min(end, from + 1024);
+        foreach (var candidate in ReadPolicyChanges(id, from, boundary, reverse, includeEnemyRoster, roomId, change, cancellation))
+            if (candidate.Match is { } match)
+                return new(info.Header.sessionId, info.Header.streamId, through, from, direction, includeEnemyRoster,
+                    roomId, change, candidate.Sequence, null, match);
+        return new(info.Header.sessionId, info.Header.streamId, through, from, direction, includeEnemyRoster,
+            roomId, change, boundary, boundary == end ? null : boundary, null);
+    }
+
+    private static void ValidatePolicyScope(WorldRecordingInfo info, long through, bool includeEnemyRoster, int? roomId, string? change)
+    {
         if (through > info.AcceptedSequence)
             throw new KeyNotFoundException("No saved world frame with this sequence.");
         if (roomId.HasValue && (!includeEnemyRoster || !info.Header.roomIds.Contains(roomId.Value)))
@@ -30,60 +67,57 @@ public sealed partial class WorldRecordings
         if (change is not (null or "initial" or "phase" or "environment" or "enemies" or "enemy-roster")
             || (change == "enemy-roster" && !includeEnemyRoster))
             throw new ArgumentException("Use a recorded policy change kind. Enemy roster changes require includeEnemyRoster.");
-
-        var frames = new List<WorldPolicyFrame>();
-        var scanned = after;
-        var boundary = Math.Min(through, after + 1024);
-        RecordedWorldPolicy? previous = null;
-        EnemyRosterState? previousRoster = null;
-        // An inclusive anchor compares the first candidate with its actual predecessor, even across pages.
-        var first = Math.Max(1, after);
-        while (scanned < boundary && frames.Count < 24)
-        {
-            var candidates = ReadPolicies(id, first, boundary, includeEnemyRoster, roomId, cancellation);
-            if (candidates.Count == 0) throw new InvalidDataException("Saved world frame sequence has a gap.");
-            foreach (var candidate in candidates)
-            {
-                cancellation.ThrowIfCancellationRequested();
-                if (candidate.Sequence != first++) throw new InvalidDataException("Saved world frame sequence has a gap.");
-                var policy = candidate.Policy;
-                var roster = candidate.Roster is null ? null : WorldJson.Read<EnemyRosterState>(candidate.Roster);
-                var rosterChanged = roster is not null && previousRoster is not null
-                    && !roster.EnemyIds.SequenceEqual(previousRoster.EnemyIds);
-                if (candidate.Sequence != after)
-                {
-                    scanned = candidate.Sequence;
-                    if (policy != previous || rosterChanged)
-                    {
-                        var changes = new List<string>(4);
-                        if (previous is null) changes.Add("initial");
-                        else
-                        {
-                            if (policy.Phase != previous.Phase) changes.Add("phase");
-                            if (policy.Weather != previous.Weather || policy.Night != previous.Night || policy.Lightning != previous.Lightning)
-                                changes.Add("environment");
-                            if (policy.Behavior != previous.Behavior || policy.AutoAttack != previous.AutoAttack) changes.Add("enemies");
-                            if (rosterChanged) changes.Add("enemy-roster");
-                        }
-                        if (change is null || changes.Contains(change))
-                        {
-                            var observation = roster is null ? null : new WorldPolicyEnemyRoster(roster.EnemyIds, roster.Alive,
-                                rosterChanged ? roster.EnemyIds.Except(previousRoster!.EnemyIds).Count() : 0,
-                                rosterChanged ? previousRoster!.EnemyIds.Except(roster.EnemyIds).Count() : 0);
-                            frames.Add(new(scanned, candidate.Elapsed, policy, changes.ToArray(), observation));
-                        }
-                    }
-                }
-                previous = policy;
-                previousRoster = roster;
-                if (frames.Count == 24) break;
-            }
-        }
-        return new(info.Header.sessionId, info.Header.streamId, through, after, scanned, scanned < through ? scanned : null,
-            frames, includeEnemyRoster ? true : null, roomId, change);
     }
 
-    private List<(long Sequence, long Elapsed, RecordedWorldPolicy Policy, string? Roster)> ReadPolicies(Guid id,
+    private IEnumerable<(long Sequence, WorldPolicyFrame? Match)> ReadPolicyChanges(Guid id, long cursor, long boundary,
+        bool reverse, bool includeEnemyRoster, int? roomId, string? change, CancellationToken cancellation)
+    {
+        while (cursor != boundary)
+        {
+            var first = reverse ? Math.Max(boundary, cursor - 127) : cursor + 1;
+            var last = reverse ? cursor - 1 : Math.Min(boundary, cursor + 127);
+            // Keep one predecessor in each SQL batch, even when visiting candidates backwards.
+            var anchor = Math.Max(1, first - 1);
+            var samples = ReadPolicies(id, anchor, last, includeEnemyRoster, roomId, cancellation);
+            if (samples.Count != last - anchor + 1 || samples.Where((sample, index) => sample.Sequence != anchor + index).Any())
+                throw new InvalidDataException("Saved world frame sequence has a gap.");
+            var count = last - first + 1;
+            for (var offset = 0; offset < count; offset++)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                var sequence = reverse ? last - offset : first + offset;
+                var index = (int)(sequence - anchor);
+                yield return (sequence, DescribePolicy(samples[index], index > 0 ? samples[index - 1] : null, change));
+            }
+            cursor = reverse ? first : last;
+        }
+    }
+
+    private static WorldPolicyFrame? DescribePolicy(PolicySample candidate, PolicySample? previous, string? change)
+    {
+        var policy = candidate.Policy;
+        var roster = candidate.Roster;
+        var priorRoster = previous?.Roster;
+        var rosterChanged = roster is not null && priorRoster is not null && !roster.EnemyIds.SequenceEqual(priorRoster.EnemyIds);
+        if (policy == previous?.Policy && !rosterChanged) return null;
+        var changes = new List<string>(4);
+        if (previous is null) changes.Add("initial");
+        else
+        {
+            if (policy.Phase != previous.Policy.Phase) changes.Add("phase");
+            if (policy.Weather != previous.Policy.Weather || policy.Night != previous.Policy.Night || policy.Lightning != previous.Policy.Lightning)
+                changes.Add("environment");
+            if (policy.Behavior != previous.Policy.Behavior || policy.AutoAttack != previous.Policy.AutoAttack) changes.Add("enemies");
+            if (rosterChanged) changes.Add("enemy-roster");
+        }
+        if (change is not null && !changes.Contains(change)) return null;
+        var observation = roster is null ? null : new WorldPolicyEnemyRoster(roster.EnemyIds, roster.Alive,
+            rosterChanged ? roster.EnemyIds.Except(priorRoster!.EnemyIds).Count() : 0,
+            rosterChanged ? priorRoster!.EnemyIds.Except(roster.EnemyIds).Count() : 0);
+        return new(candidate.Sequence, candidate.Elapsed, policy, changes.ToArray(), observation);
+    }
+
+    private List<PolicySample> ReadPolicies(Guid id,
         long first, long boundary, bool includeEnemyRoster, int? roomId, CancellationToken cancellation)
     {
         var candidates = new List<(long, long, RecordedWorldPolicy, string?)>();
@@ -117,6 +151,7 @@ public sealed partial class WorldRecordings
                     row.GetBoolean(5), row.GetString(6), row.GetBoolean(7)), row.IsDBNull(8) ? null : row.GetString(8)));
             }
         }
-        return candidates;
+        return candidates.Select(row => new PolicySample(row.Item1, row.Item2, row.Item3,
+            row.Item4 is null ? null : WorldJson.Read<EnemyRosterState>(row.Item4))).ToList();
     }
 }

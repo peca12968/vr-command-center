@@ -201,6 +201,24 @@ module.exports = async function environmentBrowser({ page, api, tokens, director
     check(await canvas.getAttribute('data-sequence') === String(storm.sequence) && await page.locator('#world-room').inputValue() === '4',
       'The matching environment frame opens in the original selected room');
 
+    const previousChange = page.locator('#world-policy-previous-change'), nextChange = page.locator('#world-policy-next-change');
+    const jumped = () => policyStatus.filter({ hasText: `已跳到第 ${storm.sequence} 格` }).waitFor();
+    await page.locator('#world-frame-back').click();
+    await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${storm.sequence - 1} 格` }).waitFor();
+    await nextChange.click(); await jumped();
+    check(await canvas.getAttribute('data-sequence') === String(storm.sequence),
+      'Next policy change uses the current frame and environment filter to open the original storm');
+    await page.locator('#world-frame-next').click();
+    await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${storm.sequence + 1} 格` }).waitFor();
+    await previousChange.click(); await jumped();
+    check(await canvas.getAttribute('data-sequence') === String(storm.sequence) && await page.locator('#world-room').inputValue() === '4'
+      && await page.locator('#world-camera').inputValue() === 'top',
+      'Previous policy change opens the same saved frame without moving the selected room or camera');
+    await previousChange.click();
+    await policyStatus.filter({ hasText: '沒有其他符合條件' }).waitFor();
+    check(await canvas.getAttribute('data-sequence') === String(storm.sequence),
+      'An empty previous search leaves the current environment transition in place');
+
     await filter.selectOption('phase');
     check(await results.getByRole('button').count() === 0 && await page.locator('#world-policy-next').isDisabled(),
       'Changing the policy kind clears the previous results and cursor');

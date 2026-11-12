@@ -324,6 +324,20 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         request(f"{policy_route}?throughFrame={tail}&change=enemy-roster", expected=400)
         request(f"{policy_route}?throughFrame={tail}&change=environment", "Room1", 403)
         check(True, "Policy kind lookup rejects invalid filters and retains recording permissions")
+        policy_neighbor = route + "/policy-neighbor"
+        seek = f"{policy_neighbor}?throughFrame={tail}&change=environment"
+        prev = request(seek + f"&direction=previous&fromFrame={tail}", "Room5")
+        following = request(seek + f"&direction=next&fromFrame={change_frame - 1}", "Room5")
+        no_repeat = request(seek + f"&direction=previous&fromFrame={change_frame}", "Room5")
+        check(prev["frame"] == following["frame"] == environment_rows[0]
+              and prev["scannedToFrame"] == following["scannedToFrame"] == change_frame
+              and prev["nextFromFrame"] is None and no_repeat["frame"] is None and no_repeat["scannedToFrame"] == 1,
+              "Policy neighbors match the original adjacent transition in either direction and exclude the current frame")
+        request(seek + "&direction=sideways&fromFrame=1", expected=400)
+        request(seek + f"&direction=next&fromFrame={tail + 1}", expected=400)
+        request(seek + "&direction=next&fromFrame=1", "Room1", 403)
+        request(f"{policy_neighbor}?throughFrame={tail + 1}&direction=next&fromFrame=1", expected=404)
+        check(True, "Policy neighbors reject invalid cursors and retain recording authorization")
         request(f"{policy_route}?throughFrame={tail}&afterFrame=-1", expected=400)
         request(f"{policy_route}?throughFrame={tail + 1}", expected=404)
         request(f"{policy_route}?throughFrame={tail}", "Room1", 403)
@@ -917,6 +931,39 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
                    "medianMilliseconds": round(sorted(times)[len(times) // 2], 2)}
             for role, (observed, times) in zip(("Master", "Room1", "Room5"), listing, strict=True)
         }))
+
+        sparse_mission = request("/api/missions", expected=201, method="POST",
+                                 body=dict(damage_mission["definition"], enemies={"count": 0, "behavior": "Hold", "autoAttack": False}))
+        sparse = request("/api/sessions", expected=201, method="POST", body={"missionId": sparse_mission["id"],
+                         "mode": "Independent", "roomIds": [3]})
+        sparse_session = f"/api/sessions/{sparse['id']}"
+        sparse_stream = str(uuid4())
+        request(sparse_session + "/combat-stream", "GameServer", method="POST", body={"streamId": sparse_stream, "origin": "Simulation"})
+        publisher = WebSocket(port, sparse_session + "/world/publish", tokens["GameServer"])
+        try:
+            reply = publisher.send({"type": "header", "payload": dict(damage_header, sessionId=sparse["id"], streamId=sparse_stream, roomIds=[3])})
+            assert reply["type"] == "ack", reply
+            packet = deepcopy(packets[0])
+            packet.update(observedSequence=request(sparse_session)["sequence"], throughCombatSequence=0, events=[])
+            packet["frame"].update(players=[], enemies=[], phase="Preparing", autoAttack=False, tick=0, throughSequence=0)
+            for number in range(1, 1101):
+                reply = publisher.send({"type": "frame", "payload": dict(packet, sequence=number, elapsedMilliseconds=(number - 1) * 50)})
+                assert reply["type"] == "ack", reply
+            ended = request(sparse_session + "/commands", method="POST", body={"commandId": str(uuid4()), "action": "End"})
+            packet["frame"]["phase"] = "Ended"
+            reply = publisher.send({"type": "frame", "payload": dict(packet, sequence=1101, elapsedMilliseconds=55000,
+                observedSequence=ended["session"]["sequence"])})
+            assert reply["type"] == "ack", reply
+        finally:
+            publisher.close()
+        sparse_route = sparse_session + "/world/policy-neighbor?throughFrame=1101"
+        earlier = request(sparse_route + "&change=initial&direction=previous&fromFrame=1101")
+        later = request(sparse_route + "&change=phase&direction=next&fromFrame=1")
+        check(earlier["frame"] is None and earlier["nextFromFrame"] == 77
+              and later["frame"] is None and later["nextFromFrame"] == 1025
+              and request(sparse_route + "&change=initial&direction=previous&fromFrame=77")["frame"]["frameSequence"] == 1
+              and request(sparse_route + "&change=phase&direction=next&fromFrame=1025")["frame"]["frameSequence"] == 1101,
+              "Both policy neighbor directions continue across an empty bounded page and retain the original predecessor")
         print(f"All {count} world streaming checks passed. No Unity or headset execution.")
     finally:
         if demo is not None and demo.poll() is None:
