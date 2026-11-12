@@ -99,6 +99,8 @@ def prepare(args, output):
         seen_paths.add(path)
         return path
 
+    alignment_path = evidence_path(args.room_alignment_bundle.resolve()) if args.room_alignment_bundle is not None else None
+    alignment_bundle = field.read_venue_alignment_bundle(alignment_path, mode, expected) if alignment_path is not None else None
     entries, venue_seats = [], set()
     quest_sources = {}
     for session_id, row in sorted(expected.items(), key=lambda entry: entry[1]['roomIds']):
@@ -123,6 +125,11 @@ def prepare(args, output):
                       and field.integer(endpoint['port'], 1024, 65535) == port
                       and field.integer(binding['processId'], 1) == result['childPid'],
                       f'Original endpoint or server IPv4 inventory differs for {stem}')
+        if alignment_bundle is not None:
+            experience = field.verify_experience(session, world['header'])
+            alignments = field.venue_session_alignments(alignment_bundle, rooms, experience, endpoint)
+            if alignments is not None:
+                field.verify_room_alignments(session, world['header'], alignments)
         field.require(result['peerDiagnosticsEnabled'] is True, f'Original Windows launch did not record UDP peers for {stem}')
         files = session_files(result, work_root / stem if work_root is not None else None, session_id)
         peers, acknowledged, _, _ = field.server_connections(field.content(files['serverLog']), port, allow_timeout=True)
@@ -146,6 +153,8 @@ def prepare(args, output):
 
     manifest = {'version': 1, 'mode': mode, 'topology': args.topology, 'serverIps': args.server_ip,
                 'venueBundle': ref(bundle), 'venueLauncherReport': ref(terminal), 'sessions': entries}
+    if alignment_path is not None:
+        manifest['roomAlignmentBundle'] = ref(alignment_path)
     if args.players_per_room != 5:
         manifest['expectedPlayersPerRoom'] = args.players_per_room
     release = windows_seats = None
@@ -213,6 +222,7 @@ def main():
     parser.add_argument('--windows-seat-map', type=Path)
     parser.add_argument('--windows-station-addresses', type=Path)
     parser.add_argument('--udp-preflight-batch', action='append', type=Path)
+    parser.add_argument('--room-alignment-bundle', type=Path, help='Original MR or mixed venue deployment ZIP')
     parser.add_argument('--quest-capture-report', action='append', type=Path, help='Original batch logcat capture report; repeat for separate batches')
     parser.add_argument('--quest-network-plan', type=Path, help='Original Quest IPv4 plan')
     parser.add_argument('--quest-device-map', type=Path, help='Original Quest seat-to-ADB assignment')

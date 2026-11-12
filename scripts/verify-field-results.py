@@ -751,8 +751,10 @@ def verify_room_alignments(session, header, alignments):
             and set(alignments) == set(rooms), 'Provide the locked alignment file for every original MR room')
     evidence = []
     for room in sorted(rooms):
-        with alignments[room].open('rb') as source:
-            raw = source.read(MAX_ALIGNMENT_BYTES + 1)
+        raw = alignments[room]
+        if not isinstance(raw, bytes):
+            with alignments[room].open('rb') as source:
+                raw = source.read(MAX_ALIGNMENT_BYTES + 1)
         require(0 < len(raw) <= MAX_ALIGNMENT_BYTES, 'Invalid room alignment file size')
         digest = hashlib.sha256(raw).hexdigest()
         require(pins[f'room{room}'] == digest, 'Room alignment bytes differ from the sealed session lock')
@@ -1020,6 +1022,60 @@ def venue_bundle(path, mode):
         require(sum(info.file_size for info in archive.infolist()) <= MAX_FILE_BYTES, 'Venue ZIP exceeds the expanded size limit')
         closure = read_json(evidence_zip_entry(archive, 'closure.json'))['batch']
         return closure, {name: evidence_zip_entry(archive, name) for name in names}
+
+
+def read_venue_alignment_bundle(path, mode, expected):
+    sessions = {room: session_id for session_id, row in expected.items() for room in row['roomIds']}
+    with path.open('rb') as source, zipfile.ZipFile(io.BytesIO(limited_read(source))) as archive:
+        names = archive.namelist()
+        require(7 <= len(names) <= 11 and len(names) == len(set(names)) and 'venue.json' in names,
+                'Invalid MR or mixed deployment ZIP members')
+        require(sum(info.file_size for info in archive.infolist()) <= MAX_FILE_BYTES,
+                'MR or mixed deployment ZIP exceeds the expanded size limit')
+        manifest = read_json(evidence_zip_entry(archive, 'venue.json'))
+        version = integer(manifest['version'], 1, 2)
+        mixed = version == 2
+        require(manifest['topology'] == mode and (not mixed or (mode == 'Independent' and manifest.get('mode') == 'Mixed')),
+                'MR or mixed deployment topology differs from the original closure')
+        rows = manifest['rooms']
+        require(type(rows) is list and len(rows) == len(sessions), 'MR or mixed deployment ZIP must identify all five rooms')
+        rooms, expected_names = {}, {'venue.json'}
+        for row in rows:
+            room = integer(row['roomId'], 1, 5)
+            require(room not in rooms and identity(row['sessionId']) == sessions[room],
+                    'MR or mixed deployment room differs from the original closure session')
+            ticket = f'room-{room:02}-connections.zip'
+            require(row['ticketsZip'] == ticket, 'Invalid room connection ZIP name in deployment manifest')
+            expected_names.add(ticket)
+            experience = row['mode'] if mixed else 'MR'
+            require(experience in ('MR', 'VR'), 'Invalid experience mode in mixed deployment manifest')
+            binding = (ipv4(row['address']), integer(row['port'], 1024, 65535)) if mixed else None
+            raw = None
+            if experience == 'MR':
+                alignment = f'room-{room:02}-alignment.json'
+                require(row.get('alignmentFile') == alignment and alignment in names,
+                        'Provide the original alignment ZIP member for every MR room')
+                require(0 < archive.getinfo(alignment).file_size <= MAX_ALIGNMENT_BYTES, 'Invalid room alignment file size')
+                expected_names.add(alignment)
+                raw = evidence_zip_entry(archive, alignment)
+            else:
+                require('alignmentFile' not in row, 'Room alignment evidence is only for MR sessions')
+            rooms[room] = (experience, binding, raw)
+        require(set(names) == expected_names and (not mixed or {row[0] for row in rooms.values()} == {'MR', 'VR'}),
+                'Invalid MR or mixed deployment ZIP members')
+        return rooms
+
+
+def venue_session_alignments(bundle, rooms, experience, endpoint):
+    alignments = {}
+    for room in rooms:
+        room_mode, binding, raw = bundle[room]
+        require(room_mode == experience, 'Deployment room experience differs from the original session')
+        require(binding is None or binding == (ipv4(endpoint['address']), integer(endpoint['port'], 1024, 65535)),
+                'Mixed deployment room endpoint differs from the original sealed endpoint')
+        if raw is not None:
+            alignments[room] = raw
+    return alignments or None
 
 
 def venue_windows_logs(rows, expected, evidence_path, players_per_room):
@@ -1849,8 +1905,13 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
             'Guarded Begin verification requires a boolean option and the original world journals for the full batch')
     require(not (verify_tracking_begin and verify_participation_begin), 'Choose one guarded Begin verification policy')
     begin_kind = 'trackingBegin' if verify_tracking_begin else 'participationBegin' if verify_participation_begin else None
-    check_alignments = any('roomAlignments' in entry for entry in entries)
+    manual_alignments = any('roomAlignments' in entry for entry in entries)
+    bundled_alignments = 'roomAlignmentBundle' in manifest
+    require(not (manual_alignments and bundled_alignments), 'Use either roomAlignmentBundle or individual room alignment files')
+    check_alignments = manual_alignments or bundled_alignments
     require(not check_alignments or journals, 'MR alignment evidence requires the original world journals for the full batch')
+    alignment_bundle = (read_venue_alignment_bundle(evidence_path(manifest['roomAlignmentBundle']), mode, expected)
+                        if bundled_alignments and not inspect_windows else None)
     preflights = any('udpPreflight' in entry for entry in entries)
     source_lists = any('udpSourcePreflights' in entry for entry in entries)
     single_batch, multiple_batches = 'udpPreflightBatch' in manifest, 'udpPreflightBatches' in manifest
@@ -1960,8 +2021,11 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
     for entry, launcher, session, statistics, endpoint, server_log in inputs:
         alignments = None
         if check_alignments:
-            experience = verify_experience(session, launcher['finalWorld']['header'])
-            if experience == 'MR':
+            header = launcher['finalWorld']['header']
+            experience = verify_experience(session, header)
+            if alignment_bundle is not None:
+                alignments = venue_session_alignments(alignment_bundle, session['roomIds'], experience, endpoint)
+            elif experience == 'MR':
                 files = entry.get('roomAlignments')
                 require(type(files) is dict and set(files) == {str(room) for room in session['roomIds']},
                         'Provide a locked alignment file for every original MR room in this batch')
