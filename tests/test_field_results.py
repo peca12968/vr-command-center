@@ -371,6 +371,13 @@ root = Path(__file__).parent
 args = sys.argv[1:]
 settings = json.loads((root/'settings.json').read_text())
 assert args[:2] == ['-s', 'fixture-device']
+if args[2:] == ['shell', 'getprop', 'ro.serialno']:
+    count = root/'serial-count'
+    calls = int(count.read_text()) if count.exists() else 0
+    count.write_text(str(calls+1))
+    values = settings.get('deviceSerials', ['HEADSET-A'])
+    print(values[min(calls, len(values)-1)])
+    sys.exit(0)
 if args[2:] == ['shell', 'pidof', 'com.vrcommand.quest']:
     count = root/'pid-count'
     calls = int(count.read_text()) if count.exists() else 0
@@ -402,10 +409,36 @@ if settings.get('keepRunning', True):
         (self.root/'logcat.bin').write_bytes(log)
         (self.root/'settings.json').write_text(json.dumps(settings), encoding='utf-8')
         (self.root/'pid-count').unlink(missing_ok=True)
+        (self.root/'serial-count').unlink(missing_ok=True)
 
     def capture(self, seconds=4):
         port, expected = capture_tool.read_connection(self.original)
         return asyncio.run(capture_tool.capture(self.adb, port, expected, self.output, seconds))
+
+    def test_bound_capture_checks_original_device_before_read_and_publish(self):
+        port, expected = capture_tool.read_connection(self.original)
+        raw = quest_logcat(self.player_log, port).encode()
+        proof = ('a' * 32, hashlib.sha256(('a' * 32 + '\nHEADSET-A').encode()).hexdigest())
+        self.prepare(raw, deviceSerials=['unknown'])
+        with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'identity could not be read'):
+            asyncio.run(capture_tool.capture(self.adb, port, expected, self.output, 10, device_identity=proof))
+        self.assertFalse((self.root / 'pid-count').exists())
+        self.assertFalse(self.partial.exists())
+        self.prepare(raw, deviceSerials=['HEADSET-B'])
+        with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'differs from the original deployment'):
+            asyncio.run(capture_tool.capture(self.adb, port, expected, self.output, 10, device_identity=proof))
+        self.assertFalse((self.root / 'pid-count').exists())
+        self.prepare(raw, deviceSerials=['HEADSET-A', 'HEADSET-B'])
+        with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'differs from the original deployment'):
+            asyncio.run(capture_tool.capture(self.adb, port, expected, self.output, 10, device_identity=proof))
+        self.assertFalse(self.output.exists())
+        self.assertEqual(raw, self.partial.read_bytes())
+        self.partial.unlink()
+        self.prepare(raw, deviceSerials=['headset-a', 'HEADSET-A'])
+        report = asyncio.run(capture_tool.capture(self.adb, port, expected, self.output, 10, device_identity=proof))
+        self.assertTrue(report['complete'])
+        self.assertEqual(raw, self.output.read_bytes())
+        self.assertEqual('2', (self.root / 'serial-count').read_text())
 
     def test_live_capture_preserves_bytes_and_existing_verifier_accepts_original_reconnect(self):
         earlier = 'VR_CLIENT_CONNECTED id=8\nVR_CLIENT_DISCONNECTED\n'
@@ -1976,6 +2009,33 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertEqual(25, result['serverAcknowledgements'])
                 self.assertFalse(result['physicalHostsVerified'])
                 self.assertNotIn(rows[0]['admissionId'], json.dumps(result))
+
+    def test_quest_capture_matches_exact_referenced_deployment(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest = quest_capture_venue_fixture(root, mode, quest_per_room=1, batches=1)
+                deployment = self.quest_deployment_evidence(root, manifest, 1)
+                deployment['retry'] = {'version': 1, 'venueSha256': '1' * 64, 'mapSha256': '2' * 64,
+                                       'salt': '3' * 32, 'devices': [f'{index:064x}' for index in range(1, 6)]}
+                original = root / 'deployment.json'
+                original.write_text(json.dumps(deployment), encoding='utf-8')
+                capture_path = root / manifest['questCaptures']['reports'][0]
+                report = json.loads(capture_path.read_bytes())
+                report['deploymentSha256'] = hashlib.sha256(original.read_bytes()).hexdigest()
+                capture_path.write_text(json.dumps(report), encoding='utf-8')
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                self.assertEqual(1, field.verify_venue(path)['questCaptureDeploymentReportsMatched'])
+
+                with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'same original Quest deployment report'):
+                    capture_tool.retry_capture_plan({'topology': mode, 'seats': [], 'deploymentSha256': '4' * 64}, capture_path)
+                path.write_text(json.dumps({key: value for key, value in manifest.items() if key != 'questDeployments'}), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'original Quest deployment reports referenced'):
+                    field.verify_venue(path)
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                original.write_bytes(original.read_bytes() + b'\n')
+                with self.assertRaisesRegex(field.EvidenceError, 'exact completed Quest deployment report'):
+                    field.verify_venue(path)
 
     def test_quest_deployments_reject_swapped_originals_and_incomplete_or_duplicate_evidence(self):
         with tempfile.TemporaryDirectory() as directory:

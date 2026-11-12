@@ -1,6 +1,9 @@
+import asyncio
 import base64
+from contextlib import redirect_stderr
 import copy
 import hashlib
+import importlib.util
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import io
 import json
@@ -1538,6 +1541,53 @@ else:
                 self.assertEqual(hashlib.sha256(report.read_bytes()).hexdigest(), final['previousDeploymentSha256'])
                 self.assertEqual(retried['devices'][:2], final['devices'][:2])
                 self.assertTrue(all(row['status'] == 'launch-requested' and row['apkVerified'] for row in final['devices']))
+                final_report = self.root / 'final-deployment.json'
+                final_report.write_text(resumed.stdout, encoding='utf-8')
+                spec = importlib.util.spec_from_file_location('capture_quest', ROOT / 'scripts/capture-quest-field-log.py')
+                capture = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(capture)
+                capture_plan = capture.venue_plan(original, mapping, True)
+                self.assertEqual(interrupted['retry']['venueSha256'], capture_plan['venueSha256'])
+                bound = capture.bind_deployment(capture_plan, final_report)
+                self.assertEqual(hashlib.sha256(final_report.read_bytes()).hexdigest(), bound['deploymentSha256'])
+                self.assertEqual(final['retry']['devices'], [seat['deviceIdentity'][1] for seat in bound['seats']])
+                changed_map = copy.deepcopy(capture_plan)
+                changed_map['seats'][0]['serial'] = 'fixture-04'
+                with self.assertRaisesRegex(capture.field.EvidenceError, 'original device map'):
+                    capture.bind_deployment(changed_map, final_report)
+                with self.assertRaisesRegex(capture.field.EvidenceError, 'original venue ZIP'):
+                    capture.bind_deployment(dict(capture_plan, venueSha256='f' * 64), final_report)
+                adb_capture = self.root / 'capture-adb.py'
+                adb_capture.write_text('''from pathlib import Path
+import sys
+serial, command = sys.argv[2], sys.argv[3:]
+assert sys.argv[1] == '-s'
+if command == ['shell', 'getprop', 'ro.serialno']:
+    print('HARDWARE-SERIAL-' + serial)
+elif command == ['shell', 'pidof', 'com.vrcommand.quest']:
+    print(7342)
+else:
+    assert command == ['logcat', '-b', 'main', '--pid=7342', '-v', 'threadtime', '-s', 'Unity:I']
+    sys.stdout.buffer.write(Path(__file__).with_name(serial + '.logcat').read_bytes())
+''', encoding='utf-8')
+                original_logs = {}
+                for seat in bound['seats']:
+                    result = {'version': 1, **{key: seat[key] for key in ('roomId', 'sessionId', 'playerId', 'admissionId')}}
+                    messages = (f"VR_NETWORK_STARTED role=Client started=True background=False port={seat['port']}",
+                                'VR_CLIENT_CONNECTED id=1', 'VR_CLIENT_DEBRIEF_FINAL ' + json.dumps(result),
+                                'VR_CLIENT_DISCONNECTED')
+                    raw = ''.join(f'11-09 00:00:00.000 7342 7343 I Unity : {message}\n' for message in messages).encode()
+                    (self.root / (seat['serial'] + '.logcat')).write_bytes(raw)
+                    original_logs[seat['roomId'], seat['seat']] = raw
+                captured = self.root / 'capture-after-deploy'
+                with redirect_stderr(io.StringIO()):
+                    capture_result = asyncio.run(capture.capture_venue([sys.executable, str(adb_capture)], bound, captured, 10))
+                self.assertTrue(capture_result['complete'])
+                self.assertEqual(bound['deploymentSha256'], capture_result['deploymentSha256'])
+                capture_report = capture.field.read_quest_capture_report(captured / 'capture-report.json', 'Independent')
+                for seat in capture_report['seats']:
+                    self.assertEqual(original_logs[seat['roomId'], seat['seat']], (captured / seat['log']).read_bytes())
+                self.assertNotIn('HARDWARE-SERIAL-', json.dumps(capture_report))
                 self.assertEqual(done_bytes, done_config.read_bytes())
                 commands = log.read_text(encoding='utf-8').splitlines()
                 self.assertEqual({'fixture-03'}, {line.split()[1] for line in commands if line.startswith('-s ')})

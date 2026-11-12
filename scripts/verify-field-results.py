@@ -1357,9 +1357,13 @@ def read_udp_preflight_batch(path, mode, expected_rooms, *, expected_sessions=No
 
 def read_quest_capture_report(path, mode):
     report = read_quest_plan_file(path)
-    require(set(report) == {'version', 'complete', 'topology', 'expectedSeats', 'capturedSeats', 'scope', 'seats'}
+    fields = {'version', 'complete', 'topology', 'expectedSeats', 'capturedSeats', 'scope', 'seats'}
+    require(set(report) in (fields, fields | {'deploymentSha256'})
             and type(report['complete']) is bool and report['topology'] == mode and report['scope'] == 'quest-logcat-only',
             'Quest capture report has an invalid format or the wrong topology')
+    if 'deploymentSha256' in report:
+        digest = report['deploymentSha256']
+        require(type(digest) is str and re.fullmatch(r'[0-9a-f]{64}', digest), 'Invalid original Quest deployment digest in capture report')
     count = integer(report['expectedSeats'], 1, 25)
     captured = integer(report['capturedSeats'], 0, count)
     rows = report['seats']
@@ -1403,11 +1407,13 @@ def read_quest_capture_batches(spec, mode, expected, evidence_path):
         sources = {seat: ipv4(address) for seat, address in plan_sources.items()}
     reports = spec['reports']
     require(type(reports) is list and 1 <= len(reports) <= 25, 'Provide 1 to 25 Quest capture reports')
-    captures, used_seats = {}, set()
+    captures, used_seats, deployments = {}, set(), []
     incomplete_reports = failed_attempts = 0
     for name in reports:
         path = evidence_path(name)
         report = read_quest_capture_report(path, mode)
+        if 'deploymentSha256' in report:
+            deployments.append((report['deploymentSha256'], report['seats']))
         incomplete_reports += not report['complete']
         failed_attempts += report['expectedSeats'] - report['capturedSeats']
         for row in report['seats']:
@@ -1435,7 +1441,7 @@ def read_quest_capture_batches(spec, mode, expected, evidence_path):
         summary['questCaptureAddressSource'] = 'server-observed'
     if incomplete_reports:
         summary.update(questCaptureIncompleteReports=incomplete_reports, questCaptureFailedAttempts=failed_attempts)
-    return captures, endpoints, summary
+    return captures, endpoints, summary, deployments
 
 
 def quest_capture_log(address, path, pid, seat, size, digest):
@@ -1492,7 +1498,7 @@ def quest_deployment_leaves(attempts):
     return leaves, linked
 
 
-def read_quest_deployments(spec, mode, evidence_path, release=None):
+def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_reports=()):
     expected = {'releaseReport', 'reports'} if release is None else {'reports'}
     require(type(spec) is dict and set(spec) == expected,
             'Provide the original Quest deployment reports and exactly one release report for the selected mode')
@@ -1541,6 +1547,14 @@ def read_quest_deployments(spec, mode, evidence_path, release=None):
         attempts[report_hash] = dict(proof=proof, previous=previous, complete=report['complete'], seats=tuple(seats),
                                      launched=launched, confirmed=confirmed)
 
+    for digest, seats in capture_reports:
+        deployment = attempts.get(digest)
+        require(deployment is not None and deployment['complete'] and deployment['proof'] is not None,
+                'Provide the exact completed Quest deployment report referenced by the capture')
+        for row in seats:
+            original = deployment['confirmed'].get((row['roomId'], row['seat']))
+            require(original is not None and original[0] == row['sessionId'] and original[3] == row['port'],
+                    'Quest capture seat does not match its referenced deployment')
     leaves, linked = quest_deployment_leaves(attempts)
     deployed = {}
     for attempt in leaves:
@@ -1843,15 +1857,19 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
     windows_by_session = venue_windows_logs(manifest['windowsPlayers'], expected, evidence_path, players_per_room) if explicit_windows else {}
 
     capture_supplied = 'questCaptures' in manifest
-    captures, capture_endpoints, capture_summary = {}, {}, {}
+    captures, capture_endpoints, capture_summary, capture_deployments = {}, {}, {}, []
     if capture_supplied and not inspect_windows:
         require(topology == 'direct-lan', 'Quest capture batches require direct LAN evidence')
-        captures, capture_endpoints, capture_summary = read_quest_capture_batches(manifest['questCaptures'], mode, expected, evidence_path)
+        captures, capture_endpoints, capture_summary, capture_deployments = read_quest_capture_batches(manifest['questCaptures'], mode, expected, evidence_path)
     observed_quest_addresses = set() if capture_summary.get('questCaptureAddressSource') == 'server-observed' else None
     quest_deployments, deployment_summary = None, None
+    require(not capture_deployments or 'questDeployments' in manifest, 'Provide the original Quest deployment reports referenced by the capture')
     if 'questDeployments' in manifest and not inspect_windows:
         require(topology == 'direct-lan', 'Quest deployment evidence requires direct LAN evidence')
-        quest_deployments, deployment_summary = read_quest_deployments(manifest['questDeployments'], mode, evidence_path, release)
+        quest_deployments, deployment_summary = read_quest_deployments(manifest['questDeployments'], mode, evidence_path, release,
+                                                                      capture_reports=capture_deployments)
+        if capture_deployments:
+            capture_summary['questCaptureDeploymentReportsMatched'] = len(capture_deployments)
 
     def load_session(entry):
         if venue_launcher is None:

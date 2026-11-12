@@ -1126,7 +1126,7 @@ if ($PSCmdlet.ParameterSetName -eq 'Venue') {
 if ($PSCmdlet.ParameterSetName -eq 'CapturePlan') {
     if (-not $ReadCapturePlan) { throw 'Specify -ReadCapturePlan for offline log capture planning.' }
     $map = @(Read-QuestDeviceMap $DeviceMap -Partial:$AllowPartialMap)
-    $venue = Read-VenueBundle $VenueBundle 0 0
+    $venue = Read-VenueBundle $VenueBundle 0 0 -Fingerprint
     $seats = foreach ($row in $map) {
         $ticket = $venue.Connections["$($row.roomId)/$($row.seat)"].Ticket
         [ordered]@{
@@ -1135,7 +1135,7 @@ if ($PSCmdlet.ParameterSetName -eq 'CapturePlan') {
             admissionId = $ticket.AdmissionId.ToString('D')
         }
     }
-    [ordered]@{ version = 1; topology = $venue.Report.topology; seats = @($seats) } | ConvertTo-Json -Depth 4 -Compress
+    [ordered]@{ version = 1; topology = $venue.Report.topology; venueSha256 = $venue.BundleSha256; seats = @($seats) } | ConvertTo-Json -Depth 4 -Compress
     return
 }
 

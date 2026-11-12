@@ -522,6 +522,8 @@ python scripts/verify-field-results.py --venue-stages .\stages.json
 
 ### 直接使用 Quest 批次擷取報告
 
+若擷取時使用 `--deployment-report`，請在同一份 `venue.json` 的 `questDeployments.reports` 提供擷取所引用的完整部署原檔。工具會逐份核對 SHA-256、房間、席位、場次與埠，通過時摘要列出 `questCaptureDeploymentReportsMatched`。原部署報告和擷取報告應一起保存。 [Quest 批次擷取](QUEST3.md#一次擷取五房-quest-日誌)
+
 在 `direct-lan` 場館清單加入下列欄位。保留每份原 `capture-report.json` 與同一資料夾內的原日誌。網路計畫使用 Quest UDP 預檢的版本 1 格式，列出這次五房所有遊戲端點，以及各 Quest 席位實際使用的 IPv4。 [網路計畫格式](QUEST3.md#批次預檢五房-quest-席位) · [整批擷取](QUEST3.md#一次擷取五房-quest-日誌)
 
 ```json

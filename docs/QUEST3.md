@@ -604,6 +604,8 @@ python .\scripts\capture-quest-field-log.py --adb $adb `
 
 場次結束後，`capture-report.json` 依房號、席位及場次列出完整日誌、`logcatPid` 和 SHA-256。任一席失敗時，整批回傳退出碼 1，已完成的日誌與可用的 `.partial` 各自保留。
 
+若部署時使用發行報告核對 APK，可加 `--deployment-report .\quest-deployment.json`，指定同一份 ZIP、同一份裝置清單的完整部署結果。工具會逐席比對原入場，並在開始讀取及保存完整日誌前各讀一次裝置識別。如果 ADB 回報的裝置與原部署不同，該席不會發布完整日誌，已擷取的內容保留為 `.partial`。擷取報告只增加原部署報告的 SHA-256，裝置序號留在原私人裝置清單。 [核對發行 APK](#核對頭盔內已安裝的發行-apk)
+
 ### 重試未完成的 Quest 擷取席位
 
 若 ADB 中斷後仍能讀到原遊戲程序的啟動、入場、最終戰績及結束斷線記錄，使用相同的部署 ZIP、原裝置對照表與原擷取報告重試。混合場繼續帶 `--allow-partial-map`。新輸出資料夾須尚未建立。
@@ -615,7 +617,7 @@ python .\scripts\capture-quest-field-log.py --adb $adb `
     --output-directory .\quest-capture-retry --seconds 1800
 ```
 
-重試只擷取原報告中失敗的席位。保留首次和重試的原報告、各自的日誌，以及原裝置對照表或記錄實際 IPv4 的網路計畫，交給五房驗收工具。重試仍須取得同一個原入場的完整紀錄。混合場可在同一份驗收清單加入 Windows 席位。 [核對原始擷取報告](EXTERNAL_CLIENTS.md#直接使用-quest-批次擷取報告)
+重試只擷取原報告中失敗的席位。若首次用了 `--deployment-report`，重試須指定同一份部署原檔。保留首次和重試的原報告、各自的日誌，以及原裝置對照表或記錄實際 IPv4 的網路計畫，交給五房驗收工具。重試仍須取得同一個原入場的完整紀錄。混合場可在同一份驗收清單加入 Windows 席位。 [核對原始擷取報告](EXTERNAL_CLIENTS.md#直接使用-quest-批次擷取報告)
 
 ## 連線與仍待實作事項
 
