@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 預覽五房任務配置檔
+
+- 管理包 0.31.151 新增「預覽配置」。主控可在載入前逐房比對目前準備與檔案指定的任務版本、VR／MR、時長及場地檢查結果。來源與解壓包各通過 65 項 Chromium 專項，包含歷史版本、場地無效、切頁隔離及原直接載入流程。 [操作方式](MISSION_VERSIONS.md#在開場前保存五房任務配置) · [預覽畫面](../artifacts/console-venue-file-review-151-package/venue-mission-file-review.png)
+- Windows 0.50.7 同機通過 383 項整合。兩種模式各核對五房的原版本 ID 與場地結果，再以解壓管理包載入並開場。獨立及合併各有 25 個同機模擬玩家端。六場雙封存共 784 格回放、6 份 CSV 與 50 筆伺服器回條。程序清理後，原生與管理 C／F 快照分別有 215、18 個非資料庫檔案一致。 [驗證摘要](../artifacts/venue-mission-file-review-0.31.151-validation.json)
+- 解壓核對 564 筆清單，另通過 825 項 HTTP 及 107 項管理包檢查。離線核對沿用 Windows 與 Quest 0.50.7。功能來源 `3808484e` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商硬體仍待驗收。 [管理包](WINDOWS_CONTROL_PACKAGE.md) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43276384123)
+
 ## 2026-11-13 套用物件調整前檢查場地
 
 - 管理包 0.31.150 在成列複製、批次移動及旋轉的預覽中檢查完整候選配置。場地問題會列出原配置編號並在圖上標出涉及的預覽物件。解壓包 69 項 Chromium 專項驗證套用前發現重疊及包圍盒越界、延遲舊結果隔離和檢查失敗時保留草稿，另有 44 項場地專項。 [操作方式](LAYOUT.md#套用前檢查物件預覽) · [預覽畫面](../artifacts/console-placement-proposal-150-package/placement-proposal-outside-room.png)
