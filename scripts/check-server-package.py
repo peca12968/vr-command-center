@@ -2164,6 +2164,9 @@ def main():
         result = read(output)
         check(result['scores'] == scores and scores['total']['players'] == venue_players,
               f'{mode} shipped console renders exact room and batch totals from all {venue_players} original sealed statistics')
+        name = f"vr-command-venue-scores-v1-{scores['requestId']}.csv"
+        check(result['scoreCsv'] == {'name': name, 'rows': len(scores['rooms']) + 1, 'sha256': control.sha(out / name)},
+              f'{mode} downloaded batch summary matches every original native room and the weighted total')
         if args.check_debrief_receipts:
             check(result['debriefReceipts'] == config['debriefReceipts'],
                   f'{mode} shipped console renders the five original room receipt counts')

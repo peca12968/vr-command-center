@@ -21,7 +21,17 @@ internal sealed record VenueClosureResponse(VenueClosureBatch? Batch,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueDebriefSummary? DebriefReceipts);
 internal sealed record VenueDebriefSummary(Guid RequestId, VenueDebriefRoom[] Rooms);
 internal sealed record VenueDebriefRoom(Guid SessionId, int RoomId, int RosterCount, int? ConfirmedCount);
-internal sealed record VenueBattleScores(Guid RequestId, VenueRoomScore[] Rooms, VenueBattleTotals Total);
+internal sealed record VenueBattleScores(Guid RequestId, VenueRoomScore[] Rooms, VenueBattleTotals Total)
+{
+    internal static VenueBattleScores From(FinalVenueReport report)
+    {
+        var rooms = report.Sessions.SelectMany(item => item.Report.RoomIds.Select(room =>
+            new VenueRoomScore(room, item.Report.SessionId, VenueBattleTotals.From(item.Report.ForRoom(room).Players))))
+            .OrderBy(score => score.RoomId).ToArray();
+        return new(report.RequestId, rooms,
+            VenueBattleTotals.From(report.Sessions.SelectMany(item => item.Report.Players).ToArray()));
+    }
+}
 internal sealed record VenueRoomScore(int RoomId, Guid SessionId, VenueBattleTotals Totals);
 internal sealed record VenueBattleTotals(int Players, long AmmoUsed, long ShotsHit, long Kills, long HitsReceived, long DamageTaken)
 {
@@ -147,12 +157,7 @@ public sealed partial class WorldRecordings
                 || batch.Sessions.Any(session => session.Combat is not (VenueArchiveState.Sealed or VenueArchiveState.NoSource)))
                 return new(batch, null, receipts);
 
-            var final = manager.FinalVenueReports(batch.RequestId, actor);
-            var rooms = final.Sessions.SelectMany(item => item.Report.RoomIds.Select(room =>
-                new VenueRoomScore(room, item.Report.SessionId, VenueBattleTotals.From(item.Report.ForRoom(room).Players))))
-                .OrderBy(score => score.RoomId).ToArray();
-            return new(batch, new(final.RequestId, rooms,
-                VenueBattleTotals.From(final.Sessions.SelectMany(item => item.Report.Players).ToArray())), receipts);
+            return new(batch, VenueBattleScores.From(manager.FinalVenueReports(batch.RequestId, actor)), receipts);
         }
     }
 

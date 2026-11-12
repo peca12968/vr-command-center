@@ -344,6 +344,12 @@ app.MapGet("/api/venue/closure/{id:guid}/reports.zip", (Guid id, SessionManager 
     var report = manager.FinalVenueReports(id, Actor(context));
     return Results.File(FinalReportCsv.EncodeVenueBundle(report), "application/zip", $"vr-command-venue-reports-v1-{id:D}.zip");
 });
+app.MapGet("/api/venue/closure/{id:guid}/scores.csv", (Guid id, SessionManager manager, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var scores = VenueBattleScores.From(manager.FinalVenueReports(id, Actor(context)));
+    return Results.File(FinalReportCsv.EncodeVenueScores(scores), "text/csv; charset=utf-8", $"vr-command-venue-scores-v1-{id:D}.csv");
+});
 app.MapGet("/api/venue/closure/{id:guid}/replay-at", (Guid id, Guid fromSessionId, long fromFrame, int roomId,
     WorldRecordings worlds, HttpContext context) =>
 {

@@ -10,7 +10,7 @@ import { mountVrVenueTickets } from './vr-venue-tickets-ui.js';
 import { mountVenueServerPlan } from './venue-server-plan-ui.js';
 import { mountVenueLaunchReview } from './venue-launch-review-ui.js';
 import { mountOperatorNetwork } from './operator-network-ui.js';
-import { mountReport, mountVenueReport } from './report-ui.js';
+import { mountReport, mountVenueReport, venueScoreFields } from './report-ui.js';
 import { mountVenueHistory } from './venue-history-ui.js';
 import { mountVenueDebriefSeats } from './venue-debrief-ui.js';
 import { mountReadiness, mountRoomReadiness } from './readiness-ui.js';
@@ -1106,8 +1106,7 @@ function renderVenueClosure(report, loading = false) {
     rows.append(result);
   }
   $('venue-closure-table').hidden = false;
-  renderVenueScores(batch, report.scores);
-  venueReport.update(batch);
+  venueReport.update(batch, renderVenueScores(batch, report.scores));
 }
 function venueDebriefRooms(batch, summary) {
   if (!summary || typeof batch.requestId !== 'string' || summary.requestId !== batch.requestId
@@ -1131,14 +1130,17 @@ function renderVenueScores(batch, scores) {
     || batch.sessions.some(session => !['Sealed', 'NoSource'].includes(session.combat))) return;
   const expected = new Map(batch.sessions.flatMap(session => session.roomIds.map(room => [room, session.sessionId])));
   const actual = new Set(scores.rooms.map(score => score?.roomId));
-  const keys = ['players', 'ammoUsed', 'shotsHit', 'kills', 'hitsReceived', 'damageTaken'];
+  const keys = venueScoreFields;
+  const identity = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
   const valid = totals => totals && keys.every(key => Number.isSafeInteger(totals[key]) && totals[key] >= 0)
     && Number.isFinite(totals.accuracyPercent) && totals.accuracyPercent >= 0 && totals.accuracyPercent <= 100;
   if (scores.rooms.length !== expected.size || actual.size !== expected.size || !valid(scores.total)
-    || scores.rooms.some(score => !expected.has(score?.roomId) || expected.get(score.roomId) !== score.sessionId
+    || scores.rooms.some(score => !Number.isInteger(score?.roomId) || score.roomId < 1 || score.roomId > 5
+      || !identity.test(score.sessionId) || expected.get(score.roomId) !== score.sessionId
       || !valid(score.totals))) return;
   const scoreRow = (label, totals) => row([label, ...keys.map(key => totals[key]), totals.accuracyPercent + '%']);
-  const rows = scores.rooms.map(score => {
+  const sorted = [...scores.rooms].sort((a, b) => a.roomId - b.roomId);
+  const rows = sorted.map(score => {
     const item = scoreRow('房間 ' + score.roomId, score.totals);
     item.dataset.venueScoreRoom = score.roomId;
     return item;
@@ -1146,6 +1148,7 @@ function renderVenueScores(batch, scores) {
   rows.push(scoreRow('本批合計', scores.total));
   $('venue-score-rows').replaceChildren(...rows);
   $('venue-score-table').hidden = false;
+  return { ...scores, rooms: sorted };
 }
 function row(cells) { const tr = element('tr'); for (const value of cells) { const td = element('td'); if (value instanceof Node) td.append(value); else td.textContent = value; tr.append(td); } return tr; }
 function emptyTable(id, columns, message) { const tr = element('tr'), td = element('td', message, 'empty-cell'); td.colSpan = columns; tr.append(td); $(id).replaceChildren(tr); }

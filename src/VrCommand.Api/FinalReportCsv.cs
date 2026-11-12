@@ -58,6 +58,21 @@ public static class FinalReportCsv
         return output.ToArray();
     }
 
+    internal static byte[] EncodeVenueScores(VenueBattleScores scores)
+    {
+        var csv = new StringBuilder("\uFEFF");
+        CsvReportRows.Append(csv, "reportVersion", "rowType", "requestId", "sessionId", "roomId", "players", "ammoUsed",
+            "shotsHit", "kills", "hitsReceived", "damageTaken", "accuracyPercent");
+        foreach (var room in scores.Rooms) WriteRow("Room", room.SessionId, room.RoomId, room.Totals);
+        WriteRow("Total", null, null, scores.Total);
+        return Encoding.UTF8.GetBytes(csv.ToString());
+
+        void WriteRow(string type, Guid? sessionId, int? roomId, VenueBattleTotals totals) =>
+            CsvReportRows.Append(csv, 1, type, scores.RequestId, sessionId, roomId, totals.Players, totals.AmmoUsed,
+                totals.ShotsHit, totals.Kills, totals.HitsReceived, totals.DamageTaken,
+                totals.AccuracyPercent.ToString("0.##", CultureInfo.InvariantCulture));
+    }
+
     private static void WriteCsv(ZipArchive archive, FinalSessionReport report)
     {
         using var stream = OpenEntry(archive, FileName(report.SessionId, report.ReportRoomId));

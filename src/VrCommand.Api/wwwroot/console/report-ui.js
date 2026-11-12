@@ -1,3 +1,14 @@
+export const venueScoreFields = ['players', 'ammoUsed', 'shotsHit', 'kills', 'hitsReceived', 'damageTaken'];
+
+function venueScoreCsv(scores) {
+  const header = ['reportVersion', 'rowType', 'requestId', 'sessionId', 'roomId', ...venueScoreFields, 'accuracyPercent'];
+  const row = (type, session, room, totals) => [1, type, scores.requestId, session, room,
+    ...venueScoreFields.map(field => totals[field]), totals.accuracyPercent];
+  const rooms = scores.rooms.map(room => row('Room', room.sessionId, room.roomId, room.totals));
+  return '\uFEFF' + [header, ...rooms, row('Total', '', '', scores.total)]
+    .map(cells => cells.map(cell => `"${cell}"`).join(',') + '\r\n').join('');
+}
+
 export function mountReport(current, unauthorized, scopeChanged) {
   const button = document.getElementById('export-report'), status = document.getElementById('report-status');
   const bundle = document.getElementById('export-report-bundle');
@@ -118,6 +129,14 @@ export function mountVenueReport(current, unauthorized, save) {
     conflict: '本批仍在等待戰鬥資料封存。', invalid: '報表格式不符，可重新下載。',
     failed: '本批戰績下載失敗，可重新整理後再試。', saved: '已下載本批戰績與原場次清單。'
   });
+  const scores = mountVenueDownload(current, unauthorized, save, {
+    actions: 'venue-score-actions', button: 'export-venue-scores', status: 'venue-score-status',
+    route: 'scores', filename: 'scores', extension: 'csv', mediaType: 'text/csv', verifyContent: true,
+    ready: session => ['Sealed', 'NoSource'].includes(session.combat),
+    available: '', loading: '正在下載分房合計 CSV…',
+    conflict: '本批仍在等待戰鬥資料封存。', invalid: '分房合計 CSV 與目前批次戰績不符，可重新下載。',
+    failed: '分房合計下載失敗，可重新整理後再試。', saved: '已下載各房與全批戰績合計。'
+  });
   const field = mountVenueDownload(current, unauthorized, save, {
     actions: 'venue-field-actions', button: 'export-venue-field', status: 'venue-field-status',
     route: 'field-evidence', filename: 'field',
@@ -136,30 +155,31 @@ export function mountVenueReport(current, unauthorized, save) {
     conflict: '本批尚未完成雙封存。', invalid: '戰績回條格式不符，可重新下載。',
     failed: '本批戰績回條下載失敗，可重新整理後再試。', saved: '已下載本批戰績回條，請私下保管。'
   });
-  return { update(batch) { reports(batch); field(batch); debrief(batch); } };
+  return { update(batch, totals) { reports(batch); field(batch); debrief(batch); scores(batch, totals ? venueScoreCsv(totals) : null); } };
 }
 
 function mountVenueDownload(current, unauthorized, save, options) {
   const { extension = 'zip', mediaType = 'application/zip' } = options;
   const actions = document.getElementById(options.actions);
   const button = document.getElementById(options.button), status = document.getElementById(options.status);
-  let id = null, waiting = '', controller = null;
+  let id = null, waiting = '', controller = null, content = null;
   const updateButton = () => { button.disabled = !id || !!waiting || !!controller; };
-  function update(batch) {
-    const nextId = current().actor?.role === 'Master' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(batch?.requestId ?? '')
+  function update(batch, expected = null) {
+    const nextId = (!options.verifyContent || expected !== null) && current().actor?.role === 'Master'
+      && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(batch?.requestId ?? '')
       ? batch.requestId : null;
     const nextWaiting = nextId ? batch.sessions.filter(session => !options.ready(session))
       .flatMap(session => session.roomIds).sort((a, b) => a - b).join('、') : '';
-    if (id !== nextId || waiting !== nextWaiting) {
+    if (id !== nextId || waiting !== nextWaiting || content !== expected) {
       controller?.abort(); controller = null;
-      id = nextId; waiting = nextWaiting;
+      id = nextId; waiting = nextWaiting; content = expected;
       status.textContent = !id ? '' : waiting ? options.waiting(waiting) : options.available;
     }
     actions.hidden = !id;
     updateButton();
   }
   button.addEventListener('click', async () => {
-    const { actor, epoch, key } = current(), batchId = id;
+    const { actor, epoch, key } = current(), batchId = id, expected = content;
     if (!batchId || waiting || controller || actor?.role !== 'Master') return;
     const request = new AbortController(); controller = request;
     const active = () => controller === request && id === batchId && current().epoch === epoch;
@@ -176,6 +196,12 @@ function mountVenueDownload(current, unauthorized, save, options) {
         throw new Error(options.invalid);
       const blob = await response.blob();
       if (!active()) return;
+      if (expected !== null) {
+        if (blob.size !== expected.length + 2) throw new Error(options.invalid); // The UTF-8 BOM occupies three bytes.
+        const csv = new TextDecoder('utf-8', { ignoreBOM: true }).decode(await blob.arrayBuffer());
+        if (!active()) return;
+        if (csv !== expected) throw new Error(options.invalid);
+      }
       save(`vr-command-venue-${options.filename}-v1-${batchId}.${extension}`, blob);
       status.textContent = options.saved;
     } catch (error) {

@@ -12,7 +12,7 @@ async function main() {
   const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_CLOSURE_CHROMIUM,
     args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
   const results = [], fieldEvidence = [], participation = [], receiptExports = [], debriefSeats = [], debriefCsv = [], debriefReplay = [], debriefAll = [];
-  let history, roomReplay, scores, alignment, missionTime, debriefReceipts;
+  let history, roomReplay, scores, scoreCsv, alignment, missionTime, debriefReceipts;
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1080 }, acceptDownloads: true });
     const errors = [];
@@ -40,6 +40,18 @@ async function main() {
         rows.map(row => [...row.cells].map(cell => cell.textContent))), expected);
       await scoresTable.screenshot({ path: path.join(path.dirname(output), config.mode + '-venue-scores.png') });
       scores = body.scores;
+      const saved = page.waitForEvent('download');
+      await page.locator('#export-venue-scores').click();
+      const download = await saved;
+      const name = `vr-command-venue-scores-v1-${scores.requestId}.csv`;
+      assert.equal(download.suggestedFilename(), name);
+      const bytes = await fs.readFile(await download.path());
+      const expectedCsv = (rowType, sessionId, roomId, totals) => ({ reportVersion: '1', rowType, requestId: scores.requestId,
+        sessionId, roomId, ...Object.fromEntries(Object.entries(totals).map(([key, value]) => [key, String(value)])) });
+      assert.deepEqual(readCsv(bytes), [...config.scores.rooms.map(room => expectedCsv('Room', room.sessionId, String(room.roomId), room.totals)),
+        expectedCsv('Total', '', '', config.scores.total)]);
+      await fs.writeFile(path.join(path.dirname(output), name), bytes, { flag: 'wx' });
+      scoreCsv = { name, rows: scores.rooms.length + 1, sha256: createHash('sha256').update(bytes).digest('hex') };
       if (config.debriefReceipts) {
         assert.deepEqual(body.debriefReceipts, config.debriefReceipts);
         const table = page.locator('#venue-closure-table');
@@ -586,7 +598,7 @@ async function main() {
   } finally {
     await browser.close();
   }
-  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation, scores, alignment, missionTime, debriefReceipts, receiptExports, debriefSeats, debriefCsv, debriefReplay, debriefAll }, null, 2), { flag: 'wx' });
+  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation, scores, scoreCsv, alignment, missionTime, debriefReceipts, receiptExports, debriefSeats, debriefCsv, debriefReplay, debriefAll }, null, 2), { flag: 'wx' });
 }
 main().catch(error => {
   const location = error.stack?.match(/check-venue-replay-native\.cjs:(\d+):(\d+)\)/);
