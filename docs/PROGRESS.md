@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 開場前核對五房保存環境
+
+- 管理包 0.31.152 在各房任務選項、配置檔預覽、建立確認及已確認的五房建立結果顯示初始天氣、日夜與閃電。來源與解壓包各通過 69 項 Chromium 專項，涵蓋歷史與目前版本並排、保存環境欄位不符的回覆拒絕，以及原保存環境與場次目前環境不同時的回條顯示。 [操作方式](MISSION_VERSIONS.md#逐房指定任務版本) · [配置檔預覽](../artifacts/console-mission-climate-152-package/venue-mission-file-review.png)
+- Windows 0.50.7 同機通過 383 項整合。獨立及合併各 25 個模擬玩家端。獨立五房使用四種天氣及不同的日夜與閃電設定，合併場重載歷史版本。六場均從原 Running 畫格核對預覽所用的保存環境，共 852 格回放、6 份 CSV 與 50 筆伺服器戰績回條。程序停止後，原生與管理 C／F 快照分別有 215、18 個非資料庫檔案一致。 [驗證摘要](../artifacts/mission-climate-0.31.152-validation.json)
+- 解壓核對 564 筆清單，另通過 825 項 HTTP 及 107 項管理包檢查。離線核對沿用 Windows 與 Quest 0.50.7 和 Windows 玩家啟動器 1.13。功能來源 `86526d9` 已推送，GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商硬體仍待驗收。 [管理包](WINDOWS_CONTROL_PACKAGE.md) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43284376039)
+
 ## 2026-11-13 逐席驗收 Windows 連線量測
 
 - 場館驗收工具在 Windows 收件階段逐席列出回覆、逾時、中斷、p95 往返時間及缺量測的席位。場館可選填最低回覆數與 p95 上限。檔案收齊但量測未達門檻時，收件檢查保留完整狀態並指出未達標的欄位，完整驗收則指出房間及席位。省略門檻時，完整驗收輸出與原結果一致。 [操作方式](EXTERNAL_CLIENTS.md#逐席核對-windows-連線量測門檻)

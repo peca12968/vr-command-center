@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-13 `VRCommand-ControlServer-0.31.152-mission-climate-win-x64.zip` 為 53,100,746 bytes，SHA-256 `b7a5157512f3205ee33b1d02e9888776471e1f3654aa8c855ca89b2c46adf52a`。逐房準備與配置檔預覽顯示原保存版本的初始環境，並在五房建立回覆核對初始環境。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.152-mission-climate-win-x64.zip) · [操作方式](MISSION_VERSIONS.md#逐房指定任務版本)
+
 2026-11-13 `VRCommand-ControlServer-0.31.151-mission-file-review-win-x64.zip` 為 53,100,303 bytes，SHA-256 `18097064f506e62a6c1f2e42b3c2d06a40e8e71fc571e43ad3796bddcd531b2a`。主控可在載入五房任務配置前逐房比對版本及場地結果。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.151-mission-file-review-win-x64.zip) · [操作說明](MISSION_VERSIONS.md#在開場前保存五房任務配置)
 
 2026-11-13 `VRCommand-ControlServer-0.31.150-layout-proposal-win-x64.zip` 為 53,097,624 bytes，SHA-256 `31fbb72fab836d1d36df2a6eebed8ae2a07aac8be3f770f1821510cf8aa585f4`。任務編輯器會在套用批次移動、旋轉及成列複製前檢查候選配置。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.150-layout-proposal-win-x64.zip) · [操作方式](LAYOUT.md#套用前檢查物件預覽)
