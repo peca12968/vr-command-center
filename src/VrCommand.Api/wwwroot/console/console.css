@@ -70,6 +70,8 @@
 #venue-missions-review :is(td,th):is(:nth-child(2),:nth-child(3)){white-space:normal;overflow-wrap:anywhere}
 #venue-missions-review td:first-child{min-width:0}
 #venue-missions-review [data-changed=true] td:nth-child(3){color:var(--accent)}
+.mission-file-climate{margin:4px 0 0}
+#launch-independent-receipt td:nth-child(4){white-space:normal;min-width:8.5rem}
 #launch-layout-spawns circle{fill:#4e839433;stroke:#80c4d5;stroke-width:.05;stroke-dasharray:.08 .04}
 #launch-layout-spawns text{fill:#b2dfec;font-size:.3px;text-anchor:middle}
 #launch-layout-spawns [data-route-missing] circle{fill:#ffbb6333;stroke:#ffbb63}

@@ -2,7 +2,7 @@ import { savedRoomLayoutMap, validateLayoutReport } from './layout-ui.js';
 
 const $ = id => document.getElementById(id);
 
-export function mountIndependentPlan({ available, catalog, pinned, common, inspect, invalidate, changed }) {
+export function mountIndependentPlan({ available, catalog, pinned, common, climateText, inspect, invalidate, changed }) {
   const toggle = $('launch-room-missions-toggle'), panel = $('launch-room-missions'), preview = $('launch-review-room');
   const overview = $('launch-room-layouts'), maps = $('launch-room-layouts-grid');
   let choices = new Map(), optionKey = '';
@@ -82,7 +82,8 @@ export function mountIndependentPlan({ available, catalog, pinned, common, inspe
       const definition = row.current?.revision.mission.definition;
       const layoutStatus = { empty: '尚未選取', pending: '正在檢查場地…', valid: '場地檢查通過',
         invalid: '場地配置未通過，請查看本房預覽', error: '場地檢查未完成，可重新檢查' }[state];
-      row.status.textContent = definition ? `${definition.environment.mode} · ${definition.durationSeconds} 秒 · ${layoutStatus}` : layoutStatus;
+      row.status.textContent = definition
+        ? `${definition.environment.mode} · ${definition.durationSeconds} 秒 · ${climateText(definition.environment)} · ${layoutStatus}` : layoutStatus;
     }
     optionKey = key;
     renderMaps();

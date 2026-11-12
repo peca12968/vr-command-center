@@ -33,6 +33,7 @@ module.exports = async function independentSetBrowser({ context, api, tokens, ba
   const draft = { name: '五房同步準備測試', briefing: '固定的原始版本', durationSeconds: 600,
     environment: { mode: 'VR', weather: 'Rain', timeOfDay: 'Night', lightning: false },
     enemies: { count: 2, behavior: 'Hold', autoAttack: false }, props: [] };
+  const rain = '下雨 · 夜晚 · 閃電關閉', storm = '暴風雨 · 夜晚 · 閃電開啟';
   try {
     assert.deepEqual(await api('/sessions'), []);
     const mission = await api('/missions', 'POST', draft, 'Master', 201);
@@ -97,7 +98,7 @@ module.exports = async function independentSetBrowser({ context, api, tokens, ba
         && session.mode === 'Independent' && session.state === 'Preparing'), 'Retry restores exactly the five original IDs and saved revision even after the mission head changes');
     const originalReceipt = await receiptRows();
     check(await receipt.isVisible() && originalReceipt.length === 5 && originalReceipt.every((row, index) => row.missionId === mission.id
-      && row.cells.join('|') === `房間 ${index + 1}|${draft.name} · 第 1 版|VR · 600 秒|${original[index]}`),
+      && row.cells.join('|') === `房間 ${index + 1}|${draft.name} · 第 1 版|VR · 600 秒|${rain}|${original[index]}`),
       'The confirmed uniform batch shows all five original session IDs and saved versions');
     await page.unroute(endpoint, intercept);
     await page.locator('#rooms').screenshot({ path: path.join(screenshots, 'independent-set-prepared.png') });
@@ -209,6 +210,8 @@ module.exports = async function independentSetBrowser({ context, api, tokens, ba
       && await card(2).locator('.room-layout-props [data-index="0"]').getAttribute('transform') === 'translate(2 -1) rotate(45)'
       && await card(1).locator('.room-layout-props [data-index]').count() === 0,
       'Each room preview reflects its exact assigned duration, environment and saved geometry');
+    check((await roomLayout(1).innerText()).includes(rain) && (await roomLayout(2).innerText()).includes(storm),
+      'Two room assignment rows show their saved climate without switching the preview room');
     await overview.screenshot({ path: path.join(screenshots, 'independent-room-layouts.png') });
     await page.locator('#launch-room-missions').screenshot({ path: path.join(screenshots, 'independent-room-missions.png') });
     await page.setViewportSize({ width: 390, height: 844 });
@@ -249,12 +252,18 @@ module.exports = async function independentSetBrowser({ context, api, tokens, ba
         if (attempts === 2) {
           result.sessions[3].mission.definition.durationSeconds = 480;
           await route.fulfill({ status: 200, json: result });
-        } else await route.fulfill({ response: actual });
+        } else if (attempts === 3) {
+          result.sessions[3].mission.definition.environment.lightning = false;
+          await route.fulfill({ response: actual, json: result });
+        } else {
+          result.sessions[3].environment.lightning = false;
+          await route.fulfill({ response: actual, json: result });
+        }
       }
     });
     const cancelled = await confirmPlan(false);
     check(plan.every(({ roomId, missionId }) => cancelled.includes(`房間 ${roomId}　${missionId === head
-      ? `${draft.name} · 第 2 版 · VR · 600 秒` : `${alternateDraft.name} · 第 1 版 · MR · 420 秒`}`))
+      ? `${draft.name} · 第 2 版 · VR · 600 秒 · ${rain}` : `${alternateDraft.name} · 第 1 版 · MR · 420 秒 · ${storm}`}`))
       && attempts === 0 && (await api('/sessions')).length === 0 && await roomMission(4).inputValue() === alternate.id,
       'Cancelling confirmation for the exact five saved versions leaves rooms free and sends no write');
     check(await confirmPlan(true) === cancelled, 'Confirmation submits the same five assignments that the operator reviewed');
@@ -265,6 +274,10 @@ module.exports = async function independentSetBrowser({ context, api, tokens, ba
     await page.waitForFunction(() => !document.querySelector('#retry-command').disabled && !document.querySelector('#pending-command').hidden, null, { polling: 100 });
     check(attempts === 2 && JSON.stringify(await receiptRows()) === JSON.stringify(originalReceipt),
       'A retry receipt with a different duration cannot replace the last confirmed batch');
+    await page.locator('#retry-command').click();
+    await page.waitForFunction(() => !document.querySelector('#retry-command').disabled && !document.querySelector('#pending-command').hidden, null, { polling: 100 });
+    check(attempts === 3 && JSON.stringify(await receiptRows()) === JSON.stringify(originalReceipt),
+      'A retry receipt with a different saved lightning setting cannot replace the confirmed batch');
     await page.locator('#retry-command').click(); await notice.filter({ hasText: '五個獨立場次已確認' }).waitFor();
     check(mixed.sessions.every((session, index) => session.roomIds[0] === index + 1 && session.mission.id === plan[index].missionId)
       && mixed.sessions[3].mission.definition.durationSeconds === 420
@@ -273,9 +286,9 @@ module.exports = async function independentSetBrowser({ context, api, tokens, ba
       'A mixed retry keeps all original sessions and the assigned historical version after a library revision');
     const rows = await receiptRows();
     check(rows.length === 5 && rows.every((row, index) => row.missionId === plan[index].missionId
-      && row.cells.join('|') === (row.missionId === head ? `房間 ${index + 1}|${draft.name} · 第 2 版|VR · 600 秒|${mixed.sessions[index].id}`
-        : `房間 ${index + 1}|${alternateDraft.name} · 第 1 版|MR · 420 秒|${mixed.sessions[index].id}`)),
-      'The confirmed mixed receipt identifies the exact accepted VR and MR versions and session IDs');
+      && row.cells.join('|') === (row.missionId === head ? `房間 ${index + 1}|${draft.name} · 第 2 版|VR · 600 秒|${rain}|${mixed.sessions[index].id}`
+        : `房間 ${index + 1}|${alternateDraft.name} · 第 1 版|MR · 420 秒|${storm}|${mixed.sessions[index].id}`)),
+      'The confirmed receipt retains the saved climate even if the mutable current environment in the response differs');
     await page.setViewportSize({ width: 390, height: 844 });
     check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), 'The receipt keeps its table scroll inside the mobile viewport');
     await receipt.screenshot({ path: path.join(screenshots, 'independent-mixed-receipt.png') });

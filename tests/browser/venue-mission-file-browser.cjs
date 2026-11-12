@@ -43,7 +43,7 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
     assert.deepEqual(await api('/sessions'), []);
     const a = await api('/missions', 'POST', template, 'Master', 201);
     const b = await api('/missions', 'POST', { ...template, name: '配置檔 MR 任務', durationSeconds: 420,
-      environment: { ...template.environment, mode: 'MR' } }, 'Master', 201);
+      environment: { ...template.environment, mode: 'MR', weather: 'Storm', lightning: true } }, 'Master', 201);
     await login('Room2');
     check(await panel.isHidden(), 'Room control has no venue mission file controls');
     await login('Master');
@@ -64,7 +64,8 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
     assert.deepEqual(independent.value, { schemaVersion: 1, mode: 'IndependentSet', rooms: rooms(ids) });
     check((await api('/sessions')).length === 0, 'Both downloaded configuration files contain only version assignments and need no prior session');
 
-    const head = await api(`/missions/${a.id}/revisions`, 'POST', { ...template, durationSeconds: 690, props: [] },
+    const head = await api(`/missions/${a.id}/revisions`, 'POST', { ...template, durationSeconds: 690, props: [],
+      environment: { ...template.environment, weather: 'Fog', timeOfDay: 'Day' } },
       'Master', 201, undefined, randomUUID());
     const invalidLayout = await api('/missions', 'POST', { ...template, name: '未修正配置',
       props: [template.props[0], template.props[0]] }, 'Master', 201);
@@ -94,6 +95,10 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
       && await reviewRows.locator('[data-status=valid]').count() === 5
       && (await review.innerText()).includes('目前為單房獨立，檔案指定五房各自獨立'),
       'The review shows exact original assignments, historical versions, MR duration and each original layout result');
+    const climate = (column, index) => reviewRows.nth(index).locator(`td:nth-child(${column}) .mission-file-climate`).textContent();
+    check(await climate(2, 0) === '濃霧 · 白天 · 閃電關閉' && await climate(3, 0) === '下雨 · 夜晚 · 閃電關閉'
+      && await climate(3, 1) === '暴風雨 · 夜晚 · 閃電開啟',
+      'The file review distinguishes saved historical weather, time of day and lightning from the current revision');
     await mode.selectOption('Linked');
     check(await reviewRows.locator('td:nth-child(2)').evaluateAll(cells => cells.every(cell => cell.textContent.includes('第 2 版')))
       && (await review.innerText()).includes('目前為五房全連線'),
@@ -139,9 +144,21 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
     check(await mode.inputValue() === 'IndependentSet' && JSON.stringify(await selected()) === JSON.stringify(ids),
       'Malformed, ambiguous or oversized files preserve all five selections');
 
+    const versionPath = `**/api/missions/${a.id}/version`;
+    await page.route(versionPath, async route => {
+      const response = await route.fetch();
+      const value = await response.json();
+      value.mission.definition.environment.weather = 'Unknown';
+      await route.fulfill({ response, json: value });
+    }, { times: 1 });
+    await input.setInputFiles(linked.target);
+    await preview.click();
+    await status.filter({ hasText: '無法核對房間 1、2、3、4、5' }).waitFor();
+    check(await review.isHidden() && JSON.stringify(await selected()) === JSON.stringify(ids),
+      'A malformed saved environment is refused for every affected room before applying the file');
+
     let intercept;
     const pending = new Promise(resolve => { intercept = resolve; });
-    const versionPath = `**/api/missions/${a.id}/version`;
     await page.route(versionPath, route => { intercept(route); }, { times: 1 });
     await input.setInputFiles(linked.target);
     await preview.click();
