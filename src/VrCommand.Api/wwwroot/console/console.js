@@ -1113,7 +1113,7 @@ function renderVenueClosure(report, loading = false) {
     rows.append(result);
   }
   $('venue-closure-table').hidden = false;
-  venueReport.update(batch, renderVenueScores(batch, report.scores));
+  venueReport.update(batch, renderVenueScores(batch, report.scores), receipts);
 }
 function venueDebriefRooms(batch, summary) {
   if (!summary || typeof batch.requestId !== 'string' || summary.requestId !== batch.requestId

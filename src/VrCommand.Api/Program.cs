@@ -139,7 +139,7 @@ app.Use(async (context, next) =>
         else if (ex is VenueReportsNotReadyException reportsNotReady)
             await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "venue-reports-not-ready", roomIds = reportsNotReady.RoomIds });
         else if (ex is VenueFieldEvidenceNotReadyException fieldNotReady)
-            await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = "venue-field-evidence-not-ready", roomIds = fieldNotReady.RoomIds });
+            await context.Response.WriteAsJsonAsync(new { error = ex.Message, code = fieldNotReady.Code, roomIds = fieldNotReady.RoomIds });
         else await context.Response.WriteAsJsonAsync(new { error = ex.Message });
     }
 });
@@ -362,11 +362,12 @@ app.MapGet("/api/venue/closure/{id:guid}/replay-at-tick", (Guid id, Guid fromSes
     context.Response.Headers.CacheControl = "no-store";
     return Results.Json(worlds.ReadVenueReplayAtTick(id, fromSessionId, fromFrame, roomId, Actor(context)), WorldJson.Options);
 });
-app.MapGet("/api/venue/closure/{id:guid}/field-evidence.zip", (Guid id, WorldRecordings worlds, HttpContext context) =>
+app.MapGet("/api/venue/closure/{id:guid}/field-evidence.zip", (Guid id, bool? includeDebriefReceipts, WorldRecordings worlds, HttpContext context) =>
 {
     context.Response.Headers.CacheControl = "no-store";
-    var evidence = worlds.ReadVenueFieldEvidence(id, Actor(context));
-    return Results.File(evidence.Encode(), "application/zip", $"vr-command-venue-field-v1-{id:D}.zip");
+    var evidence = worlds.ReadVenueFieldEvidence(id, Actor(context), includeDebriefReceipts == true);
+    var name = evidence.Receipts is null ? "field" : "field-with-receipts";
+    return Results.File(evidence.Encode(), "application/zip", $"vr-command-venue-{name}-v1-{id:D}.zip");
 });
 app.MapGet("/api/venue/closure/{id:guid}/debrief-receipts.json", (Guid id, WorldRecordings worlds, HttpContext context) =>
 {

@@ -790,6 +790,71 @@ class FieldResultsTests(unittest.TestCase):
                 with self.assertRaisesRegex(field.EvidenceError, 'lacks an exact Running frame'):
                     field.verify_venue(path)
 
+    def test_prepared_venue_manifest_uses_embedded_original_receipts(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, closure = venue_fixture(root, mode, with_journals=True)
+                terminal, report, moved = self.terminal_venue_fixture(root, manifest, closure)
+                packed = self.pack_venue(root, manifest)
+                bundle = root / packed['venueBundle']
+                with zipfile.ZipFile(bundle) as archive:
+                    originals = {name: archive.read(name) for name in archive.namelist()}
+                rows = []
+                for entry in manifest['sessions']:
+                    session, _, _ = field.management_zip(root / entry['evidenceZip'])
+                    launcher = next(row['result'] for row in report['servers'] if row['result']['sessionId'] == session['id'])
+                    rows.append({'sessionId': session['id'], 'streamId': launcher['streamId'], 'throughSequence': session['sequence'],
+                                 'finalStreamSequence': launcher['finalCombatStream']['acceptedSequence'],
+                                 'worldSequence': launcher['finalWorld']['acceptedSequence'],
+                                 'players': [{'playerId': p['id'], 'admissionId': p['admissionId'], 'roomId': p['roomId'], 'acknowledged': True}
+                                             for p in session['players']]})
+                export = {'version': 1, 'requestId': closure['requestId'], 'sessions': rows}
+
+                def write_bundle(payload):
+                    with zipfile.ZipFile(bundle, 'w', zipfile.ZIP_DEFLATED) as archive:
+                        for name, raw in originals.items():
+                            archive.writestr(name, raw)
+                        archive.writestr('debrief-receipts.json', payload)
+
+                raw_receipts = json.dumps(export).encode('utf-8-sig')
+                external = root / 'receipts.json'
+                external.write_bytes(raw_receipts)
+                path.write_text(json.dumps(dict(packed, venueDebriefReceipts=external.name)), encoding='utf-8')
+                expected = field.verify_venue(path)
+                self.assertEqual(25, expected['venueDebriefReceipts']['acknowledgedPlayers'])
+                write_bundle(raw_receipts)
+                with self.assertRaisesRegex(field.EvidenceError, 'either bundled or separate'):
+                    field.verify_venue(path)
+                path.write_text(json.dumps(packed), encoding='utf-8')
+                external.unlink()
+                self.assertEqual(expected, field.verify_venue(path))
+
+                generated = root / 'prepared.json'
+                command = [sys.executable, str(SCRIPT.with_name('prepare-venue-field-manifest.py')), '--venue-bundle', str(bundle),
+                           '--launcher-report', str(terminal), '--topology', 'same-host', '--server-ip', manifest['serverIps'][0],
+                           '--server-work-root', str(moved)]
+                result = subprocess.run([*command, '--output', str(generated)], capture_output=True)
+                self.assertEqual(0, result.returncode, result.stderr.decode())
+                prepared = json.loads(generated.read_bytes())
+                self.assertNotIn('venueDebriefReceipts', prepared)
+                generated.write_text(json.dumps(dict(prepared, windowsPlayers=packed['windowsPlayers'])), encoding='utf-8')
+                self.assertEqual(expected, field.verify_venue(generated))
+
+                rejected = root / 'rejected.json'
+                altered = deepcopy(export)
+                altered['sessions'][0]['players'][0]['acknowledged'] = False
+                for raw, message in ((json.dumps(altered).encode(), 'missing or unconfirmed'),
+                                     (json.dumps(dict(export, requestId=id_for(1111))).encode(), 'another End batch'),
+                                     (b' ' * (field.MAX_DEBRIEF_BYTES + 1), 'receipt export is too large')):
+                    write_bundle(raw)
+                    with self.assertRaisesRegex(field.EvidenceError, message):
+                        field.verify_venue(path)
+                    result = subprocess.run([*command, '--output', str(rejected)], capture_output=True)
+                    self.assertEqual(1, result.returncode)
+                    self.assertIn(message.encode(), result.stderr)
+                    self.assertFalse(rejected.exists())
+
     def test_venue_receipt_export_matches_original_logs_and_rejects_mismatches(self):
         for mode in ('Independent', 'Linked'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:

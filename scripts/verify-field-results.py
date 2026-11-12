@@ -36,6 +36,7 @@ PLAYER_MARKERS = ('VR_CLIENT_CONNECTED', 'VR_CLIENT_DISCONNECTED', 'VR_CLIENT_DE
 MAX_FILE_BYTES = 16 * 1024 * 1024
 MAX_WINDOWS_LINK_BYTES = 64 * 1024
 MAX_ALIGNMENT_BYTES = 16 * 1024
+MAX_DEBRIEF_BYTES = 16 * 1024
 QUEST_ROOMS = (1, 2, 3, 4, 5)
 MAX_QUEST_PLAN_BYTES = 32768
 MAX_CONCURRENT_FRAME_GAP_MS = 500
@@ -1017,11 +1018,18 @@ def management_zip(path):
 def venue_bundle(path, mode):
     names = ['linked.zip'] if mode == 'Linked' else [f'room-{room:02}.zip' for room in QUEST_ROOMS]
     with path.open('rb') as source, zipfile.ZipFile(io.BytesIO(limited_read(source))) as archive:
-        require(sorted(archive.namelist()) == sorted(['closure.json', *names]),
-                'Venue ZIP must contain only the original closure and exact session ZIPs for this mode')
+        members = sorted(archive.namelist())
+        required = ['closure.json', *names]
+        receipt_name = 'debrief-receipts.json'
+        require(members in (sorted(required), sorted([*required, receipt_name])),
+                'Venue ZIP must contain the original closure, exact session ZIPs for this mode and optional debrief receipts')
         require(sum(info.file_size for info in archive.infolist()) <= MAX_FILE_BYTES, 'Venue ZIP exceeds the expanded size limit')
         closure = read_json(evidence_zip_entry(archive, 'closure.json'))['batch']
-        return closure, {name: evidence_zip_entry(archive, name) for name in names}
+        receipts = None
+        if receipt_name in members:
+            require(archive.getinfo(receipt_name).file_size <= MAX_DEBRIEF_BYTES, 'Management debrief receipt export is too large')
+            receipts = evidence_zip_entry(archive, receipt_name)
+        return closure, {name: evidence_zip_entry(archive, name) for name in names}, receipts
 
 
 def read_venue_alignment_bundle(path, mode, expected):
@@ -1680,10 +1688,8 @@ def read_venue_release(path):
     return release, hashlib.sha256(raw).hexdigest()
 
 
-def read_venue_debrief_receipts(path, request_id, session_count):
-    with path.open('rb') as source:
-        raw = source.read(16385)
-    require(len(raw) <= 16384, 'Management debrief receipt export is too large')
+def read_venue_debrief_receipts(raw, request_id, session_count):
+    require(len(raw) <= MAX_DEBRIEF_BYTES, 'Management debrief receipt export is too large')
     value = read_json(raw.decode('utf-8-sig'))
     require(type(value) is dict and set(value) == {'version', 'requestId', 'sessions'}
             and integer(value['version'], 1, 1) == 1 and identity(value['requestId']) == request_id,
@@ -1849,8 +1855,9 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
 
     packed = 'venueBundle' in manifest
     require(packed != ('closure' in manifest), 'Provide either venueBundle or the original closure and per-session ZIPs')
+    receipt_bytes = None
     if packed:
-        closure, archives = venue_bundle(evidence_path(manifest['venueBundle']), mode)
+        closure, archives, receipt_bytes = venue_bundle(evidence_path(manifest['venueBundle']), mode)
     else:
         closure = read_json(content(evidence_path(manifest['closure'])))['batch']
     closure_id = identity(closure['requestId'])
@@ -1862,9 +1869,14 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
     expected_rooms, expected = venue_closure_sessions(mode, rows)
     require(type(entries) is list and len(entries) == len(rows),
             'Venue must contain the original five independent sessions or one linked session')
-    debrief_receipts, debrief_hash = (read_venue_debrief_receipts(evidence_path(manifest['venueDebriefReceipts']),
-                                                               closure['requestId'], len(rows))
-                                    if 'venueDebriefReceipts' in manifest and not inspect_windows else (None, None))
+    require(receipt_bytes is None or 'venueDebriefReceipts' not in manifest, 'Use either bundled or separate management debrief receipts')
+    debrief_receipts, debrief_hash = None, None
+    if not inspect_windows:
+        if 'venueDebriefReceipts' in manifest:
+            with evidence_path(manifest['venueDebriefReceipts']).open('rb') as source:
+                receipt_bytes = source.read(MAX_DEBRIEF_BYTES + 1)
+        if receipt_bytes is not None:
+            debrief_receipts, debrief_hash = read_venue_debrief_receipts(receipt_bytes, closure_id, len(rows))
     journals = any('worldJournal' in entry for entry in entries)
     require(not journals or all('worldJournal' in entry for entry in entries), 'Provide a world journal for every session in this batch')
     combat_journals = any('combatJournal' in entry for entry in entries)

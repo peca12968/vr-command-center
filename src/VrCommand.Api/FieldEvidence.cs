@@ -34,7 +34,7 @@ internal sealed record FieldEvidence(SessionView Session, SessionStatistics Stat
     }
 }
 
-internal sealed record VenueFieldEvidence(VenueClosureBatch Batch, FieldEvidence[] Sessions)
+internal sealed record VenueFieldEvidence(VenueClosureBatch Batch, FieldEvidence[] Sessions, VenueDebriefExport? Receipts)
 {
     public byte[] Encode()
     {
@@ -49,15 +49,22 @@ internal sealed record VenueFieldEvidence(VenueClosureBatch Batch, FieldEvidence
                 using var entry = FieldEvidence.Entry(archive, name, CompressionLevel.NoCompression).Open();
                 entry.Write(item.Encode());
             }
+            if (Receipts is not null)
+            {
+                using var receipts = FieldEvidence.Entry(archive, "debrief-receipts.json").Open();
+                JsonSerializer.Serialize(receipts, Receipts, JsonFormat.Options);
+            }
         }
         return output.ToArray();
     }
 }
 
-internal sealed class VenueFieldEvidenceNotReadyException(int[] roomIds)
-    : InvalidOperationException("All original sessions must provide sealed field evidence.")
+internal sealed class VenueFieldEvidenceNotReadyException(int[] roomIds, bool waitingForReceipts = false)
+    : InvalidOperationException(waitingForReceipts ? "All original players must have confirmed debrief receipts."
+        : "All original sessions must provide sealed field evidence.")
 {
     public int[] RoomIds { get; } = roomIds;
+    public string Code { get; } = waitingForReceipts ? "venue-field-receipts-not-confirmed" : "venue-field-evidence-not-ready";
 }
 
 public sealed partial class WorldRecordings
@@ -86,14 +93,25 @@ public sealed partial class WorldRecordings
         }
     }
 
-    internal VenueFieldEvidence ReadVenueFieldEvidence(Guid id, OperatorIdentity actor)
+    internal VenueFieldEvidence ReadVenueFieldEvidence(Guid id, OperatorIdentity actor, bool includeDebriefReceipts)
     {
         lock (gate)
         {
             var (batch, evidence) = ReadVenueClosureData(actor, id) ?? throw new KeyNotFoundException("No venue End batch with that ID.");
             var waiting = batch.Sessions.Where(row => !row.FieldEvidenceReady).SelectMany(row => row.RoomIds).Order().ToArray();
             if (waiting.Length > 0) throw new VenueFieldEvidenceNotReadyException(waiting);
-            return new(batch, evidence.OfType<FieldEvidence>().ToArray());
+            var sessions = evidence.OfType<FieldEvidence>().ToArray();
+            VenueDebriefExport? receipts = null;
+            if (includeDebriefReceipts)
+            {
+                var rows = sessions.Select(item => BuildDebriefExportSession(item.Session, item.Session.CombatStream!,
+                    batch.Sessions.Single(row => row.SessionId == item.Session.Id).Replay!.ThroughSequence)).ToArray();
+                var unconfirmed = rows.SelectMany(row => row.Players).Where(player => !player.Acknowledged)
+                    .Select(player => player.RoomId).Distinct().Order().ToArray();
+                if (unconfirmed.Length > 0) throw new VenueFieldEvidenceNotReadyException(unconfirmed, waitingForReceipts: true);
+                receipts = new(1, batch.RequestId, rows);
+            }
+            return new(batch, sessions, receipts);
         }
     }
 

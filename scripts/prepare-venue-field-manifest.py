@@ -80,9 +80,10 @@ def prepare(args, output):
     bundle, terminal = (path.resolve(strict=True) for path in (args.venue_bundle, args.launcher_report))
     mode = field.read_json(field.content(terminal))['topology']
     field.require(mode in ('Independent', 'Linked'), 'Invalid Windows venue launch mode')
-    closure, archives = field.venue_bundle(bundle, mode)
-    field.identity(closure['requestId'])
+    closure, archives, receipt_bytes = field.venue_bundle(bundle, mode)
+    closure_id = field.identity(closure['requestId'])
     groups, expected = field.venue_closure_sessions(mode, closure['sessions'])
+    receipts = field.read_venue_debrief_receipts(receipt_bytes, closure_id, len(expected))[0] if receipt_bytes is not None else None
     launch, results = field.read_terminal_venue_launcher(terminal, mode, expected)
     addresses = {field.ipv4(address) for address in args.server_ip}
     field.require(len(addresses) == len(args.server_ip) <= 128, 'Provide distinct server IPv4 addresses')
@@ -140,6 +141,10 @@ def prepare(args, output):
         field.require(owners.keys() == ledger.keys() and len(seats) == count
                       and all(sum(seat[0] == room for seat in seats) == args.players_per_room for room in rooms),
                       f'Original roster differs from the declared stage for {stem}')
+        if receipts is not None:
+            field.verify_venue_debrief_session(receipts.get(session_id), session, stream,
+                {'combatSequence': boundary['finalStreamSequence'], 'worldSequence': boundary['worldSequence'],
+                 'serverAcknowledgements': len(acknowledged)})
         venue_seats.update((room, seat + 1) for room, seat in seats)
         if args.quest_capture_report or args.quest_deployment_report:
             quest_sources[session_id] = {'rooms': tuple(rooms), 'binding': (address, port), 'boundary': boundary, 'ledger': ledger,

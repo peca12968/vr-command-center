@@ -629,7 +629,10 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const reportButton = page.locator('#export-venue-reports');
     const reportStatus = page.locator('#venue-report-status');
     const fieldPath = id => `/venue/closure/${id}/field-evidence.zip`;
+    const fieldReceiptsPath = id => fieldPath(id) + '?includeDebriefReceipts=true';
     const fieldButton = page.locator('#export-venue-field'), fieldStatus = page.locator('#venue-field-status');
+    const fieldReceiptsButton = page.locator('#export-venue-field-with-receipts');
+    const fieldReceiptsStatus = page.locator('#venue-field-receipt-status');
     const waitingReport = await api(reportsPath, 'GET', undefined, 'Master', 409);
     await api(reportsPath, 'GET', undefined, 'Room2', 403);
     check(waitingReport.code === 'venue-reports-not-ready' && waitingReport.roomIds.join() === '2'
@@ -645,6 +648,8 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     await api(fieldPath(randomUUID()), 'GET', undefined, 'Master', 404);
     check(waitingField.code === 'venue-field-evidence-not-ready' && waitingField.roomIds.join() === '1,2,3'
       && await fieldButton.isDisabled(), 'The private batch field export rejects unready rooms even when the combat ZIP is available');
+    assert.deepEqual(await api(fieldReceiptsPath(closure.requestId), 'GET', undefined, 'Master', 409), waitingField);
+    assert.ok(await fieldReceiptsButton.isDisabled());
     await page.locator('#venue-closure').screenshot({ path: path.join(screenshots, 'venue-closure.png') });
     const replacement = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [1] }, 'Master', 201);
     active.add(replacement.id);
@@ -903,6 +908,13 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     assert.equal(Object.hasOwn(await api(closurePath), 'debriefReceipts'), false);
     await api(receiptsPath, 'GET', undefined, 'Room4', 403);
     await debriefRoom(4).filter({ hasText: '已確認 1／2 席 · 1 席未確認' }).waitFor();
+    await fieldReceiptsStatus.filter({ hasText: '等待房間 4' }).waitFor();
+    const pendingReceipts = await api(fieldReceiptsPath(evidenceId), 'GET', undefined, 'Master', 409);
+    check(pendingReceipts.code === 'venue-field-receipts-not-confirmed' && pendingReceipts.roomIds.join() === '4'
+      && await fieldReceiptsButton.isDisabled() && await fieldButton.isEnabled(),
+      'One pending original receipt blocks only the combined field ZIP');
+    await api(fieldReceiptsPath(evidenceId), 'GET', undefined, 'Room4', 403);
+    await api(fieldReceiptsPath(evidenceId), 'GET', undefined, 'GameServer', 403);
     await detailStatus.filter({ hasText: '已確認 1／2 席' }).waitFor();
     check((await seatRows.evaluateAll(rows => rows.map(row => [...row.cells].slice(0, 3).map(cell => cell.textContent).join('')))).join('|')
       === roster.map(player => `${player.seat + 1}${player.name}`
@@ -1090,6 +1102,32 @@ with zipfile.ZipFile(sys.argv[1]) as archive:
     assert.deepEqual(closureRecord, await api(`/venue/closure/${evidenceId}`));
     check(Buffer.from(inner, 'base64').equals(Buffer.from(await directZip.arrayBuffer())),
       'Batch evidence contains the exact original closure and the byte-identical individual field ZIP');
+
+    const [, lastPlayer] = originalReceipts.players;
+    await api(sessionPath + '/debrief-receipts', 'POST', { streamId, throughSequence, finalStreamSequence, worldSequence,
+      players: [{ playerId: lastPlayer.playerId, admissionId: lastPlayer.admissionId, roomId: 4 }] }, 'GameServer', 204);
+    await page.waitForFunction(() => !document.getElementById('export-venue-field-with-receipts').disabled);
+    const combinedResponse = await fetch(base + '/api' + fieldReceiptsPath(evidenceId), auth);
+    const finalReceipt = await fetch(receiptUrl, auth);
+    const combinedDownload = page.waitForEvent('download');
+    await fieldReceiptsButton.click();
+    const downloadedCombined = await combinedDownload;
+    const combinedFile = path.join(screenshots, 'venue-field-with-receipts.zip');
+    await downloadedCombined.saveAs(combinedFile);
+    const combinedRead = spawnSync('python', ['-c', `import base64, sys, zipfile
+with zipfile.ZipFile(sys.argv[1]) as original, zipfile.ZipFile(sys.argv[2]) as combined:
+    assert combined.namelist() == original.namelist() + ['debrief-receipts.json'] and combined.testzip() is None
+    assert all(combined.read(name) == original.read(name) for name in original.namelist())
+    print(base64.b64encode(combined.read('debrief-receipts.json')).decode())`, fieldFile, combinedFile],
+    { encoding: 'utf8', windowsHide: true, timeout: 6000 });
+    assert.equal(combinedRead.status, 0, combinedRead.stderr);
+    const receiptBytes = Buffer.from(combinedRead.stdout.trim(), 'base64');
+    check(combinedResponse.ok && combinedResponse.headers.get('cache-control') === 'no-store'
+      && downloadedCombined.suggestedFilename() === `vr-command-venue-field-with-receipts-v1-${evidenceId}.zip`
+      && Buffer.from(await combinedResponse.arrayBuffer()).equals(await fs.readFile(combinedFile))
+      && receiptBytes.equals(Buffer.from(await finalReceipt.arrayBuffer()))
+      && JSON.parse(receiptBytes).sessions[0].players.every(player => player.acknowledged),
+      'Late receipt enables the historical batch combined ZIP with unchanged original members and exact final receipt bytes');
 
     const heldRoute = '**/api' + privatePath;
     let notify, release, finished, lateDownload = false;

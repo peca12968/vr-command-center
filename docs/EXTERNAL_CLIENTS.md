@@ -355,7 +355,7 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `serverIps` | 所有本次伺服器電腦已指派的 IPv4，使用字串陣列 |
 | `venueBundle` 或 `closure` | 原批次的場館驗收 ZIP 路徑，或原 `closure.json` 路徑。選一種 |
 | `venueLauncherReport` | 使用 Windows 五房批次啟動時，填該批啟動器 `--report` 產生的原終止報告 |
-| `venueDebriefReceipts` | 選用。從同一批次下載的戰績回條 JSON 路徑 |
+| `venueDebriefReceipts` | 選用。從同一批次下載的戰績回條 JSON 路徑。若 `venueBundle` 已內附回條，省略此欄 |
 | `verifyPlayerSources` | 選用。填布林值 `true` 核對所有原席位的日誌與姿態。每場均須提供 `worldJournal` |
 | `verifyTrackingBegin` | 選用。填布林值 `true` 核對同一批追蹤開場採用的原始準備中畫格及後續執行畫格。每場均須提供 `worldJournal` |
 | `minimumConcurrentMilliseconds` | 選用。填 1,000 至 900,000 的整數，要求本階段全數席位同時連線且遊戲持續執行的最短毫秒數。每場均須提供 `worldJournal` |
@@ -384,7 +384,7 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 
 路徑可以是絕對路徑，或相對於 `venue.json` 所在資料夾。同一檔案只能使用一次。以下是五房獨立模式的 Windows 範例，請依現場配置填入實際地址與檔名。混合場可改用 `questCaptures` 或逐場補上 Quest 原 logcat。兩種方式合計每房須有五席。
 
-若有填寫 `venueDebriefReceipts`，驗收會將檔案與已通過原始日誌驗證的場次、封存尾界及原入場名冊逐席比對。任何缺席位或未確認回條都會使核對失敗。成功摘要的同名欄位列出回條檔 SHA-256、場次數及 25 個已確認席位。 [下載回條](SESSION_CLOSURE.md#下載本批戰績回條)
+若 `venueBundle` 已內附 `debrief-receipts.json`，或另有填寫 `venueDebriefReceipts`，驗收會將回條與已通過原始日誌驗證的場次、封存尾界及原入場名冊逐席比對。任何缺席位或未確認回條都會使核對失敗。成功摘要的 `venueDebriefReceipts` 欄位列出回條檔 SHA-256、場次數及已確認席位數。 [合併下載](SESSION_CLOSURE.md#下載驗收-zip-與全員回條)
 
 ```powershell
 $sessions = 1..5 | ForEach-Object {

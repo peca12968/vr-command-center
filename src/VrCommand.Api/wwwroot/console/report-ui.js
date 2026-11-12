@@ -146,6 +146,18 @@ export function mountVenueReport(current, unauthorized, save) {
     conflict: '本批場館驗收資料尚未齊備。', invalid: '場館驗收 ZIP 格式不符，可重新下載。',
     failed: '本批場館驗收 ZIP 下載失敗，可重新整理後再試。', saved: '已下載原批次與各場驗收資料，請私下保管。'
   });
+  const fieldWithReceipts = mountVenueDownload(current, unauthorized, save, {
+    actions: 'venue-field-receipt-actions', button: 'export-venue-field-with-receipts', status: 'venue-field-receipt-status',
+    route: 'field-evidence', query: '?includeDebriefReceipts=true', filename: 'field-with-receipts',
+    waitingRooms: (session, rooms) => session.roomIds.filter(room => {
+      const info = rooms?.get(room);
+      return !session.fieldEvidenceReady || !info || info.confirmedCount !== info.rosterCount;
+    }),
+    waiting: rooms => `等待房間 ${rooms} 的驗收資料及全員回條。`,
+    available: '', loading: '正在下載驗收 ZIP 與全員回條…',
+    conflict: '本批驗收資料或全員回條尚未齊備，請更新後重試。', invalid: '驗收 ZIP 格式不符，可重新下載。',
+    failed: '驗收 ZIP 下載失敗，可重新整理後再試。', saved: '已下載本批驗收資料與全員確認回條，請私下保管。'
+  });
   const debrief = mountVenueDownload(current, unauthorized, save, {
     actions: 'venue-debrief-actions', button: 'export-venue-debrief', status: 'venue-debrief-status',
     route: 'debrief-receipts', filename: 'debrief-receipts', extension: 'json', mediaType: 'application/json',
@@ -155,7 +167,10 @@ export function mountVenueReport(current, unauthorized, save) {
     conflict: '本批尚未完成雙封存。', invalid: '戰績回條格式不符，可重新下載。',
     failed: '本批戰績回條下載失敗，可重新整理後再試。', saved: '已下載本批戰績回條，請私下保管。'
   });
-  return { update(batch, totals) { reports(batch); field(batch); debrief(batch); scores(batch, totals ? venueScoreCsv(totals) : null); } };
+  return { update(batch, totals, receipts) {
+    reports(batch); field(batch); fieldWithReceipts(batch, null, receipts); debrief(batch);
+    scores(batch, totals ? venueScoreCsv(totals) : null);
+  } };
 }
 
 function mountVenueDownload(current, unauthorized, save, options) {
@@ -164,12 +179,13 @@ function mountVenueDownload(current, unauthorized, save, options) {
   const button = document.getElementById(options.button), status = document.getElementById(options.status);
   let id = null, waiting = '', controller = null, content = null;
   const updateButton = () => { button.disabled = !id || !!waiting || !!controller; };
-  function update(batch, expected = null) {
+  function update(batch, expected = null, context = null) {
     const nextId = (!options.verifyContent || expected !== null) && current().actor?.role === 'Master'
       && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(batch?.requestId ?? '')
       ? batch.requestId : null;
-    const nextWaiting = nextId ? batch.sessions.filter(session => !options.ready(session))
-      .flatMap(session => session.roomIds).sort((a, b) => a - b).join('、') : '';
+    const nextWaiting = nextId ? batch.sessions.flatMap(session => options.waitingRooms
+      ? options.waitingRooms(session, context) : options.ready(session) ? [] : session.roomIds)
+      .sort((a, b) => a - b).join('、') : '';
     if (id !== nextId || waiting !== nextWaiting || content !== expected) {
       controller?.abort(); controller = null;
       id = nextId; waiting = nextWaiting; content = expected;
@@ -186,7 +202,7 @@ function mountVenueDownload(current, unauthorized, save, options) {
     const timeout = setTimeout(() => request.abort(), 8000);
     updateButton(); status.textContent = options.loading;
     try {
-      const response = await fetch(`/api/venue/closure/${batchId}/${options.route}.${extension}`, {
+      const response = await fetch(`/api/venue/closure/${batchId}/${options.route}.${extension}${options.query ?? ''}`, {
         headers: { Authorization: 'Bearer ' + key }, signal: request.signal, cache: 'no-store'
       });
       if (!active()) return;

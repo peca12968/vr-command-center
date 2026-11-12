@@ -93,15 +93,19 @@ public sealed partial class WorldRecordings
                 if (session.State != SessionState.Ended || session.CombatStream is not { Sealed: true } stream
                     || VenueWorldArchive(session, stream, actor) is not (VenueArchiveState.Sealed, { } replay))
                     throw new InvalidOperationException("Every original session needs sealed combat and world data.");
-                var confirmed = ReadDebriefAdmissions(session.Id);
-                var players = session.Players.OrderBy(player => player.RoomId).ThenBy(player => player.Seat)
-                    .Select(player => new VenueDebriefExportPlayer(player.Id, player.AdmissionId, player.RoomId,
-                        confirmed.Contains(player.AdmissionId))).ToArray();
-                sessions.Add(new(session.Id, stream.StreamId, session.Sequence, stream.AcceptedSequence,
-                    replay.ThroughSequence, players));
+                sessions.Add(BuildDebriefExportSession(session, stream, replay.ThroughSequence));
             }
             return new(1, batch.RequestId, sessions.ToArray());
         }
+    }
+
+    private VenueDebriefExportSession BuildDebriefExportSession(SessionView session, CombatStreamView stream, long worldSequence)
+    {
+        var confirmed = ReadDebriefAdmissions(session.Id);
+        var players = session.Players.OrderBy(player => player.RoomId).ThenBy(player => player.Seat)
+            .Select(player => new VenueDebriefExportPlayer(player.Id, player.AdmissionId, player.RoomId,
+                confirmed.Contains(player.AdmissionId))).ToArray();
+        return new(session.Id, stream.StreamId, session.Sequence, stream.AcceptedSequence, worldSequence, players);
     }
 
     internal VenueDebriefSeats ReadVenueDebriefSeats(Guid id, int roomId, OperatorIdentity actor, bool includeScores, bool includePlayerIds)
