@@ -72,7 +72,7 @@ const placement = mountLayout({ api, epoch: () => state.epoch, active: () => !!s
 const roomPlan = mountIndependentPlan({
   available: () => master() && $('launch-mode').value === 'IndependentSet',
   catalog: () => state.catalog, pinned: () => state.launchPinned, common: commonLaunchRevision,
-  climateText: venueClimateText,
+  climateText: venueClimateText, enemyText: missionEnemyText,
   inspect: revision => placement.inspectSaved({ id: revision.mission.id, mode: 'Independent', experienceMode: revision.mission.definition.environment.mode }),
   invalidate: id => placement.invalidateSaved(id, 'Independent'),
   changed: () => { placement.scheduleLaunch(); applyPermissions(); }
@@ -473,7 +473,8 @@ function renderVenueMissionFileReview() {
     const { definition } = revision.mission;
     const historical = state.catalog.some(head => head.seriesId === revision.seriesId && head.number > revision.number);
     const summary = element('div', `${definition.name} · 第 ${revision.number} 版${historical ? '（歷史）' : ''} · ${definition.environment.mode} · ${definition.durationSeconds} 秒`);
-    summary.append(element('div', venueClimateText(definition.environment), 'hint mission-file-climate'));
+    summary.append(element('div', venueClimateText(definition.environment), 'hint mission-file-climate'),
+      element('div', missionEnemyText(definition.enemies), 'hint mission-file-enemies'));
     return summary;
   }
   list.replaceChildren(...venueMissionRooms.map((roomId, index) => {
@@ -504,11 +505,14 @@ function clearVenueMissionFile() {
 function validLaunchRevision(revision) {
   const definition = revision?.mission?.definition;
   const env = definition?.environment;
+  const enemies = definition?.enemies;
   return !!revision?.mission?.id && Number.isSafeInteger(revision.number) && revision.number > 0
     && typeof definition?.name === 'string' && Number.isSafeInteger(definition.durationSeconds)
     && ['VR', 'MR'].includes(env?.mode) && Object.hasOwn(weatherNames, env.weather)
     && ['Day', 'Night'].includes(env.timeOfDay) && typeof env.lightning === 'boolean'
-    && !!definition.enemies && Array.isArray(definition.props);
+    && Number.isSafeInteger(enemies?.count) && enemies.count >= 0 && enemies.count <= 100
+    && Object.hasOwn(behaviorNames, enemies.behavior) && typeof enemies.autoAttack === 'boolean'
+    && Array.isArray(definition.props);
 }
 function applyVenueMissionRevisions(mode, revisions) {
   $('launch-mode').value = mode;
@@ -623,7 +627,7 @@ function renderLaunchPreview(plan) {
     ? shownRooms.map(room => `房間 ${room.id}${room.sessionId ? '（使用中）' : ''}`).join('、') : '尚無可用的房間資訊';
   $('launch-preview-duration').textContent = `${durationSeconds} 秒`;
   $('launch-preview-environment').textContent = `${env.mode} · ${venueClimateText(env)}`;
-  $('launch-preview-enemies').textContent = `${mixed ? '本房' : body.mode === 'IndependentSet' ? '各場' : '全場'} ${enemy.count} 名 · ${behaviorNames[enemy.behavior]} · ${enemy.autoAttack ? '自動攻擊開啟' : '自動攻擊關閉'}`;
+  $('launch-preview-enemies').textContent = `${mixed ? '本房' : body.mode === 'IndependentSet' ? '各場' : '全場'} ${missionEnemyText(enemy)}`;
   const sandbags = props.filter(prop => prop.assetId === 'sandbag').length;
   const barrels = props.filter(prop => prop.assetId === 'barrel').length;
   $('launch-preview-props').textContent = `每房 ${props.length} 件 · 沙包 ${sandbags} · 油桶 ${barrels}`;
@@ -761,6 +765,9 @@ function venueClimateText({ weather, timeOfDay, lightning }) {
 }
 function venueEnemyText({ behavior, autoAttack }) {
   return `${behaviorNames[behavior]} · ${autoAttack ? '自動攻擊開啟' : '自動攻擊關閉'}`;
+}
+function missionEnemyText(enemies) {
+  return `${enemies.count} 名 · ${venueEnemyText(enemies)}`;
 }
 function settingBatchRoom(kind, batch, session, room) {
   if (session.state === 'Ended') return { status: 'Ended', text: '原場次已結束' };
@@ -1229,10 +1236,10 @@ function loadClock() { if (state.session) { $('clock-auto-end').checked = state.
 function renderIndependentReceipt(sessions = [], versions = []) {
   const rows = sessions.map((session, index) => {
     const row = element('tr'), title = element('th', `房間 ${index + 1}`);
-    const { name, durationSeconds, environment } = session.mission.definition;
+    const { name, durationSeconds, environment, enemies } = session.mission.definition;
     title.scope = 'row'; row.dataset.missionId = session.mission.id;
     row.append(title, element('td', `${name} · 第 ${versions[index].number} 版`), element('td', `${environment.mode} · ${durationSeconds} 秒`),
-      element('td', venueClimateText(environment)), element('td', session.id));
+      element('td', venueClimateText(environment)), element('td', missionEnemyText(enemies)), element('td', session.id));
     return row;
   });
   $('launch-independent-receipt-rows').replaceChildren(...rows);
@@ -1247,10 +1254,10 @@ async function createSession() {
   const independentSet = plan.body.mode === 'IndependentSet';
   const revisions = plan.mixed ? roomPlan.revisions() : independentSet ? plan.body.roomIds.map(() => plan.revision) : [];
   const versions = revisions.map(({ mission, number }) => ({ id: mission.id, number, name: mission.definition.name,
-    durationSeconds: mission.definition.durationSeconds, environment: mission.definition.environment }));
+    durationSeconds: mission.definition.durationSeconds, environment: mission.definition.environment, enemies: mission.definition.enemies }));
   if (plan.mixed) {
-    const summary = versions.map(({ name, number, environment, durationSeconds }, index) =>
-      `房間 ${index + 1}　${name} · 第 ${number} 版 · ${environment.mode} · ${durationSeconds} 秒 · ${venueClimateText(environment)}`);
+    const summary = versions.map(({ name, number, environment, enemies, durationSeconds }, index) =>
+      `房間 ${index + 1}　${name} · 第 ${number} 版 · ${environment.mode} · ${durationSeconds} 秒 · ${venueClimateText(environment)} · ${missionEnemyText(enemies)}`);
     if (!confirm(`依下列保存版本建立五個獨立準備場次？\n\n${summary.join('\n')}`)) return;
   }
   state.pending = { kind: independentSet ? 'create-set' : 'create', path: independentSet ? '/sessions/independent-set' : '/sessions',
@@ -1341,7 +1348,8 @@ async function sendPending() {
             const version = pending.versions[index], definition = session?.mission?.definition;
             return !session?.id || session.mode !== 'Independent' || session.roomIds?.length !== 1 || session.roomIds[0] !== index + 1
               || session.mission?.id !== version.id || definition?.name !== version.name || definition?.durationSeconds !== version.durationSeconds
-              || !['mode', 'weather', 'timeOfDay', 'lightning'].every(field => definition?.environment?.[field] === version.environment[field]);
+              || !['mode', 'weather', 'timeOfDay', 'lightning'].every(field => definition?.environment?.[field] === version.environment[field])
+              || !['count', 'behavior', 'autoAttack'].every(field => definition?.enemies?.[field] === version.enemies[field]);
           }))
         throw new Error('Incomplete five-room preparation receipt');
       renderIndependentReceipt(sessions, pending.versions);
@@ -1638,8 +1646,7 @@ async function compareMissionVersion(id) {
   add('任務時間', `${saved.durationSeconds} 秒`, `${draft.durationSeconds} 秒`);
   add('環境模式', saved.environment.mode, draft.environment.mode);
   add('天氣、時段、閃電', venueClimateText(saved.environment), venueClimateText(draft.environment));
-  const enemyText = value => `${value.count} 名 · ${behaviorNames[value.behavior]} · 自動攻擊${value.autoAttack ? '開啟' : '關閉'}`;
-  add('敵軍設定', enemyText(saved.enemies), enemyText(draft.enemies));
+  add('敵軍設定', missionEnemyText(saved.enemies), missionEnemyText(draft.enemies));
   const propText = prop => prop ? `${prop.assetId} · (${prop.position.x}, ${prop.position.y}, ${prop.position.z}) m · ${prop.yawDegrees}°` : '（無物件）';
   for (let index = 0; index < Math.max(saved.props.length, draft.props.length); index++)
     add(`物件 ${index + 1}`, propText(saved.props[index]), propText(draft.props[index]));

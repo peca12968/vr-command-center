@@ -43,7 +43,8 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
     assert.deepEqual(await api('/sessions'), []);
     const a = await api('/missions', 'POST', template, 'Master', 201);
     const b = await api('/missions', 'POST', { ...template, name: '配置檔 MR 任務', durationSeconds: 420,
-      environment: { ...template.environment, mode: 'MR', weather: 'Storm', lightning: true } }, 'Master', 201);
+      environment: { ...template.environment, mode: 'MR', weather: 'Storm', lightning: true },
+      enemies: { count: 4, behavior: 'Patrol', autoAttack: true } }, 'Master', 201);
     await login('Room2');
     check(await panel.isHidden(), 'Room control has no venue mission file controls');
     await login('Master');
@@ -65,7 +66,8 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
     check((await api('/sessions')).length === 0, 'Both downloaded configuration files contain only version assignments and need no prior session');
 
     const head = await api(`/missions/${a.id}/revisions`, 'POST', { ...template, durationSeconds: 690, props: [],
-      environment: { ...template.environment, weather: 'Fog', timeOfDay: 'Day' } },
+      environment: { ...template.environment, weather: 'Fog', timeOfDay: 'Day' },
+      enemies: { count: 0, behavior: 'Advance', autoAttack: false } },
       'Master', 201, undefined, randomUUID());
     const invalidLayout = await api('/missions', 'POST', { ...template, name: '未修正配置',
       props: [template.props[0], template.props[0]] }, 'Master', 201);
@@ -99,6 +101,10 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
     check(await climate(2, 0) === '濃霧 · 白天 · 閃電關閉' && await climate(3, 0) === '下雨 · 夜晚 · 閃電關閉'
       && await climate(3, 1) === '暴風雨 · 夜晚 · 閃電開啟',
       'The file review distinguishes saved historical weather, time of day and lightning from the current revision');
+    const enemies = (column, index) => reviewRows.nth(index).locator(`td:nth-child(${column}) .mission-file-enemies`).textContent();
+    check(await enemies(2, 0) === '0 名 · 推進 · 自動攻擊關閉' && await enemies(3, 0) === '2 名 · 守備 · 自動攻擊關閉'
+      && await enemies(3, 1) === '4 名 · 巡邏 · 自動攻擊開啟',
+      'The file review compares the exact saved historical and current enemy settings');
     await mode.selectOption('Linked');
     check(await reviewRows.locator('td:nth-child(2)').evaluateAll(cells => cells.every(cell => cell.textContent.includes('第 2 版')))
       && (await review.innerText()).includes('目前為五房全連線'),
@@ -156,6 +162,16 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
     await status.filter({ hasText: '無法核對房間 1、2、3、4、5' }).waitFor();
     check(await review.isHidden() && JSON.stringify(await selected()) === JSON.stringify(ids),
       'A malformed saved environment is refused for every affected room before applying the file');
+    await page.route(versionPath, async route => {
+      const response = await route.fetch();
+      const value = await response.json();
+      value.mission.definition.enemies.behavior = 'Unknown';
+      await route.fulfill({ response, json: value });
+    }, { times: 1 });
+    await load.click();
+    await status.filter({ hasText: '無法核對房間 1、2、3、4、5' }).waitFor();
+    check(await review.isHidden() && JSON.stringify(await selected()) === JSON.stringify(ids),
+      'Loading a file refuses a malformed saved enemy policy without changing the assignments');
 
     let intercept;
     const pending = new Promise(resolve => { intercept = resolve; });

@@ -169,6 +169,10 @@ function savedClimate({ definition: { environment: { weather, timeOfDay, lightni
   const names = { Clear: '晴朗', Rain: '下雨', Fog: '濃霧', Storm: '暴風雨' };
   return `${names[weather]} · ${timeOfDay === 'Night' ? '夜晚' : '白天'} · ${lightning ? '閃電開啟' : '閃電關閉'}`;
 }
+function savedEnemies({ definition: { enemies: { count, behavior, autoAttack } } }) {
+  const names = { Hold: '守備', Patrol: '巡邏', Advance: '推進' };
+  return `${count} 名 · ${names[behavior]} · 自動攻擊${autoAttack ? '開啟' : '關閉'}`;
+}
 
 async function roundTripMissionFile(page, base, token, mode, missions, output) {
   const panel = page.locator('#launch-mission-file-panel');
@@ -192,6 +196,7 @@ async function roundTripMissionFile(page, base, token, mode, missions, output) {
   })));
   assert.deepEqual(reviewed, plan.rooms.map(room => ({ ...room, layout: 'valid' })));
   assert.deepEqual(await review.locator('tbody td:nth-child(3) .mission-file-climate').allTextContents(), missions.map(savedClimate));
+  assert.deepEqual(await review.locator('tbody td:nth-child(3) .mission-file-enemies').allTextContents(), missions.map(savedEnemies));
   assert.equal(await page.locator('#launch-mode').inputValue(), 'Independent');
   const label = mode === 'Linked' ? 'linked' : 'independent';
   if (mode === 'Linked') assert((await review.locator('tbody td:nth-child(3)').allTextContents()).every(value => value.includes('（歷史）')));
@@ -274,12 +279,13 @@ async function prepareRoomLayouts(page, missions, invalidMission, output, reload
   assert.equal(accepted.status(), 201);
   assert(previews.every(({ roomId }, index) => confirmationText.includes(`房間 ${roomId}　${missions[index].definition.name}`)));
   assert.deepEqual(confirmationText.split('\n').filter(line => line.startsWith('房間 ')).map(line => line.split(' 秒 · ')[1]),
-    missions.map(savedClimate));
+    missions.map(mission => `${savedClimate(mission)} · ${savedEnemies(mission)}`));
   assert.deepEqual(accepted.request().postDataJSON(), { rooms: previews.map(({ roomId, missionId }) => ({ roomId, missionId })) });
   const prepared = await accepted.json(), requestId = accepted.request().headers()['idempotency-key'];
   assert.match(requestId, /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/);
   await page.locator('#launch-independent-receipt-rows tr').last().waitFor();
   assert.deepEqual(await page.locator('#launch-independent-receipt-rows td:nth-child(4)').allTextContents(), missions.map(savedClimate));
+  assert.deepEqual(await page.locator('#launch-independent-receipt-rows td:nth-child(5)').allTextContents(), missions.map(savedEnemies));
   await fs.writeFile(output, JSON.stringify({ previews, requestId, prepared, rejection, filePlan }, null, 2), { flag: 'wx' });
 }
 
