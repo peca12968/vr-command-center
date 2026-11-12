@@ -1100,7 +1100,28 @@ def read_windows_seat_map(path):
     return seats
 
 
-def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, seat_map, evidence_path, link_criteria):
+def read_windows_station_addresses(path, seat_map):
+    with path.open('rb') as source:
+        raw = source.read(8193)
+    require(len(raw) <= 8192, 'Windows station address map exceeds its file limit')
+    value = read_json(raw.decode('utf-8-sig'))
+    require(type(value) is dict and set(value) == {'version', 'stations'}, 'Invalid Windows station address map')
+    integer(value['version'], 1, 1)
+    rows = value['stations']
+    require(type(rows) is list and len(rows) == len(seat_map), 'Provide an address for every mapped Windows station')
+    expected = {station.lower(): seat for seat, station in seat_map.items()}
+    addresses = {}
+    for row in rows:
+        require(type(row) is dict and set(row) == {'station', 'address'}
+                and type(row['station']) is str and type(row['address']) is str, 'Invalid Windows station address row')
+        seat = expected.get(row['station'].lower())
+        require(seat is not None and seat not in addresses, 'Windows station address map names an unknown or repeated station')
+        addresses[seat] = ipv4(row['address'])
+    return addresses, hashlib.sha256(raw).hexdigest()
+
+
+def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, seat_map, evidence_path, link_criteria,
+                  station_addresses=None):
     require(directory.is_dir(), 'Windows evidence inbox must be a directory')
     require(type(windows_hash) is str and re.fullmatch(r'[0-9a-f]{64}', windows_hash),
             'Windows evidence inbox requires the original Windows release report')
@@ -1157,6 +1178,8 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
             verify_player_terminal_result(result, owners[player_id], ledger[player_id], boundary)
             require(seat not in received and (session_id, connection) not in connections, 'Player ZIP repeats a seat or acknowledged connection')
             address, _ = peer_address(peers[connection])
+            if station_addresses is not None:
+                require(address == station_addresses[seat], f'Server-observed IPv4 differs from the address assigned to Windows station {seat_map[seat]}')
         except EvidenceError as error:
             issues.append({'file': file.name, 'reason': str(error)})
             continue
@@ -1814,6 +1837,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
     explicit_windows = 'windowsPlayers' in manifest
     require(not (inbox_supplied and explicit_windows), 'Use either windowsEvidenceDirectory or windowsPlayers')
     require(inbox_supplied or not (inspect_windows or 'windowsSeatMap' in manifest), 'Windows inbox inspection and seat maps require windowsEvidenceDirectory')
+    require('windowsStationAddresses' not in manifest or (inbox_supplied and 'windowsSeatMap' in manifest),
+            'Windows station addresses require the Windows evidence inbox and seat map')
     windows_supplied = inbox_supplied or explicit_windows
     windows_by_session = venue_windows_logs(manifest['windowsPlayers'], expected, evidence_path, players_per_room) if explicit_windows else {}
 
@@ -1850,11 +1875,14 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
         return entry, launcher, session, statistics, endpoint, content(evidence_path(entry['serverLog']))
 
     inputs = (load_session(entry) for entry in entries)
+    station_summary = {}
     if inbox_supplied:
         for entry in entries:
             require(all(type(player) is dict and 'logcatPid' in player for player in entry.get('players', [])),
                     'Use only Quest evidence in per-session players when using a Windows inbox')
         seat_map = read_windows_seat_map(evidence_path(manifest['windowsSeatMap'])) if 'windowsSeatMap' in manifest else None
+        station_addresses, address_hash = (read_windows_station_addresses(evidence_path(manifest['windowsStationAddresses']), seat_map)
+                                           if 'windowsStationAddresses' in manifest else (None, None))
         require(seat_map is not None or not (capture_supplied or any(entry.get('players') for entry in entries)),
                 'Provide the Windows seat map when the batch contains Quest evidence')
         name = manifest['windowsEvidenceDirectory']
@@ -1862,9 +1890,12 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
         directory = (manifest_path.parent / name).resolve(strict=True)
         inputs = list(inputs)
         windows_by_session, inbox = windows_inbox(directory, inputs, expected, players_per_room, windows_hash,
-                                                 seat_map, evidence_path, link_criteria)
+                                                 seat_map, evidence_path, link_criteria, station_addresses=station_addresses)
+        if station_addresses is not None:
+            station_summary['windowsStationAddresses'] = {'sha256': address_hash, 'expectedSeats': len(station_addresses),
+                                                          'verifiedSeats': inbox['receivedWindowsSeats']}
         if inspect_windows:
-            return {'version': 1, 'scope': 'windows-inbox', 'mode': mode, 'closureRequestId': closure_id, **inbox}, None
+            return {'version': 1, 'scope': 'windows-inbox', 'mode': mode, 'closureRequestId': closure_id, **inbox, **station_summary}, None
         require(inbox['complete'], 'Windows inbox is incomplete or contains conflicting files; use --inspect-windows-inbox')
 
     rooms, summaries = {}, []
@@ -2082,6 +2113,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
             'distinctPeerAddresses': len(peer_ips), 'distinctAddressesOutsideDeclaredServer': len(remote),
             'serverAcknowledgements': sum(item['serverAcknowledgements'] for item in summaries),
             'physicalHostsVerified': False, 'networkCapacityAccepted': False,
+            **station_summary,
             **({'venueLauncherReport': venue_launcher} if venue_launcher is not None else {}),
             **({'venueDebriefReceipts': {'sha256': debrief_hash, 'sessions': len(summaries), 'acknowledgedPlayers': len(player_ids)}}
                if debrief_receipts is not None else {}),
@@ -2173,7 +2205,8 @@ def verify_venue_stages(plan_path):
                             'serverAcknowledgements': report['serverAcknowledgements'],
                             'worldJournalsVerified': report['worldJournalsVerified'],
                             'concurrentRoster': report['concurrentRoster'],
-                            **{field: report[field] for field in ('combatJournalsVerified', 'distinctRemoteRoster', 'windowsLinkCriteria')
+                            **{field: report[field] for field in ('combatJournalsVerified', 'distinctRemoteRoster', 'windowsLinkCriteria',
+                                                                'windowsStationAddresses')
                                if field in report}})
     return {'version': 1, 'consistent': True, 'declaredTopology': topology,
             'planSha256': hashlib.sha256(raw_plan).hexdigest(), 'venueReleaseSha256': release_hash,

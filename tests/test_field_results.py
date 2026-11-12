@@ -1650,6 +1650,58 @@ class FieldResultsTests(unittest.TestCase):
             self.assertEqual([seats[-1]], wrong['missingSeats'])
             self.assertIn('expected Windows seat', wrong['issues'][0]['reason'])
 
+    def test_windows_inbox_matches_configured_station_addresses_to_final_server_peers(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, _ = venue_fixture(root, mode, remote=True, room_sizes=(1,) * 5)
+                manifest['expectedPlayersPerRoom'] = 1
+                self.add_shared_release(root, manifest, 0)
+                inbox = self.windows_inbox_fixture(root, manifest)
+                seats = [{'roomId': room, 'seat': 1, 'station': f'PC-{room}'} for room in range(1, 6)]
+                originals = [player['address'] for entry in manifest['sessions'] for player in entry['players']]
+                rows = [{'station': seat['station'].lower(), 'address': address} for seat, address in zip(seats, originals, strict=True)]
+                seat_path, addresses_path = root / 'seats.json', root / 'addresses.json'
+                seat_path.write_text(json.dumps({'version': 1, 'seats': seats}), encoding='utf-8')
+                inbox.update(windowsSeatMap=seat_path.name, windowsStationAddresses=addresses_path.name)
+                path.write_text(json.dumps(inbox), encoding='utf-8')
+
+                def write_addresses(stations):
+                    addresses_path.write_text(json.dumps({'version': 1, 'stations': stations}), encoding='utf-8')
+
+                write_addresses(rows[::-1])
+                inspection, _ = field.verify_venue_batch(path, inspect_windows=True)
+                expected = {'expectedSeats': 5, 'verifiedSeats': 5, 'sha256': hashlib.sha256(addresses_path.read_bytes()).hexdigest()}
+                self.assertTrue(inspection['complete'])
+                self.assertEqual(expected, inspection['windowsStationAddresses'])
+                full = field.verify_venue(path)
+                self.assertEqual(expected, full['windowsStationAddresses'])
+                self.assertFalse(full['physicalHostsVerified'])
+                self.assertNotIn('192.168.', json.dumps(inspection))
+
+                swapped = deepcopy(rows)
+                swapped[0]['address'], swapped[-1]['address'] = swapped[-1]['address'], swapped[0]['address']
+                write_addresses(swapped)
+                failed = subprocess.run([sys.executable, str(SCRIPT), '--venue-manifest', str(path), '--inspect-windows-inbox'],
+                                        capture_output=True)
+                self.assertEqual(1, failed.returncode)
+                missing = json.loads(failed.stdout)
+                self.assertEqual([seats[0], seats[-1]], missing['missingSeats'])
+                self.assertEqual(3, missing['windowsStationAddresses']['verifiedSeats'])
+                self.assertEqual({row['file'] for row in inspection['receivedSeats'] if row['roomId'] in (1, 5)},
+                                 {issue['file'] for issue in missing['issues']})
+                self.assertTrue(all('Server-observed IPv4 differs' in issue['reason'] for issue in missing['issues']))
+                self.assertNotIn('192.168.', json.dumps(missing))
+                with self.assertRaisesRegex(field.EvidenceError, 'Windows inbox is incomplete'):
+                    field.verify_venue(path)
+
+                write_addresses([*rows[:-1], dict(rows[-1], station='PC-1')])
+                with self.assertRaisesRegex(field.EvidenceError, 'unknown or repeated station'):
+                    field.verify_venue_batch(path, inspect_windows=True)
+                write_addresses(rows[:-1])
+                with self.assertRaisesRegex(field.EvidenceError, 'address for every mapped Windows station'):
+                    field.verify_venue(path)
+
     def test_windows_inbox_reports_missing_acknowledgement_without_weakening_final_verification(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

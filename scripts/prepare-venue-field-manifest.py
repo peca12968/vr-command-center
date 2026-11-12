@@ -110,6 +110,10 @@ def prepare(args, output):
         seats = field.read_windows_seat_map(seat_map)
         field.require(seats.keys() <= venue_seats, 'Windows seat map names a seat outside the original batch roster')
         manifest['windowsSeatMap'] = ref(seat_map)
+        if args.windows_station_addresses is not None:
+            addresses_path = args.windows_station_addresses.resolve(strict=True)
+            field.read_windows_station_addresses(addresses_path, seats)
+            manifest['windowsStationAddresses'] = ref(addresses_path)
     if args.udp_preflight_batch:
         paths = [path.resolve(strict=True) for path in args.udp_preflight_batch]
         field.require(len(paths) == len(set(paths)) <= 25, 'Provide up to 25 distinct original UDP preflight batches')
@@ -135,12 +139,15 @@ def main():
     parser.add_argument('--venue-release-report', type=Path)
     parser.add_argument('--windows-inbox', type=Path)
     parser.add_argument('--windows-seat-map', type=Path)
+    parser.add_argument('--windows-station-addresses', type=Path)
     parser.add_argument('--udp-preflight-batch', action='append', type=Path)
     args = parser.parse_args()
     if args.windows_inbox is not None and args.venue_release_report is None:
         parser.error('--windows-inbox requires --venue-release-report')
     if args.windows_seat_map is not None and args.windows_inbox is None:
         parser.error('--windows-seat-map requires --windows-inbox')
+    if args.windows_station_addresses is not None and args.windows_seat_map is None:
+        parser.error('--windows-station-addresses requires --windows-seat-map')
     try:
         output = args.output.resolve()
         field.require(not output.exists(), 'Use a new output file')

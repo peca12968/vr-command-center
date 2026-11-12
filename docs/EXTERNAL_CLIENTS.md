@@ -377,6 +377,7 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `windowsPlayers` | 選用。集中填入所有 Windows 席位，每筆提供玩家裝置實際使用的 IPv4 `address`，再填原日誌路徑 `log` 或原玩家驗收 ZIP 路徑 `evidenceZip` |
 | `windowsEvidenceDirectory` | 選用。Windows 玩家 ZIP 收件資料夾。與 `windowsPlayers` 擇一 |
 | `windowsSeatMap` | 選用。收件資料夾用的版本 1 Windows 電腦對照表。混合 Quest 場次須指定應收的 Windows 席位 |
+| `windowsStationAddresses` | 選用。Windows 電腦標籤與預期 IPv4 的對照表。須搭配 `windowsEvidenceDirectory` 及 `windowsSeatMap` |
 | `windowsLinkCriteria` | 選用。場館填入 `minimumReplies` 和 `maximumP95RoundTripMs`，逐席驗收原 Windows 連線量測。 |
 | `sessions[].players` | 逐場填寫尚未由 `windowsPlayers` 或 `questCaptures` 提供的席位，每筆填實際 IPv4 `address` 及原日誌路徑 `log`。手動填入 Quest 3 原 logcat 時另填數字 `logcatPid`，例如 `7342`。該場席位已全部由前兩欄提供時可省略 |
 
@@ -660,11 +661,21 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json --inspect-w
 python scripts/verify-field-results.py --venue-manifest .\venue.json
 ```
 
-第一條指令列出應收及已收的 Windows 席位、缺件與有問題的檔名，缺件或衝突時以退出碼 1 結束。配對依據是原名冊的入場與場次識別、退出報告及原伺服器對該連線的戰績確認，玩家可自行命名 ZIP。每席的最終戰績及管理、世界、戰鬥序號也須與原封存一致。若不符，該檔會出現在 `issues`。尚無有效 ZIP 的席位會列在 `missingSeats`。每席的 IPv4 取自伺服器觀察到的對應 UDP 來源。需要另外指定各席預期的 IPv4 時，可沿用 `windowsPlayers`。
+第一條指令列出應收及已收的 Windows 席位、缺件與有問題的檔名，缺件或衝突時以退出碼 1 結束。配對依據是原名冊的入場與場次識別、退出報告及原伺服器對該連線的戰績確認，玩家可自行命名 ZIP。每席的最終戰績及管理、世界、戰鬥序號也須與原封存一致。若不符，該檔會出現在 `issues`。尚無有效 ZIP 的席位會列在 `missingSeats`。每席的 IPv4 取自伺服器觀察到的對應 UDP 來源。
 
 收件檢查也會核對 ZIP 內的連線量測。若本批有 Windows 席位提供量測，須由所有 Windows 席位提供，Quest 席位沿用原 logcat 流程。內含量測不符、遺失或覆蓋席位不足時，收件檢查會指出對應的 ZIP。
 
 收件完成後執行第二條指令，工具沿用同一資料夾完成原場次封存及戰績驗收。混合場的 Quest 證據照原欄位提供，可在 Windows 收件檢查後補齊。
+
+#### 核對 Windows 席位的來源 IPv4
+
+開場前，將原 `windowsSeatMap` 中各電腦本次使用的 IPv4 記在私人 `station-addresses.json`。每個電腦標籤填一次，順序可調整，大小寫會視為相同。下例涵蓋兩個 Windows 席位，其他席位可照常使用 Quest 證據。
+
+```json
+{"version":1,"stations":[{"station":"PC-A","address":"192.168.1.20"},{"station":"PC-B","address":"192.168.1.21"}]}
+```
+
+在 `venue.json` 加入 `"windowsStationAddresses": "station-addresses.json"`，或在產生清單時與 `--windows-seat-map` 一起提供 `--windows-station-addresses`。收件和完整驗收都會比對原伺服器記錄、且已確認戰績的連線來源。若不符，收件會列出 ZIP 檔名、席位及電腦標籤。摘要記錄預期席位數、通過數及位址表 SHA-256。實體設備識別與跨機容量仍依現地驗收。 [準備驗收清單](#核對五房批次啟動器的原終止報告)
 
 #### 逐席核對 Windows 連線量測門檻
 
