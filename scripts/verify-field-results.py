@@ -1650,6 +1650,25 @@ def read_terminal_venue_launcher(path, mode, expected):
     return {'launchId': launch_id, 'sha256': hashlib.sha256(raw).hexdigest(), 'sessions': len(results)}, results
 
 
+def venue_closure_sessions(mode, rows):
+    rooms = list(QUEST_ROOMS)
+    groups = [rooms] if mode == 'Linked' else [[room] for room in rooms]
+    require(type(rows) is list and len(rows) == len(groups),
+            'Venue must contain the original five independent sessions or one linked session')
+    expected = {identity(row['sessionId']): row for row in rows}
+    require(len(expected) == len(rows) and all(type(row['roomIds']) is list and row['roomIds']
+            and all(integer(room, 1, 5) for room in row['roomIds']) for row in rows)
+            and sorted(row['roomIds'] for row in rows) == groups, 'Closure does not cover exactly the five original rooms')
+    return groups, expected
+
+
+def require_venue_launcher_source(session, launch_id, session_id, original):
+    source = session['combatStream']
+    require(session['id'] == session_id and type(source) is dict and source.get('venueLaunchId') == launch_id,
+            'Original management source belongs to a different venue launch or session')
+    integer(source['expectedSequence'], 1, original['appliedAtSequence'] - 1)
+
+
 def verify_venue(manifest_path):
     report, _ = verify_venue_batch(manifest_path)
     return report
@@ -1699,10 +1718,10 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
     recorded_at = datetime.fromisoformat(closure['recordedAtUtc'])
     require(recorded_at.utcoffset() is not None, 'Closure time must specify a time zone')
     all_rooms = list(range(1, 6))
-    expected_rooms = [all_rooms] if mode == 'Linked' else [[room] for room in all_rooms]
     entries = manifest['sessions']
     rows = closure['sessions']
-    require(type(entries) is list and type(rows) is list and len(entries) == len(rows) == len(expected_rooms),
+    expected_rooms, expected = venue_closure_sessions(mode, rows)
+    require(type(entries) is list and len(entries) == len(rows),
             'Venue must contain the original five independent sessions or one linked session')
     debrief_receipts, debrief_hash = (read_venue_debrief_receipts(evidence_path(manifest['venueDebriefReceipts']),
                                                                closure['requestId'], len(rows))
@@ -1760,10 +1779,6 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
     require(not source_lists or batch_supplied or all('udpSourcePreflights' in entry for entry in entries),
             'Provide all-source UDP preflight reports for every session in this batch')
 
-    expected = {identity(row['sessionId']): row for row in rows}
-    require(len(expected) == len(rows) and all(type(row['roomIds']) is list and row['roomIds']
-            and all(integer(room, 1, 5) for room in row['roomIds']) for row in rows)
-            and sorted(row['roomIds'] for row in rows) == expected_rooms, 'Closure does not cover exactly the five original rooms')
     venue_launcher, venue_results = None, {}
     if 'venueLauncherReport' in manifest:
         require(all('launcherReport' not in entry and 'sessionId' in entry for entry in entries),
@@ -1831,10 +1846,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
         else:
             session, statistics, endpoint = management_zip(evidence_path(entry['evidenceZip']))
         if venue_launcher is not None:
-            source = session['combatStream']
-            require(session['id'] == launch_id and type(source) is dict and source.get('venueLaunchId') == venue_launcher['launchId'],
-                    'Original management source belongs to a different venue launch or session')
-            integer(source['expectedSequence'], 1, expected[launch_id]['appliedAtSequence'] - 1)
+            require_venue_launcher_source(session, venue_launcher['launchId'], launch_id, expected[launch_id])
         return entry, launcher, session, statistics, endpoint, content(evidence_path(entry['serverLog']))
 
     inputs = (load_session(entry) for entry in entries)

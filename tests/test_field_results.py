@@ -1714,18 +1714,29 @@ class FieldResultsTests(unittest.TestCase):
         for mode in ('Independent', 'Linked'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                path, manifest, closure = venue_fixture(root, mode)
+                path, manifest, closure = venue_fixture(root, mode, with_journals=True)
                 launch_id = id_for(950)
                 report_path = root / 'venue-launcher.json'
                 report = {'schemaVersion': 1, 'status': 'venue-sealed-stopped', 'complete': True, 'topology': mode,
                           'instanceId': id_for(951), 'readyPublished': True, 'venueLaunchId': launch_id,
                           'sourceAttachment': 'confirmed', 'endpointPublication': 'confirmed', 'servers': []}
+                moved = root / 'copied server workspace'
                 for index, (entry, closed) in enumerate(zip(manifest['sessions'], closure['sessions'], strict=True)):
                     launcher = json.loads((root / entry.pop('launcherReport')).read_bytes())
                     launcher['childPid'] = launcher['udpBinding']['processId'] = 4300 + index
                     launcher['finalCombatStream'].update(venueLaunchId=launch_id, expectedSequence=5)
+                    launcher['workDirectory'] = str(root / 'unavailable original workspace')
+                    launcher['peerDiagnosticsEnabled'] = True
                     report['servers'].append({'roomIds': closed['roomIds'], 'result': launcher})
                     entry['sessionId'] = closed['sessionId']
+                    work = moved / ('linked' if mode == 'Linked' else f'room-{index + 1:02}')
+                    telemetry = work / 'telemetry'
+                    telemetry.mkdir(parents=True)
+                    shutil.copyfile(root / entry['serverLog'], work / 'server.log')
+                    shutil.copyfile(root / entry['worldJournal'], telemetry / f"{entry['sessionId']}.worldlog")
+                    combat_path = telemetry / f"{entry['sessionId']}.journal"
+                    combat_journal(combat_path, launcher)
+                    entry['combatJournal'] = combat_path.relative_to(root).as_posix()
                     archive = root / entry['evidenceZip']
                     session, statistics, endpoint = field.management_zip(archive)
                     session['combatStream'] = launcher['finalCombatStream']
@@ -1743,6 +1754,26 @@ class FieldResultsTests(unittest.TestCase):
                 packed = self.pack_venue(root, manifest)
                 path.write_text(json.dumps(packed), encoding='utf-8')
                 self.assertEqual(split, field.verify_venue(path))
+                generated = root / 'prepared.json'
+                command = [sys.executable, str(SCRIPT.with_name('prepare-venue-field-manifest.py')),
+                           '--venue-bundle', str(root / packed['venueBundle']), '--launcher-report', str(report_path),
+                           '--topology', 'same-host', '--server-ip', manifest['serverIps'][0]]
+                missing = subprocess.run([*command, '--output', str(generated)], capture_output=True)
+                self.assertEqual(1, missing.returncode)
+                self.assertFalse(generated.exists())
+                prepared = subprocess.run([*command, '--server-work-root', str(moved), '--output', str(generated)], capture_output=True)
+                self.assertEqual(0, prepared.returncode, prepared.stderr.decode())
+                original_generated = generated.read_bytes()
+                ready = json.loads(original_generated)
+                self.assertEqual([row['sessionId'] for row in closure['sessions']], [row['sessionId'] for row in ready['sessions']])
+                self.assertTrue(all(not Path(row['serverLog']).is_absolute() for row in ready['sessions']))
+                ready['windowsPlayers'] = packed['windowsPlayers']
+                path.write_text(json.dumps(ready), encoding='utf-8')
+                self.assertEqual(split, field.verify_venue(path))
+                refused = subprocess.run([*command, '--server-work-root', str(moved), '--output', str(generated)], capture_output=True)
+                self.assertEqual(1, refused.returncode)
+                self.assertEqual(original_generated, generated.read_bytes())
+                path.write_text(json.dumps(packed), encoding='utf-8')
 
                 for field_name, value, message in (
                     ('readyPublished', False, 'terminal Windows venue launch report'),

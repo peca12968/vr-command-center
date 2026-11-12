@@ -414,23 +414,21 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json
 
 #### 核對五房批次啟動器的原終止報告
 
-若從同一份 Windows 啟動計畫啟動全館，啟動時加上 `--peer-diagnostics on`。待原批次程序結束且報告顯示 `venue-sealed-stopped`，在驗收清單填入 `venueLauncherReport`。每場改用原報告 `servers[].result.sessionId`，並保留各自的 `serverLog` 和其他證據欄位。獨立模式有五個場次 ID，合併模式只有一個。 [批次啟動方式](WINDOWS_SERVER_PACKAGE.md#依場館計畫批次啟動)
+若從同一份 Windows 啟動計畫啟動全館，啟動時加上 `--peer-diagnostics on`。待原批次程序結束且報告顯示 `venue-sealed-stopped`，下載同一批次的管理驗收 ZIP。準備指令會比對兩份原檔，逐房確認場次、端點、名冊、伺服器日誌及已封存的回放和戰鬥紀錄，然後寫出新的 `venue.json`。 [批次啟動方式](WINDOWS_SERVER_PACKAGE.md#依場館計畫批次啟動)
 
 ```powershell
-$reportPath = '.\venue-final.json'
-$terminal = Get-Content -Raw -LiteralPath $reportPath | ConvertFrom-Json
-$sessions = foreach ($server in $terminal.servers) {
-    $result = $server.result
-    @{
-        sessionId = $result.sessionId
-        serverLog = Join-Path $result.workDirectory 'server.log'
-        worldJournal = Join-Path $result.workDirectory "telemetry/$($result.sessionId).worldlog"
-        combatJournal = Join-Path $result.workDirectory "telemetry/$($result.sessionId).journal"
-    }
-}
+python scripts/prepare-venue-field-manifest.py `
+    --venue-bundle .\management.zip --launcher-report .\venue-final.json `
+    --topology direct-lan --server-ip 192.168.1.10 --server-ip 127.0.0.1 `
+    --windows-inbox .\returned --venue-release-report .\release.json `
+    --udp-preflight-batch .\UDP\readiness.json --output .\venue.json
+python scripts/verify-field-results.py --venue-manifest .\venue.json --inspect-windows-inbox
+python scripts/verify-field-results.py --venue-manifest .\venue.json
 ```
 
-將 `$reportPath` 和 `@($sessions)` 分別放入上例的 `venueLauncherReport` 和 `sessions`。若已搬移原檔，請填入目前保存位置。若開場前已核對 UDP，再填 `udpPreflightBatch`。工具會將原計畫序號與管理端保存的來源附掛序號比對，並核對原終止報告的批次識別、各房場次、來源及兩份封存。成功摘要的 `venueLauncherReport` 會列出批次識別、原檔 SHA-256 及驗證場次數。 [UDP 預檢](#開場前核對五房-udp-報告)
+每個本機 IPv4 各填一次 `--server-ip`。同機演練將 `--topology` 設為 `same-host`。5 席或 10 席的試跑分別使用 `--players-per-room 1` 或 `2`。若伺服器工作目錄已搬移，填入 `--server-work-root` 並保留其下的 `room-01` 至 `room-05` 或 `linked` 及原 `telemetry` 子目錄。證據與清單放在同一磁碟時，清單會使用相對路徑。將整批資料移到別處時，保留檔案之間的位置。輸出檔名須為新路徑。
+
+使用 Windows 收件資料夾時一併提供原發行報告，混合 Quest 的場次再用 `--windows-seat-map` 指定 Windows 席位。沒有收件資料夾時，可在產生清單後填入 `windowsPlayers` 或逐場玩家證據。Quest 擷取及 MR 校正資料沿用上表欄位。若有開場預檢，可用 `--udp-preflight-batch` 納入原報告，並保留其引用的原計畫、預覽和雙端紀錄。最後執行完整驗收，摘要會列出原終止報告的批次識別、SHA-256 及驗證場次數。 [Windows 收件](#按收件資料夾找缺件及錯批) · [UDP 預檢](#開場前核對五房-udp-報告)
 
 ### 分階段驗收 5 人與 10 人
 
