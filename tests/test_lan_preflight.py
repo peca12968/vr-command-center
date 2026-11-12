@@ -226,6 +226,7 @@ class LanPreflightTests(unittest.TestCase):
             'mode': 'Linked', 'complete': True,
             'groups': [{'roomIds': rooms, 'complete': True, 'udpSourcePreflights': [second]}]})
         report = self.venue_check(plan, 'readiness.json', '--pairs', manual, '--batch', batch)
+        self.assertEqual(hashlib.sha256(plan.read_bytes()).hexdigest(), report['networkPlanSha256'])
         self.assertEqual(('same-host', 2, 2), (report['network'], report['expectedSources'], report['verifiedSources']))
         group, = report['groups']
         self.assertTrue(report['complete'])

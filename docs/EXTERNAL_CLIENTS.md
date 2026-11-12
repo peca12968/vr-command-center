@@ -301,6 +301,14 @@ python .\scripts\prepare-venue-network-plan.py `
 
 全館清單可交給 `check-venue-udp-preflight.py`，Quest 子集可交給 `probe-quest-venue.py`。請一併保留原啟動計畫、預覽與席位表。產生清單只核對檔案，實際 UDP 往返仍須依雙端報告驗收。 [Quest 批次預檢](QUEST3.md#批次預檢五房-quest-席位)
 
+#### 用原網路清單核對封存席位
+
+在 `venue.json` 加入 `"venueNetworkPlan": "venue-network.json"`，或在 `prepare-venue-field-manifest.py` 加 `--venue-network-plan .\venue-network.json`。使用開場前的全館清單，涵蓋本階段所有 Windows 與 Quest 席位。工具會比對每房原封存端點及原名冊，再將伺服器已確認戰績的 UDP 來源逐席核對。收件模式會列出來源不符的 Windows ZIP，並將對應席位列為待補件。
+
+新版全館 UDP 預檢回條會保留 `networkPlanSha256`。同時提交清單和新版回條時，驗收會核對兩者引用同一份原檔。舊回條仍核對原雙端 UDP 報告、場次與逐席來源。若同時提供 `windowsStationAddresses`，兩份位址資料須相符。全 Quest 場可在 `questCaptures.networkPlan` 填同一清單路徑，混合場仍可保留原 Quest 子集清單。
+
+`venueNetworkPlan` 摘要列出原檔雜湊、預期席位、已核對席位及端點數。收件模式的已核對席位數只計入已交回且通過的 Windows ZIP。完整驗收會核對全館 Windows 與 Quest 席位。 [收件方式](#按收件資料夾找缺件及錯批)
+
 ### 核對封存戰績與 UDP 來源
 
 離線核對工具使用已完成的一場 Windows 伺服器任務。啟動器 1.7 可勾選「記錄本次玩家連線來源（場館驗收）」，CLI 可加 `--peer-diagnostics on`。將公告及本機綁定都設為這台電腦實際使用的 IPv4，選擇名冊固定的場次。結束後等待原啟動器寫出 `sealed-stopped` 報告，並等玩家寫完戰績與斷線日誌。 [伺服器操作](WINDOWS_SERVER_PACKAGE.md#跨機來源診斷)

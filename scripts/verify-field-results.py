@@ -138,7 +138,11 @@ def quest_network_address(value):
 
 
 def read_quest_network_plan(path, *, allow_shared_sources=False):
-    plan = read_quest_plan_file(path)
+    return parse_quest_network_plan(read_quest_json(path), allow_shared_sources=allow_shared_sources)
+
+
+def parse_quest_network_plan(plan, *, allow_shared_sources=False):
+    require(type(plan.get('version')) is int and plan['version'] == 1, 'Expected a version 1 Quest plan or report')
     require(set(plan) == {'version', 'mode', 'endpoints', 'sources'}, 'Unexpected Quest network plan fields')
     sources = {seat: quest_network_address(value) for seat, value in quest_seats(plan['sources'], 'address').items()}
     if not allow_shared_sources:
@@ -157,6 +161,27 @@ def read_quest_network_plan(path, *, allow_shared_sources=False):
         groups[tuple(rooms)] = quest_network_address(row['address']), integer(row['port'], 1024, 65535)
     require(len(set(groups.values())) == len(groups), 'A game binding is used by more than one endpoint')
     return mode, groups, sources
+
+
+def read_venue_network_plan(path, mode, players_per_room):
+    document, raw = read_quest_document(path)
+    plan_mode, endpoints, sources = parse_quest_network_plan(document, allow_shared_sources=True)
+    require(plan_mode == mode and all(sum(seat[0] == room for seat in sources) == players_per_room for room in QUEST_ROOMS),
+            'Venue network plan mode or seats per room differ from the declared stage')
+    addresses = {seat: ipv4(address) for seat, address in sources.items()}
+    require(len({address.is_loopback for address in addresses.values()} |
+                {ipv4(address).is_loopback for address, _ in endpoints.values()}) == 1,
+            'Use only loopback or only private LAN addresses in one venue network plan')
+    return {'sha256': hashlib.sha256(raw).hexdigest(), 'endpoints': endpoints, 'seats': addresses}
+
+
+def check_venue_network_session(plan, session, endpoint, binding):
+    rooms = tuple(session['roomIds'])
+    require(plan['endpoints'].get(rooms) == (endpoint['address'], endpoint['port']) == (binding['address'], binding['port']),
+            'Venue network plan endpoint differs from the original sealed game binding')
+    seats = {(integer(owner['roomId'], 1, 5), integer(owner['seat'], 0, 4) + 1) for owner in session['players']}
+    require(seats == {seat for seat in plan['seats'] if seat[0] in rooms},
+            'Venue network plan seats differ from the original sealed roster')
 
 
 def peer_address(endpoint):
@@ -876,7 +901,7 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
                    udp_preflight=None, udp_source_preflights=None, verify_player_sources=False, quest_capture_logs=(),
                    guarded_begin=None, concurrency=None, verify_reconnect_history=False, reconnect_window=None,
                    quest_deployments=None, require_distinct_remote_roster=False, control_batches=(),
-                   observed_quest_addresses=None, quest_readiness=()):
+                   observed_quest_addresses=None, quest_readiness=(), planned_seat_addresses=None):
     integer(size, 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(not verify_player_sources or world_journal is not None, 'Player source verification requires the original closed world journal')
@@ -949,15 +974,19 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
             quest_players += 1
         room = verify_player_terminal_result(result, owner, stats, boundary)
         require(room in rooms, 'Player result admission or room differs')
+        if (capture_seat is not None or pid is not None and quest_deployments is not None
+                or player_sources is not None or verify_reconnect_history or planned_seat_addresses is not None):
+            seat = integer(owner['seat'], 0, 4) + 1
         if capture_seat is not None:
-            require((room, integer(owner['seat'], 0, 4) + 1) == capture_seat,
+            require((room, seat) == capture_seat,
                     'Quest capture room or seat differs from the original admission')
         if pid is not None and quest_deployments is not None:
-            seat = integer(owner['seat'], 0, 4) + 1
             require(quest_deployments.pop((room, seat), None) == (session_id, player_id, owner['admissionId'], port),
                     f'Quest deployment does not match the original admission and endpoint for room {room} seat {seat}')
+        if planned_seat_addresses is not None:
+            require(observed[0] == planned_seat_addresses[room, seat],
+                    f'Server-observed IPv4 differs from the venue network plan for room {room} seat {seat}')
         if player_sources is not None or verify_reconnect_history:
-            seat = integer(owner['seat'], 0, 4) + 1
             require((room, seat) not in source_seats, 'Duplicate seat in the player source evidence')
             source_seats.add((room, seat))
         if verify_reconnect_history:
@@ -1214,7 +1243,7 @@ def read_windows_station_addresses(path, seat_map):
 
 
 def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, seat_map, evidence_path, link_criteria,
-                  station_addresses=None):
+                  station_addresses=None, planned_seat_addresses=None):
     require(directory.is_dir(), 'Windows evidence inbox must be a directory')
     require(type(windows_hash) is str and re.fullmatch(r'[0-9a-f]{64}', windows_hash),
             'Windows evidence inbox requires the original Windows release report')
@@ -1273,6 +1302,9 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
             address, _ = peer_address(peers[connection])
             if station_addresses is not None:
                 require(address == station_addresses[seat], f'Server-observed IPv4 differs from the address assigned to Windows station {seat_map[seat]}')
+            if planned_seat_addresses is not None:
+                require(address == planned_seat_addresses[seat],
+                        f'Server-observed IPv4 differs from the venue network plan for room {seat[0]} seat {seat[1]}')
         except EvidenceError as error:
             issues.append({'file': file.name, 'reason': str(error)})
             continue
@@ -1456,11 +1488,13 @@ def read_udp_launch_binding(batch, directory, mode, expected_sessions=None):
     return checked, plan[2]
 
 
-def read_udp_preflight_batch(path, mode, expected_rooms, *, expected_sessions=None):
+def read_udp_preflight_batch(path, mode, expected_rooms, *, expected_sessions=None, venue_plan_hash=None):
     batch = read_json(content(path))
     require(integer(batch['version'], 1, 1) and batch.get('scope') in ('quest-udp-preflight-only', 'venue-udp-preflight-only')
             and batch.get('mode') == mode and batch.get('complete') is True,
             'Provide a complete UDP preflight batch for the original mode')
+    if venue_plan_hash is not None and batch['scope'] == 'venue-udp-preflight-only' and 'networkPlanSha256' in batch:
+        require(batch['networkPlanSha256'] == venue_plan_hash, 'UDP preflight references a different original venue network plan')
     launch = read_udp_launch_binding(batch, path.parent, mode, expected_sessions)
     groups = batch['groups']
     require(type(groups) is list and 1 <= len(groups) <= len(expected_rooms), 'Invalid UDP endpoint groups')
@@ -1515,7 +1549,7 @@ def read_quest_capture_report(path, mode):
     return report
 
 
-def read_quest_capture_batches(spec, mode, expected, evidence_path):
+def read_quest_capture_batches(spec, mode, expected, evidence_path, shared_network=None):
     require(type(spec) is dict and 'reports' in spec and {'networkPlan', 'deviceMap'} & spec.keys()
             and spec.keys() <= {'networkPlan', 'deviceMap', 'reports'},
             'Provide capture reports and a Quest network plan, the original device map, or both')
@@ -1525,10 +1559,14 @@ def read_quest_capture_batches(spec, mode, expected, evidence_path):
         sources = dict.fromkeys(device_map)
         endpoints = {}
     else:
-        plan_mode, endpoints, plan_sources = read_quest_network_plan(evidence_path(spec['networkPlan']))
-        require(plan_mode == mode, 'Quest network plan differs from the venue mode')
-        require(device_map is None or plan_sources.keys() == device_map.keys(), 'Quest network plan and device map must cover the same seats')
-        sources = {seat: ipv4(address) for seat, address in plan_sources.items()}
+        if shared_network is None:
+            plan_mode, endpoints, plan_sources = read_quest_network_plan(evidence_path(spec['networkPlan']))
+            require(plan_mode == mode, 'Quest network plan differs from the venue mode')
+            sources = {seat: ipv4(address) for seat, address in plan_sources.items()}
+        else:
+            endpoints, sources = shared_network['endpoints'], shared_network['seats']
+            require(len(set(sources.values())) == len(sources), 'Use a distinct IPv4 for each mapped Quest')
+        require(device_map is None or sources.keys() == device_map.keys(), 'Quest network plan and device map must cover the same seats')
     reports = spec['reports']
     require(type(reports) is list and 1 <= len(reports) <= 25, 'Provide 1 to 25 Quest capture reports')
     captures, used_seats, deployments = {}, set(), []
@@ -1766,14 +1804,17 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_r
     return deployed, summary, readiness
 
 
-def read_venue_quest_evidence(manifest, mode, expected, evidence_path, release):
+def read_venue_quest_evidence(manifest, mode, expected, evidence_path, release, *, venue_network=None):
     captures, endpoints, summary, references = {}, {}, {}, []
     device_map = deployments = deployment_summary = None
     readiness = {}, None
     if 'questCaptures' in manifest:
         require(manifest['topology'] == 'direct-lan', 'Quest capture batches require direct LAN evidence')
+        captures_spec = manifest['questCaptures']
+        shared = (venue_network if type(captures_spec) is dict and captures_spec.get('networkPlan') == manifest.get('venueNetworkPlan')
+                  else None)
         captures, endpoints, summary, references, device_map = read_quest_capture_batches(
-            manifest['questCaptures'], mode, expected, evidence_path)
+            captures_spec, mode, expected, evidence_path, shared)
     require(not references or 'questDeployments' in manifest, 'Provide the original Quest deployment reports referenced by the capture')
     if 'questReadinessReports' in manifest:
         require('questDeployments' in manifest and type(manifest['questReadinessReports']) is list,
@@ -1965,6 +2006,17 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
         seen_paths.add(path)
         return path
 
+    network_reference = manifest.get('venueNetworkPlan')
+    venue_network = (read_venue_network_plan(evidence_path(network_reference), mode, players_per_room)
+                     if 'venueNetworkPlan' in manifest else None)
+    planned_seat_addresses = venue_network['seats'] if venue_network is not None else None
+
+    def network_summary(verified):
+        if venue_network is None:
+            return {}
+        return {'venueNetworkPlan': {'sha256': venue_network['sha256'], 'expectedSeats': len(planned_seat_addresses),
+                                     'verifiedSeats': verified, 'endpointsVerified': len(venue_network['endpoints'])}}
+
     release, release_hash = (read_venue_release(evidence_path(manifest['venueReleaseReport']))
                              if 'venueReleaseReport' in manifest else (None, None))
     windows_release = release.get('windows') if release is not None else None
@@ -2067,7 +2119,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
         require(type(batch_names) is list and 1 <= len(batch_names) <= 25, 'Provide 1 to 25 Quest UDP batch reports')
         for name in batch_names:
             batch, launch = read_udp_preflight_batch(evidence_path(name), mode, expected_rooms,
-                                                     expected_sessions={tuple(row['roomIds']): sid for sid, row in expected.items()})
+                                                     expected_sessions={tuple(row['roomIds']): sid for sid, row in expected.items()},
+                                                     venue_plan_hash=venue_network['sha256'] if venue_network else None)
             if launch is not None:
                 for group, planned in launch[1].items():
                     require(udp_launch_bindings.setdefault(group, planned) == planned, 'UDP launch plans disagree on the original room binding')
@@ -2099,7 +2152,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
     capture_supplied = 'questCaptures' in manifest
     captures, capture_endpoints, capture_summary, quest_deployments, deployment_summary, readiness = (
         ({}, {}, {}, None, None, ({}, None)) if inspect_windows else
-        read_venue_quest_evidence(manifest, mode, expected, evidence_path, release))
+        read_venue_quest_evidence(manifest, mode, expected, evidence_path, release, venue_network=venue_network))
     quest_readiness, readiness_summary = readiness
     observed_quest_addresses = set() if capture_summary.get('questCaptureAddressSource') == 'server-observed' else None
 
@@ -2122,6 +2175,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
             session, statistics, endpoint = management_zip(evidence_path(entry['evidenceZip']))
         if venue_launcher is not None:
             require_venue_launcher_source(session, venue_launcher['launchId'], launch_id, expected[launch_id])
+        if venue_network is not None:
+            check_venue_network_session(venue_network, session, endpoint, launcher['udpBinding'])
         return entry, launcher, session, statistics, endpoint, content(evidence_path(entry['serverLog']))
 
     inputs = (load_session(entry) for entry in entries)
@@ -2133,6 +2188,9 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
         seat_map = read_windows_seat_map(evidence_path(manifest['windowsSeatMap'])) if 'windowsSeatMap' in manifest else None
         station_addresses, address_hash = (read_windows_station_addresses(evidence_path(manifest['windowsStationAddresses']), seat_map)
                                            if 'windowsStationAddresses' in manifest else (None, None))
+        if station_addresses is not None and planned_seat_addresses is not None:
+            require(all(planned_seat_addresses.get(seat) == address for seat, address in station_addresses.items()),
+                    'Windows station addresses disagree with the original venue network plan')
         require(seat_map is not None or not (capture_supplied or any(entry.get('players') for entry in entries)),
                 'Provide the Windows seat map when the batch contains Quest evidence')
         name = manifest['windowsEvidenceDirectory']
@@ -2140,12 +2198,14 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
         directory = (manifest_path.parent / name).resolve(strict=True)
         inputs = list(inputs)
         windows_by_session, inbox = windows_inbox(directory, inputs, expected, players_per_room, windows_hash,
-                                                 seat_map, evidence_path, link_criteria, station_addresses=station_addresses)
+                                                 seat_map, evidence_path, link_criteria, station_addresses=station_addresses,
+                                                 planned_seat_addresses=planned_seat_addresses)
         if station_addresses is not None:
             station_summary['windowsStationAddresses'] = {'sha256': address_hash, 'expectedSeats': len(station_addresses),
                                                           'verifiedSeats': inbox['receivedWindowsSeats']}
         if inspect_windows:
-            return {'version': 1, 'scope': 'windows-inbox', 'mode': mode, 'closureRequestId': closure_id, **inbox, **station_summary}, None
+            return {'version': 1, 'scope': 'windows-inbox', 'mode': mode, 'closureRequestId': closure_id,
+                    **inbox, **station_summary, **network_summary(inbox['receivedWindowsSeats'])}, None
         require(inbox['complete'], 'Windows inbox is incomplete or contains conflicting files; use --inspect-windows-inbox')
 
     rooms, summaries = {}, []
@@ -2293,7 +2353,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
                                          quest_deployments=quest_deployments,
                                          require_distinct_remote_roster=require_distinct_remote_roster,
                                          control_batches=controls.get(session['id'], ()), observed_quest_addresses=observed_quest_addresses,
-                                         quest_readiness=quest_readiness.pop(session['id'], ()))
+                                         quest_readiness=quest_readiness.pop(session['id'], ()),
+                                         planned_seat_addresses=planned_seat_addresses)
         require(set(sources) == set(row['roomIds']) and all(len(peers) == players_per_room for peers in sources.values()),
                 'Verified player count differs from the expected seats in an original room')
         if debrief_receipts is not None:
@@ -2365,7 +2426,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
             'distinctPeerAddresses': len(peer_ips), 'distinctAddressesOutsideDeclaredServer': len(remote),
             'serverAcknowledgements': sum(item['serverAcknowledgements'] for item in summaries),
             'physicalHostsVerified': False, 'networkCapacityAccepted': False,
-            **station_summary,
+            **station_summary, **network_summary(len(player_ids)),
             **({'venueLauncherReport': venue_launcher} if venue_launcher is not None else {}),
             **({'venueDebriefReceipts': {'sha256': debrief_hash, 'sessions': len(summaries), 'acknowledgedPlayers': len(player_ids)}}
                if debrief_receipts is not None else {}),
@@ -2466,7 +2527,7 @@ def verify_venue_stages(plan_path):
                             'worldJournalsVerified': report['worldJournalsVerified'],
                             'concurrentRoster': report['concurrentRoster'],
                             **{field: report[field] for field in ('combatJournalsVerified', 'distinctRemoteRoster', 'windowsLinkCriteria',
-                                                                'windowsStationAddresses')
+                                                                'windowsStationAddresses', 'venueNetworkPlan')
                                if field in report}})
     return {'version': 1, 'consistent': True, 'declaredTopology': topology,
             'planSha256': hashlib.sha256(raw_plan).hexdigest(), 'venueReleaseSha256': release_hash,

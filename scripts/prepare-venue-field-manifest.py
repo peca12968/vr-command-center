@@ -35,9 +35,9 @@ def session_files(result, folder, session_id):
     return {key: path.resolve(strict=True) for key, path in files.items()}
 
 
-def check_quest_inputs(manifest, expected, evidence_path, release, sources, server_ips, windows_seats):
+def check_quest_inputs(manifest, expected, evidence_path, release, sources, server_ips, windows_seats, venue_network):
     captures, endpoints, _, deployments, _, _ = field.read_venue_quest_evidence(
-        manifest, manifest['mode'], expected, evidence_path, release)
+        manifest, manifest['mode'], expected, evidence_path, release, venue_network=venue_network)
     for source in sources.values():
         if source['rooms'] in endpoints:
             field.require_quest_capture_endpoint(source['binding'], endpoints[source['rooms']])
@@ -57,6 +57,9 @@ def check_quest_inputs(manifest, expected, evidence_path, release, sources, serv
             field.require(observed not in server_ips and observed not in observed_addresses
                           and any(observed in network for network in field.LAN) and (address is None or address == observed),
                           'Quest capture IPv4 differs from the original or declared direct LAN source')
+            if venue_network is not None:
+                field.require(observed == venue_network['seats'][seat],
+                              f'Server-observed IPv4 differs from the venue network plan for room {seat[0]} seat {seat[1]}')
             captured_seats.add(seat)
             observed_addresses.add(observed)
     field.require(release is None or not captured_seats or deployments is not None,
@@ -102,6 +105,8 @@ def prepare(args, output):
 
     alignment_path = evidence_path(args.room_alignment_bundle.resolve()) if args.room_alignment_bundle is not None else None
     alignment_bundle = field.read_venue_alignment_bundle(alignment_path, mode, expected) if alignment_path is not None else None
+    network_path = evidence_path(args.venue_network_plan.resolve()) if args.venue_network_plan is not None else None
+    venue_network = field.read_venue_network_plan(network_path, mode, args.players_per_room) if network_path is not None else None
     entries, venue_seats = [], set()
     quest_sources = {}
     for session_id, row in sorted(expected.items(), key=lambda entry: entry[1]['roomIds']):
@@ -126,6 +131,8 @@ def prepare(args, output):
                       and field.integer(endpoint['port'], 1024, 65535) == port
                       and field.integer(binding['processId'], 1) == result['childPid'],
                       f'Original endpoint or server IPv4 inventory differs for {stem}')
+        if venue_network is not None:
+            field.check_venue_network_session(venue_network, session, endpoint, binding)
         if alignment_bundle is not None:
             experience = field.verify_experience(session, world['header'])
             alignments = field.venue_session_alignments(alignment_bundle, rooms, experience, endpoint)
@@ -160,6 +167,8 @@ def prepare(args, output):
                 'venueBundle': ref(bundle), 'venueLauncherReport': ref(terminal), 'sessions': entries}
     if alignment_path is not None:
         manifest['roomAlignmentBundle'] = ref(alignment_path)
+    if network_path is not None:
+        manifest['venueNetworkPlan'] = ref(network_path)
     if args.players_per_room != 5:
         manifest['expectedPlayersPerRoom'] = args.players_per_room
     release = windows_seats = None
@@ -185,7 +194,10 @@ def prepare(args, output):
         seen_paths.add(seat_map)
         if args.windows_station_addresses is not None:
             addresses_path = args.windows_station_addresses.resolve(strict=True)
-            field.read_windows_station_addresses(addresses_path, seats)
+            station_addresses, _ = field.read_windows_station_addresses(addresses_path, seats)
+            if venue_network is not None:
+                field.require(all(venue_network['seats'].get(seat) == address for seat, address in station_addresses.items()),
+                              'Windows station addresses disagree with the original venue network plan')
             manifest['windowsStationAddresses'] = ref(addresses_path)
             seen_paths.add(addresses_path)
     if args.udp_preflight_batch:
@@ -193,7 +205,8 @@ def prepare(args, output):
         field.require(len(paths) == len(set(paths)) <= 25, 'Provide up to 25 distinct original UDP preflight batches')
         sessions = {tuple(row['roomIds']): session_id for session_id, row in expected.items()}
         for path in paths:
-            field.read_udp_preflight_batch(path, mode, groups, expected_sessions=sessions)
+            field.read_udp_preflight_batch(path, mode, groups, expected_sessions=sessions,
+                                           venue_plan_hash=venue_network['sha256'] if venue_network else None)
         seen_paths.update(paths)
         if len(paths) == 1:
             manifest['udpPreflightBatch'] = ref(paths[0])
@@ -211,7 +224,7 @@ def prepare(args, output):
     if args.quest_readiness_report:
         manifest['questReadinessReports'] = [ref(path.resolve(strict=True)) for path in args.quest_readiness_report]
     if quest_sources:
-        check_quest_inputs(manifest, expected, evidence_path, release, quest_sources, addresses, windows_seats)
+        check_quest_inputs(manifest, expected, evidence_path, release, quest_sources, addresses, windows_seats, venue_network)
     return manifest
 
 
@@ -228,6 +241,7 @@ def main():
     parser.add_argument('--windows-inbox', type=Path)
     parser.add_argument('--windows-seat-map', type=Path)
     parser.add_argument('--windows-station-addresses', type=Path)
+    parser.add_argument('--venue-network-plan', type=Path, help='Original whole-venue network plan with all seat IPv4 assignments')
     parser.add_argument('--udp-preflight-batch', action='append', type=Path)
     parser.add_argument('--room-alignment-bundle', type=Path, help='Original MR or mixed venue deployment ZIP')
     parser.add_argument('--quest-capture-report', action='append', type=Path, help='Original batch logcat capture report; repeat for separate batches')

@@ -4,6 +4,7 @@ import argparse
 import codecs
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
+import hashlib
 import importlib.util
 import json
 import os
@@ -52,7 +53,9 @@ def load_pairs(pairs_path, batch_paths, mode, rooms, binding):
 
 
 def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, launch_plan=None):
-    mode, endpoints, sources = field.read_quest_network_plan(plan, allow_shared_sources=True)
+    document, raw = field.read_quest_document(plan)
+    mode, endpoints, sources = field.parse_quest_network_plan(document, allow_shared_sources=True)
+    plan_hash = hashlib.sha256(raw).hexdigest()
     field.require({room for room, _ in sources} == set(field.QUEST_ROOMS), 'Plan a source for every room')
     field.require(launch_plan is None or launcher_preview is not None, 'A launch plan requires its original launcher preview')
     preview = field.read_udp_launcher_document(launcher_preview, preview=True) if launcher_preview else None
@@ -129,6 +132,7 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
     complete = (not (unmatched or unreadable) and all(group['complete'] for group in groups)
                 and (launch_check is None or launch_check['complete']) and (binding is None or binding['complete']))
     return {'version': 1, 'scope': 'venue-udp-preflight-only', 'mode': mode,
+            'networkPlanSha256': plan_hash,
             'network': 'same-host' if True in address_modes else 'private-lan-plan',
             'complete': complete,
             'checkedAtUtc': checked_at, 'expectedSources': len(expected),

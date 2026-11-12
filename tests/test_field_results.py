@@ -1870,6 +1870,57 @@ class FieldResultsTests(unittest.TestCase):
                 with self.assertRaisesRegex(field.EvidenceError, 'address for every mapped Windows station'):
                     field.verify_venue(path)
 
+    def test_venue_network_plan_detects_swapped_windows_seats(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, _ = venue_fixture(root, mode, remote=True, room_sizes=(1,) * 5)
+                manifest['expectedPlayersPerRoom'] = 1
+                plan = {'version': 1, 'mode': mode, 'endpoints': [], 'sources': []}
+                for entry in manifest['sessions']:
+                    session, _, endpoint = field.management_zip(root / entry['evidenceZip'])
+                    plan['endpoints'].append({'roomIds': session['roomIds'], 'address': endpoint['address'], 'port': endpoint['port']})
+                    for owner, player in zip(session['players'], entry['players'], strict=True):
+                        plan['sources'].append({'roomId': owner['roomId'], 'seat': 1, 'address': player['address']})
+                plan_path = root / 'venue-network.json'
+                plan_path.write_text(json.dumps(plan), encoding='utf-8')
+                manifest['venueNetworkPlan'] = plan_path.name
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                original = field.verify_venue(path)
+                self.assertEqual({'sha256': hashlib.sha256(plan_path.read_bytes()).hexdigest(), 'expectedSeats': 5,
+                                  'verifiedSeats': 5, 'endpointsVerified': len(plan['endpoints'])}, original['venueNetworkPlan'])
+
+                swapped = deepcopy(plan)
+                first, last = swapped['sources'][0], swapped['sources'][-1]
+                first['address'], last['address'] = last['address'], first['address']
+                plan_path.write_text(json.dumps(swapped), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'venue network plan for room 1 seat 1'):
+                    field.verify_venue(path)
+
+                self.add_shared_release(root, manifest, 0)
+                inbox = self.windows_inbox_fixture(root, manifest)
+                path.write_text(json.dumps(inbox), encoding='utf-8')
+                inspection, _ = field.verify_venue_batch(path, inspect_windows=True)
+                self.assertEqual([{'roomId': 1, 'seat': 1}, {'roomId': 5, 'seat': 1}], inspection['missingSeats'])
+                self.assertEqual(3, inspection['venueNetworkPlan']['verifiedSeats'])
+                self.assertEqual(2, len(inspection['issues']))
+                self.assertNotIn('192.168.', json.dumps(inspection))
+                with self.assertRaisesRegex(field.EvidenceError, 'Windows inbox is incomplete'):
+                    field.verify_venue(path)
+
+                changed = deepcopy(plan)
+                changed['endpoints'][0]['port'] += 100
+                plan_path.write_text(json.dumps(changed), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'endpoint differs from the original sealed game binding'):
+                    field.verify_venue_batch(path, inspect_windows=True)
+                changed = deepcopy(plan)
+                changed['sources'][0]['seat'] = 2
+                plan_path.write_text(json.dumps(changed), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'seats differ from the original sealed roster'):
+                    field.verify_venue(path)
+                plan_path.write_text(json.dumps(plan), encoding='utf-8')
+                self.assertEqual(original['venueNetworkPlan'], field.verify_venue(path)['venueNetworkPlan'])
+
     def test_windows_inbox_reports_missing_acknowledgement_without_weakening_final_verification(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2144,6 +2195,17 @@ class FieldResultsTests(unittest.TestCase):
                 capture.update(observed_quest_capture_spec(root, capture))
                 capture_path = root / capture['reports'][0]
                 map_path, network_path = (root / capture[key] for key in ('deviceMap', 'networkPlan'))
+                whole = json.loads(network_path.read_bytes())
+                for entry in manifest['sessions']:
+                    session, _, _ = field.management_zip(root / entry['evidenceZip'])
+                    owners = {owner['id']: owner for owner in session['players']}
+                    for player in entry['players']:
+                        _, result = field.client_result((root / player['log']).read_text(encoding='utf-8'))
+                        owner = owners[result['playerId']]
+                        whole['sources'].append({'roomId': owner['roomId'], 'seat': owner['seat'] + 1, 'address': player['address']})
+                whole_path = root / 'venue-network.json'
+                whole_path.write_text(json.dumps(whole), encoding='utf-8')
+                manifest['venueNetworkPlan'] = whole_path.name
                 deployment_path = root / manifest['questDeployments']['reports'][0]
                 deployment = json.loads(deployment_path.read_bytes())
                 salt = '1' * 32
@@ -2166,6 +2228,7 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertEqual(5, expected['questCaptureSeatsVerified'])
                 self.assertEqual(20, expected['venueRelease']['windows']['seatsVerified'])
                 self.assertEqual(1, expected['questDeployment']['deviceMapsMatched'])
+                self.assertEqual(25, expected['venueNetworkPlan']['verifiedSeats'])
 
                 output = root / 'handoff' / 'venue.json'
                 output.parent.mkdir()
@@ -2174,6 +2237,7 @@ class FieldResultsTests(unittest.TestCase):
                            '--venue-bundle', str(root / packed['venueBundle']), '--launcher-report', str(terminal),
                            '--topology', 'direct-lan', '--server-ip', manifest['serverIps'][0], '--server-work-root', str(moved),
                            '--venue-release-report', str(release), '--windows-inbox', str(inbox), '--windows-seat-map', str(seats_path),
+                           '--venue-network-plan', str(whole_path),
                            '--quest-capture-report', str(capture_path), '--quest-device-map', str(map_path), '--quest-network-plan', str(network_path),
                            '--quest-deployment-report', str(deployment_path)]
                 returning = next(inbox.glob('*.ZIP'))
@@ -2182,11 +2246,13 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertEqual(0, prepared.returncode, prepared.stderr.decode())
                 inspection, _ = field.verify_venue_batch(output, inspect_windows=True)
                 self.assertEqual(19, inspection['receivedWindowsSeats'])
+                self.assertEqual(19, inspection['venueNetworkPlan']['verifiedSeats'])
                 delayed.rename(returning)
                 self.assertEqual(expected, field.verify_venue(output))
                 generated = json.loads(output.read_bytes())
                 self.assertTrue(all(not Path(value).is_absolute() for value in (
                     generated['questCaptures']['deviceMap'], generated['questCaptures']['networkPlan'],
+                    generated['venueNetworkPlan'],
                     *generated['questCaptures']['reports'], *generated['questDeployments']['reports'])))
 
                 original_network = network_path.read_bytes()
@@ -2199,6 +2265,17 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertIn(b'Quest capture IPv4 differs', result.stderr)
                 self.assertFalse(rejected_path.exists())
                 network_path.write_bytes(original_network)
+                changed = deepcopy(whole)
+                first, second = changed['sources'][:2]
+                first['address'], second['address'] = second['address'], first['address']
+                original_whole = whole_path.read_bytes()
+                whole_path.write_text(json.dumps(changed), encoding='utf-8')
+                rejected_path = output.with_name('swapped-quest-seats.json')
+                result = subprocess.run([*command, '--output', str(rejected_path)], capture_output=True)
+                self.assertEqual(1, result.returncode)
+                self.assertIn(b'IPv4 differs from the venue network plan for room 1 seat 5', result.stderr)
+                self.assertFalse(rejected_path.exists())
+                whole_path.write_bytes(original_whole)
                 seats[0]['seat'] = 5
                 seats_path.write_text(json.dumps({'version': 1, 'seats': seats}), encoding='utf-8')
                 rejected_path = output.with_name('overlapping-seats.json')
@@ -2661,17 +2738,30 @@ class FieldResultsTests(unittest.TestCase):
             binding = launcher['udpBinding']
             binding['observedAtUtc'] = '2026-11-08T23:59:59Z'
             launcher_path.write_text(json.dumps(launcher), encoding='utf-8')
-            network = json.loads((root / 'network-plan.json').read_text(encoding='utf-8'))
+            plan_path = root / 'network-plan.json'
+            network = json.loads(plan_path.read_bytes())
             entry['udpSourcePreflights'] = []
             for index, source in enumerate(network['sources']):
                 listener, probe = preflight_fixture(root, f'quest-{index}', server=binding['address'],
                                                     peer=source['address'], port=binding['port'])
                 entry['udpSourcePreflights'].append({'listener': listener.name, 'probe': probe.name})
+            manifest['venueNetworkPlan'] = plan_path.name
+            batch = {'version': 1, 'scope': 'venue-udp-preflight-only', 'mode': 'Linked', 'complete': True,
+                     'networkPlanSha256': hashlib.sha256(plan_path.read_bytes()).hexdigest(),
+                     'groups': [{'roomIds': list(range(1, 6)), 'complete': True,
+                                 'udpSourcePreflights': entry.pop('udpSourcePreflights')}]}
+            batch_path = root / 'readiness.json'
+            batch_path.write_text(json.dumps(batch), encoding='utf-8')
+            manifest['udpPreflightBatch'] = batch_path.name
             path.write_text(json.dumps(manifest), encoding='utf-8')
             report = field.verify_venue(path)
             self.assertEqual(25, report['questCaptureSeatsVerified'])
             self.assertEqual(25, report['udpSourcePreflightsVerified'])
             self.assertEqual(25, report['serverAcknowledgements'])
+            self.assertEqual(25, report['venueNetworkPlan']['verifiedSeats'])
+            plan_path.write_bytes(plan_path.read_bytes() + b'\n')
+            with self.assertRaisesRegex(field.EvidenceError, 'different original venue network plan'):
+                field.verify_venue(path)
 
     def test_venue_checks_capture_seat_even_when_swapped_logs_and_addresses_agree(self):
         with tempfile.TemporaryDirectory() as directory:
