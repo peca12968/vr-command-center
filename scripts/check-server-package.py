@@ -170,6 +170,7 @@ def main():
     p.add_argument('--check-venue-concurrent-fire', action='store_true',
                    help='Drive normal exercise fire on all 25 native desktop seats and verify the sealed shared window')
     p.add_argument('--check-venue-link-metrics', action='store_true', help='Bind each packaged Windows client link report to its original sealed result')
+    p.add_argument('--check-venue-link-form', action='store_true', help='Measure one graphical Windows player through the shipped WinForms handlers in each mode')
     p.add_argument('--check-venue-field-ui',action='store_true',help='Download the original current and earlier field bundles from the shipped console')
     p.add_argument('--check-room-readiness',action='store_true',help='Verify live aggregate pose counts from the management package in both modes')
     p.add_argument('--check-room-observer',action='store_true',help='Verify room-scoped observation and instant replay on the original Linked source')
@@ -306,6 +307,8 @@ def main():
         p.error('--windows-release-report requires the packaged Windows launchers in the ordinary venue check')
     if args.check_windows_evidence_zip and not (args.windows_release_report and args.venue_field_evidence):
         p.error('--check-windows-evidence-zip requires Windows release and venue field evidence')
+    if args.check_venue_link_form and not (args.check_venue_link_metrics and args.check_windows_evidence_zip and not args.check_venue_openxr):
+        p.error('--check-venue-link-form requires measured Windows evidence ZIPs and desktop mode')
     if args.check_venue_field_ui and not args.venue_field_evidence:
         p.error('--check-venue-field-ui requires --venue-field-evidence')
     if args.check_room_readiness and not args.player_package:p.error('--check-room-readiness requires the three-package check')
@@ -1466,14 +1469,34 @@ def main():
         if archive is not None:
             flags += ['--evidence-zip',str(archive)]
         environment=env if mock is None else {**env,**mock}
-        child=subprocess.Popen([str(player_folder/'Launch-Player.exe'),'--config',str(file),'--launch',
-            *flags,'--wait','--log',str(log),'--report',str(report)],cwd=runtime,env=environment)
+        measured_form = args.check_venue_link_form and (person['roomId'], person['seat']) == (5, 0)
+        if measured_form:
+            form_runner = out / 'release-form-checks.exe'
+            if not form_runner.exists():
+                compiler = Path(os.environ['WINDIR']) / 'Microsoft.NET/Framework64/v4.0.30319/csc.exe'
+                subprocess.run([str(compiler), '/nologo', '/target:exe', '/platform:x64', '/warnaserror+',
+                                '/reference:System.Windows.Forms.dll', '/reference:System.Web.Extensions.dll',
+                                '/out:' + str(form_runner), str(ROOT / 'tools/WindowsPlayerLauncher/ReleaseFormChecks.cs')],
+                               check=True, timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
+            form_folder = file.with_suffix('.form')
+            form_folder.mkdir()
+            log, report = form_folder / 'player.log', form_folder / 'launch-report.json'
+            metrics, archive = form_folder / 'link-metrics.json', form_folder / 'player-evidence.zip'
+            with (form_folder / 'form-run.log').open('xb') as diagnostics:
+                child = subprocess.Popen([str(form_runner), '--measured-session', str(player_folder), str(form_folder),
+                                          str(file), str(args.windows_release_report)], cwd=runtime, env=environment,
+                                         stdout=diagnostics, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW)
+        else:
+            child=subprocess.Popen([str(player_folder/'Launch-Player.exe'),'--config',str(file),'--launch',
+                *flags,'--wait','--log',str(log),'--report',str(report)],cwd=runtime,env=environment)
         client={'process':child,'log':log,'player':person,'sessionId':entry['sessionId'],
             'launcherReport':report,'witness':None,'configPath':file}
         if metrics is not None:
             client['linkMetrics']=metrics
         if archive is not None:
             client['evidenceZip']=archive
+        if measured_form:
+            client['measuredForm'] = form_folder
         clients.append(client)
         def started():
             if child.poll() is not None:raise RuntimeError('Player launcher exited before admission')
@@ -1497,7 +1520,11 @@ def main():
                     client['witness']=witness
                     client['nativePid']=info['processId']
             if witness:
-                witness.terminate()
+                form = client.get('measuredForm')
+                if form is not None and 'final' in client:
+                    (form / 'finish.request').touch(exist_ok=False)
+                else:
+                    witness.terminate()
                 witness.wait()
                 child.wait(timeout=15)
                 status=read(report)
@@ -1514,6 +1541,11 @@ def main():
                     raise RuntimeError('Launcher did not confirm original player exit')
                 witness.close()
                 client['witness']=None
+                if form is not None and 'final' in client:
+                    reviewed = read(form / 'release-form-checks.json')
+                    check(reviewed == {'complete': True, 'checks': 6, 'processId': client['nativePid']}
+                          and read(client['linkMetrics'])['batchMode'] is False and read(client['linkMetrics'])['graphicsDeviceActive'] is True,
+                          'shipped graphical form publishes the measured player ZIP after a normal game window exit')
                 if 'evidenceZip' in client and 'final' in client:
                     with zipfile.ZipFile(client['evidenceZip']) as bundle:
                         originals = {'launch-report.json': report, 'player.log': client['log']}
@@ -1802,8 +1834,9 @@ def main():
         check(original.returncode == 0 and json.loads(original.stdout) == summary,
               label + ' untouched venue ZIP and unordered Windows logs match the original split field summary')
         if args.check_windows_evidence_zip:
+            archives = {str(client['log']): str(client['evidenceZip']) for client in clients if 'evidenceZip' in client}
             bundled = dict(evidence, windowsPlayers=[{'address': player['address'],
-                'evidenceZip': str(Path(player['log']).with_suffix('.evidence.zip'))} for player in evidence['windowsPlayers']])
+                'evidenceZip': archives[player['log']]} for player in evidence['windowsPlayers']])
             zipped = run(bundled)
             check(zipped.returncode == 0 and json.loads(zipped.stdout) == summary,
                   label + ' original Windows player ZIPs match the exact loose-file field report')

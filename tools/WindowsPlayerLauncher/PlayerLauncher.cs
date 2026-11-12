@@ -501,6 +501,7 @@ internal static class PlayerLauncher
         private readonly Label status = new Label { AutoSize = false, Dock = DockStyle.Top, Height = 65 };
         private readonly Button play = new Button { Text = "開始遊戲(&S)", AccessibleName = "開始遊戲", AutoSize = true, Enabled = false };
         private readonly RadioButton openXR = new RadioButton { Text = "Windows OpenXR(&O)", AutoSize = true };
+        private readonly CheckBox measureLink = new CheckBox { Text = "記錄本次連線量測(&M)", AccessibleName = "記錄本次連線量測", AutoSize = true, Enabled = false };
         private readonly TextBox path = new TextBox { Dock = DockStyle.Top, AccessibleName = "玩家連線檔完整路徑" };
         private readonly TextBox releasePath = new TextBox { Dock = DockStyle.Top, AccessibleName = "場館發行報告完整路徑" };
         private readonly Label releaseInfo = new Label { Dock = DockStyle.Top, Height = 33, UseMnemonic = false };
@@ -522,6 +523,7 @@ internal static class PlayerLauncher
             var modes = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40, AccessibleName = "遊戲模式" };
             modes.Controls.Add(new RadioButton { Text = "桌面模式(&D)", AutoSize = true, Checked = true });
             modes.Controls.Add(openXR);
+            modes.Controls.Add(measureLink);
             var pathHint = new Label { Text = "可選檔或貼上完整路徑，再按 Enter 載入。", Dock = DockStyle.Top, Height = 35 };
             var hint = new Label { Text = "票券過期或入場被拒絕時，請向控制人員重新取得連線檔。", Dock = DockStyle.Top, Height = 50 };
             var releaseButtons = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 40 };
@@ -547,7 +549,7 @@ internal static class PlayerLauncher
             releasePath.TextChanged += delegate
             {
                 release.Clear();
-                releaseInfo.Text = HasReleasePath ? "請按 Enter 或「核對發行報告」。" : "場館發行報告（選用）";
+                releaseInfo.Text = HasReleasePath ? "請按 Enter 或「核對發行報告」。" : "場館發行報告（選用，連線量測時須核對）";
                 UpdatePlay();
             };
             loadRelease.Click += delegate { SelectRelease(); };
@@ -556,7 +558,7 @@ internal static class PlayerLauncher
                 using (var dialog = new OpenFileDialog { Filter = "發行報告 (*.json)|*.json", CheckFileExists = true, Multiselect = false })
                     if (dialog.ShowDialog(this) == DialogResult.OK) { releasePath.Text = dialog.FileName; SelectRelease(); }
             };
-            string activeRelease = null, activeLog = null, activeReport = null, resultFolder = null;
+            string activeRelease = null, activeLog = null, activeReport = null, activeMetrics = null, resultFolder = null;
             records.LinkClicked += delegate
             {
                 try { using (Process.Start(new ProcessStartInfo(resultFolder) { UseShellExecute = true })) { } }
@@ -580,10 +582,17 @@ internal static class PlayerLauncher
                         if (ownLog == null) ownLog = Path.Combine(directory, "player.log");
                         if (ownReport == null && releaseHash != null) ownReport = Path.Combine(directory, "launch-report.json");
                     }
+                    var ownMetrics = measureLink.Checked ? Path.Combine(Path.GetDirectoryName(ownReport), "link-metrics.json") : null;
+                    if (ownMetrics != null)
+                    {
+                        PlainPath(Path.GetDirectoryName(ownMetrics));
+                        Require(!SamePath(ownMetrics, ownLog) && !SamePath(ownMetrics, ownReport) && !SamePath(ownMetrics, review.FilePath)
+                            && !File.Exists(ownMetrics) && !Directory.Exists(ownMetrics), "連線量測須使用獨立的新檔案。");
+                    }
                     child = Launch(review.FilePath, false, ownLog, review.ContentHash, openXR: openXR.Checked,
-                        releaseManifestHash: releaseHash, reportPath: ownReport);
+                        linkMetrics: ownMetrics, releaseManifestHash: releaseHash, reportPath: ownReport);
                     diagnosticLog = null; diagnosticReport = null;
-                    activeRelease = releaseHash; activeLog = ownLog; activeReport = ownReport;
+                    activeRelease = releaseHash; activeLog = ownLog; activeReport = ownReport; activeMetrics = ownMetrics;
                     records.Visible = false; resultFolder = null;
                     monitor = new PlayerConnectionMonitor(ownLog);
                     choose.Enabled = false; load.Enabled = false; path.Enabled = false; modes.Enabled = false;
@@ -611,7 +620,7 @@ internal static class PlayerLauncher
                     {
                         try
                         {
-                            ProcessReport(activeReport, "exited", activeRelease, child, exited: true, log: activeLog);
+                            ProcessReport(activeReport, "exited", activeRelease, child, exited: true, linkMetrics: activeMetrics, log: activeLog);
                             resultFolder = Path.GetDirectoryName(activeReport); records.Visible = true;
                         }
                         catch { saved = false; }
@@ -619,13 +628,16 @@ internal static class PlayerLauncher
                         {
                             try
                             {
-                                var archived = WriteEvidenceZip(Path.Combine(resultFolder, "player-evidence.zip"), activeLog, activeReport, activeRelease, child.Id);
-                                zipStatus = archived ? " 本次驗收 ZIP 已建立。" : " 本次記錄未通過驗收 ZIP 核對，可查看原檔。";
+                                var archived = WriteEvidenceZip(Path.Combine(resultFolder, "player-evidence.zip"), activeLog, activeReport,
+                                    activeRelease, child.Id, activeMetrics);
+                                zipStatus = archived ? (activeMetrics == null ? " 本次驗收 ZIP 已建立。" : " 本次驗收 ZIP 已附連線量測。")
+                                    : " 本次記錄未通過驗收 ZIP 核對，可查看原檔。";
                             }
                             catch { zipStatus = " 本次驗收 ZIP 未能建立，可在紀錄資料夾查看原檔。"; }
                         }
                     }
                     var final = monitor.State == "Final"; child.Dispose(); child = null;
+                    measureLink.Checked = false;
                     choose.Enabled = true; load.Enabled = true; path.Enabled = true; modes.Enabled = true;
                     releasePath.Enabled = true; chooseRelease.Enabled = true; loadRelease.Enabled = true; UpdatePlay();
                     RenderTicket();
@@ -641,7 +653,7 @@ internal static class PlayerLauncher
             };
             timer.Start(); FormClosed += delegate { timer.Dispose(); if (child != null) child.Dispose(); };
             selected.Text = "尚未選擇連線檔";
-            releaseInfo.Text = "場館發行報告（選用）";
+            releaseInfo.Text = "場館發行報告（選用，連線量測時須核對）";
             if (initial != null) SelectConfig(initial);
         }
         protected override bool ProcessCmdKey(ref Message message, Keys keyData)
@@ -656,7 +668,12 @@ internal static class PlayerLauncher
             }
             return base.ProcessCmdKey(ref message, keyData);
         }
-        private void UpdatePlay() { play.Enabled = child == null && review.Loaded && (!HasReleasePath || release.ManifestHash != null); }
+        private void UpdatePlay()
+        {
+            if (release.ManifestHash == null) measureLink.Checked = false;
+            measureLink.Enabled = child == null && release.ManifestHash != null;
+            play.Enabled = child == null && review.Loaded && (!HasReleasePath || release.ManifestHash != null);
+        }
         private void SelectRelease()
         {
             release.Clear();
@@ -665,7 +682,7 @@ internal static class PlayerLauncher
                 try { release.Load(releasePath.Text); releaseInfo.Text = "發行清單相符，啟動時會逐檔核對。"; }
                 catch { releaseInfo.Text = "發行報告或套件不符。請核對主控交付的原始檔案。"; }
             }
-            else releaseInfo.Text = "場館發行報告（選用）";
+            else releaseInfo.Text = "場館發行報告（選用，連線量測時須核對）";
             UpdatePlay();
         }
         private void SelectConfig(string file)

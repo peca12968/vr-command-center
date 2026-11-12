@@ -1,4 +1,4 @@
-// Runs the shipped WinForms handlers with a real packaged child and a missing OpenXR runtime.
+// Runs shipped WinForms handlers with real packaged children.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -18,14 +18,17 @@ public sealed class ReleaseFormChecks : MarshalByRefObject
     [STAThread]
     private static int Main(string[] args)
     {
-        var package = Path.GetFullPath(args[0]).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var measured = args[0] == "--measured-session";
+        var offset = measured ? 1 : 0;
+        var package = Path.GetFullPath(args[offset]).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var output = args[offset + 1];
         var domain = AppDomain.CreateDomain("Extracted player", null, new AppDomainSetup { ApplicationBase = package });
         try
         {
             var runner = (ReleaseFormChecks)domain.CreateInstanceFromAndUnwrap(typeof(ReleaseFormChecks).Assembly.Location,
                 typeof(ReleaseFormChecks).FullName);
-            var report = runner.Run(args[1], args[2], args[3], args[4]);
-            using (var stream = new FileStream(Path.Combine(args[1], "release-form-checks.json"), FileMode.CreateNew))
+            var report = measured ? runner.RunMeasured(output, args[3], args[4]) : runner.Run(output, args[2], args[3], args[4]);
+            using (var stream = new FileStream(Path.Combine(output, "release-form-checks.json"), FileMode.CreateNew))
             using (var writer = new StreamWriter(stream)) writer.WriteLine(report);
             return 0;
         }
@@ -83,7 +86,9 @@ public sealed class ReleaseFormChecks : MarshalByRefObject
                 var release = Field<TextBox>(form, "releasePath");
                 var play = Field<Button>(form, "play");
                 var records = Field<LinkLabel>(form, "records");
+                var measureLink = Field<CheckBox>(form, "measureLink");
                 Check(play.Enabled && !records.Visible, "Ordinary graphical mode remains available without a report");
+                Check(!measureLink.Enabled && !measureLink.Checked, "Measurement requires a reviewed release and starts unchecked");
                 release.Text = otherRelease;
                 Check(!play.Enabled, "An edited release path invalidates the previous selection");
                 Enter(form, release);
@@ -91,9 +96,12 @@ public sealed class ReleaseFormChecks : MarshalByRefObject
                 release.Text = releaseCopy;
                 Enter(form, release);
                 Check(play.Enabled, "Matching reviewed release enables play");
+                Check(measureLink.Enabled && !measureLink.Checked, "Matching reviewed release offers opt-in measurement");
+                measureLink.Checked = true;
                 File.AppendAllText(releaseCopy, "\n");
                 play.PerformClick();
                 Check(!play.Enabled && Field<Process>(form, "child") == null, "Modified report is rejected before spawning a game");
+                Check(!measureLink.Enabled && !measureLink.Checked, "A modified release clears the opted-in measurement");
                 Check(!Directory.Exists(runs) || Directory.GetDirectories(runs).Except(before).Count() == 0,
                     "A refused launch publishes no session records");
                 Enter(form, path);
@@ -134,6 +142,65 @@ public sealed class ReleaseFormChecks : MarshalByRefObject
         finally
         {
             Environment.SetEnvironmentVariable("XR_RUNTIME_JSON", oldRuntime);
+            if (owned != null)
+            {
+                if (!owned.HasExited) { owned.Kill(); owned.WaitForExit(5000); }
+                owned.Dispose();
+            }
+        }
+    }
+
+    public string RunMeasured(string output, string config, string originalRelease)
+    {
+        var launcher = Assembly.LoadFrom(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Launch-Player.exe"));
+        var formType = launcher.GetType("PlayerLauncher+PlayerForm", true);
+        var log = Path.Combine(output, "player.log");
+        var report = Path.Combine(output, "launch-report.json");
+        Process owned = null;
+        try
+        {
+            using (var form = (Form)Activator.CreateInstance(formType, new object[] { config, log, report }))
+            {
+                form.ShowInTaskbar = false; form.Opacity = 0; form.Show();
+                var release = Field<TextBox>(form, "releasePath");
+                var measureLink = Field<CheckBox>(form, "measureLink");
+                release.Text = originalRelease;
+                Enter(form, release);
+                Check(measureLink.Enabled && !measureLink.Checked, "Reviewed package offers measurement for the current game");
+                measureLink.Checked = true;
+                Field<Button>(form, "play").PerformClick();
+                owned = Field<Process>(form, "child");
+                Check(owned != null && !measureLink.Enabled && measureLink.Checked, "The actual graphical child owns the measurement selection");
+                var pid = owned.Id;
+                var finish = Path.Combine(output, "finish.request");
+                var wait = Stopwatch.StartNew();
+                var closed = false;
+                while (Field<Process>(form, "child") != null && wait.Elapsed < TimeSpan.FromSeconds(145))
+                {
+                    if (!closed && File.Exists(finish))
+                    {
+                        owned.Refresh();
+                        closed = owned.HasExited || owned.CloseMainWindow();
+                    }
+                    Application.DoEvents(); Thread.Sleep(20);
+                }
+                if (Field<Process>(form, "child") == null) owned = null;
+                Check(owned == null, "Graphical player exits and the form completes its terminal report");
+                Check(Field<LinkLabel>(form, "records").Visible && measureLink.Enabled && !measureLink.Checked,
+                    "The record folder is available and the next launch starts unchecked");
+                var metrics = Path.Combine(output, "link-metrics.json");
+                Check(File.Exists(metrics) && File.Exists(Path.Combine(output, "player-evidence.zip")),
+                    "The form publishes the original measurement and measured ZIP");
+                var result = Json.Deserialize<Dictionary<string, object>>(File.ReadAllText(report));
+                var proof = (Dictionary<string, object>)result["linkMetrics"];
+                Check((string)result["status"] == "exited" && (int)result["processId"] == pid && (int)result["exitCode"] == 0
+                    && (string)proof["logSha256"] == Hash(log) && (string)proof["metricsSha256"] == Hash(metrics),
+                    "The form binds both original files to the exited graphical child");
+                return Json.Serialize(new { complete = true, checks, processId = pid });
+            }
+        }
+        finally
+        {
             if (owned != null)
             {
                 if (!owned.HasExited) { owned.Kill(); owned.WaitForExit(5000); }
