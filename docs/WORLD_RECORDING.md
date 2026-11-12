@@ -253,6 +253,8 @@ SSE 以 `header`、`frame`、`status`、`complete` 事件輸出單行 JSON。fra
 
 ## 儲存與驗證邊界
 
+管理包 0.31.146 讀取觀戰錄製清單時，先依場次權限取得可見場次，再按原建立時間順序，每批至多讀取 128 個場次識別。每批收集錄製資料後釋放 SQLite 存取鎖，再解析標頭。持續發布中的各批可反映讀取當下已接受的尾端。需要查核同一場次最新狀態時，可讀取該場次的 `/world`。
+
 `SessionDataDirectory/worlds.db` 使用 WAL／synchronous FULL，schema 1。recordings 保存不可變 header 及 cursor，world_frames 以 session／sequence 為鍵並建 elapsed 索引，world_event_ids 保證跨幀事件唯一。每幀、統計、事件 ID、cursor 在同一交易；拒絕／寫入失敗不留下部分幀。重啟不把整場幀載入記憶體，播放讀取當前幀。管理／戰鬥核心仍保留既有事件記憶體投影，未宣稱全系統恆定記憶體。
 
 v0.14.1 另以可新增的 camera_bookmarks 表保存不可變位置、完整身分命名空間與移除 tombstone，沿用此資料庫與單一寫入程序租約；不改 header／世界幀／統計／updatedAtUtc 或 schema 1。移除不實體刪掉原請求內容，保留原樣重試的判斷資料；未實作清理 tombstone 或跨任務鏡頭範本。API／主控台需一起更新；共享 Runtime、Unity NGO protocol 14 及場次 envelope 6 不變。

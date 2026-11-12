@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-13 `VRCommand-ControlServer-0.31.146-archive-list-win-x64.zip` 為 53,085,046 bytes，SHA-256 `e4e27df2b4c25a134a362c4daa3e57a9d64c3b159cac9e0ecd3699f9b4290d69`。錄製清單改為分批查詢。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.146-archive-list-win-x64.zip) · [錄製說明](WORLD_RECORDING.md#儲存與驗證邊界)
+
 2026-11-13 `VRCommand-ControlServer-0.31.145-clip-csv-win-x64.zip` 為 53,083,946 bytes，SHA-256 `3418934d503bca0a1c5935794e1e38a72a67b88a79d98362708ad2c423d428e8`。下載前會核對片段戰績 CSV 與畫面內容。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.145-clip-csv-win-x64.zip) · [操作說明](REPORTS.md#下載指定片段的戰績)
 
 2026-11-11 `VRCommand-ControlServer-0.31.144-projected-events-win-x64.zip` 為 53,081,518 bytes，SHA-256 `a975d44a03fc4d9c58a3bf3e12ab839795fe36ab36cc9af3fa368d2e419fa8b5`。本房回放的事件搜尋和跳轉採用與本房畫格相同的篩選。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.144-projected-events-win-x64.zip) · [操作說明](WORLD_RECORDING.md#依房間與種類搜尋戰鬥事件)
