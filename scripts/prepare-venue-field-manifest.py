@@ -35,6 +35,47 @@ def session_files(result, folder, session_id):
     return {key: path.resolve(strict=True) for key, path in files.items()}
 
 
+def check_quest_inputs(manifest, expected, evidence_path, release, sources, server_ips, windows_seats):
+    captures, endpoints, _, deployments, _ = field.read_venue_quest_evidence(
+        manifest, manifest['mode'], expected, evidence_path, release)
+    for source in sources.values():
+        if source['rooms'] in endpoints:
+            field.require_quest_capture_endpoint(source['binding'], endpoints[source['rooms']])
+    captured_seats, observed_addresses = set(), set()
+    for sid, rows in captures.items():
+        source = sources[sid]
+        port = source['binding'][1]
+        for address, path, pid, seat, size, digest in rows:
+            owner = source['players'].get(seat)
+            field.require(owner is not None and owner.get('headset') == 'Quest3', 'Quest capture does not match a Quest 3 seat in the original roster')
+            _, log, _, _ = field.quest_capture_log(address, path, pid, seat, size, digest)
+            connection, result = field.quest_client_result(log, pid, port)
+            field.require(result['playerId'] == owner['id'] and connection in source['acknowledged'],
+                          'Quest capture lacks the original player or server acknowledgement')
+            field.verify_player_terminal_result(result, owner, source['ledger'][owner['id']], source['boundary'])
+            observed, _ = field.peer_address(source['peers'][connection])
+            field.require(observed not in server_ips and observed not in observed_addresses
+                          and any(observed in network for network in field.LAN) and (address is None or address == observed),
+                          'Quest capture IPv4 differs from the original or declared direct LAN source')
+            captured_seats.add(seat)
+            observed_addresses.add(observed)
+    field.require(release is None or not captured_seats or deployments is not None,
+                  'Release evidence requires original deployments for every Quest seat')
+    if deployments is not None:
+        field.require(not captured_seats or deployments.keys() == captured_seats, 'Quest capture and deployment reports must cover the same seats')
+        for seat, (sid, player_id, admission_id, port) in deployments.items():
+            source = sources.get(sid)
+            owner = source['players'].get(seat) if source is not None else None
+            field.require(owner is not None and owner.get('headset') == 'Quest3' and owner['id'] == player_id
+                          and owner['admissionId'] == admission_id and source['binding'][1] == port,
+                          'Quest deployment does not match an original Quest 3 admission and endpoint')
+    quest_seats = captured_seats or set(deployments or ())
+    if windows_seats is not None:
+        roster_seats = set().union(*(source['players'] for source in sources.values()))
+        field.require(windows_seats.isdisjoint(quest_seats) and windows_seats | quest_seats == roster_seats,
+                      'Windows and Quest evidence must cover the original venue roster without overlapping seats')
+
+
 def prepare(args, output):
     bundle, terminal = (path.resolve(strict=True) for path in (args.venue_bundle, args.launcher_report))
     mode = field.read_json(field.content(terminal))['topology']
@@ -50,7 +91,16 @@ def prepare(args, output):
     def ref(path):
         return path_reference(path, output.parent)
 
+    seen_paths = {output, bundle, terminal}
+
+    def evidence_path(value, base=output.parent):
+        path = (base / value).resolve(strict=True)
+        field.require(path not in seen_paths, 'Evidence paths must be distinct across the venue')
+        seen_paths.add(path)
+        return path
+
     entries, venue_seats = [], set()
+    quest_sources = {}
     for session_id, row in sorted(expected.items(), key=lambda entry: entry[1]['roomIds']):
         rooms = row['roomIds']
         stem = 'linked' if mode == 'Linked' else f'room-{rooms[0]:02}'
@@ -75,7 +125,7 @@ def prepare(args, output):
                       f'Original endpoint or server IPv4 inventory differs for {stem}')
         field.require(result['peerDiagnosticsEnabled'] is True, f'Original Windows launch did not record UDP peers for {stem}')
         files = session_files(result, work_root / stem if work_root is not None else None, session_id)
-        field.server_connections(field.content(files['serverLog']), port, allow_timeout=True)
+        peers, acknowledged, _, _ = field.server_connections(field.content(files['serverLog']), port, allow_timeout=True)
         count = args.players_per_room * len(rooms)
         owners = field.roster(session['players'], 'id', count)
         ledger = field.roster(statistics['players'], 'playerId', count)
@@ -84,17 +134,24 @@ def prepare(args, output):
                       and all(sum(seat[0] == room for seat in seats) == args.players_per_room for room in rooms),
                       f'Original roster differs from the declared stage for {stem}')
         venue_seats.update((room, seat + 1) for room, seat in seats)
+        if args.quest_capture_report or args.quest_deployment_report:
+            quest_sources[session_id] = {'rooms': tuple(rooms), 'binding': (address, port), 'boundary': boundary, 'ledger': ledger,
+                                         'players': {(player['roomId'], player['seat'] + 1): player for player in owners.values()},
+                                         'peers': peers, 'acknowledged': acknowledged}
         field.verify_world_journal(files['worldJournal'], world, boundary['finalStreamSequence'], boundary['throughSequence'], applied_end)
         field.verify_combat_journal(files['combatJournal'], session_id, stream, boundary['origin'],
                                     boundary['finalStreamSequence'], applied_end, ledger)
         entries.append({'sessionId': session_id, **{key: ref(path) for key, path in files.items()}})
+        seen_paths.update(files.values())
 
     manifest = {'version': 1, 'mode': mode, 'topology': args.topology, 'serverIps': args.server_ip,
                 'venueBundle': ref(bundle), 'venueLauncherReport': ref(terminal), 'sessions': entries}
     if args.players_per_room != 5:
         manifest['expectedPlayersPerRoom'] = args.players_per_room
+    release = windows_seats = None
     if args.venue_release_report is not None:
         release_path = args.venue_release_report.resolve(strict=True)
+        seen_paths.add(release_path)
         release, _ = field.read_venue_release(release_path)
         if args.windows_inbox is not None:
             digest = (release.get('windows') or {}).get('playerManifestSha256')
@@ -108,22 +165,37 @@ def prepare(args, output):
     if args.windows_seat_map is not None:
         seat_map = args.windows_seat_map.resolve(strict=True)
         seats = field.read_windows_seat_map(seat_map)
-        field.require(seats.keys() <= venue_seats, 'Windows seat map names a seat outside the original batch roster')
+        windows_seats = seats.keys()
+        field.require(windows_seats <= venue_seats, 'Windows seat map names a seat outside the original batch roster')
         manifest['windowsSeatMap'] = ref(seat_map)
+        seen_paths.add(seat_map)
         if args.windows_station_addresses is not None:
             addresses_path = args.windows_station_addresses.resolve(strict=True)
             field.read_windows_station_addresses(addresses_path, seats)
             manifest['windowsStationAddresses'] = ref(addresses_path)
+            seen_paths.add(addresses_path)
     if args.udp_preflight_batch:
         paths = [path.resolve(strict=True) for path in args.udp_preflight_batch]
         field.require(len(paths) == len(set(paths)) <= 25, 'Provide up to 25 distinct original UDP preflight batches')
         sessions = {tuple(row['roomIds']): session_id for session_id, row in expected.items()}
         for path in paths:
             field.read_udp_preflight_batch(path, mode, groups, expected_sessions=sessions)
+        seen_paths.update(paths)
         if len(paths) == 1:
             manifest['udpPreflightBatch'] = ref(paths[0])
         else:
             manifest['udpPreflightBatches'] = [ref(path) for path in paths]
+    if args.quest_capture_report:
+        captures = {'reports': [ref(path.resolve(strict=True)) for path in args.quest_capture_report]}
+        if args.quest_network_plan is not None:
+            captures['networkPlan'] = ref(args.quest_network_plan.resolve(strict=True))
+        if args.quest_device_map is not None:
+            captures['deviceMap'] = ref(args.quest_device_map.resolve(strict=True))
+        manifest['questCaptures'] = captures
+    if args.quest_deployment_report:
+        manifest['questDeployments'] = {'reports': [ref(path.resolve(strict=True)) for path in args.quest_deployment_report]}
+    if quest_sources:
+        check_quest_inputs(manifest, expected, evidence_path, release, quest_sources, addresses, windows_seats)
     return manifest
 
 
@@ -141,6 +213,10 @@ def main():
     parser.add_argument('--windows-seat-map', type=Path)
     parser.add_argument('--windows-station-addresses', type=Path)
     parser.add_argument('--udp-preflight-batch', action='append', type=Path)
+    parser.add_argument('--quest-capture-report', action='append', type=Path, help='Original batch logcat capture report; repeat for separate batches')
+    parser.add_argument('--quest-network-plan', type=Path, help='Original Quest IPv4 plan')
+    parser.add_argument('--quest-device-map', type=Path, help='Original Quest seat-to-ADB assignment')
+    parser.add_argument('--quest-deployment-report', action='append', type=Path, help='Original Quest deployment report; repeat for separate batches')
     args = parser.parse_args()
     if args.windows_inbox is not None and args.venue_release_report is None:
         parser.error('--windows-inbox requires --venue-release-report')
@@ -148,6 +224,12 @@ def main():
         parser.error('--windows-seat-map requires --windows-inbox')
     if args.windows_station_addresses is not None and args.windows_seat_map is None:
         parser.error('--windows-station-addresses requires --windows-seat-map')
+    if bool(args.quest_capture_report) != bool(args.quest_network_plan or args.quest_device_map):
+        parser.error('Quest captures require reports and --quest-network-plan, --quest-device-map or both')
+    if args.quest_deployment_report and args.venue_release_report is None:
+        parser.error('--quest-deployment-report requires --venue-release-report')
+    if (args.quest_capture_report or args.quest_deployment_report) and args.windows_inbox is not None and args.windows_seat_map is None:
+        parser.error('Using Quest reports and --windows-inbox together requires --windows-seat-map')
     try:
         output = args.output.resolve()
         field.require(not output.exists(), 'Use a new output file')

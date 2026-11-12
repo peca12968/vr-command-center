@@ -1590,6 +1590,30 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_r
     return deployed, summary
 
 
+def read_venue_quest_evidence(manifest, mode, expected, evidence_path, release):
+    captures, endpoints, summary, references = {}, {}, {}, []
+    device_map = deployments = deployment_summary = None
+    if 'questCaptures' in manifest:
+        require(manifest['topology'] == 'direct-lan', 'Quest capture batches require direct LAN evidence')
+        captures, endpoints, summary, references, device_map = read_quest_capture_batches(
+            manifest['questCaptures'], mode, expected, evidence_path)
+    require(not references or 'questDeployments' in manifest, 'Provide the original Quest deployment reports referenced by the capture')
+    if 'questDeployments' in manifest:
+        require(manifest['topology'] == 'direct-lan', 'Quest deployment evidence requires direct LAN evidence')
+        deployments, deployment_summary = read_quest_deployments(manifest['questDeployments'], mode, evidence_path, release,
+                                                                  capture_reports=references, capture_device_map=device_map)
+        if references:
+            summary['questCaptureDeploymentReportsMatched'] = len(references)
+    return captures, endpoints, summary, deployments, deployment_summary
+
+
+def require_quest_capture_endpoint(binding, planned_binding):
+    planned_address, planned_port = planned_binding
+    require(binding[1] == planned_port and (planned_address is None or str(binding[0]) == planned_address),
+            'Quest network plan endpoint differs from the original game binding' if planned_address is not None
+            else 'Quest capture port differs from the original game binding')
+
+
 def read_venue_release(path):
     with path.open('rb') as file:
         raw = file.read(8193)
@@ -1879,21 +1903,9 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
     windows_by_session = venue_windows_logs(manifest['windowsPlayers'], expected, evidence_path, players_per_room) if explicit_windows else {}
 
     capture_supplied = 'questCaptures' in manifest
-    captures, capture_endpoints, capture_summary, capture_deployments = {}, {}, {}, []
-    capture_device_map = None
-    if capture_supplied and not inspect_windows:
-        require(topology == 'direct-lan', 'Quest capture batches require direct LAN evidence')
-        captures, capture_endpoints, capture_summary, capture_deployments, capture_device_map = read_quest_capture_batches(
-            manifest['questCaptures'], mode, expected, evidence_path)
+    captures, capture_endpoints, capture_summary, quest_deployments, deployment_summary = ({}, {}, {}, None, None) if inspect_windows else (
+        read_venue_quest_evidence(manifest, mode, expected, evidence_path, release))
     observed_quest_addresses = set() if capture_summary.get('questCaptureAddressSource') == 'server-observed' else None
-    quest_deployments, deployment_summary = None, None
-    require(not capture_deployments or 'questDeployments' in manifest, 'Provide the original Quest deployment reports referenced by the capture')
-    if 'questDeployments' in manifest and not inspect_windows:
-        require(topology == 'direct-lan', 'Quest deployment evidence requires direct LAN evidence')
-        quest_deployments, deployment_summary = read_quest_deployments(manifest['questDeployments'], mode, evidence_path, release,
-                                                                      capture_reports=capture_deployments, capture_device_map=capture_device_map)
-        if capture_deployments:
-            capture_summary['questCaptureDeploymentReportsMatched'] = len(capture_deployments)
 
     def load_session(entry):
         if venue_launcher is None:
@@ -2003,10 +2015,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
         captured = captures.get(session['id'], [])
         planned_binding = capture_endpoints.get(tuple(row['roomIds']))
         if planned_binding is not None:
-            planned_address, planned_port = planned_binding
-            require(binding[1] == planned_port and (planned_address is None or str(binding[0]) == planned_address),
-                    'Quest network plan endpoint differs from the original game binding' if planned_address is not None
-                    else 'Quest capture port differs from the original game binding')
+            require_quest_capture_endpoint(binding, planned_binding)
         logs = list(windows_by_session.get(session['id'], []))
         players = entry.get('players', []) if capture_supplied or windows_supplied else entry['players']
         require(type(players) is list and all(type(player) is dict for player in players), 'Invalid player log list')

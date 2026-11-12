@@ -429,7 +429,24 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json
 
 每個本機 IPv4 各填一次 `--server-ip`。同機演練將 `--topology` 設為 `same-host`。5 席或 10 席的試跑分別使用 `--players-per-room 1` 或 `2`。若伺服器工作目錄已搬移，填入 `--server-work-root` 並保留其下的 `room-01` 至 `room-05` 或 `linked` 及原 `telemetry` 子目錄。證據與清單放在同一磁碟時，清單會使用相對路徑。將整批資料移到別處時，保留檔案之間的位置。輸出檔名須為新路徑。
 
-使用 Windows 收件資料夾時一併提供原發行報告，混合 Quest 的場次再用 `--windows-seat-map` 指定 Windows 席位。沒有收件資料夾時，可在產生清單後填入 `windowsPlayers` 或逐場玩家證據。Quest 擷取及 MR 校正資料沿用上表欄位。若有開場預檢，可用 `--udp-preflight-batch` 納入原報告，並保留其引用的原計畫、預覽和雙端紀錄。最後執行完整驗收，摘要會列出原終止報告的批次識別、SHA-256 及驗證場次數。 [Windows 收件](#按收件資料夾找缺件及錯批) · [UDP 預檢](#開場前核對五房-udp-報告)
+使用 Windows 收件資料夾時一併提供原發行報告，混合 Quest 的場次再用 `--windows-seat-map` 指定 Windows 席位。沒有收件資料夾時，可在產生清單後填入 `windowsPlayers` 或逐場玩家證據。MR 校正資料沿用上表欄位。若有開場預檢，可用 `--udp-preflight-batch` 納入原報告，並保留其引用的原計畫、預覽和雙端紀錄。最後執行完整驗收，摘要會列出原終止報告的批次識別、SHA-256 及驗證場次數。 [Windows 收件](#按收件資料夾找缺件及錯批) · [UDP 預檢](#開場前核對五房-udp-報告)
+
+#### 產生 Windows 與 Quest 混合驗收清單
+
+若 Quest 原日誌已收齊，可直接在產生清單時帶入原擷取報告、裝置表、網路計畫及部署報告。擷取及部署報告可各自分批重複帶入。擷取須提供裝置表、網路計畫或兩者。若使用原發行報告驗收，請一併提供對應的原部署報告。
+
+```powershell
+python scripts/prepare-venue-field-manifest.py `
+    --venue-bundle .\management.zip --launcher-report .\venue-final.json `
+    --topology direct-lan --server-ip 192.168.1.10 --server-ip 127.0.0.1 `
+    --windows-inbox .\returned --windows-seat-map .\windows-seats.json `
+    --venue-release-report .\release.json --quest-device-map .\device-map.json `
+    --quest-network-plan .\network-plan.json `
+    --quest-capture-report .\quest-capture\capture-report.json `
+    --quest-deployment-report .\quest-deployment.json --output .\venue.json
+```
+
+產生器會核對 Quest 原日誌、來源位址、部署及戰績，並確認 Windows 與 Quest 席位完整且無重疊。Windows ZIP 尚未交齊時可先產生清單，再用 `--inspect-windows-inbox` 查缺件。收齊後以同一份清單執行完整封存驗收。 [Quest 擷取報告](#直接使用-quest-批次擷取報告)
 
 ### 分階段驗收 5 人與 10 人
 

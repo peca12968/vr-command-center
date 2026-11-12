@@ -264,8 +264,8 @@ def venue_fixture(root, mode, *, remote=False, quest_per_room=0, with_journals=F
     return path, manifest, batch
 
 
-def quest_capture_venue_fixture(root, mode, *, quest_per_room=2, batches=2, use_capture_tool=False, interrupt_first=False):
-    path, manifest, _ = venue_fixture(root, mode, remote=True, quest_per_room=quest_per_room)
+def quest_capture_venue_fixture(root, mode, *, quest_per_room=2, batches=2, use_capture_tool=False, interrupt_first=False, with_journals=False):
+    path, manifest, _ = venue_fixture(root, mode, remote=True, quest_per_room=quest_per_room, with_journals=with_journals)
     network = {'version': 1, 'mode': mode, 'endpoints': [], 'sources': []}
     mapped, inputs = [], {}
     for entry in manifest['sessions']:
@@ -1795,46 +1795,50 @@ class FieldResultsTests(unittest.TestCase):
                 archive_path.write_bytes(archive_bytes)
                 self.assertEqual(original, field.verify_venue_batch(path, inspect_windows=True)[0])
 
+    def terminal_venue_fixture(self, root, manifest, closure):
+        mode, launch_id = manifest['mode'], id_for(950)
+        report_path = root / 'venue-launcher.json'
+        report = {'schemaVersion': 1, 'status': 'venue-sealed-stopped', 'complete': True, 'topology': mode,
+                  'instanceId': id_for(951), 'readyPublished': True, 'venueLaunchId': launch_id,
+                  'sourceAttachment': 'confirmed', 'endpointPublication': 'confirmed', 'servers': []}
+        moved = root / 'copied server workspace'
+        for index, (entry, closed) in enumerate(zip(manifest['sessions'], closure['sessions'], strict=True)):
+            launcher = json.loads((root / entry.pop('launcherReport')).read_bytes())
+            launcher['childPid'] = launcher['udpBinding']['processId'] = 4300 + index
+            launcher['finalCombatStream'].update(venueLaunchId=launch_id, expectedSequence=5)
+            launcher['workDirectory'] = str(root / 'unavailable original workspace')
+            launcher['peerDiagnosticsEnabled'] = True
+            report['servers'].append({'roomIds': closed['roomIds'], 'result': launcher})
+            entry['sessionId'] = closed['sessionId']
+            work = moved / ('linked' if mode == 'Linked' else f'room-{index + 1:02}')
+            telemetry = work / 'telemetry'
+            telemetry.mkdir(parents=True)
+            shutil.copyfile(root / entry['serverLog'], work / 'server.log')
+            shutil.copyfile(root / entry['worldJournal'], telemetry / f"{entry['sessionId']}.worldlog")
+            combat_path = telemetry / f"{entry['sessionId']}.journal"
+            combat_journal(combat_path, launcher)
+            entry['combatJournal'] = combat_path.relative_to(root).as_posix()
+            archive = root / entry['evidenceZip']
+            session, statistics, endpoint = field.management_zip(archive)
+            session['combatStream'] = launcher['finalCombatStream']
+            with zipfile.ZipFile(archive, 'w') as bundle:
+                for name, value in [('session.json', session), ('statistics.json', statistics), ('endpoint.json', endpoint)]:
+                    bundle.writestr(name, json.dumps(value))
+        manifest['venueLauncherReport'] = report_path.name
+        report['servers'].reverse()
+        report_path.write_text(json.dumps(report), encoding='utf-8')
+        return report_path, report, moved
+
     def test_venue_accepts_one_original_batch_launcher_report(self):
         for mode in ('Independent', 'Linked'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 path, manifest, closure = venue_fixture(root, mode, with_journals=True)
-                launch_id = id_for(950)
-                report_path = root / 'venue-launcher.json'
-                report = {'schemaVersion': 1, 'status': 'venue-sealed-stopped', 'complete': True, 'topology': mode,
-                          'instanceId': id_for(951), 'readyPublished': True, 'venueLaunchId': launch_id,
-                          'sourceAttachment': 'confirmed', 'endpointPublication': 'confirmed', 'servers': []}
-                moved = root / 'copied server workspace'
-                for index, (entry, closed) in enumerate(zip(manifest['sessions'], closure['sessions'], strict=True)):
-                    launcher = json.loads((root / entry.pop('launcherReport')).read_bytes())
-                    launcher['childPid'] = launcher['udpBinding']['processId'] = 4300 + index
-                    launcher['finalCombatStream'].update(venueLaunchId=launch_id, expectedSequence=5)
-                    launcher['workDirectory'] = str(root / 'unavailable original workspace')
-                    launcher['peerDiagnosticsEnabled'] = True
-                    report['servers'].append({'roomIds': closed['roomIds'], 'result': launcher})
-                    entry['sessionId'] = closed['sessionId']
-                    work = moved / ('linked' if mode == 'Linked' else f'room-{index + 1:02}')
-                    telemetry = work / 'telemetry'
-                    telemetry.mkdir(parents=True)
-                    shutil.copyfile(root / entry['serverLog'], work / 'server.log')
-                    shutil.copyfile(root / entry['worldJournal'], telemetry / f"{entry['sessionId']}.worldlog")
-                    combat_path = telemetry / f"{entry['sessionId']}.journal"
-                    combat_journal(combat_path, launcher)
-                    entry['combatJournal'] = combat_path.relative_to(root).as_posix()
-                    archive = root / entry['evidenceZip']
-                    session, statistics, endpoint = field.management_zip(archive)
-                    session['combatStream'] = launcher['finalCombatStream']
-                    with zipfile.ZipFile(archive, 'w') as bundle:
-                        for name, value in [('session.json', session), ('statistics.json', statistics), ('endpoint.json', endpoint)]:
-                            bundle.writestr(name, json.dumps(value))
-                manifest['venueLauncherReport'] = report_path.name
-                report['servers'].reverse()
-                report_path.write_text(json.dumps(report), encoding='utf-8')
+                report_path, report, moved = self.terminal_venue_fixture(root, manifest, closure)
                 path.write_text(json.dumps(manifest), encoding='utf-8')
                 split = field.verify_venue(path)
                 self.assertEqual(25, split['serverAcknowledgements'])
-                self.assertEqual({'launchId': launch_id, 'sha256': hashlib.sha256(report_path.read_bytes()).hexdigest(),
+                self.assertEqual({'launchId': report['venueLaunchId'], 'sha256': hashlib.sha256(report_path.read_bytes()).hexdigest(),
                                   'sessions': len(closure['sessions'])}, split['venueLauncherReport'])
                 packed = self.pack_venue(root, manifest)
                 path.write_text(json.dumps(packed), encoding='utf-8')
@@ -1879,6 +1883,81 @@ class FieldResultsTests(unittest.TestCase):
                 path.write_text(json.dumps(packed), encoding='utf-8')
                 with self.assertRaisesRegex(field.EvidenceError, 'sessionId instead of a per-session launcher report'):
                     field.verify_venue(path)
+
+    def test_prepare_mixed_venue_keeps_original_quest_and_windows_evidence(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest = quest_capture_venue_fixture(root, mode, quest_per_room=1, batches=1, with_journals=True)
+                closure = json.loads((root / manifest['closure']).read_bytes())['batch']
+                terminal, _, moved = self.terminal_venue_fixture(root, manifest, closure)
+                release = self.add_shared_release(root, manifest, 1)
+                capture = manifest['questCaptures']
+                capture.update(observed_quest_capture_spec(root, capture))
+                capture_path = root / capture['reports'][0]
+                map_path, network_path = (root / capture[key] for key in ('deviceMap', 'networkPlan'))
+                deployment_path = root / manifest['questDeployments']['reports'][0]
+                deployment = json.loads(deployment_path.read_bytes())
+                salt = '1' * 32
+                serials = field.read_quest_device_map(map_path)
+                deployment['retry'] = {'version': 1, 'venueSha256': '2' * 64, 'salt': salt,
+                                       'mapSha256': field.quest_deployment_map_fingerprint(salt, serials),
+                                       'devices': [f'{index:064x}' for index in range(1, 6)]}
+                deployment_path.write_text(json.dumps(deployment), encoding='utf-8')
+                captured = json.loads(capture_path.read_bytes())
+                captured['deploymentSha256'] = hashlib.sha256(deployment_path.read_bytes()).hexdigest()
+                capture_path.write_text(json.dumps(captured), encoding='utf-8')
+                packed = self.windows_inbox_fixture(root, manifest)
+                seats = [{'roomId': room, 'seat': seat, 'station': f'PC-{room}-{seat}'}
+                         for room in range(1, 6) for seat in range(1, 5)]
+                seats_path = root / 'windows-seats.json'
+                seats_path.write_text(json.dumps({'version': 1, 'seats': seats}), encoding='utf-8')
+                packed['windowsSeatMap'] = seats_path.name
+                path.write_text(json.dumps(packed), encoding='utf-8')
+                expected = field.verify_venue(path)
+                self.assertEqual(5, expected['questCaptureSeatsVerified'])
+                self.assertEqual(20, expected['venueRelease']['windows']['seatsVerified'])
+                self.assertEqual(1, expected['questDeployment']['deviceMapsMatched'])
+
+                output = root / 'handoff' / 'venue.json'
+                output.parent.mkdir()
+                inbox = root / packed['windowsEvidenceDirectory']
+                command = [sys.executable, str(SCRIPT.with_name('prepare-venue-field-manifest.py')),
+                           '--venue-bundle', str(root / packed['venueBundle']), '--launcher-report', str(terminal),
+                           '--topology', 'direct-lan', '--server-ip', manifest['serverIps'][0], '--server-work-root', str(moved),
+                           '--venue-release-report', str(release), '--windows-inbox', str(inbox), '--windows-seat-map', str(seats_path),
+                           '--quest-capture-report', str(capture_path), '--quest-device-map', str(map_path), '--quest-network-plan', str(network_path),
+                           '--quest-deployment-report', str(deployment_path)]
+                returning = next(inbox.glob('*.ZIP'))
+                delayed = returning.rename(root / 'not-yet-returned.zip')
+                prepared = subprocess.run([*command, '--output', str(output)], capture_output=True)
+                self.assertEqual(0, prepared.returncode, prepared.stderr.decode())
+                inspection, _ = field.verify_venue_batch(output, inspect_windows=True)
+                self.assertEqual(19, inspection['receivedWindowsSeats'])
+                delayed.rename(returning)
+                self.assertEqual(expected, field.verify_venue(output))
+                generated = json.loads(output.read_bytes())
+                self.assertTrue(all(not Path(value).is_absolute() for value in (
+                    generated['questCaptures']['deviceMap'], generated['questCaptures']['networkPlan'],
+                    *generated['questCaptures']['reports'], *generated['questDeployments']['reports'])))
+
+                original_network = network_path.read_bytes()
+                changed = json.loads(original_network)
+                changed['sources'][0]['address'] = '192.168.5.210'
+                network_path.write_text(json.dumps(changed), encoding='utf-8')
+                rejected_path = output.with_name('wrong-source.json')
+                result = subprocess.run([*command, '--output', str(rejected_path)], capture_output=True)
+                self.assertEqual(1, result.returncode)
+                self.assertIn(b'Quest capture IPv4 differs', result.stderr)
+                self.assertFalse(rejected_path.exists())
+                network_path.write_bytes(original_network)
+                seats[0]['seat'] = 5
+                seats_path.write_text(json.dumps({'version': 1, 'seats': seats}), encoding='utf-8')
+                rejected_path = output.with_name('overlapping-seats.json')
+                result = subprocess.run([*command, '--output', str(rejected_path)], capture_output=True)
+                self.assertEqual(1, result.returncode)
+                self.assertIn(b'without overlapping seats', result.stderr)
+                self.assertFalse(rejected_path.exists())
 
     def test_windows_player_zip_matches_loose_evidence_and_rejects_changed_members(self):
         for mode in ('Independent', 'Linked'):
