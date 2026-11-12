@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 從原部署 ZIP 驗收 MR 校正
+
+- 場館驗收清單可直接引用原 MR 或混合部署 ZIP。清單產生器和完整驗收都會核對五房原場次、MR 校正檔 SHA-256，以及混合包的房間模式和 UDP 端點。 [操作方式](EXTERNAL_CLIENTS.md#核對-mr-校正封存)
+- 105 項封存、54 項 Quest 部署及 8 項 UDP 測試通過。獨立混合場、獨立全 MR 及合併 MR 的受控案例均與逐房提供校正檔的結果一致。另重驗既有同機 50 份 Windows 玩家 ZIP、6 組 UDP 預檢及 2,502 格回放，摘要與原紀錄一致。 [驗證紀錄](../artifacts/venue-alignment-bundle-validation.json)
+- 功能來源 `219f5e1` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43313601106)
+
 ## 2026-11-13 產生 Windows 與 Quest 混合驗收清單
 
 - `prepare-venue-field-manifest.py` 可同時帶入原 Quest 擷取、部署、裝置表、網路計畫及 Windows 收件資料夾。產生前核對 Quest 原日誌、戰績回條、來源、部署與席位。Windows ZIP 未齊時可先產生清單，收件後使用原清單完成驗收。 [操作方式](EXTERNAL_CLIENTS.md#產生-windows-與-quest-混合驗收清單)

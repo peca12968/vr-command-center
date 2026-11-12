@@ -1,5 +1,7 @@
 # 長期開發目標
 
+2026-11-13 五房 MR 校正可用原 MR 或混合部署 ZIP 直接核對場次及封存雜湊。 [驗收方式](EXTERNAL_CLIENTS.md#核對-mr-校正封存)
+
 2026-11-13 混合場館可直接從 Quest 原擷取與部署報告、Windows 收件資料夾及原伺服器封存產生驗收清單。 [準備方式](EXTERNAL_CLIENTS.md#產生-windows-與-quest-混合驗收清單)
 
 2026-11-13 Quest 封存可同時核對原裝置表的部署指紋，以及原網路計畫的逐席來源 IPv4。 [封存方式](EXTERNAL_CLIENTS.md#以原-quest-裝置對照表驗收收尾)
