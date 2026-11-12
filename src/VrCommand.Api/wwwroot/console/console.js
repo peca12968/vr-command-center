@@ -1128,7 +1128,7 @@ function renderVenueClosure(report, loading = false) {
             throughSequence: anchor.worldSequence, roomId: session.roomIds.length === 1 ? session.roomIds[0] : null,
             venue: complete && session.roomIds.length === 1 ? venue : null,
             witness: { kind: participation ? 'participation-begin' : 'tracking-begin',
-              appliedAtSequence: begin.appliedAtSequence, elapsedMilliseconds: anchor.elapsedMilliseconds,
+              requestId: begin.requestId, appliedAtSequence: begin.appliedAtSequence, elapsedMilliseconds: anchor.elapsedMilliseconds,
               roomIds: session.roomIds, archiveComplete: complete, archiveThroughSequence: replay.throughSequence } });
         });
         actions.append(witness);

@@ -133,6 +133,13 @@ public static class WorldRoutes
             context.Response.Headers.CacheControl = "no-store";
             return Results.Json(frame, WorldJson.Options);
         });
+        app.MapGet("/api/sessions/{id:guid}/world/venue-begin-running", (Guid id, long throughFrame,
+            WorldRecordings store, HttpContext context) =>
+        {
+            var result = store.ReadWorldBeginReplay(id, throughFrame, Actor(context), context.RequestAborted);
+            context.Response.Headers.CacheControl = "no-store";
+            return Results.Json(result, WorldJson.Options);
+        });
         app.MapGet("/api/sessions/{id:guid}/world/frame-context", (Guid id, long centerFrame, long throughFrame,
             WorldRecordings store, HttpContext context) =>
         {

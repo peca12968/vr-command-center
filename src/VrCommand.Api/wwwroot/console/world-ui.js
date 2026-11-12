@@ -36,6 +36,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   let observerRoom = null;
   let liveRooms = new Map(), roomSwitch;
   let venueReview = null, venueAnchor = null;
+  let beginReview = null;
   const venueBasis = $('world-venue-basis');
   const clipLoop = $('world-clip-loop');
   const liveEventKind = $('world-live-event-kind'), liveEventButton = $('world-live-event');
@@ -68,6 +69,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   function stopList() { listEpoch++; listController?.abort(); listController = null; }
   function reset() {
     observerRoom = null;
+    beginReview = null;
     reviewPlayer = returnLiveSource = null; clearClip(); bindVenueReview(null);
     stop(); stopList(); info = frame = savedLimit = null; savedFinished = false; geometry = ''; mode = ''; cameras.reset(); cameraForm.reset(); reviewControls();
     liveEventKind.value = '';
@@ -301,6 +303,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   }
   function resetRecording() {
     observerRoom = null;
+    beginReview = null;
     reviewPlayer = returnLiveSource = null; clearClip(); bindVenueReview(null);
     stop(); cameras.bind(null); cameraForm.reset(); info = frame = savedLimit = null; savedFinished = false; geometry = ''; mode = '';
     bindRooms([]); resetActors(); delete $('world-canvas').dataset.sequence;
@@ -540,6 +543,11 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
       throughFrame, roomId: clipRoom === 'all' ? null : Number(clipRoom), playerId: reviewPlayer?.id ?? null,
       frameSequence: frame.packet.sequence } : null, idle);
     $('world-frame-next').disabled = !idle || frame.packet.sequence >= throughFrame;
+    const opening = showing && beginReview?.geometry === geometry ? beginReview.target : null;
+    const openingIdle = idle && opening && !$('world-recording').disabled;
+    $('world-begin-review').hidden = !opening;
+    $('world-begin-original').disabled = !openingIdle || frame.packet.sequence === opening.throughSequence;
+    $('world-begin-running').disabled = !openingIdle || throughFrame <= opening.throughSequence;
     const extend = $('world-frame-extend');
     extend.hidden = !canExtendSaved();
     extend.disabled = extend.hidden || !idle;
@@ -798,6 +806,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
         || !clockMatches
         || ![...picker.options].some(option => option.value === room.sessionId)) throw new Error('Recording or frame differs.');
       picker.value = room.sessionId;
+      beginReview = null;
       info = recording; frame = savedLimit = null; savedFinished = false; reviewPlayer = returnLiveSource = null;
       showRecording(room.roomId); recordingControls(); show(value, true);
       venueAnchor = anchor;
@@ -831,6 +840,45 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     } catch (error) {
       if (request === epoch) $('world-frame-message').textContent = '讀取快照失敗，請再試一次。';
       return false;
+    } finally {
+      if (request === epoch) { stepping = false; controller = null; reviewControls(); }
+    }
+  }
+  async function returnToBegin() {
+    if ($('world-begin-original').disabled) return;
+    const review = beginReview, target = review.target;
+    if (await readFrame(target.throughSequence, () => beginReview === review,
+      value => matchesWitness(value.packet, target, info.header)) && beginReview === review && frame.packet.sequence === target.throughSequence)
+      $('world-frame-message').textContent = describeWitnessFrame(target, frame);
+  }
+  async function seekFirstRunning() {
+    if ($('world-begin-running').disabled) return;
+    const review = beginReview, { target } = review, { witness, sessionId, streamId, throughSequence } = target;
+    const throughFrame = replayThroughFrame(), picker = $('world-recording');
+    controller?.abort(); controller = new AbortController();
+    const request = ++epoch, signal = AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]);
+    const note = $('world-frame-message');
+    stepping = true; reviewControls(); note.textContent = '正在查找原開場後的首個執行畫格…';
+    try {
+      const result = await (await response(`/api/sessions/${sessionId}/world/venue-begin-running?throughFrame=${throughFrame}`, signal)).json();
+      if (request !== epoch || !active || beginReview !== review || picker.value !== sessionId || geometry !== review.geometry) return;
+      if (picker.disabled) { note.textContent = '請先確認鏡頭操作結果。'; return; }
+      if (result.sessionId !== sessionId || result.streamId !== streamId || result.beginRequestId !== witness.requestId
+        || result.appliedAtSequence !== witness.appliedAtSequence || result.beginFrame !== throughSequence || result.throughFrame !== throughFrame)
+        throw new Error('Opening recording differs.');
+      if (result.frame === null) { note.textContent = '目前保存範圍內沒有已套用開場的執行畫格。'; return; }
+      const value = result.frame, packet = value?.packet;
+      if (!Number.isSafeInteger(packet?.sequence) || packet.sequence <= throughSequence || packet.sequence > throughFrame
+        || !Number.isSafeInteger(packet.elapsedMilliseconds) || packet.elapsedMilliseconds < witness.elapsedMilliseconds
+        || packet.elapsedMilliseconds > info.durationMilliseconds || !Number.isSafeInteger(packet.observedSequence)
+        || packet.observedSequence < witness.appliedAtSequence || packet.suspended !== false || packet.frame?.phase !== 'Running'
+        || !Number.isSafeInteger(packet.frame.tick) || packet.frame.tick < 1 || (value.observerRoomId ?? null) !== observerRoom
+        || !Array.isArray(packet.frame.players) || !Array.isArray(packet.frame.enemies) || !Array.isArray(packet.events) || !Array.isArray(value.statistics))
+        throw new Error('Opening frame differs.');
+      clearVenueAnchor(); clipPlayback = ''; show(value, true);
+      note.textContent = `已停在開場後首個執行畫格（第 ${packet.sequence} 格）。`;
+    } catch {
+      if (request === epoch) note.textContent = '無法核對開場後的執行畫格，已保留目前畫面。';
     } finally {
       if (request === epoch) { stepping = false; controller = null; reviewControls(); }
     }
@@ -905,6 +953,18 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     const policy = local ?? packet.frame;
     return policy.behavior === setting.behavior && policy.autoAttack === setting.autoAttack
       && enemies.length === population.present && enemies.filter(enemy => enemy.health > 0).length === population.alive;
+  }
+  function describeWitnessFrame(target, value) {
+    const witness = target.witness;
+    let text = `已停在第 ${target.throughSequence} 格的${witnessLabels[witness.kind]}快照。`;
+    if (witness.kind === 'participation-begin') {
+      const players = value.packet.frame.players;
+      const tracked = players.filter(player => player.rig.kind === 'Tracked').length;
+      text += ` 此格追蹤 ${tracked} 席、合成 ${players.length - tracked} 席。`;
+    } else if (witness.kind === 'pose-interruption') {
+      text += ` 房間 ${target.roomId} · 席位 ${witness.seats.join('、')}。`;
+    }
+    return text;
   }
   function showEnemyPolicy() {
     const packet = frame?.packet.frame, room = $('world-room').value;
@@ -1085,16 +1145,9 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
             savedFinished = savedLimit === sequence;
           }
           if (target.returnToLive) returnLiveSource = geometry;
+          if (isBeginWitness(witness)) beginReview = { target, geometry };
           show(witnessFrame, true);
-          let text = `已停在第 ${target.throughSequence} 格的${witnessLabel}快照。`;
-          if (witness.kind === 'participation-begin') {
-            const players = witnessFrame.packet.frame.players;
-            const tracked = players.filter(player => player.rig.kind === 'Tracked').length;
-            text += ` 此格追蹤 ${tracked} 席、合成 ${players.length - tracked} 席。`;
-          } else if (witness.kind === 'pose-interruption') {
-            text += ` 房間 ${target.roomId} · 席位 ${witness.seats.join('、')}。`;
-          }
-          $('world-frame-message').textContent = text;
+          $('world-frame-message').textContent = describeWitnessFrame(target, witnessFrame);
         }
         if (playerReview) {
           reviewPlayer = { id: target.playerId, name: target.playerName };
@@ -1135,6 +1188,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
   });
   $('world-frame-back').addEventListener('click', () => step(-1));
   $('world-frame-next').addEventListener('click', () => step(1));
+  $('world-begin-original').addEventListener('click', returnToBegin);
+  $('world-begin-running').addEventListener('click', seekFirstRunning);
   $('world-frame-extend').addEventListener('click', extendSaved);
   $('world-clip-start').addEventListener('click', () => markClip(false));
   $('world-clip-end').addEventListener('click', () => markClip(true));

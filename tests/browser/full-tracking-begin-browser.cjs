@@ -35,6 +35,36 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     assert.equal(await page.locator('#world-room').inputValue(), row.roomIds.length === 1 ? String(row.roomIds[0]) : 'all');
     await page.locator('#world-status').filter({ hasText: '準備中' }).waitFor();
   }
+  async function compareBegin(row, policy, tamper = false) {
+    const anchor = row[policy].frame.worldSequence, first = anchor + 2;
+    const route = `/sessions/${row.sessionId}/world/venue-begin-running`;
+    const running = page.locator('#world-begin-running'), original = page.locator('#world-begin-original');
+    const note = page.locator('#world-frame-message');
+    const room = await page.locator('#world-room').inputValue(), camera = await page.locator('#world-camera').inputValue();
+    const bounded = await api(`${route}?throughFrame=${anchor + 1}`);
+    assert.equal(bounded.frame, null);
+    await api(`${route}?throughFrame=${first}`, 'GET', undefined, 'Room2', 403);
+    if (tamper) {
+      await page.route(url => url.pathname === '/api' + route, async intercepted => {
+        const response = await intercepted.fetch(), value = await response.json();
+        value.beginRequestId = randomUUID();
+        await intercepted.fulfill({ response, json: value });
+      }, { times: 1 });
+      await running.click();
+      await note.filter({ hasText: '已保留目前畫面' }).waitFor();
+      check(await canvas.getAttribute('data-sequence') === String(anchor), 'A mismatched Begin request retains the original frame');
+    }
+    await running.click();
+    await note.filter({ hasText: `首個執行畫格（第 ${first} 格）` }).waitFor();
+    check(await canvas.getAttribute('data-sequence') === String(first)
+      && (await page.locator('#world-status').innerText()).includes('執行中')
+      && await page.locator('#world-room').inputValue() === room && await page.locator('#world-camera').inputValue() === camera,
+    `${policy} skips the later Preparing frame and keeps the original room and camera`);
+    await original.click();
+    await note.filter({ hasText: `已停在第 ${anchor} 格` }).waitFor();
+    check(await canvas.getAttribute('data-sequence') === String(anchor) && await original.isDisabled(),
+      `${policy} returns to the independently verified original Preparing frame`);
+  }
   async function mission(mode) {
     return api('/missions', 'POST', { name: `Full tracking ${mode}`, briefing: '', durationSeconds: 180,
       environment: { mode, weather: 'Clear', timeOfDay: 'Day', lightning: false },
@@ -170,6 +200,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       check(retry.duplicate && retry.requireFullParticipation && JSON.stringify(retry.sessions) === JSON.stringify(receipt.sessions),
         `${mode} retry preserves the original policy and the exact accepted Preparing frames`);
       for (const source of sources) {
+        source.publish(source.snapshot, false);
         source.snapshot = await api(source.route);
         source.publish(source.snapshot, false);
       }
@@ -215,6 +246,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         && await page.locator('#world-room').inputValue() === (mode === 'Linked' ? 'all' : '2')
         && await page.locator('#world-camera').inputValue() === (mode === 'Linked' ? 'overview' : 'top'),
       `${mode} reopens the exact original participation frame and room scope`);
+      await compareBegin(selected, 'participationBegin', mode === 'Linked');
       await page.locator('#world-player').screenshot({ path: path.join(screenshots, `participation-begin-${mode.toLowerCase()}-replay.png`) });
       await page.locator('#world-frame-next').click();
       await page.locator(`#world-canvas[data-sequence="${originalFrame + 1}"]`).waitFor();
@@ -280,7 +312,10 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       await api('/venue/phase', 'POST', { ...body, action: 'End' }, 'Master', 400, undefined, randomUUID());
       check(retry.duplicate && retry.requireFullTracking && JSON.stringify(retry.sessions) === JSON.stringify(receipt.sessions),
         `${mode} retry keeps the original policy and rejects changing it`);
-      for (const source of sources) source.snapshot = await api(source.route);
+      for (const source of sources) {
+        source.publish(source.snapshot, true);
+        source.snapshot = await api(source.route);
+      }
       const waitSummary = text => () => liveSummary.filter({ hasText: text }).isVisible();
       check(await liveTracking.count() === 1, `${mode} provides a live tracking overview after Begin`);
       await publishUntil(sources, true, waitSummary('追蹤 25 / 25 席'));
@@ -415,6 +450,7 @@ with zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())) as archive:
       }
       await page.locator('#tab-operations').click();
       await openTracking(row);
+      await compareBegin(row, 'trackingBegin');
       assert.match(await page.locator('#world-message').innerText(), mode === 'Linked' ? /VR 未校正/ : /Quest 3 MR 錄製設定/);
       assert.match(await page.locator('#world-actor-info').innerText(), /頭手來源 Tracked/);
       if (mode === 'Mixed') assert.ok(Number((await canvas.getAttribute('data-camera')).split(',')[1]) < 30,
