@@ -1382,29 +1382,57 @@ def compare_udp_launch_documents(plan, preview):
             'complete': mode == preview_mode and not any(group['issues'] for group in groups), 'groups': groups}
 
 
+def check_udp_launcher_endpoints(preview, mode, endpoints):
+    digest, topology, bindings = preview
+    groups = []
+    for group in sorted(endpoints.keys() | bindings.keys()):
+        if group not in bindings:
+            issues = ['missing-launch-endpoint']
+        elif group not in endpoints:
+            issues = ['unexpected-launch-endpoint']
+        else:
+            address, port = endpoints[group]
+            binding = bindings[group]
+            issues = [name for matches, name in (
+                (port == binding['port'], 'port-mismatch'),
+                (address == binding['address'], 'advertised-address-mismatch'),
+                (address == binding['listenAddress'], 'listen-address-mismatch'),
+            ) if not matches]
+        groups.append({'roomIds': list(group), 'issues': issues})
+    return {'sha256': digest, 'complete': topology == mode and not any(row['issues'] for row in groups),
+            'topologyMatches': topology == mode, 'groups': groups}
+
+
+def read_udp_launch_binding(batch, directory, mode, expected_sessions=None):
+    if 'launchBinding' not in batch:
+        return None
+    proof = batch['launchBinding']
+    require(type(proof) is dict and all(type(proof.get(name)) is str and proof[name] for name in ('plan', 'preview')),
+            'Missing original Windows launch plan and preview paths')
+    paths = {name: proof[name] for name in ('plan', 'preview')}
+    plan = read_udp_launcher_document(directory / paths['plan'], preview=False)
+    preview = read_udp_launcher_document(directory / paths['preview'], preview=True)
+    checked = compare_udp_launch_documents(plan, preview)
+    summary = batch.get('launcherPreview')
+    require(proof == {**paths, **checked} and checked['complete'] and checked['mode'] == mode
+            and type(summary) is dict and summary.get('sha256') == checked['previewSha256'] and summary.get('complete') is True,
+            'Original Windows launch plan or preview differs from the UDP readiness proof')
+    if batch['scope'] == 'quest-udp-preflight-only':
+        endpoints = {rooms: (row['address'], row['port']) for rooms, row in plan[2].items()}
+        require(summary == check_udp_launcher_endpoints(preview, mode, endpoints),
+                'Quest UDP launcher endpoint proof differs from the original preview')
+    if expected_sessions is not None:
+        require({rooms: row['sessionId'] for rooms, row in plan[2].items()} == expected_sessions,
+                'UDP launch plan sessions differ from the original sealed batch')
+    return checked, plan[2]
+
+
 def read_udp_preflight_batch(path, mode, expected_rooms, *, expected_sessions=None):
     batch = read_json(content(path))
     require(integer(batch['version'], 1, 1) and batch.get('scope') in ('quest-udp-preflight-only', 'venue-udp-preflight-only')
             and batch.get('mode') == mode and batch.get('complete') is True,
             'Provide a complete UDP preflight batch for the original mode')
-    launch = None
-    if 'launchBinding' in batch:
-        proof = batch['launchBinding']
-        require(batch['scope'] == 'venue-udp-preflight-only' and type(proof) is dict
-                and all(type(proof.get(name)) is str and proof[name] for name in ('plan', 'preview')),
-                'Missing original Windows launch plan and preview paths')
-        paths = {name: proof[name] for name in ('plan', 'preview')}
-        plan = read_udp_launcher_document(path.parent / paths['plan'], preview=False)
-        preview = read_udp_launcher_document(path.parent / paths['preview'], preview=True)
-        checked = compare_udp_launch_documents(plan, preview)
-        summary = batch.get('launcherPreview')
-        require(proof == {**paths, **checked} and checked['complete'] and checked['mode'] == mode
-                and type(summary) is dict and summary.get('sha256') == checked['previewSha256'] and summary.get('complete') is True,
-                'Original Windows launch plan or preview differs from the UDP readiness proof')
-        if expected_sessions is not None:
-            require({rooms: row['sessionId'] for rooms, row in plan[2].items()} == expected_sessions,
-                    'UDP launch plan sessions differ from the original sealed batch')
-        launch = checked, plan[2]
+    launch = read_udp_launch_binding(batch, path.parent, mode, expected_sessions)
     groups = batch['groups']
     require(type(groups) is list and 1 <= len(groups) <= len(expected_rooms), 'Invalid UDP endpoint groups')
     sources = {}

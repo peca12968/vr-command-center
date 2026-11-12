@@ -2702,17 +2702,24 @@ class FieldResultsTests(unittest.TestCase):
             plan_path = batch_folder / 'launch.json'
             preview_path = batch_folder / 'preview.json'
 
-            def save_binding():
+            def save_binding(scope='quest-udp-preflight-only'):
                 plan_path.write_text(json.dumps(plan), encoding='utf-8')
                 preview_path.write_text(json.dumps(preview), encoding='utf-8')
-                checked = field.compare_udp_launch_documents(field.read_udp_launcher_document(plan_path, preview=False),
-                                                             field.read_udp_launcher_document(preview_path, preview=True))
-                bound = dict(batch, scope='venue-udp-preflight-only',
+                original = field.read_udp_launcher_document(plan_path, preview=False)
+                current = field.read_udp_launcher_document(preview_path, preview=True)
+                checked = field.compare_udp_launch_documents(original, current)
+                endpoints = {rooms: (row['address'], row['port']) for rooms, row in original[2].items()}
+                summary = (field.check_udp_launcher_endpoints(current, 'Independent', endpoints) if scope == 'quest-udp-preflight-only'
+                           else {'sha256': checked['previewSha256'], 'complete': True})
+                bound = dict(batch, scope=scope,
                              launchBinding={'plan': plan_path.name, 'preview': preview_path.name, **checked},
-                             launcherPreview={'sha256': checked['previewSha256'], 'complete': True})
+                             launcherPreview=summary)
                 batch_path.write_text(json.dumps(bound), encoding='utf-8')
 
+            save_binding('venue-udp-preflight-only')
+            legacy = field.verify_venue(path)
             save_binding()
+            self.assertEqual(legacy, field.verify_venue(path))
             self.assertEqual(5, field.verify_venue(path)['udpSourcePreflightsVerified'])
             preview_path.write_bytes(preview_path.read_bytes() + b'\n')
             with self.assertRaisesRegex(field.EvidenceError, 'differs from the UDP readiness proof'):

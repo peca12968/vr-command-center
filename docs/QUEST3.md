@@ -63,9 +63,17 @@ python .\scripts\probe-quest-venue.py --adb $adb --device-map .\device-map.json 
 
 全部探測完成後，按原網路清單啟動遊戲伺服器。封存驗收清單可用 `udpPreflightBatch` 引用一份報告，或用 `udpPreflightBatches` 引用多份。混合 Windows 與 Quest 時，可在開場前用場館工具核對各席位的雙端報告，也可在封存驗收清單逐場補上 Windows 來源的 `udpSourcePreflights`。 [場館 UDP 核對](EXTERNAL_CLIENTS.md#開場前核對五房-udp-報告) · [封存核對](EXTERNAL_CLIENTS.md#核對每個玩家來源的-udp-預檢)
 
+#### 預檢前核對 Windows 原啟動批次
+
+使用 Windows 啟動計畫時，可在上面的預檢命令加上 `--launch-plan .\venue-plan.json --launcher-preview .\venue-preview.json`。兩個參數要一起提供。工具在呼叫 ADB 或建立輸出目錄前，先核對兩份檔案的場次、任務版本、序號及端點，再核對 Quest 網路清單裡的全部端點。只測部分 Quest 席位時，仍會檢查其他房間的端點。
+
+報告會保存兩份原檔的路徑及 SHA-256，請與原 UDP 雙端報告一併保留。封存驗收會重讀這兩份原檔，核對原場次及實際遊戲綁定。若用全館 UDP 工具合併多份報告，請同時提供這兩份原檔。 [全館 UDP 核對](EXTERNAL_CLIENTS.md#開場前核對五房-udp-報告)
+
 ### 重試 Quest UDP 預檢席位
 
 某席失敗或操作員在探測中按 Ctrl+C 時，工具會保存已確認的結果與未完成席位。重試需使用支援 `--retry-report` 的版本所產生的報告。恢復裝置連線後，使用同一份裝置對照與網路清單、相同樣本數，以及新的輸出資料夾。
+
+若首次已核對 Windows 原啟動批次，重試也要提供相同原檔。場次更新或兩份原檔的 SHA-256 改變時，須用新計畫開始新的預檢批次。
 
 ```powershell
 python .\scripts\probe-quest-venue.py --adb $adb --device-map .\device-map.json `

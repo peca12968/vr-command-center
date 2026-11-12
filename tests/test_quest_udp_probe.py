@@ -42,6 +42,20 @@ def java_tool(name):
     return shutil.which(name)
 
 
+def write_guarded_launch(directory, mode, endpoints, prefix):
+    address = endpoints[0]['address']
+    binding = {'address': address, 'listenAddress': address}
+    rows = [{'roomIds': endpoint['roomIds'], 'sessionId': f'00000000-0000-4000-8000-{index:012}',
+             'missionId': f'00000000-0000-4000-8000-{index + 10:012}', 'sessionSequence': 3, 'port': endpoint['port']}
+            for index, endpoint in enumerate(endpoints, 1)]
+    launch, preview = directory / f'{prefix}-launch.json', directory / f'{prefix}-preview.json'
+    launch.write_text(json.dumps({'version': 4, 'controlInstance': 'fixture/control-instance.json', 'topology': mode,
+                                  **binding, 'servers': rows}), encoding='utf-8')
+    preview.write_text(json.dumps({'schemaVersion': 1, 'complete': True, 'status': 'venue-checked', 'topology': mode,
+                                   'servers': [{**row, **binding} for row in rows]}), encoding='utf-8')
+    return launch, preview
+
+
 @unittest.skipUnless(java_tool('javac') and java_tool('java'), 'A JDK is required for the Quest probe protocol checks')
 class QuestUdpProtocolTests(unittest.TestCase):
     @classmethod
@@ -154,18 +168,11 @@ class QuestUdpProtocolTests(unittest.TestCase):
         devices = [{'roomId': 1, 'seat': 2, 'serial': 'fixture-a', 'address': PEER},
                    {'roomId': 4, 'seat': 5, 'serial': 'fixture-b', 'address': '127.0.0.3'}]
         rooms = list(range(1, 6))
-        planned = {'roomIds': rooms, 'sessionId': '00000000-0000-4000-8000-000000000001',
-                   'missionId': '00000000-0000-4000-8000-000000000002', 'sessionSequence': 3, 'port': port}
-        binding = {'address': SERVER, 'listenAddress': SERVER}
+        launch, preview = write_guarded_launch(self.work, 'Linked', [{'roomIds': rooms, 'address': SERVER, 'port': port}], 'prepared')
         source_addresses = {(row['roomId'], row['seat']): row['address'] for row in devices}
-        launch, preview, seat_addresses, device_map, network = (
-            self.work / f'prepared-{name}.json' for name in ('launch', 'preview', 'seats', 'devices', 'network'))
-        launch.write_text(json.dumps({'version': 4, 'controlInstance': 'fixture/control-instance.json', 'topology': 'Linked',
-                                      **binding, 'servers': [planned]}), encoding='utf-8')
-        preview.write_text(json.dumps({'schemaVersion': 1, 'complete': True, 'status': 'venue-checked', 'topology': 'Linked',
-                                       'servers': [{**planned, **binding}]}), encoding='utf-8')
+        seat_addresses, device_map, network = (self.work / f'prepared-{name}.json' for name in ('seats', 'devices', 'network'))
         seat_addresses.write_text(json.dumps({'version': 1, 'seats': [
-            {'roomId': room, 'seat': seat, 'address': source_addresses.get((room, seat), SERVER)}
+            {'roomId': room, 'seat': seat, 'address': source_addresses.get((room, seat), PEER)}
             for room in rooms for seat in rooms]}), encoding='utf-8')
         device_map.write_text(json.dumps({'version': 1, 'seats': [
             {key: value for key, value in row.items() if key != 'address'} for row in devices]}), encoding='utf-8')
@@ -173,7 +180,9 @@ class QuestUdpProtocolTests(unittest.TestCase):
                                    '--launch-plan', str(launch), '--launcher-preview', str(preview), '--seat-addresses', str(seat_addresses),
                                    '--quest-device-map', str(device_map), '--output', str(network)], capture_output=True, text=True, timeout=15)
         self.assertEqual(0, prepared.returncode, prepared.stderr)
-        mode, groups = quest_venue.load_plan(device_map, network)
+        output = self.work / 'actual-batch'
+        launcher, parsed = quest_venue.launcher_proof(launch, preview, output)
+        mode, groups = quest_venue.load_plan(device_map, network, launcher_preview=parsed)
         self.assertEqual('Linked', mode)
         self.assertEqual([{'roomIds': rooms, 'address': SERVER, 'port': port, 'devices': devices}], groups)
 
@@ -182,10 +191,9 @@ class QuestUdpProtocolTests(unittest.TestCase):
                        str(args.count), str(args.timeout_ms)]
             return json.loads(subprocess.run(command, capture_output=True, check=True, timeout=8).stdout)
 
-        output = self.work / 'actual-batch'
         with patch.object(quest_venue, 'device_ready', return_value=True), patch.object(
                 quest_venue.quest_udp, 'run_probe', side_effect=java_probe) as probes, redirect_stderr(io.StringIO()):
-            report = quest_venue.probe_venue(shell, self.work / 'adb-fixture.exe', mode, groups, output, 2, 900)
+            report = quest_venue.probe_venue(shell, self.work / 'adb-fixture.exe', mode, groups, output, 2, 900, launcher=launcher)
         self.assertTrue(report['complete'])
         self.assertEqual(2, report['verifiedSeats'])
         self.assertEqual([PEER, '127.0.0.3'], [call.args[0].local_address for call in probes.call_args_list])
@@ -196,6 +204,23 @@ class QuestUdpProtocolTests(unittest.TestCase):
             self.assertTrue((output / pair['listener']).is_file())
         self.assertEqual(5, len(list(output.iterdir())))
         self.assertNotIn('127.0.0.', (output / 'preflight-report.json').read_text(encoding='utf-8'))
+        pairs, (verified, bindings) = quest_venue.field.read_udp_preflight_batch(output / 'preflight-report.json', mode, [rooms])
+        self.assertEqual(2, len(pairs[tuple(rooms)]))
+        self.assertEqual(port, bindings[tuple(rooms)]['port'])
+        self.assertEqual(hashlib.sha256(launch.read_bytes()).hexdigest(), verified['planSha256'])
+        self.assertEqual(hashlib.sha256(preview.read_bytes()).hexdigest(), verified['previewSha256'])
+        full_network = self.work / 'full-network.json'
+        prepared = subprocess.run([sys.executable, str(ROOT / 'scripts/prepare-venue-network-plan.py'),
+                                   '--launch-plan', str(launch), '--launcher-preview', str(preview), '--seat-addresses', str(seat_addresses),
+                                   '--output', str(full_network)], capture_output=True, text=True, timeout=15)
+        self.assertEqual(0, prepared.returncode, prepared.stderr)
+        venue_report = self.work / 'ready.json'
+        checked = subprocess.run([sys.executable, str(ROOT / 'scripts/check-venue-udp-preflight.py'),
+                                  '--network-plan', str(full_network), '--launch-plan', str(launch), '--launcher-preview', str(preview),
+                                  '--batch', str(output / 'preflight-report.json'), '--output', str(venue_report)],
+                                 capture_output=True, text=True, timeout=20)
+        self.assertEqual(0, checked.returncode, checked.stderr or checked.stdout)
+        self.assertEqual(2, json.loads(checked.stdout)['verifiedSources'])
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as game:
             game.bind((SERVER, port))
             busy_output = self.work / 'busy'
@@ -217,6 +242,7 @@ class QuestUdpProtocolTests(unittest.TestCase):
         devices = [{'roomId': room, 'seat': 1, 'serial': f'fixture-{room}', 'address': f'127.0.0.{room + 1}'}
                    for room in range(1, 4)]
         groups = [{'roomIds': [1, 2, 3, 4, 5], 'address': SERVER, 'port': port, 'devices': devices}]
+        launch, preview = write_guarded_launch(self.work, 'Linked', groups, 'retry')
 
         def java_probe(args):
             command = [*self.java, str(args.key_file), args.local_address, args.peer_address, str(args.port),
@@ -225,9 +251,10 @@ class QuestUdpProtocolTests(unittest.TestCase):
 
         def run(name, retry_report=None, offline=None):
             output = self.work / name
+            launcher, _ = quest_venue.launcher_proof(launch, preview, output)
             with patch.object(quest_venue, 'device_ready', side_effect=lambda _, serial: serial != offline), patch.object(
                     quest_venue.quest_udp, 'run_probe', side_effect=java_probe) as probes, redirect_stderr(io.StringIO()):
-                report = quest_venue.probe_venue(shell, self.work / 'adb-fixture.exe', 'Linked', groups, output, 2, 900, retry_report)
+                report = quest_venue.probe_venue(shell, self.work / 'adb-fixture.exe', 'Linked', groups, output, 2, 900, retry_report, launcher=launcher)
             return report, [call.args[0].serial for call in probes.call_args_list]
 
         first, first_calls = run('first', offline='fixture-2')
@@ -237,6 +264,21 @@ class QuestUdpProtocolTests(unittest.TestCase):
         self.assertEqual(['verified', 'device', 'verified'], [seat['stage'] for seat in first['groups'][0]['seats']])
         original_dir = self.work / 'first'
         original = {path.name: path.read_bytes() for path in original_dir.iterdir()}
+        original_report = original_dir / 'preflight-report.json'
+        replaced_plan, replaced_preview = write_guarded_launch(self.work, 'Linked', groups, 'replaced')
+        for path in (replaced_plan, replaced_preview):
+            replacement = json.loads(path.read_bytes())
+            replacement['servers'][0]['sessionId'] = '00000000-0000-4000-8000-000000000050'
+            path.write_text(json.dumps(replacement), encoding='utf-8')
+        rejected = self.work / 'rejected'
+        other, _ = quest_venue.launcher_proof(replaced_plan, replaced_preview, rejected)
+        with patch.object(quest_venue, 'probe_seat') as probe:
+            with self.assertRaisesRegex(ValueError, 'original Windows launch plan and preview bytes'):
+                quest_venue.probe_venue(shell, Path('adb'), 'Linked', groups, rejected, 2, 900, original_report, launcher=other)
+            with self.assertRaisesRegex(ValueError, 'preserve the original Windows launch proof'):
+                quest_venue.probe_venue(shell, Path('adb'), 'Linked', groups, rejected, 2, 900, original_report)
+            probe.assert_not_called()
+        self.assertFalse(rejected.exists())
         second, second_calls = run('retry', original_dir / 'preflight-report.json')
         self.assertTrue(second['complete'])
         self.assertEqual(['fixture-2'], second_calls)
@@ -315,6 +357,22 @@ class QuestUdpVenuePlanTests(unittest.TestCase):
         self.network['endpoints'][1]['port'] = self.network['endpoints'][0]['port']
         with self.assertRaisesRegex(ValueError, 'binding is used'):
             self.plan()
+
+    def test_cli_rejects_unused_room_binding_before_touching_adb_or_output(self):
+        launch, preview = write_guarded_launch(self.root, 'Independent', self.network['endpoints'], 'original')
+        self.devices['seats'] = self.devices['seats'][-1:]
+        self.network['sources'] = self.network['sources'][-1:]
+        self.network['endpoints'][0]['port'] = 9999
+        self.plan()
+        output = self.root / 'no-output'
+        command = [sys.executable, str(ROOT / 'scripts/probe-quest-venue.py'), '--adb', str(self.root / 'absent-adb.exe'),
+                   '--device-map', str(self.device_map), '--network-plan', str(self.network_plan),
+                   '--launch-plan', str(launch), '--launcher-preview', str(preview), '--output-directory', str(output)]
+        rejected = subprocess.run(command, capture_output=True, text=True, timeout=15)
+        self.assertEqual(1, rejected.returncode)
+        self.assertIn('Windows endpoint for room(s) 5 (port-mismatch)', rejected.stderr)
+        self.assertEqual('', rejected.stdout)
+        self.assertFalse(output.exists())
 
     def test_failed_seat_and_duplicate_exchange_do_not_claim_complete_group(self):
         mode, groups = self.plan()

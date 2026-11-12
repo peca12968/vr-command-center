@@ -51,33 +51,12 @@ def load_pairs(pairs_path, batch_paths, mode, rooms, binding):
     return pairs
 
 
-def check_launcher_preview(preview, mode, endpoints):
-    digest, topology, bindings = preview
-    groups = []
-    for group in sorted(endpoints.keys() | bindings.keys()):
-        if group not in bindings:
-            issues = ['missing-launch-endpoint']
-        elif group not in endpoints:
-            issues = ['unexpected-launch-endpoint']
-        else:
-            address, port = endpoints[group]
-            binding = bindings[group]
-            issues = [name for matches, name in (
-                (port == binding['port'], 'port-mismatch'),
-                (address == binding['address'], 'advertised-address-mismatch'),
-                (address == binding['listenAddress'], 'listen-address-mismatch'),
-            ) if not matches]
-        groups.append({'roomIds': list(group), 'issues': issues})
-    return {'sha256': digest, 'complete': topology == mode and not any(row['issues'] for row in groups),
-            'topologyMatches': topology == mode, 'groups': groups}
-
-
 def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, launch_plan=None):
     mode, endpoints, sources = field.read_quest_network_plan(plan, allow_shared_sources=True)
     field.require({room for room, _ in sources} == set(field.QUEST_ROOMS), 'Plan a source for every room')
     field.require(launch_plan is None or launcher_preview is not None, 'A launch plan requires its original launcher preview')
     preview = field.read_udp_launcher_document(launcher_preview, preview=True) if launcher_preview else None
-    launch_check = check_launcher_preview(preview, mode, endpoints) if preview else None
+    launch_check = field.check_udp_launcher_endpoints(preview, mode, endpoints) if preview else None
     binding = None
     if launch_plan:
         planned = field.read_udp_launcher_document(launch_plan, preview=False)

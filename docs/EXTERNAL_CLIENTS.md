@@ -253,6 +253,8 @@ Windows 與 Quest 混用時，可在啟動遊戲伺服器前先核對報告是�
 
 可一併加入原 Quest 批次報告，每份使用一個 `--batch`。只有批次報告時可省略 `--pairs`。
 
+若 Quest 預檢已核對 Windows 原啟動批次，合併時用 `--launch-plan` 和 `--launcher-preview` 提供相同原檔。 [Quest 開場前核對](QUEST3.md#預檢前核對-windows-原啟動批次)
+
 Quest 批次重試完成後，`--batch` 指向最新完整的報告，並保留各輪原始資料夾供工具核對。 [重試 Quest 預檢](QUEST3.md#重試-quest-udp-預檢席位)
 
 使用 Windows 批次啟動時，可用 `--launch-plan` 和 `--launcher-preview` 同時提供控制台下載的原啟動計畫，以及啟動器 `--venue-check` 產生的成功預覽。在 UDP 監聽工具啟動前或退出後產生預覽，並使用實際要啟動的那份計畫。計畫的公告 IPv4 和本機綁定 IPv4 都填成網路清單上的同一個具體位址。 [下載啟動計畫](WINDOWS_SERVER_PACKAGE.md#依場館計畫批次啟動)

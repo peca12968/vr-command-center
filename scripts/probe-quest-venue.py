@@ -40,10 +40,16 @@ def read_json(raw):
     return json.loads(raw.decode('utf-8-sig'), object_pairs_hook=unique_fields)
 
 
-def load_plan(device_map_path, network_plan_path):
+def load_plan(device_map_path, network_plan_path, *, launcher_preview=None):
     serials = field.read_quest_device_map(device_map_path)
     mode, endpoints, sources = field.read_quest_network_plan(network_plan_path)
     require(serials.keys() == sources.keys(), 'Network sources must match the mapped Quest seats exactly.')
+    if launcher_preview is not None:
+        checked = field.check_udp_launcher_endpoints(launcher_preview, mode, endpoints)
+        field.require(checked['topologyMatches'], 'The Quest network plan uses a different venue mode from the Windows preview')
+        for group in checked['groups']:
+            field.require(not group['issues'], 'Quest network plan differs from the Windows endpoint for room(s) '
+                          + ', '.join(map(str, group['roomIds'])) + ' (' + ', '.join(group['issues']) + ')')
     groups = []
     for rooms, (address, port) in sorted(endpoints.items()):
         devices = [{'roomId': room, 'seat': seat, 'serial': serials[room, seat], 'address': sources[room, seat]}
@@ -51,6 +57,27 @@ def load_plan(device_map_path, network_plan_path):
         if devices:
             groups.append({'roomIds': list(rooms), 'address': address, 'port': port, 'devices': devices})
     return mode, groups
+
+
+def path_reference(path, directory):
+    try:
+        return os.path.relpath(path, directory)
+    except ValueError:  # The original report can be on another Windows drive.
+        return str(path)
+
+
+def launcher_proof(plan_path, preview_path, directory):
+    plan_path, preview_path = plan_path.resolve(strict=True), preview_path.resolve(strict=True)
+    plan = field.read_udp_launcher_document(plan_path, preview=False)
+    preview = field.read_udp_launcher_document(preview_path, preview=True)
+    checked = field.compare_udp_launch_documents(plan, preview)
+    field.require(checked['complete'], 'Use matching original Windows launch plan and preview files')
+    endpoints = {rooms: (row['address'], row['port']) for rooms, row in plan[2].items()}
+    summary = field.check_udp_launcher_endpoints(preview, checked['mode'], endpoints)
+    field.require(summary['complete'], 'The original Windows plan and preview must use concrete matching IPv4 addresses')
+    return {'launchBinding': {'plan': path_reference(plan_path, directory),
+                              'preview': path_reference(preview_path, directory), **checked},
+            'launcherPreview': summary}, preview
 
 
 def device_ready(adb, serial):
@@ -146,12 +173,18 @@ def probe_seat(shell, adb, directory, group, device, count, timeout_ms):
     return result
 
 
-def read_retry(path, mode, groups, plan_hash, count):
+def read_retry(path, mode, groups, plan_hash, count, launcher):
     previous = read_json(report_bytes(path, limit=256 * 1024))
     require(type(previous) is dict and field.integer(previous.get('version'), 1, 1) == 1
             and previous.get('scope') == 'quest-udp-preflight-only' and previous.get('mode') == mode
             and previous.get('planSha256') == plan_hash and type(previous.get('sampleCount')) is int
             and previous['sampleCount'] == count, 'Retry must use the original Quest plan and sample count.')
+    field.require(('launchBinding' in previous) == (launcher is not None),
+                  'Retry must preserve the original Windows launch proof')
+    if launcher is not None:
+        checked, _ = field.read_udp_launch_binding(previous, path.parent, mode)
+        field.require(all(checked[key] == launcher['launchBinding'][key] for key in ('planSha256', 'previewSha256')),
+                      'Retry requires the original Windows launch plan and preview bytes')
     originals = previous['groups']
     require(type(originals) is list and len(originals) == len(groups), 'Retry room groups differ.')
     seats = {}
@@ -185,16 +218,13 @@ def reuse_seat(row, previous_directory, directory, group, device, count, exchang
     retained = {'roomId': device['roomId'], 'seat': device['seat'], 'complete': True, 'stage': 'reused',
                 'exchangeSha256': summary['exchangeSha256'], **metadata}
     for key, path in (('listener', listener), ('probe', probe)):
-        try:
-            retained[key] = os.path.relpath(path, directory)
-        except ValueError:  # The original report can be on another Windows drive.
-            retained[key] = str(path)
+        retained[key] = path_reference(path, directory)
     return retained
 
 
-def probe_venue(shell, adb, mode, groups, directory, count, timeout_ms, retry_report=None):
+def probe_venue(shell, adb, mode, groups, directory, count, timeout_ms, retry_report=None, *, launcher=None):
     plan_hash = hashlib.sha256(json.dumps([mode, groups], sort_keys=True, separators=(',', ':')).encode('utf-8')).hexdigest()
-    previous = read_retry(retry_report, mode, groups, plan_hash, count) if retry_report else {}
+    previous = read_retry(retry_report, mode, groups, plan_hash, count, launcher) if retry_report else {}
     directory.mkdir()
     deadline = time.monotonic() + 20 * 60
     results, exchanges = [], set()
@@ -237,7 +267,7 @@ def probe_venue(shell, adb, mode, groups, directory, count, timeout_ms, retry_re
     report = {'version': 1, 'scope': 'quest-udp-preflight-only', 'mode': mode, 'complete': all(seat['complete'] for seat in seats),
               'planSha256': plan_hash, 'sampleCount': count, 'interrupted': interrupted,
               'expectedSeats': len(seats), 'verifiedSeats': sum(seat['complete'] for seat in seats),
-              'reusedSeats': sum(seat['stage'] == 'reused' for seat in seats), 'groups': results}
+              'reusedSeats': sum(seat['stage'] == 'reused' for seat in seats), 'groups': results, **(launcher or {})}
     with (directory / 'preflight-report.json').open('x', encoding='utf-8', newline='\n') as output:
         json.dump(report, output, indent=2)
         output.write('\n')
@@ -249,6 +279,8 @@ def main():
     parser.add_argument('--adb', required=True, type=Path)
     parser.add_argument('--device-map', required=True, type=Path)
     parser.add_argument('--network-plan', required=True, type=Path)
+    parser.add_argument('--launch-plan', type=Path, help='Original revision-guarded Windows launch plan')
+    parser.add_argument('--launcher-preview', type=Path, help='Original successful Windows launcher preview')
     parser.add_argument('--output-directory', required=True, type=Path)
     parser.add_argument('--retry-report', type=Path, help='Original batch report to retain fresh, verified seats from')
     parser.add_argument('--count', type=int, default=5)
@@ -256,14 +288,21 @@ def main():
     args = parser.parse_args()
     if not (1 <= args.count <= 20 and 200 <= args.timeout_ms <= 3000):
         parser.error('Use valid probe sample and timeout bounds.')
+    if (args.launch_plan is None) != (args.launcher_preview is None):
+        parser.error('--launch-plan and --launcher-preview must be supplied together.')
     try:
-        mode, groups = load_plan(args.device_map, args.network_plan)
+        directory = args.output_directory.resolve()
+        launcher, preview = (launcher_proof(args.launch_plan, args.launcher_preview, directory)
+                             if args.launch_plan is not None else (None, None))
+        mode, groups = load_plan(args.device_map, args.network_plan, launcher_preview=preview)
         adb = args.adb.resolve(strict=True)
         powershell = (shutil.which('powershell.exe') if os.name == 'nt' else None) or shutil.which('pwsh')
         require(adb.is_file() and powershell is not None, 'ADB or PowerShell is missing.')
         shell = [powershell, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'RemoteSigned',
                  '-File', str(ROOT / 'check-lan-udp.ps1')]
-        report = probe_venue(shell, adb, mode, groups, args.output_directory, args.count, args.timeout_ms, args.retry_report)
+        report = probe_venue(shell, adb, mode, groups, directory, args.count, args.timeout_ms, args.retry_report, launcher=launcher)
+    except field.EvidenceError as error:
+        parser.exit(1, f'Quest venue preflight rejected. {error}.\n')
     except (OSError, ValueError, argparse.ArgumentTypeError, TypeError, KeyError, RecursionError):
         parser.exit(1, 'Quest venue preflight could not start or save its report. Check the maps, retry report, tools and new output directory.\n')
     print(json.dumps({key: report[key] for key in ('complete', 'expectedSeats', 'verifiedSeats', 'reusedSeats', 'interrupted')}))
