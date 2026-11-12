@@ -129,6 +129,8 @@ Windows 建置啟用 Touch 與 Unity 的 HTC Vive Controller 兩個 OpenXR 互�
 
 啟動器 1.13 可在視窗核對場館發行報告後勾選「記錄本次連線量測」，再按「開始遊戲」。完成任務、收到最終戰績並關閉遊戲後，點「開啟本次紀錄資料夾」取得含 `link-metrics.json` 的 `player-evidence.zip`。量測選項會在每場結束後恢復未勾選。沒有勾選時，驗收 ZIP 會照常包含日誌及退出報告。 [收件流程](EXTERNAL_CLIENTS.md#收集-windows-玩家驗收-zip)
 
+啟動器 1.14 會在遊戲仍開著時顯示量測結案結果。視窗先顯示等待，讀到這次玩家程序與原連線的量測後，顯示完成或提早停止，以及樣本總數、回覆、逾時與中斷。重新入場時會標示原量測未涵蓋目前連線。場館驗收仍以關閉遊戲後的原 ZIP 及主控端收件結果為準。 [逐席驗收](EXTERNAL_CLIENTS.md#逐席核對-windows-連線量測門檻)
+
 啟動器 1.12 或更新版本也可從命令列同時指定 `--link-metrics` 與 `--evidence-zip`，以同一格式匯出原量測。 [量測命令](EXTERNAL_CLIENTS.md#收集-windows-玩家驗收-zip)
 
 在啟動器 1.6 加上 `--release-report`，選用主控為本次交付產生的原始 `venue-release.json`。先以 `--verify` 做離線檢查，也可在桌面或 OpenXR 的直接啟動命令加上同一選項，讓每次啟動都重新核對。

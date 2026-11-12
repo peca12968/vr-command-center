@@ -494,11 +494,61 @@ internal static class PlayerLauncher
             return SeatLabel + "　到期 " + localExpiry + "\n" + detail;
         }
     }
+
+    internal sealed class LinkMeasurement
+    {
+        private ulong connection;
+        private bool complete;
+        private int replies, timeouts, interrupted;
+
+        public static LinkMeasurement ReadReport(string path, int processId)
+        {
+            PlainPath(path);
+            var value = Read(path, 64 * 1024);
+            object rawConnection, rawComplete, rawSamples;
+            ulong id = 0;
+            Require(Number(value, "version") == 1 && Number(value, "processId") == processId
+                && value.TryGetValue("connection", out rawConnection) && (rawConnection is int || rawConnection is long || rawConnection is decimal)
+                && UInt64.TryParse(Convert.ToString(rawConnection, System.Globalization.CultureInfo.InvariantCulture), out id)
+                && value.TryGetValue("complete", out rawComplete) && rawComplete is bool
+                && value.TryGetValue("samples", out rawSamples) && rawSamples is object[], "本次連線量測格式或程序不符。");
+            var samples = (object[])value["samples"];
+            var reason = Text(value, "reason");
+            var result = new LinkMeasurement { connection = id, complete = (bool)value["complete"] };
+            Require(samples.Length <= 30 && result.complete == (reason == "Limit") && (!result.complete || samples.Length == 30)
+                && (reason == "Limit" || reason == "Ended" || reason == "Disconnected" || reason == "Deadline" || reason == "Shutdown"),
+                "本次連線量測結案狀態不符。");
+            for (var index = 0; index < samples.Length; index++)
+            {
+                var sample = Map(samples[index]);
+                Require(sample != null && Number(sample, "sequence") == index + 1, "本次連線量測樣本序號不符。");
+                switch (Text(sample, "result"))
+                {
+                    case "Reply": result.replies++; break;
+                    case "Timeout": result.timeouts++; break;
+                    case "Interrupted": result.interrupted++; break;
+                    default: throw new InvalidDataException("本次連線量測樣本結果不符。");
+                }
+            }
+            return result;
+        }
+
+        public string Describe(ulong? lastConnection, bool reconnected)
+        {
+            if (reconnected) return "遊戲已重新入場，已保存的量測未涵蓋目前連線。";
+            if (!lastConnection.HasValue) return "已保存連線量測，等待核對本次入場記錄。";
+            if (lastConnection.Value != connection) return "已保存的量測與目前連線不符。";
+            return (complete ? "連線量測已完成" : "連線量測已停止") + "（" + (replies + timeouts + interrupted)
+                + "／30）　回覆 " + replies + "、逾時 " + timeouts + "、中斷 " + interrupted + "。";
+        }
+    }
+
     private sealed class PlayerForm : Form
     {
         private readonly Label selected = new Label { AutoSize = false, Dock = DockStyle.Top, Height = 75, UseMnemonic = false };
         private readonly Label ticketInfo = new Label { AutoSize = false, Dock = DockStyle.Top, Height = 58, UseMnemonic = false };
         private readonly Label status = new Label { AutoSize = false, Dock = DockStyle.Top, Height = 65 };
+        private readonly Label linkStatus = new Label { Dock = DockStyle.Top, Height = 35, UseMnemonic = false, Visible = false };
         private readonly Button play = new Button { Text = "開始遊戲(&S)", AccessibleName = "開始遊戲", AutoSize = true, Enabled = false };
         private readonly RadioButton openXR = new RadioButton { Text = "Windows OpenXR(&O)", AutoSize = true };
         private readonly CheckBox measureLink = new CheckBox { Text = "記錄本次連線量測(&M)", AccessibleName = "記錄本次連線量測", AutoSize = true, Enabled = false };
@@ -513,7 +563,7 @@ internal static class PlayerLauncher
         private bool HasReleasePath { get { return !String.IsNullOrWhiteSpace(releasePath.Text); } }
         public PlayerForm(string initial, string diagnosticLog, string diagnosticReport)
         {
-            Text = "VR Command 玩家"; ClientSize = new Size(660, 608); MinimumSize = new Size(676, 647);
+            Text = "VR Command 玩家"; ClientSize = new Size(660, 643); MinimumSize = new Size(676, 682);
             Font = new Font("Microsoft JhengHei UI", 11); Padding = new Padding(20); StartPosition = FormStartPosition.CenterScreen;
             var title = new Label { Text = "選擇控制台下載的玩家連線檔", Dock = DockStyle.Top, Height = 40 };
             var buttons = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 45 };
@@ -530,7 +580,7 @@ internal static class PlayerLauncher
             var chooseRelease = new Button { Text = "選擇發行報告…", AutoSize = true };
             var loadRelease = new Button { Text = "核對發行報告(&R)", AccessibleName = "核對發行報告", AutoSize = true };
             releaseButtons.Controls.Add(chooseRelease); releaseButtons.Controls.Add(loadRelease);
-            Controls.Add(hint); Controls.Add(records); Controls.Add(status); Controls.Add(buttons); Controls.Add(modes);
+            Controls.Add(hint); Controls.Add(records); Controls.Add(linkStatus); Controls.Add(status); Controls.Add(buttons); Controls.Add(modes);
             Controls.Add(releaseInfo); Controls.Add(releaseButtons); Controls.Add(releasePath);
             Controls.Add(ticketInfo); Controls.Add(selected); Controls.Add(pathHint); Controls.Add(path); Controls.Add(title);
             path.TextChanged += delegate
@@ -559,6 +609,7 @@ internal static class PlayerLauncher
                     if (dialog.ShowDialog(this) == DialogResult.OK) { releasePath.Text = dialog.FileName; SelectRelease(); }
             };
             string activeRelease = null, activeLog = null, activeReport = null, activeMetrics = null, resultFolder = null;
+            LinkMeasurement measurement = null;
             records.LinkClicked += delegate
             {
                 try { using (Process.Start(new ProcessStartInfo(resultFolder) { UseShellExecute = true })) { } }
@@ -593,6 +644,9 @@ internal static class PlayerLauncher
                         linkMetrics: ownMetrics, releaseManifestHash: releaseHash, reportPath: ownReport);
                     diagnosticLog = null; diagnosticReport = null;
                     activeRelease = releaseHash; activeLog = ownLog; activeReport = ownReport; activeMetrics = ownMetrics;
+                    measurement = null;
+                    linkStatus.Text = ownMetrics == null ? "" : "正在等候本次連線量測的 30 筆樣本結案。";
+                    linkStatus.Visible = ownMetrics != null;
                     records.Visible = false; resultFolder = null;
                     monitor = new PlayerConnectionMonitor(ownLog);
                     choose.Enabled = false; load.Enabled = false; path.Enabled = false; modes.Enabled = false;
@@ -613,6 +667,21 @@ internal static class PlayerLauncher
                 if (child == null) { RenderTicket(); return; }
                 var exited = child.HasExited;
                 monitor.Poll(exited); status.Text = monitor.Message;
+                if (activeMetrics != null)
+                {
+                    if (measurement == null && File.Exists(activeMetrics))
+                    {
+                        try { measurement = LinkMeasurement.ReadReport(activeMetrics, child.Id); }
+                        catch (Exception error)
+                        {
+                            if (!(error is IOException || error is InvalidDataException || error is UnauthorizedAccessException
+                                || error is ArgumentException || error is InvalidOperationException)) throw;
+                            linkStatus.Text = "無法核對本次連線量測檔。";
+                        }
+                    }
+                    if (measurement != null) linkStatus.Text = measurement.Describe(monitor.LogAvailable ? monitor.LastConnection : null, monitor.Reconnected);
+                    else if (exited && !File.Exists(activeMetrics)) linkStatus.Text = "未取得本次連線量測檔。";
+                }
                 if (exited)
                 {
                     var saved = true; var zipStatus = "";
@@ -728,6 +797,8 @@ internal sealed class PlayerConnectionMonitor
     private bool finalDisconnected;
     public string State { get; private set; }
     public bool LogAvailable { get; private set; }
+    public ulong? LastConnection { get; private set; }
+    public bool Reconnected { get; private set; }
     public bool CanArchiveEvidence { get { return evidenceConnections != null && finalDisconnected && !invalidEvidence && !invalidLog; } }
     public bool Truncated { get; private set; }
     public readonly List<string> Transitions = new List<string>();
@@ -748,7 +819,11 @@ internal sealed class PlayerConnectionMonitor
         // Never serialize or display arbitrary log text or IDs.
         if (value.StartsWith(ConnectedPrefix, StringComparison.Ordinal))
         {
-            if (!Regex.IsMatch(value, @"\AVR_CLIENT_CONNECTED id=(0|[1-9][0-9]{0,19})\z")) { invalidEvidence = true; return; }
+            var connection = Regex.Match(value, @"\AVR_CLIENT_CONNECTED id=(0|[1-9][0-9]{0,19})\z");
+            if (!connection.Success) { invalidEvidence = true; return; }
+            ulong id;
+            Reconnected |= LastConnection.HasValue;
+            LastConnection = UInt64.TryParse(connection.Groups[1].Value, out id) ? (ulong?)id : null;
             if (evidenceConnections != null && (!evidenceConnections.Add(value) || sawFinal || State == "Connected" || State == "ResultPending"))
                 invalidEvidence = true;
             pendingSession = Guid.Empty;

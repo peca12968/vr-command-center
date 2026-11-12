@@ -88,6 +88,7 @@ public sealed class ReleaseFormChecks : MarshalByRefObject
                 var records = Field<LinkLabel>(form, "records");
                 var measureLink = Field<CheckBox>(form, "measureLink");
                 Check(play.Enabled && !records.Visible, "Ordinary graphical mode remains available without a report");
+                Check(!Field<Label>(form, "linkStatus").Visible, "Ordinary launches have no measurement status");
                 Check(!measureLink.Enabled && !measureLink.Checked, "Measurement requires a reviewed release and starts unchecked");
                 release.Text = otherRelease;
                 Check(!play.Enabled, "An edited release path invalidates the previous selection");
@@ -173,10 +174,30 @@ public sealed class ReleaseFormChecks : MarshalByRefObject
                 Check(owned != null && !measureLink.Enabled && measureLink.Checked, "The actual graphical child owns the measurement selection");
                 var pid = owned.Id;
                 var finish = Path.Combine(output, "finish.request");
+                var metrics = Path.Combine(output, "link-metrics.json");
+                var linkStatus = Field<Label>(form, "linkStatus");
+                Check(linkStatus.Visible && linkStatus.Text.Contains("等候"), "Measured launch starts waiting before a report exists");
                 var wait = Stopwatch.StartNew();
                 var closed = false;
+                var previewSaved = false;
                 while (Field<Process>(form, "child") != null && wait.Elapsed < TimeSpan.FromSeconds(145))
                 {
+                    if (!previewSaved && linkStatus.Text.StartsWith("連線量測已完成", StringComparison.Ordinal))
+                    {
+                        var saved = Json.Deserialize<Dictionary<string, object>>(File.ReadAllText(metrics));
+                        var samples = ((object[])saved["samples"]).Cast<Dictionary<string, object>>().ToArray();
+                        var replies = samples.Count(sample => (string)sample["result"] == "Reply");
+                        var timeouts = samples.Count(sample => (string)sample["result"] == "Timeout");
+                        var interrupted = samples.Count(sample => (string)sample["result"] == "Interrupted");
+                        var expected = "連線量測已完成（30／30）　回覆 " + replies + "、逾時 " + timeouts + "、中斷 " + interrupted + "。";
+                        Check(linkStatus.Text == expected && samples.Length == 30 && (bool)saved["complete"]
+                            && (int)saved["processId"] == pid && !owned.HasExited, "Live form displays the original outcomes while the game is open");
+                        CheckMeasurementPreview(launcher, output, metrics, pid, saved);
+                        var previewProof = Path.Combine(output, "link-preview-ready.json");
+                        File.WriteAllText(previewProof + ".tmp", Json.Serialize(new { processId = pid, replies, timeouts, interrupted, metricsSha256 = Hash(metrics) }));
+                        File.Move(previewProof + ".tmp", previewProof);
+                        previewSaved = true;
+                    }
                     if (!closed && File.Exists(finish))
                     {
                         owned.Refresh();
@@ -188,8 +209,7 @@ public sealed class ReleaseFormChecks : MarshalByRefObject
                 Check(owned == null, "Graphical player exits and the form completes its terminal report");
                 Check(Field<LinkLabel>(form, "records").Visible && measureLink.Enabled && !measureLink.Checked,
                     "The record folder is available and the next launch starts unchecked");
-                var metrics = Path.Combine(output, "link-metrics.json");
-                Check(File.Exists(metrics) && File.Exists(Path.Combine(output, "player-evidence.zip")),
+                Check(previewSaved && File.Exists(metrics) && File.Exists(Path.Combine(output, "player-evidence.zip")),
                     "The form publishes the original measurement and measured ZIP");
                 var result = Json.Deserialize<Dictionary<string, object>>(File.ReadAllText(report));
                 var proof = (Dictionary<string, object>)result["linkMetrics"];
@@ -207,5 +227,43 @@ public sealed class ReleaseFormChecks : MarshalByRefObject
                 owned.Dispose();
             }
         }
+    }
+
+    private void CheckMeasurementPreview(Assembly launcher, string output, string metrics, int pid, Dictionary<string, object> report)
+    {
+        var type = launcher.GetType("PlayerLauncher+LinkMeasurement", true);
+        var read = type.GetMethod("ReadReport");
+        var preview = read.Invoke(null, new object[] { metrics, pid });
+        var describe = type.GetMethod("Describe");
+        var previous = Convert.ToUInt64(report["connection"]);
+        Check(((string)describe.Invoke(preview, new object[] { previous == 0 ? 1UL : 0UL, false })).Contains("目前連線不符"),
+            "A later connection cannot inherit the first connection's status");
+        Check(((string)describe.Invoke(preview, new object[] { previous, true })).Contains("未涵蓋目前連線"),
+            "A later admission cannot inherit the measurement even if a connection number is reused");
+        Check(RejectMeasurement(read, metrics, 0), "A report for another process cannot become the current preview");
+        var early = Path.Combine(output, "link-preview-early-fixture.json");
+        report["complete"] = false;
+        report["reason"] = "Ended";
+        var last = (Dictionary<string, object>)((object[])report["samples"])[29];
+        last["result"] = "Interrupted";
+        File.WriteAllText(early, Json.Serialize(report));
+        var stopped = read.Invoke(null, new object[] { early, pid });
+        Check(((string)describe.Invoke(stopped, new object[] { previous, false })).StartsWith("連線量測已停止（30／30）", StringComparison.Ordinal),
+            "An interrupted last attempt is not reported as a completed measurement");
+        last["sequence"] = 29;
+        var invalid = Path.Combine(output, "link-preview-invalid-fixture.json");
+        File.WriteAllText(invalid, Json.Serialize(report));
+        Check(RejectMeasurement(read, invalid, pid), "A repeated sample sequence cannot become the current preview");
+    }
+
+    private static bool RejectMeasurement(MethodInfo read, string file, int pid)
+    {
+        try { read.Invoke(null, new object[] { file, pid }); }
+        catch (TargetInvocationException error)
+        {
+            if (!(error.InnerException is InvalidDataException)) throw;
+            return true;
+        }
+        return false;
     }
 }

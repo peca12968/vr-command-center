@@ -1541,7 +1541,7 @@ def main():
                 client['witness']=None
                 if form is not None and 'final' in client:
                     reviewed = read(form / 'release-form-checks.json')
-                    check(reviewed == {'complete': True, 'checks': 6, 'processId': client['nativePid']}
+                    check(reviewed == {'complete': True, 'checks': 13, 'processId': client['nativePid']}
                           and read(client['linkMetrics'])['batchMode'] is False and read(client['linkMetrics'])['graphicsDeviceActive'] is True,
                           'shipped graphical form publishes the measured player ZIP after a normal game window exit')
                 if 'evidenceZip' in client and 'final' in client:
@@ -4644,6 +4644,18 @@ def main():
             if args.check_venue_link_metrics:
                 stage('collecting-player-link-metrics',mode='Linked' if linked else 'Independent')
                 wait(lambda:all(c['linkMetrics'].is_file() for c in round_clients),55,'all original packaged client link reports')
+                if args.check_venue_link_form:
+                    measured = next(c for c in round_clients if 'measuredForm' in c)
+                    proof = measured['measuredForm'] / 'link-preview-ready.json'
+                    preview = wait(lambda: read(proof) if proof.is_file() else None, 8, 'live WinForms link measurement')
+                    metrics = read(measured['linkMetrics'])
+                    counts = {field: sum(s['result'] == outcome for s in metrics['samples'])
+                              for field, outcome in (('replies', 'Reply'), ('timeouts', 'Timeout'), ('interrupted', 'Interrupted'))}
+                    check(preview == {'processId': measured['nativePid'], 'metricsSha256': control.sha(measured['linkMetrics']), **counts}
+                          and sum(counts.values()) == 30 and metrics['complete'] is True
+                          and request('/api/sessions/' + measured['sessionId'])['phase'] == 'Running'
+                          and measured['process'].poll() is None,
+                          'shipped graphical form displays the original link outcomes before End while the game is running')
             if args.check_venue_openxr:verify_venue_openxr(entries,round_clients,linked)
             elif args.check_quest_vr_deploy or args.check_quest_vr_partial_map:verify_quest_tracking(linked)
             if args.check_room_readiness:verify_room_readiness(round_clients,linked)
