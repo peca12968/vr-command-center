@@ -609,7 +609,20 @@ python scripts/verify-field-results.py --venue-stages .\stages.json
 {"address":"192.168.1.20","evidenceZip":"room-01-seat-01/player-evidence.zip"}
 ```
 
-工具直接讀取 ZIP 內原日誌與退出報告。每席可使用 ZIP 或分開的 `log`、`launcherReport`，同一批可混用不同格式。另有原連線量測時，`linkMetrics` 仍填其原 JSON 路徑。 [玩家端操作](WINDOWS_PLAYER_PACKAGE.md#依場館發行報告核對玩家包)
+工具直接讀取 ZIP 內原日誌與退出報告。每席可使用 ZIP 或分開的 `log`、`launcherReport`，同一批可混用不同格式。 [玩家端操作](WINDOWS_PLAYER_PACKAGE.md#依場館發行報告核對玩家包)
+
+Windows 啟動器 1.12 可將原量測一併加入驗收 ZIP。需要量測的場次，每個 Windows 席位均使用獨立的新路徑。保留任務執行至每席 30 筆量測結案，再由主控結束任務。
+
+```powershell
+& .\Launch-Player.exe --config '.\room-01-seat-01.json' --launch --wait `
+  --release-report '.\venue-release.json' `
+  --log 'C:\Private\room-01-seat-01.log' `
+  --report 'C:\Private\room-01-seat-01-launch.json' `
+  --link-metrics 'C:\Private\room-01-seat-01-link.json' `
+  --evidence-zip 'C:\Private\room-01-seat-01-evidence.zip'
+```
+
+交回 ZIP 即可使用收件資料夾或 `evidenceZip`。已有 `link-metrics.json` 的 ZIP 直接使用內含原檔，舊 ZIP 搭配散裝量測則使用逐席的 `evidenceZip` 及 `linkMetrics`。工具會核對原量測雜湊、程序 ID、30 筆樣本及伺服器確認戰績的同一條連線。
 
 #### 按收件資料夾找缺件及錯批
 
@@ -620,7 +633,9 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json --inspect-w
 python scripts/verify-field-results.py --venue-manifest .\venue.json
 ```
 
-第一條指令列出應收及已收的 Windows 席位、缺件與有問題的檔名，缺件或衝突時以退出碼 1 結束。配對依據是原名冊的入場與場次識別、退出報告及原伺服器對該連線的戰績確認，玩家可自行命名 ZIP。每席的 IPv4 取自伺服器觀察到的對應 UDP 來源。需要另外指定各席預期的 IPv4 或核對連線量測時，可沿用 `windowsPlayers`。
+第一條指令列出應收及已收的 Windows 席位、缺件與有問題的檔名，缺件或衝突時以退出碼 1 結束。配對依據是原名冊的入場與場次識別、退出報告及原伺服器對該連線的戰績確認，玩家可自行命名 ZIP。每席的 IPv4 取自伺服器觀察到的對應 UDP 來源。需要另外指定各席預期的 IPv4 時，可沿用 `windowsPlayers`。
+
+收件檢查也會核對 ZIP 內的連線量測。若本批有 Windows 席位提供量測，須由所有 Windows 席位提供，Quest 席位沿用原 logcat 流程。內含量測不符、遺失或覆蓋席位不足時，收件檢查會指出對應的 ZIP。
 
 收件完成後執行第二條指令，工具沿用同一資料夾完成原場次封存及戰績驗收。混合場的 Quest 證據照原欄位提供，可在 Windows 收件檢查後補齊。
 

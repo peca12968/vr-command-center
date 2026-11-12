@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 Windows 玩家驗收 ZIP 納入連線量測
+
+- Windows 玩家啟動器 1.12 可將同一次的原始連線量測、玩家日誌與退出報告放入驗收 ZIP。主控收件時依原入場、程序、最後連線與伺服器戰績回條核對。Windows 玩家包通過 42 項啟動器檢查及 331 筆解壓清單核對，其中 329 個檔案與 1.11 雜湊相同。 [收件流程](EXTERNAL_CLIENTS.md#收集-windows-玩家驗收-zip) · [玩家包](WINDOWS_PLAYER_PACKAGE.md)
+- Windows 0.50.7 同機整合通過 514 項。獨立及合併各 25 個模擬玩家端，50 份原 ZIP 的收件及封存結果與散檔相同。每席 30 筆，共 1,500 筆量測。本次全部取得回覆，兩種模式各有逾 53 秒的共同在線區間。六場雙封存共 3,611 格回放、6 份 CSV 與 50 筆伺服器戰績回條。程序停止後，C／F 快照 372 個非資料庫檔案一致。 [驗證摘要](../artifacts/player-link-archive-1.12-validation.json)
+- 原 ZIP 副本移除量測或換入另一席的量測時，收件檢查都指出問題檔案與缺件席位，完整驗收均拒絕。首輪三項 Python 斷言因舊提示字串及舊版回條測試資料不符而失敗。修正測試資料及斷言後，94 項場館封存測試通過。功能來源 `57a0654` 和測試修正 `f96d0f8` 均已推送，兩次 GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商硬體仍待驗收。 [拒絕紀錄](../artifacts/player-link-archive-1.12-native-negative.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43279025852)
+
 ## 2026-11-13 預覽五房任務配置檔
 
 - 管理包 0.31.151 新增「預覽配置」。主控可在載入前逐房比對目前準備與檔案指定的任務版本、VR／MR、時長及場地檢查結果。來源與解壓包各通過 65 項 Chromium 專項，包含歷史版本、場地無效、切頁隔離及原直接載入流程。 [操作方式](MISSION_VERSIONS.md#在開場前保存五房任務配置) · [預覽畫面](../artifacts/console-venue-file-review-151-package/venue-mission-file-review.png)
