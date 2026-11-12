@@ -1494,6 +1494,9 @@ class FieldResultsTests(unittest.TestCase):
             self.assertEqual(original, field.verify_venue(path))
             inspected, _ = field.verify_venue_batch(path, inspect_windows=True)
             self.assertTrue(inspected['complete'])
+            self.assertEqual(inspected['windowsLinkMetrics']['verifiedSeats'], 5)
+            self.assertEqual(inspected['windowsLinkMetrics']['missingSeats'], [])
+            self.assertEqual(inspected['windowsLinkMetrics']['seats'][0]['p95RoundTripMs'], 13.5)
             self.assertEqual(5, original['windowsLinkMetricsVerified'])
 
             archives = sorted((root / inbox['windowsEvidenceDirectory']).glob('*.ZIP'))
@@ -1542,6 +1545,75 @@ class FieldResultsTests(unittest.TestCase):
                 for name, data in missing.items():
                     archive.writestr(name, data)
             self.assertEqual(original, field.verify_venue(path))
+
+    def test_windows_link_criteria_report_measurement_failures_by_seat(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, _ = venue_fixture(root, 'Independent', room_sizes=(1,) * 5)
+            manifest['expectedPlayersPerRoom'] = 1
+            self.add_shared_release(root, manifest, 0)
+            self.add_windows_links(root, manifest)
+            criteria = {'minimumReplies': 28, 'maximumP95RoundTripMs': 14}
+            manifest['windowsLinkCriteria'] = criteria
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            self.assertEqual(field.verify_venue(path)['windowsLinkCriteria'], dict(criteria, seatsVerified=5))
+
+            for entry, delayed in zip(manifest['sessions'][:2], (False, True), strict=True):
+                player, = entry['players']
+                metrics_path, launch_path = (root / player[key] for key in ('linkMetrics', 'launcherReport'))
+                metrics = json.loads(metrics_path.read_bytes())
+                for row in metrics['samples']:
+                    if delayed and row['result'] == 'Reply':
+                        row['roundTripMilliseconds'] = 15
+                    elif not delayed:
+                        row.update(result='Timeout', roundTripMilliseconds=0)
+                raw = json.dumps(metrics).encode()
+                metrics_path.write_bytes(raw)
+                launch = json.loads(launch_path.read_bytes())
+                launch['linkMetrics']['metricsSha256'] = hashlib.sha256(raw).hexdigest()
+                launch_path.write_text(json.dumps(launch), encoding='utf-8')
+
+            inbox = self.windows_inbox_fixture(root, manifest)
+            path.write_text(json.dumps(inbox), encoding='utf-8')
+            result = subprocess.run([sys.executable, str(SCRIPT), '--venue-manifest', str(path), '--inspect-windows-inbox'],
+                                    capture_output=True)
+            self.assertEqual(result.returncode, 1)
+            inspection = json.loads(result.stdout)
+            self.assertTrue(inspection['complete'])
+            self.assertFalse(inspection['windowsLinkMetrics']['meetsCriteria'])
+            failures = [(row['roomId'], row['seat'], row['replies'], row['p95RoundTripMs'], row['criteriaFailures'])
+                        for row in inspection['windowsLinkMetrics']['seats'] if 'criteriaFailures' in row]
+            self.assertEqual(failures, [(1, 1, 0, None, ['minimumReplies', 'maximumP95RoundTripMs']),
+                                        (2, 1, 28, 15.0, ['maximumP95RoundTripMs'])])
+            for candidate in (manifest, inbox):
+                path.write_text(json.dumps(candidate), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'criteria not met at room 1 seat 1, room 2 seat 1'):
+                    field.verify_venue(path)
+
+    def test_windows_link_criteria_require_measurements_even_when_all_zips_are_returned(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, _ = venue_fixture(root, 'Linked', room_sizes=(1,) * 5)
+            manifest['expectedPlayersPerRoom'] = 1
+            self.add_shared_release(root, manifest, 0)
+            inbox = self.windows_inbox_fixture(root, manifest)
+            path.write_text(json.dumps(inbox), encoding='utf-8')
+            report, _ = field.verify_venue_batch(path, inspect_windows=True)
+            self.assertNotIn('windowsLinkMetrics', report)
+            inbox['windowsLinkCriteria'] = {'minimumReplies': 1, 'maximumP95RoundTripMs': 900}
+            path.write_text(json.dumps(inbox), encoding='utf-8')
+            report, _ = field.verify_venue_batch(path, inspect_windows=True)
+            self.assertTrue(report['complete'])
+            self.assertFalse(report['windowsLinkMetrics']['meetsCriteria'])
+            self.assertEqual(report['windowsLinkMetrics']['verifiedSeats'], 0)
+            self.assertEqual(len(report['windowsLinkMetrics']['missingSeats']), 5)
+            with self.assertRaisesRegex(field.EvidenceError, 'original link reports for every Windows seat'):
+                field.verify_venue(path)
+            for invalid in (None, {}, {'minimumReplies': True, 'maximumP95RoundTripMs': 900},
+                            {'minimumReplies': 1, 'maximumP95RoundTripMs': 901}):
+                path.write_text(json.dumps(dict(inbox, windowsLinkCriteria=invalid)), encoding='utf-8')
+                with self.assertRaises(field.EvidenceError):
+                    field.verify_venue(path)
 
     def test_windows_inbox_receives_only_the_mapped_windows_seats_in_a_mixed_batch(self):
         with tempfile.TemporaryDirectory() as directory:
