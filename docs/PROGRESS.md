@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 Quest 封存一起核對裝置表與來源 IPv4
+
+- 封存清單可同時引用原 Quest 裝置表與網路計畫。驗收依擷取引用的各份部署報告重算原席位和 ADB 標籤指紋，並核對伺服器記錄的來源 IPv4。也修正有擷取引用時，摘要誤以部署報告雜湊取代 APK 雜湊的問題。 [操作方式](EXTERNAL_CLIENTS.md#以原-quest-裝置對照表驗收收尾)
+- 102 項封存及 54 項 Quest 部署測試通過。獨立及合併受控案例各用 5 個 Quest 席位和 20 個 Windows 席位，分別核對兩份原部署與裝置表指紋。錯誤 ADB 標籤或來源 IPv4 都會拒絕。兩種模式的摘要均對上既有 Quest 0.50.7 APK 的實際 SHA-256。 [驗證紀錄](../artifacts/quest-device-map-network-validation.json)
+- 功能來源 `fdb282f` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43310847938)
+
 ## 2026-11-13 Quest 日誌擷取核對原部署裝置
 
 - 批次擷取可使用 `--deployment-report`，核對原部署 ZIP、裝置清單、已驗證的 APK 及原入場席位。擷取開始與交付前各核對一次 ADB 裝置識別。若交付前識別改變，保留 `.partial`。擷取重試及封存驗收沿用原部署報告的 SHA-256。 [擷取方式](QUEST3.md#一次擷取五房-quest-日誌)
