@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 五房配置檔平面圖對照
+
+- Windows 管理包 0.31.160 可在五房配置檔預覽中選房，以相同比例對照目前準備與檔案版本的保存物件、角度、出生位及配置問題。對照保留原準備和編輯草稿。 [操作方式](MISSION_VERSIONS.md#在開場前保存五房任務配置)
+- 首次瀏覽器檢查等待目前房間的出生位逾時。修正平面圖在場地回報尚未取得時的渲染後，來源與解壓版各通過 81 項五房準備檢查，涵蓋原座標、窄畫面與換檔後晚到的回覆。完整 Chromium 1,078 項、Node 113 項及 Windows 管理包 107 項通過。 [管理包](WINDOWS_CONTROL_PACKAGE.md) · [驗證紀錄](../artifacts/venue-mission-maps-160-validation.json)
+- 功能來源 `916648a` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43320747293)
+
 ## 2026-11-13 任務回放循環播放片段
 
 - Windows 管理包 0.31.159 在「指定回放片段」提供「循環播放片段」。每輪都核對原起訖與串流終點，再回到起點。播放沿用所選房間、鏡頭及個人檢討範圍，支援暫停及取消循環。 [操作方式](WORLD_RECORDING.md#重看指定片段)
