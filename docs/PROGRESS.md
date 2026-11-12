@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 以原網路清單核對封存席位
+
+- 全館收件及封存驗收可引用同一份五房網路清單，依原場次、席位、封存端點及伺服器戰績確認比對 Windows 與 Quest 的 UDP 來源。新版全館 UDP 預檢回條保留清單雜湊。Windows 收件會逐檔標示不符及待補件席位。 [操作方式](EXTERNAL_CLIENTS.md#用原網路清單核對封存席位)
+- 本機通過 110 項封存、10 項 LAN 預檢及 12 項 Quest UDP 測試。以原始啟動與預檢資料重建清單，重驗既有 Windows 同機兩種模式的 50 份玩家 ZIP、6 組 UDP 預檢與 2,502 格封存回放，原資料及其餘驗收結果一致。另確認位址錯配及封存端點不符會被拒絕。 [本機驗證摘要](../artifacts/venue-network-seat-readback-validation.json)
+- 功能來源 `a0fe5a6` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43331355845)
+
 ## 2026-11-13 Windows 五房開場回放原生驗收
 
 - 新的三包驗收選項會等原伺服器退出，再由封存世界日誌定位原開場與首個執行畫格。Chromium 在管理包 0.31.161 上實際切換兩格，逐場核對原錄製、房間與鏡頭，並與離線封存驗收核對同一開場指令及兩個原畫格。 [重跑方式](WINDOWS_SERVER_PACKAGE.md#三個可攜包整合驗證)
