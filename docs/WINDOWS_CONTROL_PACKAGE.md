@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-13 `VRCommand-ControlServer-0.31.161-opening-replay-win-x64.zip` 為 53,120,954 bytes，SHA-256 `4c5f6ee0ac5dfdcd4630988f95f1cdcb90a53d999f552026cea8f7de25f94647`。主控可在同一錄製比較原開場畫格與首個有效執行畫格。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.161-opening-replay-win-x64.zip) · [回放操作](SESSION_CLOSURE.md#比較準備與執行畫格)
+
 2026-11-13 `VRCommand-ControlServer-0.31.160-mission-maps-win-x64.zip` 為 53,117,222 bytes，SHA-256 `a56e61f10d4a4d2b4a5e521ea7529ff7dec1ed24bce78c50b969940802bcf442`。五房任務配置檔可對照目前準備與檔案版本的平面圖。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.160-mission-maps-win-x64.zip) · [任務配置](MISSION_VERSIONS.md#在開場前保存五房任務配置)
 
 2026-11-13 `VRCommand-ControlServer-0.31.159-clip-loop-win-x64.zip` 為 53,114,782 bytes，SHA-256 `1bd809dc89bbebf9c9790f68ba1f86bae73ebb6505f5f17235266e3df732e472`。主控台可循環播放已標記的任務片段。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.159-clip-loop-win-x64.zip) · [回放操作](WORLD_RECORDING.md#重看指定片段)
