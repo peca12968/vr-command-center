@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 按電腦標籤核對 Windows 席位來源
+
+- 場館可在收件清單加入 `windowsStationAddresses`，把原 Windows 席位對照表中的電腦標籤與預期 IPv4 一起核對。工具使用伺服器原已確認戰績連線的來源。來源不符時會列出檔名、缺件席位及電腦標籤。成功摘要保存位址表 SHA-256 與通過席位數。99 項封存及 8 項 UDP 測試通過，涵蓋受控兩位址互換、缺少標籤與重複標籤。 [操作方式](EXTERNAL_CLIENTS.md#核對-windows-席位的來源-ipv4)
+- 沿用原 Windows 同機封存生成獨立與合併清單，各 25 份玩家 ZIP 通過。共核對 6 組 UDP 預檢及 2,502 格回放。兩種模式各修改第五房第五席的預期位址後，舊版仍收 25 席，新版均只收 24 席並拒絕完整驗收。原玩家 ZIP 雜湊一致。 [驗證紀錄](../artifacts/windows-station-address-validation.json)
+- 功能來源 `d722ec0` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、Quest 3、VIVE XR、MR 場地及廠商硬體仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43308542651)
+
 ## 2026-11-13 在五房準備時核對初始敵軍
 
 - 管理包 0.31.157 在各房選項、配置檔預覽、建立確認和回條列出原任務版本的敵軍數量、行為和自動攻擊。回條若含不同的原保存設定，會保留前一份已確認結果，等候以原請求重試。來源與解壓包各通過 73 項 Chromium 專項。舊版缺少逐房摘要的反例已保存，初版候選的窄螢幕欄位已調整為表格內捲動。 [逐房設定](MISSION_VERSIONS.md#逐房指定任務版本)
