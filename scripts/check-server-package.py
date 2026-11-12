@@ -1521,9 +1521,7 @@ def main():
                     client['nativePid']=info['processId']
             if witness:
                 form = client.get('measuredForm')
-                if form is not None and 'final' in client:
-                    (form / 'finish.request').touch(exist_ok=False)
-                else:
+                if form is None or not (form / 'finish.request').exists():
                     witness.terminate()
                 witness.wait()
                 child.wait(timeout=15)
@@ -4704,6 +4702,11 @@ def main():
                 for entry in entries:
                     if args.observe_closure_ui and not linked and entry is observer_entry:(out/'closure-end.request').write_text('request one normal UI End',encoding='utf-8')
                     else:command(entry['sessionId'],'End')
+            if args.check_venue_link_form:
+                measured, = [client for client in round_clients if 'measuredForm' in client]
+                wait(lambda: venue.player_result_phase(measured['log'].read_text(encoding='utf-8', errors='replace')) == 'acknowledged',
+                     35, 'graphical player receives and disconnects after the original final result')
+                (measured['measuredForm'] / 'finish.request').touch(exist_ok=False)
             for entry in entries:finish(entry)
             for sample in live_samples:
                 world_sid, observed_room, frame_sequence = (sample[field] for field in ('sessionId','roomId','sequence'))
