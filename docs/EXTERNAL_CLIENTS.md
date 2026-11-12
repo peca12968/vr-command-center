@@ -373,6 +373,7 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `windowsPlayers` | 選用。集中填入所有 Windows 席位，每筆提供玩家裝置實際使用的 IPv4 `address`，再填原日誌路徑 `log` 或原玩家驗收 ZIP 路徑 `evidenceZip` |
 | `windowsEvidenceDirectory` | 選用。Windows 玩家 ZIP 收件資料夾。與 `windowsPlayers` 擇一 |
 | `windowsSeatMap` | 選用。收件資料夾用的版本 1 Windows 電腦對照表。混合 Quest 場次須指定應收的 Windows 席位 |
+| `windowsLinkCriteria` | 選用。場館填入 `minimumReplies` 和 `maximumP95RoundTripMs`，逐席驗收原 Windows 連線量測。 |
 | `sessions[].players` | 逐場填寫尚未由 `windowsPlayers` 或 `questCaptures` 提供的席位，每筆填實際 IPv4 `address` 及原日誌路徑 `log`。手動填入 Quest 3 原 logcat 時另填數字 `logcatPid`，例如 `7342`。該場席位已全部由前兩欄提供時可省略 |
 
 路徑可以是絕對路徑，或相對於 `venue.json` 所在資料夾。同一檔案只能使用一次。以下是五房獨立模式的 Windows 範例，請依現場配置填入實際地址與檔名。混合場可改用 `questCaptures` 或逐場補上 Quest 原 logcat。兩種方式合計每房須有五席。
@@ -640,6 +641,18 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json
 收件檢查也會核對 ZIP 內的連線量測。若本批有 Windows 席位提供量測，須由所有 Windows 席位提供，Quest 席位沿用原 logcat 流程。內含量測不符、遺失或覆蓋席位不足時，收件檢查會指出對應的 ZIP。
 
 收件完成後執行第二條指令，工具沿用同一資料夾完成原場次封存及戰績驗收。混合場的 Quest 證據照原欄位提供，可在 Windows 收件檢查後補齊。
+
+#### 逐席核對 Windows 連線量測門檻
+
+收件報告的 `windowsLinkMetrics` 逐席列出 30 筆量測的回覆、逾時、中斷、回覆的 p95 往返時間及缺量測的席位。需要按場館規格驗收時，在 `venue.json` 加入 `windowsLinkCriteria`，將下例的數值替換為本次規格。
+
+```json
+{"windowsLinkCriteria":{"minimumReplies":28,"maximumP95RoundTripMs":40}}
+```
+
+兩個門檻均為整數。每席最低回覆數可填 1 至 30，最高 p95 可填 0 至 900 毫秒。p95 由收到回覆的樣本計算，回覆數為零時 p95 為空。收件報告保留檔案完整狀態，另以 `meetsCriteria` 表示量測是否齊全且逐席符合門檻，並以 `criteriaFailures` 列出未通過的欄位。收件或完整驗收遇到缺量測或超出門檻時，退出碼為 1。
+
+完整驗收也支援逐席列出 ZIP 或散檔。通過時會保存門檻及核對席位數，多階段驗收亦會列出各批採用的門檻。省略 `windowsLinkCriteria` 時沿用原驗收規則。量測包含遊戲訊息往返和兩端排程，實體網路容量仍依現場驗收。
 
 ## 同機 UDP 流量量測
 

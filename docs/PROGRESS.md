@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 逐席驗收 Windows 連線量測
+
+- 場館驗收工具在 Windows 收件階段逐席列出回覆、逾時、中斷、p95 往返時間及缺量測的席位。場館可選填最低回覆數與 p95 上限。檔案收齊但量測未達門檻時，收件檢查保留完整狀態並指出未達標的欄位，完整驗收則指出房間及席位。省略門檻時，完整驗收輸出與原結果一致。 [操作方式](EXTERNAL_CLIENTS.md#逐席核對-windows-連線量測門檻)
+- 唯讀重驗 1.13 的獨立與合併同機資料，核對原 50 份 ZIP、1,500 筆量測及 18 個場次證據檔。兩批各 25 席以最低 30 筆回覆、p95 上限 40 毫秒的測試設定通過。上限設為 20 毫秒時，舊工具回傳成功，新工具指出獨立 1 席與合併 22 席超出，ZIP 收件與散檔的拒絕結果相同。原檔雜湊維持一致。 [驗證摘要](../artifacts/windows-link-criteria-113/validation.json)
+- 96 項場館封存 Python 測試通過。功能來源 `0b47ac6` 已推送，GitHub Actions 因帳務或支出上限未啟動。這次驗證沿用已封存的 Windows 0.50.7 同機場次。跨機 25 人、頭盔、MR 場地及廠商硬體仍待驗收。 [測試紀錄](../artifacts/windows-link-criteria-113/field-tests.log) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43283177108)
+
 ## 2026-11-13 從 Windows 玩家視窗啟用連線量測
 
 - Windows 玩家啟動器 1.13 可在核對發行報告後勾選本次連線量測。遊戲關閉後從紀錄資料夾取出驗收 ZIP，下一場恢復未勾選。44 項解壓包啟動器檢查及 20 項 WinForms 發行核對通過，包括已核對的發行報告變更時清除量測選擇及拒絕啟動。解壓清單 331 個檔案中，329 個與 1.12 雜湊相同。 [操作方式](WINDOWS_PLAYER_PACKAGE.md#依場館發行報告核對玩家包) · [視窗畫面](../artifacts/player-link-form-1.13-layout.png)
