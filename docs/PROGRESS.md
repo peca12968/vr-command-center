@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 在五房準備時核對初始敵軍
+
+- 管理包 0.31.157 在各房選項、配置檔預覽、建立確認和回條列出原任務版本的敵軍數量、行為和自動攻擊。回條若含不同的原保存設定，會保留前一份已確認結果，等候以原請求重試。來源與解壓包各通過 73 項 Chromium 專項。舊版缺少逐房摘要的反例已保存，初版候選的窄螢幕欄位已調整為表格內捲動。 [逐房設定](MISSION_VERSIONS.md#逐房指定任務版本)
+- 最終 Windows 包通過 383 項同機整合。獨立及合併各使用 25 個模擬玩家端，瀏覽器選用的五份獨立版本及原合併版本均與遊戲執行格的初始敵軍設定一致。六場雙封存保留 814 格回放、6 份 CSV、50 筆伺服器戰績確認。清理後原生及管理 C／F 快照分別有 215 和 18 個非資料庫檔案雜湊一致。 [驗證紀錄](../artifacts/venue-mission-enemies-0.31.157-validation.json)
+- 解壓核對 564 筆清單，並通過 825 項 HTTP 與 107 項管理包檢查。離線發行用原帶收據的 Windows 和 Quest 0.50.7 套件，確認 APK v2 簽章。功能與畫面修正已推送，最終包來源 `63e79e7`。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商硬體仍待驗收。 [管理包](WINDOWS_CONTROL_PACKAGE.md) · [發行核對](../artifacts/venue-release-0.50.7-control-0.31.157.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43306891267)
+
 ## 2026-11-13 從原封存產生五房驗收清單
 
 - `prepare-venue-field-manifest.py` 從管理驗收 ZIP 與 Windows 批次終止報告產生 `venue.json`。它逐場核對來源、UDP 端點、原名冊、伺服器日誌及封存的世界與戰鬥紀錄。可帶入 Windows 玩家收件資料夾、發行報告及 UDP 預檢。搬移後以 `--server-work-root` 指定原房間資料夾。98 項封存及 8 項 UDP 測試通過。 [準備方式](EXTERNAL_CLIENTS.md#核對五房批次啟動器的原終止報告)
