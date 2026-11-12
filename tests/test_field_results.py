@@ -188,7 +188,7 @@ class PlayerSourceEvidenceTests(unittest.TestCase):
 
 
 def venue_fixture(root, mode, *, remote=False, quest_per_room=0, with_journals=False, mr_rooms=(), room_sizes=(5,) * 5,
-                  id_offset=0, minutes_after=0):
+                  id_offset=0, minutes_after=0, game_server=False):
     def write_json(path, value):
         path.write_text(json.dumps(value), encoding='utf-8')
 
@@ -202,7 +202,7 @@ def venue_fixture(root, mode, *, remote=False, quest_per_room=0, with_journals=F
     for rooms in groups:
         prefix = f'Room {rooms[0]}'
         experience = 'MR' if rooms[0] in mr_rooms else 'VR'
-        origin = 'GameServer' if experience == 'MR' else 'Simulation'
+        origin = 'GameServer' if game_server or experience == 'MR' else 'Simulation'
         _, _, launcher, session, stats, endpoint, _, _ = fixture(remote=False)
         session_id, stream = id_for(100 + rooms[0] + id_offset), id_for(200 + rooms[0] + id_offset)
         port = 7776 + rooms[0]
@@ -2018,6 +2018,119 @@ class FieldResultsTests(unittest.TestCase):
                 path.write_text(json.dumps(packed), encoding='utf-8')
                 with self.assertRaisesRegex(field.EvidenceError, 'sessionId instead of a per-session launcher report'):
                     field.verify_venue(path)
+
+    def test_quest_readiness_matches_original_preparing_frames(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, closure = venue_fixture(root, mode, remote=True, quest_per_room=5, with_journals=True,
+                                                        game_server=True)
+                devices = []
+                for entry in manifest['sessions']:
+                    session, _, endpoint = field.management_zip(root / entry['evidenceZip'])
+                    started = datetime.fromisoformat(session['startedAtUtc'])
+                    captured = started - timedelta(seconds=1)
+                    capture_start = captured - timedelta(milliseconds=100)
+                    launcher_path = root / entry['launcherReport']
+                    launcher = json.loads(launcher_path.read_bytes())
+                    bodies = [{'id': owner['id'], 'roomId': owner['roomId'], 'connected': True, 'health': 100,
+                               'rig': {'kind': 'Tracked'}} for owner in session['players']]
+                    journal_path = root / entry['worldJournal']
+                    world_journal(journal_path, launcher['finalWorld'], capture_start=capture_start.isoformat(),
+                                  players=lambda _, __: bodies)
+                    launcher_path.write_text(json.dumps(launcher), encoding='utf-8')
+                    devices.extend({'roomId': owner['roomId'], 'seat': owner['seat'] + 1, 'sessionId': session['id'],
+                                    'playerId': owner['id'], 'admissionId': owner['admissionId'], 'port': endpoint['port'],
+                                    'status': 'launch-requested', 'versionCode': 61, 'apkVerified': True, 'filesVerified': True}
+                                   for owner in session['players'])
+                apk_digest, venue_digest = 'a' * 64, 'b' * 64
+                release = {'verified': True, 'scope': 'offline-package-consistency',
+                           'quest': {'applicationId': 'com.vrcommand.quest', 'architecture': 'arm64-v8a', 'signatureV2': True,
+                                     'versionCode': 61, 'sha256': apk_digest}}
+                (root / 'release.json').write_text(json.dumps(release), encoding='utf-8')
+                manifest.update(questDeployments={'releaseReport': 'release.json', 'reports': []},
+                                questReadinessReports=[])
+                for index, rows in enumerate((devices[:2], devices[2:]), 1):
+                    deployment = {'phase': 'deployment', 'topology': mode, 'managementVerified': True, 'complete': True,
+                                  'expectedApkSha256': apk_digest, 'expectedVersionCode': 61, 'apkVerificationVersion': 1,
+                                  'devices': rows, 'retry': {'version': 1, 'venueSha256': venue_digest, 'mapSha256': 'c' * 64,
+                                                           'salt': f'{index:032x}', 'devices': [f'{i:064x}' for i in range(len(rows))]}}
+                    deployment_path = root / f'deployment-{index}.json'
+                    deployment_path.write_text(json.dumps(deployment), encoding='utf-8')
+                    manifest['questDeployments']['reports'].append(deployment_path.name)
+                    report = {'evidenceVersion': 1, 'phase': 'tracked-readiness', 'topology': mode, 'managementVerified': True,
+                              'complete': True, 'venueSha256': venue_digest, 'sampledAtUtc': (captured + timedelta(milliseconds=50)).isoformat(),
+                              'deploymentSha256': hashlib.sha256(deployment_path.read_bytes()).hexdigest(),
+                              'seats': [{key: row[key] for key in ('roomId', 'seat', 'sessionId')} |
+                                        {'status': 'tracked-ready', 'sourceState': 'Fresh', 'worldSequence': 1,
+                                         'observedSequence': 7, 'capturedAtUtc': captured.isoformat()} for row in rows]}
+                    report_path = root / f'readiness-{index}.json'
+                    report_path.write_text(json.dumps(report), encoding='utf-8')
+                    manifest['questReadinessReports'].append(report_path.name)
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                verified = field.verify_venue(path)
+                self.assertEqual({'reportsVerified': 2, 'seatsVerified': 25, 'sessionsVerified': len(manifest['sessions'])},
+                                 verified['questReadiness'])
+                self.assertFalse(verified['physicalHostsVerified'])
+                self.assertEqual(25, verified['serverAcknowledgements'])
+                for session in verified['sessions']:
+                    self.assertEqual([{'worldSequence': 1, 'observedSequence': 7, 'seatsVerified': 5 * len(session['roomIds'])}],
+                                     session['worldJournal']['questReadinessFrames'])
+
+                for name, changes, seats, message in (
+                    ('other-deployment', {'deploymentSha256': 'd' * 64}, {}, 'exact completed deployment report'),
+                    ('other-zip', {'venueSha256': 'd' * 64}, {}, 'original venue ZIP digest'),
+                    ('incomplete', {'complete': False}, {}, 'completed tracked sample'),
+                    ('stale', {'sampledAtUtc': (started + timedelta(seconds=2)).isoformat()}, {}, 'freshness window'),
+                    ('after-begin', {'sampledAtUtc': (started + timedelta(milliseconds=10)).isoformat()}, {}, 'before the original Begin'),
+                    ('other-session', {}, {'sessionId': id_for(999)}, 'original deployed session'),
+                    ('running', {}, {'worldSequence': 2}, 'original Preparing frame'),
+                    ('other-revision', {}, {'observedSequence': 6}, 'original Preparing frame'),
+                    ('other-capture', {}, {'capturedAtUtc': (captured + timedelta(milliseconds=1)).isoformat()}, 'original Preparing frame'),
+                    ('missing-frame', {}, {'worldSequence': 81}, 'missing from the original world journal'),
+                ):
+                    with self.subTest(name=name):
+                        invalid = deepcopy(report)
+                        invalid.update(changes)
+                        for row in invalid['seats']:
+                            row.update(seats)
+                        report_path.write_text(json.dumps(invalid), encoding='utf-8')
+                        with self.assertRaisesRegex(field.EvidenceError, message):
+                            field.verify_venue(path)
+                report_path.write_text(json.dumps(report), encoding='utf-8')
+                first = root / manifest['questReadinessReports'][0]
+                path.write_text(json.dumps(dict(manifest, questReadinessReports=[first.name])), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'cover every original deployed Quest seat'):
+                    field.verify_venue(path)
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                original_journal = journal_path.read_bytes()
+                bodies[0]['rig']['kind'] = 'Simulated'
+                world_journal(journal_path, launcher['finalWorld'], capture_start=capture_start.isoformat(),
+                              players=lambda _, __: bodies)
+                with self.assertRaisesRegex(field.EvidenceError, 'lacks the original tracked player'):
+                    field.verify_venue(path)
+                journal_path.write_bytes(original_journal)
+
+                terminal, _, moved = self.terminal_venue_fixture(root, manifest, closure)
+                packed = self.pack_venue(root, manifest)
+                prepared = root / 'prepared.json'
+                command = [sys.executable, str(SCRIPT.with_name('prepare-venue-field-manifest.py')),
+                           '--venue-bundle', str(root / packed['venueBundle']), '--launcher-report', str(terminal),
+                           '--topology', 'direct-lan', '--server-ip', manifest['serverIps'][0], '--server-work-root', str(moved),
+                           '--venue-release-report', str(root / 'release.json'), '--output', str(prepared)]
+                for name in manifest['questDeployments']['reports']:
+                    command += ['--quest-deployment-report', str(root / name)]
+                for name in manifest['questReadinessReports']:
+                    command += ['--quest-readiness-report', str(root / name)]
+                result = subprocess.run(command, capture_output=True, encoding='utf-8', timeout=30)
+                self.assertEqual(0, result.returncode, result.stderr)
+                prepared_manifest = json.loads(prepared.read_bytes())
+                self.assertEqual(manifest['questReadinessReports'], prepared_manifest['questReadinessReports'])
+                players = {entry['sessionId']: entry['players'] for entry in manifest['sessions']}
+                for entry in prepared_manifest['sessions']:
+                    entry['players'] = players[entry['sessionId']]
+                prepared.write_text(json.dumps(prepared_manifest), encoding='utf-8')
+                self.assertEqual(verified['questReadiness'], field.verify_venue(prepared)['questReadiness'])
 
     def test_prepare_mixed_venue_keeps_original_quest_and_windows_evidence(self):
         for mode in ('Independent', 'Linked'):

@@ -656,6 +656,14 @@ function New-TrackedSeatReport($Venue, [object[]]$Map, $Batch, [switch]$IncludeA
         $result = [ordered]@{ roomId = $row.roomId; seat = $row.seat; status = Get-TrackedSeatStatus $batch $snapshot $connection;
             sourceState = $snapshot.sourceState; worldSequence = $snapshot.worldSequence }
         if ($IncludeAllHeadsets) { $result.registeredHeadset = $headset }
+        if ($DeploymentReport) {
+            $result.sessionId = $connection.Ticket.SessionId.ToString('D')
+            $result.observedSequence = $snapshot.observedSequence
+            $result.capturedAtUtc = $snapshot.capturedAtUtc
+            if ($result.status -ceq 'tracked-ready' -and ($snapshot.origin -cne 'GameServer' -or -not $snapshot.capturedAtUtc)) {
+                $result.status = 'source-capture-unverified'
+            }
+        }
         $result
     })
     $report = [ordered]@{ phase = 'tracked-readiness'; topology = $Venue.Report.topology; managementVerified = $true;
@@ -675,7 +683,8 @@ function Confirm-TrackedSeats($Venue, [object[]]$Map, [switch]$IncludeAllHeadset
     $timer = [Diagnostics.Stopwatch]::StartNew()
     $limit = 1000 * $WaitForTrackedSeconds
     $samples = 0
-    $terminal = @('venue-changed','seat-unavailable','admission-changed','seat-headset-mismatch','readiness-invalid','readiness-access-denied')
+    $terminal = @('venue-changed','seat-unavailable','admission-changed','seat-headset-mismatch','readiness-invalid','readiness-access-denied',
+        'source-capture-unverified')
     $report = $null
     do {
         $ticketMilliseconds = ($Venue.EarliestExpiry - [DateTimeOffset]::UtcNow).TotalMilliseconds
@@ -1209,7 +1218,11 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
         $venue = Read-VenueBundle $VenueBundle 0 0 -Fingerprint:([bool]$DeploymentReport)
         if ($DeploymentReport) { $deploymentSha256 = Read-QuestTrackedDeployment $venue $map $DeploymentReport }
         $result = Confirm-TrackedSeats $venue $map -IncludeAllHeadsets:$AllHeadsets
-        if ($DeploymentReport) { $result.deploymentSha256 = $deploymentSha256 }
+        if ($DeploymentReport) {
+            $result.evidenceVersion = 1
+            $result.venueSha256 = $venue.BundleSha256
+            $result.deploymentSha256 = $deploymentSha256
+        }
         $result | ConvertTo-Json -Depth 4 -Compress
         if (-not $result.complete) { exit 1 }
         return

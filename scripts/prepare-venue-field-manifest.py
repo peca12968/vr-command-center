@@ -36,7 +36,7 @@ def session_files(result, folder, session_id):
 
 
 def check_quest_inputs(manifest, expected, evidence_path, release, sources, server_ips, windows_seats):
-    captures, endpoints, _, deployments, _ = field.read_venue_quest_evidence(
+    captures, endpoints, _, deployments, _, _ = field.read_venue_quest_evidence(
         manifest, manifest['mode'], expected, evidence_path, release)
     for source in sources.values():
         if source['rooms'] in endpoints:
@@ -208,6 +208,8 @@ def prepare(args, output):
         manifest['questCaptures'] = captures
     if args.quest_deployment_report:
         manifest['questDeployments'] = {'reports': [ref(path.resolve(strict=True)) for path in args.quest_deployment_report]}
+    if args.quest_readiness_report:
+        manifest['questReadinessReports'] = [ref(path.resolve(strict=True)) for path in args.quest_readiness_report]
     if quest_sources:
         check_quest_inputs(manifest, expected, evidence_path, release, quest_sources, addresses, windows_seats)
     return manifest
@@ -232,6 +234,7 @@ def main():
     parser.add_argument('--quest-network-plan', type=Path, help='Original Quest IPv4 plan')
     parser.add_argument('--quest-device-map', type=Path, help='Original Quest seat-to-ADB assignment')
     parser.add_argument('--quest-deployment-report', action='append', type=Path, help='Original Quest deployment report; repeat for separate batches')
+    parser.add_argument('--quest-readiness-report', action='append', type=Path, help='Original pre-Begin Quest tracked sample; repeat for separate batches')
     args = parser.parse_args()
     if args.windows_inbox is not None and args.venue_release_report is None:
         parser.error('--windows-inbox requires --venue-release-report')
@@ -243,6 +246,8 @@ def main():
         parser.error('Quest captures require reports and --quest-network-plan, --quest-device-map or both')
     if args.quest_deployment_report and args.venue_release_report is None:
         parser.error('--quest-deployment-report requires --venue-release-report')
+    if args.quest_readiness_report and not args.quest_deployment_report:
+        parser.error('--quest-readiness-report requires --quest-deployment-report')
     if (args.quest_capture_report or args.quest_deployment_report) and args.windows_inbox is not None and args.windows_seat_map is None:
         parser.error('Using Quest reports and --windows-inbox together requires --windows-seat-map')
     try:

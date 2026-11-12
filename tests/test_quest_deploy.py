@@ -2,6 +2,7 @@ import asyncio
 import base64
 from contextlib import redirect_stderr
 import copy
+from datetime import datetime
 import hashlib
 import importlib.util
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -1240,7 +1241,7 @@ else:
         calls = []
         readiness = {'version': 1, 'sessionId': session, 'sessionSequence': 27, 'observedSequence': 27,
                      'worldSequence': 14, 'sourceState': 'Fresh', 'origin': 'GameServer', 'mrStartState': 'WaitingPlayers',
-                     'sampledAtUtc': '2026-11-10T00:00:00Z', 'sourceAgeMilliseconds': 50,
+                     'sampledAtUtc': '2026-11-10T00:00:00Z', 'capturedAtUtc': '2026-11-09T23:59:59.950Z', 'sourceAgeMilliseconds': 50,
                      'players': [{'roomId': row['roomId'], 'seat': row['seat'] - 1, 'state': 'Participating',
                                   'rigKind': 'Tracked', 'canParticipate': True,
                                   'playerId': str(self.players[(row['roomId'] - 1) * 5 + row['seat'] - 1]),
@@ -1310,6 +1311,11 @@ else:
                 ready_report = json.loads(ready.stdout)
                 self.assertEqual(['tracked-ready'] * 2, [row['status'] for row in ready_report['seats']])
                 self.assertEqual(deployment_hash, ready_report['deploymentSha256'])
+                self.assertEqual((1, hashlib.sha256(original_bundle).hexdigest()),
+                                 (ready_report['evidenceVersion'], ready_report['venueSha256']))
+                for row in ready_report['seats']:
+                    self.assertEqual((session, 14, 27), (row['sessionId'], row['worldSequence'], row['observedSequence']))
+                    self.assertEqual(datetime.fromisoformat(readiness['capturedAtUtc']), datetime.fromisoformat(row['capturedAtUtc']))
                 self.assertEqual({'maximumSeconds': 5, 'samples': 1, 'outcome': 'ready'}, ready_report['wait'])
                 for canary in ('fixture-03', 'HARDWARE-SERIAL-', 'v2.', 'private-fixture-master'):
                     self.assertNotIn(canary, ready.stdout + ready.stderr)
@@ -1320,6 +1326,11 @@ else:
                     pending_report = json.loads(pending.stdout)
                     self.assertEqual(deployment_hash, pending_report['deploymentSha256'])
                     self.assertEqual(['mr-profile-pending'] * 2, [row['status'] for row in pending_report['seats']])
+                readiness.update(origin='GameServer', capturedAtUtc=None)
+                missing_capture = readback(*flags, *bound, '-WaitForTrackedSeconds', '5')
+                self.assertEqual(1, missing_capture.returncode, missing_capture.stderr)
+                missing_report = json.loads(missing_capture.stdout)
+                self.assertEqual({'maximumSeconds': 5, 'samples': 1, 'outcome': 'source-capture-unverified'}, missing_report['wait'])
 
                 header_error = 'complete release-verified deployment report for this original ZIP and device map'
                 seat_error = 'does not match the original completed seat admissions'
@@ -1349,7 +1360,7 @@ else:
                 self.assert_rejected(readback('-DeviceMap', str(mapping), *bound), 'only with -VerifyTrackedSeats')
                 self.assertEqual(deployment_hash, hashlib.sha256(deployment.read_bytes()).hexdigest())
                 self.assertEqual(before, (self.root / 'adb.log').read_bytes())
-                self.assertEqual(deploy_calls + (deploy_calls[:2] + ['/api/venue/tracked-readiness']) * 4, calls)
+                self.assertEqual(deploy_calls + (deploy_calls[:2] + ['/api/venue/tracked-readiness']) * 5, calls)
             finally:
                 server.shutdown()
                 thread.join(timeout=5)

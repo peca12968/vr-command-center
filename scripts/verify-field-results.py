@@ -611,7 +611,7 @@ class VenueReconnectWindow:
 
 def verify_world_journal(path, world, combat_sequence, through, applied_end, *, player_sources=None, guarded_begin=None,
                          players=None, concurrency=None, sealed_fires=None, reconnect_window=None, on_packet=None,
-                         control_batches=()):
+                         control_batches=(), quest_readiness=()):
     spec = importlib.util.spec_from_file_location('field_world_journal', Path(__file__).with_name('analyze-world-journal.py'))
     analyzer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(analyzer)
@@ -624,6 +624,13 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
     begin_roster = None
     controls = {batch['appliedAtSequence']: batch for batch in control_batches}
     control_frames = {}
+    readiness_frames, verified_readiness_frames = {}, []
+    if quest_readiness:
+        require(expected['origin'] == 'GameServer' and expected.get('captureStartedAtUtc'),
+                'Quest readiness requires the original GameServer capture clock')
+        capture_start = quest_readiness_time(expected['captureStartedAtUtc'])
+        for seat in quest_readiness:
+            readiness_frames.setdefault(seat['worldSequence'], []).append(seat)
     if concurrency is not None:
         observe_roster, periods, fires = roster_periods(players, concurrency.minimum_ms, applied_end,
                                                        require_tracked=concurrency.require_tracked, sealed_fires=sealed_fires)
@@ -638,6 +645,21 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
             observe_roster(packet)
         if reconnect_window is not None:
             observe_reconnect(packet)
+        witnesses = readiness_frames.pop(packet['sequence'], ())
+        if witnesses:
+            frame = packet['frame']
+            captured = capture_start + timedelta(milliseconds=integer(packet['elapsedMilliseconds']))
+            require(packet['suspended'] is False and frame['phase'] == 'Preparing' and integer(frame['tick'], 0, 0) == 0
+                    and all(seat['observedSequence'] == packet['observedSequence'] and seat['capturedAtUtc'] == captured
+                            for seat in witnesses), 'Quest readiness differs from the original Preparing frame')
+            bodies = roster(frame['players'], 'id', len(frame['players']))
+            for seat in witnesses:
+                body = bodies.get(seat['playerId'])
+                require(body is not None and body['roomId'] == seat['roomId'] and body['connected'] is True
+                        and body['rig']['kind'] == 'Tracked' and integer(body['health'], 1, 100),
+                        'Quest readiness frame lacks the original tracked player')
+            verified_readiness_frames.append({'worldSequence': packet['sequence'], 'observedSequence': packet['observedSequence'],
+                                              'seatsVerified': len(witnesses)})
         observed = packet['observedSequence']
         if observed in controls and packet['frame']['phase'] == 'Running' and packet['suspended'] is False and packet['frame']['tick'] > 0:
             batch = controls[observed]
@@ -691,12 +713,14 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
     try:
         journal = analyzer.analyze(path, accepted_sequence=begin['appliedAtSequence'] if begin is not None else None,
                                    expected_full_header=expected, on_running_frame=count_player_rigs if player_sources is not None else None,
-                                   on_packet=observe_packet if controls or any(item is not None for item in (begin, concurrency, reconnect_window, on_packet)) else None)
+                                   on_packet=observe_packet if controls or quest_readiness or any(
+                                       item is not None for item in (begin, concurrency, reconnect_window, on_packet)) else None)
     except EvidenceError:
         raise
     except (OSError, ValueError, TypeError, KeyError, AttributeError, ArithmeticError, RecursionError) as error:
         raise EvidenceError('World journal failed source or record integrity verification') from error
     tail = journal['lastFrame']
+    require(not readiness_frames, 'Quest readiness frame is missing from the original world journal')
     sequence = world['acceptedSequence']
     require(journal['complete'] is journal['sealed'] is True and journal['unacknowledgedFrames'] == 0
             and journal['acknowledgedSequence'] == sequence and journal['runningFrames'] > 0
@@ -718,6 +742,8 @@ def verify_world_journal(path, world, combat_sequence, through, applied_end, *, 
         require(capture is not None, 'Reconnect window requires an original UTC capture clock')
         finish_reconnect(datetime.fromisoformat(capture).astimezone(timezone.utc))
     result = {'sha256': journal['sha256'], 'frames': sequence, 'runningFrames': journal['runningFrames']}
+    if quest_readiness:
+        result['questReadinessFrames'] = verified_readiness_frames
     if controls:
         require(control_frames.keys() == controls.keys(), 'World journal lacks an exact Running frame for a venue control batch')
         result['venueControlFrames'] = [control_frames[observed] for observed in sorted(control_frames)]
@@ -850,7 +876,7 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
                    udp_preflight=None, udp_source_preflights=None, verify_player_sources=False, quest_capture_logs=(),
                    guarded_begin=None, concurrency=None, verify_reconnect_history=False, reconnect_window=None,
                    quest_deployments=None, require_distinct_remote_roster=False, control_batches=(),
-                   observed_quest_addresses=None):
+                   observed_quest_addresses=None, quest_readiness=()):
     integer(size, 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(not verify_player_sources or world_journal is not None, 'Player source verification requires the original closed world journal')
@@ -875,6 +901,8 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
             and session['state'] == 'Ended' and session['mode'] == mode and header['roomIds'] == rooms,
             'Session identity, room scope or terminal state differs')
     started, ended = (datetime.fromisoformat(session[field]) for field in ('startedAtUtc', 'endedAtUtc'))
+    require(not quest_readiness or world_journal is not None and all(seat['sampledAtUtc'] <= started for seat in quest_readiness),
+            'Quest readiness requires a sample taken before the original Begin and a sealed world journal')
     require(started.utcoffset() is not None and ended.utcoffset() is not None and started <= ended,
             'Invalid session start or end time')
     boundary = sealed_result_boundary(session, statistics, world, combat, stream_id)
@@ -970,7 +998,8 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
     journal = verify_world_journal(world_journal, world, combat_sequence, through, applied_end,
                                    player_sources=player_sources, guarded_begin=guarded_begin, players=players,
                                    concurrency=concurrency, sealed_fires=sealed_fires,
-                                   reconnect_window=reconnect_window, control_batches=control_batches) if world_journal is not None else None
+                                   reconnect_window=reconnect_window, control_batches=control_batches,
+                                   quest_readiness=quest_readiness) if world_journal is not None else None
     alignments = None
     if room_alignments is not None:
         require(journal is not None and quest_players == size, 'MR alignment evidence requires the closed world journal and all original Quest logs')
@@ -1602,7 +1631,60 @@ def quest_deployment_leaves(attempts):
     return leaves, linked
 
 
-def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_reports=(), capture_device_map=None):
+def quest_readiness_time(value):
+    require(type(value) is str and len(value) <= 40, 'Invalid Quest readiness capture or sample time')
+    try:
+        when = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise EvidenceError('Invalid Quest readiness capture or sample time') from error
+    require(when.utcoffset() is not None, 'Quest readiness time must include a UTC offset')
+    return when
+
+
+def read_quest_readiness_reports(paths, mode, attempts, deployed, evidence_path):
+    require(type(paths) is list and 1 <= len(paths) <= 25, 'Provide 1 to 25 original Quest readiness reports')
+    sessions, used, verified = {}, set(), set()
+    for path in paths:
+        report = read_quest_json(evidence_path(path))
+        digest = report.get('deploymentSha256')
+        require(type(digest) is str and digest not in used, 'Quest readiness repeats an original deployment')
+        original = attempts.get(digest)
+        require(original is not None and original['complete'] and original['proof'] is not None
+                and report.get('venueSha256') == original['proof']['venueSha256'],
+                'Quest readiness requires the exact completed deployment report and original venue ZIP digest')
+        require(integer(report.get('evidenceVersion'), 1, 1) and report.get('topology') == mode
+                and report.get('phase') == 'tracked-readiness' and report.get('complete') is True
+                and report.get('managementVerified') is True,
+                'Quest readiness report lacks a completed tracked sample for this topology')
+        sampled = quest_readiness_time(report.get('sampledAtUtc'))
+        rows = report.get('seats')
+        require(type(rows) is list and len(rows) == len(original['confirmed']),
+                'Quest readiness report must cover the original deployment seats exactly')
+        current_frames = {}
+        for row in rows:
+            require(type(row) is dict, 'Invalid Quest readiness seat')
+            seat = integer(row.get('roomId'), 1, 5), integer(row.get('seat'), 1, 5)
+            admission = original['confirmed'].get(seat)
+            require(admission is not None and admission == deployed.get(seat) and seat not in verified
+                    and row.get('sessionId') == admission[0] and row.get('status') == 'tracked-ready'
+                    and row.get('sourceState') == 'Fresh', 'Quest readiness seat does not match its original deployed session')
+            world, observed = integer(row.get('worldSequence'), 1), integer(row.get('observedSequence'), 1)
+            captured = quest_readiness_time(row.get('capturedAtUtc'))
+            require(timedelta(seconds=-1) <= sampled - captured <= timedelta(milliseconds=1500),
+                    'Quest readiness sample is outside the original source freshness window')
+            frame = world, observed, captured
+            require(current_frames.setdefault(admission[0], frame) == frame,
+                    'Quest readiness reports different frames for one session in the same sample')
+            sessions.setdefault(admission[0], []).append({'roomId': seat[0], 'playerId': admission[1],
+                'worldSequence': world, 'observedSequence': observed, 'capturedAtUtc': captured, 'sampledAtUtc': sampled})
+            verified.add(seat)
+        used.add(digest)
+    require(verified == deployed.keys(), 'Quest readiness reports must cover every original deployed Quest seat')
+    return sessions, {'reportsVerified': len(used), 'seatsVerified': len(verified), 'sessionsVerified': len(sessions)}
+
+
+def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_reports=(), capture_device_map=None,
+                           readiness_reports=None):
     expected = {'releaseReport', 'reports'} if release is None else {'reports'}
     require(type(spec) is dict and set(spec) == expected,
             'Provide the original Quest deployment reports and exactly one release report for the selected mode')
@@ -1679,24 +1761,31 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_r
         summary['deviceMapsMatched'] = len(matched_maps)
     if linked:
         summary['retryReportsLinked'] = linked
-    return deployed, summary
+    readiness = (read_quest_readiness_reports(readiness_reports, mode, attempts, deployed, evidence_path)
+                 if readiness_reports is not None else ({}, None))
+    return deployed, summary, readiness
 
 
 def read_venue_quest_evidence(manifest, mode, expected, evidence_path, release):
     captures, endpoints, summary, references = {}, {}, {}, []
     device_map = deployments = deployment_summary = None
+    readiness = {}, None
     if 'questCaptures' in manifest:
         require(manifest['topology'] == 'direct-lan', 'Quest capture batches require direct LAN evidence')
         captures, endpoints, summary, references, device_map = read_quest_capture_batches(
             manifest['questCaptures'], mode, expected, evidence_path)
     require(not references or 'questDeployments' in manifest, 'Provide the original Quest deployment reports referenced by the capture')
+    if 'questReadinessReports' in manifest:
+        require('questDeployments' in manifest and type(manifest['questReadinessReports']) is list,
+                'Quest readiness requires a list of reports and the original Quest deployment evidence')
     if 'questDeployments' in manifest:
         require(manifest['topology'] == 'direct-lan', 'Quest deployment evidence requires direct LAN evidence')
-        deployments, deployment_summary = read_quest_deployments(manifest['questDeployments'], mode, evidence_path, release,
-                                                                  capture_reports=references, capture_device_map=device_map)
+        deployments, deployment_summary, readiness = read_quest_deployments(
+            manifest['questDeployments'], mode, evidence_path, release, capture_reports=references,
+            capture_device_map=device_map, readiness_reports=manifest.get('questReadinessReports'))
         if references:
             summary['questCaptureDeploymentReportsMatched'] = len(references)
-    return captures, endpoints, summary, deployments, deployment_summary
+    return captures, endpoints, summary, deployments, deployment_summary, readiness
 
 
 def require_quest_capture_endpoint(binding, planned_binding):
@@ -1907,6 +1996,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
             debrief_receipts, debrief_hash = read_venue_debrief_receipts(receipt_bytes, closure_id, len(rows))
     journals = any('worldJournal' in entry for entry in entries)
     require(not journals or all('worldJournal' in entry for entry in entries), 'Provide a world journal for every session in this batch')
+    require('questReadinessReports' not in manifest or journals, 'Quest readiness requires original world journals for the full batch')
     combat_journals = any('combatJournal' in entry for entry in entries)
     require(not combat_journals or all('combatJournal' in entry for entry in entries),
             'Provide a combat journal for every session in this batch')
@@ -2007,8 +2097,10 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
     windows_by_session = venue_windows_logs(manifest['windowsPlayers'], expected, evidence_path, players_per_room) if explicit_windows else {}
 
     capture_supplied = 'questCaptures' in manifest
-    captures, capture_endpoints, capture_summary, quest_deployments, deployment_summary = ({}, {}, {}, None, None) if inspect_windows else (
+    captures, capture_endpoints, capture_summary, quest_deployments, deployment_summary, readiness = (
+        ({}, {}, {}, None, None, ({}, None)) if inspect_windows else
         read_venue_quest_evidence(manifest, mode, expected, evidence_path, release))
+    quest_readiness, readiness_summary = readiness
     observed_quest_addresses = set() if capture_summary.get('questCaptureAddressSource') == 'server-observed' else None
 
     def load_session(entry):
@@ -2200,7 +2292,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
                                          verify_reconnect_history=verify_reconnect_history, reconnect_window=reconnect_window,
                                          quest_deployments=quest_deployments,
                                          require_distinct_remote_roster=require_distinct_remote_roster,
-                                         control_batches=controls.get(session['id'], ()), observed_quest_addresses=observed_quest_addresses)
+                                         control_batches=controls.get(session['id'], ()), observed_quest_addresses=observed_quest_addresses,
+                                         quest_readiness=quest_readiness.pop(session['id'], ()))
         require(set(sources) == set(row['roomIds']) and all(len(peers) == players_per_room for peers in sources.values()),
                 'Verified player count differs from the expected seats in an original room')
         if debrief_receipts is not None:
@@ -2235,6 +2328,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
 
     require(recorded_at in end_times and not expected, 'Closure time or session set differs from the terminal evidence')
     require(not quest_deployments, 'Quest deployment reports include seats without original Quest logcat evidence')
+    require(not quest_readiness, 'Quest readiness refers to a session outside the original closure')
     require(windows_link_reports in (0, windows_players), 'Windows link evidence must cover every Windows seat in the venue')
     if link_criteria is not None:
         require(windows_link_reports == windows_players > 0,
@@ -2280,6 +2374,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
             **({'questLogcatPlayers': quest_players} if quest_players else {}),
             **({**capture_summary, 'questCaptureSeatsVerified': quest_players} if capture_supplied else {}),
             **({'questDeployment': deployment_summary} if deployment_summary is not None else {}),
+            **({'questReadiness': readiness_summary} if readiness_summary is not None else {}),
             **({'venueRelease': {'reportSha256': release_hash,
                 **({'windows': {'playerManifestSha256': windows_hash, 'seatsVerified': windows_players}} if windows_players else {}),
                 **({'quest': deployment_summary} if deployment_summary is not None else {})}} if release is not None else {}),

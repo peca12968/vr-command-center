@@ -573,6 +573,20 @@ python scripts/verify-field-results.py --venue-stages .\stages.json
 
 工具依原場次、房間及管理序號逐場找出有效的執行畫格。環境核對天氣、日夜及閃電；敵軍策略核對行為與自動攻擊開關。可用逐場 `worldJournal.venueControlFrames` 的 `worldSequence` 定位回放。需要確認的批次應在下一個管理變更前取得畫格。僅有較晚序號的相同設定，或只有暫停、暫緩及結束畫格時，該批驗收會失敗。
 
+### 核對 Quest 開場追蹤回條
+
+在 `direct-lan` 驗收清單的 `questReadinessReports` 加入每一批部署的成功追蹤回條。使用 `prepare-venue-field-manifest.py` 時可重複指定 `--quest-readiness-report`，並照常提供原部署報告、發行報告和玩家日誌。手動編輯時可加入下列欄位。 [保存開場前回條](QUEST3.md#核對本次部署與追蹤席位)
+
+```json
+{
+  "questReadinessReports": ["quest-a/ready.json", "quest-b/ready.json"]
+}
+```
+
+`verify-field-results.py --venue-manifest` 會核對回條引用的部署與 ZIP 雜湊，並從各場的原封存世界日誌定位同一格 `Preparing` 畫格。工具比對原擷取時間、管理序號，以及該格內已連線、存活且使用追蹤姿態的玩家。入場識別另由原部署與戰績回條比對。各份回條須涵蓋所有已提交的 Quest 部署席位。同一份回條共用取樣時間，分批回條可以各有自己的取樣時間。
+
+成功時摘要列出 `questReadiness` 的回條數、場次數及席位數。各場的 `worldJournal.questReadinessFrames` 提供可定位回放的世界序號。全館同時開場、持續操作及實機驗收沿用各自的檢查。 [五房追蹤驗收開場](PLAYER_READINESS.md#五房追蹤驗收開場) · [核對同時連線區間](#核對-25-席同時連線的區間)
+
 ### 直接使用 Quest 批次擷取報告
 
 若擷取時使用 `--deployment-report`，請在同一份 `venue.json` 的 `questDeployments.reports` 提供擷取所引用的完整部署原檔。工具會逐份核對 SHA-256、房間、席位、場次與埠，通過時摘要列出 `questCaptureDeploymentReportsMatched`。原部署報告和擷取報告應一起保存。 [Quest 批次擷取](QUEST3.md#一次擷取五房-quest-日誌)
