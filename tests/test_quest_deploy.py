@@ -523,20 +523,31 @@ class QuestVenueTests(unittest.TestCase):
 
     def test_windows_staging_copies_only_live_verified_original_vr_seats(self):
         requests = []
-        state = {'topology': 'Linked', 'quest': None, 'stale': False}
+        state = {'topology': 'Linked', 'quest': None, 'admission_changed': False, 'source_stale': False,
+                 'reject_after_staging': False, 'staged_files': []}
+        root = self.root
         key = 'PRIVATE_WINDOWS_TEST_MASTER'
 
         class Handler(BaseHTTPRequestHandler):
             def do_POST(self):
                 body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
                 requests.append((self.path, self.headers.get('Authorization'), body))
+                strict = body.get('requireLiveSource') is True
+                if state['reject_after_staging']:
+                    state['staged_files'] = sorted(path.name for path in root.glob('.vr-windows-*/*.json'))
+                stale = strict and (state['source_stale'] or bool(state['staged_files']))
                 rows = [{'roomId': room, 'seat': seat, 'headset': 'Quest3' if (room, seat) == state['quest'] else 'ViveXr',
-                         'status': 'admission-changed' if state['stale'] and (room, seat) == (5, 4) else 'matched'}
+                         'status': ('source-stale' if stale and room == 5 else
+                                    'admission-changed' if state['admission_changed'] and (room, seat) == (5, 4) else 'matched')}
                         for room in range(1, 6) for seat in range(5)]
+                matched = all(row['status'] == 'matched' for row in rows)
+                receipt = {'topology': state['topology'], 'allMatched': matched, 'seats': rows}
+                if strict:
+                    receipt['liveSourceVerified'] = matched
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
-                self.wfile.write(json.dumps({'topology': state['topology'], 'allMatched': not state['stale'], 'seats': rows}).encode())
+                self.wfile.write(json.dumps(receipt).encode())
 
             def log_message(self, *args):
                 pass
@@ -556,14 +567,31 @@ class QuestVenueTests(unittest.TestCase):
                 files, _ = self.vr_bundle('Linked')
                 all_seats = [{'roomId': room, 'seat': seat, 'station': f'R{room}-S{seat}'}
                              for room in range(1, 6) for seat in range(1, 6)]
+                blocked = self.root / 'Unavailable Windows delivery'
+                state['source_stale'] = True
+                self.assert_rejected(stage(files, all_seats, blocked), 'Room 5 seat 1: source-stale')
+                self.assertFalse(blocked.exists())
+                self.assertEqual([], list(self.root.glob('.vr-windows-*')))
+                state['source_stale'] = False
+                state['reject_after_staging'] = True
+                self.assert_rejected(stage(files, all_seats, blocked), 'Room 5 seat 1: source-stale')
+                self.assertFalse(blocked.exists())
+                self.assertEqual(25, len(state['staged_files']))
+                self.assertEqual([], list(self.root.glob('.vr-windows-*')))
+                state.update(reject_after_staging=False, staged_files=[])
                 output = self.root / 'Windows delivery'
                 result = stage(files, all_seats[::-1], output)
                 self.assertEqual(0, result.returncode, result.stderr)
                 report = json.loads(result.stdout)
                 self.assertEqual(('Linked', True, 25), (report['topology'], report['managementVerified'], len(report['seats'])))
+                self.assertIs(report['liveSourceVerified'], True)
                 self.assertEqual(all_seats, [{key: row[key] for key in ('roomId', 'seat', 'station')} for row in report['seats']])
-                path, auth, body = requests[0]
+                self.assertEqual(5, len(requests))
+                self.assertEqual(requests[-2], requests[-1])
+                path, auth, body = requests[-1]
                 self.assertEqual(('/api/vr-deployment/venue-check', f'Bearer {key}'), (path, auth))
+                self.assertIs(body['requireLiveSource'], True)
+                self.assertIs(body['allowLoopback'], True)
                 before = {p.name: p.read_bytes() for p in output.iterdir()}
                 self.assertEqual(25, len(before))
                 for row in report['seats']:
@@ -581,20 +609,23 @@ class QuestVenueTests(unittest.TestCase):
                 one = all_seats[0]
                 self.assert_rejected(stage(files, [one, {**all_seats[1], 'station': 'r1-s1'}], fresh), 'only once')
                 self.assert_rejected(stage(files, [{**one, 'station': '../outside'}], fresh), 'station label')
-                self.assertEqual(1, len(requests))
+                self.assertEqual(5, len(requests))
                 state['quest'] = (1, 0)
                 self.assert_rejected(stage(files, [one], fresh), 'not assigned to VIVE XR')
-                state['stale'] = True
+                state['admission_changed'] = True
                 self.assert_rejected(stage(files, [all_seats[1]], fresh), 'Room 5 seat 5: admission-changed')
                 self.assertFalse(fresh.exists())
 
                 mixed, _ = self.mixed_bundle()
-                state.update(topology='Independent', quest=None, stale=False)
+                state.update(topology='Independent', quest=None, admission_changed=False)
                 self.assert_rejected(stage(mixed, [all_seats[5]], fresh), 'belongs to an MR room')
-                self.assertEqual(3, len(requests))
+                self.assertEqual(7, len(requests))
                 result = stage(mixed, [one], fresh)
                 self.assertEqual(0, result.returncode, result.stderr)
                 self.assertEqual('/api/mixed-deployment/venue-check', requests[-1][0])
+                self.assertEqual(requests[-2], requests[-1])
+                self.assertIs(requests[-1][2]['requireLiveSource'], True)
+                self.assertNotIn('allowLoopback', requests[-1][2])
                 self.assertEqual(1, len(list(fresh.iterdir())))
                 self.assertEqual([], list(self.root.glob('.vr-windows-*')))
             finally:

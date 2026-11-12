@@ -1240,6 +1240,20 @@ def main():
               and request('/api/player-tickets/validate',{'ticket':original['ticket'],'sessionId':state['id'],
                   'protocolVersion':2},'GameServer')['admissionId']==first['admissionId'],
               'Original endpoint, saved world and already issued admission remain readable while issuance is blocked')
+        if args.check_windows_venue_staging:
+            original_zip = runtime/'stale-ticket-windows.zip'
+            original_zip.write_bytes(venue_zip)
+            seat_map = runtime/'stale-ticket-windows-map.json'
+            seat_map.write_text(json.dumps({'version': 1, 'seats': [{'roomId': 1, 'seat': 2, 'station': 'PC-A'}]}),
+                                encoding='utf-8')
+            delivery = runtime/'stale-ticket-windows-delivery'
+            result = subprocess.run([shutil.which('pwsh'), '-NoProfile', '-File', str(ROOT/'scripts/deploy-quest.ps1'),
+                '-VenueBundle', str(original_zip), '-ManagementApi', uri, '-WindowsSeatMap', str(seat_map),
+                '-WindowsOutputDirectory', str(delivery)], env={**os.environ, 'VR_COMMAND_MASTER_KEY': keys['Master']},
+                capture_output=True, encoding='utf-8', timeout=25)
+            check(result.returncode == 1 and 'Room 1 seat 2: source-stale' in result.stderr
+                  and not result.stdout.strip() and not delivery.exists() and not list(runtime.glob('.vr-windows-*')),
+                  'Stale original native source blocks Windows export of the already issued VIVE seat')
         descriptor=runtime/'stale-ticket-browser-private.json'
         output=out/'stale-ticket-browser.json'
         descriptor.write_text(json.dumps({'base':uri,'masterKey':keys['Master'],'mode':'Linked','expectStale':True,
@@ -1412,7 +1426,7 @@ def main():
                 report = json.loads(subprocess.check_output(command, env=environment, timeout=25, encoding='utf-8'))
                 expected_rows = [{**row, 'file': f"pc-{row['station']}-room-{row['roomId']:02}-seat-{row['seat']:02}.json",
                                   'endpoint': f"{address}:{staged[row['roomId'] - 1][0]['ready']['port']}"} for row in mapped]
-                check(report['topology'] == mode and report['managementVerified'] and len(mapped) == 10
+                check(report['topology'] == mode and report['managementVerified'] and report['liveSourceVerified'] and len(mapped) == 10
                       and [{k: v for k, v in row.items() if k != 'expiresAtUtc'} for row in report['seats']] == expected_rows
                       and {file.name for file in staged_path.iterdir()} == {row['file'] for row in expected_rows},
                       mode+' stages exactly the ten live-verified VIVE XR seats')
@@ -4123,7 +4137,8 @@ def main():
                 seat_map.write_text(json.dumps({'version': 1, 'seats': [{'roomId': 1, 'seat': 2, 'station': 'PC-A'}]}), encoding='utf-8')
                 windows = json.loads(subprocess.check_output(stage_windows, env=environment, timeout=25, encoding='utf-8'))
                 file = delivery / 'pc-PC-A-room-01-seat-02.json'
-                check(windows['managementVerified'] and windows['topology'] == 'Independent' and len(windows['seats']) == 1
+                check(windows['managementVerified'] and windows['liveSourceVerified']
+                      and windows['topology'] == 'Independent' and len(windows['seats']) == 1
                       and windows['seats'][0]['file'] == file.name and list(delivery.iterdir()) == [file]
                       and file.read_bytes() == base64.b64decode(live['rooms'][0]['connectionFiles'][1]),
                       'Mixed Windows staging preserves only the original signed VR seat')

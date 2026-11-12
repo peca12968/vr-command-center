@@ -6,7 +6,7 @@ namespace VrCommand.Api;
 
 internal static partial class VrVenueTickets
 {
-    internal sealed record CheckRequest(string Topology, CheckRoom[] Rooms, bool RequireLiveSource = false);
+    internal sealed record CheckRequest(string Topology, CheckRoom[] Rooms, bool RequireLiveSource = false, bool AllowLoopback = false);
     internal sealed record CheckRoom(int RoomId, Guid SessionId, byte[][] ConnectionFiles);
     internal sealed record SeatResult(int RoomId, int Seat, string Status, HeadsetKind? Headset = null);
     internal sealed record CheckResult(string Topology, bool AllMatched, SeatResult[] Seats,
@@ -50,7 +50,7 @@ internal static partial class VrVenueTickets
                 if (current.SessionId != room.SessionId || plan.Topology?.ToString() != input.Topology)
                     result = new(room.RoomId, seat, "session-unavailable");
                 else if (current.Endpoint is not { } endpoint || current.Problem == "vr-venue-endpoint-reused"
-                    || (input.RequireLiveSource && IPAddress.IsLoopback(IPAddress.Parse(endpoint.Address))))
+                    || (input.RequireLiveSource && !input.AllowLoopback && IPAddress.IsLoopback(IPAddress.Parse(endpoint.Address))))
                     result = new(room.RoomId, seat, "endpoint-mismatch");
                 else if (current.Problem == "vr-venue-roster-reused")
                     result = new(room.RoomId, seat, "venue-unavailable");

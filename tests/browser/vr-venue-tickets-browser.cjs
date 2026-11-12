@@ -33,17 +33,22 @@ module.exports = async ({ context, api, tokens, base, root, directory, screensho
     await api(`/sessions/${id}/commands`, 'POST', { action: 'End', commandId: randomUUID() });
     active.delete(id);
   }
+  function publishWorld(sessionId, messages) {
+    const fixture = spawnSync('python', [path.join(root, 'scripts/world_test_socket.py')], {
+      encoding: 'utf8', timeout: 6000, windowsHide: true, input: JSON.stringify({ port: Number(new URL(base).port),
+        route: `/api/sessions/${sessionId}/world/publish`, token: tokens.GameServer, messages }) });
+    assert.equal(fixture.status, 0, fixture.stderr);
+    return JSON.parse(fixture.stdout);
+  }
   async function publish(session, address, port) {
     const streamId = randomUUID(), origin = 'Simulation';
     const route = `/sessions/${session.id}`;
     await api(route + '/combat-stream', 'POST', { streamId, origin }, 'GameServer');
     const header = { sessionId: session.id, streamId, origin, roomIds: session.roomIds,
       captureStartedAtUtc: new Date().toISOString().replace('Z', '0000+00:00') };
-    const fixture = spawnSync('python', [path.join(root, 'scripts/world_test_socket.py')], {
-      encoding: 'utf8', timeout: 6000, windowsHide: true, input: JSON.stringify({ port: Number(new URL(base).port),
-        route: '/api' + route + '/world/publish', token: tokens.GameServer, messages: [{ type: 'header', payload: header }] }) });
-    assert.equal(fixture.status, 0, 'VR source must attach before publishing its endpoint');
-    return api(route + '/connection-endpoint', 'PUT', { version: 1, streamId, address, port }, 'GameServer');
+    publishWorld(session.id, [{ type: 'header', payload: header }]);
+    await api(route + '/connection-endpoint', 'PUT', { version: 1, streamId, address, port }, 'GameServer');
+    return header;
   }
   async function add(id, roomId, seat, playerId = randomUUID()) {
     return api(`/sessions/${id}/players`, 'POST', { playerId, roomId, name: `VR ${roomId} seat ${seat}`,
@@ -111,6 +116,7 @@ with zipfile.ZipFile(sys.argv[1]) as outer:
         const conflict = await post(previous, 409);
         check(conflict.roomId === 1 && conflict.code === 'vr-venue-session-changed', 'Old linked seats cannot be issued into a replacement independent room');
       }
+      let linkedSource;
       for (const session of sessions) {
         for (const room of session.roomIds)
           for (const seat of roomIds) if (room !== 5 || seat !== 5) await add(session.id, room, seat);
@@ -119,7 +125,8 @@ with zipfile.ZipFile(sys.argv[1]) as outer:
           check(!noSource.ready && noSource.rooms.every(room => room.problem === 'vr-venue-endpoint-missing'),
             'A linked venue with players still needs its game server to publish the endpoint');
         }
-        await publish(session, topology === 'Linked' ? '127.0.0.1' : '192.0.2.51', 7770 + session.roomIds[0]);
+        const source = await publish(session, topology === 'Linked' ? '127.0.0.1' : '192.0.2.51', 7770 + session.roomIds[0]);
+        if (topology === 'Linked') linkedSource = source;
       }
       await login('Master');
       const roomOverview = await api('/rooms/readiness');
@@ -187,7 +194,32 @@ with zipfile.ZipFile(sys.argv[1]) as outer:
       check(!Object.hasOwn(readback, 'liveSourceVerified') && !deployment.allMatched && deployment.liveSourceVerified === false
         && deployment.seats.length === 25 && deployment.seats.every(seat => seat.status === blockedBy),
       `${topology} device writes reject ${blockedBy} even when the original 25 signed files pass read-only verification`);
-      if (topology === 'Linked') await panel.screenshot({ path: path.join(screenshots, 'vr-venue-tickets.png') });
+      if (topology === 'Linked') {
+        const windowsProof = { ...proof, requireLiveSource: true, allowLoopback: true };
+        const waiting = await api(verify, 'POST', windowsProof);
+        check(!waiting.allMatched && waiting.liveSourceVerified === false && waiting.seats.every(seat => seat.status === 'source-stale'),
+          'Windows loopback deployment still requires a current world frame');
+        const state = await api(`/sessions/${linkedSource.sessionId}`);
+        const players = state.players.map(player => {
+          const head = { x: (player.roomId - 3) * 14, y: 1.65, z: -3 };
+          return { id: player.id, roomId: player.roomId, head, muzzle: head, connected: false,
+            forward: { x: 0, y: 0, z: 1 }, health: 100, magazine: 30, reserve: 90, rig: { kind: 'None' } };
+        });
+        const packet = { sequence: 1, observedSequence: state.sequence, elapsedMilliseconds: 0, weather: 'Clear', lightning: false,
+          throughCombatSequence: 0, events: [],
+          frame: { phase: 'Preparing', tick: 0, night: false, visibility: 'Clear', behavior: 'Hold', autoAttack: false,
+            throughSequence: 0, players, enemies: [] } };
+        const fresh = { ...packet, sequence: 2, elapsedMilliseconds: Date.now() - Date.parse(linkedSource.captureStartedAtUtc) };
+        const accepted = publishWorld(state.id, [{ type: 'header', payload: linkedSource },
+          { type: 'frame', payload: packet }, { type: 'frame', payload: fresh }]);
+        const current = await api(verify, 'POST', windowsProof);
+        const quest = await api(verify, 'POST', { ...proof, requireLiveSource: true });
+        check(accepted.acceptedSequence === 2 && current.allMatched && current.liveSourceVerified === true
+          && current.seats.length === 25 && current.seats.every(seat => seat.status === 'matched')
+          && quest.liveSourceVerified === false && quest.seats.every(seat => seat.status === 'endpoint-mismatch'),
+          'A current Windows loopback source verifies every original seat while Quest still requires a LAN endpoint');
+        await panel.screenshot({ path: path.join(screenshots, 'vr-venue-tickets.png') });
+      }
       if (topology === 'Independent') {
         let notify, release, finish, late = false;
         const requested = new Promise(resolve => { notify = resolve; });

@@ -215,12 +215,13 @@ function Get-ManagementTarget([string]$Address) {
 }
 
 function Confirm-VenueWithManagement([string]$Address, [string]$Topology, [object[]]$Rooms, $PublishedEndpoints, [string]$Mode = 'MR',
-    [switch]$RequireLiveSource) {
+    [switch]$RequireLiveSource, [switch]$AllowLoopback) {
     $target = Get-ManagementTarget $Address
     $endpoint = [Uri]::new($target.Origin, "/api/$($Mode.ToLowerInvariant())-deployment/venue-check")
     $checksHeadset = $Mode -cin @('VR','Mixed')
     $requestBody = @{ topology = $Topology; rooms = $Rooms }
     if ($RequireLiveSource) { $requestBody.requireLiveSource = $true }
+    if ($AllowLoopback -and $Mode -ceq 'VR') { $requestBody.allowLoopback = $true }
     $body = $requestBody | ConvertTo-Json -Compress -Depth 6
     try {
         $response = Invoke-WebRequest -Uri $endpoint -Method Post -ContentType 'application/json' `
@@ -444,11 +445,11 @@ function Read-Venue($Manifest, [string]$Directory, $BundleEntries, [int]$Selecte
         EarliestExpiry = $earliest; LiveRooms = $liveRooms.ToArray(); PublishedEndpoints = $publishedEndpoints; SeatHeadsets = @{} }
 }
 
-function Confirm-VenueReadback($Venue, [switch]$RequireLiveSource) {
+function Confirm-VenueReadback($Venue, [switch]$RequireLiveSource, [switch]$AllowLoopback) {
     if ($ManagementApi) {
         if ($Venue.Report.mode -cin @('VR','Mixed')) {
             $seats = @(Confirm-VenueWithManagement $ManagementApi $Venue.Report.topology $Venue.LiveRooms $Venue.PublishedEndpoints `
-                -Mode $Venue.Report.mode -RequireLiveSource:$RequireLiveSource)
+                -Mode $Venue.Report.mode -RequireLiveSource:$RequireLiveSource -AllowLoopback:$AllowLoopback)
             foreach ($row in $seats) { $Venue.SeatHeadsets["$($row.roomId)/$($row.seat + 1)"] = $row.headset }
             $Venue.Report.quest3Seats = @($seats | Where-Object headset -CEQ 'Quest3').Count
         } else {
@@ -460,6 +461,15 @@ function Confirm-VenueReadback($Venue, [switch]$RequireLiveSource) {
     }
     if ($Venue.EarliestExpiry -le [DateTimeOffset]::UtcNow) {
         throw 'A player ticket expired during venue preflight. Download fresh room connection ZIPs.'
+    }
+}
+
+function Confirm-WindowsVenueSeats($Venue, $Seats) {
+    Confirm-VenueReadback $Venue -RequireLiveSource -AllowLoopback
+    foreach ($row in $Seats) {
+        if ($Venue.SeatHeadsets["$($row.roomId)/$($row.seat)"] -cne 'ViveXr') {
+            throw "Room $($row.roomId) seat $($row.seat) is not assigned to VIVE XR."
+        }
     }
 }
 
@@ -500,10 +510,9 @@ function Export-WindowsVenueSeats {
             throw "Room $($row.roomId) seat $($row.seat) belongs to an MR room."
         }
     }
-    Confirm-VenueReadback $venue
+    Confirm-WindowsVenueSeats $venue $map.seats
     $selected = foreach ($row in ($map.seats | Sort-Object roomId, seat)) {
         $key = "$($row.roomId)/$($row.seat)"
-        if ($venue.SeatHeadsets[$key] -cne 'ViveXr') { throw "Room $($row.roomId) seat $($row.seat) is not assigned to VIVE XR." }
         $ticket = $venue.Connections[$key].Ticket
         [pscustomobject]@{ RoomId = $row.roomId; Seat = $row.seat; Station = $row.station; Ticket = $ticket
             File = 'pc-{0}-room-{1:00}-seat-{2:00}.json' -f $row.station,$row.roomId,$row.seat }
@@ -515,7 +524,7 @@ function Export-WindowsVenueSeats {
         foreach ($row in $selected) {
             [IO.File]::WriteAllBytes((Join-Path $staging $row.File), $row.Ticket.Bytes)
         }
-        if ($venue.EarliestExpiry -le [DateTimeOffset]::UtcNow) { throw 'A player ticket expired while staging. Download a fresh bundle.' }
+        Confirm-WindowsVenueSeats $venue $map.seats
         [IO.Directory]::Move($staging, $output)
     } finally {
         if ([IO.Directory]::Exists($staging)) {
@@ -523,7 +532,7 @@ function Export-WindowsVenueSeats {
             [IO.Directory]::Delete($staging)
         }
     }
-    [ordered]@{ version = 1; topology = $venue.Report.topology; managementVerified = $true; seats = @(
+    [ordered]@{ version = 1; topology = $venue.Report.topology; managementVerified = $true; liveSourceVerified = $true; seats = @(
         foreach ($row in $selected) {
             [ordered]@{ roomId = $row.RoomId; seat = $row.Seat; station = $row.Station; file = $row.File
                 endpoint = $row.Ticket.Endpoint; expiresAtUtc = $row.Ticket.ExpiresAtUtc.ToString('o') }
