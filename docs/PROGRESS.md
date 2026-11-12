@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 套用物件調整前檢查場地
+
+- 管理包 0.31.150 在成列複製、批次移動及旋轉的預覽中檢查完整候選配置。場地問題會列出原配置編號並在圖上標出涉及的預覽物件。解壓包 69 項 Chromium 專項驗證套用前發現重疊及包圍盒越界、延遲舊結果隔離和檢查失敗時保留草稿，另有 44 項場地專項。 [操作方式](LAYOUT.md#套用前檢查物件預覽) · [預覽畫面](../artifacts/console-placement-proposal-150-package/placement-proposal-outside-room.png)
+- Windows 0.50.7 同機通過 376 項整合。將實際瀏覽器保存並匯出的旋轉版本匯入隔離管理台，兩種模式各五房逐件核對共 30 筆沙包位置及角度。獨立及合併各 25 個同機模擬玩家端，六場雙封存、821 格回放與 50 筆伺服器戰績回條。程序清理後，原生與管理 C／F 快照分別有 215、18 個非資料庫檔案一致。 [驗證摘要](../artifacts/layout-proposal-0.31.150-validation.json)
+- 解壓核對 564 筆清單，825 項 HTTP 及 107 項管理包檢查通過。離線核對沿用 Windows 與 Quest 0.50.7 遊戲。功能來源 `79ff57ab` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商硬體仍待驗收。 [管理包](WINDOWS_CONTROL_PACKAGE.md) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43274779617)
+
 ## 2026-11-13 全館未確認戰績席位
 
 - 管理包 0.31.149 可從所選結束批次一次查閱各房的未確認席位，並直接下載個人 CSV 或開啟原房間回放。另列有名冊但暫無可核對回條的房間。125 項解壓包 Chromium 專項通過，包括獨立場部分封存、合併場重複席號、錯誤串流拒絕及晚到回條。 [操作方式](SESSION_CLOSURE.md#查看全館未確認席位) · [管理台畫面](../artifacts/console-venue-all-seats-149-package/venue-debrief-all.png)

@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-13 `VRCommand-ControlServer-0.31.150-layout-proposal-win-x64.zip` 為 53,097,624 bytes，SHA-256 `31fbb72fab836d1d36df2a6eebed8ae2a07aac8be3f770f1821510cf8aa585f4`。任務編輯器會在套用批次移動、旋轉及成列複製前檢查候選配置。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.150-layout-proposal-win-x64.zip) · [操作方式](LAYOUT.md#套用前檢查物件預覽)
+
 2026-11-13 `VRCommand-ControlServer-0.31.149-venue-seats-win-x64.zip` 為 53,095,201 bytes，SHA-256 `d614b1c30e250b692b41efb488ac06c67cc51e8bbbe02b7245129ba929aeec64`。主控可在所選結束批次查全館未確認席位、下載個人 CSV 並開啟原回放。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.149-venue-seats-win-x64.zip) · [操作方式](SESSION_CLOSURE.md#查看全館未確認席位)
 
 2026-11-13 `VRCommand-ControlServer-0.31.148-windows-source-gate-win-x64.zip` 為 53,092,123 bytes，SHA-256 `6ff6abe82f062ad9d099feea0138ca9cf956c30c251b67797399235ae3581b04`。支援在 Windows 五房連線檔交付前核對原遊戲來源。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.148-windows-source-gate-win-x64.zip) · [分發方式](EXTERNAL_CLIENTS.md#依電腦分發-windows-vr-連線檔)
