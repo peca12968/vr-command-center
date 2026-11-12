@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 Windows 收件核對原程序重連
+
+- 開啟 `verifyReconnectHistory` 後，Windows 收件就會檢查各 ZIP 的原程序啟動、歷次 UDP 來源及舊連線釋放順序。重複認領同一歷史連線時，兩份檔案都會列為待補件。產生場館清單可加 `--verify-reconnect-history`。 [操作方式](EXTERNAL_CLIENTS.md#核對原程序的重連歷程)
+- 本機通過 111 項封存、10 項 LAN 預檢及 12 項 Quest UDP 測試。重驗既有 Windows 同機獨立與合併的 50 份原玩家 ZIP、52 條連線及 3,361 格封存回放。兩種模式的測試副本各移除一筆舊連線釋放紀錄，收件均指出第 5 房第 2 席及對應檔案。原資料及完整驗收結果一致。 [本機驗證摘要](../artifacts/windows-inbox-reconnect-validation.json)
+- 功能來源 `4b18ed3` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43332405464)
+
 ## 2026-11-13 以原網路清單核對封存席位
 
 - 全館收件及封存驗收可引用同一份五房網路清單，依原場次、席位、封存端點及伺服器戰績確認比對 Windows 與 Quest 的 UDP 來源。新版全館 UDP 預檢回條保留清單雜湊。Windows 收件會逐檔標示不符及待補件席位。 [操作方式](EXTERNAL_CLIENTS.md#用原網路清單核對封存席位)
