@@ -4647,7 +4647,11 @@ def main():
                 if args.check_venue_link_form:
                     measured = next(c for c in round_clients if 'measuredForm' in c)
                     proof = measured['measuredForm'] / 'link-preview-ready.json'
-                    preview = wait(lambda: read(proof) if proof.is_file() else None, 8, 'live WinForms link measurement')
+                    def live_preview():
+                        if measured['process'].poll() is not None:
+                            raise RuntimeError('Measured graphical form exited before reporting its live preview')
+                        return read(proof) if proof.is_file() else None
+                    preview = wait(live_preview, 8, 'live WinForms link measurement')
                     metrics = read(measured['linkMetrics'])
                     counts = {field: sum(s['result'] == outcome for s in metrics['samples'])
                               for field, outcome in (('replies', 'Reply'), ('timeouts', 'Timeout'), ('interrupted', 'Interrupted'))}

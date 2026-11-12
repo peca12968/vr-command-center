@@ -1,5 +1,6 @@
 // Runs shipped WinForms handlers with real packaged children.
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -185,7 +186,7 @@ public sealed class ReleaseFormChecks : MarshalByRefObject
                     if (!previewSaved && linkStatus.Text.StartsWith("連線量測已完成", StringComparison.Ordinal))
                     {
                         var saved = Json.Deserialize<Dictionary<string, object>>(File.ReadAllText(metrics));
-                        var samples = ((object[])saved["samples"]).Cast<Dictionary<string, object>>().ToArray();
+                        var samples = ((IList)saved["samples"]).Cast<Dictionary<string, object>>().ToArray();
                         var replies = samples.Count(sample => (string)sample["result"] == "Reply");
                         var timeouts = samples.Count(sample => (string)sample["result"] == "Timeout");
                         var interrupted = samples.Count(sample => (string)sample["result"] == "Interrupted");
@@ -244,7 +245,7 @@ public sealed class ReleaseFormChecks : MarshalByRefObject
         var early = Path.Combine(output, "link-preview-early-fixture.json");
         report["complete"] = false;
         report["reason"] = "Ended";
-        var last = (Dictionary<string, object>)((object[])report["samples"])[29];
+        var last = (Dictionary<string, object>)((IList)report["samples"])[29];
         last["result"] = "Interrupted";
         File.WriteAllText(early, Json.Serialize(report));
         var stopped = read.Invoke(null, new object[] { early, pid });
