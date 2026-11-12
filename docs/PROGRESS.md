@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 Quest 日誌擷取核對原部署裝置
+
+- 批次擷取可使用 `--deployment-report`，核對原部署 ZIP、裝置清單、已驗證的 APK 及原入場席位。擷取開始與交付前各核對一次 ADB 裝置識別。若交付前識別改變，保留 `.partial`。擷取重試及封存驗收沿用原部署報告的 SHA-256。 [擷取方式](QUEST3.md#一次擷取五房-quest-日誌)
+- 54 項部署及 101 項封存測試通過。實際 PowerShell 部署工具透過模擬 ADB 完成三席重試，Python 隨後核對原報告並保存三份逐位元一致的模擬日誌。受控測試拒絕錯裝置、交付前裝置更換、不同裝置清單與改過的原部署檔。獨立及合併封存皆核對擷取引用。 [驗證紀錄](../artifacts/quest-capture-deployment-validation.json)
+- 功能來源 `fdd38a8` 已推送。既有 Quest 0.50.7 APK 與管理包 0.31.157 離線發行核對通過。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43309910705)
+
 ## 2026-11-13 按電腦標籤核對 Windows 席位來源
 
 - 場館可在收件清單加入 `windowsStationAddresses`，把原 Windows 席位對照表中的電腦標籤與預期 IPv4 一起核對。工具使用伺服器原已確認戰績連線的來源。來源不符時會列出檔名、缺件席位及電腦標籤。成功摘要保存位址表 SHA-256 與通過席位數。99 項封存及 8 項 UDP 測試通過，涵蓋受控兩位址互換、缺少標籤與重複標籤。 [操作方式](EXTERNAL_CLIENTS.md#核對-windows-席位的來源-ipv4)
