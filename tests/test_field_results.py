@@ -1626,7 +1626,7 @@ class FieldResultsTests(unittest.TestCase):
                 for bad_log, bad_report, extra, message in (
                     (log + b'\nextra log bytes\n', report, False, 'original player log bytes'),
                     (log, b'x' * 4097, False, 'ZIP entry limit'),
-                    (log, report, True, 'must contain only the original'),
+                    (log, report, True, 'must contain the original player log and launcher report'),
                 ):
                     with self.subTest(message=message):
                         write_zip(bad_log, bad_report, extra)
@@ -1692,7 +1692,7 @@ class FieldResultsTests(unittest.TestCase):
                 for seat in entry['players']:
                     launch_path = root / seat['launcherReport']
                     launch = json.loads(launch_path.read_bytes())
-                    launch['playerManifestSha256'] = 'bc' * 32
+                    del launch['playerLogSha256']  # This earlier launcher recorded the log digest only in linkMetrics.
                     launch_path.write_text(json.dumps(launch), encoding='utf-8')
             path.write_text(json.dumps(manifest), encoding='utf-8')
             result = field.verify_venue(path)
