@@ -206,14 +206,17 @@ internal static class PlayerLauncher
         if (releaseManifestHash != null) value.Add("playerManifestSha256", releaseManifestHash);
         Report(path, value);
     }
-    private static bool WriteEvidenceZip(string path, string logPath, string reportPath, string manifestHash, int processId)
+    private static bool WriteEvidenceZip(string path, string logPath, string reportPath, string manifestHash, int processId,
+        string linkMetricsPath = null)
     {
         PlainPath(Path.GetDirectoryName(path)); PlainPath(logPath); PlainPath(reportPath);
+        if (linkMetricsPath != null) PlainPath(linkMetricsPath);
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
             using (var log = File.OpenRead(logPath))
             using (var report = File.OpenRead(reportPath))
+            using (var metrics = linkMetricsPath == null ? null : File.OpenRead(linkMetricsPath))
             {
                 var result = Read(reportPath, 4096);
                 Require(Text(result, "status") == "exited" && Number(result, "exitCode") == 0 && Number(result, "processId") == processId
@@ -229,13 +232,25 @@ internal static class PlayerLauncher
                 }
                 if (!terminal.CanArchiveEvidence) return false;
                 log.Position = 0;
-                Require(Text(result, "playerLogSha256") == Hash(log), "本次日誌與退出報告不符。");
+                var logHash = Hash(log);
+                Require(Text(result, "playerLogSha256") == logHash, "本次日誌與退出報告不符。");
                 log.Position = 0;
+                if (metrics != null)
+                {
+                    object value;
+                    var proof = result.TryGetValue("linkMetrics", out value) ? Map(value) : null;
+                    Require(metrics.Length > 0 && metrics.Length <= 64 * 1024 && proof != null
+                        && Text(proof, "logSha256") == logHash && Text(proof, "metricsSha256") == Hash(metrics),
+                        "本次連線量測與退出報告不符。");
+                    metrics.Position = 0;
+                }
                 using (var file = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
                 using (var zip = new ZipArchive(file, ZipArchiveMode.Create))
                 {
                     using (var entry = zip.CreateEntry("player.log", CompressionLevel.Fastest).Open()) log.CopyTo(entry);
                     using (var entry = zip.CreateEntry("launch-report.json", CompressionLevel.Fastest).Open()) report.CopyTo(entry);
+                    if (metrics != null)
+                        using (var entry = zip.CreateEntry("link-metrics.json", CompressionLevel.Fastest).Open()) metrics.CopyTo(entry);
                 }
             }
             File.Move(temporary, path);
@@ -367,7 +382,7 @@ internal static class PlayerLauncher
                     }
                     ProcessReport(report, "exited", releaseManifestHash, child, exited: true, linkMetrics: linkMetrics, log: log);
                     if (evidenceZip != null && child.ExitCode == 0)
-                        Require(WriteEvidenceZip(evidenceZip, log, report, releaseManifestHash, child.Id),
+                        Require(WriteEvidenceZip(evidenceZip, log, report, releaseManifestHash, child.Id, linkMetrics),
                             "驗收 ZIP 需要同一次遊戲的完整最終戰績及結束斷線。");
                     return child.ExitCode;
                 }

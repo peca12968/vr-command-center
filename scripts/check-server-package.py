@@ -1516,10 +1516,12 @@ def main():
                 client['witness']=None
                 if 'evidenceZip' in client and 'final' in client:
                     with zipfile.ZipFile(client['evidenceZip']) as bundle:
-                        check(sorted(bundle.namelist())==['launch-report.json','player.log']
-                              and bundle.read('player.log')==client['log'].read_bytes()
-                              and bundle.read('launch-report.json')==report.read_bytes(),
-                              'player ZIP contains the exact original log and exited report')
+                        originals = {'launch-report.json': report, 'player.log': client['log']}
+                        if 'linkMetrics' in client:
+                            originals['link-metrics.json'] = client['linkMetrics']
+                        check(sorted(bundle.namelist()) == sorted(originals)
+                              and all(bundle.read(name) == path.read_bytes() for name, path in originals.items()),
+                              'player ZIP contains the exact original log, exited report and requested evidence')
             elif not report.exists() or read(report)['status'] not in ('exited','rejected'):
                 raise RuntimeError('Native player cleanup unknown')
         elif child.poll() is None:
@@ -1787,10 +1789,10 @@ def main():
                         windowsPlayers=[player for entry in reversed(entries) for player in reversed(entry['players'])])
         split = dict(common, closure=str(closure_file), sessions=entries)
 
-        def run(manifest):
+        def run(manifest, *options):
             manifest_path.write_text(json.dumps(manifest), encoding='utf-8')
             return subprocess.run([sys.executable, str(ROOT / 'scripts/verify-field-results.py'),
-                                   '--venue-manifest', str(manifest_path)], capture_output=True, encoding='utf-8', timeout=45)
+                                   '--venue-manifest', str(manifest_path), *options], capture_output=True, encoding='utf-8', timeout=45)
 
         result = run(evidence)
         if result.returncode:
@@ -1801,12 +1803,26 @@ def main():
               label + ' untouched venue ZIP and unordered Windows logs match the original split field summary')
         if args.check_windows_evidence_zip:
             bundled = dict(evidence, windowsPlayers=[{'address': player['address'],
-                'evidenceZip': str(Path(player['log']).with_suffix('.evidence.zip')),
-                **({'linkMetrics': player['linkMetrics']} if 'linkMetrics' in player else {})} for player in evidence['windowsPlayers']])
+                'evidenceZip': str(Path(player['log']).with_suffix('.evidence.zip'))} for player in evidence['windowsPlayers']])
             zipped = run(bundled)
             check(zipped.returncode == 0 and json.loads(zipped.stdout) == summary,
                   label + ' original Windows player ZIPs match the exact loose-file field report')
             (runtime / (label + '-player-archives-manifest.json')).write_text(json.dumps(bundled), encoding='utf-8')
+            if args.check_venue_link_metrics:
+                inbox = runtime / (label + '-windows-inbox')
+                inbox.mkdir()
+                for index, player in enumerate(bundled['windowsPlayers'], 1):
+                    shutil.copyfile(player['evidenceZip'], inbox / f'returned-{index:02}.zip')
+                received = dict(evidence, windowsEvidenceDirectory=str(inbox))
+                del received['windowsPlayers']
+                inspected = run(received, '--inspect-windows-inbox')
+                check(inspected.returncode == 0 and json.loads(inspected.stdout)['receivedWindowsSeats'] == venue_players,
+                      label + ' measured player ZIP inbox recognizes every original acknowledged seat')
+                inbox_result = run(received)
+                check(inbox_result.returncode == 0 and json.loads(inbox_result.stdout) == summary,
+                      label + ' measured player ZIP inbox matches the complete loose-file report without sidecars')
+                save(label + '-measured-windows-inbox.json', json.loads(inspected.stdout))
+                (runtime / (label + '-measured-inbox-manifest.json')).write_text(json.dumps(received), encoding='utf-8')
         check(summary['consistent'] and summary['mode'] == mode and summary['players'] == summary['serverAcknowledgements'] == venue_players
               and summary['rooms'] == [{'roomId': room, 'players': players_per_room, 'playersOutsideDeclaredServer': 0} for room in range(1, 6)]
               and not summary['physicalHostsVerified'] and not summary['networkCapacityAccepted'],

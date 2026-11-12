@@ -34,6 +34,7 @@ LOGCAT_UNITY = re.compile(r'[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{
 OPENXR_RUNTIME = re.compile(r'\[XR\] .* Runtime Name: (\S.{0,127})')
 PLAYER_MARKERS = ('VR_CLIENT_CONNECTED', 'VR_CLIENT_DISCONNECTED', 'VR_CLIENT_DEBRIEF_FINAL')
 MAX_FILE_BYTES = 16 * 1024 * 1024
+MAX_WINDOWS_LINK_BYTES = 64 * 1024
 MAX_ALIGNMENT_BYTES = 16 * 1024
 QUEST_ROOMS = (1, 2, 3, 4, 5)
 MAX_QUEST_PLAN_BYTES = 32768
@@ -1011,7 +1012,7 @@ def venue_windows_logs(rows, expected, evidence_path, players_per_room):
     for row in rows:
         files = windows_log_paths(row, evidence_path)
         _, path, launch, _, bundle = files
-        raw_log, _ = read_windows_evidence(path, launch, bundle)
+        raw_log, _, _ = read_windows_evidence(path, launch, bundle)
         _, result = client_result(raw_log.decode('utf-8-sig'))
         session_id = identity(result['sessionId'])
         require(session_id in expected, 'Windows log belongs to a different venue session')
@@ -1038,15 +1039,23 @@ def windows_log_paths(row, evidence_path):
 def read_windows_evidence(log, launcher, bundle):
     if bundle is not None:
         with bundle.open('rb') as source:
-            require(os.fstat(source.fileno()).st_size <= MAX_FILE_BYTES + 65536, 'Windows evidence ZIP exceeds its file limit')
+            require(os.fstat(source.fileno()).st_size <= MAX_FILE_BYTES + MAX_WINDOWS_LINK_BYTES + 65536,
+                    'Windows evidence ZIP exceeds its file limit')
             with zipfile.ZipFile(source) as archive:
-                require(sorted(archive.namelist()) == ['launch-report.json', 'player.log'],
-                        'Windows evidence ZIP must contain only the original player log and launcher report')
+                names = sorted(archive.namelist())
+                require(names in (['launch-report.json', 'player.log'], ['launch-report.json', 'link-metrics.json', 'player.log']),
+                        'Windows evidence ZIP must contain the original player log and launcher report, with optional link metrics')
                 require(archive.getinfo('launch-report.json').file_size <= 4096, 'Windows launcher report exceeds its ZIP entry limit')
-                return evidence_zip_entry(archive, 'player.log'), evidence_zip_entry(archive, 'launch-report.json').decode('utf-8-sig')
+                metrics = None
+                if 'link-metrics.json' in names:
+                    require(0 < archive.getinfo('link-metrics.json').file_size <= MAX_WINDOWS_LINK_BYTES,
+                            'Windows link report exceeds its file limit')
+                    metrics = evidence_zip_entry(archive, 'link-metrics.json')
+                return (evidence_zip_entry(archive, 'player.log'),
+                        evidence_zip_entry(archive, 'launch-report.json').decode('utf-8-sig'), metrics)
     with log.open('rb') as source:
         raw_log = limited_read(source)
-    return raw_log, content(launcher) if launcher is not None else None
+    return raw_log, content(launcher) if launcher is not None else None, None
 
 
 def verify_windows_release(log_hash, launch, windows_hash, *, has_link_metrics=False):
@@ -1104,11 +1113,11 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
     if seat_map is not None:
         require(seat_map.keys() <= roster_seats.keys(), 'Windows seat map names a seat outside the original batch roster')
     selected = {owner: seat for seat, owner in roster_seats.items() if seat_map is None or seat in seat_map}
-    received, groups, issues, connections = {}, {}, [], set()
+    received, groups, issues, connections, measured = {}, {}, [], set(), set()
     for file in files:
         try:
             path = evidence_path(str(file))
-            raw_log, raw_launch = read_windows_evidence(None, None, path)
+            raw_log, raw_launch, raw_metrics = read_windows_evidence(None, None, path)
             connection, result = client_result(raw_log.decode('utf-8-sig'))
             session_id, player_id = identity(result['sessionId']), identity(result['playerId'])
             require(session_id in batches, 'Player ZIP belongs to another venue batch')
@@ -1117,7 +1126,11 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
             require(seat is not None, 'Player ZIP does not match an expected Windows seat')
             require(result['admissionId'] == owners[player_id]['admissionId'] and integer(result['roomId'], 1, 5) == seat[0]
                     and result['streamId'] == stream, 'Player ZIP admission, room or stream differs from the original roster')
-            verify_windows_release(hashlib.sha256(raw_log).hexdigest(), read_json(raw_launch), windows_hash)
+            log_hash, launch = hashlib.sha256(raw_log).hexdigest(), read_json(raw_launch)
+            require(raw_metrics is not None or 'linkMetrics' not in launch, 'Player ZIP lacks its recorded Windows link report')
+            if raw_metrics is not None:
+                verify_windows_link(log_hash, connection, launch, raw_metrics)
+            verify_windows_release(log_hash, launch, windows_hash, has_link_metrics=raw_metrics is not None)
             require(connection in acknowledgements, 'Player ZIP lacks an original server acknowledgement')
             require(seat not in received and (session_id, connection) not in connections, 'Player ZIP repeats a seat or acknowledged connection')
             address, _ = peer_address(peers[connection])
@@ -1129,6 +1142,8 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
             issues.append({'file': file.name, 'reason': 'Player ZIP cannot be read as original Windows evidence'})
             continue
         received[seat] = file.name
+        if raw_metrics is not None:
+            measured.add(seat)
         connections.add((session_id, connection))
         groups.setdefault(session_id, []).append((address, None, None, None, path))
 
@@ -1136,15 +1151,16 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
         return {'roomId': seat[0], 'seat': seat[1], **({'station': seat_map[seat]} if seat_map is not None else {})}
 
     missing = sorted(set(selected.values()) - received.keys())
+    if measured:
+        issues.extend({'file': received[seat], 'reason': 'Windows link evidence must cover every Windows seat in the venue'}
+                      for seat in sorted(received.keys() - measured))
     return groups, {'complete': not missing and not issues, 'expectedWindowsSeats': len(selected),
                     'receivedWindowsSeats': len(received), 'missingSeats': [seat_row(seat) for seat in missing],
                     'receivedSeats': [dict(seat_row(seat), file=received[seat]) for seat in sorted(received)], 'issues': issues}
 
 
-def verify_windows_link(log_hash, connection, launch, metrics_path):
-    with metrics_path.open('rb') as source:
-        raw_metrics = source.read(64 * 1024 + 1)
-    require(0 < len(raw_metrics) <= 64 * 1024, 'Windows link report exceeds its file limit')
+def verify_windows_link(log_hash, connection, launch, raw_metrics):
+    require(0 < len(raw_metrics) <= MAX_WINDOWS_LINK_BYTES, 'Windows link report exceeds its file limit')
     metrics = read_json(raw_metrics.decode('utf-8-sig'))
     proof = launch.get('linkMetrics')
     require(launch.get('status') == 'exited' and integer(launch.get('exitCode'), 0, 0) == 0
@@ -1754,22 +1770,28 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
 
         def windows_logs():
             for address, path, launch_path, metrics_path, bundle in logs:
-                raw_log, raw_launch = read_windows_evidence(path, launch_path, bundle)
+                raw_log, raw_launch, raw_metrics = read_windows_evidence(path, launch_path, bundle)
                 log = raw_log.decode('utf-8-sig')
                 if raw_launch is None:
                     yield address, log
                     continue
-                require(release is not None or metrics_path is not None, 'A Windows launcher report requires venue release or link evidence')
+                require(raw_metrics is None or metrics_path is None, 'Provide Windows link evidence either in the ZIP or as an original file')
+                if metrics_path is not None:
+                    with metrics_path.open('rb') as source:
+                        raw_metrics = source.read(MAX_WINDOWS_LINK_BYTES + 1)
+                require(release is not None or raw_metrics is not None, 'A Windows launcher report requires venue release or link evidence')
                 log_hash = hashlib.sha256(raw_log).hexdigest()
                 launch = read_json(raw_launch)
+                require(bundle is None or raw_metrics is not None or 'linkMetrics' not in launch,
+                        'Player ZIP lacks its recorded Windows link report')
                 connection, result = client_result(log)
                 owner = owners.get(result['playerId'])
                 require(owner is not None, 'Windows launcher evidence belongs to a different session player')
                 seat = {'roomId': owner['roomId'], 'seat': integer(owner['seat'], 0, 4) + 1}
-                if metrics_path is not None:
-                    link_rows.append({**seat, **verify_windows_link(log_hash, connection, launch, metrics_path)})
+                if raw_metrics is not None:
+                    link_rows.append({**seat, **verify_windows_link(log_hash, connection, launch, raw_metrics)})
                 if release is not None:
-                    verify_windows_release(log_hash, launch, windows_hash, has_link_metrics=metrics_path is not None)
+                    verify_windows_release(log_hash, launch, windows_hash, has_link_metrics=raw_metrics is not None)
                     release_seats.append(seat)
                 yield address, log
         preflight_paths = preflight_pair(entry['udpPreflight']) if preflights else None

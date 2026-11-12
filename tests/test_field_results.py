@@ -1257,14 +1257,17 @@ class FieldResultsTests(unittest.TestCase):
                 connection = int(raw_connection)
                 metrics = log.with_suffix('.link.json')
                 launcher = log.with_suffix('.launch.json')
+                report = json.loads(launcher.read_bytes()) if launcher.exists() else {
+                    'status': 'exited', 'processId': 8000 + connection, 'exitCode': 0}
                 samples = [{'sequence': number, 'tick': number * 20, 'windowSeconds': 1.01, 'playerLoopFrames': 60,
                             'result': 'Reply' if number <= 28 else 'Timeout' if number == 29 else 'Interrupted',
                             'roundTripMilliseconds': number / 2 if number <= 28 else 0} for number in range(1, 31)]
-                metrics.write_text(json.dumps({'version': 1, 'processId': 8000 + connection, 'connection': connection,
+                metrics.write_text(json.dumps({'version': 1, 'processId': report['processId'], 'connection': connection,
                     'complete': True, 'reason': 'Limit', 'batchMode': True, 'graphicsDeviceActive': False, 'samples': samples}), encoding='utf-8')
-                launcher.write_text(json.dumps({'status': 'exited', 'processId': 8000 + connection, 'exitCode': 0, 'linkMetrics': {
+                report['linkMetrics'] = {
                     'metricsSha256': hashlib.sha256(metrics.read_bytes()).hexdigest(),
-                    'logSha256': hashlib.sha256(log.read_bytes()).hexdigest()}}), encoding='utf-8')
+                    'logSha256': hashlib.sha256(log.read_bytes()).hexdigest()}
+                launcher.write_text(json.dumps(report), encoding='utf-8')
                 player.update(launcherReport=launcher.name, linkMetrics=metrics.name)
 
     def test_venue_link_metrics_cover_all_windows_seats_and_preserve_outcomes(self):
@@ -1472,8 +1475,73 @@ class FieldResultsTests(unittest.TestCase):
             with zipfile.ZipFile(inbox / f'box-{index:02}.ZIP', 'w', zipfile.ZIP_DEFLATED) as archive:
                 archive.write(root / player['log'], 'player.log')
                 archive.write(root / player['launcherReport'], 'launch-report.json')
+                if 'linkMetrics' in player:
+                    archive.write(root / player['linkMetrics'], 'link-metrics.json')
         packed['windowsEvidenceDirectory'] = inbox.name
         return packed
+
+    def test_windows_inbox_verifies_embedded_metrics_against_the_original_connection(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, _ = venue_fixture(root, 'Independent', room_sizes=(1,) * 5)
+            manifest['expectedPlayersPerRoom'] = 1
+            self.add_shared_release(root, manifest, 0)
+            self.add_windows_links(root, manifest)
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            original = field.verify_venue(path)
+            inbox = self.windows_inbox_fixture(root, manifest)
+            path.write_text(json.dumps(inbox), encoding='utf-8')
+            self.assertEqual(original, field.verify_venue(path))
+            inspected, _ = field.verify_venue_batch(path, inspect_windows=True)
+            self.assertTrue(inspected['complete'])
+            self.assertEqual(5, original['windowsLinkMetricsVerified'])
+
+            archives = sorted((root / inbox['windowsEvidenceDirectory']).glob('*.ZIP'))
+            archive_path, another, *_ = archives
+            with zipfile.ZipFile(archive_path) as archive:
+                original_entries = {name: archive.read(name) for name in archive.namelist()}
+            with zipfile.ZipFile(another) as archive:
+                foreign_metrics = archive.read('link-metrics.json')
+            missing = dict(original_entries)
+            missing.pop('link-metrics.json')
+            launch = json.loads(original_entries['launch-report.json'])
+            launch.pop('linkMetrics')
+            mixed = dict(missing, **{'launch-report.json': json.dumps(launch).encode()})
+            for entries, reason in (
+                (missing, 'lacks its recorded Windows link report'),
+                (mixed, 'cover every Windows seat'),
+                (dict(original_entries, **{'link-metrics.json': foreign_metrics}), 'original link and player log bytes'),
+                (dict(original_entries, **{'link-metrics.json': b'x' * (field.MAX_WINDOWS_LINK_BYTES + 1)}), 'exceeds its file limit'),
+            ):
+                with self.subTest(reason=reason):
+                    with zipfile.ZipFile(archive_path, 'w', zipfile.ZIP_DEFLATED) as archive:
+                        for name, data in entries.items():
+                            archive.writestr(name, data)
+                    inspected, _ = field.verify_venue_batch(path, inspect_windows=True)
+                    self.assertFalse(inspected['complete'])
+                    self.assertIn(reason, inspected['issues'][0]['reason'])
+                    with self.assertRaisesRegex(field.EvidenceError, 'Windows inbox is incomplete'):
+                        field.verify_venue(path)
+
+            packed = self.pack_venue(root, manifest)
+            first = packed['windowsPlayers'][0]
+            metrics_path = first.pop('linkMetrics')
+            first.pop('log')
+            first.pop('launcherReport')
+            first['evidenceZip'] = str(archive_path)
+            path.write_text(json.dumps(packed), encoding='utf-8')
+            with zipfile.ZipFile(archive_path, 'w') as archive:
+                for name, data in original_entries.items():
+                    archive.writestr(name, data)
+            self.assertEqual(original, field.verify_venue(path))
+            first['linkMetrics'] = metrics_path
+            path.write_text(json.dumps(packed), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'either in the ZIP or as an original file'):
+                field.verify_venue(path)
+            with zipfile.ZipFile(archive_path, 'w') as archive:
+                for name, data in missing.items():
+                    archive.writestr(name, data)
+            self.assertEqual(original, field.verify_venue(path))
 
     def test_windows_inbox_receives_only_the_mapped_windows_seats_in_a_mixed_batch(self):
         with tempfile.TemporaryDirectory() as directory:
