@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 產生 Windows 與 Quest 混合驗收清單
+
+- `prepare-venue-field-manifest.py` 可同時帶入原 Quest 擷取、部署、裝置表、網路計畫及 Windows 收件資料夾。產生前核對 Quest 原日誌、戰績回條、來源、部署與席位。Windows ZIP 未齊時可先產生清單，收件後使用原清單完成驗收。 [操作方式](EXTERNAL_CLIENTS.md#產生-windows-與-quest-混合驗收清單)
+- 103 項封存、54 項 Quest 部署及 8 項 UDP 測試通過。獨立和合併的受控案例各使用 5 份 Quest 日誌及 20 份 Windows 玩家證據，驗證第 20 份 Windows ZIP 晚交後可直接完成，錯誤來源或重疊席位則不產生清單。原 Windows 同機封存另重驗 50 份玩家 ZIP、6 組 UDP 預檢及 2,502 格回放，與原驗收摘要一致。 [驗證紀錄](../artifacts/mixed-venue-manifest-validation.json)
+- 功能來源 `1ebaa60` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43312258682)
+
 ## 2026-11-13 Quest 封存一起核對裝置表與來源 IPv4
 
 - 封存清單可同時引用原 Quest 裝置表與網路計畫。驗收依擷取引用的各份部署報告重算原席位和 ADB 標籤指紋，並核對伺服器記錄的來源 IPv4。也修正有擷取引用時，摘要誤以部署報告雜湊取代 APK 雜湊的問題。 [操作方式](EXTERNAL_CLIENTS.md#以原-quest-裝置對照表驗收收尾)
