@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-13 `VRCommand-Player-0.50.7-1.14.1-win-x64.zip` 為 84,947,109 bytes，SHA-256 `b9b1e5cd1f739764e2a87958b5cd1500b848cfae4719adae8bb76ff6b41d6321`。解壓核對 331 筆清單。玩家可在關閉遊戲前查看本次量測結果，關窗後可短暫等候原紀錄檔解除占用。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.7-1.14.1-win-x64.zip) · [本包發行報告](../artifacts/venue-release-0.50.7-player-1.14.1.json)
+
 2026-11-13 `VRCommand-Player-0.50.7-1.13-win-x64.zip` 為 84,945,434 bytes，SHA-256 `5d9c7957d9d2a7d079d881d204239f17a717854abc79765f12bc5b1856daf85f`。解壓核對 331 筆清單。玩家可在啟動器視窗核對發行報告，並勾選記錄本次連線量測。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.7-1.13-win-x64.zip) · [本包發行報告](../artifacts/venue-release-0.50.7-player-1.13.json)
 
 2026-11-13 `VRCommand-Player-0.50.7-1.12-win-x64.zip` 為 84,945,186 bytes，SHA-256 `d5a179c71afea1f9882b9ee9bc6e4d16a7dc1a14dadf51d4731ae3fdc898e79f`。解壓核對 331 筆清單。命令列可將原連線量測和同一次玩家日誌、退出報告一起匯出。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.7-1.12-win-x64.zip) · [本包發行報告](../artifacts/venue-release-0.50.7-player-1.12.json)
@@ -129,7 +131,7 @@ Windows 建置啟用 Touch 與 Unity 的 HTC Vive Controller 兩個 OpenXR 互�
 
 啟動器 1.13 可在視窗核對場館發行報告後勾選「記錄本次連線量測」，再按「開始遊戲」。完成任務、收到最終戰績並關閉遊戲後，點「開啟本次紀錄資料夾」取得含 `link-metrics.json` 的 `player-evidence.zip`。量測選項會在每場結束後恢復未勾選。沒有勾選時，驗收 ZIP 會照常包含日誌及退出報告。 [收件流程](EXTERNAL_CLIENTS.md#收集-windows-玩家驗收-zip)
 
-啟動器 1.14 會在遊戲仍開著時顯示量測結案結果。視窗先顯示等待，讀到這次玩家程序與原連線的量測後，顯示完成或提早停止，以及樣本總數、回覆、逾時與中斷。重新入場時會標示原量測未涵蓋目前連線。場館驗收仍以關閉遊戲後的原 ZIP 及主控端收件結果為準。 [逐席驗收](EXTERNAL_CLIENTS.md#逐席核對-windows-連線量測門檻)
+啟動器 1.14.1 會在遊戲仍開著時顯示量測結案結果。視窗先顯示等待，讀到這次玩家程序與原連線的量測後，顯示完成或提早停止，以及樣本總數、回覆、逾時與中斷。重新入場時會標示原量測未涵蓋目前連線。關窗後若 Windows 回報原檔仍被占用，啟動器會等候最多約三秒再核對雜湊及匯出；仍無法取得原檔時會保留原紀錄供查閱。場館驗收以關窗後的原 ZIP 及主控收件結果為準。 [逐席驗收](EXTERNAL_CLIENTS.md#逐席核對-windows-連線量測門檻)
 
 啟動器 1.12 或更新版本也可從命令列同時指定 `--link-metrics` 與 `--evidence-zip`，以同一格式匯出原量測。 [量測命令](EXTERNAL_CLIENTS.md#收集-windows-玩家驗收-zip)
 
