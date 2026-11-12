@@ -547,15 +547,32 @@ def preflight_fixture(root, label, *, server, peer, port, exchange=None):
 
 
 class FieldResultsTests(unittest.TestCase):
-    def staged_batch(self, root, mode, count, id_offset, minutes_after, *, remote=False):
+    def staged_batch(self, root, mode, count, id_offset, minutes_after, *, remote=False, tracked_fire=False,
+                     missing_shot=False, runtime='Test OpenXR Runtime'):
         root.mkdir()
         path, manifest, _ = venue_fixture(root, mode, remote=remote, with_journals=True,
             room_sizes=(count,) * 5, id_offset=id_offset, minutes_after=minutes_after)
         offsets = [0] if mode == 'Linked' else [0, 100, 200, 300, 400]
         capture_start = datetime.fromisoformat('2026-11-09T08:00:00+08:00') + timedelta(minutes=minutes_after)
-        self.concurrent_journals(root, manifest, offsets, capture_start=capture_start)
+        if tracked_fire:
+            def tracked_packet(packet):
+                for player in packet['frame']['players']:
+                    player['rig'] = {'kind': 'Tracked'}
+
+            def fire_frame(player):
+                return None if missing_shot and (player['roomId'], player['seat']) == (5, count - 1) else 16
+
+            self.concurrent_fire_journals(root, manifest, fire_frame=fire_frame, edit_packet=tracked_packet, capture_start=capture_start)
+            for entry in manifest['sessions']:
+                _, _, endpoint = field.management_zip(root / entry['evidenceZip'])
+                startup = PlayerSourceEvidenceTests.openxr_startup(runtime).replace('port=7777', f"port={endpoint['port']}")
+                for player in entry['players']:
+                    log = root / player['log']
+                    log.write_bytes(startup.encode() + log.read_bytes())
+        else:
+            self.concurrent_journals(root, manifest, offsets, capture_start=capture_start)
+            manifest['minimumConcurrentMilliseconds'] = 1000
         self.add_shared_release(root, manifest, 0)
-        manifest['minimumConcurrentMilliseconds'] = 1000
         if count != 5:
             manifest['expectedPlayersPerRoom'] = count
         if mode == 'Linked':
@@ -563,8 +580,8 @@ class FieldResultsTests(unittest.TestCase):
         path.write_text(json.dumps(manifest), encoding='utf-8')
         return str(path.relative_to(root.parent))
 
-    def staged_plan(self, root, *, remote=False):
-        names = [self.staged_batch(root / f'{count}-{mode}', mode, count, index * 10000, minutes, remote=remote)
+    def staged_plan(self, root, *, remote=False, tracked_fire=False):
+        names = [self.staged_batch(root / f'{count}-{mode}', mode, count, index * 10000, minutes, remote=remote, tracked_fire=tracked_fire)
                  for minutes, count in enumerate((1, 2, 5), 1)
                  for index, mode in ((minutes * 2, 'Independent'), (minutes * 2 + 1, 'Linked'))]
         return {'version': 1, 'topology': 'direct-lan' if remote else 'same-host',
@@ -627,6 +644,59 @@ class FieldResultsTests(unittest.TestCase):
             path = root / 'stages.json'
             path.write_text(json.dumps(plan), encoding='utf-8')
             with self.assertRaisesRegex(field.EvidenceError, 'distinct original remote sources'):
+                field.verify_venue_stages(path)
+
+    def test_staged_plan_applies_tracked_and_sealed_fire_to_all_original_batches(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = self.staged_plan(root, remote=True, tracked_fire=True)
+            plan.update(requireTrackedRoster=True, requireConcurrentFire=True, minimumConcurrentMilliseconds=3000)
+            path = root / 'stages.json'
+            path.write_text(json.dumps(plan), encoding='utf-8')
+            last = root / plan['venueManifests'][-1]
+            batch = json.loads(last.read_bytes())
+            batch.update(requireTrackedRoster=False, requireConcurrentFire=False, minimumConcurrentMilliseconds=6000)
+            last.write_text(json.dumps(batch), encoding='utf-8')
+            result = subprocess.run([sys.executable, str(SCRIPT), '--venue-stages', str(path)], capture_output=True)
+            self.assertEqual(0, result.returncode, result.stderr.decode())
+            report = json.loads(result.stdout)
+            self.assertTrue(report['requireTrackedRoster'])
+            self.assertTrue(report['requireConcurrentFire'])
+            self.assertEqual(80, report['serverAcknowledgements'])
+            self.assertFalse(report['physicalHostsVerified'])
+            self.assertEqual([3000] * 5 + [6000], [stage['concurrentRoster']['minimumMilliseconds'] for stage in report['stages']])
+            for stage in report['stages']:
+                self.assertEqual('Tracked', stage['concurrentRoster']['rigKind'])
+                self.assertEqual(stage['players'], stage['concurrentRoster']['playersWithConfirmedFire'])
+                self.assertEqual(stage['worldJournalsVerified'], stage['combatJournalsVerified'])
+            for option in ('requireTrackedRoster', 'requireConcurrentFire'):
+                path.write_text(json.dumps(dict(plan, **{option: 1})), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'options must be boolean'):
+                    field.verify_venue_stages(path)
+
+    def test_staged_roster_rejects_one_batch_with_weaker_original_evidence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = self.staged_plan(root, remote=True, tracked_fire=True)
+            plan.update(requireTrackedRoster=True, requireConcurrentFire=True)
+            path = root / 'stages.json'
+            for label, extra, message in (
+                ('missing-shot', {'missing_shot': True}, 'sealed shot from every original seat'),
+                ('mock-tracking', {'runtime': 'Unity Mock Runtime'}, 'Quest or non-mock Windows OpenXR'),
+            ):
+                with self.subTest(label=label):
+                    replaced = self.staged_batch(root / label, 'Linked', 5, 95000, 3, remote=True, tracked_fire=True, **extra)
+                    self.assertEqual(25, field.verify_venue(root / replaced)['serverAcknowledgements'])
+                    invalid = dict(plan, venueManifests=[*plan['venueManifests'][:-1], replaced])
+                    path.write_text(json.dumps(invalid), encoding='utf-8')
+                    with self.assertRaisesRegex(field.EvidenceError, 'Venue manifest entry 6: .*' + message):
+                        field.verify_venue_stages(path)
+            last = root / plan['venueManifests'][-1]
+            batch = json.loads(last.read_bytes())
+            batch['sessions'][0].pop('combatJournal')
+            last.write_text(json.dumps(batch), encoding='utf-8')
+            path.write_text(json.dumps(plan), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'Venue manifest entry 6: .*original combat journals'):
                 field.verify_venue_stages(path)
 
     def test_venue_pilot_requires_declared_room_sizes_and_preserves_original_concurrency(self):
@@ -872,7 +942,7 @@ class FieldResultsTests(unittest.TestCase):
                           players=lambda _, phase: deepcopy(members) if phase == 'Running' else [], edit_packet=edit_packet)
             launch.write_text(json.dumps(launcher), encoding='utf-8')
 
-    def concurrent_fire_journals(self, root, manifest, *, fire_frame=lambda _: 12, edit_packet=None):
+    def concurrent_fire_journals(self, root, manifest, *, fire_frame=lambda _: 12, edit_packet=None, capture_start=None):
         for index, entry in enumerate(manifest['sessions']):
             archive_path = root / entry['evidenceZip']
             session, stats, endpoint = field.management_zip(archive_path)
@@ -905,7 +975,7 @@ class FieldResultsTests(unittest.TestCase):
             entry['combatJournal'] = f'Room {index + 1}.journal'
             combat_journal(root / entry['combatJournal'], launcher, records)
             players = [{'id': player['id'], 'roomId': player['roomId'], 'connected': True} for player in roster]
-            capture_start = datetime.fromisoformat('2026-11-09T00:00:00+00:00') + timedelta(milliseconds=index * 150)
+            start = (capture_start or datetime.fromisoformat('2026-11-09T00:00:00+00:00')) + timedelta(milliseconds=index * 150)
 
             def packet_at(number, phase):
                 return deepcopy(players) if phase == 'Running' else []
@@ -916,7 +986,7 @@ class FieldResultsTests(unittest.TestCase):
                 if edit_packet is not None:
                     edit_packet(packet)
 
-            world_journal(root / entry['worldJournal'], launcher['finalWorld'], capture_start=capture_start.isoformat(),
+            world_journal(root / entry['worldJournal'], launcher['finalWorld'], capture_start=start.isoformat(),
                           players=packet_at, edit_packet=with_events)
             launch.write_text(json.dumps(launcher), encoding='utf-8')
 

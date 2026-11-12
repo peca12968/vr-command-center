@@ -457,7 +457,7 @@ python scripts/prepare-venue-field-manifest.py `
 
 #### 一次驗收兩種模式的三個階段
 
-準備六份 `venue.json`，每份都保留該批原始場館封存、遊戲日誌及同一份 `venueReleaseReport`。各批清單啟用 `minimumConcurrentMilliseconds`，並提供所有原 `.worldlog`。將六份清單的路徑填入 `stages.json`。路徑相對於 `stages.json`，清單列出的順序可調整。
+準備六份 `venue.json`，每份都保留該批原始場館封存、遊戲日誌、原 `.worldlog` 及同一份 `venueReleaseReport`。一般驗收在各批清單啟用 `minimumConcurrentMilliseconds`。將六份清單的路徑填入 `stages.json`。路徑相對於 `stages.json`，清單列出的順序可調整。
 
 ```json
 {
@@ -480,6 +480,12 @@ python scripts/verify-field-results.py --venue-stages .\stages.json
 ```
 
 工具會重驗六批原始資料，要求各模式的 5、10、25 人場次按原開始與結束時間依序完成。各批須符合總清單的拓撲與同時在線門檻，且不得共用原結束回條、場次、世界來源或入場識別。結果列出每批原結束回條、清單雜湊、開始與結束時間、同時在線區間及伺服器戰績確認。若要每席都有不同直連 IPv4，可在 `direct-lan` 總清單與六份批次清單都加上 `"requireDistinctRemoteRoster": true`。同機排演使用 `same-host`，現場實體主機數及網路容量仍須驗收。
+
+##### 統一核對追蹤及遊戲射擊
+
+要讓六批都通過同時追蹤及遊戲射擊驗收，在 `stages.json` 加入 `"requireTrackedRoster": true` 及 `"requireConcurrentFire": true`。兩項可各自啟用。各批保留所有原玩家日誌及 `worldJournal`，啟用射擊驗收時另提供 `combatJournal`。啟用任一項後，總清單會將自己的 `minimumConcurrentMilliseconds` 套用到全部六批；若個別清單另有較長門檻，該批使用較長值。
+
+兩項同時啟用時，同一段共同執行區間須包含全體原席位的有效追蹤，以及每席至少一筆已封存的遊戲射擊。批次清單可省略這兩項，總清單仍會照樣核對。摘要逐批列出 `concurrentRoster.rigKind`、`playersWithConfirmedFire` 及實際採用的 `minimumMilliseconds`。若原始證據未通過，錯誤會指出 `venueManifests` 陣列中從 1 開始計算的項次。
 
 ### 核對 25 席各自的直連來源
 

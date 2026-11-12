@@ -1813,7 +1813,7 @@ def verify_venue(manifest_path):
     return report
 
 
-def verify_venue_batch(manifest_path, *, inspect_windows=False):
+def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=None):
     manifest_path = manifest_path.resolve(strict=True)
     with manifest_path.open('rb') as stream:
         raw_manifest = limited_read(stream)
@@ -1872,17 +1872,20 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
             'Provide a combat journal for every session in this batch')
     require_tracked = manifest.get('requireTrackedRoster', False)
     require(type(require_tracked) is bool, 'requireTrackedRoster must be a boolean')
-    require(not require_tracked or 'minimumConcurrentMilliseconds' in manifest,
-            'requireTrackedRoster requires minimumConcurrentMilliseconds')
     require_fire = manifest.get('requireConcurrentFire', False)
     require(type(require_fire) is bool, 'requireConcurrentFire must be a boolean')
-    require(not require_fire or ('minimumConcurrentMilliseconds' in manifest and combat_journals),
+    minimum = integer(manifest['minimumConcurrentMilliseconds'], 1000, 900000) if 'minimumConcurrentMilliseconds' in manifest else None
+    if staged_roster is not None:
+        minimum = max(minimum or 0, staged_roster['minimumConcurrentMilliseconds'])
+        require_tracked = require_tracked or staged_roster['requireTrackedRoster']
+        require_fire = require_fire or staged_roster['requireConcurrentFire']
+    require(not require_tracked or minimum is not None, 'requireTrackedRoster requires minimumConcurrentMilliseconds')
+    require(not require_fire or (minimum is not None and combat_journals),
             'requireConcurrentFire requires minimumConcurrentMilliseconds and the original combat journals for the full batch')
     concurrency = None
-    if 'minimumConcurrentMilliseconds' in manifest:
+    if minimum is not None:
         require(journals, 'Concurrent roster verification requires the original world journals for the full batch')
-        concurrency = VenueRosterOverlap(integer(manifest['minimumConcurrentMilliseconds'], 1000, 900000),
-                                         require_tracked=require_tracked, require_fire=require_fire)
+        concurrency = VenueRosterOverlap(minimum, require_tracked=require_tracked, require_fire=require_fire)
     require_distinct_remote_roster = manifest.get('requireDistinctRemoteRoster', False)
     require(type(require_distinct_remote_roster) is bool, 'requireDistinctRemoteRoster must be a boolean')
     require(not require_distinct_remote_roster or (topology == 'direct-lan' and concurrency is not None),
@@ -2263,7 +2266,8 @@ def verify_venue_stages(plan_path):
         raw_plan = limited_read(stream)
     plan = read_json(raw_plan.decode('utf-8-sig'))
     required = {'version', 'topology', 'minimumConcurrentMilliseconds', 'venueManifests'}
-    require(type(plan) is dict and required <= plan.keys() <= required | {'requireDistinctRemoteRoster'},
+    roster_options = ('requireTrackedRoster', 'requireConcurrentFire')
+    require(type(plan) is dict and required <= plan.keys() <= required | {'requireDistinctRemoteRoster', *roster_options},
             'Invalid staged venue plan fields')
     integer(plan['version'], 1, 1)
     topology = plan['topology']
@@ -2272,6 +2276,9 @@ def verify_venue_stages(plan_path):
     distinct = plan.get('requireDistinctRemoteRoster', False)
     require(type(distinct) is bool and (not distinct or topology == 'direct-lan'),
             'Distinct staged roster requires a boolean option and direct-lan topology')
+    requirements = {key: plan.get(key, False) for key in roster_options}
+    require(all(type(value) is bool for value in requirements.values()), 'Staged tracked roster and concurrent fire options must be boolean')
+    staged_roster = {'minimumConcurrentMilliseconds': minimum, **requirements} if any(requirements.values()) else None
     modes, sizes = ('Independent', 'Linked'), (5, 10, 25)
     names = plan['venueManifests']
     require(type(names) is list and len(names) == len(modes) * len(sizes)
@@ -2282,8 +2289,11 @@ def verify_venue_stages(plan_path):
 
     stages, used = {}, {}
     release_hash = None
-    for path in paths:
-        report, batch = verify_venue_batch(path)
+    for index, path in enumerate(paths, 1):
+        try:
+            report, batch = verify_venue_batch(path, staged_roster=staged_roster)
+        except EvidenceError as error:
+            raise EvidenceError(f'Venue manifest entry {index}: {error}') from None
         mode, players = report['mode'], report['players']
         key = mode, players
         require(mode in modes and players in sizes and key not in stages,
@@ -2325,7 +2335,8 @@ def verify_venue_stages(plan_path):
                                if field in report}})
     return {'version': 1, 'consistent': True, 'declaredTopology': topology,
             'planSha256': hashlib.sha256(raw_plan).hexdigest(), 'venueReleaseSha256': release_hash,
-            'minimumConcurrentMilliseconds': minimum, 'requireDistinctRemoteRoster': distinct, 'stages': results,
+            'minimumConcurrentMilliseconds': minimum, 'requireDistinctRemoteRoster': distinct,
+            **{key: requirements[key] for key in roster_options if key in plan}, 'stages': results,
             'serverAcknowledgements': sum(stage['serverAcknowledgements'] for stage in results),
             'physicalHostsVerified': False, 'networkCapacityAccepted': False}
 
