@@ -25,6 +25,43 @@ internal static class PlayerLauncher
     { object result; return value.TryGetValue(key, out result) ? result as string : null; }
     private static int Number(Dictionary<string, object> value, string key)
     { object result; return value.TryGetValue(key, out result) && result is int ? (int)result : -1; }
+    private static long DebriefCounter(Dictionary<string, object> value, string key)
+    {
+        object result;
+        if (!value.TryGetValue(key, out result)) return -1;
+        if (result is int) return (int)result;
+        return result is long ? (long)result : -1;
+    }
+    private static bool DebriefId(Dictionary<string, object> value, string key, out Guid id)
+    { return Guid.TryParseExact(Text(value, key), "D", out id) && id != Guid.Empty; }
+    internal static bool TryReadFinalDebrief(string body, out Guid session)
+    {
+        session = Guid.Empty;
+        // The current final record is a flat object with 17 fields. None of its values contain a colon.
+        // Count the original separators too, since the Framework JSON reader collapses repeated keys.
+        if (body.Length > 4096 || !body.StartsWith("{", StringComparison.Ordinal)
+            || !body.EndsWith("}", StringComparison.Ordinal) || body.Split(':').Length != 18) return false;
+        Dictionary<string, object> value;
+        try { value = Map(Json.DeserializeObject(body)); }
+        catch (ArgumentException) { return false; }
+        catch (InvalidOperationException) { return false; }
+        if (value == null || value.Count != 17 || Number(value, "version") != 1) return false;
+        var room = Number(value, "roomId"); var health = Number(value, "health");
+        var origin = Text(value, "origin");
+        Guid id;
+        if (room < 1 || room > 5 || health < 0 || health > 100 || (origin != "Simulation" && origin != "GameServer")
+            || !DebriefId(value, "sessionId", out session) || !DebriefId(value, "playerId", out id)
+            || !DebriefId(value, "admissionId", out id) || !DebriefId(value, "streamId", out id)
+            || DebriefCounter(value, "throughSequence") <= 0 || DebriefCounter(value, "worldSequence") <= 0
+            || DebriefCounter(value, "finalStreamSequence") < 0 || DebriefCounter(value, "hitsReceived") < 0
+            || DebriefCounter(value, "damageTaken") < 0) return false;
+        var ammo = DebriefCounter(value, "ammoUsed"); var hits = DebriefCounter(value, "shotsHit"); var kills = DebriefCounter(value, "kills");
+        object accuracy;
+        if (kills < 0 || kills > hits || hits > ammo || !value.TryGetValue("accuracyPercent", out accuracy)
+            || !(accuracy is int || accuracy is long || accuracy is decimal || accuracy is double)) return false;
+        var percent = Convert.ToDouble(accuracy);
+        return percent >= 0 && percent <= 100;
+    }
     private static void Require(bool condition, string message) { if (!condition) throw new InvalidDataException(message); }
     private static Dictionary<string, object> Read(string path, long max, string expectedHash = null)
     {
@@ -182,7 +219,7 @@ internal static class PlayerLauncher
                 Require(Text(result, "status") == "exited" && Number(result, "exitCode") == 0 && Number(result, "processId") == processId
                     && Text(result, "playerManifestSha256") == manifestHash && log.Length <= 16 * 1024 * 1024,
                     "本次日誌與退出報告不符。");
-                var terminal = new PlayerConnectionMonitor(logPath);
+                var terminal = new PlayerConnectionMonitor(logPath, verifyEvidence: true);
                 using (var reader = new StreamReader(log, Encoding.UTF8, true, 4096, true))
                 {
                     var buffer = new char[4096];
@@ -190,7 +227,7 @@ internal static class PlayerLauncher
                     while ((count = reader.Read(buffer, 0, buffer.Length)) != 0)
                         terminal.Feed(new string(buffer, 0, count));
                 }
-                if (!terminal.FinalDisconnected) return false;
+                if (!terminal.CanArchiveEvidence) return false;
                 log.Position = 0;
                 Require(Text(result, "playerLogSha256") == Hash(log), "本次日誌與退出報告不符。");
                 log.Position = 0;
@@ -331,7 +368,7 @@ internal static class PlayerLauncher
                     ProcessReport(report, "exited", releaseManifestHash, child, exited: true, linkMetrics: linkMetrics, log: log);
                     if (evidenceZip != null && child.ExitCode == 0)
                         Require(WriteEvidenceZip(evidenceZip, log, report, releaseManifestHash, child.Id),
-                            "等待最終戰績及結束斷線後才可建立驗收 ZIP。");
+                            "驗收 ZIP 需要同一次遊戲的完整最終戰績及結束斷線。");
                     return child.ExitCode;
                 }
             }
@@ -567,8 +604,8 @@ internal static class PlayerLauncher
                         {
                             try
                             {
-                                if (WriteEvidenceZip(Path.Combine(resultFolder, "player-evidence.zip"), activeLog, activeReport, activeRelease, child.Id))
-                                    zipStatus = " 本次驗收 ZIP 已建立。";
+                                var archived = WriteEvidenceZip(Path.Combine(resultFolder, "player-evidence.zip"), activeLog, activeReport, activeRelease, child.Id);
+                                zipStatus = archived ? " 本次驗收 ZIP 已建立。" : " 本次記錄未通過驗收 ZIP 核對，可查看原檔。";
                             }
                             catch { zipStatus = " 本次驗收 ZIP 未能建立，可在紀錄資料夾查看原檔。"; }
                         }
@@ -642,19 +679,32 @@ internal static class PlayerLauncher
 // network probe, payload parsing, process inspection or changes to game state.
 internal sealed class PlayerConnectionMonitor
 {
+    private const string ConnectedPrefix = "VR_CLIENT_CONNECTED ";
+    private const string PendingPrefix = "VR_CLIENT_DEBRIEF_PENDING ";
+    private const string FinalPrefix = "VR_CLIENT_DEBRIEF_FINAL ";
     private readonly string path;
     private readonly Stopwatch clock = Stopwatch.StartNew();
     private readonly Decoder decoder = Encoding.UTF8.GetDecoder();
     private readonly StringBuilder line = new StringBuilder();
+    private readonly HashSet<string> evidenceConnections;
+    private Guid pendingSession;
     private long offset;
     private bool discardLine;
     private bool invalidLog;
+    private bool invalidEvidence;
+    private bool sawFinal;
+    private bool finalDisconnected;
     public string State { get; private set; }
     public bool LogAvailable { get; private set; }
-    public bool FinalDisconnected { get; private set; }
+    public bool CanArchiveEvidence { get { return evidenceConnections != null && finalDisconnected && !invalidEvidence && !invalidLog; } }
     public bool Truncated { get; private set; }
     public readonly List<string> Transitions = new List<string>();
-    public PlayerConnectionMonitor(string log) { path = log; Change("Waiting"); }
+    public PlayerConnectionMonitor(string log, bool verifyEvidence = false)
+    {
+        path = log;
+        if (verifyEvidence) evidenceConnections = new HashSet<string>(StringComparer.Ordinal);
+        Change("Waiting");
+    }
     private void Change(string state)
     {
         if (State == state) return;
@@ -663,11 +713,29 @@ internal sealed class PlayerConnectionMonitor
     }
     internal void Observe(string value)
     {
-        // Exact markers only. Never serialize or display arbitrary log text / IDs.
-        if (Regex.IsMatch(value, "^VR_CLIENT_CONNECTED id=[0-9]+$")) { FinalDisconnected = false; Change("Connected"); }
+        // Never serialize or display arbitrary log text or IDs.
+        if (value.StartsWith(ConnectedPrefix, StringComparison.Ordinal))
+        {
+            if (!Regex.IsMatch(value, @"\AVR_CLIENT_CONNECTED id=(0|[1-9][0-9]{0,19})\z")) { invalidEvidence = true; return; }
+            if (evidenceConnections != null && (!evidenceConnections.Add(value) || sawFinal || State == "Connected" || State == "ResultPending"))
+                invalidEvidence = true;
+            pendingSession = Guid.Empty;
+            finalDisconnected = false;
+            Change("Connected");
+        }
+        else if (value.StartsWith(FinalPrefix, StringComparison.Ordinal))
+        {
+            Guid session;
+            if (State != "ResultPending" || !PlayerLauncher.TryReadFinalDebrief(value.Substring(FinalPrefix.Length), out session)
+                || session != pendingSession)
+            { invalidEvidence = true; return; }
+            if (sawFinal) invalidEvidence = true;
+            sawFinal = true;
+            Change("Final");
+        }
         else if (State == "Final")
         {
-            if (value == "VR_CLIENT_DISCONNECTED") FinalDisconnected = true;
+            if (value == "VR_CLIENT_DISCONNECTED") finalDisconnected = true;
         }
         else if ((value == "VR_OPENXR_STARTUP status=rejected" || value == "VR_OPENXR_STARTUP status=unavailable")
                  && (State == "Waiting" || State == "Unconfirmed")) Change("OpenXRUnavailable");
@@ -677,15 +745,15 @@ internal sealed class PlayerConnectionMonitor
             if (State == "ResultPending") Change("ResultInterrupted");
             else if (State != "ResultInterrupted") Change("Disconnected");
         }
-        else if (State == "Connected" && IsPendingMarker(value)) Change("ResultPending");
-        else if ((State == "Connected" || State == "ResultPending") && value.StartsWith("VR_CLIENT_DEBRIEF_FINAL {", StringComparison.Ordinal)) Change("Final");
-    }
-    private static bool IsPendingMarker(string value)
-    {
-        const string prefix = "VR_CLIENT_DEBRIEF_PENDING ";
-        Guid session;
-        return value.Length == prefix.Length + 36 && value.StartsWith(prefix, StringComparison.Ordinal)
-            && Guid.TryParseExact(value.Substring(prefix.Length), "D", out session) && session != Guid.Empty;
+        else if ((State == "Connected" || State == "ResultPending") && value.StartsWith(PendingPrefix, StringComparison.Ordinal))
+        {
+            Guid session;
+            if (value.Length != PendingPrefix.Length + 36
+                || !Guid.TryParseExact(value.Substring(PendingPrefix.Length), "D", out session) || session == Guid.Empty) return;
+            if (State == "ResultPending" && session != pendingSession) { invalidEvidence = true; return; }
+            pendingSession = session;
+            Change("ResultPending");
+        }
     }
     internal void WaitingSeconds(double seconds) { if (State == "Waiting" && seconds >= 30) Change("Unconfirmed"); }
     internal void Feed(string value)
@@ -696,7 +764,12 @@ internal sealed class PlayerConnectionMonitor
             else if (!discardLine)
             {
                 if (line.Length < 4096) line.Append(c);
-                else { line.Clear(); discardLine = true; }
+                else
+                {
+                    var prefix = line.ToString(0, FinalPrefix.Length);
+                    if (prefix == FinalPrefix || prefix.StartsWith(ConnectedPrefix, StringComparison.Ordinal)) invalidEvidence = true;
+                    line.Clear(); discardLine = true;
+                }
             }
         }
     }
