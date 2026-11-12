@@ -56,6 +56,8 @@ API／控制台 **0.27.0** 新增 `GET /api/sessions/{id}/report.csv`。在「�
 
 「命中」包含該片段內保存的所有命中，「計入命中率」則只包含本段發射且本段確認命中的射擊。CSV 對應 `shotsHit` 與 `matchedShots`。沒有發射時 `accuracyPercent` 留空。沒有玩家戰鬥事件時，仍可下載一列 `rowType=Clip` 的範圍資料。匯出使用 UTF-8 BOM、CRLF 與原報表的試算表文字防護。
 
+控制台 0.31.145 會在下載前將 CSV 的場次、串流、起訖、房間、玩家及每列戰績與畫面已核對的資料比較。若檔案不符，畫面會保留已讀取的戰績，操作員可重新下載。
+
 `GET /api/sessions/{id}/world/clip-statistics.csv` 必須帶 `streamId`、`fromFrame`、`throughFrame`，可選 `roomId` 和 `playerId`。下載以原錄製的已保存範圍計算，回應含 `Cache-Control: no-store`。整場結算可使用原最終戰績報表。
 
 ## 下載全館結束批次
