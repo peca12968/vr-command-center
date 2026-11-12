@@ -668,18 +668,60 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       && (await page.locator('#world-status').innerText()).includes('錄製已核對封存') && await page.locator('#world-room').inputValue() === '2',
       'Interval ends at the exact frame while preserving the full sealed archive, selected room and access to later frames');
     await page.screenshot({ path: path.join(screenshots, 'world-replay-interval.png'), fullPage: true });
+    const loop = page.locator('#world-clip-loop');
+    const loopRequests = [];
+    const boundedQuery = request => {
+      const url = new URL(request.url());
+      return url.pathname === `/api${archiveRoute}/watch` && url.searchParams.get('throughFrame') === String(clipTail)
+        ? url.searchParams : null;
+    };
+    const recordLoop = request => {
+      const query = boundedQuery(request);
+      if (query) loopRequests.push(query);
+    };
     await page.route('**/world/watch?**', async route => {
       const original = await route.fetch();
       const body = (await original.text()).split('event: saved-end\n')[0];
       await route.fulfill({ response: original, body });
     }, { times: 1 });
-    await clipPlay.click();
-    await page.waitForFunction(() => document.querySelector('#world-message').textContent.includes('尚未讀到已保存片段尾端'), null, { polling: 100 });
-    check(!(await clipStatus.innerText()).includes('已到片段終點') && await clipPlay.isEnabled(),
-      'A stream missing the terminal acknowledgement does not mark the interval finished and remains retryable');
+    await loop.check();
+    page.on('request', recordLoop);
+    try {
+      await clipPlay.click();
+      await page.waitForFunction(() => document.querySelector('#world-message').textContent.includes('尚未讀到已保存片段尾端'), null, { polling: 100 });
+      await page.waitForTimeout(700);
+      check(!(await clipStatus.innerText()).includes('已到片段終點') && await clipPlay.isEnabled() && loopRequests.length === 1,
+        'A stream missing the terminal acknowledgement remains retryable and does not restart the interval');
+    } finally { page.off('request', recordLoop); }
+    await loop.uncheck();
     const repeatedClip = clipWatch(eventSequence, '4');
     await clipPlay.click(); await repeatedClip; await waitClipEnd();
     check(Number(await canvas.getAttribute('data-sequence')) === clipTail, 'Retrying the interval repeats from the original start and finishes at the original end');
+    loopRequests.length = 0;
+    const clipCamera = await canvas.getAttribute('data-camera');
+    const replayPause = page.locator('#world-pause');
+    page.on('request', recordLoop);
+    try {
+      await loop.check();
+      let laps = 0;
+      await Promise.all([page.waitForRequest(request => boundedQuery(request) && ++laps === 2),
+        clipStatus.filter({ hasText: '已確認終點，即將回到起點' }).waitFor(), clipPlay.click()]);
+      check(loopRequests.slice(0, 2).every(query => query.get('fromFrame') === String(eventSequence) && query.get('rate') === '4')
+        && await canvas.getAttribute('data-camera') === clipCamera && await page.locator('#world-room').inputValue() === '2',
+        'A confirmed clip end starts a second lap with the original range, rate, room and camera');
+      await replayPause.click();
+      await clipStatus.filter({ hasText: '片段已暫停' }).waitFor();
+      const pauseSequence = await canvas.getAttribute('data-sequence');
+      const count = loopRequests.length;
+      await page.waitForTimeout(700);
+      check(loopRequests.length === count && await canvas.getAttribute('data-sequence') === pauseSequence,
+        'Pausing a looping clip stops new requests and retains the displayed frame');
+      await loop.uncheck();
+      await replayPause.click(); await waitClipEnd();
+      await page.waitForTimeout(700);
+      check(loopRequests.length === count + 1 && Number(await canvas.getAttribute('data-sequence')) === clipTail,
+        'Turning off looping while paused resumes to the original end without starting another lap');
+    } finally { page.off('request', recordLoop); }
     const savedRoute = archiveRoute + '/clips', savedPicker = page.locator('#saved-clip-select');
     const clipName = '掩體 <東側> 複盤 ' + 'W'.repeat(45);
     const putRequests = [];
