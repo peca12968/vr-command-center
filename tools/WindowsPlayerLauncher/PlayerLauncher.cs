@@ -186,7 +186,7 @@ internal static class PlayerLauncher
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
     private static void ProcessReport(string path, string status, string releaseManifestHash, Process child = null,
-        bool exited = false, string linkMetrics = null, string log = null)
+        bool exited = false, string linkMetrics = null, string log = null, bool deferSharing = false)
     {
         if (path == null) return;
         var value = new Dictionary<string, object> { { "status", status } };
@@ -194,11 +194,11 @@ internal static class PlayerLauncher
         if (exited) value.Add("exitCode", child.ExitCode);
         if (exited && log != null && (linkMetrics != null || releaseManifestHash != null))
         {
-            var logHash = EvidenceHash(log, 16 * 1024 * 1024);
+            var logHash = EvidenceHash(log, 16 * 1024 * 1024, deferSharing);
             if (releaseManifestHash != null) value.Add("playerLogSha256", logHash);
             if (linkMetrics != null)
             {
-                var metricsHash = EvidenceHash(linkMetrics, 64 * 1024);
+                var metricsHash = EvidenceHash(linkMetrics, 64 * 1024, deferSharing);
                 value.Add("linkMetrics", metricsHash != null && logHash != null
                     ? new { metricsSha256 = metricsHash, logSha256 = logHash } : null);
             }
@@ -270,7 +270,11 @@ internal static class PlayerLauncher
         File.Move(temporary, statusReport);
         lastStatusReport = value;
     }
-    private static string EvidenceHash(string path, long limit)
+    private static bool IsSharingViolation(IOException error)
+    {
+        return error.HResult == unchecked((int)0x80070020) || error.HResult == unchecked((int)0x80070021);
+    }
+    private static string EvidenceHash(string path, long limit, bool deferSharing = false)
     {
         try
         {
@@ -279,7 +283,7 @@ internal static class PlayerLauncher
             using (var file = File.OpenRead(path))
                 return file.Length > 0 && file.Length <= limit ? Hash(file) : null;
         }
-        catch (IOException) { }
+        catch (IOException error) { if (deferSharing && IsSharingViolation(error)) throw; }
         catch (UnauthorizedAccessException) { }
         catch (InvalidDataException) { }
         return null;
@@ -610,6 +614,7 @@ internal static class PlayerLauncher
             };
             string activeRelease = null, activeLog = null, activeReport = null, activeMetrics = null, resultFolder = null;
             LinkMeasurement measurement = null;
+            Stopwatch terminalWait = null;
             records.LinkClicked += delegate
             {
                 try { using (Process.Start(new ProcessStartInfo(resultFolder) { UseShellExecute = true })) { } }
@@ -645,6 +650,7 @@ internal static class PlayerLauncher
                     diagnosticLog = null; diagnosticReport = null;
                     activeRelease = releaseHash; activeLog = ownLog; activeReport = ownReport; activeMetrics = ownMetrics;
                     measurement = null;
+                    terminalWait = null;
                     linkStatus.Text = ownMetrics == null ? "" : "正在等候本次連線量測的 30 筆樣本結案。";
                     linkStatus.Visible = ownMetrics != null;
                     records.Visible = false; resultFolder = null;
@@ -687,22 +693,40 @@ internal static class PlayerLauncher
                     var saved = true; var zipStatus = "";
                     if (activeRelease != null)
                     {
+                        if (terminalWait == null) terminalWait = Stopwatch.StartNew();
+                        var canWait = terminalWait.Elapsed < TimeSpan.FromSeconds(3);
                         try
                         {
-                            ProcessReport(activeReport, "exited", activeRelease, child, exited: true, linkMetrics: activeMetrics, log: activeLog);
-                            resultFolder = Path.GetDirectoryName(activeReport); records.Visible = true;
-                        }
-                        catch { saved = false; }
-                        if (saved && child.ExitCode == 0)
-                        {
-                            try
+                            ProcessReport(activeReport, "exited", activeRelease, child, exited: true, linkMetrics: activeMetrics,
+                                log: activeLog, deferSharing: canWait);
+                            resultFolder = Path.GetDirectoryName(activeReport);
+                            if (child.ExitCode == 0)
                             {
-                                var archived = WriteEvidenceZip(Path.Combine(resultFolder, "player-evidence.zip"), activeLog, activeReport,
-                                    activeRelease, child.Id, activeMetrics);
-                                zipStatus = archived ? (activeMetrics == null ? " 本次驗收 ZIP 已建立。" : " 本次驗收 ZIP 已附連線量測。")
-                                    : " 本次記錄未通過驗收 ZIP 核對，可查看原檔。";
+                                try
+                                {
+                                    var archived = WriteEvidenceZip(Path.Combine(resultFolder, "player-evidence.zip"), activeLog, activeReport,
+                                        activeRelease, child.Id, activeMetrics);
+                                    zipStatus = archived ? (activeMetrics == null ? " 本次驗收 ZIP 已建立。" : " 本次驗收 ZIP 已附連線量測。")
+                                        : " 本次記錄未通過驗收 ZIP 核對，可查看原檔。";
+                                }
+                                catch (Exception error)
+                                {
+                                    var io = error as IOException;
+                                    if (io != null && canWait && IsSharingViolation(io)) throw;
+                                    zipStatus = " 本次驗收 ZIP 未能建立，可在紀錄資料夾查看原檔。";
+                                }
                             }
-                            catch { zipStatus = " 本次驗收 ZIP 未能建立，可在紀錄資料夾查看原檔。"; }
+                            records.Visible = true;
+                        }
+                        catch (Exception error)
+                        {
+                            var io = error as IOException;
+                            if (io != null && canWait && IsSharingViolation(io))
+                            {
+                                status.Text = "遊戲已關閉，正在等候本次紀錄檔解除占用。";
+                                return;
+                            }
+                            saved = false;
                         }
                     }
                     var final = monitor.State == "Final"; child.Dispose(); child = null;

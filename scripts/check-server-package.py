@@ -1541,9 +1541,9 @@ def main():
                 client['witness']=None
                 if form is not None and 'final' in client:
                     reviewed = read(form / 'release-form-checks.json')
-                    check(reviewed == {'complete': True, 'checks': 13, 'processId': client['nativePid']}
+                    check(reviewed == {'complete': True, 'checks': 15, 'processId': client['nativePid'], 'deferredSharing': True}
                           and read(client['linkMetrics'])['batchMode'] is False and read(client['linkMetrics'])['graphicsDeviceActive'] is True,
-                          'shipped graphical form publishes the measured player ZIP after a normal game window exit')
+                          'shipped graphical form publishes the measured player ZIP after the terminal log lock clears')
                 if 'evidenceZip' in client and 'final' in client:
                     with zipfile.ZipFile(client['evidenceZip']) as bundle:
                         originals = {'launch-report.json': report, 'player.log': client['log']}

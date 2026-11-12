@@ -203,6 +203,20 @@ public sealed class ReleaseFormChecks : MarshalByRefObject
                     {
                         owned.Refresh();
                         closed = owned.HasExited || owned.CloseMainWindow();
+                        if (closed)
+                        {
+                            Check(owned.WaitForExit(5000), "The original graphical child exits before the sharing test");
+                            using (var lease = new FileStream(log, FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite | FileShare.Delete))
+                            {
+                                var waitForSharing = Stopwatch.StartNew();
+                                var terminalStatus = Field<Label>(form, "status");
+                                while (!terminalStatus.Text.Contains("解除占用") && waitForSharing.Elapsed < TimeSpan.FromSeconds(2))
+                                { Application.DoEvents(); Thread.Sleep(20); }
+                                var pending = Json.Deserialize<Dictionary<string, object>>(File.ReadAllText(report));
+                                Check(terminalStatus.Text.Contains("解除占用") && (string)pending["status"] == "started"
+                                    && !Field<LinkLabel>(form, "records").Visible, "The form waits without replacing the original launch report during a sharing violation");
+                            }
+                        }
                     }
                     Application.DoEvents(); Thread.Sleep(20);
                 }
@@ -217,7 +231,7 @@ public sealed class ReleaseFormChecks : MarshalByRefObject
                 Check((string)result["status"] == "exited" && (int)result["processId"] == pid && (int)result["exitCode"] == 0
                     && (string)proof["logSha256"] == Hash(log) && (string)proof["metricsSha256"] == Hash(metrics),
                     "The form binds both original files to the exited graphical child");
-                return Json.Serialize(new { complete = true, checks, processId = pid });
+                return Json.Serialize(new { complete = true, checks, processId = pid, deferredSharing = true });
             }
         }
         finally

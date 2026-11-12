@@ -52,7 +52,7 @@ Windows 開發版自 0.46.0 起可用 VrCommand.exe --vr-config 玩家連線檔 
 啟動器 1.9 可在視窗選擇或貼上場館發行報告，核對後再開始遊戲。遊戲關閉後按「開啟本次紀錄資料夾」，保留同一次的 player.log 與 launch-report.json。
 啟動器 1.11 會核對等待場次、完整最終戰績及結束斷線。已核對發行並正常退出後才建立 player-evidence.zip，包含原日誌及退出報告。命令列可搭配 --launch --wait --release-report --log --report 指定 --evidence-zip 新檔案.zip。
 啟動器 1.12 同時指定 --link-metrics 和 --evidence-zip 時，會將同次原始量測一併封入 ZIP。主控可從收件資料夾逐席核對原量測。
-啟動器 1.14 可在視窗核對場館發行報告後勾選「記錄本次連線量測」。量測結案時，視窗會顯示回覆、逾時和中斷數。收到最終戰績並關閉遊戲後，從本次紀錄資料夾取出驗收 ZIP。
+啟動器 1.14.1 可在視窗核對場館發行報告後勾選「記錄本次連線量測」。量測結案時，視窗會顯示回覆、逾時和中斷數。收到最終戰績並關閉遊戲後，從本次紀錄資料夾取出驗收 ZIP。
 啟動器 1.7 在發行核對搭配 --wait --log 新日誌 --report 新程序報告 時，另在終止報告保存原玩家日誌的 SHA-256，供五房封存驗收。
 
 環境：Windows x64、適用的圖形驅動及 .NET Framework 4.8；不需要Unity Editor、Python或.NET 10 SDK。
@@ -158,7 +158,7 @@ def package(player, output, compiler):
                         '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', '/reference:System.Web.Extensions.dll',
                         '/reference:System.IO.Compression.dll',
                         '/out:' + str(folder / 'Launch-Player.exe'), str(source)], check=True)
-        manifest = {'version': 1, 'platform': 'Windows-x64', 'launcherVersion': '1.14.0', 'createdAtUtc': datetime.now(timezone.utc).isoformat(),
+        manifest = {'version': 1, 'platform': 'Windows-x64', 'launcherVersion': '1.14.1', 'createdAtUtc': datetime.now(timezone.utc).isoformat(),
                     'build': receipt, 'launcherSourceSha256': digest(source), 'scope': 'Offline portable PC player; no tickets; not a signature or network/device verification',
                     'files': [{'path': file.relative_to(folder).as_posix(), 'bytes': file.stat().st_size, 'sha256': digest(file)}
                               for file in sorted(folder.rglob('*')) if file.is_file()]}
