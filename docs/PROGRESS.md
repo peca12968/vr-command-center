@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 全館未確認戰績席位
+
+- 管理包 0.31.149 可從所選結束批次一次查閱各房的未確認席位，並直接下載個人 CSV 或開啟原房間回放。另列有名冊但暫無可核對回條的房間。125 項解壓包 Chromium 專項通過，包括獨立場部分封存、合併場重複席號、錯誤串流拒絕及晚到回條。 [操作方式](SESSION_CLOSURE.md#查看全館未確認席位) · [管理台畫面](../artifacts/console-venue-all-seats-149-package/venue-debrief-all.png)
+- Windows 0.50.7 同機通過 550 項整合。獨立及合併各有 25 個同機模擬玩家端。兩批全館 API 與原逐房回條、七項戰績及席位一致。以實際解壓包 Chromium 開啟兩批原收尾，確認未確認清單為空，解除篩選各顯示 25 席，合併場結束後再核對原獨立批次。六場雙封存共 809 格回放、6 份 CSV 與 50 筆伺服器回條，活動場次及程序已清理。原生及管理 C／F 快照分別有 220、18 個非資料庫檔案一致。 [驗證摘要](../artifacts/venue-all-seats-0.31.149-validation.json)
+- 解壓核對 564 筆清單，另通過 825 項 HTTP、131 項世界串流與 107 項管理包檢查。沿用 Windows 與 Quest 0.50.7 遊戲。功能來源 `1b7d2048` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商硬體仍待驗收。 [管理包](WINDOWS_CONTROL_PACKAGE.md) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43273236104)
+
 ## 2026-11-13 Windows 玩家重連後的戰績驗收 ZIP
 
 - 啟動器 1.11 核對等待中的原場次、完整最終戰績及結束斷線。同一份缺少戰績欄位的日誌在舊版進入 Final 並建立 ZIP，新版維持等待，斷線後顯示未確認且保留原檔。46 項實際 Framework 監看測試通過，涵蓋錯場次、重複結果、截斷及合法重連。另通過 44 項解壓包檢查、17 項 WinForms 處理流程及 36 項連線檔檢查。 [驗證摘要](../artifacts/player-evidence-1.11-validation.json)

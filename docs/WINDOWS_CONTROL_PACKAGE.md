@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-13 `VRCommand-ControlServer-0.31.149-venue-seats-win-x64.zip` 為 53,095,201 bytes，SHA-256 `d614b1c30e250b692b41efb488ac06c67cc51e8bbbe02b7245129ba929aeec64`。主控可在所選結束批次查全館未確認席位、下載個人 CSV 並開啟原回放。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.149-venue-seats-win-x64.zip) · [操作方式](SESSION_CLOSURE.md#查看全館未確認席位)
+
 2026-11-13 `VRCommand-ControlServer-0.31.148-windows-source-gate-win-x64.zip` 為 53,092,123 bytes，SHA-256 `6ff6abe82f062ad9d099feea0138ca9cf956c30c251b67797399235ae3581b04`。支援在 Windows 五房連線檔交付前核對原遊戲來源。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.148-windows-source-gate-win-x64.zip) · [分發方式](EXTERNAL_CLIENTS.md#依電腦分發-windows-vr-連線檔)
 
 2026-11-13 `VRCommand-ControlServer-0.31.147-recording-pages-win-x64.zip` 為 53,091,893 bytes，SHA-256 `98a1a672aed29e91be0c7b569cfc0473426eb5efda2f407b55e679178a554df6`。觀戰清單先顯示最近 30 筆錄製及使用中的來源，可向前載入並從收尾直接回放原場次。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.147-recording-pages-win-x64.zip) · [操作說明](WORLD_RECORDING.md#載入較早錄製)
