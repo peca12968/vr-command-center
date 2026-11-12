@@ -20,6 +20,7 @@ param(
     [Parameter(ParameterSetName='Bundle')][switch]$DeployMappedSeats,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$RetryIncomplete,
     [Parameter(ParameterSetName='Bundle')][switch]$VerifyTrackedSeats,
+    [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$DeploymentReport,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,120)][int]$WaitForTrackedSeconds,
     [Parameter(ParameterSetName='Bundle')][switch]$AllHeadsets,
     [Parameter(ParameterSetName='Venue')][Parameter(ParameterSetName='Bundle')][Parameter(Mandatory, ParameterSetName='Windows')][ValidateNotNullOrEmpty()][string]$ManagementApi,
@@ -795,21 +796,61 @@ function Get-QuestMapFingerprint([object[]]$Map, [string]$Salt) {
     return Get-QuestDeploymentFingerprint $Salt ($assignments -join "`n")
 }
 
+function Test-QuestDeploymentMap($Venue, [object[]]$Map, $Report) {
+    $proof = $Report.retry
+    return ('deployment' -ceq $Report.phase -and $Report.managementVerified -is [bool] -and $Report.managementVerified -and
+        $Venue.Report.topology -ceq $Report.topology -and
+        (Test-JsonInteger $proof.version) -and $proof.version -eq 1 -and $Venue.BundleSha256 -ceq $proof.venueSha256 -and
+        $proof.salt -is [string] -and $proof.salt -cmatch '\A[0-9a-f]{32}\z' -and
+        (Get-QuestMapFingerprint $Map $proof.salt) -ceq $proof.mapSha256 -and
+        $proof.devices -is [array] -and $proof.devices.Count -eq $Map.Count -and
+        @($proof.devices | Sort-Object -Unique).Count -eq $Map.Count -and
+        $Report.devices -is [array] -and $Report.devices.Count -eq $Map.Count)
+}
+
+function Test-QuestDeploymentRow($Entry, $Row, $DeviceFingerprint, [int]$VersionCode) {
+    return ($DeviceFingerprint -is [string] -and $DeviceFingerprint -cmatch '\A[0-9a-f]{64}\z' -and
+        (Test-JsonInteger $Entry.roomId) -and $Entry.roomId -eq $Row.roomId -and
+        (Test-JsonInteger $Entry.seat) -and $Entry.seat -eq $Row.seat -and
+        (Test-JsonInteger $Entry.versionCode) -and $Entry.versionCode -eq $VersionCode)
+}
+
+function Test-QuestDeployedAdmission($Entry, $Ticket) {
+    return ($Entry.apkVerified -is [bool] -and $Entry.apkVerified -and
+        $Ticket.SessionId.ToString('D') -ceq $Entry.sessionId -and $Ticket.PlayerId.ToString('D') -ceq $Entry.playerId -and
+        $Ticket.AdmissionId.ToString('D') -ceq $Entry.admissionId -and $Ticket.Config.port -eq $Entry.port)
+}
+
+function Read-QuestTrackedDeployment($Venue, [object[]]$Map, [string]$Path) {
+    $original = Read-DeploymentJson $Path 32768 'original deployment report'
+    $report = $original.Document
+    if ($report.complete -isnot [bool] -or -not $report.complete -or
+        -not (Test-JsonInteger $report.expectedVersionCode) -or $report.expectedVersionCode -lt 1 -or
+        $report.expectedVersionCode -gt [int]::MaxValue -or
+        $report.expectedApkSha256 -isnot [string] -or $report.expectedApkSha256 -cnotmatch '\A[0-9a-f]{64}\z' -or
+        -not (Test-JsonInteger $report.apkVerificationVersion) -or $report.apkVerificationVersion -ne 1 -or
+        -not (Test-QuestDeploymentMap $Venue $Map $report)) {
+        throw 'Use a complete release-verified deployment report for this original ZIP and device map.'
+    }
+    for ($index = 0; $index -lt $Map.Count; $index++) {
+        $entry = $report.devices[$index]
+        $row = $Map[$index]
+        $ticket = $Venue.Connections["$($row.roomId)/$($row.seat)"].Ticket
+        if (-not (Test-QuestDeploymentRow $entry $row $report.retry.devices[$index] $report.expectedVersionCode) -or
+            'launch-requested' -cne $entry.status -or $entry.filesVerified -isnot [bool] -or -not $entry.filesVerified -or
+            -not (Test-JsonInteger $entry.port) -or -not (Test-QuestDeployedAdmission $entry $ticket)) {
+            throw 'The deployment report does not match the original completed seat admissions.'
+        }
+    }
+    return Get-QuestSha256 $original.Bytes
+}
+
 function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, [string]$ExpectedHash) {
     $original = Read-DeploymentJson $RetryIncomplete 32768 'original deployment report'
     $previous = $original.Document
     $proof = $previous.retry
-    $hashPattern = '\A[0-9a-f]{64}\z'
-    if ($previous.phase -cne 'deployment' -or $previous.complete -isnot [bool] -or $previous.complete -or
-        $previous.managementVerified -isnot [bool] -or -not $previous.managementVerified -or
-        $previous.topology -cne $Venue.Report.topology -or $previous.expectedVersionCode -ne $VersionCode -or
-        [string]$previous.expectedApkSha256 -cne $ExpectedHash -or
-        -not (Test-JsonInteger $proof.version) -or $proof.version -ne 1 -or $proof.venueSha256 -cne $Venue.BundleSha256 -or
-        $proof.salt -isnot [string] -or $proof.salt -cnotmatch '\A[0-9a-f]{32}\z' -or
-        $proof.mapSha256 -cne (Get-QuestMapFingerprint $Map $proof.salt) -or
-        $proof.devices -isnot [array] -or $proof.devices.Count -ne $Map.Count -or
-        @($proof.devices | Sort-Object -Unique).Count -ne $Map.Count -or
-        $previous.devices -isnot [array] -or $previous.devices.Count -ne $Map.Count) {
+    if ($previous.complete -isnot [bool] -or $previous.complete -or $previous.expectedVersionCode -ne $VersionCode -or
+        [string]$previous.expectedApkSha256 -cne $ExpectedHash -or -not (Test-QuestDeploymentMap $Venue $Map $previous)) {
         throw 'Use an incomplete deployment report for this original ZIP, device map and APK requirement.'
     }
     $completed = [Collections.Generic.List[object]]::new()
@@ -821,19 +862,13 @@ function Read-QuestDeploymentRetry($Venue, [object[]]$Map, [int]$VersionCode, [s
     for ($index = 0; $index -lt $Map.Count; $index++) {
         $entry = $previous.devices[$index]
         $row = $Map[$index]
-        if ($proof.devices[$index] -isnot [string] -or $proof.devices[$index] -cnotmatch $hashPattern -or
-            -not (Test-JsonInteger $entry.roomId) -or $entry.roomId -ne $row.roomId -or
-            -not (Test-JsonInteger $entry.seat) -or $entry.seat -ne $row.seat -or
-            -not (Test-JsonInteger $entry.versionCode) -or $entry.versionCode -ne $VersionCode) {
+        if (-not (Test-QuestDeploymentRow $entry $row $proof.devices[$index] $VersionCode)) {
             throw 'Deployment report rows do not match the original mapped seats.'
         }
         if ($entry.status -ceq 'launch-requested') {
             $ticket = $Venue.Connections["$($row.roomId)/$($row.seat)"].Ticket
             if ($completed.Count -ne $index -or $entry.filesVerified -isnot [bool] -or -not $entry.filesVerified -or
-                ($ExpectedHash -and ($previous.apkVerificationVersion -ne 1 -or $entry.apkVerified -isnot [bool] -or
-                    -not $entry.apkVerified -or $entry.sessionId -cne $ticket.SessionId.ToString('D') -or
-                    $entry.playerId -cne $ticket.PlayerId.ToString('D') -or $entry.admissionId -cne $ticket.AdmissionId.ToString('D') -or
-                    $entry.port -ne $ticket.Config.port))) {
+                ($ExpectedHash -and ($previous.apkVerificationVersion -ne 1 -or -not (Test-QuestDeployedAdmission $entry $ticket)))) {
                 throw 'Deployment report has inconsistent completed seats.'
             }
             $seatResult = [ordered]@{ roomId = $row.roomId; seat = $row.seat; status = 'launch-requested';
@@ -1155,6 +1190,9 @@ $alignment = $null
 $alignmentHash = $null
 if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
     if ($WaitForTrackedSeconds -and -not $VerifyTrackedSeats) { throw 'Use -WaitForTrackedSeconds only with -VerifyTrackedSeats.' }
+    if ($DeploymentReport -and (-not $VerifyTrackedSeats -or -not $DeviceMap)) {
+        throw 'Use -DeploymentReport only with -VerifyTrackedSeats and the original -DeviceMap.'
+    }
     if ($RetryIncomplete -and (-not $DeployMappedSeats -or -not $DeviceMap)) {
         throw 'Use -RetryIncomplete with -DeployMappedSeats and the original -DeviceMap.'
     }
@@ -1168,7 +1206,10 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
         }
         $map = @(if ($DeviceMap) { Read-QuestDeviceMap $DeviceMap -Partial:$AllowPartialMap }
             else { foreach ($room in 1..5) { foreach ($seat in 1..5) { @{ roomId = $room; seat = $seat } } } })
-        $result = Confirm-TrackedSeats (Read-VenueBundle $VenueBundle 0 0) $map -IncludeAllHeadsets:$AllHeadsets
+        $venue = Read-VenueBundle $VenueBundle 0 0 -Fingerprint:([bool]$DeploymentReport)
+        if ($DeploymentReport) { $deploymentSha256 = Read-QuestTrackedDeployment $venue $map $DeploymentReport }
+        $result = Confirm-TrackedSeats $venue $map -IncludeAllHeadsets:$AllHeadsets
+        if ($DeploymentReport) { $result.deploymentSha256 = $deploymentSha256 }
         $result | ConvertTo-Json -Depth 4 -Compress
         if (-not $result.complete) { exit 1 }
         return

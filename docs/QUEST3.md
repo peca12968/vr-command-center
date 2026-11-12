@@ -459,6 +459,19 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connect
 
 混合 Quest 3 與 VIVE 名冊的場館可加上 `-AllHeadsets`，用同一份 ZIP 核對全部 25 席。此模式不能搭配裝置清單或部分席位。報告含 `scope: "venue"`，各席的 `registeredHeadset` 取自管理名冊。報告核對伺服器接收的追蹤狀態，實體裝置型號與控制器操作由現場驗收。
 
+##### 核對本次部署與追蹤席位
+
+若本批使用 `-ReleaseReport` 核對 APK 並完成部署，可加 `-DeploymentReport` 指定保存的完整部署 JSON。請使用部署時的原 ZIP 與 `-DeviceMap`。若當時只部署部分席位，保留 `-AllowPartialMap`。完成重試後可使用最新的完整累計報告。
+
+```powershell
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -VenueBundle .\vr-venue-connections.zip `
+    -ManagementApi http://127.0.0.1:5081 -VerifyTrackedSeats `
+    -DeviceMap .\quest-batch.json -AllowPartialMap -DeploymentReport .\quest-deployment.json `
+    -WaitForTrackedSeconds 30
+```
+
+工具在連線管理服務前，先核對 ZIP 原檔雜湊、裝置對照表，以及每席原場次、玩家、入場名額和端口。每席須已完成 APK 與檔案核對，並送出啟動指令。取樣報告的 `deploymentSha256` 是所讀部署報告原檔的 SHA-256。查詢仍依管理服務當下的追蹤狀態判定，且全程無需 ADB。 [核對發行 APK](#核對頭盔內已安裝的發行-apk)
+
 ##### 等候指定席位同時追蹤就緒
 
 加入 `-WaitForTrackedSeconds` 可在原部署包核對完成後，等待 1 至 120 秒。每次重新取得同一個五房取樣，並逐席核對原入場名額及 1.5 秒的畫格期限。只有同一輪所有指定席位就緒才會結束等待並回傳退出碼 0。

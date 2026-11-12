@@ -1277,27 +1277,82 @@ else:
             thread = Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
+                release, _, release_env = self.release_report()
+                api = f'http://127.0.0.1:{server.server_port}'
+                auth = {'VR_COMMAND_MASTER_KEY': 'private-fixture-master'}
                 result = self.run_fleet(files, mapping, '-AllowPartialMap', '-DeployMappedSeats',
-                    '-ManagementApi', f'http://127.0.0.1:{server.server_port}', environment={'VR_COMMAND_MASTER_KEY': 'private-fixture-master'})
+                    '-ManagementApi', api, release=release, environment={**release_env, **auth})
+                self.assertEqual(0, result.returncode, result.stderr)
                 deploy_calls = calls.copy()
                 before = (self.root / 'adb.log').read_bytes()
+                bundle = self.root / 'quest-mr-venue.zip'
+                original_bundle = bundle.read_bytes()
+                original_map = mapping.read_bytes()
+                deployment = self.root / 'deployment.json'
+                deployment.write_bytes(result.stdout.encode('utf-8'))
+                deployment_hash = hashlib.sha256(deployment.read_bytes()).hexdigest()
+                bound = ('-DeploymentReport', str(deployment))
                 flags = ('-VerifyTrackedSeats', '-DeviceMap', str(mapping), '-AllowPartialMap',
-                         '-ManagementApi', f'http://127.0.0.1:{server.server_port}')
-                env = {**os.environ, 'VR_COMMAND_MASTER_KEY': 'private-fixture-master'}
-                ready = self.run_bundle(files, *flags, environment=env)
+                         '-ManagementApi', api)
+
+                def readback(*options):
+                    return subprocess.run(['pwsh', '-NoProfile', '-NonInteractive', '-File',
+                                           str(ROOT / 'scripts/deploy-quest.ps1'), '-VenueBundle', str(bundle),
+                                           '-AdbPath', str(ROOT / 'tests/fixtures/mock-quest-fleet.ps1'), *options],
+                                          capture_output=True, encoding='utf-8', timeout=20,
+                                          env={**os.environ, **release_env, **auth, 'VR_QUEST_FLEET_FIXTURE': str(self.root)})
+
+                legacy = readback(*flags)
+                self.assertEqual(0, legacy.returncode, legacy.stderr)
+                self.assertNotIn('deploymentSha256', json.loads(legacy.stdout))
+                ready = readback(*flags, *bound, '-WaitForTrackedSeconds', '5')
                 self.assertEqual(0, ready.returncode, ready.stderr)
-                self.assertEqual(['tracked-ready'] * 2, [row['status'] for row in json.loads(ready.stdout)['seats']])
+                ready_report = json.loads(ready.stdout)
+                self.assertEqual(['tracked-ready'] * 2, [row['status'] for row in ready_report['seats']])
+                self.assertEqual(deployment_hash, ready_report['deploymentSha256'])
+                self.assertEqual({'maximumSeconds': 5, 'samples': 1, 'outcome': 'ready'}, ready_report['wait'])
+                for canary in ('fixture-03', 'HARDWARE-SERIAL-', 'v2.', 'private-fixture-master'):
+                    self.assertNotIn(canary, ready.stdout + ready.stderr)
                 for changes in ({'mrStartState': 'WaitingProfile'}, {'mrStartState': 'Ready', 'origin': 'Simulation'}):
                     readiness.update(changes)
-                    pending = self.run_bundle(files, *flags, environment=env)
+                    pending = readback(*flags, *bound)
                     self.assertEqual(1, pending.returncode, pending.stderr)
-                    self.assertEqual(['mr-profile-pending'] * 2, [row['status'] for row in json.loads(pending.stdout)['seats']])
+                    pending_report = json.loads(pending.stdout)
+                    self.assertEqual(deployment_hash, pending_report['deploymentSha256'])
+                    self.assertEqual(['mr-profile-pending'] * 2, [row['status'] for row in pending_report['seats']])
+
+                header_error = 'complete release-verified deployment report for this original ZIP and device map'
+                seat_error = 'does not match the original completed seat admissions'
+                modified = self.root / 'modified-deployment.json'
+                for changes, seat, error in (
+                    ({'complete': False}, False, header_error),
+                    ({'expectedApkSha256': None}, False, header_error),
+                    ({'admissionId': str(self.admissions[0])}, True, seat_error),
+                    ({'port': '7777'}, True, seat_error),
+                    ({'apkVerified': False}, True, seat_error),
+                    ({'filesVerified': False}, True, seat_error),
+                ):
+                    with self.subTest(changes=changes):
+                        changed = json.loads(deployment.read_bytes())
+                        (changed['devices'][0] if seat else changed).update(changes)
+                        modified.write_text(json.dumps(changed), encoding='utf-8')
+                        self.assert_rejected(readback(*flags, '-DeploymentReport', str(modified)), error)
+                changed_map = json.loads(original_map)
+                changed_map['seats'][0]['serial'] = 'fixture-04'
+                mapping.write_text(json.dumps(changed_map), encoding='utf-8')
+                self.assert_rejected(readback(*flags, *bound), header_error)
+                mapping.write_bytes(original_map)
+                bundle.write_bytes(original_bundle + b'ignored ZIP suffix')
+                self.assert_rejected(readback(*flags, *bound), header_error)
+                bundle.write_bytes(original_bundle)
+                self.assert_rejected(readback('-VerifyTrackedSeats', '-ManagementApi', api, *bound), 'original -DeviceMap')
+                self.assert_rejected(readback('-DeviceMap', str(mapping), *bound), 'only with -VerifyTrackedSeats')
+                self.assertEqual(deployment_hash, hashlib.sha256(deployment.read_bytes()).hexdigest())
                 self.assertEqual(before, (self.root / 'adb.log').read_bytes())
-                self.assertEqual(deploy_calls + (deploy_calls[:2] + ['/api/venue/tracked-readiness']) * 3, calls)
+                self.assertEqual(deploy_calls + (deploy_calls[:2] + ['/api/venue/tracked-readiness']) * 4, calls)
             finally:
                 server.shutdown()
                 thread.join(timeout=5)
-        self.assertEqual(0, result.returncode, result.stderr)
         report = json.loads(result.stdout)
         self.assertEqual((True, True, True, 2, 23), (report['complete'], report['managementVerified'],
                          report['alignmentPinsVerified'], report['mappedSeats'], report['unmappedSeats']))
