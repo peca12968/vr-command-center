@@ -1,5 +1,6 @@
 """Real WebSocket publisher, authenticated SSE observation and SQLite restart checks."""
 from copy import deepcopy
+from concurrent.futures import ThreadPoolExecutor
 import csv
 from decimal import Decimal
 import io
@@ -774,6 +775,78 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         native = subprocess.run(shared_command, cwd=ROOT, capture_output=True, text=True, encoding="utf-8", timeout=30)
         check(native.returncode != 0 and shared.read_bytes() == intact[:-1], "Torn shared source fails closed in the native recovery process without truncation")
         check(request(shared_route) == shared_info, "Rejected source recovery changes no persisted world state")
+
+        list_path = "/api/world-recordings"
+        initial = {row["header"]["sessionId"]: row for row in request(list_path)}
+        for index in range(288):
+            room = 1 if index % 2 == 0 else 5
+            historical = request("/api/sessions", expected=201, method="POST", body={"missionId": damage_mission["id"],
+                "mode": "Independent", "roomIds": [room]})
+            historical_id = historical["id"]
+            historical_session = f"/api/sessions/{historical_id}"
+            if index % 12:
+                stream = str(uuid4())
+                request(historical_session + "/combat-stream", "GameServer", method="POST",
+                        body={"streamId": stream, "origin": "Simulation"})
+                publisher = WebSocket(port, historical_session + "/world/publish", tokens["GameServer"])
+                try:
+                    reply = publisher.send({"type": "header", "payload": dict(damage_header, sessionId=historical_id,
+                        streamId=stream, roomIds=[room])})
+                    assert reply["type"] == "ack", reply
+                    initial[historical_id] = reply["info"]
+                finally:
+                    publisher.close()
+            request(historical_session + "/commands", method="POST", body={"commandId": str(uuid4()), "action": "End"})
+
+        expected_lists = {}
+        for role in ("Master", "Room1", "Room5"):
+            ordered = request("/api/sessions?includeEnded=true", role)
+            expected_lists[role] = [initial[row["id"]] for row in ordered if row["id"] in initial]
+            check(request(list_path, role) == expected_lists[role],
+                  f"Large recording list keeps exact management order, metadata and authorized rooms for {role}")
+        check(len(expected_lists["Master"]) > 256 and len(expected_lists["Room5"]) > 128,
+              "Large recording fixture spans multiple archive reads and includes incomplete and sealed sources")
+
+        demo = subprocess.Popen([*shared_command[:2], "--world-journal", str(directory / "list-live.worldlog"),
+            "--base-url", base, "--key-file", str(keys), "--demo-room", "5", "--seconds", "3"],
+            cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8")
+        for _ in range(100):
+            if any(row["header"]["sessionId"] not in initial and 0 < row["acceptedSequence"] and not row["complete"]
+                   for row in request(list_path)):
+                break
+            if demo.poll() is not None:
+                raise AssertionError("Publisher exited before concurrent list observations")
+            time.sleep(.03)
+        else:
+            raise AssertionError("No advancing publisher available for list observations")
+
+        def list_during_publication(role):
+            observations = set()
+            times = []
+            for _ in range(24):
+                started = time.perf_counter()
+                entries = request(list_path, role)
+                times.append((time.perf_counter() - started) * 1000)
+                assert [row for row in entries if row["header"]["sessionId"] in initial] == expected_lists[role]
+                fresh = [row for row in entries if row["header"]["sessionId"] not in initial]
+                assert len(fresh) <= 1 and all(row["header"]["roomIds"] == [5] for row in fresh)
+                observations.update(row["acceptedSequence"] for row in fresh if not row["complete"] and row["acceptedSequence"] > 0)
+                time.sleep(.07)
+            return observations, times
+
+        with ThreadPoolExecutor(max_workers=3) as pool:
+            listing = list(pool.map(list_during_publication, ("Master", "Room1", "Room5")))
+        output, errors = demo.communicate(timeout=15)
+        check(demo.returncode == 0, "Native .NET publisher completes while archive readers are active: " + errors[-400:])
+        live_info = request("/api/sessions/" + json.loads(output)["sessionId"] + "/world")
+        check(live_info["complete"] and live_info["acceptedSequence"] == 64
+              and len(listing[0][0]) >= 2 and not listing[1][0] and len(listing[2][0]) >= 2,
+              "Concurrent archive reads observe advancing publication within the original room scope and the source seals")
+        print("ARCHIVE_LIST_PROBE " + json.dumps({
+            role: {"historyRows": len(expected_lists[role]), "liveSequences": sorted(observed),
+                   "medianMilliseconds": round(sorted(times)[len(times) // 2], 2)}
+            for role, (observed, times) in zip(("Master", "Room1", "Room5"), listing, strict=True)
+        }))
         print(f"All {count} world streaming checks passed. No Unity or headset execution.")
     finally:
         if demo is not None and demo.poll() is None:

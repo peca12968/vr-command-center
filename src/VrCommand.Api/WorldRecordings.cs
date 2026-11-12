@@ -39,6 +39,21 @@ public record WorldFrameView(WorldRecordingPacket Packet, PlayerStatistics[] Sta
 // This instance shares the session store's process lease and uses its own synchronous SQLite transactions.
 public sealed partial class WorldRecordings : IDisposable
 {
+    private const int RecordingListBatchSize = 128;
+    private readonly record struct RecordingRow(string Header, long Accepted, long Duration, bool Complete, string Updated)
+    {
+        internal static RecordingRow Read(SqliteDataReader row) =>
+            new(row.GetString(0), row.GetInt64(1), row.GetInt64(2), row.GetInt64(3) != 0, row.GetString(4));
+
+        internal WorldRecordingInfo ToInfo(string missionName)
+        {
+            var header = WorldJson.Read<WorldRecordingHeader>(Header);
+            var captured = header.captureStartedAtUtc == "" ? (DateTimeOffset?)null
+                : DateTimeOffset.ParseExact(header.captureStartedAtUtc, "O", System.Globalization.CultureInfo.InvariantCulture).AddMilliseconds(Duration);
+            return new(header, Accepted, Duration, Complete, DateTimeOffset.Parse(Updated), missionName, captured);
+        }
+    }
+
     private readonly object gate = new();
     private readonly SqliteConnection db;
     private readonly SessionManager manager;
@@ -142,30 +157,50 @@ public sealed partial class WorldRecordings : IDisposable
     public WorldRecordingInfo Info(Guid id, OperatorIdentity actor)
     {
         var session = manager.Get(id, actor);
+        RecordingRow recording;
         lock (gate)
         {
             using var command = Command("SELECT header,accepted,duration,complete,updated FROM recordings WHERE session=$id", ("$id", id.ToString("D")));
             using var row = command.ExecuteReader();
             if (!row.Read()) throw new KeyNotFoundException("No world recording for this session.");
-            var header = WorldJson.Read<WorldRecordingHeader>(row.GetString(0));
-            var captured = header.captureStartedAtUtc == "" ? (DateTimeOffset?)null : DateTimeOffset.ParseExact(header.captureStartedAtUtc, "O", System.Globalization.CultureInfo.InvariantCulture).AddMilliseconds(row.GetInt64(2));
-            return new(header, row.GetInt64(1), row.GetInt64(2), row.GetInt64(3) != 0, DateTimeOffset.Parse(row.GetString(4)), session.Mission.Definition.Name, captured);
+            recording = RecordingRow.Read(row);
         }
+        return recording.ToInfo(session.Mission.Definition.Name);
     }
 
-    public WorldRecordingInfo[] List(OperatorIdentity actor)
+    public WorldRecordingInfo[] List(OperatorIdentity actor, CancellationToken cancellation = default)
     {
-        // Session metadata is already scoped and intentionally retained by the management service.
-        lock (gate)
+        cancellation.ThrowIfCancellationRequested();
+        var result = new List<WorldRecordingInfo>();
+        // Authorize and order the immutable session IDs before reading the archive.
+        foreach (var batch in manager.List(true, actor).Chunk(RecordingListBatchSize))
         {
-            var result = new List<WorldRecordingInfo>();
-            foreach (var session in manager.List(true, actor))
+            cancellation.ThrowIfCancellationRequested();
+            var ids = batch.Select(session => session.Id.ToString("D")).ToArray();
+            var encoded = WorldJson.Write(ids);
+            var recordings = new Dictionary<string, RecordingRow>(batch.Length, StringComparer.Ordinal);
+            lock (gate)
             {
-                using var exists = Command("SELECT 1 FROM recordings WHERE session=$id", ("$id", session.Id.ToString("D")));
-                if (exists.ExecuteScalar() is not null) result.Add(Info(session.Id, actor));
+                cancellation.ThrowIfCancellationRequested();
+                using var command = Command("""
+                    SELECT r.header,r.accepted,r.duration,r.complete,r.updated,r.session
+                    FROM json_each($ids) wanted CROSS JOIN recordings r WHERE r.session=wanted.value
+                    """, ("$ids", encoded));
+                using var rows = command.ExecuteReader();
+                while (rows.Read())
+                {
+                    cancellation.ThrowIfCancellationRequested();
+                    recordings.Add(rows.GetString(5), RecordingRow.Read(rows));
+                }
             }
-            return result.ToArray();
+            for (var index = 0; index < batch.Length; index++)
+            {
+                cancellation.ThrowIfCancellationRequested();
+                if (recordings.TryGetValue(ids[index], out var recording))
+                    result.Add(recording.ToInfo(batch[index].Mission.Definition.Name));
+            }
         }
+        return result.ToArray();
     }
 
     public WorldFrameView? Frame(Guid id, long sequence, OperatorIdentity actor)

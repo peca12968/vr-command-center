@@ -12,7 +12,8 @@ public static class WorldRoutes
     private static OperatorIdentity Actor(HttpContext context) => (OperatorIdentity)context.Items[typeof(OperatorIdentity)]!;
     public static void MapWorldRoutes(this WebApplication app)
     {
-        app.MapGet("/api/world-recordings", (WorldRecordings store, HttpContext context) => Results.Json(store.List(Actor(context)), WorldJson.Options));
+        app.MapGet("/api/world-recordings", (WorldRecordings store, HttpContext context) =>
+            Results.Json(store.List(Actor(context), context.RequestAborted), WorldJson.Options));
         app.MapGet("/api/sessions/{id:guid}/world", (Guid id, bool? includeDebriefReceipts, int? observerRoomId, WorldRecordings store, HttpContext context) =>
         {
             var actor = Actor(context);
