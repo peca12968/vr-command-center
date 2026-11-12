@@ -14,6 +14,11 @@ public static class WorldRoutes
     {
         app.MapGet("/api/world-recordings", (WorldRecordings store, HttpContext context) =>
             Results.Json(store.List(Actor(context), context.RequestAborted), WorldJson.Options));
+        app.MapGet("/api/world-recordings/page", (int? limit, Guid? before, Guid[]? include, WorldRecordings store, HttpContext context) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            return Results.Json(store.Page(Actor(context), limit ?? 30, before, include ?? [], context.RequestAborted), WorldJson.Options);
+        });
         app.MapGet("/api/sessions/{id:guid}/world", (Guid id, bool? includeDebriefReceipts, int? observerRoomId, WorldRecordings store, HttpContext context) =>
         {
             var actor = Actor(context);

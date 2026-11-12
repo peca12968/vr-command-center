@@ -777,12 +777,30 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
         check(request(shared_route) == shared_info, "Rejected source recovery changes no persisted world state")
 
         list_path = "/api/world-recordings"
+        page_path = list_path + "/page"
         initial = {row["header"]["sessionId"]: row for row in request(list_path)}
+        older_active = request("/api/sessions", expected=201, method="POST", body={"missionId": damage_mission["id"],
+            "mode": "Independent", "roomIds": [3]})["id"]
+        older_route = f"/api/sessions/{older_active}"
+        older_stream = str(uuid4())
+        request(older_route + "/combat-stream", "GameServer", method="POST",
+                body={"streamId": older_stream, "origin": "Simulation"})
+        publisher = WebSocket(port, older_route + "/world/publish", tokens["GameServer"])
+        try:
+            reply = publisher.send({"type": "header", "payload": dict(damage_header, sessionId=older_active,
+                streamId=older_stream, roomIds=[3])})
+            assert reply["type"] == "ack", reply
+            initial[older_active] = reply["info"]
+        finally:
+            publisher.close()
+        source_free = None
         for index in range(288):
             room = 1 if index % 2 == 0 else 5
             historical = request("/api/sessions", expected=201, method="POST", body={"missionId": damage_mission["id"],
                 "mode": "Independent", "roomIds": [room]})
             historical_id = historical["id"]
+            if index == 0:
+                source_free = historical_id
             historical_session = f"/api/sessions/{historical_id}"
             if index % 12:
                 stream = str(uuid4())
@@ -806,6 +824,45 @@ with tempfile.TemporaryDirectory(prefix="vr-world-") as directory:
                   f"Large recording list keeps exact management order, metadata and authorized rooms for {role}")
         check(len(expected_lists["Master"]) > 256 and len(expected_lists["Room5"]) > 128,
               "Large recording fixture spans multiple archive reads and includes incomplete and sealed sources")
+
+        for role, expected in expected_lists.items():
+            collected, cursor = [], None
+            while len(collected) < len(expected):
+                query = f"?before={cursor}" if cursor else ""
+                page = request(page_path + query, role)
+                chunk = expected[len(collected):len(collected) + 30]
+                assert page["recordings"] == chunk
+                assert page["pinned"] == ([initial[older_active]] if not cursor and role == "Master" else [])
+                collected.extend(page["recordings"])
+                next_cursor = chunk[-1]["header"]["sessionId"] if len(collected) < len(expected) else None
+                assert page["nextBefore"] == next_cursor and (not next_cursor or next_cursor != cursor)
+                cursor = next_cursor
+            check(collected == expected, f"Paginated catalog reproduces every scoped row in the same order for {role}")
+
+        room_one = next(row for row in reversed(expected_lists["Room1"]) if row["header"]["roomIds"] == [1])
+        room_five = next(row for row in reversed(expected_lists["Room5"]) if row["header"]["roomIds"] == [5])
+        one_id, five_id = (row["header"]["sessionId"] for row in (room_one, room_five))
+        newest_id = expected_lists["Room5"][0]["header"]["sessionId"]
+        included = request(f"{page_path}?limit=1&include={one_id}&include={five_id}&include={five_id}&include={newest_id}", "Room5")
+        check(included["recordings"] == expected_lists["Room5"][:1] and included["pinned"] == [room_five]
+              and included["nextBefore"] == newest_id,
+              "Explicit pins include each older authorized recording once and suppress both foreign and already listed IDs")
+        limited = request(f"{page_path}?limit=50", "Master")
+        check(limited["recordings"] == expected_lists["Master"][:50]
+              and limited["nextBefore"] == limited["recordings"][-1]["header"]["sessionId"],
+              "The maximum page size bounds the response and returns an exclusive cursor")
+        request(f"{page_path}?before={one_id}", "Room5", 404)
+        request(f"{page_path}?before={source_free}", "Master", 404)
+        request(f"{page_path}?before={uuid4()}", "Master", 404)
+        check(True, "Foreign, source-free, and nonexistent cursor IDs have the same not-found response")
+        empty = "00000000-0000-0000-0000-000000000000"
+        for query in ("limit=0", "limit=51", "before=invalid", f"before={empty}", f"include={empty}",
+                      "&".join(f"include={uuid4()}" for _ in range(7))):
+            request(page_path + "?" + query, "Master", 400)
+        request(page_path, "invalid", 401)
+        check(True, "Recording pagination validates query bounds and requires authentication")
+        request(older_route + "/commands", method="POST", body={"commandId": str(uuid4()), "action": "End"})
+        check(request(page_path)["pinned"] == [], "The previously pinned source drops out of the live pins after End")
 
         demo = subprocess.Popen([*shared_command[:2], "--world-journal", str(directory / "list-live.worldlog"),
             "--base-url", base, "--key-file", str(keys), "--demo-room", "5", "--seconds", "3"],

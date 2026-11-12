@@ -652,11 +652,14 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     check(await page.locator('[data-venue-tracking-begin]').count() === 0, 'Ordinary archived sessions retain their replay without a tracking shortcut');
     check(await openReplay(extra.id).count() === 0 && originalReplay.streamId === ending.combatStream.streamId,
       'A no-source room has no replay shortcut and the original closure identifies its actual stream');
-    const archiveListRoute = '**/api/world-recordings';
+    const archiveListRoute = url => url.pathname === '/api/world-recordings/page';
     await page.route(archiveListRoute, async route => {
       const original = await route.fetch();
-      const recordings = await original.json();
-      await route.fulfill({ response: original, json: recordings.filter(item => item.header.sessionId !== ending.id) });
+      const catalog = await original.json();
+      const keep = item => item.header.sessionId !== ending.id;
+      await route.fulfill({ response: original, json: {
+        ...catalog, recordings: catalog.recordings.filter(keep), pinned: catalog.pinned.filter(keep)
+      } });
     });
     await openReplay(ending.id).click();
     await page.locator('#world-message').filter({ hasText: '目前無法讀取原場次的錄製' }).waitFor();
@@ -677,10 +680,40 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     check(Number(partial.get('throughFrame')) === partialReplay.throughSequence,
       'A partial shortcut uses the exact original saved boundary from the closure');
     await page.locator('#tab-operations').click();
+    for (let i = 0; i < 31; i++) {
+      const historical = await api('/sessions', 'POST', { missionId: mission.id, mode: 'Independent', roomIds: [4] }, 'Master', 201);
+      active.add(historical.id);
+      await prepare(historical.id, 4, true);
+      await end(historical.id);
+    }
+    const { recordings: newestRecordings, nextBefore: recordingCursor } = await api('/world-recordings/page');
+    assert.equal(newestRecordings.length, 30);
+    assert.ok(newestRecordings.every(row => row.header.sessionId !== ending.id));
+    const directCatalog = page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return archiveListRoute(url) && url.searchParams.getAll('include').includes(ending.id);
+    });
     const sealed = await replayRequest(ending.id);
     check(!sealed.has('throughFrame') && await page.locator('#world-room').inputValue() === '1'
       && await page.locator('#world-camera').inputValue() === 'top',
       'A sealed shortcut opens the original room in top view after a new session occupies the room');
+    const directPage = await (await directCatalog).json();
+    const olderRecordings = page.locator('#world-older');
+    check(directPage.recordings.length === 30 && directPage.nextBefore === recordingCursor
+      && directPage.pinned.some(row => row.header.sessionId === ending.id)
+      && await recording.locator('option').count() === 30 + directPage.pinned.length,
+      'The closure shortcut requests and displays its original recording outside the bounded first page');
+    const earlierCatalog = page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return archiveListRoute(url) && url.searchParams.get('before') === recordingCursor;
+    });
+    await olderRecordings.click();
+    const earlierPage = await (await earlierCatalog).json();
+    await page.locator('#world-list-status').filter({ hasText: `已載入 ${30 + earlierPage.recordings.length} 筆錄製` }).waitFor();
+    check(earlierPage.recordings.some(row => row.header.sessionId === ending.id) && earlierPage.nextBefore === null
+      && await olderRecordings.isHidden() && await recording.locator(`option[value="${ending.id}"]`).count() === 1
+      && await recording.inputValue() === ending.id && await playerCanvas.isVisible(),
+      'Loading older recordings preserves the selected replay and shows the original recording only once');
     await page.locator('#tab-operations').click();
     const reportsUrl = base + '/api' + reportsPath;
     const fetchReports = () => fetch(reportsUrl, { headers: { Authorization: 'Bearer ' + tokens.Master } });

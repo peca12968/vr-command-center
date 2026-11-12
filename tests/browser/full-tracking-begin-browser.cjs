@@ -387,11 +387,11 @@ with zipfile.ZipFile(io.BytesIO(sys.stdin.buffer.read())) as archive:
       await page.locator('#refresh').click();
       if (mode === 'Linked') {
         originalLinked = { row, batch: ended.requestId };
-        const list = '**/api/world-recordings';
+        const list = url => url.pathname === '/api/world-recordings/page';
         await page.route(list, async route => {
-          const response = await route.fetch(), rows = await response.json();
-          rows.find(item => item.header.sessionId === row.sessionId).header.streamId = randomUUID();
-          await route.fulfill({ response, json: rows });
+          const response = await route.fetch(), catalog = await response.json();
+          [...catalog.recordings, ...catalog.pinned].find(item => item.header.sessionId === row.sessionId).header.streamId = randomUUID();
+          await route.fulfill({ response, json: catalog });
         }, { times: 1 });
         await tracking(row.sessionId).click();
         await page.locator('#world-message').filter({ hasText: '目前無法讀取原場次的錄製' }).waitFor();

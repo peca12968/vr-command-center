@@ -34,6 +34,7 @@ public record WorldFrameView(WorldRecordingPacket Packet, PlayerStatistics[] Sta
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? ObserverRoomId { get; init; }
 }
+public record WorldRecordingPage(WorldRecordingInfo[] Recordings, WorldRecordingInfo[] Pinned, Guid? NextBefore);
 
 // Indexed, append-only frames are read on demand; startup never loads an entire world recording.
 // This instance shares the session store's process lease and uses its own synchronous SQLite transactions.
@@ -171,9 +172,37 @@ public sealed partial class WorldRecordings : IDisposable
     public WorldRecordingInfo[] List(OperatorIdentity actor, CancellationToken cancellation = default)
     {
         cancellation.ThrowIfCancellationRequested();
-        var result = new List<WorldRecordingInfo>();
-        // Authorize and order the immutable session IDs before reading the archive.
-        foreach (var batch in manager.List(true, actor).Chunk(RecordingListBatchSize))
+        return ReadRecordings(manager.List(true, actor), cancellation).ToArray();
+    }
+
+    public WorldRecordingPage Page(OperatorIdentity actor, int limit, Guid? before, Guid[] include, CancellationToken cancellation)
+    {
+        if (limit is < 1 or > 50 || before == Guid.Empty || include.Length > 6 || include.Contains(Guid.Empty))
+            throw new ArgumentException("Use a page size from 1 to 50 and at most six nonempty recording IDs.");
+        cancellation.ThrowIfCancellationRequested();
+        var sessions = manager.List(true, actor);
+        var start = 0;
+        if (before is Guid cursor)
+        {
+            var index = Array.FindIndex(sessions, session => session.Id == cursor);
+            if (index < 0 || !ReadRecordings([sessions[index]], cancellation).Any())
+                throw new KeyNotFoundException("No world recording for the requested cursor.");
+            start = index + 1;
+        }
+        var page = ReadRecordings(sessions.Skip(start), cancellation, limit + 1).Take(limit + 1).ToArray();
+        var recordings = page.Take(limit).ToArray();
+        var returned = recordings.Select(row => Guid.Parse(row.Header.sessionId)).ToHashSet();
+        var requested = include.ToHashSet();
+        var pinned = ReadRecordings(sessions.Where(session => !returned.Contains(session.Id)
+            && (requested.Contains(session.Id) || (before is null && session.State != SessionState.Ended))), cancellation).ToArray();
+        return new(recordings, pinned, page.Length > limit ? Guid.Parse(recordings[^1].Header.sessionId) : null);
+    }
+
+    private IEnumerable<WorldRecordingInfo> ReadRecordings(IEnumerable<SessionView> sessions, CancellationToken cancellation,
+        int batchSize = RecordingListBatchSize)
+    {
+        cancellation.ThrowIfCancellationRequested();
+        foreach (var batch in sessions.Chunk(batchSize))
         {
             cancellation.ThrowIfCancellationRequested();
             var ids = batch.Select(session => session.Id.ToString("D")).ToArray();
@@ -197,10 +226,9 @@ public sealed partial class WorldRecordings : IDisposable
             {
                 cancellation.ThrowIfCancellationRequested();
                 if (recordings.TryGetValue(ids[index], out var recording))
-                    result.Add(recording.ToInfo(batch[index].Mission.Definition.Name));
+                    yield return recording.ToInfo(batch[index].Mission.Definition.Name);
             }
         }
-        return result.ToArray();
     }
 
     public WorldFrameView? Frame(Guid id, long sequence, OperatorIdentity actor)

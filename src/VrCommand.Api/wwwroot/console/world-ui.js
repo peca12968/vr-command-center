@@ -16,6 +16,8 @@ const shortId = id => id && id !== '00000000-0000-0000-0000-000000000000' ? id.s
 const roomName = room => room === 'all' ? '全部房間' : '房間 ' + room;
 const LIVE_RETRY_DELAYS = [500, 1000, 2000];
 const LIVE_IDLE_MILLISECONDS = 6000;
+const RECORDING_PAGE_SIZE = 30;
+const recordingId = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const hasRecordedPose = player => player.connected && (player.rig.kind === 'Simulated' || player.rig.kind === 'Tracked');
 const isBeginWitness = witness => witness?.kind === 'tracking-begin' || witness?.kind === 'participation-begin';
 const witnessLabels = { enemies: '敵軍', environment: '環境', 'tracking-begin': '追蹤開場', 'participation-begin': '有效姿態開場',
@@ -23,6 +25,7 @@ const witnessLabels = { enemies: '敵軍', environment: '環境', 'tracking-begi
 
 export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips, download) {
   let active = false, scene, controller, epoch = 0, listEpoch = 0, listController, info, frame, geometry = '', mode = '', connected = false, received = 0;
+  let recordingRows = [], pinnedRecordings = [], nextRecordingBefore = null;
   let connecting = false, stepping = false, savedLimit = null, savedFinished = false;
   let reviewPlayer = null, actors = new Map(), actorInitialized = false;
   let clipStart = null, clipEnd = null, clipPosition = null, clipPlayback = '';
@@ -61,7 +64,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     reviewPlayer = returnLiveSource = null; clearClip(); bindVenueReview(null);
     stop(); stopList(); info = frame = savedLimit = null; savedFinished = false; geometry = ''; mode = ''; cameras.reset(); cameraForm.reset(); reviewControls();
     liveEventKind.value = '';
-    $('world-recording').replaceChildren(); $('world-player').hidden = true; message('選取已錄製的場次，開始觀戰或回放。');
+    clearRecordingList(); $('world-player').hidden = true; message('選取已錄製的場次，開始觀戰或回放。');
     bindLiveRooms([], []);
     recordingControls(); bindRooms([]);
     resetActors(); scene?.reset(); $('world-sound').textContent = '音效：關閉'; $('world-sound').disabled = true;
@@ -78,26 +81,91 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     }
     return result;
   }
+  function clearRecordingList() {
+    recordingRows = []; pinnedRecordings = []; nextRecordingBefore = null;
+    $('world-recording').replaceChildren();
+    $('world-list-status').textContent = '';
+    recordingControls();
+  }
+  async function recordingPage(signal, before = null, include = []) {
+    const query = new URLSearchParams({ limit: RECORDING_PAGE_SIZE });
+    if (before) query.set('before', before);
+    for (const id of new Set(include.filter(Boolean))) query.append('include', id);
+    const page = await (await response('/api/world-recordings/page?' + query, signal)).json();
+    if (!Array.isArray(page?.recordings) || page.recordings.length > RECORDING_PAGE_SIZE
+      || !Array.isArray(page.pinned) || page.pinned.length > 11
+      || (page.nextBefore !== null && (page.recordings.length !== RECORDING_PAGE_SIZE
+        || page.nextBefore === before || page.nextBefore !== page.recordings.at(-1)?.header?.sessionId)))
+      throw new Error('錄製清單頁面不符。');
+    const ids = new Set();
+    for (const row of [...page.recordings, ...page.pinned]) {
+      const id = row?.header?.sessionId;
+      if (typeof id !== 'string' || !recordingId.test(id) || ids.has(id)
+        || typeof row.missionName !== 'string' || !Array.isArray(row.header.roomIds)
+        || !Number.isSafeInteger(row.acceptedSequence) || row.acceptedSequence < 0 || typeof row.complete !== 'boolean')
+        throw new Error('錄製清單資料不符。');
+      ids.add(id);
+    }
+    return page;
+  }
+  function renderRecordingOptions(selected) {
+    const picker = $('world-recording');
+    const empty = picker.selectedOptions[0]?.value === '' ? picker.selectedOptions[0] : null;
+    const historyIds = new Set(recordingRows.map(row => row.header.sessionId));
+    const rows = [...recordingRows, ...pinnedRecordings.filter(row => !historyIds.has(row.header.sessionId))];
+    picker.replaceChildren(...(empty ? [empty] : []), ...rows.map(row => {
+      const option = new Option(`${row.missionName} · 房間 ${visibleRooms(row).join('、')} · ${row.header.origin} · ${row.complete ? '完整' : '錄製未封存'} · ${row.header.sessionId.slice(0, 8)}`, row.header.sessionId);
+      option.dataset.complete = String(row.complete); option.dataset.accepted = String(row.acceptedSequence);
+      return option;
+    }));
+    if ((empty && selected === '') || rows.some(row => row.header.sessionId === selected)) picker.value = selected;
+    return rows;
+  }
+  async function loadOlderRecordings() {
+    if (!active || listController || !nextRecordingBefore) return;
+    const before = nextRecordingBefore, request = listEpoch, key = getKey();
+    const controller = listController = new AbortController();
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]);
+    const current = () => request === listEpoch && active && key === getKey();
+    recordingControls();
+    $('world-list-status').textContent = '正在載入較早的錄製…';
+    try {
+      const page = await recordingPage(signal, before);
+      if (!current()) return;
+      const historyIds = new Set(recordingRows.map(row => row.header.sessionId));
+      if (page.recordings.some(row => historyIds.has(row.header.sessionId))) throw new Error('較早錄製的清單重複。');
+      recordingRows.push(...page.recordings);
+      nextRecordingBefore = page.nextBefore;
+      renderRecordingOptions($('world-recording').value);
+      $('world-list-status').textContent = `已載入 ${recordingRows.length} 筆錄製。`;
+    } catch {
+      if (current()) $('world-list-status').textContent = '無法載入較早的錄製，請重試。';
+    } finally {
+      if (listController === controller) listController = null;
+      if (current()) recordingControls();
+    }
+  }
   async function refresh(target = null) {
     stopList(); stopRoomSwitch();
     const request = listEpoch, key = getKey(); if (!active || !key) return;
     const controller = listController = new AbortController();
-    const signal = target ? AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]) : controller.signal;
-    const roomRead = canWriteClips() ? response('/api/rooms', AbortSignal.any([signal, AbortSignal.timeout(8000)]))
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]);
+    const roomRead = canWriteClips() ? response('/api/rooms', signal)
       .then(result => result.json()).catch(() => []) : [];
     let recordings;
     liveRoomControls();
+    recordingControls();
+    $('world-list-status').textContent = '';
     try {
-      const rows = await (await response('/api/world-recordings', signal)).json();
-      if (request !== listEpoch || !active || getKey() !== key) return;
-      recordings = rows;
       const picker = $('world-recording'), selected = picker.value;
-      picker.replaceChildren(...rows.map(row => {
-        const option = document.createElement('option'); option.value = row.header.sessionId;
-        option.dataset.complete = String(row.complete); option.dataset.accepted = String(row.acceptedSequence);
-        option.textContent = `${row.missionName} · 房間 ${visibleRooms(row).join('、')} · ${row.header.origin} · ${row.complete ? '完整' : '錄製未封存'} · ${row.header.sessionId.slice(0, 8)}`;
-        return option;
-      }));
+      const include = target ? [target.sessionId, ...(target.venue?.rooms.map(room => room.sessionId) ?? [])] : [selected];
+      const page = await recordingPage(signal, null, include);
+      if (request !== listEpoch || !active || getKey() !== key) return;
+      const currentSelection = picker.value;
+      if (!target && currentSelection !== selected && currentSelection
+        && ![...page.recordings, ...page.pinned].some(row => row.header.sessionId === currentSelection)) return;
+      recordingRows = page.recordings; pinnedRecordings = page.pinned; nextRecordingBefore = page.nextBefore;
+      const rows = recordings = renderRecordingOptions(currentSelection);
       if (target) {
         const row = rows.find(item => item.header.sessionId === target.sessionId);
         const begin = isBeginWitness(target.witness) ? target.witness : null;
@@ -128,8 +196,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
         void connect(target.mode, 0, sequence, limit, replayTarget);
         return;
       }
-      if (rows.some(row => row.header.sessionId === selected)) picker.value = selected;
-      else if (selected) resetRecording();
+      if (currentSelection && !rows.some(row => row.header.sessionId === currentSelection)) resetRecording();
       recordingControls(); reviewControls();
       if (!rows.length) message('目前沒有可讀取的世界錄製；等待遊戲伺服器開始發送。');
     } catch (error) {
@@ -141,6 +208,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
       const rooms = await roomRead;
       if (listController === controller) listController = null;
       if (recordings && request === listEpoch && active && getKey() === key) bindLiveRooms(rooms, recordings);
+      if (request === listEpoch && active && getKey() === key) recordingControls();
       liveRoomControls();
     }
   }
@@ -220,6 +288,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     $('world-live').disabled = !selected;
     $('world-replay').disabled = !(Number(selected?.dataset.accepted) > 0);
     $('world-replay').textContent = selected?.dataset.complete === 'false' ? '回放已保存片段' : '從頭回放';
+    $('world-older').hidden = !nextRecordingBefore;
+    $('world-older').disabled = !nextRecordingBefore || !!listController;
   }
   function resetRecording() {
     observerRoom = null;
@@ -1016,6 +1086,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     } finally { clearTimeout(idleTimer); }
   }
   $('world-refresh').addEventListener('click', () => refresh());
+  $('world-older').addEventListener('click', loadOlderRecordings);
   $('world-sound').addEventListener('click', async () => { if (scene?.weather.version === 1 || scene?.weather.audio.combat.version === 1) { const pending = scene.weather.audio.toggle(); status(); await pending; if (active && getKey()) status(); } });
   $('world-recording').addEventListener('change', resetRecording);
   $('world-live').addEventListener('click', openLive);
@@ -1056,7 +1127,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     active = value;
     if (value) {
       if (target) {
-        $('world-recording').replaceChildren();
+        clearRecordingList();
         resetRecording();
         message('正在尋找原場次錄製…');
       }
