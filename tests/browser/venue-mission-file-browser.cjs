@@ -9,6 +9,8 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
   const mode = page.locator('#launch-mode'), mission = page.locator('#launch-mission');
   const panel = page.locator('#launch-mission-file-panel'), input = page.locator('#venue-missions-file');
   const save = page.locator('#download-venue-missions'), load = page.locator('#load-venue-missions');
+  const preview = page.locator('#preview-venue-missions'), review = page.locator('#venue-missions-review');
+  const reviewRows = review.locator('tbody tr');
   const status = page.locator('#venue-missions-file-status'), create = page.locator('#create-session-form button[type=submit]');
   const choices = page.locator('#launch-room-missions-fields select');
   const selected = () => choices.evaluateAll(fields => fields.map(field => field.value));
@@ -46,7 +48,8 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
     check(await panel.isHidden(), 'Room control has no venue mission file controls');
     await login('Master');
     await panel.locator('summary').click();
-    check(await save.isDisabled() && await load.isDisabled(), 'A single room and an empty file selection cannot save or load a venue configuration');
+    check(await save.isDisabled() && await load.isDisabled() && await preview.isDisabled(),
+      'A single room and an empty file selection cannot save, review or load a venue configuration');
     await mission.selectOption(a.id);
     await mode.selectOption('Linked');
     const linked = await savedFile('vr-venue-missions-linked.json');
@@ -63,6 +66,8 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
 
     const head = await api(`/missions/${a.id}/revisions`, 'POST', { ...template, durationSeconds: 690, props: [] },
       'Master', 201, undefined, randomUUID());
+    const invalidLayout = await api('/missions', 'POST', { ...template, name: '未修正配置',
+      props: [template.props[0], template.props[0]] }, 'Master', 201);
     const blocker = await api('/sessions', 'POST', { mode: 'Independent', roomIds: [3], missionId: a.id }, 'Master', 201);
     active.add(blocker.id);
     await login('Master');
@@ -74,6 +79,39 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
     await draft.fill('691');
     await page.locator('#tab-operations').click();
     await panel.locator('summary').click();
+    await mission.selectOption(head.id);
+    await page.locator('#launch-room').selectOption('1');
+    await input.setInputFiles(independent.target);
+    await preview.click();
+    await review.waitFor();
+    check(await mode.inputValue() === 'Independent' && await mission.inputValue() === head.id && await draft.inputValue() === '691'
+      && (await api('/sessions')).map(session => session.id).join() === blocker.id,
+      'Reviewing a file preserves the active preparation, draft and existing sessions');
+    const expectedReview = ids.map((id, index) => [index === 0 ? head.id : '', id]);
+    assert.deepEqual(await reviewRows.evaluateAll(rows => rows.map(row => [row.dataset.currentMission, row.dataset.fileMission])), expectedReview);
+    check((await reviewRows.nth(0).innerText()).includes('第 1 版（歷史）')
+      && (await reviewRows.nth(1).innerText()).includes('MR · 420 秒')
+      && await reviewRows.locator('[data-status=valid]').count() === 5
+      && (await review.innerText()).includes('目前為單房獨立，檔案指定五房各自獨立'),
+      'The review shows exact original assignments, historical versions, MR duration and each original layout result');
+    await mode.selectOption('Linked');
+    check(await reviewRows.locator('td:nth-child(2)').evaluateAll(cells => cells.every(cell => cell.textContent.includes('第 2 版')))
+      && (await review.innerText()).includes('目前為五房全連線'),
+      'Changing the current plan updates the comparison while the file assignments stay fixed');
+    await review.screenshot({ path: path.join(screenshots, 'venue-mission-file-review.png') });
+    await page.setViewportSize({ width: 390, height: 844 });
+    check(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
+      'A narrow screen keeps the preview table inside its own scroll region');
+    await page.setViewportSize({ width: 1440, height: 1080 });
+    const withInvalidLayout = structuredClone(independent.value);
+    withInvalidLayout.rooms[4].missionId = invalidLayout.id;
+    await input.setInputFiles({ name: 'layout.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(withInvalidLayout)) });
+    check(await review.isHidden(), 'Choosing a different file clears the old comparison immediately');
+    await preview.click();
+    await review.waitFor();
+    check(await reviewRows.last().locator('[data-status=invalid]').count() === 1
+      && await mission.inputValue() === head.id && await mode.inputValue() === 'Linked',
+      'The preview flags the actual invalid room layout while leaving the current plan untouched');
     await input.setInputFiles(independent.target);
     await load.click();
     await status.filter({ hasText: '已載入' }).waitFor();
@@ -106,7 +144,7 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
     const versionPath = `**/api/missions/${a.id}/version`;
     await page.route(versionPath, route => { intercept(route); }, { times: 1 });
     await input.setInputFiles(linked.target);
-    await load.click();
+    await preview.click();
     const held = await Promise.race([pending, new Promise((_, reject) =>
       setTimeout(() => reject(new Error('The historical revision read did not start')), 10000).unref())]);
     try { await page.locator('#tab-missions').click(); }
@@ -114,7 +152,7 @@ module.exports = async function venueMissionFileBrowser({ context, api, tokens, 
     await page.waitForFunction(() => !document.querySelector('#mission-fields').disabled);
     await page.locator('#tab-operations').click();
     check(await mode.inputValue() === 'IndependentSet' && await panel.getAttribute('open') === null
-      && await input.inputValue() === '' && await status.textContent() === '',
+      && await input.inputValue() === '' && await status.textContent() === '' && await review.isHidden(),
       'Leaving operations discards an in-flight file read and clears the file selection');
     await panel.locator('summary').click();
     await input.setInputFiles(linked.target);

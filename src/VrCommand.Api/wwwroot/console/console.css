@@ -66,6 +66,10 @@
 .layout-proposal-issues:empty{display:none}
 #prop-copy-preview [data-layout-invalid=true] [data-envelope],#prop-move-preview [data-layout-invalid=true] [data-envelope]{stroke:#ff9f8b;stroke-width:.14}
 [data-layout-status=invalid]{color:#ffb9a8}
+#venue-missions-review table{min-width:520px}
+#venue-missions-review :is(td,th):is(:nth-child(2),:nth-child(3)){white-space:normal;overflow-wrap:anywhere}
+#venue-missions-review td:first-child{min-width:0}
+#venue-missions-review [data-changed=true] td:nth-child(3){color:var(--accent)}
 #launch-layout-spawns circle{fill:#4e839433;stroke:#80c4d5;stroke-width:.05;stroke-dasharray:.08 .04}
 #launch-layout-spawns text{fill:#b2dfec;font-size:.3px;text-anchor:middle}
 #launch-layout-spawns [data-route-missing] circle{fill:#ffbb6333;stroke:#ffbb63}

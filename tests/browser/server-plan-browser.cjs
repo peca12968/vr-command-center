@@ -179,6 +179,18 @@ async function roundTripMissionFile(page, base, token, mode, missions, output) {
   assert.equal(await page.locator('#launch-mode').inputValue(), 'Independent');
   await panel.locator('summary').click();
   await page.locator('#venue-missions-file').setInputFiles(filename);
+  await page.locator('#preview-venue-missions').click();
+  const review = page.locator('#venue-missions-review');
+  await review.waitFor();
+  const reviewed = await review.locator('tbody tr').evaluateAll(rows => rows.map((row, index) => ({
+    roomId: index + 1, missionId: row.dataset.fileMission, layout: row.cells[3].dataset.status
+  })));
+  assert.deepEqual(reviewed, plan.rooms.map(room => ({ ...room, layout: 'valid' })));
+  assert.equal(await page.locator('#launch-mode').inputValue(), 'Independent');
+  const label = mode === 'Linked' ? 'linked' : 'independent';
+  if (mode === 'Linked') assert((await review.locator('tbody td:nth-child(3)').allTextContents()).every(value => value.includes('（歷史）')));
+  await fs.writeFile(path.join(path.dirname(output), `native-${label}-mission-file-review.json`),
+    JSON.stringify({ mode, rooms: reviewed }, null, 2), { flag: 'wx' });
   await page.locator('#load-venue-missions').click();
   await page.locator('#venue-missions-file-status').filter({ hasText: '已載入五房任務配置' }).waitFor();
   assert.equal(await page.locator('#launch-mode').inputValue(), mode);

@@ -551,6 +551,9 @@ def main():
             check(observed['filePlan'] == {'schemaVersion': 1, 'mode': 'Linked',
                                           'rooms': [{'roomId': room, 'missionId': mission['id']} for room in rooms]},
                   'fresh console reopens the saved Linked mission file with all five original assignments')
+            check(read(out/'native-linked-mission-file-review.json') == {'mode': 'Linked',
+                  'rooms': [{'roomId': room, 'missionId': mission['id'], 'layout': 'valid'} for room in rooms]},
+                  'fresh console previews each original Linked assignment and layout before loading')
         prepared = observed['prepared']
         check(prepared['id'] != original['id'] and prepared['mode'] == 'Linked' and prepared['roomIds'] == rooms
               and prepared['mission'] == mission and prepared['mission']['id'] != head['id']
@@ -4416,6 +4419,9 @@ def main():
                     if args.check_venue_mission_file_ui:
                         check(observed['filePlan'] == {'schemaVersion': 1, 'mode': 'IndependentSet', **body},
                               'fresh console reopens the saved independent mission file with the five original assignments')
+                        check(read(out/'native-independent-mission-file-review.json') == {'mode': 'IndependentSet',
+                              'rooms': [dict(room, layout='valid') for room in body['rooms']]},
+                              'fresh console previews each original independent assignment and layout before loading')
                     check(observed['rejection'] == {'roomId': 4, 'invalidProps': [0, 1],
                           'marked': [{'roomId': room, 'indices': [0, 1]} for room in (4, 5)]},
                           'the exact creation rejection marks the two shared invalid props before the browser submits corrected assignments')

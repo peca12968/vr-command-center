@@ -218,9 +218,15 @@
             <div class="button-row">
               <button id="download-venue-missions" type="button" class="quiet" disabled>下載目前配置</button>
               <label>配置 JSON<input id="venue-missions-file" type="file" accept=".json,application/json" disabled></label>
+              <button id="preview-venue-missions" type="button" class="quiet" disabled>預覽配置</button>
               <button id="load-venue-missions" type="button" class="quiet" disabled>載入配置</button>
             </div>
             <p id="venue-missions-file-status" class="hint" role="status"></p>
+            <div id="venue-missions-review" class="table-scroll" role="region" aria-label="五房任務配置預覽" tabindex="0" hidden>
+              <p id="venue-missions-review-summary" class="hint"></p>
+              <table><thead><tr><th scope="col">房間</th><th scope="col">目前準備</th><th scope="col">檔案指定</th><th scope="col">檔案版本場地</th></tr></thead>
+                <tbody id="venue-missions-review-rows"></tbody></table>
+            </div>
           </details>
           <details id="launch-room-layouts" class="layout-report" hidden>
             <summary>同時查看五房平面圖</summary>
@@ -518,7 +524,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.150 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.151 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>
