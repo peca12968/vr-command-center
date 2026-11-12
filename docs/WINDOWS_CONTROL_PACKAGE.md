@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-13 `VRCommand-ControlServer-0.31.159-clip-loop-win-x64.zip` 為 53,114,782 bytes，SHA-256 `1bd809dc89bbebf9c9790f68ba1f86bae73ebb6505f5f17235266e3df732e472`。主控台可循環播放已標記的任務片段。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.159-clip-loop-win-x64.zip) · [回放操作](WORLD_RECORDING.md#重看指定片段)
+
 2026-11-13 `VRCommand-ControlServer-0.31.158-venue-receipts-win-x64.zip` 為 53,113,932 bytes，SHA-256 `8aa9aef7c3defca4d38acd9c055625b7c374ace2f6cbab3e8f6f7ccb976e7d43`。全館收尾可下載含全員確認回條的場館驗收 ZIP。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.158-venue-receipts-win-x64.zip) · [收尾操作](SESSION_CLOSURE.md#下載驗收-zip-與全員回條)
 
 2026-11-13 `VRCommand-ControlServer-0.31.157-mission-enemies-final-win-x64.zip` 為 53,111,901 bytes，SHA-256 `585fa62ffcc4a46e2893dd1fbad3a167b53adeb24933ca37a14982e5956ef93b`。五房任務準備可逐房核對初始敵軍設定。解壓核對 564 筆清單，包含 544 個管理服務發行檔案。 [管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.157-mission-enemies-final-win-x64.zip) · [任務設定](MISSION_VERSIONS.md#逐房指定任務版本)

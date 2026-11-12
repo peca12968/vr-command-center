@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 任務回放循環播放片段
+
+- Windows 管理包 0.31.159 在「指定回放片段」提供「循環播放片段」。每輪都核對原起訖與串流終點，再回到起點。播放沿用所選房間、鏡頭及個人檢討範圍，支援暫停及取消循環。 [操作方式](WORLD_RECORDING.md#重看指定片段)
+- 來源與解壓版各通過 137 項觀戰與回放檢查。瀏覽器核對了原範圍的第二輪、暫停保留畫格、取消後停在原終點，以及缺少終點確認時停止重播。完整 Chromium 1,070 項、Node 113 項與 Windows 管理包 107 項通過。瀏覽器使用真管理服務與 .NET 轉送的模擬錄製。 [管理包](WINDOWS_CONTROL_PACKAGE.md) · [驗證紀錄](../artifacts/world-clip-loop-159-validation.json)
+- 功能來源 `d34b46d` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43318810676)
+
 ## 2026-11-13 合併下載場館驗收與全員回條
 
 - 管理包 0.31.158 在所選原收尾批次提供「下載驗收 ZIP 與全員回條」。資料齊備及名冊全數確認後，ZIP 會保留原封存內容並內附 `debrief-receipts.json`。離線清單產生器及驗收工具可直接使用。 [收尾操作](SESSION_CLOSURE.md#下載驗收-zip-與全員回條)
