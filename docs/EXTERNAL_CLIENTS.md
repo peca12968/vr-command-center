@@ -272,6 +272,33 @@ python .\scripts\check-venue-udp-preflight.py `
 
 可將完整報告的路徑填入封存驗收清單的 `udpPreflightBatch`。請保留原雙端報告，以及 `launchBinding` 所引用的原計畫和預覽，並維持檔案間的路徑。結束後，驗收工具會用遊戲伺服器實際綁定時間與已確認的玩家來源重驗每組，並比對原計畫與封存的場次、任務版本及端點。若透過 `--batch` 重新納入含 `launchBinding` 的報告，須再次提供相同的計畫和預覽。`network` 為 `same-host` 的結果代表同機 UDP，跨機連線與頭盔仍須現場測試。
 
+#### 從原啟動預覽產生網路清單
+
+先在 `seat-addresses.json` 保存本階段所有 Windows 與 Quest 的席位 IPv4。格式為版本 `1`，`seats` 中每列有 `roomId`、`seat` 及 `address`。以下是五房各一席的範例，地址請替換為現場值。
+
+```json
+{
+  "version": 1,
+  "seats": [
+    {"roomId": 1, "seat": 1, "address": "192.168.1.21"},
+    {"roomId": 2, "seat": 1, "address": "192.168.1.22"},
+    {"roomId": 3, "seat": 1, "address": "192.168.1.23"},
+    {"roomId": 4, "seat": 1, "address": "192.168.1.24"},
+    {"roomId": 5, "seat": 1, "address": "192.168.1.25"}
+  ]
+}
+```
+
+```powershell
+python .\scripts\prepare-venue-network-plan.py `
+  --launch-plan .\venue-plan.json --launcher-preview .\venue-preview.json `
+  --seat-addresses .\seat-addresses.json --players-per-room 1 --output .\venue-network.json
+```
+
+預設每房五席，10 人階段用 `--players-per-room 2`。工具先核對原啟動計畫與成功預覽的模式、場次、任務版本、場次序號及 UDP 端點，再將原端點與席位寫成版本 1 網路清單。若要為同一批混合場另產生 Quest 專用清單，再跑一次並加上 `--quest-device-map .\device-map.json`，將 `--output` 改為 `quest-network.json`。Quest 子集的每個裝置須有各自的 IPv4，且每席都須存在於全館席位表。
+
+全館清單可交給 `check-venue-udp-preflight.py`，Quest 子集可交給 `probe-quest-venue.py`。請一併保留原啟動計畫、預覽與席位表。產生清單只核對檔案，實際 UDP 往返仍須依雙端報告驗收。 [Quest 批次預檢](QUEST3.md#批次預檢五房-quest-席位)
+
 ### 核對封存戰績與 UDP 來源
 
 離線核對工具使用已完成的一場 Windows 伺服器任務。啟動器 1.7 可勾選「記錄本次玩家連線來源（場館驗收）」，CLI 可加 `--peer-diagnostics on`。將公告及本機綁定都設為這台電腦實際使用的 IPv4，選擇名冊固定的場次。結束後等待原啟動器寫出 `sealed-stopped` 報告，並等玩家寫完戰績與斷線日誌。 [伺服器操作](WINDOWS_SERVER_PACKAGE.md#跨機來源診斷)

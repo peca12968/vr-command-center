@@ -11,6 +11,7 @@ from pathlib import Path
 import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 from types import SimpleNamespace
@@ -152,7 +153,29 @@ class QuestUdpProtocolTests(unittest.TestCase):
                  '-File', str(ROOT / 'scripts/check-lan-udp.ps1')]
         devices = [{'roomId': 1, 'seat': 2, 'serial': 'fixture-a', 'address': PEER},
                    {'roomId': 4, 'seat': 5, 'serial': 'fixture-b', 'address': '127.0.0.3'}]
-        group = {'roomIds': [1, 2, 3, 4, 5], 'address': SERVER, 'port': port, 'devices': devices}
+        rooms = list(range(1, 6))
+        planned = {'roomIds': rooms, 'sessionId': '00000000-0000-4000-8000-000000000001',
+                   'missionId': '00000000-0000-4000-8000-000000000002', 'sessionSequence': 3, 'port': port}
+        binding = {'address': SERVER, 'listenAddress': SERVER}
+        source_addresses = {(row['roomId'], row['seat']): row['address'] for row in devices}
+        launch, preview, seat_addresses, device_map, network = (
+            self.work / f'prepared-{name}.json' for name in ('launch', 'preview', 'seats', 'devices', 'network'))
+        launch.write_text(json.dumps({'version': 4, 'controlInstance': 'fixture/control-instance.json', 'topology': 'Linked',
+                                      **binding, 'servers': [planned]}), encoding='utf-8')
+        preview.write_text(json.dumps({'schemaVersion': 1, 'complete': True, 'status': 'venue-checked', 'topology': 'Linked',
+                                       'servers': [{**planned, **binding}]}), encoding='utf-8')
+        seat_addresses.write_text(json.dumps({'version': 1, 'seats': [
+            {'roomId': room, 'seat': seat, 'address': source_addresses.get((room, seat), SERVER)}
+            for room in rooms for seat in rooms]}), encoding='utf-8')
+        device_map.write_text(json.dumps({'version': 1, 'seats': [
+            {key: value for key, value in row.items() if key != 'address'} for row in devices]}), encoding='utf-8')
+        prepared = subprocess.run([sys.executable, str(ROOT / 'scripts/prepare-venue-network-plan.py'),
+                                   '--launch-plan', str(launch), '--launcher-preview', str(preview), '--seat-addresses', str(seat_addresses),
+                                   '--quest-device-map', str(device_map), '--output', str(network)], capture_output=True, text=True, timeout=15)
+        self.assertEqual(0, prepared.returncode, prepared.stderr)
+        mode, groups = quest_venue.load_plan(device_map, network)
+        self.assertEqual('Linked', mode)
+        self.assertEqual([{'roomIds': rooms, 'address': SERVER, 'port': port, 'devices': devices}], groups)
 
         def java_probe(args):
             command = [*self.java, str(args.key_file), args.local_address, args.peer_address, str(args.port),
@@ -162,7 +185,7 @@ class QuestUdpProtocolTests(unittest.TestCase):
         output = self.work / 'actual-batch'
         with patch.object(quest_venue, 'device_ready', return_value=True), patch.object(
                 quest_venue.quest_udp, 'run_probe', side_effect=java_probe) as probes, redirect_stderr(io.StringIO()):
-            report = quest_venue.probe_venue(shell, self.work / 'adb-fixture.exe', 'Linked', [group], output, 2, 900)
+            report = quest_venue.probe_venue(shell, self.work / 'adb-fixture.exe', mode, groups, output, 2, 900)
         self.assertTrue(report['complete'])
         self.assertEqual(2, report['verifiedSeats'])
         self.assertEqual([PEER, '127.0.0.3'], [call.args[0].local_address for call in probes.call_args_list])
@@ -178,7 +201,7 @@ class QuestUdpProtocolTests(unittest.TestCase):
             busy_output = self.work / 'busy'
             with patch.object(quest_venue, 'device_ready', return_value=True), patch.object(
                     quest_venue.quest_udp, 'run_probe') as probes, redirect_stderr(io.StringIO()):
-                busy = quest_venue.probe_venue(shell, self.work / 'adb-fixture.exe', 'Linked', [group], busy_output, 2, 900)
+                busy = quest_venue.probe_venue(shell, self.work / 'adb-fixture.exe', mode, groups, busy_output, 2, 900)
             self.assertFalse(busy['complete'])
             self.assertEqual(['listener', 'listener'], [seat['stage'] for seat in busy['groups'][0]['seats']])
             probes.assert_not_called()

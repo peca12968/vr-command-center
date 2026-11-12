@@ -36,6 +36,8 @@ python .\scripts\probe-quest-udp.py --adb $adb --serial $serial --key-file $key 
 
 先在各台要測的 Quest 安裝診斷 APK 並授權 ADB。批次工具在可操作這些 ADB 裝置的遊戲伺服器電腦上執行。它讀取原版本 1 的 `device-map.json`，再用開場前的網路清單取得各房正式綁定位址與埠。網路清單的 `sources` 必須和裝置清單的房號、席位完全相符，每台填自己的實際 IPv4。可只安排部分 Quest 席位。
 
+從 Windows 啟動器準備場館時，可用原啟動計畫、成功預覽及全館席位 IPv4 產生 Quest 專用清單。 [從原啟動預覽產生網路清單](EXTERNAL_CLIENTS.md#從原啟動預覽產生網路清單)
+
 ```json
 {
   "version": 1,

@@ -3,6 +3,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 import hashlib
 import hmac
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,120 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 SHELL = shutil.which(os.environ.get('VR_COMMAND_POWERSHELL', 'powershell.exe' if os.name == 'nt' else 'pwsh'))
 LOOPBACK = '127.0.0.1'
+PLAN_SCRIPT = ROOT / 'scripts/prepare-venue-network-plan.py'
+
+
+def guarded_documents(mode, ports, address=LOOPBACK, listen=None):
+    groups = [list(range(1, 6))] if mode == 'Linked' else [[room] for room in range(1, 6)]
+    rows = [{'roomIds': group, 'sessionId': f'00000000-0000-4000-8000-{index:012}',
+             'missionId': f'00000000-0000-4000-8000-{index + 10:012}', 'sessionSequence': index + 2, 'port': port}
+            for index, (group, port) in enumerate(zip(groups, ports, strict=True), 1)]
+    binding = {'address': address, 'listenAddress': listen if listen is not None else address}
+    return ({'version': 4, 'topology': mode, 'controlInstance': 'fixture/control-instance.json', **binding, 'servers': rows},
+            {'schemaVersion': 1, 'status': 'venue-checked', 'complete': True, 'topology': mode,
+             'servers': [{**row, **binding} for row in rows]})
+
+
+def prepare_network(launch, preview, seats, output, *options):
+    return subprocess.run([sys.executable, str(PLAN_SCRIPT), '--launch-plan', str(launch), '--launcher-preview', str(preview),
+                           '--seat-addresses', str(seats), '--output', str(output), *map(str, options)],
+                          capture_output=True, text=True, timeout=15)
+
+
+class NetworkPlanPreparationTests(unittest.TestCase):
+    def setUp(self):
+        scratch = tempfile.TemporaryDirectory(prefix='venue-network-plan-')
+        self.addCleanup(scratch.cleanup)
+        self.root = Path(scratch.name)
+
+    def store(self, name, value):
+        path = self.root / name
+        path.write_text(json.dumps(value), encoding='utf-8')
+        return path
+
+    def test_prepare_both_topologies_and_a_quest_subset_consumed_by_the_original_probe(self):
+        spec = importlib.util.spec_from_file_location('quest_venue_probe', ROOT / 'scripts/probe-quest-venue.py')
+        probe = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(probe)
+        rows = [{'roomId': room, 'seat': seat, 'address': f'192.168.5.{20 + room if seat == 2 else 15}'}
+                for room in range(1, 6) for seat in (1, 2)]
+        seats = self.store('seats.json', {'version': 1, 'seats': rows[::-1]})
+        devices = self.store('devices.json', {'version': 1, 'seats': [
+            {'roomId': 5, 'seat': 2, 'serial': 'fixture-late'}, {'roomId': 1, 'seat': 2, 'serial': 'fixture-first'}]})
+        for mode, ports in (('Independent', range(7777, 7782)), ('Linked', [7777])):
+            with self.subTest(mode=mode):
+                launch_value, preview_value = guarded_documents(mode, ports, '192.168.5.10')
+                launch_value['servers'].reverse()
+                launch, preview = (self.store(name, value) for name, value in (('launch.json', launch_value), ('preview.json', preview_value)))
+                before = {path: path.read_bytes() for path in (launch, preview, seats, devices)}
+                output = self.root / f'{mode}-all.json'
+                prepared = prepare_network(launch, preview, seats, output, '--players-per-room', 2)
+                self.assertEqual(0, prepared.returncode, prepared.stderr)
+                plan = json.loads(output.read_bytes())
+                self.assertEqual({'version', 'mode', 'endpoints', 'sources'}, plan.keys())
+                self.assertEqual(rows, plan['sources'])
+                self.assertEqual([{'roomIds': row['roomIds'], 'address': '192.168.5.10', 'port': row['port']}
+                                  for row in preview_value['servers']], plan['endpoints'])
+                self.assertEqual({'prepared': True, 'mode': mode, 'plannedSeats': 10, 'includedSeats': 10,
+                                  'endpointCount': len(ports), 'planSha256': hashlib.sha256(before[launch]).hexdigest(),
+                                  'previewSha256': hashlib.sha256(before[preview]).hexdigest()}, json.loads(prepared.stdout))
+                quest = self.root / f'{mode}-quest.json'
+                prepared = prepare_network(launch, preview, seats, quest, '--players-per-room', 2, '--quest-device-map', devices)
+                self.assertEqual(0, prepared.returncode, prepared.stderr)
+                self.assertEqual(2, json.loads(prepared.stdout)['includedSeats'])
+                self.assertEqual(plan['endpoints'], json.loads(quest.read_bytes())['endpoints'])
+                self.assertNotIn('fixture-', prepared.stdout + quest.read_text(encoding='utf-8'))
+                self.assertNotIn('192.168.', prepared.stdout)
+                original_mode, groups = probe.load_plan(devices, quest)
+                self.assertEqual(mode, original_mode)
+                self.assertEqual([(1, 2, '192.168.5.21'), (5, 2, '192.168.5.25')], [
+                    (device['roomId'], device['seat'], device['address']) for group in groups for device in group['devices']])
+                self.assertEqual(before, {path: path.read_bytes() for path in before})
+                previous = quest.read_bytes()
+                refused = prepare_network(launch, preview, seats, quest, '--players-per-room', 2)
+                self.assertEqual(1, refused.returncode)
+                self.assertEqual(previous, quest.read_bytes())
+
+    def test_rejects_mismatches_in_plan_preview_and_seat_inventory_before_output(self):
+        launch_value, preview_value = guarded_documents('Independent', range(7777, 7782))
+        seats_value = {'version': 1, 'seats': [{'roomId': room, 'seat': 1, 'address': '127.0.0.2'} for room in range(1, 6)]}
+        launch = self.store('launch.json', launch_value)
+        preview = self.store('preview.json', preview_value)
+        seats = self.store('seats.json', seats_value)
+        output = self.root / 'refused.json'
+
+        def rejects(message, *options):
+            result = prepare_network(launch, preview, seats, output, '--players-per-room', 1, *options)
+            self.assertEqual(1, result.returncode, result.stderr)
+            self.assertIn(message, result.stderr)
+            self.assertFalse(output.exists())
+
+        for key, value, message in (('sessionId', '00000000-0000-4000-8000-000000000099', 'session-mismatch'),
+                                    ('missionId', '00000000-0000-4000-8000-000000000099', 'mission-mismatch'),
+                                    ('sessionSequence', 25, 'session-sequence-mismatch'),
+                                    ('port', 9000, 'port-mismatch')):
+            with self.subTest(key=key):
+                self.store(preview.name, {**preview_value, 'servers': [*preview_value['servers'][:4], {**preview_value['servers'][4], key: value}]})
+                rejects(f'Room(s) 5 differ between the launch plan and preview ({message})')
+        _, wrong_mode = guarded_documents('Linked', [7777])
+        self.store(preview.name, wrong_mode)
+        rejects('different venue modes')
+        wildcard_launch, wildcard_preview = guarded_documents('Independent', range(7777, 7782), listen='0.0.0.0')
+        self.store(launch.name, wildcard_launch)
+        self.store(preview.name, wildcard_preview)
+        rejects('one concrete advertised and listening IPv4 address')
+        self.store(launch.name, launch_value)
+        self.store(preview.name, preview_value)
+        self.store(seats.name, {'version': 1, 'seats': seats_value['seats'][:-1]})
+        rejects('requested stage in room(s) 5')
+        self.store(seats.name, {'version': 1, 'seats': [{**seats_value['seats'][0], 'address': '192.168.5.20'}, *seats_value['seats'][1:]]})
+        rejects('only loopback or only private LAN')
+        self.store(seats.name, seats_value)
+        devices = self.store('devices.json', {'version': 1, 'seats': [{'roomId': 1, 'seat': 2, 'serial': 'fixture-a'}]})
+        rejects('room 1 seat 2', '--quest-device-map', devices)
+        self.store(devices.name, {'version': 1, 'seats': [
+            {'roomId': 1, 'seat': 1, 'serial': 'fixture-a'}, {'roomId': 5, 'seat': 1, 'serial': 'fixture-b'}]})
+        rejects('distinct IPv4 for each mapped Quest', '--quest-device-map', devices)
 
 
 def packet(key, kind, nonce):
@@ -131,7 +246,12 @@ class LanPreflightTests(unittest.TestCase):
             'address': LOOPBACK, 'listenAddress': LOOPBACK,
             'servers': [{key: value for key, value in guarded.items() if key not in ('address', 'listenAddress')}]})
         guarded_preview = self.venue_json('guarded-preview.json', {**launch, 'servers': [guarded]})
-        bound = self.venue_check(plan, 'bound.json', '--batch', self.root / 'readiness.json',
+        inventory = self.venue_json('seat-addresses.json', {'version': 1, 'seats': json.loads(plan.read_bytes())['sources']})
+        generated = self.root / 'prepared-network.json'
+        prepared = prepare_network(original, guarded_preview, inventory, generated)
+        self.assertEqual(0, prepared.returncode, prepared.stderr)
+        self.assertEqual(json.loads(plan.read_bytes()), json.loads(generated.read_bytes()))
+        bound = self.venue_check(generated, 'bound.json', '--batch', self.root / 'readiness.json',
                                  '--launcher-preview', guarded_preview, '--launch-plan', original)
         self.assertEqual({'plan': original.name, 'preview': guarded_preview.name, 'complete': True, 'mode': 'Linked',
                           'planSha256': hashlib.sha256(original.read_bytes()).hexdigest(),
@@ -199,9 +319,18 @@ class LanPreflightTests(unittest.TestCase):
             'sources': [{'roomId': room, 'seat': 1, 'address': peer} for room in range(1, 6)]}
         plan = self.venue_json('plan.json', plan_value)
         manifest = self.venue_json('pairs.json', {'version': 1, 'pairs': list(reversed(pairs))})
-        report = self.venue_check(plan, 'readiness.json', '--pairs', manifest)
+        launch_value, preview_value = guarded_documents('Independent', ports)
+        launch = self.venue_json('launch.json', launch_value)
+        preview = self.venue_json('preview.json', preview_value)
+        inventory = self.venue_json('seat-addresses.json', {'version': 1, 'seats': plan_value['sources']})
+        generated = self.root / 'prepared-network.json'
+        prepared = prepare_network(launch, preview, inventory, generated, '--players-per-room', 1)
+        self.assertEqual(0, prepared.returncode, prepared.stderr)
+        self.assertEqual(plan_value, json.loads(generated.read_bytes()))
+        report = self.venue_check(generated, 'readiness.json', '--pairs', manifest, '--launcher-preview', preview, '--launch-plan', launch)
         self.assertEqual((5, 5), (report['expectedSources'], report['verifiedSources']))
         self.assertTrue(report['complete'])
+        self.assertTrue(report['launchBinding']['complete'])
         self.assertEqual([[1], [2], [3], [4], [5]], [group['roomIds'] for group in report['groups']])
         self.assertEqual([[pair] for pair in pairs], [group['udpSourcePreflights'] for group in report['groups']])
         plan_value['sources'][4]['address'] = '127.0.0.3'
