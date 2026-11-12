@@ -354,6 +354,7 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `expectedPlayersPerRoom` | 選用。每房原場次須有的席數，填 1 至 5 的整數。省略時為 5，按全館 25 席核對 |
 | `serverIps` | 所有本次伺服器電腦已指派的 IPv4，使用字串陣列 |
 | `venueBundle` 或 `closure` | 原批次的場館驗收 ZIP 路徑，或原 `closure.json` 路徑。選一種 |
+| `venueLauncherReport` | 使用 Windows 五房批次啟動時，填該批啟動器 `--report` 產生的原終止報告 |
 | `venueDebriefReceipts` | 選用。從同一批次下載的戰績回條 JSON 路徑 |
 | `verifyPlayerSources` | 選用。填布林值 `true` 核對所有原席位的日誌與姿態。每場均須提供 `worldJournal` |
 | `verifyTrackingBegin` | 選用。填布林值 `true` 核對同一批追蹤開場採用的原始準備中畫格及後續執行畫格。每場均須提供 `worldJournal` |
@@ -365,9 +366,11 @@ Windows 管理包 0.31.40 起，在「全館收尾」選取要驗收的批次，
 | `questDeployments` | 選用。填原離線發行報告及 1 至 25 份正式 Quest 部署報告，核對原入場及 APK 雜湊 |
 | `venueReleaseReport` | 選用。核對全館所有 Windows 與 Quest 席位共用的原發行報告。Quest 的 `questDeployments` 此時只填 `reports` |
 | `sessions` | 獨立模式填五場，合併模式填一場 |
-| `sessions[].launcherReport`、`serverLog` | 各場啟動器終止報告及伺服器日誌的路徑 |
+| `sessions[].launcherReport` 或 `sessions[].sessionId` | 個別啟動時填各場原終止報告路徑。使用 `venueLauncherReport` 時填各場原 `sessionId` |
+| `sessions[].serverLog` | 各場原伺服器日誌的路徑 |
 | `sessions[].evidenceZip` | 使用 `closure` 時填各場原 ZIP。使用 `venueBundle` 時省略 |
 | `sessions[].worldJournal` | 選用。若驗收回放檔，每個場次都填自己關閉後的原始 `.worldlog` 路徑 |
+| `sessions[].combatJournal` | 選用。逐場填原始 `.journal` 路徑，以封存事件核對戰績 |
 | `sessions[].roomAlignments` | 選用。核對 MR 校正時，每個 MR 場次按房號填原校正檔，例如 `{"2":"room-02-alignment.json"}` |
 | `sessions[].udpPreflight` | 選用。每場提供原 UDP 預檢報告的 `listener` 與 `probe` 路徑 |
 | `sessions[].udpSourcePreflights` | 選用。每場按實際來源 IPv4 填一組 `listener` 與 `probe`。可補上 Quest 批次以外的來源 |
@@ -408,6 +411,26 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json
 摘要核對五房各五個席位、原封存來源、每位玩家的原入場與 UDP 來源，以及 25 筆伺服器戰績確認。它逐房列出在伺服器位址清單以外的玩家數。`direct-lan` 至少須觀察到一筆這類連線，仍須依實際設備及網路拓撲核對主機數、同時遊玩與容量。
 
 提供回放檔的整批驗收會逐場比對完整檔頭，檢查最後影格已觀察到該批結束指令，並輸出 `worldJournalsVerified` 與逐場摘要。回放畫面及遊戲事件內容可用原回放介面另行檢視。
+
+#### 核對五房批次啟動器的原終止報告
+
+若從同一份 Windows 啟動計畫啟動全館，啟動時加上 `--peer-diagnostics on`。待原批次程序結束且報告顯示 `venue-sealed-stopped`，在驗收清單填入 `venueLauncherReport`。每場改用原報告 `servers[].result.sessionId`，並保留各自的 `serverLog` 和其他證據欄位。獨立模式有五個場次 ID，合併模式只有一個。 [批次啟動方式](WINDOWS_SERVER_PACKAGE.md#依場館計畫批次啟動)
+
+```powershell
+$reportPath = '.\venue-final.json'
+$terminal = Get-Content -Raw -LiteralPath $reportPath | ConvertFrom-Json
+$sessions = foreach ($server in $terminal.servers) {
+    $result = $server.result
+    @{
+        sessionId = $result.sessionId
+        serverLog = Join-Path $result.workDirectory 'server.log'
+        worldJournal = Join-Path $result.workDirectory "telemetry/$($result.sessionId).worldlog"
+        combatJournal = Join-Path $result.workDirectory "telemetry/$($result.sessionId).journal"
+    }
+}
+```
+
+將 `$reportPath` 和 `@($sessions)` 分別放入上例的 `venueLauncherReport` 和 `sessions`。若已搬移原檔，請填入目前保存位置。若開場前已核對 UDP，再填 `udpPreflightBatch`。工具會將原計畫序號與管理端保存的來源附掛序號比對，並核對原終止報告的批次識別、各房場次、來源及兩份封存。成功摘要的 `venueLauncherReport` 會列出批次識別、原檔 SHA-256 及驗證場次數。 [UDP 預檢](#開場前核對五房-udp-報告)
 
 ### 分階段驗收 5 人與 10 人
 

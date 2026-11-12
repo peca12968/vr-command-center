@@ -76,6 +76,7 @@ def integer(value, lower=0, upper=2**63 - 1):
 
 
 def identity(value):
+    require(type(value) is str, 'Invalid evidence identity')
     parsed = uuid.UUID(value)
     require(parsed.int and str(parsed) == value, 'Invalid evidence identity')
     return value
@@ -801,6 +802,12 @@ def verify_udp_source_preflights(pairs, binding, addresses):
             'pairs': sorted(summaries, key=lambda summary: summary['exchangeSha256'])}
 
 
+def require_terminal_launcher(launcher):
+    require(type(launcher) is dict and integer(launcher['schemaVersion'], 1, 1) and launcher['status'] == 'sealed-stopped'
+            and launcher['complete'] is launcher['childExited'] is launcher['cleanupCompleted'] is True
+            and integer(launcher['exitCode'], 0, 0) == 0, 'Launcher lacks terminal evidence')
+
+
 def verify(topology, server_ips, launcher, session, statistics, endpoint, server_log, player_logs, *, quest_player_logs=(),
            world_journal=None, combat_journal=None, room_alignments=None, udp_preflight=None, udp_source_preflights=None,
            verify_player_sources=False, verify_reconnect_history=False):
@@ -822,9 +829,7 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(not verify_player_sources or world_journal is not None, 'Player source verification requires the original closed world journal')
     require(udp_preflight is None or udp_source_preflights is None, 'Use either single-pair or all-source UDP preflight verification')
-    require(integer(launcher['schemaVersion'], 1, 1) and launcher['status'] == 'sealed-stopped'
-            and launcher['complete'] is launcher['childExited'] is launcher['cleanupCompleted'] is True
-            and integer(launcher['exitCode'], 0, 0) == 0, 'Launcher lacks terminal evidence')
+    require_terminal_launcher(launcher)
     binding = launcher['udpBinding']
     bound = ipv4(binding['address'])
     require(bound in server_ips and integer(binding['processId'], 1) == integer(launcher['childPid'], 1), 'UDP binding differs from the server interface or process')
@@ -1596,6 +1601,36 @@ def read_venue_control_batches(references, expected, closure, recorded_at, evide
     return list(batches.values()), {sid: targets.values() for sid, targets in by_session.items()}
 
 
+def read_terminal_venue_launcher(path, mode, expected):
+    with path.open('rb') as stream:
+        raw = limited_read(stream)
+    report = read_json(raw.decode('utf-8-sig'))
+    require(type(report) is dict and integer(report['schemaVersion'], 1, 1)
+            and report['status'] == 'venue-sealed-stopped' and report['complete'] is report['readyPublished'] is True
+            and report['topology'] == mode and report['sourceAttachment'] == report['endpointPublication'] == 'confirmed',
+            'Provide the original terminal Windows venue launch report')
+    identity(report['instanceId'])
+    launch_id = identity(report['venueLaunchId'])
+    rows = report['servers']
+    require(type(rows) is list and len(rows) == len(expected), 'Venue launcher report must cover every original venue session')
+    results, child_pids = {}, set()
+    for row in rows:
+        result = row['result']
+        require_terminal_launcher(result)
+        sid = identity(result['sessionId'])
+        original = expected.get(sid)
+        rooms = row['roomIds']
+        require(original is not None and sid not in results and type(rooms) is list
+                and all(type(room) is int for room in rooms) and rooms == original['roomIds']
+                and result['streamId'] == original['replay']['streamId'],
+                'Venue launcher result differs from the original closure room or stream')
+        pid = integer(result['childPid'], 1)
+        require(pid not in child_pids, 'Venue launcher repeats an original child process')
+        child_pids.add(pid)
+        results[sid] = result
+    return {'launchId': launch_id, 'sha256': hashlib.sha256(raw).hexdigest(), 'sessions': len(results)}, results
+
+
 def verify_venue(manifest_path):
     report, _ = verify_venue_batch(manifest_path)
     return report
@@ -1710,6 +1745,11 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
     require(len(expected) == len(rows) and all(type(row['roomIds']) is list and row['roomIds']
             and all(integer(room, 1, 5) for room in row['roomIds']) for row in rows)
             and sorted(row['roomIds'] for row in rows) == expected_rooms, 'Closure does not cover exactly the five original rooms')
+    venue_launcher, venue_results = None, {}
+    if 'venueLauncherReport' in manifest:
+        require(all('launcherReport' not in entry and 'sessionId' in entry for entry in entries),
+                'Use sessionId instead of a per-session launcher report with venueLauncherReport')
+        venue_launcher, venue_results = read_terminal_venue_launcher(evidence_path(manifest['venueLauncherReport']), mode, expected)
     batch_pairs, udp_launch_bindings = {}, {}
     if batch_supplied and not inspect_windows:
         batch_names = [manifest['udpPreflightBatch']] if single_batch else manifest['udpPreflightBatches']
@@ -1755,10 +1795,15 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
         quest_deployments, deployment_summary = read_quest_deployments(manifest['questDeployments'], mode, evidence_path, release)
 
     def load_session(entry):
-        launcher = read_json(content(evidence_path(entry['launcherReport'])))
+        if venue_launcher is None:
+            launcher = read_json(content(evidence_path(entry['launcherReport'])))
+            launch_id = identity(launcher['sessionId']) if packed else None
+        else:
+            launch_id = identity(entry['sessionId'])
+            launcher = venue_results.get(launch_id)
+            require(launcher is not None and launch_id in expected, 'Venue sessionId differs from the original launcher report or repeats')
         if packed:
             require('evidenceZip' not in entry, 'Omit per-session evidenceZip when using venueBundle')
-            launch_id = identity(launcher['sessionId'])
             original = expected.get(launch_id)
             require(original is not None, 'Launcher report belongs to a different or repeated venue session')
             name = 'linked.zip' if mode == 'Linked' else f"room-{original['roomIds'][0]:02}.zip"
@@ -1766,6 +1811,11 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
             require(session['id'] == launch_id, 'Venue ZIP member differs from its original launcher session')
         else:
             session, statistics, endpoint = management_zip(evidence_path(entry['evidenceZip']))
+        if venue_launcher is not None:
+            source = session['combatStream']
+            require(session['id'] == launch_id and type(source) is dict and source.get('venueLaunchId') == venue_launcher['launchId'],
+                    'Original management source belongs to a different venue launch or session')
+            integer(source['expectedSequence'], 1, expected[launch_id]['appliedAtSequence'] - 1)
         return entry, launcher, session, statistics, endpoint, content(evidence_path(entry['serverLog']))
 
     inputs = (load_session(entry) for entry in entries)
@@ -1835,8 +1885,12 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
         binding = (ipv4(endpoint['address']), integer(endpoint['port'], 1024, 65535))
         launch_binding = udp_launch_bindings.get(tuple(row['roomIds']))
         if launch_binding is not None:
+            source = session['combatStream']
+            require(type(source) is dict, 'UDP launch plan requires an original sealed combat source')
+            attached_sequence = source.get('expectedSequence')
             require(launch_binding['address'] == launch_binding['listenAddress'] == str(binding[0])
                     and launch_binding['port'] == binding[1] and launch_binding['missionId'] == session['mission']['id']
+                    and (attached_sequence is None or launch_binding['sessionSequence'] == integer(attached_sequence, 1))
                     and launch_binding['sessionSequence'] < row['appliedAtSequence'],
                     'UDP launch plan does not match the sealed mission and game binding')
         require(stream not in stream_ids and binding not in bindings, 'Venue reused a world stream or server UDP binding')
@@ -1997,6 +2051,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
             'distinctPeerAddresses': len(peer_ips), 'distinctAddressesOutsideDeclaredServer': len(remote),
             'serverAcknowledgements': sum(item['serverAcknowledgements'] for item in summaries),
             'physicalHostsVerified': False, 'networkCapacityAccepted': False,
+            **({'venueLauncherReport': venue_launcher} if venue_launcher is not None else {}),
             **({'venueDebriefReceipts': {'sha256': debrief_hash, 'sessions': len(summaries), 'acknowledgedPlayers': len(player_ids)}}
                if debrief_receipts is not None else {}),
             **({'distinctRemoteRoster': {'seatsVerified': len(player_ids), 'distinctSourceAddresses': len(remote),

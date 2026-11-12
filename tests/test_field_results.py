@@ -1669,6 +1669,60 @@ class FieldResultsTests(unittest.TestCase):
             with self.assertRaisesRegex(field.EvidenceError, 'Windows inbox is incomplete'):
                 field.verify_venue(path)
 
+    def test_venue_accepts_one_original_batch_launcher_report(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, closure = venue_fixture(root, mode)
+                launch_id = id_for(950)
+                report_path = root / 'venue-launcher.json'
+                report = {'schemaVersion': 1, 'status': 'venue-sealed-stopped', 'complete': True, 'topology': mode,
+                          'instanceId': id_for(951), 'readyPublished': True, 'venueLaunchId': launch_id,
+                          'sourceAttachment': 'confirmed', 'endpointPublication': 'confirmed', 'servers': []}
+                for index, (entry, closed) in enumerate(zip(manifest['sessions'], closure['sessions'], strict=True)):
+                    launcher = json.loads((root / entry.pop('launcherReport')).read_bytes())
+                    launcher['childPid'] = launcher['udpBinding']['processId'] = 4300 + index
+                    launcher['finalCombatStream'].update(venueLaunchId=launch_id, expectedSequence=5)
+                    report['servers'].append({'roomIds': closed['roomIds'], 'result': launcher})
+                    entry['sessionId'] = closed['sessionId']
+                    archive = root / entry['evidenceZip']
+                    session, statistics, endpoint = field.management_zip(archive)
+                    session['combatStream'] = launcher['finalCombatStream']
+                    with zipfile.ZipFile(archive, 'w') as bundle:
+                        for name, value in [('session.json', session), ('statistics.json', statistics), ('endpoint.json', endpoint)]:
+                            bundle.writestr(name, json.dumps(value))
+                manifest['venueLauncherReport'] = report_path.name
+                report['servers'].reverse()
+                report_path.write_text(json.dumps(report), encoding='utf-8')
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                split = field.verify_venue(path)
+                self.assertEqual(25, split['serverAcknowledgements'])
+                self.assertEqual({'launchId': launch_id, 'sha256': hashlib.sha256(report_path.read_bytes()).hexdigest(),
+                                  'sessions': len(closure['sessions'])}, split['venueLauncherReport'])
+                packed = self.pack_venue(root, manifest)
+                path.write_text(json.dumps(packed), encoding='utf-8')
+                self.assertEqual(split, field.verify_venue(path))
+
+                for field_name, value, message in (
+                    ('readyPublished', False, 'terminal Windows venue launch report'),
+                    ('venueLaunchId', id_for(952), 'management source belongs to a different venue launch'),
+                    ('servers', report['servers'][:-1], 'every original venue session'),
+                ):
+                    with self.subTest(altered=field_name):
+                        report_path.write_text(json.dumps({**report, field_name: value}), encoding='utf-8')
+                        with self.assertRaisesRegex(field.EvidenceError, message):
+                            field.verify_venue(path)
+                invalid = deepcopy(report)
+                invalid['servers'][0]['roomIds'] = [2] if mode == 'Linked' else [1]
+                report_path.write_text(json.dumps(invalid), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'original closure room or stream'):
+                    field.verify_venue(path)
+                report_path.write_text(json.dumps(report), encoding='utf-8')
+                packed['sessions'][0]['launcherReport'] = 'individual.json'
+                path.write_text(json.dumps(packed), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'sessionId instead of a per-session launcher report'):
+                    field.verify_venue(path)
+
     def test_windows_player_zip_matches_loose_evidence_and_rejects_changed_members(self):
         for mode in ('Independent', 'Linked'):
             with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:

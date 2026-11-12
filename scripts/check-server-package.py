@@ -324,8 +324,7 @@ def main():
                                            or not args.player_package or not shutil.which('node')):
         p.error('--check-live-room-navigation requires the two-topology three-package check with --check-venue-begin and Node.js')
     if args.check_venue_launcher and (not all((args.prepare_independent_set, args.check_venue_begin, args.check_venue_end))
-                                     or any((args.check_lan_preflight, args.check_layout_preview, args.field_evidence,
-                                             args.venue_field_evidence, args.observe_closure_ui))):
+                                     or any((args.check_lan_preflight, args.check_layout_preview, args.observe_closure_ui))):
         p.error('--check-venue-launcher requires --prepare-independent-set --check-venue-begin --check-venue-end; '
                 'individual launcher report workflows must be checked separately')
     if args.check_venue_plan_ui and (not args.check_venue_launcher or not shutil.which('node')):
@@ -1619,7 +1618,8 @@ def main():
                     session,statistics,endpoint=exported
                     world_journal = entry['work']/'telemetry'/(entry['sessionId']+'.worldlog')
                     combat_journal = entry['work']/'telemetry'/(entry['sessionId']+'.journal')
-                    manifest_entry={'evidenceZip':str(evidence_zip),'launcherReport':str(entry['reportPath']),
+                    launcher_input = {'sessionId':entry['sessionId']} if 'venueIndex' in entry else {'launcherReport':str(entry['reportPath'])}
+                    manifest_entry={'evidenceZip':str(evidence_zip),**launcher_input,
                         'serverLog':str(entry['work']/'server.log'),'worldJournal':str(world_journal),
                         'combatJournal':str(combat_journal),
                         'players':[{'address':address,'log':str(c['log']),
@@ -1629,7 +1629,7 @@ def main():
                 if manifest_entry is not None and preflight is not None:
                     manifest_entry['udpSourcePreflights'] = [dict(zip(('listener', 'probe'), map(str, preflight), strict=True))]
                 ip=ipaddress.IPv4Address(address)
-                result=field.verify('same-host',{ip},read(entry['reportPath']),session,statistics,endpoint,server,
+                result=field.verify('same-host',{ip},entry['terminalReport'],session,statistics,endpoint,server,
                     [(ip,field.content(c['log'])) for c in owners], world_journal=world_journal,
                     combat_journal=combat_journal,
                     udp_source_preflights=[preflight] if preflight is not None else None,
@@ -1753,6 +1753,10 @@ def main():
                   **({'expectedPlayersPerRoom': players_per_room} if players_per_room != 5 else {}),
                   **({'verifyPlayerSources': True} if args.check_venue_openxr and not args.check_venue_openxr_reconnect else {}),
                   **({'verifyReconnectHistory': True} if args.check_venue_openxr_reconnect else {})}
+        if args.check_venue_launcher:
+            common['venueLauncherReport'] = str(out / (label + '-venue-final.json'))
+        if args.check_venue_udp_readiness:
+            common['udpPreflightBatch'] = str(out / (label + '-venue-udp-readiness.json'))
         if label in venue_control_reports:
             common['venueControlBatches'] = venue_control_reports[label]
         debrief_file = None
@@ -1990,10 +1994,35 @@ def main():
             check(sources=={(room,seat):'windows-openxr-mock-tracked' if (room,seat)==(5,2) else 'windows-desktop-simulated'
                            for room in range(1,6) for seat in range(1,6)},
                   label+' closed field evidence identifies the exact mock OpenXR seat and all 24 desktop peers')
-        if args.check_lan_preflight:
+        if args.check_lan_preflight or args.check_venue_udp_readiness:
             check(summary['udpSourcePreflightsVerified'] == len(entries)
                   and all(row['udpSourcePreflight']['verifiedSourceAddresses'] == 1 for row in summary['sessions']),
                   label + ' original paired UDP reports cover all acknowledged source addresses at every sealed game endpoint')
+        if args.check_venue_launcher:
+            original_launch = Path(common['venueLauncherReport'])
+            check(summary['venueLauncherReport'] == {'launchId': read(original_launch)['venueLaunchId'],
+                  'sha256': control.sha(original_launch), 'sessions': len(entries)},
+                  label + ' sealed field report reads the untouched shared Windows terminal report')
+        if args.check_venue_udp_readiness:
+            readiness = read(Path(common['udpPreflightBatch']))
+            proof = readiness['launchBinding']
+            plan, preview = (read(out / proof[name]) for name in ('plan', 'preview'))
+            target = closed['sessions'][-1]
+            candidates = [next(row for row in doc['servers'] if row['sessionId'] == target['sessionId']) for doc in (plan, preview)]
+            revision = candidates[0]['sessionSequence']
+            stale = revision + 1 if revision == 1 else revision - 1
+            assert stale < target['appliedAtSequence']
+            for name, doc, candidate in zip(('plan', 'preview'), (plan, preview), candidates, strict=True):
+                candidate['sessionSequence'] = stale
+                proof[name] = f'{label}-udp-altered-{name}.json'
+                save(proof[name], doc)
+                proof[name+'Sha256'] = control.sha(out / proof[name])
+            readiness['launcherPreview']['sha256'] = proof['previewSha256']
+            altered = out / (label + '-udp-altered-revision.json')
+            save(altered.name, readiness)
+            refused = run(dict(evidence, udpPreflightBatch=str(altered)))
+            check(refused.returncode == 1 and not refused.stdout and 'does not match the sealed mission and game binding' in refused.stderr,
+                  label + ' rejects an internally matching UDP plan and preview at a different revision than the sealed source')
         save(label + '-venue-field-results.json', summary)
         rejected = run(dict(evidence, topology='direct-lan'))
         check(rejected.returncode == 1 and not rejected.stdout and 'outside the declared server addresses' in rejected.stderr,
@@ -2558,6 +2587,7 @@ def main():
         check(entry['process'].returncode==0 and report['complete'] and report['cleanupCompleted'] and report['childExited'] and report['playerResultsAcknowledged'] is None,entry['label']+' dual seal / retained36 / original process terminal')
         check(report['udpBinding'] == entry['ready']['udpBinding'], entry['label'] + ' terminal report preserves the startup UDP observation')
         check(report['peerDiagnosticsEnabled'] is entry['peerDiagnostics'], entry['label']+' terminal report preserves the startup diagnostics choice')
+        entry['terminalReport'] = report
         if 'layoutSession' in entry:
             state=entry['layoutSession'];mission=state['mission']
             preview=request('/api/missions/'+mission['id']+'/layout?mode='+state['mode'])
