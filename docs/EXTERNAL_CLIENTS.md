@@ -662,7 +662,7 @@ python scripts/verify-field-results.py --venue-manifest .\venue.json --inspect-w
 python scripts/verify-field-results.py --venue-manifest .\venue.json
 ```
 
-第一條指令列出應收及已收的 Windows 席位、缺件與有問題的檔名，缺件或衝突時以退出碼 1 結束。配對依據是原名冊的入場與場次識別、退出報告及原伺服器對該連線的戰績確認，玩家可自行命名 ZIP。每席的最終戰績及管理、世界、戰鬥序號也須與原封存一致。若不符，該檔會出現在 `issues`，對應席位仍會列在 `missingSeats`。每席的 IPv4 取自伺服器觀察到的對應 UDP 來源。需要另外指定各席預期的 IPv4 時，可沿用 `windowsPlayers`。
+第一條指令列出應收及已收的 Windows 席位、缺件與有問題的檔名，缺件或衝突時以退出碼 1 結束。配對依據是原名冊的入場與場次識別、退出報告及原伺服器對該連線的戰績確認，玩家可自行命名 ZIP。每席的最終戰績及管理、世界、戰鬥序號也須與原封存一致。若不符，該檔會出現在 `issues`。尚無有效 ZIP 的席位會列在 `missingSeats`。每席的 IPv4 取自伺服器觀察到的對應 UDP 來源。需要另外指定各席預期的 IPv4 時，可沿用 `windowsPlayers`。
 
 收件檢查也會核對 ZIP 內的連線量測。若本批有 Windows 席位提供量測，須由所有 Windows 席位提供，Quest 席位沿用原 logcat 流程。內含量測不符、遺失或覆蓋席位不足時，收件檢查會指出對應的 ZIP。
 
