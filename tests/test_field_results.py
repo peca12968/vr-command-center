@@ -2025,7 +2025,9 @@ class FieldResultsTests(unittest.TestCase):
                 report['deploymentSha256'] = hashlib.sha256(original.read_bytes()).hexdigest()
                 capture_path.write_text(json.dumps(report), encoding='utf-8')
                 path.write_text(json.dumps(manifest), encoding='utf-8')
-                self.assertEqual(1, field.verify_venue(path)['questCaptureDeploymentReportsMatched'])
+                checked = field.verify_venue(path)
+                self.assertEqual(1, checked['questCaptureDeploymentReportsMatched'])
+                self.assertEqual(deployment['expectedApkSha256'], checked['questDeployment']['apkSha256'])
 
                 with self.assertRaisesRegex(capture_tool.field.EvidenceError, 'same original Quest deployment report'):
                     capture_tool.retry_capture_plan({'topology': mode, 'seats': [], 'deploymentSha256': '4' * 64}, capture_path)
@@ -2036,6 +2038,66 @@ class FieldResultsTests(unittest.TestCase):
                 original.write_bytes(original.read_bytes() + b'\n')
                 with self.assertRaisesRegex(field.EvidenceError, 'exact completed Quest deployment report'):
                     field.verify_venue(path)
+
+    def test_quest_capture_checks_device_map_and_network_plan_for_separate_deployments(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest = quest_capture_venue_fixture(root, mode, quest_per_room=1, batches=2)
+                capture_spec = manifest['questCaptures']
+                device_spec = observed_quest_capture_spec(root, capture_spec)
+                capture_spec.update(deviceMap=device_spec['deviceMap'])
+                map_path, network_path = (root / capture_spec[key] for key in ('deviceMap', 'networkPlan'))
+                raw_map, raw_network = map_path.read_bytes(), network_path.read_bytes()
+                serials = {(row['roomId'], row['seat']): row['serial'] for row in json.loads(raw_map)['seats']}
+                deployment = self.quest_deployment_evidence(root, manifest, 1)
+                devices = {(row['roomId'], row['seat']): row for row in deployment['devices']}
+                manifest['questDeployments']['reports'] = []
+                for batch, capture_name in enumerate(capture_spec['reports'], 1):
+                    capture_path = root / capture_name
+                    captured = json.loads(capture_path.read_bytes())
+                    seats = sorted((row['roomId'], row['seat']) for row in captured['seats'])
+                    assignments = '\n'.join(f'{room}/{seat}={serials[room, seat]}' for room, seat in seats)
+                    salt = f'{batch:032x}'
+                    proof = {'version': 1, 'venueSha256': '1' * 64, 'salt': salt,
+                             'mapSha256': hashlib.sha256(f'{salt}\n{assignments}'.encode()).hexdigest(),
+                             'devices': [f'{index:064x}' for index in range(1, len(seats) + 1)]}
+                    deployment_path = root / f'deployment-{batch}.json'
+                    deployment_path.write_text(json.dumps(dict(deployment, retry=proof, devices=[devices[seat] for seat in seats])), encoding='utf-8')
+                    manifest['questDeployments']['reports'].insert(0, deployment_path.name)
+                    captured['deploymentSha256'] = hashlib.sha256(deployment_path.read_bytes()).hexdigest()
+                    capture_path.write_text(json.dumps(captured), encoding='utf-8')
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                checked = field.verify_venue(path)
+                self.assertEqual(2, checked['questCaptureDeploymentReportsMatched'])
+                self.assertEqual(2, checked['questDeployment']['deviceMapsMatched'])
+                self.assertEqual(deployment['expectedApkSha256'], checked['questDeployment']['apkSha256'])
+                self.assertNotIn('questCaptureAddressSource', checked)
+                self.assertNotIn('fixture-', json.dumps(checked))
+
+                changed = json.loads(raw_map)
+                changed['seats'][0]['serial'] = 'another-adb-label'
+                map_path.write_text(json.dumps(changed), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'device map differs from the original referenced deployment'):
+                    field.verify_venue(path)
+                map_path.write_bytes(raw_map)
+                changed = json.loads(raw_network)
+                changed['sources'][0]['address'] = '192.168.5.210'
+                network_path.write_text(json.dumps(changed), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'UDP peer differs from the declared source'):
+                    field.verify_venue(path)
+                network_path.write_bytes(raw_network)
+                changed = json.loads(raw_map)
+                changed['seats'].pop()
+                map_path.write_text(json.dumps(changed), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'network plan and device map must cover the same seats'):
+                    field.verify_venue(path)
+                map_path.write_bytes(raw_map)
+                del capture_spec['networkPlan']
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                observed = field.verify_venue(path)
+                self.assertEqual('server-observed', observed['questCaptureAddressSource'])
+                self.assertEqual(checked['questDeployment'], observed['questDeployment'])
 
     def test_quest_deployments_reject_swapped_originals_and_incomplete_or_duplicate_evidence(self):
         with tempfile.TemporaryDirectory() as directory:

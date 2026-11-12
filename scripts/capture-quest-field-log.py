@@ -108,10 +108,6 @@ async def read_capture(child, adb, pid, port, admission, log, deadline, on_ready
                         'sha256': hashlib.sha256(captured).hexdigest(), 'scope': 'quest-logcat-only'}
 
 
-def deployment_fingerprint(salt, value):
-    return hashlib.sha256(f'{salt}\n{value}'.encode('utf-8')).hexdigest()
-
-
 def check_device_identity(adb, expected, timeout):
     field.require(timeout > 0, 'Capture timed out before the Quest device identity could be checked')
     try:
@@ -122,7 +118,7 @@ def check_device_identity(adb, expected, timeout):
     field.require(result.returncode == 0 and serial is not None and not re.fullmatch(rb'unknown|0+', serial[1], re.I),
                   'Quest device identity could not be read')
     salt, digest = expected
-    field.require(deployment_fingerprint(salt, serial[1].decode('ascii').upper()) == digest,
+    field.require(field.quest_deployment_fingerprint(salt, serial[1].decode('ascii').upper()) == digest,
                   'Quest device identity differs from the original deployment')
 
 
@@ -209,8 +205,8 @@ def bind_deployment(plan, path):
     proof, _ = field.quest_deployment_retry_proof(report, len(seats))
     field.require(proof is not None and proof['venueSha256'] == plan['venueSha256'],
                   'Quest deployment report does not match the original venue ZIP')
-    assignments = '\n'.join(f"{row['roomId']}/{row['seat']}={row['serial']}" for row in seats)
-    field.require(deployment_fingerprint(proof['salt'], assignments) == proof['mapSha256'],
+    device_map = {(row['roomId'], row['seat']): row['serial'] for row in seats}
+    field.require(field.quest_deployment_map_fingerprint(proof['salt'], device_map) == proof['mapSha256'],
                   'Quest deployment report does not match the original device map')
     for seat, device in zip(seats, devices, strict=True):
         field.require(type(device) is dict and device.get('status') == 'launch-requested'

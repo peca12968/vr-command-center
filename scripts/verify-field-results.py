@@ -1395,15 +1395,18 @@ def read_quest_capture_report(path, mode):
 
 
 def read_quest_capture_batches(spec, mode, expected, evidence_path):
-    require(type(spec) is dict and set(spec) in ({'networkPlan', 'reports'}, {'deviceMap', 'reports'}),
-            'Provide capture reports and either a Quest network plan or the original device map')
-    observed = 'deviceMap' in spec
+    require(type(spec) is dict and 'reports' in spec and {'networkPlan', 'deviceMap'} & spec.keys()
+            and spec.keys() <= {'networkPlan', 'deviceMap', 'reports'},
+            'Provide capture reports and a Quest network plan, the original device map, or both')
+    device_map = read_quest_device_map(evidence_path(spec['deviceMap'])) if 'deviceMap' in spec else None
+    observed = 'networkPlan' not in spec
     if observed:
-        sources = dict.fromkeys(read_quest_device_map(evidence_path(spec['deviceMap'])))
+        sources = dict.fromkeys(device_map)
         endpoints = {}
     else:
         plan_mode, endpoints, plan_sources = read_quest_network_plan(evidence_path(spec['networkPlan']))
         require(plan_mode == mode, 'Quest network plan differs from the venue mode')
+        require(device_map is None or plan_sources.keys() == device_map.keys(), 'Quest network plan and device map must cover the same seats')
         sources = {seat: ipv4(address) for seat, address in plan_sources.items()}
     reports = spec['reports']
     require(type(reports) is list and 1 <= len(reports) <= 25, 'Provide 1 to 25 Quest capture reports')
@@ -1441,7 +1444,7 @@ def read_quest_capture_batches(spec, mode, expected, evidence_path):
         summary['questCaptureAddressSource'] = 'server-observed'
     if incomplete_reports:
         summary.update(questCaptureIncompleteReports=incomplete_reports, questCaptureFailedAttempts=failed_attempts)
-    return captures, endpoints, summary, deployments
+    return captures, endpoints, summary, deployments, device_map
 
 
 def quest_capture_log(address, path, pid, seat, size, digest):
@@ -1449,6 +1452,15 @@ def quest_capture_log(address, path, pid, seat, size, digest):
         raw = limited_read(source)
     require(len(raw) == size and hashlib.sha256(raw).hexdigest() == digest, 'Original Quest capture log size or digest differs')
     return address, raw.decode('utf-8-sig'), pid, seat
+
+
+def quest_deployment_fingerprint(salt, value):
+    return hashlib.sha256(f'{salt}\n{value}'.encode('utf-8')).hexdigest()
+
+
+def quest_deployment_map_fingerprint(salt, device_map):
+    assignments = '\n'.join(f'{room}/{seat}={device_map[room, seat]}' for room, seat in sorted(device_map))
+    return quest_deployment_fingerprint(salt, assignments)
 
 
 def quest_deployment_retry_proof(report, count):
@@ -1498,7 +1510,7 @@ def quest_deployment_leaves(attempts):
     return leaves, linked
 
 
-def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_reports=()):
+def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_reports=(), capture_device_map=None):
     expected = {'releaseReport', 'reports'} if release is None else {'reports'}
     require(type(spec) is dict and set(spec) == expected,
             'Provide the original Quest deployment reports and exactly one release report for the selected mode')
@@ -1510,8 +1522,8 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_r
             and quest.get('architecture') == 'arm64-v8a' and quest.get('signatureV2') is True,
             'Quest release report was not verified for the original application')
     version = integer(quest.get('versionCode'), 1, 2**31 - 1)
-    digest = quest.get('sha256')
-    require(type(digest) is str and re.fullmatch(r'[0-9a-f]{64}', digest), 'Invalid Quest release APK digest')
+    apk_digest = quest.get('sha256')
+    require(type(apk_digest) is str and re.fullmatch(r'[0-9a-f]{64}', apk_digest), 'Invalid Quest release APK digest')
     reports = spec['reports']
     require(type(reports) is list and 1 <= len(reports) <= 25, 'Provide 1 to 25 Quest deployment reports')
     attempts = {}
@@ -1522,7 +1534,7 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_r
         require(report.get('phase') == 'deployment' and report.get('managementVerified') is True
                 and report.get('topology') == mode and integer(report.get('apkVerificationVersion'), 1, 1),
                 'Quest deployment report lacks verified deployment or uses another topology')
-        require(report.get('expectedApkSha256') == digest and integer(report.get('expectedVersionCode'), 1) == version,
+        require(report.get('expectedApkSha256') == apk_digest and integer(report.get('expectedVersionCode'), 1) == version,
                 'Quest deployment report differs from the original release APK')
         devices = report.get('devices')
         require(type(devices) is list and 1 <= len(devices) <= 25
@@ -1547,10 +1559,18 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_r
         attempts[report_hash] = dict(proof=proof, previous=previous, complete=report['complete'], seats=tuple(seats),
                                      launched=launched, confirmed=confirmed)
 
-    for digest, seats in capture_reports:
-        deployment = attempts.get(digest)
+    matched_maps = set()
+    for deployment_digest, seats in capture_reports:
+        deployment = attempts.get(deployment_digest)
         require(deployment is not None and deployment['complete'] and deployment['proof'] is not None,
                 'Provide the exact completed Quest deployment report referenced by the capture')
+        if capture_device_map is not None and deployment_digest not in matched_maps:
+            require(capture_device_map.keys() >= set(deployment['seats']), 'Quest device map lacks a seat from the referenced deployment')
+            original_map = {seat: capture_device_map[seat] for seat in deployment['seats']}
+            proof = deployment['proof']
+            require(quest_deployment_map_fingerprint(proof['salt'], original_map) == proof['mapSha256'],
+                    'Quest device map differs from the original referenced deployment')
+            matched_maps.add(deployment_digest)
         for row in seats:
             original = deployment['confirmed'].get((row['roomId'], row['seat']))
             require(original is not None and original[0] == row['sessionId'] and original[3] == row['port'],
@@ -1562,7 +1582,9 @@ def read_quest_deployments(spec, mode, evidence_path, release=None, *, capture_r
         require(confirmed, 'Quest deployment report lacks a consistent successful prefix')
         require(deployed.keys().isdisjoint(confirmed), 'Quest deployment repeats a successful seat')
         deployed.update(confirmed)
-    summary = {'versionCode': version, 'apkSha256': digest, 'reportsVerified': len(reports), 'seatsVerified': len(deployed)}
+    summary = {'versionCode': version, 'apkSha256': apk_digest, 'reportsVerified': len(reports), 'seatsVerified': len(deployed)}
+    if matched_maps:
+        summary['deviceMapsMatched'] = len(matched_maps)
     if linked:
         summary['retryReportsLinked'] = linked
     return deployed, summary
@@ -1858,16 +1880,18 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False):
 
     capture_supplied = 'questCaptures' in manifest
     captures, capture_endpoints, capture_summary, capture_deployments = {}, {}, {}, []
+    capture_device_map = None
     if capture_supplied and not inspect_windows:
         require(topology == 'direct-lan', 'Quest capture batches require direct LAN evidence')
-        captures, capture_endpoints, capture_summary, capture_deployments = read_quest_capture_batches(manifest['questCaptures'], mode, expected, evidence_path)
+        captures, capture_endpoints, capture_summary, capture_deployments, capture_device_map = read_quest_capture_batches(
+            manifest['questCaptures'], mode, expected, evidence_path)
     observed_quest_addresses = set() if capture_summary.get('questCaptureAddressSource') == 'server-observed' else None
     quest_deployments, deployment_summary = None, None
     require(not capture_deployments or 'questDeployments' in manifest, 'Provide the original Quest deployment reports referenced by the capture')
     if 'questDeployments' in manifest and not inspect_windows:
         require(topology == 'direct-lan', 'Quest deployment evidence requires direct LAN evidence')
         quest_deployments, deployment_summary = read_quest_deployments(manifest['questDeployments'], mode, evidence_path, release,
-                                                                      capture_reports=capture_deployments)
+                                                                      capture_reports=capture_deployments, capture_device_map=capture_device_map)
         if capture_deployments:
             capture_summary['questCaptureDeploymentReportsMatched'] = len(capture_deployments)
 
