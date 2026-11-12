@@ -1,5 +1,7 @@
 # Windows 可攜玩家包
 
+2026-11-13 `VRCommand-Player-0.50.7-1.11-win-x64.zip` 為 84,944,952 bytes，SHA-256 `ba6c5cd5b3fcfb1644e39c33a76ae098cb29a7be8d4eb2b128c3acaa4e30e543`。解壓核對 331 筆清單。啟動器核對等待中的原場次、完整最終戰績與結束斷線後才建立驗收 ZIP。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.7-1.11-win-x64.zip) · [本包發行報告](../artifacts/venue-release-0.50.7-player-1.11.json)
+
 2026-11-11 `VRCommand-Player-0.50.7-1.10-final-win-x64.zip` 為 84,943,952 bytes，SHA-256 `4300d739d2395ff7f91727580c77091abbe668f9ee52a2d97e36a2be982ca92b`。含 331 筆清單，玩家可交回一份包含原日誌與退出報告的 ZIP。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.7-1.10-final-win-x64.zip) · [本包發行報告](../artifacts/venue-release-0.50.7-player-1.10.json)
 
 2026-11-11 `VRCommand-Player-0.50.7-1.9-win-x64.zip` 為 84,942,855 bytes，SHA-256 `b5027281b55aaa125825dda1772217b604322f0ac3609f3ceba3e460bc2ce752`。含 331 筆清單，玩家視窗可核對場館發行報告並保留原程序紀錄。 [玩家包](../artifacts/player-packages/VRCommand-Player-0.50.7-1.9-win-x64.zip) · [本包發行報告](../artifacts/venue-release-0.50.7-player-1.9.json)
@@ -118,6 +120,8 @@ Windows 建置啟用 Touch 與 Unity 的 HTC Vive Controller 兩個 OpenXR 互�
 遊戲關閉後，在啟動器按「開啟本次紀錄資料夾」，把同一資料夾的 `player.log` 和 `launch-report.json` 交給控制人員。每次發行核對啟動都會建立自己的資料夾。退出報告包含原套件清單和玩家日誌的雜湊、程序識別及退出碼。 [全館封存操作](EXTERNAL_CLIENTS.md#核對全館共用的發行報告)
 
 啟動器 1.10 在原日誌包含最終戰績與結束斷線、玩家程序以退出碼 0 結束後，會在本次紀錄資料夾建立 `player-evidence.zip`。它包含原 `player.log` 與 `launch-report.json`，原檔繼續保留在同一資料夾。交回 ZIP 即可供主控驗收。命令列可搭配 `--launch --wait --release-report --log --report` 加上 `--evidence-zip <包外新檔案.zip>`。 [主控驗收](EXTERNAL_CLIENTS.md#收集-windows-玩家驗收-zip)
+
+啟動器 1.11 會比對等待與最終戰績的原場次，並核對戰績欄位及日誌中的連線順序。任務中可斷線再重連，最後一條連線收到本次唯一戰績並結束斷線後仍可匯出。若日誌有不完整、錯場次或重複戰績，啟動器保留原日誌與程序報告供查閱。下一場請開啟新的玩家程序，以便各場保存獨立的驗收檔。
 
 在啟動器 1.6 加上 `--release-report`，選用主控為本次交付產生的原始 `venue-release.json`。先以 `--verify` 做離線檢查，也可在桌面或 OpenXR 的直接啟動命令加上同一選項，讓每次啟動都重新核對。
 

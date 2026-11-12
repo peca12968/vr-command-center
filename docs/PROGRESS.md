@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 Windows 玩家重連後的戰績驗收 ZIP
+
+- 啟動器 1.11 核對等待中的原場次、完整最終戰績及結束斷線。同一份缺少戰績欄位的日誌在舊版進入 Final 並建立 ZIP，新版維持等待，斷線後顯示未確認且保留原檔。46 項實際 Framework 監看測試通過，涵蓋錯場次、重複結果、截斷及合法重連。另通過 44 項解壓包檢查、17 項 WinForms 處理流程及 36 項連線檔檢查。 [驗證摘要](../artifacts/player-evidence-1.11-validation.json)
+- Windows 0.50.7 同機通過 566 項整合。獨立與合併各 25 個玩家端，第 5 房第 2 席使用 Unity Mock Runtime，在 UDP 中斷後以原程序及原入場重連並保留彈藥。50 份原玩家 ZIP 和散檔的驗收結果相同，重連席只以最後一條連線取得戰績回條。六場雙封存核對 3,361 格回放、6 份 CSV 與 50 筆原戰績回條。停止隔離程序後，C／F 快照 286 個非資料庫檔案相同。 [原生檢查](../artifacts/server-package-checks/run-8b0af89870184abdb1dd6df583d9bcdd/checks.json)
+- 解壓核對 331 筆清單，329 個檔案與 1.10 雜湊相同。離線核對仍使用 Windows 與 Quest 0.50.7 原遊戲及管理包 0.31.148。功能來源 `40565adf` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地與廠商硬體仍待驗收。 [玩家包](WINDOWS_PLAYER_PACKAGE.md) · [發行核對](../artifacts/venue-release-0.50.7-player-1.11.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43270609208)
+
 ## 2026-11-13 Windows 五房連線檔交付前核對遊戲來源
 
 - 管理包 0.31.148 和部署工具在暫存前、正式交付前各核對 25 份原票券、名冊、端點及近期原畫格。舊工具在來源失效對照仍回傳成功。新版在暫存前拒絕，並在暫存完成後收到失效回條時移除 25 個暫存檔，兩次均無交付目錄。54 項部署工具測試通過。 [分發方式](EXTERNAL_CLIENTS.md#依電腦分發-windows-vr-連線檔) · [驗證摘要](../artifacts/windows-source-gate-0.31.148-validation.json)
