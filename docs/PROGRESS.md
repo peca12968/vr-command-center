@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 從原封存產生五房驗收清單
+
+- `prepare-venue-field-manifest.py` 從管理驗收 ZIP 與 Windows 批次終止報告產生 `venue.json`。它逐場核對來源、UDP 端點、原名冊、伺服器日誌及封存的世界與戰鬥紀錄。可帶入 Windows 玩家收件資料夾、發行報告及 UDP 預檢。搬移後以 `--server-work-root` 指定原房間資料夾。98 項封存及 8 項 UDP 測試通過。 [準備方式](EXTERNAL_CLIENTS.md#核對五房批次啟動器的原終止報告)
+- 沿用前輪 Windows 0.50.7 的同機原件，在原工作目錄與搬移後目錄分別產生獨立及合併清單。92 份搬移檔案的雜湊一致，整批再從 F 槽複製到 C 槽後，兩種模式的離線摘要仍完全相同。重驗核對 50 份玩家 ZIP、6 組 UDP 預檢及 2,502 格回放。兩種模式均拒絕其他批次報告、缺原日誌的目錄和覆寫既有清單。 [驗證紀錄](../artifacts/venue-manifest-preparation-validation.json)
+- 功能來源 `8b50bc4` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、Quest 3、VIVE XR、MR 場地及廠商硬體仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43305222123)
+
 ## 2026-11-13 Windows 玩家 ZIP 收件時核對封存戰績
 
 - Windows 收件與完整驗收共用玩家戰績檢查。每份 ZIP 的最終戰績、管理序號、世界回放序號與戰鬥事件序號都要對上管理端原封存。不符的檔名列在 `issues`，尚無有效 ZIP 的席位留在 `missingSeats`。舊版在兩種模式各錯收四種受控修改，修正後 98 項封存及 8 項 UDP 測試通過。 [收件操作](EXTERNAL_CLIENTS.md#按收件資料夾找缺件及錯批)
