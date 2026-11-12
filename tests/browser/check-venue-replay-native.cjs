@@ -11,7 +11,7 @@ async function main() {
   assert.match(config.base, /^http:\/\/127\.0\.0\.1:\d+$/);
   const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_CLOSURE_CHROMIUM,
     args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
-  const results = [], fieldEvidence = [], participation = [], receiptExports = [], debriefSeats = [], debriefCsv = [], debriefReplay = [], debriefAll = [];
+  const results = [], fieldEvidence = [], participation = [], openingReplay = [], receiptExports = [], debriefSeats = [], debriefCsv = [], debriefReplay = [], debriefAll = [];
   let history, roomReplay, scores, scoreCsv, alignment, missionTime, debriefReceipts;
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1080 }, acceptDownloads: true });
@@ -104,9 +104,49 @@ async function main() {
       assert.match(await page.locator('#world-status').innerText(), /錄製已核對封存 · 準備中/);
       assert.ok((await page.locator('#world-time').innerText()).startsWith((elapsedMilliseconds / 1000).toFixed(2) + ' 秒'));
       if (!participation.length) await page.locator('#world-player').screenshot({ path: path.join(path.dirname(output), config.mode + '-participation-begin.png') });
+      if (config.openingReplay?.[session.sessionId]) openingReplay.push(await compareOpening(session));
       await page.locator('#world-frame-next').click();
       await page.locator(`#world-canvas[data-sequence="${sequence + 1}"]`).waitFor();
       return { sessionId: session.sessionId, room, sequence, next: sequence + 1, simulatedPlayers: count };
+    }
+    async function compareOpening(session) {
+      const { sessionId, participationBegin: begin, replay } = session;
+      const expected = config.openingReplay[sessionId];
+      const canvas = page.locator('#world-canvas'), picker = page.locator('#world-recording');
+      const camera = await canvas.getAttribute('data-camera'), room = await page.locator('#world-room').inputValue();
+      const route = `/api/sessions/${sessionId}/world`;
+      const pending = page.waitForResponse(response => new URL(response.url()).pathname === `${route}/venue-begin-running`);
+      await page.locator('#world-begin-running').click();
+      const response = await pending;
+      assert.equal(response.status(), 200);
+      assert.equal(new URL(response.url()).searchParams.get('throughFrame'), String(replay.throughSequence));
+      const body = await response.json(), { packet } = body.frame;
+      assert.deepEqual([body.sessionId, body.streamId, body.beginRequestId, body.beginFrame, body.appliedAtSequence, body.throughFrame],
+        [sessionId, replay.streamId, begin.requestId, begin.frame.worldSequence, begin.appliedAtSequence, replay.throughSequence]);
+      const { sequence: firstRunningFrame, observedSequence, elapsedMilliseconds, frame: { tick, phase }, suspended } = packet;
+      assert.equal(phase, 'Running');
+      assert.equal(suspended, false);
+      const witnessed = { sessionId: body.sessionId, streamId: body.streamId, beginRequestId: body.beginRequestId,
+        appliedAtSequence: body.appliedAtSequence, beginFrame: body.beginFrame, firstRunningFrame, observedSequence, elapsedMilliseconds, tick };
+      assert.deepEqual(witnessed, expected);
+      const exact = await fetch(`${config.base}${route}/frames/${firstRunningFrame}`,
+        { headers: { Authorization: 'Bearer ' + config.masterKey } });
+      assert.equal(exact.status, 200);
+      assert.deepEqual(await exact.json(), body.frame);
+      await page.locator('#world-frame-message').filter({ hasText: `首個執行畫格（第 ${firstRunningFrame} 格）` }).waitFor();
+      assert.equal(await canvas.getAttribute('data-sequence'), String(firstRunningFrame));
+      assert.match(await page.locator('#world-status').innerText(), /錄製已核對封存 · 執行中/);
+      assert.equal(await picker.inputValue(), sessionId);
+      assert.equal(await page.locator('#world-room').inputValue(), room);
+      assert.equal(await canvas.getAttribute('data-camera'), camera);
+      if (!openingReplay.length) await page.locator('#world-player').screenshot({ path: path.join(path.dirname(output), config.mode + '-venue-opening-running.png') });
+      await page.locator('#world-begin-original').click();
+      await page.locator('#world-frame-message').filter({ hasText: `已停在第 ${expected.beginFrame} 格的有效姿態開場快照` }).waitFor();
+      assert.equal(await canvas.getAttribute('data-sequence'), String(expected.beginFrame));
+      assert.equal(await picker.inputValue(), sessionId);
+      assert.equal(await page.locator('#world-room').inputValue(), room);
+      assert.equal(await canvas.getAttribute('data-camera'), camera);
+      return witnessed;
     }
     async function reviewInterval(replay) {
       const canvas = page.locator('#world-canvas');
@@ -598,7 +638,9 @@ async function main() {
   } finally {
     await browser.close();
   }
-  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation, scores, scoreCsv, alignment, missionTime, debriefReceipts, receiptExports, debriefSeats, debriefCsv, debriefReplay, debriefAll }, null, 2), { flag: 'wx' });
+  await fs.writeFile(output, JSON.stringify({ complete: true, mode: config.mode, results, history, fieldEvidence, roomReplay, participation,
+    ...(config.openingReplay ? { openingReplay } : {}), scores, scoreCsv, alignment, missionTime, debriefReceipts, receiptExports,
+    debriefSeats, debriefCsv, debriefReplay, debriefAll }, null, 2), { flag: 'wx' });
 }
 main().catch(error => {
   const location = error.stack?.match(/check-venue-replay-native\.cjs:(\d+):(\d+)\)/);

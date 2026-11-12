@@ -200,6 +200,7 @@ def main():
     p.add_argument('--check-venue-end', action='store_true', help='End each native topology in one batch and read its original archives')
     p.add_argument('--check-venue-reports', action='store_true', help='Verify the original reports ZIP for each native End batch')
     p.add_argument('--check-venue-replay-ui', action='store_true', help='Open the original native archives through the shipped console')
+    p.add_argument('--check-venue-opening-replay', action='store_true', help='Compare each original guarded Begin and its first Running frame in the shipped console')
     p.add_argument('--check-venue-replay-alignment', action='store_true', help='Switch to the original adjacent room at the same recorded UTC time')
     p.add_argument('--check-venue-mission-time', action='store_true', help='Switch original independent replays by mission tick in the shipped console')
     p.add_argument('--check-player-room-replay', action='store_true', help='Export a single room from the original native Linked combat replay')
@@ -358,6 +359,8 @@ def main():
         p.error('--check-venue-reports requires --check-venue-end and --check-room-reports')
     if args.check_venue_replay_ui and not args.check_venue_end:
         p.error('--check-venue-replay-ui requires --check-venue-end')
+    if args.check_venue_opening_replay and not (args.check_venue_replay_ui and args.check_venue_participation_gate):
+        p.error('--check-venue-opening-replay requires --check-venue-replay-ui and --check-venue-participation-gate')
     if args.check_venue_replay_alignment and not (args.check_venue_replay_ui and args.check_venue_participation_gate):
         p.error('--check-venue-replay-alignment requires --check-venue-replay-ui and --check-venue-participation-gate')
     if args.check_venue_mission_time and not args.check_venue_replay_ui:
@@ -2185,6 +2188,8 @@ def main():
             for row in rows for room in row['roomIds']],
             'total': totals([player for roster in players.values() for player in roster])}
         config = {'base': uri, 'masterKey': keys['Master'], 'mode': mode, 'sessions': rows, 'scores': scores}
+        if args.check_venue_opening_replay:
+            config['openingReplay'] = {entry['sessionId']: entry['openingReplay'] for entry in entries}
         if args.check_debrief_receipts:
             config['debriefReceipts'] = {'requestId': closed['requestId'], 'rooms': [
                 {'sessionId': room['sessionId'], 'roomId': room['roomId'], 'rosterCount': room['totals']['players'],
@@ -2228,6 +2233,9 @@ def main():
                   'next':row['participationBegin']['frame']['worldSequence']+1,
                   'simulatedPlayers':5*len(row['roomIds'])} for row in rows],
                   f'{mode} shipped console reopens every original participation Begin frame and its neighbor')
+        if args.check_venue_opening_replay:
+            check(result['openingReplay'] == [config['openingReplay'][row['sessionId']] for row in rows],
+                  f'{mode} shipped console compares every original Begin and its first Running frame from the sealed game journals')
         if args.check_venue_replay_alignment:
             alignment = result['alignment']
             check(alignment == {'hidden': True} if linked else alignment['requestId'] == closed['requestId']
@@ -2604,8 +2612,19 @@ def main():
             actual={(prop['roomId'],prop['kind'],prop['feet']['x'],prop['feet']['y'],prop['feet']['z'],prop['yaw']) for prop in header['props']}
             check(actual==expected and len(header['props'])==len(expected),entry['label']+' native world preserves every saved cover coordinate and opening')
             save(entry['label']+'-layout-preview.json',preview)
-        closed=world.analyze(entry['work']/'telemetry'/(entry['sessionId']+'.worldlog'),expected_session=entry['sessionId']);save(entry['label']+'-journal.json',closed)
+        opening = entry.get('openingReplay')
+        journal = entry['work']/'telemetry'/(entry['sessionId']+'.worldlog')
+        closed=world.analyze(journal, accepted_sequence=opening['appliedAtSequence'] if opening else None,
+                             expected_session=entry['sessionId'],
+                             expected_full_header=report['finalWorld']['header'] if opening else None)
+        save(entry['label']+'-journal.json',closed)
         check(closed['complete'] and closed['sealed'] and closed['unacknowledgedFrames']==0 and closed['lastFrame']['worldSequence']==report['finalWorld']['acceptedSequence'],entry['label']+' closed original journal complete / sealed / exact durable tail')
+        if opening:
+            first = closed['firstApplied']
+            check(first is not None and opening['beginFrame'] < first['worldSequence'] < closed['lastFrame']['worldSequence'],
+                  entry['label']+' original closed journal locates the first Running frame after guarded Begin')
+            opening.update(firstRunningFrame=first['worldSequence'], observedSequence=first['observedSequence'],
+                           elapsedMilliseconds=first['elapsedMilliseconds'], tick=first['tick'])
         stats=request('/api/sessions/'+entry['sessionId']+'/statistics');entry['sealed']={'world':report['finalWorld'],'statistics':stats};save(entry['label']+'-statistics.json',stats)
         frames=[];req=urllib.request.Request(uri+'/api/sessions/'+entry['sessionId']+'/world/watch?mode=replay&rate=4',headers={'Authorization':'Bearer '+keys['Master']})
         with urllib.request.urlopen(req,timeout=10) as response:
@@ -4615,6 +4634,9 @@ def main():
                               and all(p['connected'] and p['health']==100 and p['rig']['kind']=='Simulated' for p in packet['frame']['players']),
                               entry['label']+' participation gate retains the exact original Preparing pose for every native admission')
                         proofs[sid]={'appliedAtSequence':seq,'witness':witness,'packet':packet}
+                        if args.check_venue_opening_replay:
+                            entry['openingReplay'] = {'sessionId': sid, 'streamId': witness['streamId'], 'beginRequestId': key,
+                                                      'appliedAtSequence': seq, 'beginFrame': witness['worldSequence']}
                     save(('linked' if linked else 'independent')+'-full-participation-begin.json',proofs)
             for entry in entries:
                 sid=entry['sessionId'];ids=owner_ids[sid]
@@ -5006,6 +5028,7 @@ def main():
             'venueEnd':args.check_venue_end,
             'venueReports':args.check_venue_reports,
             'venueReplayUi':args.check_venue_replay_ui,
+            **({'venueOpeningReplay':True} if args.check_venue_opening_replay else {}),
             'venueReplayAlignment':args.check_venue_replay_alignment,
             'venueHistoryUi':args.check_venue_history_ui,
             'venueFieldEvidence':args.venue_field_evidence,

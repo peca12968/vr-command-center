@@ -253,6 +253,8 @@ python scripts/check-server-package.py <VRCommand-GameServer> `
 
 搭配管理包 0.31.134，可再加 `--check-independent-room-layouts-ui`。Chromium 會從控制台確認五張平面圖及各房保存版本，送出原五房建立請求。測試沿用該次回條及場次 ID，核對 Windows 遊戲實際載入的配置。
 
+搭配管理包 0.31.161 或更新版，可在三包命令加上 `--prepare-independent-set --check-venue-begin --check-venue-participation-gate --check-venue-end --check-venue-replay-ui --check-venue-opening-replay`。五房獨立與合併各啟動 25 個同機 Windows 玩家程序。原遊戲程序停止後，工具從各場封存世界日誌找出第一個已套用原開場指令的有效執行畫格，再以 Chromium 核對兩個回放按鈕、原場次、房間與鏡頭。 [回放操作](SESSION_CLOSURE.md#比較準備與執行畫格)
+
 要以同機 Windows 套件排演 5 人或 10 人場測，在三包命令加入 `--peer-diagnostics --field-evidence --venue-field-evidence --check-venue-end --field-players-per-room 1` 或將最後的數字改成 `2`。工具從房間連線 ZIP 啟動指定席數，對兩種模式核對同次原封存與戰績。加上 `--check-venue-begin` 會檢查未滿 25 席時全員參與閘門拒絕開始，接著以一般全館開始執行該階段。 [現場清單](EXTERNAL_CLIENTS.md#分階段驗收-5-人與-10-人)
 
 Quest 小批次驗證可在三包命令加上 `--check-vr-venue-tickets --check-quest-vr-partial-map`。獨立與合併的名冊各登記 15 個 Quest 3 席位與 10 個 VIVE XR 席位。工具從原控制台 ZIP 測試錯列 VIVE 的拒絕，再把五份指定設定送至模擬 ADB。MR 可省略 `--player-package`，保留本機 `--game-address`，改用 `--mr-venue-bundle-only --check-mapped-quest`，核對完整清單與五席清單各自使用的原鎖定校正檔。 [小批次操作](QUEST3.md#部署指定的-quest-席位)
