@@ -206,7 +206,7 @@ def main():
         (directory / 'release-form-run.log').write_bytes(result.stdout + result.stderr)
         result.check_returncode()
         reviewed = json.loads((directory / 'release-form-checks.json').read_bytes())
-        assert reviewed['complete'] and reviewed['checks'] == 20
+        assert reviewed['complete'] and reviewed['checks'] == 21
         findings.append('Shipped WinForms release selection rejects stale reports and publishes the owned child log digest')
         print('PASS:', findings[-1], flush=True)
     # A fresh minimal copy is intentionally incomplete. Never alter the delivered package.
