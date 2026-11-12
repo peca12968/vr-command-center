@@ -1921,6 +1921,89 @@ class FieldResultsTests(unittest.TestCase):
                 plan_path.write_text(json.dumps(plan), encoding='utf-8')
                 self.assertEqual(original['venueNetworkPlan'], field.verify_venue(path)['venueNetworkPlan'])
 
+    def test_windows_inbox_reconnect_history_marks_problem_files_before_full_verification(self):
+        for mode in ('Independent', 'Linked'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, _ = venue_fixture(root, mode, room_sizes=(1,) * 5)
+                manifest.update(expectedPlayersPerRoom=1, verifyReconnectHistory=True)
+                old = 'VR_CLIENT_CONNECTED id=99\nVR_CLIENT_DISCONNECTED\n'
+                for entry in manifest['sessions']:
+                    session, _, endpoint = field.management_zip(root / entry['evidenceZip'])
+                    startup = f"VR_NETWORK_STARTED role=Client started=True background=True port={endpoint['port']}\n"
+                    for owner, player in zip(session['players'], entry['players'], strict=True):
+                        log = root / player['log']
+                        raw = log.read_text(encoding='utf-8')
+                        if owner['roomId'] == 5:
+                            raw = old + raw
+                            target_owner = owner
+                            server = root / entry['serverLog']
+                            first, rest = server.read_text(encoding='utf-8').split('\n', 1)
+                            server.write_text(first + '\nVR_SERVER_ADMISSION_APPROVED id=99\n'
+                                              f"VR_SERVER_PEER id=99 endpoint={player['address']}:5123\n"
+                                              'VR_SERVER_CLIENT_LEFT id=99\n' + rest, encoding='utf-8')
+                        log.write_text(startup + raw, encoding='utf-8')
+                self.add_shared_release(root, manifest, 0)
+                packed = self.windows_inbox_fixture(root, manifest)
+                path.write_text(json.dumps(packed), encoding='utf-8')
+
+                def inspect():
+                    return field.verify_venue_batch(path, inspect_windows=True)[0]
+
+                received = inspect()
+                self.assertTrue(received['complete'])
+                history = {'observedConnections': 6, 'retiredConnections': 1,
+                           'reconnectedSeats': [{'roomId': 5, 'seat': 1, 'retiredConnections': 1}]}
+                self.assertEqual(history, received['reconnectHistory'])
+                self.assertEqual(history, field.verify_venue(path)['reconnectHistory'])
+                boxes = {row['roomId']: root / packed['windowsEvidenceDirectory'] / row['file'] for row in received['receivedSeats']}
+                server_bytes = server.read_bytes()
+                for bad, message in (
+                    (server_bytes.replace(b'VR_SERVER_CLIENT_LEFT id=99\r\n', b'').replace(b'VR_SERVER_CLIENT_LEFT id=99\n', b''),
+                     'Missing server release'),
+                    (server_bytes.replace(b'192.168.5.10:5123', b'192.168.5.21:5123'), 'Historical UDP peer differs'),
+                ):
+                    server.write_bytes(bad)
+                    failed = inspect()
+                    self.assertFalse(failed['complete'])
+                    self.assertEqual([{'roomId': 5, 'seat': 1}], failed['missingSeats'])
+                    self.assertEqual({'observedConnections': 4, 'retiredConnections': 0, 'reconnectedSeats': []},
+                                     failed['reconnectHistory'])
+                    self.assertEqual(boxes[5].name, failed['issues'][0]['file'])
+                    self.assertIn(message, failed['issues'][0]['reason'])
+                    self.assertNotIn('192.168', json.dumps(failed))
+                    with self.assertRaisesRegex(field.EvidenceError, 'Windows inbox is incomplete'):
+                        field.verify_venue(path)
+                    path.write_text(json.dumps(dict(packed, verifyReconnectHistory=False)), encoding='utf-8')
+                    self.assertTrue(inspect()['complete'])
+                    path.write_text(json.dumps(packed), encoding='utf-8')
+                server.write_bytes(server_bytes)
+
+                def rewrite(box, change):
+                    original = box.read_bytes()
+                    with zipfile.ZipFile(box) as archive:
+                        log, launch = archive.read('player.log'), json.loads(archive.read('launch-report.json'))
+                    log = change(log.decode('utf-8')).encode('utf-8')
+                    launch['playerLogSha256'] = hashlib.sha256(log).hexdigest()
+                    with zipfile.ZipFile(box, 'w') as archive:
+                        archive.writestr('player.log', log)
+                        archive.writestr('launch-report.json', json.dumps(launch))
+                    return original
+
+                changed = rewrite(boxes[5], lambda log: log.replace(target_owner['admissionId'], id_for(999)))
+                failure = inspect()
+                self.assertEqual([{'roomId': 5, 'seat': 1}], failure['missingSeats'])
+                self.assertIn('admission', failure['issues'][0]['reason'])
+                boxes[5].write_bytes(changed)
+                if mode == 'Linked':
+                    changed = rewrite(boxes[1], lambda log: log.replace('VR_CLIENT_CONNECTED', old + 'VR_CLIENT_CONNECTED', 1))
+                    failure = inspect()
+                    self.assertEqual([{'roomId': 1, 'seat': 1}, {'roomId': 5, 'seat': 1}], failure['missingSeats'])
+                    self.assertEqual({boxes[1].name, boxes[5].name}, {row['file'] for row in failure['issues']})
+                    self.assertTrue(all('reused across player logs' in row['reason'] for row in failure['issues']))
+                    boxes[1].write_bytes(changed)
+                self.assertEqual(received, inspect())
+
     def test_windows_inbox_reports_missing_acknowledgement_without_weakening_final_verification(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2042,6 +2125,11 @@ class FieldResultsTests(unittest.TestCase):
                 ready = json.loads(original_generated)
                 self.assertEqual([row['sessionId'] for row in closure['sessions']], [row['sessionId'] for row in ready['sessions']])
                 self.assertTrue(all(not Path(row['serverLog']).is_absolute() for row in ready['sessions']))
+                strict = root / 'prepared-reconnect.json'
+                prepared = subprocess.run([*command, '--server-work-root', str(moved), '--verify-reconnect-history',
+                                           '--output', str(strict)], capture_output=True)
+                self.assertEqual(0, prepared.returncode, prepared.stderr.decode())
+                self.assertIs(json.loads(strict.read_bytes()).pop('verifyReconnectHistory'), True)
                 ready['windowsPlayers'] = packed['windowsPlayers']
                 path.write_text(json.dumps(ready), encoding='utf-8')
                 self.assertEqual(split, field.verify_venue(path))

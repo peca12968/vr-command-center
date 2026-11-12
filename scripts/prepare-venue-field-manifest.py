@@ -169,6 +169,8 @@ def prepare(args, output):
         manifest['roomAlignmentBundle'] = ref(alignment_path)
     if network_path is not None:
         manifest['venueNetworkPlan'] = ref(network_path)
+    if args.verify_reconnect_history:
+        manifest['verifyReconnectHistory'] = True
     if args.players_per_room != 5:
         manifest['expectedPlayersPerRoom'] = args.players_per_room
     release = windows_seats = None
@@ -242,6 +244,7 @@ def main():
     parser.add_argument('--windows-seat-map', type=Path)
     parser.add_argument('--windows-station-addresses', type=Path)
     parser.add_argument('--venue-network-plan', type=Path, help='Original whole-venue network plan with all seat IPv4 assignments')
+    parser.add_argument('--verify-reconnect-history', action='store_true', help='Check original reconnect histories at inbox intake and final verification')
     parser.add_argument('--udp-preflight-batch', action='append', type=Path)
     parser.add_argument('--room-alignment-bundle', type=Path, help='Original MR or mixed venue deployment ZIP')
     parser.add_argument('--quest-capture-report', action='append', type=Path, help='Original batch logcat capture report; repeat for separate batches')

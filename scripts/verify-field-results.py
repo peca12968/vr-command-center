@@ -286,14 +286,12 @@ def quest_client_result(log, pid, port, *, connections=None):
     return client_result('\n'.join(markers), connections=connections)
 
 
-def verify_reconnect_chain(connections, used, peers, acknowledged, approved, released, expected_ip):
-    require(not used.intersection(connections), 'A connection was reused across player logs')
+def verify_reconnect_chain(connections, peers, acknowledged, approved, released, expected_ip):
     for previous, following in zip(connections, connections[1:]):
         require(previous in peers and previous not in acknowledged and following in approved
                 and previous in released and released[previous] < approved[following],
                 'Missing server release before the next approved connection')
         require(peer_address(peers[previous])[0] == expected_ip, 'Historical UDP peer differs from the declared source')
-    used.update(connections)
 
 
 def windows_player_source(log, port):
@@ -990,7 +988,9 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
             require((room, seat) not in source_seats, 'Duplicate seat in the player source evidence')
             source_seats.add((room, seat))
         if verify_reconnect_history:
-            verify_reconnect_chain(history, verified_history, peers, acknowledged, approved, released, expected_ip)
+            require(not verified_history.intersection(history), 'A connection was reused across player logs')
+            verify_reconnect_chain(history, peers, acknowledged, approved, released, expected_ip)
+            verified_history.update(history)
             if len(history) > 1:
                 reconnected_seats.append({'roomId': room, 'seat': seat, 'retiredConnections': len(history) - 1})
         if player_sources is not None:
@@ -1243,7 +1243,7 @@ def read_windows_station_addresses(path, seat_map):
 
 
 def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, seat_map, evidence_path, link_criteria,
-                  station_addresses=None, planned_seat_addresses=None):
+                  station_addresses=None, planned_seat_addresses=None, verify_history=False, strict_startup_port=False):
     require(directory.is_dir(), 'Windows evidence inbox must be a directory')
     require(type(windows_hash) is str and re.fullmatch(r'[0-9a-f]{64}', windows_hash),
             'Windows evidence inbox requires the original Windows release report')
@@ -1267,7 +1267,8 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
                 and boundary['worldSequence'] == integer(original['replay']['throughSequence'], 1),
                 'Windows inbox statistics or seals differ from the original closure')
         port = integer(endpoint['port'], 1024, 65535)
-        peers, acknowledgements, _, _ = server_connections(server_log, port, allow_timeout=True)
+        peers, acknowledgements, approved, released = server_connections(server_log, port, verify_history=verify_history,
+                                                                          allow_timeout=True)
         size = len(session['roomIds']) * players_per_room
         owners, ledger = roster(session['players'], 'id', size), roster(statistics['players'], 'playerId', size)
         require(owners.keys() == ledger.keys(), 'Final roster and statistics disagree')
@@ -1275,21 +1276,23 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
             room, seat = integer(owner['roomId'], 1, 5), integer(owner['seat'], 0, 4) + 1
             require(room in original['roomIds'] and (room, seat) not in roster_seats, 'Windows inbox roster repeats or misplaces a seat')
             roster_seats[room, seat] = (session_id, player_id)
-        batches[session_id] = (boundary, owners, ledger, peers, acknowledgements)
+        batches[session_id] = (boundary, owners, ledger, port, peers, acknowledgements, approved, released)
     require(all(sum(seat[0] == room for seat in roster_seats) == players_per_room for room in range(1, 6)),
             'Windows inbox original roster has an unexpected room size')
     if seat_map is not None:
         require(seat_map.keys() <= roster_seats.keys(), 'Windows seat map names a seat outside the original batch roster')
     selected = {owner: seat for seat, owner in roster_seats.items() if seat_map is None or seat in seat_map}
-    received, groups, issues, connections, measured = {}, {}, [], set(), {}
+    received, logs, issues, connections, measured, histories = {}, {}, [], set(), {}, {}
     for file in files:
         try:
             path = evidence_path(str(file))
             raw_log, raw_launch, raw_metrics = read_windows_evidence(None, None, path)
-            connection, result = client_result(raw_log.decode('utf-8-sig'))
+            log = raw_log.decode('utf-8-sig')
+            history = [] if verify_history else None
+            connection, result = client_result(log, connections=history, require_startup=verify_history)
             session_id, player_id = identity(result['sessionId']), identity(result['playerId'])
             require(session_id in batches, 'Player ZIP belongs to another venue batch')
-            boundary, owners, ledger, peers, acknowledgements = batches[session_id]
+            boundary, owners, ledger, port, peers, acknowledgements, approved, released = batches[session_id]
             seat = selected.get((session_id, player_id))
             require(seat is not None, 'Player ZIP does not match an expected Windows seat')
             log_hash, launch = hashlib.sha256(raw_log).hexdigest(), read_json(raw_launch)
@@ -1305,6 +1308,11 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
             if planned_seat_addresses is not None:
                 require(address == planned_seat_addresses[seat],
                         f'Server-observed IPv4 differs from the venue network plan for room {seat[0]} seat {seat[1]}')
+            if verify_history:
+                if strict_startup_port:
+                    startup = next(line for line in log.splitlines() if line.startswith('VR_NETWORK_STARTED '))
+                    require(client_startup_on_port(startup, port), 'Expected one original Windows client startup')
+                verify_reconnect_chain(history, peers, acknowledgements, approved, released, address)
         except EvidenceError as error:
             issues.append({'file': file.name, 'reason': str(error)})
             continue
@@ -1316,6 +1324,30 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
         if metrics is not None:
             measured[seat] = metrics
         connections.add((session_id, connection))
+        logs[seat] = (session_id, address, path)
+        if verify_history:
+            histories[seat] = history
+
+    reconnect_report = {}
+    if verify_history:
+        claims = {}
+        for seat, history in histories.items():
+            for connection in history:
+                claims.setdefault((logs[seat][0], connection), []).append(seat)
+        conflicts = {seat for seats in claims.values() if len(seats) > 1 for seat in seats}
+        for seat in sorted(conflicts):
+            issues.append({'file': received.pop(seat), 'reason': 'A connection was reused across player logs'})
+            histories.pop(seat)
+            measured.pop(seat, None)
+        reconnect_report['reconnectHistory'] = {
+            'observedConnections': sum(map(len, histories.values())),
+            'retiredConnections': sum(len(history) - 1 for history in histories.values()),
+            'reconnectedSeats': [{'roomId': room, 'seat': seat, 'retiredConnections': len(history) - 1}
+                                 for (room, seat), history in sorted(histories.items()) if len(history) > 1],
+        }
+    groups = {}
+    for seat in received:
+        session_id, address, path = logs[seat]
         groups.setdefault(session_id, []).append((address, None, None, None, path))
 
     def seat_row(seat):
@@ -1341,7 +1373,7 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
     return groups, {'complete': not missing and not issues, 'expectedWindowsSeats': len(selected),
                     'receivedWindowsSeats': len(received), 'missingSeats': [seat_row(seat) for seat in missing],
                     'receivedSeats': [dict(seat_row(seat), file=received[seat]) for seat in sorted(received)], 'issues': issues,
-                    **link_report}
+                    **link_report, **reconnect_report}
 
 
 def verify_windows_link(log_hash, connection, launch, raw_metrics, criteria=None):
@@ -2199,7 +2231,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
         inputs = list(inputs)
         windows_by_session, inbox = windows_inbox(directory, inputs, expected, players_per_room, windows_hash,
                                                  seat_map, evidence_path, link_criteria, station_addresses=station_addresses,
-                                                 planned_seat_addresses=planned_seat_addresses)
+                                                 planned_seat_addresses=planned_seat_addresses, verify_history=verify_reconnect_history,
+                                                 strict_startup_port=require_distinct_remote_roster)
         if station_addresses is not None:
             station_summary['windowsStationAddresses'] = {'sha256': address_hash, 'expectedSeats': len(station_addresses),
                                                           'verifiedSeats': inbox['receivedWindowsSeats']}

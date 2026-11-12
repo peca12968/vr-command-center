@@ -341,6 +341,8 @@ python scripts/verify-field-results.py --topology direct-lan `
 
 驗收會比對每條已連線記錄的伺服器核准及 UDP 來源，確認舊連線在下一條核准前已由伺服器釋放，最後一條才有原戰績確認。無法歸入任何玩家日誌的伺服器來源記錄會使驗收失敗。`reconnectHistory` 提供總連線數、已釋放的舊連線數與重連房號席位。入場識別以最後封存的原戰績核對，歷史來源記錄提供連線識別與順序。 [伺服器來源診斷](WINDOWS_SERVER_PACKAGE.md#跨機來源診斷)
 
+使用 `prepare-venue-field-manifest.py` 時，可加 `--verify-reconnect-history` 保留這項檢查。Windows 收件模式會逐份檢查已交回 ZIP 的原程序及歷次連線。舊連線缺少伺服器釋放紀錄、來源不符，或同一條舊連線出現在兩份玩家日誌時，會列出受影響的檔案與席位。收件摘要只計入通過的 Windows 檔案。收齊後，完整驗收會核對全場 Windows 與 Quest 日誌及伺服器記錄。 [收件方式](#按收件資料夾找缺件及錯批)
+
 #### 核對重連席位的回放區間
 
 五房清單開啟 `verifyReconnectHistory` 並提供所有原始 `worldJournal` 後，可再填 `reconnectWindow`。從該席原場次的回放取第一格姿態無效與第一格恢復有效姿態的世界序號。房號與席位由 1 起算。
