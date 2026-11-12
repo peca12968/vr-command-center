@@ -343,6 +343,22 @@ python scripts/verify-field-results.py --topology direct-lan `
 
 使用 `prepare-venue-field-manifest.py` 時，可加 `--verify-reconnect-history` 保留這項檢查。Windows 收件模式會逐份檢查已交回 ZIP 的原程序及歷次連線。舊連線缺少伺服器釋放紀錄、來源不符，或同一條舊連線出現在兩份玩家日誌時，會列出受影響的檔案與席位。收件摘要只計入通過的 Windows 檔案。收齊後，完整驗收會核對全場 Windows 與 Quest 日誌及伺服器記錄。 [收件方式](#按收件資料夾找缺件及錯批)
 
+#### 核對重連時變更的 IPv4
+
+若現場重連時確認席位的 IPv4 有變，保留開場前的 `venueNetworkPlan`，另外在私人清單記錄受影響席位的歷次 IPv4。每筆對應一條連線，依玩家日誌順序填寫。第一筆須符合開場清單，同一 IPv4 在不同連線重複出現時也須逐筆填寫。`closureRequestId` 使用這批原全館結束回條的識別碼。
+
+```json
+{
+  "version": 1,
+  "closureRequestId": "17166e9f-6035-41ad-b4e3-3cc70b2c0ec4",
+  "seats": [{"roomId": 5, "seat": 2, "addresses": ["192.168.1.22", "192.168.1.42"]}]
+}
+```
+
+在 `venue.json` 加 `"reconnectSourcePlan": "reconnect-sources.json"`、`"verifyReconnectHistory": true` 及原 `venueNetworkPlan`。用工具產生清單時，可傳入 `--reconnect-source-plan .\reconnect-sources.json --verify-reconnect-history --venue-network-plan .\venue-network.json`。此流程與要求每席固定來源的 `requireDistinctRemoteRoster` 擇一。
+
+工具逐條核對同一玩家程序的連線順序、伺服器所見 IPv4、舊連線釋放及最後一條連線的原戰績確認。未列入變更清單的席位沿用原固定來源。開場前 UDP 預檢沿用當時的第一個來源。摘要 `reconnectSourcePlan` 只顯示原檔雜湊、席位數及核對連線數。Windows 收件會列出不符的 ZIP 與席位，Quest 由原 PID 的 logcat 及封存資料核對。
+
 #### 核對重連席位的回放區間
 
 五房清單開啟 `verifyReconnectHistory` 並提供所有原始 `worldJournal` 後，可再填 `reconnectWindow`。從該席原場次的回放取第一格姿態無效與第一格恢復有效姿態的世界序號。房號與席位由 1 起算。

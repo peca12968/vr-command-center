@@ -2004,6 +2004,114 @@ class FieldResultsTests(unittest.TestCase):
                     boxes[1].write_bytes(changed)
                 self.assertEqual(received, inspect())
 
+    @unittest.skipUnless(HAS_POWERSHELL, 'UDP evidence requires PowerShell')
+    def test_venue_reconnect_source_plan_keeps_original_opening_preflight(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, manifest, closure = venue_fixture(root, 'Linked', remote=True, room_sizes=(1,) * 5)
+            entry, = manifest['sessions']
+            session, _, endpoint = field.management_zip(root / entry['evidenceZip'])
+            launcher_path = root / entry['launcherReport']
+            launcher = json.loads(launcher_path.read_bytes())
+            launcher['udpBinding']['observedAtUtc'] = '2026-11-08T23:59:59Z'
+            launcher_path.write_text(json.dumps(launcher), encoding='utf-8')
+            server = root / entry['serverLog']
+            first, rest = server.read_text(encoding='utf-8').split('\n', 1)
+            initial, final = '192.168.5.21', '192.168.5.20'
+            server.write_text(first + f'\nVR_SERVER_ADMISSION_APPROVED id=99\nVR_SERVER_PEER id=99 endpoint={initial}:5010\n'
+                              'VR_SERVER_CLIENT_LEFT id=99\n' + rest, encoding='utf-8')
+            startup = f"VR_NETWORK_STARTED role=Client started=True background=True port={endpoint['port']}\n"
+            seats = []
+            for owner, player in zip(session['players'], entry['players'], strict=True):
+                room = owner['roomId']
+                file = root / player['log']
+                extra = 'VR_CLIENT_CONNECTED id=99\nVR_CLIENT_DISCONNECTED\n' if room == 5 else ''
+                file.write_text(startup + extra + file.read_text(encoding='utf-8'), encoding='utf-8')
+                seats.append({'roomId': room, 'seat': 1, 'address': initial if room == 5 else player['address']})
+            network = {'version': 1, 'mode': 'Linked', 'sources': seats, 'endpoints': [
+                {'roomIds': session['roomIds'], 'address': endpoint['address'], 'port': endpoint['port']}]}
+            (root / 'network.json').write_text(json.dumps(network), encoding='utf-8')
+            (root / 'reconnect.json').write_text(json.dumps({'version': 1, 'closureRequestId': closure['requestId'],
+                'seats': [{'roomId': 5, 'seat': 1, 'addresses': [initial, final]}]}), encoding='utf-8')
+            manifest.update(expectedPlayersPerRoom=1, verifyReconnectHistory=True, venueNetworkPlan='network.json',
+                            reconnectSourcePlan='reconnect.json')
+            opening = [preflight_fixture(root, f'source-{i}', server=endpoint['address'], peer=address, port=endpoint['port'])
+                       for i, address in enumerate((endpoint['address'], initial))]
+            entry['udpSourcePreflights'] = [dict(listener=listener.name, probe=probe.name) for listener, probe in opening]
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            report = field.verify_venue(path)
+            self.assertEqual(2, report['udpSourcePreflightsVerified'])
+            self.assertEqual(1, report['reconnectSourcePlan']['verifiedSeats'])
+            listener, probe = preflight_fixture(root, 'final-source', server=endpoint['address'], peer=final, port=endpoint['port'])
+            entry['udpSourcePreflights'][-1] = dict(listener=listener.name, probe=probe.name)
+            path.write_text(json.dumps(manifest), encoding='utf-8')
+            with self.assertRaisesRegex(field.EvidenceError, 'peer|source'):
+                field.verify_venue(path)
+
+    def test_venue_reconnect_source_plan_checks_order_in_inbox_and_full_verification(self):
+        for mode in ('Linked', 'Independent'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                path, manifest, closure = venue_fixture(root, mode, remote=True, room_sizes=(1,) * 5)
+                manifest.update(expectedPlayersPerRoom=1, verifyReconnectHistory=True, venueNetworkPlan='network.json',
+                                reconnectSourcePlan='reconnect.json')
+                network = {'version': 1, 'mode': mode, 'sources': [], 'endpoints': []}
+                initial, final = '192.168.5.21', '192.168.5.20'
+                for entry in manifest['sessions']:
+                    session, _, endpoint = field.management_zip(root / entry['evidenceZip'])
+                    network['endpoints'].append({'roomIds': session['roomIds'], 'address': endpoint['address'], 'port': endpoint['port']})
+                    for player, original in zip(session['players'], entry['players'], strict=True):
+                        room = player['roomId']
+                        network['sources'].append({'roomId': room, 'seat': 1, 'address': initial if room == 5 else original['address']})
+                        log = root / original['log']
+                        extra = ''
+                        if room == 5:
+                            extra = 'VR_CLIENT_CONNECTED id=99\nVR_CLIENT_DISCONNECTED\n'
+                            server = root / entry['serverLog']
+                            startup, rest = server.read_text(encoding='utf-8').split('\n', 1)
+                            server.write_text(startup + '\nVR_SERVER_ADMISSION_APPROVED id=99\n'
+                                              f'VR_SERVER_PEER id=99 endpoint={initial}:5111\nVR_SERVER_CLIENT_LEFT id=99\n'
+                                              + rest, encoding='utf-8')
+                        log.write_text(f"VR_NETWORK_STARTED role=Client started=True background=True port={endpoint['port']}\n"
+                                       + extra + log.read_text(encoding='utf-8'), encoding='utf-8')
+                plan = {'version': 1, 'closureRequestId': closure['requestId'],
+                        'seats': [{'roomId': 5, 'seat': 1, 'addresses': [initial, final]}]}
+                (root / 'network.json').write_text(json.dumps(network), encoding='utf-8')
+                source = root / 'reconnect.json'
+                source.write_text(json.dumps(plan), encoding='utf-8')
+                self.add_shared_release(root, manifest, 0)
+                packed = self.windows_inbox_fixture(root, manifest)
+                path.write_text(json.dumps(packed), encoding='utf-8')
+                expected = {'sha256': hashlib.sha256(source.read_bytes()).hexdigest(), 'plannedSeats': 1,
+                            'verifiedSeats': 1, 'connectionsVerified': 2}
+                inbox, _ = field.verify_venue_batch(path, inspect_windows=True)
+                self.assertTrue(inbox['complete'])
+                self.assertEqual(expected, inbox['reconnectSourcePlan'])
+                self.assertEqual(expected, field.verify_venue(path)['reconnectSourcePlan'])
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+                self.assertEqual(expected, field.verify_venue(path)['reconnectSourcePlan'])
+                target = next(row for row in inbox['receivedSeats'] if row['roomId'] == 5)
+                path.write_text(json.dumps(packed), encoding='utf-8')
+
+                for addresses, reason in (([initial, '192.168.5.22', final], 'Connection count differs'),
+                                          ([initial, '192.168.5.22'], 'Final UDP peer differs')):
+                    altered = deepcopy(plan)
+                    altered['seats'][0]['addresses'] = addresses
+                    source.write_text(json.dumps(altered), encoding='utf-8')
+                    rejected, _ = field.verify_venue_batch(path, inspect_windows=True)
+                    self.assertEqual([{'roomId': 5, 'seat': 1}], rejected['missingSeats'])
+                    self.assertEqual(target['file'], rejected['issues'][0]['file'])
+                    self.assertIn(reason, rejected['issues'][0]['reason'])
+                    self.assertEqual(0, rejected['reconnectSourcePlan']['verifiedSeats'])
+                    self.assertNotIn('192.168.', json.dumps(rejected))
+
+                for altered, reason in ((dict(plan, closureRequestId=id_for(997)), 'original End batch'),
+                                        (dict(plan, seats=[dict(plan['seats'][0], addresses=[final, initial])]), 'original seat IPv4'),
+                                        (dict(plan, seats=[dict(plan['seats'][0], addresses=[initial, '192.168.5.10'])]), 'network topology')):
+                    source.write_text(json.dumps(altered), encoding='utf-8')
+                    with self.assertRaisesRegex(field.EvidenceError, reason):
+                        field.verify_venue(path)
+
     def test_windows_inbox_reports_missing_acknowledgement_without_weakening_final_verification(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2364,6 +2472,57 @@ class FieldResultsTests(unittest.TestCase):
                 self.assertIn(b'IPv4 differs from the venue network plan for room 1 seat 5', result.stderr)
                 self.assertFalse(rejected_path.exists())
                 whole_path.write_bytes(original_whole)
+                # Keep the opening plan fixed. Only the simulated server's final peer changes.
+                first = whole['sources'][0]
+                first_seat = (first['roomId'], first['seat'])
+                first_capture = next(row for row in captured['seats'] if (row['roomId'], row['seat']) == first_seat)
+                original_log = capture_path.parent / first_capture['log']
+                log_bytes = original_log.read_bytes()
+                capture_bytes = capture_path.read_bytes()
+                connection = field.quest_client_result(log_bytes.decode('utf-8'), first_capture['logcatPid'], first_capture['port'])[0]
+                start = log_bytes.index(b'\n', log_bytes.index(b'VR_NETWORK_STARTED')) + 1
+                added = (logcat_line('VR_CLIENT_CONNECTED id=99') + logcat_line('VR_CLIENT_DISCONNECTED')).encode()
+                updated = log_bytes[:start] + added + log_bytes[start:]
+                original_log.write_bytes(updated)
+                first_capture.update(bytes=len(updated), sha256=hashlib.sha256(updated).hexdigest())
+                capture_path.write_text(json.dumps(captured), encoding='utf-8')
+                server = moved / ('linked' if mode == 'Linked' else 'room-01') / 'server.log'
+                server_bytes = server.read_bytes()
+                startup, rest = server_bytes.split(b'\n', 1)
+                original_address = first['address']
+                new_address = '192.168.5.220'
+                marker = b'VR_SERVER_PEER id=' + connection.encode() + b' endpoint='
+                assert marker + original_address.encode() in rest
+                history = (f'VR_SERVER_ADMISSION_APPROVED id=99\nVR_SERVER_PEER id=99 endpoint={original_address}:5100\n'
+                           'VR_SERVER_CLIENT_LEFT id=99\n').encode()
+                server.write_bytes(startup + b'\n' + history + rest.replace(marker + original_address.encode(), marker + new_address.encode()))
+                for log in inbox.glob('*.ZIP'):
+                    # The strict history option requires the original startup line in every Windows fixture ZIP.
+                    with zipfile.ZipFile(log) as archive:
+                        data = {name: archive.read(name) for name in archive.namelist()}
+                    owner_id = field.client_result(data['player.log'].decode())[1]['sessionId']
+                    port = next(row['port'] for row in deployment['devices'] if row['sessionId'] == owner_id)
+                    data['player.log'] = f'VR_NETWORK_STARTED role=Client started=True background=True port={port}\n'.encode() + data['player.log']
+                    launch = json.loads(data['launch-report.json'])
+                    launch['playerLogSha256'] = hashlib.sha256(data['player.log']).hexdigest()
+                    data['launch-report.json'] = json.dumps(launch).encode()
+                    with zipfile.ZipFile(log, 'w') as archive:
+                        for name, raw in data.items():
+                            archive.writestr(name, raw)
+                change_plan = root / 'reconnect-sources.json'
+                change_plan.write_text(json.dumps({'version': 1, 'closureRequestId': closure['requestId'], 'seats': [
+                    {'roomId': first_seat[0], 'seat': first_seat[1], 'addresses': [original_address, new_address]}]}), encoding='utf-8')
+                handoff = output.with_name('with-reconnect.json')
+                result = subprocess.run([*command, '--verify-reconnect-history', '--reconnect-source-plan', str(change_plan),
+                                         '--output', str(handoff)], capture_output=True)
+                self.assertEqual(0, result.returncode, result.stderr)
+                verified = field.verify_venue(handoff)
+                self.assertEqual(1, verified['reconnectSourcePlan']['verifiedSeats'])
+                self.assertEqual(2, verified['reconnectSourcePlan']['connectionsVerified'])
+                self.assertEqual(5, verified['questCaptureSeatsVerified'])
+                server.write_bytes(server_bytes)
+                original_log.write_bytes(log_bytes)
+                capture_path.write_bytes(capture_bytes)
                 seats[0]['seat'] = 5
                 seats_path.write_text(json.dumps({'version': 1, 'seats': seats}), encoding='utf-8')
                 rejected_path = output.with_name('overlapping-seats.json')

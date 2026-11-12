@@ -35,7 +35,8 @@ def session_files(result, folder, session_id):
     return {key: path.resolve(strict=True) for key, path in files.items()}
 
 
-def check_quest_inputs(manifest, expected, evidence_path, release, sources, server_ips, windows_seats, venue_network):
+def check_quest_inputs(manifest, expected, evidence_path, release, sources, server_ips, windows_seats, venue_network,
+                       reconnect_sources):
     captures, endpoints, _, deployments, _, _ = field.read_venue_quest_evidence(
         manifest, manifest['mode'], expected, evidence_path, release, venue_network=venue_network)
     for source in sources.values():
@@ -49,15 +50,21 @@ def check_quest_inputs(manifest, expected, evidence_path, release, sources, serv
             owner = source['players'].get(seat)
             field.require(owner is not None and owner.get('headset') == 'Quest3', 'Quest capture does not match a Quest 3 seat in the original roster')
             _, log, _, _ = field.quest_capture_log(address, path, pid, seat, size, digest)
-            connection, result = field.quest_client_result(log, pid, port)
+            planned = reconnect_sources.get(seat) if reconnect_sources is not None else None
+            history = [] if planned is not None else None
+            connection, result = field.quest_client_result(log, pid, port, connections=history)
             field.require(result['playerId'] == owner['id'] and connection in source['acknowledged'],
                           'Quest capture lacks the original player or server acknowledgement')
             field.verify_player_terminal_result(result, owner, source['ledger'][owner['id']], source['boundary'])
             observed, _ = field.peer_address(source['peers'][connection])
+            expected_address = observed if planned is None else planned[0]
             field.require(observed not in server_ips and observed not in observed_addresses
-                          and any(observed in network for network in field.LAN) and (address is None or address == observed),
+                          and any(observed in network for network in field.LAN) and (address is None or address == expected_address),
                           'Quest capture IPv4 differs from the original or declared direct LAN source')
-            if venue_network is not None:
+            if planned is not None:
+                field.verify_reconnect_chain(history, source['peers'], source['acknowledged'], source['approved'], source['released'],
+                                             observed, planned)
+            elif venue_network is not None:
                 field.require(observed == venue_network['seats'][seat],
                               f'Server-observed IPv4 differs from the venue network plan for room {seat[0]} seat {seat[1]}')
             captured_seats.add(seat)
@@ -107,6 +114,9 @@ def prepare(args, output):
     alignment_bundle = field.read_venue_alignment_bundle(alignment_path, mode, expected) if alignment_path is not None else None
     network_path = evidence_path(args.venue_network_plan.resolve()) if args.venue_network_plan is not None else None
     venue_network = field.read_venue_network_plan(network_path, mode, args.players_per_room) if network_path is not None else None
+    reconnect_path = evidence_path(args.reconnect_source_plan.resolve()) if args.reconnect_source_plan is not None else None
+    reconnect_sources = (field.read_reconnect_source_plan(reconnect_path, closure_id, venue_network['seats'], args.topology, addresses)[0]
+                         if reconnect_path is not None else None)
     entries, venue_seats = [], set()
     quest_sources = {}
     for session_id, row in sorted(expected.items(), key=lambda entry: entry[1]['roomIds']):
@@ -140,7 +150,8 @@ def prepare(args, output):
                 field.verify_room_alignments(session, world['header'], alignments)
         field.require(result['peerDiagnosticsEnabled'] is True, f'Original Windows launch did not record UDP peers for {stem}')
         files = session_files(result, work_root / stem if work_root is not None else None, session_id)
-        peers, acknowledged, _, _ = field.server_connections(field.content(files['serverLog']), port, allow_timeout=True)
+        peers, acknowledged, approved, released = field.server_connections(
+            field.content(files['serverLog']), port, verify_history=reconnect_sources is not None, allow_timeout=True)
         count = args.players_per_room * len(rooms)
         owners = field.roster(session['players'], 'id', count)
         ledger = field.roster(statistics['players'], 'playerId', count)
@@ -156,7 +167,7 @@ def prepare(args, output):
         if args.quest_capture_report or args.quest_deployment_report:
             quest_sources[session_id] = {'rooms': tuple(rooms), 'binding': (address, port), 'boundary': boundary, 'ledger': ledger,
                                          'players': {(player['roomId'], player['seat'] + 1): player for player in owners.values()},
-                                         'peers': peers, 'acknowledged': acknowledged}
+                                         'peers': peers, 'acknowledged': acknowledged, 'approved': approved, 'released': released}
         field.verify_world_journal(files['worldJournal'], world, boundary['finalStreamSequence'], boundary['throughSequence'], applied_end)
         field.verify_combat_journal(files['combatJournal'], session_id, stream, boundary['origin'],
                                     boundary['finalStreamSequence'], applied_end, ledger)
@@ -171,6 +182,8 @@ def prepare(args, output):
         manifest['venueNetworkPlan'] = ref(network_path)
     if args.verify_reconnect_history:
         manifest['verifyReconnectHistory'] = True
+    if reconnect_path is not None:
+        manifest['reconnectSourcePlan'] = ref(reconnect_path)
     if args.players_per_room != 5:
         manifest['expectedPlayersPerRoom'] = args.players_per_room
     release = windows_seats = None
@@ -226,7 +239,8 @@ def prepare(args, output):
     if args.quest_readiness_report:
         manifest['questReadinessReports'] = [ref(path.resolve(strict=True)) for path in args.quest_readiness_report]
     if quest_sources:
-        check_quest_inputs(manifest, expected, evidence_path, release, quest_sources, addresses, windows_seats, venue_network)
+        check_quest_inputs(manifest, expected, evidence_path, release, quest_sources, addresses, windows_seats, venue_network,
+                           reconnect_sources)
     return manifest
 
 
@@ -245,6 +259,7 @@ def main():
     parser.add_argument('--windows-station-addresses', type=Path)
     parser.add_argument('--venue-network-plan', type=Path, help='Original whole-venue network plan with all seat IPv4 assignments')
     parser.add_argument('--verify-reconnect-history', action='store_true', help='Check original reconnect histories at inbox intake and final verification')
+    parser.add_argument('--reconnect-source-plan', type=Path, help='Ordered IPv4 changes for seats in the original End batch')
     parser.add_argument('--udp-preflight-batch', action='append', type=Path)
     parser.add_argument('--room-alignment-bundle', type=Path, help='Original MR or mixed venue deployment ZIP')
     parser.add_argument('--quest-capture-report', action='append', type=Path, help='Original batch logcat capture report; repeat for separate batches')
@@ -253,6 +268,8 @@ def main():
     parser.add_argument('--quest-deployment-report', action='append', type=Path, help='Original Quest deployment report; repeat for separate batches')
     parser.add_argument('--quest-readiness-report', action='append', type=Path, help='Original pre-Begin Quest tracked sample; repeat for separate batches')
     args = parser.parse_args()
+    if args.reconnect_source_plan is not None and not (args.venue_network_plan is not None and args.verify_reconnect_history):
+        parser.error('--reconnect-source-plan requires --venue-network-plan and --verify-reconnect-history')
     if args.windows_inbox is not None and args.venue_release_report is None:
         parser.error('--windows-inbox requires --venue-release-report')
     if args.windows_seat_map is not None and args.windows_inbox is None:

@@ -184,6 +184,29 @@ def check_venue_network_session(plan, session, endpoint, binding):
             'Venue network plan seats differ from the original sealed roster')
 
 
+def read_reconnect_source_plan(path, closure_id, initial, topology, server_ips):
+    plan, raw = read_quest_document(path)
+    require(set(plan) == {'version', 'closureRequestId', 'seats'} and integer(plan['version'], 1, 1)
+            and plan['closureRequestId'] == closure_id, 'Reconnect source plan must identify the original End batch')
+    rows = plan['seats']
+    require(type(rows) is list and 1 <= len(rows) <= len(initial), 'Provide at least one seat with a planned IPv4 change')
+    changes = {}
+    for row in rows:
+        require(type(row) is dict and set(row) == {'roomId', 'seat', 'addresses'}, 'Invalid reconnect source plan seat')
+        seat = integer(row['roomId'], 1, 5), integer(row['seat'], 1, 5)
+        require(seat in initial and seat not in changes, 'Reconnect source plan names an unknown or repeated seat')
+        values = row['addresses']
+        require(type(values) is list and 2 <= len(values) <= 32, 'Provide 2 to 32 ordered connection addresses for the seat')
+        addresses = [ipv4(quest_network_address(value)) for value in values]
+        require(addresses[0] == initial[seat] and len(set(addresses)) > 1,
+                'Reconnect source plan must begin at the original seat IPv4 and record an address change')
+        require((all(address in server_ips for address in addresses) if topology == 'same-host' else
+                 all(address not in server_ips and any(address in network for network in LAN) for address in addresses)),
+                'Reconnect source plan addresses differ from the declared network topology')
+        changes[seat] = addresses
+    return changes, hashlib.sha256(raw).hexdigest()
+
+
 def peer_address(endpoint):
     host, separator, port = endpoint.rpartition(':')
     require(separator and re.fullmatch(r'[1-9][0-9]{0,4}', port), 'Missing or invalid UDP peer endpoint')
@@ -286,12 +309,15 @@ def quest_client_result(log, pid, port, *, connections=None):
     return client_result('\n'.join(markers), connections=connections)
 
 
-def verify_reconnect_chain(connections, peers, acknowledged, approved, released, expected_ip):
-    for previous, following in zip(connections, connections[1:]):
+def verify_reconnect_chain(connections, peers, acknowledged, approved, released, expected_ip, planned=None):
+    require(planned is None or len(connections) == len(planned), 'Connection count differs from the seat reconnect source plan')
+    for index, (previous, following) in enumerate(zip(connections, connections[1:])):
         require(previous in peers and previous not in acknowledged and following in approved
                 and previous in released and released[previous] < approved[following],
                 'Missing server release before the next approved connection')
-        require(peer_address(peers[previous])[0] == expected_ip, 'Historical UDP peer differs from the declared source')
+        require(peer_address(peers[previous])[0] == (expected_ip if planned is None else planned[index]),
+                'Historical UDP peer differs from the declared source')
+    require(planned is None or expected_ip == planned[-1], 'Final UDP peer differs from the seat reconnect source plan')
 
 
 def windows_player_source(log, port):
@@ -899,7 +925,7 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
                    udp_preflight=None, udp_source_preflights=None, verify_player_sources=False, quest_capture_logs=(),
                    guarded_begin=None, concurrency=None, verify_reconnect_history=False, reconnect_window=None,
                    quest_deployments=None, require_distinct_remote_roster=False, control_batches=(),
-                   observed_quest_addresses=None, quest_readiness=(), planned_seat_addresses=None):
+                   observed_quest_addresses=None, quest_readiness=(), planned_seat_addresses=None, reconnect_sources=None):
     integer(size, 1, 25)
     require(topology in ('same-host', 'direct-lan') and server_ips, 'Missing topology or server addresses')
     require(not verify_player_sources or world_journal is not None, 'Player source verification requires the original closed world journal')
@@ -943,6 +969,7 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
     peers, acknowledged, approved, released = server_connections(server_log, port, verify_history=verify_reconnect_history)
     used_players, used_connections, endpoints = set(), set(), set()
     verified_history, reconnected_seats = set(), []
+    opening_peer_ips = set()
     room_sources = {}
     player_sources = {} if verify_player_sources else None
     source_seats = set()
@@ -962,7 +989,7 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
             expected_ip = observed[0]
             require(expected_ip not in observed_quest_addresses, 'Use a distinct observed IPv4 for each mapped Quest')
             observed_quest_addresses.add(expected_ip)
-        require(observed[0] == expected_ip and observed not in endpoints, 'UDP peer differs from the declared source or is reused')
+        require(observed not in endpoints, 'UDP peer differs from the declared source or is reused')
         player_id = identity(result['playerId'])
         require(player_id in players and player_id not in used_players, 'Unexpected or duplicated result player')
         owner, stats = players[player_id], ledger[player_id]
@@ -981,7 +1008,12 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
         if pid is not None and quest_deployments is not None:
             require(quest_deployments.pop((room, seat), None) == (session_id, player_id, owner['admissionId'], port),
                     f'Quest deployment does not match the original admission and endpoint for room {room} seat {seat}')
-        if planned_seat_addresses is not None:
+        planned = reconnect_sources.get((room, seat)) if reconnect_sources is not None else None
+        if planned is None:
+            require(observed[0] == expected_ip, 'UDP peer differs from the declared source or is reused')
+        else:
+            require(expected_ip in (planned[0], planned[-1]), 'Declared seat IPv4 differs from the reconnect source plan')
+        if planned_seat_addresses is not None and planned is None:
             require(observed[0] == planned_seat_addresses[room, seat],
                     f'Server-observed IPv4 differs from the venue network plan for room {room} seat {seat}')
         if player_sources is not None or verify_reconnect_history:
@@ -989,7 +1021,7 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
             source_seats.add((room, seat))
         if verify_reconnect_history:
             require(not verified_history.intersection(history), 'A connection was reused across player logs')
-            verify_reconnect_chain(history, peers, acknowledged, approved, released, expected_ip)
+            verify_reconnect_chain(history, peers, acknowledged, approved, released, observed[0], planned)
             verified_history.update(history)
             if len(history) > 1:
                 reconnected_seats.append({'roomId': room, 'seat': seat, 'retiredConnections': len(history) - 1})
@@ -1003,6 +1035,7 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
         used_players.add(player_id)
         used_connections.add(connection)
         endpoints.add(observed)
+        opening_peer_ips.add(planned[0] if planned else observed[0])
         room_sources.setdefault(room, []).append(observed[0])
     require(used_connections == acknowledged and used_players == set(players), 'Extra acknowledgement or missing result')
     if verify_reconnect_history:
@@ -1018,8 +1051,8 @@ def verify_session(topology, server_ips, launcher, session, statistics, endpoint
                 'Direct LAN needs private addresses and a peer outside the declared server addresses')
     else:
         require(not remote, 'A peer is outside the declared same-host addresses')
-    preflight = verify_udp_preflight(udp_preflight, binding, peer_ips)[0] if udp_preflight else None
-    source_preflight = verify_udp_source_preflights(udp_source_preflights, binding, peer_ips) if udp_source_preflights is not None else None
+    preflight = verify_udp_preflight(udp_preflight, binding, opening_peer_ips)[0] if udp_preflight else None
+    source_preflight = verify_udp_source_preflights(udp_source_preflights, binding, opening_peer_ips) if udp_source_preflights is not None else None
     sealed_fires = {} if concurrency is not None and concurrency.require_fire else None
     combat_evidence = verify_combat_journal(combat_journal, session_id, stream_id, origin, combat_sequence,
                                             applied_end if applied_end is not None else through, ledger,
@@ -1243,7 +1276,8 @@ def read_windows_station_addresses(path, seat_map):
 
 
 def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, seat_map, evidence_path, link_criteria,
-                  station_addresses=None, planned_seat_addresses=None, verify_history=False, strict_startup_port=False):
+                  station_addresses=None, planned_seat_addresses=None, verify_history=False, strict_startup_port=False,
+                  reconnect_sources=None):
     require(directory.is_dir(), 'Windows evidence inbox must be a directory')
     require(type(windows_hash) is str and re.fullmatch(r'[0-9a-f]{64}', windows_hash),
             'Windows evidence inbox requires the original Windows release report')
@@ -1303,16 +1337,17 @@ def windows_inbox(directory, inputs, expected, players_per_room, windows_hash, s
             verify_player_terminal_result(result, owners[player_id], ledger[player_id], boundary)
             require(seat not in received and (session_id, connection) not in connections, 'Player ZIP repeats a seat or acknowledged connection')
             address, _ = peer_address(peers[connection])
-            if station_addresses is not None:
+            planned = reconnect_sources.get(seat) if reconnect_sources is not None else None
+            if station_addresses is not None and planned is None:
                 require(address == station_addresses[seat], f'Server-observed IPv4 differs from the address assigned to Windows station {seat_map[seat]}')
-            if planned_seat_addresses is not None:
+            if planned_seat_addresses is not None and planned is None:
                 require(address == planned_seat_addresses[seat],
                         f'Server-observed IPv4 differs from the venue network plan for room {seat[0]} seat {seat[1]}')
             if verify_history:
                 if strict_startup_port:
                     startup = next(line for line in log.splitlines() if line.startswith('VR_NETWORK_STARTED '))
                     require(client_startup_on_port(startup, port), 'Expected one original Windows client startup')
-                verify_reconnect_chain(history, peers, acknowledgements, approved, released, address)
+                verify_reconnect_chain(history, peers, acknowledgements, approved, released, address, planned)
         except EvidenceError as error:
             issues.append({'file': file.name, 'reason': str(error)})
             continue
@@ -2111,6 +2146,21 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
     verify_reconnect_history = manifest.get('verifyReconnectHistory', False)
     require(type(verify_reconnect_history) is bool, 'verifyReconnectHistory must be a boolean')
     verify_reconnect_history = verify_reconnect_history or require_distinct_remote_roster
+    reconnect_sources, reconnect_sources_hash = None, None
+    if 'reconnectSourcePlan' in manifest:
+        require(verify_reconnect_history and venue_network is not None and not require_distinct_remote_roster,
+                'Reconnect source plan requires verifyReconnectHistory and venueNetworkPlan with the original fixed-source roster option off')
+        reconnect_sources, reconnect_sources_hash = read_reconnect_source_plan(
+            evidence_path(manifest['reconnectSourcePlan']), closure_id, planned_seat_addresses, topology, server_ips)
+
+    def reconnect_source_summary(seats):
+        if reconnect_sources is None:
+            return {}
+        matched = {(row['roomId'], row['seat']) for row in seats} & reconnect_sources.keys()
+        return {'reconnectSourcePlan': {'sha256': reconnect_sources_hash, 'plannedSeats': len(reconnect_sources),
+                                        'verifiedSeats': len(matched),
+                                        'connectionsVerified': sum(len(reconnect_sources[seat]) for seat in matched)}}
+
     reconnect_window = None
     if 'reconnectWindow' in manifest:
         require(verify_reconnect_history and journals, 'reconnectWindow requires verified reconnect history and the original world journals')
@@ -2232,13 +2282,14 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
         windows_by_session, inbox = windows_inbox(directory, inputs, expected, players_per_room, windows_hash,
                                                  seat_map, evidence_path, link_criteria, station_addresses=station_addresses,
                                                  planned_seat_addresses=planned_seat_addresses, verify_history=verify_reconnect_history,
-                                                 strict_startup_port=require_distinct_remote_roster)
+                                                 strict_startup_port=require_distinct_remote_roster, reconnect_sources=reconnect_sources)
         if station_addresses is not None:
             station_summary['windowsStationAddresses'] = {'sha256': address_hash, 'expectedSeats': len(station_addresses),
                                                           'verifiedSeats': inbox['receivedWindowsSeats']}
         if inspect_windows:
             return {'version': 1, 'scope': 'windows-inbox', 'mode': mode, 'closureRequestId': closure_id,
-                    **inbox, **station_summary, **network_summary(inbox['receivedWindowsSeats'])}, None
+                    **inbox, **station_summary, **network_summary(inbox['receivedWindowsSeats']),
+                    **reconnect_source_summary(inbox['receivedSeats'])}, None
         require(inbox['complete'], 'Windows inbox is incomplete or contains conflicting files; use --inspect-windows-inbox')
 
     rooms, summaries = {}, []
@@ -2387,7 +2438,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
                                          require_distinct_remote_roster=require_distinct_remote_roster,
                                          control_batches=controls.get(session['id'], ()), observed_quest_addresses=observed_quest_addresses,
                                          quest_readiness=quest_readiness.pop(session['id'], ()),
-                                         planned_seat_addresses=planned_seat_addresses)
+                                         planned_seat_addresses=planned_seat_addresses, reconnect_sources=reconnect_sources)
         require(set(sources) == set(row['roomIds']) and all(len(peers) == players_per_room for peers in sources.values()),
                 'Verified player count differs from the expected seats in an original room')
         if debrief_receipts is not None:
@@ -2451,6 +2502,10 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
                                        key=lambda row: (row['roomId'], row['seat']))}
     if reconnect_window is not None:
         reconnect_summary['reconnectWindow'] = reconnect_window.summary(reconnect_summary['reconnectHistory']['reconnectedSeats'], len(player_ids))
+    if reconnect_sources is not None:
+        reconnect_summary.update(reconnect_source_summary(reconnect_summary['reconnectHistory']['reconnectedSeats']))
+        require(reconnect_summary['reconnectSourcePlan']['verifiedSeats'] == len(reconnect_sources),
+                'A planned reconnect source seat has no verified connection history')
     report = {'version': 1, 'consistent': True, 'declaredTopology': topology, 'mode': mode, 'players': len(player_ids),
             **({'expectedPlayersPerRoom': players_per_room} if 'expectedPlayersPerRoom' in manifest else {}),
             'rooms': [{'roomId': room, 'players': len(rooms[room]),
@@ -2560,7 +2615,7 @@ def verify_venue_stages(plan_path):
                             'worldJournalsVerified': report['worldJournalsVerified'],
                             'concurrentRoster': report['concurrentRoster'],
                             **{field: report[field] for field in ('combatJournalsVerified', 'distinctRemoteRoster', 'windowsLinkCriteria',
-                                                                'windowsStationAddresses', 'venueNetworkPlan')
+                                                                'windowsStationAddresses', 'venueNetworkPlan', 'reconnectSourcePlan')
                                if field in report}})
     return {'version': 1, 'consistent': True, 'declaredTopology': topology,
             'planSha256': hashlib.sha256(raw_plan).hexdigest(), 'venueReleaseSha256': release_hash,
