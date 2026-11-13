@@ -600,6 +600,8 @@ python scripts/verify-field-results.py --venue-stages .\stages.json --inspect-ve
 
 可在 `stages.json` 加入 `"windowsLinkCriteria": {"minimumReplies": 28, "maximumP95RoundTripMs": 40}`，讓六批都核對原 Windows 逐席量測。個別批次可要求更高的最低回覆數或更低的 p95 上限，每項採兩份清單中較嚴的值。總表會顯示共用門檻，並逐批列出實際門檻及核對席數。每批至少須有一席 Windows 量測才能通過這項選用檢查。
 
+通過量測門檻的批次會在 `windowsLinkObserved` 列出回覆數最低及 p95 最高的房號、席號和數值。多席同值時顯示房號及席號最前的一席。可在總驗收及收件報告直接找出每批最接近門檻的席位。量測未通過的批次仍會在收件問題中顯示逐席結果。
+
 ##### 統一核對追蹤及遊戲射擊
 
 要讓六批都通過同時追蹤及遊戲射擊驗收，在 `stages.json` 加入 `"requireTrackedRoster": true` 及 `"requireConcurrentFire": true`。兩項可各自啟用。各批保留所有原玩家日誌及 `worldJournal`，啟用射擊驗收時另提供 `combatJournal`。啟用任一項後，總清單會將自己的 `minimumConcurrentMilliseconds` 套用到全部六批；若個別清單另有較長門檻，該批使用較長值。

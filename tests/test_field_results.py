@@ -780,6 +780,10 @@ class FieldResultsTests(unittest.TestCase):
             self.assertEqual(base, report['windowsLinkCriteria'])
             self.assertEqual([dict(base, seatsVerified=count) for count in (5, 5, 10, 10, 25, 25)],
                              [stage['windowsLinkCriteria'] for stage in report['stages']])
+            self.assertEqual([{
+                'lowestReplies': {'roomId': 1, 'seat': 1, 'replies': 28},
+                'highestP95RoundTripMs': {'roomId': 1, 'seat': 1, 'p95RoundTripMs': 13.5},
+            }] * 6, [stage['windowsLinkObserved'] for stage in report['stages']])
             self.assertEqual(80, report['serverAcknowledgements'])
 
             set_criteria(0, {'minimumReplies': 29, 'maximumP95RoundTripMs': 900})
@@ -790,6 +794,7 @@ class FieldResultsTests(unittest.TestCase):
             report = json.loads(inspected.stdout)
             self.assertEqual(base, report['windowsLinkCriteria'])
             self.assertEqual([[1], [4]], [issue['entries'] for issue in report['issues']])
+            self.assertEqual([2, 3, 5, 6], [row['entry'] for row in report['entries'] if 'windowsLinkObserved' in row])
             failures = [issue['windowsLinkMetrics'] for issue in report['issues']]
             for failure, criteria, name, count in zip(
                 failures,

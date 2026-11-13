@@ -2703,6 +2703,16 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
 
 
 def staged_batch_report(report, batch):
+    observed = {}
+    if 'windowsLinkCriteria' in report:
+        rows = sorted(chain.from_iterable(session.get('windowsLinkMetrics', ()) for session in report['sessions']),
+                      key=lambda row: (row['roomId'], row['seat']))
+        fewest = min(rows, key=lambda row: row['replies'])
+        slowest = max(rows, key=lambda row: row['p95RoundTripMs'])
+        observed['windowsLinkObserved'] = {
+            'lowestReplies': {key: fewest[key] for key in ('roomId', 'seat', 'replies')},
+            'highestP95RoundTripMs': {key: slowest[key] for key in ('roomId', 'seat', 'p95RoundTripMs')},
+        }
     return {'mode': report['mode'], 'players': report['players'], 'closureRequestId': batch['closureRequestId'],
             'manifestSha256': batch['manifestSha256'],
             'startedAtUtc': batch['started'].astimezone(timezone.utc).isoformat(),
@@ -2711,7 +2721,7 @@ def staged_batch_report(report, batch):
             'worldJournalsVerified': report['worldJournalsVerified'], 'concurrentRoster': report['concurrentRoster'],
             **{key: report[key] for key in ('combatJournalsVerified', 'distinctRemoteRoster', 'windowsLinkCriteria',
                                            'windowsStationAddresses', 'venueNetworkPlan', 'reconnectSourcePlan',
-                                           'verifiedVenueStart') if key in report}}
+                                           'verifiedVenueStart') if key in report}, **observed}
 
 
 def verify_venue_stages(plan_path, *, inspect=False):
