@@ -12,6 +12,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
+using Microsoft.Win32;
 
 internal static class PlayerLauncher
 {
@@ -173,17 +174,117 @@ internal static class PlayerLauncher
         }
         result.Append('\\', slashes * 2); return result.Append('"').ToString();
     }
-    private static void Report(string path, object value)
+    private static void Report(string path, object value, bool replaceExisting = true)
     {
         if (path == null) return;
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         try
         {
             File.WriteAllText(temporary, Json.Serialize(value), new UTF8Encoding(false));
-            if (File.Exists(path)) File.Replace(temporary, path, null);
+            if (replaceExisting && File.Exists(path)) File.Replace(temporary, path, null);
             else File.Move(temporary, path);
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+    private static bool LocalFullPath(string path)
+    {
+        return path != null && Regex.IsMatch(path, @"\A[A-Za-z]:[\\/][^:\x00-\x1f]*\z");
+    }
+    private static bool IsX64Dll(string path)
+    {
+        using (var reader = new BinaryReader(File.OpenRead(path)))
+        {
+            var file = reader.BaseStream;
+            if (file.Length < 64 || reader.ReadUInt16() != 0x5A4D) return false;
+            file.Position = 60;
+            var header = reader.ReadInt32();
+            if (header < 64 || header > file.Length - 26) return false;
+            file.Position = header;
+            if (reader.ReadUInt32() != 0x4550 || reader.ReadUInt16() != 0x8664) return false;
+            file.Position = header + 20L;
+            var optionalSize = reader.ReadUInt16();
+            var flags = reader.ReadUInt16();
+            return (flags & 0x2000) != 0 && optionalSize >= 112 && header + 24L + optionalSize <= file.Length
+                && reader.ReadUInt16() == 0x20B;
+        }
+    }
+    private static string InspectOpenXrRuntime(out string source)
+    {
+        object configured = Environment.GetEnvironmentVariable("XR_RUNTIME_JSON");
+        source = "environment";
+        if (String.IsNullOrEmpty(configured as string))
+        {
+            source = "registry64";
+            try
+            {
+                using (var hive = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, RegistryView.Registry64))
+                using (var key = hive.OpenSubKey(@"SOFTWARE\Khronos\OpenXR\1"))
+                    configured = key == null ? null : key.GetValue("ActiveRuntime", null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+            }
+            catch (System.Security.SecurityException) { return "registry-unreadable"; }
+            catch (UnauthorizedAccessException) { return "registry-unreadable"; }
+            catch (IOException) { return "registry-unreadable"; }
+            if (configured == null || Object.Equals(configured, "")) return "runtime-not-configured";
+        }
+        var manifest = configured as string;
+        if (!LocalFullPath(manifest)) return "manifest-path-invalid";
+        Dictionary<string, object> doc;
+        try
+        {
+            using (var reader = new BinaryReader(File.OpenRead(manifest)))
+            {
+                var size = reader.BaseStream.Length;
+                if (size < 1 || size > 65536) return "manifest-invalid";
+                var bytes = reader.ReadBytes((int)size);
+                if (bytes.Length != size || reader.BaseStream.ReadByte() != -1) return "manifest-invalid";
+                var json = new UTF8Encoding(false, true).GetString(bytes).TrimStart('\uFEFF');
+                doc = Map(Json.DeserializeObject(json));
+            }
+        }
+        catch (FileNotFoundException) { return "manifest-missing"; }
+        catch (DirectoryNotFoundException) { return "manifest-missing"; }
+        catch (IOException) { return "manifest-invalid"; }
+        catch (UnauthorizedAccessException) { return "manifest-invalid"; }
+        catch (ArgumentException) { return "manifest-invalid"; }
+        catch (InvalidOperationException) { return "manifest-invalid"; }
+        catch (NotSupportedException) { return "manifest-invalid"; }
+        object runtime;
+        if (doc == null || Text(doc, "file_format_version") != "1.0.0" || !doc.TryGetValue("runtime", out runtime)
+            || Map(runtime) == null) return "manifest-invalid";
+        var library = Text(Map(runtime), "library_path");
+        if (library == null || !library.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)) return "manifest-invalid";
+        if (library.IndexOfAny(new[] { '\\', '/' }) < 0) return "library-search-required";
+        try
+        {
+            if (!Path.IsPathRooted(library)) library = Path.Combine(Path.GetDirectoryName(manifest), library);
+            if (!LocalFullPath(library)) return "library-path-invalid";
+            return IsX64Dll(library) ? "x64-runtime-files-found" : "library-not-x64-dll";
+        }
+        catch (FileNotFoundException) { return "library-missing"; }
+        catch (DirectoryNotFoundException) { return "library-missing"; }
+        catch (ArgumentException) { return "library-path-invalid"; }
+        catch (NotSupportedException) { return "library-path-invalid"; }
+        catch (IOException) { return "library-unreadable"; }
+        catch (UnauthorizedAccessException) { return "library-unreadable"; }
+    }
+    private static int CheckOpenXrCommand(string[] args)
+    {
+        if (args.Length != 3 || args[0] != "--check-openxr" || args[1] != "--report" || args[2].StartsWith("--", StringComparison.Ordinal))
+            return 2;
+        try
+        {
+            var report = Path.GetFullPath(args[2]);
+            Require(LocalFullPath(report) && String.Equals(Path.GetExtension(report), ".json", StringComparison.OrdinalIgnoreCase)
+                && !report.StartsWith(Root, StringComparison.OrdinalIgnoreCase) && !File.Exists(report) && !Directory.Exists(report),
+                "請在玩家包外指定新的 JSON 報告路徑。");
+            PlainPath(Path.GetDirectoryName(report));
+            string source;
+            var status = InspectOpenXrRuntime(out source);
+            var complete = status == "x64-runtime-files-found";
+            Report(report, new { version = 1, scope = "windows-openxr-runtime-files", complete, source, status }, replaceExisting: false);
+            return complete ? 0 : 1;
+        }
+        catch (Exception) { return 2; }
     }
     private static void ProcessReport(string path, string status, string releaseManifestHash, Process child = null,
         bool exited = false, string linkMetrics = null, string log = null, bool deferSharing = false)
@@ -307,6 +408,7 @@ internal static class PlayerLauncher
     [STAThread]
     private static int Main(string[] args)
     {
+        if (Array.IndexOf(args, "--check-openxr") >= 0) return CheckOpenXrCommand(args);
         string config = null, log = null, linkMetrics = null, releasePath = null, report = null, evidenceZip = null;
         bool launch = false, wait = false, headless = false, verify = false, openXR = false, invalidEvidenceOption = false;
         try

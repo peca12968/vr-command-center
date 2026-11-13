@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import shutil
 import socket
+import struct
 import subprocess
 import time
 import uuid
@@ -18,6 +19,72 @@ import uuid
 ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('player_package', ROOT / 'scripts/package-windows-player.py')
 package = importlib.util.module_from_spec(spec); spec.loader.exec_module(package)
+
+
+def check_openxr_preflight(folder, directory, mock_manifest):
+    launcher = str(folder / 'Launch-Player.exe')
+    fixture = directory / 'OpenXR fixture 玩家'
+    fixture.mkdir()
+    manifest = fixture / 'runtime.json'
+
+    def run(output, override, options=()):
+        env = {key: value for key, value in os.environ.items() if key.upper() != 'XR_RUNTIME_JSON'}
+        if override is not None:
+            env['XR_RUNTIME_JSON'] = str(override)
+        return subprocess.run([launcher, '--check-openxr', '--report', str(output), *options],
+                              cwd=fixture, env=env, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW).returncode
+
+    def inspect(name, override, status):
+        output = fixture / (name + '.json')
+        code = run(output, override)
+        body = output.read_bytes()
+        value = json.loads(body)
+        if status is None:
+            status = value['status']
+            assert status in {'runtime-not-configured', 'registry-unreadable', 'manifest-path-invalid', 'manifest-missing',
+                              'manifest-invalid', 'library-search-required', 'library-path-invalid', 'library-missing',
+                              'library-unreadable', 'library-not-x64-dll', 'x64-runtime-files-found'}
+        complete = status == 'x64-runtime-files-found'
+        assert code == (0 if complete else 1), (name, code)
+        assert value == {'version': 1, 'scope': 'windows-openxr-runtime-files', 'complete': complete,
+                         'source': 'environment' if override is not None else 'registry64', 'status': status}, (name, value)
+        return output
+
+    def write_manifest(library):
+        manifest.write_text(json.dumps({'file_format_version': '1.0.0', 'runtime': {'library_path': library}}), encoding='utf-8-sig')
+
+    inspect('registry', None, None)
+    inspect('missing', manifest, 'manifest-missing')
+    inspect('unc', r'\\unreachable\openxr\runtime.json', 'manifest-path-invalid')
+    manifest.write_bytes(b' ' * 65537)
+    inspect('oversized', manifest, 'manifest-invalid')
+    manifest.write_bytes(b'{"\xff":0}')
+    inspect('bad-encoding', manifest, 'manifest-invalid')
+    write_manifest('runtime.dll')
+    inspect('bare-name', manifest, 'library-search-required')
+    write_manifest(r'\\unreachable\openxr\runtime.dll')
+    inspect('remote-library', manifest, 'library-path-invalid')
+    write_manifest('./runtime.dll')
+    inspect('missing-library', manifest, 'library-missing')
+    library = fixture / 'runtime.dll'
+    header = bytearray(256)
+    struct.pack_into('<H', header, 0, 0x5A4D)
+    struct.pack_into('<I', header, 60, 64)
+    struct.pack_into('<IH', header, 64, 0x4550, 0x14C)
+    struct.pack_into('<HHH', header, 84, 112, 0x2000, 0x20B)
+    library.write_bytes(header)
+    inspect('x86', manifest, 'library-not-x64-dll')
+    struct.pack_into('<H', header, 68, 0x8664)
+    library.write_bytes(header)
+    success = inspect('x64', manifest, 'x64-runtime-files-found')
+    original = success.read_bytes()
+    disallowed = folder / 'preflight-inside.json'
+    conflicting = fixture / 'preflight-launch.json'
+    assert run(success, manifest) == 2 and success.read_bytes() == original
+    assert run(disallowed, manifest) == 2 and not disallowed.exists()
+    assert run(conflicting, manifest, ['--launch']) == 2 and not conflicting.exists()
+    if mock_manifest is not None:
+        inspect('unity-mock', mock_manifest.resolve(strict=True), 'x64-runtime-files-found')
 
 
 def check_openxr_unavailable(folder, directory, base, release=None, manifest_hash=None):
@@ -96,6 +163,7 @@ def check_local_profiler(folder, directory):
 def main():
     parser = argparse.ArgumentParser(description=__doc__); parser.add_argument('package_directory', type=Path)
     parser.add_argument('--check-openxr-unavailable', action='store_true', help='Run a graphical player with a missing OpenXR runtime for that process')
+    parser.add_argument('--openxr-mock-manifest', type=Path, help='Also run the file preflight against this existing Unity mock manifest')
     parser.add_argument('--check-local-profiler', action='store_true', help='Check the actual owned Unity PlayerConnection sockets without a player config')
     parser.add_argument('--check-release-form', action='store_true', help='Exercise the shipped WinForms handlers with an actual owned OpenXR child')
     parser.add_argument('--release-report', type=Path, help='Original offline release report for this package')
@@ -186,6 +254,9 @@ def main():
     check('Preserves an existing player evidence ZIP', [*with_release, '--evidence-zip', str(evidence)])
     assert evidence.read_bytes() == b'original evidence fixture'
     assert not future_log.exists() and release.read_bytes() == original_release and other_release.read_bytes() == other_bytes
+    check_openxr_preflight(folder, directory, args.openxr_mock_manifest)
+    findings.append('Packaged OpenXR preflight reports registry, explicit manifests, PE architecture and output rejections')
+    print('PASS:', findings[-1], flush=True)
     if args.check_local_profiler:
         check_local_profiler(folder, directory)
         findings.append('Actual Unity PlayerConnection listens only on loopback with no discovery broadcast')
