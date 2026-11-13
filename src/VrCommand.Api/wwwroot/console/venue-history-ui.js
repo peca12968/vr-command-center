@@ -62,6 +62,14 @@ export function mountVenueHistory(api, onSelect) {
   more.addEventListener('click', () => fetchPage(true));
   return {
     selected: () => picker.value,
+    selectOriginal(id) {
+      if (!allowed || !isId(id)) return false;
+      if (![...picker.options].some(option => option.value === id))
+        picker.add(new Option(`報告對應批次 ${id.slice(0, 8)}`, id));
+      picker.value = id;
+      controls();
+      return true;
+    },
     update(value) { allowed = value; controls(); },
     reset() {
       epoch++; allowed = loading = loaded = false; next = null; items.clear();

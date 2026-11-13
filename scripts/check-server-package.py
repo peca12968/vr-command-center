@@ -2179,11 +2179,13 @@ def main():
                             'worldSequence': row['result']['finalWorld']['acceptedSequence']}
                            for row in sorted(terminal['servers'], key=lambda row: row['roomIds'][0]) for room in row['roomIds']]
                 check(observed['version'] == 3 and observed['launchId'] == terminal['venueLaunchId']
+                      and observed['closureBatchId'] == closed['requestId']
+                      and observed['checkedClosure'] == {'requestId': closed['requestId'], 'players': venue_players, 'receipts': venue_players}
                       and observed['checkedReplays'] == replays
                       and (('replayBatchId' not in observed and 'checkedAlignment' not in observed) if linked else
                            observed['replayBatchId'] == closed['requestId'] and observed['checkedAlignment'] == alignment)
                       and control.sha(original_launch) == summary['venueLauncherReport']['sha256'],
-                      label+' original terminal report matches both seals and opens each original room replay without changing the file')
+                      label+' original terminal report opens the verified closure and each room replay without changing the file')
         if args.check_venue_udp_readiness:
             if args.check_venue_plan_ui:
                 check(summary['venueNetworkPlan'] == {'sha256': control.sha(Path(common['venueNetworkPlan'])),

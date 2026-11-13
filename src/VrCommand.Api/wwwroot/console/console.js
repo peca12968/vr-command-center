@@ -50,7 +50,7 @@ const mrVenue = mountMrVenueBundle(() => state, api, download, roomReadiness.tic
 const vrVenue = mountVrVenueTickets(() => state, api, download, roomReadiness.ticketSourceLive);
 const venueServerPlan = mountVenueServerPlan(() => state, api, download);
 const venueLaunchReview = mountVenueLaunchReview(() => state, api, selectSession, focusRoster, roomReadiness.reviewedBegin,
-  target => tab('world', target));
+  target => tab('world', target), openReviewedVenueClosure);
 const operatorNetwork = mountOperatorNetwork(() => state, api, download, uuid);
 const alignmentPins = mountAlignmentPins({ state: () => state,
   checkFile: file => api('/room-alignment/check-file', 'POST', file),
@@ -1031,6 +1031,30 @@ async function selectVenueClosure() {
   renderVenueClosure(null, true);
   if (state.refreshPromise) { try { await state.refreshPromise; } catch { /* The selected batch is read below. */ } }
   if (request === venueClosureEpoch && epoch === state.epoch) await refresh().catch(showRefreshError);
+}
+
+async function openReviewedVenueClosure(id, targets, stillCurrent) {
+  const selection = venueClosureEpoch, view = operationsViewEpoch, epoch = state.epoch;
+  const current = () => stillCurrent() && master() && !state.busy && !state.pending && state.epoch === epoch
+    && venueClosureEpoch === selection && operationsViewEpoch === view;
+  if (!current()) return;
+  try {
+    const report = await api(`/venue/closure/${id}?includeScores=true&includeDebriefReceipts=true`);
+    if (!current()) return;
+    const batch = report?.batch;
+    if (batch?.requestId !== id || !Array.isArray(batch.sessions) || batch.sessions.length !== targets.length
+      || !targets.every(target => batch.sessions.some(row => row?.sessionId === target.sessionId
+        && Array.isArray(row.roomIds) && row.roomIds.join(',') === target.roomIds.join(',')
+        && row.combat === 'Sealed' && row.world === 'Sealed' && row.replay?.streamId === target.streamId
+        && row.replay.throughSequence === target.seal.worldSequence)))
+      throw new Error('Original closure differs');
+    if (!venueHistory.selectOriginal(id)) return;
+    venueClosureEpoch++;
+    renderVenueClosure(report);
+    $('venue-closure-title').focus();
+  } catch {
+    if (current()) notify('無法確認原批次戰績與回條。請重新核對結束報告。', true);
+  }
 }
 
 async function restoreVenuePlan() {

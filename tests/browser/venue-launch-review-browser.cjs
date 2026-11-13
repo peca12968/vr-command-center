@@ -9,6 +9,7 @@ const panel = '#venue-launch-review', input = panel + '-file', button = panel + 
 const rows = panel + '-rooms li';
 const rosterShortcut = roomId => `[data-launch-review-roster="${roomId}"]`;
 const replayShortcut = roomId => `[data-launch-review-replay="${roomId}"]`;
+const closureShortcut = '[data-launch-review-action="closure"]';
 const seatStatus = roomId => `[data-launch-review-seats="${roomId}"]`;
 const rosterStatus = panel + '-roster-status';
 
@@ -255,6 +256,7 @@ async function checkVenueLaunchReview({ context, api, tokens, base, screenshots,
     await page.locator(summary).filter({ hasText: '五房原戰鬥與回放封存序號均相符' }).waitFor();
     check(await page.locator(rosterShortcut(5)).count() === 0 && JSON.stringify(await api(sessionPath)) === JSON.stringify(originalClosed),
       'A sealed report matches both original tails without uploading private fields or changing the session');
+    check(await page.locator(closureShortcut).count() === 0, 'An individually ended recording offers replay without inventing a venue closure');
     await page.locator(panel).screenshot({ path: path.join(screenshots, 'venue-terminal-review.png') });
     await openRoomReplay(page, session.id, 5, sequence);
     check(await page.locator('#world-view').isVisible() && await page.locator('#world-recording').inputValue() !== replacement.id,
@@ -352,6 +354,31 @@ if (require.main === module) {
         assert.equal(await page.locator(rows).filter({ hasText: '雙封存序號相符' }).count(), expected.length);
         assert.equal(await page.locator('[data-launch-review-roster]').count(), 0);
         const targets = response.request().postDataJSON().servers;
+        assert.ok(review.closureBatchId);
+        const closurePath = `/api/venue/closure/${review.closureBatchId}`;
+        const isClosure = url => url.pathname === closurePath && url.searchParams.get('includeScores') === 'true'
+          && url.searchParams.get('includeDebriefReceipts') === 'true';
+        await page.route(isClosure, async route => {
+          const response = await route.fetch();
+          const report = await response.json();
+          report.batch.sessions[0].replay.throughSequence++;
+          await route.fulfill({ response, json: report });
+        }, { times: 1 });
+        await page.locator(closureShortcut).click();
+        await page.getByText('無法確認原批次戰績與回條。請重新核對結束報告。', { exact: true }).waitFor();
+        assert.equal(await page.locator('#venue-closure-batch').inputValue(), '');
+        const readClosure = page.waitForResponse(value => isClosure(new URL(value.url())));
+        await page.locator(closureShortcut).click();
+        const archived = await readClosure;
+        assert.equal(archived.status(), 200);
+        const report = await archived.json();
+        await page.waitForFunction(id => document.activeElement.id === 'venue-closure-title'
+          && document.querySelector('#venue-closure-batch').value === id, review.closureBatchId, { polling: 100 });
+        assert.equal(await page.locator('#venue-score-table').isVisible(), true);
+        assert.equal(await page.locator('[data-venue-debrief-room]').count(), 5);
+        assert.deepEqual(report.batch.sessions.map(row => row.sessionId), targets.map(row => row.sessionId));
+        review.checkedClosure = { requestId: report.batch.requestId, players: report.scores.total.players,
+          receipts: report.debriefReceipts.rooms.reduce((total, room) => total + room.confirmedCount, 0) };
         const checkedReplays = [];
         for (const { sessionId, roomIds, seal } of targets) for (const roomId of roomIds) {
           if (checkedReplays.length) {

@@ -88,6 +88,7 @@
             <button id="venue-launch-review-check" type="button" class="quiet" disabled>核對原場次</button>
           </div>
           <p id="venue-launch-review-summary" class="hint" role="status"></p>
+          <div id="venue-launch-review-closure"></div>
           <ul id="venue-launch-review-rooms" class="event-list" aria-label="原場次來源與核對結果"></ul>
           <p id="venue-launch-review-roster-status" class="hint" role="status"></p>
         </details>
@@ -158,7 +159,7 @@
           <div id="vr-venue-files" class="form-row" hidden></div>
         </section>
         <section id="venue-closure" class="panel" aria-labelledby="venue-closure-title" hidden>
-          <h3 id="venue-closure-title">全館收尾</h3>
+          <h3 id="venue-closure-title" tabindex="-1">全館收尾</h3>
           <div class="button-row">
             <label>結束批次<select id="venue-closure-batch" disabled><option value="">自動顯示最新批次</option></select></label>
             <button id="venue-closure-load" type="button" class="quiet" disabled>載入批次清單</button>
@@ -559,7 +560,7 @@
           <p class="hint">統計按該快照涵蓋的事件計算，結束結果已與紀錄內報表核對。尚未記錄真實頭盔六軸姿態、手部動畫、MR 或硬體訊號。</p>
         </section>
       </section>
-      <footer>控制台 v0.31.182 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
+      <footer>控制台 v0.31.183 · 支援 VR 與 Quest 3 MR 場次、任務控制、觀戰回放及場館資料匯出。實體場地、跨機與廠商硬體仍待驗證。</footer>
     </div>
   </main>
 </body>

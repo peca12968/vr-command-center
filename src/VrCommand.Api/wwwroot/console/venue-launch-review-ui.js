@@ -110,10 +110,14 @@ function verifyReply(value, request) {
   if (value.replayBatchId !== undefined && (!isId(value.replayBatchId) || request.version !== 3
     || request.topology !== 'Independent' || !value.instanceVerified || !value.servers.every(row => row.sealState === 'matched')))
     throw new Error('Invalid original End batch');
+  if (value.closureBatchId !== undefined && (!isId(value.closureBatchId) || request.version !== 3
+    || !value.instanceVerified || !value.servers.every(row => row.sealState === 'matched')
+    || (request.topology === 'Independent' && value.replayBatchId !== value.closureBatchId)))
+    throw new Error('Invalid original closure batch');
   return value;
 }
 
-export function mountVenueLaunchReview(getState, api, selectSession, focusRoster, reviewedBegin, openReplay) {
+export function mountVenueLaunchReview(getState, api, selectSession, focusRoster, reviewedBegin, openReplay, openClosure) {
   const $ = suffix => document.getElementById('venue-launch-review-' + suffix);
   const panel = document.getElementById('venue-launch-review'), file = $('file'), button = $('check');
   let active = false, pending = false, opening = false, generation = 0, seatViews = [];
@@ -124,7 +128,8 @@ export function mountVenueLaunchReview(getState, api, selectSession, focusRoster
     panel.hidden = !active || state.actor?.role !== 'Master';
     file.disabled = panel.hidden || state.busy || !!state.pending || pending || opening;
     button.disabled = file.disabled || file.files.length !== 1;
-    for (const shortcut of $('rooms').querySelectorAll('button')) shortcut.disabled = file.disabled;
+    for (const shortcut of panel.querySelectorAll('[data-launch-review-action], #venue-launch-review-rooms button'))
+      shortcut.disabled = file.disabled;
     if (panel.hidden) return;
     for (const { row, roomId, status } of seatViews) {
       const view = reviewedBegin(row, roomId);
@@ -140,6 +145,7 @@ export function mountVenueLaunchReview(getState, api, selectSession, focusRoster
   function clear() {
     seatViews = [];
     $('summary').textContent = '';
+    $('closure').replaceChildren();
     $('roster-status').textContent = '';
     $('rooms').replaceChildren();
   }
@@ -183,6 +189,23 @@ export function mountVenueLaunchReview(getState, api, selectSession, focusRoster
       : allUnbound ? '原場次取樣時均在準備中且尚未登記來源。' : '已核對原場次。請查看各房來源與端點狀態。';
     const instance = review.instanceVerified ? '管理實例相符。' : '此管理服務未提供實例識別，已按原場次識別比對。';
     $('summary').textContent = `${instance}${summary} 取樣時間 ${new Date(review.observedAtUtc).toLocaleString('zh-TW')}。`;
+    if (review.closureBatchId) {
+      const shortcut = document.createElement('button');
+      shortcut.type = 'button';
+      shortcut.className = 'quiet small';
+      shortcut.dataset.launchReviewAction = 'closure';
+      shortcut.textContent = '查看原批次戰績與回條';
+      shortcut.addEventListener('click', async () => {
+        if (shortcut.disabled || !shortcut.isConnected) return;
+        const attempt = generation, epoch = getState().epoch;
+        const current = () => isCurrent(attempt, epoch);
+        opening = true;
+        update();
+        try { await openClosure(review.closureBatchId, request.servers, current); }
+        finally { if (current()) { opening = false; update(); } }
+      });
+      $('closure').append(shortcut);
+    }
     $('rooms').replaceChildren(...review.servers.map((row, index) => {
       const li = document.createElement('li');
       li.className = 'venue-launch-review-row';
