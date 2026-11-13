@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-13 玩家離線回放可跳到原畫格
+
+- 管理包 0.31.189 的玩家回放頁可輸入場館提供的原畫格序號。驗證從第 2 格開始的真實匯出片段，跳至原末格或播放中定位皆維持本機讀取，並保留房間視角與循環選項。重新載入會清除舊序號。已檢視解壓版的小螢幕畫面。 [操作方式](WORLD_RECORDING.md) · [管理包](../artifacts/VRCommand-ControlServer-0.31.189.zip)
+- 發行版及解壓版各通過 147 項瀏覽器檢查，另通過 107 項管理包、7 項回放與時鐘測試。核對 567 筆清單及同源 Windows 遊戲包、Quest APK 的離線發行。功能提交 `669dbc1` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商硬體仍待現場驗收。 [驗證摘要](../artifacts/player-frame-jump-189-validation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43408707485)
+
 ## 2026-11-13 暫停回放可按序號跳到保存畫格
 
 - 管理包 0.31.188 在「逐格檢視」加入畫格序號。按 Enter 或「跳到畫格」讀取原保存格並維持暫停，沿用房間、鏡頭及玩家檢討範圍。未封存錄製沿用本次確認的保存尾端。初版畫格標籤在畫面上換行，調整後重新打包並檢視截圖。 [操作方式](WORLD_RECORDING.md#暫停逐格檢視) · [管理包](../artifacts/VRCommand-ControlServer-0.31.188.zip)
