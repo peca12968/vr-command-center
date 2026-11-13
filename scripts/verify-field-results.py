@@ -46,6 +46,12 @@ class EvidenceError(ValueError):
     pass
 
 
+class WindowsInboxIncomplete(EvidenceError):
+    def __init__(self, inbox):
+        super().__init__('Windows inbox is incomplete or contains conflicting files; use --inspect-windows-inbox')
+        self.inbox = inbox
+
+
 class MissingEvidence(FileNotFoundError):
     def __init__(self, kind, reference):
         self.kind = kind
@@ -2365,7 +2371,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
             return {'version': 1, 'scope': 'windows-inbox', 'mode': mode, 'closureRequestId': closure_id,
                     **inbox, **station_summary, **network_summary(inbox['receivedWindowsSeats']),
                     **reconnect_source_summary(inbox['receivedSeats'])}, None
-        require(inbox['complete'], 'Windows inbox is incomplete or contains conflicting files; use --inspect-windows-inbox')
+        if not inbox['complete']:
+            raise WindowsInboxIncomplete(inbox)
 
     rooms, summaries = {}, []
     quest_players, windows_players, windows_link_reports = 0, 0, 0
@@ -2662,10 +2669,12 @@ def verify_venue_stages(plan_path, *, inspect=False):
     stage_keys = [(mode, players) for players in sizes for mode in modes]
     stages, entries, issues = {}, {}, []
 
-    def reject(message, *indices, missing=None):
+    def reject(message, *indices, missing=None, windows_inbox=None):
         if not inspect:
             raise EvidenceError(message)
-        issues.append({'entries': sorted(set(indices)), 'reason': message, **({'missingFile': missing} if missing else {})})
+        issues.append({'entries': sorted(set(indices)), 'reason': message,
+                       **({'missingFile': missing} if missing else {}),
+                       **({'windowsInbox': windows_inbox} if windows_inbox is not None else {})})
 
     paths, used, releases = {}, {}, {}
     for index, name in enumerate(names, 1):
@@ -2696,6 +2705,9 @@ def verify_venue_stages(plan_path, *, inspect=False):
                     'Venue batch lacks distinct original remote sources for every seat')
             verified_start = report.get('verifiedVenueStart')
             require(not require_start or verified_start is not None, 'missing verified Windows start receipt')
+        except WindowsInboxIncomplete as error:
+            reject(f'Venue manifest entry {index}: {error}', index, windows_inbox=error.inbox)
+            continue
         except EvidenceError as error:
             reject(f'Venue manifest entry {index}: {error}', index)
             continue

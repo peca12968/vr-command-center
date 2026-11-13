@@ -548,7 +548,7 @@ def preflight_fixture(root, label, *, server, peer, port, exchange=None):
 
 class FieldResultsTests(unittest.TestCase):
     def staged_batch(self, root, mode, count, id_offset, minutes_after, *, remote=False, tracked_fire=False,
-                     missing_shot=False, runtime='Test OpenXR Runtime'):
+                     missing_shot=False, runtime='Test OpenXR Runtime', windows_inbox=False):
         root.mkdir()
         path, manifest, _ = venue_fixture(root, mode, remote=remote, with_journals=True,
             room_sizes=(count,) * 5, id_offset=id_offset, minutes_after=minutes_after)
@@ -575,13 +575,16 @@ class FieldResultsTests(unittest.TestCase):
         self.add_shared_release(root, manifest, 0)
         if count != 5:
             manifest['expectedPlayersPerRoom'] = count
-        if mode == 'Linked':
+        if windows_inbox:
+            manifest = self.windows_inbox_fixture(root, manifest)
+        elif mode == 'Linked':
             manifest = self.pack_venue(root, manifest)
         path.write_text(json.dumps(manifest), encoding='utf-8')
         return str(path.relative_to(root.parent))
 
-    def staged_plan(self, root, *, remote=False, tracked_fire=False):
-        names = [self.staged_batch(root / f'{count}-{mode}', mode, count, index * 10000, minutes, remote=remote, tracked_fire=tracked_fire)
+    def staged_plan(self, root, *, remote=False, tracked_fire=False, windows_inbox=False):
+        names = [self.staged_batch(root / f'{count}-{mode}', mode, count, index * 10000, minutes, remote=remote,
+                                   tracked_fire=tracked_fire, windows_inbox=windows_inbox and count == 1)
                  for minutes, count in enumerate((1, 2, 5), 1)
                  for index, mode in ((minutes * 2, 'Independent'), (minutes * 2 + 1, 'Linked'))]
         return {'version': 1, 'topology': 'direct-lan' if remote else 'same-host',
@@ -647,6 +650,50 @@ class FieldResultsTests(unittest.TestCase):
             self.assertEqual({'entries': [5], 'reason': 'Venue manifest entry 5: missing original evidence file',
                               'missingFile': {'kind': 'worldJournal', 'name': 'room-01.worldlog'}}, inspection['issues'][-1])
             self.assertNotIn('private-directory', json.dumps(inspection))
+
+    def test_staged_inspection_lists_windows_inbox_seats_and_files_by_batch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = self.staged_plan(root, windows_inbox=True)
+            names = plan['venueManifests']
+            path = root / 'stages.json'
+            path.write_text(json.dumps(plan), encoding='utf-8')
+            command = [sys.executable, str(SCRIPT), '--venue-stages', str(path)]
+
+            first, second = ((root / name).parent / 'returned' for name in names[:2])
+            original = first / 'box-00.ZIP'
+            missing_bytes = original.read_bytes()
+            original.unlink()
+            foreign = second / 'wrong-batch.ZIP'
+            foreign.write_bytes(missing_bytes)
+
+            result = subprocess.run([*command, '--inspect-venue-stages'], capture_output=True)
+            self.assertEqual(1, result.returncode, result.stderr)
+            self.assertFalse(result.stderr)
+            inspection = json.loads(result.stdout)
+            self.assertEqual(['needs-evidence', 'needs-evidence', *(['verified'] * 4)],
+                             [row['status'] for row in inspection['entries']])
+            first_issue, second_issue = inspection['issues']
+            self.assertEqual([1], first_issue['entries'])
+            self.assertEqual([2], second_issue['entries'])
+            first_report, second_report = first_issue['windowsInbox'], second_issue['windowsInbox']
+            self.assertEqual((5, 4), (first_report['expectedWindowsSeats'], first_report['receivedWindowsSeats']))
+            self.assertEqual([{'roomId': 5, 'seat': 1}], first_report['missingSeats'])
+            self.assertEqual([], first_report['issues'])
+            self.assertEqual((5, 5), (second_report['expectedWindowsSeats'], second_report['receivedWindowsSeats']))
+            self.assertEqual([], second_report['missingSeats'])
+            self.assertEqual([{'file': foreign.name, 'reason': 'Player ZIP belongs to another venue batch'}], second_report['issues'])
+            self.assertNotIn(str(root), result.stdout.decode())
+            rejected = subprocess.run(command, capture_output=True)
+            self.assertEqual(1, rejected.returncode)
+            self.assertIn(b'Windows inbox is incomplete', rejected.stderr)
+
+            original.write_bytes(missing_bytes)
+            foreign.unlink()
+            clean = subprocess.run([*command, '--inspect-venue-stages'], capture_output=True, check=True)
+            self.assertTrue(json.loads(clean.stdout)['complete'])
+            verified = subprocess.run(command, capture_output=True, check=True)
+            self.assertEqual(80, json.loads(verified.stdout)['serverAcknowledgements'])
 
     def test_staged_venue_rejects_incomplete_repeated_misordered_or_mismatched_batches(self):
         with tempfile.TemporaryDirectory() as directory:
