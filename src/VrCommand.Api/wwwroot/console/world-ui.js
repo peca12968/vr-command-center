@@ -654,7 +654,8 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     const audio = scene?.weather.audio.state || 'off';
     $('world-sound').textContent = ({ on: '音效：開啟', off: '音效：關閉', loading: '音效載入中…', error: '音效：重試開啟' })[audio];
     $('world-sound').setAttribute('aria-pressed', String(audio === 'on'));
-    const phase = frame ? phases[frame.packet.frame.phase] : '等待第一份快照';
+    const phase = frame ? frame.packet.suspended && frame.packet.frame.phase === 'Paused'
+      ? '遊戲來源暫停' : phases[frame.packet.frame.phase] : '等待第一份快照';
     const clock = recordedClock(info.header, frame?.packet.frame.tick);
     const saved = mode === 'replay' && typeof savedLimit === 'number';
     const enemies = frame?.packet.frame.enemies;
@@ -738,7 +739,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     scene.show(value.packet.frame, previous, value.packet.events.filter(event => event.hasRay), { weather: value.packet.weather, lightning: value.packet.lightning }, continuous);
     const packet = value.packet;
     $('world-time').textContent = `${time(packet.elapsedMilliseconds)} / ${time(info.durationMilliseconds)} · 幀 ${packet.sequence}`;
-    $('world-environment').textContent = `${packet.weather} · ${packet.frame.night ? '夜間' : '日間'} · ${packet.lightning ? '雷電啟用' : '無雷電'}${packet.suspended ? ' · 管理中斷暫停' : ''}`;
+    $('world-environment').textContent = `${packet.weather} · ${packet.frame.night ? '夜間' : '日間'} · ${packet.lightning ? '雷電啟用' : '無雷電'}`;
     showEnemyPolicy();
     $('world-timeline').max = String(Math.max(info.durationMilliseconds, packet.elapsedMilliseconds, 1)); $('world-timeline').value = String(packet.elapsedMilliseconds);
     showRoomCounts(packet); showStatistics();

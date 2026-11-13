@@ -323,7 +323,9 @@ public sealed partial class WorldRecordings
                         ? players.All(ReadyForVrResume) : null) : null);
             var duration = current.Mission.Definition.DurationSeconds;
             RoomMissionTime? clock = null;
-            if (confirmed && current.State is SessionState.Running or SessionState.Paused
+            var suspendedClock = source == "Suspended" && current.State == SessionState.Running
+                && observedSequence >= phaseSince && frame?.Packet.frame.phase == "Paused";
+            if ((confirmed || suspendedClock) && current.State is SessionState.Running or SessionState.Paused
                 && current.CombatStream is { MissionClockVersion: 1 } && info?.Header is { missionClockVersion: 1 } header
                 && header.missionDurationSeconds == duration && frame is not null)
             {

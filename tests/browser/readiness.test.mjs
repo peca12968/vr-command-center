@@ -165,6 +165,16 @@ test('Room time clears for stale responses, mismatched phase, policy or session 
   for (const fields of [{ sessionId: 'other' }, { sessionSequence: 9 }, { registered: 4 }, { sourceState: 'Suspended' }])
     assert.equal(roomMissionTimeView(timeReport(timer, fields), room, timed, 0).state, 'Waiting');
 });
+test('A fresh game suspension freezes time while management remains running', () => {
+  const paused = timeReport({ ...timer, phase: 'Paused' }, { sourceState: 'Suspended' });
+  assert.deepEqual(roomMissionTimeView(paused, room, timed, 1490),
+    { state: 'Suspended', text: '遊戲來源暫停 · 剩餘 00:40 · 自動結束' });
+  assert.equal(roomMissionTimeView(paused, room, timed, 1490.01).state, 'Waiting');
+  assert.equal(roomMissionTimeView(paused, room, { ...timed, state: 'Paused' }, 0).state, 'Waiting');
+  assert.equal(roomMissionTimeView(paused, room, timed, NaN).state, 'Waiting');
+  const due = timeReport({ ...timer, phase: 'Paused', elapsedSeconds: 60, remainingSeconds: 0 }, { sourceState: 'Suspended' });
+  assert.equal(roomMissionTimeView(due, room, timed, 0).state, 'Suspended');
+});
 test('Room totals are scoped to the current room and session and retain both rig kinds', () => {
   const foreign = { ...roomRow, roomId: 2, simulatedReady: 3, trackedReady: 0 };
   assert.deepEqual(roomReadinessView({ ...overview, rooms: [foreign, roomRow] }, room, session, 0),

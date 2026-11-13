@@ -23,7 +23,7 @@ function venueBeginSeats(details, registered, capacity, trackedRequired) {
 
 function sourceAt(report, elapsed) {
   const source = Object.hasOwn(labels, report.sourceState) ? report.sourceState : 'Unavailable';
-  if (source === 'Fresh' && (!Number.isFinite(elapsed) || elapsed < 0 || elapsed > 1500 || !Number.isFinite(report.sourceAgeMilliseconds)
+  if ((source === 'Fresh' || source === 'Suspended') && (!Number.isFinite(elapsed) || elapsed < 0 || elapsed > 1500 || !Number.isFinite(report.sourceAgeMilliseconds)
     || report.sourceAgeMilliseconds + elapsed > 1500 || report.sourceAgeMilliseconds + elapsed < -1000)) return 'Stale';
   return source;
 }
@@ -175,15 +175,17 @@ export function roomMissionTimeView(report, room, session, elapsed) {
   if (!['Running', 'Paused'].includes(session.state)) return waiting;
   if (session.combatStream?.missionClockVersion === 0) return { state: 'Unsupported', text: '來源未提供活動時間' };
   const row = roomReadinessRow(report, room, session), clock = row?.clock;
-  if (!row || sourceAt(row, elapsed) !== 'Fresh' || clock?.phase !== session.state || clock.durationSeconds !== duration
+  const source = row ? sourceAt(row, elapsed) : null;
+  const suspended = source === 'Suspended' && session.state === 'Running';
+  if ((!suspended && source !== 'Fresh') || clock?.phase !== (suspended ? 'Paused' : session.state) || clock.durationSeconds !== duration
     || clock.autoEnd !== (session.missionClock?.version === 1 && session.missionClock.autoEnd === true)
     || !Number.isSafeInteger(clock.elapsedSeconds) || clock.elapsedSeconds < 0
     || clock.remainingSeconds !== Math.max(0, duration - clock.elapsedSeconds)) return waiting;
-  if (clock.autoEnd && clock.remainingSeconds === 0) return { state: 'Due', text: '活動時間已到期 · 等待結束確認' };
-  const prefix = session.state === 'Paused' ? '暫停 · ' : '';
+  if (!suspended && clock.autoEnd && clock.remainingSeconds === 0) return { state: 'Due', text: '活動時間已到期 · 等待結束確認' };
+  const prefix = suspended ? '遊戲來源暫停 · ' : session.state === 'Paused' ? '暫停 · ' : '';
   const time = clock.autoEnd ? `剩餘 ${formatClock(clock.remainingSeconds)} · 自動結束`
     : `活動 ${formatClock(clock.elapsedSeconds)} / ${formatClock(duration)}`;
-  return { state: session.state, text: prefix + time };
+  return { state: suspended ? 'Suspended' : session.state, text: prefix + time };
 }
 
 export function roomReadinessView(report, room, session, elapsed) {
@@ -541,7 +543,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
       const clockCell = cell.parentElement.querySelector('[data-room-clock]');
       clockCell.textContent = clock.text;
       clockCell.dataset.clockState = clock.state;
-      clockCell.classList.toggle('tracking-attention', clock.state === 'Due');
+      clockCell.classList.toggle('tracking-attention', clock.state === 'Due' || clock.state === 'Suspended');
       const phase = roomVenuePhaseView(report, room, session, elapsed, failed);
       const phaseCell = cell.parentElement.querySelector('[data-room-venue-phase]');
       phaseCell.hidden = !phase;

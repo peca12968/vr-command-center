@@ -209,6 +209,7 @@ internal static class ReadinessChecks
             var (arena, frames, started) = sources[current.Id];
             arena.Apply(JsonSerializer.Deserialize<ManagementSnapshot>(JsonSerializer.Serialize(current, JsonFormat.Options), options)!);
             for (var i = 0; i < activeTicks; i++) arena.Tick(i * .05);
+            if (suspended) arena.Suspend();
             if (frames > 0) clock.Now = clock.Now.AddMilliseconds(50);
             var packet = WorldRecordingPacket.Capture(arena.World, frames + 1, frames == 0 ? 0 : (long)(clock.Now - started).TotalMilliseconds,
                 current.Sequence, 0, 0, _ => new());
@@ -247,7 +248,18 @@ internal static class ReadinessChecks
         check(ClockFor(1) is null, "The room clock expires at the existing source freshness boundary");
         clock.Now = sample;
         Publish(automatic, suspended: true);
-        check(ClockFor(1) is null, "Suspended sources cannot expose a room clock");
+        check(ClockFor(1) is null, "Suspension while the operator has already paused does not confirm the operator clock");
+        automatic = Command(automatic, ControlAction.Resume);
+        Publish(automatic, 20);
+        Publish(automatic, suspended: true);
+        check(ClockFor(1) is { Phase: "Paused", ElapsedSeconds: 22, RemainingSeconds: 38, AutoEnd: true }
+            && store.Readiness(automatic.Id, master).SourceState == "Suspended",
+            "A fresh management suspension exposes a frozen clock without confirming gameplay readiness");
+        clock.Now = clock.Now.AddMilliseconds(1501);
+        check(ClockFor(1) is null, "A stopped suspended source loses its frozen clock at the existing freshness boundary");
+        Publish(automatic, 20);
+        check(ClockFor(1) is { Phase: "Running", ElapsedSeconds: 23, RemainingSeconds: 37 },
+            "A resumed source restores the same room clock");
         Command(automatic, ControlAction.End); Command(manual, ControlAction.End); Command(legacy, ControlAction.End);
         var linked = Create(SessionMode.Linked, [1, 2, 3, 4, 5], false);
         Publish(linked);
@@ -257,6 +269,10 @@ internal static class ReadinessChecks
         check(all.Length == 5 && all.All(row => row.SessionId == linked.Id && row.Clock == new RoomMissionTime("Running", 5, 55, 60, false))
             && own.Length == 1 && own[0].RoomId == 1 && own[0].Clock == all[0].Clock,
             "Linked rooms share one accepted activity clock and room controllers receive only their room");
+        Publish(linked, suspended: true);
+        check(store.ReadinessByRoom(master).All(row => row is { SourceState: "Suspended", Clock: { Phase: "Paused", ElapsedSeconds: 5 } })
+            && store.ReadinessByRoom(roomOne).Single() is { RoomId: 1, Clock: { Phase: "Paused", ElapsedSeconds: 5 } },
+            "A linked suspension exposes the same frozen activity time across all five rooms");
         VenuePhaseFence[] Fences(VenuePhaseTarget[] targets) => targets.Select(target => new VenuePhaseFence(target.SessionId, target.PhaseSinceSequence)).ToArray();
         var pause = store.ExecuteVenuePhase(ControlAction.Pause, Fences(manager.ReadVenuePhase(master).Pause), Guid.NewGuid(), master).Sessions.Single();
         var targets = Fences(manager.ReadVenuePhase(master).Resume);
@@ -276,8 +292,9 @@ internal static class ReadinessChecks
         RejectUnobservedPause("A VR linked game cannot resume from a world frame predating the venue Pause");
         Publish(manager.Get(linked.Id));
         var pausedAt = clock.Now;
-        check(store.ReadinessByRoom(master).All(row => row.VenuePhase == new RoomVenuePhase(ControlAction.Pause, pause.AppliedAtSequence, 3, true))
-            && store.ReadinessByRoom(roomOne).Single().VenuePhase?.WorldSequence == 3,
+        var pauseFrame = sources[linked.Id].Frames;
+        check(store.ReadinessByRoom(master).All(row => row.VenuePhase == new RoomVenuePhase(ControlAction.Pause, pause.AppliedAtSequence, pauseFrame, true))
+            && store.ReadinessByRoom(roomOne).Single().VenuePhase?.WorldSequence == pauseFrame,
             "Five linked rooms share the exact accepted pause frame while room control reads only its own row");
         clock.Now = pausedAt.AddMilliseconds(1501);
         RejectUnobservedPause("Expired VR pause evidence cannot authorize the batch Resume");
@@ -288,7 +305,7 @@ internal static class ReadinessChecks
         check(store.ReadinessByRoom(master).All(row => row.VenuePhase == new RoomVenuePhase(ControlAction.Resume, resumed.AppliedAtSequence, null, false)),
             "The new Resume receipt is pending until a new running frame actually observes it");
         Publish(manager.Get(linked.Id), 20);
-        check(store.ReadinessByRoom(master).All(row => row.VenuePhase == new RoomVenuePhase(ControlAction.Resume, resumed.AppliedAtSequence, 5, false)),
+        check(store.ReadinessByRoom(master).All(row => row.VenuePhase == new RoomVenuePhase(ControlAction.Resume, resumed.AppliedAtSequence, sources[linked.Id].Frames, false)),
             "A fresh running frame confirms the original venue Resume for each linked room");
         Command(linked, ControlAction.Pause);
         check(store.ReadinessByRoom(master).All(row => row.VenuePhase is null), "A later manual transition removes the venue marker from the current rooms");

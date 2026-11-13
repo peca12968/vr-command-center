@@ -21,12 +21,13 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     const header = { sessionId: session.id, streamId, origin, roomIds: [room], missionClockVersion: 1, missionDurationSeconds: 90,
       captureStartedAtUtc: new Date(start).toISOString().replace('Z', '0000+00:00') };
     let sequence = 0;
-    function publish(snapshot, tick) {
+    function publish(snapshot, tick, suspended = false) {
       const point = { x: (room - 3) * 14, y: 1.65, z: -3 };
       const players = snapshot.players.map(player => ({ id: player.id, roomId: room, connected: false, head: point, muzzle: point,
         forward: { x: 0, y: 0, z: 1 }, health: 100, magazine: 30, reserve: 90, rig: { kind: 'None' } }));
       const packet = { sequence: ++sequence, observedSequence: snapshot.sequence, elapsedMilliseconds: sequence === 1 ? 0 : Date.now() - start,
-        weather: 'Clear', throughCombatSequence: 0, events: [], frame: { phase: snapshot.state, tick, night: false, throughSequence: 0, players } };
+        weather: 'Clear', suspended, throughCombatSequence: 0, events: [],
+        frame: { phase: suspended ? 'Paused' : snapshot.state, tick, night: false, throughSequence: 0, players } };
       const result = spawnSync('python', [path.join(root, 'scripts/world_test_socket.py')], { encoding: 'utf8', timeout: 6000, windowsHide: true,
         input: JSON.stringify({ port: Number(new URL(base).port), route: `/api/sessions/${snapshot.id}/world/publish`, token: tokens.GameServer,
           messages: [{ type: 'header', payload: header }, { type: 'frame', payload: packet }] }) });
@@ -44,7 +45,7 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
   async function publishUntil(samples, expected) {
     const deadline = Date.now() + 10000;
     while (Date.now() < deadline) {
-      for (const [source, tick] of samples) source.publish(source.session, tick);
+      for (const [source, tick, suspended] of samples) source.publish(source.session, tick, suspended);
       const matches = await Promise.all(expected.map(async ([room, text]) => (await cell(room).innerText()) === text));
       if (matches.every(Boolean)) return;
       await new Promise(resolve => setTimeout(resolve, 150));
@@ -77,6 +78,31 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     automatic.session = await command(automatic.session, 'Resume');
     await publishUntil([[automatic, 420]], [[1, '剩餘 01:09 · 自動結束'], [2, '活動時間未確認']]);
     check(await cell(1).getAttribute('data-clock-state') === 'Running', 'A newly accepted Resume frame restores only its own clock');
+    await publishUntil([[automatic, 420, true], [manual, 200]],
+      [[1, '遊戲來源暫停 · 剩餘 01:09 · 自動結束'], [2, '活動 00:10 / 01:30']]);
+    const suspended = (await api('/rooms/readiness')).rooms[0];
+    check(await cell(1).getAttribute('data-clock-state') === 'Suspended' && suspended.sourceState === 'Suspended'
+      && suspended.clock.phase === 'Paused' && (await api('/sessions/' + automatic.session.id)).state === 'Running',
+      'A suspended game source displays its frozen clock without pausing management or the other room');
+    await page.locator('#rooms').screenshot({ path: path.join(screenshots, 'room-clock-source-suspended.png') });
+    await cell(1).filter({ hasText: '活動時間未確認' }).waitFor();
+    check(!(await api('/rooms/readiness')).rooms[0].clock,
+      'A suspended clock clears when no fresh source frames arrive');
+    await publishUntil([[automatic, 440]], [[1, '剩餘 01:08 · 自動結束']]);
+    check(await cell(1).getAttribute('data-clock-state') === 'Running',
+      'A running frame restores the countdown without an operator Resume');
+    await page.locator('#tab-world').click();
+    await page.locator('#world-recording').selectOption(automatic.session.id);
+    await page.locator('#world-live').click();
+    automatic.publish(automatic.session, 440, true);
+    await page.locator('#world-status').filter({ hasText: '遊戲來源暫停' }).waitFor();
+    check((await page.locator('#world-status').textContent()).includes('活動時間 00:22')
+      && await page.locator('#world-environment').textContent() === 'Clear · 日間 · 無雷電',
+      'Observation describes a suspended phase and keeps the recorded environment distinct');
+    automatic.publish(automatic.session, 460);
+    await page.locator('#world-status').filter({ hasText: '執行中' }).waitFor();
+    check(!(await page.locator('#world-status').textContent()).includes('遊戲來源暫停'),
+      'The next running world frame clears the suspension label');
     await login('Room2');
     await publishUntil([[manual, 200]], [[2, '活動 00:10 / 01:30']]);
     check(await page.locator('[data-room-clock]').count() === 1 && (await api('/rooms/readiness', 'GET', undefined, 'Room2')).rooms.length === 1,
