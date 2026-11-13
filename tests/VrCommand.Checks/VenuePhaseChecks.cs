@@ -250,6 +250,8 @@ internal static class VenuePhaseChecks
                 && manager.List(includeEnded: true).Count(session => session.State == SessionState.Ended) == 1,
                 "Restart preserves the original batch Begin receipt after a room ends");
             check(manager.ReadLatestVenueEnd(master) is null, "Individual End does not create a venue closure batch");
+            check(manager.FindVenueEndForSessions([manager.List(includeEnded: true).Single(session => session.State == SessionState.Ended).Id], master) is null,
+                "An individual End does not identify a shared replay batch");
             Reject<AccessDeniedException>(() => manager.ReadLatestVenueEnd(room2), "Venue closure is scoped to Master");
             var preparing = manager.Create(SessionMode.Independent, [1], mission, master);
             var running = manager.List().Single(session => session.State == SessionState.Running);
@@ -316,6 +318,14 @@ internal static class VenuePhaseChecks
                 && old.RequestId == endId && old.RoomIds.SequenceEqual(new[] { 1, 2 }) && old.SessionCount == 2
                 && manager.ReadVenueEnd(endId, master).Sessions.SequenceEqual(ended),
                 "Restart restores the exclusive history cursor and the exact older batch behind it");
+            var originalSessions = ended.Select(row => row.SessionId).Reverse().ToArray();
+            check(manager.FindVenueEndForSessions(originalSessions, master) == endId
+                && manager.FindVenueEndForSessions([originalSessions[0]], master) is null
+                && manager.FindVenueEndForSessions([originalSessions[0], replacement], master) is null
+                && manager.FindVenueEndForSessions([replacement, originalSessions[0]], master) is null,
+                "Replay binding resolves the original durable End after restart and rejects partial or mixed batches");
+            Reject<AccessDeniedException>(() => manager.FindVenueEndForSessions(originalSessions, room2),
+                "Original replay batch lookup is scoped to Master");
         }
 
         var environmentData = Path.Combine(directory, "venue-environment");

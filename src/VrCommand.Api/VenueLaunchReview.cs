@@ -14,7 +14,8 @@ internal sealed record VenueLaunchReviewRow(Guid SessionId, int[] RoomIds, Sessi
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     string? SealState = null);
 internal sealed record VenueLaunchReview(int Version, Guid? LaunchId, SessionMode Topology, bool InstanceVerified,
-    DateTimeOffset ObservedAtUtc, VenueLaunchReviewRow[] Servers);
+    DateTimeOffset ObservedAtUtc, VenueLaunchReviewRow[] Servers,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? ReplayBatchId = null);
 internal sealed class VenueLaunchInstanceMismatchException()
     : InvalidOperationException("The launch report belongs to a different control instance.");
 
@@ -51,8 +52,12 @@ public sealed partial class WorldRecordings
         {
             var original = manager.ReadVenueLaunchSessions(targets.Select(row => row.SessionId).ToArray(), actor);
             var observed = readinessClock.GetUtcNow();
-            return new(request.Version, request.LaunchId, request.Topology, instanceId.HasValue, observed, targets.Select(target =>
-                ReviewLaunchTarget(target, original.GetValueOrDefault(target.SessionId), request.Topology, request.LaunchId, actor)).ToArray());
+            var reviewed = targets.Select(target =>
+                ReviewLaunchTarget(target, original.GetValueOrDefault(target.SessionId), request.Topology, request.LaunchId, actor)).ToArray();
+            var replayBatch = request.Version == 3 && request.Topology == SessionMode.Independent && instanceId.HasValue
+                && reviewed.All(row => row.SealState == "matched")
+                ? manager.FindVenueEndForSessions(targets.Select(row => row.SessionId).ToArray(), actor) : null;
+            return new(request.Version, request.LaunchId, request.Topology, instanceId.HasValue, observed, reviewed, replayBatch);
         }
     }
 

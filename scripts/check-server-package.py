@@ -721,11 +721,12 @@ def main():
                   label+' original Unity child owns the exact endpoint released by the UDP preflight')
             save(label+'-lan-preflight.json', dict(preflight, gameBinding=binding, scope='same-host'))
         return entry
-    def browser_launch_review(report, expected, label, *, live_ready=False):
+    def browser_launch_review(report, expected, label, *, live_ready=False, replay_alignment=None):
         driver=ROOT/'tests/browser/venue-launch-review-browser.cjs'
         output=out/(label+'-browser-review.json')
         completed=subprocess.run([shutil.which('node'),str(driver)],cwd=driver.parent,
-            input=json.dumps({'base':uri,'token':keys['Master'],'reportPath':str(report),'expected':expected,'output':str(output),'liveReady':live_ready}),
+            input=json.dumps({'base':uri,'token':keys['Master'],'reportPath':str(report),'expected':expected,'output':str(output),
+                              'liveReady':live_ready,'replayAlignment':replay_alignment}),
             text=True,encoding='utf-8',capture_output=True,timeout=45,creationflags=subprocess.CREATE_NO_WINDOW)
         diagnostic=completed.stderr
         for key in keys.values():diagnostic=diagnostic.replace(key,'[redacted]')
@@ -2154,12 +2155,33 @@ def main():
                 expected = [{'sessionId': row['result']['sessionId'], 'roomIds': row['roomIds'], 'phase': 'Ended',
                              'sourceState': 'original-source', 'streamId': row['result']['streamId'], 'sealState': 'matched'}
                             for row in sorted(terminal['servers'], key=lambda row: row['roomIds'][0])]
-                observed = browser_launch_review(original_launch, expected, label+'-terminal')
+                alignment = None
+                if not linked:
+                    source, destination = (read(out/f'room-{room}-replay.json') for room in (1, 2))
+                    first, match = None, None
+                    destination_ticks = [row['packet']['frame']['tick'] for row in destination]
+                    for index, row in enumerate(source[:-1]):
+                        candidate = row['packet']
+                        tick = candidate['frame']['tick']
+                        if not 0 < tick <= destination_ticks[-1] or candidate['elapsedMilliseconds'] == source[index + 1]['packet']['elapsedMilliseconds']:
+                            continue
+                        floor = max((value for value in destination_ticks if 0 < value <= tick), default=0)
+                        if 0 < floor <= tick <= floor + 10:
+                            first, match = candidate, destination[destination_ticks.index(floor)]['packet']
+                            break
+                    check(first is not None and match is not None, 'independent original world journals share a playable mission tick')
+                    alignment = {'requestId': closed['requestId'], 'fromSessionId': expected[0]['sessionId'],
+                                 'toSessionId': expected[1]['sessionId'], 'fromFrame': first['sequence'],
+                                 'fromElapsed': first['elapsedMilliseconds'], 'fromTick': first['frame']['tick'],
+                                 'toFrame': match['sequence'], 'frameTick': match['frame']['tick']}
+                observed = browser_launch_review(original_launch, expected, label+'-terminal', replay_alignment=alignment)
                 replays = [{'sessionId': row['result']['sessionId'], 'roomId': room,
                             'worldSequence': row['result']['finalWorld']['acceptedSequence']}
                            for row in sorted(terminal['servers'], key=lambda row: row['roomIds'][0]) for room in row['roomIds']]
                 check(observed['version'] == 3 and observed['launchId'] == terminal['venueLaunchId']
                       and observed['checkedReplays'] == replays
+                      and (('replayBatchId' not in observed and 'checkedAlignment' not in observed) if linked else
+                           observed['replayBatchId'] == closed['requestId'] and observed['checkedAlignment'] == alignment)
                       and control.sha(original_launch) == summary['venueLauncherReport']['sha256'],
                       label+' original terminal report matches both seals and opens each original room replay without changing the file')
         if args.check_venue_udp_readiness:

@@ -259,6 +259,8 @@ async function checkVenueLaunchReview({ context, api, tokens, base, screenshots,
     await openRoomReplay(page, session.id, 5, sequence);
     check(await page.locator('#world-view').isVisible() && await page.locator('#world-recording').inputValue() !== replacement.id,
       'A verified room shortcut opens its original sealed recording even after the room is reused');
+    check(await page.locator('#world-venue-review').isHidden(),
+      'Linked replay keeps its room selector without offering alignment between separate recordings');
     await page.locator('#tab-operations').click();
     await page.locator(panel + ' summary').click();
     await choose(page, terminal);
@@ -326,7 +328,7 @@ if (require.main === module) {
     const { chromium } = require('playwright');
     const inputChunks = [];
     for await (const chunk of process.stdin) inputChunks.push(chunk);
-    const { base, token, reportPath, expected, output, liveReady } = JSON.parse(Buffer.concat(inputChunks).toString('utf8'));
+    const { base, token, reportPath, expected, output, liveReady, replayAlignment } = JSON.parse(Buffer.concat(inputChunks).toString('utf8'));
     assert.match(base, /^http:[/][/]127[.]0[.]0[.]1:[0-9]+$/);
     const browser = await chromium.launch({ headless: true, executablePath: process.env.VR_SERVER_PLAN_CHROMIUM,
       args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
@@ -359,6 +361,38 @@ if (require.main === module) {
             assert.equal((await checkSelected(page)).status(), 200);
           }
           await openRoomReplay(page, sessionId, roomId, seal.worldSequence);
+          if (replayAlignment && roomId === 1) {
+            const { requestId, fromSessionId, toSessionId, fromFrame, fromElapsed, fromTick, toFrame, frameTick } = replayAlignment;
+            assert.equal(review.replayBatchId, requestId);
+            await page.locator('#world-speed').selectOption('0.25');
+            const frame = page.locator(`#world-canvas[data-sequence="${fromFrame}"]`);
+            await page.locator('#world-timeline').evaluate((slider, value) => {
+              slider.value = value;
+              slider.dispatchEvent(new Event('change', { bubbles: true }));
+            }, fromElapsed);
+            await frame.waitFor();
+            await page.locator('#world-pause').filter({ hasText: '暫停回放' }).click();
+            const paused = Number(await page.locator('#world-canvas').getAttribute('data-sequence'));
+            for (let offset = paused; offset > fromFrame; offset--) {
+              await page.locator('#world-frame-back').click();
+              await page.locator(`#world-canvas[data-sequence="${offset - 1}"]`).waitFor();
+            }
+            assert.equal(await frame.count(), 1);
+            await page.locator('#world-venue-basis').selectOption('tick');
+            const pending = page.waitForResponse(value => new URL(value.url()).pathname === `/api/venue/closure/${requestId}/replay-at-tick`);
+            await page.locator('[data-venue-align-room="2"]').click();
+            const aligned = await pending;
+            assert.equal(aligned.status(), 200);
+            const result = await aligned.json();
+            assert.deepEqual([result.requestId, result.fromSessionId, result.fromFrame, result.fromTick, result.roomId,
+              result.recording.header.sessionId, result.frame.packet.sequence, result.frameTick],
+            [requestId, fromSessionId, fromFrame, fromTick, 2, toSessionId, toFrame, frameTick]);
+            await page.locator('#world-venue-message').filter({ hasText: '已對齊房間 2' }).waitFor();
+            assert.equal(await page.locator('#world-recording').inputValue(), toSessionId);
+            assert.equal(await page.locator('#world-room').inputValue(), '2');
+            assert.equal(await page.locator('#world-canvas').getAttribute('data-sequence'), String(toFrame));
+            review.checkedAlignment = replayAlignment;
+          }
           checkedReplays.push({ sessionId, roomId, worldSequence: seal.worldSequence });
         }
         review.checkedReplays = checkedReplays;

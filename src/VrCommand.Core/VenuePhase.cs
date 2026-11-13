@@ -119,6 +119,23 @@ public sealed partial class SessionManager
         lock (gate) return ToEndBatch(id);
     }
 
+    public Guid? FindVenueEndForSessions(Guid[] sessionIds, OperatorIdentity actor)
+    {
+        RequireVenueMaster(actor);
+        lock (gate)
+        {
+            if (sessionIds.Length == 0 || !sessions.TryGetValue(sessionIds[0], out var history)
+                || history.View.State != SessionState.Ended) return null;
+            var end = history.Events[(int)history.PhaseSinceSequence - 1];
+            if (end.Kind != SessionEventKind.ControlApplied || end.Venue is null) return null;
+            var command = end.Read<ControlCommand>();
+            return command.Action == ControlAction.End
+                && venueTransitions.TryGetValue(command.CommandId, out var entries) && entries.Count == sessionIds.Length
+                && sessionIds.ToHashSet().SetEquals(entries.Select(entry => entry.SessionId))
+                ? command.CommandId : null;
+        }
+    }
+
     public VenueTrackingBegin? ReadVenueTrackingBegin(Guid id, OperatorIdentity actor) => ReadVenueBeginEvidence(id, actor).Tracking;
 
     public (VenueTrackingBegin? Tracking, VenueParticipationBegin? Participation) ReadVenueBeginEvidence(Guid id, OperatorIdentity actor)

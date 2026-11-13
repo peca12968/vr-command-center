@@ -107,6 +107,9 @@ function verifyReply(value, request) {
           && !validDestination(row.endpointAddress, row.endpointPort)))
       throw new Error('Invalid room review');
   });
+  if (value.replayBatchId !== undefined && (!isId(value.replayBatchId) || request.version !== 3
+    || request.topology !== 'Independent' || !value.instanceVerified || !value.servers.every(row => row.sealState === 'matched')))
+    throw new Error('Invalid original End batch');
   return value;
 }
 
@@ -172,6 +175,9 @@ export function mountVenueLaunchReview(getState, api, selectSession, focusRoster
     const allLive = review.servers.every(row => row.phase === 'Preparing' && row.sourceState === 'original-source'
       && row.endpointState === 'published' && row.recentSource === true);
     const allSealed = review.servers.every(row => row.sealState === 'matched');
+    const venue = review.replayBatchId ? { requestId: review.replayBatchId, rooms: request.servers.map(row => ({
+      mode: 'replay', complete: true, sessionId: row.sessionId, roomId: row.roomIds[0], streamId: row.streamId,
+      origin: row.seal.origin, throughSequence: row.seal.worldSequence })) } : null;
     const summary = review.version === 3 ? (allSealed ? '五房原戰鬥與回放封存序號均相符。' : '請查看各房的原來源與封存結果。')
       : review.version === 2 && allLive && review.instanceVerified ? '取樣時五房原端點皆相符，並收到近期來源快照。'
       : allUnbound ? '原場次取樣時均在準備中且尚未登記來源。' : '已核對原場次。請查看各房來源與端點狀態。';
@@ -202,7 +208,7 @@ export function mountVenueLaunchReview(getState, api, selectSession, focusRoster
           shortcut.addEventListener('click', () => {
             if (!shortcut.disabled && shortcut.isConnected)
               openReplay({ mode: 'replay', complete: true, sessionId: row.sessionId, streamId: row.streamId,
-                origin, throughSequence: worldSequence, roomId });
+                origin, throughSequence: worldSequence, roomId, venue });
           });
           actions.append(shortcut);
         }
