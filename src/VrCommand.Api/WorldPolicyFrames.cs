@@ -3,7 +3,8 @@ using VrCommand.Core;
 
 namespace VrCommand.Api;
 
-public record RecordedWorldPolicy(string Phase, string Weather, bool Night, bool Lightning, string Behavior, bool AutoAttack);
+public record RecordedWorldPolicy(string Phase, string Weather, bool Night, bool Lightning, string Behavior, bool AutoAttack,
+    bool Suspended = false);
 public record WorldPolicyEnemyRoster(string[] EnemyIds, int Alive, int Added, int Removed);
 public record WorldPolicyFrame(long FrameSequence, long ElapsedMilliseconds, RecordedWorldPolicy Policy, string[] Changes,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] WorldPolicyEnemyRoster? EnemyRoster = null);
@@ -66,7 +67,7 @@ public sealed partial class WorldRecordings
             throw new KeyNotFoundException("No saved world frame with this sequence.");
         if (roomId.HasValue && (!includeEnemyRoster || !info.Header.roomIds.Contains(roomId.Value)))
             throw new ArgumentException("Select a room within this recording when including enemy rosters.");
-        if (change is not (null or "initial" or "phase" or "environment" or "enemies" or "enemy-roster")
+        if (change is not (null or "initial" or "phase" or "suspension" or "environment" or "enemies" or "enemy-roster")
             || (change == "enemy-roster" && !includeEnemyRoster))
             throw new ArgumentException("Use a recorded policy change kind. Enemy roster changes require includeEnemyRoster.");
     }
@@ -102,11 +103,12 @@ public sealed partial class WorldRecordings
         var priorRoster = previous?.Roster;
         var rosterChanged = roster is not null && priorRoster is not null && !roster.EnemyIds.SequenceEqual(priorRoster.EnemyIds);
         if (policy == previous?.Policy && !rosterChanged) return null;
-        var changes = new List<string>(4);
+        var changes = new List<string>(5);
         if (previous is null) changes.Add("initial");
         else
         {
             if (policy.Phase != previous.Policy.Phase) changes.Add("phase");
+            if (policy.Suspended != previous.Policy.Suspended) changes.Add("suspension");
             if (policy.Weather != previous.Policy.Weather || policy.Night != previous.Policy.Night || policy.Lightning != previous.Policy.Lightning)
                 changes.Add("environment");
             if (policy.Behavior != previous.Policy.Behavior || policy.AutoAttack != previous.Policy.AutoAttack) changes.Add("enemies");
@@ -133,6 +135,7 @@ public sealed partial class WorldRecordings
                   coalesce(json_extract(packet,'$.lightning'),0),
                   coalesce(json_extract(roomPolicy.value,'$.behavior'),json_extract(packet,'$.frame.behavior'),'Hold'),
                   coalesce(json_extract(roomPolicy.value,'$.autoAttack'),json_extract(packet,'$.frame.autoAttack'),0),
+                  coalesce(json_extract(packet,'$.suspended'),0),
                   CASE WHEN $roster THEN (
                     SELECT json_object('enemyIds',json_group_array(json_extract(enemy.value,'$.id') ORDER BY json_extract(enemy.value,'$.id')),
                         'alive',count(CASE WHEN json_extract(enemy.value,'$.health') > 0 THEN 1 END))
@@ -150,7 +153,7 @@ public sealed partial class WorldRecordings
             {
                 cancellation.ThrowIfCancellationRequested();
                 candidates.Add((row.GetInt64(0), row.GetInt64(1), new(row.GetString(2), row.GetString(3), row.GetBoolean(4),
-                    row.GetBoolean(5), row.GetString(6), row.GetBoolean(7)), row.IsDBNull(8) ? null : row.GetString(8)));
+                    row.GetBoolean(5), row.GetString(6), row.GetBoolean(7), row.GetBoolean(8)), row.IsDBNull(9) ? null : row.GetString(9)));
             }
         }
         return candidates.Select(row => new PolicySample(row.Item1, row.Item2, row.Item3,

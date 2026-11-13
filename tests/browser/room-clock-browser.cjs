@@ -99,10 +99,48 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
     check((await page.locator('#world-status').textContent()).includes('活動時間 00:22')
       && await page.locator('#world-environment').textContent() === 'Clear · 日間 · 無雷電',
       'Observation describes a suspended phase and keeps the recorded environment distinct');
+    const canvas = page.locator('#world-canvas'), policyStatus = page.locator('#world-policy-status');
+    const suspendedFrame = Number(await canvas.getAttribute('data-sequence'));
     automatic.publish(automatic.session, 460);
     await page.locator('#world-status').filter({ hasText: '執行中' }).waitFor();
     check(!(await page.locator('#world-status').textContent()).includes('遊戲來源暫停'),
       'The next running world frame clears the suspension label');
+    const recoveredFrame = Number(await canvas.getAttribute('data-sequence'));
+    automatic.publish(automatic.session, 480);
+    await page.waitForFunction(frame => Number(document.querySelector('#world-canvas').dataset.sequence) > frame, recoveredFrame);
+    await page.locator('#world-live-policy-kind').selectOption('suspension');
+    await page.locator('#world-live-policy').click();
+    await policyStatus.filter({ hasText: `已跳到第 ${recoveredFrame} 格` }).waitFor();
+    check(await canvas.getAttribute('data-sequence') === String(recoveredFrame),
+      'Live observation finds the original recovery at or before the displayed tail');
+    await page.locator('#world-policy-previous-change').click();
+    await policyStatus.filter({ hasText: `已跳到第 ${suspendedFrame} 格` }).waitFor();
+    check((await page.locator('#world-status').textContent()).includes('遊戲來源暫停'),
+      'The previous suspension transition restores the exact frozen frame');
+    await page.locator('#world-policy-next-change').click();
+    await policyStatus.filter({ hasText: `已跳到第 ${recoveredFrame} 格` }).waitFor();
+    await page.locator('#world-policy-start').click();
+    const results = page.locator('#world-policy-results');
+    await policyStatus.filter({ hasText: '已到保存範圍尾端' }).waitFor();
+    check(await results.locator('li').count() === 4
+      && (await results.locator('li').nth(2).innerText()).includes('遊戲來源暫停')
+      && (await results.locator('li').nth(3).innerText()).includes('遊戲來源恢復'),
+      'Replay lists only source transitions and distinguishes them from the earlier operator pause');
+    await results.screenshot({ path: path.join(screenshots, 'room-clock-suspension-transitions.png') });
+    const exact = url => url.pathname.endsWith(`/world/frames/${suspendedFrame}`);
+    const alter = async route => {
+      const response = await route.fetch();
+      const frame = await response.json();
+      frame.packet.suspended = false;
+      await route.fulfill({ response, json: frame });
+    };
+    await page.route(exact, alter);
+    try {
+      await results.locator(`[data-frame-sequence="${suspendedFrame}"]`).click();
+      await page.locator('#world-frame-message').filter({ hasText: '讀取快照失敗' }).waitFor();
+      check(await canvas.getAttribute('data-sequence') === String(recoveredFrame),
+        'An exact frame with a different suspension flag cannot replace the current view');
+    } finally { await page.unroute(exact, alter); }
     await login('Room2');
     await publishUntil([[manual, 200]], [[2, '活動 00:10 / 01:30']]);
     check(await page.locator('[data-room-clock]').count() === 1 && (await api('/rooms/readiness', 'GET', undefined, 'Room2')).rooms.length === 1,

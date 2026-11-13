@@ -548,12 +548,13 @@ def verify_marksmanship_bundle(v, entry, csv_report):
 def check_policy_frames(v, entry, rows):
     expected = []
     previous = {}
-    groups = {'phase': ('phase',), 'environment': ('weather', 'night', 'lightning'), 'enemies': ('behavior', 'autoAttack')}
+    groups = {'phase': ('phase',), 'suspension': ('suspended',),
+              'environment': ('weather', 'night', 'lightning'), 'enemies': ('behavior', 'autoAttack')}
     for row in rows:
         packet = row['packet']
         frame = packet['frame']
         policy = {name: frame[name] for name in ('phase', 'night', 'behavior', 'autoAttack')}
-        policy.update(weather=packet['weather'], lightning=packet['lightning'])
+        policy.update(weather=packet['weather'], lightning=packet['lightning'], suspended=packet.get('suspended', False))
         changes = [name for name, fields in groups.items() if any(policy[field] != previous.get(field) for field in fields)]
         if changes:
             expected.append({'frameSequence': packet['sequence'], 'elapsedMilliseconds': packet['elapsedMilliseconds'],
@@ -572,6 +573,9 @@ def check_policy_frames(v, entry, rows):
             if (page['sessionId'], page['streamId'], page['throughFrame'], page['afterFrame'], page['nextAfterFrame'], page.get('change')) != (
                     entry['id'], stream, through, cursor, end if end < through else None, change) or not cursor < end <= min(through, cursor + 1024):
                 raise ValueError('Policy page left the original native recording or saved boundary')
+            # Older management builds omitted the false suspension flag.
+            for hit in page['frames']:
+                hit['policy'].setdefault('suspended', False)
             found.extend(page['frames'])
             pages.append(page)
             cursor = end
@@ -587,6 +591,8 @@ def check_policy_frames(v, entry, rows):
             start = anchor['frameSequence']
             item = v.request(f'/api/sessions/{entry["id"]}/world/policy-neighbor?throughFrame={through}&change=environment'
                              f'&fromFrame={start}&direction={direction}')
+            if item['frame'] is not None:
+                item['frame']['policy'].setdefault('suspended', False)
             if (item['sessionId'], item['streamId'], item['throughFrame'], item['fromFrame'], item['direction'], item['change'],
                     item['scannedToFrame'], item['nextFromFrame'], item['frame']) != (
                     entry['id'], stream, through, start, direction, 'environment', target['frameSequence'], None, target):

@@ -1,7 +1,8 @@
 const phaseNames = { Preparing: '準備中', Running: '執行中', Paused: '已暫停', Ended: '已結束' };
 const weatherNames = { Clear: '晴朗', Rain: '下雨', Fog: '濃霧', Storm: '暴風雨' };
 const behaviorNames = { Hold: '固守', Patrol: '巡邏', Advance: '推進' };
-const changeNames = { initial: '首格狀態', phase: '場次階段', environment: '環境', enemies: '敵軍策略', 'enemy-roster': '敵軍增減' };
+const changeNames = { initial: '首格狀態', phase: '場次階段', suspension: '遊戲來源暫停／恢復',
+  environment: '環境', enemies: '敵軍策略', 'enemy-roster': '敵軍增減' };
 const enemyId = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 
 function matchesRoster(value, elapsed, roomId, roster) {
@@ -16,7 +17,8 @@ function matchesPolicy(value, roomId, policy) {
   const packet = value?.packet, frame = packet?.frame;
   if (!frame) return false;
   const local = roomId === null ? null : frame.roomEnemyPolicies?.find(row => row.roomId === roomId);
-  return (frame.phase ?? 'Preparing') === policy.phase && (packet.weather ?? 'Clear') === policy.weather
+  return (frame.phase ?? 'Preparing') === policy.phase && (packet.suspended ?? false) === policy.suspended
+    && (packet.weather ?? 'Clear') === policy.weather
     && (frame.night ?? false) === policy.night && (packet.lightning ?? false) === policy.lightning
     && (local?.behavior ?? frame.behavior ?? 'Hold') === policy.behavior
     && (local?.autoAttack ?? frame.autoAttack ?? false) === policy.autoAttack;
@@ -27,7 +29,7 @@ function validatePolicyHit({ frameSequence, elapsedMilliseconds, policy, changes
       || !Number.isSafeInteger(elapsedMilliseconds) || elapsedMilliseconds < 0 || !Array.isArray(changes) || changes.length === 0
       || changes.some(change => !Object.hasOwn(changeNames, change)) || (changeKind !== null && !changes.includes(changeKind)) || !policy
       || !Object.hasOwn(phaseNames, policy.phase) || !Object.hasOwn(weatherNames, policy.weather) || !Object.hasOwn(behaviorNames, policy.behavior)
-      || [policy.night, policy.lightning, policy.autoAttack].some(value => typeof value !== 'boolean')) throw new Error('設定畫格不符。');
+      || [policy.night, policy.lightning, policy.autoAttack, policy.suspended].some(value => typeof value !== 'boolean')) throw new Error('設定畫格不符。');
   const { enemyIds, alive, added, removed } = enemyRoster ?? {};
   if (!Array.isArray(enemyIds) || enemyIds.length > 100 || enemyIds.some((id, index) => typeof id !== 'string'
       || !enemyId.test(id) || (index > 0 && enemyIds[index - 1] >= id))
@@ -117,7 +119,10 @@ export function mountWorldPolicyFrames(response, jump) {
         summary.className = 'hint';
         const rosterSummary = `${roomId === null ? '全場' : `房間 ${roomId}`} · 在場 ${enemyIds.length}／存活 ${alive}`
           + (added || removed ? `／增援 ${added}／撤除 ${removed}` : '');
-        summary.textContent = ` ${phaseNames[policy.phase]} · ${weatherNames[policy.weather]}／${policy.night ? '夜晚' : '白天'}／閃電${policy.lightning ? '開啟' : '關閉'} · ${behaviorNames[policy.behavior]}／自動攻擊${policy.autoAttack ? '開啟' : '關閉'} · ${rosterSummary}`;
+        const phase = policy.suspended ? '遊戲來源暫停'
+          : changes.includes('suspension') && policy.phase === 'Running' ? '遊戲來源恢復'
+            : phaseNames[policy.phase];
+        summary.textContent = ` ${phase} · ${weatherNames[policy.weather]}／${policy.night ? '夜晚' : '白天'}／閃電${policy.lightning ? '開啟' : '關閉'} · ${behaviorNames[policy.behavior]}／自動攻擊${policy.autoAttack ? '開啟' : '關閉'} · ${rosterSummary}`;
         row.append(button, summary);
         return row;
       });

@@ -148,7 +148,9 @@ v0.16 新增 `environmentVersion:1`，依保存的 tick／環境重現雨、日�
 
 唯讀端點 `GET /api/sessions/{id}/world/policy-frames` 需要 `throughFrame`，可用 `afterFrame` 指定不包含的游標。每頁最多查閱 1,024 格並回傳最多 24 格，`nextAfterFrame` 非空時可繼續。傳入 `includeEnemyRoster=true` 可取得名單與變動量，並可用 `roomId` 指定錄製涵蓋的房間。權限沿用原錄製。原生設定變更可用 `scripts/check-desktop-exercise.py --operator-controls --check-policy-frames` 核對，原生增撤援可用 `scripts/check-server-package.py --check-live-reinforcement` 核對。
 
-選填 `change` 可只回傳符合 `initial`、`phase`、`environment`、`enemies` 或 `enemy-roster` 的原畫格。`enemy-roster` 需搭配 `includeEnemyRoster=true`。回應會回傳使用的種類。若這一頁沒有符合的畫格，仍可依 `nextAfterFrame` 繼續查閱原保存範圍。
+選填 `change` 可只回傳符合 `initial`、`phase`、`suspension`、`environment`、`enemies` 或 `enemy-roster` 的原畫格。`enemy-roster` 需搭配 `includeEnemyRoster=true`。回應會回傳使用的種類。若這一頁沒有符合的畫格，仍可依 `nextAfterFrame` 繼續查閱原保存範圍。
+
+控制台 0.31.172 可在即時觀戰與回放選取「遊戲來源暫停／恢復」。搜尋依原畫格的 `suspended` 狀態變化，標出進入暫停的第一格及恢復執行的第一格。操作員手動暫停仍可從「場次階段」查閱。舊錄製缺少此欄位時以未暫停讀取。
 
 `GET /api/sessions/{id}/world/policy-neighbor` 使用同一範圍與篩選，另須指定 `fromFrame` 及 `direction=previous` 或 `direction=next`。每次最多查閱 1,024 格，回傳最近一個符合的畫格。即時觀戰首次向前回看時加上 `includeFrom=true`，將畫面上的尾端也納入搜尋。空白區段可依 `nextFromFrame` 接續，後續查詢省略 `includeFrom`。往前搜尋時，每格仍與錄製時間上早一格比較。
 
