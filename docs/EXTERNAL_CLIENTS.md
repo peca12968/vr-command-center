@@ -592,6 +592,10 @@ python scripts/verify-field-results.py --venue-stages .\stages.json --inspect-ve
 
 若批次已設定 `windowsLinkCriteria`，Windows 收件核對完成但量測缺漏或未達門檻，總表會在 `issues[].windowsLinkMetrics` 顯示該批門檻、已核對席數、缺量測的房號與席號，以及已收到的逐席回覆數與 p95 往返時間。`criteriaFailures` 會指出該席未通過的門檻。原始資料可使用散檔、逐席 ZIP 或 Windows 收件資料夾。 [連線量測門檻](#逐席核對-windows-連線量測門檻)
 
+##### 六批共用 Windows 連線量測門檻
+
+可在 `stages.json` 加入 `"windowsLinkCriteria": {"minimumReplies": 28, "maximumP95RoundTripMs": 40}`，讓六批都核對原 Windows 逐席量測。個別批次可要求更高的最低回覆數或更低的 p95 上限，每項採兩份清單中較嚴的值。總表會顯示共用門檻，並逐批列出實際門檻及核對席數。每批至少須有一席 Windows 量測才能通過這項選用檢查。
+
 ##### 統一核對追蹤及遊戲射擊
 
 要讓六批都通過同時追蹤及遊戲射擊驗收，在 `stages.json` 加入 `"requireTrackedRoster": true` 及 `"requireConcurrentFire": true`。兩項可各自啟用。各批保留所有原玩家日誌及 `worldJournal`，啟用射擊驗收時另提供 `combatJournal`。啟用任一項後，總清單會將自己的 `minimumConcurrentMilliseconds` 套用到全部六批；若個別清單另有較長門檻，該批使用較長值。

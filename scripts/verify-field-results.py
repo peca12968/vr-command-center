@@ -2120,19 +2120,28 @@ def verify_venue(manifest_path):
     return report
 
 
-def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=None):
+def read_windows_link_criteria(document):
+    if 'windowsLinkCriteria' not in document:
+        return None
+    criteria = document['windowsLinkCriteria']
+    require(type(criteria) is dict and set(criteria) == {'minimumReplies', 'maximumP95RoundTripMs'},
+            'Windows link criteria require minimumReplies and maximumP95RoundTripMs')
+    integer(criteria['minimumReplies'], 1, 30)
+    integer(criteria['maximumP95RoundTripMs'], 0, 900)
+    return criteria
+
+
+def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=None, staged_link_criteria=None):
     manifest_path = manifest_path.resolve(strict=True)
     with manifest_path.open('rb') as stream:
         raw_manifest = limited_read(stream)
     manifest = read_json(raw_manifest.decode('utf-8-sig'))
     integer(manifest['version'], 1, 1)
-    link_criteria = None
-    if 'windowsLinkCriteria' in manifest:
-        link_criteria = manifest['windowsLinkCriteria']
-        require(type(link_criteria) is dict and set(link_criteria) == {'minimumReplies', 'maximumP95RoundTripMs'},
-                'Windows link criteria require minimumReplies and maximumP95RoundTripMs')
-        integer(link_criteria['minimumReplies'], 1, 30)
-        integer(link_criteria['maximumP95RoundTripMs'], 0, 900)
+    link_criteria = read_windows_link_criteria(manifest)
+    if staged_link_criteria is not None:
+        local = link_criteria or staged_link_criteria
+        link_criteria = {'minimumReplies': max(local['minimumReplies'], staged_link_criteria['minimumReplies']),
+                         'maximumP95RoundTripMs': min(local['maximumP95RoundTripMs'], staged_link_criteria['maximumP95RoundTripMs'])}
     players_per_room = integer(manifest.get('expectedPlayersPerRoom', 5), 1, 5)
     topology, mode = manifest['topology'], manifest['mode']
     require(topology in ('same-host', 'direct-lan') and mode in ('Independent', 'Linked'), 'Invalid venue topology or mode')
@@ -2668,9 +2677,12 @@ def verify_venue_stages(plan_path, *, inspect=False):
     plan = read_json(raw_plan.decode('utf-8-sig'))
     required = {'version', 'topology', 'minimumConcurrentMilliseconds', 'venueManifests'}
     roster_options = ('requireTrackedRoster', 'requireConcurrentFire')
-    require(type(plan) is dict and required <= plan.keys() <= required | {'requireDistinctRemoteRoster', 'requireVerifiedVenueStart', *roster_options},
+    optional = {'requireDistinctRemoteRoster', 'requireVerifiedVenueStart', 'windowsLinkCriteria', *roster_options}
+    require(type(plan) is dict and required <= plan.keys() <= required | optional,
             'Invalid staged venue plan fields')
     integer(plan['version'], 1, 1)
+    link_criteria = read_windows_link_criteria(plan)
+    link_policy = {'windowsLinkCriteria': link_criteria} if link_criteria is not None else {}
     topology = plan['topology']
     require(topology in ('same-host', 'direct-lan'), 'Invalid staged venue topology')
     minimum = integer(plan['minimumConcurrentMilliseconds'], 1000, 900000)
@@ -2714,7 +2726,7 @@ def verify_venue_stages(plan_path, *, inspect=False):
             continue
         paths[path] = index
         try:
-            report, batch = verify_venue_batch(path, staged_roster=staged_roster)
+            report, batch = verify_venue_batch(path, staged_roster=staged_roster, staged_link_criteria=link_criteria)
             key = (report['mode'], report['players'])
             require(key in stage_keys, 'Staged venue evidence must cover each mode and seat count exactly once')
             require(report['declaredTopology'] == topology, 'Venue batch topology differs from the staged plan')
@@ -2782,12 +2794,13 @@ def verify_venue_stages(plan_path, *, inspect=False):
             status = 'conflict' if index in affected else 'verified'
             results.append({'entry': index, 'status': status, **entries[index]})
         return {'version': 1, 'scope': 'staged-venue-inspection', 'complete': not issues,
-                'planSha256': hashlib.sha256(raw_plan).hexdigest(), 'entries': results, 'issues': issues,
+                'planSha256': hashlib.sha256(raw_plan).hexdigest(), **link_policy, 'entries': results, 'issues': issues,
                 'missingStages': [{'mode': mode, 'players': players} for mode, players in stage_keys if (mode, players) not in stages]}
     results = [entries[stages[key][0]] for key in stage_keys]
     return {'version': 1, 'consistent': True, 'declaredTopology': topology,
             'planSha256': hashlib.sha256(raw_plan).hexdigest(), 'venueReleaseSha256': next(iter(releases)),
             'minimumConcurrentMilliseconds': minimum, 'requireDistinctRemoteRoster': distinct,
+            **link_policy,
             **({'requireVerifiedVenueStart': require_start} if 'requireVerifiedVenueStart' in plan else {}),
             **{key: requirements[key] for key in roster_options if key in plan}, 'stages': results,
             'serverAcknowledgements': sum(stage['serverAcknowledgements'] for stage in results),

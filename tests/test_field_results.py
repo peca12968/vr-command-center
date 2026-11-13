@@ -584,9 +584,10 @@ class FieldResultsTests(unittest.TestCase):
         path.write_text(json.dumps(manifest), encoding='utf-8')
         return str(path.relative_to(root.parent))
 
-    def staged_plan(self, root, *, remote=False, tracked_fire=False, windows_inbox=False):
+    def staged_plan(self, root, *, remote=False, tracked_fire=False, windows_inbox=False, windows_links=False):
         names = [self.staged_batch(root / f'{count}-{mode}', mode, count, index * 10000, minutes, remote=remote,
-                                   tracked_fire=tracked_fire, windows_inbox=windows_inbox and count == 1)
+                                   tracked_fire=tracked_fire, windows_inbox=windows_inbox and count == 1,
+                                   windows_links=windows_links)
                  for minutes, count in enumerate((1, 2, 5), 1)
                  for index, mode in ((minutes * 2, 'Independent'), (minutes * 2 + 1, 'Linked'))]
         return {'version': 1, 'topology': 'direct-lan' if remote else 'same-host',
@@ -754,6 +755,57 @@ class FieldResultsTests(unittest.TestCase):
                 (root / name).write_bytes(original)
             accepted = subprocess.run(command, capture_output=True, check=True)
             self.assertEqual(80, json.loads(accepted.stdout)['serverAcknowledgements'])
+
+    def test_staged_windows_link_criteria_apply_to_all_batches_and_keep_stricter_local_limits(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = self.staged_plan(root, windows_links=True, windows_inbox=True)
+            base = {'minimumReplies': 28, 'maximumP95RoundTripMs': 14}
+            plan['windowsLinkCriteria'] = base
+            path = root / 'stages.json'
+            path.write_text(json.dumps(plan), encoding='utf-8')
+            command = [sys.executable, str(SCRIPT), '--venue-stages', str(path)]
+            names = plan['venueManifests']
+
+            def set_criteria(index, criteria):
+                batch = root / names[index]
+                manifest = json.loads(batch.read_bytes())
+                manifest['windowsLinkCriteria'] = criteria
+                batch.write_text(json.dumps(manifest), encoding='utf-8')
+
+            set_criteria(0, {'minimumReplies': 1, 'maximumP95RoundTripMs': 900})
+            report = json.loads(subprocess.check_output(command))
+            self.assertEqual(base, report['windowsLinkCriteria'])
+            self.assertEqual([dict(base, seatsVerified=count) for count in (5, 5, 10, 10, 25, 25)],
+                             [stage['windowsLinkCriteria'] for stage in report['stages']])
+            self.assertEqual(80, report['serverAcknowledgements'])
+
+            set_criteria(0, {'minimumReplies': 29, 'maximumP95RoundTripMs': 900})
+            set_criteria(3, {'minimumReplies': 1, 'maximumP95RoundTripMs': 13})
+            inspected = subprocess.run([*command, '--inspect-venue-stages'], capture_output=True)
+            self.assertEqual(1, inspected.returncode)
+            self.assertFalse(inspected.stderr)
+            report = json.loads(inspected.stdout)
+            self.assertEqual(base, report['windowsLinkCriteria'])
+            self.assertEqual([[1], [4]], [issue['entries'] for issue in report['issues']])
+            failures = [issue['windowsLinkMetrics'] for issue in report['issues']]
+            for failure, criteria, name, count in zip(
+                failures,
+                [{'minimumReplies': 29, 'maximumP95RoundTripMs': 14}, {'minimumReplies': 28, 'maximumP95RoundTripMs': 13}],
+                ['minimumReplies', 'maximumP95RoundTripMs'], [5, 10], strict=True,
+            ):
+                self.assertEqual(criteria, failure['criteria'])
+                self.assertEqual(count, failure['verifiedSeats'])
+                self.assertFalse(failure['meetsCriteria'])
+                self.assertTrue(all(seat['criteriaFailures'] == [name] for seat in failure['seats']))
+            rejected = subprocess.run(command, capture_output=True)
+            self.assertEqual(1, rejected.returncode)
+            self.assertIn(b'Venue manifest entry 1: Windows link criteria not met', rejected.stderr)
+
+            for invalid in (None, {}, {'minimumReplies': True, 'maximumP95RoundTripMs': 14}):
+                path.write_text(json.dumps(dict(plan, windowsLinkCriteria=invalid)), encoding='utf-8')
+                with self.assertRaises(field.EvidenceError):
+                    field.verify_venue_stages(path)
 
     def test_staged_venue_rejects_incomplete_repeated_misordered_or_mismatched_batches(self):
         with tempfile.TemporaryDirectory() as directory:
