@@ -971,6 +971,29 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
       await csvStatus.filter({ hasText: '暫時無法下載原封存戰績' }).waitFor();
       check(unexpectedCsv === 0 && await csvButton.isEnabled(), 'A different player CSV from the same archive is refused');
     } finally { await page.unroute(csvRoute, otherPlayerCsv); page.off('download', unexpected); }
+    const otherSeat = await fetch(base + `/api/sessions/${originalSession}/players/${acknowledged.playerId}/report.csv`, auth);
+    assert(otherSeat.ok);
+    const otherSeatBytes = Buffer.from(await otherSeat.arrayBuffer());
+    const originalText = exactCsv.toString('utf8');
+    const changedBoundary = originalText.replace(`,"${streamId}",`, `,"${randomUUID()}",`);
+    const changedScore = originalText.replace(/,"100"\r\n$/, ',"99"\r\n');
+    assert.notEqual(changedBoundary, originalText);
+    assert.notEqual(changedScore, originalText);
+    for (const [body, reason] of [[otherSeatBytes, 'player'], [changedBoundary, 'source'], [changedScore, 'score']]) {
+      const substitute = async route => { const response = await route.fetch(); await route.fulfill({ response, body }); };
+      await page.route(csvRoute, substitute); page.on('download', unexpected);
+      try {
+        await csvButton.click();
+        await csvStatus.filter({ hasText: '暫時無法下載原封存戰績' }).waitFor();
+        check(unexpectedCsv === 0 && await csvButton.isEnabled(),
+          `The original filename cannot authorize a substituted ${reason} in an archived seat CSV`);
+      } finally { await page.unroute(csvRoute, substitute); page.off('download', unexpected); }
+    }
+    const retriedCsv = page.waitForEvent('download');
+    await csvButton.click();
+    const retriedSeat = await retriedCsv;
+    check(exactCsv.equals(await fs.readFile(await retriedSeat.path())), 'Retry after CSV content mismatches downloads the original sealed seat');
+    await retriedSeat.delete();
     await page.setViewportSize({ width: 390, height: 844 });
     check(await detailPanel.evaluate(panel => panel.scrollWidth <= panel.clientWidth + 1), 'The receipt detail fits the mobile console');
     await page.setViewportSize({ width: 1440, height: 1080 });

@@ -1,3 +1,5 @@
+import { matchesDebriefCsv } from './report-csv.js';
+
 const $ = id => document.getElementById(id);
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const sequence = value => Number.isSafeInteger(value) && value >= 0;
@@ -20,7 +22,7 @@ function validatedPlayers(body, room) {
       && uuid.test(player.playerId ?? '') && typeof player.name === 'string' && typeof player.acknowledged === 'boolean' && validScore(player.score))
     || body.players.filter(player => player.acknowledged).length < room.confirmedCount) throw new Error('Mismatch');
   return [...body.players].sort((a, b) => a.seat - b.seat)
-    .map(player => ({ ...player, room, throughCombatSequence: body.finalStreamSequence }));
+    .map(player => ({ ...player, room, throughSequence: body.throughSequence, throughCombatSequence: body.finalStreamSequence }));
 }
 
 export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) {
@@ -59,6 +61,12 @@ export function mountVenueDebriefSeats(current, unauthorized, save, openReplay) 
         throw new Error('Mismatch');
       const blob = await response.blob();
       if (!inScope()) return;
+      if (blob.size < 1 || blob.size > 16 * 1024) throw new Error('Mismatch');
+      const bytes = await blob.arrayBuffer();
+      if (!inScope()) return;
+      const currentSeat = players?.find(row => row.room.id === room.id && row.seat === seat && row.playerId === playerId);
+      if (!currentSeat || !matchesDebriefCsv(bytes, player) || !matchesDebriefCsv(bytes, currentSeat))
+        throw new Error('Mismatch');
       save(name, blob);
       csvStatus.textContent = `已下載${seatLabel}的原封存戰績。`;
     } catch { if (inScope()) csvStatus.textContent = '暫時無法下載原封存戰績，可重新下載。'; }
