@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 最終戰績 CSV 下載核對
+
+- 控制台 0.31.169 會在下載全場、分房或個人 CSV 前，核對原場次、兩個戰鬥與管理序號及每列成績。瀏覽器成功攔下錯場次、錯房、錯玩家及被改動的耗彈值，保留正確檔案的原始位元組。 [操作方式](REPORTS.md#場次與戰績同步)
+- 通過 825 項 HTTP、1,118 項完整 Chromium、107 項 Windows 管理包及 543 項三包整合檢查。五房獨立與合併各有 25 個同機模擬玩家，核對瀏覽器實際下載的 6 份最終 CSV、50 列原戰績、50 份伺服器回條及 1,112 格封存回放。第一輪 Windows 整合缺正式啟動回條，保留原結果，改用帶正式回條的啟動流程重跑通過。 [本機驗證摘要](../artifacts/venue-verified-final-reports-validation.json)
+- 功能來源 `2cb89ae` 已推送。新版管理包與原 Windows 遊戲包、Quest 0.50.7 APK 通過離線交付一致性核對。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、Quest 3／VIVE XR、MR 場地及廠商硬體仍待實地驗收。 [Windows 管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.169-verified-reports-win-x64.zip) · [離線交付報告](../artifacts/venue-release-control-0.31.169-game-0.50.7.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43350663709)
+
 ## 2026-11-13 單席補發採用原公告端點
 
 - 控制台 0.31.168 在五房批次公告後，單席連線檔採用管理服務在同次票券回應提供的 IPv4 與 UDP 埠，手動欄位空白或填錯仍可按原端點補發。來源過期時停用；未使用批次公告的場次仍沿用手動欄位。 [操作方式](EXTERNAL_CLIENTS.md#按房間下載連線檔)
