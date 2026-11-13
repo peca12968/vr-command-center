@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 硬體排演顯示管理連線故障原因
+
+- 模擬器 0.2.15 在本機單房終端與五房狀態提供三種管理故障碼。以隔離的管理服務和模擬接收端實測第 4 房收到 HTTP 503、逾時及傳輸中斷。恢復後以新連線附掛，取消舊待確認批次，保留舊確認並只新增一筆新確認。新版可讀取舊版未附原因的狀態。 [操作說明](HARDWARE.md#查看五房排演狀態) · [故障快照](../artifacts/live-hardware-gateway/run-d7d4d4cfcb93481da411ace169286d1b/linked-fleet-management-statuses.json)
+- Windows 通過 1,109 項核心、38 項離線與 82 項即時模擬檢查，含五房獨立及合併。解壓核對 8 個清單檔案，並用解壓版重跑 38 項離線檢查。前兩次直接把即時證據寫到 F 槽，分別在既有批次等待及既有房間狀態斷言中止，兩次測試程序均清理。完成場先將證據寫到 C 槽，停止程序後複製，163 檔在 C／F 逐檔雜湊相符。 [即時檢查](../artifacts/live-hardware-gateway/run-d7d4d4cfcb93481da411ace169286d1b/checks.json) · [解壓版檢查](../artifacts/hardware-simulator/run-a5460179c040480dafe7aa68ade23c07/checks.json)
+- `484273e` 已推送。GitHub Actions 因帳務或支出上限未啟動。桌面仍有「Windows 安全性」視窗，本輪驗證使用命令列。六台工作站直連、跨機 25 人、頭盔、MR 場地及廠商硬體仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43394966139)
+
 ## 2026-11-13 命令列列出工作站回條問題
 
 - `check-venue-operator.py --verify-workstations` 可混用瀏覽器原回條與命令列 JSON。可先提供一至六份檔案，本機列出缺少或重複的角色。收齊後，會從管理服務的拒絕回應擷取已知角色及原因。 [命令列操作](WINDOWS_CONTROL_PACKAGE.md#命令列操作)
