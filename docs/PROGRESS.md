@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 六批 Windows 收件的逐席缺件
+
+- 六批收件總表在 `issues[].windowsInbox` 顯示原驗收的 Windows 收件細節，包括預期與實收席數、缺少的房間及席號，以及錯批或重複的 ZIP 檔名。原正式驗收及其退出碼維持。 [收件方式](EXTERNAL_CLIENTS.md#一次查看六批待補件)
+- 通過 115 項封存及 11 項 LAN 預檢測試。既有六批 Windows 同機驗收的 80 份戰績回條與 252 個原檔雜湊一致。以 10 席原始日誌和啟動報告製作測試用收件 ZIP，總表同輪辨識缺一席及錯批檔，其他四批保持通過，補件後的正式摘要與副本基準逐位元一致。測試過程修正了初版 fixture 的席位排序與重複包裝。 [本機驗證摘要](../artifacts/staged-venue-windows-inbox-validation.json)
+- 功能來源 `337f70e` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、Quest 3／VIVE XR、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43353038158)
+
 ## 2026-11-13 全館收尾個人 CSV 內容核對
 
 - 控制台 0.31.170 核對全館與單房席位明細下載的個人 CSV。檔名正確時仍會逐欄比對原場次、遊戲串流、管理與戰鬥封存序號、玩家及七項戰績。瀏覽器攔下三種內容錯置後仍可重試並取回原始檔。 [操作方式](REPORTS.md#從戰績開啟個人回放)
