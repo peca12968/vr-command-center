@@ -1,6 +1,11 @@
 const challengePattern = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
 const emptyChallenge = '00000000-0000-0000-0000-000000000000';
 const roles = ['主控', '房間 1', '房間 2', '房間 3', '房間 4', '房間 5'];
+const issueLabels = {
+  'missing-role': '缺少回條', 'duplicate-role': '回條重複', 'invalid-signature': '簽章無法核對',
+  'invalid-witness': '回條內容無效', 'challenge-mismatch': '本輪代號不符', expired: '回條已過期',
+  'clock-ahead': '回條時間晚於管理端時間', 'listener-mismatch': '管理端點不符', 'source-mismatch': '來源位址與清單不符'
+};
 
 function privateAddress(value) {
   if (typeof value !== 'string' || !/^(?:0|[1-9][0-9]{0,2})(?:\.(?:0|[1-9][0-9]{0,2})){3}$/.test(value)) return false;
@@ -35,12 +40,24 @@ export function mountOperatorNetwork(getState, api, download, uuid) {
     $('master').hidden = generate.hidden = seat !== 0;
     challengeInput.disabled = generate.disabled = inventoryInput.disabled = receiptsInput.disabled = panel.hidden || pending;
     issue.disabled = challengeInput.disabled || !challengePattern.test(id) || id === emptyChallenge;
-    verify.disabled = issue.disabled || seat !== 0 || inventoryInput.files.length !== 1 || receiptsInput.files.length !== roles.length;
+    verify.disabled = issue.disabled || seat !== 0 || inventoryInput.files.length !== 1
+      || receiptsInput.files.length < 1 || receiptsInput.files.length > roles.length;
   }
   function clear() {
     status.textContent = '';
     result.replaceChildren();
     update();
+  }
+  function showIssues(issues) {
+    if (!Array.isArray(issues) || issues.length < 1 || issues.length > roles.length || issues.some((item, index) =>
+      !Number.isInteger(item?.workstation) || !roles[item.workstation] || !Object.hasOwn(issueLabels, item.reason)
+      || (index > 0 && issues[index - 1].workstation >= item.workstation))) return;
+    result.replaceChildren(...issues.map(({ workstation, reason }) => {
+      const row = document.createElement('li');
+      row.dataset.workstationIssue = workstation;
+      row.textContent = `${roles[workstation]} · ${issueLabels[reason]}`;
+      return row;
+    }));
   }
   async function perform(message, failed, action) {
     const id = challenge(), seat = workstation(), token = ++generation, epoch = getState().epoch;
@@ -50,7 +67,10 @@ export function mountOperatorNetwork(getState, api, download, uuid) {
     status.textContent = message;
     try { await action(id, seat, current); }
     catch (error) {
-      if (current()) status.textContent = error.status === 404 ? '此站台未啟用工作站核對，請開啟場館 HTTPS 網址。' : failed;
+      if (current()) {
+        status.textContent = error.status === 404 ? '此站台未啟用工作站核對，請開啟場館 HTTPS 網址。' : failed;
+        if (error.status === 400 && error.code === 'operator-network-witnesses-rejected') showIssues(error.workstationIssues);
+      }
     } finally {
       if (current()) { pending = false; update(); }
     }
@@ -88,7 +108,15 @@ export function mountOperatorNetwork(getState, api, download, uuid) {
           return readWitness(value?.schemaVersion === 1 && value.complete === true ? value.networkWitness : value, id);
         }));
         witnesses.sort((a, b) => a.workstation - b.workstation);
-        if (witnesses.some((witness, index) => witness.workstation !== index)) throw new Error('Missing workstation role');
+        if (witnesses.length !== roles.length || witnesses.some((witness, index) => witness.workstation !== index)) {
+          if (current()) {
+            const counts = roles.map((_, workstation) => witnesses.filter(witness => witness.workstation === workstation).length);
+            showIssues(counts.flatMap((count, workstation) => count === 1 ? []
+              : [{ workstation, reason: count === 0 ? 'missing-role' : 'duplicate-role' }]));
+            status.textContent = '請補齊主控與五房各一份回條。';
+          }
+          return;
+        }
       } catch {
         if (current()) status.textContent = '請選取六個相異的私有 IPv4 位址，以及本輪主控與五房各一份有效格式的 JSON 回條。每檔上限 16 KiB。';
         return;

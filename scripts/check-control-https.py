@@ -365,7 +365,8 @@ def main():
                 inventory = {'masterAddress': address, 'roomAddresses': room_addresses}
                 mismatch = request(tls, verify_path, keys['Master'], status=400,
                                    body={'challenge': challenge, 'inventory': inventory, 'witnesses': witnesses})
-                check('differs from this venue and expected source' in mismatch['error'],
+                check(mismatch.get('code') == 'operator-network-witnesses-rejected'
+                      and mismatch.get('issues') == [{'workstation': room, 'reason': 'source-mismatch'} for room in range(1, 6)],
                       'validly formed same-PC receipts fail at the declared source check')
                 inventory_file = output / 'workstation-inventory.json'
                 inventory_file.write_text(json.dumps(inventory), encoding='utf-8')

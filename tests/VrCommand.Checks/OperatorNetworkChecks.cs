@@ -59,5 +59,19 @@ internal static class OperatorNetworkChecks
             "Loopback cannot stand in for a direct venue workstation");
         Reject<ArgumentException>(() => proof.Issue(room, challenge, masterPeer with { Source = IPAddress.Parse("100.64.0.5") }, now),
             "An overlay address cannot stand in for a direct private LAN workstation");
+        var oldRoom = proof.Issue(room with { RoomId = 2 }, challenge,
+            new(IPAddress.Parse(addresses[1]), listener, 8443), now.AddMinutes(-16));
+        try
+        {
+            proof.Verify(master, challenge, masterPeer, moved,
+                [receipts[0], receipts[1], oldRoom, receipts[3], receipts[3], receipts[5]], now);
+            check(false, "Mixed workstation issues reject the complete submission");
+        }
+        catch (OperatorNetworkWitnessException error)
+        {
+            check(error.Issues.SequenceEqual(new OperatorNetworkIssue[] {
+                new(1, "source-mismatch"), new(2, "expired"), new(3, "duplicate-role"), new(4, "missing-role") }),
+                "A single rejection identifies each affected role in room order without witness data");
+        }
     }
 }

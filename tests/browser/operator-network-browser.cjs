@@ -88,10 +88,16 @@ async function main() {
     await inventoryInput.setInputFiles(file('inventory.json', inventory));
     let posts = 0;
     page.on('request', request => { if (request.url().endsWith('/operator-network/verify')) posts++; });
+    await receiptsInput.setInputFiles(witnessFiles.slice(0, 4));
+    await verify.click();
+    await waitStatus('請補齊主控與五房各一份回條');
+    check(posts === 0 && JSON.stringify(await result.allTextContents()) === JSON.stringify(['房間 4 · 缺少回條', '房間 5 · 缺少回條']),
+      'A partial upload lists missing rooms without sending any receipts');
     await receiptsInput.setInputFiles([...witnessFiles.slice(0, 5), witnessFiles[0]]);
     await verify.click();
-    await waitStatus('每檔上限');
-    check(posts === 0 && await result.count() === 0, 'Duplicate roles are rejected locally before submitting a workstation bundle');
+    await waitStatus('請補齊主控與五房各一份回條');
+    check(posts === 0 && JSON.stringify(await result.allTextContents()) === JSON.stringify(['主控 · 回條重複', '房間 5 · 缺少回條']),
+      'Duplicate and missing roles are identified locally before submitting a workstation bundle');
 
     const mixed = [...witnessFiles.slice(0, 5), file('cli-room5.json', {
       schemaVersion: 1, complete: true, networkWitness: JSON.parse(witnessFiles[5].buffer), ignored: 'local-only fixture'
@@ -102,7 +108,8 @@ async function main() {
     const failure = await rejected;
     await waitStatus('管理服務未確認');
     const request = failure.request().postDataJSON();
-    check(failure.status() === 400 && posts === 1 && await result.count() === 0
+    check(failure.status() === 400 && posts === 1 && await result.count() === 5
+      && (await result.allTextContents()).every((line, index) => line === `房間 ${index + 1} · 來源位址與清單不符`)
       && request.witnesses.every((witness, index) => JSON.stringify(witness) === JSON.stringify(JSON.parse(witnessFiles[index].buffer)))
       && !failure.request().postData().includes('local-only fixture'), 'Shuffled browser and CLI-format receipts submit only signed fields and fail the real same-PC source check');
 

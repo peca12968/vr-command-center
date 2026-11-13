@@ -168,7 +168,11 @@ if (controlHttps is not null)
         var peer = context.Features.Get<OperatorNetworkPeer>() ?? throw new ArgumentException("Use the direct venue HTTPS listener.");
         var request = await DeploymentJson.Read<OperatorNetworkSubmission>(context.Request, 8192,
             "Invalid workstation verification submission.", context.RequestAborted, completeFile: true);
-        return networkProof.Verify(actor, request.Challenge, peer, request.Inventory, request.Witnesses, DateTimeOffset.UtcNow);
+        try { return Results.Ok(networkProof.Verify(actor, request.Challenge, peer, request.Inventory, request.Witnesses, DateTimeOffset.UtcNow)); }
+        catch (OperatorNetworkWitnessException error)
+        {
+            return Results.BadRequest(new { code = "operator-network-witnesses-rejected", error = error.Message, issues = error.Issues });
+        }
     });
 }
 app.MapGet("/api/missions", (SqliteMissionLibrary store, HttpContext context) => store.List(Actor(context)));

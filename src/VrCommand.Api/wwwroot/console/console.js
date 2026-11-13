@@ -127,8 +127,10 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
     const content = responseType === 'blob' && response.ok ? await response.blob() : await response.text();
     if (epoch !== state.epoch) throw new Error('登入狀態已變更，已忽略舊回應。');
     if (!response.ok) {
-      let message = '操作未完成，請重新整理後確認。', layout, code, maxCount, roomIds, roomId;
-      try { const data = JSON.parse(content); message = data.error || message; layout = data.layout; code = data.code; maxCount = data.maxCount; roomIds = data.roomIds; roomId = data.roomId; } catch { /* Non-domain errors have no stable JSON contract. */ }
+      let message = '操作未完成，請重新整理後確認。', layout, code, maxCount, roomIds, roomId, workstationIssues;
+      try { const data = JSON.parse(content); message = data.error || message; layout = data.layout; code = data.code; maxCount = data.maxCount; roomIds = data.roomIds; roomId = data.roomId;
+        if (code === 'operator-network-witnesses-rejected') workstationIssues = data.issues;
+      } catch { /* Non-domain errors have no stable JSON contract. */ }
       if (response.status === 401) { logout(); message = '憑證無效或已更換，請重新登入。'; }
       if (response.status === 403) message = '目前身分沒有此操作權限。';
       if (response.status === 409) {
@@ -157,7 +159,8 @@ async function api(path, method = 'GET', body, requestId, admissionId, responseT
       if (layout) message = Number.isInteger(roomId) ? `房間 ${roomId} 的場地未通過檢查，五場都未建立。請修正並保存新版本。`
         : '場地配置未通過檢查，請修正並保存新版本後再開場。';
       if (code === 'enemy-capacity-exceeded' && Number.isInteger(maxCount)) message = `此場地最多可設定 ${maxCount} 名敵軍。請調低目標數量後再套用。`;
-      const error = new Error(message); error.status = response.status; error.layout = layout; error.code = code; error.roomId = roomId; throw error;
+      const error = new Error(message); error.status = response.status; error.layout = layout; error.code = code; error.roomId = roomId;
+      error.workstationIssues = workstationIssues; throw error;
     }
     if (responseType === 'blob') return content;
     return content ? JSON.parse(content) : null;

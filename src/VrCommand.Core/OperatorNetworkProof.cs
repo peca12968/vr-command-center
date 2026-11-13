@@ -11,6 +11,12 @@ public sealed record OperatorNetworkWitness(int Version, Guid Challenge, int Wor
     string Listener, int Port, long ObservedAtUnixSeconds, string Signature);
 public sealed record OperatorNetworkInventory(string MasterAddress, string[] RoomAddresses);
 public sealed record OperatorNetworkCheck(Guid Challenge, string Listener, int Port, string[] WorkstationAddresses);
+public sealed record OperatorNetworkIssue(int Workstation, string Reason);
+public sealed class OperatorNetworkWitnessException(OperatorNetworkIssue[] issues)
+    : ArgumentException("A workstation witness is invalid, expired, duplicated or differs from this venue and expected source.")
+{
+    public OperatorNetworkIssue[] Issues { get; } = issues;
+}
 
 // One verifier per running management service. Reports can be assembled without
 // storing any challenge, source address or validation result in the database.
@@ -45,19 +51,39 @@ public sealed class OperatorNetworkProof
             || inventory.RoomAddresses.Contains(listener, StringComparer.Ordinal) || addresses[0] != source)
             throw new ArgumentException("Require distinct private IPv4 workstations, five room sources separate from the management listener, and submission from the declared master address.");
 
-        var observed = new HashSet<int>();
+        if (witnesses.Any(witness => witness is null || witness.Workstation is < 0 or > SessionManager.RoomCount))
+            throw new ArgumentException("Provide one master and five room workstation addresses and witnesses.");
+        var groups = witnesses.ToLookup(witness => witness.Workstation);
         var latest = now.ToUnixTimeSeconds();
-        foreach (var witness in witnesses)
+        var issues = new List<OperatorNetworkIssue>();
+        for (var workstation = 0; workstation < addresses.Length; workstation++)
         {
-            if (witness is null || witness.Version != 1 || witness.Challenge != challenge
-                || witness.Workstation is < 0 or > SessionManager.RoomCount || !observed.Add(witness.Workstation)
-                || witness.ObservedAtUnixSeconds < latest - LifetimeSeconds || witness.ObservedAtUnixSeconds > latest
-                || witness.Listener != listener || witness.Port != peer.Port || witness.Source != addresses[witness.Workstation]
-                || witness.Signature is not { Length: 64 } || !witness.Signature.All(char.IsAsciiHexDigitLower)
-                || !CryptographicOperations.FixedTimeEquals(Sign(witness), Convert.FromHexString(witness.Signature)))
-                throw new ArgumentException("A workstation witness is invalid, expired, duplicated or differs from this venue and expected source.");
+            var entries = groups[workstation].ToArray();
+            var reason = entries.Length switch
+            {
+                0 => "missing-role",
+                1 => Rejection(entries[0], challenge, listener, peer.Port, addresses[workstation], latest),
+                _ => "duplicate-role"
+            };
+            if (reason is not null) issues.Add(new(workstation, reason));
         }
+        if (issues.Count != 0) throw new OperatorNetworkWitnessException([.. issues]);
         return new OperatorNetworkCheck(challenge, listener, peer.Port, addresses);
+    }
+
+    private string? Rejection(OperatorNetworkWitness witness, Guid challenge, string listener, int port, string source, long latest)
+    {
+        if (!IsPrivateAddress(witness.Source) || !IsPrivateAddress(witness.Listener) || witness.Port is < 1 or > 65535)
+            return "invalid-witness";
+        if (witness.Version != 1 || witness.Signature is not { Length: 64 }
+            || !witness.Signature.All(char.IsAsciiHexDigitLower)
+            || !CryptographicOperations.FixedTimeEquals(Sign(witness), Convert.FromHexString(witness.Signature)))
+            return "invalid-signature";
+        if (witness.Challenge != challenge) return "challenge-mismatch";
+        if (witness.ObservedAtUnixSeconds < latest - LifetimeSeconds) return "expired";
+        if (witness.ObservedAtUnixSeconds > latest) return "clock-ahead";
+        if (witness.Listener != listener || witness.Port != port) return "listener-mismatch";
+        return witness.Source == source ? null : "source-mismatch";
     }
 
     private byte[] Sign(OperatorNetworkWitness value) => HMACSHA256.HashData(key, Encoding.ASCII.GetBytes(
