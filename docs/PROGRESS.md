@@ -1,5 +1,12 @@
 # 開發進度
 
+## 2026-11-13 主控台核對 Windows 全館就緒檔
+
+- 管理台 0.31.176 可從「核對全館伺服器就緒」讀取 Windows 啟動器的原就緒檔。按下核對後，管理服務逐組比對原場次、遊戲來源、公告 IPv4、UDP 埠與近期快照。當遊戲綁定所有網卡，仍以原公告位址比對。面板也可讀取原未確認啟動結果。 [操作說明](WINDOWS_SERVER_PACKAGE.md#核對未確認的啟動報告) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.176.zip)
+- 解壓包 Chromium 匯入五房獨立與合併的原就緒檔，開場前分別對上五組及一組遊戲來源及端點。匯入前後的開場序號一致。537 項三包整合通過，兩種模式各 25 個同機 Windows 模擬玩家，核對 50 筆伺服器戰績回條、6 份 CSV、1,076 格回放及雙封存。成功場 C／F 共 255 個非資料庫檔案雜湊相符。 [三包檢查](../artifacts/server-package-checks/run-e9bd8ec29b0043178fc4d86b0b336497/checks.json)
+- 另通過 1,105 項核心、825 項 HTTP、15 項解壓版 Chromium 與 107 項管理包檢查。解壓核對 567 筆清單，193 個建置來源檔與提交 `6fc7f3a` 相符。首次瀏覽器專項缺少世界標頭及時鐘欄位，首次三包測試覆蓋開場斷言變數，均保留失敗紀錄並修正測試。Windows 包與原 Quest 0.50.7 APK 已通過離線版本及簽章核對。跨機 25 人、頭盔、MR 場地及廠商硬體仍待驗收。 [離線交付核對](../artifacts/console-windows-ready-review-venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43375240281)
+- 首次完整瀏覽器回歸因舊測試假設錄製只有兩頁而失敗。測試改沿原游標讀到尾頁並檢查原錄製只出現一次，重新通過 1,149 項。`6fc7f3a` 及測試提交 `f099530` 的 GitHub Actions 均因帳務或支出上限未啟動。 [本機驗證摘要](../artifacts/console-windows-ready-review-validation.json) · [測試提交的 GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43375722928)
+
 ## 2026-11-13 Windows 正式啟動重新核對五房席位
 
 - Windows 伺服器啟動器 1.21 的場館預覽帶入原場次房號與已登記席號。命令列產生清單及 UDP 預檢會核對完整席位，正式啟動再以原計畫向管理服務讀取一次。若預檢後名冊變更，需重新下載啟動計畫並核對預檢。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.7-1.21-win-x64.zip) · [操作說明](WINDOWS_SERVER_PACKAGE.md#從主控台下載場館計畫)
