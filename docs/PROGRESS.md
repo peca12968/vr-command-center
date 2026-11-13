@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 全館收尾個人 CSV 內容核對
+
+- 控制台 0.31.170 核對全館與單房席位明細下載的個人 CSV。檔名正確時仍會逐欄比對原場次、遊戲串流、管理與戰鬥封存序號、玩家及七項戰績。瀏覽器攔下三種內容錯置後仍可重試並取回原始檔。 [操作方式](REPORTS.md#從戰績開啟個人回放)
+- 通過 1,122 項完整 Chromium、131 項場館專項、107 項 Windows 管理包及 601 項三包整合檢查。獨立與合併各 25 個 Windows 同機模擬玩家，核對 50 份回條及 1,089 格封存回放。兩批的房間 5 逐席核對原下載與個人回放，合併場結束後也重新開啟較早的獨立場原席位。 [本機驗證摘要](../artifacts/venue-verified-debrief-seat-validation.json)
+- 功能來源 `483b0f8` 已推送。新版管理包與原 Windows 遊戲包、Quest 0.50.7 APK 通過離線交付一致性核對。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、Quest 3／VIVE XR、MR 場地及廠商硬體仍待實地驗收。 [Windows 管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.170-verified-debrief-seat-win-x64.zip) · [離線交付報告](../artifacts/venue-release-control-0.31.170-game-0.50.7.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43351826877)
+
 ## 2026-11-13 最終戰績 CSV 下載核對
 
 - 控制台 0.31.169 會在下載全場、分房或個人 CSV 前，核對原場次、兩個戰鬥與管理序號及每列成績。瀏覽器成功攔下錯場次、錯房、錯玩家及被改動的耗彈值，保留正確檔案的原始位元組。 [操作方式](REPORTS.md#場次與戰績同步)
