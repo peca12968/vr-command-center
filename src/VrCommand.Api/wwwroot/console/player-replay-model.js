@@ -33,7 +33,8 @@ export function readPlayerReplay(data) {
   for (const [index, packet] of packets.entries()) {
     const frame = packet?.frame;
     require(packet?.sequence === startFrame + index && integer(packet.elapsedMilliseconds, elapsed, 86400000)
-      && weather.includes(packet.weather) && bool(packet.lightning) && list(packet.events, 500)
+      && weather.includes(packet.weather) && bool(packet.lightning)
+      && (packet.suspended === undefined || bool(packet.suspended)) && list(packet.events, 500)
       && frame && integer(frame.tick, tick, header.environmentVersion === 1 ? 1728000 : Number.MAX_SAFE_INTEGER)
       && phase.includes(frame.phase) && bool(frame.night)
       && ['Clear', 'Fog', 'Storm'].includes(frame.visibility)
@@ -61,4 +62,19 @@ export function readPlayerReplay(data) {
     tick = frame.tick;
   }
   return data;
+}
+
+export function sourcePaused(packet) {
+  return packet?.suspended === true && packet.frame.phase === 'Paused';
+}
+
+export function sourceTransitions(packets) {
+  const rows = [];
+  for (const [index, packet] of packets.entries()) {
+    const previous = packets[index - 1];
+    if (sourcePaused(packet) && !sourcePaused(previous)) rows.push({ index, suspended: true });
+    if (previous?.suspended === true && packet.suspended !== true && packet.frame.phase === 'Running')
+      rows.push({ index, suspended: false });
+  }
+  return rows;
 }

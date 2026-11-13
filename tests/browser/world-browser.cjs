@@ -793,6 +793,36 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
         && await player.locator('#player-replay-play').innerText() === '播放' && requests.length === 0,
         'Player stops at the exact exported boundary and sends no API requests');
       await player.screenshot({ path: path.join(screenshots, 'player-replay-mobile.png'), fullPage: true });
+      const pausedReplay = structuredClone(exported);
+      pausedReplay.header.missionClockVersion = 1;
+      pausedReplay.header.missionDurationSeconds = 60;
+      const [normal, paused, recovered] = pausedReplay.packets;
+      normal.frame.phase = 'Running';
+      paused.frame.phase = 'Paused';
+      paused.frame.tick = normal.frame.tick;
+      paused.suspended = true;
+      recovered.frame.phase = 'Running';
+      recovered.suspended = false;
+      await input.setInputFiles({ name: 'source-pause.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(pausedReplay)) });
+      await note.filter({ hasText: `已載入 ${pausedReplay.packets.length} 格。` }).waitFor();
+      const clock = player.locator('#player-replay-clock'), time = player.locator('#player-replay-time');
+      const firstClock = await clock.innerText(), firstTime = await time.innerText();
+      const transition = player.locator('#player-replay-transition');
+      await transition.selectOption({ label: `第 ${paused.sequence} 格 · 遊戲來源暫停` });
+      check((await position.innerText()).includes('遊戲來源暫停') && firstClock === await clock.innerText()
+        && firstTime !== await time.innerText(), 'Player can jump to a source pause while clip time advances and mission activity stays frozen');
+      await transition.selectOption({ label: `第 ${recovered.sequence} 格 · 遊戲來源恢復` });
+      check((await position.innerText()) === `第 ${recovered.sequence} 格 · 執行中` && requests.length === 0,
+        'Player jumps directly to source recovery using only the local file');
+      const older = structuredClone(exported);
+      for (const packet of older.packets) delete packet.suspended;
+      delete older.header.missionClockVersion;
+      delete older.header.missionDurationSeconds;
+      await input.setInputFiles({ name: 'legacy.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(older)) });
+      await note.filter({ hasText: `已載入 ${older.packets.length} 格。` }).waitFor();
+      check(await player.locator('#player-replay-clock').isHidden()
+        && await player.locator('#player-replay-transition-field').isHidden(),
+        'Legacy player replay with no recorded clock or suspension still opens without empty controls');
       const damaged = { ...exported, packets: exported.packets.slice(1) };
       await input.setInputFiles({ name: 'damaged.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(damaged)) });
       await note.filter({ hasText: '無法辨識回放檔' }).waitFor();

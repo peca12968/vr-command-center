@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readPlayerReplay } from '../../src/VrCommand.Api/wwwroot/console/player-replay-model.js';
+import { readPlayerReplay, sourcePaused, sourceTransitions } from '../../src/VrCommand.Api/wwwroot/console/player-replay-model.js';
 
 const point = { x: 0, y: 0, z: 0 };
 const actor = '71100000-0000-0000-0000-000000000000';
@@ -21,6 +21,33 @@ function replay(version, rooms) {
 test('keeps original contiguous timing in both full and room player files', () => {
   for (const file of [replay(1, [1, 2, 3, 4, 5]), replay(2, [3])])
     assert.equal(readPlayerReplay(file), file);
+});
+
+test('finds saved source pauses and running recoveries without counting an operator pause', () => {
+  const packets = [
+    { frame: { phase: 'Paused' } },
+    { frame: { phase: 'Running' } },
+    { suspended: true, frame: { phase: 'Paused' } },
+    { suspended: true, frame: { phase: 'Paused' } },
+    { suspended: false, frame: { phase: 'Running' } },
+    { suspended: true, frame: { phase: 'Paused' } },
+    { suspended: false, frame: { phase: 'Ended' } }
+  ];
+  assert.deepEqual(sourceTransitions(packets), [
+    { index: 2, suspended: true }, { index: 4, suspended: false }, { index: 5, suspended: true }
+  ]);
+  assert.deepEqual(sourceTransitions(packets.slice(3, 5)), [{ index: 0, suspended: true }, { index: 1, suspended: false }]);
+  assert.equal(sourcePaused(packets[0]), false);
+});
+
+test('keeps the optional suspension flag in both replay formats and rejects invalid types', () => {
+  for (const file of [replay(1, [1, 2, 3, 4, 5]), replay(2, [3])]) {
+    file.packets[0].suspended = true;
+    file.packets[0].frame.phase = 'Paused';
+    assert.equal(readPlayerReplay(file), file);
+    file.packets[0].suspended = 'true';
+    assert.throws(() => readPlayerReplay(file), /無法辨識回放檔/);
+  }
 });
 
 test('rejects disagreement between scoped room, geometry or recorded actors', () => {

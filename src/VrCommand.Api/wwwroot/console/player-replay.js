@@ -1,4 +1,5 @@
-import { MAX_REPLAY_BYTES, readPlayerReplay } from './player-replay-model.js';
+import { MAX_REPLAY_BYTES, readPlayerReplay, sourcePaused, sourceTransitions } from './player-replay-model.js';
+import { recordedClock } from './mission-clock.js';
 
 const $ = id => document.getElementById('player-replay-' + id);
 const timeline = document.getElementById('replay-timeline');
@@ -29,11 +30,14 @@ function show(next, continuous = false) {
   timeline.value = index;
   $('back').disabled = index === 0;
   $('next').disabled = index === packets.length - 1;
-  $('frame').textContent = `第 ${packet.sequence} 格 · ${phaseNames[packet.frame.phase]}`;
+  $('frame').textContent = `第 ${packet.sequence} 格 · ${sourcePaused(packet) ? '遊戲來源暫停' : phaseNames[packet.frame.phase]}`;
+  const clock = recordedClock(replay.header, packet.frame.tick);
+  $('clock').textContent = clock;
+  $('clock').hidden = !clock;
   $('weather').textContent = [weatherNames[packet.weather], packet.frame.night ? '夜晚' : '白天',
     packet.lightning ? '雷電開啟' : '雷電關閉'].join(' · ');
   const first = packets[0].elapsedMilliseconds;
-  $('time').textContent = `${((packet.elapsedMilliseconds - first) / 1000).toFixed(2)} / ${((packets.at(-1).elapsedMilliseconds - first) / 1000).toFixed(2)} 秒`;
+  $('time').textContent = `片段 ${((packet.elapsedMilliseconds - first) / 1000).toFixed(2)} / ${((packets.at(-1).elapsedMilliseconds - first) / 1000).toFixed(2)} 秒`;
 }
 
 function openFrame(next) {
@@ -69,6 +73,10 @@ $('file').addEventListener('change', async () => {
     const source = candidate.header.origin === 'GameServer' ? '遊戲伺服器' : '模擬';
     const scope = candidate.roomId === undefined ? '' : ` · 僅房間 ${candidate.roomId}`;
     $('source').textContent = `${candidate.missionName} · ${source}${scope} · 原畫格 ${candidate.startFrame}–${candidate.endFrame}`;
+    const transitions = sourceTransitions(candidate.packets);
+    $('transition').replaceChildren(new Option('跳到畫格', ''), ...transitions.map(({ index, suspended }) =>
+      new Option(`第 ${candidate.packets[index].sequence} 格 · ${suspended ? '遊戲來源暫停' : '遊戲來源恢復'}`, index)));
+    $('transition-field').hidden = transitions.length === 0;
     timeline.max = candidate.packets.length - 1;
     $('view').hidden = false;
     scene.resize();
@@ -106,5 +114,9 @@ $('play').addEventListener('click', () => {
 $('back').addEventListener('click', () => openFrame(index - 1));
 $('next').addEventListener('click', () => openFrame(index + 1));
 timeline.addEventListener('input', () => openFrame(Number(timeline.value)));
+$('transition').addEventListener('change', event => {
+  if (event.target.value !== '') openFrame(Number(event.target.value));
+  event.target.value = '';
+});
 $('room').addEventListener('change', () => scene?.preset('top', $('room').value));
 document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
