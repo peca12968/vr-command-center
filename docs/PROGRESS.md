@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 六批共用 Windows 連線量測門檻
+
+- `stages.json` 可一次指定六批共用的最低回覆數與 p95 上限。各批在每項採用總清單與批次清單較嚴的值，收件及正式摘要都會顯示採用的設定。 [驗收方式](EXTERNAL_CLIENTS.md#六批共用-windows-連線量測門檻)
+- 通過 117 項封存與 11 項 LAN 預檢測試。六批共 80 席合成量測通過共用門檻，另驗證較嚴的回覆數與 p95 上限各自拒絕相應批次。既有 Windows 同機六批的 80 份戰績回條重驗後，正式摘要逐位元一致。只在總清單副本加門檻時，正確列出六批各自缺少的 5、5、10、10、25、25 席量測。 [本機驗證摘要](../artifacts/staged-venue-shared-windows-link-criteria-validation.json)
+- 功能來源 `84e5343` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、Quest 3／VIVE XR、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43354239134)
+
 ## 2026-11-13 六批 Windows 連線量測明細
 
 - 批次已設定 `windowsLinkCriteria` 時，收件總表會在 `issues[].windowsLinkMetrics` 提供缺少量測的席位，以及各席回覆數、p95 往返時間和未通過的門檻。散檔、逐席 ZIP 與收件資料夾仍由同一原驗收流程核對，未達門檻時正式驗收仍拒絕。 [收件方式](EXTERNAL_CLIENTS.md#一次查看六批待補件)
