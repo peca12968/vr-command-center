@@ -171,6 +171,81 @@ class NetworkPlanPreparationTests(unittest.TestCase):
                 self.assertIn('shared source: room 1 seat 1, room 5 seat 1', checked.stderr)
                 self.assertFalse(readiness.exists())
 
+    def test_distinct_requirement_survives_retry_and_batch_recheck(self):
+        launch_value, preview_value = guarded_documents('Linked', [7777], '192.168.5.10')
+        launch = self.store('launch.json', launch_value)
+        preview = self.store('preview.json', preview_value)
+        sources = [{'roomId': room, 'seat': 1, 'address': f'192.168.5.{20 + room}'} for room in range(1, 6)]
+        inventory = self.store('seats.json', {'version': 1, 'seats': sources})
+        network = self.root / 'network.json'
+        generated = prepare_network(launch, preview, inventory, network, '--players-per-room', 1,
+                                    '--require-distinct-remote-roster')
+        self.assertEqual(0, generated.returncode, generated.stderr)
+        common = [sys.executable, str(ROOT / 'scripts/check-venue-udp-preflight.py'), '--network-plan', str(network),
+                  '--launch-plan', str(launch), '--launcher-preview', str(preview)]
+
+        def preflight(output, *extra):
+            return subprocess.run([*common, '--output', str(output), *map(str, extra)],
+                                  capture_output=True, text=True, timeout=15)
+
+        partial, retry = self.root / 'partial.json', self.root / 'retry.json'
+        checked = preflight(partial, '--require-distinct-remote-roster')
+        self.assertEqual(1, checked.returncode, checked.stderr)
+        first = json.loads(partial.read_bytes())
+        self.assertIs(first['requireDistinctRemoteRoster'], True)
+        self.assertEqual(5, first['expectedSources'])
+        checked = preflight(retry, '--retry-report', partial)
+        self.assertEqual(1, checked.returncode, checked.stderr)
+        self.assertIs(json.loads(retry.read_bytes())['requireDistinctRemoteRoster'], True)
+        bad = self.store('bad-partial.json', dict(first, requireDistinctRemoteRoster='true'))
+        refused = self.root / 'refused.json'
+        checked = preflight(refused, '--retry-report', bad)
+        self.assertIn('Invalid distinct remote roster option', checked.stderr)
+        self.assertFalse(refused.exists())
+
+        # A batch with unavailable original pairs cannot complete, but its requirement still applies.
+        first['complete'] = first['groups'][0]['complete'] = True
+        first['groups'][0]['udpSourcePreflights'] = [{'listener': 'missing-listener', 'probe': 'missing-probe'}]
+        batch = self.store('batch.json', first)
+        aggregated = self.root / 'aggregated.json'
+        checked = preflight(aggregated, '--batch', batch)
+        self.assertEqual(1, checked.returncode, checked.stderr)
+        result = json.loads(aggregated.read_bytes())
+        self.assertIs(result['requireDistinctRemoteRoster'], True)
+        self.assertEqual(1, result['unreadablePairs'])
+        network.write_bytes(network.read_bytes() + b'\n')
+        checked = preflight(refused, '--batch', batch)
+        self.assertIn('Reuse the original venue network plan', checked.stderr)
+        self.assertFalse(refused.exists())
+
+    @unittest.skipUnless(os.name == 'nt', 'Verified launch CLI requires Windows')
+    def test_launch_enforces_original_distinct_policy_without_repeating_flag(self):
+        launch_value, preview_value = guarded_documents('Linked', [7777], '192.168.5.10')
+        launch = self.store('launch.json', launch_value)
+        preview = self.store('preview.json', preview_value)
+        network = self.store('network.json', {'version': 1, 'mode': 'Linked',
+            'endpoints': [{'roomIds': list(range(1, 6)), 'address': '192.168.5.10', 'port': 7777}],
+            'sources': [{'roomId': room, 'seat': 1, 'address': '192.168.5.21'} for room in range(1, 6)]})
+        ready = self.root / 'readiness.json'
+        command = [sys.executable, str(ROOT / 'scripts/check-venue-udp-preflight.py'), '--network-plan', str(network),
+                   '--launch-plan', str(launch), '--launcher-preview', str(preview), '--output', str(ready)]
+        incomplete = subprocess.run(command, capture_output=True, text=True, timeout=15)
+        self.assertEqual(1, incomplete.returncode, incomplete.stderr)
+        report = json.loads(ready.read_bytes())
+        report.update(complete=True, requireDistinctRemoteRoster=True)
+        claimed = self.store('claimed.json', report)
+        launcher = self.root / 'Launch-Server.exe'
+        launcher.touch()
+        work, launched, terminal = (self.root / name for name in ('work', 'ready.json', 'terminal.json'))
+        started = subprocess.run([sys.executable, str(ROOT / 'scripts/start-verified-venue.py'), '--launcher', str(launcher),
+                                  '--network-plan', str(network), '--launch-plan', str(launch), '--readiness', str(claimed),
+                                  '--seconds', '60', '--work', str(work), '--ready-report', str(launched),
+                                  '--report', str(terminal)], capture_output=True, text=True, timeout=15)
+        self.assertEqual(1, started.returncode)
+        self.assertIn('shared source: room 1 seat 1, room 2 seat 1', started.stderr)
+        self.assertEqual('', started.stdout)
+        self.assertFalse(any(path.exists() for path in (work, launched, terminal)))
+
 
 def packet(key, kind, nonce):
     prefix = f'VRLAN1{kind}:{nonce}'.encode('ascii')

@@ -1620,6 +1620,17 @@ def read_udp_launch_binding(batch, directory, mode, expected_sessions=None):
 
 def read_udp_preflight_batch(path, mode, expected_rooms, *, expected_sessions=None, venue_plan_hash=None):
     batch = read_json(content(path))
+    return udp_preflight_batch(batch, path, mode, expected_rooms, expected_sessions=expected_sessions, venue_plan_hash=venue_plan_hash)
+
+
+def udp_preflight_distinct_roster(report):
+    require(type(report) is dict, 'Expected a UDP report object')
+    distinct = report.get('requireDistinctRemoteRoster', False)
+    require(type(distinct) is bool, 'Invalid distinct remote roster option in UDP report')
+    return distinct
+
+
+def udp_preflight_batch(batch, path, mode, expected_rooms, *, expected_sessions=None, venue_plan_hash=None):
     require(integer(batch['version'], 1, 1) and batch.get('scope') in ('quest-udp-preflight-only', 'venue-udp-preflight-only')
             and batch.get('mode') == mode and batch.get('complete') is True,
             'Provide a complete UDP preflight batch for the original mode')
@@ -2121,8 +2132,8 @@ def read_terminal_venue_launcher(path, mode, expected, *, include_instance=False
 
 def read_verified_venue_start(path, readiness_path, terminal, results, mode):
     receipt, raw = read_quest_document(path)
-    require(set(receipt) == {'version', 'scope', 'mode', 'checkedAtUtc', 'readinessSha256',
-                            'terminalSha256', 'readyReport', 'readySha256'}
+    fields = {'version', 'scope', 'mode', 'checkedAtUtc', 'readinessSha256', 'terminalSha256', 'readyReport', 'readySha256'}
+    require(set(receipt) in (fields, fields | {'requireDistinctRemoteRoster'})
             and integer(receipt['version'], 1, 1) == 1 and receipt['scope'] == 'verified-windows-venue-start'
             and receipt['mode'] == mode and receipt['terminalSha256'] == terminal['sha256'],
             'Verified start receipt differs from the original terminal venue report')
@@ -2135,6 +2146,10 @@ def read_verified_venue_start(path, readiness_path, terminal, results, mode):
             and preflight.get('complete') is True and preflight.get('mode') == mode
             and type(preflight.get('launchBinding')) is dict,
             'Verified start requires a complete UDP readiness report bound to Windows')
+    distinct = udp_preflight_distinct_roster(receipt)
+    required_distinct = udp_preflight_distinct_roster(preflight)
+    require(distinct or not required_distinct,
+            'Verified start receipt omits the original distinct remote roster requirement')
     require(type(receipt['readyReport']) is str and receipt['readyReport'], 'Verified start receipt lacks the original ready report')
     ready_path = resolve_evidence_reference(path.parent, receipt['readyReport'], 'windowsReadyReport')
     ready, ready_raw = read_quest_document(ready_path)
@@ -2161,7 +2176,8 @@ def read_verified_venue_start(path, readiness_path, terminal, results, mode):
                 and checked <= datetime.fromisoformat(result['udpBinding']['observedAtUtc']),
                 'Verified start ready report differs from the original sealed game process or bind time')
         seen.add(sid)
-    return {'sha256': hashlib.sha256(raw).hexdigest(), 'launchId': terminal['launchId'], 'sessionsVerified': len(seen)}
+    return {'sha256': hashlib.sha256(raw).hexdigest(), 'launchId': terminal['launchId'], 'sessionsVerified': len(seen),
+            **({'requireDistinctRemoteRoster': True} if distinct else {})}
 
 
 def venue_closure_sessions(mode, rows):

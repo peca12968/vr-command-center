@@ -310,11 +310,13 @@ python .\scripts\check-venue-udp-preflight.py `
 
 重試會重新核對雙端原檔、來源及既有 30 分鐘期限。原檔有變、無法讀取或逾時時，該來源須補測。`retainedSources` 是這輪仍有效的來源數。完整報告可直接交給戰後封存驗收。 [封存方式](#用原網路清單核對封存席位)
 
+逐席直連預檢會在報告保存 `requireDistinctRemoteRoster`。補測、併入完整報告及驗證啟動都會沿用此條件，並重新核對原網路清單。啟動時可省略已記錄在報告的旗標。
+
 #### 核對 Windows 五房啟動回條
 
 使用 `start-verified-venue.py --start-receipt` 完成封存後，產生全館清單時加上 `--verified-start-receipt .\venue-start.json`。同時保留原 `--launcher-report` 與唯一一份 `--udp-preflight-batch`。若已有清單，可填入 `"verifiedVenueStart": "venue-start.json"`，並沿用原 `venueLauncherReport` 和 `udpPreflightBatch`。回條引用的就緒檔路徑以回條所在目錄為準。
 
-封存驗收核對三份原報告的雜湊，以及就緒與結束報告中的房間、遊戲程序、錄製來源及 UDP 綁定。完整驗收仍會重驗原雙端資料及玩家 UDP 來源。成功摘要中的 `verifiedVenueStart` 列出回條雜湊、原啟動批次 ID 及通過的場次數。 [啟動方式](WINDOWS_SERVER_PACKAGE.md#以-udp-預檢報告啟動五房)
+封存驗收核對三份原報告的雜湊，以及就緒與結束報告中的房間、遊戲程序、錄製來源及 UDP 綁定。完整驗收仍會重驗原雙端資料及玩家 UDP 來源。成功摘要中的 `verifiedVenueStart` 列出回條雜湊、原啟動批次 ID、通過的場次數及有啟用時的逐席直連條件。 [啟動方式](WINDOWS_SERVER_PACKAGE.md#以-udp-預檢報告啟動五房)
 
 #### 從原啟動預覽產生網路清單
 

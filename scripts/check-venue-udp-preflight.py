@@ -80,22 +80,29 @@ def path_reference(path, directory):
         return str(path)
 
 
-def load_pairs(pairs_path, batch_paths, mode, rooms, binding):
+def load_pairs(pairs_path, batch_paths, mode, rooms, binding, plan_hash):
     pairs = []
+    distinct = False
     if pairs_path:
         manifest = field.read_quest_plan_file(pairs_path)
         field.require(set(manifest) == {'version', 'pairs'} and type(manifest['pairs']) is list,
                       'Expected a version 1 list of report pairs')
         pairs.extend((row, pairs_path.parent, None) for row in manifest['pairs'])
     for path in batch_paths:
-        sources, launch = field.read_udp_preflight_batch(path, mode, rooms)
+        report = field.read_json(field.content(path))
+        batch_distinct = field.udp_preflight_distinct_roster(report)
+        if batch_distinct:
+            field.require(report.get('networkPlanSha256') == plan_hash,
+                          'Reuse the original venue network plan when including a distinct-roster UDP report')
+        distinct |= batch_distinct
+        sources, launch = field.udp_preflight_batch(report, path, mode, rooms)
         if launch is not None:
             field.require(binding is not None and all(binding[key] == launch[0][key] for key in ('planSha256', 'previewSha256')),
                           'Reuse the original Windows plan and preview when including a bound UDP report')
         for group, rows in sources.items():
             pairs.extend((row, base, group) for row, base in rows)
     field.require(len(pairs) <= 50, 'Too many UDP preflight reports')
-    return pairs
+    return pairs, distinct
 
 
 def read_pair(pair, base):
@@ -126,7 +133,7 @@ def pair_hashes(paths):
     return hashes
 
 
-def read_retry(path, mode, plan_hash, expected, launch_check, binding, checked_at):
+def read_retry(path, mode, plan_hash):
     with path.open('rb') as stream:
         raw = stream.read(128 * 1024 + 1)
     field.require(len(raw) <= 128 * 1024, 'Retry report exceeds its size limit')
@@ -135,6 +142,10 @@ def read_retry(path, mode, plan_hash, expected, launch_check, binding, checked_a
                   and report.get('scope') == 'venue-udp-preflight-only' and report.get('complete') is False
                   and report.get('mode') == mode and report.get('networkPlanSha256') == plan_hash,
                   'Use an incomplete report for the same original venue network plan')
+    return report, hashlib.sha256(raw).hexdigest()
+
+
+def retained_sources(path, report, mode, expected, launch_check, binding, checked_at):
     prior = field.read_udp_launch_binding(report, path.parent, mode)
     field.require(report.get('launcherPreview') == launch_check and (prior is None) == (binding is None)
                   and (prior is None or all(prior[0][key] == binding[key] for key in ('planSha256', 'previewSha256'))),
@@ -163,7 +174,7 @@ def read_retry(path, mode, plan_hash, expected, launch_check, binding, checked_a
         except (OSError, ValueError, KeyError, TypeError, RecursionError):
             continue
         valid[address] = paths, summary, hashes
-    return valid, seen - valid.keys(), hashlib.sha256(raw).hexdigest()
+    return valid, seen - valid.keys()
 
 
 def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, launch_plan=None, retry_report=None, inbox=None,
@@ -172,8 +183,6 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
     mode, endpoints, sources = field.parse_quest_network_plan(document, allow_shared_sources=True)
     plan_hash = hashlib.sha256(raw).hexdigest()
     field.require({room for room, _ in sources} == set(field.QUEST_ROOMS), 'Plan a source for every room')
-    if require_distinct_remote_roster:
-        field.require_distinct_remote_sources(sources, endpoints.values())
     field.require(launch_plan is None or launcher_preview is not None, 'A launch plan requires its original launcher preview')
     preview = field.read_udp_launcher_document(launcher_preview, preview=True) if launcher_preview else None
     launch_check = field.check_udp_launcher_endpoints(preview, mode, endpoints) if preview else None
@@ -194,9 +203,19 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
 
     checked_at = datetime.now(timezone.utc).isoformat()
     launch_matches = (launch_check is None or launch_check['complete']) and (binding is None or binding['complete'])
+    prior = None
     if retry_report is not None:
         field.require(launch_matches, 'Retry requires the original matching Windows plan and preview')
-        retained, expired, prior_hash = read_retry(retry_report, mode, plan_hash, expected, launch_check, binding, checked_at)
+        prior, prior_hash = read_retry(retry_report, mode, plan_hash)
+        require_distinct_remote_roster |= field.udp_preflight_distinct_roster(prior)
+    if require_distinct_remote_roster:
+        field.require_distinct_remote_sources(sources, endpoints.values())
+    pairs, batch_distinct = load_pairs(pairs_path, batch_paths, mode, [list(group) for group in rooms], binding, plan_hash)
+    if batch_distinct and not require_distinct_remote_roster:
+        field.require_distinct_remote_sources(sources, endpoints.values())
+        require_distinct_remote_roster = True
+    if prior is not None:
+        retained, expired = retained_sources(retry_report, prior, mode, expected, launch_check, binding, checked_at)
     else:
         retained, expired, prior_hash = {}, set(), None
     observed = defaultdict(list)
@@ -205,7 +224,6 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
         observed[address].append(paths)
         path_counts.update(paths)
     unmatched = unreadable = 0
-    pairs = load_pairs(pairs_path, batch_paths, mode, [list(group) for group in rooms], binding)
     inbox_summary = None
     if inbox is not None:
         inbox_pairs, inbox_summary = load_inbox(inbox)
@@ -271,6 +289,7 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
             'checkedAtUtc': checked_at, 'expectedSources': len(expected),
             'verifiedSources': sum(row['status'] == 'verified' for row in results.values()),
             'unmatchedPairs': unmatched, 'unreadablePairs': unreadable, 'groups': groups,
+            **({'requireDistinctRemoteRoster': True} if require_distinct_remote_roster else {}),
             **({'inbox': inbox_summary} if inbox_summary is not None else {}),
             **({'retrySources': retry_sources} if not complete and launch_matches else {}),
             **({'retryReportSha256': prior_hash, 'retainedSources': sum(results[address]['status'] == 'verified' for address in retained)}
@@ -307,6 +326,8 @@ def main():
     except (OSError, ValueError, KeyError, TypeError, RecursionError):
         parser.exit(1, 'UDP venue preflight could not read its inputs or save the report. Check the plan, inbox, launcher preview and output path.\n')
     summary = {key: result[key] for key in ('complete', 'expectedSources', 'verifiedSources', 'unmatchedPairs', 'unreadablePairs')}
+    if 'requireDistinctRemoteRoster' in result:
+        summary['requireDistinctRemoteRoster'] = result['requireDistinctRemoteRoster']
     if 'launcherPreview' in result:
         summary['launcherPreviewMatches'] = result['launcherPreview']['complete']
     if 'launchBinding' in result:

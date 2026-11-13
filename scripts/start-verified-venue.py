@@ -56,6 +56,7 @@ def launch(args):
     report = field.read_json(original.decode('utf-8-sig'))
     field.require(type(report) is dict and report.get('scope') == 'venue-udp-preflight-only'
                   and report.get('complete') is True, 'Provide a complete venue UDP readiness report')
+    distinct = field.udp_preflight_distinct_roster(report) or args.require_distinct_remote_roster
     proof = field.read_udp_launch_binding(report, readiness.parent, report.get('mode'))
     field.require(proof is not None, 'Provide a readiness report bound to the original Windows plan and preview')
     binding, _ = proof
@@ -81,7 +82,7 @@ def launch(args):
         snapshot = Path(directory) / 'venue-plan.json'
         snapshot.write_bytes(raw_plan)
         checked = preflight.check_venue(args.network_plan, None, [readiness], readiness, preview, snapshot,
-                                        require_distinct_remote_roster=args.require_distinct_remote_roster)
+                                        require_distinct_remote_roster=distinct)
         with readiness.open('rb') as stream:
             field.require(checked['networkPlanSha256'] == report.get('networkPlanSha256')
                           and field.limited_read(stream) == original
@@ -90,7 +91,8 @@ def launch(args):
         field.require(checked['complete'], 'UDP readiness is no longer complete or within its original time window')
         print(json.dumps({'status': 'udp-preflight-verified', 'mode': checked['mode'],
                           'verifiedSources': checked['verifiedSources'], 'launchPlanSha256': binding['planSha256'],
-                          'networkPlanSha256': checked['networkPlanSha256']}), flush=True)
+                          'networkPlanSha256': checked['networkPlanSha256'],
+                          **({'requireDistinctRemoteRoster': True} if distinct else {})}), flush=True)
         command = [str(launcher), '--venue-run', str(snapshot), '--work', str(args.work.resolve()),
                    '--seconds', str(args.seconds), '--ready-report', str(ready_path), '--report', str(result_path)]
         if args.peer_diagnostics:
@@ -119,7 +121,8 @@ def write_start_receipt(path, ready_path, result_path, readiness, original, chec
     receipt = {'version': 1, 'scope': 'verified-windows-venue-start', 'mode': checked['mode'],
                'checkedAtUtc': checked['checkedAtUtc'], 'readinessSha256': hashlib.sha256(original).hexdigest(),
                'terminalSha256': hashlib.sha256(result_raw).hexdigest(),
-               'readyReport': preflight.path_reference(ready_path, path.parent), 'readySha256': hashlib.sha256(ready_raw).hexdigest()}
+               'readyReport': preflight.path_reference(ready_path, path.parent), 'readySha256': hashlib.sha256(ready_raw).hexdigest(),
+               **({'requireDistinctRemoteRoster': True} if checked.get('requireDistinctRemoteRoster') else {})}
     with readiness.open('rb') as stream:
         field.require(ready['status'] == 'venue-ready' and ready['topology'] == terminal['topology'] == checked['mode']
                       and ready['instanceId'] == terminal['instanceId'] and field.limited_read(stream) == original,
