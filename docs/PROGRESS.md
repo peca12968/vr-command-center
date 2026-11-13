@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 五房獨立模式管理延遲驗收
+
+- Windows 0.50.7 同機開啟五個獨立房間及 25 個模擬玩家端。第 1 房的管理 GET 暫留後，遊戲時鐘停在 tick 133，隨後沿用原管理序號 9 恢復。其他四房同期各前進 11、11、10、7 tick，且原席位的姿態持續更新。五場各在 tick 1200 自動結束，核對 25 份原入場戰績確認及 2,980 格封存回放。 [重跑方式](CLOCK_RECOVERY.md) · [本機驗證摘要](../artifacts/native-five-room-management-isolation-validation.json)
+- 首輪仍保留為失敗。當時檢查器將畫格的姿態有效狀態當成 UDP 連線狀態。新版以擷取時間比對精確畫格，並用原生客戶端日誌與原入場戰績回條驗證連線。第 1 房五位玩家的姿態在恢復後重新更新。另通過 72 項本機測試及原單房 9 項回歸、699 格回放。三輪 C／F 的 83 個關閉後快照檔逐檔雜湊相符。
+- 功能來源 `773cbdf` 已推送。GitHub Actions 因帳務或支出上限未啟動。Windows 桌面自動化重設後仍在初始化時回報找不到路徑（OS error 3），本次未操作啟動器。跨機、頭盔、MR、廠商硬體及舊 25 席偶發暫停原因仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43365822033)
+
 ## 2026-11-13 管理更新延遲與暫停原因驗收
 
 - Windows 原生測試新增 `--delay-management`。單次管理 GET 等待時，原計時器在 1.502 秒觸發 `ManagementWatchdog`。HTTP 503 對照則記下 `ManagementRefresh`。兩場都沿用管理序號 5 恢復，確認遊戲時鐘到期、完整封存及原入場戰績。 [操作方式](CLOCK_RECOVERY.md)
