@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 全館戰績 ZIP 包含分房與全館合計
+
+- 管理包 0.31.187 的「下載本批戰績 ZIP」新增 `scores.csv`，與獨立下載的分房合計逐位元相同。清單以 `scoresFile` 標示檔名。API 加 `includeScores=true` 可取得新版內容，省略參數沿用既有格式。開發版與解壓版各通過 20 項戰績瀏覽器檢查，另通過 133 項全館流程。首輪瀏覽器驗證取到空的回應正文，改以獨立 API 讀取比對下載檔後通過。 [操作方式](REPORTS.md#下載全館結束批次) · [驗證摘要](../artifacts/venue-score-zip-187-validation.json)
+- 434 項 Windows 三包檢查通過。五房獨立與合併各 25 位同機模擬玩家，共核對 50 份戰績回條、1,350 格回放及雙封存。兩種 ZIP 均保留原逐房 CSV，並逐位元核對合計檔。房間重用後可從瀏覽器下載原獨立批次的同一份 ZIP。程序清理後 C／F 215 個非資料庫檔案雜湊相符。 [本機檢查](../artifacts/server-package-checks/run-036cd6df0d3c4863ba6d8ae288fef060/checks.json)
+- 通過 1,109 項核心、825 項 HTTP 及 107 項管理包檢查。解壓核對 567 筆清單及 `2a3925f` 的 193 個建置來源，29 檔按換行正規化比對。既有 Windows 與 Quest APK 通過相容性與簽章核對。功能和瀏覽器驗證提交已推送，兩次 GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商硬體待驗。 [管理包](../artifacts/VRCommand-ControlServer-0.31.187.zip) · [功能 CI](https://github.com/peca12968/vr-command-center/actions/runs/43400049492) · [測試 CI](https://github.com/peca12968/vr-command-center/actions/runs/43400327741)
+
 ## 2026-11-13 UDP 離線重驗指出缺件端別
 
 - `start-verified-venue.py --verify-only` 可從可讀的一端對照原計畫，在待補席位標示 `missingRole` 為 `listener` 或 `probe`。雙端都無法確認時，仍列待補席位及配對數量。合併模式共用來源時會列出該來源涵蓋的全部席位。 [操作方式](WINDOWS_SERVER_PACKAGE.md#以-udp-預檢報告啟動五房)

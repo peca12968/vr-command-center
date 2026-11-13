@@ -70,6 +70,8 @@ Windows 管理包 0.31.37 起，主控可在「最近一次全館收尾」按「
 
 獨立場次每房一份 CSV。五房合併場次包含全場與五份分房 CSV。每份 CSV 與原端點逐一下載的內容相同。ZIP 另含 `manifest.json`，記錄批次 ID、原場次 ID、房號、結束命令序號、最終統計序號與 CSV 檔名。世界回放有獨立封存流程。
 
+管理包 0.31.187 的「下載本批戰績 ZIP」也包含 `scores.csv`，列出各房與本批合計。`manifest.json` 以 `scoresFile` 指向此檔。若從 API 取得同一份 ZIP，請加上 `?includeScores=true`。省略此參數時，API 沿用既有 ZIP 格式。
+
 `GET /api/venue/closure/{batchId}/reports.zip` 限主控，回傳 `vr-command-venue-reports-v1-{batchId}.zip` 與 `Cache-Control: no-store`。若任一場的戰鬥報表尚未完成，回傳 `409`、`venue-reports-not-ready` 與待封存房號。即使房間重用或已有新批次，原批次網址仍指向原場次和報表。
 
 ### 在全館收尾比較分房戰績
