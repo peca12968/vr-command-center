@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 逐席直連條件沿用至五房啟動
+
+- UDP 預檢報告會保留逐席直連條件。補測、合併報告及驗證啟動會重新套用，啟動時可省略已保存的旗標。正式啟動回條會記下此條件，封存驗收會拒絕遺漏條件的回條。 [操作說明](EXTERNAL_CLIENTS.md#補測未完成的全館-udp-預檢)
+- 獨立與合併各用 25 對受控 UDP 報告測試補測與合併。兩份原同機 25 席清單即使省略旗標，也在啟動前遭拒。沿用原設定重驗六批已封存資料，80 份戰績確認與既有輸出逐位元相符。另通過 14 項 LAN 與 12 項 Quest UDP 本機測試。 [本機驗證摘要](../artifacts/distinct-roster-handoff-validation.json)
+- 功能來源 `e0dbdfd` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 與廠商硬體仍待現場驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43370752384)
+
 ## 2026-11-13 五房逐席直連的開場前檢查
 
 - 場館可在產生網路清單、UDP 預檢及驗證啟動時選用 `--require-distinct-remote-roster`。工具會指出共用 IPv4 或與伺服器位址衝突的房號、席號。封存驗收也會核對原清單與完整伺服器位址表。 [操作說明](EXTERNAL_CLIENTS.md#從原啟動預覽產生網路清單)
