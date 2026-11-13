@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 新版暫停診斷的 25 席丟包複驗
+
+- 用新增暫停標記的 Windows 0.50.7 重跑雙向每 20 個 UDP 封包丟棄 1 個的測試。合併與獨立各 25 個同機模擬玩家，通過 24 項，核對 4,140 格封存回放、6 份 CSV 與 50 份戰績確認。六場均未出現非預期暫停。先前偶發暫停的原因仍待查。 [驗證摘要](../artifacts/authority-diagnostics-25-seat-validation.json)
+- 測試工具新增逐場暫停診斷摘要，通過五席實際程序收尾及原 503 測試日誌讀回。兩輪 C／F 共 253 份封存快照檔雜湊相同。另通過 32 項動態驗證與 17 項 UDP 轉送測試。 [操作方式](DESKTOP_EXERCISE.md#五房-udp-丟包驗證)
+- 功能來源 `f1796ca` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商硬體仍待現場驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43363659328)
+
 ## 2026-11-13 遊戲伺服器暫停與恢復診斷
 
 - 遊戲伺服器日誌可區分管理更新失敗、管理更新逾時及封存錯誤，並保存恢復序號。Windows 受控 503 複驗通過 9 項。原管理序號 5 暫停後恢復，另在世界發布中斷後核對 772 格封存回放、到期時鐘及原入場的戰績回條。上一輪 25 席合併場的暫停原因仍待查。 [操作方式](CLOCK_RECOVERY.md) · [驗證摘要](../artifacts/management-suspension-diagnostics-validation.json)
