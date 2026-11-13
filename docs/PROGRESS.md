@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 六批 Windows 啟動回條驗收
+
+- `stages.json` 可啟用 `requireVerifiedVenueStart`，逐批核對獨立與合併模式的 5、10、25 人啟動回條。摘要保留各批的啟動 ID，並拒絕重複 ID、缺件或其他批次的回條。 [操作方式](EXTERNAL_CLIENTS.md#六批使用各自的-windows-啟動回條)
+- 用同一組 Windows 套件依序完成六批同機模擬，通過 1,343 項套件檢查及 113 項封存測試。總清單核對 18 場伺服器封存、80 份戰績回條及 3,057 格回放，六批最短的同時在線區間為 8.562 秒。第六批移除回條或改用第一批回條均遭拒。原檔雜湊一致，三輪收尾皆無遺留程序。 [本機驗證摘要](../artifacts/staged-venue-start-receipts-validation.json)
+- 功能來源 `9b687cf` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43338224403)
+
 ## 2026-11-13 Windows 五房啟動回條與封存核對
 
 - `start-verified-venue.py --start-receipt` 在正常封存並停止後保存當次預檢、就緒檔與結束檔的雜湊。驗收工具核對相同房間、錄製來源、遊戲程序與 UDP 綁定。可用 `--verified-start-receipt` 將原回條帶入驗收清單。 [操作方式](EXTERNAL_CLIENTS.md#核對-windows-五房啟動回條)
