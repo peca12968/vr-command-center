@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 從 Windows 封存結果開啟原房間回放
+
+- 管理台 0.31.181 在管理實例和雙封存相符後，提供逐房回放捷徑。觀戰頁重新比對原場次、來源、房間與封存尾端。瀏覽器專項覆蓋房間已重用及錄製尾端變動，來源與解壓包各通過 29 項。首次專項等待了錯誤的提示欄位，修正測試選擇器後通過。 [操作說明](WINDOWS_SERVER_PACKAGE.md#核對未確認的啟動報告) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.181.zip)
+- 三包整合通過 591 項。以兩份原生結束報告在解壓版各開啟五房，獨立場對上五份原錄製，合併場對上同一錄製內五個房間。兩種模式各 25 位同機模擬玩家，共核對 50 份戰績回條、6 份 CSV 及 1,104 格回放。清理後 C／F 259 個非資料庫檔案雜湊相符。 [本機驗證](../artifacts/console-venue-terminal-replay-validation.json)
+- 另通過 107 項管理包及 1,164 項完整瀏覽器檢查。解壓核對 567 筆清單與提交 `5250e6f` 的 193 個建置來源，其中 29 檔以換行正規化比對。Windows 套件與既有 Quest APK 通過離線相容性核對。GitHub Actions 因帳務或支出上限未啟動。完整桌面操作、跨機 25 人、頭盔、MR 場地與廠商硬體仍待驗。 [離線核對](../artifacts/console-venue-terminal-replay-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43385591290)
+
 ## 2026-11-13 管理台核對 Windows 全館結束報告
 
 - 管理台 0.31.180 的「核對全館啟動與封存」接受第四版計畫正常結束的 `venue-sealed-stopped` JSON。逐組核對原場次、批次、來源及戰鬥與回放封存尾端。測試確認尚未雙封存、任一序號不同或來源類型不同時，畫面不會顯示相符。 [操作說明](WINDOWS_SERVER_PACKAGE.md#核對未確認的啟動報告) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.180.zip)
