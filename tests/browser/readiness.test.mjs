@@ -40,6 +40,17 @@ test('A response ages from request start, including download time and silent int
   for (const elapsed of [1490.01, 1501, Infinity, NaN, -1]) assert.equal(readinessView(report, session, elapsed).rows[0].ready, false);
   assert.equal(readinessView({ ...report, sourceAgeMilliseconds: null }, session, 0).rows[0].ready, false);
 });
+test('Selected roster room counts only its registered admissions and preserves the freshness boundary', () => {
+  const other = { ...player, id: 'other', roomId: 5 };
+  const current = { ...session, players: [player, other] };
+  assert.match(readinessView(report, current, 0).text, /1 \/ 2 姿態有效/);
+  assert.match(readinessView(report, current, 0, 5).text, /房間 5 · Simulation · 0 \/ 1 姿態有效/);
+  const scoped = readinessView(report, current, 1490, 1);
+  assert.deepEqual(scoped.rows.map(row => row.id), ['player']);
+  assert.match(scoped.text, /房間 1 · Simulation · 1 \/ 1 姿態有效/);
+  assert.match(readinessView(report, current, 1490.01, 1).text, /0 \/ 1 姿態有效/);
+  assert.match(readinessView(report, current, 0, 2).text, /0 \/ 0 姿態有效/);
+});
 test('Source suspension, stale capture, clock skew and ended session override a prior ready body', () => {
   for (const sourceState of ['NoRecording', 'Stale', 'ClockSkew', 'Suspended', 'UnknownCaptureTime', 'Ended', 'PhasePending', 'new-status'])
     assert.equal(readinessView({ ...report, sourceState }, session, 0).rows[0].ready, false);

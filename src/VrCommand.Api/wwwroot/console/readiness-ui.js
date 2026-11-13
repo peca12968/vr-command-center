@@ -28,11 +28,12 @@ function sourceAt(report, elapsed) {
   return source;
 }
 
-export function readinessView(report, session, elapsed) {
+export function readinessView(report, session, elapsed, roomId = null) {
   const matches = report?.version === 1 && report.sessionId === session?.id && Number.isSafeInteger(report.sessionSequence)
     && report.sessionSequence >= session.sequence && Array.isArray(report.players) && report.players.length <= 25;
   const source = session?.state === 'Ended' ? 'Ended' : !matches ? 'Updating' : sourceAt(report, elapsed);
-  const rows = (session?.players || []).map(player => {
+  const players = session?.players || [];
+  const rows = (roomId === null ? players : players.filter(player => player.roomId === roomId)).map(player => {
     const candidates = matches ? report.players.filter(row => row?.playerId === player.id && row.admissionId === player.admissionId && row.roomId === player.roomId && row.seat === player.seat) : [];
     const row = candidates.length === 1 ? candidates[0] : null;
     const kind = ['Simulated', 'Tracked'].includes(row?.rigKind) ? row.rigKind : 'None';
@@ -42,7 +43,8 @@ export function readinessView(report, session, elapsed) {
       text: labels[status] + (kind === 'Simulated' ? ' · 合成姿態' : kind === 'Tracked' ? ' · 追蹤姿態' : '') };
   });
   const origin = matches && ['Simulation', 'GameServer'].includes(report.origin) ? report.origin + ' · ' : '';
-  return { source, rows, text: `${origin}${rows.filter(row => row.ready).length} / ${rows.length} 姿態有效 · ${labels[source]}` };
+  const scope = roomId === null ? '' : `房間 ${roomId} · `;
+  return { source, rows, text: `${scope}${origin}${rows.filter(row => row.ready).length} / ${rows.length} 姿態有效 · ${labels[source]}` };
 }
 
 export function mrReadinessView(report, session, elapsed, actor) {
@@ -595,7 +597,7 @@ export function mountRoomReadiness(getState, unauthorized, venueUpdated, describ
     active(value) { active = value; if (value) update(); else reset(); } };
 }
 
-export function mountReadiness(getState, unauthorized) {
+export function mountReadiness(getState, unauthorized, rosterRoom) {
   let active = false, controller, generation = 0, identity = '', report, started = 0, attempted = -Infinity, failed = false;
   const summary = document.getElementById('readiness-summary');
   const mrPanel = document.getElementById('mr-start-requirement'), mrStatus = document.getElementById('mr-start-status');
@@ -633,10 +635,12 @@ export function mountReadiness(getState, unauthorized) {
   function render() {
     const state = getState(); if (!state.actor || !state.session || state.session.id !== state.selected) return;
     const elapsed = performance.now() - started;
-    const view = readinessView(report, state.session, elapsed);
+    const roomId = rosterRoom();
+    const view = readinessView(report, state.session, elapsed, roomId);
     const mr = mrReadinessView(report, state.session, elapsed, state.actor);
     renderMr(failed && mr ? { ...mr, state: 'Unavailable', text: 'MR 就緒狀態未確認，正在重試。', rooms: [] } : mr);
-    summary.textContent = failed ? '參戰狀態未確認，正在重試。' : view.text;
+    const text = failed ? (roomId === null ? '' : `房間 ${roomId} · `) + '參戰狀態未確認，正在重試。' : view.text;
+    if (summary.textContent !== text) summary.textContent = text;
     summary.classList.toggle('warning', failed || ['Stale', 'ClockSkew', 'Suspended', 'Unavailable'].includes(view.source));
     for (const cell of document.querySelectorAll('[data-readiness-player]')) {
       const row = view.rows.find(value => value.id === cell.dataset.readinessPlayer && value.admissionId === cell.dataset.admission);

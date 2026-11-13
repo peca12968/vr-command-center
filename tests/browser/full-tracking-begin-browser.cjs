@@ -160,9 +160,14 @@ module.exports = async ({ context, api, tokens, base, root, screenshots, check, 
         `${mode} opening shortcut selects the original room and shows only its four registered seats`);
       check(await option.isChecked() && (await api('/sessions')).every(session => session.state === 'Preparing'),
         `${mode} visiting a roster leaves the active Begin policy and original phases intact`);
+      check((await page.locator('#readiness-summary').textContent()).startsWith('房間 5 · ')
+        && (await page.locator('#player-count').textContent()) === '房間 5 · 4 / 5 人（名冊）',
+        `${mode} roster and readiness summaries both use the selected room`);
       if (mode === 'Linked') {
         await page.locator('#roster-room').selectOption('');
-        check(await page.locator('#roster tr:visible').count() === 24,
+        check(await page.locator('#roster tr:visible').count() === 24
+          && (await page.locator('#player-count').textContent()) === '24 / 25 人（名冊）'
+          && !(await page.locator('#readiness-summary').textContent()).startsWith('房間 5 · '),
           'Linked roster can return to all rooms without changing the selected session');
         await login('Room1');
         await page.locator('#session-panel').waitFor();

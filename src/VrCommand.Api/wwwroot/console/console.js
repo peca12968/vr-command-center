@@ -38,7 +38,7 @@ const report = mountReport(() => state, logout, () => { renderStatistics(); clos
 const venueReport = mountVenueReport(() => state, logout, download);
 const venueHistory = mountVenueHistory(api, selectVenueClosure);
 const venueDebrief = mountVenueDebriefSeats(() => state, logout, download, target => tab('world', target));
-const readiness = mountReadiness(() => state, logout);
+const readiness = mountReadiness(() => state, logout, () => Number($('roster-room').value) || null);
 const roomReadiness = mountRoomReadiness(() => state, logout, applyVenuePermissions, venueClimateText, venueEnemyText, target => {
   if (!state.busy && !state.pending) tab('world', target);
 });
@@ -1258,7 +1258,6 @@ function renderSession(statistics, events) {
   fillOptions('ticket-room', [['', ticketRooms.length ? '請選擇房間' : '尚無可配票的房間'], ...ticketRooms],
     $('ticket-room').dataset.session === session.id ? undefined : '');
   $('ticket-room').dataset.session = session.id;
-  $('player-count').textContent = `${session.players.length} / ${session.roomIds.length * 5} 人（名冊）`;
   const rosterRoom = $('roster-room'), rosterFilter = $('roster-room-filter');
   const visibleRooms = session.roomIds.filter(ownsRoom);
   fillOptions('roster-room', [['', '全部房間'], ...visibleRooms.map(id => [String(id), `房間 ${id}`])],
@@ -1279,7 +1278,6 @@ function renderSession(statistics, events) {
   }));
   if (!session.players.length) emptyTable('roster', 5, '尚未加入玩家');
   filterRoster();
-  readiness.update();
   connections.update();
   $('statistics-origin').textContent = statistics.origin === 'Simulation' ? '模擬資料' : statistics.origin === 'GameServer' ? '遊戲伺服器回報' : '尚無戰鬥資料';
   $('telemetry-status').hidden = !session.combatStream;
@@ -1299,6 +1297,9 @@ function filterRoster() {
     if (!item.hidden) shown++;
   }
   $('roster-filter-empty').hidden = !room || shown !== 0 || !state.session?.players.length;
+  const capacity = room ? 5 : (state.session?.roomIds.length ?? 0) * 5;
+  $('player-count').textContent = (room ? `房間 ${room} · ` : '') + `${shown} / ${capacity} 人（名冊）`;
+  readiness.update();
 }
 $('roster-room').addEventListener('change', filterRoster);
 function environment(prefix) { return { mode: prefix === 'live' ? state.session.environment.mode : $('draft-mode').value, weather: $(prefix + '-weather').value, timeOfDay: $(prefix + '-time').value, lightning: $(prefix + '-lightning').checked }; }

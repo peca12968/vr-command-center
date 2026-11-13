@@ -28,7 +28,9 @@ async function main() {
       await page.locator('#roster-title:focus').waitFor();
       assert.equal(await page.locator('#session-select').inputValue(), sessionId);
       assert.equal(await page.locator('#roster-room').inputValue(), String(roomId));
-      const rows = await page.waitForFunction(expected => {
+      const rows = await page.waitForFunction(({ expected, roomId }) => {
+        if (!document.querySelector('#readiness-summary').textContent.startsWith(`房間 ${roomId} · `)
+            || !document.querySelector('#readiness-summary').textContent.includes('5 / 5 姿態有效')) return null;
         const visible = [...document.querySelectorAll('#roster tr[data-roster-room]')].filter(row => !row.hidden);
         if (visible.length !== expected.length) return null;
         const rows = visible.map(row => {
@@ -38,7 +40,8 @@ async function main() {
         });
         return rows.every(row => row.ready && row.status.includes('合成姿態')
           && expected.some(player => player.id === row.id && player.admissionId === row.admissionId)) ? rows : null;
-      }, players).then(handle => handle.jsonValue());
+      }, { expected: players, roomId }).then(handle => handle.jsonValue());
+      assert.equal(await page.locator('#player-count').textContent(), `房間 ${roomId} · 5 / 5 人（名冊）`);
       for (const row of rows) {
         const expected = players.find(player => player.id === row.id);
         assert.equal(row.position, `${roomId} / ${expected.seat}`);
