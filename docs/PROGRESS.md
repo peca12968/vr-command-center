@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 UDP 離線重驗指出待補原因
+
+- `--verify-only` 的待補席位可附原因，包含原檔無法讀取、量測逾期、時間戳未早於核對時間、雙端屬不同交換、端點不符及報告無效。沿用原配對及 30 分鐘規則。 [操作說明](WINDOWS_SERVER_PACKAGE.md#以-udp-預檢報告啟動五房)
+- Windows 三包通過 688 項。缺一份探測原檔時，獨立 5 席與合併 25 席均指出原檔無法讀取。兩種模式各 25 位同機模擬玩家，核對 50 份戰績回條、6 份 CSV 與 1,072 格回放。清理後 C／F 259 個非資料庫檔案雜湊相符。 [驗證摘要](../artifacts/venue-udp-offline-reasons-validation.json)
+- 通過 150 項封存及 UDP 測試，六批既有正式與收件摘要逐位元相符。首輪 LAN 測試的區域變數覆蓋既有報告，修正測試變數後通過。`b4b658f` 已推送，GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商硬體待驗。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43391738372)
+
 ## 2026-11-13 Windows 啟動前離線重驗 UDP 原檔
 
 - `start-verified-venue.py --verify-only` 沿用正式啟動的原計畫、預覽和雙端 UDP 證據核對，輸出可重用的來源數及待補席位。只做檔案與時限核對，實際啟動仍會確認最新場次與名冊。 [操作說明](WINDOWS_SERVER_PACKAGE.md#以-udp-預檢報告啟動五房)
