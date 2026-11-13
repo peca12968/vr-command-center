@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 六批 Quest 擷取待補件
+
+- 六批收件總表可列出 Quest 預期席數、報告中標示完成的席數、失敗嘗試數及待補房號與席號。原擷取、部署報告或裝置表缺檔時，回報檔案類型與檔名。收齊後仍由原流程核對日誌內容及伺服器確認。 [收件方式](EXTERNAL_CLIENTS.md#一次查看六批待補件)
+- 通過 118 項封存與 12 項 Quest UDP 預檢測試。獨立場與合併場各找出兩席待補，另核對中斷報告及缺檔。初版中斷測試誤帶成功列欄位，修正測試資料後重跑通過。補回原報告後，六批測試資料核對 80 份模擬回條。另重驗既有 Windows 同機六批資料，正式摘要逐位元一致。 [本機驗證摘要](../artifacts/staged-venue-quest-capture-intake-validation.json)
+- 功能來源 `e44bf47` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、Quest 3／VIVE XR、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43354942967)
+
 ## 2026-11-13 六批共用 Windows 連線量測門檻
 
 - `stages.json` 可一次指定六批共用的最低回覆數與 p95 上限。各批在每項採用總清單與批次清單較嚴的值，收件及正式摘要都會顯示採用的設定。 [驗收方式](EXTERNAL_CLIENTS.md#六批共用-windows-連線量測門檻)
