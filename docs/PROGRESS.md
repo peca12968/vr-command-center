@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 玩家循環播放本機回放片段
+
+- 控制台 0.31.185 的玩家回放可循環播放原匯出片段，保留速度及房間視角。用解壓管理包在 390 像素寬的 Chromium 載入原 Windows 全場檔及第 4 房檔，兩份均按第 100 → 90 → 100 格播放，取消後停在第 100 格。另核對暫停保留畫面、跳到遊戲來源恢復及全程零 API 請求。兩份既有匯出檔雜湊相符。 [操作方式](WORLD_RECORDING.md) · [原檔播放證據](../artifacts/console-player-loop-185-native/checks.json)
+- 開發版及解壓包各通過 143 項觀戰回放檢查，另通過 107 項管理包、5 項 Node 及 7 項封裝檢查。解壓核對 567 筆清單及 `240a3e3` 的 193 個建置來源，29 檔按換行正規化比對。首輪打包因版本檢查仍為 0.31.184 退出，更新打包及驗收腳本後通過。原檔播放初次啟動的隔離 API 缺測試金鑰，補上後重跑通過。 [驗證摘要](../artifacts/player-replay-loop-185-validation.json)
+- 功能與打包修正 `240a3e3`、`a72b9fb` 已推送。兩次 GitHub Actions 均因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商硬體仍待驗收。 [功能提交 CI](https://github.com/peca12968/vr-command-center/actions/runs/43396812109) · [打包修正 CI](https://github.com/peca12968/vr-command-center/actions/runs/43396963442)
+
 ## 2026-11-13 Windows 啟動器複製本輪五房報告路徑
 
 - 1.23 批次視窗在報告寫出後啟用「複製就緒路徑」與「複製結果路徑」。結束後可取本輪兩份報告，修改或重新核對計畫會清除按鈕。實際 WinForms 按鈕處理通過六項專項，含 Unicode 路徑、剪貼簿忙碌、檔案移除與清除舊路徑。測試以替身接收複製內容。桌面工具初始化仍回報 Windows 錯誤 3，本輪未驗證實際桌面剪貼簿。 [操作方式](WINDOWS_SERVER_PACKAGE.md#從-windows-視窗核對並啟動) · [驗證摘要](../artifacts/server-launcher-1.23-report-copy-validation.json)
