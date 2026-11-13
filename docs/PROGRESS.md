@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 六批收件總表辨識啟動回條雜湊不符
+
+- 六批收件檢查會列出與 Windows 啟動回條雜湊不符的原報告類別和檔名。以六批同機資料的副本驗證，結束報告、UDP 預檢及就緒報告的三種雜湊不一致各自被辨識，缺少就緒報告也會列出檔名。其餘兩批通過，正式驗收拒絕缺件的總清單。 [操作說明](EXTERNAL_CLIENTS.md#六批使用各自的-windows-啟動回條) · [缺件範例](../artifacts/staged-venue-start-evidence-inspection.json)
+- 六批正式與收件摘要均與封存逐位元相符，共核對 80 份伺服器戰績回條。核對前後 31 個原始清單及回條相關檔案雜湊相符，另重新產生一份獨立場清單並通過五場啟動核對。122 項封存、16 項 LAN 預檢、12 項 Quest UDP 測試通過。`e6d0338` 已推送，GitHub Actions 因帳務或支出上限未啟動。 [驗證摘要](../artifacts/staged-venue-start-evidence-validation.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43381998552)
+- 使用者已關閉先前的遮擋視窗。桌面複驗停在自動化工具初始化，重設後仍無法寫入執行環境檔案（Windows 錯誤 3）。完整桌面流程、跨機 25 人、頭盔、MR 場地及廠商硬體仍待驗收。
+
 ## 2026-11-13 六批收件總表列出 UDP 待補席位
 
 - `--inspect-venue-stages` 在 `issues[].udpPreflight` 列出未完成的全館與 Quest UDP 預檢。回報包含原報告的檔名、項次、待補房號與席號。若缺少原報告、來源重複或啟動計畫比對失敗，也會列出相應狀態。正式驗收仍要求原預檢完整通過。 [操作說明](EXTERNAL_CLIENTS.md#一次查看六批待補件)
