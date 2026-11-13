@@ -97,13 +97,43 @@ module.exports = async ({ context, api, tokens, base, screenshots, check, captur
     const independent = await finish();
     await login('Master');
     await page.locator('#venue-report-status').filter({ hasText: '房間 2' }).waitFor();
-    check(!Object.hasOwn(await api(scoresUrl(independent)), 'scores') && await table.isHidden(),
-      'The batch score table never displays partial totals before the final combat seal');
+    const waitingReport = await api(scoresUrl(independent));
+    assert.deepEqual(waitingReport.readyRoomScores, { requestId: independent, rooms: [
+      { roomId: 1, sessionId: first, totals: score(1, 1, 1, 1, 1, 20, 100) },
+      { roomId: 3, sessionId: empty, totals: blank }
+    ] });
+    assert.deepEqual(await api('/venue/closure/' + independent), { batch: waitingReport.batch });
+    await table.waitFor();
+    check(!Object.hasOwn(waitingReport, 'scores')
+      && (await table.locator('[data-venue-score-room="1"] td').allTextContents()).join('|') === '房間 1|1|1|1|1|1|20|100%'
+      && (await table.locator('[data-venue-score-room="2"] td').allTextContents()).join('|') === '房間 2|等待戰鬥封存'
+      && await table.getByText('本批合計', { exact: true }).count() === 0,
+      'The original final room scores appear while the waiting room has no numeric cells or partial batch total');
     const waiting = await fetchCsv(independent);
     check(waiting.status === 409 && (await waiting.json()).roomIds.join() === '2' && await exportScores.isHidden(),
       'Unsealed combat blocks the summary CSV and keeps the download hidden');
+    const reportZip = await fetch(base + `/api/venue/closure/${independent}/reports.zip?includeScores=true`, {
+      headers: { Authorization: 'Bearer ' + tokens.Master }
+    });
+    check(reportZip.status === 409 && (await reportZip.json()).roomIds.join() === '2'
+      && await page.locator('#export-venue-reports').isDisabled(),
+      'Partial room results leave the original batch ZIP gated on the last combat seal');
+    await table.screenshot({ path: path.join(screenshots, 'venue-battle-scores-awaiting-seal.png') });
+    const latestWithReceipts = base + '/api' + scoresUrl() + '&includeDebriefReceipts=true';
+    const corrupt = async route => {
+      const response = await route.fetch(), body = await response.json();
+      body.readyRoomScores.rooms[0].sessionId = second;
+      await route.fulfill({ response, json: body });
+    };
+    await page.route(latestWithReceipts, corrupt);
+    try {
+      await page.locator('#refresh').click();
+      await table.waitFor({ state: 'hidden' });
+      check(await exportScores.isHidden(), 'A partial row with a different session ID clears the scores and leaves summary export unavailable');
+    } finally { await page.unroute(latestWithReceipts, corrupt); }
     await api(`/sessions/${second}/combat-stream/seal`, 'POST', { streamId, finalSequence: events.length }, 'GameServer');
     const separate = await api(scoresUrl(independent));
+    assert.equal(Object.hasOwn(separate, 'readyRoomScores'), false);
     assert.deepEqual(separate.scores, { requestId: independent, rooms: [
       { roomId: 1, sessionId: first, totals: score(1, 1, 1, 1, 1, 20, 100) },
       { roomId: 2, sessionId: second, totals: score(1, 3, 1, 0, 0, 0, 33.33) },
@@ -123,9 +153,18 @@ module.exports = async ({ context, api, tokens, base, screenshots, check, captur
 
     const rooms = [1, 2, 3, 4, 5], linked = await prepare('Linked', rooms);
     const leader = await join(linked, 1), wing = await join(linked, 5);
-    await command(linked, 'Begin');
-    await report(linked, [...shot(leader, true), ...shot(wing, false), ...shot(wing, false)]);
+    const linkedStream = randomUUID();
+    await api(`/sessions/${linked}/combat-stream`, 'POST', { streamId: linkedStream, origin: 'Simulation' }, 'GameServer');
+    const { session: { sequence: linkedSequence } } = await command(linked, 'Begin');
+    const linkedEvents = [...shot(leader, true), ...shot(wing, false), ...shot(wing, false)];
+    await api(`/sessions/${linked}/combat-stream/batch`, 'POST', linkedEvents.map((event, index) =>
+      ({ streamId: linkedStream, streamSequence: index + 1, observedSequence: linkedSequence, report: record(event) })), 'GameServer');
     const linkedBatch = await finish();
+    assert.deepEqual((await api(scoresUrl(linkedBatch))).readyRoomScores, { requestId: linkedBatch, rooms: [] });
+    await page.waitForFunction(() => document.querySelectorAll('#venue-score-rows td[colspan="7"]').length === 5, null, { polling: 100 });
+    check(await table.getByText('本批合計', { exact: true }).count() === 0 && await exportScores.isHidden(),
+      'All five Linked rooms wait together for the shared combat seal');
+    await api(`/sessions/${linked}/combat-stream/seal`, 'POST', { streamId: linkedStream, finalSequence: linkedEvents.length }, 'GameServer');
     const combined = await api(scoresUrl());
     assert.deepEqual(combined.scores, { requestId: linkedBatch, rooms: rooms.map(roomId => ({ roomId, sessionId: linked,
       totals: roomId === 1 ? score(1, 1, 1, 0, 0, 0, 100) : roomId === 5 ? score(1, 2, 0, 0, 0, 0, 0) : blank })),

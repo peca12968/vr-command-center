@@ -1214,7 +1214,7 @@ function renderVenueClosure(report, loading = false) {
     rows.append(result);
   }
   $('venue-closure-table').hidden = false;
-  venueReport.update(batch, renderVenueScores(batch, report.scores), receipts);
+  venueReport.update(batch, renderVenueScores(batch, report.scores, report.readyRoomScores), receipts);
 }
 function venueDebriefRooms(batch, summary) {
   if (!summary || typeof batch.requestId !== 'string' || summary.requestId !== batch.requestId
@@ -1233,30 +1233,38 @@ function venueDebriefRooms(batch, summary) {
   }
   return rooms;
 }
-function renderVenueScores(batch, scores) {
-  if (!scores || typeof batch.requestId !== 'string' || scores.requestId !== batch.requestId || !Array.isArray(scores.rooms)
-    || batch.sessions.some(session => !['Sealed', 'NoSource'].includes(session.combat))) return;
-  const expected = new Map(batch.sessions.flatMap(session => session.roomIds.map(room => [room, session.sessionId])));
-  const actual = new Set(scores.rooms.map(score => score?.roomId));
+function renderVenueScores(batch, scores, readyScores) {
+  const ready = session => ['Sealed', 'NoSource'].includes(session.combat);
+  const partial = batch.sessions.some(session => !ready(session));
+  if (partial ? scores != null : readyScores != null) return;
+  const data = partial ? readyScores : scores;
+  if (!data || typeof batch.requestId !== 'string' || data.requestId !== batch.requestId || !Array.isArray(data.rooms)) return;
+  const allRooms = batch.sessions.flatMap(session => session.roomIds.map(id => [id, session]));
+  if (new Set(allRooms.map(([id]) => id)).size !== allRooms.length) return;
+  const expected = new Map(allRooms.filter(([, session]) => ready(session)).map(([id, session]) => [id, session.sessionId]));
+  const actual = new Map(data.rooms.map(score => [score?.roomId, score]));
   const keys = venueScoreFields;
   const identity = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/;
   const valid = totals => totals && keys.every(key => Number.isSafeInteger(totals[key]) && totals[key] >= 0)
     && Number.isFinite(totals.accuracyPercent) && totals.accuracyPercent >= 0 && totals.accuracyPercent <= 100;
-  if (scores.rooms.length !== expected.size || actual.size !== expected.size || !valid(scores.total)
-    || scores.rooms.some(score => !Number.isInteger(score?.roomId) || score.roomId < 1 || score.roomId > 5
+  if (data.rooms.length !== expected.size || actual.size !== expected.size
+    || (partial ? Object.hasOwn(data, 'total') : !valid(data.total))
+    || data.rooms.some(score => !Number.isInteger(score?.roomId) || score.roomId < 1 || score.roomId > 5
       || !identity.test(score.sessionId) || expected.get(score.roomId) !== score.sessionId
       || !valid(score.totals))) return;
   const scoreRow = (label, totals) => row([label, ...keys.map(key => totals[key]), totals.accuracyPercent + '%']);
-  const sorted = [...scores.rooms].sort((a, b) => a.roomId - b.roomId);
-  const rows = sorted.map(score => {
-    const item = scoreRow('房間 ' + score.roomId, score.totals);
-    item.dataset.venueScoreRoom = score.roomId;
+  const ordered = [...actual.values()].sort((a, b) => a.roomId - b.roomId);
+  const rows = allRooms.sort(([a], [b]) => a - b).map(([id]) => {
+    const label = '房間 ' + id, score = actual.get(id);
+    const item = score ? scoreRow(label, score.totals) : row([label, '等待戰鬥封存']);
+    if (!score) item.lastElementChild.colSpan = keys.length + 1;
+    item.dataset.venueScoreRoom = id;
     return item;
   });
-  rows.push(scoreRow('本批合計', scores.total));
+  if (!partial) rows.push(scoreRow('本批合計', scores.total));
   $('venue-score-rows').replaceChildren(...rows);
   $('venue-score-table').hidden = false;
-  return { ...scores, rooms: sorted };
+  if (!partial) return { ...scores, rooms: ordered };
 }
 function row(cells) { const tr = element('tr'); for (const value of cells) { const td = element('td'); if (value instanceof Node) td.append(value); else td.textContent = value; tr.append(td); } return tr; }
 function emptyTable(id, columns, message) { const tr = element('tr'), td = element('td', message, 'empty-cell'); td.colSpan = columns; tr.append(td); $(id).replaceChildren(tr); }

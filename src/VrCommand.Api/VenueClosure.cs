@@ -18,20 +18,24 @@ internal sealed record VenueClosureSession(Guid SessionId, long AppliedAtSequenc
 internal sealed record VenueClosureBatch(Guid RequestId, DateTimeOffset RecordedAtUtc, VenueClosureSession[] Sessions);
 internal sealed record VenueClosureResponse(VenueClosureBatch? Batch,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueBattleScores? Scores,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueDebriefSummary? DebriefReceipts);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueDebriefSummary? DebriefReceipts,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] VenueReadyRoomScores? ReadyRoomScores = null);
 internal sealed record VenueDebriefSummary(Guid RequestId, VenueDebriefRoom[] Rooms);
 internal sealed record VenueDebriefRoom(Guid SessionId, int RoomId, int RosterCount, int? ConfirmedCount);
 internal sealed record VenueBattleScores(Guid RequestId, VenueRoomScore[] Rooms, VenueBattleTotals Total)
 {
     internal static VenueBattleScores From(FinalVenueReport report)
     {
-        var rooms = report.Sessions.SelectMany(item => item.Report.RoomIds.Select(room =>
-            new VenueRoomScore(room, item.Report.SessionId, VenueBattleTotals.From(item.Report.ForRoom(room).Players))))
+        var rooms = report.Sessions.SelectMany(item => RoomScores(item.Report))
             .OrderBy(score => score.RoomId).ToArray();
         return new(report.RequestId, rooms,
             VenueBattleTotals.From(report.Sessions.SelectMany(item => item.Report.Players).ToArray()));
     }
+
+    internal static IEnumerable<VenueRoomScore> RoomScores(FinalSessionReport report) => report.RoomIds.Select(room =>
+        new VenueRoomScore(room, report.SessionId, VenueBattleTotals.From(report.ForRoom(room).Players)));
 }
+internal sealed record VenueReadyRoomScores(Guid RequestId, VenueRoomScore[] Rooms);
 internal sealed record VenueRoomScore(int RoomId, Guid SessionId, VenueBattleTotals Totals);
 internal sealed record VenueBattleTotals(int Players, long AmmoUsed, long ShotsHit, long Kills, long HitsReceived, long DamageTaken)
 {
@@ -153,10 +157,16 @@ public sealed partial class WorldRecordings
         {
             var batch = ReadVenueClosureData(actor, batchId)?.Batch;
             var receipts = includeDebriefReceipts && batch is not null ? SummarizeVenueDebriefReceipts(batch, actor) : null;
-            if (!includeScores || batch is null
-                || batch.Sessions.Any(session => session.Combat is not (VenueArchiveState.Sealed or VenueArchiveState.NoSource)))
+            if (!includeScores || batch is null)
                 return new(batch, null, receipts);
 
+            var ready = batch.Sessions.Where(session => session.Combat is VenueArchiveState.Sealed or VenueArchiveState.NoSource).ToArray();
+            if (ready.Length != batch.Sessions.Length)
+            {
+                var rooms = ready.SelectMany(session => VenueBattleScores.RoomScores(manager.FinalReport(session.SessionId, actor)))
+                    .OrderBy(score => score.RoomId).ToArray();
+                return new(batch, null, receipts, new(batch.RequestId, rooms));
+            }
             return new(batch, VenueBattleScores.From(manager.FinalVenueReports(batch.RequestId, actor)), receipts);
         }
     }
