@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 管理更新延遲與暫停原因驗收
+
+- Windows 原生測試新增 `--delay-management`。單次管理 GET 等待時，原計時器在 1.502 秒觸發 `ManagementWatchdog`。HTTP 503 對照則記下 `ManagementRefresh`。兩場都沿用管理序號 5 恢復，確認遊戲時鐘到期、完整封存及原入場戰績。 [操作方式](CLOCK_RECOVERY.md)
+- 兩場各通過 9 項，共核對 1,437 格回放。首輪因測試進行中修改腳本，來源一致性檢查未通過。以固定來源重跑後通過，三輪 C／F 共 119 份關閉後快照檔雜湊相同。另通過 11 項代理測試。 [驗證摘要](../artifacts/native-management-watchdog-validation.json)
+- 功能來源 `4c981f7` 已推送，沿用已交付的 Windows 0.50.7 診斷版。GitHub Actions 因帳務或支出上限未啟動。原 25 席偶發暫停原因、跨機、頭盔、MR 場地及廠商硬體仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43364456954)
+
 ## 2026-11-13 新版暫停診斷的 25 席丟包複驗
 
 - 用新增暫停標記的 Windows 0.50.7 重跑雙向每 20 個 UDP 封包丟棄 1 個的測試。合併與獨立各 25 個同機模擬玩家，通過 24 項，核對 4,140 格封存回放、6 份 CSV 與 50 份戰績確認。六場均未出現非預期暫停。先前偶發暫停的原因仍待查。 [驗證摘要](../artifacts/authority-diagnostics-25-seat-validation.json)
