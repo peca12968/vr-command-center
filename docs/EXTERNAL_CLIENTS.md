@@ -274,6 +274,19 @@ python .\scripts\check-venue-udp-preflight.py `
 
 可將完整報告的路徑填入封存驗收清單的 `udpPreflightBatch`。請保留原雙端報告，以及 `launchBinding` 所引用的原計畫和預覽，並維持檔案間的路徑。結束後，驗收工具會用遊戲伺服器實際綁定時間與已確認的玩家來源重驗每組，並比對原計畫與封存的場次、任務版本及端點。若透過 `--batch` 重新納入含 `launchBinding` 的報告，須再次提供相同的計畫和預覽。`network` 為 `same-host` 的結果代表同機 UDP，跨機連線與頭盔仍須現場測試。
 
+#### 補測未完成的全館 UDP 預檢
+
+全館檢查未完成且已提供的啟動資料核對通過時，報告會在 `retrySources` 保留已驗證的來源、雙端報告路徑與雜湊。補測缺漏或失敗來源後，用 `--retry-report` 指定前一份未完成的全館報告，並用 `--pairs` 或 `--batch` 帶入補測的雙端資料。每輪使用新的輸出路徑。重試須沿用同一份網路清單，以及前一輪提供的啟動計畫或預覽原檔。
+
+```powershell
+python .\scripts\check-venue-udp-preflight.py `
+  --network-plan .\venue-network.json --retry-report .\venue-readiness.json `
+  --pairs .\new-pairs.json --launch-plan .\venue-plan.json --launcher-preview .\venue-preview.json `
+  --output .\venue-readiness-retry.json
+```
+
+重試會重新核對雙端原檔、來源及既有 30 分鐘期限。原檔有變、無法讀取或逾時時，該來源須補測。`retainedSources` 是這輪仍有效的來源數。完整報告可直接交給戰後封存驗收。 [封存方式](#用原網路清單核對封存席位)
+
 #### 從原啟動預覽產生網路清單
 
 先在 `seat-addresses.json` 保存本階段所有 Windows 與 Quest 的席位 IPv4。格式為版本 `1`，`seats` 中每列有 `roomId`、`seat` 及 `address`。以下是五房各一席的範例，地址請替換為現場值。

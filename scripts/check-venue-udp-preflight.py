@@ -52,7 +52,75 @@ def load_pairs(pairs_path, batch_paths, mode, rooms, binding):
     return pairs
 
 
-def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, launch_plan=None):
+def read_pair(pair, base):
+    field.require(type(pair) is dict and set(pair) == {'listener', 'probe'}
+                  and all(type(value) is str and value for value in pair.values()), 'Invalid UDP report paths')
+    return tuple((base / pair[key]).resolve(strict=True) for key in ('listener', 'probe'))
+
+
+def pair_reference(paths, directory):
+    return dict(zip(('listener', 'probe'), (path_reference(path, directory) for path in paths), strict=True))
+
+
+def verify_source(address, paths, checked_at, hashes=None):
+    server, port, peer = address
+    before = pair_hashes(paths) if hashes is None else hashes
+    summary, _ = field.verify_udp_preflight(paths, {'address': server, 'port': port, 'observedAtUtc': checked_at}, {field.ipv4(peer)})
+    field.require(pair_hashes(paths) == before, 'UDP pair files changed during verification')
+    return summary, before
+
+
+def pair_hashes(paths):
+    hashes = []
+    for path in paths:
+        with path.open('rb') as stream:
+            raw = stream.read(32769)
+        field.require(1 <= len(raw) <= 32768, 'Invalid UDP report size')
+        hashes.append(hashlib.sha256(raw).hexdigest())
+    return hashes
+
+
+def read_retry(path, mode, plan_hash, expected, launch_check, binding, checked_at):
+    with path.open('rb') as stream:
+        raw = stream.read(128 * 1024 + 1)
+    field.require(len(raw) <= 128 * 1024, 'Retry report exceeds its size limit')
+    report = field.read_json(raw.decode('utf-8-sig'))
+    field.require(type(report) is dict and field.integer(report['version'], 1, 1)
+                  and report.get('scope') == 'venue-udp-preflight-only' and report.get('complete') is False
+                  and report.get('mode') == mode and report.get('networkPlanSha256') == plan_hash,
+                  'Use an incomplete report for the same original venue network plan')
+    prior = field.read_udp_launch_binding(report, path.parent, mode)
+    field.require(report.get('launcherPreview') == launch_check and (prior is None) == (binding is None)
+                  and (prior is None or all(prior[0][key] == binding[key] for key in ('planSha256', 'previewSha256'))),
+                  'Retry requires the same original Windows plan and preview')
+    rows = report.get('retrySources')
+    field.require(type(rows) is list and 0 <= len(rows) <= len(expected), 'Retry report lacks its original verified sources')
+    by_seats = {tuple(seats): address for address, seats in expected.items()}
+    valid, seen = {}, set()
+    for row in rows:
+        field.require(type(row) is dict and set(row) == {'seats', 'pair', 'exchangeSha256', 'pairSha256'},
+                      'Invalid verified source in retry report')
+        seats = row['seats']
+        field.require(type(seats) is list and 1 <= len(seats) <= 25 and all(
+            type(seat) is dict and set(seat) == {'roomId', 'seat'} for seat in seats), 'Invalid seats in retry report')
+        key = tuple(sorted((field.integer(seat['roomId'], 1, 5), field.integer(seat['seat'], 1, 5)) for seat in seats))
+        address = by_seats.get(key)
+        field.require(address is not None and address not in seen, 'Retry report source differs from the original planned seats')
+        seen.add(address)
+        try:
+            paths = read_pair(row['pair'], path.parent)
+            field.require(probe_identity(paths[1]) == address, 'Retry reports name a different UDP source')
+            hashes = pair_hashes(paths)
+            field.require(hashes == row['pairSha256'], 'Retry pair differs from its original files')
+            summary, _ = verify_source(address, paths, checked_at, hashes)
+            field.require(summary['exchangeSha256'] == row['exchangeSha256'], 'Retry exchange differs from the original pair')
+        except (OSError, ValueError, KeyError, TypeError, RecursionError):
+            continue
+        valid[address] = paths, summary, hashes
+    return valid, seen - valid.keys(), hashlib.sha256(raw).hexdigest()
+
+
+def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, launch_plan=None, retry_report=None):
     document, raw = field.read_quest_document(plan)
     mode, endpoints, sources = field.parse_quest_network_plan(document, allow_shared_sources=True)
     plan_hash = hashlib.sha256(raw).hexdigest()
@@ -75,16 +143,24 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
     address_modes = {field.ipv4(address).is_loopback for server, _, peer in expected for address in (server, peer)}
     field.require(len(address_modes) == 1, 'Use only loopback or only private LAN addresses in one plan')
 
+    checked_at = datetime.now(timezone.utc).isoformat()
+    launch_matches = (launch_check is None or launch_check['complete']) and (binding is None or binding['complete'])
+    if retry_report is not None:
+        field.require(launch_matches, 'Retry requires the original matching Windows plan and preview')
+        retained, expired, prior_hash = read_retry(retry_report, mode, plan_hash, expected, launch_check, binding, checked_at)
+    else:
+        retained, expired, prior_hash = {}, set(), None
     observed = defaultdict(list)
     path_counts = Counter()
+    for address, (paths, _, _) in retained.items():
+        observed[address].append(paths)
+        path_counts.update(paths)
     unmatched = unreadable = 0
     for pair, base, declared_group in load_pairs(pairs_path, batch_paths, mode, [list(group) for group in rooms], binding):
         try:
-            field.require(type(pair) is dict and set(pair) == {'listener', 'probe'}
-                          and all(type(value) is str and value for value in pair.values()), 'Invalid UDP report paths')
-            paths = tuple((base / pair[key]).resolve(strict=True) for key in ('listener', 'probe'))
+            paths = read_pair(pair, base)
             address = probe_identity(paths[1])
-        except (OSError, ValueError, KeyError, RecursionError):
+        except (OSError, ValueError, KeyError, TypeError, RecursionError):
             unreadable += 1
             continue
         if address not in expected or (declared_group is not None and
@@ -94,27 +170,26 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
         observed[address].append(paths)
         path_counts.update(paths)
 
-    checked_at = datetime.now(timezone.utc).isoformat()
     results, exchange_counts = {}, Counter()
     for address, seats in expected.items():
         row = results[address] = {'seats': seats, 'status': 'missing'}
         choices = observed[address]
         if not choices:
+            if address in expired:
+                row['status'] = 'invalid-or-expired'
             continue
         if len(choices) != 1 or any(path_counts[path] != 1 for path in choices[0]):
             row['status'] = 'duplicate-pair'
             continue
-        server, port, peer = address
         try:
-            summary, _ = field.verify_udp_preflight(choices[0],
-                {'address': server, 'port': port, 'observedAtUtc': checked_at}, {field.ipv4(peer)})
+            summary, hashes = retained[address][1:] if address in retained else verify_source(address, choices[0], checked_at)
         except (OSError, ValueError, KeyError, RecursionError):
             row['status'] = 'invalid-or-expired'
             continue
-        row.update(status='verified', summary=summary, paths=choices[0])
+        row.update(status='verified', summary=summary, paths=choices[0], hashes=hashes)
         exchange_counts[summary['exchangeSha256']] += 1
 
-    groups = []
+    groups, retry_sources = [], []
     for group in rooms:
         bindings = [row for row in results.values() if room_groups[row['seats'][0][0]] == group]
         for row in bindings:
@@ -125,12 +200,14 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
                    for row in bindings]
         result = {'roomIds': list(group), 'complete': complete, 'sources': entries}
         if complete:
-            result['udpSourcePreflights'] = [dict(zip(('listener', 'probe'),
-                (path_reference(path, output.parent) for path in row['paths']), strict=True)) for row in bindings]
+            result['udpSourcePreflights'] = [pair_reference(row['paths'], output.parent) for row in bindings]
+        if launch_matches:
+            retry_sources.extend({'seats': entry['seats'], 'pair': pair_reference(row['paths'], output.parent),
+                                  'exchangeSha256': row['summary']['exchangeSha256'], 'pairSha256': row['hashes']}
+                                 for row, entry in zip(bindings, entries, strict=True) if row['status'] == 'verified')
         groups.append(result)
 
-    complete = (not (unmatched or unreadable) and all(group['complete'] for group in groups)
-                and (launch_check is None or launch_check['complete']) and (binding is None or binding['complete']))
+    complete = not (unmatched or unreadable) and all(group['complete'] for group in groups) and launch_matches
     return {'version': 1, 'scope': 'venue-udp-preflight-only', 'mode': mode,
             'networkPlanSha256': plan_hash,
             'network': 'same-host' if True in address_modes else 'private-lan-plan',
@@ -138,6 +215,9 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
             'checkedAtUtc': checked_at, 'expectedSources': len(expected),
             'verifiedSources': sum(row['status'] == 'verified' for row in results.values()),
             'unmatchedPairs': unmatched, 'unreadablePairs': unreadable, 'groups': groups,
+            **({'retrySources': retry_sources} if not complete and launch_matches else {}),
+            **({'retryReportSha256': prior_hash, 'retainedSources': sum(results[address]['status'] == 'verified' for address in retained)}
+               if prior_hash is not None else {}),
             **({'launcherPreview': launch_check} if launch_check is not None else {}),
             **({'launchBinding': binding} if binding is not None else {})}
 
@@ -147,6 +227,7 @@ def main():
     parser.add_argument('--network-plan', required=True, type=Path)
     parser.add_argument('--pairs', type=Path, help='Version 1 JSON list of original listener and probe report paths')
     parser.add_argument('--batch', type=Path, action='append', default=[], help='Original completed UDP batch report')
+    parser.add_argument('--retry-report', type=Path, help='Incomplete venue report whose verified sources should be checked again')
     parser.add_argument('--launcher-preview', type=Path, help='Original successful Launch-Server.exe --venue-check report')
     parser.add_argument('--launch-plan', type=Path, help='Original revision-guarded Windows launch plan for the provided preview')
     parser.add_argument('--output', required=True, type=Path, help='New readiness report (also usable for sealed verification)')
@@ -155,10 +236,12 @@ def main():
         parser.error('At most 25 existing batch reports are supported.')
     try:
         field.require(not args.output.exists(), 'Use a new output file')
-        result = check_venue(args.network_plan, args.pairs, args.batch, args.output.resolve(), args.launcher_preview, args.launch_plan)
+        result = check_venue(args.network_plan, args.pairs, args.batch, args.output.resolve(), args.launcher_preview, args.launch_plan, args.retry_report)
         with args.output.open('x', encoding='utf-8', newline='\n') as stream:
             json.dump(result, stream, indent=2)
             stream.write('\n')
+    except field.EvidenceError as error:
+        parser.exit(1, f'UDP venue preflight rejected. {error}.\n')
     except (OSError, ValueError, KeyError, TypeError, RecursionError):
         parser.exit(1, 'UDP venue preflight could not read its inputs or save the report. Check the plan, launcher preview and output path.\n')
     summary = {key: result[key] for key in ('complete', 'expectedSources', 'verifiedSources', 'unmatchedPairs', 'unreadablePairs')}
@@ -166,6 +249,8 @@ def main():
         summary['launcherPreviewMatches'] = result['launcherPreview']['complete']
     if 'launchBinding' in result:
         summary['launchPlanMatches'] = result['launchBinding']['complete']
+    if 'retainedSources' in result:
+        summary['retainedSources'] = result['retainedSources']
     print(json.dumps(summary))
     return 0 if result['complete'] else 1
 

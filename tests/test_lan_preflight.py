@@ -1,6 +1,6 @@
 import base64
 from contextlib import contextmanager
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import hashlib
 import hmac
 import importlib.util
@@ -289,6 +289,66 @@ class LanPreflightTests(unittest.TestCase):
         self.assertEqual(['verified', 'missing'], [row['status'] for row in missing['groups'][0]['sources']])
         self.assertNotIn('udpSourcePreflights', missing['groups'][0])
         self.assertFalse(missing['complete'])
+        partial_path = self.root / 'missing.json'
+        original_partial = partial_path.read_bytes()
+        saved, = missing['retrySources']
+        self.assertEqual(first, saved['pair'])
+        self.assertEqual([hashlib.sha256(original_reports[first[key]]).hexdigest() for key in ('listener', 'probe')], saved['pairSha256'])
+        retry = self.venue_check(plan, 'retry.json', '--retry-report', partial_path, '--batch', batch)
+        self.assertEqual(1, retry['retainedSources'])
+        self.assertEqual(hashlib.sha256(original_partial).hexdigest(), retry['retryReportSha256'])
+        self.assertEqual(report['groups'], retry['groups'])
+        self.assertEqual(original_partial, partial_path.read_bytes())
+        repeated = self.venue_check(plan, 'retry-duplicate.json', '--retry-report', partial_path, '--pairs', manual, status=1)
+        self.assertEqual(['duplicate-pair', 'missing'], [row['status'] for row in repeated['groups'][0]['sources']])
+        self.assertEqual(0, repeated['retainedSources'])
+        (self.root / first['probe']).write_bytes(original_reports[first['probe']] + b'\n\x00')
+        changed = self.venue_check(plan, 'retry-changed.json', '--retry-report', partial_path, '--batch', batch, status=1)
+        self.assertEqual(['invalid-or-expired', 'verified'], [row['status'] for row in changed['groups'][0]['sources']])
+        self.assertEqual(0, changed['retainedSources'])
+        (self.root / first['probe']).write_bytes(original_reports[first['probe']])
+
+        def reject_retry(retry_plan, report_path, *flags):
+            output = self.root / 'not-written.json'
+            result = subprocess.run([sys.executable, str(ROOT / 'scripts/check-venue-udp-preflight.py'),
+                                     '--network-plan', str(retry_plan), '--output', str(output),
+                                     '--retry-report', str(report_path), *map(str, flags)], capture_output=True, text=True, timeout=15)
+            self.assertEqual(1, result.returncode, result.stderr)
+            self.assertFalse(output.exists())
+            self.assertNotIn(str(self.root), result.stderr)
+            return result.stderr
+
+        self.assertIn('same original venue network plan', reject_retry(generated, partial_path))
+        self.assertIn('incomplete report', reject_retry(plan, self.root / 'retry.json'))
+        bound_partial = self.venue_check(plan, 'bound-partial.json', '--pairs', manual, '--launch-plan', original,
+                                         '--launcher-preview', guarded_preview, status=1)
+        self.assertEqual(1, len(bound_partial['retrySources']))
+        self.assertIn('same original Windows plan and preview', reject_retry(plan, self.root / 'bound-partial.json'))
+        bound_retry = self.venue_check(plan, 'bound-retry.json', '--retry-report', self.root / 'bound-partial.json', '--batch', batch,
+                                       '--launch-plan', original, '--launcher-preview', guarded_preview)
+        self.assertEqual(bound['launchBinding'], bound_retry['launchBinding'])
+        self.assertEqual(1, bound_retry['retainedSources'])
+
+        old_probe, old_listener = (self.root / first[key] for key in ('probe', 'listener'))
+        stale_at = (datetime.now(timezone.utc) - timedelta(minutes=31)).isoformat()
+        probe_doc = json.loads(old_probe.read_text(encoding='utf-16'))
+        probe_doc['completedAtUtc'] = stale_at
+        old_probe.write_text(json.dumps(probe_doc), encoding='utf-16')
+        listener_rows = [json.loads(line) for line in old_listener.read_text(encoding='utf-8').splitlines()]
+        listener_rows[-1]['completedAtUtc'] = stale_at
+        old_listener.write_text(''.join(json.dumps(row) + '\n' for row in listener_rows), encoding='utf-8')
+        stale = json.loads(original_partial)
+        stale['retrySources'][0]['pairSha256'] = [hashlib.sha256((self.root / first[key]).read_bytes()).hexdigest() for key in ('listener', 'probe')]
+        stale_report = self.venue_json('older-retry.json', stale)
+        renewed = self.venue_pair(port, '127.0.0.2', 'renewed')
+        fresh = self.venue_json('renewed-pairs.json', {'version': 1, 'pairs': [renewed]})
+        expired = self.venue_check(plan, 'retry-expired.json', '--retry-report', stale_report, '--batch', batch, status=1)
+        self.assertEqual(['invalid-or-expired', 'verified'], [row['status'] for row in expired['groups'][0]['sources']])
+        recovered = self.venue_check(plan, 'retry-recovered.json', '--retry-report', self.root / 'retry-expired.json', '--pairs', fresh)
+        self.assertEqual([renewed, second], recovered['groups'][0]['udpSourcePreflights'])
+        self.assertEqual(1, recovered['retainedSources'])
+        old_probe.write_bytes(original_reports[first['probe']])
+        old_listener.write_bytes(original_reports[first['listener']])
         duplicate = self.venue_check(plan, 'duplicate.json', '--pairs', manual, '--batch', self.root / 'readiness.json', status=1)
         self.assertEqual(['duplicate-pair', 'verified'], [row['status'] for row in duplicate['groups'][0]['sources']])
         wrong = self.venue_json('wrong.json', {'version': 1, 'pairs': [{**first, 'listener': second['listener']},
