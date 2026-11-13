@@ -1,5 +1,10 @@
 # 開發進度
 
+## 2026-11-13 六批收件總表列出 UDP 補件原因
+
+- 六批收件總表可在逐席 `pendingSeats` 顯示雙端原檔已變更、已逾時或缺少哪一端。使用兩份原生排演產生的補件報告，總表列出獨立場 5 席、合併場 25 席的原檔變更原因，其餘四批通過。正式驗收拒絕這兩份未完成報告。 [操作方式](EXTERNAL_CLIENTS.md#一次查看六批待補件) · [本機證據](../artifacts/staged-udp-recheck-details/validation.json)
+- 122 項封存及 16 項 LAN 測試通過。舊六批正式摘要逐位元相符，仍核對 80 份戰績確認。功能提交 `cf5618f` 已推送，GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、Quest 3 與 VIVE 實機、MR 場地與廠商硬體仍待現場驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43407573043)
+
 ## 2026-11-13 五房 UDP 離線重驗可匯出補件報告
 
 - `start-verified-venue.py --verify-only --retry-output` 可在原計畫與預覽仍相符、UDP 報告需要補件時保存有效原檔，供既有 `--retry-report` 接續。全部通過時不建立補件檔。 [補件指令](EXTERNAL_CLIENTS.md#補測未完成的全館-udp-預檢)
