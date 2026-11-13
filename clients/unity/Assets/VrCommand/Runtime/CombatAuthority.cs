@@ -7,6 +7,13 @@ using VrCommand.Simulation;
 
 namespace VrCommand.Unity
 {
+    internal enum AuthoritySuspension
+    {
+        ManagementRefresh,
+        ManagementWatchdog,
+        TelemetryFault
+    }
+
     public struct CombatActorState : INetworkSerializable, IEquatable<CombatActorState>
     {
         public Guid id;
@@ -213,7 +220,7 @@ namespace VrCommand.Unity
             serverReady = false;
         }
         public void TelemetryFault()
-        { journalFault = true; Suspend(); Debug.LogError("Telemetry persistence or delivery failed. Combat paused; recover the journal."); }
+        { journalFault = true; Suspend(AuthoritySuspension.TelemetryFault); Debug.LogError("Telemetry persistence or delivery failed. Combat paused; recover the journal."); }
         private bool Capture()
         {
             if (journalFault) return false;
@@ -246,7 +253,9 @@ namespace VrCommand.Unity
             var changed = management == null || snapshot.sequence != observedSequence || managementSuspended;
             if (changed && !CaptureWorld(true)) throw new InvalidOperationException("World recording is faulted.");
             session.Apply(snapshot); desktopResume.Retain(snapshot.players); observedSequence = snapshot.sequence;
-            management = snapshot; managementSuspended = false;
+            management = snapshot;
+            var wasSuspended = managementSuspended;
+            managementSuspended = false;
             if (!ClockDue) clockBoundaryCaptured = false;
             if (session.World.Phase == WorldPhase.Ended && Outbox != null)
             {
@@ -256,11 +265,19 @@ namespace VrCommand.Unity
             }
             if (changed && !CaptureWorld(true)) throw new InvalidOperationException("World recording is faulted.");
             lastManagement = Time.realtimeSinceStartupAsDouble; serverReady = true;
+            if (wasSuspended) Debug.Log(FormattableString.Invariant(
+                $"VR_AUTHORITY_RESUMED observedSequence={observedSequence} phase={session.World.Phase} monotonicSeconds={lastManagement:F3}"));
             if (IsSpawned && IsServer) { Ready.Value = true; Publish(); }
         }
-        public void Suspend()
+        internal void Suspend(AuthoritySuspension reason)
         {
             var first = !managementSuspended; managementSuspended = true; session.Suspend(); serverReady = false;
+            if (first)
+            {
+                var now = Time.realtimeSinceStartupAsDouble;
+                Debug.LogWarning(FormattableString.Invariant(
+                    $"VR_AUTHORITY_SUSPENDED reason={reason} observedSequence={observedSequence} managementAgeSeconds={now - lastManagement:F3} monotonicSeconds={now:F3}"));
+            }
             if (first && !journalFault) CaptureWorld(true);
             if (IsSpawned && IsServer) Ready.Value = false;
         }
@@ -355,7 +372,7 @@ namespace VrCommand.Unity
             {
                 if (Time.realtimeSinceStartupAsDouble - lastManagement > 1.5)
                 {
-                    Suspend(); VenueBootstrap.Instance?.sceneAuthority.SuspendForManagementLoss();
+                    Suspend(AuthoritySuspension.ManagementWatchdog); VenueBootstrap.Instance?.sceneAuthority.SuspendForManagementLoss();
                 }
                 if (ClockDue)
                 {

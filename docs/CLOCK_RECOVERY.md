@@ -6,6 +6,8 @@
 
 管理失聯時，只對該 session 的管理 GET 回503，保留 combat及world發布。Unity 既有安全流程暫停世界、Ready=false，保存 suspended=true 的 Paused 幀；API管理狀態仍 Running，這不是操作員送出 Pause。工具用已接受世界幀與真正本地複本，多次核對 tick 相同及政策未重置。恢復 GET 後同一場次接續活動時間。
 
+遊戲伺服器日誌以 `VR_AUTHORITY_SUSPENDED` 標示進入暫停時先觸發的路徑，包括管理更新失敗、管理更新逾時及封存錯誤。另以 `VR_MANAGEMENT_REFRESH_FAILED` 保存更新結果類型、HTTP 狀態及耗時，以 `VR_AUTHORITY_RESUMED` 保存恢復時的管理序號與場次狀態。這些記錄使用程序的單調時間，不含請求網址、憑證或回應內容。原有的 1.5 秒管理更新逾時規則仍適用。
+
 接近期限時，代理關閉自己既有 world tunnel，拒絕新的 publish upgrade，其他管理與 combat HTTP 正常。Unity計時繼續，恰好期限 tick 停止並 Ready=false；用既有 Windows Development `--vr-replication-probe` 分別觀察真正 server／client，**不讀取或破壞仍有 exclusive lease 的 journal**。後端的已接受序號保持不變且仍 Running，證明未發布的本地到期不能授權 End。
 
 維持本地到期至少6秒後恢復 publication，原 world publisher 重連、原來源精確補送。API收到保存的到期幀後只能出現一次 mission-clock End；原 combat／world雙seal、結果ack與原入場／ledger核對均須通過。完整封存回放須逐幀連續、tick不倒退／不超過期限，保留管理失聯與到期等待兩個階段，末packet及統計與已保存世界相同。這不是世界進程崩潰恢復，也不保證指定某一個ACK曾經丟失。

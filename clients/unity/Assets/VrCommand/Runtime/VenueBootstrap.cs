@@ -163,10 +163,10 @@ namespace VrCommand.Unity
                 while (networkManager.IsListening)
                 {
                     if (managementReady) sceneAuthority.ApplyServerSnapshot(latestSnapshot);
-                    else { sceneAuthority.SuspendForManagementLoss(); combatAuthority.Suspend(); }
+                    else { sceneAuthority.SuspendForManagementLoss(); combatAuthority.Suspend(AuthoritySuspension.ManagementRefresh); }
                     yield return new WaitForSecondsRealtime(0.5f);
                     yield return RefreshManagement();
-                    if (!managementReady) { sceneAuthority.SuspendForManagementLoss(); combatAuthority.Suspend(); }
+                    if (!managementReady) { sceneAuthority.SuspendForManagementLoss(); combatAuthority.Suspend(AuthoritySuspension.ManagementRefresh); }
                 }
             }
         }
@@ -360,6 +360,19 @@ namespace VrCommand.Unity
             }
         }
         private bool refreshingManagement;
+        private string lastRefreshFailure;
+        private long lastRefreshStatus;
+
+        private void RecordRefreshFailure(string reason, long httpStatus, double started)
+        {
+            if (reason == lastRefreshFailure && httpStatus == lastRefreshStatus) return;
+            lastRefreshFailure = reason;
+            lastRefreshStatus = httpStatus;
+            var now = Time.realtimeSinceStartupAsDouble;
+            Debug.LogWarning(FormattableString.Invariant(
+                $"VR_MANAGEMENT_REFRESH_FAILED reason={reason} httpStatus={httpStatus} elapsedSeconds={now - started:F3} monotonicSeconds={now:F3}"));
+        }
+
         private IEnumerator RefreshManagement()
         {
             if (refreshingManagement) { while (refreshingManagement) yield return null; yield break; }
@@ -372,21 +385,32 @@ namespace VrCommand.Unity
             using (var request = UnityWebRequest.Get(configuration.managementApiUrl.TrimEnd('/') + "/api/sessions/" + configuration.sessionId))
             {
                 AuthorizeManagement(request);
+                var started = Time.realtimeSinceStartupAsDouble;
                 yield return request.SendWebRequest();
                 managementReady = false;
-                if (request.result != UnityWebRequest.Result.Success) yield break;
+                if (request.result != UnityWebRequest.Result.Success)
+                {
+                    RecordRefreshFailure(request.result.ToString(), request.responseCode, started);
+                    yield break;
+                }
                 SessionSnapshot snapshot = null;
                 try { snapshot = JsonUtility.FromJson<SessionSnapshot>(request.downloadHandler.text); }
                 catch (Exception) { }
-                if (snapshot == null || snapshot.id != configuration.sessionId || snapshot.environment == null) yield break;
+                if (snapshot == null || snapshot.id != configuration.sessionId || snapshot.environment == null)
+                {
+                    RecordRefreshFailure("InvalidSnapshot", request.responseCode, started);
+                    yield break;
+                }
                 if (snapshot.environment.mode == "MR" && (configuration.role != "Server" || configuration.telemetryOrigin != "GameServer"))
                 {
                     status = "MR REQUIRES A DEDICATED GAME SERVER";
+                    RecordRefreshFailure("UnsupportedMrRole", request.responseCode, started);
                     yield break;
                 }
                 if (snapshot.environment.mode == "MR" && snapshot.roomAlignment?.Covers(snapshot.roomIds) != true)
                 {
                     status = "MR REQUIRES PINNED ROOM ALIGNMENT FILES";
+                    RecordRefreshFailure("MissingMrAlignment", request.responseCode, started);
                     Debug.LogError(status);
                     yield break;
                 }
@@ -394,7 +418,12 @@ namespace VrCommand.Unity
                 try { combatAuthority.ApplyManagement(snapshot); }
                 catch (Exception exception) when (exception is ArgumentException || exception is InvalidOperationException || exception is System.IO.IOException)
                 { status = "MISSION NOT READY - CHECK SERVER CONSOLE"; Debug.LogError("Mission validation: " + exception.Message); valid = false; }
-                if (!valid) yield break;
+                if (!valid)
+                {
+                    RecordRefreshFailure("ApplyRejected", request.responseCode, started);
+                    yield break;
+                }
+                lastRefreshFailure = null;
                 latestSnapshot = snapshot;
                 managementReady = true;
                 if (sceneAuthority.IsSpawned) sceneAuthority.ApplyServerSnapshot(snapshot);

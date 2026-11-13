@@ -5,6 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import time
 import urllib.request
 from venue_http_gate import VenueHttpGate
@@ -13,6 +14,25 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('fault_debrief', ROOT / 'scripts/check-desktop-debrief.py')
 debrief = importlib.util.module_from_spec(spec); spec.loader.exec_module(debrief)
 vm = debrief.venue_module
+
+
+def management_suspension(log, observed_sequence, resumed_sequence):
+    # Read message lines only. Unity emits separate stack traces after warnings.
+    events = [line for line in log.splitlines() if line.startswith(
+        ('VR_MANAGEMENT_REFRESH_FAILED ', 'VR_AUTHORITY_SUSPENDED ', 'VR_AUTHORITY_RESUMED '))]
+    expected = (
+        r'VR_MANAGEMENT_REFRESH_FAILED reason=ProtocolError httpStatus=503 elapsedSeconds=[\d.]+ monotonicSeconds=([\d.]+)',
+        rf'VR_AUTHORITY_SUSPENDED reason=ManagementRefresh observedSequence={observed_sequence} '
+        r'managementAgeSeconds=[\d.]+ monotonicSeconds=([\d.]+)',
+        rf'VR_AUTHORITY_RESUMED observedSequence={resumed_sequence} phase=Running monotonicSeconds=([\d.]+)',
+    )
+    matches = [re.fullmatch(pattern, event) for pattern, event in zip(expected, events)]
+    if len(events) != len(expected) or not all(matches):
+        raise RuntimeError('Native suspension diagnostics did not distinguish the original management refresh outage')
+    times = [float(match.group(1)) for match in matches]
+    if not times[0] <= times[1] < times[2]:
+        raise RuntimeError('Native suspension diagnostics are out of order')
+    return {'events': events, 'observedSequence': observed_sequence, 'resumedSequence': resumed_sequence}
 
 
 def fingerprint():
@@ -87,6 +107,7 @@ def main():
             if venue.state(entry)['state'] != 'Running': raise RuntimeError('Source suspension incorrectly changed management lifecycle')
         hold_seconds = time.monotonic() - hold_started
         venue.proxy.release(); resumed = venue.wait(lambda: (f if not (f := frame())['suspended'] and f['frame']['phase'] == 'Running' and f['frame']['tick'] > frozen_tick else None), 10, 'same-policy recovery')
+        diagnostics = management_suspension(debrief.log_text(venue, names[0]), paused['observedSequence'], resumed['observedSequence'])
         limit = args.seconds * 20
         venue.stage('running-before-publication-fault', durationSeconds=args.seconds, resumedTick=resumed['frame']['tick'])
         venue.wait(lambda: frame()['frame']['tick'] >= limit - 100, args.seconds + 10, 'near deadline')
@@ -126,13 +147,15 @@ def main():
             raise RuntimeError('Fault proxy scope / bounds / reconnection invalid')
         report = {'complete': False, 'source': 'Actual Windows Unity UDP / native local replicas; Simulation rigs', 'headsets': 0, 'durationSeconds': args.seconds,
             'playerBuildReceipt': venue.receipt, 'toolFingerprint': original_fingerprint, 'managementPausedTick': frozen_tick, 'managementHoldSeconds': hold_seconds,
-            'managementSamples': management_samples, 'resumedPacket': resumed, 'acceptedBeforeDue': accepted_before_due,
+            'managementSamples': management_samples, 'managementDiagnostics': diagnostics,
+            'resumedPacket': resumed, 'acceptedBeforeDue': accepted_before_due,
             'localDueSamples': held_samples, 'clientDue': due_client, 'unacceptedDueHoldSeconds': due_hold_seconds, 'proxy': gate,
             'automaticEnd': expiry[0], 'sealed': sealed, 'clientResult': result, 'replay': replay(venue, entry, sealed, limit),
             'checks': ['management loss visibly freezes the authority and published clock', 'same policy resumes without resetting elapsed ticks',
                        'publication loss does not pause an otherwise managed timer', 'native server and client freeze at exact due tick before API acceptance',
                        'unaccepted local due time cannot authorize End', 'restored publication commits exactly one internal End',
-                       'both seals and targeted client result match the final ledger', 'entire sealed replay is contiguous and never exceeds the deadline']}
+                       'both seals and targeted client result match the final ledger', 'entire sealed replay is contiguous and never exceeds the deadline',
+                       'native logs identify the 503 refresh failure, authority suspension and recovery in order']}
     except BaseException as error:
         venue.stage('failed', errorType=type(error).__name__); raise
     finally:
@@ -145,7 +168,7 @@ def main():
         print('Artifacts:', venue.directory, flush=True)
         if not cleanup: raise RuntimeError('Fault fixture cleanup failed')
     if not report or not report['complete']: raise RuntimeError('Fault check incomplete')
-    print('PASS: 8 native clock fault checks; Simulation only', flush=True)
+    print('PASS: 9 native clock fault checks; Simulation only', flush=True)
 
 
 if __name__ == '__main__': main()
