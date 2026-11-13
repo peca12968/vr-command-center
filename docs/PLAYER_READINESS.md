@@ -56,6 +56,8 @@ Windows 三包整合可加上 `--check-room-readiness` 核對兩種模式的實�
 
 控制台 0.31.163 可從「全館場次控制」各房開場狀態按「查看名冊」，直接查看該房玩家及即時參戰快照。五房合併時會篩選到該房，可用「名冊房間」切回全部房間。重新整理同一場次會保留篩選。開場條件仍以原全館檢查為準。
 
+Windows 三包整合驗證可使用 `--prepare-independent-set --check-venue-begin --check-venue-end --check-venue-launcher --check-venue-participation-gate --check-venue-roster-ui`。兩種模式各由 25 個同機玩家端送出實際合成姿態。Chromium 在開場前逐房操作名冊捷徑，核對原入場、房間、席位及有效姿態。 [三包整合驗證](WINDOWS_SERVER_PACKAGE.md#三個可攜包整合驗證)
+
 控制台 0.31.65 的主控可在「全館場次控制」勾選「五房開場須各有 5 席追蹤就緒」。適用於五房合併及各房獨立，包括同時有 VR 和 MR 的五個獨立場次。名冊未滿、仍有合成姿態或原快照未確認時，畫面顯示各房等候原因。勾選後，五房須同時是本次準備中的目標，且每房的五席均有有效追蹤。新登入預設使用一般開始條件。
 
 操作員確認開始時，管理服務依原場次及序號重新核對最新已接受快照。任何一房未通過時，整批維持準備中。程式介面在 `POST /api/venue/phase` 的 `Begin` 本文加入 `requireFullTracking: true`。接受回條保留此值，重試須帶同一請求識別及原選項。MR 來源仍須符合 Quest 3 設定及原 MR 開場條件。

@@ -197,6 +197,7 @@ def main():
     p.add_argument('--check-linked-room-enemies', action='store_true', help='Change one linked room through Chromium and verify original combat and replay')
     p.add_argument('--check-venue-tracking-gate', action='store_true', help='Reject full tracking Begin while the same native roster is otherwise ready')
     p.add_argument('--check-venue-participation-gate', action='store_true', help='Require all 25 effective native seats and verify their original Preparing frames')
+    p.add_argument('--check-venue-roster-ui', action='store_true', help='Open all five original Preparing rosters in the shipped console')
     p.add_argument('--check-venue-end', action='store_true', help='End each native topology in one batch and read its original archives')
     p.add_argument('--check-venue-reports', action='store_true', help='Verify the original reports ZIP for each native End batch')
     p.add_argument('--check-venue-replay-ui', action='store_true', help='Open the original native archives through the shipped console')
@@ -353,6 +354,8 @@ def main():
     if args.check_venue_tracking_gate and not args.check_venue_begin:p.error('--check-venue-tracking-gate requires --check-venue-begin')
     if args.check_venue_participation_gate and not (args.check_venue_begin and args.player_package):
         p.error('--check-venue-participation-gate requires --check-venue-begin and all native player seats')
+    if args.check_venue_roster_ui and not (args.check_venue_participation_gate and args.prepare_independent_set and shutil.which('node')):
+        p.error('--check-venue-roster-ui requires --check-venue-participation-gate, --prepare-independent-set and Node.js')
     if args.check_venue_end and (not args.player_package or args.observe_closure_ui):
         p.error('--check-venue-end requires the three-package check and its own End path')
     if args.check_venue_reports and (not args.check_venue_end or not args.check_room_reports):
@@ -4509,7 +4512,7 @@ def main():
             with (out / f'{recovery_prefix}-{phase}-deployment.json').open('xb') as saved:
                 saved.write(raw)
     try:
-        management_port=venue_browser_port() if args.check_venue_plan_ui else free()
+        management_port=venue_browser_port() if args.check_venue_plan_ui or args.check_venue_roster_ui else free()
         subprocess.run([str(control_exe),'--init',str(data),'--port',str(management_port),'--report',str(out/'control-init.json')],env=env,check=True,timeout=30);keys=read(data/'operator-keys.json')['OperatorKeys'];marker=read(data/'control-instance.json');uri='http://127.0.0.1:'+str(marker['port'])
         control_env = env
         if args.venue_management_https:
@@ -4661,6 +4664,29 @@ def main():
                     if len(rows)==5 and all(row['venueBeginReady'] and row['sessionSequence']==expected.get(row['sessionId']) for row in rows):
                         return rows
                 preparing=wait(begin_when_ready,60,'five fresh original Preparing room aggregates')
+                if args.check_venue_roster_ui:
+                    mode = 'linked' if linked else 'independent'
+                    roster = []
+                    for room in range(1, 6):
+                        owners = [client for client in round_clients if client['player']['roomId'] == room]
+                        roster.append({'roomId': room, 'sessionId': owners[0]['sessionId'],
+                                       'players': [{'id': client['player']['id'], 'admissionId': client['player']['admissionId'],
+                                                    'seat': client['player']['seat'] + 1} for client in owners]})
+                    output = out / (mode + '-venue-roster-ui.json')
+                    driver = ROOT / 'tests/browser/check-venue-roster-native.cjs'
+                    browser = subprocess.run([shutil.which('node'), str(driver)], cwd=driver.parent,
+                        input=json.dumps({'base': uri, 'token': keys['Master'], 'rooms': roster, 'output': str(output)}),
+                        capture_output=True, encoding='utf-8', timeout=90, creationflags=subprocess.CREATE_NO_WINDOW)
+                    if browser.returncode:
+                        diagnostic = browser.stderr
+                        for secret in keys.values():
+                            diagnostic = diagnostic.replace(secret, '[redacted]')
+                        raise RuntimeError(mode + ' roster browser failed: ' + diagnostic[-1000:])
+                    observed = read(output)
+                    check(observed['writeRequests'] == 0 and observed['refreshRoom'] == 5
+                          and len(observed['rooms']) == 5 and sum(len(row['rows']) for row in observed['rooms']) == 25
+                          and request(route)['begin'] == preview,
+                          mode + ' Chromium visits the five original native rosters and retains the unchanged Begin targets')
                 body={'action':'Begin','targets':targets};key=str(uuid.uuid4())
                 if args.check_venue_tracking_gate:
                     denied=request(route,{**body,'requireFullTracking':True},request_id=str(uuid.uuid4()),expected=409)
