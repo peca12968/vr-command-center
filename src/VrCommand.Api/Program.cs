@@ -363,6 +363,12 @@ app.MapGet("/api/venue/closure/{id:guid}/scores.csv", (Guid id, SessionManager m
     var scores = VenueBattleScores.From(manager.FinalVenueReports(id, Actor(context)));
     return Results.File(FinalReportCsv.EncodeVenueScores(scores), "text/csv; charset=utf-8", $"vr-command-venue-scores-v1-{id:D}.csv");
 });
+app.MapGet("/api/venue/closure/{id:guid}/rooms/{roomId:int}/report.csv", (Guid id, int roomId, SessionManager manager, HttpContext context) =>
+{
+    context.Response.Headers.CacheControl = "no-store";
+    var report = manager.FinalVenueRoomReport(id, roomId, Actor(context));
+    return Results.File(FinalReportCsv.Encode(report), "text/csv; charset=utf-8", FinalReportCsv.FileName(report.SessionId, roomId));
+});
 app.MapGet("/api/venue/closure/{id:guid}/replay-at", (Guid id, Guid fromSessionId, long fromFrame, int roomId,
     WorldRecordings worlds, HttpContext context) =>
 {

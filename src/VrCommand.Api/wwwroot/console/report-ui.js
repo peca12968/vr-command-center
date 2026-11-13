@@ -129,6 +129,7 @@ export function mountReport(current, unauthorized, scopeChanged) {
 }
 
 export function mountVenueReport(current, unauthorized, save) {
+  const rooms = mountVenueRoomReports(current, unauthorized, save);
   const reports = mountVenueDownload(current, unauthorized, save, {
     actions: 'venue-report-actions', button: 'export-venue-reports', status: 'venue-report-status',
     route: 'reports', query: '?includeScores=true', filename: 'reports',
@@ -176,10 +177,84 @@ export function mountVenueReport(current, unauthorized, save) {
     conflict: '本批尚未完成雙封存。', invalid: '戰績回條格式不符，可重新下載。',
     failed: '本批戰績回條下載失敗，可重新整理後再試。', saved: '已下載本批戰績回條，請私下保管。'
   });
-  return { update(batch, totals, receipts) {
+  return { active: rooms.active, update(batch, totals, receipts, roomScores) {
     reports(batch); field(batch); fieldWithReceipts(batch, null, receipts); debrief(batch);
     scores(batch, totals ? venueScoreCsv(totals) : null);
+    rooms.update(batch, roomScores);
   } };
+}
+
+function mountVenueRoomReports(current, unauthorized, save) {
+  const rows = document.getElementById('venue-score-rows'), status = document.getElementById('venue-room-report-status');
+  let shown = false, targets = new Map(), pending = null;
+  const updateButtons = () => {
+    for (const button of rows.querySelectorAll('[data-venue-room-report]'))
+      button.disabled = !shown || !!pending || !targets.has(Number(button.dataset.venueRoomReport));
+  };
+  function stop() {
+    pending?.request.abort(); pending = null; status.textContent = '';
+  }
+  function update(batch, scores = []) {
+    const previous = JSON.stringify([...targets]);
+    targets = new Map(scores.map(score => {
+      const { missionName, roomIds, combat, appliedAtSequence } = batch.sessions.find(item =>
+        item.sessionId === score.sessionId && item.roomIds.includes(score.roomId));
+      return [score.roomId, { batchId: batch.requestId, score, original: { missionName, roomIds, combat, appliedAtSequence } }];
+    }));
+    if (pending ? JSON.stringify(targets.get(pending.roomId)) !== pending.target : previous !== JSON.stringify([...targets])) stop();
+    updateButtons();
+  }
+  rows.addEventListener('click', async event => {
+    const button = event.target.closest('[data-venue-room-report]');
+    const roomId = Number(button?.dataset.venueRoomReport), target = targets.get(roomId);
+    const { actor, epoch, key } = current();
+    if (!target || button.disabled || pending || !shown || actor?.role !== 'Master') return;
+    const { batchId, score, original } = target;
+    const request = new AbortController(), operation = pending = { request, roomId, target: JSON.stringify(target) };
+    const active = () => pending === operation && shown && current().epoch === epoch && current().key === key;
+    const timeout = setTimeout(() => request.abort(), 8000);
+    const get = url => fetch(url, { headers: { Authorization: 'Bearer ' + key }, cache: 'no-store', signal: request.signal });
+    updateButtons(); status.textContent = `正在下載房間 ${roomId} 的戰績…`;
+    try {
+      const overview = await get(`/api/sessions/${score.sessionId}/overview`);
+      if (!active()) return;
+      if (overview.status === 401) { unauthorized(); return; }
+      if (!overview.ok) throw new Error('Overview unavailable');
+      const { session, statistics } = await overview.json();
+      if (!active()) return;
+      if (session?.id !== score.sessionId || session.state !== 'Ended' || session.mission?.definition?.name !== original.missionName
+        || !Array.isArray(session.roomIds) || session.roomIds.join() !== original.roomIds.join()
+        || !Number.isSafeInteger(original.appliedAtSequence) || original.appliedAtSequence < 1
+        || !Number.isSafeInteger(session.sequence) || session.sequence < original.appliedAtSequence
+        || (original.combat === 'Sealed' ? session.combatStream?.sealed !== true : session.combatStream != null)
+        || statistics?.sessionId !== session.id || statistics.throughSequence !== session.sequence
+        || statistics.pendingTelemetry !== false || !Array.isArray(statistics.players)) throw new Error('Overview mismatch');
+      const players = statistics.players.filter(player => player.roomId === roomId);
+      if (players.length !== score.totals.players || venueScoreFields.slice(1).some(field =>
+        players.some(player => !Number.isSafeInteger(player[field]) || player[field] < 0)
+        || players.reduce((total, player) => total + player[field], 0) !== score.totals[field])) throw new Error('Room totals mismatch');
+      const response = await get(`/api/venue/closure/${batchId}/rooms/${roomId}/report.csv`);
+      if (!active()) return;
+      if (response.status === 401) { unauthorized(); return; }
+      const filename = `vr-command-report-v1-${score.sessionId}-room-${String(roomId).padStart(2, '0')}.csv`;
+      const attachment = response.headers.get('Content-Disposition')?.match(/^attachment;\s*filename="?([^";\s]+)"?(?:;|$)/i)?.[1];
+      if (!response.ok || attachment !== filename
+        || response.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase() !== 'text/csv') throw new Error('Report mismatch');
+      const blob = await response.blob();
+      if (!active()) return;
+      const bytes = await blob.arrayBuffer();
+      if (!active()) return;
+      if (!matchesFinalCsv(bytes, { session, statistics }, roomId, null)) throw new Error('Report rows mismatch');
+      save(filename, blob);
+      status.textContent = `已下載房間 ${roomId} 的原封存戰績。`;
+    } catch {
+      if (active()) status.textContent = `無法核對房間 ${roomId} 的封存戰績，可重新下載。`;
+    } finally {
+      clearTimeout(timeout);
+      if (pending === operation) { pending = null; updateButtons(); }
+    }
+  });
+  return { update, active(value) { shown = value; if (!shown) stop(); updateButtons(); } };
 }
 
 function mountVenueDownload(current, unauthorized, save, options) {

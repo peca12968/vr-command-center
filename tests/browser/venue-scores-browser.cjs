@@ -9,11 +9,14 @@ module.exports = async ({ context, api, tokens, base, screenshots, check, captur
   captureErrors(page);
   const table = page.locator('#venue-score-table');
   const exportScores = page.locator('#export-venue-scores'), exportStatus = page.locator('#venue-score-status');
+  const exportRoom = room => table.locator(`[data-venue-room-report="${room}"]`);
+  const roomStatus = page.locator('#venue-room-report-status');
   const score = (players, ammoUsed, shotsHit, kills, hitsReceived, damageTaken, accuracyPercent) =>
     ({ players, ammoUsed, shotsHit, kills, hitsReceived, damageTaken, accuracyPercent });
   const blank = score(0, 0, 0, 0, 0, 0, 0);
   const scoresUrl = id => '/venue/closure' + (id ? '/' + id : '') + '?includeScores=true';
   const csvUrl = id => `/venue/closure/${id}/scores.csv`;
+  const roomUrl = (id, room) => `/venue/closure/${id}/rooms/${room}/report.csv`;
   const fetchCsv = id => fetch(base + '/api' + csvUrl(id), { headers: { Authorization: 'Bearer ' + tokens.Master } });
   const command = (id, action) => api(`/sessions/${id}/commands`, 'POST', { commandId: randomUUID(), action });
   async function login(role) {
@@ -32,6 +35,22 @@ module.exports = async ({ context, api, tokens, base, screenshots, check, captur
   async function showTotal(expected) {
     await page.waitForFunction(text => document.querySelector('#venue-score-rows tr:last-child')?.textContent === text
       && !document.querySelector('#venue-score-table').hidden, '本批合計' + expected.join(''), { polling: 100 });
+  }
+  async function checkRoomDownload(batchId, sessionId, room, rowType, playerId, label) {
+    const url = base + '/api' + roomUrl(batchId, room);
+    const served = page.waitForResponse(response => response.url() === url && response.ok());
+    const saved = page.waitForEvent('download');
+    await exportRoom(room).click();
+    const [download, response] = await Promise.all([saved, served]);
+    const bytes = await fs.readFile(await download.path());
+    const original = await fetch(base + `/api/sessions/${sessionId}/rooms/${room}/report.csv`, {
+      headers: { Authorization: 'Bearer ' + tokens.Master }
+    });
+    const records = readCsv(bytes);
+    check(original.ok && bytes.equals(Buffer.from(await original.arrayBuffer())) && response.headers()['cache-control'] === 'no-store'
+      && download.suggestedFilename() === `vr-command-report-v1-${sessionId}-room-0${room}.csv`
+      && records.length === 1 && records[0].sessionId === sessionId && records[0].rowType === rowType
+      && records[0].reportRoomId === String(room) && records[0].playerId === playerId, label);
   }
   async function checkDownload(scores, label) {
     const { requestId } = scores, saved = page.waitForEvent('download');
@@ -105,7 +124,7 @@ module.exports = async ({ context, api, tokens, base, screenshots, check, captur
     assert.deepEqual(await api('/venue/closure/' + independent), { batch: waitingReport.batch });
     await table.waitFor();
     check(!Object.hasOwn(waitingReport, 'scores')
-      && (await table.locator('[data-venue-score-room="1"] td').allTextContents()).join('|') === '房間 1|1|1|1|1|1|20|100%'
+      && (await table.locator('[data-venue-score-room="1"] td').allTextContents()).join('|') === '房間 1|1|1|1|1|1|20|100%|下載 CSV'
       && (await table.locator('[data-venue-score-room="2"] td').allTextContents()).join('|') === '房間 2|等待戰鬥封存'
       && await table.getByText('本批合計', { exact: true }).count() === 0,
       'The original final room scores appear while the waiting room has no numeric cells or partial batch total');
@@ -118,6 +137,31 @@ module.exports = async ({ context, api, tokens, base, screenshots, check, captur
     check(reportZip.status === 409 && (await reportZip.json()).roomIds.join() === '2'
       && await page.locator('#export-venue-reports').isDisabled(),
       'Partial room results leave the original batch ZIP gated on the last combat seal');
+    const unsealedRoom = await api(roomUrl(independent, 2), 'GET', undefined, 'Master', 409);
+    await api(roomUrl(independent, 1), 'GET', undefined, 'Room1', 403);
+    await api(roomUrl(independent, 1), 'GET', undefined, 'GameServer', 403);
+    await api(roomUrl(independent, 4), 'GET', undefined, 'Master', 404);
+    await api(roomUrl(independent, 6), 'GET', undefined, 'Master', 400);
+    await api(roomUrl(randomUUID(), 1), 'GET', undefined, 'Master', 404);
+    check(unsealedRoom.roomIds.join() === '2' && await exportRoom(2).count() === 0,
+      'The batch room route requires Master and the original sealed room, and reports the waiting room');
+    await checkRoomDownload(independent, first, 1, 'Player', alpha, 'A ready room downloads its original player CSV before the other room seals');
+    await checkRoomDownload(independent, empty, 3, 'Session', '', 'An empty room downloads its original session row before the other room seals');
+    const roomCsv = base + '/api' + roomUrl(independent, 1);
+    let roomDownloads = 0;
+    const countRoomDownload = () => roomDownloads++;
+    page.on('download', countRoomDownload);
+    try {
+      await page.route(roomCsv, async route => {
+        const response = await route.fetch();
+        const altered = (await response.body()).toString('utf8').replaceAll(alpha, randomUUID());
+        await route.fulfill({ response, body: altered });
+      }, { times: 1 });
+      await exportRoom(1).click();
+      await roomStatus.filter({ hasText: '無法核對房間 1' }).waitFor();
+      check(roomDownloads === 0 && await exportRoom(1).isEnabled(),
+        'A substituted player row with the original filename is rejected and the room can retry');
+    } finally { page.off('download', countRoomDownload); }
     await table.screenshot({ path: path.join(screenshots, 'venue-battle-scores-awaiting-seal.png') });
     const latestWithReceipts = base + '/api' + scoresUrl() + '&includeDebriefReceipts=true';
     const corrupt = async route => {
@@ -141,7 +185,7 @@ module.exports = async ({ context, api, tokens, base, screenshots, check, captur
     ], total: score(2, 4, 2, 1, 1, 20, 50) });
     await showTotal([2, 4, 2, 1, 1, 20, '50%']);
     check(separate.batch.sessions[1].world === 'Missing' && (await table.locator('[data-venue-score-room="3"] td').allTextContents()).join('|')
-      === '房間 3|0|0|0|0|0|0|0%', 'Independent room totals include the original empty room and weighted accuracy once combat is final');
+      === '房間 3|0|0|0|0|0|0|0%|下載 CSV', 'Independent room totals include the original empty room and weighted accuracy once combat is final');
     assert.deepEqual(await api('/venue/closure/' + independent), { batch: separate.batch });
     const privateRead = await fetch(base + '/api' + scoresUrl(independent), { headers: { Authorization: 'Bearer ' + tokens.Master } });
     await api(scoresUrl(independent), 'GET', undefined, 'Room1', 403);
@@ -161,7 +205,7 @@ module.exports = async ({ context, api, tokens, base, screenshots, check, captur
       ({ streamId: linkedStream, streamSequence: index + 1, observedSequence: linkedSequence, report: record(event) })), 'GameServer');
     const linkedBatch = await finish();
     assert.deepEqual((await api(scoresUrl(linkedBatch))).readyRoomScores, { requestId: linkedBatch, rooms: [] });
-    await page.waitForFunction(() => document.querySelectorAll('#venue-score-rows td[colspan="7"]').length === 5, null, { polling: 100 });
+    await page.waitForFunction(() => document.querySelectorAll('#venue-score-rows td[colspan="8"]').length === 5, null, { polling: 100 });
     check(await table.getByText('本批合計', { exact: true }).count() === 0 && await exportScores.isHidden(),
       'All five Linked rooms wait together for the shared combat seal');
     await api(`/sessions/${linked}/combat-stream/seal`, 'POST', { streamId: linkedStream, finalSequence: linkedEvents.length }, 'GameServer');
@@ -171,6 +215,7 @@ module.exports = async ({ context, api, tokens, base, screenshots, check, captur
       total: score(2, 3, 1, 0, 0, 0, 33.33) });
     await showTotal([2, 3, 1, 0, 0, 0, '33.33%']);
     check(await table.locator('[data-venue-score-room]').count() === 5, 'Linked room scores count their original players once and show all five rooms');
+    await checkRoomDownload(linkedBatch, linked, 5, 'Player', wing, 'A Linked room exports only its players from the shared session');
     await checkDownload(combined.scores, 'Linked CSV counts the shared session once and preserves the original decimal accuracy');
 
     await page.locator('#venue-closure-load').click();
@@ -190,6 +235,7 @@ module.exports = async ({ context, api, tokens, base, screenshots, check, captur
     await page.locator('#refresh').click();
     await showTotal([2, 4, 2, 1, 1, 20, '50%']);
     check(await table.locator('[data-venue-score-room]').count() === 3, 'The original independent totals return after the rooms have been reused by Linked');
+    await checkRoomDownload(independent, first, 1, 'Player', alpha, 'Historical room CSV resolves the original session after Linked reused the room');
     const historicalCsv = base + '/api' + csvUrl(independent);
     let downloads = 0;
     page.on('download', () => downloads++);

@@ -39,6 +39,20 @@ public sealed partial class SessionManager
         }
     }
 
+    public FinalSessionReport FinalVenueRoomReport(Guid requestId, int roomId, OperatorIdentity actor)
+    {
+        RequireVenueMaster(actor);
+        if (roomId is < 1 or > RoomCount) throw new ArgumentException("Invalid report room.");
+        lock (gate)
+        {
+            var session = EndEntries(requestId).Select(entry => Find(entry.SessionId).View)
+                .SingleOrDefault(view => view.RoomIds.Contains(roomId))
+                ?? throw new KeyNotFoundException("No original session for this room in the venue End batch.");
+            if (!CanExportFinalReport(session)) throw new VenueReportsNotReadyException([roomId]);
+            return FinalReport(session.Id, actor, roomId);
+        }
+    }
+
     public FinalSessionReport FinalReport(Guid id, OperatorIdentity actor) => FinalReport(id, actor, null);
 
     public FinalSessionReport FinalPlayerReport(Guid id, Guid playerId, OperatorIdentity actor)

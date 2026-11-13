@@ -1214,7 +1214,8 @@ function renderVenueClosure(report, loading = false) {
     rows.append(result);
   }
   $('venue-closure-table').hidden = false;
-  venueReport.update(batch, renderVenueScores(batch, report.scores, report.readyRoomScores), receipts);
+  const battle = renderVenueScores(batch, report.scores, report.readyRoomScores);
+  venueReport.update(batch, battle?.totals, receipts, battle?.rooms);
 }
 function venueDebriefRooms(batch, summary) {
   if (!summary || typeof batch.requestId !== 'string' || summary.requestId !== batch.requestId
@@ -1257,14 +1258,23 @@ function renderVenueScores(batch, scores, readyScores) {
   const rows = allRooms.sort(([a], [b]) => a - b).map(([id]) => {
     const label = '房間 ' + id, score = actual.get(id);
     const item = score ? scoreRow(label, score.totals) : row([label, '等待戰鬥封存']);
-    if (!score) item.lastElementChild.colSpan = keys.length + 1;
+    if (score) {
+      const downloadRoom = element('button', '下載 CSV', 'quiet small');
+      downloadRoom.type = 'button'; downloadRoom.dataset.venueRoomReport = id;
+      downloadRoom.setAttribute('aria-label', `下載房間 ${id} 的原批次戰績 CSV`);
+      item.insertCell().append(downloadRoom);
+    } else item.lastElementChild.colSpan = keys.length + 2;
     item.dataset.venueScoreRoom = id;
     return item;
   });
-  if (!partial) rows.push(scoreRow('本批合計', scores.total));
+  if (!partial) {
+    const total = scoreRow('本批合計', scores.total);
+    total.insertCell();
+    rows.push(total);
+  }
   $('venue-score-rows').replaceChildren(...rows);
   $('venue-score-table').hidden = false;
-  if (!partial) return { ...scores, rooms: ordered };
+  return { rooms: ordered, totals: partial ? null : { ...scores, rooms: ordered } };
 }
 function row(cells) { const tr = element('tr'); for (const value of cells) { const td = element('td'); if (value instanceof Node) td.append(value); else td.textContent = value; tr.append(td); } return tr; }
 function emptyTable(id, columns, message) { const tr = element('tr'), td = element('td', message, 'empty-cell'); td.colSpan = columns; tr.append(td); $(id).replaceChildren(tr); }
@@ -1995,6 +2005,7 @@ function tab(name, worldTarget = null) {
   roomReadiness.active(name === 'operations');
   closure.active(name === 'operations');
   venueDebrief.active(name === 'operations');
+  venueReport.active(name === 'operations');
   alignment.active(name === 'missions' && master());
   alignmentPins.active(name === 'operations');
   seatDeployments.forEach(panel => panel.active(name === 'operations'));
