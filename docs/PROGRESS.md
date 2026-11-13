@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 六批場館驗收收件檢查
+
+- `--inspect-venue-stages` 一次檢查 5、10、25 人的獨立與合併六批資料，列出待補的模式與人數，並指出原清單項次、缺件原因及跨批衝突。 [操作方式](EXTERNAL_CLIENTS.md#一次查看六批待補件)
+- 本機通過 114 項測試。重驗既有 Windows 同機六批的 80 份戰績回條，正式驗收摘要與原輸出逐位元一致。另用一份測試清單在同一輪定位缺少清單、重複路徑、缺少啟動回條及誤用其他批次回條，退出碼為 1 並保留完整 JSON。原始清單雜湊一致。 [本機驗證摘要](../artifacts/staged-venue-inspection-validation.json)
+- 功能來源 `8f447cf` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43339802247)
+
 ## 2026-11-13 六批 Windows 啟動回條驗收
 
 - `stages.json` 可啟用 `requireVerifiedVenueStart`，逐批核對獨立與合併模式的 5、10、25 人啟動回條。摘要保留各批的啟動 ID，並拒絕重複 ID、缺件或其他批次的回條。 [操作方式](EXTERNAL_CLIENTS.md#六批使用各自的-windows-啟動回條)
