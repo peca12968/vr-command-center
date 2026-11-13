@@ -27,7 +27,7 @@ $page.signals
 
 ## 現況
 
-硬體由外部公司負責，目前尚待技術資料或 SDK。模擬器 0.2.17 支援以下即時排演，以及[離線回饋模擬](HARDWARE_SIMULATOR.md)的事件重建、佇列、重送和到期測試。設備輸入、強度映射、實體停止及廠商協議列入後續實機驗收。
+硬體由外部公司負責，目前尚待技術資料或 SDK。模擬器 0.2.18 支援以下即時排演，以及[離線回饋模擬](HARDWARE_SIMULATOR.md)的事件重建、佇列、重送和到期測試。設備輸入、強度映射、實體停止及廠商協議列入後續實機驗收。
 
 ### 依現行名冊建立座位綁定
 
@@ -122,6 +122,15 @@ dotnet .\VrCommand.HardwareSimulator.dll --verify-venue-report ..\venue\venue-bi
 輸出列出各房的退出碼、終止原因及模擬確認、取消與模擬設備失敗的訊號數。`verified` 表示報告互相一致。`rehearsalComplete` 反映原排演結果，即使某房排演失敗，只要原報告一致仍可核對。命令在檔案缺漏、變更、場次不符或版本不符時回傳退出碼 1。這些雜湊供交接核對，實體送達與停止仍需設備端驗收。
 
 模擬器 0.2.17 產生版本 3 總報告。交接時也須保留綁定清單同目錄中的 `room-01.json` 至 `room-05.json`。工具核對排演實際讀入的設定檔雜湊，以及每筆訊號的設備、玩家、入場及席位是否與設定相符。輸出 `configurationsVerified: true` 並逐席列出結果，席號從 0 起算。版本 2 仍可查各房總數，`configurationsVerified` 為 `false`。
+
+模擬器 0.2.18 可將原綁定檔與原報告打包成單一 ZIP。接收方可直接驗證 ZIP，核對結果與讀取原資料夾相同。ZIP 包含場次、玩家、入場與設備識別，請私下交接。
+
+```powershell
+dotnet .\VrCommand.HardwareSimulator.dll --pack-venue-report ..\venue\venue-bindings.json --report-directory ..\rehearsal-01 --output ..\rehearsal-01.zip
+dotnet .\VrCommand.HardwareSimulator.dll --verify-venue-zip ..\rehearsal-01.zip
+```
+
+打包時須指定新 ZIP 路徑。原檔核對失敗時不會發布 ZIP。版本 3 收錄五房設定，版本 2 收錄可核對的原清單及報告。兩個指令均可離線執行。
 
 #### 停止五房排演中的指定房間
 

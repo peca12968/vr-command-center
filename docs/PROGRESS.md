@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 五房硬體模擬報告可用單一 ZIP 交接
+
+- 模擬器 0.2.18 以同一份原始檔案執行核對及打包，接收方可直接核對 ZIP。合併及獨立各保留 12 份原檔，舊版本 2 的 ZIP 保留 7 份。拒絕缺件、修改、重複名稱與非原定路徑，且保留既有輸出。 [下載套件](../artifacts/hardware-packages/hardware-simulator-0.2.18-net10.zip) · [交接方式](HARDWARE.md#離線核對五房排演結果)
+- 91 項即時及 38 項離線檢查通過。解壓版重建兩份 ZIP 並逐位元核對，另重驗舊格式與離線範例。首次測試的 ZIP 斷言已過，但腳本覆用了編譯檔清單變數，導致最後核對中止。修正後完整重驗通過。重驗有一筆測試用 HTTP 中繼的連線中止例外，原程序清理通過。 [驗證摘要](../artifacts/hardware-venue-handoff-0218-validation.json)
+- 功能提交 `9c1965e` 與測試調整 `82fac5c` 已推送。GitHub Actions 因帳務或支出上限未啟動。廠商設備、實體回饋與停止、頭盔、MR 場地及跨機 25 人仍待驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43418990355)
+
 ## 2026-11-13 五房硬體排演可核對原設定與逐席結果
 
 - 模擬器 0.2.17 以版本 3 總報告保存原五份房間設定的雜湊。離線核對會比對每筆訊號的設備、玩家、入場及席位，再輸出逐席模擬確認、取消與失敗數。舊版本 2 報告仍可查看各房總數。 [下載套件](../artifacts/hardware-packages/hardware-simulator-0.2.17-net10.zip) · [操作方式](HARDWARE.md#離線核對五房排演結果)
