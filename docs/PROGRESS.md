@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 瀏覽器預檢清單的 Windows 全流程驗收
+
+- 三包整合工具使用控制台 0.31.162 的原始瀏覽器下載，核對啟動計畫、UDP 預檢、Windows 就緒與結束檔。戰後用同一份預檢清單核對伺服器觀察到的各席來源。 [重跑方式](WINDOWS_SERVER_PACKAGE.md#從主控台下載場館計畫)
+- 獨立與合併各 25 個同機 Windows 模擬玩家完成入場和結算。581 項套件檢查、26 項 Chromium 檢查及 10 項伺服器包測試通過，共核對 6 組 UDP、50 份戰績回條及 1,024 格封存回放。原下載檔雜湊和啟動回條相符，收尾無遺留程序。 [本機驗證摘要](../artifacts/venue-console-network-native-validation.json)
+- 整合驗證來源 `8b6ad24` 已推送，控制台來源為 `eae45ac`。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43341464786)
+
 ## 2026-11-13 從控制台下載五房 UDP 預檢清單
 
 - 控制台 0.31.162 可在 Windows 啟動計畫頁選取席位 IPv4 表，依五房獨立或合併模式匯出預檢清單。下載前重新核對場次，席位表留在瀏覽器。 [操作方式](WINDOWS_SERVER_PACKAGE.md#從主控台下載場館計畫)
