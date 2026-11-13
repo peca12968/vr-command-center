@@ -743,6 +743,70 @@ class FieldResultsTests(unittest.TestCase):
                               'missingFile': {'kind': 'worldJournal', 'name': 'room-01.worldlog'}}, inspection['issues'][-1])
             self.assertNotIn('private-directory', json.dumps(inspection))
 
+    def test_staged_inspection_locates_incomplete_venue_and_quest_udp_reports(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = self.staged_plan(root)
+            plan_path = root / 'stages.json'
+            plan_path.write_text(json.dumps(plan), encoding='utf-8')
+            first, second = (root / name for name in plan['venueManifests'][:2])
+            originals = {path: path.read_bytes() for path in (first, second)}
+            venue_groups = [{'roomIds': [room], 'complete': room != 5,
+                             'sources': [{'seats': [{'roomId': room, 'seat': 1}],
+                                          'status': 'verified' if room != 5 else 'invalid-or-expired'}]}
+                            for room in range(1, 6)]
+            venue = {'version': 1, 'scope': 'venue-udp-preflight-only', 'mode': 'Independent', 'complete': False,
+                     'groups': venue_groups, 'expectedSources': 5, 'verifiedSources': 4, 'unmatchedPairs': 1,
+                     'unreadablePairs': 0, 'inbox': {'issues': [{'files': ['private-file.json']}]},
+                     'launcherPreview': {'complete': True}, 'launchBinding': {'complete': True}}
+            quest = {'version': 1, 'scope': 'quest-udp-preflight-only', 'mode': 'Linked', 'complete': False,
+                     'groups': [{'roomIds': [1, 2, 3, 4, 5], 'complete': False, 'seats': [
+                         {'roomId': 1, 'seat': 1, 'stage': 'verified', 'complete': True, 'listener': 'private-file.json'},
+                         {'roomId': 3, 'seat': 1, 'stage': 'device', 'complete': False}]}],
+                     'expectedSeats': 2, 'verifiedSeats': 1}
+            for path, evidence in ((first, venue), (second, quest)):
+                report = path.parent / 'udp.json'
+                report.write_text(json.dumps(evidence), encoding='utf-8')
+                manifest = json.loads(originals[path])
+                manifest['udpPreflightBatch' if path == first else 'udpPreflightBatches'] = (
+                    report.name if path == first else [report.name, 'private-directory/missing-quest-udp.json'])
+                path.write_text(json.dumps(manifest), encoding='utf-8')
+            command = [sys.executable, str(SCRIPT), '--venue-stages', str(plan_path)]
+            result = subprocess.run([*command, '--inspect-venue-stages'], capture_output=True)
+            self.assertEqual(1, result.returncode, result.stderr)
+            report = json.loads(result.stdout)
+            self.assertEqual([[1], [2]], [issue['entries'] for issue in report['issues']])
+            self.assertEqual([{'roomId': 5, 'seat': 1, 'status': 'invalid-or-expired'}],
+                             report['issues'][0]['udpPreflight'][0]['pendingSeats'])
+            self.assertEqual(1, report['issues'][0]['udpPreflight'][0]['inboxIssues'])
+            self.assertEqual([{'roomId': 3, 'seat': 1, 'status': 'device'}], report['issues'][1]['udpPreflight'][0]['pendingSeats'])
+            self.assertEqual({'report': 2, 'name': 'missing-quest-udp.json', 'status': 'missing-report'},
+                             report['issues'][1]['udpPreflight'][1])
+            self.assertNotIn(b'private-file.json', result.stdout)
+            self.assertNotIn(b'private-directory', result.stdout)
+            self.assertNotIn(str(root).encode(), result.stdout)
+            rejected = subprocess.run(command, capture_output=True)
+            self.assertEqual(1, rejected.returncode)
+            self.assertIn(b'Provide a complete UDP preflight batch', rejected.stderr)
+
+            venue['groups'][-1]['complete'] = True
+            venue['groups'][-1]['sources'][0]['status'] = 'verified'
+            venue.update(verifiedSources=5, unmatchedPairs=0, launchBinding={'complete': False})
+            venue.pop('inbox')
+            (first.parent / 'udp.json').write_text(json.dumps(venue), encoding='utf-8')
+            only_binding = field.verify_venue_stages(plan_path, inspect=True)['issues'][0]['udpPreflight'][0]
+            self.assertFalse(only_binding['launchBindingComplete'])
+            self.assertEqual([], only_binding['pendingSeats'])
+
+            quest['groups'][0]['seats'][1]['roomId'] = 1
+            (second.parent / 'udp.json').write_text(json.dumps(quest), encoding='utf-8')
+            bad = field.verify_venue_stages(plan_path, inspect=True)['issues'][1]
+            self.assertIn('repeats a seat', bad['reason'])
+            self.assertNotIn('udpPreflight', bad)
+            for path, original in originals.items():
+                path.write_bytes(original)
+            self.assertEqual(80, field.verify_venue_stages(plan_path)['serverAcknowledgements'])
+
     def test_staged_inspection_lists_windows_inbox_seats_and_files_by_batch(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

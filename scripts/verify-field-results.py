@@ -1,7 +1,7 @@
 """Check sealed Windows server results against Windows player logs or Quest logcat."""
 import argparse
 from bisect import bisect_left
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_EVEN
 import hashlib
@@ -64,6 +64,12 @@ class QuestCapturesIncomplete(EvidenceError):
         super().__init__('Quest capture reports must cover the planned Quest seats exactly' if captures['missingSeats']
                          else 'Quest capture logs are missing or do not match their original reports')
         self.captures = captures
+
+
+class UdpPreflightIncomplete(EvidenceError):
+    def __init__(self, reports):
+        super().__init__('Original UDP preflight reports are incomplete')
+        self.reports = reports
 
 
 class VenueStageMismatch(EvidenceError):
@@ -1668,6 +1674,85 @@ def read_udp_preflight_batch(path, mode, expected_rooms, *, expected_sessions=No
     return udp_preflight_batch(batch, path, mode, expected_rooms, expected_sessions=expected_sessions, venue_plan_hash=venue_plan_hash)
 
 
+def inspect_incomplete_udp_preflight(path, mode, expected_rooms, players_per_room, venue_network):
+    report = read_json(content(path))
+    require(type(report) is dict and type(report.get('complete')) is bool, 'Invalid UDP preflight report')
+    if report['complete']:
+        return None
+    scope = report.get('scope')
+    require(integer(report.get('version'), 1, 1) and scope in ('venue-udp-preflight-only', 'quest-udp-preflight-only')
+            and report.get('mode') == mode, 'Incomplete UDP preflight must match the original mode and report type')
+    venue = scope == 'venue-udp-preflight-only'
+    if venue and venue_network is not None:
+        require(report.get('networkPlanSha256') == venue_network['sha256'], 'UDP preflight references a different original venue network plan')
+    groups = report.get('groups')
+    require(type(groups) is list and 1 <= len(groups) <= len(expected_rooms), 'Invalid UDP endpoint groups')
+    venue_statuses = {'missing', 'invalid-or-expired', 'duplicate-pair', 'duplicate-exchange', 'verified'}
+    quest_failures = {'device', 'key', 'listener', 'probe', 'pair', 'budget', 'not-attempted', 'interrupted', 'duplicate', 'expired'}
+    seen_groups, seen_seats, issues = set(), set(), []
+    expected_sources = verified_sources = 0
+    for group in groups:
+        require(type(group) is dict and type(group.get('complete')) is bool, 'Invalid UDP endpoint group')
+        rooms = group.get('roomIds')
+        require(type(rooms) is list and all(type(room) is int for room in rooms) and rooms in expected_rooms
+                and tuple(rooms) not in seen_groups, 'Invalid or repeated UDP endpoint group')
+        seen_groups.add(tuple(rooms))
+        rows = group.get('sources' if venue else 'seats')
+        require(type(rows) is list and 1 <= len(rows) <= len(rooms) * players_per_room, 'Invalid UDP source list')
+        outcomes = []
+        for row in rows:
+            require(type(row) is dict, 'Invalid UDP source row')
+            if venue:
+                seats, status = row.get('seats'), row.get('status')
+                require(type(status) is str and status in venue_statuses and type(seats) is list
+                        and 1 <= len(seats) <= len(rooms) * players_per_room, 'Invalid venue UDP source outcome')
+                verified = status == 'verified'
+            else:
+                seats, status = [row], row.get('stage')
+                require(type(row.get('complete')) is bool and type(status) is str, 'Invalid Quest UDP seat outcome')
+                verified = row['complete']
+                require(status in ({'verified', 'reused'} if verified else quest_failures), 'Invalid Quest UDP seat outcome')
+            outcomes.append(verified)
+            for seat in seats:
+                require(type(seat) is dict, 'Invalid UDP seat')
+                key = (integer(seat.get('roomId'), 1, 5), integer(seat.get('seat'), 1, 5))
+                require(key[0] in rooms and key not in seen_seats, 'UDP preflight repeats a seat or uses the wrong room')
+                seen_seats.add(key)
+                if not verified:
+                    issues.append({'roomId': key[0], 'seat': key[1], 'status': status})
+        require(group['complete'] == all(outcomes), 'UDP endpoint completeness differs from its source outcomes')
+        expected_sources += len(outcomes)
+        verified_sources += sum(outcomes)
+    counts = Counter(room for room, _ in seen_seats)
+    require(all(count <= players_per_room for count in counts.values()), 'UDP preflight seat counts exceed the staged room sizes')
+    if venue:
+        require(all(counts[room] == players_per_room for room in QUEST_ROOMS)
+                and (venue_network is None or seen_seats == venue_network['seats'].keys()),
+                'Venue UDP preflight does not cover the original seat inventory')
+    total_field, passed_field = ('expectedSources', 'verifiedSources') if venue else ('expectedSeats', 'verifiedSeats')
+    require(integer(report.get(total_field), 1, 25) == expected_sources
+            and integer(report.get(passed_field), 0, 25) == verified_sources, 'UDP preflight totals differ from the source outcomes')
+    summary = {'scope': scope, total_field: expected_sources, passed_field: verified_sources,
+               'pendingSeats': sorted(issues, key=lambda row: (row['roomId'], row['seat']))}
+    if venue:
+        for key in ('unmatchedPairs', 'unreadablePairs'):
+            summary[key] = integer(report.get(key), 0, 50)
+        for key in ('launcherPreview', 'launchBinding'):
+            if key in report:
+                require(type(report[key]) is dict and type(report[key].get('complete')) is bool, 'Invalid UDP launch check outcome')
+                summary[key + 'Complete'] = report[key]['complete']
+        if 'inbox' in report:
+            inbox = report['inbox']
+            require(type(inbox) is dict and type(inbox.get('issues')) is list and len(inbox['issues']) <= 100, 'Invalid UDP inbox issues')
+            summary['inboxIssues'] = len(inbox['issues'])
+        require(bool(issues) or summary['unmatchedPairs'] or summary['unreadablePairs'] or summary.get('inboxIssues')
+                or any(summary.get(key + 'Complete') is False for key in ('launcherPreview', 'launchBinding')),
+                'Incomplete venue UDP report has no pending sources or reported issues')
+    else:
+        require(bool(issues), 'Incomplete Quest UDP report has no pending seats')
+    return summary
+
+
 def udp_preflight_distinct_roster(report):
     require(type(report) is dict, 'Expected a UDP report object')
     distinct = report.get('requireDistinctRemoteRoster', False)
@@ -2260,7 +2345,7 @@ def read_windows_link_criteria(document):
     return criteria
 
 
-def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_logs=False,
+def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_logs=False, inspect_udp=False,
                        staged_roster=None, staged_link_criteria=None, expected_stage=None):
     manifest_path = manifest_path.resolve(strict=True)
     with manifest_path.open('rb') as stream:
@@ -2411,6 +2496,24 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     require(not preflights or all('udpPreflight' in entry for entry in entries), 'Provide UDP preflight reports for every session in this batch')
     require(not source_lists or batch_supplied or all('udpSourcePreflights' in entry for entry in entries),
             'Provide all-source UDP preflight reports for every session in this batch')
+    udp_batch_paths = None
+    if inspect_udp and batch_supplied:
+        names = [manifest['udpPreflightBatch']] if single_batch else manifest['udpPreflightBatches']
+        require(type(names) is list and 1 <= len(names) <= 25, 'Provide 1 to 25 Quest UDP batch reports')
+        udp_batch_paths = []
+        incomplete = []
+        for index, name in enumerate(names, 1):
+            try:
+                path = evidence_path(name, kind='udpPreflightBatch')
+            except MissingEvidence as error:
+                incomplete.append({'report': index, 'name': error.file_name, 'status': 'missing-report'})
+                continue
+            udp_batch_paths.append(path)
+            report = inspect_incomplete_udp_preflight(path, mode, expected_rooms, players_per_room, venue_network)
+            if report is not None:
+                incomplete.append({'report': index, 'name': path.name, 'status': 'incomplete', **report})
+        if incomplete:
+            raise UdpPreflightIncomplete(incomplete)
 
     venue_launcher, venue_results, verified_start = None, {}, None
     wants_verified_start = 'verifiedVenueStart' in manifest
@@ -2424,7 +2527,8 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
             include_instance=wants_verified_start)
     start_readiness_path = None
     if wants_verified_start:
-        start_readiness_path = evidence_path(manifest['udpPreflightBatch'], kind='udpPreflightBatch')
+        start_readiness_path = (udp_batch_paths[0] if udp_batch_paths is not None
+                                else evidence_path(manifest['udpPreflightBatch'], kind='udpPreflightBatch'))
         verified_start = read_verified_venue_start(evidence_path(manifest['verifiedVenueStart'], kind='verifiedVenueStart'),
                                                   start_readiness_path, venue_launcher, venue_results, mode)
         venue_launcher.pop('instanceId')
@@ -2432,8 +2536,9 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     if batch_supplied and not inspect_windows:
         batch_names = [manifest['udpPreflightBatch']] if single_batch else manifest['udpPreflightBatches']
         require(type(batch_names) is list and 1 <= len(batch_names) <= 25, 'Provide 1 to 25 Quest UDP batch reports')
-        for name in batch_names:
-            batch, launch = read_udp_preflight_batch(start_readiness_path or evidence_path(name, kind='udpPreflightBatch'), mode, expected_rooms,
+        for index, name in enumerate(batch_names):
+            path = start_readiness_path or (udp_batch_paths[index] if udp_batch_paths is not None else evidence_path(name, kind='udpPreflightBatch'))
+            batch, launch = read_udp_preflight_batch(path, mode, expected_rooms,
                                                      expected_sessions={tuple(row['roomIds']): sid for sid, row in expected.items()},
                                                      venue_plan_hash=venue_network['sha256'] if venue_network else None)
             if launch is not None:
@@ -2887,7 +2992,7 @@ def verify_venue_stages(plan_path, *, inspect=False):
             continue
         paths[path] = index
         try:
-            report, batch = verify_venue_batch(path, inspect_quest_logs=inspect,
+            report, batch = verify_venue_batch(path, inspect_quest_logs=inspect, inspect_udp=inspect,
                                                staged_roster=staged_roster, staged_link_criteria=link_criteria,
                                                expected_stage=expected_stage)
             key = (report['mode'], report['players'])
@@ -2914,6 +3019,9 @@ def verify_venue_stages(plan_path, *, inspect=False):
             continue
         except QuestCapturesIncomplete as error:
             reject(f'Venue manifest entry {index}: {error}', index, questCaptures=error.captures)
+            continue
+        except UdpPreflightIncomplete as error:
+            reject(f'Venue manifest entry {index}: {error}', index, udpPreflight=error.reports)
             continue
         except EvidenceError as error:
             reject(f'Venue manifest entry {index}: {error}', index)
