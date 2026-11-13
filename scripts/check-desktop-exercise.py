@@ -3,6 +3,7 @@
 Automated Simulation input, not physical operators, XR tracking, LAN or capacity acceptance.
 """
 import argparse,concurrent.futures,hashlib,importlib.util,io,json,math,os,re,sys,time,urllib.request,uuid,zipfile
+from collections import deque
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 def module(name,file):
@@ -123,6 +124,35 @@ def summarize_link_report(report, owner):
             'playerLoopHz': sum(row['playerLoopFrames'] for row in samples) / sum(row['windowSeconds'] for row in samples)}
 
 
+AUTHORITY_MARKERS = {
+    'VR_MANAGEMENT_REFRESH_FAILED': re.compile(
+        r'reason=(ProtocolError|ConnectionError|DataProcessingError|InvalidSnapshot|UnsupportedMrRole|MissingMrAlignment|ApplyRejected)'
+        r' httpStatus=\d{1,3} elapsedSeconds=\d+\.\d{3} monotonicSeconds=\d+\.\d{3}'),
+    'VR_AUTHORITY_SUSPENDED': re.compile(
+        r'reason=(ManagementRefresh|ManagementWatchdog|TelemetryFault) observedSequence=\d+'
+        r' managementAgeSeconds=(?:\d+\.\d{3}|Infinity) monotonicSeconds=\d+\.\d{3}'),
+    'VR_AUTHORITY_RESUMED': re.compile(
+        r'observedSequence=\d+ phase=(Preparing|Running|Paused|Ended) monotonicSeconds=\d+\.\d{3}'),
+}
+
+
+def summarize_authority_log(lines):
+    counts = dict.fromkeys(AUTHORITY_MARKERS, 0)
+    recent = deque(maxlen=32)
+    unrecognized = 0
+    for line in lines:
+        marker, _, details = line.rstrip('\r\n').partition(' ')
+        if marker not in AUTHORITY_MARKERS:
+            continue
+        if not AUTHORITY_MARKERS[marker].fullmatch(details):
+            unrecognized += 1
+            continue
+        counts[marker] += 1
+        recent.append(marker + ' ' + details)
+    return {'counts': counts, 'unrecognizedMarkers': unrecognized, 'recentMarkers': list(recent),
+            'truncated': sum(counts.values()) > len(recent)}
+
+
 class ExerciseVenue(continuity.DiagnosticVenue):
     def __init__(self,args):
         super().__init__(args,artifact_family='desktop-exercise')
@@ -158,6 +188,17 @@ class ExerciseVenue(continuity.DiagnosticVenue):
 
     def cleanup(self):
         clean=super().cleanup()
+        if clean:
+            sources = []
+            for entry in self.rounds:
+                name = entry['name']
+                path = self.directory / (name + '-server.log')
+                if path.is_file():
+                    with path.open(encoding='utf-8-sig', errors='replace') as stream:
+                        sources.append({'round': name, 'sessionId': entry['id'], **summarize_authority_log(stream)})
+                else:
+                    sources.append({'round': name, 'sessionId': entry['id'], 'missingLog': True})
+            self.save('authority-diagnostics.json', {'sources': sources})
         if self.args.udp_traffic:
             relays={name:relay.report() for name,relay in self.udp_relays.items()}
             self.save('udp-relay-cleanup.json',relays)

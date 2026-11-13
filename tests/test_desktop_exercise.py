@@ -3,6 +3,17 @@ from pathlib import Path
 spec=importlib.util.spec_from_file_location('desktop_exercise_checks',Path(__file__).resolve().parents[1]/'scripts/check-desktop-exercise.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
 
 class ExerciseEvidenceTests(unittest.TestCase):
+    def test_authority_summary_bounds_output_and_omits_unrecognized_message_text(self):
+        failure = 'VR_MANAGEMENT_REFRESH_FAILED reason=ProtocolError httpStatus=503 elapsedSeconds=0.012 monotonicSeconds=8.608'
+        pause = 'VR_AUTHORITY_SUSPENDED reason=ManagementRefresh observedSequence=5 managementAgeSeconds=0.519 monotonicSeconds=8.614'
+        resumed = 'VR_AUTHORITY_RESUMED observedSequence=5 phase=Running monotonicSeconds=16.831'
+        result = m.summarize_authority_log(iter(['other logs', failure, *([pause] * 33), resumed,
+                                                'VR_MANAGEMENT_REFRESH_FAILED private response']))
+        self.assertEqual([1, 33, 1], list(result['counts'].values()))
+        self.assertEqual(1, result['unrecognizedMarkers'])
+        self.assertTrue(result['truncated'])
+        self.assertEqual([pause] * 31 + [resumed], result['recentMarkers'])
+
     def setUp(self):
         self.players=[{'id':'alpha','admissionId':'epoch-a','roomId':3,'seat':0}]
         self.value={'packet':{'suspended':False,'observedSequence':10,'frame':{'phase':'Running','players':[{'id':'alpha','roomId':3,'connected':True,'health':100,'head':{'x':-3,'y':1.65,'z':-2.5},'rig':{'kind':'Simulated'}}]}}}

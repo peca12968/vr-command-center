@@ -14,6 +14,8 @@ python scripts/check-desktop-exercise.py --api-dll <API-DLL> --player-exe <Windo
 
 若執行中發現來源暫停、原玩家狀態異常等問題，`exercise-live-failure.json` 會保存原畫格、同場最近的觀察摘要及失敗當下的轉送計數，供比對封存時間線。失敗場即使之後可封存及送達個人戰績，仍按原驗收條件判定。
 
+測試程序完成清理後，`authority-diagnostics.json` 會逐場統計原伺服器日誌中的管理更新失敗、暫停和恢復標記，並保留最近 32 筆有效標記。摘要另標示缺少日誌、無法辨識的標記數及截斷狀態。需要核對完整時序時可讀原伺服器日誌。
+
 ## 五房射擊與戰績驗證
 
 `--marksmanship` 沿用 Windows Development batch Client 的短場輸入。任務每房放置六個正常油桶，讓敵軍出生候選只在第一列保留五席正前方的位置。五名玩家各對應一個由遊戲伺服器實際配置的原始目標，開場前逐一核對其房號與座標。敵軍守備，關閉自動攻擊。
