@@ -689,7 +689,10 @@ def run(v):
                 if value['packet']['frame']['phase']=='Preparing':continue
                 try:validate_frame(value,e['players'],pause if e is entries[0] else None,e['beginSequence'])
                 except ValueError:
-                    v.save('exercise-live-failure.json',{'round':e['id'],'value':value});raise
+                    v.save('exercise-live-failure.json', {'round': e['id'], 'value': value,
+                           'previousObservations': [row for row in live[-32:] if row['sessionId'] == e['id']],
+                           'trafficAtFailure': v.udp_meter.snapshot() if v.udp_meter is not None else None})
+                    raise
                 if v.args.endurance and v.args.marksmanship:
                     replenish_marksmanship(v, e, value)
                 observation={'sessionId':e['id'],'sequence':value['packet']['sequence'],'tick':value['packet']['frame']['tick'],'phase':value['packet']['frame']['phase']}
