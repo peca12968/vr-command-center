@@ -2724,6 +2724,9 @@ def staged_batch_report(report, batch):
                                            'verifiedVenueStart') if key in report}, **observed}
 
 
+VENUE_STAGE_KEYS = tuple((mode, players) for players in (5, 10, 25) for mode in ('Independent', 'Linked'))
+
+
 def verify_venue_stages(plan_path, *, inspect=False):
     plan_path = plan_path.resolve(strict=True)
     with plan_path.open('rb') as stream:
@@ -2750,10 +2753,10 @@ def verify_venue_stages(plan_path, *, inspect=False):
     staged_roster = {'minimumConcurrentMilliseconds': minimum, **requirements} if any(requirements.values()) else None
     modes, sizes = ('Independent', 'Linked'), (5, 10, 25)
     names = plan['venueManifests']
-    require(type(names) is list and len(names) == len(modes) * len(sizes)
+    require(type(names) is list and len(names) == len(VENUE_STAGE_KEYS)
             and all(type(name) is str and bool(name.strip()) for name in names),
             'Provide six venue manifests for the two 5, 10 and 25 seat series')
-    stage_keys = [(mode, players) for players in sizes for mode in modes]
+    stage_keys = VENUE_STAGE_KEYS
     stages, entries, issues = {}, {}, []
 
     def reject(message, *indices, **details):

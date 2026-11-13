@@ -624,6 +624,67 @@ class FieldResultsTests(unittest.TestCase):
             with self.assertRaisesRegex(field.EvidenceError, 'verified Windows start option must be boolean'):
                 field.verify_venue_stages(path)
 
+    def test_prepare_staged_venue_plan_from_unordered_batch_manifests(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = self.staged_plan(root, windows_inbox=True, windows_links=True)
+            names = [root / name for name in plan['venueManifests']]
+            plan_folder = root / 'operator plan'
+            plan_folder.mkdir()
+            output = plan_folder / 'stages.json'
+            command = [sys.executable, str(SCRIPT.with_name('prepare-venue-stages.py')),
+                       '--topology', 'same-host', '--minimum-concurrent-ms', '2000',
+                       '--windows-minimum-replies', '28', '--windows-maximum-p95-ms', '14']
+
+            def prepare(paths=names[::-1], options=command, target=output):
+                return subprocess.run([*options, '--output', str(target),
+                                       *(str(path) for path in paths)], capture_output=True)
+
+            inbox = names[0].parent / 'returned'
+            archive = sorted(inbox.glob('*.ZIP'))[0]
+            original_zip = archive.read_bytes()
+            archive.unlink()
+            result = prepare()
+            self.assertEqual(0, result.returncode, result.stderr.decode())
+            self.assertEqual({'prepared': True, 'batches': 6}, json.loads(result.stdout))
+            original = output.read_bytes()
+            generated = json.loads(original)
+            self.assertEqual(names, [(output.parent / name).resolve() for name in generated['venueManifests']])
+            self.assertTrue(all(not Path(name).is_absolute() for name in generated['venueManifests']))
+            self.assertEqual({'minimumReplies': 28, 'maximumP95RoundTripMs': 14}, generated['windowsLinkCriteria'])
+            inspection = field.verify_venue_stages(output, inspect=True)
+            self.assertFalse(inspection['complete'])
+            self.assertEqual([[1]], [row['entries'] for row in inspection['issues']])
+            self.assertEqual(4, inspection['issues'][0]['windowsInbox']['receivedWindowsSeats'])
+            archive.write_bytes(original_zip)
+            self.assertEqual(80, field.verify_venue_stages(output)['serverAcknowledgements'])
+
+            self.assertNotEqual(0, prepare().returncode)
+            self.assertEqual(original, output.read_bytes())
+            rejected = plan_folder / 'rejected.json'
+            for paths, options, reason in (
+                (names[:-1] + [names[0]], command, b'paths must be distinct'),
+                (names, command[:3] + ['direct-lan'] + command[4:], b'topology differs'),
+                (names, command[:-2], b'Provide both Windows link criteria'),
+            ):
+                result = prepare(paths, options, rejected)
+                self.assertNotEqual(0, result.returncode)
+                self.assertIn(reason, result.stderr)
+                self.assertFalse(rejected.exists())
+            wrong = names[-1]
+            batch = json.loads(wrong.read_bytes())
+            wrong.write_text(json.dumps(dict(batch, expectedPlayersPerRoom=2)), encoding='utf-8')
+            result = prepare(target=rejected)
+            self.assertEqual(1, result.returncode)
+            self.assertIn(b'each mode and seat count exactly once', result.stderr)
+            wrong.write_text(json.dumps(batch), encoding='utf-8')
+            release = wrong.parent / batch['venueReleaseReport']
+            release.write_bytes(release.read_bytes() + b'\n')
+            result = prepare(target=rejected)
+            self.assertEqual(1, result.returncode)
+            self.assertIn(b'same original verified release', result.stderr)
+            self.assertFalse(rejected.exists())
+
     def test_staged_inspection_reports_missing_bad_and_reused_evidence_in_one_run(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -560,6 +560,19 @@ python scripts/prepare-venue-field-manifest.py `
 
 準備六份 `venue.json`，每份都保留該批原始場館封存、遊戲日誌、原 `.worldlog` 及同一份 `venueReleaseReport`。一般驗收在各批清單啟用 `minimumConcurrentMilliseconds`。將六份清單的路徑填入 `stages.json`。路徑相對於 `stages.json`，清單列出的順序可調整。
 
+也可將六份批次清單交給準備指令，自動按 5、10、25 席及獨立、合併排序。清單可任意順序提供，工具會核對拓撲、席數組合及發行報告的 SHA-256。同磁碟的引用會保存為相對路徑，輸出須使用新檔名。玩家證據尚未收齊時可先建立總清單，再執行收件檢查。
+
+```powershell
+python scripts/prepare-venue-stages.py `
+    --output .\stages.json --topology direct-lan --minimum-concurrent-ms 2000 `
+    --require-verified-venue-start --windows-minimum-replies 28 --windows-maximum-p95-ms 40 `
+    .\5-independent\venue.json .\5-linked\venue.json `
+    .\10-independent\venue.json .\10-linked\venue.json `
+    .\25-independent\venue.json .\25-linked\venue.json
+```
+
+上例的啟動回條及 Windows 量測門檻可依場館規格選用。另可加上 `--require-tracked-roster`、`--require-concurrent-fire` 或 `--require-distinct-remote-roster`。使用同機封存時將拓撲改為 `same-host`。建立後用同一份總清單執行收件或正式驗收。
+
 ```json
 {
   "version": 1,
