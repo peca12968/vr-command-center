@@ -821,6 +821,34 @@ class FieldResultsTests(unittest.TestCase):
             self.assertEqual(1, rejected.returncode)
             self.assertIn(b'Provide a complete UDP preflight batch', rejected.stderr)
 
+            source = venue['groups'][-1]['sources'][0]
+            for status, details in (
+                    ('invalid-or-expired', {'reason': 'changed-original'}),
+                    ('invalid-or-expired', {'reason': 'expired'}),
+                    ('missing', {'reason': 'unreadable-original', 'missingRole': 'listener'}),
+                    ('missing', {'reason': 'unreadable-original', 'missingRole': 'probe'})):
+                with self.subTest(status=status, details=details):
+                    venue['groups'][-1]['sources'][0] = {**source, 'status': status, **details}
+                    (first.parent / 'udp.json').write_text(json.dumps(venue), encoding='utf-8')
+                    checked = subprocess.run([*command, '--inspect-venue-stages'], capture_output=True)
+                    self.assertEqual(1, checked.returncode, checked.stderr)
+                    self.assertEqual([{'roomId': 5, 'seat': 1, 'status': status, **details}],
+                                     json.loads(checked.stdout)['issues'][0]['udpPreflight'][0]['pendingSeats'])
+                    self.assertNotIn(b'private-file.json', checked.stdout)
+            for details in ({'reason': 'private-directory/listener.ndjson'},
+                            {'reason': ['changed-original']},
+                            {'reason': 'changed-original', 'missingRole': 'probe'},
+                            {'reason': 'unreadable-original'}):
+                with self.subTest(invalid_details=details):
+                    venue['groups'][-1]['sources'][0] = {**source, **details}
+                    (first.parent / 'udp.json').write_text(json.dumps(venue), encoding='utf-8')
+                    checked = subprocess.run([*command, '--inspect-venue-stages'], capture_output=True)
+                    self.assertEqual(1, checked.returncode, checked.stderr)
+                    issue = json.loads(checked.stdout)['issues'][0]
+                    self.assertNotIn('udpPreflight', issue)
+                    self.assertIn('Invalid', issue['reason'])
+                    self.assertNotIn(b'private-directory/listener.ndjson', checked.stdout)
+            venue['groups'][-1]['sources'][0] = source
             venue['inbox']['issues'][1]['seats'].append({'roomId': 4, 'seat': 1})
             (first.parent / 'udp.json').write_text(json.dumps(venue), encoding='utf-8')
             bad_inbox = field.verify_venue_stages(plan_path, inspect=True)['issues'][0]

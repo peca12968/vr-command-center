@@ -639,6 +639,8 @@ python scripts/verify-field-results.py --venue-stages .\stages.json --inspect-ve
 
 全館 UDP 報告若包含收件問題的席位，總表會在 `inboxSeatIssues` 列出原來源對應的房號、席號及缺少的端別。請回該批原預檢報告查看檔名。無法對上原網路清單的問題仍會計入 `inboxIssues`。
 
+使用離線重驗匯出的補件報告時，`pendingSeats` 也會列出原報告的原因，例如 `changed-original` 表示原檔內容已變更，`expired` 表示已逾時。若能從一端確認來源，`missingRole` 會標示須補的監聽端或探測端。
+
 擷取報告已標示完成的席位，若原日誌缺少、長度或 SHA-256 不符、編碼無效或無法讀取，會一併出現在 `issues[].questCaptures.logIssues`。每筆包含房號、席號、原檔名及原因。請按批次與席號補回同一次擷取的原檔，再重跑收件與正式驗收，由原流程核對部署、日誌內容及伺服器回條。
 
 ##### 六批共用 Windows 連線量測門檻

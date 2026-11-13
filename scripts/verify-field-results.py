@@ -939,6 +939,11 @@ class UdpPairRejected(EvidenceError):
         self.reason = reason
 
 
+UDP_PAIR_REJECTION_REASONS = frozenset({
+    'invalid-report', 'exchange-mismatch', 'binding-mismatch', 'expired', 'clock-ahead',
+})
+
+
 def verify_udp_preflight(paths, binding, addresses, *, failure_reason=False):
     require(bool(addresses), 'UDP preflight needs an observed peer for this game binding')
     powershell = None
@@ -964,8 +969,7 @@ def verify_udp_preflight(paths, binding, addresses, *, failure_reason=False):
         if failure_reason:
             try:
                 rejected = read_json(response.stdout.decode('utf-8-sig'))
-                if isinstance(rejected, dict) and rejected.get('reason') in (
-                        'invalid-report', 'exchange-mismatch', 'binding-mismatch', 'expired', 'clock-ahead'):
+                if isinstance(rejected, dict) and type(rejected.get('reason')) is str and rejected['reason'] in UDP_PAIR_REJECTION_REASONS:
                     reason = rejected['reason']
             except (ValueError, RecursionError):
                 pass
@@ -1760,11 +1764,24 @@ def inspect_incomplete_udp_preflight(path, mode, expected_rooms, players_per_roo
         outcomes = []
         for row in rows:
             require(type(row) is dict, 'Invalid UDP source row')
+            details = {}
             if venue:
                 seats, status = row.get('seats'), row.get('status')
                 require(type(status) is str and status in venue_statuses and type(seats) is list
                         and 1 <= len(seats) <= len(rooms) * players_per_room, 'Invalid venue UDP source outcome')
                 verified = status == 'verified'
+                if 'reason' in row:
+                    reason = row['reason']
+                    require(type(reason) is str and (
+                        (status == 'missing' and reason == 'unreadable-original')
+                        or (status == 'invalid-or-expired' and (reason == 'changed-original' or reason in UDP_PAIR_REJECTION_REASONS))),
+                        'Invalid venue UDP source reason')
+                    details['reason'] = reason
+                if 'missingRole' in row:
+                    role = row['missingRole']
+                    require(details.get('reason') == 'unreadable-original' and role in ('listener', 'probe'),
+                            'Invalid missing venue UDP report role')
+                    details['missingRole'] = role
             else:
                 seats, status = [row], row.get('stage')
                 require(type(row.get('complete')) is bool and type(status) is str, 'Invalid Quest UDP seat outcome')
@@ -1779,7 +1796,7 @@ def inspect_incomplete_udp_preflight(path, mode, expected_rooms, players_per_roo
                 seen_seats.add(key)
                 source.append(key)
                 if not verified:
-                    issues.append({'roomId': key[0], 'seat': key[1], 'status': status})
+                    issues.append({'roomId': key[0], 'seat': key[1], 'status': status, **details})
             source_seats.add(tuple(sorted(source)))
         require(group['complete'] == all(outcomes), 'UDP endpoint completeness differs from its source outcomes')
         expected_sources += len(outcomes)
