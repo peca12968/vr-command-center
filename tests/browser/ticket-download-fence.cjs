@@ -51,13 +51,23 @@ async function checkTicketDownloadFence({ context, api, tokens, base, screenshot
   try {
     await page.goto(base + '/console/'); await page.locator('#login-key').fill(tokens.Master); await page.locator('#login-form button').click();
     await page.locator('#session-select').selectOption(session.id);
-    for (const scope of ['seat', 'room']) {
-      const isRoom = scope === 'room', previous = player.admissionId;
+    const shortcut = page.locator('#download-roster-room-tickets');
+    check(await shortcut.isHidden(), 'Room ticket shortcut waits for a room selection');
+    for (const scope of ['seat', 'room', 'roster-room']) {
+      const isRoom = scope !== 'seat', previous = player.admissionId;
       const routeUrl = base + '/api' + (isRoom ? detail + '/rooms/' + roomId + '/join-ticket-bundle' : playerRoute + '/join-ticket');
       await page.locator('#roster').filter({ hasText: player.name }).waitFor();
+      if (scope === 'room') await page.locator('#ticket-room').selectOption(String(roomId));
+      if (scope === 'roster-room') {
+        await page.locator('#ticket-room').selectOption('');
+        await page.locator(`[data-begin-room="${roomId}"] button`).click();
+        await page.locator('#roster-title:focus').waitFor();
+        check(await page.locator('#ticket-room').inputValue() === '' && await shortcut.isEnabled(),
+          'Roster shortcut uses the chosen room without changing the separate ticket selector');
+      }
       await page.locator('#game-address').fill('127.0.0.1');
-      if (isRoom) await page.locator('#ticket-room').selectOption(String(roomId));
-      const button = isRoom ? page.locator('#download-room-tickets') : page.locator('[data-player-action=ticket]');
+      const button = scope === 'roster-room' ? shortcut
+        : isRoom ? page.locator('#download-room-tickets') : page.locator('[data-player-action=ticket]');
       const result = await holdTicketResponse(page, routeUrl, () => button.click(), async () => {
         await api(playerRoute, 'DELETE', undefined, 'Master', 204, previous);
         ({ players: [player] } = await add('Replacement for ' + scope));
@@ -70,6 +80,14 @@ async function checkTicketDownloadFence({ context, api, tokens, base, screenshot
       await page.locator('#refresh').click();
       await page.locator('#roster').filter({ hasText: player.name }).waitFor();
     }
+    const url = base + '/api' + detail + '/rooms/' + roomId + '/join-ticket-bundle';
+    const [file, response] = await Promise.all([page.waitForEvent('download'),
+      page.waitForResponse(reply => reply.url() === url && reply.request().method() === 'POST'), shortcut.click()]);
+    assert.equal(response.status(), 200);
+    assert.deepEqual(response.request().postDataJSON().players, [{ playerId, admissionId: player.admissionId }]);
+    assert.equal(file.suggestedFilename(), `room-${String(roomId).padStart(2, '0')}-connections.zip`);
+    await file.delete();
+    check(true, 'Roster shortcut downloads the newly confirmed room bundle after refresh');
     await fs.writeFile(path.join(screenshots, 'ticket-download-fence.json'), JSON.stringify(cases, null, 2));
     for (const result of cases)
       check(result.signedResponses === 1 && result.replaced && result.downloads === 0 && result.message.includes('名冊已變更'),

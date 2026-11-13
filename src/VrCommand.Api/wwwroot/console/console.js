@@ -733,6 +733,7 @@ function applyPermissions() {
   if (mixedReality) $('player-headset').value = 'Quest3';
   $('ticket-fields').disabled = locked || ended || !session;
   $('download-room-tickets').disabled = locked || !$('ticket-room').value || !canIssueTicket(session, Number($('ticket-room').value));
+  updateRosterTicketButton();
   const pinHint = $('mr-ticket-pin-hint');
   pinHint.hidden = !mixedReality || ended;
   const pinMessage = session?.roomAlignment
@@ -1299,7 +1300,16 @@ function filterRoster() {
   $('roster-filter-empty').hidden = !room || shown !== 0 || !state.session?.players.length;
   const capacity = room ? 5 : (state.session?.roomIds.length ?? 0) * 5;
   $('player-count').textContent = (room ? `房間 ${room} · ` : '') + `${shown} / ${capacity} 人（名冊）`;
+  updateRosterTicketButton();
   readiness.update();
+}
+function updateRosterTicketButton() {
+  const session = state.session, roomId = Number($('roster-room').value);
+  const button = $('download-roster-room-tickets');
+  button.hidden = !session?.roomIds.includes(roomId) || !ownsRoom(roomId);
+  button.disabled = button.hidden || state.busy || !!state.pending || !canIssueTicket(session, roomId)
+    || !session.players.some(player => player.roomId === roomId);
+  if (!button.hidden) button.textContent = `下載房間 ${roomId} 連線檔 ZIP`;
 }
 $('roster-room').addEventListener('change', filterRoster);
 function environment(prefix) { return { mode: prefix === 'live' ? state.session.environment.mode : $('draft-mode').value, weather: $(prefix + '-weather').value, timeOfDay: $(prefix + '-time').value, lightning: $(prefix + '-lightning').checked }; }
@@ -1552,8 +1562,8 @@ async function downloadTicket(player) {
   download(`quest-player-${player.id}.json`, new Blob([JSON.stringify(config, null, 2)], { type: 'application/json' }));
   notify(`玩家連線檔已產生，有效至 ${time(ticket.expiresAtUtc)}。請將各自檔案配置到對應玩家端。`);
 }
-function downloadRoomTickets() {
-  const session = state.session, roomId = Number($('ticket-room').value);
+function downloadRoomTickets(roomId) {
+  const session = state.session;
   if (!canIssueTicket(session, roomId) || !ownsRoom(roomId) || !session.roomIds.includes(roomId)) return;
   const destination = ticketDestination();
   if (!destination) return;
@@ -1957,7 +1967,8 @@ submit('venue-environment-form', () => venuePhase('SetEnvironment', { environmen
 submit('venue-enemies-form', () => venuePhase('SetEnemies', { enemyPolicy: {
   behavior: $('venue-behavior').value, autoAttack: $('venue-auto-attack').checked
 } }));
-$('download-room-tickets').addEventListener('click', downloadRoomTickets);
+$('download-room-tickets').addEventListener('click', () => downloadRoomTickets(Number($('ticket-room').value)));
+$('download-roster-room-tickets').addEventListener('click', () => downloadRoomTickets(Number($('roster-room').value)));
 $('ticket-room').addEventListener('change', applyPermissions);
 document.querySelectorAll('[data-command]').forEach(button => button.addEventListener('click', () => runSession(() => command(button.dataset.command))));
 submit('create-session-form', createSession);
