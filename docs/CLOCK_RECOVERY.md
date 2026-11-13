@@ -10,6 +10,8 @@
 
 加上 `--delay-management` 可測試管理 GET 尚未回應時的行為。代理暫留原請求，讓遊戲伺服器的 1.5 秒更新逾時計時器觸發暫停。釋放後將同一請求交給原管理服務處理。驗收要求暫停標記為 `ManagementWatchdog`、恢復沿用原管理序號，並核對封存回放、時鐘到期與原戰績回條。
 
+五房獨立模式可再加 `--five-room-isolation`。五房各開五個 Windows 模擬玩家端，僅暫留第 1 房的原管理請求。依已接受畫格的擷取時間，確認其他四房在第 1 房時鐘暫停期間仍持續更新原席位的姿態與推進時鐘。遊戲暫停時原姿態可能因 0.5 秒時限失效，工具另用原生客戶端日誌確認每位玩家從入場到收到結果均沿用同一條 UDP 連線。五場到期後逐房核對原入場戰績回條及封存回放。這個選項固定使用 `--seconds 60`，適用於同機排演。
+
 接近期限時，代理關閉自己既有 world tunnel，拒絕新的 publish upgrade，其他管理與 combat HTTP 正常。Unity計時繼續，恰好期限 tick 停止並 Ready=false；用既有 Windows Development `--vr-replication-probe` 分別觀察真正 server／client，**不讀取或破壞仍有 exclusive lease 的 journal**。後端的已接受序號保持不變且仍 Running，證明未發布的本地到期不能授權 End。
 
 維持本地到期至少6秒後恢復 publication，原 world publisher 重連、原來源精確補送。API收到保存的到期幀後只能出現一次 mission-clock End；原 combat／world雙seal、結果ack與原入場／ledger核對均須通過。完整封存回放須逐幀連續、tick不倒退／不超過期限，保留管理失聯與到期等待兩個階段，末packet及統計與已保存世界相同。這不是世界進程崩潰恢復，也不保證指定某一個ACK曾經丟失。
@@ -28,12 +30,13 @@
 $env:VR_COMMAND_API_DLL = "$PWD/artifacts/build-clock-v1/bin/VrCommand.Api/release/VrCommand.Api.dll"
 python scripts/check-desktop-clock-faults.py --runtime-root "$env:LOCALAPPDATA/VrCommand/SimulationRuns" --seconds 60
 python scripts/check-desktop-clock-faults.py --runtime-root "$env:LOCALAPPDATA/VrCommand/SimulationRuns" --seconds 60 --delay-management
+python scripts/check-desktop-clock-faults.py --runtime-root "$env:LOCALAPPDATA/VrCommand/SimulationRuns" --seconds 60 --delay-management --five-room-isolation
 python scripts/check-desktop-clock-faults.py --runtime-root "$env:LOCALAPPDATA/VrCommand/SimulationRuns" --seconds 180
 python -m unittest discover -s tests -p test_venue_http_gate.py
 ```
 
-每次獨立run建立自己的server／一個headless client、憑證與資料；資料明確C SSD、source／binary仍F。來源標記Simulation，無頭盔或GPU／PCM觀察。既有probe固定240秒／4096 rows／64 snapshots，不為測試放寬，因此工具限60或180秒；180秒是有界較長運行，**不是15分鐘、4小時或長期穩定性驗收**。
+每次測試建立自己的伺服器、模擬玩家、憑證與資料。來源標記為 Simulation。單房模式使用一個模擬玩家與原生探針，固定 240 秒、4,096 筆和 64 份快照，支援 60 或 180 秒任務。五房模式透過管理 API 讀回精確畫格，另核對原生伺服器及客戶端日誌。
 
 `checks.json`只在代理停止、工具fingerprint未變、cleanup／snapshot成功後complete=true，內含原生複本快照、故障秒數、API未接受邊界、End證據、雙seal／玩家結果、整段回放與代理上限／錯誤計數。`--vr-replication-probe`僅觀察，不授權遊戲行為；finish.request須在正常斷線及固定期限前完成。任何工具失敗都保留自己的原件與cleanup結果，不改規則或丟掉舊資料重跑。
 
-這仍是一位同機Windows Simulation、選定通道故障與固定503／連線關閉的證據。跨機、25位持續操作、封存中斷、整個API重啟、長任務、Quest／VIVE／MR與廠商硬體須分別驗收；不能把這些檢查等同完整交付。
+本頁範圍為 Windows 同機模擬及選定通道故障。跨機、25 位真人持續操作、封存中斷、整個 API 重啟、長任務、Quest／VIVE／MR 與廠商硬體須分別驗收。

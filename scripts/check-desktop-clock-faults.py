@@ -1,5 +1,7 @@
 """Real native countdown across separate management / publication outages. No synthetic gameplay input."""
 import argparse
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone
 import hashlib
 import importlib.util
 import json
@@ -8,6 +10,7 @@ from pathlib import Path
 import re
 import time
 import urllib.request
+import uuid
 from venue_http_gate import VenueHttpGate
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,14 +54,16 @@ def fingerprint():
 class FaultVenue(vm.Venue):
     proxy = None
     def launch(self, name, config, visible=False, *, extra_args=()):
-        if config['role'] == 'Server':
+        if config['role'] == 'Server' and (not self.args.five_room_isolation or name == 'room-1-server'):
             self.proxy = VenueHttpGate(self.base, config['sessionId']).start()
             config = {**config, 'managementApiUrl': self.proxy.base}
         probe = self.runtime_directory / (name + '-replica')
-        super().launch(name, config, visible, extra_args=(*extra_args, '--vr-replication-probe', str(probe)))
+        if not self.args.five_room_isolation:
+            extra_args = (*extra_args, '--vr-replication-probe', str(probe))
+        super().launch(name, config, visible, extra_args=extra_args)
 
 
-def replay(venue, entry, sealed, limit):
+def replay(venue, entry, sealed, limit, *, frozen_tick=None, isolation=False):
     expected = venue.frame(entry); previous, last, maximum, due_running, suspended = 0, None, 0, 0, 0
     message = urllib.request.Request(venue.base + f'/api/sessions/{entry["id"]}/world/watch?mode=replay&fromMs=0&rate=4', headers={'Authorization': 'Bearer ' + venue.tokens['Master']})
     deadline = time.monotonic() + sealed['world']['durationMilliseconds'] / 4000 + 20
@@ -74,9 +79,181 @@ def replay(venue, entry, sealed, limit):
             previous, last, maximum = packet['sequence'], row, frame['tick']
             due_running += frame['tick'] == limit and frame['phase'] == 'Running'
             suspended += packet['suspended']
-    if previous != sealed['world']['acceptedSequence'] or last != expected or last['packet']['frame']['phase'] != 'Ended' or not due_running or not suspended:
+            if isolation:
+                if packet['suspended'] and (frozen_tick is None or frame['phase'] != 'Paused' or frame['tick'] != frozen_tick):
+                    raise RuntimeError('Replay suspension left the selected room or its frozen tick')
+                if frame['phase'] == 'Paused' and not packet['suspended']:
+                    raise RuntimeError('Unexpected operator pause in the isolation fixture')
+    expects_suspension = not isolation or frozen_tick is not None
+    if previous != sealed['world']['acceptedSequence'] or last != expected or last['packet']['frame']['phase'] != 'Ended' or not due_running or bool(suspended) != expects_suspension:
         raise RuntimeError('Sealed replay lost the suspension, deadline or exact final ledger')
     return {'frames': previous, 'maximumTick': maximum, 'dueRunningFrames': due_running, 'suspendedFrames': suspended, 'finalPacketAndStatisticsMatch': True}
+
+
+def require_live_room(entry, packet, phase, *, require_fresh_pose=True):
+    frame = packet['frame']
+    expected = {player['id'] for player in entry['players']}
+    players = frame['players']
+    if frame['phase'] != phase or packet['suspended'] != (phase == 'Paused'):
+        raise RuntimeError(f'{entry["name"]} expected {phase} at frame {packet["sequence"]}, got {frame["phase"]}')
+    if (packet['observedSequence'] < entry['beginSequence'] or len(players) != len(expected)
+            or {player['id'] for player in players} != expected
+            or any(player['roomId'] != entry['roomIds'][0] for player in players)):
+        raise RuntimeError(f'{entry["name"]} changed its original room roster at frame {packet["sequence"]}')
+    if require_fresh_pose and any(not player['connected'] or player['rig']['kind'] != 'Simulated' for player in players):
+        raise RuntimeError(f'{entry["name"]} lost an original fresh simulated pose at frame {packet["sequence"]}')
+
+
+def five_room_isolation(venue):
+    mission = venue.request('/api/missions', {
+        'name': 'Five-room management delay', 'briefing': 'One owned management GET is delayed',
+        'durationSeconds': 60,
+        'environment': {'mode': 'VR', 'weather': 'Clear', 'timeOfDay': 'Day', 'lightning': False},
+        'enemies': {'count': 0, 'behavior': 'Hold', 'autoAttack': False}, 'props': [],
+    }, expected=201)
+    entries = [venue.create(mission, [room], f'room-{room}') for room in range(1, 6)]
+    for entry in entries:
+        room, = entry['roomIds']
+        for _ in range(4):
+            identity = str(uuid.uuid4())
+            roster = venue.request(f'/api/sessions/{entry["id"]}/players', {
+                'playerId': identity, 'roomId': room, 'name': f'PC room {room}', 'headset': 'Quest3',
+            }, role=f'Room{room}')
+            entry['players'].append(next(player for player in roster['players'] if player['id'] == identity))
+        venue.wait(lambda: venue.request(f'/api/sessions/{entry["id"]}/world', optional=True), 90, entry['name'] + ' recording')
+        for player in entry['players']:
+            venue.launch(f'{entry["name"]}-client-{player["seat"]}', venue.client_config(entry, venue.ticket(entry, player)))
+    for entry in entries:
+        venue.wait(lambda: venue.connected(entry), 100, entry['name'] + ' five original rigs')
+    for entry in entries:
+        venue.command(entry, 'SetMissionClock', missionClock={'autoEnd': True})
+        entry['beginSequence'] = venue.command(entry, 'Begin')['appliedAtSequence']
+
+    def packet(entry):
+        route = f'/api/sessions/{entry["id"]}/world'
+        meta = venue.request(route)
+        sequence = meta['acceptedSequence']
+        value = venue.request(f'{route}/frames/{sequence}')['packet']
+        captured = datetime.fromisoformat(meta['capturedAtUtc'])
+        age = (datetime.now(timezone.utc) - captured).total_seconds()
+        entry['sourceAges'].append(age)
+        if value['sequence'] != sequence or value['elapsedMilliseconds'] != meta['durationMilliseconds'] or not -1 <= age < 1.5:
+            raise RuntimeError(f'{entry["name"]} could not read a fresh exact accepted frame {sequence} (age {age}s)')
+        return {'packet': value, 'capturedAtUtc': captured.isoformat(timespec='microseconds')}
+
+    def running(entry):
+        value = packet(entry)['packet']
+        return value if value['frame']['phase'] == 'Running' and value['frame']['tick'] >= 100 else None
+
+    before = {entry['name']: venue.wait(lambda: running(entry), 20, entry['name'] + ' active clock') for entry in entries}
+    for entry in entries:
+        require_live_room(entry, before[entry['name']], 'Running')
+    target, *peers = entries
+    venue.proxy.block('management-delay')
+    venue.stage('one-room-management-delayed', room=1)
+    venue.wait(lambda: venue.proxy.snapshot()['counts']['managementDelayed'] == 1, 5, 'one original room management GET')
+
+    def suspended():
+        value = packet(target)
+        return value if value['packet']['suspended'] else None
+
+    paused = venue.wait(suspended, 5, 'room 1 watchdog suspension')
+    require_live_room(target, paused['packet'], 'Paused', require_fresh_pose=False)
+
+    def peer_sample(entry, *, after_utc, after_tick=0):
+        value = packet(entry)
+        return value if value['capturedAtUtc'] >= after_utc and value['packet']['frame']['tick'] > after_tick else None
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        def sample_peers(label, threshold):
+            futures = [pool.submit(venue.wait, lambda entry=entry: peer_sample(entry, **threshold(entry)), 2, label)
+                       for entry in peers]
+            return {entry['name']: future.result() for entry, future in zip(peers, futures, strict=True)}
+
+        peer_before = sample_peers('peer frame inside room 1 suspension', lambda entry: {'after_utc': paused['capturedAtUtc']})
+        time.sleep(.4)
+        peer_after = sample_peers('peer clock advances inside room 1 suspension', lambda entry: {
+            'after_utc': peer_before[entry['name']]['capturedAtUtc'],
+            'after_tick': peer_before[entry['name']]['packet']['frame']['tick'],
+        })
+    last_peer = max(value['capturedAtUtc'] for value in peer_after.values())
+
+    def after_peers():
+        value = packet(target)
+        return value if value['capturedAtUtc'] >= last_peer else None
+
+    still = venue.wait(after_peers, 2, 'room 1 suspension frame after peers')
+    frozen_tick = paused['packet']['frame']['tick']
+    witness = {'paused': paused, 'stillPaused': still, 'peersBefore': peer_before, 'peersAfter': peer_after}
+
+    venue.save('isolation-witness.json', witness)
+    # While the authority is suspended, the existing 0.5 s pose freshness
+    # timer can mark a body disconnected. Verify transport in the client logs.
+    require_live_room(target, still['packet'], 'Paused', require_fresh_pose=False)
+    if (still['packet']['frame']['tick'] != frozen_tick
+            or still['packet']['sequence'] <= paused['packet']['sequence'] or venue.state(target)['state'] != 'Running'):
+        raise RuntimeError('Delayed room did not retain its running management state and frozen game clock')
+    for entry in peers:
+        first, last = peer_before[entry['name']]['packet'], peer_after[entry['name']]['packet']
+        require_live_room(entry, first, 'Running')
+        require_live_room(entry, last, 'Running')
+        if (last['frame']['tick'] <= first['frame']['tick'] or last['sequence'] <= first['sequence']
+                or last['observedSequence'] != first['observedSequence']
+                or peer_before[entry['name']]['capturedAtUtc'] < paused['capturedAtUtc']):
+            raise RuntimeError('An unaffected room did not advance during the selected suspension')
+    venue.proxy.release()
+
+    def recovered():
+        value = packet(target)['packet']
+        return value if (not value['suspended'] and value['frame']['tick'] > frozen_tick
+                         and all(player['connected'] for player in value['frame']['players'])) else None
+
+    resumed = venue.wait(recovered, 10, 'room 1 resumes on the same management revision')
+    require_live_room(target, resumed, 'Running')
+    diagnostics = management_suspension(debrief.log_text(venue, 'room-1-server'), paused['packet']['observedSequence'],
+                                        resumed['observedSequence'], delayed=True)
+    witness.update(resumed=resumed, diagnostics=diagnostics)
+    venue.save('isolation-witness.json', witness)
+    venue.stage('rooms-running-after-recovery')
+    venue.wait(lambda: all(venue.state(entry)['state'] == 'Ended' for entry in entries), 75, 'five original mission-clock Ends')
+    limit = 1200
+    results = []
+    for entry in entries:
+        sealed = venue.seal(entry)
+        delivery = venue.wait_for_player_results(entry)
+        if not delivery['allAcknowledged'] or delivery['timedOut']:
+            raise RuntimeError('Original room results did not all reach their clients')
+        for player in entry['players']:
+            name = f'{entry["name"]}-client-{player["seat"]}'
+            result = debrief.final_result(venue, name)
+            debrief.validate_result(result, entry, player, sealed)
+            events = [line.split(' ', 1)[0] for line in debrief.log_text(venue, name).splitlines()
+                      if line.startswith(('VR_CLIENT_CONNECTED ', 'VR_CLIENT_DISCONNECTED', 'VR_CLIENT_DEBRIEF_FINAL '))]
+            if events[:2] != ['VR_CLIENT_CONNECTED', 'VR_CLIENT_DEBRIEF_FINAL'] or events[2:] not in ([], ['VR_CLIENT_DISCONNECTED']):
+                raise RuntimeError(f'{name} did not keep its original UDP connection through its final result')
+        admissions = {player['admissionId'] for player in entry['players']}
+
+        def recorded_receipts():
+            info = venue.request(f'/api/sessions/{entry["id"]}/world?includeDebriefReceipts=true')
+            rows = (info.get('debriefReceipts') or {}).get('players', [])
+            return rows if len(rows) == len(admissions) and {row['admissionId'] for row in rows if row['acknowledged']} == admissions else None
+
+        receipts = venue.wait(recorded_receipts, 5, 'original management debrief acknowledgements', required={'api'})
+        events = venue.request(f'/api/sessions/{entry["id"]}/events?after=0&limit=500')
+        expiry = [event for event in events if event['kind'] == 'ControlApplied' and event['payload'].get('clockExpiration')]
+        if len(expiry) != 1 or expiry[0]['payload']['clockExpiration']['tick'] != limit or expiry[0]['actor']['id'] != 'mission-clock':
+            raise RuntimeError('Room deadline did not commit exactly one original End')
+        results.append({'room': entry['roomIds'][0], 'sessionId': entry['id'], 'receipts': receipts, 'automaticEnd': expiry[0]})
+        venue.stop_round(entry)
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        replays = [pool.submit(replay, venue, entry, entry['sealed'], limit,
+                               frozen_tick=frozen_tick if entry is target else None, isolation=True) for entry in entries]
+        for result, future in zip(results, replays, strict=True):
+            result['replay'] = future.result()
+    if venue.request('/api/sessions'):
+        raise RuntimeError('An isolation fixture session is still active')
+    return {'complete': False, 'rooms': results, 'managementDiagnostics': diagnostics, 'frozenTick': frozen_tick,
+            'playerBuildReceipt': venue.receipt, 'scope': '25 same-host Windows simulated players'}
 
 
 def main():
@@ -87,11 +264,25 @@ def main():
     parser.add_argument('--seconds', type=int, choices=[60, 180], default=180, help='Bounded active duration, below the existing probe 240-second lifetime')
     parser.add_argument('--delay-management', action='store_true',
                         help='Hold the original management GET until the native watchdog suspends the server')
+    parser.add_argument('--five-room-isolation', action='store_true',
+                        help='Delay room 1 management while 25 clients occupy five independent rooms')
     args = parser.parse_args(); args.duration = 230; args.job_workers = 2; args.visible_room = 0; args.check = True
+    if args.five_room_isolation and (not args.delay_management or args.seconds != 60):
+        parser.error('--five-room-isolation requires --delay-management --seconds 60')
     vm.verify_player(args); original_fingerprint = fingerprint(); venue = FaultVenue(args, artifact_family='desktop-clock-faults')
     report = None; proxy_closed = False
     try:
         venue.start()
+        if args.five_room_isolation:
+            isolation = five_room_isolation(venue)
+            venue.proxy.close(); proxy_closed = True
+            gate = venue.proxy.snapshot()
+            venue.save('proxy-final.json', gate)
+            if (gate['limitsTriggered'] or gate['activeTunnels'] or gate['counts']['managementDelayed'] != 1
+                    or any(gate['counts'][name] for name in ('managementBlocked', 'handlerErrors', 'routeRejected', 'capacityRejected'))):
+                raise RuntimeError('Room 1 management proxy did not preserve the original delayed request')
+            report = {**isolation, 'proxy': gate, 'toolFingerprint': original_fingerprint}
+            return
         mission = venue.request('/api/missions', {'name': 'PC clock fault recovery', 'briefing': 'Separate owned management and publication failures', 'durationSeconds': args.seconds,
             'environment': {'mode': 'VR', 'weather': 'Clear', 'timeOfDay': 'Day', 'lightning': False}, 'enemies': {'count': 0, 'behavior': 'Hold', 'autoAttack': False}, 'props': []}, expected=201)
         entry = venue.create(mission, [3], 'clock-fault'); venue.clients([entry])
@@ -188,6 +379,8 @@ def main():
             report['complete'] = cleanup; venue.save('checks.json', report)
         print('Artifacts:', venue.directory, flush=True)
         if not cleanup: raise RuntimeError('Fault fixture cleanup failed')
+        if args.five_room_isolation and report and report['complete']:
+            print('PASS: five independent rooms and 25 original acknowledgements; Simulation only', flush=True)
     if not report or not report['complete']: raise RuntimeError('Fault check incomplete')
     print('PASS: 9 native clock fault checks; Simulation only', flush=True)
 
