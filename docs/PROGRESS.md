@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 從全館就緒結果開啟原房間名冊
+
+- Windows 管理台 0.31.177 在核對到原管理實例、場次來源及公告端點後，提供逐房名冊捷徑。合併場可從共用端點的結果選擇任一房。點選時重讀原場次，若已結束或來源不符，畫面要求重新核對就緒檔。 [操作說明](WINDOWS_SERVER_PACKAGE.md#核對未確認的啟動報告) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.177.zip)
+- 用原 Windows 就緒檔在獨立及合併模式各開啟五房名冊，逐房核對原場次、房號、五席及原開場序號。兩種模式各 25 個同機模擬玩家完成入場與結算，537 項整合通過，核對 50 筆戰績回條、6 份 CSV 和 1,005 格回放。程序清理後 C／F 共 255 個非資料庫檔案雜湊一致。 [三包驗收](../artifacts/server-package-checks/run-63af21a432ee48f6a025ddcb2228b66b/checks.json)
+- 通過 825 項 HTTP、107 項管理包、來源及解壓包各 20 項 Chromium 專項，以及 1,154 項完整瀏覽器回歸。解壓核對 567 筆清單，193 個建置來源與提交 `64324cb` 相符。Windows 套件與原 Quest 0.50.7 APK 通過離線版本及簽章核對。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、實體頭盔、MR 場地及廠商硬體仍待驗收。 [驗證摘要](../artifacts/console-ready-roster-shortcuts-validation.json) · [離線核對](../artifacts/console-ready-roster-shortcuts-venue-release.json) · [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43376869325)
+
 ## 2026-11-13 主控台核對 Windows 全館就緒檔
 
 - 管理台 0.31.176 可從「核對全館伺服器就緒」讀取 Windows 啟動器的原就緒檔。按下核對後，管理服務逐組比對原場次、遊戲來源、公告 IPv4、UDP 埠與近期快照。當遊戲綁定所有網卡，仍以原公告位址比對。面板也可讀取原未確認啟動結果。 [操作說明](WINDOWS_SERVER_PACKAGE.md#核對未確認的啟動報告) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.176.zip)
