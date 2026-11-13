@@ -97,6 +97,27 @@ module.exports = async function venueTimeReplayBrowser({ context, api, tokens, b
     check(await picker.inputValue() === ids[0] && await page.locator('#world-room').inputValue() === '1'
       && await page.locator('#world-canvas').getAttribute('data-sequence') === '4',
       'A substituted recording stream leaves the current live room and frame intact');
+    await page.route(url => url.pathname === `/api/sessions/${ids[1]}/world/frames/4` && url.searchParams.get('observerRoomId') === '2', async route => {
+      const actual = await route.fetch(), altered = await actual.json();
+      altered.packet.frame.players[0].roomId = 1;
+      await route.fulfill({ response: actual, json: altered });
+    }, { times: 1 });
+    await liveRoom(2).click();
+    await page.waitForFunction(() => !document.querySelector('[data-live-room="2"]').disabled, null, { polling: 100 });
+    check(await picker.inputValue() === ids[0] && await page.locator('#world-room').inputValue() === '1'
+      && await page.locator('#world-canvas').getAttribute('data-sequence') === '4'
+      && (await page.locator('#world-message').innerText()).includes('已保留目前畫面'),
+    'A room switch with a foreign actor in its first snapshot preserves the original live room');
+    await page.route(url => url.pathname === `/api/sessions/${ids[1]}/world/watch`
+      && url.searchParams.get('observerRoomId') === '2', route => route.fulfill({
+      status: 200, contentType: 'text/event-stream', body: 'event: header\ndata: {"observerRoomId":2}\n\n'
+    }), { times: 1 });
+    await openLiveRoom(2, ids[1], 4);
+    await page.locator('#world-message').filter({ hasText: '觀戰已中斷' }).waitFor();
+    check(await page.locator('#world-canvas').getAttribute('data-sequence') === '4'
+      && (await page.locator('#world-status').innerText()).includes('顯示最後保存格'),
+    'A mismatched live stream leaves the verified destination snapshot visible');
+    await openLiveRoom(1, ids[0], 4);
     await openLiveRoom(2, ids[1], 4);
     check(await liveRoom(1).isEnabled() && await liveRoom(2).isDisabled() && (await liveRoom(2).innerText()).includes('觀戰中'),
       'The Independent room switch selects the exact other recording without returning to operations');

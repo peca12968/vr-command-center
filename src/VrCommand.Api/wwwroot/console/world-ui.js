@@ -262,17 +262,32 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     const signal = AbortSignal.any([request.signal, AbortSignal.timeout(8000)]);
     liveRoomControls();
     try {
-      const verified = await (await response(`/api/sessions/${sessionId}/world?observerRoomId=${roomId}`, signal)).json();
+      const endpoint = `/api/sessions/${sessionId}/world`, scope = `?observerRoomId=${roomId}`;
+      const verified = await (await response(endpoint + scope, signal)).json();
+      if (verified.observerRoomId !== roomId || verified.header?.sessionId !== sessionId || verified.header?.streamId !== streamId
+        || !verified.header.roomIds.includes(roomId) || verified.complete !== false
+        || !Number.isSafeInteger(verified.acceptedSequence) || verified.acceptedSequence < 1
+        || !Number.isSafeInteger(verified.durationMilliseconds) || verified.durationMilliseconds < 0)
+        throw new Error('Room recording changed');
+      const value = await (await response(`${endpoint}/frames/${verified.acceptedSequence}${scope}`, signal)).json();
+      const packet = value?.packet;
+      if (value?.observerRoomId !== roomId || packet?.sequence !== verified.acceptedSequence
+        || packet.elapsedMilliseconds !== verified.durationMilliseconds
+        || !Array.isArray(packet.frame?.players) || !packet.frame.players.every(actor => actor.roomId === roomId)
+        || !Array.isArray(packet.frame.enemies) || !packet.frame.enemies.every(actor => actor.roomId === roomId)
+        || !Array.isArray(packet.events)
+        || !Array.isArray(value.statistics) || !value.statistics.every(player => player.roomId === roomId))
+        throw new Error('Room snapshot changed');
       const rooms = await (await response('/api/rooms', signal)).json();
       if (roomSwitch !== request || !active || picker.disabled) return;
-      if (verified.observerRoomId !== roomId || verified.header?.sessionId !== sessionId || verified.header?.streamId !== streamId
-        || !verified.header.roomIds.includes(roomId) || verified.complete !== false || !(verified.acceptedSequence > 0)
+      if (!Array.isArray(rooms)
         || !rooms.some(room => room.id === roomId && room.sessionId === sessionId)
         || ![...picker.options].some(option => option.value === sessionId)) throw new Error('Room recording changed');
       picker.value = sessionId;
       resetRecording();
-      observerRoom = roomId;
-      void connect('live', 0, null, null, { mode: 'live', sessionId, roomId, sourceKey: observationKey(verified) });
+      observerRoom = roomId; mode = 'live'; info = verified;
+      showRecording(roomId); show(value, true);
+      void connect('live', 0, null, null, { mode: 'live', sessionId, roomId, sourceKey: observationKey(verified), initialFrame: packet.sequence });
     } catch {
       if (roomSwitch === request && active) message(`無法確認房間 ${roomId} 的即時錄製。已保留目前畫面，請更新錄製列表。`, true);
     } finally {
@@ -1020,6 +1035,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
     let hasHeader = false, streamGeometry = '', reachedSavedEnd = false, lastSequence = sequence === null ? null : sequence - 1;
     let recentJump = Boolean(target?.sourceKey || returnLiveSource || (clip && sequence < frame?.packet.sequence));
     let playerFrame = null, playerComplete = false, witnessFrame = null;
+    const initialLiveSequence = target?.initialFrame ?? 0;
     let lastLiveSequence = liveAttempt ? frame?.packet.sequence ?? 0 : 0;
     let announcedLiveSequence = 0, announcedLiveComplete = false;
     let idleTimer, idleExpired = false, transportFailure = false;
@@ -1072,7 +1088,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
                 throw new Error('回應的錄製來源不同。');
               if (type !== 'header' && !hasHeader) throw new Error('缺少觀戰串流的錄製標頭。');
               if (nextMode === 'live') {
-                if (!Number.isSafeInteger(data.acceptedSequence) || data.acceptedSequence < Math.max(announcedLiveSequence, lastLiveSequence)
+                if (!Number.isSafeInteger(data.acceptedSequence) || data.acceptedSequence < Math.max(announcedLiveSequence, lastLiveSequence, initialLiveSequence)
                   || typeof data.complete !== 'boolean' || (announcedLiveComplete && !data.complete))
                   throw new Error('即時觀戰的狀態序號不符。');
                 announcedLiveSequence = data.acceptedSequence;
@@ -1095,7 +1111,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
             } else if (type === 'frame') {
               if (nextMode === 'live') {
                 const current = data.packet.sequence;
-                if (!hasHeader || !Number.isSafeInteger(current) || current < 1 || current < lastLiveSequence)
+                if (!hasHeader || !Number.isSafeInteger(current) || current < 1 || current < Math.max(lastLiveSequence, initialLiveSequence))
                   throw new Error('即時觀戰的快照序號不符。');
                 if (current === lastLiveSequence) continue;
                 lastLiveSequence = current; liveAttempt = 0;
@@ -1169,7 +1185,7 @@ export function mountWorld(getKey, unauthorized, describeEnemies, canWriteClips,
         if (playerReview || witness) resetRecording();
         if (clip) clipPlayback = '';
         connected = connecting = false; status();
-        const original = hasHeader ? geometry : liveAttempt ? expectedGeometry : null;
+        const original = hasHeader || initialLiveSequence ? geometry : liveAttempt ? expectedGeometry : null;
         if (nextMode === 'live' && (idleExpired || transportFailure) && retryLive(id, key, original, request, liveAttempt)) return;
         message('觀戰已中斷：' + (idleExpired ? '等待即時資料逾時' : error.message) + '；可重新連接。', true);
       }
