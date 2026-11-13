@@ -792,6 +792,31 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       check(await player.locator('#player-replay-next').isDisabled()
         && await player.locator('#player-replay-play').innerText() === '播放' && requests.length === 0,
         'Player stops at the exact exported boundary and sends no API requests');
+      const loop = player.locator('#player-replay-loop'), play = player.locator('#player-replay-play');
+      await loop.check();
+      const firstTail = await player.evaluate(({ start, end }) => new Promise((resolve, reject) => {
+        const position = document.getElementById('player-replay-frame');
+        const play = document.getElementById('player-replay-play');
+        let tailLabel;
+        const observer = new MutationObserver(() => {
+          if (position.textContent.startsWith(`第 ${end} 格`)) tailLabel = play.textContent;
+          if (tailLabel && position.textContent.startsWith(`第 ${start} 格`)) {
+            observer.disconnect();
+            clearTimeout(timeout);
+            document.getElementById('player-replay-loop').click();
+            resolve(tailLabel);
+          }
+        });
+        const timeout = setTimeout(() => { observer.disconnect(); reject(new Error('Local replay did not loop')); }, 10000);
+        observer.observe(position, { childList: true });
+        play.click();
+      }), { start: eventSequence, end: clipTail });
+      check(firstTail === '暫停', 'Player can keep playing when the exact local clip tail is reached');
+      await player.waitForFunction(end => document.getElementById('player-replay-frame').textContent.startsWith(`第 ${end} 格`)
+        && document.getElementById('player-replay-play').textContent === '播放', clipTail, { polling: 100 });
+      check(!await loop.isChecked() && requests.length === 0,
+        'Player loops back to the original first frame and stops at the tail when looping is disabled');
+      await loop.check();
       await player.screenshot({ path: path.join(screenshots, 'player-replay-mobile.png'), fullPage: true });
       const pausedReplay = structuredClone(exported);
       pausedReplay.header.missionClockVersion = 1;
@@ -805,6 +830,7 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
       recovered.suspended = false;
       await input.setInputFiles({ name: 'source-pause.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(pausedReplay)) });
       await note.filter({ hasText: `已載入 ${pausedReplay.packets.length} 格。` }).waitFor();
+      check(!await loop.isChecked(), 'Loading a different local replay resets the loop option');
       const clock = player.locator('#player-replay-clock'), time = player.locator('#player-replay-time');
       const firstClock = await clock.innerText(), firstTime = await time.innerText();
       const transition = player.locator('#player-replay-transition');

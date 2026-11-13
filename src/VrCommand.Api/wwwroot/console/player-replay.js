@@ -4,9 +4,12 @@ import { recordedClock } from './mission-clock.js';
 const $ = id => document.getElementById('player-replay-' + id);
 const timeline = document.getElementById('replay-timeline');
 const canvas = document.getElementById('replay-canvas');
+const loop = $('loop');
+const loopPauseMilliseconds = 300;
 const weatherNames = { Clear: '晴朗', Rain: '下雨', Fog: '濃霧', Storm: '暴風雨' };
 const phaseNames = { Preparing: '準備中', Running: '執行中', Paused: '已暫停', Ended: '已結束' };
 let replay, scene, index = 0, cursor = 0, lastTime = 0, animation = 0, epoch = 0;
+let restartAt = null;
 
 function message(text, error = false) {
   $('message').textContent = text;
@@ -16,6 +19,7 @@ function message(text, error = false) {
 function pause() {
   cancelAnimationFrame(animation);
   animation = 0;
+  restartAt = null;
   $('play').textContent = '播放';
   scene?.weather.pause();
 }
@@ -51,6 +55,7 @@ $('file').addEventListener('change', async () => {
   const own = ++epoch;
   pause();
   replay = null;
+  loop.checked = false;
   $('file').value = '';
   $('view').hidden = true;
   scene?.reset();
@@ -94,13 +99,26 @@ $('file').addEventListener('change', async () => {
 
 function advance(now) {
   const { packets } = replay;
+  if (restartAt !== null) {
+    if (now >= restartAt) {
+      show(0);
+      lastTime = now;
+      restartAt = null;
+    }
+    animation = requestAnimationFrame(advance);
+    return;
+  }
   cursor += Math.min(250, Math.max(0, now - lastTime)) * Number($('speed').value);
   lastTime = now;
   let next = index;
   while (next + 1 < packets.length && packets[next + 1].elapsedMilliseconds <= cursor) next++;
   if (next !== index) show(next, true);
-  if (next === packets.length - 1) pause();
-  else animation = requestAnimationFrame(advance);
+  if (next === packets.length - 1) {
+    if (!loop.checked) { pause(); return; }
+    scene.weather.pause();
+    restartAt = now + loopPauseMilliseconds;
+  }
+  animation = requestAnimationFrame(advance);
 }
 
 $('play').addEventListener('click', () => {
@@ -113,6 +131,7 @@ $('play').addEventListener('click', () => {
 });
 $('back').addEventListener('click', () => openFrame(index - 1));
 $('next').addEventListener('click', () => openFrame(index + 1));
+loop.addEventListener('change', () => { if (!loop.checked && restartAt !== null) pause(); });
 timeline.addEventListener('input', () => openFrame(Number(timeline.value)));
 $('transition').addEventListener('change', event => {
   if (event.target.value !== '') openFrame(Number(event.target.value));
