@@ -68,7 +68,14 @@ app.Use(async (context, next) =>
     await next(context);
 });
 app.UseDefaultFiles();
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions
+{
+    OnPrepareResponse = context =>
+    {
+        if (context.Context.Request.Path.Equals("/console/player-replay-offline.html", StringComparison.OrdinalIgnoreCase))
+            context.Context.Response.Headers.ContentDisposition = "attachment; filename=VRCommand-Player-Replay.html";
+    }
+});
 
 app.Use(async (context, next) =>
 {

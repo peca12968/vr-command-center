@@ -416,6 +416,7 @@ python .\scripts\check-venue-operator.py https://control.venue.example --role ma
 ## 建置與驗證
 
 ```powershell
+pnpm --dir tests/browser install --frozen-lockfile
 python scripts/publish-control-server.py --build-root "$env:LOCALAPPDATA/VrCommand/BuildRuns"
 python scripts/package-control-server.py --publication <上述全新輸出目錄> --stage-root "$env:LOCALAPPDATA/VrCommand/Pkg" --output <新的ZIP>
 python scripts/check-control-package.py <完整解壓後的VRCommand-ControlServer> --runtime-root "$env:LOCALAPPDATA/VrCommand/ControlChecks"

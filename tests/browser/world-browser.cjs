@@ -894,7 +894,27 @@ module.exports = async function worldBrowser({ page, context, api, tokens, direc
     }
     const offlineFile = path.join(directory, 'player-replay-offline.html');
     const { packagePlayerReplay } = await import('../../scripts/package-player-replay.mjs');
-    await packagePlayerReplay(offlineFile);
+    const offlineLink = page.locator('#saved-clip-offline-player');
+    if (process.env.VR_COMMAND_EXPECT_OFFLINE_REPLAY === '1') {
+      const attachment = await page.request.head(base + '/console/player-replay-offline.html');
+      check(attachment.ok() && attachment.headers()['content-disposition'] === 'attachment; filename=VRCommand-Player-Replay.html'
+        && attachment.headers()['content-security-policy'].includes("script-src 'self'"),
+      'The packaged console offers the offline player as an attachment under the original console policy');
+      const pendingDownload = page.waitForEvent('download');
+      await offlineLink.click();
+      const playerDownload = await pendingDownload;
+      check(playerDownload.suggestedFilename() === 'VRCommand-Player-Replay.html',
+        'The control console downloads the standalone player with its portable filename');
+      await playerDownload.saveAs(offlineFile);
+      const expectedFile = path.join(directory, 'expected-offline-player.html');
+      await packagePlayerReplay(expectedFile);
+      check((await fs.readFile(offlineFile)).equals(await fs.readFile(expectedFile)),
+        'The downloaded player is the exact standalone bundle of the original player page');
+    } else {
+      const asset = await page.request.head(base + '/console/player-replay-offline.html');
+      if (asset.status() === 404) check(await offlineLink.isHidden(), 'The development console hides the download when no standalone player was published');
+      await packagePlayerReplay(offlineFile);
+    }
     const offlineContext = await context.browser().newContext({ offline: true, viewport: { width: 390, height: 844 } });
     try {
       const offline = await offlineContext.newPage(), requests = [], errors = [];

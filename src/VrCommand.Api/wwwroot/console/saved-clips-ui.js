@@ -15,6 +15,8 @@ function validClip(clip, streamId) {
 export function mountSavedClips(request, canWrite, load) {
   let scope = null, idle = false, draft = null, rows = [], pending = null, work = null;
   const select = $('select'), name = $('name'), exportRoom = $('export-room');
+  const offlinePlayer = $('offline-player');
+  let checkedOfflinePlayer = false;
   const selected = () => rows.find(clip => clip.id === select.value);
   const route = () => `/api/sessions/${scope.sessionId}/world/clips`;
   function message(text, error = false) {
@@ -148,7 +150,18 @@ export function mountSavedClips(request, canWrite, load) {
         work?.abort(); work = pending = null; rows = []; name.value = ''; options(); message('');
         $('export-room-field').hidden = !(scope?.roomIds.length > 1);
         exportRoom.replaceChildren(new Option('全場', ''), ...(scope?.roomIds ?? []).map(room => new Option('房間 ' + room, room)));
-        if (scope) void sync();
+        if (scope) {
+          void sync();
+          if (!checkedOfflinePlayer) {
+            checkedOfflinePlayer = true;
+            fetch(offlinePlayer.href, { method: 'HEAD', cache: 'no-store', signal: AbortSignal.timeout(8000) })
+              .then(response => {
+                offlinePlayer.hidden = !response.ok || !response.headers.get('Content-Disposition')?.startsWith('attachment;');
+                if (response.status !== 404 && !response.ok) checkedOfflinePlayer = false;
+              })
+              .catch(() => { checkedOfflinePlayer = false; });
+          }
+        }
       }
       controls();
     }
