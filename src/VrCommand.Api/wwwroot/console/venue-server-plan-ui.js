@@ -13,7 +13,7 @@ function parsePreview(value) {
   const { topology, ready, rooms } = value ?? {};
   if (![null, 'Independent', 'Linked'].includes(topology) || typeof ready !== 'boolean' || !Array.isArray(rooms) || rooms.length !== 5)
     throw new Error('Invalid venue preview');
-  const rows = rooms.map(({ roomId, sessionId, sessionSequence, missionId, missionName, experienceMode, state }, index) => {
+  const rows = rooms.map(({ roomId, sessionId, sessionSequence, missionId, missionName, experienceMode, state, registeredSeats }, index) => {
     if (roomId !== index + 1 || !Object.hasOwn(roomStates, state)) throw new Error('Invalid venue room');
     if (state === 'missing-session') {
       if ([sessionId, sessionSequence, missionId, missionName, experienceMode].some(field => field !== null))
@@ -22,7 +22,11 @@ function parsePreview(value) {
       || typeof missionName !== 'string' || missionName.length === 0 || missionName.length > 100 || !['VR', 'MR'].includes(experienceMode)) {
       throw new Error('Invalid venue session');
     }
-    return { roomId, sessionId, sessionSequence, missionId, missionName, experienceMode, state };
+    if (!Array.isArray(registeredSeats) || registeredSeats.length > 5
+      || (state === 'missing-session' && registeredSeats.length > 0)
+      || registeredSeats.some((seat, i) => !Number.isInteger(seat) || seat < 1 || seat > 5 || (i > 0 && seat <= registeredSeats[i - 1])))
+      throw new Error('Invalid registered seats');
+    return { roomId, sessionId, sessionSequence, missionId, missionName, experienceMode, state, registeredSeats };
   });
   const sessions = new Set(rows.map(room => room.sessionId));
   const first = rows[0];
@@ -120,6 +124,15 @@ export function mountVenueServerPlan(getState, api, download) {
     if (!current || !inventory) return {};
     if (current.address !== current.listenAddress || privateAddressKind(current.address) !== inventory.kind)
       return { error: 'UDP 預檢需要具體綁定位址，並使用同類型的私有網路或本機 IPv4。' };
+    const seatKey = (room, seat) => `房間 ${room} 席位 ${seat}`;
+    const registered = new Set(preview.rooms.flatMap(room => room.registeredSeats.map(seat => seatKey(room.roomId, seat))));
+    const supplied = new Set(inventory.seats.map(row => seatKey(row.roomId, row.seat)));
+    const missing = [...registered].filter(seat => !supplied.has(seat));
+    const unexpected = [...supplied].filter(seat => !registered.has(seat));
+    if (missing.length || unexpected.length) return { error: [
+      missing.length ? `席位表缺少：${missing.join('、')}。` : '',
+      unexpected.length ? `場次未登記：${unexpected.join('、')}。` : ''
+    ].filter(Boolean).join(' ') };
     const payload = { version: 1, mode: current.topology,
       endpoints: current.servers.map(({ roomIds, port }) => ({ roomIds, address: current.address, port })),
       sources: inventory.seats };
@@ -132,7 +145,7 @@ export function mountVenueServerPlan(getState, api, download) {
     const seatsByAddress = new Map();
     for (const { roomId, seat, address } of inventory.seats) {
       if (!seatsByAddress.has(address)) seatsByAddress.set(address, []);
-      seatsByAddress.get(address).push(`房間 ${roomId} 席位 ${seat}`);
+      seatsByAddress.get(address).push(seatKey(roomId, seat));
     }
     const collisions = [], shared = [];
     for (const [value, seats] of seatsByAddress) {

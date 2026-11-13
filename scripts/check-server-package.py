@@ -752,6 +752,13 @@ def main():
                   and request('/api/sessions/'+states[0]['id'])['combatStream'] is None,
                   'unlocked Linked MR venue cannot start or publish a game source')
             return []
+        prepared_rosters={}
+        if args.check_venue_plan_ui and args.check_venue_udp_readiness:
+            for state in states:
+                for room in state['roomIds']:
+                    people=sorted((p for p in state['players'] if p['roomId']==room),key=lambda p:p['seat'])
+                    prepared_rosters[room]=people or prepare_room_roster({'sessionId':state['id']},room,players_per_room)
+            states=[request('/api/sessions/'+state['id']) for state in states]
         if not linked:
             if venue_pin:
                 valid_profile = read(venue_target)
@@ -829,8 +836,8 @@ def main():
                 payload={'base':uri,'token':keys['Master'],'plan':plan,'output':str(file)}
                 if network:
                     payload['network']={'output':str(out/(label+'-udp-network.json')),
-                                        'seats':[{'roomId':room,'seat':seat,'address':address}
-                                                 for room in range(1,6) for seat in range(1,players_per_room+1)]}
+                                        'seats':[{'roomId':room,'seat':person['seat']+1,'address':address}
+                                                 for room,people in sorted(prepared_rosters.items()) for person in people]}
                 completed=subprocess.run([shutil.which('node'),str(driver)],cwd=driver.parent,
                     input=json.dumps(payload),
                     text=True,encoding='utf-8',capture_output=True,timeout=45,creationflags=subprocess.CREATE_NO_WINDOW)
@@ -1060,6 +1067,7 @@ def main():
             entry_label=('linked' if label=='linked-venue' else label) if linked else f'room-{index+1}'
             entry={'process':process,'readyPath':ready,'reportPath':report,'work':work/name,'config':value,'label':entry_label,
                    'sessionId':state['id'],'witness':None,'peerDiagnostics':args.peer_diagnostics,'venueIndex':index}
+            entry['preparedRosters']={room:prepared_rosters[room] for room in state['roomIds'] if room in prepared_rosters}
             runners.append(entry);entries.append(entry)
         def is_ready():
             if process.poll() is not None:raise RuntimeError('Venue launcher exited before all sources were ready')
@@ -1233,7 +1241,7 @@ def main():
         state=create(list(range(1,6)), 'managed ticket-source interruption')
         route='/api/sessions/'+state['id']
         entry,=launch_venue([state],True,label='stale-ticket-venue')
-        people={room:prepare_room_roster(entry,room) for room in range(1,6)}
+        people={room:entry['preparedRosters'].get(room) or prepare_room_roster(entry,room) for room in range(1,6)}
         def live_preview():
             preview=request('/api/vr-deployment/venue')
             return preview if preview['ready'] else None
@@ -4684,9 +4692,10 @@ def main():
                 entry['combatEnemyCount']=enemy_count
                 if not linked and rooms==[1]:rejected('bound-preparing',config(state['id']))
                 for room in rooms:
+                    people=entry.get('preparedRosters',{}).get(room)
                     if args.check_vr_venue_tickets or args.check_roster_room_tickets:
-                        staged.append((entry, room, prepare_room_roster(entry, room)))
-                    else: round_clients.extend(room_players(entry,room) if player_folder else [player(entry,room)])
+                        staged.append((entry, room, people or prepare_room_roster(entry, room)))
+                    else: round_clients.extend(room_players(entry,room,people) if player_folder else [player(entry,room)])
             if args.check_vr_venue_tickets: round_clients=venue_ticket_players(staged,linked)
             if args.check_roster_room_tickets: round_clients=roster_ticket_players(staged,linked)
             owner_ids={entry['sessionId']:[c['player']['id'] for c in round_clients if c['sessionId']==entry['sessionId']] for entry in entries}

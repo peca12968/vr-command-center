@@ -70,6 +70,9 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
     return session;
   };
   const end = async id => { await command(id, 'End'); active.delete(id); };
+  const join = (session, roomId) => api(state(session.id) + '/players', 'POST', {
+    playerId: randomUUID(), roomId, name: 'Private roster seat', headset: 'Quest3'
+  });
   const shape = (topology, sessions) => ({ version: 4, controlInstance: 'C:\\Private Venue\\control\\control-instance.json', topology,
     address: '192.168.1.10', listenAddress: '0.0.0.0',
     servers: sessions.map((session, index) => ({ sessionId: session.id, sessionSequence: session.sequence,
@@ -81,7 +84,8 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
     check(await page.locator(panel).isHidden(), 'Room controller and GameServer cannot access the venue server plan');
     const vacant = await api(route);
     check(!vacant.ready && vacant.topology === null && vacant.rooms.length === 5
-      && vacant.rooms.every(room => room.state === 'missing-session' && room.sessionId === null), 'Vacant rooms have no launch identity');
+      && vacant.rooms.every(room => room.state === 'missing-session' && room.sessionId === null && room.registeredSeats.length === 0),
+      'Vacant rooms have no launch identity or registered seats');
 
     const vr = await mission('VR'), mr = await mission('MR');
     const independent = [];
@@ -92,10 +96,16 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
       && (await page.locator('#venue-server-rooms li').nth(2).textContent()).includes('等待鎖定 MR 校正'),
       'A mixed venue exposes the exact MR room waiting for a lock and cannot download');
     await command(independent[2].id, 'SetRoomAlignment', { roomAlignment: { room3: 'a'.repeat(64) } });
-    independent[2] = await api(state(independent[2].id));
+    for (const [index, session] of independent.entries()) independent[index] = await join(session, index + 1);
     await page.locator('#venue-server-read').click();
     await page.locator('#venue-server-form').waitFor();
     const independentPlan = shape('Independent', independent);
+    const seatPreview = await api(route);
+    const previewBody = JSON.stringify(seatPreview);
+    assert.deepEqual(seatPreview.rooms.map(room => room.registeredSeats), [[1], [1], [1], [1], [1]]);
+    check(!previewBody.includes('Private roster seat') && independent.every(session => session.players.every(player =>
+      !previewBody.includes(player.id) && !previewBody.includes(player.admissionId))),
+      'The Master preview projects exact one-based seats without including player identities or admission IDs');
     await fill(page, independentPlan);
     await page.locator('#venue-server-instance').fill('control-instance.json');
     check(await page.locator(issue).isDisabled(), 'Plan export rejects a relative management instance path');
@@ -112,6 +122,7 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
       && requests.length > 0 && requests.every(([method, body]) => method === 'GET' && body === null),
       'Actual download retains the five room revisions and mission IDs without exposing credentials or sending the local path to management');
     const inventoryInput = page.locator('#venue-server-seat-addresses'), networkButton = page.locator('#venue-server-network-download');
+    const networkStatus = page.locator('#venue-server-network-status');
     const seats = [1, 2, 3, 4, 5].map(roomId => ({ roomId, seat: 1, address: `192.168.1.${20 + roomId}` }));
     const upload = value => inventoryInput.setInputFiles({ name: 'seat-addresses.json', mimeType: 'application/json',
       buffer: Buffer.from(JSON.stringify(value)) });
@@ -120,6 +131,13 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
     check(await networkButton.isDisabled() && !await page.locator(issue).isDisabled(),
       'A wildcard bind remains valid for launch but cannot generate a UDP preflight plan');
     await page.locator('#venue-server-bind').fill(independentPlan.address);
+    const alternateSeats = [...seats.slice(0, 4), { ...seats[4], seat: 2 }];
+    await upload({ version: 1, seats: alternateSeats });
+    await networkStatus.filter({ hasText: '場次未登記：房間 5 席位 2' }).waitFor();
+    check(await networkButton.isDisabled() && !await page.locator(issue).isDisabled()
+      && (await networkStatus.innerText()).includes('席位表缺少：房間 5 席位 1'),
+      'A same-size inventory with the wrong seat reports both mismatches and leaves the launch plan available');
+    await upload({ version: 1, seats: [...seats].reverse() });
     const [networkFile] = await Promise.all([page.waitForEvent('download'), networkButton.click()]);
     const networkOutput = path.join(screenshots, 'independent-venue-network.json');
     assert.equal(networkFile.suggestedFilename(), 'vr-command-venue-network.json');
@@ -170,7 +188,8 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
     check(await page.locator('#venue-server-form').isHidden(), 'An unavailable preview cannot download a saved port draft');
     for (const session of independent) await end(session.id);
 
-    const linked = await create(vr, 'Linked', [1, 2, 3, 4, 5]);
+    let linked = await create(vr, 'Linked', [1, 2, 3, 4, 5]);
+    for (const room of [1, 2, 3, 4, 5]) linked = await join(linked, room);
     await page.locator('#venue-server-read').click();
     await page.locator('#venue-server-form').waitFor();
     const linkedPlan = shape('Linked', [linked]);
@@ -196,7 +215,6 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
       sources: seats
     });
     const otherIps = page.locator('#venue-server-other-ips');
-    const networkStatus = page.locator('#venue-server-network-status');
     await otherIps.fill('192.168.1.25');
     check(await networkButton.isDisabled() && !await page.locator(issue).isDisabled()
       && (await networkStatus.innerText()).includes('房間 5 席位 1'),
@@ -220,6 +238,23 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
       && requests.every(([method, body]) => method === 'GET' && body === null),
       'The browser downloads the canonical address inventory without sending it to the management API');
     await page.locator(panel).screenshot({ path: path.join(screenshots, 'venue-server-ip-inventory.png') });
+    await otherIps.fill('');
+    const originalSeat = linked.players.find(player => player.roomId === 5);
+    await join(linked, 5);
+    await api(state(linked.id) + '/players/' + originalSeat.id, 'DELETE', undefined, 'Master', 204, originalSeat.admissionId);
+    const beforeRosterRecheck = unexpected.length;
+    await networkButton.click();
+    await page.locator(status).filter({ hasText: '場次狀態已變更' }).waitFor();
+    check(await page.locator('#venue-server-form').isHidden() && unexpected.length === beforeRosterRecheck,
+      'A same-size roster change after preview cancels the pending network download');
+    await page.locator('#venue-server-read').click();
+    await networkStatus.filter({ hasText: '席位表缺少：房間 5 席位 2' }).waitFor();
+    check(await networkButton.isDisabled() && !await page.locator(issue).isDisabled()
+      && (await networkStatus.innerText()).includes('場次未登記：房間 5 席位 1'),
+      'Rereading compares the actual occupied seat even when a lower seat is vacant');
+    await page.locator(panel).screenshot({ path: path.join(screenshots, 'venue-server-seat-mismatch.png') });
+    await downloadNetwork(page, path.join(screenshots, 'linked-venue-network-updated-seats.json'), linkedPlan, alternateSeats);
+    check(unexpected.length === beforeRosterRecheck + 1, 'The corrected seat inventory downloads after the roster reread');
     await page.locator('#venue-server-bind').fill(linkedPlan.listenAddress);
     await end(linked.id);
     const replacement = [];
@@ -229,6 +264,9 @@ async function checkServerPlan({ context, api, tokens, base, screenshots, check,
     check((await page.locator(ports).evaluateAll(inputs => inputs.map(input => input.value))).join(',') === '18800,18801,18802,18803,18804',
       'Returning to Independent restores its original room ports, even after an unavailable preview');
     await download(page, path.join(screenshots, 'replacement-venue-server-plan.json'), shape('Independent', replacement));
+    await page.locator('#venue-server-bind').fill(independentPlan.address);
+    check(await networkButton.isDisabled() && (await networkStatus.innerText()).includes('場次未登記：房間 1 席位 1'),
+      'Empty rosters can export a launch plan while a populated network inventory is rejected');
     await page.locator('#tab-missions').click();
     await page.locator('#tab-operations').click();
     await page.locator(panel + ' summary').click();
