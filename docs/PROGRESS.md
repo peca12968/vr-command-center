@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 六批 Windows 連線量測明細
+
+- 批次已設定 `windowsLinkCriteria` 時，收件總表會在 `issues[].windowsLinkMetrics` 提供缺少量測的席位，以及各席回覆數、p95 往返時間和未通過的門檻。散檔、逐席 ZIP 與收件資料夾仍由同一原驗收流程核對，未達門檻時正式驗收仍拒絕。 [收件方式](EXTERNAL_CLIENTS.md#一次查看六批待補件)
+- 通過 116 項封存及 11 項 LAN 預檢測試。既有六批 Windows 同機的 80 份戰績回條重驗與原正式摘要逐位元一致。兩份測試副本加上門檻後，總表定位 10 席缺量測，其餘四批仍通過。合成測試另核對回覆數不足、p95 超標及一席缺量測。 [本機驗證摘要](../artifacts/staged-venue-windows-link-metrics-validation.json)
+- 功能來源 `d287d32` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、Quest 3／VIVE XR、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43353716836)
+
 ## 2026-11-13 六批 Windows 收件的逐席缺件
 
 - 六批收件總表在 `issues[].windowsInbox` 顯示原驗收的 Windows 收件細節，包括預期與實收席數、缺少的房間及席號，以及錯批或重複的 ZIP 檔名。原正式驗收及其退出碼維持。 [收件方式](EXTERNAL_CLIENTS.md#一次查看六批待補件)
