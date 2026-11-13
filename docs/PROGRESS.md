@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 五房 UDP 報告收件配對
+
+- `--inbox` 可依遊戲端點、來源與交換雜湊配對原始監聽和探測報告，列出缺少對端、重複及無法讀取的檔名。完整報告可納入封存驗收，未完成報告可接續補件。 [收件方式](EXTERNAL_CLIENTS.md#從資料夾配對-udp-報告)
+- Windows 本機通過 11 項 LAN 預檢、12 項 Quest UDP 及 113 項封存測試。以原檢查時間及另存副本的原始位元重驗兩種模式，兩批均先定位缺件，再補交雙端報告，收件與封存摘要均和原驗收一致，合計 50 份玩家 ZIP、6 組 UDP 及 2,502 格回放。 [本機驗證摘要](../artifacts/venue-udp-inbox-validation.json)
+- 功能來源 `3583e49` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43335417400)
+
 ## 2026-11-13 五房 UDP 預檢補測
 
 - 全館預檢可用 `--retry-report` 重新核對原本通過的雙端資料，並只提交缺漏來源。重試沿用同一份網路清單和原啟動資料，並檢查原檔雜湊、重複來源與既有時限。 [補測方式](EXTERNAL_CLIENTS.md#補測未完成的全館-udp-預檢)
