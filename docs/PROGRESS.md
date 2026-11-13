@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 自動準備六批場館驗收總清單
+
+- `prepare-venue-stages.py` 可從六份批次清單產生總清單。輸入可任意排序，工具會檢查拓撲、模式與席數組合、重複清單及發行報告的 SHA-256，並可帶入共同的啟動、量測及追蹤驗收條件。 [操作方式](EXTERNAL_CLIENTS.md#一次驗收兩種模式的三個階段)
+- 以既有 Windows 同機封存重驗 18 場啟動、80 份連線量測與戰績回條。除了新總清單的 SHA-256，驗收摘要與原結果相同。空白收件資料夾的測試列出第六批 25 席待補，其餘五批通過。 [本機驗證摘要](../artifacts/staged-venue-plan-preparation-validation.json)
+- 通過 120 項封存及 12 項 Quest UDP 測試。功能來源 `4405fee` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 場地及廠商硬體仍待現地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43359507218)
+
 ## 2026-11-13 從原封存準備 Windows 量測驗收清單
 
 - 準備指令可在建立批次清單時填入同時在線時間、Windows 最低回覆數及最高 p95。25 席合併場的缺件測試辨識第 1 房第 1 席，補回原 ZIP 後使用同一清單通過正式驗收。 [操作方式](EXTERNAL_CLIENTS.md#核對五房批次啟動器的原終止報告)
