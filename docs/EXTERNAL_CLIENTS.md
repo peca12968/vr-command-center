@@ -347,6 +347,8 @@ python .\scripts\prepare-venue-network-plan.py `
 
 若本批要驗收每席各自直連，可在產生全館清單、執行 UDP 預檢及 `start-verified-venue.py` 啟動時加上 `--require-distinct-remote-roster`。各席須使用不同的私有 IPv4，且不能與任一遊戲伺服器公告位址相同。檢查失敗會指出房號及席號。用 `--quest-device-map` 產生子集時，此選項仍會先檢查完整席位表。既有共用工作站及同機排演可沿用原指令。
 
+若伺服器有多張網卡，產生清單時可重複加上 `--server-ip`，列出所有公告位址及其他伺服器 IPv4。清單會保存這些位址並啟用逐席直連檢查。預檢與啟動會讀取同一份清單，任何席位若填到其中一個伺服器位址，工具會指出房號及席號。
+
 #### 用原網路清單核對封存席位
 
 在 `venue.json` 加入 `"venueNetworkPlan": "venue-network.json"`，或在 `prepare-venue-field-manifest.py` 加 `--venue-network-plan .\venue-network.json`。使用開場前的全館清單，涵蓋本階段所有 Windows 與 Quest 席位。工具會比對每房原封存端點及原名冊，再將伺服器已確認戰績的 UDP 來源逐席核對。收件模式會列出來源不符的 Windows ZIP，並將對應席位列為待補件。
@@ -356,6 +358,8 @@ python .\scripts\prepare-venue-network-plan.py `
 `venueNetworkPlan` 摘要列出原檔雜湊、預期席位、已核對席位及端點數。收件模式的已核對席位數只計入已交回且通過的 Windows ZIP。完整驗收會核對全館 Windows 與 Quest 席位。 [收件方式](#按收件資料夾找缺件及錯批)
 
 若驗收清單同時設定 `requireDistinctRemoteRoster`，工具也會核對預先保存的全館清單，包含所有 `serverIps`。逐席驗收仍以原連線與封存戰績為準。
+
+網路清單若已保存伺服器位址，封存清單的 `serverIps` 須涵蓋這些位址。封存驗收也會檢查後續列入的伺服器位址是否與任何原席位衝突。
 
 ### 核對封存戰績與 UDP 來源
 

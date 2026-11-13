@@ -184,7 +184,8 @@ def read_quest_network_plan(path, *, allow_shared_sources=False):
 
 def parse_quest_network_plan(plan, *, allow_shared_sources=False):
     require(type(plan.get('version')) is int and plan['version'] == 1, 'Expected a version 1 Quest plan or report')
-    require(set(plan) == {'version', 'mode', 'endpoints', 'sources'}, 'Unexpected Quest network plan fields')
+    fields = {'version', 'mode', 'endpoints', 'sources'}
+    require(set(plan) in (fields, fields | {'serverIps'}), 'Unexpected Quest network plan fields')
     sources = {seat: quest_network_address(value) for seat, value in quest_seats(plan['sources'], 'address').items()}
     if not allow_shared_sources:
         require(len(set(sources.values())) == len(sources), 'Use a distinct IPv4 for each mapped Quest')
@@ -201,6 +202,10 @@ def parse_quest_network_plan(plan, *, allow_shared_sources=False):
                 and tuple(rooms) in expected and tuple(rooms) not in groups, 'Invalid or repeated game endpoint')
         groups[tuple(rooms)] = quest_network_address(row['address']), integer(row['port'], 1024, 65535)
     require(len(set(groups.values())) == len(groups), 'A game binding is used by more than one endpoint')
+    if 'serverIps' in plan:
+        servers = read_network_server_ips(plan['serverIps'])
+        require({address for address, _ in groups.values()} <= set(servers), 'Server IPv4 inventory must include every advertised endpoint')
+        require_distinct_remote_sources(sources, groups.values(), servers)
     return mode, groups, sources
 
 
@@ -213,7 +218,15 @@ def read_venue_network_plan(path, mode, players_per_room):
     require(len({address.is_loopback for address in addresses.values()} |
                 {ipv4(address).is_loopback for address, _ in endpoints.values()}) == 1,
             'Use only loopback or only private LAN addresses in one venue network plan')
-    return {'sha256': hashlib.sha256(raw).hexdigest(), 'endpoints': endpoints, 'seats': addresses}
+    return {'sha256': hashlib.sha256(raw).hexdigest(), 'endpoints': endpoints, 'seats': addresses,
+            **({'serverIps': {ipv4(address) for address in document['serverIps']}} if 'serverIps' in document else {})}
+
+
+def read_network_server_ips(values):
+    require(type(values) is list and 1 <= len(values) <= 128, 'Provide 1 to 128 server IPv4 addresses')
+    addresses = [quest_network_address(value) for value in values]
+    require(len(set(addresses)) == len(addresses), 'Provide distinct server IPv4 addresses')
+    return sorted(addresses, key=ipv4)
 
 
 def require_distinct_remote_sources(seats, endpoints, server_ips=()):
@@ -231,6 +244,14 @@ def require_distinct_remote_sources(seats, endpoints, server_ips=()):
         if len(labels) > 1:
             issues.append('shared source: ' + ', '.join(labels))
     require(not issues, 'Distinct remote roster requires a unique private player IPv4 outside the server addresses for every seat (' + '; '.join(issues) + ')')
+
+
+def check_network_server_inventory(plan, topology, server_ips):
+    if plan is None or 'serverIps' not in plan:
+        return
+    require(plan['serverIps'] <= server_ips, 'The sealed server IPv4 inventory omits addresses from the venue network plan')
+    require(topology == 'direct-lan', 'A venue network plan with server IPv4 inventory requires direct-lan topology')
+    require_distinct_remote_sources(plan['seats'], plan['endpoints'].values(), server_ips)
 
 
 def check_venue_network_session(plan, session, endpoint, binding):
@@ -2250,6 +2271,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     network_reference = manifest.get('venueNetworkPlan')
     venue_network = (read_venue_network_plan(evidence_path(network_reference, kind='venueNetworkPlan'), mode, players_per_room)
                      if 'venueNetworkPlan' in manifest else None)
+    check_network_server_inventory(venue_network, topology, server_ips)
     planned_seat_addresses = venue_network['seats'] if venue_network is not None else None
 
     def network_summary(verified):
@@ -2313,7 +2335,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, inspect_quest_lo
     require(type(require_distinct_remote_roster) is bool, 'requireDistinctRemoteRoster must be a boolean')
     require(not require_distinct_remote_roster or (topology == 'direct-lan' and concurrency is not None),
             'requireDistinctRemoteRoster requires direct-lan and minimumConcurrentMilliseconds')
-    if require_distinct_remote_roster and venue_network is not None:
+    if require_distinct_remote_roster and venue_network is not None and 'serverIps' not in venue_network:
         require_distinct_remote_sources(planned_seat_addresses, venue_network['endpoints'].values(), server_ips)
     verify_player_sources = manifest.get('verifyPlayerSources', False)
     require(type(verify_player_sources) is bool and (not verify_player_sources or journals),

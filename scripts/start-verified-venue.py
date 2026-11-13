@@ -89,6 +89,7 @@ def launch(args):
                           and checked['launchBinding']['previewSha256'] == binding['previewSha256'],
                           'The original network plan, readiness report or preview changed')
         field.require(checked['complete'], 'UDP readiness is no longer complete or within its original time window')
+        distinct = field.udp_preflight_distinct_roster(checked)
         print(json.dumps({'status': 'udp-preflight-verified', 'mode': checked['mode'],
                           'verifiedSources': checked['verifiedSources'], 'launchPlanSha256': binding['planSha256'],
                           'networkPlanSha256': checked['networkPlanSha256'],

@@ -11,7 +11,8 @@ field = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(field)
 
 
-def prepare(launch_path, preview_path, seat_path, players_per_room, device_path=None, *, require_distinct_remote_roster=False):
+def prepare(launch_path, preview_path, seat_path, players_per_room, device_path=None, *, require_distinct_remote_roster=False,
+            server_ips=None):
     launch = field.read_udp_launcher_document(launch_path, preview=False)
     preview = field.read_udp_launcher_document(preview_path, preview=True)
     checked = field.compare_udp_launch_documents(launch, preview)
@@ -34,8 +35,11 @@ def prepare(launch_path, preview_path, seat_path, players_per_room, device_path=
     addresses = {row['address'] for row in endpoints} | set(seats.values())
     field.require(len({field.ipv4(address).is_loopback for address in addresses}) == 1,
                   'Use only loopback or only private LAN addresses in one plan')
-    if require_distinct_remote_roster:
-        field.require_distinct_remote_sources(seats, ((row['address'], row['port']) for row in endpoints))
+    if server_ips is not None:
+        server_ips = field.read_network_server_ips(server_ips)
+        field.require({row['address'] for row in endpoints} <= set(server_ips), 'Server IPv4 inventory must include every advertised endpoint')
+    if require_distinct_remote_roster or server_ips is not None:
+        field.require_distinct_remote_sources(seats, ((row['address'], row['port']) for row in endpoints), server_ips or ())
 
     included = seats
     if device_path is not None:
@@ -48,6 +52,8 @@ def prepare(launch_path, preview_path, seat_path, players_per_room, device_path=
 
     network = {'version': 1, 'mode': checked['mode'], 'endpoints': endpoints,
                'sources': [{'roomId': room, 'seat': seat, 'address': address} for (room, seat), address in sorted(included.items())]}
+    if server_ips is not None:
+        network['serverIps'] = server_ips
     summary = {'prepared': True, 'mode': checked['mode'], 'plannedSeats': len(seats), 'includedSeats': len(included),
                'endpointCount': len(endpoints), 'planSha256': checked['planSha256'], 'previewSha256': checked['previewSha256']}
     return network, summary
@@ -62,12 +68,14 @@ def main():
     parser.add_argument('--quest-device-map', type=Path, help='Include only these Quest seats in the generated plan')
     parser.add_argument('--require-distinct-remote-roster', action='store_true',
                         help='Require each planned seat to have its own private IPv4 outside the server endpoints')
+    parser.add_argument('--server-ip', action='append', help='Repeat for each server IPv4, including all advertised endpoints; requires distinct remote seats')
     parser.add_argument('--output', required=True, type=Path, help='New version 1 network plan JSON')
     args = parser.parse_args()
     try:
         field.require(not args.output.exists(), 'Use a new output file')
         plan, summary = prepare(args.launch_plan, args.launcher_preview, args.seat_addresses, args.players_per_room,
-                                args.quest_device_map, require_distinct_remote_roster=args.require_distinct_remote_roster)
+                                args.quest_device_map, require_distinct_remote_roster=args.require_distinct_remote_roster,
+                                server_ips=args.server_ip)
         payload = json.dumps(plan, indent=2) + '\n'
         with args.output.open('x', encoding='utf-8', newline='\n') as stream:
             stream.write(payload)

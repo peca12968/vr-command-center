@@ -125,6 +125,7 @@ def prepare(args, output):
     alignment_bundle = field.read_venue_alignment_bundle(alignment_path, mode, expected) if alignment_path is not None else None
     network_path = evidence_path(args.venue_network_plan.resolve()) if args.venue_network_plan is not None else None
     venue_network = field.read_venue_network_plan(network_path, mode, args.players_per_room) if network_path is not None else None
+    field.check_network_server_inventory(venue_network, args.topology, addresses)
     reconnect_path = evidence_path(args.reconnect_source_plan.resolve()) if args.reconnect_source_plan is not None else None
     reconnect_sources = (field.read_reconnect_source_plan(reconnect_path, closure_id, venue_network['seats'], args.topology, addresses)[0]
                          if reconnect_path is not None else None)

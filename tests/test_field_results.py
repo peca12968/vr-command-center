@@ -1646,11 +1646,16 @@ class FieldResultsTests(unittest.TestCase):
                     plan['sources'].extend({'roomId': owner['roomId'], 'seat': owner['seat'] + 1, 'address': player['address']}
                                            for owner, player in zip(session['players'], entry['players'], strict=True))
                 plan_path = root / 'distinct-network.json'
+                extra_server = '192.168.5.254'
+                plan['serverIps'] = sorted({row['address'] for row in plan['endpoints']} | {extra_server})
                 plan_path.write_text(json.dumps(plan), encoding='utf-8')
                 path.write_text(json.dumps(dict(manifest, venueNetworkPlan=plan_path.name)), encoding='utf-8')
+                with self.assertRaisesRegex(field.EvidenceError, 'omits addresses from the venue network plan'):
+                    field.verify_venue(path)
+                path.write_text(json.dumps(dict(manifest, venueNetworkPlan=plan_path.name,
+                                                serverIps=manifest['serverIps'] + [extra_server])), encoding='utf-8')
                 self.assertEqual(field.verify_venue(path)['venueNetworkPlan']['verifiedSeats'], 25)
                 last_source = plan['sources'][-1]
-                extra_server = '192.168.5.254'
                 last_source['address'] = extra_server
                 plan_path.write_text(json.dumps(plan), encoding='utf-8')
                 path.write_text(json.dumps(dict(manifest, venueNetworkPlan=plan_path.name,

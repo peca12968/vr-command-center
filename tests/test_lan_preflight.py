@@ -218,6 +218,41 @@ class NetworkPlanPreparationTests(unittest.TestCase):
         self.assertIn('Reuse the original venue network plan', checked.stderr)
         self.assertFalse(refused.exists())
 
+    def test_server_inventory_rejects_a_player_on_an_unadvertised_server_address(self):
+        launch_value, preview_value = guarded_documents('Linked', [7777], '192.168.5.10')
+        launch = self.store('launch.json', launch_value)
+        preview = self.store('preview.json', preview_value)
+        sources = [{'roomId': room, 'seat': 1, 'address': f'192.168.5.{20 + room}'} for room in range(1, 6)]
+        inventory = self.store('seats.json', {'version': 1, 'seats': sources})
+        network = self.root / 'network.json'
+        extra_server = '192.168.5.40'
+        args = ('--players-per-room', 1, '--server-ip', extra_server, '--server-ip', launch_value['address'])
+        generated = prepare_network(launch, preview, inventory, network, *args)
+        self.assertEqual(0, generated.returncode, generated.stderr)
+        plan = json.loads(network.read_bytes())
+        self.assertEqual([launch_value['address'], extra_server], plan['serverIps'])
+        output = self.root / 'readiness.json'
+        command = [sys.executable, str(ROOT / 'scripts/check-venue-udp-preflight.py'),
+                   '--output', str(output), '--network-plan']
+        checked = subprocess.run([*command, str(network)], capture_output=True, text=True, timeout=15)
+        self.assertEqual(1, checked.returncode, checked.stderr)
+        self.assertIs(json.loads(output.read_bytes())['requireDistinctRemoteRoster'], True)
+        refused = self.root / 'refused.json'
+        result = prepare_network(launch, preview, inventory, refused, '--players-per-room', 1, '--server-ip', extra_server)
+        self.assertIn('include every advertised endpoint', result.stderr)
+        sources[-1]['address'] = extra_server
+        self.store(inventory.name, {'version': 1, 'seats': sources})
+        result = prepare_network(launch, preview, inventory, refused, *args)
+        self.assertIn('server or non-private source: room 5 seat 1', result.stderr)
+        self.assertNotIn(extra_server, result.stderr)
+        self.assertFalse(refused.exists())
+        corrupted = self.store('corrupted-network.json', dict(plan, sources=sources))
+        output.unlink()
+        checked = subprocess.run([*command, str(corrupted)], capture_output=True, text=True, timeout=15)
+        self.assertEqual(1, checked.returncode)
+        self.assertIn('server or non-private source: room 5 seat 1', checked.stderr)
+        self.assertFalse(output.exists())
+
     @unittest.skipUnless(os.name == 'nt', 'Verified launch CLI requires Windows')
     def test_launch_enforces_original_distinct_policy_without_repeating_flag(self):
         launch_value, preview_value = guarded_documents('Linked', [7777], '192.168.5.10')

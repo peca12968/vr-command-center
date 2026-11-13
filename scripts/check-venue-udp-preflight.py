@@ -181,6 +181,8 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
                 *, require_distinct_remote_roster=False):
     document, raw = field.read_quest_document(plan)
     mode, endpoints, sources = field.parse_quest_network_plan(document, allow_shared_sources=True)
+    inventory_checked = 'serverIps' in document
+    require_distinct_remote_roster |= inventory_checked
     plan_hash = hashlib.sha256(raw).hexdigest()
     field.require({room for room, _ in sources} == set(field.QUEST_ROOMS), 'Plan a source for every room')
     field.require(launch_plan is None or launcher_preview is not None, 'A launch plan requires its original launcher preview')
@@ -208,7 +210,7 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
         field.require(launch_matches, 'Retry requires the original matching Windows plan and preview')
         prior, prior_hash = read_retry(retry_report, mode, plan_hash)
         require_distinct_remote_roster |= field.udp_preflight_distinct_roster(prior)
-    if require_distinct_remote_roster:
+    if require_distinct_remote_roster and not inventory_checked:
         field.require_distinct_remote_sources(sources, endpoints.values())
     pairs, batch_distinct = load_pairs(pairs_path, batch_paths, mode, [list(group) for group in rooms], binding, plan_hash)
     if batch_distinct and not require_distinct_remote_roster:
