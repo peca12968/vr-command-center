@@ -35,6 +35,10 @@ if ($args[0] -eq 'devices') {
 if ($args[0] -ne '-s' -or $args[1] -ne 'fixture') { exit 99 }
 switch ($args[2]) {
     'install' {
+        if ($env:QUEST_TEST_RELEASE_HASH) {
+            $installedHash = (Get-FileHash -LiteralPath $args[-1] -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($installedHash -cne $env:QUEST_TEST_RELEASE_HASH) { exit 95 }
+        }
         if ($env:QUEST_TEST_ALTER_ALIGNMENT) {
             [IO.File]::WriteAllText($env:QUEST_TEST_ALTER_ALIGNMENT, '{}')
         }
@@ -71,6 +75,12 @@ switch ($args[2]) {
                 if ($env:QUEST_TEST_FAIL -eq 'model') { 'Quest 2' } else { 'Quest 3' }
                 exit 0
             }
+            'pm' {
+                if ($env:QUEST_TEST_RELEASE_HASH -and ($args[4..7] -join ' ') -ceq 'path --user current com.vrcommand.quest') {
+                    'package:/data/app/fixture/base.apk'; exit 0
+                }
+                exit 98
+            }
             'mv' {
                 $name = $args[5].Split('/')[-1]
                 if ($name -eq 'vr-connection.json' -and $env:QUEST_TEST_FAIL -eq 'config-move') { exit 1 }
@@ -81,6 +91,10 @@ switch ($args[2]) {
                 exit 0
             }
             'sha256sum' {
+                if ($args[4] -ceq '/data/app/fixture/base.apk' -and $env:QUEST_TEST_RELEASE_HASH) {
+                    $hash = if ($env:QUEST_TEST_FAIL -eq 'installed-apk-mismatch') { 'f' * 64 } else { $env:QUEST_TEST_RELEASE_HASH }
+                    "$hash  $($args[4])"; exit 0
+                }
                 $file = Join-Path $remote ($args[4].Split('/')[-1])
                 $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
                 "$hash  $($args[4])"
@@ -140,9 +154,9 @@ class QuestDeployTests(unittest.TestCase):
     def write(path, document):
         path.write_text(json.dumps(document), encoding='utf-8')
 
-    def run_script(self, *flags, failure='', alter=False):
+    def run_script(self, *flags, failure='', alter=False, release_hash=''):
         env = {**os.environ, 'QUEST_TEST_ROOT':str(self.root), 'QUEST_TEST_FAIL':failure,
-               'QUEST_TEST_ALTER_ALIGNMENT':str(self.plan) if alter else ''}
+               'QUEST_TEST_ALTER_ALIGNMENT':str(self.plan) if alter else '', 'QUEST_TEST_RELEASE_HASH':release_hash}
         return subprocess.run(['pwsh','-NoProfile','-NonInteractive','-File',str(self.script),
                                '-ClientConfig',str(self.config),'-AdbPath',str(self.adb),*flags],
                               env=env, capture_output=True, encoding='utf-8', timeout=20)
@@ -161,6 +175,44 @@ class QuestDeployTests(unittest.TestCase):
         apk = self.root / 'artifacts/quest/VrCommand.apk'
         apk.parent.mkdir(parents=True)
         apk.write_bytes(b'mock APK')
+
+    def test_single_seat_checks_local_release_and_installed_apk_before_activation(self):
+        apk = self.root / 'selected release.apk'
+        apk.write_bytes(b'mock APK')
+        expected = hashlib.sha256(apk.read_bytes()).hexdigest()
+        release = self.root / 'release.json'
+        report = {'verified': True, 'scope': 'offline-package-consistency', 'quest': {
+            'applicationId': 'com.vrcommand.quest', 'architecture': 'arm64-v8a', 'signatureV2': True,
+            'versionCode': 72, 'sha256': expected}}
+        self.write(release, report)
+        flags = ('-ApkPath', str(apk), '-ReleaseReport', str(release))
+        checked = self.run_script(*flags, '-CheckOnly')
+        self.assertEqual(0, checked.returncode, checked.stderr)
+        info = json.loads(checked.stdout)
+        self.assertEqual((True, 72), (info['localApkVerified'], info['expectedVersionCode']))
+        self.assertFalse(self.commands.exists())
+        apk.write_bytes(b'wrong APK')
+        self.assert_rejected(self.run_script(*flags), 'Local Quest APK SHA-256 differs')
+        self.assertFalse(self.commands.exists())
+        apk.write_bytes(b'mock APK')
+        failed = self.run_script(*flags, '-Serial', 'fixture', failure='installed-apk-mismatch', release_hash=expected)
+        self.assert_rejected(failed, 'Installed Quest APK could not be verified')
+        commands = self.commands.read_text(encoding='utf-8').splitlines()
+        self.assertEqual(4, len(commands))
+        staged = commands[1].split(' install -r ', 1)[1]
+        self.assertNotEqual(str(apk), staged)
+        self.assertFalse(Path(staged).exists())
+        self.assertTrue(commands[-1].endswith('sha256sum /data/app/fixture/base.apk'))
+        self.assertEqual([], list(self.remote.iterdir()))
+        self.commands.unlink()
+        success = self.run_script(*flags, '-Serial', 'fixture', release_hash=expected)
+        self.assertEqual(0, success.returncode, success.stderr)
+        commands = self.commands.read_text(encoding='utf-8').splitlines()
+        self.assertLess(next(i for i, command in enumerate(commands) if 'base.apk' in command),
+                        next(i for i, command in enumerate(commands) if ' push ' in command))
+        self.assertIn(' shell monkey ', commands[-1])
+        self.assertEqual(self.player, json.loads((self.remote/'vr-connection.json').read_bytes()))
+        self.assertEqual(expected, hashlib.sha256(apk.read_bytes()).hexdigest())
 
     def ticket_refresh(self, installed_expiry, *, mode='MR'):
         identities = [uuid.uuid4() for _ in range(3)]

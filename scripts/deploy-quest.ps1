@@ -16,7 +16,8 @@ param(
     [Parameter(ParameterSetName='Bundle')][Parameter(ParameterSetName='CapturePlan')][switch]$AllowPartialMap,
     [Parameter(Mandatory, ParameterSetName='CapturePlan')][switch]$ReadCapturePlan,
     [Parameter(ParameterSetName='Bundle')][ValidateRange(1,2147483647)][int]$ExpectedVersionCode,
-    [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$ReleaseReport,
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$ReleaseReport,
+    [Parameter(ParameterSetName='Player')][Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$ApkPath,
     [Parameter(ParameterSetName='Bundle')][switch]$DeployMappedSeats,
     [Parameter(ParameterSetName='Bundle')][ValidateNotNullOrEmpty()][string]$RetryIncomplete,
     [Parameter(ParameterSetName='Bundle')][switch]$VerifyTrackedSeats,
@@ -757,6 +758,13 @@ function Get-QuestApkStatus([string]$TargetSerial, [string]$ExpectedHash) {
     return 'ready'
 }
 
+function Confirm-LocalQuestApk([string]$Path, [string]$ExpectedHash) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw 'Choose the original Quest APK for this release.' }
+    if ((Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $ExpectedHash) {
+        throw 'Local Quest APK SHA-256 differs from the release report.'
+    }
+}
+
 function Get-MappedQuestStatus($Row, $Inventory, [int]$VersionCode, [string]$ExpectedHash) {
     $result = [ordered]@{ roomId = $Row.roomId; seat = $Row.seat; status = 'ready' }
     $status = $Inventory[$Row.serial]
@@ -1197,6 +1205,9 @@ if ($PSCmdlet.ParameterSetName -eq 'Windows') { Export-WindowsVenueSeats; return
 
 $alignment = $null
 $alignmentHash = $null
+if ($ApkPath -and (-not $ReleaseReport -or $DeviceMap)) {
+    throw 'Use -ApkPath only for a single-seat install with -ReleaseReport.'
+}
 if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
     if ($WaitForTrackedSeconds -and -not $VerifyTrackedSeats) { throw 'Use -WaitForTrackedSeconds only with -VerifyTrackedSeats.' }
     if ($DeploymentReport -and (-not $VerifyTrackedSeats -or -not $DeviceMap)) {
@@ -1248,8 +1259,9 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
         if (-not $result.complete) { exit 1 }
         return
     }
-    if ($DeployMappedSeats -or $ExpectedVersionCode -or $ReleaseReport -or $AllowPartialMap) { throw 'Specify -DeviceMap for mapped deployment parameters.' }
+    if ($DeployMappedSeats -or $ExpectedVersionCode -or $AllowPartialMap) { throw 'Specify -DeviceMap for mapped deployment parameters.' }
     if ([bool]$RoomId -ne [bool]$Seat) { throw 'Specify both -RoomId and -Seat, or omit both for five-room preflight.' }
+    if ($ReleaseReport -and -not $RoomId) { throw 'Specify both -RoomId and -Seat to check an APK for a single bundle seat.' }
     if (-not $RoomId -and $Serial) { throw 'Specify -RoomId and -Seat when targeting a Quest device.' }
     if ($RoomId -and -not $CheckOnly -and [string]::IsNullOrWhiteSpace($Serial)) { throw 'Specify -Serial to deploy a bundle seat to a Quest 3.' }
     $venue = Read-VenueBundle $VenueBundle $RoomId $Seat
@@ -1283,6 +1295,10 @@ if ($PSCmdlet.ParameterSetName -eq 'Bundle') {
         }
     }
 }
+$release = if ($ReleaseReport) { Read-QuestRelease $ReleaseReport }
+$projectRoot = Split-Path -Parent $PSScriptRoot
+$apk = if ($ApkPath) { $ApkPath } else { Join-Path $projectRoot 'artifacts/quest/VrCommand.apk' }
+if ($release) { Confirm-LocalQuestApk $apk $release.sha256 }
 if ($CheckOnly) {
     $report = [ordered]@{
         roomId = $ticket.RoomId
@@ -1292,6 +1308,7 @@ if ($CheckOnly) {
         alignmentSha256 = $alignmentHash
     }
     if ($ticket.AlignmentHash) { $report.alignmentPinsVerified = $true }
+    if ($release) { $report.localApkVerified = $true; $report.expectedVersionCode = $release.versionCode }
     if ($ManagementApi) { $report.managementVerified = $true }
     if ($PSCmdlet.ParameterSetName -eq 'Bundle' -and $requiresLive -and $ManagementApi) {
         $report.headset = $venue.SeatHeadsets["$RoomId/$Seat"]
@@ -1300,8 +1317,6 @@ if ($CheckOnly) {
     return
 }
 
-$projectRoot = Split-Path -Parent $PSScriptRoot
-$apk = Join-Path $projectRoot 'artifacts/quest/VrCommand.apk'
 if (-not (Test-Path -LiteralPath $AdbPath -PathType Leaf)) { throw 'Android platform-tools are not installed.' }
 if (-not (Test-Path -LiteralPath $apk -PathType Leaf)) { throw 'Build the Quest APK before deploying.' }
 if (-not $Serial) {
@@ -1311,18 +1326,35 @@ if (-not $Serial) {
     $Serial = $devices[0]
 }
 $deploymentLock = Enter-QuestDeployment
+$stagedApk = $null
 try {
     $model = & $AdbPath -s $Serial shell getprop ro.product.model
     if ($LASTEXITCODE -ne 0) { throw 'Could not identify the selected Android device.' }
     $model = ([string]$model).Trim()
     if ($model -ne 'Quest 3') { throw 'Selected device is not a Meta Quest 3. No app was installed.' }
     if ($ManagementApi) { Confirm-VenueReadback $venue -RequireLiveSource }
+    if ($release) {
+        $stagePath = Join-Path ([IO.Path]::GetTempPath()) ('vr-command-' + [Guid]::NewGuid().ToString('N') + '.apk')
+        $source = [IO.File]::OpenRead((Resolve-Path -LiteralPath $apk).ProviderPath)
+        try {
+            $destination = [IO.File]::Open($stagePath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+            $stagedApk = $stagePath
+            try { $source.CopyTo($destination) }
+            finally { $destination.Dispose() }
+        } finally { $source.Dispose() }
+        Confirm-LocalQuestApk $stagedApk $release.sha256
+        $apk = $stagedApk
+    }
     & $AdbPath -s $Serial install -r $apk
     if ($LASTEXITCODE -ne 0) { throw 'APK installation failed.' }
+    if ($release -and (Get-QuestApkStatus $Serial $release.sha256) -cne 'ready') {
+        throw 'Installed Quest APK could not be verified against the release report.'
+    }
     if ($ManagementApi) { Confirm-VenueReadback $venue -RequireLiveSource }
     Set-QuestConnection $Serial $config $ticket $alignment -UsePassthrough:$Passthrough -RequestMixedReality:$isMixedReality `
         -LiveVenue $(if ($ManagementApi) { $venue })
 } finally {
     $deploymentLock.ReleaseMutex(); $deploymentLock.Dispose()
+    if ($stagedApk) { Remove-Item -LiteralPath $stagedApk -ErrorAction SilentlyContinue }
 }
 Write-Host 'Quest client installed and launched. Ticket expiry and server admission still apply.'

@@ -266,6 +266,15 @@ pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -CheckOnly `
 
 預檢回報房間、從 1 開始計算的席位、票券到期時間、選用模式及校正檔 SHA-256。`alignmentPinsVerified: true` 表示原檔符合連線檔內的鎖定值。預檢只讀本機檔案，輸出不含票券。遊戲伺服器負責驗簽及核對目前名冊，頭盔會重新計算校正並量測追蹤。票券效期為五分鐘，正式部署時請使用當場新配發的檔案。舊四欄 MR 連線檔仍可明確指定 `-MixedReality`，校正檔由伺服器在入場時核對。
 
+單席可另帶 `-ReleaseReport` 與原 `-ApkPath`，例如以下 VR 預檢。省略 `-ApkPath` 時使用 `artifacts/quest/VrCommand.apk`。用五房 ZIP 選定單席時，也可把 `-ClientConfig` 換成 `-VenueBundle`、`-RoomId` 和 `-Seat`。
+
+```powershell
+pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -CheckOnly -ClientConfig .\player.json `
+  -ReleaseReport .\venue-release.json -ApkPath .\VrCommand.apk
+```
+
+`localApkVerified: true` 表示本機 APK 與原發行報告的 SHA-256 相符，此步驟無需頭盔。正式安裝時會核對當次暫存副本，ADB 安裝後再讀回裝置上 `base.apk` 的 SHA-256。若讀回失敗，流程停在 APK 核對，保留原玩家連線設定。安裝指令已送出時，須到裝置核對目前套件狀態。 [產生發行報告](EXTERNAL_CLIENTS.md#發送前離線核對交付套件)
+
 ```powershell
 pwsh -NoProfile -File .\scripts\deploy-quest.ps1 -ClientConfig .\data\vr-connections\<場次ID>\player-1.json -AlignmentFile .\room-1-alignment.json
 ```
