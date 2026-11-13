@@ -198,6 +198,7 @@ def main():
     p.add_argument('--check-venue-tracking-gate', action='store_true', help='Reject full tracking Begin while the same native roster is otherwise ready')
     p.add_argument('--check-venue-participation-gate', action='store_true', help='Require all 25 effective native seats and verify their original Preparing frames')
     p.add_argument('--check-venue-roster-ui', action='store_true', help='Open all five original Preparing rosters in the shipped console')
+    p.add_argument('--check-roster-room-tickets', action='store_true', help='Launch native players from the five original roster shortcut ZIP downloads')
     p.add_argument('--check-venue-end', action='store_true', help='End each native topology in one batch and read its original archives')
     p.add_argument('--check-venue-reports', action='store_true', help='Verify the original reports ZIP for each native End batch')
     p.add_argument('--check-venue-replay-ui', action='store_true', help='Open the original native archives through the shipped console')
@@ -356,6 +357,8 @@ def main():
         p.error('--check-venue-participation-gate requires --check-venue-begin and all native player seats')
     if args.check_venue_roster_ui and not (args.check_venue_participation_gate and args.prepare_independent_set and shutil.which('node')):
         p.error('--check-venue-roster-ui requires --check-venue-participation-gate, --prepare-independent-set and Node.js')
+    if args.check_roster_room_tickets and (not args.check_venue_roster_ui or args.check_vr_venue_tickets):
+        p.error('--check-roster-room-tickets requires --check-venue-roster-ui and its own room ZIP downloads')
     if args.check_venue_end and (not args.player_package or args.observe_closure_ui):
         p.error('--check-venue-end requires the three-package check and its own End path')
     if args.check_venue_reports and (not args.check_venue_end or not args.check_room_reports):
@@ -1410,6 +1413,36 @@ def main():
               'master and room desks receive only their original published UDP endpoints')
         return {'expectedEndpoints': [{'roomId': room, 'address': endpoint['address'], 'port': endpoint['port']}
                                       for room, endpoint in endpoints.items()]}
+
+    def roster_ticket_players(staged, linked):
+        mode = 'linked' if linked else 'independent'
+        output = runtime / (mode + '-roster-ticket-downloads')
+        output.mkdir()
+        rooms = [{'roomId': room, 'sessionId': entry['sessionId'], 'address': address, 'port': entry['ready']['port'],
+                  'players': [{'playerId': person['id'], 'admissionId': person['admissionId']} for person in people]}
+                 for entry, room, people in staged]
+        driver = ROOT / 'tests/browser/check-roster-tickets-native.cjs'
+        browser = subprocess.run([shutil.which('node'), str(driver)], cwd=driver.parent,
+            input=json.dumps({'base': uri, 'token': keys['Master'], 'rooms': rooms, 'output': str(output)}),
+            capture_output=True, encoding='utf-8', timeout=90, creationflags=subprocess.CREATE_NO_WINDOW)
+        if browser.returncode:
+            diagnostic = browser.stderr
+            for secret in keys.values():
+                diagnostic = diagnostic.replace(secret, '[redacted]')
+            raise RuntimeError(mode + ' roster ticket browser failed: ' + diagnostic[-1000:])
+        reports = read(output / 'checks.json')
+        check(reports == [{'roomId': row['roomId'], 'sessionId': row['sessionId'], 'seats': len(row['players']),
+                           'zip': f"room-{row['roomId']}.zip"} for row in rooms],
+              mode + ' original browser roster downloads cover all five room admissions')
+        launched = []
+        for (entry, room, people), report in zip(staged, reports, strict=True):
+            original = output / report['zip']
+            launched.extend(room_players(entry, room, people, original.read_bytes()))
+            copy = runtime / (entry['label'] + f'-bundle-{room}') / 'download.zip'
+            report['sha256'] = control.sha(original)
+            check(report['sha256'] == control.sha(copy), mode + f' room {room} uses the byte-identical browser ZIP')
+        save(mode + '-roster-ticket-downloads.json', reports)
+        return launched
 
     def venue_ticket_players(staged, linked):
         mode = 'Linked' if linked else 'Independent'
@@ -4647,9 +4680,11 @@ def main():
                 entry['combatEnemyCount']=enemy_count
                 if not linked and rooms==[1]:rejected('bound-preparing',config(state['id']))
                 for room in rooms:
-                    if args.check_vr_venue_tickets: staged.append((entry, room, prepare_room_roster(entry, room)))
+                    if args.check_vr_venue_tickets or args.check_roster_room_tickets:
+                        staged.append((entry, room, prepare_room_roster(entry, room)))
                     else: round_clients.extend(room_players(entry,room) if player_folder else [player(entry,room)])
             if args.check_vr_venue_tickets: round_clients=venue_ticket_players(staged,linked)
+            if args.check_roster_room_tickets: round_clients=roster_ticket_players(staged,linked)
             owner_ids={entry['sessionId']:[c['player']['id'] for c in round_clients if c['sessionId']==entry['sessionId']] for entry in entries}
             if args.check_venue_begin:
                 route='/api/venue/phase'
