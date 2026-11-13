@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 管理台匯出五房伺服器 IPv4 清單
+
+- 控制台 0.31.174 的五房啟動計畫可逐行填入伺服器其他 IPv4。公告位址會自動加入 UDP 預檢清單。下載前會指出衝突房號及席號，欄位與席位表只在瀏覽器處理。 [操作說明](EXTERNAL_CLIENTS.md#從原啟動預覽產生網路清單) · [Windows 管理包](../artifacts/VRCommand-ControlServer-0.31.174.zip)
+- 套件版 Chromium 通過 30 項啟動計畫檢查。以瀏覽器匯出的五席、三伺服器位址清單讀回預檢，確認自動套用逐席直連。測試副本若將一席改為第二網卡位址，預檢會指出該席並拒絕輸出。另通過 825 項 HTTP 與 107 項套件啟停檢查。 [本機驗證摘要](../artifacts/console-venue-server-ip-inventory-validation.json)
+- 功能來源 `5bd3909` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、頭盔、MR 與廠商硬體仍待現場驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43371754542)
+
 ## 2026-11-13 五房預檢核對伺服器其他 IPv4
 
 - 產生網路清單時可重複使用 `--server-ip` 登記伺服器的其他網卡位址。UDP 預檢、驗證啟動及封存清單會核對原位址表。若席位誤用伺服器位址，工具會指出房號與席號。 [操作說明](EXTERNAL_CLIENTS.md#從原啟動預覽產生網路清單)
