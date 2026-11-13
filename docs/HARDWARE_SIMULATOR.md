@@ -2,6 +2,8 @@
 
 即時模擬與單房停止的操作方式見[硬體模擬閘道](HARDWARE.md#停止單房模擬閘道)。
 
+模擬器 0.2.16 提供五房排演報告的離線核對。`hardware-simulator-0.2.16-net10.zip` 為 248,144 bytes，SHA-256 `f4c8bb6044252a338a1a720a7c9a8c75d7078e5de9f3c2cad8deab8c61d3262f`，解壓核對 8 筆清單。 [下載套件](../artifacts/hardware-packages/hardware-simulator-0.2.16-net10.zip) · [核對指令](HARDWARE.md#離線核對五房排演結果)
+
 模擬器 0.2.15 的單房終端與五房狀態會區分管理服務暫停供應、讀取逾時與傳輸中斷。`hardware-simulator-0.2.15-net10.zip` 為 242,132 bytes，SHA-256 `b827a617102329eb5a572e0f01be8f6841faa2e5f0506e79ebe9c72575843f8d`，解壓後核對 8 個清單檔案。 [下載套件](../artifacts/hardware-packages/hardware-simulator-0.2.15-net10.zip) · [查看五房狀態](HARDWARE.md#查看五房排演狀態)
 
 模擬器 0.2.14 會在管理回覆的序號或檢查時間倒退時取消該房待確認批次，並保存原已確認回饋。`hardware-simulator-0.2.14-net10.zip` 為 239,839 bytes，SHA-256 `5518e54b64c6ab4d00cb7d046fff313f5d40ab7a117995001b5e14af67b06344`，清單含 8 個檔案。 [下載套件](../artifacts/hardware-packages/hardware-simulator-0.2.14-net10.zip) · [排演操作](HARDWARE.md#一次啟動與停止五房排演)
