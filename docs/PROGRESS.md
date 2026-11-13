@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 全館開場表直達指定房間名冊
+
+- 控制台 0.31.163 的「查看名冊」會從原開場目標選定房間，顯示該房玩家與即時參戰狀態。合併場可切回全部房間，同一場次重新整理會保留篩選。 [操作方式](PLAYER_READINESS.md#五房追蹤驗收開場)
+- 通過 42 項 Chromium 與 107 項 Windows 管理包檢查。合併場及混合 VR／MR 獨立場均核對第 5 房由四席增加至五席。房控測試原先誤以為既有合併名冊會隱藏外房列，已改為核對新捷徑及篩選選項。瀏覽器使用測試姿態與隔離 API。 [Windows 管理包](../artifacts/control-server-packages/VRCommand-ControlServer-0.31.163-venue-roster-final-win-x64.zip) · [本機驗證摘要](../artifacts/venue-opening-roster-validation.json)
+- 功能來源 `8133b22` 已推送。GitHub Actions 因帳務或支出上限未啟動。Quest 3、VIVE XR、跨機 25 人、MR 場地及廠商硬體仍待實地驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43342552959)
+
 ## 2026-11-13 瀏覽器預檢清單的 Windows 全流程驗收
 
 - 三包整合工具使用控制台 0.31.162 的原始瀏覽器下載，核對啟動計畫、UDP 預檢、Windows 就緒與結束檔。戰後用同一份預檢清單核對伺服器觀察到的各席來源。 [重跑方式](WINDOWS_SERVER_PACKAGE.md#從主控台下載場館計畫)
