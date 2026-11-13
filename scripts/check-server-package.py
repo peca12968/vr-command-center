@@ -1249,6 +1249,8 @@ def main():
         bundle_path=route+'/rooms/1/join-ticket-bundle'
         venue_path='/api/vr-deployment/venue-bundle'
         original=request(player_path,{},'Room1',admission=first['admissionId'])
+        check(original.get('endpoint')=={'address':endpoint['address'],'port':endpoint['port']},
+              'The native managed source returns its exact IPv4 and UDP port with the single-seat ticket')
         room_zip,_=request(bundle_path,room_body,'Room1',raw_response=True)
         venue_zip,_=request(venue_path,venue_body,raw_response=True)
         with zipfile.ZipFile(io.BytesIO(room_zip)) as archive:

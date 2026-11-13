@@ -471,9 +471,10 @@ app.MapPost("/api/sessions/{id:guid}/players/{playerId:guid}/join-ticket", (Guid
     if (session.State == SessionState.Ended) throw new InvalidOperationException("Session has ended.");
     var expected = AdmissionMatch(context) ?? throw new ArgumentException("If-Match-Admission is required; reload the current player roster.");
     if (expected != player.AdmissionId) throw new InvalidOperationException("Player admission changed; reload the current roster.");
-    worlds.RequireTicketSource(session);
+    var endpoint = worlds.RequireTicketSource(session);
+    var ticket = ticketSigner.Issue(session, player);
     context.Response.Headers.CacheControl = "no-store";
-    return ticketSigner.Issue(session, player);
+    return new SeatTicketResponse(ticket.Ticket, ticket.ExpiresAtUtc, ticket.RoomAlignmentSha256, endpoint);
 });
 app.MapPost("/api/player-tickets/validate", (ValidatePlayerTicket request, SessionManager manager, HttpContext context) =>
 {
@@ -613,4 +614,7 @@ record CreateIndependentSet(Guid? MissionId, IndependentRoomMission[]? Rooms);
 record VenuePhaseRequest(ControlAction Action, VenuePhaseFence?[]? Targets, VenueClimate? Environment, VenueEnemyPolicy? EnemyPolicy,
     bool RequireFullTracking = false, bool RequireFullParticipation = false);
 record JoinPlayer(Guid PlayerId, string Name, int RoomId, HeadsetKind Headset);
+record SeatTicketResponse(string Ticket, DateTimeOffset ExpiresAtUtc,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RoomAlignmentSha256,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] TicketEndpoint? Endpoint);
 record ValidatePlayerTicket(Guid SessionId, string Ticket, int ProtocolVersion = 0);

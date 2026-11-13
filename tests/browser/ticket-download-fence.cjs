@@ -120,6 +120,8 @@ async function checkManagedRoomTickets({ context, api, tokens, base, check, capt
     await api(detail + '/combat-stream', 'POST', { streamId, origin }, 'GameServer');
     const current = await api(detail);
     const [player] = current.players;
+    const seatRoute = detail + '/players/' + player.id + '/join-ticket';
+    const issueSeat = (expected, role = 'Room1') => api(seatRoute, 'POST', undefined, role, expected, player.admissionId);
     const header = { sessionId: session.id, streamId, origin, roomIds,
       captureStartedAtUtc: new Date().toISOString().replace('Z', '0000+00:00') };
     const publish = (...packets) => {
@@ -144,7 +146,12 @@ async function checkManagedRoomTickets({ context, api, tokens, base, check, capt
     await api('/venue/connection-endpoints', 'PUT', { version: 1, topology: 'Linked',
       servers: [{ sessionId: session.id, endpoint: { version: 1, streamId, address, port } }] }, 'GameServer');
     assert.equal((await api(route, 'POST', request, 'Room1', 409)).code, 'ticket-source-unavailable');
+    assert.equal((await issueSeat(409)).code, 'ticket-source-unavailable');
     publish(packet(1, 0), packet(2, elapsed()));
+    const invitation = await issueSeat(200);
+    assert.deepEqual(invitation.endpoint, { address, port });
+    await issueSeat(403, 'Room2');
+    check(true, 'Single-seat issuance returns the original managed endpoint to its own room controller');
     assert.equal((await api(route, 'POST', { ...request, port: port + 1 }, 'Room1', 409)).code, 'ticket-endpoint-mismatch');
     assert.equal((await api(route, 'POST', { ...request, address: '192.0.2.53' }, 'Master', 409)).code, 'ticket-endpoint-mismatch');
     check(true, 'Managed room ZIP API refuses a different IPv4 or UDP port, including direct requests from a room controller');
@@ -153,15 +160,30 @@ async function checkManagedRoomTickets({ context, api, tokens, base, check, capt
     await page.locator('#session-select').selectOption(session.id);
     await page.locator('#roster-room').selectOption(String(roomId));
     const status = page.locator('#roster-ticket-destination'), shortcut = page.locator('#download-roster-room-tickets');
+    const seat = page.locator('[data-player-action="ticket"]');
     await status.filter({ hasText: '遊戲來源暫未確認' }).waitFor();
-    check(await shortcut.isDisabled() && (await status.textContent()).includes(`${address}:${port}`),
-      'A managed room retains its published endpoint when its original frame expires and disables roster ZIP');
+    check(await shortcut.isDisabled() && await seat.isDisabled() && (await status.textContent()).includes(`${address}:${port}`),
+      'An expired original frame disables both single-seat and roster ZIP downloads');
     assert.equal((await api(route, 'POST', request, 'Room1', 409)).code, 'ticket-source-unavailable');
     publish(packet(3, elapsed()));
     await shortcut.locator('xpath=self::*[not(@disabled)]').waitFor();
     await page.locator('#game-port').fill(String(port + 1));
     check(await shortcut.isDisabled() && (await status.textContent()).includes(`公告端點為 ${address}:${port}`),
       'A manual port from another destination is blocked beside the roster shortcut');
+    await page.locator('#game-address').fill('');
+    const [seatFile, seatResponse] = await Promise.all([page.waitForEvent('download'),
+      page.waitForResponse(reply => reply.url() === base + '/api' + seatRoute && reply.request().method() === 'POST'), seat.click()]);
+    assert.equal(seatResponse.status(), 200);
+    assert.equal(seatResponse.headers()['cache-control'], 'no-store');
+    const seatTicket = await seatResponse.json();
+    const config = JSON.parse(await fs.readFile(await seatFile.path(), 'utf8'));
+    assert.deepEqual(config, { role: 'Client', address, port, joinTicket: seatTicket.ticket });
+    const resolved = await api('/player-tickets/validate', 'POST',
+      { ticket: config.joinTicket, sessionId: session.id, protocolVersion: 2 }, 'GameServer');
+    assert.equal(resolved.admissionId, player.admissionId);
+    await seatFile.delete();
+    check(true, 'A reissued single-seat file uses the signed response endpoint even when the manual fields are blank or wrong');
+    publish(packet(4, elapsed()));
     await page.locator('#apply-connection-endpoint').click();
     const [file, response] = await Promise.all([page.waitForEvent('download'),
       page.waitForResponse(reply => reply.url() === base + '/api' + route && reply.request().method() === 'POST'), shortcut.click()]);

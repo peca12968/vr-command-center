@@ -12,6 +12,7 @@ public record ConnectionEndpoint(int Version, Guid SessionId, Guid StreamId, str
 public record VenueEndpointTarget(Guid SessionId, ConnectionEndpointDraft Endpoint);
 public record VenueEndpointBatch(int Version, SessionMode Topology, VenueEndpointTarget?[]? Servers);
 public record VenueEndpointReceipt(int Version, SessionMode Topology, ConnectionEndpoint[] Servers);
+internal sealed record TicketEndpoint(string Address, int Port);
 internal sealed class TicketSourceUnavailableException()
     : InvalidOperationException("The published game source has no current frame; wait for it before issuing connection files.");
 internal sealed class TicketEndpointMismatchException()
@@ -61,15 +62,17 @@ public sealed partial class WorldRecordings
                 });
     }
 
-    internal void RequireTicketSource(SessionView session, (string Address, int Port)? destination = null)
+    internal TicketEndpoint? RequireTicketSource(SessionView session, (string Address, int Port)? destination = null)
     {
         lock (gate)
         {
             var live = TicketSourceLive(session);
             if (live == false) throw new TicketSourceUnavailableException();
-            if (live == true && destination is { } requested
-                && (EndpointRow(session) is not { } endpoint || (endpoint.Address, endpoint.Port) != requested))
+            if (live is null) return null;
+            var endpoint = EndpointRow(session) ?? throw new TicketSourceUnavailableException();
+            if (destination is { } requested && (endpoint.Address, endpoint.Port) != requested)
                 throw new TicketEndpointMismatchException();
+            return new(endpoint.Address, endpoint.Port);
         }
     }
 

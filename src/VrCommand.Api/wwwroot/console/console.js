@@ -733,7 +733,6 @@ function applyPermissions() {
   $('player-headset').querySelector('option[value="ViveXr"]').disabled = mixedReality;
   if (mixedReality) $('player-headset').value = 'Quest3';
   $('ticket-fields').disabled = locked || ended || !session;
-  updateRoomTicketButtons();
   const pinHint = $('mr-ticket-pin-hint');
   pinHint.hidden = !mixedReality || ended;
   const pinMessage = session?.roomAlignment
@@ -753,9 +752,9 @@ function applyPermissions() {
   $('refresh').disabled = !!state.pending;
   document.querySelectorAll('.room-card button:not([data-room-vr-resume])').forEach(button => { button.disabled = locked; });
   if (locked) document.querySelectorAll('[data-room-vr-resume]').forEach(button => { button.disabled = true; });
-  document.querySelectorAll('[data-player-room]').forEach(button => {
+  document.querySelectorAll('[data-player-action=remove]').forEach(button => {
     const room = Number(button.dataset.playerRoom);
-    button.disabled = locked || ended || !ownsRoom(room) || (button.dataset.playerAction === 'ticket' && !canIssueTicket(session, room));
+    button.disabled = locked || ended || !ownsRoom(room);
   });
   alignmentPins.update();
   seatDeployments.forEach(panel => panel.update());
@@ -1304,8 +1303,11 @@ function filterRoster() {
   updateRoomTicketButtons();
   readiness.update();
 }
+function roomTicketSource(session, roomId) {
+  return roomReadiness.ticketDestination(state.rooms.find(room => room.id === roomId), session);
+}
 function roomTicketProblem(session, roomId, destination) {
-  const source = roomReadiness.ticketDestination(state.rooms.find(room => room.id === roomId), session);
+  const source = roomTicketSource(session, roomId);
   if (source?.live == null) return '';
   const { address, port } = source.endpoint;
   if (!source.live) return `公告端點 ${address}:${port} · 遊戲來源暫未確認，暫停配票。`;
@@ -1318,6 +1320,13 @@ function updateRoomTicketButtons() {
   const status = $('roster-ticket-destination');
   const destination = configuredTicketDestination();
   const locked = state.busy || !!state.pending;
+  const sources = new Map(session?.roomIds.map(id => [id, roomTicketSource(session, id)]));
+  for (const seat of $('roster').querySelectorAll('[data-player-action=ticket]')) {
+    const room = Number(seat.dataset.playerRoom), source = sources.get(room);
+    seat.disabled = locked || !ownsRoom(room) || !canIssueTicket(session, room) || source?.live === false;
+    seat.title = source?.live === false ? '原遊戲來源暫未確認，暫停配票。'
+      : source?.live === true ? `使用公告端點 ${source.endpoint.address}:${source.endpoint.port}` : '';
+  }
   $('download-room-tickets').disabled = locked || !selectedRoom || !canIssueTicket(session, selectedRoom)
     || !!roomTicketProblem(session, selectedRoom, destination);
   button.hidden = !session?.roomIds.includes(roomId) || !ownsRoom(roomId);
@@ -1570,13 +1579,20 @@ async function confirmTicketRoster(session, roomId, players, { wholeRoom = false
 }
 async function downloadTicket(player) {
   const session = state.session;
-  if (!canIssueTicket(session, player.roomId)) return;
+  if (!canIssueTicket(session, player.roomId) || !ownsRoom(player.roomId)) return;
   if (!player.admissionId) throw new Error('控制台與 API 版本不一致，請更新服務並重新整理。');
-  const destination = ticketDestination();
-  if (!destination) return;
+  const source = roomTicketSource(session, player.roomId);
+  if (source?.live === false) return;
+  const managed = source?.live === true;
+  const fallback = managed ? null : ticketDestination();
+  if (!managed && !fallback) return;
   const view = operationsViewEpoch;
   const ticket = await api(`/sessions/${session.id}/players/${player.id}/join-ticket`, 'POST', undefined, undefined, player.admissionId);
-  const config = { role: 'Client', ...destination, joinTicket: ticket.ticket };
+  const destination = ticket.endpoint ?? fallback;
+  if (!validDestination(destination?.address, destination?.port)
+      || (managed && (destination.address !== source.endpoint.address || destination.port !== source.endpoint.port)))
+    throw new Error('Published ticket destination does not match the current game source.');
+  const config = { role: 'Client', address: destination.address, port: destination.port, joinTicket: ticket.ticket };
   if (session.environment.mode === 'MR') {
     if (ticket.roomAlignmentSha256 !== session.roomAlignment[`room${player.roomId}`])
       throw new Error('MR 連線檔的校正雜湊與目前場次不符。');
