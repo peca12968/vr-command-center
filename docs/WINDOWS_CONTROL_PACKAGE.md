@@ -1,5 +1,7 @@
 # Windows 可攜管理服務
 
+2026-11-13 `VRCommand-ControlServer-0.31.194.zip` 為 53,348,658 bytes，SHA-256 `d3e5a88d8a14d03f7b7260714de9a68e5fd3bb2dca31359e14c9fa4dcb2365d5`。解壓核對 568 筆清單。全館收尾可先查看已就緒的分房戰績。 [管理包](../artifacts/VRCommand-ControlServer-0.31.194.zip) · [分房戰績](REPORTS.md#在全館收尾比較分房戰績)
+
 2026-11-13 `VRCommand-ControlServer-0.31.193.zip` 為 53,347,166 bytes，SHA-256 `a5ca7ef5cd1481aa26802dd9317ac0e42860c28e10a7be676fab814a2d4344c9`。解壓核對 568 筆清單。分房觀戰可重連原錄製並保留鏡頭。 [管理包](../artifacts/VRCommand-ControlServer-0.31.193.zip) · [驗證摘要](../artifacts/live-room-reconnect-193-validation.json)
 
 2026-11-13 `VRCommand-ControlServer-0.31.192.zip` 為 53,346,681 bytes，SHA-256 `8203b293848cd401b12131962a636b9e6cb497ecb263bbd3e0c4fd0517568da4`。解壓核對 568 筆清單。主控切換即時觀戰房間前會先核對目標快照。 [管理包](../artifacts/VRCommand-ControlServer-0.31.192.zip) · [觀戰操作](WORLD_RECORDING.md)

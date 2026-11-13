@@ -1,5 +1,11 @@
 # 開發進度
 
+## 2026-11-13 獨立場結束後可先看已完成的分房戰績
+
+- Windows 管理包 0.31.194 會在「全館收尾」顯示原批次已就緒的分房戰績，未就緒的房間保留等待列。五房合併沿用共同封存。本批合計、整批 ZIP 與合計 CSV 要等所有原場次的最終戰鬥報表就緒。 [管理包](../artifacts/VRCommand-ControlServer-0.31.194.zip) · [分房戰績](REPORTS.md#在全館收尾比較分房戰績)
+- 發行版及解壓版各通過 23 項 Edge 檢查，涵蓋獨立場部分就緒、合併場共同等待、異場資料、舊批次及封存後 CSV 與 ZIP。另通過 1,109 項領域、825 項 HTTP、138 項世界串流及 107 項管理包檢查。已核對 568 筆清單及既有 Windows 遊戲包與 Quest APK 的離線發行。 [驗證摘要](../artifacts/ready-room-scores-194-validation.json)
+- 功能提交 `572064a` 已推送。GitHub Actions 因帳務或支出上限未啟動。跨機 25 人、Quest 3、VIVE、MR 場地與廠商硬體仍待現場驗收。 [GitHub Actions](https://github.com/peca12968/vr-command-center/actions/runs/43415404571)
+
 ## 2026-11-13 分房觀戰重連保留原畫格與鏡頭
 
 - 管理包 0.31.193 讓手動重連沿用原房、錄製來源及最後畫格序號。分房串流每格核對角色、敵軍設定與玩家統計的房間，相同序號可恢復連線而保留原畫格。發行版和解壓版各通過 37 項 Edge 檢查，涵蓋手動重連來源替換、序號倒退、跨房資料及原鏡頭。解壓版另通過 26 項即時觀戰測試與 107 項管理包檢查。 [管理包](../artifacts/VRCommand-ControlServer-0.31.193.zip) · [觀戰操作](WORLD_RECORDING.md)
