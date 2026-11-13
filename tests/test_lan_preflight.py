@@ -442,6 +442,28 @@ class LanPreflightTests(unittest.TestCase):
         again = self.venue_check(plan, 'rechecked.json', '--batch', self.root / 'bound.json',
                                  '--launcher-preview', guarded_preview, '--launch-plan', original)
         self.assertEqual(bound['launchBinding'], again['launchBinding'])
+        verify = [sys.executable, str(ROOT / 'scripts/start-verified-venue.py'), '--verify-only',
+                  '--launch-plan', str(original), '--network-plan', str(generated)]
+        success = subprocess.run([*verify, '--readiness', str(self.root / 'bound.json')], capture_output=True, timeout=15)
+        self.assertEqual(0, success.returncode, success.stderr)
+        self.assertEqual({'status': 'udp-evidence-verified', 'mode': 'Linked', 'verifiedSources': 2,
+                          'expectedSources': 2, 'unreadablePairs': 0, 'unmatchedPairs': 0, 'pendingSeats': []},
+                         json.loads(success.stdout))
+        missing_original = json.loads((self.root / 'bound.json').read_bytes())
+        missing_original['groups'][0]['udpSourcePreflights'][0]['probe'] = 'private/absent.json'
+        missing_path = self.venue_json('bound-missing-original.json', missing_original)
+        failure = subprocess.run([*verify, '--readiness', str(missing_path)], capture_output=True, timeout=15)
+        self.assertEqual(1, failure.returncode, failure.stderr)
+        self.assertEqual({'status': 'udp-evidence-incomplete', 'mode': 'Linked', 'verifiedSources': 1,
+                          'expectedSources': 2, 'unreadablePairs': 1, 'unmatchedPairs': 0,
+                          'pendingSeats': [{'roomId': room, 'seat': seat, 'status': 'missing'}
+                                           for room in rooms for seat in (1, 2, 3)]},
+                         json.loads(failure.stdout))
+        self.assertNotIn(b'private', failure.stdout)
+        conflicting = subprocess.run([*verify, '--readiness', str(missing_path), '--work', str(self.root / 'work')],
+                                     capture_output=True, timeout=15)
+        self.assertEqual(2, conflicting.returncode, conflicting.stderr)
+        self.assertFalse((self.root / 'work').exists())
         outdated = self.venue_json('outdated-preview.json', {**launch, 'servers': [dict(guarded,
             sessionId='00000000-0000-4000-8000-000000000072', missionId='00000000-0000-4000-8000-000000000073', sessionSequence=6)]})
         refused = self.venue_check(plan, 'outdated.json', '--batch', self.root / 'readiness.json',

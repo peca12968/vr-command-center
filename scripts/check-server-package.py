@@ -1062,6 +1062,24 @@ def main():
                 missing = read(readiness_path)
                 missing['groups'][-1]['udpSourcePreflights'][0]['probe'] = label + '-absent-probe.json'
                 save(missing_pair.name, missing)
+                verify_only = [sys.executable, str(ROOT / 'scripts/start-verified-venue.py'), '--verify-only',
+                               '--network-plan', str(out / (label + '-udp-network.json')), '--launch-plan', str(plan_file)]
+                good_evidence = subprocess.run([*verify_only, '--readiness', str(readiness_path)],
+                                               capture_output=True, encoding='utf-8', timeout=45)
+                bad_evidence = subprocess.run([*verify_only, '--readiness', str(missing_pair)],
+                                              capture_output=True, encoding='utf-8', timeout=45)
+                good_summary, bad_summary = (json.loads(run.stdout) for run in (good_evidence, bad_evidence))
+                missing_rooms = missing['groups'][-1]['roomIds']
+                check(good_evidence.returncode == 0 and good_summary['status'] == 'udp-evidence-verified'
+                      and good_summary['verifiedSources'] == len(states) and not good_summary['pendingSeats']
+                      and bad_evidence.returncode == 1 and bad_summary['status'] == 'udp-evidence-incomplete'
+                      and bad_summary['verifiedSources'] == len(states) - 1 and bad_summary['unreadablePairs'] == 1
+                      and bad_summary['pendingSeats'] == [{'roomId': seat['roomId'], 'seat': seat['seat'], 'status': 'missing'}
+                          for seat in original_network['sources'] if seat['roomId'] in missing_rooms]
+                      and not any(path.exists() for path in (work, ready, report, start_receipt))
+                      and all(request('/api/sessions/' + row['id']) == row for row in states),
+                      label + ' offline verification reports affected seats without launching or changing sessions')
+                save(label + '-offline-udp-check.json', {'verified': good_summary, 'missing': bad_summary})
                 for reason, input_plan, input_report in (
                     ('complete venue UDP readiness report', plan_file, incomplete),
                     ('launch plan differs', wrong_plan, readiness_path),

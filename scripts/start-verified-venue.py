@@ -67,17 +67,18 @@ def launch(args):
                   and hashlib.sha256(raw_plan).hexdigest() == binding['planSha256'],
                   'The launch plan differs from the original readiness proof')
 
-    launcher = args.launcher.resolve(strict=True)
-    field.require(launcher.name.lower() == 'launch-server.exe' and launcher.is_file(),
-                  'Use Launch-Server.exe from the extracted Windows server package')
-    ready_path, result_path = args.ready_report.resolve(), args.report.resolve()
-    receipt_path = args.start_receipt.resolve() if args.start_receipt else None
-    if receipt_path is not None:
-        field.require(not receipt_path.exists() and receipt_path.parent.is_dir()
-                      and receipt_path not in (ready_path, result_path) and not receipt_path.is_relative_to(args.work.resolve())
-                      and not receipt_path.is_relative_to(launcher.parent)
-                      and not receipt_path.is_relative_to(Path(field.read_json(raw_plan.decode('utf-8-sig'))['controlInstance']).resolve().parent),
-                      'Use a separate new start receipt path outside the package, work directory and management instance')
+    if not args.verify_only:
+        launcher = args.launcher.resolve(strict=True)
+        field.require(launcher.name.lower() == 'launch-server.exe' and launcher.is_file(),
+                      'Use Launch-Server.exe from the extracted Windows server package')
+        ready_path, result_path = args.ready_report.resolve(), args.report.resolve()
+        receipt_path = args.start_receipt.resolve() if args.start_receipt else None
+        if receipt_path is not None:
+            field.require(not receipt_path.exists() and receipt_path.parent.is_dir()
+                          and receipt_path not in (ready_path, result_path) and not receipt_path.is_relative_to(args.work.resolve())
+                          and not receipt_path.is_relative_to(launcher.parent)
+                          and not receipt_path.is_relative_to(Path(field.read_json(raw_plan.decode('utf-8-sig'))['controlInstance']).resolve().parent),
+                          'Use a separate new start receipt path outside the package, work directory and management instance')
     with tempfile.TemporaryDirectory(prefix='vr-verified-venue-') as directory:
         snapshot = Path(directory) / 'venue-plan.json'
         snapshot.write_bytes(raw_plan)
@@ -93,6 +94,15 @@ def launch(args):
                           and field.limited_read(stream) == original
                           and checked['launchBinding']['previewSha256'] == binding['previewSha256'],
                           'The original network plan, readiness report or preview changed')
+        if args.verify_only:
+            print(json.dumps({'status': 'udp-evidence-verified' if checked['complete'] else 'udp-evidence-incomplete',
+                              'mode': checked['mode'], 'verifiedSources': checked['verifiedSources'],
+                              'expectedSources': checked['expectedSources'], 'unreadablePairs': checked['unreadablePairs'],
+                              'unmatchedPairs': checked['unmatchedPairs'],
+                              'pendingSeats': sorted(({**seat, 'status': row['status']}
+                                  for group in checked['groups'] for row in group['sources'] if row['status'] != 'verified'
+                                  for seat in row['seats']), key=lambda seat: (seat['roomId'], seat['seat']))}), flush=True)
+            return 0 if checked['complete'] else 1
         field.require(checked['complete'], 'UDP readiness is no longer complete or within its original time window')
         distinct = field.udp_preflight_distinct_roster(checked)
         original_preview = field.read_udp_launcher_document(preview, preview=True)
@@ -148,22 +158,30 @@ def write_start_receipt(path, ready_path, result_path, readiness, original, chec
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--launcher', type=Path, required=True)
+    parser.add_argument('--verify-only', action='store_true', help='Recheck archived UDP evidence without contacting management or starting Windows')
+    parser.add_argument('--launcher', type=Path)
     parser.add_argument('--launch-plan', type=Path, required=True)
     parser.add_argument('--network-plan', type=Path, required=True)
     parser.add_argument('--readiness', type=Path, required=True)
-    parser.add_argument('--work', type=Path, required=True)
-    parser.add_argument('--seconds', type=int, required=True)
-    parser.add_argument('--ready-report', type=Path, required=True)
-    parser.add_argument('--report', type=Path, required=True)
+    parser.add_argument('--work', type=Path)
+    parser.add_argument('--seconds', type=int)
+    parser.add_argument('--ready-report', type=Path)
+    parser.add_argument('--report', type=Path)
     parser.add_argument('--start-receipt', type=Path, help='New optional receipt after the original batch seals and stops')
     parser.add_argument('--require-distinct-remote-roster', action='store_true',
                         help='Require each planned seat to have its own private IPv4 outside the server endpoints')
     parser.add_argument('--peer-diagnostics', action='store_true')
     args = parser.parse_args()
+    launch_options = ('launcher', 'work', 'seconds', 'ready_report', 'report')
+    if args.verify_only:
+        if any(getattr(args, name) is not None for name in launch_options) or args.start_receipt or args.peer_diagnostics:
+            parser.error('--verify-only does not accept Windows launch or output options')
+    elif any(getattr(args, name) is None for name in launch_options):
+        parser.error('Starting Windows requires --launcher --work --seconds --ready-report --report')
     try:
-        field.require(os.name == 'nt', 'This launcher runs on Windows')
-        field.require(60 <= args.seconds <= 86400, 'Use a run limit from 60 to 86400 seconds')
+        if not args.verify_only:
+            field.require(os.name == 'nt', 'This launcher runs on Windows')
+            field.require(60 <= args.seconds <= 86400, 'Use a run limit from 60 to 86400 seconds')
         return launch(args)
     except field.EvidenceError as error:
         parser.exit(1, f'Verified venue start rejected. {error}.\n')
