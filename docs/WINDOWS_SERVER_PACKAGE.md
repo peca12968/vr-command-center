@@ -1,5 +1,7 @@
 # Windows 遊戲伺服器包
 
+2026-11-13 `VRCommand-GameServer-0.50.7-1.22-win-x64.zip` 為 84,983,846 bytes，SHA-256 `7043c427022e40f4f4048e6801992504671e75d9a779b260964d0aeb9d19a293`。解壓核對 331 筆清單。五房批次啟動視窗可逐房查看已登記的席號。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.7-1.22-win-x64.zip)
+
 2026-11-11 `VRCommand-GameServer-0.50.7-1.20-win-x64.zip` 為 84,981,993 bytes，SHA-256 `ce417b05968a31d3ecf13cb07acc8f8c132ea481e8a746de8ddf52e04154ab03`。解壓核對 331 筆清單。執行中的合併場實測指定網卡上的遊戲 UDP 及本機上的 Unity 編輯器連線。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.7-1.20-win-x64.zip) · [監聽紀錄](../artifacts/windows-local-profiler-0507/linked-server-sockets.json)
 
 2026-11-11 `VRCommand-GameServer-0.50.6-1.20-win-x64.zip` 為 84,981,819 bytes，SHA-256 `b6ce6d22ba811a9f6743d33f2720a14c90ddc909ad1dc8ca64b4fe3b442d7c73`，解壓核對 331 筆清單。 [伺服器包](../artifacts/server-packages/VRCommand-GameServer-0.50.6-1.20-win-x64.zip) · [發行核對](../artifacts/venue-release-0.50.6-xr-startup.json)
@@ -83,6 +85,8 @@ Unity 0.47.0 伺服器可搭配控制台 0.31.14。啟動器 1.5 可選擇待開
 ### 從 Windows 視窗核對並啟動
 
 啟動器 1.20 可按 **Alt+V** 開啟「五房批次啟動」。貼上控制台下載的 JSON 完整路徑，按 **Enter** 核對計畫。確認清單上的房號、任務、場次 ID 與 UDP 埠後，按 **Alt+S** 啟動全館。視窗也提供「選擇計畫」與「核對計畫」按鈕。將滑鼠停在清單列可看見場次序號、任務版本與本機綁定位址。
+
+啟動器 1.22 的「已登記席號」從 1 起算，保留名冊中空出的席位，例如 `1、4`。合併場顯示五列房間，各列共用同一場次 ID 與 UDP 埠。已核對的空房顯示「尚未登記」，第一版計畫顯示「計畫未提供」。請在按 **Alt+S** 前對照主控台名冊。啟動時會再核對原場次和名冊。
 
 修改路徑會清除前次核對結果。啟動器會在開場前重讀計畫及管理實例。若檔案在核對後被更換，啟動會拒絕舊預覽、清除清單並停用啟動。請從控制台重新下載並核對當次計畫。
 

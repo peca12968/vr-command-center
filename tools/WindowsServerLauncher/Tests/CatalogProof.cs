@@ -43,6 +43,39 @@ internal static class ServerCatalogProof
             Check(ServerLauncher.UdpBinding.Find(pid, "127.0.0.1", port) == null, "Wildcard cannot satisfy an explicit loopback request");
         }
     }
+
+    static void CheckVenuePreviewRows()
+    {
+        var independent = ServerLauncher.Choice.Parse(Row(2));
+        var config = new ServerLauncher.Settings { Address = "127.0.0.1", Bind = "0.0.0.0", Port = 7778 };
+        var legacy = ServerLauncher.VenuePreviewRows(independent, config, false).Single();
+        Check(legacy.Text == "房間 2" && legacy.SubItems[1].Text == "計畫未提供" && !legacy.ToolTipText.Contains("場次序號"),
+            "version 1 keeps its original room and does not infer an empty roster");
+        var linkedRow = Row(1);
+        linkedRow["mode"] = "Linked";
+        linkedRow["roomIds"] = new object[] { 5, 2, 1, 3, 4 };
+        linkedRow["sequence"] = 42;
+        linkedRow["players"] = new object[] {
+            new Dictionary<string, object> { { "roomId", 5 }, { "seat", 4 } },
+            new Dictionary<string, object> { { "roomId", 1 }, { "seat", 3 } },
+            new Dictionary<string, object> { { "roomId", 1 }, { "seat", 0 } },
+            new Dictionary<string, object> { { "roomId", 3 }, { "seat", 1 } }
+        };
+        var linked = ServerLauncher.Catalog.Parse(new object[] { linkedRow }, true).Single();
+        var rows = ServerLauncher.VenuePreviewRows(linked, config, true);
+        Check(rows.Select(row => row.Text).SequenceEqual(new[] { "房間 1", "房間 2", "房間 3", "房間 4", "房間 5" }),
+            "a linked server renders five room rows in the original room order");
+        Check(rows.Select(row => row.SubItems[1].Text).SequenceEqual(new[] { "1、4", "尚未登記", "2", "尚未登記", "5" }),
+            "linked rooms keep sparse one-based seat numbers distinct from empty rooms");
+        Check(rows.All(row => row.SubItems[2].Text == "軍事任務 · VR" && row.SubItems[3].Text == linked.Id
+            && row.SubItems[4].Text == "127.0.0.1:7778" && row.ToolTipText.Contains(linked.MissionId)
+            && row.ToolTipText.Contains("0.0.0.0:7778") && row.ToolTipText.Contains("場次序號：42")),
+            "all five linked rows retain the original common session, mission revision and UDP endpoint");
+        independent.RegisteredSeats = new Dictionary<string, object>[0];
+        var guarded = ServerLauncher.VenuePreviewRows(independent, config, true).Single();
+        Check(guarded.Text == "房間 2" && guarded.SubItems[1].Text == "尚未登記" && guarded.SubItems[3].Text == independent.Id,
+            "independent rooms keep their own session and distinguish a checked empty roster");
+    }
     static async Task WaitFor(Func<bool> condition, string description)
     {
         var elapsed = Stopwatch.StartNew();
@@ -150,6 +183,7 @@ internal static class ServerCatalogProof
         try
         {
             CheckUdpBindings();
+            CheckVenuePreviewRows();
             foreach (var code in new[] { 502, 503, 504 })
                 Check(ServerLauncher.ManagementUnavailable.IsTemporary(code, WebExceptionStatus.ProtocolError), "Temporary management gateway status " + code);
             foreach (var code in new[] { 401, 403, 404, 500 })

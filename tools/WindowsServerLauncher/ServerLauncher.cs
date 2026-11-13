@@ -1001,6 +1001,24 @@ internal static class ServerLauncher
         return true;
     }
 
+    internal static ListViewItem[] VenuePreviewRows(Choice choice, Settings config, bool includesSeats)
+    {
+        var detail = choice.Detail() + "\r\n本機綁定：" + config.Bind + ":" + config.Port;
+        if (includesSeats) detail += "\r\n場次序號：" + choice.Sequence;
+        var mission = Choice.Label(choice.MissionName) + " · " + choice.Experience;
+        var endpoint = config.Address + ":" + config.Port;
+        return Array.ConvertAll(choice.Rooms, room =>
+        {
+            var seats = "計畫未提供";
+            if (includesSeats)
+            {
+                var registered = Array.FindAll(choice.RegisteredSeats, row => Num(row, "roomId") == room);
+                seats = registered.Length == 0 ? "尚未登記" : String.Join("、", Array.ConvertAll(registered, row => Num(row, "seat")));
+            }
+            return new ListViewItem(new[] { "房間 " + room, seats, mission, choice.Id, endpoint }) { ToolTipText = detail };
+        });
+    }
+
     sealed class VenueWindow : Form
     {
         readonly TextBox path = new TextBox(), status = new TextBox { Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical };
@@ -1022,7 +1040,8 @@ internal static class ServerLauncher
             Add(new Label { Text = "場館計畫 JSON 完整路徑", AutoSize = true }, 22, 20, 500, 26);
             Add(path, 22, 50, 680, 32); Add(browse, 715, 48, 118, 36); Add(check, 846, 48, 132, 36);
             Add(summary, 22, 92, 956, 30);
-            rooms.Columns.Add("房間", 140); rooms.Columns.Add("任務", 225); rooms.Columns.Add("場次 ID", 340); rooms.Columns.Add("公告位址與 UDP", 230);
+            rooms.Columns.Add("房間", 92); rooms.Columns.Add("已登記席號", 138); rooms.Columns.Add("任務", 202);
+            rooms.Columns.Add("場次 ID", 325); rooms.Columns.Add("公告位址與 UDP", 184);
             Add(rooms, 22, 126, 956, 195);
             Add(peers, 22, 329, 600, 29); Add(start, 22, 368, 165, 36); Add(abort, 200, 368, 165, 36);
             Add(status, 22, 416, 956, 56);
@@ -1102,17 +1121,9 @@ internal static class ServerLauncher
                 if (failure != null) { status.Text = "核對未完成：" + Safe(failure); return; }
                 preview = result;
                 foreach (var server in result.Servers)
-                {
-                    var room = String.Join("、", server.Choice.Rooms);
-                    var endpoint = server.Config.Address + ":" + server.Config.Port;
-                    var item = new ListViewItem(new[] { room, Choice.Label(server.Choice.MissionName) + " · " + server.Choice.Experience,
-                        server.Choice.Id, endpoint });
-                    item.ToolTipText = server.Choice.Detail() + "\r\n本機綁定：" + server.Config.Bind + ":" + server.Config.Port;
-                    if (result.Version >= 2) item.ToolTipText += "\r\n場次序號：" + server.Choice.Sequence;
-                    rooms.Items.Add(item);
-                }
+                    rooms.Items.AddRange(VenuePreviewRows(server.Choice, server.Config, result.Version >= 2));
                 summary.Text = (result.Topology == "Linked" ? "五房合併" : "五房獨立") + " · " + result.Servers.Count + " 個遊戲伺服器";
-                status.Text = "計畫已核對。確認房間與端點後按啟動全館。";
+                status.Text = "計畫已核對。確認房間、席位與端點後按啟動全館。";
             });
         }
 
