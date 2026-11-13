@@ -1995,7 +1995,7 @@ def read_venue_control_batches(references, expected, closure, recorded_at, evide
     return list(batches.values()), {sid: targets.values() for sid, targets in by_session.items()}
 
 
-def read_terminal_venue_launcher(path, mode, expected):
+def read_terminal_venue_launcher(path, mode, expected, *, include_instance=False):
     with path.open('rb') as stream:
         raw = limited_read(stream)
     report = read_json(raw.decode('utf-8-sig'))
@@ -2003,7 +2003,7 @@ def read_terminal_venue_launcher(path, mode, expected):
             and report['status'] == 'venue-sealed-stopped' and report['complete'] is report['readyPublished'] is True
             and report['topology'] == mode and report['sourceAttachment'] == report['endpointPublication'] == 'confirmed',
             'Provide the original terminal Windows venue launch report')
-    identity(report['instanceId'])
+    instance_id = identity(report['instanceId'])
     launch_id = identity(report['venueLaunchId'])
     rows = report['servers']
     require(type(rows) is list and len(rows) == len(expected), 'Venue launcher report must cover every original venue session')
@@ -2022,7 +2022,52 @@ def read_terminal_venue_launcher(path, mode, expected):
         require(pid not in child_pids, 'Venue launcher repeats an original child process')
         child_pids.add(pid)
         results[sid] = result
-    return {'launchId': launch_id, 'sha256': hashlib.sha256(raw).hexdigest(), 'sessions': len(results)}, results
+    return {'launchId': launch_id, 'sha256': hashlib.sha256(raw).hexdigest(), 'sessions': len(results),
+            **({'instanceId': instance_id} if include_instance else {})}, results
+
+
+def read_verified_venue_start(path, readiness_path, terminal, results, mode):
+    receipt, raw = read_quest_document(path)
+    require(set(receipt) == {'version', 'scope', 'mode', 'checkedAtUtc', 'readinessSha256',
+                            'terminalSha256', 'readyReport', 'readySha256'}
+            and integer(receipt['version'], 1, 1) == 1 and receipt['scope'] == 'verified-windows-venue-start'
+            and receipt['mode'] == mode and receipt['terminalSha256'] == terminal['sha256'],
+            'Verified start receipt differs from the original terminal venue report')
+    with readiness_path.open('rb') as stream:
+        readiness = limited_read(stream)
+    require(receipt['readinessSha256'] == hashlib.sha256(readiness).hexdigest(),
+            'Verified start receipt differs from the original UDP readiness report')
+    preflight = read_json(readiness.decode('utf-8-sig'))
+    require(type(preflight) is dict and preflight.get('scope') == 'venue-udp-preflight-only'
+            and preflight.get('complete') is True and preflight.get('mode') == mode
+            and type(preflight.get('launchBinding')) is dict,
+            'Verified start requires a complete UDP readiness report bound to Windows')
+    require(type(receipt['readyReport']) is str and receipt['readyReport'], 'Verified start receipt lacks the original ready report')
+    ready, ready_raw = read_quest_document(path.parent / receipt['readyReport'])
+    require(receipt['readySha256'] == hashlib.sha256(ready_raw).hexdigest()
+            and integer(ready['schemaVersion'], 1, 1) == 1 and ready['status'] == 'venue-ready'
+            and ready['topology'] == mode and identity(ready['instanceId']) == terminal['instanceId'],
+            'Verified start receipt differs from the original ready venue report')
+    checked = datetime.fromisoformat(receipt['checkedAtUtc'])
+    require(checked.utcoffset() == timedelta(0)
+            and datetime.fromisoformat(preflight['checkedAtUtc']) <= checked,
+            'Verified start receipt requires the original UTC check time')
+    seen = set()
+    require(type(ready['servers']) is list and len(ready['servers']) == len(results),
+            'Verified start ready report must cover every original venue session')
+    for row in ready['servers']:
+        startup = row['ready']
+        sid = identity(startup['sessionId'])
+        result = results.get(sid)
+        require(sid not in seen and result is not None and row['roomIds'] == result['finalWorld']['header']['roomIds']
+                and integer(startup['schemaVersion'], 1, 1) == 1 and startup['status'] == 'ready'
+                and all(startup[key] == result[key] for key in ('streamId', 'childPid', 'workDirectory', 'udpBinding',
+                                                               'peerDiagnosticsEnabled'))
+                and integer(startup['port'], 1024, 65535) == result['udpBinding']['port']
+                and checked <= datetime.fromisoformat(result['udpBinding']['observedAtUtc']),
+                'Verified start ready report differs from the original sealed game process or bind time')
+        seen.add(sid)
+    return {'sha256': hashlib.sha256(raw).hexdigest(), 'launchId': terminal['launchId'], 'sessionsVerified': len(seen)}
 
 
 def venue_closure_sessions(mode, rows):
@@ -2195,17 +2240,27 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
     require(not source_lists or batch_supplied or all('udpSourcePreflights' in entry for entry in entries),
             'Provide all-source UDP preflight reports for every session in this batch')
 
-    venue_launcher, venue_results = None, {}
+    venue_launcher, venue_results, verified_start = None, {}, None
+    wants_verified_start = 'verifiedVenueStart' in manifest
+    require(not wants_verified_start or (single_batch and 'venueLauncherReport' in manifest),
+            'Verified start requires the original Windows venue report and one UDP readiness report')
     if 'venueLauncherReport' in manifest:
         require(all('launcherReport' not in entry and 'sessionId' in entry for entry in entries),
                 'Use sessionId instead of a per-session launcher report with venueLauncherReport')
-        venue_launcher, venue_results = read_terminal_venue_launcher(evidence_path(manifest['venueLauncherReport']), mode, expected)
+        venue_launcher, venue_results = read_terminal_venue_launcher(
+            evidence_path(manifest['venueLauncherReport']), mode, expected, include_instance=wants_verified_start)
+    start_readiness_path = None
+    if wants_verified_start:
+        start_readiness_path = evidence_path(manifest['udpPreflightBatch'])
+        verified_start = read_verified_venue_start(evidence_path(manifest['verifiedVenueStart']),
+                                                  start_readiness_path, venue_launcher, venue_results, mode)
+        venue_launcher.pop('instanceId')
     batch_pairs, udp_launch_bindings = {}, {}
     if batch_supplied and not inspect_windows:
         batch_names = [manifest['udpPreflightBatch']] if single_batch else manifest['udpPreflightBatches']
         require(type(batch_names) is list and 1 <= len(batch_names) <= 25, 'Provide 1 to 25 Quest UDP batch reports')
         for name in batch_names:
-            batch, launch = read_udp_preflight_batch(evidence_path(name), mode, expected_rooms,
+            batch, launch = read_udp_preflight_batch(start_readiness_path or evidence_path(name), mode, expected_rooms,
                                                      expected_sessions={tuple(row['roomIds']): sid for sid, row in expected.items()},
                                                      venue_plan_hash=venue_network['sha256'] if venue_network else None)
             if launch is not None:
@@ -2521,6 +2576,7 @@ def verify_venue_batch(manifest_path, *, inspect_windows=False, staged_roster=No
             'physicalHostsVerified': False, 'networkCapacityAccepted': False,
             **station_summary, **network_summary(len(player_ids)),
             **({'venueLauncherReport': venue_launcher} if venue_launcher is not None else {}),
+            **({'verifiedVenueStart': verified_start} if verified_start is not None else {}),
             **({'venueDebriefReceipts': {'sha256': debrief_hash, 'sessions': len(summaries), 'acknowledgedPlayers': len(player_ids)}}
                if debrief_receipts is not None else {}),
             **({'distinctRemoteRoster': {'seatsVerified': len(player_ids), 'distinctSourceAddresses': len(remote),

@@ -51,8 +51,9 @@ def own_launcher_processes():
 
 def launch(args):
     readiness = args.readiness.resolve(strict=True)
-    original = field.content(readiness)
-    report = field.read_json(original)
+    with readiness.open('rb') as stream:
+        original = field.limited_read(stream)
+    report = field.read_json(original.decode('utf-8-sig'))
     field.require(type(report) is dict and report.get('scope') == 'venue-udp-preflight-only'
                   and report.get('complete') is True, 'Provide a complete venue UDP readiness report')
     proof = field.read_udp_launch_binding(report, readiness.parent, report.get('mode'))
@@ -68,32 +69,63 @@ def launch(args):
     launcher = args.launcher.resolve(strict=True)
     field.require(launcher.name.lower() == 'launch-server.exe' and launcher.is_file(),
                   'Use Launch-Server.exe from the extracted Windows server package')
+    ready_path, result_path = args.ready_report.resolve(), args.report.resolve()
+    receipt_path = args.start_receipt.resolve() if args.start_receipt else None
+    if receipt_path is not None:
+        field.require(not receipt_path.exists() and receipt_path.parent.is_dir()
+                      and receipt_path not in (ready_path, result_path) and not receipt_path.is_relative_to(args.work.resolve())
+                      and not receipt_path.is_relative_to(launcher.parent)
+                      and not receipt_path.is_relative_to(Path(field.read_json(raw_plan.decode('utf-8-sig'))['controlInstance']).resolve().parent),
+                      'Use a separate new start receipt path outside the package, work directory and management instance')
     with tempfile.TemporaryDirectory(prefix='vr-verified-venue-') as directory:
         snapshot = Path(directory) / 'venue-plan.json'
         snapshot.write_bytes(raw_plan)
         checked = preflight.check_venue(args.network_plan, None, [readiness], readiness, preview, snapshot)
-        field.require(checked['networkPlanSha256'] == report.get('networkPlanSha256')
-                      and field.content(readiness) == original
-                      and checked['launchBinding']['previewSha256'] == binding['previewSha256'],
-                      'The original network plan, readiness report or preview changed')
+        with readiness.open('rb') as stream:
+            field.require(checked['networkPlanSha256'] == report.get('networkPlanSha256')
+                          and field.limited_read(stream) == original
+                          and checked['launchBinding']['previewSha256'] == binding['previewSha256'],
+                          'The original network plan, readiness report or preview changed')
         field.require(checked['complete'], 'UDP readiness is no longer complete or within its original time window')
         print(json.dumps({'status': 'udp-preflight-verified', 'mode': checked['mode'],
                           'verifiedSources': checked['verifiedSources'], 'launchPlanSha256': binding['planSha256'],
                           'networkPlanSha256': checked['networkPlanSha256']}), flush=True)
         command = [str(launcher), '--venue-run', str(snapshot), '--work', str(args.work.resolve()),
-                   '--seconds', str(args.seconds), '--ready-report', str(args.ready_report.resolve()),
-                   '--report', str(args.report.resolve())]
+                   '--seconds', str(args.seconds), '--ready-report', str(ready_path), '--report', str(result_path)]
         if args.peer_diagnostics:
             command.extend(('--peer-diagnostics', 'on'))
         own_launcher_processes()
         with subprocess.Popen(command) as process:
             try:
-                return process.wait()
+                code = process.wait()
             except KeyboardInterrupt:
                 if process.poll() is None:
                     process.terminate()
                 process.wait()
                 return 130
+        if code == 0 and receipt_path is not None:
+            write_start_receipt(receipt_path, ready_path, result_path, readiness, original, checked)
+        return code
+
+
+def write_start_receipt(path, ready_path, result_path, readiness, original, checked):
+    ready, ready_raw = field.read_quest_document(ready_path)
+    with result_path.open('rb') as stream:
+        result_raw = field.limited_read(stream)
+    terminal = field.read_json(result_raw.decode('utf-8-sig'))
+    field.require(terminal['status'] == 'venue-sealed-stopped' and terminal['complete'] is terminal['readyPublished'] is True,
+                  'The original Windows venue launch did not seal and stop')
+    receipt = {'version': 1, 'scope': 'verified-windows-venue-start', 'mode': checked['mode'],
+               'checkedAtUtc': checked['checkedAtUtc'], 'readinessSha256': hashlib.sha256(original).hexdigest(),
+               'terminalSha256': hashlib.sha256(result_raw).hexdigest(),
+               'readyReport': preflight.path_reference(ready_path, path.parent), 'readySha256': hashlib.sha256(ready_raw).hexdigest()}
+    with readiness.open('rb') as stream:
+        field.require(ready['status'] == 'venue-ready' and ready['topology'] == terminal['topology'] == checked['mode']
+                      and ready['instanceId'] == terminal['instanceId'] and field.limited_read(stream) == original,
+                      'The original readiness or Windows venue reports changed')
+    with path.open('x', encoding='utf-8', newline='\n') as stream:
+        json.dump(receipt, stream, indent=2)
+        stream.write('\n')
 
 
 def main():
@@ -106,6 +138,7 @@ def main():
     parser.add_argument('--seconds', type=int, required=True)
     parser.add_argument('--ready-report', type=Path, required=True)
     parser.add_argument('--report', type=Path, required=True)
+    parser.add_argument('--start-receipt', type=Path, help='New optional receipt after the original batch seals and stops')
     parser.add_argument('--peer-diagnostics', action='store_true')
     args = parser.parse_args()
     try:

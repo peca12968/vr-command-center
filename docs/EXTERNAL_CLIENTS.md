@@ -300,6 +300,12 @@ python .\scripts\check-venue-udp-preflight.py `
 
 重試會重新核對雙端原檔、來源及既有 30 分鐘期限。原檔有變、無法讀取或逾時時，該來源須補測。`retainedSources` 是這輪仍有效的來源數。完整報告可直接交給戰後封存驗收。 [封存方式](#用原網路清單核對封存席位)
 
+#### 核對 Windows 五房啟動回條
+
+使用 `start-verified-venue.py --start-receipt` 完成封存後，產生全館清單時加上 `--verified-start-receipt .\venue-start.json`。同時保留原 `--launcher-report` 與唯一一份 `--udp-preflight-batch`。若已有清單，可填入 `"verifiedVenueStart": "venue-start.json"`，並沿用原 `venueLauncherReport` 和 `udpPreflightBatch`。回條引用的就緒檔路徑以回條所在目錄為準。
+
+封存驗收核對三份原報告的雜湊，以及就緒與結束報告中的房間、遊戲程序、錄製來源及 UDP 綁定。完整驗收仍會重驗原雙端資料及玩家 UDP 來源。成功摘要中的 `verifiedVenueStart` 列出回條雜湊、原啟動批次 ID 及通過的場次數。 [啟動方式](WINDOWS_SERVER_PACKAGE.md#以-udp-預檢報告啟動五房)
+
 #### 從原啟動預覽產生網路清單
 
 先在 `seat-addresses.json` 保存本階段所有 Windows 與 Quest 的席位 IPv4。格式為版本 `1`，`seats` 中每列有 `roomId`、`seat` 及 `address`。以下是五房各一席的範例，地址請替換為現場值。

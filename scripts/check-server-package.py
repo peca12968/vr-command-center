@@ -1002,6 +1002,8 @@ def main():
                 guarded_start = [sys.executable, str(ROOT / 'scripts/start-verified-venue.py'), '--launcher', str(exe),
                                  '--network-plan', str(out / (label + '-udp-network.json'))]
                 readiness_path = out / (label + '-udp-readiness.json')
+                start_receipt = out / (label + '-verified-start.json')
+                guarded_start.extend(('--start-receipt', str(start_receipt)))
                 incomplete = out / (label + '-udp-incomplete-launch.json')
                 save(incomplete.name, dict(read(readiness_path), complete=False))
                 wrong_plan = out / (label + '-udp-changed-launch.json')
@@ -1020,7 +1022,7 @@ def main():
                                               '--seconds', '600', '--ready-report', str(ready), '--report', str(report)],
                                              capture_output=True, text=True, encoding='utf-8', cwd=out, env=env, timeout=45)
                     check(blocked.returncode == 1 and reason in blocked.stderr and not blocked.stdout
-                          and not any(path.exists() for path in (work, ready, report))
+                          and not any(path.exists() for path in (work, ready, report, start_receipt))
                           and all(request('/api/sessions/' + row['id']) == row for row in states),
                           label + ' guarded launch rejects ' + reason + ' before native work')
                 guarded_start.extend(('--launch-plan', str(plan_file), '--readiness', str(readiness_path)))
@@ -1791,6 +1793,7 @@ def main():
             common['venueLauncherReport'] = str(out / (label + '-venue-final.json'))
         if args.check_venue_udp_readiness:
             common['udpPreflightBatch'] = str(out / (label + '-venue-udp-readiness.json'))
+            common['verifiedVenueStart'] = str(out / (label + '-venue-verified-start.json'))
         if label in venue_control_reports:
             common['venueControlBatches'] = venue_control_reports[label]
         debrief_file = None
@@ -2038,6 +2041,18 @@ def main():
                   'sha256': control.sha(original_launch), 'sessions': len(entries)},
                   label + ' sealed field report reads the untouched shared Windows terminal report')
         if args.check_venue_udp_readiness:
+            receipt_path = Path(common['verifiedVenueStart'])
+            check(summary['verifiedVenueStart'] == {'sha256': control.sha(receipt_path),
+                  'launchId': summary['venueLauncherReport']['launchId'], 'sessionsVerified': len(entries)},
+                  label + ' seal verifies the exact rechecked readiness and original Windows ready and terminal reports')
+            receipt = read(receipt_path)
+            altered_receipt = out / (label + '-verified-start-altered.json')
+            save(altered_receipt.name, dict(receipt, readinessSha256='0' * 64))
+            refused = run(dict(evidence, verifiedVenueStart=str(altered_receipt)))
+            check(refused.returncode == 1 and not refused.stdout and 'differs from the original UDP readiness report' in refused.stderr,
+                  label + ' seal rejects a verified start receipt for a different readiness report')
+            without_receipt = dict(evidence)
+            without_receipt.pop('verifiedVenueStart')
             readiness = read(Path(common['udpPreflightBatch']))
             proof = readiness['launchBinding']
             plan, preview = (read(out / proof[name]) for name in ('plan', 'preview'))
@@ -2054,7 +2069,7 @@ def main():
             readiness['launcherPreview']['sha256'] = proof['previewSha256']
             altered = out / (label + '-udp-altered-revision.json')
             save(altered.name, readiness)
-            refused = run(dict(evidence, udpPreflightBatch=str(altered)))
+            refused = run(dict(without_receipt, udpPreflightBatch=str(altered)))
             check(refused.returncode == 1 and not refused.stdout and 'does not match the sealed mission and game binding' in refused.stderr,
                   label + ' rejects an internally matching UDP plan and preview at a different revision than the sealed source')
         save(label + '-venue-field-results.json', summary)

@@ -101,6 +101,8 @@ python .\scripts\start-verified-venue.py `
 
 指令核對原計畫與網路清單的雜湊，重驗原始雙端報告及既有 30 分鐘期限，再把已核對的計畫交給 `Launch-Server.exe`。預檢缺件、逾時或計畫有變時，指令會在遊戲程序建立前退出。看到 `udp-preflight-verified` 後，仍須等啟動器寫出 `venue-ready`，再到控制台配票和開始。`--peer-diagnostics` 可選，用於需要保存玩家 UDP 來源的驗收。 [補測方式](EXTERNAL_CLIENTS.md#補測未完成的全館-udp-預檢)
 
+要讓戰後驗收核對這次啟動，可另加 `--start-receipt C:\VRCommand\venue-start.json`。正常封存並停止後，指令會在新路徑輸出回條，記錄預檢、就緒檔與結束檔的 SHA-256。保留三份原檔，與原雙端報告一併交給驗收工具。回條保存檔案關聯及重驗時間，無數位簽章。 [封存核對](EXTERNAL_CLIENTS.md#核對-windows-五房啟動回條)
+
 ### 重跑五房視窗驗收
 
 在 Windows 使用解壓後的伺服器包及管理包，指定新的本機測試目錄。`--topology Independent` 驗證五個伺服器，`--topology Linked` 驗證一個涵蓋五房的伺服器。`--players-per-room 5` 會啟動 25 個同機 Windows 模擬端。

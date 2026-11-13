@@ -94,7 +94,8 @@ def prepare(args, output):
     closure_id = field.identity(closure['requestId'])
     groups, expected = field.venue_closure_sessions(mode, closure['sessions'])
     receipts = field.read_venue_debrief_receipts(receipt_bytes, closure_id, len(expected))[0] if receipt_bytes is not None else None
-    launch, results = field.read_terminal_venue_launcher(terminal, mode, expected)
+    launch, results = field.read_terminal_venue_launcher(terminal, mode, expected,
+                                                        include_instance=args.verified_start_receipt is not None)
     addresses = {field.ipv4(address) for address in args.server_ip}
     field.require(len(addresses) == len(args.server_ip) <= 128, 'Provide distinct server IPv4 addresses')
     work_root = args.server_work_root.resolve(strict=True) if args.server_work_root is not None else None
@@ -227,6 +228,11 @@ def prepare(args, output):
             manifest['udpPreflightBatch'] = ref(paths[0])
         else:
             manifest['udpPreflightBatches'] = [ref(path) for path in paths]
+    if args.verified_start_receipt is not None:
+        field.require('udpPreflightBatch' in manifest, 'Verified start requires one original UDP readiness report')
+        receipt_path = evidence_path(args.verified_start_receipt.resolve(strict=True))
+        field.read_verified_venue_start(receipt_path, paths[0], launch, results, mode)
+        manifest['verifiedVenueStart'] = ref(receipt_path)
     if args.quest_capture_report:
         captures = {'reports': [ref(path.resolve(strict=True)) for path in args.quest_capture_report]}
         if args.quest_network_plan is not None:
@@ -261,6 +267,7 @@ def main():
     parser.add_argument('--verify-reconnect-history', action='store_true', help='Check original reconnect histories at inbox intake and final verification')
     parser.add_argument('--reconnect-source-plan', type=Path, help='Ordered IPv4 changes for seats in the original End batch')
     parser.add_argument('--udp-preflight-batch', action='append', type=Path)
+    parser.add_argument('--verified-start-receipt', type=Path, help='Original Windows verified-start receipt')
     parser.add_argument('--room-alignment-bundle', type=Path, help='Original MR or mixed venue deployment ZIP')
     parser.add_argument('--quest-capture-report', action='append', type=Path, help='Original batch logcat capture report; repeat for separate batches')
     parser.add_argument('--quest-network-plan', type=Path, help='Original Quest IPv4 plan')
