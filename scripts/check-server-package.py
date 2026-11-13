@@ -1058,29 +1058,34 @@ def main():
                 save(incomplete.name, dict(read(readiness_path), complete=False))
                 wrong_plan = out / (label + '-udp-changed-launch.json')
                 wrong_plan.write_bytes(plan_file.read_bytes() + b'\n')
-                missing_pair = out / (label + '-udp-missing-original.json')
-                missing = read(readiness_path)
-                missing['groups'][-1]['udpSourcePreflights'][0]['probe'] = label + '-absent-probe.json'
-                save(missing_pair.name, missing)
                 verify_only = [sys.executable, str(ROOT / 'scripts/start-verified-venue.py'), '--verify-only',
                                '--network-plan', str(out / (label + '-udp-network.json')), '--launch-plan', str(plan_file)]
                 good_evidence = subprocess.run([*verify_only, '--readiness', str(readiness_path)],
                                                capture_output=True, encoding='utf-8', timeout=45)
-                bad_evidence = subprocess.run([*verify_only, '--readiness', str(missing_pair)],
-                                              capture_output=True, encoding='utf-8', timeout=45)
-                good_summary, bad_summary = (json.loads(run.stdout) for run in (good_evidence, bad_evidence))
-                missing_rooms = missing['groups'][-1]['roomIds']
+                good_summary = json.loads(good_evidence.stdout)
                 check(good_evidence.returncode == 0 and good_summary['status'] == 'udp-evidence-verified'
-                      and good_summary['verifiedSources'] == len(states) and not good_summary['pendingSeats']
-                      and bad_evidence.returncode == 1 and bad_summary['status'] == 'udp-evidence-incomplete'
-                      and bad_summary['verifiedSources'] == len(states) - 1 and bad_summary['unreadablePairs'] == 1
-                      and bad_summary['pendingSeats'] == [{'roomId': seat['roomId'], 'seat': seat['seat'], 'status': 'missing',
-                                                           'reason': 'unreadable-original'}
-                          for seat in original_network['sources'] if seat['roomId'] in missing_rooms]
-                      and not any(path.exists() for path in (work, ready, report, start_receipt))
-                      and all(request('/api/sessions/' + row['id']) == row for row in states),
-                      label + ' offline verification reports affected seats without launching or changing sessions')
-                save(label + '-offline-udp-check.json', {'verified': good_summary, 'missing': bad_summary})
+                      and good_summary['verifiedSources'] == len(states) and not good_summary['pendingSeats'],
+                      label + ' offline verification accepts all original paired reports')
+                offline = {'verified': good_summary}
+                for role in ('listener', 'probe'):
+                    missing_pair = out / f'{label}-udp-missing-{role}.json'
+                    missing = read(readiness_path)
+                    missing['groups'][-1]['udpSourcePreflights'][0][role] = f'{label}-absent-{role}.json'
+                    save(missing_pair.name, missing)
+                    bad_evidence = subprocess.run([*verify_only, '--readiness', str(missing_pair)],
+                                                  capture_output=True, encoding='utf-8', timeout=45)
+                    bad_summary = json.loads(bad_evidence.stdout)
+                    missing_rooms = missing['groups'][-1]['roomIds']
+                    check(bad_evidence.returncode == 1 and bad_summary['status'] == 'udp-evidence-incomplete'
+                          and bad_summary['verifiedSources'] == len(states) - 1 and bad_summary['unreadablePairs'] == 1
+                          and bad_summary['pendingSeats'] == [{'roomId': seat['roomId'], 'seat': seat['seat'], 'status': 'missing',
+                                                               'reason': 'unreadable-original', 'missingRole': role}
+                              for seat in original_network['sources'] if seat['roomId'] in missing_rooms]
+                          and not any(path.exists() for path in (work, ready, report, start_receipt))
+                          and all(request('/api/sessions/' + row['id']) == row for row in states),
+                          label + f' offline verification reports affected seats and missing {role} without launching or changing sessions')
+                    offline['missing' if role == 'probe' else 'missingListener'] = bad_summary
+                save(label + '-offline-udp-check.json', offline)
                 for reason, input_plan, input_report in (
                     ('complete venue UDP readiness report', plan_file, incomplete),
                     ('launch plan differs', wrong_plan, readiness_path),

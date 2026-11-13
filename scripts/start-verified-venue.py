@@ -95,7 +95,7 @@ def launch(args):
                           and checked['launchBinding']['previewSha256'] == binding['previewSha256'],
                           'The original network plan, readiness report or preview changed')
         if args.verify_only:
-            pending = [{**seat, 'status': row['status'], **({'reason': row['reason']} if 'reason' in row else {})}
+            pending = [{**seat, 'status': row['status'], **{key: row[key] for key in ('reason', 'missingRole') if key in row}}
                        for group in checked['groups'] for row in group['sources'] if row['status'] != 'verified'
                        for seat in row['seats']]
             print(json.dumps({'status': 'udp-evidence-verified' if checked['complete'] else 'udp-evidence-incomplete',

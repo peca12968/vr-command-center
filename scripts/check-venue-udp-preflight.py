@@ -236,7 +236,7 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
         observed[address].append(paths)
         path_counts.update(paths)
     unmatched = unreadable = 0
-    unreadable_sources = set()
+    unreadable_sources = defaultdict(set)
     inbox_summary = None
     if inbox is not None:
         inbox_pairs, inbox_summary = load_inbox(inbox, expected)
@@ -254,18 +254,20 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
             unreadable += 1
             if explain_failures and declared_group is not None:
                 # Either readable original can identify the planned source even if its counterpart is missing.
-                identities = set()
+                identities = {}
                 for key, role in (('listener', 'listen'), ('probe', 'probe')):
                     try:
                         row = field.read_json(read_report_lines(base / pair[key])[-1])
-                        if row.get('mode') == role and row.get('scope') == 'authenticated-udp-only':
-                            identities.add(report_address(row, role))
+                        if (row.get('mode') == role and row.get('scope') == 'authenticated-udp-only'
+                                and row.get('stage') == 'finished' and row.get('complete') is True):
+                            identities[key] = report_address(row, role)
                     except (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError, RecursionError):
                         continue
-                if len(identities) == 1:
-                    source, = identities
+                candidates = set(identities.values())
+                if len(candidates) == 1:
+                    source, = candidates
                     if source in expected and room_groups[expected[source][0][0]] == declared_group:
-                        unreadable_sources.add(source)
+                        unreadable_sources[source].update({'listener', 'probe'} - identities.keys())
             continue
         if address not in expected or (declared_group is not None and
                                       declared_group != room_groups[expected[address][0][0]]):
@@ -283,6 +285,8 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
                 row['status'] = 'invalid-or-expired'
             elif address in unreadable_sources:
                 row['reason'] = 'unreadable-original'
+                if len(unreadable_sources[address]) == 1:
+                    row['missingRole'], = unreadable_sources[address]
             continue
         if len(choices) != 1 or any(path_counts[path] != 1 for path in choices[0]):
             row['status'] = 'duplicate-pair'
@@ -306,7 +310,7 @@ def check_venue(plan, pairs_path, batch_paths, output, launcher_preview=None, la
                 row['status'] = 'duplicate-exchange'
         complete = all(row['status'] == 'verified' for row in bindings)
         entries = [{'seats': [{'roomId': room, 'seat': seat} for room, seat in row['seats']], 'status': row['status'],
-                    **({'reason': row['reason']} if 'reason' in row else {})}
+                    **{key: row[key] for key in ('reason', 'missingRole') if key in row}}
                    for row in bindings]
         result = {'roomIds': list(group), 'complete': complete, 'sources': entries}
         if complete:

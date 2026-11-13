@@ -449,17 +449,21 @@ class LanPreflightTests(unittest.TestCase):
         self.assertEqual({'status': 'udp-evidence-verified', 'mode': 'Linked', 'verifiedSources': 2,
                           'expectedSources': 2, 'unreadablePairs': 0, 'unmatchedPairs': 0, 'pendingSeats': []},
                          json.loads(success.stdout))
-        missing_original = json.loads((self.root / 'bound.json').read_bytes())
-        missing_original['groups'][0]['udpSourcePreflights'][0]['probe'] = 'private/absent.json'
-        missing_path = self.venue_json('bound-missing-original.json', missing_original)
-        failure = subprocess.run([*verify, '--readiness', str(missing_path)], capture_output=True, timeout=15)
-        self.assertEqual(1, failure.returncode, failure.stderr)
-        self.assertEqual({'status': 'udp-evidence-incomplete', 'mode': 'Linked', 'verifiedSources': 1,
-                          'expectedSources': 2, 'unreadablePairs': 1, 'unmatchedPairs': 0,
-                          'pendingSeats': [{'roomId': room, 'seat': seat, 'status': 'missing', 'reason': 'unreadable-original'}
-                                           for room in rooms for seat in (1, 2, 3)]},
-                         json.loads(failure.stdout))
-        self.assertNotIn(b'private', failure.stdout)
+        for missing_roles in [('probe',), ('listener',), ('listener', 'probe')]:
+            with self.subTest(missing_roles=missing_roles):
+                missing_original = json.loads((self.root / 'bound.json').read_bytes())
+                for role in missing_roles:
+                    missing_original['groups'][0]['udpSourcePreflights'][0][role] = f'private/absent-{role}.json'
+                missing_path = self.venue_json('bound-missing-original.json', missing_original)
+                failure = subprocess.run([*verify, '--readiness', str(missing_path)], capture_output=True, timeout=15)
+                self.assertEqual(1, failure.returncode, failure.stderr)
+                details = {'reason': 'unreadable-original', 'missingRole': missing_roles[0]} if len(missing_roles) == 1 else {}
+                self.assertEqual({'status': 'udp-evidence-incomplete', 'mode': 'Linked', 'verifiedSources': 1,
+                                  'expectedSources': 2, 'unreadablePairs': 1, 'unmatchedPairs': 0,
+                                  'pendingSeats': [{'roomId': room, 'seat': seat, 'status': 'missing', **details}
+                                                   for room in rooms for seat in (1, 2, 3)]},
+                                 json.loads(failure.stdout))
+                self.assertNotIn(b'private', failure.stdout)
         for reason, stamp in [('expired', datetime.now(timezone.utc) - timedelta(minutes=31)),
                               ('clock-ahead', datetime.now(timezone.utc) + timedelta(minutes=2)),
                               ('exchange-mismatch', None), ('invalid-report', None)]:
